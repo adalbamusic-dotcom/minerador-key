@@ -105,7 +105,7 @@ const semAcento = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, 
 export const RADAR_YOUTUBE_TITLE_PATTERNS = [
   { id: "PASSO_A_PASSO", label: "Passo a passo", marcadores: ["passo a passo", "passo-a-passo", "como fazer", "tutorial"] },
   { id: "COMO", label: "Como (instrucional)", marcadores: ["como ", "aprenda", "guia"] },
-  { id: "LISTA", label: "Lista numerada", marcadores: ["top ", "melhores", "piores", "dicas"] },
+  { id: "LISTA", label: "Lista (dicas, melhores, top)", marcadores: ["top ", "melhores", "piores", "dicas"] },
   { id: "RANKING", label: "Ranking", marcadores: ["ranking", "top 3", "top 5", "top 10", "os melhores"] },
   { id: "PERGUNTA", label: "Pergunta", marcadores: ["?"] },
   { id: "COMPARACAO", label: "Comparação", marcadores: [" vs ", " ou ", "comparativo", "qual o melhor", "qual e melhor", "diferenca entre"] },
@@ -588,7 +588,12 @@ function lacunas(input: {
     if (coorte.videoCount === 0) {
       encontradas.push(RadarYoutubeGapSchema.parse({
         kind: "FORMATO_AUSENTE",
-        statement: `Não há ${coorte.format === "SHORTS" ? "Shorts" : "long-form"} disputando estas consultas.`,
+        /*
+         * 2026-10-02 · o que a amostra mostra, não o que existe no YouTube: a
+         * coleta pode não trazer o formato, e "não há disputa" era afirmação
+         * maior que o dado.
+         */
+        statement: `Nenhum ${coorte.format === "SHORTS" ? "Short" : "vídeo longo"} identificado na amostra coletada: confira se a coleta traz esse formato antes de tratar como oportunidade.`,
         evidence: `A coorte ${coorte.format} ficou com zero vídeo na amostra coletada.`,
       }));
     }
@@ -635,7 +640,8 @@ function lacunas(input: {
   if (input.universo.length >= RADAR_YOUTUBE_MIN_COHORT && fatia < 0.25) {
     encontradas.push(RadarYoutubeGapSchema.parse({
       kind: "AUTORIDADE_ESCASSA",
-      statement: "Pouca autoridade declarada na amostra: espaço para posicionamento especializado.",
+      /* 2026-10-02 · mede credencial VISÍVEL no título ou no canal, não a autoridade de quem fala. */
+      statement: "Pouca credencial visível no título ou no nome do canal: espaço para mostrar a especialidade de quem fala.",
       evidence: `${comCredencial.size} de ${input.universo.length} vídeos declaram credencial profissional no título ou no nome do canal.`,
     }));
   }
@@ -650,10 +656,18 @@ function lacunas(input: {
  * observado e sugerir variação dele entregaria o texto do concorrente como
  * material nosso.
  */
+/*
+ * 2026-10-02 · PADRÕES DA MESMA FAMÍLIA. "Lista numerada" (dicas, melhores, top)
+ * e "Ranking" são o mesmo formato para quem lê a amostra (o formato "Ranking /
+ * lista" soma os dois): com listas na amostra, "Ranking: nenhum título usa"
+ * contradizia a linha de padrões logo acima.
+ */
+const FAMILIA_DO_PADRAO: Record<string, readonly string[]> = { RANKING: ["LISTA"], LISTA: ["RANKING"] };
+
 export function radarYoutubeTitleOpportunities(padroes: readonly RadarYoutubeTitlePattern[]): string[] {
   const usados = new Set(padroes.filter(item => item.count > 0).map(item => item.id));
   return RADAR_YOUTUBE_TITLE_PATTERNS
-    .filter(padrao => !usados.has(padrao.id))
+    .filter(padrao => !usados.has(padrao.id) && !(FAMILIA_DO_PADRAO[padrao.id] || []).some(id => usados.has(id)))
     .map(padrao => `${padrao.label}: nenhum título da amostra usa este padrão.`);
 }
 

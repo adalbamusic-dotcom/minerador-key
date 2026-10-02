@@ -4,6 +4,7 @@ import { buildRadarYoutubeUniverse, RadarYoutubeSearchResultSchema } from "../li
 import { buildRadarYoutubeRunFingerprint, buildRadarYoutubeSearchRun, RADAR_YOUTUBE_PROVIDER_ENDPOINT } from "../lib/radar/youtube-search-run.ts";
 import {
   buildRadarVideoBrandVoiceRow,
+  RADAR_VIDEO_EXPORT_CELL_CHARS,
   buildRadarVideoExportArticle,
   radarPortableVideoExport,
   radarVideoExportYoutubeOf,
@@ -243,13 +244,14 @@ const capitulosDe = (roteiro: string) => {
 test("1 · o gancho abre pelo próprio tema e pela promessa da pesquisa do YouTube; pergunta ampla não abre", () => {
   const instagram = linhaDe(entradaDoAssunto(INSTAGRAM), { youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") }).diretrizes_de_roteiro;
   const gancho = instagram.split("\n")[0];
-  assert.match(gancho, /^Gancho \(primeiros 15 segundos\): abra pelo próprio tema, "como atrair clientes pelo instagram", no recorte "clínicas de estética", sem apresentação longa\./);
   /*
-   * A pergunta de abertura do CSV para escrever aqui é "Como captar clientes
-   * pela internet?" — a mais buscada, e da complementar. Ela não fala da
-   * principal: o gancho fica no próprio tema, sem pergunta.
+   * 2026-10-02 · a pergunta de abertura agora prefere a que fala da PRINCIPAL
+   * ("…sendo uma clínica pequena?") à mais buscada que só adere pela
+   * complementar ("Como captar clientes pela internet?"). A ampla continua sem
+   * abrir o vídeo; a do tema abre.
    */
-  assert.doesNotMatch(gancho, /respondendo/, "a pergunta ampla, por mais buscada, não abre o vídeo");
+  assert.match(gancho, /^Gancho \(primeiros 15 segundos\): abra pelo próprio tema, "como atrair clientes pelo instagram", no recorte "clínicas de estética", respondendo "Como atrair clientes pelo Instagram sendo uma clínica pequena\?" logo de cara, sem apresentação longa\./);
+  assert.doesNotMatch(gancho, /captar clientes pela internet/, "a pergunta ampla, por mais buscada, não abre o vídeo");
   assert.match(gancho, /Promessa \(pesquisa do YouTube\): /);
 
   /* Outro assunto, sem pesquisa do YouTube: a promessa do artigo, e a pergunta da principal. */
@@ -319,7 +321,12 @@ test("4 · cortes: saem dos capítulos, cada um funcionando sozinho; legenda por
     }
     assert.doesNotMatch(cortes, /sem som/i, "nada de generalização sem fonte sobre como o público assiste");
     assert.match(cortes, /Legenda na tela em todos os cortes, por acessibilidade e compreensão/);
-    assert.match(cortes, /os mesmos capítulos, um por lâmina/);
+    /* 2026-10-02 · cada corte com gancho, ideia única, o que mostrar e fechamento; o carrossel, uma mensagem por lâmina. */
+    assert.match(cortes, /^ {3}Gancho: /m);
+    assert.match(cortes, /^ {3}Ideia única: /m);
+    assert.match(cortes, /^ {3}Mostrar: /m);
+    assert.match(cortes, /^ {3}Fechamento: convite para o vídeo longo ou /m);
+    assert.match(cortes, /uma mensagem por lâmina/);
   }
   assert.match(linhaDe(entradaDoAssunto(INSTAGRAM), { youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") }).cortes_para_redes, /^Shorts: nenhum Short do tema nesta amostra/);
   assert.match(linhaDe(entradaDoAssunto(IMPLANTE)).cortes_para_redes, /^Shorts: sem pesquisa do YouTube, não há amostra de Shorts do tema/);
@@ -429,22 +436,25 @@ test("10 · cada vídeo do topo diz por que está ali (classe e sinal) e por qua
   assert.match(serp, /^Consultas: 1\) como atrair clientes pelo instagram · 2\) instagram para clínicas$/m);
   assert.match(serp, /^Classe de cada vídeo \(motivo do universo, pela SERP\): vídeo longo comparável — Vídeo editorial com duração que sustenta comparação/m);
   assert.equal((serp.match(/Vídeo editorial com duração que sustenta comparação/g) || []).length, 1, "o motivo da classe, uma vez só");
-  assert.match(linhas[primeiro], / · aparece em 2 consultas · /);
+  /* 2026-10-02 · conta perspectivas distintas (consulta que repete outra conta como a de origem). */
+  assert.match(linhas[primeiro], / · aparece em 2 consultas distintas · /);
   assert.match(linhas[primeiro + 1], /^ {3}Por que está aqui: vídeo longo comparável · sinal (forte|médio): Chegou à posição 1 — topo da busca/);
-  assert.match(linhas[primeiro + 1], / · consultas 1 e 2$/, "o vídeo achado pelas duas consultas diz as duas, pelo número");
+  /* 2026-10-02 · a linha termina com a relevância para o público. */
+  assert.match(linhas[primeiro + 1], / · consultas 1 e 2 · relevância: [^\n]+$/, "o vídeo achado pelas duas consultas diz as duas, pelo número");
   assert.doesNotMatch(linhas[primeiro + 1], /visualiza|Apareceu em/, "o que já está na linha do vídeo não se repete");
   assert.match(serp, /Nenhum vídeo foi assistido ou transcrito/);
 
   const implante = linhaDe(entradaDoAssunto(IMPLANTE), { youtube: youtubeDe(IMPLANTE.principal, "implante dentário preço") }).serp_youtube;
   assert.match(implante, /^Consultas: 1\) implante dentário · 2\) implante dentário preço$/m);
-  assert.match(implante, /^ {3}Por que está aqui: [^\n]* · consulta 2$/m, "o vídeo achado só pela segunda consulta");
+  assert.match(implante, /^ {3}Por que está aqui: [^\n]* · consulta 2 · relevância: [^\n]+$/m, "o vídeo achado só pela segunda consulta");
 });
 
 /*
  * 2026-10-02 · REVISÃO: A LISTA CHEIA NÃO EMPURRA O RESTO PARA FORA DA CÉLULA.
  *
  * Com dez vídeos e várias consultas, o "por que está aqui" de cada vídeo fazia
- * `serp_youtube` passar de 6.000 caracteres, e o corte da célula levava canais,
+ * `serp_youtube` passar de 6.000 caracteres (teto da célula até 2026-10-02; hoje
+ * `RADAR_VIDEO_EXPORT_CELL_CHARS`), e o corte da célula levava canais,
  * padrões, termos, lacunas, os vídeos da SERP do Google e o aviso "Nenhum vídeo
  * foi assistido". A régua vale para qualquer tema: dois assuntos, títulos
  * médios e longos, três e quatro consultas.
@@ -452,7 +462,7 @@ test("10 · cada vídeo do topo diz por que está ali (classe e sinal) e por qua
 function youtubeCheio(principal: string, consultas: readonly string[], tamanhoDoTitulo: number, canalLongo = false): RadarVideoExportYoutube {
   const enchimento = " — explicado com exemplos reais, erros comuns e o que ninguém conta antes de começar";
   /* O nome do canal não tem corte: o caso extremo força a lista a não caber inteira. */
-  const canal = (numero: number) => (canalLongo ? `Canal de referência número ${numero}${enchimento.repeat(6)}` : `Canal de referência número ${numero % 5}`);
+  const canal = (numero: number) => (canalLongo ? `Canal de referência número ${numero}${enchimento.repeat(14)}` : `Canal de referência número ${numero % 5}`);
   const titulo = (numero: number) => `${principal} ${numero}${enchimento.repeat(3)}`.slice(0, tamanhoDoTitulo);
   const ids = consultas.map((_, indice) => `ytq:${indice + 1}`);
   /* Doze vídeos, dez por consulta, deslocados: quase todo vídeo aparece em mais de uma consulta. */
@@ -491,7 +501,7 @@ test("10b · dez vídeos e várias consultas cabem na célula: canais, padrões,
       const serp = linhaDe(entrada, { youtube }).serp_youtube;
       const quando = `${principal}, ${consultas.length} consultas, títulos de ${tamanho}`;
       assert.doesNotMatch(serp, /cortado no limite da célula/, quando);
-      assert.ok(serp.length <= 6_000, `${quando}: ${serp.length} caracteres`);
+      assert.ok(serp.length <= RADAR_VIDEO_EXPORT_CELL_CHARS, `${quando}: ${serp.length} caracteres`);
       for (const parte of [/^Canais que dominam: /m, /^Padrões de título \(vídeos longos\): /m, /^Lacunas no YouTube \(onde entrar\):$/m, /Nenhum vídeo foi assistido ou transcrito/]) {
         assert.match(serp, parte, quando);
       }
@@ -505,7 +515,7 @@ test("10b · dez vídeos e várias consultas cabem na célula: canais, padrões,
   /* Caso extremo: a lista não cabe inteira. Sai o fim da lista, com a contagem dita — nunca o fim da coluna. */
   const extremo = linhaDe(entradaGoogle(), { youtube: youtubeCheio("protetor solar para pele oleosa", ["protetor solar para pele oleosa", "protetor solar oil free", "melhor protetor solar"], 90, true) }).serp_youtube;
   assert.doesNotMatch(extremo, /cortado no limite da célula/);
-  assert.ok(extremo.length <= 6_000, `${extremo.length} caracteres`);
+  assert.ok(extremo.length <= RADAR_VIDEO_EXPORT_CELL_CHARS, `${extremo.length} caracteres`);
   const listados = extremo.split("\n").filter(linha => /^\d+\. /.test(linha)).length;
   const omitidos = Number(extremo.match(/^\(\+(\d+) vídeo\(s\) do topo não couberam nesta célula; a lista inteira está na pesquisa do YouTube, no Radar\.\)$/m)?.[1] ?? 0);
   assert.ok(listados > 0 && omitidos > 0 && listados + omitidos === 10, `${listados} listados e ${omitidos} fora`);
@@ -584,8 +594,10 @@ test("12 · vídeos selecionados pela marca: canal de cada um, trecho com tempo 
   const biblioteca = linhaDe(entradaDoAssunto(IMPLANTE, { videoContext: contexto })).biblioteca_da_marca;
   assert.match(biblioteca, /Vídeos selecionados pela marca \(modo de uso escolhido no Radar, decisão do dono\):/);
   assert.doesNotMatch(biblioteca, /Vídeos da marca/, "o rótulo é \"selecionados pela marca\": o vídeo pode ser de outro canal");
-  assert.match(biblioteca, /Apoio · "Implante sem medo" \(https:\/\/www\.youtube\.com\/watch\?v=apoio000001\) · canal: Odonto Explica — [^\n]*: \(01:35–01:50\) "Com a anestesia local, o paciente sente pressão, não dor\." · Começo da transcrição \(fala do vídeo, conferir antes de usar\): "Hoje eu explico/);
-  assert.match(biblioteca, /Incorporar no artigo · "Tour pelo consultório" [^\n]*· canal: Clínica Sorriso — [^\n]*· seção: a que o vídeo responde \(definir no artigo-modelo\) · Começo da transcrição \(fala do vídeo, conferir antes de usar\): "Vem conhecer a sala/);
+  /* 2026-10-02 · a fala do vídeo vai em linha própria, abaixo do vídeo, com o aviso de transcrição automática. */
+  assert.match(biblioteca, /Apoio · "Implante sem medo" \(https:\/\/www\.youtube\.com\/watch\?v=apoio000001\) · canal: Odonto Explica — [^\n]*: \(01:35–01:50\) "Com a anestesia local, o paciente sente pressão, não dor\."\n {2}Começo da transcrição \(fala do vídeo, conferir antes de usar\): "Hoje eu explico/);
+  assert.match(biblioteca, /Incorporar no artigo · "Tour pelo consultório" [^\n]*· canal: Clínica Sorriso — [^\n]*· seção: a que o vídeo responde \(definir no artigo-modelo\)\n {2}Começo da transcrição \(fala do vídeo, conferir antes de usar\): "Vem conhecer a sala/);
+  assert.match(biblioteca, /^ {2}Transcrição automática: confira as palavras no vídeo antes de citar/m);
 });
 
 /* ================================ 13 ================================ */
@@ -670,6 +682,122 @@ test("13b · o \"não cobrir\" do Silo vale no CSV de vídeo como no CSV para es
   const [entrada, pergunta, excluidos] = casos[0];
   assert.ok(linhaDe(entrada).perguntas_do_publico.includes(pergunta));
   assert.equal(linhaDe(entrada, { siloExcludedTopics: excluidos }).perguntas_do_publico.includes(pergunta), false);
+});
+
+/* ================================ 14–18 · briefing de vídeo (revisão de 2026-10-02) ================================ */
+
+/* Uma pesquisa do YouTube com títulos e consultas escolhidos: cada vídeo diz em quais consultas apareceu. */
+function youtubeCom(consultas: readonly string[], videos: ReadonlyArray<{ title: string; channel?: string; em: number[] }>): RadarVideoExportYoutube {
+  const ids = consultas.map((_, indice) => `ytq:${indice + 1}`);
+  const results = videos.flatMap((video, v) => video.em.map(q => RadarYoutubeSearchResultSchema.parse({
+    videoId: `vid${String(v).padStart(8, "0")}`, url: `https://www.youtube.com/watch?v=vid${String(v).padStart(8, "0")}`,
+    title: video.title, channelName: video.channel || `Canal ${v}`, rank: v + 1,
+    durationSeconds: 600 + v * 60, views: 1_000 * (v + 1), isShorts: false, publishedAt: "2026-03-01T00:00:00.000Z", queryId: ids[q - 1],
+  })));
+  const run = buildRadarYoutubeSearchRun({
+    runId: "run-b", runVersion: 1, startedAt: "2026-09-14T18:51:00.000Z", startedBy: "u",
+    fingerprint: buildRadarYoutubeRunFingerprint({ articleId: "a1", articleDnaVersionId: "d1", queryIds: ids }),
+    provenance: {
+      provider: "dataforseo", endpoint: RADAR_YOUTUBE_PROVIDER_ENDPOINT, blockDepth: 20,
+      queriesRequested: consultas.length, queriesSucceeded: consultas.length, queriesFailed: 0, failures: [], collectedAt: "2026-09-14T18:51:07.000Z",
+    },
+    queries: consultas.map((text, indice) => ({ queryId: ids[indice], text, origin: indice ? "SECONDARY_KEYWORD" : "PRIMARY_KEYWORD", reason: "consulta", executed: true, resultCount: 5 })),
+    results, universe: buildRadarYoutubeUniverse(results),
+  });
+  return radarVideoExportYoutubeOf({ run, frozen: null, declaredIntent: "INFORMATIONAL", editorialTopics: [], generatedAt: EXPORTADO_EM })!;
+}
+
+test("14 · consultas que repetem outra (palavra duplicada, prefixo sobre busca já enquadrada) são ditas e não contam como outra perspectiva", () => {
+  const principal = INSTAGRAM.principal;
+  const youtube = youtubeCom([principal, `como ${principal}`, `rotina ${principal}`, "instagram não traz pacientes"], [
+    { title: "Vídeo achado nas três primeiras", em: [1, 2, 3] },
+    { title: "Vídeo achado na primeira e na quarta", em: [1, 4] },
+  ]);
+  const serp = linhaDe(entradaDoAssunto(INSTAGRAM), { youtube }).serp_youtube;
+  assert.match(serp, /2\) como como atrair clientes pelo instagram \(repete a 1: palavra duplicada\)/);
+  assert.match(serp, /3\) rotina como atrair clientes pelo instagram \(repete a 1: prefixo "rotina" sobre uma busca já enquadrada\)/);
+  assert.match(serp, /^Consultas que repetem outra \(2, 3\): vieram do plano antigo/m);
+  const linhas = serp.split("\n");
+  assert.doesNotMatch(linhas.find(linha => linha.includes("Vídeo achado nas três primeiras"))!, /aparece em/, "três consultas iguais são uma perspectiva só");
+  assert.match(linhas.find(linha => linha.includes("Vídeo achado na primeira e na quarta"))!, /aparece em 2 consultas distintas/);
+
+  /* Outro assunto, consultas sem repetição: nada muda. */
+  const implante = linhaDe(entradaDoAssunto(IMPLANTE), { youtube: youtubeCom([IMPLANTE.principal, "implante dentário preço"], [{ title: "Implante dentário: quanto custa", em: [1, 2] }]) }).serp_youtube;
+  assert.doesNotMatch(implante, /repete a|Consultas que repetem/);
+});
+
+test("15 · cada concorrente diz a relevância para o público: mesmo, próximo, geral ou outro público", () => {
+  const entrada = entradaDoAssunto({ ...INSTAGRAM, audience: "Biomédicas estetas e profissionais de estética que atendem em clínicas. Querem agenda cheia." });
+  const youtube = youtubeCom([INSTAGRAM.principal], [
+    { title: "Como captar clientes na estética pelo Instagram", em: [1] },
+    { title: "Como atrair clientes de advocacia pelo Instagram", em: [1] },
+    { title: "Captar clientes pela internet: o guia", em: [1] },
+    { title: "Seis dicas de alcance no Instagram", em: [1] },
+  ]);
+  const serp = linhaDe(entrada, { youtube }).serp_youtube;
+  const relevancia = (titulo: string) => serp.split("\n")[serp.split("\n").findIndex(linha => linha.includes(titulo)) + 1].replace(/^.*relevância: /, "");
+  assert.equal(relevancia("na estética"), "mesmo público: referência principal");
+  assert.equal(relevancia("de advocacia"), "outro público: inspiração pontual, sem transportar recomendação");
+  assert.equal(relevancia("pela internet"), "público próximo: referência de abordagem");
+  assert.equal(relevancia("dicas de alcance"), "tema geral: referência de formato e apresentação");
+  assert.match(serp, /^Relevância para o público \(pelo título e pelo canal; posição e visualizações não medem retenção nem contatos\): 1 mesmo público[^\n]*1 outro público/m);
+});
+
+test("16 · com a planta do artigo-modelo, cada capítulo diz o que entregar, o que mostrar e a fonte; cortes e carrossel com conteúdo próprio", () => {
+  const entrada = entradaDoAssunto(INSTAGRAM);
+  const linha = linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "APPROVED"), youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") });
+  const roteiro = linha.diretrizes_de_roteiro;
+  assert.match(roteiro, /^Capítulos do vídeo principal \(3, da planta do artigo-modelo da SERP, aprovado; viram os marcadores de tempo da descrição\)/m);
+  assert.match(roteiro, /^1\. Por que o perfil não traz pacientes\n {3}Pergunta do público: "Por que o perfil não traz pacientes\?"\n {3}Entregar: Resposta direta\./m);
+  assert.match(roteiro, /^2\. Roteiro de três stories\n[\s\S]*? {3}Mostrar na tela: um roteiro de três stories para a semana\./m);
+  assert.match(roteiro, /^Ritmo que a SERP do YouTube sugere \(referência, não roteiro\): HOOK → /m);
+  assert.doesNotMatch(roteiro, /O fundamento principal do tema/, "o bloco genérico não é capítulo quando há planta");
+  /* O gancho abre pela abertura da planta, que fala da principal. */
+  assert.match(roteiro, /respondendo "Como atrair clientes pelo Instagram\?" logo de cara/);
+
+  const cortes = linha.cortes_para_redes;
+  /* Três capítulos, três cortes, na ordem do vídeo; o que tem entrega prática diz o que mostrar. */
+  assert.match(cortes, /^2\. Do capítulo 2 \(Roteiro de três stories\):\n {3}Gancho: "Roteiro de três stories\?"\n {3}Ideia única: Resposta direta\.\n {3}Mostrar: um roteiro de três stories para a semana\.\n {3}Fechamento: convite para o vídeo longo ou o artigo\.$/m);
+  assert.match(cortes, /^Carrossel \(Instagram e LinkedIn\), 5 lâminas, uma mensagem por lâmina e cada uma puxando a próxima:$/m);
+  assert.match(cortes, /^- Lâmina 1 \(capa\): Promessa\.$/m);
+  assert.match(cortes, /^- Lâmina 2: Por que o perfil não traz pacientes — Resposta direta\. Puxa a próxima: "Roteiro de três stories"\.$/m);
+  assert.match(cortes, /^- Lâmina 5: CTA para o artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\), sem prometer resultado\.$/m);
+
+  /* Proposta da IA: o capítulo avisa. Sem planta: a sequência de antes. */
+  assert.match(linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") }).diretrizes_de_roteiro, /proposta da IA, ainda sem aprovação: confira antes de gravar/);
+  assert.doesNotMatch(linhaDe(entrada).diretrizes_de_roteiro, /da planta do artigo-modelo/);
+});
+
+test("17 · com planta, o gancho não pega pergunta da amostra: abertura que não fala da principal deixa o gancho no próprio tema", () => {
+  const entrada = entradaDoAssunto(INSTAGRAM);
+  const planta = artigoModeloDe(entrada, "APPROVED");
+  const outraAbertura = { ...planta, blueprint: { ...planta.blueprint, opening: { ...planta.blueprint.opening, readerQuestion: "Como captar clientes pelo WhatsApp?" } } };
+  const gancho = linhaDe(entrada, { blueprint: outraAbertura }).diretrizes_de_roteiro.split("\n")[0];
+  assert.doesNotMatch(gancho, /respondendo/, "\"pelo\" não faz a pergunta do WhatsApp falar da principal");
+  assert.doesNotMatch(gancho, /Quais dicas|sendo uma clínica pequena/, "nem cai na pergunta da amostra");
+});
+
+test("18 · a fala do vídeo: o trecho ligado ao tema (não a saudação), o capítulo que ele sustenta e o idioma", async () => {
+  const { radarVideoTranscriptLanguage, radarVideoTranscriptPassage } = await import("../lib/radar/portable-video-export.ts");
+  const enche = (n: number) => Array.from({ length: n }, () => "e aí a gente conversa um pouco sobre a rotina do dia").join(" ");
+  const fala = `Olá pessoal sejam todos bem vindos ao canal hoje eu vou falar com vocês ${enche(12)} para atrair clientes pelo instagram a clínica precisa mostrar serviço cidade e contato no perfil ${enche(12)}`;
+  const raizes = new Set(["atrair", "client", "instagram", "perfil", "clinica"]);
+  const trecho = radarVideoTranscriptPassage(fala, raizes)!;
+  assert.ok(trecho.position > 10, `trecho no meio da fala (${trecho.position}%)`);
+  assert.match(trecho.text, /mostrar serviço cidade e contato no perfil/);
+  assert.equal(radarVideoTranscriptPassage("só saudação, sem tema nenhum aqui", raizes), null);
+  assert.equal(radarVideoTranscriptLanguage("You posted almost every day this month and your schedule is still empty, but it is not about the content that you post"), "en");
+  assert.equal(radarVideoTranscriptLanguage("E por que que no Instagram ainda não te traz pacientes, a gente posta para não ter lugar e a agenda não enche"), "pt");
+
+  const contexto = radarPortableVideoContext(null, [
+    uso({ videoSourceId: "vs-pt", usage: "SUPPORT", title: "Perfil que traz pacientes", channel: "Canal Pt", textPreview: fala.slice(0, 300), textBody: fala }),
+    uso({ videoSourceId: "vs-en", usage: "CONTEXT", title: "Posting every day", channel: "Canal En", textPreview: "You posted almost every day this month and your schedule is still empty, but it is not about the content", textBody: "You posted almost every day this month and your schedule is still empty, but it is not about the content that you post on instagram for clients" }),
+  ]);
+  const entrada = entradaDoAssunto(INSTAGRAM, { videoContext: contexto });
+  const biblioteca = linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "APPROVED") }).biblioteca_da_marca;
+  assert.match(biblioteca, /^ {2}Trecho ligado ao tema \(transcrição automática, por volta de \d+% do vídeo; ache o tempo exato antes de usar\): "[^"]*contato no perfil/m);
+  assert.match(biblioteca, /^ {2}Ponto a explicar: capítulo "Por que o perfil não traz pacientes" · uso: Apoio, atribuído ao canal\.$/m);
+  assert.match(biblioteca, /^ {2}Fala em inglês: traduza e revise antes de usar/m);
 });
 
 test("PROVIDER_CALLS = 0 e AI_CALLS = 0", () => {

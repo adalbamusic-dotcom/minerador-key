@@ -106,6 +106,8 @@ export type RadarPortableVideoSelected = {
    * Citação e Incorporar seguem levando o trecho casado.
    */
   transcriptStart?: string;
+  /** 2026-10-02 · Aditivo: o corpo da transcrição (com teto), só para o CSV de vídeo escolher o trecho do tema. */
+  transcriptBody?: string;
 };
 
 /** O que o export lê do banco para cada vínculo com modo. Tem o id: fica do lado de dentro. */
@@ -120,6 +122,12 @@ export type RadarPortableVideoUsageInput = {
   description: string | null;
   /** O começo do texto corrente, já curto. 2026-10-02 · lido para todo modo, só da versão corrente. */
   textPreview: string | null;
+  /**
+   * 2026-10-02 · Aditivo: o corpo da transcrição corrente, com teto (20 mil
+   * caracteres no leitor), para o CSV de vídeo escolher o trecho ligado ao tema.
+   * Ausente ou nulo = a linha de antes.
+   */
+  textBody?: string | null;
 };
 
 export type RadarPortableVideoContext = {
@@ -214,6 +222,7 @@ function radarPortableVideoSelected(
         summary: daTranscricao || daDescricao,
         ...(daTranscricao ? { summarySource: "TRANSCRIPT" as const } : daDescricao ? { summarySource: "DESCRIPTION" as const } : {}),
         ...(comecoDaFala ? { transcriptStart: comecoDaFala } : {}),
+        ...(item.textBody?.trim() ? { transcriptBody: item.textBody } : {}),
       };
     })
     .sort((a, b) => ORDEM_DOS_MODOS[a.usage] - ORDEM_DOS_MODOS[b.usage] || a.title.localeCompare(b.title, "pt-BR"));

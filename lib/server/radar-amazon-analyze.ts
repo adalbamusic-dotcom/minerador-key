@@ -36,6 +36,7 @@ import { RadarCompetitiveBlueprintSchema, type RadarAmazonBlueprint, type RadarR
 import { radarDeclaredArticleIntent } from "../radar/editorial-identity.ts";
 import { ArtifactRepository, SerpSnapshotRepository } from "./editorial-repositories.ts";
 import { RadarStartError, radarStartPorts } from "./radar-youtube-start.ts";
+import { RADAR_AMAZON_REFREEZE_LABELS, radarRefreezeDiagnosis, radarRefreezeDifferences, type RadarRefreezeDiagnosis } from "../radar/refreeze-repair.ts";
 
 export class RadarAmazonAnalyzeError extends Error {
   readonly code: string;
@@ -93,7 +94,40 @@ export async function analyzeRadarAmazonInvestigation(entrada: {
 }): Promise<{ blueprint: RadarAmazonBlueprint; analysisVersionId: string; supportApplied: boolean }> {
   const { estado, corrente } = await lerCorrente(entrada);
   const payload = corrente.payload;
+  const { pacote, corrida } = validarColetaAmazon(payload);
 
+  if (payload.amazonFrozenInvestigation) {
+    /*
+     * §27 · DEPOIS DO FREEZE, ANALISAR DE NOVO REESCREVERIA O ASSINADO.
+     *
+     * Reabrir continua possível — e é explícito, com a consequência declarada.
+     * 2026-10-02 · E o reparo (Adendo E) refaz a fotografia por `refreeze`,
+     * que analisa a projeção sem ela, numa escrita só.
+     */
+    throw new RadarAmazonAnalyzeError(
+      "amazon_already_finalized",
+      "Esta investigação está finalizada. Reabra antes de analisar novamente.",
+    );
+  }
+
+  const { blueprint, apoio } = await montarBlueprintAmazon(entrada, payload, pacote, corrida);
+
+  const proxima = await createRadarAnalysisSuccessor(corrente, { amazonBlueprint: blueprint }, entrada.actorId);
+  await radarStartPorts.appendAnalysis({
+    brandId: entrada.brandId, articleId: entrada.articleId,
+    expectedLock: estado.lockVersion, analysis: proxima,
+  });
+
+  return { blueprint, analysisVersionId: proxima.versionId, supportApplied: Boolean(apoio) };
+}
+
+type PayloadAmazon = Awaited<ReturnType<typeof lerCorrente>>["corrente"]["payload"];
+
+/*
+ * 2026-10-02 · A VALIDAÇÃO DA COLETA, UMA SÓ — para analisar e para o reparo
+ * (Adendo E). As recusas são as de antes, na mesma ordem.
+ */
+function validarColetaAmazon(payload: PayloadAmazon) {
   const pacote = payload.researchPackage ? RadarResearchPackageRecordSchema.parse(payload.researchPackage) : null;
   const corrida = payload.amazonSearch ? RadarAmazonSearchRunSchema.parse(payload.amazonSearch) : null;
 
@@ -153,19 +187,16 @@ export async function analyzeRadarAmazonInvestigation(entrada: {
       }
     }
   }
+  return { pacote, corrida };
+}
 
-  if (payload.amazonFrozenInvestigation) {
-    /*
-     * §27 · DEPOIS DO FREEZE, ANALISAR DE NOVO REESCREVERIA O ASSINADO.
-     *
-     * Reabrir continua possível — e é explícito, com a consequência declarada.
-     */
-    throw new RadarAmazonAnalyzeError(
-      "amazon_already_finalized",
-      "Esta investigação está finalizada. Reabra antes de analisar novamente.",
-    );
-  }
-
+/* 2026-10-02 · O BLUEPRINT DA COLETA GRAVADA — o mesmo para analisar e para o reparo. Sem provider. */
+async function montarBlueprintAmazon(
+  entrada: { brandId: string; articleId: string; analyzedAt: string },
+  payload: PayloadAmazon,
+  pacote: ReturnType<typeof validarColetaAmazon>["pacote"],
+  corrida: ReturnType<typeof validarColetaAmazon>["corrida"],
+): Promise<{ blueprint: RadarAmazonBlueprint; apoio: RadarAmazonGoogleSupport | null }> {
   const apoio = await loadRadarAmazonSupport({
     brandId: entrada.brandId,
     articleId: entrada.articleId,
@@ -210,14 +241,7 @@ export async function analyzeRadarAmazonInvestigation(entrada: {
     generatedAt: entrada.analyzedAt,
     frozenAt: null,
   });
-
-  const proxima = await createRadarAnalysisSuccessor(corrente, { amazonBlueprint: blueprint }, entrada.actorId);
-  await radarStartPorts.appendAnalysis({
-    brandId: entrada.brandId, articleId: entrada.articleId,
-    expectedLock: estado.lockVersion, analysis: proxima,
-  });
-
-  return { blueprint, analysisVersionId: proxima.versionId, supportApplied: Boolean(apoio) };
+  return { blueprint, apoio };
 }
 
 /* ============================= o congelamento ============================= */
@@ -266,28 +290,7 @@ export async function finalizeRadarAmazonInvestigation(entrada: {
     );
   }
 
-  const pacote = payload.researchPackage ? RadarResearchPackageRecordSchema.parse(payload.researchPackage) : null;
-  const apoioRef = pacote?.supportResearch?.status === "COLLECTED" && pacote.supportResearch.snapshotId
-    ? [{
-      source: "WEB_SERP" as const,
-      role: "SEO_COMMERCIAL_SUPPORT" as const,
-      snapshotId: pacote.supportResearch.snapshotId,
-      keyword: pacote.supportResearch.keyword,
-      collectedAt: pacote.supportResearch.collectedAt,
-    }]
-    : [];
-
-  const fotografia = freezeRadarAmazonInvestigation({
-    run: corrida,
-    blueprint,
-    supportRefs: apoioRef,
-    finalizedBy: entrada.actorId,
-    finalizedAt: entrada.finalizedAt,
-    /* §6 · a intenção original viaja com a fotografia que ela originou. */
-    setup: payload.amazonEditorialSetup
-      ? { intent: payload.amazonEditorialSetup.intent, target: payload.amazonEditorialSetup.target }
-      : null,
-  });
+  const fotografia = fotografiaAmazon(payload, corrida, blueprint, entrada.actorId, entrada.finalizedAt);
 
   /*
    * ============ §26 · A FOTOGRAFIA SUBSTITUI O BLUEPRINT VIVO ============
@@ -307,6 +310,88 @@ export async function finalizeRadarAmazonInvestigation(entrada: {
   });
 
   return { analysisVersionId: proxima.versionId, frozen: fotografia, alreadyFrozen: false };
+}
+
+/* 2026-10-02 · A FOTOGRAFIA, UMA MONTAGEM SÓ — para finalizar e para o reparo (Adendo E). */
+function fotografiaAmazon(payload: PayloadAmazon, corrida: RadarAmazonSearchRun, blueprint: RadarAmazonBlueprint, actorId: string, finalizedAt: string) {
+  const pacote = payload.researchPackage ? RadarResearchPackageRecordSchema.parse(payload.researchPackage) : null;
+  const apoioRef = pacote?.supportResearch?.status === "COLLECTED" && pacote.supportResearch.snapshotId
+    ? [{
+      source: "WEB_SERP" as const,
+      role: "SEO_COMMERCIAL_SUPPORT" as const,
+      snapshotId: pacote.supportResearch.snapshotId,
+      keyword: pacote.supportResearch.keyword,
+      collectedAt: pacote.supportResearch.collectedAt,
+    }]
+    : [];
+
+  return freezeRadarAmazonInvestigation({
+    run: corrida,
+    blueprint,
+    supportRefs: apoioRef,
+    finalizedBy: actorId,
+    finalizedAt,
+    /* §6 · a intenção original viaja com a fotografia que ela originou. */
+    setup: payload.amazonEditorialSetup
+      ? { intent: payload.amazonEditorialSetup.intent, target: payload.amazonEditorialSetup.target }
+      : null,
+  });
+}
+
+/* =================== o reparo do congelamento (Adendo E) =================== */
+
+/**
+ * ===== REPARAR O CONGELAMENTO DA AMAZON — SDD diretriz editorial, Adendo E (2026-10-02) =====
+ *
+ * Refaz a fotografia com a leitura de HOJE sobre a coleta já gravada: analisa
+ * a projeção sem a fotografia (o mesmo `montarBlueprintAmazon` de analisar) e
+ * congela (a mesma `fotografiaAmazon` de finalizar) numa versão sucessora só.
+ * Zero provider: o apoio do Google é lido onde mora.
+ *
+ * `dryRun` é a prévia do botão: diz o que mudaria e não grava. Sem diferença,
+ * nada a reparar e nada gravado. Coleta que não sustenta a análise vira o
+ * caminho pago (zerar e coletar), dito com o motivo — aqui nunca se coleta.
+ */
+export async function refreezeRadarAmazonInvestigation(entrada: {
+  brandId: string;
+  articleId: string;
+  actorId: string;
+  at: string;
+  dryRun: boolean;
+}): Promise<{ diagnosis: RadarRefreezeDiagnosis; written: boolean; analysisVersionId: string | null }> {
+  const { estado, corrente } = await lerCorrente(entrada);
+  const payload = corrente.payload;
+  const anterior = payload.amazonFrozenInvestigation ? RadarAmazonFrozenInvestigationSchema.parse(payload.amazonFrozenInvestigation) : null;
+  if (!anterior) {
+    return { diagnosis: radarRefreezeDiagnosis({ profile: "AMAZON", finalized: false, differences: [], blocker: null }), written: false, analysisVersionId: null };
+  }
+
+  let nova: z.infer<typeof RadarAmazonFrozenInvestigationSchema> | null = null;
+  let bloqueio: string | null = null;
+  try {
+    const projetado = { ...payload, amazonFrozenInvestigation: null, amazonBlueprint: null } as PayloadAmazon;
+    const { pacote, corrida } = validarColetaAmazon(projetado);
+    const { blueprint } = await montarBlueprintAmazon({ ...entrada, analyzedAt: entrada.at }, projetado, pacote, corrida);
+    nova = fotografiaAmazon(projetado, corrida, blueprint, entrada.actorId, entrada.at);
+  } catch (erro) {
+    if (!(erro instanceof RadarAmazonAnalyzeError) && !(erro instanceof RadarAmazonFinalizeError)) throw erro;
+    bloqueio = erro.message;
+  }
+
+  const diagnosis = radarRefreezeDiagnosis({
+    profile: "AMAZON",
+    finalized: true,
+    differences: nova ? radarRefreezeDifferences(anterior, nova, RADAR_AMAZON_REFREEZE_LABELS) : [],
+    blocker: bloqueio,
+  });
+  if (entrada.dryRun || diagnosis.mode !== "REFREEZE" || !nova) return { diagnosis, written: false, analysisVersionId: null };
+
+  const proxima = await createRadarAnalysisSuccessor(corrente, { amazonFrozenInvestigation: nova, amazonBlueprint: null }, entrada.actorId);
+  await radarStartPorts.appendAnalysis({
+    brandId: entrada.brandId, articleId: entrada.articleId,
+    expectedLock: estado.lockVersion, analysis: proxima,
+  });
+  return { diagnosis, written: true, analysisVersionId: proxima.versionId };
 }
 
 /** A conferência de referência, para quem lê a fotografia. Reexportada aqui. */

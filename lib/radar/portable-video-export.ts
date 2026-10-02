@@ -2,6 +2,7 @@ import { buildRadarYoutubeBlueprint, type RadarYoutubeBlueprint } from "./youtub
 import { RADAR_YOUTUBE_SIGNAL_LABELS, radarYoutubeCompetitiveSignal, type RadarYoutubeUniverseEntry } from "./youtube-search-model.ts";
 import type { RadarYoutubeSearchRun } from "./youtube-search-run.ts";
 import type { RadarYoutubeFrozenInvestigation } from "./youtube-evidence.ts";
+import { RADAR_YOUTUBE_FRAMING_STARTS } from "./youtube-search-queries.ts";
 import { radarTextAdheresToCore, radarUbiquitousStems } from "./intent-adherence.ts";
 import { radarSemanticStems } from "./semantic-concept-model.ts";
 import type { RadarPortableExportInput } from "./portable-export.ts";
@@ -23,6 +24,7 @@ import {
   type RadarArticleBlueprintPayload,
 } from "./article-blueprint.ts";
 import {
+  RADAR_WRITING_FUNCTION_WORDS,
   radarWritingCompareKey,
   radarWritingContentWords,
   radarWritingDate,
@@ -99,8 +101,15 @@ export const RADAR_VIDEO_EXPORT_COLUMNS = [
 export type RadarVideoExportColumn = typeof RADAR_VIDEO_EXPORT_COLUMNS[number];
 export type RadarVideoExportRow = Record<RadarVideoExportColumn, string>;
 
-/* 2026-10-02 · `chapters`: a sequência do vídeo principal tem no máximo 6 capítulos; `cuts`: 3 cortes. */
-const LIMITES = { videos: 10, questions: 12, terms: 18, sources: 6, cellChars: 6_000, titleChars: 90, chapters: 6, cuts: 3, audienceChars: 500 } as const;
+/*
+ * 2026-10-02 · `chapters`: a sequência do vídeo principal tem no máximo 6 capítulos; `cuts`: 3 cortes.
+ * 2026-10-02 · `cellChars` 6 → 10 mil: com os capítulos da planta (o que entregar,
+ * mostrar e a fonte de cada um) e a relevância de cada concorrente, roteiro e SERP
+ * passavam de 6 mil e o corte levava o "Vídeo × artigo" e vídeos do topo. Segue
+ * longe dos 32.767 por célula do Excel.
+ */
+export const RADAR_VIDEO_EXPORT_CELL_CHARS = 10_000;
+const LIMITES = { videos: 10, questions: 12, terms: 18, sources: 6, cellChars: RADAR_VIDEO_EXPORT_CELL_CHARS, titleChars: 90, chapters: 6, cuts: 3, audienceChars: 500 } as const;
 
 /* ============================== a pesquisa do YouTube ============================== */
 
@@ -218,6 +227,11 @@ const naUnidade = (unidade: RadarWritingUnit) => `${unidade.feminine ? "na" : "n
  * O trecho do assunto "leitor" (`radarBrandVoiceBySlot`) cujo título fala de
  * público, leitor ou persona; sem título assim, o assunto inteiro. Curto.
  */
+/** 2026-10-02 · O público que o vídeo atende: o do artigo ou, sem ele, o da Skill de voz (a mesma régua da coluna de tema). */
+function publicoDoVideo(input: RadarPortableExportInput, voz: RadarBrandVoiceState | undefined): string | null {
+  return util(input.article.audience) || publicoDaVoz(voz)?.texto || null;
+}
+
 function publicoDaVoz(voz: RadarBrandVoiceState | undefined): { texto: string; origem: string } | null {
   if (voz?.kind !== "available") return null;
   const doLeitor = radarBrandVoiceBySlot(voz.voice).reader;
@@ -369,8 +383,95 @@ function listaQueCabe(itens: readonly string[], folga: number): string[] {
   return cabem;
 }
 
-function colunaSerpYoutube(p: RadarWritingProjections, youtube: RadarVideoExportYoutube | null, foraDoEscopo: (valor: string | null | undefined) => boolean): string {
+/*
+ * ===== 2026-10-02 · CONSULTAS QUE REPETEM OUTRA (revisão do CSV de vídeo) =====
+ *
+ * O plano antigo gerava "como como atrair…" e "rotina como atrair…" sobre uma
+ * principal já enquadrada (o gerador foi corrigido; corridas gravadas antes
+ * continuam com elas). Um vídeo achado nas três não foi achado em três
+ * perspectivas: a linha das consultas diz qual repete qual, e a contagem de
+ * "aparece em N consultas" conta perspectivas distintas.
+ */
+function semPalavraRepetida(chave: string): string {
+  return chave.replace(/\b(\S+)(?: \1\b)+/g, "$1");
+}
+
+function consultasRepetidas(consultas: readonly string[]): Map<number, { base: number; motivo: string }> {
+  const chaves = consultas.map(consulta => radarWritingCompareKey(consulta));
+  const saida = new Map<number, { base: number; motivo: string }>();
+  for (const [indice, chave] of chaves.entries()) {
+    const limpa = semPalavraRepetida(chave);
+    const igual = chaves.findIndex((outra, j) => j < indice && semPalavraRepetida(outra) === limpa);
+    if (igual >= 0 && limpa !== chave) { saida.set(indice, { base: igual, motivo: "palavra duplicada" }); continue; }
+    const prefixo = RADAR_YOUTUBE_FRAMING_STARTS.find(inicio => limpa.startsWith(`${inicio} `));
+    const resto = prefixo ? limpa.slice(prefixo.length + 1) : "";
+    const jaEnquadrada = resto && RADAR_YOUTUBE_FRAMING_STARTS.some(inicio => resto.startsWith(`${inicio} `));
+    const base = jaEnquadrada ? chaves.findIndex((outra, j) => j !== indice && semPalavraRepetida(outra) === resto) : -1;
+    if (base >= 0) saida.set(indice, { base, motivo: `prefixo "${prefixo}" sobre uma busca já enquadrada` });
+  }
+  return saida;
+}
+
+/*
+ * ===== 2026-10-02 · A RELEVÂNCIA DE CADA CONCORRENTE PARA O PÚBLICO =====
+ *
+ * Posição e visualizações não dizem se o vídeo fala com o mesmo público. Um de
+ * estética, um de advocacia e um genérico entravam iguais. Pelo título e pelo
+ * canal (nada foi assistido):
+ *   - MESMO público: nomeia o público da marca (a primeira frase do público);
+ *   - OUTRO público: "clientes de advocacia", "pacientes para contabilidade"…;
+ *   - PRÓXIMO: fala do termo da busca relacionada (ex.: "pacientes");
+ *   - GERAL: o resto, referência de formato.
+ */
+type Relevancia = "MESMO" | "PROXIMO" | "GERAL" | "OUTRO";
+const RELEVANCIA: Record<Relevancia, string> = {
+  MESMO: "mesmo público: referência principal",
+  PROXIMO: "público próximo: referência de abordagem",
+  GERAL: "tema geral: referência de formato e apresentação",
+  OUTRO: "outro público: inspiração pontual, sem transportar recomendação",
+};
+const GENERICAS_DO_PUBLICO = new Set(radarSemanticStems("profissionais profissional pessoas que atendem atende outras especialidades entram quando o artigo tiver esse público explicitamente definido trabalham"));
+
+type LeituraDoPublico = { publico: ReadonlySet<string>; busca: ReadonlySet<string>; nucleo: ReadonlySet<string> };
+
+function leituraDoPublico(p: RadarWritingProjections, publico: string | null): LeituraDoPublico {
+  const principal = new Set(radarSemanticStems(texto(p.dna.principalKeyword)));
+  const complementares = unicos([...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements]).flatMap(item => radarSemanticStems(item));
+  const nucleo = new Set([...principal, ...complementares]);
+  const primeiraFrase = (publico || "").split(/(?<=[.!?])\s+/)[0] || "";
+  return {
+    publico: new Set(radarSemanticStems(primeiraFrase).filter(raiz => !GENERICAS_DO_PUBLICO.has(raiz) && !nucleo.has(raiz))),
+    busca: new Set(complementares.filter(raiz => !principal.has(raiz))),
+    nucleo,
+  };
+}
+
+/* O radical não é uniforme ("pacientes" → "pacient", "paciente" → "paciente"): mesma raiz quando uma começa pela outra. */
+const mesmaRaiz = (a: string, b: string) => a === b || (Math.min(a.length, b.length) >= 5 && (a.startsWith(b) || b.startsWith(a)));
+
+function relevanciaDoVideo(video: RadarYoutubeUniverseEntry, leitura: LeituraDoPublico): Relevancia {
+  const raizes = radarSemanticStems(`${radarWritingDecodeEntities(video.title)} ${video.channelName || ""}`);
+  const tem = (conjunto: ReadonlySet<string>) => raizes.some(raiz => [...conjunto].some(outra => mesmaRaiz(raiz, outra)));
+  if (tem(leitura.publico)) return "MESMO";
+  const outro = radarWritingCompareKey(radarWritingDecodeEntities(video.title)).match(/\b(?:clientes?|pacientes?|alunos?|negocios?)\s+(?:de|para|da|do|na|no)\s+([a-z]{4,})/);
+  const raizDoOutro = outro ? radarSemanticStems(outro[1])[0] : null;
+  if (raizDoOutro && !leitura.nucleo.has(raizDoOutro) && !leitura.publico.has(raizDoOutro)) return "OUTRO";
+  if (tem(leitura.busca)) return "PROXIMO";
+  return "GERAL";
+}
+
+/* 2026-10-02 · lacunas gravadas com a frase antiga (corrida congelada antes da revisão) saem com a frase de hoje. */
+function lacunaComFraseAtual(frase: string): string {
+  const formato = frase.match(/^Não há (Shorts|long-form) disputando estas consultas\.$/);
+  if (formato) return `Nenhum ${formato[1] === "Shorts" ? "Short" : "vídeo longo"} identificado na amostra coletada: confira se a coleta traz esse formato antes de tratar como oportunidade.`;
+  if (/^Pouca autoridade declarada na amostra/.test(frase)) return "Pouca credencial visível no título ou no nome do canal: espaço para mostrar a especialidade de quem fala.";
+  return frase;
+}
+
+function colunaSerpYoutube(p: RadarWritingProjections, youtube: RadarVideoExportYoutube | null, foraDoEscopo: (valor: string | null | undefined) => boolean, publico: string | null = null): string {
   const linhas: string[] = ["Referência de pesquisa, não conteúdo a copiar: não reproduza títulos, falas nem roteiros de terceiros."];
+  const doPublico = leituraDoPublico(p, publico);
+  const porRelevancia = new Map<Relevancia, number>();
   /* 2026-10-02 · revisão: cada vídeo do topo (linha + porquê) é um item; a lista entra depois, no espaço que sobra. */
   const lista: string[] = [];
   let posicaoDaLista = -1;
@@ -379,9 +480,20 @@ function colunaSerpYoutube(p: RadarWritingProjections, youtube: RadarVideoExport
     linhas.push(`Pesquisa do YouTube${youtube.frozen ? " (congelada)" : " (corrida gravada, ainda não congelada)"}${data ? ` · coleta de ${data}` : ""}`);
     /* 2026-10-02 · revisão: numeradas, para cada vídeo citar a consulta pelo número. */
     const consultas = youtube.queries.slice(0, 6);
-    if (consultas.length) linhas.push(`Consultas: ${consultas.map((consulta, indice) => `${indice + 1}) ${consulta}`).join(" · ")}`);
+    const repetidas = consultasRepetidas(consultas);
+    if (consultas.length) {
+      linhas.push(`Consultas: ${consultas.map((consulta, indice) => {
+        const repete = repetidas.get(indice);
+        return `${indice + 1}) ${consulta}${repete ? ` (repete a ${repete.base + 1}: ${repete.motivo})` : ""}`;
+      }).join(" · ")}`);
+      if (repetidas.size) {
+        linhas.push(`Consultas que repetem outra (${[...repetidas.keys()].map(indice => indice + 1).join(", ")}): vieram do plano antigo, que a próxima coleta não repete; vídeo achado nelas e na consulta de origem conta como uma perspectiva só.`);
+      }
+    }
     const numeroDaConsulta = new Map<string, number>();
     for (const [indice, consulta] of consultas.entries()) if (!numeroDaConsulta.has(radarWritingCompareKey(consulta))) numeroDaConsulta.set(radarWritingCompareKey(consulta), indice + 1);
+    /* Número da consulta → número da consulta de origem (ela mesma, quando não repete outra). */
+    const origemDaConsulta = (numero: number) => (repetidas.get(numero - 1)?.base ?? numero - 1) + 1;
     if (youtube.videos.length) {
       const doTopo = youtube.videos.slice(0, LIMITES.videos);
       const legenda = legendaDasClasses(doTopo);
@@ -389,16 +501,28 @@ function colunaSerpYoutube(p: RadarWritingProjections, youtube: RadarVideoExport
       if (legenda.linha) linhas.push(legenda.linha);
       posicaoDaLista = linhas.length;
       for (const [indice, video] of doTopo.entries()) {
+        /* 2026-10-02 · perspectivas distintas: consulta que repete outra conta como a de origem. */
+        const numeros = unicos(video.queriesFoundIn.map(id => youtube.queryTextById?.[id] || ""))
+          .map(consulta => numeroDaConsulta.get(radarWritingCompareKey(consulta)))
+          .filter((valor): valor is number => typeof valor === "number");
+        const distintas = numeros.length ? new Set(numeros.map(origemDaConsulta)).size : video.occurrenceCount;
+        const relevancia = relevanciaDoVideo(video, doPublico);
+        porRelevancia.set(relevancia, (porRelevancia.get(relevancia) || 0) + 1);
         const partes = [
           cortar(radarWritingDecodeEntities(video.title), LIMITES.titleChars),
           video.channelName || null,
           video.isShorts ? "Short" : duracao(video.durationSeconds) || video.durationLabel,
           typeof video.views === "number" ? `${numero(video.views)} visualizações` : null,
           video.publishedAtLabel || radarWritingDate(video.publishedAt),
-          video.occurrenceCount > 1 ? `aparece em ${video.occurrenceCount} consultas` : null,
+          distintas > 1 ? `aparece em ${distintas} consultas distintas` : null,
           enderecoDoVideo(video),
         ].filter(Boolean);
-        lista.push(`${indice + 1}. ${partes.join(" · ")}\n${porQueEntrou(video, youtube, { motivoDaClasse: legenda.motivoDaClasse, numeroDaConsulta })}`);
+        lista.push(`${indice + 1}. ${partes.join(" · ")}\n${porQueEntrou(video, youtube, { motivoDaClasse: legenda.motivoDaClasse, numeroDaConsulta })} · relevância: ${RELEVANCIA[relevancia]}`);
+      }
+      if (porRelevancia.size) {
+        const ordem: Relevancia[] = ["MESMO", "PROXIMO", "GERAL", "OUTRO"];
+        linhas.splice(posicaoDaLista, 0, `Relevância para o público (pelo título e pelo canal; posição e visualizações não medem retenção nem contatos): ${ordem.filter(item => porRelevancia.get(item)).map(item => `${porRelevancia.get(item)} ${RELEVANCIA[item]}`).join(" · ")}.`);
+        posicaoDaLista += 1;
       }
     }
     const bp = youtube.blueprint;
@@ -414,7 +538,7 @@ function colunaSerpYoutube(p: RadarWritingProjections, youtube: RadarVideoExport
       const lacunas = bp.recommended.gaps.filter(lacuna => !foraDoEscopo(lacuna.statement)).slice(0, 5);
       if (lacunas.length) {
         linhas.push("Lacunas no YouTube (onde entrar):");
-        for (const lacuna of lacunas) linhas.push(`- ${lacuna.statement} (${lacuna.evidence})`);
+        for (const lacuna of lacunas) linhas.push(`- ${lacunaComFraseAtual(lacuna.statement)} (${lacuna.evidence})`);
       }
     }
   } else {
@@ -565,15 +689,82 @@ function colunaEspecialista(input: RadarPortableExportInput, p: RadarWritingProj
  * Incorporar é a do artigo-modelo APROVADO quando há (a mesma regra do CSV
  * para escrever).
  */
-function linhaDoSelecionado(item: RadarPortableVideoSelected, artigoModelo: RadarArticleBlueprintPayload | null): string {
-  const secoesDoPlano = artigoModelo ? radarArticleBlueprintVideoSections(artigoModelo, { title: item.title, url: item.url }) : null;
-  const base = radarPortableVideoUsageLine(item, secoesDoPlano);
-  return item.transcriptStart && item.summarySource !== "TRANSCRIPT"
-    ? `${base} · Começo da transcrição (fala do vídeo, conferir antes de usar): "${item.transcriptStart}"`
-    : base;
+/*
+ * ===== 2026-10-02 · O TRECHO DA FALA LIGADO AO TEMA (revisão do CSV de vídeo) =====
+ *
+ * O começo da transcrição era saudação ("olá pessoal, sejam todos bem vindos").
+ * Do corpo (com teto, lido só dos vídeos com modo), a janela de ~55 palavras
+ * que mais nomeia o tema e os capítulos; o capítulo mais próximo vira o ponto a
+ * explicar. A transcrição automática não tem tempo por trecho aqui: a posição
+ * é aproximada e o tempo exato se acha no vídeo. Idioma por palavras comuns:
+ * fala em inglês pede tradução e revisão antes de virar citação.
+ */
+const PALAVRAS_EN = new Set(["the", "and", "you", "your", "it's", "is", "to", "of", "this", "that", "with", "for", "are", "but", "what", "they"]);
+const PALAVRAS_PT = new Set(["que", "não", "nao", "de", "para", "você", "voce", "com", "uma", "um", "os", "as", "do", "da", "no", "na", "mas", "por"]);
+
+export function radarVideoTranscriptLanguage(fala: string): "pt" | "en" | null {
+  const palavras = fala.toLowerCase().split(/[^a-zà-ú']+/).filter(Boolean).slice(0, 400);
+  const en = palavras.filter(palavra => PALAVRAS_EN.has(palavra)).length;
+  const pt = palavras.filter(palavra => PALAVRAS_PT.has(palavra)).length;
+  if (en + pt < 8) return null;
+  return en > pt * 1.5 ? "en" : "pt";
 }
 
-function colunaBiblioteca(p: RadarWritingProjections, artigoModelo: RadarArticleBlueprintPayload | null): string {
+export function radarVideoTranscriptPassage(corpo: string, raizes: ReadonlySet<string>): { text: string; position: number } | null {
+  const palavras = corpo.split(/\s+/).filter(Boolean);
+  if (!palavras.length || !raizes.size) return null;
+  const JANELA = 55;
+  const PASSO = 20;
+  let melhor: { inicio: number; pontos: number } | null = null;
+  /* A abertura do vídeo (saudação, apresentação do canal) perde um ponto: o trecho útil costuma vir depois. */
+  const SAUDACAO = /^(ol[aá]|oi|fala|e a[ií]|bom dia|boa tarde|boa noite|sejam?|seja bem|hello|hi|hey|welcome)\b/i;
+  const inicioDoVideo = Math.max(JANELA, Math.round(palavras.length * 0.08));
+  for (let inicio = 0; inicio < palavras.length; inicio += PASSO) {
+    const janela = palavras.slice(inicio, inicio + JANELA).join(" ");
+    const raizesDaJanela = new Set(radarSemanticStems(janela));
+    const pontos = [...raizes].filter(raiz => raizesDaJanela.has(raiz)).length
+      - (inicio < inicioDoVideo && (inicio === 0 || SAUDACAO.test(janela)) ? 1 : 0);
+    if (!melhor || pontos > melhor.pontos) melhor = { inicio, pontos };
+    if (inicio + JANELA >= palavras.length) break;
+  }
+  if (!melhor || melhor.pontos < 2) return null;
+  return { text: palavras.slice(melhor.inicio, melhor.inicio + JANELA).join(" "), position: Math.round((melhor.inicio / palavras.length) * 100) };
+}
+
+type LeituraDaFala = { raizes: ReadonlySet<string>; capitulos: readonly Capitulo[] };
+
+function pontoDoTrecho(trecho: string, capitulos: readonly Capitulo[]): string | null {
+  const doTrecho = new Set(radarSemanticStems(trecho));
+  let melhor: { titulo: string; pontos: number } | null = null;
+  for (const capitulo of capitulos) {
+    const pontos = radarSemanticStems(`${capitulo.titulo} ${capitulo.pergunta || ""}`).filter(raiz => doTrecho.has(raiz)).length;
+    if (pontos > 0 && (!melhor || pontos > melhor.pontos)) melhor = { titulo: capitulo.titulo, pontos };
+  }
+  return melhor?.titulo ?? null;
+}
+
+function linhaDoSelecionado(item: RadarPortableVideoSelected, artigoModelo: RadarArticleBlueprintPayload | null, fala: LeituraDaFala | null = null): string {
+  const secoesDoPlano = artigoModelo ? radarArticleBlueprintVideoSections(artigoModelo, { title: item.title, url: item.url }) : null;
+  const base = radarPortableVideoUsageLine(item, secoesDoPlano);
+  const corpo = item.transcriptBody || item.transcriptStart || "";
+  const idioma = corpo ? radarVideoTranscriptLanguage(corpo) : null;
+  const trecho = fala && item.transcriptBody ? radarVideoTranscriptPassage(item.transcriptBody, fala.raizes) : null;
+  const extras: string[] = [];
+  if (trecho) {
+    const ponto = pontoDoTrecho(trecho.text, fala!.capitulos);
+    extras.push(`  Trecho ligado ao tema (transcrição automática, por volta de ${trecho.position}% do vídeo; ache o tempo exato antes de usar): "${cortar(trecho.text, 420)}"`);
+    extras.push(`  Ponto a explicar: ${ponto ? `capítulo ${entreAspas(ponto)}` : "o capítulo que o trecho sustentar"} · uso: ${item.usageLabel}, atribuído ao canal.`);
+  } else if (item.transcriptStart && item.summarySource !== "TRANSCRIPT") {
+    extras.push(item.transcriptBody
+      ? `  Começo da transcrição (nenhum trecho do tema achado no texto lido; conferir no vídeo): "${item.transcriptStart}"`
+      : `  Começo da transcrição (fala do vídeo, conferir antes de usar): "${item.transcriptStart}"`);
+  }
+  if (idioma === "en") extras.push("  Fala em inglês: traduza e revise antes de usar; citação só traduzida e atribuída ao canal.");
+  else if (corpo) extras.push("  Transcrição automática: confira as palavras no vídeo antes de citar (o reconhecimento erra nomes e termos).");
+  return extras.length ? [base, ...extras].join("\n") : base;
+}
+
+function colunaBiblioteca(p: RadarWritingProjections, artigoModelo: RadarArticleBlueprintPayload | null, fala: LeituraDaFala | null = null): string {
   /*
    * 2026-10-02 · OS MODOS DE USO VÊM MESMO SEM CASAMENTO (Adendo B, D6).
    *
@@ -589,7 +780,7 @@ function colunaBiblioteca(p: RadarWritingProjections, artigoModelo: RadarArticle
    */
   const modos = p.video.selected || [];
   const comModos = (celula: string) => (modos.length
-    ? [celula, "Vídeos selecionados pela marca (modo de uso escolhido no Radar, decisão do dono):", ...modos.map(item => `- ${linhaDoSelecionado(item, artigoModelo)}`)].join("\n")
+    ? [celula, "Vídeos selecionados pela marca (modo de uso escolhido no Radar, decisão do dono):", ...modos.map(item => `- ${linhaDoSelecionado(item, artigoModelo, fala)}`)].join("\n")
     : celula);
   if (p.video.state !== "MATCHED") return comModos(p.video.note);
   const linhas = ["Trechos dos vídeos selecionados pela marca (corte só de vídeo da própria marca; de outro canal, referência citada e atribuída; conferir no vídeo):"];
@@ -608,7 +799,58 @@ function colunaBiblioteca(p: RadarWritingProjections, artigoModelo: RadarArticle
  * do YouTube recomenda e, quando cabe, a pergunta do público que ele responde;
  * sem roteiro do YouTube, a própria pergunta.
  */
-type Capitulo = { titulo: string; proposito: string | null; pergunta: string | null };
+type Capitulo = {
+  titulo: string;
+  proposito: string | null;
+  pergunta: string | null;
+  /** 2026-10-02 · Aditivo: o capítulo veio da planta do artigo-modelo (seção = capítulo). */
+  daPlanta?: boolean;
+  /** O que explicar (até dois itens da seção). */
+  explicar?: string[];
+  /** O que mostrar na tela: a entrega prática da seção ou o conceito da imagem dela. */
+  mostrar?: string | null;
+  /** Afirmação que pede fonte antes de ser dita. */
+  fonte?: string | null;
+};
+
+/*
+ * ===== 2026-10-02 · OS CAPÍTULOS SAEM DA PLANTA DO ARTIGO-MODELO =====
+ *
+ * Revisão do CSV de vídeo: "O fundamento principal do tema", "A aplicação
+ * prática do fundamento" organizavam um formulário, não diziam o que gravar. O
+ * vídeo é do MESMO assunto do artigo, e a planta da SERP já tem, por seção, a
+ * pergunta do leitor, a resposta que abre, o que explicar, a entrega prática, a
+ * imagem e a afirmação que pede fonte. Cada seção vira um capítulo com o que
+ * entregar; os blocos da SERP do YouTube ficam como referência de ritmo.
+ * Sem planta (ou no formato curto), a sequência de antes.
+ */
+function capitulosDaPlanta(planta: RadarArticleBlueprintPayload): Capitulo[] {
+  const imagens = new Map(planta.blueprint.visual.map(item => [item.slot, item]));
+  return planta.blueprint.sections.slice(0, LIMITES.chapters).map(secao => {
+    const imagem = secao.image ? imagens.get(secao.image as never) : null;
+    const externo = secao.externalLinks[0] || null;
+    return {
+      titulo: secao.h2,
+      proposito: texto(secao.answerFirst) || null,
+      pergunta: texto(secao.readerQuestion) || null,
+      daPlanta: true,
+      explicar: secao.explain.map(item => texto(item)).filter(Boolean).slice(0, 2),
+      mostrar: texto(secao.practical) || texto(imagem?.concept) || null,
+      fonte: externo ? `${semPontoFinal(texto(externo.claim))} (${externo.source ? "fonte do pacote" : "fonte a obter: oficial ou verificada"})` : null,
+    };
+  });
+}
+
+function linhaDoCapituloDaPlanta(capitulo: Capitulo, indice: number): string {
+  return [
+    `${indice + 1}. ${capitulo.titulo}`,
+    ...(capitulo.pergunta ? [`   Pergunta do público: ${entreAspas(capitulo.pergunta)}`] : []),
+    ...(capitulo.proposito ? [`   Entregar: ${capitulo.proposito}`] : []),
+    ...(capitulo.explicar?.length ? [`   Explicar: ${capitulo.explicar.map(semPontoFinal).join("; ")}.`] : []),
+    `   Mostrar na tela: ${capitulo.mostrar ? semPontoFinal(capitulo.mostrar) : "um exemplo concreto do ponto, identificado como ilustrativo"}.`,
+    ...(capitulo.fonte ? [`   Antes de afirmar: ${capitulo.fonte}; sem fonte, diga de forma delimitada.`] : []),
+  ].join("\n");
+}
 
 const EH_GANCHO = /^(hook|gancho)$/;
 const EH_FECHO = /^(cta|corte)$/;
@@ -661,7 +903,8 @@ const linhaDoCapitulo = (capitulo: Capitulo, indice: number) => (capitulo.propos
  * ampla demais para o gancho, por mais que seja uma busca relacionada.
  */
 function falaDaPrincipal(pergunta: string, principal: string): boolean {
-  const daPrincipal = radarSemanticStems(principal);
+  /* 2026-10-02 · "pelo" não é raiz do tema: "Como captar clientes pelo WhatsApp?" passava por "clientes" + "pelo". */
+  const daPrincipal = radarSemanticStems(principal).filter(raiz => !RADAR_WRITING_FUNCTION_WORDS.has(raiz));
   if (!daPrincipal.length) return false;
   const daPergunta = new Set(radarSemanticStems(pergunta));
   return daPrincipal.filter(raiz => daPergunta.has(raiz)).length >= Math.min(2, daPrincipal.length);
@@ -743,7 +986,16 @@ function colunaRoteiro(
       linhas.push(`${item.dimension}: ${item.recommendedStrategy} (a SERP mostra: ${item.observedSignal})`);
     }
   }
-  if (capitulos.length) {
+  if (capitulos.length && capitulos[0].daPlanta) {
+    const estado = artigoModelo?.approval === "DRAFT" ? "proposta da IA, ainda sem aprovação: confira antes de gravar" : "aprovado";
+    const ritmo = (bp?.recommended.script || []).map(bloco => bloco.block).filter(Boolean);
+    linhas.push(
+      `Capítulos do vídeo principal (${capitulos.length}, da planta do artigo-modelo da SERP, ${estado}; viram os marcadores de tempo da descrição). O vídeo demonstra o que o artigo explica, na mesma ordem:`,
+      ...capitulos.map(linhaDoCapituloDaPlanta),
+      ...(ritmo.length ? [`Ritmo que a SERP do YouTube sugere (referência, não roteiro): ${ritmo.join(" → ")}.`] : []),
+      "Entregar = o que a pessoa leva do capítulo, dito no começo dele. As frases são da planta: reescreva para a fala, sem tornar regra o que a pesquisa não sustenta.",
+    );
+  } else if (capitulos.length) {
     linhas.push(
       curto
         ? `Sequência do vídeo (${capitulos.length} bloco(s), nesta ordem; formato curto, sem capítulos na descrição):`
@@ -785,18 +1037,58 @@ function colunaRoteiro(
  * acessibilidade e compreensão (sem afirmar como o público assiste), e a
  * ausência de Shorts é da amostra, não do mundo.
  */
-function colunaCortes(youtube: RadarVideoExportYoutube | null, sequencia: Sequencia, p: RadarWritingProjections, unidade: RadarWritingUnit): string {
+/* 2026-10-02 · uma mensagem por lâmina: a primeira oração da frase, inteira (cortar no meio deixava a mensagem pela metade). */
+function mensagemDaLamina(frase: string): string {
+  const primeira = semPontoFinal(frase.split(/;\s*/)[0] || frase);
+  const curta = cortar(primeira, 180);
+  return /[.!?…]$/.test(curta) ? curta : `${curta}.`;
+}
+
+function colunaCortes(youtube: RadarVideoExportYoutube | null, sequencia: Sequencia, p: RadarWritingProjections, unidade: RadarWritingUnit, artigoModelo: RadarArticleBlueprintPayload | null = null, destino = ""): string {
   const curtos = youtube?.blueprint?.observed.shorts ?? null;
   const capitulos = sequencia.curto ? [] : sequencia.capitulos;
   const fatos = (p.autoridade?.factualEvidence || []).filter(item => item.supportType === "SUPPORTS").length;
-  const peso = (capitulo: Capitulo) => (capitulo.pergunta ? 0 : /^(contexto|conclus)/.test(radarWritingCompareKey(capitulo.titulo)) ? 2 : 1);
+  /* 2026-10-02 · da planta, primeiro o capítulo que tem o que mostrar: é o que rende um corte que se sustenta sozinho. */
+  const peso = (capitulo: Capitulo) => (capitulo.daPlanta
+    ? (capitulo.mostrar ? 0 : 1)
+    : capitulo.pergunta ? 0 : /^(contexto|conclus)/.test(radarWritingCompareKey(capitulo.titulo)) ? 2 : 1);
   const escolhidos = capitulos.map((capitulo, indice) => ({ capitulo, numero: indice + 1 }))
     .sort((a, b) => peso(a.capitulo) - peso(b.capitulo) || a.numero - b.numero)
     .slice(0, LIMITES.cuts)
     .sort((a, b) => a.numero - b.numero);
-  const cortes = escolhidos.map(({ capitulo, numero: posicao }, indice) => `${indice + 1}. Do capítulo ${posicao} (${capitulo.titulo}): ${capitulo.pergunta
-    ? `a pergunta ${entreAspas(capitulo.pergunta)} e a resposta direta`
-    : semPontoFinal(capitulo.proposito || capitulo.titulo)}.`);
+  /*
+   * 2026-10-02 · CADA CORTE COM CONTEÚDO PRÓPRIO (revisão do CSV de vídeo): o
+   * corte era "a pergunta X e a resposta direta". Agora diz o gancho, a ideia
+   * única, o que mostrar, a fonte quando a fala pede e o fechamento. Com a
+   * planta, tudo vem da seção; sem ela, o que o capítulo tem.
+   */
+  const fechamento = `convite para o vídeo longo ou ${aUnidade(unidade)}`;
+  const cortes = escolhidos.map(({ capitulo, numero: posicao }, indice) => (capitulo.daPlanta || capitulo.pergunta
+    ? [
+      `${indice + 1}. Do capítulo ${posicao} (${capitulo.titulo}):`,
+      `   Gancho: ${capitulo.pergunta ? entreAspas(capitulo.pergunta) : `o problema do capítulo em uma frase`}`,
+      `   Ideia única: ${capitulo.daPlanta && capitulo.proposito ? semPontoFinal(capitulo.proposito) : "a resposta direta à pergunta, em uma frase"}.`,
+      `   Mostrar: ${capitulo.mostrar ? semPontoFinal(capitulo.mostrar) : "um exemplo concreto, identificado como ilustrativo"}.`,
+      ...(capitulo.fonte ? [`   Fonte: ${capitulo.fonte}.`] : []),
+      `   Fechamento: ${fechamento}.`,
+    ].join("\n")
+    : `${indice + 1}. Do capítulo ${posicao} (${capitulo.titulo}): ${semPontoFinal(capitulo.proposito || capitulo.titulo)}.`));
+  /*
+   * 2026-10-02 · O CARROSSEL COM UMA MENSAGEM POR LÂMINA e a ligação com a
+   * próxima. Com a planta: capa pela promessa, uma lâmina por seção com a
+   * resposta curta, lâmina final com o CTA. Sem ela, a regra.
+   */
+  const daPlanta = sequencia.capitulos.filter(capitulo => capitulo.daPlanta);
+  const promessa = texto(artigoModelo?.blueprint.promise) || texto(artigoModelo?.blueprint.title.h1) || null;
+  const carrossel = daPlanta.length
+    ? [
+      `Carrossel (Instagram e LinkedIn), ${daPlanta.length + 2} lâminas, uma mensagem por lâmina e cada uma puxando a próxima:`,
+      `- Lâmina 1 (capa): ${promessa ? mensagemDaLamina(promessa) : "o problema do tema em uma frase."}`,
+      ...daPlanta.map((capitulo, indice) => `- Lâmina ${indice + 2}: ${capitulo.titulo} — ${mensagemDaLamina(capitulo.proposito || capitulo.pergunta || capitulo.titulo)}${indice < daPlanta.length - 1 ? ` Puxa a próxima: ${entreAspas(daPlanta[indice + 1].titulo)}.` : ""}`),
+      `- Lâmina ${daPlanta.length + 2}: CTA para ${aUnidade(unidade)}${destino ? ` (${destino})` : ""}, sem prometer resultado.`,
+      "Fonte na lâmina quando a mensagem afirma algo que pede fonte; sem fonte, a mensagem fica delimitada.",
+    ]
+    : ["Carrossel (Instagram e LinkedIn): uma mensagem por lâmina, a resposta curta de cada capítulo, cada lâmina puxando a próxima, a fonte quando a mensagem afirma algo e o CTA na última."];
   return [
     !youtube
       ? "Shorts: sem pesquisa do YouTube, não há amostra de Shorts do tema; cortes podem testar o formato, sem dado de concorrência."
@@ -813,7 +1105,7 @@ function colunaCortes(youtube: RadarVideoExportYoutube | null, sequencia: Sequen
       ? [sequencia.curto ? "Um fato com fonte, dito em uma frase e com a fonte na legenda, também rende um vídeo curto." : `${cortes.length + 1}. Um fato com fonte, dito em uma frase, com a fonte na legenda.`]
       : []),
     `Legenda na tela em todos os cortes, por acessibilidade e compreensão; gancho no primeiro segundo e convite para o vídeo longo ou ${aUnidade(unidade)}.`,
-    "Carrossel (Instagram e LinkedIn): os mesmos capítulos, um por lâmina, com a resposta curta e a fonte.",
+    ...carrossel,
   ].join("\n");
 }
 
@@ -866,12 +1158,24 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
    */
   const foraDoEscopo = radarWritingOutOfScope(p, contexto.siloExcludedTopics || []);
   const perguntas = perguntasDoPublico(p, foraDoEscopo);
+  /* 2026-10-02 · a abertura da planta vem primeiro (vídeo e artigo abrem pela mesma dúvida); depois a do CSV para escrever. */
+  const daPlanta = texto(contexto.blueprint?.blueprint.opening.readerQuestion) || null;
   const daEscrita = radarWritingOpeningQuestion(p, foraDoEscopo);
   /* 2026-10-02 · a pergunta só abre o vídeo se fala da principal; senão, o gancho é o próprio tema. */
-  const abertura = daEscrita && !radarVideoRhetoricalQuestion(daEscrita) && falaDaPrincipal(daEscrita, principal) ? daEscrita : null;
+  /*
+   * Com planta, só a abertura dela (e só se fala da principal): a pergunta mais
+   * buscada da amostra levava ao gancho "…com mídia paga" num vídeo cujos
+   * capítulos são outros. Sem planta, a do CSV para escrever.
+   */
+  const candidatas = contexto.blueprint ? [daPlanta] : [daEscrita];
+  const abertura = candidatas.find(pergunta => pergunta && !radarVideoRhetoricalQuestion(pergunta) && falaDaPrincipal(pergunta, principal)) || null;
   const youtube = contexto.youtube;
-  const sequencia = capitulosDoVideo(youtube?.blueprint ?? null, perguntas, principal);
   const artigoModelo = contexto.blueprint ?? null;
+  const daSerp = capitulosDoVideo(youtube?.blueprint ?? null, perguntas, principal);
+  /* 2026-10-02 · com planta (e fora do formato curto), os capítulos são as seções dela. */
+  const sequencia: Sequencia = artigoModelo && !daSerp.curto && artigoModelo.blueprint.sections.length
+    ? { capitulos: capitulosDaPlanta(artigoModelo), curto: false, restantes: [] }
+    : daSerp;
   const vozAtiva = contexto.brandVoiceActive ?? contexto.brandVoice?.kind === "available";
 
   const ressalvas: string[] = [];
@@ -891,19 +1195,23 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
     pode_gravar: pode,
     tema_e_publico: colunaTema(input, p, contexto.brandVoice),
     intencao_e_formato: colunaIntencao(input, p, youtube),
-    serp_youtube: colunaSerpYoutube(p, youtube, foraDoEscopo),
+    serp_youtube: colunaSerpYoutube(p, youtube, foraDoEscopo, publicoDoVideo(input, contexto.brandVoice)),
     perguntas_do_publico: perguntas.length
       ? ["O que o público pergunta (responder com clareza; as que aderem ao tema entram nos capítulos do roteiro):", ...perguntas.map(item => `- ${item}`)].join("\n")
       : "Sem perguntas do público registradas no pacote.",
     termos_e_entidades: colunaTermos(p, foraDoEscopo),
     fatos_e_fontes: colunaFatos(p),
     especialista: colunaEspecialista(input, p),
-    biblioteca_da_marca: colunaBiblioteca(p, artigoModelo),
+    biblioteca_da_marca: colunaBiblioteca(p, artigoModelo, {
+      /* 2026-10-02 · o trecho da fala ligado ao tema: as raízes da principal, das complementares e dos capítulos. */
+      raizes: new Set(radarSemanticStems([principal, ...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements, ...sequencia.capitulos.map(capitulo => capitulo.titulo)].join(" "))),
+      capitulos: sequencia.capitulos,
+    }),
     diretrizes_de_roteiro: [
       colunaRoteiro(input, p, youtube, abertura, sequencia, artigoModelo),
       ...(vozAtiva ? ['Voz da marca: gancho, fala, CTA e descrição seguem a linha "Voz da marca" deste arquivo (vocabulário, o que a marca não faz e a página comercial que ela permite citar).'] : []),
     ].join("\n"),
-    cortes_para_redes: colunaCortes(youtube, sequencia, p, unidade),
+    cortes_para_redes: colunaCortes(youtube, sequencia, p, unidade, artigoModelo, texto(input.article.canonical) || (texto(input.article.slug) ? `/${texto(input.article.slug)}` : "")),
     prompt: colunaPrompt(principal, unidade, { vozAtiva, bloqueio }),
   };
   for (const coluna of RADAR_VIDEO_EXPORT_COLUMNS) row[coluna] = celula(row[coluna]);

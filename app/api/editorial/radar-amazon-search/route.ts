@@ -34,6 +34,7 @@ import {
   RadarAmazonAnalyzeError,
   analyzeRadarAmazonInvestigation,
   finalizeRadarAmazonInvestigation,
+  refreezeRadarAmazonInvestigation,
 } from "@/lib/server/radar-amazon-analyze";
 import { RadarAmazonFinalizeError, RadarAmazonRunRefError } from "@/lib/radar/amazon-evidence";
 
@@ -90,7 +91,13 @@ const CorpoSchema = z.object({
    * Ela não abre corrida e não grava investigação: devolve candidatos e para. O
    * que grava é o START, depois de a pessoa ter escolhido.
    */
-  action: z.enum(["collect", "retry-support", "analyze", "finalize", "resolve-product"]),
+  /*
+   * 2026-10-02 · `refreeze` (SDD diretriz editorial, Adendo E): o reparo do
+   * congelamento — refaz a fotografia com a leitura de hoje sobre a coleta já
+   * gravada, numa escrita só, sem provider. `dryRun` é a prévia do botão.
+   */
+  action: z.enum(["collect", "retry-support", "analyze", "finalize", "resolve-product", "refreeze"]),
+  dryRun: z.boolean().optional(),
   brandId: z.string().uuid(),
   articleId: z.string().trim().min(1).max(256),
   articleDnaVersionId: z.string().trim().min(1).max(256),
@@ -188,6 +195,26 @@ export async function POST(request: Request) {
         headline: resultado.supportApplied
           ? "Blueprint competitivo da Amazon gerado com apoio do Google."
           : "Blueprint competitivo da Amazon gerado sem o apoio do Google — a análise declara a ausência.",
+      }, { headers: noStoreHeaders });
+    }
+
+    /* 2026-10-02 · Adendo E · o reparo do congelamento: prévia (dryRun) ou uma escrita. Sem provider. */
+    if (input.action === "refreeze") {
+      const resultado = await refreezeRadarAmazonInvestigation({
+        brandId: input.brandId,
+        articleId: input.articleId,
+        actorId: profile.userId,
+        at: new Date().toISOString(),
+        dryRun: input.dryRun === true,
+      });
+      return NextResponse.json({
+        success: true,
+        persistenceMode: "remote" as const,
+        readbackConfirmed: resultado.written,
+        written: resultado.written,
+        analysisVersionId: resultado.analysisVersionId,
+        diagnosis: resultado.diagnosis,
+        headline: resultado.written ? "Congelamento da Amazon refeito com a leitura atual." : resultado.diagnosis.headline,
       }, { headers: noStoreHeaders });
     }
 

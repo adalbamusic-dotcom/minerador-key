@@ -78,7 +78,9 @@ import { buildRadarR3Model, type RadarR3Model } from "@/lib/radar/r3-workbench";
 import { buildRadarYoutubeQueryPlan } from "@/lib/radar/youtube-search-queries";
 import { RadarYoutubeSearchRunSchema, radarYoutubeApplySelection, radarYoutubeResetPatch, radarYoutubeRunSummary, type RadarYoutubeSearchRun } from "@/lib/radar/youtube-search-run";
 import { buildRadarYoutubeBlueprint } from "@/lib/radar/youtube-blueprint";
-import { freezeRadarYoutubeInvestigation } from "@/lib/radar/youtube-evidence";
+import { freezeRadarYoutubeInvestigation, resolveRadarFrozenRun } from "@/lib/radar/youtube-evidence";
+import { RADAR_YOUTUBE_REFREEZE_LABELS, radarRefreezeDiagnosis, radarRefreezeDifferences, radarReopenedGooglePatch, type RadarRefreezeDiagnosis, type RadarRefreezeProfile } from "@/lib/radar/refreeze-repair";
+import { radarObservedDivergesFromFrozen } from "@/lib/radar/handoff-readiness";
 import type { RadarVideoSourceInputVerdict, RadarVideoSourceTextSummary } from "@/lib/radar/video-source";
 import { useRadarAreaLiveRead } from "./use-radar-area-live-read";
 
@@ -1128,6 +1130,17 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * caminho de erro reabria — leitura falha, `readbackConfirmed` volta a falso,
    * o efeito redispara, e assim indefinidamente. Era o laço que piscava a tela.
    */
+
+  /*
+   * 2026-10-02 · Adendo E · A CONTINUAÇÃO DO CAMINHO PAGO DO REPARO. Os hooks
+   * ficam antes do retorno antecipado; a função que decide e inicia a coleta é
+   * atribuída a cada render completo (ela usa o artigo ativo e os handlers de
+   * iniciar, declarados depois daqui). A coleta só começa com o reset
+   * confirmado e o perfil já zerado na tela.
+   */
+  const coletaDepoisDoResetRef = useRef<{ articleId: string; profile: RadarRefreezeProfile } | null>(null);
+  const continuarColetaRef = useRef<(() => void) | null>(null);
+  useEffect(() => { continuarColetaRef.current?.(); });
 
   if (state || !pipeline.snapshot) return state;
   /*
@@ -3302,6 +3315,15 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     run: RadarYoutubeSearchRun;
     /** A versão sobre a qual a fotografia nasce, lida do servidor com a trava daquela leitura. */
     base: Awaited<ReturnType<typeof versaoCorrenteNoServidor>>;
+  }) => gravarYoutube(target, { youtubeFrozenInvestigation: fotografiaDoYoutube(target, entrada) }, entrada.base);
+
+  /*
+   * 2026-10-02 · A MONTAGEM DA FOTOGRAFIA, SEM GRAVAR — a mesma para finalizar
+   * e para o reparo do congelamento (Adendo E), que compara antes de gravar.
+   */
+  const fotografiaDoYoutube = (target: RadarItem, entrada: {
+    run: RadarYoutubeSearchRun;
+    base: Awaited<ReturnType<typeof versaoCorrenteNoServidor>>;
   }) => {
     const contexto = rowWorkbenchData(target).researchContext;
     const blueprint = buildRadarYoutubeBlueprint({
@@ -3320,11 +3342,10 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      */
     const plano = planoDePesquisa(target, entrada.base?.payload);
     const multimodal = multimodalDoArtigo(target, { corrida: entrada.run, registros: serpRecordsAtuaisRef.current });
-    const congelada = freezeRadarYoutubeInvestigation({
+    return freezeRadarYoutubeInvestigation({
       run: entrada.run, blueprint, finalizedBy: sessionId(session), finalizedAt: new Date().toISOString(),
       multimodal: multimodal ? { blueprint: multimodal, researchSources: plano.sources } : null,
     });
-    return gravarYoutube(target, { youtubeFrozenInvestigation: congelada }, entrada.base);
   };
 
   /**
@@ -3389,6 +3410,262 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     } finally {
       setYoutubeBusy(false);
     }
+  };
+
+  /*
+   * ===================== 2026-10-02 · ADENDO E · REPARAR O CONGELAMENTO =====================
+   *
+   * Um botão por perfil (Google, YouTube, Amazon), no desenho do "Diagnosticar
+   * e reparar" do Arquiteto: a prévia relê o SERVIDOR (a versão corrente
+   * inteira), projeta a investigação reaberta, refaz a fotografia com o código
+   * de hoje SEM GRAVAR e compara com a congelada (`lib/radar/refreeze-repair.ts`).
+   *
+   *   - recongelar (grátis): as MESMAS rotinas de finalizar de cada perfil;
+   *   - zerar e coletar (pago): o MESMO reset de cada perfil e, confirmado pelo
+   *     servidor, o MESMO início de coleta do botão — disparado quando a tela já
+   *     mostra o perfil zerado (o início lê o artigo do render).
+   *
+   * Nada daqui chama provider na prévia; só o caminho pago coleta, depois da
+   * confirmação na tela.
+   */
+  const algoEmCursoNoRadar = () => Boolean(
+    serpActionRef.current || serpAction || busyArticleId || reviewingArticleIdRef.current || reviewingArticleId
+    || pesquisaEmVooRef.current || youtubeEmVoo.current || amazonEmVoo.current || youtubeBusy || amazonBusy,
+  );
+  const recusarSeEmCurso = () => {
+    if (algoEmCursoNoRadar()) throw new Error("Outra ação ainda está em andamento neste artigo. Aguarde a conclusão.");
+  };
+
+  /*
+   * O RESET DO CAMINHO PAGO SÓ VALE CONFIRMADO PELO SERVIDOR. `gravarYoutube`
+   * aceita recuperação local; aqui não: coletar pago sobre um reset que ficou
+   * só nesta aba cobraria por uma investigação que o banco ainda diz congelada.
+   */
+  const zerarPerfilNoServidor = async (target: RadarItem, patch: Parameters<typeof gravarYoutube>[1]) => {
+    const base = await versaoCorrenteNoServidor(target);
+    if (!base) throw new Error("Não há versão de análise para zerar neste artigo.");
+    const trava = LOCK_DA_LEITURA_REMOTA.get(base);
+    LOCK_DA_LEITURA_REMOTA.delete(base);
+    const proxima = await createRadarAnalysisSuccessor(base, patch, sessionId(session));
+    const gravado = await pipeline.saveRadarAnalysis(target.articleId, proxima, { requireRemote: true, ...(typeof trava === "number" ? { expectedLock: trava } : {}) });
+    if (!gravado.readbackConfirmed) throw new Error("O reset não foi confirmado pelo servidor: nada foi coletado.");
+    await pipeline.reloadRadarAnalysis(target.articleId);
+  };
+
+  /* ---------------------------------- Google ---------------------------------- */
+
+  const ensaioDoGoogle = async (target: RadarItem) => {
+    const lida = await analiseConfirmadaNoServidor(target);
+    if (!lida.ok) throw new Error(lida.reason);
+    const congelado = lida.corrente.payload.finalizedBundle;
+    if (!congelado) return { lida, diagnosis: radarRefreezeDiagnosis({ profile: "GOOGLE", finalized: false, differences: [], blocker: null }) };
+    const reaberta = { ...lida.corrente, payload: { ...lida.corrente.payload, ...radarReopenedGooglePatch(lida.corrente.payload.deepResearch) } };
+    const dados = rowWorkbenchData({ ...target, analysisVersions: [...lida.analyses.slice(0, -1), reaberta] });
+    const investigacao = dados.deepResearch;
+    let bloqueio: string | null = null;
+    let diferencas: string[] = [];
+    if (!investigacao) bloqueio = "O contexto da investigação não foi resolvido (fundamento, keywords ou Silo).";
+    else {
+      diferencas = radarObservedDivergesFromFrozen(investigacao.observed, congelado);
+      /* O ENSAIO: as mesmas duas funções do botão Finalizar, sobre a projeção reaberta. Nada é gravado. */
+      const ensaio = finalizeRadarDeepResearch({
+        record: reaberta.payload.deepResearch,
+        currentFingerprint: investigacao.fingerprint,
+        sufficiency: investigacao.sufficiency,
+        summary: investigacao.summary,
+        analyzed: investigacao.observed.sample.analyzedSuccess,
+        finalizedBy: sessionId(session),
+      });
+      if (!ensaio.ok) bloqueio = ensaio.reason;
+      else {
+        const fotografia = freezeRadarEvidenceBundle({
+          readiness: investigacao.finalization,
+          observed: investigacao.observed,
+          record: ensaio.record,
+          mode: ensaio.record.primarySearchMode,
+          sufficiency: investigacao.sufficiency,
+          blueprint: investigacao.blueprint,
+          frozenBy: sessionId(session),
+          frozenAt: ensaio.record.finalizedAt || new Date().toISOString(),
+        });
+        if (!fotografia.ok) bloqueio = fotografia.reason;
+      }
+    }
+    return { lida, diagnosis: radarRefreezeDiagnosis({ profile: "GOOGLE", finalized: true, differences: diferencas, blocker: bloqueio }) };
+  };
+
+  const recongelarGoogle = async (target: RadarItem) => {
+    recusarSeEmCurso();
+    const { lida, diagnosis } = await ensaioDoGoogle(target);
+    if (diagnosis.mode !== "REFREEZE") throw new Error(diagnosis.headline);
+    /* 1/2 · REABRIR: a trava de escrita aceita a próxima versão sem fotografia. */
+    const trava = LOCK_DA_LEITURA_REMOTA.get(lida.corrente);
+    LOCK_DA_LEITURA_REMOTA.delete(lida.corrente);
+    history.capture(`Reparar congelamento do Google de ${target.title}`);
+    const reaberta = await createRadarAnalysisSuccessor(lida.corrente, radarReopenedGooglePatch(lida.corrente.payload.deepResearch), sessionId(session), undefined, crypto.randomUUID());
+    await pipeline.saveRadarAnalysis(target.articleId, reaberta, { requireRemote: true, ...(typeof trava === "number" ? { expectedLock: trava } : {}) });
+    /* 2/2 · CONGELAR pela MESMA rotina do botão, sobre a linha relida do servidor. */
+    const relida = await analiseConfirmadaNoServidor(target);
+    if (!relida.ok) {
+      setNotice(`A investigação do Google foi reaberta, mas a releitura não veio (${relida.reason}). Use "Finalizar pesquisa" para concluir o reparo.`);
+      return;
+    }
+    const linhaRelida: RadarItem = { ...target, analysisVersions: relida.analyses };
+    await finalizarInvestigacaoGoogle(linhaRelida, rowWorkbenchData(linhaRelida));
+  };
+
+  const recoletarGoogle = async (target: RadarItem) => {
+    recusarSeEmCurso();
+    const lida = await analiseConfirmadaNoServidor(target);
+    if (!lida.ok) throw new Error(lida.reason);
+    const trava = LOCK_DA_LEITURA_REMOTA.get(lida.corrente);
+    LOCK_DA_LEITURA_REMOTA.delete(lida.corrente);
+    history.capture(`Zerar e coletar de novo o Google de ${target.title}`);
+    const zerada = await createRadarAnalysisSuccessor(lida.corrente, buildRadarResetPayload(lida.corrente.payload), sessionId(session), undefined, crypto.randomUUID());
+    const gravado = await pipeline.saveRadarAnalysis(target.articleId, zerada, { requireRemote: true, ...(typeof trava === "number" ? { expectedLock: trava } : {}) });
+    if (!gravado.readbackConfirmed) throw new Error("O reset do Google não foi confirmado pelo servidor: nada foi coletado.");
+    setResearchDraftByArticle(current => ({ ...current, [target.articleId]: {} }));
+    setSearchModeByArticle(current => {
+      const proximo = { ...current };
+      delete proximo[target.articleId];
+      return proximo;
+    });
+    coletaDepoisDoResetRef.current = { articleId: target.articleId, profile: "GOOGLE" };
+    setNotice("Investigação do Google zerada e confirmada pelo servidor. A pesquisa nova (paga) começa assim que a tela mostrar o artigo zerado.");
+  };
+
+  /* ---------------------------------- YouTube ---------------------------------- */
+
+  const ensaioDoYoutube = async (target: RadarItem) => {
+    const base = await versaoCorrenteNoServidor(target);
+    const congelada = base?.payload.youtubeFrozenInvestigation || null;
+    if (!base || !congelada) return { base, nova: null, diagnosis: radarRefreezeDiagnosis({ profile: "YOUTUBE", finalized: false, differences: [], blocker: null }) };
+    let bloqueio: string | null = null;
+    let nova: ReturnType<typeof fotografiaDoYoutube> | null = null;
+    try {
+      /* A corrida gravada precisa ser a da fotografia (mesmo runId e assinatura); a legada traz a cópia. */
+      const corrida = congelada.runRef ? resolveRadarFrozenRun({ frozen: congelada, liveRun: base.payload.youtubeSearch }) : congelada.run;
+      if (!corrida) bloqueio = "A fotografia não aponta para nenhuma coleta gravada.";
+      else if (corrida.state !== "COLLECTED") bloqueio = "A coleta gravada não está concluída.";
+      else nova = fotografiaDoYoutube(target, { run: corrida, base });
+    } catch (erro) {
+      bloqueio = erro instanceof Error ? erro.message : "A coleta gravada não confere com a fotografia.";
+    }
+    return {
+      base, nova,
+      diagnosis: radarRefreezeDiagnosis({
+        profile: "YOUTUBE", finalized: true, blocker: bloqueio,
+        differences: nova ? radarRefreezeDifferences(congelada, nova, RADAR_YOUTUBE_REFREEZE_LABELS) : [],
+      }),
+    };
+  };
+
+  const recongelarYoutube = async (target: RadarItem) => {
+    recusarSeEmCurso();
+    const { base, nova, diagnosis } = await ensaioDoYoutube(target);
+    if (diagnosis.mode !== "REFREEZE" || !nova || !base) throw new Error(diagnosis.headline);
+    setYoutubeBusy(true);
+    try {
+      history.capture(`Reparar congelamento do YouTube de ${target.title}`);
+      await gravarYoutube(target, { youtubeFrozenInvestigation: nova }, base);
+      setNotice("Congelamento do YouTube refeito com a leitura atual. O artigo-modelo da SERP é organizado de novo para o pacote novo.");
+    } finally {
+      setYoutubeBusy(false);
+    }
+    void organizarArtigosModeloDaSerp([target.articleId]);
+  };
+
+  const recoletarYoutube = async (target: RadarItem) => {
+    recusarSeEmCurso();
+    setYoutubeBusy(true);
+    try {
+      history.capture(`Zerar e coletar de novo o YouTube de ${target.title}`);
+      await zerarPerfilNoServidor(target, radarYoutubeResetPatch());
+    } finally {
+      setYoutubeBusy(false);
+    }
+    coletaDepoisDoResetRef.current = { articleId: target.articleId, profile: "YOUTUBE" };
+    setNotice("Pesquisa do YouTube zerada e confirmada pelo servidor. A coleta nova (paga) começa assim que a tela mostrar o perfil zerado.");
+  };
+
+  /* ---------------------------------- Amazon ---------------------------------- */
+
+  const pedirRefreezeAmazon = async (target: RadarItem, dryRun: boolean) => {
+    const resposta = await fetch("/api/editorial/radar-amazon-search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ action: "refreeze", dryRun, brandId: target.brandId, articleId: target.articleId, articleDnaVersionId: target.articleDnaVersionId }),
+    });
+    const corpo = await resposta.json().catch(() => ({}));
+    if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível ler o congelamento da Amazon.");
+    return corpo as { written: boolean; diagnosis: RadarRefreezeDiagnosis; headline?: string };
+  };
+
+  const recongelarAmazon = async (target: RadarItem) => {
+    recusarSeEmCurso();
+    amazonEmVoo.current = target.articleId;
+    setAmazonBusy(true);
+    let gravou = false;
+    try {
+      history.capture(`Reparar congelamento da Amazon de ${target.title}`);
+      const corpo = await pedirRefreezeAmazon(target, false);
+      if (!corpo.written) throw new Error(corpo.diagnosis.headline);
+      await pipeline.reloadRadarAnalysis(target.articleId);
+      setNotice(`${corpo.headline || "Congelamento da Amazon refeito."} O artigo-modelo da SERP é organizado de novo para o pacote novo.`);
+      gravou = true;
+    } finally {
+      setAmazonBusy(false);
+      amazonEmVoo.current = null;
+    }
+    if (gravou) void organizarArtigosModeloDaSerp([target.articleId]);
+  };
+
+  const recoletarAmazon = async (target: RadarItem) => {
+    recusarSeEmCurso();
+    setAmazonBusy(true);
+    try {
+      history.capture(`Zerar e coletar de novo a Amazon de ${target.title}`);
+      await zerarPerfilNoServidor(target, { amazonSearch: null, amazonBlueprint: null, amazonFrozenInvestigation: null, researchPackage: null });
+    } finally {
+      setAmazonBusy(false);
+    }
+    coletaDepoisDoResetRef.current = { articleId: target.articleId, profile: "AMAZON" };
+    setNotice("Investigação Amazon zerada e confirmada pelo servidor. A coleta nova (paga) começa assim que a tela mostrar o perfil zerado.");
+  };
+
+  /** O que cada painel de reparo recebe: diagnóstico (só leitura), recongelar e recoletar, do artigo ativo. */
+  const reparoDoCongelamento = (profile: RadarRefreezeProfile) => {
+    const target = activeRadarItem;
+    const semArtigo = () => { throw new Error("Selecione um artigo."); };
+    if (!target) return { onDiagnose: async () => semArtigo(), onRefreeze: async () => semArtigo(), onRecollect: async () => semArtigo() };
+    if (profile === "GOOGLE") return { onDiagnose: async () => (await ensaioDoGoogle(target)).diagnosis, onRefreeze: () => recongelarGoogle(target), onRecollect: () => recoletarGoogle(target) };
+    if (profile === "YOUTUBE") return { onDiagnose: async () => (await ensaioDoYoutube(target)).diagnosis, onRefreeze: () => recongelarYoutube(target), onRecollect: () => recoletarYoutube(target) };
+    return { onDiagnose: async () => (await pedirRefreezeAmazon(target, true)).diagnosis, onRefreeze: () => recongelarAmazon(target), onRecollect: () => recoletarAmazon(target) };
+  };
+
+  /*
+   * A CONTINUAÇÃO DO CAMINHO PAGO: o reset foi confirmado pelo servidor; quando
+   * a tela mostra o perfil zerado, começa a coleta pelo MESMO handler do botão
+   * de iniciar (que lê o artigo do render). Outro artigo aberto no meio
+   * cancela a continuação — nada é coletado para um artigo que não está na tela.
+   */
+  continuarColetaRef.current = () => {
+    const pendente = coletaDepoisDoResetRef.current;
+    if (!pendente || !activeRadarItem) return;
+    if (activeRadarItem.articleId !== pendente.articleId) {
+      coletaDepoisDoResetRef.current = null;
+      void Promise.resolve().then(() => setNotice("A coleta nova foi cancelada porque outro artigo foi aberto. O perfil continua zerado: use o botão de iniciar quando quiser."));
+      return;
+    }
+    const payload = analiseCorrenteDe(activeRadarItem)?.payload;
+    const zerado = pendente.profile === "GOOGLE"
+      ? !payload?.finalizedBundle && !payload?.deepResearch
+      : pendente.profile === "YOUTUBE" ? !payload?.youtubeSearch && !payload?.youtubeFrozenInvestigation
+        : !payload?.amazonSearch && !payload?.amazonFrozenInvestigation;
+    if (!zerado) return;
+    coletaDepoisDoResetRef.current = null;
+    const iniciar = pendente.profile === "GOOGLE" ? startDeepResearch : pendente.profile === "YOUTUBE" ? startYoutubeSearch : startAmazonSearch;
+    void Promise.resolve().then(() => iniciar());
   };
 
   const startDeepResearch = async () => {
@@ -5012,6 +5289,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       onRetrySupport: () => void retryAmazonSupport(),
       onFinalize: () => void acaoAmazonSemProvider("finalize", "Não foi possível finalizar a investigação Amazon."),
       onReset: () => void resetAmazonSearch(),
+      /* 2026-10-02 · Adendo E · reparar o congelamento da Amazon. */
+      refreeze: reparoDoCongelamento("AMAZON"),
       /*
        * §23 · O BOTÃO DEIXOU DE SER PLACEHOLDER.
        *
@@ -5065,6 +5344,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       onFinalize: () => void finalizeYoutubeInvestigation(),
       onToggleVideo: (videoId: string) => void toggleYoutubeVideo(videoId),
       onReset: () => void resetYoutubeSearch(),
+      /* 2026-10-02 · Adendo E · reparar o congelamento do YouTube. */
+      refreeze: reparoDoCongelamento("YOUTUBE"),
       /* 2026-10-02 · D9 · o motivo de não ter finalizado sozinha, quando há pendência. */
       autoFinalizePending: pendenciaDoAutomatico(activeRadarItem, "YOUTUBE"),
     }} googleResearch={{
@@ -5075,7 +5356,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       lazyProvenance: lazyPesquisa[chaveLazy(activeRadarItem)]?.provenance || { state: "IDLE" as const, data: null, message: null },
       onLoadSample: () => void carregarParteDaPesquisa("sample"),
       onLoadProvenance: () => void carregarParteDaPesquisa("provenance"),
-    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
+    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} googleRefreeze={reparoDoCongelamento("GOOGLE")} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
 }
 
 function RadarProfile({ r3, articleHref, architectHref }: { r3: RadarR3Model; articleHref: string | null; architectHref: string | null }) {

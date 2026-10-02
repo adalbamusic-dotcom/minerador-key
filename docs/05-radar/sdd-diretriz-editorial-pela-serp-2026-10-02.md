@@ -298,3 +298,69 @@ e engolia o 409; o gerador de consultas duplicava o prefixo ("como como …").
   proposta marcada até a aprovação; o Redator continua só com o aprovado.)
 - **D6:** APROVADO pelo dono em 2026-10-02 — modos de uso dos vídeos com migration aditiva, depois do
   artigo-modelo.
+
+## Adendo E — Reparar o congelamento, cirúrgico e por perfil (2026-10-02) — APROVADO PELO DONO, IMPLEMENTADO EM CÓDIGO
+
+### E.1 Problema (diagnóstico do artigo do Instagram, só leitura)
+
+O pacote congelado do Google é de 2026-10-02 02:44Z. Depois dele, a limpeza de cabeçalhos de concorrentes
+(`radarCleanCompetitorHeading`) mudou os ids dos conceitos lidos das MESMAS extrações: o dossiê de hoje tem
+outros conceitos e 12 afirmações a sustentar contra 13 no congelado. A divergência é real e bloqueia o
+Redator e o CSV. Refinalizar não grava (`finalizeRadarDeepResearch` recusa investigação já finalizada); o
+único caminho era o reset, que descarta extrações e obriga coleta paga. O mesmo pode acontecer com o YouTube
+e a Amazon sempre que a leitura (blueprint) mudar depois do congelamento.
+
+### E.2 Decisão do dono (2026-10-02)
+
+"Recongelar com a leitura atual" como botão cirúrgico, no espírito do "Diagnosticar e reparar" do Arquiteto
+(`docs/04-arquiteto/sdd-reparo-pontual-do-artigo-2026-10-01.md`): arruma o defeito sem mexer no resto. Um
+botão POR PERFIL — Google, YouTube e Amazon, cada um separado —, com as duas saídas incorporadas:
+
+1. **Recongelar com a leitura atual (grátis):** quando o material já coletado basta, a fotografia é refeita
+   com o código de hoje sobre ele. Nenhuma chamada ao provider.
+2. **Zerar e coletar de novo (pago):** quando o material gravado não basta (fundamento mudou, corrida ausente
+   ou que não confere, amostra que não sustenta congelar), o botão zera SÓ aquele perfil e começa a coleta de
+   novo — chamada paga, confirmada antes.
+
+Salvaguardas para as situações a que se destina.
+
+### E.3 Desenho
+
+- **Diagnóstico é leitura.** O clique abre a prévia: relê a versão corrente do servidor (cheia), projeta a
+  investigação reaberta, recalcula a fotografia com o código de hoje e compara com a congelada. Saídas:
+  - *Nada a reparar*: a fotografia já corresponde à leitura atual — nenhuma escrita.
+  - *Recongelar (grátis)*: diz O QUE divergiu (conceitos, afirmações, links, amostra; partes do blueprint).
+  - *Zerar e coletar (pago)*: diz por que o material gravado não basta.
+  - *Não finalizada*: o botão não se aplica (use Finalizar).
+- **Google (grátis):** o ensaio roda `finalizeRadarDeepResearch` e `freezeRadarEvidenceBundle` sobre a
+  projeção reaberta; só se os dois passam, grava (1) a versão reaberta — que a trava de escrita já aceita
+  (`radarGoogleResearchWriteLock`: próxima sem `finalizedBundle`) — e (2) o congelamento pela MESMA rotina do
+  botão "Finalizar pesquisa" (carimbo de standing e lentes no servidor, readback, artigo-modelo). Nenhuma
+  mudança de servidor.
+- **YouTube (grátis):** confere a corrida gravada contra a referência da fotografia
+  (`resolveRadarFrozenRun`), monta a fotografia pela MESMA função do botão Finalizar e grava numa escrita.
+- **Amazon (grátis):** nova ação aditiva `refreeze` na rota (`dryRun` para a prévia): analisa a coleta gravada
+  sem a fotografia e congela numa única versão sucessora. Sem provider.
+- **Pago:** o reset JÁ EXISTENTE do perfil e, confirmado o reset pelo readback, o início da coleta pelo MESMO
+  handler do botão de iniciar. O Google zera só o Google; YouTube e Amazon, só o seu perfil.
+
+### E.4 Salvaguardas
+
+1. O botão só aparece com o perfil finalizado e sem outra ação em curso no artigo.
+2. Nada é gravado no diagnóstico; "nada a reparar" não grava.
+3. Confirmação explícita, com as consequências ditas antes: nova versão (a anterior fica no histórico,
+   append-only); o pacote muda de hash, então o artigo-modelo da SERP é organizado de novo (1 chamada de IA,
+   +1 se cortar) e precisa de nova aprovação; se o pacote já foi ao Redator, ele mostra "Atualização
+   disponível"; URL, slug, canonical, keyword, papel e Silo não mudam.
+4. O caminho pago diz o custo antes e só começa a coleta depois de o reset ser confirmado pelo servidor.
+5. Google em duas escritas: o ensaio prévio garante que o congelamento passaria; se a segunda escrita falhar
+   mesmo assim, a investigação fica reaberta (não perdida) e "Finalizar pesquisa" conclui — a frase diz isso.
+6. Sem ferramenta MCP: decisão humana na tela (catálogo registra a etapa).
+
+### E.5 Compatibilidade, riscos, rollback e testes
+
+- Sem migration e sem mudança de schema. Rota Amazon: ação nova, aditiva; as demais intactas.
+- Rollback: reverter o código; os dados são versões append-only — a versão anterior continua no histórico.
+- Testes: domínio do diagnóstico (Google, YouTube, comparação sem carimbos de tempo), servidor Amazon
+  (`dryRun` sem escrita, nada a reparar sem escrita, recongelar numa escrita, recusa sem fotografia), regras
+  estruturais da tela (prévia antes da escrita, ensaio antes de reabrir, pago só depois do readback do reset).
