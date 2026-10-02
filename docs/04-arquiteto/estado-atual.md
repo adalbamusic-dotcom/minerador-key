@@ -7045,3 +7045,47 @@ Verificação local: `test:arquiteto` 2.427/2.427 (inclui `arquiteto-precedencia
 Arquivos: `lib/arquiteto/article-formation-priority.ts`, `lib/arquiteto/article-formation.ts` (`carriesSubject`, `suggestedTrunkSubjectKeywordIds`, motivos, auditoria), `lib/arquiteto/declared-subject.ts` (selo e parâmetro opcional), `modules/arquiteto/arquiteto-workspace.tsx`, `modules/arquiteto/serp-paid-plan-dialog.tsx`, `lib/agent/platform-catalog.ts` e `tests/arquiteto-precedencia-formacao.test.mts`. Mudanças aditivas: consumidores sem os campos novos leem o contrato anterior. Sem schema, migration, escrita remota, chamada paga ou mudança de rota.
 
 Verificação local: `test:arquiteto` 2.435/2.435 (precedência 30/30, com as sondas Z, H e C), `test:arquiteto:servidor` 52/52, `test:arquiteto:lentes` 35/35, `test:agent` 44/44, `tsc --noEmit` sem erros e `git diff --check` limpo. O ESLint dos arquivos de domínio, do diálogo e do catálogo não aponta erro. `arquiteto-workspace.tsx` mantém os 41 erros anteriores, nenhum nas linhas desta entrega. **Ainda não verificado:** a tela no navegador e a marca real.
+
+## Reparo pontual do artigo — 2026-10-01
+
+**Verificado no código e confirmado por teste local. A 1ª entrega está autorizada
+pelo dono; a classe "custo de provider" ficou para uma segunda.**
+
+SDD: `sdd-reparo-pontual-do-artigo-2026-10-01.md`.
+
+O defeito que motivou: um publicado da AdalbaPro ficou preso no portão do Radar
+dizendo "O parecer da SERP ainda espera decisão editorial", com tudo aprovado.
+A causa era estado parcial — a operação "Reforçar publicados" gravou o
+ArticleDNA e a decisão na keyword em 28/09, e não gravou nem a resolução do
+parecer nem a entrada no marcador. O artigo existia; a prova de que fora
+aprovado, não. E não havia tela capaz de consertar: "Concluir formação" recusa
+publicados, e "Melhorar publicados" descarta página sem keyword nova.
+
+- **O catálogo de defeitos não foi inventado:** `resolveRadarEligibility` já
+  avalia doze invariantes e já diz qual quebrou. O módulo novo as **classifica**
+  em reexecutável, decisão humana, custo de provider, outra fase e composição.
+- **A classe importa mais que o botão:** "o registro se perdeu" e "ninguém
+  decidiu" não são a mesma coisa; tratá-las igual transformaria o portão em
+  carimbo. Parecer indeciso nunca tem reparo de um clique — abre decisão com as
+  opções do contrato e motivo obrigatório.
+- **Restaurar vence perguntar:** quando a decisão já foi tomada e só o registro
+  sumiu, o reparo regrava o registro em vez de pedir uma decisão nova, que
+  poderia divergir da que o artigo já carrega.
+- **Nenhuma autoridade de escrita nova:** os dois reparos passam por
+  `POST /api/arquiteto/article-formation-marker` e
+  `POST /api/arquiteto/serp-resolution`, com as permissões e os readbacks delas.
+- **Um artigo por vez:** sem lote, sem automático, sem segundo plano.
+- **Idempotente por construção:** o passo some quando a invariante passa a
+  valer; as contagens do marcador saem da lista final, não de um incremento.
+- **O que não ganhou botão, e por quê:** `ARTICLE_DNA_CURRENT` com readback não
+  confirmado é registro perdido de verdade, mas regravar ArticleDNA passa pelo
+  versionamento. O painel mostra a classe e diz onde se resolve hoje.
+
+Arquivos: `lib/arquiteto/article-repair.ts`,
+`modules/arquiteto/article-repair-panel.tsx`,
+`modules/arquiteto/arquiteto-workspace.tsx` (diagnóstico, dois reparos e o botão
+no rodapé da fase Links internos).
+
+Verificação local: `tests/arquiteto-reparo-pontual-artigo.test.mts` 15/15,
+`tsc` sem erros de código. A interface ainda não foi exercitada com um artigo
+bloqueado real — o caso que motivou a SDD foi destravado antes da entrega.

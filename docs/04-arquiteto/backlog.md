@@ -2622,3 +2622,24 @@ Todas confirmadas pela lente de gatilho; a correção proposta de cada uma foi
 - [ ] **Antes da homologação, dizer ao dono o que esperar na AdalbaPro:** 21 artigos publicados reconhecidos. Em "Leads sem Tráfego Pago", no máximo 25 das 101 livres reforçam os 5 publicados, e pelo menos 76 ficam em Keywords não agrupadas, com motivo, ou viram propostas para outros Silos. Os artigos unitários com parecer antigo ficam "incompleta · faltam lentes" até as extras serem coletadas, e cada um soma até 3 chamadas no plano.
 - [ ] Homologar após deploy (usuário): nenhum Assunto com mais de um artigo, nenhum candidato de uma keyword com o mesmo Assunto sugerido, o selo "Assunto · artigo sugerido na formação, aguarda confirmação" e a compatibilidade dos artigos de Assunto sem "Não aplicável".
 - [ ] A convergência continua lexical: avaliar o DNA (entidade e problema) antes de declarar a D1 atendida na AdalbaPro.
+
+## Reparo pontual do artigo — pendências abertas em 2026-10-01
+
+SDD: `sdd-reparo-pontual-do-artigo-2026-10-01.md` (1ª entrega feita).
+
+- **2ª entrega — classe "custo de provider".** Reparar `SERP_EXECUTED` e
+  `SERP_CURRENT` recoletando as 4 lentes, cache primeiro, custo declarado antes
+  e aceite por item. Hoje o painel classifica e aponta "Processar artigos".
+- **Reparo de `ARTICLE_DNA_CURRENT` (readback não confirmado).** É registro
+  perdido e não tem botão: regravar ArticleDNA passa pelo versionamento e pede
+  desenho próprio para não criar sucessora indevida.
+- **Dois pareceres de SERP para a mesma keyword.** Encontrados na AdalbaPro:
+  `article-candidate:territory:…:24679c44…` (inconclusivo, `serpbase:465916d5…`)
+  e `24679c44…` puro (divergente, `serpbase:81a5848c…`). Duas autoridades para a
+  mesma pergunta; se o portão passar a ler a outra, o artigo trava sem
+  explicação. **Investigação própria, fora do escopo do reparo.**
+- **Contar reparos por tipo.** A trilha permite ver se a mesma operação quebra
+  sempre no mesmo passo — sinal para corrigir a origem em vez de reparar de
+  novo. Ainda não há leitura agregada disso.
+- **Exercitar a interface com um artigo bloqueado real.** O caso que motivou a
+  SDD foi destravado antes da entrega; falta uma homologação com bloqueio vivo.
