@@ -118,6 +118,9 @@ import {
   type ClassificationEvidence,
 } from "@/lib/arquiteto/article-classification-closure";
 import { buildRadarHandoffPlan } from "@/lib/arquiteto/radar-handoff-gate";
+import { appendConcludedFormation, buildArticleRepairPlan, concludedFormationForRepair, markerCovers, type ArticleRepairFacts } from "@/lib/arquiteto/article-repair";
+import { ArticleRepairPanel } from "@/modules/arquiteto/article-repair-panel";
+import type { ArticleSerpHumanDecision } from "@/lib/arquiteto/article-serp-record";
 import { resolveApprovedArticleSerpGate, type ApprovedSerpRecord } from "@/lib/arquiteto/approved-article-serp-gate";
 import { buildArchitectureWorkingProposal, formatProposalCounters, intentIsKnown, proposalCoversScope, resolveKeywordDnaSignals, type KeywordDnaSignals } from "@/lib/arquiteto/architecture-working-proposal";
 import { detectCandidateOverlap, detectSlugCollisions, reservedForSiloPage, unresolvedCannibalization, type CandidateOverlapRisk } from "@/lib/arquiteto/article-candidate-guards";
@@ -1128,6 +1131,15 @@ export default function ArquitetoPage() {
   const [panelSiloRef, setPanelSiloRef] = useState<string | null>(null);
   /** Cenário de formação vigente vindo do remoto; os candidatos são reconstruídos. */
   const [articleFormationMarker, setArticleFormationMarker] = useState<ArticleFormationMarkerPayload | null>(null);
+  /*
+   * ===== ARTICLE_REPAIR_1 · O REPARO E PONTUAL, E O ESTADO DELE TAMBEM =====
+   *
+   * Nada aqui e lote nem fila: o painel abre sobre a selecao atual e some ao
+   * fechar. Nao existe reparo em segundo plano, por decisao da SDD.
+   */
+  const [repairOpen, setRepairOpen] = useState(false);
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairMessage, setRepairMessage] = useState<{ tom: "erro" | "sucesso" | "progresso"; texto: string } | null>(null);
 
   /** Grupos abertos no mapa; fora deles vale o limite anti-hairball. */
   const [expandedClusterRefs, setExpandedClusterRefs] = useState<Set<string>>(new Set());
@@ -13212,6 +13224,125 @@ export default function ArquitetoPage() {
   const canSendSelectedArticlesToRadar = selectedArticleRadarGateIssues.length === 0;
 
   /**
+   * ===== ARTICLE_REPAIR_1 · DIAGNOSTICO =====
+   *
+   * Leitura pura sobre o que o portao JA reprovou: classificar nao chama
+   * provider nem escreve, e e por isso que o painel pode abrir sem custo e sem
+   * consequencia. Quem decide a classe e o modulo puro.
+   */
+  const articleRepairPlans = useMemo(() => selectedArticleRadarPlan.blocked.map(eligibility => {
+    const article = selectedArticlesForRadar.find(item =>
+      (articleDnaEntryFor({ articleId: articleEntityIdFor(item), candidateRef: item.candidateRef }).version?.payload.articleId || item.id) === eligibility.articleId);
+    const dna = article ? articleDnaEntryFor({ articleId: articleEntityIdFor(article), candidateRef: article.candidateRef }).version : null;
+    const candidateRef = article?.candidateRef ?? null;
+    const serp = candidateRef ? remoteArticleSerp.find(entry => entry.candidateRef === candidateRef) : undefined;
+    const principalId = dna?.payload.principalKeywordId ?? null;
+    const linha = principalId ? masterList.find(row => String(row.id) === principalId) : null;
+    const facts: ArticleRepairFacts = {
+      article: {
+        articleId: eligibility.articleId,
+        label: eligibility.label,
+        articleDnaVersionId: dna?.versionId ?? null,
+        belongsToCurrentScenario: Boolean(dna),
+        readbackConfirmed: Boolean(dna && effectiveVersionStatus(dna.versionId, versionEvents) === "approved"),
+      },
+      eligibility,
+      parecer: serp ? {
+        candidateRef: serp.candidateRef,
+        assessmentId: serp.payload.assessment.id,
+        formationBaseHash: serp.payload.formationBaseHash,
+        resolvido: serp.payload.humanResolution?.formationBaseHash === serp.payload.formationBaseHash,
+      } : null,
+      constaNoMarcador: markerCovers(articleFormationMarker, { candidateRef, articleId: eligibility.articleId }),
+      /* Decisao humana gravada na propria keyword: distingue rastro perdido de decisao ausente. */
+      formacaoDecididaForaDoMarcador: Boolean(linha?.articleFormationRef),
+    };
+    return { plano: buildArticleRepairPlan(facts), article, dna, candidateRef, serp };
+  }), [selectedArticleRadarPlan, selectedArticlesForRadar, articleDnaEntryFor, articleEntityIdFor, remoteArticleSerp, articleFormationMarker, masterList, versionEvents]);
+
+  /**
+   * ===== ARTICLE_REPAIR_1 · REGRAVAR O REGISTRO PERDIDO =====
+   *
+   * Passa pela MESMA rota que o fluxo normal usa para o marcador, com a
+   * permissao e o readback dela. O reparo nao ganha autoridade propria, e o
+   * sucesso so e declarado depois de a releitura devolver a conclusao.
+   */
+  const repararRegistroDoArtigo = async (articleId: string) => {
+    const alvo = articleRepairPlans.find(item => item.plano.articleId === articleId);
+    const ator = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
+    if (!alvo || !selectedBrandId || !articleFormationMarker || !ator) return;
+    const pai = alvo.article ? articleParentFor(alvo.article) : null;
+    const entrada = concludedFormationForRepair({
+      candidateRef: alvo.candidateRef,
+      territoryRef: pai?.territoryRef ?? null,
+      principalKeywordId: alvo.dna?.payload.principalKeywordId ?? null,
+      secondaryKeywordIds: alvo.dna?.payload.secondaryKeywordIds ?? [],
+      narrativeReinforcementIds: alvo.dna?.payload.narrativeReinforcementIds ?? [],
+      formationBaseHash: alvo.serp?.payload.formationBaseHash ?? null,
+      slug: alvo.dna?.payload.suggestedSlug ?? null,
+      fullPath: null,
+      materializedArticleId: articleId,
+      agora: new Date().toISOString(),
+      ator,
+    });
+    if (!entrada) {
+      /* Faltando dado, nao se grava formacao parcial: o marcador deixaria de ser prova. */
+      setRepairMessage({ tom: "erro", texto: "Faltam dados para reconstruir a conclusao deste artigo. Nada foi gravado." });
+      return;
+    }
+    setRepairBusy(true);
+    setRepairMessage({ tom: "progresso", texto: "Regravando o registro…" });
+    try {
+      const marcador = appendConcludedFormation(articleFormationMarker, entrada, entrada.concludedAt);
+      await callStrategicApi("/api/arquiteto/article-formation-marker", { brandId: selectedBrandId, marker: marcador });
+      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+      setArticleFormationMarker(canonical.articleFormationMarker);
+      setRepairMessage(markerCovers(canonical.articleFormationMarker, { candidateRef: alvo.candidateRef, articleId })
+        ? { tom: "sucesso", texto: "Registro regravado e confirmado na releitura." }
+        : { tom: "erro", texto: "A gravacao nao voltou na releitura remota." });
+    } catch (error) {
+      setRepairMessage({ tom: "erro", texto: error instanceof Error ? error.message : "Falha ao regravar o registro." });
+    } finally {
+      setRepairBusy(false);
+    }
+  };
+
+  /**
+   * ===== ARTICLE_REPAIR_1 · REGISTRAR A DECISAO SOBRE O PARECER =====
+   *
+   * A mesma rota que a conclusao da formacao usa. O reparo nao decide: ele
+   * grava a decisao que a pessoa tomou, com o motivo que ela escreveu.
+   */
+  const registrarDecisaoDoParecer = async (articleId: string, decisao: ArticleSerpHumanDecision, motivo: string) => {
+    const alvo = articleRepairPlans.find(item => item.plano.articleId === articleId);
+    if (!alvo || !selectedBrandId || !alvo.serp || !motivo.trim()) return;
+    const parecer = alvo.serp;
+    setRepairBusy(true);
+    setRepairMessage({ tom: "progresso", texto: "Registrando a decisao…" });
+    try {
+      await callStrategicApi("/api/arquiteto/serp-resolution", {
+        brandId: selectedBrandId,
+        candidateRef: parecer.candidateRef,
+        formationBaseHash: parecer.payload.formationBaseHash,
+        assessmentId: parecer.payload.assessment.id,
+        decision: decisao,
+        reason: motivo.trim(),
+      }, "serp");
+      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+      setRemoteArticleSerp(canonical.articleFormationSerp);
+      const confirmada = canonical.articleFormationSerp
+        .find(entry => entry.candidateRef === parecer.candidateRef)?.payload.humanResolution;
+      setRepairMessage(confirmada?.formationBaseHash === parecer.payload.formationBaseHash
+        ? { tom: "sucesso", texto: "Decisao registrada e confirmada na releitura." }
+        : { tom: "erro", texto: "A decisao nao voltou na releitura remota." });
+    } catch (error) {
+      setRepairMessage({ tom: "erro", texto: error instanceof Error ? error.message : "Falha ao registrar a decisao." });
+    } finally {
+      setRepairBusy(false);
+    }
+  };
+
+  /**
    * OS DOIS EIXOS, POR ARTIGO SELECIONADO.
    *
    * `approval_state` é LIDO das versões canônicas; `workflow_status` é
@@ -20043,11 +20174,20 @@ export default function ArquitetoPage() {
              )}
              {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <select aria-label="Status global dos artigos selecionados" value={globalStatusTargets.includes(globalStatusTarget) ? globalStatusTarget : "EM_PROCESSO"} onChange={event=>setGlobalStatusTarget(event.target.value as typeof globalStatusTarget)} className={ARCHITECT_UI.footerButton}>{globalStatusTargets.map(status=><option key={status} value={status}>{GLOBAL_WORKFLOW_LABELS[status]}</option>)}</select>}
              {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button type="button" onClick={() => { void applyGlobalStatus(); }} disabled={updating} data-testid="architect-mark-ready-for-radar" title="Aplica o status global escolhido aos artigos selecionados após validação e confirmação remota." className={`${ARCHITECT_UI.footerButton} border-module-accent/45 text-module-accent hover:border-module-accent disabled:cursor-not-allowed disabled:opacity-40`}><ShieldCheck className="h-3 w-3" aria-hidden="true"/>Aplicar status</button>}
+             {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && selectedArticleRadarGateIssues.length > 0 && <button type="button" onClick={() => { setRepairMessage(null); setRepairOpen(true); }} data-testid="architect-open-repair" title="Mostra o que bloqueia cada artigo selecionado e o que pode ser reparado. O diagnostico nao altera nada." className={`${ARCHITECT_UI.footerButton} border-warning/45 text-warning hover:border-warning`}>Diagnosticar e reparar</button>}
              {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button onClick={() => { void sendSelectedToRadar(); }} disabled={!canSendSelectedArticlesToRadarNow} title={canSendSelectedArticlesToRadarNow ? "Enviar ao Radar os artigos com status Pronto para Radar" : sendToRadarBlocker} className={`${ARCHITECT_UI.footerButton} border-context-accent/45 text-context-accent hover:border-context-accent disabled:cursor-not-allowed disabled:opacity-40`}><ArrowRight className="h-3 w-3"/>Enviar ao Radar</button>}
             <button onClick={() => { markSelectionInteraction("clear-selection"); setSelectedArticleIds(new Set()); setSelectedSiloPageIds(new Set()); lastSelectionAnchorId.current = null; }} className={ARCHITECT_UI.footerButton}>Limpar seleção</button>
           </div>
         </footer>
       )}
+
+      {repairOpen && <ArticleRepairPanel
+        planos={articleRepairPlans.map(item => item.plano)}
+        busy={repairBusy}
+        mensagem={repairMessage}
+        onReexecutar={articleId => { void repararRegistroDoArtigo(articleId); }}
+        onDecidir={(articleId, decisao, motivo) => { void registrarDecisaoDoParecer(articleId, decisao, motivo); }}
+        onClose={() => setRepairOpen(false)}/>}
 
       <BackgroundTaskNotice tasks={architectTasks.slice(-4)} onDismiss={dismissBackgroundTask}/>
 
