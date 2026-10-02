@@ -106,15 +106,29 @@ function dentroDosLimites(row: RadarWritingExportRow) {
  * 2026-10-02 · snapshot renovado: a única diferença conferida linha a linha é a
  * URL limpa de cada orgânico em serp_resumida (antes só o domínio). Amazon e
  * YouTube, sem orgânicos, ficaram idênticos.
+ *
+ * 2026-10-02 · snapshot renovado de novo (frente B, coerência do CSV para
+ * qualquer tipo de página). Conferido linha a linha contra a saída anterior;
+ * mudou SÓ o pretendido, e nada do Assunto:
+ *   - regra geral 2 e, no publicado, coluna artigo e prompt: a MESMA frase do
+ *     FAQ legado (`RADAR_WRITING_LEGACY_FAQ`);
+ *   - serp_resumida: o sistema da coleta principal ("desktop · Windows"), a
+ *     lista das páginas comparáveis que embasaram as medidas e, com lentes, a
+ *     configuração de cada lente (rótulo, observada em / sem observação);
+ *   - promessa_e_leitor do silo: "(sem link aprovado no grafo: …)" ao lado do
+ *     próximo artigo e da SiloPage quando o plano de links não os alcança;
+ *   - plano_visual do Suporte comercial (uma seção só): "uma capa e 2
+ *     respiro(s)", com o respiro 2 declarado para a estrutura final.
+ * YouTube (linha só de identidade) ficou idêntico.
  */
 const SNAPSHOT = {
-  silo: { sha: "50e2d360e88e77af562ffdec663760f5da92572e0b747468b924dd57d746e144", len: 17288 },
-  saude: { sha: "1d9237d167455b4caf9e531dc27aa4b1962751eab09772a4bb18ef36603fa0cc", len: 21444 },
+  silo: { sha: "b239453d29119b9e1ccd555eaaae7da52c3cd06e5bdcb8d964701edb8cb230a7", len: 19253 },
+  saude: { sha: "9211b763870d18f3435dbf03b845a8e16d1a29129b94f2147ad58557ab11a0e9", len: 23637 },
   artigos: {
-    google: "903a52ab6b5ad5b9a1654f3b4d232df6ec514082f567a8c8e13853645a5cb9c6",
-    amazon: "13aaa813adb1fee8a2024b73378acc29e44f2040ba38c6d80a566652c4548ccf",
+    google: "2f5bcbb8a4a7ce04a5474e00263525cc320b97b895e26ec5cf456cf0d5aba031",
+    amazon: "7a5a5dfc18f160dcbf36cc14ef497d8f8c4f85b7389c0892155975aa6060c96d",
     youtube: "0b0118248360fabc79e06be63916b91bd3f6aadd0c6b99fb06d3c4baabd5137a",
-    saude: "b7ea7ea96a0bc8b004a915a1e91c12060e632c7f21fbd63b4cec865fbaa78c47",
+    saude: "ccf777cf43b9c4a6a92326f2b9642efca843faf2e289816c0b01aaf7e2bcd6e9",
   },
 };
 

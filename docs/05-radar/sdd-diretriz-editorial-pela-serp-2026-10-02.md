@@ -236,6 +236,35 @@ Sem tabela nova: leitura server-side da versão ativa pelo repositório de Skill
 aditivos e opcionais no lote do export e no payload do artigo-modelo (`brandVoice`). Sem Skill ativa, tudo
 sai como hoje, com o aviso.
 
+## Adendo D — Artigo-modelo dentro da SERP e finalização automática (2026-10-02) — DECIDIDO PELO DONO
+
+### D.1 Artigo-modelo é dado da SERP
+
+Na primeira geração real a resposta da IA veio cortada ("JSON inválido": a Skill inteira + todas as
+evidências + uma planta longa estouraram a saída). O dono: "o artigo-modelo teria que ser parte dos dados da
+SERP, não algo separado; a SERP faz o trabalho, a IA só ajuda a organizar". Decisões:
+
+- **D7:** a IA organiza o esqueleto que a SERP já entrega (seções do modelo da SERP, perguntas, conceitos,
+  lacunas, medidas, lentes, cada item com id) **ao finalizar a investigação**; o botão avisa a chamada de IA.
+  Saída compacta, uma nova tentativa automática quando a resposta vem cortada.
+- **D8:** enquanto o dono não aprova, o CSV já sai com a estrutura organizada, marcada "PROPOSTA DA IA —
+  aguardando aprovação no Radar"; aprovada (ou editada e aprovada), a marca some. O Redator continua lendo só
+  o aprovado.
+
+### D.2 Finalização automática
+
+O código tinha a regra "nada congela sozinho; só o clique" (`lib/radar/investigation-finalization.ts`) e
+testes que a travavam; o dono acreditava que Google e Amazon finalizavam sozinhos e pediu o automático
+também no YouTube. **D9 (dono, 2026-10-02): automático nos três** — Google, YouTube e Amazon congelam sozinhos
+quando a coleta (e a análise/curadoria automática) termina sem pendência, e em seguida a IA organiza o
+artigo-modelo. O botão manual continua. O botão que dispara a coleta passa a dizer que ela também finaliza e
+chama a IA. Com pendência (amostra insuficiente, falha de coleta, curadoria que exige decisão), nada congela
+e a tela diz por quê.
+
+Defeitos do YouTube encontrados no mapeamento (corrigidos junto): a projeção ignorava o Google base como
+apoio já coletado (ficava "Coletando" sem botão de finalizar); a gravação do apoio usava trava de versão velha
+e engolia o 409; o gerador de consultas duplicava o prefixo ("como como …").
+
 ## Decisões pendentes do Adendo
 
 - **D5:** APROVADO pelo dono em 2026-10-02 — botão "Gerar artigo-modelo (IA)" depois de finalizar, 1

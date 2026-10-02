@@ -19,7 +19,7 @@ import {
 } from "../lib/radar/amazon-evidence.ts";
 import { assertRadarBlueprintSeparation, RadarCompetitiveBlueprintSchema } from "../lib/radar/competitive-blueprint.ts";
 import { radarCompetitiveBlueprintViewOfAnalysis } from "../lib/radar/competitive-blueprint-view.ts";
-import { radarAmazonReportEvidence, radarResearchProfileStateOfAnalysis } from "../lib/radar/research-profile-state.ts";
+import { radarAmazonReportEvidence, radarProfileAutoFinalizeDecision, radarResearchProfileStateOfAnalysis } from "../lib/radar/research-profile-state.ts";
 import { buildRadarAmazonBlueprintCards } from "../lib/radar/amazon-observed.ts";
 
 /*
@@ -609,6 +609,20 @@ test("N · FINALIZED some com START e ANALYZE, e o blueprint fica legível", () 
   assert.equal(/Refinalizar|Nova coleta/.test(painel), false, "§27 · não existe refinalizar nem nova coleta");
   assert.ok(painel.includes("Reabrir / zerar investigação"));
   assert.ok(painel.includes('data-testid="radar-amazon-view-blueprint"'));
+
+  /*
+   * 2026-10-02 · D9 (dono, "automático nos três"): a coleta sem pendência
+   * analisa e congela SOZINHA. O botão manual continua — e, como no Google,
+   * diz a chamada de IA que finalizar inclui (D7). Já congelada, a decisão
+   * automática não tira outra fotografia.
+   */
+  assert.ok(painel.includes('radarFinalizeWithAiLabel("Finalizar investigação")'), "o botão manual existe e diz a IA");
+  const automatico = radarProfileAutoFinalizeDecision({
+    payload: { amazonSearch: run, amazonFrozenInvestigation: fotografia, researchPackage: null },
+    profile: "AMAZON",
+  });
+  assert.equal(automatico.next, null, "fotografia assinada não é refeita pelo automático");
+  assert.equal(automatico.pending, false);
 });
 
 /* ================================ O ================================ */
@@ -687,7 +701,7 @@ test("P · Google e YouTube não regridem — o envelope segue discriminado", ()
 
 /* ======================== §2 · ZERO PROVIDER CALLS ======================== */
 
-test("§2 · analisar e finalizar não chamam provider em caminho nenhum", () => {
+test("§2 · analisar e finalizar não chamam provider em caminho nenhum", async () => {
   const servico = semComentarios(fonteDoServico);
   assert.equal(
     /executeDataForSeo|collectDataForSeoSerpSnapshot|collectRadarGoogleSupport|resolveDataForSeoCanonical|\bfetch\(/.test(servico),
@@ -707,6 +721,18 @@ test("§2 · analisar e finalizar não chamam provider em caminho nenhum", () =>
   assert.equal(/executeDataForSeoAmazonQuery|startRadarAmazonRun|resolveDataForSeoCanonical/.test(fatia), false);
   assert.ok(fatia.includes("analyzeRadarAmazonInvestigation({"));
   assert.ok(fatia.includes("finalizeRadarAmazonInvestigation({"));
+
+  /*
+   * 2026-10-02 · D9 (dono): o encadeamento automático da tela usa SÓ estas
+   * duas ações sem provider. Ele nunca coleta, nunca repete apoio e nunca
+   * resolve produto — o que custa continua atrás de um clique.
+   */
+  const pagina = semComentarios(await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8"));
+  const encadeamento = pagina.slice(pagina.indexOf("const finalizarAmazonSemPendencia = async"), pagina.indexOf("const acaoAmazonSemProvider = async"));
+  assert.ok(encadeamento.length > 0, "o encadeamento existe");
+  assert.ok(encadeamento.includes('pedirAcaoAmazonSemProvider(target, "analyze"'));
+  assert.ok(encadeamento.includes('pedirAcaoAmazonSemProvider(target, "finalize"'));
+  assert.equal(/"collect"|"retry-support"|"resolve-product"|\bfetch\(/.test(encadeamento), false, "nenhuma chamada paga no automático");
 });
 
 /* ============ §5 e §24 · os cards e o estado depois da análise ============ */
@@ -747,6 +773,25 @@ test("§24 · blueprint gravado leva a READY_TO_FINALIZE, e ele não oferece STA
   assert.equal(projecao.canStart, false);
   assert.equal(projecao.showBlueprint, true);
   assert.equal(projecao.sampleDefaultExpanded, false, "§29 · a amostra não empurra o blueprint para fora da tela");
+
+  /*
+   * 2026-10-02 · D9 (dono, "automático nos três"): READY_TO_FINALIZE SEM
+   * PENDÊNCIA CONGELA SOZINHO. Com o apoio do Google coletado no pacote, a
+   * decisão automática é finalizar; sem o apoio gravado, nada congela e o
+   * motivo é dito — o botão manual continua sendo o caminho.
+   */
+  const comApoio = radarProfileAutoFinalizeDecision({
+    payload: {
+      amazonSearch: run, amazonBlueprint: blueprintDe(),
+      researchPackage: { status: "READY", primaryResearch: { status: "COLLECTED", queryCount: 1, uniqueProductCount: 51 }, supportResearch: { status: "COLLECTED" } },
+    },
+    profile: "AMAZON",
+  });
+  assert.equal(comApoio.next, "FINALIZE");
+  const semApoio = radarProfileAutoFinalizeDecision({ payload: { amazonSearch: run, amazonBlueprint: blueprintDe() }, profile: "AMAZON" });
+  assert.equal(semApoio.next, null);
+  assert.equal(semApoio.pending, true);
+  assert.match(semApoio.reason, /apoio do Google/);
 });
 
 /* ============================ §33 · o relatório ============================ */

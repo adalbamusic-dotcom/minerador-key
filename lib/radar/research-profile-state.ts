@@ -49,6 +49,7 @@ import {
   radarResearchProfileLabel,
   type RadarResearchProfile,
 } from "./research-profile.ts";
+import { radarResearchPlanOfAnalysis } from "./search-mode.ts";
 
 /*
  * ============ §24 · COLETA E ANÁLISE SÃO COISAS DIFERENTES ============
@@ -232,6 +233,15 @@ type LeituraDaAnalise = {
   amazonFrozenInvestigation?: unknown;
   serpSnapshotId?: unknown;
   deepResearch?: unknown;
+  /*
+   * 2026-10-02 · A FOTOGRAFIA DO GOOGLE BASE TAMBÉM É GOOGLE GRAVADO.
+   *
+   * Desde a SDD Radar 2026-09-30 (Parte A) o Google é a base de todo artigo e
+   * YouTube/Amazon são acréscimos. O artigo chega à aba de vídeo com a SERP do
+   * Google já coletada — e congelada. Ler o campo aqui é o que deixa a
+   * projeção concordar com o plano de pesquisa sobre "o apoio já existe".
+   */
+  finalizedBundle?: unknown;
 };
 
 const objeto = (valor: unknown) =>
@@ -329,9 +339,29 @@ export function radarResearchProfileStateOfAnalysis(input: {
    * formas aqui é o que permite o YouTube seguir como está enquanto a Amazon
    * usa o pacote.
    */
+  /*
+   * ====== 2026-10-02 · O GOOGLE BASE JÁ GRAVADO SATISFAZ O APOIO ======
+   *
+   * O DEFEITO: um artigo com o Google base finalizado abria a aba YouTube,
+   * coletava, e o card ficava "Coletando · Apoio do Google pendente" — sem
+   * botão de finalizar — enquanto o aviso da mesma coleta dizia "Pronta para
+   * finalizar". Duas regras para a mesma pergunta: o pacote
+   * (`buildRadarResearchPackage`, alimentado por `radarResearchPlanOfAnalysis`)
+   * já contava a SERP do Google gravada como apoio satisfeito; esta projeção só
+   * olhava `supportResearch.collectedAt` — que nem chegava a ser gravado quando
+   * a escrita do apoio perdia a corrida da trava de versão.
+   *
+   * Agora a pergunta "existe Google gravado?" tem UMA resposta, a do plano de
+   * pesquisa: `deepResearch`, `finalizedBundle` ou `serpSnapshotId`. Sem
+   * nenhum dos três (artigo de vídeo sem Google), o apoio pendente continua
+   * segurando, como antes. O pacote gravado (Amazon) continua mandando no
+   * próprio status: quem decide o apoio lá é o servidor, que já reaproveita
+   * o snapshot existente.
+   */
+  const googleBaseGravado = radarResearchPlanOfAnalysis(input.payload).sources.includes("WEB_SERP");
   const apoioColetado = apoioDoPacote
     ? apoioDoPacote.status === "COLLECTED"
-    : Boolean(apoio?.collectedAt);
+    : Boolean(apoio?.collectedAt) || (apoioPlanejado && googleBaseGravado);
   const apoioFalhou = apoioDoPacote
     ? apoioDoPacote.status === "FAILED" || apoioDoPacote.status === "SKIPPED"
     : Boolean(apoio?.failureReason) && !apoioColetado;
@@ -546,6 +576,20 @@ function rotuloDaProxima(proxima: RadarProfileNextAction, profile: RadarResearch
   return NEXT_ACTION_LABELS[proxima];
 }
 
+/**
+ * 2026-10-02 · O NOME DE UMA AÇÃO, LIDO DA MESMA TABELA DA PROJEÇÃO.
+ *
+ * O botão [Analisar] da Amazon mostrava `projecao.nextAction.label`. Com o
+ * apoio falho, a próxima ação recomendada é repetir o apoio — e o botão que
+ * ANALISA se chamava "Tentar novamente apoio Google", igual ao retry do card,
+ * que faz outra coisa. Com o D9 os dois passaram a declarar que finalizam:
+ * dois botões com o mesmo nome e efeitos diferentes. O botão diz o que ele
+ * faz; o nome continua vindo daqui, da tabela que a projeção e a planilha leem.
+ */
+export function radarProfileActionLabel(action: RadarProfileNextAction, profile: RadarResearchProfile): string {
+  return rotuloDaProxima(action, profile);
+}
+
 function montar(entrada: {
   input: { profile: RadarResearchProfile };
   plano: typeof RADAR_RESEARCH_PROFILE_PLANS[RadarResearchProfile];
@@ -639,6 +683,128 @@ export function radarYoutubeFinalizeDecision(input: {
     return { shouldFreeze: false, reason: "A coleta falhou e não há investigação utilizável para congelar." };
   }
   return { shouldFreeze: true, reason: "Investigação congelada: consultas, amostra, coortes e blueprint." };
+}
+
+/**
+ * ====== 2026-10-02 · D9 · O QUE CONGELA SOZINHO — E O QUE ESPERA A PESSOA ======
+ *
+ * A regra antiga era "nada congela sozinho; só o clique". Decisão do dono em
+ * 2026-10-02 ("automático nos três"): Google, YouTube e Amazon congelam
+ * sozinhos quando a coleta — e a análise, onde ela existe — termina SEM
+ * pendência; em seguida a IA organiza o artigo-modelo. O botão manual fica.
+ *
+ * Esta função responde, sobre o payload RELIDO DO SERVIDOR, qual passo a tela
+ * pode encadear agora sem perguntar a ninguém: analisar (a Amazon analisa antes
+ * de congelar), finalizar, ou nada — e, quando nada, POR QUÊ, numa frase que
+ * vai à tela.
+ *
+ * Ela é mais estrita que `radarYoutubeFinalizeDecision`, de propósito. O botão
+ * manual aceita congelar com o apoio falho, porque quem clica assume a
+ * ausência. O automático não assume nada por ninguém. Pendência é: coleta em
+ * curso, coleta que falhou (inteira ou em parte), amostra vazia, apoio do
+ * Google pendente ou falho, análise que ainda não aconteceu.
+ *
+ * Vale para qualquer página, marca e assunto: só lê o estado gravado. O perfil
+ * Google não passa por aqui — o pipeline dele tem decisão própria
+ * (`radarGoogleAutoFinalizeDecision`, ao lado da prontidão de finalização).
+ */
+export type RadarProfileAutoStep = "ANALYZE" | "FINALIZE";
+
+/**
+ * 2026-10-02 · D9 · QUAL BOTÃO RESOLVE A PENDÊNCIA, NESTE ESTADO.
+ *
+ * Quando o automático para, a frase aponta o caminho manual. Ela não pode
+ * apontar um botão que a tela não mostra naquele estado: com a coleta pronta,
+ * é finalizar (ou analisar, na Amazon); com o apoio do vídeo preso em
+ * pendente, é repetir o apoio; nos demais, nenhum. Os painéis e o aviso leem
+ * daqui, para dizerem o mesmo nome.
+ */
+export function radarProfileManualStepLabel(projecao: RadarResearchProfileProjection): string | null {
+  if (projecao.ownedByGooglePipeline || projecao.state === "FINALIZED") return null;
+  if (projecao.state === "READY_TO_FINALIZE") return NEXT_ACTION_LABELS.FINALIZE;
+  if (projecao.state === "READY" || projecao.state === "PARTIAL_SUPPORT_FAILED") {
+    return projecao.profile === "AMAZON" ? projecao.nextAction.label : NEXT_ACTION_LABELS.FINALIZE;
+  }
+  if (projecao.state === "COLLECTING" && projecao.profile === "YOUTUBE" && projecao.counts.queries > 0 && projecao.support && !projecao.support.collected) {
+    return "Repetir apoio";
+  }
+  return null;
+}
+
+export type RadarProfileAutoFinalizeDecision = {
+  /** O passo que a tela pode encadear sozinha agora. `null` quando nenhum. */
+  next: RadarProfileAutoStep | null;
+  /** Parou por algo que pede olho humano — não por já estar finalizada. */
+  pending: boolean;
+  reason: string;
+};
+
+export function radarProfileAutoFinalizeDecision(input: {
+  payload: unknown;
+  profile: RadarResearchProfile;
+}): RadarProfileAutoFinalizeDecision {
+  const parar = (reason: string): RadarProfileAutoFinalizeDecision => ({ next: null, pending: true, reason });
+
+  if (input.profile === "GOOGLE") {
+    return { next: null, pending: false, reason: "A finalização do perfil Google é decidida pelo pipeline dele." };
+  }
+
+  const projecao = radarResearchProfileStateOfAnalysis(input);
+  const unidade = input.profile === "AMAZON" ? "produto" : "vídeo";
+  const analise = objeto(input.payload) || {};
+  const corrida = objeto(input.profile === "AMAZON" ? analise.amazonSearch : analise.youtubeSearch);
+
+  if (projecao.state === "FINALIZED") {
+    return { next: null, pending: false, reason: "A investigação já estava finalizada; nenhuma fotografia nova foi criada." };
+  }
+  if (projecao.state === "NOT_STARTED") return parar("Ainda não há coleta para finalizar.");
+  if (projecao.state === "FAILED") return parar("A coleta falhou e não há investigação utilizável para congelar.");
+  if (projecao.state === "COLLECTING") {
+    /* A corrida terminou e só o apoio falta: é ELE que segura, e a frase diz isso. */
+    const corridaEmCurso = corrida?.state === "COLLECTING" || projecao.counts.queries === 0;
+    return parar(!corridaEmCurso && projecao.support && !projecao.support.collected
+      ? "O apoio do Google ainda não está gravado; congelar agora deixaria a investigação sem ele."
+      : "A coleta ainda está em andamento; congelar agora fotografaria uma investigação pela metade.");
+  }
+  if (projecao.state === "PARTIAL_SUPPORT_FAILED") {
+    return parar("O apoio do Google falhou. Repita o apoio, ou finalize assumindo a ausência dele.");
+  }
+
+  /*
+   * FALHA PARCIAL TAMBÉM É PENDÊNCIA.
+   *
+   * A projeção chama de pronta uma coleta que trouxe ALGUMA coisa — e está
+   * certa: jogá-la fora cobraria de novo o que foi pago. Mas congelar uma
+   * amostra que perdeu consultas é decidir que ela basta, e essa decisão é de
+   * quem lê a amostra.
+   */
+  const falhas = Number(objeto(corrida?.provenance)?.queriesFailed) || 0;
+  if (corrida?.state === "COLLECTION_FAILED" || falhas > 0) {
+    return parar(falhas
+      ? `${falhas} consulta(s) da coleta falharam; congelar com a amostra incompleta é decisão sua.`
+      : "A coleta terminou com falha; congelar o que veio é decisão sua.");
+  }
+  if (projecao.counts.videos === 0) return parar(`A coleta não trouxe nenhum ${unidade}; não há amostra para congelar.`);
+  if (projecao.support && !projecao.support.collected) {
+    return parar("O apoio do Google não foi coletado; congelar agora deixaria a investigação sem ele.");
+  }
+
+  if (input.profile === "AMAZON") {
+    /* A Amazon analisa ANTES de congelar: sem blueprint, o passo é a análise (sem custo de provider). */
+    if (projecao.state === "READY") {
+      return { next: "ANALYZE", pending: false, reason: "Coleta sem pendência: a análise roda sozinha, sem chamada paga." };
+    }
+    if (projecao.state === "READY_TO_FINALIZE") {
+      return { next: "FINALIZE", pending: false, reason: "Análise sem pendência: a investigação congela sozinha." };
+    }
+    return parar("A investigação Amazon ainda não chegou ao ponto de congelar.");
+  }
+
+  /* YouTube: a mesma autoridade do botão manual tem a última palavra. */
+  const manual = radarYoutubeFinalizeDecision(input);
+  return manual.shouldFreeze
+    ? { next: "FINALIZE", pending: false, reason: manual.reason }
+    : parar(manual.reason);
 }
 
 /**

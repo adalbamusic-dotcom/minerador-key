@@ -349,9 +349,15 @@ export type RadarPortableExportAssembledArticle = {
    * vídeo e redes sociais. Os outros formatos não a leem.
    */
   youtube?: RadarVideoExportYoutube | null;
+  /** 2026-10-02 · Aditivo: ids dos especialistas das contribuições aceitas (a autoria é lida por eles). */
+  expertIds?: string[];
   /** 2026-10-02 · Aditivo: o hash do pacote congelado que esta entrada descreve. */
   bundleHash?: string | null;
-  /** 2026-10-02 · Aditivo: o artigo-modelo APROVADO deste pacote (SDD diretriz, Adendo A). */
+  /**
+   * 2026-10-02 · Aditivo: o artigo-modelo deste pacote (SDD diretriz, Adendo A) —
+   * o aprovado ou, sem ele, a proposta da IA, com o estado em `approval`
+   * (nunca gravado), para as colunas saírem marcadas como proposta.
+   */
   blueprint?: RadarArticleBlueprintPayload | null;
 };
 

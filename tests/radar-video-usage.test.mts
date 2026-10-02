@@ -253,21 +253,72 @@ test("B · o export lê o lote uma vez; sem modo nenhum, não lê mais nada", as
       { id: "b", video_title: null, display_name: "Tour", normalized_url: "https://www.youtube.com/watch?v=bbbbbbbbbbb", channel_title: null, video_description: "Tour pela clínica.", duration: null },
     ], error: null },
     radar_video_source_texts: { data: [
-      { video_source_id: "a", transcript_text: `${"palavra ".repeat(400)}`, processing_version: 2 },
-      { video_source_id: "a", transcript_text: "versão antiga", processing_version: 1 },
+      { id: "t-a-2", video_source_id: "a", transcript_text: `${"palavra ".repeat(400)}`, processing_version: 2 },
+      { id: "t-a-1", video_source_id: "a", transcript_text: "versão antiga", processing_version: 1 },
     ], error: null },
   });
   const lote = await readRadarVideoUsagesForExport(com.cliente, "marca-1", ["artigo-1", "artigo-2"]);
-  assert.deepEqual(com.chamadas.map(item => item.tabela), ["radar_article_video_sources", "radar_video_sources", "radar_video_source_texts"]);
+  /*
+   * 2026-10-02 · revisão da frente: o texto é lido em duas consultas — as
+   * versões (sem texto) e, depois, só o texto da versão corrente de cada fonte.
+   * Antes vinha `transcript_text` inteiro de todas as versões para guardar 600
+   * caracteres; o teste travava a consulta única.
+   */
+  assert.deepEqual(com.chamadas.map(item => item.tabela), ["radar_article_video_sources", "radar_video_sources", "radar_video_source_texts", "radar_video_source_texts"]);
   assert.ok(com.chamadas[0].passos.includes("in:article_id=artigo-1|artigo-2"), "uma consulta para o lote, presa aos artigos pedidos");
   assert.ok(com.chamadas.every(item => item.passos.includes("eq:brand_id=marca-1")), "toda leitura presa à marca");
-  /* Prévia do texto: só do Contexto sem descrição, e curta. */
-  assert.ok(com.chamadas[2].passos.includes("in:video_source_id=a"));
+  /*
+   * Prévia do texto: curta, e da versão corrente. 2026-10-02 · com ou sem
+   * descrição (a descrição do YouTube é promocional: ela virou o último
+   * recurso) — e, pedido do dono para o CSV de vídeo, de TODO vídeo com modo
+   * (aqui "b", Incorporar, entra na leitura e não tem transcrição).
+   */
+  assert.ok(com.chamadas[2].passos.includes("in:video_source_id=a|b"));
+  assert.ok(com.chamadas[2].passos.includes("select:id,video_source_id,processing_version"), "a primeira consulta não traz texto");
+  assert.ok(com.chamadas[3].passos.includes("in:id=t-a-2"), "o texto só da maior versão");
   const contexto = lote.get("artigo-1")![0];
   assert.equal(contexto.title, "Bastidores");
   assert.ok(contexto.textPreview && contexto.textPreview.length <= 600 && !contexto.textPreview.includes("versão antiga"));
   const embed = lote.get("artigo-2")![0];
   assert.deepEqual({ usage: embed.usage, note: embed.note, title: embed.title, textPreview: embed.textPreview }, { usage: "EMBED", note: "abrir com ele", title: "Tour", textPreview: null });
+});
+
+test("B · a prévia: a maior versão de cada fonte, cortada cedo; sem versão legível, nada de texto", async () => {
+  const com = clienteFalso({
+    radar_article_video_sources: { data: [
+      { article_id: "artigo-1", video_source_id: "a", usage: "SUPPORT", usage_note: null },
+      { article_id: "artigo-1", video_source_id: "b", usage: "QUOTE", usage_note: null },
+    ], error: null },
+    radar_video_sources: { data: [{ id: "a", video_title: "A" }, { id: "b", video_title: "B" }], error: null },
+    radar_video_source_texts: { data: [
+      /* A ordem de chegada não decide: vale o maior número de versão. */
+      { id: "t-a-1", video_source_id: "a", transcript_text: "versão um de a", processing_version: 1 },
+      { id: "t-a-3", video_source_id: "a", transcript_text: `versão três de a ${"x".repeat(5_000)}`, processing_version: 3 },
+      { id: "t-b-1", video_source_id: "b", transcript_text: "   ", processing_version: 1 },
+    ], error: null },
+  });
+  const lote = await readRadarVideoUsagesForExport(com.cliente, "marca-1", ["artigo-1"]);
+  assert.ok(com.chamadas[3].passos.includes("in:id=t-a-3|t-b-1"));
+  const porId = new Map((lote.get("artigo-1") || []).map(item => [item.videoSourceId, item]));
+  assert.ok(porId.get("a")!.textPreview!.startsWith("versão três de a"), "a corrente, nunca a antiga");
+  assert.ok(porId.get("a")!.textPreview!.length <= 600, "cortada cedo");
+  assert.equal(porId.get("b")!.textPreview, null, "texto em branco não vira prévia");
+
+  /* Falha na leitura das versões: o export segue sem prévia, e nada quebra. */
+  const avisos = console.warn;
+  console.warn = () => {};
+  try {
+    const falha = clienteFalso({
+      radar_article_video_sources: { data: [{ article_id: "artigo-1", video_source_id: "a", usage: "EMBED", usage_note: null }], error: null },
+      radar_video_sources: { data: [{ id: "a", video_title: "A" }], error: null },
+      radar_video_source_texts: { data: null, error: { message: "permission denied" } },
+    });
+    const semPrevia = await readRadarVideoUsagesForExport(falha.cliente, "marca-1", ["artigo-1"]);
+    assert.equal(semPrevia.get("artigo-1")![0].textPreview, null);
+    assert.equal(falha.chamadas.filter(item => item.tabela === "radar_video_source_texts").length, 1, "sem versões, o texto nem é pedido");
+  } finally {
+    console.warn = avisos;
+  }
 });
 
 /* ============================== C · a rota ============================== */
@@ -366,8 +417,14 @@ test("D · o CSV 'para escrever': cada modo vira a instrução certa, sem transc
 
   const linha = buildRadarWritingExportArticle(entradaGoogle({ videoContext: radarPortableVideoContext(camada(), USOS) }), CONTEXTO).row;
   const fontes = linha.fontes_e_especialista;
-  assert.match(fontes, /Vídeos da marca com modo de uso escolhido no Radar/);
-  assert.match(fontes, /Incorporar no artigo · "Tour pela clínica" \(https:\/\/www\.youtube\.com\/watch\?v=embed000001\) — o vídeo entra incorporado no artigo, na seção indicada/);
+  /*
+   * 2026-10-02 · pedido do dono: o bloco virou "Vídeos selecionados pela marca"
+   * (o vídeo pode ser de outro canal) e cada linha diz o canal — ou que ele não
+   * está registrado na biblioteca, como nestes fixtures sem canal.
+   */
+  assert.match(fontes, /Vídeos selecionados pela marca \(modo de uso escolhido no Radar, decisão do dono; conferir no vídeo e atribuir ao canal\):/);
+  assert.doesNotMatch(fontes, /Vídeos da marca com modo de uso/);
+  assert.match(fontes, /Incorporar no artigo · "Tour pela clínica" \(https:\/\/www\.youtube\.com\/watch\?v=embed000001\) · canal não registrado na biblioteca — o vídeo entra incorporado no artigo, na seção indicada/);
   assert.match(fontes, /Nota do dono: Abrir a seção com ele/);
   assert.match(fontes, /Apoio · "Palestra Instagram"[^\n]*\(01:02–01:17\) "No Instagram, quem segue/);
   assert.match(fontes, /Contexto · "Bastidores do Instagram"[^\n]*ler para entender o assunto, não citar/);
@@ -383,12 +440,13 @@ test("D · o CSV de vídeo lista os modos mesmo sem casamento", () => {
   const semCasamento = radarPortableVideoContext(null, USOS);
   assert.equal(semCasamento.state, "NO_LIBRARY");
   const linha = buildRadarVideoExportArticle(entradaGoogle({ videoContext: semCasamento }), { position: 1, youtube: null }).row;
-  assert.match(linha.biblioteca_da_marca, /Modo de uso escolhido no Radar para os vídeos da marca/);
+  /* 2026-10-02 · o cabeçalho do bloco é "Vídeos selecionados pela marca", o mesmo do CSV para escrever. */
+  assert.match(linha.biblioteca_da_marca, /Vídeos selecionados pela marca \(modo de uso escolhido no Radar, decisão do dono\):/);
   assert.match(linha.biblioteca_da_marca, /Incorporar no artigo · "Tour pela clínica"/);
   assert.match(linha.biblioteca_da_marca, /Contexto · "Bastidores do Instagram"/);
 
   const antes = buildRadarVideoExportArticle(entradaGoogle({ videoContext: radarPortableVideoContext(null) }), { position: 1, youtube: null }).row;
-  assert.doesNotMatch(antes.biblioteca_da_marca, /Modo de uso/, "sem modo, a coluna é a de antes");
+  assert.doesNotMatch(antes.biblioteca_da_marca, /Modo de uso|Vídeos selecionados pela marca/, "sem modo, a coluna é a de antes");
 });
 
 test("D · o artigo-modelo recebe o modo, a regra só aparece com modo, e Contexto não vira vídeo de seção", () => {

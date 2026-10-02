@@ -9,6 +9,7 @@ import { planRadarSiloExport } from "../lib/radar/portable-silo-export.ts";
 import {
   RADAR_WRITING_EXPORT_COLUMNS,
   RADAR_WRITING_EXPORT_LIMITS,
+  RADAR_WRITING_LEGACY_FAQ,
   buildRadarWritingExportArticle,
   radarWritingCleanUrl,
   radarWritingDecodeEntities,
@@ -368,15 +369,31 @@ test("F · artigo publicado: URL, canonical e o estado da principal SEMPRE — o
   assert.match(pilar.artigo, /Principal: estado desconhecido — não trocar até decisão humana/);
   assert.match(pilar.artigo, /Não altere: .*a URL publicada\./);
   assert.match(pilar.pode_escrever, /estrutura publicada atual indisponível: trate como atualização, preservando URL, slug, canonical e as seções existentes/);
-  /* FAQ legado: a linha do prompt é OBRIGATÓRIA no publicado. */
-  assert.match(pilar.prompt, /Mantenha a seção de perguntas existente, se a página tiver uma; não amplie nem remova\./);
+  /*
+   * FAQ legado: a linha do prompt é OBRIGATÓRIA no publicado.
+   *
+   * 2026-10-02 · pedido do dono (FAQ coerente em todo o arquivo, AGENTS §13): a
+   * frase antiga ("Mantenha a seção de perguntas existente… não amplie nem
+   * remova") dizia uma coisa no prompt, outra na coluna artigo e outra na regra
+   * geral, e nenhuma dizia que o legado sai com decisão humana registrada. Agora
+   * é UMA frase, a mesma nos três lugares.
+   */
+  assert.ok(pilar.prompt.includes(`- ${RADAR_WRITING_LEGACY_FAQ}`), "o prompt do publicado traz a frase do FAQ legado");
+  assert.ok(pilar.artigo.split("\n").includes(RADAR_WRITING_LEGACY_FAQ), "a coluna artigo do publicado traz a MESMA frase");
+  const topoPublicado = linhasDe(EXPORT_DO_SILO_SAUDE(true).files![0].csv).dados[0];
+  const regraDois = topoPublicado.prompt.split("\n").find(linha => linha.startsWith("2. ")) || "";
+  assert.equal(regraDois, `2. Sem seção de perguntas frequentes (FAQ): as perguntas são respondidas dentro das seções. ${RADAR_WRITING_LEGACY_FAQ}`,
+    "a regra geral 2 traz a MESMA frase");
+  assert.match(RADAR_WRITING_LEGACY_FAQ, /sem ampliar/);
+  assert.match(RADAR_WRITING_LEGACY_FAQ, /só sai com decisão humana registrada/);
+  assert.equal(/Mantenha a seção de perguntas existente|sem ampliar nem remover/.test(Object.values(pilar).join("\n") + topoPublicado.prompt), false, "a frase antiga do FAQ voltou");
 
   const travada = buildRadarWritingExportArticle(entradaGoogle(), contextoAvulso({ publication: { ...PUBLICACAO_SEM_POLITICA, principalPolicy: "locked" } })).row;
   assert.match(travada.artigo, /Principal: travada — não trocar/);
   assert.equal(/estado desconhecido/.test(travada.artigo + travada.pode_escrever), false);
 
   const nova = buildRadarWritingExportArticle(entradaGoogle(), contextoAvulso()).row;
-  assert.equal(/Publicado:|Principal:|perguntas existente/.test(nova.artigo + nova.prompt), false, "artigo novo não tem aviso de publicado");
+  assert.equal(/Publicado:|Principal:|perguntas existente|FAQ legado/.test(nova.artigo + nova.prompt), false, "artigo novo não tem aviso de publicado");
 });
 
 /* ================================ G ================================ */

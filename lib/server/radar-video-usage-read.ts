@@ -58,7 +58,7 @@ export async function readRadarArticleVideoUsages(
   }
 }
 
-/** O teto da prévia de texto que o Contexto pode levar. Nunca a transcrição. */
+/** O teto da prévia de texto de um vídeo selecionado. Nunca a transcrição inteira. */
 const PREVIA = 600;
 
 /**
@@ -66,9 +66,19 @@ const PREVIA = 600;
  *
  * Só os vínculos ATIVOS com modo entram; sem nenhum, nada mais é lido e o
  * export sai byte a byte como antes. Os metadados vêm de `radar_video_sources`
- * (título, endereço, canal, duração, descrição). O começo do texto corrente só
- * é lido para Contexto SEM descrição — é o único modo em que ele serve, e
- * mesmo assim curto.
+ * (título, endereço, canal, duração, descrição).
+ *
+ * Revisão de 2026-10-02 (pedido do dono): o começo do texto corrente é lido
+ * para Contexto E Sugestão de pauta, com ou sem descrição — a descrição do
+ * YouTube costuma ser promocional e não diz do que o vídeo trata; ela fica só
+ * como último recurso. A leitura continua UMA para o lote e curta (prévia de
+ * 600 caracteres, cortada de novo na projeção). Apoio, Citação e Incorporar
+ * continuam sem prévia: eles levam o trecho casado.
+ *
+ * 2026-10-02 · Revisão da frente: a prévia passa a ser lida para TODO modo
+ * (o CSV de vídeo diz do que cada vídeo selecionado trata), e só da versão
+ * corrente de cada fonte. No CSV para escrever nada muda: Apoio, Citação e
+ * Incorporar seguem levando o trecho casado, não a prévia.
  *
  * Nada aqui entra no pacote congelado nem no hash: é leitura ao vivo, como a
  * voz da marca. Mudar o modo não refinaliza nada nem orfana o artigo-modelo.
@@ -125,26 +135,60 @@ export async function readRadarVideoUsagesForExport(
       if (!comModo.length) return saida;
     }
 
-    /* Prévia do texto: só para Contexto sem descrição, e só a versão corrente. */
-    const precisamDePrevia = [...new Set(comModo
-      .filter(linha => linha.usage === "CONTEXT" && !textoOuNulo(metadados.get(linha.videoSourceId)?.video_description))
-      .map(linha => linha.videoSourceId))];
+    /*
+     * Prévia do texto: o começo da transcrição CORRENTE de cada vídeo com modo.
+     *
+     * 2026-10-02 · revisão da frente: a leitura trazia `transcript_text` INTEIRO
+     * de TODAS as versões de processamento só para guardar 600 caracteres. Agora
+     * são duas consultas, presas à marca e a ORIGINAL_TRANSCRIPT: a primeira lê
+     * só os números de versão (sem texto) e escolhe a maior por fonte; a segunda
+     * lê o texto só dessas versões, cortado assim que chega. O banco não corta
+     * texto pelo PostgREST: o corte é aqui, antes de qualquer outro uso.
+     *
+     * 2026-10-02 · E PARA TODO MODO (pedido do dono, CSV de vídeo): quem grava
+     * precisa saber do que cada vídeo selecionado trata, também em Apoio,
+     * Citação e Incorporar. O resumo do CSV para escrever continua só de
+     * Contexto e Sugestão de pauta (`portable-annex-context`): os outros modos
+     * seguem levando o trecho casado.
+     */
+    const precisamDePrevia = [...new Set(comModo.map(linha => linha.videoSourceId))];
     const previas = new Map<string, string>();
     if (precisamDePrevia.length) {
-      const textos = await client.from("radar_video_source_texts")
-        .select("video_source_id,transcript_text,processing_version")
+      const versoes = await client.from("radar_video_source_texts")
+        .select("id,video_source_id,processing_version")
         .eq("brand_id", brandId)
         .eq("content_kind", "ORIGINAL_TRANSCRIPT")
         .in("video_source_id", precisamDePrevia)
         .order("processing_version", { ascending: false });
-      if (textos.error) avisar("export_usage_text_read_failed", textos.error);
+      if (versoes.error) avisar("export_usage_text_read_failed", versoes.error);
       else {
-        for (const linha of (textos.data || []) as unknown as Array<Record<string, unknown>>) {
-          const id = String(linha.video_source_id);
-          /* A ordenação traz a maior versão primeiro; a primeira vence. */
-          if (previas.has(id)) continue;
-          const texto = textoOuNulo(linha.transcript_text);
-          if (texto) previas.set(id, texto.replace(/\s+/g, " ").slice(0, PREVIA));
+        /* A maior versão por fonte: a corrente. */
+        const corrente = new Map<string, { id: string; versao: number }>();
+        for (const linha of (versoes.data || []) as unknown as Array<Record<string, unknown>>) {
+          const fonte = String(linha.video_source_id);
+          const versao = Number(linha.processing_version);
+          if (!linha.id || !Number.isFinite(versao)) continue;
+          const atual = corrente.get(fonte);
+          if (!atual || versao > atual.versao) corrente.set(fonte, { id: String(linha.id), versao });
+        }
+        const escolhidas = new Map([...corrente.entries()].map(([fonte, item]) => [item.id, fonte]));
+        if (escolhidas.size) {
+          const textos = await client.from("radar_video_source_texts")
+            .select("id,video_source_id,transcript_text")
+            .eq("brand_id", brandId)
+            .eq("content_kind", "ORIGINAL_TRANSCRIPT")
+            .in("id", [...escolhidas.keys()]);
+          if (textos.error) avisar("export_usage_text_read_failed", textos.error);
+          else {
+            for (const linha of (textos.data || []) as unknown as Array<Record<string, unknown>>) {
+              /* Só a versão escolhida, e da fonte que a escolheu. */
+              const fonte = escolhidas.get(String(linha.id));
+              if (!fonte || fonte !== String(linha.video_source_id) || previas.has(fonte)) continue;
+              const bruto = typeof linha.transcript_text === "string" ? linha.transcript_text.slice(0, PREVIA * 2) : "";
+              const texto = textoOuNulo(bruto);
+              if (texto) previas.set(fonte, texto.replace(/\s+/g, " ").slice(0, PREVIA));
+            }
+          }
         }
       }
     }
