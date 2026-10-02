@@ -109,7 +109,8 @@ export const RADAR_YOUTUBE_TITLE_PATTERNS = [
   { id: "RANKING", label: "Ranking", marcadores: ["ranking", "top 3", "top 5", "top 10", "os melhores"] },
   { id: "PERGUNTA", label: "Pergunta", marcadores: ["?"] },
   { id: "COMPARACAO", label: "Comparação", marcadores: [" vs ", " ou ", "comparativo", "qual o melhor", "qual e melhor", "diferenca entre"] },
-  { id: "PROBLEMA_SOLUCAO", label: "Problema → solução", marcadores: ["acabe com", "acabar com", "resolva", "elimine", "controlar", "como tratar"] },
+  /* 2026-10-02 · "(e o que fazer diferente)" e "ajustes simples que…" são problema → solução: a amostra os tinha e a oportunidade dizia que não. */
+  { id: "PROBLEMA_SOLUCAO", label: "Problema → solução", marcadores: ["acabe com", "acabar com", "resolva", "elimine", "controlar", "como tratar", "o que fazer", "como resolver", "solucao", "ajustes", "como corrigir", "como sair", "o que mudar"] },
   { id: "NAO_FACA", label: "Alerta / não faça", marcadores: ["nao faca", "nao compre", "pare de", "cuidado", "erros", "nunca", "mitos"] },
   { id: "VALE_A_PENA", label: "Vale a pena", marcadores: ["vale a pena", "vale o investimento", "funciona mesmo", "funciona?"] },
   { id: "CUSTO_BENEFICIO", label: "Custo-benefício", marcadores: ["barato", "baratinho", "custo beneficio", "custo-beneficio", "gastando", "reais", "economia"] },

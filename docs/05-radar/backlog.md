@@ -1,5 +1,31 @@
 # Backlog — Radar
 
+## Briefing de vídeo e os 4 limites do artigo — 2026-10-02 (fim da noite)
+
+- [x] Vídeo: premissa e capítulos sem afirmação absoluta, demonstração em "Mostrar na tela", ordem flexível, gancho sem conector, capa do carrossel, tempos estimados.
+- [x] Vídeo: relevância com "mesma dor, público vizinho" e "fora do tema da busca"; Problema → solução; estado e tempo das transcrições.
+- [x] Artigo: rótulo neutro, títulos genéricos iguais, estrutura publicada atual lida na exportação, lente de cada evidência.
+- [ ] **Dono:** "Organizar de novo (IA)" no Instagram (1 chamada, +1 se houver correção) e exportar os dois CSVs.
+- [ ] Data da página publicada (`dateModified`/`article:modified_time`) junto da estrutura lida.
+- [ ] Rodapé de formato incomum: filtrar pelo que se repete em outra página do mesmo site, se aparecer em revisão.
+
+## D10 · entregável concluído — 2026-10-02 (fim da noite)
+
+- [x] Organizar e editar gravam concluído; passada de correção; conferência fecha a origem errada.
+- [x] CSV, CSV de vídeo, Redator e MCP sem marca de proposta, pendência ou aviso de aprovação.
+- [ ] **Dono:** "Organizar de novo (IA)" no Instagram (1 chamada, +1 se houver correção) e exportar o CSV.
+- [ ] Teste do servidor com IA falsa (hoje estrutural) para a passada de correção.
+
+## Leitura dos concorrentes — 2026-10-02 (fim da noite)
+
+- [x] Temas dos concorrentes pelos H2/H3 das páginas lidas, no CSV e no esqueleto do artigo-modelo.
+- [x] Limitação por camada; destino único por link; prompt com três linhas e aviso de rascunho.
+- [x] Conferências de afirmação absoluta e seções quase iguais; regra 19.
+- [ ] **Dono:** "Organizar de novo (IA)" no artigo do Instagram (1 chamada) para a planta usar os temas novos; revisar as pendências e aprovar.
+- [x] Ler a estrutura publicada atual (H1/H2) para a atualização preservar seções existentes (lida na exportação; a data da página ainda não).
+- [x] Ligar decisões às lentes: cada evidência S da seção diz em que lente da SERP a página apareceu.
+- [x] Rótulo neutro do tema (sem a frase de comando de um concorrente). Mais sinônimos continuam abertos.
+
 ## Reparar congelamento, por perfil — 2026-10-02 (noite)
 
 - [x] Adendo E escrito e aprovado; domínio, painel e os três perfis implementados; catálogo MCP.

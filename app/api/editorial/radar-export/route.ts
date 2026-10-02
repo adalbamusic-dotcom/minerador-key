@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
-import { assembleRadarPortableExport } from "@/lib/server/radar-portable-export-core";
+import { assembleRadarPortableExport, radarReadPublishedStructure } from "@/lib/server/radar-portable-export-core";
 import {
   radarPortableExportCsv,
   radarPortableExportFilename,
@@ -107,6 +107,8 @@ export async function POST(request: Request) {
       groupBy: input.mode === "video" ? undefined : input.groupBy,
       supabase: profile.supabase,
       actorUserId: profile.userId,
+      /* 2026-10-02 · a estrutura atual da página publicada (H1/H2), para a atualização preservar o que existe. */
+      readPublishedStructure: radarReadPublishedStructure,
       /* 2026-10-02 · "Só os selecionados" no formato para escrever também leva o Silo. */
       /* 2026-10-02 · o CSV de vídeo também recebe o Silo (os tópicos que o Silo exclui valem no "não cobrir"). */
       selectionSiloContext: input.mode === "video" || (input.mode === "writing" && !input.groupBy),

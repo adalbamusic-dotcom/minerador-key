@@ -112,7 +112,12 @@ test("CSV: URL de evidência inteira, destino pelo nome, prefixo provável e pro
   assert.match(colunas.estrutura, /https:\/\/www\.nextar\.com\.br\/blog\/guia-de-como-atrair-clientes-no-instagram-passo-a-passo\)/, "a URL sai inteira");
   assert.doesNotMatch(colunas.estrutura, /%E2%80%A6|blog\/…/);
   assert.doesNotMatch(`${colunas.estrutura}\n${colunas.links_internos}`, /Cobrir com clareza/, "a moldura da promessa não é nome de destino");
-  assert.match(colunas.links_internos, /Pilar "leads qualificados" → \/qualificados \(caminho provável: \/leads-sem-trafego-pago\/qualificados, com o prefixo da URL publicada deste artigo; confirme antes de publicar\)/);
+  /* 2026-10-02 · UM destino por link: o caminho com o prefixo; a confirmação e o slug do Arquiteto vão como pendência. */
+  /* 2026-10-02 · D10: sem "pendência" no entregável. */
+  assert.match(colunas.links_internos, /Pilar "leads qualificados" → \/leads-sem-trafego-pago\/qualificados \(planejado: caminho do Silo, o mesmo prefixo da URL publicada deste artigo; slug do Arquiteto \/qualificados\)/);
+  assert.doesNotMatch(colunas.links_internos, /pendência/);
+  assert.equal((colunas.links_internos.match(/^L1 · [^\n]*→ \//gm) || []).length, 1);
+  assert.doesNotMatch(colunas.links_internos, /\(planejado[^)]*\) \(planejado/, "nada de dois status no mesmo link");
   assert.match(colunas.links_internos, /→ \/leads-sem-trafego-pago\/captacao \(planejado/, "caminho que já tem o prefixo não ganha outro");
   assert.match(colunas.links_internos, /→ https:\/\/exemplo\.com\.br\/servicos \(publicado\)/, "publicado não muda");
   assert.doesNotMatch(colunas.plano_visual.split("Respiro")[0], /Proporção:/, "o prompt da capa já diz a proporção");
@@ -120,9 +125,9 @@ test("CSV: URL de evidência inteira, destino pelo nome, prefixo provável e pro
 
   /* Sem URL publicada (ou com o slug fora do fim do caminho), nenhum prefixo é deduzido. */
   const semPublicacao = radarArticleBlueprintColumns(organizado().payload).links_internos;
-  assert.doesNotMatch(semPublicacao, /caminho provável/);
+  assert.doesNotMatch(semPublicacao, /prefixo do Silo/);
   const outroSlug = radarArticleBlueprintColumns(organizado().payload, null, { slug: "outro", publishedUrl: "https://exemplo.com.br/a/b" }).links_internos;
-  assert.doesNotMatch(outroSlug, /caminho provável/);
+  assert.doesNotMatch(outroSlug, /prefixo do Silo/);
 });
 
 test("o brief tira a moldura do nome do irmão do Silo antes de a IA o ver", async () => {
@@ -187,6 +192,23 @@ test("o bloqueio por divergência diz o que divergiu; detalhe com id não entra"
 test("com o artigo-modelo, 'cobrir e superar' remete à abertura dele em vez de dar outra", async () => {
   const fonte = (await readFile(new URL("../lib/radar/portable-writing-export.ts", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   assert.match(fonte, /if \(contexto\.blueprint\) \{\n\s+movimentos\.push\("Abertura: a do artigo-modelo \(coluna estrutura\); as perguntas abaixo entram nas seções\."\);\n\s+\} else if \(perguntaDeAbertura\) \{/);
+});
+
+test("a conferência aponta afirmação absoluta e seções quase iguais, como pendência da proposta", () => {
+  const ai = RadarArticleBlueprintAiSchema.parse(resposta({
+    sections: [
+      secao("Por que o Instagram não traz pacientes", { from: ["M1"], answerFirst: "O Instagram foi feito para entretenimento, não para agendar." }),
+      secao("Conteúdos que geram confiança no perfil", { from: ["M2"], explain: ["Pacientes procuram no Google, não no Instagram."] }),
+      secao("Conteúdo que gera confiança no perfil da clínica", { from: ["M2"] }),
+      secao("Bio do perfil que leva ao contato", { from: ["M2"] }),
+    ],
+  }));
+  const { notes } = radarSanitizeArticleBlueprint(ai, pacote());
+  assert.ok(notes.some(nota => /Seção "Por que o Instagram não traz pacientes" afirma de forma absoluta \("O Instagram foi feito para entretenimento/.test(nota)));
+  assert.ok(notes.some(nota => /Seção "Conteúdos que geram confiança no perfil" afirma de forma absoluta \("Pacientes procuram no Google, não no Instagram\."\)/.test(nota)));
+  assert.ok(notes.some(nota => /Seções "Conteúdos que geram confiança no perfil" e "Conteúdo que gera confiança no perfil da clínica" tratam quase do mesmo assunto/.test(nota)));
+  assert.equal(notes.some(nota => /"Bio do perfil que leva ao contato" e/.test(nota)), false, "assunto diferente não é duplicata");
+  assert.ok(notes.filter(nota => /afirma de forma absoluta|quase do mesmo assunto/.test(nota)).every(nota => /antes de aprovar/.test(nota)), "vão às pendências do CSV");
 });
 
 test("PROVIDER_CALLS = 0", () => {

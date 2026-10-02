@@ -124,7 +124,8 @@ test("a edição do dono vira outra planta, e as medidas acompanham", () => {
 test("o artigo-modelo APROVADO vira as colunas de planta do CSV; sem ele, nada muda", () => {
   const { payload } = radarSanitizeArticleBlueprint(respostaDaIa(), brief());
   const colunas = radarArticleBlueprintColumns(payload);
-  assert.match(colunas.estrutura, /^ARTIGO-MODELO APROVADO/);
+  /* 2026-10-02 · D10: o cabeçalho diz "concluída", em qualquer estado. */
+  assert.match(colunas.estrutura, /^ARTIGO-MODELO DA SERP \(planta concluída do artigo/);
   assert.match(colunas.estrutura, /Medidas do plano: 3 H2 · 3 H3/);
   assert.match(colunas.links_internos, /^Aplique somente estes 1 link/);
   assert.match(colunas.plano_visual, /Capa[\s\S]*Prompt: pia com toalha[\s\S]*ALT: rotina/);
@@ -135,8 +136,8 @@ test("o artigo-modelo APROVADO vira as colunas de planta do CSV; sem ele, nada m
   const comModelo = montadasDoSilo().map(item => item.articleId === ARTIGO ? { ...item, blueprint: payload } : item);
   const com = radarPortableWritingExport({ articles: comModelo, lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM });
   assert.notEqual(sem.files![0].csv, com.files![0].csv);
-  assert.ok(com.files![0].csv.includes("ARTIGO-MODELO APROVADO"));
-  assert.equal(sem.files![0].csv.includes("ARTIGO-MODELO APROVADO"), false);
+  assert.ok(com.files![0].csv.includes("ARTIGO-MODELO DA SERP (planta concluída"));
+  assert.equal(sem.files![0].csv.includes("ARTIGO-MODELO DA SERP"), false);
 });
 
 test("a migration: append-only, aprovada imutável, leitura por marca, escrita só no servidor", async () => {

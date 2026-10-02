@@ -914,10 +914,10 @@ export async function readWriterApprovedArticleBlueprint(
   if (outra && outra.article_id === alvo.articleId) {
     return {
       kind: "other_bundle",
-      reason: `o artigo-modelo aprovado (v${numero(outra.version_number) ?? "?"}) é de outro congelamento da investigação e não vale para este documento: aprove no Radar um artigo-modelo sobre o pacote entregue, ou o Radar reenvia o pacote atual ao Redator`,
+      reason: `o artigo-modelo concluído (v${numero(outra.version_number) ?? "?"}) é de outro congelamento da investigação e não vale para este documento: organize no Radar o artigo-modelo do pacote entregue, ou o Radar reenvia o pacote atual ao Redator`,
     };
   }
-  return { kind: "none", reason: "nenhum artigo-modelo aprovado para este pacote: a estrutura fica por conta de quem escreve" };
+  return { kind: "none", reason: "nenhum artigo-modelo concluído para este pacote: a estrutura fica por conta de quem escreve" };
 }
 
 /** As chaves do payload do artigo-modelo que a fatia serve, cada uma por caminho. */

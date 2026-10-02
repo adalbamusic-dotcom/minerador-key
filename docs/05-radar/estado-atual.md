@@ -1,5 +1,95 @@
 # Estado atual — Radar
 
+## Briefing de vídeo pelo que alimenta os campos e os 4 limites do artigo — 2026-10-02 (fim da noite)
+
+**Verificado no código e confirmado por teste; a exportação "Para escrever" do Instagram foi conferida por POST
+somente leitura (`/api/editorial/radar-export`, nada gravado). O CSV de vídeo e a planta nova dependem de o dono
+organizar de novo e exportar.**
+
+Vídeo (`lib/radar/portable-video-export.ts`, `lib/radar/youtube-blueprint.ts`, `lib/radar/article-blueprint.ts`):
+
+- "Premissa do vídeo" (`radarVideoPremise`) e capítulos, cortes e carrossel sem afirmação absoluta
+  (`RADAR_ABSOLUTE_CLAIM`, a mesma régua da planta); regra 20 no pedido à IA (demonstração e premissa).
+- "Mostrar na tela": a parte prática da seção; sem ela, o passo a passo dos H3 num exemplo identificado como
+  ilustrativo; sem nenhum dos dois, "contexto visual (não demonstra sozinho)".
+- Ordem flexível ("reorganize se o vídeo render mais abrindo pela demonstração"); gancho sem conector
+  (`radarVideoHookQuestion` tira "Então", "Mas"…); capa do carrossel é o H1; tempos marcados como ESTIMADOS.
+- Relevância dos concorrentes: mesmo público · mesma dor com público vizinho · tema geral · outro público · fora
+  do tema da busca (só cita a plataforma); `leituraDoPublico` separa quem (antes de "que") dos termos vizinhos.
+- Problema → solução reconhece "o que fazer", "como resolver", "ajustes", "como corrigir", "como sair", "o que
+  mudar".
+- Transcrições: estado "selecionado pela marca · trecho candidato encontrado", tempo estimado pela duração
+  (`radarVideoDurationSeconds`), cabeçalho da biblioteca quando nenhum trecho casou.
+
+Artigo:
+
+- **Rótulo neutro do tema** (`radarCompetitorTopicLabel`): tira o verbo de comando, o artigo e a preposição do
+  começo ("Use as hashtags certas" → "Hashtags certas").
+- **Seções quase iguais por título genérico** (`titulosGenericosIguais`): além da sobreposição de radicais, duas
+  seções cujos títulos só diferem por raízes genéricas (estratég, prátic, dica…) contam como a mesma entrega.
+- **Estrutura publicada atual**: `assembleRadarPortableExport` recebe `readPublishedStructure` (opcional,
+  injetado pela rota e pelo MCP de um artigo); `radarReadPublishedStructure` usa o extrator das páginas
+  concorrentes (GET, 8 s, até 10 páginas por lote). O bloco "Publicado:" traz H1 e H2 de hoje e a regra de
+  atualização (seção existente fora da planta só sai com decisão humana). H2 de navegação, rodapé, widgets
+  (`radarIsNavigationHeading`) e a assinatura do próprio site (`radarIsSiteIdentityHeading`: começa pelo nome
+  do domínio e tem separador " - " / " | ") ficam fora. Conferido no Instagram: 15 H2 lidos → 9 do artigo.
+- **Lente de cada evidência** (`radarWritingDomainLenses` + `lenteDaEvidencia`): a evidência S da seção diz
+  "em todas as 4 lentes" ou "só em desktop · Windows e desktop · macOS (2 de 4 lentes)"; pacote congelado
+  primeiro, cache da principal sem ele; uma lente só não diz nada.
+- Arquivos compartilhados: `lib/server/radar-portable-export-core.ts` (entrada opcional, aditiva; sem leitor,
+  comportamento anterior), `app/api/editorial/radar-export/route.ts`, `lib/radar/competitor-topics.ts`.
+- Testes: `radar-leitura-concorrentes` (7), `radar-csv-video-roteiro` (22), `radar-csv-revisao-pacote`,
+  `radar-video-usage`. Suítes: test:radar 2882/0, test:redator 357/0, test:redator:mcp 134/0, test:agent 65/0;
+  `tsc` limpo fora do cache `.next/types` (rotas do Planejador aposentado); eslint sem erro; `git diff --check`
+  limpo. Catálogo do MCP atualizado.
+- **Limites:** a leitura da página publicada depende de ela responder em 8 s e ter H2 no HTML; rodapé com outro
+  formato pode escapar do filtro (a lista é de cabeçalhos comuns de blog, não do site); a lente só aparece quando
+  há 2+ lentes observadas.
+
+## D10 · o entregável sai concluído — 2026-10-02 (fim da noite)
+
+**Verificado no código e confirmado por teste. Não executado no artigo do Instagram (a próxima organização é do
+dono).** Decisão do dono, SDD diretriz editorial, D10 (substitui D8).
+
+- Organizar grava o artigo-modelo já concluído (`APPROVED` com autor e momento, sem migration); com pendência
+  na conferência, `fecharArtigoModelo` faz UMA chamada a mais com a lista ("CORREÇÃO OBRIGATÓRIA") e fica com a
+  versão de menos pendência; a conferência com `close` tira a origem M que não trata do assunto da seção. A
+  correção é pulada se a primeira resposta já precisou de nova tentativa (teto de 300 s da rota) e, falhando,
+  grava a primeira.
+- Editar grava outra versão concluída; o painel deixa editar a concluída e só oferece "Concluir esta versão" a
+  rascunho antigo.
+- Entregáveis sem marca: `radarArticleBlueprintColumns` não marca proposta nem lista pendências; seção sem
+  origem sai como "proposta editorial do artigo"; o prompt do CSV não tem mais a linha de rascunho; CSV de
+  vídeo sem "(aprovado)"/"(proposta…)"; textos do Redator e do MCP dizem "concluído no Radar".
+- Testes: `tests/radar-artigo-modelo-concluido.test.mts` (4); reescritos os de marcação em
+  `radar-artigo-modelo-serp`; ajustes em 8 arquivos de teste; snapshot F4.4 renovado (só a frase dos prompts de
+  imagem, conferido revertendo-a).
+- **Limites:** o rascunho antigo do Instagram (v5) sai sem marca mas com o conteúdo de antes — organizar de novo
+  aplica a correção e os temas dos concorrentes; a correção custa 1 chamada a mais quando há pendência.
+
+## Leitura dos concorrentes e ajustes do CSV — 2026-10-02 (fim da noite)
+
+**Verificado no código e confirmado por teste. Validado no local por POST de leitura (artigo do Instagram, depois do
+reparo do congelamento feito pelo dono): 138 cabeçalhos lidos das 6 páginas comparáveis; temas recorrentes como
+bio (5 de 6), hashtags (5 de 6), conteúdo, interação, recursos, Stories e parcerias (4 de 6); nenhuma célula
+cortada.**
+
+- **Temas dos concorrentes** (`lib/radar/competitor-topics.ts`): H2/H3 das páginas COMPARÁVEIS (das extrações
+  gravadas, via `competitorOutlines` no export), limpos (numeração de listicle, verbo de comando, palavras da
+  keyword), agrupados pela raiz que mais páginas compartilham; contagem por página; ruído de navegação fora;
+  "não cobrir" aplicado. Fora do congelamento e do hash (nenhuma divergência nova).
+- **CSV:** bloco "O que os concorrentes lidos cobrem" na SERP resumida (teto próprio de 10 mil; artigo 40 mil);
+  a limitação "nenhuma página foi visitada" passa a dizer que é da camada multiformato; link interno com um
+  destino só; prompt com as três linhas e o aviso de rascunho quando o artigo-modelo é proposta.
+- **Artigo-modelo:** os temas de 2+ páginas viram seções M do esqueleto; conferências novas (afirmação absoluta,
+  seções quase iguais) como pendência; regra 19 no pedido (uma entrega por seção). Vale na próxima organização.
+- Testes: `tests/radar-leitura-concorrentes.test.mts` (6) e caso novo em `radar-csv-revisao-pacote`; Radar
+  2876/0, MCP 134/0, agent 65/0; tsc e eslint limpos.
+- **Limites:** o rótulo do tema é um cabeçalho de concorrente (marcado "não copie"); sinônimos cobertos só os
+  comuns (bio/biografia, reel, story); a régua de seções quase iguais é por radical e não pega duplicata só de
+  sentido ("de forma estratégica" × "estratégias práticas") — fica com a regra 19 e a revisão; a estrutura
+  publicada atual do artigo ainda não é lida.
+
 ## Reparar congelamento, por perfil — 2026-10-02 (noite)
 
 **Verificado no código e confirmado por teste. NÃO validado na tela nem executado no artigo do Instagram: o

@@ -345,7 +345,7 @@ export async function readWriterEvidenceManifest(context: WriterEvidenceContext,
     fonte({
       sourceKey: `radar.blueprint/${meta.id}`, owner: "radar", status: "approved", level: writerEvidenceHierarchyOf({ family: "radar.blueprint" }).level,
       bytes: null, items: null, etag: writerEvidenceEtag([meta.id, meta.bundleHash, meta.approvedAt]), observedAt: meta.approvedAt, posteriorAoPacote: false,
-      note: `artigo-modelo aprovado v${meta.versionNumber ?? "?"}, preso ao pacote entregue; planta de IA aprovada pelo dono (forma, links e CTA), não evidência`,
+      note: `artigo-modelo concluído v${meta.versionNumber ?? "?"}, preso ao pacote entregue; planta da SERP organizada no Radar (forma, links e CTA), não evidência`,
     });
   } else {
     ausentes.push({ sourceKey: "radar.blueprint", owner: "radar", reason: artigoModelo.reason });
@@ -1145,7 +1145,7 @@ async function prepararArtigoModelo(context: WriterEvidenceContext, head: Writer
     posteriorAoPacote: false,
     hierarchy: writerEvidenceHierarchyOf({ family: "radar.blueprint" }),
     truncate: false,
-    notice: "Artigo-modelo aprovado pelo dono no Radar para o pacote entregue: planta de IA (títulos, seções, links e CTA), não evidência. Siga a forma; diante da evidência do pacote, vale a evidência e o conflito vira divergência.",
+    notice: "Artigo-modelo da SERP concluído no Radar para o pacote entregue: planta (títulos, seções, links e CTA), não evidência. Siga a forma; diante da evidência do pacote, vale a evidência e o conflito vira divergência.",
     load: async pedido => {
       const conteudo = await readWriterArticleBlueprintContent(context, alvo, meta.id, chave.path[0] ?? null);
       return linhasDe(chave.path.length ? navegar(conteudo, chave.path) : conteudo, pedido);

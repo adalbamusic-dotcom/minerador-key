@@ -9,6 +9,7 @@ import { planRadarSiloExport } from "../lib/radar/portable-silo-export.ts";
 import {
   RADAR_WRITING_EXPORT_COLUMNS,
   RADAR_WRITING_EXPORT_LIMITS,
+  radarWritingCellLimit,
   RADAR_WRITING_LEGACY_FAQ,
   buildRadarWritingExportArticle,
   radarWritingCleanUrl,
@@ -472,11 +473,11 @@ test("H · as decisões protegidas são as do Redator (RADAR_WRITER_MAY_NOT), to
 /* ================================ I ================================ */
 
 /*
- * 2026-10-02 · tetos novos (estrutura 14 mil, artigo 32 mil) e a SERP por
+ * 2026-10-02 · tetos novos (estrutura 14 mil, artigo 40 mil; SERP 10 mil) e a SERP por
  * último: com o artigo-modelo, a estrutura e a linha passavam dos tetos antigos
  * e a SERP resumida, índice dos ids S/P/C, sumia inteira.
  */
-test("I · limites: célula até 6 mil (estrutura até 14 mil), artigo até 32 mil — a SERP é a última a ceder e nunca some, e o corte é dito", () => {
+test("I · limites: célula até 6 mil (estrutura até 14 mil), artigo até 40 mil — a SERP é a última a ceder e nunca some, e o corte é dito", () => {
   const base = entradaGoogleSaude();
   const modelo = base.articleModel as unknown as { sections: Array<Record<string, unknown>> };
   const secaoLonga = modelo.sections[0];
@@ -503,15 +504,15 @@ test("I · limites: célula até 6 mil (estrutura até 14 mil), artigo até 32 m
   const linha = buildRadarWritingExportArticle(inflado, contextoAvulso()).row;
   const total = RADAR_WRITING_EXPORT_COLUMNS.reduce((soma, coluna) => soma + linha[coluna].length, 0);
   for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) {
-    const limite = coluna === "estrutura" ? RADAR_WRITING_EXPORT_LIMITS.structureChars : RADAR_WRITING_EXPORT_LIMITS.cellChars;
+    const limite = radarWritingCellLimit(coluna);
     assert.ok(linha[coluna].length <= limite, `${coluna}: ${linha[coluna].length} > ${limite}`);
   }
   assert.ok(total <= RADAR_WRITING_EXPORT_LIMITS.articleChars, `artigo com ${total} caracteres`);
   assert.match(linha.estrutura, /\[…\] Célula cortada no limite de 14\.000 caracteres\.$/);
   if (/Cortado para o artigo caber/.test(linha.serp_resumida)) {
-    assert.match(linha.cobrir_e_superar, /Cortado para o artigo caber em 32\.000 caracteres\./, "antes da SERP, cede o cobrir e superar");
+    assert.match(linha.cobrir_e_superar, /Cortado para o artigo caber em 40\.000 caracteres\./, "antes da SERP, cede o cobrir e superar");
   }
-  assert.ok(linha.serp_resumida.replace(/\n?\[…\] Cortado para o artigo caber em 32\.000 caracteres\./, "").trim().length > 0, "a SERP resumida nunca some inteira");
+  assert.ok(linha.serp_resumida.replace(/\n?\[…\] Cortado para o artigo caber em 40\.000 caracteres\./, "").trim().length > 0, "a SERP resumida nunca some inteira");
   for (const coluna of ["ordem", "pode_escrever", "artigo", "prompt"] as const) {
     assert.equal(/Cortado para o artigo caber/.test(linha[coluna]), false, `${coluna} nunca é cortada`);
   }

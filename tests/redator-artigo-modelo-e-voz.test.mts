@@ -478,7 +478,7 @@ test("manifesto · a linha do aprovado (dono Radar, abaixo da evidência, preso 
   assert.equal(linha[2], "approved");
   assert.equal(manifesto.levels[linha[3] - 1], "AI_INTERPRETATION");
   assert.equal(linha[9], false);
-  assert.match(String(linha[10]), /aprovado v3, preso ao pacote entregue/);
+  assert.match(String(linha[10]), /concluído v3, preso ao pacote entregue/);
   const voz = manifesto.sources.find(item => item[0] === `brand.skill/${vozV2}`)!;
   assert.match(String(voz[10]), /Voz da marca \(Skill brand_voice\) v2, em rascunho na Marca/);
   assert.equal(manifesto.sources.some(item => item[0] === `brand.skill/${vozV1}`), false, "só a corrente");
@@ -494,7 +494,7 @@ test("manifesto · sem aprovado e sem Skill de voz, as duas ausências são decl
   });
   const manifesto = await readWriterEvidenceManifest(contexto(), documentId);
   const ausentes = new Map(manifesto.absent.map(([chave, , motivo]) => [chave, motivo]));
-  assert.match(ausentes.get("radar.blueprint") ?? "", /nenhum artigo-modelo aprovado para este pacote/);
+  assert.match(ausentes.get("radar.blueprint") ?? "", /nenhum artigo-modelo concluído para este pacote/);
   assert.match(ausentes.get("brand.voice") ?? "", /nenhuma Skill de voz/);
   assert.equal(manifesto.sources.some(item => String(item[0]).startsWith("radar.blueprint/")), false);
 });

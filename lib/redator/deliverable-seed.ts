@@ -188,7 +188,7 @@ const REGRAS_COMUNS = [
    * 2026-10-02 · SDD diretriz editorial, Adendos A e C: a voz da marca vale
    * "inclusive nos CTAs"; o artigo-modelo aprovado diz o próximo passo.
    */
-  "Quando o contexto trouxer 'Voz da marca (copy e CTA)', escreva gancho, texto, legenda e closingCta nessa voz, sem o que ela proíbe; quando trouxer o artigo-modelo aprovado, o closingCta leva ao mesmo próximo passo. A voz e o artigo-modelo não mudam keyword, intenção nem fatos.",
+  "Quando o contexto trouxer 'Voz da marca (copy e CTA)', escreva gancho, texto, legenda e closingCta nessa voz, sem o que ela proíbe; quando trouxer o artigo-modelo da SERP, o closingCta leva ao mesmo próximo passo. A voz e o artigo-modelo não mudam keyword, intenção nem fatos.",
   "Escreva em português do Brasil.",
 ].join("\n");
 
