@@ -654,6 +654,9 @@ export const RADAR_EXTERNAL_WRITER_PROMPT = [
 /* ========================= a montagem da linha ========================= */
 
 
+/** Quem assina: o nome do especialista da aba Especialista; `only_active` = único ativo da marca, sugerido. */
+export type RadarPortableArticleAuthor = { name: string; specialty: string | null; source: "contribution" | "only_active" };
+
 export type RadarPortableExportInput = {
   profile: RadarResearchProfile;
   blueprintView: RadarCompetitiveBlueprintView;
@@ -692,6 +695,12 @@ export type RadarPortableExportInput = {
   commercial?: RadarPortableCommercial | null;
   /** §9 · a biblioteca de vídeos da marca, casada com as pautas. */
   videoContext?: RadarPortableVideoContext | null;
+  /**
+   * 2026-10-02 · Aditivo: quem ASSINA o artigo — o especialista da aba
+   * Especialista (E-E-A-T), lido ao vivo pelo id que o pacote guarda. Ausente:
+   * a leitura não foi feita (texto de antes); lista vazia: não há especialista.
+   */
+  authors?: RadarPortableArticleAuthor[] | null;
   /** §10 · as contribuições do especialista, já revisadas. */
   specialistContext?: RadarPortableSpecialistContext | null;
   internalLinks?: readonly string[];

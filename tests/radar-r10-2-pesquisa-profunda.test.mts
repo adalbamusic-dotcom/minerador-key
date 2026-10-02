@@ -480,7 +480,14 @@ test("P · busca comercial coerente conclui a investigação em vez de acusar am
  * ============  22 · Q · COMEÇA E TERMINA POR AÇÃO HUMANA  ================
  */
 
-test("Q · a investigação começa por ação humana, congela o fundamento e não finaliza sozinha", () => {
+/*
+ * 2026-10-02 · D9 (dono, "automático nos três"): a investigação passou a
+ * finalizar sozinha quando a ANÁLISE termina sem pendência. O que este teste
+ * guarda continua valendo e é o que importa aqui: INICIAR não finaliza — o
+ * registro nasce sem `finalizedAt`, e o congelamento automático só acontece
+ * depois da análise, pela decisão pura (ver tests/radar-finalizar-automatico.test.mts).
+ */
+test("Q · a investigação começa por ação humana, congela o fundamento e iniciar não a finaliza", () => {
   const context = contexto();
   const resultado = plano();
   const registro = startRadarDeepResearch({ context, plan: resultado, startedBy: "ator-1", now: "2026-09-08T10:00:00.000Z" });
@@ -586,7 +593,14 @@ test("Q · as duas ações são as únicas, e nenhuma delas dispara sozinha", ()
   assert.match(page, /onStartDeepResearch=\{\(\) => void startDeepResearch\(\)\}/);
   assert.match(page, /onFinalizeInvestigation=\{\(\) => void finalizeInvestigation\(\)\}/);
   assert.equal(/useEffect\([^)]*startDeepResearch/.test(page), false, "nada inicia a pesquisa ao montar a tela");
-  assert.equal(/useEffect\([^)]*finalizeInvestigation/.test(page), false, "nada finaliza a investigação sozinho");
+  assert.equal(/useEffect\([^)]*finalizeInvestigation/.test(page), false, "nada finaliza a investigação ao montar a tela");
+  /*
+   * 2026-10-02 · D9 (dono): "sozinha" agora existe — e só num lugar. O fim da
+   * análise encadeia o congelamento quando não há pendência; nenhum efeito de
+   * render o faz, e abrir a tela continua não executando nada.
+   */
+  assert.equal(/useEffect\([^)]*finalizarGoogleSemPendencia/.test(page), false, "o automático não nasce de efeito");
+  assert.match(page, /if \(analiseConfirmada\) await finalizarGoogleSemPendencia\(target, analiseConfirmada\);/, "ele nasce do fim da análise");
 });
 
 /*

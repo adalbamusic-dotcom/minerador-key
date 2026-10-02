@@ -32,8 +32,8 @@ import { emptyRadarSerpBatchTally, radarFinalizeReadbackNotice, radarFinalizeSuc
 import { startRadarDeepResearch, settleRadarDeepResearchQuery, finalizeRadarDeepResearch, radarQueryEvidenceFrom, type RadarDeepResearchRecord } from "@/lib/radar/deep-research";
 import { radarCanonicalReusePlan, radarResearchResumption } from "@/lib/radar/research-resumption";
 import { radarResumableRemoteAnalysis, radarUnconfirmedClaimsNotice, type RadarRemoteOnlyClaim } from "@/lib/radar/remote-authority";
-import { freezeRadarEvidenceBundle } from "@/lib/radar/investigation-finalization";
-import { radarActionOutcome, radarClaimAction, type RadarOperationalActionId } from "@/lib/radar/operational-actions";
+import { freezeRadarEvidenceBundle, radarGoogleAutoFinalizeDecision } from "@/lib/radar/investigation-finalization";
+import { RADAR_AUTO_FINALIZE_DONE_NOTICE, radarActionOutcome, radarAutoFinalizePendingNotice, radarClaimAction, type RadarOperationalActionId } from "@/lib/radar/operational-actions";
 import { radarSufficiencyLabel } from "@/lib/radar/investigation-sufficiency";
 import { buildRadarResearchCuration, type RadarResearchDecision } from "@/lib/radar/research-curation";
 import { radarNormalizedUrl } from "@/lib/radar/research-reference";
@@ -43,7 +43,7 @@ import { RADAR_EXTRACTION_MAX_ATTEMPTS, radarExtractionFailureIsRecoverable } fr
 import { radarPhase1NextAction } from "@/lib/radar/serp-phase1";
 import { RADAR_DEFAULT_SEARCH_MODE, radarGoogleBaseCommitment, radarResearchPlanOfAnalysis, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
 import { buildRadarResearchPackage, radarProfileOfTarget, radarProfileSupportPlan, type RadarResearchPackage, type RadarResearchProfile, type RadarSupportResearchRecord } from "@/lib/radar/research-profile";
-import { radarAmazonReportEvidence, radarResearchProfileStateOfAnalysis, radarYoutubeFinalizeDecision, radarYoutubeReportEvidence, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
+import { radarAmazonReportEvidence, radarProfileAutoFinalizeDecision, radarProfileManualStepLabel, radarResearchProfileStateOfAnalysis, radarYoutubeFinalizeDecision, radarYoutubeReportEvidence, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
 import { buildRadarAmazonQueryPlan, radarAmazonQueryId, type RadarAmazonSearchRun } from "@/lib/radar/amazon-search-run";
 import { radarPrimaryProfileOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
 import { radarResearchPrimaryCollection, radarResearchProvenanceSummary, radarResearchSampleSummary, type RadarResearchProvenancePayload, type RadarResearchSamplePayload } from "@/lib/radar/research-read-model";
@@ -101,6 +101,7 @@ import { RadarR3ProfileMirror } from "./radar-r3-profile-mirror";
 import { RadarR4BulkOperationsBar, RadarR5QueueProgress, type RadarR5QueueView } from "./radar-r4-bulk-operations-bar";
 import { useRadarAnalysisReadback } from "./use-radar-analysis-readback";
 import { useRadarSerpReviewReadback } from "./use-radar-serp-review-readback";
+import { organizeRadarArticleBlueprintsInSeries, postRadarArticleBlueprintOrganize, radarArticleBlueprintSeriesSummary, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
 
 /**
@@ -199,8 +200,45 @@ const TOM_DO_AVISO_DE_EXPORT: Record<RadarExportNotice["type"], string> = {
   error: "border-danger/40 bg-danger/10 text-danger",
 };
 
+/*
+ * 2026-10-02 · A TRAVA DE VERSÃO VIAJA COM A LEITURA DO SERVIDOR.
+ *
+ * O DEFEITO: o apoio do YouTube era gravado sobre a versão lida do servidor,
+ * mas com a trava velha — a do último save DESTA aba, ou a do render. A rota
+ * do YouTube já tinha gravado versões pelo servidor, então a escrita voltava
+ * 409 `optimistic_conflict`, e o `.catch(() => {})` a engolia: o card ficava
+ * "Apoio do Google pendente" para sempre, sem aviso.
+ *
+ * A leitura remota devolve a análise E a trava, juntas. Esta tabela amarra a
+ * trava ao OBJETO lido — por identidade, sem cópia —, e a gravação que parte
+ * dele declara exatamente a trava daquela leitura (`expectedLock`), como o
+ * ANALYZE já faz com `lockRemoto`. Quem grava a partir de um clique, sem base
+ * lida, segue pelo caminho antigo. Se outra sessão gravou no meio, o 409 é
+ * verdadeiro — e agora é dito na tela.
+ */
+const LOCK_DA_LEITURA_REMOTA = new WeakMap<object, number>();
+
+/*
+ * 2026-10-02 · D9 · O DESFECHO DO AUTOMÁTICO, NUM AVISO SÓ.
+ *
+ * `headline` é o estado relido (a mesma projeção que o card lê), `antes` é o
+ * que o passo anterior tem a dizer, e `message` diz se congelou sozinha ou por
+ * que não. Uma frase por evento: a coleta e o desfecho dela.
+ */
+type RadarDesfechoAutomatico = { congelou: boolean; headline: string | null; message: string };
+/** 2026-10-02 · os registros de SERP do workspace, para quem congela dentro do handler. */
+type RadarRegistrosDeSerp = ReturnType<typeof useEditorialPipeline>["serpRecords"];
+const avisoComDesfechoAutomatico = (antes: string | null, desfecho: RadarDesfechoAutomatico) =>
+  [desfecho.headline ? `${desfecho.headline}.` : null, antes, desfecho.message].filter(Boolean).join(" ");
+
 export function RadarPage({ brandRef }: { brandRef: string }) {
   const { data: session } = useSession(); const router = useRouter(); const { selectedBrandId } = useBrand(); const { pipeline, state } = useReadyPipeline(); const [picker, setPicker] = useState(false); const [notice, setNotice] = useState(""); const [busyArticleId, setBusyArticleId] = useState<string | null>(null); const [reviewingArticleId, setReviewingArticleId] = useState<string | null>(null); const [serpAction, setSerpAction] = useState<RadarSerpAction | null>(null); const serpActionRef = useRef<RadarSerpAction | null>(null); const reviewingArticleIdRef = useRef<string | null>(null); const [expandedRadarId, setExpandedRadarId] = useState<string | null>(null); const [spreadsheetSelection, setSpreadsheetSelection] = useState(createRadarSpreadsheetSelection); const { activeArticleId, selectedArticleIds } = spreadsheetSelection; const [r4LocalByArticle, setR4LocalByArticle] = useState<Record<string, RadarR4LocalArticleState>>({}); const [r4SerpQueue, setR4SerpQueue] = useState<RadarR4SerpQueue | null>(null); const [topicHistoryByArticle, setTopicHistoryByArticle] = useState<Record<string, RadarR5TopicHistory>>({}); const [expertEvidenceByArticle, setExpertEvidenceByArticle] = useState<Record<string, RadarR6ExpertEvidenceInput[]>>({}); const [canonicalExpertEvidenceByArticle, setCanonicalExpertEvidenceByArticle] = useState<Record<string, RadarExpertEvidence[]>>({}); const [expertContributionSummaryByArticle, setExpertContributionSummaryByArticle] = useState<Record<string, { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; articleDnaVersionId: string; counters: RadarSpecialistCounters }>>({}); const approvingArticleIdRef = useRef<string | null>(null); const collectingArticleIdRef = useRef<string | null>(null); const generatingReportIdRef = useRef<string | null>(null); const [collectionByArticle, setCollectionByArticle] = useState<Record<string, { state: RadarSerpCollectionState; blockedReason: string | null }>>({});
+  /*
+   * 2026-10-02 · A ORGANIZAÇÃO DO ARTIGO-MODELO DA SERP, por artigo: o que a
+   * tela mostra enquanto a IA trabalha depois do finalizar. Estado de
+   * apresentação — a versão é do banco, e o painel a relê ao fim.
+   */
+  const [blueprintJobs, setBlueprintJobs] = useState<Record<string, RadarArticleBlueprintJob>>({});
   /*
    * AS FONTES DE VÍDEO SÃO REMOTAS — o dicionário abaixo é CACHE, não cópia.
    *
@@ -479,6 +517,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const youtubeEmVoo = useRef<string | null>(null);
   const [youtubeBusy, setYoutubeBusy] = useState(false);
   /*
+   * 2026-10-02 · A GRAVAÇÃO DO APOIO QUE FALHOU, GUARDADA PARA SER DITA.
+   *
+   * O apoio nunca derruba a principal (§7), e por isso a falha de GRAVAR o
+   * registro dele não sobe como exceção. Ela também não pode sumir: o START e
+   * o repetir apoio leem daqui e põem a frase no aviso que fecham.
+   */
+  const apoioNaoGravadoRef = useRef<{ articleId: string; message: string } | null>(null);
+  /*
    * §1 · UM CLIQUE POR VEZ, E ELE É DESTE ARTIGO.
    *
    * A trava guarda o articleId, não um booleano: dois artigos abertos em abas
@@ -670,8 +716,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * daqui em vez de inferir por conta: uma segunda inferência acabaria
    * discordando da do servidor, que é o defeito que o 1.2 fechou.
    */
-  const planoDePesquisa = useCallback((row: RadarItem | null) =>
-    radarResearchPlanOfAnalysis(row ? analiseCorrenteDe(row)?.payload : null), [analiseCorrenteDe]);
+  const planoDePesquisa = useCallback((
+    row: RadarItem | null,
+    /* 2026-10-02 · quem congela sobre a versão relida do servidor entrega o payload dela. */
+    payloadRelido?: RadarAnalysisPayload | null,
+  ) =>
+    radarResearchPlanOfAnalysis(payloadRelido || (row ? analiseCorrenteDe(row)?.payload : null)), [analiseCorrenteDe]);
 
   /**
    * ===== O BLUEPRINT MULTIFORMATO VIVO — 1.1 · §4, §5 e §6 =====
@@ -683,10 +733,22 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * Snapshot antigo não tem essa leitura, e ela não é fabricada (§4): sem ela,
    * o blueprint sai só com o YouTube e diz o que faltou.
    */
-  const multimodalDoArtigo = useCallback((row: RadarItem | null): RadarMultimodalBlueprint | null => {
+  const multimodalDoArtigo = useCallback((
+    row: RadarItem | null,
+    /*
+     * 2026-10-02 · O CONGELAMENTO AUTOMÁTICO PASSA O QUE ACABOU DE LER.
+     *
+     * Dentro do handler da coleta, `row` e `pipeline.serpRecords` são os do
+     * render ANTERIOR ao START: a corrida e o snapshot do apoio que acabaram
+     * de chegar não estão neles. Quem congela sem esperar render novo entrega
+     * a corrida relida do servidor e os registros atuais; sem isto, a leitura
+     * é a de sempre.
+     */
+    fresco?: { corrida?: RadarYoutubeSearchRun | null; registros?: RadarRegistrosDeSerp },
+  ): RadarMultimodalBlueprint | null => {
     if (!row) return null;
-    const corrida = analiseCorrenteDe(row)?.payload.youtubeSearch || null;
-    const comFeatures = pipeline.serpRecords
+    const corrida = fresco?.corrida !== undefined ? fresco.corrida : analiseCorrenteDe(row)?.payload.youtubeSearch || null;
+    const comFeatures = (fresco?.registros || pipeline.serpRecords)
       .filter(registro => registro.input.articleId === row.articleId && registro.research?.serpFeatures)
       .slice(-1)[0];
     const features = comFeatures?.research?.serpFeatures || null;
@@ -717,9 +779,45 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const remoto = await pipeline.readRemoteRadarAnalyses(row.articleId).catch(() => null);
     if (!remoto?.available || !remoto.analyses.length) return local;
     const maisNova = remoto.analyses.slice().sort((esquerda, direita) => direita.versionNumber - esquerda.versionNumber)[0];
-    if (!local) return maisNova as typeof local;
-    return maisNova.versionNumber > local.versionNumber ? maisNova as typeof local : local;
+    const escolhida = !local ? maisNova as typeof local : maisNova.versionNumber > local.versionNumber ? maisNova as typeof local : local;
+    /* 2026-10-02 · a trava LIDA AGORA viaja com o objeto lido (ver LOCK_DA_LEITURA_REMOTA). */
+    if (escolhida && typeof remoto.lockVersion === "number") LOCK_DA_LEITURA_REMOTA.set(escolhida, remoto.lockVersion);
+    return escolhida;
   }, [analiseCorrenteDe, pipeline]);
+
+  /**
+   * ====== 2026-10-02 · D9 · A RELEITURA QUE DECIDE O AUTOMÁTICO ======
+   *
+   * O congelamento automático decide sobre o que o SERVIDOR confirmou — nunca
+   * sobre o `RadarItem` do render, que dentro do handler descreve o passado.
+   * Diferente de `versaoCorrenteNoServidor`, aqui não há recuo para a cópia
+   * local: sem leitura remota confirmada, nada congela sozinho, e o motivo
+   * volta para a tela. A versão corrente (a de maior número, que o servidor
+   * devolve inteira) leva junto a trava lida.
+   */
+  const analiseConfirmadaNoServidor = useCallback(async (row: RadarItem) => {
+    const remoto = await pipeline.readRemoteRadarAnalyses(row.articleId).catch(() => null);
+    if (!remoto?.available || !remoto.analyses.length) {
+      return { ok: false as const, reason: `A releitura do servidor não foi confirmada (${remoto?.reason || "sem resposta"}).` };
+    }
+    const analyses = remoto.analyses.slice().sort((esquerda, direita) => esquerda.versionNumber - direita.versionNumber);
+    const corrente = analyses[analyses.length - 1]!;
+    if (typeof remoto.lockVersion === "number") LOCK_DA_LEITURA_REMOTA.set(corrente, remoto.lockVersion);
+    return { ok: true as const, analyses, corrente };
+  }, [pipeline]);
+
+  /*
+   * 2026-10-02 · OS REGISTROS DE SERP ATUAIS, PARA QUEM CONGELA DENTRO DO HANDLER.
+   *
+   * O snapshot do apoio coletado no mesmo START chega ao estado depois do
+   * render que criou o handler. A referência acompanha cada render; quem
+   * congela sozinho lê dela as `serpFeatures` que acabaram de chegar. É só
+   * leitura: nada aqui coleta, grava ou notifica.
+   */
+  const serpRecordsAtuaisRef = useRef(pipeline.serpRecords);
+  useEffect(() => {
+    serpRecordsAtuaisRef.current = pipeline.serpRecords;
+  }, [pipeline.serpRecords]);
 
   const gravarYoutube = useCallback(async (
     row: RadarItem,
@@ -740,7 +838,16 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     /* O contêiner é infraestrutura: se faltar, cria-se — não se recusa o clique. */
     const anterior = base || analiseCorrenteDe(row) || await garantirContextoDoRadar(row);
     const proxima = await createRadarAnalysisSuccessor(anterior, patch, sessionId(session));
-    await pipeline.saveRadarAnalysis(row.articleId, proxima);
+    /*
+     * 2026-10-02 · QUEM GRAVA DEPOIS DO SERVIDOR DECLARA A TRAVA QUE LEU.
+     *
+     * A base lida do servidor traz a trava daquela leitura; sem ela, a escrita
+     * declarava a trava velha desta aba e voltava 409 depois que a rota do
+     * YouTube gravou por lá. A trava vale para UMA escrita: some depois dela.
+     */
+    const travaLida = base ? LOCK_DA_LEITURA_REMOTA.get(base) : undefined;
+    if (base) LOCK_DA_LEITURA_REMOTA.delete(base);
+    await pipeline.saveRadarAnalysis(row.articleId, proxima, typeof travaLida === "number" ? { expectedLock: travaLida } : undefined);
     await pipeline.reloadRadarAnalysis(row.articleId);
     return proxima;
   }, [analiseCorrenteDe, garantirContextoDoRadar, pipeline, session]);
@@ -1851,11 +1958,28 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * vídeo": os dois produzem o mesmo snapshot.
    */
   const coletarApoioDoGoogle = async (target: RadarItem, packageRunId: string): Promise<RadarSupportResearchRecord | null> => {
+    /* 2026-10-02 · cada coleta de apoio responde só pela própria gravação. */
+    apoioNaoGravadoRef.current = null;
     const data = rowWorkbenchData(target);
     const perfil = radarProfileOfTarget(modoEfetivoDe(target));
     const principal = data.researchContext?.keywords.find(item => item.identity.role === "principal")?.identity.text || null;
     const apoio = radarProfileSupportPlan({ profile: perfil, primaryKeyword: principal });
     if (!apoio) return null;
+
+    /*
+     * 2026-10-02 · A GRAVAÇÃO QUE FALHA É DITA, NÃO ENGOLIDA.
+     *
+     * Eram dois `.catch(() => {})`: um 409 de trava velha sumia aqui e o card
+     * ficava "Apoio do Google pendente" sem ninguém saber por quê. Continua sem
+     * derrubar a principal (§7) — mas a frase vai para o aviso de quem chamou.
+     */
+    const avisarApoioNaoGravado = (erro: unknown) => {
+      const motivo = erro instanceof Error ? erro.message : "erro não identificado";
+      apoioNaoGravadoRef.current = {
+        articleId: target.articleId,
+        message: `O registro do apoio do Google não foi gravado (${motivo}). A pesquisa principal está preservada; repita o apoio.`,
+      };
+    };
 
     /*
      * UM SNAPSHOT QUE JÁ EXISTE NÃO É RECOLETADO.
@@ -1870,7 +1994,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         source: apoio.source, role: apoio.role, keyword: apoio.keyword, packageRunId,
         collectedAt: new Date().toISOString(), serpSnapshotId: existente.id, failureReason: null,
       };
-      await gravarYoutube(target, { supportResearch: reaproveitado }, await versaoCorrenteNoServidor(target)).catch(() => {});
+      await gravarYoutube(target, { supportResearch: reaproveitado }, await versaoCorrenteNoServidor(target)).catch(avisarApoioNaoGravado);
       return reaproveitado;
     }
 
@@ -1898,7 +2022,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         source: apoio.source, role: apoio.role, keyword: apoio.keyword, packageRunId,
         collectedAt: null, serpSnapshotId: null, failureReason: motivo.slice(0, 500),
       };
-      await gravarYoutube(target, { supportResearch: falhou }, await versaoCorrenteNoServidor(target)).catch(() => {});
+      await gravarYoutube(target, { supportResearch: falhou }, await versaoCorrenteNoServidor(target)).catch(avisarApoioNaoGravado);
       return falhou;
     }
   };
@@ -1914,10 +2038,20 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     try {
       const apoio = await coletarApoioDoGoogle(target, corrida.runId);
       await pipeline.reloadRadarAnalysis(target.articleId);
+      const naoGravado = apoioNaoGravadoRef.current?.articleId === target.articleId ? apoioNaoGravadoRef.current.message : null;
       /* O que a função gravou, não o que o render anterior tinha em mãos. */
-      setNotice(apoio?.collectedAt
+      const avisoDoApoio = naoGravado || (apoio?.collectedAt
         ? "Apoio do Google coletado. A pesquisa principal não foi refeita."
         : apoio?.failureReason || "Este perfil não planeja apoio do Google.");
+      /*
+       * 2026-10-02 · D9 · O APOIO QUE FECHA A PENDÊNCIA TAMBÉM FINALIZA.
+       *
+       * O apoio era a pendência que segurava o congelamento. Coletado e
+       * gravado, a mesma releitura do START decide: sem outra pendência, a
+       * investigação congela sozinha e a IA organiza o artigo-modelo.
+       */
+      const automatico = apoio?.collectedAt && !naoGravado ? await finalizarYoutubeSemPendencia(target) : null;
+      setNotice(automatico ? avisoComDesfechoAutomatico(avisoDoApoio, automatico) : avisoDoApoio);
     } finally { setYoutubeBusy(false); }
   };
 
@@ -2138,6 +2272,21 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     });
 
   /**
+   * 2026-10-02 · D9 · POR QUE NÃO FINALIZOU SOZINHA — dito no painel, ao lado do botão manual.
+   *
+   * É a MESMA decisão que o encadeamento automático usa, lida do que está
+   * gravado: a tela e o automático não podem discordar sobre o que é
+   * pendência. Antes da primeira coleta não há o que explicar.
+   */
+  const pendenciaDoAutomatico = (row: RadarItem | null, perfil: "YOUTUBE" | "AMAZON") => {
+    if (!row) return null;
+    const leitura = { payload: analiseCorrenteDe(row)?.payload || null, profile: perfil };
+    if (radarResearchProfileStateOfAnalysis(leitura).state === "NOT_STARTED") return null;
+    const decisao = radarProfileAutoFinalizeDecision(leitura);
+    return decisao.pending ? decisao.reason : null;
+  };
+
+  /**
    * ===== §8 a §18 · A CONFIGURAÇÃO DO ALVO, POR ARTIGO =====
    *
    * Ela vive na tela até o START — é rascunho, e rascunho não ocupa banco. O que
@@ -2342,6 +2491,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     setAmazonBusy(true);
     setNotice("");
 
+    /* 2026-10-02 · D9 · o que a coleta disse, para o desfecho automático continuar a frase. */
+    let coletaConcluida: string | null = null;
     try {
       const resposta = await fetch("/api/editorial/radar-amazon-search", {
         method: "POST",
@@ -2367,6 +2518,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       /* O que a tela mostra é o que o banco confirmou, nunca o que enviamos. */
       await pipeline.reloadRadarAnalysis(target.articleId);
       setNotice(corpo.headline || "Pesquisa Amazon concluída.");
+      coletaConcluida = corpo.headline || "Pesquisa Amazon concluída.";
     } catch (erro) {
       /* Quem fecha a corrida como falha é o SERVIDOR. A tela só relê. */
       await pipeline.reloadRadarAnalysis(target.articleId).catch(() => {});
@@ -2375,6 +2527,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       setAmazonBusy(false);
       amazonEmVoo.current = null;
     }
+    /*
+     * 2026-10-02 · D9 · A COLETA SEM PENDÊNCIA ANALISA E FINALIZA SOZINHA.
+     *
+     * Encadeado aqui, ao fim do handler — nunca num efeito de render. A
+     * releitura do servidor decide cada passo; com pendência nada congela.
+     */
+    if (coletaConcluida !== null) await finalizarAmazonSemPendencia(target, coletaConcluida);
   };
 
   /**
@@ -2392,6 +2551,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const plano = planoAmazon(target);
     amazonEmVoo.current = target.articleId;
     setAmazonBusy(true);
+    /* 2026-10-02 · D9 · o apoio que fecha a pendência também deixa o automático continuar. */
+    let apoioConcluido: string | null = null;
     try {
       const resposta = await fetch("/api/editorial/radar-amazon-search", {
         method: "POST",
@@ -2410,12 +2571,102 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível repetir o apoio do Google.");
       await pipeline.reloadRadarAnalysis(target.articleId);
       setNotice(corpo.headline || "Apoio do Google coletado.");
+      apoioConcluido = corpo.headline || "Apoio do Google coletado.";
     } catch (erro) {
       setNotice(erro instanceof Error ? erro.message : "Falha ao repetir o apoio do Google.");
     } finally {
       setAmazonBusy(false);
       amazonEmVoo.current = null;
     }
+    if (apoioConcluido !== null) await finalizarAmazonSemPendencia(target, apoioConcluido);
+  };
+
+  /*
+   * 2026-10-02 · AS AÇÕES DA AMAZON QUE NÃO GASTAM NADA, NUMA PORTA SÓ.
+   *
+   * O botão [Analisar], o [Finalizar] e o encadeamento automático (D9) mandam
+   * a mesma intenção à mesma rota. Uma segunda cópia desta chamada seria o
+   * lugar onde, um dia, só uma delas ganharia a correção seguinte.
+   */
+  const pedirAcaoAmazonSemProvider = async (target: RadarItem, action: "analyze" | "finalize", recusa: string) => {
+    const resposta = await fetch("/api/editorial/radar-amazon-search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        action,
+        brandId: target.brandId,
+        articleId: target.articleId,
+        articleDnaVersionId: target.articleDnaVersionId,
+      }),
+    });
+    const corpo = await resposta.json().catch(() => ({}));
+    if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || recusa);
+    return corpo as { headline?: string; alreadyFrozen?: boolean };
+  };
+
+  /**
+   * ====== 2026-10-02 · D9 · A AMAZON ANALISA E CONGELA SOZINHA — SÓ SEM PENDÊNCIA ======
+   *
+   * A regra antiga era "nada congela sozinho; só o clique". Decisão do dono
+   * ("automático nos três"): coleta OK → analisar → congelar → IA do
+   * artigo-modelo, sem clique no meio. Chamado ao fim do START, do repetir
+   * apoio e do [Analisar] — nunca de um efeito de render.
+   *
+   * Cada passo é decidido sobre a análise RELIDA DO SERVIDOR, por
+   * `radarProfileAutoFinalizeDecision`: apoio falho, consulta que falhou,
+   * amostra vazia ou análise sem apoio param tudo, e a frase diz por quê. Os
+   * passos são as MESMAS ações dos botões (analisar e finalizar não chamam
+   * provider; finalizar é idempotente no servidor). A IA só vem depois do
+   * congelamento confirmado, e a falha dela não desfaz nada.
+   */
+  const finalizarAmazonSemPendencia = async (target: RadarItem, antes: string) => {
+    if (amazonEmVoo.current) return;
+    amazonEmVoo.current = target.articleId;
+    setAmazonBusy(true);
+    const frases = [antes];
+    let desfecho: RadarDesfechoAutomatico = { congelou: false, headline: null, message: "" };
+    try {
+      /* No máximo dois passos: analisar (se ainda não houve análise) e congelar. */
+      for (let passo = 0; passo < 2; passo += 1) {
+        const lida = await analiseConfirmadaNoServidor(target);
+        if (!lida.ok) {
+          desfecho = { congelou: false, headline: null, message: radarAutoFinalizePendingNotice(lida.reason, "Finalizar investigação") };
+          break;
+        }
+        const leitura = { payload: lida.corrente.payload, profile: "AMAZON" as const };
+        const decisaoAutomatica = radarProfileAutoFinalizeDecision(leitura);
+        const estadoRelido = radarResearchProfileStateOfAnalysis(leitura);
+        if (!decisaoAutomatica.next) {
+          const botaoManual = radarProfileManualStepLabel(estadoRelido);
+          desfecho = {
+            congelou: false,
+            headline: estadoRelido.headline,
+            message: decisaoAutomatica.pending ? radarAutoFinalizePendingNotice(decisaoAutomatica.reason, botaoManual) : decisaoAutomatica.reason,
+          };
+          break;
+        }
+        if (decisaoAutomatica.next === "ANALYZE") {
+          const analise = await pedirAcaoAmazonSemProvider(target, "analyze", "Não foi possível analisar a pesquisa Amazon.");
+          await pipeline.reloadRadarAnalysis(target.articleId);
+          if (analise.headline) frases.push(analise.headline);
+          continue;
+        }
+        const congelamento = await pedirAcaoAmazonSemProvider(target, "finalize", "Não foi possível finalizar a investigação Amazon.");
+        await pipeline.reloadRadarAnalysis(target.articleId);
+        desfecho = congelamento.alreadyFrozen
+          ? { congelou: false, headline: null, message: congelamento.headline || "Esta investigação já estava finalizada." }
+          : { congelou: true, headline: null, message: RADAR_AUTO_FINALIZE_DONE_NOTICE };
+        break;
+      }
+    } catch (erro) {
+      const motivo = erro instanceof Error ? erro.message : "erro não identificado";
+      desfecho = { congelou: false, headline: null, message: radarAutoFinalizePendingNotice(motivo, "Finalizar investigação") };
+    } finally {
+      setAmazonBusy(false);
+      amazonEmVoo.current = null;
+    }
+    setNotice(avisoComDesfechoAutomatico(frases.join(" "), desfecho));
+    if (desfecho.congelou) void organizarArtigosModeloDaSerp([target.articleId]);
   };
 
   /**
@@ -2433,29 +2684,31 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
 
     amazonEmVoo.current = target.articleId;
     setAmazonBusy(true);
+    /* 2026-10-02 · o que a ação confirmou, para o encadeamento seguinte. */
+    let confirmada: { headline: string; congelou: boolean } | null = null;
     try {
-      const resposta = await fetch("/api/editorial/radar-amazon-search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          action,
-          brandId: target.brandId,
-          articleId: target.articleId,
-          articleDnaVersionId: target.articleDnaVersionId,
-        }),
-      });
-      const corpo = await resposta.json().catch(() => ({}));
-      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || recusa);
+      const corpo = await pedirAcaoAmazonSemProvider(target, action, recusa);
 
       /* O que a tela mostra é o que o banco confirmou, nunca o que enviamos. */
       await pipeline.reloadRadarAnalysis(target.articleId);
       setNotice(corpo.headline || recusa);
+      confirmada = { headline: corpo.headline || recusa, congelou: action === "finalize" && !corpo.alreadyFrozen };
     } catch (erro) {
       setNotice(erro instanceof Error ? erro.message : recusa);
     } finally {
       setAmazonBusy(false);
       amazonEmVoo.current = null;
     }
+    /*
+     * 2026-10-02 · D9 e D7 · DEPOIS DO CLIQUE, O QUE ELE DESTRAVA.
+     *
+     * [Analisar] confirmado: sem pendência, a investigação congela sozinha.
+     * [Finalizar] que congelou de verdade (não o idempotente "já estava"):
+     * a IA organiza o artigo-modelo, como no Google; a falha dela não desfaz.
+     */
+    if (!confirmada) return;
+    if (action === "analyze") await finalizarAmazonSemPendencia(target, confirmada.headline);
+    else if (confirmada.congelou) void organizarArtigosModeloDaSerp([target.articleId]);
   };
 
   /**
@@ -2912,7 +3165,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * trouxe dezenas. O que a função tem em mãos é a corrida que o servidor
        * confirmou e o apoio que ela mesma gravou.
        */
-      setNotice(buildRadarResearchPackage({
+      const pacoteDaColeta = buildRadarResearchPackage({
         profile: radarProfileOfTarget(modoEfetivoDe(target)),
         primaryKeyword: plano.queries[0]?.text || null,
         primaryRunning: run.state === "COLLECTING",
@@ -2922,7 +3175,23 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         primaryResultCount: run.universe.length,
         support: apoio,
         webSerpCollected: Boolean(apoio?.collectedAt),
-      }).headline);
+      });
+      /*
+       * ====== 2026-10-02 · D9 · A COLETA TAMBÉM FINALIZA — SE NÃO HOUVER PENDÊNCIA ======
+       *
+       * Decisão do dono ("automático nos três"): encadeado AQUI, ao fim do
+       * handler, depois do apoio e da releitura — nunca num efeito de render.
+       * A decisão e o congelamento leem a versão RELIDA DO SERVIDOR, e o
+       * congelamento é a mesma rotina do botão. Com pendência nada congela, e
+       * o aviso diz por quê; o botão manual continua.
+       *
+       * O cabeçalho do aviso vem da MESMA projeção que o card lê (relida do
+       * servidor), para o card e o aviso nunca dizerem coisas opostas. O pacote
+       * montado acima responde só se a releitura não vier.
+       */
+      const naoGravado = apoioNaoGravadoRef.current?.articleId === target.articleId ? apoioNaoGravadoRef.current.message : null;
+      const automatico = await finalizarYoutubeSemPendencia(target);
+      setNotice(avisoComDesfechoAutomatico(naoGravado, { ...automatico, headline: automatico.headline || pacoteDaColeta.headline }));
     } catch (erro) {
       /*
        * §7 · quem fecha a corrida como falha é o SERVIDOR. A tela só relê: se
@@ -2969,12 +3238,19 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
   const finalizeYoutubeInvestigation = async () => {
     const target = activeRadarItem;
-    const data = activeWorkbenchData;
     const run = target ? analiseCorrenteDe(target)?.payload.youtubeSearch || null : null;
     if (!target || !run) { setNotice("Não há coleta de YouTube para finalizar."); return; }
 
     setYoutubeBusy(true);
     try {
+      /*
+       * 2026-10-02 · A BASE É A LIDA DO SERVIDOR, COM A TRAVA DAQUELA LEITURA.
+       *
+       * Era o render que decidia e a trava velha que gravava: depois de a rota
+       * do YouTube gravar pelo servidor, o clique voltava 409. A leitura remota
+       * agora decide E grava — a mesma base, a mesma trava.
+       */
+      const base = await versaoCorrenteNoServidor(target);
       /*
        * ============ §9 · FINALIZE É IDEMPOTENTE ============
        *
@@ -2984,32 +3260,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * canônica, que já sabe se existe fotografia válida.
        */
       const decisao = radarYoutubeFinalizeDecision({
-        payload: analiseCorrenteDe(target)?.payload || null,
+        payload: base?.payload || null,
         profile: radarProfileOfTarget(modoEfetivoDe(target)),
       });
       if (!decisao.shouldFreeze) { setNotice(decisao.reason); return; }
 
-      const blueprint = buildRadarYoutubeBlueprint({
-        run,
-        declaredIntent: data?.researchContext ? radarDeclaredArticleIntent(data.researchContext.article) : null,
-        editorialTopics: data?.researchContext?.editorialTopics || [],
-        generatedAt: new Date().toISOString(),
-      });
-      /*
-       * §9 · O FINALIZE CONGELA A INVESTIGAÇÃO INTEIRA.
-       *
-       * Fontes usadas, cruzamento entre as SERPs, saída editorial e blueprint
-       * multiformato entram na MESMA fotografia. Congelar só a parte de YouTube
-       * deixaria a leitura multiformato recalculando a cada abertura, sob um
-       * carimbo que diz "finalizado".
-       */
-      const plano = planoDePesquisa(target);
-      const multimodal = multimodalDoArtigo(target);
-      const congelada = freezeRadarYoutubeInvestigation({
-        run, blueprint, finalizedBy: sessionId(session), finalizedAt: new Date().toISOString(),
-        multimodal: multimodal ? { blueprint: multimodal, researchSources: plano.sources } : null,
-      });
-      await gravarYoutube(target, { youtubeFrozenInvestigation: congelada }, await versaoCorrenteNoServidor(target));
+      await congelarInvestigacaoYoutube(target, { run: base?.payload.youtubeSearch || run, base });
       /*
        * §11 · UM EVENTO LÓGICO DE FINALIZAÇÃO, E ELE É ESTE.
        *
@@ -3017,10 +3273,107 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * segundo acontecimento e não emite aviso próprio.
        */
       setNotice(decisao.reason);
+      /*
+       * 2026-10-02 · FINALIZAR INCLUI ORGANIZAR O ARTIGO-MODELO (D7), COMO NO GOOGLE.
+       *
+       * Só depois da gravação confirmada. O botão disse a chamada de IA; se ela
+       * falhar, a investigação continua finalizada e o painel oferece de novo.
+       */
+      void organizarArtigosModeloDaSerp([target.articleId]);
     } catch (erro) {
       setNotice(erro instanceof Error ? erro.message : "Não foi possível finalizar a investigação de YouTube.");
     } finally {
       setYoutubeBusy(false);
+    }
+  };
+
+  /**
+   * ====== 2026-10-02 · A FOTOGRAFIA DO YOUTUBE, UMA ROTINA SÓ ======
+   *
+   * O botão e o congelamento automático (D9) passam por AQUI. Duas montagens
+   * da mesma fotografia divergiriam na primeira correção feita só numa delas.
+   *
+   * Quem chama entrega a corrida e a base JÁ DECIDIDAS: a do botão vem da
+   * leitura remota do clique; a do automático, da releitura do fim da coleta.
+   * Nada é lido do `RadarItem` do render — dentro do handler da coleta ele
+   * ainda descreve o artigo de antes do START.
+   */
+  const congelarInvestigacaoYoutube = async (target: RadarItem, entrada: {
+    run: RadarYoutubeSearchRun;
+    /** A versão sobre a qual a fotografia nasce, lida do servidor com a trava daquela leitura. */
+    base: Awaited<ReturnType<typeof versaoCorrenteNoServidor>>;
+  }) => {
+    const contexto = rowWorkbenchData(target).researchContext;
+    const blueprint = buildRadarYoutubeBlueprint({
+      run: entrada.run,
+      declaredIntent: contexto ? radarDeclaredArticleIntent(contexto.article) : null,
+      editorialTopics: contexto?.editorialTopics || [],
+      generatedAt: new Date().toISOString(),
+    });
+    /*
+     * §9 · O FINALIZE CONGELA A INVESTIGAÇÃO INTEIRA.
+     *
+     * Fontes usadas, cruzamento entre as SERPs, saída editorial e blueprint
+     * multiformato entram na MESMA fotografia. Congelar só a parte de YouTube
+     * deixaria a leitura multiformato recalculando a cada abertura, sob um
+     * carimbo que diz "finalizado".
+     */
+    const plano = planoDePesquisa(target, entrada.base?.payload);
+    const multimodal = multimodalDoArtigo(target, { corrida: entrada.run, registros: serpRecordsAtuaisRef.current });
+    const congelada = freezeRadarYoutubeInvestigation({
+      run: entrada.run, blueprint, finalizedBy: sessionId(session), finalizedAt: new Date().toISOString(),
+      multimodal: multimodal ? { blueprint: multimodal, researchSources: plano.sources } : null,
+    });
+    return gravarYoutube(target, { youtubeFrozenInvestigation: congelada }, entrada.base);
+  };
+
+  /**
+   * ====== 2026-10-02 · D9 · O YOUTUBE CONGELA SOZINHO — SÓ SEM PENDÊNCIA ======
+   *
+   * A regra antiga era "nada congela sozinho; só o clique". Decisão do dono
+   * ("automático nos três"): o fim do START (depois do apoio) e o fim do
+   * repetir apoio chamam ISTO — nunca um efeito de render; abrir a tela não
+   * congela nada.
+   *
+   * 1. relê a análise do SERVIDOR (a rota do YouTube gravou por lá);
+   * 2. decide com `radarProfileAutoFinalizeDecision`, que é a decisão do botão
+   *    (`radarYoutubeFinalizeDecision`) mais as pendências que o automático não
+   *    assume: apoio falho ou pendente, consulta que falhou, amostra vazia;
+   * 3. congela pela MESMA rotina do botão, sobre a base relida e a trava dela;
+   * 4. só então pede à IA o artigo-modelo — e a falha dela não desfaz nada.
+   *
+   * Não notifica: devolve o desfecho, e quem fecha o handler diz numa frase só.
+   */
+  const finalizarYoutubeSemPendencia = async (target: RadarItem): Promise<RadarDesfechoAutomatico> => {
+    const lida = await analiseConfirmadaNoServidor(target);
+    if (!lida.ok) return { congelou: false, headline: null, message: radarAutoFinalizePendingNotice(lida.reason, "Finalizar investigação") };
+
+    const leitura = { payload: lida.corrente.payload, profile: "YOUTUBE" as const };
+    const decisaoAutomatica = radarProfileAutoFinalizeDecision(leitura);
+    const projecaoRelida = radarResearchProfileStateOfAnalysis(leitura);
+    const estadoRelido = projecaoRelida.headline;
+    /* O botão que a tela mostra NESTE estado — a frase não promete o que não está lá. */
+    const botaoManual = radarProfileManualStepLabel(projecaoRelida);
+    const corrida = lida.corrente.payload.youtubeSearch;
+    if (decisaoAutomatica.next !== "FINALIZE" || !corrida) {
+      return {
+        congelou: false,
+        headline: estadoRelido,
+        message: decisaoAutomatica.pending ? radarAutoFinalizePendingNotice(decisaoAutomatica.reason, botaoManual) : decisaoAutomatica.reason,
+      };
+    }
+    try {
+      const gravada = await congelarInvestigacaoYoutube(target, { run: corrida, base: lida.corrente });
+      void organizarArtigosModeloDaSerp([target.articleId]);
+      return {
+        congelou: true,
+        headline: radarResearchProfileStateOfAnalysis({ payload: gravada.payload, profile: "YOUTUBE" }).headline,
+        message: RADAR_AUTO_FINALIZE_DONE_NOTICE,
+      };
+    } catch (erro) {
+      /* Conflito de trava (outra sessão gravou) ou gravação recusada: nada congelou, e é dito. */
+      const motivo = erro instanceof Error ? erro.message : "erro não identificado";
+      return { congelou: false, headline: estadoRelido, message: radarAutoFinalizePendingNotice(`a gravação do congelamento não foi confirmada (${motivo}).`, botaoManual) };
     }
   };
 
@@ -3294,23 +3647,55 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   };
 
   /*
-   * E TERMINA AQUI — TAMBÉM SÓ AQUI.
+   * E TERMINA AQUI — PELO CLIQUE OU, SEM PENDÊNCIA, SOZINHA.
    *
-   * Nenhuma etapa fecha a investigação sozinha. Quem declara o encerramento é
-   * uma pessoa, e nem ela consegue encerrar o que não concluiu nada: a
-   * suficiência responde antes.
+   * Até 2026-10-02 valia "nenhuma etapa fecha a investigação sozinha; só o
+   * clique". Decisão do dono em 2026-10-02 (D9, "automático nos três"): a
+   * análise que termina sem pendência finaliza sozinha — encadeada ao fim do
+   * handler da análise, depois da releitura do servidor, nunca num efeito de
+   * render — e a IA organiza o artigo-modelo em seguida. Com pendência nada
+   * congela, a tela diz por quê e este botão continua sendo o caminho.
+   *
+   * O que não mudou: ninguém encerra o que não concluiu nada — a suficiência
+   * responde antes, e o clique e o automático passam pela MESMA rotina abaixo.
    */
   const finalizeInvestigation = async () => {
     const target = activeRadarItem;
     const data = activeWorkbenchData;
     if (!target || !data) { setNotice("Selecione um artigo antes de finalizar a investigação."); return; }
+    await finalizarInvestigacaoGoogle(target, data);
+  };
+
+  /**
+   * ====== 2026-10-02 · O CONGELAMENTO DO GOOGLE, UMA ROTINA SÓ ======
+   *
+   * O botão entrega a linha e o modelo do render, que são recentes para um
+   * clique. O automático (D9) entrega a linha RELIDA DO SERVIDOR e o modelo
+   * montado sobre ela: dentro do handler da análise, o render ainda descreve
+   * a amostra de antes. Daqui para baixo é o mesmo caminho para os dois —
+   * suficiência, bundle, escrita de autoridade, readback e a IA do
+   * artigo-modelo depois do readback.
+   */
+  const finalizarInvestigacaoGoogle = async (
+    target: RadarItem,
+    data: ReturnType<typeof rowWorkbenchData>,
+    /** Presente só no automático: a frase da análise, que o desfecho continua. */
+    automatico?: { antes: string },
+  ) => {
+    /*
+     * 2026-10-02 · No automático, a recusa continua a frase da análise e diz
+     * que nada congelou sozinho — com o motivo e o botão que continua.
+     */
+    const recusar = (motivo: string) =>
+      setNotice(automatico ? `${automatico.antes} ${radarAutoFinalizePendingNotice(motivo, "Finalizar pesquisa")}` : motivo);
+    const continuarFrase = (frase: string) => (automatico ? `${automatico.antes} ${frase}` : frase);
     if (serpActionRef.current || serpAction || busyArticleId || reviewingArticleIdRef.current || reviewingArticleId) {
-      setNotice("Outra ação ainda está em andamento neste artigo. Aguarde a conclusão.");
+      recusar("Outra ação ainda está em andamento neste artigo. Aguarde a conclusão.");
       return;
     }
-    if (!data.analysis) { setNotice("Não existe versão de análise onde registrar a conclusão desta investigação."); return; }
+    if (!data.analysis) { recusar("Não existe versão de análise onde registrar a conclusão desta investigação."); return; }
     const investigacao = data.deepResearch;
-    if (!investigacao) { setNotice("O contexto desta investigação não foi resolvido."); return; }
+    if (!investigacao) { recusar("O contexto desta investigação não foi resolvido."); return; }
 
     const resultado = finalizeRadarDeepResearch({
       record: data.analysis.payload.deepResearch,
@@ -3320,7 +3705,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       analyzed: investigacao.observed.sample.analyzedSuccess,
       finalizedBy: sessionId(session),
     });
-    if (!resultado.ok) { setNotice(resultado.reason); return; }
+    if (!resultado.ok) { recusar(resultado.reason); return; }
 
     /*
      * FINALIZAR É CONGELAR — e congelar acontece ANTES de gravar.
@@ -3347,7 +3732,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       frozenBy: sessionId(session),
       frozenAt: resultado.record.finalizedAt || new Date().toISOString(),
     });
-    if (!congelamento.ok) { setNotice(congelamento.reason); return; }
+    if (!congelamento.ok) { recusar(congelamento.reason); return; }
 
     if (!claimSerpAction({ articleId: target.articleId, kind: "decision" })) return;
     history.capture(`Finalizar investigação de ${target.title}`);
@@ -3384,11 +3769,59 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         persistence: gravado,
         successMessage: radarFinalizeSuccessMessage({ sufficiencyLabel: suficiencia, stored: null }),
       });
-      setNotice(desfecho.message);
+      /* 2026-10-02 · no automático, a frase diz que congelou SOZINHA e que a IA vem depois. */
+      setNotice(continuarFrase(automatico && desfecho.status === "SUCCEEDED" ? `${RADAR_AUTO_FINALIZE_DONE_NOTICE} ${desfecho.message}` : desfecho.message));
       if (desfecho.status === "SUCCEEDED") setFinalizeReadback({ articleId: target.articleId, versionId: next.versionId, sufficiencyLabel: suficiencia });
+      /*
+       * 2026-10-02 · FINALIZAR INCLUI ORGANIZAR O ARTIGO-MODELO DA SERP (decisão do dono).
+       *
+       * Só depois do congelamento confirmado pelo servidor (readback): a IA
+       * organiza o pacote que ficou gravado. O botão avisou a chamada de IA. Se
+       * ela falhar, a investigação continua finalizada — nada aqui a desfaz — e
+       * o painel oferece organizar de novo.
+       */
+      if (desfecho.status === "SUCCEEDED") void organizarArtigosModeloDaSerp([target.articleId]);
     } catch (error) {
-      setNotice(radarActionOutcome({ action: "FINALIZE", error }).message);
+      setNotice(continuarFrase(radarActionOutcome({ action: "FINALIZE", error }).message));
     } finally { releaseSerpAction(target.articleId, "decision"); }
+  };
+
+  /**
+   * ====== 2026-10-02 · D9 · O GOOGLE FINALIZA SOZINHO AO FIM DA ANÁLISE — SÓ SEM PENDÊNCIA ======
+   *
+   * A regra antiga era "terminar o ANALYZE não finaliza; só o clique".
+   * Decisão do dono ("automático nos três"): o fim de `analyzeSerpSelection`,
+   * com a escrita de autoridade confirmada, chama ISTO — nunca um efeito de
+   * render.
+   *
+   * 1. relê as versões do SERVIDOR e monta a linha com elas (o `RadarItem` do
+   *    render ainda não tem a análise que acabou de ser gravada);
+   * 2. monta o modelo da linha pela MESMA função da tela, e decide com
+   *    `radarGoogleAutoFinalizeDecision` — a autoridade que habilita o botão
+   *    (Fase 1 e prontidão) mais as pendências que o automático não assume:
+   *    amostra insuficiente, intenção em conflito, consulta auxiliar que falhou;
+   * 3. sem pendência, congela pela MESMA rotina do botão; a IA do
+   *    artigo-modelo vem depois do readback, e a falha dela não desfaz nada.
+   *
+   * Com pendência, nada congela: o aviso diz por quê e o botão continua.
+   */
+  const finalizarGoogleSemPendencia = async (target: RadarItem, antes: string) => {
+    const lida = await analiseConfirmadaNoServidor(target);
+    if (!lida.ok) { setNotice(`${antes} ${radarAutoFinalizePendingNotice(lida.reason, "Finalizar pesquisa")}`); return; }
+    const linhaRelida: RadarItem = { ...target, analysisVersions: lida.analyses };
+    const dadosRelidos = rowWorkbenchData(linhaRelida);
+    const investigacao = dadosRelidos.deepResearch;
+    const decisaoAutomatica = radarGoogleAutoFinalizeDecision({
+      phase1: investigacao?.phase1,
+      finalization: investigacao?.finalization,
+      sufficiency: investigacao?.sufficiency,
+      auxiliaryFailed: investigacao?.resumption.auxiliaryFailed.length || 0,
+    });
+    if (!decisaoAutomatica.autoFinalize) {
+      setNotice(`${antes} ${radarAutoFinalizePendingNotice(decisaoAutomatica.reason, "Finalizar pesquisa")}`);
+      return;
+    }
+    await finalizarInvestigacaoGoogle(linhaRelida, dadosRelidos, { antes });
   };
 
   /*
@@ -3533,6 +3966,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const research = data.view.record.research;
     if (!claimSerpAction({ articleId: target.articleId, kind: "extract" })) return;
     setNotice("");
+    /* 2026-10-02 · D9 · a frase da análise confirmada, para o finalizar automático continuar. */
+    let analiseConfirmada: string | null = null;
     try {
       /*
        * A SELEÇÃO CURADA VAI EM LOTES — o contrato tem um teto real.
@@ -3888,9 +4323,20 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       setNotice(`${conta}. ${salvo.persistenceMode === "remote" && salvo.readbackConfirmed
         ? "Persistência remota e readback confirmados."
         : "A gravação remota não pôde ser confirmada."}`);
+      if (salvo.persistenceMode === "remote" && salvo.readbackConfirmed) analiseConfirmada = `${conta}. Análise gravada e confirmada.`;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Não foi possível analisar as referências selecionadas.");
     } finally { releaseSerpAction(target.articleId, "extract"); }
+    /*
+     * ====== 2026-10-02 · D9 · A ANÁLISE SEM PENDÊNCIA TAMBÉM FINALIZA ======
+     *
+     * Era "terminar o ANALYZE não finaliza; só o clique". Decisão do dono
+     * ("automático nos três"): só DEPOIS da escrita de autoridade confirmada e
+     * da posse da análise devolvida, a releitura do servidor decide. Sem
+     * pendência, a mesma rotina do botão congela e a IA organiza o
+     * artigo-modelo; com pendência, o aviso diz por quê e o botão continua.
+     */
+    if (analiseConfirmada) await finalizarGoogleSemPendencia(target, analiseConfirmada);
   };
   const reviewSerpForArticle = async (status: "approved" | "rejected") => {
     if (!activeRadarItem || reviewingArticleIdRef.current || reviewingArticleId || busyArticleId || serpActionRef.current || serpAction) return;
@@ -4067,6 +4513,27 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       }
     }
     setNotice(`Preparação de pautas concluída: ${prepared} pronta(s) para revisão e ${failed} falha(s) com retry independente.`);
+  };
+  /*
+   * 2026-10-02 · ORGANIZAR O ARTIGO-MODELO DA SERP, EM SÉRIE.
+   *
+   * Um artigo por vez: N artigos são N chamadas de IA, com o progresso dito. É
+   * chamada pelo finalizar já confirmado; a falha de um artigo não para os
+   * outros nem desfaz finalizar nenhum. A rota confere a investigação
+   * finalizada e o pacote congelado antes de chamar a IA.
+   */
+  const organizarArtigosModeloDaSerp = async (articleIds: string[]) => {
+    const marca = selectedBrandId;
+    if (!marca || !articleIds.length) return;
+    const resultado = await organizeRadarArticleBlueprintsInSeries({
+      articleIds,
+      organize: articleId => postRadarArticleBlueprintOrganize({ brandId: marca, articleId }),
+      onProgress: job => {
+        setBlueprintJobs(atual => ({ ...atual, [job.articleId]: job }));
+        if (job.position.total > 1 && job.state === "running") setNotice(`Organizando o artigo-modelo da SERP com a IA: ${job.position.index} de ${job.position.total}…`);
+      },
+    });
+    setNotice(radarArticleBlueprintSeriesSummary(resultado));
   };
   const approveTopicsBatch = (ids: string[]) => {
     ids.forEach(articleId => updateLocalState(articleId, current => ({ ...current, topics: { ...current.topics, state: "TOPICS_APPROVED" }, specialist: "READY_TO_SEND" })));
@@ -4473,7 +4940,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     * `localStorage` derrubava do estado uma coleta que o DataForSEO já tinha
     * entregue e cobrado. A frase agora nomeia o navegador como responsável e
     * afirma, na mesma linha, que a pesquisa não precisa ser refeita.
-    */}{pipeline.localRecoveryWarning && <div className="shrink-0 border-b border-pending/40 bg-pending/10 px-4 py-2 text-sm text-foreground" role="status" data-testid="radar-local-recovery-warning">{pipeline.localRecoveryWarning}</div>}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} brandId={selectedBrandId} videoSources={{ ...vistaDeVideos, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} writerHandoff={fronteiraDoRedator(activeRadarItem)} amazonSearch={{
+    */}{pipeline.localRecoveryWarning && <div className="shrink-0 border-b border-pending/40 bg-pending/10 px-4 py-2 text-sm text-foreground" role="status" data-testid="radar-local-recovery-warning">{pipeline.localRecoveryWarning}</div>}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} brandId={selectedBrandId} articleBlueprintJob={activeRadarItem ? blueprintJobs[activeRadarItem.articleId] ?? null : null} videoSources={{ ...vistaDeVideos, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} writerHandoff={fronteiraDoRedator(activeRadarItem)} amazonSearch={{
       run: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.amazonSearch || null : null,
       plannedQueries: planoAmazon(activeRadarItem).queries.length,
       busy: amazonBusy,
@@ -4552,6 +5019,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * já foi paga.
        */
       onAnalyze: () => void acaoAmazonSemProvider("analyze", "Não foi possível analisar a pesquisa Amazon."),
+      /* 2026-10-02 · D9 · o motivo de não ter finalizado sozinha, quando há pendência. */
+      autoFinalizePending: pendenciaDoAutomatico(activeRadarItem, "AMAZON"),
     }} youtubeSearch={{
       run: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.youtubeSearch || null : null,
       plannedQueries: activeWorkbenchData?.researchContext ? buildRadarYoutubeQueryPlan({ context: activeWorkbenchData.researchContext }).queries.length : 0,
@@ -4595,6 +5064,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       onFinalize: () => void finalizeYoutubeInvestigation(),
       onToggleVideo: (videoId: string) => void toggleYoutubeVideo(videoId),
       onReset: () => void resetYoutubeSearch(),
+      /* 2026-10-02 · D9 · o motivo de não ter finalizado sozinha, quando há pendência. */
+      autoFinalizePending: pendenciaDoAutomatico(activeRadarItem, "YOUTUBE"),
     }} googleResearch={{
       /* 2.4 · §1 · a área Google na mesma gramática, pela mesma infra. */
       sampleSummary: radarResearchSampleSummary({ payload: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload || null : null, profile: "GOOGLE" }),

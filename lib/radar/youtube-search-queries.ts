@@ -106,6 +106,15 @@ const ENQUADRAMENTO_POR_INTENCAO: Array<{ radicais: readonly string[]; modificad
 /** Sem intenção reconhecível, o enquadramento é o mais neutro que existe. */
 const ENQUADRAMENTO_PADRAO = ["como", "rotina"] as const;
 
+/**
+ * Palavras que já ENQUADRAM a busca quando a principal começa por elas (forma
+ * normalizada, sem acento). Exportado para o teste conferir a lista.
+ */
+export const RADAR_YOUTUBE_FRAMING_STARTS = [
+  "como", "o que", "oque", "por que", "porque", "pra que", "para que", "qual", "quais", "quando", "onde", "quanto", "quantos",
+  "tutorial", "passo a passo", "rotina", "resenha", "review", "comparativo", "vale a pena", "melhor", "melhores", "dicas",
+] as const;
+
 function enquadramentos(intent: string | null): { modificadores: readonly string[]; reconhecida: boolean } {
   const chave = (intent || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
   if (!chave) return { modificadores: ENQUADRAMENTO_PADRAO, reconhecida: false };
@@ -232,7 +241,31 @@ export function buildRadarYoutubeQueryPlan(input: {
       ? `A intenção declarada ("${intencao}") não corresponde a nenhum enquadramento audiovisual conhecido; a pesquisa usou o padrão neutro.`
       : "O Arquiteto não fechou a classificação de intenção; o enquadramento audiovisual usou o padrão neutro.");
   }
-  for (const modificador of enquadramento.modificadores) {
+  /*
+   * A PRINCIPAL JÁ ENQUADRADA NÃO GANHA OUTRO ENQUADRAMENTO (2026-10-02).
+   *
+   * "como atrair clientes pelo instagram" virava "como como atrair…" e "rotina
+   * como atrair…". Vale para qualquer keyword: se a principal já contém o
+   * modificador como palavra, ou já começa por uma palavra que pergunta ou
+   * enquadra (como, o que, por que, qual, tutorial, passo a passo…), o prefixo
+   * não entra, e a limitação diz que a própria principal já é a consulta
+   * enquadrada.
+   */
+  const palavrasDaPrincipal = radarYoutubeQueryKey(principal).split(" ");
+  const jaEnquadrada = RADAR_YOUTUBE_FRAMING_STARTS.some(inicio => {
+    const partes = inicio.split(" ");
+    return partes.every((parte, indice) => palavrasDaPrincipal[indice] === parte);
+  });
+  const modificadoresUteis = jaEnquadrada
+    ? []
+    : enquadramento.modificadores.filter(modificador => {
+      const partes = radarYoutubeQueryKey(modificador).split(" ");
+      return !palavrasDaPrincipal.some((_, inicio) => partes.every((parte, indice) => palavrasDaPrincipal[inicio + indice] === parte));
+    });
+  if (jaEnquadrada && enquadramento.modificadores.length) {
+    limitations.push(`A keyword principal já é uma busca enquadrada ("${principal}"); nenhum prefixo de enquadramento foi acrescentado.`);
+  }
+  for (const modificador of modificadoresUteis) {
     acrescentar({
       text: `${modificador} ${principal}`,
       origin: "AUDIOVISUAL_FRAMING",

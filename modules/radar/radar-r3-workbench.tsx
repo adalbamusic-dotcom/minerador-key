@@ -6,7 +6,7 @@ import { RADAR_R3_AREAS, type RadarR3Area, type RadarR3Model } from "@/lib/radar
 import type { RadarR6ExpertEvidenceInput, RadarR6ExpertTopicContext } from "@/lib/radar/r6-sequential";
 import { radarR4SerpStatusLabel, type RadarR4AmazonState } from "@/lib/radar/r4-queue";
 import { radarSufficiencyLabel } from "@/lib/radar/investigation-sufficiency";
-import { RADAR_PHASE1_HANDLER } from "@/lib/radar/operational-actions";
+import { RADAR_PHASE1_HANDLER, radarPhase1WithAutoFinalize } from "@/lib/radar/operational-actions";
 import { InfoHint } from "@/components/info-hint";
 import type { RadarYoutubeFrozenInvestigation } from "@/lib/radar/youtube-evidence";
 import type { RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
@@ -47,7 +47,7 @@ import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
 import { radarAuxiliaryLensLabel, radarCanonicalLensLabel, radarFrozenLensView } from "./radar-serp-lens-view";
 import { radarCandidateEvidenceLabel } from "./radar-subject-turn-view";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
-import { RadarArticleBlueprintPanel } from "./radar-article-blueprint-panel";
+import { RadarArticleBlueprintPanel, radarPhase1WithArticleBlueprint, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
 
 /** A cobertura de lentes da SERP canônica viva, para a linha da consulta central. */
 function lenteDaCanonica(research: SerpResearchSnapshot | null | undefined) {
@@ -133,6 +133,12 @@ type RadarR3WorkbenchProps = {
   /** Traz para a tela a coleta real já gravada. É leitura: não consulta provider. */
   onRecoverSerp?: () => void;
   onFinalizeInvestigation?: () => void;
+  /**
+   * 2026-10-02 · A organização do artigo-modelo da SERP que a página pediu
+   * depois do finalizar (em curso, feita ou com falha). Só mostra: quem chama a
+   * IA é a página, depois do readback do finalizar.
+   */
+  articleBlueprintJob?: RadarArticleBlueprintJob | null;
   /** A curadoria do universo pesquisado: marcar (rascunho) e confirmar (escrita). */
   /** Zera a investigação deste artigo de teste. Não toca nos fundamentos. */
   onResetInvestigation?: () => void;
@@ -402,6 +408,8 @@ export type RadarYoutubeSearchTab = {
   onToggleVideo?: (videoId: string) => void;
   onFinalize?: () => void;
   onReset?: () => void;
+  /** 2026-10-02 · D9 · por que a coleta não finalizou sozinha. `null` sem pendência. */
+  autoFinalizePending?: string | null;
 };
 
 /**
@@ -448,6 +456,8 @@ export type RadarAmazonSearchTab = {
   onAnalyze?: () => void;
   onFinalize?: () => void;
   onReset?: () => void;
+  /** 2026-10-02 · D9 · por que a coleta/análise não finalizou sozinha. `null` sem pendência. */
+  autoFinalizePending?: string | null;
 };
 
 /**
@@ -530,7 +540,7 @@ function WriterHandoff({ tab }: { tab: RadarWriterHandoffTab }) {
   </div>;
 }
 
-function DeepResearch({ view, busy, searchMode, researchProjection, researchBlueprint, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover, youtubeSearch, amazonSearch, writerHandoff, googleResearch, evidenceExtras, canonicalLens = null }: { canonicalLens?: { snapshotId: string; label: string } | null; view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; researchProjection?: RadarResearchProfileProjection | null; researchBlueprint?: RadarCompetitiveBlueprintView | null; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void; youtubeSearch?: RadarYoutubeSearchTab; amazonSearch?: RadarAmazonSearchTab; writerHandoff?: RadarWriterHandoffTab; googleResearch?: RadarGoogleResearchTab; evidenceExtras?: React.ReactNode }) {
+function DeepResearch({ view, busy, searchMode, researchProjection, researchBlueprint, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover, youtubeSearch, amazonSearch, writerHandoff, googleResearch, evidenceExtras, articleBlueprint = null, canonicalLens = null }: { articleBlueprint?: React.ReactNode; canonicalLens?: { snapshotId: string; label: string } | null; view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; researchProjection?: RadarResearchProfileProjection | null; researchBlueprint?: RadarCompetitiveBlueprintView | null; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void; youtubeSearch?: RadarYoutubeSearchTab; amazonSearch?: RadarAmazonSearchTab; writerHandoff?: RadarWriterHandoffTab; googleResearch?: RadarGoogleResearchTab; evidenceExtras?: React.ReactNode }) {
   /*
    * ====== 1.2 · §1 · O PERFIL MANDA NESTA SEÇÃO INTEIRA ======
    *
@@ -655,6 +665,7 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
       onToggleVideo={youtubeSearch.onToggleVideo}
       onFinalize={youtubeSearch.onFinalize}
       onReset={youtubeSearch.onReset}
+      autoFinalizePending={youtubeSearch.autoFinalizePending}
     />}
 
     {/*
@@ -688,7 +699,11 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
       onAnalyze={amazonSearch.onAnalyze}
       onFinalize={amazonSearch.onFinalize}
       onReset={amazonSearch.onReset}
+      autoFinalizePending={amazonSearch.autoFinalizePending}
     />}
+
+    {/* 2026-10-02 · nas abas de acréscimo (YouTube, Amazon), o artigo-modelo da SERP continua à mão, depois do painel delas. */}
+    {!areaGoogle && articleBlueprint && <div className="mt-3">{articleBlueprint}</div>}
 
     {areaGoogle && <>
 
@@ -706,6 +721,15 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
     {view.articleModel.sections.length > 0 && <div className="mt-3">
       <RadarArticleModelSection model={view.articleModel} />
     </div>}
+
+    {/*
+      * 2026-10-02 · O ARTIGO-MODELO DA SERP, LOGO ABAIXO DO ESQUELETO.
+      *
+      * Era um painel à parte, depois da área inteira. O dono decidiu que ele é
+      * parte da SERP: o modelo acima é o esqueleto que a SERP monta; este é o
+      * mesmo esqueleto organizado pela IA, que ele aprova.
+      */}
+    {articleBlueprint && <div className="mt-3">{articleBlueprint}</div>}
 
     {/* §19 · a decisão, logo depois do que se decide. */}
     {writerHandoff && <WriterHandoff tab={writerHandoff} />}
@@ -1194,7 +1218,18 @@ function DisabledAreaCard({ area }: { area: RadarR3Area }) {
  * O tooltip carrega EXPLICAÇÃO. `blockedReason` e `hint` continuam no texto
  * visível ao lado, nunca escondidos atrás do ⓘ.
  */
-function Phase1Button({ acao, busy, onTrigger }: { acao: RadarPhase1Action; busy: boolean; onTrigger: () => void }) {
+function Phase1Button({ acao: daFase1, busy, onTrigger }: { acao: RadarPhase1Action; busy: boolean; onTrigger: () => void }) {
+  /*
+   * 2026-10-02 · D9 (dono): a análise que termina sem pendência também
+   * finaliza e chama a IA. O botão de análise diz isso no rótulo e no ⓘ,
+   * antes do clique. Ação, id e handler continuam os da Fase 1.
+   */
+  const resolvida = radarPhase1WithAutoFinalize(daFase1);
+  /*
+   * 2026-10-02 · finalizar inclui a organização do artigo-modelo da SERP: o
+   * rótulo e o ⓘ dizem a chamada de IA. Ação, id e handler continuam os da Fase 1.
+   */
+  const acao = radarPhase1WithArticleBlueprint(resolvida);
   return <span className="inline-flex items-center gap-1.5">
     <button type="button" data-testid="radar-deep-research-button" data-action-id={acao.id} className={primaryButton} disabled={!acao.enabled || busy} onClick={onTrigger} title={acao.blockedReason || undefined}>{acao.label}</button>
     {acao.info && <InfoHint title={acao.label} description={acao.info} side="top" align="end" />}
@@ -1354,7 +1389,7 @@ function ReportSummaryPanel({ model }: { model: RadarR3Model }) {
   </section>;
 }
 
-export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, writerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, onResetInvestigation, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
+export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, writerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, articleBlueprintJob = null, onResetInvestigation, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
   const [expandedArea, setExpandedArea] = useState<RadarR3Area | null>(null);
 
   /*
@@ -1463,8 +1498,13 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
           * sempre estiveram: consolidar a superfície do Google não pode apagar
           * a consulta dos outros perfis.
           */}
-        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)} />}
-        {model.deepResearch?.finalizedBundle && brandId && articleId && <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} />}
+        {/*
+          * 2026-10-02 · o artigo-modelo da SERP entra NA Pesquisa, logo abaixo do
+          * modelo do artigo (era um painel solto depois da área). Só existe com a
+          * investigação finalizada: ele organiza o pacote congelado.
+          */}
+        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)}
+          articleBlueprint={model.deepResearch.finalizedBundle && brandId && articleId ? <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} job={articleBlueprintJob} /> : null} />}
         {/*
           * AMAZON NÃO É UM LUGAR SEPARADO — é um dos destinos da pesquisa.
           *

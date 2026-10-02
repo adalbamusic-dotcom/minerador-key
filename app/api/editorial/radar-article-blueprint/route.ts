@@ -18,7 +18,15 @@ import { StructuredAIError } from "@/lib/server/structured-ai";
  *   - "generate": 1 chamada de IA, paga, por clique explícito (`confirmPaid: true`);
  *   - "edit": a edição do dono vira outra versão;
  *   - "approve": aprova a versão do pacote vigente (decisão humana).
+ *
+ * 2026-10-02 · "generate" é ORGANIZAR o artigo-modelo da SERP: a tela o pede
+ * logo depois de "Finalizar pesquisa" (o botão avisa a chamada de IA) ou pelo
+ * painel "Artigo-modelo da SERP". Resposta cortada ou fora do formato ganha UMA
+ * nova tentativa (uma chamada a mais); por isso o teto da rota cobre as duas.
  */
+
+/* Route segment config do Next 16 (docs/01-app/.../route-segment-config/maxDuration). */
+export const maxDuration = 300;
 
 const noStore = { "Cache-Control": "no-store" };
 

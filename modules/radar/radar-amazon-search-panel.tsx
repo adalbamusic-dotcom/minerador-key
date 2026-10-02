@@ -6,9 +6,10 @@ import type { RadarAmazonFrozenInvestigation } from "@/lib/radar/amazon-evidence
 import type { RadarResearchProvenancePayload } from "@/lib/radar/research-read-model";
 import type { RadarResearchPackageRecord } from "@/lib/radar/research-package";
 import { radarPackageHeadline } from "@/lib/radar/research-package";
-import type { RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
+import { radarProfileActionLabel, radarProfileManualStepLabel, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
 import type { RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
 import { RADAR_RESEARCH_SOURCE_ROLE_LABELS } from "@/lib/radar/research-profile";
+import { radarAutoFinalizeButtonLabel, radarAutoFinalizePendingNotice, radarAutoFinalizeStartNote, radarFinalizeWithAiLabel } from "@/lib/radar/operational-actions";
 import { RadarCompetitiveBlueprintSection } from "./radar-competitive-blueprint";
 import { RadarProfileBlueprintSection } from "./radar-profile-blueprint";
 import type { RadarEditorialProfileModel } from "@/lib/radar/editorial-profile-model";
@@ -72,6 +73,14 @@ export type RadarAmazonSearchPanelProps = {
   /** §25 · o congelamento, por decisão humana. */
   onFinalize?: () => void;
   onReset?: () => void;
+  /**
+   * 2026-10-02 · D9 · POR QUE A COLETA NÃO FINALIZOU SOZINHA.
+   *
+   * Coleta sem pendência analisa e congela sozinha, e a IA organiza o
+   * artigo-modelo. Com pendência nada congela, e a tela diz o motivo ao lado
+   * dos botões manuais, que continuam. `null` quando não há pendência.
+   */
+  autoFinalizePending?: string | null;
   /**
    * ============ §4 e §5 · O QUE CHEGA SOB DEMANDA ============
    *
@@ -148,19 +157,29 @@ function PacoteDaPesquisa({ pacote, busy, counts, onRetrySupport }: {
           : <span className="text-warning" data-testid="radar-amazon-support-failed">
             {apoio.failureReason || "não foi coletado"}
           </span>}
+        {/*
+          * 2026-10-02 · D9 · O RETRY DO APOIO TAMBÉM PODE FINALIZAR — e diz isso.
+          *
+          * O apoio é, em geral, a pendência que segurava o congelamento.
+          * Coletado, o handler encadeia o automático (analisar → congelar →
+          * IA do artigo-modelo). O acréscimo vai no rótulo e a explicação no
+          * title, antes do clique — como no botão da coleta. O nome vem da
+          * tabela da projeção: é o mesmo que o aviso de pendência aponta.
+          */}
         {apoio.status !== "COLLECTED" && <button
           type="button"
           className={`${button} ml-2`}
           disabled={busy}
           onClick={() => onRetrySupport?.()}
+          title={radarAutoFinalizeStartNote("coleta do apoio")}
           data-testid="radar-amazon-retry-support"
-        >Tentar novamente apoio Google</button>}
+        >{radarAutoFinalizeButtonLabel(radarProfileActionLabel("RETRY_SUPPORT", "AMAZON"))}</button>}
       </li>}
     </ul>
   </section>;
 }
 
-export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReason, pacote, projecao, blueprintView, editorialModel, evidenceExtras, targetSetup, counts, frozen, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onRetrySupport, onAnalyze, onFinalize, onReset }: RadarAmazonSearchPanelProps) {
+export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReason, pacote, projecao, blueprintView, editorialModel, evidenceExtras, targetSetup, counts, frozen, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onRetrySupport, onAnalyze, onFinalize, onReset, autoFinalizePending = null }: RadarAmazonSearchPanelProps) {
   const finalizada = projecao.state === "FINALIZED";
   /*
    * A CORRIDA EFETIVA — a do payload quando ela veio, a buscada quando não.
@@ -236,13 +255,22 @@ export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReaso
           * Reabrir continua possível — e é o que parece: uma ação com
           * consequência declarada.
           */}
+        {/*
+          * 2026-10-02 · D9 · O BOTÃO DA COLETA DIZ QUE ELA TAMBÉM FINALIZA.
+          *
+          * Coleta sem pendência → análise (sem provider) → congelamento →
+          * IA do artigo-modelo, sem clique no meio. A coleta já era paga; o
+          * acréscimo (+ 1 chamada de IA) vai no rótulo, e a explicação inteira
+          * no title e na linha abaixo, antes do clique.
+          */}
         {!finalizada && projecao.canStart && projecao.state !== "READY" && <button
           type="button"
           className={primary}
           disabled={busy || Boolean(blockedReason) || plannedQueries === 0}
           onClick={() => onStart?.()}
+          title={radarAutoFinalizeStartNote("coleta")}
           data-testid="radar-amazon-start"
-        >{busy ? "Coletando…" : projecao.state === "FAILED" ? "Tentar novamente Pesquisa Amazon" : "Iniciar Pesquisa Amazon"}</button>}
+        >{busy ? "Coletando…" : radarAutoFinalizeButtonLabel(projecao.state === "FAILED" ? "Tentar novamente Pesquisa Amazon" : "Iniciar Pesquisa Amazon")}</button>}
 
         {/*
           * §23 · ANALISAR SÓ EXISTE COM PESQUISA PRONTA — e ele não gasta nada.
@@ -256,23 +284,38 @@ export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReaso
           className={primary}
           disabled={busy}
           onClick={() => onAnalyze?.()}
+          title={radarAutoFinalizeStartNote("análise")}
           data-testid="radar-amazon-analyze"
         /*
          * §16 · O RÓTULO VEM DA PROJEÇÃO, e não daqui.
          *
          * A barra de ação e a tabela precisam dizer a mesma coisa; duas
          * fontes de texto para a mesma decisão divergem na primeira mudança.
+         *
+         * 2026-10-02 · D9 · o [Analisar] confirmado encadeia o automático:
+         * sem pendência, a investigação congela e a IA organiza o
+         * artigo-modelo. O botão diz isso antes do clique (rótulo e title),
+         * como o "Analisar concorrência" do Google. E o nome é o da AÇÃO que
+         * ele dispara: quando a projeção recomenda a análise, é o rótulo dela;
+         * com o apoio falho ela recomenda repetir o apoio, e este botão — que
+         * analisa — se chamava como o retry do card. Aí o nome sai da mesma
+         * tabela da projeção, pela ação de análise.
          */
-        >{busy ? "Analisando…" : projecao.nextAction.label}</button>}
+        >{busy ? "Analisando…" : radarAutoFinalizeButtonLabel(projecao.nextAction.id === "ANALYZE_RESEARCH" ? projecao.nextAction.label : radarProfileActionLabel("ANALYZE_RESEARCH", projecao.profile))}</button>}
 
-        {/* §24 · FINALIZE só depois de haver blueprint para congelar. */}
+        {/*
+          * §24 · FINALIZE só depois de haver blueprint para congelar.
+          *
+          * 2026-10-02 · o botão manual continua (D9) e, como no Google,
+          * finalizar inclui a IA que organiza o artigo-modelo (D7).
+          */}
         {!finalizada && projecao.state === "READY_TO_FINALIZE" && <button
           type="button"
           className={button}
           disabled={busy}
           onClick={() => onFinalize?.()}
           data-testid="radar-amazon-finalize"
-        >Finalizar investigação</button>}
+        >{radarFinalizeWithAiLabel("Finalizar investigação")}</button>}
 
         {/*
           * ============ 1.1 · §24 · UMA AÇÃO DE RETRY, E SÓ UMA ============
@@ -305,6 +348,18 @@ export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReaso
         </button>}
       </div>
     </div>
+
+    {/*
+      * 2026-10-02 · D9 · O AUTOMÁTICO, DITO NA TELA.
+      *
+      * Antes da coleta, a linha diz que ela também analisa, finaliza e chama a
+      * IA. Depois, se algo pediu olho humano, a linha diz POR QUE nada
+      * congelou — ao lado dos botões manuais, que continuam.
+      */}
+    {!finalizada && !busy && autoFinalizePending && <p className="text-sm text-warning" role="status" data-testid="radar-amazon-auto-finalize-pending">
+      {radarAutoFinalizePendingNotice(autoFinalizePending, radarProfileManualStepLabel(projecao))}
+    </p>}
+    {!finalizada && !run && <p className="text-sm text-text-muted" data-testid="radar-amazon-auto-finalize-note">{radarAutoFinalizeStartNote("coleta")}</p>}
 
     {/*
       * §27 · O QUE SUBSTITUI OS BOTÕES: o estado, dito.

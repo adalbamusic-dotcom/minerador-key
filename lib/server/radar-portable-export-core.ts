@@ -30,9 +30,10 @@ import {
 } from "@/lib/radar/portable-export-batch";
 import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
 import { radarVideoExportYoutubeOf } from "@/lib/radar/portable-video-export";
-import { readApprovedRadarArticleBlueprints } from "@/lib/server/radar-article-blueprint-read";
+import { readRadarArticleBlueprintsForExport } from "@/lib/server/radar-article-blueprint-read";
 import { readRadarVideoUsagesForExport } from "@/lib/server/radar-video-usage-read";
 import { readRadarBrandVoice } from "@/lib/server/radar-brand-voice";
+import { readRadarArticleAuthors } from "@/lib/server/radar-article-authors";
 import type { RadarBrandVoiceState } from "@/lib/radar/brand-voice";
 import type { RadarWritingPublication } from "@/lib/radar/portable-writing-export";
 import type { RadarCanonicalItemIdentity } from "@/lib/server/radar-canonical-authorities";
@@ -383,6 +384,8 @@ export async function assembleRadarPortableExport(input: {
        * o bundle e os snapshots já estão em memória.
        */
       lentesCongeladas: radarPortableExportFrozenLensesInput({ profile: perfil, bundle, analysis: payload, records: snapshots.records }),
+      /* 2026-10-02 · os especialistas das contribuições aceitas: a autoria é lida pelo id, fora do hash. */
+      expertIds: [...new Set((bundle.specialist?.items || []).map(item => item.expert?.id).filter((id): id is string => Boolean(id)))],
       /*
        * 2026-10-02 · A PESQUISA DO YOUTUBE, EM QUALQUER PERFIL.
        *
@@ -499,12 +502,21 @@ export async function assembleRadarPortableExport(input: {
     : null;
 
   /*
-   * 2026-10-02 · O ARTIGO-MODELO APROVADO, por lote e preso ao pacote vigente.
-   * Leitura de contexto: falhou ou não há tabela, o CSV sai como antes.
+   * 2026-10-02 · O ARTIGO-MODELO (aprovado ou, sem ele, a proposta), por lote e
+   * preso ao pacote vigente. Leitura de contexto: falhou ou não há tabela, o CSV
+   * sai como antes.
    */
   if (montadas.length) {
-    const aprovados = await readApprovedRadarArticleBlueprints(input.supabase as never, input.brandId, montadas.map(item => ({ articleId: item.articleId, bundleHash: item.bundleHash })));
-    for (const item of montadas) item.blueprint = aprovados.get(item.articleId) ?? null;
+    /* 2026-10-02 · quem assina (E-E-A-T): o especialista da aba Especialista, lido ao vivo. */
+    const autores = await readRadarArticleAuthors(input.supabase as never, input.brandId, montadas.map(item => ({ articleId: item.articleId, expertIds: item.expertIds || [] })));
+    if (autores) for (const item of montadas) item.entrada.authors = autores.get(item.articleId) || [];
+    /*
+     * 2026-10-02 · o aprovado do pacote vigente; sem ele, a proposta da IA mais
+     * nova — o CSV já sai com a estrutura organizada, marcada como proposta
+     * (`approval`, que nunca é gravado). O Redator continua lendo só o aprovado.
+     */
+    const artigosModelo = await readRadarArticleBlueprintsForExport(input.supabase as never, input.brandId, montadas.map(item => ({ articleId: item.articleId, bundleHash: item.bundleHash })));
+    for (const item of montadas) item.blueprint = artigosModelo.get(item.articleId) ?? null;
   }
 
   const planoDaSelecao = !plano && input.selectionSiloContext

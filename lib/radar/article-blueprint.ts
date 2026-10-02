@@ -1,8 +1,22 @@
 import { z } from "zod";
 import type { RadarPortableExportInput } from "./portable-export.ts";
 import type { RadarSiloExportWritingContext } from "./portable-silo-export.ts";
-import { radarBrandVoiceOwnUrls, radarBrandVoiceRef, radarBrandVoiceStatusLabel, type RadarBrandVoice, type RadarBrandVoiceRef } from "./brand-voice.ts";
+import type { RadarPortableSection } from "./portable-read-model.ts";
+import {
+  radarBrandVoiceBySlot,
+  radarBrandVoiceOwnUrls,
+  radarBrandVoiceRef,
+  radarBrandVoiceStatusLabel,
+  radarBrandVoiceText,
+  type RadarBrandVoice,
+  type RadarBrandVoiceRef,
+  type RadarBrandVoiceSection,
+} from "./brand-voice.ts";
 import { RADAR_VIDEO_USAGE_HINT, RADAR_VIDEO_USAGE_LABEL, type RadarVideoUsage } from "./video-library.ts";
+import { RADAR_EDITORIAL_OUTPUT_LABELS } from "./multimodal-blueprint.ts";
+import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "./competitive-blueprint.ts";
+import { radarSemanticStems } from "./semantic-concept-model.ts";
+import { radarOutOfScopeMatcher } from "./out-of-scope.ts";
 import {
   radarWritingCleanUrl,
   radarWritingCompareKey,
@@ -26,65 +40,233 @@ import {
  * pacote e transforma a versão APROVADA nas colunas do CSV. As medidas não são da
  * IA: vêm dos concorrentes comparáveis, contadas aqui.
  *
+ * ===== 2026-10-02 · O ARTIGO-MODELO PASSA A SER PARTE DA SERP (decisão do dono) =====
+ *
+ * "A SERP que faz esse trabalho, a IA só ajuda a organizar, e não é para
+ * escrever algo à parte." Três mudanças, todas aditivas:
+ *
+ * 1. A ENTRADA É O ESQUELETO DA SERP. As seções do modelo editorial que a SERP
+ *    já entrega ganham ids (M1…Mn) e vão à IA como ponto de partida. Cada seção
+ *    organizada diz de onde vem (`from`: ids M e/ou de evidência); a IA renomeia,
+ *    ordena, junta e descarta com motivo (`discarded`) — e só acrescenta o que
+ *    uma evidência sustenta. Seção sem origem fica marcada para o dono.
+ * 2. O PEDIDO E A RESPOSTA SÃO COMPACTOS. A primeira tentativa real falhou com
+ *    "JSON invalido": o pedido levava a Skill de voz inteira (~18 mil
+ *    caracteres) e a resposta passou do teto e veio cortada. A voz vai em
+ *    trechos por assunto, com teto; a resposta tem tetos menores e o esquema
+ *    CORTA o que passa em vez de recusar a chamada paga inteira.
+ * 3. A PROPOSTA JÁ SAI NO CSV, MARCADA. Enquanto o dono não aprova, as colunas
+ *    saem com "PROPOSTA DA IA — aguardando aprovação no Radar"; aprovada, a
+ *    marca some. A marca vem de `approval`, que o export põe no objeto que passa
+ *    e que NUNCA é gravado.
+ *
+ * Vale para qualquer tipo de página (artigo, review, landing page, página de
+ * serviço, SiloPage) e qualquer marca: o tipo da unidade vai à IA e manda na
+ * forma da planta.
+ *
  * Domínio puro: sem fetch, sem storage, sem provider, sem React.
  */
 
+/* ============================== os tetos ============================== */
+
+/**
+ * 2026-10-02 · OS TETOS DA PLANTA COMPACTA.
+ *
+ * Oito seções com até quatro H3 cabem num artigo que vence a SERP e numa
+ * resposta de ~4 mil tokens. `maxTokens` é o mesmo que o modelo já aceitou na
+ * primeira chamada real (8000): o que cortou a resposta foi o tamanho pedido,
+ * não o teto.
+ */
+export const RADAR_ARTICLE_BLUEPRINT_LIMITS = Object.freeze({
+  sections: 8,
+  h3: 4,
+  explain: 3,
+  bold: 5,
+  terms: 6,
+  evidence: 6,
+  from: 6,
+  internalLinks: 3,
+  externalLinks: 2,
+  visual: 4,
+  alternatives: 2,
+  complementary: 8,
+  eeat: 6,
+  warnings: 5,
+  discarded: 8,
+  skeleton: 16,
+  textChars: 320,
+  shortChars: 160,
+  termChars: 80,
+  metaChars: 320,
+  imagePromptChars: 400,
+  voiceChars: Object.freeze({ cta: 1_200, voice: 1_200, avoid: 800, visual: 600 }),
+  maxTokens: 8_000,
+});
+
+const t = (valor: unknown): string => (typeof valor === "string" ? valor.trim() : "");
+const corte = (valor: string, limite: number) => (valor.length > limite ? `${valor.slice(0, limite - 1).trimEnd()}…` : valor);
+const limpo = (valor: string | null | undefined) => radarWritingDecodeEntities(t(valor)).replace(/\s+/g, " ").trim();
+const EH_FAQ = /\b(faq|perguntas frequentes|d[uú]vidas frequentes)\b/i;
+
 /* ============================== a resposta da IA ============================== */
 
+/* Os campos da edição humana continuam RECUSANDO o que passa do teto: quem edita vê o erro. */
 const texto = z.string().trim().min(1).max(600);
 const curto = z.string().trim().min(1).max(220);
-const ids = z.array(z.string().trim().min(1).max(12)).max(12).default([]);
+
+/*
+ * 2026-10-02 · A RESPOSTA DA IA É CORTADA, NÃO RECUSADA.
+ *
+ * Um texto com dez caracteres a mais ou uma quinta seção de H3 recusava a
+ * resposta inteira — uma chamada paga perdida por enfeite. Agora o que passa do
+ * teto é cortado aqui; o que não tem forma nenhuma continua recusado.
+ */
+const L = RADAR_ARTICLE_BLUEPRINT_LIMITS;
+
+/*
+ * 2026-10-02 · AS FORMAS COMUNS DA RESPOSTA SÃO NORMALIZADAS, NÃO RECUSADAS.
+ *
+ * Revisão da frente: o esquema ainda recusava a resposta inteira por formas que
+ * a IA usa com frequência e que têm leitura única — `null` onde cabia lista,
+ * um texto solto onde cabia lista ("h3": "Rotina da noite"), ids numa frase só
+ * ("P1, P2"), um número onde cabia texto, `{ "text": … }` no lugar do texto,
+ * "Respiro 1" no lugar de "R1", ou um item de lista sem forma (um link sem
+ * candidato) derrubando as outras. Agora cada uma vira a forma combinada; o
+ * item de lista sem forma sai sozinho (o servidor confere o resto depois). O
+ * que decide a planta e não veio continua recusado.
+ */
+const CHAVES_DE_TEXTO = ["text", "texto", "title", "titulo", "label", "value", "heading", "statement", "item", "id"] as const;
+const comoTexto = (valor: unknown): string | null => {
+  if (typeof valor === "string") return valor;
+  if (typeof valor === "number" && Number.isFinite(valor)) return String(valor);
+  if (valor && typeof valor === "object" && !Array.isArray(valor)) {
+    const objeto = valor as Record<string, unknown>;
+    for (const chave of CHAVES_DE_TEXTO) if (typeof objeto[chave] === "string") return objeto[chave] as string;
+  }
+  return null;
+};
+/* Texto: lista vira uma frase (itens unidos), objeto vira o texto dele, número vira texto. */
+const textual = (valor: unknown): unknown => {
+  if (valor === null || valor === undefined || typeof valor === "string") return valor;
+  if (Array.isArray(valor)) return valor.map(comoTexto).filter((item): item is string => Boolean(item && item.trim())).join(" · ");
+  return comoTexto(valor) ?? valor;
+};
+/* Lista: `null` é lista vazia; um valor solto é lista de um. */
+const comoLista = (valor: unknown): unknown => (valor === null || valor === undefined ? [] : Array.isArray(valor) ? valor : [valor]);
+/* Ids: "P1, P2" numa frase só são dois ids; numa lista, cada item é lido como texto. */
+const idsBrutos = (valor: unknown): unknown => (typeof valor === "string"
+  ? valor.split(/[,;]+/)
+  : (comoLista(valor) as unknown[]).map(comoTexto).filter((item): item is string => item !== null));
+/* Objeto que veio como texto solto: o texto vai para o campo principal ("angle": "…" é o statement). */
+const objetoDe = (campo: string) => (valor: unknown): unknown => (typeof valor === "string" ? { [campo]: valor } : valor);
+
+/* O que decide a planta (H1, H2, pergunta, resposta, promessa, CTA, prompt) continua obrigatório. */
+const textoIa = (limite: number) => z.preprocess(textual, z.string().trim().min(1)).transform(valor => corte(valor, limite));
+/* O que só explica (motivo, direção, ALT, legenda) pode vir vazio sem derrubar a resposta. */
+const textoOuVazioIa = (limite: number) => z.preprocess(textual, z.string().nullable().optional()).transform(valor => corte(t(valor), limite));
+const opcionalIa = (limite: number) => z.preprocess(textual, z.string().nullable().optional()).transform(valor => {
+  const limpa = t(valor);
+  return limpa ? corte(limpa, limite) : null;
+});
+/* Lista de textos: item vazio sai, o resto é cortado no teto. */
+const textosIa = (limite: number, maximo: number) => z.preprocess(valor => (comoLista(valor) as unknown[]).map(comoTexto), z.array(z.string().nullable()))
+  .transform(itens => itens.map(t).filter(Boolean).map(valor => corte(valor, limite)).slice(0, maximo));
+/* "S1 (resultado orgânico)" ainda é S1: o id é o primeiro pedaço. */
+const soOId = (valor: unknown) => t(valor).split(/[\s,;·()[\]]+/)[0]?.slice(0, 12) || "";
+const idIa = z.preprocess(textual, z.string()).transform(soOId);
+const idOpcionalIa = z.preprocess(valor => (Array.isArray(valor) ? comoTexto(valor[0]) : textual(valor)), z.string().nullable().optional()).transform(valor => soOId(valor) || null);
+const idsDe = (itens: readonly string[], limite: number) => [...new Set(itens.map(soOId).filter(Boolean))].slice(0, limite);
+const idsIa = z.preprocess(idsBrutos, z.array(z.string())).transform(itens => idsDe(itens, 12));
+/* Lista de objetos: item sem forma sai sozinho, em vez de derrubar a resposta inteira. */
+const listaIa = <T extends z.ZodType>(item: T, limite: number) => z.preprocess(comoLista, z.array(z.unknown()))
+  .transform(itens => itens.flatMap(valor => {
+    const lido = item.safeParse(valor);
+    return lido.success ? [lido.data as z.output<T>] : [];
+  }).slice(0, limite));
+/* "Respiro 1", "respiro-2", "capa": a vaga do plano visual na forma combinada (CAPA, R1…R3). */
+const slotIa = z.preprocess(valor => {
+  const lido = textual(valor);
+  if (typeof lido !== "string") return lido;
+  const respiro = lido.match(/^\s*(?:respiro|r)\s*[-_ ]?\s*(\d)\b/i);
+  if (respiro) return `R${respiro[1]}`;
+  return /^\s*(?:capa|cover)\b/i.test(lido) ? "CAPA" : lido;
+}, z.string()).transform(soOId);
+const paragrafosIa = z.unknown().optional().transform(valor => {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero > 0 ? Math.min(12, Math.max(1, Math.round(numero))) : 2;
+});
+
+const SecaoIaSchema = z.object({
+  h2: textoIa(L.shortChars),
+  readerQuestion: textoIa(L.shortChars),
+  answerFirst: textoIa(L.textChars),
+  /** 2026-10-02 · De onde a seção vem: ids M do esqueleto da SERP e/ou ids de evidência. Ausente em versões antigas. */
+  from: z.preprocess(valor => (valor === undefined ? undefined : idsBrutos(valor)), z.array(z.string()).optional())
+    .transform(itens => (itens ? idsDe(itens, L.from) : undefined)),
+  h3: textosIa(L.shortChars, L.h3),
+  explain: textosIa(L.textChars, L.explain),
+  paragraphs: paragrafosIa,
+  bold: textosIa(L.termChars, L.bold),
+  terms: textosIa(L.termChars, L.terms),
+  evidence: idsIa,
+  specialist: idOpcionalIa,
+  video: idOpcionalIa,
+  internalLinks: listaIa(z.object({ candidate: idIa, anchor: textoIa(L.shortChars), reason: textoOuVazioIa(L.shortChars) }), L.internalLinks),
+  externalLinks: listaIa(z.object({ claim: textoIa(L.textChars), sourceType: textoOuVazioIa(L.shortChars), source: idOpcionalIa }), L.externalLinks),
+  image: idOpcionalIa,
+  practical: opcionalIa(L.textChars),
+});
+
+const DescarteIaSchema = z.object({ id: idIa, reason: opcionalIa(L.shortChars) });
 
 export const RadarArticleBlueprintAiSchema = z.object({
-  keywordPlan: z.object({
-    reading: texto,
-    principalPlacement: z.array(curto).max(6).default([]),
-    complementary: z.array(z.object({ keyword: curto, placement: curto, reason: texto })).max(12).default([]),
-    slugNote: z.string().trim().max(600).nullable().default(null),
-  }),
-  reader: texto,
-  promise: texto,
-  angle: z.object({ statement: texto, evidence: ids }),
+  /* 2026-10-02 · o plano de keywords só explica: ausente vira vazio; texto solto vira a leitura. */
+  keywordPlan: z.preprocess(valor => (valor === null || valor === undefined ? {} : objetoDe("reading")(valor)), z.object({
+    reading: textoOuVazioIa(L.textChars),
+    principalPlacement: z.preprocess(valor => (typeof valor === "string" ? valor.split(/[,;]+/) : valor), textosIa(L.termChars, 6)),
+    complementary: listaIa(z.preprocess(objetoDe("keyword"), z.object({ keyword: textoIa(L.shortChars), placement: textoOuVazioIa(L.shortChars), reason: textoOuVazioIa(L.shortChars) })), L.complementary),
+    slugNote: opcionalIa(L.textChars),
+  })),
+  reader: textoIa(L.textChars),
+  promise: textoIa(L.textChars),
+  angle: z.preprocess(objetoDe("statement"), z.object({ statement: textoIa(L.textChars), evidence: idsIa })),
   title: z.object({
-    h1: curto,
-    alternatives: z.array(curto).max(3).default([]),
-    seoTitle: curto,
-    metaDescription: z.string().trim().min(1).max(320),
+    h1: textoIa(L.shortChars),
+    alternatives: textosIa(L.shortChars, L.alternatives),
+    seoTitle: textoIa(L.shortChars),
+    metaDescription: textoIa(L.metaChars),
   }),
-  opening: z.object({ readerQuestion: curto, direction: texto, evidence: ids }),
-  sections: z.array(z.object({
-    h2: curto,
-    readerQuestion: curto,
-    answerFirst: texto,
-    h3: z.array(curto).max(6).default([]),
-    explain: z.array(texto).max(8).default([]),
-    paragraphs: z.number().int().min(1).max(20),
-    bold: z.array(curto).max(8).default([]),
-    terms: z.array(curto).max(10).default([]),
-    evidence: ids,
-    specialist: z.string().trim().max(12).nullable().default(null),
-    video: z.string().trim().max(12).nullable().default(null),
-    internalLinks: z.array(z.object({ candidate: z.string().trim().min(1).max(12), anchor: curto, reason: texto })).max(4).default([]),
-    externalLinks: z.array(z.object({ claim: texto, sourceType: curto, source: z.string().trim().max(12).nullable().default(null) })).max(3).default([]),
-    image: z.string().trim().max(12).nullable().default(null),
-    practical: z.string().trim().max(600).nullable().default(null),
-  })).min(3).max(12),
+  opening: z.preprocess(objetoDe("readerQuestion"), z.object({ readerQuestion: textoIa(L.shortChars), direction: textoOuVazioIa(L.textChars), evidence: idsIa })),
+  /* O servidor corta em `sections` (com aviso); aqui só o teto de segurança. */
+  sections: z.array(SecaoIaSchema).min(1).transform(itens => itens.slice(0, 12)),
+  /**
+   * 2026-10-02 · As seções do esqueleto da SERP que a IA descartou, com o motivo. Ausente em versões antigas.
+   * `null` é "nada descartado" (lista vazia); um id solto ("M3") é um descarte sem motivo.
+   */
+  discarded: z.preprocess(valor => (valor === undefined ? undefined : (comoLista(valor) as unknown[]).map(item => (typeof item === "string" ? { id: item } : item))),
+    z.array(z.unknown()).optional())
+    .transform(itens => (itens
+      ? itens.flatMap(item => {
+        const lido = DescarteIaSchema.safeParse(item);
+        return lido.success ? [lido.data] : [];
+      }).slice(0, L.discarded)
+      : undefined)),
   closing: z.object({
-    turn: texto,
-    specialist: z.string().trim().max(12).nullable().default(null),
-    cta: texto,
-    nextStep: z.string().trim().max(600).nullable().default(null),
+    turn: textoIa(L.textChars),
+    specialist: idOpcionalIa,
+    cta: textoIa(L.textChars),
+    nextStep: opcionalIa(L.textChars),
   }),
-  visual: z.array(z.object({
-    slot: z.string().trim().min(1).max(12),
-    section: z.string().trim().max(220).nullable().default(null),
-    concept: texto,
-    prompt: z.string().trim().min(1).max(1200),
-    alt: curto,
-    caption: curto,
-  })).min(1).max(5),
-  eeat: z.array(texto).max(6).default([]),
-  warnings: z.array(texto).max(8).default([]),
+  visual: listaIa(z.object({
+    slot: slotIa,
+    section: opcionalIa(L.shortChars),
+    concept: textoOuVazioIa(L.shortChars),
+    prompt: textoIa(L.imagePromptChars),
+    alt: textoOuVazioIa(L.shortChars),
+    caption: textoOuVazioIa(L.shortChars),
+  }), 6),
+  eeat: textosIa(L.textChars, L.eeat),
+  warnings: textosIa(L.textChars, L.warnings),
 });
 export type RadarArticleBlueprintAi = z.infer<typeof RadarArticleBlueprintAiSchema>;
 
@@ -112,6 +294,36 @@ export type RadarArticleBlueprintMeasures = {
   lists: number | null;
 };
 
+/**
+ * 2026-10-02 · UMA SEÇÃO DO ESQUELETO DA SERP, COM ID.
+ *
+ * Sai do modelo editorial que a SERP já monta (`p.editorial.sections`): o
+ * título, a pergunta que responde, o que cobrir e as marcas do ArticleDNA. A IA
+ * cita pelo id; o servidor confere; o CSV e a tela dizem de onde cada seção do
+ * plano veio. Seção que toca assunto fora do escopo vem marcada para descarte.
+ */
+export type RadarArticleBlueprintSkeletonItem = {
+  id: string;
+  level: 2 | 3;
+  parent: string | null;
+  heading: string;
+  readerQuestion: string | null;
+  cover: string[];
+  mustCover: boolean;
+  needsSource: boolean;
+  needsSpecialist: boolean;
+  outOfScope: boolean;
+};
+
+/** 2026-10-02 · O tipo da unidade (artigo, SiloPage, landing page…) e o formato que a SERP pediu. */
+export type RadarArticleBlueprintUnit = { type: string | null; label: string; format: string | null };
+
+/** 2026-10-02 · Quem assina: o especialista da aba Especialista (`entrada.authors`). */
+export type RadarArticleBlueprintAuthor = { name: string; specialty: string | null; source: string };
+
+/** 2026-10-02 · Um trecho da Skill de voz, por assunto, com teto. */
+export type RadarArticleBlueprintVoiceExcerpt = { title: string; text: string };
+
 export type RadarArticleBlueprintBrief = {
   article: {
     principal: string;
@@ -125,8 +337,14 @@ export type RadarArticleBlueprintBrief = {
     slug: string | null;
     publishedUrl: string | null;
     mustCover: string[];
+    /** 2026-10-02 · Aditivo: o tipo da unidade e o formato. */
+    unit: RadarArticleBlueprintUnit;
   };
   silo: { label: string; centralEntity: string | null; excludedTopics: string[] } | null;
+  /** 2026-10-02 · Aditivo: o esqueleto da SERP (M1…Mn). Vazio quando a SERP não deixou seções. */
+  skeleton: RadarArticleBlueprintSkeletonItem[];
+  /** 2026-10-02 · Aditivo: o título de trabalho, a promessa e o fecho do esqueleto, como vieram. */
+  skeletonFrame: { workingTitle: string | null; promise: string | null; closing: string | null };
   evidence: RadarArticleBlueprintEvidence[];
   linkCandidates: RadarArticleBlueprintLinkCandidate[];
   graphLinks: string[];
@@ -143,12 +361,21 @@ export type RadarArticleBlueprintBrief = {
   outOfScope: string[];
   competitorTitles: string[];
   measures: RadarArticleBlueprintMeasures;
-  /** 2026-10-02 · A Skill de voz CORRENTE da Marca (Adendo C; spec da Marca §24), inteira. Sem ela, null. */
-  brandVoice: { ref: RadarBrandVoiceRef; markdown: string } | null;
+  /**
+   * 2026-10-02 · Aditivo: quem assina. `null` = a autoria não foi lida (nada
+   * muda); lista vazia = não há especialista definido.
+   */
+  authors: RadarArticleBlueprintAuthor[] | null;
+  /**
+   * A Skill de voz CORRENTE da Marca (Adendo C; spec da Marca §24). Sem ela, null.
+   *
+   * 2026-10-02 · Em TRECHOS por assunto, com teto (CTA e oferta, voz e
+   * vocabulário, o que não fazer, plano visual) — não mais o Markdown inteiro,
+   * que levou o pedido a ~18 mil caracteres só de voz.
+   */
+  brandVoice: { ref: RadarBrandVoiceRef; excerpts: RadarArticleBlueprintVoiceExcerpt[] } | null;
 };
 
-const t = (valor: unknown): string => (typeof valor === "string" ? valor.trim() : "");
-const corte = (valor: string, limite: number) => (valor.length > limite ? `${valor.slice(0, limite - 1).trimEnd()}…` : valor);
 const mediana = (valores: number[]): number | null => {
   if (!valores.length) return null;
   const ordem = [...valores].sort((a, b) => a - b);
@@ -177,6 +404,125 @@ export function radarArticleBlueprintMeasures(structures: ReadonlyArray<{ words:
   };
 }
 
+/* ============================== o fora do escopo ============================== */
+
+/**
+ * 2026-10-02 · O QUE TOCA UM ASSUNTO FORA DO ESCOPO — para qualquer marca e assunto.
+ *
+ * Comparar a frase inteira deixava passar "Como prospectar clientes pelo
+ * Instagram com o Instagram Shopping" contra "Ative o Instagram Shopping". O
+ * rótulo fora do escopo perde o que não o distingue — as palavras do próprio
+ * artigo (principal, complementares, Assunto), o verbo de abertura e a palavra
+ * genérica de formato — e o que sobra ("shopping") decide.
+ *
+ * 2026-10-02 · RÉGUA ÚNICA (`out-of-scope.ts`), a mesma do CSV para escrever e
+ * do CSV de vídeo. Antes esta pedia TODAS as palavras distintivas e aceitava a
+ * frase contida mesmo sem palavra distintiva; a do CSV pedia metade. Um texto
+ * saía de um lugar e ficava no outro. E "Dicas de Instagram" num artigo sobre
+ * Instagram tirava qualquer texto com "dicas": a palavra genérica sozinha não
+ * decide mais. A assinatura desta função não mudou.
+ */
+export function radarArticleBlueprintOutOfScopeMatcher(rotulos: readonly string[], nucleo: readonly string[]): (valor: string | null | undefined) => boolean {
+  return radarOutOfScopeMatcher({ labels: rotulos, core: nucleo });
+}
+
+/* ============================== o tipo da unidade ============================== */
+
+const TIPO_DA_UNIDADE: Record<string, string> = {
+  article: "Artigo",
+  silo_page: "SiloPage (página de entrada do Silo)",
+  silopage: "SiloPage (página de entrada do Silo)",
+};
+
+/** 2026-10-02 · O tipo vem do ArticleDNA (`unitClassification.type`); o formato, do modelo da SERP. */
+function unidadeDe(entrada: RadarPortableExportInput, saida: string | null): RadarArticleBlueprintUnit {
+  const tipo = t(entrada.article.contentType) || null;
+  const chave = (tipo || "article").toLowerCase().replace(/[\s-]+/g, "_");
+  const label = TIPO_DA_UNIDADE[chave] || (tipo ? tipo.replace(/[_-]+/g, " ") : "Artigo");
+  const rotulos: Record<string, string> = { ...RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS, ...RADAR_EDITORIAL_OUTPUT_LABELS };
+  const format = entrada.profile === "YOUTUBE"
+    ? "Roteiro de vídeo"
+    : saida ? rotulos[saida] || saida.replace(/_/g, " ").toLowerCase() : null;
+  return { type: tipo, label, format: format && format !== label ? format : null };
+}
+
+/* ============================== o esqueleto da SERP ============================== */
+
+function esqueletoDaSerp(secoes: readonly RadarPortableSection[], tocaFora: (valor: string | null | undefined) => boolean): RadarArticleBlueprintSkeletonItem[] {
+  const saida: RadarArticleBlueprintSkeletonItem[] = [];
+  const visitar = (lista: readonly RadarPortableSection[], pai: string | null) => {
+    for (const secao of lista) {
+      if (saida.length >= L.skeleton) return;
+      const heading = corte(limpo(secao.heading), L.shortChars);
+      /* FAQ não integra o fluxo (AGENTS §13): a seção nem chega à IA. */
+      if (!heading || UUID.test(heading) || EH_FAQ.test(heading)) continue;
+      const pergunta = limpo(secao.readerQuestion);
+      const readerQuestion = pergunta && !UUID.test(pergunta) && radarWritingCompareKey(pergunta) !== radarWritingCompareKey(heading) ? corte(pergunta, L.shortChars) : null;
+      const chaves = new Set([radarWritingCompareKey(heading), radarWritingCompareKey(readerQuestion)]);
+      const cover = [...new Set(secao.coveragePoints.map(limpo).filter(item => item && !UUID.test(item) && !chaves.has(radarWritingCompareKey(item))))]
+        .slice(0, 4).map(item => corte(item, 120));
+      const id = `M${saida.length + 1}`;
+      saida.push({
+        id,
+        level: pai ? 3 : secao.level,
+        parent: pai,
+        heading,
+        readerQuestion,
+        cover,
+        mustCover: secao.mustCoverReasons.length > 0,
+        needsSource: Boolean(secao.sourceNeeded),
+        needsSpecialist: Boolean(secao.specialistRequired),
+        outOfScope: tocaFora(heading) || tocaFora(readerQuestion),
+      });
+      visitar(secao.children, id);
+    }
+  };
+  visitar(secoes, null);
+  return saida;
+}
+
+/* ============================== a voz compacta ============================== */
+
+const semAcento = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+/* Dentro de "structure" e "reader", o que fala de CTA, oferta e transição vem na frente (a régua do Redator). */
+const TITULO_DE_CTA = /\bcta\b|comercial|transicao|oferta|servico|conversao|chamada/;
+const TITULO_DE_EVITAR = /n[aã]o (fazer|usar|escrever|recomendar|cobrir)|evitar|proib|inadequad|nunca|exclus/;
+
+/**
+ * 2026-10-02 · As mesmas réguas de título, para o CSV de vídeo separar da Skill
+ * o que fala de CTA, oferta e transição comercial e o que a marca não faz.
+ */
+export const radarBrandVoiceSectionIsCommercial = (heading: string): boolean => TITULO_DE_CTA.test(semAcento(heading));
+export const radarBrandVoiceSectionIsAvoid = (heading: string): boolean => TITULO_DE_EVITAR.test(semAcento(heading));
+
+/**
+ * 2026-10-02 · A SKILL DE VOZ EM TRECHOS POR ASSUNTO, COM TETO.
+ *
+ * Os mesmos assuntos de `radarBrandVoiceBySlot`. O que a Skill proíbe vem num
+ * trecho próprio, venha de que seção vier. Seção que não entra em nenhum trecho
+ * (fontes, links, pesquisa) já chega à IA por outro caminho: as fontes X, os
+ * candidatos K e as evidências.
+ */
+function vozCompacta(voz: RadarBrandVoice): RadarArticleBlueprintVoiceExcerpt[] {
+  const por = radarBrandVoiceBySlot(voz);
+  const evitar = voz.sections.filter(secao => secao.body.trim() && TITULO_DE_EVITAR.test(semAcento(secao.heading)));
+  const ehEvitar = new Set(evitar);
+  const fora = (lista: readonly RadarBrandVoiceSection[]) => lista.filter(secao => !ehEvitar.has(secao));
+  const ehCta = (secao: RadarBrandVoiceSection) => (TITULO_DE_CTA.test(semAcento(secao.heading)) ? 0 : 1);
+  const cta = fora([...por.structure, ...por.reader]).sort((a, b) => ehCta(a) - ehCta(b));
+  const trecho = (title: string, secoes: readonly RadarBrandVoiceSection[], limite: number) => ({ title, text: corte(radarBrandVoiceText(secoes), limite) });
+  return [
+    trecho("CTA, oferta e transição comercial", cta, L.voiceChars.cta),
+    trecho("Voz, vocabulário e títulos", fora([...por.voice, ...por.title]), L.voiceChars.voice),
+    trecho("O que não fazer", evitar, L.voiceChars.avoid),
+    trecho("Plano visual", fora(por.visual), L.voiceChars.visual),
+  ].filter(item => item.text);
+}
+
+/* ============================== o pacote ============================== */
+
+const PRIORIDADE: Record<string, string> = { HIGH: "prioridade alta", MEDIUM: "prioridade média", LOW: "prioridade baixa" };
+
 export function buildRadarArticleBlueprintBrief(input: {
   entrada: RadarPortableExportInput;
   silo: RadarSiloExportWritingContext | null;
@@ -190,34 +536,65 @@ export function buildRadarArticleBlueprintBrief(input: {
   const volume = new Map(p.keywords.map(item => [radarWritingCompareKey(item.keyword), typeof item.volume === "number" ? item.volume : null]));
   const evidence: RadarArticleBlueprintEvidence[] = [];
   const add = (prefixo: string, kind: string, valor: string) => {
-    const limpo = corte(radarWritingDecodeEntities(valor).replace(/\s+/g, " ").trim(), 260);
-    if (!limpo || UUID.test(limpo)) return;
-    evidence.push({ id: `${prefixo}${evidence.filter(item => item.id.startsWith(prefixo)).length + 1}`, kind, text: limpo });
+    const texto = corte(radarWritingDecodeEntities(valor).replace(/\s+/g, " ").trim(), 260);
+    if (!texto || UUID.test(texto)) return;
+    evidence.push({ id: `${prefixo}${evidence.filter(item => item.id.startsWith(prefixo)).length + 1}`, kind, text: texto });
   };
+
+  /* 2026-10-02 · o fora do escopo pelas palavras que o distinguem do artigo, não pela frase inteira. */
+  const foraDoEscopo = p.serp.editorialCandidates.filter(item => item.verdict === "OUT_OF_SCOPE").map(item => radarWritingDecodeEntities(item.observedLabel));
+  const outOfScope = [...foraDoEscopo, ...(input.silo?.excludedTopics || [])];
+  const nucleo = [principal, ...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements, p.assunto?.phrase || ""].filter(Boolean);
+  const tocaFora = radarArticleBlueprintOutOfScopeMatcher(outOfScope, nucleo);
 
   const serp = p.serpObservada;
   for (const item of serp?.organic.slice(0, 10) || []) {
     const url = radarWritingCleanUrl(item.url);
     add("S", "resultado orgânico", `${item.title || item.domain} · ${url && !UUID.test(url) ? url : item.domain}${item.snippet?.thirdPartyExcerpt ? ` · "${corte(item.snippet.thirdPartyExcerpt, 140)}"` : ""}`);
   }
-  for (const item of serp?.peopleAlsoAsk || []) if (t(item.question) && !radarWritingRhetoricalQuestion(t(item.question))) add("P", "Pessoas também perguntam", t(item.question));
+
+  /*
+   * 2026-10-02 · AS PERGUNTAS: PAA, amostra e descoberta, sem repetição.
+   *
+   * Pergunta retórica de fecho de concorrente ("Aprendeu como…?") e pergunta
+   * que toca assunto fora do escopo não chegam à IA: ela não tem como usar sem
+   * errar.
+   */
+  const perguntas: Array<{ kind: string; question: string; text: string }> = [];
+  for (const item of serp?.peopleAlsoAsk || []) perguntas.push({ kind: "Pessoas também perguntam", question: t(item.question), text: t(item.question) });
   for (const item of p.serp.questions.slice().sort((a, b) => b.pages - a.pages).slice(0, 12)) {
-    if (!radarWritingRhetoricalQuestion(item.question)) add("P", "pergunta da amostra", `${item.question} (${item.pages} de ${item.sampleSize} páginas)`);
+    perguntas.push({ kind: "pergunta da amostra", question: item.question, text: `${item.question} (${item.pages} de ${item.sampleSize} páginas)` });
   }
-  for (const item of serp?.relatedSearches || []) if (t(item.term)) add("B", "busca relacionada", t(item.term));
+  const ordemDePrioridade: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+  for (const item of (p.descoberta?.questionCoverageRequirements || []).slice().sort((a, b) => (ordemDePrioridade[a.priority] ?? 3) - (ordemDePrioridade[b.priority] ?? 3)).slice(0, 6)) {
+    perguntas.push({ kind: `pergunta a responder (${PRIORIDADE[item.priority] || "descoberta"})`, question: item.question, text: item.question });
+  }
+  for (const item of (p.descoberta?.answerableUnits || []).filter(unidade => unidade.importance === "CORE").slice(0, 4)) {
+    perguntas.push({ kind: "necessidade central da busca", question: item.questionOrNeed, text: item.questionOrNeed });
+  }
+  const perguntasVistas = new Set<string>();
+  for (const item of perguntas) {
+    const chave = radarWritingCompareKey(item.question);
+    if (!chave || perguntasVistas.has(chave) || radarWritingRhetoricalQuestion(item.question) || tocaFora(item.question)) continue;
+    perguntasVistas.add(chave);
+    add("P", item.kind, item.text);
+  }
+
+  for (const item of serp?.relatedSearches || []) if (t(item.term) && !tocaFora(item.term)) add("B", "busca relacionada", t(item.term));
   if (serp?.features?.aiOverview?.shown) add("A", "AI Overview", `aparece; cita ${serp.features.aiOverview.citedSources.slice(0, 5).map(fonte => fonte.domain).join(", ")}`);
-  const foraDoEscopo = p.serp.editorialCandidates.filter(item => item.verdict === "OUT_OF_SCOPE").map(item => radarWritingDecodeEntities(item.observedLabel));
-  const chavesFora = new Set(foraDoEscopo.map(radarWritingCompareKey));
   for (const item of p.serp.concepts.filter(conceito => conceito.status !== "ISOLATED").slice(0, 20)) {
-    if (!chavesFora.has(radarWritingCompareKey(item.label))) add("C", "conceito da amostra", `${item.label} (${item.sourceCount} de ${item.sampleSize} páginas)`);
+    if (!tocaFora(item.label)) add("C", "conceito da amostra", `${item.label} (${item.sourceCount} de ${item.sampleSize} páginas)`);
   }
-  for (const item of p.serp.gaps.slice(0, 6)) add("G", "lacuna", `${item.subject} (${item.pagesCovering} de ${item.sampleSize} páginas cobrem)`);
-  for (const item of p.serp.differentiations.slice(0, 6)) if (!chavesFora.has(radarWritingCompareKey(item.subject))) add("D", "diferencial possível", `${item.subject} (${item.pagesCovering} páginas cobrem)`);
+  for (const item of p.serp.gaps.slice(0, 6)) if (!tocaFora(item.subject)) add("G", "lacuna", `${item.subject} (${item.pagesCovering} de ${item.sampleSize} páginas cobrem)`);
+  for (const item of p.serp.differentiations.slice(0, 6)) if (!tocaFora(item.subject)) add("D", "diferencial possível", `${item.subject} (${item.pagesCovering} páginas cobrem)`);
   for (const item of serp?.features?.videos || []) add("Y", "vídeo na SERP", `${item.title || "vídeo"} · ${item.url}`);
   if (serp?.diagnostic) {
     if (serp.diagnostic.dominantFormats.length) add("F", "formato dominante", serp.diagnostic.dominantFormats.join(", "));
     for (const oportunidade of serp.diagnostic.opportunities.slice(0, 4)) add("O", "oportunidade da SERP", oportunidade);
   }
+  /* 2026-10-02 · as lentes (desktop e mobile, por exemplo): o que muda entre elas no topo. */
+  const lentesDaPrincipal = p.lentes?.keywords.find(item => item.role === "principal") || p.lentes?.keywords[0];
+  if (lentesDaPrincipal?.divergence.statement) add("L", "lentes da SERP", lentesDaPrincipal.divergence.statement);
 
   /* Os destinos possíveis dos links: o Silo inteiro, a SiloPage e o que o grafo aprovado pede. */
   const linkCandidates: RadarArticleBlueprintLinkCandidate[] = [];
@@ -315,10 +692,17 @@ export function buildRadarArticleBlueprintBrief(input: {
       slug: t(publicacao?.slug) || t(entrada.article.slug) || null,
       publishedUrl: publicacao?.published || entrada.article.publishedProtected ? t(publicacao?.publishedUrl) || t(entrada.article.canonical) || null : null,
       mustCover: p.dna.mustCover,
+      unit: unidadeDe(entrada, p.editorial.editorialOutput),
     },
     silo: input.silo && input.silo.kind === "silo"
       ? { label: input.silo.label, centralEntity: input.silo.centralEntity, excludedTopics: input.silo.excludedTopics }
       : null,
+    skeleton: esqueletoDaSerp(p.editorial.sections, tocaFora),
+    skeletonFrame: {
+      workingTitle: limpo(p.editorial.title) || null,
+      promise: limpo(p.editorial.readerPromise) ? corte(limpo(p.editorial.readerPromise), L.textChars) : null,
+      closing: limpo(p.editorial.conclusion) ? corte(limpo(p.editorial.conclusion), L.textChars) : null,
+    },
     evidence,
     linkCandidates,
     graphLinks: [
@@ -329,43 +713,69 @@ export function buildRadarArticleBlueprintBrief(input: {
     unsupportedClaims: radarWritingUnsupportedClaims(p.autoridade, p.serp).map(item => item.afirmacao).slice(0, 8),
     specialist: especialista,
     videos,
-    outOfScope: [...foraDoEscopo, ...(input.silo?.excludedTopics || [])],
+    outOfScope,
     competitorTitles: (serp?.organic || []).map(item => t(item.title)).filter(Boolean),
     measures: radarArticleBlueprintMeasures((p.concorrentes?.competitors || []).filter(item => item.comparable).map(item => item.structure)),
-    brandVoice: input.brandVoice ? { ref: radarBrandVoiceRef(input.brandVoice), markdown: input.brandVoice.markdown.slice(0, 24_000) } : null,
+    authors: entrada.authors ? entrada.authors.map(autor => ({ name: autor.name, specialty: autor.specialty, source: autor.source })) : null,
+    brandVoice: input.brandVoice ? { ref: radarBrandVoiceRef(input.brandVoice), excerpts: vozCompacta(input.brandVoice) } : null,
   };
 }
 
 /* ============================== o pedido à IA ============================== */
 
-export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief): { system: string; user: string } {
+const linhaDoEsqueleto = (item: RadarArticleBlueprintSkeletonItem) => [
+  `${item.level === 3 ? "  " : ""}${item.id} · H${item.level}${item.parent ? ` (de ${item.parent})` : ""} · ${item.heading}`,
+  ...(item.readerQuestion ? [`responde: ${item.readerQuestion}`] : []),
+  ...(item.cover.length ? [`cobrir: ${item.cover.join(" · ")}`] : []),
+  ...(item.mustCover ? ["obrigatória pelo ArticleDNA"] : []),
+  ...(item.needsSource ? ["precisa de fonte"] : []),
+  ...(item.needsSpecialist ? ["pede revisão profissional"] : []),
+  ...(item.outOfScope ? ["FORA DO ESCOPO: descarte"] : []),
+].join(" · ");
+
+const nomesDosAutores = (autores: readonly RadarArticleBlueprintAuthor[]) =>
+  autores.map(autor => `${autor.name}${autor.specialty ? ` (${autor.specialty})` : ""}`).join(" e ");
+
+/**
+ * O PEDIDO À IA. `short` é a SEGUNDA tentativa, depois de uma resposta cortada
+ * ou fora do formato (2026-10-02): mesmas regras, saída menor.
+ */
+export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, opcoes: { short?: boolean } = {}): { system: string; user: string } {
   const m = brief.measures;
+  const a = brief.article;
   const system = [
-    "Você é o editor-chefe de SEO de uma agência brasileira. Monte o ARTIGO-MODELO que vence a SERP: a planta completa do artigo ideal, para um redator escrever.",
-    "Responda SOMENTE com JSON no formato pedido, em português do Brasil.",
+    "Você é o editor-chefe de SEO de uma agência brasileira. A SERP já montou o esqueleto do conteúdo que vence a busca (seções M1…Mn) e reuniu as evidências. Sua tarefa é ORGANIZAR esse esqueleto no ARTIGO-MODELO: a planta que um redator vai seguir. Você organiza; não escreve o texto e não inventa.",
+    "Responda SOMENTE com JSON no formato pedido, em português do Brasil, com frases curtas e diretas.",
     "Regras:",
-    "1. Use só o que está no pacote. Cite evidências pelos ids dados (S, P, B, A, C, G, D, Y, F, O). Nunca invente id, número, estudo, autor, depoimento ou URL.",
+    "1. Use só o que está no pacote. Cite pelos ids dados (M, S, P, B, A, C, G, D, Y, F, O, L). Nunca invente id, número, estudo, autor, depoimento ou URL.",
     "2. A SERP manda na intenção (Google e respostas de IA): responda a intenção que a busca mostra, com o recorte do leitor da marca. Se a amostra for de outro público, diga como adaptar ao leitor.",
-    "3. Dê sentido a TODAS as keywords: onde cada uma entra (H1, H2, H3, corpo) e por quê, sem forçar repetição.",
-    "4. Não cubra o que está em 'fora do escopo'. Sem seção de perguntas frequentes (FAQ): as perguntas entram nas seções.",
+    "3. Dê sentido a TODAS as keywords: onde cada uma entra (H1, H2, H3, corpo) e por quê, sem forçar repetição. O H1 traz a keyword principal inteira, em frase natural.",
+    "4. ORGANIZE O ESQUELETO: cada seção diz de onde vem no campo \"from\" (ids M do esqueleto e/ou ids de evidência). Pode renomear, reordenar, juntar e descartar seções M — o descarte vai em \"discarded\" com o motivo. Só acrescente seção nova quando uma evidência (P, C, G, D, B, A, O) a sustenta, e cite-a. Não cubra o que está em 'fora do escopo'. Sem seção de perguntas frequentes (FAQ): as perguntas entram nas seções.",
     "5. Cada seção abre respondendo a pergunta dela (resposta clara, citável por IA), depois explica. Negrito só em termo ou entidade, nunca frase inteira.",
     "6. Links internos: só para os candidatos K dados, com âncora natural e o motivo. Inclua o link para o Pilar quando o artigo for Suporte e para a SiloPage quando houver. Distribua pelas seções certas.",
     "7. Links externos: só onde uma afirmação precisa de reforço; use a fonte X quando existir; sem fonte X, source = null (o redator vai obter uma fonte oficial).",
-    "8. Abertura: a dúvida real do leitor (nunca pergunta retórica de concorrente). Fechamento e CTA na voz do especialista (id E) quando houver, levando ao próximo passo no Silo.",
-    "9. Plano visual: slot CAPA e 2 ou 3 respiros (R1, R2, R3), cada respiro ligado a uma seção, com prompt de imagem, ALT e legenda. Sem texto na imagem, sem marca de terceiros, sem antes/depois.",
+    "8. Abertura: a dúvida real do leitor sobre a keyword principal (nunca pergunta retórica de concorrente nem pergunta de outro assunto). Fechamento e CTA na voz do especialista (id E) quando houver, levando ao próximo passo no Silo.",
+    "9. Plano visual: exatamente uma CAPA e 2 ou 3 respiros (R1, R2, R3), cada respiro ligado a uma seção, com prompt de imagem de até 400 caracteres, ALT e legenda. Sem texto na imagem, sem marca de terceiros, sem antes/depois.",
     "10. Não copie títulos nem frases de concorrentes. URL, slug e canonical publicados não mudam.",
     `11. Medidas: use como referência os concorrentes comparáveis (${m.comparablePages} páginas): ${m.words.median ? `mediana de ${m.words.median} palavras (P25 ${m.words.p25}, P75 ${m.words.p75})` : "palavras não medidas"}, H2 ${m.h2 ?? "?"}, H3 ${m.h3 ?? "?"}, parágrafos ${m.paragraphs ?? "?"}, imagens ${m.images ?? "?"}. Supere em profundidade útil, não em enchimento.`,
-    "12. VOZ DA MARCA: quando o pacote trouxer a Skill de voz, ela manda na forma: promessa, H1, títulos, abertura, CTA, transição comercial, vocabulário e prompts de imagem seguem a Skill; o que ela proíbe não entra. O CTA usa a oferta da Skill e, se couber, o candidato 'Página da marca'. A Skill não muda keyword, intenção nem escopo do artigo.",
+    "12. VOZ DA MARCA: quando o pacote trouxer os trechos da Skill de voz, eles mandam na forma: promessa, H1, títulos, abertura, CTA, transição comercial, vocabulário e prompts de imagem seguem a Skill; o que ela proíbe não entra. O CTA usa a oferta da Skill e, se couber, o candidato 'Página da marca'. A Skill não muda keyword, intenção nem escopo do artigo.",
     /* 2026-10-02 · Adendo B (D6): a regra só entra quando algum vídeo tem modo; sem modo, o pedido é o de antes. */
     ...(brief.videos.some(item => item.usage)
       ? ["13. VÍDEOS DA MARCA (id V): o modo de uso de cada um é decisão do dono e manda. Incorporar: o vídeo pode virar uma seção com ele incorporado (campo video da seção). Citação: fala literal, entre aspas, atribuída ao vídeo e com o tempo. Apoio: o trecho sustenta um ponto, atribuído ao vídeo e com o tempo. Contexto: só para entender o assunto; NÃO é citável e não vai no campo video. Sugestão de pauta: ideia de seção ou pergunta a validar contra a SERP; não é citável e não vai no campo video. Vídeo marcado 'Não usar' não está no pacote e não entra."]
       : []),
+    `14. TIPO DA UNIDADE: a planta segue o tipo (aqui: ${a.unit.label}${a.unit.format ? `, formato ${a.unit.format}` : ""}). Guia ou artigo responde e ensina; review ou comparativo traz critérios, prós e contras e veredito; landing page ou página de serviço traz problema, oferta, prova, objeções e CTA; SiloPage apresenta o tema e distribui para os artigos do Silo.`,
+    "15. AUTORIA (E-E-A-T): quando o pacote disser quem assina, o eeat cita essa pessoa pelo nome cadastrado, sem credencial além do cadastro; sem quem assine, diga em eeat que falta definir.",
+    `16. TAMANHO: no máximo ${L.sections} seções, ${L.h3} H3 por seção e ${L.explain} itens em explain; uma frase por campo de texto. A resposta inteira cabe em ~4 mil tokens.`,
+    ...(opcoes.short
+      ? ["SAÍDA CURTA (a resposta anterior veio cortada ou fora do formato): no máximo 5 seções, 2 H3 por seção, 2 itens em explain, sem alternatives, uma frase curta por campo e prompts de imagem de até 250 caracteres. Feche o JSON."]
+      : []),
   ].join("\n");
 
-  const a = brief.article;
   const linhas = (titulo: string, itens: string[]) => (itens.length ? [`## ${titulo}`, ...itens.map(item => `- ${item}`), ""] : []);
+  const moldura = brief.skeletonFrame;
   const user = [
-    "# Artigo",
+    "# Unidade",
+    `Tipo: ${a.unit.label}${a.unit.format ? ` · formato: ${a.unit.format}` : ""}`,
     `Keyword principal: ${a.principal}`,
     ...a.complementary.map(item => `Keyword complementar (${item.role}): ${item.keyword}${item.volume !== null ? ` · ${item.volume}/mês` : ""}`),
     ...(a.subject ? [`Assunto (tronco): ${a.subject}`] : []),
@@ -376,8 +786,21 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief): 
     ...(a.slug ? [`Slug: ${a.slug}`] : []),
     ...(a.publishedUrl ? [`Publicado em: ${a.publishedUrl} (preservar URL, slug e canonical; é atualização)`] : []),
     ...(a.mustCover.length ? [`Cobertura obrigatória: ${a.mustCover.join(" · ")}`] : []),
+    ...(brief.authors
+      ? [brief.authors.length
+        ? `Quem assina (E-E-A-T): ${nomesDosAutores(brief.authors)} — especialista da aba Especialista${brief.authors.every(autor => autor.source === "only_active") ? " (único ativo da marca; a confirmar)" : ""}`
+        : "Quem assina (E-E-A-T): nenhum especialista definido na aba Especialista"]
+      : []),
     "",
     ...(brief.silo ? [`# Silo: ${brief.silo.label}${brief.silo.centralEntity ? ` (tema central: ${brief.silo.centralEntity})` : ""}`, ""] : []),
+    "# Esqueleto da SERP (o ponto de partida: organize e cite pelo id M)",
+    ...(moldura.workingTitle ? [`Título de trabalho do esqueleto: ${moldura.workingTitle} (pode estar malformado; o H1 é seu, com a keyword principal)`] : []),
+    ...(moldura.promise ? [`Promessa do esqueleto: ${moldura.promise}`] : []),
+    ...(brief.skeleton.length
+      ? brief.skeleton.map(linhaDoEsqueleto)
+      : ["A SERP não deixou seções neste pacote: monte as seções só a partir das evidências (P, C, G, D) e cite-as em from."]),
+    ...(moldura.closing ? [`Fecho do esqueleto: ${moldura.closing}`] : []),
+    "",
     ...linhas("Evidências da SERP (cite pelo id)", brief.evidence.map(item => `${item.id} · ${item.kind}: ${item.text}`)),
     ...linhas("Candidatos a link interno (use o id K)", brief.linkCandidates.map(item => `${item.id} · ${item.role} · ${item.label} · ${item.destination || "sem endereço"} · ${item.status === "PUBLISHED" ? "publicado" : item.status === "PLANNED" ? "planejado" : "não resolvido"}${item.fromGraph ? " · pedido pelo grafo aprovado" : ""}`)),
     ...linhas("Grafo aprovado (links que o Arquiteto pediu)", brief.graphLinks),
@@ -386,20 +809,60 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief): 
     ...linhas("Especialista (id E; voz de quem pratica)", brief.specialist.map(item => `${item.id}${item.kind ? ` (${item.kind})` : ""}: ${item.text}`)),
     ...linhas("Vídeos da marca (id V)", brief.videos.map(item => `${item.id}: ${item.text}`)),
     ...linhas("Fora do escopo (não cobrir)", brief.outOfScope),
-    ...(brief.brandVoice ? [`# Voz da marca — Skill "${brief.brandVoice.ref.name}" v${brief.brandVoice.ref.version} (${radarBrandVoiceStatusLabel(brief.brandVoice.ref.status)} na Marca). Siga em toda a copy, no CTA e no plano visual.`, brief.brandVoice.markdown, ""] : []),
+    ...(brief.brandVoice
+      ? [
+        `# Voz da marca — Skill "${brief.brandVoice.ref.name}" v${brief.brandVoice.ref.version} (${radarBrandVoiceStatusLabel(brief.brandVoice.ref.status)} na Marca). Trechos por assunto; siga em toda a copy, no CTA e no plano visual.`,
+        ...brief.brandVoice.excerpts.flatMap(item => [`## ${item.title}`, item.text, ""]),
+      ]
+      : []),
     "# Formato da resposta (JSON)",
     JSON.stringify({
       keywordPlan: { reading: "como as keywords se atendem juntas", principalPlacement: ["H1", "primeiro parágrafo"], complementary: [{ keyword: "", placement: "H2 x", reason: "" }], slugNote: null },
       reader: "", promise: "", angle: { statement: "", evidence: ["S1"] },
       title: { h1: "", alternatives: [""], seoTitle: "até 60 caracteres", metaDescription: "até 155 caracteres" },
       opening: { readerQuestion: "", direction: "", evidence: ["P1"] },
-      sections: [{ h2: "", readerQuestion: "", answerFirst: "", h3: [""], explain: [""], paragraphs: 3, bold: ["termo"], terms: ["termo LSI"], evidence: ["C1"], specialist: null, video: null, internalLinks: [{ candidate: "K1", anchor: "", reason: "" }], externalLinks: [{ claim: "", sourceType: "fonte oficial", source: null }], image: "R1", practical: null }],
+      sections: [{ h2: "", readerQuestion: "", answerFirst: "", from: ["M1", "P2"], h3: [""], explain: [""], paragraphs: 3, bold: ["termo"], terms: ["termo LSI"], evidence: ["C1"], specialist: null, video: null, internalLinks: [{ candidate: "K1", anchor: "", reason: "" }], externalLinks: [{ claim: "", sourceType: "fonte oficial", source: null }], image: "R1", practical: null }],
+      discarded: [{ id: "M3", reason: "" }],
       closing: { turn: "", specialist: "E1", cta: "", nextStep: "" },
       visual: [{ slot: "CAPA", section: null, concept: "", prompt: "", alt: "", caption: "" }],
       eeat: [""], warnings: [""],
     }),
   ].join("\n");
   return { system, user };
+}
+
+/* ============================== quando a resposta falha ============================== */
+
+/**
+ * 2026-10-02 · POR QUE A RESPOSTA DA IA NÃO SERVIU — e se vale tentar de novo.
+ *
+ * Só três falhas autorizam UMA nova tentativa (uma chamada paga a mais, dita na
+ * tela e registrada no log): a resposta cortada pelo teto (`finish_reason`
+ * "length"), o JSON fora do formato e a resposta vazia. Tempo esgotado, quota,
+ * credencial e erro do provider não são repetidos.
+ */
+export type RadarArticleBlueprintAiFailure = "CUT" | "FORMAT" | "EMPTY";
+
+export function radarArticleBlueprintAiFailure(input: { code: string | null | undefined; finishReason: string | null | undefined }): RadarArticleBlueprintAiFailure | null {
+  if (input.finishReason === "length") return "CUT";
+  if (input.code === "AI_OUTPUT_INVALID") return "FORMAT";
+  if (input.code === "AI_PROVIDER_INVALID_RESPONSE") return "EMPTY";
+  return null;
+}
+
+/** A frase para a tela: nunca "JSON invalido" cru. */
+export function radarArticleBlueprintAiFailureMessage(falha: RadarArticleBlueprintAiFailure, chamadas: number): string {
+  const depois = chamadas > 1 ? ", mesmo depois de 1 nova tentativa com saída mais curta" : "";
+  const fim = "Tente de novo; a investigação continua finalizada.";
+  if (falha === "CUT") return `A resposta da IA veio cortada (passou do tamanho máximo)${depois}. ${fim}`;
+  if (falha === "EMPTY") return `A IA não devolveu conteúdo${depois}. ${fim}`;
+  return `A IA respondeu fora do formato combinado${depois}. ${fim}`;
+}
+
+/** O que fica registrado na versão quando a segunda tentativa salvou a organização. */
+export function radarArticleBlueprintRetryNote(falha: RadarArticleBlueprintAiFailure): string {
+  const motivo = falha === "CUT" ? "veio cortada (passou do tamanho máximo)" : falha === "EMPTY" ? "veio vazia" : "veio fora do formato";
+  return `A primeira resposta da IA ${motivo}; o servidor fez 1 nova tentativa pedindo saída mais curta (2 chamadas de IA nesta organização).`;
 }
 
 /* ============================== a correção do servidor ============================== */
@@ -433,6 +896,13 @@ function mesmoVideo(a: { title: string; url: string | null }, b: { title: string
   return Boolean(chave) && !TITULOS_GENERICOS.has(chave) && chave === radarWritingCompareKey(b.title);
 }
 
+/**
+ * 2026-10-02 · O estado que o export informa ao montar as colunas. NUNCA é
+ * gravado: a versão no banco tem estado próprio (`state`), e o payload aprovado
+ * é imutável.
+ */
+export type RadarArticleBlueprintApproval = "APPROVED" | "DRAFT";
+
 export type RadarArticleBlueprintPayload = {
   schemaVersion: 1;
   blueprint: RadarArticleBlueprintAi;
@@ -451,6 +921,23 @@ export type RadarArticleBlueprintPayload = {
   videos?: RadarArticleBlueprintVideo[];
   /** 2026-10-02 · Aditivo: a versão da Skill de voz que a IA recebeu. Ausente em versões antigas. */
   brandVoice?: RadarBrandVoiceRef | null;
+  /** 2026-10-02 · Aditivo: o esqueleto da SERP que a IA organizou (ids M). Ausente em versões antigas. */
+  skeleton?: RadarArticleBlueprintSkeletonItem[];
+  /** 2026-10-02 · Aditivo: o tipo da unidade que a planta segue. Ausente em versões antigas. */
+  unit?: RadarArticleBlueprintUnit;
+  /**
+   * 2026-10-02 · NÃO PERSISTIDO: o export diz se esta é a versão aprovada ou a
+   * proposta da IA ainda sem aprovação. Ausente = como antes (aprovada).
+   */
+  approval?: RadarArticleBlueprintApproval;
+  /**
+   * 2026-10-02 · NÃO PERSISTIDO: o que o servidor achou ao conferir a resposta
+   * da IA (`validation` da versão, que já está gravada). O export o lê junto da
+   * PROPOSTA, para o CSV dizer as pendências; ausente na aprovada.
+   */
+  validation?: string[];
+  /** 2026-10-02 · NÃO PERSISTIDO: a origem da versão lida pelo export (proposta da IA ou edição do dono). */
+  origin?: "ai" | "human_edit";
 };
 
 export class RadarArticleBlueprintInvalidError extends Error {
@@ -463,16 +950,57 @@ export class RadarArticleBlueprintInvalidError extends Error {
 }
 
 /**
+ * O que vai ao banco: sem a marca de aprovação, que é do export (2026-10-02).
+ * 2026-10-02 · Nem as pendências e a origem que o export lê junto da proposta:
+ * elas já moram nas colunas da versão.
+ */
+export function radarArticleBlueprintPayloadToStore(payload: RadarArticleBlueprintPayload): RadarArticleBlueprintPayload {
+  if (!("approval" in payload) && !("validation" in payload) && !("origin" in payload)) return payload;
+  const copia = { ...payload };
+  delete copia.approval;
+  delete copia.validation;
+  delete copia.origin;
+  return copia;
+}
+
+/*
+ * 2026-10-02 · O QUE AINDA PEDE AÇÃO DO DONO, entre as notas do servidor.
+ *
+ * As notas da conferência são de dois tipos: correção já aplicada ("removida",
+ * "ignorado", "virou fonte a obter") e pendência que a correção não resolve
+ * (H1 sem a principal, abertura de outro assunto, seção sem origem, respiros
+ * a menos, título de concorrente…). Só as pendências vão ao CSV, uma a uma; as
+ * correções são contadas.
+ */
+const PEDE_ACAO = /antes de aprovar|confira|troque|reescreva|a regra pede|\balvo ~|^falta\b|n[aã]o foi usad/i;
+
+export function radarArticleBlueprintPendingNotes(notes: readonly string[]): { pending: string[]; corrected: number } {
+  const limpas = notes.map(nota => t(nota)).filter(Boolean);
+  const pending = [...new Set(limpas.filter(nota => PEDE_ACAO.test(nota)))];
+  return { pending, corrected: limpas.length - limpas.filter(nota => PEDE_ACAO.test(nota)).length };
+}
+
+const nucleoDoPacote = (brief: RadarArticleBlueprintBrief) =>
+  [brief.article.principal, ...brief.article.complementary.map(item => item.keyword), brief.article.subject || ""].filter(Boolean);
+
+/**
  * O QUE A IA DEVOLVE É CONFERIDO CONTRA O PACOTE — e corrigido, com aviso.
  *
  * Id que não existe sai; link para fora do Silo sai; URL externa sem fonte vira
  * "fonte a obter"; seção fora do escopo ou de FAQ sai. Recusar a resposta inteira
  * jogaria fora uma chamada paga por um id errado; aceitar sem conferir deixaria a
  * IA inventar. Sobra menos de três seções: aí sim, recusa.
+ *
+ * 2026-10-02 · E A ORIGEM NA SERP: a origem que não existe sai; seção sem origem
+ * nenhuma (nem M, nem evidência) fica com aviso para o dono decidir; seção do
+ * esqueleto que a IA não usou nem descartou é dita; o que toca o fora do escopo
+ * sai também do H3 e da origem.
  */
 export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief: RadarArticleBlueprintBrief): { payload: RadarArticleBlueprintPayload; notes: string[] } {
   const notes: string[] = [];
   const evidencias = new Set(brief.evidence.map(item => item.id));
+  const esqueleto = brief.skeleton || [];
+  const doEsqueleto = new Map(esqueleto.map(item => [item.id, item]));
   const candidatos = new Set(brief.linkCandidates.map(item => item.id));
   const fontes = new Set(brief.sources.map(item => item.id));
   const especialistas = new Set(brief.specialist.map(item => item.id));
@@ -482,17 +1010,14 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
    * existe, mas não vale no campo `video` da seção. Sem modo, todo V vale.
    */
   const naoCitaveis = new Map(brief.videos.filter(item => item.usage === "CONTEXT" || item.usage === "TOPIC_SUGGESTION").map(item => [item.id, item.usage!]));
-  const fora = brief.outOfScope.map(radarWritingCompareKey).filter(Boolean);
+  const nucleo = nucleoDoPacote(brief);
+  const tocaForaDoEscopo = radarArticleBlueprintOutOfScopeMatcher(brief.outOfScope, nucleo);
   const titulos = brief.competitorTitles.map(radarWritingCompareKey).filter(Boolean);
 
   const soIds = (lista: readonly string[], onde: string) => {
     const validos = lista.filter(id => evidencias.has(id));
     if (validos.length < lista.length) notes.push(`${onde}: ${lista.length - validos.length} evidência(s) com id inexistente removida(s).`);
     return validos;
-  };
-  const tocaForaDoEscopo = (valor: string) => {
-    const chave = radarWritingCompareKey(valor);
-    return fora.some(item => item.length > 3 && (chave.includes(item) || item.includes(chave)));
   };
 
   const visual = ai.visual.filter(item => /^(CAPA|R[1-3])$/i.test(item.slot)).map(item => ({ ...item, slot: item.slot.toUpperCase() }));
@@ -501,15 +1026,31 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
   if (respiros < 2) notes.push(`Plano visual com ${respiros} respiro(s): a regra pede dois ou três.`);
   const slots = new Set(visual.map(item => item.slot));
 
-  const secoes = ai.sections.flatMap(secao => {
-    if (/\b(faq|perguntas frequentes|d[uú]vidas frequentes)\b/i.test(`${secao.h2} ${secao.readerQuestion}`)) {
+  const daIa = ai.sections.length > L.sections ? ai.sections.slice(0, L.sections) : ai.sections;
+  if (daIa.length < ai.sections.length) notes.push(`A IA propôs ${ai.sections.length} seções; ficaram as ${L.sections} primeiras (teto do artigo-modelo).`);
+
+  const secoes = daIa.flatMap(secao => {
+    if (EH_FAQ.test(`${secao.h2} ${secao.readerQuestion}`)) {
       notes.push(`Seção "${secao.h2}" removida: FAQ não integra o fluxo.`);
       return [];
     }
-    if (tocaForaDoEscopo(secao.h2)) {
+    if (tocaForaDoEscopo(secao.h2) || tocaForaDoEscopo(secao.readerQuestion)) {
       notes.push(`Seção "${secao.h2}" removida: o pacote marca o assunto como fora do escopo.`);
       return [];
     }
+    const h3 = secao.h3.filter(item => !EH_FAQ.test(item) && !tocaForaDoEscopo(item));
+    if (h3.length < secao.h3.length) notes.push(`Seção "${secao.h2}": ${secao.h3.length - h3.length} H3 de FAQ ou fora do escopo removido(s).`);
+    /* 2026-10-02 · a origem na SERP: só ids que existem, e nunca uma seção M marcada fora do escopo. */
+    const origem = secao.from ?? [];
+    const conhecidos = origem.filter(id => doEsqueleto.has(id) || evidencias.has(id));
+    if (conhecidos.length < origem.length) notes.push(`Seção "${secao.h2}": ${origem.length - conhecidos.length} origem(ns) com id inexistente removida(s).`);
+    const from = conhecidos.filter(id => !doEsqueleto.get(id)?.outOfScope);
+    if (from.length < conhecidos.length) notes.push(`Seção "${secao.h2}": origem em seção da SERP marcada fora do escopo removida.`);
+    const evidencia = soIds(secao.evidence, `Seção "${secao.h2}"`);
+    if (!from.length && !evidencia.length) {
+      notes.push(`Seção "${secao.h2}" não diz de onde vem na SERP (nenhum id M ou de evidência válido): a IA não acrescenta seção sem evidência — aponte a origem ou remova antes de aprovar.`);
+    }
+    if (radarWritingRhetoricalQuestion(secao.readerQuestion)) notes.push(`Seção "${secao.h2}": a pergunta do leitor é retórica de concorrente; troque pela dúvida real.`);
     const links = secao.internalLinks.filter(link => candidatos.has(link.candidate));
     if (links.length < secao.internalLinks.length) notes.push(`Seção "${secao.h2}": link interno para destino fora do Silo removido.`);
     const externos = secao.externalLinks.map(link => {
@@ -523,7 +1064,9 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
     if (naoCitavel) notes.push(`Seção "${secao.h2}": o vídeo ${secao.video} é de ${RADAR_VIDEO_USAGE_LABEL[naoCitavel]} (não citável); saiu do campo vídeo da seção.`);
     return [{
       ...secao,
-      evidence: soIds(secao.evidence, `Seção "${secao.h2}"`),
+      from,
+      h3,
+      evidence: evidencia,
       internalLinks: links,
       externalLinks: externos,
       specialist: secao.specialist && especialistas.has(secao.specialist) ? secao.specialist : null,
@@ -536,9 +1079,46 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
     throw new RadarArticleBlueprintInvalidError("O artigo-modelo da IA ficou com menos de três seções válidas; gere de novo.", notes);
   }
 
+  /*
+   * 2026-10-02 · O QUE A IA FEZ COM O ESQUELETO. O descarte vale para id M que
+   * existe e não foi usado; a seção fora do escopo entra no descarte mesmo que
+   * a IA não diga; e o que ela esqueceu é dito (H3 de um H2 usado conta como
+   * usado: virou H3 da seção; e o H2 de um H3 usado também).
+   */
+  const usados = new Set(secoes.flatMap(secao => secao.from).filter(id => doEsqueleto.has(id)));
+  const pedidos = ai.discarded ?? [];
+  const descartados = new Map<string, { id: string; reason: string | null }>();
+  let invalidos = 0;
+  for (const item of pedidos) {
+    if (!doEsqueleto.has(item.id)) { invalidos += 1; continue; }
+    if (!usados.has(item.id) && !descartados.has(item.id)) descartados.set(item.id, item);
+  }
+  if (invalidos) notes.push(`Descarte: ${invalidos} id(s) que não existem no esqueleto da SERP ignorado(s).`);
+  for (const item of esqueleto) {
+    if (item.outOfScope && !usados.has(item.id) && !descartados.has(item.id)) descartados.set(item.id, { id: item.id, reason: "fora do escopo do pacote" });
+  }
+  const esquecidos = esqueleto.filter(item => !usados.has(item.id) && !descartados.has(item.id)
+    && !(item.parent && usados.has(item.parent))
+    && !esqueleto.some(filho => filho.parent === item.id && usados.has(filho.id)));
+  if (esquecidos.length) {
+    notes.push(`A IA não usou nem descartou ${esquecidos.length} seção(ões) do esqueleto da SERP (${esquecidos.slice(0, 4).map(item => `${item.id} "${item.heading}"`).join("; ")}${esquecidos.length > 4 ? "; …" : ""}): confira antes de aprovar.`);
+  }
+
   const h1 = radarWritingCompareKey(ai.title.h1);
   if (titulos.some(titulo => titulo === h1)) notes.push("O H1 repete o título de um concorrente: reescreva antes de aprovar.");
+  /* 2026-10-02 · o H1 traz a principal inteira (regra de SEO de qualquer página). */
+  const raizesDaPrincipal = radarSemanticStems(brief.article.principal);
+  const raizesDoH1 = new Set(radarSemanticStems(ai.title.h1));
+  const faltamNoH1 = raizesDaPrincipal.filter(raiz => !raizesDoH1.has(raiz));
+  if (raizesDaPrincipal.length && faltamNoH1.length) notes.push(`O H1 não traz a keyword principal inteira ("${brief.article.principal}"): confira antes de aprovar.`);
   if (radarWritingRhetoricalQuestion(ai.opening.readerQuestion)) notes.push("A abertura usa pergunta retórica de concorrente: troque pela dúvida do leitor.");
+  /* 2026-10-02 · a abertura responde a dúvida sobre a PRINCIPAL, não sobre um assunto vizinho. */
+  const raizesDaAbertura = new Set(radarSemanticStems(ai.opening.readerQuestion));
+  const emComum = raizesDaPrincipal.filter(raiz => raizesDaAbertura.has(raiz)).length;
+  if (raizesDaPrincipal.length && emComum < Math.min(2, raizesDaPrincipal.length)) {
+    notes.push(`A pergunta da abertura ("${ai.opening.readerQuestion}") não fala da keyword principal ("${brief.article.principal}"): confira antes de aprovar.`);
+  }
+  if (tocaForaDoEscopo(ai.opening.readerQuestion)) notes.push("A pergunta da abertura toca assunto fora do escopo: troque antes de aprovar.");
   if (ai.title.seoTitle.length > 65) notes.push(`SEO title com ${ai.title.seoTitle.length} caracteres (alvo ~60).`);
   if (ai.title.metaDescription.length > 165) notes.push(`Meta description com ${ai.title.metaDescription.length} caracteres (alvo ~155).`);
 
@@ -549,13 +1129,32 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
   const closingSpecialist = ai.closing.specialist && especialistas.has(ai.closing.specialist) ? ai.closing.specialist : null;
   if (brief.specialist.some(item => item.kind === "FECHAMENTO" || item.kind === "CTA") && !closingSpecialist) notes.push("O parecer de fechamento do especialista não foi usado na virada final.");
 
+  /*
+   * 2026-10-02 · A AUTORIA VAI NO E-E-A-T DO PLANO. Quem assina é dado da aba
+   * Especialista, não da IA: entra pelo nome cadastrado, sem credencial além
+   * dele; sem especialista, o plano diz que falta definir.
+   */
+  let eeat = ai.eeat;
+  if (brief.authors) {
+    const autores = brief.authors;
+    if (autores.length) {
+      const citado = eeat.some(item => autores.some(autor => radarWritingCompareKey(item).includes(radarWritingCompareKey(autor.name))));
+      const unicoAtivo = autores.every(autor => autor.source === "only_active");
+      if (!citado) eeat = [`Autoria: ${nomesDosAutores(autores)}, ${unicoAtivo ? "único especialista ativo da marca (confirme antes de publicar)" : "especialista da aba Especialista"}; assina o conteúdo, sem credencial além do cadastro.`, ...eeat].slice(0, L.eeat);
+    } else {
+      eeat = ["Autoria: nenhum especialista definido na aba Especialista do Radar; defina quem assina antes de publicar (não invente autor).", ...eeat].slice(0, L.eeat);
+    }
+  }
+
   const blueprint: RadarArticleBlueprintAi = {
     ...ai,
     angle: { ...ai.angle, evidence: soIds(ai.angle.evidence, "Ângulo") },
     opening: { ...ai.opening, evidence: soIds(ai.opening.evidence, "Abertura") },
     sections: secoes,
+    discarded: [...descartados.values()],
     closing: { ...ai.closing, specialist: closingSpecialist },
     visual,
+    eeat,
   };
   const m = brief.measures;
   return {
@@ -586,6 +1185,9 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
         ? { videos: brief.videos.filter(item => item.title).map(item => ({ id: item.id, title: item.title!, url: item.url ?? null, usage: item.usage ?? null })) }
         : {}),
       brandVoice: brief.brandVoice?.ref ?? null,
+      /* 2026-10-02 · o esqueleto que a IA organizou e o tipo da unidade, para a tela e o CSV dizerem de onde cada seção veio. */
+      skeleton: esqueleto,
+      unit: brief.article.unit,
     },
   };
 }
@@ -619,7 +1221,7 @@ export function radarApplyArticleBlueprintEdit(payload: RadarArticleBlueprintPay
   });
   if (secoes.length < 1) throw new RadarArticleBlueprintInvalidError("O artigo-modelo precisa de ao menos uma seção.", []);
   return {
-    ...payload,
+    ...radarArticleBlueprintPayloadToStore(payload),
     blueprint: {
       ...b,
       promise: edit.promise ?? b.promise,
@@ -650,15 +1252,25 @@ const rotuloDaEvidencia = (payload: RadarArticleBlueprintPayload, ids: readonly 
     .map(item => `${item.id} (${corte(item.text, 90)})`);
 
 /**
+ * 2026-10-02 · A MARCA DA PROPOSTA. Enquanto o dono não aprova, o CSV já sai
+ * com a estrutura organizada — e diz, no topo de cada coluna, que é proposta.
+ */
+export const RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK = "PROPOSTA DA IA — aguardando aprovação no Radar (Pesquisa → Artigo-modelo da SERP)";
+const MARCA_CURTA_DA_PROPOSTA = "PROPOSTA DA IA — aguardando aprovação no Radar.";
+
+/**
  * 2026-10-02 · AS SEÇÕES DO PLANO APROVADO EM QUE UM VÍDEO ENTRA (Adendo B).
  *
  * Para o bloco dos modos da coluna de fontes dizer a seção do Incorporar que o
  * artigo-modelo aprovado escolheu, em vez de devolver a decisão a ele. `null` =
  * versão sem retrato dos vídeos (não dá para saber); lista vazia = o plano não
  * pôs este vídeo em seção nenhuma.
+ *
+ * 2026-10-02 · Proposta da IA ainda sem aprovação também devolve `null`: a
+ * coluna de fontes fala do artigo-modelo APROVADO, e a proposta não é.
  */
 export function radarArticleBlueprintVideoSections(payload: RadarArticleBlueprintPayload, video: { title: string; url: string | null }): string[] | null {
-  if (!payload.videos) return null;
+  if (!payload.videos || payload.approval === "DRAFT") return null;
   const ids = new Set(payload.videos.filter(item => mesmoVideo(item, video)).map(item => item.id));
   return payload.blueprint.sections.filter(secao => secao.video && ids.has(secao.video)).map(secao => secao.h2);
 }
@@ -696,6 +1308,20 @@ function videoDaSecao(payload: RadarArticleBlueprintPayload, id: string, aoVivo:
 }
 
 /**
+ * 2026-10-02 · DE ONDE A SEÇÃO VEIO NA SERP. Só para versões com `from`
+ * (as anteriores saem como antes). As evidências já têm linha própria; aqui vão
+ * as seções M do esqueleto — ou o aviso de que a IA não apontou origem.
+ */
+function origemDaSecao(payload: RadarArticleBlueprintPayload, secao: { from?: string[]; evidence: string[] }): string[] {
+  if (!secao.from) return [];
+  const doEsqueleto = new Map((payload.skeleton || []).map(item => [item.id, item]));
+  const secoesM = secao.from.map(id => doEsqueleto.get(id)).filter((item): item is RadarArticleBlueprintSkeletonItem => Boolean(item));
+  if (secoesM.length) return [`- Vem do esqueleto da SERP: ${secoesM.map(item => `${item.id} "${item.heading}"`).join("; ")}`];
+  if (!secao.from.length && !secao.evidence.length) return ["- Vem da SERP: origem não indicada (a IA acrescentou sem evidência; confira)"];
+  return [];
+}
+
+/**
  * O ARTIGO-MODELO APROVADO VIRA AS COLUNAS DE ESTRUTURA DO CSV.
  *
  * Só as colunas que ele decide: título e SEO, promessa e leitor, estrutura, links
@@ -703,6 +1329,10 @@ function videoDaSecao(payload: RadarArticleBlueprintPayload, id: string, aoVivo:
  *
  * 2026-10-02 · `aoVivo` é OPCIONAL (Adendo B): o que o export sabe agora dos
  * vídeos do artigo, para resolver o vídeo de cada seção contra o modo vigente.
+ *
+ * 2026-10-02 · Com `payload.approval === "DRAFT"` (a proposta da IA que o dono
+ * ainda não aprovou), as mesmas colunas saem MARCADAS como proposta. Aprovada
+ * ou sem estado informado, o texto é o de antes.
  */
 export function radarArticleBlueprintColumns(payload: RadarArticleBlueprintPayload, aoVivo: readonly RadarArticleBlueprintLiveVideo[] | null = null): {
   promessa_e_leitor: string;
@@ -713,24 +1343,53 @@ export function radarArticleBlueprintColumns(payload: RadarArticleBlueprintPaylo
 } {
   const b = payload.blueprint;
   const m = payload.measures;
+  const proposta = payload.approval === "DRAFT";
+  const marcar = (celula: string) => (proposta ? `${MARCA_CURTA_DA_PROPOSTA}\n${celula}` : celula);
   const candidato = new Map(payload.linkCandidates.map(item => [item.id, item]));
   const fonte = new Map(payload.sources.map(item => [item.id, item]));
   const status = (item: RadarArticleBlueprintLinkCandidate) => item.status === "PUBLISHED" ? "publicado" : item.status === "PLANNED" ? "planejado: use o caminho, sem domínio, e não invente URL" : "não resolvido: marque a âncora e não invente URL";
+  const descartados = b.discarded ?? [];
+  const doEsqueleto = new Map((payload.skeleton || []).map(item => [item.id, item]));
+  /*
+   * 2026-10-02 · AS PENDÊNCIAS DA PROPOSTA. O que o servidor achou ao conferir a
+   * resposta da IA (H1 sem a principal, abertura de outro assunto, seção sem
+   * origem, respiros a menos…) vai junto da proposta, para quem escreve não
+   * tomar como pronta uma planta que o próprio servidor marcou. Só na proposta,
+   * e só quando o export leu as notas da versão; a aprovada sai como antes.
+   */
+  const conferencia = proposta && payload.validation?.length ? radarArticleBlueprintPendingNotes(payload.validation) : null;
+  const pendencias = conferencia && (conferencia.pending.length || conferencia.corrected)
+    ? [
+      ...(conferencia.pending.length
+        ? [payload.origin === "human_edit"
+          ? "Pendências da proposta (achadas na resposta da IA; a edição do dono pode já ter resolvido alguma — confira):"
+          : "Pendências da proposta (o servidor conferiu a resposta da IA contra o pacote):",
+        ...conferencia.pending.map(nota => `- ${nota}`)]
+        : ["Pendências da proposta: nenhuma além da aprovação do dono."]),
+      ...(conferencia.corrected ? [`Outras ${conferencia.corrected} nota(s) da conferência são correções já aplicadas pelo servidor ou registro (ver no Radar).`] : []),
+    ]
+    : [];
 
   const estrutura = [
-    "ARTIGO-MODELO APROVADO (planta do artigo ideal; a redação é de quem escreve).",
+    proposta
+      ? `${RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK}. A SERP montou o esqueleto e a IA organizou; até o dono aprovar, trate como sugestão (a redação é de quem escreve).`
+      : "ARTIGO-MODELO APROVADO (planta do artigo ideal; a redação é de quem escreve).",
+    ...pendencias,
+    ...(payload.unit ? [`Tipo da unidade: ${payload.unit.label}${payload.unit.format ? ` · formato: ${payload.unit.format}` : ""}.`] : []),
     ...(payload.brandVoice ? [`Voz da marca usada no plano: Skill "${payload.brandVoice.name}" v${payload.brandVoice.version}.`] : []),
     `Medidas do plano: ${m.plan.sections} H2 · ${m.plan.h3} H3 · ~${m.plan.paragraphs} parágrafos · ${m.plan.bold} negritos · ${m.plan.images} imagens (capa + ${m.plan.respites} respiros) · ${m.plan.internalLinks} links internos · ${m.plan.externalLinks} links externos${m.plan.wordsMin && m.plan.wordsMax ? ` · ${m.plan.wordsMin}–${m.plan.wordsMax} palavras` : ""}.`,
     `Concorrentes comparáveis (${m.serp.comparablePages}): mediana de ${m.serp.words.median ?? "?"} palavras, ${m.serp.h2 ?? "?"} H2, ${m.serp.h3 ?? "?"} H3, ${m.serp.paragraphs ?? "?"} parágrafos, ${m.serp.images ?? "?"} imagens.`,
-    `Keywords: ${b.keywordPlan.reading}`,
-    ...b.keywordPlan.complementary.map(item => `- ${item.keyword} → ${item.placement} (${item.reason})`),
+    /* 2026-10-02 · campo que veio vazio não deixa rótulo solto ("Keywords: ", "→  ()", "— "). */
+    ...(b.keywordPlan.reading ? [`Keywords: ${b.keywordPlan.reading}`] : b.keywordPlan.complementary.length ? ["Keywords:"] : []),
+    ...b.keywordPlan.complementary.map(item => `- ${item.keyword}${item.placement ? ` → ${item.placement}` : ""}${item.reason ? ` (${item.reason})` : ""}`),
     ...(b.keywordPlan.slugNote ? [`Slug × principal: ${b.keywordPlan.slugNote}`] : []),
     "",
-    `Abertura: responder "${b.opening.readerQuestion}" no primeiro parágrafo — ${b.opening.direction}${b.opening.evidence.length ? ` [${rotuloDaEvidencia(payload, b.opening.evidence).join("; ")}]` : ""}`,
+    `Abertura: responder "${b.opening.readerQuestion}" no primeiro parágrafo${b.opening.direction ? ` — ${b.opening.direction}` : ""}${b.opening.evidence.length ? ` [${rotuloDaEvidencia(payload, b.opening.evidence).join("; ")}]` : ""}`,
     "",
     ...b.sections.flatMap((secao, indice) => [
       `## ${secao.h2}`,
       `- Pergunta do leitor: ${secao.readerQuestion}`,
+      ...origemDaSecao(payload, secao),
       `- Abre respondendo: ${secao.answerFirst}`,
       ...secao.h3.map(h3 => `  ### ${h3}`),
       ...secao.explain.map(item => `- Explicar: ${item}`),
@@ -738,13 +1397,16 @@ export function radarArticleBlueprintColumns(payload: RadarArticleBlueprintPaylo
       ...(secao.terms.length ? [`- Termos a nomear: ${secao.terms.join(" · ")}`] : []),
       ...(secao.evidence.length ? [`- Evidências: ${rotuloDaEvidencia(payload, secao.evidence).join("; ")}`] : []),
       ...secao.internalLinks.map(link => `- Link interno: âncora "${link.anchor}" → ${candidato.get(link.candidate)?.label || link.candidate}`),
-      ...secao.externalLinks.map(link => `- Link externo: ${link.claim} → ${link.source && fonte.get(link.source) ? fonte.get(link.source)!.url : `fonte a obter (${link.sourceType})`}`),
+      ...secao.externalLinks.map(link => `- Link externo: ${link.claim} → ${link.source && fonte.get(link.source) ? fonte.get(link.source)!.url : `fonte a obter${link.sourceType ? ` (${link.sourceType})` : ""}`}`),
       ...(secao.specialist ? [`- Especialista: usar ${secao.specialist}`] : []),
       ...(secao.video ? [videoDaSecao(payload, secao.video, aoVivo)] : []),
       ...(secao.image ? [`- Imagem: ${secao.image}`] : []),
       ...(secao.practical ? [`- Entrega prática: ${secao.practical}`] : []),
       ...(indice < b.sections.length - 1 ? [""] : []),
     ]),
+    ...(descartados.length
+      ? ["", `Descartado do esqueleto da SERP: ${descartados.map(item => `${item.id}${doEsqueleto.get(item.id) ? ` "${doEsqueleto.get(item.id)!.heading}"` : ""}${item.reason ? ` (${item.reason})` : ""}`).join("; ")}.`]
+      : []),
     "",
     `Fechamento: ${b.closing.turn}${b.closing.specialist ? ` (voz do especialista ${b.closing.specialist})` : ""}`,
     `CTA: ${b.closing.cta}`,
@@ -758,25 +1420,30 @@ export function radarArticleBlueprintColumns(payload: RadarArticleBlueprintPaylo
       `Aplique somente estes ${links.length} link(s), com a âncora indicada (pode ajustar concordância):`,
       ...links.map(({ secao, link }, indice) => {
         const destino = candidato.get(link.candidate);
-        return `L${indice + 1} · âncora "${link.anchor}" → ${destino ? `${destino.role} "${destino.label}"${destino.destination ? ` → ${destino.destination}` : ""} (${status(destino)})` : link.candidate} · onde: seção "${secao}" · por quê: ${link.reason}`;
+        return `L${indice + 1} · âncora "${link.anchor}" → ${destino ? `${destino.role} "${destino.label}"${destino.destination ? ` → ${destino.destination}` : ""} (${status(destino)})` : link.candidate} · onde: seção "${secao}"${link.reason ? ` · por quê: ${link.reason}` : ""}`;
       }),
     ].join("\n")
-    : "Nenhum link interno no artigo-modelo aprovado.";
+    : proposta ? "Nenhum link interno na proposta da IA." : "Nenhum link interno no artigo-modelo aprovado.";
 
   return {
-    promessa_e_leitor: [`Leitor: ${b.reader}`, `Promessa: ${b.promise}`, `Ângulo: ${b.angle.statement}${b.angle.evidence.length ? ` [${rotuloDaEvidencia(payload, b.angle.evidence).join("; ")}]` : ""}`].join("\n"),
-    titulo_e_seo: [
+    promessa_e_leitor: marcar([`Leitor: ${b.reader}`, `Promessa: ${b.promise}`, `Ângulo: ${b.angle.statement}${b.angle.evidence.length ? ` [${rotuloDaEvidencia(payload, b.angle.evidence).join("; ")}]` : ""}`].join("\n")),
+    titulo_e_seo: marcar([
       `H1: ${b.title.h1}`,
       ...(b.title.alternatives.length ? [`Alternativas: ${b.title.alternatives.join(" · ")}`] : []),
       `SEO title: ${b.title.seoTitle}`,
       `Meta description: ${b.title.metaDescription}`,
       `Keyword principal em: ${b.keywordPlan.principalPlacement.join(", ") || "H1 e primeiro parágrafo"}`,
-    ].join("\n"),
+    ].join("\n")),
     estrutura,
-    links_internos: linksInternos,
-    plano_visual: [
+    links_internos: marcar(linksInternos),
+    plano_visual: marcar([
       `Plano visual: ${b.visual.length} imagem(ns).`,
-      ...b.visual.map(item => `${item.slot === "CAPA" ? "Capa" : `Respiro ${item.slot.slice(1)}`}${item.section ? ` · seção "${item.section}"` : ""} · ${item.concept}\n  Prompt: ${item.prompt}\n  ALT: ${item.alt}\n  Legenda: ${item.caption}`),
-    ].join("\n"),
+      ...b.visual.map(item => [
+        `${item.slot === "CAPA" ? "Capa" : `Respiro ${item.slot.slice(1)}`}${item.section ? ` · seção "${item.section}"` : ""}${item.concept ? ` · ${item.concept}` : ""}`,
+        `  Prompt: ${item.prompt}`,
+        ...(item.alt ? [`  ALT: ${item.alt}`] : []),
+        ...(item.caption ? [`  Legenda: ${item.caption}`] : []),
+      ].join("\n")),
+    ].join("\n")),
   };
 }

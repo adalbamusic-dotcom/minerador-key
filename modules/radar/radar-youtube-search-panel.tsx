@@ -13,9 +13,10 @@ import type { RadarYoutubeFrozenInvestigation } from "@/lib/radar/youtube-eviden
 import { RADAR_EDITORIAL_OUTPUT_LABELS, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
 import { radarResearchSourceLabel } from "@/lib/radar/search-mode";
 import { RADAR_RESEARCH_PACKAGE_STATE_LABELS, RADAR_RESEARCH_SOURCE_ROLE_LABELS, radarResearchProfilePlan, type RadarResearchPackage } from "@/lib/radar/research-profile";
-import type { RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
+import { radarProfileManualStepLabel, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
 import type { RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
 import type { RadarResearchProvenancePayload } from "@/lib/radar/research-read-model";
+import { radarAutoFinalizeButtonLabel, radarAutoFinalizePendingNotice, radarAutoFinalizeStartNote, radarFinalizeWithAiLabel } from "@/lib/radar/operational-actions";
 import { RadarCompetitiveBlueprintSection } from "./radar-competitive-blueprint";
 import { RadarProfileBlueprintSection } from "./radar-profile-blueprint";
 import type { RadarEditorialProfileModel } from "@/lib/radar/editorial-profile-model";
@@ -94,6 +95,15 @@ export type RadarYoutubeSearchPanelProps = {
   onToggleVideo?: (videoId: string) => void;
   onFinalize?: () => void;
   onReset?: () => void;
+  /**
+   * 2026-10-02 · D9 · POR QUE A COLETA NÃO FINALIZOU SOZINHA.
+   *
+   * A coleta que termina sem pendência congela e chama a IA sozinha. Quando
+   * algo pede olho humano (apoio falho, consulta que falhou, amostra vazia),
+   * nada congela — e a tela diz o motivo ao lado do botão manual, que continua.
+   * `null` quando não há pendência.
+   */
+  autoFinalizePending?: string | null;
   /**
    * ============ 2.2 · §1 · O QUE CHEGA SOB DEMANDA ============
    *
@@ -442,13 +452,28 @@ function PacoteDePesquisa({ pacote, projecao, busy, onRetrySupport }: {
             Apoio {radarResearchSourceLabel(apoio.source)}
             <span className="ml-1 text-text-muted">· {RADAR_RESEARCH_SOURCE_ROLE_LABELS[apoio.role]}</span>
           </span>
+          {/*
+            * 2026-10-02 · O APOIO QUE FICOU PENDENTE DEPOIS DO START TAMBÉM TEM SAÍDA.
+            *
+            * A gravação do apoio podia perder a corrida da trava de versão e
+            * sumir sem registro de falha: o card ficava "Apoio do Google
+            * pendente" e nenhum botão aparecia. Com a coleta principal pronta e
+            * nada em curso, o retry — que alcança SÓ o apoio — fica à mão.
+            *
+            * 2026-10-02 · D9 · os dois retries encadeiam o automático: com o
+            * apoio gravado e sem outra pendência, a investigação congela e a
+            * IA organiza o artigo-modelo. Eles dizem isso antes do clique
+            * (rótulo e title), como o botão da coleta.
+            */}
           {apoio.collected
             ? <span className="text-positive" data-testid="radar-research-support-ok">✓ coletado automaticamente</span>
             : apoio.failureReason
               ? projecao.state === "FINALIZED"
               ? <span className="text-text-muted">não participou da fotografia</span>
-              : <button type="button" className={button} disabled={busy} onClick={() => onRetrySupport?.()} data-testid="radar-retry-support">Repetir apoio</button>
-              : <span className="text-text-muted">no mesmo START</span>}
+              : <button type="button" className={button} disabled={busy} onClick={() => onRetrySupport?.()} title={radarAutoFinalizeStartNote("coleta do apoio")} data-testid="radar-retry-support">{radarAutoFinalizeButtonLabel("Repetir apoio")}</button>
+              : !busy && pacote.primary.collected && !pacote.primary.running && projecao.state !== "FINALIZED"
+                ? <button type="button" className={button} onClick={() => onRetrySupport?.()} title={radarAutoFinalizeStartNote("coleta do apoio")} data-testid="radar-retry-support-pending">{radarAutoFinalizeButtonLabel("Repetir apoio")}</button>
+                : <span className="text-text-muted">no mesmo START</span>}
         </div>
         <p className="mt-1 text-sm text-text-muted">{apoio.purpose}</p>
         {/*
@@ -554,7 +579,7 @@ function BlueprintMultiformato({ blueprint }: { blueprint: RadarMultimodalBluepr
   </section>;
 }
 
-export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReason, frozen, pacote, projecao, blueprintView, editorialModel, evidenceExtras, multimodal, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onToggleVideo, onFinalize, onReset, onRetrySupport }: RadarYoutubeSearchPanelProps) {
+export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReason, frozen, pacote, projecao, blueprintView, editorialModel, evidenceExtras, multimodal, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onToggleVideo, onFinalize, onReset, onRetrySupport, autoFinalizePending = null }: RadarYoutubeSearchPanelProps) {
   /*
    * ============ 2.2 · §2 · A CORRIDA EFETIVA ============
    *
@@ -634,13 +659,22 @@ export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReas
           * Reabrir continua possível, e agora é o que parece: uma ação com
           * consequência declarada.
           */}
+        {/*
+          * 2026-10-02 · D9 · O BOTÃO DA COLETA DIZ QUE ELA TAMBÉM FINALIZA.
+          *
+          * A coleta já era paga. Terminando sem pendência, ela congela a
+          * investigação sozinha e a IA organiza o artigo-modelo: o acréscimo
+          * (+ 1 chamada de IA) vai no rótulo e a explicação inteira no title e
+          * na linha abaixo, antes do clique.
+          */}
         {!finalizada && <button
           type="button"
           className={primary}
           disabled={busy || Boolean(blockedReason) || plannedQueries === 0}
           onClick={() => onStart?.()}
+          title={radarAutoFinalizeStartNote("coleta")}
           data-testid="radar-youtube-start"
-        >{busy ? "Coletando…" : run ? "Nova coleta" : radarResearchProfilePlan(pacote.profile).startLabel}</button>}
+        >{busy ? "Coletando…" : radarAutoFinalizeButtonLabel(run ? "Nova coleta" : radarResearchProfilePlan(pacote.profile).startLabel)}</button>}
 
         {/*
           * §12 · FINALIZE É DECISÃO HUMANA, e só aparece quando há o que congelar.
@@ -649,13 +683,18 @@ export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReas
           * a partir da coleta que já existe e tira a fotografia. A autoridade
           * canônica já sabe quando isso vale — READY ou apoio falho.
           */}
+        {/*
+          * 2026-10-02 · O BOTÃO MANUAL CONTINUA (D9) — e, como no Google,
+          * finalizar inclui a IA que organiza o artigo-modelo (D7). O rótulo
+          * diz a chamada antes do clique.
+          */}
         {!finalizada && (projecao.state === "READY" || projecao.state === "PARTIAL_SUPPORT_FAILED") && <button
           type="button"
           className={button}
           disabled={busy}
           onClick={() => onFinalize?.()}
           data-testid="radar-youtube-finalize"
-        >Finalizar investigação</button>}
+        >{radarFinalizeWithAiLabel("Finalizar investigação")}</button>}
 
         {/*
           * ====== §5 · [VER BLUEPRINT] É A AÇÃO PRINCIPAL DEPOIS DO FREEZE ======
@@ -684,6 +723,18 @@ export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReas
         </button>}
       </div>
     </div>
+
+    {/*
+      * 2026-10-02 · D9 · O AUTOMÁTICO, DITO NA TELA.
+      *
+      * Antes da primeira coleta, a linha diz que ela também finaliza e o
+      * custo. Depois, se algo pediu olho humano, a linha diz POR QUE nada
+      * congelou — ao lado do botão manual, que continua.
+      */}
+    {!finalizada && !busy && autoFinalizePending && <p className="text-sm text-warning" role="status" data-testid="radar-youtube-auto-finalize-pending">
+      {radarAutoFinalizePendingNotice(autoFinalizePending, radarProfileManualStepLabel(projecao))}
+    </p>}
+    {!finalizada && !run && <p className="text-sm text-text-muted" data-testid="radar-youtube-auto-finalize-note">{radarAutoFinalizeStartNote("coleta")}</p>}
 
     {/*
       * §10 · O QUE SUBSTITUI OS BOTÕES: o estado, dito.

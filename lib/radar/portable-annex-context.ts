@@ -63,6 +63,11 @@ export type RadarPortableVideoExtract = {
   usage?: RadarVideoUsage;
   usageLabel?: string;
   sourceUrl?: string | null;
+  /**
+   * 2026-10-02 · O canal (ou autor) do vídeo, para a citação ser atribuída a
+   * ele. Como as três chaves acima, só existe quando o dono escolheu um modo.
+   */
+  sourceChannel?: string | null;
 };
 
 /**
@@ -86,8 +91,21 @@ export type RadarPortableVideoSelected = {
   section: string | null;
   /** O trecho casado desta fonte, com tempo (Apoio, Citação, Incorporar). Nunca a transcrição. */
   excerpt: { text: string; startLabel: string; endLabel: string } | null;
-  /** Do que o vídeo trata (Contexto e Sugestão de pauta): descrição ou começo do texto, curto. */
+  /** Do que o vídeo trata (Contexto e Sugestão de pauta): começo da transcrição ou, sem ela, a descrição, curto. */
   summary: string | null;
+  /**
+   * 2026-10-02 · De onde o resumo saiu: o começo da TRANSCRIÇÃO (fala do vídeo)
+   * ou a DESCRIÇÃO do canal (texto promocional, último recurso). Opcional: sem
+   * ela, a linha diz "Do que trata", como antes.
+   */
+  summarySource?: "TRANSCRIPT" | "DESCRIPTION";
+  /**
+   * 2026-10-02 · O começo da transcrição corrente, curto, em QUALQUER modo
+   * (o CSV de vídeo diz do que cada vídeo selecionado trata). Opcional e
+   * ausente sem transcrição; o CSV para escrever não o usa: nele, Apoio,
+   * Citação e Incorporar seguem levando o trecho casado.
+   */
+  transcriptStart?: string;
 };
 
 /** O que o export lê do banco para cada vínculo com modo. Tem o id: fica do lado de dentro. */
@@ -100,7 +118,7 @@ export type RadarPortableVideoUsageInput = {
   channel: string | null;
   duration: string | null;
   description: string | null;
-  /** O começo do texto corrente, já curto. Só lido para Contexto sem descrição. */
+  /** O começo do texto corrente, já curto. 2026-10-02 · lido para todo modo, só da versão corrente. */
   textPreview: string | null;
 };
 
@@ -153,9 +171,15 @@ const curto = (valor: string, limite: number): string => {
  *
  * Um por vínculo ativo com modo, "Não usar" fora. O trecho (Apoio, Citação,
  * Incorporar) é o do casamento desta fonte — o que responde o título primeiro —
- * e nunca a transcrição: até 400 caracteres. O resumo (Contexto, Sugestão de
- * pauta) é a descrição do vídeo ou o começo do texto, até 300.
+ * e nunca a transcrição: até 400 caracteres.
+ *
+ * Revisão de 2026-10-02 (pedido do dono): o resumo (Contexto, Sugestão de
+ * pauta) é o COMEÇO DA TRANSCRIÇÃO, até 300 caracteres — a descrição do YouTube
+ * costuma ser promocional ("inscreva-se", links, cupom) e não diz do que o
+ * vídeo trata. A descrição só entra sem transcrição, e mais curta (160).
  */
+const RESUMO_DA_TRANSCRICAO = 300;
+const RESUMO_DA_DESCRICAO = 160;
 function radarPortableVideoSelected(
   usages: readonly RadarPortableVideoUsageInput[],
   layer: RadarVideoEvidenceLayer | null,
@@ -170,7 +194,10 @@ function radarPortableVideoSelected(
       const melhor = trechos.find(entrada => entrada.trecho.answersTitle) || trechos[0] || null;
       const comTrecho = item.usage === "SUPPORT" || item.usage === "QUOTE" || item.usage === "EMBED";
       const comResumo = item.usage === "CONTEXT" || item.usage === "TOPIC_SUGGESTION";
-      const resumo = item.description || item.textPreview;
+      const daTranscricao = comResumo && item.textPreview ? curto(item.textPreview, RESUMO_DA_TRANSCRICAO) : null;
+      const daDescricao = comResumo && !daTranscricao && item.description ? curto(item.description, RESUMO_DA_DESCRICAO) : null;
+      /* 2026-10-02 · o começo da fala em qualquer modo, para o CSV de vídeo; a chave só existe com transcrição. */
+      const comecoDaFala = item.textPreview?.trim() ? curto(item.textPreview, RESUMO_DA_TRANSCRICAO) : null;
       return {
         title: item.title || nomeNaCamada.get(item.videoSourceId) || "Vídeo da biblioteca",
         url: item.url,
@@ -184,7 +211,9 @@ function radarPortableVideoSelected(
         excerpt: comTrecho && melhor
           ? { text: curto(melhor.trecho.originalText, 400), startLabel: tempo(melhor.trecho.startMs), endLabel: tempo(melhor.trecho.endMs) }
           : null,
-        summary: comResumo && resumo ? curto(resumo, 300) : null,
+        summary: daTranscricao || daDescricao,
+        ...(daTranscricao ? { summarySource: "TRANSCRIPT" as const } : daDescricao ? { summarySource: "DESCRIPTION" as const } : {}),
+        ...(comecoDaFala ? { transcriptStart: comecoDaFala } : {}),
       };
     })
     .sort((a, b) => ORDEM_DOS_MODOS[a.usage] - ORDEM_DOS_MODOS[b.usage] || a.title.localeCompare(b.title, "pt-BR"));
@@ -204,7 +233,13 @@ export function radarPortableVideoUsageLine(item: RadarPortableVideoSelected, pl
   const citavel = item.usage === "EMBED" || item.usage === "QUOTE" || item.usage === "SUPPORT";
   const noPlano = citavel && planSections ? planSections.filter(Boolean) : [];
   const secoesDoPlano = ` · seção do artigo-modelo aprovado ${noPlano.map(secao => `"${secao}"`).join(", ")}`;
-  const partes = [`${item.usageLabel} · "${item.title}"${item.url ? ` (${item.url})` : ""} — ${item.usageHint}`];
+  /*
+   * 2026-10-02 · CADA VÍDEO DIZ O CANAL. O vídeo selecionado pode ser de outro
+   * canal, e Citação e Apoio são atribuídos a ele; sem canal registrado na
+   * biblioteca, a linha diz isso em vez de calar.
+   */
+  const canal = item.channel?.trim() ? ` · canal: ${item.channel.trim()}` : " · canal não registrado na biblioteca";
+  const partes = [`${item.usageLabel} · "${item.title}"${item.url ? ` (${item.url})` : ""}${canal} — ${item.usageHint}`];
   if (item.usage === "EMBED") {
     if (noPlano.length) partes.push(secoesDoPlano);
     else if (planSections) {
@@ -222,7 +257,14 @@ export function radarPortableVideoUsageLine(item: RadarPortableVideoSelected, pl
     partes.push(` · ponto alto: ${item.excerpt.startLabel}–${item.excerpt.endLabel}`);
   }
   if (item.usage === "TOPIC_SUGGESTION") partes.push(" (passa pela SERP e pelo artigo-modelo; não é citável)");
-  if (item.summary) partes.push(`. Do que trata: ${item.summary}`);
+  /* 2026-10-02 · o resumo diz de onde veio: fala do vídeo (começo da transcrição) ou texto do canal. */
+  if (item.summary) {
+    partes.push(item.summarySource === "TRANSCRIPT"
+      ? `. Começo da transcrição (fala do vídeo, conferir antes de usar): "${item.summary}"`
+      : item.summarySource === "DESCRIPTION"
+        ? `. Descrição do canal (sem transcrição; texto do canal, não fala do vídeo): ${item.summary}`
+        : `. Do que trata: ${item.summary}`);
+  }
   if (item.note) partes.push(` · Nota do dono: ${item.note}`);
   return partes.join("");
 }
@@ -284,8 +326,9 @@ export function radarPortableVideoContext(
           limitations: [...trecho.limitations],
         };
         const modo = modos.get(trecho.videoSourceId);
+        /* 2026-10-02 · com modo, o trecho leva também o canal, para a atribuição. */
         return modo && modo.usage !== "NOT_USED"
-          ? { ...base, usage: modo.usage, usageLabel: RADAR_VIDEO_USAGE_LABEL[modo.usage], sourceUrl: modo.url }
+          ? { ...base, usage: modo.usage, usageLabel: RADAR_VIDEO_USAGE_LABEL[modo.usage], sourceUrl: modo.url, sourceChannel: modo.channel }
           : base;
       }),
     };

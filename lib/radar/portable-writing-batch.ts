@@ -70,6 +70,8 @@ export function radarPortableWritingExport(input: {
   today: string;
 }): RadarPortableWritingExportResult {
   const lentesDe = radarPortableExportLensLookupsFor(input.lenses.lookups);
+  /* 2026-10-02 · a autoria foi lida no núcleo: o topo manda ler quem assina na linha de cada artigo. */
+  const autoriaLida = input.articles.some(artigo => artigo.entrada.authors !== undefined && artigo.entrada.authors !== null);
   const porId = new Map(input.articles.map(artigo => [artigo.articleId, artigo]));
 
   const montar = (
@@ -118,6 +120,7 @@ export function radarPortableWritingExport(input: {
       sharedVisualAvoid: compartilhado.shared,
       ...(porLinha ? { siloPerRow: true } : {}),
       ...(input.brandVoice ? { brandVoice: input.brandVoice } : {}),
+      ...(autoriaLida ? { authorsKnown: true } : {}),
     });
     const voz = buildRadarWritingBrandVoiceRow(input.brandVoice);
     return {
@@ -152,6 +155,7 @@ export function radarPortableWritingExport(input: {
       siteUrl: enderecoDoSite(doArquivo, silo),
       sharedVisualAvoid: compartilhado.shared,
       ...(input.brandVoice ? { brandVoice: input.brandVoice } : {}),
+      ...(autoriaLida ? { authorsKnown: true } : {}),
     });
     const voz = buildRadarWritingBrandVoiceRow(input.brandVoice);
     return {

@@ -1,18 +1,25 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  RADAR_ARTICLE_BLUEPRINT_LIMITS,
   RadarArticleBlueprintAiSchema,
   RadarArticleBlueprintInvalidError,
   buildRadarArticleBlueprintBrief,
   radarApplyArticleBlueprintEdit,
+  radarArticleBlueprintAiFailure,
+  radarArticleBlueprintAiFailureMessage,
+  radarArticleBlueprintPayloadToStore,
   radarArticleBlueprintPrompt,
+  radarArticleBlueprintRetryNote,
   radarSanitizeArticleBlueprint,
+  type RadarArticleBlueprintAi,
+  type RadarArticleBlueprintBrief,
   type RadarArticleBlueprintEdit,
   type RadarArticleBlueprintPayload,
 } from "@/lib/radar/article-blueprint";
 import { assembleRadarPortableExport } from "@/lib/server/radar-portable-export-core";
 import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
-import { generateStructuredAI } from "@/lib/server/structured-ai";
+import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
 
 /**
@@ -24,7 +31,14 @@ import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
  *
  * Versões append-only, presas ao hash do pacote: a IA cria um rascunho; a
  * edição do dono cria outra versão; aprovar marca a versão uma vez só (o banco
- * recusa mudar a aprovada). Só a aprovada do pacote vigente chega ao CSV.
+ * recusa mudar a aprovada). Só a aprovada do pacote vigente chega ao Redator.
+ *
+ * 2026-10-02 · O ARTIGO-MODELO É PARTE DA SERP (decisão do dono). A tela pede a
+ * organização logo depois de "Finalizar pesquisa" (o botão avisa a chamada de
+ * IA). O pedido é compacto e sem modo de raciocínio; resposta cortada ou fora
+ * do formato ganha UMA nova tentativa com saída mais curta — uma chamada a
+ * mais, registrada no log e na versão. Enquanto o dono não aprova, o CSV já
+ * sai com a proposta, marcada (`readRadarArticleBlueprintsForExport`).
  */
 
 export type RadarArticleBlueprintRow = {
@@ -71,7 +85,7 @@ async function montagemDoArtigo(input: { client: SupabaseClient; brandId: string
   const montada = montagem.montadas[0];
   if (!montada || !montada.bundleHash) {
     const recusa = montagem.recusados[0];
-    throw new PipelineRuntimeError("CONFLICT", recusa?.reason || "O artigo não tem investigação finalizada: finalize antes de gerar o artigo-modelo.", 409);
+    throw new PipelineRuntimeError("CONFLICT", recusa?.reason || "O artigo não tem investigação finalizada: finalize antes de organizar o artigo-modelo da SERP.", 409);
   }
   const silo = montagem.planoDaSelecao?.files.find(arquivo => arquivo.articleIds.includes(input.articleId))?.writing ?? null;
   return { montada, silo, publicacao: montagem.publicacoes.get(input.articleId) ?? null, brandVoice: montagem.brandVoice };
@@ -93,24 +107,96 @@ async function gravarVersao(client: SupabaseClient, input: {
   const insercao = await client.from("radar_article_blueprints").insert({
     brand_id: input.brandId, article_id: input.articleId, bundle_hash: input.bundleHash,
     version_number: versao, state: "DRAFT", origin: input.origin,
-    payload: input.payload, validation: input.validation, created_by: input.actorUserId,
+    /* 2026-10-02 · a marca de aprovação é do export, nunca do banco. */
+    payload: radarArticleBlueprintPayloadToStore(input.payload), validation: input.validation, created_by: input.actorUserId,
   }).select(COLUNAS).single();
   if (insercao.error) throw new PipelineRuntimeError("QUERY_FAILURE", `Não foi possível gravar o artigo-modelo: ${insercao.error.message}`, 503);
   return linhaDe(insercao.data as unknown as Record<string, unknown>);
 }
 
-/** 1 chamada de IA, paga, por clique explícito do dono. */
+/**
+ * 2026-10-02 · OS TEMPOS DE CADA TENTATIVA. A rota tem 300 s; a montagem leva
+ * poucos segundos. A segunda tentativa só existe depois de uma resposta que
+ * VOLTOU (cortada, vazia ou fora do formato) — nunca depois de tempo esgotado.
+ */
+export const RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS = Object.freeze({ first: 150_000, retry: 110_000 });
+
+type ProvedorDaIa = Parameters<typeof generateStructuredAI>[0]["provider"];
+
+/**
+ * 2026-10-02 · O PEDIDO À IA, COM NO MÁXIMO UMA NOVA TENTATIVA.
+ *
+ * Sem modo de raciocínio (o raciocínio consome o mesmo teto de tokens e foi o
+ * que cortou a primeira resposta real) e com o `finish_reason` capturado pelo
+ * diagnóstico. Falhou por corte, formato ou resposta vazia: UMA nova chamada,
+ * com o pedido de saída curta, e o log diz por quê. Qualquer outra falha
+ * (tempo, quota, credencial, provider) sobe como veio. A mensagem para a tela é
+ * em português claro — nunca "JSON invalido" cru.
+ */
+export async function requestRadarArticleBlueprintAi(input: {
+  provider: ProvedorDaIa;
+  brief: RadarArticleBlueprintBrief;
+  articleId?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ ai: RadarArticleBlueprintAi; calls: 1 | 2; notes: string[] }> {
+  const tentar = async (curta: boolean) => {
+    const visto = { finishReason: null as string | null };
+    const { system, user } = radarArticleBlueprintPrompt(input.brief, { short: curta });
+    try {
+      const ai = await generateStructuredAI({
+        provider: input.provider,
+        system,
+        user,
+        schema: RadarArticleBlueprintAiSchema,
+        maxTokens: RADAR_ARTICLE_BLUEPRINT_LIMITS.maxTokens,
+        thinkingMode: "disabled",
+        timeoutMs: curta ? RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.retry : RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.first,
+        fetchImpl: input.fetchImpl,
+        onDiagnostic: diagnostico => { if (diagnostico.finishReason) visto.finishReason = diagnostico.finishReason; },
+      });
+      return { ok: true as const, ai, finishReason: visto.finishReason };
+    } catch (error) {
+      return { ok: false as const, error, finishReason: visto.finishReason };
+    }
+  };
+  const codigo = (error: unknown) => (error instanceof StructuredAIError ? error.code : null);
+
+  const primeira = await tentar(false);
+  if (primeira.ok) return { ai: primeira.ai, calls: 1, notes: [] };
+  const falha = radarArticleBlueprintAiFailure({ code: codigo(primeira.error), finishReason: primeira.finishReason });
+  if (!falha) throw primeira.error;
+
+  console.warn("[radar-article-blueprint] nova_tentativa", {
+    articleId: input.articleId ?? null,
+    motivo: falha,
+    finishReason: primeira.finishReason,
+    code: codigo(primeira.error),
+    chamadasDeIa: 2,
+  });
+  const segunda = await tentar(true);
+  if (segunda.ok) return { ai: segunda.ai, calls: 2, notes: [radarArticleBlueprintRetryNote(falha)] };
+  const falhaFinal = radarArticleBlueprintAiFailure({ code: codigo(segunda.error), finishReason: segunda.finishReason });
+  console.warn("[radar-article-blueprint] nova_tentativa_falhou", {
+    articleId: input.articleId ?? null,
+    motivo: falhaFinal,
+    finishReason: segunda.finishReason,
+    code: codigo(segunda.error),
+  });
+  if (!falhaFinal) throw segunda.error;
+  throw new StructuredAIError(radarArticleBlueprintAiFailureMessage(falhaFinal, 2), 502, undefined, "AI_OUTPUT_INVALID");
+}
+
+/** 1 chamada de IA, paga (2 só se a primeira vier cortada ou fora do formato), por clique explícito do dono. */
 export async function generateRadarArticleBlueprint(input: { client: SupabaseClient; brandId: string; articleId: string; actorUserId: string }): Promise<RadarArticleBlueprintRow> {
   /* Onde gravar tem de existir ANTES da chamada paga: sem a tabela, nada de IA. */
   await listRadarArticleBlueprints(input.client, input.brandId, input.articleId);
   const { montada, silo, publicacao, brandVoice } = await montagemDoArtigo(input);
-  /* A voz da marca (Skill corrente, Adendo C) entra inteira: CTA, promessa, H1 e imagens seguem ela. */
+  /* A voz da marca (Skill corrente, Adendo C) entra em trechos por assunto, com teto (2026-10-02). */
   const brief = buildRadarArticleBlueprintBrief({ entrada: montada.entrada, silo, articleId: input.articleId, publication: publicacao, brandVoice: brandVoice.kind === "available" ? brandVoice.voice : null });
-  const { system, user } = radarArticleBlueprintPrompt(brief);
   const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, brandId: input.brandId, client: input.client, quotaUnits: 1 });
-  const resposta = await generateStructuredAI({ provider, system, user, schema: RadarArticleBlueprintAiSchema, maxTokens: 8000 });
-  const { payload, notes } = radarSanitizeArticleBlueprint(resposta, brief);
-  return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: montada.bundleHash!, origin: "ai", payload, validation: notes, actorUserId: input.actorUserId });
+  const resposta = await requestRadarArticleBlueprintAi({ provider, brief, articleId: input.articleId });
+  const { payload, notes } = radarSanitizeArticleBlueprint(resposta.ai, brief);
+  return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: montada.bundleHash!, origin: "ai", payload, validation: [...resposta.notes, ...notes], actorUserId: input.actorUserId });
 }
 
 export async function editRadarArticleBlueprint(input: { client: SupabaseClient; brandId: string; articleId: string; blueprintId: string; edit: RadarArticleBlueprintEdit; actorUserId: string }): Promise<RadarArticleBlueprintRow> {
@@ -129,7 +215,7 @@ export async function approveRadarArticleBlueprint(input: { client: SupabaseClie
   if (alvo.state === "APPROVED") return alvo;
   const { montada } = await montagemDoArtigo(input);
   if (montada.bundleHash !== alvo.bundleHash) {
-    throw new PipelineRuntimeError("CONFLICT", "Este artigo-modelo é de outro congelamento da investigação. Gere de novo sobre o pacote atual.", 409);
+    throw new PipelineRuntimeError("CONFLICT", "Este artigo-modelo é de outro congelamento da investigação. Organize de novo sobre o pacote atual.", 409);
   }
   const atualizacao = await input.client.from("radar_article_blueprints")
     .update({ state: "APPROVED", approved_by: input.actorUserId, approved_at: new Date().toISOString() })
@@ -142,5 +228,5 @@ export async function approveRadarArticleBlueprint(input: { client: SupabaseClie
   return lida;
 }
 
-export { readApprovedRadarArticleBlueprints } from "@/lib/server/radar-article-blueprint-read";
+export { readApprovedRadarArticleBlueprints, readRadarArticleBlueprintsForExport } from "@/lib/server/radar-article-blueprint-read";
 export { RadarArticleBlueprintInvalidError };

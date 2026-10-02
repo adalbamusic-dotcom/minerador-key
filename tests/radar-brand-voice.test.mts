@@ -18,8 +18,9 @@ import { ARTIGO, EXPORTADO_EM, LEITURA_DAS_LENTES, entradaGoogle, montadasDoSilo
  *
  * A Skill `brand_voice` CORRENTE da Marca (regra canônica da spec da Marca
  * §24: rascunho, aguardando aprovação ou ativa) entra na linha "Voz da marca" do
- * CSV para escrever e do CSV de vídeo, e inteira no pedido do artigo-modelo, com
- * o estado dito. Sem Skill, o entregável diz por quê — e nada mais muda.
+ * CSV para escrever e do CSV de vídeo, e em trechos por assunto no pedido do
+ * artigo-modelo (2026-10-02; antes ia inteira), com o estado dito. Sem Skill,
+ * o entregável diz por quê — e nada mais muda.
  *
  * PROVIDER_CALLS = 0, com sentinela no fim.
  */
@@ -138,12 +139,22 @@ test("CSV de vídeo: a mesma voz, em linha própria, e o roteiro aponta para ela
   assert.match(linhas[1].tema_e_publico, /Biomédicas estetas/);
   assert.match(linhas[1].prompt, /Linguagem próxima/);
   assert.match(linhas[2].diretrizes_de_roteiro, /seguem a linha "Voz da marca"/);
+  /* 2026-10-02 · na linha do vídeo, só o que serve ao vídeo: o que é do artigo é nomeado e fica de fora. */
+  assert.match(linhas[1].pode_gravar, /Fica fora desta linha \(vale para o artigo, não para o vídeo\): Responder diretamente à keyword; FAQ e dados estruturados; Links e conteúdo já publicado; Plano visual\./);
+  assert.equal(/Uma capa e dois ou três respiros/.test(Object.values(linhas[1]).join("\n")), false);
+  assert.match(linhas[1].diretrizes_de_roteiro, /Não recomendar Instagram Shopping/);
+  assert.match(linhas[2].prompt, /usando SOMENTE os dados desta linha e da linha "Voz da marca"/);
   const semVoz = lerCsv(radarPortableVideoExport({ articles: [{ entrada: entradaGoogle(), youtube: null }], today: EXPORTADO_EM, brandVoice: NENHUMA }).csv);
   assert.deepEqual(semVoz.map(item => item.ordem), ["Marca", "1"]);
   assert.match(semVoz[0].pode_gravar, /não há Skill de voz na Marca/);
 });
 
-test("artigo-modelo: a Skill inteira vai à IA, a página comercial vira candidata ao CTA e a versão fica registrada", () => {
+/*
+ * 2026-10-02 · o título dizia "a Skill inteira vai à IA": desde a revisão do
+ * artigo-modelo, vão TRECHOS da Skill por assunto, com teto (CTA e oferta, voz
+ * e vocabulário, o que não fazer, plano visual). O que o teste prova não mudou.
+ */
+test("artigo-modelo: trechos da Skill por assunto vão à IA, a página comercial vira candidata ao CTA e a versão fica registrada", () => {
   const silo = planoDoSilo().files[0].writing!;
   const brief = buildRadarArticleBlueprintBrief({ entrada: entradaGoogle(), silo, articleId: ARTIGO, publication: null, brandVoice: VOZ });
   assert.deepEqual(brief.brandVoice?.ref, { versionId: "voz-v1", version: 1, name: "AdalbaPro", contentHash: "sha256:voz", status: "active" });

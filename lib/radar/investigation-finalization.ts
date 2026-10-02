@@ -29,7 +29,14 @@
  *      encerrá-la assumindo a limitação, que fica escrita. Zero páginas lidas
  *      não são leitura nenhuma: não há o que congelar.
  *
- *   4. NADA CONGELA SOZINHO. Terminar o ANALYZE não finaliza. Só o clique.
+ *   4. CONGELA SOZINHO SÓ SEM PENDÊNCIA. A regra antiga era "nada congela
+ *      sozinho; só o clique". Decisão do dono em 2026-10-02 (D9, "automático
+ *      nos três"): terminar o ANALYZE sem pendência finaliza — encadeado ao fim
+ *      do handler, depois da releitura do servidor, nunca num efeito de
+ *      render — e a IA organiza o artigo-modelo em seguida. Com pendência
+ *      (amostra insuficiente, consulta que falhou, intenção em conflito, etapa
+ *      faltando) nada congela, a tela diz por quê e o botão manual continua.
+ *      Quem decide o que é pendência é `radarGoogleAutoFinalizeDecision`.
  *
  * Domínio puro: sem fetch, sem storage, sem provider. Finalizar não pesquisa —
  * ele consolida o que o ANALYZE já produziu.
@@ -120,6 +127,55 @@ export function radarFinalizationReadiness(input: {
     reason: `${input.analyzed} página(s) na amostra${input.failed ? ` · ${input.failed} sem acesso` : ""} · ${input.sufficiency.headline}.`,
     acknowledgedInsufficiency: null,
   };
+}
+
+/**
+ * ====== 2026-10-02 · D9 · O GOOGLE FINALIZA SOZINHO — SÓ SEM PENDÊNCIA ======
+ *
+ * O botão manual aceita `INSUFFICIENT_BUT_FINALIZABLE`: quem clica assume a
+ * limitação, e ela fica escrita. O automático não assume nada por ninguém. Ele
+ * só congela quando a MESMA autoridade que habilita o botão (`phase1` e
+ * `finalization`) diz que dá, e nenhuma destas pendências existe:
+ *
+ *   - a próxima etapa ainda não é finalizar (falta completar ou analisar);
+ *   - a amostra é insuficiente — encerrar assim é decisão humana;
+ *   - a intenção observada na SERP conflita com a declarada;
+ *   - alguma consulta auxiliar do plano falhou na coleta.
+ *
+ * Páginas "sem acesso" NÃO são pendência: elas já são limitação declarada e
+ * não impedem nem o botão (ver `radarFinalizationReadiness`).
+ *
+ * Vale para qualquer página, marca e assunto: só lê a investigação resolvida.
+ */
+export type RadarGoogleAutoFinalizeDecision = { autoFinalize: boolean; reason: string };
+
+export function radarGoogleAutoFinalizeDecision(input: {
+  phase1: { id: string; enabled: boolean; label: string; blockedReason: string | null } | null | undefined;
+  finalization: RadarFinalizationReadiness | null | undefined;
+  sufficiency: Pick<RadarInvestigationSufficiency, "level" | "headline" | "reasons"> | null | undefined;
+  /** Consultas auxiliares do plano que foram tentadas e não trouxeram evidência. */
+  auxiliaryFailed?: number;
+}): RadarGoogleAutoFinalizeDecision {
+  const parar = (reason: string): RadarGoogleAutoFinalizeDecision => ({ autoFinalize: false, reason });
+
+  if (!input.phase1 || !input.finalization || !input.sufficiency) {
+    return parar("A investigação deste artigo não pôde ser resolvida na releitura do servidor.");
+  }
+  if (input.phase1.id !== "FINALIZE_SERP" || !input.phase1.enabled) {
+    return parar(input.phase1.blockedReason || `A próxima etapa ainda é "${input.phase1.label}".`);
+  }
+  if (!input.finalization.canFinalize) return parar(input.finalization.reason);
+  if (input.finalization.state === "INSUFFICIENT_BUT_FINALIZABLE") {
+    return parar(`A amostra é insuficiente (${input.finalization.acknowledgedInsufficiency || input.sufficiency.headline}); encerrar assim é decisão sua, e a limitação fica registrada.`);
+  }
+  if (input.sufficiency.level === "CONFLICTING_SEARCH_INTENT") {
+    return parar(`${input.sufficiency.headline}: a intenção observada na SERP pede a sua decisão antes de congelar.`);
+  }
+  const falhas = input.auxiliaryFailed || 0;
+  if (falhas > 0) {
+    return parar(`${falhas} consulta(s) auxiliar(es) do plano falharam na coleta; congelar sem elas é decisão sua.`);
+  }
+  return { autoFinalize: true, reason: `Sem pendência: ${input.finalization.reason}` };
 }
 
 /* ============================ o bundle congelado ======================== */

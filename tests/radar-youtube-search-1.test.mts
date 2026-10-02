@@ -679,3 +679,15 @@ test("§1 e §10 · a investigação de YouTube é PARALELA à do Google no cont
 test("PROVIDER_CALLS_IN_TESTS = 0", () => {
   assert.deepEqual(tentativasDeRede, [], `nenhuma rede deveria ter saído; houve: ${tentativasDeRede.join(", ")}`);
 });
+
+test("§3 · principal já enquadrada não ganha prefixo duplicado (2026-10-02)", () => {
+  const plano = buildRadarYoutubeQueryPlan({ context: contexto({ principal: "como atrair clientes pelo instagram" }) });
+  const textos = plano.queries.map(item => item.text);
+  assert.equal(textos[0], "como atrair clientes pelo instagram");
+  assert.equal(textos.some(texto => /^como como |^rotina como /.test(texto)), false, textos.join(" | "));
+  assert.ok(plano.limitations.some(item => /já é uma busca enquadrada/.test(item)));
+
+  const comRotina = buildRadarYoutubeQueryPlan({ context: contexto({ principal: "skincare rotina noturna" }) }).queries.map(item => item.text);
+  assert.ok(comRotina.includes("como skincare rotina noturna"), "o modificador que não está na principal continua");
+  assert.equal(comRotina.includes("rotina skincare rotina noturna"), false, "o que já está na principal não repete");
+});

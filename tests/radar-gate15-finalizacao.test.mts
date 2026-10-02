@@ -29,7 +29,9 @@ import type { RadarInvestigationSufficiency } from "../lib/radar/investigation-s
  *   o bundle tem identidade e hash PRÓPRIOS, não os do ArticleDNA;
  *   insuficiência consciente é diferente de investigação inexistente;
  *   falha de extração não bloqueia, vira limitação;
- *   nada congela sozinho, e nada congela sem readback;
+ *   nada congela sozinho com pendência, e nada congela sem readback
+ *   (2026-10-02 · D9, decisão do dono: sem pendência, a análise finaliza
+ *   sozinha — ver o teste T e tests/radar-finalizar-automatico.test.mts);
  *   e o congelado não muda em silêncio.
  *
  * Nenhum teste chama rede: finalizar não pesquisa.
@@ -494,7 +496,7 @@ test("GATE 15 · S — congelar não pesquisa: nenhum provider é tocado", () =>
 
 /* ==========  T, U, V e W · AUTORIDADE, TELA E IMUTABILIDADE  ========== */
 
-test("GATE 15 · T — nenhum efeito finaliza: só o clique", () => {
+test("GATE 15 · T — nenhum efeito finaliza; o clique e, sem pendência, o fim da análise", () => {
   const workbench = readFileSync(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");
   const page = readFileSync(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
 
@@ -503,11 +505,33 @@ test("GATE 15 · T — nenhum efeito finaliza: só o clique", () => {
   assert.match(workbench, /onTrigger=\{disparar\}/, "a ação primária nasce de um clique");
   assert.match(workbench, /onClick=\{onTrigger\}/, "e o clique é o único caminho até ela");
   assert.equal(/useEffect\([^)]*finalizeInvestigation/.test(page), false);
+  assert.equal(/useEffect\([^)]*finalizar(InvestigacaoGoogle|GoogleSemPendencia)/.test(page), false, "nenhum efeito de render congela");
+  /* O botão manual continua existindo, e é a MESMA rotina que o automático usa. */
   assert.match(page, /onFinalizeInvestigation=\{\(\) => void finalizeInvestigation\(\)\}/);
+  assert.match(page, /await finalizarInvestigacaoGoogle\(target, data\);/);
 
-  /* Terminar o ANALYZE não encadeia o FINALIZE. */
-  const analyze = page.slice(page.indexOf("const analyzeSerpSelection"), page.indexOf("const finalizeInvestigation"));
-  assert.equal(analyze.includes("finalizeInvestigation("), false, "ANALYZE terminar ≠ FINALIZAR");
+  /*
+   * 2026-10-02 · A REGRA MUDOU POR DECISÃO DO DONO (D9, "automático nos três").
+   *
+   * Antes: "terminar o ANALYZE não encadeia o FINALIZE" — e a asserção, por
+   * acaso, cortava uma fatia vazia (a análise fica DEPOIS do finalizar no
+   * arquivo). Agora o fim da análise encadeia o finalizar SÓ sem pendência:
+   * depois da escrita de autoridade confirmada e da posse devolvida, pela
+   * releitura do servidor e pela decisão pura, e nunca pelo handler do clique.
+   */
+  const analyze = page.slice(page.indexOf("const analyzeSerpSelection = async"), page.indexOf("const reviewSerpForArticle = async"));
+  assert.ok(analyze.length > 0, "a fatia da análise existe");
+  assert.equal(analyze.includes("finalizeInvestigation("), false, "a análise não chama o handler do clique");
+  const escrita = analyze.indexOf("const salvo = await pipeline.saveRadarAnalysis(target.articleId, next, {");
+  const posse = analyze.indexOf('releaseSerpAction(target.articleId, "extract")');
+  const encadeia = analyze.indexOf("if (analiseConfirmada) await finalizarGoogleSemPendencia(target, analiseConfirmada);");
+  assert.ok(escrita > 0 && posse > escrita && encadeia > posse, "escrita confirmada → posse devolvida → finalizar automático");
+
+  const automatico = page.slice(page.indexOf("const finalizarGoogleSemPendencia = async"), page.indexOf("const confirmResearchCuration = async"));
+  const releitura = automatico.indexOf("await analiseConfirmadaNoServidor(target)");
+  const decisao = automatico.indexOf("radarGoogleAutoFinalizeDecision({");
+  const congela = automatico.indexOf("await finalizarInvestigacaoGoogle(linhaRelida, dadosRelidos, { antes });");
+  assert.ok(releitura > 0 && decisao > releitura && congela > decisao, "relê o servidor → decide → congela pela mesma rotina");
 });
 
 test("GATE 15 · U — investigação finalizada não oferece Finalizar de novo", () => {

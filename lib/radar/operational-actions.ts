@@ -179,6 +179,78 @@ export function radarActionOutcome(input: {
   };
 }
 
+/* ============ 2026-10-02 · D9 · o automático, dito antes do clique ============ */
+
+/**
+ * O CUSTO QUE O BOTÃO DE COLETA PASSA A DECLARAR — D9 (dono, 2026-10-02).
+ *
+ * A coleta já era paga, e o botão já dizia. Agora ela também finaliza sozinha
+ * quando termina sem pendência, e finalizar chama a IA uma vez para organizar o
+ * artigo-modelo da SERP. O acréscimo é dito no botão, antes do clique — nunca
+ * descoberto na fatura.
+ */
+export const RADAR_AUTO_FINALIZE_AI_COST = "+ 1 chamada de IA para organizar o artigo-modelo";
+
+/** O rótulo curto do botão que dispara a coleta (ou a análise, no Google). */
+export const radarAutoFinalizeButtonLabel = (label: string) => `${label} · e finaliza (+ 1 chamada de IA)`;
+
+/**
+ * O BOTÃO MANUAL DE FINALIZAR TAMBÉM DIZ A IA — em qualquer perfil.
+ *
+ * Finalizar inclui organizar o artigo-modelo da SERP (D7). O botão manual de
+ * YouTube e Amazon passa a encadear a mesma organização que o do Google, e o
+ * rótulo diz isso antes do clique.
+ */
+export const radarFinalizeWithAiLabel = (label: string) => `${label} · inclui 1 chamada de IA`;
+
+/**
+ * A explicação completa, para o ⓘ ou a linha sob o botão.
+ *
+ * 2026-10-02 · "coleta do apoio": repetir o apoio do Google também encadeia o
+ * automático (YouTube e Amazon) — é ele que costuma fechar a pendência. Todo
+ * botão que pode terminar em congelamento e IA diz isso antes do clique, não
+ * só o da coleta principal.
+ */
+export function radarAutoFinalizeStartNote(etapa: "coleta" | "análise" | "coleta do apoio"): string {
+  return `Ao terminar sem pendência, a ${etapa} também finaliza a investigação e a IA organiza o artigo-modelo da SERP (${RADAR_AUTO_FINALIZE_AI_COST}). Com pendência, nada congela: a tela diz por quê e o botão de finalizar continua.`;
+}
+
+/**
+ * Quando o automático parou: o motivo e o caminho manual, na mesma frase.
+ * `manualLabel` nulo quando a tela não tem, naquele estado, botão que resolva —
+ * a frase não promete um botão que não está lá.
+ */
+export function radarAutoFinalizePendingNotice(reason: string, manualLabel: string | null): string {
+  const motivo = reason.trim().replace(/[.;:]?$/, ".");
+  /* "A coleta…" vira "a coleta…" depois dos dois-pontos; sigla ("SERP…") fica como está. */
+  const frase = /^[A-ZÀ-Ý][a-zà-ÿ ]/.test(motivo) ? `${motivo.charAt(0).toLowerCase()}${motivo.slice(1)}` : motivo;
+  return manualLabel
+    ? `Não finalizou sozinha: ${frase} Revise e use "${manualLabel}" quando decidir.`
+    : `Não finalizou sozinha: ${frase}`;
+}
+
+/** Quando congelou: diz que foi sozinha e que a IA vem depois — e que a falha dela não desfaz nada. */
+export const RADAR_AUTO_FINALIZE_DONE_NOTICE =
+  "Finalizada sozinha, sem pendência. A IA está organizando o artigo-modelo da SERP; se ela falhar, a investigação continua finalizada.";
+
+/**
+ * O BOTÃO DA FASE 1 QUE ENCADEIA O CONGELAMENTO DIZ ISSO — Google.
+ *
+ * No Google, quem termina a investigação é a análise da concorrência: é nela
+ * que o automático encadeia o FINALIZE. O rótulo e o ⓘ do botão de análise
+ * dizem o custo; o do START diz o que vem depois dele. Ação, id e handler não
+ * mudam — só o texto.
+ */
+export function radarPhase1WithAutoFinalize<T extends { id: string; label: string; info: string | null }>(acao: T): T {
+  if (acao.id === "ANALYZE_COMPETITION") {
+    return { ...acao, label: radarAutoFinalizeButtonLabel(acao.label), info: [acao.info, radarAutoFinalizeStartNote("análise")].filter(Boolean).join(" ") };
+  }
+  if (acao.id === "START_RESEARCH") {
+    return { ...acao, info: [acao.info, `Depois dela vem a análise da concorrência. ${radarAutoFinalizeStartNote("análise")}`].filter(Boolean).join(" ") };
+  }
+  return acao;
+}
+
 /* ========================= o que cada ação preserva ===================== */
 
 /**
