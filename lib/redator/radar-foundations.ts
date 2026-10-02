@@ -31,6 +31,7 @@ import { RADAR_EDITORIAL_OUTPUT_LABELS } from "../radar/multimodal-blueprint.ts"
 import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "../radar/competitive-blueprint.ts";
 import { radarResearchProfileLabel, type RadarResearchProfile } from "../radar/research-profile.ts";
 import { RADAR_WRITER_SUBJECT_LINE_PREFIXES } from "./radar-subject-turn.ts";
+import type { WriterArticleBlueprintFoundation, WriterBrandVoiceFoundation } from "./writer-evidence-catalog.ts";
 
 export type RadarFoundationsRecommendation = {
   output: string;
@@ -107,6 +108,16 @@ export type RadarFoundations = {
    * Ausente quando não há linha: sem Assunto, a projeção sai idêntica.
    */
   editorialContext?: string[];
+  /**
+   * 2026-10-02 · SDD diretriz editorial, Adendos A e C · a voz corrente da
+   * Marca (Skill `brand_voice`) e o artigo-modelo APROVADO do pacote, que a
+   * semeadura de roteiro e carrossel lê AO VIVO no servidor
+   * (`lib/server/writer-seed.ts`) para escrever copy e CTA na voz da marca.
+   * Não moram no documento: a projeção do documento (`radarFoundationsOf*`)
+   * nunca os preenche, e o painel sai idêntico.
+   */
+  brandVoice?: WriterBrandVoiceFoundation;
+  articleBlueprint?: WriterArticleBlueprintFoundation;
 };
 
 /* ============================== leitura defensiva ============================== */

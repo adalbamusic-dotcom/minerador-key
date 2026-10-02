@@ -222,7 +222,13 @@ test("VÍDEOS 2.3.2 · C — sem artigo, nenhuma associação é criada, nem no 
    * E AS AÇÕES DO ARTIGO RECUSAM EM VOZ ALTA em vez de escolher um artigo
    * qualquer para a requisição passar — isso gravaria uso que ninguém declarou.
    */
-  assert.match(rotaBiblioteca(), /const ACOES_DO_ARTIGO = \["SELECT", "UNSELECT", "PROCESS_SELECTED"\] as const;/);
+  /*
+   * 2026-10-02 · `SET_USAGE` ENTROU NA LISTA DO ARTIGO (SDD diretriz editorial,
+   * Adendo B, D6 aprovado pelo dono). O modo de uso diz como ESTE artigo usa o
+   * vídeo — sem artigo não tem sujeito, então ele recusa em voz alta como as
+   * outras três. Arquivar e limpar continuam fora.
+   */
+  assert.match(rotaBiblioteca(), /const ACOES_DO_ARTIGO = \["SELECT", "UNSELECT", "PROCESS_SELECTED", "SET_USAGE"\] as const;/);
   assert.match(rotaBiblioteca(), /if \(!articleId && \(ACOES_DO_ARTIGO as readonly string\[\]\)\.includes\(action\)\) \{/);
   assert.match(rotaBiblioteca(), /code: "ARTICLE_REQUIRED"/);
   /* Arquivar e limpar são da biblioteca: continuam valendo sem artigo. */

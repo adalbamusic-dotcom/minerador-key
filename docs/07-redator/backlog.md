@@ -1,5 +1,13 @@
 # Backlog — Redator
 
+## Artigo-modelo e voz da marca — 2026-10-02
+
+- [x] Artigo-modelo aprovado e voz da marca nos fundamentos, manifesto, fatia, IA interna e semeadura (leitura ao vivo).
+- [ ] Alerta da IA interna sobre a voz com alvo na própria Skill: `versionId` no alerta (lib/server/writer-evidence-ai.ts:158 → `resolveWriterDivergenceTarget`) e só então pedir `brand_dna` + versionId nos prompts.
+- [ ] `bytes` do `radar.blueprint` no manifesto (exige migration da função SQL `writer_evidence_manifest`).
+- [ ] Mostrar artigo-modelo e voz no painel do Redator, se o dono quiser.
+- [ ] Homologação do dono: aprovar um artigo-modelo no Radar e conferir `get_writer_foundations`, uma seção da IA interna e a semeadura no documento real.
+
 ## Aposentadoria do Planejador — 2026-10-01
 
 - [x] Documento v1 e família `ContentPlan` fora do contrato; mock de teste é v2.

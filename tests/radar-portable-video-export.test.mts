@@ -171,3 +171,10 @@ test("B · sem plano da seleção, o avulso sai como antes", () => {
 test("PROVIDER_CALLS = 0", () => {
   assert.deepEqual(idasAoServidor, []);
 });
+
+test("pergunta de fecho de concorrente não abre artigo nem vídeo", async () => {
+  const { radarWritingRhetoricalQuestion } = await import("../lib/radar/portable-writing-export.ts");
+  assert.equal(radarWritingRhetoricalQuestion("Aprendeu como atrair clientes no Instagram?"), true);
+  assert.equal(radarWritingRhetoricalQuestion("Gostou das dicas?"), true);
+  assert.equal(radarWritingRhetoricalQuestion("Como captar clientes pela internet?"), false);
+});

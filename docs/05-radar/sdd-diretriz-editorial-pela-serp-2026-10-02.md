@@ -108,3 +108,138 @@ em adendo próprio.
   (decisão D2 da SDD de 2026-09-30)?
 - **D4:** vídeos — o que falta: (a) usar os vídeos que aparecem na SERP como sinal de formato e sugestão
   de embed; (b) a biblioteca de vídeos da marca no artigo; (c) o acréscimo YouTube virar roteiro no Redator.
+
+---
+
+## Adendo A — F2 ampliada: o "artigo-modelo" (2026-10-02) — PROPOSTA
+
+### A.1 Pedido do dono
+
+"A SERP teria que fornecer uma fotocópia de um artigo ideal para concorrer com os resultados: quantos H2,
+H3, parágrafos, negritas, imagens de respiro e capa; resolver o que o Planejador fazia; juntar os dados com
+ajuda da IA; dar sentido a todas as keywords; detalhar, com as evidências, em que partes vão os links
+internos e quantos; e se precisa de links externos para reforçar alguma questão."
+
+### A.2 Diagnóstico do CSV real (artigo do Instagram, export de 2026-10-02)
+
+- A estrutura saiu com **um H2** e H1 malformado ("Como o que considerar sobre stories…"): o artigo-modelo
+  determinístico depende de cabeçalhos de concorrente e a amostra é de lojas (Nuvemshop, Stone, Bagy), não
+  de clínica. Regra fixa não transforma essa amostra num artigo para o leitor da marca — por isso a IA.
+- O pacote está **bloqueado** ("dossiê diverge da investigação congelada"): o congelamento é anterior às
+  correções da F1 e da hidratação. Refinalizar (grátis) já aplica a F1; não resolve a estrutura.
+- Corrigido nesta data, sem contrato novo: pergunta retórica de concorrente não abre artigo; link não é
+  posicionado em seção fora do escopo; diferencial do blueprint que contradiz "não cobrir" sai; orgânicos
+  com URL limpa na SERP resumida.
+
+### A.3 Proposta — `articleBlueprint` (artigo-modelo)
+
+Uma chamada de IA estruturada (`generateStructuredAI`, Connection DeepSeek da plataforma, a mesma do
+Arquiteto e das pautas do Radar), sobre o pacote CONGELADO. Saída validada por Zod:
+
+1. **Sentido das keywords:** como a principal, as complementares e o Assunto se atendem juntos; onde cada
+   uma entra (H1, H2, H3, corpo) e a intenção que a SERP mostra. Divergência entre principal e slug publicado
+   vira alerta para o Arquiteto — nunca troca silenciosa.
+2. **Leitor, promessa e ângulo** contra a SERP (o que a amostra cobre, o que falta, como superar), cada
+   afirmação com o id da evidência do pacote (orgânico, PAA, conceito, lente, AI Overview).
+3. **Título:** H1, SEO title (até ~60), meta description (até ~155); slug e canonical preservados.
+4. **Medidas do artigo ideal:** faixa de palavras (P25–P75 dos concorrentes comparáveis), número de H2 e
+   de H3, parágrafos por seção, negritos por seção (termo/entidade, nunca frase inteira), listas e tabelas
+   quando a SERP usa.
+5. **Seções H2** (cada uma): pergunta do leitor, resposta que abre a seção, H3, o que explicar, evidências
+   (ids), termos LSI/entidades, uso do especialista e dos vídeos, entrega prática.
+6. **Links internos:** quantos e onde — do grafo aprovado e dos membros do Silo (Pilar, SiloPage, irmãos),
+   com âncora, destino resolvido (publicado, planejado ou não resolvido) e o motivo. Nenhum link fora do grafo.
+7. **Links externos:** onde uma afirmação pede reforço, o tipo de fonte (oficial, estudo, órgão) e a
+   afirmação que ela sustenta. Só fonte verificada vira URL; o resto sai como "fonte a obter".
+8. **Abertura e fechamento:** abertura respondendo a dúvida do leitor; virada final e CTA na voz do
+   especialista (parecer aceito); próximo passo no Silo.
+9. **Plano visual:** capa e 2–3 respiros, cada um ligado a uma seção, com prompt, ALT e legenda.
+10. **E-E-A-T/YMYL:** autoria, revisão, cuidado com promessa de resultado.
+
+**Validador do servidor** (recusa e devolve o motivo): id de evidência inexistente; seção fora do escopo
+ou "não cobrir"; link fora do grafo/Silo; URL externa sem fonte verificada; título copiado de concorrente;
+FAQ; contagens incoerentes com a faixa da SERP.
+
+**Decisão humana:** a IA gera uma cópia de trabalho; o dono revisa, edita e aprova. Só a versão aprovada
+vai ao CSV e ao Redator. Versão aprovada é imutável; nova geração cria nova versão.
+
+**Persistência:** versão própria, append-only, presa ao hash do pacote congelado (não refaz o
+congelamento). Se o pacote for refinalizado, a versão anterior fica marcada como "de outro congelamento".
+Campo opcional no que o export e o Redator leem; quem não conhece ignora.
+
+**Custo:** 1 chamada de IA por artigo, por clique explícito, com o custo mostrado antes. Testes com fixtures.
+
+**CSV:** com artigo-modelo aprovado, `estrutura`, `titulo_e_seo`, `promessa_e_leitor`, `links_internos` e
+`plano_visual` saem dele; sem ele, como hoje (F1).
+
+## Adendo B — Vídeos com modos de uso (2026-10-02) — APROVADO (D6), IMPLEMENTADO EM CÓDIGO
+
+Hoje a aba Vídeos só tem "Casar pautas com o conteúdo". Como no Especialista, cada vídeo selecionado para o
+artigo ganha um **modo de uso** escolhido pelo dono:
+
+- **Contexto** — o redator lê o resumo do vídeo para entender o assunto (não cita);
+- **Sugestão de pauta** — ideias do vídeo viram candidatas a seção/pergunta (passam pelo artigo-modelo);
+- **Apoio (suporte)** — trecho com tempo sustenta um ponto do texto, atribuído ao vídeo;
+- **Citação** — fala literal, atribuída, com tempo;
+- **Incorporar (embed)** — o vídeo entra no artigo, na seção indicada;
+- **Não usar**.
+
+"Casar pautas" continua como está e passa a preencher o modo sugerido; o dono confirma ou troca.
+
+**Contrato:** coluna aditiva e opcional `usage` em `radar_article_video_sources` (+ `usage_note`), migration
+aplicada pelo dono (`db query -f` + `migration repair`). Rota da biblioteca ganha a ação `SET_USAGE`. O texto
+extraído do vídeo entra no pacote conforme o modo (resumo para Contexto, trechos com tempo para Apoio e
+Citação, URL e seção para Embed) e chega ao CSV de artigo, ao CSV de vídeo e ao artigo-modelo.
+
+**Rollback:** coluna nula = comportamento de hoje.
+
+## Adendo C — Voz da marca (Skill `brand_voice`) nos entregáveis (2026-10-02) — PEDIDO DO DONO, IMPLEMENTADO EM CÓDIGO
+
+### C.1 Pedido do dono
+
+"Puxar a skill da voz de marca que acabei de subir na aba Skills e prompts da Marca. Ela tem que ser lida e
+pode extrair coisas para direcionar como adendo da marca ou diretrizes dentro do nosso entregável; acho que
+pode entrar ao concluir os processos da SERP. Tem que estar inclusive para ser útil nos CTAs."
+
+### C.2 Quando ela entra — leitura no uso, com a versão registrada
+
+- A Skill é da **Marca**, versionada e aprovada lá (rascunho → aprovação → ativa). Ela muda por motivos que
+  não têm nada a ver com a SERP de um artigo.
+- **Não entra no congelamento da investigação.** Copiá-la para o pacote congelado mudaria o hash e obrigaria
+  a refinalizar todos os artigos a cada ajuste de voz ("dossiê diverge").
+- **Entra quando a SERP termina, no que nasce dela:** o artigo-modelo (IA) recebe a Skill inteira e grava qual
+  versão usou; o CSV "para escrever", o CSV de vídeo e o Redator leem a versão corrente no momento da
+  exportação e dizem qual versão foi usada e em que estado ela está.
+- **Regra de seleção = a canônica da Marca** (spec da Marca §24, `resolveBrandSkill`, a mesma do Redator):
+  vale a versão CORRENTE não arquivada — rascunho, aguardando aprovação ou ativa. A primeira versão desta
+  proposta dizia "só a ativa"; o mapeamento do código mostrou que isso criaria uma terceira regra para a mesma
+  pergunta, contra a spec, e foi corrigido em 2026-10-02. O entregável diz o estado ("em rascunho na Marca").
+
+### C.3 Onde ela aparece
+
+- **CSV "para escrever":** uma linha própria "Voz da marca", logo abaixo da linha de topo, com as seções da
+  Skill distribuídas pelas colunas de mesmo assunto (leitor e oferta, título e abertura, estrutura e
+  transição comercial, SERP e exclusões, fontes e autoridade, links, plano visual; voz, vocabulário e
+  critérios no prompt). Seção sem assunto reconhecido vai inteira para o prompt. Cada artigo recebe a
+  instrução de aplicar essa linha no CTA e na copy.
+- **CSV de vídeo:** a mesma linha, nas colunas de público, roteiro, fontes e prompt.
+- **Artigo-modelo (IA):** a Skill inteira entra no pedido; o CTA, a promessa, o H1 e os prompts de imagem
+  seguem a voz; a página comercial do próprio domínio da marca citada na Skill vira candidata a link (só
+  entra no texto se a IA a colocar no CTA e o dono aprovar). O payload registra a versão da Skill usada.
+- **Redator:** lê a voz CORRENTE não arquivada (rascunho incluído, com o estado dito), ao vivo, nos fundamentos e
+  fatias do MCP, na IA interna e na semeadura de roteiro e carrossel; o artigo-modelo aprovado do MESMO
+  `bundleHash` também chega ao Redator ao vivo, sem entrar no envio nem mudar o hash.
+
+### C.4 Contrato
+
+Sem tabela nova: leitura server-side da versão ativa pelo repositório de Skills que já existe. Campos
+aditivos e opcionais no lote do export e no payload do artigo-modelo (`brandVoice`). Sem Skill ativa, tudo
+sai como hoje, com o aviso.
+
+## Decisões pendentes do Adendo
+
+- **D5:** APROVADO pelo dono em 2026-10-02 — botão "Gerar artigo-modelo (IA)" depois de finalizar, 1
+  chamada por artigo com custo mostrado; revisão, edição e aprovação humana; só o aprovado vai ao CSV e ao
+  Redator. Começa primeiro.
+- **D6:** APROVADO pelo dono em 2026-10-02 — modos de uso dos vídeos com migration aditiva, depois do
+  artigo-modelo.

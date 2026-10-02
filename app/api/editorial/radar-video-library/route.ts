@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { decideRadarVideoArchive, decideRadarVideoProcessing, overlayRadarArticleSelection, summarizeRadarVideoArchive, type RadarLibrarySource } from "@/lib/radar/video-library";
+import { decideRadarVideoArchive, decideRadarVideoProcessing, overlayRadarArticleSelection, RADAR_VIDEO_USAGE_NOTE_MAX, RADAR_VIDEO_USAGES, radarVideoUsageOf, summarizeRadarVideoArchive, withRadarArticleUsage, type RadarLibrarySource } from "@/lib/radar/video-library";
 import { radarVideoAcquisitionCapability } from "@/lib/radar/video-text-acquisition";
 import { enqueueRadarVideoTextJob } from "@/lib/server/radar-video-text";
+import { readRadarArticleVideoUsages } from "@/lib/server/radar-video-usage-read";
 import { PipelineRuntimeError, resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
 /**
@@ -24,18 +25,31 @@ import { PipelineRuntimeError, resolvePipelineContext } from "@/lib/server/pipel
  * — mas a recusa tem de ser explícita, e não um artigo implícito inventado
  * para fazer a requisição passar.
  */
-const ACOES_DO_ARTIGO = ["SELECT", "UNSELECT", "PROCESS_SELECTED"] as const;
+/*
+ * 2026-10-02 · `SET_USAGE` (o modo de uso do vídeo, Adendo B/D6) é do ARTIGO:
+ * o modo diz como ESTE artigo usa a fonte, e sem artigo não há sujeito.
+ */
+const ACOES_DO_ARTIGO = ["SELECT", "UNSELECT", "PROCESS_SELECTED", "SET_USAGE"] as const;
 
 const AcaoSchema = z.object({
   brandId: z.string().uuid(),
   articleId: z.string().trim().min(1).max(256).nullable().optional(),
-  action: z.enum(["SELECT", "UNSELECT", "PROCESS_SELECTED", "ARCHIVE", "CLEAR_LIST"]),
+  action: z.enum(["SELECT", "UNSELECT", "PROCESS_SELECTED", "SET_USAGE", "ARCHIVE", "CLEAR_LIST"]),
   videoSourceIds: z.array(z.string().uuid()).max(500).default([]),
+  /* 2026-10-02 · Só para `SET_USAGE`. `usage` nulo limpa o modo (e a nota junto). */
+  usage: z.enum(RADAR_VIDEO_USAGES).nullable().optional(),
+  usageNote: z.string().trim().max(RADAR_VIDEO_USAGE_NOTE_MAX).nullable().optional(),
 }).strict();
 
 const COLUNAS = "id,brand_id,article_id,source_kind,original_url,normalized_url,normalized_url_hash,youtube_video_id,display_name,registration_status,registered_by,registration_article_dna_version_id,registration_article_dna_content_hash,text_state,text_state_reason,metadata_fetched_at,video_title,channel_id,channel_title,video_description,published_at,duration,thumbnails,uploaded_media_uri,uploaded_media_content_type,uploaded_media_at,created_at,updated_at";
 
 type Contexto = Awaited<ReturnType<typeof resolvePipelineContext>>;
+
+/*
+ * 2026-10-02 · A COLUNA DO MODO AINDA NÃO EXISTE (migration 20261002120000 não
+ * aplicada): o Postgres diz 42703; o PostgREST, PGRST204 ao gravar.
+ */
+const colunaDeModoAusente = (erro: { code?: string | null }) => erro.code === "42703" || erro.code === "PGRST204";
 
 /** A biblioteca da marca, com a seleção do artigo corrente por cima — se houver. */
 async function lerBiblioteca(context: Contexto, articleId: string | null): Promise<RadarLibrarySource[]> {
@@ -71,11 +85,16 @@ async function lerBiblioteca(context: Contexto, articleId: string | null): Promi
     createdAt: String(linha.created_at), updatedAt: String(linha.updated_at),
   }));
 
-  return overlayRadarArticleSelection({
+  /*
+   * 2026-10-02 · O MODO DE USO POR CIMA DA SELEÇÃO (Adendo B, D6), numa leitura
+   * à parte e tolerante: sem a coluna, a biblioteca sai como antes, sem modos.
+   */
+  const usos = await readRadarArticleVideoUsages(context.supabase, context.brandId, articleId);
+  return withRadarArticleUsage(overlayRadarArticleSelection({
     sources: projetadas,
     links: linhas.map(item => ({ articleId: item.article_id, videoSourceId: item.video_source_id })),
     articleId,
-  }) as RadarLibrarySource[];
+  }), usos, articleId) as RadarLibrarySource[];
 }
 
 /** As fontes citadas por qualquer investigação congelada desta marca. */
@@ -140,12 +159,20 @@ export async function POST(request: Request) {
         if (insercao.error) throw new PipelineRuntimeError("QUERY_FAILURE", `Não foi possível selecionar: ${insercao.error.message}`, 503);
       }
       if (action === "UNSELECT" && alvos.length) {
-        const remocao = await context.supabase
+        /*
+         * 2026-10-02 · Desmarcar LIMPA o modo de uso e a nota no mesmo update:
+         * um modo de vínculo removido não pode voltar em silêncio quando a fonte
+         * for selecionada de novo — a reseleção é decisão nova, sem modo.
+         */
+        const remover = (comModo: boolean) => context.supabase
           .from("radar_article_video_sources")
-          .update({ status: "REMOVED", removed_at: new Date().toISOString() })
+          .update({ status: "REMOVED", removed_at: new Date().toISOString(), ...(comModo ? { usage: null, usage_note: null } : {}) })
           .eq("brand_id", context.brandId)
           .eq("article_id", articleId)
           .in("video_source_id", alvos);
+        let remocao = await remover(true);
+        /* Sem a coluna (migration ausente), não há modo a limpar: o vínculo sai como antes. */
+        if (remocao.error && colunaDeModoAusente(remocao.error)) remocao = await remover(false);
         if (remocao.error) throw new PipelineRuntimeError("QUERY_FAILURE", `Não foi possível remover deste artigo: ${remocao.error.message}`, 503);
       }
       return NextResponse.json({ success: true, action, affected: alvos.length, sources: await lerBiblioteca(context, articleId) });
@@ -182,6 +209,70 @@ export async function POST(request: Request) {
         reusedText: decisoes.filter(item => item.outcome === "REUSED_TEXT").length,
         sources: await lerBiblioteca(context, articleId),
       });
+    }
+
+    if (action === "SET_USAGE") {
+      /*
+       * O MODO DE USO É DECISÃO HUMANA — Adendo B (D6), 2026-10-02.
+       *
+       * Como no Especialista: a tela pode SUGERIR (a partir do casamento), mas
+       * só este pedido explícito grava. Vale para fontes desta marca
+       * SELECIONADAS neste artigo; o resto é recusado por item, com motivo.
+       * `usage` nulo limpa o modo e a nota juntos: nota sem modo não qualifica
+       * nada. Não toca a fonte, o texto, o casamento nem o pacote congelado.
+       *
+       * SUCESSO SÓ DEPOIS DO READBACK: o update devolve as linhas gravadas, e
+       * cada fonte só conta como aplicada quando o banco devolveu exatamente o
+       * modo e a nota pedidos.
+       */
+      if (parsed.data.usage === undefined || !videoSourceIds.length) {
+        return NextResponse.json({
+          success: false,
+          code: "USAGE_REQUIRED",
+          error: "Informe as fontes e o modo de uso (ou nulo, para limpar o modo).",
+        }, { status: 400 });
+      }
+      const usage = radarVideoUsageOf(parsed.data.usage);
+      const usageNote = usage ? (parsed.data.usageNote?.trim() || null) : null;
+      const recusadas: Array<{ videoSourceId: string; reason: string }> = [];
+      for (const id of new Set(videoSourceIds)) {
+        if (!porId.has(id)) recusadas.push({ videoSourceId: id, reason: "Esta fonte não está na biblioteca desta marca." });
+        else if (!porId.get(id)?.selectedForArticle) recusadas.push({ videoSourceId: id, reason: "Esta fonte não está selecionada neste artigo: marque a caixa dela antes de escolher o modo de uso." });
+      }
+      /* A mesma fonte pedida duas vezes é uma fonte. */
+      const aplicar = [...new Set(alvos)].filter(id => porId.get(id)?.selectedForArticle);
+      const aplicadas: string[] = [];
+      if (aplicar.length) {
+        const gravacao = await context.supabase
+          .from("radar_article_video_sources")
+          .update({ usage, usage_note: usageNote })
+          .eq("brand_id", context.brandId)
+          .eq("article_id", articleId)
+          .eq("status", "ACTIVE")
+          .in("video_source_id", aplicar)
+          .select("video_source_id,usage,usage_note");
+        if (gravacao.error) {
+          throw new PipelineRuntimeError("QUERY_FAILURE", colunaDeModoAusente(gravacao.error)
+            ? "O modo de uso dos vídeos ainda não existe no banco (migration 20261002120000 não aplicada)."
+            : `Não foi possível gravar o modo de uso: ${gravacao.error.message}`, 503);
+        }
+        const devolvidas = new Map(((gravacao.data || []) as unknown as Array<{ video_source_id: string; usage: unknown; usage_note: unknown }>)
+          .map(linha => [String(linha.video_source_id), linha]));
+        for (const id of aplicar) {
+          const linha = devolvidas.get(id);
+          if (linha && radarVideoUsageOf(linha.usage) === usage && (linha.usage_note ?? null) === usageNote) aplicadas.push(id);
+          else recusadas.push({ videoSourceId: id, reason: "O banco não confirmou o modo de uso desta fonte; atualize a área e tente de novo." });
+        }
+      }
+      const sources = await lerBiblioteca(context, articleId);
+      if (!aplicadas.length) {
+        return NextResponse.json({
+          success: false, code: "USAGE_NOT_APPLIED", action,
+          error: recusadas[0]?.reason || "Nenhum modo de uso foi gravado.",
+          refused: recusadas, sources,
+        }, { status: 409 });
+      }
+      return NextResponse.json({ success: true, action, usage, affected: aplicadas.length, refused: recusadas, sources });
     }
 
     /* ARCHIVE e CLEAR_LIST: a política decide, e a recusa é por item. */

@@ -578,7 +578,8 @@ test("K · a rota: 'mode' opcional, padrão completo, e o ramo novo não lê nad
   assert.match(rota, /mode: z\.enum\(\["writing", "full", "video"\]\)\.optional\(\)/);
   assert.match(rota, /if \(input\.mode === "writing"\) \{/);
   const ramo = rota.slice(rota.indexOf("if (input.mode === \"writing\") {"), rota.indexOf("const linhaPorArtigo ="));
-  assert.match(ramo, /radarPortableWritingExport\(\{ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt \}\)/);
+  /* 2026-10-02 · a voz da marca (SDD diretriz editorial, Adendo C) vai ao formato para escrever, lida no núcleo. */
+  assert.match(ramo, /radarPortableWritingExport\(\{ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt, brandVoice \}\)/);
   assert.equal(/await |Repository\(|lookupSerpCache|supabase|\.from\(/.test(ramo), false, "o ramo 'Para escrever' faz leitura própria");
   assert.equal(/radarPortableExportCsv|buildRadarPortableExportRow/.test(ramo), false, "o ramo novo monta o formato completo");
   /* A página publicada sai do ArticleDNA já lido no laço. */

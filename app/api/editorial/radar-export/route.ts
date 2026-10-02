@@ -101,7 +101,7 @@ export async function POST(request: Request) {
     const input = CorpoSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "radar", "view");
 
-    const { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao } = await assembleRadarPortableExport({
+    const { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice } = await assembleRadarPortableExport({
       brandId: input.brandId,
       articleIds: input.articleIds,
       groupBy: input.mode === "video" ? undefined : input.groupBy,
@@ -126,7 +126,7 @@ export async function POST(request: Request) {
           refused: recusados,
         }, { status: 409, headers: noStoreHeaders });
       }
-      const video = radarPortableVideoExport({ articles: montadas, today: exportedAt });
+      const video = radarPortableVideoExport({ articles: montadas, today: exportedAt, brandVoice });
       const semYoutube = video.withoutYoutube ? ` ${video.withoutYoutube} sem pesquisa do YouTube: veja a coluna pode_gravar.` : "";
       return radarPortableExportStreamResponse({
         success: true,
@@ -161,7 +161,7 @@ export async function POST(request: Request) {
           ...(plano ? { warnings: plano.warnings, emptySilos: radarPortableExportEmptySilos(plano) } : {}),
         }, { status: 409, headers: noStoreHeaders });
       }
-      const escrita = radarPortableWritingExport({ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt });
+      const escrita = radarPortableWritingExport({ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt, brandVoice });
       const bloqueados = escrita.blocked ? ` ${escrita.blocked} com bloqueio para escrever: veja a coluna pode_escrever.` : "";
       return radarPortableExportStreamResponse({
         success: true,

@@ -1,5 +1,70 @@
 # Estado atual — Radar
 
+## Voz da marca e modos de uso dos vídeos — 2026-10-02 (noite)
+
+**Verificado no código e confirmado por teste. Validado no local: CSVs pela rota real (linha "Voz da marca" com a
+Skill "AdalbaPro" v1 em rascunho) e botões dos modos na aba Vídeos (nenhum modo gravado; a escolha é do dono).**
+SDD: Adendos B e C.
+
+- **Voz da marca (Adendo C):** `readRadarBrandVoice` (lib/server/radar-brand-voice.ts) reaproveita o repositório
+  e a regra canônica da Marca (`resolveBrandSkill`, spec §24): Skill `brand_voice` corrente não arquivada,
+  rascunho incluído. Lida UMA vez por lote em `assembleRadarPortableExport`, fora do congelamento e do hash;
+  falha vira "não foi possível ler", nunca derruba o export. CSV "para escrever" e CSV de vídeo ganham a linha
+  "Voz da marca" (seções da Skill distribuídas pelas colunas de mesmo assunto, `lib/radar/brand-voice.ts`); o
+  topo diz versão e estado; cada artigo é instruído a seguir a voz na copy e no CTA. O artigo-modelo recebe a
+  Skill inteira; página do próprio site citada nela vira candidata a link do CTA; o payload registra a versão.
+  O MCP `get_article_for_writing` recebe a mesma voz.
+- **Modos de uso dos vídeos (Adendo B):** 6 botões por vídeo selecionado (Usar como contexto, Sugerir como
+  pauta, Usar como apoio, Marcar citação, Incorporar no artigo, Não usar), "Limpar modo" e nota opcional;
+  sugestão do casamento só como borda tracejada, nunca gravada. Rota da biblioteca com `SET_USAGE` (só fonte
+  da marca selecionada no artigo, releitura obrigatória); UNSELECT limpa o modo. Leitura tolerante em consulta
+  separada (`lib/server/radar-video-usage-read.ts`). Export: modos lidos ao vivo, `bundle.video` e hash
+  intocados; "Não usar" some da projeção; vídeo arquivado na biblioteca não vai ao entregável; Incorporar leva
+  URL e seção, Apoio/Citação trecho com tempo, Contexto "ler, não citar". O bloco de modos vem antes do que é
+  de terceiros na coluna de fontes. O artigo-modelo leva o modo de cada vídeo e o CSV identifica o vídeo que a
+  planta põe numa seção.
+- Testes: `tests/radar-brand-voice.test.mts`, `tests/radar-brand-voice-leitor.test.mts`,
+  `tests/radar-video-usage.test.mts`; Radar 2751/0 (1 pulado).
+- **Limites:** homologação do dono (clicar num modo e exportar); versões do artigo-modelo geradas antes da
+  correção não identificam o vídeo da seção (gerar de novo); o painel do artigo-modelo ainda não mostra qual
+  vídeo foi para qual seção.
+
+## Artigo-modelo (IA) e correções do CSV "para escrever" — 2026-10-02 (tarde)
+
+**Verificado no código e confirmado por teste. Validado no local: painel renderiza e, sem a tabela, avisa e
+bloqueia "Gerar"; export segue saindo. Geração real (paga) e aprovação: NÃO executadas — dependem da migration
+e são do dono.** SDD: `sdd-diretriz-editorial-pela-serp-2026-10-02.md`, Adendos A e B (D5 e D6 aprovados).
+
+- **Artigo-modelo (IA)** na área Pesquisa, depois de finalizar: botão com confirmação de custo (1 chamada
+  DeepSeek da plataforma, cota da marca) → planta do artigo ideal: sentido das keywords, H1/SEO title/meta,
+  leitor, promessa, ângulo com evidências, abertura, seções (pergunta do leitor, resposta inicial, H3, o que
+  explicar, parágrafos, negritos, termos, evidências por id, links internos e externos, imagem, especialista,
+  vídeo), fechamento e CTA na voz do especialista, plano visual com prompt/ALT/legenda. As medidas (palavras,
+  H2, H3, parágrafos, imagens) vêm dos concorrentes comparáveis, não da IA.
+- **O servidor confere** a resposta contra o pacote (`radarSanitizeArticleBlueprint`): id inexistente, link fora
+  do Silo, fonte externa sem verificação, seção fora do escopo ou de FAQ saem com aviso; < 3 seções → recusa.
+- **Versões** append-only em `radar_article_blueprints`, presas ao `bundleHash`; editar cria versão; aprovar é
+  humano e o banco recusa mudar a aprovada. O export lê a APROVADA do pacote vigente, por lote, e troca as colunas
+  de planta (título e SEO, promessa, estrutura, links internos, plano visual). Sem ela, o CSV sai como antes.
+  A leitura falha em silêncio controlado (aviso no log) se a tabela não existir.
+- **CSV "para escrever", regra fixa:** pergunta retórica de concorrente ("Aprendeu como…?") não abre artigo nem
+  vídeo; diferencial que contradiz "não cobrir" sai; link não é posicionado em seção fora do escopo; orgânicos com
+  URL limpa (com UUID no caminho, só o domínio). Conferido no artigo do Instagram pela rota real.
+- **Migration** `20261002120000_radar_artigo_modelo_e_uso_de_videos.sql` (+ rollback): tabela do artigo-modelo
+  e coluna `usage`/`usage_note` em `radar_article_video_sources` (modos de vídeo, Adendo B). Aplicação pelo dono.
+- Arquivos: `lib/radar/article-blueprint.ts`, `lib/server/radar-article-blueprint.ts`,
+  `lib/server/radar-article-blueprint-read.ts`, `app/api/editorial/radar-article-blueprint/route.ts`,
+  `modules/radar/radar-article-blueprint-panel.tsx` (novos); `lib/server/radar-portable-export-core.ts`,
+  `lib/radar/portable-export-batch.ts`, `lib/radar/portable-writing-batch.ts`, `lib/radar/portable-writing-export.ts`,
+  `lib/radar/portable-video-export.ts`, `modules/radar/radar-r3-workbench.tsx`, `lib/agent/platform-catalog.ts`
+  (etapa `radar.article_blueprint`).
+- Testes: `tests/radar-article-blueprint.test.mts` (resposta da IA em fixture), retórica no teste de vídeo,
+  snapshot dourado F4.4 renovado (diferença conferida linha a linha: só a URL dos orgânicos). Radar 2718/0,
+  Redator 357/0, agent 65/0.
+- **Limites:** o Redator da plataforma ainda não recebe o artigo-modelo (só o CSV e o MCP
+  `get_article_for_writing`, que usa o mesmo núcleo); modos de uso dos vídeos (Adendo B) têm a coluna na
+  migration, mas a tela e a rota ainda não.
+
 ## Relatório informativo, CSV de vídeo e Silo nos selecionados — 2026-10-02
 
 **Verificado no código e confirmado por teste. Validado no local pelo desenvolvimento (leitura da tela e POST de

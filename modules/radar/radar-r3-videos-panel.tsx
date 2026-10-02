@@ -6,9 +6,15 @@ import {
   filterRadarVideoLibrary,
   RADAR_VIDEO_LIBRARY_FILTERS,
   RADAR_VIDEO_LIBRARY_FILTER_LABEL,
+  RADAR_VIDEO_USAGE_ACTION_LABEL,
+  RADAR_VIDEO_USAGE_HINT,
+  RADAR_VIDEO_USAGE_LABEL,
+  RADAR_VIDEO_USAGES,
+  suggestRadarVideoUsage,
   summarizeRadarVideoLibrary,
   type RadarLibrarySource,
   type RadarVideoLibraryFilter,
+  type RadarVideoUsage,
 } from "@/lib/radar/video-library";
 import { radarVideoAcquisitionCapability, radarVideoMetadataCanRequest, radarVideoTextCanRequest, type RadarVideoTextState } from "@/lib/radar/video-text-acquisition";
 import { radarMatchingReadiness, summarizeRadarBriefCoverage, type RadarBriefCoverage } from "@/lib/radar/video-brief-matching";
@@ -120,7 +126,11 @@ type RadarR3VideosPanelProps = {
   onFetchVideoMetadata?: (articleId: string | null, videoSourceId: string) => void;
   onProvideVideoTranscript?: (articleId: string | null, videoSourceId: string, transcript: string) => void;
   onUploadVideoMedia?: (articleId: string | null, videoSourceId: string, file: File) => void;
-  onLibraryAction?: (articleId: string | null, action: "SELECT" | "UNSELECT" | "PROCESS_SELECTED" | "ARCHIVE" | "CLEAR_LIST", videoSourceIds: string[]) => void;
+  /*
+   * 2026-10-02 · `SET_USAGE` grava o modo de uso do vídeo no artigo (Adendo B,
+   * D6); o 4º parâmetro só existe para ela. As outras ações não mudam.
+   */
+  onLibraryAction?: (articleId: string | null, action: "SELECT" | "UNSELECT" | "PROCESS_SELECTED" | "SET_USAGE" | "ARCHIVE" | "CLEAR_LIST", videoSourceIds: string[], options?: { usage: RadarVideoUsage | null; usageNote?: string | null }) => void;
   /** Repetir a leitura depois de uma falha, por decisão de quem opera. */
   onReloadLibrary?: (articleId: string | null) => void;
   /** Casar pauta com conteúdo. Ação humana, e a única que grava recorte. */
@@ -162,6 +172,15 @@ const tempoLegivel = (ms: number) => {
   const total = Math.max(0, Math.round(ms / 1000));
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 };
+
+const campo = "mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:text-text-muted";
+/*
+ * 2026-10-02 · OS BOTÕES DO MODO DE USO SÃO OS DO ESPECIALISTA: a mesma base
+ * (`button` aqui é a `action` de lá) e o mesmo ativo (`primaryAction`: borda de
+ * destaque e `bg-selected`). A sugestão é discreta: só a borda tracejada.
+ */
+const botaoAtivo = `${button} border-context-accent bg-selected`;
+const botaoSugerido = `${button} border-dashed border-context-accent`;
 
 export function RadarR3VideosPanel({ articleId = null, brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, onReloadLibrary, onRunMatching }: RadarR3VideosPanelProps) {
   const [raw, setRaw] = useState("");
@@ -491,6 +510,23 @@ const leituraDoWorker = vista?.worker
               */}
             {!pedido.allowed && !capacidade.available && <p className="mt-1 text-sm text-text-muted">{capacidade.reason}</p>}
             {leitura.textStatusReason && <p className="mt-1 text-sm text-text-muted">{leitura.textStatusReason}</p>}
+
+            {/*
+              * O MODO DE USO NESTE ARTIGO — Adendo B (D6), 2026-10-02.
+              *
+              * Só na fonte SELECIONADA (o modo qualifica um uso que já foi
+              * declarado) e só quando o servidor leu o modo: chave ausente é
+              * leitura indisponível, e oferecer o seletor seria prometer uma
+              * gravação que o banco ainda não sabe fazer.
+              */}
+            {camadaDoArtigo && fonte.selectedForArticle && fonte.articleUsage !== undefined && <RadarVideoUsageControl
+              key={`${articleId}:${fonte.id}`}
+              fonte={fonte}
+              articleId={articleId}
+              coverage={cobertura}
+              disabled={ocupado}
+              onLibraryAction={onLibraryAction}
+            />}
 
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {/* Obter metadados: a única coisa que a API key alcança. */}
@@ -891,4 +927,107 @@ const leituraDoWorker = vista?.worker
       * isso que todo trecho em outro idioma carrega a limitação dizendo isso.
       */}
   </section>;
+}
+
+/**
+ * O MODO DE USO DO VÍDEO NESTE ARTIGO — Adendo B (D6), 2026-10-02.
+ *
+ * Como no Especialista: cada vídeo SELECIONADO ganha uma fileira de BOTÕES de
+ * ação — "Usar como contexto", "Sugerir como pauta", "Usar como apoio",
+ * "Marcar citação", "Incorporar no artigo", "Não usar" — e uma nota curta
+ * opcional para quem escreve. O dono pediu botões, e não um seletor: "coloca
+ * igual que no Especialista (...) por que ele está muito rígido com uma única
+ * opção". Cada clique é uma escrita remota (`SET_USAGE`).
+ *
+ * O ESTADO VEM DO SERVIDOR (`articleUsage`), nunca de uma cópia local: o botão
+ * do modo gravado fica marcado (aria-pressed, destaque e selo), e a releitura
+ * da área é a confirmação. Clicar no modo já ativo o limpa; "Limpar modo" faz o
+ * mesmo, explícito.
+ *
+ * A SUGESTÃO É SÓ SUGESTÃO. Ela sai do casamento (`suggestRadarVideoUsage`),
+ * aparece quando não há modo, como frase e como borda tracejada no botão
+ * dela — e NUNCA é gravada sozinha: só o clique do dono grava (AGENTS §9).
+ *
+ * Fica DEPOIS do painel no arquivo de propósito: a suíte do Gate 2.3 recorta o
+ * checkbox até o primeiro `</label>` do arquivo, e esse rótulo tem de continuar
+ * sendo o do checkbox.
+ */
+function RadarVideoUsageControl({ fonte, articleId, coverage, disabled, onLibraryAction }: {
+  fonte: RadarLibrarySource;
+  articleId: string | null;
+  coverage: RadarBriefCoverage[] | null;
+  disabled: boolean;
+  onLibraryAction?: RadarR3VideosPanelProps["onLibraryAction"];
+}) {
+  const [rascunho, setRascunho] = useState<string | null>(null);
+  const modo = fonte.articleUsage ?? null;
+  const notaSalva = fonte.articleUsageNote || "";
+  const nota = rascunho ?? notaSalva;
+  const sugestao = modo ? null : suggestRadarVideoUsage({ source: fonte, coverage });
+  const bloqueado = !onLibraryAction || disabled;
+  const gravar = (usage: RadarVideoUsage | null, usageNote: string | null) => onLibraryAction?.(articleId, "SET_USAGE", [fonte.id], { usage, usageNote });
+  /*
+   * Trocar de modo leva a nota que está no campo (gravada ou digitada); limpar o
+   * modo limpa a nota junto. O rascunho só é descartado ao limpar: numa gravação
+   * que falha, o que foi digitado continua no campo (revisão de 2026-10-02). A
+   * `key` com o artigo zera o rascunho ao trocar de artigo.
+   */
+  const escolher = (usage: RadarVideoUsage | null) => { gravar(usage, usage ? nota.trim() || null : null); if (!usage) setRascunho(null); };
+
+  return <div className="mt-2 rounded-md border border-divider bg-surface p-2" data-testid={`radar-videos-usage-block-${fonte.id}`} data-usage={modo || "NONE"}>
+    <p className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
+      <span>Modo de uso neste artigo</span>
+      {modo && <span className="rounded border border-context-accent px-1.5 py-0.5 text-sm font-semibold text-context-accent" data-testid={`radar-videos-usage-badge-${fonte.id}`}>{RADAR_VIDEO_USAGE_LABEL[modo]}</span>}
+    </p>
+    <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label={`Modo de uso de ${radarVideoSourceDisplay(fonte).title} neste artigo`} data-testid={`radar-videos-usage-${fonte.id}`}>
+      {RADAR_VIDEO_USAGES.map(item => <button
+        type="button"
+        key={item}
+        className={modo === item ? botaoAtivo : sugestao === item ? botaoSugerido : button}
+        aria-pressed={modo === item}
+        data-suggested={sugestao === item ? "true" : undefined}
+        title={modo === item ? "Clique de novo para limpar o modo" : RADAR_VIDEO_USAGE_HINT[item]}
+        disabled={bloqueado}
+        onClick={() => escolher(modo === item ? null : item)}
+        data-testid={`radar-videos-usage-${fonte.id}-${item}`}
+      >{RADAR_VIDEO_USAGE_ACTION_LABEL[item]}</button>)}
+      {modo && <button
+        type="button"
+        className={button}
+        disabled={bloqueado}
+        onClick={() => escolher(null)}
+        data-testid={`radar-videos-usage-clear-${fonte.id}`}
+      >Limpar modo</button>}
+    </div>
+    <p className="mt-1 text-sm text-text-muted" data-testid={`radar-videos-usage-hint-${fonte.id}`}>
+      {modo
+        ? `${RADAR_VIDEO_USAGE_LABEL[modo]}: ${RADAR_VIDEO_USAGE_HINT[modo]}.`
+        : sugestao
+          ? `Sugerido: ${RADAR_VIDEO_USAGE_LABEL[sugestao]} — ${RADAR_VIDEO_USAGE_HINT[sugestao]}. Nada é gravado até você clicar.`
+          : "Sem modo: o vídeo entra no artigo como antes, pelos trechos do casamento."}
+    </p>
+    {modo && <div className="mt-2 flex flex-wrap items-end gap-2">
+      <label className="min-w-0 flex-1 text-sm text-text-muted" htmlFor={`radar-video-usage-note-${fonte.id}`}>
+        Nota para quem escreve (opcional)
+        <input
+          id={`radar-video-usage-note-${fonte.id}`}
+          data-testid={`radar-videos-usage-note-${fonte.id}`}
+          type="text"
+          maxLength={300}
+          className={campo}
+          value={nota}
+          disabled={!onLibraryAction || disabled}
+          placeholder="Ex.: usar a parte sobre o Instagram"
+          onChange={event => setRascunho(event.target.value)}
+        />
+      </label>
+      <button
+        type="button"
+        className={button}
+        data-testid={`radar-videos-usage-note-save-${fonte.id}`}
+        disabled={!onLibraryAction || disabled || nota.trim() === notaSalva.trim()}
+        onClick={() => gravar(modo, nota.trim() || null)}
+      >Salvar nota</button>
+    </div>}
+  </div>;
 }

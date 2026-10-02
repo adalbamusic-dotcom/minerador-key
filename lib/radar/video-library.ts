@@ -26,7 +26,119 @@ export type RadarLibrarySource = RadarVideoSource & {
   selectedForArticle: boolean;
   /** Em quantos artigos ela está ativa. Zero é resposta legítima. */
   articleUsageCount: number;
+  /*
+   * 2026-10-02 · O MODO DE USO NESTE ARTIGO (SDD diretriz editorial, Adendo B, D6).
+   *
+   * OPCIONAIS de propósito, e fora de `RadarVideoSourceSchema` (que é .strict()):
+   * a chave AUSENTE diz "o servidor não leu o modo" (coluna inexistente ou
+   * leitura falha) e a tela não oferece o seletor; `null` diz "lido, sem modo".
+   * Só existem em fonte SELECIONADA pelo artigo corrente.
+   */
+  articleUsage?: RadarVideoUsage | null;
+  articleUsageNote?: string | null;
 };
+
+/* ================== o modo de uso do vídeo no artigo ================== */
+
+/**
+ * COMO O ARTIGO USA CADA VÍDEO SELECIONADO — Adendo B (D6), 2026-10-02.
+ *
+ * Como no Especialista, a escolha é do DONO: a plataforma sugere a partir do
+ * casamento, mas nunca grava a sugestão (AGENTS §9). A ordem é a do contrato
+ * do banco (`radar_article_video_sources_usage_check`).
+ */
+export const RADAR_VIDEO_USAGES = ["CONTEXT", "TOPIC_SUGGESTION", "SUPPORT", "QUOTE", "EMBED", "NOT_USED"] as const;
+export type RadarVideoUsage = typeof RADAR_VIDEO_USAGES[number];
+
+export const RADAR_VIDEO_USAGE_LABEL: Record<RadarVideoUsage, string> = {
+  CONTEXT: "Contexto",
+  TOPIC_SUGGESTION: "Sugestão de pauta",
+  SUPPORT: "Apoio",
+  QUOTE: "Citação",
+  EMBED: "Incorporar no artigo",
+  NOT_USED: "Não usar",
+};
+
+/*
+ * O RÓTULO DO BOTÃO É UM VERBO — pedido do dono, 2026-10-02: "coloca igual que
+ * no Especialista" ("Aceitar como evidência", "Usar como apoio"…). O substantivo
+ * acima continua sendo o nome do modo no selo e nos CSVs.
+ */
+export const RADAR_VIDEO_USAGE_ACTION_LABEL: Record<RadarVideoUsage, string> = {
+  CONTEXT: "Usar como contexto",
+  TOPIC_SUGGESTION: "Sugerir como pauta",
+  SUPPORT: "Usar como apoio",
+  QUOTE: "Marcar citação",
+  EMBED: "Incorporar no artigo",
+  NOT_USED: "Não usar",
+};
+
+/** O que cada modo pede a quem escreve. Uma frase só, lida pela tela e pelos CSVs. */
+export const RADAR_VIDEO_USAGE_HINT: Record<RadarVideoUsage, string> = {
+  CONTEXT: "ler para entender o assunto, não citar",
+  TOPIC_SUGGESTION: "ideia de seção ou pergunta a validar",
+  SUPPORT: "trecho com tempo sustenta um ponto do texto, atribuído ao vídeo",
+  QUOTE: "fala literal entre aspas, atribuída ao vídeo, com o tempo",
+  EMBED: "o vídeo entra incorporado no artigo, na seção indicada",
+  NOT_USED: "não entra no artigo",
+};
+
+/** O mesmo teto da coluna `usage_note` (CHECK de 2000 caracteres). */
+export const RADAR_VIDEO_USAGE_NOTE_MAX = 2000;
+
+/** O valor do banco, conferido: o que não é um dos seis modos vale como "sem modo". */
+export function radarVideoUsageOf(valor: unknown): RadarVideoUsage | null {
+  return typeof valor === "string" && (RADAR_VIDEO_USAGES as readonly string[]).includes(valor) ? valor as RadarVideoUsage : null;
+}
+
+/**
+ * O MODO POR CIMA DA SELEÇÃO — 2026-10-02.
+ *
+ * Envolve o resultado de `overlayRadarArticleSelection` em vez de mudá-lo: a
+ * sobreposição continua uma decisão só, e o modo é outra camada, do mesmo
+ * artigo. `usages` NULO é leitura indisponível (coluna ainda inexistente ou
+ * consulta recusada): a lista sai exatamente como antes, sem as chaves novas,
+ * e a aba segue funcionando sem modos.
+ *
+ * Só a fonte SELECIONADA pelo artigo corrente recebe o modo. Sem artigo não há
+ * uso a declarar — o mesmo raciocínio do checkbox.
+ */
+export function withRadarArticleUsage<T extends { id: string; selectedForArticle: boolean }>(
+  sources: readonly T[],
+  usages: ReadonlyMap<string, { usage: RadarVideoUsage | null; note: string | null }> | null,
+  articleId: string | null,
+): Array<T & { articleUsage?: RadarVideoUsage | null; articleUsageNote?: string | null }> {
+  if (!usages || !articleId) return [...sources];
+  return sources.map(fonte => {
+    if (!fonte.selectedForArticle) return fonte;
+    const modo = usages.get(fonte.id) || null;
+    return { ...fonte, articleUsage: modo?.usage ?? null, articleUsageNote: modo?.note ?? null };
+  });
+}
+
+/**
+ * A SUGESTÃO DO CASAMENTO — derivada, NUNCA gravada (AGENTS §9).
+ *
+ * "Casar pautas" passa a preencher o modo SUGERIDO; quem confirma ou troca é o
+ * dono. A regra é curta de propósito, para não fingir mais do que o casamento
+ * sabe:
+ *
+ *   - a fonte sustentou trecho de alguma pauta → Apoio (o trecho tem tempo);
+ *   - o casamento rodou, a fonte tem texto e nenhum trecho dela serviu →
+ *     Contexto (ler para entender, sem citar);
+ *   - sem casamento, sem seleção ou sem texto → nenhuma sugestão.
+ *
+ * Citação, Incorporar e Não usar são julgamentos editoriais que o casamento
+ * não tem como fazer, e por isso nunca são sugeridos.
+ */
+export function suggestRadarVideoUsage(input: {
+  source: { id: string; selectedForArticle: boolean; textState: string };
+  coverage: ReadonlyArray<{ extracts: ReadonlyArray<{ videoSourceId: string }> }> | null;
+}): RadarVideoUsage | null {
+  if (!input.coverage || !input.source.selectedForArticle) return null;
+  if (input.coverage.some(pauta => pauta.extracts.some(trecho => trecho.videoSourceId === input.source.id))) return "SUPPORT";
+  return input.source.textState === "TEXT_READY" ? "CONTEXT" : null;
+}
 
 /**
  * A CAMADA DO ARTIGO POR CIMA DA BIBLIOTECA — §2.3.2.

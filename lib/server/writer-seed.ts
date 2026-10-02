@@ -27,12 +27,52 @@ import "server-only";
  */
 
 import { radarFoundationsOfDossier, type RadarFoundations } from "@/lib/redator/radar-foundations";
+import { writerArticleBlueprintFoundation, writerBrandVoiceFoundation } from "@/lib/redator/writer-evidence-catalog";
 import {
   WRITER_SEED_BUNDLE_SELECTS, WRITER_SEED_DOCUMENT_SELECT,
   writerSeedDossierFromRows, writerSeedHeadFromRow, type WriterSeedDocument,
 } from "@/lib/redator/writer-document-reads";
 import { getOperationalClient, mapPersistenceError } from "@/lib/server/editorial-db";
 import { WriterDeliverableError } from "@/lib/server/writer-deliverables";
+import { readWriterApprovedArticleBlueprint, readWriterBrandVoice } from "@/lib/server/writer-evidence-sources";
+
+/*
+ * 2026-10-02 · O artigo da semeadura sai da origem do Radar que a PRIMEIRA
+ * consulta já traz (`radarOrigin`, validada pelo contrato do documento): o
+ * artigo-modelo é lido por Marca + artigo + pacote sem consulta extra ao
+ * documento. O apelido vem do próprio select, não de um prefixo copiado.
+ */
+const APELIDO_DA_ORIGEM = WRITER_SEED_DOCUMENT_SELECT.split(",")
+  .find(coluna => coluna.endsWith("->radarOrigin"))?.split(":")[0] ?? null;
+
+const artigoDaOrigem = (linha: Record<string, unknown>): string | null => {
+  const origem = APELIDO_DA_ORIGEM ? linha[APELIDO_DA_ORIGEM] : null;
+  const articleId = origem && typeof origem === "object" && !Array.isArray(origem) ? (origem as Record<string, unknown>).articleId : null;
+  return typeof articleId === "string" && articleId.trim() ? articleId : null;
+};
+
+/**
+ * 2026-10-02 · SDD diretriz editorial, Adendos A e C · a voz corrente da Marca
+ * e o artigo-modelo APROVADO do pacote, para roteiro e carrossel escreverem a
+ * copy e o `closingCta` na voz da marca. Leitura de contexto, não condição: o
+ * que não existe (ou não pôde ser lido agora) não entra, e a semeadura segue
+ * como era. Mesmos leitores do leitor de evidências, na Marca autorizada, em
+ * série como o resto desta leitura.
+ */
+async function vozEArtigoModelo(brandId: string, alvo: { articleId: string | null; bundleHash: string }): Promise<Pick<RadarFoundations, "brandVoice" | "articleBlueprint">> {
+  const contexto = { brandId, client: getOperationalClient() };
+  const voz = await readWriterBrandVoice(contexto, { content: true });
+  const artigoModelo = alvo.articleId
+    ? await readWriterApprovedArticleBlueprint(contexto, { articleId: alvo.articleId, bundleHash: alvo.bundleHash }, { content: true })
+    : null;
+  const brandVoice = voz.kind === "current"
+    ? writerBrandVoiceFoundation({ versionId: voz.meta.versionId, versionNumber: voz.meta.versionNumber, name: voz.name, lifecycle: voz.lifecycle, title: voz.title, sections: voz.sections })
+    : null;
+  const articleBlueprint = artigoModelo?.kind === "approved" && artigoModelo.content
+    ? writerArticleBlueprintFoundation({ id: artigoModelo.meta.id, versionNumber: artigoModelo.meta.versionNumber, approvedAt: artigoModelo.meta.approvedAt, ...artigoModelo.content })
+    : null;
+  return { ...(brandVoice ? { brandVoice } : {}), ...(articleBlueprint ? { articleBlueprint } : {}) };
+}
 
 export async function writerSeedDocument(brandId: string, documentId: string): Promise<{
   document: WriterSeedDocument;
@@ -48,7 +88,8 @@ export async function writerSeedDocument(brandId: string, documentId: string): P
     return data as unknown as Record<string, unknown>;
   };
 
-  const head = writerSeedHeadFromRow(await ler(WRITER_SEED_DOCUMENT_SELECT));
+  const primeira = await ler(WRITER_SEED_DOCUMENT_SELECT);
+  const head = writerSeedHeadFromRow(primeira);
   if (!head) {
     /*
      * Documento gravado fora do contrato não vira contexto de IA. Semear com
@@ -69,9 +110,12 @@ export async function writerSeedDocument(brandId: string, documentId: string): P
       "O pacote do Radar deste documento mudou durante a leitura. Tente de novo.", 409);
   }
   /* As linhas do envio (Assunto, F4.2) vêm do cabeçalho, pela mesma projeção do painel. */
+  const fundamentos = radarFoundationsOfDossier(dossier, { editorialContext: head.editorialContext });
+  /* 2026-10-02 · voz e artigo-modelo só quando existem: sem eles, os fundamentos são os do painel. */
+  const vivos = fundamentos ? await vozEArtigoModelo(brandId, { articleId: artigoDaOrigem(primeira), bundleHash: head.dossier.bundleHash }) : {};
   return {
     document: head.document,
-    foundations: radarFoundationsOfDossier(dossier, { editorialContext: head.editorialContext }),
+    foundations: fundamentos ? { ...fundamentos, ...vivos } : null,
     contentHash: head.contentHash,
   };
 }

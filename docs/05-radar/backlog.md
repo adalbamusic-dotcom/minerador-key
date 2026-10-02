@@ -1,5 +1,26 @@
 # Backlog — Radar
 
+## Voz da marca e modos de vídeo — 2026-10-02
+
+- [x] Voz da marca (Skill corrente) nos dois CSVs, no artigo-modelo e no MCP `get_article_for_writing`.
+- [x] Modos de uso dos vídeos: botões, `SET_USAGE`, leitura tolerante, três consumidores, sem tocar no hash.
+- [ ] **Dono:** escolher modos nos 3 vídeos do Instagram, exportar e conferir a coluna de fontes.
+- [ ] Painel do artigo-modelo mostrar o vídeo de cada seção.
+- [ ] SET_USAGE: teste executando o POST (hoje só estrutural): readback divergente, 409 USAGE_NOT_APPLIED, recusa por item.
+- [ ] Prévia de Contexto lê o texto inteiro só para 600 caracteres (peso de leitura).
+- [ ] Formato completo (técnico) ainda cita trechos de vídeos marcados Contexto/Sugestão de pauta.
+
+## Artigo-modelo (IA) e modos de vídeo — 2026-10-02
+
+- [x] Artigo-modelo: domínio, servidor, rota, painel, export do CSV, catálogo, testes com fixture.
+- [x] CSV: abertura sem pergunta retórica; sem diferencial fora do escopo; link fora de seção excluída; URL dos orgânicos.
+- [ ] **Dono:** aplicar `20261002120000_radar_artigo_modelo_e_uso_de_videos.sql` (`db query -f` + `migration repair`).
+- [ ] **Dono:** refinalizar a investigação do Instagram (grátis) — o pacote está bloqueado por divergir do congelado.
+- [ ] **Dono:** gerar o artigo-modelo (pago, 1 chamada), revisar, editar, aprovar e exportar o CSV.
+- [ ] Redator da plataforma recebe o artigo-modelo aprovado no ContentDocument.
+- [ ] Adendo B: modos de uso dos vídeos (Contexto, Sugestão de pauta, Apoio, Citação, Incorporar, Não usar) na tela, na rota (`SET_USAGE`) e no pacote/CSV.
+- [ ] Teste com o acréscimo YouTube (pago, decisão do dono).
+
 ## Relatório, CSV de vídeo e Silo nos selecionados — 2026-10-02
 
 - [x] Relatório como painel informativo com intenção e gráfico de estado SEO; sem revisão nem alerta na aba.

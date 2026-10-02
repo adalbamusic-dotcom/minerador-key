@@ -50,12 +50,12 @@ import {
   type SerpCacheLens,
   type SerpCacheQuery,
 } from "@/lib/editorial/serp-cache";
-import { BrandSkillSchema } from "@/lib/marca/brand-skill-contracts";
+import { BrandSkillSchema, NormalizedSkillSectionSchema } from "@/lib/marca/brand-skill-contracts";
 import { effectiveBrandDnaVersionId } from "@/lib/marca/domain";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE } from "@/lib/minerador/keyword-semantic-qualification";
 import { acceptQualificationPayload } from "@/lib/minerador/keyword-semantic-qualification-current";
-import { WRITER_ARTICLE_DNA_FOUNDATION_FIELDS } from "@/lib/redator/writer-evidence-catalog";
+import { WRITER_ARTICLE_DNA_FOUNDATION_FIELDS, WRITER_BRAND_VOICE_DEFINITION_KEY, writerBrandVoiceEntityId } from "@/lib/redator/writer-evidence-catalog";
 import { readSerpCacheEntries, type SerpCacheReadMode, type SerpCacheStoredEntry } from "@/lib/server/serp-cache-store";
 import { parseStoredSerpSnapshotPayload } from "@/lib/server/serp-persistence-adapter";
 import {
@@ -63,6 +63,7 @@ import {
   isLegacyVersionReference,
   writerEvidenceClient,
   writerEvidenceDatabaseFailure,
+  writerEvidenceTableMissing,
   type WriterEvidenceContext,
   type WriterEvidenceHead,
 } from "@/lib/server/writer-evidence-document";
@@ -821,6 +822,188 @@ export async function readWriterBrandContextVersions(context: WriterEvidenceCont
     .filter(meta => !SKILL_ARQUIVADA.has(meta.lifecycle))
     .sort((a, b) => a.entityId.localeCompare(b.entityId));
   return { brandDna, skills, truncated: { brandDna: dnasLidas.length > teto, skills: skillsLidas.length > teto } };
+}
+
+/* ================ artigo-modelo aprovado e voz da marca (2026-10-02) ================ */
+
+/*
+ * SDD docs/05-radar/sdd-diretriz-editorial-pela-serp-2026-10-02.md, Adendos A
+ * (D5: "só o aprovado vai ao CSV e ao Redator") e C (voz da marca). Os dois são
+ * lidos AO VIVO, por Marca e artigo, como `dna.brand/current`: nada disso é
+ * gravado no documento — gravar mudaria o hash e a idempotência do envio, e o
+ * MCP não reescreve `importedContext`. Tabela do Radar e Skill da Marca são só
+ * LIDAS; a projeção compacta é do catálogo puro (`writer-evidence-catalog.ts`).
+ */
+
+const MIGRATION_DO_ARTIGO_MODELO = "20261002120000_radar_artigo_modelo_e_uso_de_videos";
+
+/** O artigo e o pacote congelado do documento: é a eles que o artigo-modelo se prende. */
+export type WriterBlueprintTarget = { articleId: string; bundleHash: string | null };
+
+export type WriterApprovedBlueprintMeta = { id: string; versionNumber: number | null; bundleHash: string; approvedAt: string | null };
+
+export type WriterApprovedBlueprintRead =
+  | { kind: "approved"; meta: WriterApprovedBlueprintMeta; content: { blueprint: unknown; plan: unknown; linkCandidates: unknown; brandVoice: unknown } | null }
+  | { kind: "no_bundle" | "none" | "other_bundle" | "table_missing" | "read_failed"; reason: string };
+
+const COLUNAS_DO_ARTIGO_MODELO = "id,article_id,bundle_hash,version_number,approved_at";
+/**
+ * Só os caminhos que a projeção usa (planta, medidas do plano, candidatos a
+ * link e a versão da voz). `evidence` e `sources`, a maior parte do payload,
+ * ficam para a fatia `radar.blueprint/<id>`. Nunca `payload` nu.
+ */
+const CAMINHOS_DO_ARTIGO_MODELO = "bp:payload->blueprint,pl:payload->measures->plan,lc:payload->linkCandidates,bv:payload->brandVoice";
+
+type ErroDoBanco = { code?: string; message?: string } | null;
+
+/**
+ * Tabela ausente é ausência declarada (migration pendente), nunca 500. Outra
+ * falha: na leitura estrita (a fatia pedida), o padrão do repositório; nos
+ * fundamentos, no manifesto e na semeadura, a planta é contexto, não condição
+ * — a ausência é declarada com o código e a escrita segue.
+ */
+function falhaDoArtigoModelo(error: ErroDoBanco, estrito: boolean): WriterApprovedBlueprintRead | null {
+  if (!error) return null;
+  if (writerEvidenceTableMissing(error)) {
+    return { kind: "table_missing", reason: `a tabela do artigo-modelo ainda não existe (migration ${MIGRATION_DO_ARTIGO_MODELO} pendente)` };
+  }
+  if (estrito) writerEvidenceDatabaseFailure(error);
+  console.warn("[writer-evidence] artigo_modelo_nao_lido", { code: error.code ?? null });
+  return { kind: "read_failed", reason: `a leitura do artigo-modelo falhou agora (${error.code || "sem código"}); tente de novo` };
+}
+
+const linhasDaResposta = (data: unknown): Linha[] => (Array.isArray(data) ? data as Linha[] : data ? [data as Linha] : []);
+
+/**
+ * O ARTIGO-MODELO APROVADO DO PACOTE ENTREGUE.
+ *
+ * Primeiro o aprovado do MESMO `bundleHash` do documento (o mais novo, se o
+ * dono aprovou mais de um). Sem ele, uma consulta só de metadados diz se há
+ * aprovado de OUTRO congelamento — que não vale para este documento e não é
+ * servido como se valesse (invariante 30): o caminho é aprovar sobre o pacote
+ * entregue ou o Radar reenviar o pacote atual.
+ */
+export async function readWriterApprovedArticleBlueprint(
+  context: WriterEvidenceContext,
+  alvo: WriterBlueprintTarget,
+  opcoes: { content: boolean; strict?: boolean },
+): Promise<WriterApprovedBlueprintRead> {
+  if (!alvo.bundleHash) return { kind: "no_bundle", reason: "documento sem dossiê do Radar: o artigo-modelo se prende ao pacote congelado" };
+  const cliente = writerEvidenceClient(context);
+  const estrito = opcoes.strict === true;
+  const doPacote = await cliente.from("radar_article_blueprints")
+    .select(opcoes.content ? `${COLUNAS_DO_ARTIGO_MODELO},${CAMINHOS_DO_ARTIGO_MODELO}` : COLUNAS_DO_ARTIGO_MODELO)
+    .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("bundle_hash", alvo.bundleHash).eq("state", "APPROVED")
+    .order("version_number", { ascending: false }).limit(1);
+  const falhou = falhaDoArtigoModelo(doPacote.error, estrito);
+  if (falhou) return falhou;
+  const [linha] = linhasDaResposta(doPacote.data);
+  if (linha && typeof linha.id === "string" && linha.article_id === alvo.articleId && linha.bundle_hash === alvo.bundleHash) {
+    return {
+      kind: "approved",
+      meta: { id: linha.id, versionNumber: numero(linha.version_number), bundleHash: alvo.bundleHash, approvedAt: texto(linha.approved_at) },
+      content: opcoes.content ? { blueprint: linha.bp, plan: linha.pl, linkCandidates: linha.lc, brandVoice: linha.bv } : null,
+    };
+  }
+  const deOutroPacote = await cliente.from("radar_article_blueprints").select(COLUNAS_DO_ARTIGO_MODELO)
+    .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("state", "APPROVED")
+    .order("version_number", { ascending: false }).limit(1);
+  const falhouDeNovo = falhaDoArtigoModelo(deOutroPacote.error, estrito);
+  if (falhouDeNovo) return falhouDeNovo;
+  const [outra] = linhasDaResposta(deOutroPacote.data);
+  if (outra && outra.article_id === alvo.articleId) {
+    return {
+      kind: "other_bundle",
+      reason: `o artigo-modelo aprovado (v${numero(outra.version_number) ?? "?"}) é de outro congelamento da investigação e não vale para este documento: aprove no Radar um artigo-modelo sobre o pacote entregue, ou o Radar reenvia o pacote atual ao Redator`,
+    };
+  }
+  return { kind: "none", reason: "nenhum artigo-modelo aprovado para este pacote: a estrutura fica por conta de quem escreve" };
+}
+
+/** As chaves do payload do artigo-modelo que a fatia serve, cada uma por caminho. */
+export const WRITER_BLUEPRINT_PAYLOAD_KEYS = Object.freeze(["schemaVersion", "blueprint", "measures", "linkCandidates", "sources", "evidence", "brandVoice"] as const);
+
+/**
+ * O CONTEÚDO DO APROVADO, para a fatia: só a chave de topo pedida (ou todas,
+ * cada uma por caminho), com Marca, artigo, pacote, estado e id na consulta.
+ */
+export async function readWriterArticleBlueprintContent(
+  context: WriterEvidenceContext,
+  alvo: { articleId: string; bundleHash: string },
+  blueprintId: string,
+  topo: string | null,
+): Promise<Linha> {
+  const conhecidas: readonly string[] = WRITER_BLUEPRINT_PAYLOAD_KEYS;
+  const chaves = topo ? (conhecidas.includes(topo) ? [topo] : []) : [...conhecidas];
+  const select = ["id", "bundle_hash", ...chaves.map(chave => `k_${chave}:payload->${chave}`)].join(",");
+  const [linha] = await linhas(writerEvidenceClient(context).from("radar_article_blueprints").select(select)
+    .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("bundle_hash", alvo.bundleHash)
+    .eq("state", "APPROVED").eq("id", blueprintId).limit(1));
+  if (!linha || linha.bundle_hash !== alvo.bundleHash) {
+    throw new WriterEvidenceError("source_absent", "O artigo-modelo aprovado não existe mais para o pacote entregue.");
+  }
+  return Object.fromEntries(chaves.map(chave => [chave, linha[`k_${chave}`]] as const).filter(([, valor]) => valor !== null && valor !== undefined));
+}
+
+export type WriterBrandVoiceRead =
+  | {
+    kind: "current";
+    meta: WriterArtifactVersionMeta;
+    /** Estado técnico pelo último evento (`approved`, `proposed`, `draft`). */
+    lifecycle: string;
+    name: string | null;
+    title: string | null;
+    sections: Array<{ heading: string; body: string }>;
+  }
+  | { kind: "none" | "read_failed"; reason: string };
+
+const SecoesDaSkillSchema = z.array(NormalizedSkillSectionSchema);
+
+/**
+ * A VOZ DA MARCA CORRENTE: a Skill `brand_voice`, pela MESMA regra de
+ * `readWriterBrandContextVersions` restrita a uma definição — primeiro a maior
+ * versão, depois o filtro de arquivada pelo último evento. Rascunho e
+ * aguardando aprovação valem (spec da Marca §24), com o estado dito; se a mais
+ * nova foi recusada, a anterior não volta a ser a voz.
+ *
+ * Uma consulta, por caminho: nome, título e as seções normalizadas. O Markdown
+ * original (que repete as seções) e os diagnósticos não saem do banco. Com
+ * `content: false`, só os metadados (para conferir alcance de uma chave).
+ */
+export async function readWriterBrandVoice(
+  context: WriterEvidenceContext,
+  opcoes: { content: boolean; strict?: boolean } = { content: true },
+): Promise<WriterBrandVoiceRead> {
+  const entityId = writerBrandVoiceEntityId(context.brandId);
+  try {
+    const select = opcoes.content
+      ? `${METADADOS_DE_VERSAO},b:payload->brandId,k:payload->definitionKey,n:payload->name,t:payload->normalizedContent->title,s:payload->normalizedContent->sections`
+      : METADADOS_DE_VERSAO;
+    const [linha] = await linhas(writerEvidenceClient(context).from("editorial_artifact_versions").select(select)
+      .eq("marca_id", context.brandId).eq("artifact_type", "brand_skill").eq("entity_id", entityId)
+      .order("version_number", { ascending: false }).limit(1));
+    const meta = linha ? metaDeVersao(linha) : null;
+    if (!linha || !meta || meta.artifactType !== "brand_skill" || meta.entityId !== entityId) {
+      return { kind: "none", reason: "nenhuma Skill de voz (brand_voice) na Marca: voz, tom e CTA ficam por conta de quem escreve" };
+    }
+    const lifecycle = (await ultimoEventoDe(context, [meta.versionId])).get(meta.versionId) ?? meta.status ?? "draft";
+    if (SKILL_ARQUIVADA.has(lifecycle)) {
+      return { kind: "none", reason: "a versão mais nova da Skill de voz foi recusada ou substituída na Marca: a anterior não volta a ser a voz" };
+    }
+    if (!opcoes.content) return { kind: "current", meta, lifecycle, name: null, title: null, sections: [] };
+    const secoes = SecoesDaSkillSchema.safeParse(linha.s);
+    if (linha.b !== context.brandId || linha.k !== WRITER_BRAND_VOICE_DEFINITION_KEY || !secoes.success) {
+      return { kind: "read_failed", reason: "a Skill de voz corrente está fora do contrato da Marca" };
+    }
+    return {
+      kind: "current", meta, lifecycle, name: texto(linha.n), title: texto(linha.t),
+      sections: secoes.data.map(secao => ({ heading: secao.heading, body: secao.body })),
+    };
+  } catch (erro) {
+    if (opcoes.strict) throw erro;
+    console.warn("[writer-evidence] voz_da_marca_nao_lida", { code: erro instanceof WriterEvidenceError ? erro.code : erro instanceof Error ? erro.name : null });
+    return { kind: "read_failed", reason: "a leitura da Skill de voz falhou agora; tente de novo" };
+  }
 }
 
 /* ============================ utilitários de ref =========================== */

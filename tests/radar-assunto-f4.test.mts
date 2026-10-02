@@ -102,14 +102,19 @@ function dentroDosLimites(row: RadarWritingExportRow) {
 
 /* ============================ sem Assunto ============================ */
 
+/*
+ * 2026-10-02 · snapshot renovado: a única diferença conferida linha a linha é a
+ * URL limpa de cada orgânico em serp_resumida (antes só o domínio). Amazon e
+ * YouTube, sem orgânicos, ficaram idênticos.
+ */
 const SNAPSHOT = {
-  silo: { sha: "7cf012e0982db8f717c248bbbc928adf3fec32b6be99712fd24cddc3ba327a24", len: 17024 },
-  saude: { sha: "795bc3856be698a7f6bfefdb31f0fb68c3945714f000dbbb34129b8526209016", len: 21180 },
+  silo: { sha: "50e2d360e88e77af562ffdec663760f5da92572e0b747468b924dd57d746e144", len: 17288 },
+  saude: { sha: "1d9237d167455b4caf9e531dc27aa4b1962751eab09772a4bb18ef36603fa0cc", len: 21444 },
   artigos: {
-    google: "095e0b55626c737aac16acf21cb56760cd9cb632572adc6ed44aba0215ee93be",
+    google: "903a52ab6b5ad5b9a1654f3b4d232df6ec514082f567a8c8e13853645a5cb9c6",
     amazon: "13aaa813adb1fee8a2024b73378acc29e44f2040ba38c6d80a566652c4548ccf",
     youtube: "0b0118248360fabc79e06be63916b91bd3f6aadd0c6b99fb06d3c4baabd5137a",
-    saude: "f982919fa98efd3b1fbf56e2ad1c6371566d997f3147c26c087ac1299a967c5d",
+    saude: "b7ea7ea96a0bc8b004a915a1e91c12060e632c7f21fbd63b4cec865fbaa78c47",
   },
 };
 

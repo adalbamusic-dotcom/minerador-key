@@ -82,7 +82,7 @@ import { freezeRadarYoutubeInvestigation } from "@/lib/radar/youtube-evidence";
 import type { RadarVideoSourceInputVerdict, RadarVideoSourceTextSummary } from "@/lib/radar/video-source";
 import { useRadarAreaLiveRead } from "./use-radar-area-live-read";
 
-import type { RadarLibrarySource } from "@/lib/radar/video-library";
+import type { RadarLibrarySource, RadarVideoUsage } from "@/lib/radar/video-library";
 import type { RadarBriefCoverage } from "@/lib/radar/video-brief-matching";
 import { availableBulkActions, createRadarR4LocalArticleState, createRadarR4SerpQueue, nextActionForRadarR4Article, radarR4SpecialistStatusLabel, removeRadarR4Topic, moveRadarR4Topic, updateRadarR4Topic, updateRadarR4SerpQueueItem, type RadarR4AmazonState, type RadarR4BulkArticleSnapshot, type RadarR4BulkOperation, type RadarR4ExistingContentKind, type RadarR4ExistingContentState, type RadarR4LocalArticleState, type RadarR4SerpQueue, type RadarR4Topic } from "@/lib/radar/r4-queue";
 import { areRadarR5TopicsReviewed, classifyRadarR5SerpFailure, deriveRadarR5PersistedSerpState, latestRadarR5SerpRecord, topicSuggestionsToRadarTopics } from "@/lib/radar/r5-sequential";
@@ -906,8 +906,10 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
   const runVideoLibraryAction = useCallback(async (
     articleId: string | null,
-    action: "SELECT" | "UNSELECT" | "PROCESS_SELECTED" | "ARCHIVE" | "CLEAR_LIST",
+    action: "SELECT" | "UNSELECT" | "PROCESS_SELECTED" | "SET_USAGE" | "ARCHIVE" | "CLEAR_LIST",
     videoSourceIds: string[],
+    /* 2026-10-02 · Só para `SET_USAGE`: o modo de uso do vídeo no artigo (Adendo B, D6). */
+    options?: { usage: RadarVideoUsage | null; usageNote?: string | null },
   ) => {
     if (!selectedBrandId) return;
     setVideoAction(atual => ({ ...atual, saving: true, error: null }));
@@ -915,10 +917,17 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const resposta = await fetch("/api/editorial/radar-video-library", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandId: selectedBrandId, articleId: articleId || null, action, videoSourceIds }),
+        body: JSON.stringify({
+          brandId: selectedBrandId, articleId: articleId || null, action, videoSourceIds,
+          ...(action === "SET_USAGE" ? { usage: options?.usage ?? null, usageNote: options?.usageNote ?? null } : {}),
+        }),
       });
       const corpo = await resposta.json();
       if (!corpo?.success) throw new Error(corpo?.error || "Não foi possível executar a ação da biblioteca.");
+      /* 2026-10-02 · Modo gravado com recusa parcial: a recusa é dita, por item. */
+      if (action === "SET_USAGE" && Array.isArray(corpo.refused) && corpo.refused.length) {
+        setNotice(`${corpo.affected} modo(s) de uso gravado(s) · ${corpo.refused.length} recusado(s): ${corpo.refused[0]?.reason || "sem motivo informado"}`);
+      }
       if (corpo.summary) {
         const { archived, keptInUse, keptFrozen } = corpo.summary;
         const partes = [`${archived} arquivada(s)`];

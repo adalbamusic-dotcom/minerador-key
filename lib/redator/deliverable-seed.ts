@@ -78,6 +78,35 @@ export const SEED_SUBJECT_SECTION_TITLE =
 /** Linhas do envio sem a do tronco: entram, mas não se apresentam como Assunto. */
 export const SEED_EDITORIAL_CONTEXT_SECTION_TITLE = "Contexto editorial do envio do Radar";
 
+/** O cabeçalho da voz da marca no contexto da semeadura (2026-10-02). */
+export const SEED_BRAND_VOICE_SECTION_TITLE = "Voz da marca (copy e CTA)";
+/** O cabeçalho do fechamento do artigo-modelo aprovado no contexto da semeadura (2026-10-02). */
+export const SEED_BLUEPRINT_SECTION_TITLE = "Artigo-modelo aprovado no Radar (o mesmo próximo passo do artigo)";
+
+/**
+ * As linhas da voz e do artigo-modelo. A voz entra com o estado dito ("em
+ * rascunho na Marca" também vale, spec da Marca §24) e só nos trechos que
+ * servem à copy: CTA e transição comercial; voz e vocabulário. Do artigo-modelo
+ * entra o que o derivado precisa repetir: promessa, CTA e próximo passo.
+ */
+function linhasDaVozEDoArtigoModelo(f: RadarFoundations): string[] {
+  const linhas: string[] = [];
+  const voz = f.brandVoice;
+  if (voz) {
+    linhas.push(`${SEED_BRAND_VOICE_SECTION_TITLE}: Skill "${voz.name}" v${voz.version ?? "?"} (${voz.statusLabel} na Marca)`);
+    if (voz.cta) linhas.push("CTA e transição comercial, como a marca escreveu:", voz.cta);
+    if (voz.voice) linhas.push("Voz, tom e vocabulário, como a marca escreveu:", voz.voice);
+  }
+  const planta = f.articleBlueprint;
+  if (planta) {
+    linhas.push(`${SEED_BLUEPRINT_SECTION_TITLE}: v${planta.version ?? "?"}`);
+    if (planta.promise) linhas.push(`- Promessa: ${planta.promise}`);
+    if (planta.closing?.cta) linhas.push(`- CTA: ${planta.closing.cta}`);
+    if (planta.closing?.nextStep) linhas.push(`- Próximo passo: ${planta.closing.nextStep}`);
+  }
+  return linhas;
+}
+
 /**
  * O contexto de produção, em linhas. Texto e não JSON de propósito: o modelo lê
  * melhor, e o que sai daqui aparece inteiro no log quando alguém precisar
@@ -125,6 +154,14 @@ export function seedContextLines(source: SeedSource): string[] {
     linhas.push(`Cruzamento de SERPs: ${f.multimodal.crossSerp.map(item => `${item.signal} (${item.count})`).join(" · ")}`);
   }
 
+  /*
+   * 2026-10-02 · SDD diretriz editorial, Adendos A e C · a voz da marca e o
+   * fechamento do artigo-modelo aprovado, lidos ao vivo pela semeadura. É o
+   * que faz o gancho, a legenda e o `closingCta` saírem na voz da marca e
+   * levarem ao mesmo próximo passo do artigo. Sem eles, nenhuma linha nova.
+   */
+  linhas.push(...linhasDaVozEDoArtigoModelo(f));
+
   linhas.push(...secao("Precisa responder", f.mustAnswer));
   linhas.push(...secao("Precisa cobrir", f.mustCover));
   if (f.evidence.sources.length) linhas.push(`Fontes de evidência: ${f.evidence.sources.join(" · ")}`);
@@ -147,6 +184,11 @@ const REGRAS_COMUNS = [
   "Respeite integralmente a lista 'O Redator NÃO pode'.",
   "As limitações declaradas são reais: não afirme com certeza o que a investigação não sustenta.",
   "Não gere nem sugira FAQ ou bloco de perguntas frequentes (AGENTS.md §13): perguntas observadas orientam a cobertura.",
+  /*
+   * 2026-10-02 · SDD diretriz editorial, Adendos A e C: a voz da marca vale
+   * "inclusive nos CTAs"; o artigo-modelo aprovado diz o próximo passo.
+   */
+  "Quando o contexto trouxer 'Voz da marca (copy e CTA)', escreva gancho, texto, legenda e closingCta nessa voz, sem o que ela proíbe; quando trouxer o artigo-modelo aprovado, o closingCta leva ao mesmo próximo passo. A voz e o artigo-modelo não mudam keyword, intenção nem fatos.",
   "Escreva em português do Brasil.",
 ].join("\n");
 

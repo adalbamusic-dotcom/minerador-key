@@ -5,6 +5,8 @@ import type { RadarYoutubeFrozenInvestigation } from "./youtube-evidence.ts";
 import { radarTextAdheresToCore, radarUbiquitousStems } from "./intent-adherence.ts";
 import { radarSemanticStems } from "./semantic-concept-model.ts";
 import type { RadarPortableExportInput } from "./portable-export.ts";
+import { radarBrandVoiceAbsence, radarBrandVoiceBySlot, radarBrandVoiceLabel, radarBrandVoiceText, type RadarBrandVoiceState } from "./brand-voice.ts";
+import { radarPortableVideoUsageLine } from "./portable-annex-context.ts";
 import {
   radarWritingCompareKey,
   radarWritingContentWords,
@@ -12,6 +14,7 @@ import {
   radarWritingDecodeEntities,
   radarWritingOpeningQuestion,
   radarWritingProjections,
+  radarWritingRhetoricalQuestion,
   radarWritingSpecialistContributions,
   radarWritingSpreadsheetSafe,
   radarWritingUnsupportedClaims,
@@ -250,10 +253,8 @@ function perguntasDoPublico(p: RadarWritingProjections): string[] {
   return unicos(aderentes).filter(pergunta => !/\b(faq|perguntas frequentes)\b/i.test(pergunta)).slice(0, LIMITES.questions);
 }
 
-/** Pergunta de fecho de concorrente ("Aprendeu como…?", "Gostou?") não é dúvida do público. */
-export function radarVideoRhetoricalQuestion(pergunta: string): boolean {
-  return /^(aprendeu|gostou|curtiu|entendeu|viu|percebeu|ficou com alguma d[uú]vida)\b/i.test(pergunta.trim());
-}
+/** Pergunta de fecho de concorrente não é dúvida do público: a MESMA régua do export para escrever. */
+export const radarVideoRhetoricalQuestion = radarWritingRhetoricalQuestion;
 
 function colunaTermos(p: RadarWritingProjections): string {
   const termos = unicos([
@@ -320,14 +321,25 @@ function colunaEspecialista(p: RadarWritingProjections): string {
 }
 
 function colunaBiblioteca(p: RadarWritingProjections): string {
-  if (p.video.state !== "MATCHED") return p.video.note;
+  /*
+   * 2026-10-02 · OS MODOS DE USO VÊM MESMO SEM CASAMENTO (Adendo B, D6).
+   *
+   * O dono pode marcar um vídeo como Incorporar ou Contexto antes de casar
+   * qualquer pauta; a coluna lista esses modos depois do que já dizia. "Não
+   * usar" saiu na projeção. Sem modo nenhum, a coluna é a de antes.
+   */
+  const modos = p.video.selected || [];
+  const comModos = (celula: string) => (modos.length
+    ? [celula, "Modo de uso escolhido no Radar para os vídeos da marca (decisão do dono):", ...modos.map(item => `- ${radarPortableVideoUsageLine(item)}`)].join("\n")
+    : celula);
+  if (p.video.state !== "MATCHED") return comModos(p.video.note);
   const linhas = ["Trechos dos vídeos da própria marca (reaproveitar como corte ou referência; conferir no vídeo):"];
   for (const brief of p.video.briefs) {
     for (const trecho of brief.extracts.slice(0, 2)) {
-      linhas.push(`- ${entreAspas(trecho.sourceTitle)} ${trecho.startLabel}–${trecho.endLabel} · pauta ${entreAspas(brief.topic)} · ${cortar(texto(trecho.whyRelevant), 160)}`);
+      linhas.push(`- ${entreAspas(trecho.sourceTitle)} ${trecho.startLabel}–${trecho.endLabel} · pauta ${entreAspas(brief.topic)} · ${cortar(texto(trecho.whyRelevant), 160)}${trecho.usageLabel ? ` · modo: ${trecho.usageLabel}` : ""}`);
     }
   }
-  return linhas.join("\n");
+  return comModos(linhas.join("\n"));
 }
 
 function colunaRoteiro(input: RadarPortableExportInput, p: RadarWritingProjections, youtube: RadarVideoExportYoutube | null, abertura: string | null, perguntas: readonly string[]): string {
@@ -384,7 +396,7 @@ function colunaPrompt(principal: string): string {
 
 export type RadarVideoExportArticle = { row: RadarVideoExportRow; label: string; hasYoutube: boolean };
 
-export function buildRadarVideoExportArticle(input: RadarPortableExportInput, contexto: { position: number; youtube: RadarVideoExportYoutube | null }): RadarVideoExportArticle {
+export function buildRadarVideoExportArticle(input: RadarPortableExportInput, contexto: { position: number; youtube: RadarVideoExportYoutube | null; brandVoiceActive?: boolean }): RadarVideoExportArticle {
   const p = radarWritingProjections(input);
   const principal = texto(p.dna.principalKeyword);
   const perguntas = perguntasDoPublico(p);
@@ -412,7 +424,10 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
     fatos_e_fontes: colunaFatos(p),
     especialista: colunaEspecialista(p),
     biblioteca_da_marca: colunaBiblioteca(p),
-    diretrizes_de_roteiro: colunaRoteiro(input, p, youtube, abertura, perguntas),
+    diretrizes_de_roteiro: [
+      colunaRoteiro(input, p, youtube, abertura, perguntas),
+      ...(contexto.brandVoiceActive ? ['Voz da marca: gancho, fala, CTA e descrição seguem a linha "Voz da marca" deste arquivo (vocabulário, o que a marca não faz e a página comercial que ela permite citar).'] : []),
+    ].join("\n"),
     cortes_para_redes: colunaCortes(youtube, perguntas, p),
     prompt: colunaPrompt(principal),
   };
@@ -428,7 +443,7 @@ export const RADAR_VIDEO_GENERAL_RULES = [
   "Cada vídeo leva o público para o artigo da marca (link na descrição e no CTA).",
 ];
 
-export function buildRadarVideoTopRow(input: { articles: readonly RadarVideoExportArticle[] }): RadarVideoExportRow {
+export function buildRadarVideoTopRow(input: { articles: readonly RadarVideoExportArticle[]; brandVoice?: RadarBrandVoiceState }): RadarVideoExportRow {
   const semYoutube = input.articles.filter(item => !item.hasYoutube);
   const vazio = Object.fromEntries(RADAR_VIDEO_EXPORT_COLUMNS.map(coluna => [coluna, ""])) as RadarVideoExportRow;
   return {
@@ -437,11 +452,39 @@ export function buildRadarVideoTopRow(input: { articles: readonly RadarVideoExpo
     pode_gravar: celula([
       `${input.articles.length} tema(s) neste arquivo.`,
       ...(semYoutube.length ? [`- ${semYoutube.length} sem pesquisa do YouTube: ${semYoutube.slice(0, 5).map(item => entreAspas(item.label)).join(", ")}. Rode a pesquisa do YouTube no Radar para ter os dados de vídeo.`] : []),
-      "- Voz da marca, apresentador e identidade visual não fazem parte deste arquivo: defina-os antes de gravar.",
+      input.brandVoice?.kind === "available"
+        ? `- Voz da marca: linha "Voz da marca" logo abaixo (${radarBrandVoiceLabel(input.brandVoice.voice)}). Apresentador e identidade visual não fazem parte deste arquivo.`
+        : input.brandVoice
+          ? `- ${radarBrandVoiceAbsence(input.brandVoice)}`
+          : "- Voz da marca, apresentador e identidade visual não fazem parte deste arquivo: defina-os antes de gravar.",
     ].join("\n")),
     tema_e_publico: celula(["Temas neste arquivo:", ...input.articles.map((item, indice) => `${indice + 1} · ${item.label}`)].join("\n")),
     prompt: celula(["Regras para todos os vídeos deste arquivo:", ...RADAR_VIDEO_GENERAL_RULES.map((regra, indice) => `${indice + 1}. ${regra}`)].join("\n")),
   };
+}
+
+/**
+ * A LINHA "VOZ DA MARCA" DO CSV DE VÍDEO (Adendo C): a mesma Skill ativa, nas
+ * colunas de público, roteiro, fontes, cortes e prompt. Sem Skill ativa, não existe.
+ */
+export function buildRadarVideoBrandVoiceRow(state: RadarBrandVoiceState | undefined): RadarVideoExportRow | null {
+  if (state?.kind !== "available") return null;
+  const por = radarBrandVoiceBySlot(state.voice);
+  const vazio = Object.fromEntries(RADAR_VIDEO_EXPORT_COLUMNS.map(coluna => [coluna, ""])) as RadarVideoExportRow;
+  const row: RadarVideoExportRow = {
+    ...vazio,
+    ordem: "Voz da marca",
+    pode_gravar: `Vale para todos os vídeos deste arquivo: ${radarBrandVoiceLabel(state.voice)}. O tema vem de cada linha; a forma, o CTA e o que a marca não faz vêm desta.`,
+    tema_e_publico: radarBrandVoiceText(por.reader),
+    intencao_e_formato: radarBrandVoiceText(por.title),
+    serp_youtube: radarBrandVoiceText(por.research),
+    fatos_e_fontes: radarBrandVoiceText(por.sources),
+    diretrizes_de_roteiro: radarBrandVoiceText([...por.structure, ...por.links]),
+    cortes_para_redes: radarBrandVoiceText(por.visual),
+    prompt: radarBrandVoiceText(por.voice),
+  };
+  for (const coluna of RADAR_VIDEO_EXPORT_COLUMNS) row[coluna] = celula(row[coluna]);
+  return row;
 }
 
 export function radarVideoExportCsv(rows: readonly RadarVideoExportRow[]): string {
@@ -463,10 +506,14 @@ export function radarVideoExportFilename(input: { keywords: ReadonlyArray<string
 export function radarPortableVideoExport(input: {
   articles: ReadonlyArray<{ entrada: RadarPortableExportInput; youtube?: RadarVideoExportYoutube | null }>;
   today: string;
+  /** 2026-10-02 · Aditivo: a voz da marca (Adendo C). */
+  brandVoice?: RadarBrandVoiceState;
 }): { csv: string; filename: string; exported: number; withoutYoutube: number } {
-  const artigos = input.articles.map((artigo, indice) => buildRadarVideoExportArticle(artigo.entrada, { position: indice + 1, youtube: artigo.youtube ?? null }));
+  const ativa = input.brandVoice?.kind === "available";
+  const artigos = input.articles.map((artigo, indice) => buildRadarVideoExportArticle(artigo.entrada, { position: indice + 1, youtube: artigo.youtube ?? null, brandVoiceActive: ativa }));
+  const voz = buildRadarVideoBrandVoiceRow(input.brandVoice);
   return {
-    csv: radarVideoExportCsv([buildRadarVideoTopRow({ articles: artigos }), ...artigos.map(item => item.row)]),
+    csv: radarVideoExportCsv([buildRadarVideoTopRow({ articles: artigos, brandVoice: input.brandVoice }), ...(voz ? [voz] : []), ...artigos.map(item => item.row)]),
     filename: radarVideoExportFilename({ keywords: artigos.map(item => item.label), today: input.today }),
     exported: artigos.length,
     withoutYoutube: artigos.filter(item => !item.hasYoutube).length,
