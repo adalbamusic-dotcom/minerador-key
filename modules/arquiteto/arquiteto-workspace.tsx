@@ -13258,6 +13258,17 @@ export default function ArquitetoPage() {
       formacaoDecididaForaDoMarcador: Boolean(linha?.articleFormationRef),
     };
     return { plano: buildArticleRepairPlan(facts), article, dna, candidateRef, serp };
+    /*
+     * `articleEntityIdFor` entra nas dependencias de proposito, e o lint avisa
+     * que ela e recriada a cada render — entao este memo recalcula sempre.
+     *
+     * Aceito: a lista e so a dos artigos BLOQUEADOS da selecao, e recalcular
+     * algumas classificacoes puras custa menos do que a alternativa. Omitir a
+     * dependencia (como o memo vizinho faz) deixaria o diagnostico preso a uma
+     * versao antiga da funcao, e diagnostico errado e pior que memo inutil.
+     * Envolver a funcao em `useCallback` resolveria os dois, mas ela e
+     * compartilhada e isso e mudanca de outro escopo.
+     */
   }), [selectedArticleRadarPlan, selectedArticlesForRadar, articleDnaEntryFor, articleEntityIdFor, remoteArticleSerp, articleFormationMarker, masterList, versionEvents]);
 
   /**
