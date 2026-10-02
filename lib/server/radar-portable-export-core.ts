@@ -30,6 +30,10 @@ import {
 } from "@/lib/radar/portable-export-batch";
 import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
 import { radarVideoExportYoutubeOf } from "@/lib/radar/portable-video-export";
+import { readApprovedRadarArticleBlueprints } from "@/lib/server/radar-article-blueprint-read";
+import { readRadarVideoUsagesForExport } from "@/lib/server/radar-video-usage-read";
+import { readRadarBrandVoice } from "@/lib/server/radar-brand-voice";
+import type { RadarBrandVoiceState } from "@/lib/radar/brand-voice";
 import type { RadarWritingPublication } from "@/lib/radar/portable-writing-export";
 import type { RadarCanonicalItemIdentity } from "@/lib/server/radar-canonical-authorities";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
@@ -63,6 +67,11 @@ export type RadarPortableExportAssembly = {
   plano: ReturnType<typeof planRadarSiloExport> | null;
   /** 2026-10-02 · Só com `selectionSiloContext` e sem `groupBy`: o Silo de cada selecionado. */
   planoDaSelecao: ReturnType<typeof planRadarSiloExport> | null;
+  /**
+   * 2026-10-02 · A voz da marca (Skill `brand_voice` corrente, Adendo C), lida
+   * UMA vez por lote, fora do congelamento e do hash.
+   */
+  brandVoice: RadarBrandVoiceState;
 };
 
 export async function assembleRadarPortableExport(input: {
@@ -115,6 +124,16 @@ export async function assembleRadarPortableExport(input: {
    * nova; o formato completo não usa este mapa.
    */
   const publicacoes = new Map<string, RadarWritingPublication>();
+
+  /*
+   * 2026-10-02 · O MODO DE USO DOS VÍDEOS (SDD diretriz editorial, Adendo B, D6).
+   *
+   * UMA leitura ao vivo para o lote inteiro, tolerante: sem coluna, sem modo ou
+   * com o banco recusando, o mapa volta vazio e o arquivo sai como antes. O
+   * modo NÃO entra em `bundle.video` — mudaria o `bundleHash` e orfanaria o
+   * artigo-modelo aprovado; ele só muda a PROJEÇÃO (`radarPortableVideoContext`).
+   */
+  const usosDeVideo = await readRadarVideoUsagesForExport(input.supabase as never, input.brandId, input.articleIds);
 
   /*
    * O ARTIGO RECUSADO CONTINUA SENDO MEMBRO DO SILO.
@@ -250,7 +269,14 @@ export async function assembleRadarPortableExport(input: {
      * normalizações da mesma resposta de especialista. Duas normalizações são
      * duas verdades.
      */
-    const videoContext = radarPortableVideoContext(bundle.video);
+    /*
+     * 2026-10-02 · Com modo de uso, a mesma projeção recebe os modos lidos acima
+     * ("Não usar" some, os outros viajam). Sem modo, a chamada é a de sempre.
+     */
+    const usosDoArtigo = usosDeVideo.get(articleId);
+    const videoContext = usosDoArtigo?.length
+      ? radarPortableVideoContext(bundle.video, usosDoArtigo)
+      : radarPortableVideoContext(bundle.video);
     const specialistContext = radarPortableSpecialistContext(bundle.specialist);
 
     /*
@@ -370,6 +396,7 @@ export async function assembleRadarPortableExport(input: {
         editorialTopics: contexto?.editorialTopics || [],
         generatedAt: exportedAt,
       }),
+      bundleHash: bundle.bundleHash,
     });
 
     identificacao.push({
@@ -471,6 +498,15 @@ export async function assembleRadarPortableExport(input: {
     })
     : null;
 
+  /*
+   * 2026-10-02 · O ARTIGO-MODELO APROVADO, por lote e preso ao pacote vigente.
+   * Leitura de contexto: falhou ou não há tabela, o CSV sai como antes.
+   */
+  if (montadas.length) {
+    const aprovados = await readApprovedRadarArticleBlueprints(input.supabase as never, input.brandId, montadas.map(item => ({ articleId: item.articleId, bundleHash: item.bundleHash })));
+    for (const item of montadas) item.blueprint = aprovados.get(item.articleId) ?? null;
+  }
+
   const planoDaSelecao = !plano && input.selectionSiloContext
     ? planRadarSiloExport({
       today: exportedAt,
@@ -482,7 +518,9 @@ export async function assembleRadarPortableExport(input: {
     })
     : null;
 
-  return { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao };
+  const brandVoice: RadarBrandVoiceState = montadas.length ? await readRadarBrandVoice(input.brandId) : { kind: "none" };
+
+  return { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice };
 }
 
 /**
@@ -504,7 +542,7 @@ export async function radarWritingExportForArticle(input: {
     const recusa = montagem.recusados[0];
     return { ok: false, code: recusa?.code ?? "radar_export_empty", reason: recusa?.reason ?? "O artigo não tem investigação finalizada para exportar." };
   }
-  const escrita = radarPortableWritingExport({ articles: montagem.montadas, lenses: montagem.lentes, plan: null, publications: montagem.publicacoes, today: montagem.exportedAt });
+  const escrita = radarPortableWritingExport({ articles: montagem.montadas, lenses: montagem.lentes, plan: null, publications: montagem.publicacoes, today: montagem.exportedAt, brandVoice: montagem.brandVoice });
   return { ok: true, csv: escrita.csv ?? "", filename: escrita.filename, blocked: escrita.blocked > 0, exportedAt: montagem.exportedAt };
 }
 

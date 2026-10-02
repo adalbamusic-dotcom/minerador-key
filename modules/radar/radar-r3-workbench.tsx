@@ -36,7 +36,7 @@ import { RADAR_DEFAULT_SEARCH_MODE, RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE, radarSe
 import { RadarR3AmazonPanel } from "./radar-r3-amazon-panel";
 import { RadarR3ContentDossier } from "./radar-r3-content-dossier";
 import { RadarR3VideosPanel, type RadarVideoSourcesView } from "./radar-r3-videos-panel";
-import { summarizeRadarVideoLibrary, type RadarLibrarySource } from "@/lib/radar/video-library";
+import { summarizeRadarVideoLibrary, type RadarLibrarySource, type RadarVideoUsage } from "@/lib/radar/video-library";
 import { RadarBlueprintSummaryCard } from "./radar-r3-blueprint";
 import { RadarR3ResearchDetails } from "./radar-r3-research-details";
 import { RadarR3SpecialistPanel } from "./radar-r3-specialist-panel";
@@ -47,6 +47,7 @@ import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
 import { radarAuxiliaryLensLabel, radarCanonicalLensLabel, radarFrozenLensView } from "./radar-serp-lens-view";
 import { radarCandidateEvidenceLabel } from "./radar-subject-turn-view";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
+import { RadarArticleBlueprintPanel } from "./radar-article-blueprint-panel";
 
 /** A cobertura de lentes da SERP canônica viva, para a linha da consulta central. */
 function lenteDaCanonica(research: SerpResearchSnapshot | null | undefined) {
@@ -107,7 +108,8 @@ type RadarR3WorkbenchProps = {
   onFetchVideoMetadata?: (articleId: string | null, videoSourceId: string) => void;
   onProvideVideoTranscript?: (articleId: string | null, videoSourceId: string, transcript: string) => void;
   onUploadVideoMedia?: (articleId: string | null, videoSourceId: string, file: File) => void;
-  onLibraryAction?: (articleId: string | null, action: "SELECT" | "UNSELECT" | "PROCESS_SELECTED" | "ARCHIVE" | "CLEAR_LIST", videoSourceIds: string[]) => void;
+  /* 2026-10-02 · `SET_USAGE` e o 4º parâmetro: o modo de uso do vídeo no artigo (Adendo B, D6). */
+  onLibraryAction?: (articleId: string | null, action: "SELECT" | "UNSELECT" | "PROCESS_SELECTED" | "SET_USAGE" | "ARCHIVE" | "CLEAR_LIST", videoSourceIds: string[], options?: { usage: RadarVideoUsage | null; usageNote?: string | null }) => void;
   /** O artigo ativo, quando existe. A camada da marca não depende dele. */
   articleId?: string | null;
   /** Necessário para a busca sob demanda da transcrição — RADAR_LIVE_UX_2.2 · §8. */
@@ -1462,6 +1464,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
           * a consulta dos outros perfis.
           */}
         {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)} />}
+        {model.deepResearch?.finalizedBundle && brandId && articleId && <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} />}
         {/*
           * AMAZON NÃO É UM LUGAR SEPARADO — é um dos destinos da pesquisa.
           *

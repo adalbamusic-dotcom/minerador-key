@@ -13,9 +13,11 @@ import {
   radarWritingExportCsv,
   radarWritingExportSiloFilename,
   radarWritingShareVisualAvoid,
+  buildRadarWritingBrandVoiceRow,
   type RadarWritingExportArticle,
   type RadarWritingPublication,
 } from "./portable-writing-export.ts";
+import { radarBrandVoiceRef, type RadarBrandVoiceState } from "./brand-voice.ts";
 
 /**
  * ===== A MONTAGEM DO LOTE NO FORMATO "PARA ESCREVER" — a ponte pura da rota =====
@@ -62,6 +64,8 @@ export function radarPortableWritingExport(input: {
    * cruza Silos leva o contexto para a linha de cada artigo.
    */
   selectionPlan?: Pick<RadarSiloExportPlan, "files"> | null;
+  /** 2026-10-02 · Aditivo: a voz da marca (Adendo C). Ativa: linha própria e referência em cada artigo. */
+  brandVoice?: RadarBrandVoiceState;
   publications?: ReadonlyMap<string, RadarWritingPublication>;
   today: string;
 }): RadarPortableWritingExportResult {
@@ -88,6 +92,8 @@ export function radarPortableWritingExport(input: {
     silo,
     articleId: artigo.articleId,
     publication: input.publications?.get(artigo.articleId) ?? null,
+    ...(artigo.blueprint ? { blueprint: artigo.blueprint } : {}),
+    ...(input.brandVoice?.kind === "available" ? { brandVoice: radarBrandVoiceRef(input.brandVoice.voice) } : {}),
     ...(siloInline ? { siloInline: true } : {}),
   });
 
@@ -111,11 +117,13 @@ export function radarPortableWritingExport(input: {
       siteUrl: enderecoDoSite(input.articles, umSilo),
       sharedVisualAvoid: compartilhado.shared,
       ...(porLinha ? { siloPerRow: true } : {}),
+      ...(input.brandVoice ? { brandVoice: input.brandVoice } : {}),
     });
+    const voz = buildRadarWritingBrandVoiceRow(input.brandVoice);
     return {
       exported: artigos.length,
       blocked: artigos.filter(item => item.verdict === "Não").length,
-      csv: artigos.length ? radarWritingExportCsv([topo, ...compartilhado.rows]) : "",
+      csv: artigos.length ? radarWritingExportCsv([topo, ...(voz ? [voz] : []), ...compartilhado.rows]) : "",
       filename: radarWritingExportBatchFilename({
         articles: input.articles.map(item => ({ slug: item.entrada.article.slug, keyword: item.entrada.article.principalKeyword })),
         today: input.today,
@@ -143,10 +151,12 @@ export function radarPortableWritingExport(input: {
       articles: artigos,
       siteUrl: enderecoDoSite(doArquivo, silo),
       sharedVisualAvoid: compartilhado.shared,
+      ...(input.brandVoice ? { brandVoice: input.brandVoice } : {}),
     });
+    const voz = buildRadarWritingBrandVoiceRow(input.brandVoice);
     return {
       filename: radarWritingExportSiloFilename(arquivo.filename),
-      csv: radarWritingExportCsv([linhaDeTopo, ...compartilhado.rows]),
+      csv: radarWritingExportCsv([linhaDeTopo, ...(voz ? [voz] : []), ...compartilhado.rows]),
       silo: {
         name: arquivo.siloLabel,
         kind: arquivo.kind,

@@ -1,5 +1,39 @@
 # Estado atual — Redator
 
+## Artigo-modelo aprovado e voz da marca no Redator — 2026-10-02
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** SDD
+`docs/05-radar/sdd-diretriz-editorial-pela-serp-2026-10-02.md`, Adendos A (D5) e C.
+
+- **Leitura ao vivo, nada gravado no documento:** `readWriterApprovedArticleBlueprint`,
+  `readWriterArticleBlueprintContent` e `readWriterBrandVoice` (lib/server/writer-evidence-sources.ts), com
+  select por caminho, filtro de Marca, artigo, `bundle_hash` do pacote entregue e state `APPROVED`. O hash
+  e a idempotência do envio não mudam.
+- **Voz:** regra canônica da Marca (spec §24): Skill `brand_voice` corrente não arquivada, rascunho incluído,
+  com o estado dito. Trechos escolhidos pela régua pura do Radar (`lib/radar/brand-voice.ts`).
+- **Manifesto:** linha `radar.blueprint/<id>` (dono radar, "Interpretação de IA") ou ausência declarada
+  (nenhum aprovado, outro congelamento, migration pendente); nota da voz na linha `brand.skill`; sem voz,
+  ausência `brand.voice`. Até 8 kB.
+- **Fundamentos:** `articleBlueprint` e `brandVoice` opcionais; sem eles, idênticos aos de antes. Ordem de
+  corte: `articleBlueprint.sections` entre `video.results` e `conflicts`. Até 24 kB.
+- **Fatia:** família `radar.blueprint`, paginada, nível `AI_INTERPRETATION` (planta aprovada pelo dono, não
+  evidência).
+- **IA interna:** a seção do artigo-modelo só entra com casamento seguro (mesmo H2, ou ao menos 2 palavras que
+  distinguem a seção e metade das do foco, ignorando as palavras do tema); empate, H2 duplicado e melhoria de
+  trecho dão `section: null`. Sempre vão o `outline`, o fechamento com CTA e a voz. Regra nova nos prompts de
+  seção e melhoria; o conflito com a voz entra como fonte citada (`brand.skill/<versionId>`).
+- **Semeadura de roteiro e carrossel:** contexto "Voz da marca (copy e CTA)" e promessa, CTA e próximo passo do
+  artigo-modelo; regra em `REGRAS_COMUNS`.
+- **MCP:** instruções e descrições de `get_writer_foundations` e `get_writer_evidence_manifest` atualizadas.
+- Arquivos: lib/server/writer-evidence-sources.ts, lib/server/writer-evidence-reader.ts,
+  lib/redator/writer-evidence-catalog.ts, lib/redator/writer-section-evidence.ts, lib/redator/prompts.ts,
+  lib/server/writer-seed.ts, lib/redator/deliverable-seed.ts, lib/redator/radar-foundations.ts,
+  app/api/mcp/redator/route.ts. Handoff, `radar-import`, `radar-writer-send` e schemas `.strict()` intocados.
+- **Dependência de entrega:** `writer-evidence-catalog.ts` importa `lib/radar/brand-voice.ts` (novo): os dois
+  vão no mesmo commit e deploy.
+- Testes: `tests/redator-artigo-modelo-e-voz.test.mts` (16 casos, na suíte `test:redator:mcp`); Redator
+  357/0, MCP 134/0, DOM 19/0, agent 65/0.
+
 ## Documento só de origem Radar — 2026-10-01
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.**

@@ -32,6 +32,7 @@
  */
 
 import { RADAR_EVIDENCE_HIERARCHY, RADAR_EVIDENCE_LABEL, type RadarEvidenceSource } from "../radar/evidence-authority.ts";
+import { radarBrandVoiceSlotOf, radarBrandVoiceStatusLabel, radarBrandVoiceText, type RadarBrandVoiceSection, type RadarBrandVoiceSlot } from "../radar/brand-voice.ts";
 import { RADAR_WRITER_MAY_NOT } from "./writer-handoff.ts";
 
 /* ================================ limites ================================ */
@@ -117,6 +118,13 @@ export const WRITER_EVIDENCE_HIERARCHY = Object.freeze(
 
 const NAO_REVISADA = "observação não revisada pelo Radar; quem decide suficiência é o Radar (invariante 27)";
 const AFIRMACAO_DE_DNA = "afirmação do DNA, a confrontar com a evidência; quem muda o DNA é o dono, por decisão humana";
+/*
+ * 2026-10-02 · O artigo-modelo (SDD diretriz editorial, Adendo A) é a planta
+ * que a IA montou sobre o pacote congelado e o dono aprovou no Radar. Manda
+ * na FORMA (títulos, seções, links, CTA); não é evidência e não sobe acima
+ * dela: fica no nível da IA, com a nota dizendo que a aprovação é humana.
+ */
+const PLANTA_APROVADA = "artigo-modelo: planta montada por IA sobre o pacote congelado e aprovada pelo dono no Radar; orienta a forma, não é evidência — diante da evidência do pacote, vale a evidência e o conflito vira divergência";
 
 /* ============================= famílias ================================= */
 
@@ -144,7 +152,9 @@ export type WriterEvidenceFamily =
   | "publication.self"
   | "publication.brand"
   | "specialist.posterior"
-  | "run.amazon.shortlist";
+  | "run.amazon.shortlist"
+  /* 2026-10-02 · o artigo-modelo APROVADO do pacote entregue (SDD diretriz editorial, Adendo A, D5). */
+  | "radar.blueprint";
 
 type Familia = {
   owner: WriterEvidenceOwner;
@@ -180,6 +190,8 @@ const FAMILIAS: Readonly<Record<WriterEvidenceFamily, Familia>> = Object.freeze(
   "publication.brand": { owner: "publicacoes", ref: "none", frozen: false, dna: false, thirdParty: false },
   "specialist.posterior": { owner: "radar", ref: "none", frozen: false, dna: false, thirdParty: false },
   "run.amazon.shortlist": { owner: "radar", ref: "none", frozen: false, dna: false, thirdParty: true },
+  /* Lido ao vivo, preso ao `bundleHash` entregue; a versão aprovada é imutável (trigger do banco). */
+  "radar.blueprint": { owner: "radar", ref: "required", frozen: false, dna: false, thirdParty: false },
 });
 
 export const writerEvidenceOwnerOf = (family: WriterEvidenceFamily): WriterEvidenceOwner => FAMILIAS[family].owner;
@@ -213,6 +225,8 @@ export function writerEvidenceHierarchyOf(input: {
     if (fotografia && input.serpAuthoritative === true) return { level: "CURRENT_SUFFICIENT_SERP", note: "declarada vigente e suficiente pelo Radar no congelamento" };
     return { level: "OTHER_RADAR_EVIDENCE", note: fotografia ? "o Radar não declarou esta SERP vigente e suficiente" : null };
   }
+  /* 2026-10-02 · ramo próprio: planta aprovada, abaixo da evidência (invariante 35). */
+  if (input.family === "radar.blueprint") return { level: "AI_INTERPRETATION", note: PLANTA_APROVADA };
   if (familia.dna) return { level: "ARTICLE_DNA_HYPOTHESIS", note: AFIRMACAO_DE_DNA };
   return { level: "OTHER_RADAR_EVIDENCE", note: NAO_REVISADA };
 }
@@ -871,10 +885,18 @@ export function buildWriterEvidenceManifest(input: {
  * inventado: a lista cortada diz quantos ficaram de fora e onde ler o resto.
  */
 export const WRITER_FOUNDATIONS_TRIM_ORDER = Object.freeze([
-  "competitors", "questions", "video.results", "conflicts", "limitations", "specialist.items", "pendingDecisions",
+  /*
+   * 2026-10-02 · as seções do artigo-modelo aprovado cedem DEPOIS da pesquisa
+   * de terceiros (concorrentes, perguntas, vídeo) e ANTES do que o pacote
+   * protege (conflitos, limitações, especialista, pendências). As do fim saem
+   * primeiro; a planta inteira continua em `radar.blueprint/<id>`.
+   */
+  "competitors", "questions", "video.results", "articleBlueprint.sections", "conflicts", "limitations", "specialist.items", "pendingDecisions",
 ] as const);
 
 type CortavelDosFundamentos = (typeof WRITER_FOUNDATIONS_TRIM_ORDER)[number];
+/** 2026-10-02 · só existe com artigo-modelo aprovado: quem chama sem ele não precisa dizer onde ler. */
+type CortavelOpcionalDosFundamentos = "articleBlueprint.sections";
 
 /**
  * CABE OS FUNDAMENTOS NO TETO. Cada passo corta pela metade a lista da vez
@@ -883,7 +905,8 @@ type CortavelDosFundamentos = (typeof WRITER_FOUNDATIONS_TRIM_ORDER)[number];
  */
 export function fitWriterFoundations<T extends Record<string, unknown>>(
   fundamentos: T,
-  ondeLer: Readonly<Record<CortavelDosFundamentos, string>>,
+  ondeLer: Readonly<Record<Exclude<CortavelDosFundamentos, CortavelOpcionalDosFundamentos>, string>>
+    & Readonly<Partial<Record<CortavelOpcionalDosFundamentos, string>>>,
   teto: number = WRITER_EVIDENCE_LIMITS.foundationsMaxBytes,
 ): (T & { trimmed: Array<{ field: string; kept: number; total: number; readAt: string }> }) | null {
   const trimmed: Array<{ field: string; kept: number; total: number; readAt: string }> = [];
@@ -908,7 +931,7 @@ export function fitWriterFoundations<T extends Record<string, unknown>>(
       const manter = Math.floor(lista.length / 2);
       gravarLista(caminho, lista.slice(0, manter));
       if (registroExistente) registroExistente.kept = manter;
-      else trimmed.push({ field: caminho, kept: manter, total, readAt: ondeLer[caminho] });
+      else trimmed.push({ field: caminho, kept: manter, total, readAt: ondeLer[caminho] ?? "radar.blueprint" });
     }
     if (medir() <= teto) break;
   }
@@ -999,3 +1022,220 @@ export const WRITER_ARTICLE_DNA_FOUNDATION_FIELDS = Object.freeze([
 
 /** O teto da projeção editorial do ArticleDNA com Assunto (F4.1). */
 export const WRITER_ARTICLE_DNA_FOUNDATION_MAX_BYTES = 1_638;
+
+/* =============== artigo-modelo aprovado e voz da marca (2026-10-02) =============== */
+
+/*
+ * O ARTIGO-MODELO APROVADO E A VOZ DA MARCA CHEGAM AO REDATOR.
+ *
+ * SDD docs/05-radar/sdd-diretriz-editorial-pela-serp-2026-10-02.md, Adendo A
+ * (D5, aprovado pelo dono em 2026-10-02: "só o aprovado vai ao CSV e ao
+ * Redator") e Adendo C (a voz da marca "inclusive para ser útil nos CTAs e
+ * demais coisas"). A regra da voz é a canônica da Marca (spec §24): vale a
+ * versão CORRENTE não arquivada da Skill `brand_voice` — rascunho incluído,
+ * com o estado dito —, a mesma que `readWriterBrandContextVersions` usa.
+ *
+ * Os dois são LIDOS AO VIVO pelo servidor (Marca + artigo + pacote), nunca
+ * gravados no documento: gravar mudaria o hash e a idempotência do envio, e o
+ * MCP não reescreve `importedContext`. Aqui mora só a PROJEÇÃO compacta, pura:
+ *
+ *   - artigo-modelo: o que o dono aprovou no Radar para o MESMO `bundleHash`
+ *     do documento — título e SEO, promessa, leitor, ângulo, abertura, seções
+ *     (pergunta do leitor, resposta que abre, H3, links internos com o destino
+ *     resolvido pelo candidato), fechamento com CTA e próximo passo, e as
+ *     medidas do plano. É planta de IA aprovada, não evidência;
+ *   - voz: dois trechos escolhidos pela régua do Radar (`lib/radar/brand-voice.ts`):
+ *     CTA e transição comercial (assuntos "structure" e "reader", com os
+ *     títulos de CTA/oferta na frente) e voz e vocabulário ("voice").
+ *
+ * O integral fica a uma fatia: `radar.blueprint/<id>` e `brand.skill/<versionId>`.
+ */
+
+export const WRITER_BRAND_VOICE_DEFINITION_KEY = "brand_voice";
+/** A identidade da Skill de voz na Marca (`brandSkillIdentity`, lib/marca/brand-skill-domain.ts). */
+export const writerBrandVoiceEntityId = (brandId: string) => `${brandId}:${WRITER_BRAND_VOICE_DEFINITION_KEY}`;
+
+export const WRITER_BLUEPRINT_PROJECTION_LIMITS = Object.freeze({
+  titleChars: 220,
+  textChars: 400,
+  answerFirstChars: 280,
+  h3Chars: 140,
+  anchorChars: 140,
+  labelChars: 140,
+  destinationChars: 300,
+  voiceExcerptChars: 1_200,
+  voiceOtherSections: 12,
+  voiceHeadingChars: 80,
+});
+
+export type WriterBlueprintLink = { anchor: string; label: string | null; destination: string | null; status: string | null };
+export type WriterBlueprintSection = { h2: string; readerQuestion: string | null; answerFirst: string | null; h3: string[]; internalLinks: WriterBlueprintLink[] };
+
+export type WriterArticleBlueprintFoundation = {
+  blueprintId: string;
+  version: number | null;
+  approvedAt: string | null;
+  h1: string | null;
+  seoTitle: string | null;
+  metaDescription: string | null;
+  promise: string | null;
+  reader: string | null;
+  angle: string | null;
+  openingQuestion: string | null;
+  sections: WriterBlueprintSection[];
+  closing: { turn: string | null; cta: string | null; nextStep: string | null } | null;
+  /** As medidas do plano, contadas pelo Radar (não pela IA). */
+  plan: Record<string, number | null> | null;
+  /** A versão da Skill de voz que a IA recebeu ao montar a planta (ausente em versões antigas). */
+  voiceUsed: { versionId: string | null; version: number | null; name: string | null } | null;
+  readAt: string;
+};
+
+export type WriterBrandVoiceFoundation = {
+  versionId: string;
+  version: number | null;
+  name: string;
+  /** Estado de tela da Marca: a regra vale também para o rascunho, e o texto diz qual. */
+  status: "draft" | "pending_approval" | "active";
+  statusLabel: string;
+  /** CTA e transição comercial, como a marca escreveu (cortado). */
+  cta: string | null;
+  /** Voz, tom e vocabulário (cortado). */
+  voice: string | null;
+  /** Os títulos das outras seções da Skill (fontes, links, visual…): o integral está em `readAt`. */
+  otherSections: string[];
+  readAt: string;
+};
+
+const cortarTexto = (valor: unknown, limite: number): string | null => {
+  if (typeof valor !== "string" || !valor.trim()) return null;
+  const caracteres = [...valor.trim()];
+  return caracteres.length > limite ? `${caracteres.slice(0, limite).join("")}…` : caracteres.join("");
+};
+const listaDe = (valor: unknown): unknown[] => (Array.isArray(valor) ? valor : []);
+const registrosDe = (valor: unknown): Array<Record<string, unknown>> =>
+  listaDe(valor).map(registro).filter((item): item is Record<string, unknown> => Boolean(item));
+const numeroOuNulo = (valor: unknown): number | null => (typeof valor === "number" && Number.isFinite(valor) ? valor : null);
+
+/**
+ * A PLANTA APROVADA, COMPACTA. `null` quando o que o banco devolveu não tem a
+ * forma mínima (planta com seções): o chamador declara a ausência.
+ *
+ * Leitura tolerante e só de texto: a edição do dono pode deixar menos seções
+ * do que a IA precisa gerar, e isso continua sendo a planta aprovada.
+ */
+export function writerArticleBlueprintFoundation(input: {
+  id: string;
+  versionNumber: number | null;
+  approvedAt: string | null;
+  blueprint: unknown;
+  plan: unknown;
+  linkCandidates: unknown;
+  brandVoice: unknown;
+}): WriterArticleBlueprintFoundation | null {
+  const planta = registro(input.blueprint);
+  if (!planta || !Array.isArray(planta.sections)) return null;
+  const L = WRITER_BLUEPRINT_PROJECTION_LIMITS;
+  const candidatos = new Map(registrosDe(input.linkCandidates).map(item => [String(item.id ?? ""), item]));
+  const sections = registrosDe(planta.sections).map(secao => ({
+    h2: cortarTexto(secao.h2, L.titleChars) ?? "",
+    readerQuestion: cortarTexto(secao.readerQuestion, L.titleChars),
+    answerFirst: cortarTexto(secao.answerFirst, L.answerFirstChars),
+    h3: listaDe(secao.h3).map(item => cortarTexto(item, L.h3Chars)).filter((item): item is string => Boolean(item)),
+    internalLinks: registrosDe(secao.internalLinks).map(link => {
+      const candidato = candidatos.get(String(link.candidate ?? "")) ?? null;
+      return {
+        anchor: cortarTexto(link.anchor, L.anchorChars) ?? "",
+        label: cortarTexto(candidato?.label, L.labelChars),
+        destination: cortarTexto(candidato?.destination, L.destinationChars),
+        status: cortarTexto(candidato?.status, 20),
+      };
+    }).filter(link => link.anchor),
+  })).filter(secao => secao.h2);
+  const titulo = registro(planta.title);
+  const abertura = registro(planta.opening);
+  const fechamento = registro(planta.closing);
+  const plano = registro(input.plan);
+  const voz = registro(input.brandVoice);
+  return {
+    blueprintId: input.id,
+    version: input.versionNumber,
+    approvedAt: input.approvedAt,
+    h1: cortarTexto(titulo?.h1, L.titleChars),
+    seoTitle: cortarTexto(titulo?.seoTitle, L.titleChars),
+    metaDescription: cortarTexto(titulo?.metaDescription, L.textChars),
+    promise: cortarTexto(planta.promise, L.textChars),
+    reader: cortarTexto(planta.reader, L.textChars),
+    angle: cortarTexto(registro(planta.angle)?.statement, L.textChars),
+    openingQuestion: cortarTexto(abertura?.readerQuestion, L.titleChars),
+    sections,
+    closing: fechamento
+      ? { turn: cortarTexto(fechamento.turn, L.textChars), cta: cortarTexto(fechamento.cta, 600), nextStep: cortarTexto(fechamento.nextStep, L.textChars) }
+      : null,
+    plan: plano
+      ? Object.fromEntries(Object.entries(plano).filter(([, valor]) => valor === null || numeroOuNulo(valor) !== null).map(([chave, valor]) => [chave, numeroOuNulo(valor)]))
+      : null,
+    voiceUsed: voz
+      ? { versionId: typeof voz.versionId === "string" ? voz.versionId : null, version: numeroOuNulo(voz.version), name: cortarTexto(voz.name, 120) }
+      : null,
+    readAt: `radar.blueprint/${input.id}`,
+  };
+}
+
+/** Estado técnico do ciclo de vida → estado de tela da Marca (`uiStatus`, lib/server/brand-skills.ts). */
+const ESTADO_DE_TELA_DA_SKILL: Readonly<Record<string, WriterBrandVoiceFoundation["status"]>> = Object.freeze({
+  approved: "active", proposed: "pending_approval", draft: "draft",
+});
+
+/** O rótulo do estado na Marca ("ativa", "em rascunho", "aguardando aprovação") a partir do estado técnico. */
+export const writerBrandVoiceStatusLabel = (lifecycle: string): string =>
+  radarBrandVoiceStatusLabel(ESTADO_DE_TELA_DA_SKILL[lifecycle] ?? "draft");
+
+const semAcentoMinusculo = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+/** Dentro de "structure" e "reader", o que fala de CTA, oferta e transição vem na frente. */
+const TITULO_DE_CTA = /\bcta\b|comercial|transicao|oferta|servico|conversao|chamada/;
+
+/**
+ * A VOZ CORRENTE, COMPACTA: dois trechos e os títulos do resto. A escolha dos
+ * assuntos é a do Radar (`radarBrandVoiceSlotOf`): uma régua para a mesma
+ * Skill, no CSV e no Redator.
+ */
+export function writerBrandVoiceFoundation(input: {
+  versionId: string;
+  versionNumber: number | null;
+  name: string | null;
+  lifecycle: string;
+  title: string | null;
+  sections: unknown;
+}): WriterBrandVoiceFoundation {
+  const L = WRITER_BLUEPRINT_PROJECTION_LIMITS;
+  const secoes: RadarBrandVoiceSection[] = registrosDe(input.sections)
+    .map(secao => ({ heading: typeof secao.heading === "string" ? secao.heading.trim() : "", body: typeof secao.body === "string" ? secao.body : "" }))
+    .filter(secao => secao.body.trim());
+  const porAssunto = new Map<RadarBrandVoiceSlot, RadarBrandVoiceSection[]>();
+  for (const secao of secoes) {
+    const assunto = radarBrandVoiceSlotOf(secao.heading);
+    porAssunto.set(assunto, [...(porAssunto.get(assunto) ?? []), secao]);
+  }
+  const doCta = [...(porAssunto.get("structure") ?? []), ...(porAssunto.get("reader") ?? [])]
+    .map((secao, indice) => ({ secao, indice, cta: TITULO_DE_CTA.test(semAcentoMinusculo(secao.heading)) }))
+    .sort((a, b) => Number(b.cta) - Number(a.cta) || a.indice - b.indice)
+    .map(item => item.secao);
+  const daVoz = porAssunto.get("voice") ?? [];
+  const usadas = new Set([...doCta, ...daVoz]);
+  const status = ESTADO_DE_TELA_DA_SKILL[input.lifecycle] ?? "draft";
+  return {
+    versionId: input.versionId,
+    version: input.versionNumber,
+    name: cortarTexto(input.name, 120) ?? cortarTexto(input.title, 120) ?? WRITER_BRAND_VOICE_DEFINITION_KEY,
+    status,
+    statusLabel: radarBrandVoiceStatusLabel(status),
+    cta: cortarTexto(radarBrandVoiceText(doCta), L.voiceExcerptChars),
+    voice: cortarTexto(radarBrandVoiceText(daVoz), L.voiceExcerptChars),
+    otherSections: secoes.filter(secao => !usadas.has(secao))
+      .map(secao => cortarTexto(secao.heading.replace(/^\d+[.)]\s*/, ""), L.voiceHeadingChars))
+      .filter((titulo): titulo is string => Boolean(titulo))
+      .slice(0, L.voiceOtherSections),
+    readAt: `brand.skill/${input.versionId}`,
+  };
+}

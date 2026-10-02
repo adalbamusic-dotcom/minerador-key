@@ -17,7 +17,9 @@ import "server-only";
  *       da keyword, o que o Redator não pode redefinir, hierarquia, origem,
  *       pendências, projeção editorial do ArticleDNA, especialista e vídeo
  *       congelados, concorrentes e perguntas resumidos. Só caminhos pequenos
- *       e fixos, por seletor de caminho; funciona antes da migration.
+ *       e fixos, por seletor de caminho; funciona antes da migration. Desde
+ *       2026-10-02, quando existem, o artigo-modelo aprovado do pacote e a
+ *       voz corrente da Marca (lidos ao vivo, nunca gravados no documento).
  *   (3) FATIAS ≤ 32 kB (padrão 16 kB) — uma `sourceKey` do manifesto, com
  *       cursor, projeção e `ifNoneMatch`. Paginadas no banco pela função
  *       `writer_evidence_slice`; sem ela, só a lista fechada de seções medidas
@@ -56,6 +58,12 @@ import {
   writerEvidencePageOf,
   writerEvidenceJsonBytes,
   writerSliceRowsOf,
+  writerArticleBlueprintFoundation,
+  writerBrandVoiceEntityId,
+  writerBrandVoiceFoundation,
+  writerBrandVoiceStatusLabel,
+  type WriterArticleBlueprintFoundation,
+  type WriterBrandVoiceFoundation,
   type WriterEvidenceEnvelope,
   type WriterEvidenceFamily,
   type WriterEvidenceHierarchy,
@@ -87,9 +95,12 @@ import {
   countWriterBrandPublications,
   countWriterPosteriorSpecialist,
   countWriterSiteCatalog,
+  readWriterApprovedArticleBlueprint,
+  readWriterArticleBlueprintContent,
   readWriterArtifactVersionMeta,
   readWriterArticleProjection,
   readWriterBrandContextVersions,
+  readWriterBrandVoice,
   readWriterBrandPublicationsPage,
   readWriterDnaVersion,
   readWriterFormation,
@@ -322,6 +333,24 @@ export async function readWriterEvidenceManifest(context: WriterEvidenceContext,
     }
   }
 
+  /* ------------------------------ Radar: artigo-modelo aprovado ------------------------------ */
+  /*
+   * 2026-10-02 · SDD diretriz editorial, Adendo A (D5): só o APROVADO do pacote
+   * entregue chega ao Redator. Só metadados aqui (id, versão, pacote, data);
+   * o conteúdo vem nos fundamentos e na fatia `radar.blueprint/<id>`.
+   */
+  const artigoModelo = await readWriterApprovedArticleBlueprint(context, { articleId: head.articleId, bundleHash: head.dossier?.bundleHash ?? null }, { content: false });
+  if (artigoModelo.kind === "approved") {
+    const { meta } = artigoModelo;
+    fonte({
+      sourceKey: `radar.blueprint/${meta.id}`, owner: "radar", status: "approved", level: writerEvidenceHierarchyOf({ family: "radar.blueprint" }).level,
+      bytes: null, items: null, etag: writerEvidenceEtag([meta.id, meta.bundleHash, meta.approvedAt]), observedAt: meta.approvedAt, posteriorAoPacote: false,
+      note: `artigo-modelo aprovado v${meta.versionNumber ?? "?"}, preso ao pacote entregue; planta de IA aprovada pelo dono (forma, links e CTA), não evidência`,
+    });
+  } else {
+    ausentes.push({ sourceKey: "radar.blueprint", owner: "radar", reason: artigoModelo.reason });
+  }
+
   /* ------------------------------ DNAs fixados ------------------------------ */
   const { articleDnaRef, siloDnaRef, keywordDnaRefs } = head.refs;
   const reais = [articleDnaRef, siloDnaRef, ...keywordDnaRefs].filter(referencia => !isLegacyVersionReference(referencia));
@@ -399,11 +428,29 @@ export async function readWriterEvidenceManifest(context: WriterEvidenceContext,
   if (contextoDaMarca.truncated.skills) {
     ausentes.push({ sourceKey: "brand.skill/*", owner: "marca", reason: `mais de ${WRITER_BRAND_CONTEXT_MAX_VERSIONS} versões de Skill na Marca: definições além do corte não foram listadas` });
   }
+  /*
+   * 2026-10-02 · A VOZ DA MARCA (SDD diretriz editorial, Adendo C). É a Skill
+   * `brand_voice` corrente não arquivada — a mesma linha `brand.skill/` de
+   * sempre, com a nota dizendo que copy e CTA seguem ela e em que estado ela
+   * está na Marca. Sem ela, a ausência é declarada: ninguém infere uma voz.
+   */
+  const entidadeDaVoz = writerBrandVoiceEntityId(context.brandId);
   for (const skill of contextoDaMarca.skills) {
+    const daVoz = skill.entityId === entidadeDaVoz;
     fonte({
       sourceKey: `brand.skill/${skill.versionId}`, owner: "marca", status: skill.lifecycle, level: nivelDna.level, bytes: bytesDaVersao(skill.versionId), items: null,
       etag: writerEvidenceEtag([skill.versionId, skill.contentHash]), observedAt: skill.createdAt, posteriorAoPacote: posterior(head, skill.createdAt),
-      note: `Skill da Marca ${skill.entityId} v${skill.versionNumber ?? "?"}; não fixada no documento`,
+      note: daVoz
+        ? `Voz da marca (Skill brand_voice) v${skill.versionNumber ?? "?"}, ${writerBrandVoiceStatusLabel(skill.lifecycle)} na Marca: copy e CTA seguem ela; não fixada no documento`
+        : `Skill da Marca ${skill.entityId} v${skill.versionNumber ?? "?"}; não fixada no documento`,
+    });
+  }
+  if (!contextoDaMarca.skills.some(skill => skill.entityId === entidadeDaVoz)) {
+    ausentes.push({
+      sourceKey: "brand.voice", owner: "marca",
+      reason: contextoDaMarca.truncated.skills
+        ? `Skill de voz fora das ${WRITER_BRAND_CONTEXT_MAX_VERSIONS} versões listadas: os fundamentos a leem direto (brandVoice)`
+        : "nenhuma Skill de voz (brand_voice) corrente na Marca: voz, tom e CTA ficam por conta de quem escreve",
     });
   }
 
@@ -548,6 +595,18 @@ export type WriterFoundations = {
    * sugestão do Radar, com a decisão de quem escreve. Ausente sem elas.
    */
   editorialContext?: string[];
+  /**
+   * 2026-10-02 · SDD diretriz editorial, Adendo A (D5) · o artigo-modelo que o
+   * dono APROVOU no Radar para o MESMO pacote do documento, compacto (a planta
+   * inteira em `readAt`). Ausente sem aprovado: os fundamentos saem como eram.
+   */
+  articleBlueprint?: WriterArticleBlueprintFoundation;
+  /**
+   * 2026-10-02 · Adendo C · a voz corrente da Marca (Skill `brand_voice`, spec
+   * da Marca §24, rascunho incluído com o estado dito), em dois trechos: CTA e
+   * transição comercial; voz e vocabulário. Ausente sem Skill de voz.
+   */
+  brandVoice?: WriterBrandVoiceFoundation;
   specialist: unknown;
   video: { summary: unknown; sources: unknown[]; results: unknown[] } | null;
   competitors: Array<{ url: string | null; domain: string | null; title: string | null; bestRank: number | null; classification: string | null }>;
@@ -574,6 +633,53 @@ const cortar = (valor: unknown, limite: number) => {
   return caracteres.length > limite ? `${caracteres.slice(0, limite).join("")}…` : linha;
 };
 
+/*
+ * 2026-10-02 · O ARTIGO-MODELO APROVADO E A VOZ DA MARCA para quem escreve
+ * (SDD diretriz editorial, Adendos A e C). Lidos ao vivo, pela Marca do
+ * contexto; presentes só quando existem — sem eles, fundamentos e material
+ * saem como eram. Só o que pede ação vira ausência declarada: aprovado de
+ * outro congelamento, planta fora do contrato e leitura que falhou. A falta
+ * simples ("nenhum aprovado", "nenhuma Skill de voz") fica no manifesto.
+ */
+type PlantaEVoz = {
+  articleBlueprint: WriterArticleBlueprintFoundation | null;
+  brandVoice: WriterBrandVoiceFoundation | null;
+  absent: Array<{ field: string; reason: string }>;
+};
+
+async function plantaEVozDe(context: WriterEvidenceContext, head: WriterEvidenceHead): Promise<PlantaEVoz> {
+  const [lido, voz] = await Promise.all([
+    readWriterApprovedArticleBlueprint(context, { articleId: head.articleId, bundleHash: head.dossier?.bundleHash ?? null }, { content: true }),
+    readWriterBrandVoice(context, { content: true }),
+  ]);
+  const absent: PlantaEVoz["absent"] = [];
+  let articleBlueprint: WriterArticleBlueprintFoundation | null = null;
+  if (lido.kind === "approved") {
+    articleBlueprint = lido.content
+      ? writerArticleBlueprintFoundation({ id: lido.meta.id, versionNumber: lido.meta.versionNumber, approvedAt: lido.meta.approvedAt, ...lido.content })
+      : null;
+    if (!articleBlueprint) absent.push({ field: "articleBlueprint", reason: `o artigo-modelo aprovado está fora do contrato do Radar: leia radar.blueprint/${lido.meta.id}` });
+  } else if (lido.kind === "other_bundle" || lido.kind === "read_failed") {
+    absent.push({ field: "articleBlueprint", reason: lido.reason });
+  }
+  const brandVoice = voz.kind === "current"
+    ? writerBrandVoiceFoundation({ versionId: voz.meta.versionId, versionNumber: voz.meta.versionNumber, name: voz.name, lifecycle: voz.lifecycle, title: voz.title, sections: voz.sections })
+    : null;
+  if (voz.kind === "read_failed") absent.push({ field: "brandVoice", reason: voz.reason });
+  return { articleBlueprint, brandVoice, absent };
+}
+
+/** O próximo passo dos fundamentos. Sem planta e sem voz, o texto de sempre. */
+function proximoPassoDosFundamentos(planta: PlantaEVoz): string {
+  return [
+    "Leia get_writer_evidence_manifest e, para a seção que está escrevendo, read_writer_evidence com a sourceKey do manifesto.",
+    ...(planta.articleBlueprint ? ["articleBlueprint é o artigo-modelo que o dono aprovou no Radar para este pacote: siga a planta (H1, seções, pergunta do leitor, resposta que abre, links internos com a âncora indicada, fechamento e CTA); o integral está em articleBlueprint.readAt."] : []),
+    ...(planta.brandVoice ? ["brandVoice é a voz corrente da Marca: forma, copy, transições e CTA seguem ela (statusLabel diz se está ativa ou em rascunho); a Skill inteira está em brandVoice.readAt."] : []),
+    ...(planta.articleBlueprint || planta.brandVoice ? ["Planta e voz não mudam keyword, intenção, escopo nem fatos: conflito com a evidência vira record_writer_divergence."] : []),
+    "As perguntas orientam a cobertura dentro do texto — nunca uma seção de FAQ.",
+  ].join(" ");
+}
+
 /**
  * OS FUNDAMENTOS, ≤ 24 kB. Sempre pequenos, sempre os mesmos caminhos, e sem
  * depender da migration. O que não coube diz quantos ficaram de fora e onde
@@ -587,6 +693,7 @@ export async function readWriterFoundations(context: WriterEvidenceContext, docu
   const projecao = await readWriterArticleProjection(context, head);
   /* As linhas da virada só existem com Assunto: sem ele, nenhuma consulta a mais. */
   const linhasDaVirada = projecao?.fields.subject ? await readWriterEditorialContext(context, head) : [];
+  const plantaEVoz = await plantaEVozDe(context, head);
   const ausentes: WriterFoundations["absent"] = [];
 
   const concorrentes = lista(lidos.get("observed.competitors")).map(registro).filter((item): item is Linha => Boolean(item))
@@ -619,6 +726,7 @@ export async function readWriterFoundations(context: WriterEvidenceContext, docu
   if (!projecao) ausentes.push({ field: "article", reason: isLegacyVersionReference(head.refs.articleDnaRef) ? "ArticleDNA com referência legada" : "a versão fixada do ArticleDNA não existe nesta Marca" });
   if (head.dossier && !video) ausentes.push({ field: "video", reason: "o pacote não trouxe evidência audiovisual" });
   if (head.dossier && !registro(lidos.get("specialist"))) ausentes.push({ field: "specialist", reason: "nenhuma contribuição de especialista aceita no pacote" });
+  ausentes.push(...plantaEVoz.absent);
 
   const fundamentos: WriterFoundations = {
     kind: "writer_foundations",
@@ -644,14 +752,20 @@ export async function readWriterFoundations(context: WriterEvidenceContext, docu
       : null,
     /* Só quando o envio gravou linhas: sem Assunto, os fundamentos ficam byte a byte como eram. */
     ...(linhasDaVirada.length ? { editorialContext: [...linhasDaVirada] } : {}),
+    /* 2026-10-02 · só quando existem: sem aprovado e sem Skill de voz, os fundamentos ficam como eram. */
+    ...(plantaEVoz.articleBlueprint ? { articleBlueprint: plantaEVoz.articleBlueprint } : {}),
+    ...(plantaEVoz.brandVoice ? { brandVoice: plantaEVoz.brandVoice } : {}),
     specialist: lidos.get("specialist") ?? null,
     video: projecaoDoVideo,
     competitors: concorrentes,
     questions: perguntas,
     absent: ausentes,
-    next: "Leia get_writer_evidence_manifest e, para a seção que está escrevendo, read_writer_evidence com a sourceKey do manifesto. As perguntas orientam a cobertura dentro do texto — nunca uma seção de FAQ.",
+    next: proximoPassoDosFundamentos(plantaEVoz),
   };
-  const cabe = fitWriterFoundations(fundamentos, ONDE_LER);
+  const cabe = fitWriterFoundations(fundamentos, {
+    ...ONDE_LER,
+    ...(plantaEVoz.articleBlueprint ? { "articleBlueprint.sections": plantaEVoz.articleBlueprint.readAt } : {}),
+  });
   if (!cabe) throw new WriterEvidenceError("source_too_large", "Os fundamentos não couberam no limite de 24 kB.");
   return cabe as WriterFoundations;
 }
@@ -1007,6 +1121,38 @@ async function prepararLista(chave: WriterEvidenceSourceKey, input: {
   };
 }
 
+/**
+ * 2026-10-02 · O ARTIGO-MODELO APROVADO, em fatia (SDD diretriz editorial,
+ * Adendo A, D5). Alcançável só o aprovado do pacote ENTREGUE: id de outro
+ * congelamento, rascunho ou id inventado é recusado antes de ler conteúdo. A
+ * versão aprovada é imutável no banco (trigger): a identidade é conhecida
+ * antes da leitura, e `ifNoneMatch` responde sem baixar nada. Paginado como
+ * qualquer objeto: `#blueprint.sections`, `#linkCandidates`, `#evidence`…
+ */
+async function prepararArtigoModelo(context: WriterEvidenceContext, head: WriterEvidenceHead, chave: WriterEvidenceSourceKey): Promise<Preparado> {
+  const dossie = head.dossier ?? recusar("Documento sem dossiê do Radar: não há pacote a que um artigo-modelo se prenda.");
+  const alvo = { articleId: head.articleId, bundleHash: dossie.bundleHash };
+  const lido = await readWriterApprovedArticleBlueprint(context, alvo, { content: false, strict: true });
+  if (lido.kind === "table_missing") {
+    throw new WriterEvidenceError("migration_pendente", lido.reason, { migration: "20261002120000_radar_artigo_modelo_e_uso_de_videos" });
+  }
+  if (lido.kind !== "approved") return recusar(`Este artigo-modelo não está no manifesto: ${lido.reason}.`);
+  if (lido.meta.id !== chave.ref) recusar("Esta versão do artigo-modelo não é a aprovada para o pacote entregue.");
+  const meta = lido.meta;
+  return {
+    identity: [meta.id, meta.bundleHash, meta.approvedAt],
+    origin: { entityId: head.articleId, versionId: meta.id, contentHash: meta.bundleHash, collectedAt: meta.approvedAt, status: `approved v${meta.versionNumber ?? "?"}` },
+    posteriorAoPacote: false,
+    hierarchy: writerEvidenceHierarchyOf({ family: "radar.blueprint" }),
+    truncate: false,
+    notice: "Artigo-modelo aprovado pelo dono no Radar para o pacote entregue: planta de IA (títulos, seções, links e CTA), não evidência. Siga a forma; diante da evidência do pacote, vale a evidência e o conflito vira divergência.",
+    load: async pedido => {
+      const conteudo = await readWriterArticleBlueprintContent(context, alvo, meta.id, chave.path[0] ?? null);
+      return linhasDe(chave.path.length ? navegar(conteudo, chave.path) : conteudo, pedido);
+    },
+  };
+}
+
 async function preparar(context: WriterEvidenceContext, head: WriterEvidenceHead, chave: WriterEvidenceSourceKey): Promise<Preparado> {
   const familia: WriterEvidenceFamily = chave.family;
   switch (familia) {
@@ -1051,9 +1197,20 @@ async function preparar(context: WriterEvidenceContext, head: WriterEvidenceHead
     }
     case "brand.skill": {
       const { skills } = await readWriterBrandContextVersions(context);
-      const skill = skills.find(item => item.versionId === chave.ref) ?? recusar("Esta versão de Skill não é a corrente da Marca.");
+      /*
+       * 2026-10-02 · os fundamentos apontam a voz corrente (`brandVoice.readAt`),
+       * lida sem o teto de versões da lista da Marca: ela continua alcançável
+       * quando a lista foi cortada. Mesma regra (maior versão, não arquivada).
+       */
+      let skill = skills.find(item => item.versionId === chave.ref) ?? null;
+      if (!skill) {
+        const voz = await readWriterBrandVoice(context, { content: false, strict: true });
+        if (voz.kind === "current" && voz.meta.versionId === chave.ref) skill = { ...voz.meta, lifecycle: voz.lifecycle };
+      }
+      if (!skill) return recusar("Esta versão de Skill não é a corrente da Marca.");
       return prepararDna(context, head, chave, { versionId: skill.versionId, entityId: skill.entityId, contentHash: skill.contentHash, types: ["brand_skill"], status: skill.lifecycle, vigenteDesde: skill.createdAt });
     }
+    case "radar.blueprint": return prepararArtigoModelo(context, head, chave);
     case "serp.architect.formation": return prepararFormacao(context, head, chave);
     case "serp.architect.territorial": return prepararTerritorial(context, head, chave);
     case "graph.article": return prepararGrafo(context, head, chave);
@@ -1228,6 +1385,8 @@ export async function readWriterSectionMaterial(context: WriterEvidenceContext, 
   const lidos = head.dossier ? await readWriterBundlePaths(context, head, WRITER_SECTION_BUNDLE_PATHS) : new Map<string, unknown>();
   const projecao = await readWriterArticleProjection(context, head);
   const linhasDaVirada = projecao?.fields.subject ? await readWriterEditorialContext(context, head) : [];
+  /* 2026-10-02 · a planta aprovada e a voz da marca, pela mesma leitura dos fundamentos. */
+  const plantaEVoz = await plantaEVozDe(context, head);
   const ausentes: WriterSectionMaterial["absent"][number][] = [];
   if (!head.dossier) ausentes.push({ field: "bundle", reason: "documento sem dossiê: não inferir evidências" });
   else if (head.dossier.researchProfile !== "GOOGLE") ausentes.push({ field: "questions/gaps/entities/claims", reason: `fotografia do Google ausente no perfil ${head.dossier.researchProfile}` });
@@ -1237,6 +1396,7 @@ export async function readWriterSectionMaterial(context: WriterEvidenceContext, 
       if (!lidos.has(caminho)) ausentes.push({ field: rotulo, reason: "o pacote não trouxe esta seção" });
     }
   }
+  ausentes.push(...plantaEVoz.absent);
   return {
     documentId: head.documentId,
     articleId: head.articleId,
@@ -1248,6 +1408,8 @@ export async function readWriterSectionMaterial(context: WriterEvidenceContext, 
       : null,
     article: projecao ? { versionId: projecao.meta.versionId, contentHash: projecao.meta.contentHash, fields: projecao.fields } : null,
     ...(linhasDaVirada.length ? { editorialContext: [...linhasDaVirada] } : {}),
+    ...(plantaEVoz.articleBlueprint ? { articleBlueprint: plantaEVoz.articleBlueprint } : {}),
+    ...(plantaEVoz.brandVoice ? { brandVoice: plantaEVoz.brandVoice } : {}),
     pendingDecisions: head.pendingDecisions,
     sections: Object.fromEntries(lidos),
     absent: ausentes,

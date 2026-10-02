@@ -34,6 +34,7 @@ import {
 import { latestRadarR5SerpReview } from "./r5-sequential.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
 import type { RadarVideoExportYoutube } from "./portable-video-export.ts";
+import type { RadarArticleBlueprintPayload } from "./article-blueprint.ts";
 
 /**
  * ===== A MONTAGEM DO LOTE DO EXPORT PORTÁTIL — as pontes puras da rota =====
@@ -348,6 +349,10 @@ export type RadarPortableExportAssembledArticle = {
    * vídeo e redes sociais. Os outros formatos não a leem.
    */
   youtube?: RadarVideoExportYoutube | null;
+  /** 2026-10-02 · Aditivo: o hash do pacote congelado que esta entrada descreve. */
+  bundleHash?: string | null;
+  /** 2026-10-02 · Aditivo: o artigo-modelo APROVADO deste pacote (SDD diretriz, Adendo A). */
+  blueprint?: RadarArticleBlueprintPayload | null;
 };
 
 /**

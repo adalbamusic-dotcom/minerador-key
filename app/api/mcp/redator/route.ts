@@ -104,6 +104,12 @@ const WRITER_MCP_INSTRUCTIONS = [
   "Conflito entre fonte factual e recorrência de mercado fica escrito dos dois lados.",
   "Ler não é mudar: quando a evidência contradiz um DNA, registre com record_writer_divergence (fica aberta para decisão humana) e não altere nem contrarie o DNA em silêncio.",
   "Com Assunto declarado (article.fields.subject nos fundamentos), faça a virada da principal para ele e, havendo destinationUrl, leve o leitor ao destino; a sugestão do Radar de onde virar, da seção da virada e da direção do H1 está em editorialContext (fundamentos e get_writer_brief); a decisão final é sua, mas não troque nem remova o Assunto. get_writer_guardian avisa quando faltam a virada ou o link para o destino.",
+  /*
+   * 2026-10-02 · SDD diretriz editorial, Adendos A e C: o artigo-modelo que o
+   * dono aprovou no Radar e a voz corrente da Marca chegam pelos fundamentos,
+   * lidos ao vivo; o integral fica a uma fatia.
+   */
+  "Com articleBlueprint nos fundamentos (o artigo-modelo que o dono aprovou no Radar para o pacote entregue), siga a planta: H1, seções, pergunta do leitor, resposta que abre cada seção, links internos com as âncoras indicadas e o CTA; a planta inteira está em radar.blueprint/<id> (read_writer_evidence). Com brandVoice (a Skill de voz corrente da Marca, inclusive em rascunho, com o estado dito), escreva a copy, as transições e o CTA nessa voz; a Skill inteira está em brand.skill/<versionId>. Planta e voz não mudam keyword, intenção, escopo nem fatos: conflito com a evidência vira record_writer_divergence.",
   "Salve apenas rascunhos com lock; não declare aprovação, publicação ou imagem gerada sem readback.",
 ].join(" ");
 
@@ -332,13 +338,13 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
   }));
 
   server.registerTool("get_writer_evidence_manifest", { title: "Mapa das evidências do artigo",
-    description: "Use antes de escrever: lista cada fonte de evidência do documento (dossiê do Radar, SERP, corridas, DNAs, especialista, vídeos, cache de SERP, Marca, publicações), com dono, versão, status, tamanho, páginas e etag, e as ausências declaradas. Até 8 kB; não traz conteúdo.", annotations: readAnnotations,
+    description: "Use antes de escrever: lista cada fonte de evidência do documento (dossiê do Radar, SERP, corridas, DNAs, especialista, vídeos, cache de SERP, Marca e voz da marca, artigo-modelo aprovado, publicações), com dono, versão, status, tamanho, páginas e etag, e as ausências declaradas. Até 8 kB; não traz conteúdo.", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
   async ({ documentId }) => call("get_writer_evidence_manifest", "writer.read", "view", { documentId }, async ({ access }) =>
     readWriterEvidenceManifest(evidenceContext(access), documentId)));
 
   server.registerTool("get_writer_foundations", { title: "Fundamentos da escrita",
-    description: "Use depois do manifesto: o essencial para escrever, até 24 kB — guardas (sem FAQ), o que o Redator não pode redefinir, hierarquia de evidência, contexto da keyword, projeção do ArticleDNA (com o Assunto declarado, quando houver, e a sugestão do Radar para a virada em editorialContext), especialista e vídeo congelados, concorrentes e perguntas resumidos.", annotations: readAnnotations,
+    description: "Use depois do manifesto: o essencial para escrever, até 24 kB — guardas (sem FAQ), o que o Redator não pode redefinir, hierarquia de evidência, contexto da keyword, projeção do ArticleDNA (com o Assunto declarado, quando houver, e a sugestão do Radar para a virada em editorialContext), especialista e vídeo congelados, concorrentes e perguntas resumidos; e, quando existem, o artigo-modelo aprovado no Radar para o pacote entregue (articleBlueprint: títulos, seções, links internos e CTA) e a voz corrente da Marca (brandVoice: CTA e transição comercial, voz e vocabulário).", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
   async ({ documentId }) => call("get_writer_foundations", "writer.read", "view", { documentId }, async ({ access }) =>
     readWriterFoundations(evidenceContext(access), documentId)));

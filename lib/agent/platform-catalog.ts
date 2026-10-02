@@ -653,6 +653,8 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
       "O Google é a base de todo artigo (SDD Radar 2026-09-30, decisão do dono): ele começa sempre e é a investigação primária do pacote enviado ao Redator, com a fotografia congelada (observed e lentes). YouTube (o artigo também vira vídeo) e Amazon (também vira review) são acréscimos opcionais: na tela, as abas '+ YouTube (vídeo)' e '+ Amazon (review)' só liberam depois do Google finalizado, e a rota paga recusa sem ele (radar_google_base_required). Eles nunca travam, substituem nem apagam o Google; entram no pacote como camadas de apoio (acréscimo de formato) e o blueprint de vídeo ou de review vai em formatBlueprints. Acrescentar depois de enviar gera pacote novo, e o Redator mostra 'Atualização disponível'. Investigação antiga só de YouTube ou Amazon continua legível como foi entregue.",
       "No Radar, o rótulo do KGR é 'KGR não aplicável' quando o artigo não aplica KGR (o padrão).",
       "A aba Relatório é painel informativo (2026-10-02): mostra a keyword principal, a intenção declarada × a da SERP, o formato dominante, o funil, o Silo e o papel, e o gráfico 'Estado SEO do artigo' — um pilar por diretriz do Google e das respostas de IA (intenção e SERP, cobertura semântica, respostas claras, fontes, especialista, links internos, multimídia, estrutura), com nota e média. Não pede revisão nem aprovação e não alerta; o envio ao Redator nunca dependeu dela.",
+      "Modos de uso dos vídeos (2026-10-02, SDD diretriz editorial, Adendo B): na aba Vídeos, cada vídeo selecionado para o artigo tem 6 botões — Usar como contexto, Sugerir como pauta, Usar como apoio, Marcar citação, Incorporar no artigo, Não usar — além de 'Casar pautas com o conteúdo'. O casamento só SUGERE (borda tracejada, nada gravado); vale o clique do dono. Rota: /api/editorial/radar-video-library, ação SET_USAGE (usage com os 6 modos ou nulo para limpar; usageNote até 2000 caracteres), exige artigo e fonte selecionada, grava com releitura; desmarcar o vídeo limpa o modo. Sem ferramenta MCP: decisão humana na tela.",
+      "Como os modos chegam ao entregável: Não usar tira o vídeo (e os trechos dele) do CSV e do artigo-modelo; Contexto é para ler e não citar; Sugestão de pauta é ideia de seção a validar; Apoio e Citação levam trecho com tempo, atribuído ao vídeo; Incorporar leva a URL e a seção sugerida. Valem mesmo sem casamento. Mudar o modo NÃO muda o pacote congelado nem o hash: é lido ao vivo a cada exportação e na geração do artigo-modelo.",
     ],
   },
   {
@@ -694,6 +696,27 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     routes: [],
   },
   {
+    id: "radar.article_blueprint",
+    stage: "radar",
+    title: "Artigo-modelo (IA) — a planta do artigo ideal",
+    purpose: "Transformar a investigação congelada na planta do artigo que vence a SERP: sentido das keywords, H1/SEO title/meta, medidas (H2, H3, parágrafos, negritos, imagens, palavras) contra os concorrentes comparáveis, seções com a pergunta do leitor e as evidências, links internos (quantos, onde, para quem) e externos, abertura, fechamento na voz do especialista e plano visual (capa + 2–3 respiros com prompt, ALT e legenda).",
+    requires: ["Pacote do Radar finalizado"],
+    produces: ["Artigo-modelo aprovado, usado pelo CSV 'Para escrever' e pelo Redator"],
+    cost: "paid_ai",
+    decision: "human",
+    access: "ui",
+    screen: "radar",
+    howOnScreen: "Radar → artigo finalizado → Pesquisa → Artigo-modelo (IA) → Gerar (confirma o custo) → revisar/Editar → Aprovar artigo-modelo.",
+    routes: ["/api/editorial/radar-article-blueprint"],
+    notes: [
+      "SDD docs/05-radar/sdd-diretriz-editorial-pela-serp-2026-10-02.md, Adendo A (D5, 2026-10-02). 1 chamada de IA (DeepSeek da plataforma, cota da marca) por clique, sobre o pacote congelado; nunca automática.",
+      "O artigo-modelo recebe a Skill de voz da Marca inteira (versão corrente): promessa, H1, abertura, CTA, transição comercial e prompts de imagem seguem a voz; página do próprio site da marca citada na Skill (ex.: a página comercial) vira candidata a link do CTA. O payload registra a versão da Skill usada.",
+      "Só o APROVADO do pacote entregue chega ao Redator (2026-10-02): get_writer_foundations traz articleBlueprint (H1, SEO title, meta, promessa, leitor, ângulo, abertura, seções com a pergunta do leitor, a resposta que abre, H3 e links internos com o destino resolvido, fechamento com CTA e próximo passo, medidas do plano); o manifesto lista radar.blueprint/<id>; a planta inteira sai por read_writer_evidence radar.blueprint/<id>. É lido ao vivo por Marca + artigo + hash do pacote, não viaja no envio nem é gravado no documento. Aprovado de outro congelamento não vale: o Redator avisa — aprove um artigo-modelo sobre o pacote entregue ou reenvie o pacote atual ao Redator.",
+      "O servidor confere a resposta contra o pacote: id de evidência inexistente sai, link para fora do Silo sai, fonte externa sem verificação vira 'fonte a obter', seção fora do escopo ou de FAQ sai; com menos de 3 seções válidas, recusa. As medidas vêm dos concorrentes comparáveis, não da IA.",
+      "Versões append-only presas ao hash do pacote: editar cria outra versão; aprovar é decisão humana e a aprovada não muda mais. Refinalizar a investigação exige gerar e aprovar de novo. Só a versão APROVADA do pacote vigente muda o CSV (título e SEO, promessa, estrutura, links internos, plano visual); sem ela, o CSV sai como antes.",
+    ],
+  },
+  {
     id: "radar.send_to_writer",
     stage: "radar",
     title: "Enviar ao Redator",
@@ -727,6 +750,7 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
       "Pelo MCP (2026-09-30): get_article_for_writing devolve o MESMO CSV 'Para escrever' da tela, de um artigo com investigação finalizada, montado pelo mesmo núcleo (lib/server/radar-portable-export-core.ts). Grátis e só leitura: nunca chama provider. O CSV vem em partes (part 1 … parts); junte na ordem. A coluna pode_escrever diz se há bloqueio.",
       "Escolha do usuário no fim da jornada: escrever no Redator (send_radar_to_writer e as ferramentas do Redator) ou puxar este material e escrever no ambiente da IA. Nos dois casos, URL, slug e canonical de página publicada continuam protegidos.",
       "Só os artigos selecionados (2026-10-02): o CSV 'Para escrever' também leva o Silo — seleção de um Silo só abre pela linha 'Silo' com a ordem narrativa e a SiloPage; seleção que cruza Silos põe o Silo, o papel e a ordem narrativa na linha de cada artigo. Irmão não marcado sai como 'fora desta seleção'. Os links internos resolvem o destino pelo slug do irmão.",
+      "Voz da marca (2026-10-02, SDD diretriz editorial, Adendo C): o CSV 'Para escrever' e o CSV de vídeo ganham a linha 'Voz da marca', logo abaixo do topo, com a Skill brand_voice da Marca (Marca → Skills e prompts) distribuída pelas colunas de mesmo assunto (leitor e oferta, título e abertura, estrutura e transição comercial, SERP e exclusões, fontes, links, plano visual; voz, vocabulário e critérios no prompt). Cada artigo é instruído a seguir essa linha na copy e no CTA. Vale a versão corrente não arquivada, como na Marca e no Redator (rascunho incluído), e o arquivo diz a versão e o estado. Sem Skill, o topo diz onde ela mora. A voz não entra no congelamento da investigação: é lida a cada exportação.",
       "CSV para vídeo e redes sociais (2026-10-02, mode 'video' na mesma rota; na tela: Radar → Exportar → 'CSV para vídeo e redes sociais'): dados, evidências e diretrizes de roteiro de YouTube — SERP do YouTube (vídeos no topo, canais, padrões de título, duração de longos e Shorts, lacunas), perguntas do público, termos, fatos com fonte, voz do especialista, trechos da biblioteca da marca, gancho, capítulos, CTA para o artigo e cortes para Shorts/Reels/TikTok. Sem estrutura de artigo (nem H1/H2, nem plano de links ou de imagens). Usa a pesquisa do YouTube gravada (a congelada vence a viva); sem ela, a coluna pode_gravar diz 'Com ressalva'. Grátis: nunca chama provider.",
     ],
   },
@@ -755,6 +779,10 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     screen: "redator",
     howOnScreen: "Redator → documento → Rascunhos e fundamentos.",
     routes: ["/api/editorial/documents", "/api/redator/seed"],
+    notes: [
+      "get_writer_foundations traz, quando existem (2026-10-02): articleBlueprint (o artigo-modelo aprovado no Radar para o pacote entregue; inteiro em radar.blueprint/<id>) e brandVoice (a Skill brand_voice corrente da Marca, inclusive rascunho, com versão e estado: trecho de CTA e transição comercial, trecho de voz e vocabulário e os títulos das outras seções; inteira em brand.skill/<versionId>). Sem eles, os fundamentos são os de sempre.",
+      "No manifesto, radar.blueprint/<id> tem dono radar e nível 'Interpretação de IA' (planta aprovada pelo dono, não evidência), e a linha brand.skill da voz diz a versão e o estado na Marca. Sem eles, o manifesto declara as ausências 'radar.blueprint' e 'brand.voice'.",
+    ],
   },
   {
     id: "redator.write_draft",
@@ -770,7 +798,10 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     screen: "redator",
     howOnScreen: "Redator → documento → editor.",
     routes: ["/api/redator/section", "/api/redator/improve", "/api/redator/deliverables"],
-    notes: ["Divergência com um DNA se registra (record_writer_divergence); nunca se contraria o DNA em silêncio."],
+    notes: [
+      "Divergência com um DNA se registra (record_writer_divergence); nunca se contraria o DNA em silêncio.",
+      "A IA interna (/api/redator/section e /improve), o roteiro e o carrossel (/api/redator/seed) seguem o artigo-modelo aprovado e escrevem copy, transições e CTA na voz da marca (2026-10-02). Planta e voz não mudam keyword, intenção, escopo nem fatos. A seção do artigo-modelo só chega à IA de seção quando o H2 casa com segurança (mesmo H2, ou as palavras que distinguem a seção); sem casamento, valem a ordem dos H2 e a voz. A melhoria de trecho nunca recebe seção da planta e não acrescenta CTA nem link. Conflito vira divergência: na IA interna a voz entra como fonte citada (brand.skill/<versionId>); pelo MCP, record_writer_divergence aceita target { kind: 'brand_dna', versionId: <versionId da Skill de voz> } para apontar a própria voz.",
+    ],
   },
   {
     id: "redator.media",
@@ -963,6 +994,7 @@ export const PLATFORM_PLAYBOOKS: readonly PlatformPlaybook[] = [
     steps: [
       "list_writer_documents → get_writer_document (guarde o lockVersion).",
       "get_writer_evidence_manifest → get_writer_foundations → read_writer_evidence só para a seção que está escrevendo.",
+      "Com articleBlueprint nos fundamentos, siga a planta aprovada (H1, seções, pergunta do leitor, resposta que abre, links internos com as âncoras indicadas e o CTA). Com brandVoice, escreva a copy e o CTA na voz da marca (vale também a Skill em rascunho; o estado vem dito).",
       "get_writer_brief: instruções, links internos planejados e pendências do Radar.",
       "Estrutura: a principal no H1 e no slug; secundárias nos H2/H3 de forma natural (LSI/PNL, sem densidade forçada); o Assunto com a virada na seção sugerida.",
       "TOFU/informacional: abra cada seção com a resposta direta em 1–2 frases, depois aprofunde — é o formato que as IAs citam.",

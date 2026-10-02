@@ -14,7 +14,10 @@
  *   - as fatias ligadas à seção: perguntas, lacunas, entidades e afirmações
  *     de autoridade (claims e conflito mercado × fato), com as que casam com o
  *     título da seção na frente;
- *   - a lista das chaves que a IA pode citar ao apontar divergência.
+ *   - a lista das chaves que a IA pode citar ao apontar divergência;
+ *   - desde 2026-10-02, quando existem, o recorte do artigo-modelo aprovado
+ *     (a seção da planta que casa com segurança com o H2, a ordem dos H2 e o fechamento
+ *     com CTA) e a voz corrente da Marca (SDD diretriz editorial, Adendos A e C).
  *
  * O servidor nunca confia em evidência vinda do navegador. Este módulo só
  * projeta, ordena e corta o que o servidor leu; não lê banco.
@@ -27,6 +30,9 @@ import {
   truncateWriterThirdPartyText,
   writerEvidenceHierarchyOf,
   writerEvidenceJsonBytes,
+  type WriterArticleBlueprintFoundation,
+  type WriterBlueprintSection,
+  type WriterBrandVoiceFoundation,
 } from "./writer-evidence-catalog.ts";
 
 export const WRITER_SECTION_PACKAGE_MAX_BYTES = 24_576;
@@ -61,6 +67,13 @@ export type WriterSectionMaterial = {
    * elas, o pacote sai byte a byte como antes.
    */
   editorialContext?: readonly string[];
+  /**
+   * 2026-10-02 · SDD diretriz editorial, Adendos A e C · o artigo-modelo que o
+   * dono aprovou no Radar para o pacote do documento e a voz corrente da Marca,
+   * lidos ao vivo pelo servidor. Opcionais: sem eles, o pacote sai como antes.
+   */
+  articleBlueprint?: WriterArticleBlueprintFoundation;
+  brandVoice?: WriterBrandVoiceFoundation;
   pendingDecisions: readonly unknown[];
   /** Seções do dossiê pelo caminho pontuado de `WRITER_SECTION_BUNDLE_PATHS`. */
   sections: Readonly<Record<string, unknown>>;
@@ -70,6 +83,27 @@ export type WriterSectionMaterial = {
 export type WriterSectionFocus = { kind: "section" | "improve"; id: string | null; label: string };
 
 export type WriterSectionSource = { sourceKey: string; level: RadarEvidenceSource; frozen: boolean };
+
+/** 2026-10-02 · o recorte do artigo-modelo aprovado que vai no pacote de uma seção. */
+export type WriterSectionBlueprint = {
+  readAt: string;
+  version: number | null;
+  h1: string | null;
+  promise: string | null;
+  reader: string | null;
+  angle: string | null;
+  openingQuestion: string | null;
+  /**
+   * A seção da planta para ESTE H2, só com casamento seguro (mesmo H2 ou as
+   * palavras que distinguem a seção); `null` quando nenhuma casa, quando é
+   * ambíguo e sempre na melhoria de trecho.
+   */
+  section: WriterBlueprintSection | null;
+  /** Os H2 da planta, em ordem: onde esta seção está no artigo. */
+  outline: string[];
+  closing: WriterArticleBlueprintFoundation["closing"];
+  plan: WriterArticleBlueprintFoundation["plan"];
+};
 
 export type WriterSectionEvidencePackage = {
   kind: "writer_section_evidence";
@@ -84,6 +118,16 @@ export type WriterSectionEvidencePackage = {
   article: { sourceKey: string; versionId: string; fields: Linha } | null;
   /** As linhas do Assunto gravadas no envio (F4.1). Ausente sem elas. */
   editorialContext?: string[];
+  /**
+   * 2026-10-02 · a planta aprovada, só no que esta seção usa: a seção da planta
+   * para este H2 (`section`, só com casamento seguro; `null` sem ele e na
+   * melhoria de trecho), a ordem dos H2
+   * (`outline`), título, promessa, abertura e o fechamento com CTA. Ausente sem
+   * artigo-modelo aprovado.
+   */
+  articleBlueprint?: WriterSectionBlueprint;
+  /** 2026-10-02 · a voz corrente da Marca, compacta (CTA e transição; voz e vocabulário). */
+  brandVoice?: WriterBrandVoiceFoundation;
   bundle: { bundleId: string; bundleHash: string; researchProfile: string; observedAt: string | null; serpAuthoritative: boolean | null } | null;
   sources: WriterSectionSource[];
   questions: Array<{ id: string | null; question: string; pages: number | null; status: string | null; declaredByArticle: boolean | null; matchesSection: boolean }>;
@@ -146,6 +190,72 @@ const cortar = (valor: unknown, limite: number): string | null => {
   return caracteres.length > limite ? `${caracteres.slice(0, limite).join("")}…` : linha;
 };
 
+/* Os textos de uma seção da planta que a régua de relevância lê. */
+const textosDaSecaoDaPlanta = (secao: WriterBlueprintSection): unknown[] => [secao.h2, secao.readerQuestion, ...secao.h3];
+
+/* Mesmas palavras que importam, nos dois sentidos (plural/flexão curta casa). */
+const mesmasPalavras = (a: readonly string[], b: readonly string[]) =>
+  a.length > 0 && b.length > 0 && a.every(token => b.some(outro => casam(token, outro))) && b.every(token => a.some(outro => casam(token, outro)));
+
+/*
+ * 2026-10-02 · CASAMENTO SEGURO ENTRE O H2 DO DOCUMENTO E A SEÇÃO DA PLANTA
+ * (correção da revisão da frente do Redator). A primeira versão entregava a
+ * seção com UMA palavra em comum, e os H2 de um artigo dividem o vocabulário
+ * do tema: "Quanto tempo a rotina leva à noite" e "Erros comuns na pele à
+ * noite" caíam em "Limpeza: o primeiro passo da noite" — e o prompt manda
+ * seguir a seção entregue, com pergunta, H3 e o link de OUTRA seção. Entregar
+ * a seção errada é pior que não entregar. Agora:
+ *
+ *   - o mesmo H2 (as mesmas palavras que importam) casa direto;
+ *   - fora isso, só contam as palavras que DISTINGUEM uma seção: a que
+ *     aparece em mais da metade das seções da planta (e em duas ou mais) é do
+ *     tema, não da seção. A seção precisa ter ao menos duas das distintivas e
+ *     metade delas (uma só quando o foco tem uma só);
+ *   - empate no topo é ambíguo e dá `null`.
+ */
+function secaoDaPlantaPara(secoes: readonly WriterBlueprintSection[], titulo: string): WriterBlueprintSection | null {
+  const tokens = writerSectionTokens(titulo);
+  if (!tokens.length || !secoes.length) return null;
+  const mesmoH2 = secoes.filter(secao => mesmasPalavras(tokens, writerSectionTokens(secao.h2)));
+  if (mesmoH2.length) return mesmoH2.length === 1 ? mesmoH2[0] : null;
+
+  const emQuantasSecoes = (token: string) => secoes.filter(secao => writerSectionScore([token], ...textosDaSecaoDaPlanta(secao)) > 0).length;
+  const distintivas = tokens.filter(token => {
+    const quantas = emQuantasSecoes(token);
+    return !(quantas >= 2 && quantas * 2 > secoes.length);
+  });
+  if (!distintivas.length) return null;
+  const minimo = Math.max(Math.min(2, distintivas.length), Math.ceil(distintivas.length / 2));
+  const notas = secoes.map(secao => writerSectionScore(distintivas, ...textosDaSecaoDaPlanta(secao)));
+  const maior = Math.max(...notas);
+  if (maior < minimo) return null;
+  return notas.filter(nota => nota === maior).length === 1 ? secoes[notas.indexOf(maior)] : null;
+}
+
+/**
+ * 2026-10-02 · O RECORTE DA PLANTA APROVADA PARA O FOCO. A seção da planta só
+ * vem com casamento seguro (`secaoDaPlantaPara`); sem ele, `null` — a IA vê a
+ * ordem dos H2 e a voz e não copia pergunta, H3 nem link de outra seção. Na
+ * melhoria de trecho o foco é o texto selecionado, não um H2: nunca há seção
+ * da planta (o trecho não ganha CTA nem link que mudem seu sentido).
+ */
+export function writerBlueprintForSection(planta: WriterArticleBlueprintFoundation, focus: WriterSectionFocus): WriterSectionBlueprint {
+  const secao = focus.kind === "section" ? secaoDaPlantaPara(planta.sections, focus.label) : null;
+  return {
+    readAt: planta.readAt,
+    version: planta.version,
+    h1: planta.h1,
+    promise: planta.promise,
+    reader: planta.reader,
+    angle: planta.angle,
+    openingQuestion: planta.openingQuestion,
+    section: secao,
+    outline: planta.sections.map(secao => cortar(secao.h2, 120)).filter((h2): h2 is string => Boolean(h2)),
+    closing: planta.closing,
+    plan: planta.plan,
+  };
+}
+
 /** Ordena pela nota de relevância, estável pela ordem do Radar. */
 function porRelevancia<T>(itens: T[], nota: (item: T) => number): Array<T & { matchesSection: boolean }> {
   return itens
@@ -165,6 +275,8 @@ const LIMITE_INICIAL = Object.freeze({
 const CORTAVEIS = [
   "competitors", "video.results", "entities.observed", "marketVsFact", "conflicts", "limitations", "gaps", "claims",
   "entities.article", "pendingDecisions", "questions", "specialist.items",
+  /* 2026-10-02 · a ordem dos H2 da planta aprovada (só existe com artigo-modelo); a seção do foco nunca sai. */
+  "articleBlueprint.outline",
 ] as const;
 type Cortavel = (typeof CORTAVEIS)[number];
 
@@ -184,6 +296,8 @@ const ONDE_LER: Readonly<Record<Cortavel, string>> = Object.freeze({
   limitations: "radar.bundle.limitations",
   pendingDecisions: "get_writer_document",
   "specialist.items": "radar.bundle.specialist",
+  /* O id do aprovado está em `articleBlueprint.readAt`; o corte aponta para ele. */
+  "articleBlueprint.outline": "radar.blueprint",
 });
 
 function lerLista(pacote: Linha, caminho: string): unknown[] | null {
@@ -299,6 +413,14 @@ export function buildWriterSectionEvidencePackage(material: WriterSectionMateria
     }
   }
   if (material.article) fontes.push({ sourceKey: `dna.article/${material.article.versionId}`, level: "ARTICLE_DNA_HYPOTHESIS", frozen: false });
+  /*
+   * 2026-10-02 · a planta aprovada e a voz da marca entram nas chaves que a IA
+   * pode citar num alerta, com o nível de cada uma: a planta abaixo da
+   * evidência (planta de IA aprovada) e a voz como afirmação da Marca.
+   */
+  const planta = material.articleBlueprint ? writerBlueprintForSection(material.articleBlueprint, focus) : null;
+  if (planta) fontes.push({ sourceKey: planta.readAt, level: writerEvidenceHierarchyOf({ family: "radar.blueprint" }).level, frozen: false });
+  if (material.brandVoice) fontes.push({ sourceKey: material.brandVoice.readAt, level: writerEvidenceHierarchyOf({ family: "brand.skill" }).level, frozen: false });
 
   const conflitos = truncateWriterThirdPartyText(lista(secao("conflicts"))).value as unknown[];
   const limitacoes = truncateWriterThirdPartyText(lista(secao("limitations"))).value as unknown[];
@@ -315,6 +437,9 @@ export function buildWriterSectionEvidencePackage(material: WriterSectionMateria
     keywordContext: material.keywordContext ?? null,
     article: material.article ? { sourceKey: `dna.article/${material.article.versionId}`, versionId: material.article.versionId, fields: material.article.fields } : null,
     ...(material.editorialContext?.length ? { editorialContext: [...material.editorialContext] } : {}),
+    /* 2026-10-02 · só quando existem: sem planta aprovada e sem voz, o pacote sai byte a byte como antes. */
+    ...(planta ? { articleBlueprint: planta } : {}),
+    ...(material.brandVoice ? { brandVoice: material.brandVoice } : {}),
     bundle: material.bundle,
     sources: fontes,
     questions: perguntas,
@@ -335,7 +460,7 @@ export function buildWriterSectionEvidencePackage(material: WriterSectionMateria
   const registrarCorte = (campo: Cortavel, total: number, kept: number) => {
     const existente = trimmed.find(item => item.field === campo);
     if (existente) existente.kept = kept;
-    else trimmed.push({ field: campo, kept, total, readAt: ONDE_LER[campo] });
+    else trimmed.push({ field: campo, kept, total, readAt: campo === "articleBlueprint.outline" && planta ? planta.readAt : ONDE_LER[campo] });
   };
   for (const [campo, limite] of Object.entries(LIMITE_INICIAL) as Array<[Cortavel, number]>) {
     const atual = lerLista(pacote, campo);
@@ -407,6 +532,14 @@ export const WriterAiAlertSchema = z.union([
     message: z.string().trim().min(1).max(1000),
     targetKind: z.string().trim().max(40).optional(),
     keywordId: z.string().trim().max(300).optional(),
+    /*
+     * 2026-10-02 · a versão exata do alvo (ex.: a Skill de voz em brand_dna).
+     * Antes o schema descartava o campo. Opcional e aditivo: o registro em
+     * lib/server/writer-evidence-ai.ts ainda não o repassa ao resolvedor do
+     * alvo, então o prompt NÃO pede brand_dna para a voz até essa ligação
+     * existir — sem ela, brand_dna cai no BrandDNA aprovado, outro artefato.
+     */
+    versionId: z.string().trim().max(300).optional(),
     dnaClaimPath: z.string().trim().max(500).optional(),
     evidenceSourceKey: z.string().trim().max(300).optional(),
     evidencePath: z.string().trim().max(500).optional(),

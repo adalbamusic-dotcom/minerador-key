@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { classifyRadarVideoSourceBatch, radarVideoTextSummary, RadarVideoSourceSchema, RadarVideoSourceTextSchema, type RadarVideoSource, type RadarVideoSourceTextSummary } from "@/lib/radar/video-source";
-import { overlayRadarArticleSelection } from "@/lib/radar/video-library";
+import { overlayRadarArticleSelection, withRadarArticleUsage } from "@/lib/radar/video-library";
+import { readRadarArticleVideoUsages } from "@/lib/server/radar-video-usage-read";
 import { PipelineRuntimeError, resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
 /**
@@ -138,11 +139,16 @@ async function lerFontes(context: Awaited<ReturnType<typeof resolvePipelineConte
 
   const linhas = (vinculos.data || []) as unknown as Array<{ article_id: string; video_source_id: string }>;
   /* A sobreposição é decisão do domínio — uma só, conferível sem banco. */
-  return overlayRadarArticleSelection({
+  /*
+   * 2026-10-02 · E o modo de uso do artigo por cima dela (Adendo B, D6), lido à
+   * parte e tolerante: sem a coluna, a listagem sai como antes, sem modos.
+   */
+  const usos = await readRadarArticleVideoUsages(context.supabase, context.brandId, articleId);
+  return withRadarArticleUsage(overlayRadarArticleSelection({
     sources: fontes,
     links: linhas.map(item => ({ articleId: item.article_id, videoSourceId: item.video_source_id })),
     articleId,
-  });
+  }), usos, articleId);
 }
 
 function falha(error: unknown) {

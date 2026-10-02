@@ -7,7 +7,7 @@ import { radarSemanticStems } from "./semantic-concept-model.ts";
 import { RADAR_SUBJECT_MUST_COVER_REASON, radarSubjectCtaDirection, radarSubjectTurnTitle } from "./declared-subject.ts";
 import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "./competitive-blueprint.ts";
 import { RADAR_EDITORIAL_OUTPUT_LABELS } from "./multimodal-blueprint.ts";
-import { radarPortableSpecialistContext, radarPortableVideoContext } from "./portable-annex-context.ts";
+import { radarPortableSpecialistContext, radarPortableVideoContext, radarPortableVideoUsageLine, type RadarPortableVideoExtract } from "./portable-annex-context.ts";
 import { radarPortableCompetitorsStructure, radarPortableWriterReadiness } from "./portable-dossier-gaps.ts";
 import {
   radarPortableExternalSources,
@@ -32,6 +32,16 @@ import type { RadarAiDiscoveryContext } from "./ai-discovery-context.ts";
 import type { RadarAuthorityEvidence } from "./authority-evidence.ts";
 import type { RadarEditorialSubjectTurn } from "./editorial-article-model.ts";
 import type { RadarSiloExportWritingContext } from "./portable-silo-export.ts";
+import { radarArticleBlueprintColumns, radarArticleBlueprintVideoSections, type RadarArticleBlueprintLiveVideo, type RadarArticleBlueprintPayload } from "./article-blueprint.ts";
+import {
+  radarBrandVoiceAbsence,
+  radarBrandVoiceBySlot,
+  radarBrandVoiceLabel,
+  radarBrandVoiceStatusLabel,
+  radarBrandVoiceText,
+  type RadarBrandVoiceRef,
+  type RadarBrandVoiceState,
+} from "./brand-voice.ts";
 
 /**
  * ===== O EXPORT "PARA ESCREVER" — o CSV que uma pessoa ou uma IA usa para escrever =====
@@ -161,6 +171,13 @@ export type RadarWritingArticleContext = {
    * pode carregar todos. Sem ele, nada muda.
    */
   siloInline?: boolean;
+  /**
+   * 2026-10-02 · Aditivo: o artigo-modelo APROVADO (SDD diretriz, Adendo A).
+   * Com ele, título e SEO, promessa, estrutura, links e plano visual saem dele.
+   */
+  blueprint?: RadarArticleBlueprintPayload | null;
+  /** 2026-10-02 · Aditivo: a Skill de voz ATIVA da Marca, que a linha "Voz da marca" carrega (Adendo C). */
+  brandVoice?: RadarBrandVoiceRef | null;
 };
 
 export type RadarWritingExportArticle = {
@@ -660,6 +677,13 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
     saida.push({ ...link, rotulo: `L${saida.length + 1}` });
   };
 
+  /* O ponto sugerido pode nomear um assunto que o pacote manda NÃO cobrir. */
+  const foraDoEscopo = new Set(p.serp.editorialCandidates.filter(item => item.verdict === "OUT_OF_SCOPE").map(item => radarWritingCompareKey(item.observedLabel)));
+  const lugarForaDoEscopo = (lugar: string) => {
+    const citado = radarWritingCompareKey(lugar.match(/["“]([^"”]+)["”]/)?.[1] || "");
+    return Boolean(citado && foraDoEscopo.has(citado));
+  };
+
   /* 1 · o plano de links que o Radar aplicou sobre o grafo aprovado. */
   for (const link of p.linksDoPlano) {
     const codigo = link.relationship.split(",")[0]?.trim() || "";
@@ -668,7 +692,11 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
     registrar({
       ancora: link.suggestedAnchor,
       destino: codigo === "ARTICLE_TO_SILO_PAGE" ? destinoDaPagina : destinoDoMembro(membro, link.targetTitle, link.targetSlug),
-      onde: secao ? `seção "${secao.heading}"` : util(link.placement) ? cortar(link.placement, 140) : null,
+      onde: secao
+        ? `seção "${secao.heading}"`
+        : lugarForaDoEscopo(link.placement)
+          ? "na seção que trata do assunto do destino (o ponto sugerido pela investigação está fora do escopo deste artigo)"
+          : util(link.placement) ? cortar(link.placement, 140) : null,
       alternativas: [],
       direcao: DIRECAO[codigo] || null,
       secao: secao?.heading ?? null,
@@ -1156,6 +1184,16 @@ function colunaEstrutura(
 const STATUS_DE_PERGUNTA = new Set(["ARTICLE_QUESTION_CONFIRMED", "MARKET_QUESTION_UNDERCOVERED"]);
 const PRIORIDADE: Record<string, string> = { HIGH: "prioridade alta", MEDIUM: "prioridade média", LOW: "prioridade baixa" };
 
+/**
+ * PERGUNTA DE FECHO DE CONCORRENTE NÃO É DÚVIDA DO LEITOR (2026-10-02).
+ *
+ * "Aprendeu como atrair clientes no Instagram?" é a última linha de uma página
+ * concorrente, e virava a abertura do artigo.
+ */
+export function radarWritingRhetoricalQuestion(pergunta: string): boolean {
+  return /^(aprendeu|gostou|curtiu|entendeu|viu|percebeu|ficou com alguma d[uú]vida)\b/i.test(radarWritingDecodeEntities(pergunta).trim());
+}
+
 export function radarWritingOpeningQuestion(p: Projecoes): string | null {
   /*
    * A ABERTURA RESPONDE A PERGUNTA DO LEITOR DESTE ARTIGO (SDD 2026-10-02).
@@ -1172,7 +1210,7 @@ export function radarWritingOpeningQuestion(p: Projecoes): string | null {
     .map(unidade => unidade.questionOrNeed);
   const doBlueprint = p.blueprint?.profile === "GOOGLE" ? p.blueprint.observed.questions.map(item => item.statement) : [];
   const observadas = p.serp.questions.filter(item => STATUS_DE_PERGUNTA.has(item.status)).sort((a, b) => b.pages - a.pages).map(item => item.question);
-  const todas = [...centrais, ...doBlueprint, ...observadas].filter((valor): valor is string => Boolean(texto(valor)));
+  const todas = [...centrais, ...doBlueprint, ...observadas].filter((valor): valor is string => Boolean(texto(valor)) && !radarWritingRhetoricalQuestion(valor));
   /* Só raiz da PRINCIPAL vira cenário (ex.: "instagram"). */
   const daPrincipal = new Set(radarSemanticStems(texto(p.dna.principalKeyword) || ""));
   const onipresentes = new Set([...radarUbiquitousStems(todas)].filter(raiz => daPrincipal.has(raiz)));
@@ -1198,7 +1236,16 @@ function colunaCobrir(input: RadarPortableExportInput, p: Projecoes, contexto: R
     if (fragmentados.length >= 2) {
       movimentos.push(`Costurar num mesmo argumento ${fragmentados.map(item => entreAspas(item.statement)).join(" e ")}, que a amostra trata em páginas separadas.`);
     }
-    for (const item of p.blueprint.recommended.differentiation.slice(0, 2)) movimentos.push(comPontoFinal(item.statement));
+    /*
+     * DIFERENCIAL FORA DO ESCOPO NÃO É INSTRUÇÃO (2026-10-02). O CSV real dizia
+     * "Sustentar 'Ative o Instagram Shopping' como diferencial" e, na mesma
+     * célula, "Não cobrir: Ative o Instagram Shopping". O "não cobrir" vence.
+     */
+    for (const item of p.blueprint.recommended.differentiation.slice(0, 2)) {
+      const citado = radarWritingCompareKey(item.statement.match(/["“]([^"”]+)["”]/)?.[1] || "");
+      if (citado && chavesForaDoEscopo.has(citado)) continue;
+      movimentos.push(comPontoFinal(item.statement));
+    }
     for (const item of p.blueprint.observed.conflicts.slice(0, 2)) movimentos.push(`Explicar a divergência que o mercado repete sem resolver: ${comPontoFinal(item.statement)}`);
   }
   const naEstrutura = new Set(p.secoes.flatMap(secao => [radarWritingCompareKey(secao.readerQuestion), radarWritingCompareKey(secao.heading)]).filter(Boolean));
@@ -1364,7 +1411,10 @@ function colunaSerp(input: RadarPortableExportInput, p: Projecoes): string {
   const organicos = serp.organic.slice(0, RADAR_WRITING_EXPORT_LIMITS.organicResults).map((item, indice) => {
     const trecho = item.snippet?.thirdPartyExcerpt ? ` · “${cortar(item.snippet.thirdPartyExcerpt, RADAR_WRITING_EXPORT_LIMITS.thirdPartyExcerptChars)}”` : "";
     const naPagina = typeof item.position === "number" && item.position !== indice + 1 ? ` · posição ${item.position} na página` : "";
-    return `${indice + 1}. ${cortar(item.title || item.domain, RADAR_WRITING_EXPORT_LIMITS.titleChars)} · ${item.domain}${item.type && item.type !== "outro" ? ` · ${item.type}` : ""}${naPagina}${trecho}`;
+    /* A URL limpa, para conferir (2026-10-02); com endereço interno de terceiro no caminho, só o domínio. */
+    const url = radarWritingCleanUrl(item.url);
+    const endereco = url && !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(url) ? url : item.domain;
+    return `${indice + 1}. ${cortar(item.title || item.domain, RADAR_WRITING_EXPORT_LIMITS.titleChars)} · ${endereco}${item.type && item.type !== "outro" ? ` · ${item.type}` : ""}${naPagina}${trecho}`;
   });
   const formatos = (serp.diagnostic?.dominantFormats || []).filter(item => item && item !== "outro");
   const aiOverview = serp.features?.aiOverview || null;
@@ -1393,7 +1443,7 @@ function colunaSerp(input: RadarPortableExportInput, p: Projecoes): string {
 
 /* ------------------------------ fontes e especialista ------------------------------ */
 
-function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], videos: ReadonlyArray<{ rotulo: string; linha: string }>): string {
+function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], videos: ReadonlyArray<{ rotulo: string; linha: string }>, plano: RadarArticleBlueprintPayload | null = null): string {
   const linhas: string[] = [];
   const ymyl = p.autoridade?.ymylAssessment || null;
   if (ymyl) {
@@ -1412,6 +1462,27 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
     : "Fontes verificadas: nenhuma nesta investigação.");
   for (const fonte of unicosPorChave(verificadas, item => `${item.sourceUrl}|${item.claimId}`).slice(0, 6)) {
     linhas.push(`- ${cortar(fonte.sourceTitle || fonte.sourceDomain, 90)} — ${fonte.sourceUrl} — sustenta ${entreAspas(afirmacaoDe.get(fonte.claimId) || "afirmação registrada no pacote")}`);
+  }
+
+  /*
+   * 2026-10-02 · O MODO DE USO ESCOLHIDO NO RADAR (Adendo B, D6), um vídeo por
+   * linha e mesmo sem casamento: Incorporar leva URL e seção; Apoio e Citação,
+   * o trecho com tempo; Contexto é para ler, não citar; Sugestão de pauta é
+   * ideia a validar. Nunca a transcrição inteira — o corte da célula vale aqui.
+   * Sem modo nenhum, o bloco não existe e a célula é a de antes.
+   *
+   * 2026-10-02 · Com artigo-modelo aprovado, a seção é a que o PLANO escolheu
+   * para o vídeo — o bloco não devolve a decisão a ele. Sem plano, ou com
+   * versão sem retrato dos vídeos, a linha é a de antes.
+   *
+   * Revisão de 2026-10-02: o bloco vem ANTES do que é de terceiros (citadas pelo
+   * mercado, sem fonte, conflitos). A célula é cortada do fim para o começo, e a
+   * decisão do dono não pode ser a primeira a sair.
+   */
+  const modos = p.video.selected || [];
+  if (modos.length) {
+    linhas.push("Vídeos da marca com modo de uso escolhido no Radar (decisão do dono; conferir no vídeo):");
+    for (const item of modos) linhas.push(`- ${radarPortableVideoUsageLine(item, plano ? radarArticleBlueprintVideoSections(plano, item) : null)}`);
   }
 
   const citadas = p.fontesExternas.filter(item => item.authorityClass !== "NAO_CLASSIFICADA");
@@ -1681,6 +1752,17 @@ const finalizarLinha = (linha: RadarWritingExportRow): RadarWritingExportRow => 
 /* ============================== o artigo ============================== */
 
 /**
+ * 2026-10-02 · O MODO DO VÍDEO DE UM TRECHO V (Adendo B, D6). Sem modo, nada
+ * se acrescenta e a linha é a de antes.
+ */
+function modoDoTrecho(trecho: RadarPortableVideoExtract): string {
+  if (trecho.usage === "SUPPORT") return " · Apoio: o trecho sustenta o ponto, atribuído ao vídeo e com o tempo";
+  if (trecho.usage === "QUOTE") return " · Citação: fala literal entre aspas, atribuída ao vídeo e com o tempo";
+  if (trecho.usage === "EMBED") return ` · Incorporar o vídeo nesta seção${trecho.sourceUrl ? `: ${trecho.sourceUrl}` : ""}`;
+  return "";
+}
+
+/**
  * ===== UMA LINHA POR ARTIGO — o que é preciso para escrever, e nada além =====
  *
  * `contexto` diz onde o artigo está no arquivo (silo ou avulso) e o que se
@@ -1698,16 +1780,43 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
 
   const links = linksDeEscrita(p, contexto, principal);
   const especialista = radarWritingSpecialistContributions(p);
+  /*
+   * 2026-10-02 · O TRECHO QUE VAI AO TEXTO É O DE VÍDEO CITÁVEL (Adendo B).
+   *
+   * Contexto ("ler para entender, não citar") e Sugestão de pauta ("ideia a
+   * validar") não viram V no texto: eles aparecem no bloco dos modos da coluna
+   * de fontes. "Não usar" já saiu na projeção. Sem modo, todo trecho é citável
+   * e a lista é exatamente a de antes.
+   */
+  const citavel = (trecho: RadarPortableVideoExtract) => trecho.usage !== "CONTEXT" && trecho.usage !== "TOPIC_SUGGESTION";
   const videos = p.video.briefs
-    .filter(brief => brief.coverage.startsWith("Sustentada") && brief.extracts.length)
-    .flatMap(brief => brief.extracts.slice(0, 1).map(trecho => ({ brief, trecho })))
+    .filter(brief => brief.coverage.startsWith("Sustentada") && brief.extracts.some(citavel))
+    .flatMap(brief => brief.extracts.filter(citavel).slice(0, 1).map(trecho => ({ brief, trecho })))
     .map((item, indice) => ({
       rotulo: `V${indice + 1}`,
+      trecho: item.trecho,
       secao: p.secoes.find(secao => radarWritingCompareKey(secao.heading) === radarWritingCompareKey(item.brief.relatedSection))?.heading ?? null,
-      linha: `V${indice + 1} · ${entreAspas(item.trecho.sourceTitle)} (${item.trecho.startLabel}–${item.trecho.endLabel})${item.brief.relatedSection ? ` · seção "${item.brief.relatedSection}"` : ""} · ${semPontoFinal(item.brief.narrativePurpose)}`,
+      linha: `V${indice + 1} · ${entreAspas(item.trecho.sourceTitle)} (${item.trecho.startLabel}–${item.trecho.endLabel})${item.brief.relatedSection ? ` · seção "${item.brief.relatedSection}"` : ""} · ${semPontoFinal(item.brief.narrativePurpose)}${modoDoTrecho(item.trecho)}`,
     }));
   const videosPorSecao = new Map<string, string[]>();
   for (const item of videos) if (item.secao) videosPorSecao.set(item.secao, [...(videosPorSecao.get(item.secao) || []), item.rotulo]);
+  /*
+   * 2026-10-02 · OS VÍDEOS DO ARTIGO AGORA, para o artigo-modelo aprovado
+   * (Adendo B). O V da seção do plano é o do PEDIDO à IA; aqui ele vira título,
+   * endereço e o V desta coluna de fontes, contra o modo vigente — "Não usar"
+   * já saiu da projeção, então o vídeo que sumiu daqui é aviso, não instrução.
+   * Só é usado quando há plano aprovado; sem ele, nada muda.
+   */
+  const rotuloNasFontes = new Map(videos.map(item => [item.trecho, item.rotulo]));
+  const videosAoVivo: RadarArticleBlueprintLiveVideo[] = [
+    ...p.video.briefs.flatMap(brief => brief.extracts.map(trecho => ({
+      title: trecho.sourceTitle,
+      url: trecho.sourceUrl ?? null,
+      usage: trecho.usage ?? null,
+      sourcesColumnLabel: rotuloNasFontes.get(trecho) ?? null,
+    }))),
+    ...(p.video.selected || []).map(item => ({ title: item.title, url: item.url, usage: item.usage, sourcesColumnLabel: null })),
+  ];
 
   const visual = colunaVisual(input, p);
   const estrutura = colunaEstrutura(input, p, links, especialista, visual.imagens, videosPorSecao);
@@ -1789,12 +1898,20 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     estrutura: conteudo(() => estrutura.celula),
     cobrir_e_superar: conteudo(() => cobrir.celula),
     serp_resumida: conteudo(() => colunaSerp(input, p)),
-    fontes_e_especialista: conteudo(() => colunaFontes(p, especialista, videos)),
+    fontes_e_especialista: conteudo(() => colunaFontes(p, especialista, videos, contexto.blueprint ?? null)),
     links_internos: conteudo(() => colunaLinks(links, contexto)),
     plano_visual: conteudo(() => visual.celula),
     produtos: conteudo(() => colunaProdutos(input)),
     prompt: colunaPrompt(contexto, especificas, decisao.verdict === "Não" ? decisao.primeira : null),
   };
+  /* O artigo-modelo APROVADO decide as colunas de planta; o resto continua como era. */
+  if (contexto.blueprint && !soIdentidade) Object.assign(linha, radarArticleBlueprintColumns(contexto.blueprint, videosAoVivo));
+  if (contexto.brandVoice && !soIdentidade) {
+    linha.promessa_e_leitor = [
+      linha.promessa_e_leitor,
+      `Voz da marca: copy, CTA e transição comercial seguem a linha "Voz da marca" deste arquivo (Skill "${contexto.brandVoice.name}" v${contexto.brandVoice.version}). Oferta e página comercial só como a Skill e o plano de links permitem; sem inventar preço, prazo nem garantia.`,
+    ].filter(Boolean).join("\n");
+  }
 
   return {
     row: finalizarLinha(linha),
@@ -1836,6 +1953,8 @@ export type RadarWritingTopRowInput = {
   sharedVisualAvoid?: string | null;
   /** 2026-10-02 · Aditivo: export dos selecionados com o Silo na linha de cada artigo. */
   siloPerRow?: boolean;
+  /** 2026-10-02 · Aditivo: a voz da marca (Adendo C). Ausente = texto de antes. */
+  brandVoice?: RadarBrandVoiceState;
 };
 
 /**
@@ -1861,7 +1980,7 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
   const motivos = [
     `${resumo}${bloqueados.length ? `; ${bloqueados.length} com bloqueio (${bloqueados.slice(0, 4).map(item => entreAspas(item.label)).join(", ")})` : ""}`,
     ...(fora.length ? [`fora do arquivo: ${fora.slice(0, 6).map(membro => `${entreAspas(rotuloDoMembro(membro))} (${membro.statusLabel})`).join(", ")}`] : []),
-    `voz da marca, autor e revisor não fazem parte deste arquivo: defina-os antes de publicar${saude ? " (há tema de saúde: autoria e revisão reais são exigidas)" : ""}`,
+    `${input.brandVoice?.kind === "available" ? "autor e revisor" : "voz da marca, autor e revisor"} não fazem parte deste arquivo: defina-os antes de publicar${saude ? " (há tema de saúde: autoria e revisão reais são exigidas)" : ""}`,
     ...(silo?.draft ? ["o Silo ainda é rascunho no Arquiteto: a composição pode mudar"] : []),
   ];
   const verdict: RadarWritingVerdict = artigos.length && bloqueados.length === artigos.length ? "Não" : "Com ressalva";
@@ -1903,13 +2022,17 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
   const audiencia = silo && util(silo.audience) ? silo.audience : null;
   const marca = [
     `Marca: ${site ? `site ${site}` : "site não registrado neste arquivo"}.`,
-    "Voz, tom, autor e revisor: não fazem parte deste arquivo; cole-os antes de pedir o texto a uma IA. Não invente autor, credencial nem depoimento.",
+    ...(input.brandVoice?.kind === "available"
+      ? [`Voz da marca: aplique a linha "Voz da marca", logo abaixo (${radarBrandVoiceLabel(input.brandVoice.voice)}). Autor e revisor: não fazem parte deste arquivo. Não invente autor, credencial nem depoimento.`]
+      : input.brandVoice
+        ? [radarBrandVoiceAbsence(input.brandVoice) || "", "Autor e revisor: não fazem parte deste arquivo. Não invente autor, credencial nem depoimento."]
+        : ["Voz, tom, autor e revisor: não fazem parte deste arquivo; cole-os antes de pedir o texto a uma IA. Não invente autor, credencial nem depoimento."]),
     ...(audiencia ? [`Público do Silo: ${comPontoFinal(audiencia)}`] : []),
   ].join("\n");
 
   const regras = [
     `Regras gerais para todos os artigos deste arquivo (valem para cada linha abaixo):`,
-    ...RADAR_WRITING_GENERAL_RULES.map((regra, indice) => `${indice + 1}. ${regra}`),
+    ...RADAR_WRITING_GENERAL_RULES.map((regra, indice) => `${indice + 1}. ${indice === 0 && input.brandVoice?.kind === "available" ? "Escreva em português do Brasil, na voz da marca da linha \"Voz da marca\" deste arquivo." : regra}`),
     `${RADAR_WRITING_GENERAL_RULES.length + 1}. Não altere: ${naoAltere(false).join("; ")}.`,
     ...(texto(input.sharedVisualAvoid) ? [`${RADAR_WRITING_GENERAL_RULES.length + 2}. Imagens, em todos os artigos deste arquivo — ${texto(input.sharedVisualAvoid).replace(/^Evitar: /, "evitar: ")}`] : []),
   ].join("\n");
@@ -1928,6 +2051,36 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
     plano_visual: "",
     produtos: "",
     prompt: regras,
+  });
+}
+
+/**
+ * ===== A LINHA "VOZ DA MARCA" (SDD diretriz editorial, Adendo C — 2026-10-02) =====
+ *
+ * A Skill ativa da Marca, inteira, distribuída pelas colunas do mesmo assunto:
+ * leitor e oferta em promessa_e_leitor, título e abertura em titulo_e_seo,
+ * estrutura e transição comercial em estrutura, SERP e exclusões em
+ * cobrir_e_superar, fontes, links, plano visual; voz, vocabulário e critérios no
+ * prompt. Vale para todas as linhas do arquivo. Sem Skill ativa, a linha não existe.
+ */
+export function buildRadarWritingBrandVoiceRow(state: RadarBrandVoiceState | undefined): RadarWritingExportRow | null {
+  if (state?.kind !== "available") return null;
+  const voz = state.voice;
+  const por = radarBrandVoiceBySlot(voz);
+  return finalizarLinha({
+    ordem: "Voz da marca",
+    pode_escrever: `Vale para todas as linhas deste arquivo: ${radarBrandVoiceLabel(voz)}. O dossiê de cada artigo decide o assunto; esta linha decide a forma, o CTA e o que a marca não faz. Em conflito, registre a divergência para decisão humana.`,
+    artigo: `${voz.title || voz.name}\nVersão ${voz.version} da Skill de voz, ${radarBrandVoiceStatusLabel(voz.status)} na Marca.`,
+    promessa_e_leitor: radarBrandVoiceText(por.reader),
+    titulo_e_seo: radarBrandVoiceText(por.title),
+    estrutura: radarBrandVoiceText(por.structure),
+    cobrir_e_superar: radarBrandVoiceText(por.research),
+    serp_resumida: "",
+    fontes_e_especialista: radarBrandVoiceText(por.sources),
+    links_internos: radarBrandVoiceText(por.links),
+    plano_visual: radarBrandVoiceText(por.visual),
+    produtos: "",
+    prompt: radarBrandVoiceText(por.voice),
   });
 }
 
