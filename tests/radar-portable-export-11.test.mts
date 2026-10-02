@@ -306,11 +306,13 @@ test("§1 e §23 · a barra tem UM botão Exportar, com os dois produtos dentro"
     'data-testid="radar-export-resumo-selecao"',
     'data-testid="radar-export-resumo-silo"',
     'data-testid="radar-export-silos-tecnico"',
+    /* 2026-10-02 · a saída para vídeo e redes sociais (pedido do dono). */
+    'data-testid="radar-export-video"',
   ], "§23 · o botão da barra e as marcas do card, e nada além disso");
   assert.equal(new Set(botoesDeExport).size, botoesDeExport.length, "§23 · cada marca aparece uma vez só");
-  /* Um caminho de export sem marca nova também conta: são quatro cliques que exportam, e só quatro. */
+  /* Um caminho de export sem marca nova também conta: são cinco cliques que exportam (2026-10-02: o de vídeo), e só cinco. */
   const cliquesQueExportam = [...barra.matchAll(/onClick=\{\(\) => \{[^\n]*?(?:exportarSilosCompletos|exportarDossiesFinalizados|grid\.exportRows)\(/g)];
-  assert.equal(cliquesQueExportam.length, 4, "§23 · Exportar CSV, os dois técnicos e a planilha — nada além disso");
+  assert.equal(cliquesQueExportam.length, 5, "§23 · Exportar CSV, o de vídeo, os dois técnicos e a planilha — nada além disso");
   assert.equal(/Dossiês editoriais finalizados|data-testid="radar-export-silos"|data-testid="radar-export-dossiers"/.test(barra), false,
     "§23 · um item do menu antigo voltou ao card");
   const ordemNoCard = [...barra.slice(barra.indexOf('data-testid="radar-export-menu"')).matchAll(/data-testid="(radar-export-(?:csv|silos-tecnico|dossiers-tecnico|grid))"/g)].map(item => item[1]);

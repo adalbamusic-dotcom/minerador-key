@@ -59,6 +59,7 @@ import type { RadarArticleResearchContext } from "./article-research-context.ts"
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
 import type { RadarEditorialBlueprint, RadarSectionCandidate } from "./editorial-blueprint.ts";
 import type { RadarFactualSupportStatus } from "./ai-discovery-context.ts";
+import { radarAdheresToCore } from "./intent-adherence.ts";
 
 /* ============================ o que é entregue ========================== */
 
@@ -1309,11 +1310,22 @@ export function buildRadarEditorialArticleModel(input: {
   const paginasPorSecao = new Map<string, number>();
   const secoesDoAssunto: Array<{ id: string; pages: number }> = [];
 
+  /*
+   * Raízes onipresentes nos grupos da amostra (ex.: "instagram" num artigo sobre
+   * Instagram) não distinguem assunto: sozinhas, não alinham (SDD 2026-10-02).
+   */
+  const contagemDeRaizes = new Map<string, number>();
+  for (const grupo of grupos) for (const raiz of new Set(grupo.raizes)) contagemDeRaizes.set(raiz, (contagemDeRaizes.get(raiz) || 0) + 1);
+  /* Só raiz da PRINCIPAL vira cenário; tópico declarado no ArticleDNA nunca é rebaixado. */
+  const onipresentes = grupos.length >= 4
+    ? new Set([...contagemDeRaizes].filter(([raiz, vezes]) => vezes / grupos.length >= 0.5 && territorio.genericas.has(raiz)).map(([raiz]) => raiz))
+    : new Set<string>();
+
   for (const grupo of grupos) {
     const lider = [...grupo.candidatos].sort((esquerda, direita) =>
       direita.marketEvidence.pages - esquerda.marketEvidence.pages)[0];
 
-    const alinhado = [...grupo.raizes].some(raiz => territorio.raizes.has(raiz));
+    const alinhado = radarAdheresToCore({ stems: grupo.raizes, core: territorio.raizes, ubiquitous: onipresentes });
     const serve = serveAIntencao(lider.workingTitle, intencao);
     const evidenciaBasta = grupo.pages >= PISO_DE_EVIDENCIA;
 

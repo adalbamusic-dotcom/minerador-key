@@ -143,13 +143,19 @@ test("3 · por silo: 13 colunas, a linha 'Silo' no topo, o nome 'para-escrever' 
   assert.match(escrita.headline, /exportado\(s\) para escrever/);
 });
 
-test("3 · avulso: o CSV do lote com a linha 'Marca' no topo e o nome 'para-escrever'", async () => {
+/*
+ * 2026-10-02 · OS SELECIONADOS LEVAM O SILO (pedido do dono). Um arquivo só,
+ * como antes; seleção de um Silo só abre pela linha "Silo", e o irmão não
+ * marcado sai como "fora desta seleção", nunca como "não enviado ao Radar".
+ */
+test("3 · selecionados: um CSV do lote, com o Silo no topo quando a seleção é de um Silo só", async () => {
   const escrita = JSON.parse((await exportar({ brandId: MARCA, articleIds: PEDIDO_DO_SILO, mode: "writing" })).texto);
   assert.equal(escrita.success, true);
   assert.equal(escrita.files, undefined);
   assert.match(escrita.filename, /para-escrever/);
   assert.equal(primeiraLinhaDoCsv(escrita.csv), RADAR_WRITING_EXPORT_COLUMNS.map(coluna => `"${coluna}"`).join(","));
-  assert.match(escrita.csv.replace(/^﻿/, "").split("\r\n")[1], /^"Marca","/);
+  assert.match(escrita.csv.replace(/^﻿/, "").split("\r\n")[1], /^"Silo","/);
+  assert.equal(/não enviado ao Radar/.test(escrita.csv), false, "o irmão só não foi selecionado");
 });
 
 test("3 · só recusados: o mesmo 409 do formato completo", async () => {

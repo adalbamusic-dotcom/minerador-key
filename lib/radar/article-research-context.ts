@@ -313,7 +313,8 @@ export function buildRadarArticleResearchContext(input: {
     const snapshot = indice >= 0 ? disponiveis.splice(indice, 1)[0] : null;
 
     const strategy = estrategiaDe(reference);
-    const textoResolvido = texto(snapshot?.keyword);
+    // Sem hidratação, o snapshot da KeywordDNA na própria referência dá o texto (mesmo id).
+    const textoResolvido = texto(snapshot?.keyword) ?? texto(reference.keywordDnaSnapshot?.sourceKeywordSnapshot?.keyword);
     const comEstrategia = temEstrategia(strategy);
     const resolution: RadarKeywordResolution = textoResolvido && comEstrategia ? "FULL"
       : textoResolvido || comEstrategia ? "PARTIAL"

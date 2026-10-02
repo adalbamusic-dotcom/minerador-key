@@ -55,6 +55,13 @@ export function radarPortableWritingExport(input: {
   articles: readonly RadarPortableExportAssembledArticle[];
   lenses: RadarPortableExportLensReading;
   plan: Pick<RadarSiloExportPlan, "files" | "delivery"> | null;
+  /**
+   * 2026-10-02 · Aditivo: o plano por silo dos SELECIONADOS (`selectionOnly`).
+   * Só vale sem `plan`: o arquivo continua um só, e cada linha ganha o Silo
+   * dela. Seleção de um Silo só leva o Silo para a linha de topo; seleção que
+   * cruza Silos leva o contexto para a linha de cada artigo.
+   */
+  selectionPlan?: Pick<RadarSiloExportPlan, "files"> | null;
   publications?: ReadonlyMap<string, RadarWritingPublication>;
   today: string;
 }): RadarPortableWritingExportResult {
@@ -66,6 +73,7 @@ export function radarPortableWritingExport(input: {
     topo: "Silo" | "Marca",
     posicao: number,
     silo: RadarSiloExportWritingContext | null,
+    siloInline = false,
   ): RadarWritingExportArticle => buildRadarWritingExportArticle({
     ...artigo.entrada,
     serpLenses: {
@@ -80,12 +88,30 @@ export function radarPortableWritingExport(input: {
     silo,
     articleId: artigo.articleId,
     publication: input.publications?.get(artigo.articleId) ?? null,
+    ...(siloInline ? { siloInline: true } : {}),
   });
 
   if (!input.plan) {
-    const artigos = input.articles.map((artigo, indice) => montar(artigo, "Marca", indice + 1, null));
+    /* O Silo de cada selecionado, pelo plano da seleção. Sem plano, como antes: nenhum. */
+    const siloDe = new Map<string, RadarSiloExportWritingContext>();
+    for (const arquivo of input.selectionPlan?.files || []) {
+      if (!arquivo.writing) continue;
+      for (const articleId of arquivo.articleIds) siloDe.set(articleId, arquivo.writing);
+    }
+    const silos = [...new Set(input.articles.map(artigo => siloDe.get(artigo.articleId) ?? null))];
+    const umSilo = silos.length === 1 && silos[0]?.kind === "silo" ? silos[0] : null;
+    const porLinha = !umSilo && siloDe.size > 0;
+    const rotulo = umSilo ? "Silo" : "Marca";
+    const artigos = input.articles.map((artigo, indice) => montar(artigo, rotulo, indice + 1, siloDe.get(artigo.articleId) ?? null, porLinha));
     const compartilhado = radarWritingShareVisualAvoid(artigos.map(item => item.row));
-    const topo = buildRadarWritingTopRow({ label: "Marca", silo: null, articles: artigos, siteUrl: enderecoDoSite(input.articles, null), sharedVisualAvoid: compartilhado.shared });
+    const topo = buildRadarWritingTopRow({
+      label: rotulo,
+      silo: umSilo,
+      articles: artigos,
+      siteUrl: enderecoDoSite(input.articles, umSilo),
+      sharedVisualAvoid: compartilhado.shared,
+      ...(porLinha ? { siloPerRow: true } : {}),
+    });
     return {
       exported: artigos.length,
       blocked: artigos.filter(item => item.verdict === "Não").length,

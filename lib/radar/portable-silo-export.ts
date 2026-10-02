@@ -103,11 +103,16 @@ export type RadarSiloExportInput = {
   siloVersions: readonly VersionEnvelope<SiloDNA>[];
   siloPageVersions?: readonly VersionEnvelope<SiloPage>[];
   memberDescriptors?: readonly RadarSiloExportMemberDescriptor[];
+  /**
+   * 2026-10-02 · Aditivo: o plano serve ao export dos SELECIONADOS. O membro sem
+   * item não foi marcado — não quer dizer que não foi enviado ao Radar.
+   */
+  selectionOnly?: boolean;
 };
 
 /* ============================== a saída ============================== */
 
-export type RadarSiloExportMemberStatus = "finalized" | "not_finalized" | "other_silo" | "not_sent";
+export type RadarSiloExportMemberStatus = "finalized" | "not_finalized" | "other_silo" | "not_sent" | "not_selected";
 
 export const RADAR_SILO_MEMBER_STATUS_LABEL: Record<RadarSiloExportMemberStatus, string> = {
   finalized: "finalizado",
@@ -115,6 +120,8 @@ export const RADAR_SILO_MEMBER_STATUS_LABEL: Record<RadarSiloExportMemberStatus,
   /* Está no Radar, mas o Radar o registra em outro silo: não sai neste arquivo. */
   other_silo: "no Radar sob outro silo",
   not_sent: "não enviado ao Radar",
+  /* 2026-10-02 · export dos selecionados: o irmão só não foi marcado; o Radar pode tê-lo. */
+  not_selected: "fora desta seleção",
 };
 
 export type RadarSiloExportMember = {
@@ -639,7 +646,7 @@ export function planRadarSiloExport(input: RadarSiloExportInput): RadarSiloExpor
       const item = itens.get(articleId);
       const status: RadarSiloExportMemberStatus = idsDoGrupo.has(articleId)
         ? item!.status
-        : item ? "other_silo" : "not_sent";
+        : item ? "other_silo" : input.selectionOnly ? "not_selected" : "not_sent";
       return {
         articleId,
         position: indice + 1,

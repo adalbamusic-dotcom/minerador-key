@@ -27,7 +27,7 @@ import type { RadarResearchProvenancePayload } from "@/lib/radar/research-read-m
 import {
   buildRadarArticleDnaSummary, buildRadarAuthoritySummary, buildRadarCompetitiveSummary,
   buildRadarDiscoverySummary, buildRadarInternalLinkSummary, buildRadarReportSummary,
-  buildRadarResearchCardSummary, radarReportCheckTone,
+  buildRadarResearchCardSummary,
 } from "@/lib/radar/operational-view";
 import { radarQueryExecutionLabel } from "@/lib/radar/deep-research";
 import { radarQueryDispositionLabel } from "@/lib/radar/research-query-plan";
@@ -46,6 +46,7 @@ import type { SerpResearchSnapshot } from "@/lib/radar/serp/contracts";
 import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
 import { radarAuxiliaryLensLabel, radarCanonicalLensLabel, radarFrozenLensView } from "./radar-serp-lens-view";
 import { radarCandidateEvidenceLabel } from "./radar-subject-turn-view";
+import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
 
 /** A cobertura de lentes da SERP canônica viva, para a linha da consulta central. */
 function lenteDaCanonica(research: SerpResearchSnapshot | null | undefined) {
@@ -268,11 +269,12 @@ function areaCopy(area: RadarR3Area, model: RadarR3Model, mode: RadarPrimarySear
     if (observado && model.deepResearch) {
       const resumo = buildRadarReportSummary({ observed: observado, view: model.deepResearch, youtube: radarYoutubeReportEvidence(researchProjection) });
       const prontos = resumo.checks.filter(item => item.state === "READY").length;
+      const placar = radarSeoGuidelineState(resumo.checks, { specialistAccepted: model.specialist.reviewedEvidence });
       const exigidos = resumo.checks.filter(item => item.state !== "NOT_REQUIRED").length;
       return {
-        lines: [`${prontos} de ${exigidos} verificação(ões) prontas`, resumo.blockers.length ? `${resumo.blockers.length} ponto(s) em aberto` : "Nenhum ponto em aberto"],
-        status: model.report.approved ? "Aprovado" : resumo.blockers.length ? "Em aberto" : "Pronto para revisão",
-        tone: model.report.approved ? "success" : resumo.blockers.length ? "pending" : "success",
+        lines: [`${prontos} de ${exigidos} verificação(ões) prontas`, placar.overall === null ? "Estado SEO sem pilares aplicáveis" : `Estado SEO: ${placar.overall}% das diretrizes`],
+        status: "Painel informativo",
+        tone: "info",
       };
     }
     return { lines: [model.report.status], status: model.report.sentToWriter ? "Enviado ao Redator" : "Aguardando investigação", tone: model.report.approved ? "success" : "neutral" };
@@ -1295,6 +1297,13 @@ function ArticleContextBand({ model }: { model: RadarR3Model }) {
  * uma pergunta fechada com a resposta e o porquê — e o que está em aberto é
  * nomeado em vez de virar um número solto.
  */
+/*
+ * O RELATÓRIO É PAINEL, NÃO REVISÃO (pedido do dono, 2026-10-02).
+ *
+ * Mostra o artigo (intenção declarada × a da SERP, funil, principal, Silo) e o
+ * estado SEO em relação às diretrizes do Google e das respostas de IA. Não pede
+ * revisão e não alerta: o que falta aparece como nota baixa no pilar.
+ */
 function ReportSummaryPanel({ model }: { model: RadarR3Model }) {
   if (!model.deepResearch) return null;
   const materiais = model.r4?.existingContent || [];
@@ -1303,22 +1312,47 @@ function ReportSummaryPanel({ model }: { model: RadarR3Model }) {
     view: model.deepResearch,
     videos: { registered: materiais.filter(item => item.state !== "IGNORED_FOR_ARTICLE").length, transcribed: 0 },
   });
-  return <section className="rounded-md border border-divider bg-surface p-3" data-testid="radar-report-summary">
-    <dl className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-      {resumo.checks.map(check => <div key={check.id} className="rounded-md border border-divider bg-surface-subtle p-2.5">
-        <dt className="text-sm font-medium text-foreground">{check.question}</dt>
-        <dd className={`mt-1 text-sm ${toneText[radarReportCheckTone(check.state)]}`}>{check.state === "READY" ? "Sim" : check.state === "PARTIAL" ? "Parcialmente" : check.state === "NOT_REQUIRED" ? "Não se aplica" : "Ainda não"}</dd>
-        <dd className="mt-1 text-sm leading-6 text-text-muted">{check.detail}</dd>
+  const placar = radarSeoGuidelineState(resumo.checks, { specialistAccepted: model.specialist.reviewedEvidence });
+  const intencao = model.deepResearch.observed.intent;
+  const dna = model.article?.payload || null;
+  const dados: Array<[string, string]> = [
+    ["Keyword principal", model.keyword || "Não resolvida"],
+    ["Intenção declarada", intencao.declared || "Não declarada"],
+    ["Intenção na SERP", intencao.observedInSerp || "Não observada"],
+    ["Declarada × SERP", { ALIGNED: "Concordam", COHERENT_COMMERCIAL: "Concordam (comercial)", DIVERGENT: "Divergem", NOT_OBSERVED: "SERP sem leitura" }[intencao.alignment]],
+    ["Formato dominante", intencao.observedInPages || "Não observado"],
+    ["Funil", dna?.journeyStage || "Não declarado"],
+    ["Silo e papel", [model.silo, model.hierarchy].filter(Boolean).join(" · ") || "Sem Silo"],
+  ];
+  const corDaNota = (nota: number | null) => nota === null ? "bg-surface-subtle" : nota >= 80 ? "bg-success" : nota >= 50 ? "bg-pending" : "bg-warning";
+  return <section className="space-y-3 rounded-md border border-divider bg-surface p-3" data-testid="radar-report-summary">
+    <dl className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3" data-testid="radar-report-article-data">
+      {dados.map(([rotulo, valor]) => <div key={rotulo} className="rounded-md border border-divider bg-surface-subtle p-2.5">
+        <dt className="text-sm text-text-muted">{rotulo}</dt>
+        <dd className="mt-1 text-sm font-medium text-foreground">{valor}</dd>
       </div>)}
     </dl>
-    {resumo.blockers.length > 0 && <div className="mt-3" data-testid="radar-report-blockers">
-      <h3 className="text-sm font-semibold text-foreground">Em aberto</h3>
-      <ul className="mt-1 space-y-1 text-sm leading-6 text-text-muted">{resumo.blockers.map(item => <li key={item}>{item}</li>)}</ul>
-    </div>}
+    {intencao.note && <p className="text-sm leading-6 text-text-muted">{intencao.note}</p>}
+    <div className="rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-report-seo-chart">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-foreground">Estado SEO do artigo</h3>
+        <span className="text-sm text-text-muted">{placar.overall === null ? "Sem pilares aplicáveis" : `${placar.overall}% das diretrizes atendidas`}</span>
+      </div>
+      <ul className="mt-3 space-y-2.5">{placar.pillars.map(pilar => <li key={pilar.id}>
+        <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+          <span className="font-medium text-foreground">{pilar.label}</span>
+          <span className="text-text-muted">{pilar.percent === null ? "Não se aplica" : `${pilar.percent}%`}</span>
+        </div>
+        <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-surface" role="img" aria-label={`${pilar.label}: ${pilar.percent === null ? "não se aplica" : `${pilar.percent}%`}`}>
+          <div className={`h-full rounded-full ${corDaNota(pilar.percent)}`} style={{ width: `${pilar.percent ?? 0}%` }} />
+        </div>
+        <p className="mt-1 text-sm leading-6 text-text-muted">{pilar.guideline} {pilar.detail}</p>
+      </li>)}</ul>
+    </div>
   </section>;
 }
 
-export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportReview, onReportApprove, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, writerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, onResetInvestigation, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
+export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, writerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, onResetInvestigation, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
   const [expandedArea, setExpandedArea] = useState<RadarR3Area | null>(null);
 
   /*
@@ -1494,7 +1528,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
       </div>}
       {expandedArea === "relatorio" && <div key={model.articleId} className="space-y-3">
         <ReportSummaryPanel model={model} />
-        <RadarR6ReportPanel report={model.r6Report} canonicalApproved={model.report.approved} onGenerate={onReportGenerate} onReview={onReportReview} onApprove={onReportApprove} />
+        <RadarR6ReportPanel report={model.r6Report} canonicalApproved={model.report.approved} onGenerate={onReportGenerate} informational />
       </div>}
     </div>
     {/*

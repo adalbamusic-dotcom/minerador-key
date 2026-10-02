@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { createExpertBrief, getExpertBrief, getExpertContribution, listActiveBrandExperts, listExpertBriefsForContext } from "./telegram/persistence";
+import { createBrandExpert, createExpertBrief, getExpertBrief, getExpertContribution, listActiveBrandExperts, listExpertBriefsForContext, persistExpertBriefRadarContext } from "./telegram/persistence";
+import { radarContextWithSpecialistReview, radarSpecialistReviewsOf } from "@/lib/radar/specialist-contribution-review";
 import { radarSpecialistRequirementIdOf } from "@/lib/radar/specialist-lifecycle";
 import type { createCanonicalServiceClient } from "./canonical-authorization";
 
@@ -28,6 +29,8 @@ export const PLATFORM_CONTRIBUTION_KINDS = ["RESPOSTA", "FECHAMENTO", "CTA", "DI
 export type PlatformContributionKind = typeof PLATFORM_CONTRIBUTION_KINDS[number];
 export const PLATFORM_CONTRIBUTION_MAX_CHARS = 20000;
 export const PLATFORM_DIRECT_REQUIREMENT_PREFIX = "direto:";
+/** "Eu mesmo": quem está logado escreve o parecer (SDD Radar 2026-09-30, B2.1). */
+export const PLATFORM_SELF_EXPERT = "self";
 
 const ROTULO: Record<Exclude<PlatformContributionKind, "RESPOSTA">, { titulo: string; pergunta: string }> = {
   FECHAMENTO: { titulo: "Fechamento do artigo (parecer direto)", pergunta: "Como o especialista fecha este artigo: conclusão, recado final e o que o leitor deve levar." },
@@ -43,6 +46,41 @@ export class PlatformContributionError extends Error {
 
 type Client = ReturnType<typeof createCanonicalServiceClient>;
 
+/**
+ * "EU MESMO" — o usuário logado vira o especialista daquela Marca.
+ *
+ * A SDD previa a opção e ela não existia: com a Marca sem especialista
+ * cadastrado, o campo do parecer nem aparecia. O registro é o mesmo
+ * `brand_experts` de sempre; o vínculo com quem digita vai no `metadata`
+ * (`platformUserId`), e a segunda vez reaproveita o mesmo registro.
+ */
+/** O especialista escolhido é o registro "Eu mesmo" de quem está logado? */
+async function expertIsActor(brandId: string, expertId: string, actorUserId: string, client: Client): Promise<boolean> {
+  const linha = await client.from("brand_experts").select("id").eq("brand_id", brandId).eq("id", expertId)
+    .contains("metadata", { platformUserId: actorUserId }).limit(1);
+  return !linha.error && Boolean((linha.data || []).length);
+}
+
+async function resolveSelfExpert(brandId: string, actorUserId: string, client: Client): Promise<string> {
+  const existente = await client.from("brand_experts").select("id").eq("brand_id", brandId).eq("status", "active")
+    .contains("metadata", { platformUserId: actorUserId }).limit(1);
+  if (existente.error) throw new PlatformContributionError("expert_lookup_failed", "Não foi possível conferir o especialista desta Marca.", 503);
+  const achado = (existente.data || [])[0] as { id?: string } | undefined;
+  if (achado?.id) return String(achado.id);
+  let nome = "Especialista da equipe";
+  try {
+    const usuario = await client.auth.admin.getUserById(actorUserId);
+    const dados = usuario.data.user;
+    const meta = (dados?.user_metadata || {}) as Record<string, unknown>;
+    const candidato = [meta.full_name, meta.name, dados?.email?.split("@")[0]].find(valor => typeof valor === "string" && valor.trim());
+    if (typeof candidato === "string") nome = candidato.trim().slice(0, 160);
+  } catch {
+    // Sem o nome do Auth, o rótulo genérico basta: a autoria fica em `authored_by`.
+  }
+  const criado = await createBrandExpert({ brandId, displayName: nome, createdBy: actorUserId, metadata: { origin: "platform_self", platformUserId: actorUserId } }, client);
+  return criado.id;
+}
+
 export async function submitPlatformExpertContribution(input: {
   brandId: string;
   articleId: string;
@@ -53,7 +91,7 @@ export async function submitPlatformExpertContribution(input: {
   actorUserId: string;
   /** RESPOSTA: o ponto de revisão respondido (id, pergunta e tipo, como a tela os mostra). */
   requirement?: { id: string; question: string | null; kind: string | null } | null;
-}, client: Client): Promise<{ contributionId: string; briefId: string; readbackConfirmed: true }> {
+}, client: Client): Promise<{ contributionId: string; briefId: string; readbackConfirmed: true; accepted: boolean }> {
   const texto = input.text.trim();
   if (!texto) throw new PlatformContributionError("empty_text", "Escreva o parecer antes de enviar.", 400);
   if (texto.length > PLATFORM_CONTRIBUTION_MAX_CHARS) throw new PlatformContributionError("text_too_long", `O parecer passa de ${PLATFORM_CONTRIBUTION_MAX_CHARS} caracteres.`, 400);
@@ -67,21 +105,29 @@ export async function submitPlatformExpertContribution(input: {
   const coluna = await client.from("expert_contributions").select("authored_by").limit(1);
   if (coluna.error) throw new PlatformContributionError("migration_pending", "O parecer direto ainda não pode ser gravado: falta aplicar a migration 20260930120000_expert_contribution_platform_channel.sql no banco. Nada foi gravado.", 503);
 
+  const expertId = input.expertId === PLATFORM_SELF_EXPERT ? await resolveSelfExpert(input.brandId, input.actorUserId, client) : input.expertId;
+  /*
+   * D3 (SDD diretriz editorial, 2026-10-02): o parecer escrito pelo PRÓPRIO
+   * especialista logado entra já aceito. Quem escreve é quem decide; o passo de
+   * aceitar só faz sentido para o que chega de outra pessoa (Telegram, outro
+   * especialista da lista).
+   */
+  const proprio = input.expertId === PLATFORM_SELF_EXPERT || await expertIsActor(input.brandId, expertId, input.actorUserId, client);
   const experts = await listActiveBrandExperts(input.brandId, client);
-  if (!experts.some(expert => expert.id === input.expertId)) throw new PlatformContributionError("expert_not_found", "Especialista não encontrado ou não utilizável nesta Marca.", 404);
+  if (!experts.some(expert => expert.id === expertId)) throw new PlatformContributionError("expert_not_found", "Especialista não encontrado ou não utilizável nesta Marca.", 404);
 
   /* A pauta: a do ponto, quando já existe para este especialista; senão, uma nova, já esperando revisão. */
   const requirementId = input.kind === "RESPOSTA" ? input.requirement!.id : `${PLATFORM_DIRECT_REQUIREMENT_PREFIX}${input.kind.toLowerCase()}:${randomUUID()}`;
   let briefId: string | null = null;
   if (input.kind === "RESPOSTA") {
-    const existentes = await listExpertBriefsForContext({ brandId: input.brandId, expertId: input.expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
+    const existentes = await listExpertBriefsForContext({ brandId: input.brandId, expertId: expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
     briefId = existentes.find(pauta => radarSpecialistRequirementIdOf(pauta.radarContext) === requirementId)?.id ?? null;
   }
   if (!briefId) {
     const rotulo = input.kind === "RESPOSTA" ? null : ROTULO[input.kind];
     const criada = await createExpertBrief({
       brandId: input.brandId,
-      expertId: input.expertId,
+      expertId: expertId,
       articleId: input.articleId,
       articleDnaVersionId: input.articleDnaVersionId,
       title: rotulo?.titulo ?? (input.requirement?.question || "Resposta a ponto de revisão (parecer direto)").slice(0, 240),
@@ -102,7 +148,7 @@ export async function submitPlatformExpertContribution(input: {
 
   const inserido = await client.from("expert_contributions").insert({
     brand_id: input.brandId,
-    expert_id: input.expertId,
+    expert_id: expertId,
     brief_id: briefId,
     provider: "platform",
     bot_key: "platform",
@@ -129,7 +175,58 @@ export async function submitPlatformExpertContribution(input: {
     .in("status", ["draft", "ready_to_send", "awaiting_expert", "receiving", "reviewed"]);
 
   const lida = await getExpertContribution({ brandId: input.brandId, contributionId, briefId }, client);
-  const pauta = await getExpertBrief({ brandId: input.brandId, briefId, expertId: input.expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
+  const pauta = await getExpertBrief({ brandId: input.brandId, briefId, expertId: expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
   if (!lida || !pauta) throw new PlatformContributionError("readback_failed", "O parecer foi enviado, mas a releitura não confirmou. Atualize a aba antes de tentar de novo.", 503);
-  return { contributionId, briefId, readbackConfirmed: true };
+  if (!proprio) return { contributionId, briefId, readbackConfirmed: true, accepted: false };
+
+  /* O aceite do próprio autor, pelo mesmo registro da revisão, com releitura. */
+  const radarContext = radarContextWithSpecialistReview({
+    radarContext: pauta.radarContext,
+    contributionId,
+    review: { decision: "ACCEPTED_EVIDENCE", classification: null, relatedRequirementId: null, decidedAt: new Date().toISOString(), decidedBy: input.actorUserId },
+  });
+  await persistExpertBriefRadarContext({ brandId: input.brandId, briefId, expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId, radarContext }, client);
+  const relida = await getExpertBrief({ brandId: input.brandId, briefId, expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
+  const aceita = relida ? radarSpecialistReviewsOf(relida.radarContext)[contributionId]?.decision === "ACCEPTED_EVIDENCE" : false;
+  if (!aceita) throw new PlatformContributionError("accept_readback_failed", "O parecer foi gravado, mas o aceite não se confirmou na releitura. Aceite em Respostas recebidas.", 503);
+  return { contributionId, briefId, readbackConfirmed: true, accepted: true };
+}
+
+/**
+ * REEDITAR O PRÓPRIO PARECER (pedido do dono, 2026-10-02).
+ *
+ * Só o autor reedita, e só o que veio pela plataforma: resposta do Telegram é a
+ * fala original de outra pessoa e não se reescreve. O texto anterior não some:
+ * vai para `original_metadata.edits`, com data e autor da edição.
+ */
+export async function updatePlatformExpertContribution(input: {
+  brandId: string;
+  contributionId: string;
+  text: string;
+  actorUserId: string;
+}, client: Client): Promise<{ contributionId: string; readbackConfirmed: true }> {
+  const texto = input.text.trim();
+  if (!texto) throw new PlatformContributionError("empty_text", "Escreva o parecer antes de salvar.", 400);
+  if (texto.length > PLATFORM_CONTRIBUTION_MAX_CHARS) throw new PlatformContributionError("text_too_long", `O parecer passa de ${PLATFORM_CONTRIBUTION_MAX_CHARS} caracteres.`, 400);
+  const lida = await client.from("expert_contributions").select("id,provider,authored_by,original_text,original_metadata")
+    .eq("brand_id", input.brandId).eq("id", input.contributionId).maybeSingle();
+  if (lida.error) throw new PlatformContributionError("read_failed", "Não foi possível ler o parecer.", 503);
+  const linha = lida.data as { provider?: string; authored_by?: string | null; original_text?: string | null; original_metadata?: Record<string, unknown> | null } | null;
+  if (!linha) throw new PlatformContributionError("not_found", "Parecer não encontrado nesta Marca.", 404);
+  if (linha.provider !== "platform" || linha.authored_by !== input.actorUserId) {
+    throw new PlatformContributionError("not_author", "Só quem escreveu o parecer na plataforma pode reeditá-lo.", 403);
+  }
+  if ((linha.original_text || "").trim() === texto) return { contributionId: input.contributionId, readbackConfirmed: true };
+  const meta = (linha.original_metadata && typeof linha.original_metadata === "object") ? linha.original_metadata : {};
+  const edicoes = Array.isArray((meta as { edits?: unknown }).edits) ? (meta as { edits: unknown[] }).edits : [];
+  const gravada = await client.from("expert_contributions").update({
+    original_text: texto,
+    original_metadata: { ...meta, edits: [...edicoes, { previousText: linha.original_text || "", editedAt: new Date().toISOString(), editedBy: input.actorUserId }] },
+  }).eq("brand_id", input.brandId).eq("id", input.contributionId);
+  if (gravada.error) throw new PlatformContributionError("update_failed", "Não foi possível salvar o parecer.", 503);
+  const relida = await client.from("expert_contributions").select("original_text").eq("brand_id", input.brandId).eq("id", input.contributionId).maybeSingle();
+  if (relida.error || ((relida.data as { original_text?: string } | null)?.original_text || "").trim() !== texto) {
+    throw new PlatformContributionError("readback_failed", "O parecer foi salvo, mas a releitura não confirmou. Atualize a área antes de tentar de novo.", 503);
+  }
+  return { contributionId: input.contributionId, readbackConfirmed: true };
 }

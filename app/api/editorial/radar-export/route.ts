@@ -16,6 +16,7 @@ import {
   radarPortableExportSiloFiles,
 } from "@/lib/radar/portable-export-batch";
 import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
+import { radarPortableVideoExport } from "@/lib/radar/portable-video-export";
 
 /**
  * ===== O DOSSIÊ EDITORIAL PORTÁTIL — RADAR_PORTABLE_EXPORT_1.2 =====
@@ -84,7 +85,12 @@ const CorpoSchema = z.object({
    * ("full", o formato completo/técnico): quem chamava continua recebendo as
    * mesmas colunas. A tela manda "writing", o padrão dela.
    */
-  mode: z.enum(["writing", "full"]).optional(),
+  /*
+   * 2026-10-02 · Aditivo: "video" é o CSV para vídeo e redes sociais — dados,
+   * evidências e diretrizes de roteiro do YouTube, sem estrutura de artigo.
+   * Sempre um arquivo só, mesmo com `groupBy`.
+   */
+  mode: z.enum(["writing", "full", "video"]).optional(),
 }).strict();
 
 const noStoreHeaders = { "Cache-Control": "no-store" };
@@ -95,13 +101,47 @@ export async function POST(request: Request) {
     const input = CorpoSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "radar", "view");
 
-    const { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano } = await assembleRadarPortableExport({
+    const { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao } = await assembleRadarPortableExport({
       brandId: input.brandId,
       articleIds: input.articleIds,
-      groupBy: input.groupBy,
+      groupBy: input.mode === "video" ? undefined : input.groupBy,
       supabase: profile.supabase,
       actorUserId: profile.userId,
+      /* 2026-10-02 · "Só os selecionados" no formato para escrever também leva o Silo. */
+      selectionSiloContext: input.mode === "writing" && !input.groupBy,
     });
+
+    /*
+     * ===== 2026-10-02 · O FORMATO "PARA VÍDEO E REDES SOCIAIS" =====
+     *
+     * As MESMAS entradas, outra projeção: sem estrutura de artigo, com a
+     * pesquisa do YouTube que o núcleo já leu. Nenhuma leitura a mais.
+     */
+    if (input.mode === "video") {
+      if (!montadas.length) {
+        return NextResponse.json({
+          success: false,
+          code: "radar_export_empty",
+          error: "Nenhum dos artigos selecionados tem investigação finalizada para exportar.",
+          refused: recusados,
+        }, { status: 409, headers: noStoreHeaders });
+      }
+      const video = radarPortableVideoExport({ articles: montadas, today: exportedAt });
+      const semYoutube = video.withoutYoutube ? ` ${video.withoutYoutube} sem pesquisa do YouTube: veja a coluna pode_gravar.` : "";
+      return radarPortableExportStreamResponse({
+        success: true,
+        mode: "video",
+        csv: video.csv,
+        filename: video.filename,
+        exported: video.exported,
+        refused: recusados,
+        headline: recusados.length
+          ? `${video.exported} tema(s) exportado(s) para vídeo; ${recusados.length} artigo(s) ficaram de fora por não estarem finalizados.${semYoutube}`
+          : `${video.exported} tema(s) exportado(s) para vídeo.${semYoutube}`,
+        exportedAt,
+        serpCacheReadFailed: lentes.readFailed,
+      }, { headers: noStoreHeaders });
+    }
 
     /*
      * ===== 2026-09-23 · O FORMATO "PARA ESCREVER" =====
@@ -121,7 +161,7 @@ export async function POST(request: Request) {
           ...(plano ? { warnings: plano.warnings, emptySilos: radarPortableExportEmptySilos(plano) } : {}),
         }, { status: 409, headers: noStoreHeaders });
       }
-      const escrita = radarPortableWritingExport({ articles: montadas, lenses: lentes, plan: plano, publications: publicacoes, today: exportedAt });
+      const escrita = radarPortableWritingExport({ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt });
       const bloqueados = escrita.blocked ? ` ${escrita.blocked} com bloqueio para escrever: veja a coluna pode_escrever.` : "";
       return radarPortableExportStreamResponse({
         success: true,
