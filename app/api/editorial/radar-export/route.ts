@@ -108,7 +108,8 @@ export async function POST(request: Request) {
       supabase: profile.supabase,
       actorUserId: profile.userId,
       /* 2026-10-02 · "Só os selecionados" no formato para escrever também leva o Silo. */
-      selectionSiloContext: input.mode === "writing" && !input.groupBy,
+      /* 2026-10-02 · o CSV de vídeo também recebe o Silo (os tópicos que o Silo exclui valem no "não cobrir"). */
+      selectionSiloContext: input.mode === "video" || (input.mode === "writing" && !input.groupBy),
     });
 
     /*
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
           refused: recusados,
         }, { status: 409, headers: noStoreHeaders });
       }
-      const video = radarPortableVideoExport({ articles: montadas, today: exportedAt, brandVoice });
+      const video = radarPortableVideoExport({ articles: montadas, today: exportedAt, brandVoice, selectionPlan: planoDaSelecao });
       const semYoutube = video.withoutYoutube ? ` ${video.withoutYoutube} sem pesquisa do YouTube: veja a coluna pode_gravar.` : "";
       return radarPortableExportStreamResponse({
         success: true,

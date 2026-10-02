@@ -1,5 +1,20 @@
 # Backlog — Radar
 
+## Artigo-modelo da SERP, autoria, CSV de vídeo e finalização automática — 2026-10-02 (madrugada)
+
+- [x] Frente A: artigo-modelo organizado ao finalizar (D7), proposta marcada no CSV (D8), `ifMissing`, nova tentativa.
+- [x] Frente B: autoria pelo especialista da aba Especialista.
+- [x] Frente C: finalização automática nos três perfis (D9) e correções do YouTube.
+- [x] Frente D: CSV de vídeo pronto para roteiro; regra única de fora do escopo.
+- [x] Compactação por perfil no TS e migration `20261002130000_compactacao_por_perfil.sql` (+ rollback).
+- [ ] **Dono:** aplicar `20261002130000_compactacao_por_perfil.sql` (`db query --linked -f` + `migration repair --status applied 20261002130000 --linked`).
+- [ ] **Dono:** recarregar o artigo do Instagram e conferir que a aba YouTube mostra a coleta e finaliza (sozinha ou pelo botão).
+- [ ] **Dono:** refinalizar o artigo do Instagram (organiza o artigo-modelo), revisar e aprovar; escolher os modos dos vídeos; exportar os dois CSVs.
+- [ ] **Dono decide:** o clique manual em "Analisar" na Amazon continua encadeando o congelamento quando não há pendência?
+- [ ] CSV de vídeo (revisor): "Por que está aqui" verboso; cabeçalho de perguntas × capítulos; "artigo" em landing page; regex de placeholder; `FORMATO_GENERICO` com palavras do assunto; tamanho da célula `biblioteca_da_marca`; URLs próprias na linha de voz.
+- [ ] Import circular entre `lib/radar/out-of-scope.ts` e `lib/radar/portable-writing-export.ts`.
+- [ ] Aviso de pendência: rótulo do botão fixo em alguns caminhos; comentários antigos sobre "nada congela sozinho".
+
 ## Voz da marca e modos de vídeo — 2026-10-02
 
 - [x] Voz da marca (Skill corrente) nos dois CSVs, no artigo-modelo e no MCP `get_article_for_writing`.

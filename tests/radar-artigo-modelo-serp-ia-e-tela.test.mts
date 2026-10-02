@@ -250,7 +250,8 @@ test("finalizar → organizar: só depois do readback confirmado, e nada desfaz 
 
   const organizador = semComentarios(trecho(pagina(), "const organizarArtigosModeloDaSerp = async", "const approveTopicsBatch ="));
   assert.match(organizador, /organizeRadarArticleBlueprintsInSeries\(\{/);
-  assert.match(organizador, /postRadarArticleBlueprintOrganize\(\{ brandId: marca, articleId \}\)/);
+  /* 2026-10-02 · o encadeamento automático só organiza se o pacote ainda não tem artigo-modelo (ifMissing). */
+  assert.match(organizador, /postRadarArticleBlueprintOrganize\(\{ brandId: marca, articleId, ifMissing: true \}\)/);
   assert.match(organizador, /setBlueprintJobs\(/);
   assert.equal(/resetRadarInvestigation|saveRadarAnalysis|setFinalizeReadback|updateLocalState/.test(organizador), false, "falha da IA não toca a investigação");
   assert.equal(/useEffect\([^)]*organizarArtigosModeloDaSerp/.test(pagina()), false, "nenhuma chamada de IA nasce de efeito");
@@ -267,7 +268,8 @@ test("a tela: o painel mora na Pesquisa, logo abaixo do modelo da SERP; o botão
   const botao = semComentarios(trecho(fonte, "function Phase1Button(", "function RecoverSerpAction("));
   assert.match(botao, /const acao = radarPhase1WithArticleBlueprint\(resolvida\);/);
   const bancadaFora = semComentarios(fonte.slice(fonte.indexOf("export function RadarR3Workbench(")));
-  assert.match(bancadaFora, /articleBlueprint=\{model\.deepResearch\.finalizedBundle && brandId && articleId \? <RadarArticleBlueprintPanel brandId=\{brandId\} articleId=\{articleId\} job=\{articleBlueprintJob\} \/> : null\}/);
+  /* 2026-10-02 · o painel recebe o congelamento vigente: mostra a versão do pacote atual, como o export. */
+  assert.match(bancadaFora, /articleBlueprint=\{model\.deepResearch\.finalizedBundle && brandId && articleId \? <RadarArticleBlueprintPanel brandId=\{brandId\} articleId=\{articleId\} job=\{articleBlueprintJob\} currentBundleHash=\{model\.deepResearch\.finalizedBundle\.bundleHash\} \/> : null\}/);
   assert.equal((bancadaFora.match(/<RadarArticleBlueprintPanel/g) || []).length, 1, "um lugar só: o painel solto saiu");
 });
 

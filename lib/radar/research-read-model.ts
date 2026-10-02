@@ -115,20 +115,32 @@ export function radarResearchIsFrozen(payload: unknown): boolean {
  * payload ORIGINAL, e `FULL` continua valendo. Marcar `COMPACT` sem ter tirado
  * nada travaria escritas legítimas.
  */
+/*
+ * CADA CORRIDA SÓ SAI QUANDO A FOTOGRAFIA DELA EXISTE (2026-10-02).
+ *
+ * A regra era "alguma fotografia existe → tira todas as corridas". Com os
+ * acréscimos (SDD Radar 2026-09-30), um artigo do Google FINALIZADO ganha uma
+ * pesquisa do YouTube ou da Amazon VIVA, ainda não congelada — e a compactação
+ * apagava essa corrida da cópia de leitura: depois de recarregar, a tela dizia
+ * "Nenhuma coleta ainda" sobre 51 vídeos coletados e escondia o finalizar.
+ * Agora cada corrida só sai se a fotografia DO SEU perfil a substitui.
+ */
+const FOTOGRAFIA_DA_CORRIDA: Record<(typeof CORRIDAS)[number], string> = {
+  amazonSearch: "amazonFrozenInvestigation",
+  youtubeSearch: "youtubeFrozenInvestigation",
+};
+
 export function compactRadarResearchForRead<T extends Record<string, unknown>>(payload: T): T {
   if (!radarResearchIsFrozen(payload)) return payload;
 
-  const temCorrida = CORRIDAS.some(campo => objeto(payload[campo]));
-  const temAmostra = LISTAS_DE_AMOSTRA.some(campo => lista(payload[campo]).length > 0);
-  if (!temCorrida && !temAmostra) return payload;
+  const corridasCongeladas = CORRIDAS.filter(campo => objeto(payload[campo]) && objeto(payload[FOTOGRAFIA_DA_CORRIDA[campo]]));
+  const amostraCongelada = Boolean(objeto(payload.finalizedBundle));
+  const amostras = amostraCongelada ? LISTAS_DE_AMOSTRA.filter(campo => lista(payload[campo]).length > 0) : [];
+  if (!corridasCongeladas.length && !amostras.length) return payload;
 
   const compacto: Record<string, unknown> = { ...payload, researchTransport: "COMPACT" };
-  for (const campo of CORRIDAS) {
-    if (objeto(payload[campo])) compacto[campo] = null;
-  }
-  for (const campo of LISTAS_DE_AMOSTRA) {
-    if (lista(payload[campo]).length > 0) compacto[campo] = [];
-  }
+  for (const campo of corridasCongeladas) compacto[campo] = null;
+  for (const campo of amostras) compacto[campo] = [];
   return compacto as T;
 }
 

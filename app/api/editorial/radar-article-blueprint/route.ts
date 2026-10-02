@@ -36,7 +36,13 @@ const LeituraSchema = z.object({
 });
 
 const AcaoSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("generate"), brandId: z.string().uuid(), articleId: z.string().trim().min(1).max(256), confirmPaid: z.literal(true) }).strict(),
+  /*
+   * 2026-10-02 · `ifMissing`: o encadeamento automático (congelar → organizar) não
+   * paga a IA de novo quando o MESMO pacote já tem artigo-modelo — acrescentar
+   * YouTube ou Amazon a um artigo do Google não muda o pacote. Os botões do painel
+   * não mandam a opção e organizam de novo de propósito.
+   */
+  z.object({ action: z.literal("generate"), brandId: z.string().uuid(), articleId: z.string().trim().min(1).max(256), confirmPaid: z.literal(true), ifMissing: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("edit"), brandId: z.string().uuid(), articleId: z.string().trim().min(1).max(256), blueprintId: z.string().uuid(), edit: RadarArticleBlueprintEditSchema }).strict(),
   z.object({ action: z.literal("approve"), brandId: z.string().uuid(), articleId: z.string().trim().min(1).max(256), blueprintId: z.string().uuid() }).strict(),
 ]);
@@ -68,7 +74,7 @@ export async function POST(request: Request) {
     const context = await resolvePipelineContext({ brandId: entrada.brandId, module: "radar", action: "edit" });
     const base = { client: context.supabase, brandId: context.brandId, articleId: entrada.articleId, actorUserId: context.actorUserId };
     const version = entrada.action === "generate"
-      ? await generateRadarArticleBlueprint(base)
+      ? await generateRadarArticleBlueprint({ ...base, ifMissing: entrada.ifMissing === true })
       : entrada.action === "edit"
         ? await editRadarArticleBlueprint({ ...base, blueprintId: entrada.blueprintId, edit: entrada.edit })
         : await approveRadarArticleBlueprint({ ...base, blueprintId: entrada.blueprintId });

@@ -1,5 +1,48 @@
 # Estado atual — Radar
 
+## Artigo-modelo da SERP, autoria, CSV de vídeo e finalização automática — 2026-10-02 (madrugada)
+
+**Verificado no código e confirmado por teste. Validado no local (POST de leitura em `/api/editorial/radar-export`):
+linha "Voz da marca", autoria "Adalberto Escalante" da aba Especialista, CSV de vídeo com a pesquisa do YouTube
+(51 vídeos). Organização real do artigo-modelo e finalização automática: NÃO executadas pelo agente — são do
+dono.** SDD: `sdd-diretriz-editorial-pela-serp-2026-10-02.md`, Adendo D (D7, D8, D9) e D.3.
+
+- **Frente A — artigo-modelo é dado da SERP (D7, D8):** o painel virou "Artigo-modelo da SERP" (Pesquisa). A IA
+  recebe o esqueleto da SERP com ids (`M…`) e só organiza; schema compacto, fatias da voz por assunto,
+  `thinkingMode` desligado, 1 nova tentativa quando a resposta vem cortada ou inválida (era o "JSON inválido").
+  Congelar qualquer perfil encadeia a organização; o encadeamento manda `ifMissing` e reaproveita a versão do
+  mesmo `bundleHash` antes de chamar o provider. O CSV "para escrever" leva a aprovada do pacote vigente ou,
+  sem ela, a proposta mais nova marcada "PROPOSTA DA IA — aguardando aprovação no Radar". O tipo da unidade
+  (ArticleDNA) e o formato da SERP vão à IA — vale para artigo, SiloPage, landing page e serviço.
+- **Frente B — autoria (E-E-A-T):** `lib/server/radar-article-authors.ts` lê `brand_experts` da marca:
+  primeiro o especialista das contribuições do pacote; sem contribuição e com um único ativo, ele é sugerido
+  para confirmação; sem nenhum, o CSV pede para definir antes de publicar. Erro de leitura não derruba o export.
+- **CSV "para escrever", regra fixa:** sem pergunta retórica nem pergunta de Shopping na abertura, sem o
+  conflito de Shopping, texto de FAQ unificado, plano visual capa + 2–3 respiros.
+- **Frente D — CSV de vídeo pronto para roteiro:** a mesma voz e o mesmo plano do Silo da seleção; a mesma
+  regra de fora do escopo do CSV "para escrever" (`lib/radar/out-of-scope.ts`); vídeos selecionados com modo,
+  canal, começo da transcrição e, no Incorporar, a seção do artigo-modelo aprovado; CTA para o artigo.
+- **Frente C — finalização automática nos três perfis (D9):** `radarGoogleAutoFinalizeDecision` e
+  `radarProfileAutoFinalizeDecision` decidem; a tela encadeia as MESMAS ações dos botões. Pendência para e diz
+  o motivo e o botão manual. Rótulos: "· e finaliza (+ 1 chamada de IA)" na coleta, "· inclui 1 chamada de IA"
+  no finalizar. Correções do YouTube: a projeção conta o Google base como apoio; a gravação do apoio usa a
+  trava da leitura remota (`LOCK_DA_LEITURA_REMOTA`) e não engole o 409; consulta com a principal já
+  enquadrada ("como …") não ganha outro prefixo.
+- **Compactação por perfil (defeito da homologação):** a cópia de leitura esvaziava toda corrida quando
+  qualquer fotografia existia; com o Google finalizado, a coleta viva do YouTube sumia depois de recarregar e o
+  botão de finalizar não aparecia. `compactRadarResearchForRead` agora tira cada corrida só quando a fotografia
+  DO SEU perfil existe; a função do banco `editorial_radar_versao_compactada` ganhou a mesma regra na migration
+  `20261002130000_compactacao_por_perfil.sql` (+ rollback), conferida pelo teste de paridade
+  `tests/editorial-listagem-workflow-sem-corridas.test.mts`. **A migration ainda não foi aplicada** — até lá, a
+  listagem que vem da view continua escondendo a coleta viva.
+- Catálogo MCP: `radar.finalize` (custo `paid_ai`, automático, sem "Aprovar selecionadas"),
+  `radar.article_blueprint` (D7/D8), `radar.investigate` (consultas e compactação),
+  `radar.export_for_writing` (vídeo e proposta marcada).
+- Testes: Radar 2847/0 (1 pulado), Redator 357/0, MCP 134/0, agent 65/0, compactação 8/0; `tsc` sem erro no
+  código (só tipos gerados velhos em `.next/` da rota aposentada do Planejador); eslint 0 erros.
+- **Limites:** homologação do dono; a decisão sobre o clique manual em "Analisar" (Amazon) encadear o
+  congelamento está pendente; pequenos ajustes de texto do revisor no CSV de vídeo estão no backlog.
+
 ## Voz da marca e modos de uso dos vídeos — 2026-10-02 (noite)
 
 **Verificado no código e confirmado por teste. Validado no local: CSVs pela rota real (linha "Voz da marca" com a

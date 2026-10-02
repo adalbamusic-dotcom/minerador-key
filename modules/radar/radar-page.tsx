@@ -4527,7 +4527,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     if (!marca || !articleIds.length) return;
     const resultado = await organizeRadarArticleBlueprintsInSeries({
       articleIds,
-      organize: articleId => postRadarArticleBlueprintOrganize({ brandId: marca, articleId }),
+      /* 2026-10-02 · encadeamento automático: só organiza se o pacote ainda não tem artigo-modelo. */
+      organize: articleId => postRadarArticleBlueprintOrganize({ brandId: marca, articleId, ifMissing: true }),
       onProgress: job => {
         setBlueprintJobs(atual => ({ ...atual, [job.articleId]: job }));
         if (job.position.total > 1 && job.state === "running") setNotice(`Organizando o artigo-modelo da SERP com a IA: ${job.position.index} de ${job.position.total}…`);
