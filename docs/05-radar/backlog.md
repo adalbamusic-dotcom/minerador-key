@@ -1,5 +1,38 @@
 # Backlog — Radar
 
+## Revisão dos entregáveis (CSV para escrever, CSV de vídeo, Redator, MCP) — 2026-10-08
+
+Detalhe, testes e consumidores preservados em `docs/05-radar/estado-atual.md` (2026-10-08). Feito = Verificado no
+código e Confirmado por teste (fixtures, sem provider nem IA); nada desta lista foi validado manualmente.
+
+- [x] A · rótulo de entregável da voz compartilhado (`radarBrandVoiceDeliverableLabel`/`StatusLabel`); régua por frase `radarSentenceNeedsSource` por sentido (plataforma, conversão, comportamento) com polaridade; motivo do link da planta sem "fonte a obter".
+- [x] B · artigo-modelo: página publicada lida na geração e `publishedMap`; regras 8, 9, 17, 21–23; todas as absolutas viram nota; nomes atuais; `rulesVersion` e aviso na tela; parágrafos pela faixa de palavras.
+- [x] C · CSV "Para escrever": voz de entregável; mapa da atualização; link sem fonte delimitado; trava "(precisa de fonte: …)" e lista concluída; cabeçalhos sem ruído; "Como superar" sem costura; perguntas × "Não cobrir"; sem marcador de relato; destino planejado condicional.
+- [x] D · CSV de vídeo: corte só com utilidade ≥ 1; cena pela ideia; H3 só é passo quando é ação; "Por que em lista"; voz compartilhada e trava por sentido.
+- [x] Correção da revisão: régua sem falso positivo em orientação, orientar contra, modal, tese negada com mecanismo, finalidade do guia e público que só define o sujeito; efeito comercial do caso real ("se tornam pacientes", "capta", "recebem mais", "fecham mais", "a agenda enche", "dá mais alcance"). `tests/radar-fonte-por-sentido.test.mts`.
+- [x] Correção da revisão: H1, alternativas, SEO title, meta, próximo passo, ALT e legenda pela trava no CSV "Para escrever".
+- [x] Correção da revisão: mapa da planta antiga (só a principal nas comuns; a complementar posta numa seção casa; o sem par nunca antes da 1ª seção; medidas somam os H2 mantidos).
+- [x] Correção da revisão: proteção da planta antiga no export ("Ordem de leitura", "Cena repetida", ângulo só com G/D/O).
+- [x] Correção da revisão: pergunta usada como evidência da planta fora do "Não cobrir"; pergunta que é a keyword de outro do Silo vai a ele.
+- [x] Correção da revisão: absoluta listada e contada no CSV de vídeo; fato com fonte sem número quando não há corte de capítulo.
+- [x] Correção da revisão: esperas antigas concluídas ("a definir", "conferir antes") no CSV "Para escrever", no CSV de vídeo e na linha de vídeo selecionado; snapshot F4.4 renovado com prova por reversão.
+- [x] Correção da revisão: catálogo MCP sem as notas que contradiziam o comportamento novo; nota da correção.
+- [ ] **Dono (homologação):** reexportar os dois CSVs do artigo `instagram-nao-traz-pacientes` (tela) e conferir: o mapa (H2 "Instagram não traz pacientes quando…" na seção 2, os outros 8 depois dela, a medida "+ 8 H2"), a "Ordem de leitura", a "Cena repetida", a trava no H1/meta/próximo passo/legenda, as perguntas (WhatsApp e "pela internet"), a lista "Fica fora" do vídeo com a absoluta, e o MCP `get_writer_foundations` com "versão corrente".
+- [ ] **Dono (decisão):** a Skill de voz real manda "registrar a pendência fora do texto publicável", "Destinos não resolvidos ficam nas pendências", "Separe texto publicável de pendências" e fala em "preencher" — o oposto do D10. O export a transcreve como a Marca escreveu (isenção explícita no teste). Ajustar o texto na Marca → Skills e prompts, se quiser o arquivo inteiro sem essas palavras.
+- [ ] **Dono (decisão, pago):** regerar ("Organizar de novo (IA)") os ~25 artigos-modelo antigos do Silo — o export os protege, mas só a planta nova traz o mapa decidido pela IA com a página lida, a 1ª seção prática e o ângulo como entrega. O painel avisa a versão montada antes das regras de 2026-10-08; nada regera sozinho (`ifMissing` reaproveita a versão do pacote). Começar pelos publicados; no CSV de vídeo do caso real, só a planta regerada (com evidências P/G/D/O por seção) devolve os cortes.
+- [ ] **Dono (decisão):** a ordem de publicação dos destinos planejados. O link para destino ainda não publicado entra com a URL final só quando o destino estiver no ar junto com o artigo ou antes; se o artigo for primeiro, a âncora sai como texto simples e o link só entra numa atualização posterior do artigo (esta rodada não cria nada que o acrescente sozinho). Publicar antes o Pilar e os destinos citados.
+- [x] Conferência do artigo-modelo: a nota B2 só conta a negação quando o H2 da 1ª seção não começa por "como", "o que fazer", "quando" ou "evite" ("Como não errar na bio" não paga mais a passada de correção).
+- [x] Ruído dos cabeçalhos (C5): "marco" só é mês com contexto de data; domínio de órgão (`.gov`, `.edu`, `.jus`…) não tem marca.
+- [ ] Ruído dos cabeçalhos (C5): domínio comercial cuja marca é palavra de dicionário ainda pode tirar cabeçalho legítimo como autopromoção — colher casos.
+- [x] Tempo da rota de geração do artigo-modelo: prazo único de 280 s; nova tentativa e passada de correção usam o que sobra e, sem 30 s, não são pedidas.
+- [ ] Medir no uso real o tempo da rota de geração com a leitura da página publicada.
+- [ ] CSV de vídeo: "Vídeo × artigo" ainda escolhe a seção com entrega prática ou a primeira; preferir a primeira com demonstração (H3 de ação). O classificador D3 trata gerúndio e pergunta sem "Como" como tópico — colher casos.
+- [ ] Título da lâmina (H2) e listas de passos e pontos (H3) continuam sem a trava (são cabeçalhos; a régua é de frase e marcaria "O papel do algoritmo…"). Se o dono quiser título travado, a régua precisa de um modo para cabeçalho.
+- [ ] Planta antiga com muitos H2 publicados sem par: ficam todos como seções próprias (conservador); o artigo pode passar das medidas da SERP. Avaliar, com o dono, se a instrução deve sugerir fundir os H2 que repetem o diagnóstico (decisão humana, não automática).
+- [ ] Régua por sentido: colher casos reais dos próximos exports (imperativo com relativa afirmativa, voz passiva, "chegam com intenção") antes de ampliar; a lista de imperativos é curta.
+- [ ] "trate como tema sensível até o Radar resolver" (conflito YMYL no pode_escrever do CSV "Para escrever") ainda é espera aberta; reescrever como instrução concluída numa próxima passada (muda o snapshot F4.4).
+- [ ] Validação manual da tela (dono): aviso de regras anteriores, bloco "Página publicada → planta" e célula "Parágrafos" em 360/768/1024/1440 px, claro e escuro.
+
 ## Revisão do CSV de vídeo competitivo (três revisores) — 2026-10-07
 
 - [x] Trava de fonte com polaridade em (b) e (c): a frase que nega o que o mercado repete (a tese do dono, do lado da fonte) fica no texto publicável; a que repete trava; a afirmação que a fonte contradiz sai de (b) e fica só em (c), com o motivo certo. Teste 31.

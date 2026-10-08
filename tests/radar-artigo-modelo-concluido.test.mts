@@ -35,12 +35,16 @@ test("a passada de correção: com pendência, uma chamada a mais; escolhe a de 
   const servidor = semComentarios(await ler("lib/server/radar-article-blueprint.ts"));
   const fechar = servidor.slice(servidor.indexOf("export async function fecharArtigoModelo"), servidor.indexOf("export async function editRadarArticleBlueprint"));
   assert.match(fechar, /const pendentes = radarArticleBlueprintPendingNotes\(primeira\.notes\)\.pending;/);
-  assert.match(fechar, /if \(pendentes\.length && input\.allowFix !== false\)/);
+  assert.match(fechar, /if \(pendentes\.length && input\.allowFix !== false && tetoDaCorrecao !== null\)/, "2026-10-08 · e só com tempo no prazo da rota");
+  assert.match(fechar, /const tetoDaCorrecao = radarArticleBlueprintCallTimeout\(input\.deadlineAt, Date\.now\(\)\);/);
+  assert.match(fechar, /timeoutMs: tetoDaCorrecao!/, "a correção usa o que sobra do prazo");
   assert.match(fechar, /radarArticleBlueprintPrompt\(input\.brief, \{ fix: \{ previous: input\.ai, pending: pendentes \} \}\)/);
   assert.match(fechar, /pending\.length <= pendentes\.length\) escolhida = corrigida/);
   assert.match(fechar, /catch \(error\) \{\n\s+console\.warn\("\[radar-article-blueprint\] correcao_falhou"/, "a correção falhando grava a primeira");
   assert.match(fechar, /radarSanitizeArticleBlueprint\(escolhida, input\.brief, \{ close: true \}\)/, "e a conferência fecha antes de gravar");
-  assert.match(servidor, /fecharArtigoModelo\(\{ provider, brief, ai: resposta\.ai, articleId: input\.articleId, allowFix: resposta\.calls === 1 \}\)/, "depois de uma nova tentativa, sem tempo para corrigir");
+  assert.match(servidor, /fecharArtigoModelo\(\{ provider, brief, ai: resposta\.ai, articleId: input\.articleId, allowFix: resposta\.calls === 1, deadlineAt: prazo \}\)/, "depois de uma nova tentativa, sem tempo para corrigir");
+  assert.match(servidor, /requestRadarArticleBlueprintAi\(\{ provider, brief, articleId: input\.articleId, deadlineAt: prazo \}\)/);
+  assert.match(servidor, /const prazo = Date\.now\(\) \+ RADAR_ARTICLE_BLUEPRINT_ROUTE_BUDGET_MS;/);
 
   const pedido = await ler("lib/radar/article-blueprint.ts");
   assert.match(pedido, /# CORREÇÃO OBRIGATÓRIA/);

@@ -370,8 +370,9 @@ test("8 · storyboard: estilo só com o que se afirma sem ver a imagem, referên
   /* Títulos que falam com o público da entrada ("pele oleosa"): os quatro são pertinentes, e os sinais se contam um a um. */
   const titulos = ["COMO cuidar da pele oleosa à noite 🌙", "Pele oleosa em 3 passos?", "Dermatologista e a pele oleosa", "Rotina noturna para pele oleosa"];
   const entrada = entradaNoturno({ authors: [{ name: "Dra. Paula Reis", specialty: "Dermatologia", source: "contribution" }] });
+  /* 2026-10-08 · D1: corte pede 1 ponto de utilidade — os passos sem demanda nem lacuna ficavam em 0 de 4; a seção cita a lacuna G1 do pacote. */
   const planta = plantaDe(entrada, [
-    { h2: "A ordem da noite", readerQuestion: "Qual a ordem do skincare noturno?", answerFirst: "Limpe, trate e hidrate.", practical: "limpeza; sérum; hidratante" },
+    { h2: "A ordem da noite", readerQuestion: "Qual a ordem do skincare noturno?", answerFirst: "Limpe, trate e hidrate.", practical: "limpeza; sérum; hidratante", evidence: ["G1"] },
     { h2: "O que evitar", readerQuestion: "O que não fazer no skin care noturno?", answerFirst: "Não misture ativos sem orientação.", practical: "rotina com três ácidos → um ativo por noite → pele sem irritação" },
   ]);
   const row = linhaDe(entrada, { youtube: youtubeLongos(titulos, 0), blueprint: planta, lentesCongeladas: lentesCongeladas({ "desktop-windows": ["images"], "desktop-macos": ["images"], "mobile-android": ["organic"], "mobile-ios": ["images"] }) });
@@ -391,14 +392,22 @@ test("8 · storyboard: estilo só com o que se afirma sem ver a imagem, referên
   assert.match(story, /^- Cena 2 · O que evitar: [^\n]*imagem: 3 telas: antes "rotina com três ácidos" · ajuste "um ativo por noite" · depois "pele sem irritação"/m);
   assert.match(story, /^- Thumbnail: a promessa do título em poucas palavras; nos títulos pertinentes, número em 1 de 4 e pergunta em 1 de 4; rosto só de quem fala de fato \(aba Especialista: Dra\. Paula Reis\)\.$/m);
   /* Os cortes na vertical, os MESMOS da coluna de cortes. */
-  assert.match(story, /^- Corte 1 \(capítulo 1\): tela 1: "Qual a ordem do skincare noturno\?" · tela 2: o primeiro passo "limpeza" · tela final: o CTA do corte\.$/m);
+  /* 2026-10-08 · D2: a ideia ("Limpe, trate e hidrate") nomeia a limpeza — a tela 2 é o passo que ela nomeia, não "o primeiro passo" por posição. */
+  assert.match(story, /^- Corte 1 \(capítulo 1\): tela 1: "Qual a ordem do skincare noturno\?" · tela 2: o passo que a ideia nomeia "limpeza" · tela final: o CTA do corte\.$/m);
   assert.match(story, /^- Corte 2 \(capítulo 2\): tela 1: "O que não fazer no skin care noturno\?" · tela 2: o ajuste "um ativo por noite" a partir do antes "rotina com três ácidos" · tela final: o CTA do corte\.$/m);
   assert.match(row.cortes_para_redes, /^1\. Do capítulo 1 \(A ordem da noite\):$/m);
   assert.match(row.cortes_para_redes, /^2\. Do capítulo 2 \(O que evitar\):$/m);
   /* O carrossel leva texto na imagem: a regra "sem texto legível" é dita como a que NÃO vale, e nenhuma lâmina a pede. */
   assert.match(story, /^Storyboard do carrossel \(o carrossel leva texto na imagem: a regra "sem texto legível" do plano visual do artigo não vale aqui; 4 lâminas, o texto de cada uma em cortes_para_redes\):$/m);
   for (const lamina of story.split("\n").filter(linha => linha.startsWith("- Lâmina"))) assert.doesNotMatch(lamina, /sem texto/i, lamina);
-  assert.match(story, /^- Lâmina 2: texto = o título "A ordem da noite" e o Apoio publicável · visual = os passos em lista: limpeza; sérum; hidratante \(lista, como em \d+ de \d+ páginas concorrentes\)\.$/m);
+  /*
+   * 2026-10-08 · D4: "(lista, como em N de N páginas concorrentes)" em cada
+   * lâmina soava como carrossel observado. A contagem é das páginas lidas, dita
+   * uma vez depois das lâminas, e diz que carrossel ninguém contou.
+   */
+  assert.match(story, /^- Lâmina 2: texto = o título "A ordem da noite" e o Apoio publicável · visual = os passos em lista: limpeza; sérum; hidratante\.$/m);
+  assert.match(story, /^Por que em lista: é a estrutura das páginas concorrentes lidas \(\d+ de \d+ usam listas\), não uma contagem de carrosséis — o Radar não lê as lâminas dos carrosséis\.$/m);
+  assert.doesNotMatch(story, /como em \d+ de \d+ páginas concorrentes/);
   /* Nenhum adjetivo de estilo em nenhuma das três colunas novas. */
   for (const coluna of ["storyboard_visual", "concorrencia_curtos_e_carrossel", "cadeia_competitiva"] as const) assert.doesNotMatch(row[coluna], ADJETIVO_DE_ESTILO, coluna);
   assert.deepEqual(radarVideoTitleSignals([{ title: "SKINCARE NOITE 🌑", channelName: "Thaíse Santos | Farmacêutica" }, { title: "CLT e skin care?", channelName: null }]), { total: 2, caixaAlta: 1, numero: 0, pergunta: 1, emoji: 1, credencial: 1 }, "sigla de 3 letras não é caixa alta");

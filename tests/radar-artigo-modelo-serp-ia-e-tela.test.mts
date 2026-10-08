@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildRadarArticleBlueprintBrief } from "../lib/radar/article-blueprint.ts";
-import { requestRadarArticleBlueprintAi, RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS } from "../lib/server/radar-article-blueprint.ts";
+import { requestRadarArticleBlueprintAi, radarArticleBlueprintCallTimeout, RADAR_ARTICLE_BLUEPRINT_ROUTE_BUDGET_MS, RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS } from "../lib/server/radar-article-blueprint.ts";
 import { StructuredAIError } from "../lib/server/structured-ai.ts";
 import { radarPhase1Action } from "../lib/radar/serp-phase1.ts";
 import {
@@ -157,6 +157,22 @@ test("JSON fora do formato sem corte também ganha uma nova tentativa; erro do p
   assert.equal(credencial.pedidos.length, 1, "credencial recusada não é repetida");
   assert.ok(segundo.erro instanceof StructuredAIError);
   assert.equal(segundo.avisos.some(item => item[0] === "[radar-article-blueprint] nova_tentativa"), false);
+});
+
+test("2026-10-08 · o prazo da rota: a nova tentativa usa o que sobra, e sem 30 s não é pedida", async () => {
+  assert.equal(radarArticleBlueprintCallTimeout(undefined, 0), RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.retry, "sem prazo, o teto de sempre");
+  assert.equal(radarArticleBlueprintCallTimeout(1_000_000, 1_000_000 - 200_000), RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.retry, "sobra muito: o teto de sempre");
+  assert.equal(radarArticleBlueprintCallTimeout(1_000_000, 1_000_000 - 60_000), 60_000, "sobra pouco: só o que sobra");
+  assert.equal(radarArticleBlueprintCallTimeout(1_000_000, 1_000_000 - 29_999), null, "menos de 30 s: não pede");
+  assert.ok(RADAR_ARTICLE_BLUEPRINT_ROUTE_BUDGET_MS < 300_000, "o prazo cabe no maxDuration da rota");
+
+  const cortada = JSON.stringify(respostaValida()).slice(0, 120);
+  const { pedidos, fetchImpl } = provedorFalso([() => envelope(cortada, "length")]);
+  const { erro } = await semAvisos(() => requestRadarArticleBlueprintAi({ provider: PROVEDOR, brief: brief(), fetchImpl, deadlineAt: Date.now() + 10_000 }));
+  assert.equal(pedidos.length, 1, "sem tempo no prazo, nenhuma segunda chamada");
+  assert.ok(erro instanceof StructuredAIError);
+  assert.match((erro as Error).message, /^A resposta da IA veio cortada/);
+  assert.doesNotMatch((erro as Error).message, /JSON/);
 });
 
 /* ============================== finalizar → organizar ============================== */

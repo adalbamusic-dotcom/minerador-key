@@ -32,7 +32,7 @@
  */
 
 import { RADAR_EVIDENCE_HIERARCHY, RADAR_EVIDENCE_LABEL, type RadarEvidenceSource } from "../radar/evidence-authority.ts";
-import { radarBrandVoiceSlotOf, radarBrandVoiceStatusLabel, radarBrandVoiceText, type RadarBrandVoiceSection, type RadarBrandVoiceSlot } from "../radar/brand-voice.ts";
+import { radarBrandVoiceDeliverableStatusLabel, radarBrandVoiceSlotOf, radarBrandVoiceStatusLabel, radarBrandVoiceText, type RadarBrandVoiceSection, type RadarBrandVoiceSlot } from "../radar/brand-voice.ts";
 import { RADAR_WRITER_MAY_NOT } from "./writer-handoff.ts";
 
 /* ================================ limites ================================ */
@@ -891,12 +891,13 @@ export const WRITER_FOUNDATIONS_TRIM_ORDER = Object.freeze([
    * protege (conflitos, limitações, especialista, pendências). As do fim saem
    * primeiro; a planta inteira continua em `radar.blueprint/<id>`.
    */
-  "competitors", "questions", "video.results", "articleBlueprint.sections", "conflicts", "limitations", "specialist.items", "pendingDecisions",
+  /* 2026-10-08 · o mapa da atualização (só no publicado com página lida) cede antes das seções da planta. */
+  "competitors", "questions", "video.results", "articleBlueprint.publishedMap", "articleBlueprint.sections", "conflicts", "limitations", "specialist.items", "pendingDecisions",
 ] as const);
 
 type CortavelDosFundamentos = (typeof WRITER_FOUNDATIONS_TRIM_ORDER)[number];
 /** 2026-10-02 · só existe com artigo-modelo aprovado: quem chama sem ele não precisa dizer onde ler. */
-type CortavelOpcionalDosFundamentos = "articleBlueprint.sections";
+type CortavelOpcionalDosFundamentos = "articleBlueprint.sections" | "articleBlueprint.publishedMap";
 
 /**
  * CABE OS FUNDAMENTOS NO TETO. Cada passo corta pela metade a lista da vez
@@ -1069,7 +1070,21 @@ export const WRITER_BLUEPRINT_PROJECTION_LIMITS = Object.freeze({
 });
 
 export type WriterBlueprintLink = { anchor: string; label: string | null; destination: string | null; status: string | null };
-export type WriterBlueprintSection = { h2: string; readerQuestion: string | null; answerFirst: string | null; h3: string[]; internalLinks: WriterBlueprintLink[] };
+/**
+ * 2026-10-08 · Uma frase da planta que só entra no texto com fonte do pacote
+ * (régua por frase do Radar, `radarSentenceNeedsSource`): `field` diz de onde
+ * ela vem ("promise", "closing.cta", "answerFirst", "explain"…), `label` o
+ * motivo curto. Sem fonte, a frase sai delimitada ou fica fora; o motivo nunca
+ * vai ao texto. Montada em `lib/redator/writer-blueprint-for-writing.ts`.
+ */
+export type WriterBlueprintSourceNeed = { field: string; sentence: string; label: string };
+/** 2026-10-08 · Um H2 da página publicada e o destino dele na planta, numa frase concluída (mapa da atualização). */
+export type WriterBlueprintPublishedMapItem = { current: string; kind: "ABSORBED" | "CLOSING" | "REMOVED" | "KEEP"; section: number | null; line: string };
+export type WriterBlueprintSection = {
+  h2: string; readerQuestion: string | null; answerFirst: string | null; h3: string[]; internalLinks: WriterBlueprintLink[];
+  /** 2026-10-08 · Aditivo: as frases desta seção que só entram com fonte. Ausente quando nenhuma. */
+  needsSource?: WriterBlueprintSourceNeed[];
+};
 
 export type WriterArticleBlueprintFoundation = {
   blueprintId: string;
@@ -1089,14 +1104,29 @@ export type WriterArticleBlueprintFoundation = {
   /** A versão da Skill de voz que a IA recebeu ao montar a planta (ausente em versões antigas). */
   voiceUsed: { versionId: string | null; version: number | null; name: string | null } | null;
   readAt: string;
+  /**
+   * 2026-10-08 · Aditivos, presentes só quando existem: as frases fora das
+   * seções (título, promessa, ângulo, abertura, fechamento) que só entram com
+   * fonte, e o mapa da atualização do artigo publicado (para onde vai cada H2
+   * de hoje). Ver `lib/redator/writer-blueprint-for-writing.ts`.
+   */
+  needsSource?: WriterBlueprintSourceNeed[];
+  publishedMap?: WriterBlueprintPublishedMapItem[];
 };
 
 export type WriterBrandVoiceFoundation = {
   versionId: string;
   version: number | null;
   name: string;
-  /** Estado de tela da Marca: a regra vale também para o rascunho, e o texto diz qual. */
+  /** Estado de tela da Marca: a regra vale também para o rascunho (o estado técnico fica aqui). */
   status: "draft" | "pending_approval" | "active";
+  /**
+   * 2026-10-08 (correção da revisão) · O rótulo de ENTREGÁVEL (D10 do dono: CSV,
+   * Redator e MCP saem concluídos): "ativa" ou "versão corrente" na Marca — o
+   * mesmo do CSV (`radarBrandVoiceDeliverableStatusLabel`). Antes era o estado
+   * de tela ("em rascunho", "aguardando aprovação"); quem precisa do estado lê
+   * `status`.
+   */
   statusLabel: string;
   /** CTA e transição comercial, como a marca escreveu (cortado). */
   cta: string | null;
@@ -1187,9 +1217,17 @@ const ESTADO_DE_TELA_DA_SKILL: Readonly<Record<string, WriterBrandVoiceFoundatio
   approved: "active", proposed: "pending_approval", draft: "draft",
 });
 
-/** O rótulo do estado na Marca ("ativa", "em rascunho", "aguardando aprovação") a partir do estado técnico. */
+/** O rótulo do estado na Marca ("ativa", "em rascunho", "aguardando aprovação") a partir do estado técnico — rótulo de TELA. */
 export const writerBrandVoiceStatusLabel = (lifecycle: string): string =>
   radarBrandVoiceStatusLabel(ESTADO_DE_TELA_DA_SKILL[lifecycle] ?? "draft");
+
+/**
+ * 2026-10-08 (correção da revisão) · O rótulo de ENTREGÁVEL a partir do estado
+ * técnico: "ativa" ou "versão corrente" (D10 — o MCP e o pacote da IA são
+ * entregáveis; "em rascunho" fica nas telas da Marca e do Radar).
+ */
+export const writerBrandVoiceDeliverableStatusLabel = (lifecycle: string): string =>
+  (radarBrandVoiceDeliverableStatusLabel(ESTADO_DE_TELA_DA_SKILL[lifecycle] ?? "draft") === "ativa" ? "ativa" : "versão corrente");
 
 const semAcentoMinusculo = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 /** Dentro de "structure" e "reader", o que fala de CTA, oferta e transição vem na frente. */
@@ -1229,7 +1267,7 @@ export function writerBrandVoiceFoundation(input: {
     version: input.versionNumber,
     name: cortarTexto(input.name, 120) ?? cortarTexto(input.title, 120) ?? WRITER_BRAND_VOICE_DEFINITION_KEY,
     status,
-    statusLabel: radarBrandVoiceStatusLabel(status),
+    statusLabel: writerBrandVoiceDeliverableStatusLabel(input.lifecycle),
     cta: cortarTexto(radarBrandVoiceText(doCta), L.voiceExcerptChars),
     voice: cortarTexto(radarBrandVoiceText(daVoz), L.voiceExcerptChars),
     otherSections: secoes.filter(secao => !usadas.has(secao))

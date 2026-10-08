@@ -560,7 +560,12 @@ export async function assembleRadarPortableExport(input: {
      * nova — o CSV já sai com a estrutura organizada, marcada como proposta
      * (`approval`, que nunca é gravado). O Redator continua lendo só o aprovado.
      */
-    const artigosModelo = await readRadarArticleBlueprintsForExport(input.supabase as never, input.brandId, montadas.map(item => ({ articleId: item.articleId, bundleHash: item.bundleHash })));
+    /* 2026-10-08 · B4 · as keywords do artigo vão junto: a que traz o nome antigo de um produto o preserva na planta. */
+    const artigosModelo = await readRadarArticleBlueprintsForExport(input.supabase as never, input.brandId, montadas.map(item => ({
+      articleId: item.articleId,
+      bundleHash: item.bundleHash,
+      keywords: [item.entrada.article.principalKeyword || "", ...(item.entrada.article.secondaryKeywords || [])].filter(Boolean),
+    })));
     for (const item of montadas) item.blueprint = artigosModelo.get(item.articleId) ?? null;
   }
 

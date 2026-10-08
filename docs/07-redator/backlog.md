@@ -1,5 +1,18 @@
 # Backlog — Redator
 
+## Planta para quem escreve e voz de entregável — 2026-10-08
+
+- [x] `writerArticleBlueprintForWriting`: nomes atuais, `needsSource` (topo e seção) e `publishedMap` nos fundamentos, no pacote da IA interna, na semeadura e na fatia.
+- [x] Regras `BLUEPRINT_SOURCE_RULE` e `PUBLISHED_MAP_RULE` nos prompts.
+- [x] Correção da revisão: o próximo passo real (orientação) não vai mais ao `needsSource`; a régua do Radar pega o efeito comercial do caso real.
+- [x] Correção da revisão (D10 no MCP): `brandVoice.statusLabel` e a nota da voz no manifesto com "ativa"/"versão corrente"; estado técnico em `status`.
+- [ ] **Dono (homologação, grátis):** pelo MCP, no artigo `instagram-nao-traz-pacientes`, conferir em `get_writer_foundations` o "Perfil da Empresa no Google", o `needsSource` com as frases do caso (converte visitantes, canais que convertem, procuram no Google, não no Instagram, poucos se tornam pacientes) SEM o próximo passo, e `brandVoice.statusLabel` = "versão corrente"; na semeadura, a voz "versão corrente na Marca".
+- [ ] `publishedMap` do artigo-modelo antigo no Redator: hoje só a planta que leu a página ao organizar o traz; o CSV "Para escrever" casa os títulos com a página lida no ar. Decidir se o Redator lê a página publicada (GET) para o mesmo casamento.
+- [ ] O `readAt` do mapa cortado no pacote da seção não tem teste próprio (só o corte nos fundamentos tem).
+- [x] Semeadura com o rótulo de entregável da voz e a lista das frases da planta que só entram com fonte (promessa, CTA e próximo passo).
+- [ ] `needsSource` não usa as afirmações do mercado (MERCADO_SEM_FONTE e MERCADO_X_FONTE): a projeção não tem as projeções do pacote; o pacote da seção leva claims e marketVsFact à parte. Avaliar se vale juntar, depois da homologação.
+- [ ] **Dono (entrega):** o módulo novo `lib/redator/writer-blueprint-for-writing.ts` ainda não é rastreado pelo git; vai no mesmo commit e deploy que as mudanças do Radar de 2026-10-08 que ele importa.
+
 ## Artigo-modelo e voz da marca — 2026-10-02
 
 - [x] Artigo-modelo aprovado e voz da marca nos fundamentos, manifesto, fatia, IA interna e semeadura (leitura ao vivo).

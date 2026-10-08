@@ -269,7 +269,8 @@ export function radarPortableVideoUsageLine(item: RadarPortableVideoSelected, pl
   /* 2026-10-02 · o resumo diz de onde veio: fala do vídeo (começo da transcrição) ou texto do canal. */
   if (item.summary) {
     partes.push(item.summarySource === "TRANSCRIPT"
-      ? `. Começo da transcrição (fala do vídeo, conferir antes de usar): "${item.summary}"`
+      /* 2026-10-08 (correção da revisão) · D10: a regra concluída, não "conferir antes de usar". */
+      ? `. Começo da transcrição (fala do vídeo, transcrição automática: cite só o que o vídeo confirma): "${item.summary}"`
       : item.summarySource === "DESCRIPTION"
         ? `. Descrição do canal (sem transcrição; texto do canal, não fala do vídeo): ${item.summary}`
         : `. Do que trata: ${item.summary}`);

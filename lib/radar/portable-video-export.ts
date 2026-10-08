@@ -14,11 +14,10 @@ import type { RadarSiloExportPlan } from "./portable-silo-export.ts";
 import {
   radarBrandVoiceAbsence,
   radarBrandVoiceBySlot,
-  radarBrandVoiceLabel,
+  radarBrandVoiceDeliverableLabel,
   radarBrandVoiceOwnUrls,
   radarBrandVoiceSectionIsArticleDelivery,
   radarBrandVoiceText,
-  type RadarBrandVoice,
   type RadarBrandVoiceSection,
   type RadarBrandVoiceState,
 } from "./brand-voice.ts";
@@ -50,7 +49,8 @@ import {
   type RadarWritingUnit,
 } from "./portable-writing-export.ts";
 /* 2026-10-07 · a trava de fonte (item 5) e a leitura competitiva (item 1) moram em módulos próprios do Radar. */
-import { radarClaimCommonStems, radarClaimGate, radarClaimGateReason, radarPendingClaims, type RadarClaimGate, type RadarPendingClaim } from "./pending-claims.ts";
+/* 2026-10-08 · e a régua por frase (`radarSentenceNeedsSource`, a mesma porta lida por sentido) serve às checagens de sim ou não. */
+import { radarClaimCommonStems, radarClaimGate, radarClaimGateReason, radarPendingClaims, radarSentenceNeedsSource, type RadarClaimGate, type RadarPendingClaim } from "./pending-claims.ts";
 import {
   RADAR_VIDEO_PERTINENT,
   RADAR_VIDEO_RELEVANCE_LABELS as RELEVANCIA,
@@ -297,9 +297,11 @@ const util = (valor: unknown): string | null => {
  * CSV para escrever, que não muda, mas espera aberta no CSV de vídeo, que sai
  * concluído. Aqui a versão em uso é dita pelo que ela é — a corrente da Marca,
  * a mesma regra de `resolveBrandSkill` —; a ativa continua dita "ativa".
+ *
+ * 2026-10-08 · D5: o `rotuloDaVoz` local saiu. A regra mora em `brand-voice.ts`
+ * (`radarBrandVoiceDeliverableLabel`), a mesma de todo entregável — o CSV para
+ * escrever também —, com o texto de antes.
  */
-const rotuloDaVoz = (voz: Pick<RadarBrandVoice, "name" | "version" | "status">) =>
-  (voz.status === "active" ? radarBrandVoiceLabel(voz) : `Skill "${voz.name}" v${voz.version} (versão corrente na Marca)`);
 
 /* 2026-10-02 · "o artigo" ou "a landing page": o destino do vídeo é a página que a linha descreve, de qualquer tipo. */
 const aUnidade = (unidade: RadarWritingUnit) => `${unidade.feminine ? "a" : "o"} ${unidade.noun}`;
@@ -327,7 +329,7 @@ function publicoDaVoz(voz: RadarBrandVoiceState | undefined): { texto: string; o
   const titulos = secoes.map(secao => entreAspas(secao.heading.replace(/^\d+[.)]\s*/, ""))).join(", ");
   return {
     texto: cortar(secoes.map(secao => secao.body.trim()).join(" ").replace(/\s*\n+\s*/g, " "), LIMITES.audienceChars),
-    origem: `${titulos} da Skill de voz da marca, ${rotuloDaVoz(voz.voice)}`,
+    origem: `${titulos} da Skill de voz da marca, ${radarBrandVoiceDeliverableLabel(voz.voice)}`,
   };
 }
 
@@ -349,7 +351,8 @@ function colunaTema(input: RadarPortableExportInput, p: RadarWritingProjections,
     ? `Público: ${doArtigo}`
     : daVoz
       ? `Público: ${daVoz.texto}\nOrigem do público: o artigo não define; vem do trecho ${daVoz.origem}.`
-      : "Público: a definir (o artigo não define público e a marca não tem Skill de voz com o público).";
+      /* 2026-10-08 (correção da revisão) · D10: sem público dito, fala-se com quem faz a busca — concluído, não "a definir". */
+      : `Público: quem busca ${principal ? entreAspas(principal) : "o tema desta linha"} (o artigo não define público e a marca não tem Skill de voz com o público).`;
   return [
     `Tema (keyword principal): ${principal ? comVolume(principal) : "não resolvida no pacote"}`,
     ...(p.assunto ? [`Assunto (tronco): ${p.assunto.phrase}`] : []),
@@ -974,7 +977,7 @@ function linhaDoSelecionado(item: RadarPortableVideoSelected, artigoModelo: Rada
   } else if (item.transcriptStart && item.summarySource !== "TRANSCRIPT") {
     extras.push(item.transcriptBody
       ? `  Começo da transcrição (nenhum trecho do tema achado no texto lido; conferir no vídeo): "${item.transcriptStart}"`
-      : `  Começo da transcrição (fala do vídeo, conferir antes de usar): "${item.transcriptStart}"`);
+      : `  Começo da transcrição (fala do vídeo, transcrição automática: cite só o que o vídeo confirma): "${item.transcriptStart}"`);
   }
   if (idioma === "en") extras.push("  Fala em inglês: traduza e revise antes de usar; citação só traduzida e atribuída ao canal.");
   else if (corpo) extras.push("  Transcrição automática: confira as palavras no vídeo antes de citar (o reconhecimento erra nomes e termos).");
@@ -1058,7 +1061,7 @@ type Capitulo = {
    * 2026-10-07 (revisão) · `porta` (aditivo): a trava inteira, para a lista
    * encurtar a afirmação citada quando a célula aperta — sem perder a frase.
    */
-  travadas?: Array<{ frase: string; motivo: string; porta?: Extract<RadarClaimGate, { estado: "TRAVADA" }> }>;
+  travadas?: Array<{ frase: string; motivo: string; porta?: Extract<RadarClaimGate, { estado: "TRAVADA" }>; /** 2026-10-08 (correção) · frase absoluta (regra universal), fora do texto publicável mesmo sem a trava. */ absoluta?: boolean }>;
   /**
    * 2026-10-07 (revisão) · O "Entregar" curto, para quando a coluna de roteiro
    * encolhe: a mesma instrução sem repetir a pergunta do público (que está na
@@ -1074,6 +1077,12 @@ type Capitulo = {
    * CSV real: ideia com três táticas e cena com uma).
    */
   passosDaIdeia?: string[];
+  /**
+   * 2026-10-08 · D2 (aditivo) · A CENA DO CORTE quando a ideia não nomeia 2+
+   * passos: o passo que a ideia nomeia ou, sem casamento, a própria ideia numa
+   * situação. Ausente, o primeiro passo, como antes (capítulo sem planta).
+   */
+  cenaDoCorte?: { tipo: "PASSO"; passo: string } | { tipo: "IDEIA"; ideia: string };
   /** 2026-10-07 · A resposta que abre o capítulo existia, não era absoluta e a trava a tirou. */
   aberturaTravada?: boolean;
   /** 2026-10-07 · Os ids de evidência que a seção cita (evidence e from): a demanda e a oportunidade do corte. */
@@ -1108,7 +1117,120 @@ type Demonstracao =
   | { tipo: "ANTES_DEPOIS"; objeto: string | null; antes: string; ajuste: string; depois: string | null }
   | { tipo: "PASSOS"; objeto: string | null; passos: string[] }
   | { tipo: "ACAO"; objeto: string | null; acao: string }
-  | { tipo: "NENHUMA"; contexto: string | null };
+  /* 2026-10-08 · D3 · `topicos` (aditivo): os H3 do capítulo explicativo (2 ou mais), ditos como pontos, nunca como passos. */
+  | { tipo: "NENHUMA"; contexto: string | null; topicos?: string[] };
+
+/*
+ * ===== 2026-10-08 · D3 · DEMONSTRAÇÃO = AÇÕES (CSV de vídeo de 08/10) =====
+ *
+ * "N telas, uma por passo" listava H3 SUBSTANTIVOS como passos: "O papel do
+ * algoritmo na entrega de conteúdo; Por que seguidores não são sinônimo de
+ * pacientes" — e o capítulo 1 virou corte com a cena "só o primeiro passo — O
+ * papel do algoritmo…", o tema da afirmação que a trava tirou. Agora o H3 só
+ * conta como passo quando é AÇÃO: imperativo ("Otimize seu perfil", "Crie
+ * conteúdo", "Use stories"), infinitivo ("Escolher o tema") ou "Como +
+ * infinitivo" ("Como medir o perfil"); "Passo 2:" e "Etapa 2:" declaram a
+ * sequência. Com menos de duas ações, a seção é explicativa: não vira corte
+ * nem carrossel de passos, e os H3 entram como os PONTOS do capítulo.
+ *
+ * A leitura é pela forma da primeira palavra, sem dicionário de verbos: as
+ * terminações que só verbo tem ("-ize", "-ione", "-ifique", "-ure"…), uma
+ * lista curta dos imperativos de manual que a terminação não separa de
+ * substantivo ("Faça", "Grave", "Mostre") e o imperativo seguido de artigo ou
+ * possessivo ("Ajuste o perfil", "Defina sua oferta"). Palavra acentuada
+ * ("Diagnóstico", "Análise") não é imperativo nem infinitivo. Limite
+ * declarado: gerúndio ("Integrando canais…") e pergunta que não começa por
+ * "Como" ("Investir em anúncio vale a pena?") contam como tópico.
+ */
+const ACENTO_GRAFICO = /[áàâãéêíóôõú]/;
+const ABRE_TOPICO = new Set([
+  "o", "a", "os", "as", "um", "uma", "uns", "umas", "por", "para", "pra", "de", "do", "da", "dos", "das", "no", "na", "nos", "nas", "em",
+  "com", "sem", "sobre", "entre", "ate", "que", "qual", "quais", "quando", "onde", "quanto", "quantos", "quantas", "porque", "quem",
+  "cada", "todo", "toda", "todos", "todas", "seu", "sua", "seus", "suas", "meu", "minha", "nosso", "nossa", "este", "esta", "esse",
+  "essa", "isso", "aquele", "aquela", "outro", "outra", "outros", "outras", "nova", "novo", "grande", "pequena", "pequeno",
+]);
+/* Depois do imperativo vem o objeto: artigo, possessivo, demonstrativo ou indefinido ("Ajuste o perfil", "Defina sua oferta"). */
+const DETERMINANTE_DO_OBJETO = new Set([
+  "o", "a", "os", "as", "um", "uma", "uns", "umas", "seu", "sua", "seus", "suas", "este", "esta", "estes", "estas", "esse", "essa",
+  "esses", "essas", "cada", "todo", "toda", "todos", "todas", "algum", "alguma", "alguns", "algumas", "isso", "tudo", "voce",
+]);
+/*
+ * Imperativos de manual que a terminação não separa de substantivo ("Mostre" ×
+ * "Mestre", "Agende" × "Agenda"). O que também é substantivo comum de H3
+ * ("Ajuste", "Teste", "Controle", "Escolha", "Venda", "Peça", "Filme") fica
+ * fora: só conta seguido de artigo ou possessivo ("Ajuste o perfil").
+ */
+const IMPERATIVO_DE_MANUAL = new Set([
+  "faca", "grave", "mostre", "demonstre", "evite", "aproveite", "solicite", "facilite", "habilite", "visite", "edite", "cite", "convide",
+  "agende", "marque", "coloque", "foque", "busque", "chame", "salve", "trabalhe", "espalhe", "experimente", "apresente", "aumente",
+  "comente", "documente", "oriente", "segmente", "implemente", "alimente", "complemente", "represente", "tente", "sustente", "enfrente",
+  "defina", "divida", "decida", "permita", "repita", "assuma", "resuma", "promova", "remova", "invista",
+  "assista", "insista", "siga", "consiga", "traga", "diga", "abra", "descubra", "sirva", "veja", "seja", "esteja", "proteja",
+  "leia", "responda", "atenda", "entenda", "aprenda", "defenda", "estenda", "compreenda", "prepare", "compare",
+  "separe", "repare", "poste", "conte", "monte", "aponte", "conecte", "colete", "registre", "cadastre", "fale", "instale", "revele",
+  "envolva", "desenvolva", "resolva", "escreva", "descreva", "comece", "ouca", "escute", "pergunte", "anote", "liste", "encontre",
+  "concentre", "fixe", "deixe", "feche", "acompanhe", "ganhe", "exiba", "receba", "capte", "adapte", "adote", "cuide", "valide",
+  "consolide", "estime", "cultive", "ative", "motive", "incentive", "desative", "aprove", "prove", "comprove", "renove", "mova", "una",
+  "junte", "pense", "repense", "transforme", "informe", "confirme", "tire", "retire", "inspire", "olhe", "fotografe", "trate",
+  "contrate", "aborde", "fuja", "regule", "simule", "estimule", "formule", "calcule", "vincule", "estude", "lembre", "converse",
+  "interaja", "engaje", "atraia", "converta", "colabore", "treine", "ensine", "invente", "movimente", "organize", "inclua",
+  "use", "abuse", "aposte", "saiba", "confira", "programe", "garanta", "prefira", "encerre",
+]);
+/* Terminações que só verbo tem (imperativo): "-ize", "-ione", "-ilhe", "-eie", "-eje", "-ique", "-gue", "-ie", "-ue", "-ure", "-ere", "-ine", "-ise", "-ece", "-ore", "-rve", "-ude", "-uza", "-ua", "-enha", "-onha", "-ija", "-inja", "-screva". */
+const TERMINACAO_DO_IMPERATIVO = /(?:iz|ion|ilh|ei|ej|iqu|gu|i|(?<![qg])u|ur|er|in|is|ec|or|rv|(?<!t)ud)e$|(?:uz|u|enh|onh|ij|inj|screv)a$/;
+/* O substantivo, o adjetivo e o empréstimo que a terminação confunde com verbo. */
+const NAO_E_VERBO = new Set([
+  "sangue", "dengue", "mangue", "gangue", "ringue", "merengue", "bumerangue", "selfie", "cookie", "brownie", "smoothie", "lingerie",
+  "hippie", "rookie", "newbie", "zombie", "indie", "movie", "blue", "true", "value", "issue", "revenue", "venue", "tissue", "dique",
+  "pique", "tique", "chique", "boutique", "butique", "cacique", "alambique", "unique", "technique", "manicure", "pedicure", "feature",
+  "nature", "future", "culture", "picture", "measure", "texture", "posture", "before", "store", "score", "core", "more", "here", "where",
+  "there", "vitrine", "cine", "online", "offline", "pipeline", "timeline", "headline", "deadline", "guideline", "baseline", "routine",
+  "magazine", "line", "crise", "expertise", "premise", "franchise", "size", "prize", "prece", "piece", "rua", "lua", "sua", "tua", "nua",
+  "crua", "perua", "senha", "resenha", "lenha", "ordenha", "vergonha", "cegonha", "pamonha", "fronha", "cabeca", "grande", "mestre",
+  "lugar", "celular", "popular", "similar", "particular", "regular", "familiar", "militar", "solar", "escolar", "exemplar", "auxiliar",
+  "preliminar", "singular", "circular", "titular", "vulgar", "peculiar", "par", "lar", "bar", "mar", "jantar", "olhar", "colar", "radar",
+  "avatar", "webinar", "seminar", "bazar", "altar", "nectar", "calendar", "star", "polar", "lunar", "mulher", "colher", "qualquer", "poder",
+  "prazer", "dever", "ser", "lazer", "laser", "poster", "cluster", "master", "teaser", "freelancer", "influencer", "designer", "manager",
+  "leader", "trailer", "container", "folder", "header", "footer", "super", "uber", "filter", "slider", "spoiler", "tinder", "messenger",
+  "printer", "computer", "marketer", "partner", "hamburger", "flyer", "banner", "newsletter", "twitter", "blogger", "youtuber", "trainer",
+  "poker", "dealer", "reader", "writer", "copywriter", "storyteller", "broker", "sticker", "timer", "hacker", "gamer", "booster", "elixir",
+  "nadir",
+]);
+const INFINITIVO = /^[a-z]{1,}(?:ar|er|ir)$/;
+/* Empréstimo do inglês em "-er" ("banner", "newsletter", "follower"): consoante dobrada, k, w, y ou "-ier" não são infinitivo português. */
+const FORMA_ESTRANGEIRA = /[kwy]|nn|tt|ll|pp|gg|dd|bb|ff|ck|sh|th|ph|ier$/;
+
+const palavraDoH3 = (palavra: string | undefined) => (palavra || "").toLowerCase().replace(/^[^\p{L}]+|[^\p{L}-]+$/gu, "");
+const semAcentoDaPalavra = (palavra: string) => palavra.normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+function ehInfinitivo(palavra: string): boolean {
+  if (!palavra || ACENTO_GRAFICO.test(palavra)) return false;
+  const base = semAcentoDaPalavra(palavra);
+  return base.length >= 3 && INFINITIVO.test(base) && !NAO_E_VERBO.has(base) && !FORMA_ESTRANGEIRA.test(base);
+}
+
+function ehImperativo(palavra: string, seguinte: string): boolean {
+  if (!palavra) return false;
+  const base = semAcentoDaPalavra(palavra);
+  /* Ênclise com hífen ("Posicione-se", "Mostre-o") é verbo: substantivo não leva pronome colado. */
+  if (/^[a-z]{3,}-(?:se|o|a|os|as|lo|la|los|las|lhe|lhes|nos|me|te)$/.test(base)) return true;
+  if (ABRE_TOPICO.has(base) || NAO_E_VERBO.has(base)) return false;
+  if (IMPERATIVO_DE_MANUAL.has(base)) return true;
+  if (ACENTO_GRAFICO.test(palavra) || base.length < 3) return false;
+  /* "-eça" lida antes de tirar a cedilha: "Conheça", "Ofereça" — e não "biblioteca". */
+  if (/eça$/.test(palavra) || TERMINACAO_DO_IMPERATIVO.test(base)) return true;
+  return /[ae]$/.test(base) && DETERMINANTE_DO_OBJETO.has(semAcentoDaPalavra(seguinte));
+}
+
+/** 2026-10-08 · D3 · O H3 é AÇÃO (passo da demonstração) ou tópico (ponto do capítulo explicativo)? */
+export function radarVideoH3IsAction(h3: string): boolean {
+  const limpo = texto(h3).replace(/^\d+\s*[.)–—-]\s*/, "");
+  if (/^(?:passo|etapa)\s*\d+\s*[:.)–—-]/i.test(limpo)) return true;
+  const [primeira, segunda, terceira] = limpo.split(/\s+/).map(palavraDoH3);
+  if (primeira === "como") return segunda === "se" ? ehInfinitivo(terceira) : ehInfinitivo(segunda);
+  if (limpo.endsWith("?")) return false;
+  return ehInfinitivo(primeira) || ehImperativo(primeira, segunda);
+}
 
 /*
  * A régua da cena vai inteira UMA vez por coluna (`REGRA_DAS_CENAS`), depois
@@ -1120,7 +1242,9 @@ const REGRA_DAS_CENAS = "Regra das cenas (regras 9 e 17 da planta): exemplo fict
 
 function demonstracaoDaSecao(secao: { practical?: string | null; h3: readonly string[]; terms: readonly string[] }, conceito: string | null): Demonstracao {
   const pratica = texto(secao.practical);
-  const passosDosH3 = secao.h3.map(item => semPontoFinal(texto(item))).filter(Boolean);
+  /* 2026-10-08 · D3: só o H3 de AÇÃO é passo; os outros são os pontos do capítulo. */
+  const dosH3 = secao.h3.map(item => semPontoFinal(texto(item))).filter(Boolean);
+  const passosDosH3 = dosH3.filter(radarVideoH3IsAction);
   const nomeado = new Set(radarSemanticStems(`${pratica} ${passosDosH3.join(" ")}`));
   const termos = secao.terms.map(texto).filter(termo => {
     const raizes = radarSemanticStems(termo).filter(raiz => !RADAR_WRITING_FUNCTION_WORDS.has(raiz));
@@ -1137,10 +1261,19 @@ function demonstracaoDaSecao(secao: { practical?: string | null; h3: readonly st
     return { tipo: "ACAO", objeto, acao: semPontoFinal(pratica) };
   }
   if (passosDosH3.length >= 2) return { tipo: "PASSOS", objeto, passos: passosDosH3 };
-  return { tipo: "NENHUMA", contexto: conceito };
+  return { tipo: "NENHUMA", contexto: conceito, ...(dosH3.length >= 2 ? { topicos: dosH3 } : {}) };
 }
 
 const objetoDa = (demo: Demonstracao) => (demo.tipo !== "NENHUMA" && demo.objeto ? `objeto: ${demo.objeto} · ` : "");
+/* 2026-10-08 · D3 · os pontos do capítulo explicativo (H3 de tópico, 2 ou mais): na tela e na lâmina, ditos como pontos, nunca como passos. */
+const pontosDa = (demo: Demonstracao | undefined): string[] => (demo?.tipo === "NENHUMA" && (demo.topicos?.length || 0) >= 2 ? demo.topicos! : []);
+/* O contexto visual do capítulo explicativo: os pontos na tela, o conceito da imagem ou o título em destaque. */
+const contextoVisual = (demo: Extract<Demonstracao, { tipo: "NENHUMA" }>, limite = 0) => {
+  const curta = (valor: string) => (limite ? cortar(valor, limite) : valor);
+  const pontos = pontosDa(demo);
+  if (pontos.length) return `os pontos do capítulo na tela, um por vez: ${pontos.map(curta).join("; ")}`;
+  return demo.contexto ? curta(semPontoFinal(demo.contexto)) : "o título do capítulo em destaque";
+};
 
 /** O "Mostrar na tela" do capítulo: o que o editor prepara, pela demonstração da planta. */
 function mostrarNaTela(demo: Demonstracao): string {
@@ -1149,8 +1282,11 @@ function mostrarNaTela(demo: Demonstracao): string {
   }
   if (demo.tipo === "PASSOS") return `Mostrar na tela (demonstração da planta): ${objetoDa(demo)}passos: ${demo.passos.join("; ")} · prepare uma tela por passo ${REGUA_DA_CENA}.`;
   if (demo.tipo === "ACAO") return `Mostrar na tela (demonstração da planta): ${objetoDa(demo)}ação: ${demo.acao} · prepare a tela da ação ${REGUA_DA_CENA}.`;
-  return `Mostrar na tela: sem demonstração na planta (capítulo explicativo) — contexto visual: ${demo.contexto ? semPontoFinal(demo.contexto) : "o título do capítulo em destaque"}; este capítulo não vira corte.`;
+  return `Mostrar na tela: sem demonstração na planta (capítulo explicativo) — contexto visual: ${contextoVisual(demo)}; este capítulo não vira corte.`;
 }
+
+/** 2026-10-08 · D2 · A cena do corte de um capítulo, quando ela não é a demonstração inteira. */
+type CenaDoCorte = NonNullable<Capitulo["cenaDoCorte"]>;
 
 /**
  * O "Mostrar" do corte: UMA demonstração em 60 segundos — o ajuste com o antes e o depois, a ação, ou só o primeiro passo.
@@ -1159,8 +1295,13 @@ function mostrarNaTela(demo: Demonstracao): string {
  * automática do descompasso entre gancho, ideia e cena (D10), em vez da
  * instrução de "ficar no primeiro passo" que a cena do storyboard desmentia.
  * `limite` (aditivo) encurta cada parte quando a célula aperta.
+ * 2026-10-08 · D2 · `cena` (aditivo): com a ideia nomeando um passo só, o
+ * corte mostra ESSE passo; sem passo nomeado, a própria ideia numa situação.
+ * O CSV de 08/10 tinha a ideia "A atenção no feed é passageira…" e a cena "só
+ * o primeiro passo — O papel do algoritmo…": gancho, ideia e cena falando de
+ * três coisas. Ausente, o primeiro passo, como antes.
  */
-function mostrarNoCorte(demo: Demonstracao, passosDaIdeia: readonly string[] = [], limite = 0): string {
+function mostrarNoCorte(demo: Demonstracao, passosDaIdeia: readonly string[] = [], limite = 0, cena?: CenaDoCorte): string {
   const curta = (valor: string) => (limite ? cortar(valor, limite) : valor);
   if (demo.tipo === "ANTES_DEPOIS") {
     return demo.depois
@@ -1168,6 +1309,8 @@ function mostrarNoCorte(demo: Demonstracao, passosDaIdeia: readonly string[] = [
       : `o ajuste — ${curta(demo.ajuste)} — a partir do antes (${curta(demo.antes)}), com o resultado do ajuste na própria tela, num exemplo fictício identificado como ilustrativo`;
   }
   if (demo.tipo === "PASSOS" && passosDaIdeia.length >= 2) return `os ${passosDaIdeia.length} passos que a ideia nomeia, uma tela rápida por passo — ${passosDaIdeia.map(curta).join("; ")} — num exemplo fictício identificado como ilustrativo; o detalhe de cada passo fica no vídeo longo`;
+  if (demo.tipo === "PASSOS" && cena?.tipo === "PASSO") return `só o passo que a ideia nomeia — ${curta(cena.passo)} — num exemplo fictício identificado como ilustrativo; os outros passos ficam no vídeo longo`;
+  if (demo.tipo === "PASSOS" && cena?.tipo === "IDEIA") return `a ideia numa situação — ${curta(cena.ideia)} — num exemplo fictício identificado como ilustrativo; os passos do capítulo ficam no vídeo longo`;
   if (demo.tipo === "PASSOS") return `só o primeiro passo — ${curta(demo.passos[0])} — num exemplo fictício identificado como ilustrativo; os outros passos ficam no vídeo longo`;
   if (demo.tipo === "ACAO") return `a ação — ${curta(demo.acao)} — num exemplo fictício identificado como ilustrativo`;
   return "um exemplo concreto, identificado como ilustrativo";
@@ -1188,19 +1331,53 @@ function passosQueAFraseNomeia(frase: string, demo: Demonstracao, comuns: Readon
   return nomeados.length >= 2 ? nomeados : [];
 }
 
+/*
+ * 2026-10-08 · D2 · A CENA DO CORTE PELA IDEIA. Com a ideia nomeando menos de
+ * dois passos, o corte mostra o passo que ela nomeia (mais raízes que
+ * distinguem o assunto em comum; empate, o primeiro); sem nenhum, a própria
+ * ideia (a primeira oração) numa situação. A mesma régua de raiz de
+ * `passosQueAFraseNomeia`: nada se liga por semelhança solta.
+ */
+function cenaPelaIdeia(frase: string, demo: Extract<Demonstracao, { tipo: "PASSOS" }>, comuns: ReadonlySet<string>): CenaDoCorte {
+  const daFrase = palavrasDistintivas(frase, comuns).map(item => item.raiz);
+  const casadas = demo.passos.map(passo => palavrasDistintivas(passo, comuns).filter(item => nomeia(daFrase, item.raiz)).length);
+  const melhor = Math.max(0, ...casadas);
+  return melhor > 0
+    ? { tipo: "PASSO", passo: demo.passos[casadas.indexOf(melhor)] }
+    : { tipo: "IDEIA", ideia: semPontoFinal(frase.split(/;\s*/)[0] || frase) };
+}
+
 /** O "Visual" da lâmina: a mesma demonstração, no formato do carrossel (passos viram lista). */
 function visualDaLaminaPela(demo: Demonstracao): string {
   if (demo.tipo === "ANTES_DEPOIS") return `demonstração: ${demo.antes} → ${demo.ajuste}${demo.depois ? ` → ${demo.depois}` : ""}`;
   if (demo.tipo === "PASSOS") return `os passos em lista: ${demo.passos.join("; ")}`;
   if (demo.tipo === "ACAO") return `demonstração de ${demo.acao}`;
+  /* 2026-10-08 · D3: o capítulo explicativo lista os PONTOS dele — nunca "os passos". */
+  const pontos = pontosDa(demo);
+  if (pontos.length) return `os pontos do capítulo em lista: ${pontos.join("; ")}`;
   return demo.contexto ? semPontoFinal(demo.contexto) : "destaque do título";
 }
 
 /** 2026-10-07 · A trava de fonte da linha (item 5): as afirmações que pedem fonte e as raízes que não distinguem assunto. */
 export type RadarVideoClaimLock = { pendentes: readonly RadarPendingClaim[]; comuns: ReadonlySet<string> };
 
+/*
+ * 2026-10-08 · D5 · SEM TRAVA DA LINHA, VALE O SENTIDO. Quem chamava sem a
+ * trava (a premissa lida sozinha, `radarVideoPremise(planta)`) recebia tudo
+ * livre; agora vale o detector por sentido de `pending-claims.ts`, com a
+ * polaridade — a tese do dono ("o Instagram, sozinho, não enche a agenda")
+ * continua livre. O export sempre passa a trava inteira.
+ */
 const travar = (trava: RadarVideoClaimLock | null | undefined, frase: string | null | undefined, secao: number | null): RadarClaimGate =>
-  (trava ? radarClaimGate(frase, trava.pendentes, secao, { comuns: trava.comuns }) : { estado: "LIVRE" });
+  radarClaimGate(frase, trava?.pendentes || [], secao, { comuns: trava?.comuns });
+/*
+ * 2026-10-08 · D5 · A régua por frase do Grupo A (`radarSentenceNeedsSource`),
+ * para as checagens de sim ou não (capa de reserva, pergunta do gancho,
+ * premissa). É a mesma porta de `travar`; quem precisa do motivo para a lista
+ * "Fica fora" usa `travar`.
+ */
+const precisaDeFonte = (trava: RadarVideoClaimLock | null | undefined, frase: string | null | undefined, secao: number | null): boolean =>
+  radarSentenceNeedsSource(frase, { pendentes: trava?.pendentes, secao, comuns: trava?.comuns }).needs;
 const fonteDa = (porta: RadarClaimGate): string | null => (porta.estado === "COM_FONTE" ? porta.afirmacao.fonte?.url ?? null : null);
 const comFonte = (frase: string, fonte: string | null) => (fonte ? `${semPontoFinal(frase)} (fonte: ${fonte})` : frase);
 const FALA_DELIMITADA_ROTULO = "Fala delimitada, sem fonte: ";
@@ -1226,6 +1403,21 @@ const FALA_DELIMITADA_ROTULO = "Fala delimitada, sem fonte: ";
 const semAbsoluta = (frase: string | null | undefined): string | null => {
   const limpo = texto(frase);
   return limpo && !RADAR_ABSOLUTE_CLAIM.test(limpo) ? limpo : null;
+};
+/*
+ * 2026-10-08 (correção da revisão) · A ABSOLUTA NÃO SOME CALADA. O filtro de
+ * absoluta rodava antes da trava: "Pacientes com dor ou necessidade procuram no
+ * Google, não no Instagram" — uma das três afirmações do caso real — saía do
+ * vídeo sem entrar na lista "Fica fora", e o pode_gravar contava menos frases
+ * do que saíram. Ela continua fora do vídeo inteiro — também da fala, como a
+ * regra de 2026-10-02 decidiu (a premissa não se multiplica) —, mas agora é
+ * listada com o motivo e contada: ninguém a reintroduz achando que foi
+ * esquecida.
+ */
+export const RADAR_VIDEO_ABSOLUTE_CLAIM_REASON = "regra universal sem fonte: fica fora do vídeo, também da fala";
+const absolutaDe = (frase: string | null | undefined): string | null => {
+  const limpo = texto(frase);
+  return limpo && RADAR_ABSOLUTE_CLAIM.test(limpo) ? limpo : null;
 };
 
 /* Conector de diálogo não abre gancho: "Então como eu posso…?" funciona sozinho como "Como eu posso…?". */
@@ -1294,6 +1486,10 @@ function capitulosDaPlanta(planta: RadarArticleBlueprintPayload, trava: RadarVid
      * sustenta". O teto de dois itens do Explicar vale para as duas linhas
      * juntas, como antes (a lista "Fica fora" tem todas as travadas).
      */
+    /* 2026-10-08 (correção da revisão) · as absolutas (resposta e explicar): fora do vídeo, também da fala, mas listadas e contadas. */
+    const absolutas = [absolutaDe(secao.answerFirst), ...secao.explain.map(absolutaDe)]
+      .filter((frase): frase is string => Boolean(frase))
+      .map(frase => ({ frase, motivo: RADAR_VIDEO_ABSOLUTE_CLAIM_REASON, absoluta: true }));
     const delimitadas = [
       ...(aberturaTravada ? [resposta!] : []),
       ...restantes.filter(item => item.porta.estado === "TRAVADA").map(item => item.frase),
@@ -1301,13 +1497,15 @@ function capitulosDaPlanta(planta: RadarArticleBlueprintPayload, trava: RadarVid
     const portaDaPergunta = pergunta ? travar(trava, pergunta, indice) : null;
     const travadas = [
       ...(aberturaTravada && portaDaResposta?.estado === "TRAVADA" ? [{ frase: resposta!, motivo: portaDaResposta.motivo, porta: portaDaResposta }] : []),
+      ...absolutas,
       ...explicaveis.flatMap(item => (item.porta.estado === "TRAVADA" ? [{ frase: item.frase, motivo: item.porta.motivo, porta: item.porta }] : [])),
       ...(portaDaPergunta?.estado === "TRAVADA" ? [{ frase: pergunta!, motivo: portaDaPergunta.motivo, porta: portaDaPergunta }] : []),
     ];
     /*
      * 2026-10-07 · TODOS os links externos da seção (até 2): o vídeo lia só o
-     * primeiro. Os que têm fonte do pacote levam o endereço; os pendentes vão
-     * juntos, com "fonte a obter" dito uma vez.
+     * primeiro. Os que têm fonte do pacote levam o endereço; os sem fonte vão
+     * juntos, com a regra dita uma vez (2026-10-08 · D10: sem "fonte a obter",
+     * ver `fonteDosLinks`).
      */
     const links = secao.externalLinks.filter(link => texto(link.claim));
     const linksDaSecao = {
@@ -1322,6 +1520,10 @@ function capitulosDaPlanta(planta: RadarArticleBlueprintPayload, trava: RadarVid
     /* 2026-10-07 (revisão) · os passos que a frase publicável nomeia: o corte mostra esses, não só o primeiro. */
     const frasePublicavel = respostaLivre || promovida?.frase || null;
     const passosDaIdeia = frasePublicavel ? passosQueAFraseNomeia(frasePublicavel, demo, trava?.comuns || new Set<string>()) : [];
+    /* 2026-10-08 · D2: com menos de dois passos nomeados, a cena do corte é o passo que a ideia nomeia ou a própria ideia. */
+    const cenaDoCorte = demo.tipo === "PASSOS" && passosDaIdeia.length < 2 && frasePublicavel
+      ? cenaPelaIdeia(frasePublicavel, demo, trava?.comuns || new Set<string>())
+      : undefined;
     return {
       titulo: secao.h2,
       proposito,
@@ -1342,15 +1544,22 @@ function capitulosDaPlanta(planta: RadarArticleBlueprintPayload, trava: RadarVid
       propositoCurto,
       linksDaSecao,
       passosDaIdeia,
+      ...(cenaDoCorte ? { cenaDoCorte } : {}),
     };
   });
 }
 
-/* O "Antes de afirmar" dos links da seção; `limite` (2026-10-07, revisão) encurta cada afirmação quando a célula aperta. */
+/*
+ * O "Antes de afirmar" dos links da seção; `limite` (2026-10-07, revisão) encurta cada afirmação quando a célula aperta.
+ * 2026-10-08 · D10: "(fonte a obter: oficial ou verificada)" era espera
+ * aberta no entregável. A regra sai concluída — a planta pede fonte oficial ou
+ * verificada e o pacote não a tem —, e a linha já diz o que fazer sem ela
+ * ("sem fonte, diga de forma delimitada").
+ */
 function fonteDosLinks(links: NonNullable<Capitulo["linksDaSecao"]>, limite = 0): string | null {
   const curta = (valor: string) => (limite ? cortar(valor, limite) : valor);
   const comEndereco = links.comEndereco.map(item => `${curta(item.afirmacao)} (${item.onde})`);
-  return [...comEndereco, ...(links.aObter.length ? [`${links.aObter.map(curta).join("; ")} (fonte a obter: oficial ou verificada)`] : [])].join("; ") || null;
+  return [...comEndereco, ...(links.aObter.length ? [`${links.aObter.map(curta).join("; ")} (a planta pede fonte oficial ou verificada; o pacote não tem)`] : [])].join("; ") || null;
 }
 
 /*
@@ -1365,18 +1574,21 @@ const CONJUGA: Readonly<Record<string, string>> = { mostrar: "mostra", explicar:
  * 2026-10-07 · `trava` (aditivo, item 5): a promessa que afirma sobre plataforma
  * sem fonte não vira premissa — vale a pergunta da abertura, como na promessa
  * absoluta. A tese de quem fala (promessa sem afirmação de plataforma) passa.
+ * 2026-10-08 · D5: pela régua por frase (`precisaDeFonte`), que lê o SENTIDO
+ * com a polaridade — conversão e comportamento do público afirmados também
+ * caem; a pergunta da abertura de reserva passa pela mesma régua.
  */
 export function radarVideoPremise(planta: RadarArticleBlueprintPayload | null, trava: RadarVideoClaimLock | null = null): string | null {
   if (!planta) return null;
   const candidata = semAbsoluta(planta.blueprint.promise);
-  const promessa = candidata && travar(trava, candidata, null).estado !== "TRAVADA" ? candidata : null;
+  const promessa = candidata && !precisaDeFonte(trava, candidata, null) ? candidata : null;
   if (promessa) {
     const [primeira, ...resto] = promessa.split(/\s+/);
     const verbo = CONJUGA[radarWritingCompareKey(primeira)];
     return comPonto(verbo ? `O vídeo ${verbo} ${resto.join(" ")}` : promessa);
   }
   const abertura = texto(planta.blueprint.opening.readerQuestion);
-  return abertura ? `O vídeo responde ${entreAspas(abertura)} com o que a pesquisa sustenta.` : null;
+  return abertura && !precisaDeFonte(trava, abertura, null) ? `O vídeo responde ${entreAspas(abertura)} com o que a pesquisa sustenta.` : null;
 }
 
 const comPonto = (frase: string) => (/[.!?…]$/.test(frase) ? frase : `${frase}.`);
@@ -1533,7 +1745,7 @@ function linhaDoGancho(input: RadarPortableExportInput, p: RadarWritingProjectio
  *
  * A seção é a do artigo-modelo quando ele existe (aprovado ou proposta, dito):
  * a que tem entrega prática, que é onde a demonstração rende; sem ela, a
- * primeira. Sem artigo-modelo, "a definir no artigo-modelo". O endereço é o
+ * primeira. Sem artigo-modelo, a primeira seção prática do artigo. O endereço é o
  * canonical ou o caminho do slug; o vídeo acrescenta o que o texto não mostra.
  */
 function linhasDoVideoNoArtigo(unidade: RadarWritingUnit, artigoModelo: RadarArticleBlueprintPayload | null, destino: string): string[] {
@@ -1544,7 +1756,8 @@ function linhasDoVideoNoArtigo(unidade: RadarWritingUnit, artigoModelo: RadarArt
     `Vídeo × ${unidade.noun} (o vídeo faz parte ${daUnidade(unidade)}):`,
     secao
       ? `- Complementa a seção ${entreAspas(secao.h2)} do artigo-modelo da SERP.`
-      : "- Complementa a seção: a definir no artigo-modelo (ainda não organizado para este pacote).",
+      /* 2026-10-08 (correção da revisão) · D10: sem artigo-modelo, a regra concluída, não "a definir". */
+      : "- Complementa a primeira seção prática do artigo (este pacote não tem artigo-modelo).",
     `- O que o vídeo acrescenta: ${secao && texto(secao.practical) ? `a demonstração de ${entreAspas(texto(secao.practical))}, com exemplo prático` : "demonstração e exemplo prático do que a seção explica"}, sem repetir o texto.`,
     `- Onde fica: incorporado ${naUnidade(unidade)}${destino ? ` (${destino})` : ""}, nessa seção.`,
     `- Na descrição do vídeo: o link ${daUnidade(unidade)} (${endereco}).`,
@@ -1561,11 +1774,17 @@ type AberturaPublicavel = {
   premissa: string | null;
   capa: string | null;
   promessaDoArtigo: string | null;
+  /**
+   * 2026-10-08 · D5 (aditivo) · A pergunta que o gancho responde "logo de
+   * cara", já pela trava: ela vai ao texto do gancho e não passava por régua
+   * nenhuma. Travada, o gancho abre pelo próprio tema e ela entra no "Fica fora".
+   */
+  perguntaDoGancho?: string | null;
   /** 2026-10-07 (revisão) · `porta` (aditivo): a trava inteira, para a lista "Fica fora" encurtar a afirmação citada quando a célula aperta. */
   fora: Array<{ onde: string; frase: string; motivo: string; porta?: Extract<RadarClaimGate, { estado: "TRAVADA" }> }>;
 };
 
-function aberturaPublicavel(input: RadarPortableExportInput, artigoModelo: RadarArticleBlueprintPayload | null, bp: RadarYoutubeBlueprint | null, trava: RadarVideoClaimLock): AberturaPublicavel {
+function aberturaPublicavel(input: RadarPortableExportInput, artigoModelo: RadarArticleBlueprintPayload | null, bp: RadarYoutubeBlueprint | null, trava: RadarVideoClaimLock, perguntaDoGancho: string | null = null): AberturaPublicavel {
   const fora: AberturaPublicavel["fora"] = [];
   const pela = (onde: string, frase: string | null) => {
     if (!frase) return null;
@@ -1586,11 +1805,11 @@ function aberturaPublicavel(input: RadarPortableExportInput, artigoModelo: Radar
    */
   const aberturaDaPlanta = texto(artigoModelo?.blueprint.opening.readerQuestion) || null;
   const capa = pela("Capa do carrossel (lâmina 1)", texto(artigoModelo?.blueprint.title.h1) || null)
-    || (aberturaDaPlanta && travar(trava, aberturaDaPlanta, null).estado !== "TRAVADA" ? aberturaDaPlanta : null);
+    || (aberturaDaPlanta && !precisaDeFonte(trava, aberturaDaPlanta, null) ? aberturaDaPlanta : null);
   /* A promessa do artigo só abre o gancho quando a pesquisa do YouTube não recomenda uma: só então ela iria ao texto. */
   const doArtigo = util(input.article.promise);
   const promessaDoArtigo = promessaDaPesquisa(bp) ? doArtigo : pela("Promessa do gancho", doArtigo);
-  return { premissa, capa, promessaDoArtigo, fora };
+  return { premissa, capa, promessaDoArtigo, perguntaDoGancho: pela("Pergunta do gancho", perguntaDoGancho), fora };
 }
 
 function colunaRoteiro(
@@ -1700,7 +1919,14 @@ function colunaRoteiro(
  * depois a ordem. Com menos de três elegíveis, saem menos — nenhum capítulo
  * inelegível completa a conta, e cada capítulo sem corte diz o motivo. Tudo
  * por id da planta: nada se liga por semelhança de texto.
+ *
+ * 2026-10-08 · D1 · CORTE EXIGE UTILIDADE. O CSV de 08/10 dizia "3 ideia(s)
+ * escolhida(s) … pela utilidade isolada" com cortes em 0, 0 e 1 de 4: os
+ * portões completavam a conta. Agora o corte pede 1 ponto ou mais
+ * (`UTILIDADE_MINIMA_DO_CORTE`); sem elegível com ponto, saem menos cortes —
+ * até nenhum —, e o cabeçalho diz o número real.
  */
+const UTILIDADE_MINIMA_DO_CORTE = 1;
 type ContextoDoCorte = {
   evidencia: ReadonlyMap<string, { kind: string; text: string }>;
   /** A recorrência de cada necessidade central da descoberta, pela chave da formulação. */
@@ -1721,9 +1947,10 @@ function utilidadeDoCorte(capitulo: Capitulo, contexto: ContextoDoCorte): Utilid
   if (!capitulo.pergunta) return { elegivel: false, motivo: "sem pergunta do público na planta" };
   /* O gancho do corte É a pergunta: pergunta travada pela fonte não abre corte. */
   if (!capitulo.provocacao) return { elegivel: false, motivo: "a pergunta do capítulo pede fonte" };
-  if (!capitulo.publicavel) return { elegivel: false, motivo: capitulo.travadas?.length ? "a frase publicável pede fonte" : "sem frase publicável na planta: só afirmação absoluta" };
+  if (!capitulo.publicavel) return { elegivel: false, motivo: capitulo.travadas?.some(item => !item.absoluta) ? "a frase publicável pede fonte" : "sem frase publicável na planta: só afirmação absoluta" };
   const demo = capitulo.demo;
-  if (!demo || demo.tipo === "NENHUMA") return { elegivel: false, motivo: "sem demonstração definida na planta" };
+  /* 2026-10-08 · D3: com H3 só de tópico, o motivo diz por quê (os subtítulos são pontos, não passos). */
+  if (!demo || demo.tipo === "NENHUMA") return { elegivel: false, motivo: pontosDa(demo).length ? "sem demonstração definida na planta: os subtítulos são tópicos, não ações" : "sem demonstração definida na planta" };
   let demanda = 0;
   let origemDaDemanda = "";
   for (const id of capitulo.evidencias || []) {
@@ -1754,11 +1981,12 @@ function utilidadeDoCorte(capitulo: Capitulo, contexto: ContextoDoCorte): Utilid
       demanda === 2 ? `pergunta com demanda (${origemDaDemanda})` : demanda === 1 ? `pergunta citada na pesquisa (${origemDaDemanda})` : "pergunta sem demanda medida na SERP",
       "funciona sozinha",
       /* 2026-10-07 (revisão) · com a ideia nomeando 2+ passos, o corte mostra esses (`passosDaIdeia`), não só o primeiro. */
+      /* 2026-10-08 · D2: com um passo nomeado, o corte usa esse; sem nenhum, mostra a ideia numa situação. */
       umaAcao
         ? "uma ação"
         : capitulo.passosDaIdeia?.length
           ? `${demo.tipo === "PASSOS" ? demo.passos.length : "vários"} passos (o corte mostra os ${capitulo.passosDaIdeia.length} que a ideia nomeia)`
-          : `${demo.tipo === "PASSOS" ? demo.passos.length : "vários"} passos (o corte usa o primeiro)`,
+          : `${demo.tipo === "PASSOS" ? demo.passos.length : "vários"} passos (${capitulo.cenaDoCorte?.tipo === "PASSO" ? "o corte usa o que a ideia nomeia" : capitulo.cenaDoCorte?.tipo === "IDEIA" ? "o corte mostra a ideia numa situação" : "o corte usa o primeiro"})`,
       ...(oportunidade ? [`${ROTULO_DA_OPORTUNIDADE[oportunidade[0]]} ${oportunidade}`] : []),
     ],
   };
@@ -1820,7 +2048,10 @@ function linhaDeAlinhamento(capitulo: Capitulo, demo: Demonstracao, comuns: Read
    */
   const nomeados = capitulo.passosDaIdeia || [];
   if (demo.tipo === "PASSOS" && nomeados.length >= 2) return `   Alinhamento: a ideia única nomeia ${nomeados.length} passos e o corte mostra os ${nomeados.length}, uma tela por passo: gancho, ideia e cena falam dos mesmos passos.`;
-  const daDemo = raizesDe(demo.tipo === "PASSOS" ? demo.passos[0] : demo.tipo === "ACAO" ? demo.acao : [demo.antes, demo.ajuste, demo.depois || ""].join(" "));
+  /* 2026-10-08 · D2: a cena do corte é o passo que a ideia nomeia (ou a própria ideia), não o primeiro passo. */
+  const cena = capitulo.cenaDoCorte;
+  const doPasso = demo.tipo === "PASSOS" ? (cena?.tipo === "PASSO" ? cena.passo : cena?.tipo === "IDEIA" ? cena.ideia : demo.passos[0]) : null;
+  const daDemo = raizesDe(doPasso ?? (demo.tipo === "ACAO" ? demo.acao : demo.tipo === "ANTES_DEPOIS" ? [demo.antes, demo.ajuste, demo.depois || ""].join(" ") : ""));
   const doGancho = palavrasDistintivas(capitulo.pergunta, comuns);
   if (!doGancho.length) return null;
   const nosTres = doGancho.filter(item => nomeia(daIdeia, item.raiz) && nomeia(daDemo, item.raiz));
@@ -1851,7 +2082,12 @@ function origemRecomendada(capitulo: Capitulo, numero: number, utilidade: Utilid
     ...(capitulo.demo?.tipo === "PASSOS"
       ? [capitulo.passosDaIdeia?.length
         ? `a demonstração tem ${capitulo.demo.passos.length} passos e o corte mostra ${capitulo.passosDaIdeia.length} em sequência rápida, que a gravação do capítulo detalha um a um`
-        : `a demonstração tem ${capitulo.demo.passos.length} passos e o corte usa só o primeiro`]
+        /* 2026-10-08 · D2: o motivo diz a cena que o corte de fato usa. */
+        : capitulo.cenaDoCorte?.tipo === "PASSO"
+          ? `a demonstração tem ${capitulo.demo.passos.length} passos e o corte usa só o que a ideia nomeia`
+          : capitulo.cenaDoCorte?.tipo === "IDEIA"
+            ? `a demonstração tem ${capitulo.demo.passos.length} passos e o corte mostra a ideia numa situação`
+            : `a demonstração tem ${capitulo.demo.passos.length} passos e o corte usa só o primeiro`]
       : []),
     ...(!capitulo.publicavel.daAbertura ? [capitulo.aberturaTravada ? "a frase de abertura do capítulo pede fonte" : "a ideia única vem do Explicar, não da abertura do capítulo"] : []),
   ];
@@ -1902,7 +2138,8 @@ function escolhaDosCortes(
   let escolhidos: CapituloAvaliado[];
   if (porUtilidade) {
     /* 2026-10-07 · da planta: portões e pontuação (item 3); nenhum inelegível completa a conta. */
-    const elegiveis = avaliados.flatMap(item => (item.utilidade?.elegivel ? [{ ...item, pontos: item.utilidade.pontos }] : []));
+    /* 2026-10-08 · D1: e só com 1 ponto ou mais — passar nos portões com 0 de 4 não faz corte. */
+    const elegiveis = avaliados.flatMap(item => (item.utilidade?.elegivel && item.utilidade.pontos >= UTILIDADE_MINIMA_DO_CORTE ? [{ ...item, pontos: item.utilidade.pontos }] : []));
     escolhidos = escolhaPorUtilidade(elegiveis, LIMITES.cuts);
   } else {
     /*
@@ -1977,7 +2214,7 @@ function colunaCortes(
         `   Utilidade ${utilidade.pontos} de 4: ${utilidade.partes.join(" · ")}.`,
         `   Gancho: ${entreAspas(radarVideoHookQuestion(capitulo.pergunta!))}`,
         `   Ideia única: ${fraseCurta(comFonte(semPontoFinal(capitulo.publicavel.frase), capitulo.publicavel.fonte), nivel.ideia)}.`,
-        `   Mostrar: ${mostrarNoCorte(capitulo.demo, capitulo.passosDaIdeia || [], nivel.parte)}.`,
+        `   Mostrar: ${mostrarNoCorte(capitulo.demo, capitulo.passosDaIdeia || [], nivel.parte, capitulo.cenaDoCorte)}.`,
         ...(alinhamento ? [alinhamento] : []),
         ...(capitulo.fonteDoCorte ? [`   Fonte: ${capitulo.fonteDoCorte}.`] : []),
         origemRecomendada(capitulo, posicao, utilidade),
@@ -2004,8 +2241,12 @@ function colunaCortes(
    * todos os escolhidos em 0 de 4 (nenhuma demanda nem oportunidade medida),
    * "pela utilidade isolada (pergunta com demanda…)" prometia o que não houve —
    * aí quem escolheu foram os portões e a distribuição pelo vídeo.
+   * 2026-10-08 · D1: corte em 0 de 4 não existe mais (`UTILIDADE_MINIMA_DO_CORTE`).
+   * Quando há capítulo que passa nos portões e nenhum tem ponto, a coluna diz
+   * isso — nenhum corte —, em vez de escolher pela distribuição.
    */
-  const semDemanda = porUtilidade && escolhidos.length > 0 && escolhidos.every(item => item.utilidade?.elegivel && item.utilidade.pontos === 0);
+  const soComZero = porUtilidade && !escolhidos.length && avaliados.some(item => item.utilidade?.elegivel);
+  const nCortes = (n: number) => (n === 1 ? "1 ideia escolhida" : `${n} ideias escolhidas`);
   /*
    * 2026-10-02 · O CARROSSEL COM UMA MENSAGEM POR LÂMINA e a ligação com a
    * próxima. Com a planta: capa pela promessa, uma lâmina por seção com a
@@ -2110,16 +2351,24 @@ function colunaCortes(
       : cortes.length
         /* 2026-10-07 · o rótulo honesto: "um por capítulo" mentia com 3 cortes para 5 capítulos; com a planta, a escolha é pela utilidade isolada (item 3). */
         ? [porUtilidade
-          ? semDemanda
-            ? `Cortes sugeridos (Shorts, Reels e TikTok): ${cortes.length} ideia(s) escolhida(s) dos capítulos que passam nos portões (pergunta própria, frase publicável e demonstração definida); nenhum tem demanda nem oportunidade medida na SERP, e a escolha os espalha pelo começo, meio e fim do vídeo; cada corte funciona sozinho, com gancho próprio e sem depender do vídeo longo:`
-            : `Cortes sugeridos (Shorts, Reels e TikTok): ${cortes.length} ideia(s) escolhida(s) dos capítulos pela utilidade isolada (pergunta com demanda, funciona sozinha, uma demonstração, oportunidade na SERP); cada corte funciona sozinho, com gancho próprio e sem depender do vídeo longo:`
-          : `Cortes sugeridos (Shorts, Reels e TikTok): ${cortes.length} ideia(s) escolhida(s) dos capítulos (as que funcionam sozinhas em até 60 segundos); cada corte funciona sozinho, com gancho próprio e sem depender do vídeo longo:`, ...cortes]
-        : porUtilidade
-          /* 2026-10-07 · nenhum capítulo passa nos portões: nenhum corte inventado para completar a conta. */
-          ? ["Cortes (Shorts, Reels e TikTok): nenhum capítulo da planta funciona sozinho como corte (pergunta própria, frase publicável e demonstração definida); os capítulos ficam no vídeo longo."]
-          : ["Cortes (Shorts, Reels e TikTok, até 60 segundos): um por bloco do vídeo principal, cada um funcionando sozinho, com gancho próprio."]),
+          ? `Cortes sugeridos (Shorts, Reels e TikTok): ${nCortes(cortes.length)} dos capítulos pela utilidade isolada (pergunta com demanda, funciona sozinha, uma demonstração, oportunidade na SERP), só com 1 ponto ou mais de 4; cada corte funciona sozinho, com gancho próprio e sem depender do vídeo longo:`
+          : `Cortes sugeridos (Shorts, Reels e TikTok): ${nCortes(cortes.length)} dos capítulos (as que funcionam sozinhas em até 60 segundos); cada corte funciona sozinho, com gancho próprio e sem depender do vídeo longo:`, ...cortes]
+        : soComZero
+          /* 2026-10-08 · D1: passar nos portões não basta; sem ponto de utilidade, nenhum corte, e cada capítulo diz o seu motivo. */
+          ? ["Cortes (Shorts, Reels e TikTok): nenhum corte nesta linha — os capítulos que funcionam sozinhos (pergunta própria, frase publicável e demonstração definida) ficaram em 0 de 4 de utilidade (sem demanda medida, sem ação única e sem oportunidade na SERP); os capítulos ficam no vídeo longo."]
+          : porUtilidade
+            /* 2026-10-07 · nenhum capítulo passa nos portões: nenhum corte inventado para completar a conta. */
+            ? ["Cortes (Shorts, Reels e TikTok): nenhum capítulo da planta funciona sozinho como corte (pergunta própria, frase publicável e demonstração definida); os capítulos ficam no vídeo longo."]
+            : ["Cortes (Shorts, Reels e TikTok, até 60 segundos): um por bloco do vídeo principal, cada um funcionando sozinho, com gancho próprio."]),
+    /*
+     * 2026-10-08 (correção da revisão) · com zero corte de capítulo, o fato com
+     * fonte não é o "1." de uma lista que acabou de dizer "nenhum corte": ele
+     * sai sem número, como o vídeo curto à parte que é (o prompt diz o mesmo).
+     */
     ...(fatos
-      ? [sequencia.curto ? "Um fato com fonte, dito em uma frase e com a fonte na legenda, também rende um vídeo curto." : `${cortes.length + 1}. Um fato com fonte, dito em uma frase, com a fonte na legenda.`]
+      ? [sequencia.curto ? "Um fato com fonte, dito em uma frase e com a fonte na legenda, também rende um vídeo curto."
+        : cortes.length ? `${cortes.length + 1}. Um fato com fonte, dito em uma frase, com a fonte na legenda.`
+          : "Fora dos capítulos: um fato com fonte, dito em uma frase e com a fonte na legenda, rende um vídeo curto à parte."]
       : []),
     ...(semCorte.length ? [`Capítulos sem corte: ${semCorte.join(" · ")}.`] : []),
     /* 2026-10-07 · com a planta, as cenas dos cortes e das lâminas seguem a mesma régua das demonstrações do vídeo longo. */
@@ -2142,6 +2391,8 @@ function colunaCortes(
 function motivoSemCorte(item: CapituloAvaliado, escolhidos: readonly CapituloAvaliado[]): string {
   if (!item.utilidade) return "fora da escolha por utilidade";
   if (!item.utilidade.elegivel) return item.utilidade.motivo;
+  /* 2026-10-08 · D1: abaixo do mínimo, o motivo é o mínimo — não o empate com quem não existe. */
+  if (item.utilidade.pontos < UTILIDADE_MINIMA_DO_CORTE) return `utilidade ${item.utilidade.pontos} de 4: o corte pede ao menos 1 ponto — pergunta com demanda, uma ação ou oportunidade na SERP`;
   const menor = Math.min(...escolhidos.map(escolhido => (escolhido.utilidade?.elegivel ? escolhido.utilidade.pontos : Infinity)));
   return item.utilidade.pontos >= menor
     ? `utilidade ${item.utilidade.pontos} de 4, empatada com os escolhidos; ficou fora pela distribuição ao longo do vídeo`
@@ -2182,7 +2433,12 @@ function primeiraQueCabe(versoes: ReadonlyArray<() => string>): string {
  * desta linha E os daquela. Com bloqueio na investigação, como no CSV para
  * escrever: nada de roteiro antes de resolver.
  */
-function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: { vozAtiva: boolean; bloqueio: string | null }): string {
+/*
+ * 2026-10-08 · D1 · `cortes` (aditivo): quantos cortes a escolha por utilidade
+ * deixou. Com zero, o prompt não pede corte — pedir "os cortes desta linha"
+ * sem nenhum levava a IA a inventar um. Ausente, como antes.
+ */
+function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: { vozAtiva: boolean; bloqueio: string | null; cortes?: number; /** 2026-10-08 (correção) · há fato com fonte do pacote (o vídeo curto à parte). */ fatoComFonte?: boolean }): string {
   if (opcoes.bloqueio) {
     return `Não escreva o roteiro deste vídeo antes de resolver o bloqueio da investigação: ${semPontoFinal(opcoes.bloqueio)}. Depois de resolvido no Radar, exporte de novo para receber o prompt do roteiro.`;
   }
@@ -2194,7 +2450,7 @@ function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: { vo
    * capítulos OU a que o vídeo render melhor.
    */
   return [
-    `Escreva o roteiro de um vídeo para o YouTube, os cortes e o carrossel sobre ${entreAspas(principal || "o tema desta linha")}, em português do Brasil, usando SOMENTE os dados desta linha${opcoes.vozAtiva ? " e da linha \"Voz da marca\"" : ""}.`,
+    `Escreva o roteiro de um vídeo para o YouTube${opcoes.cortes === 0 ? "" : ", os cortes"} e o carrossel sobre ${entreAspas(principal || "o tema desta linha")}, em português do Brasil, usando SOMENTE os dados desta linha${opcoes.vozAtiva ? " e da linha \"Voz da marca\"" : ""}.`,
     "Entregue:",
     /* 2026-10-07 (revisão) · o prompt nomeava storyboard_visual e a coluna de curtos, mas não cadeia_competitiva — a coluna que diz por que cada capítulo existe. */
     `1) O vídeo longo: 3 opções de título, o gancho dos primeiros 15 segundos (pelo próprio tema, não por uma pergunta ampla), o roteiro falado na ordem dos capítulos desta linha OU na ordem em que o vídeo render melhor (a diretriz permite reorganizar), mantendo assunto, evidências e premissa e usando em cada capítulo a oportunidade que cadeia_competitiva aponta, com marcação de tempo ESTIMADA (os tempos da descrição se conferem na edição final), os capítulos para a descrição e a descrição com as fontes e o link ${daUnidade(unidade)}.`,
@@ -2209,7 +2465,9 @@ function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: { vo
      * (concorrencia_curtos_e_carrossel) — a cena e o visual saem de lá, não de
      * um estilo inventado.
      */
-    "2) Os cortes desta linha (até 3, escolhidos por utilidade) para Shorts/Reels/TikTok, cada um com fala própria, a cena do storyboard (storyboard_visual), a duração-alvo de concorrencia_curtos_e_carrossel e UM CTA.",
+    opcoes.cortes === 0
+      ? `2) Cortes: esta linha não tem corte de capítulo (nenhum capítulo com utilidade para corte; o motivo de cada um está em cortes_para_redes) — não escreva corte de capítulo para ela${opcoes.fatoComFonte ? "; o fato com fonte de cortes_para_redes pode virar um vídeo curto à parte, com a fonte na legenda" : ""}.`
+      : "2) Os cortes desta linha (até 3, escolhidos por utilidade) para Shorts/Reels/TikTok, cada um com fala própria, a cena do storyboard (storyboard_visual), a duração-alvo de concorrencia_curtos_e_carrossel e UM CTA.",
     "3) O carrossel desta linha, com o texto publicável de cada lâmina (título e apoio curto) e o visual de storyboard_visual, sem instrução interna no texto da lâmina; frase listada em \"Fica fora do texto publicável\" não entra em lâmina nem legenda, e na fala só entra delimitada.",
     "Estilo visual: só o que storyboard_visual registra como observado e o que quem abrir as referências anotar; não descreva estilo de imagem que ninguém viu.",
     "Não copie títulos nem falas de concorrentes. Não invente fato, número, estudo, depoimento, autor ou credencial. Fala do especialista só a que está nesta linha, atribuída.",
@@ -2538,16 +2796,20 @@ function cenaDa(demo: Demonstracao | undefined, limite = 0): string {
   if (demo.tipo === "ANTES_DEPOIS") return `${demo.objeto ? `${demo.objeto} — ` : ""}3 telas: antes ${entreAspas(curta(demo.antes))} · ajuste ${entreAspas(curta(demo.ajuste))} · depois ${demo.depois ? entreAspas(curta(demo.depois)) : "o resultado do ajuste na própria tela"}`;
   if (demo.tipo === "PASSOS") return `${demo.objeto ? `${demo.objeto} — ` : ""}${demo.passos.length} telas, uma por passo: ${demo.passos.map(curta).join("; ")}`;
   if (demo.tipo === "ACAO") return `${demo.objeto ? `${demo.objeto} — ` : ""}1 tela: ${curta(demo.acao)}`;
-  return `capítulo explicativo (sem demonstração): ${demo.contexto ? curta(semPontoFinal(demo.contexto)) : "o título do capítulo em destaque"}`;
+  /* 2026-10-08 · D3: o capítulo explicativo com H3 de tópico mostra os pontos na tela, não "N telas, uma por passo". */
+  return `capítulo explicativo (sem demonstração): ${contextoVisual(demo, limite)}`;
 }
 
 /* A ação única do corte, curta: a tela 2 do storyboard vertical. */
 /* 2026-10-07 (revisão) · `passosDaIdeia` (aditivo): o corte que mostra os passos que a ideia nomeia tem uma tela por passo — a mesma cena da coluna de cortes. */
-function acaoDoCorte(demo: Demonstracao | undefined, limite = 0, passosDaIdeia: readonly string[] = []): string {
+/* 2026-10-08 · D2 · `cena` (aditivo): o passo que a ideia nomeia ou a ideia numa situação — a mesma cena do "Mostrar" do corte. */
+function acaoDoCorte(demo: Demonstracao | undefined, limite = 0, passosDaIdeia: readonly string[] = [], cena?: CenaDoCorte): string {
   const curta = (valor: string) => (limite ? cortar(valor, limite) : valor);
   if (!demo || demo.tipo === "NENHUMA") return "tela 2: um exemplo identificado como ilustrativo";
   if (demo.tipo === "ANTES_DEPOIS") return `tela 2: o ajuste ${entreAspas(curta(demo.ajuste))} a partir do antes ${entreAspas(curta(demo.antes))}`;
   if (demo.tipo === "PASSOS" && passosDaIdeia.length >= 2) return `telas 2 a ${passosDaIdeia.length + 1}: os ${passosDaIdeia.length} passos que a ideia nomeia, um por tela — ${passosDaIdeia.map(passo => entreAspas(curta(passo))).join("; ")}`;
+  if (demo.tipo === "PASSOS" && cena?.tipo === "PASSO") return `tela 2: o passo que a ideia nomeia ${entreAspas(curta(cena.passo))}`;
+  if (demo.tipo === "PASSOS" && cena?.tipo === "IDEIA") return `tela 2: a ideia numa situação ${entreAspas(curta(cena.ideia))}`;
   if (demo.tipo === "PASSOS") return `tela 2: o primeiro passo ${entreAspas(curta(demo.passos[0]))}`;
   return `tela 2: a ação ${entreAspas(curta(demo.acao))}`;
 }
@@ -2676,8 +2938,11 @@ function storyboardNoNivel(input: EntradaDoStoryboard, nivel: 0 | 1 | 2): string
     linhas.push("Storyboard dos cortes (vertical 9:16; a duração-alvo está em concorrencia_curtos_e_carrossel): primeiro segundo = o gancho escrito na tela; cena = a ação única do corte; legenda o tempo todo.");
     for (const [indice, { capitulo, numero }] of escolha.escolhidos.entries()) {
       if (!capitulo.daPlanta || !capitulo.pergunta) continue;
-      linhas.push(`- Corte ${indice + 1} (capítulo ${numero}): tela 1: ${entreAspas(parte(radarVideoHookQuestion(capitulo.pergunta)))} · ${acaoDoCorte(capitulo.demo, LIMITE_DA_PARTE[nivel], capitulo.passosDaIdeia || [])} · tela final: o CTA do corte.`);
+      linhas.push(`- Corte ${indice + 1} (capítulo ${numero}): tela 1: ${entreAspas(parte(radarVideoHookQuestion(capitulo.pergunta)))} · ${acaoDoCorte(capitulo.demo, LIMITE_DA_PARTE[nivel], capitulo.passosDaIdeia || [], capitulo.cenaDoCorte)} · tela final: o CTA do corte.`);
     }
+  } else if (escolha.porUtilidade) {
+    /* 2026-10-08 · D1: sem corte na linha, o storyboard diz isso — e onde está o motivo. */
+    linhas.push("Storyboard dos cortes: nenhum corte nesta linha (o motivo de cada capítulo está em cortes_para_redes).");
   }
 
   /* O carrossel leva texto na imagem: a regra do plano visual do artigo não vale aqui. */
@@ -2693,12 +2958,21 @@ function storyboardNoNivel(input: EntradaDoStoryboard, nivel: 0 | 1 | 2): string
     linhas.push(`Storyboard do carrossel (o carrossel leva texto na imagem: a regra "sem texto legível" do plano visual do artigo não vale aqui; ${daPlanta.length + 2} lâminas, o texto de cada uma em cortes_para_redes):`);
     linhas.push(`- Lâmina 1 (capa): texto = ${input.publicavel.capa ? entreAspas(mensagemDaLamina(input.publicavel.capa)) : "o problema do tema em uma frase"} · estrutura: pergunta ou número em destaque${raros ? `, para diferenciar: os títulos pertinentes quase não usam${titulosPertinentes}` : titulosPertinentes}.`);
     const listas = padrao("Usa listas");
+    /* 2026-10-08 · D3: os pontos do capítulo explicativo também vão em lista (ditos como pontos, não passos). */
+    const emLista = (capitulo: Capitulo) => capitulo.demo?.tipo === "PASSOS" || pontosDa(capitulo.demo).length > 0;
     for (const [indice, capitulo] of daPlanta.entries()) {
-      const emLista = capitulo.demo?.tipo === "PASSOS";
       const visual = nivel >= 1 ? `o Visual da Lâmina ${indice + 2} em cortes_para_redes` : capitulo.demo ? visualDaLaminaPela(capitulo.demo) : "destaque do título";
-      linhas.push(`- Lâmina ${indice + 2}: texto = o título ${entreAspas(parte(capitulo.titulo))} e o Apoio publicável · visual = ${visual}${emLista && listas ? ` (lista, como em ${listas.present} de ${listas.sampleSize} páginas concorrentes)` : ""}.`);
+      /* O visual inteiro já diz "em lista"; o encolhido (que aponta para cortes_para_redes) não diz, e a marca fica. */
+      linhas.push(`- Lâmina ${indice + 2}: texto = o título ${entreAspas(parte(capitulo.titulo))} e o Apoio publicável · visual = ${visual}${nivel >= 1 && emLista(capitulo) && listas ? " (em lista)" : ""}.`);
     }
     linhas.push(`- Lâmina ${daPlanta.length + 2}: texto = o CTA para ${aUnidade(input.unidade)}${input.destino ? ` (${input.destino})` : ""} · visual = o endereço legível na lâmina.`);
+    /*
+     * 2026-10-08 · D4: "(lista, como em 6 de 6 páginas concorrentes)" em cada
+     * lâmina soava como carrossel observado. A contagem é das PÁGINAS
+     * concorrentes lidas — a estrutura delas —; carrossel ninguém contou. Dita
+     * uma vez, depois das lâminas.
+     */
+    if (listas && daPlanta.some(emLista)) linhas.push(`Por que em lista: é a estrutura das páginas concorrentes lidas (${listas.present} de ${listas.sampleSize} usam listas), não uma contagem de carrosséis — o Radar não lê as lâminas dos carrosséis.`);
   } else {
     linhas.push("Storyboard do carrossel: capa com a promessa, uma lâmina por capítulo (título e a resposta curta, com texto na imagem) e o CTA na última.");
   }
@@ -2888,7 +3162,7 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
    * capítulos são outros. Sem planta, a do CSV para escrever.
    */
   const candidatas = contexto.blueprint ? [daPlanta] : [daEscrita];
-  const abertura = candidatas.find(pergunta => pergunta && !radarVideoRhetoricalQuestion(pergunta) && falaDaPrincipal(pergunta, principal)) || null;
+  const aberturaCandidata = candidatas.find(pergunta => pergunta && !radarVideoRhetoricalQuestion(pergunta) && falaDaPrincipal(pergunta, principal)) || null;
   const youtube = contexto.youtube;
   const artigoModelo = contexto.blueprint ?? null;
   const daSerp = capitulosDoVideo(youtube?.blueprint ?? null, perguntas, principal);
@@ -2897,9 +3171,13 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
    * fonte (planta, mercado sem fonte, mercado × fonte) e as raízes que não
    * distinguem assunto. Ela passa por TODO texto publicável: capítulos (Apoio da
    * lâmina, Ideia única do corte), premissa, capa e promessa do gancho.
+   * 2026-10-08 · D5: e a pergunta que o gancho responde; tudo pelo detector por
+   * sentido do Grupo A (plataforma, conversão e comportamento do público, com a
+   * polaridade).
    */
   const trava: RadarVideoClaimLock = { pendentes: radarPendingClaims(p, artigoModelo), comuns: radarClaimCommonStems(p, artigoModelo) };
-  const publicavel = aberturaPublicavel(input, artigoModelo, youtube?.blueprint ?? null, trava);
+  const publicavel = aberturaPublicavel(input, artigoModelo, youtube?.blueprint ?? null, trava, aberturaCandidata);
+  const abertura = publicavel.perguntaDoGancho ?? null;
   /* 2026-10-02 · com planta (e fora do formato curto), os capítulos são as seções dela. */
   const sequencia: Sequencia = artigoModelo && !daSerp.curto && artigoModelo.blueprint.sections.length
     ? { capitulos: capitulosDaPlanta(artigoModelo, trava), curto: false, restantes: [] }
@@ -2975,7 +3253,13 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
     concorrencia_curtos_e_carrossel: colunaConcorrenciaCurta(competitiva, youtube),
     storyboard_visual: colunaStoryboard({ c: competitiva, p, entrada: input, youtube, sequencia, escolha, artigoModelo, publicavel, comuns: trava.comuns, unidade, destino }),
     cadeia_competitiva: colunaCadeia({ c: competitiva, p, entrada: input, youtube, sequencia, escolha, artigoModelo, publicavel, foraDoEscopo }),
-    prompt: colunaPrompt(principal, unidade, { vozAtiva, bloqueio }),
+    /* 2026-10-08 · D1: com a planta (fora do formato curto), o prompt sabe quantos cortes a utilidade deixou. */
+    prompt: colunaPrompt(principal, unidade, {
+      vozAtiva, bloqueio,
+      ...(escolha.porUtilidade && !sequencia.curto ? { cortes: escolha.escolhidos.length } : {}),
+      /* 2026-10-08 (correção da revisão) · o prompt cita o fato com fonte quando a linha não tem corte de capítulo. */
+      fatoComFonte: (p.autoridade?.factualEvidence || []).some(item => item.supportType === "SUPPORTS"),
+    }),
   };
   for (const coluna of RADAR_VIDEO_EXPORT_COLUMNS) row[coluna] = celula(row[coluna]);
   return {
@@ -3014,7 +3298,7 @@ export function buildRadarVideoTopRow(input: { articles: readonly RadarVideoExpo
        * identidade visual. A linha de topo agora aponta para lá.
        */
       input.brandVoice?.kind === "available"
-        ? `- Voz da marca: linha "Voz da marca" logo abaixo (${rotuloDaVoz(input.brandVoice.voice)}). ${APRESENTADOR_E_IDENTIDADE}`
+        ? `- Voz da marca: linha "Voz da marca" logo abaixo (${radarBrandVoiceDeliverableLabel(input.brandVoice.voice)}). ${APRESENTADOR_E_IDENTIDADE}`
         : input.brandVoice
           ? `- ${radarBrandVoiceAbsence(input.brandVoice)} ${APRESENTADOR_E_IDENTIDADE}`
           : `- Voz da marca: não informada nesta exportação. ${APRESENTADOR_E_IDENTIDADE}`,
@@ -3071,7 +3355,7 @@ export function buildRadarVideoBrandVoiceRow(state: RadarBrandVoiceState | undef
     ...vazio,
     ordem: "Voz da marca",
     pode_gravar: [
-      `Vale para todos os vídeos deste arquivo: ${rotuloDaVoz(state.voice)}. O tema vem de cada linha; o público, a voz, o CTA e o que a marca não faz vêm desta.`,
+      `Vale para todos os vídeos deste arquivo: ${radarBrandVoiceDeliverableLabel(state.voice)}. O tema vem de cada linha; o público, a voz, o CTA e o que a marca não faz vêm desta.`,
       ...(soDoArtigo.length ? [`Fica fora desta linha (vale para o artigo, não para o vídeo): ${soDoArtigo.map(titulo).join("; ")}.`] : []),
     ].join("\n"),
     tema_e_publico: radarBrandVoiceText(fora(por.reader).filter(secao => !ehComercial.has(secao))),

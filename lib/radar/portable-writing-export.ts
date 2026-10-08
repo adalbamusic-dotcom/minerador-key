@@ -34,16 +34,26 @@ import type { RadarAiDiscoveryContext } from "./ai-discovery-context.ts";
 import type { RadarAuthorityEvidence } from "./authority-evidence.ts";
 import type { RadarEditorialSubjectTurn } from "./editorial-article-model.ts";
 import type { RadarSiloExportWritingContext } from "./portable-silo-export.ts";
-import { radarArticleBlueprintColumns, radarArticleBlueprintVideoSections, type RadarArticleBlueprintLiveVideo, type RadarArticleBlueprintPayload } from "./article-blueprint.ts";
+import {
+  radarArticleBlueprintColumns,
+  radarArticleBlueprintPublishedMapLine,
+  radarArticleBlueprintPublishedMapReading,
+  radarArticleBlueprintVideoSections,
+  radarArticleBlueprintWithCurrentNames,
+  type RadarArticleBlueprintLiveVideo,
+  type RadarArticleBlueprintPayload,
+  type RadarArticleBlueprintPublishedMapReading,
+} from "./article-blueprint.ts";
 import {
   radarBrandVoiceAbsence,
   radarBrandVoiceBySlot,
-  radarBrandVoiceLabel,
-  radarBrandVoiceStatusLabel,
+  radarBrandVoiceDeliverableLabel,
+  radarBrandVoiceDeliverableStatusLabel,
   radarBrandVoiceText,
   type RadarBrandVoiceRef,
   type RadarBrandVoiceState,
 } from "./brand-voice.ts";
+import { radarClaimCommonStems, radarPendingClaims, radarSentenceNeedsSource, type RadarSentenceSourceVerdict } from "./pending-claims.ts";
 
 /**
  * ===== O EXPORT "PARA ESCREVER" — o CSV que uma pessoa ou uma IA usa para escrever =====
@@ -740,19 +750,28 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
     ...radarWritingContentWords(silo?.centralEntity),
     ...radarWritingContentWords(principal),
   ]);
+  /*
+   * 2026-10-08 · C9 · O DESTINO PLANEJADO É INSTRUÇÃO CONCLUÍDA E CONDICIONAL.
+   * "Use o slug planejado" transformava caminho planejado em endereço publicado
+   * (o link quebrava se este artigo fosse ao ar antes), e "marque a âncora" era
+   * marcador por preencher. Agora: o link entra com a URL final quando o
+   * destino estiver no ar junto com este artigo ou antes; senão, a âncora fica
+   * como texto simples — nunca link quebrado.
+   */
+  const SE_NAO_PUBLICADO = "o link entra com a URL final quando o destino estiver no ar junto com este artigo ou antes; senão, a âncora fica como texto simples";
   const paginaDoSilo = silo?.siloPage || null;
   const destinoDaPagina = paginaDoSilo
     ? paginaDoSilo.publishedUrl || paginaDoSilo.canonical
-      ? `SiloPage "${silo?.label}" → ${paginaDoSilo.publishedUrl || paginaDoSilo.canonical}${paginaDoSilo.publishedUrl ? "" : ` (${paginaDoSilo.status}: marque a âncora e não invente outro endereço)`}`
-      : `SiloPage "${silo?.label}"${paginaDoSilo.slug ? ` → /${paginaDoSilo.slug}` : ""} (${paginaDoSilo.status}: marque a âncora e não invente URL)`
-    : "SiloPage do Silo (endereço não registrado: marque a âncora e não invente URL)";
+      ? `SiloPage "${silo?.label}" → ${paginaDoSilo.publishedUrl || paginaDoSilo.canonical}${paginaDoSilo.publishedUrl ? "" : ` (${paginaDoSilo.status}: ${SE_NAO_PUBLICADO}; não invente outro endereço)`}`
+      : `SiloPage "${silo?.label}"${paginaDoSilo.slug ? ` → /${paginaDoSilo.slug}` : ""} (${paginaDoSilo.status}: ${SE_NAO_PUBLICADO}; não invente URL)`
+    : "SiloPage do Silo (endereço não registrado: a âncora fica como texto simples, sem link; não invente URL)";
 
   const destinoDoMembro = (membro: Membro | null, fallback: string | null, slugConhecido: string | null): string => {
     if (membro) {
-      return `${membro.role} "${rotuloDoMembro(membro)}"${membro.slug ? ` → /${membro.slug}` : ""} (destino ainda não publicado: use o slug planejado, sem domínio, e não invente URL)`;
+      return `${membro.role} "${rotuloDoMembro(membro)}"${membro.slug ? ` → /${membro.slug}` : ""} (destino ainda não publicado: ${SE_NAO_PUBLICADO}; não invente URL)`;
     }
-    if (slugConhecido) return `"${fallback || slugConhecido}" → /${slugConhecido} (destino ainda não publicado: não invente URL)`;
-    return `"${fallback || "destino sem nome"}" (destino não resolvido: marque a âncora e não invente URL)`;
+    if (slugConhecido) return `"${fallback || slugConhecido}" → /${slugConhecido} (destino ainda não publicado: ${SE_NAO_PUBLICADO}; não invente URL)`;
+    return `"${fallback || "destino sem nome"}" (destino não resolvido: a âncora fica como texto simples, sem link; não invente URL)`;
   };
 
   const saida: LinkDeEscrita[] = [];
@@ -919,10 +938,15 @@ export function radarWritingSpecialistContributions(p: Projecoes): Contribuicao[
      */
     const avisos: string[] = [];
     const doAssunto = radarWritingContentWords(assunto);
+    /*
+     * 2026-10-08 (correção da revisão) · D10: "conferir antes de usar" e "a
+     * definir" eram espera aberta no entregável. O aviso diz o que fazer com a
+     * contribuição, concluído.
+     */
     if (!tipo && doAssunto.size && ![...doAssunto].some(palavra => radarWritingContentWords(item.contribution).has(palavra))) {
-      avisos.push(`aceita, mas a resposta não trata de ${entreAspas(assunto || "")}; conferir antes de usar`);
+      avisos.push(`aceita, mas a resposta não trata de ${entreAspas(assunto || "")}: use só como orientação geral, sem apresentá-la como resposta a essa pergunta`);
     }
-    if (!aplicacao) avisos.push("sem ponto de aplicação definido");
+    if (!aplicacao) avisos.push("sem ponto de aplicação no pacote: entra onde couber, como orientação");
     avisos.push(...item.limitations.map(semPontoFinal));
     const rotulo = `E${indice + 1}`;
     return {
@@ -934,7 +958,7 @@ export function radarWritingSpecialistContributions(p: Projecoes): Contribuicao[
       linha: [
         `${rotulo} · Pergunta: ${entreAspas(assunto || pergunta || "ponto preparado pela investigação")}`,
         `Resposta aprovada: ${entreAspas(resposta)}`,
-        `Aplicar em: ${secao ? `seção "${secao.heading}"` : aplicacao || "a definir"}`,
+        `Aplicar em: ${secao ? `seção "${secao.heading}"` : aplicacao || "onde couber no texto, como orientação"}`,
         `Atribuir como: ${semPontoFinal(item.classification).toLowerCase()} de especialista, sem inventar nome ou credencial`,
         ...(avisos.length ? [`Atenção: ${avisos.join("; ")}`] : []),
       ].join(" · "),
@@ -956,6 +980,48 @@ export function radarWritingSpecialistContributions(p: Projecoes): Contribuicao[
  * regra geral, à linha do publicado e ao prompt, para qualquer tipo de página.
  */
 export const RADAR_WRITING_LEGACY_FAQ = "FAQ legado de página publicada: mantenha como está, sem ampliar; ele não integra o fluxo novo, mas só sai com decisão humana registrada (por exemplo, reescrita integral autorizada pela marca), e então as respostas úteis vão para o corpo das seções.";
+
+/*
+ * ===== 2026-10-08 · C2 · O MAPA DA ATUALIZAÇÃO, NO LUGAR DA PENDÊNCIA =====
+ *
+ * A linha dizia "seção existente que a planta não tem só sai com decisão
+ * humana — leve-a como pendência fora do texto": espera aberta no entregável
+ * (D10), e nenhuma resposta sobre o que fazer com cada H2 publicado. Agora cada
+ * H2 tem destino, pela leitura do mapa do artigo-modelo
+ * (`radarArticleBlueprintPublishedMapReading`): vira a seção N da planta
+ * (reescrito na voz), vai para o fechamento, fica como seção própria depois da
+ * seção N, ou sai com o motivo que a planta registrou. O artigo-modelo antigo
+ * (sem `publishedMap`) é lido pelo casamento de títulos, conservador: o H2 sem
+ * par FICA — nada sai sem decisão. O FAQ legado segue a regra dele. Sem
+ * artigo-modelo, a regra concluída: o que a página cobre fica, reescrito.
+ */
+const RADAR_WRITING_UPDATE_WITHOUT_BLUEPRINT = "Atualização: o que a página já cobre fica no texto, reescrito na voz e reordenado se preciso; a seção publicada que a estrutura sugerida não tem fica como seção própria. Nada sai da página sem decisão humana registrada.";
+
+/** 2026-10-08 · C2 · O destino de um H2 publicado; o "depois da seção N" diz também o título da seção N. */
+function destinoDoH2(item: RadarArticleBlueprintPublishedMapReading, secoes: ReadonlyArray<{ h2: string }>): string {
+  const frase = radarArticleBlueprintPublishedMapLine(item);
+  const depois = item.kind === "KEEP" && item.after ? secoes[item.after - 1]?.h2 : null;
+  return depois ? `${frase} (${entreAspas(depois)})` : frase;
+}
+
+function linhasDaAtualizacao(atual: { h1: string | null; h2: string[] }, planta: RadarArticleBlueprintPayload | null, keywords: readonly string[], lida = "lida da página na exportação"): string[] {
+  const titulo = `Estrutura publicada atual (${lida}): H1 ${entreAspas(atual.h1 || "sem H1 legível")}`;
+  if (!atual.h2.length) return [`${titulo}; nenhum H2 legível.`];
+  const leitura = planta ? radarArticleBlueprintPublishedMapReading(planta, atual.h2, { keywords }) : [];
+  if (!planta || !leitura.length) {
+    return [`${titulo}; ${atual.h2.length} H2: ${atual.h2.map(item => entreAspas(cortar(item, 80))).join(" · ")}.`, RADAR_WRITING_UPDATE_WITHOUT_BLUEPRINT];
+  }
+  const faq = unicosPorChave(atual.h2.filter(item => EH_FAQ.test(item)), radarWritingCompareKey);
+  return [
+    `${titulo}; ${atual.h2.length} H2.`,
+    "Atualização: cada H2 publicado tem destino na planta do artigo-modelo (coluna estrutura); nada sai da página sem decisão registrada no artigo-modelo:",
+    ...leitura.map(item => `- ${entreAspas(cortar(item.current, 80))} → ${destinoDoH2(item, planta.blueprint.sections)}`),
+    ...faq.map(item => `- ${entreAspas(cortar(item, 80))} → FAQ legado: segue a regra do FAQ legado, abaixo`),
+  ];
+}
+
+/* 2026-10-08 · As keywords do artigo (principal, complementares e Assunto), sem vazio: não distinguem um título do outro. */
+const keywordsDoArtigo = (p: Projecoes): string[] => nucleoDoArtigo(p).map(valor => texto(valor)).filter(Boolean);
 
 function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: RadarWritingArticleContext, papel: string | null): string {
   const principal = texto(p.dna.principalKeyword);
@@ -1002,13 +1068,13 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
     const politica = radarWritingCompareKey(publicacao?.principalPolicy);
     linhas.push(
       `Publicado: ${url || "sim (URL publicada não registrada no pacote)"} — preservar URL, slug e canonical`,
-      /* 2026-10-02 · a estrutura atual da página, lida na exportação: a atualização parte dela. */
+      /* 2026-10-02 · a estrutura atual da página, lida na exportação: a atualização parte dela. 2026-10-08 · C2 · com o destino de cada H2. */
       ...(publicacao?.currentStructure
-        ? [
-          `Estrutura publicada atual (lida da página na exportação): H1 ${entreAspas(publicacao.currentStructure.h1 || "sem H1 legível")}${publicacao.currentStructure.h2.length ? `; ${publicacao.currentStructure.h2.length} H2: ${publicacao.currentStructure.h2.map(item => entreAspas(cortar(item, 80))).join(" · ")}` : "; nenhum H2 legível"}.`,
-          "Atualização: o que a página já cobre e continua na planta fica (pode ser reescrito e reordenado); seção existente que a planta não tem só sai com decisão humana — leve-a como pendência fora do texto.",
-        ]
-        : []),
+        ? linhasDaAtualizacao(publicacao.currentStructure, contexto.blueprint ?? null, keywordsDoArtigo(p))
+        /* 2026-10-08 · C2 · sem a leitura de agora, a página que o artigo-modelo viu ao ser montado (com o mapa dele). */
+        : contexto.blueprint?.publishedStructure?.h2.length
+          ? linhasDaAtualizacao(contexto.blueprint.publishedStructure, contexto.blueprint, keywordsDoArtigo(p), "lida ao montar o artigo-modelo")
+          : []),
       `Canonical: ${canonical || "não registrado no pacote; não criar um novo"}`,
       politica === "locked"
         ? "Principal: travada — não trocar"
@@ -1055,7 +1121,8 @@ function siloNaLinha(contexto: RadarWritingArticleContext): string[] {
   const pagina = silo.siloPage;
   const endereco = pagina ? pagina.publishedUrl || pagina.canonical || (pagina.slug ? `/${pagina.slug}` : null) : null;
   return [
-    `Silo: ${silo.label}${silo.draft ? " (rascunho no Arquiteto: a composição pode mudar)" : ""}`,
+    /* 2026-10-08 · D10: o estado do Silo dito sem "rascunho" (a composição continua podendo mudar). */
+    `Silo: ${silo.label}${silo.draft ? " (em formação no Arquiteto: a composição pode mudar)" : ""}`,
     ...(util(silo.centralEntity) ? [`Tema central do Silo: ${silo.centralEntity}`] : []),
     ...(pagina ? [`SiloPage: ${endereco || "endereço não registrado"} (${pagina.status})`] : []),
     ...(silo.excludedTopics.length ? [`Fora do Silo (não cobrir): ${silo.excludedTopics.join(" · ")}`] : []),
@@ -1092,6 +1159,23 @@ function naoAltere(publicado: boolean, assunto: Pick<AssuntoDeEscrita, "phrase">
  */
 export const RADAR_WRITING_NO_APPROVED_LINK = "(sem link aprovado no grafo: cite sem link ou peça ao Arquiteto; não crie o link)";
 
+/**
+ * ===== 2026-10-08 · C4 · A TRAVA DE FONTE NO CSV PARA ESCREVER =====
+ *
+ * O CSV de vídeo já tirava do texto publicável a frase que só entra com fonte;
+ * o CSV para escrever não marcava nada ("O CSV 'Para escrever' não muda", no
+ * catálogo). Agora a frase que a régua por sentido (`radarSentenceNeedsSource`)
+ * reprova leva o rótulo da regra geral 5 — "(precisa de fonte: …)" — e quem
+ * escreve a sustenta com fonte do pacote, a delimita ou a omite. A tese que
+ * NEGA o efeito ("o Instagram, sozinho, não enche a agenda") passa.
+ */
+export function radarWritingSourceMark(frase: string, veredito: Pick<RadarSentenceSourceVerdict, "needs" | "label">): string {
+  if (!veredito.needs || !veredito.label) return frase;
+  const corpo = frase.trim();
+  const comPonto = corpo.endsWith(".");
+  return `${corpo.replace(/[.;:\s]+$/, "")} (precisa de fonte: ${veredito.label})${comPonto ? "." : ""}`;
+}
+
 function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto: RadarWritingArticleContext, perguntaDeAbertura: string | null, especialista: readonly Contribuicao[] = [], links: readonly LinkDeEscrita[] = []): string {
   const promessa = util(p.editorial.readerPromise) || util(semMolduraDoTema(input.article.promise) === texto(input.article.promise) ? input.article.promise : null);
   const leitor = util(input.article.audience);
@@ -1103,6 +1187,10 @@ function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto:
   const proximo = eu && silo ? silo.members.find(membro => membro.position === eu.position + 1) || null : null;
   const linkParaOProximo = Boolean(proximo?.articleId) && links.some(link => link.alvo === proximo?.articleId);
   const linkParaAPagina = links.some(link => link.direcao === DIRECAO.ARTICLE_TO_SILO_PAGE);
+  /* 2026-10-08 · C4 · promessa, abertura, fechamento e chamada: a frase que só entra com fonte leva a marca (a tese que nega passa). */
+  const pendentes = radarPendingClaims(p, null);
+  const comuns = radarClaimCommonStems(p, null);
+  const comFonte = (frase: string) => radarWritingSourceMark(frase, radarSentenceNeedsSource(frase, { pendentes, comuns }));
   const depois = silo
     ? [
       ...(proximo ? [`o próximo artigo do Silo, ${entreAspas(rotuloDoMembro(proximo))}${linkParaOProximo ? "" : ` ${RADAR_WRITING_NO_APPROVED_LINK}`}`] : []),
@@ -1110,18 +1198,18 @@ function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto:
     ]
     : [];
   const linhas = [
-    ...(promessa ? [`Promessa: ${comPontoFinal(promessa)}`] : []),
+    ...(promessa ? [`Promessa: ${comFonte(comPontoFinal(promessa))}`] : []),
     ...(leitor ? [`Leitor: ${comPontoFinal(leitor)}`] : []),
     ...linhasDoTronco(p),
     ...(perguntaDeAbertura ? [`Abertura: responder ${entreAspas(perguntaDeAbertura)} logo no primeiro parágrafo, de forma direta, antes de contextualizar.`] : []),
-    ...(direcaoDaAbertura ? [`Direção da abertura: ${comPontoFinal(direcaoDaAbertura)}`] : []),
+    ...(direcaoDaAbertura ? [`Direção da abertura: ${comFonte(comPontoFinal(direcaoDaAbertura))}`] : []),
     ...(vozDoEspecialista(especialista, "DIRETRIZ").map(item => `Diretriz do especialista (vale para ${daUnidade(p.unidade).o} ${p.unidade.noun} inteir${daUnidade(p.unidade).terminacao}): ${falaDoEspecialista(item)}.`)),
     ...(vozDoEspecialista(especialista, "FECHAMENTO").length
       ? vozDoEspecialista(especialista, "FECHAMENTO").map(item => `Fechamento — virada final na voz do especialista: ${falaDoEspecialista(item)}.`)
-      : fechamento ? [`Fechamento: ${comPontoFinal(fechamento)}`] : []),
+      : fechamento ? [`Fechamento: ${comFonte(comPontoFinal(fechamento))}`] : []),
     ...(vozDoEspecialista(especialista, "CTA").length
       ? vozDoEspecialista(especialista, "CTA").map(item => `Chamada final — argumento do especialista: ${falaDoEspecialista(item)}.`)
-      : chamada ? [`Chamada final: ${comPontoFinal(chamada)}`] : []),
+      : chamada ? [`Chamada final: ${comFonte(comPontoFinal(chamada))}`] : []),
     ...linhaDoDestino(p),
     ...(depois.length ? [`Próximo passo do leitor: ${depois.join(" ou ")}.`] : []),
   ];
@@ -1224,10 +1312,11 @@ function colunaTitulo(input: RadarPortableExportInput, p: Projecoes): { celula: 
     ...(alternativas.length ? [`Alternativas: ${alternativas.join(" · ")}`] : []),
     ...linhaDoH1(p),
     ...(direcao ? [`Direção de título: ${comPontoFinal(direcao)}`] : []),
-    p.seo.seoTitle ? `SEO title: ${p.seo.seoTitle}` : "SEO title: a definir; cerca de 60 caracteres, com a keyword principal, sem copiar título de concorrente.",
+    /* 2026-10-08 (correção da revisão) · D10: "a definir" virou a instrução concluída de escrever. */
+    p.seo.seoTitle ? `SEO title: ${p.seo.seoTitle}` : "SEO title: escreva com cerca de 60 caracteres, com a keyword principal, sem copiar título de concorrente.",
     p.seo.metaDescription
       ? `Meta description: ${p.seo.metaDescription}`
-      : `Meta description: a definir; cerca de 155 caracteres${restricaoFalaDaPromessa ? "" : ", refletindo a promessa"}${restricoes.length ? `. ${restricoes.map(semPontoFinal).join("; ")}` : ""}.`,
+      : `Meta description: escreva com cerca de 155 caracteres${restricaoFalaDaPromessa ? "" : ", refletindo a promessa"}${restricoes.length ? `. ${restricoes.map(semPontoFinal).join("; ")}` : ""}.`,
     ...(slug ? [`Slug (conferir o alinhamento com a principal): ${slug}`] : []),
   ];
   return { celula: linhas.join("\n"), tituloInutil };
@@ -1489,6 +1578,153 @@ function limitacaoDaCamada(limitacao: string, paginasLidas: number): string {
   return `A leitura multiformato e dos recursos da SERP (vídeos e blocos) usa só o que a SERP devolveu: nenhum vídeo foi assistido ou transcrito. As ${paginasLidas} páginas comparáveis, estas sim, foram lidas pela investigação (base das medidas e dos temas dos concorrentes)`;
 }
 
+/* ---------------------- 2026-10-08 · C6 e C7: o diferencial e o foco das perguntas ---------------------- */
+
+/* A raiz de comparação, sem palavra de função nem vazia; o radical não é uniforme ("cliente" × "client"): casa pelo começo (5+ letras). */
+const mesmaRaizDeEscrita = (a: string, b: string) => a === b || (Math.min(a.length, b.length) >= 5 && (a.startsWith(b) || b.startsWith(a)));
+const raizesDeEscrita = (valor: string | null | undefined): string[] =>
+  [...new Set(radarSemanticStems(radarWritingDecodeEntities(texto(valor))))].filter(raiz => raiz.length >= 3 && !RADAR_WRITING_FUNCTION_WORDS.has(raiz) && !VAZIAS.has(raiz));
+const temRaiz = (lista: readonly string[], raiz: string) => lista.some(outra => mesmaRaizDeEscrita(raiz, outra));
+/* As raízes do núcleo do artigo: principal, complementares, Assunto e a cobertura que o ArticleDNA exige. */
+const raizesDoNucleo = (p: Projecoes): string[] => [...new Set([...keywordsDoArtigo(p), ...p.dna.mustCover].flatMap(raizesDeEscrita))];
+/* Palavras de forma, não de assunto: "Destaques de forma estratégica" não toca "Como usar… de forma estratégica". */
+const RAIZES_DE_FORMA = ["estrateg", "pratic", "dica", "forma", "maneira", "tatic", "passo", "guia", "melhor", "import", "eficient", "complet"];
+const deAssunto = (raiz: string) => !RAIZES_DE_FORMA.some(forma => raiz.startsWith(forma));
+
+/*
+ * ===== 2026-10-08 · C7 · A PERGUNTA É DESTE ARTIGO? =====
+ *
+ * No CSV real de 08/10, "Como fazer um pitch de vendas eficiente?" e "O que
+ * fazer para vender muito no Instagram?" entravam nas perguntas a responder,
+ * enquanto "Como chamar a atenção no Instagram?" estava no "Não cobrir": as
+ * três só dividem com "como atrair clientes pelo instagram" a palavra do
+ * cenário. E "Como captar clientes pelo WhatsApp?" é o assunto de outro
+ * tópico do Silo ("como atrair clientes pelo whatsapp").
+ *
+ * A régua, a mesma da pergunta de abertura (`radarWritingOpeningQuestion`):
+ * a pergunta é deste artigo quando divide com o núcleo duas raízes, ou uma que
+ * não é cenário — a raiz do núcleo que está em metade ou mais das perguntas
+ * (com quatro ou mais) é cenário ("instagram", "clientes"). A pergunta sem
+ * nenhuma raiz do núcleo continua: a investigação a ligou ao artigo por outro
+ * caminho, e o export não tem base para tirá-la ("Quais são os tipos de acne?"
+ * num artigo de skincare). A que só divide o cenário sai das perguntas e vai ao
+ * "Não cobrir": para o artigo ou tópico do Silo cujas palavras próprias ela
+ * traz (a mais rara entre os destinos vence; empate, o artigo), ou como outro
+ * foco. Vale para qualquer marca, assunto e tipo de página.
+ */
+type FocoDasPerguntas = { doArtigo: (pergunta: string) => boolean; destino: (pergunta: string) => string };
+
+function focoDasPerguntas(p: Projecoes, contexto: RadarWritingArticleContext, perguntas: readonly string[]): FocoDasPerguntas {
+  const nucleo = raizesDoNucleo(p);
+  const raizesDe = (pergunta: string) => raizesDeEscrita(pergunta);
+  const lidas = perguntas.map(raizesDe);
+  const cenario = lidas.length >= 4 ? nucleo.filter(raiz => lidas.filter(raizes => temRaiz(raizes, raiz)).length / lidas.length >= 0.5) : [];
+
+  const silo = contexto.silo?.kind === "silo" ? contexto.silo : null;
+  const proprias = new Set(keywordsDoArtigo(p).map(radarWritingCompareKey));
+  const alvos = unicosPorChave([
+    ...(silo?.members || []).filter(membro => membro.articleId !== contexto.articleId).map(membro => ({ rotulo: rotuloDoMembro(membro), artigo: true })),
+    ...(silo?.includedTopics || []).map(rotulo => ({ rotulo: texto(rotulo), artigo: false })),
+  ], item => radarWritingCompareKey(item.rotulo))
+    .filter(item => item.rotulo && !proprias.has(radarWritingCompareKey(item.rotulo)))
+    .map(item => ({ ...item, todas: raizesDeEscrita(item.rotulo), proprias: raizesDeEscrita(item.rotulo).filter(raiz => !temRaiz(nucleo, raiz)) }))
+    .filter(item => item.proprias.length);
+  /*
+   * 2026-10-08 (correção da revisão) · a pergunta que É a keyword de outro
+   * artigo ou tópico do Silo ("Como atrair clientes pelo WhatsApp?", com o
+   * tópico "como atrair clientes pelo whatsapp") pertence a ele, mesmo dividindo
+   * duas raízes com o núcleo: ela traz as palavras próprias do destino e nenhuma
+   * fora dele. "Como captar clientes pelo Instagram?" continua deste artigo — o
+   * "instagram" não está em "como captar um cliente".
+   */
+  const ehDeOutroDoSilo = (pergunta: string) => {
+    const daPergunta = raizesDe(pergunta);
+    return daPergunta.length > 0 && alvos.some(alvo => alvo.proprias.every(raiz => temRaiz(daPergunta, raiz)) && daPergunta.every(raiz => temRaiz(alvo.todas, raiz)));
+  };
+  const doArtigo = (pergunta: string) => {
+    if (ehDeOutroDoSilo(pergunta)) return false;
+    const comuns = raizesDe(pergunta).filter(raiz => temRaiz(nucleo, raiz));
+    return !comuns.length || comuns.length >= 2 || comuns.some(raiz => !temRaiz(cenario, raiz));
+  };
+  const raridade = (raiz: string) => 1 / Math.max(1, alvos.filter(alvo => temRaiz(alvo.proprias, raiz)).length);
+  const principal = texto(p.dna.principalKeyword);
+  const comComplementares = p.dna.secondaryKeywords.length + p.dna.narrativeReinforcements.length > 0;
+
+  const destino = (pergunta: string): string => {
+    const daPergunta = raizesDe(pergunta);
+    /* Os artigos do Silo vêm antes dos tópicos na lista: no empate, fica o primeiro — o artigo. */
+    let melhor: { alvo: typeof alvos[number]; nota: number } | null = null;
+    for (const alvo of alvos) {
+      if (!alvo.proprias.every(raiz => temRaiz(daPergunta, raiz))) continue;
+      const nota = alvo.proprias.reduce((soma, raiz) => soma + raridade(raiz), 0);
+      if (!melhor || nota > melhor.nota + 1e-9) melhor = { alvo, nota };
+    }
+    const dita = entreAspas(pergunta);
+    if (melhor?.alvo.artigo) return `${dita}: pertence ao artigo ${entreAspas(melhor.alvo.rotulo)} do Silo; não responder aqui.`;
+    if (melhor) return `${dita}: pertence a ${entreAspas(melhor.alvo.rotulo)}, outro tópico do Silo; não responder aqui.`;
+    return `${dita}: outro foco; não trata de ${principal ? entreAspas(principal) : "a keyword principal"}${comComplementares ? " nem das complementares" : ""}.`;
+  };
+  return { doArtigo, destino };
+}
+
+/* "Conclusão", "Considerações finais": fecho da página, não diferencial. */
+const EH_FECHO_DA_PAGINA = /^(?:conclusao|consideracoes finais|para finalizar|finalizando|em resumo|resumo final|resumindo)\b/;
+
+/** 2026-10-08 · C6 · O diferencial do artigo, na ordem do desenho; `null` = nenhum (o movimento não existe). */
+function diferencialDoArtigo(
+  input: RadarPortableExportInput,
+  p: Projecoes,
+  contexto: RadarWritingArticleContext,
+  tocaForaDoEscopo: (valor: string | null | undefined) => boolean,
+): string | null {
+  const nucleo = raizesDoNucleo(p);
+  const cabecalhos = (input.competitorOutlines || []).flatMap(pagina => pagina.headings.filter(item => item.level === 2 || item.level === 3).map(item => raizesDeEscrita(item.text)));
+  /* 1 · o que a página publicada já trata e os concorrentes lidos não tratam (o que a planta decidiu tirar não conta). */
+  const atual = contexto.publication?.published ? contexto.publication.currentStructure ?? null : null;
+  if (atual?.h2.length && cabecalhos.length) {
+    const removidos = new Set(contexto.blueprint
+      ? radarArticleBlueprintPublishedMapReading(contexto.blueprint, atual.h2, { keywords: keywordsDoArtigo(p) }).filter(item => item.kind === "REMOVED").map(item => radarWritingCompareKey(item.current))
+      : []);
+    const daPagina = unicosPorChave(atual.h2.map(item => radarWritingDecodeEntities(item).replace(/\s+/g, " ").trim()), radarWritingCompareKey)
+      .filter(h2 => h2 && !EH_FAQ.test(h2) && !EH_FECHO_DA_PAGINA.test(radarWritingCompareKey(h2)) && !removidos.has(radarWritingCompareKey(h2)) && !tocaForaDoEscopo(h2))
+      .filter(h2 => {
+        const proprias = raizesDeEscrita(h2).filter(raiz => !temRaiz(nucleo, raiz) && deAssunto(raiz));
+        if (proprias.length < 2) return false;
+        return !cabecalhos.some(outro => {
+          const divididas = proprias.filter(raiz => temRaiz(outro, raiz)).length;
+          return divididas >= 2 || divididas / proprias.length >= 0.5;
+        });
+      })
+      .slice(0, 3);
+    if (daPagina.length) {
+      return `Diferencial da página publicada: ela já trata o que os concorrentes lidos não tratam — ${daPagina.map(item => entreAspas(cortar(item, 80))).join("; ")}. Isso fica na atualização, reescrito na voz (o destino de cada H2 está na coluna artigo).`;
+    }
+  }
+  /* 2 · o tema de uma página só que serve ao leitor: toca a planta (ou, sem ela, a estrutura sugerida). */
+  const unicos = (radarWritingCompetitorTopicsOf(input, p)?.topics || []).filter(item => item.pages < 2);
+  if (unicos.length) {
+    /* O título e os H3 da seção dizem o assunto dela (peso 2); a resposta e o "Explicar", o que ela desenvolve (peso 1). */
+    const secoes = contexto.blueprint
+      ? contexto.blueprint.blueprint.sections.map(secao => ({ titulo: secao.h2, nome: raizesDeEscrita([secao.h2, ...secao.h3].join(" ")), corpo: raizesDeEscrita([secao.readerQuestion, secao.answerFirst, ...secao.explain].join(" ")) }))
+      : p.secoes.map(secao => ({ titulo: secao.heading, nome: raizesDeEscrita(secao.heading), corpo: raizesDeEscrita([secao.readerQuestion || "", ...secao.coveragePoints].join(" ")) }));
+    for (const tema of unicos) {
+      const proprias = raizesDeEscrita([tema.label, ...tema.headings].join(" ")).filter(raiz => !temRaiz(nucleo, raiz) && deAssunto(raiz));
+      if (proprias.length < 2) continue;
+      const notas = secoes.map(item => proprias.reduce((soma, raiz) => soma + (temRaiz(item.nome, raiz) ? 2 : temRaiz(item.corpo, raiz) ? 1 : 0), 0));
+      const melhor = Math.max(0, ...notas);
+      const secao = melhor > 0 ? secoes[notas.indexOf(melhor)] : null;
+      if (secao) return `Diferencial possível: ${entreAspas(tema.label)}, tratado por 1 de ${tema.sampleSize} páginas comparáveis — aprofunde na seção ${entreAspas(secao.titulo)}, sem copiar o cabeçalho do concorrente.`;
+    }
+  }
+  return null;
+}
+
+/** 2026-10-08 · C6 · Sem outro diferencial: a entrega concreta que a planta pede (B6), quando ela a diz. */
+function entregaDaPlanta(planta: RadarArticleBlueprintPayload | null): string | null {
+  const secao = planta?.blueprint.sections.find(item => texto(item.practical));
+  return secao ? `Entrega concreta da planta: ${semPontoFinal(texto(secao.practical))} (seção ${entreAspas(secao.h2)}).` : null;
+}
+
 function colunaCobrir(
   input: RadarPortableExportInput,
   p: Projecoes,
@@ -1555,11 +1791,20 @@ function colunaCobrir(
     const vezes = p.serp.questions.find(item => radarWritingCompareKey(item.question) === radarWritingCompareKey(perguntaDeAbertura));
     movimentos.push(`Responder ${entreAspas(perguntaDeAbertura)} logo no primeiro parágrafo${vezes ? ` (${vezes.pages} de ${vezes.sampleSize} páginas tratam)` : ""}.`);
   }
+  /*
+   * 2026-10-08 · C6 · O DIFERENCIAL, NUNCA A COSTURA DO QUE A MAIORIA JÁ COBRE.
+   * O movimento "Costurar num mesmo argumento X e Y" usava os conceitos que 2+
+   * páginas tratam — os mesmos que esta célula lista em "Já coberto pela
+   * maioria (não é diferencial)". Saiu. No lugar, UM movimento de diferencial,
+   * nesta ordem: o que a página publicada já trata e a amostra não trata; o
+   * tema de uma página só que serve ao leitor (toca a planta); as lacunas e
+   * diferenciais G/D da investigação (movimentos abaixo); e, sem nada disso, a
+   * entrega concreta que a planta pede. Sem nenhum, o movimento não existe.
+   */
+  const diferencial = diferencialDoArtigo(input, p, contexto, tocaForaDoEscopo);
+  if (diferencial) movimentos.push(diferencial);
+  const antesDosDiferenciaisDaSerp = movimentos.length;
   if (p.blueprint?.profile === "GOOGLE") {
-    const fragmentados = p.blueprint.observed.recurrentConcepts.filter(item => (item.count ?? 0) >= maioria && !descartar(item.statement)).slice(0, 3);
-    if (fragmentados.length >= 2) {
-      movimentos.push(`Costurar num mesmo argumento ${fragmentados.map(item => entreAspas(item.statement)).join(" e ")}, que a amostra trata em páginas separadas.`);
-    }
     /*
      * DIFERENCIAL FORA DO ESCOPO NÃO É INSTRUÇÃO (2026-10-02). O CSV real dizia
      * "Sustentar 'Ative o Instagram Shopping' como diferencial" e, na mesma
@@ -1612,10 +1857,23 @@ function colunaCobrir(
     movimentos.push(`Cobrir ${entreAspas(rotulo)}: ${lacuna.pagesCovering} de ${lacuna.sampleSize} concorrentes tratam e o ArticleDNA não declara.`);
     if (movimentos.length >= RADAR_WRITING_EXPORT_LIMITS.moves) break;
   }
+  /* 2026-10-08 · C6 · sem diferencial da página, de tema de uma página só nem da SERP (G/D): a entrega concreta que a planta pede, se houver. */
+  if (!diferencial && movimentos.length === antesDosDiferenciaisDaSerp) {
+    const entrega = entregaDaPlanta(contexto.blueprint ?? null);
+    if (entrega) movimentos.push(entrega);
+  }
   const sinal = (chave: string) => p.autoridade?.eeatSignals.find(item => item.key === chave) || null;
   const experiencia = sinal("FIRSTHAND_ACCOUNT");
+  /*
+   * 2026-10-08 · C8 · SEM MATERIAL PRÓPRIO, SEM RELATO E SEM MARCADOR. O
+   * "[RELATO DA MARCA — preencher]" contrariava D10 e a própria voz da marca
+   * ("não ficaram marcadores internos ou relatos por preencher no texto
+   * publicável?"; a ausência de caso próprio não impede um artigo explicativo).
+   * Decisão da rodada: sem material da marca, o texto sai sem relato e sem
+   * inventá-lo — nada de marcador.
+   */
   if (experiencia && experiencia.state === "ABSENT") {
-    movimentos.push(`Experiência: nenhuma das ${experiencia.sampleSize} páginas traz relato de prática. Não há material próprio da marca neste arquivo: onde couber experiência, deixe o marcador [RELATO DA MARCA — preencher] e não escreva relato.`);
+    movimentos.push(`Experiência: nenhuma das ${experiencia.sampleSize} páginas traz relato de prática. Não há material próprio da marca neste arquivo: escreva sem relato e sem inventá-lo; nenhum marcador vai ao texto.`);
   }
   const autoria = sinal("NAMED_AUTHOR");
   const credencial = sinal("DECLARED_CREDENTIAL");
@@ -1632,7 +1890,28 @@ function colunaCobrir(
   const naoProntas = new Set((p.descoberta?.answerableUnits || []).filter(unidade => unidade.readiness !== "READY").map(unidade => radarWritingCompareKey(unidade.questionOrNeed)));
   const semFonte = new Set(radarWritingUnsupportedClaims(p.autoridade, p.serp).map(item => radarWritingCompareKey(item.afirmacao)));
   const jaNaEstrutura = new Set(p.secoes.flatMap(secao => [radarWritingCompareKey(secao.readerQuestion), radarWritingCompareKey(secao.heading)]).filter(Boolean));
-  jaNaEstrutura.add(radarWritingCompareKey(perguntaDeAbertura));
+  /*
+   * 2026-10-08 · C7 · com o artigo-modelo, a abertura e as seções são as DELE:
+   * a pergunta que a planta já responde não se repete aqui, e a "pergunta de
+   * abertura" do export (que a planta não usa) volta para a lista.
+   */
+  const planta = contexto.blueprint?.blueprint;
+  if (planta) for (const pergunta of [planta.opening.readerQuestion, ...planta.sections.map(secao => secao.readerQuestion)]) jaNaEstrutura.add(radarWritingCompareKey(pergunta));
+  else jaNaEstrutura.add(radarWritingCompareKey(perguntaDeAbertura));
+  /*
+   * 2026-10-08 (correção da revisão) · a pergunta que a planta usa como
+   * EVIDÊNCIA de uma seção ou da abertura (G1 "Como captar clientes pela
+   * internet?" na seção 5 do caso real) também já está na estrutura: ela não
+   * se repete nas perguntas a responder e nunca vai ao "Não cobrir" — o mesmo
+   * tema não pode ser obrigatório na estrutura e proibido aqui.
+   */
+  if (planta && contexto.blueprint) {
+    const textoDaEvidencia = new Map((contexto.blueprint.evidence || []).map(item => [item.id, item.text]));
+    for (const id of [...(planta.opening.evidence || []), ...planta.sections.flatMap(secao => secao.evidence || [])]) {
+      const dita = /^[PGDO]\d/i.test(id) ? textoDaEvidencia.get(id) : undefined;
+      if (dita) jaNaEstrutura.add(radarWritingCompareKey(dita.replace(/\s*\([^()]*p[áa]ginas?[^()]*\)\s*$/i, "")));
+    }
+  }
   const candidatas = [
     ...(p.descoberta?.questionCoverageRequirements || [])
       .slice().sort((a, b) => ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[a.priority] ?? 3) - ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[b.priority] ?? 3))
@@ -1640,8 +1919,12 @@ function colunaCobrir(
     ...p.serp.questions.filter(item => STATUS_DE_PERGUNTA.has(item.status)).sort((a, b) => b.pages - a.pages)
       .map(item => ({ pergunta: item.question, prioridade: null as string | null })),
   ].map(item => ({ ...item, pergunta: semCaixaAlta(radarWritingDecodeEntities(item.pergunta).replace(/\s+\?/g, "?").trim()) }));
-  const perguntas = unicosPorChave(candidatas, item => radarWritingCompareKey(item.pergunta))
-    .filter(item => !jaNaEstrutura.has(radarWritingCompareKey(item.pergunta)) && !descartar(item.pergunta) && !EH_FAQ.test(item.pergunta))
+  const elegiveis = unicosPorChave(candidatas, item => radarWritingCompareKey(item.pergunta))
+    .filter(item => !jaNaEstrutura.has(radarWritingCompareKey(item.pergunta)) && !descartar(item.pergunta) && !EH_FAQ.test(item.pergunta));
+  /* 2026-10-08 · C7 · só a pergunta DESTE artigo; a que só divide o cenário vai ao "Não cobrir", com o destino. */
+  const foco = focoDasPerguntas(p, contexto, elegiveis.map(item => item.pergunta));
+  const foraDoFoco = elegiveis.filter(item => !foco.doArtigo(item.pergunta)).map(item => foco.destino(item.pergunta));
+  const perguntas = elegiveis.filter(item => foco.doArtigo(item.pergunta))
     .slice(0, RADAR_WRITING_EXPORT_LIMITS.questions)
     .map(item => {
       const chave = radarWritingCompareKey(item.pergunta);
@@ -1672,6 +1955,7 @@ function colunaCobrir(
   const resolvidos = unicosPorChave(resolvidosComoForaDoEscopo.map(item => radarWritingDecodeEntities(item)), radarWritingCompareKey);
   const naoCobrir = [
     ...foraDoEscopo.map(item => `${entreAspas(radarWritingDecodeEntities(item.observedLabel))}: ${semPontoFinal(item.reason)}.`),
+    ...foraDoFoco,
     ...(resolvidos.length
       ? [`Nota: o pacote também listava ${resolvidos.map(entreAspas).join(", ")} como diferencial; aqui vale o "não cobrir" (resolvido neste arquivo, sem decisão pendente).`]
       : []),
@@ -1957,7 +2241,8 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
 
   const citadas = p.fontesExternas.filter(item => item.authorityClass !== "NAO_CLASSIFICADA");
   if (citadas.length) {
-    linhas.push("Citadas pelo mercado, não verificadas (conferir antes de citar):");
+    /* 2026-10-08 (correção da revisão) · D10: a regra concluída, não "conferir antes de citar". */
+    linhas.push("Citadas pelo mercado, sem verificação no pacote (só como referência delimitada, nunca como fonte da afirmação):");
     for (const fonte of unicosPorChave(citadas, item => item.url).slice(0, 6)) {
       const titulo = /^https?:\/\//.test(fonte.title) ? fonte.domain : cortar(fonte.title, 80);
       linhas.push(`- ${titulo} — ${fonte.url} (${fonte.authorityClass}; citada por ${fonte.citedByPages} página(s))`);
@@ -1980,13 +2265,14 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
     }
   }
 
+  /* 2026-10-08 · D10: o parecer ainda não aceito fica fora do texto — dito como regra cumprida, sem "aguardando" (como o CSV de vídeo, 2026-10-07). */
   const pendentes = p.especialista.pending;
   linhas.push(especialista.length
     ? "Especialista:"
     : pendentes
-      ? `Especialista: ${pendentes} parecer(es) recebido(s) aguardando aceite no Radar. Eles NÃO entram no texto até serem aceitos (Radar → Especialista → Respostas recebidas).`
+      ? `Especialista: sem contribuição aceita; ${pendentes} parecer(es) ainda não aceito(s) no Radar ficam fora deste texto.`
       : "Especialista: sem contribuição aceita.");
-  if (especialista.length && pendentes) linhas.push(`- Há ainda ${pendentes} parecer(es) aguardando aceite no Radar; não usar até serem aceitos.`);
+  if (especialista.length && pendentes) linhas.push(`- ${pendentes} parecer(es) ainda não aceito(s) no Radar ficam fora deste texto.`);
   for (const item of especialista) linhas.push(`- ${item.linha}`);
 
   if (videos.length) {
@@ -2277,8 +2563,16 @@ function modoDoTrecho(trecho: RadarPortableVideoExtract): string {
  * `contexto` diz onde o artigo está no arquivo (silo ou avulso) e o que se
  * sabe da página publicada. A entrada é a MESMA do formato completo.
  */
-export function buildRadarWritingExportArticle(input: RadarPortableExportInput, contexto: RadarWritingArticleContext): RadarWritingExportArticle {
+export function buildRadarWritingExportArticle(input: RadarPortableExportInput, contextoRecebido: RadarWritingArticleContext): RadarWritingExportArticle {
   const p = radarWritingProjections(input);
+  /*
+   * 2026-10-08 · B4 também aqui: o artigo-modelo com os nomes atuais de
+   * produtos ("Perfil da Empresa no Google"), para valer em todo caminho que
+   * monte esta linha — a leitura do servidor já troca; sem troca, o MESMO
+   * objeto. A keyword que traz o nome antigo o preserva.
+   */
+  const plantaAtual = contextoRecebido.blueprint ? radarArticleBlueprintWithCurrentNames(contextoRecebido.blueprint, keywordsDoArtigo(p)) : null;
+  const contexto: RadarWritingArticleContext = plantaAtual && plantaAtual !== contextoRecebido.blueprint ? { ...contextoRecebido, blueprint: plantaAtual } : contextoRecebido;
   const membro = contexto.silo?.members.find(item => item.articleId === contexto.articleId) || null;
   const papel = (membro && membro.role !== "sem silo" ? papelLegivel(membro.role) : null) || papelLegivel(p.dna.siloRole);
   const posicao = membro?.position ?? contexto.filePosition;
@@ -2382,7 +2676,9 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   if (!util(p.editorial.readerPromise) && input.profile !== "YOUTUBE") ressalvas.push("promessa ao leitor não definida no pacote");
   for (const item of especialista) if (item.aviso) ressalvas.push(`especialista ${item.rotulo}: ${item.aviso}`);
   ressalvas.push(...cobrir.conflitos);
-  if (artigoDeSilo(contexto) && !links.length && input.profile !== "YOUTUBE") {
+  /* 2026-10-08 · a planta que já posiciona links internos (coluna links_internos dela) não deixa o artigo isolado do Silo. */
+  const plantaComLinks = Boolean(contexto.blueprint?.blueprint.sections.some(secao => secao.internalLinks.length));
+  if (artigoDeSilo(contexto) && !links.length && !plantaComLinks && input.profile !== "YOUTUBE") {
     ressalvas.push(`sem links internos no pacote: ${formas.o} ${unidade.noun} sai isolad${formas.terminacao} do Silo (sem link para o Pilar nem para a SiloPage) até o Arquiteto definir o plano de links`);
   }
   const decisao = veredito(bloqueios, ressalvas);
@@ -2400,7 +2696,10 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   const especificas = [
     ...(decisao.verdict === "Com ressalva" && decisao.primeira ? [decisao.primeira] : []),
     ...(publicado ? [
-      `${formas.Nome} publicad${formas.terminacao}: é atualização; preserve URL, slug e canonical e não remova seção existente sem decisão humana`,
+      /* 2026-10-08 · C2 · com o mapa da atualização (artigo-modelo e H2 publicados), o prompt aponta para ele. */
+      contexto.blueprint && (publicacao?.currentStructure?.h2.length || contexto.blueprint.publishedStructure?.h2.length)
+        ? `${formas.Nome} publicad${formas.terminacao}: é atualização; preserve URL, slug e canonical e siga o mapa da página publicada (coluna artigo): nenhuma seção existente sai sem decisão registrada no artigo-modelo`
+        : `${formas.Nome} publicad${formas.terminacao}: é atualização; preserve URL, slug e canonical e não remova seção existente sem decisão humana`,
       /* 2026-10-02 · a MESMA frase do FAQ legado da regra geral e da coluna artigo (AGENTS §13). */
       RADAR_WRITING_LEGACY_FAQ,
     ] : []),
@@ -2423,8 +2722,21 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     produtos: conteudo(() => colunaProdutos(input)),
     prompt: colunaPrompt(contexto, especificas, decisao.verdict === "Não" ? decisao.primeira : null, unidade),
   };
-  /* O artigo-modelo APROVADO decide as colunas de planta; o resto continua como era. */
-  if (contexto.blueprint && !soIdentidade) Object.assign(linha, radarArticleBlueprintColumns(contexto.blueprint, videosAoVivo, { slug: texto(publicacao?.slug) || texto(input.article.slug), publishedUrl: texto(publicacao?.publishedUrl) }, radarWritingDomainLenses(p.lentes)));
+  /*
+   * O artigo-modelo APROVADO decide as colunas de planta; o resto continua como era.
+   * 2026-10-08 · C2 e C4 · a planta recebe a trava de fonte (as afirmações do
+   * pacote e as raízes de cenário, como no CSV de vídeo) e os H2 publicados,
+   * para marcar a frase que só entra com fonte e o destino de cada H2.
+   */
+  if (contexto.blueprint && !soIdentidade) {
+    Object.assign(linha, radarArticleBlueprintColumns(contexto.blueprint, videosAoVivo, { slug: texto(publicacao?.slug) || texto(input.article.slug), publishedUrl: texto(publicacao?.publishedUrl) }, radarWritingDomainLenses(p.lentes), {
+      pendentes: radarPendingClaims(p, contexto.blueprint),
+      comuns: radarClaimCommonStems(p, contexto.blueprint),
+      /* 2026-10-08 (correção da revisão) · a principal, para a ordem de leitura da busca "como …" também na planta antiga. */
+      principal: texto(p.dna.principalKeyword),
+      ...(publicado ? { currentH2: publicacao?.currentStructure?.h2 ?? null, keywords: keywordsDoArtigo(p) } : {}),
+    }));
+  }
   if (contexto.brandVoice && !soIdentidade) {
     linha.promessa_e_leitor = [
       linha.promessa_e_leitor,
@@ -2454,7 +2766,8 @@ export const RADAR_WRITING_GENERAL_RULES = [
   /* 2026-10-02 · o FAQ legado na MESMA frase da coluna artigo e do prompt do publicado (AGENTS §13). */
   `Sem seção de perguntas frequentes (FAQ): as perguntas são respondidas dentro das seções. ${RADAR_WRITING_LEGACY_FAQ}`,
   "Dado de terceiros é pesquisa: não copie frases, títulos, trechos, transcrições nem avaliações.",
-  "Não invente fatos, números, estudos, preços, produtos, autores, credenciais, depoimentos nem URLs; onde faltar experiência própria da marca, deixe o marcador [RELATO DA MARCA — preencher].",
+  /* 2026-10-08 · C8 · sem marcador por preencher (D10): sem experiência própria da marca, o texto sai sem relato e sem inventá-lo. */
+  "Não invente fatos, números, estudos, preços, produtos, autores, credenciais, depoimentos nem URLs; onde faltar experiência própria da marca, escreva sem relato e sem inventá-lo, sem marcador no texto.",
   "Afirmação marcada \"precisa de fonte\" só entra com uma das fontes listadas; sem fonte, escreva de forma qualificada ou omita. Tema de saúde pede autor e revisor reais.",
   "Conflito entre fonte factual e o que o mercado repete fica escrito dos dois lados.",
   "Cada seção abre respondendo a pergunta dela, nomeando o termo, de forma compreensível fora da página.",
@@ -2513,7 +2826,7 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
     input.authorsKnown
       ? paraAsUnidades(`autoria: cada artigo diz quem assina (o especialista da aba Especialista); revisor não faz parte deste arquivo${saude ? " (há tema de saúde: autoria e revisão reais são exigidas)" : ""}`)
       : `${input.brandVoice?.kind === "available" ? "autor e revisor" : "voz da marca, autor e revisor"} não fazem parte deste arquivo: defina-os antes de publicar${saude ? " (há tema de saúde: autoria e revisão reais são exigidas)" : ""}`,
-    ...(silo?.draft ? ["o Silo ainda é rascunho no Arquiteto: a composição pode mudar"] : []),
+    ...(silo?.draft ? ["o Silo está em formação no Arquiteto: a composição pode mudar"] : []),
   ];
   const verdict: RadarWritingVerdict = artigos.length && bloqueados.length === artigos.length ? "Não" : "Com ressalva";
   const pode = [
@@ -2552,10 +2865,11 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
     ].join("\n");
 
   const audiencia = silo && util(silo.audience) ? silo.audience : null;
+  /* 2026-10-08 · C1 · D10: o rótulo de entregável (a versão corrente, nunca "em rascunho" nem "aguardando aprovação"). */
   const marca = [
     `Marca: ${site ? `site ${site}` : "site não registrado neste arquivo"}.`,
     ...(input.brandVoice?.kind === "available"
-      ? [`Voz da marca: aplique a linha "Voz da marca", logo abaixo (${radarBrandVoiceLabel(input.brandVoice.voice)}). ${input.authorsKnown ? paraAsUnidades("Autoria: na linha de cada artigo (especialista da aba Especialista).") : "Autor e revisor: não fazem parte deste arquivo."} Não invente autor, credencial nem depoimento.`]
+      ? [`Voz da marca: aplique a linha "Voz da marca", logo abaixo (${radarBrandVoiceDeliverableLabel(input.brandVoice.voice)}). ${input.authorsKnown ? paraAsUnidades("Autoria: na linha de cada artigo (especialista da aba Especialista).") : "Autor e revisor: não fazem parte deste arquivo."} Não invente autor, credencial nem depoimento.`]
       : input.brandVoice
         ? [radarBrandVoiceAbsence(input.brandVoice) || "", "Autor e revisor: não fazem parte deste arquivo. Não invente autor, credencial nem depoimento."]
         : ["Voz, tom, autor e revisor: não fazem parte deste arquivo; cole-os antes de pedir o texto a uma IA. Não invente autor, credencial nem depoimento."]),
@@ -2599,10 +2913,11 @@ export function buildRadarWritingBrandVoiceRow(state: RadarBrandVoiceState | und
   if (state?.kind !== "available") return null;
   const voz = state.voice;
   const por = radarBrandVoiceBySlot(voz);
+  /* 2026-10-08 · C1 · D10: "Versão 1 da Skill de voz, corrente na Marca." — o estado de tela ("em rascunho") fica nas telas do Radar e da Marca. */
   return finalizarLinha({
     ordem: "Voz da marca",
-    pode_escrever: `Vale para todas as linhas deste arquivo: ${radarBrandVoiceLabel(voz)}. O dossiê de cada artigo decide o assunto; esta linha decide a forma, o CTA e o que a marca não faz. Em conflito, registre a divergência para decisão humana.`,
-    artigo: `${voz.title || voz.name}\nVersão ${voz.version} da Skill de voz, ${radarBrandVoiceStatusLabel(voz.status)} na Marca.`,
+    pode_escrever: `Vale para todas as linhas deste arquivo: ${radarBrandVoiceDeliverableLabel(voz)}. O dossiê de cada artigo decide o assunto; esta linha decide a forma, o CTA e o que a marca não faz. Em conflito, registre a divergência para decisão humana.`,
+    artigo: `${voz.title || voz.name}\nVersão ${voz.version} da Skill de voz, ${radarBrandVoiceDeliverableStatusLabel(voz.status)} na Marca.`,
     promessa_e_leitor: radarBrandVoiceText(por.reader),
     titulo_e_seo: radarBrandVoiceText(por.title),
     estrutura: radarBrandVoiceText(por.structure),

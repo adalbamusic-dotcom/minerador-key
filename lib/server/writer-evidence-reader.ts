@@ -58,10 +58,9 @@ import {
   writerEvidencePageOf,
   writerEvidenceJsonBytes,
   writerSliceRowsOf,
-  writerArticleBlueprintFoundation,
   writerBrandVoiceEntityId,
   writerBrandVoiceFoundation,
-  writerBrandVoiceStatusLabel,
+  writerBrandVoiceDeliverableStatusLabel,
   type WriterArticleBlueprintFoundation,
   type WriterBrandVoiceFoundation,
   type WriterEvidenceEnvelope,
@@ -76,6 +75,7 @@ import {
   type WriterManifestSourceRow,
   type WriterSliceRow,
 } from "@/lib/redator/writer-evidence-catalog";
+import { WRITER_BLUEPRINT_READING_RULES, writerArticleBlueprintForWriting, writerBlueprintWithCurrentNames } from "@/lib/redator/writer-blueprint-for-writing";
 import { RADAR_WRITER_MAY_NOT, radarWriterMayNotWithSubject } from "@/lib/redator/writer-handoff";
 import { WRITER_SECTION_BUNDLE_PATHS, type WriterSectionMaterial } from "@/lib/redator/writer-section-evidence";
 import {
@@ -344,7 +344,8 @@ export async function readWriterEvidenceManifest(context: WriterEvidenceContext,
     const { meta } = artigoModelo;
     fonte({
       sourceKey: `radar.blueprint/${meta.id}`, owner: "radar", status: "approved", level: writerEvidenceHierarchyOf({ family: "radar.blueprint" }).level,
-      bytes: null, items: null, etag: writerEvidenceEtag([meta.id, meta.bundleHash, meta.approvedAt]), observedAt: meta.approvedAt, posteriorAoPacote: false,
+      /* 2026-10-08 · a regra da leitura (nomes atuais) entra no etag, como na fatia. */
+      bytes: null, items: null, etag: writerEvidenceEtag([meta.id, meta.bundleHash, meta.approvedAt, WRITER_BLUEPRINT_READING_RULES]), observedAt: meta.approvedAt, posteriorAoPacote: false,
       note: `artigo-modelo concluído v${meta.versionNumber ?? "?"}, preso ao pacote entregue; planta da SERP organizada no Radar (forma, links e CTA), não evidência`,
     });
   } else {
@@ -441,7 +442,8 @@ export async function readWriterEvidenceManifest(context: WriterEvidenceContext,
       sourceKey: `brand.skill/${skill.versionId}`, owner: "marca", status: skill.lifecycle, level: nivelDna.level, bytes: bytesDaVersao(skill.versionId), items: null,
       etag: writerEvidenceEtag([skill.versionId, skill.contentHash]), observedAt: skill.createdAt, posteriorAoPacote: posterior(head, skill.createdAt),
       note: daVoz
-        ? `Voz da marca (Skill brand_voice) v${skill.versionNumber ?? "?"}, ${writerBrandVoiceStatusLabel(skill.lifecycle)} na Marca: copy e CTA seguem ela; não fixada no documento`
+        /* 2026-10-08 (correção da revisão) · D10 no MCP: "ativa" ou "versão corrente" na Marca, não o estado de tela ("em rascunho"); o estado técnico vai em `status`. */
+        ? `Voz da marca (Skill brand_voice) v${skill.versionNumber ?? "?"}, ${writerBrandVoiceDeliverableStatusLabel(skill.lifecycle)} na Marca: copy e CTA seguem ela; não fixada no documento`
         : `Skill da Marca ${skill.entityId} v${skill.versionNumber ?? "?"}; não fixada no documento`,
     });
   }
@@ -655,8 +657,9 @@ async function plantaEVozDe(context: WriterEvidenceContext, head: WriterEvidence
   const absent: PlantaEVoz["absent"] = [];
   let articleBlueprint: WriterArticleBlueprintFoundation | null = null;
   if (lido.kind === "approved") {
+    /* 2026-10-08 · a projeção para quem escreve: nomes atuais, frases que pedem fonte e o mapa da atualização (writer-blueprint-for-writing.ts). */
     articleBlueprint = lido.content
-      ? writerArticleBlueprintFoundation({ id: lido.meta.id, versionNumber: lido.meta.versionNumber, approvedAt: lido.meta.approvedAt, ...lido.content })
+      ? writerArticleBlueprintForWriting({ id: lido.meta.id, versionNumber: lido.meta.versionNumber, approvedAt: lido.meta.approvedAt, ...lido.content, keywords: head.dossier?.keywordContext ?? null })
       : null;
     if (!articleBlueprint) absent.push({ field: "articleBlueprint", reason: `o artigo-modelo aprovado está fora do contrato do Radar: leia radar.blueprint/${lido.meta.id}` });
   } else if (lido.kind === "other_bundle" || lido.kind === "read_failed") {
@@ -674,7 +677,14 @@ function proximoPassoDosFundamentos(planta: PlantaEVoz): string {
   return [
     "Leia get_writer_evidence_manifest e, para a seção que está escrevendo, read_writer_evidence com a sourceKey do manifesto.",
     ...(planta.articleBlueprint ? ["articleBlueprint é o artigo-modelo que o dono aprovou no Radar para este pacote: siga a planta (H1, seções, pergunta do leitor, resposta que abre, links internos com a âncora indicada, fechamento e CTA); o integral está em articleBlueprint.readAt."] : []),
-    ...(planta.brandVoice ? ["brandVoice é a voz corrente da Marca: forma, copy, transições e CTA seguem ela (statusLabel diz se está ativa ou em rascunho); a Skill inteira está em brandVoice.readAt."] : []),
+    /* 2026-10-08 · só quando a planta os tem: sem frase marcada e sem mapa, o texto de antes. */
+    ...(planta.articleBlueprint?.needsSource?.length || planta.articleBlueprint?.sections.some(secao => secao.needsSource?.length)
+      ? ["needsSource (na planta e em cada seção) lista as frases que só entram com fonte do pacote: sem ela, escreva delimitado (orientação ou possibilidade, sem afirmar como fato o efeito, a conversão ou o comportamento do público) ou deixe fora; label é o motivo e não vai ao texto."]
+      : []),
+    ...(planta.articleBlueprint?.publishedMap?.length
+      ? ["articleBlueprint.publishedMap é o mapa da atualização da página publicada: cada H2 de hoje tem o destino na planta (line); o conteúdo dele é reescrito na seção indicada, e nada sai sem a decisão registrada ali."]
+      : []),
+    ...(planta.brandVoice ? ["brandVoice é a voz corrente da Marca: forma, copy, transições e CTA seguem ela (statusLabel diz se é a ativa ou a versão corrente na Marca); a Skill inteira está em brandVoice.readAt."] : []),
     ...(planta.articleBlueprint || planta.brandVoice ? ["Planta e voz não mudam keyword, intenção, escopo nem fatos: conflito com a evidência vira record_writer_divergence."] : []),
     "As perguntas orientam a cobertura dentro do texto — nunca uma seção de FAQ.",
   ].join(" ");
@@ -764,7 +774,7 @@ export async function readWriterFoundations(context: WriterEvidenceContext, docu
   };
   const cabe = fitWriterFoundations(fundamentos, {
     ...ONDE_LER,
-    ...(plantaEVoz.articleBlueprint ? { "articleBlueprint.sections": plantaEVoz.articleBlueprint.readAt } : {}),
+    ...(plantaEVoz.articleBlueprint ? { "articleBlueprint.sections": plantaEVoz.articleBlueprint.readAt, "articleBlueprint.publishedMap": plantaEVoz.articleBlueprint.readAt } : {}),
   });
   if (!cabe) throw new WriterEvidenceError("source_too_large", "Os fundamentos não couberam no limite de 24 kB.");
   return cabe as WriterFoundations;
@@ -1140,14 +1150,17 @@ async function prepararArtigoModelo(context: WriterEvidenceContext, head: Writer
   if (lido.meta.id !== chave.ref) recusar("Esta versão do artigo-modelo não é a aprovada para o pacote entregue.");
   const meta = lido.meta;
   return {
-    identity: [meta.id, meta.bundleHash, meta.approvedAt],
+    /* 2026-10-08 · a regra da leitura entra na identidade: a planta é imutável, mas a fatia agora sai com os nomes atuais. */
+    identity: [meta.id, meta.bundleHash, meta.approvedAt, WRITER_BLUEPRINT_READING_RULES],
     origin: { entityId: head.articleId, versionId: meta.id, contentHash: meta.bundleHash, collectedAt: meta.approvedAt, status: `approved v${meta.versionNumber ?? "?"}` },
     posteriorAoPacote: false,
     hierarchy: writerEvidenceHierarchyOf({ family: "radar.blueprint" }),
     truncate: false,
     notice: "Artigo-modelo da SERP concluído no Radar para o pacote entregue: planta (títulos, seções, links e CTA), não evidência. Siga a forma; diante da evidência do pacote, vale a evidência e o conflito vira divergência.",
     load: async pedido => {
-      const conteudo = await readWriterArticleBlueprintContent(context, alvo, meta.id, chave.path[0] ?? null);
+      const lido = await readWriterArticleBlueprintContent(context, alvo, meta.id, chave.path[0] ?? null);
+      /* 2026-10-08 · a planta inteira sai com os nomes atuais, como a projeção (artigo-modelo antigo incluído). */
+      const conteudo = "blueprint" in lido ? { ...lido, blueprint: writerBlueprintWithCurrentNames(lido.blueprint, head.dossier?.keywordContext ?? null) } : lido;
       return linhasDe(chave.path.length ? navegar(conteudo, chave.path) : conteudo, pedido);
     },
   };

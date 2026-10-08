@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { radarArticleBlueprintReportFacts, type RadarArticleBlueprintEdit, type RadarArticleBlueprintPayload, type RadarArticleBlueprintReportFacts, type RadarArticleBlueprintSkeletonItem } from "@/lib/radar/article-blueprint";
+import {
+  RADAR_ARTICLE_BLUEPRINT_RULES_VERSION,
+  radarArticleBlueprintParagraphPlan,
+  radarArticleBlueprintPublishedMapLine,
+  radarArticleBlueprintPublishedMapReading,
+  radarArticleBlueprintReportFacts,
+  radarArticleBlueprintRulesOutdated,
+  type RadarArticleBlueprintEdit,
+  type RadarArticleBlueprintPayload,
+  type RadarArticleBlueprintReportFacts,
+  type RadarArticleBlueprintSkeletonItem,
+} from "@/lib/radar/article-blueprint";
 import type { RadarPhase1Action } from "@/lib/radar/serp-phase1";
 
 /**
@@ -270,6 +281,19 @@ function origemDaSecao(payload: RadarArticleBlueprintPayload, ids: readonly stri
   }).filter((item): item is string => Boolean(item));
 }
 
+/**
+ * 2026-10-08 · B7 · A PLANTA MONTADA COM REGRAS ANTERIORES. Tela operacional
+ * (não é entregável): a versão sem a versão das regras atuais é dita, e o
+ * caminho é o "Organizar de novo (IA)" que já existe — nenhum botão novo. O
+ * entregável continua saindo concluído com ela.
+ */
+export function RadarArticleBlueprintRulesNotice({ payload }: { payload: Pick<RadarArticleBlueprintPayload, "rulesVersion"> }) {
+  if (!radarArticleBlueprintRulesOutdated(payload)) return null;
+  return <p className="text-sm leading-6 text-pending" role="status" data-testid="radar-article-blueprint-rules-outdated">
+    Esta versão foi montada com regras anteriores às atuais ({RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}): a planta não leu a página publicada, nem conferiu a abertura pela busca, os nomes atuais de produtos e as cenas repetidas. Para refazer com as regras atuais, use &quot;Organizar de novo (IA)&quot; (1 chamada de IA); até lá, os entregáveis seguem com esta versão.
+  </p>;
+}
+
 const marcasDoEsqueleto = (item: RadarArticleBlueprintSkeletonItem) => [
   ...(item.mustCover ? ["obrigatória"] : []),
   ...(item.needsSource ? ["precisa de fonte"] : []),
@@ -375,6 +399,9 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
 
   const candidato = (id: string) => atual?.payload.linkCandidates.find(item => item.id === id);
   const m = atual?.payload.measures;
+  /* 2026-10-08 · B8 · os parágrafos pela faixa de palavras (a mesma conta do CSV); B1 · o mapa da página publicada. */
+  const paragrafos = m && b ? radarArticleBlueprintParagraphPlan(m, b.sections.map(secao => secao.paragraphs)) : null;
+  const mapaPublicado = atual ? radarArticleBlueprintPublishedMapReading(atual.payload) : [];
   const esqueleto = atual?.payload.skeleton || [];
   const descartados = b?.discarded || [];
   const travado = Boolean(ocupado) || organizandoPelaPagina;
@@ -395,6 +422,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
     </p>}
     {falhaDaPagina && !ocupado && <p className="text-sm text-warning" role="status" data-testid="radar-article-blueprint-job-failed">A investigação está finalizada, mas a IA não organizou o artigo-modelo: {falhaDaPagina}</p>}
     {aviso && <p className={`text-sm ${aviso.ok ? "text-success" : "text-warning"}`} role="status">{aviso.texto}</p>}
+    {!carregando && atual && !organizandoPelaPagina && <RadarArticleBlueprintRulesNotice payload={atual.payload} />}
     {/* 2026-10-02 · a versão mais nova de outro congelamento não é a que vai ao CSV: o painel diz qual vai. */}
     {!carregando && escolha.newestFromOtherFreeze && <p className="text-sm leading-6 text-warning" role="status" data-testid="radar-article-blueprint-other-freeze">
       A versão mais nova (v{escolha.newestFromOtherFreeze.versionNumber}) é de outro congelamento da investigação: ela não vai ao CSV nem ao Redator. {vaiAoCsv
@@ -469,7 +497,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
             ["Palavras", m.plan.wordsMin && m.plan.wordsMax ? `${m.plan.wordsMin}–${m.plan.wordsMax}` : "—", m.serp.words.median ?? "—"],
             ["H2", m.plan.sections, m.serp.h2 ?? "—"],
             ["H3", m.plan.h3, m.serp.h3 ?? "—"],
-            ["Parágrafos", m.plan.paragraphs, m.serp.paragraphs ?? "—"],
+            ["Parágrafos", paragrafos ? `${paragrafos.min}–${paragrafos.max}` : m.plan.paragraphs, m.serp.paragraphs ?? "—"],
             ["Negritos", m.plan.bold, "—"],
             ["Imagens", `${m.plan.images} (capa + ${m.plan.respites})`, m.serp.images ?? "—"],
             ["Links internos", m.plan.internalLinks, "—"],
@@ -480,6 +508,12 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
           </div>)}
         </dl>
       </div>
+      {mapaPublicado.length > 0 && <div className={bloco} data-testid="radar-article-blueprint-published-map">
+        <p className="text-sm font-semibold text-foreground">Página publicada → planta ({mapaPublicado.length} H2 atuais)</p>
+        <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-text-muted">{mapaPublicado.map(item => <li key={item.current}>
+          <span className="text-foreground">“{item.current}”</span> → {radarArticleBlueprintPublishedMapLine(item)}{item.origin === "match" && item.kind === "ABSORBED" ? " · casado pelo título" : ""}
+        </li>)}</ul>
+      </div>}
       <div className={bloco}>
         <p className="text-sm font-semibold text-foreground">H1: {b.title.h1}</p>
         <p className="mt-1 text-sm text-text-muted">SEO title: {b.title.seoTitle}</p>
@@ -503,7 +537,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
           <p className="mt-1 text-sm text-text-muted">Pergunta: {secao.readerQuestion}</p>
           <p className="text-sm text-foreground">Abre respondendo: {secao.answerFirst}</p>
           {secao.h3.length > 0 && <ul className="mt-1 list-disc pl-5 text-sm text-text-muted">{secao.h3.map(h3 => <li key={h3}>H3 · {h3}</li>)}</ul>}
-          <p className="mt-1 text-sm text-text-muted">~{secao.paragraphs} parágrafo(s){secao.bold.length ? ` · negrito: ${secao.bold.join(", ")}` : ""}{secao.image ? ` · imagem ${secao.image}` : ""}{secao.specialist ? ` · especialista ${secao.specialist}` : ""}</p>
+          <p className="mt-1 text-sm text-text-muted">~{paragrafos?.perSection[indice] ?? secao.paragraphs} parágrafo(s){secao.bold.length ? ` · negrito: ${secao.bold.join(", ")}` : ""}{secao.image ? ` · imagem ${secao.image}` : ""}{secao.specialist ? ` · especialista ${secao.specialist}` : ""}</p>
           {secao.internalLinks.map(link => <p key={`${link.candidate}-${link.anchor}`} className="text-sm text-foreground">Link interno: “{link.anchor}” → {candidato(link.candidate)?.label || link.candidate}{candidato(link.candidate)?.destination ? ` (${candidato(link.candidate)?.destination})` : ""}</p>)}
           {secao.externalLinks.map(link => <p key={link.claim} className="text-sm text-foreground">Link externo: {link.claim} → {link.source || `fonte a obter (${link.sourceType || "fonte oficial"})`}</p>)}
         </li>;

@@ -18,7 +18,8 @@ import {
   type RadarArticleBlueprintEdit,
   type RadarArticleBlueprintPayload,
 } from "@/lib/radar/article-blueprint";
-import { assembleRadarPortableExport } from "@/lib/server/radar-portable-export-core";
+import { assembleRadarPortableExport, radarReadPublishedStructure } from "@/lib/server/radar-portable-export-core";
+import type { RadarWritingPublication } from "@/lib/radar/portable-writing-export";
 import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
@@ -131,6 +132,23 @@ async function gravarVersao(client: SupabaseClient, input: {
  */
 export const RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS = Object.freeze({ first: 150_000, retry: 110_000 });
 
+/**
+ * 2026-10-08 (revisão) · O PRAZO DA ROTA. Com a leitura da página publicada e as
+ * notas novas (que disparam mais a passada de correção), o pior caso encostava
+ * nos 300 s da rota. A geração passa a ter um prazo único (280 s, 20 s de folga
+ * para gravar): a nova tentativa e a correção usam o que sobra, e sem ao menos
+ * 30 s não são pedidas (a primeira resposta fica, e a conferência fecha o que dá).
+ */
+export const RADAR_ARTICLE_BLUEPRINT_ROUTE_BUDGET_MS = 280_000;
+const MINIMO_PARA_NOVA_CHAMADA_MS = 30_000;
+
+/** O teto da chamada seguinte dentro do prazo; `null` = não há tempo para ela. Sem prazo, o teto de sempre. */
+export function radarArticleBlueprintCallTimeout(prazo: number | undefined, agora: number, teto: number = RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.retry): number | null {
+  if (prazo === undefined) return teto;
+  const restante = prazo - agora;
+  return restante < MINIMO_PARA_NOVA_CHAMADA_MS ? null : Math.min(teto, restante);
+}
+
 type ProvedorDaIa = Parameters<typeof generateStructuredAI>[0]["provider"];
 
 /**
@@ -148,8 +166,10 @@ export async function requestRadarArticleBlueprintAi(input: {
   brief: RadarArticleBlueprintBrief;
   articleId?: string;
   fetchImpl?: typeof fetch;
+  /** 2026-10-08 (revisão) · prazo da rota (epoch ms); a nova tentativa só usa o que sobra. */
+  deadlineAt?: number;
 }): Promise<{ ai: RadarArticleBlueprintAi; calls: 1 | 2; notes: string[] }> {
-  const tentar = async (curta: boolean) => {
+  const tentar = async (curta: boolean, timeoutMs: number) => {
     const visto = { finishReason: null as string | null };
     const { system, user } = radarArticleBlueprintPrompt(input.brief, { short: curta });
     try {
@@ -160,7 +180,7 @@ export async function requestRadarArticleBlueprintAi(input: {
         schema: RadarArticleBlueprintAiSchema,
         maxTokens: RADAR_ARTICLE_BLUEPRINT_LIMITS.maxTokens,
         thinkingMode: "disabled",
-        timeoutMs: curta ? RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.retry : RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.first,
+        timeoutMs,
         fetchImpl: input.fetchImpl,
         onDiagnostic: diagnostico => { if (diagnostico.finishReason) visto.finishReason = diagnostico.finishReason; },
       });
@@ -171,10 +191,13 @@ export async function requestRadarArticleBlueprintAi(input: {
   };
   const codigo = (error: unknown) => (error instanceof StructuredAIError ? error.code : null);
 
-  const primeira = await tentar(false);
+  const primeira = await tentar(false, radarArticleBlueprintCallTimeout(input.deadlineAt, Date.now(), RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.first) ?? RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.first);
   if (primeira.ok) return { ai: primeira.ai, calls: 1, notes: [] };
   const falha = radarArticleBlueprintAiFailure({ code: codigo(primeira.error), finishReason: primeira.finishReason });
   if (!falha) throw primeira.error;
+  /* 2026-10-08 (revisão) · sem tempo na rota para a nova tentativa: a falha sobe dita em português, como a da segunda. */
+  const tetoDaSegunda = radarArticleBlueprintCallTimeout(input.deadlineAt, Date.now());
+  if (tetoDaSegunda === null) throw new StructuredAIError(radarArticleBlueprintAiFailureMessage(falha, 1), 502, undefined, "AI_OUTPUT_INVALID");
 
   console.warn("[radar-article-blueprint] nova_tentativa", {
     articleId: input.articleId ?? null,
@@ -183,7 +206,7 @@ export async function requestRadarArticleBlueprintAi(input: {
     code: codigo(primeira.error),
     chamadasDeIa: 2,
   });
-  const segunda = await tentar(true);
+  const segunda = await tentar(true, tetoDaSegunda);
   if (segunda.ok) return { ai: segunda.ai, calls: 2, notes: [radarArticleBlueprintRetryNote(falha)] };
   const falhaFinal = radarArticleBlueprintAiFailure({ code: codigo(segunda.error), finishReason: segunda.finishReason });
   console.warn("[radar-article-blueprint] nova_tentativa_falhou", {
@@ -196,22 +219,70 @@ export async function requestRadarArticleBlueprintAi(input: {
   throw new StructuredAIError(radarArticleBlueprintAiFailureMessage(falhaFinal, 2), 502, undefined, "AI_OUTPUT_INVALID");
 }
 
-/** 1 chamada de IA, paga (2 só se a primeira vier cortada ou fora do formato), por clique explícito do dono. */
-export async function generateRadarArticleBlueprint(input: { client: SupabaseClient; brandId: string; articleId: string; actorUserId: string; ifMissing?: boolean }): Promise<RadarArticleBlueprintRow> {
+/** 2026-10-08 · B1 · O leitor da página publicada (o MESMO do export: só GET, URL validada, tempo limite próprio). */
+export type RadarArticleBlueprintPublishedReader = (url: string) => Promise<{ h1: string | null; h2: string[] } | null>;
+
+/** 2026-10-08 · B1 · O teto da leitura da página publicada na geração; passou, a planta segue sem ela. */
+export const RADAR_ARTICLE_BLUEPRINT_PUBLISHED_READ_MS = 10_000;
+
+/**
+ * 2026-10-08 · B1 · A PÁGINA PUBLICADA NA GERAÇÃO.
+ *
+ * A estrutura publicada (H1 e H2) só era lida no export: a IA montava a
+ * atualização sem ver a página ("O erro geográfico que quase ninguém fala" —
+ * o diferencial da página, e exemplo da voz da marca — sumia da planta). Aqui
+ * a geração lê a página do artigo publicado com o MESMO leitor do export, como
+ * o export faz: falha, tempo esgotado ou página sem H1/H2 deixam a publicação
+ * como veio, e a planta sai como antes. Nada é gravado; artigo não publicado
+ * não lê nada. Já lida (`currentStructure`), não lê de novo.
+ */
+export async function radarArticleBlueprintWithPublishedStructure(
+  publicacao: RadarWritingPublication | null,
+  ler: RadarArticleBlueprintPublishedReader | null,
+  tempoMs = RADAR_ARTICLE_BLUEPRINT_PUBLISHED_READ_MS,
+): Promise<RadarWritingPublication | null> {
+  if (!publicacao?.published || !publicacao.publishedUrl || publicacao.currentStructure || !ler) return publicacao;
+  const relogio: { id?: ReturnType<typeof setTimeout> } = {};
+  try {
+    const estrutura = await Promise.race([
+      ler(publicacao.publishedUrl),
+      new Promise<null>(resolve => { relogio.id = setTimeout(() => resolve(null), tempoMs); }),
+    ]);
+    if (!estrutura || (!estrutura.h1 && !estrutura.h2?.length)) return publicacao;
+    return { ...publicacao, currentStructure: { h1: estrutura.h1, h2: estrutura.h2 || [], updatedAt: null } };
+  } catch {
+    /* página fora do ar, bloqueada ou lenta: a planta segue sem ela, como no export */
+    return publicacao;
+  } finally {
+    if (relogio.id) clearTimeout(relogio.id);
+  }
+}
+
+/**
+ * 1 chamada de IA, paga (2 só se a primeira vier cortada ou fora do formato), por clique explícito do dono.
+ *
+ * 2026-10-08 · B1 · `readPublishedStructure` (opcional, para teste): o leitor
+ * da página publicada; sem ele, o do export (`radarReadPublishedStructure`).
+ */
+export async function generateRadarArticleBlueprint(input: { client: SupabaseClient; brandId: string; articleId: string; actorUserId: string; ifMissing?: boolean; readPublishedStructure?: RadarArticleBlueprintPublishedReader }): Promise<RadarArticleBlueprintRow> {
+  /* 2026-10-08 (revisão) · o prazo único da rota (ver RADAR_ARTICLE_BLUEPRINT_ROUTE_BUDGET_MS). */
+  const prazo = Date.now() + RADAR_ARTICLE_BLUEPRINT_ROUTE_BUDGET_MS;
   /* Onde gravar tem de existir ANTES da chamada paga: sem a tabela, nada de IA. */
   const existentes = await listRadarArticleBlueprints(input.client, input.brandId, input.articleId);
-  const { montada, silo, publicacao, brandVoice } = await montagemDoArtigo(input);
+  const { montada, silo, publicacao: semPagina, brandVoice } = await montagemDoArtigo(input);
   /* Só se faltar (encadeamento automático): o mesmo pacote já organizado não paga a IA de novo. */
   if (input.ifMissing) {
     const doPacote = existentes.filter(item => item.bundleHash === montada.bundleHash);
     const reaproveitada = doPacote.find(item => item.state === "APPROVED") || doPacote[0];
     if (reaproveitada) return reaproveitada;
   }
+  /* 2026-10-08 · B1 · a página publicada entra no pedido (depois do reaproveitamento: reaproveitar não lê nada). */
+  const publicacao = await radarArticleBlueprintWithPublishedStructure(semPagina, input.readPublishedStructure ?? radarReadPublishedStructure);
   /* A voz da marca (Skill corrente, Adendo C) entra em trechos por assunto, com teto (2026-10-02). */
   const brief = buildRadarArticleBlueprintBrief({ entrada: montada.entrada, silo, articleId: input.articleId, publication: publicacao, brandVoice: brandVoice.kind === "available" ? brandVoice.voice : null });
   const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, brandId: input.brandId, client: input.client, quotaUnits: 1 });
-  const resposta = await requestRadarArticleBlueprintAi({ provider, brief, articleId: input.articleId });
-  const fechada = await fecharArtigoModelo({ provider, brief, ai: resposta.ai, articleId: input.articleId, allowFix: resposta.calls === 1 });
+  const resposta = await requestRadarArticleBlueprintAi({ provider, brief, articleId: input.articleId, deadlineAt: prazo });
+  const fechada = await fecharArtigoModelo({ provider, brief, ai: resposta.ai, articleId: input.articleId, allowFix: resposta.calls === 1, deadlineAt: prazo });
   return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: montada.bundleHash!, origin: "ai", payload: fechada.payload, validation: [...resposta.notes, ...fechada.notes], actorUserId: input.actorUserId });
 }
 
@@ -233,19 +304,23 @@ export async function fecharArtigoModelo(input: {
   fetchImpl?: typeof fetch;
   /** A rota tem 300 s: depois de uma nova tentativa, não há tempo para a correção (a conferência ainda fecha o que dá). */
   allowFix?: boolean;
+  /** 2026-10-08 (revisão) · prazo da rota (epoch ms): a correção usa o que sobra, e sem 30 s não é pedida. */
+  deadlineAt?: number;
 }): Promise<{ payload: RadarArticleBlueprintPayload; notes: string[]; calls: 0 | 1 }> {
   const primeira = radarSanitizeArticleBlueprint(input.ai, input.brief);
   const pendentes = radarArticleBlueprintPendingNotes(primeira.notes).pending;
   let escolhida = input.ai;
   let chamadas: 0 | 1 = 0;
-  if (pendentes.length && input.allowFix !== false) {
+  const tetoDaCorrecao = radarArticleBlueprintCallTimeout(input.deadlineAt, Date.now());
+  const semTempo = Boolean(pendentes.length && input.allowFix !== false && tetoDaCorrecao === null);
+  if (pendentes.length && input.allowFix !== false && tetoDaCorrecao !== null) {
     chamadas = 1;
     try {
       const { system, user } = radarArticleBlueprintPrompt(input.brief, { fix: { previous: input.ai, pending: pendentes } });
       const corrigida = await generateStructuredAI({
         provider: input.provider, system, user, schema: RadarArticleBlueprintAiSchema,
         maxTokens: RADAR_ARTICLE_BLUEPRINT_LIMITS.maxTokens, thinkingMode: "disabled",
-        timeoutMs: RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.retry, fetchImpl: input.fetchImpl,
+        timeoutMs: tetoDaCorrecao!, fetchImpl: input.fetchImpl,
       });
       const conferida = radarSanitizeArticleBlueprint(corrigida, input.brief);
       if (radarArticleBlueprintPendingNotes(conferida.notes).pending.length <= pendentes.length) escolhida = corrigida;
@@ -256,7 +331,11 @@ export async function fecharArtigoModelo(input: {
   const fechada = radarSanitizeArticleBlueprint(escolhida, input.brief, { close: true });
   return {
     payload: fechada.payload,
-    notes: [...(chamadas ? [`Passada de correção: ${pendentes.length} pendência(s) enviada(s) de volta à IA (1 chamada a mais).`] : []), ...fechada.notes],
+    notes: [
+      ...(chamadas ? [`Passada de correção: ${pendentes.length} pendência(s) enviada(s) de volta à IA (1 chamada a mais).`] : []),
+      ...(semTempo ? [`Passada de correção não pedida: o prazo da rota não comportava mais uma chamada; ${pendentes.length} nota(s) ficam neste painel.`] : []),
+      ...fechada.notes,
+    ],
     calls: chamadas,
   };
 }

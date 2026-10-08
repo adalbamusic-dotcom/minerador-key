@@ -1,6 +1,15 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { RadarArticleBlueprintApproval, RadarArticleBlueprintPayload } from "@/lib/radar/article-blueprint";
+import { radarArticleBlueprintWithCurrentNames, type RadarArticleBlueprintApproval, type RadarArticleBlueprintPayload } from "@/lib/radar/article-blueprint";
+
+/*
+ * 2026-10-08 · B4 · AS DUAS LEITURAS ENTREGAM A PLANTA COM OS NOMES ATUAIS.
+ *
+ * O artigo-modelo gravado antes da regra "use os nomes atuais" ainda manda
+ * escrever "Google Meu Negócio". A troca é na leitura (a versão no banco é
+ * imutável), com as keywords do artigo quando quem chama as passa (`keywords`,
+ * opcional): a keyword que traz o nome antigo o preserva.
+ */
 
 /**
  * O EXPORT LÊ O APROVADO EM LOTE — uma consulta, filtrada pela marca.
@@ -11,9 +20,10 @@ import type { RadarArticleBlueprintApproval, RadarArticleBlueprintPayload } from
 export async function readApprovedRadarArticleBlueprints(
   client: SupabaseClient,
   brandId: string,
-  articles: ReadonlyArray<{ articleId: string; bundleHash: string | null | undefined }>,
+  articles: ReadonlyArray<{ articleId: string; bundleHash: string | null | undefined; keywords?: readonly string[] }>,
 ): Promise<Map<string, RadarArticleBlueprintPayload>> {
   const saida = new Map<string, RadarArticleBlueprintPayload>();
+  const keywordsDe = new Map(articles.map(item => [item.articleId, item.keywords || []]));
   const comHash = articles.filter(item => item.bundleHash);
   if (!comHash.length) return saida;
   try {
@@ -28,7 +38,7 @@ export async function readApprovedRadarArticleBlueprints(
     for (const linha of (leitura.data || []) as unknown as Array<Record<string, unknown>>) {
       const articleId = String(linha.article_id);
       if (saida.has(articleId) || hashDe.get(articleId) !== String(linha.bundle_hash)) continue;
-      saida.set(articleId, linha.payload as RadarArticleBlueprintPayload);
+      saida.set(articleId, radarArticleBlueprintWithCurrentNames(linha.payload as RadarArticleBlueprintPayload, keywordsDe.get(articleId)));
     }
   } catch (erro) {
     console.warn("[radar-article-blueprint] approved_read_failed", { message: erro instanceof Error ? erro.message.slice(0, 240) : "falha desconhecida" });
@@ -79,9 +89,10 @@ export function radarArticleBlueprintExportChoice(
 export async function readRadarArticleBlueprintsForExport(
   client: SupabaseClient,
   brandId: string,
-  articles: ReadonlyArray<{ articleId: string; bundleHash: string | null | undefined }>,
+  articles: ReadonlyArray<{ articleId: string; bundleHash: string | null | undefined; keywords?: readonly string[] }>,
 ): Promise<Map<string, RadarArticleBlueprintPayload>> {
   const saida = new Map<string, RadarArticleBlueprintPayload>();
+  const keywordsDe = new Map(articles.map(item => [item.articleId, item.keywords || []]));
   const hashes = new Map(articles.filter(item => item.bundleHash).map(item => [item.articleId, String(item.bundleHash)]));
   if (!hashes.size) return saida;
   try {
@@ -115,7 +126,7 @@ export async function readRadarArticleBlueprintsForExport(
         ? (linha.validation as unknown[]).filter((nota): nota is string => typeof nota === "string" && Boolean(nota.trim()))
         : [];
       saida.set(articleId, {
-        ...(linha.payload as RadarArticleBlueprintPayload),
+        ...radarArticleBlueprintWithCurrentNames(linha.payload as RadarArticleBlueprintPayload, keywordsDe.get(articleId)),
         approval: escolha.approval,
         /* 2026-10-02 · só a proposta leva as pendências e a origem (não gravadas no payload). */
         ...(validation.length ? { validation } : {}),

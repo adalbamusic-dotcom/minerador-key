@@ -36,6 +36,7 @@ import type { ContentDocument } from "../arquiteto/contracts.ts";
 import { z } from "zod";
 import { novaCena } from "./script-scenes.ts";
 import { radarFoundationsSubjectOf, type RadarFoundations } from "./radar-foundations.ts";
+import { radarBrandVoiceDeliverableLabel } from "../radar/brand-voice.ts";
 import type { WriterDeliverablePayload } from "./multiformat-contracts.ts";
 
 /* ============================== a fonte ============================== */
@@ -83,17 +84,33 @@ export const SEED_BRAND_VOICE_SECTION_TITLE = "Voz da marca (copy e CTA)";
 /** O cabeçalho do fechamento do artigo-modelo aprovado no contexto da semeadura (2026-10-02). */
 export const SEED_BLUEPRINT_SECTION_TITLE = "Artigo-modelo aprovado no Radar (o mesmo próximo passo do artigo)";
 
+/** 2026-10-08 · O cabeçalho das frases do artigo-modelo que só entram com fonte (régua por frase do Radar). */
+export const SEED_BLUEPRINT_NEEDS_SOURCE_TITLE =
+  "Frases do artigo-modelo que só entram com fonte (sem fonte neste contexto, delimite como orientação ou possibilidade, ou deixe fora; o motivo não vai ao texto)";
+
+/* Os campos do artigo-modelo que a semeadura repete: só as frases deles entram na lista (as outras não estão no contexto). */
+const CAMPOS_DA_SEMENTE: ReadonlySet<string> = new Set(["promise", "closing.cta", "closing.nextStep"]);
+
 /**
- * As linhas da voz e do artigo-modelo. A voz entra com o estado dito ("em
- * rascunho na Marca" também vale, spec da Marca §24) e só nos trechos que
- * servem à copy: CTA e transição comercial; voz e vocabulário. Do artigo-modelo
- * entra o que o derivado precisa repetir: promessa, CTA e próximo passo.
+ * As linhas da voz e do artigo-modelo. A voz entra só nos trechos que servem à
+ * copy: CTA e transição comercial; voz e vocabulário. Do artigo-modelo entra o
+ * que o derivado precisa repetir: promessa, CTA e próximo passo.
+ *
+ * 2026-10-08 · D10 no rótulo da voz: o estado de tela ("em rascunho",
+ * "aguardando aprovação") era espera aberta dentro do contexto que escreve o
+ * roteiro e o carrossel — e podia vazar para as notas do entregável. O rótulo
+ * é o de entregável do Radar (`radarBrandVoiceDeliverableLabel`): a ativa é
+ * dita "ativa"; qualquer outra, "versão corrente na Marca" (a regra continua a
+ * da spec da Marca §24: a corrente vale, rascunho incluído). E a promessa, o
+ * CTA ou o próximo passo que a régua por frase marca vão numa lista própria:
+ * o derivado não os afirma sem fonte.
  */
 function linhasDaVozEDoArtigoModelo(f: RadarFoundations): string[] {
   const linhas: string[] = [];
   const voz = f.brandVoice;
   if (voz) {
-    linhas.push(`${SEED_BRAND_VOICE_SECTION_TITLE}: Skill "${voz.name}" v${voz.version ?? "?"} (${voz.statusLabel} na Marca)`);
+    /* O rótulo só interpola a versão: sem número, "v?", como antes. */
+    linhas.push(`${SEED_BRAND_VOICE_SECTION_TITLE}: ${radarBrandVoiceDeliverableLabel({ name: voz.name, version: (voz.version ?? "?") as number, status: voz.status })}`);
     if (voz.cta) linhas.push("CTA e transição comercial, como a marca escreveu:", voz.cta);
     if (voz.voice) linhas.push("Voz, tom e vocabulário, como a marca escreveu:", voz.voice);
   }
@@ -103,6 +120,8 @@ function linhasDaVozEDoArtigoModelo(f: RadarFoundations): string[] {
     if (planta.promise) linhas.push(`- Promessa: ${planta.promise}`);
     if (planta.closing?.cta) linhas.push(`- CTA: ${planta.closing.cta}`);
     if (planta.closing?.nextStep) linhas.push(`- Próximo passo: ${planta.closing.nextStep}`);
+    linhas.push(...secao(SEED_BLUEPRINT_NEEDS_SOURCE_TITLE,
+      (planta.needsSource ?? []).filter(item => CAMPOS_DA_SEMENTE.has(item.field)).map(item => `"${item.sentence}" — ${item.label}`)));
   }
   return linhas;
 }
@@ -189,6 +208,8 @@ const REGRAS_COMUNS = [
    * "inclusive nos CTAs"; o artigo-modelo aprovado diz o próximo passo.
    */
   "Quando o contexto trouxer 'Voz da marca (copy e CTA)', escreva gancho, texto, legenda e closingCta nessa voz, sem o que ela proíbe; quando trouxer o artigo-modelo da SERP, o closingCta leva ao mesmo próximo passo. A voz e o artigo-modelo não mudam keyword, intenção nem fatos.",
+  /* 2026-10-08 · a régua por frase do Radar: efeito comercial, comportamento do público e plataforma sem fonte não viram afirmação no derivado. */
+  "Frase listada em 'Frases do artigo-modelo que só entram com fonte' não vira afirmação no gancho, nas cenas, nos slides, na legenda nem no closingCta: sem fonte neste contexto, delimite (orientação ou possibilidade) ou deixe fora.",
   "Escreva em português do Brasil.",
 ].join("\n");
 

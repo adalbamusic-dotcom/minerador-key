@@ -110,6 +110,77 @@ function raizesDoTema(texto: string, nucleo: ReadonlySet<string>): string[] {
   return [...new Set(radarSemanticStems(palavras.join(" ")))].filter(raiz => raiz.length >= 3 && !nucleo.has(raiz));
 }
 
+/*
+ * ===== 2026-10-08 · O RUÍDO DOS CABEÇALHOS DOS CONCORRENTES (C5 da rodada dos entregáveis) =====
+ *
+ * O CSV real de 08/10 ("como atrair clientes pelo instagram", público de
+ * clínicas) listava como tema dos concorrentes "Transforme seus seguidores em
+ * clientes com a Bagy" (a página se promovendo), "Carol" (nome solto), "Agora a
+ * sua loja virtual" (chamada de loja), "Feriados e datas comemorativas de
+ * setembro: calendário do mês" (conteúdo recomendado datado) e "Qual a
+ * importância de ter um catálogo online" — num artigo que não é de loja. Saem,
+ * para qualquer marca e assunto:
+ *
+ *   - AUTOPROMOÇÃO: o cabeçalho cita a marca do domínio da própria página (o
+ *     nome antes do sufixo: "bagy" em bagy.com.br, "stone" em
+ *     conteudo.stone.com.br), salvo quando a marca é do núcleo do artigo;
+ *   - CONTEÚDO DATADO: mês do ano, "datas comemorativas", "calendário do mês",
+ *     salvo quando o núcleo fala de data, calendário ou promoção;
+ *   - LOJA E CATÁLOGO: "loja virtual", "e-commerce", "catálogo online", frete,
+ *     carrinho…, só quando o artigo NÃO é de loja (o núcleo não fala de loja,
+ *     produto, venda nem catálogo);
+ *   - PALAVRA SOLTA: cabeçalho de uma palavra só que nenhuma outra página
+ *     trata não diz tema ("Carol"); "Hashtags", que outras páginas tratam, fica.
+ *
+ * O tema legítimo de uma página só ("Destaques de forma estratégica", "Promova
+ * a interação nos comentários") continua no "Tratado por 1 página só".
+ */
+const INSTITUCIONAIS = new Set(["gov", "edu", "jus", "mil", "leg", "mp", "def"]);
+const SUFIXOS_DE_DOMINIO = new Set(["com", "br", "net", "org", "gov", "edu", "co", "io", "info", "biz", "app", "pt", "us", "uk", "es", "ar", "mx", "tv", "me", "ind", "adv", "med", "art"]);
+
+/** 2026-10-08 · A marca de um domínio: o nome antes do sufixo ("bagy" em www.bagy.com.br). Nome curto (menos de 4 letras) não conta. */
+export function radarCompetitorBrandOf(dominio: string | null | undefined): string | null {
+  const partes = semAcento(dominio || "").replace(/^www\./, "").split(".").filter(Boolean);
+  /* 2026-10-08 (revisão) · domínio de órgão não tem marca: "saude" em saude.gov.br é o assunto da fonte, não autopromoção. */
+  if (partes.some(parte => INSTITUCIONAIS.has(parte))) return null;
+  while (partes.length > 1 && SUFIXOS_DE_DOMINIO.has(partes[partes.length - 1])) partes.pop();
+  const marca = (partes[partes.length - 1] || "").replace(/[^a-z0-9]/g, "");
+  return marca.length >= 4 ? marca : null;
+}
+
+/* A marca aparece como palavra, ou como duas ou três palavras juntas ("Vetline Brasil" em vetlinebrasil.com.br). */
+function citaAMarca(texto: string, marca: string): boolean {
+  const palavras = semAcento(texto).split(/[^a-z0-9]+/).filter(Boolean);
+  for (let i = 0; i < palavras.length; i += 1) {
+    let junto = "";
+    for (let j = i; j < Math.min(palavras.length, i + 3); j += 1) {
+      junto += palavras[j];
+      if (junto === marca) return true;
+      if (junto.length >= marca.length) break;
+    }
+  }
+  return false;
+}
+
+const MESES = "janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro";
+/* 2026-10-08 (revisão) · sem acento, "março" é "marco" ("marco zero"): ele só conta como mês com contexto de data. */
+const MESES_SEM_AMBIGUIDADE = MESES.replace("marco|", "");
+const MARCO_DATADO = "(?:de|em) marco|marco (?:de )?\\d{4}";
+const DATADO = new RegExp(`\\b(?:${MESES_SEM_AMBIGUIDADE}|${MARCO_DATADO}|datas comemorativas|calendario do mes)\\b`);
+const NUCLEO_DATADO = new RegExp(`\\b(?:${MESES}|datas?|calendarios?|promoc\\w*|sazona\\w*|feriados?|comemorativ\\w*)\\b`);
+const DE_LOJA = /\b(?:lojas? (?:virtua\w*|online|on line|propria)|sua loja|e ?commerce|catalogos? (?:online|on line|digita\w*|de produtos)|frete|checkout|carrinho|dropshipping|marketplace|instagram shopping)\b/;
+const NUCLEO_DE_LOJA = /\b(?:lojas?|e ?commerce|catalogos?|produtos?|vend\w*|marketplace|dropshipping|shopping|frete)\b/;
+
+/** 2026-10-08 · O cabeçalho é ruído da página, não tema: autopromoção, conteúdo datado ou loja num artigo que não é de loja. */
+export function radarCompetitorHeadingIsNoise(cabecalho: string, contexto: { domain?: string | null; core?: readonly string[] } = {}): boolean {
+  const texto = semAcento(cabecalho);
+  const nucleo = semAcento((contexto.core || []).join(" "));
+  const marca = radarCompetitorBrandOf(contexto.domain);
+  if (marca && citaAMarca(texto, marca) && !citaAMarca(nucleo, marca)) return true;
+  if (DATADO.test(texto) && !NUCLEO_DATADO.test(nucleo)) return true;
+  return DE_LOJA.test(texto) && !NUCLEO_DE_LOJA.test(nucleo);
+}
+
 /**
  * Os esboços das páginas COMPARÁVEIS, das extrações gravadas. A lista de
  * comparáveis é a do modelo observado (a mesma do "Páginas comparáveis lidas"
@@ -142,7 +213,7 @@ export function radarCompetitorTopics(input: {
   outOfScope?: (valor: string) => boolean;
 }): { topics: RadarCompetitorTopic[]; sampleSize: number; headingsRead: number } {
   const nucleo = new Set(input.core.flatMap(texto => raizesDoTema(texto, new Set())));
-  const itens: Array<{ pagina: number; rotulo: string; raizes: string[] }> = [];
+  const itens: Array<{ pagina: number; rotulo: string; raizes: string[]; solta: boolean }> = [];
   let lidos = 0;
   for (const [pagina, page] of input.pages.entries()) {
     for (const cabecalho of page.headings) {
@@ -151,8 +222,10 @@ export function radarCompetitorTopics(input: {
       const rotulo = radarCleanCompetitorHeading(cabecalho.text).replace(/\s+/g, " ").trim();
       if (rotulo.length < 3 || rotulo.length > 120 || RUIDO.test(rotulo)) continue;
       if (input.outOfScope?.(rotulo)) continue;
+      /* 2026-10-08 · C5 · autopromoção, conteúdo datado e loja num artigo que não é de loja não são tema. */
+      if (radarCompetitorHeadingIsNoise(rotulo, { domain: page.domain, core: input.core })) continue;
       const raizes = raizesDoTema(rotulo, nucleo);
-      if (raizes.length) itens.push({ pagina, rotulo, raizes });
+      if (raizes.length) itens.push({ pagina, rotulo, raizes, solta: rotulo.split(" ").length === 1 });
     }
   }
 
@@ -166,7 +239,8 @@ export function radarCompetitorTopics(input: {
     }
   }
   const grupos = new Map<string, typeof itens>();
-  for (const item of itens) {
+  /* 2026-10-08 · C5 · a palavra solta que nenhuma outra página trata ("Carol") não diz tema. */
+  for (const item of itens.filter(item => !item.solta || item.raizes.some(raiz => (paginasDaRaiz.get(raiz)?.size || 0) >= 2))) {
     const ancora = [...item.raizes].sort((a, b) =>
       (paginasDaRaiz.get(b)?.size || 0) - (paginasDaRaiz.get(a)?.size || 0) || b.length - a.length || a.localeCompare(b))[0];
     const grupo = grupos.get(ancora) || [];

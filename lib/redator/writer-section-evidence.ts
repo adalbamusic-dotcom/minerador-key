@@ -17,7 +17,11 @@
  *   - a lista das chaves que a IA pode citar ao apontar divergência;
  *   - desde 2026-10-02, quando existem, o recorte do artigo-modelo aprovado
  *     (a seção da planta que casa com segurança com o H2, a ordem dos H2 e o fechamento
- *     com CTA) e a voz corrente da Marca (SDD diretriz editorial, Adendos A e C).
+ *     com CTA) e a voz corrente da Marca (SDD diretriz editorial, Adendos A e C);
+ *   - desde 2026-10-08, a planta já vem com os nomes atuais de produto, as
+ *     frases que só entram com fonte (`needsSource`, na seção e fora dela) e,
+ *     no artigo publicado, o mapa da atualização (`publishedMap`) — montados
+ *     em `writer-blueprint-for-writing.ts`.
  *
  * O servidor nunca confia em evidência vinda do navegador. Este módulo só
  * projeta, ordena e corta o que o servidor leu; não lê banco.
@@ -31,7 +35,9 @@ import {
   writerEvidenceHierarchyOf,
   writerEvidenceJsonBytes,
   type WriterArticleBlueprintFoundation,
+  type WriterBlueprintPublishedMapItem,
   type WriterBlueprintSection,
+  type WriterBlueprintSourceNeed,
   type WriterBrandVoiceFoundation,
 } from "./writer-evidence-catalog.ts";
 
@@ -103,6 +109,14 @@ export type WriterSectionBlueprint = {
   outline: string[];
   closing: WriterArticleBlueprintFoundation["closing"];
   plan: WriterArticleBlueprintFoundation["plan"];
+  /*
+   * 2026-10-08 · Aditivos, só quando a planta os tem: as frases de fora das
+   * seções (promessa, ângulo, abertura, fechamento) que só entram com fonte —
+   * as da seção vêm em `section.needsSource` — e o mapa da atualização do
+   * artigo publicado. Sem eles, o recorte sai como antes.
+   */
+  needsSource?: WriterBlueprintSourceNeed[];
+  publishedMap?: WriterBlueprintPublishedMapItem[];
 };
 
 export type WriterSectionEvidencePackage = {
@@ -253,6 +267,9 @@ export function writerBlueprintForSection(planta: WriterArticleBlueprintFoundati
     outline: planta.sections.map(secao => cortar(secao.h2, 120)).filter((h2): h2 is string => Boolean(h2)),
     closing: planta.closing,
     plan: planta.plan,
+    /* 2026-10-08 · a seção casada leva as frases dela em `section.needsSource`; aqui, as de fora das seções e o mapa. */
+    ...(planta.needsSource?.length ? { needsSource: planta.needsSource } : {}),
+    ...(planta.publishedMap?.length ? { publishedMap: planta.publishedMap } : {}),
   };
 }
 
@@ -277,6 +294,8 @@ const CORTAVEIS = [
   "entities.article", "pendingDecisions", "questions", "specialist.items",
   /* 2026-10-02 · a ordem dos H2 da planta aprovada (só existe com artigo-modelo); a seção do foco nunca sai. */
   "articleBlueprint.outline",
+  /* 2026-10-08 · o mapa da atualização (só no publicado com página lida); as frases que pedem fonte nunca saem. */
+  "articleBlueprint.publishedMap",
 ] as const;
 type Cortavel = (typeof CORTAVEIS)[number];
 
@@ -298,6 +317,7 @@ const ONDE_LER: Readonly<Record<Cortavel, string>> = Object.freeze({
   "specialist.items": "radar.bundle.specialist",
   /* O id do aprovado está em `articleBlueprint.readAt`; o corte aponta para ele. */
   "articleBlueprint.outline": "radar.blueprint",
+  "articleBlueprint.publishedMap": "radar.blueprint",
 });
 
 function lerLista(pacote: Linha, caminho: string): unknown[] | null {
@@ -460,7 +480,7 @@ export function buildWriterSectionEvidencePackage(material: WriterSectionMateria
   const registrarCorte = (campo: Cortavel, total: number, kept: number) => {
     const existente = trimmed.find(item => item.field === campo);
     if (existente) existente.kept = kept;
-    else trimmed.push({ field: campo, kept, total, readAt: campo === "articleBlueprint.outline" && planta ? planta.readAt : ONDE_LER[campo] });
+    else trimmed.push({ field: campo, kept, total, readAt: campo.startsWith("articleBlueprint.") && planta ? planta.readAt : ONDE_LER[campo] });
   };
   for (const [campo, limite] of Object.entries(LIMITE_INICIAL) as Array<[Cortavel, number]>) {
     const atual = lerLista(pacote, campo);

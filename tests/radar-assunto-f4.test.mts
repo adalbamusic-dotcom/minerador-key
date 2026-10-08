@@ -128,14 +128,43 @@ function dentroDosLimites(row: RadarWritingExportRow) {
  * artigo-modelo da SERP organizado no Radar"); conferido revertendo só essa
  * frase, com o qual o snapshot anterior volta a bater.
  */
+/*
+ * 2026-10-08 · renovado (Grupo C da rodada dos entregáveis). Conferido linha a
+ * linha contra a saída anterior (cópia de HEAD no scratchpad, carregador de
+ * redirecionamento): as 26 linhas que mudaram são só as pretendidas —
+ *   - C8: a regra geral 4 e o movimento "Experiência" sem o marcador
+ *     "[RELATO DA MARCA — preencher]" (sem relato e sem inventá-lo);
+ *   - C9: o destino planejado ou não resolvido dito como instrução concluída e
+ *     condicional ("o link entra com a URL final quando o destino estiver no
+ *     ar…; senão, a âncora fica como texto simples"), sem "marque a âncora" nem
+ *     "use o slug planejado".
+ * Amazon e YouTube ficaram idênticos.
+ */
+/*
+ * 2026-10-08 · renovado de novo (correção da revisão, D10 nas esperas antigas).
+ * Prova: as cópias com SÓ estas frases revertidas (carregador de
+ * redirecionamento, no scratchpad) devolvem exatamente o snapshot anterior —
+ * silo, silo de saúde e as quatro linhas. As frases:
+ *   - "SEO title: a definir; …" e "Meta description: a definir; …" → "escreva
+ *     com cerca de …";
+ *   - "Citadas pelo mercado, não verificadas (conferir antes de citar)" → "sem
+ *     verificação no pacote (só como referência delimitada, nunca como fonte da
+ *     afirmação)";
+ *   - especialista: "Aplicar em: a definir" → "onde couber no texto, como
+ *     orientação"; "conferir antes de usar; sem ponto de aplicação definido" →
+ *     "use só como orientação geral, sem apresentá-la como resposta a essa
+ *     pergunta; sem ponto de aplicação no pacote: entra onde couber, como
+ *     orientação".
+ * YouTube (linha só de identidade) ficou idêntico.
+ */
 const SNAPSHOT = {
-  silo: { sha: "9d600505e21b39bbc5dd7b71b1303c6bc6785533935906e245acdb7443df8112", len: 19238 },
-  saude: { sha: "811c509ba604246187e6584ae5f6af56be1fdc426c0dc4c46d9d4fe9d1ef718b", len: 23622 },
+  silo: { sha: "8ad8178649a6e1a02bc12394e7940bc83886a198383c1e6977d767899344cd0a", len: 19342 },
+  saude: { sha: "51f2c45a4176fb6a51663496cdef247188d1751eaa456938b5966c22e6cd34a4", len: 24180 },
   artigos: {
-    google: "2f5bcbb8a4a7ce04a5474e00263525cc320b97b895e26ec5cf456cf0d5aba031",
-    amazon: "b609c3bc5c61491ac35bb7098c28b9585dff5d0bbacc1b51fcbe31fe6ebd9e94",
+    google: "b07c173f2a36b9940188c6922ffde482f7b2988754465b991327bda415ed8526",
+    amazon: "a0be57cdf211dd0dd86a47f10eda688c415f1ad9cfca5534ad64cc4faa54b84a",
     youtube: "0b0118248360fabc79e06be63916b91bd3f6aadd0c6b99fb06d3c4baabd5137a",
-    saude: "ccf777cf43b9c4a6a92326f2b9642efca843faf2e289816c0b01aaf7e2bcd6e9",
+    saude: "17f096dbe4b2089902be4361587e6d11203c616c3396eb6f59110fbeb42fabeb",
   },
 };
 

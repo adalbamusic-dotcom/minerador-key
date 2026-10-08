@@ -27,7 +27,8 @@ import "server-only";
  */
 
 import { radarFoundationsOfDossier, type RadarFoundations } from "@/lib/redator/radar-foundations";
-import { writerArticleBlueprintFoundation, writerBrandVoiceFoundation } from "@/lib/redator/writer-evidence-catalog";
+import { writerBrandVoiceFoundation } from "@/lib/redator/writer-evidence-catalog";
+import { writerArticleBlueprintForWriting, type WriterBlueprintKeywords } from "@/lib/redator/writer-blueprint-for-writing";
 import {
   WRITER_SEED_BUNDLE_SELECTS, WRITER_SEED_DOCUMENT_SELECT,
   writerSeedDossierFromRows, writerSeedHeadFromRow, type WriterSeedDocument,
@@ -59,7 +60,7 @@ const artigoDaOrigem = (linha: Record<string, unknown>): string | null => {
  * como era. Mesmos leitores do leitor de evidências, na Marca autorizada, em
  * série como o resto desta leitura.
  */
-async function vozEArtigoModelo(brandId: string, alvo: { articleId: string | null; bundleHash: string }): Promise<Pick<RadarFoundations, "brandVoice" | "articleBlueprint">> {
+async function vozEArtigoModelo(brandId: string, alvo: { articleId: string | null; bundleHash: string; keywords: WriterBlueprintKeywords | null }): Promise<Pick<RadarFoundations, "brandVoice" | "articleBlueprint">> {
   const contexto = { brandId, client: getOperationalClient() };
   const voz = await readWriterBrandVoice(contexto, { content: true });
   const artigoModelo = alvo.articleId
@@ -68,8 +69,9 @@ async function vozEArtigoModelo(brandId: string, alvo: { articleId: string | nul
   const brandVoice = voz.kind === "current"
     ? writerBrandVoiceFoundation({ versionId: voz.meta.versionId, versionNumber: voz.meta.versionNumber, name: voz.name, lifecycle: voz.lifecycle, title: voz.title, sections: voz.sections })
     : null;
+  /* 2026-10-08 · a mesma projeção do leitor de evidências: nomes atuais, frases que pedem fonte e o mapa da atualização. */
   const articleBlueprint = artigoModelo?.kind === "approved" && artigoModelo.content
-    ? writerArticleBlueprintFoundation({ id: artigoModelo.meta.id, versionNumber: artigoModelo.meta.versionNumber, approvedAt: artigoModelo.meta.approvedAt, ...artigoModelo.content })
+    ? writerArticleBlueprintForWriting({ id: artigoModelo.meta.id, versionNumber: artigoModelo.meta.versionNumber, approvedAt: artigoModelo.meta.approvedAt, ...artigoModelo.content, keywords: alvo.keywords })
     : null;
   return { ...(brandVoice ? { brandVoice } : {}), ...(articleBlueprint ? { articleBlueprint } : {}) };
 }
@@ -112,7 +114,7 @@ export async function writerSeedDocument(brandId: string, documentId: string): P
   /* As linhas do envio (Assunto, F4.2) vêm do cabeçalho, pela mesma projeção do painel. */
   const fundamentos = radarFoundationsOfDossier(dossier, { editorialContext: head.editorialContext });
   /* 2026-10-02 · voz e artigo-modelo só quando existem: sem eles, os fundamentos são os do painel. */
-  const vivos = fundamentos ? await vozEArtigoModelo(brandId, { articleId: artigoDaOrigem(primeira), bundleHash: head.dossier.bundleHash }) : {};
+  const vivos = fundamentos ? await vozEArtigoModelo(brandId, { articleId: artigoDaOrigem(primeira), bundleHash: head.dossier.bundleHash, keywords: head.dossier.keywordContext }) : {};
   return {
     document: head.document,
     foundations: fundamentos ? { ...fundamentos, ...vivos } : null,
