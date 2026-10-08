@@ -37,6 +37,13 @@ export type RadarVerifiedSource = {
 };
 
 export type RadarSourceVerificationFailure = {
+  /**
+   * 2026-10-08 · A IDENTIDADE DA FONTE QUE FALHOU. A versão da análise grava a
+   * falha com `sourceId` obrigatório (`sourceVerificationFailures`), e a tela usa
+   * o id para repetir a fonte. Sem ele, uma única fonte bloqueada recusava a
+   * gravação da análise inteira e a 1ª fase não fechava.
+   */
+  sourceId: string;
   domain: string;
   url: string;
   code: string;
@@ -49,6 +56,16 @@ export type RadarSourceVerificationResult = {
   failures: RadarSourceVerificationFailure[];
   limitations: string[];
 };
+
+/* 2026-10-08 · o domínio gravado nunca sai vazio (o contrato exige): sem o do plano, o host do endereço. */
+function dominioDoAlvo(target: RadarSourceVerificationTarget): string {
+  if (target.domain) return target.domain;
+  try {
+    return new URL(target.candidateUrl).hostname || target.candidateUrl;
+  } catch {
+    return target.candidateUrl || "fonte sem endereço";
+  }
+}
 
 /**
  * Busca as fontes escolhidas, uma vez cada.
@@ -79,7 +96,7 @@ export async function verifyRadarSources(input: {
         now: input.now,
       });
       verified.push({
-        domain: target.domain,
+        domain: dominioDoAlvo(target),
         url: page.url,
         classification: classifyRadarSourceAuthority({ domain: target.domain, url: page.url, verifiedPage: page }),
         page,
@@ -87,7 +104,8 @@ export async function verifyRadarSources(input: {
     } catch (error) {
       const tipado = error instanceof CompetitorExtractionError ? error : null;
       failures.push({
-        domain: target.domain,
+        sourceId: target.sourceId,
+        domain: dominioDoAlvo(target),
         url: target.candidateUrl,
         code: tipado?.code || "fetch_failed",
         status: tipado?.status ?? null,

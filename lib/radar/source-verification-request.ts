@@ -63,6 +63,75 @@ export function radarSourceVerificationBatches(sourceIds: readonly string[], siz
   return lotes;
 }
 
+/** 2026-10-08 · A falha de fonte no formato que a versão da análise grava (`sourceVerificationFailures`). */
+export type RadarSourceVerificationFailureRecord = {
+  sourceId: string;
+  domain: string;
+  url: string;
+  code: string;
+  message: string;
+  status: number | null;
+  observedAt: string;
+};
+
+const texto = (valor: unknown): string => (typeof valor === "string" ? valor.trim() : "");
+
+function hostDe(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 2026-10-08 · A FALHA DA ROTA VIRA REGISTRO VÁLIDO, SEMPRE.
+ *
+ * A rota devolvia a fonte que falhou sem `sourceId` (e, na repetição, sem
+ * domínio), e o contrato da versão exige os dois: uma fonte bloqueada recusava a
+ * gravação da análise inteira ("expected string, received undefined") e a
+ * pesquisa Google não fechava. Aqui o id vem da própria falha; sem ele, do plano
+ * pelo endereço, ou pelo domínio quando só uma fonte do lote o tem, ou do lote
+ * de uma fonte só. Sem como resolver, a falha fica registrada com um id próprio
+ * (`resolved: false`) e NÃO volta à fila — repetir um id fora do plano faria a
+ * rota recusar o lote inteiro.
+ */
+export function radarSourceVerificationFailureRecords(input: {
+  failures: unknown;
+  batch: readonly string[];
+  plan: ReadonlyArray<{ sourceId: string; domain: string; candidateUrl: string }>;
+  observedAt: string;
+}): Array<RadarSourceVerificationFailureRecord & { resolved: boolean }> {
+  const lista = Array.isArray(input.failures) ? input.failures : [];
+  const doLote = input.plan.filter(item => input.batch.includes(item.sourceId));
+  const porId = new Map(input.plan.map(item => [item.sourceId, item]));
+  return lista.flatMap((bruto, indice) => {
+    if (!bruto || typeof bruto !== "object") return [];
+    const falha = bruto as Record<string, unknown>;
+    const url = texto(falha.url);
+    const dominio = texto(falha.domain);
+    const declarado = texto(falha.sourceId);
+    const doDominio = dominio ? doLote.filter(item => item.domain === dominio) : [];
+    const alvo = (declarado && porId.get(declarado))
+      || (url ? doLote.find(item => item.candidateUrl === url) : undefined)
+      || (doDominio.length === 1 ? doDominio[0] : undefined)
+      || (doLote.length === 1 ? doLote[0] : undefined)
+      || null;
+    const enderecoFinal = url || alvo?.candidateUrl || "";
+    const status = typeof falha.status === "number" && Number.isInteger(falha.status) && falha.status >= 0 ? falha.status : null;
+    return [{
+      sourceId: alvo?.sourceId || declarado || `source:sem-id-${indice + 1}`,
+      domain: dominio || alvo?.domain || hostDe(enderecoFinal) || enderecoFinal || "fonte sem endereço",
+      url: enderecoFinal,
+      code: texto(falha.code) || "verification_failed",
+      message: texto(falha.message) || "A fonte não pôde ser verificada.",
+      status,
+      observedAt: texto(falha.observedAt) || input.observedAt,
+      resolved: Boolean(alvo),
+    }];
+  });
+}
+
 export function radarSourceVerificationErrorMessage(code: string | undefined, fallback: string): string {
   switch (code) {
     case RADAR_SOURCE_VERIFICATION_ERROR.ANALYSIS_UNKNOWN:

@@ -1,5 +1,35 @@
 # Estado atual — Radar
 
+## Correção: fonte que falha na verificação recusava a análise inteira — 2026-10-08
+
+**Relatado pelo usuário:** em "marketing digital para dentistas", a Pesquisa Google não finalizava
+("Análise incompleta"), o botão do YouTube ficava desabilitado e a notificação mostrava o erro do zod
+`sourceVerificationFailures[i].sourceId — expected string, received undefined` (e `domain` no item 2).
+
+**Causa (Verificado no código):** defeito de origem (2026-09-12), não regressão da rodada dos entregáveis.
+`verifyRadarSources` (`lib/radar/source-verification.ts`) devolvia a falha sem `sourceId`, e a rota
+`/api/editorial/radar-analysis/verify-sources` a repassava assim; o contrato da versão
+(`sourceVerificationFailures` em `lib/radar/analysis-contracts.ts`, `.strict()`) exige `sourceId` e `domain`.
+Bastava UMA fonte bloqueada ou lenta: a tela juntava a falha sem id, a repetição mandava `sourceIds: [undefined]`
+(o pedido recusado voltava sem domínio), e a gravação da camada de evidência era recusada — a amostra já
+gravada ficava sem a versão final, e a fase 1 não fechava.
+
+**Correção (Confirmado por teste):**
+
+- `verifyRadarSources` devolve `sourceId` do alvo e nunca domínio vazio (host do endereço como reserva);
+- `radarSourceVerificationFailureRecords` (`lib/radar/source-verification-request.ts`, puro) transforma a
+  falha da rota em registro válido para o contrato: id pela falha, pelo endereço no plano, pelo domínio
+  único no lote ou pelo lote de uma fonte; sem como identificar, id próprio e fora da fila;
+- a tela (`modules/radar/radar-page.tsx`, ANALYZE) grava só registros normalizados e só repete fonte cujo id
+  está no plano (id fora dele faria a rota recusar o lote inteiro).
+- Testes novos em `tests/radar-gate12-1-verificacao-no-analyze.test.mts` (a falha volta com id e passa no
+  contrato; a falha antiga sem id nem domínio é normalizada; a tela usa a normalização). `npm run test:radar`
+  3002 testes, 3001 pass, 0 fail, 1 skipped. `tsc` só com os 2 erros conhecidos de `.next/types`.
+
+**O que o dono faz:** depois do deploy (ou no dev local), abrir o artigo e rodar de novo "Analisar
+concorrência": a amostra já gravada é retomada (consolidação), a verificação refeita e a versão final grava;
+então "Finalizar pesquisa" habilita o YouTube. Validado manualmente: não.
+
 ## Revisão dos entregáveis (CSV para escrever, CSV de vídeo, Redator, MCP) — 2026-10-08
 
 **Como ler esta seção (rodada A–E e a correção da revisão):**
