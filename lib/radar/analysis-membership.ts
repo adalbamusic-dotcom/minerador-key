@@ -30,7 +30,7 @@
 import type { RadarAnalysisVersion } from "./analysis-contracts.ts";
 import type { RadarSerpView } from "./snapshot-view.ts";
 import { buildRadarSerpSelectionProjection, type RadarSerpSelectionScope } from "./serp-curation.ts";
-import { radarNormalizedUrl } from "./research-reference.ts";
+import { radarExtractionAccount } from "./extraction-round.ts";
 
 export type RadarAnalysisMembership = {
   /** A seleção confirmada corrente. É ela que define a amostra. */
@@ -76,39 +76,33 @@ export function buildRadarAnalysisMembership(input: {
    * `www.` ou barra final de diferença. Duas contagens, um só destino.
    */
   const canonicalUrls = projection.compatible ? projection.selectedRows.map(row => row.result.url) : [];
-  const porNormalizada = new Map<string, string>();
-  for (const url of [...canonicalUrls, ...(input.researchSelectedUrls || [])]) {
-    const chave = radarNormalizedUrl(url);
-    if (chave && !porNormalizada.has(chave)) porNormalizada.set(chave, url);
-  }
-  const selectedUrls = [...porNormalizada.values()];
-  const selecionadas = new Set(porNormalizada.keys());
-
   const extractedUrls = projection.compatible ? (input.analysis?.payload.extractions || []).map(page => page.url) : [];
-  const extraidas = new Set(extractedUrls.map(radarNormalizedUrl));
-  /* Só a falha REGISTRADA nesta versão conta como desfecho. */
-  const falhadas = new Set((input.analysis?.payload.extractionFailures || []).map(item => radarNormalizedUrl(item.url)).filter(Boolean));
-
-  const reusedUrls = selectedUrls.filter(url => extraidas.has(radarNormalizedUrl(url)));
-  const failedUrls = selectedUrls.filter(url => !extraidas.has(radarNormalizedUrl(url)) && falhadas.has(radarNormalizedUrl(url)));
-  const pendingUrls = selectedUrls.filter(url => !extraidas.has(radarNormalizedUrl(url)) && !falhadas.has(radarNormalizedUrl(url)));
-  const orphanUrls = [...new Map(extractedUrls
-    .filter(url => !selecionadas.has(radarNormalizedUrl(url)))
-    .map(url => [radarNormalizedUrl(url), url])).values()];
+  /*
+   * 2026-10-08 · A MESMA RÉGUA DA FASE 1.
+   *
+   * A conta saiu daqui para `radarExtractionAccount`, que a releitura da Fase 1
+   * também usa. Eram duas contas sobre a mesma amostra — e foi assim que a
+   * análise disse "fechou" enquanto a Fase 1 via uma pendente.
+   */
+  const conta = radarExtractionAccount({
+    selectedUrls: [...canonicalUrls, ...(input.researchSelectedUrls || [])],
+    extractionUrls: extractedUrls,
+    failureUrls: (input.analysis?.payload.extractionFailures || []).map(item => item.url),
+  });
 
   return {
-    selected: selectedUrls.length,
-    reused: reusedUrls.length,
-    failed: failedUrls.length,
-    pending: pendingUrls.length,
-    analyzed: reusedUrls.length,
-    orphanExtractions: orphanUrls.length,
-    selectedUrls,
-    reusedUrls,
-    failedUrls,
-    pendingUrls,
-    orphanUrls,
-    consistent: selectedUrls.length === reusedUrls.length + failedUrls.length + pendingUrls.length,
+    selected: conta.selected,
+    reused: conta.analyzed,
+    failed: conta.failed,
+    pending: conta.pending,
+    analyzed: conta.analyzed,
+    orphanExtractions: conta.orphans,
+    selectedUrls: conta.selectedUrls,
+    reusedUrls: conta.analyzedUrls,
+    failedUrls: conta.failedUrls,
+    pendingUrls: conta.pendingUrls,
+    orphanUrls: conta.orphanUrls,
+    consistent: conta.consistent,
   };
 }
 

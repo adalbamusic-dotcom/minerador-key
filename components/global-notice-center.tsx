@@ -24,6 +24,16 @@ type NoticeCenterValue = {
 };
 
 const NoticeCenterContext = createContext<NoticeCenterValue | null>(null);
+/*
+ * 2026-10-08 · QUEM SÓ PUBLICA NÃO PRECISA RENDERIZAR A CADA AVISO.
+ *
+ * `useNoticeBridge` lia o contexto inteiro do centro, então cada aviso
+ * publicado — inclusive o próprio "Analisando páginas X de Y…" — re-renderizava
+ * a tela que publicou. No Radar isso era um render completo da planilha por
+ * aviso (medido: ~9 s com 25 artigos). Este contexto carrega só `publishNotice`,
+ * que só muda com a rota; `useNoticeCenter` e o sino continuam lendo tudo.
+ */
+const NoticePublisherContext = createContext<NoticeCenterValue["publishNotice"] | null>(null);
 
 const toneClasses: Record<NoticeSeverity, string> = {
   SUCCESS: "text-success",
@@ -162,8 +172,10 @@ export function GlobalNoticeProvider({ children }: { children: React.ReactNode }
   const value = useMemo(() => ({ notices: visibleNotices, currentScope, autoOpenNotice, toast, publishNotice, consumeAutoOpenNotice, markNoticeRead, markAllNoticesRead, unreadCount, dismissNotice, dismissToast }), [autoOpenNotice, consumeAutoOpenNotice, currentScope, dismissNotice, dismissToast, markAllNoticesRead, markNoticeRead, publishNotice, toast, unreadCount, visibleNotices]);
 
   return <NoticeCenterContext.Provider value={value}>
-    {children}
-    <NoticeToast notice={toast} onDismiss={dismissToast} />
+    <NoticePublisherContext.Provider value={publishNotice}>
+      {children}
+      <NoticeToast notice={toast} onDismiss={dismissToast} />
+    </NoticePublisherContext.Provider>
   </NoticeCenterContext.Provider>;
 }
 
@@ -195,7 +207,8 @@ export function useNoticeBridge({
   source?: PublishNoticeInput["source"];
   fallbackSeverity?: NoticeSeverity;
 }) {
-  const { publishNotice } = useNoticeCenter();
+  const publishNotice = useContext(NoticePublisherContext);
+  if (!publishNotice) throw new Error("useNoticeCenter deve ser usado dentro de GlobalNoticeProvider.");
   const lastPublished = useRef("");
   const text = typeof notice === "string" ? notice : notice?.message || "";
   const rawSeverity = typeof notice === "object" && notice ? notice.type || notice.tone : undefined;

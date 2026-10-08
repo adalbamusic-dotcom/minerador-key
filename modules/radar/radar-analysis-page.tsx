@@ -6,7 +6,8 @@ import { useSupabaseSession as useSession } from "@/components/auth/supabase-ses
 import { useBrand } from "@/components/brand-context";
 import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
 import type { RadarAnalysisVersion, RadarExpertEvidence } from "@/lib/radar/analysis-contracts";
-import { buildRadarBenchmark, createRadarAnalysisSuccessor, createRadarAnalysisVersion, radarApprovedPackageOf, suggestRadarAnalysisMode } from "@/lib/radar/analysis-contracts";
+import { buildRadarBenchmark, createRadarAnalysisSuccessor, createRadarAnalysisVersion, RadarExtractionPageSchema, radarApprovedPackageOf, suggestRadarAnalysisMode } from "@/lib/radar/analysis-contracts";
+import { radarReconcileExtractionRound, type RadarExtractionRoundResponse } from "@/lib/radar/extraction-round";
 import { postRadarWriterHandoff } from "@/lib/radar/writer-handoff-client";
 import { approveRadarReport, radarReportApprovalIssues } from "@/lib/radar/report-approval";
 import { deriveRadarSerpReviewState } from "@/lib/radar/serp-review-state";
@@ -26,7 +27,10 @@ import { buildRadarFlowProgress, deriveRadarReferenceRole, radarSemanticDecision
 import { buildExpertTopicContext } from "@/lib/radar/r6-sequential";
 import { parseRadarExpertEvidenceReviews, projectRadarExpertEvidence, type RadarExpertBriefEvidenceSource, type RadarExpertContributionEvidenceSource } from "@/lib/radar/expert-evidence";
 import { CompetitiveReportPanel } from "./competitive-report-panel";
-import { RadarExpertBriefPanel } from "./radar-expert-brief-panel";
+import { RadarExpertBriefPanel, type RadarSpecialistPanelSummary } from "./radar-expert-brief-panel";
+import type { RadarR6ExpertEvidenceInput } from "@/lib/radar/r6-sequential";
+import type { RadarFrozenSpecialistRequirement } from "@/lib/radar/specialist-lifecycle";
+import { radarExpertEvidenceChanged, type RadarExpertEvidenceNotice } from "@/lib/radar/expert-evidence-change";
 import { RadarAnalysisSignals } from "./radar-analysis-signals";
 import { RadarSerpScreen } from "./radar-serp-screen";
 import { radarSerpCollectReading } from "./radar-serp-collect-notices";
@@ -113,6 +117,16 @@ type RemoteExpertEvidenceState = {
   evidence: RadarExpertEvidence[];
 };
 
+/*
+ * 2026-10-08 · SEM CONGELAMENTO, NENHUM PONTO — E SEMPRE O MESMO "NENHUM".
+ *
+ * `|| []` criava um array novo a cada render; o painel do especialista lê os
+ * pontos como dependência e avisava de novo, o aviso subia a revisão, a
+ * revisão renderizava esta página — um laço com GET de expert-briefs a cada
+ * volta. Uma constante congelada tem a mesma identidade sempre.
+ */
+const SEM_PONTOS_DE_REVISAO: readonly RadarFrozenSpecialistRequirement[] = Object.freeze([]);
+
 const emptyRemoteExpertEvidence: RemoteExpertEvidenceState = { selectionKey: "", reviewRevision: -1, loaded: false, error: null, briefCount: 0, contributionCount: 0, pendingCount: 0, blockedCount: 0, evidence: [] };
 
 function radarExpertEvidenceFingerprint(evidence: RadarExpertEvidence[]) {
@@ -144,9 +158,25 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
   const [pendingReferencesOnly, setPendingReferencesOnly] = useState(false);
   const [remoteExpertEvidence, setRemoteExpertEvidence] = useState<RemoteExpertEvidenceState>(emptyRemoteExpertEvidence);
   const [remoteExpertEvidenceReviewRevision, setRemoteExpertEvidenceReviewRevision] = useState(0);
-  const refreshRemoteExpertEvidence = useCallback(() => {
+  /*
+   * 2026-10-08 · SÓ RELÊ O ESPECIALISTA QUANDO O AVISO DO PAINEL MUDOU.
+   *
+   * Cada aviso subia a revisão, a revisão refazia o GET de expert-briefs e
+   * renderizava a página — que recriava os pontos de revisão e fazia o painel
+   * avisar de novo, igual. O primeiro aviso de cada abertura da aba e qualquer
+   * aviso com conteúdo diferente continuam relendo, como antes.
+   */
+  const ultimoAvisoDoEspecialista = useRef<RadarExpertEvidenceNotice | null>(null);
+  const refreshRemoteExpertEvidence = useCallback((articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: RadarSpecialistPanelSummary) => {
+    const aviso: RadarExpertEvidenceNotice = { articleId, evidence, summary };
+    if (!radarExpertEvidenceChanged(ultimoAvisoDoEspecialista.current, aviso)) return;
+    ultimoAvisoDoEspecialista.current = aviso;
     setRemoteExpertEvidenceReviewRevision(current => current + 1);
   }, []);
+  /* Fora da aba o painel desmonta; ao voltar, o primeiro aviso relê de novo. */
+  useEffect(() => {
+    if (tab !== "evidencias-adicionais") ultimoAvisoDoEspecialista.current = null;
+  }, [tab]);
 
   const row = resolveRadarRouteItem(pipeline.radarItems, routeKey);
   const article = row ? pipeline.articleVersions[row.articleId] : undefined;
@@ -500,14 +530,42 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
     try {
       const response = await fetch("/api/editorial/radar-analysis/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brandId: selectedBrandId, articleId, analysis, candidates }) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error || "Não foi possível extrair os concorrentes.");
-      const pages = (body.pages || []).map((item: { page: unknown }) => item.page).filter(Boolean) as Parameters<typeof buildRadarBenchmark>[1];
+      /*
+       * 2026-10-08 · A ROTA DE DETALHE FECHA A RODADA COMO A TELA PRINCIPAL — POR CHAVE.
+       *
+       * Ela empurrava `item.page` com a URL FINAL do extrator (redirect,
+       * `%C3%B3`, "/" na raiz), deduplicava pela URL crua e não gravava as
+       * falhas: a página lida virava "fora da seleção" e a referência ficava
+       * pendente para sempre na Fase 1. Agora a página entra com a URL pedida,
+       * a falha (e a candidata sem desfecho) fica gravada como limitação
+       * declarada, e a órfã antiga sai — pela mesma `radarReconcileExtractionRound`.
+       */
+      const agora = new Date().toISOString();
+      const respostas: RadarExtractionRoundResponse[] = (Array.isArray(body.pages) ? body.pages : []).flatMap((item: { key?: unknown; requestedUrl?: unknown; page?: unknown }) => {
+        if (typeof item.key !== "string") return [];
+        const parsed = RadarExtractionPageSchema.safeParse(item.page);
+        return [{ key: item.key, requestedUrl: typeof item.requestedUrl === "string" ? item.requestedUrl : null, page: parsed.success ? parsed.data : null }];
+      });
+      const falhas = (Array.isArray(body.errors) ? body.errors : []).flatMap((item: { key?: string; error?: { url?: string; message?: string; code?: string; status?: number } }) => item.error?.url
+        ? [{ key: item.key || item.error.url, url: item.error.url, code: item.error.code || "fetch_failed", message: item.error.message || "Falha na extração.", status: typeof item.error.status === "number" ? item.error.status : null, observedAt: agora }]
+        : []);
+      const rodada = radarReconcileExtractionRound({
+        candidates: candidates.map(candidate => ({ key: candidate.key, url: candidate.url })),
+        responses: respostas,
+        failures: falhas,
+        previousExtractions: analysis.payload.extractions,
+        previousFailures: analysis.payload.extractionFailures,
+        selectedUrls: organicResults.filter(result => ["primary", "support"].includes(resultRole(result))).map(result => result.url),
+        observedAt: agora,
+      });
+      const pages = rodada.pages;
       const primaryUrls = new Set(analysisQueue.filter(result => resultRole(result) === "primary").map(result => result.url));
       const benchmark = buildRadarBenchmark(analysis.payload.mode, pages.filter(page => primaryUrls.has(page.url)));
       const semanticTerms = pages.flatMap(page => page.recurringTerms).slice(0, 50).map(term => ({ term: term.term, frequency: term.frequency, pageCount: term.pageCount, pageIds: term.pageIds, sources: term.sources.filter((source): source is "body" | "h1" | "h2" | "h3" | "title" => ["body", "h1", "h2", "h3", "title"].includes(source)), relation: "Termo recorrente observado nas páginas selecionadas.", decision: "pending" as const, note: "" }));
       const structuralDecisions = Object.entries(benchmark?.metrics || {}).map(([key, metric]) => ({ key, label: metric.label, observedCount: Math.round(metric.mean), sampleSize: metric.sampleSize, observedText: `Observado: média ${metric.mean.toFixed(1)}; faixa ${metric.typicalRange[0].toFixed(0)}–${metric.typicalRange[1].toFixed(0)}.`, level: "optional" as const, enforcement: "advisory" as const, humanNote: "" }));
       const competitorCount = pages.length;
       const competitiveness = { classification: competitorCount >= 5 ? "high" as const : competitorCount >= 3 ? "medium" as const : competitorCount ? "low" as const : "insufficient_evidence" as const, dimensions: { sample: Math.min(1, competitorCount / 5), structure: Math.min(1, (benchmark?.metrics.h2?.mean || 0) / 12), depth: Math.min(1, (benchmark?.metrics.words?.mean || 0) / 2500) }, reasons: [`${competitorCount} página(s) selecionada(s) foram extraídas.`, "A classificação é observacional e não define o plano editorial."], score: competitorCount ? Math.min(1, competitorCount / 5) : null };
-      await patchAnalysis({ selectedCompetitorIds: [...new Set([...analysis.payload.selectedCompetitorIds, ...candidates.map(candidate => candidate.key)])], extractionIds: [...new Set([...analysis.payload.extractionIds, ...pages.map(page => page.id)])], extractions: [...analysis.payload.extractions.filter(page => !pages.some(nextPage => nextPage.url === page.url)), ...pages], benchmark, semanticTerms, structuralDecisions, competitiveness }, `${pages.length} página(s) extraída(s); ${body.errors?.length || 0} falha(s) isolada(s).`);
+      await patchAnalysis({ selectedCompetitorIds: [...new Set([...analysis.payload.selectedCompetitorIds, ...candidates.map(candidate => candidate.key)])], extractionIds: [...new Set(rodada.mergedExtractions.map(page => page.id))], extractions: rodada.mergedExtractions, extractionFailures: rodada.failures, benchmark, semanticTerms, structuralDecisions, competitiveness }, `${pages.length} página(s) extraída(s); ${candidates.length - pages.length} sem acesso, registrada(s) como limitação.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : "Falha na extração."); } finally { setBusy(""); }
   };
 
@@ -637,7 +695,7 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
         {tab === "referencias" && renderAdvancedSelection()}
         {tab === "analise-serp" && <RadarAnalysisSignals needs={analysis?.payload.competitiveReport?.needs.map(need => `${need.title} · prioridade ${need.priority}`) || []} gaps={[...(comparison?.topics.missing || []), ...(analysis?.payload.competitiveReport?.profile.limitations || [])]} conflicts={[...(serpView?.diagnostic?.possibleConflicts || []), ...conflicts.map(conflict => conflict.reason)]} opportunities={serpView?.diagnostic?.opportunities || []} sources={[...extractionPages.map(page => page.url), ...(analysis?.payload.competitiveReport?.competitors.map(competitor => competitor.url) || [])]} />}
         {tab === "analise-serp" && renderSample()}
-        {tab === "evidencias-adicionais" && <RadarExpertBriefPanel key={`${articleId}:${row.articleDnaVersionId}`} brandId={row.brandId} articleId={articleId} articleDnaVersionId={row.articleDnaVersionId} articleTitle={identity.title} articleVersion={`v${article.versionNumber}`} articleRole={identity.hierarchy} context={expertContext} requirements={analysis?.payload.finalizedBundle?.authority.specialistRequirements || []} onExpertEvidenceChange={refreshRemoteExpertEvidence} />}
+        {tab === "evidencias-adicionais" && <RadarExpertBriefPanel key={`${articleId}:${row.articleDnaVersionId}`} brandId={row.brandId} articleId={articleId} articleDnaVersionId={row.articleDnaVersionId} articleTitle={identity.title} articleVersion={`v${article.versionNumber}`} articleRole={identity.hierarchy} context={expertContext} requirements={analysis?.payload.finalizedBundle?.authority.specialistRequirements || SEM_PONTOS_DE_REVISAO} onExpertEvidenceChange={refreshRemoteExpertEvidence} />}
         {tab === "relatorio" && renderReport()}
         {tab === "relatorio" && renderExpertEvidenceReport()}
         {tab === "historico" && <section className={flowSection}><h2 className="text-xl font-semibold text-foreground">Histórico</h2><p className="mt-2 text-base leading-6 text-foreground/85">Versões, snapshots, extrações e transferências permanecem rastreáveis neste artigo.</p>{renderHistory()}</section>}

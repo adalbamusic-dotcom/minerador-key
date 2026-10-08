@@ -217,17 +217,73 @@ export function radarConceptSupportsLinkRelation(concept: Pick<RadarSemanticConc
  * entidade e pedem coisas opostas. É a mesma regra que o confronto editorial e
  * o modelo observado já usam — conferir o tipo antes das palavras.
  */
-function necessidadeCompativel(esquerda: string, direita: string): boolean {
-  const aqui = radarSemanticType(esquerda);
-  const ali = radarSemanticType(direita);
+/*
+ * 2026-10-08 · A LEITURA DE UM TEXTO, UMA VEZ POR CHAMADA.
+ *
+ * O cruzamento conceito × destino × seção × variante perguntava o tipo, os
+ * tokens e as raízes das MESMAS strings milhares de vezes: medido na bancada
+ * do scratchpad, com 36 links por página, eram ~18 mil `radarSemanticType` e
+ * ~20 mil `radarTopicTokens` POR LINHA da planilha, e `buildRadarExternalSourceResearch`
+ * respondia por ~86% do modelo da linha (158 ms de 177 ms). O dono sentia isso
+ * como seletor e scroll travados.
+ *
+ * As três leituras são funções puras do texto (sem relógio, sem estado, sem
+ * regex com `g`), então guardar a resposta por string dentro de UMA chamada
+ * não muda nenhum resultado — só deixa de refazer a mesma conta. O guarda vive
+ * na chamada e morre com ela: nada atravessa marcas, artigos nem renders, e
+ * ninguém altera as listas devolvidas (só `filter`/`has`).
+ */
+type LeituraDeTexto = {
+  tipo: (texto: string) => ReturnType<typeof radarSemanticType>;
+  tokens: (texto: string) => string[];
+  conjuntoDeTokens: (texto: string) => Set<string>;
+  raizes: (texto: string) => string[];
+  conjuntoDeRaizes: (texto: string) => Set<string>;
+};
+
+/** Sem guarda: a leitura de sempre, para quem não repete strings em massa. */
+const LEITURA_DIRETA: LeituraDeTexto = {
+  tipo: radarSemanticType,
+  tokens: radarTopicTokens,
+  conjuntoDeTokens: texto => new Set(radarTopicTokens(texto)),
+  raizes: radarSemanticStems,
+  conjuntoDeRaizes: texto => new Set(radarSemanticStems(texto)),
+};
+
+function lembrar<Valor>(calcular: (texto: string) => Valor): (texto: string) => Valor {
+  const guardados = new Map<string, Valor>();
+  return texto => {
+    if (guardados.has(texto)) return guardados.get(texto) as Valor;
+    const valor = calcular(texto);
+    guardados.set(texto, valor);
+    return valor;
+  };
+}
+
+/** Uma leitura com guarda por string, para durar UMA chamada. */
+function criarLeituraDeTexto(): LeituraDeTexto {
+  const tokens = lembrar(radarTopicTokens);
+  const raizes = lembrar(radarSemanticStems);
+  return {
+    tipo: lembrar(radarSemanticType),
+    tokens,
+    conjuntoDeTokens: lembrar(texto => new Set(tokens(texto))),
+    raizes,
+    conjuntoDeRaizes: lembrar(texto => new Set(raizes(texto))),
+  };
+}
+
+function necessidadeCompativel(esquerda: string, direita: string, leitura: LeituraDeTexto = LEITURA_DIRETA): boolean {
+  const aqui = leitura.tipo(esquerda);
+  const ali = leitura.tipo(direita);
   return !(aqui.faceted && ali.faceted && aqui.type !== ali.type);
 }
 
 /** As palavras batem? Interseção de tokens significativos, sem acento nem vazio. */
-function mesmaFormulacao(esquerda: string, direita: string): boolean {
-  if (!necessidadeCompativel(esquerda, direita)) return false;
-  const daEsquerda = new Set(radarTopicTokens(esquerda));
-  const daDireita = radarTopicTokens(direita);
+function mesmaFormulacao(esquerda: string, direita: string, leitura: LeituraDeTexto = LEITURA_DIRETA): boolean {
+  if (!necessidadeCompativel(esquerda, direita, leitura)) return false;
+  const daEsquerda = leitura.conjuntoDeTokens(esquerda);
+  const daDireita = leitura.tokens(direita);
   if (!daEsquerda.size || !daDireita.length) return false;
   return daDireita.filter(token => daEsquerda.has(token)).length / Math.min(daEsquerda.size, daDireita.length) >= 0.6;
 }
@@ -246,10 +302,10 @@ function mesmaFormulacao(esquerda: string, direita: string): boolean {
  * ninguém consegue defender. Uma raiz só sustenta a ponte quando ELA É o
  * assunto do artigo; fora disso, são precisas duas.
  */
-function raizesEmComum(anchor: string, conceito: string, escopo: RadarSemanticScope): boolean {
-  if (!necessidadeCompativel(anchor, conceito)) return false;
-  const doConceito = new Set(radarSemanticStems(conceito));
-  const comuns = radarSemanticStems(anchor).filter(raiz => doConceito.has(raiz));
+function raizesEmComum(anchor: string, conceito: string, escopo: RadarSemanticScope, leitura: LeituraDeTexto = LEITURA_DIRETA): boolean {
+  if (!necessidadeCompativel(anchor, conceito, leitura)) return false;
+  const doConceito = leitura.conjuntoDeRaizes(conceito);
+  const comuns = leitura.raizes(anchor).filter(raiz => doConceito.has(raiz));
   if (!comuns.length) return false;
   if (comuns.length >= 2) return true;
   return escopo.stems.has(comuns[0]);
@@ -839,13 +895,15 @@ export function buildRadarExternalSourceResearch(input: {
   });
 
   const conceptAlignments: RadarSourceConceptAlignment[] = [];
+  /* 2026-10-08 · os mesmos rótulos, seções e variantes, lidos uma vez nesta chamada. */
+  const leitura = criarLeituraDeTexto();
   for (const concept of (input.semantic?.concepts || []).filter(radarConceptSupportsLinkRelation)) {
     for (const [, ocorrencias] of porDestino) {
       const comSecao = ocorrencias.filter(item => item.sectionHeading);
-      const lexical = comSecao.find(item => mesmaFormulacao(item.sectionHeading as string, concept.canonicalLabel)
-        || concept.variants.some(variante => mesmaFormulacao(item.sectionHeading as string, variante)));
-      const semantico = comSecao.find(item => raizesEmComum(item.sectionHeading as string, concept.canonicalLabel, escopo)
-        || concept.variants.some(variante => raizesEmComum(item.sectionHeading as string, variante, escopo)));
+      const lexical = comSecao.find(item => mesmaFormulacao(item.sectionHeading as string, concept.canonicalLabel, leitura)
+        || concept.variants.some(variante => mesmaFormulacao(item.sectionHeading as string, variante, leitura)));
+      const semantico = comSecao.find(item => raizesEmComum(item.sectionHeading as string, concept.canonicalLabel, escopo, leitura)
+        || concept.variants.some(variante => raizesEmComum(item.sectionHeading as string, variante, escopo, leitura)));
       const casado = lexical || semantico;
       if (!casado) continue;
 

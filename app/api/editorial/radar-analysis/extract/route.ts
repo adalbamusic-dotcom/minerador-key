@@ -125,9 +125,18 @@ export async function POST(request: NextRequest) {
      * Uma URL que falha não derruba a amostra: cada página volta como sucesso
      * ou como erro nomeado, e o benchmark decide depois o que é comparável.
      */
+    /*
+     * 2026-10-08 · A PÁGINA VOLTA COM A URL QUE FOI PEDIDA — aditivo.
+     *
+     * `page.url` é a URL FINAL (depois do redirect, serializada por `new URL()`),
+     * e a seleção conhece a pedida. Sem esta, a tela casava a página pela final,
+     * a referência ficava pendente para sempre e o automático da Fase 1 parava
+     * em "Analisar concorrência". Quem fecha a rodada é a chave; esta é a URL
+     * que a autoridade do servidor buscou.
+     */
     const pages = await Promise.all(unique.map(async target => {
       try {
-        return { key: target.key, page: await extractCompetitorPage(target.url, { keyword: input.keyword }) };
+        return { key: target.key, requestedUrl: target.url, page: await extractCompetitorPage(target.url, { keyword: input.keyword }) };
       } catch (error) {
         const extractionError = error instanceof CompetitorExtractionError ? error : new CompetitorExtractionError("fetch_failed", "Falha na extração.", 502);
         return { key: target.key, error: { code: extractionError.code, message: extractionError.message, status: extractionError.status, url: target.url } };

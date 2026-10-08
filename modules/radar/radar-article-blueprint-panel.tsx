@@ -14,6 +14,8 @@ import {
   type RadarArticleBlueprintSkeletonItem,
 } from "@/lib/radar/article-blueprint";
 import type { RadarPhase1Action } from "@/lib/radar/serp-phase1";
+import type { RadarPrimarySearchMode } from "@/lib/radar/search-mode";
+import { radarPhase1WithAutoFinalize } from "@/lib/radar/operational-actions";
 
 /**
  * ===== O ARTIGO-MODELO NA TELA (SDD diretriz editorial, Adendo A, D5 — 2026-10-02) =====
@@ -155,6 +157,29 @@ export function radarPhase1WithArticleBlueprint(acao: RadarPhase1Action, artigos
       "Se a IA falhar, a investigação continua finalizada e o painel \"Artigo-modelo da SERP\" oferece organizar de novo. O artigo-modelo sai concluído: com pendência na conferência, a IA corrige numa chamada a mais.",
     ].filter(Boolean).join(" "),
   };
+}
+
+/**
+ * ====== 2026-10-08 · O BOTÃO DA FASE 1 COMO A TELA O MOSTRA — uma montagem só ======
+ *
+ * O botão da Fase 1 passa por dois invólucros de texto (o "e finaliza" da
+ * análise e o "inclui 1 chamada de IA" do finalizar). A frase do automático,
+ * quando parava, nomeava "Finalizar pesquisa" fixo — enquanto a tela mostrava
+ * "Analisar concorrência · e finaliza (+ 1 chamada de IA)". O dono leu
+ * "revise e use Finalizar pesquisa" e não achou botão nenhum com esse nome.
+ *
+ * O `Phase1Button` e a frase de parada usam ESTA função: o nome dito é o nome
+ * que está na tela, naquele estado.
+ */
+export function radarPhase1Visible(acao: RadarPhase1Action, mode: RadarPrimarySearchMode = "WEB"): RadarPhase1Action {
+  /* 2026-10-08 · o modo decide a nota do ⓘ: a regra nova é só do Google. */
+  return radarPhase1WithArticleBlueprint(radarPhase1WithAutoFinalize(acao, mode));
+}
+
+/** O rótulo do botão da Fase 1 na tela, ou `null` quando não há botão que resolva (ação NONE ou desabilitada). */
+export function radarPhase1VisibleLabel(acao: RadarPhase1Action | null | undefined, mode: RadarPrimarySearchMode = "WEB"): string | null {
+  if (!acao || acao.id === "NONE" || !acao.enabled) return null;
+  return radarPhase1Visible(acao, mode).label;
 }
 
 /** POST "generate": organizar o artigo-modelo da SERP de um artigo finalizado. */

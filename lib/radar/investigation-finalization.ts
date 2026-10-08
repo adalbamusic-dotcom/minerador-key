@@ -29,14 +29,16 @@
  *      encerrá-la assumindo a limitação, que fica escrita. Zero páginas lidas
  *      não são leitura nenhuma: não há o que congelar.
  *
- *   4. CONGELA SOZINHO SÓ SEM PENDÊNCIA. A regra antiga era "nada congela
- *      sozinho; só o clique". Decisão do dono em 2026-10-02 (D9, "automático
- *      nos três"): terminar o ANALYZE sem pendência finaliza — encadeado ao fim
- *      do handler, depois da releitura do servidor, nunca num efeito de
- *      render — e a IA organiza o artigo-modelo em seguida. Com pendência
- *      (amostra insuficiente, consulta que falhou, intenção em conflito, etapa
- *      faltando) nada congela, a tela diz por quê e o botão manual continua.
- *      Quem decide o que é pendência é `radarGoogleAutoFinalizeDecision`.
+ *   4. O GOOGLE CONGELA SOZINHO, COM A LIMITAÇÃO ESCRITA. A regra antiga era
+ *      "nada congela sozinho; só o clique". D9 (2026-10-02): terminar o ANALYZE
+ *      sem pendência finaliza — encadeado ao fim do handler, depois da
+ *      releitura do servidor, nunca num efeito de render — e a IA organiza o
+ *      artigo-modelo em seguida. Decisão do dono em 2026-10-08: amostra
+ *      insuficiente e consulta auxiliar que falhou também finalizam, com a
+ *      limitação registrada no bundle; página sem desfecho é lida de novo uma
+ *      vez. Só param intenção em conflito, nenhuma página lida, fundamento
+ *      mudado e gravação não confirmada — a tela diz por quê e onde continuar.
+ *      Quem decide é `radarGoogleAutoFinalizeDecision`.
  *
  * Domínio puro: sem fetch, sem storage, sem provider. Finalizar não pesquisa —
  * ele consolida o que o ANALYZE já produziu.
@@ -130,33 +132,81 @@ export function radarFinalizationReadiness(input: {
 }
 
 /**
- * ====== 2026-10-02 · D9 · O GOOGLE FINALIZA SOZINHO — SÓ SEM PENDÊNCIA ======
+ * ====== 2026-10-08 · O GOOGLE TERMINA A FASE 1 SOZINHO — COM A LIMITAÇÃO ESCRITA ======
  *
- * O botão manual aceita `INSUFFICIENT_BUT_FINALIZABLE`: quem clica assume a
- * limitação, e ela fica escrita. O automático não assume nada por ninguém. Ele
- * só congela quando a MESMA autoridade que habilita o botão (`phase1` e
- * `finalization`) diz que dá, e nenhuma destas pendências existe:
+ * A regra de 2026-10-02 (D9) parava também por amostra insuficiente e por
+ * consulta auxiliar que falhou. Decisão do dono em 2026-10-08, depois de ver o
+ * botão "… e finaliza" parar e mandar "revisar" sem dizer onde: "ele já teria
+ * que ter feito isso de forma automática sem importar os custos".
  *
- *   - a próxima etapa ainda não é finalizar (falta completar ou analisar);
- *   - a amostra é insuficiente — encerrar assim é decisão humana;
- *   - a intenção observada na SERP conflita com a declarada;
- *   - alguma consulta auxiliar do plano falhou na coleta.
+ * As duas viraram LIMITAÇÃO REGISTRADA, pela mesma rotina do botão manual: a
+ * insuficiência vai ao bundle em `acknowledgedInsufficiency` e em
+ * `conclusion = INSUFFICIENT_BUT_FINALIZABLE`; a consulta que falhou vai em
+ * `limitations` (`radarAuxiliaryFailureLimitation`) e continua em
+ * `search.queries` com execução e motivo. Páginas "sem acesso" já eram
+ * limitação declarada e continuam sendo.
  *
- * Páginas "sem acesso" NÃO são pendência: elas já são limitação declarada e
- * não impedem nem o botão (ver `radarFinalizationReadiness`).
+ * CONTINUA PARANDO só o que não tem o que congelar ou pede decisão humana:
+ *
+ *   - a releitura do servidor que não veio;
+ *   - a próxima etapa ainda não é finalizar (salvaguarda: depois da análise e
+ *     da rodada extra, a conta da Fase 1 é a mesma da análise);
+ *   - a prontidão que recusa: nenhuma página lida, fundamento mudado (STALE),
+ *     já finalizada, amostra bloqueada;
+ *   - a intenção observada na SERP em conflito com a declarada.
+ *
+ * A falha de gravação do congelamento para na rotina que grava, não aqui.
  *
  * Vale para qualquer página, marca e assunto: só lê a investigação resolvida.
+ * YouTube e Amazon continuam com `radarProfileAutoFinalizeDecision`.
  */
-export type RadarGoogleAutoFinalizeDecision = { autoFinalize: boolean; reason: string };
+export type RadarGoogleAutoFinalizeDecision = {
+  autoFinalize: boolean;
+  reason: string;
+  /** O que fica registrado como limitação quando finaliza sozinho. Vazio quando não há. */
+  limitations: string[];
+};
+
+/**
+ * A consulta auxiliar que falhou, dita como limitação — uma frase só.
+ *
+ * Usada pelo automático (para dizer na tela) e pelo congelamento (para gravar
+ * no bundle), no clique e no automático: a mesma frase nos dois lugares.
+ */
+export function radarAuxiliaryFailureLimitation(failed: ReadonlyArray<{ keyword: string | null }> | number): string[] {
+  const total = typeof failed === "number" ? failed : failed.length;
+  if (!total) return [];
+  const keywords = typeof failed === "number" ? [] : [...new Set(failed.map(item => item.keyword?.trim()).filter((item): item is string => Boolean(item)))];
+  const quais = keywords.length ? ` (${keywords.map(item => `"${item}"`).join(", ")})` : "";
+  return [`${total} consulta(s) auxiliar(es) do plano falharam na coleta${quais}; o universo competitivo foi montado sem elas.`];
+}
+
+/**
+ * O que o congelamento do Google registra como limitação, em linguagem de tela:
+ * a amostra insuficiente (já gravada em `acknowledgedInsufficiency`) e a
+ * consulta auxiliar que falhou. O automático diz isto ao finalizar; o
+ * congelamento grava. Uma lista só para os dois.
+ */
+export function radarGoogleRegisteredLimitations(input: {
+  finalization: Pick<RadarFinalizationReadiness, "state" | "acknowledgedInsufficiency">;
+  sufficiency: Pick<RadarInvestigationSufficiency, "headline">;
+  auxiliaryFailed?: ReadonlyArray<{ keyword: string | null }> | number;
+}): string[] {
+  const motivo = (input.finalization.acknowledgedInsufficiency || input.sufficiency.headline).trim().replace(/[.;:]+$/, "");
+  return [
+    ...(input.finalization.state === "INSUFFICIENT_BUT_FINALIZABLE" ? [`amostra insuficiente (${motivo})`] : []),
+    ...radarAuxiliaryFailureLimitation(input.auxiliaryFailed || 0),
+  ];
+}
 
 export function radarGoogleAutoFinalizeDecision(input: {
   phase1: { id: string; enabled: boolean; label: string; blockedReason: string | null } | null | undefined;
   finalization: RadarFinalizationReadiness | null | undefined;
   sufficiency: Pick<RadarInvestigationSufficiency, "level" | "headline" | "reasons"> | null | undefined;
   /** Consultas auxiliares do plano que foram tentadas e não trouxeram evidência. */
-  auxiliaryFailed?: number;
+  auxiliaryFailed?: ReadonlyArray<{ keyword: string | null }> | number;
 }): RadarGoogleAutoFinalizeDecision {
-  const parar = (reason: string): RadarGoogleAutoFinalizeDecision => ({ autoFinalize: false, reason });
+  const parar = (reason: string): RadarGoogleAutoFinalizeDecision => ({ autoFinalize: false, reason, limitations: [] });
 
   if (!input.phase1 || !input.finalization || !input.sufficiency) {
     return parar("A investigação deste artigo não pôde ser resolvida na releitura do servidor.");
@@ -165,17 +215,21 @@ export function radarGoogleAutoFinalizeDecision(input: {
     return parar(input.phase1.blockedReason || `A próxima etapa ainda é "${input.phase1.label}".`);
   }
   if (!input.finalization.canFinalize) return parar(input.finalization.reason);
-  if (input.finalization.state === "INSUFFICIENT_BUT_FINALIZABLE") {
-    return parar(`A amostra é insuficiente (${input.finalization.acknowledgedInsufficiency || input.sufficiency.headline}); encerrar assim é decisão sua, e a limitação fica registrada.`);
-  }
   if (input.sufficiency.level === "CONFLICTING_SEARCH_INTENT") {
     return parar(`${input.sufficiency.headline}: a intenção observada na SERP pede a sua decisão antes de congelar.`);
   }
-  const falhas = input.auxiliaryFailed || 0;
-  if (falhas > 0) {
-    return parar(`${falhas} consulta(s) auxiliar(es) do plano falharam na coleta; congelar sem elas é decisão sua.`);
-  }
-  return { autoFinalize: true, reason: `Sem pendência: ${input.finalization.reason}` };
+  const limitations = radarGoogleRegisteredLimitations({
+    finalization: input.finalization,
+    sufficiency: input.sufficiency,
+    auxiliaryFailed: input.auxiliaryFailed || 0,
+  });
+  return {
+    autoFinalize: true,
+    reason: limitations.length
+      ? `Com limitação registrada: ${input.finalization.reason}`
+      : `Sem pendência: ${input.finalization.reason}`,
+    limitations,
+  };
 }
 
 /* ============================ o bundle congelado ======================== */
@@ -535,6 +589,13 @@ export function freezeRadarEvidenceBundle(input: {
     /* A pauta INTEIRA: o snapshot congelado precisa dela, não só do id. */
     videoBriefs: ReadonlyArray<RadarVideoBriefSnapshotInput>;
   } | null;
+  /**
+   * 2026-10-08 · LIMITAÇÕES QUE A AMOSTRA NÃO DIZ SOZINHA — hoje, a consulta
+   * auxiliar que falhou (`radarAuxiliaryFailureLimitation`). Ela já ficava em
+   * `search.queries`; agora também é dita em `limitations`. Opcional: sem
+   * ela, o bundle é byte a byte o de antes, e o hash dos antigos não muda.
+   */
+  extraLimitations?: readonly string[];
   frozenBy: string;
   frozenAt: string;
 }): RadarFreezeResult {
@@ -716,6 +777,7 @@ export function freezeRadarEvidenceBundle(input: {
       ...observed.limitations,
       ...(input.readiness.acknowledgedInsufficiency ? [input.readiness.acknowledgedInsufficiency] : []),
       ...(observed.sample.failedFinal ? [`${observed.sample.failedFinal} página(s) selecionada(s) não puderam ser acessadas e ficaram fora da amostra congelada.`] : []),
+      ...(input.extraLimitations || []),
     ])],
   };
 

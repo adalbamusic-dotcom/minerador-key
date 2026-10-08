@@ -361,8 +361,14 @@ test("(1) extract · o destino buscado é o da curadoria gravada, não o do corp
   semear();
   const corpo = pedidoDeExtracao({ candidates: [{ key: "organic:1", url: "https://concorrente-1.test/curado", itemType: "organic", decision: "included" }] });
   const { texto } = await extrair(corpo);
-  const lido = JSON.parse(texto) as { pages: Array<{ key: string; page: { url: string } }> };
+  const lido = JSON.parse(texto) as { pages: Array<{ key: string; requestedUrl?: string; page: { url: string } }> };
   assert.deepEqual(lido.pages.map(item => [item.key, item.page.url]), [["organic:1", "https://concorrente-1.test/curado"]]);
+  /*
+   * 2026-10-08 · a página volta também com a URL que o SERVIDOR buscou — a da
+   * curadoria gravada. É por ela (e pela chave) que a tela casa a página com a
+   * seleção, porque `page.url` é a URL final, depois de redirect.
+   */
+  assert.deepEqual(lido.pages.map(item => [item.key, item.requestedUrl]), [["organic:1", "https://concorrente-1.test/curado"]]);
 });
 
 /* ======================= (2) verificação de fontes ======================= */

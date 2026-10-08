@@ -15,6 +15,7 @@ import {
   radarArticleBlueprintPanelChoice,
   radarArticleBlueprintPanelStateLabel,
   radarArticleBlueprintSeriesSummary,
+  radarPhase1Visible,
   radarPhase1WithArticleBlueprint,
   type RadarArticleBlueprintJob,
 } from "../modules/radar/radar-article-blueprint-panel.tsx";
@@ -284,7 +285,9 @@ test("a tela: o painel mora na Pesquisa, logo abaixo do modelo da SERP; o botão
   assert.ok(modelo > 0 && painel > modelo, "o artigo-modelo da SERP vem logo depois do modelo do artigo");
   assert.ok(painel < pesquisa.indexOf("{writerHandoff && <WriterHandoff"), "e antes da decisão de envio");
   const botao = semComentarios(trecho(fonte, "function Phase1Button(", "function RecoverSerpAction("));
-  assert.match(botao, /const acao = radarPhase1WithArticleBlueprint\(resolvida\);/);
+  /* 2026-10-08 · o aviso da IA continua no botão, agora pela montagem única que a frase de parada também usa. */
+  assert.match(botao, /const acao = radarPhase1Visible\(daFase1, mode\);/);
+  assert.equal(radarPhase1Visible(radarPhase1Action({ state: "AWAITING_REVIEW" as never, contextReady: true, hasPrimaryQuery: true, running: false, selected: 10, pending: 0, failed: 0, analyzed: 10 })).label, "Finalizar pesquisa · inclui 1 chamada de IA");
   const bancadaFora = semComentarios(fonte.slice(fonte.indexOf("export function RadarR3Workbench(")));
   /* 2026-10-02 · o painel recebe o congelamento vigente: mostra a versão do pacote atual, como o export. */
   assert.match(bancadaFora, /articleBlueprint=\{model\.deepResearch\.finalizedBundle && brandId && articleId \? <RadarArticleBlueprintPanel brandId=\{brandId\} articleId=\{articleId\} job=\{articleBlueprintJob\} currentBundleHash=\{model\.deepResearch\.finalizedBundle\.bundleHash\} \/> : null\}/);

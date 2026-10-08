@@ -238,25 +238,39 @@ const leituraGoogle = (entrada: { level?: string; pending?: number; analyzed?: n
   return radarGoogleAutoFinalizeDecision({ phase1, finalization, sufficiency: sufic, auxiliaryFailed: entrada.auxiliaryFailed ?? 0 });
 };
 
-test("D9 · Google finaliza sozinho só quando a autoridade do botão diz pronto e não há pendência", () => {
+test("D9 · Google finaliza sozinho quando a autoridade do botão diz pronto — e 2026-10-08: com a limitação registrada", () => {
   assert.equal(leituraGoogle().autoFinalize, true);
+  assert.deepEqual(leituraGoogle().limitations, [], "sem limitação, nada a dizer");
   assert.equal(leituraGoogle({ level: "PARTIAL_BUT_USABLE" }).autoFinalize, true, "amostra parcial mas utilizável não é pendência");
   assert.equal(leituraGoogle({ failed: 3 }).autoFinalize, true, "página sem acesso já é limitação declarada, não pendência");
 
+  /*
+   * 2026-10-08 · DECISÃO DO DONO: a amostra insuficiente e a consulta auxiliar
+   * que falhou não seguram mais o automático do Google. Elas finalizam, e a
+   * limitação vai junto — escrita na resposta para a tela dizer qual.
+   */
   const insuficiente = leituraGoogle({ level: "INSUFFICIENT" });
-  assert.equal(insuficiente.autoFinalize, false, "amostra insuficiente: encerrar é decisão humana");
-  assert.match(insuficiente.reason, /insuficiente/);
-
-  const conflito = leituraGoogle({ level: "CONFLICTING_SEARCH_INTENT", });
-  assert.equal(conflito.autoFinalize, false, "intenção em conflito pede decisão");
+  assert.equal(insuficiente.autoFinalize, true, "amostra insuficiente finaliza com a limitação registrada");
+  assert.match(insuficiente.limitations.join(" "), /amostra insuficiente \(Apenas 1 página comparável\)/);
+  assert.match(insuficiente.reason, /^Com limitação registrada: /);
 
   const auxiliar = leituraGoogle({ auxiliaryFailed: 2 });
-  assert.equal(auxiliar.autoFinalize, false);
-  assert.match(auxiliar.reason, /2 consulta\(s\) auxiliar/);
+  assert.equal(auxiliar.autoFinalize, true, "consulta auxiliar que falhou finaliza com a limitação registrada");
+  assert.match(auxiliar.limitations.join(" "), /2 consulta\(s\) auxiliar\(es\) do plano falharam na coleta/);
+
+  const ambas = leituraGoogle({ level: "INSUFFICIENT", auxiliaryFailed: 1 });
+  assert.equal(ambas.autoFinalize, true);
+  assert.equal(ambas.limitations.length, 2);
+
+  /* Continua parando: intenção em conflito, etapa que não é finalizar, nada lido, releitura ausente. */
+  const conflito = leituraGoogle({ level: "CONFLICTING_SEARCH_INTENT", });
+  assert.equal(conflito.autoFinalize, false, "intenção em conflito pede decisão");
 
   const faltaAnalisar = leituraGoogle({ pending: 2 });
   assert.equal(faltaAnalisar.autoFinalize, false);
   assert.match(faltaAnalisar.reason, /Analisar concorrência/);
+
+  assert.equal(leituraGoogle({ analyzed: 0, failed: 12 }).autoFinalize, false, "nenhuma página lida: nada a congelar");
 
   assert.equal(radarGoogleAutoFinalizeDecision({ phase1: null, finalization: null, sufficiency: null }).autoFinalize, false);
 });
@@ -286,6 +300,11 @@ test("o botão que dispara a coleta diz que ela também finaliza e o custo da IA
   assert.equal(dita.id, "ANALYZE_COMPETITION");
   assert.match(dita.label, /^Analisar concorrência · e finaliza/);
   assert.ok(dita.info?.includes(RADAR_AUTO_FINALIZE_AI_COST));
+  /* 2026-10-08 · o ⓘ do Google diz a regra nova: finaliza com a limitação; só para o que é decisão humana. */
+  assert.match(dita.info || "", /amostra insuficiente e consulta auxiliar que falhou não seguram/);
+  /* 2026-10-08 · revisão: o ⓘ lista TODAS as paradas do automático, não só três. */
+  assert.match(dita.info || "", /Param: a intenção da SERP em conflito com a declarada; nenhuma página lida; o que pede pesquisa nova \(fundamento do artigo mudado, consulta paga ainda faltando\); página que segue sem desfecho depois da leitura extra; e a gravação ou a releitura do servidor não confirmadas/);
+  assert.equal(/Com pendência, nada congela/.test(dita.info || ""), false, "a regra antiga não aparece mais no Google");
   const finalizar = radarPhase1Action({ state: "AWAITING_REVIEW", contextReady: true, hasPrimaryQuery: true, running: false, selected: 12, pending: 0, failed: 0, analyzed: 12, analysisConfirmed: true });
   assert.deepEqual(radarPhase1WithAutoFinalize(finalizar), finalizar, "o FINALIZE ganha o aviso da IA no painel do artigo-modelo, não aqui");
 });
@@ -465,7 +484,14 @@ test("os painéis dizem o automático e mantêm o botão manual", async () => {
 
   /* E no Google, o botão de análise diz o custo — o FINALIZE segue com o aviso do artigo-modelo. */
   const bancada = semComentarios(await ler("../modules/radar/radar-r3-workbench.tsx"));
-  emOrdem(bancada, ["const resolvida = radarPhase1WithAutoFinalize(daFase1);", "const acao = radarPhase1WithArticleBlueprint(resolvida);"]);
+  /*
+   * 2026-10-08 · a montagem do botão é UMA função (`radarPhase1Visible`), a
+   * mesma que a frase de parada do automático usa para nomear o botão.
+   */
+  /* 2026-10-08 · revisão: com o modo da investigação — o ⓘ do YouTube e da Amazon não promete a regra do Google. */
+  assert.ok(bancada.includes("const acao = radarPhase1Visible(daFase1, mode);"));
+  const montagem = semComentarios(await ler("../modules/radar/radar-article-blueprint-panel.tsx"));
+  assert.ok(montagem.includes("return radarPhase1WithArticleBlueprint(radarPhase1WithAutoFinalize(acao, mode));"), "os dois invólucros, na ordem do botão");
 });
 
 /*

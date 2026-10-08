@@ -5,7 +5,9 @@
  *  A · o modelo da linha é lido UMA vez por linha por render (cache de render);
  *  B · a projeção e o blueprint têm a mesma disciplina;
  *  C · o cache não atravessa renders (nada de useMemo com lista de dependências
- *      para envelhecer);
+ *      para envelhecer) — com UMA exceção nomeada desde 2026-10-08: a view da
+ *      investigação de cada linha, lembrada no módulo com a entrada inteira na
+ *      chave (`tests/radar-investigacao-memo.test.mts` prova a chave);
  *  D · o card fechado tem o tamanho do card vazio — uma linha e a marca de
  *      estado — e o resto só aparece com a área aberta.
  */
@@ -44,7 +46,19 @@ test("C · o cache vive um render: nasce no corpo do componente, sem useMemo nem
     const declaracao = new RegExp(`const ${cache} = (useMemo|useRef|useState)`);
     assert.equal(declaracao.test(pagina), false, `${cache} atravessa renders — uma linha pode mostrar o estado anterior`);
     assert.match(pagina, new RegExp(`const ${cache} = new (WeakMap|Map)<`));
+    /* Nasce DENTRO do componente: declarado no módulo, viveria entre renders. */
+    assert.ok(pagina.indexOf(`const ${cache} = new`) > pagina.indexOf("export function RadarPage("), `${cache} saiu do corpo do componente`);
   }
+});
+
+test("C · 2026-10-08 · a única memória entre renders é a da investigação, com a entrada inteira na chave", async () => {
+  const pagina = semComentarios(await fonte("../modules/radar/radar-page.tsx"));
+  /* Ela existe, é do módulo, e a chave é a entrada completa da view. */
+  assert.match(pagina, /const investigacaoDaLinha = createRadarDeepResearchViewMemo<ReturnType<typeof buildRadarDeepResearchView>>\(\);/);
+  assert.match(pagina, /investigacaoDaLinha\(\{ row, article, serpRecord: record, running: investigacaoRodando, researchDraft: rascunhoDaPesquisa, mode: modoDaLinha \}, \(\) => buildRadarDeepResearchView\(\{/);
+  /* E é a única: nenhum outro memo de módulo nem hook de memória guarda o modelo da linha. */
+  assert.equal((pagina.match(/createRadarDeepResearchViewMemo</g) || []).length, 1);
+  assert.doesNotMatch(pagina, /const (cacheDaLinha|cacheDaProjecao|cacheDoBlueprint|investigacaoDaLinha) = use(Memo|Ref|State)/);
 });
 
 test("D · o card fechado tem o tamanho do card vazio: uma linha, e o resto só aberto", async () => {

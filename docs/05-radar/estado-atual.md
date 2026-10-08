@@ -1,5 +1,323 @@
 # Estado atual — Radar
 
+## Revisão da Fase 1 automática e da lentidão: o que ainda segurava o automático — 2026-10-08
+
+**Relatado pelo usuário:** "O [Analisar concorrência · e finaliza (+ 1 chamada de IA)] não está funcionando com
+muitos novos, está falando para revisar pesquisa, mas vou revisar onde? ele já teria que ter feito isso de forma
+automática sem importar os custos" e "o selector e o scroll está muito lento". As duas correções do dia estão nas
+seções abaixo ("Seletor e scroll lentos…" e "Automático da Fase 1 do Google…"). Esta seção registra o que a revisão
+adversarial delas achou e o que o corretor mudou.
+
+**Decisão do dono aplicada:** no Google, "… e finaliza" termina a Fase 1 sozinho, sem importar o custo. Página que
+nunca é lida (sem acesso, bloqueada, formato que a extração não lê, sem resposta) vira limitação declarada, não
+pendência eterna; amostra insuficiente e consulta auxiliar que falhou finalizam com a limitação registrada no pacote
+congelado. Só param a intenção da SERP em conflito (decisão humana), nenhuma página lida (nada para congelar), o que
+pede pesquisa nova e a gravação ou releitura não confirmadas — e a frase diz o motivo, a área e o nome do botão que
+a tela mostra naquele estado.
+
+**Causa e correção, por achado (Verificado no código / Confirmado por teste):**
+
+- **F1 · amostra vazia e todas as candidatas recusadas.** A análise lançava erro ANTES de gravar
+  (`!pages.length && !membership.reused`): 403, PDF e `no_outcome` não chegavam ao banco, as referências seguiam
+  pendentes e cada clique relia tudo para parar na mesma frase. Agora `analyzeSerpSelection` grava a versão da
+  amostra com as falhas (sem carimbo), PARA ali — sem fontes, modelo, relatório nem escrita de autoridade — e, pela
+  releitura do servidor, diz: "Não finalizou sozinha: nenhuma das N página(s) pendente(s) pôde ser analisada e
+  nenhuma outra está na amostra; N falha(s) ficaram gravadas (readback confirmado) como limitação declarada. Para
+  continuar, na área Pesquisa, botão "Refazer Pesquisa Google"." Só lança quem não tem nem falha para gravar.
+- **F2 · a extração órfã entrava no modelo e no pacote congelado.** Se a releitura da página falhava, a órfã (a URL
+  final gravada pelo defeito, ou a de uma referência desmarcada) ficava, e `buildRadarDeepResearchView` montava
+  estrutura, modelo observado, fontes externas, suficiência e resumo com TODAS as extrações: o pacote dizia 12
+  analisadas + 6 sem acesso para 17 selecionadas. Agora, com página na amostra, tudo isso sai só das extrações da
+  seleção (`paginasDaAmostra`, recortadas por `sample.analyzedUrls`), como o handler já fazia em `paginasDoModelo`;
+  sem página na amostra, a leitura continua mostrando o cache, como antes. Efeito visível: o card da Pesquisa conta só
+  as analisadas da seleção (na fixture da tela, 12 extraídas com 1 de referência "format" → "11 analisada(s)").
+- **F3 · curadoria da pesquisa obsoleta ou ausente, com canônicas extraídas.** As canônicas somadas à conta da Fase 1
+  levavam a "Finalizar pesquisa", que a prontidão recusava ("A curadoria ainda não foi confirmada") sem nenhum botão
+  para confirmar. Agora as canônicas só entram com a curadoria da pesquisa confirmada; sem ela, a conta e o caminho
+  voltam aos de antes desta entrega ("Refazer Pesquisa Google").
+- **F4 · o ⓘ de "Iniciar Pesquisa YouTube/Amazon" prometia a regra do Google** ("não seguram"), mas os dois perfis
+  continuam na D9 (`radarProfileAutoFinalizeDecision`). `radarPhase1WithAutoFinalize(acao, mode)` usa a nota nova só
+  no Google; YouTube e Amazon voltam a `radarAutoFinalizeStartNote("análise")`. `radarPhase1Visible` e
+  `radarPhase1VisibleLabel` recebem o modo (padrão Google), e o `Phase1Button` recebe o modo da investigação
+  (`view.record?.primarySearchMode || searchMode`) dentro da área Pesquisa e na barra recolhida.
+- **F5 · o ⓘ do Google listava três paradas; o automático tem mais.** `radarGoogleAutoFinalizeStartNote` lista todas:
+  intenção em conflito; nenhuma página lida; o que pede pesquisa nova (fundamento mudado, consulta paga faltando);
+  página sem desfecho depois da leitura extra; gravação ou releitura do servidor não confirmadas.
+- **V3 · rota de detalhe `/{brandRef}/radar/{articleId}`** ("Analisar páginas selecionadas") gravava a URL final,
+  deduplicava pela URL crua e não gravava as falhas. Agora fecha a rodada por `radarReconcileExtractionRound` e grava
+  `extractionFailures`.
+- **V4 · duas referências, uma página.** A referência que redireciona para a página de outra referência já na amostra
+  (ou lida agora pela própria URL), ou para a mesma página que outra referência da rodada já trouxe, punha o conteúdo
+  duas vezes no modelo (benchmark, termos, competitividade). Agora a repetida vira falha declarada
+  `redirect_duplicate`, com o destino dito na mensagem; se o destino falhou, a origem fica com o conteúdo (uma vez).
+- **V5 · rodada com amostra existente em que TODAS as candidatas falham** (registrado, sem mudança de código): as
+  falhas são gravadas e o automático congela com essas páginas fora — inclusive quando a causa é uma queda passageira
+  que persiste depois do único retry. Reler depois exige zerar a investigação (pesquisa paga nova); "Reparar
+  congelamento" não relê páginas. É a decisão do dono ("página que nunca é lida vira limitação declarada").
+- **MEMO-1 · rolagem na troca de marca.** Um evento de rolagem com a chave nova antes da limpeza do efeito (o clamp
+  do navegador, no mesmo commit) apagava a posição pendente da marca anterior. `agendarRolagem` grava a pendente da
+  chave antiga antes de agendar a nova.
+- **V1 · `npm run test:visual-system`:** o pin de `tests/identity-keyword-colors.test.mts` esperava a marcação antiga
+  da coluna Artigo (mudada na seção "Planilha sem 'Cobrir com clareza o tema'"); agora exige `text-keyword` no valor
+  da keyword dentro do JSX condicional novo. **V6:** higiene (`RemoteExpertEvidenceState = {`).
+
+**Desempenho — antes → depois** (bancada `perf-radar/` do scratchpad: 25 artigos analisados, 12 páginas e 36 links por
+página, React de desenvolvimento, happy-dom, sem rede). A correção da lentidão é a da seção "Seletor e scroll lentos";
+esta revisão remediu na mesma bancada, depois das mudanças acima, para confirmar que nada voltou:
+
+| Ação | Antes da correção | Depois da correção | Depois desta revisão |
+| --- | --- | --- | --- |
+| montagem | 31.278 ms (75 views) | 2.203 ms (25 views) | 909 ms (25 views) |
+| clicar numa linha | 15.569 a 355.557 ms | 320 a 652 ms (0 view) | 93 a 214 ms (0 view) |
+| marcar checkbox | 13.981 a 26.697 ms | 172 a 217 ms | 82 a 83 ms |
+| marcar todas | 4.722 ms | 47 ms | 22 ms |
+| aviso publicado | 10.508 ms, 2 renders | 1 ms, 0 render | 1 ms, 0 render |
+| releitura de 1 análise | 10.500 ms | 433 ms (1 view) | 64 ms (1 view) |
+| 60 eventos de rolagem | 1 ms (60 escritas no storage) | 3 ms (≤ 1 escrita) | 1 ms (≤ 1 escrita) |
+| modelo de 1 linha, 0/12/36/72 links | 24 / 76 / 241 / 656 ms | 24 / 28 / 27 / 30 ms | 26 / 27 / 28 / 30 ms |
+
+A diferença entre as duas últimas colunas é variação da máquina (a revisão não mexe no caminho quente; o recorte da
+amostra na view é um `Set` por linha). Especialista aberto e parado: 98% da thread antes → ~1% depois (medido na
+correção; não remedido aqui).
+
+**Arquivos compartilhados (AGENTS §4) e consumidores preservados:**
+
+- `components/editorial/operational-data-grid.tsx` — MEMO-1, aditivo (mesma chave, mesma restauração). Consumidores:
+  Radar, Minerador, Arquiteto; `test:minerador:dom` 4/4 e `test:arquiteto:dom` 17/17.
+- `lib/radar/operational-actions.ts` (`radarPhase1WithAutoFinalize`, 2º argumento opcional com padrão Google — as
+  chamadas existentes não mudam) e `modules/radar/radar-article-blueprint-panel.tsx` (`radarPhase1Visible` e
+  `radarPhase1VisibleLabel`, modo opcional).
+- `lib/radar/deep-research-view.ts` — o formato da saída não muda; muda o que entra no modelo (só a seleção, quando
+  há página nela) e quando as canônicas contam. Consumidores: tela do Radar, `r3-workbench`, relatório, export e
+  congelamento (todos pela mesma view).
+- `lib/radar/extraction-round.ts` — código de falha novo `redirect_duplicate` (o contrato de `extractionFailures`
+  aceita `code` livre). `tests/identity-keyword-colors.test.mts` (suíte de sistema visual).
+- Catálogo MCP (`lib/agent/platform-catalog.ts`, `radar.finalize`) e `docs/05-radar/spec.md` (FINALIZE) atualizados
+  na mesma entrega.
+
+**Testes (Confirmado por teste, só fixtures, PROVIDER_CALLS = 0):**
+
+- Novos: `tests/radar-fase1-revisao-2026-10-08.test.mts` (13 testes: F1 puro e estrutural, F2 com o pacote
+  congelado, F3, F4 puro e fiação da tela, F5, V4 ×3, V3 + V6) e `tests/radar-fase1-sem-amostra-dom.test.mts` (o
+  `RadarPage` inteiro montado: o clique grava 1 versão com todas as falhas e sem carimbo, não verifica fontes, e a
+  frase manda para "Refazer Pesquisa Google" — o botão que a tela passa a mostrar); caso novo em
+  `tests/radar-planilha-rolagem-dom.test.mts` (troca de marca com evento intercalado).
+- Atualizados: `radar-pendente-eterno-2026-10-08` (destino que é outra referência: 11 + a repetida declarada),
+  `radar-tela-render-dom` (11 e 7 analisadas — a página "format" da fixture fica fora da amostra),
+  `radar-finalizar-automatico`, `radar-artigo-modelo-serp-ia-e-tela`, `radar-curadoria-lote`,
+  `radar-18101-retomar-consolidacao`, `radar-extracao-contrato`, `identity-keyword-colors`.
+- `npm run test:radar` 3072 testes, 3071 pass, 0 fail, 1 skipped (eram 3056); `npm run test:agent` 65/65;
+  `npm run test:editorial` 168/172 — as mesmas 4 falhas de antes, em `editorial-pipeline.test.mts` (rotas de
+  Conta/Admin/Marca), sem relação; `npm run test:visual-system` 29/30 — `identity-keyword-colors` volta a passar, e
+  segue a dívida visual já existente (`professional-writer`, Arquiteto, Publicações, Redator; a mesma lista de
+  antes); `test:minerador:dom` 4/4, `test:arquiteto:dom` 17/17, `test:redator:dom` 19/19, `test:editorial:dom`
+  12/12; `tsc` só com os 2 erros conhecidos de `.next/types` (planejador); eslint 0 erro (os 10 avisos antigos de
+  `radar-page.tsx`); `git diff --check` limpo e o fim de linha de cada arquivo preservado.
+- Mutantes em memória (pré-carga no scratchpad; o repositório não é escrito): 17 de 17 mortos, rodada original verde
+  (58 testes) — F1 de volta ao comportamento anterior, F1 sem parar, F1 com "Finalizar pesquisa" fixo; F2 órfã no
+  modelo, cache sumindo, suficiência com tudo; F3; F4 nota do Google em qualquer modo, botão sem modo, barra sem modo;
+  F5; V4 ×3; V3; V6; MEMO-1.
+
+Validado manualmente: não.
+
+**Limitações:** a duplicata (V4) só é detectada quando a URL final da página relida casa com outra referência; uma
+página gravada antes desta revisão com o conteúdo de outra continua contando (a URL final não fica guardada). A rota
+de detalhe ainda relê, a cada clique, as candidatas que falharam (a fila dela conta só extrações). A medição é Node +
+happy-dom; o navegador real não foi medido.
+
+**O que o dono faz:** depois do deploy (ou no dev local), no artigo "marketing digital para dentistas", 1 clique em
+"Analisar concorrência · e finaliza (+ 1 chamada de IA)": deve finalizar sozinho (com a limitação, se houver) e o
+readback deve mostrar `finalizedBundle`. Num artigo em que nenhuma página abre, a frase deve mandar para "Refazer
+Pesquisa Google" na área Pesquisa, e o botão não pode voltar a "Analisar concorrência". No YouTube e na Amazon, o ⓘ de
+"Iniciar Pesquisa …" não deve prometer a regra do Google.
+
+## Seletor e scroll lentos: a tela refazia a investigação de todas as linhas a cada render — 2026-10-08
+
+**Relatado pelo usuário:** "O selector e o scroll está muito lento, parece que estou trabalhando num computador dos
+anos 80 … não tem como ser mais ágil?"
+
+**Causa (Verificado no código; medido na bancada do scratchpad `perf-radar/`, React de desenvolvimento, happy-dom,
+fixtures de tamanho real geradas pelos schemas e funções de produção — sem rede, sem provider):**
+
+1. Cada render do `RadarPage` refazia `buildRadarDeepResearchView` para TODAS as linhas (`cacheDaLinha` vive um render,
+   regra C do RADAR_SELECTION_LIGHT_1), e um clique faz 3 a 4 renders. A view era ~90% do custo de cada linha.
+2. Dentro dela, `buildRadarExternalSourceResearch` relia tipo, tokens e raízes das MESMAS strings milhares de vezes
+   (conceito × destino × seção × variante): o custo crescia com os links observados por página.
+3. Com a área Especialista aberta num artigo não finalizado, laço de render: `requirements` chegava ao painel como array
+   novo, o painel avisava `onExpertEvidenceChange`, o Radar gravava três objetos novos de mesmo conteúdo, e a página
+   renderizava de novo. A rota de detalhe tinha o mesmo laço (`|| []` + revisão incrementada a cada aviso, com GET de
+   expert-briefs a cada volta — verificado só no código).
+4. `useNoticeBridge` lia o contexto inteiro do centro de avisos: cada aviso publicado ("Analisando páginas 5 de 6…")
+   re-renderizava a tela inteira.
+5. Com renders de ~5 s, o tique de 10 s da leitura de vídeos (sem Realtime LIVE) passava a disparar render atrás de
+   render: o primeiro clique da bancada levou 355 s (34 renders).
+
+O scroll em si não executava trabalho caro (60 eventos = 1 ms); ele travava porque a thread estava ocupada pelos itens
+acima. O `onScroll` da planilha gravava no localStorage a cada evento.
+
+**Medido — antes → depois (25 artigos analisados, 12 páginas e 36 links por página, mesmo harness):**
+
+- montagem: 31.278 ms → 2.203 ms; clique numa linha: 15.569 a 355.557 ms → 320 a 652 ms (0 recálculo da view);
+  checkbox: 13.981 a 26.697 ms → 172 a 217 ms; marcar todas: 4.722 → 47 ms;
+- aviso publicado: 10.508 ms e 2 renders → 1 ms e 0 render; releitura de 1 análise: 10.500 → 433 ms (1 view);
+  troca de `serpRecords`: 10.625 → 57 ms; mesa trocada sem mudar linhas: 10.494 → 57 ms;
+- Especialista aberto, 6 s parado (0 link/página): 6 commits e 7.254 ms de render (98% da thread) → 3 commits, 80 ms;
+  com 36 links: 3 commits, 71 ms;
+- abertura com 50 releituras: 263.412 ms (53 commits) → 6.355 ms (54 commits); depois, 8 s: 59% → 1% da thread;
+- cenário misto (10 analisados, 4 só SERP, 11 novos): clique 6.438 a 8.463 ms → 146 a 365 ms;
+- modelo de uma linha: 24 / 76 / 241 / 656 ms (0 / 12 / 36 / 72 links) → 24 / 28 / 27 / 30 ms;
+  `buildRadarExternalSourceResearch`: saída JSON idêntica nos três tamanhos, 36× a 78× mais rápido.
+
+**Correção (Verificado no código / Confirmado por teste) — nenhum texto, ação ou persistência mudou:**
+
+- `lib/radar/deep-research-view-memo.ts` (novo, puro): `createRadarDeepResearchViewMemo` guarda a view por linha
+  (WeakMap pelo RadarItem) com a chave = [ArticleDNA, registro SERP mais recente, "rodando?", rascunho da curadoria,
+  modo efetivo]. Todo insumo do objeto entregue à view deriva dessas identidades. `radar-page.tsx` usa uma instância
+  de módulo (`investigacaoDaLinha`); a única chamada de `buildRadarDeepResearchView` está dentro dela.
+- **Regra C do RADAR_SELECTION_LIGHT_1 revisada:** `cacheDaLinha`, `cacheDaProjecao` e `cacheDoBlueprint` continuam
+  vivendo um render; a exceção nomeada é a view da investigação, com a entrada inteira na chave.
+  `tests/radar-selecao-leve-1.test.mts` exige isso (em vez de proibir) e `tests/radar-investigacao-memo.test.mts`
+  prende o objeto literal da página à lista de insumos da chave.
+- `lib/radar/link-and-source-research.ts`: leitura de texto (tipo, tokens, raízes) guardada por string DENTRO de cada
+  chamada de `buildRadarExternalSourceResearch` (`criarLeituraDeTexto`); os helpers aceitam a leitura como parâmetro
+  opcional e, sem ela, leem como antes (`buildRadarInternalLinkResearch` não mudou).
+- `lib/radar/expert-evidence-change.ts` (novo, puro): `radarSameData` (igualdade de dado puro; na dúvida, diferente),
+  `radarArticleDataUpdate` (mesmo conteúdo → mesmo mapa) e `radarExpertEvidenceChanged`. `handleExpertEvidenceChange`
+  grava os três mapas pelo redutor; a rota de detalhe passa `SEM_PONTOS_DE_REVISAO` (constante congelada) e só sobe a
+  revisão quando o aviso do painel muda (o primeiro aviso de cada abertura da aba continua relendo).
+
+**Arquivos compartilhados (AGENTS §4, mudanças aditivas e retrocompatíveis):**
+
+- `components/global-notice-center.tsx` — motivo: quem só publica re-renderizava a cada aviso. Um segundo contexto
+  interno só com `publishNotice` (que muda só com a rota); `useNoticeBridge` lê esse contexto. `useNoticeCenter`,
+  `NotificationBell`, `publishNotice` e a deduplicação por assinatura não mudaram. Consumidores preservados: Radar
+  (página e detalhe), Marca, Minerador (Descoberta), Admin, Conta, Publicações. Teste:
+  `tests/radar-avisos-sem-rerender-dom.test.mts`; regressão: `test:minerador:dom`, `test:arquiteto:dom`,
+  `test:redator:dom`, `test:editorial:dom`, `minerador-lote-progressivo` e `minerador-discovery-phase-one` verdes.
+- `components/editorial/operational-data-grid.tsx` — motivo: escrita síncrona no localStorage a cada evento de
+  rolagem. A posição é gravada quando a rolagem para (`ROLAGEM_GRAVADA_APOS_MS` = 150 ms, exportado) e na troca de
+  marca/módulo, na desmontagem e no `pagehide`; mesma chave, mesma restauração. Consumidores: Radar, Minerador,
+  Arquiteto. Teste: `tests/radar-planilha-rolagem-dom.test.mts`.
+
+**Testes (Confirmado por teste, só fixtures, PROVIDER_CALLS = 0):** novos `radar-especialista-sem-laco` (unitário +
+fiação), `radar-especialista-sem-laco-dom` (painel real, agendador real: com o redutor o Pai assenta; sem ele o
+controle dispara), `radar-fontes-externas-desempenho` (oráculo = cópia literal do laço anterior, com alinhamento
+LEXICAL e SEMANTICALLY_RELATED; ≥ 15× mais rápido que o laço sem guarda no pior caso), `radar-investigacao-memo`,
+`radar-tela-render-dom` (tela inteira montada com `tests/stubs/radar-tela-hooks.mjs`: trocar de artigo e checkbox com
+0 recálculo; versão nova e seleção nova recalculam só a linha mudada; o texto da tela é comparado com uma releitura
+FRIA — itens clonados — depois de cada ação; aviso sem render; Especialista ocioso sem laço),
+`radar-planilha-rolagem-dom`, `radar-avisos-sem-rerender-dom`. `npm run test:radar` 3056 testes, 3055 pass, 0 fail,
+1 skipped. Mutantes em cópia no scratchpad: leitura de texto 7 de 8 mortos (sobrevive só a guarda do conjunto de
+tokens, ganho marginal); UI e memória 12 de 12 mortos (página sem memória, chave sem registro, insumo fora da chave,
+Especialista sem redutor, ponte lendo o centro inteiro, rolagem por evento, desmontagem sem gravar, `|| []` de volta,
+memória sem modo, memória ignorando a chave, igualdade sem tamanho de lista, redutor travado). Validado manualmente:
+não.
+
+**Limitações:** medição em Node + happy-dom com React de desenvolvimento — a parte de React/DOM no navegador real e o
+custo de pintura das células sticky não foram medidos. Um clique ainda faz 3 a 4 renders (a leitura de vídeos troca
+de chave com o artigo), agora de ~50 a 150 ms cada. Sem Realtime LIVE, o tique de 10 s da leitura de vídeos ainda
+faz 2 renders por volta (baratos agora). A quantidade real de links por página nas extrações do dono não foi
+verificada (o SQL fica com ele). P2 (agrupar as releituras da abertura com `startTransition`) não foi feito: depois da
+correção, a abertura ocupa 1% da thread.
+
+**O que o dono faz:** depois do deploy (ou no `next dev`), abrir o Radar da marca, clicar em linhas diferentes, marcar
+checkboxes, rolar a planilha e abrir a área Especialista num artigo não finalizado: a resposta deve ser imediata.
+Se ainda houver travada, gravar um perfil do Chrome DevTools rolando a planilha.
+
+## Automático da Fase 1 do Google: a página que ficava pendente para sempre — 2026-10-08
+
+**Relatado pelo usuário:** em "marketing digital para dentistas", "Analisar concorrência · e finaliza (+ 1 chamada
+de IA)" terminou com "17 selecionada(s) · 11 reutilizada(s) · 1 analisada(s) agora · 5 sem acesso. Análise gravada
+e confirmada. Não finalizou sozinha: a próxima etapa ainda é "Analisar concorrência". Revise e use "Finalizar
+pesquisa" quando decidir." A frase não dizia onde revisar e nomeava um botão que a tela não mostrava; cada clique
+relia a mesma página e parava de novo.
+
+**Causa (Verificado no código; Confirmado por teste com fixture):** o extrator grava em `page.url` a URL FINAL
+(depois do redirect, serializada por `new URL()`: `%C3%B3` no caminho com acento, punycode, "/" na raiz). A tela
+empurrava a página assim para a amostra, e a releitura da Fase 1 compara por `radarNormalizedUrl`, que não absorve
+troca de caminho nem percent-encoding: a página lida virava "fora da seleção atual" e a referência continuava
+pendente. A frase da análise fechava a conta por subtração (17 = 11 + 1 + 5), enquanto a Fase 1 contava por outro
+caminho — duas réguas. O literal "Finalizar pesquisa" estava fixo na frase de parada.
+
+**Decisão do dono aplicada (muda a regra D9 de 2026-10-02 no Google):** o botão "… e finaliza" termina a Fase 1
+sozinho. Página sem acesso, página sem resposta ou recusada pelo contrato, amostra insuficiente e consulta auxiliar
+que falhou viram limitação registrada no pacote congelado (a mesma rotina do botão manual). Continuam parando:
+intenção da SERP em conflito, nenhuma página lida, fundamento mudado, etapa paga faltando ("Completar Pesquisa
+Google") e gravação não confirmada. Página que ainda ficar pendente depois da análise é lida de novo uma vez.
+
+**Correção (Verificado no código / Confirmado por teste):**
+
+- `lib/radar/extraction-round.ts` (novo, puro): `radarExtractionAccount` é a régua única (selecionadas =
+  analisadas + sem acesso + pendentes, por URL normalizada), usada por `buildRadarAnalysisMembership`, pela frase do
+  fim da análise e por `buildRadarDeepResearchView` (que expõe `sample`). `radarReconcileExtractionRound` fecha a
+  rodada pela CHAVE do candidato: a página entra com a URL que a seleção pediu; candidata sem página nem erro (ou com
+  página recusada pelo `RadarExtractionPageSchema`) vira falha `no_outcome`; a extração órfã antiga (a URL final de
+  uma página relida agora, fora da seleção) sai; falha anterior não tentada de novo é herdada.
+- Rota `/api/editorial/radar-analysis/extract`: cada página volta também com `requestedUrl: target.url` (aditivo;
+  `radar-analysis-page.tsx` continua lendo só `page`). `radarNormalizedUrl` NÃO mudou (referenceId e fingerprint).
+- `radarAnalysisCandidates` e o filtro do benchmark comparam por URL normalizada (a home "https://c.com.br" lida
+  como "https://c.com.br/" deixou de ser relida em toda análise).
+- `analyzeSerpSelection` (`modules/radar/radar-page.tsx`): seleção igual à da Fase 1 (canônicas + linhas
+  selecionadas da pesquisa; a view recebe `canonicalSelectedUrls`); rodada fechada por `radarReconcileExtractionRound`;
+  a rodada em que todas as candidatas falham grava as falhas quando já há páginas na amostra (com a amostra vazia,
+  desde a revisão do corretor acima, também grava e para sem consolidar); o modelo (benchmark, termos, competitividade) sai da amostra gravada recortada pela seleção, não só das
+  páginas lidas agora; a frase "sem desfecho" sai de `radarExtractionAccount` sobre a versão gravada.
+- `finalizarGoogleSemPendencia`: relê o servidor; com página pendente, roda a análise de novo SÓ para ela (no máximo
+  1 rodada extra, que devolve a frase sem encadear de novo) e só então decide. `radarGoogleAutoFinalizeDecision`
+  finaliza com `limitations` (amostra insuficiente, consulta auxiliar que falhou); `freezeRadarEvidenceBundle` ganhou
+  `extraLimitations` opcional (a consulta que falhou vai a `limitations`; sem ela o hash é o de antes). O aviso de
+  sucesso diz "Finalizada sozinha com limitação registrada: …" quando houver.
+- Frase de parada: `radarPhase1VisibleLabel` (`modules/radar/radar-article-blueprint-panel.tsx`) é a mesma montagem
+  do `Phase1Button`; `radarAutoFinalizePendingNotice` ganhou `area` opcional: "Para continuar, na área Pesquisa, botão
+  "Analisar concorrência · e finaliza (+ 1 chamada de IA)"." O ⓘ do botão de análise diz a regra nova
+  (`radarGoogleAutoFinalizeStartNote`); YouTube e Amazon seguem com `radarAutoFinalizeStartNote` e a D9 de antes.
+- Catálogo MCP (`lib/agent/platform-catalog.ts`, `radar.finalize`) e `docs/05-radar/spec.md` (FINALIZE) atualizados.
+
+**Arquivos compartilhados e consumidores preservados:** rota de extração (campo aditivo); `buildRadarDeepResearchView`
+(`canonicalSelectedUrls` opcional e `sample` aditivo; `google-observed-read-model.ts` não muda);
+`freezeRadarEvidenceBundle` (`extraLimitations` opcional; bundles antigos com o mesmo hash);
+`radarAutoFinalizePendingNotice` (terceiro argumento opcional; YouTube e Amazon sem mudança);
+`radarGoogleAutoFinalizeDecision` (campo `limitations` aditivo; aceita a lista das consultas que falharam).
+
+**Testes:** `tests/radar-pendente-eterno-2026-10-08.test.mts` (novo, 19 testes: o caso do dono com redirect e com
+acento, dado legado, `no_outcome`, rodada extra, canônicas, régua única, bundle, frase e botão visível). Pins
+atualizados em `radar-finalizar-automatico`, `radar-curadoria-lote`, `radar-fase1-contabilidade`,
+`radar-fase1-tres-acoes`, `radar-18101/18102/18103`, `radar-cardinalidade-suficiencia`, `radar-extracao-contrato`,
+`radar-acoes-sem-reidratar-tudo` (rota devolve `requestedUrl`) e `radar-artigo-modelo-serp-ia-e-tela`.
+`npm run test:radar` 3024 testes, 3023 pass, 0 fail, 1 skipped; `npm run test:agent` 65 pass; `tsc` só com os 2
+erros conhecidos de `.next/types`; eslint sem erro; 13 mutantes em cópia no scratchpad, 13 mortos (sem reescrever a
+URL, sem `no_outcome`, sem herdar falha, sem limpar a órfã, regra D9 antiga de volta, frase sem a área, literal
+"Finalizar pesquisa" de volta, rodada extra sem limite ou sem filtro). Validado manualmente: não.
+
+**Limitações:** a órfã já gravada no artigo do dono só sai no próximo clique (relê 1 página, sem provider); a URL
+final não é guardada na página (só limpa a órfã); o id da extração (`competitor:` + base64 cortado em 32) colide em
+páginas do mesmo domínio — fora deste escopo; "Reparar congelamento" ainda diz "Finalizar pesquisa" fixo quando a
+releitura falha; a lentidão do seletor e do scroll não foi tratada aqui.
+
+**O que o dono faz:** depois do deploy (ou no dev local), no artigo "marketing digital para dentistas", 1 clique em
+"Analisar concorrência · e finaliza (+ 1 chamada de IA)": a página pendente é relida, a órfã sai, a investigação
+finaliza sozinha (com a limitação, se houver) e a IA organiza o artigo-modelo. O readback deve mostrar
+`finalizedBundle` gravado.
+
+## Planilha sem "Cobrir com clareza o tema" e sem a coluna Especialista — 2026-10-08
+
+**Pedido do dono:** tirar da coluna Artigo da planilha a frase "Cobrir com clareza o tema" (não faz sentido) e
+retirar a coluna Especialista (não mostrava nada útil).
+
+**Verificado no código / Confirmado por teste:**
+
+- `radarArticleDisplayTitle` (`lib/radar/r3-workbench.ts`) tira a moldura da promessa padrão do Arquiteto
+  ("Cobrir com clareza o tema “X”." → "X", com ou sem aspas e ponto); promessa escrita de verdade fica como
+  veio. `buildRadarR3Model` usa a função no `title`, então a planilha, o cabeçalho do Workbench e o perfil
+  mostram só o X. A busca/ordenação da coluna Artigo e o rótulo do diálogo "Importar artigos aprovados" usam a
+  mesma função. O ArticleDNA não muda (a promessa gravada continua a do Arquiteto).
+- Na coluna Artigo, quando o título sem moldura é a própria keyword, a linha de baixo mostra só a função no
+  Silo (a keyword não se repete).
+- A coluna "Especialista" saiu da planilha (`modules/radar/radar-page.tsx`); o card Especialista do Workbench
+  continua com a mesma autoridade (`r3.specialist.summary`). `radarSpecialistCell` continua exportada.
+- Testes: `tests/radar-planilha-titulo-2026-10-08.test.mts` (novo) e `tests/radar-gate18-7-especialista-planilha.test.mts`
+  (agora exige a ausência da coluna). Validado manualmente: não.
+
 ## Correção: fonte que falha na verificação recusava a análise inteira — 2026-10-08
 
 **Relatado pelo usuário:** em "marketing digital para dentistas", a Pesquisa Google não finalizava
