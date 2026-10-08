@@ -228,21 +228,13 @@ test("GATE 18.7 · B — card e planilha consomem o MESMO objeto, não a mesma f
   assert.match(workbench, /const resumoEspecialista = model\.specialist\.summary/);
   assert.ok(!/buildRadarSpecialistSummary\(/.test(workbench), "o card não monta a própria leitura");
 
-  /* A planilha consome o mesmo campo — e não o estado do fluxo. */
-  const coluna = pagina.slice(pagina.indexOf(`{ id: "specialist", header: "Especialista"`), pagina.indexOf(`{ id: "report", header: "Relatório"`));
-  assert.ok(coluna.length > 60, "a coluna foi localizada");
-  assert.match(coluna, /value: row => radarSpecialistCell\(rowWorkbenchData\(row\)\.r3\.specialist\)\.title/, "até a ordenação usa a mesma célula");
-  assert.match(coluna, /const celula = radarSpecialistCell\(rowWorkbenchData\(row\)\.r3\.specialist\)/);
-  assert.match(coluna, /\{celula\.title\}/);
-  assert.match(coluna, /\{celula\.subtitle\}/);
-
   /*
-   * E NENHUMA DAS INFERÊNCIAS PROIBIDAS sobrou na coluna: contribuições
-   * recebidas, especialista escolhido, Telegram ou estado legado.
+   * 2026-10-08 · A COLUNA "ESPECIALISTA" SAIU DA PLANILHA (pedido do dono: não
+   * mostrava nada útil). O card continua lendo a mesma autoridade (acima), e
+   * `radarSpecialistCell` continua a régua da célula para quem a usar.
    */
-  for (const proibido of ["radarR4SpecialistStatusLabel", "data.expert", "localState.specialist", "Telegram", "expertSummary", "specialist.status"]) {
-    assert.ok(!coluna.includes(proibido), `a coluna ainda infere de "${proibido}"`);
-  }
+  assert.equal(pagina.includes(`{ id: "specialist", header: "Especialista"`), false, "a planilha não tem mais a coluna Especialista");
+  assert.equal(/radarSpecialistCell\(/.test(pagina), false, "nenhuma célula de especialista sobrou na página");
 
   /*
    * A CÉLULA E O CARD, LADO A LADO — a mesma entrada, a mesma saída.

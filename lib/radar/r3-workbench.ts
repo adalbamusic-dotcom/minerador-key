@@ -238,6 +238,20 @@ function formatCapturedAt(value: string | null | undefined) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("pt-BR");
 }
 
+/**
+ * 2026-10-08 · O TÍTULO DO ARTIGO NAS TELAS DO RADAR, SEM A MOLDURA DA PROMESSA.
+ *
+ * "Cobrir com clareza o tema “X”." é a promessa padrão que o Arquiteto grava
+ * quando a semântica não trouxe uma: não é título e não diz nada (pedido do
+ * dono). A planilha, o cabeçalho do Workbench e o perfil mostram só o X. Uma
+ * promessa escrita de verdade continua como veio. O ArticleDNA não muda.
+ */
+export function radarArticleDisplayTitle(titulo: string | null | undefined): string {
+  const limpo = (titulo || "").trim();
+  const dentro = limpo.match(/^cobrir com clareza o tema\s*[“"]?(.+?)[”"]?\s*\.?$/i);
+  return dentro ? dentro[1].trim() : limpo;
+}
+
 export function buildRadarR3Model(input: {
   row: RadarItem;
   article: VersionEnvelope<ArticleDNA> | null;
@@ -327,7 +341,7 @@ export function buildRadarR3Model(input: {
     brandId: input.row.brandId,
     articleId: input.row.articleId,
     articleDnaVersionId: input.row.articleDnaVersionId,
-    title: input.article?.payload.promise || input.row.title,
+    title: radarArticleDisplayTitle(input.article?.payload.promise || input.row.title),
     keyword: principal,
     silo: input.silo,
     hierarchy: input.row.hierarchy,

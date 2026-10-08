@@ -51,7 +51,11 @@ test("a keyword usa a cor oficial também fora do Minerador e do Arquiteto", () 
   assert.match(discovery, /const keywordCell = "[^"]*text-keyword/);
   // Componentes genéricos recebem tom opcional; só o campo da keyword o usa.
   assert.ok(radarWorkbench.includes('<ContextValue label="Keyword principal" value={model.keyword} tone="keyword"/>'));
-  assert.ok(radarPage.includes('<span className="mt-1 block text-sm"><span className="text-keyword">{data.r3.keyword}</span>'));
+  /*
+   * 2026-10-08 · a coluna Artigo omite a keyword quando o título já é ela
+   * (radarArticleDisplayTitle); quando aparece, o valor continua em text-keyword.
+   */
+  assert.match(radarPage, /<span className="mt-1 block text-sm">[^\n]*<span className="text-keyword">\{data\.r3\.keyword\}<\/span>/);
   assert.ok(radarPage.includes('<Field label="Keyword principal" tone="keyword"'));
   assert.ok(radarMirror.includes('<Field label="Keyword principal" tone="keyword"'));
   assert.ok(radarAnalysis.includes('<Field label="Keyword principal" tone="keyword"'));

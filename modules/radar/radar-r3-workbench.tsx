@@ -6,7 +6,7 @@ import { RADAR_R3_AREAS, type RadarR3Area, type RadarR3Model } from "@/lib/radar
 import type { RadarR6ExpertEvidenceInput, RadarR6ExpertTopicContext } from "@/lib/radar/r6-sequential";
 import { radarR4SerpStatusLabel, type RadarR4AmazonState } from "@/lib/radar/r4-queue";
 import { radarSufficiencyLabel } from "@/lib/radar/investigation-sufficiency";
-import { RADAR_PHASE1_HANDLER, radarPhase1WithAutoFinalize } from "@/lib/radar/operational-actions";
+import { RADAR_PHASE1_HANDLER } from "@/lib/radar/operational-actions";
 import { InfoHint } from "@/components/info-hint";
 import type { RadarYoutubeFrozenInvestigation } from "@/lib/radar/youtube-evidence";
 import type { RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
@@ -48,7 +48,7 @@ import { radarAuxiliaryLensLabel, radarCanonicalLensLabel, radarFrozenLensView }
 import { radarCandidateEvidenceLabel } from "./radar-subject-turn-view";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
 import { RadarRefreezePanel, type RadarRefreezeHandlers } from "./radar-refreeze-panel";
-import { RadarArticleBlueprintPanel, radarPhase1WithArticleBlueprint, useRadarArticleBlueprintForReport, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
+import { RadarArticleBlueprintPanel, radarPhase1Visible, useRadarArticleBlueprintForReport, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
 
 /** A cobertura de lentes da SERP canônica viva, para a linha da consulta central. */
 function lenteDaCanonica(research: SerpResearchSnapshot | null | undefined) {
@@ -1061,7 +1061,7 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
         * rodada usa zerar, que é explícito.
         */}
       <RecoverSerpAction view={view} busy={busy} onRecover={onRecover} />
-      {acao.id !== "NONE" && <Phase1Button acao={acao} busy={busy} onTrigger={disparar} />}
+      {acao.id !== "NONE" && <Phase1Button acao={acao} mode={view.record?.primarySearchMode || searchMode} busy={busy} onTrigger={disparar} />}
     </div>
     </>}
 
@@ -1229,18 +1229,18 @@ function DisabledAreaCard({ area }: { area: RadarR3Area }) {
  * O tooltip carrega EXPLICAÇÃO. `blockedReason` e `hint` continuam no texto
  * visível ao lado, nunca escondidos atrás do ⓘ.
  */
-function Phase1Button({ acao: daFase1, busy, onTrigger }: { acao: RadarPhase1Action; busy: boolean; onTrigger: () => void }) {
+function Phase1Button({ acao: daFase1, mode, busy, onTrigger }: { acao: RadarPhase1Action; mode: RadarPrimarySearchMode; busy: boolean; onTrigger: () => void }) {
   /*
-   * 2026-10-02 · D9 (dono): a análise que termina sem pendência também
-   * finaliza e chama a IA. O botão de análise diz isso no rótulo e no ⓘ,
-   * antes do clique. Ação, id e handler continuam os da Fase 1.
+   * 2026-10-02 · D9 (dono): a análise também finaliza e chama a IA, e o
+   * finalizar inclui a organização do artigo-modelo da SERP — o rótulo e o ⓘ
+   * dizem isso antes do clique. Ação, id e handler continuam os da Fase 1.
+   *
+   * 2026-10-08 · a montagem é `radarPhase1Visible`, a MESMA que a frase de
+   * parada do automático usa para nomear o botão: o nome dito é o da tela. O
+   * modo é o da investigação (o gravado, ou o escolhido): o ⓘ do YouTube e da
+   * Amazon não promete a regra nova do Google.
    */
-  const resolvida = radarPhase1WithAutoFinalize(daFase1);
-  /*
-   * 2026-10-02 · finalizar inclui a organização do artigo-modelo da SERP: o
-   * rótulo e o ⓘ dizem a chamada de IA. Ação, id e handler continuam os da Fase 1.
-   */
-  const acao = radarPhase1WithArticleBlueprint(resolvida);
+  const acao = radarPhase1Visible(daFase1, mode);
   return <span className="inline-flex items-center gap-1.5">
     <button type="button" data-testid="radar-deep-research-button" data-action-id={acao.id} className={primaryButton} disabled={!acao.enabled || busy} onClick={onTrigger} title={acao.blockedReason || undefined}>{acao.label}</button>
     {acao.info && <InfoHint title={acao.label} description={acao.info} side="top" align="end" />}
@@ -1265,8 +1265,10 @@ function RecoverSerpAction({ view, busy, onRecover }: { view: RadarDeepResearchV
   </span>;
 }
 
-function Phase1Slot({ view, busy, researchProjection, onStart, onAnalyze, onFinalize, onRecover }: {
+function Phase1Slot({ view, busy, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection, onStart, onAnalyze, onFinalize, onRecover }: {
   view: RadarDeepResearchView; busy: boolean;
+  /** 2026-10-08 · o modo escolhido, para o ⓘ do botão dizer a regra do perfil certo. */
+  searchMode?: RadarPrimarySearchMode;
   researchProjection?: RadarResearchProfileProjection | null;
   onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onRecover?: () => void;
 }) {
@@ -1295,7 +1297,7 @@ function Phase1Slot({ view, busy, researchProjection, onStart, onAnalyze, onFina
   return <div className="mt-3 flex flex-wrap items-center justify-end gap-3 border-t border-divider pt-3" data-testid="radar-phase1-slot">
     {(acao.blockedReason || acao.hint) && <p className="mr-auto max-w-3xl text-sm leading-6 text-text-muted">{acao.blockedReason || acao.hint}</p>}
     <RecoverSerpAction view={view} busy={busy} onRecover={onRecover} />
-    {acao.id !== "NONE" && <Phase1Button acao={acao} busy={busy} onTrigger={disparar} />}
+    {acao.id !== "NONE" && <Phase1Button acao={acao} mode={view.record?.primarySearchMode || searchMode} busy={busy} onTrigger={disparar} />}
   </div>;
 }
 
@@ -1603,6 +1605,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
     {expandedArea !== "pesquisa" && model.deepResearch && <Phase1Slot
       view={model.deepResearch}
       busy={refreshing || reviewingSerp || serpAction !== null}
+      searchMode={searchMode}
       researchProjection={researchProjection}
       onStart={onStartDeepResearch}
       onRecover={onRecoverSerp}

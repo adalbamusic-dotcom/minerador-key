@@ -587,6 +587,22 @@ necessária. O bundle é amarrado a `articleId`, à versão do ArticleDNA e ao h
 do ArticleDNA. Após F5, conclusões diferentes não podem ser reconstruídas
 silenciosamente.
 
+Desde a D9 (2026-10-02) o FINALIZE também é encadeado sozinho ao fim da
+análise, pela mesma rotina do botão. No Google, por decisão do dono em
+2026-10-08, amostra insuficiente, página sem acesso e consulta auxiliar que
+falhou não param o automático: a investigação congela com a limitação
+registrada no bundle (`acknowledgedInsufficiency` e `limitations`). Página que
+fica sem desfecho é lida de novo uma vez. O automático só para por intenção da
+SERP em conflito com a declarada, nenhuma página lida, fundamento mudado,
+etapa paga faltando ou gravação não confirmada — e diz o motivo, a área e o
+nome do botão que a tela mostra naquele estado. A conta da Fase 1 e a da
+análise são a mesma (`radarExtractionAccount`). Quando nenhuma página abre e
+nenhuma está na amostra, as falhas são gravadas como limitação (a referência
+não fica pendente), nada é consolidado e o caminho é refazer a pesquisa. O
+modelo, a suficiência e o bundle contam só as páginas da seleção — extração
+órfã não entra — e duas referências que terminam na mesma página contam o
+conteúdo uma vez.
+
 ### RESET
 
 Limpa apenas a pesquisa corrente. Preserva `ArticleDNA`, `KeywordDNA`,

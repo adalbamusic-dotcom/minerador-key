@@ -214,8 +214,13 @@ test("RADAR 18.10.2 · E, F e G — 11 reutilizadas, zero extração, zero SERP"
    * sobre ele gravaria um carimbo de análise sobre nada: zero comparáveis, zero
    * termos recorrentes, competitividade "insufficient_evidence". O trabalho
    * está nas páginas gravadas, e é delas que o modelo nasce.
+   *
+   * 2026-10-08 · na rodada normal também: com a reutilização, `pages` é só o
+   * que esta rodada leu (1 página nova reescrevia o modelo das 12). O modelo é
+   * a amostra gravada, recortada pela seleção — e nunca `pages`.
    */
-  assert.match(corpo, /const paginasDoModelo = retomandoConsolidacao \? paginasDaAmostra : pages;/);
+  assert.match(corpo, /const paginasDoModelo = naSelecao\.size \? paginasDaAmostra\.filter\(page => naSelecao\.has\(radarNormalizedUrl\(page\.url\)\)\) : paginasDaAmostra;/);
+  assert.equal(/const paginasDoModelo = [^;]*\bpages\b/.test(corpo), false, "o modelo não nasce só do que foi lido agora");
   assert.match(corpo, /buildRadarBenchmark\(versaoDaAmostra\.payload\.mode, paginasDoModelo\.filter\(/);
   assert.match(corpo, /const semanticTerms = paginasDoModelo\.flatMap\(/);
   assert.match(corpo, /const competitorCount = paginasDoModelo\.length;/);

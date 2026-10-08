@@ -244,9 +244,15 @@ test("§10 · a análise repete o que é temporário e não deixa pendente para 
   assert.match(corpo, /while \(fila\.length\)/, "o retry é uma rodada, não uma chamada solta");
   assert.match(corpo, /Repetindo \$\{fila\.length\} página\(s\) que falharam por motivo temporário/);
 
-  /* E o membership tira a falha de pendente — a conta fecha sem sobra eterna. */
+  /*
+   * E o membership tira a falha de pendente — a conta fecha sem sobra eterna.
+   * 2026-10-08 · a conta mora em `radarExtractionAccount`, a régua única que
+   * a análise e a Fase 1 usam; o membership a chama.
+   */
   const membership = readFileSync("lib/radar/analysis-membership.ts", "utf8");
-  assert.match(membership, /falhadas\.has\(radarNormalizedUrl\(url\)\)/);
+  assert.match(membership, /radarExtractionAccount\(\{/);
+  const regua = readFileSync("lib/radar/extraction-round.ts", "utf8");
+  assert.match(regua, /falhadas\.has\(radarNormalizedUrl\(url\)\)/);
 });
 
 /* ------------------------- a seleção vai gravada -------------------------- */

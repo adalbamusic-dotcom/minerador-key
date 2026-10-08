@@ -189,13 +189,26 @@ test("I · uma referência que falha não derruba a amostra", () => {
    * caso esperado: as onze já estão gravadas no servidor e o que falta é
    * consolidá-las. Abortar ali deixaria o trabalho pago inalcançável.
    */
-  assert.match(page, /if \(!pages\.length && !retomandoConsolidacao\) throw new Error/);
+  /*
+   * 2026-10-08 · e "zero" é a AMOSTRA vazia: com páginas já na amostra, a
+   * rodada em que todas as candidatas falham grava as falhas como limitação
+   * declarada, em vez de ser descartada e deixar a página pendente para sempre.
+   */
+  /*
+   * 2026-10-08 · revisão: com a amostra VAZIA também nada é descartado — a
+   * versão da amostra grava as falhas e a análise para ali, sem consolidar.
+   * Só lança quem não tem nem falha para gravar.
+   */
+  assert.match(page, /const semPaginaNaAmostra = !pages\.length && !retomandoConsolidacao && !membership\.reused;/);
+  assert.match(page, /if \(semPaginaNaAmostra && !rodadaFechada\.failures\.length\) throw new Error/);
   assert.match(page, /const retomandoConsolidacao = persistencia\?\.state === "ANALYSIS_PARTIALLY_PERSISTED"/, "e a exceção tem uma condição nomeada");
   // O desfecho da falha mudou de nome: "sem acesso" em vez de "não processada".
-  assert.ok(page.includes("${falhas.length} sem acesso"), "a falha é dita, com nome de desfecho");
+  assert.ok(page.includes("${contaDepois.failed} sem acesso"), "a falha é dita, com nome de desfecho");
 
   const rota = readFileSync(new URL("../app/api/editorial/radar-analysis/extract/route.ts", import.meta.url), "utf8");
   assert.match(rota, /errors: pages\.filter\(result => "error" in result\)/);
+  /* 2026-10-08 · cada página volta com a URL que a autoridade do servidor buscou (`target.url`), ao lado da final. */
+  assert.match(rota, /\{ key: target\.key, requestedUrl: target\.url, page: await extractCompetitorPage\(target\.url,/);
 });
 
 /* ---------------------------------- J ------------------------------------ */

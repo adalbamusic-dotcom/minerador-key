@@ -3,6 +3,7 @@ import { deriveRadarReferenceRole, type RadarReferenceRole } from "./flow-presen
 import type { RadarSerpView } from "./snapshot-view.ts";
 import type { RadarSerpReviewCurrentness } from "./serp-review-state.ts";
 import type { SerpOrganicResult } from "./serp/contracts.ts";
+import { radarNormalizedUrl } from "./research-reference.ts";
 
 /**
  * The persisted decision contract predates the Workbench and uses the SERP
@@ -147,9 +148,16 @@ export function radarSelectionFingerprint(view: RadarSerpView | null | undefined
 export function radarAnalysisCandidates(view: RadarSerpView | null | undefined, analysis: RadarAnalysisVersion | null | undefined, scope?: RadarSerpSelectionScope) {
   const projection = buildRadarSerpSelectionProjection(view, analysis, scope);
   if (!projection.compatible || !analysis) return [];
-  const extractedUrls = new Set(analysis.payload.extractions.map(page => page.url));
+  /*
+   * 2026-10-08 · já extraída é por URL NORMALIZADA, como em toda conta da amostra.
+   *
+   * A comparação crua relia em toda análise a canônica gravada com "/" final,
+   * `www.` ou outro protocolo — a home "https://c.com.br" volta do extrator
+   * como "https://c.com.br/" — e a frase da rodada fechava com sobra negativa.
+   */
+  const extractedUrls = new Set(analysis.payload.extractions.map(page => radarNormalizedUrl(page.url)));
   return projection.selectedRows
-    .filter(row => !extractedUrls.has(row.result.url))
+    .filter(row => !extractedUrls.has(radarNormalizedUrl(row.result.url)))
     .map(row => ({ key: row.key, url: row.result.url, itemType: "organic" as const, decision: "included" as const }));
 }
 

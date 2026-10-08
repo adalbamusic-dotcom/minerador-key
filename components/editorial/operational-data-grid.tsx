@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Columns3, Download, GripVertical, Search, Settings2 } from "lucide-react";
 import { useGlobalTopbarControlsRegistration, type GlobalTopbarModuleControls } from "@/components/global-topbar";
 import { applyGridQuery, gridViewStorageKey, reorderIds, selectionState, selectAllVisible } from "@/lib/editorial/data-grid";
@@ -96,6 +96,8 @@ export interface OperationalDataGridProps<T extends { id: string }> {
 }
 
 const control = "h-7 rounded border border-divider bg-surface-subtle px-2 text-[12px] text-foreground/85 outline-none transition-colors hover:border-module-accent/25 focus:border-module-accent/45";
+/** 2026-10-08 · quanto a rolagem precisa ficar parada para a posição ser gravada. */
+export const ROLAGEM_GRAVADA_APOS_MS = 150;
 
 export function OperationalDataGrid<T extends { id: string }>({ module, userId, brandId, rows, columns, loading = false, error = null,
   emptyTitle = "Nenhum item encontrado", searchPlaceholder = "Buscar…", bulkActions = [], renderBulkBar, renderActions, renderExpanded,
@@ -113,6 +115,40 @@ export function OperationalDataGrid<T extends { id: string }>({ module, userId, 
 
   useEffect(() => { const timer = window.setTimeout(() => setManualOrder(current => [...current.filter(id => rows.some(row => row.id === id)), ...rows.map(row => row.id).filter(id => !current.includes(id))]), 0); return () => window.clearTimeout(timer); }, [rows]);
   useEffect(() => { const timer = window.setTimeout(() => { const scroll = Number(window.localStorage.getItem(`${storageKey}:scroll`) || 0); scrollRef.current?.scrollTo({ top: scroll }); }, 0); return () => window.clearTimeout(timer); }, [storageKey]);
+  /*
+   * 2026-10-08 · A POSIÇÃO DA ROLAGEM É GRAVADA DEPOIS QUE A ROLAGEM PARA.
+   *
+   * O `onScroll` gravava no localStorage — escrita síncrona — a cada evento,
+   * dezenas por segundo enquanto a pessoa rola. Agora o último valor espera
+   * ROLAGEM_GRAVADA_APOS_MS sem evento novo e é gravado uma vez, na mesma
+   * chave; troca de marca/módulo, desmontagem e saída da página (pagehide)
+   * gravam o que estiver pendente na hora. A posição restaurada é a mesma.
+   */
+  const rolagemPendente = useRef<{ chave: string; topo: number; timer: number } | null>(null);
+  const gravarRolagemPendente = useCallback(() => {
+    const pendente = rolagemPendente.current;
+    if (!pendente) return;
+    rolagemPendente.current = null;
+    window.clearTimeout(pendente.timer);
+    try { window.localStorage.setItem(pendente.chave, String(pendente.topo)); } catch { /* storage indisponível: a posição só não é lembrada */ }
+  }, []);
+  const agendarRolagem = (topo: number) => {
+    const chave = `${storageKey}:scroll`;
+    /*
+     * 2026-10-08 · CHAVE NOVA COM POSIÇÃO DA CHAVE ANTIGA PENDENTE: grava a
+     * antiga ANTES. Um evento de rolagem pode chegar com a marca/módulo novo
+     * antes da limpeza do efeito (o clamp do navegador quando as linhas mudam,
+     * no mesmo commit da troca); substituir a entrada pendente apagava a
+     * última posição da chave anterior, que o evento-a-evento antigo gravava.
+     */
+    if (rolagemPendente.current && rolagemPendente.current.chave !== chave) gravarRolagemPendente();
+    if (rolagemPendente.current) window.clearTimeout(rolagemPendente.current.timer);
+    rolagemPendente.current = { chave, topo, timer: window.setTimeout(gravarRolagemPendente, ROLAGEM_GRAVADA_APOS_MS) };
+  };
+  useEffect(() => {
+    window.addEventListener("pagehide", gravarRolagemPendente);
+    return () => { window.removeEventListener("pagehide", gravarRolagemPendente); gravarRolagemPendente(); };
+  }, [storageKey, gravarRolagemPendente]);
   const visibleColumns = columns.filter(column => !hidden.has(column.id));
   const queried = useMemo(() => applyGridQuery(rows, { search, searchText: row => columns.map(column => String(column.value(row) ?? "")).join(" "), filters,
     filterValue: (row, columnId) => columns.find(column => column.id === columnId)?.value(row), sort, manualOrder }), [rows, columns, search, filters, sort, manualOrder]);
@@ -186,7 +222,7 @@ export function OperationalDataGrid<T extends { id: string }>({ module, userId, 
       <select value={orderMode} onChange={event => setOrderModeValue(event.target.value as OperationalGridOrderMode)} className={control}><option value="automatic">Ordem automática</option><option value="manual">Ordem manual</option></select>
       <select value={String(pageSize)} onChange={event => setPageSizeValue(event.target.value === "all" ? "all" : Number(event.target.value) as 25 | 50 | 100 | 200)} className={control}>{[25, 50, 100, 200].map(size => <option key={size}>{size}</option>)}<option value="all">Todos</option></select>
     </div> : null}
-    {error ? <div className="m-4 rounded border border-danger/45 bg-danger-soft p-4 text-sm text-danger">{error}</div> : loading ? <div className="flex min-h-44 items-center justify-center text-sm text-text-muted">Carregando planilha…</div> : !queried.length ? <div className="flex min-h-44 items-center justify-center text-sm text-text-muted">{emptyTitle}</div> : <div ref={scrollRef} onScroll={event => window.localStorage.setItem(`${storageKey}:scroll`, String(event.currentTarget.scrollTop))} className="min-h-0 flex-1 overflow-auto">
+    {error ? <div className="m-4 rounded border border-danger/45 bg-danger-soft p-4 text-sm text-danger">{error}</div> : loading ? <div className="flex min-h-44 items-center justify-center text-sm text-text-muted">Carregando planilha…</div> : !queried.length ? <div className="flex min-h-44 items-center justify-center text-sm text-text-muted">{emptyTitle}</div> : <div ref={scrollRef} onScroll={event => agendarRolagem(event.currentTarget.scrollTop)} className="min-h-0 flex-1 overflow-auto">
       <table className="w-full table-fixed border-collapse text-sm" style={{ minWidth: Math.max(960, visibleColumns.reduce((total, column) => total + (widths[column.id] || column.width || 140), 150)) }}>
         <thead className="sticky top-0 z-30 bg-surface-subtle text-text-muted"><tr><th className="sticky left-0 z-40 w-10 border-b border-r border-divider bg-surface-subtle p-1 text-center">#</th><th className="sticky left-10 z-40 w-9 border-b border-r border-divider bg-surface-subtle p-1"><input ref={selectAllRef} type="checkbox" checked={bulkSelection.checked} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onChange={event => { const checked = event.target.checked; commitBulkSelection(selectAllVisible(bulkSelected, visibleIds, checked), { kind: "visible", rowIds: visibleIds, checked }); }}/></th><th className="w-7 border-b border-divider" title={sort ? "A ordenação manual está bloqueada pela ordenação automática." : "Arrastar para reordenar"}><GripVertical className="mx-auto h-3 w-3"/></th>
           {visibleColumns.map((column, index) => { const sticky = column.pinned === "left" || index === 0; return <th key={column.id} style={{ width: column.fill && !widths[column.id] ? undefined : widths[column.id] || column.width || 140, left: sticky ? 79 : undefined }} className={`${sticky ? "sticky z-30 bg-surface-subtle" : ""} relative border-b border-r border-divider p-2 text-left`}><button disabled={!column.sortable || orderMode === "manual"} onClick={() => setSort(current => current?.columnId === column.id ? current.direction === "asc" ? { columnId: column.id, direction: "desc" } : null : { columnId: column.id, direction: "asc" })} className="w-full truncate text-left disabled:cursor-default">{column.header}{sort?.columnId === column.id ? sort.direction === "asc" ? " ↑" : " ↓" : ""}</button><span onMouseDown={event => resizeColumn(column.id, event.clientX, widths[column.id] || column.width || 140)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-context-accent"/></th>; })}

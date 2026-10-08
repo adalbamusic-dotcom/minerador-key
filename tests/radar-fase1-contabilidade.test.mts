@@ -226,7 +226,14 @@ test("§0 · a pesquisa sempre recoleta a SERP canônica depois do reset", () =>
 
 test("§1 · a frase do aviso mostra a sobra em vez de escondê-la", () => {
   const page = readFileSync("modules/radar/radar-page.tsx", "utf8");
-  assert.ok(page.includes("membership.selected - (membership.reused + pages.length + falhas.length)"),
-    "a sobra é calculada a partir da própria conta");
+  /*
+   * 2026-10-08 · a sobra deixou de ser subtração: ela sai da MESMA régua que a
+   * Fase 1 usa na releitura (`radarExtractionAccount`), sobre a amostra
+   * gravada. A subtração fechava em zero com a página lida gravada sob a URL
+   * final do redirect — e a Fase 1 via uma pendente.
+   */
+  assert.ok(page.includes("const contaDepois = radarExtractionAccount({"), "a sobra é contada pela régua da Fase 1");
+  assert.ok(page.includes("const semDesfecho = contaDepois.pending;"));
+  assert.equal(page.includes("membership.selected - (membership.reused + pages.length + falhas.length)"), false, "a subtração não volta");
   assert.ok(page.includes("sem desfecho nesta rodada"), "e é dita quando existe");
 });

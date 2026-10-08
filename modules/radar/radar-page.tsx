@@ -26,14 +26,17 @@ import { RADAR_INTENT_NOT_CONCLUDED, radarDeclaredArticleIntent, radarObservedGa
 import { buildRadarEditorialContext, radarPrincipalHydrated } from "@/lib/radar/editorial-context";
 import { buildRadarArticleResearchContext } from "@/lib/radar/article-research-context";
 import { buildRadarDeepResearchView } from "@/lib/radar/deep-research-view";
+import { createRadarDeepResearchViewMemo } from "@/lib/radar/deep-research-view-memo";
+import { radarArticleDataUpdate } from "@/lib/radar/expert-evidence-change";
 import type { SerpResearchSnapshot } from "@/lib/radar/serp/contracts";
 import type { RadarSerpCollectOptions, RadarSerpCollectOutcome } from "@/lib/radar/serp/request";
 import { emptyRadarSerpBatchTally, radarFinalizeReadbackNotice, radarFinalizeSuccessMessage, radarSerpBatchQueueState, radarSerpBatchStartNotice, radarSerpBatchSummary, radarSerpCollectReading, radarStartOnRejectedSerpWarning, tallyRadarSerpBatch, type RadarFinalizeReadbackWatch, type RadarSerpCollectReading, type RadarSerpCollectStatus } from "./radar-serp-collect-notices";
 import { startRadarDeepResearch, settleRadarDeepResearchQuery, finalizeRadarDeepResearch, radarQueryEvidenceFrom, type RadarDeepResearchRecord } from "@/lib/radar/deep-research";
 import { radarCanonicalReusePlan, radarResearchResumption } from "@/lib/radar/research-resumption";
 import { radarResumableRemoteAnalysis, radarUnconfirmedClaimsNotice, type RadarRemoteOnlyClaim } from "@/lib/radar/remote-authority";
-import { freezeRadarEvidenceBundle, radarGoogleAutoFinalizeDecision } from "@/lib/radar/investigation-finalization";
-import { RADAR_AUTO_FINALIZE_DONE_NOTICE, radarActionOutcome, radarAutoFinalizePendingNotice, radarClaimAction, type RadarOperationalActionId } from "@/lib/radar/operational-actions";
+import { freezeRadarEvidenceBundle, radarAuxiliaryFailureLimitation, radarGoogleAutoFinalizeDecision, radarGoogleRegisteredLimitations } from "@/lib/radar/investigation-finalization";
+import { RADAR_AUTO_FINALIZE_DONE_NOTICE, radarActionOutcome, radarAutoFinalizeDoneNotice, radarAutoFinalizePendingNotice, radarClaimAction, type RadarOperationalActionId } from "@/lib/radar/operational-actions";
+import { radarExtractionAccount, radarReconcileExtractionRound, type RadarExtractionRoundResponse } from "@/lib/radar/extraction-round";
 import { radarSufficiencyLabel } from "@/lib/radar/investigation-sufficiency";
 import { buildRadarResearchCuration, type RadarResearchDecision } from "@/lib/radar/research-curation";
 import { radarNormalizedUrl } from "@/lib/radar/research-reference";
@@ -65,7 +68,7 @@ import { RADAR_STORED_ZIP_MIME, radarStoredZipOfTexts } from "@/lib/radar/stored
 import { radarCompetitiveBlueprintViewOfAnalysis, type RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
 import { buildRadarMultimodalBlueprint, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
 import type { RadarSpecialistCounters } from "@/lib/radar/specialist-lifecycle";
-import { buildRadarArticleDnaSummary, buildRadarReportSummary, buildRadarResearchCardSummary, buildRadarSpecialistSummary, radarSpecialistCell, RADAR_OPERATIONAL_STATUS_LABEL, RADAR_OPERATIONAL_STATUS_ORDER, radarOperationalRow, type RadarOperationalTone } from "@/lib/radar/operational-view";
+import { buildRadarArticleDnaSummary, buildRadarReportSummary, buildRadarResearchCardSummary, buildRadarSpecialistSummary, RADAR_OPERATIONAL_STATUS_LABEL, RADAR_OPERATIONAL_STATUS_ORDER, radarOperationalRow, type RadarOperationalTone } from "@/lib/radar/operational-view";
 import { radarExtractionBatches, radarExtractionErrorMessage } from "@/lib/radar/extraction-request";
 import { buildRadarAnalysisMembership } from "@/lib/radar/analysis-membership";
 import { buildRadarSourceVerificationPlan } from "@/lib/radar/source-authority";
@@ -75,7 +78,7 @@ import { buildRadarExternalSourceResearch } from "@/lib/radar/link-and-source-re
 import { buildRadarSemanticConceptModel } from "@/lib/radar/semantic-concept-model";
 import { buildRadarWorkbenchStages, resolveRadarWorkbenchArticleId, summarizeRadarReferenceCounts, type RadarAdditionalEvidenceState } from "@/lib/radar/workbench";
 import { clearSelection, createRadarSpreadsheetSelection, selectAndActivateArticle, selectVisibleArticles, setArticleSelection, type RadarSpreadsheetSelectionState } from "@/lib/radar/spreadsheet-selection";
-import { buildRadarR3Model, type RadarR3Model } from "@/lib/radar/r3-workbench";
+import { buildRadarR3Model, radarArticleDisplayTitle, type RadarR3Model } from "@/lib/radar/r3-workbench";
 import { buildRadarYoutubeQueryPlan } from "@/lib/radar/youtube-search-queries";
 import { RadarYoutubeSearchRunSchema, radarYoutubeApplySelection, radarYoutubeResetPatch, radarYoutubeRunSummary, type RadarYoutubeSearchRun } from "@/lib/radar/youtube-search-run";
 import { buildRadarYoutubeBlueprint } from "@/lib/radar/youtube-blueprint";
@@ -104,7 +107,7 @@ import { RadarR3ProfileMirror } from "./radar-r3-profile-mirror";
 import { RadarR4BulkOperationsBar, RadarR5QueueProgress, type RadarR5QueueView } from "./radar-r4-bulk-operations-bar";
 import { useRadarAnalysisReadback } from "./use-radar-analysis-readback";
 import { useRadarSerpReviewReadback } from "./use-radar-serp-review-readback";
-import { organizeRadarArticleBlueprintsInSeries, postRadarArticleBlueprintOrganize, radarArticleBlueprintSeriesSummary, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
+import { organizeRadarArticleBlueprintsInSeries, postRadarArticleBlueprintOrganize, radarArticleBlueprintSeriesSummary, radarPhase1VisibleLabel, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
 
 /**
@@ -233,6 +236,19 @@ type RadarDesfechoAutomatico = { congelou: boolean; headline: string | null; mes
 type RadarRegistrosDeSerp = ReturnType<typeof useEditorialPipeline>["serpRecords"];
 const avisoComDesfechoAutomatico = (antes: string | null, desfecho: RadarDesfechoAutomatico) =>
   [desfecho.headline ? `${desfecho.headline}.` : null, antes, desfecho.message].filter(Boolean).join(" ");
+
+/*
+ * 2026-10-08 · A INVESTIGAÇÃO DE CADA LINHA, LEMBRADA PELA ENTRADA INTEIRA.
+ *
+ * O dono: "o selector e o scroll estão muito lentos". Cada render refazia
+ * `buildRadarDeepResearchView` para TODAS as linhas — medido: clique numa linha
+ * de 14 a 19 s com 25 artigos. Aqui ela só é refeita quando o item, o
+ * ArticleDNA, o registro SERP, o "rodando?", o rascunho da curadoria ou o modo
+ * daquela linha mudam (ver `lib/radar/deep-research-view-memo.ts`). O resto
+ * do modelo da linha continua vivendo um render (RADAR_SELECTION_LIGHT_1).
+ * Fica no módulo, fora do componente, porque a chave é o próprio item.
+ */
+const investigacaoDaLinha = createRadarDeepResearchViewMemo<ReturnType<typeof buildRadarDeepResearchView>>();
 
 export function RadarPage({ brandRef }: { brandRef: string }) {
   const { data: session } = useSession(); const router = useRouter(); const { selectedBrandId } = useBrand(); const { pipeline, state } = useReadyPipeline(); const [picker, setPicker] = useState(false); const [notice, setNotice] = useState(""); const [busyArticleId, setBusyArticleId] = useState<string | null>(null); const [reviewingArticleId, setReviewingArticleId] = useState<string | null>(null); const [serpAction, setSerpAction] = useState<RadarSerpAction | null>(null); const serpActionRef = useRef<RadarSerpAction | null>(null); const reviewingArticleIdRef = useRef<string | null>(null); const [expandedRadarId, setExpandedRadarId] = useState<string | null>(null); const [spreadsheetSelection, setSpreadsheetSelection] = useState(createRadarSpreadsheetSelection); const { activeArticleId, selectedArticleIds } = spreadsheetSelection; const [r4LocalByArticle, setR4LocalByArticle] = useState<Record<string, RadarR4LocalArticleState>>({}); const [r4SerpQueue, setR4SerpQueue] = useState<RadarR4SerpQueue | null>(null); const [topicHistoryByArticle, setTopicHistoryByArticle] = useState<Record<string, RadarR5TopicHistory>>({}); const [expertEvidenceByArticle, setExpertEvidenceByArticle] = useState<Record<string, RadarR6ExpertEvidenceInput[]>>({}); const [canonicalExpertEvidenceByArticle, setCanonicalExpertEvidenceByArticle] = useState<Record<string, RadarExpertEvidence[]>>({}); const [expertContributionSummaryByArticle, setExpertContributionSummaryByArticle] = useState<Record<string, { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; articleDnaVersionId: string; counters: RadarSpecialistCounters }>>({}); const approvingArticleIdRef = useRef<string | null>(null); const collectingArticleIdRef = useRef<string | null>(null); const generatingReportIdRef = useRef<string | null>(null); const [collectionByArticle, setCollectionByArticle] = useState<Record<string, { state: RadarSerpCollectionState; blockedReason: string | null }>>({});
@@ -1102,7 +1118,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
 
 
   const handleExpandedChange = useCallback((id: string | null) => { const rowArticleId = id ? pipeline.radarItems.find(row => row.id === id)?.articleId : null; if ((serpActionRef.current && id && rowArticleId !== serpActionRef.current.articleId) || (reviewingArticleIdRef.current && id && rowArticleId !== reviewingArticleIdRef.current) || (serpAction && id && rowArticleId !== serpAction.articleId) || (reviewingArticleId && id && rowArticleId !== reviewingArticleId)) return; setExpandedRadarId(id); }, [pipeline.radarItems, reviewingArticleId, serpAction]);
-  const handleExpertEvidenceChange = useCallback((articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: RadarSpecialistPanelSummary) => { setExpertEvidenceByArticle(current => ({ ...current, [articleId]: evidence })); setCanonicalExpertEvidenceByArticle(current => ({ ...current, [articleId]: summary.canonicalEvidence })); setExpertContributionSummaryByArticle(current => ({ ...current, [articleId]: { contributionCount: summary.contributionCount, pendingCount: summary.pendingCount, blockedEvidenceCount: summary.blockedEvidenceCount, remote: true, articleDnaVersionId: summary.articleDnaVersionId, counters: summary.counters } })); }, []);
+  /*
+   * 2026-10-08 · AVISO IGUAL NÃO VIRA ESTADO NOVO. Com a área Especialista
+   * aberta, o painel avisava a cada render com o mesmo conteúdo, e gravar três
+   * objetos novos fazia a página renderizar de novo — um laço que ocupava ~98%
+   * da thread (medido). `radarArticleDataUpdate` devolve o mesmo mapa quando o
+   * conteúdo é igual, e o React descarta o render; mudança real grava como antes.
+   */
+  const handleExpertEvidenceChange = useCallback((articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: RadarSpecialistPanelSummary) => { setExpertEvidenceByArticle(current => radarArticleDataUpdate(current, articleId, evidence)); setCanonicalExpertEvidenceByArticle(current => radarArticleDataUpdate(current, articleId, summary.canonicalEvidence)); setExpertContributionSummaryByArticle(current => radarArticleDataUpdate(current, articleId, { contributionCount: summary.contributionCount, pendingCount: summary.pendingCount, blockedEvidenceCount: summary.blockedEvidenceCount, remote: true as const, articleDnaVersionId: summary.articleDnaVersionId, counters: summary.counters })); }, []);
   useNoticeBridge({ notice, module: "radar", area: "Radar", title: "Radar", fallbackSeverity: "INFO" });
   useNoticeBridge({ notice: avisoDeExport, module: "radar", area: "Radar · Exportação", title: "Radar · Exportação", fallbackSeverity: "INFO" });
   const radarReadbackScopeKey = useMemo(() => {
@@ -1343,14 +1366,27 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * recompõe nada por conta própria. Nada é executado nesta leitura: montar
      * o plano não dispara coleta.
      */
-    const deepResearch = buildRadarDeepResearchView({
+    /*
+     * 2026-10-08 · A VIEW SÓ É REFEITA QUANDO A ENTRADA DELA MUDA.
+     *
+     * Tudo o que vai abaixo deriva do item, do ArticleDNA e do registro SERP
+     * — que são a chave por identidade —, menos estes três, que entram na chave
+     * pelo valor. Insumo novo no objeto precisa entrar aqui também:
+     * `tests/radar-investigacao-memo.test.mts` quebra antes de servir dado velho.
+     */
+    const investigacaoRodando = busyArticleId === row.articleId || serpAction?.articleId === row.articleId;
+    const rascunhoDaPesquisa = researchDraftByArticle[row.articleId];
+    const modoDaLinha = modoEfetivoDe(row);
+    const deepResearch = investigacaoDaLinha({ row, article, serpRecord: record, running: investigacaoRodando, researchDraft: rascunhoDaPesquisa, mode: modoDaLinha }, () => buildRadarDeepResearchView({
       context: researchContext,
       record: analysis?.payload.deepResearch || null,
-      running: busyArticleId === row.articleId || serpAction?.articleId === row.articleId,
+      running: investigacaoRodando,
       snapshot: view ? { query: view.query, organicResults: view.organicResults } : null,
       extractions: analysis?.payload.extractions || [],
       extractionFailures: analysis?.payload.extractionFailures.length || 0,
       extractionFailureUrls: (analysis?.payload.extractionFailures || []).map(item => item.url),
+      /* 2026-10-08 · as canônicas que a análise também lê: a Fase 1 conta a MESMA amostra que ela. */
+      canonicalSelectedUrls: selectionProjection.selectedRows.map(selection => selection.result.url),
       selectedReferences: curationSummary.selectedCompetitors,
       curationConfirmed: curationSummary.curationStarted,
       model: modeloDoRelatorio,
@@ -1364,8 +1400,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       analysisConfirmed: Boolean(analysis?.payload.analysisCompletedAt),
       /* O que o servidor já guardou desta análise — Gate 18.10.1 · §2. */
       persistedAnalysis: analysis?.payload || null,
-      researchDraft: researchDraftByArticle[row.articleId],
-      mode: modoEfetivoDe(row),
+      researchDraft: rascunhoDaPesquisa,
+      mode: modoDaLinha,
       /* As fontes que o ANALYZE verificou, lidas de volta da versão gravada. */
       verifiedSources: analysis?.payload.verifiedSources || [],
       /*
@@ -1376,7 +1412,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * finalizado é o que está gravado.
        */
       finalizedBundle: analysis?.payload.finalizedBundle || null,
-    });
+    }));
     const investigation = buildRadarInvestigationView({
       hasSnapshot: Boolean(view),
       collection,
@@ -1470,6 +1506,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * dependências para envelhecer — se qualquer insumo mudar, há um render novo
    * e um cache novo. O que se ganha é o fator 20; o que não se arrisca é uma
    * linha mostrando o estado anterior.
+   *
+   * 2026-10-08 · UMA EXCEÇÃO, COM NOME: dentro deste cálculo, a view da
+   * investigação (`investigacaoDaLinha`) atravessa renders — e só ela, com a
+   * entrada inteira na chave. Ela era ~90% do custo de cada linha; o resto
+   * continua nascendo e morrendo aqui.
    */
   const cacheDaLinha = new WeakMap<RadarItem, ReturnType<typeof calcularDadosDaLinha>>();
   const rowWorkbenchData = (row: RadarItem) => {
@@ -1556,14 +1597,15 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   };
 
   const columns: OperationalGridColumn<RadarItem>[] = [
-    { id: "article", header: "Artigo", value: row => `${row.title} ${resolveRowKeyword(row).keyword} ${row.hierarchy}`, pinned: "left", sortable: true, width: 280, fill: true, render: row => { const data = rowWorkbenchData(row); const isFocused = row.articleId === activeArticleId; return <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><strong className="block truncate text-sm text-foreground">{data.r3.title}</strong>{isFocused && <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-xs font-semibold text-context-accent">Em foco</span>}</div>{/*
+    { id: "article", header: "Artigo", value: row => `${radarArticleDisplayTitle(row.title)} ${resolveRowKeyword(row).keyword} ${row.hierarchy}`, pinned: "left", sortable: true, width: 280, fill: true, render: row => { const data = rowWorkbenchData(row); const isFocused = row.articleId === activeArticleId; return <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><strong className="block truncate text-sm text-foreground">{data.r3.title}</strong>{isFocused && <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-xs font-semibold text-context-accent">Em foco</span>}</div>{/*
       * A COR DA KEYWORD PERTENCE À KEYWORD.
       *
       * A linha inteira vinha em `text-keyword` — silo e versão do ArticleDNA
       * junto. O papel é do VALOR da keyword; nome de silo e versão são
       * metadado, e a coluna Conteúdo já é dona deles.
       */}
-      <span className="mt-1 block text-sm"><span className="text-keyword">{data.r3.keyword}</span><span className="text-text-muted"> · {data.r3.hierarchy}</span></span></div>; } },
+      {/* 2026-10-08 · sem a moldura, o título costuma ser a própria keyword: ela não se repete na linha de baixo. */}
+      <span className="mt-1 block text-sm">{data.r3.title.trim().toLowerCase() === (data.r3.keyword || "").trim().toLowerCase() ? <span className="text-text-muted">{data.r3.hierarchy}</span> : <><span className="text-keyword">{data.r3.keyword}</span><span className="text-text-muted"> · {data.r3.hierarchy}</span></>}</span></div>; } },
     /*
      * PESQUISA — a mesma leitura do card, pelo mesmo selector.
      *
@@ -1586,14 +1628,10 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       if (data.deepResearch) { const resumo = buildRadarResearchCardSummary({ view: data.deepResearch, mode: modo }); return <div><strong className="block text-sm text-foreground">{resumo.statusLabel}</strong><span className="mt-1 block text-sm text-text-muted">{resumo.modeLabel} · {resumo.counts.analyzed} de {resumo.counts.references} analisada(s)</span></div>; } const queue = data.r4?.serp; const queueLabel = queue?.state === "QUEUED" ? `Na fila ${queue.position || 1}/${queue.total || 1}` : queue?.state === "RUNNING" ? `Processando ${queue.position || 1}/${queue.total || 1}` : queue?.state === "WAITING_REVIEW" ? "Aguardando revisão" : queue?.state === "FAILED_RETRYABLE" ? "Falha · tentar novamente" : queue?.state === "FAILED_FINAL" ? (data.serp.collection?.state === "STRUCTURAL_BLOCK" ? "Coleta bloqueada" : "Falha final") : queue?.state === "COMPLETED" ? "Pesquisa concluída" : data.serp.resultCount ? `${data.serp.resultCount} resultado(s)` : "Não iniciada"; return <div><strong className="block text-sm text-foreground">{queueLabel}</strong><span className="mt-1 block text-sm text-text-muted">{radarSearchModeLabel(modo)} · {data.serp.pendingCount} pendente(s)</span></div>; } },
     { id: "content", header: "Conteúdo", value: row => { const data = rowWorkbenchData(row).r3.content; return `${data.articleDnaVersion} ${data.needs} ${data.evidenceCount}`; }, width: 190, render: row => { const data = rowWorkbenchData(row).r3; const resumo = data.researchContext ? buildRadarArticleDnaSummary(data.researchContext) : null; return <div><strong className="block text-sm text-foreground">{resumo ? `${resumo.silo || "Sem silo"} · ${resumo.role || "Sem papel"}` : data.content.articleDnaVersion}</strong><span className="mt-1 block text-sm text-text-muted">{resumo ? `${resumo.keywordCount} keyword(s)${resumo.funnel ? ` · funil ${resumo.funnel.toLowerCase()}` : ""}` : `${data.content.needs} necessidade(s)`}</span></div>; } },
     /*
-     * A LINHA LÊ A NECESSIDADE; O SUBTÍTULO, O FLUXO.
-     *
-     * O subtítulo anterior começava pelo nome do especialista ("Não
-     * selecionado"), que é justamente uma das inferências que o §REGRAS
-     * proíbe: não ter ninguém escolhido não diz nada sobre a investigação
-     * precisar de revisão.
+     * 2026-10-08 · A COLUNA "ESPECIALISTA" SAIU DA PLANILHA (pedido do dono: não
+     * mostrava nada útil). O estado do especialista continua no card Especialista
+     * do Workbench, que lê o mesmo `r3.specialist.summary`.
      */
-    { id: "specialist", header: "Especialista", value: row => radarSpecialistCell(rowWorkbenchData(row).r3.specialist).title, width: 180, render: row => { const celula = radarSpecialistCell(rowWorkbenchData(row).r3.specialist); return <div><strong className="block text-sm text-foreground">{celula.title}</strong><span className="mt-1 block text-sm text-text-muted">{celula.subtitle}</span></div>; } },
     /*
      * O RELATÓRIO DIZ O QUE FALTA, NÃO QUANTAS NECESSIDADES EXISTEM.
      *
@@ -3934,6 +3972,10 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * render — e a IA organiza o artigo-modelo em seguida. Com pendência nada
    * congela, a tela diz por quê e este botão continua sendo o caminho.
    *
+   * 2026-10-08 · no Google, amostra insuficiente e consulta auxiliar que
+   * falhou deixaram de ser pendência: o automático congela com a limitação
+   * registrada (ver `finalizarGoogleSemPendencia`).
+   *
    * O que não mudou: ninguém encerra o que não concluiu nada — a suficiência
    * responde antes, e o clique e o automático passam pela MESMA rotina abaixo.
    */
@@ -3963,9 +4005,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     /*
      * 2026-10-02 · No automático, a recusa continua a frase da análise e diz
      * que nada congelou sozinho — com o motivo e o botão que continua.
+     *
+     * 2026-10-08 · o botão nomeado é o que a tela mostra NESTE estado
+     * (`radarPhase1VisibleLabel`, a mesma montagem do botão), e a frase diz
+     * onde ele está. Era "Finalizar pesquisa" fixo, com outro botão na tela.
      */
     const recusar = (motivo: string) =>
-      setNotice(automatico ? `${automatico.antes} ${radarAutoFinalizePendingNotice(motivo, "Finalizar pesquisa")}` : motivo);
+      setNotice(automatico ? `${automatico.antes} ${radarAutoFinalizePendingNotice(motivo, radarPhase1VisibleLabel(data.deepResearch?.phase1), "Pesquisa")}` : motivo);
     const continuarFrase = (frase: string) => (automatico ? `${automatico.antes} ${frase}` : frase);
     if (serpActionRef.current || serpAction || busyArticleId || reviewingArticleIdRef.current || reviewingArticleId) {
       recusar("Outra ação ainda está em andamento neste artigo. Aguarde a conclusão.");
@@ -4007,6 +4053,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * diferente da evidência que as originou.
        */
       blueprint: investigacao.blueprint,
+      /*
+       * 2026-10-08 · a consulta auxiliar que falhou vira limitação escrita no
+       * pacote — no clique e no automático, pela mesma rotina. A amostra
+       * insuficiente já entra por `acknowledgedInsufficiency`.
+       */
+      extraLimitations: radarAuxiliaryFailureLimitation(investigacao.resumption.auxiliaryFailed),
       frozenBy: sessionId(session),
       frozenAt: resultado.record.finalizedAt || new Date().toISOString(),
     });
@@ -4047,8 +4099,16 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         persistence: gravado,
         successMessage: radarFinalizeSuccessMessage({ sufficiencyLabel: suficiencia, stored: null }),
       });
-      /* 2026-10-02 · no automático, a frase diz que congelou SOZINHA e que a IA vem depois. */
-      setNotice(continuarFrase(automatico && desfecho.status === "SUCCEEDED" ? `${RADAR_AUTO_FINALIZE_DONE_NOTICE} ${desfecho.message}` : desfecho.message));
+      /*
+       * 2026-10-02 · no automático, a frase diz que congelou SOZINHA e que a IA vem depois.
+       * 2026-10-08 · e, quando congelou com limitação registrada, diz qual.
+       */
+      const limitacoesRegistradas = radarGoogleRegisteredLimitations({
+        finalization: investigacao.finalization,
+        sufficiency: investigacao.sufficiency,
+        auxiliaryFailed: investigacao.resumption.auxiliaryFailed,
+      });
+      setNotice(continuarFrase(automatico && desfecho.status === "SUCCEEDED" ? `${radarAutoFinalizeDoneNotice(limitacoesRegistradas)} ${desfecho.message}` : desfecho.message));
       if (desfecho.status === "SUCCEEDED") setFinalizeReadback({ articleId: target.articleId, versionId: next.versionId, sufficiencyLabel: suficiencia });
       /*
        * 2026-10-02 · FINALIZAR INCLUI ORGANIZAR O ARTIGO-MODELO DA SERP (decisão do dono).
@@ -4076,27 +4136,54 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    *    render ainda não tem a análise que acabou de ser gravada);
    * 2. monta o modelo da linha pela MESMA função da tela, e decide com
    *    `radarGoogleAutoFinalizeDecision` — a autoridade que habilita o botão
-   *    (Fase 1 e prontidão) mais as pendências que o automático não assume:
-   *    amostra insuficiente, intenção em conflito, consulta auxiliar que falhou;
-   * 3. sem pendência, congela pela MESMA rotina do botão; a IA do
-   *    artigo-modelo vem depois do readback, e a falha dela não desfaz nada.
+   *    (Fase 1 e prontidão) mais o que só o humano decide (intenção em conflito);
+   * 3. congela pela MESMA rotina do botão; a IA do artigo-modelo vem depois do
+   *    readback, e a falha dela não desfaz nada.
    *
-   * Com pendência, nada congela: o aviso diz por quê e o botão continua.
+   * 2026-10-08 · decisão do dono ("sem importar os custos"): amostra
+   * insuficiente e consulta auxiliar que falhou finalizam com a limitação
+   * registrada; página que ficou sem desfecho é lida de novo UMA vez (a rodada
+   * extra abaixo) antes de decidir. Quando para, a frase nomeia o botão que a
+   * tela mostra naquele estado e diz onde ele está.
    */
-  const finalizarGoogleSemPendencia = async (target: RadarItem, antes: string) => {
+  const finalizarGoogleSemPendencia = async (target: RadarItem, antes: string, rodadaExtraFeita = false): Promise<void> => {
     const lida = await analiseConfirmadaNoServidor(target);
-    if (!lida.ok) { setNotice(`${antes} ${radarAutoFinalizePendingNotice(lida.reason, "Finalizar pesquisa")}`); return; }
+    /* Sem releitura não se sabe o estado da tela: nenhum botão é prometido. */
+    if (!lida.ok) { setNotice(`${antes} ${radarAutoFinalizePendingNotice(lida.reason, null)}`); return; }
     const linhaRelida: RadarItem = { ...target, analysisVersions: lida.analyses };
     const dadosRelidos = rowWorkbenchData(linhaRelida);
     const investigacao = dadosRelidos.deepResearch;
+    /*
+     * 2026-10-08 · PÁGINA AINDA PENDENTE DEPOIS DA ANÁLISE: UMA RODADA EXTRA, SÓ PARA ELA.
+     *
+     * A régua é a mesma da análise, então isto não deveria acontecer — a
+     * rodada fecha cada candidata como página ou como falha declarada. Se
+     * acontecer (retomada que só consolidou, seleção que mudou no meio), o
+     * automático lê de novo SÓ as pendentes, no máximo uma vez, e decide
+     * depois. As "sem acesso" não são relidas aqui: já são limitação.
+     */
+    const pendentes = investigacao?.phase1.id === "ANALYZE_COMPETITION" ? investigacao.sample.pendingUrls : [];
+    if (pendentes.length && !rodadaExtraFeita) {
+      setNotice(`${antes} ${pendentes.length} página(s) ficaram sem desfecho: lendo de novo, numa rodada extra…`);
+      const extra = await analyzeSerpSelection({ target: linhaRelida, data: dadosRelidos, somente: pendentes });
+      if (!extra.confirmada) {
+        setNotice(`${antes} ${radarAutoFinalizePendingNotice(`a rodada extra para ${pendentes.length} página(s) sem desfecho não foi confirmada (${extra.motivo || "sem resposta"})`, radarPhase1VisibleLabel(investigacao?.phase1), "Pesquisa")}`);
+        return;
+      }
+      await finalizarGoogleSemPendencia(linhaRelida, `${antes} Rodada extra: ${extra.confirmada}`, true);
+      return;
+    }
     const decisaoAutomatica = radarGoogleAutoFinalizeDecision({
       phase1: investigacao?.phase1,
       finalization: investigacao?.finalization,
       sufficiency: investigacao?.sufficiency,
-      auxiliaryFailed: investigacao?.resumption.auxiliaryFailed.length || 0,
+      auxiliaryFailed: investigacao?.resumption.auxiliaryFailed || 0,
     });
     if (!decisaoAutomatica.autoFinalize) {
-      setNotice(`${antes} ${radarAutoFinalizePendingNotice(decisaoAutomatica.reason, "Finalizar pesquisa")}`);
+      const motivo = pendentes.length
+        ? `${pendentes.length} página(s) selecionada(s) continuam sem desfecho mesmo depois da rodada extra (${pendentes.slice(0, 3).join(", ")}${pendentes.length > 3 ? ", …" : ""})`
+        : decisaoAutomatica.reason;
+      setNotice(`${antes} ${radarAutoFinalizePendingNotice(motivo, radarPhase1VisibleLabel(investigacao?.phase1), "Pesquisa")}`);
       return;
     }
     await finalizarInvestigacaoGoogle(linhaRelida, dadosRelidos, { antes });
@@ -4197,11 +4284,25 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       setNotice(error instanceof Error ? error.message : "Não foi possível confirmar a curadoria.");
     } finally { releaseSerpAction(target.articleId, "decision"); }
   };
-  const analyzeSerpSelection = async () => {
-    const target = activeRadarItem;
-    const data = activeWorkbenchData;
-    if (!target || !data?.article || !data.analysis || !data.view?.record.research || serpActionRef.current || serpAction || busyArticleId || reviewingArticleIdRef.current || reviewingArticleId) return;
-    const canonicos = radarAnalysisCandidates(data.view, data.analysis, radarSelectionScope(target));
+  /*
+   * 2026-10-08 · A RODADA EXTRA DO AUTOMÁTICO.
+   *
+   * O clique chama sem argumento e lê a linha do render. O automático do
+   * Google (`finalizarGoogleSemPendencia`) chama com a linha RELIDA DO
+   * SERVIDOR e só as páginas que ficaram pendentes — e recebe de volta a frase
+   * da análise confirmada, sem encadear o automático uma segunda vez.
+   */
+  type RodadaExtraDaAnalise = { target: RadarItem; data: ReturnType<typeof rowWorkbenchData>; somente: readonly string[] };
+  const analyzeSerpSelection = async (rodadaExtra?: RodadaExtraDaAnalise): Promise<{ confirmada: string | null; motivo: string | null }> => {
+    const target = rodadaExtra?.target || activeRadarItem;
+    const data = rodadaExtra?.data || activeWorkbenchData;
+    if (!target || !data?.article || !data.analysis || !data.view?.record.research || serpActionRef.current || serpAction || busyArticleId || reviewingArticleIdRef.current || reviewingArticleId) {
+      return { confirmada: null, motivo: "outra ação está em andamento neste artigo, ou a SERP dele não está disponível" };
+    }
+    /* Na rodada extra, só as pendentes que a releitura apontou; no clique, todas as que aguardam. */
+    const alvo = rodadaExtra ? new Set(rodadaExtra.somente.map(radarNormalizedUrl)) : null;
+    const canonicos = radarAnalysisCandidates(data.view, data.analysis, radarSelectionScope(target))
+      .filter(candidate => !alvo || alvo.has(radarNormalizedUrl(candidate.url)));
     /*
      * AS REFERÊNCIAS DA PESQUISA ENTRAM NA MESMA ANÁLISE.
      *
@@ -4221,11 +4322,15 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const daPesquisa = (data.deepResearch?.curation.confirmed ? data.deepResearch.curation.selectedRows : [])
       .filter(row => row.confirmedDecision
         && !jaExtraidas.has(row.reference.normalizedUrl)
-        && !jaCobertas.has(row.reference.normalizedUrl))
+        && !jaCobertas.has(row.reference.normalizedUrl)
+        && (!alvo || alvo.has(row.reference.normalizedUrl)))
       .map(row => ({ source: "research" as const, referenceId: row.reference.referenceId }));
     const candidates = [...canonicos, ...daPesquisa];
     /* A chave que o servidor devolve no erro: posição da canônica ou id da referência. */
     const chaveDoCandidato = (candidate: (typeof candidates)[number]) => "source" in candidate ? candidate.referenceId : candidate.key;
+    /* 2026-10-08 · a URL que a seleção conhece, por candidato — a da página que voltar, se o servidor não disser outra. */
+    const urlDaReferencia = new Map((data.deepResearch?.curation.rows || []).map(row => [row.reference.referenceId, row.reference.url]));
+    const urlDoCandidato = (candidate: (typeof candidates)[number]) => "source" in candidate ? urlDaReferencia.get(candidate.referenceId) || "" : candidate.url;
     /*
      * RETOMAR A CONSOLIDAÇÃO NÃO EXIGE PÁGINA NOVA — 18.10.1 · §3.
      *
@@ -4240,12 +4345,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      */
     const persistencia = data.deepResearch?.persistence;
     const retomandoConsolidacao = persistencia?.state === "ANALYSIS_PARTIALLY_PERSISTED";
-    if (!candidates.length && !retomandoConsolidacao) { setNotice("Nenhuma referência selecionada aguarda análise. Ajuste a curadoria ou consulte as páginas já analisadas."); return; }
+    if (!candidates.length && !retomandoConsolidacao) { setNotice("Nenhuma referência selecionada aguarda análise. Ajuste a curadoria ou consulte as páginas já analisadas."); return { confirmada: null, motivo: "nenhuma das páginas pendentes pôde ser enviada à leitura" }; }
     const research = data.view.record.research;
-    if (!claimSerpAction({ articleId: target.articleId, kind: "extract" })) return;
+    if (!claimSerpAction({ articleId: target.articleId, kind: "extract" })) return { confirmada: null, motivo: "outra ação está em andamento neste artigo" };
     setNotice("");
     /* 2026-10-02 · D9 · a frase da análise confirmada, para o finalizar automático continuar. */
     let analiseConfirmada: string | null = null;
+    /* 2026-10-08 · e o motivo, quando não confirmou: a rodada extra o devolve a quem a pediu. */
+    let motivoDaFalha: string | null = null;
     try {
       /*
        * A SELEÇÃO CURADA VAI EM LOTES — o contrato tem um teto real.
@@ -4261,12 +4368,21 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * análise busca agora são as pendentes — e as três contas aparecem
        * separadas para "1 pendente" nunca mais ser lido como "1 selecionada".
        */
-      const membership = buildRadarAnalysisMembership({ view: data.view, analysis: data.analysis, scope: radarSelectionScope(target), researchSelectedUrls: (data.deepResearch?.curation.confirmed ? data.deepResearch.curation.selectedRows : []).map(row => row.reference.url) });
+      /*
+       * 2026-10-08 · A SELEÇÃO É A MESMA DA FASE 1: as canônicas da projeção e
+       * as linhas selecionadas da curadoria da pesquisa, como `deepResearch`
+       * as conta (`sample`). Antes a análise só somava a pesquisa quando a
+       * curadoria estava confirmada, e a Fase 1 somava sempre.
+       */
+      const membership = buildRadarAnalysisMembership({ view: data.view, analysis: data.analysis, scope: radarSelectionScope(target), researchSelectedUrls: (data.deepResearch?.curation.selectedRows || []).map(row => row.reference.url) });
       /*
        * Vazio na retomada: nenhuma página é lida de novo. O laço abaixo
        * inteiro fica sem fila, e `mergedExtractions` cai nas já gravadas.
+       *
+       * 2026-10-08 · cada resposta guarda a CHAVE e a URL pedida: a página é
+       * casada com a seleção pela chave, nunca pela URL final que voltou.
        */
-      const pages: RadarExtractionPage[] = [];
+      const respostas: RadarExtractionRoundResponse[] = [];
       const falhas: Array<{ key: string; url: string; code: string; message: string; status: number | null; observedAt: string }> = [];
       /*
        * Os lotes são invisíveis: uma análise lógica, um progresso, um
@@ -4308,8 +4424,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
           throw new Error(radarExtractionErrorMessage(body.code, body.error || "Não foi possível analisar as referências selecionadas."));
         }
         for (const item of Array.isArray(body.pages) ? body.pages : []) {
-          const parsed = RadarExtractionPageSchema.safeParse((item as { page?: unknown }).page);
-          if (parsed.success) pages.push(parsed.data);
+          const resposta = item as { key?: unknown; requestedUrl?: unknown; page?: unknown };
+          if (typeof resposta.key !== "string") continue;
+          /* A página que o contrato recusa não some: ela fica `null` e a rodada a fecha como falha declarada. */
+          const parsed = RadarExtractionPageSchema.safeParse(resposta.page);
+          respostas.push({ key: resposta.key, requestedUrl: typeof resposta.requestedUrl === "string" ? resposta.requestedUrl : null, page: parsed.success ? parsed.data : null });
         }
         for (const item of Array.isArray(body.errors) ? body.errors : []) {
           const registro = item as { key?: string; error?: { url?: string; message?: string; code?: string; status?: number } };
@@ -4345,10 +4464,46 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         setNotice(`Repetindo ${fila.length} página(s) que falharam por motivo temporário…`);
       }
       }
-      // Uma página que falhou não invalida as outras; nenhuma analisada, sim.
-      if (!pages.length && !retomandoConsolidacao) throw new Error(falhas.length
-        ? `Nenhuma das ${candidates.length} página(s) pendente(s) pôde ser analisada. As ${membership.reused} já analisada(s) continuam na amostra.`
-        : "Nenhuma página pendente foi analisada.");
+      /*
+       * ====== 2026-10-08 · A RODADA FECHA POR CHAVE, NÃO PELA URL QUE VOLTOU ======
+       *
+       * `page.url` é a URL FINAL do extrator (redirect, `%C3%B3`, punycode,
+       * "/" na raiz). Empurrada assim para a amostra, a página lida virava
+       * "fora da seleção" e a referência dela ficava pendente para sempre: a
+       * releitura dizia "Analisar concorrência" e o automático parava, a cada
+       * clique. Agora cada candidata termina como página — com a URL que a
+       * seleção pediu — ou como falha declarada, inclusive a que voltou sem
+       * nada ou que o contrato recusou (`no_outcome`). Ver
+       * `lib/radar/extraction-round.ts`.
+       */
+      const rodadaFechada = radarReconcileExtractionRound({
+        candidates: retomandoConsolidacao ? [] : candidates.map(candidate => ({ key: chaveDoCandidato(candidate), url: urlDoCandidato(candidate) })),
+        responses: respostas,
+        failures: falhas,
+        previousExtractions: data.analysis.payload.extractions,
+        previousFailures: data.analysis.payload.extractionFailures,
+        selectedUrls: membership.selectedUrls,
+        observedAt: new Date().toISOString(),
+      });
+      const pages = rodadaFechada.pages;
+      /*
+       * Uma página que falhou não invalida as outras; nenhuma analisada, sim.
+       *
+       * 2026-10-08 · "nenhuma analisada" é a AMOSTRA vazia, não a rodada: com
+       * páginas já na amostra, a rodada em que todas as candidatas falham grava
+       * as falhas como limitação declarada. Antes ela era descartada inteira,
+       * e a página que nunca abre ficava pendente para sempre.
+       *
+       * 2026-10-08 · E COM A AMOSTRA VAZIA AS FALHAS TAMBÉM SÃO GRAVADAS. Antes
+       * a rodada lançava aqui, antes de gravar qualquer coisa: 403, PDF e
+       * `no_outcome` não chegavam ao banco, as referências continuavam
+       * pendentes e cada clique relia tudo para terminar na mesma frase. Agora
+       * a versão da amostra (sem página nova, com as falhas) é gravada mais
+       * abaixo e a análise para ali, sem consolidar nada — ver
+       * `semPaginaNaAmostra`. Só lança quem não tem nem falha para gravar.
+       */
+      const semPaginaNaAmostra = !pages.length && !retomandoConsolidacao && !membership.reused;
+      if (semPaginaNaAmostra && !rodadaFechada.failures.length) throw new Error("Nenhuma página pendente foi analisada.");
 
       /*
        * ====== A AMOSTRA É GRAVADA ANTES DE VERIFICAR AS FONTES ==========
@@ -4373,9 +4528,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        */
       const selectionScope = radarSelectionScope(target);
       const selectedKeys = selectedRadarOrganicDecisionKeys(data.view, data.analysis, selectionScope);
-      /* A dedução da amostra é por URL normalizada: uma página, um registro. */
-      const novasNormalizadas = new Set(pages.map(page => radarNormalizedUrl(page.url)));
-      const mergedExtractions = [...data.analysis.payload.extractions.filter(page => !novasNormalizadas.has(radarNormalizedUrl(page.url))), ...pages];
+      /*
+       * A dedução da amostra é por URL normalizada: uma página, um registro.
+       * 2026-10-08 · e a órfã gravada pelo defeito (a URL final de uma página
+       * relida agora) sai — a amostra não conta a mesma página duas vezes.
+       */
+      const mergedExtractions = rodadaFechada.mergedExtractions;
       const amostraPayload = {
         ...data.analysis.payload,
         /*
@@ -4389,7 +4547,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         selectedCompetitorIds: selectedKeys,
         extractionIds: [...new Set(mergedExtractions.map(page => page.id))],
         extractions: mergedExtractions,
-        extractionFailures: falhas,
+        /* 2026-10-08 · as da rodada, as `no_outcome` e as anteriores não tentadas de novo. */
+        extractionFailures: rodadaFechada.failures,
       };
       /*
        * NA RETOMADA, A AMOSTRA JÁ É A VERSÃO REMOTA — §3 e §5.
@@ -4442,6 +4601,26 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
          * exatamente o SOURCE_UNKNOWN que esta correção existe para eliminar.
          */
         throw new Error("As páginas foram lidas, mas a gravação da amostra não foi confirmada. A verificação de fontes não foi executada.");
+      }
+      /*
+       * ====== 2026-10-08 · AMOSTRA SEM PÁGINA: AS FALHAS FICAM GRAVADAS, E A ANÁLISE PARA AQUI ======
+       *
+       * Nenhuma candidata abriu e nenhuma outra página está na amostra. A
+       * versão acima gravou as falhas (403, PDF, `no_outcome`) como desfecho —
+       * a referência deixa de ser pendente eterna — e nada é consolidado: não
+       * há página para modelo, fonte nem relatório, e congelar não é possível.
+       * A releitura do servidor diz o que a Fase 1 oferece agora, e a frase
+       * nomeia esse botão e onde ele está (pela mesma montagem do botão).
+       */
+      if (semPaginaNaAmostra) {
+        const motivo = `nenhuma das ${candidates.length} página(s) pendente(s) pôde ser analisada e nenhuma outra está na amostra; ${rodadaFechada.failures.length} falha(s) ficaram gravadas (readback confirmado) como limitação declarada`;
+        motivoDaFalha = motivo;
+        if (!rodadaExtra) {
+          const lida = await analiseConfirmadaNoServidor(target);
+          const fase1Relida = lida.ok ? rowWorkbenchData({ ...target, analysisVersions: lida.analyses }).deepResearch?.phase1 : null;
+          setNotice(radarAutoFinalizePendingNotice(motivo, radarPhase1VisibleLabel(fase1Relida), "Pesquisa"));
+        }
+        return { confirmada: null, motivo };
       }
       /*
        * ============ A VERIFICAÇÃO DE FONTES É SUBETAPA DO ANALYZE ==========
@@ -4531,11 +4710,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         setNotice("Consolidando evidências…");
       }
 
+      /* 2026-10-08 · por URL normalizada: a página relida em variante (www, "/", protocolo) continua no benchmark. */
       const primaryUrls = new Set([
         ...buildRadarSerpSelectionProjection(data.view, data.analysis, selectionScope).rows.filter(selection => selection.role === "primary").map(selection => selection.result.url),
         // O benchmark também é formado pelas referências que a pesquisa confirmou como concorrente.
         ...(data.deepResearch?.curation.confirmed ? data.deepResearch.curation.rows.filter(row => row.confirmedDecision === "primary").map(row => row.reference.url) : []),
-      ]);
+      ].map(radarNormalizedUrl));
       /*
        * OS MODELOS SAEM DAS PÁGINAS DA BASE — 18.10.2.
        *
@@ -4543,9 +4723,17 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * construção: benchmark vazio, zero termos recorrentes, competitividade
        * "insufficient_evidence" — um carimbo de análise sobre nada. As páginas
        * que sustentam a consolidação são as da versão base, gravadas.
+       *
+       * 2026-10-08 · NA RODADA NORMAL TAMBÉM. Com a reutilização, `pages` é só
+       * o que foi lido nesta rodada: uma rodada que lia 1 página nova
+       * reescrevia benchmark, termos e competitividade sobre 1 página, por cima
+       * do modelo das 12 — e a rodada extra do automático, que lê só as
+       * pendentes, faria isso sempre. O modelo é a amostra gravada, recortada
+       * pela seleção (sem as extrações órfãs).
        */
-      const paginasDoModelo = retomandoConsolidacao ? paginasDaAmostra : pages;
-      const benchmark = buildRadarBenchmark(versaoDaAmostra.payload.mode, paginasDoModelo.filter(page => primaryUrls.has(page.url)));
+      const naSelecao = new Set(membership.selectedUrls.map(radarNormalizedUrl));
+      const paginasDoModelo = naSelecao.size ? paginasDaAmostra.filter(page => naSelecao.has(radarNormalizedUrl(page.url))) : paginasDaAmostra;
+      const benchmark = buildRadarBenchmark(versaoDaAmostra.payload.mode, paginasDoModelo.filter(page => primaryUrls.has(radarNormalizedUrl(page.url))));
       const semanticTerms = paginasDoModelo.flatMap(page => page.recurringTerms).slice(0, 50).map(term => ({ term: term.term, frequency: term.frequency, pageCount: term.pageCount, pageIds: term.pageIds, sources: term.sources.filter((source): source is "body" | "h1" | "h2" | "h3" | "title" => ["body", "h1", "h2", "h3", "title"].includes(source)), relation: "Termo recorrente observado nas páginas selecionadas.", decision: "pending" as const, note: "" }));
       const structuralDecisions = Object.entries(benchmark.metrics).map(([metricKey, metric]) => ({ key: metricKey, label: metric.label, observedCount: Math.round(metric.mean), sampleSize: metric.sampleSize, observedText: `Observado: média ${metric.mean.toFixed(1)}; faixa ${metric.typicalRange[0].toFixed(0)}–${metric.typicalRange[1].toFixed(0)}.`, level: "optional" as const, enforcement: "advisory" as const, humanNote: "" }));
       const competitorCount = paginasDoModelo.length;
@@ -4562,8 +4750,21 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * "18 · 6 · 10 · 3" somava 19 e ninguém via onde estava a sobra. Agora o
        * que não teve desfecho aparece como sobra explícita em vez de sumir na
        * diferença entre dois números.
+       *
+       * 2026-10-08 · E A CONTA É A DA FASE 1. A sobra era uma subtração
+       * (selecionadas − reutilizadas − lidas − falhas) que fechava em zero
+       * mesmo com a página lida gravada sob outra URL — e a releitura, que
+       * conta por `radarExtractionAccount`, via uma pendente. A frase agora
+       * sai da MESMA função, sobre a amostra gravada: o que ela diz "sem
+       * desfecho" é exatamente o que a Fase 1 vai ver pendente.
        */
-      const semDesfecho = membership.selected - (membership.reused + pages.length + falhas.length);
+      const contaDepois = radarExtractionAccount({
+        selectedUrls: membership.selectedUrls,
+        extractionUrls: versaoDaAmostra.payload.extractions.map(page => page.url),
+        failureUrls: versaoDaAmostra.payload.extractionFailures.map(item => item.url),
+      });
+      const analisadasAgora = Math.max(0, contaDepois.analyzed - membership.reused);
+      const semDesfecho = contaDepois.pending;
       /*
        * A RETOMADA TEM CONTA PRÓPRIA — 18.10.1.
        *
@@ -4584,8 +4785,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         : [
           `${membership.selected} selecionada(s)`,
           `${membership.reused} reutilizada(s)`,
-          `${pages.length} analisada(s) agora`,
-          ...(falhas.length ? [`${falhas.length} sem acesso`] : []),
+          `${analisadasAgora} analisada(s) agora`,
+          ...(contaDepois.failed ? [`${contaDepois.failed} sem acesso`] : []),
           ...(semDesfecho ? [`${semDesfecho} sem desfecho nesta rodada`] : []),
         ].join(" · ");
       /*
@@ -4608,8 +4809,10 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         ? "Persistência remota e readback confirmados."
         : "A gravação remota não pôde ser confirmada."}`);
       if (salvo.persistenceMode === "remote" && salvo.readbackConfirmed) analiseConfirmada = `${conta}. Análise gravada e confirmada.`;
+      else motivoDaFalha = "a gravação remota não pôde ser confirmada";
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Não foi possível analisar as referências selecionadas.");
+      motivoDaFalha = error instanceof Error ? error.message : "Não foi possível analisar as referências selecionadas.";
+      setNotice(motivoDaFalha);
     } finally { releaseSerpAction(target.articleId, "extract"); }
     /*
      * ====== 2026-10-02 · D9 · A ANÁLISE SEM PENDÊNCIA TAMBÉM FINALIZA ======
@@ -4619,8 +4822,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * da posse da análise devolvida, a releitura do servidor decide. Sem
      * pendência, a mesma rotina do botão congela e a IA organiza o
      * artigo-modelo; com pendência, o aviso diz por quê e o botão continua.
+     *
+     * 2026-10-08 · a rodada extra devolve a frase a quem a pediu, sem
+     * encadear o automático uma segunda vez (no máximo 1 rodada extra).
      */
+    if (rodadaExtra) return { confirmada: analiseConfirmada, motivo: motivoDaFalha };
     if (analiseConfirmada) await finalizarGoogleSemPendencia(target, analiseConfirmada);
+    return { confirmada: analiseConfirmada, motivo: motivoDaFalha };
   };
   const reviewSerpForArticle = async (status: "approved" | "rejected") => {
     if (!activeRadarItem || reviewingArticleIdRef.current || reviewingArticleId || busyArticleId || serpActionRef.current || serpAction) return;
@@ -5385,7 +5593,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       lazyProvenance: lazyPesquisa[chaveLazy(activeRadarItem)]?.provenance || { state: "IDLE" as const, data: null, message: null },
       onLoadSample: () => void carregarParteDaPesquisa("sample"),
       onLoadProvenance: () => void carregarParteDaPesquisa("provenance"),
-    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} googleRefreeze={reparoDoCongelamento("GOOGLE")} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importableAgrupado} groupOf={version => rotuloDoGrupoDeImportacao.get(version.id) || null} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
+    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} googleRefreeze={reparoDoCongelamento("GOOGLE")} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importableAgrupado} groupOf={version => rotuloDoGrupoDeImportacao.get(version.id) || null} label={version => `${radarArticleDisplayTitle(version.payload.promise)} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
 }
 
 function RadarProfile({ r3, articleHref, architectHref }: { r3: RadarR3Model; articleHref: string | null; architectHref: string | null }) {

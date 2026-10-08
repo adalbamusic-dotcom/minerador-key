@@ -217,6 +217,7 @@ test("as falhas de extração são dado por página, não um número solto", () 
   assert.match(painel, /item\.code/);
 
   const page = readFileSync(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
-  assert.match(page, /extractionFailures: falhas/);
+  /* 2026-10-08 · a falha gravada é a da rodada fechada por chave (com as `no_outcome` e as herdadas). */
+  assert.match(page, /extractionFailures: rodadaFechada\.failures/);
   assert.match(page, /code: registro\.error\.code \|\| "fetch_failed"/);
 });

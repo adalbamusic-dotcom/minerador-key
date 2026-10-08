@@ -101,7 +101,7 @@ test("D · sete selecionadas produzem uma análise lógica, em lotes invisíveis
    * a guarda virou `!pages.length && !retomandoConsolidacao`.
    */
   const inicioDoLaco = corpo.indexOf("let fila = retomandoConsolidacao");
-  const fimDoLaco = corpo.indexOf("if (!pages.length && !retomandoConsolidacao) throw new Error");
+  const fimDoLaco = corpo.indexOf("const semPaginaNaAmostra = !pages.length && !retomandoConsolidacao && !membership.reused;");
   assert.notEqual(inicioDoLaco, -1, "âncora inicial do laço");
   assert.notEqual(fimDoLaco, -1, "âncora final do laço");
   const laco = corpo.slice(inicioDoLaco, fimDoLaco);
@@ -127,7 +127,7 @@ test("D · sete selecionadas produzem uma análise lógica, em lotes invisíveis
 
 test("E · lote parcial não promove modelo, relatório nem necessidades", () => {
   const fonte = page();
-  const fimDoLoop = fonte.indexOf("if (!pages.length && !retomandoConsolidacao) throw new Error");
+  const fimDoLoop = fonte.indexOf("const semPaginaNaAmostra = !pages.length && !retomandoConsolidacao && !membership.reused;");
   assert.ok(fimDoLoop > 0);
   // Tudo que vira resultado corrente é construído DEPOIS do último lote.
   for (const marco of ["const benchmark = buildRadarBenchmark", "buildRadarCompetitiveReport({", "createRadarAnalysisSuccessor(versaoDaAmostra, { ...candidatePayload"]) {
@@ -147,8 +147,14 @@ test("E · lote parcial não promove modelo, relatório nem necessidades", () =>
 
 test("F · o resultado final usa o conjunto completo, e a falha parcial é dita", () => {
   const fonte = page();
-  assert.ok(fonte.includes("const pages: RadarExtractionPage[] = [];"), "as páginas acumulam entre lotes");
-  assert.ok(fonte.includes("pages.push(parsed.data)"));
+  /*
+   * 2026-10-08 · as respostas acumulam entre lotes com a CHAVE e a URL pedida;
+   * quem fecha a rodada — página com a URL da seleção ou falha declarada — é
+   * `radarReconcileExtractionRound`, depois do último lote.
+   */
+  assert.ok(fonte.includes("const respostas: RadarExtractionRoundResponse[] = [];"), "as respostas acumulam entre lotes");
+  assert.ok(fonte.includes("respostas.push({ key: resposta.key,"));
+  assert.ok(fonte.includes("const pages = rodadaFechada.pages;"));
   /*
    * A frase virou uma lista montada, para a sobra aparecer em vez de sumir na
    * diferença entre dois números. As contas separadas continuam obrigatórias.
@@ -156,11 +162,13 @@ test("F · o resultado final usa o conjunto completo, e a falha parcial é dita"
   for (const conta of [
     "${membership.selected} selecionada(s)",
     "${membership.reused} reutilizada(s)",
-    "${pages.length} analisada(s) agora",
-    "${falhas.length} sem acesso",
+    "${analisadasAgora} analisada(s) agora",
+    "${contaDepois.failed} sem acesso",
     "${semDesfecho} sem desfecho nesta rodada",
   ]) assert.ok(fonte.includes(conta), `a conta "${conta}" precisa aparecer separada`);
-  assert.ok(fonte.includes("membership.selected - (membership.reused + pages.length + falhas.length)"), "a sobra é calculada, não presumida");
+  /* 2026-10-08 · a sobra sai da MESMA régua da Fase 1, sobre a amostra gravada — não de uma subtração. */
+  assert.ok(fonte.includes("const contaDepois = radarExtractionAccount({"), "a sobra é contada, não presumida");
+  assert.ok(fonte.includes("const semDesfecho = contaDepois.pending;"));
   assert.ok(fonte.includes("página(s) pendente(s) pôde ser analisada"), "pendente nunca é chamado de selecionada");
 });
 

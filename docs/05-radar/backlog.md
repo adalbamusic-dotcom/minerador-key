@@ -1,5 +1,48 @@
 # Backlog — Radar
 
+## Revisão da Fase 1 automática e da lentidão (corretor) — 2026-10-08
+
+- [x] F1 · amostra vazia com todas as candidatas recusadas: as falhas são gravadas (sem carimbo), a análise para sem consolidar e a frase nomeia "Refazer Pesquisa Google" na área Pesquisa. Detalhe em `estado-atual.md`.
+- [x] F2 · modelo, suficiência, resumo e pacote congelado contam só as páginas da seleção (a extração órfã fica fora).
+- [x] F3 · as canônicas entram na conta da Fase 1 só com a curadoria da pesquisa confirmada (sem "Finalizar" que a prontidão recusa).
+- [x] F4 e F5 · o ⓘ do botão da Fase 1 diz a regra do perfil (Google com todas as paradas; YouTube e Amazon com a D9).
+- [x] V3 · a rota de detalhe fecha a rodada por chave e grava as falhas; V4 · duas referências que terminam na mesma página contam o conteúdo uma vez (`redirect_duplicate`).
+- [x] MEMO-1 · a posição da rolagem da marca anterior é gravada na troca com evento intercalado (compartilhado, aditivo).
+- [x] V1 · pin de `identity-keyword-colors` alinhado ao JSX novo da coluna Artigo (`test:visual-system` sem essa falha); V6 · higiene.
+- [ ] **Dono (homologação):** 1 clique em "Analisar concorrência · e finaliza (+ 1 chamada de IA)" em "marketing digital para dentistas" e conferir `finalizedBundle` no readback; num artigo em que nenhuma página abre, conferir a frase com "Refazer Pesquisa Google"; no YouTube/Amazon, o ⓘ de "Iniciar Pesquisa …" sem a regra do Google.
+- [ ] Decidir (V5): a rodada com amostra existente em que 100% das candidatas falham por motivo passageiro (timeout, `fetch_failed`) depois do único retry também congela com elas fora; se não quiser, não encadear o congelamento nesse caso ou avisar na frase.
+- [ ] Rota de detalhe: a fila ainda relê as candidatas que falharam a cada clique (conta só extrações).
+- [ ] Página gravada antes desta revisão com o conteúdo de outra referência (redirect) não é detectada; depende de guardar a URL final (`fetchedUrl`, item já listado abaixo).
+
+## Seletor e scroll lentos — 2026-10-08
+
+- [x] A view da investigação de cada linha é lembrada com a entrada inteira na chave (`createRadarDeepResearchViewMemo`); regra C do RADAR_SELECTION_LIGHT_1 revisada com a exceção nomeada. Detalhe e medidas em `estado-atual.md`.
+- [x] `buildRadarExternalSourceResearch` lê tipo, tokens e raízes de cada string uma vez por chamada (saída idêntica, 36× a 78× mais rápido).
+- [x] Laço da área Especialista: redutor com bail-out no Radar; constante congelada e revisão só com aviso novo na rota de detalhe.
+- [x] `useNoticeBridge` sem re-render a cada aviso (contexto só de publicação, compartilhado, aditivo).
+- [x] Posição da rolagem da planilha gravada quando a rolagem para (compartilhado, aditivo).
+- [ ] **Dono (homologação):** no Radar da marca, clicar em linhas, marcar checkboxes, rolar a planilha e abrir o Especialista num artigo não finalizado; se ainda travar, gravar um perfil do Chrome DevTools rolando a planilha.
+- [ ] Opcional: um clique ainda faz 3 a 4 renders (a leitura de vídeos troca de chave com o artigo); agrupar as releituras da abertura com `startTransition` (P2) se a abertura voltar a pesar.
+- [ ] Verificar se o canal Realtime da leitura de vídeos chega a SUBSCRIBED em produção (sem ele, tique de 10 s com 2 renders).
+- [ ] Dono (SQL, opcional): quantos links observados as extrações da marca guardam por página (`jsonb_array_length(observedLinks)`); o extrator aceita até 300.
+
+## Automático da Fase 1 do Google: pendente eterno e frase de parada — 2026-10-08
+
+- [x] A rodada de extração fecha pela chave (`radarReconcileExtractionRound`): página com a URL da seleção, `no_outcome` para candidata sem desfecho, órfã legada removida, falha não tentada herdada. Rota devolve `requestedUrl` (aditivo).
+- [x] Régua única (`radarExtractionAccount`) na análise, na frase do fim da rodada e na Fase 1; candidatas canônicas e benchmark por URL normalizada.
+- [x] Decisão do dono: no Google, amostra insuficiente e consulta auxiliar que falhou finalizam com a limitação registrada; página ainda pendente é lida de novo uma vez antes de decidir.
+- [x] A frase de parada nomeia o botão que a tela mostra (`radarPhase1VisibleLabel`) e diz a área; catálogo MCP e spec atualizados. Detalhe em `estado-atual.md`.
+- [ ] **Dono (homologação):** 1 clique em "Analisar concorrência · e finaliza (+ 1 chamada de IA)" em "marketing digital para dentistas" e conferir `finalizedBundle` gravado no readback.
+- [ ] Decidir se YouTube e Amazon seguem a mesma regra (hoje ainda param por amostra insuficiente e consulta que falhou).
+- [ ] Tarefa separada: o id da extração (`competitor:` + base64 cortado em 32) colide em páginas do mesmo domínio; trocar por hash da URL inteira depois de mapear quem deduplica por `page.id`.
+- [ ] Decidir se a página guarda a URL final (`fetchedUrl` opcional no `RadarExtractionPageSchema`, contrato `.strict()` compartilhado).
+- [ ] "Reparar congelamento" ainda diz "Finalizar pesquisa" fixo quando a releitura falha.
+
+## Planilha sem "Cobrir com clareza o tema" e sem a coluna Especialista — 2026-10-08
+
+- [x] Título sem a moldura da promessa padrão na planilha, no cabeçalho do Workbench, no perfil e no diálogo de importação (`radarArticleDisplayTitle`); coluna Especialista retirada da planilha.
+- [ ] **Dono (homologação):** conferir a planilha (coluna Artigo sem a frase, sem a coluna Especialista) e o cabeçalho do artigo aberto.
+
 ## Correção: fonte que falha na verificação recusava a análise — 2026-10-08
 
 - [x] `verifyRadarSources` devolve `sourceId` e domínio; a tela normaliza a falha (`radarSourceVerificationFailureRecords`) e só repete id do plano. Detalhe em `estado-atual.md`.

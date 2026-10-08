@@ -193,7 +193,13 @@ test("RADAR 18.10.1 · B, C e D — a retomada trabalha sobre as páginas já gr
   /* C · nenhuma página é lida de novo: a amostra é a versão remota lida do banco. */
   assert.match(corpo, /const remoto = await pipeline\.readRemoteRadarAnalyses\(target\.articleId\);/);
   assert.match(corpo, /versaoDaAmostra = base\.version as RadarAnalysisVersion;/);
-  assert.match(corpo, /if \(!pages\.length && !retomandoConsolidacao\) throw new Error/);
+  /*
+   * 2026-10-08 · a retomada nunca cai no ramo da amostra vazia (que grava só
+   * as falhas e para): a condição exclui `retomandoConsolidacao`.
+   */
+  assert.match(corpo, /const semPaginaNaAmostra = !pages\.length && !retomandoConsolidacao && !membership\.reused;/);
+  /* E na retomada a rodada não tem candidata enviada: nada vira `no_outcome`. */
+  assert.match(corpo, /candidates: retomandoConsolidacao \? \[\] : candidates\.map\(/);
 
   /*
    * E a única chamada de extração continua dentro do laço de lotes, que fica
@@ -211,7 +217,7 @@ test("RADAR 18.10.1 · B, C e D — a retomada trabalha sobre as páginas já gr
    */
   assert.match(corpo, /let fila = retomandoConsolidacao \? \[\] : \[\.\.\.candidates\];/, "PAGE_EXTRACTION_ON_RETRY = 0");
 
-  const laco = trecho(corpo, "let fila = retomandoConsolidacao", "if (!pages.length && !retomandoConsolidacao) throw new Error");
+  const laco = trecho(corpo, "let fila = retomandoConsolidacao", "const semPaginaNaAmostra = !pages.length && !retomandoConsolidacao && !membership.reused;");
   assert.match(laco, /radar-analysis\/extract/, "a extração vive no laço");
   assert.match(laco, /for \(const lote of radarExtractionBatches\(fila\)\)/, "e ela só roda sobre a fila");
 

@@ -23,6 +23,7 @@ import { buildRadarEditorialComparison, type RadarEditorialComparison } from "./
 import { buildRadarExternalEvidenceCandidates, type RadarExternalEvidenceCandidate, type RadarInternalLinkResearch } from "./link-and-source-research.ts";
 import { buildRadarResearchQueryPlan, type RadarResearchQueryPlan } from "./research-query-plan.ts";
 import { buildRadarResearchReferences, radarNormalizedUrl, type RadarResearchReference } from "./research-reference.ts";
+import { radarExtractionAccount, type RadarExtractionAccount } from "./extraction-round.ts";
 import { buildRadarResearchCurationView, type RadarResearchCurationView, type RadarResearchDecision } from "./research-curation.ts";
 import { radarPhase1Action, type RadarPhase1Action } from "./serp-phase1.ts";
 import { radarResearchResumption, type RadarResearchResumption } from "./research-resumption.ts";
@@ -55,6 +56,13 @@ export type RadarDeepResearchView = {
   action: RadarDeepResearchAction;
   /** A ação única da Fase 1: iniciar, analisar ou finalizar. */
   phase1: RadarPhase1Action;
+  /**
+   * 2026-10-08 · A CONTA DA AMOSTRA QUE DECIDE A FASE 1 — a mesma régua da análise.
+   *
+   * Exposta para o automático saber QUAIS páginas ficaram pendentes (e ler só
+   * elas numa rodada extra), sem recontar por outro caminho.
+   */
+  sample: RadarExtractionAccount;
   /**
    * O QUE JÁ EXISTE E O QUE FALTA, POR CONSULTA — Gate 18.9.
    *
@@ -133,6 +141,14 @@ export function buildRadarDeepResearchView(input: {
   extractionFailures?: number;
   /** As URLs que falharam nesta versão. Sem elas, falha vira pendente eterno. */
   extractionFailureUrls?: readonly string[];
+  /**
+   * 2026-10-08 · AS CANÔNICAS QUE A CURADORIA DA SERP SELECIONOU, quando há.
+   *
+   * A análise lê também estas (`radarAnalysisCandidates`) e as conta na
+   * amostra. Sem elas aqui, a Fase 1 contaria uma amostra menor que a da
+   * análise — duas réguas. Opcional: sem o dado, a conta é a de antes.
+   */
+  canonicalSelectedUrls?: readonly string[];
   selectedReferences?: number;
   curationConfirmed?: boolean;
   model?: RadarCompetitiveModel | null;
@@ -273,6 +289,73 @@ export function buildRadarDeepResearchView(input: {
   });
 
   /*
+   * A AMOSTRA É A DA PESQUISA — não a da curadoria canônica legada.
+   *
+   * O SMOKE ENCONTROU ISTO. Com 18 referências selecionadas automaticamente e
+   * 12 páginas lidas, o painel dizia "Análise não iniciada" e "Investigação sem
+   * amostra" ao lado de um card dizendo "Modelo competitivo: Pronto".
+   *
+   * A suficiência recebia `selectedReferences` da curadoria da SERP CANÔNICA —
+   * a tabela do fluxo antigo, que ninguém confirma mais desde que a seleção
+   * passou a ser automática sobre o universo multi-query. Zero selecionadas ali
+   * significava BLOCKED aqui, enquanto o modelo competitivo era construído
+   * normalmente a partir das páginas reais.
+   *
+   * Duas autoridades sobre a mesma amostra, e a que a tela mostrava era a que
+   * não estava mais sendo alimentada. A curadoria da PESQUISA já vive nesta
+   * view, calculada acima; é dela que a conta sai quando existe investigação.
+   *
+   * 2026-10-08 · subiu para antes do modelo: a amostra abaixo depende dela, e
+   * o modelo depende da amostra.
+   */
+  const curadoriaDaPesquisa = input.record && curation.availableCount > 0 ? curation : null;
+  const referenciasSelecionadas = curadoriaDaPesquisa ? curadoriaDaPesquisa.selectedCount : input.selectedReferences || 0;
+  const curadoriaConfirmada = curadoriaDaPesquisa
+    ? curadoriaDaPesquisa.confirmed && curadoriaDaPesquisa.selectedCount > 0
+    : input.curationConfirmed !== false && (input.selectedReferences || 0) > 0;
+
+  /*
+   * A CONTA DA AMOSTRA, SOBRE A SELEÇÃO DA PESQUISA.
+   *
+   * Na Fase 1 a curadoria automática cobre o universo inteiro — inclusive as
+   * URLs da SERP canônica, que também são referências. Então é ela que define
+   * a amostra, e a conta fecha aqui: selecionadas = analisadas + sem acesso +
+   * pendentes.
+   *
+   * 2026-10-08 · A MESMA RÉGUA DA ANÁLISE. A conta é `radarExtractionAccount`,
+   * a mesma que a análise usa na frase do fim da rodada
+   * (`buildRadarAnalysisMembership`). Antes eram duas contas, e a análise
+   * fechava "17 = 11 + 1 + 5" enquanto esta via uma pendente.
+   *
+   * 2026-10-08 · AS CANÔNICAS SÓ ENTRAM COM A CURADORIA CONFIRMADA. A
+   * suficiência só conhece a curadoria confirmada; com ela obsoleta ou
+   * ausente, somar as canônicas aqui levava a Fase 1 a oferecer "Finalizar
+   * pesquisa" que a prontidão recusa ("A curadoria ainda não foi
+   * confirmada"), sem nenhum botão que confirmasse. Sem confirmação, a conta
+   * volta a ser a de antes — e o caminho, "Refazer Pesquisa Google".
+   */
+  const sample = radarExtractionAccount({
+    selectedUrls: [...(curadoriaConfirmada ? input.canonicalSelectedUrls || [] : []), ...curation.selectedRows.map(row => row.reference.url)],
+    extractionUrls: extractions.map(page => page.url),
+    failureUrls: input.extractionFailureUrls || [],
+  });
+  /*
+   * 2026-10-08 · O MODELO É A AMOSTRA — A EXTRAÇÃO ÓRFÃ NÃO ENTRA.
+   *
+   * A órfã é a página gravada sob uma URL que a seleção não tem (a URL final
+   * que o defeito do redirect gravou, ou a de uma referência desmarcada). Ela
+   * só sai quando a releitura daquela página dá certo; se a releitura falha,
+   * ela ficava — e o modelo, a suficiência e o pacote congelado contavam o
+   * conteúdo de uma referência que a mesma conta chamava de "sem acesso"
+   * (12 analisadas + 6 sem acesso para 17 selecionadas). Com página na
+   * amostra, o modelo é ela, recortada pela seleção — como o handler já faz
+   * em `paginasDoModelo`. Sem página nenhuma na amostra, a leitura continua
+   * mostrando o que há (cache), como antes.
+   */
+  const naAmostra = new Set(sample.analyzedUrls.map(radarNormalizedUrl));
+  const paginasDaAmostra = sample.analyzed > 0 ? extractions.filter(page => naAmostra.has(radarNormalizedUrl(page.url))) : extractions;
+
+  /*
    * O MODELO ESTRUTURAL NASCE AQUI, E SÓ AQUI.
    *
    * Ele era montado em dois lugares: a aba calculava um a partir das extrações
@@ -290,7 +373,7 @@ export function buildRadarDeepResearchView(input: {
 
   const structural = extractions.length
     ? buildRadarCompetitiveModel({
-      pages: extractions,
+      pages: paginasDaAmostra,
       query: input.snapshot?.query || plan.primary?.keyword || null,
       observedIntent: input.diagnostic?.dominantIntent || null,
       principal: plan.primary?.keyword || null,
@@ -311,7 +394,7 @@ export function buildRadarDeepResearchView(input: {
     observedFormats: input.diagnostic?.dominantFormats || [],
   });
 
-  const externas = buildRadarExternalEvidenceCandidates({ pages: extractions });
+  const externas = buildRadarExternalEvidenceCandidates({ pages: paginasDaAmostra });
 
   /*
    * A INTENÇÃO DECLARADA VEM DA COMPOSIÇÃO, NÃO DE UM PALPITE DA TELA.
@@ -321,28 +404,6 @@ export function buildRadarDeepResearchView(input: {
    */
   const sinalComercial = radarDeclaredCommercialSignal(context);
   const comerciaisObservados = (universe?.byClass.COMMERCIAL_COMPETITOR || 0) + (universe?.byClass.PRODUCT_REFERENCE || 0);
-  /*
-   * A AMOSTRA É A DA PESQUISA — não a da curadoria canônica legada.
-   *
-   * O SMOKE ENCONTROU ISTO. Com 18 referências selecionadas automaticamente e
-   * 12 páginas lidas, o painel dizia "Análise não iniciada" e "Investigação sem
-   * amostra" ao lado de um card dizendo "Modelo competitivo: Pronto".
-   *
-   * A suficiência recebia `selectedReferences` da curadoria da SERP CANÔNICA —
-   * a tabela do fluxo antigo, que ninguém confirma mais desde que a seleção
-   * passou a ser automática sobre o universo multi-query. Zero selecionadas ali
-   * significava BLOCKED aqui, enquanto o modelo competitivo era construído
-   * normalmente a partir das páginas reais.
-   *
-   * Duas autoridades sobre a mesma amostra, e a que a tela mostrava era a que
-   * não estava mais sendo alimentada. A curadoria da PESQUISA já vive nesta
-   * view, calculada acima; é dela que a conta sai quando existe investigação.
-   */
-  const curadoriaDaPesquisa = input.record && curation.availableCount > 0 ? curation : null;
-  const referenciasSelecionadas = curadoriaDaPesquisa ? curadoriaDaPesquisa.selectedCount : input.selectedReferences || 0;
-  const curadoriaConfirmada = curadoriaDaPesquisa
-    ? curadoriaDaPesquisa.confirmed && curadoriaDaPesquisa.selectedCount > 0
-    : input.curationConfirmed !== false && (input.selectedReferences || 0) > 0;
 
   /*
    * ============ 1.3 · §2 e §5 · A FOTOGRAFIA É A AUTORIDADE ============
@@ -363,9 +424,9 @@ export function buildRadarDeepResearchView(input: {
     hasSnapshot: Boolean(input.snapshot),
     curationConfirmed: curadoriaConfirmada,
     selected: fotografia ? fotografia.search.selectedReferences : referenciasSelecionadas,
-    analyzed: fotografia ? fotografia.sample.analyzedSuccess : extractions.length,
+    analyzed: fotografia ? fotografia.sample.analyzedSuccess : paginasDaAmostra.length,
     failed: fotografia ? fotografia.sample.failedFinal : input.extractionFailures || 0,
-    comparable: fotografia ? fotografia.sample.comparablePages : extractions.filter(isComparableRadarExtraction).length,
+    comparable: fotografia ? fotografia.sample.comparablePages : paginasDaAmostra.filter(isComparableRadarExtraction).length,
     intentEvidence: {
       declaredIntent: sinalComercial.expectsCommercialSerp
         ? sinalComercial.declaredIntents.join(" · ")
@@ -389,7 +450,7 @@ export function buildRadarDeepResearchView(input: {
     universe,
     references,
     selectedUrls: curation.selectedRows.map(row => row.reference.url),
-    pages: extractions,
+    pages: paginasDaAmostra,
     failedUrls: input.extractionFailureUrls || [],
     structural,
     comparison,
@@ -415,7 +476,7 @@ export function buildRadarDeepResearchView(input: {
     plan,
     universe,
     record: input.record || null,
-    pagesAnalyzed: extractions.length,
+    pagesAnalyzed: paginasDaAmostra.length,
     pagesFailed: input.extractionFailures || 0,
     recurringTopics: (input.model?.classifiedTopics || []).filter(topic => topic.classification === "RECURRENT_TOPIC").length,
     relevantGaps: comparison.gaps,
@@ -428,20 +489,10 @@ export function buildRadarDeepResearchView(input: {
   const record = input.record || null;
   const state = radarDeepResearchState({ record, currentFingerprint: fingerprint, running: Boolean(input.running) });
 
-  /*
-   * A CONTA DA AMOSTRA, SOBRE A SELEÇÃO DA PESQUISA.
-   *
-   * Na Fase 1 a curadoria automática cobre o universo inteiro — inclusive as
-   * URLs da SERP canônica, que também são referências. Então é ela que define
-   * a amostra, e a conta fecha aqui: selecionadas = analisadas + sem acesso +
-   * pendentes.
-   */
-  const selecionadas = new Set(curation.selectedRows.map(row => row.reference.normalizedUrl));
-  const extraidas = new Set(extractions.map(page => radarNormalizedUrl(page.url)));
-  const falhadas = new Set((input.extractionFailureUrls || []).map(radarNormalizedUrl).filter(Boolean));
-  const analisadas = [...selecionadas].filter(url => extraidas.has(url));
-  const semAcesso = [...selecionadas].filter(url => !extraidas.has(url) && falhadas.has(url));
-  const pendentes = [...selecionadas].filter(url => !extraidas.has(url) && !falhadas.has(url));
+  /* A conta da amostra (`sample`) é montada lá em cima, antes do modelo: ele é ela. */
+  const analisadas = sample.analyzedUrls;
+  const semAcesso = sample.failedUrls;
+  const pendentes = sample.pendingUrls;
 
   /*
    * O QUE FALTA, POR CONSULTA — Gate 18.9.
@@ -475,7 +526,7 @@ export function buildRadarDeepResearchView(input: {
     hasPrimaryQuery: Boolean(plan.primary?.keyword),
     running: Boolean(input.running),
     mode: record?.primarySearchMode || input.mode,
-    selected: selecionadas.size,
+    selected: sample.selected,
     pending: pendentes.length,
     failed: semAcesso.length,
     analyzed: analisadas.length,
@@ -532,6 +583,7 @@ export function buildRadarDeepResearchView(input: {
     state,
     action,
     phase1,
+    sample,
     resumption,
     persistence,
     record,

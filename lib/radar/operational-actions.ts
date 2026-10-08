@@ -27,6 +27,7 @@
  */
 
 import type { RadarPhase1ActionId } from "./serp-phase1.ts";
+import type { RadarPrimarySearchMode } from "./search-mode.ts";
 
 /* ============================== as ações ================================ */
 
@@ -216,14 +217,38 @@ export function radarAutoFinalizeStartNote(etapa: "coleta" | "análise" | "colet
 }
 
 /**
+ * ====== 2026-10-08 · O GOOGLE TERMINA A FASE 1 SOZINHO — decisão do dono ======
+ *
+ * "Ele já teria que ter feito isso de forma automática sem importar os
+ * custos." A análise do Google deixou de parar por amostra insuficiente e por
+ * consulta auxiliar que falhou: as duas viram limitação registrada no pacote
+ * congelado, como no botão manual. Página que fica sem desfecho é lida de novo
+ * uma vez. Só param o que pede decisão humana ou não tem o que congelar.
+ * YouTube e Amazon continuam com a nota de `radarAutoFinalizeStartNote`.
+ */
+export function radarGoogleAutoFinalizeStartNote(): string {
+  /*
+   * 2026-10-08 · a lista de paradas é a de `radarGoogleAutoFinalizeDecision` e
+   * do automático (`finalizarGoogleSemPendencia`), não uma versão menor: o ⓘ
+   * prometia três paradas, e o automático também para no que pede pesquisa
+   * nova, na página que segue sem desfecho e na releitura que não veio.
+   */
+  return `Ao terminar, a análise também finaliza a investigação e a IA organiza o artigo-modelo da SERP (${RADAR_AUTO_FINALIZE_AI_COST}). Página sem acesso, amostra insuficiente e consulta auxiliar que falhou não seguram: a investigação finaliza com a limitação registrada. Página que ficar sem desfecho é lida de novo uma vez antes de decidir. Param: a intenção da SERP em conflito com a declarada; nenhuma página lida; o que pede pesquisa nova (fundamento do artigo mudado, consulta paga ainda faltando); página que segue sem desfecho depois da leitura extra; e a gravação ou a releitura do servidor não confirmadas — e a tela diz por quê e onde continuar.`;
+}
+
+/**
  * Quando o automático parou: o motivo e o caminho manual, na mesma frase.
  * `manualLabel` nulo quando a tela não tem, naquele estado, botão que resolva —
  * a frase não promete um botão que não está lá.
+ *
+ * 2026-10-08 · `area` diz ONDE está o botão. "Revise e use…" deixava o dono
+ * perguntando "vou revisar onde?" — e o botão nomeado nem era o da tela.
  */
-export function radarAutoFinalizePendingNotice(reason: string, manualLabel: string | null): string {
+export function radarAutoFinalizePendingNotice(reason: string, manualLabel: string | null, area?: string): string {
   const motivo = reason.trim().replace(/[.;:]?$/, ".");
   /* "A coleta…" vira "a coleta…" depois dos dois-pontos; sigla ("SERP…") fica como está. */
   const frase = /^[A-ZÀ-Ý][a-zà-ÿ ]/.test(motivo) ? `${motivo.charAt(0).toLowerCase()}${motivo.slice(1)}` : motivo;
+  if (manualLabel && area) return `Não finalizou sozinha: ${frase} Para continuar, na área ${area}, botão "${manualLabel}".`;
   return manualLabel
     ? `Não finalizou sozinha: ${frase} Revise e use "${manualLabel}" quando decidir.`
     : `Não finalizou sozinha: ${frase}`;
@@ -234,6 +259,17 @@ export const RADAR_AUTO_FINALIZE_DONE_NOTICE =
   "Finalizada sozinha, sem pendência. A IA está organizando o artigo-modelo da SERP; se ela falhar, a investigação continua finalizada.";
 
 /**
+ * 2026-10-08 · Congelou COM limitação declarada (amostra insuficiente,
+ * consulta auxiliar que falhou): a frase diz qual, em vez de "sem pendência".
+ * Sem limitação, é exatamente `RADAR_AUTO_FINALIZE_DONE_NOTICE`.
+ */
+export function radarAutoFinalizeDoneNotice(limitations: readonly string[]): string {
+  const ditas = limitations.map(item => item.trim().replace(/[.;:]+$/, "")).filter(Boolean);
+  if (!ditas.length) return RADAR_AUTO_FINALIZE_DONE_NOTICE;
+  return `Finalizada sozinha com limitação registrada: ${ditas.join("; ")}. A IA está organizando o artigo-modelo da SERP; se ela falhar, a investigação continua finalizada.`;
+}
+
+/**
  * O BOTÃO DA FASE 1 QUE ENCADEIA O CONGELAMENTO DIZ ISSO — Google.
  *
  * No Google, quem termina a investigação é a análise da concorrência: é nela
@@ -241,12 +277,21 @@ export const RADAR_AUTO_FINALIZE_DONE_NOTICE =
  * dizem o custo; o do START diz o que vem depois dele. Ação, id e handler não
  * mudam — só o texto.
  */
-export function radarPhase1WithAutoFinalize<T extends { id: string; label: string; info: string | null }>(acao: T): T {
+export function radarPhase1WithAutoFinalize<T extends { id: string; label: string; info: string | null }>(acao: T, mode: RadarPrimarySearchMode = "WEB"): T {
+  /*
+   * 2026-10-08 · a nota do Google diz a regra nova (finaliza com limitação;
+   * só para o que é decisão humana) — e SÓ no Google. O mesmo botão da Fase 1
+   * mostra "Iniciar Pesquisa YouTube/Amazon", e lá o automático continua na
+   * D9 (`radarProfileAutoFinalizeDecision` para por amostra incompleta e por
+   * consulta que falhou): prometer "não seguram" ali seria falso. O modo é o
+   * da ação (o do registro, ou o escolhido); sem ele, Google, como antes.
+   */
+  const nota = mode === "WEB" ? radarGoogleAutoFinalizeStartNote() : radarAutoFinalizeStartNote("análise");
   if (acao.id === "ANALYZE_COMPETITION") {
-    return { ...acao, label: radarAutoFinalizeButtonLabel(acao.label), info: [acao.info, radarAutoFinalizeStartNote("análise")].filter(Boolean).join(" ") };
+    return { ...acao, label: radarAutoFinalizeButtonLabel(acao.label), info: [acao.info, nota].filter(Boolean).join(" ") };
   }
   if (acao.id === "START_RESEARCH") {
-    return { ...acao, info: [acao.info, `Depois dela vem a análise da concorrência. ${radarAutoFinalizeStartNote("análise")}`].filter(Boolean).join(" ") };
+    return { ...acao, info: [acao.info, `Depois dela vem a análise da concorrência. ${nota}`].filter(Boolean).join(" ") };
   }
   return acao;
 }

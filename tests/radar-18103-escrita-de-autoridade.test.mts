@@ -50,7 +50,8 @@ test("18.10.3 · 1 — retomada sobre a v24 remota não extrai página nenhuma",
   const corpo = trecho(pagina(), "const analyzeSerpSelection = async", "const reviewSerpForArticle = async");
 
   assert.match(corpo, /let fila = retomandoConsolidacao \? \[\] : \[\.\.\.candidates\];/, "PAGE_EXTRACTION_CALLS = 0");
-  assert.match(corpo, /const paginasDoModelo = retomandoConsolidacao \? paginasDaAmostra : pages;/);
+  /* 2026-10-08 · o modelo sai da amostra GRAVADA (recortada pela seleção), na retomada e na rodada normal. */
+  assert.match(corpo, /const paginasDoModelo = naSelecao\.size \? paginasDaAmostra\.filter\(/);
   assert.equal(/collectSerp\(|collectAuxiliarySerp|dataforseo/i.test(corpo), false, "SERP_CALLS = 0");
 });
 
