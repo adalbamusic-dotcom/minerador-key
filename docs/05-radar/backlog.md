@@ -1,5 +1,93 @@
 # Backlog — Radar
 
+## Revisão do CSV de vídeo competitivo (três revisores) — 2026-10-07
+
+- [x] Trava de fonte com polaridade em (b) e (c): a frase que nega o que o mercado repete (a tese do dono, do lado da fonte) fica no texto publicável; a que repete trava; a afirmação que a fonte contradiz sai de (b) e fica só em (c), com o motivo certo. Teste 31.
+- [x] D10 no rótulo da Skill de voz no CSV de vídeo ("versão corrente na Marca"; a ativa continua "ativa"); varredura do CSV inteiro com a Skill em rascunho e aguardando aprovação, e "rascunho"/"falta conferir" na lista proibida. Testes 26 e "D10 e teto".
+- [x] `diretrizes_de_roteiro` e `cortes_para_redes` encolhem por níveis e dizem; o fim do roteiro e a lista "Fica fora" inteira continuam no pior caso medido. Teste 32.
+- [x] Abertura dos cortes com os Shorts pertinentes e o remetimento a `concorrencia_curtos_e_carrossel`; "sem dado de concorrência" só sem o dado.
+- [x] Detector da regra 17: plataforma como sujeito de ordenar/entregar/punir, "têm mais alcance", "o alcance caiu"; preço e recurso só com plataforma; motivo próprio da conversão. Teste 25c.
+- [x] Capa do carrossel com o H1 travado: a pergunta da abertura da planta, nunca a premissa de produção. Teste 25b.
+- [x] Ideia que nomeia 2+ passos: o corte mostra esses passos, uma tela cada (Mostrar, Alinhamento, Origem e storyboard iguais); verbo comum fora do assunto do alinhamento. Testes 25 e 29.
+- [x] Cadeia com a faixa do formato que a sequência segue e a liderança do outro formato dita; divergência de formato contra a amostra inteira pela régua de hoje; lentes extras com data e "fora do pacote".
+- [x] Testes do caminho da rota (lote com `lensDigests` e `lentesCongeladas`; núcleo entregando o resumo), de (b), (c), do portão da pergunta travada e de "outro público" fora da conta. Mutantes em cópia: 28 de 28 morrem.
+- [x] Notas: empate dito como empate; cabeçalho com todos em 0 de 4; três inferências da coluna de curtos ditas como inferência; frases de espera antigas concluídas (lacuna de formato, especialista único, estado do trecho, linha de topo); prompt com `cadeia_competitiva`; capa do storyboard "para diferenciar"; catálogo dos agentes.
+- [ ] **Dono (homologação):** reexportar o CSV de vídeo do artigo real e conferir na planilha: a tese na premissa e na capa, a lista "Fica fora", o corte 3 com os três passos, a abertura dos cortes apontando para a coluna de curtos e as datas das lentes extras (MANUAL_UI_VALIDATED = NO).
+- [ ] H2 e H3 publicados sem passar pela porta: o Título da lâmina (H2), o Visual "os passos em lista" (H3) e a tela do corte (o primeiro H3) não passam por `radarPlatformClaimWithoutSource`. Os H2/H3 do caso real são tópicos e passam bem; um H3 afirmativo ("Hashtags aumentam o alcance do perfil") seria publicado sem fonte. Decidir o que pôr no lugar do passo travado (rótulo neutro não existe na planta).
+- [ ] Piso GERAL para os curtos que o próprio Google mostra para a principal (o falso "fora do tema" de "SKINCARE NOITE" para "skin care noturno", item já aberto abaixo): o revisor propõe não aplicar FORA a eles; muda contagens e a amostra de curtos — colher casos na reexportação.
+- [ ] Alinhamento "a demonstração não nomeia o assunto do gancho (…): ajuste a cena na produção" continua instrução ao produtor; decidir se vira correção automática (ex.: o gancho do corte vira o primeiro passo).
+- [ ] Polaridade por palavras: negação que não toca a afirmação também libera ("enche a agenda, não importa o nicho"); detector por palavras dá falso positivo e falso negativo. Colher casos.
+- [ ] Orçamento das células: com o maior acréscimo medido, roteiro 9.907 e cortes 9.875 de 10.000 já encolhidos; o último nível do roteiro não encurta o Entregar (cortaria a fonte). Se novas linhas entrarem nessas colunas, medir de novo.
+
+## Conteúdos derivados competitivos no CSV de vídeo, Parte 1 (itens 6, 2, 8, 7 e 9) — 2026-10-07
+
+- [x] Item 6 · `concorrencia_curtos_e_carrossel`: curtos do Google sem repetição (autor do `source`, duração do m:ss do título, relevância pela régua do topo, cruzamento com o YouTube; vídeo comum fora da amostra), Shorts do YouTube com `shortsNotice` (aditivo), presença dos blocos por lente (`lentesCongeladas`), redes sociais no orgânico das quatro lentes (carrossel CONFIRMADO só com `img_index`; perfil fora), amostra pertinente de curtos, duração-alvo e carrosséis/posts que ranqueiam.
+- [x] A única leitura nova: o resumo orgânico das lentes extras da principal (cache, modo `digest`, grátis, por lote, só com `videoLensDigests` = modo vídeo da rota); o CSV para escrever e o MCP não a fazem; falha contida.
+- [x] Item 2 · `cadeia_competitiva` por id da planta (`rotuloDaEvidencia`/`origemDaSecao` exportados, aditivo; CSV para escrever e Redator iguais); páginas só por igualdade exata do rótulo, senão "não ligadas"; corte de cada capítulo = o da coluna de cortes (`escolhaDosCortes`); sem planta, origem de cada pergunta em `perguntas_do_publico`.
+- [x] Item 8 · `storyboard_visual`: estilo só com o que se afirma sem ver imagem, referências para abrir, checklist, identidade visual ausente na Marca, storyboard do vídeo, da thumbnail, dos cortes e do carrossel (texto na imagem); teste negativo de adjetivo de estilo.
+- [x] Item 7 · o vídeo do topo com transcrição na biblioteca da marca é dito pelo número; sem cruzamento, a frase de antes.
+- [x] Item 9 · prompt (cena de `storyboard_visual`, duração-alvo, visual do carrossel; estilo só o observado) e catálogo dos agentes (test:agent verde).
+- [x] Teto: `cadeia_competitiva` e `storyboard_visual` encolhem por igual e dizem; teste do caso extremo; D10 varrendo o CSV inteiro com as colunas novas.
+- [ ] **Dono (homologação):** reexportar o CSV de vídeo do artigo real e ler as três colunas novas — se os curtos e os posts listados são os que o Google mostra, se o carrossel confirmado abre como carrossel, se a cadeia liga as páginas certas e se o storyboard ajuda a produzir (MANUAL_UI_VALIDATED = NO).
+- [ ] Falso "fora do tema" nos curtos: a régua do topo lê raízes do título e do autor; um curto que diz "SKINCARE NOITE" para a busca "skin care noturno" sai fora da amostra. Colher casos na reexportação antes de mexer na régua (ela é a mesma da lista do topo).
+- [ ] A linha "Vídeos que a SERP do Google mostra" de `serp_youtube` continua com o título cru do Google ("… enviado por X em…", vindo da projeção portátil); a coluna nova já limpa a moldura — decidir se `serp_youtube` passa a usar a mesma limpeza.
+- [ ] **Parte 2 — decisões do dono (coleta nova; custos do desenho de 2026-10-07):**
+  - [ ] A · Transcrever 3 a 5 vídeos concorrentes do YouTube por artigo (MESMO e PRÓXIMO, melhor posição, um por canal): legenda pública com US$ 0 de provider (pacote `youtube-transcript`; endpoint não oficial que pode quebrar; termos de uso do YouTube: Ainda não verificado); Speech não se aplica (não converte URL do YouTube); legendas pela DataForSEO não existem no repositório (preço: Ainda não verificado); análise da transcrição por IA é paga e precisa de ação separada e explícita. Estrutural: SDD, migration (`source_role` e `youtube_run_id` em `radar_video_sources`) executada pelo usuário e o worker iniciado pelo usuário. Não recomendado: colar as URLs dos concorrentes na biblioteca da marca.
+  - [ ] B · Itens de vídeo e imagem nas lentes extras e `image_url` no cache: chave nova do payload, fora do digest (o digest é `.strict()`); contrato do cache é do Minerador (adendo à SDD das quatro lentes e regressão em `tests/serp-cache.test.mts`); só vale para coletas novas; recoleta por keyword US$ 0,0095 a 0,014 (estimado na SDD; só a canônica US$ 0,0035); validade de 30 dias; se o link do CDN da DataForSEO expira: Ainda não verificado.
+  - [ ] C · Coleta específica de Shorts no YouTube: o primeiro passo grátis (`shortsNotice`) já entrou; pagas: mandar `device`/`os` na tarefa ou uma consulta "Shorts" (se a palavra ajuda: Ainda não verificado); US$ 0,01 por consulta com profundidade 100 nos fixtures, profundidade 20 não medido; aditiva no plano de consultas, mas paga.
+  - [ ] D · Estilo de imagem por visão: não há chamada a modelo de visão em `lib/`; thumbnails têm URL grátis, imagens do Google dependem do B, posts do Instagram não têm URL de imagem; custo por imagem não medido; exige SDD de integração. Alternativa sem IA: classificação humana na tela, gravada como decisão humana (persistência nova, SDD).
+  - [ ] E · Reels, TikTok, Instagram e Google Imagens nativos: não há endpoint no repositório; Serper e RapidAPI proibidos; se a DataForSEO oferece e a que custo: Ainda não verificado; exige SDD de provider.
+
+## Pesquisa competitiva no CSV de vídeo, Parte 1 — 2026-10-07
+
+- [x] Item 5 · trava de fonte (`lib/radar/pending-claims.ts`): links externos de todas as seções, mercado sem fonte, mercado × fonte e detector da regra 17; porta única em `capitulosDaPlanta` e na premissa, capa e promessa do gancho; "Fica fora do texto publicável" e a contagem no `pode_gravar`; com fonte do pacote, a frase fica com "(fonte: url)".
+- [x] Item 1 · estatísticas só com pertinentes (`lib/radar/video-competitive.ts`): fora da conta por motivo, ressalva abaixo de 4, divergência dita, "não recalculável" sem a corrida.
+- [x] Item 4 · demonstração definida pela planta (antes · ajuste · depois; passos; uma ação; capítulo explicativo sem corte), regra das cenas uma vez por coluna.
+- [x] Item 3 · cortes pela utilidade isolada (portões + 0–4; menos cortes sem elegíveis; "Capítulos sem corte"; Origem recomendada com motivo; alinhamento gancho/ideia/demonstração); `shortQuestions` aditivo lido da camada multiformato congelada.
+- [x] D10: "Entregar" sem PENDÊNCIA; especialista sem "aguardando aceite"; teste que varre o CSV inteiro.
+- [x] Prompt ("os cortes desta linha, até 3, escolhidos por utilidade") e catálogo dos agentes na mesma entrega (test:agent 65/65).
+- [ ] **Dono (homologação):** reexportar o CSV de vídeo do artigo real e conferir: a Lâmina 2 sem "O algoritmo prioriza…", a lista "Fica fora" no fim de `cortes_para_redes`, a coluna de intenção com "Amostra pertinente … Fora da conta …", e se os cortes escolhidos fazem sentido (MANUAL_UI_VALIDATED = NO).
+- [ ] Falso positivo do detector da regra 17 no uso real: colher exemplos na reexportação; a frase só sai do publicável e é listada (nada se apaga).
+- [ ] Afirmação sobre comportamento do público SEM link externo na planta ("consumido de passagem") não é pega por nenhuma régua — limite declarado; resolver exigiria a planta ligar a afirmação a um link (regra 17 já pede) ou um detector de comportamento.
+- [ ] A trava não chega ao CSV "Para escrever" (nem ao `get_article_for_writing` do MCP): decisão separada do dono, por mudar a saída do MCP.
+- [x] Itens 6, 2, 8 e 7 do desenho (colunas `concorrencia_curtos_e_carrossel`, `cadeia_competitiva`, `storyboard_visual`; transcrição da biblioteca cruzada com o topo) — entregues no mesmo dia (seção acima); a Parte 2 (coleta nova) segue como decisão do dono, listada lá.
+- [x] (Resolvido na revisão de 2026-10-07: o CSV de vídeo diz "versão corrente na Marca"; `brand-voice.ts` e o CSV para escrever não mudam.) O estado "aguardando aprovação" da Skill de voz (`lib/radar/brand-voice.ts`) aparece no CSV de vídeo quando a Skill está nesse estado; o arquivo é compartilhado com o CSV "Para escrever" — decidir com o dono se o rótulo muda nos dois.
+
+## Importação por silo na entrada do Radar — 2026-10-07
+
+- [x] Módulo puro `lib/radar/import-silo-groups.ts` com a chave do export por silo (siloId DECLARADO quando a linha o traz → composição → territoryRef → "Sem silo" por último; mais recente por versão; "Silo sem nome N", nunca id cru).
+- [x] `groupOf` aditivo no `WorkflowImportDialog` + repasse opcional no `ImportPanel`; sem a prop nada muda (provado em teste de DOM; consumidores Redator/Arquiteto preservados).
+- [x] Cabeçalho por grupo: nome, "N de M ainda não importados" e "Selecionar o silo inteiro" (indeterminate na seleção parcial; respeita a busca atual); busca casa também com o nome do silo.
+- [x] Radar reordena `importable` por `orderedRowIds` (pilar → narrativa → resto; grupos em alfabética) antes do diálogo; `onImport`, mensagens e bloqueios intactos.
+- [x] Passada dos revisores (2026-10-07): siloId declarado vem primeiro NO MÓDULO PURO (a precedência de `resolveCanonicalSiloForArticle`; a tela ainda não o repassa — ver pendência abaixo); "Silo sem nome N" consome o contador como o export (nome que limpa para vazio também anda o N); grafia "Sem silo" unificada com o export; `aria-label` por grupo no checkbox; âncora estrutural da ligação em `radar-page.tsx`.
+- [ ] **Decisão de contrato (dono):** repassar o siloId DECLARADO do ArticleDNA à prévia do agrupamento. O guarda do Arquiteto "a tela Radar não usa payload.siloId como autoridade" (`tests/arquiteto-radar-handoff-context.test.mts:261`) proíbe `payload.siloId` em `radar-page.tsx`; as saídas são relaxar o guarda para esta leitura de prévia ou receber o silo pré-resolvido do pipeline/servidor. Sem isso, no estado degenerado (artigo na composição de um silo mais recente que o declarado) a prévia agrupa diferente do `RadarItem.siloId` que a importação grava e do CSV por silo — o módulo puro já resolve certo quando a linha trouxer `siloId`.
+- [ ] **Dono (homologação):** abrir "Importar do Arquiteto", buscar pelo nome de um silo, marcar "Selecionar o silo inteiro", importar e conferir na planilha que o grupo chegou inteiro; depois exportar o CSV por silo e conferir que o grupo importado bate com o arquivo (MANUAL_UI_VALIDATED = NO).
+- [ ] Redator ("Importar do Radar") com o mesmo agrupamento — próxima ponta: as linhas de lá são RadarItems e a chave certa é `RadarItem.siloId` (a do export); exige decidir o contrato do módulo (siloId pré-resolvido vencendo composição/território), fora do escopo desta entrega.
+- [ ] Dois silos diferentes com o MESMO nome, adjacentes na lista, dividem um cabeçalho visual (a chave continua distinta); desambiguar o rótulo se aparecer no uso real (ex.: `groupOf` devolver `{ key, label }`).
+- [ ] Território declarado por DOIS silos distintos (artigo legado sem siloId): a prévia agrupa no mais recente, mas o gate da importação recusa por AMBIGUOUS (`resolveCanonicalSiloIdForTerritory`); decidir se a prévia cai em "Sem silo" para espelhar a recusa — divergência prévia×gate, sem perda de dados.
+- [ ] O cabeçalho do grupo "Sem silo" também exibe "Selecionar o silo inteiro", embora não seja um silo; decidir o texto desse grupo (cosmético).
+- [ ] Contrato implícito do consumidor do `groupOf`: linhas do mesmo grupo precisam chegar CONTÍGUAS (o Radar garante via `orderedRowIds`); um chamador futuro que intercalar grupo null entre segmentos do mesmo grupo duplicaria o cabeçalho — garantir isso quando o Redator for ligado.
+- [ ] A numeração "Silo sem nome N" pode divergir entre diálogo e export quando o CONJUNTO exportado difere do importável (o critério de consumo agora é o mesmo; a ordem de chegada dos grupos é que pode diferir) — o nome real nunca diverge.
+- [ ] Fora do Radar (registrar com o módulo dono): 1 falha pré-existente em `tests/global-workflow-status.test.mts` — "concurrent write refuses before creating history" espera `/outra sessão/` e `lib/server/global-workflow-transition.ts:91` lança "A versão do status mudou; recarregue e tente novamente"; idêntica no HEAD, domínio da transição global, não desta entrega.
+
+## CSV de vídeo para os três produtos — 2026-10-07
+
+- [x] Voz da marca sem seção de entrega de artigo (nomeada no "Fica fora"); "Critérios antes de redigir", "Voz" e "Vocabulário" ficam.
+- [x] Prompt pede vídeo longo, 3 cortes e o carrossel, e libera a ordem dos capítulos.
+- [x] "Entregar" nunca sem resposta: frase promovida de explicar ("o que a pesquisa sustenta") ou PENDÊNCIA nomeada.
+- [x] "Mostrar na tela" diz o material a preparar (uma tela por passo, antes e depois).
+- [x] Cortes: rótulo honesto, dispersão início/meio/fim, ideia única (um passo só), linha Origem e fechamento com UM CTA e endereço.
+- [x] Carrossel publicável: Título · Apoio · Visual por lâmina, sem instrução interna.
+- [x] Amostra declarada: fora-do-tema contado no universo inteiro, dito na coluna de intenção.
+- [x] Catálogo dos agentes atualizado na mesma entrega (test:agent verde).
+- [x] Passada de revisão (2026-10-07, três revisores): teste 23 prende a dispersão (5 capítulos iguais → cortes 1·2·4; prática só em 2 e 5 → 1·2·5; o top-3 por peso não volta); teste 24 prende o Mostrar do corte na origem do mostrar do capítulo (prática vence H3); plural "Instruções para o redator" vira entrega; cabeçalho do carrossel sem "cada uma puxando a próxima".
+- [ ] **Dono:** exportar de novo o CSV de vídeo do artigo real e conferir na planilha (MANUAL_UI_VALIDATED = NO). Atenção na conferência: com 5 capítulos de peso igual os cortes saem de 1, 2 e 4 (não 1·3·5 como o relato da entrega disse) e podem diferir de exportações antigas — diferença intencional da dispersão, não regressão.
+- [x] Corte herdado de capítulo pendente mostra a PENDÊNCIA na Ideia única — resolvido em 2026-10-07 (pesquisa competitiva): capítulo sem frase publicável não passa no portão do corte, e a Ideia única é sempre a frase publicável depois da trava de fonte; o "Entregar" sem frase virou instrução concluída (D10).
+- [ ] `diretrizes_de_roteiro` sem orçamento gracioso (pior caso sintético: 9.614 dos 10.000): se um caso real passar do teto, `celula()` trunca com o marcador visível — acompanhar na reexportação real antes de investir em orçamento por bloco.
+- [ ] "Mostrar na tela" ainda não desenha a cena exata: decisão de produção (dito na linha).
+- [x] Estatísticas da amostra (mediana, formatos) seguem incluindo os fora-do-tema — resolvido em 2026-10-07 (pesquisa competitiva): relidas só com os pertinentes no export, sem regravar a fotografia; sem a corrida referenciada, "não recalculável".
+- [ ] Tempos dos trechos da biblioteca seguem estimados pela posição no texto.
+
 ## Briefing de vídeo e os 4 limites do artigo — 2026-10-02 (fim da noite)
 
 - [x] Vídeo: premissa e capítulos sem afirmação absoluta, demonstração em "Mostrar na tela", ordem flexível, gancho sem conector, capa do carrossel, tempos estimados.

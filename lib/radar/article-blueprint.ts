@@ -1440,7 +1440,12 @@ function lenteDaEvidencia(texto: string, lentesDoDominio: ((dominio: string) => 
   }
 }
 
-const rotuloDaEvidencia = (payload: RadarArticleBlueprintPayload, ids: readonly string[], lentesDoDominio: ((dominio: string) => string | null) | null = null) =>
+/*
+ * 2026-10-07 · exportado (aditivo, §4) para a cadeia competitiva do CSV de
+ * vídeo citar as evidências pelo MESMO rótulo do CSV para escrever. Nada muda
+ * aqui: o CSV para escrever e o Redator continuam iguais.
+ */
+export const rotuloDaEvidencia = (payload: RadarArticleBlueprintPayload, ids: readonly string[], lentesDoDominio: ((dominio: string) => string | null) | null = null) =>
   ids.map(id => payload.evidence.find(item => item.id === id)).filter((item): item is RadarArticleBlueprintEvidence => Boolean(item))
     .map(item => `${item.id} (${textoDaEvidencia(item.text)}${lenteDaEvidencia(item.text, lentesDoDominio)})`);
 
@@ -1527,8 +1532,11 @@ function videoDaSecao(payload: RadarArticleBlueprintPayload, id: string, aoVivo:
  * 2026-10-02 · DE ONDE A SEÇÃO VEIO NA SERP. Só para versões com `from`
  * (as anteriores saem como antes). As evidências já têm linha própria; aqui vão
  * as seções M do esqueleto — ou o aviso de que a IA não apontou origem.
+ *
+ * 2026-10-07 · exportada (aditivo, §4) para a cadeia competitiva do CSV de
+ * vídeo; o CSV para escrever e o Redator continuam iguais.
  */
-function origemDaSecao(payload: RadarArticleBlueprintPayload, secao: { from?: string[]; evidence: string[] }): string[] {
+export function origemDaSecao(payload: RadarArticleBlueprintPayload, secao: { from?: string[]; evidence: string[] }): string[] {
   if (!secao.from) return [];
   const doEsqueleto = new Map((payload.skeleton || []).map(item => [item.id, item]));
   const secoesM = secao.from.map(id => doEsqueleto.get(id)).filter((item): item is RadarArticleBlueprintSkeletonItem => Boolean(item));

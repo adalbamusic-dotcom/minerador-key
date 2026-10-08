@@ -23,8 +23,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false, nocache: true, googleBot: { index: false, follow: false, noarchive: true, noimageindex: true, nosnippet: true } },
-  title: "Minerador Key | SEO Local & KGR Automation",
-  description: "Ferramenta profissional para mineração de palavras-chave cauda longa de SEO Local e cálculo de KGR (Keyword Golden Ratio) integrado ao Google Sheets.",
+  title: "Minerador Key | Planejamento de SEO para agências",
+  description: "Agrupamentos semânticos de palavras-chave, nichos inexplorados, análise da concorrência e estratégias de SEO elaboradas em diálogo com IA, marca a marca.",
 };
 
 export const dynamic = "force-dynamic";

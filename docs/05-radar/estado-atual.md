@@ -1,5 +1,468 @@
 # Estado atual — Radar
 
+## Revisão do CSV de vídeo competitivo (três revisores) — 2026-10-07
+
+**Verificado no código e confirmado por teste (fixtures; PROVIDER_CALLS = 0); `MANUAL_UI_VALIDATED = NO`
+(a reexportação real e a leitura na planilha são do dono).** Módulo proprietário: Radar. Três revisores leram a
+entrega das duas seções abaixo (honestidade e D10; dados competitivos e a leitura nova; testes e usabilidade).
+Cada achado foi conferido no código com cenário e, quando real, corrigido com um teste que falha sem a correção
+(mutantes só em cópias no scratchpad: 28 de 28 morrem, controle verde). Nada de coleta nova, schema, rota, núcleo
+do export, contrato do cache, `article-blueprint.ts`, `portable-writing-export.ts` nem `brand-voice.ts`: o CSV
+"Para escrever" não muda.
+
+**Achados reais e o que mudou:**
+
+1. **A tese do dono era travada (must-fix).** A porta (`radarClaimGate`) casava só raízes: "Mostrar por que o
+   Instagram, sozinho, não enche a agenda" e "(sem cair na ilusão de que ele enche a agenda)" saíam do texto
+   publicável como se repetissem "O Instagram enche a agenda da clínica" — que o mercado repete e a FONTE
+   contradiz. Agora a porta olha a polaridade nas afirmações do mercado ((b) e (c)): a frase que nega não
+   reproduz e fica livre; a que repete trava. O link externo da planta (a) trava nos dois sentidos. A afirmação
+   que a fonte contradiz sai da régua (b) e é dita uma vez, em (c), com o motivo certo. Limite declarado:
+   negação que não toca a afirmação ("enche a agenda, não importa o nicho") também libera.
+2. **"aguardando aprovação"/"em rascunho" no CSV de vídeo (must-fix, D10).** O rótulo da Skill de voz vinha
+   com o estado de tela da Marca. No CSV de vídeo, a versão em uso é dita "versão corrente na Marca" (a ativa
+   continua "ativa"), nas linhas Marca e Voz da marca e na origem do público. `brand-voice.ts` e o CSV para
+   escrever não mudam (o teste de lá continua fixando "em rascunho").
+3. **Roteiro e cortes cortados no teto da célula (must-fix).** Com frases ~35% maiores que as do teste 30,
+   `diretrizes_de_roteiro` perdia o capítulo 6, o Fechamento com o CTA, a Descrição, o "Vídeo × artigo" e o "Não
+   inventar"; `cortes_para_redes` perdia o meio da lista "Fica fora". As duas colunas encolhem por níveis
+   (`NIVEIS_DO_ROTEIRO`, `NIVEIS_DOS_CORTES`, escolhidos por `primeiraQueCabe`): o Entregar deixa de repetir a
+   pergunta, as frases encurtam (sem cortar a fonte do fim), o Mostrar vira a cena curta, e no último nível o
+   capítulo fica com título, pergunta, Entregar e Mostrar; nos cortes, ideia, cena, visual e as frases da lista
+   encurtam, e no último nível o alinhamento sai. Cada coluna diz que encolheu e onde está o resto. Medido: o
+   pior caso da planta (resposta e três explicações longas e travadas, dois links por seção) e o teste 30 com as
+   frases maiores saem sem corte; com o acréscimo maior medido, roteiro 9.907 e cortes 9.875 de 10.000.
+4. **"sem dado de concorrência" ao lado da coluna que tem o dado (should-fix, três revisores).** A abertura de
+   `cortes_para_redes` lia os Shorts da fotografia (amostra inteira, com outro público na mediana). Agora conta só
+   os Shorts pertinentes ("Shorts do tema nesta amostra (pertinentes): N de M · duração mediana") e aponta para
+   `concorrencia_curtos_e_carrossel` quando ela tem a concorrência do curto; "sem dado de concorrência" só quando
+   não tem. Sem a corrida, a amostra inteira, dita.
+5. **Detector da regra 17 (should-fix).** Pega a plataforma como sujeito de ordenar, entregar ou punir ("O
+   Instagram prioriza…", "penaliza…", "mostra … primeiro para quem…"), "têm mais alcance" e "o alcance caiu"; não
+   trava preço nem recurso sem plataforma na frase; "converte visitantes em agendamentos" sai com o motivo
+   "afirmação sobre conversão do público sem fonte (regra 17 da planta)". "O Instagram mostra os bastidores da
+   clínica" continua livre (uso da plataforma, não afirmação sobre ela).
+6. **Capa com texto de produção (should-fix).** Com o H1 travado, a Lâmina 1 caía para a premissa ("O vídeo
+   responde … com o que a pesquisa sustenta"). A reserva agora é a pergunta da abertura da planta, que passa pela
+   mesma porta; o storyboard usa a mesma capa.
+7. **Corte com ideia de três táticas e cena de uma (should-fix, D10).** O alinhamento pedia "ficar no primeiro
+   passo" e a cena do storyboard desmentia. Quando a ideia única nomeia 2+ passos (`passosDaIdeia`, pela raiz
+   própria de cada passo), o corte MOSTRA esses passos, uma tela rápida cada — Utilidade, Mostrar, Alinhamento,
+   Origem e storyboard dizem o mesmo. Verbo de uso comum ("serve", "usar", "traz") não é assunto do alinhamento.
+8. **Faixa errada na cadeia (should-fix).** Com os pertinentes liderados por Shorts e a sequência longa, a cadeia
+   dizia "vídeo longo, faixa 25s a 45s". Agora a faixa é a do formato que a sequência segue (longos ou Shorts
+   pertinentes, `radarVideoCohortRange`, aditivo em `video-competitive.ts`), e a liderança do outro formato é dita.
+9. **Divergência que era do classificador (should-fix).** O formato dos pertinentes (classificador de hoje) era
+   comparado com o formato gravado na fotografia (classificador da época). Agora é comparado com a amostra
+   inteira pela mesma régua; sem ninguém fora da conta, não há divergência de formato. A duração continua
+   comparada com a fotografia, que é o que a sequência segue.
+10. **Lentes extras sem data (should-fix).** O orgânico das três lentes extras vem do resumo do cache no momento
+    da exportação. A coluna ganhou a linha "Lentes extras no orgânico: resumo do cache da marca …, observação fora
+    do pacote congelado (congelado em …) — <lentes>: coleta de <data>, posterior/anterior ao congelamento"
+    (`collectedAt` aditivo em `RadarVideoLensOrganic`, de `hit.meta`).
+11. **Partes da trava e do caminho da rota sem teste (should-fix).** As coletas (b) e (c), o portão "pergunta
+    travada não abre corte", a pergunta travada na lista "Fica fora", "outro público" fora da conta, o lote
+    repassando `lensDigests` e `lentesCongeladas` e o núcleo entregando o resumo a cada artigo ganharam teste.
+12. **Notas corrigidas (triviais):** empate dito como empate ("empatada com os escolhidos; ficou fora pela
+    distribuição ao longo do vídeo"), também na cadeia; cabeçalho dos cortes quando todos estão em 0 de 4;
+    "o Google não o marca como curto", "imagem de uma página do instagram.com" e "nas lentes lidas" na coluna de
+    curtos; D10 nas frases de espera que existiam antes — a lacuna de formato do YouTube ("confira se a coleta…",
+    só no CSV; a tela mantém), o especialista único ("confirme antes de gravar") e o estado do trecho da
+    biblioteca ("falta conferir…"); a linha de topo aponta apresentador e identidade visual para
+    `storyboard_visual`; o prompt pede a oportunidade de `cadeia_competitiva` em cada capítulo; a capa do
+    storyboard diz "para diferenciar" quando pergunta e número são raros nos pertinentes; o catálogo dos agentes
+    não diz mais que a ideia única tem um passo só.
+
+**Ficaram no backlog (notas não triviais):** H2/H3 publicados no carrossel e na tela do corte sem passar pela
+porta; o piso GERAL para os curtos que o Google mostra (falso "fora do tema"); a frase de alinhamento "ajuste a
+cena na produção" quando a demonstração não nomeia o assunto do gancho.
+
+**Arquivos:** `lib/radar/pending-claims.ts`, `lib/radar/portable-video-export.ts`, `lib/radar/video-competitive.ts`
+(aditivo: `radarVideoCohortRange`, `collectedAt`), `lib/agent/platform-catalog.ts` (entrada nova datada e dois
+trechos corrigidos; `npm run test:agent` verde), `tests/radar-csv-video-roteiro.test.mts` (25, 25b, 25c, 26, 27,
+29 e 23 ajustados com comentário datado; 31, 32 e 33 novos), `tests/radar-csv-video-competitivo.test.mts` (três
+testes novos e o "D10 e teto" e o estrutural ampliados). Consumidores preservados: o CSV para escrever, o
+Redator, o MCP `get_article_for_writing` e a tela (o blueprint do YouTube e a frase da lacuna dele não mudam).
+
+**Testes:** `npm run test:radar` 2934 testes, 2933 pass, 0 fail, 1 skipped (pré-existente; a base desta rodada era
+2928/2927/0/1, +6 testes novos); os três arquivos do CSV de vídeo 66/66; `tests/radar-brand-voice.test.mts` verde;
+`npm run test:agent` 65/65; `tsc --noEmit` só com os 2 erros pré-existentes de `.next/types/validator.ts`
+(planejador removido); eslint dos três módulos limpo; `git diff --check` limpo. Mutantes (cópias no scratchpad,
+`rev2-mutantes.cjs`): 28 de 28 morrem com o controle verde. Regeneração do caso real (`rev2-regen.mts`, a linha
+equivalente ao CSV do dono): zero "pendência", "pendente de", "aguardando", "confira antes de aprovar" e
+"rascunho", com a Skill ativa e aguardando aprovação. **Limites:** as regras de polaridade e do detector leem palavras, não sentido;
+o encolhimento mantém tudo, mas a frase encurtada só está inteira na planta (CSV para escrever) e na lista "Fica
+fora"; nenhuma validação manual.
+
+## Conteúdos derivados competitivos no CSV de vídeo, Parte 1 (concorrência curta e carrossel, storyboard, cadeia, o que foi assistido) — 2026-10-07
+
+**Verificado no código e confirmado por teste (fixtures reais; PROVIDER_CALLS = 0); `MANUAL_UI_VALIDATED = NO`
+(a reexportação real e a leitura na planilha são do dono).** Pedido do dono: "a ideia de poder criar conteúdos
+derivados do assunto é para utilizar a SERP para fazer desses conteúdos competitivos, incluindo os dados de
+estilos de imagem que podem ser utilizados para os storyboard; eles podem ser fundamento dos vídeos e dos
+carrosséis. Precisa caprichar na pesquisa competitiva." Itens 6, 2, 8, 7 e 9 da Parte 1 do desenho, nesta ordem,
+sobre a entrega dos itens 5, 1, 4 e 3 (seção abaixo). Módulo proprietário: Radar. Três colunas novas no CSV de
+vídeo, entre `cortes_para_redes` e `prompt` (as linhas "Marca" e "Voz da marca" as deixam vazias):
+
+1. **`concorrencia_curtos_e_carrossel` (item 6)** — os curtos e vídeos que o Google mostra na lente da investigação
+   (`snapshot.serpFeatures.videos`, leitura zero): sem repetição (no fixture real, os 3 do bloco de vídeos
+   repetem o de curtos), título sem a moldura do Google, autor só do campo `source`, duração só quando o título
+   termina em m:ss, relevância pela MESMA régua da lista do topo e o cruzamento com a pesquisa do YouTube; o
+   vídeo comum do bloco de vídeos é listado e fica fora da amostra de curtos. Os Shorts da pesquisa do YouTube
+   pertinentes, com o motivo do zero (`radarYoutubeShortsNotice`, campo aditivo `shortsNotice` em
+   `RadarVideoExportYoutube`: "o YouTube não marcou" × "a leitura perdeu"; corrida antiga: não atribuído). A
+   presença dos blocos por lente (cópia das lentes congelada no pacote, `lentesCongeladas` aditivo; sem ela, a
+   lente da investigação). As redes sociais no orgânico das quatro lentes (canônica pelo snapshot, as três extras
+   pelo resumo do cache): Reel, post, carrossel CONFIRMADO só com `img_index` na URL, vídeo do TikTok, Short e
+   artigo/post do LinkedIn; perfil fora da conta; a mesma peça em duas lentes é uma. A leitura da amostra
+   pertinente de curtos (duração mediana e metade central, plataformas, credencial no nome por lista fechada,
+   padrões de título), a duração-alvo dos cortes (P75; abaixo de 4 diz que descreve casos; sem duração, a régua
+   de 60 segundos) e os carrosséis e posts que ranqueiam, para abrir e anotar. Nada sobre retenção ou alcance.
+2. **`cadeia_competitiva` (item 2)** — referência → observação → oportunidade → entrega → formato do vídeo
+   inteiro (os pertinentes mais bem posicionados, o que atravessa Google e YouTube por `radarCrossSerpVideoSignal`,
+   padrões e faixa pertinentes, lacunas do YouTube — sem a de formato ausente, que é limite da amostra — e a
+   premissa) e de cada capítulo da planta, pelos ids que a seção cita (`evidence` e `from`), com o MESMO rótulo do
+   CSV para escrever (`rotuloDaEvidencia` e `origemDaSecao` passaram a ser exportados de `article-blueprint.ts`;
+   aditivo, §4: o CSV para escrever e o Redator continuam iguais). As páginas de uma lacuna, diferencial ou
+   pergunta só ligam por igualdade exata do rótulo com a leitura do Google (`gaps`, `differentiations`,
+   `questions`); sem casar, "não ligadas". Seção sem evidência nem origem: "proposta editorial", e a disputa é
+   pela execução. O formato de cada capítulo diz o MESMO corte da coluna de cortes (a escolha saiu de
+   `colunaCortes` para `escolhaDosCortes`, sem mudar de comportamento). Sem planta, a cadeia por capítulo é dita
+   ausente e `perguntas_do_publico` passa a dizer a origem de cada pergunta (Pessoas também perguntam, N de M
+   páginas, necessidade central com a recorrência, pergunta a responder pela descoberta).
+3. **`storyboard_visual` (item 8)** — estilo observado SÓ com o que se afirma sem ver imagem (o Radar não vê
+   imagem: domínio das imagens do bloco do Google, rotulado como inferência, e em quantas lentes ele aparece;
+   sinais dos títulos dos vídeos longos pertinentes — caixa alta, número, pergunta, emoji, credencial —, "a
+   thumbnail não foi vista"; credencial dos autores dos curtos; presença de imagem, lista e tabela e a mediana de
+   imagens das páginas concorrentes). Referências para abrir (thumbnails, curtos, posts), o checklist para quem
+   abrir anotar, a identidade visual que a Marca não guarda (definir antes de produzir), o storyboard do vídeo
+   (uma cena por capítulo = a demonstração da planta, com a referência observada da mesma pergunta quando o
+   título divide 2+ raízes distintivas), da thumbnail (rosto só de quem fala de fato, da aba Especialista), dos
+   cortes (vertical, os mesmos da coluna de cortes) e do carrossel (que leva texto na imagem: a regra "sem texto
+   legível" do plano visual do artigo é dita como a que NÃO vale lá). Nenhum adjetivo de estilo (teste negativo).
+4. **O que foi assistido (item 7)** — o vídeo do topo cujo endereço é o de um vídeo selecionado pela marca COM
+   transcrição é dito pelo número da lista ("seleção da marca, não da pesquisa"; o trecho está em
+   `biblioteca_da_marca`); os outros seguem não assistidos. Sem cruzamento, a frase de antes.
+5. **Prompt e catálogo (item 9)** — o corte pede a cena de `storyboard_visual` e a duração-alvo de
+   `concorrencia_curtos_e_carrossel`; o carrossel, o visual de `storyboard_visual`; estilo de imagem só o
+   observado ou anotado. `lib/agent/platform-catalog.ts` na mesma entrega (§17.1).
+6. **A leitura nova, grátis** — o resumo orgânico (`digest`) das três lentes extras da keyword principal, lido
+   do cache por `lib/server/radar-video-lens-digest-read.ts` (`lookupSerpCache`, modo `digest`, colunas
+   explícitas e filtro pela marca no store), UMA vez por lote, com os pedidos que a leitura das lentes já montou
+   (nenhuma leitura de alvo a mais), só quando `assembleRadarPortableExport` recebe `videoLensDigests` — que só
+   a rota no modo vídeo liga. O CSV para escrever, o formato completo e o `get_article_for_writing` do MCP não a
+   fazem. Falhou, a coluna diz; nenhuma escrita; o contrato do cache (Minerador) não mudou.
+7. **As células encolhem por igual** — `cadeia_competitiva` e `storyboard_visual` têm níveis (menos itens e
+   endereços por elo; referências e visual das lâminas apontando para as outras colunas) e dizem quando
+   encolheram, em vez de o corte da célula levar os últimos capítulos.
+
+D10: nenhuma das saídas novas diz pendência, "pendente de", "aguardando" nem "confira antes de aprovar" (teste
+que varre o CSV inteiro com as colunas novas). Decisões mantidas: a tese do dono não é censurada; só a frase SEM
+FONTE sobre plataforma sai do publicável (trava da entrega anterior, intocada); `RADAR_ABSOLUTE_CLAIM` igual; o
+CSV para escrever igual (os testes dele seguem verdes); nada de adjetivo de estilo sem ver a imagem; nada
+afirmado sobre o que é dito dentro de vídeo não transcrito.
+
+Arquivos: novos `lib/server/radar-video-lens-digest-read.ts` e `tests/radar-csv-video-competitivo.test.mts`;
+alterados `lib/radar/portable-video-export.ts`, `lib/radar/video-competitive.ts` (curtos, peça social,
+credencial, sinais de título, pedidos e leitura do resumo), `lib/radar/portable-export-batch.ts` (campo aditivo
+`lensDigests`), `lib/radar/article-blueprint.ts` (só `export` em duas funções), `lib/server/radar-portable-export-core.ts`
+(flag aditiva `videoLensDigests`), `app/api/editorial/radar-export/route.ts` (liga a flag no modo vídeo),
+`lib/agent/platform-catalog.ts`, `tests/radar-csv-video-roteiro.test.mts` (o prompt do teste 20). Consumidores
+preservados: a rota (único consumidor do CSV de vídeo); o CSV para escrever e o MCP (sem a flag, nada muda);
+`radarPortableVideoExport` (campos opcionais nos artigos); os guardas "uma leitura do cache" do núcleo seguem
+valendo para a leitura de `observation` (o resumo mora no leitor próprio e tem guarda própria).
+
+Testes: `tests/radar-csv-video-competitivo.test.mts` (14, fixtures reais de skin care noturno no Google e no
+YouTube e o cache real das lentes da AdalbaPro, com o carrossel `img_index=3`), roteiro 35/35 e export 11/11;
+test:radar 2928 (2927 pass, 1 skip pré-existente; base de hoje 2914), test:agent 65/65, tsc sem erro de fonte
+(só os 2 pré-existentes de `.next/types`), eslint 0 erro, `git diff --check` limpo. Treze mutantes em cópias no
+scratchpad (post vira carrossel sem img_index, curtos sem dedupe, cadeia ligando por semelhança, cadeia citando
+evidência que a seção não cita, leitura nova ligada em todo modo, sem o cruzamento do item 7, sem o motivo do
+zero de Shorts, vídeo comum na amostra de curtos, adjetivo de estilo, storyboard e cadeia sem encolher, perfil
+na conta, curto fora do tema na conta dos pertinentes) — todos morrem, com o controle verde (60/60). Maior caso
+medido (seis capítulos com evidência cheia, nove curtos, trinta posts): concorrência 5.410, storyboard 8.380,
+cadeia 9.859 caracteres; o caso extremo encolhe (storyboard 9.334, cadeia 8.335) sem corte no teto de 10 mil.
+
+Limites declarados: a relevância dos curtos é a régua do topo, pelo título e pelo autor — o curto cujo título não
+repete as raízes da busca ("SKINCARE NOITE" para "skin care noturno") sai "fora do tema"; a duração só existe
+quando o título a traz; o cache não diz quantas lâminas tem um carrossel nem o visual; as lentes extras só têm
+o orgânico (os blocos de vídeo e imagem delas são só presença); a canônica pode não ter `short_videos` abaixo do
+10º orgânico (o snapshot corta ali). A Parte 2 (coleta nova) segue como decisão do dono, no backlog.
+
+## Pesquisa competitiva no CSV de vídeo, Parte 1 (trava de fonte, pertinentes, demonstração, cortes por utilidade) — 2026-10-07
+
+**Verificado no código e confirmado por teste (fixtures; PROVIDER_CALLS = 0; nenhuma leitura nova de banco);
+`MANUAL_UI_VALIDATED = NO` (a reexportação real e a leitura na planilha são do dono).** Pedido do dono: "a ideia
+de poder criar conteúdos derivados do assunto é para utilizar a SERP para fazer desses conteúdos competitivos …
+precisa caprichar na pesquisa competitiva". Desenho: itens 5, 1, 4 e 3 da Parte 1 (sem coleta nova), nesta ordem,
+mais a correção D10 do "Entregar". Módulo proprietário: Radar. O CSV "Para escrever" não mudou (os testes dele
+seguem verdes); o contrato do cache, a rota e o núcleo do export não foram tocados.
+
+1. **Trava de fonte em todo texto publicável (item 5)** — módulo novo `lib/radar/pending-claims.ts`:
+   `radarPendingClaims(p, planta)` junta (a) TODOS os links externos da planta (até 2 por seção; `source` nulo =
+   fonte a obter, `X` = fonte do pacote com URL), (b) `radarWritingUnsupportedClaims` (usada como está) e (c)
+   `marketVsFactConflicts`; `radarClaimGate(frase, pendentes, secao)` trava por raízes distintivas (mesma seção:
+   2+; outra seção ou mercado: 60% da afirmação, 2+), com a afirmação da própria seção primeiro, e (d) um detector
+   da regra 17 da planta (mecanismo de plataforma E efeito afirmado — "Hashtags e geolocalização ajudam…", "Um
+   site otimizado converte visitantes…"; a recomendação que só nomeia o recurso passa). Ponto único de aplicação
+   em `capitulosDaPlanta` (`lib/radar/portable-video-export.ts`): a frase travada sai do Apoio da lâmina e da
+   Ideia única do corte; na produção vai para a linha "Fala delimitada, sem fonte:" (sem o rótulo "o que a
+   pesquisa sustenta"); a mesma porta vale para a premissa, a capa (H1) e a promessa do gancho
+   (`aberturaPublicavel`). `cortes_para_redes` termina com "Fica fora do texto publicável" (regra concluída, uma
+   linha por lugar, com o motivo) e o `pode_gravar` conta as frases. Com fonte do pacote, a frase fica e leva
+   "(fonte: url)". A tese de quem fala (premissa, capa, fala E1) passa; `RADAR_ABSOLUTE_CLAIM` não mudou.
+2. **Estatísticas só com os pertinentes (item 1)** — módulo novo `lib/radar/video-competitive.ts` recebe a régua
+   de relevância (movida sem mudar de comportamento, assinatura relaxada para título e canal) e
+   `radarVideoPertinentSample`: formato, duração, faixa (P25–P75 da coorte que lidera, a régua de
+   `faixaRecomendada` replicada) e formato recomendado saem só de MESMO/PRÓXIMO/GERAL, lidos do universo inteiro;
+   "Fora da conta" diz quantos por motivo; ressalva abaixo de 4; a divergência com a fotografia é DITA, não
+   aplicada (a decisão de formato curto continua lida da fotografia); sem a corrida referenciada, "não
+   recalculável". A frase "…mas entram nas estatísticas" saiu.
+3. **Demonstração definida pela planta (item 4)** — "antes → ajuste → depois" é UMA demonstração (com 2 partes, o
+   depois é dito "não descrito na planta"), ";" ou 2+ H3 são passos, sem separador é uma ação, sem nada é
+   capítulo explicativo (não vira corte). O objeto é o termo da seção que a entrega prática ou os H3 nomeiam
+   (sem termo nomeado, a linha não inventa objeto). Mesma régua no "Mostrar na tela", no "Mostrar" do corte e no
+   "Visual" da lâmina; a regra das cenas (regras 9 e 17: sem métrica, ranking nem resultado fictício como prova;
+   nunca antes e depois de paciente ou de resultado) vem UMA vez por coluna.
+4. **Cortes pela utilidade isolada (item 3)** — portões (pergunta e frase publicável livres da trava;
+   demonstração definida) e pontuação 0–4 (demanda pelos ids P/B da seção — PAA, "N de M páginas" com 2+,
+   necessidade central forte/moderada — ou a pergunta de uma peça SHORT congelada, campo aditivo
+   `shortQuestions` em `RadarVideoExportYoutube`; uma ação; lacuna/diferencial/oportunidade G/D/O). Até 3, menos
+   quando faltam elegíveis; empate pela dispersão de antes. Cada corte diz a utilidade, o alinhamento entre
+   gancho, ideia e demonstração (o caso do CSV real — ideia com três táticas, cena com uma — vira a instrução de
+   ficar no passo mostrado) e a "Origem recomendada" com o motivo; "Capítulos sem corte" diz por quê. A linha
+   "Fonte" do corte leva só o link com fonte do pacote (o pendente está na lista "Fica fora").
+5. **D10** — o "Entregar" sem frase aproveitável deixou de dizer "PENDÊNCIA: …": agora "abra pela pergunta … e
+   responda só com o que esta linha sustenta, em fala delimitada (sem regra universal nem afirmação sem fonte)";
+   o especialista com pareceres não aceitos deixou de dizer "aguardando aceite" ("ficam fora desta linha"). Teste
+   que varre o CSV INTEIRO por pendência/"pendente de"/"aguardando"/"confira antes de aprovar".
+6. **Prompt e catálogo**: o prompt pede "os cortes desta linha (até 3, escolhidos por utilidade)" e manda a frase
+   da lista "Fica fora" não voltar em lâmina nem legenda; `lib/agent/platform-catalog.ts` atualizado na mesma
+   entrega (§17.1; test:agent 65/65).
+
+Arquivos: novos `lib/radar/pending-claims.ts` e `lib/radar/video-competitive.ts`; alterados
+`lib/radar/portable-video-export.ts`, `lib/agent/platform-catalog.ts`, `tests/radar-csv-video-roteiro.test.mts`,
+`tests/radar-portable-video-export.test.mts`. Consumidores preservados: a rota `app/api/editorial/radar-export`
+(único consumidor do CSV de vídeo; assinatura de `radarPortableVideoExport` igual), `radarVideoPremise` (segundo
+parâmetro opcional), `RadarVideoExportYoutube` (campo opcional). Testes: test:radar 2914 (2913 pass, 1 skip
+pré-existente; base 2904), roteiro 35/35 + export 11/11, test:agent 65/65, tsc sem erro de fonte, eslint 0 erro.
+Sete mutantes em cópias no scratchpad (porta desligada, sem regra 17, sem filtro de pertinência, dispersão pura,
+portão de demonstração aberto, "A → B → C" como três passos, PENDÊNCIA de volta) — todos morrem, com o controle
+verde. Prova por regeneração da linha equivalente ao CSV real: a Lâmina 2 sai com "A atenção no feed é
+passageira." e "O algoritmo prioriza…" vai para "Fica fora"; 11 de 44 fora do tema e 4 de outro público saem da
+mediana (fotografia 13min39s → pertinentes 11min39s); o corte do capítulo 4 ganha o alinhamento.
+
+Limites declarados: o detector (d) pode dar falso positivo (só tira do publicável e lista; não apaga); afirmação
+sobre comportamento do público sem link externo ("consumido de passagem") não é pega; a relevância é lida pelo
+título e pelo canal (pode errar). Fora desta entrega: itens 6, 2, 8 e 7 do desenho (colunas novas de concorrência
+curta, cadeia competitiva e storyboard; transcrição da biblioteca) e toda a Parte 2 (coleta nova: decisão do
+dono). O rótulo "aguardando aprovação" do estado da Skill de voz (`lib/radar/brand-voice.ts`, compartilhado com o
+CSV "Para escrever") não foi mexido (revisão do mesmo dia: o CSV de vídeo passou a dizer "versão corrente na
+Marca"; `brand-voice.ts` e o CSV para escrever seguem iguais).
+
+## Passada de revisão da importação por silo (três revisores) — 2026-10-07
+
+**Verificado no código e confirmado por teste (os 4 testes novos falharam antes das correções e passam depois);
+`MANUAL_UI_VALIDATED = NO` (a homologação do dono descrita no backlog continua valendo, agora com a precedência
+nova).** Dois should-fix confirmados e corrigidos, três notas triviais fechadas; o resto foi ao backlog:
+
+- **siloId DECLARADO vem primeiro no MÓDULO (should-fix confirmado; ligação da tela bloqueada por invariante)**:
+  a chave do grupo em `lib/radar/import-silo-groups.ts` agora aceita `siloId?: string | null` na linha e o
+  resolve PRIMEIRO, com a precedência da resolução real (`resolveCanonicalSiloForArticle`,
+  `lib/arquiteto/radar-handoff-context.ts`): declarado (quando há SiloDNA correspondente) → composição →
+  território → "Sem silo". O cenário confirmado: artigo presente na composição de dois silos aparecia no
+  diálogo sob o mais recente, mas a importação grava `RadarItem.siloId` = declarado e o CSV por silo sai no
+  outro arquivo. A TELA, porém, NÃO repassa o declarado: o invariante do Arquiteto "a tela Radar não usa
+  payload.siloId como autoridade" (`tests/arquiteto-radar-handoff-context.test.mts`) proíbe `payload.siloId`
+  em `radar-page.tsx`, e relaxar um guarda confirmado de outro módulo é decisão de contrato do dono — a ponta
+  que falta está no backlog. Enquanto isso o contrato declarado-primeiro fica pronto e testado no módulo puro,
+  e a prévia da tela segue por composição → território (diverge do CSV só no estado degenerado descrito).
+- **"Silo sem nome N" anda com o contador do export (should-fix confirmado)**: no export, todo silo cujo nome
+  LIMPA para vazio ("!!!", só emoji) consome um N (`numeroSemNome`, `portable-silo-export.ts`) mesmo mantendo o
+  name como rótulo; o módulo da importação só incrementava quando o name faltava, então com um silo "!!!" antes,
+  o diálogo dizia "Silo sem nome 1" e o arquivo dizia "Silo sem nome 2" para o MESMO silo. Agora o módulo usa
+  `radarSiloExportCleanName` (exportada pelo export) com o mesmo critério de consumo.
+- **Grafia unificada (nota)**: `RADAR_IMPORT_NO_SILO_LABEL` passou de "Sem Silo" para **"Sem silo"**, a grafia
+  do arquivo do export — as duas pontas do fluxo mostram o mesmo texto.
+- **aria-label por grupo (nota)**: o checkbox "Selecionar o silo inteiro" tem texto visível igual em todos os
+  cabeçalhos; agora leva `aria-label="Selecionar o silo {nome} inteiro"` (`workflow-status.tsx`, aditivo, sem
+  mudança visual) para o leitor de tela distinguir os grupos.
+- **Âncora estrutural da ligação (nota)**: a junção módulo puro → reordenação → `groupOf` no Radar não tinha
+  guarda; teste estrutural novo em `tests/radar-import-dialog-silo-dom.test.mts` (comentários removidos antes do
+  match) exige `radarImportSiloGroups({`, `articleId: version.payload.articleId`, `orderedRowIds.map(` e
+  `groupOf={` em `radar-page.tsx`, e guarda também que a tela NÃO contém `payload.siloId` (o invariante do
+  Arquiteto continua valendo).
+
+Ao backlog (não triviais, exigem decisão): ligar o siloId declarado na tela (bloqueado pelo invariante acima —
+relaxar o guarda ou receber o silo pré-resolvido do pipeline é decisão do dono), território disputado por dois
+silos (prévia agrupa no mais recente, o gate recusa AMBIGUOUS), o checkbox "Selecionar o silo inteiro" no
+cabeçalho "Sem silo", dois silos com o mesmo nome dividindo cabeçalho (já registrado) e o contrato implícito de
+grupos contíguos para consumidores futuros.
+Fora do Radar: 1 falha pré-existente em `tests/global-workflow-status.test.mts` ("concurrent write refuses…",
+mensagem de `lib/server/global-workflow-transition.ts:91` não casa com o regex `/outra sessão/`) — idêntica no
+HEAD, domínio da transição global; e a regressão visual pré-existente de `professional-writer.tsx` (41 vs
+baseline 40), de outra sessão.
+
+Testes da passada (rodada final de verificação, 2026-10-07): test:radar 2904 (2903 pass, 1 skip pré-existente;
+os 2 testes acima do placar anterior são da sessão paralela do CSV de vídeo), test:operational com as MESMAS
+12 falhas pré-existentes (todas as asserções apontam para `arquiteto-workspace.tsx`/pipeline, arquivos que esta
+entrega não tocou), test:arquiteto 2737/0, test:agent 65/65, tsc sem erro de fonte, dívida visual de
+`workflow-status.tsx` sem aumento (53 → 53). Os dois should-fixes têm prova por mutante (cópias no scratchpad,
+nunca no repositório): reverter o contador do "Silo sem nome N" mata exatamente o teste do contador; remover o
+critério declarado-primeiro mata exatamente o teste da precedência — cada um com os outros 9 testes verdes.
+
+## Entrada do Radar agrupada por silo — 2026-10-07
+
+**Verificado no código e confirmado por teste (módulo puro + DOM real); `MANUAL_UI_VALIDATED = NO` (homologação
+do dono descrita no backlog).** Pedido do dono (literal): "eu quero importar por silos … tem que ter a opção de
+poder importar um silo inteiro da lista … hoje aparece só como uma lista e não tem como distinguir quais deles
+pertencem a um determinado silo … isso também vai servir para depois poder exportar o silo inteiro no csv".
+
+O diálogo "Importar do Arquiteto" agora separa os ArticleDNAs aprovados por grupos/silos: cabeçalho por grupo com
+o nome do silo, a contagem "N de M ainda não importados" e o checkbox "Selecionar o silo inteiro" (com
+`indeterminate` na seleção parcial), e a busca também casa com o nome do silo — buscar o nome mostra o silo
+inteiro, mesmo as linhas cujo rótulo não contém o termo.
+
+1. **A chave do grupo é a MESMA do export por silo**: o SiloDNA (mais recente por `versionNumber`, empate por
+   `createdAt`) cuja COMPOSIÇÃO (`pillarArticleId`, `narrativeOrder`, `supportArticleIds`, `articleReferences`)
+   contém o `articleId`; na falta, o SiloDNA com o mesmo `territoryRef` do ArticleDNA (composição vence
+   território); sem nenhum, "Sem silo", sempre por último. Assim o grupo importado bate com o arquivo que sai no
+   CSV por silo (`groupBy: "silo"` em `app/api/editorial/radar-export`). Rótulo nunca é id cru: silo sem nome
+   vira "Silo sem nome N" — a mesma regra do export, REPLICADA porque lá ela é interna ao `planRadarSiloExport`
+   (não exportada), com o porquê registrado no módulo novo.
+2. **Módulo puro novo** `lib/radar/import-silo-groups.ts` (`radarImportSiloGroups`): sem React, sem fetch;
+   recebe `{ rows: [{ id, articleId, siloId?, territoryRef? }], siloVersions }` e devolve
+   `{ groups: [{ key, label, rowIds }], orderedRowIds }`. Ordem dos grupos: alfabética pt-BR, "Sem silo" por
+   último; dentro do grupo: pilar → ordem narrativa → o resto na ordem de chegada — a mesma leitura de
+   composição do export por silo.
+3. **Prop ADITIVA `groupOf?: (row) => string | null`** no `WorkflowImportDialog`
+   (`components/editorial/workflow-status.tsx`, arquivo compartilhado) e repasse opcional no `ImportPanel`
+   (`components/editorial/operational-screen-shared.tsx`). SEM `groupOf`, o render é o de hoje — consumidores
+   preservados: `professional-writer.tsx` ("Importar do Radar"), `arquiteto-workspace.tsx` ("Importar keywords
+   do Minerador") e o `ImportPanel` sem a prop, provado por teste de DOM (sem `groupOf`: nenhum cabeçalho e a
+   busca só pelo rótulo da linha). As linhas novas do cabeçalho usam tokens semânticos (`border-divider`,
+   `bg-surface-subtle`, `text-foreground`, `text-text-muted`) e 12px; a dívida visual do arquivo NÃO aumentou
+   (53 antes → 53 depois, `scripts/check-visual-system.mjs`).
+4. **O Radar liga o agrupamento** (`modules/radar/radar-page.tsx`): calcula os grupos sobre `importable`
+   (`articleId`/`territoryRef` do payload aprovado) e `pipeline.siloVersions`, reordena por `orderedRowIds`
+   ANTES do `<ImportPanel>` e passa `groupOf` (mapa rowId → rótulo do grupo). `onImport`, mensagens e bloqueios
+   não mudaram.
+5. **Redator ficou de FORA nesta entrega** (caminho B do desenho): as linhas do "Importar do Radar" são
+   RadarItems, e a chave certa para quem JÁ está no Radar é `RadarItem.siloId` — a mesma do export
+   (`lib/radar/portable-silo-export.ts` documenta por que composição e território erram nos legados com silo
+   deduzido). Ligar `radarImportSiloGroups` lá agruparia diferente do CSV nesses casos; aceitar um siloId
+   pré-resolvido seria mudança de contrato do módulo, fora do escopo desenhado. Registrado no backlog como
+   próxima ponta.
+
+Catálogo dos agentes (AGENTS §17.1): `lib/agent/platform-catalog.ts` NÃO descreve o diálogo de importação do
+Radar (procurado por "Importar", "importApprovedToRadar" e pela rota de importação; `arquiteto.send_to_radar`
+descreve o envio pelo Arquiteto, que não mudou) — nada a atualizar; `npm run test:agent` verde.
+
+- Arquivos: `lib/radar/import-silo-groups.ts` (novo), `components/editorial/workflow-status.tsx`
+  (compartilhado, aditivo), `components/editorial/operational-screen-shared.tsx` (compartilhado, aditivo),
+  `modules/radar/radar-page.tsx`, `tests/radar-import-silo-groups.test.mts` (novo),
+  `tests/radar-import-dialog-silo-dom.test.mts` (novo, DOM real pelo harness de `radar-dom-harness.mts`).
+- Testes: test:radar 2898 (2897 pass, 1 skip pré-existente, 0 falhas; +12 novos sobre a base);
+  test:operational 51 (39 pass, as MESMAS 12 falhas pré-existentes de antes da mudança — não piorou);
+  test:arquiteto 2737/0; test:agent 65/0; `npx tsc --noEmit -p .` com 0 erros de fonte (só as 2 rotas do
+  Planejador aposentado no cache `.next/types`, pré-existentes); eslint sem erro nos tocados;
+  `check-visual-system`: workflow-status.tsx 53 → 53, radar-page.tsx 0 → 0, professional-writer.tsx intocado;
+  `git diff --check` limpo.
+
+## Passada de revisão do CSV de vídeo (três revisores) — 2026-10-07
+
+**Verificado no código e confirmado por teste; `MANUAL_UI_VALIDATED = NO` (a mesma pendência de reexportação do
+dono da entrega abaixo).** Três revisores (usabilidade, honestidade, testes-regressão) olharam a entrega dos
+três produtos; o único should-fix e as notas triviais foram fechados aqui:
+
+- **Teste da dispersão dos cortes (should-fix)**: nenhuma fixture tinha mais de 3 capítulos, então reverter a
+  dispersão para o top-3 por peso passava a suíte inteira. Teste 23 novo
+  (`tests/radar-csv-video-roteiro.test.mts`) com planta de 5 seções: pesos iguais → cortes 1·2·4 (faixas {1},
+  {2,3}, {4,5}; empate fica com o primeiro da faixa); entrega prática só em 2 e 5 → cortes 1·2·5. Registro
+  corrigido: o relato da entrega dizia "1·3·5" para 5 capítulos iguais — o comportamento real (e correto pela
+  regra) é **1·2·4**; "1·3·5" só acontece com 6 capítulos.
+- **Mostrar do corte segue a origem do mostrar do capítulo** (nota dos revisores de honestidade e regressão):
+  seção com entrega prática E 2+ H3 fazia o corte dizer "só o primeiro passo — {H3[0]}" citando passos que o
+  Mostrar na tela do vídeo longo nem nomeia (a prática vence os H3 em `capitulosDaPlanta`). Agora os passos do
+  corte saem da prática quando ela existe (split por → ou ;; sem separador, a demonstração inteira da prática) e
+  dos H3 só quando o mostrar veio deles. Teste 24 novo prende as duas pontas.
+- **Plural na seção de entrega**: "Instruções para o redator" não casava com `TITULO_DE_ENTREGA`
+  (`lib/radar/brand-voice.ts` — "instrucao" não é substring de "instrucoes" sem acento); o regex virou
+  `instruc(?:ao|oes)`, com caso unitário no teste 21.
+- **Cabeçalho do carrossel**: dizia "cada uma puxando a próxima" depois de o "Puxa a próxima" sair do corpo da
+  lâmina; agora diz "(o título de cada lâmina já puxa a seguinte)". O fallback sem planta (que não monta
+  lâminas) continua com a instrução de encadear, que lá é acionável.
+- **Catálogo (AGENTS §17.1)**: a nota de 2026-10-07 em `lib/agent/platform-catalog.ts` ganhou a passada de
+  revisão (plural, origem do Mostrar do corte, cabeçalho do carrossel).
+
+Notas conferidas e NÃO alteradas (comportamento intencional, registradas no backlog quando pedem decisão):
+corte herdado de capítulo pendente mostra a PENDÊNCIA (documento de produção; a lâmina correspondente sai
+limpa); estatísticas da amostra seguem incluindo os fora-do-tema (fotografia congelada, declarada na coluna);
+`diretrizes_de_roteiro` não tem orçamento gracioso como a `serp_youtube` (pior caso sintético medido:
+9.614/10.000; acima do teto, `celula()` trunca com marcador visível — mecanismo pré-existente).
+
+## O CSV de vídeo serve aos três produtos (vídeo longo, cortes e carrossel) — 2026-10-07
+
+**Verificado no código e confirmado por teste; `MANUAL_UI_VALIDATED = NO` (o dono precisa exportar de novo o CSV
+real para conferir na planilha).** Pedido do dono: o CSV "para vídeo e redes sociais" exportado no caso real
+(Instagram/AdalbaPro) foi avaliado externamente, as críticas foram conferidas no código e procedem. Sete mudanças
+em `lib/radar/portable-video-export.ts` e `lib/radar/brand-voice.ts`:
+
+1. **Voz da marca sem entrega de artigo**: `radarBrandVoiceSectionIsArticleDelivery` (novo, exportado em
+   `lib/radar/brand-voice.ts`) reconhece seção de ENTREGA DE ARTIGO pelo título (entrega e revisão, revisão
+   final, instrução para o teste/para o redator, checklist de entrega) ou pelo corpo ("corpo do artigo" +
+   "meta description"/"SEO title", ou a ordem de escrever o artigo). Em `buildRadarVideoBrandVoiceRow`, essas
+   seções saem de TODAS as colunas da linha de voz e são nomeadas no "Fica fora desta linha". "Critérios antes
+   de redigir", "Voz" e "Vocabulário e estilo" FICAM; o CSV para escrever não muda (provado em teste).
+2. **O prompt pede os três produtos e libera a ordem** (`colunaPrompt`): vídeo longo (roteiro na ordem dos
+   capítulos OU na ordem que o vídeo render melhor — a diretriz permite reorganizar — mantendo assunto,
+   evidências e premissa), os 3 cortes (fala própria, cena a mostrar e UM CTA) e o carrossel (texto publicável
+   por lâmina + sugestão visual, sem instrução interna).
+3. **"Entregar" nunca fica sem resposta** (`capitulosDaPlanta`): answerFirst não-absoluto como antes; senão a
+   PRIMEIRA frase não-absoluta de explicar, promovida ("o que a pesquisa sustenta: {frase}; a resposta completa
+   a {pergunta} se delimita na fala", sem repeti-la no Explicar); senão a PENDÊNCIA nomeada e acionável
+   ("delimite na fala ou grave a resposta do especialista"). O placeholder "a resposta a X pelo que a pesquisa
+   sustenta, sem regra universal" morreu.
+4. **"Mostrar na tela" diz o que o editor prepara**: dos H3, "demonstração num exemplo fictício (identificado
+   como ilustrativo): prepare uma tela para cada passo — A; B; C — e mostre o antes e depois (com e sem) de
+   cada um; a cena exata é decisão de produção"; da entrega prática, "demonstração na tela: {practical}, num
+   exemplo fictício identificado como ilustrativo". O fallback de imagem segue como contexto visual.
+5. **Cortes com ideia única, origem e rótulo honesto** (`colunaCortes`): rótulo "{n} ideia(s) escolhida(s) dos
+   capítulos (as que funcionam sozinhas em até 60 segundos)"; escolha com DISPERSÃO (o melhor do início, do
+   meio e do fim da sequência; empate pela ordem; mesmos pesos de elegibilidade); "Mostrar" do corte usa SÓ o
+   primeiro passo quando há vários (o resto fica no vídeo longo); linha "Origem: extrair da gravação do
+   capítulo {N} ou gravar à parte com fala própria"; "Fechamento: CTA: o artigo ({URL}) ou o vídeo longo quando
+   publicado — um só por corte".
+6. **Carrossel publicável**: cada lâmina sai com "Título: … · Apoio (texto publicável): … · Visual: …". O Apoio
+   vem da frase publicável do capítulo (answerFirst ou a promovida de explicar); na pendência, a primeira frase
+   não-absoluta de explicar; sem nada, a pergunta do público como provocação. O Visual deriva do mostrar
+   ("demonstração de …"), do conceito da imagem ou "destaque do título". Nenhuma lâmina sai com instrução
+   interna; o "Puxa a próxima" saiu da lâmina (o Título da seguinte já diz o que vem). Capa segue o H1 da
+   planta; lâmina final segue o CTA com endereço; a frase de fonte por lâmina fica.
+7. **Amostra declarada** (`colunaIntencao` + `buildRadarVideoExportArticle`): a relevância (`relevanciaDoVideo`)
+   é lida do UNIVERSO INTEIRO (não só do top 10) e, havendo FORA, a coluna de intenção diz "Da amostra, {n} só
+   citam a plataforma (fora do tema da busca): ficam fora das recomendações, mas entram nas estatísticas de
+   duração e formato acima." Mediana e formatos não são recalculados (fotografia congelada).
+
+Decisões mantidas (NÃO reabertas): a tese editorial da marca ("o Instagram, sozinho, não enche a agenda" na
+capa/H1 e premissa) é decisão do dono e não foi censurada nem delimitada (o sanitize do blueprint já avisa o
+humano na aprovação); a fala E1 no fechamento (tipo FECHAMENTO) mantida; `RADAR_ABSOLUTE_CLAIM`
+(`lib/radar/article-blueprint.ts`) intacto (compartilhado com o artigo-modelo); o CSV "para escrever"
+(`portable-writing-export`) sem mudança de conteúdo.
+
+- Arquivos: `lib/radar/portable-video-export.ts`, `lib/radar/brand-voice.ts` (aditivo: predicado novo
+  exportado; consumidores anteriores preservados), `lib/agent/platform-catalog.ts` (AGENTS §17.1: descrição do
+  CSV de vídeo com carrossel publicável e prompt dos três produtos; nota nova datada 2026-10-07),
+  `tests/radar-csv-video-roteiro.test.mts` (asserções atualizadas com o porquê + testes 20–22 de prova por
+  regeneração: planta com answerFirst absoluto, pendência nomeada, lâmina sem instrução interna, voz sem
+  entrega de artigo, amostra declarada lida além do top 10).
+- Testes: test:radar 2886 (2885 pass, 1 skip pré-existente, 0 falhas; linha de base 2883 + 3 novos);
+  test:agent 65/0; `npx tsc --noEmit -p .` limpo fora do cache `.next/types` (rotas do Planejador aposentado,
+  pré-existente); eslint sem erro nos arquivos tocados; `git diff --check` limpo.
+- **Limites:** "Mostrar na tela" ainda não desenha a cena exata (decisão de produção, dito na linha); as
+  estatísticas da amostra seguem incluindo os fora-do-tema (declarado na coluna); os tempos da biblioteca
+  seguem estimados pela posição no texto.
+
 ## Briefing de vídeo pelo que alimenta os campos e os 4 limites do artigo — 2026-10-02 (fim da noite)
 
 **Verificado no código e confirmado por teste; a exportação "Para escrever" do Instagram foi conferida por POST
