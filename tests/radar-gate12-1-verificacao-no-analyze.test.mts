@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   RADAR_SOURCE_VERIFICATION_BATCH, RADAR_SOURCE_VERIFICATION_ERROR,
   RadarSourceVerificationRequestSchema, radarSourceVerificationBatches, radarSourceVerificationErrorMessage,
+  radarSourceVerificationFailureRecords,
 } from "../lib/radar/source-verification-request.ts";
 import { buildRadarSourceVerificationPlan, radarSourceClassificationFromRecord, radarSourceId, radarSourceVerificationTargets } from "../lib/radar/source-authority.ts";
 import { verifyRadarSources } from "../lib/radar/source-verification.ts";
@@ -256,6 +257,73 @@ test("GATE 12.1 · J e K — uma fonte que falha não aborta, e nada fica penden
 
   /* SOURCE_PENDING = 0: toda selecionada terminou verificada ou como falha. */
   assert.equal(resultado.verified.length + resultado.failures.length, alvos.length);
+});
+
+/* ======  2026-10-08 · A FALHA DE FONTE GRAVA COM IDENTIDADE  ========= */
+
+const FALHAS_DA_VERSAO = RadarAnalysisPayloadSchema.shape.sourceVerificationFailures;
+
+test("2026-10-08 · a fonte que falha volta com sourceId e domínio: a versão grava sem recusar a análise", async () => {
+  const alvos = plano();
+  const resultado = await verifyRadarSources({
+    targets: alvos,
+    fetchImpl: (async (entrada: unknown) => {
+      const url = String(entrada);
+      return { ok: false, status: 403, url, headers: new Headers({ "content-type": "text/html" }), text: async () => "", arrayBuffer: async () => new ArrayBuffer(0) } as unknown as Response;
+    }) as unknown as typeof fetch,
+    lookupImpl: (async () => [{ address: "93.184.216.34" }]) as never,
+    now: "2026-10-08T10:00:00.000Z",
+  });
+  assert.ok(resultado.failures.length > 0);
+  for (const falha of resultado.failures) {
+    const alvo = alvos.find(item => item.candidateUrl === falha.url)!;
+    assert.equal(falha.sourceId, alvo.sourceId, "o id do plano acompanha a falha");
+    assert.ok(falha.domain.length > 0);
+  }
+  /* O que a rota devolve (falha + observedAt) é exatamente o que a versão aceita. */
+  const comoARotaDevolve = resultado.failures.map(item => ({ ...item, observedAt: "2026-10-08T10:00:00.000Z" }));
+  assert.doesNotThrow(() => FALHAS_DA_VERSAO.parse(comoARotaDevolve));
+});
+
+test("2026-10-08 · a tela normaliza a falha antiga (sem sourceId nem domínio) e só repete a fonte do plano", () => {
+  const alvos = plano();
+  const [primeiro, segundo] = alvos;
+  const lote = alvos.map(item => item.sourceId);
+  const registros = radarSourceVerificationFailureRecords({
+    failures: [
+      /* como a rota de antes devolvia: sem sourceId */
+      { domain: primeiro.domain, url: primeiro.candidateUrl, code: "access_blocked", status: 403, message: "Bloqueado.", observedAt: "2026-10-08T10:00:00.000Z" },
+      /* sem sourceId e sem domínio, só com o endereço */
+      ...(segundo ? [{ url: segundo.candidateUrl, code: "timeout", status: 504, message: "" }] : []),
+      /* nada que o identifique */
+      { code: "fetch_failed" },
+      null,
+    ],
+    batch: lote,
+    plan: alvos,
+    observedAt: "2026-10-08T11:00:00.000Z",
+  });
+  assert.equal(registros[0].sourceId, primeiro.sourceId);
+  assert.equal(registros[0].resolved, true);
+  if (segundo) {
+    assert.equal(registros[1].sourceId, segundo.sourceId, "pelo endereço");
+    assert.equal(registros[1].domain, segundo.domain, "o domínio vem do plano");
+    assert.equal(registros[1].message, "A fonte não pôde ser verificada.");
+  }
+  const orfa = registros[registros.length - 1];
+  if (lote.length > 1) {
+    assert.equal(orfa.resolved, false, "sem como identificar, não volta à fila");
+    assert.match(orfa.sourceId, /^source:sem-id-/);
+  }
+  assert.equal(registros.length, segundo ? 3 : 2, "item nulo não vira registro");
+  /* Todos gravam: o contrato da versão aceita a lista inteira. */
+  assert.doesNotThrow(() => FALHAS_DA_VERSAO.parse(registros.map(({ resolved: _r, ...item }) => item)));
+
+  /* E a tela usa a normalização e só repete id do plano. */
+  const analyze = PAGINA_DO_RADAR.slice(PAGINA_DO_RADAR.indexOf("const analyzeSerpSelection = async"), PAGINA_DO_RADAR.indexOf("const reviewSerpForArticle = async"));
+  assert.match(analyze, /radarSourceVerificationFailureRecords\(\{ failures: corpo\.failures, batch: lote, plan: planoDeFontes/);
+  assert.doesNotMatch(analyze, /for \(const item of Array\.isArray\(corpo\.failures\) \? corpo\.failures : \[\]\) recusadasNestaRodada\.push\(item\)/);
+  assert.match(analyze, /idsDoPlano\.has\(falha\.sourceId\)/);
 });
 
 /* =========  9, L, R · PERSISTÊNCIA, READBACK E BUNDLE  ============= */

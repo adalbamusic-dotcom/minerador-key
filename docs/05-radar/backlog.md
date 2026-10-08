@@ -1,5 +1,10 @@
 # Backlog — Radar
 
+## Correção: fonte que falha na verificação recusava a análise — 2026-10-08
+
+- [x] `verifyRadarSources` devolve `sourceId` e domínio; a tela normaliza a falha (`radarSourceVerificationFailureRecords`) e só repete id do plano. Detalhe em `estado-atual.md`.
+- [ ] **Dono (homologação):** rodar de novo "Analisar concorrência" em "marketing digital para dentistas", conferir que a versão final grava (sem o erro de `sourceId`) e que "Finalizar pesquisa" habilita o YouTube.
+
 ## Revisão dos entregáveis (CSV para escrever, CSV de vídeo, Redator, MCP) — 2026-10-08
 
 Detalhe, testes e consumidores preservados em `docs/05-radar/estado-atual.md` (2026-10-08). Feito = Verificado no

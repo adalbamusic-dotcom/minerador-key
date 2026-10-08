@@ -70,7 +70,7 @@ import { radarExtractionBatches, radarExtractionErrorMessage } from "@/lib/radar
 import { buildRadarAnalysisMembership } from "@/lib/radar/analysis-membership";
 import { buildRadarSourceVerificationPlan } from "@/lib/radar/source-authority";
 import { buildRadarEvidenceClaims } from "@/lib/radar/claim-evidence";
-import { radarSourceVerificationBatches, radarSourceVerificationErrorMessage } from "@/lib/radar/source-verification-request";
+import { radarSourceVerificationBatches, radarSourceVerificationErrorMessage, radarSourceVerificationFailureRecords } from "@/lib/radar/source-verification-request";
 import { buildRadarExternalSourceResearch } from "@/lib/radar/link-and-source-research";
 import { buildRadarSemanticConceptModel } from "@/lib/radar/semantic-concept-model";
 import { buildRadarWorkbenchStages, resolveRadarWorkbenchArticleId, summarizeRadarReferenceCounts, type RadarAdditionalEvidenceState } from "@/lib/radar/workbench";
@@ -4511,12 +4511,18 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
               continue;
             }
             for (const item of Array.isArray(corpo.verified) ? corpo.verified : []) fontesVerificadas.push(item);
-            for (const item of Array.isArray(corpo.failures) ? corpo.failures : []) recusadasNestaRodada.push(item);
+            /* 2026-10-08 · a falha vira registro válido para o contrato da versão (sem id, recusava a análise inteira). */
+            for (const item of radarSourceVerificationFailureRecords({ failures: corpo.failures, batch: lote, plan: planoDeFontes, observedAt: new Date().toISOString() })) {
+              recusadasNestaRodada.push({ sourceId: item.sourceId, domain: item.domain, url: item.url, code: item.code, message: item.message, status: item.status, observedAt: item.observedAt });
+            }
           }
 
           for (const sourceId of filaDeFontes) tentativasDeFonte.set(sourceId, rodadaDeFonte);
+          /* Só volta à fila a fonte do plano: um id fora dele faria a rota recusar o lote inteiro. */
+          const idsDoPlano = new Set(planoDeFontes.map(item => item.sourceId));
           const recuperaveisDeFonte = recusadasNestaRodada.filter(falha =>
-            (tentativasDeFonte.get(falha.sourceId) || rodadaDeFonte) < RADAR_EXTRACTION_MAX_ATTEMPTS
+            idsDoPlano.has(falha.sourceId)
+            && (tentativasDeFonte.get(falha.sourceId) || rodadaDeFonte) < RADAR_EXTRACTION_MAX_ATTEMPTS
             && radarExtractionFailureIsRecoverable({ code: falha.code, status: falha.status }));
           falhasDeFonte.push(...recusadasNestaRodada.filter(falha => !recuperaveisDeFonte.includes(falha)));
           filaDeFontes = recuperaveisDeFonte.map(falha => falha.sourceId);
