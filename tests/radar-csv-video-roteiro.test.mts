@@ -312,7 +312,8 @@ test("4 · cortes: saem dos capítulos, cada um funcionando sozinho; legenda por
     const row = linhaDe(entradaDoAssunto(assunto), { youtube });
     const cortes = row.cortes_para_redes;
     /* 2026-10-07 · o rótulo "um por capítulo do vídeo principal" mentia com 3 cortes para 5 capítulos: agora diz quantas ideias foram escolhidas. */
-    assert.match(cortes, /^Cortes sugeridos \(Shorts, Reels e TikTok\): \d ideia\(s\) escolhida\(s\) dos capítulos \(as que funcionam sozinhas em até 60 segundos\); cada corte funciona sozinho/m);
+    /* 2026-10-08 · com a concordância: "1 ideia escolhida", "3 ideias escolhidas" (antes, "ideia(s) escolhida(s)"). */
+    assert.match(cortes, /^Cortes sugeridos \(Shorts, Reels e TikTok\): \d ideias? escolhidas? dos capítulos \(as que funcionam sozinhas em até 60 segundos\); cada corte funciona sozinho/m);
     const linhas = cortes.split("\n").filter(linha => /^\d+\. Do capítulo \d+ \(/.test(linha));
     assert.ok(linhas.length > 0 && linhas.length <= 3, cortes);
     const { itens } = capitulosDe(row.diretrizes_de_roteiro);
@@ -352,7 +353,8 @@ test("5 · público: o preenchimento do DNA cede ao trecho de público da Skill 
   assert.match(comVoz, /^Origem do público: o artigo não define; vem do trecho "Público prioritário" da Skill de voz da marca, Skill "Agência Exemplo" v3 \(ativa na Marca\)\.$/m);
   assert.doesNotMatch(comVoz, /Promessa ao público: Cobrir com clareza/, "a promessa de preenchimento também não vale");
 
-  assert.match(linhaDe(entradaDoAssunto(INSTAGRAM)).tema_e_publico, /^Público: a definir \(o artigo não define público e a marca não tem Skill de voz com o público\)\.$/m);
+  /* 2026-10-08 (correção da revisão) · D10: sem público dito, quem faz a busca — não "a definir". */
+  assert.match(linhaDe(entradaDoAssunto(INSTAGRAM)).tema_e_publico, /^Público: quem busca "como atrair clientes pelo instagram" \(o artigo não define público e a marca não tem Skill de voz com o público\)\.$/m);
   /* O público real do artigo vence a Skill. */
   assert.match(linhaDe(entradaDoAssunto(IMPLANTE), { brandVoice: COM_VOZ }).tema_e_publico, /^Público: Adultos que perderam dentes e pesquisam reabilitação fixa\.$/m);
 });
@@ -560,7 +562,8 @@ test("11 · vídeo × artigo: a seção do artigo-modelo, o que o vídeo acresce
   assert.match(aprovado, /^- Onde fica: incorporado no artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\), nessa seção\.$/m);
   assert.match(aprovado, /^- Na descrição do vídeo: o link do artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\)\.$/m);
   assert.doesNotMatch(linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") }).diretrizes_de_roteiro, /proposta da IA|aprovação/);
-  assert.match(linhaDe(entrada).diretrizes_de_roteiro, /^- Complementa a seção: a definir no artigo-modelo/m);
+  /* 2026-10-08 (correção da revisão) · D10: sem artigo-modelo, a regra concluída. */
+  assert.match(linhaDe(entrada).diretrizes_de_roteiro, /^- Complementa a primeira seção prática do artigo \(este pacote não tem artigo-modelo\)\.$/m);
 
   /* A landing page fala de si; sem endereço, a descrição diz quando ele existe. */
   const landing = linhaDe(entradaDoAssunto({ ...IMPLANTE, canonical: "", slug: "" })).diretrizes_de_roteiro;
@@ -607,8 +610,8 @@ test("12 · vídeos selecionados pela marca: canal de cada um, trecho com tempo 
   assert.match(biblioteca, /Vídeos selecionados pela marca \(modo de uso escolhido no Radar, decisão do dono\):/);
   assert.doesNotMatch(biblioteca, /Vídeos da marca/, "o rótulo é \"selecionados pela marca\": o vídeo pode ser de outro canal");
   /* 2026-10-02 · a fala do vídeo vai em linha própria, abaixo do vídeo, com o aviso de transcrição automática. */
-  assert.match(biblioteca, /Apoio · "Implante sem medo" \(https:\/\/www\.youtube\.com\/watch\?v=apoio000001\) · canal: Odonto Explica — [^\n]*: \(01:35–01:50\) "Com a anestesia local, o paciente sente pressão, não dor\."\n {2}Começo da transcrição \(fala do vídeo, conferir antes de usar\): "Hoje eu explico/);
-  assert.match(biblioteca, /Incorporar no artigo · "Tour pelo consultório" [^\n]*· canal: Clínica Sorriso — [^\n]*· seção: a que o vídeo responde \(definir no artigo-modelo\)\n {2}Começo da transcrição \(fala do vídeo, conferir antes de usar\): "Vem conhecer a sala/);
+  assert.match(biblioteca, /Apoio · "Implante sem medo" \(https:\/\/www\.youtube\.com\/watch\?v=apoio000001\) · canal: Odonto Explica — [^\n]*: \(01:35–01:50\) "Com a anestesia local, o paciente sente pressão, não dor\."\n {2}Começo da transcrição \(fala do vídeo, transcrição automática: cite só o que o vídeo confirma\): "Hoje eu explico/);
+  assert.match(biblioteca, /Incorporar no artigo · "Tour pelo consultório" [^\n]*· canal: Clínica Sorriso — [^\n]*· seção: a que o vídeo responde \(definir no artigo-modelo\)\n {2}Começo da transcrição \(fala do vídeo, transcrição automática: cite só o que o vídeo confirma\): "Vem conhecer a sala/);
   assert.match(biblioteca, /^ {2}Transcrição automática: confira as palavras no vídeo antes de citar/m);
 });
 
@@ -795,7 +798,8 @@ test("16 · com a planta do artigo-modelo, cada capítulo diz o que entregar, o 
    * alinhamento e a origem recomendada com o motivo; os outros dizem por que
    * ficaram sem corte.
    */
-  assert.match(cortes, /^Cortes sugeridos \(Shorts, Reels e TikTok\): 1 ideia\(s\) escolhida\(s\) dos capítulos pela utilidade isolada \(pergunta com demanda, funciona sozinha, uma demonstração, oportunidade na SERP\)/m);
+  /* 2026-10-08 · D1: o cabeçalho diz o mínimo (1 ponto ou mais de 4) e concorda com o número. */
+  assert.match(cortes, /^Cortes sugeridos \(Shorts, Reels e TikTok\): 1 ideia escolhida dos capítulos pela utilidade isolada \(pergunta com demanda, funciona sozinha, uma demonstração, oportunidade na SERP\), só com 1 ponto ou mais de 4; /m);
   assert.match(cortes, /^1\. Do capítulo 2 \(Roteiro de três stories\):\n {3}Utilidade 3 de 4: pergunta com demanda \(P1: 12 de 12 páginas\) · funciona sozinha · uma ação\.\n {3}Gancho: "Roteiro de três stories\?"\n {3}Ideia única: Resposta direta\.\n {3}Mostrar: a ação — um roteiro de três stories para a semana — num exemplo fictício identificado como ilustrativo\.\n {3}Alinhamento: [^\n]+\n {3}Origem recomendada: extrair da gravação do capítulo 2 e reenquadrar na vertical — motivo: o capítulo abre respondendo a mesma pergunta e mostra uma ação só\. Alternativa: gravar à parte com fala própria\.\n {3}Fechamento: CTA: o artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\) ou o vídeo longo quando publicado — um só por corte\.$/m);
   assert.match(cortes, /^Capítulos sem corte: 1 \(sem demonstração definida na planta\) · 3 \(sem demonstração definida na planta\)\.$/m);
   assert.doesNotMatch(cortes, /^\d+\. Do capítulo [13] \(/m, "capítulo explicativo não completa a conta");
@@ -871,7 +875,8 @@ test("19 · premissa sem regra universal, demonstração em vez de cena, gancho 
       ...planta.blueprint,
       promise: "Mostrar como a clínica reconhece se o perfil alcança pessoas da região interessadas no atendimento.",
       sections: planta.blueprint.sections.map((secao, indice) => indice === 0
-        ? { ...secao, answerFirst: "O Instagram foi feito para entretenimento, não para agendar.", explain: ["Pacientes procuram no Google, não no Instagram.", "A bio diz serviço, cidade e contato."], h3: ["Perfil antes", "O ajuste", "Perfil depois"], practical: null }
+        /* 2026-10-08 · D3: H3 só é passo quando é ação — os de antes ("Perfil antes", "O ajuste") eram tópicos e hoje fazem o capítulo explicativo. */
+        ? { ...secao, answerFirst: "O Instagram foi feito para entretenimento, não para agendar.", explain: ["Pacientes procuram no Google, não no Instagram.", "A bio diz serviço, cidade e contato."], h3: ["Mostre o perfil antes", "Faça o ajuste", "Mostre o perfil depois"], practical: null }
         : secao),
     },
   };
@@ -893,7 +898,7 @@ test("19 · premissa sem regra universal, demonstração em vez de cena, gancho 
    * planta, uma tela por passo; o "antes e depois (com e sem) de cada um" saiu — a regra 17 da planta não
    * prescreve antes e depois como receita, e a cena segue a régua das regras 9 e 17.
    */
-  assert.match(roteiro, /Mostrar na tela \(demonstração da planta\): passos: Perfil antes; O ajuste; Perfil depois · prepare uma tela por passo num exemplo fictício identificado como ilustrativo\./, "demonstração pelos passos da seção, com o material a preparar");
+  assert.match(roteiro, /Mostrar na tela \(demonstração da planta\): passos: Mostre o perfil antes; Faça o ajuste; Mostre o perfil depois · prepare uma tela por passo num exemplo fictício identificado como ilustrativo\./, "demonstração pelos passos da seção, com o material a preparar");
   assert.match(roteiro, /^Regra das cenas \(regras 9 e 17 da planta\): [^\n]*nunca antes e depois de paciente ou de resultado\.$/m);
   assert.doesNotMatch(roteiro, /com e sem\) de cada um/, "antes e depois não vira receita de cada passo");
   assert.match(roteiro, /reorganize se o vídeo render mais abrindo pela demonstração/);
@@ -953,22 +958,24 @@ test("20 · Entregar nunca fica sem resposta; corte com ideia única e Origem; l
   assert.doesNotMatch(roteiro, /pelo que a pesquisa sustenta, sem regra universal/, "o placeholder antigo morreu");
 
   const cortes = row.cortes_para_redes;
-  /* O corte do capítulo 1 usa SÓ o primeiro passo (ideia única) e diz a origem da gravação. */
-  assert.match(cortes, /^ {3}Mostrar: só o primeiro passo — O papel do algoritmo — num exemplo fictício identificado como ilustrativo; os outros passos ficam no vídeo longo\.$/m);
   /*
-   * 2026-10-07 · revisão do mesmo dia (item 3): a origem vem recomendada, com o
-   * motivo — dois passos (o corte usa um) e a ideia única do Explicar (a
-   * abertura do capítulo é absoluta) pedem gravar à parte.
+   * 2026-10-08 · D2 e D3 (o CSV real de 08/10): "O papel do algoritmo" e
+   * "Seguidores não são pacientes" são TÓPICOS, não passos. O corte do
+   * capítulo 1 mostrava "só o primeiro passo — O papel do algoritmo" (o tema
+   * da afirmação travada) ao lado da ideia "A atenção no feed é passageira".
+   * Agora o capítulo 1 é explicativo: não vira corte e diz por quê; o
+   * capítulo 3 continua sem frase publicável.
    */
-  assert.match(cortes, /^ {3}Origem recomendada: gravar à parte com fala própria — motivo: a demonstração tem 2 passos e o corte usa só o primeiro; a ideia única vem do Explicar, não da abertura do capítulo\. Alternativa: extrair, reeditando a fala\.$/m);
-  /* O capítulo 3 não tem frase publicável nem demonstração: não vira corte e diz o motivo. */
-  assert.match(cortes, /^Capítulos sem corte: 3 \(sem frase publicável na planta: só afirmação absoluta\)\.$/m);
+  assert.doesNotMatch(cortes, /só o primeiro passo — O papel do algoritmo|^\d+\. Do capítulo 1 \(/m, "tópico não é passo de corte");
+  assert.match(roteiro, /^ {3}Mostrar na tela: sem demonstração na planta \(capítulo explicativo\) — contexto visual: os pontos do capítulo na tela, um por vez: O papel do algoritmo; Seguidores não são pacientes; este capítulo não vira corte\.$/m);
+  assert.match(cortes, /^Capítulos sem corte: 1 \(sem demonstração definida na planta: os subtítulos são tópicos, não ações\) · 3 \(sem frase publicável na planta: só afirmação absoluta\)\.$/m);
   /*
    * A lâmina sai publicável: Título, Apoio e Visual — e NUNCA instrução interna, nem sem frase aproveitável.
    * 2026-10-07 · revisão do mesmo dia (item 4): o Visual sai da demonstração da planta — passos dos H3
    * viram lista no carrossel (antes, só o primeiro passo, que dizia menos que o capítulo).
    */
-  assert.match(cortes, /^- Lâmina 2: Título: Por que o perfil não traz pacientes · Apoio \(texto publicável\): A atenção no feed é passageira\. · Visual: os passos em lista: O papel do algoritmo; Seguidores não são pacientes\.$/m);
+  /* 2026-10-08 · D3: os tópicos vão em lista como PONTOS do capítulo, nunca como "os passos". */
+  assert.match(cortes, /^- Lâmina 2: Título: Por que o perfil não traz pacientes · Apoio \(texto publicável\): A atenção no feed é passageira\. · Visual: os pontos do capítulo em lista: O papel do algoritmo; Seguidores não são pacientes\.$/m);
   assert.match(cortes, /^- Lâmina 4: Título: Prova social · Apoio \(texto publicável\): Prova social\? · Visual: destaque do título\.$/m, "sem frase publicável, a pergunta do público vira a provocação da lâmina");
   const laminas = cortes.split("\n").filter(linha => linha.startsWith("- Lâmina"));
   assert.ok(laminas.length >= 5, cortes);
@@ -1215,17 +1222,27 @@ test("25 · trava de fonte (caso real): a frase que pede fonte sai da lâmina e 
   const ideias = cortes.split("\n").filter(linha => /^ {3}Ideia única: /.test(linha));
   assert.ok(laminas.length === 5 && ideias.length > 0, cortes);
   /* O problema do CSV real: a Lâmina 2 publicava a afirmação que o capítulo 1 marcava como "fonte a obter". */
-  for (const texto of [...laminas, ...ideias]) assert.doesNotMatch(texto, /algoritmo prioriza|ampliar seu alcance|geolocalização ajudam/i, `texto publicável sem a afirmação travada: ${texto}`);
+  /* 2026-10-08 (correção da revisão) · "Influenciadores locais PODEM ampliar seu alcance" é efeito delimitado por modal: passa, como o desenho pedia. */
+  for (const texto of [...laminas, ...ideias]) assert.doesNotMatch(texto, /algoritmo prioriza|geolocalização ajudam/i, `texto publicável sem a afirmação travada: ${texto}`);
   assert.match(cortes, /^- Lâmina 2: Título: O que o Instagram faz bem \(e o que ele não faz\) · Apoio \(texto publicável\): A atenção no feed é passageira\. · /m, "o próximo candidato livre vira o Apoio");
   /* Na produção, a frase fica delimitada e perde o rótulo "o que a pesquisa sustenta". */
   assert.match(row.diretrizes_de_roteiro, /^ {3}Entregar: o que a pesquisa sustenta: A atenção no feed é passageira; a decisão de marcar consulta envolve confiança e necessidade; a resposta completa a "O Instagram realmente serve para atrair clientes\?" se delimita na fala\n {3}Fala delimitada, sem fonte: O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos\.$/m);
   assert.doesNotMatch(row.diretrizes_de_roteiro, /o que a pesquisa sustenta: O algoritmo/);
-  assert.match(row.diretrizes_de_roteiro, /^ {3}Fala delimitada, sem fonte: Influenciadores locais podem ampliar seu alcance para o público certo; Hashtags e geolocalização ajudam a ser encontrado por quem está perto\.$/m);
+  assert.match(row.diretrizes_de_roteiro, /^ {3}Explicar: Influenciadores locais podem ampliar seu alcance para o público certo\.\n {3}Fala delimitada, sem fonte: Hashtags e geolocalização ajudam a ser encontrado por quem está perto\.$/m);
   /* A lista "Fica fora" é regra concluída, com o motivo — e o pode_gravar diz a correção feita. */
   assert.match(cortes, /^Fica fora do texto publicável \(sem fonte não entra em lâmina, legenda nem ideia do corte; na fala, só delimitada\):$/m);
-  assert.match(cortes, /^- Capítulo 1 · lâmina 2[^:]*: "O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos" — a planta pede fonte: "O algoritmo do Instagram prioriza conteúdo com alto engajamento" \(fonte a obter: oficial ou verificada\)\.$/m);
+  /* 2026-10-08 · D10 no motivo: "(fonte a obter: oficial ou verificada)" era espera aberta no entregável; a regra sai concluída. */
+  /*
+   * 2026-10-08 (correção da revisão) · a resposta ABSOLUTA do capítulo 1 sumia
+   * calada (o filtro de absoluta rodava antes da trava): agora ela abre a linha
+   * do capítulo na lista, com o motivo dela — fora do vídeo, também da fala — e
+   * entra na contagem do pode_gravar.
+   */
+  assert.match(cortes, /^- Capítulo 1 · lâmina 2[^:]*: "O Instagram foi feito para entretenimento, não para agendar consultas" — regra universal sem fonte: fica fora do vídeo, também da fala; "O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos" — a planta pede fonte oficial ou verificada: "O algoritmo do Instagram prioriza conteúdo com alto engajamento"\.$/m);
+  assert.doesNotMatch(row.diretrizes_de_roteiro, /foi feito para entretenimento/, "a absoluta não volta à fala");
+  assert.doesNotMatch(cortes, /fonte a obter/, "D10: a lista \"Fica fora\" não diz \"fonte a obter\"");
   /* Uma linha por capítulo (com a lâmina e o corte dele), cada frase com o seu motivo. */
-  assert.match(cortes, /^- Capítulo 3 · lâmina 4[^:]*: "Influenciadores locais podem ampliar seu alcance para o público certo" — afirmação sobre plataforma sem fonte \(regra 17 da planta\); "Hashtags e geolocalização ajudam a ser encontrado por quem está perto" — afirmação sobre plataforma sem fonte \(regra 17 da planta\)\.$/m);
+  assert.match(cortes, /^- Capítulo 3 · lâmina 4[^:]*: "Hashtags e geolocalização ajudam a ser encontrado por quem está perto" — afirmação sobre plataforma sem fonte \(regra 17 da planta\)\.$/m);
   assert.match(row.pode_gravar, /^- 3 frase\(s\) que pedem fonte saíram do texto publicável \(lista em cortes_para_redes\)\.$/m);
   /* Controle negativo: a tese do dono (premissa e capa) e a frase sem afirmação de plataforma ficam. */
   assert.match(row.diretrizes_de_roteiro, /^Premissa do vídeo: O vídeo mostra por que o Instagram, sozinho, não enche a agenda e como usar a plataforma de forma estratégica\.$/m);
@@ -1240,7 +1257,8 @@ test("25 · trava de fonte (caso real): a frase que pede fonte sai da lâmina e 
   assert.match(comFonte.diretrizes_de_roteiro, /^ {3}Entregar: o que a pesquisa sustenta: O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos \(fonte: https:\/\/fonte-oficial\.exemplo\/algoritmo\); a resposta completa/m);
   assert.match(comFonte.diretrizes_de_roteiro, /^ {3}Antes de afirmar: O algoritmo do Instagram prioriza conteúdo com alto engajamento \(fonte: https:\/\/fonte-oficial\.exemplo\/algoritmo\); /m);
   assert.match(comFonte.cortes_para_redes, /^- Lâmina 2: [^\n]*Apoio \(texto publicável\): O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos \(fonte: https:\/\/fonte-oficial\.exemplo\/algoritmo\)\. · /m);
-  assert.doesNotMatch(comFonte.cortes_para_redes, /^- Capítulo 1 /m, "com fonte, nada do capítulo 1 fica fora");
+  /* 2026-10-08 (correção da revisão) · com fonte, do capítulo 1 só a absoluta fica fora (a regra universal não ganha fonte pelo link do algoritmo). */
+  assert.match(comFonte.cortes_para_redes, /^- Capítulo 1 · lâmina 2[^:]*: "O Instagram foi feito para entretenimento, não para agendar consultas" — regra universal sem fonte: fica fora do vídeo, também da fala\.$/m, "com fonte, a frase do algoritmo não fica fora");
 });
 
 test("25b · a mesma porta na premissa, na capa e na promessa do gancho: afirmação de plataforma sem fonte cai para a abertura e é listada", () => {
@@ -1268,6 +1286,7 @@ test("25b · a mesma porta na premissa, na capa e na promessa do gancho: afirma�
   assert.match(row.cortes_para_redes, /^- Premissa do vídeo: "Mostrar que o algoritmo do Instagram favorece quem publica todo dia" — afirmação sobre plataforma sem fonte \(regra 17 da planta\)\.$/m);
   assert.match(row.cortes_para_redes, /^- Capa do carrossel \(lâmina 1\): "O algoritmo do Instagram prioriza quem posta todo dia" — /m);
   assert.match(row.cortes_para_redes, /^- Promessa do gancho: "Hashtags certas aumentam o alcance da clínica no Instagram" — afirmação sobre plataforma sem fonte \(regra 17 da planta\)\.$/m);
+  /* 2026-10-08 (correção da revisão) · o modal ("podem ampliar") deixou de travar (-1) e a absoluta do capítulo 1 passou a ser contada (+1): 6. */
   assert.match(row.pode_gravar, /^- 6 frase\(s\) que pedem fonte saíram do texto publicável/m);
 });
 
@@ -1284,7 +1303,7 @@ test("25c · a porta (radarClaimGate): link da mesma seção, mercado sem fonte,
   /* (a) o link da MESMA seção trava com 2 raízes distintivas em comum. */
   const a = porta("O algoritmo prioriza conteúdo que gera interação", 0);
   assert.equal(a.estado, "TRAVADA");
-  assert.match(a.estado === "TRAVADA" ? a.motivo : "", /^a planta pede fonte: "O algoritmo do Instagram prioriza conteúdo com alto engajamento" \(fonte a obter: oficial ou verificada\)$/);
+  assert.match(a.estado === "TRAVADA" ? a.motivo : "", /^a planta pede fonte oficial ou verificada: "O algoritmo do Instagram prioriza conteúdo com alto engajamento"$/);
   /* Em outra seção, o mesmo link precisa de 60% das raízes: uma raiz em comum não trava. */
   assert.equal(porta("Conteúdo de bastidor da clínica", 2).estado, "LIVRE");
   /* (b) e (c): cobrir 60% da afirmação do mercado trava, com o motivo de cada uma. */
@@ -1305,9 +1324,16 @@ test("25c · a porta (radarClaimGate): link da mesma seção, mercado sem fonte,
   for (const livre of [
     "A bio diz serviço, cidade e contato.",
     "Aplique táticas como parcerias com influenciadores locais, uso de hashtags relevantes e interação ativa com a audiência.",
-    "Use o Instagram como vitrine, direcionando o público para canais que convertem, como o site e o WhatsApp.",
     "Como atrair clientes pelo Instagram (sem cair na ilusão de que ele enche a agenda)",
   ]) assert.equal(porta(livre, 3).estado, "LIVRE", livre);
+  /*
+   * 2026-10-08 · a trava por SENTIDO: "canais que convertem" era livre aqui — a
+   * conversão só contava com objeto depois do verbo — e saiu publicada na
+   * lâmina 4 e no corte 2 do CSV real de 08/10. É afirmação de conversão do
+   * público sem fonte, como "converte visitantes em agendamentos".
+   */
+  const canais = porta("Use o Instagram como vitrine, direcionando o público para canais que convertem, como o site e o WhatsApp.", 3);
+  assert.equal(canais.estado === "TRAVADA" ? canais.motivo : canais.estado, "afirmação sobre conversão do público sem fonte (regra 17 da planta)");
   assert.equal(radarPlatformClaimWithoutSource("O algoritmo prioriza engajamento?"), false, "pergunta não afirma");
   assert.equal(radarPlatformClaimWithoutSource("Deixe o contato ao alcance da mão."), false, "\"ao alcance\" é expressão, não alcance da plataforma");
   /*
@@ -1332,6 +1358,42 @@ test("25c · a porta (radarClaimGate): link da mesma seção, mercado sem fonte,
   /* A conversão do público tem o motivo dela — não é "afirmação sobre plataforma". */
   const conversao = porta("Um site otimizado converte visitantes em agendamentos.", 4);
   assert.equal(conversao.estado === "TRAVADA" ? conversao.motivo : "", "afirmação sobre conversão do público sem fonte (regra 17 da planta)");
+});
+
+test("25d · a trava por sentido de ponta a ponta (CSV real de 08/10): \"canais que convertem\" e o comportamento do público saem da lâmina e da ideia do corte; a tese passa", () => {
+  /*
+   * 2026-10-08 · o capítulo 2 do caso real abria por "Use o Instagram como
+   * vitrine…, direcionando o público para canais que convertem, como o site e o
+   * WhatsApp" — publicada na lâmina 4 e no corte 2 — e o Explicar trazia o
+   * comportamento do público sem fonte. As duas saem do texto publicável e vão
+   * para a lista "Fica fora", cada uma com o seu motivo; a frase livre do
+   * Explicar ("gera confiança" não é efeito comercial) vira o Entregar.
+   */
+  const entrada = entradaDoAssunto(INSTAGRAM);
+  const real = plantaDoCasoReal(entrada);
+  const CANAIS = "Use o Instagram como vitrine para gerar autoridade e relacionamento, direcionando o público para canais que convertem, como o site e o WhatsApp.";
+  const PROCURAM = "Pacientes com dor ou necessidade procuram atendimento pelo Google e chegam pelo site.";
+  const planta = {
+    ...real,
+    blueprint: {
+      ...real.blueprint,
+      sections: real.blueprint.sections.map((secao, indice) => (indice === 1
+        ? { ...secao, answerFirst: CANAIS, explain: [PROCURAM, "Conteúdo educativo gera confiança e posiciona você como autoridade."] }
+        : secao)),
+    },
+  };
+  const row = linhaDe(entrada, { blueprint: planta });
+  const publicaveis = row.cortes_para_redes.split("\n").filter(linha => linha.startsWith("- Lâmina") || /^ {3}Ideia única: /.test(linha));
+  assert.ok(publicaveis.length > 0, row.cortes_para_redes);
+  for (const linha of publicaveis) assert.doesNotMatch(linha, /canais que convertem|procuram atendimento/, `texto publicável sem a afirmação travada: ${linha}`);
+  /* A frase longa é citada encurtada na lista (teto da célula); o motivo vem inteiro. */
+  assert.match(row.cortes_para_redes, /^- Capítulo 2 · [^:]*: "Use o Instagram como vitrine para gerar autoridade[^"]*" — afirmação sobre conversão do público sem fonte \(regra 17 da planta\); /m);
+  assert.match(row.cortes_para_redes, /"Pacientes com dor ou necessidade procuram atendimento pelo Google e chegam pelo site" — afirmação sobre comportamento do público sem fonte \(regra 17 da planta\)/);
+  assert.match(row.diretrizes_de_roteiro, /Entregar: o que a pesquisa sustenta: Conteúdo educativo gera confiança e posiciona você como autoridade/);
+  assert.match(row.diretrizes_de_roteiro, /Fala delimitada, sem fonte: Use o Instagram como vitrine[^\n]*canais que convertem/, "na produção, a frase fica delimitada");
+  /* A tese do dono continua: premissa e capa, como antes. */
+  assert.match(row.diretrizes_de_roteiro, /^Premissa do vídeo: O vídeo mostra por que o Instagram, sozinho, não enche a agenda e como usar a plataforma de forma estratégica\.$/m);
+  assert.match(row.cortes_para_redes, /^- Lâmina 1 \(capa\): Como atrair clientes pelo Instagram \(sem cair na ilusão de que ele enche a agenda\)\.$/m);
 });
 
 test("31 · a frase que DESMENTE o mercado passa (a tese do dono); o mercado sem fonte e o mercado × fonte travam de ponta a ponta; pergunta travada não abre corte", () => {
@@ -1396,7 +1458,10 @@ test("31 · a frase que DESMENTE o mercado passa (a tese do dono); o mercado sem
 });
 
 /* 2026-10-07 · as palavras de espera aberta que o D10 proíbe no CSV de vídeo (revisão: "rascunho" e "falta conferir" entraram). */
-const D10_PROIBIDAS = [/pend[eê]ncia/i, /pendente de/i, /aguardando/i, /confira antes de aprovar/i, /rascunho/i, /falta conferir/i];
+/* 2026-10-08 · e "fonte a obter" e "preencher" (a lista do desenho de 08/10): o "Antes de afirmar" dizia "(fonte a obter: oficial ou verificada)". */
+/* 2026-10-08 · "pendência" com fronteira: "dependência" (a Skill real: "menor dependência da exposição…") não é espera aberta. */
+/* 2026-10-08 (correção da revisão) · e as esperas antigas: "a definir" (o público e a seção do vídeo) e "conferir antes" (a transcrição). */
+const D10_PROIBIDAS = [/\bpend[eê]ncia/i, /pendente de/i, /aguardando/i, /confira antes de aprovar/i, /rascunho/i, /falta conferir/i, /fonte a obter/i, /preencher/i, /\ba definir\b/i, /conferir antes/i];
 
 test("26 · D10: o CSV de vídeo inteiro sai concluído — nenhuma pendência, \"pendente de\", \"aguardando\", \"rascunho\" nem \"confira antes de aprovar\"", () => {
   /*
@@ -1431,6 +1496,8 @@ test("26 · D10: o CSV de vídeo inteiro sai concluído — nenhuma pendência, 
   assert.match(linhas[2].especialista, /^2 parecer\(es\) ainda não aceito\(s\) no Radar ficam fora desta linha\.$/m);
   assert.match(linhas[3].especialista, /^Contribuição: nenhuma aceita no Radar; 1 parecer\(es\) ainda não aceito\(s\) ficam fora desta linha\./m);
   assert.match(linhas[2].cortes_para_redes, /^Fica fora do texto publicável/m);
+  /* 2026-10-08 · o link sem fonte da planta passa pelo "Antes de afirmar" com a regra concluída (era "fonte a obter"). */
+  assert.match(linhas[2].diretrizes_de_roteiro, /Antes de afirmar: O algoritmo do Instagram prioriza conteúdo com alto engajamento \(a planta pede fonte oficial ou verificada; o pacote não tem\); sem fonte, diga de forma delimitada\./);
   for (const proibida of D10_PROIBIDAS) {
     assert.doesNotMatch(csv, proibida, `D10: o CSV de vídeo não pode conter ${proibida}`);
   }
@@ -1556,7 +1623,13 @@ test("28 · a demonstração definida pela planta: ajuste sem depois, passos por
   assert.match(roteiro, /^ {3}Mostrar na tela: sem demonstração na planta \(capítulo explicativo\) — contexto visual: o título do capítulo em destaque; este capítulo não vira corte\.$/m);
   const cortes = linha.cortes_para_redes;
   assert.match(cortes, /^ {3}Mostrar: o ajuste — serviço, cidade e link de agendamento — a partir do antes \(bio genérica\), com o resultado do ajuste na própria tela, num exemplo fictício identificado como ilustrativo\.$/m);
-  assert.match(cortes, /^ {3}Mostrar: só o primeiro passo — grave os stories na segunda — num exemplo fictício identificado como ilustrativo; os outros passos ficam no vídeo longo\.$/m);
+  /*
+   * 2026-10-08 · D2: a ideia ("Resposta direta") não nomeia nenhum passo — a
+   * cena do corte era "só o primeiro passo", que não casa com a ideia. Agora a
+   * cena mostra a própria ideia numa situação; os passos ficam no vídeo longo.
+   */
+  assert.match(cortes, /^ {3}Mostrar: a ideia numa situação — Resposta direta — num exemplo fictício identificado como ilustrativo; os passos do capítulo ficam no vídeo longo\.$/m);
+  assert.doesNotMatch(cortes, /só o primeiro passo — grave os stories/);
   assert.doesNotMatch(cortes, /^\d+\. Do capítulo 3 \(/m, "capítulo explicativo não vira corte");
   assert.match(cortes, /^Capítulos sem corte: 3 \(sem demonstração definida na planta\)\.$/m);
   /* O Visual da lâmina sai da mesma demonstração. */
@@ -1605,18 +1678,23 @@ test("29 · cortes pela utilidade isolada: a pergunta de 6 páginas vence a de 1
    * só. Agora a correção é feita: o corte MOSTRA os três passos que a ideia
    * nomeia, uma tela cada — gancho, ideia, Mostrar e storyboard dizem o mesmo.
    */
+  /*
+   * 2026-10-08 · D3: os H3 do caso real ("Parcerias com…", "Uso inteligente
+   * de…", "Interação e…") são tópicos e hoje fazem o capítulo explicativo; a
+   * fixture escreve as mesmas táticas como AÇÕES, que é o que o corte mostra.
+   */
   const tatica = plantaComSecoes(entrada, [{
     h2: "Estratégias práticas", answerFirst: "Aplique táticas como parcerias com influenciadores locais, uso de hashtags relevantes e interação ativa com a audiência.",
-    h3: ["Parcerias com influenciadores e perfis locais", "Uso inteligente de hashtags e geolocalização", "Interação e networking na plataforma"],
+    h3: ["Faça parcerias com influenciadores e perfis locais", "Use hashtags e geolocalização com inteligência", "Promova interação ativa na plataforma"],
   }]);
   const linhaDaTatica = linhaDe(entrada, { blueprint: tatica });
   const comTatica = linhaDaTatica.cortes_para_redes;
   assert.match(comTatica, /^ {3}Utilidade \d de 4: [^\n]* · 3 passos \(o corte mostra os 3 que a ideia nomeia\)\.$/m);
-  assert.match(comTatica, /^ {3}Mostrar: os 3 passos que a ideia nomeia, uma tela rápida por passo — Parcerias com influenciadores e perfis locais; Uso inteligente de hashtags e geolocalização; Interação e networking na plataforma — num exemplo fictício identificado como ilustrativo; o detalhe de cada passo fica no vídeo longo\.$/m);
+  assert.match(comTatica, /^ {3}Mostrar: os 3 passos que a ideia nomeia, uma tela rápida por passo — Faça parcerias com influenciadores e perfis locais; Use hashtags e geolocalização com inteligência; Promova interação ativa na plataforma — num exemplo fictício identificado como ilustrativo; o detalhe de cada passo fica no vídeo longo\.$/m);
   assert.match(comTatica, /^ {3}Alinhamento: a ideia única nomeia 3 passos e o corte mostra os 3, uma tela por passo: gancho, ideia e cena falam dos mesmos passos\.$/m);
   assert.doesNotMatch(comTatica, /ficam nesse passo|só o primeiro passo/, "a correção é feita, não pedida");
   assert.match(comTatica, /^ {3}Origem recomendada: gravar à parte com fala própria — motivo: a demonstração tem 3 passos e o corte mostra 3 em sequência rápida, que a gravação do capítulo detalha um a um\. /m);
-  assert.match(linhaDaTatica.storyboard_visual, /^- Corte 1 \(capítulo 1\): tela 1: "Estratégias práticas\?" · telas 2 a 4: os 3 passos que a ideia nomeia, um por tela — "Parcerias com influenciadores e perfis locais"; "Uso inteligente de hashtags e geolocalização"; "Interação e networking na plataforma" · tela final: o CTA do corte\.$/m);
+  assert.match(linhaDaTatica.storyboard_visual, /^- Corte 1 \(capítulo 1\): tela 1: "Estratégias práticas\?" · telas 2 a 4: os 3 passos que a ideia nomeia, um por tela — "Faça parcerias com influenciadores e perfis locais"; "Use hashtags e geolocalização com inteligência"; "Promova interação ativa na plataforma" · tela final: o CTA do corte\.$/m);
 
   /* Nenhum capítulo passa nos portões: nenhum corte inventado para completar a conta. */
   const nenhum = linhaDe(entrada, { blueprint: plantaComSecoes(entrada, [{ h2: "Contexto" }, { h2: "Fundamento" }]) }).cortes_para_redes;

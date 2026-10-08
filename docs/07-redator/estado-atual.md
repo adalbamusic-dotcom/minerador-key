@@ -1,5 +1,81 @@
 # Estado atual — Redator
 
+## Planta para quem escreve, trava de fonte e voz de entregável — 2026-10-08
+
+**Verificado no código e confirmado por teste (fixtures; PROVIDER_CALLS = 0). Validado manualmente: não** (o
+teste real pelo MCP no artigo `instagram-nao-traz-pacientes` é do dono: leitura grátis, sem IA). **Ainda não
+verificado:** a leitura real pelo MCP e pela IA interna com uma planta do banco (os testes usam fixtures e
+cliente falso). Módulo proprietário da rodada: Radar (`docs/05-radar/estado-atual.md`, "Revisão dos
+entregáveis", 2026-10-08); o Redator recebeu mudanças aditivas, mais a correção do rótulo da voz no MCP
+(abaixo).
+
+- **Módulo novo `lib/redator/writer-blueprint-for-writing.ts`** (puro; fora do catálogo para não fechar o ciclo
+  `writer-evidence-catalog → pending-claims → portable-writing-export → writer-evidence-catalog`):
+  `writerArticleBlueprintForWriting` aplica sobre a planta lida do banco (1) os nomes atuais de produto ("Perfil
+  da Empresa no Google"; a keyword do documento que traz o nome antigo o preserva), (2) `needsSource` — `{ field,
+  sentence, label }` no topo (título, meta, promessa, ângulo, direção da abertura, virada, CTA e próximo passo)
+  e em cada seção (resposta que abre, explicação, prática e a afirmação ligada a fonte oficial sem fonte do
+  pacote), pela régua por sentido do Radar — e (3) `publishedMap` (só na planta que leu a página publicada ao
+  organizar). O texto da planta não muda; o label nunca vai ao texto.
+- **Onde chega:** fundamentos (`get_writer_foundations`), pacote da seção da IA interna (`section.needsSource`,
+  e no topo `needsSource` e `publishedMap`), semeadura de roteiro e carrossel (lista "Frases do artigo-modelo
+  que só entram com fonte": promessa, CTA e próximo passo) e a fatia `radar.blueprint/<id>` (nomes atuais e
+  `publishedStructure`; a regra da leitura `WRITER_BLUEPRINT_READING_RULES` entra no etag da fatia e do
+  manifesto). O mapa cede antes das seções da planta no teto de 24 kB.
+- **Prompts:** `BLUEPRINT_SOURCE_RULE` (seção e melhoria) e `PUBLISHED_MAP_RULE` (só seção; a melhoria de
+  trecho não reorganiza a página). `BRAND_VOICE_RULE` continua instrução interna (E3); na correção, o texto
+  passou a descrever o rótulo novo. `prompts.ts` continua CRLF.
+- **Semeadura de roteiro e carrossel (E2):** a linha da voz usa `radarBrandVoiceDeliverableLabel` ("versão
+  corrente na Marca"; a ativa, "ativa"; sem número, "v?"); a lista `SEED_BLUEPRINT_NEEDS_SOURCE_TITLE` traz só
+  promessa, CTA e próximo passo (os textos da planta presentes no contexto do derivado), e `REGRAS_COMUNS`
+  ganhou a regra comum.
+- **Correção da revisão (2026-10-08):**
+  - o próximo passo REAL do artigo-modelo ("Acesse … e descubra como aparecer no Google quando o paciente
+    procura") era marcado como comportamento do público e a semente perdia o CTA da planta; a régua do Radar
+    deixou de travar orientação (imperativo com "o que"/"quando", orientar contra, modal, tese negada,
+    finalidade do guia, público que só define o sujeito) e passou a pegar "se tornam pacientes", "capta",
+    "recebem mais", "fecham mais", "a agenda enche" e "dá mais alcance" — vale igual no Redator, que usa a
+    mesma régua;
+  - **D10 no MCP:** `brandVoice.statusLabel` (fundamentos e pacote da seção) passou de estado de tela ("em
+    rascunho", "aguardando aprovação") para rótulo de entregável — "ativa" ou "versão corrente" —, o mesmo do CSV
+    (`writerBrandVoiceDeliverableStatusLabel`, novo); o estado técnico continua em `brandVoice.status`; a nota
+    da voz no manifesto diz "v2, versão corrente na Marca"; o `next` dos fundamentos e a `BRAND_VOICE_RULE`
+    descrevem o rótulo novo. É a única mudança de valor de campo do contrato nesta rodada; nenhum código decide
+    pelo texto do rótulo (conferido por grep), e `writerBrandVoiceStatusLabel` (rótulo de tela) continua
+    exportado.
+- **Limites declarados:** separação de frases heurística ("Dr. Silva" corta a frase); as raízes comuns vêm só
+  da principal; `needsSource` não usa as afirmações do mercado (o pacote da seção já leva claims e
+  marketVsFact à parte); tetos de 8 frases no topo, 6 por seção e 240 caracteres por frase; artigo-modelo
+  antigo fica sem `publishedMap` no Redator (o CSV "Para escrever", que lê a página no ar, faz o casamento); o
+  texto da Skill (`brandVoice.voice` e `cta`) vai como a Marca o escreveu, inclusive palavras como
+  "pendências" — decisão de texto da Marca.
+- **Arquivos:** `lib/redator/writer-blueprint-for-writing.ts` (novo), `lib/redator/writer-evidence-catalog.ts`,
+  `lib/redator/writer-section-evidence.ts`, `lib/redator/deliverable-seed.ts`, `lib/redator/prompts.ts`,
+  `lib/server/writer-evidence-reader.ts`, `lib/server/writer-seed.ts`, `lib/server/writer-evidence-sources.ts`;
+  teste `tests/redator-artigo-modelo-e-voz.test.mts`.
+- **Consumidores preservados:** `writerArticleBlueprintFoundation` com a mesma assinatura e resultado; sem nada
+  a marcar, sem nome antigo e sem página lida, os fundamentos saem byte a byte como antes; chaves novas só
+  quando existem; `WRITER_FOUNDATIONS_TRIM_ORDER` e `WRITER_BLUEPRINT_PAYLOAD_KEYS` ampliados de forma aditiva;
+  `lib/redator/radar-foundations.ts` sem mudança. `readWriterApprovedArticleBlueprint` ganhou só o caminho
+  `ps:payload->publishedStructure` no select (nunca o payload inteiro; Marca sempre filtrada). A fatia
+  `radar.blueprint/<id>` mantém as recusas (id inventado, rascunho, outro pacote, outra marca) e a paginação; o
+  etag muda uma vez por causa da regra da leitura — quem tiver o etag antigo só relê.
+- **Testes:** depois da correção da revisão, `npm run test:radar` 2.999 testes (2.998 pass, 0 fail, 1 skipped);
+`npm run test:redator` 357/357; `npm run test:redator:mcp` 144/144; `npm run test:redator:dom` 19/19;
+`tests/writer-evidence-*.test.mts` 103/103; `npm run test:agent` 65/65; `npm run test:editorial` 172 (168 pass,
+4 fail pré-existentes em `tests/editorial-pipeline.test.mts`, fora da rodada); `npx tsc --noEmit` só com os 2
+erros esperados de `.next/types` (rotas aposentadas do Planejador); eslint dos arquivos de código tocados sem
+erro; `git diff --check` limpo. Bateria de 68 mutantes da correção, em cópias no scratchpad com carregador de
+redirecionamento (o repositório nunca foi mutado): 68 de 68 mortos, os 6 controles verdes (detector 24,
+colunas e mapa 18, CSV para escrever 11, CSV de vídeo 9, anexo 1, Redator 5). As frentes A–E tinham rodado as
+delas: 19, 36, 67, 34 e 36 mutantes, todos mortos. Conferido de novo ao documentar: `test:redator` 357/357,
+`test:redator:mcp` 144/144 (dos quais `tests/redator-artigo-modelo-e-voz.test.mts` 27/27).
+- **O que o dono precisa fazer:** homologar pelo MCP (grátis, sem IA; lista em `docs/07-redator/backlog.md`);
+  no commit e no deploy, levar junto o módulo novo `lib/redator/writer-blueprint-for-writing.ts` (ainda não
+  rastreado), que importa `lib/radar/pending-claims.ts` e `lib/radar/article-blueprint.ts` desta rodada e é
+  importado por `lib/server/writer-evidence-reader.ts` e `lib/server/writer-seed.ts`: Radar e Redator vão no
+  mesmo deploy. Sem migration.
+
 ## Artigo-modelo aprovado e voz da marca no Redator — 2026-10-02
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.** SDD

@@ -428,7 +428,9 @@ test("CSV: campo que veio vazio não deixa rótulo solto", () => {
   assert.match(colunas.estrutura, /^Keywords:\n- captar clientes pela internet$/m, "a lista fica, sem seta nem parênteses vazios");
   assert.match(colunas.estrutura, /^Abertura: responder "[^"]+" no primeiro parágrafo( \[|$)/m);
   assert.doesNotMatch(colunas.estrutura, / — $| — \[|\(\)|→ \(|fonte a obter \(\)/m);
-  assert.match(colunas.estrutura, /- Link externo: Postar com frequência aumenta o alcance\. → fonte a obter$/m);
+  /* 2026-10-08 · C3 · D10: o link sem fonte vira instrução concluída — a afirmação delimitada, sem link, com a fonte que ela pede. */
+  assert.match(colunas.estrutura, /^- Sem link externo: "Postar com frequência aumenta o alcance" fica delimitada no texto \(precisa de fonte: oficial ou verificada\)\.$/m);
+  assert.doesNotMatch(colunas.estrutura, /fonte a obter/);
   assert.doesNotMatch(colunas.links_internos, /por quê: $/m);
   assert.match(colunas.links_internos, /onde: seção "Por que o perfil não traz pacientes"$/m);
   /* 2026-10-02 · prompt sem proporção ganha a referência (capa 16:9, respiro 4:3). */

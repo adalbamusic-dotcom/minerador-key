@@ -333,7 +333,9 @@ test("D · a contradição do pacote é DITA, e não resolvida: YMYL 'baixa' com
 test("D · a contribuição ACEITA do especialista não some: sai com o aviso de que responde outra coisa", () => {
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
   assert.match(pilar.fontes_e_especialista, /E1 · Pergunta: "O que causa acne" · Resposta aprovada: "Todo mundo fala de protetor solar/);
-  assert.match(pilar.fontes_e_especialista, /Atenção: aceita, mas a resposta não trata de "O que causa acne"; conferir antes de usar; sem ponto de aplicação definido/);
+  /* 2026-10-08 (correção da revisão) · D10: o aviso diz o que fazer, concluído — sem "conferir antes de usar" nem "a definir". */
+  assert.match(pilar.fontes_e_especialista, /Aplicar em: onde couber no texto, como orientação · [^\n]*Atenção: aceita, mas a resposta não trata de "O que causa acne": use só como orientação geral, sem apresentá-la como resposta a essa pergunta; sem ponto de aplicação no pacote: entra onde couber, como orientação/);
+  assert.doesNotMatch(pilar.fontes_e_especialista, /conferir antes|\ba definir\b/);
   assert.match(pilar.pode_escrever, /especialista E1: aceita, mas a resposta não trata|- Também: .*especialista E1/);
 });
 
@@ -409,7 +411,9 @@ test("G · limpeza: pergunta duplicada por caixa e entidade vira uma, isolada e 
   assert.match(pilar.cobrir_e_superar, /Não cobrir:\n- "As melhores ofertas de skincare": A intenção declarada é Informacional; este assunto pertence a uma intenção comercial\./);
   /* A lacuna de 1 página achada por keyword auxiliar não é instrução. */
   assert.equal(/Manter a pele limpa/.test(pilar.cobrir_e_superar), false);
-  assert.match(pilar.cobrir_e_superar, /\[RELATO DA MARCA — preencher\]/);
+  /* 2026-10-08 · C8 · sem material próprio da marca, sem relato e sem marcador por preencher (D10). */
+  assert.match(pilar.cobrir_e_superar, /Não há material próprio da marca neste arquivo: escreva sem relato e sem inventá-lo; nenhum marcador vai ao texto\./);
+  assert.doesNotMatch(pilar.cobrir_e_superar, /RELATO DA MARCA|preencher/);
 });
 
 test("G · termos: nunca unigrama cru nem palavra de menu; com menos de cinco válidos, a linha some", () => {
@@ -421,7 +425,7 @@ test("G · termos: nunca unigrama cru nem palavra de menu; com menos de cinco v�
 test("G · fontes: a de menu não classificada fica fora, a científica sai limpa e rotulada como não verificada", () => {
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
   assert.equal(/wa\.me|WhatsApp/.test(pilar.fontes_e_especialista), false);
-  assert.match(pilar.fontes_e_especialista, /Citadas pelo mercado, não verificadas \(conferir antes de citar\):\n- pmc\.ncbi\.nlm\.nih\.gov — https:\/\/pmc\.ncbi\.nlm\.nih\.gov\/articles\/PMC9311318\/ \(/);
+  assert.match(pilar.fontes_e_especialista, /Citadas pelo mercado, sem verificação no pacote \(só como referência delimitada, nunca como fonte da afirmação\):\n- pmc\.ncbi\.nlm\.nih\.gov — https:\/\/pmc\.ncbi\.nlm\.nih\.gov\/articles\/PMC9311318\/ \(/);
   assert.match(pilar.fontes_e_especialista, /Fontes verificadas: nenhuma nesta investigação\./);
 });
 
@@ -764,7 +768,9 @@ test("L · o que se repetia em cada linha mora uma vez na linha de topo", () => 
   assert.match(topo.prompt, /Tom visual: editorial e direto/);
   assert.match(topo.prompt, /Imagens, em todos os artigos deste arquivo — evitar: sem texto sobreposto na imagem/);
   assert.match(topo.prompt, /Links internos: só os indicados em cada artigo \(L1, L2…\)/);
-  assert.match(topo.prompt, /\[RELATO DA MARCA — preencher\]/);
+  /* 2026-10-08 · C8 · a regra geral 4 sem marcador por preencher: sem experiência própria, sem relato e sem inventá-lo. */
+  assert.match(topo.prompt, /onde faltar experiência própria da marca, escreva sem relato e sem inventá-lo, sem marcador no texto\./);
+  assert.doesNotMatch(topo.prompt, /RELATO DA MARCA|preencher/);
   for (const linha of artigos) {
     assert.equal(/Abre com a resposta direta/.test(linha.estrutura), false, `${linha.ordem}: a regra de cada H2 voltou a se repetir`);
     assert.equal(/Tom visual|^Evitar: /m.test(linha.plano_visual), false, `${linha.ordem}: o plano visual repete a regra geral`);

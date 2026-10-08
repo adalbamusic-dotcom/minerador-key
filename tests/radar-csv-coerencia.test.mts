@@ -376,7 +376,8 @@ test("6 · vídeos selecionados: cada um diz o canal; Contexto e Sugestão de pa
   const ctx = porTitulo.get("Bastidores do consultório")!;
   assert.equal(ctx.summarySource, "TRANSCRIPT");
   assert.match(radarPortableVideoUsageLine(ctx), /· canal: Clínica Sorriso — /);
-  assert.match(radarPortableVideoUsageLine(ctx), /Começo da transcrição \(fala do vídeo, conferir antes de usar\): "Hoje eu mostro/);
+  /* 2026-10-08 (correção da revisão) · D10: a regra concluída, não "conferir antes de usar". */
+  assert.match(radarPortableVideoUsageLine(ctx), /Começo da transcrição \(fala do vídeo, transcrição automática: cite só o que o vídeo confirma\): "Hoje eu mostro/);
   assert.doesNotMatch(radarPortableVideoUsageLine(ctx), /Inscreva-se|Cupom/, "a descrição promocional não entra quando há transcrição");
 
   const desc = porTitulo.get("Dúvidas de pacientes")!;

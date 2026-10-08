@@ -135,8 +135,11 @@ test("rótulo neutro do tema, títulos genéricos iguais, lentes por domínio e 
   assert.equal(radarWritingDomainLenses(null), null);
 
   const fonte = await ler("lib/radar/portable-writing-export.ts");
-  assert.match(fonte, /Estrutura publicada atual \(lida da página na exportação\): H1 /);
-  assert.match(fonte, /seção existente que a planta não tem só sai com decisão humana/);
+  /* 2026-10-08 · C2 · a estrutura publicada sai com o destino de cada H2 (o mapa), sem "leve-a como pendência" (D10). */
+  assert.match(fonte, /const titulo = `Estrutura publicada atual \(\$\{lida\}\): H1 /);
+  assert.match(fonte, /lida = "lida da página na exportação"/);
+  assert.match(fonte, /cada H2 publicado tem destino na planta do artigo-modelo/);
+  assert.doesNotMatch(fonte.replace(/\/\*[\s\S]*?\*\//g, ""), /leve-a como pendência/);
   const nucleo = await ler("lib/server/radar-portable-export-core.ts");
   assert.match(nucleo, /readPublishedStructure\?: \(url: string\) => Promise<\{ h1: string \| null; h2: string\[\] \} \| null>;/, "opcional e injetado: sem ele, nada é lido");
   assert.match(nucleo, /const pagina = await extractCompetitorPage\(url, \{ timeoutMs: 8000 \}\);/);

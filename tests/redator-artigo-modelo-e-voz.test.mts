@@ -22,11 +22,11 @@ const URL_FALSA = "http://supabase.test";
 process.env.NEXT_PUBLIC_SUPABASE_URL = URL_FALSA;
 process.env.SUPABASE_SERVICE_ROLE_KEY = "chave-de-teste";
 
-const { readWriterEvidence, readWriterEvidenceManifest, readWriterFoundations, readWriterSectionMaterial, WriterEvidenceError } = await import("../lib/server/writer-evidence-reader.ts");
+const { readWriterEvidence, readWriterEvidenceManifest, readWriterFoundations, readWriterSectionMaterial, WriterEvidenceError, describeWriterEvidenceSource, writerEvidenceIdentityEtag } = await import("../lib/server/writer-evidence-reader.ts");
 const { readWriterEvidenceHead } = await import("../lib/server/writer-evidence-document.ts");
 const {
   WRITER_EVIDENCE_LIMITS, fitWriterFoundations, parseWriterEvidenceSourceKey, writerArticleBlueprintFoundation, writerBrandVoiceFoundation,
-  writerEvidenceEnvelope, writerEvidenceHierarchyOf, writerEvidenceJsonBytes, writerEvidenceOwnerOf,
+  writerEvidenceEnvelope, writerEvidenceEtag, writerEvidenceHierarchyOf, writerEvidenceJsonBytes, writerEvidenceOwnerOf,
 } = await import("../lib/redator/writer-evidence-catalog.ts");
 const { WriterAiAlertSchema, WriterSectionProviderSchema, buildWriterSectionEvidencePackage, writerBlueprintForSection, writerSectionSourceOf } = await import("../lib/redator/writer-section-evidence.ts");
 const { resolveWriterDivergenceTarget } = await import("../lib/redator/writer-evidence-divergence.ts");
@@ -35,6 +35,9 @@ const { CAROUSEL_SEED_SYSTEM_PROMPT, SCRIPT_SEED_SYSTEM_PROMPT, buildCarouselSee
 const { radarFoundationsOf } = await import("../lib/redator/radar-foundations.ts");
 const { ContentDocumentSchema } = await import("../lib/arquiteto/contracts.ts");
 const { writerSeedDocument } = await import("../lib/server/writer-seed.ts");
+/* 2026-10-08 · a planta para quem escreve: nomes atuais, frases que pedem fonte e o mapa da atualização. */
+const { WRITER_BLUEPRINT_READING_RULES, writerArticleBlueprintForWriting, writerBlueprintWithCurrentNames } = await import("../lib/redator/writer-blueprint-for-writing.ts");
+const { SEED_BLUEPRINT_NEEDS_SOURCE_TITLE } = await import("../lib/redator/deliverable-seed.ts");
 const { bundleDoRadar, documentoV2ComDossie } = await import("./editorial-documento-e1-fixtures.mts");
 
 type Linha = Record<string, unknown>;
@@ -346,8 +349,9 @@ test("catálogo · a projeção da planta resolve o link pelo candidato, corta o
 test("catálogo · a voz sai em dois trechos pela régua do Radar: CTA e transição comercial; voz e vocabulário — com o estado dito", () => {
   const voz = writerBrandVoiceFoundation({ versionId: vozV2, versionNumber: 2, name: "Voz Care Glow", lifecycle: "draft", title: "Voz Care Glow", sections: SECOES_DA_VOZ });
   assert.equal(voz.readAt, `brand.skill/${vozV2}`);
-  assert.equal(voz.status, "draft");
-  assert.equal(voz.statusLabel, "em rascunho", "rascunho vale (spec da Marca §24) e o texto diz");
+  assert.equal(voz.status, "draft", "rascunho vale (spec da Marca §24): o estado técnico fica em status");
+  /* 2026-10-08 (correção da revisão) · D10 no MCP: o rótulo é de entregável — "versão corrente", nunca "em rascunho" nem "aguardando aprovação". */
+  assert.equal(voz.statusLabel, "versão corrente");
   assert.ok(voz.cta?.includes(CTA_DA_MARCA), voz.cta ?? "");
   assert.ok(voz.cta?.includes("transição para a oferta"));
   assert.ok(voz.cta?.includes("Falamos com quem tem pele oleosa"), "o leitor e a oferta também servem ao CTA");
@@ -357,7 +361,8 @@ test("catálogo · a voz sai em dois trechos pela régua do Radar: CTA e transi�
   assert.equal(writerBrandVoiceFoundation({ versionId: vozV2, versionNumber: 2, name: "x", lifecycle: "approved", title: null, sections: [] }).statusLabel, "ativa");
   const longa = writerBrandVoiceFoundation({ versionId: vozV2, versionNumber: 2, name: "x", lifecycle: "proposed", title: null, sections: [{ heading: "CTA", key: "c", body: "c".repeat(5_000) }] });
   assert.ok([...(longa.cta ?? "")].length <= 1_201, "trecho cortado");
-  assert.equal(longa.statusLabel, "aguardando aprovação");
+  assert.equal(longa.status, "pending_approval");
+  assert.equal(longa.statusLabel, "versão corrente");
 });
 
 test("catálogo · fundamentos cortam as seções da planta depois da pesquisa de terceiros e antes do que o pacote protege", () => {
@@ -408,7 +413,11 @@ test("fundamentos · com a planta aprovada do pacote e a voz corrente (rascunho)
   assert.equal(planta.closing?.cta, CTA_DA_PLANTA);
   const voz = fundamentos.brandVoice!;
   assert.equal(voz.versionId, vozV2, "a maior versão, mesmo em rascunho, é a corrente");
-  assert.equal(voz.statusLabel, "em rascunho");
+  /* 2026-10-08 (correção da revisão) · D10 no MCP: rótulo de entregável; o estado técnico continua em status. */
+  assert.equal(voz.status, "draft");
+  assert.equal(voz.statusLabel, "versão corrente");
+  assert.doesNotMatch(JSON.stringify(fundamentos), /em rascunho|aguardando aprova/, "o MCP sai sem o estado de tela da Skill");
+  assert.match(fundamentos.next, /statusLabel diz se é a ativa ou a versão corrente na Marca/);
   assert.ok(voz.cta?.includes(CTA_DA_MARCA));
   assert.match(fundamentos.next, /articleBlueprint/);
   assert.match(fundamentos.next, /brandVoice/);
@@ -480,7 +489,9 @@ test("manifesto · a linha do aprovado (dono Radar, abaixo da evidência, preso 
   assert.equal(linha[9], false);
   assert.match(String(linha[10]), /concluído v3, preso ao pacote entregue/);
   const voz = manifesto.sources.find(item => item[0] === `brand.skill/${vozV2}`)!;
-  assert.match(String(voz[10]), /Voz da marca \(Skill brand_voice\) v2, em rascunho na Marca/);
+  /* 2026-10-08 (correção da revisão) · D10 no MCP: "versão corrente na Marca"; o estado técnico vai na coluna de status. */
+  assert.match(String(voz[10]), /Voz da marca \(Skill brand_voice\) v2, versão corrente na Marca/);
+  assert.equal(voz[2], "draft");
   assert.equal(manifesto.sources.some(item => item[0] === `brand.skill/${vozV1}`), false, "só a corrente");
   assert.equal(manifesto.absent.some(([chave]) => chave === "radar.blueprint" || chave === "brand.voice"), false);
   assert.ok(doArtigoModelo().every(registro => !(registro.select || "").includes("payload")), "o manifesto não lê a planta, só metadados");
@@ -639,6 +650,8 @@ test("IA interna · seção e melhoria seguem a planta e escrevem copy e CTA na 
     assert.match(sistema, /não use targetKind brand_dna para a voz/);
     assert.doesNotMatch(sistema, /brand_dna quando o conflito é com a voz/);
     assert.match(sistema, /vale a evidência/);
+    /* 2026-10-08 (correção da revisão) · o statusLabel virou rótulo de entregável: a regra o descreve assim. */
+    assert.match(sistema, /statusLabel diz se a Skill é a ativa ou a versão corrente na Marca/);
     assert.match(sistema, /JSON/, "sem a palavra JSON o provider recusa");
     assert.match(sistema, /Não gerar nem sugerir FAQ/);
   }
@@ -677,7 +690,9 @@ test("semeadura · roteiro e carrossel recebem a voz (copy e CTA) e o CTA do art
 
   const fonte = { title: document.title, foundations, finalArticle: null };
   const contexto = seedContextLines(fonte).join("\n");
-  assert.match(contexto, /Voz da marca \(copy e CTA\): Skill "Voz Care Glow" v2 \(em rascunho na Marca\)/);
+  /* 2026-10-08 · D10: a semeadura escreve entregável e usa o rótulo de entregável do Radar — a corrente vale (rascunho incluído) e é dita "versão corrente". */
+  assert.match(contexto, /Voz da marca \(copy e CTA\): Skill "Voz Care Glow" v2 \(versão corrente na Marca\)/);
+  assert.doesNotMatch(contexto, /rascunho|aguardando aprova/);
   assert.ok(contexto.includes(CTA_DA_MARCA));
   assert.ok(contexto.includes(`- CTA: ${CTA_DA_PLANTA}`));
   assert.ok(contexto.includes("- Próximo passo: Ler o guia da rotina matinal"));
@@ -696,4 +711,298 @@ test("semeadura · roteiro e carrossel recebem a voz (copy e CTA) e o CTA do art
   assert.deepEqual(sem.foundations, radarFoundationsOf(completo), "sem voz e sem planta, os mesmos fundamentos do painel");
   const semLinhas = seedContextLines({ title: "T", foundations: sem.foundations!, finalArticle: null }).join("\n");
   assert.doesNotMatch(semLinhas, /Voz da marca|Artigo-modelo aprovado/);
+});
+
+/* ============== 2026-10-08 · a planta para quem escreve (rodada dos entregáveis, E1) ============== */
+
+/*
+ * O CSV real de 08/10 ("como atrair clientes pelo instagram", slug publicado
+ * instagram-nao-traz-pacientes) tinha, na planta concluída, "Google Meu
+ * Negócio" e frases sem fonte que a IA de escrita seguiria como texto: "Um
+ * site otimizado converte visitantes em agendamentos", "canais que convertem,
+ * como o site e o WhatsApp" e "Pacientes com dor ou necessidade procuram no
+ * Google, não no Instagram". A tese do dono ("o Instagram, sozinho, não enche a
+ * agenda") passa. A fixture é inventada, imitando o caso; nenhuma IA, nenhuma
+ * rede.
+ */
+const D10 = /pend[eê]ncia|pendente de|aguardando aprova|confira antes de aprovar|rascunho|fonte a obter|preencher/i;
+const TESE_DO_DONO = "O Instagram, sozinho, não enche a agenda.";
+const CONVERTE = "Um site otimizado converte visitantes em agendamentos.";
+const CANAIS = "Canais que convertem, como o site e o WhatsApp, fecham a jornada.";
+const PROCURAM = "Pacientes com dor ou necessidade procuram no Google, não no Instagram.";
+const BIO = "A bio deve deixar claro quem você atende e como agendar.";
+const CTA_QUE_AFIRMA = "Agende pelo WhatsApp: é o canal que mais traz pacientes.";
+const TAXA = "A taxa de resposta média às mensagens diretas passa de 12 horas.";
+const AFIRMACAO_DA_TAXA = "A taxa de resposta média às mensagens diretas é de 12 horas";
+const AVALIACOES = "Avaliações recentes pesam na escolha da clínica pelo paciente.";
+const KEYWORDS_DO_CASO = { principal: "como atrair clientes pelo instagram", secondary: ["atrair pacientes instagram"] };
+const CONVERSAO = "afirmação sobre conversão do público";
+const COMPORTAMENTO = "afirmação sobre comportamento do público";
+const DA_PLANTA = "afirmação que a planta liga a fonte oficial ou verificada";
+
+function plantaDoCasoReal() {
+  const base = planta("Como atrair clientes pelo Instagram");
+  const [primeira, segunda, terceira] = base.blueprint.sections;
+  return {
+    ...base,
+    blueprint: {
+      ...base.blueprint,
+      promise: "Mostrar por que o Instagram, sozinho, não enche a agenda, e o que ajustar no perfil.",
+      angle: { statement: "Um checklist de diagnóstico do perfil, com o exemplo comentado de uma clínica.", evidence: ["S1"] },
+      opening: { readerQuestion: "Como atrair clientes pelo Instagram?", direction: "Responder com o primeiro ajuste prático do perfil.", evidence: [] },
+      sections: [
+        {
+          ...primeira, h2: "Otimize o perfil para quem chega", readerQuestion: "O que ajustar primeiro no perfil?", answerFirst: `${BIO} ${CONVERTE}`,
+          explain: [CANAIS, TAXA], externalLinks: [{ claim: AFIRMACAO_DA_TAXA, sourceType: "pesquisa", source: null }],
+        },
+        /* Item sem forma no banco (versão antiga ou editada fora do contrato): a projeção o ignora e a marcação não desalinha. */
+        null,
+        {
+          ...segunda, h2: "Cadastre a clínica no Google Meu Negócio", readerQuestion: "Por que estar no Google Meu Negócio?", answerFirst: PROCURAM,
+          explain: [AVALIACOES], externalLinks: [{ claim: "Avaliações recentes pesam na escolha da clínica", sourceType: "oficial", source: "X1" }],
+        },
+        terceira,
+      ],
+      closing: { turn: TESE_DO_DONO, specialist: null, cta: CTA_QUE_AFIRMA, nextStep: "Ler o guia do Google My Business" },
+      publishedMap: [{ current: "Bastidores da clínica", section: null, reason: "fora do escopo da busca", origin: "ai" }],
+    },
+    publishedStructure: { h1: "Instagram não traz pacientes", h2: ["Otimizar o perfil do Instagram", "Conclusão", "Perguntas frequentes", "Bastidores da clínica"] },
+  };
+}
+
+const entradaDoCasoReal = (extra: Partial<Parameters<typeof writerArticleBlueprintForWriting>[0]> = {}) => {
+  const bruto = plantaDoCasoReal();
+  return {
+    id: plantaAprovada, versionNumber: 3, approvedAt: "2026-10-08T11:00:00+00:00",
+    blueprint: bruto.blueprint as unknown, plan: bruto.measures.plan, linkCandidates: bruto.linkCandidates, brandVoice: bruto.brandVoice,
+    publishedStructure: bruto.publishedStructure as unknown, keywords: KEYWORDS_DO_CASO, ...extra,
+  };
+};
+
+function comPlantaDoCasoReal(atual: Record<string, Linha[]>) {
+  const linha = atual.radar_article_blueprints.find(item => item.id === plantaAprovada)!;
+  linha.payload = plantaDoCasoReal();
+}
+
+test("2026-10-08 · planta para quem escreve · nomes atuais, frases que pedem fonte pelo sentido (a tese do dono livre) e o mapa da atualização", () => {
+  const lida = writerArticleBlueprintForWriting(entradaDoCasoReal())!;
+
+  /* B4 · o nome atual do produto, também no artigo-modelo montado antes da regra. */
+  assert.equal(lida.sections.length, 3, "o item sem forma não vira seção");
+  assert.equal(lida.sections[1].h2, "Cadastre a clínica no Perfil da Empresa no Google");
+  assert.equal(lida.sections[1].readerQuestion, "Por que estar no Perfil da Empresa no Google?");
+  assert.equal(lida.closing?.nextStep, "Ler o guia do Perfil da Empresa no Google");
+  assert.doesNotMatch(JSON.stringify(lida), /Meu Neg[oó]cio|My Business/);
+
+  /* A2 · cada frase marcada no lugar dela, com o motivo curto. */
+  assert.deepEqual(lida.needsSource, [{ field: "closing.cta", sentence: CTA_QUE_AFIRMA, label: CONVERSAO }]);
+  assert.deepEqual(lida.sections[0].needsSource, [
+    { field: "answerFirst", sentence: CONVERTE, label: CONVERSAO },
+    { field: "explain", sentence: CANAIS, label: CONVERSAO },
+    { field: "explain", sentence: TAXA, label: DA_PLANTA },
+    { field: "externalLinks", sentence: AFIRMACAO_DA_TAXA, label: DA_PLANTA },
+  ], "a frase que pede fonte sai sozinha, não o parágrafo; a afirmação que a planta liga a fonte oficial sem fonte do pacote também");
+  assert.deepEqual(lida.sections[1].needsSource, [{ field: "answerFirst", sentence: PROCURAM, label: COMPORTAMENTO }], "a frase coberta pela fonte X1 da seção passa");
+  assert.equal("needsSource" in lida.sections[2], false, "seção sem frase marcada sai como antes");
+
+  /* A tese do dono, a orientação e a frase coberta por fonte não são marcadas. */
+  const marcadas = JSON.stringify([lida.needsSource, ...lida.sections.map(secao => secao.needsSource)]);
+  for (const livre of [TESE_DO_DONO, BIO, "não enche a agenda", AVALIACOES]) assert.equal(marcadas.includes(livre), false, livre);
+
+  /* O texto da planta não muda: a marca vai na lista; o motivo nunca vai ao texto. */
+  assert.equal(lida.sections[0].answerFirst, `${BIO} ${CONVERTE}`);
+  assert.equal(lida.closing?.cta, CTA_QUE_AFIRMA);
+  assert.equal(lida.closing?.turn, TESE_DO_DONO);
+  assert.doesNotMatch(JSON.stringify(lida), /precisa de fonte|regra 17/);
+
+  /* B1 · o mapa da atualização, uma frase concluída por H2 de hoje; o FAQ legado fica fora. */
+  assert.deepEqual(lida.publishedMap?.map(item => [item.current, item.kind, item.section]), [
+    ["Otimizar o perfil do Instagram", "ABSORBED", 1], ["Conclusão", "CLOSING", null], ["Bastidores da clínica", "REMOVED", null],
+  ]);
+  assert.match(lida.publishedMap![0].line, /^vira a seção 1 \("Otimize o perfil para quem chega"\), reescrito na voz/);
+  assert.equal(lida.publishedMap![2].line, "sai: fora do escopo da busca (decisão no artigo-modelo)");
+  assert.doesNotMatch(JSON.stringify(lida), D10, "o entregável sai concluído (D10)");
+});
+
+/*
+ * 2026-10-08 (correção da revisão) · o PRÓXIMO PASSO REAL do artigo-modelo de
+ * 08/10 é orientação (imperativo, com a oração temporal "quando o paciente
+ * procura"): a régua o marcava como comportamento do público, e a semente do
+ * roteiro e do carrossel perdia o CTA da planta. Agora passa.
+ */
+test("2026-10-08 (correção) · o próximo passo real é orientação: não vai ao needsSource", () => {
+  const bruto = plantaDoCasoReal();
+  const proximoPasso = "Acesse a página de SEO para clínicas e descubra como aparecer no Google quando o paciente procura.";
+  const lida = writerArticleBlueprintForWriting(entradaDoCasoReal({ blueprint: { ...bruto.blueprint, closing: { ...bruto.blueprint.closing, nextStep: proximoPasso } } as unknown }))!;
+  assert.equal(lida.closing?.nextStep, proximoPasso);
+  assert.equal((lida.needsSource || []).some(item => item.field === "closing.nextStep"), false, JSON.stringify(lida.needsSource));
+  assert.deepEqual(lida.needsSource, [{ field: "closing.cta", sentence: CTA_QUE_AFIRMA, label: CONVERSAO }], "o CTA que afirma efeito continua marcado");
+});
+
+test("2026-10-08 · planta para quem escreve · sem nome antigo, sem frase marcada e sem página lida, a projeção é byte a byte a de antes", () => {
+  const bruto = planta("Rotina de skin care noturno em 5 passos");
+  const base = { id: plantaAprovada, versionNumber: 3, approvedAt: null, blueprint: bruto.blueprint as unknown, plan: bruto.measures.plan, linkCandidates: bruto.linkCandidates, brandVoice: bruto.brandVoice };
+  assert.equal(
+    JSON.stringify(writerArticleBlueprintForWriting({ ...base, publishedStructure: null, keywords: { principal: "skin care noturno", secondary: [] } })),
+    JSON.stringify(writerArticleBlueprintFoundation(base)),
+  );
+  assert.equal(writerArticleBlueprintForWriting({ ...base, blueprint: { title: {} } }), null, "sem seções, fora do contrato, como a projeção");
+
+  /* A keyword que traz o nome antigo o preserva; a menção ao nome anterior fica; sem troca, o mesmo objeto. */
+  const comNome = { ...bruto.blueprint, promise: "Cadastrar no Google Meu Negócio (antigo Google Meu Negócio) em 10 minutos" };
+  assert.equal((writerBlueprintWithCurrentNames(comNome, { principal: "como cadastrar no google meu negócio" }) as typeof comNome).promise, comNome.promise);
+  assert.equal((writerBlueprintWithCurrentNames(comNome, { principal: "skin care noturno" }) as typeof comNome).promise, "Cadastrar no Perfil da Empresa no Google (antigo Google Meu Negócio) em 10 minutos");
+  assert.equal(writerBlueprintWithCurrentNames(bruto.blueprint, null), bruto.blueprint);
+  assert.equal(writerBlueprintWithCurrentNames("não é objeto", null), "não é objeto");
+});
+
+test("2026-10-08 · planta para quem escreve · forma inesperada no banco não derruba a leitura nem desalinha a marcação", () => {
+  const torta = {
+    title: { h1: 42 }, promise: ["x"], closing: "texto solto", publishedMap: "não é lista",
+    sections: ["texto", null, { h2: "Seção válida", answerFirst: 7, explain: "não é lista", externalLinks: { claim: "x" }, practical: CONVERTE }],
+  };
+  const entrada = { id: "v", versionNumber: null, approvedAt: null, blueprint: torta as unknown, plan: null, linkCandidates: null, brandVoice: null, keywords: null };
+  const lida = writerArticleBlueprintForWriting({ ...entrada, publishedStructure: { h2: "não é lista" } })!;
+  assert.equal(lida.sections.length, 1);
+  assert.deepEqual(lida.sections[0].needsSource, [{ field: "practical", sentence: CONVERTE, label: CONVERSAO }]);
+  assert.equal("publishedMap" in lida, false);
+  assert.equal("needsSource" in lida, false);
+  const comPagina = writerArticleBlueprintForWriting({ ...entrada, publishedStructure: { h1: null, h2: ["Seção válida", 9] } })!;
+  assert.deepEqual(comPagina.publishedMap?.map(item => [item.current, item.kind, item.section]), [["Seção válida", "ABSORBED", 1]]);
+
+  /* A mesma frase em dois campos da seção é dita uma vez; a lista tem teto por seção. */
+  const repetida = { sections: [{ h2: "Seção com frases", answerFirst: CONVERTE, explain: [CONVERTE, ...Array.from({ length: 9 }, (_, indice) => `Canais que convertem ${indice + 1} vezes mais fecham a jornada.`)] }] };
+  const marcadas = writerArticleBlueprintForWriting({ ...entrada, blueprint: repetida })!.sections[0].needsSource!;
+  assert.equal(marcadas.filter(item => item.sentence === CONVERTE).length, 1);
+  assert.equal(marcadas.length, 6, "teto por seção");
+});
+
+test("2026-10-08 · catálogo · nos fundamentos, o mapa da atualização cede antes das seções da planta", () => {
+  const fundamentos = {
+    fixo: "x".repeat(2_000), competitors: [], conflicts: [{ id: "k1" }],
+    articleBlueprint: {
+      readAt: "radar.blueprint/abc", sections: Array.from({ length: 4 }, (_, indice) => ({ h2: `Seção ${indice}` })),
+      publishedMap: Array.from({ length: 20 }, (_, indice) => ({ current: `H2 ${indice}`, kind: "KEEP", section: null, line: "l".repeat(1_400) })),
+    },
+  };
+  const ondeLer = { competitors: "a", questions: "b", "video.results": "c", conflicts: "d", limitations: "e", "specialist.items": "f", pendingDecisions: "g" };
+  const cabe = fitWriterFoundations(fundamentos, { ...ondeLer, "articleBlueprint.sections": "radar.blueprint/abc", "articleBlueprint.publishedMap": "radar.blueprint/abc" })!;
+  assert.ok(writerEvidenceJsonBytes(cabe) <= WRITER_EVIDENCE_LIMITS.foundationsMaxBytes);
+  assert.equal(cabe.trimmed.find(item => item.field === "articleBlueprint.publishedMap")?.readAt, "radar.blueprint/abc");
+  assert.equal(cabe.trimmed.some(item => item.field === "articleBlueprint.sections"), false, "as seções ficam inteiras");
+  assert.equal(cabe.articleBlueprint.sections.length, 4);
+});
+
+test("2026-10-08 · fundamentos e pacote da seção · a planta chega com nomes atuais, as frases que pedem fonte e o mapa; ≤ 24 kB, pela Marca", async () => {
+  reiniciar(comPlantaDoCasoReal);
+  const fundamentos = await readWriterFoundations(contexto(), documentId);
+  assert.ok(writerEvidenceJsonBytes(fundamentos) <= WRITER_EVIDENCE_LIMITS.foundationsMaxBytes);
+  const lida = fundamentos.articleBlueprint!;
+  assert.equal(lida.sections[1].h2, "Cadastre a clínica no Perfil da Empresa no Google");
+  assert.deepEqual(lida.needsSource?.map(item => item.field), ["closing.cta"]);
+  assert.deepEqual(lida.sections[1].needsSource?.map(item => item.label), [COMPORTAMENTO]);
+  assert.equal(lida.publishedMap?.length, 3);
+  assert.match(fundamentos.next, /needsSource \(na planta e em cada seção\)/);
+  assert.match(fundamentos.next, /articleBlueprint\.publishedMap é o mapa da atualização/);
+  assert.doesNotMatch(JSON.stringify(lida), D10);
+  const [doPacote] = doArtigoModelo();
+  assert.match(doPacote.select ?? "", /ps:payload->publishedStructure/, "a página que a IA viu vem por caminho, nunca payload nu");
+  conferirLeitura();
+
+  const head = await readWriterEvidenceHead(contexto(), documentId);
+  const material = await readWriterSectionMaterial(contexto(), head);
+  const pacote = buildWriterSectionEvidencePackage(material, { kind: "section", id: "b2", label: "Cadastre a clínica no Perfil da Empresa no Google" })!;
+  assert.ok(writerEvidenceJsonBytes(pacote) <= 24_576);
+  assert.equal(pacote.articleBlueprint?.section?.h2, "Cadastre a clínica no Perfil da Empresa no Google");
+  assert.deepEqual(pacote.articleBlueprint?.section?.needsSource, [{ field: "answerFirst", sentence: PROCURAM, label: COMPORTAMENTO }]);
+  assert.deepEqual(pacote.articleBlueprint?.needsSource, [{ field: "closing.cta", sentence: CTA_QUE_AFIRMA, label: CONVERSAO }]);
+  assert.equal(pacote.articleBlueprint?.publishedMap?.[2].line, "sai: fora do escopo da busca (decisão no artigo-modelo)");
+  const melhoria = buildWriterSectionEvidencePackage(material, { kind: "improve", id: null, label: CONVERTE })!;
+  assert.equal(melhoria.articleBlueprint?.section, null);
+  assert.deepEqual(melhoria.articleBlueprint?.needsSource?.map(item => item.field), ["closing.cta"], "a melhoria também sabe o que pede fonte fora das seções");
+
+  /* Sem nada a marcar (a fixture de sempre), o recorte não ganha chave nova. */
+  reiniciar();
+  const deSempre = buildWriterSectionEvidencePackage(await readWriterSectionMaterial(contexto(), head), { kind: "section", id: "b1", label: "Hidratação da pele oleosa" })!;
+  assert.equal("needsSource" in deSempre.articleBlueprint!, false);
+  assert.equal("publishedMap" in deSempre.articleBlueprint!, false);
+  assert.equal("needsSource" in deSempre.articleBlueprint!.section!, false);
+});
+
+test("2026-10-08 · fatia · radar.blueprint/<id> sai com os nomes atuais (artigo-modelo antigo incluído) e a regra da leitura entra no etag", async () => {
+  reiniciar(comPlantaDoCasoReal);
+  const chave = `radar.blueprint/${plantaAprovada}`;
+  const secoes = await readWriterEvidence(contexto(), documentId, { sourceKey: `${chave}#blueprint.sections` });
+  const pagina = secoes as Exclude<typeof secoes, { notModified: true }>;
+  assert.match(JSON.stringify(pagina.data), /Cadastre a clínica no Perfil da Empresa no Google/);
+  assert.doesNotMatch(JSON.stringify(pagina.data), /Meu Neg[oó]cio/);
+  const inteira = await readWriterEvidence(contexto(), documentId, { sourceKey: chave });
+  const envelope = inteira as Exclude<typeof inteira, { notModified: true }>;
+  assert.ok(Object.keys(envelope.data as Linha).includes("publishedStructure"), "a página que a IA viu também é alcançável");
+  assert.doesNotMatch(JSON.stringify(envelope.data), /Meu Neg[oó]cio|My Business/);
+  conferirLeitura();
+
+  const head = await readWriterEvidenceHead(contexto(), documentId);
+  const descrita = await describeWriterEvidenceSource(contexto(), head, chave);
+  const aprovadaEm = "2026-10-02T11:00:00+00:00";
+  assert.equal(descrita.identityEtag, writerEvidenceIdentityEtag(chave, [plantaAprovada, BUNDLE, aprovadaEm, WRITER_BLUEPRINT_READING_RULES]));
+  assert.notEqual(descrita.identityEtag, writerEvidenceIdentityEtag(chave, [plantaAprovada, BUNDLE, aprovadaEm]), "o etag de antes da leitura com nomes atuais não vale mais");
+  const manifesto = await readWriterEvidenceManifest(contexto(), documentId);
+  const linha = manifesto.sources.find(item => item[0] === chave)!;
+  assert.equal(linha[7], writerEvidenceEtag([plantaAprovada, BUNDLE, aprovadaEm, WRITER_BLUEPRINT_READING_RULES]), "o manifesto também muda o etag com a regra da leitura");
+});
+
+test("2026-10-08 · fundamentos · a keyword do documento que traz o nome antigo o preserva na planta", async () => {
+  reiniciar(atual => {
+    comPlantaDoCasoReal(atual);
+    const dossie = ((atual.content_documents[0].payload as Linha).importedContext as Linha).dossier as Linha;
+    (dossie.keywordContext as Linha).principal = "como cadastrar a clínica no google meu negócio";
+  });
+  const fundamentos = await readWriterFoundations(contexto(), documentId);
+  assert.equal(fundamentos.articleBlueprint?.sections[1].h2, "Cadastre a clínica no Google Meu Negócio", "o leitor busca o nome antigo: a keyword manda");
+  const { foundations } = await writerSeedDocument(brandA, documentId);
+  assert.equal(foundations?.articleBlueprint?.sections[1].h2, "Cadastre a clínica no Google Meu Negócio", "a semeadura lê a mesma keyword");
+  const secoes = await readWriterEvidence(contexto(), documentId, { sourceKey: `radar.blueprint/${plantaAprovada}#blueprint.sections` });
+  assert.match(JSON.stringify((secoes as Exclude<typeof secoes, { notModified: true }>).data), /Cadastre a clínica no Google Meu Negócio/, "e a fatia");
+});
+
+test("2026-10-08 · semeadura · a promessa, o CTA e o próximo passo que pedem fonte vão numa lista própria; o rótulo da voz sai concluído", async () => {
+  reiniciar(comPlantaDoCasoReal);
+  const { foundations, document } = await writerSeedDocument(brandA, documentId);
+  assert.equal(foundations?.articleBlueprint?.closing?.nextStep, "Ler o guia do Perfil da Empresa no Google");
+  const linhas = seedContextLines({ title: document.title, foundations: foundations!, finalArticle: null }).join("\n");
+  assert.ok(linhas.includes(`${SEED_BLUEPRINT_NEEDS_SOURCE_TITLE}:\n- "${CTA_QUE_AFIRMA}" — ${CONVERSAO}`), linhas);
+  assert.equal(linhas.includes(CONVERTE), false, "a frase de seção não entra na semente: ela não está no contexto do derivado");
+  assert.doesNotMatch(linhas, /Meu Neg[oó]cio|My Business|rascunho|aguardando aprova/);
+  for (const sistema of [SCRIPT_SEED_SYSTEM_PROMPT, CAROUSEL_SEED_SYSTEM_PROMPT]) {
+    assert.match(sistema, /'Frases do artigo-modelo que só entram com fonte' não vira afirmação/);
+  }
+
+  /* A ativa continua dita "ativa"; sem número de versão, "v?" como antes. */
+  const voz = foundations!.brandVoice!;
+  const ativa = seedContextLines({ title: "T", foundations: { ...foundations!, brandVoice: { ...voz, status: "active", version: null } }, finalArticle: null }).join("\n");
+  assert.match(ativa, /Voz da marca \(copy e CTA\): Skill "Voz Care Glow" v\? \(ativa na Marca\)/);
+  const aguardando = seedContextLines({ title: "T", foundations: { ...foundations!, brandVoice: { ...voz, status: "pending_approval" } }, finalArticle: null }).join("\n");
+  assert.match(aguardando, /v2 \(versão corrente na Marca\)/);
+
+  /* Só as frases que a semente repete (promessa, CTA, próximo passo): a do ângulo não está no contexto do derivado. */
+  const plantaLida = foundations!.articleBlueprint!;
+  const comAngulo = { ...plantaLida, needsSource: [...(plantaLida.needsSource ?? []), { field: "angle", sentence: "ÂNGULO-FORA-DA-SEMENTE", label: CONVERSAO }] };
+  assert.doesNotMatch(seedContextLines({ title: "T", foundations: { ...foundations!, articleBlueprint: comAngulo }, finalArticle: null }).join("\n"), /ÂNGULO-FORA-DA-SEMENTE/);
+
+  /* Sem frase marcada, a lista não existe. */
+  reiniciar();
+  const deSempre = await writerSeedDocument(brandA, documentId);
+  assert.doesNotMatch(seedContextLines({ title: "T", foundations: deSempre.foundations!, finalArticle: null }).join("\n"), /só entram com fonte/);
+});
+
+test("2026-10-08 · IA interna · o pedido diz o que fazer com as frases que pedem fonte e com o mapa da atualização", () => {
+  for (const sistema of [SECTION_WRITING_SYSTEM_PROMPT, IMPROVE_SYSTEM_PROMPT]) {
+    assert.match(sistema, /evidence\.articleBlueprint\.needsSource ou evidence\.articleBlueprint\.section\.needsSource/);
+    assert.match(sistema, /label é o motivo e nunca vai ao texto/);
+    assert.match(sistema, /a tese da marca/);
+  }
+  assert.match(SECTION_WRITING_SYSTEM_PROMPT, /evidence\.articleBlueprint\.publishedMap/);
+  assert.match(SECTION_WRITING_SYSTEM_PROMPT, /nada da página sai sem a decisão registrada no item/);
+  assert.doesNotMatch(IMPROVE_SYSTEM_PROMPT, /publishedMap/, "a melhoria de trecho não reorganiza a página");
 });

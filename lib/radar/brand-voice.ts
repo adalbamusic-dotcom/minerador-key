@@ -131,8 +131,29 @@ export function radarBrandVoiceAbsence(state: RadarBrandVoiceState): string | nu
   return "Voz da marca: não há Skill de voz na Marca (Skills e prompts); voz, tom, autor e revisor ficam por conta de quem escreve.";
 }
 
+/** O rótulo de TELA: diz o estado da Skill na Marca. Telas operacionais (Radar, Marca); entregável usa `radarBrandVoiceDeliverableLabel`. */
 export const radarBrandVoiceLabel = (voice: Pick<RadarBrandVoice, "name" | "version" | "status">) =>
   `Skill "${voice.name}" v${voice.version} (${radarBrandVoiceStatusLabel(voice.status)} na Marca)`;
+
+/*
+ * 2026-10-08 · D10 NO RÓTULO DA VOZ, EM TODO ENTREGÁVEL. `radarBrandVoiceLabel`
+ * diz o estado de tela da Skill ("em rascunho", "aguardando aprovação"): certo
+ * nas telas operacionais, espera aberta no entregável (CSV para escrever, CSV
+ * de vídeo, Redator, MCP), que sai concluído. No entregável, a versão em uso é
+ * dita pelo que ela é — a corrente da Marca, a mesma regra de
+ * `resolveBrandSkill` —; a ativa continua dita "ativa". Era o `rotuloDaVoz`
+ * do CSV de vídeo (2026-10-07); agora é um só, para todos.
+ */
+export const radarBrandVoiceDeliverableLabel = (voice: Pick<RadarBrandVoice, "name" | "version" | "status">) =>
+  (voice.status === "active" ? radarBrandVoiceLabel(voice) : `Skill "${voice.name}" v${voice.version} (versão corrente na Marca)`);
+
+/**
+ * 2026-10-08 · O estado dito em frase de entregável ("Versão 1 da Skill de voz,
+ * corrente na Marca."): "ativa" para a ativa; qualquer outro estado — rascunho,
+ * aguardando aprovação, desconhecido — é a versão "corrente", a que a Marca
+ * entrega a todas as áreas. Nunca "em rascunho" nem "aguardando aprovação".
+ */
+export const radarBrandVoiceDeliverableStatusLabel = (status: string | undefined) => (status === "active" ? ESTADO.active : "corrente");
 
 /**
  * A Skill da Marca, do jeito que o repositório devolve, vira a voz do Radar.

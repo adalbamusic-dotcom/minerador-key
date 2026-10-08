@@ -843,7 +843,7 @@ export type WriterBlueprintTarget = { articleId: string; bundleHash: string | nu
 export type WriterApprovedBlueprintMeta = { id: string; versionNumber: number | null; bundleHash: string; approvedAt: string | null };
 
 export type WriterApprovedBlueprintRead =
-  | { kind: "approved"; meta: WriterApprovedBlueprintMeta; content: { blueprint: unknown; plan: unknown; linkCandidates: unknown; brandVoice: unknown } | null }
+  | { kind: "approved"; meta: WriterApprovedBlueprintMeta; content: { blueprint: unknown; plan: unknown; linkCandidates: unknown; brandVoice: unknown; publishedStructure?: unknown } | null }
   | { kind: "no_bundle" | "none" | "other_bundle" | "table_missing" | "read_failed"; reason: string };
 
 const COLUNAS_DO_ARTIGO_MODELO = "id,article_id,bundle_hash,version_number,approved_at";
@@ -851,8 +851,11 @@ const COLUNAS_DO_ARTIGO_MODELO = "id,article_id,bundle_hash,version_number,appro
  * Só os caminhos que a projeção usa (planta, medidas do plano, candidatos a
  * link e a versão da voz). `evidence` e `sources`, a maior parte do payload,
  * ficam para a fatia `radar.blueprint/<id>`. Nunca `payload` nu.
+ *
+ * 2026-10-08 · e a página publicada que a IA viu ao montar (`publishedStructure`,
+ * H1 e H2; ausente em versão antiga): é dela que sai o mapa da atualização.
  */
-const CAMINHOS_DO_ARTIGO_MODELO = "bp:payload->blueprint,pl:payload->measures->plan,lc:payload->linkCandidates,bv:payload->brandVoice";
+const CAMINHOS_DO_ARTIGO_MODELO = "bp:payload->blueprint,pl:payload->measures->plan,lc:payload->linkCandidates,bv:payload->brandVoice,ps:payload->publishedStructure";
 
 type ErroDoBanco = { code?: string; message?: string } | null;
 
@@ -902,7 +905,7 @@ export async function readWriterApprovedArticleBlueprint(
     return {
       kind: "approved",
       meta: { id: linha.id, versionNumber: numero(linha.version_number), bundleHash: alvo.bundleHash, approvedAt: texto(linha.approved_at) },
-      content: opcoes.content ? { blueprint: linha.bp, plan: linha.pl, linkCandidates: linha.lc, brandVoice: linha.bv } : null,
+      content: opcoes.content ? { blueprint: linha.bp, plan: linha.pl, linkCandidates: linha.lc, brandVoice: linha.bv, publishedStructure: linha.ps ?? null } : null,
     };
   }
   const deOutroPacote = await cliente.from("radar_article_blueprints").select(COLUNAS_DO_ARTIGO_MODELO)
@@ -920,8 +923,8 @@ export async function readWriterApprovedArticleBlueprint(
   return { kind: "none", reason: "nenhum artigo-modelo concluído para este pacote: a estrutura fica por conta de quem escreve" };
 }
 
-/** As chaves do payload do artigo-modelo que a fatia serve, cada uma por caminho. */
-export const WRITER_BLUEPRINT_PAYLOAD_KEYS = Object.freeze(["schemaVersion", "blueprint", "measures", "linkCandidates", "sources", "evidence", "brandVoice"] as const);
+/** As chaves do payload do artigo-modelo que a fatia serve, cada uma por caminho. 2026-10-08 · + a página publicada que a IA viu (aditivo; ausente em versão antiga). */
+export const WRITER_BLUEPRINT_PAYLOAD_KEYS = Object.freeze(["schemaVersion", "blueprint", "measures", "linkCandidates", "sources", "evidence", "brandVoice", "publishedStructure"] as const);
 
 /**
  * O CONTEÚDO DO APROVADO, para a fatia: só a chave de topo pedida (ou todas,

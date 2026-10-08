@@ -109,12 +109,25 @@ test("CSV para escrever: Skill ativa ganha a linha 'Voz da marca' logo abaixo do
   assert.match(linhas[2].promessa_e_leitor, /Voz da marca: copy, CTA e transição comercial seguem a linha "Voz da marca"/);
 });
 
-test("CSV para escrever: Skill em rascunho entra (regra canônica da Marca) e o estado é dito", () => {
-  const saida = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM, brandVoice: RASCUNHO });
-  const linhas = lerCsv(saida.csv || "");
-  assert.deepEqual(linhas.slice(0, 2).map(item => item.ordem), ["Marca", "Voz da marca"]);
-  assert.match(linhas[0].promessa_e_leitor, /Skill "AdalbaPro" v1 \(em rascunho na Marca\)/);
-  assert.match(linhas[1].pode_escrever, /em rascunho na Marca/);
+/*
+ * 2026-10-08 · C1 · D10: a Skill em rascunho continua entrando (regra canônica
+ * da Marca), dita pelo que ela é no entregável — a versão corrente —, como o CSV
+ * de vídeo já dizia. "Em rascunho" e "aguardando aprovação" ficam nas telas.
+ */
+test("CSV para escrever: Skill em rascunho entra (regra canônica da Marca), dita como a versão corrente (D10)", () => {
+  for (const [estado, voz] of [["draft", RASCUNHO], ["pending_approval", { kind: "available", voice: { ...VOZ, status: "pending_approval" } } as RadarBrandVoiceState]] as const) {
+    const saida = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM, brandVoice: voz });
+    const linhas = lerCsv(saida.csv || "");
+    assert.deepEqual(linhas.slice(0, 2).map(item => item.ordem), ["Marca", "Voz da marca"], estado);
+    assert.match(linhas[0].promessa_e_leitor, /Skill "AdalbaPro" v1 \(versão corrente na Marca\)/, estado);
+    assert.match(linhas[1].pode_escrever, /Skill "AdalbaPro" v1 \(versão corrente na Marca\)/, estado);
+    assert.match(linhas[1].artigo, /Versão 1 da Skill de voz, corrente na Marca\./, estado);
+    assert.doesNotMatch(saida.csv || "", /em rascunho|aguardando aprovação/, estado);
+  }
+  /* A ativa continua dita ativa. */
+  const ativa = lerCsv(radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM, brandVoice: ATIVA }).csv || "");
+  assert.match(ativa[1].artigo, /Versão 1 da Skill de voz, ativa na Marca\./);
+  assert.match(ativa[0].promessa_e_leitor, /Skill "AdalbaPro" v1 \(ativa na Marca\)/);
 });
 
 test("CSV para escrever: sem Skill na Marca, sem linha de voz, e o topo diz onde ela mora", () => {
@@ -170,6 +183,32 @@ test("artigo-modelo: trechos da Skill por assunto vão à IA, a página comercia
   const semVoz = buildRadarArticleBlueprintBrief({ entrada: entradaGoogle(), silo, articleId: ARTIGO, publication: null });
   assert.equal(semVoz.brandVoice, null);
   assert.equal(/# Voz da marca/.test(radarArticleBlueprintPrompt(semVoz).user), false);
+});
+
+/*
+ * 2026-10-08 · D10 NO RÓTULO DA VOZ, compartilhado (desenho dos entregáveis,
+ * Grupo A1). O rótulo de tela diz o estado da Skill; o de entregável diz a
+ * versão em uso pelo que ela é — a corrente da Marca — e a ativa como ativa.
+ * Era o `rotuloDaVoz` do CSV de vídeo; agora é um só, para todo entregável.
+ */
+test("rótulo da voz para entregável: a ativa é dita ativa; rascunho, aguardando aprovação e estado desconhecido viram a versão corrente (D10)", async () => {
+  const { radarBrandVoiceDeliverableLabel, radarBrandVoiceDeliverableStatusLabel, radarBrandVoiceLabel } = await import("../lib/radar/brand-voice.ts");
+  assert.equal(radarBrandVoiceDeliverableLabel(VOZ), 'Skill "AdalbaPro" v1 (ativa na Marca)');
+  assert.equal(radarBrandVoiceDeliverableLabel(VOZ), radarBrandVoiceLabel(VOZ), "a ativa é dita igual nas telas e no entregável");
+  for (const status of ["draft", "pending_approval", "", "arquivada?"]) {
+    const rotulo = radarBrandVoiceDeliverableLabel({ ...VOZ, version: 3, status });
+    assert.equal(rotulo, 'Skill "AdalbaPro" v3 (versão corrente na Marca)', status);
+    assert.doesNotMatch(rotulo, /rascunho|aguardando aprova|desconhecido/);
+  }
+  assert.equal(radarBrandVoiceDeliverableStatusLabel("active"), "ativa");
+  for (const status of ["draft", "pending_approval", undefined]) assert.equal(radarBrandVoiceDeliverableStatusLabel(status), "corrente", String(status));
+  /* O rótulo de tela continua dizendo o estado: telas operacionais (consumidores preservados). */
+  assert.equal(radarBrandVoiceLabel({ ...VOZ, status: "draft" }), 'Skill "AdalbaPro" v1 (em rascunho na Marca)');
+  assert.equal(radarBrandVoiceLabel({ ...VOZ, status: "pending_approval" }), 'Skill "AdalbaPro" v1 (aguardando aprovação na Marca)');
+  /* O CSV de vídeo já saía assim (2026-10-07): o rascunho entra como a versão corrente. */
+  const video = lerCsv(radarPortableVideoExport({ articles: [{ entrada: entradaGoogle(), youtube: null }], today: EXPORTADO_EM, brandVoice: RASCUNHO }).csv);
+  assert.match(Object.values(video[0]).join("\n"), /Skill "AdalbaPro" v1 \(versão corrente na Marca\)/);
+  assert.doesNotMatch(Object.values(video[0]).join("\n") + Object.values(video[1]).join("\n"), /em rascunho na Marca|aguardando aprovação na Marca/);
 });
 
 test("PROVIDER_CALLS = 0", () => {

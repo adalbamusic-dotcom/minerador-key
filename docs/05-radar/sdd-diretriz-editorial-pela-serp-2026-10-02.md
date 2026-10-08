@@ -383,3 +383,117 @@ a decisão humana passa a ser **editar** (cada edição vira a versão vigente) 
   fechado.
 - Testes: `tests/radar-artigo-modelo-concluido.test.mts` e os testes de marcação reescritos para provar a
   ausência das marcas.
+
+## Adendo F — Revisão dos entregáveis (2026-10-08) — AUTORIZADO PELO DONO, IMPLEMENTADO EM CÓDIGO
+
+**Status:** verificado no código e confirmado por teste (fixtures, sem provider nem IA); validado
+manualmente: não — a homologação é do dono. Detalhe, arquivos, consumidores preservados, limites e
+contagens em `docs/05-radar/estado-atual.md` ("Revisão dos entregáveis", 2026-10-08) e, para o Redator, em
+`docs/07-redator/estado-atual.md` (2026-10-08).
+
+### F.1 Pedido e origem
+
+Dono no chat (2026-10-08): "pode fazer os seus ajustes, e rodadas, depois documenta, tudo para deixar tudo
+otimizado com todas estes reajustes para todas as demais operações". Origem: os dois CSVs reais de 08/10 do
+artigo "como atrair clientes pelo instagram" (slug publicado `instagram-nao-traz-pacientes`), cujo
+artigo-modelo foi montado antes de 2026-10-02. Módulo proprietário: Radar; Redator e catálogo MCP com
+mudanças aditivas (AGENTS §4), com uma exceção de valor registrada em F.2.8.
+
+### F.2 Decisões
+
+1. **A página publicada entra no gerador e grava o mapa da atualização (`publishedMap`).** No artigo
+   publicado com URL, a organização lê o H1 e os H2 de hoje com o MESMO leitor do export (só GET, até 10 s;
+   falha, tempo esgotado ou página vazia seguem sem ela; reaproveitar a versão do pacote por `ifMissing` não
+   lê nada). A página publicada é atualização: o que ela já cobre dentro do escopo e a amostra não cobre é
+   diferencial e fica na planta. A IA devolve, para cada H2 de hoje, `{ current, section, reason }` — `section`
+   é a seção da planta (1-based) que o absorve; só `null` explícito quer dizer "sai", com motivo. A conferência
+   renumera o mapa para a ordem da planta e casa pelo título o que a IA omitiu ou numerou errado
+   (`origin: "match"`); sem par, o H2 fica como seção própria. **Nada sai da página sem decisão.** Na planta
+   antiga, sem mapa gravado, o export faz o casamento determinístico com os H2 lidos no ar: a complementar que
+   a planta põe numa seção leva para ela o H2 publicado que a contém, e o H2 sem par nunca vai antes da 1ª
+   seção. O CSV "Para escrever" troca "leve-a como pendência" por esse mapa, com frase concluída por H2.
+2. **A abertura responde à busca.** A abertura e a 1ª seção respondem à intenção da keyword principal
+   (principal "como …" pede a 1ª seção prática); a tese ou o contraponto da marca vem depois, sem negar o
+   assunto do artigo. A conferência anota (só no painel) a 1ª seção que abre pelo diagnóstico; na planta
+   antiga, o export dá a "Ordem de leitura" como instrução concluída.
+3. **Trava de fonte por sentido, em todos os entregáveis.** Uma régua só, pura e por frase
+   (`radarSentenceNeedsSource`, a mesma porta do CSV de vídeo), lê o SENTIDO: efeito comercial ou conversão,
+   comportamento do público e afirmação sobre plataforma sem fonte do pacote. A polaridade fica: a tese que
+   nega o efeito ("o Instagram, sozinho, não enche a agenda"), a orientação (imperativo, "deve", orientar
+   contra), o modal ("pode ampliar") e a frase coberta por fonte do pacote passam. Onde vale:
+   - CSV "Para escrever": "(precisa de fonte: <motivo>)", a marca da regra geral 5, mais a linha concluída
+     "Afirmações que só entram com fonte do pacote ou delimitadas (regra geral 5): …" — também no H1, SEO
+     title, meta description, próximo passo, ALT e legenda;
+   - CSV de vídeo: sai do texto publicável, fica como fala delimitada na produção e entra na lista "Fica fora"
+     com o motivo; a afirmação absoluta (regra universal) entra na lista e fica fora também da fala, como
+     decidido em 2026-10-02;
+   - Redator e MCP: `needsSource` por frase, no topo e por seção; o texto da planta não muda e o motivo nunca vai
+     ao texto.
+
+   O link externo sem fonte do pacote deixa de ser link: a afirmação sai delimitada. Nenhum motivo diz "fonte a
+   obter".
+4. **Nomes atuais de produto.** "Google Meu Negócio" e "Google My Business" viram "Perfil da Empresa no
+   Google" por normalização determinística na conferência e na leitura para o export e o Redator, o que vale
+   também para artigo-modelo antigo. Ficam a keyword que traz o nome antigo, a menção "antigo …"/"ex-…", o H2
+   atual da página, os ids e as evidências. O pedido à IA ganhou a regra "use os nomes atuais".
+5. **Marcador de relato substituído (D10 + voz da marca).** "[RELATO DA MARCA — preencher]" saiu do CSV "Para
+   escrever". Sem material próprio da marca, o artigo é escrito sem relato e sem inventá-lo — o que a própria
+   Skill de voz da marca manda para o artigo explicativo sem caso próprio. É decisão desta rodada.
+6. **Links planejados como instrução condicional.** O destino ainda não publicado vira instrução concluída: o
+   link entra com a URL final quando o destino estiver no ar junto com este artigo ou antes; se este artigo for
+   ao ar primeiro, a âncora fica como texto simples, sem link (nunca link quebrado). O caminho planejado não é
+   endereço publicado. A ordem de publicação é decisão do dono; nada acrescenta o link depois sozinho nesta
+   rodada.
+7. **Versão das regras do artigo-modelo.** `RADAR_ARTICLE_BLUEPRINT_RULES_VERSION = "2026-10-08"` é gravado em
+   `payload.rulesVersion` e preservado na edição; mudou regra do pedido ou da conferência, muda a data. A tela
+   do Radar (operacional, não entregável) avisa a versão montada antes das regras atuais e aponta o
+   "Organizar de novo (IA)" que já existe — sem botão novo e sem regerar sozinho (pago). Até regerar, o export
+   protege a planta antiga. No Redator, `WRITER_BLUEPRINT_READING_RULES` ("2026-10-08") entra no etag da fatia
+   `radar.blueprint` e do manifesto.
+8. **Rótulo da voz em todo entregável (D10).** CSV "Para escrever", CSV de vídeo, semeadura do Redator e MCP
+   dizem "ativa" ou "versão corrente na Marca"; o estado de tela ("em rascunho", "aguardando aprovação") fica
+   nas telas da Marca e do Radar (`radarBrandVoiceLabel` preservado). No MCP, `brandVoice.statusLabel` mudou de
+   valor — a única mudança de valor de campo existente nesta rodada; o estado técnico continua em
+   `brandVoice.status`, e nenhum código decide pelo texto do rótulo (grep). O texto da Skill é transcrito como a
+   Marca o escreveu e fica fora da varredura D10; mudá-lo é decisão do dono, na Marca.
+
+Também nesta rodada, sem contrato novo (detalhe no estado atual): cabeçalhos dos concorrentes sem ruído;
+"Como superar a SERP" sem costurar temas já cobertos; perguntas deste artigo × "Não cobrir" × outro do Silo;
+medidas de parágrafos pela faixa de palavras; no CSV de vídeo, corte só com utilidade de 1 ponto ou mais, a
+cena pela ideia e H3 só como passo quando é ação; as esperas antigas ("a definir", "conferir antes")
+reescritas como instrução concluída.
+
+### F.3 Compatibilidade, riscos e rollback
+
+- **Campos opcionais e aditivos:** `blueprint.publishedMap?`, `publishedStructure?`, `rulesVersion?` e
+  `measures.plan.paragraphsMin?`/`paragraphsMax?`/`wordsPerParagraph?` dentro de
+  `radar_article_blueprints.payload` (`jsonb`): sem migration. Nenhum leitor faz parse `.strict()` do payload,
+  e o Redator lê por caminho JSON. O payload antigo continua válido no código novo, e o novo no código antigo
+  (os campos a mais são ignorados) — testes de compatibilidade antigo × novo nas colunas e no Redator.
+- **Assinaturas:** só parâmetros opcionais novos (`readPublishedStructure?`, `keywords?` nas leituras,
+  `RadarArticleBlueprintColumnsOptions`, `cortes?`/`fatoComFonte?` no prompt do vídeo); rotas intactas; nenhuma
+  ferramenta MCP nova. O pacote congelado e o seu hash não mudam: o artigo-modelo e a voz continuam fora do
+  congelamento (Adendo C).
+- **Exceções registradas:** o valor de `brandVoice.statusLabel` no MCP (F.2.8) e o etag da fatia
+  `radar.blueprint`, que muda uma vez (quem tiver o antigo só relê).
+- **Riscos:** a régua lê palavras, não sentido de fato (falso positivo e falso negativo; limites declarados no
+  estado atual); as notas novas da conferência fazem a passada de correção paga disparar com mais frequência;
+  a rota de geração ficou perto do teto (≈ 280 s de 300 s no pior caso, não medido) — contido depois da
+  revisão por um prazo único de 280 s (`RADAR_ARTICLE_BLUEPRINT_ROUTE_BUDGET_MS`): a nova tentativa e a
+  passada de correção usam o que sobra e, sem 30 s, não são pedidas; a leitura da página na geração depende
+  de rede, contida em 10 s.
+- **Rollback:** reverter o código. Não há migration nem dado obrigatório novo; as plantas gravadas com os
+  campos novos continuam legíveis depois do rollback, e as antigas continuam legíveis sem ele.
+
+### F.4 Testes e validação
+
+- Confirmado por teste: `npm run test:radar` 2.999 testes (2.998 pass, 0 fail, 1 skipped), `npm run
+  test:redator` 357/357, `npm run test:redator:mcp` 144/144, `npm run test:redator:dom` 19/19, `npm run
+  test:agent` 65/65; testes novos `tests/radar-fonte-por-sentido.test.mts`,
+  `tests/radar-artigo-modelo-2026-10-08.test.mts`, `tests/radar-csv-escrever-2026-10-08.test.mts` e
+  `tests/radar-csv-video-2026-10-08.test.mts`, com varredura D10 do arquivo inteiro; mutantes só em cópias no
+  scratchpad, todos mortos.
+- Validado manualmente: não. Fica com o dono: reexportar os dois CSVs do caso real pela tela, conferir a tela do
+  artigo-modelo (aviso de regras anteriores, mapa, parágrafos) e ler `get_writer_foundations` pelo MCP; depois,
+  regerar os artigos-modelo anteriores às regras de 2026-10-08 e decidir a ordem de publicação dos destinos
+  planejados.
