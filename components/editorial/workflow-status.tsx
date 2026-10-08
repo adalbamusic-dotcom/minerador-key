@@ -63,23 +63,66 @@ export function WorkflowStatusSummary({ statuses }: { statuses: string[] }) {
   return <div className="flex flex-wrap items-center gap-2 border-b border-slate-900 bg-[#090a0e] px-3 py-1.5 text-[9px] text-slate-500"><span>Em processo: {counts.process || 0}</span><span>Aguardando aprovação: {counts.review || 0}</span><span className="text-emerald-400">Aprovados: {counts.approved || 0}</span><span>Importados adiante: {counts.sent || 0}</span><span>Publicados: {counts.published || 0}</span>{Boolean(counts.blocked) && <span className="text-red-400">Bloqueados: {counts.blocked}</span>}</div>;
 }
 
-export function WorkflowImportDialog<T extends { id: string }>({ open, title, description, rows, label, details, disabled = () => false, disabledReason, status, loading = false, error = null, emptyMessage, onRetry, onClose, onImport }: {
+export function WorkflowImportDialog<T extends { id: string }>({ open, title, description, rows, label, details, disabled = () => false, disabledReason, status, loading = false, error = null, emptyMessage, onRetry, onClose, onImport, groupOf }: {
   open: boolean; title: string; description: string; rows: T[]; label: (row: T) => React.ReactNode; details?: (row: T) => React.ReactNode;
   disabled?: (row: T) => boolean; disabledReason?: (row: T) => React.ReactNode; status?: (row: T) => string; loading?: boolean; error?: string | null; emptyMessage?: React.ReactNode; onRetry?: () => void | Promise<void>;
   onClose: () => void; onImport: (ids: string[]) => void | Promise<void>;
+  /*
+   * 2026-10-07 · Aditivo: o RÓTULO do grupo da linha (null = sem grupo). Com
+   * ele o diálogo insere um cabeçalho quando o rótulo muda e permite marcar o
+   * grupo inteiro; as linhas continuam na ordem recebida — quem ordena é o
+   * chamador. Sem ele, o render é exatamente o de sempre (consumidores
+   * preservados: Redator, Arquiteto e ImportPanel sem groupOf).
+   */
+  groupOf?: (row: T) => string | null;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [importing, setImporting] = useState(false);
-  const filtered = rows.filter(row => String(label(row)).toLocaleLowerCase("pt-BR").includes(search.toLocaleLowerCase("pt-BR")));
+  /* 2026-10-07 · A busca também casa com o rótulo do grupo: buscar o nome do silo mostra o silo inteiro. */
+  const needle = search.toLocaleLowerCase("pt-BR");
+  const filtered = rows.filter(row => String(label(row)).toLocaleLowerCase("pt-BR").includes(needle) || Boolean(groupOf && (groupOf(row) || "").toLocaleLowerCase("pt-BR").includes(needle)));
   const selectable = filtered.filter(row => !disabled(row));
   if (!open) return null;
   const importSelected = async () => { setImporting(true); try { await onImport([...selected]); setSelected(new Set()); } finally { setImporting(false); } };
+  /*
+   * 2026-10-07 · Com groupOf, um cabeçalho abre cada grupo contíguo: o nome do
+   * grupo, a contagem dos ainda não importados e "Selecionar o silo inteiro"
+   * (marca/desmarca os selecionáveis DO GRUPO que passam na busca atual;
+   * indeterminate quando a seleção é parcial). As linhas novas usam tokens
+   * semânticos; o resto do componente é dívida legada e não foi redesenhado —
+   * a linha permanece no JSX de sempre, recebida aqui como `renderRow`.
+   */
+  const renderRows = (renderRow: (row: T) => React.ReactNode) => {
+    if (!groupOf) return filtered.map(renderRow);
+    const out: React.ReactNode[] = [];
+    let previousGroup: string | null = null;
+    for (const row of filtered) {
+      const group = groupOf(row);
+      if (group && group !== previousGroup) {
+        const groupRows = filtered.filter(item => groupOf(item) === group);
+        const groupSelectable = groupRows.filter(item => !disabled(item));
+        const checkedCount = groupSelectable.filter(item => selected.has(item.id)).length;
+        out.push(<div key={`grupo:${group}:${row.id}`} data-testid="workflow-import-group-header" className="flex items-center gap-3 border-b border-divider bg-surface-subtle px-3 py-2">
+          <span className="min-w-0 flex-1 truncate text-[12px] font-bold text-foreground">{group}</span>
+          <span className="shrink-0 text-[12px] text-text-muted">{groupSelectable.length} de {groupRows.length} ainda não importados</span>
+          <label className={`flex shrink-0 items-center gap-1.5 text-[12px] text-text-muted ${groupSelectable.length ? "cursor-pointer" : "cursor-not-allowed opacity-55"}`}>
+            {/* 2026-10-07 · aria-label com o nome do grupo: o texto visível é igual em todos os cabeçalhos, e o leitor de tela precisa saber DE QUAL silo é cada checkbox. */}
+            <input type="checkbox" data-testid="workflow-import-group-toggle" aria-label={`Selecionar o silo ${group} inteiro`} disabled={!groupSelectable.length} ref={element => { if (element) element.indeterminate = checkedCount > 0 && checkedCount < groupSelectable.length; }} checked={groupSelectable.length > 0 && checkedCount === groupSelectable.length} onChange={event => setSelected(current => { const next = new Set(current); for (const item of groupSelectable) { if (event.target.checked) next.add(item.id); else next.delete(item.id); } return next; })}/>
+            Selecionar o silo inteiro
+          </label>
+        </div>);
+      }
+      previousGroup = group;
+      out.push(renderRow(row));
+    }
+    return out;
+  };
   return <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-4" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose(); }}>
     <section role="dialog" aria-modal="true" aria-labelledby="workflow-import-title" className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl border border-slate-800 bg-[#090a0e] shadow-2xl">
       <header className="flex items-start gap-3 border-b border-slate-850 p-4"><div><h2 id="workflow-import-title" className="text-sm font-bold text-white">{title}</h2><p className="mt-1 text-[10px] text-slate-500">{description}</p></div><button type="button" className="ml-auto rounded p-1 text-slate-500 hover:bg-slate-900 hover:text-white" onClick={onClose} aria-label="Fechar"><X className="h-4 w-4"/></button></header>
       <div className="p-3"><label className="flex h-8 items-center gap-2 rounded border border-slate-800 bg-black px-2 text-slate-500"><Search className="h-3 w-3"/><input autoFocus value={search} onChange={event => setSearch(event.target.value)} className="min-w-0 flex-1 bg-transparent text-[10px] text-slate-200 outline-none" placeholder="Buscar itens da etapa anterior…"/></label><div className="mt-2 flex justify-between text-[9px] text-slate-500"><label className="flex items-center gap-1"><input type="checkbox" checked={selectable.length > 0 && selectable.every(row => selected.has(row.id))} onChange={event => setSelected(event.target.checked ? new Set(selectable.map(row => row.id)) : new Set())}/>Selecionar todos ainda não importados</label><span>{selected.size} selecionado(s) · {rows.length} item(ns)</span></div></div>
-      <div className="min-h-0 flex-1 overflow-auto border-y border-slate-900">{filtered.map(row => { const rowDisabled = disabled(row); return <label key={row.id} className={`flex items-start gap-3 border-b border-slate-900 p-3 ${rowDisabled ? "cursor-not-allowed opacity-55" : "cursor-pointer hover:bg-slate-950"}`}><input className="mt-0.5" type="checkbox" disabled={rowDisabled} checked={selected.has(row.id)} onChange={event => setSelected(current => { const next = new Set(current); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next; })}/><span className="min-w-0 flex-1 text-[10px] text-slate-300"><strong className="block text-slate-100">{label(row)}</strong>{details?.(row)}{rowDisabled && <span className="mt-1 block text-cyan-400">{disabledReason?.(row) || "Já importado na etapa atual"}</span>}</span><WorkflowStatusBadge status={status?.(row) || (rowDisabled ? "sent_writer" : "approved")}/></label>; })}{loading && !filtered.length && <div className="flex items-center justify-center gap-2 p-8 text-[10px] text-slate-500"><Loader2 className="h-3 w-3 animate-spin"/>Atualizando itens da etapa anterior…</div>}{error && !loading && !filtered.length && <div className="p-8 text-center text-[10px] text-red-300"><p>Não foi possível atualizar os itens: {error}</p>{onRetry && <button type="button" className="mt-3 rounded border border-red-900 px-3 py-1 text-red-200" onClick={() => void onRetry()}>Tentar novamente</button>}</div>}{!loading && !error && !filtered.length && <div className="p-8 text-center text-[10px] text-slate-600">{emptyMessage || "Nenhum item disponível. Conclua a aprovação na etapa anterior primeiro."}</div>}</div>
+      <div className="min-h-0 flex-1 overflow-auto border-y border-slate-900">{renderRows(row => { const rowDisabled = disabled(row); return <label key={row.id} className={`flex items-start gap-3 border-b border-slate-900 p-3 ${rowDisabled ? "cursor-not-allowed opacity-55" : "cursor-pointer hover:bg-slate-950"}`}><input className="mt-0.5" type="checkbox" disabled={rowDisabled} checked={selected.has(row.id)} onChange={event => setSelected(current => { const next = new Set(current); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next; })}/><span className="min-w-0 flex-1 text-[10px] text-slate-300"><strong className="block text-slate-100">{label(row)}</strong>{details?.(row)}{rowDisabled && <span className="mt-1 block text-cyan-400">{disabledReason?.(row) || "Já importado na etapa atual"}</span>}</span><WorkflowStatusBadge status={status?.(row) || (rowDisabled ? "sent_writer" : "approved")}/></label>; })}{loading && !filtered.length && <div className="flex items-center justify-center gap-2 p-8 text-[10px] text-slate-500"><Loader2 className="h-3 w-3 animate-spin"/>Atualizando itens da etapa anterior…</div>}{error && !loading && !filtered.length && <div className="p-8 text-center text-[10px] text-red-300"><p>Não foi possível atualizar os itens: {error}</p>{onRetry && <button type="button" className="mt-3 rounded border border-red-900 px-3 py-1 text-red-200" onClick={() => void onRetry()}>Tentar novamente</button>}</div>}{!loading && !error && !filtered.length && <div className="p-8 text-center text-[10px] text-slate-600">{emptyMessage || "Nenhum item disponível. Conclua a aprovação na etapa anterior primeiro."}</div>}</div>
       <footer className="flex items-center justify-between p-3"><p className="text-[9px] text-slate-600">A importação não altera o conteúdo aprovado na etapa anterior.</p><button type="button" disabled={!selected.size || importing} onClick={() => void importSelected()} className="inline-flex h-8 items-center rounded border border-emerald-800 bg-emerald-950/20 px-3 text-[10px] font-bold text-emerald-300 disabled:opacity-40"><Plus className="mr-1 h-3 w-3"/>{importing ? "Importando…" : `Importar ${selected.size || ""}`}</button></footer>
     </section>
   </div>;

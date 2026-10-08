@@ -112,6 +112,8 @@ export async function POST(request: Request) {
       /* 2026-10-02 · "Só os selecionados" no formato para escrever também leva o Silo. */
       /* 2026-10-02 · o CSV de vídeo também recebe o Silo (os tópicos que o Silo exclui valem no "não cobrir"). */
       selectionSiloContext: input.mode === "video" || (input.mode === "writing" && !input.groupBy),
+      /* 2026-10-07 · o resumo orgânico das lentes extras (grátis, do cache) só serve ao CSV de vídeo: os outros formatos não o leem. */
+      videoLensDigests: input.mode === "video",
     });
 
     /*
@@ -119,6 +121,10 @@ export async function POST(request: Request) {
      *
      * As MESMAS entradas, outra projeção: sem estrutura de artigo, com a
      * pesquisa do YouTube que o núcleo já leu. Nenhuma leitura a mais.
+     *
+     * 2026-10-07 · uma leitura a mais, só aqui: o resumo orgânico das lentes
+     * extras da principal (cache em modo `digest`, grátis), que o núcleo faz
+     * quando `videoLensDigests` está ligado e devolve em `montadas`.
      */
     if (input.mode === "video") {
       if (!montadas.length) {

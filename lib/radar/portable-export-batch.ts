@@ -34,6 +34,7 @@ import {
 import { latestRadarR5SerpReview } from "./r5-sequential.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
 import type { RadarVideoExportYoutube } from "./portable-video-export.ts";
+import type { RadarVideoLensOrganicReading } from "./video-competitive.ts";
 import type { RadarArticleBlueprintPayload } from "./article-blueprint.ts";
 
 /**
@@ -359,6 +360,12 @@ export type RadarPortableExportAssembledArticle = {
    * (nunca gravado), para as colunas saírem marcadas como proposta.
    */
   blueprint?: RadarArticleBlueprintPayload | null;
+  /**
+   * 2026-10-07 · Aditivo: o orgânico das três lentes extras para a keyword
+   * principal, lido do resumo gravado no cache — só no modo vídeo da exportação
+   * (`videoLensDigests`). Os outros formatos não o leem nem o recebem.
+   */
+  lensDigests?: RadarVideoLensOrganicReading | null;
 };
 
 /**

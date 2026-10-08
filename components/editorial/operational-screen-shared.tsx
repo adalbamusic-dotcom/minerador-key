@@ -53,10 +53,11 @@ export function useReadyPipeline() {
 
 export function sessionId(session: ReturnType<typeof useSession>["data"]) { return session?.user?.email || session?.user?.id || "usuario-local"; }
 
-export function ImportPanel<T extends { id: string }>({ title, rows, label, disabled, status, onClose, onImport }: { title: string; rows: T[]; label: (row: T) => React.ReactNode; disabled?: (row: T) => boolean; status?: (row: T) => string; onClose: () => void; onImport: (ids: string[]) => void }) {
+/* 2026-10-07 · groupOf é aditivo: repassado ao diálogo para agrupar por silo; sem ele, nada muda para os chamadores atuais. */
+export function ImportPanel<T extends { id: string }>({ title, rows, label, disabled, status, groupOf, onClose, onImport }: { title: string; rows: T[]; label: (row: T) => React.ReactNode; disabled?: (row: T) => boolean; status?: (row: T) => string; groupOf?: (row: T) => string | null; onClose: () => void; onImport: (ids: string[]) => void }) {
   const isDisabled = disabled || ((row: T) => Boolean((row as T & { alreadyImported?: boolean }).alreadyImported));
   const rowStatus = status || ((row: T) => (row as T & { importStatus?: string }).importStatus || "approved");
-  return <WorkflowImportDialog open title={title} description="Todos os aprovados da etapa anterior aparecem abaixo; os já importados permanecem visíveis e bloqueados." rows={rows} label={label} disabled={isDisabled} status={rowStatus} onClose={onClose} onImport={onImport}/>;
+  return <WorkflowImportDialog open title={title} description="Todos os aprovados da etapa anterior aparecem abaixo; os já importados permanecem visíveis e bloqueados." rows={rows} label={label} disabled={isDisabled} status={rowStatus} groupOf={groupOf} onClose={onClose} onImport={onImport}/>;
 }
 
 export function Metric({ label, value }: { label: string; value: unknown }) { return <div className={card}><p className="text-[12px] font-bold uppercase tracking-wider text-text-muted">{label}</p><p className="mt-2 text-xl font-black text-foreground">{String(value)}</p></div>; }

@@ -30,6 +30,8 @@ import {
 } from "@/lib/radar/portable-export-batch";
 import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
 import { radarVideoExportYoutubeOf } from "@/lib/radar/portable-video-export";
+import { radarVideoLensOrganicOf } from "@/lib/radar/video-competitive";
+import { readRadarVideoLensDigestsForExport } from "@/lib/server/radar-video-lens-digest-read";
 import { readRadarArticleBlueprintsForExport } from "@/lib/server/radar-article-blueprint-read";
 import { readRadarVideoUsagesForExport } from "@/lib/server/radar-video-usage-read";
 import { readRadarBrandVoice } from "@/lib/server/radar-brand-voice";
@@ -98,6 +100,14 @@ export async function assembleRadarPortableExport(input: {
    * concorrentes, só GET, com tempo limite); sem ele, nada é lido.
    */
   readPublishedStructure?: (url: string) => Promise<{ h1: string | null; h2: string[] } | null>;
+  /**
+   * 2026-10-07 · Aditivo: lê o resumo orgânico das três lentes extras da
+   * keyword principal (modo `digest` do cache, grátis), para o CSV de vídeo
+   * dizer que Reels, posts, carrosséis, TikTok e Shorts ranqueiam. Só a rota
+   * no modo "video" liga; sem ele (CSV "Para escrever", formato completo, MCP),
+   * nada a mais é lido.
+   */
+  videoLensDigests?: boolean;
 }): Promise<RadarPortableExportAssembly> {
   const exportedAt = input.exportedAt ?? new Date().toISOString();
   const artefatos = await new ArtifactRepository().list(input.brandId);
@@ -468,6 +478,8 @@ export async function assembleRadarPortableExport(input: {
    * lote de 100 ids, filtrada pela marca; sem alvo resolvível, ou com a
    * leitura falha, valem os códigos do ambiente, como antes.
    */
+  /* 2026-10-07 · os pedidos ficam guardados para o resumo das lentes extras do CSV de vídeo: sem outra leitura de alvo. */
+  let pedidosDasLentes: ReturnType<typeof radarPortableSerpLensRequests> = [];
   const lentes = montadas.length
     ? await radarPortableExportReadLenses(async () => {
       const ambiente = readDataForSeoTargetCodes();
@@ -483,6 +495,7 @@ export async function assembleRadarPortableExport(input: {
         ...ambiente,
         codesFor: keywordId => serpTargetCodesFor(alvos.codes, keywordId, ambiente),
       });
+      pedidosDasLentes = pedidos;
       if (!pedidos.length) return [];
       return lookupSerpCache(
         { supabase: input.supabase as Parameters<typeof lookupSerpCache>[0]["supabase"], brandId: input.brandId, actorUserId: input.actorUserId },
@@ -493,6 +506,27 @@ export async function assembleRadarPortableExport(input: {
       message: erro instanceof Error ? erro.message.slice(0, 240) : "falha desconhecida",
     }))
     : { lookups: [], readFailed: false };
+
+  /*
+   * ===== 2026-10-07 · O RESUMO ORGÂNICO DAS LENTES EXTRAS, SÓ NO MODO VÍDEO =====
+   *
+   * A única leitura nova do CSV de vídeo competitivo (item 6 do desenho): o
+   * resumo gravado das três lentes extras da keyword principal, em modo
+   * `digest`, uma vez por lote, com os pedidos que a leitura acima já montou.
+   * Grátis (cache, nunca provider) e tolerante: falhou, a coluna diz. Sem
+   * `videoLensDigests`, nada disto roda.
+   */
+  if (input.videoLensDigests && montadas.length) {
+    const principalDe = (item: RadarPortableExportAssembledArticle) => item.lentes.find(keyword => keyword.role === "principal")?.keyword ?? null;
+    const resumos = await readRadarVideoLensDigestsForExport({
+      context: { supabase: input.supabase as Parameters<typeof lookupSerpCache>[0]["supabase"], brandId: input.brandId, actorUserId: input.actorUserId },
+      pedidos: pedidosDasLentes,
+      principais: montadas.map(principalDe),
+      now: new Date(exportedAt),
+      lensReadFailed: lentes.readFailed,
+    });
+    for (const item of montadas) item.lensDigests = radarVideoLensOrganicOf(resumos, principalDe(item));
+  }
 
   /*
    * ===== 2026-09-23 · O PLANO POR SILO, SÓ QUANDO PEDIDO =====

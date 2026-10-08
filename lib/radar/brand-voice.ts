@@ -84,6 +84,32 @@ export function radarBrandVoiceText(secoes: readonly RadarBrandVoiceSection[]): 
   return secoes.map(secao => `${secao.heading.replace(/^\d+[.)]\s*/, "")}:\n${secao.body.trim()}`).join("\n\n");
 }
 
+/*
+ * 2026-10-07 · SEÇÃO DE ENTREGA DE ARTIGO (revisão do CSV de vídeo). A Skill
+ * real da marca traz "Entrega e revisão final" (H1, SEO title, meta
+ * description, corpo do artigo…) e a "Instrução curta para o teste" que manda
+ * ESCREVER O ARTIGO — no CSV de vídeo, as duas conflitam com a finalidade do
+ * arquivo. O predicado reconhece a entrega pelo título (entrega e revisão,
+ * revisão final, instrução para o teste/para o redator, checklist de entrega)
+ * ou pelo corpo ("corpo do artigo" junto de "meta description"/"SEO title",
+ * ou a ordem de escrever o artigo). CUIDADO com o falso positivo: "Critérios
+ * antes de redigir" NÃO é entrega (a regra de coerência e bloqueio serve ao
+ * vídeo), e "Voz" e "Vocabulário e estilo" ficam.
+ *
+ * 2026-10-07 (passada de revisão) · o plural escapava: "instrucao" não é
+ * substring de "instrucoes" sem acento, e "Instruções para o redator" ficava
+ * na linha de voz.
+ */
+const TITULO_DE_ENTREGA = /entrega e revis|revisao final|instruc(?:ao|oes)[^:\n]*para o (teste|redator)|checklist d[aeo] entrega/;
+const ORDEM_DE_ESCREVER = /escrev[ae]r?[^.!?\n]*\bo artigo\b/;
+
+export function radarBrandVoiceSectionIsArticleDelivery(secao: RadarBrandVoiceSection): boolean {
+  if (TITULO_DE_ENTREGA.test(semAcento(secao.heading))) return true;
+  const corpo = semAcento(secao.body);
+  if (corpo.includes("corpo do artigo") && (corpo.includes("meta description") || corpo.includes("seo title"))) return true;
+  return ORDEM_DE_ESCREVER.test(corpo);
+}
+
 /**
  * As URLs do PRÓPRIO site da marca citadas na Skill (ex.: a página comercial).
  * URL de outro domínio (fonte, documentação) não é destino de link interno.

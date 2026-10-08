@@ -117,6 +117,49 @@ test("A · o CSV de vídeo traz dados e diretrizes de roteiro, e nada da estrutu
   assert.equal(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(saida.csv), false, "nenhum UUID");
 });
 
+/*
+ * 2026-10-07 · A AMOSTRA PERTINENTE NA CORRIDA REAL (item 1 do desenho
+ * competitivo): com a corrida que a fotografia referencia, as estatísticas da
+ * coluna de intenção saem só dos pertinentes; o congelamento novo, que guarda
+ * só a referência da corrida, sem a corrida viva com o mesmo id, diz que não dá
+ * para recalcular — e mostra as estatísticas da fotografia.
+ */
+test("A · amostra pertinente: com a corrida referenciada, só pertinentes; sem ela, não recalculável", () => {
+  const comCorrida = radarVideoExportYoutubeOf({ run: corrida(), frozen: congelada(), declaredIntent: null, editorialTopics: [], generatedAt: EXPORTADO_EM });
+  const [, artigo] = lerCsv(radarPortableVideoExport({ articles: [{ entrada: entradaGoogle(), youtube: comCorrida }], today: EXPORTADO_EM }).csv);
+  assert.match(artigo.intencao_e_formato, /^Amostra pertinente \(mesmo público, público vizinho e tema geral; pelo título e pelo canal\): \d+ de \d+ longos · \d+ de \d+ Shorts\./m);
+  assert.match(artigo.intencao_e_formato, /^Formato recomendado \(pertinentes\): /m);
+
+  const semCorrida = radarVideoExportYoutubeOf({ run: null, frozen: congelada(), declaredIntent: null, editorialTopics: [], generatedAt: EXPORTADO_EM });
+  assert.equal(semCorrida?.videos.length, 0, "o congelamento novo guarda só a referência da corrida");
+  const [, semUniverso] = lerCsv(radarPortableVideoExport({ articles: [{ entrada: entradaGoogle(), youtube: semCorrida }], today: EXPORTADO_EM }).csv);
+  assert.match(semUniverso.intencao_e_formato, /^Amostra pertinente: não recalculável — o congelamento guarda só a referência da corrida, e a corrida com esse id não está nesta exportação; as estatísticas abaixo são da amostra inteira\.$/m);
+  assert.match(semUniverso.intencao_e_formato, /^Formato recomendado: /m);
+});
+
+/*
+ * 2026-10-07 · AS PERGUNTAS DOS SHORTS DA CAMADA MULTIFORMATO (item 3): o
+ * congelamento já guardava as peças SHORT com a pergunta de origem e o CSV não
+ * as lia. Agora elas chegam ao export (e viram demanda do corte); sem camada
+ * multiformato, o campo não existe.
+ */
+test("A · as perguntas das peças SHORT congeladas chegam ao export; sem camada multiformato, nada", () => {
+  const base = congelada();
+  const comCamada = {
+    ...base,
+    multimodal: {
+      blueprint: { recommended: { pieces: [
+        { piece: "SHORT", sourceQuestion: "Qual a ordem do skin care noturno?" },
+        { piece: "ARTIGO", sourceQuestion: null },
+        { piece: "SHORT", sourceQuestion: "Pode usar ácido todo dia?" },
+      ] } },
+    },
+  } as unknown as typeof base;
+  const youtube = radarVideoExportYoutubeOf({ run: corrida(), frozen: comCamada, declaredIntent: null, editorialTopics: [], generatedAt: EXPORTADO_EM });
+  assert.deepEqual(youtube?.shortQuestions, ["Qual a ordem do skin care noturno?", "Pode usar ácido todo dia?"]);
+  assert.equal("shortQuestions" in (youtubeVivo() || {}), false, "sem fotografia com camada multiformato, o campo aditivo não aparece");
+});
+
 test("A · sem pesquisa do YouTube o tema sai com ressalva, e a linha de topo diz quais", () => {
   const saida = radarPortableVideoExport({ articles: [{ entrada: entradaGoogle(), youtube: null }], today: EXPORTADO_EM });
   assert.equal(saida.withoutYoutube, 1);
