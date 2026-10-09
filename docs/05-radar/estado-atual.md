@@ -1,5 +1,49 @@
 # Estado atual — Radar
 
+## Lista do Radar e importação do Arquiteto — 2026-10-09 (correção em produção)
+
+**Verificado no código, confirmado por teste e medido no banco (leitura só de dados, autorizada pelo dono). Validado
+manualmente: não.**
+
+- **Sintoma (relatado pelo dono, 16:39):** depois de exportar os 8 CSVs do Silo "Leads sem Tráfego Pago", a planilha
+  do Radar ficou com 1 linha (o piloto "instagram não traz pacientes"); "Importar do Arquiteto" de outro Silo devolveu
+  "0 item(ns) enviado(s)" e a mesma frase em 8 artigos.
+- **Causa medida:** o banco tem os 9 itens do Radar (os 8 do Silo e "marketing digital para dentistas"); nada foi
+  apagado. A leitura da mesa (`GET /api/editorial/workspace`) montava 10,95 MB para a marca (4,17 MB de itens do
+  Radar, 6,55 MB de 102 versões de ArticleDNA, 0,17 MB de SERP), e a função da Vercel recusa corpo acima de 4,5 MB. A
+  tela seguia na cópia local do navegador (que não cabe mais na cota e ficou só com o piloto) e só avisava com a
+  planilha vazia ou com registro incompatível. A importação seguinte saiu dessa cópia: o servidor parou no primeiro
+  recusado e a tela copiou a frase nos 8. Nada foi gravado (nenhum `import_radar` no dia). No Arquiteto, 16 artigos
+  estão Prontos para Radar na versão vigente; o diálogo também oferecia um ArticleDNA de formação sem status no
+  Arquiteto ("como atrair clientes pelo whatsapp", `article-formation:62ade5c4…`).
+- **Não foi o banco nem regra nova:** a regra de entrada (Pronto para Radar na versão enviada) é de 2026-09-12; a
+  leitura silenciosa é anterior; o que cresceu foi o volume.
+- **Correção, pelo caminho do piloto e sem mudar o Arquiteto:**
+  1. a mesa sai em fluxo pelo mesmo helper do export (`radarPortableExportStreamResponse`), com o mesmo JSON
+     (`app/api/editorial/workspace/route.ts`);
+  2. com linhas na planilha, a leitura que falhou aparece com "Tentar carregar novamente"
+     (`lib/radar/list-read-state.ts`, `modules/radar/radar-page.tsx`);
+  3. "Importar do Arquiteto" espera a lista do servidor;
+  4. a importação responde por artigo: `refused` com código (`not_delivered`, `already_in_radar`, `not_ready`,
+     `ready_base_incomplete`, `version_mismatch`, `refused`) e motivo; a recusa de um artigo não para os outros;
+     falha de infraestrutura (502/503) continua parando o lote (`app/api/editorial/workflow/route.ts`);
+  5. o cliente confere o readback só dos que entraram, devolve cada recusa com o motivo dela e conta "Já está no
+     Radar" como já existente (`components/editorial-pipeline-context.tsx`); o aviso nomeia o artigo pelo título e
+     pelo slug, o que separa os homônimos;
+  6. a falha de leitura no cliente vai ao console (`[workspace] leitura no cliente falhou`).
+- **Arquivos compartilhados e consumidores preservados:** a rota da mesa (mesmo JSON; o contexto lê com
+  `response.json()`); a rota de workflow (campo aditivo `refused`; `radarItems` e `readbackConfirmed` iguais); o
+  contexto (mesmo retorno `{ imported, skipped, blocked }`, usado também pelo "Enviar ao Radar" do Arquiteto, sem
+  mudança no Arquiteto). Catálogo do MCP: `arquiteto.send_to_radar`.
+- **Testes:** `tests/radar-lista-do-servidor-2026-10-09.test.mts` (9: fluxo acima de 4,5 MB, rota real sobre o banco
+  simulado, réguas da tela, recusa por artigo); `tests/arquiteto-radar-handoff-context.test.mts` (asserção do
+  importador trocada pelo comportamento novo). Suítes: npm run test:radar 3395 (3394 passam, 1 pulado, 0 falham); test:arquiteto 2737/2737; test:agent 73/73; test:redator 357/357; test:editorial 168/172 (as 4 falhas antigas); tsc só com os 2 erros antigos de .next/types/validator.ts; eslint sem erro nos tocados.
+- **Limites:** o fluxo acima de 4,5 MB na Vercel segue a documentação da Vercel e o export, mas ainda não foi conferido
+  no deploy (validação manual). A mesa continua lendo ~11 MB do banco por carga (egresso): a listagem leve do Radar
+  (sem `analysisVersions` históricas e só a versão vigente de cada ArticleDNA) é Proposta com SDD, porque muda contrato
+  compartilhado. O diálogo ainda lista todo ArticleDNA aprovado; o que o Arquiteto não entregou volta recusado com o
+  motivo.
+
 ## Regra do piloto em todas as operações — 2026-10-09
 
 **Origem:** regra do dono (2026-10-09): "tudo que é de processos antigos tem que ser substituído pelos novos processos

@@ -1,3 +1,8 @@
+## Cartão do Arquiteto revertido — 2026-10-09 (regra do dono)
+
+- [x] O passo "reinvestigate" ("Abrir Links internos") saiu; os três arquivos do Arquiteto voltaram ao commit 638a807.
+  O item da seção abaixo ("Cartão 'Próximo passo' depois de 'Melhoria gravada'") ficou sem efeito.
+
 ## Regra do piloto em todas as operações — 2026-10-09 (reajuste encadeado)
 
 Detalhe em `docs/04-arquiteto/estado-atual.md` e `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**

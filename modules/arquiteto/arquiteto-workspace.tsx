@@ -18555,7 +18555,6 @@ export default function ArquitetoPage() {
           */}
         {/* Publicados marcados na planilha: "Buscar keywords" analisa só eles (sem marcação, todos). */}
         {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
-          onOpenLinks={() => setWorkspaceMode("links")}
           selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))} />}
         {/* Artigos novos: os dois atos da formação continuam à mão sem abrir
             os detalhes. Mesmos handlers e mesmas travas do painel de formação. */}

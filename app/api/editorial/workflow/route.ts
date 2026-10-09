@@ -1,7 +1,7 @@
 import { persistGlobalTransition } from "@/lib/server/global-workflow-transition";
 import { getOperationalClient } from "@/lib/server/editorial-db";
 import { buildCanonicalIndex } from "@/lib/server/global-workflow-canonical";
-import { readReadyBase, validateReadyForRadarClaims } from "@/lib/arquiteto/operational-status";
+import { readReadyBase, validateReadyForRadarClaims, WORKFLOW_STATUS_LABELS } from "@/lib/arquiteto/operational-status";
 import { radarReadbackMatches } from "@/lib/editorial/global-workflow-status";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -22,6 +22,29 @@ import { contentHash } from "@/lib/arquiteto/versioning";
  */
 const allowedRadar: Record<string, string[]> = { research_pending: ["researching", "awaiting_approval"], researching: ["needs_review", "conflicts"], needs_review: ["awaiting_approval", "conflicts"], conflicts: ["needs_review"], awaiting_approval: ["approved", "needs_review"], approved: ["needs_review"] };
 
+/*
+ * 2026-10-09 · A IMPORTAÇÃO DO ARQUITETO RESPONDE POR ARTIGO.
+ *
+ * O laço lançava 409 no PRIMEIRO artigo recusado: os anteriores já estavam
+ * gravados, os seguintes nem eram olhados, e o cliente carimbava a mesma frase
+ * nos oito ("0 item(ns) enviado(s)"). Visto em produção com o Silo "como atrair
+ * clientes": sete artigos Prontos para Radar na versão vigente travados por um
+ * ArticleDNA de formação sem status no Arquiteto.
+ *
+ * Agora a recusa de REGRA (409) é do artigo: ele sai com código e motivo
+ * próprios em `refused` (campo aditivo) e os outros seguem. Falha de
+ * infraestrutura (readback 502, banco 503) continua parando o lote. O Radar
+ * recebe o artigo do jeito que o Arquiteto entregou: a regra de entrada é a
+ * mesma (Pronto para Radar na versão enviada), só a resposta ficou honesta.
+ */
+class RecusaDeImportacao extends AuthzError {
+  code: string;
+  constructor(code: string, message: string) {
+    super(409, message);
+    this.code = code;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const profile = await requireCanonicalSessionProfile(); const command = WorkflowCommandSchema.parse(await request.json());
@@ -31,11 +54,25 @@ export async function POST(request: NextRequest) {
       const db=getOperationalClient();
       const canonical=await buildCanonicalIndex(db,command.brandId);
       const confirmedRadar=[];
+      const refused: Array<{ articleId: string; code: string; reason: string }> = [];
       for (const version of command.articleVersions) {
+       try {
         const ready=await db.from("editorial_workflow_items").select("id,state,payload,lock_version").eq("marca_id",command.brandId).eq("stage","architect").eq("subject_type","article").eq("subject_id",version.payload.articleId).maybeSingle();
         if(ready.error) throw ready.error;
         const base=readReadyBase(ready.data?.payload);
-        if(!ready.data || ready.data.state!=="PRONTO_PARA_RADAR" || !base || base.articleDnaVersionId!==version.versionId) throw new AuthzError(409,"O artigo precisa estar Pronto para Radar sobre a versão enviada.");
+        /* A mesma regra de entrada de antes, agora com o motivo de cada caso. */
+        if (!ready.data) throw new RecusaDeImportacao("not_delivered", "O Arquiteto não entregou este artigo ao Radar: ele não tem status no Arquiteto.");
+        if (ready.data.state === "ENVIADO_AO_RADAR") {
+          const jaNoRadar = await db.from("editorial_workflow_items").select("id").eq("marca_id", command.brandId).eq("stage", "radar").eq("article_id", version.payload.articleId).maybeSingle();
+          if (jaNoRadar.error) throw jaNoRadar.error;
+          if (jaNoRadar.data) throw new RecusaDeImportacao("already_in_radar", "Já está no Radar.");
+        }
+        if (ready.data.state !== "PRONTO_PARA_RADAR") {
+          const estado = WORKFLOW_STATUS_LABELS[ready.data.state as keyof typeof WORKFLOW_STATUS_LABELS] || ready.data.state;
+          throw new RecusaDeImportacao("not_ready", `No Arquiteto o artigo está em "${estado}"; o Radar recebe o que está Pronto para Radar.`);
+        }
+        if (!base) throw new RecusaDeImportacao("ready_base_incomplete", "A marca de Pronto para Radar está sem a base completa (SiloDNA, SiloPage e links internos).");
+        if (base.articleDnaVersionId !== version.versionId) throw new RecusaDeImportacao("version_mismatch", `O Arquiteto entregou outra versão deste artigo; a tela enviou a v${version.versionNumber}. Recarregue a lista do Radar e importe de novo.`);
         const context=command.handoffContext[version.payload.articleId]?.silo;
         if(!context || context.siloDnaVersionId!==base.siloDnaVersionId || context.siloPageVersionId!==base.siloPageVersionId) throw new AuthzError(409,"Contexto de envio diverge da base pronta.");
         const gate=validateReadyForRadarClaims({claims:[{articleId:version.payload.articleId,...base}],canonical});
@@ -80,8 +117,16 @@ export async function POST(request: NextRequest) {
           sourceVersionId: version.versionId,
         });
         confirmedRadar.push(RadarItemSchema.parse({...readback!.payload as object,id:readback!.id,lockVersion:readback!.lock_version,state:readback!.state}));
+       } catch (error) {
+        /* Recusa de regra (409) é do artigo, não do lote. Infraestrutura (502, 503, banco) continua parando tudo. */
+        if (error instanceof AuthzError && error.status === 409) {
+          refused.push({ articleId: version.payload.articleId, code: error instanceof RecusaDeImportacao ? error.code : "refused", reason: error.message });
+          continue;
+        }
+        throw error;
+       }
       }
-      return NextResponse.json({ok:true,radarItems:confirmedRadar,readbackConfirmed:true});
+      return NextResponse.json({ok:true,radarItems:confirmedRadar,readbackConfirmed:true,refused});
     }
     if (command.action === "transition_radar") {
       await assertEditorialPermission(profile, command.brandId, "radar", command.target === "approved" ? "approve" : "edit");

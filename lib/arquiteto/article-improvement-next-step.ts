@@ -23,12 +23,6 @@ export type ImprovementNextStepKind =
   | "validate"
   | "apply"
   | "select"
-  /*
-   * 2026-10-09 · reajuste com ArticleDNA novo. (correção) O nome ficou do
-   * primeiro desenho: o passo NÃO manda reinvestigar no Radar (esse caminho não
-   * existe); diz onde o artigo segue e abre a aba Links internos.
-   */
-  | "reinvestigate"
   | "none";
 
 export type ImprovementNextStep = {
@@ -64,34 +58,7 @@ export type ImprovementNextStepInput = {
   collectProgress?: { done: number; total: number | null } | null;
   /** Andamento da gravação: artigos gravados e total aceito. */
   applyProgress?: { done: number; total: number } | null;
-  /**
-   * 2026-10-09 · Aditivo: quantos artigos ganharam ArticleDNA novo nesta
-   * execução ("Melhoria gravada"). Com a gravação concluída, o cartão diz onde
-   * cada um segue: o que ainda não foi ao Radar, no Arquiteto; o que já está no
-   * Radar, na versão enviada.
-   */
-  reinvestigateCount?: number;
 };
-
-/**
- * 2026-10-09 · O REAJUSTE COM ARTICLEDNA NOVO. Melhoria gravada é versão nova
- * do ArticleDNA.
- *
- * (correção) O cartão prometia "Reinvestigar no Radar e reorganizar", e esse
- * caminho não existe: o item que já está no Radar não é atualizado pelo
- * reajuste (o envio ao Radar só aceita artigo Pronto para Radar e não refaz o
- * item), e o Radar continua na versão que recebeu — a investigação e o
- * artigo-modelo de lá seguem valendo para ela. O cartão diz a verdade: o artigo
- * que ainda não foi ao Radar segue no Arquiteto (Pronto para Radar e Enviar ao
- * Radar, na aba Links internos); o que já está no Radar continua na versão
- * enviada até existir o reenvio da versão nova ao Radar (proposta registrada no
- * backlog, com SDD). O botão só abre a aba Links internos, sem custo.
- */
-export const IMPROVEMENT_REINVESTIGATE_BUTTON = "Abrir Links internos";
-
-export function improvementReinvestigateSentence(count: number): string {
-  return `${count} artigo(s) ganharam ArticleDNA novo. Os que ainda não foram ao Radar seguem aqui no Arquiteto: marque Pronto para Radar e use Enviar ao Radar, na aba Links internos. Os que já estão no Radar continuam na versão enviada até existir o reenvio da versão nova ao Radar.`;
-}
 
 export const IMPROVEMENT_NO_PENDING_SENTENCE = "Nada a fazer nos publicados agora. Veja artigos novos em Sobras.";
 export const IMPROVEMENT_NOTHING_ANYWHERE_SENTENCE = "Nada a fazer nos publicados nem nas Sobras agora. Para formar artigos novos, use “Processar artigos” logo abaixo.";
@@ -141,11 +108,6 @@ export function resolveImprovementNextStep(input: ImprovementNextStepInput): Imp
   const ready = input.readyCount ?? 0;
   if (ready > 0 && !done && !input.accepted) {
     return { kind: "select", sentence: `${ready} melhoria(s) pronta(s). Marque na tabela abaixo as que quer gravar.`, button: improvementApplyLabel(0) };
-  }
-  /* 2026-10-09 · gravação concluída com ArticleDNA novo: o cartão diz onde cada artigo segue, não "nada a fazer". */
-  const reinvestigar = input.reinvestigateCount ?? 0;
-  if (done && reinvestigar > 0) {
-    return { kind: "reinvestigate", sentence: improvementReinvestigateSentence(reinvestigar), button: IMPROVEMENT_REINVESTIGATE_BUTTON };
   }
   if (input.hasLeftovers === false) {
     return { kind: "none", sentence: IMPROVEMENT_NOTHING_ANYWHERE_SENTENCE, button: "Ir para Artigos novos", anchorId: ARTICLES_NEW_ANCHOR };

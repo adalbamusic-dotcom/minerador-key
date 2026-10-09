@@ -592,7 +592,9 @@ test("2026-10-09 · o catálogo diz o processo novo: sem D9, sem 'o CSV sai sem 
   assert.match(guia, /A versão do ArticleDNA que vale no Radar \(2026-10-09, correção\) é a TRANSPORTADA pelo item do Radar/);
   assert.match(guia, /do ArticleDNA transportado pelo item do Radar \(radarArticleBlueprintPick\)/);
   assert.match(guia, /reenvio da versão nova ao Radar, pendência registrada no backlog do Radar e do Arquiteto \(exige SDD\)/);
-  assert.match(guia, /mostra o botão 'Abrir Links internos', que só troca de aba \(sem custo\)/);
+  /* 2026-10-09 · o cartão do Arquiteto voltou ao de antes da rodada: o Arquiteto não ganha passo do Radar. */
+  assert.match(guia, /o cartão é o de sempre: o Arquiteto não ganha passo do Radar/);
+  assert.doesNotMatch(guia, /Abrir Links internos/);
   assert.doesNotMatch(guia, /Reinvestigar no Radar e reorganizar o artigo-modelo/, "o catálogo ainda oferece o caminho que não existe");
   assert.doesNotMatch(guia, /é a vigente pela regra da mesa do Arquiteto/);
   assert.doesNotMatch(guia, /o caminho é reinvestigar e reorganizar/);

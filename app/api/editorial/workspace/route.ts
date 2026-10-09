@@ -7,6 +7,7 @@ import { ArtifactRepository, ContentDocumentRepository, InvitationRepository, Pu
 import { PersistenceUnavailableError } from "@/lib/server/editorial-db";
 import { PersistedEditorialWorkspaceSchema } from "@/lib/editorial/persistence-contracts";
 import type { RadarItem } from "@/lib/editorial/operational-flow";
+import { radarPortableExportStreamResponse } from "@/lib/radar/portable-export-response";
 
 const QuerySchema = z.string().uuid();
 
@@ -138,7 +139,21 @@ export async function GET(request: NextRequest) {
       radarArticleIds: workflow.radar.map(item => item.articleId),
     });
 
-    return NextResponse.json({ requestId, data: parsed.data });
+    /*
+     * 2026-10-09 · A MESA SAI EM FLUXO, PELO MESMO CAMINHO DO EXPORT.
+     *
+     * Medido em produção nesta data (leitura só de dados, marca adalbapro): o
+     * corpo desta resposta tinha 10,95 MB — 4,17 MB de itens do Radar e 6,55 MB
+     * de versões de ArticleDNA. A função da Vercel recusa corpo acima de 4,5 MB
+     * (413 FUNCTION_PAYLOAD_TOO_LARGE). A leitura falhava, a planilha ficava com
+     * a cópia local do navegador (só o artigo piloto) e não dizia nada.
+     *
+     * O export já tinha passado por isso e sai em fluxo
+     * (`radarPortableExportStreamResponse`); a mesa usa o MESMO helper. É o
+     * mesmo JSON: `resposta.json()` junta os pedaços e nenhum consumidor muda.
+     * Os erros acima continuam em `NextResponse.json`: são pequenos.
+     */
+    return radarPortableExportStreamResponse({ requestId, data: parsed.data });
   } catch (error) {
     if (error instanceof PersistenceUnavailableError) {
       /* O erro do driver já vinha preservado no objeto e nunca era lido. */

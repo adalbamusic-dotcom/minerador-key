@@ -39,7 +39,7 @@ export function ImprovementProgress({ activity, now, done, total, unit }: { acti
     note="o andamento fica guardado no servidor" testId="architect-improvement-progress" />;
 }
 
-function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], onOpenLinks }: {
+function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [] }: {
   brandId: string | null; onApplied: () => void; buttonClassName: string; primaryButtonClassName: string;
   /** A aba mostra Sobras agora: sem elas, o cartão não manda para um lugar vazio. */
   hasLeftovers?: boolean;
@@ -49,13 +49,6 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
    * valendo só para as linhas marcadas na tabela desta análise.
    */
   selectedTargetIds?: readonly string[];
-  /**
-   * 2026-10-09 (correção) · Aditivo: abre a aba Links internos, onde ficam
-   * "Aplicar status" (Pronto para Radar) e "Enviar ao Radar". É o destino do
-   * passo depois de "Melhoria gravada"; o cartão não leva mais ao Radar, que
-   * continua na versão enviada. Sem ele, o botão do passo fica desligado.
-   */
-  onOpenLinks?: () => void;
 }) {
   const mounted = useRef(false);
   const [leaseActive, setLeaseActive] = useState(false);
@@ -173,12 +166,9 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     busy,
     collectProgress: run?.collect ? { done: run.collect.doneGroupIds.length, total: run.collect.totalGroups ?? null } : null,
     applyProgress: run?.acceptedIds?.length ? { done: run.outcomes.filter(o => run.acceptedIds!.includes(o.targetId)).length, total: run.acceptedIds.length } : null,
-    /* 2026-10-09 · cada "Melhoria gravada" é ArticleDNA novo: o cartão diz onde o artigo segue (Arquiteto ou, já no Radar, a versão enviada). */
-    reinvestigateCount: done ? new Set(run!.outcomes.filter(o => o.status === "improved").map(o => o.targetId)).size : 0,
   });
   const nextDisabled = next.kind === "working" ? true
     : next.kind === "none" ? false
-    : next.kind === "reinvestigate" ? !onOpenLinks
     : next.kind === "select" ? true
     : next.kind === "prepare" ? !brandId || busy || leaseActive
     : next.kind === "resume_apply" || next.kind === "apply" ? busy || leaseActive
@@ -190,8 +180,6 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     else if (next.kind === "refresh") void execute("status");
     else if (next.kind === "validate") setConfirm("collect");
     else if (next.kind === "apply") setConfirm("apply");
-    // `reinvestigate` (2026-10-09, correção): abre a aba Links internos (Pronto para Radar e Enviar ao Radar). Não leva ao Radar: lá o artigo continua na versão enviada.
-    else if (next.kind === "reinvestigate") onOpenLinks?.();
     // `none`: o mesmo destino de `next.anchorId` (Sobras se existem; senão, Artigos novos).
     else if (next.kind === "none") document.getElementById(hasLeftovers ? ARTICLES_SOBRAS_ANCHOR : ARTICLES_NEW_ANCHOR)?.scrollIntoView({ block: "start", behavior: "smooth" });
   };

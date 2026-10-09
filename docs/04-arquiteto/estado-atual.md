@@ -1,3 +1,14 @@
+## Cartão do Arquiteto revertido — 2026-10-09 (regra do dono)
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** Regra do dono: "no arquiteto não tem que
+mexer mais nada… não é o arquiteto que tem que se adaptar ao radar, é o radar". O passo `reinvestigate` do cartão
+"Próximo passo" (seção abaixo, da mesma data) saiu: `lib/arquiteto/article-improvement-next-step.ts`,
+`modules/arquiteto/article-improvement-panel.tsx` e `modules/arquiteto/arquiteto-workspace.tsx` estão idênticos ao
+commit 638a807, de antes da rodada. Depois de "Melhoria gravada", o cartão volta a ser o de sempre. O que o Radar faz
+com a versão nova do ArticleDNA fica do lado do Radar (versão transportada pelo item; o reenvio da versão nova é
+Proposta com SDD). Teste: `tests/radar-piloto-reajuste-2026-10-09.test.mts` (guarda a reversão). A seção abaixo é
+histórica: o passo que ela descreve não existe mais.
+
 ## Regra do piloto em todas as operações — 2026-10-09 (reajuste encadeado)
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.** Módulo proprietário da rodada: Radar
