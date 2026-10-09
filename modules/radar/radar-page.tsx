@@ -97,13 +97,15 @@ import { buildExpertTopicContext, buildRadarR6ConsolidatedReport, normalizeRadar
 import { parseRadarR7TopicResponse, preserveRadarR7TopicsOnFailure, radarR7ReportEvidenceFingerprint } from "@/lib/radar/r7-sequential";
 import { approveRadarReport } from "@/lib/radar/report-approval";
 import { buildRadarKgrStrategy } from "@/lib/radar/strategy-context";
+import { radarArticleSiloRole, radarCurrentSiloDna, radarUnitFormatLabel } from "@/lib/radar/silo-role";
+import { RadarFormatoFiltroLegado } from "./radar-format-filter-legacy";
 import { classifyRadarSerpCollectionFailure, radarSerpCollectionAction, type RadarSerpCollectionState } from "@/lib/radar/serp-collection-state";
 import { buildRadarInvestigationView } from "@/lib/radar/investigation-state";
 import { ImportPanel, Field, card, btn, sessionId, useReadyPipeline } from "@/components/editorial/operational-screen-shared";
 import { useNoticeBridge } from "@/components/global-notice-center";
 import { RadarWorkbench } from "./radar-workbench";
 import type { RadarSpecialistPanelSummary } from "./radar-expert-brief-panel";
-import { RadarR3ProfileMirror } from "./radar-r3-profile-mirror";
+import { RadarR3ProfileMirror, type RadarR3ProfileResearch } from "./radar-r3-profile-mirror";
 import { RadarR4BulkOperationsBar, RadarR5QueueProgress, type RadarR5QueueView } from "./radar-r4-bulk-operations-bar";
 import { useRadarAnalysisReadback } from "./use-radar-analysis-readback";
 import { useRadarSerpReviewReadback } from "./use-radar-serp-review-readback";
@@ -1218,6 +1220,21 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const additionalEvidenceState: RadarAdditionalEvidenceState = analysis ? "not-started" : "not-needed";
     const referencesReviewed = Boolean(view?.organicResults.length) && referenceCounts.pending === 0;
     const article = pipeline.articleVersions[row.articleId];
+    /*
+     * 2026-10-08 · O PAPEL NO SILO SAI DO SILODNA VIGENTE, NÃO DE `row.hierarchy`.
+     *
+     * `row.hierarchy` é cópia de `ArticleDNA.hierarchy`, a sugestão da formação
+     * ("Suporte" fixo): a planilha dizia Suporte para o Pilar que o Arquiteto
+     * mostra como PILAR. A régua única lê o SiloDNA vigente do Silo da linha,
+     * depois a foto do envio, e só então a formação — e nada é gravado.
+     *
+     * 2026-10-08 (revisão) · O Silo da linha é o que o handoff RESOLVEU
+     * (`row.siloId`), e só depois o da hidratação: a reconciliação de um
+     * ArticleDNA territorial (sem `siloId`) remonta a hidratação com o
+     * `lista_id` do Minerador no lugar do Silo, e o SiloDNA vigente sumia.
+     */
+    const siloDaLinha = radarCurrentSiloDna(pipeline.siloVersions, row.siloId || row.hydration?.silo?.id, row.brandId);
+    const papelNoSilo = radarArticleSiloRole({ articleId: row.articleId, brandId: row.brandId, siloId: row.siloId || row.hydration?.silo?.id, unitType: row.unitType, siloDna: siloDaLinha, hydrationSilo: row.hydration?.silo ?? null, formationHint: article?.payload.hierarchy || row.hierarchy });
     const publication = pipeline.operationalPublications.find(item => item.articleId === row.articleId);
     const publicationLabel = publication?.state === "published" ? "Publicado e protegido" : publication?.state ? publication.state : row.state === "sent_writer" ? "Enviado ao Redator" : "Ainda não publicado";
     const serpStatus = !view ? "Não coletada" : record?.isMock ? "Simulada · não aprovável" : "Coletada";
@@ -1278,7 +1295,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       sourceLabel: expertSummary ? "Contribuições lidas do ExpertBrief remoto selecionado." : "Estado SERP/análise do artigo; contribuição remota ainda não foi lida.",
     };
     const stages = buildRadarWorkbenchStages({ serpCollected: Boolean(view), serpResultCount: view?.organicResults.length || 0, referencesReviewed, referenceCounts, analysisStarted: Boolean(analysis), pagesAnalyzed, additionalEvidenceState, reportGenerated, reportApproved, sentToWriter });
-    const baseR3 = buildRadarR3Model({ row, article: article || null, keyword: row.hydration?.principalKeyword?.keyword || resolveRowKeyword(row).keyword, silo: siloLabel(row), publication: publicationLabel, view, records, analysis: analysis || null, referenceCounts, references, analysisQueue, pagesAnalyzed, reportGenerated, reportApproved, sentToWriter, serpStatus, latestSnapshotId: record?.id || null, reviewStatus: latestReview?.status || null, reviewNotes: latestReview?.notes || null, reviewCurrentness: reviewState.currentness, reviewedAt: latestReview?.reviewedAt || null, reviewHistory: pipeline.serpReviews.filter(review => review.articleId === row.articleId).sort((left, right) => Date.parse(right.reviewedAt) - Date.parse(left.reviewedAt)) });
+    const baseR3 = buildRadarR3Model({ row, article: article || null, siloRole: papelNoSilo, keyword: row.hydration?.principalKeyword?.keyword || resolveRowKeyword(row).keyword, silo: siloLabel(row), publication: publicationLabel, view, records, analysis: analysis || null, referenceCounts, references, analysisQueue, pagesAnalyzed, reportGenerated, reportApproved, sentToWriter, serpStatus, latestSnapshotId: record?.id || null, reviewStatus: latestReview?.status || null, reviewNotes: latestReview?.notes || null, reviewCurrentness: reviewState.currentness, reviewedAt: latestReview?.reviewedAt || null, reviewHistory: pipeline.serpReviews.filter(review => review.articleId === row.articleId).sort((left, right) => Date.parse(right.reviewedAt) - Date.parse(left.reviewedAt)) });
     const contentRows = [
       ...baseR3.content.rows,
       ...(localState.topics.items.length ? [
@@ -1307,9 +1324,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * `analysisApprovalIssues` usa o KGR para barrar composição acima do teto.
      * Sem calculá-lo aqui, o Workbench aprovaria uma composição que a outra
      * tela recusa — e a autoridade única viraria uma função com duas respostas.
+     *
+     * 2026-10-08 (revisão) · O Pilar do contexto KGR é só o da régua: a reserva
+     * `pipeline.siloVersions[row.siloId].pillarArticleId` furava a régua — o
+     * artigo que saiu da composição virava "pillar" com o Pilar sendo outro.
      */
     const kgrStrategy = article
-      ? buildRadarKgrStrategy({ article: article.payload, context: row.arquitetoStrategyContext || null, published: publication?.state === "published", slug: row.slug || article.payload.suggestedSlug, siloName: siloLabel(row), pillarArticleId: row.siloId ? pipeline.siloVersions[row.siloId]?.payload.pillarArticleId : undefined })
+      ? buildRadarKgrStrategy({ article: article.payload, context: row.arquitetoStrategyContext || null, published: publication?.state === "published", slug: row.slug || article.payload.suggestedSlug, siloName: siloLabel(row), pillarArticleId: papelNoSilo.pillarArticleId, siloRole: papelNoSilo })
       : null;
     /*
      * A ação da Coleta é DERIVADA do estado real, não de um clique preso na
@@ -1350,14 +1371,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * já transportava: referências de KeywordDNA, contexto de estratégia,
      * proveniência da SERP de formação e o grafo de links internos.
      */
-    const editorialContext = buildRadarEditorialContext({ item: row, article: article || null, keyword: row.hydration?.principalKeyword?.keyword || resolveRowKeyword(row).keyword });
+    const editorialContext = buildRadarEditorialContext({ item: row, article: article || null, keyword: row.hydration?.principalKeyword?.keyword || resolveRowKeyword(row).keyword, siloRole: papelNoSilo });
     /*
      * O CONTEXTO RESOLVIDO — a junção que ninguém fazia.
      *
      * A referência do Arquiteto tem os números; a hidratação tem o texto. Aqui
      * as duas viram uma coisa só, e nenhuma keyword some no caminho.
      */
-    const researchContext = buildRadarArticleResearchContext({ item: row, article: article || null });
+    const researchContext = buildRadarArticleResearchContext({ item: row, article: article || null, siloDna: siloDaLinha });
     /*
      * A INVESTIGAÇÃO PROFUNDA, RESOLVIDA UMA VEZ.
      *
@@ -1377,7 +1398,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const investigacaoRodando = busyArticleId === row.articleId || serpAction?.articleId === row.articleId;
     const rascunhoDaPesquisa = researchDraftByArticle[row.articleId];
     const modoDaLinha = modoEfetivoDe(row);
-    const deepResearch = investigacaoDaLinha({ row, article, serpRecord: record, running: investigacaoRodando, researchDraft: rascunhoDaPesquisa, mode: modoDaLinha }, () => buildRadarDeepResearchView({
+    const deepResearch = investigacaoDaLinha({ row, article, serpRecord: record, running: investigacaoRodando, researchDraft: rascunhoDaPesquisa, mode: modoDaLinha, siloDna: siloDaLinha }, () => buildRadarDeepResearchView({
       context: researchContext,
       record: analysis?.payload.deepResearch || null,
       running: investigacaoRodando,
@@ -1597,7 +1618,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   };
 
   const columns: OperationalGridColumn<RadarItem>[] = [
-    { id: "article", header: "Artigo", value: row => `${radarArticleDisplayTitle(row.title)} ${resolveRowKeyword(row).keyword} ${row.hierarchy}`, pinned: "left", sortable: true, width: 280, fill: true, render: row => { const data = rowWorkbenchData(row); const isFocused = row.articleId === activeArticleId; return <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><strong className="block truncate text-sm text-foreground">{data.r3.title}</strong>{isFocused && <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-xs font-semibold text-context-accent">Em foco</span>}</div>{/*
+    { id: "article", header: "Artigo", value: row => `${radarArticleDisplayTitle(row.title)} ${resolveRowKeyword(row).keyword} ${rowWorkbenchData(row).r3.hierarchy}`, pinned: "left", sortable: true, width: 280, fill: true, render: row => { const data = rowWorkbenchData(row); const isFocused = row.articleId === activeArticleId; return <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><strong className="block truncate text-sm text-foreground">{data.r3.title}</strong>{isFocused && <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-xs font-semibold text-context-accent">Em foco</span>}</div>{/*
       * A COR DA KEYWORD PERTENCE À KEYWORD.
       *
       * A linha inteira vinha em `text-keyword` — silo e versão do ArticleDNA
@@ -1644,7 +1665,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      */
     { id: "report", header: "Relatório", value: row => rowWorkbenchData(row).reportState, width: 190, render: row => { const data = rowWorkbenchData(row); const localReport = data.reportState !== "NOT_STARTED"; const resumo = data.r3.deepResearch ? buildRadarReportSummary({ observed: data.r3.deepResearch.observed, view: data.r3.deepResearch, youtube: radarYoutubeReportEvidence(projecaoDePesquisa(row)), amazon: radarAmazonReportEvidence({ projecao: projecaoAmazon(row), payload: analiseCorrenteDe(row)?.payload || null }) }) : null; const exigidos = resumo?.checks.filter(item => item.state !== "NOT_REQUIRED").length || 0; const placar = resumo ? radarSeoGuidelineState(resumo.checks, { specialistAccepted: data.r3.specialist.reviewedEvidence }) : null; return <div><strong className="block text-sm text-foreground">{placar ? (placar.overall === null ? "Estado SEO sem pilares" : `Estado SEO: ${placar.overall}%`) : localReport ? radarR6ReportStateLabel(data.reportState) : data.r3.report.status}</strong><span className="mt-1 block text-sm text-text-muted">{resumo ? `${resumo.checks.filter(item => item.state === "READY").length} de ${exigidos} verificação(ões) pronta(s)` : `${data.r3.report.needs} necessidade(s) · ${data.r3.report.sentToWriter ? "Redator" : "Não enviado"}`}</span></div>; } },
     { id: "nextAction", header: "Próxima ação", value: row => operationalRowFor(row).nextAction, width: 235, render: row => <span className="block whitespace-normal text-sm leading-5 text-foreground">{operationalRowFor(row).nextAction}</span> },
-    { id: "format", header: "Formato", value: row => row.format, filterOptions: [...new Set(pipeline.radarItems.map(item => item.format))].map(value => ({ label: value, value })), width: 110 },
+    /* 2026-10-08 · `row.format` é a sugestão de papel da formação copiada na importação: a coluna mostra a unidade, não o papel. */
+    { id: "format", header: "Formato", value: row => radarUnitFormatLabel(row), filterOptions: [...new Set(pipeline.radarItems.map(item => radarUnitFormatLabel(item)))].map(value => ({ label: value, value })), width: 110 },
     /*
      * §15 — O MESMO ESTADO NA PLANILHA E NO CARD.
      *
@@ -1861,7 +1883,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       kgrClassification: kgr ? kgr.isKgrArticle ? "confirmed_kgr" : "not_kgr" : undefined,
       resultCount: research.organicResults.length,
       keywordDnaConfidence: null,
-      format: target.format,
+      /* 2026-10-08 (revisão) · `target.format` é o papel sugerido na formação: o motivo "Formato editorial" grava a unidade, como a coluna Formato. */
+      format: radarUnitFormatLabel(target),
       intent: target.intent,
     });
     const previous = target.analysisVersions.slice().sort((left, right) => right.versionNumber - left.versionNumber)[0];
@@ -2134,6 +2157,24 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const calculada = calcularProjecaoDePesquisa(row);
     cacheDaProjecao.set(chave, calculada);
     return calculada;
+  };
+
+  /*
+   * 2026-10-08 · O CARD SERP DO PERFIL LÊ A MESMA AUTORIDADE DA COLUNA "PESQUISA".
+   *
+   * O perfil mostrava "Principais 0 · Pendentes 10 · Aguardando revisão SERP"
+   * (curadoria legada e fila R4) ao lado de "Finalizado · 26 de 38
+   * analisada(s)". Fora do Google, a projeção do perfil; no Google, o resumo
+   * da investigação (o congelado quando finalizada); sem investigação, `null`
+   * e o card de antes. Nenhum dado muda.
+   */
+  const pesquisaDoPerfil = (row: RadarItem): RadarR3ProfileResearch | null => {
+    const projecao = projecaoDePesquisa(row);
+    if (!projecao.ownedByGooglePipeline) return { statusLabel: projecao.statusLabel, detail: projecao.lines.slice(0, 2).join(" · ") || projecao.statusLabel, analyzed: null, references: null };
+    const investigacao = rowWorkbenchData(row).r3.deepResearch;
+    if (!investigacao) return null;
+    const resumo = buildRadarResearchCardSummary({ view: investigacao, mode: modoEfetivoDe(row) });
+    return { statusLabel: resumo.statusLabel, detail: `${resumo.modeLabel} · ${resumo.counts.analyzed} de ${resumo.counts.references} analisada(s)`, analyzed: resumo.counts.analyzed, references: resumo.counts.references };
   };
 
   /**
@@ -5271,6 +5312,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       botaoDoExportRef.current?.focus();
     };
     return <>
+      {formatColumn ? <RadarFormatoFiltroLegado valor={grid.filters[formatColumn.id]} limpar={() => grid.setFilter(formatColumn.id, "")}/> : null}
       {formatColumn ? filter(formatColumn, "Formato") : null}
       {statusColumn ? filter(statusColumn, "Status") : null}
       <button type="button" onClick={() => setPicker(true)} className={`${GLOBAL_TOPBAR_ACTION_CONTROL} text-positive-soft/85`} title="Importar artigos aprovados do Arquiteto">
@@ -5593,11 +5635,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       lazyProvenance: lazyPesquisa[chaveLazy(activeRadarItem)]?.provenance || { state: "IDLE" as const, data: null, message: null },
       onLoadSample: () => void carregarParteDaPesquisa("sample"),
       onLoadProvenance: () => void carregarParteDaPesquisa("provenance"),
-    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} googleRefreeze={reparoDoCongelamento("GOOGLE")} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importableAgrupado} groupOf={version => rotuloDoGrupoDeImportacao.get(version.id) || null} label={version => `${radarArticleDisplayTitle(version.payload.promise)} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
+    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} googleRefreeze={reparoDoCongelamento("GOOGLE")} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} research={pesquisaDoPerfil(row)} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importableAgrupado} groupOf={version => rotuloDoGrupoDeImportacao.get(version.id) || null} label={version => `${radarArticleDisplayTitle(version.payload.promise)} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
 }
 
-function RadarProfile({ r3, articleHref, architectHref }: { r3: RadarR3Model; articleHref: string | null; architectHref: string | null }) {
-  return <RadarR3ProfileMirror model={r3} articleHref={articleHref} architectHref={architectHref}/>;
+function RadarProfile({ r3, research, articleHref, architectHref }: { r3: RadarR3Model; research: RadarR3ProfileResearch | null; articleHref: string | null; architectHref: string | null }) {
+  return <RadarR3ProfileMirror model={r3} research={research} articleHref={articleHref} architectHref={architectHref}/>;
 }
 
 export function LegacyRadarProfile({ row, article, pipeline, articleHref, architectHref }: { row: RadarItem; article?: VersionEnvelope<ArticleDNA>; pipeline: ReturnType<typeof useEditorialPipeline>; articleHref: string | null; architectHref: string | null }) {
@@ -5619,7 +5661,7 @@ export function LegacyRadarProfile({ row, article, pipeline, articleHref, archit
   return <div className="space-y-4" aria-label="Perfil Radar do Artigo">
     <section className={profileSection}>
       <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-module-accent">Perfil Radar do Artigo</p><h2 className="mt-1 text-lg font-semibold text-foreground">{article?.payload.promise || row.title}</h2><p className="mt-1 text-sm text-text-muted">Visão operacional expandida; a troca visual de contexto não cria versão nem coleta dados.</p></div><div className="flex flex-wrap gap-2">{architectHref && <a className="inline-flex min-h-10 items-center rounded-md border border-divider px-3 py-2 text-sm text-foreground hover:border-context-accent hover:text-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" href={architectHref}>Ver no Arquiteto</a>}{articleHref && <a className="inline-flex min-h-10 items-center rounded-md border border-divider px-3 py-2 text-sm text-foreground hover:border-context-accent hover:text-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" href={`${articleHref}?tab=resumo`}>Abrir detalhe completo</a>}</div></div>
-      {article ? <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="ArticleDNA" value={`v${article.versionNumber}`}/><Field label="Keyword principal" tone="keyword" value={primaryKeyword}/><Field label="Secundárias e reforços" value={Math.max(0, article.payload.keywordReferences.length - 1)}/><Field label="Intenção" value={radarDeclaredArticleIntent(article.payload)}/><Field label="Função no silo" value={row.hierarchy}/><Field label="Publicação" value={publicationLabel}/><Field label="Slug" value={`/${row.slug}`}/><Field label="Canonical" value={article.payload.canonical || "Ainda não confirmada"}/></dl> : <p className="mt-3 text-sm text-warning">ArticleDNA não hidratado para esta linha.</p>}
+      {article ? <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="ArticleDNA" value={`v${article.versionNumber}`}/><Field label="Keyword principal" tone="keyword" value={primaryKeyword}/><Field label="Secundárias e reforços" value={Math.max(0, article.payload.keywordReferences.length - 1)}/><Field label="Intenção" value={radarDeclaredArticleIntent(article.payload)}/><Field label="Função no silo" value={radarArticleSiloRole({ articleId: row.articleId, brandId: row.brandId, siloId: row.siloId || row.hydration?.silo?.id, unitType: row.unitType, siloDna: radarCurrentSiloDna(pipeline.siloVersions, row.siloId || row.hydration?.silo?.id, row.brandId), hydrationSilo: row.hydration?.silo ?? null, formationHint: article.payload.hierarchy || row.hierarchy }).label}/><Field label="Publicação" value={publicationLabel}/><Field label="Slug" value={`/${row.slug}`}/><Field label="Canonical" value={article.payload.canonical || "Ainda não confirmada"}/></dl> : <p className="mt-3 text-sm text-warning">ArticleDNA não hidratado para esta linha.</p>}
     </section>
     {articleHref && <section className={profileSection} aria-label="Acesso rápido às áreas do Radar"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-base font-semibold text-foreground">Acesso rápido</h3><p className="mt-1 text-sm text-text-muted">Abra a área operacional correspondente sem perder o artigo selecionado.</p></div><span className="text-sm text-text-muted">Sem criar versão</span></div><nav className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5" aria-label="Áreas detalhadas do Radar"><a className="rounded-md border border-divider bg-surface-subtle px-3 py-3 text-sm text-foreground hover:border-context-accent hover:text-context-accent" href={`${articleHref}?tab=serp`}>SERP</a><a className="rounded-md border border-divider bg-surface-subtle px-3 py-3 text-sm text-foreground hover:border-context-accent hover:text-context-accent" href={`${articleHref}?tab=referencias`}>Referências</a><a className="rounded-md border border-divider bg-surface-subtle px-3 py-3 text-sm text-foreground hover:border-context-accent hover:text-context-accent" href={`${articleHref}?tab=analise-serp`}>Análise SERP</a><a className="rounded-md border border-divider bg-surface-subtle px-3 py-3 text-sm text-foreground hover:border-context-accent hover:text-context-accent" href={`${articleHref}?tab=evidencias-adicionais`}>Evidências adicionais</a><a className="rounded-md border border-divider bg-surface-subtle px-3 py-3 text-sm text-foreground hover:border-context-accent hover:text-context-accent" href={`${articleHref}?tab=relatorio`}>Relatório</a></nav></section>}
     <div className="grid gap-4 xl:grid-cols-2">

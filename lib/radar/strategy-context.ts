@@ -1,5 +1,8 @@
 import { z } from "zod";
 import type { ArticleControlContext, ArticleDNA, ArticleKgrIdentity, ArticleVolumeStrategy } from "../arquiteto/contracts.ts";
+import type { RadarArticleSiloRole } from "./silo-role.ts";
+
+const texto = (valor: unknown): string | null => typeof valor === "string" && valor.trim() ? valor.trim() : null;
 
 export const RadarKgrClassificationSchema = z.enum(["confirmed_kgr", "not_kgr", "not_available"]);
 export const RadarSlugAlignmentSchema = z.enum(["aligned", "partially_aligned", "review_in_architect", "protected_published_identity", "insufficient_evidence"]);
@@ -93,6 +96,12 @@ export function buildRadarKgrStrategy(input: {
   slug: string;
   siloName?: string | null;
   pillarArticleId?: string | null;
+  /**
+   * 2026-10-08 · O Papel no Silo pela régua única (`radarArticleSiloRole`).
+   * Quando ele vem de uma decisão do Silo, manda; a estratégia de hierarquia
+   * do ArticleDNA é sugestão da formação e só responde sem decisão.
+   */
+  siloRole?: (Pick<RadarArticleSiloRole, "decided" | "isPillar" | "isSupport" | "supportPosition"> & { source?: RadarArticleSiloRole["source"] }) | null;
 }): RadarKgrStrategy | null {
   const context = input.context || null;
   const kgr = context?.kgr || input.article.kgrIdentity;
@@ -123,8 +132,34 @@ export function buildRadarKgrStrategy(input: {
   const secondaryContributions = contributions.filter(item => item.role === "secundaria");
   const reinforcementContributions = contributions.filter(item => item.role === "reforco_narrativo");
   const hierarchy = context?.hierarchy || input.article.hierarchyStrategy;
-  const hierarchyRole = hierarchy?.role === "Pilar" ? "pillar" as const : "support" as const;
-  const supportOrder = hierarchy?.role === "Suporte" && hierarchy.rank ? hierarchy.rank : undefined;
+  /*
+   * 2026-10-08 · QUEM É O PILAR É DECISÃO DO SILO, NÃO DA FORMAÇÃO.
+   *
+   * `hierarchyStrategy.role` nasce de `suggestedHierarchy`, hoje "Suporte" fixo
+   * em todo caminho de formação: o modelo KGR dizia "support" para o próprio
+   * Pilar mesmo recebendo `pillarArticleId` igual ao artigo. A ordem agora é a
+   * decisão resolvida, depois o `pillarArticleId` do SiloDNA, e só então a
+   * sugestão da formação.
+   */
+  /*
+   * 2026-10-08 (revisão) · O "Suporte" da foto do envio deixou de ser decisão
+   * na tela (o envio grava "support" também para Silo sem Pilar), mas o KGR é
+   * binário e não tem "não decidido": a foto do Silo continua sendo a melhor
+   * evidência do lado do Silo, acima da sugestão da formação.
+   */
+  const decidido = input.siloRole && (input.siloRole.decided || input.siloRole.source === "HIDRATACAO") && (input.siloRole.isPillar || input.siloRole.isSupport) ? input.siloRole : null;
+  const pilarDoSilo = texto(input.pillarArticleId);
+  const hierarchyRole = decidido
+    ? (decidido.isPillar ? "pillar" as const : "support" as const)
+    : pilarDoSilo
+      ? (pilarDoSilo === input.article.articleId ? "pillar" as const : "support" as const)
+      : hierarchy?.role === "Pilar" ? "pillar" as const : "support" as const;
+  /* A ordem do Suporte é a da narrativeOrder decidida; sem ela, o rank da formação quando ela também diz Suporte. */
+  const supportOrder = hierarchyRole !== "support"
+    ? undefined
+    : decidido?.supportPosition
+      ? decidido.supportPosition
+      : hierarchy?.role === "Suporte" && hierarchy.rank ? hierarchy.rank : undefined;
   const protectedFields = input.published ? ["principalKeyword", "slug", "canonical", "brand", "publishedUrl", "structuralUrl"] : [];
   const primaryKeyword = context?.primaryKeyword.keyword || referenceKeyword(primary, input.article.principalKeywordId);
   const primaryVolume = volume?.primaryKeywordVolume ?? principalContribution?.volume ?? undefined;

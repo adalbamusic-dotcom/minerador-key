@@ -49,6 +49,8 @@ import {
 
 import type { RadarAiDiscoveryContext, RadarAnswerableUnit, RadarFactualSupportStatus } from "./ai-discovery-context.ts";
 import type { RadarArticleResearchContext } from "./article-research-context.ts";
+import { radarResearchContextSiloRole } from "./article-research-context.ts";
+import { radarSiloRoleLabelOrNull } from "./silo-role.ts";
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
 
 /* ============================ o que é entregue ========================== */
@@ -693,7 +695,8 @@ export function buildRadarEditorialBlueprint(input: {
       /* `??` não protege de "unknown": o sentinela é uma string, não um nulo. */
       intent: radarConclusiveIntent(input.intentLabel) ?? radarDeclaredArticleIntent(input.context.article),
       funnel: input.funnelLabel ?? input.context.article.classification?.funnelLabel ?? null,
-      siloRole: input.context.silo?.articleRole || input.context.article.hierarchy,
+      /* 2026-10-08 · a régua única: SiloDNA vigente, foto do envio, e só então a sugestão da formação (marcada). */
+      siloRole: radarSiloRoleLabelOrNull(radarResearchContextSiloRole(input.context)),
     },
     opening,
     sections: virada ? [...sections, virada] : sections,

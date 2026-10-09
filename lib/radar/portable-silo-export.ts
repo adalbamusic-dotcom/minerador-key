@@ -1,4 +1,5 @@
 import type { ArticleDNA, SiloDNA, SiloPage, VersionEnvelope } from "../arquiteto/contracts.ts";
+import { radarSiloDnaRoleOf } from "./silo-role.ts";
 
 /**
  * ===== O EXPORT POR SILO — um CSV por silo, com o silo inteiro =====
@@ -305,24 +306,18 @@ export function radarSiloMemberDescriptorsOfArticleDnas(
 
 /* ============================== o papel ============================== */
 
-const semAcento = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
-
 /**
  * O papel vem do `pillarArticleId` primeiro: ele é a decisão do Pilar.
  * `articleRoles` e `articleReferences` descrevem o resto. Um papel "Pilar"
  * declarado para outro artigo, quando o Pilar já é outro, não cria dois
  * Pilares — vira Suporte.
+ *
+ * 2026-10-08 · A regra mora em `silo-role.ts` (`radarSiloDnaRoleOf`), a MESMA
+ * régua que a planilha, o perfil e os entregáveis usam: uma regra só para o
+ * Papel no Silo no Radar.
  */
 function papelNoSilo(silo: SiloDNA, articleId: string): string {
-  if (silo.pillarArticleId && silo.pillarArticleId === articleId) return "Pilar";
-  const declarado = texto(silo.articleRoles.find(item => item.articleId === articleId)?.role)
-    || texto(silo.articleReferences.find(item => item.articleId === articleId)?.role);
-  const chave = semAcento(declarado);
-  if (!chave) return "Suporte";
-  if (chave === "pilar" || chave === "pillar") return silo.pillarArticleId ? "Suporte" : "Pilar";
-  if (chave === "suporte" || chave === "support") return "Suporte";
-  if (chave === "reforco narrativo" || chave === "reforco_narrativo") return "Reforço narrativo";
-  return declarado;
+  return radarSiloDnaRoleOf(silo, articleId);
 }
 
 /* ============================ a SiloPage ============================ */

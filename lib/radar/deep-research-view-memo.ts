@@ -17,7 +17,7 @@
  *   dono  = o RadarItem (WeakMap: item novo, conta nova — versão gravada nova,
  *           releitura, troca de estado, tudo isso troca o item);
  *   chave = [ArticleDNA, registro SERP mais recente, "rodando?", rascunho da
- *           curadoria do artigo, modo efetivo].
+ *           curadoria do artigo, modo efetivo, SiloDNA vigente do Silo].
  *
  * Todo campo do objeto que a tela entrega a `buildRadarDeepResearchView` é
  * derivado dessas identidades (o contexto sai do item e do ArticleDNA; a
@@ -48,12 +48,18 @@ export type RadarDeepResearchViewKey = {
   researchDraft: unknown;
   /** O modo efetivo da linha (sessão → gravado → padrão). */
   mode: string;
+  /**
+   * 2026-10-08 · O SiloDNA vigente do Silo da linha (`pipeline.siloVersions`).
+   * O contexto de pesquisa lê dele o Papel no Silo; SiloDNA novo (Pilar
+   * decidido ou trocado no Arquiteto) é entrada nova. Opcional: ausente = `null`.
+   */
+  siloDna?: unknown;
 };
 
 type Guardada<Valor> = { chave: readonly unknown[]; valor: Valor };
 
 const chaveDe = (entrada: RadarDeepResearchViewKey): readonly unknown[] =>
-  [entrada.article, entrada.serpRecord, entrada.running, entrada.researchDraft, entrada.mode];
+  [entrada.article, entrada.serpRecord, entrada.running, entrada.researchDraft, entrada.mode, entrada.siloDna ?? null];
 
 const mesmaChave = (esquerda: readonly unknown[], direita: readonly unknown[]) =>
   esquerda.length === direita.length && esquerda.every((valor, indice) => Object.is(valor, direita[indice]));

@@ -1,3 +1,23 @@
+## Proposta vinda do Radar: `ArticleDNA.hierarchy` não é o Papel no Silo — 2026-10-08
+
+Isto é proposta, não implementação: nada no Arquiteto mudou. O Radar passou a ler o papel do SiloDNA. Detalhe em
+`docs/05-radar/estado-atual.md`.
+
+- [ ] Os caminhos de formação gravam `hierarchy: "Suporte"` fixo e `hierarchyStrategy.role` herda esse valor:
+  - Concluir formação e o cenário da SERP de formação (`modules/arquiteto/arquiteto-workspace.tsx`);
+  - `lib/arquiteto/published-reinforcement.ts`;
+  - `lib/server/arquiteto-article-improvement.ts`;
+  - `lib/arquiteto/strategic-context.ts`.
+
+  A sucessora que materializa o Silo não reescreve o campo. Mesmo assim, consumidores o leem como se fosse papel:
+  `RadarItem.hierarchy`/`format` e `OperationalPublication.hierarchy` copiam o valor. Há três caminhos: renomear para
+  "sugestão da formação", remover, ou materializar o papel decidido numa sucessora. Qualquer um muda o significado de
+  um campo compartilhado e exige SDD.
+- [ ] Verificar: o InternalLinkGraph aprovado referencia nos nós a mesma versão do ArticleDNA enviada ao Radar? Se o
+  grafo foi aprovado sobre a v1 e o envio foi da v2, `relevantEdgesForArticle` (que só casa
+  `articleDnaVersionRef.versionId` igual, em `lib/arquiteto/radar-handoff-context.ts`) entrega `arquitetoInternalLinks`
+  nulo. Ainda não verificado no banco.
+
 ## Fechamento e ficha — 2026-10-01
 
 ## Links internos sobre a composição vigente — 2026-10-01

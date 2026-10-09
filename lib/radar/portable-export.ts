@@ -1105,7 +1105,13 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     ...(lacunas ? { competitors_structure_json: lacunas.competitors_structure_json, authority_requirements_md: lacunas.authority_requirements_md } : {}),
     section_evidence_json: json(sectionEvidence),
     external_sources_json: json(externalSources),
-    internal_links_resolved_json: json(internalLinks),
+    /*
+     * 2026-10-08 (revisão) · §13 · O NÓ DO GRAFO NÃO SAI NO ARQUIVO. O link
+     * portátil carrega `targetNodeId` para quem resolve o destino por
+     * identidade (CSV "Para escrever", artigo-modelo); aqui ele cai, e o
+     * `article:…` do grafo continua fora do entregável.
+     */
+    internal_links_resolved_json: json(internalLinks.map(link => ({ ...link, targetNodeId: undefined }))),
     video_context_md: videoMd,
     video_context_json: json(video),
     specialist_context_md: especialistaMd,

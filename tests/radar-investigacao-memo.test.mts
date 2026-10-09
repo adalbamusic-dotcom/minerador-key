@@ -56,6 +56,8 @@ test("2 · cada elemento da chave, sozinho, refaz o cálculo (nenhum dado velho)
     ["seleção nova (rascunho da curadoria)", linha => chave(linha, { researchDraft: { "ref-1": { decision: "excluded" } } })],
     ["rascunho zerado ({} novo)", linha => chave(linha, { researchDraft: {} })],
     ["modo trocado", linha => chave(linha, { mode: "YOUTUBE" })],
+    /* 2026-10-08 · o Pilar decidido ou trocado no Arquiteto chega como SiloDNA novo. */
+    ["SiloDNA novo (Pilar decidido no Arquiteto)", linha => chave(linha, { siloDna: { versionId: "silodna-v2" } })],
   ];
   for (const [nome, proxima] of casos) {
     const lerInvestigacao = createRadarDeepResearchViewMemo<{ n: number }>();
@@ -112,8 +114,8 @@ test("3 · a página: uma chamada da view, dentro da memória, com a chave compl
   const memoria = pagina.indexOf("const investigacaoDaLinha = createRadarDeepResearchViewMemo<");
   assert.ok(memoria > 0 && memoria < pagina.indexOf("export function RadarPage("), "a memória da investigação precisa nascer no módulo, fora do componente");
   assert.doesNotMatch(pagina, /investigacaoDaLinha = use(Memo|Ref|State)/);
-  /* A chave inteira, nesta ordem de leitura: item, ArticleDNA, registro, rodando, rascunho, modo. */
-  assert.match(pagina, /const deepResearch = investigacaoDaLinha\(\{ row, article, serpRecord: record, running: investigacaoRodando, researchDraft: rascunhoDaPesquisa, mode: modoDaLinha \}, \(\) => buildRadarDeepResearchView\(\{/);
+  /* A chave inteira, nesta ordem de leitura: item, ArticleDNA, registro, rodando, rascunho, modo, SiloDNA vigente (2026-10-08). */
+  assert.match(pagina, /const deepResearch = investigacaoDaLinha\(\{ row, article, serpRecord: record, running: investigacaoRodando, researchDraft: rascunhoDaPesquisa, mode: modoDaLinha, siloDna: siloDaLinha \}, \(\) => buildRadarDeepResearchView\(\{/);
   assert.match(pagina, /const investigacaoRodando = busyArticleId === row\.articleId \|\| serpAction\?\.articleId === row\.articleId;/);
   assert.match(pagina, /const rascunhoDaPesquisa = researchDraftByArticle\[row\.articleId\];/);
   assert.match(pagina, /const modoDaLinha = modoEfetivoDe\(row\);/);
@@ -143,7 +145,12 @@ test("3 · todo insumo da view deriva da chave — insumo novo fora da lista que
     /const article = pipeline\.articleVersions\[row\.articleId\];/,
     /const curationSummary = buildRadarSerpCurationSummary\(\{ view, analysis, scope: radarSelectionScope\(row\) \}\);/,
     /const modeloDoRelatorio = analysis\?\.payload\.competitiveReport\?\.observedCompetitiveModel \|\| null;/,
-    /const researchContext = buildRadarArticleResearchContext\(\{ item: row, article: article \|\| null \}\);/,
+    /*
+     * 2026-10-08 · o contexto também lê o SiloDNA vigente — e ele está na chave (`siloDna: siloDaLinha`).
+     * (revisão) o Silo resolvido pelo handoff vem antes do da hidratação; os dois são do item, que já é chave.
+     */
+    /const siloDaLinha = radarCurrentSiloDna\(pipeline\.siloVersions, row\.siloId \|\| row\.hydration\?\.silo\?\.id, row\.brandId\);/,
+    /const researchContext = buildRadarArticleResearchContext\(\{ item: row, article: article \|\| null, siloDna: siloDaLinha \}\);/,
   ];
   for (const ancora of ancoras) assert.match(calculo, ancora, `a derivação mudou: ${ancora.source.slice(0, 60)}… — confira se a chave da memória ainda cobre a entrada`);
   /* `latestSerp` escolhe UM elemento de `pipeline.serpRecords`, sem copiar: a identidade é a do registro. */

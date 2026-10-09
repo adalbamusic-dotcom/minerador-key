@@ -388,7 +388,8 @@ test("L · a identidade do ArticleDNA é preservada, e ela é o núcleo", () => 
   assert.equal(model.articleIdentity.principalKeyword, "skincare para pele oleosa");
   assert.equal(model.articleIdentity.intentLabel, "Informacional");
   assert.equal(model.articleIdentity.funnelLabel, "Topo");
-  assert.equal(model.articleIdentity.siloRole, "SUPORTE");
+  /* 2026-10-08 · o papel sai pela régua única do Papel no Silo, em português. */
+  assert.equal(model.articleIdentity.siloRole, "Suporte");
 });
 
 /* ================================ §22 ================================ */

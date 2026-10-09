@@ -39,6 +39,8 @@ import type { RadarAmazonEditorialIntentType, RadarAmazonEditorialSetup } from "
 import { radarDeclaredArticleIntent } from "./editorial-identity.ts";
 
 import type { RadarArticleResearchContext } from "./article-research-context.ts";
+import { radarResearchContextSiloRole } from "./article-research-context.ts";
+import { radarSiloRoleLabelOrNull } from "./silo-role.ts";
 import type {
   RadarAmazonBlueprint,
   RadarYoutubeCanonicalBlueprint,
@@ -291,7 +293,8 @@ function identidadeDoArtigo(context: RadarArticleResearchContext) {
      */
     intentLabel: context.article.classification?.intentLabel
       || radarDeclaredArticleIntent(context.article),
-    siloRole: context.silo?.articleRole || null,
+    /* 2026-10-08 · o Papel no Silo pela régua única, em português. */
+    siloRole: radarSiloRoleLabelOrNull(radarResearchContextSiloRole(context)),
   };
 }
 

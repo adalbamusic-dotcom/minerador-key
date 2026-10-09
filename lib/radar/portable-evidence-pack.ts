@@ -445,6 +445,14 @@ export type RadarPortableInternalLink = {
   reason: string;
   /** §13 · quando a página de destino ainda não existe, isso é dito. */
   targetPublished: boolean;
+  /**
+   * 2026-10-08 · O nó do grafo aprovado (`article:<articleId>`), para quem
+   * resolve o destino POR IDENTIDADE, e não casando palavras do título. Aditivo
+   * e opcional; o plano vindo do Blueprint não o tem. Nunca sai no arquivo: o
+   * CSV completo o tira antes de serializar `internal_links_resolved_json`
+   * (revisão de 2026-10-08) — quem serializar este objeto em outro lugar tira também.
+   */
+  targetNodeId?: string | null;
 };
 
 /**
@@ -489,6 +497,7 @@ export function radarPortableInternalLinks(input: {
       placement: item.preferredContexts[0] || item.distribution[0] || "Onde aplicar ainda não foi fundamentado nesta rodada.",
       reason: item.reason,
       targetPublished: false,
+      targetNodeId: item.nodeId || null,
     };
   });
 

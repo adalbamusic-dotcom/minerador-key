@@ -55,7 +55,8 @@ test("C · 2026-10-08 · a única memória entre renders é a da investigação,
   const pagina = semComentarios(await fonte("../modules/radar/radar-page.tsx"));
   /* Ela existe, é do módulo, e a chave é a entrada completa da view. */
   assert.match(pagina, /const investigacaoDaLinha = createRadarDeepResearchViewMemo<ReturnType<typeof buildRadarDeepResearchView>>\(\);/);
-  assert.match(pagina, /investigacaoDaLinha\(\{ row, article, serpRecord: record, running: investigacaoRodando, researchDraft: rascunhoDaPesquisa, mode: modoDaLinha \}, \(\) => buildRadarDeepResearchView\(\{/);
+  /* 2026-10-08 · o SiloDNA vigente entrou na chave: o contexto lê dele o Papel no Silo. */
+  assert.match(pagina, /investigacaoDaLinha\(\{ row, article, serpRecord: record, running: investigacaoRodando, researchDraft: rascunhoDaPesquisa, mode: modoDaLinha, siloDna: siloDaLinha \}, \(\) => buildRadarDeepResearchView\(\{/);
   /* E é a única: nenhum outro memo de módulo nem hook de memória guarda o modelo da linha. */
   assert.equal((pagina.match(/createRadarDeepResearchViewMemo</g) || []).length, 1);
   assert.doesNotMatch(pagina, /const (cacheDaLinha|cacheDaProjecao|cacheDoBlueprint|investigacaoDaLinha) = use(Memo|Ref|State)/);

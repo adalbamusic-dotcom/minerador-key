@@ -93,7 +93,8 @@ const contextoDoGoogle = (): RadarArticleResearchContext => ({
   internalLinks: {
     graphId: "g1", graphVersionId: "gv1", graphContentHash: "gh1",
     edges: [{
-      sourceNodeId: "a1", targetNodeId: "a9", relationType: "SUPPORTS",
+      /* 2026-10-08 (revisão) · o id do nó no formato real (`article:…`): com "a9" a guarda §13 não via o `targetNodeId` vazando no JSON. */
+      sourceNodeId: "a1", targetNodeId: "article:article-candidate:territory:skincare", relationType: "SUPPORTS",
       anchorConcepts: ["rotina de skincare"], reason: "O pilar recebe apoio deste suporte.",
       priority: "HIGH", direction: "outbound",
     }],
@@ -547,6 +548,8 @@ test("§13 · o destino do link interno é o nome da página, nunca o id do nó"
    */
   assert.equal(/article:article-candidate|:territory:/.test(linha.internal_links_resolved_json), false);
   assert.equal(/article:article-candidate|:territory:/.test(linha.internal_links_md), false);
+  /* 2026-10-08 (revisão) · o nó que o CSV "Para escrever" usa por identidade não sai no JSON do CSV completo. */
+  assert.doesNotMatch(linha.internal_links_resolved_json, /targetNodeId/);
 
   const links = JSON.parse(linha.internal_links_resolved_json);
   assert.ok(links.length > 0, "§13 · a bancada tem grafo interno e nenhum link atravessou");
@@ -555,7 +558,7 @@ test("§13 · o destino do link interno é o nome da página, nunca o id do nó"
    * O DESTINO SAI DO VOCABULÁRIO DO GRAFO, NÃO DO ENDEREÇAMENTO DELE.
    *
    * A relação da bancada aponta para um nó cujo conceito de âncora aprovado é
-   * "rotina de skincare". O identificador daquele nó — `a9` — é como o sistema
+   * "rotina de skincare". O identificador daquele nó — `article:…` — é como o sistema
    * encontra a página, e não diz a ninguém que página é.
    */
   assert.match(links[0].targetTitle, /rotina/i,

@@ -10,7 +10,8 @@ import { radarPrimaryProfileOfAnalysis } from "../radar/evidence-bundle-runtime.
 import { RadarItemSchema } from "../editorial/operational-flow.ts";
 import { radarSpecialistExtraction, radarSpecialistReviewsOf } from "../radar/specialist-contribution-review.ts";
 import { radarSpecialistRequirementIdOf } from "../radar/specialist-lifecycle.ts";
-import type { ArticleDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
+import type { ArticleDNA, SiloDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
+import { radarCurrentSiloDna } from "../radar/silo-role.ts";
 import type { RadarAnalysisVersion } from "../radar/analysis-contracts.ts";
 import type { RadarArticleResearchContext } from "../radar/article-research-context.ts";
 import type { RadarSpecialistEvidenceLayer } from "../radar/specialist-evidence.ts";
@@ -312,11 +313,22 @@ export async function loadRadarCanonicalAuthorities(input: {
   analysis: RadarAnalysisVersion;
   /** Os snapshots já lidos pelo chamador, quando ele leu o lote inteiro. */
   serpRecords?: Awaited<ReturnType<SerpSnapshotRepository["list"]>>["records"];
+  /**
+   * 2026-10-08 · Os SiloDNA da marca que o chamador JÁ leu (o lote do export,
+   * o envio ao Redator). O Papel no Silo sai do vigente do Silo do item, não
+   * da sugestão da formação. Ausente, vale a foto do envio — nenhuma leitura a mais.
+   */
+  siloVersions?: readonly VersionEnvelope<SiloDNA>[];
 }): Promise<RadarCanonicalAuthorities> {
   const item = await new WorkflowRepository().findByArticle(input.brandId, input.articleId, "radar");
   const lido = item ? RadarItemSchema.safeParse({ ...(item.payload as object), id: item.id }) : null;
   const researchContext = lido?.success
-    ? buildRadarArticleResearchContext({ item: lido.data, article: input.article })
+    ? buildRadarArticleResearchContext({
+      item: lido.data,
+      article: input.article,
+      /* 2026-10-08 (revisão) · o Silo resolvido pelo handoff antes do da hidratação, como a tela e o envio ao Redator. */
+      siloDna: radarCurrentSiloDna(input.siloVersions || [], lido.data.siloId || lido.data.hydration?.silo?.id, input.brandId),
+    })
     : null;
 
   /*

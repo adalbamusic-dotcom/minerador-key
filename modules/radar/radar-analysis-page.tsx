@@ -21,6 +21,7 @@ import type { SerpOrganicResult } from "@/lib/radar/serp/contracts";
 import { classifyRadarExtractionFormat, classifyRadarSemanticTerm, extractionFormatLabel, semanticGroupLabel, summarizeRadarExtractionFormats } from "@/lib/radar/analysis-insights";
 import { deriveRadarTransferState } from "@/lib/radar/workflow-insights";
 import { buildRadarKgrStrategy, radarKgrClassificationLabel, radarSlugAlignmentLabel } from "@/lib/radar/strategy-context";
+import { radarArticleSiloRole, radarCurrentSiloDna, radarUnitFormatLabel } from "@/lib/radar/silo-role";
 import { buildRadarCompetitiveReport } from "@/lib/radar/competitive-report";
 
 import { buildRadarFlowProgress, deriveRadarReferenceRole, radarSemanticDecisionLabel, resolveRadarTab, selectRadarSemanticPresentation, type RadarReferenceRole, type RadarTab } from "@/lib/radar/flow-presentation";
@@ -218,6 +219,19 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
   const silo = row?.siloId ? pipeline.siloVersions[row.siloId] || null : null;
   const siloPage = row?.siloId ? Object.values(pipeline.siloPageVersions).find(page => page.payload.siloId === row.siloId && page.payload.brandId === selectedBrandId) || null : null;
   const siloName = row && (row.hydration?.silo?.name || pipeline.snapshot?.silos.find(item => item.id === row.siloId)?.nome || silo?.payload.centralEntity || null);
+  /*
+   * 2026-10-08 · "Função no silo" pela régua única: o SiloDNA vigente decide, a formação só sugere.
+   * (revisão) O Silo é o que o handoff resolveu (`row.siloId`) antes do da hidratação, que a reconciliação troca pelo `lista_id`.
+   */
+  const papelNoSilo = row ? radarArticleSiloRole({
+    articleId: row.articleId,
+    brandId: row.brandId,
+    siloId: row.siloId || row.hydration?.silo?.id,
+    unitType: row.unitType,
+    siloDna: radarCurrentSiloDna(pipeline.siloVersions, row.siloId || row.hydration?.silo?.id, row.brandId),
+    hydrationSilo: row.hydration?.silo ?? null,
+    formationHint: article?.payload.hierarchy || row.hierarchy,
+  }) : null;
   const identity = row && article ? {
     brandName: activeBrand?.nome || pipeline.snapshot?.brand.nome || selectedBrandId || "Marca não identificada",
     title: article.payload.promise || row.title,
@@ -225,7 +239,7 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
     slug: row.slug || article.payload.suggestedSlug,
     canonical: article.payload.canonical,
     siloName,
-    hierarchy: article.payload.hierarchy || row.hierarchy,
+    hierarchy: papelNoSilo?.label || "Papel não decidido no Silo",
     articleDna: article,
     siloDna: silo,
     siloPage,
@@ -234,8 +248,13 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
     publication: resolveRadarPublication({ legacy: publicationLegacy, operational: publicationOperational, keywordPublished: row.hydration?.principalKeyword?.isPublished }),
   } : null;
 
-  const kgrStrategy = row && article && identity ? buildRadarKgrStrategy({ article: article.payload, context: row.arquitetoStrategyContext || null, published: identity.publication.published, slug: identity.slug, siloName, pillarArticleId: silo?.payload.pillarArticleId }) : null;
-  const recommendation = suggestRadarAnalysisMode({ kgr: kgrStrategy?.kgrScore ?? keywordSource?.kgr_score ?? null, volume: kgrStrategy?.principalVolume ?? keywordSource?.volume_search ?? null, kgrClassification: kgrStrategy?.classification, resultCount: serpView?.organicResults.length || 0, keywordDnaConfidence: null, format: article?.payload.hierarchy || row?.format || "article", intent: radarDeclaredArticleIntent(article?.payload) || radarConclusiveIntent(row?.intent) || "" });
+  const kgrStrategy = row && article && identity ? buildRadarKgrStrategy({ article: article.payload, context: row.arquitetoStrategyContext || null, published: identity.publication.published, slug: identity.slug, siloName, pillarArticleId: papelNoSilo?.pillarArticleId, siloRole: papelNoSilo }) : null;
+  /*
+   * 2026-10-08 (revisão) · O Pilar do KGR é só o da régua (sem a reserva do SiloDNA, que dava "pillar" ao
+   * artigo fora da composição). E "Formato editorial" é a unidade, como a coluna Formato — não
+   * `ArticleDNA.hierarchy`/`row.format`, que é o papel sugerido na formação e dizia "Suporte" para o Pilar.
+   */
+  const recommendation = suggestRadarAnalysisMode({ kgr: kgrStrategy?.kgrScore ?? keywordSource?.kgr_score ?? null, volume: kgrStrategy?.principalVolume ?? keywordSource?.volume_search ?? null, kgrClassification: kgrStrategy?.classification, resultCount: serpView?.organicResults.length || 0, keywordDnaConfidence: null, format: row ? radarUnitFormatLabel(row) : "Artigo", intent: radarDeclaredArticleIntent(article?.payload) || radarConclusiveIntent(row?.intent) || "" });
   useEffect(() => {
     if (!analysis && !modeTouched.current && mode !== recommendation.suggestedMode) {
       setMode(recommendation.suggestedMode);

@@ -533,7 +533,17 @@ test("pureza · o módulo não lê banco, rede, storage nem React", async () => 
   assert.doesNotMatch(fonte, /supabase|localStorage|sessionStorage|indexedDB/i);
   assert.doesNotMatch(fonte, /from\s+["']react/);
   const imports = fonte.match(/^import[^;]+;/gm) || [];
-  assert.ok(imports.every(linha => linha.startsWith("import type")), `só import de tipo: ${imports.join(" | ")}`);
+  /*
+   * 2026-10-08 · A única importação de valor é a régua do Papel no Silo
+   * (`silo-role.ts`), domínio puro: o papel tem uma regra só no Radar. Ela
+   * passa pela mesma higiene, e a régua do Arquiteto que ela lê também.
+   */
+  const REGUA = 'import { radarSiloDnaRoleOf } from "./silo-role.ts";';
+  assert.ok(imports.every(linha => linha.startsWith("import type") || linha === REGUA), `só import de tipo (e a régua): ${imports.join(" | ")}`);
+  for (const caminho of ["../lib/radar/silo-role.ts", "../lib/arquiteto/internal-link-projection.ts"]) {
+    const regua = (await readFile(new URL(caminho, import.meta.url), "utf8")).replace(/\r\n/g, "\n").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    assert.doesNotMatch(regua, /\bfetch\(|supabase|localStorage|sessionStorage|indexedDB|from\s+["']react/i, caminho);
+  }
 });
 
 test("PROVIDER_CALLS = 0", () => {

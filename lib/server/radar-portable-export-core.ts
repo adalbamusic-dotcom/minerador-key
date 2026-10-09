@@ -12,6 +12,8 @@ import { radarAmazonSelectCandidates } from "@/lib/radar/amazon-candidate-select
 import { radarAmazonSetupSignature } from "@/lib/radar/amazon-editorial-target";
 import type { RadarPortableCommercial, RadarPortableExportInput } from "@/lib/radar/portable-export";
 import { radarDeclaredArticleIntent } from "@/lib/radar/editorial-identity";
+import { radarResearchContextSiloRole } from "@/lib/radar/article-research-context";
+import { radarSiloRoleLabelOrNull } from "@/lib/radar/silo-role";
 import { lookupSerpCache } from "@/lib/server/serp-cache";
 import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
 import { readMineradorKeywordTargetCodes, serpTargetCodesFor } from "@/lib/arquiteto/serp-lens-targeting";
@@ -227,6 +229,8 @@ export async function assembleRadarPortableExport(input: {
       article,
       analysis: corrente,
       serpRecords: snapshots.records,
+      /* 2026-10-08 · os SiloDNA que o lote já leu: o Papel no Silo sai do vigente, sem leitura a mais. */
+      siloVersions: artefatos.silos,
     });
     const contexto = autoridades.researchContext;
 
@@ -347,7 +351,8 @@ export async function assembleRadarPortableExport(input: {
         intent: contexto?.article.classification?.intentLabel ?? radarDeclaredArticleIntent(article.payload),
         funnel: contexto?.article.classification?.funnelLabel ?? null,
         siloName: contexto?.silo?.siloName ?? null,
-        articleRole: contexto?.silo?.articleRole ?? null,
+        /* 2026-10-08 · o Papel no Silo decidido no Arquiteto (SiloDNA vigente), não a foto crua "pillar"/"support". */
+        articleRole: contexto ? radarSiloRoleLabelOrNull(radarResearchContextSiloRole(contexto)) : null,
         slug: fundamentoDoArtigo.slug,
         canonical: fundamentoDoArtigo.canonical,
         contentType: fundamentoDoArtigo.contentType,
@@ -638,12 +643,20 @@ export async function radarWritingExportForArticle(input: {
   | { ok: true; csv: string; filename: string | null; blocked: boolean; exportedAt: string }
   | { ok: false; code: string; reason: string }
 > {
-  const montagem = await assembleRadarPortableExport({ brandId: input.brandId, articleIds: [input.articleId], supabase: input.supabase, actorUserId: input.actorUserId, readPublishedStructure: radarReadPublishedStructure });
+  /*
+   * 2026-10-08 · O MCP RECEBE O MESMO SILO QUE O BOTÃO "PARA ESCREVER".
+   *
+   * Sem `selectionSiloContext`, o CSV do MCP saía sem a ordem do Silo: o papel
+   * vinha só da foto do envio, o link Suporte → Pilar ficava "destino não
+   * resolvido" e a SiloPage, "endereço não registrado". Com ele, a ordem, os
+   * papéis e os destinos saem do SiloDNA vigente — a mesma montagem da tela.
+   */
+  const montagem = await assembleRadarPortableExport({ brandId: input.brandId, articleIds: [input.articleId], supabase: input.supabase, actorUserId: input.actorUserId, readPublishedStructure: radarReadPublishedStructure, selectionSiloContext: true });
   if (!montagem.montadas.length) {
     const recusa = montagem.recusados[0];
     return { ok: false, code: recusa?.code ?? "radar_export_empty", reason: recusa?.reason ?? "O artigo não tem investigação finalizada para exportar." };
   }
-  const escrita = radarPortableWritingExport({ articles: montagem.montadas, lenses: montagem.lentes, plan: null, publications: montagem.publicacoes, today: montagem.exportedAt, brandVoice: montagem.brandVoice });
+  const escrita = radarPortableWritingExport({ articles: montagem.montadas, lenses: montagem.lentes, plan: null, selectionPlan: montagem.planoDaSelecao, publications: montagem.publicacoes, today: montagem.exportedAt, brandVoice: montagem.brandVoice });
   return { ok: true, csv: escrita.csv ?? "", filename: escrita.filename, blocked: escrita.blocked > 0, exportedAt: montagem.exportedAt };
 }
 

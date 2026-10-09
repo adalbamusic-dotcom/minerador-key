@@ -366,6 +366,10 @@ async function enviar(opcoes: {
   sentAt?: string;
   /** SDD do Assunto, F4.1 · o ArticleDNA que a identidade devolve (padrão: sem Assunto). */
   artigo?: typeof ARTICLE_DNA;
+  /** 2026-10-08 · o que o serviço pede à identidade (o `siloId` do item do Radar). */
+  aoLerIdentidade?: (entrada: { brandId: string; articleId: string; siloId?: string | null }) => void;
+  /** 2026-10-08 · campos a sobrepor no payload do item do Radar. */
+  payloadDoRadar?: Record<string, unknown>;
 } = {}) {
   const perfil = opcoes.perfil || "YOUTUBE";
   const inicial = analiseDoArtigo(perfil, { finalizada: opcoes.finalizada });
@@ -380,7 +384,8 @@ async function enviar(opcoes: {
    * `research_pending` e a finalização não a move. Foi essa fixtura otimista
    * que deixou a recusa passar por 11 mutantes sem ninguém ver.
    */
-  const radar = itemDeRadar(opcoes.estadoDoRadar || "research_pending");
+  const base = itemDeRadar(opcoes.estadoDoRadar || "research_pending");
+  const radar = opcoes.payloadDoRadar ? { ...base, payload: { ...base.payload, ...opcoes.payloadDoRadar } } : base;
   let documento: ContentDocument | null = opcoes.documentoExistente ?? null;
   const chamadas: string[] = [];
   let leiturasDoFundamento = 0;
@@ -395,7 +400,10 @@ async function enviar(opcoes: {
       leiturasDoFundamento += 1;
       return leiturasDoFundamento > 1 && opcoes.fundamentoDepois ? opcoes.fundamentoDepois : FUNDAMENTO;
     },
-    loadArticleIdentity: async () => ({ article: (opcoes.artigo || ARTICLE_DNA) as never, silo: null }),
+    loadArticleIdentity: async entrada => {
+      opcoes.aoLerIdentidade?.(entrada);
+      return { article: (opcoes.artigo || ARTICLE_DNA) as never, silo: null };
+    },
     findWorkflowItem: async () => radar as never,
     findDocument: async () => { chamadas.push("findDocument"); return documento; },
     createDocument: async ({ document }) => {
@@ -822,6 +830,28 @@ test("Q · o ArticleDNA não é mutado pela entrega", async () => {
 });
 
 /* ================================= R ================================= */
+
+/*
+ * 2026-10-08 · O SILO DO DOCUMENTO É O DO ITEM DO RADAR (radar-papel-no-silo).
+ *
+ * O ArticleDNA territorial nasce sem `siloId` (o Silo mora no SiloDNA). A
+ * identidade do documento lia só `ArticleDNA.siloId` e caía na referência
+ * legada `silo:<articleId>`. Agora o serviço passa o Silo que o handoff do
+ * Arquiteto resolveu no item do Radar — `siloId`, ou o da foto do envio.
+ */
+test("Q2 · o Silo resolvido no item do Radar chega à identidade do documento", async () => {
+  const pedidos: Array<{ siloId?: string | null }> = [];
+  await enviar({ aoLerIdentidade: entrada => pedidos.push(entrada) });
+  assert.equal(pedidos.at(-1)?.siloId, "silo-1", "o siloId do item do Radar não chegou à identidade");
+
+  const pelaFoto: Array<{ siloId?: string | null }> = [];
+  await enviar({ payloadDoRadar: { siloId: "", hydration: { silo: { id: "silo-da-foto" } } }, aoLerIdentidade: entrada => pelaFoto.push(entrada) });
+  assert.equal(pelaFoto.at(-1)?.siloId, "silo-da-foto", "sem siloId no item, vale o Silo da foto do envio");
+
+  const semNada: Array<{ siloId?: string | null }> = [];
+  await enviar({ payloadDoRadar: { siloId: "" }, aoLerIdentidade: entrada => semNada.push(entrada) });
+  assert.equal(semNada.at(-1)?.siloId ?? null, null, "sem Silo no item, nenhum Silo é inventado");
+});
 
 test("R · repetir a entrega não duplica documento nem versão de análise", async () => {
   /*
