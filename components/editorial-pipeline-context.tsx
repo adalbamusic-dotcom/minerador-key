@@ -573,6 +573,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
          operationalPublications: persisted.publications, invitations: persisted.invitations,
        }; });
     } catch (error) {
+      /* 2026-10-09 · a falha que deixava a planilha na cópia local não deixava rastro: agora fica no console. */
+      console.error("[workspace] leitura no cliente falhou", error);
       updateWorkspace(current => ({ ...current, persistenceMode: "local_fallback",
         /* Idem: assentou em exceção, e a tela não pode ficar esperando para sempre. */
         documentUserStatesReady: true,
@@ -1351,8 +1353,18 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       const remote=escrita.radarItems || [];
       updateWorkspace(current => ({ ...current, radarItems:[...current.radarItems.filter(item=>!remote.some(r=>r.articleId===item.articleId)),...remote] }));
 
+      /*
+       * 2026-10-09 · Cada recusa volta com o motivo DO artigo. "Já está no Radar"
+       * não é bloqueio: conta como já existente.
+       */
+      const recusas = escrita.refused || [];
+      const bloqueados = recusas.filter(recusa => recusa.code !== "already_in_radar").map(recusa => ({
+        articleId: recusa.articleId,
+        label: candidates.find(version => version.payload.articleId === recusa.articleId)?.payload.promise || recusa.articleId,
+        reasons: [recusa.reason],
+      }));
       const importados = remote.length;
-      return { imported: importados, skipped: Math.max(0,candidates.length - importados), blocked: resolvido.blocked };
+      return { imported: importados, skipped: Math.max(0, candidates.length - importados - bloqueados.length), blocked: [...resolvido.blocked, ...bloqueados] };
     },
     importApprovedSiloPagesToRadar: siloPageIds => {
       const candidates = approvedSiloPageVersions(workspace.siloPageVersions, workspace.versionEvents).filter(version => siloPageIds.includes(version.payload.siloPageId));
@@ -1456,8 +1468,11 @@ function zodPathsOf(details: unknown): string {
     .join(" · ");
 }
 
+/** 2026-10-09 · Aditivo: a importação devolve a recusa de cada artigo, com código e motivo. */
+export type RadarImportRefusal = { articleId: string; code: string; reason: string };
+
 export type WorkflowCommandOutcome =
-  | { ok: true; radarItems?: RadarItem[] }
+  | { ok: true; radarItems?: RadarItem[]; refused?: RadarImportRefusal[] }
   | { ok: false; code: string; message: string };
 
 async function sendWorkflowCommand(
@@ -1471,8 +1486,11 @@ async function sendWorkflowCommand(
       const body=await response.json();
       if(body.readbackConfirmed!==true || !Array.isArray(body.radarItems)) return {ok:false,code:"readback_missing",message:"Servidor não confirmou a leitura remota do Radar."};
       const items=body.radarItems.map((item:unknown)=>RadarItemSchema.parse(item));
-      if(command.articleVersions.some(v=>!items.some((item:RadarItem)=>item.brandId===command.brandId && item.articleId===v.payload.articleId && item.articleDnaVersionId===v.versionId && item.articleDnaContentHash===v.contentHash))) return {ok:false,code:"readback_mismatch",message:"Readback do Radar divergiu do envio."};
-      return {ok:true,radarItems:items};
+      /* 2026-10-09 · o artigo recusado volta em `refused`, com o motivo dele; o readback é conferido nos que entraram. */
+      const refused:RadarImportRefusal[]=Array.isArray(body.refused)?body.refused.filter((r:unknown):r is RadarImportRefusal=>Boolean(r)&&typeof (r as RadarImportRefusal).articleId==="string"&&typeof (r as RadarImportRefusal).code==="string"&&typeof (r as RadarImportRefusal).reason==="string"):[];
+      const recusados=new Set(refused.map(r=>r.articleId));
+      if(command.articleVersions.filter(v=>!recusados.has(v.payload.articleId)).some(v=>!items.some((item:RadarItem)=>item.brandId===command.brandId && item.articleId===v.payload.articleId && item.articleDnaVersionId===v.versionId && item.articleDnaContentHash===v.contentHash))) return {ok:false,code:"readback_mismatch",message:"Readback do Radar divergiu do envio."};
+      return {ok:true,radarItems:items,refused};
     }
     const body = await response.json().catch(() => null) as { code?: unknown; error?: unknown; details?: unknown } | null;
     const code = typeof body?.code === "string" && body.code.trim() ? body.code : `http_${response.status}`;

@@ -292,7 +292,8 @@ test("a escrita remota é aguardada antes do estado local", () => {
 
 test("nenhum artigo é descartado em silêncio pelo importador", () => {
   assert.match(operationalFlow, /const siloIdOf = /);
-  assert.match(pipeline, /blocked: resolvido\.blocked/);
+  /* 2026-10-09 · a recusa de cada artigo do servidor também volta nomeada (`refused`), ao lado dos bloqueios do handoff. */
+  assert.match(pipeline, /blocked: \[\.\.\.resolvido\.blocked, \.\.\.bloqueados\]/);
 });
 
 /* -------- §5 · a hidratação de legado é declarada, não silenciosa -------- */

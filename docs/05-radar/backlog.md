@@ -1,5 +1,22 @@
 # Backlog — Radar
 
+## Lista do Radar e importação — 2026-10-09 (correção em produção)
+
+Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo). **Validado manualmente: não.**
+
+- [x] Mesa em fluxo, pelo mesmo helper do export.
+- [x] Leitura que falhou aparece com linhas na planilha, com "Tentar carregar novamente".
+- [x] "Importar do Arquiteto" espera a lista do servidor.
+- [x] Importação por artigo (`refused` com código e motivo); aviso com título e slug.
+- [ ] Validação manual (dono): F5 no Radar mostra os 9 itens; importar o Silo "como atrair clientes" (os Prontos entram;
+  o ArticleDNA de formação sem status volta "O Arquiteto não entregou este artigo ao Radar").
+- [ ] Proposta (SDD, contrato compartilhado): listagem leve do Radar, sem `analysisVersions` históricas e só com a
+  versão vigente de cada ArticleDNA na mesa (hoje ~11 MB por carga).
+- [ ] Proposta: o diálogo "Importar do Arquiteto" mostrar só o que o Arquiteto entregou, lendo o status sem disparar a
+  revalidação do Arquiteto.
+- [ ] Decisão do dono, no Arquiteto e sem pressa: o ArticleDNA de formação duplicado de "como atrair clientes pelo
+  whatsapp" (`article-formation:62ade5c4…`, sem status no Arquiteto).
+
 ## Regra do piloto em todas as operações — 2026-10-09
 
 Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo). "Feito" quer dizer verificado no código e
