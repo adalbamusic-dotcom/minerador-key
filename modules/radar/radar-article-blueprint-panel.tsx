@@ -13,6 +13,7 @@ import {
   type RadarArticleBlueprintReportFacts,
   type RadarArticleBlueprintSkeletonItem,
 } from "@/lib/radar/article-blueprint";
+import { radarArticleBlueprintInvestigationRefOf, radarArticleBlueprintOfPanelFreeze, type RadarArticleBlueprintPanelFreeze } from "@/lib/radar/article-blueprint-freeze";
 import type { RadarPhase1Action } from "@/lib/radar/serp-phase1";
 import type { RadarPrimarySearchMode } from "@/lib/radar/search-mode";
 import { radarPhase1WithAutoFinalize } from "@/lib/radar/operational-actions";
@@ -49,7 +50,11 @@ type Versao = {
 
 /* ============================== a versão do pacote vigente ============================== */
 
-type VersaoParaEscolha = Pick<Versao, "versionNumber" | "state" | "origin" | "bundleHash">;
+/* 2026-10-08 · P0-A · `createdAt` e `payload` (opcionais) dão a investigação em que a versão nasceu. */
+type VersaoParaEscolha = Pick<Versao, "versionNumber" | "state" | "origin" | "bundleHash"> & { createdAt?: string | null; payload?: unknown };
+
+/** 2026-10-08 · P0-A · a referência do congelamento que a versão gravou (ausente na versão antiga). */
+const referenciaDaVersao = (versao: VersaoParaEscolha) => radarArticleBlueprintInvestigationRefOf((versao.payload as { investigationRef?: unknown } | null | undefined)?.investigationRef);
 
 /**
  * 2026-10-02 · QUAL VERSÃO O PAINEL MOSTRA — a mesma regra do export.
@@ -68,8 +73,17 @@ type VersaoParaEscolha = Pick<Versao, "versionNumber" | "state" | "origin" | "bu
  * Devolve também a mais nova quando ela é de OUTRO congelamento (para o aviso)
  * e a proposta deste congelamento mais nova que a aprovada (que o dono pode
  * revisar e aprovar; até lá, o CSV segue com a aprovada).
+ *
+ * 2026-10-08 · P0-A · `congelamento` (opcional): o pacote congelado que a página
+ * conhece (`finalizedBundle`: instante, id e hash). A página passa em `vigente`
+ * o hash do pacote CONGELADO, e a versão guarda o hash do DOSSIÊ — os dois
+ * nunca batiam, e o painel dizia "outro congelamento" de toda versão. Agora a
+ * versão é do vigente pelo hash (como antes), pelo hash congelado que ela
+ * gravou ou, com `congelamento`, pela regra do export sem o ArticleDNA
+ * (`radarArticleBlueprintOfPanelFreeze`): a versão antiga organizada depois do
+ * congelamento vigente continua sendo a que vai aos entregáveis.
  */
-export function radarArticleBlueprintPanelChoice<V extends VersaoParaEscolha>(versoes: readonly V[], vigente: string | null = null): {
+export function radarArticleBlueprintPanelChoice<V extends VersaoParaEscolha>(versoes: readonly V[], vigente: string | null = null, congelamento: RadarArticleBlueprintPanelFreeze | null = null): {
   shown: V | null;
   currentBundleHash: string | null;
   /**
@@ -79,24 +93,51 @@ export function radarArticleBlueprintPanelChoice<V extends VersaoParaEscolha>(ve
    * refinalizada com a IA falhando, e a versão deduzida ser de outro pacote.
    */
   currentConfirmed: boolean;
+  /**
+   * 2026-10-08 (correção) · Aditivo: a versão mostrada é, CONFERIDO, a que vai ao
+   * CSV, ao Redator e ao MCP — o congelamento vigente foi informado e a versão
+   * casa pelo hash ou pela referência gravada (com o ArticleDNA da página,
+   * quando ele veio). A versão antiga reconhecida pelo relógio não tem o
+   * ArticleDNA conferido aqui: o painel não afirma que ela vai.
+   */
+  deliveryConfirmed: boolean;
   newestFromOtherFreeze: V | null;
   newerDraft: V | null;
 } {
-  const confirmado = Boolean(vigente);
+  const confirmado = Boolean(vigente || congelamento);
   const ordem = [...versoes].sort((a, b) => b.versionNumber - a.versionNumber);
   const maisNova = ordem[0] ?? null;
-  if (!maisNova) return { shown: null, currentBundleHash: vigente, currentConfirmed: confirmado, newestFromOtherFreeze: null, newerDraft: null };
-  if (!vigente && ordem.every(item => !item.bundleHash)) return { shown: maisNova, currentBundleHash: null, currentConfirmed: false, newestFromOtherFreeze: null, newerDraft: null };
-  const pacote = vigente || ordem.find(item => item.origin === "ai" && item.bundleHash)?.bundleHash || ordem.find(item => item.bundleHash)?.bundleHash || null;
-  const doPacote = ordem.filter(item => item.bundleHash === pacote);
-  const aprovada = doPacote.find(item => item.state === "APPROVED") ?? null;
-  const shown = aprovada ?? doPacote.find(item => item.state === "DRAFT") ?? null;
-  const newerDraft = aprovada ? doPacote.find(item => item.state === "DRAFT" && item.versionNumber > aprovada.versionNumber) ?? null : null;
+  if (!maisNova) return { shown: null, currentBundleHash: vigente, currentConfirmed: confirmado, deliveryConfirmed: false, newestFromOtherFreeze: null, newerDraft: null };
+  if (!vigente && !congelamento && ordem.every(item => !item.bundleHash)) return { shown: maisNova, currentBundleHash: null, currentConfirmed: false, deliveryConfirmed: false, newestFromOtherFreeze: null, newerDraft: null };
+  const pacote = vigente || (congelamento ? null : ordem.find(item => item.origin === "ai" && item.bundleHash)?.bundleHash || ordem.find(item => item.bundleHash)?.bundleHash || null);
+  /* 2026-10-08 · P0-A · a regra pura do congelamento recebe as versões com id, data e a referência gravada. */
+  const metas = ordem.map((item, indice) => ({ id: String(indice), bundleHash: item.bundleHash || "", versionNumber: item.versionNumber, state: item.state, createdAt: item.createdAt ?? null, investigationRef: (item.payload as { investigationRef?: unknown } | null | undefined)?.investigationRef }));
+  const porHash = (item: V) => Boolean(pacote && item.bundleHash === pacote);
+  const pelaReferencia = (item: V) => {
+    const ref = referenciaDaVersao(item);
+    if (!ref) return false;
+    if (congelamento) return radarArticleBlueprintOfPanelFreeze(metas[ordem.indexOf(item)], metas, congelamento);
+    return Boolean(pacote && ref.frozenBundleHash === pacote);
+  };
+  const doVigente = (item: V) => porHash(item) || pelaReferencia(item)
+    || Boolean(congelamento && radarArticleBlueprintOfPanelFreeze(metas[ordem.indexOf(item)], metas, congelamento));
+  /*
+   * 2026-10-08 (correção) · A MESMA REGRA DO EXPORT (`radarArticleBlueprintPick`):
+   * rascunho só pelo hash exato; pelo congelamento, só a CONCLUÍDA. O painel
+   * mostrava o rascunho antigo do mesmo congelamento como "vai ao CSV assim
+   * mesmo", e o CSV saía sem artigo-modelo.
+   */
+  const valeNosEntregaveis = (item: V) => porHash(item) || (item.state === "APPROVED" && doVigente(item));
+  const candidatas = ordem.filter(valeNosEntregaveis);
+  const aprovada = candidatas.find(item => item.state === "APPROVED") ?? null;
+  const shown = aprovada ?? candidatas.find(item => item.state === "DRAFT") ?? null;
+  const newerDraft = aprovada ? ordem.filter(doVigente).find(item => item.state === "DRAFT" && item.versionNumber > aprovada.versionNumber) ?? null : null;
   return {
     shown,
     currentBundleHash: pacote,
     currentConfirmed: confirmado,
-    newestFromOtherFreeze: maisNova.bundleHash !== pacote ? maisNova : null,
+    deliveryConfirmed: Boolean(confirmado && shown && (porHash(shown) || (pelaReferencia(shown) && congelamento?.articleDnaVersionId))),
+    newestFromOtherFreeze: doVigente(maisNova) ? null : maisNova,
     newerDraft,
   };
 }
@@ -107,10 +148,12 @@ export function radarArticleBlueprintPanelChoice<V extends VersaoParaEscolha>(ve
  * congelamento vigente foi informado ao painel. Sem isso, a aprovada diz que
  * vai se for do congelamento vigente — o painel não afirma o que não sabe.
  */
-export function radarArticleBlueprintPanelStateLabel(versao: Pick<Versao, "state" | "origin">, vaiAoCsvConferido: boolean): string {
+export function radarArticleBlueprintPanelStateLabel(versao: Pick<Versao, "state" | "origin">, vaiAoCsvConferido: boolean, semArticleDnaConferido = false): string {
   /* 2026-10-02 · D10 · organizar e editar gravam a versão concluída: ela é a que vai ao CSV, ao Redator e ao MCP. */
   if (versao.state === "APPROVED") {
-    return vaiAoCsvConferido ? "Concluído — vai ao CSV, ao Redator e ao MCP" : "Concluído — vai aos entregáveis se for do congelamento vigente";
+    if (vaiAoCsvConferido) return "Concluído — vai ao CSV, ao Redator e ao MCP";
+    /* 2026-10-08 (correção) · do congelamento vigente, mas sem o ArticleDNA conferido aqui (versão antiga, ou a página não o informou). */
+    return semArticleDnaConferido ? "Concluído — do congelamento vigente; vai aos entregáveis se o ArticleDNA não mudou desde a organização" : "Concluído — vai aos entregáveis se for do congelamento vigente";
   }
   return "Versão antiga em rascunho — vai ao CSV assim mesmo; conclua ou organize de novo";
 }
@@ -280,7 +323,13 @@ async function lerVersoes(brandId: string, articleId: string): Promise<Leitura> 
  * pilares de estrutura e links. `null` enquanto lê, sem versão ou com erro —
  * e aí o Relatório fica com a leitura de antes.
  */
-export function useRadarArticleBlueprintForReport(brandId: string | null, articleId: string | null, currentBundleHash: string | null): ({ approval: "APPROVED" | "DRAFT" } & RadarArticleBlueprintReportFacts) | null {
+/** 2026-10-08 (correção) · o congelamento da página (`finalizedBundle`) com o ArticleDNA que ela conhece; sem pacote congelado, null. */
+export function radarArticleBlueprintFreezeOf(congelado: { frozenAt: string; bundleId?: string | null; bundleHash?: string | null } | null | undefined, articleDnaVersionId: string | null): RadarArticleBlueprintPanelFreeze | null {
+  if (!congelado) return null;
+  return { frozenAt: congelado.frozenAt, bundleId: congelado.bundleId ?? null, bundleHash: congelado.bundleHash ?? null, ...(articleDnaVersionId ? { articleDnaVersionId } : {}) };
+}
+
+export function useRadarArticleBlueprintForReport(brandId: string | null, articleId: string | null, currentBundleHash: string | null, currentFreeze: RadarArticleBlueprintPanelFreeze | null = null): ({ approval: "APPROVED" | "DRAFT" } & RadarArticleBlueprintReportFacts) | null {
   const [versoes, setVersoes] = useState<Versao[] | null>(null);
   useEffect(() => {
     if (!brandId || !articleId || !currentBundleHash) return;
@@ -289,8 +338,9 @@ export function useRadarArticleBlueprintForReport(brandId: string | null, articl
     return () => { vivo = false; };
   }, [brandId, articleId, currentBundleHash]);
   if (!versoes || !currentBundleHash) return null;
-  const escolhida = radarArticleBlueprintPanelChoice(versoes, currentBundleHash).shown;
-  if (!escolhida || escolhida.bundleHash !== currentBundleHash) return null;
+  /* 2026-10-08 · P0-A · a versão do congelamento vigente pela regra do painel (o hash da página é o do pacote congelado, não o do dossiê). */
+  const escolhida = radarArticleBlueprintPanelChoice(versoes, currentBundleHash, currentFreeze).shown;
+  if (!escolhida) return null;
   return { approval: escolhida.state, ...radarArticleBlueprintReportFacts(escolhida.payload) };
 }
 
@@ -335,7 +385,13 @@ const marcasDoEsqueleto = (item: RadarArticleBlueprintSkeletonItem) => [
  * painel conhece o pacote congelado e deve passá-lo; sem ele, o painel mostra
  * a versão deduzida mas não afirma que ela vai ao CSV e ao Redator.
  */
-export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, currentBundleHash = null }: { brandId: string; articleId: string; job?: RadarArticleBlueprintJob | null; currentBundleHash?: string | null }) {
+/*
+ * 2026-10-08 · P0-A · `currentFreeze` (opcional): o pacote congelado vigente
+ * (`finalizedBundle`). Com ele, a versão organizada sobre este congelamento é
+ * reconhecida mesmo com o hash do dossiê mudado por código — a mesma regra que
+ * o export, o Redator e o MCP aplicam (lá, também com o ArticleDNA).
+ */
+export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, currentBundleHash = null, currentFreeze = null }: { brandId: string; articleId: string; job?: RadarArticleBlueprintJob | null; currentBundleHash?: string | null; currentFreeze?: RadarArticleBlueprintPanelFreeze | null }) {
   const [versoes, setVersoes] = useState<Versao[]>([]);
   /* 2026-10-02 · o dono pode abrir a proposta mais nova do mesmo congelamento para revisar e aprovar. */
   const [revisarNova, setRevisarNova] = useState(false);
@@ -366,11 +422,12 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
   }, [aplicar, brandId, articleId, fimDoTrabalho]);
 
   /* 2026-10-02 · a versão do pacote vigente (a mesma regra do export), não a mais nova de qualquer congelamento. */
-  const escolha = radarArticleBlueprintPanelChoice(versoes, currentBundleHash);
+  const escolha = radarArticleBlueprintPanelChoice(versoes, currentBundleHash, currentFreeze);
   const vaiAoCsv = escolha.shown;
   const atual = (revisarNova && escolha.newerDraft) || vaiAoCsv;
   /* 2026-10-02 · revisão: "vai ao CSV e ao Redator" só com o congelamento vigente informado pela página. */
-  const vaiAoCsvConferido = Boolean(atual && atual === vaiAoCsv && escolha.currentConfirmed);
+  /* 2026-10-08 (correção) · conferido = hash exato ou referência gravada (com o ArticleDNA da página); a versão antiga pelo relógio não afirma. */
+  const vaiAoCsvConferido = Boolean(atual && atual === vaiAoCsv && escolha.deliveryConfirmed);
   const b = atual?.payload.blueprint || null;
   const organizandoPelaPagina = Boolean(job && job.articleId === articleId && job.state === "running");
   const falhaDaPagina = job && job.articleId === articleId && job.state === "failed" ? job.message : null;
@@ -438,7 +495,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
         <h3 className="text-base font-semibold text-foreground">Artigo-modelo da SERP</h3>
         <p className="mt-1 text-sm leading-6 text-text-muted">A SERP monta o esqueleto, a IA organiza e corrige o que a conferência apontar, e a planta sai concluída para o CSV, o Redator e o MCP. Para mudar, edite: a edição vira a versão vigente.</p>
       </div>
-      {atual && <span className={`rounded-full border px-3 py-1 text-sm ${corDoEstado(atual)}`} data-testid="radar-article-blueprint-state">v{atual.versionNumber} · {radarArticleBlueprintPanelStateLabel(atual, vaiAoCsvConferido)}</span>}
+      {atual && <span className={`rounded-full border px-3 py-1 text-sm ${corDoEstado(atual)}`} data-testid="radar-article-blueprint-state">v{atual.versionNumber} · {radarArticleBlueprintPanelStateLabel(atual, vaiAoCsvConferido, Boolean(atual && atual === vaiAoCsv && escolha.currentConfirmed && !escolha.deliveryConfirmed))}</span>}
     </div>
 
     {carregando && <p className="text-sm text-text-muted">Lendo o artigo-modelo…</p>}

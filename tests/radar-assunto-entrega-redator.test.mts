@@ -12,7 +12,7 @@ import {
 import { RADAR_WRITER_MAY_NOT, RADAR_WRITER_MAY_NOT_SUBJECT } from "../lib/redator/writer-handoff.ts";
 import { ContentDocumentV2Schema } from "../lib/arquiteto/contracts.ts";
 import { RADAR_WRITING_SUBJECT_H1_NO_SIGNAL, buildRadarWritingExportArticle, type RadarWritingArticleContext } from "../lib/radar/portable-writing-export.ts";
-import type { RadarEditorialArticleModel, RadarEditorialSubjectTurn } from "../lib/radar/editorial-article-model.ts";
+import { radarEditorialHeadingWithoutTemplate, type RadarEditorialArticleModel, type RadarEditorialSubjectTurn } from "../lib/radar/editorial-article-model.ts";
 import type { RadarArticleResearchContext } from "../lib/radar/article-research-context.ts";
 import type { RadarCanonicalAuthorities } from "../lib/server/radar-canonical-authorities.ts";
 import { ARTIGO, contextoDePesquisa, entradaGoogle, vistaDoGoogleSobre } from "./radar-portable-writing-fixtures.mts";
@@ -175,6 +175,39 @@ test("com Assunto · as linhas da virada dizem o MESMO que o CSV \"Para escrever
   assert.equal(RADAR_WRITER_SUBJECT_H1_NO_SIGNAL, RADAR_WRITING_SUBJECT_H1_NO_SIGNAL, "o texto sem sinal é o mesmo nos dois lugares");
 });
 
+/*
+ * 2026-10-08 (correção) · A PARIDADE COM PAA. O CSV nomeia a seção pela pergunta
+ * do leitor (o título da coluna estrutura) e o Redator nomeava pelo cabeçalho
+ * sem molde: com a pergunta diferente do cabeçalho — o caso comum quando há
+ * PAA —, as linhas "Virada" divergiam nos três Assuntos.
+ */
+test("com Assunto · a 'Virada' do Redator é a do CSV também quando a pergunta do leitor da seção difere do cabeçalho", () => {
+  const PERGUNTA = "Por onde começar quando a pele reage a tudo?";
+  for (const assunto of [CONSULTA, ORDEM, ROTINA]) {
+    const autoridades = autoridadesCom(assunto);
+    const modelo = structuredClone(autoridades.google!.articleModel) as RadarEditorialArticleModel;
+    const turn = modelo.declaredSubject as RadarEditorialSubjectTurn;
+    const alvos = new Set([turn.turnSection?.heading, turn.turnSection?.hostHeading, turn.suggestedPosition?.afterHeading].filter(Boolean));
+    let trocadas = 0;
+    const visitar = (secoes: RadarEditorialArticleModel["sections"]) => {
+      for (const secao of secoes) {
+        if (alvos.has(secao.headingSuggestion)) { secao.readerQuestion = PERGUNTA; trocadas += 1; }
+        visitar(secao.childSections);
+      }
+    };
+    visitar(modelo.sections);
+    assert.ok(trocadas > 0, `${assunto.phrase}: o fixture tem a seção da virada no modelo`);
+    const comPergunta = { ...autoridades, google: { ...autoridades.google!, articleModel: modelo } } as RadarCanonicalAuthorities;
+    const doCsv = buildRadarWritingExportArticle(
+      entradaGoogle({ articleModel: modelo, googleObserved: autoridades.google!.observed, researchContext: autoridades.researchContext! }),
+      CONTEXTO_DO_CSV,
+    ).row.promessa_e_leitor.split("\n").find(item => item.startsWith("Virada: "));
+    const doRedator = montar(comPergunta, { subject: doDna(assunto) }).importedContext.editorialContext.find(item => item.startsWith("Virada: "));
+    assert.equal(doRedator, doCsv, assunto.phrase);
+    if (turn.turnSection?.source === "OBSERVED_GROUP") assert.match(doRedator ?? "", new RegExp(PERGUNTA.replace(/\?/g, "\\?")), assunto.phrase);
+  }
+});
+
 test("com Assunto · a seção da virada chega: sintética diz que o título é de trabalho; a observada diz que a amostra já a trata", () => {
   const consulta = csvCom(CONSULTA);
   assert.equal(consulta.turn.turnSection.source, "SYNTHETIC");
@@ -189,7 +222,8 @@ test("com Assunto · a seção da virada chega: sintética diz que o título é 
   assert.equal(rotina.turn.turnSection.source, "OBSERVED_GROUP");
   const observada = montar(rotina.autoridades, { subject: doDna(ROTINA) }).importedContext.editorialContext
     .find(item => item.startsWith("Seção da virada: "))!;
-  assert.ok(observada.includes(`"${rotina.turn.turnSection.heading}"`), observada);
+  /* 2026-10-08 · P0-B · a seção nomeada sem o molde do modelo, como no CSV. */
+  assert.ok(observada.includes(`"${radarEditorialHeadingWithoutTemplate(rotina.turn.turnSection.heading)}"`), observada);
   assert.match(observada, /é o bloco da amostra que já trata o Assunto \(\d+ de \d+ página\(s\)\)\.$/);
   assert.equal(observada.includes("sem sinal"), false);
 });

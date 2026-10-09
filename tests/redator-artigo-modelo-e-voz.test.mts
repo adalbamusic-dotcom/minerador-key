@@ -178,7 +178,8 @@ function extrair(linha: Linha, expressao: string): unknown {
   let comoTexto = false;
   for (let indice = 1; indice < partes.length; indice += 2) {
     const chave = partes[indice + 1];
-    if (valor && typeof valor === "object") valor = Array.isArray(valor) ? (/^\d+$/.test(chave) ? valor[Number(chave)] : undefined) : (valor as Linha)[chave];
+    /* 2026-10-08 (correção) · o índice negativo do PostgREST (`analysisVersions->-1`, a última versão) também. */
+    if (valor && typeof valor === "object") valor = Array.isArray(valor) ? (/^-?\d+$/.test(chave) ? valor.at(Number(chave)) : undefined) : (valor as Linha)[chave];
     else valor = undefined;
     comoTexto = partes[indice] === "->>";
   }
@@ -445,8 +446,138 @@ test("fundamentos · aprovado só de OUTRO congelamento: não é servido, e a au
   assert.match(ausencia?.reason ?? "", /outro congelamento/);
   assert.match(ausencia?.reason ?? "", /reenvia/);
   assert.equal(doArtigoModelo().length, 2, "a segunda consulta é só de metadados");
-  assert.doesNotMatch(doArtigoModelo()[1].select ?? "", /payload/);
+  /* 2026-10-08 · P0-A · metadados e a referência do congelamento (um caminho pequeno); nunca a planta. */
+  assert.match(doArtigoModelo()[1].select ?? "", /ir:payload->investigationRef/);
+  assert.doesNotMatch(doArtigoModelo()[1].select ?? "", /(^|,)payload(,|$)|payload->(blueprint|measures|linkCandidates|brandVoice|publishedStructure|evidence|sources)/);
   assert.doesNotMatch(JSON.stringify(fundamentos), /Planta do congelamento antigo/);
+});
+
+/*
+ * 2026-10-08 · P0-A · O HASH DO DOSSIÊ MUDOU POR CÓDIGO, A INVESTIGAÇÃO NÃO.
+ *
+ * A planta concluída sobre o MESMO congelamento (o `observedAt` do pacote
+ * entregue) e o MESMO ArticleDNA do envio vale para o documento, ainda que o
+ * dossiê tenha outro hash: pela referência gravada (versão nova) ou pelo
+ * relógio, com a vigência do ArticleDNA (versão antiga). Re-congelada ou
+ * ArticleDNA novo, a ausência continua dizendo "outro congelamento".
+ */
+const CONGELADO_NO_PACOTE = "2026-09-14T23:49:44.887Z";
+const referenciaDoPacote = (extra: Linha = {}) => ({
+  frozenAt: CONGELADO_NO_PACOTE, frozenBundleId: "bundle:f1", frozenBundleHash: "aaaa1111",
+  articleDnaVersionId: "artigo-e1-v1", articleDnaContentHash: HASH("a"), ...extra,
+});
+const versaoDoArticleDna = (versao: number, criada: string) => ({
+  version_id: `artigo-e1-v${versao}`, entity_id: "artigo-e1", marca_id: brandA, artifact_type: "article_dna", version_number: versao, status: "approved",
+  content_hash: HASH("a"), created_at: criada, payload: {},
+});
+/* A leitura da vigência do ArticleDNA (só metadados da versão), separada das outras leituras de versão. */
+const daVigencia = (registro: Registro) => registro.table === "editorial_artifact_versions" && registro.select === "version_id,version_number,created_at";
+const semAExata = (alterar?: (atual: Record<string, Linha[]>) => void) => reiniciar(atual => {
+  atual.radar_article_blueprints = atual.radar_article_blueprints.filter(linha => linha.id !== plantaAprovada);
+  alterar?.(atual);
+});
+const comReferencia = (ref: Linha) => (atual: Record<string, Linha[]>) => {
+  const antiga = atual.radar_article_blueprints.find(linha => linha.id === plantaDeOutroPacote)!;
+  antiga.payload = { ...(antiga.payload as Linha), investigationRef: ref };
+};
+
+test("fundamentos · P0-A · a concluída de OUTRO dossiê da MESMA investigação é servida; o conteúdo vem pelo pacote da versão", async () => {
+  semAExata(comReferencia(referenciaDoPacote()));
+  const fundamentos = await readWriterFoundations(contexto(), documentId);
+  assert.equal(fundamentos.articleBlueprint?.blueprintId, plantaDeOutroPacote, "mesmo congelamento e ArticleDNA: vale");
+  assert.equal(fundamentos.articleBlueprint?.h1, "Planta do congelamento antigo");
+  assert.equal(fundamentos.absent.some(item => item.field === "articleBlueprint"), false);
+  const [exata, metadados, conteudo, ...resto] = doArtigoModelo();
+  assert.equal(exata.params.get("bundle_hash"), `eq.${BUNDLE}`, "primeiro, o hash exato");
+  assert.equal(metadados.params.get("state"), "in.(APPROVED,DRAFT)");
+  assert.equal(conteudo.params.get("bundle_hash"), "eq.bundle-hash:antigo", "a planta é lida pelo pacote em que ela foi organizada");
+  assert.equal(conteudo.params.get("id"), `eq.${plantaDeOutroPacote}`);
+  assert.equal(resto.length, 0);
+  assert.equal(registros.some(daVigencia), false, "com a referência gravada, a vigência do ArticleDNA nem é lida");
+  conferirLeitura();
+
+  /* O manifesto aponta a mesma versão, e a fatia a serve pelo pacote dela. */
+  const manifesto = await readWriterEvidenceManifest(contexto(), documentId);
+  assert.ok(JSON.stringify(manifesto).includes(`radar.blueprint/${plantaDeOutroPacote}`));
+  registros.length = 0;
+  const fatia = await readWriterEvidence(contexto(), documentId, { sourceKey: `radar.blueprint/${plantaDeOutroPacote}#blueprint.title` });
+  assert.match(JSON.stringify(fatia), /Planta do congelamento antigo/);
+  const daFatia = doArtigoModelo().find(registro => (registro.select || "").includes("k_"))!;
+  assert.equal(daFatia.params.get("bundle_hash"), "eq.bundle-hash:antigo");
+  conferirLeitura();
+});
+
+test("fundamentos · P0-A · re-congelada ou ArticleDNA novo: não vale, e a ausência diz outro congelamento", async () => {
+  for (const ref of [referenciaDoPacote({ frozenAt: "2026-09-20T10:00:00.000Z" }), referenciaDoPacote({ articleDnaVersionId: "artigo-e1-v2" })]) {
+    semAExata(comReferencia(ref));
+    const fundamentos = await readWriterFoundations(contexto(), documentId);
+    assert.equal("articleBlueprint" in fundamentos, false, JSON.stringify(ref));
+    assert.match(fundamentos.absent.find(item => item.field === "articleBlueprint")?.reason ?? "", /outro congelamento/);
+    conferirLeitura();
+  }
+});
+
+/*
+ * 2026-10-08 (correção) · O congelamento VIGENTE da análise do artigo (a última
+ * versão), como o leitor o lê: só os três carimbos. A planta antiga só vale com
+ * o congelamento do documento ainda vigente.
+ */
+const itemDoRadar = (frozenAt: string) => ({
+  id: "item-radar-e1", marca_id: brandA, article_id: articleId, stage: "radar", subject_type: "article", subject_id: articleId,
+  payload: { analysisVersions: [{ payload: { finalizedBundle: { frozenAt: "2026-09-01T10:00:00.000Z" } } }, { payload: { finalizedBundle: { bundleId: "bundle:vigente", frozenAt } } }] },
+});
+const doCongelamentoVigente = (registro: Registro) => registro.table === "editorial_workflow_items";
+
+test("fundamentos · P0-A · planta antiga (sem a referência): vale pelo relógio dentro da vigência do ArticleDNA; fora dela, não", async () => {
+  /* Organizada em 02/10, depois do congelamento (14/09), com a versão do ArticleDNA do envio vigente desde 10/09. */
+  semAExata(atual => { atual.editorial_artifact_versions.push(versaoDoArticleDna(1, "2026-09-10T10:00:00+00:00")); atual.editorial_workflow_items = [itemDoRadar(CONGELADO_NO_PACOTE)]; });
+  const vale = await readWriterFoundations(contexto(), documentId);
+  assert.equal(vale.articleBlueprint?.blueprintId, plantaDeOutroPacote);
+  const vigencia = registros.filter(daVigencia);
+  assert.equal(vigencia.length, 1, "uma leitura da vigência");
+  assert.equal(vigencia[0].params.get("entity_id"), "eq.artigo-e1");
+  assert.equal(vigencia[0].params.get("artifact_type"), "eq.article_dna");
+  conferirLeitura();
+
+  /* Uma versão nova do ArticleDNA (20/09) antes da planta (02/10): a planta é do ArticleDNA novo, não do envio. */
+  semAExata(atual => { atual.editorial_artifact_versions.push(versaoDoArticleDna(1, "2026-09-10T10:00:00+00:00"), versaoDoArticleDna(2, "2026-09-20T10:00:00+00:00")); atual.editorial_workflow_items = [itemDoRadar(CONGELADO_NO_PACOTE)]; });
+  const naoVale = await readWriterFoundations(contexto(), documentId);
+  assert.equal("articleBlueprint" in naoVale, false);
+  assert.match(naoVale.absent.find(item => item.field === "articleBlueprint")?.reason ?? "", /outro congelamento/);
+  conferirLeitura();
+});
+
+test("fundamentos · P0-A (correção) · documento de F1 com a investigação re-congelada em F2: a planta antiga organizada sobre F2 NÃO vale para ele", async () => {
+  /*
+   * O documento é do congelamento de 14/09 (F1). A investigação foi re-congelada
+   * em 25/09 (F2). Duas plantas antigas, sem a referência: P1, organizada sobre
+   * F1 (20/09), e P2, sobre F2 (02/10). Sem o teto, P2 — a mais nova, também
+   * nascida depois de F1 — ia para o documento de F1.
+   */
+  const RECONGELADO = "2026-09-25T10:00:00.000Z";
+  semAExata(atual => {
+    atual.editorial_artifact_versions.push(versaoDoArticleDna(1, "2026-09-10T10:00:00+00:00"));
+    const p2 = atual.radar_article_blueprints.find(linha => linha.id === plantaDeOutroPacote)!;
+    atual.radar_article_blueprints.push({ ...linhaDaPlanta("cccccccc-0000-4000-8000-000000000001", brandA, 1, "APPROVED", "bundle-hash:f1", "Planta de F1"), created_at: "2026-09-20T10:00:00+00:00" });
+    p2.created_at = "2026-10-02T10:00:00+00:00";
+    atual.editorial_workflow_items = [itemDoRadar(RECONGELADO)];
+  });
+  const fundamentos = await readWriterFoundations(contexto(), documentId);
+  assert.equal("articleBlueprint" in fundamentos, false, "nenhuma planta antiga vale: o congelamento do documento já não é o vigente");
+  assert.match(fundamentos.absent.find(item => item.field === "articleBlueprint")?.reason ?? "", /outro congelamento/);
+  assert.equal(registros.filter(doCongelamentoVigente).length, 1, "uma leitura do congelamento vigente");
+  assert.doesNotMatch(registros.find(doCongelamentoVigente)!.select ?? "", /(^|,)payload(,|$)/, "só os carimbos, nunca a análise inteira");
+  assert.equal(registros.some(daVigencia), false, "sem congelamento vigente, a vigência do ArticleDNA nem é lida");
+  conferirLeitura();
+
+  /* A planta NOVA (com a referência) do congelamento do documento continua valendo, mesmo re-congelada a análise. */
+  semAExata(atual => {
+    comReferencia(referenciaDoPacote())(atual);
+    atual.editorial_workflow_items = [itemDoRadar(RECONGELADO)];
+  });
+  const comReferenciaGravada = await readWriterFoundations(contexto(), documentId);
+  assert.equal(comReferenciaGravada.articleBlueprint?.blueprintId, plantaDeOutroPacote);
+  conferirLeitura();
 });
 
 test("fundamentos · a voz mais nova recusada não devolve a anterior; a Skill de outra Marca nunca aparece", async () => {

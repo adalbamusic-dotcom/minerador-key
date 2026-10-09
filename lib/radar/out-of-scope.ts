@@ -38,6 +38,8 @@ const VAZIAS = new Set([
   "sobre", "ate", "seu", "sua", "seus", "suas", "meu", "minha", "meus", "minhas", "este", "esta", "esse", "essa",
   "isso", "isto", "como", "qual", "quais", "quando", "onde", "porque", "voce", "voces", "nosso", "nossos", "nossa",
   "aqui", "mais", "muito", "ser", "ter", "tem", "fazer", "pode", "sao", "nao", "ja", "the", "and", "for", "of",
+  /* 2026-10-08 (correção) · "E os outros canais orgânicos?" tirava "tipos de tráfego orgânico" só pelo "outros". */
+  "outro", "outra", "outros", "outras",
 ]);
 
 /*
@@ -60,6 +62,12 @@ const FORMATO_GENERICO = [
   "guia", "guias", "tutorial", "tutoriais", "manual", "passo", "passos", "tipo", "tipos", "forma", "formas",
   "completo", "completa", "definitivo", "definitiva", "tudo", "coisa", "coisas", "ideia", "ideias",
   "truque", "truques", "segredo", "segredos", "top",
+  /*
+   * 2026-10-08 (correção) · a mesma palavra genérica de research-noise e do modelo
+   * editorial: "Como usar os 4 Ps do marketing em sua estratégia" tirava, pela
+   * raiz "estrategi", a seção "Para que serve uma estratégia de marketing digital?".
+   */
+  "estrategia", "estrategias",
 ];
 
 const raizesDe = (valor: string | null | undefined): Set<string> => new Set(

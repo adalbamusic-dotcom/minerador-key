@@ -270,12 +270,13 @@ const diferencialForaDoEscopo = (basis: "ARTICLE_DECLARES" | "SERP_EVIDENCE", ar
   modelo: modelo => ({ ...modelo, candidates: [...(modelo.candidates || []), candidatoFora("Kits de skincare em promoção")] }),
   artigo,
 });
-const NOTA_RESOLVIDA = /- Nota: o pacote também listava "Kits de skincare em promoção" como diferencial; aqui vale o "não cobrir" \(resolvido neste arquivo, sem decisão pendente\)\./;
+/* 2026-10-08 · D10: a nota diz a regra cumprida ("fica fora de todas as colunas"), sem "pendente". */
+const NOTA_RESOLVIDA = /- Nota: o pacote também listava "Kits de skincare em promoção" como diferencial; aqui vale o "não cobrir" \(resolvido neste arquivo: fica fora de todas as colunas\)\./;
 
 test("3 · diferencial da SERP fora do escopo: o export resolve, sai uma nota, e o veredito não ganha ressalva", () => {
   const artigo = buildRadarWritingExportArticle(diferencialForaDoEscopo("SERP_EVIDENCE"), AVULSO);
   assert.equal(artigo.verdict, "Sim", artigo.row.pode_escrever);
-  assert.doesNotMatch(artigo.row.pode_escrever + artigo.row.prompt, /fora do escopo e também como diferencial|até o Radar resolver|decisão humana pendente/);
+  assert.doesNotMatch(artigo.row.pode_escrever + artigo.row.prompt, /fora do escopo e também como diferencial|até o Radar resolver|decisão humana pendente|cabe decisão humana/);
   assert.match(artigo.row.cobrir_e_superar, NOTA_RESOLVIDA);
   assert.doesNotMatch(artigo.row.cobrir_e_superar, /Diferenciar em "Kits/);
 });
@@ -283,16 +284,16 @@ test("3 · diferencial da SERP fora do escopo: o export resolve, sai uma nota, e
 test("3 · diferencial que o ArticleDNA DECLARA e o Radar marca fora do escopo: ressalva de decisão humana, nunca \"sem decisão pendente\"", () => {
   const artigo = buildRadarWritingExportArticle(diferencialForaDoEscopo("ARTICLE_DECLARES"), AVULSO);
   assert.equal(artigo.verdict, "Com ressalva", artigo.row.pode_escrever);
-  assert.match(artigo.row.pode_escrever, /o ArticleDNA declara "Kits de skincare em promoção" como diferencial e o pacote do Radar o marca como fora do escopo: decisão humana pendente \(Radar ou Arquiteto\), e o diagnóstico do Radar não muda o DNA; até lá, não o sustente como diferencial/);
+  assert.match(artigo.row.pode_escrever, /o ArticleDNA declara "Kits de skincare em promoção" como diferencial e o pacote do Radar o marca como fora do escopo: cabe decisão humana \(Radar ou Arquiteto\), e o diagnóstico do Radar não muda o DNA; neste texto, não o sustente como diferencial/);
   assert.doesNotMatch(artigo.row.cobrir_e_superar, NOTA_RESOLVIDA, "o que o DNA declara nunca é dito resolvido pelo export");
-  assert.doesNotMatch(artigo.row.cobrir_e_superar, /sem decisão pendente/);
+  assert.doesNotMatch(artigo.row.cobrir_e_superar, /sem decisão pendente|fica fora de todas as colunas/);
   assert.doesNotMatch(artigo.row.cobrir_e_superar, /Diferenciar em "Kits/, "até a decisão, não é sustentado como diferencial");
 });
 
 test("3 · diferencial da SERP ligado a um ponto que o ArticleDNA EXIGE: também é ressalva de decisão humana", () => {
   const artigo = buildRadarWritingExportArticle(diferencialForaDoEscopo("SERP_EVIDENCE", { mustCover: ["ordem dos produtos", "kits de skincare para presente"] }), AVULSO);
   assert.equal(artigo.verdict, "Com ressalva", artigo.row.pode_escrever);
-  assert.match(artigo.row.pode_escrever, /o ArticleDNA exige um ponto ligado a "Kits de skincare em promoção", que o pacote do Radar marca como fora do escopo e também como diferencial: decisão humana pendente \(Radar ou Arquiteto\)/);
+  assert.match(artigo.row.pode_escrever, /o ArticleDNA exige um ponto ligado a "Kits de skincare em promoção", que o pacote do Radar marca como fora do escopo e também como diferencial: cabe decisão humana \(Radar ou Arquiteto\); neste texto, cubra o que o ArticleDNA exige/);
   assert.doesNotMatch(artigo.row.cobrir_e_superar, NOTA_RESOLVIDA);
 });
 
@@ -319,21 +320,28 @@ test("4 · FAQ legado: a MESMA frase na regra geral, na coluna artigo e no promp
 
 /* ================================ 5 ================================ */
 
-test("5 · próximo passo do leitor: sem link aprovado para o destino, a frase diz isso — e nunca inventa link", () => {
+/*
+ * 2026-10-08 · P1 · UM CTA SÓ: o "Próximo passo do leitor" (próximo artigo OU
+ * SiloPage) virou a CONTINUAÇÃO — o próximo artigo do Silo no fechamento, com
+ * o link aprovado ou citado sem link; a SiloPage só no lugar dele, quando o
+ * artigo é o último da ordem. Nunca "peça ao Arquiteto" (D10).
+ */
+test("5 · continuação do leitor: sem link aprovado para o destino, a frase diz isso — e nunca inventa link", () => {
   const silo = planoDoSilo().files[0].writing!;
   const contexto: RadarWritingArticleContext = { ...AVULSO, topRowLabel: "Silo", silo };
   const sem = linha(entradaGoogle(), contexto).promessa_e_leitor;
-  assert.match(sem, new RegExp(`Próximo passo do leitor: o próximo artigo do Silo, "skin care nivea" ${RADAR_WRITING_NO_APPROVED_LINK.replace(/[()]/g, "\\$&")} ou a SiloPage "Cuidados com a Pele"\\.`),
+  assert.match(sem, new RegExp(`^Continuação \\(não é uma segunda chamada\\): no fechamento, apresente o próximo artigo do Silo, "skin care nivea", como a leitura seguinte ${RADAR_WRITING_NO_APPROVED_LINK.replace(/[()]/g, "\\$&")}\\.$`, "m"),
     "o Pilar da bancada só tem link para a SiloPage");
-  /* O Pilar de saúde tem o link aprovado para o Suporte "skin care nivea": a frase fica limpa. */
+  assert.doesNotMatch(sem, /Próximo passo do leitor|peça ao Arquiteto|SiloPage "Cuidados com a Pele"/, "uma chamada só: a SiloPage não vira segunda saída");
+  /* O Pilar de saúde tem o link aprovado para o Suporte "skin care nivea": a continuação leva o L dele. */
   const com = linha(entradaGoogleSaude(), contexto).promessa_e_leitor;
-  assert.match(com, /Próximo passo do leitor: o próximo artigo do Silo, "skin care nivea" ou a SiloPage "Cuidados com a Pele"\./);
+  assert.match(com, /^Continuação \(não é uma segunda chamada\): no fechamento, apresente o próximo artigo do Silo, "skin care nivea", como a leitura seguinte, com o link L\d\.$/m);
   assert.equal(com.includes(RADAR_WRITING_NO_APPROVED_LINK), false);
-  /* Sem link nenhum, nem para a SiloPage: os dois destinos dizem a falta. */
+  /* Sem link nenhum: a continuação diz a falta, uma vez. */
   const nada = linha({ ...entradaGoogle(), internalLinks: [] }, contexto).promessa_e_leitor;
-  assert.equal(nada.split(RADAR_WRITING_NO_APPROVED_LINK).length - 1, 2);
-  /* Sem Silo, não há próximo passo a dizer. */
-  assert.doesNotMatch(linha(entradaGoogle()).promessa_e_leitor, /Próximo passo do leitor/);
+  assert.equal(nada.split(RADAR_WRITING_NO_APPROVED_LINK).length - 1, 1);
+  /* Sem Silo, não há continuação a dizer. */
+  assert.doesNotMatch(linha(entradaGoogle()).promessa_e_leitor, /Continuação|Próximo passo do leitor/);
 });
 
 /* ================================ 6 ================================ */

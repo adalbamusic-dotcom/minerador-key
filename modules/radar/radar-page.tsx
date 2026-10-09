@@ -3648,7 +3648,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     try {
       history.capture(`Reparar congelamento do YouTube de ${target.title}`);
       await gravarYoutube(target, { youtubeFrozenInvestigation: nova }, base);
-      setNotice("Congelamento do YouTube refeito com a leitura atual. O artigo-modelo da SERP é organizado de novo para o pacote novo.");
+      /* 2026-10-08 (correção) · P0-A: o artigo-modelo vale pelo congelamento PRIMÁRIO; o encadeamento (ifMissing) o reaproveita quando só o apoio mudou. */
+      setNotice("Congelamento do YouTube refeito com a leitura atual. Conferindo o artigo-modelo: o artigo-modelo da SERP só é organizado de novo quando muda o congelamento primário (num artigo do Google, re-congelar o YouTube ou a Amazon mantém o artigo-modelo, sem chamada de IA).");
     } finally {
       setYoutubeBusy(false);
     }
@@ -3691,7 +3692,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const corpo = await pedirRefreezeAmazon(target, false);
       if (!corpo.written) throw new Error(corpo.diagnosis.headline);
       await pipeline.reloadRadarAnalysis(target.articleId);
-      setNotice(`${corpo.headline || "Congelamento da Amazon refeito."} O artigo-modelo da SERP é organizado de novo para o pacote novo.`);
+      setNotice(`${corpo.headline || "Congelamento da Amazon refeito."} Conferindo o artigo-modelo: o artigo-modelo da SERP só é organizado de novo quando muda o congelamento primário (num artigo do Google, re-congelar o YouTube ou a Amazon mantém o artigo-modelo, sem chamada de IA).`);
       gravou = true;
     } finally {
       setAmazonBusy(false);

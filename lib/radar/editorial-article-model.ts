@@ -39,8 +39,15 @@
  * Domínio puro: sem fetch, sem storage, sem provider, sem React.
  */
 
-import { radarSemanticStems } from "./semantic-concept-model.ts";
+import { radarSemanticStem, radarSemanticStems } from "./semantic-concept-model.ts";
 import { radarDeclaredArticleIntent } from "./editorial-identity.ts";
+import {
+  radarCompetitorHeadingChromeReason,
+  radarCompetitorHeadingPostTitleReason,
+  radarReaderQuestionNoiseReason,
+  type RadarResearchNoiseContext,
+} from "./research-noise.ts";
+import { radarCompetitorHeadingIsNoise } from "./competitor-topics.ts";
 import {
   RADAR_SUBJECT_CRITERION,
   RADAR_SUBJECT_H1_FLOOR,
@@ -301,6 +308,113 @@ const VERBOS_SEM_ASSUNTO = new Set([
   "pode", "podem", "deve", "devem", "ser", "estar", "ter", "haver", "saber", "precis", "fica", "faz",
 ]);
 
+/*
+ * ===== 2026-10-08 · P0-B · A EXIGÊNCIA DO ARTICLEDNA É POR TERMO DE CONTEÚDO =====
+ *
+ * Nos CSVs do Silo "Leads sem Tráfego Pago", "Como ganhar dinheiro com IA: o
+ * guia para começar do zero" saiu "Obrigatória pelo ArticleDNA" num artigo
+ * sobre "como atrair um cliente": a complementar "como ganhar um cliente",
+ * sem as raízes da principal, sobrava só com "ganhar" — e todo cabeçalho com
+ * "ganhar" virava exigido. O mesmo com "mais" ("como atrair MAIS clientes"
+ * fazia "Afinal, gostou de saber MAIS…" obrigatória), "conquistar", "você".
+ *
+ * Verbo genérico, adjetivo de grau, palavra funcional e palavra de formato
+ * não dizem ASSUNTO: sozinhos, não tornam um cabeçalho exigido. A keyword que
+ * só tem isso além da principal ("como ganhar um cliente", "como conquistar
+ * clientes") é faceta da mesma intenção: o artigo inteiro a cobre, e nenhuma
+ * seção de concorrente fica obrigatória por causa dela. O tópico que traz um
+ * termo de conteúdo ("identificação da pele oleosa", "estratégia omnichannel")
+ * continua exigindo, pelas raízes de conteúdo, todas elas.
+ */
+const SEM_CONTEUDO_PALAVRAS = [
+  /* verbos genéricos, de aquisição e de aprendizado */
+  "fazer", "faca", "ganhar", "ganhe", "conseguir", "consiga", "obter", "usar", "utilizar", "saber", "criar", "crie", "ver", "veja",
+  "dar", "ficar", "deixar", "poder", "dever", "precisar", "precisa", "precisam", "querer", "quer", "comecar", "comece", "aumentar",
+  "aumente", "melhorar", "melhore", "ajudar", "ajuda", "tenha", "levar", "trazer", "colocar", "tornar", "manter", "funcionar",
+  "funciona", "conquistar", "conquiste", "atrair", "atraia", "captar", "capte", "gerar", "gere", "encontrar", "descobrir", "entender", "aprender",
+  "conhecer", "existir", "acontecer",
+  /* grau, tempo e qualificador */
+  "novo", "nova", "novos", "novas", "melhor", "melhores", "maior", "menor", "grande", "pequeno", "pequena", "primeiro", "primeira",
+  "importante", "principal", "principais", "certo", "certa", "ideal", "simples", "rapido", "facil", "eficiente", "eficaz", "mais",
+  "menos", "muito", "sempre", "agora", "hoje", "ainda",
+  /* funcionais de quatro letras ou mais, que a lista de vazias não tira */
+  "voce", "voces", "sobre", "pelo", "pela", "pelos", "pelas", "entre", "cada", "todo", "toda", "todos", "todas", "tudo", "outro",
+  "outra", "mesmo", "quem", "algum", "alguma", "qualquer", "isso", "aqui", "afinal", "porque", "quando", "onde", "como", "qual", "quais",
+  /* formato */
+  "dica", "dicas", "guia", "forma", "formas", "maneira", "maneiras", "passo", "passos", "exemplo", "exemplos", "estrategia",
+  "estrategias", "tipo", "tipos", "modo", "jeito", "coisa", "coisas", "ideia", "ideias", "pratica", "praticas",
+];
+let semConteudo: Set<string> | null = null;
+/* Calculado na primeira chamada: nada roda no carregamento do módulo. */
+const raizesSemConteudo = () => (semConteudo ??= new Set(SEM_CONTEUDO_PALAVRAS.map(radarSemanticStem)));
+
+/** 2026-10-08 · P0-B · A raiz diz assunto (não é verbo genérico, grau, palavra funcional nem de formato). */
+export const radarEditorialStemIsContent = (raiz: string): boolean => !raizesSemConteudo().has(raiz);
+
+/**
+ * ===== 2026-10-08 · P0-B · O CABEÇALHO SEM O MOLDE =====
+ *
+ * A escada de `direcaoDeCabecalho` veste o cabeçalho do concorrente para não
+ * copiá-lo (§10): "Como X no dia a dia?", "O que considerar sobre X?",
+ * "Afinal, X?", "Na prática, o que X?". Nos CSVs reais isso deu "Como fazer um
+ * pitch…? Guia para converter clientes no dia a dia?" — e a voz da marca
+ * proíbe "O que considerar sobre…". O modelo (e a tela do Radar) continua com
+ * a escada; quem ENTREGA o texto (o CSV "Para escrever" e as linhas da virada
+ * do Redator) nomeia a seção sem o molde, pela mesma régua.
+ */
+export function radarEditorialHeadingWithoutTemplate(cabecalho: string | null | undefined): string {
+  let saida = String(cabecalho || "").replace(/\s+/g, " ").trim();
+  saida = saida.replace(/^afinal,\s*/i, "");
+  saida = saida.replace(/^na pr[aá]tica,\s*(?=o que\b)/i, "");
+  const sobre = saida.match(/^o que considerar sobre\s+(.+?)\s*\??$/i);
+  if (sobre) saida = sobre[1];
+  saida = saida.replace(/\s+no dia a dia\s*\?$/i, "?").replace(/([?!])\?$/, "$1");
+  saida = saida.replace(/:\s*o que o artigo precisa cobrir$/i, "");
+  return saida ? saida.charAt(0).toLocaleUpperCase("pt-BR") + saida.slice(1) : saida;
+}
+
+/*
+ * ===== 2026-10-08 · P0-B · CABEÇALHO DE CONCORRENTE QUE NÃO VIRA SEÇÃO =====
+ *
+ * "Como fazer um pitch de vendas eficiente? Guia para converter clientes",
+ * "Como descobrir e captar clientes potenciais: 13 dicas para te ajudar",
+ * "Afinal, gostou de saber mais sobre como atrair clientes?", "Tudo certo
+ * sobre como atrair clientes para loja?", "Como a Bagy ajuda você a conquistar
+ * clientes?", "Why's it important to get new clients?" e "Deseja receber
+ * e-mails…" viraram seção (e "obrigatória") nos CSVs reais. São título de
+ * post, encerramento, propaganda do concorrente, inglês e newsletter: não são
+ * necessidade do leitor. A régua é a do ruído de pesquisa (`research-noise.ts`
+ * e `competitor-topics.ts`), mais a pergunta seguida de outra frase ("O que
+ * fazer para conquistar novos clientes? 10 dicas infalíveis"). O candidato
+ * não some: fica como evidência, com o motivo (§26).
+ */
+export function radarEditorialHeadingNoiseReason(titulo: string | null | undefined, contexto: RadarResearchNoiseContext = {}): string | null {
+  const original = String(titulo || "").replace(/\s+/g, " ").trim();
+  if (!original) return null;
+  const cromo = radarCompetitorHeadingChromeReason(original);
+  if (cromo) return cromo;
+  const daPergunta = radarReaderQuestionNoiseReason(original, contexto);
+  if (daPergunta) return daPergunta;
+  const dePost = radarCompetitorHeadingPostTitleReason(original, { core: contexto.core });
+  if (dePost) return dePost;
+  if (/\?\s*\S/.test(original.replace(/[\s?!.…]+$/, ""))) return "título de post";
+  return radarCompetitorHeadingIsNoise(original, { core: contexto.core, audience: contexto.audience }) ? "conteúdo datado, de loja ou de consumo" : null;
+}
+
+/**
+ * 2026-10-08 (correção) · R5 · Os motivos que dependem da UNIDADE: numa landing
+ * page, página de serviço ou categoria, a chamada, o convite ao contato e a
+ * navegação de oferta ("Planos e preços", "Nossos serviços") são seção da
+ * página. Só o artigo editorial os tira — no plano do CSV, que conhece a
+ * unidade. O fecho de post ("Gostou de saber mais…?", "Tudo certo sobre…") e
+ * o "Saiba mais!" colado num título de post saem em qualquer unidade.
+ */
+export const radarEditorialHeadingNoiseDependsOnUnit = (motivo: string | null | undefined, titulo: string | null | undefined = null): boolean => {
+  const razao = String(motivo || "");
+  if (/^(?:chamada para ação|rótulo de navegação|banner de oferta|faixa de plano)$/.test(razao)) return true;
+  return razao === "encerramento" && /\b(?:ficou com (?:alguma )?d[uú]vida|fale conosco|entre em contato)\b/i.test(String(titulo || ""));
+};
+
 /* ========================= o território do ArticleDNA ======================= */
 
 /**
@@ -335,8 +449,30 @@ function territorioDoArtigo(context: RadarArticleResearchContext) {
    */
   const genericas = new Set(radarSemanticStems(principal?.identity.text || context.article.promise || ""));
 
+  /*
+   * 2026-10-08 · P0-B · só as raízes de CONTEÚDO exigem: verbo genérico, grau e
+   * palavra funcional, sozinhos, não. E a raiz da principal conta no singular e
+   * no plural: "cliente" (da principal) e "client" (de "clientes", na
+   * complementar) são a mesma — sem isso, "como conquistar novos clientes"
+   * tornava obrigatória toda seção com "clientes".
+   */
+  const daPrincipal = (raiz: string) => genericas.has(raiz)
+    || [...genericas].some(outra => Math.min(outra.length, raiz.length) >= 5 && (outra.startsWith(raiz) || raiz.startsWith(outra)));
+  /*
+   * 2026-10-08 (correção) · R4 · O filtro de conteúdo é para o TEXTO DE KEYWORD
+   * (a complementar que só repete a principal com verbo genérico). O tópico de
+   * cobertura que o humano declarou no ArticleDNA ("tipos de pele", "passo a
+   * passo da rotina") é decisão humana: quando o filtro o esvaziaria, ele exige
+   * pelas raízes distintivas, como antes ("tipo", "passo").
+   */
+  const ehKeyword = new Set(context.resolvedKeywordTexts.map(texto => radarSemanticStems(texto).join(" ")));
   const exigidos: Array<{ texto: string; raizes: string[]; assunto?: true }> = context.editorialTopics
-    .map(texto => ({ texto, raizes: radarSemanticStems(texto).filter(raiz => !genericas.has(raiz)) }))
+    .map(texto => {
+      const distintivas = radarSemanticStems(texto).filter(raiz => !daPrincipal(raiz));
+      const deConteudo = distintivas.filter(radarEditorialStemIsContent);
+      const keyword = ehKeyword.has(radarSemanticStems(texto).join(" "));
+      return { texto, raizes: keyword || deConteudo.length ? deConteudo : distintivas };
+    })
     .filter(item => item.raizes.length > 0);
 
   /*
@@ -1302,9 +1438,48 @@ export function buildRadarEditorialArticleModel(input: {
    * não entra no agrupamento nem nas formulações da amostra (F3.1).
    */
   const observados = blueprint.sections.filter(item => !radarIsSubjectTurnSection(item.id));
-  const grupos = agrupar(observados, territorio.exigidos, territorio.genericas);
 
-  const candidates: RadarEditorialCandidate[] = [];
+  /*
+   * 2026-10-08 · P0-B · O CABEÇALHO DE CONCORRENTE QUE NÃO É NECESSIDADE DO
+   * LEITOR (título de post, encerramento, propaganda do concorrente, inglês,
+   * newsletter, loja) sai ANTES do agrupamento: não vira seção, não puxa outro
+   * candidato para o grupo dele e não torna nada obrigatório. Fica como
+   * evidência, com o motivo. O que o Assunto declarado exige não passa por aqui.
+   */
+  const contextoDoRuido: RadarResearchNoiseContext = {
+    core: [...context.resolvedKeywordTexts, ...context.editorialTopics, context.article.subject?.phrase || null],
+    competitorDomains: (observed.competitors || []).map(item => item.domain),
+  };
+  const ruidosos: Array<{ candidato: RadarSectionCandidate; motivo: string }> = [];
+  const validos = observados.filter(candidato => {
+    const raizes = new Set(radarSemanticStems(candidato.workingTitle));
+    if (territorio.exigidos.some(item => item.assunto && item.raizes.every(raiz => raizes.has(raiz)))) return true;
+    const motivo = radarEditorialHeadingNoiseReason(candidato.workingTitle, contextoDoRuido);
+    /*
+     * 2026-10-08 (correção) · R5 · O modelo não conhece a unidade (artigo,
+     * landing page, página de serviço). Numa landing page, "Fale com um
+     * especialista…", "Planos e preços" e o fecho são seção: a chamada, o
+     * encerramento e a navegação de oferta ficam para o plano do CSV, que sabe
+     * a unidade e só os tira do artigo editorial.
+     */
+    if (motivo && radarEditorialHeadingNoiseDependsOnUnit(motivo, candidato.workingTitle)) return true;
+    if (motivo) ruidosos.push({ candidato, motivo });
+    return !motivo;
+  });
+  const grupos = agrupar(validos, territorio.exigidos, territorio.genericas);
+
+  const candidates: RadarEditorialCandidate[] = ruidosos.map(({ candidato, motivo }) => ({
+    id: candidato.id,
+    observedLabel: candidato.workingTitle,
+    pages: candidato.marketEvidence.pages,
+    sampleSize: candidato.marketEvidence.sampleSize || observed.sample.comparablePages,
+    dnaAligned: false,
+    dnaRequired: false,
+    intentFit: true,
+    verdict: "OPTIONAL_EVIDENCE" as const,
+    reason: `Cabeçalho de concorrente que não vira seção (${motivo}): fica só como evidência.`,
+    sectionId: null,
+  }));
   const sections: RadarEditorialSection[] = [];
   /* As raízes próprias de cada seção — a chave do agrupamento por tema (§10). */
   const raizesPorSecao = new Map<string, Set<string>>();

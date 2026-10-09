@@ -1,5 +1,214 @@
 # Estado atual — Radar
 
+## Rodada dos 8 CSVs "Para escrever" (Silo "Leads sem Tráfego Pago") — consolidação e correção — 2026-10-08
+
+**Origem:** pedido do dono sobre os 8 CSVs reais do Silo (desenho de 2026-10-08: P0-A, P0-B e os P1 de ruído,
+fechamento/CTA/links, promoções e plano visual do Instagram), seguido de uma revisão por casos reais e por suítes e
+desta correção. Módulo proprietário: Radar. Sem chamada paga, sem SQL, sem escrita no Supabase. Arquiteto, Marca e
+Especialista não foram alterados: o que é decisão deles está na lista do dono, no fim desta seção.
+
+**Validado manualmente: não.** Tudo abaixo é verificado no código e confirmado por teste com fixtures. Os CSVs reais
+não foram regerados: os insumos deles não existem offline.
+
+### O que mudou
+
+- **P0-A, artigo-modelo pela investigação congelada.** A regra está na seção seguinte. A correção acrescentou três
+  pontos:
+  - Redator e MCP só aceitam a planta antiga (sem `investigationRef`) quando o congelamento do documento ainda é o
+    vigente da análise. A leitura pega só os três carimbos da última versão (`editorial_workflow_items`, filtrada por
+    Marca). Depois de um re-congelamento, a planta organizada sobre F2 não chega mais ao documento de F1. Documento
+    enviado antes de 2026-09-19, quando o `observedAt` ainda era a hora do clique, só recebe a planta pelo hash exato
+    ou pela referência.
+  - O painel aplica a regra do export: rascunho só pelo hash exato, e a versão nova de outro ArticleDNA não vai. A
+    página agora informa o ArticleDNA (`currentFreeze.articleDnaVersionId`). A versão antiga reconhecida pelo relógio
+    não tem o ArticleDNA conferido na tela, e o rótulo passa a dizer "vai aos entregáveis se o ArticleDNA não mudou
+    desde a organização".
+  - Re-congelar só o apoio (YouTube ou Amazon num artigo do Google) mantém o artigo-modelo, sem chamada de IA. As
+    duas mensagens da tela e o catálogo do MCP diziam que ele seria organizado de novo.
+- **P0-B, CSV sem artigo-modelo.**
+  - "Obrigatória pelo ArticleDNA" só vale por termo de conteúdo. A complementar que só traz verbo genérico deixa de
+    exigir seções. O tópico de cobertura declarado pelo humano ("tipos de pele", "passo a passo da rotina") continua
+    exigindo (correção R4).
+  - O cabeçalho de concorrente que é título de post, fecho de post, propaganda, inglês, newsletter ou loja sai antes
+    do agrupamento e fica como evidência opcional. Três ajustes da correção:
+    - chamada, convite ao contato e navegação de oferta ficam para o CSV, que conhece a unidade: numa landing page
+      continuam como seção (R5);
+    - quando a principal tem o ano ("… 2026"), o cabeçalho com o mesmo ano deixa de ser tratado como datado (R1);
+    - os blocos do Amazon não passam por essa régua de concorrente (R3).
+  - O título de trabalho é a pergunta do leitor, sem molde. H1 e H2 picotados viram instrução concluída.
+  - "Não cobrir" tem uma régua só. A seção inteira sai apenas quando é o MESMO item: na correção R2, verbo e
+    particípio passaram a contar como a mesma raiz ("qualificar" × "qualificado"). Se só a pergunta do leitor está
+    excluída, sai a pergunta e a seção fica (F3). "Outros" e "estratégia" não distinguem assunto.
+  - As linhas "Virada" e "Seção da virada" do Redator agora nomeiam a seção como o CSV, pela pergunta do leitor
+    utilizável (`radarWritingSectionTitleResolver`). Antes divergiam sempre que havia PAA.
+- **P1, ruído de pesquisa** (`research-noise.ts`, `competitor-topics.ts`): régua pura para citações do mercado,
+  perguntas, título de post e cromo. A base da recorrência é a lista impressa, contada em sites. A correção
+  acrescentou:
+  - subtítulo de post no gerúndio ou no imperativo (F4);
+  - buscas relacionadas pela régua do PAA (F5);
+  - FAQ não entra como termo a nomear (F8);
+  - superstição sai: oração, simpatia, lei da atração, "atrair clientes urgente" (F9);
+  - no artigo de promoção, vale-presente e oferta do dia ficam como tema (F11);
+  - órgão oficial e entidade (.gov, .org, .edu) que ranqueiam na SERP continuam como fonte (R6);
+  - a pergunta de outra profissão que trata do assunto do núcleo fica: "Dentista pode aplicar botox?" (R9).
+- **P1, fechamento, CTA e links.** A resposta aprovada do especialista sai inteira. Fica um CTA só, e o próximo
+  artigo do Silo entra como "Continuação (não é uma segunda chamada)". Os links vão para a seção que trata do
+  destino. O irmão publicado sai com a URL. A correção estendeu isso à planta:
+  - o irmão no ar sai "(publicado)", na geração e no export (F1);
+  - o "Próximo passo" da planta vira a continuação, e a chamada é a do especialista quando ele é CTA (F2);
+  - o link repetido (mesma âncora e mesmo destino) aparece uma vez só (F14).
+- **P1, promoções.** Sem estrutura do modelo e com a página publicada lida, a estrutura de referência passa a ser a
+  da página publicada, e o arquivo não bloqueia. A intenção divergente vira ressalva (decisão do Arquiteto). Na
+  correção, a ressalva só fala em "página de consumidor" quando o lado observado é comercial.
+- **P1, plano visual (Instagram).** Antes e depois, resultado clínico e promessa visual são proibidos, e a imagem
+  ancora pelo título da seção. A correção acrescentou:
+  - antes e depois também sai do texto da planta (resposta e "Explicar"). Na conferência vira nota que pede troca;
+    no export da planta antiga sai só o trecho (F6);
+  - o motivo do descarte cita a seção pelo título, e sem título seguro diz "em outra seção" (F7);
+  - "antes e após" passa a contar (F10);
+  - antes e depois de feed ou de métrica, sem contexto clínico, deixa de contar (R8).
+- Removido: `RADAR_WRITING_EXPORT_LIMITS.specialistAnswerChars`, que estava sem uso (R10).
+
+### Arquivos desta consolidação e correção
+
+`lib/radar/article-blueprint.ts`, `lib/radar/article-blueprint-freeze.ts`, `lib/radar/portable-writing-export.ts`,
+`lib/radar/research-noise.ts`, `lib/radar/competitor-topics.ts`, `lib/radar/out-of-scope.ts`,
+`lib/radar/editorial-article-model.ts`, `lib/radar/portable-writing-batch.ts`, `lib/server/radar-article-blueprint.ts`,
+`lib/server/radar-article-blueprint-read.ts`, `lib/server/radar-portable-export-core.ts`,
+`lib/server/writer-evidence-sources.ts`, `lib/server/writer-evidence-reader.ts`, `lib/server/writer-seed.ts`,
+`lib/redator/radar-subject-turn.ts`, `lib/redator/radar-import.ts`, `modules/radar/radar-article-blueprint-panel.tsx`,
+`modules/radar/radar-r3-workbench.tsx`, `modules/radar/radar-page.tsx` (só as duas mensagens de re-congelamento),
+`lib/agent/platform-catalog.ts`. Testes novos: `tests/radar-csv-correcao-2026-10-08.test.mts`,
+`tests/radar-csv-escrever-legado-2026-10-08.test.mts`, `tests/radar-ruido-de-pesquisa-2026-10-08.test.mts`,
+`tests/radar-artigo-modelo-congelamento.test.mts` e `tests/radar-artigo-modelo-plano-visual-2026-10-08.test.mts`.
+
+### Consumidores preservados
+
+- `radarArticleBlueprintColumns` tem opções novas e opcionais (`publishedMembers`, `continuation`, `specialistCta`).
+  Sem elas, sai igual ao que saía, e os testes que chamam direto continuam verdes. O CSV "Para escrever" passa as três.
+- `radarWriterSubjectTurnLines`: `sectionTitle` é opcional. Sem ele, sai o cabeçalho sem molde, como antes.
+- `radarArticleBlueprintPanelChoice`: `deliveryConfirmed` é aditivo, e `currentConfirmed` mantém o significado.
+  `RadarArticleBlueprintPanelFreeze.articleDnaVersionId` é opcional.
+- `buildRadarEditorialArticleModel`: mesma assinatura. Os motivos que dependem da unidade deixam de virar
+  `OPTIONAL_EVIDENCE`, como era em HEAD, e o CSV continua a tirá-los do artigo editorial.
+- O hash do dossiê (`evidence-bundle.ts`) não foi tocado. O payload do artigo-modelo não ganhou campo novo além do
+  `investigationRef` (P0-A). Nada de coluna, migration ou SQL.
+- Redator: a leitura nova são os três carimbos da análise, e só quando há planta antiga nascida depois do
+  congelamento do documento. A consulta é filtrada por Marca e nunca pede o `payload` inteiro.
+
+### Testes
+
+- `tests/radar-csv-correcao-2026-10-08.test.mts`: 21 testes. Os 20 de comportamento falham no código anterior à
+  correção, rodado numa cópia no scratchpad, e passam agora.
+- `tests/redator-artigo-modelo-e-voz.test.mts`: novo caso F1/F2 re-congelado, que falha antes da correção. O PostgREST
+  falso passou a aceitar índice negativo.
+- `tests/radar-assunto-entrega-redator.test.mts`: novo caso de paridade da "Virada" com pergunta do leitor diferente
+  do cabeçalho, que também falha antes.
+- Ajustes: `tests/radar-ruido-de-pesquisa-2026-10-08.test.mts` (F11) e duas regex estruturais em
+  `tests/radar-artigo-modelo-serp-ia-e-tela.test.mts`.
+- Resultados das suítes:
+
+  | Suíte | Testes | Passaram | Falharam | Pulados |
+  | --- | --- | --- | --- | --- |
+  | `npm run test:radar` | 3163 | 3162 | 0 | 1 |
+  | `npm run test:redator` | 357 | 357 | 0 | 0 |
+  | `npm run test:redator:mcp` | 148 | 148 | 0 | 0 |
+  | `npm run test:agent` | 65 | 65 | 0 | 0 |
+  | `npm run test:editorial` | 172 | 168 | 4 | 0 |
+
+  As 4 falhas de `test:editorial` são antigas e alheias a esta rodada. Ficam todas em `tests/editorial-pipeline.test.mts`
+  e tratam da rota de conta, do `ArticleDnaSummary` do Arquiteto, do layout do Admin e da Marca legada; nenhum desses
+  arquivos foi tocado aqui.
+- `tsc`: sem erro fora dos 2 antigos em `.next/types`, das rotas do Planejador aposentado. ESLint nos arquivos
+  tocados: 0 erros, com 10 avisos antigos de variável sem uso em `radar-page.tsx`.
+
+### Limitações e o que não foi feito
+
+- F12, nome de produto do concorrente em "1 site só": casar o prefixo do domínio com a primeira palavra tiraria
+  cabeçalho legítimo quando o domínio é palavra comum (marketing, clínica). Fica para o cromo por repetição.
+- F13, fonte institucional estrangeira: não foi feito. O caso real (Dry January, Alcohol Change UK) é exemplo de
+  campanha num artigo de campanhas, e a régua de ruído o mantém de propósito.
+- F5: o público da Marca não chega ao export sem uma leitura nova. Em artigo sem profissão no núcleo nem leitor
+  declarado, "Leads qualificados para advogados" continua nas buscas relacionadas.
+- R6: o Sebrae (.com.br), quando ranqueia na SERP, ainda sai como site do concorrente, porque o domínio não é
+  oficial nem .org.
+- R5: no artigo editorial, chamada, convite e navegação de oferta continuam no modelo da tela e no envio ao Redator,
+  como em HEAD; só o CSV os tira.
+- Paridade da "Virada": os casos que só o plano inteiro conhece podem divergir. São a pergunta excluída pelo "Não
+  cobrir" e o bloco picotado que herda o título da subseção.
+- Painel: a versão antiga, reconhecida pelo relógio, não tem o ArticleDNA conferido na tela. O export, o Redator e o
+  MCP conferem.
+
+### Decisões do dono (fora do Radar)
+
+- **Composições do Arquiteto:**
+  - Captação: "captação de pacientes dentista", "empresa de captação de pacientes" (que traz psicólogos) e "tráfego
+    orgânico como fazer" estão num artigo publicado sobre "sem tráfego pago" para clínica. São três intenções na
+    mesma composição.
+  - Campanhas: a principal "campanhas de marketing" (SERP de campanhas virais, 4 Ps, Netflix) é ampla demais para a
+    página sobre campanhas sem anúncios para estética.
+  - Promoções: a SERP é de consumidor (cupom, compra coletiva) e a página é voltada à clínica.
+- **E1 na aba Especialista:** o E1 do Pilar é uma frase só ("é possível gerar leads com trafego orgânico sim"), e o
+  do Instagram é a contribuição antiga. Atualizar as duas.
+- **Organizar o artigo-modelo dos artigos que nunca tiveram um:** IA paga, 1 chamada e mais 1 se houver correção
+  por artigo; precisa de autorização. Depois do deploy, exportar de novo os 8 CSVs e conferir títulos, links, CTA,
+  irmãos publicados e plano visual.
+
+## P0-A · O artigo-modelo vale pela investigação congelada, não pelo hash do dossiê ao vivo — 2026-10-08
+
+**Origem:** rodada dos 8 CSVs "Para escrever" do Silo "Leads sem Tráfego Pago" (desenho de 2026-10-08, P0-A). Só o
+CSV do Instagram saiu com o artigo-modelo: nos outros 7, o `bundleHash` do dossiê montado AO VIVO mudou com o código
+que lê a amostra (recorte pela seleção, URL pedida, filtros), e a planta concluída, presa àquele hash, sumiu do CSV
+sem aviso. O `ifMissing` também comparava o hash e pagaria a IA de novo.
+
+**Regra (verificado no código, confirmado por teste):** hash exato do dossiê → usa (como antes; o rascunho antigo só
+por ele e só no export). Senão, a CONCLUÍDA mais nova organizada sobre o congelamento vigente e o mesmo ArticleDNA →
+usa. Investigação re-congelada (outro `frozenAt` ou outro `finalizedBundle.bundleId`) ou ArticleDNA novo → não usa.
+Regra pura e única em `lib/radar/article-blueprint-freeze.ts` (`radarArticleBlueprintPick`).
+
+- **Identidade estável:** o instante do congelamento do perfil primário (`radarFrozenObservedAtOfAnalysis`, o mesmo
+  `observedAt` do dossiê), o `bundleId` do `finalizedBundle` (Google) e a versão do ArticleDNA do dossiê. O hash do
+  pacote congelado é guardado só como informação: os carimbos do FINALIZE reescrevem o hash sem novo congelamento.
+- **Versão nova:** grava `payload.investigationRef` (`frozenAt`, `frozenBundleId`, `frozenBundleHash`,
+  `articleDnaVersionId`, `articleDnaContentHash`). Chave aditiva do jsonb; nenhuma coluna, migration ou SQL. A edição
+  copia a referência da versão editada.
+- **Versão antiga (sem os campos novos):** vale pelo relógio — a família do mesmo `bundle_hash` nasceu (a primeira
+  versão dela, `created_at`) depois do congelamento vigente e dentro da vigência da versão do ArticleDNA (depois de ela
+  existir e antes da seguinte). Sem data ou sem a vigência conhecida, não vale. A edição feita hoje de uma planta do
+  congelamento anterior continua sendo daquela investigação.
+- **Onde vale:** export (`readRadarArticleBlueprintsForExport`, `readApprovedRadarArticleBlueprints`; o núcleo passa a
+  investigação que o laço já leu, sem leitura nova — `RadarPortableExportAssembly.congelamentos`), `ifMissing` da
+  geração (reaproveita sem chamada paga), aprovação de rascunho antigo, Redator e MCP
+  (`readWriterApprovedArticleBlueprint` em fundamentos, manifesto, fatia `radar.blueprint/<id>` e semeadura: a
+  investigação é o `observedAt` do pacote entregue e o ArticleDNA do envio; o conteúdo é lido pelo `bundle_hash` da
+  versão). O envio ao Redator (`radar-writer-send.ts`) não compara o hash do artigo-modelo: nada mudou nele.
+- **Entregável:** não diz nada a mais (D10). O CSV sai com a planta como se fosse do hash exato.
+- **Painel (tela operacional):** a página passa o pacote congelado inteiro (`currentFreeze`). A página passava o hash
+  do pacote CONGELADO e a versão guarda o hash do DOSSIÊ — os dois nunca batiam, e o painel dizia "outro congelamento"
+  de toda versão (o Relatório também não lia a planta). Agora a versão é reconhecida pela referência gravada ou pelo
+  relógio (sem o ArticleDNA, que a tela não tem).
+- **Consequência:** a pendência "trocar `observed.identity.hierarchy`… desliga os artigos-modelo aprovados" (Papel no
+  Silo, abaixo) deixa de desligar a planta enquanto o congelamento e o ArticleDNA forem os mesmos.
+
+**Testes:** `tests/radar-artigo-modelo-congelamento.test.mts` (os três casos, o legado, o `ifMissing` sem chamada paga
+com banco falso e montagem injetada, a edição, o painel); `tests/redator-artigo-modelo-e-voz.test.mts` (mesma
+investigação servida com o conteúdo pelo pacote da versão; re-congelada e ArticleDNA novo recusados; legado pela
+vigência do ArticleDNA). Mutantes da regra pura em cópia no scratchpad: 14 de 15 mortos (o vivo é equivalente: `NaN`
+já recusa). `npm run test:radar` (3118, 0 falha), `npm run test:redator:mcp` (147), `npm run test:redator` (357),
+`npm run test:agent` (65), `tsc` sem erro novo (só `.next/types` antigos do Planejador), ESLint dirigido limpo.
+
+**Ainda não verificado:** export real dos 8 CSVs depois do deploy (homologação do dono); se o Redator recebe a planta
+dos documentos já enviados (depende de `created_at` da planta antiga ser posterior ao congelamento e da vigência do
+ArticleDNA na Marca).
+
+**Arquivos:** `lib/radar/article-blueprint-freeze.ts` (novo), `lib/server/radar-article-blueprint-read.ts`,
+`lib/server/radar-article-blueprint.ts`, `lib/server/radar-portable-export-core.ts`,
+`modules/radar/radar-article-blueprint-panel.tsx`, `modules/radar/radar-r3-workbench.tsx` (uma prop),
+`lib/server/writer-evidence-sources.ts`, `lib/server/writer-evidence-reader.ts`, `lib/server/writer-seed.ts`,
+`lib/agent/platform-catalog.ts`. Consumidores preservados: sem `investigation`, as leituras e consultas são as de
+antes, byte a byte; `radarArticleBlueprintExportChoice` e `radarArticleBlueprintPanelChoice` aceitam o parâmetro novo
+como opcional.
+
 ## Revisão do Papel no Silo (corretor): Silo resolvido, fora da composição e Silo sem Pilar — 2026-10-08
 
 **Origem:** revisão adversarial da entrega "Papel no Silo" (seção logo abaixo). Foram 11 achados: 1 must-fix, 7
