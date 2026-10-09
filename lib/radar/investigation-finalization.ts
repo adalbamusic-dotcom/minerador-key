@@ -158,27 +158,94 @@ export function radarFinalizationReadiness(input: {
  * A falha de gravação do congelamento para na rotina que grava, não aqui.
  *
  * Vale para qualquer página, marca e assunto: só lê a investigação resolvida.
- * YouTube e Amazon continuam com `radarProfileAutoFinalizeDecision`.
+ *
+ * 2026-10-09 · YouTube e Amazon passaram a seguir esta MESMA regra (regra do
+ * dono: o processo do piloto substitui o antigo em tudo). A parte comum mora
+ * aqui embaixo — `radarAutoFinalizeStops`, `radarAutoFinalizeWithLimitations`
+ * e a frase da consulta que falhou — e `radarProfileAutoFinalizeDecision` a
+ * usa com as paradas próprias de cada perfil.
  */
-export type RadarGoogleAutoFinalizeDecision = {
+/**
+ * 2026-10-09 · O VEREDITO DO AUTOMÁTICO, O MESMO NOS TRÊS PERFIS.
+ *
+ * Finalizar sozinho com a limitação escrita, ou parar dizendo por quê. Quem
+ * finaliza com limitação diz qual; quem para não registra nada.
+ */
+export type RadarAutoFinalizeVerdict = {
   autoFinalize: boolean;
   reason: string;
   /** O que fica registrado como limitação quando finaliza sozinho. Vazio quando não há. */
   limitations: string[];
 };
+export type RadarGoogleAutoFinalizeDecision = RadarAutoFinalizeVerdict;
+
+/** 2026-10-09 · parar: só o que não tem o que congelar ou pede decisão humana. */
+export const radarAutoFinalizeStops = (reason: string): RadarAutoFinalizeVerdict =>
+  ({ autoFinalize: false, reason, limitations: [] });
+
+/**
+ * 2026-10-09 · finalizar sozinho — e a frase diz se foi com limitação.
+ *
+ * `reason` é a leitura de prontidão do perfil; a limitação vem escrita na
+ * mesma lista que o congelamento grava.
+ */
+export function radarAutoFinalizeWithLimitations(reason: string, limitations: readonly string[]): RadarAutoFinalizeVerdict {
+  const ditas = [...new Set(limitations.map(item => item.trim()).filter(Boolean))];
+  return {
+    autoFinalize: true,
+    reason: ditas.length ? `Com limitação registrada: ${reason}` : `Sem pendência: ${reason}`,
+    limitations: ditas,
+  };
+}
+
+/**
+ * 2026-10-09 · A CONSULTA QUE FALHOU, DITA COMO LIMITAÇÃO — nos três perfis.
+ *
+ * Uma frase só, com o nome das consultas quando se sabe: no Google, a auxiliar
+ * do plano; no YouTube e na Amazon, a consulta do próprio perfil. `consultas`
+ * é o que se conta ("consulta(s) do YouTube"); o resto da frase é o mesmo.
+ */
+export function radarFailedQueriesLimitation(
+  failed: ReadonlyArray<{ keyword: string | null }> | number,
+  consultas = "consulta(s) auxiliar(es) do plano",
+): string[] {
+  const total = typeof failed === "number" ? failed : failed.length;
+  if (!total) return [];
+  const keywords = typeof failed === "number" ? [] : [...new Set(failed.map(item => item.keyword?.trim()).filter((item): item is string => Boolean(item)))];
+  const quais = keywords.length ? ` (${keywords.map(item => `"${item}"`).join(", ")})` : "";
+  return [`${total} ${consultas} falharam na coleta${quais}; o universo competitivo foi montado sem elas.`];
+}
+
+/**
+ * 2026-10-09 · AS CONSULTAS QUE FALHARAM NUMA CORRIDA DE YOUTUBE OU AMAZON.
+ *
+ * A falha é propriedade da corrida (consulta não executada com motivo gravado,
+ * e o total na proveniência), e por isso quem congela a corrida registra a
+ * limitação — no clique, no automático e no reparo. Quando o total gravado é
+ * maior que as consultas com motivo, a frase diz o total sem inventar nomes.
+ */
+export function radarRunFailedQueriesLimitation(
+  run: { queries?: unknown; provenance?: unknown } | null | undefined,
+  consultas: string,
+): string[] {
+  const registradas = (Array.isArray(run?.queries) ? run.queries : [])
+    .filter((consulta): consulta is Record<string, unknown> => Boolean(consulta) && typeof consulta === "object")
+    .filter(consulta => consulta.executed !== true && typeof consulta.failureReason === "string" && Boolean(consulta.failureReason.trim()))
+    .map(consulta => ({ keyword: typeof consulta.text === "string" ? consulta.text : null }));
+  const proveniencia = run?.provenance && typeof run.provenance === "object" ? run.provenance as Record<string, unknown> : null;
+  const contadas = Number(proveniencia?.queriesFailed) || 0;
+  return radarFailedQueriesLimitation(registradas.length >= contadas ? registradas : contadas, consultas);
+}
 
 /**
  * A consulta auxiliar que falhou, dita como limitação — uma frase só.
  *
  * Usada pelo automático (para dizer na tela) e pelo congelamento (para gravar
  * no bundle), no clique e no automático: a mesma frase nos dois lugares.
+ * 2026-10-09 · é a frase comum (`radarFailedQueriesLimitation`), no Google.
  */
 export function radarAuxiliaryFailureLimitation(failed: ReadonlyArray<{ keyword: string | null }> | number): string[] {
-  const total = typeof failed === "number" ? failed : failed.length;
-  if (!total) return [];
-  const keywords = typeof failed === "number" ? [] : [...new Set(failed.map(item => item.keyword?.trim()).filter((item): item is string => Boolean(item)))];
-  const quais = keywords.length ? ` (${keywords.map(item => `"${item}"`).join(", ")})` : "";
-  return [`${total} consulta(s) auxiliar(es) do plano falharam na coleta${quais}; o universo competitivo foi montado sem elas.`];
+  return radarFailedQueriesLimitation(failed);
 }
 
 /**
@@ -206,7 +273,7 @@ export function radarGoogleAutoFinalizeDecision(input: {
   /** Consultas auxiliares do plano que foram tentadas e não trouxeram evidência. */
   auxiliaryFailed?: ReadonlyArray<{ keyword: string | null }> | number;
 }): RadarGoogleAutoFinalizeDecision {
-  const parar = (reason: string): RadarGoogleAutoFinalizeDecision => ({ autoFinalize: false, reason, limitations: [] });
+  const parar = radarAutoFinalizeStops;
 
   if (!input.phase1 || !input.finalization || !input.sufficiency) {
     return parar("A investigação deste artigo não pôde ser resolvida na releitura do servidor.");
@@ -223,13 +290,7 @@ export function radarGoogleAutoFinalizeDecision(input: {
     sufficiency: input.sufficiency,
     auxiliaryFailed: input.auxiliaryFailed || 0,
   });
-  return {
-    autoFinalize: true,
-    reason: limitations.length
-      ? `Com limitação registrada: ${input.finalization.reason}`
-      : `Sem pendência: ${input.finalization.reason}`,
-    limitations,
-  };
+  return radarAutoFinalizeWithLimitations(input.finalization.reason, limitations);
 }
 
 /* ============================ o bundle congelado ======================== */

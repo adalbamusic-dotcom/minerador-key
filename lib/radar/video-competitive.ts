@@ -1,12 +1,4 @@
-import {
-  RADAR_YOUTUBE_MIN_COHORT,
-  radarYoutubeAvFormats,
-  radarYoutubeCohort,
-  radarYoutubeTitlePatterns,
-  type RadarYoutubeAvFormat,
-  type RadarYoutubeCohort,
-} from "./youtube-blueprint.ts";
-import type { RadarYoutubeUniverseEntry } from "./youtube-search-model.ts";
+import { radarYoutubeCredentialMarker } from "./youtube-blueprint.ts";
 import {
   SERP_CACHE_CANONICAL_LENS,
   SERP_CACHE_LENSES,
@@ -16,9 +8,32 @@ import {
   type SerpCacheLens,
   type SerpOrganicDigest,
 } from "../editorial/serp-cache.ts";
-import { radarUbiquitousStems } from "./intent-adherence.ts";
-import { radarSemanticStems } from "./semantic-concept-model.ts";
-import { radarWritingCompareKey, radarWritingDecodeEntities, type RadarWritingProjections } from "./portable-writing-export.ts";
+import { radarWritingDecodeEntities } from "./portable-writing-export.ts";
+
+/*
+ * 2026-10-09 · A RÉGUA DA AMOSTRA PERTINENTE FOI MORAR COM A COORTE
+ * (`youtube-blueprint.ts`): a fotografia nova do YouTube nasce dela, e a
+ * fotografia não pode importar o export. Os nomes continuam saindo daqui, sem
+ * mudar de comportamento — e com eles a decisão única de formato curto
+ * (`radarVideoFormatDecision`), que o CSV de vídeo, a tela e o Redator leem.
+ */
+export {
+  RADAR_VIDEO_PERTINENT,
+  RADAR_VIDEO_RELEVANCE_LABELS,
+  radarVideoAudienceReading,
+  radarVideoAudienceReadingOf,
+  radarVideoCohortRange,
+  radarVideoFormatCohortsOf,
+  radarVideoFormatDecision,
+  radarVideoPertinentSample,
+  radarVideoRelevance,
+  radarVideoSameStem,
+  type RadarVideoAudienceReading,
+  type RadarVideoFormatDecision,
+  type RadarVideoPertinentSample,
+  type RadarVideoRelevance,
+} from "./youtube-blueprint.ts";
+import type { RadarVideoRelevance } from "./youtube-blueprint.ts";
 
 /**
  * ===== 2026-10-07 · A LEITURA COMPETITIVA DO VÍDEO, FORA DO EXPORT (pedido do dono) =====
@@ -39,170 +54,7 @@ import { radarWritingCompareKey, radarWritingDecodeEntities, type RadarWritingPr
  * Domínio puro: sem fetch, sem storage, sem provider.
  */
 
-/*
- * ===== 2026-10-02 · A RELEVÂNCIA DE CADA CONCORRENTE PARA O PÚBLICO =====
- *
- * Posição e visualizações não dizem se o vídeo fala com o mesmo público. Um de
- * estética, um de advocacia e um genérico entravam iguais. Pelo título e pelo
- * canal (nada foi assistido):
- *   - MESMO público: nomeia o público da marca (a primeira frase do público);
- *   - OUTRO público: "clientes de advocacia", "pacientes para contabilidade"…;
- *   - PRÓXIMO: fala do termo da busca relacionada (ex.: "pacientes");
- *   - GERAL: o resto, referência de formato.
- */
-export type RadarVideoRelevance = "MESMO" | "PROXIMO" | "GERAL" | "OUTRO" | "FORA";
-export const RADAR_VIDEO_RELEVANCE_LABELS: Readonly<Record<RadarVideoRelevance, string>> = {
-  MESMO: "mesmo público: referência principal",
-  PROXIMO: "mesma dor, público vizinho: referência de abordagem (não transportar o público)",
-  GERAL: "tema geral: referência de formato e apresentação",
-  OUTRO: "outro público: inspiração pontual, sem transportar recomendação",
-  FORA: "fora do tema da busca (só cita a plataforma): fica fora das recomendações",
-};
-
-/** 2026-10-07 · Pertinente é quem fala com o público ou com o tema: OUTRO e FORA ficam fora da conta. */
-export const RADAR_VIDEO_PERTINENT: ReadonlySet<RadarVideoRelevance> = new Set<RadarVideoRelevance>(["MESMO", "PROXIMO", "GERAL"]);
-
-const GENERICAS_DO_PUBLICO = new Set(radarSemanticStems("profissionais profissional pessoas que atendem atende outras especialidades entram quando o artigo tiver esse público explicitamente definido trabalham"));
-
 const texto = (valor: unknown): string => (typeof valor === "string" ? valor.trim() : "");
-const unicos = (valores: readonly string[]): string[] => {
-  const vistos = new Set<string>();
-  return valores.filter(valor => {
-    const chave = radarWritingCompareKey(valor);
-    if (!chave || vistos.has(chave)) return false;
-    vistos.add(chave);
-    return true;
-  });
-};
-
-/*
- * 2026-10-02 · A LEITURA DO PÚBLICO EM DOIS NÍVEIS (revisão do CSV de vídeo).
- *
- *   - QUEM é o público: o começo da primeira frase, até "que" ("Biomédicas
- *     estetas e profissionais de estética e cosmética") — a profissão;
- *   - ONDE e COM QUE DOR: o resto da frase ("clínicas e consultórios") e o termo
- *     da busca relacionada ("pacientes"). Vídeo de marketing médico fala da
- *     mesma dor, mas não com biomédicas estetas: público vizinho, não o mesmo.
- *
- * E o que só cita a plataforma (a raiz onipresente nos títulos da amostra,
- * como "instagram") sem nada do assunto — "A psicologia das pessoas que não
- * usam Instagram" — está fora do tema da busca, por melhor posição que tenha.
- */
-export type RadarVideoAudienceReading = { publico: ReadonlySet<string>; vizinho: ReadonlySet<string>; nucleo: ReadonlySet<string>; onipresentes: ReadonlySet<string> };
-
-export function radarVideoAudienceReading(p: RadarWritingProjections, publico: string | null, titulos: readonly string[] = []): RadarVideoAudienceReading {
-  const principal = new Set(radarSemanticStems(texto(p.dna.principalKeyword)));
-  const complementares = unicos([...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements]).flatMap(item => radarSemanticStems(item));
-  const nucleo = new Set([...principal, ...complementares]);
-  const primeiraFrase = (publico || "").split(/(?<=[.!?])\s+/)[0] || "";
-  const corte = primeiraFrase.search(/\s(que|quem|onde)\s/i);
-  const quem = corte > 0 ? primeiraFrase.slice(0, corte) : primeiraFrase;
-  const resto = corte > 0 ? primeiraFrase.slice(corte) : "";
-  const util = (raiz: string) => !GENERICAS_DO_PUBLICO.has(raiz) && !nucleo.has(raiz);
-  const publicoRaizes = new Set(radarSemanticStems(quem).filter(util));
-  return {
-    publico: publicoRaizes,
-    vizinho: new Set([...radarSemanticStems(resto).filter(raiz => util(raiz) && !publicoRaizes.has(raiz)), ...complementares.filter(raiz => !principal.has(raiz))]),
-    nucleo,
-    onipresentes: radarUbiquitousStems(titulos.map(titulo => radarWritingDecodeEntities(titulo))),
-  };
-}
-
-/* O radical não é uniforme ("pacientes" → "pacient", "paciente" → "paciente"): mesma raiz quando uma começa pela outra. */
-export const radarVideoSameStem = (a: string, b: string) => a === b || (Math.min(a.length, b.length) >= 5 && (a.startsWith(b) || b.startsWith(a)));
-
-export function radarVideoRelevance(video: Pick<RadarYoutubeUniverseEntry, "title" | "channelName">, leitura: RadarVideoAudienceReading): RadarVideoRelevance {
-  const doTitulo = radarSemanticStems(radarWritingDecodeEntities(video.title));
-  const raizes = [...doTitulo, ...radarSemanticStems(video.channelName || "")];
-  const tem = (conjunto: ReadonlySet<string>, lista: readonly string[] = raizes) => lista.some(raiz => [...conjunto].some(outra => radarVideoSameStem(raiz, outra)));
-  if (tem(leitura.publico)) return "MESMO";
-  const outro = radarWritingCompareKey(radarWritingDecodeEntities(video.title)).match(/\b(?:clientes?|pacientes?|alunos?|negocios?)\s+(?:de|para|da|do|na|no)\s+([a-z]{4,})/);
-  const raizDoOutro = outro ? radarSemanticStems(outro[1])[0] : null;
-  if (raizDoOutro && !leitura.nucleo.has(raizDoOutro) && !leitura.publico.has(raizDoOutro)) return "OUTRO";
-  if (tem(leitura.vizinho)) return "PROXIMO";
-  /* Do assunto, o título só tem o que todo título da amostra tem (a plataforma): fora do tema. */
-  const doAssunto = doTitulo.filter(raiz => [...leitura.nucleo].some(outra => radarVideoSameStem(raiz, outra)));
-  if (!doAssunto.some(raiz => !leitura.onipresentes.has(raiz))) return "FORA";
-  return "GERAL";
-}
-
-/* ============================== a amostra pertinente ============================== */
-
-export type RadarVideoPertinentSample = {
-  longos: { total: number; coorte: RadarYoutubeCohort };
-  curtos: { total: number; coorte: RadarYoutubeCohort };
-  /** Quantos ficaram fora da conta, por motivo. */
-  foraDaConta: { FORA: number; OUTRO: number };
-  /** Os formatos AV dos pertinentes (longos e Shorts juntos, como a fotografia faz). */
-  formatos: RadarYoutubeAvFormat[];
-  /** A coorte que governa a faixa: a maior, nunca as duas somadas (a mesma regra da fotografia). */
-  lider: "LONG_FORM" | "SHORTS";
-  /** P25 → P75 da coorte que lidera, pela régua da fotografia (`faixaRecomendada`). */
-  faixa: { min: number; max: number } | null;
-  /** O formato que domina os pertinentes; sem padrão, o mesmo texto da fotografia. */
-  formato: string;
-  /** A ressalva de amostra pequena, por coorte pertinente (só quando a coorte inteira tinha vídeo). */
-  ressalvas: string[];
-};
-
-/*
- * A faixa recomendada é P25 → P75 da coorte que lidera — as mesmas quatro
- * linhas de `faixaRecomendada` (youtube-blueprint.ts), que é privada lá. Replicar
- * é mais barato que exportar e mantém a fotografia intocada.
- */
-function faixaDa(coorte: RadarYoutubeCohort): { min: number; max: number } | null {
-  const baixo = coorte.durationSeconds.p25;
-  const alto = coorte.durationSeconds.p75;
-  if (baixo === null || alto === null || baixo <= 0) return null;
-  return { min: Math.max(1, Math.round(baixo)), max: Math.max(Math.round(alto), Math.round(baixo) + 1) };
-}
-
-/*
- * 2026-10-07 (revisão) · A faixa de UMA coorte pela mesma régua: a cadeia
- * competitiva diz a faixa do formato que a sequência segue (longos ou Shorts
- * pertinentes), não a da coorte que lidera — "vídeo longo, faixa 25s a 45s"
- * juntava o formato de um lado com a faixa do outro.
- */
-export const radarVideoCohortRange = (coorte: RadarYoutubeCohort): { min: number; max: number } | null => faixaDa(coorte);
-
-export function radarVideoPertinentSample(input: {
-  videos: readonly RadarYoutubeUniverseEntry[];
-  relevancia: (video: RadarYoutubeUniverseEntry) => RadarVideoRelevance;
-  collectedAt: string | null;
-}): RadarVideoPertinentSample {
-  const lidos = input.videos.map(video => ({ video, relevancia: input.relevancia(video) }));
-  const pertinentes = lidos.filter(item => RADAR_VIDEO_PERTINENT.has(item.relevancia)).map(item => item.video);
-  const ehLongo = (video: RadarYoutubeUniverseEntry) => video.universeClass === "COMPARABLE_LONG_FORM";
-  const ehCurto = (video: RadarYoutubeUniverseEntry) => video.universeClass === "COMPARABLE_SHORT";
-  const longos = radarYoutubeCohort({ format: "LONG_FORM", entries: pertinentes.filter(ehLongo), collectedAt: input.collectedAt });
-  const curtos = radarYoutubeCohort({ format: "SHORTS", entries: pertinentes.filter(ehCurto), collectedAt: input.collectedAt });
-  const comparaveis = pertinentes.filter(video => ehLongo(video) || ehCurto(video));
-  const formatos = radarYoutubeAvFormats(radarYoutubeTitlePatterns(comparaveis.map(video => video.title)), comparaveis.length);
-  const lider = curtos.videoCount > longos.videoCount ? curtos : longos;
-  const total = { longos: input.videos.filter(ehLongo).length, curtos: input.videos.filter(ehCurto).length };
-  /*
-   * A ressalva de amostra pequena é a do próprio cohort (abaixo de
-   * RADAR_YOUTUBE_MIN_COHORT os padrões descrevem casos, não mercado), dita
-   * sobre a amostra PERTINENTE. Coorte que já era vazia na amostra inteira não
-   * ganha ressalva: o zero dela é dito na linha do YouTube.
-   */
-  const ressalvas: string[] = [];
-  for (const [rotulo, coorte, inteira] of [["longos", longos, total.longos], ["Shorts", curtos, total.curtos]] as const) {
-    if (!inteira) continue;
-    if (!coorte.videoCount) ressalvas.push(`Ressalva: nenhum vídeo pertinente entre os ${rotulo}: sem estatística pertinente deste formato.`);
-    else if (coorte.videoCount < RADAR_YOUTUBE_MIN_COHORT) ressalvas.push(`Ressalva: a amostra pertinente de ${rotulo} tem ${coorte.videoCount} vídeo(s): abaixo de ${RADAR_YOUTUBE_MIN_COHORT} os padrões descrevem casos, não mercado.`);
-  }
-  return {
-    longos: { total: total.longos, coorte: longos },
-    curtos: { total: total.curtos, coorte: curtos },
-    foraDaConta: { FORA: lidos.filter(item => item.relevancia === "FORA").length, OUTRO: lidos.filter(item => item.relevancia === "OUTRO").length },
-    formatos,
-    lider: lider.format,
-    faixa: faixaDa(lider),
-    formato: formatos[0]?.label ?? "Definido pela intenção do artigo",
-    ressalvas,
-  };
-}
 
 /* ============================== o formato curto e o carrossel ============================== */
 
@@ -232,21 +84,13 @@ export const RADAR_VIDEO_RELEVANCE_SHORT: Readonly<Record<RadarVideoRelevance, s
   FORA: "fora do tema da busca",
 };
 
-const normalizado = (valor: string | null | undefined) => (valor || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-
 /*
- * A CREDENCIAL NO NOME, POR LISTA FECHADA: os marcadores de autoridade da
- * pesquisa do YouTube (dermatologista, médico, especialista, Dra., Dr.) e as
- * profissões e conselhos equivalentes. "Profissional" sozinho não é credencial
- * ("Maquiadora Profissional" declara ofício, não registro), e "explica" é
- * marca de título, não de nome.
+ * A CREDENCIAL NO NOME, POR LISTA FECHADA (2026-10-07).
+ * 2026-10-09 · uma lista só: a régua mora em `youtube-blueprint.ts`
+ * (`radarYoutubeCredentialMarker`), que a lacuna de autoridade da fotografia
+ * também lê; o nome daqui continua, apontando para ela.
  */
-const CREDENCIAL = /(?:^|[^a-z])(dra?|doutora?|medic[oa]|dermatologista|especialista|farmaceutic[oa]|nutricionista|biomedic[oa]|enfermeir[oa]|fisioterapeuta|psicolog[oa]|dentista|odontolog[oa]|esteticista|cosmetolog[oa]|advogad[oa]|crm|cro|crf|crn|crbm|coren|crefito|crp|oab)(?![a-z])/;
-
-/** 2026-10-07 · O marcador de credencial no texto (nome do autor, título ou canal), ou `null`. */
-export function radarVideoCredentialMarker(valor: string | null | undefined): string | null {
-  return normalizado(valor).match(CREDENCIAL)?.[1] ?? null;
-}
+export const radarVideoCredentialMarker = (valor: string | null | undefined): string | null => radarYoutubeCredentialMarker(valor);
 
 /*
  * OS SINAIS DO TÍTULO QUE SE LEEM SEM VER A THUMBNAIL: palavra inteira em caixa

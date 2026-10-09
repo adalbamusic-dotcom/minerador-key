@@ -1,3 +1,15 @@
+## Regra do piloto em todas as operações — 2026-10-09 (reajuste encadeado)
+
+Detalhe em `docs/04-arquiteto/estado-atual.md` e `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Cartão "Próximo passo" depois de "Melhoria gravada". Correção antes do deploy: não promete mais "Reinvestigar no Radar e reorganizar o artigo-modelo" (caminho que não existe); diz que quem ainda não foi ao Radar segue no Arquiteto (Pronto para Radar e Enviar ao Radar, na aba Links internos) e quem já está no Radar continua na versão enviada; botão "Abrir Links internos"
+  (só troca de aba, sem custo).
+- [ ] Proposta (sem schema): a rota GET da melhoria devolver, por resultado, se o artigo já tem item no Radar,
+  para o cartão separar os que seguem no Arquiteto dos que ficam na versão enviada ao Radar.
+- [ ] **Proposta (exige SDD e autorização; mudança de workflow): Reenvio da versão nova do ArticleDNA ao Radar.** Atualiza o item existente do Radar (`source_version_id`, `articleDnaVersionId`, `articleDnaContentHash`, `hydration`) e depois reinvestiga e reorganiza o artigo-modelo (custo dito antes do clique). Verificado no código: depois de "Gravar melhorias", o item do Radar NÃO passa a
+  apontar a versão nova (o `import_radar` exige Pronto para Radar e faz upsert com `ignoreDuplicates`; `workflow-status` recusa reenviar o artigo já entregue). Sem o reenvio, o reajuste de artigo já enviado não chega ao Radar; o Radar segue na versão transportada pelo item. Registrada também no backlog do Radar.
+- [ ] **Dono:** composição de promoções, campanhas e captação no Arquiteto (decisão pendente da rodada do Radar).
+
 ## Proposta vinda do Radar: `ArticleDNA.hierarchy` não é o Papel no Silo — 2026-10-08
 
 Isto é proposta, não implementação: nada no Arquiteto mudou. O Radar passou a ler o papel do SiloDNA. Detalhe em

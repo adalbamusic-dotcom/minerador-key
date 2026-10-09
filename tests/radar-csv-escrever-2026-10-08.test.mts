@@ -20,6 +20,7 @@ import type { RadarBrandVoice, RadarBrandVoiceState } from "../lib/radar/brand-v
 import type { RadarPortableExportInput } from "../lib/radar/portable-export.ts";
 import type { RadarSiloExportWritingContext } from "../lib/radar/portable-silo-export.ts";
 import { ARTIGO, EXPORTADO_EM, LEITURA_DAS_LENTES, contextoDePesquisa, entradaGoogle, montadasDoSiloSaude, planoDoSilo } from "./radar-portable-writing-fixtures.mts";
+import { comPlanta, comPlantas, plantaDe } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 
 /*
  * ===== 2026-10-08 · O CSV PARA ESCREVER DEPOIS DO CASO REAL DE 08/10 (Grupo C do desenho) =====
@@ -411,14 +412,20 @@ test("C4 · a premissa da planta (promessa, ângulo, direção da abertura e vir
   for (const trecho of ["Mostrar como o Instagram traz pacientes para a clínica", "O Instagram gera agendamentos quando o perfil é bem feito", "Abrir dizendo que pacientes procuram no Google"]) assert.ok(lista.includes(trecho), trecho);
 });
 
+/*
+ * 2026-10-09 · o fechamento e a chamada do modelo editorial não vão mais ao CSV
+ * (sem planta, a linha é recusada): a trava vale no fechamento e na chamada da
+ * PLANTA, na coluna estrutura.
+ */
 test("C4 · fora do artigo-modelo, promessa, fechamento e chamada final também passam pela trava; a frase que nega o efeito não", () => {
   const base = entradaGoogle();
-  const modelo = structuredClone(base.articleModel) as unknown as Record<string, unknown> & { conclusion: Record<string, unknown> };
-  modelo.conclusion = { ...modelo.conclusion, synthesis: "Um site otimizado converte visitantes em agendamentos.", callToAction: "O Instagram, sozinho, não enche a agenda: conheça o serviço." };
-  const row = buildRadarWritingExportArticle({ ...base, articleModel: modelo as never }, { topRowLabel: "Marca", filePosition: 1, silo: null, articleId: ARTIGO, publication: null }).row;
-  const promessa = linhas(row.promessa_e_leitor);
-  assert.ok(promessa.includes("Fechamento: Um site otimizado converte visitantes em agendamentos (precisa de fonte: afirmação sobre conversão do público)."), row.promessa_e_leitor);
-  assert.ok(promessa.includes("Chamada final: O Instagram, sozinho, não enche a agenda: conheça o serviço."), "a tese que nega o efeito passa");
+  const contexto: RadarWritingArticleContext = { topRowLabel: "Marca", filePosition: 1, silo: null, articleId: ARTIGO, publication: null };
+  assert.throws(() => buildRadarWritingExportArticle(base, contexto), (erro: unknown) => (erro as { code?: string }).code === "needs_article_blueprint");
+  const planta = plantaDe(base, { resposta: { closing: { turn: "Um site otimizado converte visitantes em agendamentos.", cta: "O Instagram, sozinho, não enche a agenda: conheça o serviço.", nextStep: null } } });
+  const row = buildRadarWritingExportArticle(base, { ...contexto, blueprint: planta }).row;
+  const estrutura = linhas(row.estrutura);
+  assert.ok(estrutura.includes("Fechamento: Um site otimizado converte visitantes em agendamentos (precisa de fonte: afirmação sobre conversão do público)."), row.estrutura);
+  assert.ok(estrutura.includes("CTA: O Instagram, sozinho, não enche a agenda: conheça o serviço."), "a tese que nega o efeito passa");
   assert.equal(radarWritingSourceMark("Gera confiança.", { needs: false, label: "" }), "Gera confiança.");
   assert.equal(radarWritingSourceMark("Converte mais", { needs: true, label: "afirmação sobre conversão do público" }), "Converte mais (precisa de fonte: afirmação sobre conversão do público)");
 });
@@ -505,7 +512,11 @@ test("C6 · o diferencial vem da página publicada (o que a amostra não trata),
   assert.match(linhaDoDiferencial, /"O erro geográfico que quase ninguém fala"/);
 });
 
-test("C7 · só a pergunta DESTE artigo fica para responder; a do outro tópico do Silo e a de outro foco vão ao \"Não cobrir\"", () => {
+/*
+ * 2026-10-09 · Defeito 4 · o dono de um assunto só é ARTIGO do Silo: a pergunta do WhatsApp, que ia ao tópico
+ * "como atrair clientes pelo whatsapp" (keyword de "Tópicos incluídos", sem artigo), vai ao artigo que trata dela.
+ */
+test("C7 · só a pergunta DESTE artigo fica para responder; a de outro ARTIGO do Silo e a de outro foco vão ao \"Não cobrir\"", () => {
   const { linha } = csvDoCaso(plantaAntiga());
   const cobrir = linha.cobrir_e_superar;
   const aResponder = cobrir.slice(cobrir.indexOf("Perguntas a responder"), cobrir.indexOf("Não cobrir:"));
@@ -514,7 +525,8 @@ test("C7 · só a pergunta DESTE artigo fica para responder; a do outro tópico 
   }
   for (const outro of ["pitch de vendas", "vender muito", "WhatsApp", "pela internet"]) assert.ok(!aResponder.includes(outro), outro);
   const naoCobrir = linhas(cobrir.slice(cobrir.indexOf("Não cobrir:")));
-  assert.ok(naoCobrir.includes("- \"Como captar clientes pelo WhatsApp?\": pertence a \"como atrair clientes pelo whatsapp\", outro tópico do Silo; não responder aqui."));
+  assert.ok(naoCobrir.includes("- \"Como captar clientes pelo WhatsApp?\": pertence ao artigo \"como captar um cliente\" do Silo; não responder aqui."), naoCobrir.join(" | "));
+  assert.equal(naoCobrir.some(item => /outro tópico do Silo/.test(item)), false, "tópico sem artigo não é dono");
   assert.ok(naoCobrir.includes("- \"Como captar clientes pela internet?\": pertence ao artigo \"como captar um cliente\" do Silo; não responder aqui."));
   /* 2026-10-08 · P1 · título de post ("…? Guia para…") é ruído de pesquisa: sai de todas as listas, sem virar linha do "Não cobrir". */
   assert.equal(cobrir.includes("pitch de vendas"), false, "o título de post sai de todas as listas");
@@ -522,24 +534,28 @@ test("C7 · só a pergunta DESTE artigo fica para responder; a do outro tópico 
   assert.ok(naoCobrir.some(item => item.startsWith("- \"Como chamar a atenção no Instagram?\": ")), "o \"não cobrir\" do pacote continua");
   /* A pergunta que a planta já responde não se repete. */
   assert.doesNotMatch(aResponder, /O Instagram realmente serve para atrair clientes\?/);
-  /* Com o artigo-modelo, a abertura é a dele: a "pergunta de abertura" que o export escolheria (a de tráfego orgânico) continua na lista. */
-  const semPlanta = csvDoCaso(null).linha;
-  assert.match(semPlanta.promessa_e_leitor, /^Abertura: responder "Como prospectar clientes pelo Instagram com tráfego orgânico\?" logo no primeiro parágrafo/m);
+  /* Com o artigo-modelo, a abertura é a dele: a "pergunta de abertura" que o export escolheria (a de tráfego orgânico) continua na lista. 2026-10-09 · sem planta, nada sai. */
+  assert.throws(() => csvDoCaso(null), (erro: unknown) => (erro as { code?: string }).code === "needs_article_blueprint");
+  assert.doesNotMatch(linha.estrutura, /^Abertura: responder "Como prospectar clientes pelo Instagram com tráfego orgânico\?"/m);
   assert.ok(aResponder.includes("- Como prospectar clientes pelo Instagram com tráfego orgânico?"));
   /* Sem Silo, a do WhatsApp é outro foco. */
   const semSilo = buildRadarWritingExportArticle(entradaDoCaso(), { topRowLabel: "Marca", filePosition: 1, silo: null, articleId: ARTIGO, publication: publicacao(), blueprint: plantaAntiga() }).row.cobrir_e_superar;
   assert.match(semSilo, /^- "Como captar clientes pelo WhatsApp\?": outro foco; não trata de "como atrair clientes pelo instagram" nem das complementares\.$/m);
 });
 
-test("C7 (correção da revisão) · a pergunta que É a keyword de outro tópico do Silo vai ao \"Não cobrir\" mesmo dividindo duas raízes; a pergunta que a planta usa como evidência não é proibida", () => {
-  /* R4 · "Como atrair clientes pelo WhatsApp?" divide "atrair" e "clientes" com o núcleo — e é o tópico "como atrair clientes pelo whatsapp". */
+/*
+ * 2026-10-09 · Defeito 4 · "como atrair clientes pelo whatsapp" é keyword de "Tópicos incluídos", não ARTIGO do
+ * Silo: não é dono. A pergunta que é ela ("Como atrair clientes pelo WhatsApp?", que divide "atrair" e "clientes"
+ * com o núcleo) volta a ser deste artigo, pela régua do núcleo — mandá-la a um tópico sem artigo a tirava de todo lugar.
+ */
+test("C7 (correção da revisão) · a pergunta que é só keyword de tópico (sem artigo) do Silo fica neste artigo; a pergunta que a planta usa como evidência não é proibida", () => {
   const entrada = entradaDoCaso();
   const observado = entrada.googleObserved as unknown as { questions: unknown[] };
   observado.questions = [...observado.questions, pergunta("Como atrair clientes pelo WhatsApp?", 2), pergunta("Como captar clientes pelo Instagram?", 2)];
   const cobrir = csvDoCaso(plantaAntiga(), { entrada }).linha.cobrir_e_superar;
   const aResponder = cobrir.slice(cobrir.indexOf("Perguntas a responder"), cobrir.indexOf("Não cobrir:"));
-  assert.doesNotMatch(aResponder, /pelo WhatsApp/);
-  assert.ok(linhas(cobrir).includes("- \"Como atrair clientes pelo WhatsApp?\": pertence a \"como atrair clientes pelo whatsapp\", outro tópico do Silo; não responder aqui."), cobrir);
+  assert.ok(aResponder.includes("- Como atrair clientes pelo WhatsApp?"), aResponder);
+  assert.doesNotMatch(cobrir, /outro tópico do Silo/, "tópico sem artigo não é dono");
   /* A pergunta com uma palavra do artigo fora do destino ("instagram" não está em "como captar um cliente") continua deste artigo. */
   assert.ok(aResponder.includes("- Como captar clientes pelo Instagram?"), aResponder);
 
@@ -548,8 +564,14 @@ test("C7 (correção da revisão) · a pergunta que É a keyword de outro tópic
   planta.blueprint.sections[4].evidence = ["G1", "O1"];
   planta.evidence = [...planta.evidence, { id: "G1", kind: "lacuna", text: "Como captar clientes pela internet? (1 de 6 páginas cobrem)" }, { id: "O1", kind: "oportunidade", text: "Revisar perguntas relacionadas como evidência editorial." }];
   const linha = csvDoCaso(planta).linha;
-  assert.match(linha.estrutura, /^- Evidências: G1 \(Como captar clientes pela internet\? \(1 de 6 páginas cobrem\)\)/m);
-  assert.doesNotMatch(linha.cobrir_e_superar, /Como captar clientes pela internet/, "nem a responder de novo, nem proibida: a planta já a responde na seção 5");
+  /* 2026-10-09 · Defeito 2 · a base única da bancada tem 12 páginas e a lacuna não está no modelo dela: a contagem "de 6" sai, o rótulo fica. */
+  assert.match(linha.estrutura, /^- Evidências: G1 \(Como captar clientes pela internet\?\)/m);
+  /* 2026-10-09 · nem a responder de novo, nem proibida: o "Como superar" diz onde a planta a responde (a lacuna que o artigo-modelo assume). */
+  const cobrirDaPlanta = linha.cobrir_e_superar;
+  const naLista = cobrirDaPlanta.includes("Perguntas a responder") ? cobrirDaPlanta.slice(cobrirDaPlanta.indexOf("Perguntas a responder"), cobrirDaPlanta.indexOf("Não cobrir:")) : "";
+  assert.doesNotMatch(naLista, /Como captar clientes pela internet/, "nem a responder de novo");
+  assert.doesNotMatch(cobrirDaPlanta.slice(cobrirDaPlanta.indexOf("Não cobrir:")), /Como captar clientes pela internet/, "nem proibida");
+  assert.match(cobrirDaPlanta, /^- Cobrir "Como captar clientes pela internet\?" na seção "[^"]+": lacuna da SERP que o artigo-modelo assume\.$/m, cobrirDaPlanta);
 });
 
 test("C8 · sem material próprio da marca: sem relato, sem inventar, sem marcador — na regra geral e no \"Como superar\"", () => {
@@ -567,10 +589,10 @@ test("C9 · destino planejado: instrução concluída e condicional, nunca ender
   assert.ok(links.some(item => /^L6 · âncora "SEO para clínicas" → .* → https:\/\/adalbapro\.com\.br\/servicos\/seo-para-clinicas \(publicado\)/.test(item)), "1 publicado");
   assert.match(linha.links_internos, /→ Pilar "leads qualificados" → \/leads-sem-trafego-pago\/qualificados \(planejado: caminho do Silo/);
   assert.doesNotMatch(linha.links_internos, /use o caminho|marque a âncora|não resolvido: marque/);
-  /* Sem artigo-modelo, a mesma regra no destino do Silo. */
-  const saude = radarPortableWritingExport({ articles: montadasDoSiloSaude(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM }).files![0].csv;
-  assert.match(saude, /\(destino ainda não publicado: o link entra com a URL final quando o destino estiver no ar junto com este artigo ou antes; senão, a âncora fica como texto simples; não invente URL\)/);
-  assert.doesNotMatch(saude, /use o slug planejado|marque a âncora/);
+  /* 2026-10-09 · no lote do Silo, cada artigo com a planta dele: a mesma regra, uma vez por linha, no destino do Silo. */
+  const saude = radarPortableWritingExport({ articles: comPlantas(montadasDoSiloSaude(), planoDoSilo().files[0].writing), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM }).files![0].csv;
+  assert.match(saude, /Destino planejado \(ainda não publicado\): o link entra com a URL final quando o destino estiver no ar junto com este artigo ou antes; se este artigo for ao ar primeiro, a âncora fica como texto simples, sem link \(nunca link quebrado\)\. O caminho planejado não é endereço publicado: não invente domínio nem URL\./);
+  assert.doesNotMatch(saude, /use o slug planejado|marque a âncora|destino ainda não publicado: o link entra/);
   /* Sem planejado, a regra não aparece. */
   const soPublicado = plantaAntiga();
   soPublicado.blueprint.sections = soPublicado.blueprint.sections.map(item => ({ ...item, internalLinks: item.internalLinks.filter(link => link.candidate === "K6") }));
@@ -585,7 +607,8 @@ test("C9 · destino planejado: instrução concluída e condicional, nunca ender
 
 test("D10 no resto do arquivo: o parecer ainda não aceito e o Silo em formação são ditos sem espera aberta", () => {
   /* O parecer ainda não aceito fica fora do texto — regra cumprida, sem "aguardando aceite" (como o CSV de vídeo). */
-  const semAceito = buildRadarWritingExportArticle({ ...entradaDoCaso(), specialistContext: { state: "RECEIVED", note: "", items: [], pending: 2, rejected: 0 } as never }, { topRowLabel: "Marca", filePosition: 1, silo: null, articleId: ARTIGO, publication: null }).row;
+  const entradaSemAceito = { ...entradaDoCaso(), specialistContext: { state: "RECEIVED", note: "", items: [], pending: 2, rejected: 0 } as never };
+  const semAceito = buildRadarWritingExportArticle(entradaSemAceito, comPlanta(entradaSemAceito, { topRowLabel: "Marca", filePosition: 1, silo: null, articleId: ARTIGO, publication: null })).row;
   assert.match(semAceito.fontes_e_especialista, /^Especialista: sem contribuição aceita; 2 parecer\(es\) ainda não aceito\(s\) no Radar ficam fora deste texto\.$/m);
   assert.doesNotMatch(semAceito.fontes_e_especialista, /aguardando/);
   /* O Silo ainda em formação no Arquiteto: dito sem "rascunho", no topo e na linha do artigo. */
@@ -610,8 +633,11 @@ test("C4 · a afirmação que o MERCADO repete sem fonte trava a frase da planta
 test("o artigo-modelo com links internos não deixa o artigo \"isolado do Silo\" no veredito", () => {
   const { artigo } = csvDoCaso(plantaAntiga());
   assert.doesNotMatch(artigo.row.pode_escrever, /sem links internos no pacote/);
-  const semPlanta = csvDoCaso(null);
-  assert.match(semPlanta.artigo.row.pode_escrever, /sem links internos no pacote/, "sem planta e sem plano, a falta continua dita");
+  /* 2026-10-09 · a planta que não posiciona link nenhum, sem plano no pacote: a falta continua dita. */
+  const semLinks = plantaAntiga();
+  semLinks.blueprint.sections = semLinks.blueprint.sections.map(item => ({ ...item, internalLinks: [] }));
+  const semLinkNenhum = csvDoCaso(semLinks);
+  assert.match(semLinkNenhum.artigo.row.pode_escrever, /sem links internos no pacote/, "sem link na planta e sem plano, a falta continua dita");
 });
 
 /* ============================== o artigo-modelo NOVO, com o mapa ============================== */
@@ -654,11 +680,18 @@ test("artigo-modelo NOVO sem a leitura de agora: o mapa sai da página que a IA 
   assert.match(linha.estrutura, /^Sai da página publicada \(decisão registrada no artigo-modelo\): /m);
 });
 
+/*
+ * 2026-10-09 · sem artigo-modelo, nada sai (a "estrutura sugerida" legada
+ * saiu); com a planta ANTIGA (sem mapa gravado), a atualização é o mapa
+ * conservador dela — cada H2 publicado com destino, nada sai sem decisão.
+ */
 test("sem artigo-modelo, a atualização é a regra concluída (nada sai sem decisão), sem pendência", () => {
-  const { linha } = csvDoCaso(null);
+  assert.throws(() => csvDoCaso(null), (erro: unknown) => (erro as { code?: string }).code === "needs_article_blueprint");
+  const { linha } = csvDoCaso(plantaAntiga());
   const artigo = linhas(linha.artigo);
-  assert.ok(artigo.some(item => item.startsWith("Estrutura publicada atual (lida da página na exportação): H1 ") && item.includes("10 H2: \"Instagram não traz pacientes quando")));
-  assert.ok(artigo.includes("Atualização: o que a página já cobre fica no texto, reescrito na voz e reordenado se preciso; a seção publicada que a estrutura sugerida não tem fica como seção própria. Nada sai da página sem decisão humana registrada."));
+  assert.ok(artigo.some(item => item.startsWith("Estrutura publicada atual (lida da página na exportação): H1 ") && item.includes("10 H2")), linha.artigo);
+  assert.ok(artigo.includes("Atualização: cada H2 publicado tem destino na planta do artigo-modelo (coluna estrutura); nada sai da página sem decisão registrada no artigo-modelo:"), linha.artigo);
+  assert.doesNotMatch(tudo(linha), /estrutura sugerida/);
   for (const proibida of D10_PROIBIDAS) assert.doesNotMatch(doExport(tudo(linha)), proibida, String(proibida));
 });
 
@@ -732,10 +765,12 @@ test("o export protege a planta ANTIGA: ordem de leitura da busca \"como …\", 
  * meta sem texto, fontes citadas pelo mercado sem verificação.
  */
 test("D10 nas esperas antigas: o CSV do silo de saúde inteiro sai sem \"a definir\" nem \"conferir antes\"", () => {
-  const { files } = radarPortableWritingExport({ articles: montadasDoSiloSaude(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
+  /* 2026-10-09 · cada artigo com a planta dele: o SEO title é o da planta (a instrução "escreva com cerca de 60 caracteres" era do título legado). */
+  const { files } = radarPortableWritingExport({ articles: comPlantas(montadasDoSiloSaude(), planoDoSilo().files[0].writing), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
   const csv = files![0].csv;
   assert.match(csv, /Aplicar em: onde couber no texto, como orientação/);
-  assert.match(csv, /SEO title: escreva com cerca de 60 caracteres/);
+  assert.match(csv, /SEO title: skincare facial/);
+  assert.doesNotMatch(csv, /SEO title: escreva com cerca de 60 caracteres/);
   assert.match(csv, /Citadas pelo mercado, sem verificação no pacote \(só como referência delimitada, nunca como fonte da afirmação\):/);
   for (const proibida of D10_PROIBIDAS) assert.doesNotMatch(doExport(csv), proibida, String(proibida));
 });

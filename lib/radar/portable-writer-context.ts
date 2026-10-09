@@ -161,5 +161,6 @@ export const RADAR_WRITING_RULES = [
   "não inventar metadados que o dossiê declara como não definidos;",
   "respeitar o plano visual: cada imagem tem função, e nenhuma repete a outra;",
   "respeitar as limitações — o que a coleta não alcançou não vira afirmação;",
-  "sinalizar qualquer dependência que continue sem resolução.",
+  /* 2026-10-09 (correção) · D10: o texto sai concluído — o que não tem fonte fica delimitado ou fora, sem marca no texto. */
+  "o que não tem fonte do pacote entra delimitado ou fica fora do texto.",
 ];

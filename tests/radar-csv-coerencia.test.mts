@@ -23,8 +23,11 @@ import {
 } from "../lib/radar/portable-writing-export.ts";
 import { radarPortableWritingExport } from "../lib/radar/portable-writing-batch.ts";
 import { buildRadarVideoExportArticle, radarPortableVideoExport } from "../lib/radar/portable-video-export.ts";
+import { plantaConcluidaDaBancada } from "./radar-piloto-artigo-modelo-fixtures-2026-10-09.mts";
 import { readRadarVideoUsagesForExport } from "../lib/server/radar-video-usage-read.ts";
 import type { RadarPortableExportInput } from "../lib/radar/portable-export.ts";
+import { RadarArticleBlueprintAiSchema, buildRadarArticleBlueprintBrief, radarArticleBlueprintPrompt, radarSanitizeArticleBlueprint } from "../lib/radar/article-blueprint.ts";
+import { comPlanta, comPlantas, plantaDe, respostaDaPlanta } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 import {
   ARTIGO,
   EXPORTADO_EM,
@@ -69,8 +72,18 @@ Object.defineProperty(globalThis, "fetch", {
 });
 
 const AVULSO: RadarWritingArticleContext = { topRowLabel: "Marca", filePosition: 1, silo: null, articleId: ARTIGO, publication: null };
+/*
+ * 2026-10-09 · regra do dono: o CSV "Para escrever" sai só com o artigo-modelo
+ * concluído. A linha é montada com a planta que a IA organizaria sobre o pacote
+ * (`radar-piloto-planta-fixtures-2026-10-09.mts`); as réguas daqui valem para o
+ * que a linha ainda escreve fora da planta e para a matéria-prima do gerador.
+ */
+const artigoDe = (entrada: RadarPortableExportInput, contexto: RadarWritingArticleContext = AVULSO) =>
+  buildRadarWritingExportArticle(entrada, comPlanta(entrada, contexto));
 const linha = (entrada: RadarPortableExportInput, contexto: RadarWritingArticleContext = AVULSO): RadarWritingExportRow =>
-  buildRadarWritingExportArticle(entrada, contexto).row;
+  artigoDe(entrada, contexto).row;
+const esqueletoDe = (entrada: RadarPortableExportInput) =>
+  buildRadarArticleBlueprintBrief({ entrada, silo: null, articleId: ARTIGO, publication: null }).skeleton.map(item => item.heading);
 const tudo = (row: RadarWritingExportRow) => RADAR_WRITING_EXPORT_COLUMNS.map(coluna => row[coluna]).join("\n");
 
 type Observado = Record<string, unknown> & {
@@ -154,17 +167,22 @@ test("1 · a seção de chamada para ação fica na estrutura da landing page e 
       ],
     }),
   });
+  /*
+   * 2026-10-09 · a régua vale na matéria-prima do artigo-modelo: o fecho
+   * retórico nem chega ao esqueleto do gerador (nem à estrutura da planta);
+   * a seção de conversão e o convite ao contato da página chegam.
+   */
   for (const tipo of ["landing_page", "service_page"]) {
-    const estrutura = linha(comFecho(tipo)).estrutura;
-    assert.match(estrutura, /^## Pronto para agendar sua avaliação\?$/m, `${tipo}: a seção de conversão é da página`);
-    assert.match(estrutura, /^## Ficou com alguma dúvida sobre a rotina\?$/m, `${tipo}: o convite ao contato é da página`);
-    assert.doesNotMatch(estrutura, /Gostou do conteúdo/);
-    assert.match(estrutura, /A seção de fecho retórico de concorrente ficou de fora/);
+    const esqueleto = esqueletoDe(comFecho(tipo));
+    assert.ok(esqueleto.includes("Pronto para agendar sua avaliação?"), `${tipo}: a seção de conversão é da página`);
+    assert.ok(esqueleto.includes("Ficou com alguma dúvida sobre a rotina?"), `${tipo}: o convite ao contato é da página`);
+    assert.equal(esqueleto.some(item => /Gostou do conteúdo/.test(item)), false);
+    assert.doesNotMatch(linha(comFecho(tipo)).estrutura, /Gostou do conteúdo/);
   }
-  const artigo = linha(comFecho(null)).estrutura;
-  assert.match(artigo, /^## Pronto para agendar sua avaliação\?$/m, "chamada para ação nunca sai da estrutura, nem no artigo");
-  assert.doesNotMatch(artigo, /Ficou com alguma dúvida|Gostou do conteúdo/);
-  assert.match(artigo, /2 seções de fecho retórico de concorrente ficaram de fora/);
+  const artigo = esqueletoDe(comFecho(null));
+  assert.ok(artigo.includes("Pronto para agendar sua avaliação?"), "chamada para ação nunca sai da estrutura, nem no artigo");
+  assert.equal(artigo.some(item => /Ficou com alguma dúvida|Gostou do conteúdo/.test(item)), false, artigo.join(" | "));
+  assert.doesNotMatch(linha(comFecho(null)).estrutura, /Ficou com alguma dúvida|Gostou do conteúdo/);
 });
 
 test("1 · a pergunta retórica não entra em NENHUMA lista: perguntas, movimentos, SERP resumida, abertura nem estrutura", () => {
@@ -195,8 +213,9 @@ test("1 · a pergunta retórica não entra em NENHUMA lista: perguntas, moviment
       assert.equal(/aprendeu como montar|gostou das dicas|gostou do conteúdo|ficou com alguma dúvida/i.test(trecho), false, `${coluna}: ${trecho}`);
     }
   }
-  assert.match(row.estrutura, /A seção de fecho retórico de concorrente ficou de fora/);
-  assert.doesNotMatch(row.promessa_e_leitor, /Abertura: responder "(Aprendeu|E aí)/);
+  /* 2026-10-09 · o fecho retórico nem chega ao esqueleto do artigo-modelo. */
+  assert.equal(esqueletoDe(entrada).some(item => /gostou do conteúdo/i.test(item)), false);
+  assert.doesNotMatch(row.estrutura, /Abertura: responder "(Aprendeu|E aí)/);
   assert.match(row.serp_resumida, /Pessoas também perguntam: O que é skincare para o rosto\?/, "a pergunta legítima do PAA continua");
 });
 
@@ -274,15 +293,23 @@ const diferencialForaDoEscopo = (basis: "ARTICLE_DECLARES" | "SERP_EVIDENCE", ar
 const NOTA_RESOLVIDA = /- Nota: o pacote também listava "Kits de skincare em promoção" como diferencial; aqui vale o "não cobrir" \(resolvido neste arquivo: fica fora de todas as colunas\)\./;
 
 test("3 · diferencial da SERP fora do escopo: o export resolve, sai uma nota, e o veredito não ganha ressalva", () => {
-  const artigo = buildRadarWritingExportArticle(diferencialForaDoEscopo("SERP_EVIDENCE"), AVULSO);
+  const artigo = artigoDe(diferencialForaDoEscopo("SERP_EVIDENCE"));
   assert.equal(artigo.verdict, "Sim", artigo.row.pode_escrever);
   assert.doesNotMatch(artigo.row.pode_escrever + artigo.row.prompt, /fora do escopo e também como diferencial|até o Radar resolver|decisão humana pendente|cabe decisão humana/);
-  assert.match(artigo.row.cobrir_e_superar, NOTA_RESOLVIDA);
+  /*
+   * 2026-10-09 · a lista de diferenciais da SERP saiu da coluna (a planta decide
+   * o que assume): não há o que conciliar, e a nota "resolvido" não é mais dita.
+   * O "não cobrir" vence, e o assunto não aparece em nenhuma outra linha.
+   */
+  assert.doesNotMatch(artigo.row.cobrir_e_superar, NOTA_RESOLVIDA);
+  assert.match(artigo.row.cobrir_e_superar, /^Não cobrir:\n(?:- .*\n)*- "Kits de skincare em promoção": /m);
+  const foraDoBloco = artigo.row.cobrir_e_superar.slice(0, artigo.row.cobrir_e_superar.indexOf("Não cobrir:"));
+  assert.doesNotMatch(foraDoBloco, /Kits de skincare em promoção/);
   assert.doesNotMatch(artigo.row.cobrir_e_superar, /Diferenciar em "Kits/);
 });
 
 test("3 · diferencial que o ArticleDNA DECLARA e o Radar marca fora do escopo: ressalva de decisão humana, nunca \"sem decisão pendente\"", () => {
-  const artigo = buildRadarWritingExportArticle(diferencialForaDoEscopo("ARTICLE_DECLARES"), AVULSO);
+  const artigo = artigoDe(diferencialForaDoEscopo("ARTICLE_DECLARES"));
   assert.equal(artigo.verdict, "Com ressalva", artigo.row.pode_escrever);
   assert.match(artigo.row.pode_escrever, /o ArticleDNA declara "Kits de skincare em promoção" como diferencial e o pacote do Radar o marca como fora do escopo: cabe decisão humana \(Radar ou Arquiteto\), e o diagnóstico do Radar não muda o DNA; neste texto, não o sustente como diferencial/);
   assert.doesNotMatch(artigo.row.cobrir_e_superar, NOTA_RESOLVIDA, "o que o DNA declara nunca é dito resolvido pelo export");
@@ -291,7 +318,7 @@ test("3 · diferencial que o ArticleDNA DECLARA e o Radar marca fora do escopo: 
 });
 
 test("3 · diferencial da SERP ligado a um ponto que o ArticleDNA EXIGE: também é ressalva de decisão humana", () => {
-  const artigo = buildRadarWritingExportArticle(diferencialForaDoEscopo("SERP_EVIDENCE", { mustCover: ["ordem dos produtos", "kits de skincare para presente"] }), AVULSO);
+  const artigo = artigoDe(diferencialForaDoEscopo("SERP_EVIDENCE", { mustCover: ["ordem dos produtos", "kits de skincare para presente"] }));
   assert.equal(artigo.verdict, "Com ressalva", artigo.row.pode_escrever);
   assert.match(artigo.row.pode_escrever, /o ArticleDNA exige um ponto ligado a "Kits de skincare em promoção", que o pacote do Radar marca como fora do escopo e também como diferencial: cabe decisão humana \(Radar ou Arquiteto\); neste texto, cubra o que o ArticleDNA exige/);
   assert.doesNotMatch(artigo.row.cobrir_e_superar, NOTA_RESOLVIDA);
@@ -305,7 +332,7 @@ test("4 · FAQ legado: a MESMA frase na regra geral, na coluna artigo e no promp
   assert.match(RADAR_WRITING_LEGACY_FAQ, /respostas úteis vão para o corpo/);
   for (const tipo of [null, "landing_page", "service_page"]) {
     const saida = radarPortableWritingExport({
-      articles: montadasDoSiloSaude().map(item => ({ ...item, entrada: { ...item.entrada, article: { ...item.entrada.article, contentType: tipo } } })),
+      articles: comPlantas(montadasDoSiloSaude().map(item => ({ ...item, entrada: { ...item.entrada, article: { ...item.entrada.article, contentType: tipo } } })), planoDoSilo().files[0].writing),
       lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM,
       publications: new Map([[ARTIGO, PUBLICACAO_SEM_POLITICA]]),
     });
@@ -326,22 +353,34 @@ test("4 · FAQ legado: a MESMA frase na regra geral, na coluna artigo e no promp
  * o link aprovado ou citado sem link; a SiloPage só no lugar dele, quando o
  * artigo é o último da ordem. Nunca "peça ao Arquiteto" (D10).
  */
-test("5 · continuação do leitor: sem link aprovado para o destino, a frase diz isso — e nunca inventa link", () => {
+/*
+ * 2026-10-09 · Defeito 10 · UM CTA SÓ: a continuação deixou o fechamento (e a
+ * coluna promessa). Ela é OPCIONAL e vai no corpo da seção da estrutura que tem
+ * o link aprovado para o destino ou, sem ele, na última seção que trata o
+ * destino (sem par, a última), citada sem link — a mesma linha da planta.
+ */
+test("5 · continuação do leitor: opcional, no corpo da seção dela; sem link aprovado, a frase diz isso — e nunca inventa link", () => {
   const silo = planoDoSilo().files[0].writing!;
   const contexto: RadarWritingArticleContext = { ...AVULSO, topRowLabel: "Silo", silo };
-  const sem = linha(entradaGoogle(), contexto).promessa_e_leitor;
-  assert.match(sem, new RegExp(`^Continuação \\(não é uma segunda chamada\\): no fechamento, apresente o próximo artigo do Silo, "skin care nivea", como a leitura seguinte ${RADAR_WRITING_NO_APPROVED_LINK.replace(/[()]/g, "\\$&")}\\.$`, "m"),
-    "o Pilar da bancada só tem link para a SiloPage");
+  /* 2026-10-09 · os links são os da planta: a planta que não pôs link nenhum cita a continuação sem link, na última seção. */
+  const semLinha = linha(entradaGoogle(), { ...contexto, blueprint: plantaDe(entradaGoogle(), { silo, articleId: ARTIGO, semLinks: true }) });
+  assert.doesNotMatch(semLinha.promessa_e_leitor, /Continuação|Leitura seguinte|Próximo passo do leitor/, "a promessa fica com uma chamada só");
+  const sem = semLinha.estrutura;
+  const linhaSem = `- Leitura seguinte (opcional, não é uma chamada): se couber, mencione o próximo artigo do Silo, "skin care nivea", no corpo desta seção ${RADAR_WRITING_NO_APPROVED_LINK}; nunca como uma segunda chamada no fechamento.`;
+  assert.ok(sem.split("\n").includes(linhaSem), sem);
+  assert.ok(sem.indexOf(linhaSem) > sem.lastIndexOf("\n## "), "sem link nem seção pertinente: na última seção");
+  assert.ok(sem.indexOf(linhaSem) < sem.indexOf("Fechamento:"), "no corpo, antes do fechamento");
+  assert.equal(sem.split(RADAR_WRITING_NO_APPROVED_LINK).length - 1, 1, "a falta dita uma vez");
   assert.doesNotMatch(sem, /Próximo passo do leitor|peça ao Arquiteto|SiloPage "Cuidados com a Pele"/, "uma chamada só: a SiloPage não vira segunda saída");
-  /* O Pilar de saúde tem o link aprovado para o Suporte "skin care nivea": a continuação leva o L dele. */
-  const com = linha(entradaGoogleSaude(), contexto).promessa_e_leitor;
-  assert.match(com, /^Continuação \(não é uma segunda chamada\): no fechamento, apresente o próximo artigo do Silo, "skin care nivea", como a leitura seguinte, com o link L\d\.$/m);
+  /* A planta com o link para o Suporte "skin care nivea": a continuação vai à seção do link, com o L dele. */
+  const com = linha(entradaGoogleSaude(), contexto).estrutura;
+  const secaoDoLink = com.slice(com.indexOf("## Como montar a rotina de skincare facial"), com.indexOf("\n## ", com.indexOf("## Como montar a rotina de skincare facial") + 3));
+  assert.match(secaoDoLink, /^- Link interno: âncora "skin care nivea" → skin care nivea$/m, com);
+  assert.match(secaoDoLink, /^- Leitura seguinte \(opcional, não é uma chamada\): o link L1 desta seção leva ao próximo artigo do Silo, "skin care nivea"; se couber, apresente-o ali como a leitura seguinte, nunca como uma segunda chamada no fechamento\.$/m);
   assert.equal(com.includes(RADAR_WRITING_NO_APPROVED_LINK), false);
-  /* Sem link nenhum: a continuação diz a falta, uma vez. */
-  const nada = linha({ ...entradaGoogle(), internalLinks: [] }, contexto).promessa_e_leitor;
-  assert.equal(nada.split(RADAR_WRITING_NO_APPROVED_LINK).length - 1, 1);
   /* Sem Silo, não há continuação a dizer. */
-  assert.doesNotMatch(linha(entradaGoogle()).promessa_e_leitor, /Continuação|Próximo passo do leitor/);
+  const avulsa = linha(entradaGoogle());
+  assert.doesNotMatch(avulsa.promessa_e_leitor + avulsa.estrutura, /Continuação|Leitura seguinte|Próximo passo do leitor/);
 });
 
 /* ================================ 6 ================================ */
@@ -478,9 +517,10 @@ test("6 · a leitura do export busca o começo da transcrição corrente de cada
 /* ================================ 7 ================================ */
 
 test("7 · SERP rastreável: as páginas comparáveis que embasaram as medidas, e a configuração de cada lente", () => {
-  const { files } = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
+  const { files } = radarPortableWritingExport({ articles: comPlantas(montadasDoSilo(), planoDoSilo().files[0].writing), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
   const pilar = files![0].csv;
-  assert.match(pilar, /Páginas comparáveis lidas pela investigação \(a base das medidas e dos ""N de M páginas"" deste arquivo; 12\):\n- Concorrente A0 · https:\/\/dominio-a0\.com\.br\/artigo\/skincare-facial/);
+  /* 2026-10-09 · Defeito 2 · a lista é a base única e diz o nome dela, o mesmo dos temas e das contagens. */
+  assert.match(pilar, /Páginas comparáveis lidas pela investigação \(a base das medidas e das contagens deste arquivo: 12 páginas comparáveis, de 12 sites\):\n- Concorrente A0 · https:\/\/dominio-a0\.com\.br\/artigo\/skincare-facial/);
   assert.match(pilar, /\n- e mais 2 página\(s\) comparável\(is\), na investigação do Radar/);
   assert.match(pilar, /- Configuração de cada lente: desktop · Windows \(observada em 22\/09\/2026\); desktop · macOS \(sem observação\); celular · Android \(observada em 22\/09\/2026\); celular · iOS \(sem observação\)\./);
   assert.match(pilar, /Consulta: skincare facial · Brasil · pt · desktop · Windows · coleta de 20\/09\/2026/, "o sistema da coleta principal, gravado no pacote");
@@ -490,7 +530,9 @@ test("7 · SERP rastreável: as páginas comparáveis que embasaram as medidas, 
   const observado = structuredClone(base.dossierGaps!.observed) as unknown as { competitors: Array<Record<string, unknown>> };
   const comparavel = observado.competitors.findIndex(item => item.comparable);
   observado.competitors[comparavel] = { ...observado.competitors[comparavel], url: "https://dominio-x.com.br/p/c0ffee00-1234-4abc-9def-00000000beef/guia" };
-  const row = linha({ ...base, dossierGaps: { ...base.dossierGaps!, observed: observado as never } });
+  /* 2026-10-09 · a base única sai do modelo observado (`googleObserved`, o mesmo objeto do dossiê no núcleo): os dois levam o endereço. */
+  const row = linha({ ...base, googleObserved: { ...base.googleObserved!, competitors: observado.competitors } as never, dossierGaps: { ...base.dossierGaps!, observed: observado as never } });
+  assert.match(row.serp_resumida, /^- Concorrente \S+ · [a-z0-9.-]+$/m, "o comparável com UUID no caminho sai pelo domínio");
   assert.doesNotMatch(row.serp_resumida, /c0ffee00-1234/);
   /* Sem lentes no pacote, nenhuma configuração inventada. */
   assert.match(linha(entradaGoogle()).serp_resumida, /^Lentes: não conferidas neste pacote; o topo acima é da coleta principal\.$/m);
@@ -500,22 +542,34 @@ test("7 · SERP rastreável: as páginas comparáveis que embasaram as medidas, 
 /* ================================ 8 ================================ */
 
 test("8 · plano visual: capa + 2 ou 3 respiros; com menos seções, o respiro que falta é declarado, nunca cortado", () => {
-  /* O Suporte comercial tem uma seção só (a de FAQ sai): antes, "uma capa e 1 respiro". */
-  const curto = linha(entradaAmazon(true), { ...AVULSO, articleId: null }).plano_visual;
-  assert.match(curto, /^Plano visual do pacote \(quem redige confirma\): uma capa e 2 respiro\(s\)\./);
-  assert.match(curto, /Regra: capa \+ 2 ou 3 respiros\. A estrutura deste pacote só ancora 1 respiro\(s\) em seção/);
-  assert.match(curto, /^Respiro 2 · definir a seção na estrutura final \(sugestão: antes do fechamento\) · 4:3/m);
-  assert.match(curto, /Prompts das imagens: com artigo-modelo da SERP organizado no Radar, eles saem dele/);
-  /* Com seções suficientes, nada muda: 3 respiros e nenhuma nota. */
-  const cheio = linha(entradaGoogle()).plano_visual;
-  assert.match(cheio, /uma capa e 3 respiro\(s\)\./);
-  assert.doesNotMatch(cheio, /Regra: capa|definir a seção na estrutura final|Prompts das imagens/);
-  /* Nenhuma linha com plano fica abaixo de dois respiros. */
+  /*
+   * 2026-10-09 · o plano visual é o da PLANTA (regra do dono): o "Plano visual
+   * do pacote" legado e a vaga "definir a seção na estrutura final" saíram. A
+   * regra vale no gerador (regra 9 do pedido) e na conferência, que diz a falta
+   * do respiro; no CSV, cada respiro aponta a seção da planta pelo título.
+   */
+  const brief = buildRadarArticleBlueprintBrief({ entrada: entradaAmazon(true), silo: null, articleId: ARTIGO, publication: null });
+  assert.match(radarArticleBlueprintPrompt(brief).system + radarArticleBlueprintPrompt(brief).user, /exatamente uma CAPA e 2 ou 3 respiros/);
+  const umRespiro = RadarArticleBlueprintAiSchema.parse(respostaDaPlanta(brief, {
+    visual: [
+      { slot: "CAPA", section: null, concept: "Bancada clara", prompt: "Bancada clara, luz natural. Sem texto legível. Proporção 16:9.", alt: "Bancada", caption: "" },
+      { slot: "R1", section: null, concept: "Mão organizando", prompt: "Mão organizando a bancada. Sem texto legível. Proporção 4:3.", alt: "Mão", caption: "" },
+    ],
+  }));
+  assert.ok(radarSanitizeArticleBlueprint(umRespiro, brief).notes.includes("Plano visual com 1 respiro(s): a regra pede dois ou três."), "a falta do respiro é dita, nunca cortada em silêncio");
+  /* Nenhuma linha fica abaixo de dois respiros, e cada um aponta uma seção da planta pelo título. */
   for (const entrada of [entradaGoogle(), entradaGoogleSaude(), entradaAmazon(true), entradaAmazon(false)]) {
-    const plano = linha(entrada).plano_visual;
-    if (!plano) continue;
-    const respiros = Number(plano.match(/uma capa e (\d) respiro/)?.[1] ?? 0);
-    assert.ok(respiros >= 2 && respiros <= 3, plano.split("\n")[0]);
+    const row = linha(entrada);
+    const plano = row.plano_visual;
+    assert.match(plano, /^Plano visual: \d imagem\(ns\)\./);
+    assert.doesNotMatch(plano, /Plano visual do pacote|definir a seção na estrutura final|Prompts das imagens/);
+    assert.equal(plano.split("\n").filter(item => /^Capa\b/.test(item)).length, 1, "uma capa");
+    const respiros = plano.split("\n").filter(item => /^Respiro \d/.test(item));
+    assert.ok(respiros.length >= 2 && respiros.length <= 3, plano);
+    for (const respiro of respiros) {
+      const secao = respiro.match(/ · seção "([^"]+)"/)?.[1];
+      assert.ok(secao && row.estrutura.includes(`## ${secao}`), `${respiro}\n${row.estrutura}`);
+    }
   }
 });
 
@@ -529,17 +583,18 @@ test("9 · o tipo da unidade: landing page, página de serviço e review falam d
   assert.equal(radarWritingUnitOf({ article: { contentType: "review" } as never }).noun, "review");
 
   const comTipo = (tipo: string | null) => entradaGoogle({ article: { ...entradaGoogle().article, contentType: tipo } });
-  const artigo = buildRadarWritingExportArticle(comTipo(null), AVULSO);
+  const artigo = artigoDe(comTipo(null));
   assert.equal("unitNoun" in artigo, false, "no artigo, o objeto não ganha chave nova");
-  assert.deepEqual(buildRadarWritingExportArticle(comTipo("article"), AVULSO), artigo, "\"article\" e sem tipo são o mesmo");
+  assert.deepEqual(artigoDe(comTipo("article")), artigo, "\"article\" e sem tipo são o mesmo");
 
   const landing = linha(comTipo("landing_page"));
   assert.match(landing.prompt, /^Escreva em português do Brasil a landing page descrita nesta linha/);
   assert.doesNotMatch(landing.prompt, /data de atualização visível/, "landing page não pede data de atualização");
   assert.match(landing.artigo, /^Formato: Landing page/m);
-  assert.match(landing.plano_visual, /função: Representar visualmente a promessa principal da landing page/);
+  /* 2026-10-09 · o plano visual é o da planta; o tipo da unidade chega à planta (e ao gerador) pelo nome. */
+  assert.match(landing.estrutura, /^Tipo da unidade: landing page\./m);
 
-  const servico = buildRadarWritingExportArticle(comTipo("service_page"), { ...AVULSO, publication: PUBLICACAO_SEM_POLITICA });
+  const servico = artigoDe(comTipo("service_page"), { ...AVULSO, publication: PUBLICACAO_SEM_POLITICA });
   assert.equal(servico.unitNoun, "página de serviço");
   assert.match(servico.row.prompt, /\nNesta página de serviço:\n/);
   assert.match(servico.row.prompt, /- Página de serviço publicada: é atualização; preserve URL, slug e canonical/);
@@ -550,17 +605,23 @@ test("9 · o tipo da unidade: landing page, página de serviço e review falam d
 
   /* A linha de topo fala de "artigos e páginas" só quando o arquivo tem página. */
   const misto = radarPortableWritingExport({
-    articles: montadasDoSilo().map((item, indice) => (indice === 0 ? { ...item, entrada: comTipo("landing_page") } : item)),
+    articles: comPlantas(montadasDoSilo().map((item, indice) => (indice === 0 ? { ...item, entrada: comTipo("landing_page") } : item))),
     lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM,
   }).csv || "";
   assert.match(misto, /Regras gerais para todos os artigos e páginas deste arquivo/);
   assert.match(misto, /só os indicados em cada artigo ou página \(L1, L2…\)/);
-  const soArtigos = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM }).csv || "";
+  const soArtigos = radarPortableWritingExport({ articles: comPlantas(montadasDoSilo()), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM }).csv || "";
   assert.match(soArtigos, /Regras gerais para todos os artigos deste arquivo/);
   assert.doesNotMatch(soArtigos, /artigo ou página/);
 
-  /* O CSV de vídeo leva o público à página que a linha descreve. */
-  const video = radarPortableVideoExport({ articles: [{ entrada: comTipo("landing_page") }], today: EXPORTADO_EM }).csv;
+  /*
+   * O CSV de vídeo leva o público à página que a linha descreve.
+   * 2026-10-09 · regra do dono: o CSV de vídeo só sai com o artigo-modelo
+   * aprovado de cada artigo (sem ele, `needs_article_blueprint`).
+   */
+  const saidaDoVideo = radarPortableVideoExport({ articles: [{ entrada: comTipo("landing_page"), blueprint: plantaConcluidaDaBancada("Skincare facial: a rotina da manhã") }], today: EXPORTADO_EM });
+  assert.equal(saidaDoVideo.status, "ready");
+  const video = saidaDoVideo.status === "ready" ? saidaDoVideo.csv : "";
   assert.match(video, /CTA para a landing page \(\/skincare-facial\)/);
   assert.match(video, /o link da landing page/);
   assert.match(video, /Cada vídeo leva o público para o artigo ou a página da marca/);

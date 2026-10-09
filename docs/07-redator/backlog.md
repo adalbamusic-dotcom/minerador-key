@@ -1,5 +1,27 @@
 # Backlog — Redator
 
+## Regra do piloto em todas as operações — 2026-10-09
+
+Detalhe em `docs/07-redator/estado-atual.md` e `docs/05-radar/estado-atual.md` (seções de mesma data). **Validado
+manualmente: não.**
+
+- [x] Escolha da planta pelo pick do CSV, com a Amazon congelada; leitura compartilhada; trava com as afirmações do
+  pacote; `publishedMap` na planta antiga pela página lida agora.
+- [x] Semeadura pelo `radarVideoPlan`; recusas 409/503 antes de qualquer IA; contagens pela régua do CSV.
+- [x] Correção: semente sem a "Recomendação editorial do Radar" e sem "Precisa responder/cobrir" do blueprint antigo.
+- [x] Melhoria de trecho com a seção do H2; regra do mapa da página publicada e D10 nos prompts.
+- [x] Painel com o artigo-modelo (rota nova só de leitura); correção: estado "não lido agora" sem o link de organizar;
+  recomendação como matéria-prima e perguntas como evidência.
+- [x] Correção: o envio grava a virada do Assunto pela planta; o MCP `get_writer_brief` serve a virada pela planta;
+  `save_writer_deliverable` exige a planta concluída.
+- [ ] Proposta: trava de fonte (`radarClaimGate`) e varredura D10 nas cenas e lâminas que uma IA externa salva por
+  `save_writer_deliverable`.
+- [ ] Proposta: o resumo do `radarVideoPlan` (formato e motivo, capítulos, cortes) em `get_writer_foundations`, dentro
+  do teto de 24 kB.
+- [ ] Remover `radarWriterSubjectTurnLines` (legada, só testes) numa rodada própria, junto dos testes do texto antigo.
+- [ ] **Dono (homologação, grátis):** painel de fundamentos nos estados lendo/aprovado/ausente/não lido; mensagens
+  409/503 da semeadura na tela de derivados; melhoria com a seção do H2; pautas do especialista com a planta.
+
 ## Planta para quem escreve e voz de entregável — 2026-10-08
 
 - [x] `writerArticleBlueprintForWriting`: nomes atuais, `needsSource` (topo e seção) e `publishedMap` nos fundamentos, no pacote da IA interna, na semeadura e na fatia.

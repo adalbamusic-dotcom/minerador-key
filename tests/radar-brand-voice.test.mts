@@ -12,6 +12,13 @@ import { radarPortableWritingExport } from "../lib/radar/portable-writing-batch.
 import { radarPortableVideoExport } from "../lib/radar/portable-video-export.ts";
 import { buildRadarArticleBlueprintBrief, radarArticleBlueprintPrompt } from "../lib/radar/article-blueprint.ts";
 import { ARTIGO, EXPORTADO_EM, LEITURA_DAS_LENTES, entradaGoogle, montadasDoSilo, planoDoSilo } from "./radar-portable-writing-fixtures.mts";
+import { plantaConcluidaDaBancada } from "./radar-piloto-artigo-modelo-fixtures-2026-10-09.mts";
+/* 2026-10-09 · o CSV "Para escrever" sai só com a planta concluída de cada artigo (regra do dono). */
+import { comPlantas } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
+
+/* 2026-10-09 · o CSV de vídeo sai só pela planta APPROVED: a linha de vídeo destes testes leva uma, e o CSV vem do estado "ready". */
+const LINHA_DE_VIDEO = { entrada: entradaGoogle(), youtube: null, blueprint: plantaConcluidaDaBancada("Skincare facial: a rotina da manhã") };
+const csvDoVideo = (saida: ReturnType<typeof radarPortableVideoExport>): string => (saida.status === "ready" ? saida.csv : assert.fail(`o lote pediu o artigo-modelo: ${JSON.stringify(saida)}`));
 
 /*
  * ===== A VOZ DA MARCA NOS ENTREGÁVEIS (SDD diretriz editorial, Adendo C — 2026-10-02) =====
@@ -95,7 +102,7 @@ test("só a URL do próprio site da marca vira destino; documentação de tercei
 });
 
 test("CSV para escrever: Skill ativa ganha a linha 'Voz da marca' logo abaixo do topo, e cada artigo aponta para ela", () => {
-  const saida = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM, brandVoice: ATIVA });
+  const saida = radarPortableWritingExport({ articles: comPlantas(montadasDoSilo(), planoDoSilo().files[0].writing), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM, brandVoice: ATIVA });
   const linhas = lerCsv(saida.files![0].csv);
   assert.deepEqual(linhas.slice(0, 2).map(item => item.ordem), ["Silo", "Voz da marca"]);
   const voz = linhas[1];
@@ -116,7 +123,7 @@ test("CSV para escrever: Skill ativa ganha a linha 'Voz da marca' logo abaixo do
  */
 test("CSV para escrever: Skill em rascunho entra (regra canônica da Marca), dita como a versão corrente (D10)", () => {
   for (const [estado, voz] of [["draft", RASCUNHO], ["pending_approval", { kind: "available", voice: { ...VOZ, status: "pending_approval" } } as RadarBrandVoiceState]] as const) {
-    const saida = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM, brandVoice: voz });
+    const saida = radarPortableWritingExport({ articles: comPlantas(montadasDoSilo()), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM, brandVoice: voz });
     const linhas = lerCsv(saida.csv || "");
     assert.deepEqual(linhas.slice(0, 2).map(item => item.ordem), ["Marca", "Voz da marca"], estado);
     assert.match(linhas[0].promessa_e_leitor, /Skill "AdalbaPro" v1 \(versão corrente na Marca\)/, estado);
@@ -125,13 +132,13 @@ test("CSV para escrever: Skill em rascunho entra (regra canônica da Marca), dit
     assert.doesNotMatch(saida.csv || "", /em rascunho|aguardando aprovação/, estado);
   }
   /* A ativa continua dita ativa. */
-  const ativa = lerCsv(radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM, brandVoice: ATIVA }).csv || "");
+  const ativa = lerCsv(radarPortableWritingExport({ articles: comPlantas(montadasDoSilo()), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM, brandVoice: ATIVA }).csv || "");
   assert.match(ativa[1].artigo, /Versão 1 da Skill de voz, ativa na Marca\./);
   assert.match(ativa[0].promessa_e_leitor, /Skill "AdalbaPro" v1 \(ativa na Marca\)/);
 });
 
 test("CSV para escrever: sem Skill na Marca, sem linha de voz, e o topo diz onde ela mora", () => {
-  const saida = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM, brandVoice: NENHUMA });
+  const saida = radarPortableWritingExport({ articles: comPlantas(montadasDoSilo()), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM, brandVoice: NENHUMA });
   const linhas = lerCsv(saida.csv || "");
   assert.equal(linhas.some(item => item.ordem === "Voz da marca"), false);
   assert.match(linhas[0].promessa_e_leitor, /não há Skill de voz na Marca \(Skills e prompts\)/);
@@ -140,14 +147,13 @@ test("CSV para escrever: sem Skill na Marca, sem linha de voz, e o topo diz onde
 });
 
 test("CSV para escrever: sem informar a voz, o arquivo é o de antes", () => {
-  const antes = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
+  const antes = radarPortableWritingExport({ articles: comPlantas(montadasDoSilo(), planoDoSilo().files[0].writing), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
   assert.equal(/Voz da marca: aplique|ordem.*Voz da marca/.test(antes.files![0].csv), false);
   assert.match(antes.files![0].csv, /Voz, tom, autor e revisor: não fazem parte deste arquivo/);
 });
 
 test("CSV de vídeo: a mesma voz, em linha própria, e o roteiro aponta para ela", () => {
-  const saida = radarPortableVideoExport({ articles: [{ entrada: entradaGoogle(), youtube: null }], today: EXPORTADO_EM, brandVoice: ATIVA });
-  const linhas = lerCsv(saida.csv);
+  const linhas = lerCsv(csvDoVideo(radarPortableVideoExport({ articles: [LINHA_DE_VIDEO], today: EXPORTADO_EM, brandVoice: ATIVA })));
   assert.deepEqual(linhas.map(item => item.ordem), ["Marca", "Voz da marca", "1"]);
   assert.match(linhas[1].tema_e_publico, /Biomédicas estetas/);
   assert.match(linhas[1].prompt, /Linguagem próxima/);
@@ -157,7 +163,7 @@ test("CSV de vídeo: a mesma voz, em linha própria, e o roteiro aponta para ela
   assert.equal(/Uma capa e dois ou três respiros/.test(Object.values(linhas[1]).join("\n")), false);
   assert.match(linhas[1].diretrizes_de_roteiro, /Não recomendar Instagram Shopping/);
   assert.match(linhas[2].prompt, /usando SOMENTE os dados desta linha e da linha "Voz da marca"/);
-  const semVoz = lerCsv(radarPortableVideoExport({ articles: [{ entrada: entradaGoogle(), youtube: null }], today: EXPORTADO_EM, brandVoice: NENHUMA }).csv);
+  const semVoz = lerCsv(csvDoVideo(radarPortableVideoExport({ articles: [LINHA_DE_VIDEO], today: EXPORTADO_EM, brandVoice: NENHUMA })));
   assert.deepEqual(semVoz.map(item => item.ordem), ["Marca", "1"]);
   assert.match(semVoz[0].pode_gravar, /não há Skill de voz na Marca/);
 });
@@ -206,7 +212,7 @@ test("rótulo da voz para entregável: a ativa é dita ativa; rascunho, aguardan
   assert.equal(radarBrandVoiceLabel({ ...VOZ, status: "draft" }), 'Skill "AdalbaPro" v1 (em rascunho na Marca)');
   assert.equal(radarBrandVoiceLabel({ ...VOZ, status: "pending_approval" }), 'Skill "AdalbaPro" v1 (aguardando aprovação na Marca)');
   /* O CSV de vídeo já saía assim (2026-10-07): o rascunho entra como a versão corrente. */
-  const video = lerCsv(radarPortableVideoExport({ articles: [{ entrada: entradaGoogle(), youtube: null }], today: EXPORTADO_EM, brandVoice: RASCUNHO }).csv);
+  const video = lerCsv(csvDoVideo(radarPortableVideoExport({ articles: [LINHA_DE_VIDEO], today: EXPORTADO_EM, brandVoice: RASCUNHO })));
   assert.match(Object.values(video[0]).join("\n"), /Skill "AdalbaPro" v1 \(versão corrente na Marca\)/);
   assert.doesNotMatch(Object.values(video[0]).join("\n") + Object.values(video[1]).join("\n"), /em rascunho na Marca|aguardando aprovação na Marca/);
 });

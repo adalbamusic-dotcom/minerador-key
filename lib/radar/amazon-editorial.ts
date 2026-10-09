@@ -100,6 +100,8 @@ const numero = (valor: number) => valor.toLocaleString("pt-BR");
 export function buildRadarAmazonPriceBands(input: {
   universe: readonly RadarAmazonUniverseEntry[];
   observedAt: string;
+  /** 2026-10-09 · aditivo: de onde a amostra veio (os compatíveis com o alvo). Sem ele, a frase de sempre. */
+  source?: string;
 }): RadarObservedPrice[] {
   const precos = input.universe
     .map(item => item.priceFrom)
@@ -127,7 +129,7 @@ export function buildRadarAmazonPriceBands(input: {
       observedValue: mediana(faixa.valores),
       currency: moeda,
       observedAt: input.observedAt,
-      source: "Universo de produtos desta coleta da Amazon.",
+      source: input.source || "Universo de produtos desta coleta da Amazon.",
       sampleSize: faixa.valores.length,
       method: `Tercil da amostra de ${precos.length} preço(s) observada nesta coleta.`,
       rangeFrom: faixa.de,
@@ -137,8 +139,60 @@ export function buildRadarAmazonPriceBands(input: {
 
 /* ============================ o observado ============================ */
 
+/**
+ * ===== 2026-10-09 · A BASE DA LEITURA COMERCIAL: OS COMPATÍVEIS COM O ALVO =====
+ *
+ * Regra do dono (o processo do piloto substitui o antigo): faixas, critérios,
+ * reputação, sinais de compra e os cards saem dos produtos que o alvo admite
+ * (`amazon-eligibility`), e não da prateleira inteira. Com "sérum facial" +
+ * "Nivea", o hidratante labial e o sérum de outra marca que a busca devolveu
+ * deixam de puxar a faixa de preço e a nota mediana.
+ *
+ * Só a descoberta por classe e marca (`CLASS_AND_BRAND`) troca a base. Os
+ * produtos escolhidos à mão (`TARGET_PRODUCTS`) têm o resto da prateleira como
+ * CONTEXTO competitivo pelo próprio contrato da elegibilidade, e sem filtro
+ * (`NO_FILTER`) os compatíveis SÃO a prateleira.
+ *
+ * Vale para a ANÁLISE NOVA: a fotografia congelada guarda o blueprint pronto, e
+ * quem a lê não passa por aqui — hash e leitura do congelamento antigo não mudam.
+ */
+export type RadarAmazonBlueprintBase = {
+  /** Os produtos sobre os quais a leitura comercial é feita. */
+  universe: readonly RadarAmazonUniverseEntry[];
+  /** Quantos a coleta devolveu (a prateleira inteira, evidência intacta). */
+  observedCount: number;
+  basis: "ELIGIBLE" | "RAW";
+};
+
+export function radarAmazonBlueprintBaseOf(input: {
+  run: Pick<RadarAmazonSearchRun, "universe">;
+  eligibility?: { eligible: readonly RadarAmazonUniverseEntry[]; method: string } | null;
+}): RadarAmazonBlueprintBase {
+  const observedCount = input.run.universe.length;
+  if (input.eligibility?.method === "CLASS_AND_BRAND") {
+    return { universe: input.eligibility.eligible, observedCount, basis: "ELIGIBLE" };
+  }
+  return { universe: input.run.universe, observedCount, basis: "RAW" };
+}
+
+/**
+ * 2026-10-09 · O BLUEPRINT GRAVADO (ainda não congelado) FOI LIDO NA BASE NOVA?
+ *
+ * Um "Analisar" feito antes desta regra deixou o blueprint sobre a prateleira
+ * inteira. Finalizar congela a base nova: a análise é refeita (grátis, sem
+ * provider) quando o número de produtos lidos não é o dos compatíveis.
+ */
+export function radarAmazonBlueprintNeedsNewBase(blueprint: Pick<RadarAmazonBlueprint, "observed">, base: RadarAmazonBlueprintBase): boolean {
+  return base.basis === "ELIGIBLE" && blueprint.observed.products !== base.universe.length;
+}
+
 type Contexto = {
   run: RadarAmazonSearchRun;
+  /** 2026-10-09 · os produtos da leitura (os compatíveis com o alvo, na descoberta por classe e marca). */
+  universo: readonly RadarAmazonUniverseEntry[];
+  /** 2026-10-09 · a base da leitura e o tamanho da prateleira inteira. */
+  base: RadarAmazonBlueprintBase["basis"];
+  observados: number;
   contagem: ReturnType<typeof radarAmazonUniverseCounts>;
   posicoesPagas: number;
   moeda: string | null;
@@ -164,23 +218,33 @@ function montarContexto(
   run: RadarAmazonSearchRun,
   support: RadarAmazonGoogleSupport | null,
   fundamento: { declaredIntent: string | null; primaryKeyword: string | null },
+  /* 2026-10-09 · a base da leitura; sem ela, a prateleira inteira (a análise de antes, byte a byte). */
+  base: RadarAmazonBlueprintBase = radarAmazonBlueprintBaseOf({ run }),
 ): Contexto {
+  const universo = base.universe;
   return {
     run,
+    universo,
+    base: base.basis,
+    observados: base.observedCount,
     declaredIntent: fundamento.declaredIntent,
     primaryKeyword: fundamento.primaryKeyword,
-    contagem: radarAmazonUniverseCounts(run.universe),
-    posicoesPagas: run.universe.reduce(
+    contagem: radarAmazonUniverseCounts(universo),
+    posicoesPagas: universo.reduce(
       (total, item) => total + item.occurrences.filter(ocorrencia => ocorrencia.placement === "SPONSORED").length,
       0,
     ),
-    moeda: run.universe.find(item => item.currency)?.currency || null,
-    precos: run.universe.map(item => item.priceFrom).filter((valor): valor is number => valor !== null),
-    notas: run.universe.map(item => item.ratingValue).filter((valor): valor is number => valor !== null),
-    votos: run.universe.map(item => item.ratingVotes).filter((valor): valor is number => valor !== null),
-    comprados: run.universe.filter(item => item.boughtPastMonth !== null),
-    entregas: run.universe.filter(item => item.deliveryMessage).length,
-    bandas: buildRadarAmazonPriceBands({ universe: run.universe, observedAt: run.provenance.collectedAt }),
+    moeda: universo.find(item => item.currency)?.currency || null,
+    precos: universo.map(item => item.priceFrom).filter((valor): valor is number => valor !== null),
+    notas: universo.map(item => item.ratingValue).filter((valor): valor is number => valor !== null),
+    votos: universo.map(item => item.ratingVotes).filter((valor): valor is number => valor !== null),
+    comprados: universo.filter(item => item.boughtPastMonth !== null),
+    entregas: universo.filter(item => item.deliveryMessage).length,
+    bandas: buildRadarAmazonPriceBands({
+      universe: universo,
+      observedAt: run.provenance.collectedAt,
+      ...(base.basis === "ELIGIBLE" ? { source: "Produtos compatíveis com o alvo, desta coleta da Amazon." } : {}),
+    }),
     support,
   };
 }
@@ -301,7 +365,7 @@ const sinaisDeCompra = (ctx: Contexto): RadarObservedSignal[] => {
 };
 
 const sinaisDeOferta = (ctx: Contexto): RadarObservedSignal[] => {
-  const textos = [...new Set(ctx.run.universe.flatMap(item => item.offerText))];
+  const textos = [...new Set(ctx.universo.flatMap(item => item.offerText))];
   const sinais: RadarObservedSignal[] = [];
 
   if (textos.length) {
@@ -402,6 +466,14 @@ const sinaisDoGoogle = (ctx: Contexto): RadarObservedSignal[] => {
  * quatro produtos.
  */
 const suficiencia = (ctx: Contexto): string => {
+  /* 2026-10-09 · na base dos compatíveis, a frase diz de onde a amostra veio — e o vazio é do alvo, não da coleta. */
+  if (ctx.base === "ELIGIBLE") {
+    if (ctx.contagem.total === 0) return `Nenhum dos ${ctx.observados} produto(s) observados é compatível com o alvo declarado: não há amostra comparável para concluir.`;
+    if (ctx.contagem.total < 8) {
+      return `Amostra pequena: ${ctx.contagem.total} produto(s) compatível(is) com o alvo, de ${ctx.observados} observado(s). Serve para descrever estas opções, não para generalizar a categoria.`;
+    }
+    return `Amostra de ${ctx.contagem.total} produto(s) compatível(is) com o alvo, de ${ctx.observados} observado(s), ${ctx.precos.length} com preço e ${ctx.notas.length} com avaliação — suficiente para faixas e agrupamentos, não para julgar produto individual.`;
+  }
   if (ctx.contagem.total === 0) return "A coleta não devolveu produtos: não há amostra competitiva para concluir.";
   if (ctx.contagem.total < 8) {
     return `Amostra pequena: ${ctx.contagem.total} produto(s). Serve para descrever a prateleira, não para generalizar a categoria.`;
@@ -862,11 +934,19 @@ export function amazonCompetitiveBlueprintOfAnalysis(input: {
   researchRefs: readonly RadarResearchRef[];
   generatedAt: string;
   frozenAt: string | null;
+  /**
+   * 2026-10-09 · Aditivo: a elegibilidade do alvo (`radarAmazonEligibleCandidates`).
+   * Na descoberta por classe e marca, a leitura comercial é feita sobre os
+   * compatíveis (`radarAmazonBlueprintBaseOf`). Sem ela, a prateleira inteira,
+   * como antes — o blueprint sai byte a byte igual.
+   */
+  eligibility?: { eligible: readonly RadarAmazonUniverseEntry[]; method: string } | null;
 }): RadarAmazonBlueprint {
+  const base = radarAmazonBlueprintBaseOf({ run: input.run, eligibility: input.eligibility ?? null });
   const ctx = montarContexto(input.run, input.support, {
     declaredIntent: input.declaredIntent,
     primaryKeyword: input.primaryKeyword,
-  });
+  }, base);
   const eixos = eixosDeComparacao(ctx);
   const saidas = saidasRecomendadas(ctx, eixos);
 
@@ -874,6 +954,10 @@ export function amazonCompetitiveBlueprintOfAnalysis(input: {
   const limitacoes = [
     ...RADAR_AMAZON_BASE_LIMITATIONS,
     ...(semApoio ? [RADAR_AMAZON_SUPPORT_MISSING_LIMITATION] : []),
+    /* 2026-10-09 · a base da leitura é dita onde quem assina o artigo lê. */
+    ...(base.basis === "ELIGIBLE"
+      ? [`A leitura comercial (faixas de preço, critérios, reputação e sinais de compra) considera só os ${base.universe.length} produto(s) compatível(is) com o alvo, de ${base.observedCount} observado(s) na prateleira.`]
+      : []),
     ...input.run.limitations,
   ];
 

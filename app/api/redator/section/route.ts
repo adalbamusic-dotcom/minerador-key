@@ -9,6 +9,7 @@ import { RedatorSectionRequestSchema } from "@/lib/redator/contracts";
 import { WriterSectionProviderSchema } from "@/lib/redator/writer-section-evidence";
 import { runWriterSectionProposal } from "@/lib/server/writer-evidence-ai";
 import { WriterEvidenceError } from "@/lib/server/writer-evidence-document";
+import { radarReadPublishedStructure } from "@/lib/server/radar-portable-export-core";
 
 /*
  * A evidência vem do SERVIDOR, pela linha do documento na Marca autorizada
@@ -24,7 +25,8 @@ export async function POST(request: NextRequest) {
     if (!section) throw new AuthzError(422, "A seção solicitada não pertence ao documento.");
     const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: profile.userId, brandId: input.brandId, client: createCanonicalServiceClient() });
     const result = await runWriterSectionProposal({
-      context: { brandId: input.brandId },
+      /* 2026-10-09 · com o leitor da página publicada do CSV: a planta antiga de artigo publicado ganha o mapa da atualização. */
+      context: { brandId: input.brandId, readPublishedStructure: radarReadPublishedStructure },
       actorUserId: profile.userId,
       document: input.document,
       sectionId: input.sectionId,

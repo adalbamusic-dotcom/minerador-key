@@ -1936,9 +1936,14 @@ export function buildRadarEditorialArticleModel(input: {
   if (evidenceNeeds.length) motivos.push(`${evidenceNeeds.length} fonte(s) pendente(s)`);
   if (specialistNeeds.length) motivos.push(`${specialistNeeds.length} revisão(ões) profissional(is)`);
 
+  /*
+   * 2026-10-09 · O ESQUELETO NÃO DIZ "PRONTO PARA O REDATOR". Este modelo virou
+   * matéria-prima do gerador do artigo-modelo (o esqueleto da SERP); quem vai ao
+   * Redator é a planta concluída. O rótulo diz só o estado do esqueleto.
+   */
   const readiness = motivos.length
     ? { state: "PARTIAL" as const, label: `Parcial · ${motivos.join(" · ")}`, reasons: motivos }
-    : { state: "READY" as const, label: "Pronto para o Redator", reasons: [] };
+    : { state: "READY" as const, label: "Esqueleto completo", reasons: [] };
 
   return {
     articleIdentity: {

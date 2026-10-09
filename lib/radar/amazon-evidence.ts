@@ -29,6 +29,7 @@ import {
 import { radarAmazonUniverseCounts } from "./amazon-search-model.ts";
 import type { RadarAmazonSearchRun } from "./amazon-search-run.ts";
 import { radarAmazonSetupSignature, type RadarAmazonEditorialIntent, type RadarAmazonResearchTarget } from "./amazon-editorial-target.ts";
+import { radarRunFailedQueriesLimitation } from "./investigation-finalization.ts";
 
 /**
  * O RESUMO OBSERVADO, CONGELADO — oito números, não a amostra.
@@ -145,6 +146,14 @@ export function freezeRadarAmazonInvestigation(input: {
   finalizedAt: string;
   /** §6 · a configuração que originou a coleta, congelada com ela. */
   setup?: { intent: RadarAmazonEditorialIntent; target: RadarAmazonResearchTarget } | null;
+  /**
+   * 2026-10-09 · LIMITAÇÕES EXTRAS — aditivo.
+   *
+   * O que falhou e não segurou o congelamento (a regra do Google, agora nos
+   * três perfis) entra aqui, escrito pela mesma frase que a tela diz. Ausente
+   * ou vazio, numa corrida sem consulta que falhou: a fotografia sai como saía.
+   */
+  extraLimitations?: readonly string[];
 }): RadarAmazonFrozenInvestigation {
   if (input.run.state !== "COLLECTED") {
     throw new RadarAmazonFinalizeError(
@@ -178,6 +187,21 @@ export function freezeRadarAmazonInvestigation(input: {
   }
 
   const contagem = radarAmazonUniverseCounts(input.run.universe);
+
+  /*
+   * ====== 2026-10-09 · A CONSULTA QUE FALHOU VIRA LIMITAÇÃO REGISTRADA ======
+   *
+   * Regra do dono (2026-10-09): a Amazon finaliza sozinha com a regra do
+   * Google. Consulta da Amazon que falhou não segura mais o congelamento — ela
+   * fica escrita aqui, derivada da própria corrida, pela frase comum
+   * (`radarRunFailedQueriesLimitation`). O apoio do Google ausente já vem
+   * declarado no blueprint (SUPPORT_MISSING). Sem nada a acrescentar, a lista é
+   * exatamente a de antes: fotografia sem falha não muda.
+   */
+  const acrescimos = [
+    ...radarRunFailedQueriesLimitation(input.run, "consulta(s) da Amazon"),
+    ...(input.extraLimitations || []).map(item => item.trim()).filter(Boolean),
+  ].filter((item, indice, todos) => todos.indexOf(item) === indice && !input.blueprint.limitations.includes(item));
 
   return RadarAmazonFrozenInvestigationSchema.parse({
     frozenVersion: 1,
@@ -226,7 +250,7 @@ export function freezeRadarAmazonInvestigation(input: {
       provenance: { ...input.blueprint.provenance, frozenAt: input.finalizedAt },
     },
     editorialOutput: input.blueprint.recommended.recommendedOutputs[0]?.output ?? null,
-    limitations: input.blueprint.limitations,
+    limitations: acrescimos.length ? [...input.blueprint.limitations, ...acrescimos] : input.blueprint.limitations,
   });
 }
 

@@ -411,9 +411,10 @@ const acaoDaFase1 = (entrada: { pending: number; analyzed: number; analysisConfi
   radarPhase1Action({ state: "AWAITING_REVIEW", contextReady: true, hasPrimaryQuery: true, running: false, selected: 12, failed: 0, ...entrada });
 
 test("O BOTÃO VISÍVEL · a frase usa a mesma montagem do botão da Fase 1", () => {
-  assert.equal(radarPhase1VisibleLabel(acaoDaFase1({ pending: 1, analyzed: 11 })), "Analisar concorrência · e finaliza (+ 1 chamada de IA)");
-  assert.equal(radarPhase1VisibleLabel(acaoDaFase1({ pending: 0, analyzed: 11, analysisConfirmed: false })), "Concluir análise · e finaliza (+ 1 chamada de IA)");
-  assert.equal(radarPhase1VisibleLabel(acaoDaFase1({ pending: 0, analyzed: 12, analysisConfirmed: true })), "Finalizar pesquisa · inclui 1 chamada de IA");
+  /* 2026-10-09 (correção) · os rótulos dizem o teto real do custo (até 2 chamadas de IA). */
+  assert.equal(radarPhase1VisibleLabel(acaoDaFase1({ pending: 1, analyzed: 11 })), "Analisar concorrência · e finaliza (+ até 2 chamadas de IA)");
+  assert.equal(radarPhase1VisibleLabel(acaoDaFase1({ pending: 0, analyzed: 11, analysisConfirmed: false })), "Concluir análise · e finaliza (+ até 2 chamadas de IA)");
+  assert.equal(radarPhase1VisibleLabel(acaoDaFase1({ pending: 0, analyzed: 12, analysisConfirmed: true })), "Finalizar pesquisa · inclui até 2 chamadas de IA");
   assert.equal(radarPhase1VisibleLabel(radarPhase1Action({ state: "FINALIZED", contextReady: true, hasPrimaryQuery: true, running: false, selected: 12, pending: 0, failed: 0, analyzed: 12 })), null, "NONE: nenhum botão prometido");
   assert.equal(radarPhase1VisibleLabel({ ...acaoDaFase1({ pending: 1, analyzed: 11 }), enabled: false }), null, "desabilitado: nenhum botão prometido");
   assert.equal(radarPhase1VisibleLabel(null), null);
@@ -422,7 +423,7 @@ test("O BOTÃO VISÍVEL · a frase usa a mesma montagem do botão da Fase 1", ()
 
   assert.equal(
     radarAutoFinalizePendingNotice('A próxima etapa ainda é "Analisar concorrência".', radarPhase1VisibleLabel(acaoDaFase1({ pending: 1, analyzed: 11 })), "Pesquisa"),
-    'Não finalizou sozinha: a próxima etapa ainda é "Analisar concorrência". Para continuar, na área Pesquisa, botão "Analisar concorrência · e finaliza (+ 1 chamada de IA)".',
+    'Não finalizou sozinha: a próxima etapa ainda é "Analisar concorrência". Para continuar, na área Pesquisa, botão "Analisar concorrência · e finaliza (+ até 2 chamadas de IA)".',
   );
 });
 

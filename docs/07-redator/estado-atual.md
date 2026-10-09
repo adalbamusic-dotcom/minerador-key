@@ -1,5 +1,49 @@
 # Estado atual — Redator
 
+## Regra do piloto em todas as operações — 2026-10-09
+
+**Verificado no código e confirmado por teste (fixtures; PROVIDER_CALLS = 0). Validado manualmente: não.** Módulo
+proprietário da rodada: Radar (`docs/05-radar/estado-atual.md`, seção de mesma data, com as decisões do dono); o
+Redator recebeu mudanças aditivas.
+
+- **A planta é a do CSV.** `writerArticleBlueprintPick` (novo, `lib/redator/writer-blueprint-pick.ts`) usa a mesma
+  escolha do CSV: só a concluída; hash exato do pacote; depois a concluída do mesmo congelamento e ArticleDNA e,
+  quando o pacote traz `research.amazon.frozenAt`, do mesmo congelamento da Amazon (planta gravada sem a chave
+  continua valendo). Leitura compartilhada (`radarArticleBlueprintPayloadReading`: fontes do pacote, exclusões do
+  ArticleDNA, próximo passo que chama fora; o que só aponta a leitura seguinte fica como "Leitura seguinte
+  (opcional, não é uma chamada)"). `needsSource` com as afirmações do pacote; `publishedMap` também na planta antiga,
+  pela página lida agora (rotas de seção e de melhoria).
+- **Semeadura pelo plano do CSV de vídeo.** `/api/redator/seed` lê o `radarVideoPlan` pela montagem do export
+  (formato pela amostra pertinente, gancho, premissa, capítulos = seções da planta, cortes, "Fica fora do texto
+  publicável"); recusa 409/503 antes de qualquer IA. Correção: o pedido não leva mais a "Recomendação editorial do
+  Radar" (a saída Shorts × vídeo longo da camada antiga dava uma segunda decisão de formato) nem "Precisa
+  responder/cobrir" do blueprint antigo (sem as exclusões do ArticleDNA); os capítulos do plano já trazem as
+  perguntas e, desde a correção, tiram a seção excluída pelo reajuste.
+- **Melhoria de trecho** recebe a seção da planta do H2 sob o qual o trecho está, a regra do mapa da página
+  publicada e a D10.
+- **Painel "Fundamentos do Radar".** Bloco do artigo-modelo pela rota nova GET `/api/redator/article-blueprint`
+  (estados lendo/approved/absent/erro). Correção: a leitura das plantas que falha no servidor devolve
+  `{ state: "unreadable" }` e o painel diz "não lido agora", sem o link de organizar (pago); a "Recomendação
+  editorial" aparece como matéria-prima do artigo-modelo, sem a saída de formato de vídeo; as perguntas e conceitos do
+  blueprint antigo aparecem como evidência, não exigência.
+- **Envio.** O documento passa a gravar a virada do Assunto pela seção da planta concluída (o envio lê a planta com o
+  conteúdo, sem IA); a conferência leva o congelamento da Amazon e escolhe a versão vigente do ArticleDNA.
+- **MCP.** `get_writer_brief` serve as linhas do Assunto pela planta (a mesma troca do painel e dos fundamentos);
+  `save_writer_deliverable` exige a planta concluída do pacote (needs_article_blueprint com a ação na tela, ou
+  blueprint_unavailable; nada é gravado).
+- **Arquivos do Redator nesta rodada:** `lib/redator/writer-blueprint-pick.ts` (novo),
+  `writer-blueprint-for-writing.ts`, `writer-evidence-catalog.ts`, `writer-section-evidence.ts`, `prompts.ts`,
+  `radar-foundations.ts`, `deliverable-seed.ts`, `radar-subject-turn.ts`, `radar-import.ts`,
+  `expert-topics-pilot.ts` (novo); `lib/server/writer-seed.ts`, `writer-evidence-*.ts`, `writer-evidence-ai.ts`;
+  `app/api/redator/{seed,section,improve,article-blueprint}`; `modules/redator/writer-radar-foundations-panel.tsx`,
+  `writer-derived-environment.tsx`; `components/editorial/professional-writer.tsx`. Consumidores preservados: sem
+  Assunto, o documento e a semente saem como antes (hash dos prompts sem Assunto remedido só pela saída das duas
+  seções legadas).
+- **Testes:** `tests/radar-piloto-redator-roteiro-2026-10-09.test.mts`, `tests/radar-piloto-redator-leitura-2026-10-09.test.mts`,
+  `tests/radar-piloto-correcao-2026-10-09.test.mts` (F6, F13, F15) e as suítes no topo do estado do Radar.
+- **Limitações:** a trava de fonte e a varredura D10 do entregável vindo de IA externa e o plano de vídeo em
+  `get_writer_foundations` ficaram como proposta (backlog).
+
 ## Planta para quem escreve, trava de fonte e voz de entregável — 2026-10-08
 
 **Verificado no código e confirmado por teste (fixtures; PROVIDER_CALLS = 0). Validado manualmente: não** (o

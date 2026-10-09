@@ -1,5 +1,8 @@
 import { radarDeclaredArticleIntent } from "./editorial-identity.ts";
 import type { RadarArticleResearchContext } from "./article-research-context.ts";
+/* 2026-10-09 · as réguas únicas de fora do escopo e de ruído (só importação). */
+import { radarOutOfScopeMatcher } from "./out-of-scope.ts";
+import { radarReaderQuestionNoiseReason } from "./research-noise.ts";
 
 /**
  * AS CONSULTAS DA PESQUISA DE YOUTUBE — YOUTUBE_SEARCH_1 · §3.
@@ -274,9 +277,30 @@ export function buildRadarYoutubeQueryPlan(input: {
     });
   }
 
+  /*
+   * ===== 2026-10-09 · O TÓPICO PASSA PELA RÉGUA DE FORA DO ESCOPO E DE RUÍDO (regra do dono: o piloto substitui o antigo) =====
+   *
+   * Cada consulta é uma chamada paga, e o vídeo que ela traz entra na amostra.
+   * Um tópico que o reajuste do Arquiteto tirou deste artigo (o "Não cobrir"
+   * de `articleScope`, pela régua única `radarOutOfScopeMatcher`) ou que é
+   * ruído pela régua da pesquisa (`radarReaderQuestionNoiseReason`: chamada,
+   * inglês, encerramento, título de post, outra profissão, área vizinha,
+   * superstição, produto de terceiro) não vira consulta — e a limitação diz
+   * qual saiu e por quê. O núcleo (principal, complementares e Assunto) é o
+   * contexto das duas réguas; as keywords do próprio artigo e o Assunto não
+   * passam por elas (o Radar não remove keyword nem troca o tronco).
+   */
+  const nucleo = [principal, ...keywords.map(item => item.identity.text), article.subject?.phrase];
+  const exclusoes = input.context.articleScope?.exclusions || [];
+  const tocaForaDoEscopo = radarOutOfScopeMatcher({ labels: exclusoes.map(item => item.label), core: nucleo });
+  const foraDoPlano: string[] = [];
+
   for (const topico of editorialTopics) {
     const limpo = texto(topico);
     if (!limpo) continue;
+    if (tocaForaDoEscopo(limpo)) { foraDoPlano.push(`"${limpo}" (fora do escopo deste artigo)`); continue; }
+    const ruido = radarReaderQuestionNoiseReason(limpo, { core: nucleo });
+    if (ruido) { foraDoPlano.push(`"${limpo}" (${ruido})`); continue; }
     acrescentar({
       text: limpo,
       origin: "EDITORIAL_TOPIC",
@@ -299,6 +323,9 @@ export function buildRadarYoutubeQueryPlan(input: {
 
   if (!editorialTopics.length) {
     limitations.push("A investigação não declarou tópicos editoriais; o plano não incluiu consultas por tópico.");
+  }
+  if (foraDoPlano.length) {
+    limitations.push(`Tópico(s) fora do plano pela régua de escopo e de ruído: ${foraDoPlano.join(", ")}.`);
   }
 
   const semAssunto = deduplicada(fila, limite);

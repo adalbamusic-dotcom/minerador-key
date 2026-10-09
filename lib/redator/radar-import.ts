@@ -1,8 +1,7 @@
 import type { ArticleDNA, ContentDocument, ContentDocumentV2, RadarDocumentOrigin, RadarWriterDossier, SiloDNA, VersionEnvelope, VersionReference } from "../arquiteto/contracts.ts";
 import { legacyVersionReference, toVersionReference } from "../arquiteto/versioning.ts";
 import { radarWriterMayNotFor } from "./writer-handoff.ts";
-import { radarWriterSubjectOf, radarWriterSubjectTurnLines } from "./radar-subject-turn.ts";
-import { radarWritingSectionTitleResolver } from "../radar/portable-writing-export.ts";
+import { radarWriterSubjectOf, radarWriterSubjectTurnLinesFromBlueprint } from "./radar-subject-turn.ts";
 import { differentiationEditorialLines } from "../arquiteto/differentiation-note.ts";
 import type { RadarCanonicalDossier } from "../server/radar-canonical-dossier.ts";
 
@@ -193,6 +192,16 @@ export type BuildRadarDocumentInput = {
    * Assunto. Opcional e aditivo: sem nota, o documento sai byte a byte como antes.
    */
   differentiation?: ArticleDNA["differentiation"] | null;
+  /**
+   * ===== 2026-10-09 · O ARTIGO-MODELO CONCLUÍDO DO PACOTE (regra do piloto) =====
+   *
+   * O `blueprint` da planta concluída que o envio conferiu (a mesma que o
+   * Redator lê). A "Virada", a "Seção da virada" e a "Direção do H1" do
+   * `editorialContext` saem DELA (`radarWriterSubjectTurnLinesFromBlueprint`),
+   * não mais do modelo editorial antigo (`articleModel.declaredSubject`). Sem
+   * ela, a virada aponta o artigo-modelo, sem lugar inventado.
+   */
+  articleBlueprint?: unknown;
 };
 
 /**
@@ -321,20 +330,20 @@ export function buildRadarDocument(input: BuildRadarDocumentInput): ContentDocum
       /*
        * SDD do Assunto, F4.1 · ONDE VIRAR E A DIREÇÃO DO H1.
        *
-       * A sugestão do Radar mora no artigo-modelo, que não viaja no dossiê
-       * (o bundle é `.strict()` e tem hash). Vão só linhas curtas, derivadas
-       * dele e do Assunto do ArticleDNA fixado — o dossiê continua lido, não
-       * copiado (invariante 78). Sem Assunto, `[]`, como sempre foi.
+       * A sugestão mora no artigo-modelo, que não viaja no dossiê (o bundle é
+       * `.strict()` e tem hash). Vão só linhas curtas, derivadas dele e do
+       * Assunto do ArticleDNA fixado — o dossiê continua lido, não copiado
+       * (invariante 78). Sem Assunto, `[]`, como sempre foi.
+       *
+       * 2026-10-09 · regra do piloto: as linhas saem da PLANTA concluída que o
+       * envio conferiu (`input.articleBlueprint`), não do modelo editorial
+       * antigo (`articleModel.declaredSubject`, que virou matéria-prima do
+       * gerador do artigo-modelo).
        */
-      editorialContext: radarWriterSubjectTurnLines({
+      editorialContext: radarWriterSubjectTurnLinesFromBlueprint({
         subject: input.subject,
-        turn: dossier.authorities?.google?.articleModel?.declaredSubject ?? null,
+        blueprint: input.articleBlueprint ?? null,
         principal: dossier.keywordContext.principal,
-        /* 2026-10-08 (correção) · a seção nomeada como no CSV (a pergunta do leitor utilizável), para a "Virada" dizer o mesmo. */
-        sectionTitle: radarWritingSectionTitleResolver(dossier.authorities?.google?.articleModel ?? null, {
-          core: [dossier.keywordContext.principal, ...(dossier.keywordContext.secondary || []), ...(dossier.keywordContext.narrativeReinforcements || [])],
-          subjectPhrase: radarWriterSubjectOf(input.subject)?.phrase ?? null,
-        }),
       }).concat(differentiationEditorialLines(input.differentiation)),
       visualGuidance: [],
       pendingDecisions: [],

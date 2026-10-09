@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { register } from "node:module";
 import test from "node:test";
 import { ARTIGO, HOST_DO_BANCO, MARCA, PEDIDO_DO_SILO, instalarPostgrestSimulado, semearBanco, type Banco, type Pedido } from "./radar-export-leitura-fixtures.mts";
+/* 2026-10-09 · toda entrega exige o artigo-modelo concluído: a bancada semeia o de cada artigo finalizado. */
+import { comArtigosModeloConcluidos } from "./radar-piloto-artigo-modelo-fixtures-2026-10-09.mts";
 
 /*
  * ===== E4 · O EXPORT LÊ SÓ A CORRIDA DA VERSÃO QUE USA — e o CSV não muda =====
@@ -97,7 +99,7 @@ class DataFixa extends DataReal {
 type Resposta = { status: number; texto: string; pedidos: Pedido[] };
 
 async function exportar(corpo: unknown, ajuste?: (semeado: Banco) => void): Promise<Resposta> {
-  banco = semearBanco();
+  banco = comArtigosModeloConcluidos(semearBanco());
   ajuste?.(banco);
   pedidos.length = 0;
   (globalThis as { Date: DateConstructor }).Date = DataFixa as unknown as DateConstructor;
@@ -127,11 +129,12 @@ async function comLeituraAntiga<T>(corpo: () => Promise<T>): Promise<T> {
   }
 }
 
+/* 2026-10-09 · o formato completo pedido de forma explícita: o padrão da rota passou a ser o formato para escrever. */
 const CENARIOS = {
-  silo: { corpo: { brandId: MARCA, articleIds: PEDIDO_DO_SILO, groupBy: "silo" }, status: 200 },
-  avulso: { corpo: { brandId: MARCA, articleIds: PEDIDO_DO_SILO }, status: 200 },
-  so_o_finalizado: { corpo: { brandId: MARCA, articleIds: [ARTIGO.F] }, status: 200 },
-  so_recusados: { corpo: { brandId: MARCA, articleIds: [ARTIGO.N, ARTIGO.V, ARTIGO.M] }, status: 409 },
+  silo: { corpo: { brandId: MARCA, articleIds: PEDIDO_DO_SILO, groupBy: "silo", mode: "full" }, status: 200 },
+  avulso: { corpo: { brandId: MARCA, articleIds: PEDIDO_DO_SILO, mode: "full" }, status: 200 },
+  so_o_finalizado: { corpo: { brandId: MARCA, articleIds: [ARTIGO.F], mode: "full" }, status: 200 },
+  so_recusados: { corpo: { brandId: MARCA, articleIds: [ARTIGO.N, ARTIGO.V, ARTIGO.M], mode: "full" }, status: 409 },
 } as const;
 
 const corridas = (lista: Pedido[]) => lista.filter(pedido => pedido.tabela === "radar_analysis_runs");

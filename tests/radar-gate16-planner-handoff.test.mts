@@ -191,10 +191,21 @@ test("GATE 16 · AC — o Relatório lê a prontidão pela mesma autoridade do h
   assert.match(checkAntes!.detail, /Finalize a pesquisa antes de preparar o pacote/);
 
   const finalizada = vista({ finalizedBundle: congelar() } as never);
-  const depois = buildRadarReportSummary({ observed: finalizada.observed, view: finalizada });
+  /*
+   * 2026-10-09 · "PRONTO PARA O REDATOR" SÓ COM O ARTIGO-MODELO (regra do dono).
+   * Com a planta concluída conferida, pronto; sem a conferência, a pergunta não
+   * afirma prontidão; com a planta ausente, a mesma autoridade a bloqueia.
+   */
+  const depois = buildRadarReportSummary({ observed: finalizada.observed, view: finalizada, articleBlueprint: "APPROVED" });
   const checkDepois = depois.checks.find(item => item.id === "handoff");
   assert.equal(checkDepois!.state, "READY");
   assert.match(checkDepois!.detail, /Pronto para o Redator/);
+  const semConferir = buildRadarReportSummary({ observed: finalizada.observed, view: finalizada }).checks.find(item => item.id === "handoff");
+  assert.equal(semConferir!.state, "PENDING");
+  assert.doesNotMatch(semConferir!.detail, /Pronto para o Redator/);
+  const semPlanta = buildRadarReportSummary({ observed: finalizada.observed, view: finalizada, articleBlueprint: "MISSING" }).checks.find(item => item.id === "handoff");
+  assert.equal(semPlanta!.state, "PENDING");
+  assert.match(semPlanta!.detail, /artigo-modelo/);
 
   /*
    * A MESMA PERGUNTA, A MESMA RESPOSTA.
@@ -205,6 +216,11 @@ test("GATE 16 · AC — o Relatório lê a prontidão pela mesma autoridade do h
    */
   const direto = radarHandoffReadiness({ article: ARTIGO, frozen: congelar(), stale: false });
   assert.equal(direto.ready, checkDepois!.state === "READY");
+  /* 2026-10-09 · a mesma autoridade com a planta ausente: bloqueia pelo passo que falta, com a frase do Relatório. */
+  const diretoSemPlanta = radarHandoffReadiness({ article: ARTIGO, frozen: congelar(), stale: false, articleBlueprint: "MISSING" });
+  assert.equal(diretoSemPlanta.ready, false);
+  assert.deepEqual(diretoSemPlanta.blocks.map(item => item.code), ["ARTICLE_BLUEPRINT_MISSING"]);
+  assert.equal(semPlanta!.detail, diretoSemPlanta.blocks[0].message);
 });
 
 /* ==========  rede  ================================================== */

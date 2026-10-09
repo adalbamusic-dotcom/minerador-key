@@ -142,7 +142,15 @@ test("§4 · a tela lê o snapshot que TEM features — e não fabrica quando n�
   const leitura = pagina.slice(pagina.indexOf("const multimodalDoArtigo"), pagina.indexOf("const gravarYoutube"));
 
   assert.ok(leitura.includes("registro.research?.serpFeatures"), "o filtro exige features presentes");
-  assert.ok(leitura.includes("buildRadarMultimodalBlueprint("));
+  /*
+   * 2026-10-09 (correção) · a montagem passa por `radarMultimodalBlueprintOfRun`, que
+   * chama `buildRadarMultimodalBlueprint` com a amostra pertinente da corrida (o
+   * congelamento novo não grava mais a saída pela amostra inteira).
+   */
+  assert.ok(leitura.includes("radarMultimodalBlueprintOfRun({"));
+  const deUmaCorrida = semComentarios(await readFile(new URL("../lib/radar/multimodal-of-run.ts", import.meta.url), "utf8"));
+  assert.ok(deUmaCorrida.includes("buildRadarMultimodalBlueprint({"));
+  assert.ok(deUmaCorrida.includes("youtubePertinence: input.run && universo.length ? radarYoutubeRunPertinence(input.run) : null"));
   /* E nada de inventar: sem features e sem corrida, não há blueprint. */
   assert.ok(leitura.includes("if (!features && !corrida?.universe.length) return null;"), "sem nada coletado, não há blueprint");
   assert.ok(leitura.includes("features,"), "o que entra é o que o snapshot tem — inclusive null");

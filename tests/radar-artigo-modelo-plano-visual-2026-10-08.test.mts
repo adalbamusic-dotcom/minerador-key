@@ -15,6 +15,7 @@ import {
 } from "../lib/radar/article-blueprint.ts";
 import { radarPortableWritingExport } from "../lib/radar/portable-writing-batch.ts";
 import { ARTIGO, EXPORTADO_EM, LEITURA_DAS_LENTES, montadasDoSilo, planoDoSilo } from "./radar-portable-writing-fixtures.mts";
+import { comPlantas } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 
 /*
  * ===== 2026-10-08 · P1 · O PLANO VISUAL DO ARTIGO-MODELO (caso real do Instagram) =====
@@ -386,8 +387,9 @@ test("P1 (b) · a imagem sem cena proibida volta igual (o MESMO objeto); a capa 
 test("P1 · CSV para escrever de ponta a ponta: a linha do artigo leva o plano visual concluído, pelo título, sem a cena proibida", () => {
   const plano = planoDoSilo();
   const planta = plantaDoCaso();
+  /* 2026-10-09 · os outros artigos do lote também saem com a planta concluída deles (sem ela, o CSV não é montado). */
   const csv = radarPortableWritingExport({
-    articles: montadasDoSilo().map(item => (item.articleId === ARTIGO ? { ...item, blueprint: { ...planta, approval: "APPROVED" as const } } : item)),
+    articles: comPlantas(montadasDoSilo().map(item => (item.articleId === ARTIGO ? { ...item, blueprint: { ...planta, approval: "APPROVED" as const } } : item)), plano.files[0].writing),
     lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM,
   }).files![0].csv;
   assert.ok(csv.includes(`Respiro 2 · seção ""${H2.posts}""`), "a âncora pelo título, com as aspas dobradas do CSV");

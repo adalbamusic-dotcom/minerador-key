@@ -1069,6 +1069,15 @@ export const WRITER_BLUEPRINT_PROJECTION_LIMITS = Object.freeze({
   voiceHeadingChars: 80,
 });
 
+/*
+ * 2026-10-09 · O PRÓXIMO PASSO DA PLANTA É A LEITURA SEGUINTE, OPCIONAL (regra do
+ * piloto, a mesma do CSV): a leitura compartilhada tira o próximo passo que CHAMA
+ * ("Acesse a página…"); o que sobra em `closing.nextStep` só aponta a leitura
+ * seguinte e entra no corpo se couber — nunca como segunda chamada no fechamento.
+ * O rótulo é um só para a semeadura, os prompts e os fundamentos.
+ */
+export const WRITER_BLUEPRINT_CONTINUATION_LABEL = "Leitura seguinte (opcional, não é uma chamada)";
+
 export type WriterBlueprintLink = { anchor: string; label: string | null; destination: string | null; status: string | null };
 /**
  * 2026-10-08 · Uma frase da planta que só entra no texto com fonte do pacote

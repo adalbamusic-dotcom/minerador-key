@@ -58,6 +58,7 @@ import {
   montadasDoSiloSaude,
   planoDoSilo,
 } from "./radar-portable-writing-fixtures.mts";
+import { comPlanta, comPlantas, plantaDe } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 
 /*
  * ===== O EXPORT "PARA ESCREVER" — 13 colunas, o que é preciso para escrever =====
@@ -115,11 +116,18 @@ function lerCsv(csv: string): string[][] {
   return linhas;
 }
 
-const EXPORT_DO_SILO = () => radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
+/*
+ * 2026-10-09 · o CSV "Para escrever" sai só pela planta concluída (regra do
+ * dono): a bancada monta cada artigo com a planta que a IA organizaria sobre o
+ * pacote (`radar-piloto-planta-fixtures-2026-10-09.mts`); sem ela, a linha é recusada.
+ */
+const EXPORT_DO_SILO = () => radarPortableWritingExport({ articles: comPlantas(montadasDoSilo(), planoDoSilo().files[0].writing), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
 const EXPORT_DO_SILO_SAUDE = (publicacao = false) => radarPortableWritingExport({
-  articles: montadasDoSiloSaude(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM,
+  articles: comPlantas(montadasDoSiloSaude(), planoDoSilo().files[0].writing), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM,
   publications: publicacao ? new Map([[ARTIGO, PUBLICACAO_SEM_POLITICA]]) : undefined,
 });
+/* A linha de um artigo, com a planta concluída dele (a que a leitura do export entrega). */
+const linhaComPlanta = (entrada: Parameters<typeof buildRadarWritingExportArticle>[0], contexto: RadarWritingArticleContext) => buildRadarWritingExportArticle(entrada, comPlanta(entrada, contexto));
 
 const linhasDe = (csv: string) => {
   const [cabecalho, ...dados] = lerCsv(csv);
@@ -147,7 +155,7 @@ test("A · 13 colunas FIXAS, na ordem do desenho, em todo arquivo — com a linh
   assert.equal(silo.exported, 3);
   assert.equal(silo.blocked, 2, "Amazon sem produto e YouTube saem bloqueados");
 
-  const avulso = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM });
+  const avulso = radarPortableWritingExport({ articles: comPlantas(montadasDoSilo()), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM });
   const lido = linhasDe(avulso.csv || "");
   assert.deepEqual(lido.cabecalho, [...RADAR_WRITING_EXPORT_COLUMNS], "o avulso tem o MESMO cabeçalho");
   assert.deepEqual(lido.dados.map(linha => linha.ordem), ["Marca", "1 · Pilar", "2 · Suporte", "3 · Suporte"]);
@@ -160,7 +168,7 @@ test("A · 13 colunas FIXAS, na ordem do desenho, em todo arquivo — com a linh
 });
 
 test("A · o cabeçalho é fixo: uma linha montada em outra ordem, ou sem uma chave, não muda o arquivo", () => {
-  const linha = buildRadarWritingExportArticle(entradaGoogle(), contextoAvulso()).row;
+  const linha = linhaComPlanta(entradaGoogle(), contextoAvulso()).row;
   const invertida = Object.fromEntries(Object.entries(linha).reverse()) as RadarWritingExportRow;
   const semProdutos = { ...linha } as Partial<RadarWritingExportRow>;
   delete semProdutos.produtos;
@@ -176,7 +184,7 @@ test("A · artigo sem silo resolvido: arquivo próprio, linha 'Marca' no topo, s
     today: EXPORTADO_EM, brandId: MARCA, siloVersions: [],
     items: [{ articleId: ARTIGO, siloId: "", status: "finalized", title: "Skincare facial passo a passo", principalKeyword: "skincare facial", slug: "skincare-facial" }],
   });
-  const saida = radarPortableWritingExport({ articles: [montadasDoSilo()[0]], lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM });
+  const saida = radarPortableWritingExport({ articles: comPlantas([montadasDoSilo()[0]]), lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM });
   assert.equal(saida.files?.[0].filename, "sem-silo-para-escrever-2026-09-23.csv");
   const { dados } = linhasDe(saida.files![0].csv);
   assert.deepEqual(dados.map(linha => linha.ordem), ["Marca", "1 · Pilar"]);
@@ -228,7 +236,7 @@ test("B · nenhum id, hash, data ISO, código cru, preenchimento ou rastreio em 
   const arquivos = [
     ...EXPORT_DO_SILO().files!.map(arquivo => arquivo.csv),
     ...EXPORT_DO_SILO_SAUDE(true).files!.map(arquivo => arquivo.csv),
-    radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM }).csv || "",
+    radarPortableWritingExport({ articles: comPlantas(montadasDoSilo()), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM }).csv || "",
   ];
   for (const csv of arquivos) {
     for (const linha of linhasDe(csv).dados) {
@@ -248,13 +256,17 @@ test("B · quando o PACOTE traz endereço interno, instante ISO ou código cru n
   const google = entradaGoogle();
   const modelo = google.articleModel as unknown as { conclusion: Record<string, unknown> };
   const sujo = `Fechar pela resposta (question:c580aef1) do artigo ${ARTIGO}, sha256:${"b".repeat(64)}, observada em 2026-09-20T13:00:00.000Z pela relação PILLAR_TO_SUPPORT e INFORMATIONAL`;
-  const linha = buildRadarWritingExportArticle(
+  const linha = linhaComPlanta(
     { ...google, articleModel: { ...modelo, conclusion: { ...modelo.conclusion, synthesis: sujo } } as never },
     contextoAvulso(),
   ).row;
-  assert.match(linha.promessa_e_leitor, /^Promessa: /);
-  assert.match(linha.promessa_e_leitor, /Fechamento: Fechar pela resposta do artigo, observada em pela relação Pilar → Suporte e Informacional\./,
-    "o endereço, o UUID, o hash e o instante saem; o código vira rótulo");
+  /*
+   * 2026-10-09 · a promessa e o fechamento são os da planta (regra do dono): o
+   * fecho sujo do modelo editorial legado nem chega ao CSV — a higiene continua
+   * valendo para tudo o que sai (abaixo).
+   */
+  assert.match(linha.promessa_e_leitor, /^Leitor: /);
+  assert.doesNotMatch(RADAR_WRITING_EXPORT_COLUMNS.map(coluna => linha[coluna]).join("\n"), /Fechar pela resposta/, "o fecho do modelo editorial legado não vai ao entregável");
   for (const [padrao, oQue] of PROIBIDO_NA_CELULA) {
     for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) assert.equal(linha[coluna].match(padrao), null, `${oQue} em ${coluna}`);
   }
@@ -285,7 +297,7 @@ test("C · as guardas no topo e em cada artigo: sem FAQ, e dado de terceiros é 
 
   /* As lentes: o cache sai rotulado como fora do pacote; sem leitura, a falta é dita, nunca um consenso inventado. */
   assert.match(pilar.serp_resumida, /Lentes \(cache da marca, fora do pacote, observado a partir de 22\/09\/2026; 2 de 4 observadas\)/);
-  const semLentes = buildRadarWritingExportArticle(entradaGoogle(), contextoAvulso()).row;
+  const semLentes = linhaComPlanta(entradaGoogle(), contextoAvulso()).row;
   assert.match(semLentes.serp_resumida, /^Lentes: não conferidas neste pacote; o topo acima é da coleta principal\.$/m);
 
   /* Trecho de terceiro: no máximo 160 caracteres, entre aspas tipográficas. */
@@ -302,7 +314,9 @@ test("C · sem FAQ: a seção de perguntas frequentes do modelo fica de fora, e 
       assert.equal(/(criar|incluir|adicionar|acrescentar) (uma )?(seção de )?(faq|perguntas frequentes)/i.test(linha[coluna]), false, `${linha.ordem}/${coluna} sugere FAQ`);
     }
   }
-  assert.match(dados[1].estrutura, /A seção de perguntas frequentes do modelo ficou de fora \(sem FAQ\)/);
+  /* 2026-10-09 · a estrutura é a da planta: a seção de FAQ do modelo da SERP nem chega à IA (o esqueleto a tira), e a planta não tem FAQ. */
+  assert.match(dados[1].estrutura, /^ARTIGO-MODELO DA SERP \(planta concluída do artigo/);
+  assert.doesNotMatch(dados[1].estrutura, /perguntas frequentes|\bFAQ\b/i);
   assert.match(dados[1].cobrir_e_superar, /Perguntas a responder dentro das seções \(sem seção de perguntas frequentes\):/);
 });
 
@@ -316,7 +330,8 @@ test("D · o veredito vem logo depois da ordem: Não para o comercial sem produt
   assert.match(amazon.produtos, /Produtos selecionados: nenhum produto selecionado/);
   assert.match(amazon.prompt, /^Não escreva este artigo antes de resolver o bloqueio/);
   assert.match(youtube.pode_escrever, /^Não: a investigação deste artigo foi feita para vídeo do YouTube/);
-  assert.match(pilar.pode_escrever, /^Com ressalva: título de trabalho do pacote não utilizável/);
+  /* 2026-10-09 · o título é o da planta: o título de trabalho picotado do modelo editorial não vira ressalva. */
+  assert.equal(pilar.pode_escrever, "Sim");
   assert.equal(/PRONTO PARA O REDATOR|suficiente: sim|BLOQUEADO PARA O REDATOR/.test(dados.map(linha => linha.pode_escrever).join("\n")), false, "status de pipeline no veredito");
   assert.equal(pilar.produtos, "", "produtos só em formato comercial");
 });
@@ -327,7 +342,9 @@ test("D · a contradição do pacote é DITA, e não resolvida: YMYL 'baixa' com
   assert.match(pilar.fontes_e_especialista, /^YMYL: baixa/, "o valor gravado continua dito como gravado");
   assert.match(pilar.fontes_e_especialista, /Conflito no pacote: o pacote registra YMYL baixa/);
   assert.match(pilar.fontes_e_especialista, /Não afirmar como fato sem fonte:\n- "O que causa acne" \(3 de 12 páginas tratam; sem fonte adequada\)/);
-  assert.match(pilar.estrutura, /Precisa de fonte: a afirmação central \("O que causa acne\?"\) só entra com uma das fontes listadas/);
+  /* 2026-10-09 · a estrutura é a da planta (a marca "Precisa de fonte" da seção legada saiu com ela); a afirmação sem fonte continua dita nas fontes e no veredito. */
+  assert.doesNotMatch(pilar.estrutura, /Precisa de fonte: a afirmação central/);
+  assert.match(pilar.estrutura, /^ARTIGO-MODELO DA SERP/);
 });
 
 test("D · a contribuição ACEITA do especialista não some: sai com o aviso de que responde outra coisa", () => {
@@ -341,26 +358,32 @@ test("D · a contribuição ACEITA do especialista não some: sai com o aviso de
 
 /* ================================ E ================================ */
 
-test("E · invariante 32: a estrutura é ordem SUGERIDA e a medida dos concorrentes é referência, nunca meta", () => {
+/*
+ * 2026-10-09 · A ESTRUTURA É A DO ARTIGO-MODELO (regra do dono: o fundamento
+ * único). A "ordem sugerida" do modelo editorial saiu com ele: a estrutura é a
+ * planta concluída (seções e medidas do plano, com a medida dos concorrentes
+ * dita como referência), e a redação continua de quem escreve.
+ */
+test("E · a estrutura é a planta concluída do artigo-modelo; a medida dos concorrentes é a referência dela e a redação é de quem escreve", () => {
   const { dados } = linhasDe(EXPORT_DO_SILO().files![0].csv);
   const pilar = dados[1];
-  assert.match(pilar.estrutura, /^Ordem sugerida: a estrutura final e a extensão são decisão de quem redige\./);
-  assert.match(pilar.estrutura, /Referência da SERP, não meta: os concorrentes comparáveis têm mediana de [\d.]+ palavras/);
-  for (const linha of dados) {
-    const tudo = RADAR_WRITING_EXPORT_COLUMNS.map(coluna => linha[coluna]).join("\n");
-    assert.equal(/~\s?\d+ palavras|\d+ H2\b|com as extensões indicadas|palavras por seção/i.test(tudo), false, `${linha.ordem}: meta de extensão ou de H2 imposta`);
-  }
-  assert.match(pilar.prompt, /a estrutura final e a extensão são decisão de quem redige/);
+  assert.match(pilar.estrutura, /^ARTIGO-MODELO DA SERP \(planta concluída do artigo; a redação é de quem escreve\)\./);
+  assert.match(pilar.estrutura, /^Concorrentes comparáveis \([^)]+\): mediana de [\d.]+ palavras/m);
+  assert.doesNotMatch(pilar.estrutura, /^Ordem sugerida/m, "a ordem sugerida do modelo editorial saiu");
+  assert.match(pilar.prompt, /siga o artigo-modelo da coluna estrutura \(seções, medidas, links e imagens da planta\), e a redação é de quem escreve/);
+  assert.doesNotMatch(pilar.prompt, /a estrutura é sugestão/);
 });
 
 test("E · o título gravado sai como foi, ou é omitido com o motivo — nunca reescrito", () => {
   assert.equal(radarWritingTitleIsUsable("Como cuidar de uma pele oleosa: pele oleosa e acne e skincare para pele oleosa: como fazer para controlar brilho e acne", "skincare para pele oleosa"), false);
   assert.equal(radarWritingTitleIsUsable("Skincare facial: o que fazer na prática", "skincare facial"), true);
   assert.equal(radarWritingTitleIsUsable("6 skin care nivea para comparar", "skin care nivea"), true);
+  /* 2026-10-09 · o H1, o SEO title e a meta são os da planta: o título de trabalho do modelo editorial (usável ou picotado) não vai ao CSV. */
   const { dados } = linhasDe(EXPORT_DO_SILO().files![0].csv);
-  assert.match(dados[1].titulo_e_seo, /^H1 de trabalho: não definido — formule a partir da promessa e da estrutura/);
-  assert.match(dados[1].titulo_e_seo, /Alternativas: Skincare facial: o que fazer na prática/);
-  assert.match(dados[2].titulo_e_seo, /^H1 de trabalho: 6 skin care nivea para comparar/);
+  assert.match(dados[1].titulo_e_seo, /^H1: Skincare facial: o guia prático$/m);
+  assert.match(dados[1].titulo_e_seo, /^SEO title: /m);
+  assert.doesNotMatch(dados[1].titulo_e_seo, /H1 de trabalho|formule a partir da promessa/);
+  assert.match(dados[2].titulo_e_seo, /^H1: Skin care nivea: o guia prático$/m);
 });
 
 /* ================================ F ================================ */
@@ -391,11 +414,11 @@ test("F · artigo publicado: URL, canonical e o estado da principal SEMPRE — o
   assert.match(RADAR_WRITING_LEGACY_FAQ, /só sai com decisão humana registrada/);
   assert.equal(/Mantenha a seção de perguntas existente|sem ampliar nem remover/.test(Object.values(pilar).join("\n") + topoPublicado.prompt), false, "a frase antiga do FAQ voltou");
 
-  const travada = buildRadarWritingExportArticle(entradaGoogle(), contextoAvulso({ publication: { ...PUBLICACAO_SEM_POLITICA, principalPolicy: "locked" } })).row;
+  const travada = linhaComPlanta(entradaGoogle(), contextoAvulso({ publication: { ...PUBLICACAO_SEM_POLITICA, principalPolicy: "locked" } })).row;
   assert.match(travada.artigo, /Principal: travada — não trocar/);
   assert.equal(/estado desconhecido/.test(travada.artigo + travada.pode_escrever), false);
 
-  const nova = buildRadarWritingExportArticle(entradaGoogle(), contextoAvulso()).row;
+  const nova = linhaComPlanta(entradaGoogle(), contextoAvulso()).row;
   assert.equal(/Publicado:|Principal:|perguntas existente|FAQ legado/.test(nova.artigo + nova.prompt), false, "artigo novo não tem aviso de publicado");
 });
 
@@ -429,35 +452,42 @@ test("G · fontes: a de menu não classificada fica fora, a científica sai limp
   assert.match(pilar.fontes_e_especialista, /Fontes verificadas: nenhuma nesta investigação\./);
 });
 
-test("G · plano visual: uma capa e até três respiros, e ALT de preenchimento não atravessa", () => {
+/* 2026-10-09 · o plano visual é o da planta (capa e respiros com prompt, ALT e proporção); o do pacote saiu com a estrutura legada. */
+test("G · plano visual: o da planta — uma capa e até três respiros, e ALT de preenchimento não atravessa", () => {
   const { dados } = linhasDe(EXPORT_DO_SILO().files![0].csv);
   const comPlano = dados.slice(1).filter(linha => linha.plano_visual);
   assert.ok(comPlano.length >= 2, "as linhas que servem para escrever trazem o plano visual");
   for (const linha of comPlano) {
-    assert.match(linha.plano_visual, /^Plano visual do pacote \(quem redige confirma\): uma capa e [0-3] respiro\(s\)\./);
+    assert.match(linha.plano_visual, /^Plano visual: [1-4] imagem\(ns\)\.\nCapa · /);
+    assert.ok((linha.plano_visual.match(/^Respiro \d/gm) || []).length <= 3, `${linha.ordem}: mais de três respiros`);
+    assert.doesNotMatch(linha.plano_visual, /Plano visual do pacote/, "o plano visual do pacote saiu");
     assert.equal(/ALT: (Ao final|Cobrir com clareza|Reunir o que|Declarar o critério|Capturar a intenção)/.test(linha.plano_visual), false, `${linha.ordem}: ALT de preenchimento`);
-    assert.equal(/legenda: (Bloco comercial|Gancho)\b/.test(linha.plano_visual), false);
+    assert.equal(/legenda: (Bloco comercial|Gancho)\b/i.test(linha.plano_visual), false);
   }
 });
 
 /* ================================ H ================================ */
 
-test("H · links pelo silo: destino pelo slug do irmão, SiloPage, e o rótulo L aparece na seção", () => {
+/*
+ * 2026-10-09 · OS LINKS SÃO OS DA PLANTA (regra do dono). A planta posiciona os
+ * candidatos K do Silo (irmãos pelo slug, a SiloPage pelo endereço) por seção;
+ * a coluna diz o destino, o estado e a seção, e a estrutura leva o link na seção
+ * dele. O plano de links do pacote (e a distribuição pela estrutura legada) saiu.
+ */
+test("H · links pelo silo, pela planta: destino pelo slug do irmão, SiloPage, e o rótulo L aparece na seção", () => {
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
-  assert.match(pilar.links_internos, /L1 · âncora "skin care noturno" → Suporte "skin care noturno" → \/skin-care-noturno/);
-  assert.match(pilar.links_internos, /âncora "produtos nivea para a pele" → Suporte "skin care nivea" → \/skin-care-nivea/);
-  assert.match(pilar.links_internos, /âncora "guia de cuidados com a pele" → SiloPage "Cuidados com a Pele" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele/);
-  assert.match(pilar.links_internos, /âncora "cuidados com máscara facial" \(ou "máscara facial de skincare"\) → Suporte "máscara facial" → \/mascara-facial/,
-    "âncora alternativa é texto, e não lugar");
-  assert.equal(/onde: âncoras alternativas/.test(pilar.links_internos), false);
-  assert.match(pilar.links_internos, /Pilar → Suporte/);
-  /* 2026-10-08 · P0-B · a seção sai com a pergunta do leitor como título de trabalho (sem o molde "no dia a dia?"). */
-  assert.match(pilar.estrutura, /## Como montar a rotina de skincare facial\?\n[\s\S]*?- Links: L1\./);
+  assert.match(pilar.links_internos, /^Aplique somente estes 4 link\(s\), com a âncora indicada/);
+  assert.match(pilar.links_internos, /L1 · âncora "skin care nivea" → Suporte "skin care nivea" → \/skin-care-nivea \(planejado, ainda não publicado\) · onde: seção "/);
+  assert.match(pilar.links_internos, /âncora "skin care noturno" → Suporte "skin care noturno" → \/skin-care-noturno/);
+  assert.match(pilar.links_internos, /âncora "Cuidados com a Pele" → SiloPage "Cuidados com a Pele" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele/, "a SiloPage não repete o papel no nome");
+  assert.doesNotMatch(pilar.links_internos, /SiloPage "SiloPage/);
+  assert.match(pilar.estrutura, /^- Link interno: âncora "skin care nivea" → skin care nivea$/m, "a estrutura leva o link na seção dele");
+  assert.doesNotMatch(pilar.links_internos, /distribuídos pelas seções|Pilar → Suporte/, "a coluna pelo plano de links do pacote saiu");
   assert.equal(/territory|node|article-candidate/.test(pilar.links_internos), false);
 });
 
 test("H · as decisões protegidas são as do Redator (RADAR_WRITER_MAY_NOT), todas", () => {
-  const pilar = buildRadarWritingExportArticle(entradaGoogle(), contextoAvulso()).row;
+  const pilar = linhaComPlanta(entradaGoogle(), contextoAvulso()).row;
   const naoAltere = pilar.artigo.split("\n").find(linha => linha.startsWith("Não altere:")) || "";
   const esperado: Record<string, RegExp> = {
     "trocar a keyword principal": /a keyword principal/,
@@ -482,7 +512,11 @@ test("H · as decisões protegidas são as do Redator (RADAR_WRITER_MAY_NOT), to
  * último: com o artigo-modelo, a estrutura e a linha passavam dos tetos antigos
  * e a SERP resumida, índice dos ids S/P/C, sumia inteira.
  */
-test("I · limites: célula até 6 mil (estrutura até 14 mil), artigo até 40 mil — a SERP é a última a ceder e nunca some, e o corte é dito", () => {
+/*
+ * 2026-10-09 · Defeito 1 · a estrutura nunca é cortada: teto no limite seguro de uma célula de planilha (32 mil),
+ * encolhe por níveis que dizem o que encolheu e, no limite, continua inteira na coluna de fontes; o artigo vai a 48 mil.
+ */
+test("I · limites: célula até 6 mil (estrutura até 32 mil, sem corte), artigo até 48 mil — a SERP é a última a ceder e nunca some, e o corte é dito", () => {
   const base = entradaGoogleSaude();
   const modelo = base.articleModel as unknown as { sections: Array<Record<string, unknown>> };
   const secaoLonga = modelo.sections[0];
@@ -507,18 +541,42 @@ test("I · limites: célula até 6 mil (estrutura até 14 mil), artigo até 40 m
     },
   };
   inflado.dossierGaps = base.dossierGaps ? { ...base.dossierGaps, observed: inflado.googleObserved as never } : null;
-  const linha = buildRadarWritingExportArticle(inflado, contextoAvulso()).row;
+  /*
+   * 2026-10-09 · a estrutura é a da planta: a planta inflada (12 seções com H3,
+   * "Explicar", termos e evidências compridos) é o que pesa na célula agora.
+   */
+  const longo = (rotulo: string, vezes: number) => `${rotulo} ${"com um texto comprido o bastante para pesar na célula ".repeat(vezes)}`.trim();
+  const evidencias = Array.from({ length: 72 }, (_, indice) => ({ id: `C${indice + 1}`, kind: "conceito da amostra", text: longo(`Conceito ${indice}`, 4) }));
+  const planta = plantaDe(inflado);
+  const plantaInflada = {
+    ...planta,
+    evidence: [...planta.evidence, ...evidencias],
+    blueprint: {
+      ...planta.blueprint,
+      sections: Array.from({ length: 12 }, (_, indice) => ({
+        h2: `Pergunta ${indice} com um texto comprido o bastante para pesar na célula`, readerQuestion: `${longo(`Pergunta ${indice}`, 2)}?`, answerFirst: longo("Resposta", 5),
+        h3: [1, 2, 3, 4].map(numero => longo(`Subtema ${indice}.${numero}`, 1)), explain: [1, 2, 3].map(numero => longo(`Explicação ${indice}.${numero}`, 4)),
+        paragraphs: 3, bold: [], terms: [1, 2, 3, 4, 5, 6].map(numero => `termo ${indice}.${numero}`), evidence: evidencias.slice(indice * 6, indice * 6 + 6).map(item => item.id),
+        internalLinks: [], externalLinks: [], specialist: null, video: null, image: null, practical: null, from: [],
+      })),
+    },
+  } as typeof planta;
+  const linha = buildRadarWritingExportArticle(inflado, contextoAvulso({ blueprint: plantaInflada })).row;
   const total = RADAR_WRITING_EXPORT_COLUMNS.reduce((soma, coluna) => soma + linha[coluna].length, 0);
+  /* 2026-10-09 · Defeito 1 · a estrutura nunca é cortada: com a continuação, a coluna de fontes a leva inteira (até o mesmo teto seguro). */
+  const continua = linha.fontes_e_especialista.startsWith("Continuação da coluna estrutura");
   for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) {
-    const limite = radarWritingCellLimit(coluna);
+    const limite = coluna === "fontes_e_especialista" && continua ? RADAR_WRITING_EXPORT_LIMITS.structureChars : radarWritingCellLimit(coluna);
     assert.ok(linha[coluna].length <= limite, `${coluna}: ${linha[coluna].length} > ${limite}`);
   }
-  assert.ok(total <= RADAR_WRITING_EXPORT_LIMITS.articleChars, `artigo com ${total} caracteres`);
-  assert.match(linha.estrutura, /\[…\] Célula cortada no limite de 14\.000 caracteres\.$/);
+  assert.ok(RADAR_WRITING_EXPORT_LIMITS.structureChars <= 32_000 && RADAR_WRITING_EXPORT_LIMITS.structureChars < 32_767, "o teto da estrutura é o seguro de uma célula de planilha");
+  assert.ok(total <= RADAR_WRITING_EXPORT_LIMITS.articleChars + (continua ? RADAR_WRITING_EXPORT_LIMITS.structureChars : 0), `artigo com ${total} caracteres`);
+  assert.doesNotMatch(linha.estrutura, /Célula cortada|Cortado para o artigo caber/, "a estrutura nunca é cortada");
+  assert.ok((linha.estrutura + linha.fontes_e_especialista).includes("## Pergunta 11 com um texto comprido"), "a última seção chega inteira (na estrutura ou na continuação dela)");
   if (/Cortado para o artigo caber/.test(linha.serp_resumida)) {
-    assert.match(linha.cobrir_e_superar, /Cortado para o artigo caber em 40\.000 caracteres\./, "antes da SERP, cede o cobrir e superar");
+    assert.match(linha.cobrir_e_superar, /Cortado para o artigo caber em 48\.000 caracteres\./, "antes da SERP, cede o cobrir e superar");
   }
-  assert.ok(linha.serp_resumida.replace(/\n?\[…\] Cortado para o artigo caber em 40\.000 caracteres\./, "").trim().length > 0, "a SERP resumida nunca some inteira");
+  assert.ok(linha.serp_resumida.replace(/\n?\[…\] Cortado para o artigo caber em 48\.000 caracteres\./, "").trim().length > 0, "a SERP resumida nunca some inteira");
   for (const coluna of ["ordem", "pode_escrever", "artigo", "prompt"] as const) {
     assert.equal(/Cortado para o artigo caber/.test(linha[coluna]), false, `${coluna} nunca é cortada`);
   }
@@ -530,7 +588,7 @@ test("I · nenhuma célula começa com =, +, - ou @: o Excel não a executa como
   assert.equal(radarWritingSpreadsheetSafe("=HYPERLINK(\"x\")"), "'=HYPERLINK(\"x\")");
   assert.equal(radarWritingSpreadsheetSafe("@soma"), "'@soma");
   assert.equal(radarWritingSpreadsheetSafe("Keyword principal: x"), "Keyword principal: x");
-  const perigosa = buildRadarWritingExportArticle(entradaGoogle({ article: { ...entradaGoogle().article, principalKeyword: "=cmd|' /C calc'!A0" } }), contextoAvulso()).row;
+  const perigosa = linhaComPlanta(entradaGoogle({ article: { ...entradaGoogle().article, principalKeyword: "=cmd|' /C calc'!A0" } }), contextoAvulso()).row;
   for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) assert.equal(/^[=+\-@]/.test(perigosa[coluna]), false, `${coluna} começa com fórmula`);
   for (const csv of [...EXPORT_DO_SILO().files!.map(arquivo => arquivo.csv), ...EXPORT_DO_SILO_SAUDE(true).files!.map(arquivo => arquivo.csv)]) {
     for (const linha of lerCsv(csv)) for (const celula of linha) assert.equal(/^[=+\-@]/.test(celula), false, `célula começa com fórmula: ${celula.slice(0, 40)}`);
@@ -556,11 +614,21 @@ test("I · o tamanho: ~10 mil caracteres por artigo, contra ~60 mil do formato c
  * Os hashes foram medidos na bancada ANTES de o formato "Para escrever"
  * existir (mesmas entradas, mesmo código do formato completo). Qualquer byte
  * diferente no modo técnico quebra aqui.
+ *
+ * 2026-10-09 · remedida (regra do dono: o artigo-modelo é obrigatório na
+ * entrega). Sem a planta, o técnico deixou de mandar escrever (o prompt é o de
+ * auditoria) e a situação da investigação diz que o Redator recusaria — a
+ * bancada não tem planta. As 56 colunas e o resumo do Silo não mudaram. O
+ * técnico COM a planta é provado em radar-piloto-artigo-modelo-obrigatorio-2026-10-09.
+ * 2026-10-09 (correção) · remedida de novo: a regra que fecha a lista de quem
+ * escreve deixou de mandar "sinalizar qualquer dependência" (D10) e passou a
+ * dizer "o que não tem fonte do pacote entra delimitado ou fica fora do texto".
+ * Só essa frase mudou; as 56 colunas e o resumo do Silo continuam iguais.
  */
 const DOURADO = {
-  avulso: { sha: "85083fd0f5046ff73b94414965c6953a93f0a1d2e4c910519e2258ed3607cdb1", len: 187094, cols: 56 },
-  silo: { filename: "radar-silo-cuidados-com-a-pele-2026-09-23-parcial.csv", sha: "c59bf263da8e39b3bc8e2776225cf1c95f99ec5453bc1473fda450b33733160e", len: 197979, silo: "9fc0462897d04838489c2ae0bc4c65e38c57dd077ee26b1304a45d821345ca9f" },
-  comProdutos: { sha: "282194de399f07166bbb91940abcdb4d27f31038ce1f0b30d97a572c59b83761", len: 32800 },
+  avulso: { sha: "5e2c66ac1bb82d04c37857cb6f1c117d8385d5a0abc0f533759d7982251a17ed", len: 187665, cols: 56 },
+  silo: { filename: "radar-silo-cuidados-com-a-pele-2026-09-23-parcial.csv", sha: "74a8b689c8775a2679408bac5362be42e1e07cd9515d439d056e63f96826f7c4", len: 198550, silo: "9fc0462897d04838489c2ae0bc4c65e38c57dd077ee26b1304a45d821345ca9f" },
+  comProdutos: { sha: "5c80355f2fc806fba9227b97a5bd8c57a9f2a1fcdc28eef620328fd9a16cfffc", len: 32875 },
 };
 const sha = (texto: string) => createHash("sha256").update(texto).digest("hex");
 
@@ -605,9 +673,11 @@ test("J · os nomes: 'para-escrever' no novo, e o do completo intocado", () => {
 
 /* ================================ K ================================ */
 
-test("K · a rota: 'mode' opcional, padrão completo, e o ramo novo não lê nada a mais", async () => {
+test("K · a rota: 'mode' opcional, padrão para escrever (2026-10-09), e o ramo novo não lê nada a mais", async () => {
   const rota = semComentarios((await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8")));
   assert.match(rota, /mode: z\.enum\(\["writing", "full", "video"\]\)\.optional\(\)/);
+  /* 2026-10-09 · sem `mode`, o formato para escrever (pelo artigo-modelo); o técnico é pedido explícito. */
+  assert.match(rota, /mode: corpo\.mode \?\? "writing"/);
   assert.match(rota, /if \(input\.mode === "writing"\) \{/);
   const ramo = rota.slice(rota.indexOf("if (input.mode === \"writing\") {"), rota.indexOf("const linhaPorArtigo ="));
   /* 2026-10-02 · a voz da marca (SDD diretriz editorial, Adendo C) vai ao formato para escrever, lida no núcleo. */
@@ -720,12 +790,12 @@ test("PROVIDER_CALLS = 0", () => {
 
 /* As variantes do Amazon e do YouTube isoladas também sobem sem rede. */
 test("K · as linhas avulsas do Amazon com produto e do YouTube", () => {
-  const amazon = buildRadarWritingExportArticle(entradaAmazon(true), contextoAvulso({ articleId: ARTIGO_AMAZON })).row;
+  const amazon = linhaComPlanta(entradaAmazon(true), contextoAvulso({ articleId: ARTIGO_AMAZON })).row;
   assert.match(amazon.pode_escrever, /^Com ressalva: o formato pede 6 produtos e só 1 foi\(ram\) selecionado\(s\)/);
   assert.match(amazon.produtos, /1\. NIVEA Q10 Sérum Antissinais Expert Dupla Ação 30ml · R\$\s?89,90 observado na coleta · nota 4,8 \(835 avaliações\) · Escolha da Amazon · https:\/\/www\.amazon\.com\.br\/dp\/B0DBRR5BP4$/m);
   assert.match(amazon.produtos, /Aviso de afiliado: obrigatório antes do primeiro link de produto\./);
   assert.equal(/tag=|ref=/.test(amazon.produtos), false, "tag de afiliado atravessou");
-  const youtube = buildRadarWritingExportArticle(entradaYoutube(), contextoAvulso({ articleId: ARTIGO_YOUTUBE })).row;
+  const youtube = linhaComPlanta(entradaYoutube(), contextoAvulso({ articleId: ARTIGO_YOUTUBE })).row;
   assert.match(youtube.pode_escrever, /^Não: a investigação deste artigo foi feita para vídeo do YouTube/);
   assert.match(youtube.artigo, /Formato: Roteiro de vídeo/);
   for (const coluna of ["promessa_e_leitor", "titulo_e_seo", "estrutura", "cobrir_e_superar", "serp_resumida", "fontes_e_especialista", "links_internos", "plano_visual", "produtos"] as const) {
@@ -736,25 +806,36 @@ test("K · as linhas avulsas do Amazon com produto e do YouTube", () => {
 
 /* ================================ L · as correções da revisão ================================ */
 
-test("L · artigo do Silo sem plano de links: a falta é dita na célula e no veredito, e nenhum link é inventado", () => {
-  const saude = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados;
+/*
+ * 2026-10-09 · os links são os da planta: a coluna diz o que a planta
+ * posicionou; o artigo do Silo sem link na planta E sem plano de links no
+ * pacote ganha a ressalva do isolamento no veredito. Nada é inventado.
+ */
+test("L · artigo do Silo sem link na planta nem plano de links no pacote: a falta é dita na célula e no veredito, e nenhum link é inventado", () => {
+  const silo = planoDoSilo().files[0].writing!;
+  const montadas = comPlantas(montadasDoSiloSaude(), silo)
+    .map(item => (item.articleId === ARTIGO_AMAZON ? { ...item, blueprint: plantaDe(item.entrada, { silo, articleId: item.articleId, semLinks: true }) } : item));
+  const saude = linhasDe(radarPortableWritingExport({ articles: montadas, lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM }).files![0].csv).dados;
   const suporte = saude[2];
   assert.equal(suporte.ordem, "2 · Suporte");
-  assert.equal(suporte.links_internos, "Nenhum link: o pacote não traz plano de links para este artigo (nem para o Pilar, nem para a SiloPage). Não crie links; o plano é do Arquiteto.");
+  assert.equal(suporte.links_internos, "Nenhum link interno no artigo-modelo.");
   assert.match(suporte.pode_escrever, /sem links internos no pacote: o artigo sai isolado do Silo \(sem link para o Pilar nem para a SiloPage\) até o Arquiteto definir o plano de links/);
-  assert.match(linhasDe(EXPORT_DO_SILO().files![0].csv).dados[2].links_internos, /^Nenhum link: /, "o bloqueado também diz a falta");
-  assert.equal(/Nenhum link/.test(saude[1].links_internos), false, "o Pilar tem plano de links");
+  assert.match(saude[1].links_internos, /^Aplique somente estes \d link\(s\)/, "o Pilar leva os links que a planta posicionou");
 
-  const avulso = linhasDe(radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM }).csv || "").dados[2];
-  assert.equal(avulso.links_internos, "", "sem silo não há plano de links a cobrar");
+  /* Sem Silo, a planta não tem candidato a link e não há plano a cobrar. */
+  const avulso = linhasDe(radarPortableWritingExport({ articles: comPlantas(montadasDoSilo()), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM }).csv || "").dados[2];
+  assert.equal(avulso.links_internos, "Nenhum link interno no artigo-modelo.");
   assert.equal(/sem links internos/.test(avulso.pode_escrever), false);
 
-  const semPagina = buildRadarWritingExportArticle({ ...entradaGoogleSaude(), internalLinks: [] }, {
-    topRowLabel: "Silo", filePosition: 1, silo: planoDoSilo().files[0].writing!, articleId: ARTIGO, publication: null,
+  /* A planta só leva destinos do Silo (irmãos e SiloPage): nenhum link fora dos candidatos, nenhuma direção do plano de links legado. */
+  const comLinks = linhaComPlanta({ ...entradaGoogleSaude(), internalLinks: [] }, {
+    topRowLabel: "Silo", filePosition: 1, silo, articleId: ARTIGO, publication: null,
   }).row;
-  assert.match(semPagina.links_internos, /^L1 · /m);
-  assert.equal(/Artigo → SiloPage/.test(semPagina.links_internos), false);
-  assert.match(semPagina.links_internos, /\nNenhum link para a SiloPage no pacote: não crie um; o plano é do Arquiteto\.$/);
+  assert.match(comLinks.links_internos, /^L1 · /m);
+  assert.equal(/Artigo → SiloPage|Nenhum link para a SiloPage no pacote/.test(comLinks.links_internos), false);
+  for (const destino of comLinks.links_internos.matchAll(/→ (Pilar|Suporte|SiloPage) "([^"]+)"/g)) {
+    assert.ok(["skincare facial", "skin care nivea", "máscara facial", "skin care noturno", "Cuidados com a Pele"].includes(destino[2]), `destino fora do Silo: ${destino[2]}`);
+  }
 });
 
 test("L · a linha de topo não afirma aprovação da Marca que não leu", () => {
@@ -768,7 +849,8 @@ test("L · o que se repetia em cada linha mora uma vez na linha de topo", () => 
   const { dados } = linhasDe(EXPORT_DO_SILO_SAUDE(true).files![0].csv);
   const [topo, ...artigos] = dados;
   assert.match(topo.prompt, /Tom visual: editorial e direto/);
-  assert.match(topo.prompt, /Imagens, em todos os artigos deste arquivo — evitar: sem texto sobreposto na imagem/);
+  /* 2026-10-09 · o plano visual é o da planta (prompts com as restrições dentro): a lista "Evitar" do plano do pacote saiu, e nada sobe ao topo. */
+  assert.doesNotMatch(topo.prompt, /Imagens, em todos os artigos deste arquivo — evitar/);
   assert.match(topo.prompt, /Links internos: só os indicados em cada artigo \(L1, L2…\)/);
   /* 2026-10-08 · C8 · a regra geral 4 sem marcador por preencher: sem experiência própria, sem relato e sem inventá-lo. */
   assert.match(topo.prompt, /onde faltar experiência própria da marca, escreva sem relato e sem inventá-lo, sem marcador no texto\./);
@@ -780,7 +862,7 @@ test("L · o que se repetia em cada linha mora uma vez na linha de topo", () => 
     assert.ok(linha.prompt.length <= 1_300, `${linha.ordem}: prompt com ${linha.prompt.length} caracteres`);
   }
   const meta = artigos[0].titulo_e_seo.split("\n").find(linha => linha.startsWith("Meta description:")) || "";
-  assert.equal((meta.match(/promessa/gi) || []).length, 1, `a meta description repete a promessa: ${meta}`);
+  assert.ok((meta.match(/promessa/gi) || []).length <= 1, `a meta description repete a promessa: ${meta}`);
 });
 
 test("L · a lista 'Evitar' só sobe quando é a mesma em todos os artigos", () => {
@@ -807,28 +889,48 @@ test("L · ALT, legenda e prompt que só repetem a pergunta, o cabeçalho ou um 
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
   assert.equal(/ALT: (Qual a ordem dos produtos|Como montar a rotina de skincare facial|Skincare facial para pele oleosa)\b/.test(pilar.plano_visual), false);
   assert.equal(/assunto: qual a ordem dos produtos/i.test(pilar.plano_visual), false, "prompt de molde atravessou");
-  assert.match(pilar.plano_visual, /A escrever a partir do conteúdo real da seção \(o pacote não trazia texto utilizável\): Capa \([^)]*\); Respiro 1 \(ALT/);
-  assert.equal(/ficaram de fora: escreva-os/.test(pilar.plano_visual), false);
+  /* 2026-10-09 · o plano visual é o da planta, concluído (D10): capa e respiros com prompt e ALT, sem mandar escrever o que falta. */
+  assert.match(pilar.plano_visual, /^ ?ALT: /m);
+  assert.doesNotMatch(pilar.plano_visual, /A escrever a partir do conteúdo real|ficaram de fora: escreva-os/);
 });
 
+/*
+ * 2026-10-09 · com a planta, o título picotado do modelo editorial não é mais
+ * ressalva; o excedente aparece com a planta que não posicionou link (o artigo
+ * do Silo isolado é a quinta ressalva).
+ */
 test("L · o veredito não repete a mesma afirmação e diz o excedente pelo nome", () => {
-  const pilar = linhasDe(EXPORT_DO_SILO_SAUDE(true).files![0].csv).dados[1];
-  assert.equal((pilar.pode_escrever.match(/O que causa acne/g) || []).length, 1, "a afirmação do conflito voltou como segundo motivo");
+  const silo = planoDoSilo().files[0].writing!;
+  /* O Pilar sem plano de links no pacote (o grafo aprovado não traz destino) e com a planta sem link. */
+  const semPlano = (entrada: ReturnType<typeof entradaGoogleSaude>) => {
+    const observado = entrada.googleObserved as unknown as Record<string, unknown> & { internalLinkPlan: Record<string, unknown> };
+    return { ...entrada, internalLinks: [], googleObserved: { ...observado, internalLinkPlan: { ...observado.internalLinkPlan, outgoing: [] } } as never };
+  };
+  const montadas = comPlantas(montadasDoSiloSaude(), silo)
+    .map(item => (item.articleId === ARTIGO ? { ...item, entrada: semPlano(item.entrada), blueprint: plantaDe(item.entrada, { silo, articleId: item.articleId, semLinks: true }) } : item));
+  const pilar = linhasDe(radarPortableWritingExport({
+    articles: montadas, lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM, publications: new Map([[ARTIGO, PUBLICACAO_SEM_POLITICA]]),
+  }).files![0].csv).dados[1];
+  /* A afirmação sem fonte que o conflito de YMYL nomeia não volta como motivo próprio ("é afirmação … sem fonte verificada"). */
+  assert.match(pilar.pode_escrever, /^Com ressalva: o pacote registra YMYL baixa e também uma afirmação sensível que pede fonte \("O que causa acne"\)/);
+  assert.equal(/"O que causa acne" é afirmação/.test(pilar.pode_escrever), false, "a afirmação do conflito voltou como segundo motivo");
   assert.equal(/\(\+\d+ ressalva/.test(pilar.pode_escrever), false, "o excedente voltou a ser só um número");
-  assert.match(pilar.pode_escrever, /título de trabalho do pacote não utilizável/);
-  assert.match(pilar.pode_escrever, /\n- Também: especialista E1 \(detalhes nas colunas desta linha\)\.$/);
+  assert.doesNotMatch(pilar.pode_escrever, /título de trabalho do pacote não utilizável/, "o título é o da planta");
+  assert.match(pilar.pode_escrever, /\n- Também: sem links internos no pacote \(detalhes nas colunas desta linha\)\.$/);
 });
 
 test("L · um artigo sem pendência sai 'Sim', e o prompt não traz o bloco 'Neste artigo'", () => {
   const google = entradaGoogle();
-  const limpo = buildRadarWritingExportArticle({
+  const limpo = linhaComPlanta({
     ...google,
     articleModel: { ...(google.articleModel as unknown as Record<string, unknown>), titleSuggestion: "Skincare facial: como montar a rotina passo a passo" } as never,
   }, contextoAvulso());
   assert.equal(limpo.verdict, "Sim");
   assert.equal(limpo.row.pode_escrever, "Sim");
   assert.equal(limpo.firstReason, null);
-  assert.match(limpo.row.titulo_e_seo, /^H1 de trabalho: Skincare facial: como montar a rotina passo a passo$/m);
+  /* 2026-10-09 · o H1 é o da planta, não o título de trabalho do modelo editorial. */
+  assert.match(limpo.row.titulo_e_seo, /^H1: Skincare facial: o guia prático$/m);
+  assert.doesNotMatch(limpo.row.titulo_e_seo, /H1 de trabalho/);
   assert.match(limpo.row.prompt, /^Escreva em português do Brasil o artigo descrito nesta linha/);
   assert.equal(/Neste artigo:|Não escreva/.test(limpo.row.prompt), false);
 });

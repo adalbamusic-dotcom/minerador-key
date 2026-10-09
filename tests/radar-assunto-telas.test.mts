@@ -92,7 +92,16 @@ test("rota radar-topics: o prompt do sistema é SYSTEM_PROMPT + as linhas do Ass
   assert.equal(sha(base), "76c8e4ed4edac84d837e7f9e18b18a7b5659494301406e87b54195568fbc84d0", "o SYSTEM_PROMPT continua byte a byte igual");
   assert.match(codigo, /import \{ radarExpertTopicsSubjectPromptLines \} from "@\/lib\/radar\/expert-brief";/);
   assert.match(codigo, /return \[SYSTEM_PROMPT, \.\.\.radarExpertTopicsSubjectPromptLines\(input\.context\)\]\.join\("\\n"\);/);
-  assert.match(codigo, /system: buildSystemPrompt\(parsed\.data\)/);
+  /*
+   * 2026-10-09 · regra do piloto: o pedido sai sem o ruído da régua da
+   * pesquisa (`expertTopicsContextWithoutNoise`) e o prompt do sistema ganha,
+   * depois das linhas do Assunto, as linhas do artigo-modelo concluído do
+   * mesmo ArticleDNA (as pautas servem às seções dele). O montador do Assunto
+   * continua o mesmo, por dentro do novo.
+   */
+  assert.match(codigo, /return \[buildSystemPrompt\(input\), \.\.\.linhasDaPlanta\]\.join\("\\n"\);/);
+  assert.match(codigo, /const pedido: Pedido = \{ \.\.\.parsed\.data, context: expertTopicsContextWithoutNoise\(parsed\.data\.context\)\.context \};/);
+  assert.match(codigo, /system: buildSystemPromptWithBlueprint\(pedido, linhasDaPlanta\), user: buildPrompt\(pedido\)/);
   assert.equal(/system: SYSTEM_PROMPT\b/.test(codigo), false, "o prompt do sistema passa pelo montador");
   /* Sem Assunto a lista é vazia, e [SYSTEM_PROMPT].join("\n") é o próprio SYSTEM_PROMPT. */
   assert.equal(["X", ...radarExpertTopicsSubjectPromptLines(expertContextFixture(false))].join("\n"), "X");
@@ -212,11 +221,12 @@ test("workbench: o disclosure usa a contagem de observados", () => {
   assert.equal(tela.includes("Ver candidatos observados · {model.deepResearch.blueprint.sections.length}"), false);
 });
 
+/* 2026-10-09 · o rótulo "Blueprint editorial" virou "Esqueleto da SERP" (regra do piloto); o resto do markup é o mesmo (conferido reconstruindo o hash antigo). */
 test("blueprint: sem Assunto, markup byte a byte igual ao HEAD", () => {
   assert.equal(sha(renderToStaticMarkup(createElement(RadarBlueprintDetail, { blueprint: blueprintFixture(false) }))),
     "6d386dbcfa1de0dbcbfb3c2140f57baf233a16b63ab942e570e1eb4669eb7ed9");
   assert.equal(sha(renderToStaticMarkup(createElement(RadarBlueprintSummaryCard, { blueprint: blueprintFixture(false) }))),
-    "4ade8468b01755b020bd5f9f2cee08fc57f71d4aec04ca1c14a4a1afb6bfb3b5");
+    "19bffb73fbab0058c8f65370abdfe94a2018413cd0940a77d851ad430ef18a3d");
 });
 
 test("blueprint: a virada tem rótulo próprio, sem número, e o alerta aparece em 14px", () => {
@@ -244,7 +254,7 @@ test("blueprint: a virada tem rótulo próprio, sem número, e o alerta aparece 
 
 test("artigo-modelo: sem Assunto, markup byte a byte igual ao HEAD", () => {
   assert.equal(sha(renderToStaticMarkup(createElement(RadarArticleModelSection, { model: articleModelFixture(false) }))),
-    "187c7014eba41ed0e097a8d2717e3a1f86dd6433613fe51b43812bb5ae374fde");
+    "742e37ceeecf3237e14de7edd470505192e30b3f326c23e1939cc8f6eb27331c");
 });
 
 test("artigo-modelo: a virada ganha o selo próprio; o Assunto, o alerta e o destino ficam visíveis", () => {

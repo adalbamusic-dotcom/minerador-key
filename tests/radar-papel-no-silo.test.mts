@@ -34,6 +34,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { RadarR3ProfileMirror } from "../modules/radar/radar-r3-profile-mirror.tsx";
 import { createRadarR4LocalArticleState } from "../lib/radar/r4-queue.ts";
 import { ARTIGO, ARTIGO_AMAZON, EXPORTADO_EM, ITENS_DO_SILO, MARCA as MARCA_DA_BANCADA, SILO_DNA, entradaGoogle, entradaGoogleSaude, planoDoSilo } from "./radar-portable-writing-fixtures.mts";
+/* 2026-10-09 · o CSV "Para escrever" sai só com a planta concluída (regra do dono). */
+import { comPlanta, plantaDe, respostaDaPlanta } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 
 /*
  * ===== 2026-10-08 · O PAPEL NO SILO É O QUE O ARQUITETO DECIDIU =====
@@ -302,7 +304,7 @@ test("1 · artigo fora da composição do SiloDNA vigente: sem papel, nem a foto
   entrada.article = { ...entrada.article, articleRole: rotulo };
   const plano = planoDoSilo().files[0].writing!;
   const foraDoPlano = { ...plano, members: plano.members.map(m => m.articleId === ARTIGO ? { ...m, role: "fora da composição do SiloDNA" } : m) };
-  const linha = JSON.stringify(buildRadarWritingExportArticle(entrada, { topRowLabel: "Silo", filePosition: 1, silo: foraDoPlano, articleId: ARTIGO, publication: null } as never).row);
+  const linha = JSON.stringify(buildRadarWritingExportArticle(entrada, comPlanta(entrada, { topRowLabel: "Silo", filePosition: 1, silo: foraDoPlano, articleId: ARTIGO, publication: null } as never)).row);
   assert.match(linha, /Papel no Silo: Fora da composição do SiloDNA vigente/);
   assert.doesNotMatch(linha, /Papel no Silo: Pilar/);
 });
@@ -407,7 +409,7 @@ test("3 · Silo sem Pilar: plano, planilha, CSV 'Para escrever' e artigo-modelo 
   const semPilar = { ...SILO_DNA, payload: { ...SILO_DNA.payload, pillarArticleId: null } };
   const planoSemPilar = planRadarSiloExport({ today: EXPORTADO_EM, brandId: MARCA_DA_BANCADA, items: ITENS_DO_SILO, siloVersions: [semPilar] as never }).files[0].writing!;
   assert.equal(planoSemPilar.members.find(m => m.articleId === ARTIGO)?.role, "Pilar (formação)");
-  const linha = JSON.stringify(buildRadarWritingExportArticle(entradaGoogle(), { topRowLabel: "Silo", filePosition: 1, silo: planoSemPilar, articleId: ARTIGO, publication: null } as never).row);
+  const linha = JSON.stringify(buildRadarWritingExportArticle(entradaGoogle(), comPlanta(entradaGoogle(), { topRowLabel: "Silo", filePosition: 1, silo: planoSemPilar, articleId: ARTIGO, publication: null } as never)).row);
   assert.match(linha, /Papel no Silo: Pilar \(formação\)/);
   assert.doesNotMatch(linha, /Papel no Silo: (?:Pilar|Suporte) —/, "a sugestão não recebe o que o papel decidido pede");
 
@@ -483,7 +485,7 @@ test("4 · o Pilar recebe 'Papel no Silo: Pilar', sem candidato a si mesmo e sem
   const { notes: notasComAntigo } = radarSanitizeArticleBlueprint(respostaSemLinkParaOPilar(comPilarAntigo), comPilarAntigo);
   assert.ok(!notasComAntigo.some(nota => /Falta o link para o Pilar/.test(nota)));
   /* O CSV "Para escrever" do mesmo artigo diz o mesmo papel — o do plano por Silo, não o da foto. */
-  const linha = JSON.stringify(buildRadarWritingExportArticle(entrada, { topRowLabel: "Silo", filePosition: 1, silo: plano, articleId: ARTIGO, publication: null } as never).row);
+  const linha = JSON.stringify(buildRadarWritingExportArticle(entrada, comPlanta(entrada, { topRowLabel: "Silo", filePosition: 1, silo: plano, articleId: ARTIGO, publication: null } as never)).row);
   assert.match(linha, /Papel no Silo: Pilar — cobre o tema com amplitude/);
   assert.doesNotMatch(linha, /Papel no Silo: Suporte/);
 });
@@ -512,14 +514,22 @@ test("6 · o destino do link sai pelo nó do grafo aprovado, e não casando pala
    */
   const irmao = { articleId: "article-candidate:territory:def", position: 5, title: "Hidratante facial noturno", principalKeyword: "hidratante facial noturno", slug: "hidratante-facial-noturno", role: "Suporte", statusLabel: "finalizado", inThisFile: false, reason: null };
   const contexto = { topRowLabel: "Silo", filePosition: 1, silo: { ...silo, members: [...silo.members, irmao] }, articleId: ARTIGO, publication: null };
-  const links = buildRadarWritingExportArticle(entradaGoogleSaude(), contexto as never).row.links_internos;
-  const doNo = links.split("\n").find(linha => linha.includes("âncora \"produtos nivea para a pele\"")) || "";
-  assert.match(doNo, /→ Suporte "hidratante facial noturno" → \/hidratante-facial-noturno/);
-  assert.doesNotMatch(doNo, /skin-care-nivea/);
-  /* O artigo-modelo marca o mesmo irmão como "pedido pelo grafo aprovado" — também pelo nó, e não pelo texto. */
+  /* O artigo-modelo marca o mesmo irmão como "pedido pelo grafo aprovado" — pelo nó, e não pelo texto. */
   const brief = buildRadarArticleBlueprintBrief({ entrada: entradaGoogleSaude(), silo: contexto.silo as never, articleId: ARTIGO, publication: null });
   const candidato = brief.linkCandidates.find(item => item.destination === "/hidratante-facial-noturno");
   assert.equal(candidato?.fromGraph, true, "o irmão pedido pelo nó do grafo aprovado não foi marcado como do grafo");
+  /*
+   * 2026-10-09 · os links do CSV são os da planta: a planta que põe o link com a
+   * âncora do grafo vai ao destino do nó (o candidato resolvido pelo nó), nunca
+   * ao irmão que só casa palavras.
+   */
+  const secoes = (respostaDaPlanta(brief, {}, { semLinks: true }).sections as Array<Record<string, unknown>>)
+    .map((item, indice) => (indice === 0 ? { ...item, internalLinks: [{ candidate: candidato!.id, anchor: "produtos nivea para a pele", reason: "pedido pelo grafo aprovado" }] } : item));
+  const planta = plantaDe(entradaGoogleSaude(), { silo: contexto.silo as never, articleId: ARTIGO, resposta: { sections: secoes } });
+  const links = buildRadarWritingExportArticle(entradaGoogleSaude(), { ...contexto, blueprint: planta } as never).row.links_internos;
+  const doNo = links.split("\n").find(linha => linha.includes("âncora \"produtos nivea para a pele\"")) || "";
+  assert.match(doNo, /→ Suporte "hidratante facial noturno" → \/hidratante-facial-noturno/, links);
+  assert.doesNotMatch(doNo, /skin-care-nivea/);
   /* 2026-10-08 (revisão) · §13 · o nó serve à resolução, mas não sai no CSV completo. */
   const json = buildRadarPortableExportRow(entradaGoogleSaude()).internal_links_resolved_json;
   assert.ok(JSON.parse(json).length > 0, "a bancada tem links do grafo");
@@ -581,8 +591,15 @@ test("5 · as telas do Radar não exibem `row.hierarchy` nem `payload.hierarchy`
   const nucleo = await fonte("../lib/server/radar-portable-export-core.ts");
   /* A chamada das autoridades, e não um dos outros dois `siloVersions` do arquivo (os do plano por Silo). */
   assert.match(nucleo, /loadRadarCanonicalAuthorities\(\{\s*brandId: input\.brandId,\s*articleId,\s*article,\s*analysis: corrente,\s*serpRecords: snapshots\.records,\s*siloVersions: artefatos\.silos,\s*\}\)/);
-  assert.match(nucleo, /readPublishedStructure: radarReadPublishedStructure, selectionSiloContext: true \}\);/);
-  assert.match(nucleo, /plan: null, selectionPlan: montagem\.planoDaSelecao,/);
+  /*
+   * 2026-10-09 (correção) · o MCP monta pelo módulo próprio (`radarMcpMaterialForArticle`,
+   * lib/server/radar-mcp-material.ts), com o Silo da seleção como o botão; a antiga
+   * `radarWritingExportForArticle` saiu do núcleo.
+   */
+  const doMcp = await fonte("../lib/server/radar-mcp-material.ts");
+  assert.match(doMcp, /readPublishedStructure: radarReadPublishedStructure,\s*selectionSiloContext: true,/);
+  /* Sem `groupBy`, `montagem.plano` é null: o Silo da linha vem do plano da seleção, como na rota. */
+  assert.match(doMcp, /plan: montagem\.plano, selectionPlan: montagem\.planoDaSelecao,/);
   /* A planilha resolve o papel UMA vez por linha, com o SiloDNA vigente, e o entrega a todo leitor da linha. */
   const pagina = await fonte("../modules/radar/radar-page.tsx");
   /* 2026-10-08 (revisão) · o Silo resolvido pelo handoff (`row.siloId`) antes do da hidratação, em todo ponto que acha o SiloDNA. */

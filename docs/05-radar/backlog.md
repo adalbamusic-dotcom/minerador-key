@@ -1,5 +1,144 @@
 # Backlog — Radar
 
+## Regra do piloto em todas as operações — 2026-10-09
+
+Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo). "Feito" quer dizer verificado no código e
+confirmado por teste. **Validado manualmente: não.**
+
+- [x] Artigo-modelo obrigatório nos 4 formatos do export (409 `needs_article_blueprint`, 503 `blueprint_unavailable`),
+  no envio ao Redator e no MCP; padrão `writing` na rota; botões e barra de lote com o custo antes do clique.
+- [x] CSV "Para escrever" só pela planta; regras `2026-10-09b` (bloco comercial e regra 25; exclusões e regra 26).
+- [x] CSV de vídeo e plano do vídeo só pela planta; decisão única de formato pela amostra pertinente.
+- [x] YouTube: fotografia nova pela amostra pertinente; plano de consultas com escopo e ruído; aba "Vídeo pelo
+  artigo-modelo"; finaliza sozinho pela regra do Google (YouTube e Amazon).
+- [x] Amazon: parte comercial em qualquer perfil; análise pelos compatíveis no congelamento novo.
+- [x] Versão do ArticleDNA pela regra (`radarCurrentArticleDnaVersion`, nunca a ordem do banco) no export, na planta, na Amazon e — correção —
+  no envio, no START e no apoio do Google. Correção antes do deploy: no Radar vale a versão TRANSPORTADA pelo item (`transportedVersionId`: a do item no envio, a da análise no export e na Amazon, a que a tela manda no START, a do START ou da análise no apoio); sem ela, a vigente da mesa. O artigo já no Radar com versão nova aprovada não trava mais. Teste: `tests/radar-versao-transportada-2026-10-09.test.mts`.
+- [x] Correção: multiformato do congelamento novo pela amostra pertinente; rótulo da régua anterior na tela.
+- [x] Correção: técnico com as regras do piloto (trava, exclusões, sem segunda chamada) e brief só pela planta; regra
+  D10 que fecha a lista de quem escreve.
+- [x] Correção: exclusões do reajuste no CSV de vídeo e no plano do Redator, com a nota em `cortes_para_redes`.
+- [x] Correção: coluna produtos, ressalva do parcial e aviso de afiliado com o Google como base e a Amazon como review.
+- [x] Correção: bloco comercial completo ao gerador do artigo-modelo (`amazonCommercialBlock`).
+- [x] Correção: envio com a Amazon congelada na conferência, virada gravada pela planta e `ifMissing` ao organizar.
+- [x] Correção: aba Amazon com o artigo-modelo primeiro e o modelo comercial recolhido ("Esqueleto completo").
+- [x] Correção: custo dos botões de finalizar pelo teto ("até 2 chamadas de IA").
+- [x] Correção: leitura da planta que falha não oferece organizar (Radar e Redator); "Leitura seguinte" no painel.
+- [x] Correção: portão único para o vídeo como perfil primário no modo `writing`.
+- [x] Correção: prévia do reparo diz quando só as limitações mudaram e que recongelar a Amazon desliga a planta.
+- [x] ~~**Dono, antes do deploy (P0-A):** a versão nova aprovada do ArticleDNA (reajuste) desliga a planta e a
+  investigação anteriores. Aceitar (efeito do reajuste, já dito na tela e no catálogo) ou manter a regra antiga até
+  todos os leitores migrarem.~~ Resolvida pela correção antes do deploy: a versão nova aprovada NÃO desliga a planta nem a investigação do item, que segue na versão transportada; o teste `contrato-F2` fixa o comportamento novo.
+- [ ] **Dono:** Google como base + Amazon review sem produto: bloquear o artigo inteiro ou manter a ressalva.
+- [ ] **Dono:** TARGET_PRODUCTS com a prateleira inteira como base das faixas e critérios.
+- [ ] **Dono:** apoio do Google "pendente" continua parando o automático.
+- [ ] **Dono (já listadas):** ferramenta MCP para organizar o artigo-modelo (paga, escopo novo, exige SDD); organizar
+  o artigo-modelo de "como atrair um cliente" e de "campanhas"; composição de promoções, campanhas e captação no
+  Arquiteto; E1 do Pilar e do Instagram; texto da Skill com "pendência"/"preencher"; ordem de publicação dos destinos
+  planejados; coluna Formato; bloquear o envio ao Redator quando o SiloDNA muda depois do envio.
+- [ ] Proposta (F7): fotografia e multiformato do YouTube com o público do artigo e da voz (hoje só o núcleo pelas
+  consultas da corrida).
+- [ ] Proposta (F8): expor o `videoPlan` numa leitura de servidor e mostrar capítulos e cortes na aba YouTube.
+- [ ] Proposta (F17): trava de fonte e varredura D10 no `save_writer_deliverable`; plano de vídeo em
+  `get_writer_foundations`.
+- [ ] **Proposta (exige SDD e autorização; mudança de workflow): Reenvio da versão nova do ArticleDNA ao Radar.** Atualiza o item existente do Radar (`source_version_id`, `articleDnaVersionId`, `articleDnaContentHash`, `hydration`) e depois reinvestiga e reorganiza o artigo-modelo (custo dito antes do clique). Sem isso, o reajuste de artigo já enviado não chega ao Radar: o `import_radar` exige Pronto para Radar e faz upsert com `ignoreDuplicates` (não muda o item que existe), e o Arquiteto recusa reenviar o artigo já entregue. Hoje o Radar segue na versão transportada pelo item (correção desta rodada; antes desta proposta, a
+  coleta, a fotografia, a planta e o envio ao Redator ficam na versão do envio do Arquiteto). Registrada também no backlog do Arquiteto.
+- [ ] Proposta: Relatório lendo a planta por linha (hoje PENDING para todo finalizado); `useRadarArticleBlueprintForReport`
+  sem o Google congelado; `amazon-observed` com a suficiência no lugar de "A coleta não devolveu produtos"; aviso
+  antes do "Finalizar" da Amazon; mover `radarWritingCompareKey`/`radarWritingDecodeEntities` para um módulo-folha.
+- [ ] **Dono (homologação, grátis):** export sem planta → botão com custo → confirmação → série → arquivo; barra de
+  lote; envio sem planta; aba Amazon (artigo-modelo primeiro, esqueleto recolhido); aba YouTube ("Vídeo pelo
+  artigo-modelo" e o rótulo da régua anterior) em 360/768/1024/1440 px e no dark mode; MCP `get_video_material`,
+  `get_writer_brief` e `save_writer_deliverable` sem planta.
+
+## Correção da coerência dos 8 CSVs e regras do artigo-modelo — 2026-10-09
+
+Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo). "Feito" quer dizer verificado no código e
+confirmado por teste. **Validado manualmente: não.**
+
+- [x] 1: o artigo vai a 80 mil e `cobrir_e_superar` nunca é cortada; no teto da célula, o "Não cobrir" fica inteiro.
+- [x] 2: plano de parágrafos pela base única; esqueleto do artigo-modelo conta o tema em sites.
+- [x] 3: 3(a) alinhado à guarda (modo, agente, raiz única em título ou expressão inteira, verbo comum) e aplicado no
+  pedido do artigo-modelo com a planta aprovada anterior ou a página publicada.
+- [x] 4: o tópico que é keyword de um artigo do Silo tem nele o dono (keywords dos membros do lote).
+- [x] 5: exclusão da voz com condição, sem "atividades" e com os sinônimos do Instagram Shopping.
+- [x] 7: isenção do objetivo estreitada; link da planta trava por oração e pela reprodução inteira.
+- [x] 8: rótulo de tema por cabeça de lista fechada e fora na origem (CSV, vídeo e Redator iguais).
+- [x] 9: demonstração — casos comuns pegos, reescrita sem quebrar o texto, ação não é resultado.
+- [x] 10: virada sem a frase que chama; leitura seguinte na última seção pertinente; próximo passo que chama sai no
+  Redator e no vídeo.
+- [x] 11: "H2 sobrepostos" sem falso positivo nas plantas reais; publicado sem modelo, a exigência do ArticleDNA vai ao
+  H2 de mesma pergunta.
+- [x] 12: segundo leitor só com ação de compra ou busca; títulos sem "para clínicas e pacientes"; seção enquadrada sem
+  linhas contraditórias.
+- [x] 13: login/controle de acesso e SPC Brasil saem; fonte regulatória com instrumento volta a ser decidida também
+  pela seção.
+- [x] 14: campanhas sem H2 duplicado da mesma pergunta.
+- [x] A planta lida é uma função só para CSV, vídeo e Redator (`WRITER_BLUEPRINT_READING_RULES` "2026-10-09").
+- [x] Aviso de regras anteriores por versão gravada; catálogo do MCP e docs com as regras de 2026-10-09.
+- [ ] **Dono:** regerar os 8 CSVs e conferir, além da lista da seção abaixo: tráfego com "O orgânico sustenta a presença
+  a longo prazo; …" marcado "(precisa de fonte…)"; promoções sem "O próximo passo é… consultoria" no fechamento, com a
+  alternativa sem "e pacientes" e a seção do cupom reescrita para a clínica; captar sem "Como prospectar clientes da
+  forma certa" no "Não cobrir"; captação e captar com "Como conseguir mais clientes…" apontando "como atrair um
+  cliente"; campanhas sem "## O que não fazer no marketing digital de sucesso?"; captar sem "SPC Brasil".
+- [ ] **Dono:** organizar o artigo-modelo de "como atrair um cliente" e de "campanhas" (1 chamada de IA cada).
+- [ ] **Dono / Arquiteto:** composição de promoções ("site de promoções estetica") e de captação de pacientes
+  (estratégias × aplicação × Instagram/TikTok).
+- [ ] **Dono / Especialista:** rever o E1 do Pilar ("é possível gerar leads com trafego orgânico sim", argumento do
+  CTA) e o do Instagram (fala de fechamento): o Radar usa a resposta aprovada inteira e não a reescreve.
+- [ ] Possível evolução: menus de CTA de produto repetidos entre sites ("Faça automação de marketing", "Explore o…")
+  como navegação — medir com os esboços reais de "como atrair um cliente" antes de mudar a régua.
+- [ ] Possível evolução: "Quem é responsável pela captação…" × "captador" (sinônimo de agente) no 3(a).
+- [ ] Possível evolução: o link da página comercial do CTA também na projeção do Redator (hoje depende dos candidatos,
+  que a fatia `radar.blueprint/<id>` lida por caminho nem sempre traz).
+
+## CSV "Para escrever" coerente com o artigo-modelo (defeitos 1, 2, 3, 4, 5, 6, 10 e 14) — 2026-10-09
+
+Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data). "Feito" quer dizer verificado no código e
+confirmado por teste. Nada foi validado manualmente.
+
+- [x] 1: a estrutura nunca é cortada (teto seguro de 32 mil, níveis de compactação que dizem o que saiu e a
+  continuação inteira na coluna de fontes).
+- [x] 2: uma base de amostra só em todas as colunas e nos rótulos da planta (régua `sample-basis.ts`).
+- [x] 3: o artigo-modelo (ou, sem ele, a página publicada) vence o "Não cobrir" genérico; o item de outro artigo do
+  Silo fica fora e a seção que o toca só menciona e linka; nenhuma sugestão aponta para o "Não cobrir".
+- [x] 4: só artigo do Silo é dono de assunto; "outro tópico do Silo" saiu.
+- [x] 5: as exclusões da voz da marca valem em "Como superar", temas, perguntas, termos e "Não cobrir".
+- [x] 6: "Sustentar <a própria keyword> como diferencial" sai.
+- [x] 10 (export): a continuação é opcional, no corpo da seção; o link da página comercial do CTA chega ao CSV.
+- [x] 14: publicado sem artigo-modelo usa a página publicada como estrutura de referência.
+- [x] Catálogo do MCP com a nota de 2026-10-09 (`npm run test:agent`).
+- [ ] **Dono:** regerar os 8 CSVs e conferir: estrutura de captar e promoções inteira; "23 páginas comparáveis, de N
+  sites" em todo o arquivo de leads; "Não cobrir" sem custo por lead (leads) e sem ICP, primeira abordagem e captador
+  (captar); nenhuma linha "outro tópico do Silo"; Instagram sem "Diferenciar em 'Ative o Instagram Shopping'"; atrair
+  sem "Sustentar 'como atrair um cliente'"; campanhas com a estrutura da página publicada e sem os 4 Ps.
+- [ ] Organizar o artigo-modelo de "como atrair um cliente" e de "campanhas" (decisão do dono): a referência pela
+  página publicada é o caminho sem planta, não o destino.
+- [ ] Possível evolução: o CSV de vídeo citar as evidências do artigo-modelo pela mesma base única (passar o
+  reescritor a `rotuloDaEvidencia` na cadeia competitiva).
+- [ ] Possível evolução: recontar E-E-A-T e padrões estruturais na deriva exige passar ao export as URLs por página
+  (hoje a contagem sai).
+
+## Coerência final dos 8 CSVs: trava de fonte, ruído e réguas das sugestões — 2026-10-09
+
+Detalhe em `docs/05-radar/estado-atual.md` (2026-10-09). "Feito" quer dizer verificado no código e confirmado por
+teste. Nada foi validado manualmente.
+
+- [x] Defeito 7: o objetivo do que se cria ou ensina, a pergunta indireta e "como + infinitivo" não travam. O link da
+  planta fora da seção dele pede semelhança alta. "Canais que convertem" continua travando.
+- [x] Defeito 13: CVM e "Atendimento CVM" saem do artigo de atrair cliente. "Biblioteca de Marketing", "Informações" e
+  "Exclusivo pra você" são navegação.
+- [x] Réguas puras para 3(c), 5 e 6: `radarBrandVoiceExclusions`, `radarBrandVoiceExclusionOf`,
+  `radarBrandVoiceExclusionsLine`, `radarSuggestionGuard` e `radarSuggestionRestatesKeyword`.
+- [x] Export e brief do artigo-modelo: aplicar as réguas de 3(c), 5 e 6 em "Como superar", temas, perguntas, "Não
+  cobrir" e no brief. Na mesma entrega, acrescentar ao catálogo do MCP a nota dessas regras. (CSV "Para escrever":
+  feito no export em 2026-10-09, seção acima, com a nota do catálogo; no brief, as exclusões da voz entram pelo
+  artigo-modelo.)
+- [ ] Dono: regerar os CSVs e conferir que a trava, a CVM e a "Biblioteca de Marketing" sumiram nos 8 arquivos.
+- [ ] Possível evolução: o tema dos concorrentes agrupado por uma raiz larga ("marketing") junta automação e marketing
+  de conteúdo. Sem a "Biblioteca de Marketing", o rótulo passa a ser o de um desses cabeçalhos. Separar por expressão
+  composta precisa de decisão e de teste com os esboços reais.
+
 ## Rodada dos 8 CSVs "Para escrever" (Silo "Leads sem Tráfego Pago") — consolidação e correção — 2026-10-08
 
 Validado manualmente: não. O detalhe, os testes e as limitações estão em `estado-atual.md`, na seção de mesma data.

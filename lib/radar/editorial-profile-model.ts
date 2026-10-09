@@ -404,7 +404,8 @@ function prontidao(input: { evidenceNeeds: string[]; specialistNeeds: string[]; 
 
   return motivos.length
     ? { state: "PARTIAL" as const, label: `Parcial · ${motivos.join(" · ")}`, reasons: motivos }
-    : { state: "READY" as const, label: "Pronto para o Redator", reasons: [] };
+    /* 2026-10-09 (correção) · "Pronto para o Redator" só com o artigo-modelo: este é o esqueleto legado de YouTube e Amazon (insumo do gerador). */
+    : { state: "READY" as const, label: "Esqueleto completo", reasons: [] };
 }
 
 /* ============================ o perfil YOUTUBE =========================== */
@@ -628,7 +629,20 @@ export function buildRadarEditorialVideoModel(input: {
   const direcaoDoGancho = semTelemetria(recomendado.hookDirection?.statement);
   const ganchoPronto = direcaoDoGancho && !comentaASerp(direcaoDoGancho) ? direcaoDoGancho : null;
 
-  const gancho = ganchoPronto
+  /*
+   * 2026-10-09 · SEM ROTEIRO NA CAMADA, SEM GANCHO NEM CTA INVENTADOS AQUI
+   * (regra do dono: o processo do piloto substitui o antigo).
+   *
+   * A fotografia nova do YouTube não grava roteiro, gancho nem Shorts: o vídeo
+   * segue o artigo-modelo aprovado, e o gancho é o da planta
+   * (`radarVideoHookLine`, o mesmo do CSV de vídeo). Derivar aqui um gancho
+   * pela pergunta do Google e um CTA genérico seria o quarto gancho. A camada
+   * gravada antes (com roteiro) continua lida como sempre — este modelo não
+   * entra em hash.
+   */
+  const semRoteiroNaCamada = recomendado.script.length === 0;
+
+  const gancho = semRoteiroNaCamada ? null : ganchoPronto
     || (perguntaDeApoio
       ? `Abra pela pergunta "${perguntaDeApoio}" e responda nos primeiros segundos, antes de qualquer apresentação de canal.`
       : primeiraNecessidade
@@ -667,7 +681,7 @@ export function buildRadarEditorialVideoModel(input: {
     hook: gancho || null,
     blocks,
     conclusion: blocks.length ? "Consolidar o que foi demonstrado, sem repetir o roteiro." : null,
-    cta: semTelemetria(recomendado.shorts[0]?.ctaDirection) || "Encaminhar o espectador para o próximo passo do tema.",
+    cta: semRoteiroNaCamada ? null : semTelemetria(recomendado.shorts[0]?.ctaDirection) || "Encaminhar o espectador para o próximo passo do tema.",
     derived,
     derivedLabel: "Shorts derivados",
     /*
@@ -948,6 +962,28 @@ function secoesComerciais(input: {
     default:
       return [];
   }
+}
+
+/**
+ * ===== 2026-10-09 · O ESQUELETO COMERCIAL É MATÉRIA-PRIMA, NÃO SAÍDA =====
+ *
+ * Regra do dono: o processo antigo é substituído pelo do piloto. As seções
+ * genéricas de cada forma comercial (`secoesComerciais`) deixam de ser a
+ * estrutura do entregável: a estrutura de todo artigo é a do artigo-modelo. O
+ * que sobra delas é isto — o esqueleto da forma prometida (review, X vs Y, top,
+ * guia), particularizado pelo assunto, pelos critérios reais e pelos produtos,
+ * entregue ao GERADOR do artigo-modelo como entrada, ao lado do esqueleto da
+ * SERP. Ninguém escreve a partir dele.
+ */
+export function radarAmazonCommercialSkeleton(input: {
+  intent: RadarAmazonEditorialIntentType;
+  assunto: string;
+  criterios: string[];
+  selecionados: number;
+  produtos: readonly { resolvedTitle: string | null; input: string }[];
+  necessidade: string | null;
+}): Array<{ heading: string; objective: string; sourceSignal: string }> {
+  return secoesComerciais(input).map(({ heading, objective, sourceSignal }) => ({ heading, objective, sourceSignal }));
 }
 
 /**
@@ -1361,5 +1397,8 @@ export function buildRadarEditorialCommercialModel(input: {
 const RADAR_BANDA_LABEL: Record<string, string> = {
   ECONOMICA: "Faixa econômica",
   INTERMEDIARIA: "Faixa intermediária",
+  /* 2026-10-09 · os códigos que o gerador da Amazon grava (`RadarPriceBandSchema`): sem eles, a faixa saía com o código cru. */
+  ECONOMICO: "Faixa econômica",
+  INTERMEDIARIO: "Faixa intermediária",
   PREMIUM: "Faixa premium",
 };

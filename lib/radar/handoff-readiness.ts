@@ -139,7 +139,9 @@ export type RadarHandoffBlockCode =
   | "ARTICLE_VERSION_MISMATCH"
   | "ARTICLE_HASH_MISMATCH"
   | "BUNDLE_MUTATED"
-  | "DOSSIER_DIVERGES";
+  | "DOSSIER_DIVERGES"
+  /* 2026-10-09 · o artigo-modelo obrigatório: a investigação está pronta, mas a planta concluída dela não existe. */
+  | "ARTICLE_BLUEPRINT_MISSING";
 
 /**
  * Um impedimento, com a frase de quem opera e o detalhe de quem investiga.
@@ -159,6 +161,34 @@ export type RadarHandoffReadiness = {
   headline: string;
   blocks: RadarHandoffBlock[];
 };
+
+/**
+ * ===== 2026-10-09 · O ARTIGO-MODELO É OBRIGATÓRIO NA ENTREGA (regra do dono) =====
+ *
+ * "Tudo que é de processos antigos tem que ser substituído pelos novos
+ * processos dos pilotos." O envio ao Redator, os CSVs e o MCP passam a exigir
+ * a planta CONCLUÍDA (APPROVED) da investigação congelada e do ArticleDNA
+ * vigentes — a mesma que `radarArticleBlueprintPick` escolhe. Sem ela, nada é
+ * montado pelo modelo editorial antigo: a operação para e oferece organizar
+ * (o custo dito no botão antes do clique).
+ *
+ * A planta não entra no pacote nem no hash (congelamento é sagrado): quem sabe
+ * dela informa a prontidão (`articleBlueprint`). Sem a informação, a regra é a
+ * de antes, byte a byte — o dossiê canônico não muda.
+ */
+export type RadarArticleBlueprintDeliveryState = "APPROVED" | "MISSING";
+
+/** O código da recusa do envio por falta de planta: o servidor o devolve; a tela e o MCP o reconhecem. */
+export const RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING = "radar_handoff_article_blueprint_missing";
+
+/** O bloqueio da planta ausente, com a mesma frase no Relatório, no envio e na rota. */
+export function radarArticleBlueprintMissingBlock(): RadarHandoffBlock {
+  return {
+    code: "ARTICLE_BLUEPRINT_MISSING",
+    message: "O envio ao Redator leva o artigo-modelo concluído desta investigação: organize o artigo-modelo da SERP (Pesquisa → Artigo-modelo da SERP).",
+    detail: "Nenhuma versão concluída do artigo-modelo vale para o congelamento e o ArticleDNA vigentes (regra de radarArticleBlueprintPick).",
+  };
+}
 
 /** O fundamento do artigo, como o handoff precisa recebê-lo. */
 export type RadarArticleFoundation = {
@@ -188,10 +218,24 @@ export function radarHandoffReadiness(input: {
   dossier?: RadarEvidenceBundle | null;
   /** Os fundamentos mudaram depois da investigação? */
   stale?: boolean;
+  /**
+   * 2026-10-09 · Aditivo: a planta concluída da investigação vigente, quando
+   * quem chama a conhece (o Relatório, pelo painel). "MISSING" vira o bloqueio
+   * `ARTICLE_BLUEPRINT_MISSING` depois das conferências da investigação.
+   * Ausente ou nulo: a prontidão de antes (o dossiê canônico não a passa).
+   */
+  articleBlueprint?: RadarArticleBlueprintDeliveryState | null;
 }): RadarHandoffReadiness {
   const blocks: RadarHandoffBlock[] = [];
   const bloquear = (code: RadarHandoffBlockCode, message: string, detail: string) =>
     blocks.push({ code, message, detail });
+  /* 2026-10-09 · a investigação conferida; a planta ausente bloqueia por último (é o passo que falta, não divergência). */
+  const fechar = (): RadarHandoffReadiness => {
+    if (input.articleBlueprint === "MISSING") blocks.push(radarArticleBlueprintMissingBlock());
+    return blocks.length
+      ? { ready: false, headline: "Pacote para o Redator bloqueado", blocks }
+      : { ready: true, headline: "Pacote para o Redator pronto", blocks: [] };
+  };
 
   /*
    * ============ §17 · O CONGELADO DO GOOGLE DEIXOU DE SER OBRIGATÓRIO ============
@@ -254,9 +298,7 @@ export function radarHandoffReadiness(input: {
       bloquear("STALE", "A investigação não corresponde mais à versão atual do Article.", "Os fundamentos mudaram depois desta investigação; a leitura descreve outra versão do artigo.");
     }
 
-    return blocks.length
-      ? { ready: false, headline: "Pacote para o Redator bloqueado", blocks }
-      : { ready: true, headline: "Pacote para o Redator pronto", blocks: [] };
+    return fechar();
   }
 
   /* Daqui para baixo é o caminho do GOOGLE, com o congelado dele em mãos. */
@@ -313,9 +355,7 @@ export function radarHandoffReadiness(input: {
     }
   }
 
-  return blocks.length
-    ? { ready: false, headline: "Pacote para o Redator bloqueado", blocks }
-    : { ready: true, headline: "Pacote para o Redator pronto", blocks: [] };
+  return fechar();
 }
 
 /**

@@ -50,8 +50,18 @@ async function visaoNormal() {
 
 test("§1 · o blueprint comercial vem antes de qualquer evidência", async () => {
   const fonte = await painel();
+  /*
+   * 2026-10-09 (correção) · regra do dono: o legado sai da posição principal. O
+   * modelo comercial fica DENTRO de um <details> fechado, com o nome que diz o que
+   * ele é (insumo do gerador do artigo-modelo).
+   */
+  const esqueleto = fonte.indexOf('data-testid="radar-amazon-serp-skeleton"');
+  assert.ok(esqueleto > 0 && fonte.lastIndexOf("<details", esqueleto) > fonte.lastIndexOf("</details>", esqueleto), "o modelo comercial está num details");
+  assert.match(fonte, /Esqueleto da SERP · o que a prateleira mostra \(insumo do artigo-modelo\)/);
+  assert.ok(esqueleto < fonte.indexOf("<RadarProfileBlueprintSection model={editorialModel}"), "o modelo vive dentro do esqueleto recolhido");
 
-  const ondeBlueprint = fonte.indexOf("{editorialModel && <RadarProfileBlueprintSection");
+  /* 2026-10-09 (correção) · o modelo comercial agora mora no "Esqueleto da SERP" recolhido (insumo do artigo-modelo). */
+  const ondeBlueprint = fonte.indexOf("<RadarProfileBlueprintSection model={editorialModel}");
   const ondeCards = fonte.indexOf('data-testid="radar-amazon-observed"');
   const ondeEvidencia = fonte.indexOf('data-testid="radar-amazon-competitive-evidence"');
 
@@ -102,7 +112,8 @@ test("§5 · a visão normal mostra o resumo, o blueprint e as portas — e só"
 
   /* O resumo curto dos três números continua no pacote, acima do blueprint. */
   const ondePacote = fonte.indexOf('data-testid="radar-amazon-package"');
-  const ondeBlueprint = fonte.indexOf("{editorialModel && <RadarProfileBlueprintSection");
+  /* 2026-10-09 (correção) · o modelo comercial agora mora no "Esqueleto da SERP" recolhido (insumo do artigo-modelo). */
+  const ondeBlueprint = fonte.indexOf("<RadarProfileBlueprintSection model={editorialModel}");
   assert.ok(ondePacote > 0 && ondePacote < ondeBlueprint, "o resumo curto abre a aba");
   assert.match(fonte, /resultado\(s\) observado\(s\) · \$\{counts\.eligible\} compatível\(is\)/);
 
@@ -239,10 +250,15 @@ test("GOOGLE_CHANGED = NO e YOUTUBE_CHANGED = NO", async () => {
   }
 
   /*
-   * E a casca compartilhada continua servindo aos dois perfis: o que mudou no
-   * blueprint de perfil vale para YouTube e Amazon, que é o ponto dela.
+   * 2026-10-09 · regra do dono (o processo do piloto substitui o antigo): a
+   * casca do roteiro-modelo competitivo saiu da aba do YouTube — o vídeo
+   * segue o artigo-modelo aprovado (`VideoPelaPlanta`: amostra pertinente,
+   * faixa por coorte, formato decidido, capítulos e cortes da planta). A casca
+   * continua servindo à Amazon (§1 e §5 acima).
    */
-  assert.match(youtube, /RadarProfileBlueprintSection/);
+  const youtubeSemComentarios = youtube.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.doesNotMatch(youtubeSemComentarios, /RadarProfileBlueprintSection/);
+  assert.match(youtubeSemComentarios, /<VideoPelaPlanta /);
 });
 
 test("MIGRATIONS = 0 e ARTICLE_DNA_MUTATED = NO", async () => {

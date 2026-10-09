@@ -1,5 +1,6 @@
 import { radarSubjectCtaDirection } from "../radar/declared-subject.ts";
 import { radarEditorialHeadingWithoutTemplate, type RadarEditorialSubjectTurn } from "../radar/editorial-article-model.ts";
+import { radarSemanticStems } from "../radar/semantic-concept-model.ts";
 
 /**
  * ===== A VIRADA PARA O ASSUNTO, ENTREGUE AO REDATOR — SDD do Assunto, F4.1 =====
@@ -158,4 +159,142 @@ export function radarWriterSubjectTurnLines(input: {
   const alerta = texto(turn?.alert);
   if (alerta) linhas.push(`Alerta do Radar sobre o Assunto: ${alerta}`);
   return linhas;
+}
+
+/* ============================== 2026-10-09 · a virada pela planta ============================== */
+
+/*
+ * ===== 2026-10-09 · A VIRADA SAI DO ARTIGO-MODELO, NÃO DO MODELO EDITORIAL ANTIGO =====
+ *
+ * Regra do dono (2026-10-09): o processo do piloto substitui o antigo, e o
+ * legado só sobrevive como matéria-prima do gerador. A "Virada", a "Seção da
+ * virada" e a "Direção do H1" do Redator saíam da sugestão do modelo editorial
+ * antigo (`articleModel.declaredSubject`), a mesma que o CSV "Para escrever"
+ * deixou de escrever: ela agora vai ao PEDIDO do artigo-modelo, e a planta
+ * concluída decide onde o Assunto entra. Aqui as linhas leem a PLANTA:
+ *
+ *   - a seção da planta que trata do Assunto (as raízes dele, fora as da
+ *     principal, no H2, na pergunta do leitor, nos H3 e na resposta que abre)
+ *     é onde virar; um H3 que o traz diz o H3;
+ *   - sem seção que o trate, a virada fica no fechamento da planta, antes do CTA;
+ *   - o H1 é o da planta: diz se ele já traz o Assunto; senão, o H1 é da
+ *     principal e o Assunto entra na seção da virada;
+ *   - o tronco e o destino continuam do ArticleDNA, como antes; não há "Alerta
+ *     do Radar" (era leitura da amostra, não da planta).
+ *
+ * Os prefixos são os mesmos (`RADAR_WRITER_SUBJECT_LINE_PREFIXES`): o painel e
+ * a semeadura leem as linhas como sempre. Sem Assunto: lista vazia. Sem a
+ * planta em mãos (quem envia ainda não a passa): a virada aponta a seção do
+ * artigo-modelo que tratar do Assunto, sem lugar inventado — e quem lê depois,
+ * com a planta, troca a linha pela dela (`radarWriterEditorialContextWithBlueprint`).
+ */
+type SecaoDaPlantaComAssunto = { indice: number; h2: string; h3: string | null };
+
+const registroDe = (valor: unknown): Record<string, unknown> | null =>
+  (valor && typeof valor === "object" && !Array.isArray(valor) ? valor as Record<string, unknown> : null);
+const textosDe = (valor: unknown): string[] => (Array.isArray(valor) ? valor : []).map(texto).filter((item): item is string => Boolean(item));
+
+/* Mesma raiz quando uma começa pela outra (a mesma régua de pending-claims). */
+const mesmaRaiz = (a: string, b: string) => a === b || (Math.min(a.length, b.length) >= 5 && (a.startsWith(b) || b.startsWith(a)));
+
+/** As raízes que distinguem o Assunto: as dele, fora as da principal (sem nenhuma, todas as dele). */
+function raizesDoAssunto(frase: string, principal: string | null): string[] {
+  const todas = radarSemanticStems(frase).filter(raiz => raiz.length >= 3);
+  const daPrincipal = radarSemanticStems(principal ?? "");
+  const proprias = todas.filter(raiz => !daPrincipal.some(outra => mesmaRaiz(raiz, outra)));
+  return proprias.length ? proprias : todas;
+}
+
+const tocaOAssunto = (textoLido: string, raizes: readonly string[]): number => {
+  const doTexto = radarSemanticStems(textoLido);
+  return raizes.filter(raiz => doTexto.some(outra => mesmaRaiz(raiz, outra))).length;
+};
+
+function secaoDaPlantaComAssunto(planta: Record<string, unknown> | null, raizes: readonly string[]): SecaoDaPlantaComAssunto | null {
+  if (!planta || !raizes.length) return null;
+  const minimo = Math.max(1, Math.ceil(raizes.length / 2));
+  const secoes = (Array.isArray(planta.sections) ? planta.sections : []).map(registroDe).filter((item): item is Record<string, unknown> => Boolean(item && texto(item.h2)));
+  let melhorNota = 0;
+  let achada: SecaoDaPlantaComAssunto | null = null;
+  for (const [indice, secao] of secoes.entries()) {
+    const h2 = texto(secao.h2) as string;
+    const nota = tocaOAssunto([h2, texto(secao.readerQuestion), ...textosDe(secao.h3), texto(secao.answerFirst)].filter(Boolean).join(" "), raizes);
+    /* A primeira seção com a maior nota: empate fica com a que vem antes no artigo. */
+    if (nota < minimo || nota <= melhorNota) continue;
+    const noTitulo = tocaOAssunto([h2, texto(secao.readerQuestion)].filter(Boolean).join(" "), raizes) >= minimo;
+    const h3 = noTitulo ? null : textosDe(secao.h3).find(item => tocaOAssunto(item, raizes) >= minimo) ?? null;
+    melhorNota = nota;
+    achada = { indice: indice + 1, h2, h3 };
+  }
+  return achada;
+}
+
+export function radarWriterSubjectTurnLinesFromBlueprint(input: {
+  subject: unknown;
+  /** O `blueprint` do artigo-modelo concluído (já lido); null = o pacote não tem planta concluída. */
+  blueprint: unknown;
+  principal: string | null | undefined;
+}): string[] {
+  const assunto = radarWriterSubjectOf(input.subject);
+  if (!assunto) return [];
+  const principal = texto(input.principal);
+  const planta = registroDe(input.blueprint);
+  const raizes = raizesDoAssunto(assunto.phrase, principal);
+  const secao = secaoDaPlantaComAssunto(planta, raizes);
+  const daPrincipal = principal ? `de ${principal}` : "da keyword principal";
+  const destino = assunto.destinationUrl ? `; destino: ${assunto.destinationUrl}` : "";
+  const onde = !planta
+    ? "na seção do artigo-modelo concluído que tratar do Assunto (ou no fechamento, antes do CTA, se nenhuma tratar)"
+    : secao
+      ? secao.h3
+        ? `no H3 ${entreAspas(secao.h3)} da seção ${entreAspas(secao.h2)} do artigo-modelo (seção ${secao.indice})`
+        : `na seção ${entreAspas(secao.h2)} do artigo-modelo (seção ${secao.indice})`
+      : "no fechamento do artigo-modelo, antes do CTA (a planta não dá seção própria ao Assunto)";
+
+  const linhas = [
+    comPontoFinal(`Tronco (Assunto): ${assunto.phrase}${assunto.note ? ` — ${semPontoFinal(assunto.note)}` : ""}`),
+    `Virada: ${onde}, levar o leitor ${daPrincipal} a ${assunto.phrase}${destino}.`,
+  ];
+  if (secao) {
+    linhas.push(secao.h3
+      ? `Seção da virada: ${entreAspas(secao.h2)}, seção ${secao.indice} do artigo-modelo concluído, no H3 ${entreAspas(secao.h3)}.`
+      : `Seção da virada: ${entreAspas(secao.h2)}, seção ${secao.indice} do artigo-modelo concluído.`);
+  }
+
+  const h1 = texto(registroDe(planta?.title)?.h1);
+  if (h1 && raizes.length && tocaOAssunto(h1, raizes) >= Math.max(1, Math.ceil(raizes.length / 2))) {
+    linhas.push(`Direção do H1: o H1 do artigo-modelo (${entreAspas(h1)}) já traz o Assunto.`);
+  } else if (secao) {
+    linhas.push(`Assunto em H2/H3 — o H1 é da principal${h1 ? `, como o do artigo-modelo (${entreAspas(h1)})` : ""}.`);
+  } else {
+    linhas.push(`Assunto no H1: o H1 é da principal${h1 ? `, como o do artigo-modelo (${entreAspas(h1)})` : ""}.`);
+  }
+
+  if (assunto.destinationUrl) {
+    /* O destino do ArticleDNA fixado, o mesmo que o guardião confere. */
+    linhas.push(`Destino da chamada: ${comPontoFinal(radarSubjectCtaDirection(assunto.destinationUrl))}`);
+  }
+  return linhas;
+}
+
+/** A linha é do Assunto (tronco, virada, seção, H1, destino ou alerta)? As outras linhas do envio (diferenciação…) ficam. */
+const ehLinhaDoAssunto = (linha: string): boolean => {
+  const P = RADAR_WRITER_SUBJECT_LINE_PREFIXES;
+  return [P.trunk, P.turn, P.section, P.destination, P.alert, ...P.h1].some(prefixo => linha.startsWith(prefixo));
+};
+
+/**
+ * 2026-10-09 · AS LINHAS DO ENVIO COM A VIRADA PELA PLANTA. Documento enviado
+ * antes desta regra gravou a virada do modelo antigo; quem lê (fundamentos,
+ * pacote da seção, semeadura, painel) troca as linhas do Assunto pelas da
+ * planta e mantém as outras (a nota de diferenciação, por exemplo), na ordem.
+ * Sem Assunto (do ArticleDNA fixado), as linhas voltam como estão.
+ */
+export function radarWriterEditorialContextWithBlueprint(
+  linhas: readonly string[],
+  input: { subject: unknown; blueprint: unknown; principal: string | null | undefined },
+): string[] {
+  const novas = radarWriterSubjectTurnLinesFromBlueprint(input);
+  if (!novas.length) return [...linhas];
+  return [...novas, ...linhas.filter(linha => !ehLinhaDoAssunto(linha))];
 }

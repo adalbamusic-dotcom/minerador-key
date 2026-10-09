@@ -17,7 +17,7 @@ import {
   type RadarWritingExportArticle,
   type RadarWritingPublication,
 } from "./portable-writing-export.ts";
-import { radarBrandVoiceRef, type RadarBrandVoiceState } from "./brand-voice.ts";
+import { radarBrandVoiceExclusions, radarBrandVoiceRef, type RadarBrandVoiceState } from "./brand-voice.ts";
 
 /**
  * ===== A MONTAGEM DO LOTE NO FORMATO "PARA ESCREVER" — a ponte pura da rota =====
@@ -70,9 +70,15 @@ export function radarPortableWritingExport(input: {
   today: string;
 }): RadarPortableWritingExportResult {
   const lentesDe = radarPortableExportLensLookupsFor(input.lenses.lookups);
+  /* 2026-10-09 · Defeito 5 · as exclusões da Skill de voz (régua única da voz), uma vez para o lote: valem em toda linha. */
+  const exclusoesDaVoz = input.brandVoice?.kind === "available" ? radarBrandVoiceExclusions(input.brandVoice.voice) : [];
   /* 2026-10-02 · a autoria foi lida no núcleo: o topo manda ler quem assina na linha de cada artigo. */
   const autoriaLida = input.articles.some(artigo => artigo.entrada.authors !== undefined && artigo.entrada.authors !== null);
   const porId = new Map(input.articles.map(artigo => [artigo.articleId, artigo]));
+  /* 2026-10-09 (correção · contrato-F2) · as keywords do ArticleDNA de cada artigo do lote: o tópico do Silo que é keyword de um artigo tem nele o dono. */
+  const palavrasDosMembros = new Map(input.articles.map(artigo => [artigo.articleId, [
+    artigo.entrada.article.principalKeyword, ...(artigo.entrada.article.secondaryKeywords || []), ...(artigo.entrada.article.narrativeReinforcements || []),
+  ].filter((palavra): palavra is string => typeof palavra === "string" && Boolean(palavra.trim()))]));
 
   const montar = (
     artigo: RadarPortableExportAssembledArticle,
@@ -98,6 +104,8 @@ export function radarPortableWritingExport(input: {
     ...(input.publications?.size ? { siloPublications: input.publications } : {}),
     ...(artigo.blueprint ? { blueprint: artigo.blueprint } : {}),
     ...(input.brandVoice?.kind === "available" ? { brandVoice: radarBrandVoiceRef(input.brandVoice.voice) } : {}),
+    ...(exclusoesDaVoz.length ? { brandVoiceExclusions: exclusoesDaVoz } : {}),
+    ...(palavrasDosMembros.size > 1 ? { siloMemberKeywords: palavrasDosMembros } : {}),
     ...(siloInline ? { siloInline: true } : {}),
   });
 

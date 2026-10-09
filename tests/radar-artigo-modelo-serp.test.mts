@@ -22,6 +22,7 @@ import { radarArticleBlueprintExportChoice, readRadarArticleBlueprintsForExport 
 import { radarPortableWritingExport } from "../lib/radar/portable-writing-batch.ts";
 import type { RadarBrandVoice } from "../lib/radar/brand-voice.ts";
 import { ARTIGO, EXPORTADO_EM, LEITURA_DAS_LENTES, entradaGoogle, montadasDoSilo, planoDoSilo } from "./radar-portable-writing-fixtures.mts";
+import { comPlantas } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 
 /*
  * ===== O ARTIGO-MODELO É PARTE DA SERP — decisão do dono, 2026-10-02 =====
@@ -478,8 +479,12 @@ test("CSV: as notas da conferência não vão ao entregável; ficam na versão e
   assert.ok(fechada.notes.some(nota => /origem M4 \("Stories que convertem"\) removida/.test(nota)));
 });
 
-/* 2026-10-02 · D10: na linha do artigo, a planta do pacote vigente vai concluída, em qualquer estado; a coluna de vídeos usa a dela. */
-test("CSV para escrever: a planta vai na linha do artigo, concluída; a coluna de vídeos usa a dela em qualquer estado", () => {
+/*
+ * 2026-10-02 · D10: na linha do artigo, a planta do pacote vigente vai concluída; a coluna de vídeos usa a dela.
+ * 2026-10-09 · a planta é obrigatória e só a CONCLUÍDA conta: o rascunho antigo
+ * não monta a linha (needs_article_blueprint), e a concluída sai sem marca.
+ */
+test("CSV para escrever: a planta concluída vai na linha do artigo; o rascunho não monta a linha; a coluna de vídeos usa a dela em qualquer estado", () => {
   const plano = planoDoSilo();
   const brief = buildRadarArticleBlueprintBrief({ entrada: entradaGoogle(), silo: plano.files[0].writing!, articleId: ARTIGO, publication: null });
   const ai = RadarArticleBlueprintAiSchema.parse(respostaCrua({
@@ -490,12 +495,11 @@ test("CSV para escrever: a planta vai na linha do artigo, concluída; a coluna d
   }));
   const { payload } = radarSanitizeArticleBlueprint(ai, brief);
   const com = (approval: "DRAFT" | "APPROVED") => radarPortableWritingExport({
-    articles: montadasDoSilo().map(item => item.articleId === ARTIGO ? { ...item, blueprint: { ...payload, approval } } : item),
+    articles: comPlantas(montadasDoSilo(), plano.files[0].writing).map(item => item.articleId === ARTIGO ? { ...item, blueprint: { ...payload, approval } } : item),
     lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM,
   }).files![0].csv;
-  const rascunho = com("DRAFT");
+  assert.throws(() => com("DRAFT"), (erro: unknown) => (erro as { code?: string; articleIds?: string[] }).code === "needs_article_blueprint" && (erro as { articleIds?: string[] }).articleIds?.join() === ARTIGO);
   const concluido = com("APPROVED");
-  assert.equal(rascunho, concluido);
   assert.ok(concluido.includes("ARTIGO-MODELO DA SERP (planta concluída do artigo"));
   assert.equal(/PROPOSTA DA IA|aguardando aprovação|ARTIGO-MODELO APROVADO/.test(concluido), false);
 
@@ -515,7 +519,13 @@ test("a marca de aprovação nunca vai ao banco: gravar e editar a tiram", () =>
 
 /* ============================== a leitura do export ============================== */
 
-test("export: o aprovado mais novo do pacote vigente; sem ele, a proposta mais nova; outro pacote não vale", () => {
+/*
+ * 2026-10-09 · SÓ A CONCLUÍDA (regra do dono: o artigo-modelo é o fundamento
+ * único). A proposta em rascunho deixou de ir ao CSV: sem a concluída do pacote
+ * vigente (ou da mesma investigação), o artigo fica sem planta e quem entrega
+ * devolve `needs_article_blueprint`.
+ */
+test("export: o aprovado mais novo do pacote vigente; rascunho não conta; outro pacote não vale", () => {
   const hashes = new Map([["a1", "h1"], ["a2", "h2"], ["a3", "h3"]]);
   const escolha = radarArticleBlueprintExportChoice([
     { id: "v1", articleId: "a1", bundleHash: "h1", versionNumber: 1, state: "APPROVED" },
@@ -527,8 +537,6 @@ test("export: o aprovado mais novo do pacote vigente; sem ele, a proposta mais n
   ], hashes);
   assert.deepEqual(Object.fromEntries(escolha), {
     a1: { id: "v1", approval: "APPROVED" },
-    a2: { id: "v4", approval: "DRAFT" },
-    a3: { id: "v6", approval: "DRAFT" },
   });
 });
 
@@ -571,24 +579,28 @@ test("export: a leitura é por lote, filtrada pela marca, traz só os payloads e
   const lidos = await readRadarArticleBlueprintsForExport(cliente as never, "marca-a", [{ articleId: "a1", bundleHash: "h1" }, { articleId: "a2", bundleHash: "h2" }, { articleId: "a3", bundleHash: null }]);
   assert.equal(lidos.get("a1")?.approval, "APPROVED");
   assert.equal(lidos.get("a1")?.blueprint.title.h1, "H1 de v1");
-  assert.equal(lidos.get("a2")?.approval, "DRAFT", "a aprovada de outra marca não vale");
-  assert.equal(lidos.get("a2")?.blueprint.title.h1, "H1 de v3");
+  /* 2026-10-09 · rascunho não conta, e a aprovada de outra marca não vale: a2 fica sem planta (quem entrega devolve needs_article_blueprint). */
+  assert.equal(lidos.has("a2"), false, "nem o rascunho, nem a aprovada de outra marca");
   assert.equal(lidos.has("a3"), false);
-  /* 2026-10-02 · só a proposta leva as pendências e a origem; a aprovada sai como antes. */
-  assert.deepEqual(lidos.get("a2")?.validation, ["O H1 não traz a keyword principal inteira (\"x\"): confira antes de aprovar (v3)."]);
-  assert.equal(lidos.get("a2")?.origin, "ai");
   assert.equal("validation" in lidos.get("a1")!, false);
   assert.equal("origin" in lidos.get("a1")!, false);
   assert.equal(cliente.selecoes[0].includes("payload"), false, "a primeira consulta não traz payload");
   assert.equal(cliente.selecoes.filter(item => item.includes("payload")).length, 1, "uma consulta de payload, só dos escolhidos");
 
-  /* Tolerante: sem tabela ou com o banco recusando, o CSV sai sem artigo-modelo. */
+  /*
+   * 2026-10-09 · A FALHA É ESTADO EXPLÍCITO: sem tabela ou com o banco
+   * recusando, a leitura levanta `blueprint_unavailable` (503) — nunca um mapa
+   * vazio que deixaria o CSV sair pelo legado.
+   */
   const quebrado = { from() { throw new Error("relation radar_article_blueprints does not exist"); } };
   const avisos: unknown[] = [];
   const original = console.warn;
   console.warn = (...args: unknown[]) => { avisos.push(args); };
   try {
-    assert.equal((await readRadarArticleBlueprintsForExport(quebrado as never, "marca-a", [{ articleId: "a1", bundleHash: "h1" }])).size, 0);
+    await assert.rejects(readRadarArticleBlueprintsForExport(quebrado as never, "marca-a", [{ articleId: "a1", bundleHash: "h1" }]), (erro: unknown) => {
+      const falha = erro as { code?: string; status?: number; articleIds?: string[]; message?: string };
+      return falha.code === "blueprint_unavailable" && falha.status === 503 && falha.articleIds?.join() === "a1" && /Não foi possível ler o artigo-modelo/.test(falha.message || "");
+    });
   } finally {
     console.warn = original;
   }

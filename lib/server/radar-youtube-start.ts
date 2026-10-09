@@ -4,6 +4,7 @@ import { createRadarAnalysisContext, createRadarAnalysisSuccessor, VersionedRada
 import { radarDecideResearchSource, radarResearchPlanOfAnalysis, type RadarPrimarySearchMode } from "../radar/search-mode";
 import { buildRadarYoutubeRunFingerprint, buildRadarYoutubeStartedRun, type RadarYoutubeQueryRecord, type RadarYoutubeSearchRun } from "../radar/youtube-search-run";
 import type { ArticleDNA, VersionEnvelope } from "../arquiteto/contracts";
+import { radarCurrentArticleDnaVersion } from "../radar/article-dna-current";
 
 /**
  * ========= O START, NO SERVIDOR — YOUTUBE_SEARCH_1.4 · §1 =========
@@ -41,7 +42,12 @@ export type RadarRadarState = {
 };
 
 export type RadarStartPorts = {
-  loadArticle: (input: { brandId: string; articleId: string }) => Promise<VersionEnvelope<ArticleDNA> | null>;
+  /**
+   * 2026-10-09 (correção) · `transportedVersionId` (aditivo): a versão que o
+   * item do Radar transporta. Existindo no acervo, ela é a lida, mesmo com uma
+   * aprovada mais nova (`radarCurrentArticleDnaVersion`).
+   */
+  loadArticle: (input: { brandId: string; articleId: string; transportedVersionId?: string | null }) => Promise<VersionEnvelope<ArticleDNA> | null>;
   loadRadarState: (input: { brandId: string; articleId: string }) => Promise<RadarRadarState | null>;
   appendAnalysis: (input: { brandId: string; articleId: string; expectedLock: number; analysis: RadarAnalysisVersion }) => Promise<void>;
 };
@@ -73,7 +79,12 @@ const correnteDe = (estado: RadarRadarState | null) =>
  * compromisso de modo, logo abaixo, faz o oposto de propósito.
  */
 export async function ensureRadarAnalysisContext(
-  input: { brandId: string; articleId: string; actorId: string },
+  /*
+   * 2026-10-09 (correção) · `articleDnaVersionId` (aditivo): a versão do item do
+   * Radar. O contêiner nasce sobre ela, e não sobre uma sucessora aprovada
+   * depois do envio (o item continua na versão enviada).
+   */
+  input: { brandId: string; articleId: string; actorId: string; articleDnaVersionId?: string | null },
   ports: RadarStartPorts,
 ): Promise<{ analysis: RadarAnalysisVersion; lockVersion: number; created: boolean }> {
   for (let tentativa = 0; tentativa < 2; tentativa += 1) {
@@ -83,7 +94,7 @@ export async function ensureRadarAnalysisContext(
     const existente = correnteDe(estado);
     if (existente) return { analysis: existente, lockVersion: estado.lockVersion, created: false };
 
-    const article = await ports.loadArticle({ brandId: input.brandId, articleId: input.articleId });
+    const article = await ports.loadArticle({ brandId: input.brandId, articleId: input.articleId, transportedVersionId: input.articleDnaVersionId ?? null });
     if (!article) throw new RadarStartError("article_dna_not_found", "O ArticleDNA canônico deste artigo não foi encontrado para esta marca.", 404);
 
     const contexto = await createRadarAnalysisContext({ brandId: input.brandId, article, actorId: input.actorId });
@@ -138,14 +149,19 @@ export async function startRadarYoutubeRun(
    * afirmou tem de ser a que o banco tem. Comparar contra o contêiner seria
    * comparar contra uma cópia; comparar contra o artigo é comparar contra a
    * autoridade.
+   *
+   * 2026-10-09 (correção) · A versão que a tela manda é a do item do Radar
+   * (`RadarItem.articleDnaVersionId`): ela é a transportada, e o acervo a
+   * confirma mesmo com uma sucessora aprovada depois do envio. Uma versão que
+   * não é deste artigo continua recusada.
    */
-  const article = await ports.loadArticle({ brandId: input.brandId, articleId: input.articleId });
+  const article = await ports.loadArticle({ brandId: input.brandId, articleId: input.articleId, transportedVersionId: input.articleDnaVersionId });
   if (!article) throw new RadarStartError("article_dna_not_found", "O ArticleDNA canônico deste artigo não foi encontrado para esta marca.", 404);
   if (article.versionId !== input.articleDnaVersionId) {
     throw new RadarStartError("radar_article_dna_mismatch", "A versão do ArticleDNA enviada diverge da versão canônica do artigo.", 409);
   }
 
-  const contexto = await ensureRadarAnalysisContext({ brandId: input.brandId, articleId: input.articleId, actorId: input.actorId }, ports);
+  const contexto = await ensureRadarAnalysisContext({ brandId: input.brandId, articleId: input.articleId, actorId: input.actorId, articleDnaVersionId: input.articleDnaVersionId }, ports);
 
   /*
    * §1 · PASSO 5 e 6 — O MODO SAI DO QUE ESTÁ GRAVADO.
@@ -282,9 +298,18 @@ export async function finishRadarYoutubeRun(
 /* ======================= as portas de produção ======================= */
 
 export const radarStartPorts: RadarStartPorts = {
-  loadArticle: async ({ brandId, articleId }) => {
+  /*
+   * 2026-10-09 · a versão VIGENTE do ArticleDNA (`radarCurrentArticleDnaVersion`,
+   * a mesma do export, do envio e do artigo-modelo): o `find()` sobre a lista
+   * sem ordem lia a versão antiga depois de um reajuste, e o plano de consultas
+   * pagas saía com as exclusões dela (as portas são as mesmas nos outros perfis).
+   *
+   * 2026-10-09 (correção) · com a versão TRANSPORTADA pelo item do Radar, ela
+   * vale (a que a tela manda, conferida no START); sem ela, a vigente da mesa.
+   */
+  loadArticle: async ({ brandId, articleId, transportedVersionId }) => {
     const artefatos = await new ArtifactRepository().list(brandId);
-    return artefatos.articles.find(version => version.payload.articleId === articleId && version.payload.brandId === brandId) || null;
+    return radarCurrentArticleDnaVersion({ versions: artefatos.articles, events: artefatos.events, brandId, articleId, transportedVersionId });
   },
   loadRadarState: async ({ brandId, articleId }) => {
     const linha = await new WorkflowRepository().findByArticle(brandId, articleId, "radar");

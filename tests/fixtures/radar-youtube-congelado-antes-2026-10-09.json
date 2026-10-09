@@ -1,0 +1,1302 @@
+{
+  "geradoEm": "2026-10-09",
+  "nota": "Fotografia do YouTube congelada com a régua ANTERIOR a 2026-10-09 (amostra inteira, roteiro genérico). Não regenerar: é a prova de que a régua nova não muda pacote congelado.",
+  "frozen": {
+    "frozenVersion": 1,
+    "finalizedAt": "2026-09-14T21:00:00.000Z",
+    "finalizedBy": "usuario-1",
+    "runRef": {
+      "runId": "run-1",
+      "runVersion": 1,
+      "runFingerprint": "ytrun:7f75772f",
+      "collectedAt": "2026-09-14T18:51:07.000Z",
+      "provider": "dataforseo",
+      "endpoint": "/v3/serp/youtube/organic/live/advanced",
+      "queriesExecuted": 1,
+      "universeSize": 25,
+      "selectedVideoIds": []
+    },
+    "run": null,
+    "blueprint": {
+      "blueprintVersion": 1,
+      "runId": "run-1",
+      "runFingerprint": "ytrun:7f75772f",
+      "generatedAt": "2026-09-14T19:00:00.000Z",
+      "observed": {
+        "declaredIntent": "INFORMATIONAL",
+        "universeSize": 25,
+        "comparableSize": 25,
+        "longForm": {
+          "format": "LONG_FORM",
+          "videoCount": 11,
+          "durationSeconds": {
+            "sampleSize": 11,
+            "p25": 679,
+            "median": 930,
+            "p75": 1008,
+            "min": 264,
+            "max": 1397
+          },
+          "views": {
+            "sampleSize": 11,
+            "p25": 28500,
+            "median": 67000,
+            "p75": 115000,
+            "min": 420,
+            "max": 514000
+          },
+          "ageMonths": {
+            "sampleSize": 11,
+            "p25": 12,
+            "median": 24,
+            "p75": 24,
+            "min": 4.03615453290018,
+            "max": 59.982278434808
+          },
+          "occurrence": {
+            "sampleSize": 11,
+            "p25": 1,
+            "median": 1,
+            "p75": 1,
+            "min": 1,
+            "max": 1
+          },
+          "dominantChannels": [
+            {
+              "channelId": "UCyXAk6wNyu_mqCau-J2yCCw",
+              "channelName": "Dra. Marina Hayashida",
+              "videos": 4,
+              "bestRank": 1
+            },
+            {
+              "channelId": "UCK9NhQvcfsGtle5iuqLFZcw",
+              "channelName": "Cams Castro",
+              "videos": 2,
+              "bestRank": 7
+            }
+          ],
+          "titlePatterns": [
+            {
+              "id": "ROTINA",
+              "label": "Rotina",
+              "count": 2,
+              "share": 0.18181818181818182
+            },
+            {
+              "id": "LISTA",
+              "label": "Lista (dicas, melhores, top)",
+              "count": 1,
+              "share": 0.09090909090909091
+            },
+            {
+              "id": "NAO_FACA",
+              "label": "Alerta / não faça",
+              "count": 1,
+              "share": 0.09090909090909091
+            },
+            {
+              "id": "PASSO_A_PASSO",
+              "label": "Passo a passo",
+              "count": 1,
+              "share": 0.09090909090909091
+            }
+          ],
+          "recurrentTerms": [
+            {
+              "term": "skincare",
+              "count": 9
+            },
+            {
+              "term": "nighttime",
+              "count": 6
+            },
+            {
+              "term": "routine",
+              "count": 4
+            },
+            {
+              "term": "night",
+              "count": 3
+            },
+            {
+              "term": "doing",
+              "count": 2
+            },
+            {
+              "term": "guide",
+              "count": 2
+            },
+            {
+              "term": "noturna",
+              "count": 2
+            },
+            {
+              "term": "rotina",
+              "count": 2
+            },
+            {
+              "term": "skin",
+              "count": 2
+            },
+            {
+              "term": "step",
+              "count": 2
+            },
+            {
+              "term": "tips",
+              "count": 2
+            }
+          ],
+          "limitations": []
+        },
+        "shorts": {
+          "format": "SHORTS",
+          "videoCount": 14,
+          "durationSeconds": {
+            "sampleSize": 14,
+            "p25": 16,
+            "median": 24,
+            "p75": 35,
+            "min": 6,
+            "max": 95
+          },
+          "views": {
+            "sampleSize": 14,
+            "p25": 70000,
+            "median": 202500,
+            "p75": 481500,
+            "min": 5800,
+            "max": 2700000
+          },
+          "ageMonths": {
+            "sampleSize": 14,
+            "p25": 12,
+            "median": 12,
+            "p75": 33,
+            "min": 9.982278434808002,
+            "max": 36.00067528106293
+          },
+          "occurrence": {
+            "sampleSize": 14,
+            "p25": 1,
+            "median": 1,
+            "p75": 1,
+            "min": 1,
+            "max": 1
+          },
+          "dominantChannels": [
+            {
+              "channelId": "UCyXAk6wNyu_mqCau-J2yCCw",
+              "channelName": "Dra. Marina Hayashida",
+              "videos": 2,
+              "bestRank": 17
+            }
+          ],
+          "titlePatterns": [
+            {
+              "id": "ROTINA",
+              "label": "Rotina",
+              "count": 4,
+              "share": 0.2857142857142857
+            },
+            {
+              "id": "NAO_FACA",
+              "label": "Alerta / não faça",
+              "count": 2,
+              "share": 0.14285714285714285
+            },
+            {
+              "id": "PERGUNTA",
+              "label": "Pergunta",
+              "count": 1,
+              "share": 0.07142857142857142
+            }
+          ],
+          "recurrentTerms": [
+            {
+              "term": "skincare",
+              "count": 11
+            },
+            {
+              "term": "routine",
+              "count": 6
+            },
+            {
+              "term": "nighttime",
+              "count": 5
+            },
+            {
+              "term": "rotina",
+              "count": 4
+            },
+            {
+              "term": "care",
+              "count": 3
+            },
+            {
+              "term": "noturno",
+              "count": 3
+            },
+            {
+              "term": "skin",
+              "count": 3
+            },
+            {
+              "term": "skincareroutine",
+              "count": 3
+            },
+            {
+              "term": "long",
+              "count": 2
+            },
+            {
+              "term": "night",
+              "count": 2
+            },
+            {
+              "term": "noturna",
+              "count": 2
+            },
+            {
+              "term": "ordem",
+              "count": 2
+            }
+          ],
+          "limitations": []
+        },
+        "avFormats": [
+          {
+            "id": "ROTINA",
+            "label": "Rotina",
+            "count": 6,
+            "share": 0.24
+          },
+          {
+            "id": "ALERTA",
+            "label": "Alerta / desmistificação",
+            "count": 3,
+            "share": 0.12
+          },
+          {
+            "id": "RANKING",
+            "label": "Ranking / lista",
+            "count": 1,
+            "share": 0.04
+          },
+          {
+            "id": "TUTORIAL",
+            "label": "Tutorial",
+            "count": 1,
+            "share": 0.04
+          }
+        ],
+        "recurrentChannels": [
+          {
+            "channelId": "UCyXAk6wNyu_mqCau-J2yCCw",
+            "channelName": "Dra. Marina Hayashida",
+            "videos": 6,
+            "bestRank": 1
+          },
+          {
+            "channelId": "UCK9NhQvcfsGtle5iuqLFZcw",
+            "channelName": "Cams Castro",
+            "videos": 2,
+            "bestRank": 7
+          }
+        ],
+        "crossQueryVideos": []
+      },
+      "recommended": {
+        "destination": "BOTH",
+        "format": "Rotina",
+        "durationSecondsRange": {
+          "min": 16,
+          "max": 35
+        },
+        "strategy": [
+          {
+            "dimension": "Linguagem e nível técnico",
+            "observedSignal": "Nenhum dos 14 título(s) invoca autoridade profissional explícita.",
+            "recommendedStrategy": "Linguagem direta e cotidiana; a credencial pode ficar no corpo, sem ocupar o título."
+          },
+          {
+            "dimension": "Promessa",
+            "observedSignal": "Nenhuma promessa de preço ou de resultado aparece de forma recorrente.",
+            "recommendedStrategy": "Há espaço para uma promessa concreta — a SERP está dominada por títulos descritivos."
+          },
+          {
+            "dimension": "Posicionamento",
+            "observedSignal": "2 canal(is) aparecem com mais de um vídeo; o mais recorrente tem 6.",
+            "recommendedStrategy": "Disputar por ÂNGULO, não por volume: os canais recorrentes já ocupam a busca genérica."
+          },
+          {
+            "dimension": "Urgência e recência",
+            "observedSignal": "A mediana de idade da coorte é de 12 mês(es).",
+            "recommendedStrategy": "O acervo é recente: a disputa é por qualidade e ângulo, não por atualização."
+          },
+          {
+            "dimension": "Foco e CTA",
+            "observedSignal": "A intenção declarada pelo Arquiteto é \"INFORMATIONAL\".",
+            "recommendedStrategy": "Foco educativo: CTA de continuidade (aprofundar, salvar, acompanhar a série)."
+          },
+          {
+            "dimension": "Formato",
+            "observedSignal": "O formato mais recorrente é Rotina (6 de 14).",
+            "recommendedStrategy": "Entregar em Rotina para competir no mesmo terreno — ou deliberadamente em outro, para diferenciar."
+          }
+        ],
+        "script": [
+          {
+            "block": "GANCHO",
+            "purpose": "Afirmar o resultado ou o erro nos primeiros 2 segundos.",
+            "derivedFrom": "formato dominante da SERP (Rotina)"
+          },
+          {
+            "block": "ENTREGA",
+            "purpose": "Uma informação só, completa e verificável.",
+            "derivedFrom": "formato dominante da SERP (Rotina)"
+          },
+          {
+            "block": "PROVA",
+            "purpose": "Demonstração rápida ou credencial que sustenta a afirmação.",
+            "derivedFrom": "formato dominante da SERP (Rotina)"
+          },
+          {
+            "block": "CORTE",
+            "purpose": "Encerrar no ponto alto, com CTA curto de continuidade.",
+            "derivedFrom": "formato dominante da SERP (Rotina)"
+          }
+        ],
+        "scriptDisclaimer": "Roteiro RECOMENDADO, derivado da intenção e do formato dominante da SERP. Não é a estrutura literal dos concorrentes: esta pesquisa não baixa nem transcreve vídeo.",
+        "titleOpportunities": [
+          "Passo a passo: nenhum título da amostra usa este padrão.",
+          "Como (instrucional): nenhum título da amostra usa este padrão.",
+          "Lista (dicas, melhores, top): nenhum título da amostra usa este padrão.",
+          "Ranking: nenhum título da amostra usa este padrão.",
+          "Comparação: nenhum título da amostra usa este padrão.",
+          "Problema → solução: nenhum título da amostra usa este padrão.",
+          "Vale a pena: nenhum título da amostra usa este padrão.",
+          "Custo-benefício: nenhum título da amostra usa este padrão.",
+          "Review / resenha: nenhum título da amostra usa este padrão.",
+          "Transformação: nenhum título da amostra usa este padrão.",
+          "Autoridade profissional: nenhum título da amostra usa este padrão."
+        ],
+        "gaps": [
+          {
+            "kind": "TOPICO_SEM_COBERTURA",
+            "statement": "O tópico \"hidratante noturno\" não aparece em nenhum título da amostra.",
+            "evidence": "Nenhum dos 25 títulos coletados contém os termos centrais deste tópico."
+          }
+        ]
+      },
+      "limitations": [
+        "Esta leitura usa apenas o que a SERP do YouTube entrega: título, canal, posição, duração, formato, visualizações e data. Nenhum vídeo foi baixado, assistido ou transcrito."
+      ]
+    },
+    "multimodal": {
+      "blueprint": {
+        "multimodalVersion": 1,
+        "generatedAt": "2026-09-14T20:00:00.000Z",
+        "observed": {
+          "googleFeatures": {
+            "featuresVersion": 1,
+            "keyword": "skin care noturno",
+            "itemTypes": [
+              "ai_overview",
+              "organic",
+              "people_also_ask",
+              "images",
+              "short_videos",
+              "video",
+              "people_also_search",
+              "popular_products"
+            ],
+            "aiOverview": {
+              "present": true,
+              "markdownLength": 2156,
+              "references": [
+                {
+                  "domain": "www.boticario.com.br",
+                  "title": "Skincare noturno: confira o passo a passo - O Boticário",
+                  "url": "https://www.boticario.com.br/dicas-de-beleza/conheca-quais-sao-as-etapas-do-skincare-noturno/"
+                },
+                {
+                  "domain": "www.minhafarmalar.com.br",
+                  "title": "3 passos indispensáveis para acordar com a pele mais bonita e protegida",
+                  "url": "https://www.minhafarmalar.com.br/skincare-noturno-3-passos-indispensaveis-para-acordar-com-a-pele-mais-bonita-e-protegida"
+                },
+                {
+                  "domain": "www.avon.com.br",
+                  "title": "Skincare noturno: o que usar e qual a melhor ordem? - Avon",
+                  "url": "https://www.avon.com.br/blog/pele/skincare-noturno"
+                }
+              ]
+            },
+            "organicCount": 6,
+            "questionMap": [
+              {
+                "question": "Qual ordem de skincare à noite?",
+                "source": "PEOPLE_ALSO_ASK"
+              },
+              {
+                "question": "Como fazer um skincare noturno?",
+                "source": "PEOPLE_ALSO_ASK"
+              },
+              {
+                "question": "Qual a rotina de skincare noturna?",
+                "source": "PEOPLE_ALSO_ASK"
+              },
+              {
+                "question": "O que devo usar no rosto à noite?",
+                "source": "PEOPLE_ALSO_ASK"
+              }
+            ],
+            "entityMap": [
+              {
+                "term": "Skin care noturno ordem",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Skincare noturno passo a passo",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Skincare noturno creamy",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Skincare noturno principia",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Kit skincare noturno",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Skincare noturno pele madura",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Hidratantes faciais",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Abaixo de R$ 70",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Retinol",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Formação de colágeno",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Vitamina C",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Loção corporal",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Para pele seca",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Para bebês",
+                "source": "REFINEMENT_CHIP"
+              }
+            ],
+            "visualOpportunities": [
+              {
+                "alt": "Cronograma skin care: a ordem certa que transforma sua pele ...",
+                "sourceDomain": "modices.com.br"
+              },
+              {
+                "alt": "Kit Rotina Skincare Noturno (5 Produtos)",
+                "sourceDomain": "www.oceane.com.br"
+              },
+              {
+                "alt": "Rotina de skincare: passo a passo ideal para iniciantes",
+                "sourceDomain": "blog.lojasrenner.com.br"
+              },
+              {
+                "alt": "Uma rotina de skincare noturna pode transformar sua pele! Com ...",
+                "sourceDomain": "www.instagram.com"
+              }
+            ],
+            "videos": [
+              {
+                "title": "SKINCARE NOITE | Ordem de aplicação dos produtos  ...",
+                "url": "https://www.instagram.com/reel/DYKYR7htpKW/",
+                "domain": null,
+                "source": "RAISA LOPES",
+                "block": "VIDEO",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Qual a ordem do skincare noturno? Essa é uma ordem mais básica pra ...",
+                "url": "https://www.instagram.com/reel/DYsycpfv4c9/",
+                "domain": null,
+                "source": "Thaíse Santos | Farmacêutica",
+                "block": "VIDEO",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Limpeza e Hidratação: A Base do Skincare Noturno (Minha rotina) ...",
+                "url": "https://www.youtube.com/shorts/Ce6RKljTA1c",
+                "domain": null,
+                "source": "Dra. Marina Hayashida",
+                "block": "VIDEO",
+                "youtubeVideoId": "Ce6RKljTA1c",
+                "platform": "YOUTUBE"
+              },
+              {
+                "title": "SKINCARE NOITE | Ordem de aplicação dos produtos 🌑 ... enviado por RAISA LOPES em Instagram. Assistir em Instagram. 0:19",
+                "url": "https://www.instagram.com/reel/DYKYR7htpKW/",
+                "domain": "www.instagram.com",
+                "source": "RAISA LOPES",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Limpeza e Hidratação: A Base do Skincare Noturno (Minha rotina) ... enviado por Dra. Marina Hayashida em YouTube. Assistir em YouTube. 1:35",
+                "url": "https://www.youtube.com/shorts/Ce6RKljTA1c",
+                "domain": "www.youtube.com",
+                "source": "Dra. Marina Hayashida",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": "Ce6RKljTA1c",
+                "platform": "YOUTUBE"
+              },
+              {
+                "title": "Qual a ordem do skincare noturno? Essa é uma ordem mais básica pra ... enviado por Thaíse Santos | Farmacêutica em Instagram. Assistir em Instagram. 0:56",
+                "url": "https://www.instagram.com/reel/DYsycpfv4c9/",
+                "domain": "www.instagram.com",
+                "source": "Thaíse Santos | Farmacêutica",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Meu ritual de skincare noturno que faz TOTAL diferença! enviado por Scarlleth Moura | Maquiadora Profissional  em YouTube. Assistir em YouTube. 1:21",
+                "url": "https://www.youtube.com/shorts/g7OIwU193fw",
+                "domain": "google.com",
+                "source": "Scarlleth Moura | Maquiadora Profissional",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": "g7OIwU193fw",
+                "platform": "YOUTUBE"
+              },
+              {
+                "title": "Rotina de skincare NOTURNA 🌛 de uma CLT de 19 anos, que trabalhava ... enviado por RAISA LOPES em Instagram. Assistir em Instagram. 1:24",
+                "url": "https://www.instagram.com/reel/DbJkIqpRzN0/",
+                "domain": "www.instagram.com",
+                "source": "RAISA LOPES",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Ordem Correta Do Skincare Noturno: Dicas Essenciais enviado por lafernandesss em TikTok. Assistir em TikTok. 0:18",
+                "url": "https://www.tiktok.com/@lafernandesss/video/7469906708723289399",
+                "domain": "www.tiktok.com",
+                "source": "lafernandesss",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": null,
+                "platform": "TIKTOK"
+              }
+            ],
+            "commercialSignals": {
+              "present": true,
+              "products": [
+                {
+                  "title": "Sérum Facial Noturno de Probióticos - Probiotic Night Serum 30ml",
+                  "seller": "Océane",
+                  "price": "R$ 89,90 agora",
+                  "rating": 4.8,
+                  "reviews": 151
+                },
+                {
+                  "title": "Creme Facial Retexturizador Noturno Sallve 30G",
+                  "seller": "Época Cosméticos Perfumaria",
+                  "price": "R$ 87,20 R$ 110",
+                  "rating": 4.6,
+                  "reviews": 1200
+                },
+                {
+                  "title": "Sérum Facial Noturno De Probióticos - Probiotic Night Serum 30Ml",
+                  "seller": "Drogasil.com.br",
+                  "price": "R$ 89,91",
+                  "rating": 4.8,
+                  "reviews": 151
+                },
+                {
+                  "title": "Creme Retexturizador Noturno Sallve",
+                  "seller": "Maquiare",
+                  "price": "R$ 109,90 agora",
+                  "rating": 4.6,
+                  "reviews": 1200
+                },
+                {
+                  "title": "Sérum Facial Noturno Océane De Probióticos 30ml",
+                  "seller": "Panvel",
+                  "price": "R$ 91,91",
+                  "rating": 4.8,
+                  "reviews": 151
+                }
+              ]
+            },
+            "contentFormatMap": {
+              "hasAiOverview": true,
+              "hasOrganic": true,
+              "hasQuestions": true,
+              "hasImages": true,
+              "hasVideo": true,
+              "hasShortVideos": true,
+              "hasProducts": true
+            },
+            "observedIntentSignals": [
+              "O Google mostra 5 produto(s) para esta busca: a intenção tem camada comercial.",
+              "O Google sintetiza a resposta num AI Overview e cita 3 fonte(s): a intenção tem resposta direta esperada.",
+              "4 pergunta(s) e expansões aparecem na SERP: a intenção é exploratória.",
+              "O Google devolve 9 peça(s) audiovisual(is), 6 em formato curto: vídeo compete nesta busca.",
+              "4 imagem(ns) aparecem na SERP: a intenção tem componente visual."
+            ],
+            "limitations": [
+              "Esta leitura usa apenas os blocos que a SERP do Google devolveu. Nenhuma página foi visitada e nenhum vídeo foi assistido."
+            ]
+          },
+          "youtubeLongForm": 11,
+          "youtubeShorts": 14,
+          "crossSerpVideos": [
+            {
+              "videoId": "Ce6RKljTA1c",
+              "title": "Limpeza e Hidratação: A Base do Skincare Noturno (Minha rotina) #shorts #skincare",
+              "youtubeBestRank": 51,
+              "googleBlock": "SHORT_VIDEOS",
+              "signal": "CROSS_PLATFORM",
+              "reason": "Está na posição 51 do YouTube e também no bloco de vídeos curtos do Google para a mesma intenção."
+            },
+            {
+              "videoId": "g7OIwU193fw",
+              "title": "Meu ritual de skincare noturno que faz TOTAL diferença! enviado por Scarlleth Moura | Maquiadora Profissional  em YouTube. Assistir em YouTube. 1:21",
+              "youtubeBestRank": 1,
+              "googleBlock": "SHORT_VIDEOS",
+              "signal": "GOOGLE_ONLY",
+              "reason": "O Google devolve este vídeo para a intenção e as nossas consultas de YouTube não o alcançaram."
+            }
+          ],
+          "sources": [
+            "GOOGLE_SERP",
+            "YOUTUBE_SERP"
+          ]
+        },
+        "recommended": {
+          "editorialOutput": "MULTIFORMAT_PACKAGE",
+          "rationale": [
+            "O Google devolve peça audiovisual para esta intenção (9 item(ns)): vídeo compete na busca de texto.",
+            "A SERP do YouTube tem 11 long-form e 14 Short(s) disputando a mesma intenção.",
+            "O Google mostra 5 produto(s): há camada comercial na intenção.",
+            "A SERP tem 6 resultado(s) orgânico(s): texto continua disputando.",
+            "Texto, vídeo longo e formato curto disputam a MESMA intenção: uma peça só deixaria duas frentes sem resposta."
+          ],
+          "pieces": [
+            {
+              "piece": "ARTIGO",
+              "role": "Peça principal: responde a intenção por escrito e sustenta a busca do Google.",
+              "derivedFrom": "6 resultado(s) orgânico(s) disputando a intenção.",
+              "sourceSignal": null,
+              "sourceQuestion": null,
+              "objective": null,
+              "suggestedAngle": null
+            },
+            {
+              "piece": "VIDEO_HERO",
+              "role": "Vídeo principal, no topo do artigo quando houver artigo.",
+              "derivedFrom": "11 long-form disputam esta intenção no YouTube.",
+              "sourceSignal": null,
+              "sourceQuestion": null,
+              "objective": null,
+              "suggestedAngle": null
+            },
+            {
+              "piece": "SHORT",
+              "role": "Short de uma ideia só: \"Qual ordem de skincare à noite?\".",
+              "derivedFrom": "Pergunta observada no bloco PEOPLE_ALSO_ASK da SERP.",
+              "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+              "sourceQuestion": "Qual ordem de skincare à noite?",
+              "objective": "Responder esta pergunta por completo, e só ela.",
+              "suggestedAngle": "Demonstração sequencial: mostre a ordem acontecendo, não explique a ordem."
+            },
+            {
+              "piece": "SHORT",
+              "role": "Short de uma ideia só: \"Como fazer um skincare noturno?\".",
+              "derivedFrom": "Pergunta observada no bloco PEOPLE_ALSO_ASK da SERP.",
+              "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+              "sourceQuestion": "Como fazer um skincare noturno?",
+              "objective": "Responder esta pergunta por completo, e só ela.",
+              "suggestedAngle": "Resposta direta nos primeiros segundos, com a prova logo atrás."
+            },
+            {
+              "piece": "SHORT",
+              "role": "Short de uma ideia só: \"Qual a rotina de skincare noturna?\".",
+              "derivedFrom": "Pergunta observada no bloco PEOPLE_ALSO_ASK da SERP.",
+              "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+              "sourceQuestion": "Qual a rotina de skincare noturna?",
+              "objective": "Responder esta pergunta por completo, e só ela.",
+              "suggestedAngle": "Resposta direta nos primeiros segundos, com a prova logo atrás."
+            },
+            {
+              "piece": "SHORT",
+              "role": "Short de uma ideia só: \"O que devo usar no rosto à noite?\".",
+              "derivedFrom": "Pergunta observada no bloco PEOPLE_ALSO_ASK da SERP.",
+              "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+              "sourceQuestion": "O que devo usar no rosto à noite?",
+              "objective": "Responder esta pergunta por completo, e só ela.",
+              "suggestedAngle": "Critério de escolha: mostre COMO decidir, não uma lista de marcas."
+            },
+            {
+              "piece": "IMAGEM",
+              "role": "Apoio visual nas seções em que a explicação é de ordem ou de passo.",
+              "derivedFrom": "4 imagem(ns) na SERP para esta intenção.",
+              "sourceSignal": null,
+              "sourceQuestion": null,
+              "objective": null,
+              "suggestedAngle": null
+            },
+            {
+              "piece": "SECAO_COMERCIAL",
+              "role": "Seção de critérios e recomendação de produto, ao fim da peça principal.",
+              "derivedFrom": "5 produto(s) que o Google mostra para esta busca.",
+              "sourceSignal": null,
+              "sourceQuestion": null,
+              "objective": null,
+              "suggestedAngle": null
+            }
+          ],
+          "mustAnswer": [
+            "Qual ordem de skincare à noite?",
+            "Como fazer um skincare noturno?",
+            "Qual a rotina de skincare noturna?",
+            "O que devo usar no rosto à noite?"
+          ],
+          "mustCover": [
+            "Skin care noturno ordem",
+            "Skincare noturno passo a passo",
+            "Skincare noturno creamy",
+            "Skincare noturno principia",
+            "Kit skincare noturno",
+            "Skincare noturno pele madura",
+            "Hidratantes faciais",
+            "Abaixo de R$ 70",
+            "Retinol",
+            "Formação de colágeno",
+            "Vitamina C",
+            "Loção corporal",
+            "Para pele seca",
+            "Para bebês"
+          ]
+        },
+        "limitations": [
+          "Leitura feita apenas com os blocos que as SERPs devolveram. Nenhuma página foi visitada, nenhum vídeo foi assistido ou transcrito."
+        ]
+      },
+      "researchSources": [
+        "WEB_SERP",
+        "YOUTUBE_SERP"
+      ],
+      "editorialOutput": "MULTIFORMAT_PACKAGE"
+    },
+    "limitations": [
+      "Esta leitura usa apenas o que a SERP do YouTube entrega: título, canal, posição, duração, formato, visualizações e data. Nenhum vídeo foi baixado, assistido ou transcrito.",
+      "Leitura feita apenas com os blocos que as SERPs devolveram. Nenhuma página foi visitada, nenhum vídeo foi assistido ou transcrito."
+    ]
+  },
+  "esperado": {
+    "canonical": {
+      "schemaVersion": 1,
+      "articleId": "artigo-1",
+      "articleDnaVersionId": "dna-1",
+      "articleDnaContentHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "researchRefs": [
+        {
+          "source": "YOUTUBE_SERP",
+          "role": "PRIMARY_COMPETITIVE_RESEARCH",
+          "ref": "run-1",
+          "fingerprint": "ytrun:7f75772f",
+          "collectedAt": "2026-09-14T18:51:07.000Z",
+          "sampleSize": 25
+        }
+      ],
+      "limitations": [
+        "Esta leitura usa apenas o que a SERP do YouTube entrega: título, canal, posição, duração, formato, visualizações e data. Nenhum vídeo foi baixado, assistido ou transcrito.",
+        "Leitura feita apenas com os blocos que as SERPs devolveram. Nenhuma página foi visitada, nenhum vídeo foi assistido ou transcrito."
+      ],
+      "provenance": {
+        "generatedAt": "2026-09-14T21:00:00.000Z",
+        "frozenAt": "2026-09-14T21:00:00.000Z"
+      },
+      "profile": "YOUTUBE",
+      "observed": {
+        "comparableVideos": 25,
+        "longForm": 11,
+        "shorts": 14,
+        "titlePatterns": [
+          {
+            "id": "pattern:ROTINA",
+            "statement": "Títulos usam o enquadramento \"Rotina\".",
+            "grade": "OBSERVED_SERP",
+            "evidence": "2 de 25 títulos comparáveis.",
+            "count": 2
+          },
+          {
+            "id": "pattern:LISTA",
+            "statement": "Títulos usam o enquadramento \"Lista (dicas, melhores, top)\".",
+            "grade": "OBSERVED_SERP",
+            "evidence": "1 de 25 títulos comparáveis.",
+            "count": 1
+          },
+          {
+            "id": "pattern:NAO_FACA",
+            "statement": "Títulos usam o enquadramento \"Alerta / não faça\".",
+            "grade": "OBSERVED_SERP",
+            "evidence": "1 de 25 títulos comparáveis.",
+            "count": 1
+          },
+          {
+            "id": "pattern:PASSO_A_PASSO",
+            "statement": "Títulos usam o enquadramento \"Passo a passo\".",
+            "grade": "OBSERVED_SERP",
+            "evidence": "1 de 25 títulos comparáveis.",
+            "count": 1
+          },
+          {
+            "id": "pattern:ROTINA",
+            "statement": "Títulos usam o enquadramento \"Rotina\".",
+            "grade": "OBSERVED_SERP",
+            "evidence": "4 de 25 títulos comparáveis.",
+            "count": 4
+          },
+          {
+            "id": "pattern:NAO_FACA",
+            "statement": "Títulos usam o enquadramento \"Alerta / não faça\".",
+            "grade": "OBSERVED_SERP",
+            "evidence": "2 de 25 títulos comparáveis.",
+            "count": 2
+          },
+          {
+            "id": "pattern:PERGUNTA",
+            "statement": "Títulos usam o enquadramento \"Pergunta\".",
+            "grade": "OBSERVED_SERP",
+            "evidence": "1 de 25 títulos comparáveis.",
+            "count": 1
+          }
+        ],
+        "recurrentChannels": [
+          {
+            "id": "channel:UCyXAk6wNyu_mqCau-J2yCCw",
+            "statement": "O canal \"Dra. Marina Hayashida\" aparece mais de uma vez.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "6 vídeo(s), melhor posição 1.",
+            "count": 6
+          },
+          {
+            "id": "channel:UCK9NhQvcfsGtle5iuqLFZcw",
+            "statement": "O canal \"Cams Castro\" aparece mais de uma vez.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "2 vídeo(s), melhor posição 7.",
+            "count": 2
+          }
+        ],
+        "durationRange": "Entre 16s e 35s na coorte dominante.",
+        "viewsRange": null,
+        "recency": null,
+        "crossQuery": [],
+        "googleSupport": [
+          {
+            "id": "google:q:0",
+            "statement": "Qual ordem de skincare à noite?",
+            "grade": "OBSERVED_SERP",
+            "evidence": "A busca do Google faz esta pergunta para a mesma intenção (PEOPLE_ALSO_ASK).",
+            "count": null
+          },
+          {
+            "id": "google:q:1",
+            "statement": "Como fazer um skincare noturno?",
+            "grade": "OBSERVED_SERP",
+            "evidence": "A busca do Google faz esta pergunta para a mesma intenção (PEOPLE_ALSO_ASK).",
+            "count": null
+          },
+          {
+            "id": "google:q:2",
+            "statement": "Qual a rotina de skincare noturna?",
+            "grade": "OBSERVED_SERP",
+            "evidence": "A busca do Google faz esta pergunta para a mesma intenção (PEOPLE_ALSO_ASK).",
+            "count": null
+          },
+          {
+            "id": "google:q:3",
+            "statement": "O que devo usar no rosto à noite?",
+            "grade": "OBSERVED_SERP",
+            "evidence": "A busca do Google faz esta pergunta para a mesma intenção (PEOPLE_ALSO_ASK).",
+            "count": null
+          }
+        ],
+        "gaps": [
+          {
+            "id": "gap:TOPICO_SEM_COBERTURA:0",
+            "statement": "O tópico \"hidratante noturno\" não aparece em nenhum título da amostra.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Nenhum dos 25 títulos coletados contém os termos centrais deste tópico.",
+            "count": null
+          }
+        ],
+        "sufficiency": "25 vídeo(s) comparáveis sustentam a leitura."
+      },
+      "recommended": {
+        "format": "Rotina",
+        "durationDirection": "Entre 16s e 35s na coorte dominante.",
+        "titleDirections": [
+          {
+            "id": "title:ROTINA",
+            "statement": "Mantenha a palavra rotina, mas ponha a promessa específica ANTES dela — o formato já saturou e sozinho não diferencia.",
+            "objective": "ser reconhecido no formato que a busca espera sem virar mais um da lista.",
+            "sourceSignal": "6 de 25 títulos comparáveis usam o enquadramento \"Rotina\"."
+          },
+          {
+            "id": "title:NAO_FACA",
+            "statement": "O alerta já está saturado: use-o como segundo elemento, depois da promessa positiva.",
+            "objective": "capturar a busca de quem já tentou e falhou.",
+            "sourceSignal": "3 de 25 títulos comparáveis usam o enquadramento \"Alerta / não faça\"."
+          },
+          {
+            "id": "title:gap:AUTORIDADE",
+            "statement": "Declare a autoridade no título: a amostra é dominada por criadores sem credencial visível.",
+            "objective": "responder à expectativa de confiança desta intenção.",
+            "sourceSignal": "Nenhum dos 25 títulos comparáveis usa este enquadramento."
+          },
+          {
+            "id": "title:gap:TRANSFORMACAO",
+            "statement": "Prometer a mudança observável está livre nesta amostra.",
+            "objective": "dar ao espectador uma razão concreta para ficar.",
+            "sourceSignal": "Nenhum dos 25 títulos comparáveis usa este enquadramento."
+          }
+        ],
+        "hookDirection": {
+          "id": "hook:question",
+          "statement": "Abra pela dúvida que a busca faz — \"Qual ordem de skincare à noite?\" — e prometa a resposta nos primeiros segundos, sem introdução de canal.",
+          "objective": "reter quem chegou com uma pergunta específica, antes que ele volte para a lista.",
+          "sourceSignal": "A pergunta aparece na busca do Google para a mesma intenção, e o enquadramento dominante nos títulos é \"Rotina\"."
+        },
+        "script": [
+          {
+            "block": "Gancho",
+            "objective": "Capturar a intenção nos primeiros segundos.",
+            "direction": "Diga o que o vídeo entrega antes de dizer quem você é. Apresentação de canal na abertura custa a retenção que a amostra disputa.",
+            "sourceSignal": "A amostra tem 25 concorrente(s) comparáveis para a mesma busca: a decisão de ficar é tomada antes do primeiro corte."
+          },
+          {
+            "block": "Abertura",
+            "objective": "Estabelecer para quem é e o que será respondido.",
+            "direction": "Delimite o caso coberto. Prometer tudo faz o espectador específico abandonar.",
+            "sourceSignal": "A intenção declarada do artigo delimita o público desta peça."
+          },
+          {
+            "block": "Bloco 1 · fundamento",
+            "objective": "Dar o porquê antes do como.",
+            "direction": "Explique o mecanismo que faz a recomendação funcionar. Sem ele, o passo a passo vira lista para decorar.",
+            "sourceSignal": "O enquadramento dominante da amostra é instrucional: o fundamento é o que a maioria pula."
+          },
+          {
+            "block": "Bloco 2 · aplicação",
+            "objective": "Entregar a execução, na ordem.",
+            "direction": "Mostre acontecendo. Descrever o passo é o que o texto já faz melhor; o vídeo existe para demonstrar.",
+            "sourceSignal": "É o formato que a busca reconhece como resposta para esta intenção."
+          },
+          {
+            "block": "Bloco 3 · erros e objeções",
+            "objective": "Responder as dúvidas que a busca já faz.",
+            "direction": "Trate as perguntas observadas de frente: Qual ordem de skincare à noite? · Como fazer um skincare noturno? · Qual a rotina de skincare noturna?.",
+            "sourceSignal": "4 pergunta(s) aparecem na busca do Google para a mesma intenção."
+          },
+          {
+            "block": "Conclusão",
+            "objective": "Fechar a promessa feita no gancho.",
+            "direction": "Retome o que foi prometido e diga o que mudou. Resumo genérico devolve o espectador ao ponto de partida.",
+            "sourceSignal": "A promessa do gancho é a dívida que o fechamento paga."
+          },
+          {
+            "block": "CTA",
+            "objective": "Dar o próximo passo, um só.",
+            "direction": "Um pedido por vez, ligado ao que o vídeo entregou. Dois CTAs dividem a ação e não convertem nenhuma.",
+            "sourceSignal": "Derivado da estrutura editorial, não observado na amostra."
+          }
+        ],
+        "tone": "Direto e sem rodeio: a amostra é dominada por peças curtas, e o espectador chega esperando resposta imediata.",
+        "languageDirection": "Use a formulação da busca, não o vocabulário técnico do setor. Quem procura ainda não conhece o nome correto do que precisa.",
+        "technicalLevel": "Superficial na explicação, preciso na instrução: o formato curto não sustenta teoria.",
+        "authorityDirection": "A amostra já tem autoridade visível; competir por credencial não diferencia — diferencie pelo recorte.",
+        "shorts": [
+          {
+            "id": "short:1",
+            "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+            "sourceQuestion": "Qual ordem de skincare à noite?",
+            "objective": "Responder esta pergunta por completo, e só ela.",
+            "hookDirection": "Abra afirmando que a ordem muda o resultado — a dúvida é de sequência, não de itens.",
+            "suggestedAngle": "Demonstração sequencial: mostre a ordem acontecendo, não explique a ordem.",
+            "contentPromise": "Responder \"Qual ordem de skincare à noite?\" sem exigir o vídeo longo.",
+            "ctaDirection": "Aponte para o vídeo principal ou para o artigo — o Short abre a dúvida, não a esgota."
+          },
+          {
+            "id": "short:2",
+            "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+            "sourceQuestion": "Como fazer um skincare noturno?",
+            "objective": "Responder esta pergunta por completo, e só ela.",
+            "hookDirection": "Abra pela resposta, e use o resto para sustentá-la.",
+            "suggestedAngle": "Resposta direta nos primeiros segundos, com a prova logo atrás.",
+            "contentPromise": "Responder \"Como fazer um skincare noturno?\" sem exigir o vídeo longo.",
+            "ctaDirection": "Aponte para o vídeo principal ou para o artigo — o Short abre a dúvida, não a esgota."
+          },
+          {
+            "id": "short:3",
+            "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+            "sourceQuestion": "Qual a rotina de skincare noturna?",
+            "objective": "Responder esta pergunta por completo, e só ela.",
+            "hookDirection": "Abra pelo critério, não pela marca: a dúvida é de escolha.",
+            "suggestedAngle": "Resposta direta nos primeiros segundos, com a prova logo atrás.",
+            "contentPromise": "Responder \"Qual a rotina de skincare noturna?\" sem exigir o vídeo longo.",
+            "ctaDirection": "Aponte para o vídeo principal ou para o artigo — o Short abre a dúvida, não a esgota."
+          },
+          {
+            "id": "short:4",
+            "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+            "sourceQuestion": "O que devo usar no rosto à noite?",
+            "objective": "Responder esta pergunta por completo, e só ela.",
+            "hookDirection": "Abra pelo critério, não pela marca: a dúvida é de escolha.",
+            "suggestedAngle": "Critério de escolha: mostre COMO decidir, não uma lista de marcas.",
+            "contentPromise": "Responder \"O que devo usar no rosto à noite?\" sem exigir o vídeo longo.",
+            "ctaDirection": "Aponte para o vídeo principal ou para o artigo — o Short abre a dúvida, não a esgota."
+          }
+        ],
+        "articleApplication": [
+          {
+            "piece": "VIDEO_HERO",
+            "placement": "Topo do artigo, antes do primeiro H2.",
+            "role": "Responde a intenção inteira para quem prefere assistir, e segura a permanência que a busca de texto mede.",
+            "sourceSignal": "A busca do Google devolve peça audiovisual para esta intenção (2 vídeo(s) cruzando as duas buscas)."
+          },
+          {
+            "piece": "SHORT",
+            "placement": "Na seção que responde \"Qual ordem de skincare à noite?\".",
+            "role": "Responde a dúvida no ponto do texto em que ela aparece, sem tirar o leitor da página.",
+            "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google."
+          },
+          {
+            "piece": "SHORT",
+            "placement": "Na seção que responde \"Como fazer um skincare noturno?\".",
+            "role": "Responde a dúvida no ponto do texto em que ela aparece, sem tirar o leitor da página.",
+            "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google."
+          },
+          {
+            "piece": "SHORT",
+            "placement": "Na seção que responde \"Qual a rotina de skincare noturna?\".",
+            "role": "Responde a dúvida no ponto do texto em que ela aparece, sem tirar o leitor da página.",
+            "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google."
+          },
+          {
+            "piece": "SHORT",
+            "placement": "Na seção que responde \"O que devo usar no rosto à noite?\".",
+            "role": "Responde a dúvida no ponto do texto em que ela aparece, sem tirar o leitor da página.",
+            "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google."
+          },
+          {
+            "piece": "GOOGLE_SUPPORT",
+            "placement": "Distribuído entre os H2, como cobertura semântica.",
+            "role": "Perguntas que precisam ser respondidas (4) e temas que a busca trata como parte da intenção (14). É o que liga a peça de vídeo à descoberta por texto.",
+            "sourceSignal": "Leitura de apoio do Google sobre a mesma keyword principal."
+          }
+        ]
+      }
+    },
+    "evidence": {
+      "researchMode": "YOUTUBE",
+      "provenance": {
+        "runId": "run-1",
+        "runFingerprint": "ytrun:7f75772f",
+        "provider": "dataforseo",
+        "endpoint": "/v3/serp/youtube/organic/live/advanced",
+        "collectedAt": "2026-09-14T18:51:07.000Z",
+        "finalizedAt": "2026-09-14T21:00:00.000Z",
+        "queriesExecuted": 1
+      },
+      "observedEvidence": {
+        "universeSize": 25,
+        "comparableSize": 25,
+        "selectedVideoIds": [],
+        "longForm": {
+          "videoCount": 11,
+          "durationSeconds": {
+            "p25": 679,
+            "median": 930,
+            "p75": 1008
+          },
+          "titlePatterns": [
+            {
+              "id": "ROTINA",
+              "label": "Rotina",
+              "count": 2
+            },
+            {
+              "id": "LISTA",
+              "label": "Lista (dicas, melhores, top)",
+              "count": 1
+            },
+            {
+              "id": "NAO_FACA",
+              "label": "Alerta / não faça",
+              "count": 1
+            },
+            {
+              "id": "PASSO_A_PASSO",
+              "label": "Passo a passo",
+              "count": 1
+            }
+          ]
+        },
+        "shorts": {
+          "videoCount": 14,
+          "durationSeconds": {
+            "p25": 16,
+            "median": 24,
+            "p75": 35
+          },
+          "titlePatterns": [
+            {
+              "id": "ROTINA",
+              "label": "Rotina",
+              "count": 4
+            },
+            {
+              "id": "NAO_FACA",
+              "label": "Alerta / não faça",
+              "count": 2
+            },
+            {
+              "id": "PERGUNTA",
+              "label": "Pergunta",
+              "count": 1
+            }
+          ]
+        },
+        "recurrentChannels": [
+          {
+            "channelName": "Dra. Marina Hayashida",
+            "videos": 6
+          },
+          {
+            "channelName": "Cams Castro",
+            "videos": 2
+          }
+        ],
+        "avFormats": [
+          {
+            "id": "ROTINA",
+            "label": "Rotina",
+            "count": 6
+          },
+          {
+            "id": "ALERTA",
+            "label": "Alerta / desmistificação",
+            "count": 3
+          },
+          {
+            "id": "RANKING",
+            "label": "Ranking / lista",
+            "count": 1
+          },
+          {
+            "id": "TUTORIAL",
+            "label": "Tutorial",
+            "count": 1
+          }
+        ]
+      },
+      "recommendedStrategy": {
+        "destination": "BOTH",
+        "format": "Rotina",
+        "durationSecondsRange": {
+          "min": 16,
+          "max": 35
+        },
+        "dimensions": [
+          {
+            "dimension": "Linguagem e nível técnico",
+            "observedSignal": "Nenhum dos 14 título(s) invoca autoridade profissional explícita.",
+            "recommendedStrategy": "Linguagem direta e cotidiana; a credencial pode ficar no corpo, sem ocupar o título."
+          },
+          {
+            "dimension": "Promessa",
+            "observedSignal": "Nenhuma promessa de preço ou de resultado aparece de forma recorrente.",
+            "recommendedStrategy": "Há espaço para uma promessa concreta — a SERP está dominada por títulos descritivos."
+          },
+          {
+            "dimension": "Posicionamento",
+            "observedSignal": "2 canal(is) aparecem com mais de um vídeo; o mais recorrente tem 6.",
+            "recommendedStrategy": "Disputar por ÂNGULO, não por volume: os canais recorrentes já ocupam a busca genérica."
+          },
+          {
+            "dimension": "Urgência e recência",
+            "observedSignal": "A mediana de idade da coorte é de 12 mês(es).",
+            "recommendedStrategy": "O acervo é recente: a disputa é por qualidade e ângulo, não por atualização."
+          },
+          {
+            "dimension": "Foco e CTA",
+            "observedSignal": "A intenção declarada pelo Arquiteto é \"INFORMATIONAL\".",
+            "recommendedStrategy": "Foco educativo: CTA de continuidade (aprofundar, salvar, acompanhar a série)."
+          },
+          {
+            "dimension": "Formato",
+            "observedSignal": "O formato mais recorrente é Rotina (6 de 14).",
+            "recommendedStrategy": "Entregar em Rotina para competir no mesmo terreno — ou deliberadamente em outro, para diferenciar."
+          }
+        ],
+        "script": [
+          {
+            "block": "GANCHO",
+            "purpose": "Afirmar o resultado ou o erro nos primeiros 2 segundos."
+          },
+          {
+            "block": "ENTREGA",
+            "purpose": "Uma informação só, completa e verificável."
+          },
+          {
+            "block": "PROVA",
+            "purpose": "Demonstração rápida ou credencial que sustenta a afirmação."
+          },
+          {
+            "block": "CORTE",
+            "purpose": "Encerrar no ponto alto, com CTA curto de continuidade."
+          }
+        ],
+        "scriptDisclaimer": "Roteiro RECOMENDADO, derivado da intenção e do formato dominante da SERP. Não é a estrutura literal dos concorrentes: esta pesquisa não baixa nem transcreve vídeo.",
+        "gaps": [
+          {
+            "kind": "TOPICO_SEM_COBERTURA",
+            "statement": "O tópico \"hidratante noturno\" não aparece em nenhum título da amostra.",
+            "evidence": "Nenhum dos 25 títulos coletados contém os termos centrais deste tópico."
+          }
+        ]
+      },
+      "limitations": [
+        "Esta leitura usa apenas o que a SERP do YouTube entrega: título, canal, posição, duração, formato, visualizações e data. Nenhum vídeo foi baixado, assistido ou transcrito.",
+        "Leitura feita apenas com os blocos que as SERPs devolveram. Nenhuma página foi visitada, nenhum vídeo foi assistido ou transcrito."
+      ]
+    },
+    "bundleHashYoutube": "bundle-hash:caedea58",
+    "bundleHashGoogleComVideo": "bundle-hash:cc72003f"
+  }
+}

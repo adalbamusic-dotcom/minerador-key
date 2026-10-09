@@ -598,7 +598,7 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
        {/* E1 · sem o documento completo, o painel diria "sem dossiê" — e o dossiê existe, só não chegou. */}
        {idAguardandoDetalhe
          ? <div className="rounded border border-dashed border-divider p-3 text-sm text-text-muted" data-radar-foundations="carregando">{falhaDoDocumentoAberto ? "Fundamentos do Radar indisponíveis até o documento completo abrir." : "Carregando os fundamentos do Radar…"}</div>
-         : <WriterRadarFoundationsPanel document={selected}/>}
+         : <WriterRadarFoundationsPanel document={selected} brandId={selectedBrandId}/>}
        <WriterMediaAnchorPanel brandId={selectedBrandId} documentId={selected?.id || null}
          targets={selected ? articleAnchorTargets({ documentId: selected.id, title: selected.title, blocks: selected.blocks }) : []}
          assets={mediaAssets} onChanged={loadMediaAssets}/>

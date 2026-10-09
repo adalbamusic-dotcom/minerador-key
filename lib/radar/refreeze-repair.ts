@@ -117,6 +117,10 @@ function consequencias(profile: RadarRefreezeProfile, mode: RadarRefreezeMode): 
         ? ["São duas gravações: reabrir e congelar. O ensaio já confirmou que o congelamento passa; se a segunda falhar mesmo assim, a investigação fica reaberta (nada se perde) e \"Finalizar pesquisa\" conclui."]
         : []),
       "O pacote muda de identidade: o artigo-modelo da SERP é organizado de novo (1 chamada de IA, mais 1 se a resposta vier cortada ou precisar de correção) e sai concluído para o CSV, o Redator e o MCP.",
+      ...(profile === "AMAZON"
+        /* 2026-10-09 (correção) · a planta organizada desde 2026-10-09 se prende ao congelamento da Amazon (amazonFrozenAt). */
+        ? ["Na Amazon, o artigo-modelo organizado desde 2026-10-09 se prende ao congelamento da Amazon: recongelar desliga essa planta, e a reorganização custa até 2 chamadas de IA (dito no botão do Radar antes do clique)."]
+        : []),
       "Se o pacote já foi enviado ao Redator, ele passa a mostrar \"Atualização disponível\".",
       `URL, slug, canonical, keyword principal, papel e Silo não mudam; ${OUTROS[profile]}.`,
     ];
@@ -159,7 +163,20 @@ export function radarRefreezeDiagnosis(input: {
   if (!base.differences.length) {
     return { ...base, mode: "NOTHING", headline: `Nada a reparar: a fotografia do ${nome} já corresponde à leitura atual.`, reason: null, consequences: [] };
   }
-  return { ...base, mode: "REFREEZE", headline: `A fotografia do ${nome} diverge da leitura de hoje e o material gravado basta: dá para recongelar sem custo de provider.`, reason: null, consequences: consequencias(input.profile, "REFREEZE") };
+  /*
+   * 2026-10-09 (correção) · SÓ AS LIMITAÇÕES MUDARAM. A régua de 2026-10-09 passou a
+   * registrar no congelamento a consulta que falhou e o apoio do Google que falhou
+   * (YouTube e Amazon): a fotografia antiga sem essas linhas aparece aqui só por
+   * isso, sem a leitura do material ter mudado. A prévia diz isso, para a decisão
+   * (que pode desligar o artigo-modelo e custar a reorganização) ser informada.
+   */
+  const soLimitacoes = base.differences.length === 1 && /limitações declaradas/.test(base.differences[0]);
+  return {
+    ...base, mode: "REFREEZE",
+    headline: `A fotografia do ${nome} diverge da leitura de hoje e o material gravado basta: dá para recongelar sem custo de provider.`,
+    reason: soLimitacoes ? "A diferença é só nas limitações declaradas: a régua de 2026-10-09 passou a registrar a consulta e o apoio que falharam. A leitura do material coletado não mudou." : null,
+    consequences: consequencias(input.profile, "REFREEZE"),
+  };
 }
 
 /** Os rótulos das partes do blueprint do YouTube que mudam com a leitura. */

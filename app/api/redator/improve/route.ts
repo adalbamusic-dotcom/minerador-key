@@ -9,6 +9,7 @@ import { RedatorImproveRequestSchema } from "@/lib/redator/contracts";
 import { WriterImproveProviderSchema } from "@/lib/redator/writer-section-evidence";
 import { runWriterImproveProposal } from "@/lib/server/writer-evidence-ai";
 import { WriterEvidenceError } from "@/lib/server/writer-evidence-document";
+import { radarReadPublishedStructure } from "@/lib/server/radar-portable-export-core";
 
 /* Mesma regra da seção: evidência lida no servidor pela Marca; alertas viram divergências. */
 export async function POST(request: NextRequest) {
@@ -18,7 +19,8 @@ export async function POST(request: NextRequest) {
     await assertEditorialPermission(profile, input.brandId, "redator", "edit");
     const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: profile.userId, brandId: input.brandId, client: createCanonicalServiceClient() });
     const result = await runWriterImproveProposal({
-      context: { brandId: input.brandId },
+      /* 2026-10-09 · a melhoria de publicado lê a página como o CSV: a planta antiga ganha o mapa da atualização. */
+      context: { brandId: input.brandId, readPublishedStructure: radarReadPublishedStructure },
       actorUserId: profile.userId,
       document: input.document,
       selectedText: input.selectedText,

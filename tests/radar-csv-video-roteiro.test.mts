@@ -11,6 +11,7 @@ import {
   type RadarVideoExportYoutube,
 } from "../lib/radar/portable-video-export.ts";
 import { radarOutOfScopeMatcher } from "../lib/radar/out-of-scope.ts";
+import { RADAR_YOUTUBE_PERTINENT_RULER } from "../lib/radar/youtube-blueprint.ts";
 import { radarWritingOutOfScopeMatcher } from "../lib/radar/portable-writing-export.ts";
 import { radarPortableWritingExport } from "../lib/radar/portable-writing-batch.ts";
 import {
@@ -227,6 +228,13 @@ const COM_VOZ: RadarBrandVoiceState = { kind: "available", voice: VOZ };
 const linhaDe = (entrada: RadarPortableExportInput, contexto: Partial<Parameters<typeof buildRadarVideoExportArticle>[1]> = {}) =>
   buildRadarVideoExportArticle(entrada, { position: 1, youtube: null, ...contexto }).row;
 
+/* 2026-10-09 · o lote de vídeo sai só com a planta APPROVED de cada artigo: o CSV vem do estado "ready". */
+const csvPronto = (saida: ReturnType<typeof radarPortableVideoExport>): string => {
+  assert.equal(saida.status, "ready", "cada artigo do lote leva a planta APPROVED");
+  return saida.status === "ready" ? saida.csv : "";
+};
+const comPlanta = (entrada: RadarPortableExportInput) => ({ entrada, blueprint: artigoModeloDe(entrada, "APPROVED") });
+
 const capitulosDe = (roteiro: string) => {
   const inicio = roteiro.split("\n").findIndex(linha => /^Capítulos do vídeo principal \(\d+,/.test(linha));
   assert.ok(inicio >= 0, roteiro);
@@ -241,52 +249,51 @@ const capitulosDe = (roteiro: string) => {
 
 /* ================================ 1 ================================ */
 
-test("1 · o gancho abre pelo próprio tema e pela promessa da pesquisa do YouTube; pergunta ampla não abre", () => {
-  const instagram = linhaDe(entradaDoAssunto(INSTAGRAM), { youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") }).diretrizes_de_roteiro;
-  const gancho = instagram.split("\n")[0];
+test("1 · o gancho abre pelo próprio tema e pela pergunta da abertura da planta (só a que fala da principal); a promessa é a premissa da planta", () => {
   /*
-   * 2026-10-02 · a pergunta de abertura agora prefere a que fala da PRINCIPAL
-   * ("…sendo uma clínica pequena?") à mais buscada que só adere pela
-   * complementar ("Como captar clientes pela internet?"). A ampla continua sem
-   * abrir o vídeo; a do tema abre.
+   * 2026-10-09 · regra do dono: o processo antigo é substituído. A "Promessa
+   * (pesquisa do YouTube)" (estratégia da amostra inteira), o "A SERP do
+   * YouTube pede para o gancho" (roteiro genérico) e a promessa do DNA sem
+   * trava saíram do gancho: a promessa é a premissa da planta, pela trava.
    */
-  assert.match(gancho, /^Gancho \(primeiros 15 segundos\): abra pelo próprio tema, "como atrair clientes pelo instagram", no recorte "clínicas de estética", respondendo "Como atrair clientes pelo Instagram sendo uma clínica pequena\?" logo de cara, sem apresentação longa\./);
-  assert.doesNotMatch(gancho, /captar clientes pela internet/, "a pergunta ampla, por mais buscada, não abre o vídeo");
-  assert.match(gancho, /Promessa \(pesquisa do YouTube\): /);
+  const entrada = entradaDoAssunto(INSTAGRAM);
+  const planta = artigoModeloDe(entrada, "APPROVED");
+  const instagram = linhaDe(entrada, { youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas"), blueprint: planta }).diretrizes_de_roteiro;
+  const gancho = instagram.split("\n")[0];
+  assert.match(gancho, /^Gancho \(primeiros 15 segundos\): abra pelo próprio tema, "como atrair clientes pelo instagram", no recorte "clínicas de estética", respondendo "Como atrair clientes pelo Instagram\?" logo de cara, sem apresentação longa\. A promessa é a premissa do vídeo, dita abaixo\.$/);
+  assert.doesNotMatch(instagram, /Promessa \(pesquisa do YouTube\)|A SERP do YouTube pede|Promessa: Cobrir com clareza/, "nada da régua de antes no gancho");
+  /* A pergunta ampla da abertura, por mais buscada, não abre o vídeo. */
+  const ampla = { ...planta, blueprint: { ...planta.blueprint, opening: { ...planta.blueprint.opening, readerQuestion: "Como captar clientes pela internet?" } } };
+  assert.doesNotMatch(linhaDe(entrada, { blueprint: ampla }).diretrizes_de_roteiro.split("\n")[0], /respondendo|captar clientes pela internet/);
 
-  /* Outro assunto, sem pesquisa do YouTube: a promessa do artigo, e a pergunta da principal. */
-  const implante = linhaDe(entradaDoAssunto(IMPLANTE)).diretrizes_de_roteiro.split("\n")[0];
-  assert.match(implante, /abra pelo próprio tema, "implante dentário" \(busca relacionada: "implante dentário preço"\), respondendo "Implante dentário dói\?" logo de cara/);
-  assert.match(implante, /Promessa: Entender como o implante funciona antes de agendar a avaliação\./);
-  assert.doesNotMatch(implante, /gostou/i, "fecho retórico não abre");
+  /* Outro assunto: a busca relacionada no recorte; a promessa do DNA não abre o gancho. */
+  const doImplante = entradaDoAssunto(IMPLANTE);
+  const implante = linhaDe(doImplante, { blueprint: artigoModeloDe(doImplante, "APPROVED") }).diretrizes_de_roteiro.split("\n")[0];
+  assert.match(implante, /abra pelo próprio tema, "implante dentário" \(busca relacionada: "implante dentário preço"\), sem apresentação longa\./);
+  assert.doesNotMatch(implante, /Entender como o implante funciona|gostou/i);
 });
 
 /* ================================ 2 ================================ */
 
-test("2 · capítulos: sequência numerada e escolhida (até 6), blocos do roteiro do YouTube e perguntas aderentes; o texto diz o número que lista", () => {
-  const roteiro = linhaDe(entradaDoAssunto(INSTAGRAM), { youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") }).diretrizes_de_roteiro;
-  const { declarado, itens } = capitulosDe(roteiro);
-  assert.equal(itens.length, declarado, "o número dito é o número listado");
-  assert.ok(declarado <= 6 && declarado > 0);
-  assert.deepEqual(itens.map((linha, indice) => linha.startsWith(`${indice + 1}. `)), itens.map(() => true), "numerada em sequência");
-  /* O bloco do roteiro recebe a pergunta aderente — primeiro a que fala da principal, depois a que só adere pela complementar. */
-  assert.match(itens.join("\n"), /BLOCO 1 — O fundamento principal do tema\. Pergunta do público a responder aqui: "Como atrair clientes pelo Instagram sendo uma clínica pequena\?"/);
-  const ampla = itens.findIndex(linha => linha.includes("Como captar clientes pela internet?"));
-  const doTema = itens.findIndex(linha => linha.includes("sendo uma clínica pequena"));
-  assert.ok(ampla === -1 || ampla > doTema, "a pergunta ampla nunca vem antes da que fala do tema");
-  assert.doesNotMatch(itens.join("\n"), /Aprendeu/, "fecho retórico de concorrente não vira capítulo");
-  assert.doesNotMatch(itens.join("\n"), /Shopping/, "pergunta que toca o \"não cobrir\" não vira capítulo");
-  assert.doesNotMatch(roteiro, /Roteiro recomendado pela SERP do YouTube \(blocos/, "a lista solta de blocos virou a sequência");
-  assert.doesNotMatch(roteiro, /\d+ a cobrir/, "nada de 'N a cobrir' com outra lista");
+test("2 · capítulos só pela planta (2026-10-09): as seções do artigo-modelo, numeradas; sem planta APPROVED, nenhum roteiro pela régua de antes", () => {
+  const entrada = entradaDoAssunto(INSTAGRAM);
+  const roteiro = linhaDe(entrada, { youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas"), blueprint: artigoModeloDe(entrada, "APPROVED") }).diretrizes_de_roteiro;
+  assert.match(roteiro, /^Capítulos do vídeo principal \(3, da planta do artigo-modelo da SERP; /m);
+  for (const [numero, h2] of [[1, "Por que o perfil não traz pacientes"], [2, "Roteiro de três stories"], [3, "Prova social"]] as const) {
+    assert.match(roteiro, new RegExp(`^${numero}\\. ${h2}$`, "m"));
+  }
+  assert.match(roteiro, /^Formato do vídeo: vídeo longo — /m, "a decisão única de formato, pela amostra pertinente");
+  assert.doesNotMatch(roteiro, /BLOCO \d|HOOK|CONTEXTO|DEMONSTRAÇÃO|Pergunta do público: "Como atrair clientes pelo Instagram sendo/, "nenhum bloco do roteiro genérico nem pergunta solta como capítulo");
+  assert.doesNotMatch(roteiro, /Ritmo que a SERP do YouTube sugere|Roteiro RECOMENDADO|Oportunidades de título \(coorte que lidera/, "nada da régua de antes");
+  assert.doesNotMatch(roteiro, /^(Linguagem e nível técnico|Posicionamento|Urgência e recência|Foco e CTA|Formato): /m, "as estratégias da amostra inteira saíram");
 
-  /* Sem pesquisa do YouTube, a sequência são as perguntas aderentes — sem retórica e sem o "não cobrir". */
-  const implante = capitulosDe(linhaDe(entradaDoAssunto(IMPLANTE)).diretrizes_de_roteiro);
-  assert.equal(implante.itens.length, implante.declarado);
-  assert.deepEqual(implante.itens, [
-    "1. Pergunta do público: \"Implante dentário dói?\"",
-    "2. Pergunta do público: \"Quanto tempo dura um implante dentário?\"",
-    "3. Pergunta do público: \"Quem tem diabetes pode fazer implante dentário?\"",
-  ]);
+  /* Sem planta, ou com a proposta (DRAFT): a linha não monta roteiro. */
+  for (const semPlanta of [linhaDe(entradaDoAssunto(IMPLANTE)), linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") })]) {
+    assert.match(semPlanta.diretrizes_de_roteiro, /^Roteiro: só com o artigo-modelo aprovado deste artigo/m);
+    assert.doesNotMatch(semPlanta.diretrizes_de_roteiro, /^Capítulos|Pergunta do público/m);
+    assert.match(semPlanta.pode_gravar, /^Não, sem o artigo-modelo aprovado deste artigo/);
+    assert.match(semPlanta.prompt, /^Não escreva o roteiro deste vídeo sem o artigo-modelo aprovado deste artigo/);
+  }
 });
 
 /* ================================ 3 ================================ */
@@ -307,37 +314,28 @@ test("3 · o \"não cobrir\" alcança termos e perguntas — e a palavra genéri
 
 /* ================================ 4 ================================ */
 
-test("4 · cortes: saem dos capítulos, cada um funcionando sozinho; legenda por acessibilidade; ausência de Shorts é da amostra", () => {
+test("4 · cortes: só capítulos da planta que funcionam sozinhos, pela utilidade; legenda por acessibilidade; ausência de Shorts é da amostra", () => {
   for (const [assunto, youtube] of [[INSTAGRAM, youtubeDe(INSTAGRAM.principal, "instagram para clínicas")], [IMPLANTE, null]] as const) {
-    const row = linhaDe(entradaDoAssunto(assunto), { youtube });
+    const entrada = entradaDoAssunto(assunto);
+    const row = linhaDe(entrada, { youtube, blueprint: artigoModeloDe(entrada, "APPROVED") });
     const cortes = row.cortes_para_redes;
     /* 2026-10-07 · o rótulo "um por capítulo do vídeo principal" mentia com 3 cortes para 5 capítulos: agora diz quantas ideias foram escolhidas. */
-    /* 2026-10-08 · com a concordância: "1 ideia escolhida", "3 ideias escolhidas" (antes, "ideia(s) escolhida(s)"). */
-    assert.match(cortes, /^Cortes sugeridos \(Shorts, Reels e TikTok\): \d ideias? escolhidas? dos capítulos \(as que funcionam sozinhas em até 60 segundos\); cada corte funciona sozinho/m);
-    const linhas = cortes.split("\n").filter(linha => /^\d+\. Do capítulo \d+ \(/.test(linha));
-    assert.ok(linhas.length > 0 && linhas.length <= 3, cortes);
-    const { itens } = capitulosDe(row.diretrizes_de_roteiro);
-    for (const linha of linhas) {
-      const numero = Number(linha.match(/Do capítulo (\d+)/)![1]);
-      assert.ok(numero >= 1 && numero <= itens.length, "o corte aponta para um capítulo que existe");
-    }
+    /* 2026-10-09 · só pela planta: o capítulo com uma ação é o que funciona sozinho; o corte "um por bloco" da régua de antes saiu. */
+    assert.match(cortes, /^Cortes sugeridos \(Shorts, Reels e TikTok\): 1 ideia escolhida dos capítulos pela utilidade isolada /m);
+    assert.match(cortes, /^1\. Do capítulo 2 \(Roteiro de três stories\):$/m);
+    assert.match(cortes, /^Capítulos sem corte: 1 \(sem demonstração definida na planta\) · 3 \(sem demonstração definida na planta\)\.$/m);
+    assert.doesNotMatch(cortes, /um por bloco do vídeo principal|a resposta direta à pergunta, em uma frase|o bloco não abre/, "nenhum corte pela régua de antes");
     assert.doesNotMatch(cortes, /sem som/i, "nada de generalização sem fonte sobre como o público assiste");
     assert.match(cortes, /Legenda na tela em todos os cortes, por acessibilidade e compreensão/);
     /* 2026-10-02 · cada corte com gancho, ideia única, o que mostrar e fechamento; o carrossel, uma mensagem por lâmina. */
-    assert.match(cortes, /^ {3}Gancho: /m);
-    assert.match(cortes, /^ {3}Ideia única: /m);
-    assert.match(cortes, /^ {3}Mostrar: /m);
+    assert.match(cortes, /^ {3}Gancho: "Roteiro de três stories\?"$/m);
+    assert.match(cortes, /^ {3}Ideia única: Resposta direta\.$/m);
+    assert.match(cortes, /^ {3}Mostrar: a ação — um roteiro de três stories para a semana — num exemplo fictício identificado como ilustrativo\.$/m);
     /* 2026-10-07 · o fechamento diz o destino com endereço e UM CTA só (antes era só "convite para o vídeo longo ou o artigo"). */
     assert.match(cortes, /^ {3}Fechamento: CTA: (?:o artigo|a landing page) \(https:[^)]+\) ou o vídeo longo quando publicado — um só por corte\.$/m);
-    /*
-     * 2026-10-07 · cada corte diz a origem da gravação. Revisão do mesmo dia
-     * (item 3 do desenho competitivo): "decida na produção" deixava a decisão
-     * sem critério; agora a origem vem RECOMENDADA, com o motivo, e a outra
-     * opção fica como alternativa. Sem planta, o capítulo com pergunta abre pela
-     * mesma pergunta do gancho: extrair.
-     */
+    /* 2026-10-07 · a origem vem RECOMENDADA, com o motivo, e a outra opção fica como alternativa. */
     assert.doesNotMatch(cortes, /decida na produção/, "a origem vem recomendada, não deixada em aberto");
-    assert.match(cortes, /^ {3}Origem recomendada: extrair da gravação do capítulo \d+ e reenquadrar na vertical — motivo: o capítulo abre pela mesma pergunta do gancho\. Alternativa: gravar à parte com fala própria\.$/m);
+    assert.match(cortes, /^ {3}Origem recomendada: extrair da gravação do capítulo 2 e reenquadrar na vertical — motivo: o capítulo abre respondendo a mesma pergunta e mostra uma ação só\. Alternativa: gravar à parte com fala própria\.$/m);
     assert.match(cortes, /uma mensagem por lâmina/);
   }
   assert.match(linhaDe(entradaDoAssunto(INSTAGRAM), { youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") }).cortes_para_redes, /^Shorts: nenhum Short do tema nesta amostra/);
@@ -403,9 +401,9 @@ test("7 · especialista: o nome da aba Especialista, a fala adaptável com o mes
 /* ================================ 8 ================================ */
 
 test("8 · prompt: desta linha e da linha \"Voz da marca\"; com bloqueio, nada de roteiro antes de resolver", () => {
-  const comVoz = lerCsv(radarPortableVideoExport({ articles: [{ entrada: entradaDoAssunto(INSTAGRAM) }], today: EXPORTADO_EM, brandVoice: COM_VOZ }).csv);
+  const comVoz = lerCsv(csvPronto(radarPortableVideoExport({ articles: [comPlanta(entradaDoAssunto(INSTAGRAM))], today: EXPORTADO_EM, brandVoice: COM_VOZ })));
   assert.match(comVoz[2].prompt, /usando SOMENTE os dados desta linha e da linha "Voz da marca"\./);
-  const semVoz = lerCsv(radarPortableVideoExport({ articles: [{ entrada: entradaDoAssunto(INSTAGRAM) }], today: EXPORTADO_EM }).csv);
+  const semVoz = lerCsv(csvPronto(radarPortableVideoExport({ articles: [comPlanta(entradaDoAssunto(INSTAGRAM))], today: EXPORTADO_EM })));
   assert.match(semVoz[1].prompt, /usando SOMENTE os dados desta linha\.\n/);
 
   const base = entradaDoAssunto(IMPLANTE);
@@ -515,7 +513,8 @@ test("10b · dez vídeos e várias consultas cabem na célula: canais, padrões,
       const quando = `${principal}, ${consultas.length} consultas, títulos de ${tamanho}`;
       assert.doesNotMatch(serp, /cortado no limite da célula/, quando);
       assert.ok(serp.length <= RADAR_VIDEO_EXPORT_CELL_CHARS, `${quando}: ${serp.length} caracteres`);
-      for (const parte of [/^Canais que dominam: /m, /^Padrões de título \(vídeos longos\): /m, /^Lacunas no YouTube \(onde entrar\):$/m, /Nenhum vídeo foi assistido ou transcrito/]) {
+      /* 2026-10-09 · canais, padrões e lacunas pela amostra pertinente, e o rótulo diz. */
+      for (const parte of [/^Canais que dominam \(pertinentes\): /m, /^Padrões de título \(vídeos longos, pertinentes\): /m, /^Lacunas no YouTube \(onde entrar; pertinentes\):$/m, /Nenhum vídeo foi assistido ou transcrito/]) {
         assert.match(serp, parte, quando);
       }
       /* Os dez vídeos do topo continuam listados, cada um com o porquê. */
@@ -532,7 +531,7 @@ test("10b · dez vídeos e várias consultas cabem na célula: canais, padrões,
   const listados = extremo.split("\n").filter(linha => /^\d+\. /.test(linha)).length;
   const omitidos = Number(extremo.match(/^\(\+(\d+) vídeo\(s\) do topo não couberam nesta célula; a lista inteira está na pesquisa do YouTube, no Radar\.\)$/m)?.[1] ?? 0);
   assert.ok(listados > 0 && omitidos > 0 && listados + omitidos === 10, `${listados} listados e ${omitidos} fora`);
-  for (const parte of [/^Padrões de título \(vídeos longos\): /m, /^Lacunas no YouTube \(onde entrar\):$/m, /Nenhum vídeo foi assistido ou transcrito/]) assert.match(extremo, parte);
+  for (const parte of [/^Padrões de título \(vídeos longos, pertinentes\): /m, /^Lacunas no YouTube \(onde entrar; pertinentes\):$/m, /Nenhum vídeo foi assistido ou transcrito/]) assert.match(extremo, parte);
 });
 
 /* ================================ 11 ================================ */
@@ -562,16 +561,17 @@ test("11 · vídeo × artigo: a seção do artigo-modelo, o que o vídeo acresce
   assert.match(aprovado, /^- Onde fica: incorporado no artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\), nessa seção\.$/m);
   assert.match(aprovado, /^- Na descrição do vídeo: o link do artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\)\.$/m);
   assert.doesNotMatch(linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") }).diretrizes_de_roteiro, /proposta da IA|aprovação/);
-  /* 2026-10-08 (correção da revisão) · D10: sem artigo-modelo, a regra concluída. */
-  assert.match(linhaDe(entrada).diretrizes_de_roteiro, /^- Complementa a primeira seção prática do artigo \(este pacote não tem artigo-modelo\)\.$/m);
+  /* 2026-10-09 · sem artigo-modelo APPROVED não há roteiro nem "Vídeo × artigo" pela régua de antes (a entrega pede a planta). */
+  assert.doesNotMatch(linhaDe(entrada).diretrizes_de_roteiro, /^Vídeo × artigo|primeira seção prática/m);
 
   /* A landing page fala de si; sem endereço, a descrição diz quando ele existe. */
-  const landing = linhaDe(entradaDoAssunto({ ...IMPLANTE, canonical: "", slug: "" })).diretrizes_de_roteiro;
+  const semEndereco = entradaDoAssunto({ ...IMPLANTE, canonical: "", slug: "" });
+  const landing = linhaDe(semEndereco, { blueprint: artigoModeloDe(semEndereco, "APPROVED") }).diretrizes_de_roteiro;
   assert.match(landing, /^Vídeo × landing page \(o vídeo faz parte da landing page\):$/m);
   assert.match(landing, /^- Onde fica: incorporado na landing page, nessa seção\.$/m);
   assert.match(landing, /^- Na descrição do vídeo: o link da landing page \(o endereço da landing page quando publicada\)\.$/m);
   /* E a regra geral do arquivo fala do vídeo dentro da página. */
-  const topo = lerCsv(radarPortableVideoExport({ articles: [{ entrada: entradaDoAssunto(IMPLANTE) }], today: EXPORTADO_EM }).csv)[0];
+  const topo = lerCsv(csvPronto(radarPortableVideoExport({ articles: [comPlanta(entradaDoAssunto(IMPLANTE))], today: EXPORTADO_EM })))[0];
   assert.match(topo.prompt, /O vídeo pode fazer parte do artigo ou da página: incorporado na seção indicada em cada linha \(Vídeo × artigo ou página\)\./);
 });
 
@@ -681,10 +681,11 @@ test("13b · o \"não cobrir\" do Silo vale no CSV de vídeo como no CSV para es
   ];
   const lenses = { lookups: [], readFailed: false };
   for (const [entrada, pergunta, excluidos] of casos) {
-    const montada = { articleId: "artigo-do-silo", entrada, lentes: [] };
+    /* 2026-10-09 · as duas entregas saem só pela planta APPROVED: a montada leva uma. */
+    const montada = { articleId: "artigo-do-silo", entrada, lentes: [], blueprint: artigoModeloDe(entrada, "APPROVED") };
     const plano = planoComSilo(montada.articleId, entrada, excluidos);
-    const videoSemSilo = radarPortableVideoExport({ articles: [montada], today: EXPORTADO_EM }).csv;
-    const video = radarPortableVideoExport({ articles: [montada], today: EXPORTADO_EM, selectionPlan: plano }).csv;
+    const videoSemSilo = csvPronto(radarPortableVideoExport({ articles: [montada], today: EXPORTADO_EM }));
+    const video = csvPronto(radarPortableVideoExport({ articles: [montada], today: EXPORTADO_EM, selectionPlan: plano }));
     const escritaSemSilo = radarPortableWritingExport({ articles: [montada], lenses, plan: null, today: EXPORTADO_EM }).csv || "";
     const escrita = radarPortableWritingExport({ articles: [montada], lenses, plan: null, selectionPlan: plano, today: EXPORTADO_EM }).csv || "";
     assert.ok(videoSemSilo.includes(pergunta), `sem o Silo, a pergunta é do público no vídeo: ${pergunta}`);
@@ -783,7 +784,8 @@ test("16 · com a planta do artigo-modelo, cada capítulo diz o que entregar, o 
   assert.equal((roteiro.match(/sem métrica, ranking/g) || []).length, 1, "a régua da cena, uma vez só");
   /* Sem entrega prática e sem 2 H3, o capítulo é explicativo: o conceito da imagem é só contexto, e ele não vira corte. */
   assert.match(roteiro, /^1\. Por que o perfil não traz pacientes\n[\s\S]*? {3}Mostrar na tela: sem demonstração na planta \(capítulo explicativo\) — contexto visual: o título do capítulo em destaque; este capítulo não vira corte\.$/m);
-  assert.match(roteiro, /^Ritmo que a SERP do YouTube sugere \(referência, não roteiro\): HOOK → /m);
+  /* 2026-10-09 · o "ritmo" do roteiro genérico do YouTube saiu: o roteiro é a planta. */
+  assert.doesNotMatch(roteiro, /Ritmo que a SERP do YouTube sugere|HOOK →/m);
   assert.doesNotMatch(roteiro, /O fundamento principal do tema/, "o bloco genérico não é capítulo quando há planta");
   /* O gancho abre pela abertura da planta, que fala da principal. */
   assert.match(roteiro, /respondendo "Como atrair clientes pelo Instagram\?" logo de cara/);
@@ -818,10 +820,10 @@ test("16 · com a planta do artigo-modelo, cada capítulo diz o que entregar, o 
   assert.doesNotMatch(cortes, /Puxa a próxima/, "a lâmina só leva o publicável e a sugestão visual");
   assert.match(cortes, /^- Lâmina 5: CTA para o artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\), sem prometer resultado\.$/m);
 
-  /* Proposta da IA: o capítulo avisa. Sem planta: a sequência de antes. */
   /* 2026-10-02 · D10: o rascunho antigo também sai sem aviso de aprovação. */
-  assert.doesNotMatch(linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") }).diretrizes_de_roteiro, /proposta da IA|confira antes de gravar/);
-  assert.doesNotMatch(linhaDe(entrada).diretrizes_de_roteiro, /da planta do artigo-modelo/);
+  /* 2026-10-09 · a proposta (DRAFT) não é o artigo-modelo: sem a APPROVED, nenhum roteiro (nem a sequência de antes). */
+  assert.doesNotMatch(linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") }).diretrizes_de_roteiro, /proposta da IA|confira antes de gravar|da planta do artigo-modelo/);
+  assert.doesNotMatch(linhaDe(entrada).diretrizes_de_roteiro, /da planta do artigo-modelo|^Capítulos/m);
 });
 
 test("17 · com planta, o gancho não pega pergunta da amostra: abertura que não fala da principal deixa o gancho no próprio tema", () => {
@@ -1036,8 +1038,9 @@ test("21 · a linha \"Voz da marca\" não leva seção de entrega de artigo: sai
   assert.equal(radarBrandVoiceSectionIsArticleDelivery({ heading: "Vocabulário e estilo", body: "Usar Internet em vez de digital." }), false);
 
   /* O CSV para escrever NÃO muda: a entrega de artigo é pertinente lá e continua na linha de voz. */
+  /* 2026-10-09 · o CSV para escrever também sai só pela planta: a linha leva uma. */
   const escrita = radarPortableWritingExport({
-    articles: [{ articleId: "a-voz", entrada: entradaDoAssunto(INSTAGRAM), lentes: [] }],
+    articles: [{ articleId: "a-voz", lentes: [], ...comPlanta(entradaDoAssunto(INSTAGRAM)) }],
     lenses: { lookups: [], readFailed: false }, plan: null, today: EXPORTADO_EM, brandVoice: ENTREGA,
   }).csv || "";
   assert.ok(escrita.includes("corpo do artigo"), "no CSV para escrever a seção de entrega continua");
@@ -1285,9 +1288,10 @@ test("25b · a mesma porta na premissa, na capa e na promessa do gancho: afirma�
   assert.doesNotMatch(row.diretrizes_de_roteiro.split("\n")[0], /Hashtags certas/, "a promessa do artigo não abre o gancho");
   assert.match(row.cortes_para_redes, /^- Premissa do vídeo: "Mostrar que o algoritmo do Instagram favorece quem publica todo dia" — afirmação sobre plataforma sem fonte \(regra 17 da planta\)\.$/m);
   assert.match(row.cortes_para_redes, /^- Capa do carrossel \(lâmina 1\): "O algoritmo do Instagram prioriza quem posta todo dia" — /m);
-  assert.match(row.cortes_para_redes, /^- Promessa do gancho: "Hashtags certas aumentam o alcance da clínica no Instagram" — afirmação sobre plataforma sem fonte \(regra 17 da planta\)\.$/m);
-  /* 2026-10-08 (correção da revisão) · o modal ("podem ampliar") deixou de travar (-1) e a absoluta do capítulo 1 passou a ser contada (+1): 6. */
-  assert.match(row.pode_gravar, /^- 6 frase\(s\) que pedem fonte saíram do texto publicável/m);
+  /* 2026-10-09 · a promessa do DNA não entra mais no vídeo (a promessa é a premissa da planta): nem no gancho, nem na lista. */
+  assert.doesNotMatch(row.cortes_para_redes + row.diretrizes_de_roteiro, /Hashtags certas aumentam/);
+  /* 2026-10-08 (correção da revisão) · o modal ("podem ampliar") deixou de travar (-1) e a absoluta do capítulo 1 passou a ser contada (+1): 6. 2026-10-09 · sem a promessa do DNA: 5. */
+  assert.match(row.pode_gravar, /^- 5 frase\(s\) que pedem fonte saíram do texto publicável/m);
 });
 
 test("25c · a porta (radarClaimGate): link da mesma seção, mercado sem fonte, mercado × fonte, com fonte e regra 17 — e o que ela NÃO trava", async () => {
@@ -1482,14 +1486,15 @@ test("26 · D10: o CSV de vídeo inteiro sai concluído — nenhuma pendência, 
       sections: [...base.blueprint.sections, { ...base.blueprint.sections[1], h2: "Prova social", readerQuestion: "Prova social?", answerFirst: "Depoimento sempre converte.", explain: ["Nunca publique sem prova."], h3: [], practical: null }],
     },
   };
-  const { csv } = radarPortableVideoExport({
+  /* 2026-10-09 · as duas linhas levam a planta APPROVED: sem ela, o lote pede o artigo-modelo antes. */
+  const csv = csvPronto(radarPortableVideoExport({
     articles: [
       { entrada, blueprint: planta, youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") },
-      { entrada: semContribuicao, youtube: null },
+      { ...comPlanta(semContribuicao), youtube: null },
     ],
     today: EXPORTADO_EM,
     brandVoice: COM_VOZ,
-  });
+  }));
   /* Os caminhos que antes deixavam espera aberta estão mesmo no arquivo (lido célula a célula: o CSV dobra as aspas). */
   const linhas = lerCsv(csv);
   assert.match(linhas[2].diretrizes_de_roteiro, /^ {3}Entregar: abra pela pergunta "Prova social\?" e responda só com o que esta linha sustenta, em fala delimitada/m);
@@ -1510,11 +1515,11 @@ test("26 · D10: o CSV de vídeo inteiro sai concluído — nenhuma pendência, 
    */
   for (const status of ["draft", "pending_approval"]) {
     const comVozNoEstado: RadarBrandVoiceState = { kind: "available", voice: { ...VOZ, status } };
-    const noEstado = radarPortableVideoExport({
+    const noEstado = csvPronto(radarPortableVideoExport({
       articles: [{ entrada, blueprint: planta, youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") }],
       today: EXPORTADO_EM,
       brandVoice: comVozNoEstado,
-    }).csv;
+    }));
     for (const proibida of D10_PROIBIDAS) assert.doesNotMatch(noEstado, proibida, `D10 com a Skill em ${status}: ${proibida}`);
     const [marca, voz, artigo] = lerCsv(noEstado);
     assert.match(marca.pode_gravar, /Skill "Agência Exemplo" v3 \(versão corrente na Marca\)/);
@@ -1565,7 +1570,9 @@ test("27 · estatísticas só com os pertinentes: o fora do tema sai da duraçã
   assert.match(intencao, /^Amostra pertinente \(mesmo público, público vizinho e tema geral; pelo título e pelo canal\): 10 de 16 longos · 0 de 0 Shorts\. Fora da conta: 4 fora do tema da busca · 2 de outro público\.$/m);
   /* Amostra inteira: mediana 10min50s e P75 60min. Pertinentes: mediana 10min, metade central 9min30s–10min50s — sem o fora do tema nem o outro público. */
   assert.match(intencao, /^Duração dos longos \(pertinentes\): mediana 10min \(metade central entre 9min30s e 10min50s\)$/m);
-  assert.match(intencao, /^Faixa recomendada \(pertinentes, P25–P75 da coorte que lidera\): 9min30s a 10min50s — a SERP aponta o vídeo longo \(referência, não meta\)$/m);
+  /* 2026-10-09 · a faixa de cada coorte pertinente e o formato pela decisão única. */
+  assert.match(intencao, /^Faixa por coorte \(pertinentes, P25–P75; referência, não meta\): longos 9min30s a 10min50s$/m);
+  assert.match(intencao, /^Formato do vídeo: vídeo longo — os vídeos longos lideram a amostra pertinente \(0 Short\(s\) × 10 vídeo\(s\) longo\(s\) pertinentes\): o vídeo segue o artigo-modelo, em formato longo\.$/m);
   assert.match(intencao, /^Formato recomendado \(pertinentes\): Tutorial$/m);
   assert.doesNotMatch(intencao, /10min40s|48min|60min|90min/, "nem o fora do tema nem o outro público entram em estatística");
   assert.doesNotMatch(intencao, /entram nas estatísticas/);
@@ -1599,11 +1606,21 @@ test("27 · estatísticas só com os pertinentes: o fora do tema sai da duraçã
   assert.match(semDivergencia, /: 10 de 10 longos · 0 de 0 Shorts\.$/m);
   assert.doesNotMatch(semDivergencia, /Divergência/, "sem ninguém fora da conta, o formato não diverge pela pertinência");
 
-  /* Sem o universo (congelamento que guarda só a referência da corrida): não recalculável, e as estatísticas são da amostra inteira. */
-  const semUniverso = linhaDe(entrada, { youtube: { ...youtubeDe(INSTAGRAM.principal, "instagram para clínicas"), frozen: true, videos: [] } }).intencao_e_formato;
-  assert.match(semUniverso, /^Amostra pertinente: não recalculável — o congelamento guarda só a referência da corrida, e a corrida com esse id não está nesta exportação; as estatísticas abaixo são da amostra inteira\.$/m);
-  assert.match(semUniverso, /^Formatos que dominam: /m);
-  assert.doesNotMatch(semUniverso, /\(pertinentes\)/);
+  /*
+   * Sem o universo (congelamento que guarda só a referência da corrida).
+   * 2026-10-09 · a fotografia é dita pela régua que a fez: a ANTIGA (sem a
+   * linha da régua pertinente) não é recalculável e fica só como referência —
+   * sem decidir o formato; a NOVA já gravou a amostra pertinente.
+   */
+  const viva = youtubeDe(INSTAGRAM.principal, "instagram para clínicas");
+  const antiga = { ...viva.blueprint!, limitations: viva.blueprint!.limitations.filter(item => !item.startsWith(RADAR_YOUTUBE_PERTINENT_RULER)) };
+  const semUniverso = linhaDe(entrada, { youtube: { ...viva, blueprint: antiga, frozen: true, videos: [] } }).intencao_e_formato;
+  assert.match(semUniverso, /^Amostra pertinente: não recalculável — o congelamento guarda só a referência da corrida, e a corrida com esse id não está nesta exportação; as estatísticas abaixo são da amostra inteira, só como referência\.$/m);
+  assert.match(semUniverso, /^Formatos que dominam \(amostra inteira, régua anterior a 2026-10-09\): /m);
+  assert.doesNotMatch(semUniverso, /\(pertinentes\)|^Faixa recomendada/m);
+  assert.match(semUniverso, /^Formato do vídeo: vídeo longo — sem amostra pertinente do YouTube/m);
+  const daNova = linhaDe(entrada, { youtube: { ...viva, frozen: true, videos: [] } }).intencao_e_formato;
+  assert.match(daNova, /^Amostra pertinente \(gravada na fotografia\): \d+ longos · \d+ Shorts\.$/m);
 });
 
 test("28 · a demonstração definida pela planta: ajuste sem depois, passos por \";\", o objeto pelos termos — e capítulo explicativo não vira corte", () => {
@@ -1657,10 +1674,15 @@ test("29 · cortes pela utilidade isolada: a pergunta de 6 páginas vence a de 1
   assert.match(cortes, /^ {3}Utilidade 4 de 4: pergunta com demanda \(P1: 6 de 12 páginas\) · funciona sozinha · uma ação · lacuna G1\.$/m);
   assert.match(cortes, /^Capítulos sem corte: 1 \(utilidade 2 de 4, abaixo dos escolhidos\)\.$/m);
 
-  /* A pergunta de um Short que a pesquisa recomenda também é demanda, mesmo sem id P na seção. */
+  /*
+   * 2026-10-07 · a pergunta de um Short do multiformato dava demanda sem id P na seção.
+   * 2026-10-09 · um plano de Shorts só (os cortes da planta): sem evidência da
+   * seção, não há demanda medida — a ação única dá o ponto.
+   */
   const doShort = plantaComSecoes(entrada, [comAcao("Stories que agendam", [])]);
-  const comShort = linhaDe(entrada, { blueprint: doShort, youtube: { ...youtubeDe(INSTAGRAM.principal, "instagram para clínicas"), shortQuestions: ["Stories que agendam?"] } }).cortes_para_redes;
-  assert.match(comShort, /^ {3}Utilidade 3 de 4: pergunta com demanda \(a mesma pergunta de um Short que a pesquisa recomenda\) · funciona sozinha · uma ação\.$/m);
+  const comShort = linhaDe(entrada, { blueprint: doShort, youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") }).cortes_para_redes;
+  assert.match(comShort, /^ {3}Utilidade 1 de 4: pergunta sem demanda medida na SERP · funciona sozinha · uma ação\.$/m);
+  assert.doesNotMatch(comShort, /pergunta de um Short que a pesquisa recomenda/);
 
   /* A única frase publicável está travada: o capítulo sai da escolha, com o motivo. */
   const travada = plantaComSecoes(entrada, [
@@ -1823,10 +1845,19 @@ test("33 · D10 nas frases de espera que existiam antes: lacuna de formato, espe
    */
   const entrada = entradaDoAssunto(INSTAGRAM, { authors: [{ name: "Dra. Ana Lima", specialty: null, source: "only_active" }] });
   const youtube = youtubeDe(INSTAGRAM.principal, "instagram para clínicas");
-  assert.ok(youtube.blueprint!.recommended.gaps.some(lacuna => /confira se a coleta traz/.test(lacuna.statement)), "o blueprint (a tela) continua com a frase dele");
-  const { csv } = radarPortableVideoExport({ articles: [{ entrada, youtube }], today: EXPORTADO_EM });
+  /* 2026-10-09 · a fotografia nova já sai em D10 (amostra pertinente, frase concluída); o CSV lê as lacunas da amostra pertinente. */
+  assert.ok(youtube.blueprint!.recommended.gaps.some(lacuna => /^Nenhum Short pertinente na amostra coletada: não é oportunidade comprovada/.test(lacuna.statement)));
+  assert.ok(!youtube.blueprint!.recommended.gaps.some(lacuna => /confira se a coleta traz/.test(lacuna.statement)), "nem a tela tem mais a conferência aberta");
+  const csv = csvPronto(radarPortableVideoExport({ articles: [{ ...comPlanta(entrada), youtube }], today: EXPORTADO_EM }));
   const [marca, linha] = lerCsv(csv);
-  assert.match(linha.serp_youtube, /^- Nenhum Short identificado na amostra coletada: não é oportunidade comprovada; o motivo do zero está em concorrencia_curtos_e_carrossel\. \(/m);
+  assert.match(linha.serp_youtube, /^- Nenhum Short pertinente na amostra coletada: não é oportunidade comprovada — a coleta não trouxe esse formato\. \(/m);
+  /* A fotografia ANTIGA (frase com conferência aberta, sem a corrida) é lida com a frase de hoje, dita pela régua dela. */
+  const fraseAntiga = "Nenhum Short identificado na amostra coletada: confira se a coleta traz esse formato antes de tratar como oportunidade.";
+  const antiga = { ...youtube.blueprint!, limitations: youtube.blueprint!.limitations.filter(item => !item.startsWith(RADAR_YOUTUBE_PERTINENT_RULER)), recommended: { ...youtube.blueprint!.recommended, gaps: [{ kind: "FORMATO_AUSENTE" as const, statement: fraseAntiga, evidence: "A coorte SHORTS ficou com zero vídeo na amostra coletada." }] } };
+  const serpAntiga = linhaDe(entrada, { youtube: { ...youtube, blueprint: antiga, frozen: true, videos: [] } }).serp_youtube;
+  assert.match(serpAntiga, /^Lacunas no YouTube \(onde entrar; amostra inteira, régua anterior a 2026-10-09\):$/m);
+  assert.match(serpAntiga, /^- Nenhum Short identificado na amostra coletada: não é oportunidade comprovada; o motivo do zero está em concorrencia_curtos_e_carrossel\. \(/m);
+  assert.doesNotMatch(serpAntiga, /confira se a coleta/);
   assert.match(linha.especialista, /^Especialista: Dra\. Ana Lima, único especialista ativo da marca \(aba Especialista; indicado por ser o único ativo\); sem credencial além do cadastro\.$/m);
   assert.match(marca.pode_gravar, /^- Voz da marca: não informada nesta exportação\. Apresentador e identidade visual: em storyboard_visual de cada linha \(rosto só de quem fala de fato, pela aba Especialista; a Marca não guarda paleta, tipografia nem logo\)\.$/m);
   for (const proibida of [/confira se a coleta/i, /confirme antes de gravar/i, /não fazem parte deste arquivo/i, ...D10_PROIBIDAS]) assert.doesNotMatch(csv, proibida, String(proibida));

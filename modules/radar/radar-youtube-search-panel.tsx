@@ -8,17 +8,25 @@ import {
   type RadarYoutubeUniverseEntry,
 } from "@/lib/radar/youtube-search-model";
 import { radarYoutubeRunSummary, type RadarYoutubeSearchRun } from "@/lib/radar/youtube-search-run";
-import type { RadarYoutubeBlueprint, RadarYoutubeCohort } from "@/lib/radar/youtube-blueprint";
+import {
+  RADAR_YOUTUBE_PERTINENT_RULER,
+  radarVideoFormatDecision,
+  radarYoutubeBlueprintRuler,
+  radarYoutubeCohortRange,
+  radarYoutubeRunPertinentSample,
+  type RadarYoutubeBlueprint,
+  type RadarYoutubeCohort,
+} from "@/lib/radar/youtube-blueprint";
+import type { RadarVideoPlan } from "@/lib/radar/portable-video-export";
 import type { RadarYoutubeFrozenInvestigation } from "@/lib/radar/youtube-evidence";
-import { RADAR_EDITORIAL_OUTPUT_LABELS, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
+import { RADAR_EDITORIAL_OUTPUT_LABELS, radarMultimodalUsesPertinentSample, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
 import { radarResearchSourceLabel } from "@/lib/radar/search-mode";
 import { RADAR_RESEARCH_PACKAGE_STATE_LABELS, RADAR_RESEARCH_SOURCE_ROLE_LABELS, radarResearchProfilePlan, type RadarResearchPackage } from "@/lib/radar/research-profile";
-import { radarProfileManualStepLabel, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
+import type { RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
 import type { RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
 import type { RadarResearchProvenancePayload } from "@/lib/radar/research-read-model";
-import { radarAutoFinalizeButtonLabel, radarAutoFinalizePendingNotice, radarAutoFinalizeStartNote, radarFinalizeWithAiLabel } from "@/lib/radar/operational-actions";
+import { radarAutoFinalizeButtonLabel, radarAutoFinalizeStartNote, radarFinalizeWithAiLabel, radarProfileFinalizeNote } from "@/lib/radar/operational-actions";
 import { RadarCompetitiveBlueprintSection } from "./radar-competitive-blueprint";
-import { RadarProfileBlueprintSection } from "./radar-profile-blueprint";
 import type { RadarEditorialProfileModel } from "@/lib/radar/editorial-profile-model";
 import { RadarRefreezePanel, type RadarRefreezeHandlers } from "./radar-refreeze-panel";
 
@@ -84,8 +92,21 @@ export type RadarYoutubeSearchPanelProps = {
    * leitura foi o defeito que o 1.1 fechou, com um dado mais barato.
    */
   blueprintView: RadarCompetitiveBlueprintView;
-  /** PROFILES_2 · o roteiro-modelo. A superfície principal do perfil. */
+  /**
+   * PROFILES_2 · o roteiro-modelo competitivo.
+   *
+   * 2026-10-09 · Não aparece mais nesta aba (regra do dono: o processo do
+   * piloto substitui o antigo): o vídeo segue o artigo-modelo aprovado, e a
+   * superfície principal é `VideoPelaPlanta`. A prop fica aceita para quem
+   * ainda a passa; a tela não a lê.
+   */
   editorialModel?: RadarEditorialProfileModel | null;
+  /**
+   * 2026-10-09 · O plano do vídeo pela planta APPROVED (`radarVideoPlan`, a
+   * mesma leitura do CSV de vídeo): capítulos e cortes. Ausente, a tela diz de
+   * onde eles saem.
+   */
+  videoPlan?: RadarVideoPlan | null;
   /** 2.1 · §25 · os painéis de consulta legados, absorvidos pela evidência. */
   evidenceExtras?: React.ReactNode;
   /** §11 · o blueprint multiformato vivo, quando as coletas o sustentam. */
@@ -102,9 +123,13 @@ export type RadarYoutubeSearchPanelProps = {
    * 2026-10-02 · D9 · POR QUE A COLETA NÃO FINALIZOU SOZINHA.
    *
    * A coleta que termina sem pendência congela e chama a IA sozinha. Quando
-   * algo pede olho humano (apoio falho, consulta que falhou, amostra vazia),
-   * nada congela — e a tela diz o motivo ao lado do botão manual, que continua.
-   * `null` quando não há pendência.
+   * algo pede olho humano, nada congela — e a tela diz o motivo ao lado do
+   * botão manual, que continua. `null` quando não há pendência.
+   *
+   * 2026-10-09 · regra do Google: consulta do YouTube e apoio do Google que
+   * falham viram limitação registrada e não aparecem mais aqui. Chega a FRASE
+   * INTEIRA (motivo, área e botão), montada pela autoridade
+   * (`radarProfileAutoFinalizePendingText`).
    */
   autoFinalizePending?: string | null;
   /**
@@ -294,6 +319,8 @@ function Coorte({ coorte }: { coorte: RadarYoutubeCohort }) {
 function Blueprint({ blueprint, finalizedAt }: { blueprint: RadarYoutubeBlueprint; finalizedAt: string | null }) {
   const { observed, recommended } = blueprint;
   const segundos = (valor: number) => `${Math.floor(valor / 60)}:${String(Math.round(valor % 60)).padStart(2, "0")}`;
+  /* 2026-10-09 · a régua que fez a fotografia: a nova é a amostra pertinente; a antiga, a amostra inteira (lida como foi gravada). */
+  const pertinente = radarYoutubeBlueprintRuler(blueprint) === "PERTINENTE";
 
   return <section className="space-y-3" aria-label="Blueprint competitivo de YouTube" data-testid="radar-youtube-blueprint">
     <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -305,7 +332,12 @@ function Blueprint({ blueprint, finalizedAt }: { blueprint: RadarYoutubeBlueprin
     <div className="space-y-2" data-testid="radar-youtube-observed">
       <p className="text-sm font-semibold text-foreground">Observado na SERP</p>
       <p className="text-sm text-text-muted">
-        Intenção declarada: {observed.declaredIntent || "não fechada pelo Arquiteto"} · {observed.universeSize} vídeo(s), {observed.comparableSize} comparável(is).
+        Intenção declarada: {observed.declaredIntent || "não fechada pelo Arquiteto"} · {observed.universeSize} vídeo(s), {observed.comparableSize} {pertinente ? "pertinente(s)" : "comparável(is)"}.
+      </p>
+      <p className="text-sm text-text-muted" data-testid="radar-youtube-blueprint-ruler">
+        {pertinente
+          ? "Coortes da amostra pertinente: só os vídeos do mesmo público, de público vizinho ou do tema geral entram na conta."
+          : "Fotografia da régua anterior a 2026-10-09: as coortes e a estratégia abaixo são da amostra inteira, só como referência. O vídeo segue o artigo-modelo aprovado."}
       </p>
 
       <div className="grid gap-2 lg:grid-cols-2">
@@ -330,7 +362,7 @@ function Blueprint({ blueprint, finalizedAt }: { blueprint: RadarYoutubeBlueprin
 
     {/* ---------------- RECOMENDADO ---------------- */}
     <div className="space-y-2" data-testid="radar-youtube-recommended">
-      <p className="text-sm font-semibold text-foreground">Estratégia recomendada</p>
+      <p className="text-sm font-semibold text-foreground">Estratégia lida na amostra {pertinente ? "pertinente" : "inteira"}</p>
       <p className="text-sm text-text-muted">
         Formato: <strong className="text-foreground">{recommended.format}</strong>
         {recommended.durationSecondsRange ? ` · duração ${segundos(recommended.durationSecondsRange.min)} a ${segundos(recommended.durationSecondsRange.max)}` : " · sem faixa de duração observável"}
@@ -351,16 +383,17 @@ function Blueprint({ blueprint, finalizedAt }: { blueprint: RadarYoutubeBlueprin
         </li>)}
       </ul>
 
-      <div className={bloco} data-testid="radar-youtube-script">
-        <p className="text-sm font-semibold text-foreground">Roteiro recomendado</p>
-        <ol className="mt-1 space-y-1">
-          {recommended.script.map(bloco2 => <li className="text-sm text-text-muted" key={bloco2.block}>
-            <span className="font-semibold text-foreground">{bloco2.block}</span> — {bloco2.purpose}
-          </li>)}
-        </ol>
-        {/* §6 · o aviso é parte do dado, não rodapé decorativo. */}
-        <p className="mt-2 text-sm text-warning" data-testid="radar-youtube-script-disclaimer">{recommended.scriptDisclaimer}</p>
-      </div>
+      {/*
+        * 2026-10-09 · O "ROTEIRO RECOMENDADO" SAIU (regra do dono: o processo do
+        * piloto substitui o antigo). Os blocos genéricos (gancho, promessa,
+        * entrega, CTA) eram um segundo roteiro ao lado da planta; o vídeo agora
+        * é o artigo-modelo aprovado, capítulo por seção — na seção do vídeo,
+        * acima. A fotografia antiga continua gravada com eles; a tela não os
+        * oferece como referência.
+        */}
+      <p className="text-sm text-text-muted" data-testid="radar-youtube-script-by-plant">
+        Roteiro: o vídeo segue o artigo-modelo aprovado deste artigo — um capítulo por seção, e os cortes são capítulos dele.
+      </p>
 
       {recommended.gaps.length > 0 && <div className={bloco} data-testid="radar-youtube-gaps">
         <p className="text-sm font-semibold text-foreground">Oportunidades</p>
@@ -382,6 +415,92 @@ function Blueprint({ blueprint, finalizedAt }: { blueprint: RadarYoutubeBlueprin
     <ul className="space-y-1" data-testid="radar-youtube-blueprint-limitations">
       {blueprint.limitations.map(item => <li className="text-sm text-text-muted" key={item}>{item}</li>)}
     </ul>
+  </section>;
+}
+
+/*
+ * ===== 2026-10-09 · O VÍDEO PELO ARTIGO-MODELO — a superfície principal da aba (regra do dono) =====
+ *
+ * O "Roteiro-modelo competitivo" (blocos de vídeo montados pela SERP do
+ * YouTube) era o produto principal desta aba e um segundo roteiro ao lado da
+ * planta. Saiu. O que a aba mostra agora é o processo do piloto:
+ *   - a AMOSTRA PERTINENTE (quantos vídeos entram e quantos ficam fora, pelo
+ *     título e pelo canal) — gravada na fotografia nova, ou lida da corrida;
+ *   - a FAIXA POR COORTE (P25–P75 dos longos e dos Shorts pertinentes,
+ *     referência e não meta);
+ *   - a DECISÃO ÚNICA DE FORMATO (`radarVideoFormatDecision`);
+ *   - os CAPÍTULOS DA PLANTA e os CORTES (`radarVideoPlan`, a mesma leitura do
+ *     CSV de vídeo), quando quem monta a tela os entrega.
+ * A fotografia gravada antes desta régua não muda: a amostra pertinente é
+ * lida da corrida, quando ela está na tela.
+ */
+const minutosESegundos = (valor: number) => `${Math.floor(valor / 60)}:${String(Math.round(valor % 60)).padStart(2, "0")}`;
+const faixaLegivel = (faixa: { min: number; max: number } | null) => (faixa ? `${minutosESegundos(faixa.min)} a ${minutosESegundos(faixa.max)}` : "sem faixa observável (nenhum vídeo pertinente com duração)");
+
+export function VideoPelaPlanta({ corrida, frozen, videoPlan }: {
+  corrida: RadarYoutubeSearchRun | null;
+  frozen: RadarYoutubeFrozenInvestigation | null;
+  videoPlan: RadarVideoPlan | null;
+}) {
+  const fotoPertinente = frozen && radarYoutubeBlueprintRuler(frozen.blueprint) === "PERTINENTE" ? frozen.blueprint : null;
+  const daCorrida = !fotoPertinente && corrida ? radarYoutubeRunPertinentSample(corrida) : null;
+  const longos = fotoPertinente ? fotoPertinente.observed.longForm : daCorrida?.amostra.longos.coorte ?? null;
+  const curtos = fotoPertinente ? fotoPertinente.observed.shorts : daCorrida?.amostra.curtos.coorte ?? null;
+  const decisao = videoPlan?.formato ?? radarVideoFormatDecision(longos && curtos ? { longos, curtos } : null);
+  const linhaDaRegua = fotoPertinente?.limitations.find(item => item.startsWith(RADAR_YOUTUBE_PERTINENT_RULER)) ?? null;
+  const foraDaConta = daCorrida ? [
+    ...(daCorrida.amostra.foraDaConta.FORA ? [`${daCorrida.amostra.foraDaConta.FORA} fora do tema da busca`] : []),
+    ...(daCorrida.amostra.foraDaConta.OUTRO ? [`${daCorrida.amostra.foraDaConta.OUTRO} de outro público`] : []),
+  ] : [];
+
+  return <section className="space-y-3" aria-label="Vídeo pelo artigo-modelo" data-testid="radar-youtube-plant-video">
+    <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">Vídeo pelo artigo-modelo</h4>
+
+    <div className={bloco} data-testid="radar-youtube-pertinent-sample">
+      <p className="text-sm font-semibold text-foreground">Amostra pertinente</p>
+      {fotoPertinente && <p className="mt-1 text-sm text-text-muted">
+        {fotoPertinente.observed.longForm.videoCount} longo(s) e {fotoPertinente.observed.shorts.videoCount} Short(s) pertinentes, gravados na fotografia.
+      </p>}
+      {linhaDaRegua && <p className="mt-1 text-sm text-text-muted">{linhaDaRegua.slice(RADAR_YOUTUBE_PERTINENT_RULER.length).trim()}</p>}
+      {daCorrida && <p className="mt-1 text-sm text-text-muted">
+        {daCorrida.julgavel
+          ? `${daCorrida.amostra.longos.coorte.videoCount} de ${daCorrida.amostra.longos.total} longo(s) e ${daCorrida.amostra.curtos.coorte.videoCount} de ${daCorrida.amostra.curtos.total} Short(s) entram na leitura (mesmo público, público vizinho e tema geral, pelo título e pelo canal)${foraDaConta.length ? `; fora da conta: ${foraDaConta.join(" e ")}` : ""}.`
+          : `A corrida não tem a consulta da keyword principal: os ${daCorrida.amostra.longos.total + daCorrida.amostra.curtos.total} comparáveis entram na leitura sem julgamento de pertinência.`}
+      </p>}
+      {frozen && !fotoPertinente && <p className="mt-1 text-sm text-text-muted" data-testid="radar-youtube-pertinent-old-photo">
+        A fotografia desta investigação é anterior à régua de 2026-10-09 e continua como foi gravada.{daCorrida ? " A amostra pertinente acima é lida da corrida." : " Abra a amostra para a leitura pertinente da corrida."}
+      </p>}
+      {!frozen && !corrida && <p className="mt-1 text-sm text-text-muted">Sem coleta do YouTube: o vídeo segue o artigo-modelo, em formato longo.</p>}
+
+      {longos && curtos && <p className="mt-2 text-sm text-text-muted" data-testid="radar-youtube-cohort-ranges">
+        Faixa por coorte (P25–P75 dos pertinentes; referência, não meta): longos <strong className="text-foreground">{faixaLegivel(radarYoutubeCohortRange(longos))}</strong> · Shorts <strong className="text-foreground">{faixaLegivel(radarYoutubeCohortRange(curtos))}</strong>
+      </p>}
+      <p className="mt-2 text-sm text-foreground" data-testid="radar-youtube-format-decision">
+        Formato do vídeo: <strong>{decisao.curto ? "formato curto (Shorts)" : "vídeo longo"}</strong> — {decisao.motivo}.
+      </p>
+    </div>
+
+    {videoPlan ? <div className={bloco} data-testid="radar-youtube-plant-capitulos">
+      <p className="text-sm font-semibold text-foreground">Capítulos da planta</p>
+      <p className="mt-1 text-sm text-text-muted">Gancho: {videoPlan.gancho}</p>
+      {videoPlan.premissa && <p className="mt-1 text-sm text-text-muted">Premissa: {videoPlan.premissa}</p>}
+      <ol className="mt-2 space-y-2">
+        {videoPlan.capitulos.map(capitulo => <li className="text-sm text-text-muted" key={capitulo.numero}>
+          <span className="font-semibold text-foreground">Capítulo {capitulo.numero} · {capitulo.titulo}</span>
+          {capitulo.entregar ? ` — ${capitulo.entregar}` : ""}
+        </li>)}
+      </ol>
+
+      <p className="mt-3 text-sm font-semibold text-foreground">{decisao.curto ? "Série de vídeos curtos" : "Cortes"}</p>
+      {videoPlan.cortes.length > 0 ? <ul className="mt-1 space-y-2" data-testid="radar-youtube-plant-cuts">
+        {videoPlan.cortes.map(corte => <li className="text-sm text-text-muted" key={corte.numero}>
+          <span className="font-semibold text-foreground">{decisao.curto ? "Vídeo curto" : "Corte"} {corte.numero} · capítulo {corte.capitulo} · {corte.titulo}</span>
+          {` — gancho: ${corte.gancho}`}
+        </li>)}
+      </ul> : <p className="mt-1 text-sm text-text-muted">Nenhum capítulo da planta tem demonstração e pergunta para funcionar sozinho.</p>}
+    </div> : <p className="text-sm text-text-muted" data-testid="radar-youtube-plant-capitulos-source">
+      Capítulos e cortes: saem das seções do artigo-modelo aprovado deste artigo — um capítulo por seção — e vêm no CSV de vídeo.
+    </p>}
   </section>;
 }
 
@@ -473,9 +592,9 @@ function PacoteDePesquisa({ pacote, projecao, busy, onRetrySupport }: {
             : apoio.failureReason
               ? projecao.state === "FINALIZED"
               ? <span className="text-text-muted">não participou da fotografia</span>
-              : <button type="button" className={button} disabled={busy} onClick={() => onRetrySupport?.()} title={radarAutoFinalizeStartNote("coleta do apoio")} data-testid="radar-retry-support">{radarAutoFinalizeButtonLabel("Repetir apoio")}</button>
+              : <button type="button" className={button} disabled={busy} onClick={() => onRetrySupport?.()} title={radarAutoFinalizeStartNote("coleta do apoio", "YOUTUBE")} data-testid="radar-retry-support">{radarAutoFinalizeButtonLabel("Repetir apoio")}</button>
               : !busy && pacote.primary.collected && !pacote.primary.running && projecao.state !== "FINALIZED"
-                ? <button type="button" className={button} onClick={() => onRetrySupport?.()} title={radarAutoFinalizeStartNote("coleta do apoio")} data-testid="radar-retry-support-pending">{radarAutoFinalizeButtonLabel("Repetir apoio")}</button>
+                ? <button type="button" className={button} onClick={() => onRetrySupport?.()} title={radarAutoFinalizeStartNote("coleta do apoio", "YOUTUBE")} data-testid="radar-retry-support-pending">{radarAutoFinalizeButtonLabel("Repetir apoio")}</button>
                 : <span className="text-text-muted">no mesmo START</span>}
         </div>
         <p className="mt-1 text-sm text-text-muted">{apoio.purpose}</p>
@@ -502,6 +621,9 @@ function PacoteDePesquisa({ pacote, projecao, busy, onRetrySupport }: {
  *
  * §12: nada de hash, runId, id de concorrente ou JSON. Só o que decide.
  */
+/* 2026-10-09 (correção) · as saídas que são decisão de formato de vídeo. */
+const SAIDAS_DE_VIDEO: ReadonlySet<string> = new Set(["SHORTS", "YOUTUBE_VIDEO"]);
+
 function BlueprintMultiformato({ blueprint }: { blueprint: RadarMultimodalBlueprint }) {
   const { observed, recommended } = blueprint;
   const google = observed.googleFeatures;
@@ -551,16 +673,34 @@ function BlueprintMultiformato({ blueprint }: { blueprint: RadarMultimodalBluepr
 
     {/* ---------------- RECOMENDADO ---------------- */}
     <div className={bloco} data-testid="radar-multimodal-recommended">
-      <p className="text-sm font-semibold text-foreground">
-        O que recomendamos: <span className="text-context-accent">{RADAR_EDITORIAL_OUTPUT_LABELS[recommended.editorialOutput]}</span>
+      {/*
+        * 2026-10-09 (correção) · a saída de vídeo (Shorts × vídeo longo) gravada pela
+        * amostra INTEIRA é da régua anterior: a tela diz isso, e a decisão de formato
+        * vale a do "Vídeo pelo artigo-modelo" (amostra pertinente). A camada nova já
+        * vem pela régua pertinente e é dita como recomendação.
+        */}
+      <p className="text-sm font-semibold text-foreground" data-testid="radar-multimodal-recommended-label">
+        {SAIDAS_DE_VIDEO.has(recommended.editorialOutput) && !radarMultimodalUsesPertinentSample(blueprint) ? "Saída pela régua anterior (amostra inteira): " : "O que recomendamos: "}<span className="text-context-accent">{RADAR_EDITORIAL_OUTPUT_LABELS[recommended.editorialOutput]}</span>
       </p>
+      {SAIDAS_DE_VIDEO.has(recommended.editorialOutput) && !radarMultimodalUsesPertinentSample(blueprint) && <p className="mt-1 text-sm text-text-muted" data-testid="radar-multimodal-previous-ruler">
+        O formato do vídeo é o decidido em “Vídeo pelo artigo-modelo”, pela amostra pertinente.
+      </p>}
 
       <ul className="mt-1 space-y-1" data-testid="radar-multimodal-rationale">
         {recommended.rationale.map(item => <li className="text-sm text-text-muted" key={item}>{item}</li>)}
       </ul>
 
+      {/*
+        * 2026-10-09 · UM PLANO DE VÍDEOS CURTOS SÓ (regra do dono). As peças
+        * "Short" pelas perguntas do Google eram o segundo plano de Shorts, ao
+        * lado dos cortes da planta. A camada gravada continua como foi; a tela
+        * não as oferece: os vídeos curtos são os cortes do artigo-modelo.
+        */}
+      {recommended.pieces.some(peca => peca.piece === "SHORT") && <p className="mt-2 text-sm text-text-muted" data-testid="radar-multimodal-shorts-by-plant">
+        Vídeos curtos: são os cortes do artigo-modelo aprovado — os capítulos que funcionam sozinhos —, não peças pelas perguntas da busca.
+      </p>}
       <ul className="mt-2 space-y-2" data-testid="radar-multimodal-pieces">
-        {recommended.pieces.map((peca, indice) => <li className="rounded-md border border-divider p-2" key={`${peca.piece}:${indice}`}>
+        {recommended.pieces.filter(peca => peca.piece !== "SHORT").map((peca, indice) => <li className="rounded-md border border-divider p-2" key={`${peca.piece}:${indice}`}>
           <p className="text-sm font-semibold text-foreground">{RADAR_PIECE_LABELS[peca.piece]}</p>
           <p className="mt-1 text-sm text-foreground">{peca.role}</p>
           {/*
@@ -582,7 +722,7 @@ function BlueprintMultiformato({ blueprint }: { blueprint: RadarMultimodalBluepr
   </section>;
 }
 
-export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReason, frozen, pacote, projecao, blueprintView, editorialModel, evidenceExtras, multimodal, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onToggleVideo, onFinalize, onReset, onRetrySupport, autoFinalizePending = null, refreeze = null }: RadarYoutubeSearchPanelProps) {
+export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReason, frozen, pacote, projecao, blueprintView, videoPlan = null, evidenceExtras, multimodal, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onToggleVideo, onFinalize, onReset, onRetrySupport, autoFinalizePending = null, refreeze = null }: RadarYoutubeSearchPanelProps) {
   /*
    * ============ 2.2 · §2 · A CORRIDA EFETIVA ============
    *
@@ -675,7 +815,7 @@ export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReas
           className={primary}
           disabled={busy || Boolean(blockedReason) || plannedQueries === 0}
           onClick={() => onStart?.()}
-          title={radarAutoFinalizeStartNote("coleta")}
+          title={radarAutoFinalizeStartNote("coleta", "YOUTUBE")}
           data-testid="radar-youtube-start"
         >{busy ? "Coletando…" : radarAutoFinalizeButtonLabel(run ? "Nova coleta" : radarResearchProfilePlan(pacote.profile).startLabel)}</button>}
 
@@ -696,6 +836,7 @@ export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReas
           className={button}
           disabled={busy}
           onClick={() => onFinalize?.()}
+          title={radarProfileFinalizeNote("YOUTUBE")}
           data-testid="radar-youtube-finalize"
         >{radarFinalizeWithAiLabel("Finalizar investigação")}</button>}
 
@@ -737,9 +878,9 @@ export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReas
       * congelou — ao lado do botão manual, que continua.
       */}
     {!finalizada && !busy && autoFinalizePending && <p className="text-sm text-warning" role="status" data-testid="radar-youtube-auto-finalize-pending">
-      {radarAutoFinalizePendingNotice(autoFinalizePending, radarProfileManualStepLabel(projecao))}
+      {autoFinalizePending}
     </p>}
-    {!finalizada && !run && <p className="text-sm text-text-muted" data-testid="radar-youtube-auto-finalize-note">{radarAutoFinalizeStartNote("coleta")}</p>}
+    {!finalizada && !run && <p className="text-sm text-text-muted" data-testid="radar-youtube-auto-finalize-note">{radarAutoFinalizeStartNote("coleta", "YOUTUBE")}</p>}
 
     {/*
       * §10 · O QUE SUBSTITUI OS BOTÕES: o estado, dito.
@@ -820,7 +961,13 @@ export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReas
       * não foi apagado: desceu para a evidência competitiva, que é onde a
       * pergunta dele é feita.
       */}
-    {editorialModel && <RadarProfileBlueprintSection model={editorialModel} />}
+    {/*
+      * 2026-10-09 · O "Roteiro-modelo competitivo" saiu daqui (regra do dono: o
+      * processo do piloto substitui o antigo). A superfície principal é o vídeo
+      * pelo artigo-modelo: amostra pertinente, faixa por coorte, formato
+      * decidido, capítulos da planta e cortes.
+      */}
+    <VideoPelaPlanta corrida={corrida} frozen={frozen} videoPlan={videoPlan}/>
 
     {/*
       * ====== 2.1 · §22, §23 e §25 · UMA PORTA PARA A EVIDÊNCIA ======

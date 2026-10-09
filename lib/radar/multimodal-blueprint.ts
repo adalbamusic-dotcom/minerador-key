@@ -192,10 +192,28 @@ export type RadarMultimodalBlueprint = z.infer<typeof RadarMultimodalBlueprintSc
  * A ordem importa: o pacote exige as duas linguagens competindo ao mesmo
  * tempo. Sem isso, cai para a saída que os sinais de fato sustentam.
  */
+/*
+ * 2026-10-09 (correção) · A MARCA DA RÉGUA NA CAMADA GRAVADA. Com a amostra
+ * pertinente, a razão do YouTube diz "pertinentes (…)"; a camada congelada antes
+ * (amostra inteira) não diz. A tela lê por aqui qual régua decidiu a saída Shorts
+ * × vídeo longo, sem campo novo no contrato congelado.
+ */
+export const RADAR_MULTIMODAL_PERTINENT_MARK = "pertinentes (mesmo público, público vizinho ou tema geral)";
+
+export function radarMultimodalUsesPertinentSample(blueprint: { recommended: { rationale: readonly string[] } }): boolean {
+  return blueprint.recommended.rationale.some(item => item.includes(RADAR_MULTIMODAL_PERTINENT_MARK));
+}
+
 export function radarDecideEditorialOutput(input: {
   features: RadarSerpFeatureIntelligence | null;
   longForm: number;
   shorts: number;
+  /**
+   * 2026-10-09 · Aditivo: a decisão única de formato curto pela amostra
+   * pertinente (`radarVideoFormatDecision`). Presente, ela decide SHORTS ×
+   * YOUTUBE_VIDEO; ausente, a conta de antes (só a camada já gravada a usou).
+   */
+  shortFormat?: boolean;
 }): { output: RadarEditorialOutput; rationale: string[] } {
   const rationale: string[] = [];
   const formatos = input.features?.contentFormatMap;
@@ -205,7 +223,7 @@ export function radarDecideEditorialOutput(input: {
   const temVideoNoYoutube = input.longForm > 0 || input.shorts > 0;
 
   if (temVideoNoGoogle) rationale.push(`O Google devolve peça audiovisual para esta intenção (${input.features!.videos.length} item(ns)): vídeo compete na busca de texto.`);
-  if (temVideoNoYoutube) rationale.push(`A SERP do YouTube tem ${input.longForm} long-form e ${input.shorts} Short(s) disputando a mesma intenção.`);
+  if (temVideoNoYoutube) rationale.push(`A SERP do YouTube tem ${input.longForm} long-form e ${input.shorts} Short(s) ${input.shortFormat === undefined ? "" : `${RADAR_MULTIMODAL_PERTINENT_MARK} `}disputando a mesma intenção.`);
   if (temComercial) rationale.push(`O Google mostra ${input.features!.commercialSignals.products.length} produto(s): há camada comercial na intenção.`);
   if (temTexto) rationale.push(`A SERP tem ${input.features!.organicCount} resultado(s) orgânico(s): texto continua disputando.`);
 
@@ -227,7 +245,8 @@ export function radarDecideEditorialOutput(input: {
 
   if (!temTexto && temVideoNoYoutube) {
     rationale.push("A disputa observada é audiovisual, sem concorrência de texto relevante.");
-    return { output: input.shorts > input.longForm ? "SHORTS" : "YOUTUBE_VIDEO", rationale };
+    const curto = input.shortFormat ?? input.shorts > input.longForm;
+    return { output: curto ? "SHORTS" : "YOUTUBE_VIDEO", rationale };
   }
 
   if (temComercial && !temVideoNoGoogle) {
@@ -307,17 +326,35 @@ function montarPecas(input: {
   return pecas;
 }
 
+/*
+ * ===== 2026-10-09 · A CONTAGEM DO YOUTUBE PELA AMOSTRA PERTINENTE (régua do piloto) =====
+ *
+ * A saída SHORTS × YOUTUBE_VIDEO era mais uma decisão de formato curto, pela
+ * amostra INTEIRA (vídeo fora do tema contava). Com `youtubePertinence`
+ * (aditivo), as contagens saem da amostra pertinente — a mesma régua da
+ * fotografia nova e do CSV de vídeo, calculada por `radarYoutubeRunPertinence`
+ * (youtube-blueprint) — e a saída SHORTS segue a decisão única
+ * (`radarVideoFormatDecision`). A conta chega pronta, como dado: este módulo
+ * não importa o youtube-blueprint (o ciclo com o CSV de escrita fica fora).
+ * Sem ela, a contagem de antes. A fotografia já gravada não muda: a camada é
+ * lida como foi congelada.
+ */
+export type RadarMultimodalYoutubePertinence = { longForm: number; shorts: number; shortFormat: boolean };
+
 export function buildRadarMultimodalBlueprint(input: {
   features: RadarSerpFeatureIntelligence | null;
   youtubeUniverse: readonly RadarYoutubeUniverseEntry[];
   generatedAt: string;
+  /** 2026-10-09 · Aditivo: a amostra pertinente do YouTube (`radarYoutubeRunPertinence`), para as contagens e a saída curta. */
+  youtubePertinence?: RadarMultimodalYoutubePertinence | null;
 }): RadarMultimodalBlueprint {
   const coortes = radarYoutubeFormatCohorts(input.youtubeUniverse);
-  const longForm = coortes.longForm.length;
-  const shorts = coortes.shorts.length;
+  const pertinente = input.youtubePertinence ?? null;
+  const longForm = pertinente ? pertinente.longForm : coortes.longForm.length;
+  const shorts = pertinente ? pertinente.shorts : coortes.shorts.length;
 
   const crossSerpVideos = radarCrossSerpVideoSignal({ features: input.features, youtubeUniverse: input.youtubeUniverse });
-  const { output, rationale } = radarDecideEditorialOutput({ features: input.features, longForm, shorts });
+  const { output, rationale } = radarDecideEditorialOutput({ features: input.features, longForm, shorts, ...(pertinente ? { shortFormat: pertinente.shortFormat } : {}) });
 
   const sources: Array<"GOOGLE_SERP" | "YOUTUBE_SERP"> = [];
   if (input.features) sources.push("GOOGLE_SERP");

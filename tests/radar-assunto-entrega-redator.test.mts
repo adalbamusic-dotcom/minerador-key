@@ -8,14 +8,16 @@ import {
   RADAR_WRITER_SUBJECT_H1_NO_SIGNAL,
   radarWriterSubjectOf,
   radarWriterSubjectTurnLines,
+  radarWriterSubjectTurnLinesFromBlueprint,
 } from "../lib/redator/radar-subject-turn.ts";
 import { RADAR_WRITER_MAY_NOT, RADAR_WRITER_MAY_NOT_SUBJECT } from "../lib/redator/writer-handoff.ts";
 import { ContentDocumentV2Schema } from "../lib/arquiteto/contracts.ts";
 import { RADAR_WRITING_SUBJECT_H1_NO_SIGNAL, buildRadarWritingExportArticle, type RadarWritingArticleContext } from "../lib/radar/portable-writing-export.ts";
-import { radarEditorialHeadingWithoutTemplate, type RadarEditorialArticleModel, type RadarEditorialSubjectTurn } from "../lib/radar/editorial-article-model.ts";
+import { type RadarEditorialArticleModel, type RadarEditorialSubjectTurn } from "../lib/radar/editorial-article-model.ts";
 import type { RadarArticleResearchContext } from "../lib/radar/article-research-context.ts";
 import type { RadarCanonicalAuthorities } from "../lib/server/radar-canonical-authorities.ts";
 import { ARTIGO, contextoDePesquisa, entradaGoogle, vistaDoGoogleSobre } from "./radar-portable-writing-fixtures.mts";
+import { comPlanta } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 
 /*
  * ===== SDD do Assunto, F4.1 · A ENTREGA AO REDATOR COM ASSUNTO =====
@@ -28,8 +30,9 @@ import { ARTIGO, contextoDePesquisa, entradaGoogle, vistaDoGoogleSobre } from ".
  *      o `radar-import.ts` do HEAD, antes desta mudança);
  *   2. com Assunto, `writerMayNot` GRAVADO ganha a proibição, uma vez, no fim;
  *   3. com Assunto, `importedContext.editorialContext` leva as linhas de onde
- *      virar, da seção da virada, da direção do H1, do destino e do alerta,
- *      com o MESMO texto do CSV "Para escrever";
+ *      virar, da seção da virada, da direção do H1 e do destino — desde
+ *      2026-10-09 lidas da PLANTA concluída (a mesma do CSV), não do modelo
+ *      editorial antigo;
  *   4. o dossiê não muda por causa do Assunto (invariante 78): o bundle é o
  *      mesmo, e as linhas vêm do artigo-modelo, que está fora dele.
  *
@@ -128,14 +131,20 @@ test("sem Assunto · as linhas ficam vazias para qualquer forma de ausência", (
 
 const CONTEXTO_DO_CSV: RadarWritingArticleContext = { topRowLabel: "Marca", filePosition: 1, silo: null, articleId: ARTIGO, publication: null };
 
+/*
+ * 2026-10-09 · regra do dono: o CSV "Para escrever" sai só com o artigo-modelo
+ * concluído, e as linhas do Assunto que a coluna promessa e o título legados
+ * escreviam (tronco, virada, direção do H1, destino) foram para o PEDIDO do
+ * artigo-modelo; a coluna artigo diz o Assunto e o destino da virada. O Redator
+ * continua com as linhas dele (`radarWriterSubjectTurnLines`); a paridade que
+ * fica é a do destino e a do texto "sem sinal".
+ */
 function csvCom(assunto: Assunto) {
   const autoridades = autoridadesCom(assunto);
   const modelo = autoridades.google!.articleModel as RadarEditorialArticleModel;
-  const row = buildRadarWritingExportArticle(
-    entradaGoogle({ articleModel: modelo, googleObserved: autoridades.google!.observed, researchContext: autoridades.researchContext! }),
-    CONTEXTO_DO_CSV,
-  ).row;
-  return { autoridades, turn: modelo.declaredSubject as RadarEditorialSubjectTurn, linhas: [...row.promessa_e_leitor.split("\n"), ...row.titulo_e_seo.split("\n")] };
+  const entrada = entradaGoogle({ articleModel: modelo, googleObserved: autoridades.google!.observed, researchContext: autoridades.researchContext! });
+  const row = buildRadarWritingExportArticle(entrada, comPlanta(entrada, CONTEXTO_DO_CSV)).row;
+  return { autoridades, turn: modelo.declaredSubject as RadarEditorialSubjectTurn, row, linhas: [...row.promessa_e_leitor.split("\n"), ...row.titulo_e_seo.split("\n")] };
 }
 
 test("com Assunto · writerMayNot GRAVADO ganha a proibição uma vez, no fim; o bundle e o resto do dossiê não mudam (invariante 78)", () => {
@@ -154,25 +163,52 @@ test("com Assunto · writerMayNot GRAVADO ganha a proibição uma vez, no fim; o
   assert.equal(ContentDocumentV2Schema.safeParse(com).success, true, "o documento continua no contrato do dono");
 });
 
-test("com Assunto · as linhas da virada dizem o MESMO que o CSV \"Para escrever\" (tronco, virada, H1, destino)", () => {
+/*
+ * ===== 2026-10-09 · A VIRADA SAI DA PLANTA (regra do piloto) =====
+ *
+ * As linhas "Virada", "Seção da virada" e "Direção do H1" do envio saíam do
+ * modelo editorial antigo (`articleModel.declaredSubject`), a mesma leitura que
+ * o CSV deixou de escrever (ela foi ao pedido do artigo-modelo). Agora saem da
+ * PLANTA concluída que o envio conferiu — a mesma do CSV (`plantaDe`, pela
+ * conferência real): a seção dela que trata do Assunto, ou o fechamento.
+ */
+const plantaDoCsv = (assunto: Assunto) => {
+  const { autoridades } = csvCom(assunto);
+  const entrada = entradaGoogle({ articleModel: autoridades.google!.articleModel as RadarEditorialArticleModel, googleObserved: autoridades.google!.observed, researchContext: autoridades.researchContext! });
+  return { autoridades, planta: comPlanta(entrada, CONTEXTO_DO_CSV).blueprint! };
+};
+
+test("com Assunto · as linhas da virada saem da PLANTA concluída (a mesma do CSV), não do modelo editorial antigo", () => {
   for (const assunto of [CONSULTA, ORDEM, ROTINA]) {
-    const { autoridades, turn, linhas: doCsv } = csvCom(assunto);
-    const documento = montar(autoridades, { subject: doDna(assunto) });
+    const { autoridades, planta } = plantaDoCsv(assunto);
+    const { linhas: doCsv, row } = csvCom(assunto);
+    const documento = montar(autoridades, { subject: doDna(assunto), articleBlueprint: planta.blueprint });
     const linhas = documento.importedContext.editorialContext;
-    assert.deepEqual(linhas, radarWriterSubjectTurnLines({ subject: doDna(assunto), turn, principal: "skincare facial" }));
+    assert.deepEqual(linhas, radarWriterSubjectTurnLinesFromBlueprint({ subject: doDna(assunto), blueprint: planta.blueprint, principal: "skincare facial" }));
     for (const prefixo of ["Tronco (Assunto): ", "Virada: ", "Destino da chamada: "]) {
       const nossa = linhas.find(item => item.startsWith(prefixo));
-      const doExport = doCsv.find(item => item.startsWith(prefixo));
-      assert.equal(nossa, doExport, `${assunto.phrase} · ${prefixo}`);
-      /* Sem destino não há linha de destino, dos dois lados; tronco e virada existem sempre. */
+      /* Sem destino não há linha de destino; tronco e virada existem sempre. */
       assert.equal(Boolean(nossa), prefixo !== "Destino da chamada: " || Boolean(assunto.destinationUrl), `${assunto.phrase} · ${prefixo} ausente`);
+      assert.equal(doCsv.some(item => item.startsWith(prefixo)), false, `${assunto.phrase} · ${prefixo} no CSV`);
     }
+    /* O Assunto e o destino ditos no CSV (coluna artigo) são os mesmos do Redator. */
+    assert.ok(row.artigo.split("\n").includes(`Assunto (tronco): ${assunto.phrase}${assunto.destinationUrl ? ` — destino da virada: ${assunto.destinationUrl}` : ""}`), row.artigo);
+    if (assunto.destinationUrl) assert.ok(linhas.find(item => item.startsWith("Destino da chamada: "))!.includes(assunto.destinationUrl));
+    /* A virada diz onde NA PLANTA: a seção dela (com o número) ou o fechamento; nunca a leitura da amostra. */
+    const virada = linhas.find(item => item.startsWith("Virada: "))!;
+    assert.match(virada, /do artigo-modelo/, virada);
+    assert.equal(/sem sinal na SERP|a amostra já trata|título é de trabalho/.test(linhas.join("\n")), false, `${assunto.phrase}: nada da régua antiga`);
+    assert.equal(linhas.some(item => item.startsWith("Alerta do Radar sobre o Assunto: ")), false, "o alerta era leitura da amostra, não da planta");
     const h1 = linhas.find(item => /^(Direção do H1: |Assunto em H2\/H3|Assunto no H1: )/.test(item));
-    assert.ok(h1, `${assunto.phrase}: sem linha do H1`);
-    assert.ok(doCsv.includes(h1!), `${assunto.phrase}: a linha do H1 difere do CSV (${h1})`);
-    assert.ok(linhas.some(item => item.startsWith("Seção da virada: ")), `${assunto.phrase}: a seção da virada chega ao Redator`);
+    assert.ok(h1?.includes(planta.blueprint.title.h1), `${assunto.phrase}: a linha do H1 cita o H1 da planta`);
   }
-  assert.equal(RADAR_WRITER_SUBJECT_H1_NO_SIGNAL, RADAR_WRITING_SUBJECT_H1_NO_SIGNAL, "o texto sem sinal é o mesmo nos dois lugares");
+  /* "Rotina de skincare facial" está na seção 1 da planta do CSV; "Consulta dermatológica online", em seção nenhuma. */
+  const rotina = montar(plantaDoCsv(ROTINA).autoridades, { subject: doDna(ROTINA), articleBlueprint: plantaDoCsv(ROTINA).planta.blueprint }).importedContext.editorialContext;
+  assert.ok(rotina.includes('Seção da virada: "Como montar a rotina de skincare facial no dia a dia?", seção 1 do artigo-modelo concluído.'), rotina.join("\n"));
+  const consulta = montar(plantaDoCsv(CONSULTA).autoridades, { subject: doDna(CONSULTA), articleBlueprint: plantaDoCsv(CONSULTA).planta.blueprint }).importedContext.editorialContext;
+  assert.match(consulta.find(item => item.startsWith("Virada: "))!, /^Virada: no fechamento do artigo-modelo, antes do CTA/);
+  assert.equal(consulta.some(item => item.startsWith("Seção da virada: ")), false);
+  assert.equal(RADAR_WRITER_SUBJECT_H1_NO_SIGNAL, RADAR_WRITING_SUBJECT_H1_NO_SIGNAL, "o texto sem sinal é o mesmo nos dois lugares (régua antiga, lida só pelas linhas já gravadas)");
 });
 
 /*
@@ -181,82 +217,86 @@ test("com Assunto · as linhas da virada dizem o MESMO que o CSV \"Para escrever
  * sem molde: com a pergunta diferente do cabeçalho — o caso comum quando há
  * PAA —, as linhas "Virada" divergiam nos três Assuntos.
  */
-test("com Assunto · a 'Virada' do Redator é a do CSV também quando a pergunta do leitor da seção difere do cabeçalho", () => {
+/*
+ * 2026-10-09 · O MODELO ANTIGO NÃO MANDA MAIS NA VIRADA. Antes, trocar a
+ * pergunta do leitor da seção do modelo editorial mudava a "Virada" do
+ * Redator. Agora o modelo antigo é só matéria-prima do gerador da planta: com
+ * a MESMA planta, mexer nele (pergunta, sugestão de virada) não muda uma linha.
+ */
+test("com Assunto · com a mesma planta, mexer no modelo editorial antigo não muda a 'Virada' do Redator", () => {
   const PERGUNTA = "Por onde começar quando a pele reage a tudo?";
   for (const assunto of [CONSULTA, ORDEM, ROTINA]) {
-    const autoridades = autoridadesCom(assunto);
+    const { autoridades, planta } = plantaDoCsv(assunto);
     const modelo = structuredClone(autoridades.google!.articleModel) as RadarEditorialArticleModel;
     const turn = modelo.declaredSubject as RadarEditorialSubjectTurn;
     const alvos = new Set([turn.turnSection?.heading, turn.turnSection?.hostHeading, turn.suggestedPosition?.afterHeading].filter(Boolean));
-    let trocadas = 0;
     const visitar = (secoes: RadarEditorialArticleModel["sections"]) => {
       for (const secao of secoes) {
-        if (alvos.has(secao.headingSuggestion)) { secao.readerQuestion = PERGUNTA; trocadas += 1; }
+        if (alvos.has(secao.headingSuggestion)) secao.readerQuestion = PERGUNTA;
         visitar(secao.childSections);
       }
     };
     visitar(modelo.sections);
-    assert.ok(trocadas > 0, `${assunto.phrase}: o fixture tem a seção da virada no modelo`);
     const comPergunta = { ...autoridades, google: { ...autoridades.google!, articleModel: modelo } } as RadarCanonicalAuthorities;
-    const doCsv = buildRadarWritingExportArticle(
-      entradaGoogle({ articleModel: modelo, googleObserved: autoridades.google!.observed, researchContext: autoridades.researchContext! }),
-      CONTEXTO_DO_CSV,
-    ).row.promessa_e_leitor.split("\n").find(item => item.startsWith("Virada: "));
-    const doRedator = montar(comPergunta, { subject: doDna(assunto) }).importedContext.editorialContext.find(item => item.startsWith("Virada: "));
-    assert.equal(doRedator, doCsv, assunto.phrase);
-    if (turn.turnSection?.source === "OBSERVED_GROUP") assert.match(doRedator ?? "", new RegExp(PERGUNTA.replace(/\?/g, "\\?")), assunto.phrase);
+    const semModelo = { ...autoridades, google: null } as RadarCanonicalAuthorities;
+    const base = montar(autoridades, { subject: doDna(assunto), articleBlueprint: planta.blueprint }).importedContext.editorialContext;
+    assert.deepEqual(montar(comPergunta, { subject: doDna(assunto), articleBlueprint: planta.blueprint }).importedContext.editorialContext, base, assunto.phrase);
+    assert.deepEqual(montar(semModelo, { subject: doDna(assunto), articleBlueprint: planta.blueprint }).importedContext.editorialContext, base, `${assunto.phrase}: sem a fotografia do Google, a planta basta`);
+    assert.equal(base.join("\n").includes(PERGUNTA), false);
+    /* O CSV "Para escrever" (com a planta) também não escreve a "Virada": ela foi ao pedido do artigo-modelo. */
+    const entrada = entradaGoogle({ articleModel: modelo, googleObserved: autoridades.google!.observed, researchContext: autoridades.researchContext! });
+    assert.equal(buildRadarWritingExportArticle(entrada, comPlanta(entrada, CONTEXTO_DO_CSV)).row.promessa_e_leitor.split("\n").some(item => item.startsWith("Virada: ")), false, assunto.phrase);
   }
 });
 
-test("com Assunto · a seção da virada chega: sintética diz que o título é de trabalho; a observada diz que a amostra já a trata", () => {
-  const consulta = csvCom(CONSULTA);
-  assert.equal(consulta.turn.turnSection.source, "SYNTHETIC");
-  const sintetica = montar(consulta.autoridades, { subject: doDna(CONSULTA) }).importedContext.editorialContext
-    .find(item => item.startsWith("Seção da virada: "))!;
-  assert.match(sintetica, /^Seção da virada: "Virada para Consulta dermatológica online", como ponto a cobrir em "[^"]+": exigida pelo ArticleDNA sem página na amostra; o título é de trabalho do Radar, reescreva para o leitor\.$/);
-  assert.ok(consulta.turn.alert, "o fixture tem alerta: nenhuma página toca o Assunto");
-  assert.ok(montar(consulta.autoridades, { subject: doDna(CONSULTA) }).importedContext.editorialContext
-    .includes(`Alerta do Radar sobre o Assunto: ${consulta.turn.alert}`), "o alerta chega a quem escreve");
-
-  const rotina = csvCom(ROTINA);
-  assert.equal(rotina.turn.turnSection.source, "OBSERVED_GROUP");
-  const observada = montar(rotina.autoridades, { subject: doDna(ROTINA) }).importedContext.editorialContext
-    .find(item => item.startsWith("Seção da virada: "))!;
-  /* 2026-10-08 · P0-B · a seção nomeada sem o molde do modelo, como no CSV. */
-  assert.ok(observada.includes(`"${radarEditorialHeadingWithoutTemplate(rotina.turn.turnSection.heading)}"`), observada);
-  assert.match(observada, /é o bloco da amostra que já trata o Assunto \(\d+ de \d+ página\(s\)\)\.$/);
-  assert.equal(observada.includes("sem sinal"), false);
+test("com Assunto · a seção da virada é a da planta (com o número); um H3 que traz o Assunto vira o lugar; sem seção, o fechamento antes do CTA", () => {
+  const { autoridades, planta } = plantaDoCsv(CONSULTA);
+  /* Sem seção da planta que trate da consulta: fechamento, sem "Seção da virada" e sem título de trabalho. */
+  const fechamento = montar(autoridades, { subject: doDna(CONSULTA), articleBlueprint: planta.blueprint }).importedContext.editorialContext;
+  assert.equal(fechamento.some(item => item.startsWith("Seção da virada: ")), false);
+  assert.equal(fechamento.join("\n").includes("Virada para Consulta"), false, "o título de trabalho do Radar era da régua antiga");
+  /* A mesma planta com um H3 sobre a consulta na seção 2: o lugar é o H3. */
+  const comH3 = structuredClone(planta.blueprint) as typeof planta.blueprint;
+  const segunda = comH3.sections[1] as { h2: string; h3?: string[] };
+  segunda.h3 = [...(segunda.h3 ?? []), "Quando a consulta dermatológica online resolve"];
+  const noH3 = montar(autoridades, { subject: doDna(CONSULTA), articleBlueprint: comH3 }).importedContext.editorialContext;
+  assert.ok(noH3.includes(`Virada: no H3 "Quando a consulta dermatológica online resolve" da seção "${segunda.h2}" do artigo-modelo (seção 2), levar o leitor de skincare facial a Consulta dermatológica online; destino: https://careglow.com.br/consulta-online.`), noH3.join("\n"));
+  assert.ok(noH3.includes(`Seção da virada: "${segunda.h2}", seção 2 do artigo-modelo concluído, no H3 "Quando a consulta dermatológica online resolve".`), noH3.join("\n"));
+  assert.ok(noH3.some(item => item.startsWith("Assunto em H2/H3 — o H1 é da principal")), noH3.join("\n"));
 });
 
-test("com Assunto · sem sugestão do Radar (sem fotografia do Google, ou virada de OUTRO Assunto), as linhas devolvem a decisão e não inventam lugar", () => {
+test("com Assunto · sem a planta em mãos (o envio ainda não a passa), a virada aponta a seção do artigo-modelo concluído, sem lugar inventado e sem a régua da amostra", () => {
   const esperadas = (assunto: Assunto) => [
     `Tronco (Assunto): ${assunto.phrase} — A marca atende por teleconsulta.`,
-    `Virada: onde quem redige decidir (sem sinal na SERP), levar o leitor de skincare facial a ${assunto.phrase}; destino: ${assunto.destinationUrl}.`,
-    RADAR_WRITER_SUBJECT_H1_NO_SIGNAL,
+    `Virada: na seção do artigo-modelo concluído que tratar do Assunto (ou no fechamento, antes do CTA, se nenhuma tratar), levar o leitor de skincare facial a ${assunto.phrase}; destino: ${assunto.destinationUrl}.`,
+    "Assunto no H1: o H1 é da principal.",
     `Destino da chamada: Levar o leitor a ${assunto.destinationUrl}.`,
   ];
   assert.deepEqual(montar(null, { subject: doDna(CONSULTA) }).importedContext.editorialContext, esperadas(CONSULTA));
-  /* A virada do modelo é de "Ordem dos ácidos": não vale para o Assunto do ArticleDNA. */
+  /* A virada do modelo antigo (de "Ordem dos ácidos" ou de qualquer outro) não entra: as linhas são as mesmas. */
   assert.deepEqual(montar(autoridadesCom(ORDEM), { subject: doDna(CONSULTA) }).importedContext.editorialContext, esperadas(CONSULTA));
+  assert.deepEqual(montar(autoridadesCom(CONSULTA), { subject: doDna(CONSULTA) }).importedContext.editorialContext, esperadas(CONSULTA));
   /* Sem principal resolvida, o texto não inventa uma. */
   const semPrincipal = montar(null, { subject: doDna(ORDEM) }, null).importedContext.editorialContext;
   assert.deepEqual(semPrincipal, [
     "Tronco (Assunto): Ordem dos ácidos no rosto.",
-    "Virada: onde quem redige decidir (sem sinal na SERP), levar o leitor da keyword principal a Ordem dos ácidos no rosto.",
-    RADAR_WRITER_SUBJECT_H1_NO_SIGNAL,
+    "Virada: na seção do artigo-modelo concluído que tratar do Assunto (ou no fechamento, antes do CTA, se nenhuma tratar), levar o leitor da keyword principal a Ordem dos ácidos no rosto.",
+    "Assunto no H1: o H1 é da principal.",
   ]);
-  /* O CSV "Para escrever" usa o MESMO recurso sem principal ("da keyword principal", nunca "de a keyword principal"). */
-  const fonteDoCsv = readFileSync(new URL("../lib/radar/portable-writing-export.ts", import.meta.url), "utf8");
-  assert.ok(fonteDoCsv.includes("levar o leitor ${principal ? `de ${principal}` : \"da keyword principal\"} a ${assunto.phrase}"));
+  assert.equal(semPrincipal.some(item => item === RADAR_WRITER_SUBJECT_H1_NO_SIGNAL), false, "o texto 'sem sinal' era da régua da amostra");
+  /* 2026-10-09 · o CSV "Para escrever" não escreve mais a virada (ela vai ao pedido do artigo-modelo): nenhuma "de a keyword principal" volta. */
+  const fonteDoCsv = semComentarios("../lib/radar/portable-writing-export.ts");
+  assert.equal(fonteDoCsv.includes("levar o leitor"), false);
   assert.equal(fonteDoCsv.includes("\"a keyword principal\";"), false);
 });
 
 test("com Assunto · linhas curtas: nota de 280 caracteres e destino longo ficam abaixo de 2 kB", () => {
   const longo: Assunto = { phrase: "Consulta dermatológica online", note: "n".repeat(280), destinationUrl: `https://careglow.com.br/${"consulta-online/".repeat(8)}agendar` };
-  const { autoridades } = csvCom(CONSULTA);
-  const linhas = montar(autoridades, { subject: doDna(longo) }).importedContext.editorialContext;
+  const { autoridades, planta } = plantaDoCsv(CONSULTA);
+  const linhas = montar(autoridades, { subject: doDna(longo), articleBlueprint: planta.blueprint }).importedContext.editorialContext;
   const bytes = Buffer.byteLength(JSON.stringify(linhas));
-  assert.ok(linhas.length >= 5 && bytes < 2_048, `${linhas.length} linhas, ${bytes} B`);
+  /* 2026-10-09 · tronco, virada, H1 e destino (o alerta da amostra saiu com a régua antiga). */
+  assert.ok(linhas.length >= 4 && bytes < 2_048, `${linhas.length} linhas, ${bytes} B`);
 });
 
 /* ============================ o envio ============================ */
@@ -271,7 +311,9 @@ test("ESTRUTURAL · o envio passa o Assunto da MESMA versão que a identidade fi
   assert.doesNotMatch(envio, /RADAR_WRITER_MAY_NOT\b/, "nenhuma lista fixa ao lado da derivada");
   const dominio = semComentarios("../lib/redator/radar-import.ts");
   assert.match(dominio, /writerMayNot: \[\.\.\.radarWriterMayNotFor\(radarWriterSubjectOf\(subject\)\)\],/);
-  assert.match(dominio, /editorialContext: radarWriterSubjectTurnLines\(\{/);
+  /* 2026-10-09 · a virada do envio sai da planta que o envio passa, não do modelo editorial antigo. */
+  assert.match(dominio, /editorialContext: radarWriterSubjectTurnLinesFromBlueprint\(\{\s*subject: input\.subject,\s*blueprint: input\.articleBlueprint \?\? null,/);
+  assert.doesNotMatch(dominio, /radarWriterSubjectTurnLines\(|declaredSubject/, "nada do modelo antigo no envio");
   assert.match(dominio, /dossier: radarWriterDossierOf\(dossier, input\.subject\),/);
 });
 

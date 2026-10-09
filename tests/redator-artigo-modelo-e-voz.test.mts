@@ -35,6 +35,9 @@ const { CAROUSEL_SEED_SYSTEM_PROMPT, SCRIPT_SEED_SYSTEM_PROMPT, buildCarouselSee
 const { radarFoundationsOf } = await import("../lib/redator/radar-foundations.ts");
 const { ContentDocumentSchema } = await import("../lib/arquiteto/contracts.ts");
 const { writerSeedDocument } = await import("../lib/server/writer-seed.ts");
+/* 2026-10-09 · a entrada do Google de bancada, para a montagem do CSV injetada na semeadura. */
+const { entradaGoogle } = await import("./radar-portable-writing-fixtures.mts");
+const { radarArticleBlueprintWithCurrentNames } = await import("../lib/radar/article-blueprint.ts");
 /* 2026-10-08 · a planta para quem escreve: nomes atuais, frases que pedem fonte e o mapa da atualização. */
 const { WRITER_BLUEPRINT_READING_RULES, writerArticleBlueprintForWriting, writerBlueprintWithCurrentNames } = await import("../lib/redator/writer-blueprint-for-writing.ts");
 const { SEED_BLUEPRINT_NEEDS_SOURCE_TITLE } = await import("../lib/redator/deliverable-seed.ts");
@@ -388,7 +391,13 @@ test("catálogo · fundamentos cortam as seções da planta depois da pesquisa d
 
 /* ================================= fundamentos ================================= */
 
-test("fundamentos · sem planta aprovada e sem voz, nada muda: nenhuma chave nova, o mesmo próximo passo", async () => {
+/*
+ * 2026-10-09 · regra do piloto: sem planta concluída, os fundamentos DIZEM a
+ * ausência, com o caminho (organizar no Radar) — antes, a falta simples ficava
+ * só no manifesto e a escrita seguia pela estrutura de quem escreve. A falta da
+ * voz continua só no manifesto.
+ */
+test("fundamentos · sem planta aprovada e sem voz: a ausência da planta é dita com o caminho; nenhuma chave nova", async () => {
   reiniciar(atual => {
     atual.radar_article_blueprints = atual.radar_article_blueprints.filter(linha => linha.brand_id !== brandA || linha.state !== "APPROVED");
     atual.editorial_artifact_versions = atual.editorial_artifact_versions.filter(linha => linha.marca_id !== brandA);
@@ -396,8 +405,10 @@ test("fundamentos · sem planta aprovada e sem voz, nada muda: nenhuma chave nov
   const fundamentos = await readWriterFoundations(contexto(), documentId);
   assert.equal("articleBlueprint" in fundamentos, false);
   assert.equal("brandVoice" in fundamentos, false);
-  assert.equal(fundamentos.next, PROXIMO_PASSO_DE_SEMPRE);
-  assert.equal(fundamentos.absent.some(item => item.field === "articleBlueprint" || item.field === "brandVoice"), false, "a falta simples fica no manifesto");
+  assert.equal(fundamentos.next, PROXIMO_PASSO_DE_SEMPRE.replace(" As perguntas", " Sem o artigo-modelo concluído deste pacote, a estrutura não sai de outro lugar: organize o artigo-modelo no Radar (Pesquisa → Artigo-modelo da SERP) e leia os fundamentos de novo. As perguntas"));
+  assert.match(fundamentos.absent.find(item => item.field === "articleBlueprint")?.reason ?? "", /nenhum artigo-modelo concluído para este pacote: organize o artigo-modelo no Radar/);
+  assert.equal(fundamentos.absent.some(item => item.field === "brandVoice"), false, "a falta simples da voz fica no manifesto");
+  assert.doesNotMatch(JSON.stringify(fundamentos), /fica por conta de quem escreve/);
   assert.doesNotMatch(JSON.stringify(fundamentos), new RegExp(`${PLANTA_DA_OUTRA_MARCA}|${VOZ_DA_OUTRA_MARCA}`));
   conferirLeitura();
 });
@@ -426,9 +437,18 @@ test("fundamentos · com a planta aprovada do pacote e a voz corrente (rascunho)
   assert.doesNotMatch(JSON.stringify(fundamentos), new RegExp(`${PLANTA_DA_OUTRA_MARCA}|${VOZ_DA_OUTRA_MARCA}|Rascunho que ninguém aprovou|${PESO_DA_EVIDENCIA}`));
 
   conferirLeitura();
-  const [doPacote, ...outras] = doArtigoModelo();
-  assert.equal(outras.length, 0, "achou o aprovado na primeira consulta");
-  for (const [filtro, valor] of [["brand_id", brandA], ["article_id", articleId], ["bundle_hash", BUNDLE], ["state", "APPROVED"]]) {
+  /*
+   * 2026-10-09 · a escolha é a do CSV (`writerArticleBlueprintPick`): uma
+   * leitura de metadados das concluídas do artigo (nunca a planta) e, depois,
+   * só o conteúdo da escolhida, pelo pacote e pelo id.
+   */
+  const [metadados, doPacote, ...outras] = doArtigoModelo();
+  assert.equal(outras.length, 0, "metadados e o conteúdo da escolhida, nada mais");
+  for (const [filtro, valor] of [["brand_id", brandA], ["article_id", articleId], ["state", "APPROVED"]]) {
+    assert.equal(metadados.params.get(filtro), `eq.${valor}`, filtro);
+  }
+  assert.doesNotMatch(metadados.select ?? "", /payload->(blueprint|measures|linkCandidates|brandVoice|publishedStructure|evidence|sources)/, "os metadados não trazem a planta");
+  for (const [filtro, valor] of [["brand_id", brandA], ["article_id", articleId], ["bundle_hash", BUNDLE], ["state", "APPROVED"], ["id", plantaAprovada]]) {
     assert.equal(doPacote.params.get(filtro), `eq.${valor}`, filtro);
   }
   assert.equal(doPacote.params.get("limit"), "1");
@@ -445,10 +465,11 @@ test("fundamentos · aprovado só de OUTRO congelamento: não é servido, e a au
   const ausencia = fundamentos.absent.find(item => item.field === "articleBlueprint");
   assert.match(ausencia?.reason ?? "", /outro congelamento/);
   assert.match(ausencia?.reason ?? "", /reenvia/);
-  assert.equal(doArtigoModelo().length, 2, "a segunda consulta é só de metadados");
+  /* 2026-10-09 · a escolha do CSV: uma consulta só de metadados, e nenhuma planta lida (nada foi escolhido). */
+  assert.equal(doArtigoModelo().length, 1, "só a consulta de metadados");
   /* 2026-10-08 · P0-A · metadados e a referência do congelamento (um caminho pequeno); nunca a planta. */
-  assert.match(doArtigoModelo()[1].select ?? "", /ir:payload->investigationRef/);
-  assert.doesNotMatch(doArtigoModelo()[1].select ?? "", /(^|,)payload(,|$)|payload->(blueprint|measures|linkCandidates|brandVoice|publishedStructure|evidence|sources)/);
+  assert.match(doArtigoModelo()[0].select ?? "", /ir:payload->investigationRef/);
+  assert.doesNotMatch(doArtigoModelo()[0].select ?? "", /(^|,)payload(,|$)|payload->(blueprint|measures|linkCandidates|brandVoice|publishedStructure|evidence|sources)/);
   assert.doesNotMatch(JSON.stringify(fundamentos), /Planta do congelamento antigo/);
 });
 
@@ -487,9 +508,10 @@ test("fundamentos · P0-A · a concluída de OUTRO dossiê da MESMA investigaç�
   assert.equal(fundamentos.articleBlueprint?.blueprintId, plantaDeOutroPacote, "mesmo congelamento e ArticleDNA: vale");
   assert.equal(fundamentos.articleBlueprint?.h1, "Planta do congelamento antigo");
   assert.equal(fundamentos.absent.some(item => item.field === "articleBlueprint"), false);
-  const [exata, metadados, conteudo, ...resto] = doArtigoModelo();
-  assert.equal(exata.params.get("bundle_hash"), `eq.${BUNDLE}`, "primeiro, o hash exato");
-  assert.equal(metadados.params.get("state"), "in.(APPROVED,DRAFT)");
+  /* 2026-10-09 · a escolha do CSV, numa leitura de metadados (o hash exato e a investigação decidem sobre ela). */
+  const [metadados, conteudo, ...resto] = doArtigoModelo();
+  assert.equal(metadados.params.get("state"), "eq.APPROVED", "só as concluídas, como o CSV lê");
+  assert.equal(metadados.params.get("bundle_hash"), null, "o hash exato é decidido pela regra pura, não pela consulta");
   assert.equal(conteudo.params.get("bundle_hash"), "eq.bundle-hash:antigo", "a planta é lida pelo pacote em que ela foi organizada");
   assert.equal(conteudo.params.get("id"), `eq.${plantaDeOutroPacote}`);
   assert.equal(resto.length, 0);
@@ -625,7 +647,8 @@ test("manifesto · a linha do aprovado (dono Radar, abaixo da evidência, preso 
   assert.equal(voz[2], "draft");
   assert.equal(manifesto.sources.some(item => item[0] === `brand.skill/${vozV1}`), false, "só a corrente");
   assert.equal(manifesto.absent.some(([chave]) => chave === "radar.blueprint" || chave === "brand.voice"), false);
-  assert.ok(doArtigoModelo().every(registro => !(registro.select || "").includes("payload")), "o manifesto não lê a planta, só metadados");
+  /* 2026-10-09 · os metadados da escolha do CSV trazem a referência do congelamento (um caminho pequeno), nunca a planta. */
+  assert.ok(doArtigoModelo().every(registro => !/(^|,)payload(,|$)|payload->(blueprint|measures|linkCandidates|brandVoice|publishedStructure|evidence|sources)/.test(registro.select || "")), "o manifesto não lê a planta, só metadados");
   conferirLeitura();
 });
 
@@ -790,7 +813,14 @@ test("IA interna · seção e melhoria seguem a planta e escrevem copy e CTA na 
   assert.match(SECTION_WRITING_SYSTEM_PROMPT, /Quando section é null/);
   assert.match(SECTION_WRITING_SYSTEM_PROMPT, /não copie pergunta, H3 nem link de outra seção/);
   assert.match(IMPROVE_SYSTEM_PROMPT, /não acrescenta CTA, link, H3, pergunta nem afirmação que o trecho não tinha/);
-  assert.doesNotMatch(IMPROVE_SYSTEM_PROMPT, /siga a pergunta do leitor/, "a melhoria não segue seção da planta");
+  /*
+   * 2026-10-09 · regra do piloto (melhoria de publicado pelos mesmos fundamentos):
+   * a melhoria recebe a seção da planta do H2 sob o qual o trecho está, pelo mesmo
+   * casamento seguro; sem par, só a forma. O trecho continua sem ganhar CTA, link
+   * nem afirmação nova.
+   */
+  assert.match(IMPROVE_SYSTEM_PROMPT, /evidence\.articleBlueprint\.section é a seção da planta para o H2 sob o qual o trecho está \(focus\.sectionLabel\)/);
+  assert.match(IMPROVE_SYSTEM_PROMPT, /Quando section é null, a planta só orienta a forma/);
 
   /* O alerta que a regra pede: a voz como fonte, o alvo no DNA do artigo — nunca o BrandDNA. */
   const alertaDaVoz = WriterAiAlertSchema.parse({ message: "a voz proíbe 'milagre' e a planta usa", targetKind: "article_dna", evidenceSourceKey: `brand.skill/${vozV2}`, versionId: vozV2 });
@@ -807,41 +837,93 @@ test("IA interna · seção e melhoria seguem a planta e escrevem copy e CTA na 
 
 /* ============================ roteiro e carrossel ============================ */
 
-test("semeadura · roteiro e carrossel recebem a voz (copy e CTA) e o CTA do artigo-modelo, lidos ao vivo pela Marca; sem eles, os fundamentos do painel", async () => {
+/*
+ * 2026-10-09 · A MONTAGEM DO CSV DE BANCADA (regra do piloto). A semeadura lê o
+ * plano do vídeo e a planta pela MESMA montagem do export; aqui ela é injetada
+ * (`ports`), com a entrada do Google de bancada e a planta concluída que o
+ * banco falso tem — sem rede, sem IA, sem provider. O congelamento é o do
+ * pacote do documento (o mesmo `observedAt` e o mesmo ArticleDNA do envio).
+ */
+type PortasDaSemente = NonNullable<Parameters<typeof writerSeedDocument>[2]["ports"]>;
+const pedidosDaMontagem: Array<{ brandId: string; articleId: string; actorUserId: string }> = [];
+function portasDaSemente(opcoes: { congeladoEm?: string } = {}): PortasDaSemente {
+  const linha = banco.radar_article_blueprints.find(item => item.id === plantaAprovada && item.brand_id === brandA && item.state === "APPROVED") ?? null;
+  /* A planta que a conferência fecharia: o item sem forma (que só existe para provar a projeção tolerante do Redator) não chega ao CSV. */
+  const versao = linha ? linha.payload as Linha & { blueprint: Linha & { sections: unknown[] } } : null;
+  const entrada = entradaGoogle();
+  /* Como a leitura do export entrega: os nomes atuais pelas keywords do artigo (`readRadarArticleBlueprintsForExport`) — as do pacote do documento. */
+  const doDossie = (((banco.content_documents[0]?.payload as Linha)?.importedContext as Linha)?.dossier as Linha)?.keywordContext as { principal?: string; secondary?: string[] } | undefined;
+  const doCsv = versao
+    ? { ...(radarArticleBlueprintWithCurrentNames({ ...versao, blueprint: { ...versao.blueprint, sections: versao.blueprint.sections.filter(Boolean) } } as never, [doDossie?.principal || "", ...(doDossie?.secondary || [])]) as Linha), approval: "APPROVED" }
+    : null;
+  return {
+    assemble: async pedido => {
+      pedidosDaMontagem.push(pedido);
+      return {
+        exportedAt: "2026-10-09T12:00:00.000Z",
+        montadas: [{ articleId, entrada, lentes: [], youtube: null, bundleHash: BUNDLE, blueprint: doCsv }],
+        identificacao: [], recusados: [], publicacoes: new Map(), lentes: [], plano: null, planoDaSelecao: null,
+        brandVoice: { kind: "none" },
+        congelamentos: new Map([[articleId, {
+          frozenAt: opcoes.congeladoEm ?? CONGELADO_NO_PACOTE, frozenBundleId: null, frozenBundleHash: null,
+          articleDnaVersionId: "artigo-e1-v1", articleDnaContentHash: null, articleDnaFrom: null, articleDnaUntil: null,
+        }]]),
+      } as never;
+    },
+    blueprintMeta: async () => (linha ? { id: plantaAprovada, versionNumber: 3, approvedAt: "2026-10-02T11:00:00+00:00" } : null),
+  };
+}
+const semearCom = (opcoes: { congeladoEm?: string } = {}) => writerSeedDocument(brandA, documentId, { actorUserId: "ator-1", ports: portasDaSemente(opcoes) });
+const planoPronto = (plano: Awaited<ReturnType<typeof writerSeedDocument>>["plan"]) => {
+  assert.equal(plano?.kind, "ready", JSON.stringify(plano));
+  return (plano as Extract<NonNullable<typeof plano>, { kind: "ready" }>).plan;
+};
+
+test("semeadura · roteiro e carrossel recebem a voz (copy e CTA), a planta e o plano do vídeo do CSV, lidos ao vivo pela Marca; sem planta, nada é semeado", async () => {
   reiniciar();
-  const { foundations, document } = await writerSeedDocument(brandA, documentId);
+  pedidosDaMontagem.length = 0;
+  const { foundations, document, plan } = await semearCom();
   assert.ok(foundations);
   assert.equal(foundations.brandVoice?.versionId, vozV2);
-  assert.equal(foundations.articleBlueprint?.blueprintId, plantaAprovada);
-  const daPlanta = doArtigoModelo()[0];
-  assert.equal(daPlanta.params.get("article_id"), `eq.${articleId}`, "o artigo vem da origem do Radar que a primeira consulta já traz");
-  assert.equal(daPlanta.params.get("bundle_hash"), `eq.${BUNDLE}`);
+  assert.equal(foundations.articleBlueprint?.blueprintId, plantaAprovada, "a versão que o CSV leu");
+  assert.deepEqual(pedidosDaMontagem, [{ brandId: brandA, articleId, actorUserId: "ator-1" }], "o artigo vem da origem do Radar que a primeira consulta já traz");
   conferirLeitura();
   assert.equal(registros.filter(registro => registro.table === "content_documents").every(registro => !(registro.select || "").includes("radar_article")), true);
 
-  const fonte = { title: document.title, foundations, finalArticle: null };
+  const fonte = { title: document.title, foundations, finalArticle: null, plan: planoPronto(plan) };
   const contexto = seedContextLines(fonte).join("\n");
   /* 2026-10-08 · D10: a semeadura escreve entregável e usa o rótulo de entregável do Radar — a corrente vale (rascunho incluído) e é dita "versão corrente". */
   assert.match(contexto, /Voz da marca \(copy e CTA\): Skill "Voz Care Glow" v2 \(versão corrente na Marca\)/);
   assert.doesNotMatch(contexto, /rascunho|aguardando aprova/);
   assert.ok(contexto.includes(CTA_DA_MARCA));
-  assert.ok(contexto.includes(`- CTA: ${CTA_DA_PLANTA}`));
-  assert.ok(contexto.includes("- Próximo passo: Ler o guia da rotina matinal"));
+  /* 2026-10-09 · o CTA é a única chamada; o próximo passo que sobra na leitura é a leitura seguinte, opcional. */
+  assert.ok(contexto.includes(`- CTA (a única chamada): ${CTA_DA_PLANTA}`));
+  assert.ok(contexto.includes("- Leitura seguinte (opcional, não é uma chamada): Ler o guia da rotina matinal"));
+  assert.doesNotMatch(contexto, /Próximo passo:/);
+  assert.match(contexto, /Plano do vídeo pelo artigo-modelo \(o mesmo do CSV de vídeo\):/);
+  assert.match(contexto, /- Capítulos \(as seções do artigo-modelo, na ordem\): 3/);
   for (const prompt of [buildScriptSeedPrompt(fonte), buildCarouselSeedPrompt(fonte)]) assert.ok(prompt.includes(CTA_DA_MARCA));
   for (const sistema of [SCRIPT_SEED_SYSTEM_PROMPT, CAROUSEL_SEED_SYSTEM_PROMPT]) {
     assert.match(sistema, /Voz da marca \(copy e CTA\)/);
     assert.match(sistema, /closingCta/);
   }
 
+  /* Sem planta concluída: o estado explícito, e os fundamentos do painel (nenhuma planta de outro lugar). */
   reiniciar(atual => {
     atual.radar_article_blueprints = [];
     atual.editorial_artifact_versions = [];
   });
-  const sem = await writerSeedDocument(brandA, documentId);
+  const sem = await semearCom();
+  assert.equal(sem.plan?.kind, "needs_article_blueprint");
+  assert.match((sem.plan as { reason: string }).reason, /organize-o no Radar/);
   const completo = ContentDocumentSchema.parse(documentoV2ComDossie(documentId, bundleDoRadar(2_000)));
   assert.deepEqual(sem.foundations, radarFoundationsOf(completo), "sem voz e sem planta, os mesmos fundamentos do painel");
-  const semLinhas = seedContextLines({ title: "T", foundations: sem.foundations!, finalArticle: null }).join("\n");
-  assert.doesNotMatch(semLinhas, /Voz da marca|Artigo-modelo aprovado/);
+
+  /* Recongelada depois do envio: o plano de hoje é de outro pacote e não é servido. */
+  reiniciar();
+  const outro = await semearCom({ congeladoEm: "2026-09-30T10:00:00.000Z" });
+  assert.equal(outro.plan?.kind, "other_investigation");
+  assert.equal(outro.foundations?.articleBlueprint, undefined, "a planta de outro congelamento não entra");
 });
 
 /* ============== 2026-10-08 · a planta para quem escreve (rodada dos entregáveis, E1) ============== */
@@ -897,6 +979,8 @@ function plantaDoCasoReal() {
       closing: { turn: TESE_DO_DONO, specialist: null, cta: CTA_QUE_AFIRMA, nextStep: "Ler o guia do Google My Business" },
       publishedMap: [{ current: "Bastidores da clínica", section: null, reason: "fora do escopo da busca", origin: "ai" }],
     },
+    /* 2026-10-09 · a fonte X1 está no pacote da planta (a leitura do CSV só aceita como fonte a que o pacote tem). */
+    sources: [{ id: "X1", url: "https://support.google.com/business/answer/3474122", title: "Ajuda do Perfil da Empresa no Google", claim: "Avaliações recentes pesam na escolha da clínica" }],
     publishedStructure: { h1: "Instagram não traz pacientes", h2: ["Otimizar o perfil do Instagram", "Conclusão", "Perguntas frequentes", "Bastidores da clínica"] },
   };
 }
@@ -965,7 +1049,13 @@ test("2026-10-08 (correção) · o próximo passo real é orientação: não vai
   const bruto = plantaDoCasoReal();
   const proximoPasso = "Acesse a página de SEO para clínicas e descubra como aparecer no Google quando o paciente procura.";
   const lida = writerArticleBlueprintForWriting(entradaDoCasoReal({ blueprint: { ...bruto.blueprint, closing: { ...bruto.blueprint.closing, nextStep: proximoPasso } } as unknown }))!;
-  assert.equal(lida.closing?.nextStep, proximoPasso);
+  /*
+   * 2026-10-09 (correção) · UM CTA SÓ (defeito 10): esse próximo passo é a
+   * segunda chamada comercial do caso real do Instagram; o CSV para escrever
+   * já não o imprime, e o Redator lê a mesma planta (`radarArticleBlueprintReading`):
+   * ele sai. O próximo passo que só aponta a leitura seguinte fica.
+   */
+  assert.equal(lida.closing?.nextStep, null);
   assert.equal((lida.needsSource || []).some(item => item.field === "closing.nextStep"), false, JSON.stringify(lida.needsSource));
   assert.deepEqual(lida.needsSource, [{ field: "closing.cta", sentence: CTA_QUE_AFIRMA, label: CONVERSAO }], "o CTA que afirma efeito continua marcado");
 });
@@ -1036,8 +1126,10 @@ test("2026-10-08 · fundamentos e pacote da seção · a planta chega com nomes 
   assert.match(fundamentos.next, /needsSource \(na planta e em cada seção\)/);
   assert.match(fundamentos.next, /articleBlueprint\.publishedMap é o mapa da atualização/);
   assert.doesNotMatch(JSON.stringify(lida), D10);
-  const [doPacote] = doArtigoModelo();
+  /* 2026-10-09 · depois dos metadados da escolha do CSV, o conteúdo da escolhida (a página que a IA viu e as fontes do pacote, por caminho). */
+  const doPacote = doArtigoModelo().find(registro => (registro.select || "").includes("bp:payload->blueprint"))!;
   assert.match(doPacote.select ?? "", /ps:payload->publishedStructure/, "a página que a IA viu vem por caminho, nunca payload nu");
+  assert.match(doPacote.select ?? "", /src:payload->sources/, "as fontes do pacote da planta, para a leitura do CSV");
   conferirLeitura();
 
   const head = await readWriterEvidenceHead(contexto(), documentId);
@@ -1091,7 +1183,7 @@ test("2026-10-08 · fundamentos · a keyword do documento que traz o nome antigo
   });
   const fundamentos = await readWriterFoundations(contexto(), documentId);
   assert.equal(fundamentos.articleBlueprint?.sections[1].h2, "Cadastre a clínica no Google Meu Negócio", "o leitor busca o nome antigo: a keyword manda");
-  const { foundations } = await writerSeedDocument(brandA, documentId);
+  const { foundations } = await semearCom();
   assert.equal(foundations?.articleBlueprint?.sections[1].h2, "Cadastre a clínica no Google Meu Negócio", "a semeadura lê a mesma keyword");
   const secoes = await readWriterEvidence(contexto(), documentId, { sourceKey: `radar.blueprint/${plantaAprovada}#blueprint.sections` });
   assert.match(JSON.stringify((secoes as Exclude<typeof secoes, { notModified: true }>).data), /Cadastre a clínica no Google Meu Negócio/, "e a fatia");
@@ -1099,32 +1191,39 @@ test("2026-10-08 · fundamentos · a keyword do documento que traz o nome antigo
 
 test("2026-10-08 · semeadura · a promessa, o CTA e o próximo passo que pedem fonte vão numa lista própria; o rótulo da voz sai concluído", async () => {
   reiniciar(comPlantaDoCasoReal);
-  const { foundations, document } = await writerSeedDocument(brandA, documentId);
+  const { foundations, document, plan } = await semearCom();
   assert.equal(foundations?.articleBlueprint?.closing?.nextStep, "Ler o guia do Perfil da Empresa no Google");
-  const linhas = seedContextLines({ title: document.title, foundations: foundations!, finalArticle: null }).join("\n");
+  const plano = planoPronto(plan);
+  const linhas = seedContextLines({ title: document.title, foundations: foundations!, finalArticle: null, plan: plano }).join("\n");
   assert.ok(linhas.includes(`${SEED_BLUEPRINT_NEEDS_SOURCE_TITLE}:\n- "${CTA_QUE_AFIRMA}" — ${CONVERSAO}`), linhas);
-  assert.equal(linhas.includes(CONVERTE), false, "a frase de seção não entra na semente: ela não está no contexto do derivado");
+  /*
+   * 2026-10-09 · as seções da planta entram na semente (os capítulos, as cenas e
+   * as lâminas são elas): a resposta que abre a seção 1 aparece, e a frase dela
+   * que pede fonte vai à lista, com o número da seção.
+   */
+  assert.ok(linhas.includes(`- Seção 1: "${CONVERTE}" — ${CONVERSAO}`), "a frase da resposta que abre, marcada");
   assert.doesNotMatch(linhas, /Meu Neg[oó]cio|My Business|rascunho|aguardando aprova/);
   for (const sistema of [SCRIPT_SEED_SYSTEM_PROMPT, CAROUSEL_SEED_SYSTEM_PROMPT]) {
-    assert.match(sistema, /'Frases do artigo-modelo que só entram com fonte' não vira afirmação/);
+    /* 2026-10-09 · e a lista que a trava do plano do vídeo tirou do texto publicável (a régua do CSV de vídeo). */
+    assert.match(sistema, /'Frases do artigo-modelo que só entram com fonte' ou em 'Fica fora do texto publicável' não vira afirmação/);
   }
 
   /* A ativa continua dita "ativa"; sem número de versão, "v?" como antes. */
   const voz = foundations!.brandVoice!;
-  const ativa = seedContextLines({ title: "T", foundations: { ...foundations!, brandVoice: { ...voz, status: "active", version: null } }, finalArticle: null }).join("\n");
+  const ativa = seedContextLines({ title: "T", foundations: { ...foundations!, brandVoice: { ...voz, status: "active", version: null } }, finalArticle: null, plan: plano }).join("\n");
   assert.match(ativa, /Voz da marca \(copy e CTA\): Skill "Voz Care Glow" v\? \(ativa na Marca\)/);
-  const aguardando = seedContextLines({ title: "T", foundations: { ...foundations!, brandVoice: { ...voz, status: "pending_approval" } }, finalArticle: null }).join("\n");
+  const aguardando = seedContextLines({ title: "T", foundations: { ...foundations!, brandVoice: { ...voz, status: "pending_approval" } }, finalArticle: null, plan: plano }).join("\n");
   assert.match(aguardando, /v2 \(versão corrente na Marca\)/);
 
-  /* Só as frases que a semente repete (promessa, CTA, próximo passo): a do ângulo não está no contexto do derivado. */
+  /* Só as frases que a semente repete (H1, promessa, CTA, leitura seguinte e a resposta que abre): a do ângulo não está no contexto do derivado. */
   const plantaLida = foundations!.articleBlueprint!;
   const comAngulo = { ...plantaLida, needsSource: [...(plantaLida.needsSource ?? []), { field: "angle", sentence: "ÂNGULO-FORA-DA-SEMENTE", label: CONVERSAO }] };
-  assert.doesNotMatch(seedContextLines({ title: "T", foundations: { ...foundations!, articleBlueprint: comAngulo }, finalArticle: null }).join("\n"), /ÂNGULO-FORA-DA-SEMENTE/);
+  assert.doesNotMatch(seedContextLines({ title: "T", foundations: { ...foundations!, articleBlueprint: comAngulo }, finalArticle: null, plan: plano }).join("\n"), /ÂNGULO-FORA-DA-SEMENTE/);
 
   /* Sem frase marcada, a lista não existe. */
   reiniciar();
-  const deSempre = await writerSeedDocument(brandA, documentId);
-  assert.doesNotMatch(seedContextLines({ title: "T", foundations: deSempre.foundations!, finalArticle: null }).join("\n"), /só entram com fonte/);
+  const deSempre = await semearCom();
+  assert.doesNotMatch(seedContextLines({ title: "T", foundations: deSempre.foundations!, finalArticle: null, plan: planoPronto(deSempre.plan) }).join("\n"), /só entram com fonte/);
 });
 
 test("2026-10-08 · IA interna · o pedido diz o que fazer com as frases que pedem fonte e com o mapa da atualização", () => {
@@ -1135,5 +1234,7 @@ test("2026-10-08 · IA interna · o pedido diz o que fazer com as frases que ped
   }
   assert.match(SECTION_WRITING_SYSTEM_PROMPT, /evidence\.articleBlueprint\.publishedMap/);
   assert.match(SECTION_WRITING_SYSTEM_PROMPT, /nada da página sai sem a decisão registrada no item/);
-  assert.doesNotMatch(IMPROVE_SYSTEM_PROMPT, /publishedMap/, "a melhoria de trecho não reorganiza a página");
+  /* 2026-10-09 · a melhoria de publicado lê o mesmo mapa da página (regra do piloto: os mesmos fundamentos nos reajustes). */
+  assert.match(IMPROVE_SYSTEM_PROMPT, /evidence\.articleBlueprint\.publishedMap/, "a melhoria de publicado segue o mapa da página");
+  assert.match(IMPROVE_SYSTEM_PROMPT, /nada da página sai sem a decisão registrada no item/);
 });

@@ -13,6 +13,7 @@ import {
 } from "../lib/radar/article-blueprint.ts";
 import { radarPortableWritingExport } from "../lib/radar/portable-writing-batch.ts";
 import { ARTIGO, EXPORTADO_EM, LEITURA_DAS_LENTES, entradaGoogle, montadasDoSilo, planoDoSilo } from "./radar-portable-writing-fixtures.mts";
+import { comPlantas } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 
 /*
  * ===== O ARTIGO-MODELO (SDD diretriz editorial, Adendo A, D5 — 2026-10-02) =====
@@ -131,13 +132,24 @@ test("o artigo-modelo APROVADO vira as colunas de planta do CSV; sem ele, nada m
   assert.match(colunas.plano_visual, /Capa[\s\S]*Prompt: pia com toalha[\s\S]*ALT: rotina/);
   assert.match(colunas.titulo_e_seo, /^H1: Skincare facial/);
 
+  /*
+   * 2026-10-09 · regra do dono: sem o artigo-modelo concluído, o CSV "Para
+   * escrever" não é montado (`needs_article_blueprint`: o lote recusa, por erro
+   * ou pelo estado que ele devolve). Com ele, as colunas de planta são as dele.
+   */
   const plano = planoDoSilo();
-  const sem = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM });
-  const comModelo = montadasDoSilo().map(item => item.articleId === ARTIGO ? { ...item, blueprint: payload } : item);
+  const recusa = (() => {
+    try {
+      return (radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM }) as { status?: string }).status ?? null;
+    } catch (erro) {
+      return (erro as { code?: string }).code ?? null;
+    }
+  })();
+  assert.equal(recusa, "needs_article_blueprint");
+  const comModelo = comPlantas(montadasDoSilo().map(item => item.articleId === ARTIGO ? { ...item, blueprint: { ...payload, approval: "APPROVED" as const } } : item), plano.files[0].writing);
   const com = radarPortableWritingExport({ articles: comModelo, lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM });
-  assert.notEqual(sem.files![0].csv, com.files![0].csv);
   assert.ok(com.files![0].csv.includes("ARTIGO-MODELO DA SERP (planta concluída"));
-  assert.equal(sem.files![0].csv.includes("ARTIGO-MODELO DA SERP"), false);
+  assert.ok(com.files![0].csv.includes("H1: Skincare facial"), "a planta aprovada do artigo é a que vai à linha");
 });
 
 test("a migration: append-only, aprovada imutável, leitura por marca, escrita só no servidor", async () => {

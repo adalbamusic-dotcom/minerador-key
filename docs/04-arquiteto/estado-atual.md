@@ -1,3 +1,24 @@
+## Regra do piloto em todas as operações — 2026-10-09 (reajuste encadeado)
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** Módulo proprietário da rodada: Radar
+(`docs/05-radar/estado-atual.md`, seção de mesma data). No Arquiteto, só mudança aditiva no cartão "Próximo passo" da
+melhoria de publicados:
+
+- `lib/arquiteto/article-improvement-next-step.ts`: passo novo `reinvestigate` (campo opcional `reinvestigateCount`,
+  `IMPROVEMENT_REINVESTIGATE_BUTTON`, `improvementReinvestigateSentence`). Com a gravação concluída e alguma
+  "Melhoria gravada" (versão nova do ArticleDNA), o cartão diz onde o artigo segue. Correção antes do deploy: ele prometia "Reinvestigar no Radar e reorganizar o artigo-modelo", caminho que não existe (o item que já está no Radar não é atualizado pelo reajuste);
+  agora diz "Os que ainda não foram ao Radar seguem aqui no Arquiteto: marque Pronto para Radar e use Enviar ao Radar, na aba Links internos. Os que já estão no Radar continuam na versão enviada até existir o reenvio da versão nova ao Radar." e o botão é "Abrir Links internos"
+  (só troca de aba, sem custo). Os nomes exportados (`reinvestigate`, `IMPROVEMENT_REINVESTIGATE_BUTTON`, `improvementReinvestigateSentence`) ficaram; nenhum passo antigo mudou de ordem nem de texto.
+- `modules/arquiteto/article-improvement-panel.tsx`: conta as "Melhoria gravada" do run concluído; prop opcional
+  `onOpenLinks` (substitui `radarHref` e o destino derivado da rota; sem ela, o botão do passo fica desligado). `modules/arquiteto/arquiteto-workspace.tsx` passa `onOpenLinks={() => setWorkspaceMode("links")}` (uma linha, aditiva; arquivo compartilhado do módulo, consumidor único do painel).
+- No Radar, a versão do ArticleDNA que vale é a TRANSPORTADA pelo item do Radar (a que o Arquiteto enviou); sem ela, a vigente pela regra da mesa do Arquiteto
+  (`lib/arquiteto/canonical-version-authority.ts`, por `radarCurrentArticleDnaVersion`): a última aprovada; proposta
+  mais nova não tira a autoridade. Uma versão nova APROVADA de artigo já enviado NÃO desliga a planta nem a investigação: o Radar segue na versão enviada (correção antes do deploy; ver `docs/05-radar/estado-atual.md`).
+  Proposta (exige SDD e autorização, mudança de workflow): reenvio da versão nova do ArticleDNA ao Radar, que atualiza o item existente (`source_version_id`, `articleDnaVersionId`, `articleDnaContentHash`, `hydration`) e depois reinvestiga e reorganiza o artigo-modelo. Sem isso, o reajuste de artigo já enviado não chega ao Radar (o Arquiteto recusa reenviar o artigo já entregue; o `import_radar` não muda o item que existe).
+- Testes: `tests/radar-piloto-reajuste-2026-10-09.test.mts` (6, com DOM: a frase, o botão "Abrir Links internos", o botão desligado sem `onOpenLinks`, a ligação no workspace e o cartão de antes), `tests/radar-piloto-articledna-vigente-2026-10-09.test.mts` e `tests/radar-versao-transportada-2026-10-09.test.mts`.
+- Limitação: o cartão conta todas as "Melhoria gravada" do run, sem separar as que já estão no Radar das que nunca foram (a frase cobre os dois casos), e
+  continua até a próxima "Buscar keywords".
+
 ## Troca da principal sem volume como reserva da leitura da IA — 2026-10-01
 
 ## Links internos: cópia sobre a composição vigente e Silos marcados — 2026-10-01

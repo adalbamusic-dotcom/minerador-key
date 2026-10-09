@@ -9,7 +9,7 @@ import { autoDecideRadarReference } from "../lib/radar/research-auto-selection.t
 import { freezeRadarEvidenceBundle } from "../lib/radar/investigation-finalization.ts";
 import { RADAR_EXTRACTION_REDIRECT_DUPLICATE, radarExtractionAccount, radarReconcileExtractionRound } from "../lib/radar/extraction-round.ts";
 import { radarPhase1Action } from "../lib/radar/serp-phase1.ts";
-import { radarAutoFinalizePendingNotice, radarGoogleAutoFinalizeStartNote, radarPhase1WithAutoFinalize } from "../lib/radar/operational-actions.ts";
+import { radarAutoFinalizePendingNotice, radarAutoFinalizeStartNote, radarGoogleAutoFinalizeStartNote, radarPhase1WithAutoFinalize } from "../lib/radar/operational-actions.ts";
 import { radarPhase1Visible, radarPhase1VisibleLabel } from "../modules/radar/radar-article-blueprint-panel.tsx";
 
 /*
@@ -225,8 +225,12 @@ test("F4 · 'Iniciar Pesquisa YouTube/Amazon' diz a regra do próprio perfil; s�
     const visivel = radarPhase1Visible(acao(mode), mode);
     assert.equal(visivel.id, "START_RESEARCH");
     assert.match(visivel.label, mode === "YOUTUBE" ? /YouTube$/ : /Amazon$/);
-    assert.equal(/não seguram/.test(visivel.info || ""), false, `${mode}: prometeu a regra do Google`);
-    assert.match(visivel.info || "", /Com pendência, nada congela/, `${mode}: a regra D9 do perfil`);
+    /*
+     * 2026-10-09 (correção) · a D9 do perfil saiu (regra do dono): o ⓘ diz a regra
+     * do Google NOS TERMOS DO PERFIL — consulta e apoio que falham viram limitação.
+     */
+    assert.match(visivel.info || "", /que falhou e apoio do Google que falhou viram limitação registrada/, `${mode}: a regra do Google no perfil (2026-10-09)`);
+    assert.ok((visivel.info || "").includes(radarAutoFinalizeStartNote("análise", mode)), `${mode}: a nota do perfil`);
     /* A análise do perfil também: o rótulo diz o custo, o ⓘ diz a regra dele. */
     const analisar = radarPhase1WithAutoFinalize({ id: "ANALYZE_COMPETITION", label: "Analisar concorrência", info: null }, mode);
     assert.equal(/não seguram/.test(analisar.info || ""), false, `${mode}: análise`);

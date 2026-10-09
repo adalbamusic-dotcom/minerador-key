@@ -127,7 +127,8 @@ test("amostra vazia e todas as candidatas recusadas: as falhas são gravadas, na
 
   const botao = tela.get("radar-deep-research-button");
   assert.equal(botao.getAttribute("data-action-id"), "ANALYZE_COMPETITION");
-  assert.equal(botao.textContent, "Analisar concorrência · e finaliza (+ 1 chamada de IA)");
+  /* 2026-10-09 (correção) · o teto real do custo no rótulo. */
+  assert.equal(botao.textContent, "Analisar concorrência · e finaliza (+ até 2 chamadas de IA)");
 
   await act(() => { botao.click(); });
   for (let espera = 0; espera < 100 && !avisos.some(aviso => aviso.startsWith("Não finalizou sozinha")) && !avisos.some(aviso => /Nenhuma das/.test(aviso)); espera += 1) {

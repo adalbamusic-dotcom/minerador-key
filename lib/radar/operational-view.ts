@@ -675,6 +675,14 @@ export function buildRadarReportSummary(input: {
    * porque esta coleta não abriu nenhum dos três.
    */
   amazon?: { finalized: boolean; queries: number; products: number; supportCollected: boolean; blueprintFrozen: boolean } | null;
+  /**
+   * 2026-10-09 · Aditivo: o artigo-modelo concluído da investigação vigente,
+   * como a tela o conhece (o painel do artigo-modelo). "Pronto para o Redator"
+   * só com ele: o envio exige a planta. Ausente (a planilha, que não lê a
+   * planta de cada linha), a pergunta diz o que falta conferir e não afirma
+   * prontidão.
+   */
+  articleBlueprint?: "APPROVED" | "MISSING" | null;
 }): RadarReportSummary {
   const observed = input.observed;
   /*
@@ -796,29 +804,45 @@ export function buildRadarReportSummary(input: {
     },
     frozen: congelado,
     stale: input.view.stale,
+    /* 2026-10-09 · a planta concluída, quando a tela a conhece: a mesma autoridade do envio. */
+    articleBlueprint: input.articleBlueprint ?? null,
   });
-  const pacote: RadarReportCheck = prontidao.ready
+  /*
+   * 2026-10-09 · "PRONTO PARA O REDATOR" SÓ COM O ARTIGO-MODELO. O envio exige a
+   * planta concluída da investigação vigente; sem a planta conferida, a
+   * pergunta não afirma prontidão: diz que a investigação está pronta e o que o
+   * envio ainda confere.
+   */
+  const pacote: RadarReportCheck = prontidao.ready && input.articleBlueprint === "APPROVED"
     ? {
       id: "handoff",
       question: "Pacote para o Redator?",
       state: "READY",
       detail: congelado?.acknowledgedInsufficiency
-        ? "Pronto para o Redator, com a insuficiência declarada junto."
-        : "Pronto para o Redator.",
+        ? "Pronto para o Redator: investigação congelada e artigo-modelo concluído, com a insuficiência declarada junto."
+        : "Pronto para o Redator: investigação congelada e artigo-modelo concluído.",
     }
-    : {
-      id: "handoff",
-      question: "Pacote para o Redator?",
-      /* Falta finalizar ainda vem; divergência é problema aberto, não etapa. */
-      state: prontidao.blocks.some(item => item.code === "NOT_FINALIZED") ? "PENDING" : "PARTIAL",
-      detail: prontidao.blocks.map(item => item.message).join(" "),
-    };
+    : prontidao.ready
+      ? {
+        id: "handoff",
+        question: "Pacote para o Redator?",
+        state: "PENDING",
+        detail: "A investigação está pronta para a entrega; o envio ao Redator confere o artigo-modelo concluído desta investigação (Pesquisa → Artigo-modelo da SERP).",
+      }
+      : {
+        id: "handoff",
+        question: "Pacote para o Redator?",
+        /* Falta finalizar ainda vem; a planta ausente também é etapa; divergência é problema aberto, não etapa. */
+        state: prontidao.blocks.every(item => item.code === "NOT_FINALIZED" || item.code === "ARTICLE_BLUEPRINT_MISSING") ? "PENDING" : "PARTIAL",
+        detail: prontidao.blocks.map(item => item.message).join(" "),
+      };
   /*
    * Falta finalizar é etapa que ainda vem; o resto é divergência que alguém
    * precisa resolver — e só o segundo caso vira impedimento declarado.
+   * 2026-10-09 · organizar o artigo-modelo também é etapa, não divergência.
    */
   for (const bloqueio of prontidao.blocks) {
-    if (bloqueio.code !== "NOT_FINALIZED") blockers.push(bloqueio.message);
+    if (bloqueio.code !== "NOT_FINALIZED" && bloqueio.code !== "ARTICLE_BLUEPRINT_MISSING") blockers.push(bloqueio.message);
   }
 
   /*
@@ -831,10 +855,10 @@ export function buildRadarReportSummary(input: {
   const blueprint = input.view.blueprint;
   /* A seção da virada do Assunto é exigida, não observada: sozinha não faz dossiê (F3.1). */
   const dossieEditorial: RadarReportCheck = !blueprint.sections.filter(secao => !radarIsSubjectTurnSection(secao.id)).length
-    ? { id: "blueprint", question: "Blueprint editorial?", state: "PENDING", detail: blueprint.readiness.reason }
+    ? { id: "blueprint", question: "Esqueleto da SERP?", state: "PENDING", detail: blueprint.readiness.reason }
     : {
       id: "blueprint",
-      question: "Blueprint editorial?",
+      question: "Esqueleto da SERP?",
       state: blueprint.readiness.state === "READY" ? "READY" : "PARTIAL",
       detail: `${blueprint.readiness.reason} ${blueprint.specialistBriefs.length} pauta(s) para especialista · ${blueprint.videoBriefs.length} oportunidade(s) de vídeo.`,
     };

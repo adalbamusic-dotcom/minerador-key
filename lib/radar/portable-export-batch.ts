@@ -35,7 +35,11 @@ import { latestRadarR5SerpReview } from "./r5-sequential.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
 import type { RadarVideoExportYoutube } from "./portable-video-export.ts";
 import type { RadarVideoLensOrganicReading } from "./video-competitive.ts";
-import type { RadarArticleBlueprintPayload } from "./article-blueprint.ts";
+import { radarArticleBlueprintColumns, radarArticleBlueprintReading, type RadarArticleBlueprintPayload } from "./article-blueprint.ts";
+import type { RadarPortableExportBlueprint } from "./portable-export.ts";
+import type { RadarAmazonCommercialBlock } from "./amazon-commercial-block.ts";
+import { radarWritingBlueprintExclusions, radarWritingProjections, radarWritingRowNeedsBlueprint } from "./portable-writing-export.ts";
+import { radarClaimCommonStems, radarPendingClaims } from "./pending-claims.ts";
 
 /**
  * ===== A MONTAGEM DO LOTE DO EXPORT PORTÁTIL — as pontes puras da rota =====
@@ -366,6 +370,14 @@ export type RadarPortableExportAssembledArticle = {
    * (`videoLensDigests`). Os outros formatos não o leem nem o recebem.
    */
   lensDigests?: RadarVideoLensOrganicReading | null;
+  /**
+   * 2026-10-09 (correção) · Aditivo, fora do pacote e do hash: o bloco comercial
+   * COMPLETO da Amazon congelada (`radarAmazonFrozenCommercialBlock`) — faixas de
+   * preço, regras de escrita, limitações e o esqueleto comercial como
+   * matéria-prima. Só o gerador do artigo-modelo o lê; sem ele, a geração caía
+   * sempre no plano comercial resumido de `entrada.commercial`.
+   */
+  amazonCommercialBlock?: RadarAmazonCommercialBlock | null;
 };
 
 /**
@@ -397,9 +409,149 @@ export function radarPortableExportRows(input: {
         ...(artigo.lentesCongeladas ? { frozen: artigo.lentesCongeladas } : {}),
       },
       siloContext: input.plan?.contextByArticleId[artigo.articleId] ?? null,
+      /*
+       * 2026-10-09 · o técnico pelo artigo-modelo: a planta concluída, já lida
+       * (rascunho antigo não conta). (correção) Com a entrada do artigo: a trava,
+       * as exclusões do ArticleDNA e o próximo passo que chama fora.
+       */
+      articleBlueprint: radarPortableExportHasApprovedBlueprint(artigo) ? radarPortableExportBlueprintOf(artigo.blueprint!, artigo.entrada) : null,
     }));
   }
   return linhas;
+}
+
+/**
+ * 2026-10-09 · A PLANTA LIDA PARA A LINHA DO TÉCNICO: as MESMAS colunas do CSV
+ * "Para escrever" (`radarArticleBlueprintColumns`) e a leitura compartilhada com
+ * o Redator e o vídeo (`radarArticleBlueprintReading`). Rascunho antigo não é
+ * planta: `null`.
+ *
+ * 2026-10-09 (correção) · COM AS REGRAS DO PILOTO. O técnico manda escrever pela
+ * estrutura (`outline_md`), mas lia a planta crua: o "Próximo passo" que chama
+ * virava uma segunda chamada no fechamento, a trava de fonte não tinha as
+ * afirmações do pacote e a seção que o reajuste do ArticleDNA excluiu ficava.
+ * Com a entrada do artigo (`entrada`), as opções são as do CSV para escrever que
+ * não dependem do lote: a trava (`radarPendingClaims` + `radarClaimCommonStems`),
+ * as exclusões do ArticleDNA, a principal e a continuação dita (`null`: o
+ * próximo passo que chama sai, sem segunda chamada). A leitura vai sem o
+ * próximo passo que chama (`withoutCallInNextStep`), como o vídeo e o Redator.
+ * Sem `entrada` (chamada antiga), a leitura de antes.
+ */
+export function radarPortableExportBlueprintOf(
+  payload: RadarArticleBlueprintPayload | null | undefined,
+  entrada: RadarPortableExportInput | null = null,
+): RadarPortableExportBlueprint | null {
+  if (!payload || !payload.blueprint || payload.approval === "DRAFT") return null;
+  const sources = new Set(payload.sources.map(item => item.id));
+  if (!entrada) {
+    return {
+      payload,
+      columns: radarArticleBlueprintColumns(payload),
+      reading: radarArticleBlueprintReading(payload.blueprint, { sources }).blueprint,
+    };
+  }
+  const p = radarWritingProjections(entrada);
+  const exclusions = radarWritingBlueprintExclusions(entrada, p);
+  return {
+    payload,
+    columns: radarArticleBlueprintColumns(payload, null, null, null, {
+      ...(exclusions ? { exclusions } : {}),
+      pendentes: radarPendingClaims(p, payload),
+      comuns: radarClaimCommonStems(p, payload),
+      principal: textoLimpo(p.dna.principalKeyword) || null,
+      continuation: null,
+    }),
+    reading: radarArticleBlueprintReading(payload.blueprint, { sources, withoutCallInNextStep: true, ...(exclusions ? { exclusions } : {}) }).blueprint,
+  };
+}
+
+/*
+ * ===== 2026-10-09 · O ARTIGO-MODELO É OBRIGATÓRIO EM TODA ENTREGA (regra do dono) =====
+ *
+ * "Tudo que é de processos antigos tem que ser substituído pelos novos
+ * processos dos pilotos." CSV "Para escrever", CSV de vídeo, CSV técnico e o
+ * export por Silo passam a exigir a planta CONCLUÍDA de cada artigo — a que a
+ * montagem já leu por `radarArticleBlueprintPick` (hash exato ou a concluída
+ * do mesmo congelamento e ArticleDNA). Sem ela, nada sai pelo modelo editorial
+ * antigo: a rota responde 409 com a lista do que falta, pelo título, e a tela
+ * organiza em série (o custo dito no botão antes do clique) e exporta.
+ *
+ * Puro: a decisão é sobre o que a montagem trouxe, sem leitura nova.
+ */
+
+/** O código do estado "falta o artigo-modelo" — o mesmo das funções puras de entrega e da resposta 409 da rota. */
+export const RADAR_EXPORT_NEEDS_ARTICLE_BLUEPRINT = "needs_article_blueprint" as const;
+
+/** O estado explícito que as funções puras de entrega devolvem sem a planta (contrato da rodada de 2026-10-09). */
+export type RadarExportNeedsArticleBlueprint = { status: typeof RADAR_EXPORT_NEEDS_ARTICLE_BLUEPRINT; articleIds: string[] };
+
+/** O que falta, como a tela o mostra: o artigo pelo título, nunca pelo id. */
+export type RadarPortableExportMissingBlueprint = { articleId: string; title: string };
+
+/** A planta concluída do pacote vigente: a montagem a trouxe e ela não é o rascunho antigo. */
+export const radarPortableExportHasApprovedBlueprint = (artigo: Pick<RadarPortableExportAssembledArticle, "blueprint">): boolean =>
+  Boolean(artigo.blueprint && artigo.blueprint.blueprint && artigo.blueprint.approval !== "DRAFT");
+
+/** O nome do artigo que a tela reconhece: a promessa do ArticleDNA (o título do item), a principal ou o slug. */
+const tituloDoArtigo = (artigo: Pick<RadarPortableExportAssembledArticle, "entrada">): string =>
+  textoLimpo(artigo.entrada.article.promise) || textoLimpo(artigo.entrada.article.principalKeyword) || textoLimpo(artigo.entrada.article.slug) || "artigo sem título conhecido";
+
+/**
+ * Os artigos montados sem a planta concluída, na ordem do pedido. `ids` (opcional): só estes (o que a função pura de entrega apontou).
+ *
+ * 2026-10-09 (correção) · UM PORTÃO SÓ. No modo "writing", a investigação de vídeo como
+ * perfil primário não pede planta — a linha dela no CSV "Para escrever" é só a
+ * identidade, bloqueada, e não lê a planta (`radarWritingRowNeedsBlueprint`, a regra do
+ * portão puro da escrita). Cobrar a organização (paga) dela era pagar por uma planta que
+ * o arquivo ignora. Nos outros modos (vídeo, técnico), todo artigo pede a planta.
+ */
+export function radarPortableExportMissingBlueprints(
+  artigos: readonly RadarPortableExportAssembledArticle[],
+  ids: readonly string[] | null = null,
+  opcoes: { mode?: "writing" | "full" | "video" | null } = {},
+): RadarPortableExportMissingBlueprint[] {
+  const pedidos = ids ? new Set(ids) : null;
+  const dispensado = (artigo: RadarPortableExportAssembledArticle) => opcoes.mode === "writing" && !radarWritingRowNeedsBlueprint(artigo.entrada.profile);
+  return artigos
+    .filter(artigo => (pedidos ? pedidos.has(artigo.articleId) : !dispensado(artigo) && !radarPortableExportHasApprovedBlueprint(artigo)))
+    .map(artigo => ({ articleId: artigo.articleId, title: tituloDoArtigo(artigo) }));
+}
+
+/**
+ * A função pura de entrega devolveu "falta o artigo-modelo"? Guarda de tipo:
+ * do lado verdadeiro, o resultado é o estado explícito; do falso, o arquivo.
+ */
+export function radarExportNeedsArticleBlueprint<T>(resultado: T): resultado is Extract<T, RadarExportNeedsArticleBlueprint> {
+  const lido = resultado as { status?: unknown; articleIds?: unknown } | null;
+  return Boolean(lido && typeof lido === "object" && lido.status === RADAR_EXPORT_NEEDS_ARTICLE_BLUEPRINT && Array.isArray(lido.articleIds));
+}
+
+/** Os ids do estado explícito, saneados. */
+export const radarExportNeedsArticleBlueprintIds = (resultado: unknown): string[] =>
+  ((resultado as { articleIds?: unknown } | null)?.articleIds as unknown[] | undefined || []).filter((id): id is string => typeof id === "string" && Boolean(id.trim()));
+
+/**
+ * O CORPO DA RESPOSTA 409: o que falta, pelo título, e o teto do custo de
+ * organizar (até 2 chamadas de IA por artigo: organizar e, quando a resposta
+ * vem cortada ou a conferência aponta o que corrigir, mais 1). Os recusados de
+ * antes (não finalizados) vão junto, para a tela não perdê-los.
+ */
+export function radarPortableExportNeedsBlueprintBody(input: {
+  missing: readonly RadarPortableExportMissingBlueprint[];
+  refused: ReadonlyArray<{ articleId: string; code: string; reason: string }>;
+}) {
+  const quantos = input.missing.length;
+  return {
+    success: false as const,
+    code: RADAR_EXPORT_NEEDS_ARTICLE_BLUEPRINT,
+    error: quantos === 1
+      ? "Falta o artigo-modelo concluído deste artigo: toda entrega sai pelo artigo-modelo. Organize-o para exportar."
+      : `Faltam os artigos-modelo concluídos de ${quantos} artigos: toda entrega sai pelo artigo-modelo. Organize-os para exportar.`,
+    missingArticleBlueprints: input.missing.map(item => ({ articleId: item.articleId, title: item.title })),
+    /* O teto do custo, para o botão dizer antes do clique. */
+    maxAiCalls: quantos * 2,
+    refused: input.refused,
+  };
 }
 
 /* ================================== o silo ================================== */

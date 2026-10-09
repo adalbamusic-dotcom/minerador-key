@@ -48,7 +48,17 @@ import { radarAuxiliaryLensLabel, radarCanonicalLensLabel, radarFrozenLensView }
 import { radarCandidateEvidenceLabel } from "./radar-subject-turn-view";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
 import { RadarRefreezePanel, type RadarRefreezeHandlers } from "./radar-refreeze-panel";
-import { RadarArticleBlueprintPanel, radarArticleBlueprintFreezeOf, radarPhase1Visible, useRadarArticleBlueprintForReport, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
+import {
+  RADAR_ARTICLE_BLUEPRINT_ORGANIZE_AND_SEND_LABEL,
+  RadarArticleBlueprintCostAction,
+  RadarArticleBlueprintPanel,
+  radarArticleBlueprintFreezeOf,
+  radarArticleBlueprintFreezeOfInvestigation,
+  radarPhase1Visible,
+  useRadarArticleBlueprintForReport,
+  type RadarArticleBlueprintDelivery,
+  type RadarArticleBlueprintJob,
+} from "./radar-article-blueprint-panel";
 
 /** A cobertura de lentes da SERP canônica viva, para a linha da consulta central. */
 function lenteDaCanonica(research: SerpResearchSnapshot | null | undefined) {
@@ -514,6 +524,17 @@ export type RadarWriterHandoffTab = {
   destinationLabel: string | null;
   busy: boolean;
   onSend?: () => void;
+  /**
+   * 2026-10-09 · O ARTIGO-MODELO OBRIGATÓRIO NO ENVIO. O envio exige a planta
+   * concluída da investigação vigente. `articleBlueprint`: o que o painel do
+   * artigo-modelo conferiu (o workbench preenche); `articleBlueprintMissing`: o
+   * servidor recusou o envio por falta dela (a página preenche). Faltando,
+   * "Enviar ao Redator" dá lugar a "Organizar o artigo-modelo e enviar", com o
+   * custo no botão, que chama `onOrganizeAndSend`.
+   */
+  articleBlueprint?: RadarArticleBlueprintDelivery;
+  articleBlueprintMissing?: boolean;
+  onOrganizeAndSend?: () => void;
 };
 
 function WriterHandoff({ tab }: { tab: RadarWriterHandoffTab }) {
@@ -534,6 +555,33 @@ function WriterHandoff({ tab }: { tab: RadarWriterHandoffTab }) {
     return tab.blockedReason
       ? <p className="mt-3 text-sm text-text-muted" role="status" data-testid="radar-writer-blocked">{tab.blockedReason}</p>
       : null;
+  }
+
+  /*
+   * 2026-10-09 · "ENVIAR AO REDATOR" SÓ COM O ARTIGO-MODELO. Enquanto o painel
+   * confere, o botão espera; faltando a planta (pelo painel ou pela recusa do
+   * servidor), o botão organiza e envia, com o custo dito antes do clique.
+   */
+  /* O painel conferiu agora (inclusive depois de organizar por ele); sem o painel, vale a recusa do servidor. */
+  const semPlanta = tab.articleBlueprint === "missing" || (tab.articleBlueprint === undefined && Boolean(tab.articleBlueprintMissing));
+  if (tab.articleBlueprint === "loading") {
+    return <p className="mt-3 text-sm text-text-muted" role="status" data-testid="radar-writer-checking-blueprint">Conferindo o artigo-modelo desta investigação antes do envio ao Redator…</p>;
+  }
+  /*
+   * 2026-10-09 (correção) · a leitura do artigo-modelo falhou: não é "falta organizar".
+   * Oferecer a organização paga aqui faria pagar por um problema de leitura; o envio
+   * espera a conferência, e o servidor recusa com 503 se a leitura falhar de novo.
+   */
+  if (tab.articleBlueprint === "unreadable") {
+    return <p className="mt-3 text-sm text-warning" role="status" data-testid="radar-writer-blueprint-unreadable">Não foi possível conferir o artigo-modelo desta investigação agora. Recarregue o artigo para tentar de novo; nada foi enviado ao Redator.</p>;
+  }
+  if (semPlanta) {
+    return <div className="mt-3 space-y-2" data-testid="radar-writer-needs-blueprint">
+      <p className="text-sm leading-6 text-text-muted">O envio ao Redator leva o artigo-modelo concluído desta investigação, e ele ainda não foi organizado.</p>
+      {tab.busy
+        ? <p className="text-sm text-pending" role="status">Organizando o artigo-modelo e enviando…</p>
+        : <RadarArticleBlueprintCostAction articles={1} label={RADAR_ARTICLE_BLUEPRINT_ORGANIZE_AND_SEND_LABEL} onConfirm={() => tab.onOrganizeAndSend?.()} disabled={!tab.onOrganizeAndSend} testId="radar-writer-organize-and-send" />}
+    </div>;
   }
 
   return <div className="mt-3">
@@ -683,6 +731,13 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
       * disso descreve uma prateleira: mostrar os dois somaria produtos com
       * páginas na mesma tabela.
       */}
+    {/*
+      * 2026-10-09 (correção) · NA AMAZON, O ARTIGO-MODELO VEM PRIMEIRO, como no
+      * Google: o modelo comercial da prateleira desceu para o "Esqueleto da SERP"
+      * recolhido dentro do painel abaixo (insumo do gerador, não saída).
+      */}
+    {searchMode === "AMAZON" && amazonSearch && articleBlueprint && <div className="mt-3">{articleBlueprint}</div>}
+
     {searchMode === "AMAZON" && amazonSearch && <RadarAmazonSearchPanel
       run={amazonSearch.run}
       plannedQueries={amazonSearch.plannedQueries}
@@ -712,7 +767,7 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
     />}
 
     {/* 2026-10-02 · nas abas de acréscimo (YouTube, Amazon), o artigo-modelo da SERP continua à mão, depois do painel delas. */}
-    {!areaGoogle && articleBlueprint && <div className="mt-3">{articleBlueprint}</div>}
+    {!areaGoogle && !(searchMode === "AMAZON" && amazonSearch) && articleBlueprint && <div className="mt-3">{articleBlueprint}</div>}
 
     {areaGoogle && <>
 
@@ -727,18 +782,21 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
       * onde contexto deve ficar. Prioridade visual não é decoração: é o que
       * decide o que vai ser lido.
       */}
-    {view.articleModel.sections.length > 0 && <div className="mt-3">
-      <RadarArticleModelSection model={view.articleModel} />
-    </div>}
-
     {/*
-      * 2026-10-02 · O ARTIGO-MODELO DA SERP, LOGO ABAIXO DO ESQUELETO.
+      * 2026-10-02 · O ARTIGO-MODELO DA SERP.
       *
-      * Era um painel à parte, depois da área inteira. O dono decidiu que ele é
-      * parte da SERP: o modelo acima é o esqueleto que a SERP monta; este é o
-      * mesmo esqueleto organizado pela IA, que ele aprova.
+      * 2026-10-09 · ELE É A REFERÊNCIA DO ARTIGO (regra do dono: o processo do
+      * piloto substitui o antigo). Vem primeiro; o "Blueprint editorial ·
+      * Artigo-modelo competitivo" de antes deixou a posição principal e virou o
+      * "Esqueleto da SERP", recolhido logo abaixo: é a matéria-prima que a IA
+      * organiza, não o que vai ao Redator.
       */}
     {articleBlueprint && <div className="mt-3">{articleBlueprint}</div>}
+
+    {view.articleModel.sections.length > 0 && <details className="mt-3 rounded-md border border-divider bg-surface p-3" data-testid="radar-serp-skeleton">
+      <summary className="cursor-pointer text-sm font-semibold text-foreground">Esqueleto da SERP · o que a amostra mostra (insumo do artigo-modelo)</summary>
+      <div className="mt-3"><RadarArticleModelSection model={view.articleModel} /></div>
+    </details>}
 
     {/* §19 · a decisão, logo depois do que se decide. */}
     {writerHandoff && <WriterHandoff tab={writerHandoff} />}
@@ -1364,6 +1422,8 @@ function ReportSummaryPanel({ model, brandId = null, articleId = null, articleDn
     observed: model.deepResearch.observed,
     view: model.deepResearch,
     videos: { registered: materiais.filter(item => item.state !== "IGNORED_FOR_ARTICLE").length, transcribed: 0 },
+    /* 2026-10-09 · "Pronto para o Redator" só com o artigo-modelo concluído conferido; sem a conferência, a pergunta não afirma prontidão. */
+    articleBlueprint: planta?.approval === "APPROVED" ? "APPROVED" : null,
   });
   const placar = radarSeoGuidelineState(resumo.checks, { specialistAccepted: model.specialist.reviewedEvidence, articleBlueprint: planta });
   const intencao = model.deepResearch.observed.intent;
@@ -1409,6 +1469,27 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
   const [expandedArea, setExpandedArea] = useState<RadarR3Area | null>(null);
   /* 2026-10-08 (correção) · o congelamento vigente com o ArticleDNA que a página conhece: o painel confere a versão nova pela referência gravada. */
   const freezeComArticleDna = radarArticleBlueprintFreezeOf(model?.deepResearch?.finalizedBundle ?? null, expertContext?.articleDnaVersionId ?? null);
+  /*
+   * 2026-10-09 · O ARTIGO-MODELO TAMBÉM SEM O GOOGLE CONGELADO. O artigo de
+   * Amazon (ou de YouTube) congelado sem o Google ficava sem o painel — e sem
+   * a referência do artigo. A precedência é a do servidor.
+   */
+  /* A Amazon congelada que a página conhece confere a planta como no export (sem a aba da Amazon, não confere). */
+  const congelamentoDoArtigoModelo = freezeComArticleDna ? radarArticleBlueprintFreezeOfInvestigation({
+    google: model?.deepResearch?.finalizedBundle ?? null,
+    amazon: amazonSearch ? amazonSearch.frozen ?? null : undefined,
+  }, expertContext?.articleDnaVersionId ?? null) : radarArticleBlueprintFreezeOfInvestigation({
+    google: null,
+    amazon: amazonSearch ? amazonSearch.frozen ?? null : undefined,
+    youtube: youtubeSearch?.frozen ?? null,
+  }, expertContext?.articleDnaVersionId ?? null);
+  /* 2026-10-09 · o que o painel conferiu, por artigo: decide o botão do envio ao Redator. */
+  const [entregaDoArtigoModelo, setEntregaDoArtigoModelo] = useState<Record<string, RadarArticleBlueprintDelivery>>({});
+  const avisarEntregaDoArtigoModelo = (alvo: string) => (entrega: RadarArticleBlueprintDelivery) =>
+    setEntregaDoArtigoModelo(atual => (atual[alvo] === entrega ? atual : { ...atual, [alvo]: entrega }));
+  const envioComArtigoModelo: RadarWriterHandoffTab | undefined = writerHandoff && articleId
+    ? { ...writerHandoff, articleBlueprint: congelamentoDoArtigoModelo && brandId ? entregaDoArtigoModelo[articleId] ?? "loading" : undefined }
+    : writerHandoff;
 
   /*
    * DUAS CAMADAS, E SÓ UMA DEPENDE DO ARTIGO — §2.3.2.
@@ -1521,8 +1602,8 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
           * modelo do artigo (era um painel solto depois da área). Só existe com a
           * investigação finalizada: ele organiza o pacote congelado.
           */}
-        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} refreeze={googleRefreeze ?? null} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)}
-          articleBlueprint={model.deepResearch.finalizedBundle && brandId && articleId ? <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} job={articleBlueprintJob} currentBundleHash={model.deepResearch.finalizedBundle.bundleHash} currentFreeze={freezeComArticleDna} /> : null} />}
+        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} refreeze={googleRefreeze ?? null} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={envioComArtigoModelo} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)}
+          articleBlueprint={congelamentoDoArtigoModelo && brandId && articleId ? <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} job={articleBlueprintJob} currentBundleHash={model.deepResearch.finalizedBundle?.bundleHash ?? null} currentFreeze={congelamentoDoArtigoModelo} onDeliveryChange={avisarEntregaDoArtigoModelo(articleId)} /> : null} />}
         {/*
           * AMAZON NÃO É UM LUGAR SEPARADO — é um dos destinos da pesquisa.
           *

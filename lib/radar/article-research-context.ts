@@ -119,6 +119,22 @@ export type RadarResearchInternalLinks = {
   }>;
 };
 
+/** 2026-10-09 · De onde vem a exclusão no ArticleDNA (o reajuste do Arquiteto que a decidiu). */
+export type RadarResearchScopeExclusionSource = "excludedSubjects" | "differentiation" | "antiCannibalizationBoundary";
+
+/** 2026-10-09 · Um assunto que o ArticleDNA tira deste artigo; `owner` = o artigo vizinho que o cobre, quando a nota diz. */
+export type RadarResearchScopeExclusion = {
+  label: string;
+  source: RadarResearchScopeExclusionSource;
+  owner: string | null;
+};
+
+/** 2026-10-09 · O escopo decidido no Arquiteto: o ângulo (guarda) e as exclusões duras. */
+export type RadarResearchArticleScope = {
+  angle: string | null;
+  exclusions: RadarResearchScopeExclusion[];
+};
+
 export type RadarArticleResearchContext = {
   state: "COMPLETE" | "PARTIAL";
   article: {
@@ -183,6 +199,20 @@ export type RadarArticleResearchContext = {
    * sem ele, `radarResearchContextSiloRole` resolve pela foto e pela formação.
    */
   siloRole?: RadarArticleSiloRole;
+  /*
+   * 2026-10-09 · O ESCOPO DECIDIDO NO ARQUITETO (reajustes: melhoria de
+   * publicados, diferenciação de canibalizados). `excludedSubjects`, as notas
+   * "não cobrir … — é do artigo …" de `differentiation` e o "deixar … para as
+   * páginas vizinhas" de `antiCannibalizationBoundary` viram EXCLUSÃO DURA: o
+   * artigo-modelo não os cobre, o CSV os põe no "Não cobrir", e a planta antiga
+   * que os cobre perde a seção na leitura. O `angle` decidido guarda: a exclusão
+   * que é o próprio ângulo (ou a keyword, ou o Assunto) não vale.
+   *
+   * FORA DO HASH, como `siloRole`: nenhum modelo observado, fingerprint ou
+   * contexto de keyword o lê, e a chave só existe quando há exclusão — o
+   * contexto (e o dossiê) de quem não tem reajuste continua byte a byte igual.
+   */
+  articleScope?: RadarResearchArticleScope;
   formationSerp: RadarResearchFormationSerp | null;
   internalLinks: RadarResearchInternalLinks | null;
   limitations: string[];
@@ -252,6 +282,54 @@ function assuntoDeclarado(dna: ArticleDNA | null): { subject: NonNullable<RadarA
   const phrase = texto(bruto?.phrase);
   if (!bruto || !phrase) return {};
   return { subject: { phrase, note: texto(bruto.note), destinationUrl: texto(bruto.destinationUrl) } };
+}
+
+/*
+ * ===== 2026-10-09 · AS EXCLUSÕES DOS REAJUSTES, LIDAS (regra do dono: o piloto vale para todos os reajustes) =====
+ *
+ * O Radar lia do ArticleDNA só `requiredTopics` e `coverage`. O que a melhoria de
+ * publicados e a diferenciação de canibalizados decidem tirar do artigo — e
+ * entregar ao vizinho — ficava no DNA sem chegar ao artigo-modelo nem ao "Não
+ * cobrir" do CSV. Três fontes, as que o Arquiteto grava:
+ *   - `excludedSubjects`: a lista explícita;
+ *   - `differentiation`: a nota `Diferenciação: ângulo "X"; não cobrir "Y" — é
+ *     do artigo "Z" (…)` (`differentiation-note.ts`), com o dono do assunto;
+ *   - `antiCannibalizationBoundary`: o "Cobrir X; deixar A; B para as páginas
+ *     vizinhas." que a melhoria grava (o texto livre da formação, como "Manter a
+ *     cobertura centrada em …", não exclui nada).
+ * A guarda é o ângulo decidido, as keywords e o Assunto do próprio artigo:
+ * exclusão igual a um deles não vale (o artigo não exclui a si mesmo).
+ */
+const normalDoEscopo = (valor: string | null | undefined): string => (valor || "")
+  .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const NAO_COBRIR_NA_NOTA = /n[aã]o\s+cobrir\s+["“]([^"”]+)["”](?:\s*[—–-]\s*[ée]\s+do\s+artigo\s+["“]([^"”]+)["”])?/gi;
+const DEIXAR_PARA_VIZINHAS = /\bdeixar\s+(.+?)\s+para\s+as\s+p[aá]ginas\s+vizinhas\b/i;
+
+function escopoDoArtigo(
+  dna: ArticleDNA | null,
+  protegidos: ReadonlyArray<string | null | undefined>,
+): { articleScope: RadarResearchArticleScope } | Record<string, never> {
+  if (!dna) return {};
+  const angle = texto(dna.angle);
+  const guarda = new Set([angle, ...protegidos].map(normalDoEscopo).filter(Boolean));
+  const exclusions: RadarResearchScopeExclusion[] = [];
+  const vistos = new Set<string>();
+  const acrescentar = (rotulo: unknown, source: RadarResearchScopeExclusionSource, owner: unknown) => {
+    const label = texto(rotulo);
+    const chave = normalDoEscopo(label);
+    if (!label || !chave || guarda.has(chave) || vistos.has(chave)) return;
+    vistos.add(chave);
+    exclusions.push({ label, source, owner: texto(owner) });
+  };
+  /* A nota de diferenciação primeiro: ela diz o artigo dono do assunto (a mesma exclusão também está em `excludedSubjects`). */
+  for (const nota of Array.isArray(dna.differentiation) ? dna.differentiation : []) {
+    if (typeof nota !== "string") continue;
+    for (const achado of nota.matchAll(NAO_COBRIR_NA_NOTA)) acrescentar(achado[1], "differentiation", achado[2] ?? null);
+  }
+  const fronteira = DEIXAR_PARA_VIZINHAS.exec(texto(dna.antiCannibalizationBoundary) ?? "");
+  if (fronteira) for (const parte of fronteira[1].split(";")) acrescentar(parte.replace(/[.\s]+$/, ""), "antiCannibalizationBoundary", null);
+  for (const item of Array.isArray(dna.excludedSubjects) ? dna.excludedSubjects : []) acrescentar(item, "excludedSubjects", null);
+  return exclusions.length ? { articleScope: { angle, exclusions } } : {};
 }
 
 function estrategiaDe(reference: ArticleKeywordReference | null): RadarResearchKeywordStrategy {
@@ -469,10 +547,30 @@ export function buildRadarArticleResearchContext(input: {
     resolvedKeywordTexts,
     silo,
     siloRole,
+    /* 2026-10-09 · as exclusões dos reajustes (fora do hash; ausente sem exclusão). */
+    ...escopoDoArtigo(dna, [...resolvedKeywordTexts, dna?.subject?.phrase]),
     formationSerp,
     internalLinks,
     limitations,
   };
+}
+
+/** 2026-10-09 · As exclusões duras do ArticleDNA (reajustes) de um contexto; sem escopo, nenhuma. */
+export const radarResearchContextScopeExclusions = (context: Pick<RadarArticleResearchContext, "articleScope"> | null | undefined): RadarResearchScopeExclusion[] =>
+  context?.articleScope?.exclusions ? [...context.articleScope.exclusions] : [];
+
+/**
+ * 2026-10-09 · Aditivo (Redator, regra do piloto): as mesmas exclusões lidas
+ * direto de um ArticleDNA, pela MESMA régua (`escopoDoArtigo`), para quem não
+ * monta o contexto de pesquisa inteiro — o Redator lê o ArticleDNA fixado no
+ * documento. `protegidos`: as keywords e o Assunto do artigo.
+ */
+export function radarArticleDnaScopeExclusions(
+  dna: Pick<ArticleDNA, "angle" | "differentiation" | "antiCannibalizationBoundary" | "excludedSubjects"> | null,
+  protegidos: ReadonlyArray<string | null | undefined>,
+): RadarResearchScopeExclusion[] {
+  const escopo = escopoDoArtigo(dna as ArticleDNA | null, protegidos);
+  return "articleScope" in escopo && escopo.articleScope ? [...escopo.articleScope.exclusions] : [];
 }
 
 /**

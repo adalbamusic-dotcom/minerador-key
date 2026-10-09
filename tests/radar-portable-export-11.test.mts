@@ -650,7 +650,9 @@ test("§10 · sem shortlist válida não saem produtos nem links", () => {
 });
 
 test("§10 · a rota recusa a corrida cuja configuração não é a da fotografia", async () => {
-  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8"));
+  /* 2026-10-09 · o estado comercial canônico mudou-se para `amazon-commercial-block` (a projeção vale em qualquer perfil); a regra é a mesma. */
+  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8")
+    + "\n" + await readFile(new URL("../lib/radar/amazon-commercial-block.ts", import.meta.url), "utf8"));
   const semComentarios = rota.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
   /*
@@ -663,6 +665,9 @@ test("§10 · a rota recusa a corrida cuja configuração não é a da fotografi
   assert.match(semComentarios, /originalEditorialIntent\?\.setupSignature/);
   assert.match(semComentarios, /radarAmazonSetupSignature\(setup\)/);
   assert.match(semComentarios, /assinaturaCongelada !== assinaturaCorrente/);
+  /* E o núcleo passa por ela: a projeção comercial do export é a do módulo, não uma cópia. */
+  assert.match(semComentarios, /const projecaoComercial = radarPortableCommercialOf\(\{/);
+  assert.match(semComentarios, /const state = radarAmazonCommercialStateOf\(input\.payload\);/);
 });
 
 test("§8 · sem a fotografia do Google, a resolução canônica volta a produzir blueprint nulo", () => {

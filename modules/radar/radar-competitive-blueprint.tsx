@@ -5,7 +5,6 @@ import {
   type RadarArticleApplication,
   type RadarBlueprintRecommendation,
   type RadarObservedSignal,
-  type RadarShortPlan,
   type RadarYoutubeCanonicalBlueprint,
   type RadarGoogleBlueprint,
   type RadarAmazonBlueprint,
@@ -90,28 +89,11 @@ function Bloco({ titulo, children }: { titulo: string; children: React.ReactNode
   </div>;
 }
 
-/* ===================== §12 · os Shorts recomendados ===================== */
-
-function Shorts({ pecas }: { pecas: readonly RadarShortPlan[] }) {
-  if (!pecas.length) {
-    /*
-     * §12 · SEM SINAL, SEM SHORT — e a ausência é declarada.
-     *
-     * Uma cota fixa produziria peças sem pergunta para responder, e elas
-     * chegariam ao Planejador parecendo iguais às que têm origem.
-     */
-    return <p className="text-sm text-text-muted">Nenhuma pergunta observada sustenta um Short nesta investigação.</p>;
-  }
-  return <ul className="space-y-2" data-testid="blueprint-shorts">
-    {pecas.map(peca => <li className="rounded-md border border-divider p-2" key={peca.id}>
-      <p className="text-sm font-semibold text-foreground">{peca.contentPromise}</p>
-      {peca.sourceQuestion && <p className="mt-1 text-sm text-text-muted">Origem: “{peca.sourceQuestion}”</p>}
-      <p className="mt-1 text-sm text-foreground">Gancho: {peca.hookDirection}</p>
-      <p className="mt-1 text-sm text-text-muted">Ângulo: {peca.suggestedAngle}</p>
-      <p className="mt-1 text-sm text-text-muted">CTA: {peca.ctaDirection}</p>
-    </li>)}
-  </ul>;
-}
+/*
+ * 2026-10-09 · Os "Shorts recomendados" pelas perguntas do Google saíram da
+ * tela (regra do dono: um plano de vídeos curtos só, os cortes da planta). O
+ * dado continua na camada gravada antes, lida como foi.
+ */
 
 /* ============== §13 · como a investigação vira artigo ============== */
 
@@ -164,31 +146,31 @@ function YoutubeBlueprint({ blueprint }: { blueprint: RadarYoutubeCanonicalBluep
         <Bloco titulo="Direções de título">
           <Recomendado itens={recommended.titleDirections} vazio="Sem amostra suficiente para recomendar direção de título."/>
         </Bloco>
-        <Bloco titulo="Gancho recomendado">
-          {/*
-            * §10 · O GANCHO É RECOMENDAÇÃO, e a tela diz isso.
-            *
-            * A coleta lê TÍTULO — ela não abre vídeo nenhum. "Os concorrentes
-            * abrem assim" seria uma leitura que ninguém fez.
-            */}
-          {recommended.hookDirection
-            ? <Recomendado itens={[recommended.hookDirection]} vazio=""/>
-            : <p className="text-sm text-text-muted">Sem sinal suficiente para recomendar um gancho.</p>}
-          <p className="mt-1 text-sm text-text-muted italic">
-            Direção derivada do que os títulos prometem. Esta pesquisa não abre nem transcreve vídeo: não há gancho observado dentro dos concorrentes.
+        {/*
+          * 2026-10-09 · UM GANCHO SÓ (regra do dono). A "direção de gancho"
+          * pelos títulos da amostra era o terceiro gancho, ao lado do da planta
+          * e do CSV de vídeo. O gancho do vídeo abre pelo próprio tema, a partir
+          * do artigo-modelo (`radarVideoHookLine`); a fotografia antiga continua
+          * gravada com a direção dela, e a tela não a oferece.
+          */}
+        <Bloco titulo="Gancho">
+          <p className="text-sm text-text-muted" data-testid="blueprint-hook-by-plant">
+            Abre pelo próprio tema do artigo-modelo aprovado, sem apresentação longa. Esta pesquisa lê títulos: não abre nem transcreve vídeo.
           </p>
         </Bloco>
       </Cartao>
 
       <Cartao titulo="Roteiro e comunicação" testid="radar-blueprint-card-roteiro">
-        <ol className="space-y-2" data-testid="blueprint-script">
-          {recommended.script.map(secao => <li className="rounded-md border border-divider p-2" key={secao.block}>
-            <p className="text-sm font-semibold text-foreground">{secao.block}</p>
-            <p className="mt-1 text-sm text-text-muted">Objetivo: {secao.objective}</p>
-            <p className="mt-1 text-sm text-foreground">{secao.direction}</p>
-            <p className="mt-1 text-sm text-text-muted opacity-80">Observado: {secao.sourceSignal}</p>
-          </li>)}
-        </ol>
+        {/*
+          * 2026-10-09 · O ROTEIRO-MODELO PELA SERP SAIU (regra do dono). Os
+          * blocos genéricos da camada canônica eram um segundo roteiro ao lado
+          * da planta; o vídeo segue o artigo-modelo aprovado, um capítulo por
+          * seção. A camada gravada antes continua como foi (mesmo hash); a tela
+          * não a oferece como referência.
+          */}
+        <p className="text-sm text-foreground" data-testid="blueprint-script-by-plant">
+          Roteiro: o artigo-modelo aprovado deste artigo — um capítulo por seção, e os cortes são capítulos dele.
+        </p>
         <Bloco titulo="Tom e linguagem">
           <ul className="space-y-1 text-sm text-text-muted" data-testid="blueprint-communication">
             {recommended.tone && <li>{recommended.tone}</li>}
@@ -201,8 +183,11 @@ function YoutubeBlueprint({ blueprint }: { blueprint: RadarYoutubeCanonicalBluep
 
       <Cartao titulo="Formatos e distribuição" testid="radar-blueprint-card-formatos">
         <p className="text-sm text-foreground">Formato principal: {recommended.format}</p>
-        <Bloco titulo="Shorts recomendados">
-          <Shorts pecas={recommended.shorts}/>
+        {/* 2026-10-09 · um plano de vídeos curtos só: os cortes da planta (o plano pelas perguntas do Google fica só na fotografia antiga). */}
+        <Bloco titulo="Vídeos curtos">
+          <p className="text-sm text-text-muted" data-testid="blueprint-shorts-by-plant">
+            São os cortes do artigo-modelo aprovado: os capítulos que funcionam sozinhos.
+          </p>
         </Bloco>
         <Bloco titulo="O que a busca geral pergunta">
           <Observado sinais={observed.googleSupport} vazio="Sem leitura de apoio do Google nesta investigação."/>
@@ -213,7 +198,7 @@ function YoutubeBlueprint({ blueprint }: { blueprint: RadarYoutubeCanonicalBluep
     {/* ---------------- §13 · o pacote editorial ---------------- */}
     <section className={cartao} data-testid="radar-blueprint-application">
       <h4 className={rotuloCartao}>Como reaproveitar no artigo</h4>
-      <div className="mt-2"><Aplicacao itens={recommended.articleApplication}/></div>
+      <div className="mt-2"><Aplicacao itens={recommended.articleApplication.filter(item => item.piece !== "SHORT")}/></div>
     </section>
   </div>;
 }

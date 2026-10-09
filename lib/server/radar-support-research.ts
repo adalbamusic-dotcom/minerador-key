@@ -56,13 +56,15 @@ import type { SerpCacheContext } from "./serp-cache-store.ts";
 import { radarDeclaredArticleIntent } from "../radar/editorial-identity.ts";
 import { radarSerpSnapshotSummary } from "../radar/serp-snapshot-summary.ts";
 import type { RadarResearchSourceRole } from "../radar/research-profile.ts";
+import { radarCurrentArticleDnaVersion } from "../radar/article-dna-current.ts";
 
 /**
  * As portas do apoio. Em produção, todas as padrão; os testes trocam banco,
  * provider e repositórios sem rede e sem chamada paga.
  */
 export type RadarGoogleSupportDeps = {
-  loadArticles?: (brandId: string) => Promise<{ articles: ReadonlyArray<VersionEnvelope<ArticleDNA>> }>;
+  /* 2026-10-09 · `events` (aditivo): sem eles, a regra vigente vale a mais nova viva. */
+  loadArticles?: (brandId: string) => Promise<{ articles: ReadonlyArray<VersionEnvelope<ArticleDNA>>; events?: ReadonlyArray<{ versionId: string; status: string }> }>;
   snapshots?: {
     list: (brandId: string, articleId: string) => Promise<{ records: readonly SerpCollectionRecord[] }>;
     save: (brandId: string, record: SerpCollectionRecord, actorUserId: string) => Promise<unknown>;
@@ -112,6 +114,12 @@ export async function collectRadarGoogleSupport(input: {
    * formulação de busca, e a SERP voltaria de outra intenção.
    */
   primaryKeyword: string | null;
+  /**
+   * 2026-10-09 (correção) · Aditivo: a versão do ArticleDNA que o item do Radar
+   * transporta (a do START, ou a da análise no retry). Com ela, o apoio usa a
+   * versão enviada pelo Arquiteto, mesmo com uma sucessora aprovada depois.
+   */
+  articleDnaVersionId?: string | null;
 }, deps: RadarGoogleSupportDeps = {}): Promise<RadarSupportCollectionOutcome> {
   const keyword = (input.primaryKeyword || "").trim() || null;
 
@@ -120,8 +128,8 @@ export async function collectRadarGoogleSupport(input: {
       return { status: "SKIPPED", reason: "A keyword principal deste artigo não foi resolvida; o apoio do Google não foi coletado." };
     }
     const artefatos = await (deps.loadArticles ? deps.loadArticles(input.brandId) : new ArtifactRepository().list(input.brandId));
-    const article = artefatos.articles.find(version =>
-      version.payload.articleId === input.articleId && version.payload.brandId === input.brandId);
+    /* 2026-10-09 · a versão VIGENTE (a mesma do export e do envio), não a primeira que a lista sem ordem devolve; (correção) com a transportada pelo item, ela. */
+    const article = radarCurrentArticleDnaVersion({ versions: artefatos.articles, events: artefatos.events ?? [], brandId: input.brandId, articleId: input.articleId, transportedVersionId: input.articleDnaVersionId ?? null });
     if (!article) return { status: "SKIPPED", reason: "O ArticleDNA canônico deste artigo não foi encontrado." };
 
     const referencia = article.payload.keywordReferences.find(item =>

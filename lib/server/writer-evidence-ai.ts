@@ -46,6 +46,7 @@ import {
 import {
   buildWriterSectionEvidencePackage,
   writerAiAlertMessage,
+  writerImproveSectionLabel,
   writerSectionSourceOf,
   type WriterAiAlert,
   type WriterImproveProviderSchema,
@@ -234,7 +235,8 @@ export async function runWriterImproveProposal(input: {
   humanInstruction: string;
   generate: WriterAiGenerate<z.infer<typeof WriterImproveProviderSchema>>;
 }): Promise<{ proposal: RedatorImproveProposal; evidence: WriterEvidenceSummary; divergences: WriterAlertRegistration }> {
-  const focus: WriterSectionFocus = { kind: "improve", id: null, label: input.selectedText.slice(0, 300) };
+  /* 2026-10-09 · o H2 do trecho: a melhoria recebe a seção da planta dele (regra do piloto: melhoria de publicado pelos mesmos fundamentos). */
+  const focus: WriterSectionFocus = { kind: "improve", id: null, label: input.selectedText.slice(0, 300), sectionLabel: writerImproveSectionLabel(input.document.blocks, input.selectedText) };
   const lido = await readWriterSectionEvidence(input.context, input.document.id, focus);
   const gerado = await input.generate({ system: IMPROVE_SYSTEM_PROMPT, user: buildImprovePrompt(input.document, input.selectedText, input.humanInstruction, lido.evidence) });
   const proposal = RedatorImproveProposalSchema.parse({

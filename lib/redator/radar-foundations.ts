@@ -29,6 +29,8 @@
 import type { ContentDocument } from "../arquiteto/contracts.ts";
 import { RADAR_EDITORIAL_OUTPUT_LABELS } from "../radar/multimodal-blueprint.ts";
 import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "../radar/competitive-blueprint.ts";
+import { RADAR_AMAZON_INTENT_LABELS } from "../radar/amazon-editorial-target.ts";
+import { radarReaderQuestionIsNoise } from "../radar/research-noise.ts";
 import { radarResearchProfileLabel, type RadarResearchProfile } from "../radar/research-profile.ts";
 import { RADAR_WRITER_SUBJECT_LINE_PREFIXES } from "./radar-subject-turn.ts";
 import type { WriterArticleBlueprintFoundation, WriterBrandVoiceFoundation } from "./writer-evidence-catalog.ts";
@@ -51,9 +53,22 @@ export type RadarFoundationsResearchLayer = {
   limitations: string[];
 };
 
-export type RadarFoundationsDirection = { statement: string; sourceSignal: string | null };
-
+/**
+ * 2026-10-09 · A CAMADA DE VÍDEO DO PACOTE, SÓ O OBSERVADO (regra do dono: o
+ * processo do piloto substitui o antigo). As recomendações do blueprint antigo
+ * do YouTube — "Formato vencedor", "Direção de gancho", "Tom", "Linguagem",
+ * "Título" e a "Estrutura sugerida" (o roteiro genérico) — saíram da projeção:
+ * o roteiro, os cortes e o carrossel saem do artigo-modelo pela leitura do CSV
+ * de vídeo (`radarVideoPlan`), e o formato pela decisão única da amostra
+ * pertinente. Fica o que a fotografia observou, com a régua que a fez.
+ *
+ * `role`: PRIMARY no perfil YouTube; SUPPORT quando o vídeo foi acrescentado ao
+ * Google (o piloto Google + YouTube, `formatBlueprints.video`), que antes não
+ * chegava ao Redator.
+ */
 export type RadarFoundationsYoutube = {
+  role: "PRIMARY" | "SUPPORT";
+  frozenAt: string | null;
   comparableVideos: number;
   longForm: number;
   shorts: number;
@@ -61,13 +76,33 @@ export type RadarFoundationsYoutube = {
   recurrentChannels: string[];
   titlePatterns: string[];
   gaps: string[];
-  format: string | null;
-  hookDirection: RadarFoundationsDirection | null;
-  titleDirections: RadarFoundationsDirection[];
-  script: Array<{ block: string; objective: string; direction: string }>;
-  tone: string | null;
-  languageDirection: string | null;
+  /** A régua da fotografia: a amostra pertinente (2026-10-09) ou a amostra inteira (congelada antes). */
+  ruler: "PERTINENTE" | "AMOSTRA_INTEIRA";
 };
+
+/**
+ * 2026-10-09 · A CAMADA DE REVIEW (Amazon) DO PACOTE: o perfil Amazon ou o
+ * acréscimo de review ao Google (`formatBlueprints.review`), que os fundamentos
+ * ignoravam. Só o que a fotografia congelada observou e recomendou como
+ * critério; os produtos da shortlist saem da Amazon congelada no servidor (a
+ * fonte `run.amazon.shortlist` do Redator e o CSV), nunca daqui.
+ */
+export type RadarFoundationsReview = {
+  role: "PRIMARY" | "SUPPORT";
+  frozenAt: string | null;
+  /** A intenção comercial congelada (rótulo), quando o pacote a traz. */
+  intent: string | null;
+  /** A saída comercial recomendada (rótulo). */
+  output: string | null;
+  products: number;
+  sufficiency: string | null;
+  priceBands: string[];
+  comparisonAxes: string[];
+  googleSupport: "APPLIED" | "SUPPORT_MISSING" | null;
+};
+
+/** 2026-10-09 · O começo da linha de limitação que marca a fotografia da amostra pertinente (`RADAR_YOUTUBE_PERTINENT_RULER`, youtube-blueprint.ts; um teste confere que é o mesmo texto). */
+export const RADAR_FOUNDATIONS_PERTINENT_RULER = "Amostra pertinente (régua de 2026-10-09):";
 
 export type RadarFoundationsMultimodal = {
   youtubeLongForm: number;
@@ -88,6 +123,8 @@ export type RadarFoundations = {
   research: RadarFoundationsResearchLayer[];
   youtube: RadarFoundationsYoutube | null;
   multimodal: RadarFoundationsMultimodal | null;
+  /** 2026-10-09 · A camada de review (Amazon), primária ou acrescentada ao Google. */
+  review: RadarFoundationsReview | null;
   evidence: {
     sources: string[];
     serpStanding: string | null;
@@ -128,16 +165,14 @@ const lista = (valor: unknown): unknown[] => (Array.isArray(valor) ? valor : [])
 const texto = (valor: unknown): string | null => (typeof valor === "string" && valor.trim() ? valor : null);
 const numero = (valor: unknown): number => (typeof valor === "number" && Number.isFinite(valor) ? valor : 0);
 const textos = (valor: unknown): string[] => lista(valor).map(texto).filter((item): item is string => Boolean(item));
-/** Sinal ou recomendação do blueprint: o que interessa é a frase. */
+/** Sinal observado do blueprint: o que interessa é a frase. */
 const frases = (valor: unknown): string[] =>
   lista(valor).map(item => texto(objeto(item)?.statement)).filter((item): item is string => Boolean(item));
-const direcao = (valor: unknown): RadarFoundationsDirection | null => {
-  const item = objeto(valor);
-  const statement = texto(item?.statement);
-  return statement ? { statement, sourceSignal: texto(item?.sourceSignal) } : null;
-};
-const direcoes = (valor: unknown): RadarFoundationsDirection[] =>
-  lista(valor).map(direcao).filter((item): item is RadarFoundationsDirection => Boolean(item));
+
+/* 2026-10-09 · os rótulos das faixas de preço da Amazon, como o bloco comercial os diz. */
+const ROTULO_DA_FAIXA: Readonly<Record<string, string>> = { ECONOMICO: "Faixa econômica", INTERMEDIARIO: "Faixa intermediária", PREMIUM: "Faixa premium" };
+const dinheiro = (valor: unknown, moeda: string | null) =>
+  (typeof valor === "number" && Number.isFinite(valor) ? `${moeda ? `${moeda} ` : ""}${valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null);
 
 const ROTULO_DE_SAIDA: Record<string, string> = { ...RADAR_EDITORIAL_OUTPUT_LABELS, ...RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS };
 export const radarEditorialOutputLabel = (output: string): string => ROTULO_DE_SAIDA[output] || output;
@@ -183,6 +218,18 @@ export const RADAR_FOUNDATIONS_BUNDLE_PATHS: readonly (readonly string[])[] = [
   ["researchSources"],
   ["serpStanding"],
   ["limitations"],
+  /*
+   * 2026-10-09 · OS ACRÉSCIMOS DE FORMATO (regra do piloto). No piloto Google +
+   * YouTube, o vídeo mora em `formatBlueprints.video` (o multiformato congelado)
+   * e não em `competitiveBlueprint`: os fundamentos não recebiam nada do
+   * YouTube. Só as contagens e o instante — o multiformato inteiro (com a
+   * leitura do Google) não é lido. A review da Amazon (`formatBlueprints.review`)
+   * entra inteira: é o blueprint comercial congelado, de tamanho do perfil.
+   */
+  ["formatBlueprints", "video", "frozenAt"],
+  ["formatBlueprints", "video", "blueprint", "observed", "youtubeLongForm"],
+  ["formatBlueprints", "video", "blueprint", "observed", "youtubeShorts"],
+  ["formatBlueprints", "review"],
 ];
 
 export function radarFoundationsOf(document: ContentDocument | null | undefined): RadarFoundations | null {
@@ -234,8 +281,23 @@ export function radarFoundationsOfDossier(valor: unknown, contexto: RadarFoundat
   const observadoBlueprint = objeto(blueprint?.observed);
   const recomendadoBlueprint = objeto(blueprint?.recommended);
 
+  /*
+   * 2026-10-09 · A CAMADA DE VÍDEO: o observado, com a régua que fez a
+   * fotografia (a linha de limitação da amostra pertinente, no blueprint ou na
+   * camada do YouTube). Nada do que o blueprint antigo recomendava (formato,
+   * gancho, tom, linguagem, título, roteiro). No piloto Google + YouTube, as
+   * contagens do multiformato congelado (`formatBlueprints.video`).
+   */
+  const camadaDoYoutube = objeto(pesquisa.youtube);
+  const reguaDoYoutube = [...textos(bundle.limitations), ...textos(camadaDoYoutube?.limitations), ...textos(blueprint?.limitations)]
+    .some(item => item.startsWith(RADAR_FOUNDATIONS_PERTINENT_RULER)) ? "PERTINENTE" as const : "AMOSTRA_INTEIRA" as const;
+  const formatos = objeto(bundle.formatBlueprints);
+  const doVideo = objeto(formatos?.video);
+  const observadoDoVideo = objeto(objeto(doVideo?.blueprint)?.observed);
   const youtube: RadarFoundationsYoutube | null = blueprint?.profile === "YOUTUBE" && observadoBlueprint
     ? {
+      role: "PRIMARY",
+      frozenAt: texto(camadaDoYoutube?.frozenAt),
       comparableVideos: numero(observadoBlueprint.comparableVideos),
       longForm: numero(observadoBlueprint.longForm),
       shorts: numero(observadoBlueprint.shorts),
@@ -243,14 +305,53 @@ export function radarFoundationsOfDossier(valor: unknown, contexto: RadarFoundat
       recurrentChannels: frases(observadoBlueprint.recurrentChannels),
       titlePatterns: frases(observadoBlueprint.titlePatterns),
       gaps: frases(observadoBlueprint.gaps),
-      format: texto(recomendadoBlueprint?.format),
-      hookDirection: direcao(recomendadoBlueprint?.hookDirection),
-      titleDirections: direcoes(recomendadoBlueprint?.titleDirections),
-      script: lista(recomendadoBlueprint?.script).map(objeto).filter((item): item is Record<string, unknown> => Boolean(item))
-        .map(item => ({ block: texto(item.block) || "Bloco", objective: texto(item.objective) || "", direction: texto(item.direction) || "" }))
-        .filter(item => item.direction),
-      tone: texto(recomendadoBlueprint?.tone),
-      languageDirection: texto(recomendadoBlueprint?.languageDirection),
+      ruler: reguaDoYoutube,
+    }
+    : doVideo
+      ? {
+        role: "SUPPORT",
+        frozenAt: texto(doVideo.frozenAt),
+        comparableVideos: numero(observadoDoVideo?.youtubeLongForm) + numero(observadoDoVideo?.youtubeShorts),
+        longForm: numero(observadoDoVideo?.youtubeLongForm),
+        shorts: numero(observadoDoVideo?.youtubeShorts),
+        durationRange: null,
+        recurrentChannels: [],
+        titlePatterns: [],
+        gaps: [],
+        ruler: reguaDoYoutube,
+      }
+      : null;
+
+  /*
+   * 2026-10-09 · A CAMADA DE REVIEW (Amazon): o perfil Amazon ou o acréscimo de
+   * review ao Google. O que a fotografia observou (produtos, faixas, suficiência)
+   * e os critérios de comparação; a shortlist sai da Amazon congelada no servidor.
+   */
+  const daReview = objeto(formatos?.review);
+  const blueprintComercial = blueprint?.profile === "AMAZON" ? blueprint : objeto(daReview?.blueprint);
+  const observadoComercial = objeto(blueprintComercial?.observed);
+  const recomendadoComercial = objeto(blueprintComercial?.recommended);
+  const intencao = objeto(daReview?.intent);
+  const tipoDaIntencao = texto(intencao?.type);
+  const saidaComercial = texto(objeto(lista(recomendadoComercial?.recommendedOutputs)[0])?.output);
+  const apoioDoGoogle = texto(recomendadoComercial?.supportState);
+  const review: RadarFoundationsReview | null = blueprintComercial && observadoComercial
+    ? {
+      role: blueprint?.profile === "AMAZON" ? "PRIMARY" : "SUPPORT",
+      frozenAt: blueprint?.profile === "AMAZON" ? texto(objeto(pesquisa.amazon)?.frozenAt) : texto(daReview?.frozenAt),
+      intent: tipoDaIntencao ? RADAR_AMAZON_INTENT_LABELS[tipoDaIntencao as keyof typeof RADAR_AMAZON_INTENT_LABELS] || tipoDaIntencao : null,
+      output: saidaComercial ? radarEditorialOutputLabel(saidaComercial) : null,
+      products: numero(observadoComercial.products),
+      sufficiency: texto(observadoComercial.sufficiency),
+      priceBands: lista(observadoComercial.priceBands).map(objeto).filter((item): item is Record<string, unknown> => Boolean(item)).map(faixa => {
+        const moeda = texto(faixa.currency);
+        const de = dinheiro(faixa.rangeFrom, moeda);
+        const ate = dinheiro(faixa.rangeTo, moeda);
+        const rotulo = ROTULO_DA_FAIXA[texto(faixa.band) ?? ""] || texto(faixa.band) || "Faixa";
+        return `${rotulo}${de && ate ? `: de ${de} a ${ate}` : ""} (${numero(faixa.sampleSize)} produto(s))`;
+      }),
+      comparisonAxes: lista(recomendadoComercial?.comparisonAxes).map(item => texto(objeto(item)?.label)).filter((item): item is string => Boolean(item)),
+      googleSupport: apoioDoGoogle === "APPLIED" || apoioDoGoogle === "SUPPORT_MISSING" ? apoioDoGoogle : null,
     }
     : null;
 
@@ -283,13 +384,22 @@ export function radarFoundationsOfDossier(valor: unknown, contexto: RadarFoundat
    * um ou outro conforme o perfil; a projeção lê o que houver.
    */
   const observado = objeto(bundle.observed);
-  const mustAnswer = textos(recomendadoBlueprint?.mustAnswer);
-  const perguntasObservadas = lista(observado?.questions).map(item => texto(objeto(item)?.canonicalQuestion))
-    .filter((item): item is string => Boolean(item));
-  const mustCover = textos(recomendadoBlueprint?.mustCover);
+  /*
+   * 2026-10-09 · A RÉGUA DE RUÍDO DO RADAR ONDE O REDATOR LÊ PESQUISA: a
+   * pergunta e o conceito que não são do leitor deste artigo (newsletter,
+   * chamada, inglês, título de post, loja ou outra profissão fora do público,
+   * área vizinha, superstição) saem, pela mesma régua do CSV (`research-noise.ts`),
+   * com o núcleo do artigo (principal, complementares e reforços).
+   */
+  const ruido = { core: [texto(keyword?.principal), ...textos(keyword?.secondary), ...textos(keyword?.narrativeReinforcements)] };
+  const semRuido = (itens: string[]) => itens.filter(item => !radarReaderQuestionIsNoise(item, ruido));
+  const mustAnswer = semRuido(textos(recomendadoBlueprint?.mustAnswer));
+  const perguntasObservadas = semRuido(lista(observado?.questions).map(item => texto(objeto(item)?.canonicalQuestion))
+    .filter((item): item is string => Boolean(item)));
+  const mustCover = semRuido(textos(recomendadoBlueprint?.mustCover));
   const conceitos = objeto(observado?.concepts);
-  const conceitosRecorrentes = lista(conceitos?.recurrent).map(item => texto(objeto(item)?.canonicalLabel))
-    .filter((item): item is string => Boolean(item));
+  const conceitosRecorrentes = semRuido(lista(conceitos?.recurrent).map(item => texto(objeto(item)?.canonicalLabel))
+    .filter((item): item is string => Boolean(item)));
 
   const video = objeto(bundle.video);
   const resumoDeVideo = objeto(video?.summary);
@@ -311,6 +421,7 @@ export function radarFoundationsOfDossier(valor: unknown, contexto: RadarFoundat
     research,
     youtube,
     multimodal,
+    review,
     evidence: {
       sources: textos(bundle.researchSources),
       serpStanding: texto(objeto(bundle.serpStanding)?.reason),

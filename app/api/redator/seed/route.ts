@@ -27,7 +27,7 @@ import { PersistenceUnavailableError } from "@/lib/server/editorial-db";
 import { newWriterDeliverable, VideoScriptPayloadSchema, CarouselPayloadSchema } from "@/lib/redator/multiformat-contracts";
 import {
   buildCarouselSeedPrompt, buildScriptSeedPrompt, carouselPayloadFromSeed, finalArticleText,
-  ProviderCarouselSeedSchema, ProviderScriptSeedSchema, scriptPayloadFromSeed,
+  ProviderCarouselSeedSchema, ProviderScriptSeedSchema, scriptPayloadFromSeed, seedPlanRefusal,
   CAROUSEL_SEED_SYSTEM_PROMPT, SCRIPT_SEED_SYSTEM_PROMPT,
 } from "@/lib/redator/deliverable-seed";
 import { writerSeedDocument } from "@/lib/server/writer-seed";
@@ -46,12 +46,25 @@ export async function POST(request: NextRequest) {
     await assertEditorialPermission(profile, input.brandId, "redator", "edit");
 
     /* Os fundamentos já vêm projetados: a leitura traz só os caminhos que eles usam. */
-    const { document, foundations, contentHash } = await writerSeedDocument(input.brandId, input.documentId);
+    const { document, foundations, contentHash, plan } = await writerSeedDocument(input.brandId, input.documentId, { actorUserId: profile.userId });
     if (!foundations) {
       throw new AuthzError(422, "Este documento não veio do Radar com dossiê. Não há contexto para semear.");
     }
+    /*
+     * 2026-10-09 · REGRA DO PILOTO: roteiro, cortes e carrossel saem do
+     * artigo-modelo concluído pelo plano do CSV de vídeo. Sem ele (ou com o
+     * pacote de outro congelamento), o estado explícito, ANTES de qualquer
+     * chamada de IA — nada é semeado pela estrutura antiga.
+     */
+    if (!plan || plan.kind !== "ready") {
+      const code = plan?.kind ?? "needs_article_blueprint";
+      return NextResponse.json({ code, error: plan?.reason ?? "Este documento não tem o artigo-modelo concluído do Radar: organize-o no Radar e crie de novo." },
+        { status: code === "blueprint_unavailable" ? 503 : 409 });
+    }
+    const recusa = seedPlanRefusal(plan.plan, input.kind);
+    if (recusa) return NextResponse.json({ code: "seed_plan_without_parts", error: recusa }, { status: 409 });
 
-    const source = { title: document.title, foundations, finalArticle: finalArticleText(document) };
+    const source = { title: document.title, foundations, finalArticle: finalArticleText(document), plan: plan.plan };
     const provider = await resolveDeepSeekCanonicalConfig({
       actorUserId: profile.userId, brandId: input.brandId, client: createCanonicalServiceClient(),
     });

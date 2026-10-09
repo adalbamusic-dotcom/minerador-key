@@ -5,6 +5,10 @@ import {
   type RadarYoutubeUniverseEntry,
 } from "./youtube-search-model.ts";
 import type { RadarYoutubeSearchRun } from "./youtube-search-run.ts";
+/* 2026-10-09 · a amostra pertinente mora aqui, com a coorte: a fotografia nova e o CSV de vídeo leem a MESMA régua. */
+import { radarUbiquitousStems } from "./intent-adherence.ts";
+import { radarSemanticStems } from "./semantic-concept-model.ts";
+import { radarWritingCompareKey, radarWritingDecodeEntities, type RadarWritingProjections } from "./portable-writing-export.ts";
 
 /**
  * ===== O BLUEPRINT COMPETITIVO DA SERP — YOUTUBE_SEARCH_2 =====
@@ -234,6 +238,13 @@ export function radarYoutubeCohort(input: {
   format: "LONG_FORM" | "SHORTS";
   entries: readonly RadarYoutubeUniverseEntry[];
   collectedAt: string | null;
+  /**
+   * 2026-10-09 · Aditivo: quantos vídeos deste formato a amostra tinha e ficaram
+   * fora da conta por pertinência (fora do tema, outro público). Com a coorte
+   * pertinente vazia, "a SERP não devolveu nenhum vídeo" seria falso: ela
+   * devolveu, e eles não falam com o tema. Ausente, a frase de antes.
+   */
+  excludedCount?: number;
 }): RadarYoutubeCohort {
   const { entries } = input;
   const titulos = entries.map(item => item.title);
@@ -253,7 +264,9 @@ export function radarYoutubeCohort(input: {
   }
 
   const limitations: string[] = [];
-  if (entries.length === 0) {
+  if (entries.length === 0 && input.excludedCount) {
+    limitations.push(`Nenhum vídeo ${input.format === "SHORTS" ? "curto" : "long-form"} pertinente: os ${input.excludedCount} da amostra estão fora do tema da busca ou falam com outro público.`);
+  } else if (entries.length === 0) {
     limitations.push(`A SERP não devolveu nenhum vídeo ${input.format === "SHORTS" ? "curto" : "long-form"} para estas consultas.`);
   } else if (entries.length < RADAR_YOUTUBE_MIN_COHORT) {
     limitations.push(`Esta coorte tem ${entries.length} vídeo(s): abaixo de ${RADAR_YOUTUBE_MIN_COHORT} os padrões descrevem casos, não mercado.`);
@@ -426,8 +439,11 @@ const maiorFormato = (formatos: readonly RadarYoutubeAvFormat[]) => formatos[0] 
  *
  * P25→P75 da coorte que vai ser disputada. Recomendar a mediana exata faria
  * todo vídeo mirar o mesmo minuto; recomendar min→max não recomendaria nada.
+ *
+ * 2026-10-09 · UMA FAIXA SÓ. A cópia que morava em `video-competitive.ts`
+ * (`faixaDa`) saiu: a fotografia, o CSV de vídeo e a tela leem esta, exportada.
  */
-function faixaRecomendada(coorte: RadarYoutubeCohort): { min: number; max: number } | null {
+export function radarYoutubeCohortRange(coorte: RadarYoutubeCohort): { min: number; max: number } | null {
   const baixo = coorte.durationSeconds.p25;
   const alto = coorte.durationSeconds.p75;
   if (baixo === null || alto === null || baixo <= 0) return null;
@@ -522,44 +538,28 @@ function estrategia(input: {
   return recomendacoes;
 }
 
-function roteiro(input: { formatos: readonly RadarYoutubeAvFormat[]; declaredIntent: string | null; shorts: boolean }): RadarYoutubeScriptBlock[] {
-  const dominante = maiorFormato(input.formatos);
-  const origem = dominante ? `formato dominante da SERP (${dominante.label})` : "intenção declarada do artigo";
+/*
+ * 2026-10-09 · O ROTEIRO GENÉRICO SAIU (regra do dono: o processo antigo é
+ * substituído, nunca fica de alternativa). "HOOK → CONTEXTO → BLOCO 1…" e
+ * "GANCHO → ENTREGA → PROVA → CORTE" eram o mesmo esqueleto para qualquer
+ * tema. O roteiro do vídeo é a planta do artigo-modelo (capítulos = seções,
+ * formato curto = recorte da planta), montado em `portable-video-export.ts`.
+ * A fotografia nova grava `script: []`; a antiga continua legível como foi
+ * gravada.
+ */
 
-  /*
-   * SHORT NÃO É LONG-FORM ENCURTADO — §2 e §6.
-   *
-   * Um Short não tem contexto, desenvolvimento e conclusão: ele tem gancho,
-   * entrega e corte. Devolver a mesma estrutura para os dois faria o roteiro
-   * recomendado descrever um formato que ninguém está disputando.
-   */
-  if (input.shorts) {
-    return [
-      { block: "GANCHO", purpose: "Afirmar o resultado ou o erro nos primeiros 2 segundos.", derivedFrom: origem },
-      { block: "ENTREGA", purpose: "Uma informação só, completa e verificável.", derivedFrom: origem },
-      { block: "PROVA", purpose: "Demonstração rápida ou credencial que sustenta a afirmação.", derivedFrom: origem },
-      { block: "CORTE", purpose: "Encerrar no ponto alto, com CTA curto de continuidade.", derivedFrom: origem },
-    ].map(bloco => RadarYoutubeScriptBlockSchema.parse(bloco));
-  }
-
-  const comercial = /COMMERCIAL|TRANSACTIONAL|COMERCIAL|TRANSACIONAL/i.test(input.declaredIntent || "");
-  return [
-    { block: "HOOK", purpose: "Promessa direta ligada à intenção da busca.", derivedFrom: origem },
-    { block: "CONTEXTO", purpose: "Por que isso importa para quem procurou.", derivedFrom: origem },
-    { block: "BLOCO 1", purpose: "O fundamento principal do tema.", derivedFrom: origem },
-    { block: "BLOCO 2", purpose: "A aplicação prática do fundamento.", derivedFrom: origem },
-    { block: "BLOCO 3", purpose: "Erros e objeções que a busca revela.", derivedFrom: origem },
-    { block: "DEMONSTRAÇÃO", purpose: "Exemplo concreto quando o formato pede.", derivedFrom: origem },
-    { block: "CONCLUSÃO", purpose: "Síntese do que foi entregue.", derivedFrom: origem },
-    { block: "CTA", purpose: comercial ? "Ação de decisão." : "Ação de continuidade.", derivedFrom: "intenção declarada do artigo" },
-  ].map(bloco => RadarYoutubeScriptBlockSchema.parse(bloco));
-}
-
-function lacunas(input: {
+/**
+ * 2026-10-09 · AS LACUNAS PELA AMOSTRA PERTINENTE. `universo` são os
+ * comparáveis que falam com o público ou com o tema; `fora` diz quantos, de
+ * cada formato, ficaram fora da conta. Exportada: o CSV de vídeo relê as
+ * lacunas da fotografia antiga com esta régua.
+ */
+export function radarYoutubePertinentGaps(input: {
   topicos: readonly string[];
   universo: readonly RadarYoutubeUniverseEntry[];
   longForm: RadarYoutubeCohort;
   shorts: RadarYoutubeCohort;
+  fora?: { longos: number; curtos: number };
 }): RadarYoutubeGap[] {
   const encontradas: RadarYoutubeGap[] = [];
   const titulos = input.universo.map(item => semAcento(item.title));
@@ -578,35 +578,40 @@ function lacunas(input: {
     if (cobertos === 0) {
       encontradas.push(RadarYoutubeGapSchema.parse({
         kind: "TOPICO_SEM_COBERTURA",
-        statement: `O tópico "${topico}" não aparece em nenhum título da amostra.`,
-        evidence: `Nenhum dos ${titulos.length} títulos coletados contém os termos centrais deste tópico.`,
+        statement: `O tópico "${topico}" não aparece em nenhum título da amostra pertinente.`,
+        evidence: `Nenhum dos ${titulos.length} títulos pertinentes contém os termos centrais deste tópico.`,
       }));
     }
   }
 
-  /* FORMATO AUSENTE: uma das coortes está vazia. */
+  /* FORMATO AUSENTE: uma das coortes pertinentes está vazia. */
   for (const coorte of [input.longForm, input.shorts]) {
     if (coorte.videoCount === 0) {
+      const curto = coorte.format === "SHORTS";
+      const foraDaConta = (curto ? input.fora?.curtos : input.fora?.longos) || 0;
       encontradas.push(RadarYoutubeGapSchema.parse({
         kind: "FORMATO_AUSENTE",
         /*
          * 2026-10-02 · o que a amostra mostra, não o que existe no YouTube: a
          * coleta pode não trazer o formato, e "não há disputa" era afirmação
          * maior que o dado.
+         * 2026-10-09 · D10: "confira se a coleta traz…" deixava conferência
+         * aberta. A frase sai concluída: não é oportunidade comprovada, e o
+         * motivo do zero é dito (coleta sem o formato ou vídeos fora do tema).
          */
-        statement: `Nenhum ${coorte.format === "SHORTS" ? "Short" : "vídeo longo"} identificado na amostra coletada: confira se a coleta traz esse formato antes de tratar como oportunidade.`,
-        evidence: `A coorte ${coorte.format} ficou com zero vídeo na amostra coletada.`,
+        statement: `Nenhum ${curto ? "Short" : "vídeo longo"} pertinente na amostra coletada: não é oportunidade comprovada${foraDaConta ? ` — os ${foraDaConta} da amostra estão fora do tema da busca ou falam com outro público` : " — a coleta não trouxe esse formato"}.`,
+        evidence: `A coorte ${coorte.format} ficou com zero vídeo pertinente na amostra coletada${foraDaConta ? ` (${foraDaConta} fora da conta)` : ""}.`,
       }));
     }
   }
 
-  /* PROMESSA REPETITIVA: um padrão domina mais de 60% da amostra. */
+  /* PROMESSA REPETITIVA: um padrão domina mais de 60% da amostra pertinente. */
   const dominante = input.longForm.titlePatterns[0];
   if (dominante && dominante.share >= 0.6) {
     encontradas.push(RadarYoutubeGapSchema.parse({
       kind: "PROMESSA_REPETITIVA",
-      statement: `O padrão "${dominante.label}" domina a amostra e ficou previsível.`,
-      evidence: `${dominante.count} de ${input.longForm.videoCount} títulos long-form usam o mesmo padrão.`,
+      statement: `O padrão "${dominante.label}" domina a amostra pertinente e ficou previsível.`,
+      evidence: `${dominante.count} de ${input.longForm.videoCount} títulos long-form pertinentes usam o mesmo padrão.`,
     }));
   }
 
@@ -630,24 +635,345 @@ function lacunas(input: {
    *
    * O nome do canal É credencial declarada: ele aparece embaixo de cada
    * miniatura, antes de qualquer clique.
+   *
+   * 2026-10-09 · UMA LISTA DE CREDENCIAL SÓ (`radarYoutubeCredentialMarker`):
+   * a lista de trechos daqui e a régua por palavra do CSV de vídeo diziam
+   * coisas diferentes sobre o mesmo canal.
    */
-  const CREDENCIAIS = ["dermatolog", "medic", "dra.", "dra ", "dr.", "dr ", "especialista", "esteticista", "farmaceutic", "nutricion", "biomedic"];
   const comCredencial = new Set<string>();
   for (const item of input.universo) {
-    const assinatura = `${semAcento(item.title)} ${semAcento(item.channelName || "")}`;
-    if (CREDENCIAIS.some(termo => assinatura.includes(termo))) comCredencial.add(item.videoId);
+    if (radarYoutubeCredentialMarker(`${item.title} ${item.channelName || ""}`)) comCredencial.add(item.videoId);
   }
   const fatia = input.universo.length ? comCredencial.size / input.universo.length : 0;
   if (input.universo.length >= RADAR_YOUTUBE_MIN_COHORT && fatia < 0.25) {
     encontradas.push(RadarYoutubeGapSchema.parse({
       kind: "AUTORIDADE_ESCASSA",
       /* 2026-10-02 · mede credencial VISÍVEL no título ou no canal, não a autoridade de quem fala. */
-      statement: "Pouca credencial visível no título ou no nome do canal: espaço para mostrar a especialidade de quem fala.",
-      evidence: `${comCredencial.size} de ${input.universo.length} vídeos declaram credencial profissional no título ou no nome do canal.`,
+      statement: "Pouca credencial visível no título ou no nome do canal dos vídeos pertinentes: espaço para mostrar a especialidade de quem fala.",
+      evidence: `${comCredencial.size} de ${input.universo.length} vídeos pertinentes declaram credencial profissional no título ou no nome do canal.`,
     }));
   }
 
   return encontradas;
+}
+
+/* ===================== 2026-10-09 · a amostra pertinente ===================== */
+
+/*
+ * ===== A AMOSTRA PERTINENTE MORA COM A COORTE (regra do dono, 2026-10-09) =====
+ *
+ * A fotografia lia a amostra INTEIRA: a mediana de duração, a faixa, o formato
+ * e a coorte que lidera somavam vídeo fora do tema ("A psicologia das pessoas
+ * que não usam Instagram") e de outro público ("clientes de advocacia"). O CSV
+ * de vídeo já relia só os pertinentes (`video-competitive.ts`, 2026-10-07) e
+ * dizia a divergência sem aplicá-la. Agora a régua mora aqui, com a coorte, e
+ * a fotografia NOVA nasce dela: coortes, formato, faixa, estratégia, títulos e
+ * lacunas pelos vídeos que falam com o público ou com o tema. As funções
+ * vieram de `video-competitive.ts` sem mudar de comportamento — ele as
+ * reexporta com os mesmos nomes.
+ *
+ * A fotografia antiga não é recalculada nem regravada: ela é lida como foi
+ * gravada (`radarYoutubeBlueprintRuler` diz qual régua a fez).
+ */
+
+/*
+ * ===== 2026-10-02 · A RELEVÂNCIA DE CADA CONCORRENTE PARA O PÚBLICO =====
+ *
+ * Posição e visualizações não dizem se o vídeo fala com o mesmo público. Um de
+ * estética, um de advocacia e um genérico entravam iguais. Pelo título e pelo
+ * canal (nada foi assistido):
+ *   - MESMO público: nomeia o público da marca (a primeira frase do público);
+ *   - OUTRO público: "clientes de advocacia", "pacientes para contabilidade"…;
+ *   - PRÓXIMO: fala do termo da busca relacionada (ex.: "pacientes");
+ *   - GERAL: o resto, referência de formato.
+ */
+export type RadarVideoRelevance = "MESMO" | "PROXIMO" | "GERAL" | "OUTRO" | "FORA";
+export const RADAR_VIDEO_RELEVANCE_LABELS: Readonly<Record<RadarVideoRelevance, string>> = {
+  MESMO: "mesmo público: referência principal",
+  PROXIMO: "mesma dor, público vizinho: referência de abordagem (não transportar o público)",
+  GERAL: "tema geral: referência de formato e apresentação",
+  OUTRO: "outro público: inspiração pontual, sem transportar recomendação",
+  FORA: "fora do tema da busca (só cita a plataforma): fica fora das recomendações",
+};
+
+/** 2026-10-07 · Pertinente é quem fala com o público ou com o tema: OUTRO e FORA ficam fora da conta. */
+export const RADAR_VIDEO_PERTINENT: ReadonlySet<RadarVideoRelevance> = new Set<RadarVideoRelevance>(["MESMO", "PROXIMO", "GERAL"]);
+
+let genericasDoPublico: Set<string> | null = null;
+/* Calculado na primeira chamada: nada roda no carregamento do módulo. */
+const GENERICAS_DO_PUBLICO = () => (genericasDoPublico ??= new Set(radarSemanticStems("profissionais profissional pessoas que atendem atende outras especialidades entram quando o artigo tiver esse público explicitamente definido trabalham")));
+
+const textoLimpo = (valor: unknown): string => (typeof valor === "string" ? valor.trim() : "");
+const unicosPorChave = (valores: readonly string[]): string[] => {
+  const vistos = new Set<string>();
+  return valores.filter(valor => {
+    const chave = radarWritingCompareKey(valor);
+    if (!chave || vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+};
+
+/*
+ * 2026-10-02 · A LEITURA DO PÚBLICO EM DOIS NÍVEIS (revisão do CSV de vídeo).
+ *
+ *   - QUEM é o público: o começo da primeira frase, até "que" ("Biomédicas
+ *     estetas e profissionais de estética e cosmética") — a profissão;
+ *   - ONDE e COM QUE DOR: o resto da frase ("clínicas e consultórios") e o termo
+ *     da busca relacionada ("pacientes"). Vídeo de marketing médico fala da
+ *     mesma dor, mas não com biomédicas estetas: público vizinho, não o mesmo.
+ *
+ * E o que só cita a plataforma (a raiz onipresente nos títulos da amostra,
+ * como "instagram") sem nada do assunto — "A psicologia das pessoas que não
+ * usam Instagram" — está fora do tema da busca, por melhor posição que tenha.
+ */
+export type RadarVideoAudienceReading = { publico: ReadonlySet<string>; vizinho: ReadonlySet<string>; nucleo: ReadonlySet<string>; onipresentes: ReadonlySet<string> };
+
+/** 2026-10-09 · A mesma leitura, sem as projeções do export: a fotografia lê a principal e as complementares da própria corrida. */
+export function radarVideoAudienceReadingOf(input: {
+  principalKeyword: string | null | undefined;
+  complementaryKeywords: readonly string[];
+  audience: string | null | undefined;
+  titles?: readonly string[];
+}): RadarVideoAudienceReading {
+  const principal = new Set(radarSemanticStems(textoLimpo(input.principalKeyword)));
+  const complementares = unicosPorChave(input.complementaryKeywords).flatMap(item => radarSemanticStems(item));
+  const nucleo = new Set([...principal, ...complementares]);
+  const primeiraFrase = (input.audience || "").split(/(?<=[.!?])\s+/)[0] || "";
+  const corte = primeiraFrase.search(/\s(que|quem|onde)\s/i);
+  const quem = corte > 0 ? primeiraFrase.slice(0, corte) : primeiraFrase;
+  const resto = corte > 0 ? primeiraFrase.slice(corte) : "";
+  const genericas = GENERICAS_DO_PUBLICO();
+  const util = (raiz: string) => !genericas.has(raiz) && !nucleo.has(raiz);
+  const publicoRaizes = new Set(radarSemanticStems(quem).filter(util));
+  return {
+    publico: publicoRaizes,
+    vizinho: new Set([...radarSemanticStems(resto).filter(raiz => util(raiz) && !publicoRaizes.has(raiz)), ...complementares.filter(raiz => !principal.has(raiz))]),
+    nucleo,
+    onipresentes: radarUbiquitousStems((input.titles || []).map(titulo => radarWritingDecodeEntities(titulo))),
+  };
+}
+
+export function radarVideoAudienceReading(p: RadarWritingProjections, publico: string | null, titulos: readonly string[] = []): RadarVideoAudienceReading {
+  return radarVideoAudienceReadingOf({
+    principalKeyword: p.dna.principalKeyword,
+    complementaryKeywords: [...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements],
+    audience: publico,
+    titles: titulos,
+  });
+}
+
+/* O radical não é uniforme ("pacientes" → "pacient", "paciente" → "paciente"): mesma raiz quando uma começa pela outra. */
+export const radarVideoSameStem = (a: string, b: string) => a === b || (Math.min(a.length, b.length) >= 5 && (a.startsWith(b) || b.startsWith(a)));
+
+export function radarVideoRelevance(video: Pick<RadarYoutubeUniverseEntry, "title" | "channelName">, leitura: RadarVideoAudienceReading): RadarVideoRelevance {
+  const doTitulo = radarSemanticStems(radarWritingDecodeEntities(video.title));
+  const raizes = [...doTitulo, ...radarSemanticStems(video.channelName || "")];
+  const tem = (conjunto: ReadonlySet<string>, lista: readonly string[] = raizes) => lista.some(raiz => [...conjunto].some(outra => radarVideoSameStem(raiz, outra)));
+  if (tem(leitura.publico)) return "MESMO";
+  const outro = radarWritingCompareKey(radarWritingDecodeEntities(video.title)).match(/\b(?:clientes?|pacientes?|alunos?|negocios?)\s+(?:de|para|da|do|na|no)\s+([a-z]{4,})/);
+  const raizDoOutro = outro ? radarSemanticStems(outro[1])[0] : null;
+  if (raizDoOutro && !leitura.nucleo.has(raizDoOutro) && !leitura.publico.has(raizDoOutro)) return "OUTRO";
+  if (tem(leitura.vizinho)) return "PROXIMO";
+  /*
+   * Do assunto, o título só tem o que todo título da amostra tem (a plataforma): fora do tema.
+   * 2026-10-09 · a régua de aderência do núcleo (`radarAdheresToCore`): DUAS
+   * raízes do núcleo também são o assunto, mesmo onipresentes. Na amostra em
+   * que todo título traz a principal inteira ("como atrair clientes pelo
+   * instagram: o passo a passo"), a raiz onipresente deixava TODOS fora do
+   * tema — e a fotografia nova, que nasce da amostra pertinente, sairia vazia.
+   */
+  const doAssunto: string[] = [];
+  for (const raiz of doTitulo) {
+    if ([...leitura.nucleo].some(outra => radarVideoSameStem(raiz, outra)) && !doAssunto.some(outra => radarVideoSameStem(raiz, outra))) doAssunto.push(raiz);
+  }
+  if (doAssunto.length < 2 && !doAssunto.some(raiz => !leitura.onipresentes.has(raiz))) return "FORA";
+  return "GERAL";
+}
+
+export type RadarVideoPertinentSample = {
+  longos: { total: number; coorte: RadarYoutubeCohort };
+  curtos: { total: number; coorte: RadarYoutubeCohort };
+  /** Quantos ficaram fora da conta, por motivo. */
+  foraDaConta: { FORA: number; OUTRO: number };
+  /** Os formatos AV dos pertinentes (longos e Shorts juntos, como a fotografia faz). */
+  formatos: RadarYoutubeAvFormat[];
+  /** A coorte que governa a faixa: a maior, nunca as duas somadas (a mesma regra da fotografia). */
+  lider: "LONG_FORM" | "SHORTS";
+  /** P25 → P75 da coorte que lidera (`radarYoutubeCohortRange`). */
+  faixa: { min: number; max: number } | null;
+  /** O formato que domina os pertinentes; sem padrão, o mesmo texto da fotografia. */
+  formato: string;
+  /** A ressalva de amostra pequena, por coorte pertinente (só quando a coorte inteira tinha vídeo). */
+  ressalvas: string[];
+  /** 2026-10-09 · Aditivo: os vídeos comparáveis que entraram na conta (as lacunas e a fotografia nova os leem). */
+  videos: RadarYoutubeUniverseEntry[];
+};
+
+/*
+ * 2026-10-07 (revisão) · A faixa de UMA coorte pela mesma régua: a cadeia
+ * competitiva diz a faixa do formato que a sequência segue (longos ou Shorts
+ * pertinentes), não a da coorte que lidera.
+ * 2026-10-09 · o nome antigo continua, apontando para a função única.
+ */
+export const radarVideoCohortRange = (coorte: RadarYoutubeCohort): { min: number; max: number } | null => radarYoutubeCohortRange(coorte);
+
+export function radarVideoPertinentSample(input: {
+  videos: readonly RadarYoutubeUniverseEntry[];
+  relevancia: (video: RadarYoutubeUniverseEntry) => RadarVideoRelevance;
+  collectedAt: string | null;
+}): RadarVideoPertinentSample {
+  const lidos = input.videos.map(video => ({ video, relevancia: input.relevancia(video) }));
+  const pertinentes = lidos.filter(item => RADAR_VIDEO_PERTINENT.has(item.relevancia)).map(item => item.video);
+  const ehLongo = (video: RadarYoutubeUniverseEntry) => video.universeClass === "COMPARABLE_LONG_FORM";
+  const ehCurto = (video: RadarYoutubeUniverseEntry) => video.universeClass === "COMPARABLE_SHORT";
+  const total = { longos: input.videos.filter(ehLongo).length, curtos: input.videos.filter(ehCurto).length };
+  const daConta = { longos: pertinentes.filter(ehLongo), curtos: pertinentes.filter(ehCurto) };
+  const longos = radarYoutubeCohort({ format: "LONG_FORM", entries: daConta.longos, collectedAt: input.collectedAt, excludedCount: total.longos - daConta.longos.length });
+  const curtos = radarYoutubeCohort({ format: "SHORTS", entries: daConta.curtos, collectedAt: input.collectedAt, excludedCount: total.curtos - daConta.curtos.length });
+  const comparaveis = pertinentes.filter(video => ehLongo(video) || ehCurto(video));
+  const formatos = radarYoutubeAvFormats(radarYoutubeTitlePatterns(comparaveis.map(video => video.title)), comparaveis.length);
+  const lider = curtos.videoCount > longos.videoCount ? curtos : longos;
+  /*
+   * A ressalva de amostra pequena é a do próprio cohort (abaixo de
+   * RADAR_YOUTUBE_MIN_COHORT os padrões descrevem casos, não mercado), dita
+   * sobre a amostra PERTINENTE. Coorte que já era vazia na amostra inteira não
+   * ganha ressalva: o zero dela é dito na linha do YouTube.
+   */
+  const ressalvas: string[] = [];
+  for (const [rotulo, coorte, inteira] of [["longos", longos, total.longos], ["Shorts", curtos, total.curtos]] as const) {
+    if (!inteira) continue;
+    if (!coorte.videoCount) ressalvas.push(`Ressalva: nenhum vídeo pertinente entre os ${rotulo}: sem estatística pertinente deste formato.`);
+    else if (coorte.videoCount < RADAR_YOUTUBE_MIN_COHORT) ressalvas.push(`Ressalva: a amostra pertinente de ${rotulo} tem ${coorte.videoCount} vídeo(s): abaixo de ${RADAR_YOUTUBE_MIN_COHORT} os padrões descrevem casos, não mercado.`);
+  }
+  return {
+    longos: { total: total.longos, coorte: longos },
+    curtos: { total: total.curtos, coorte: curtos },
+    foraDaConta: { FORA: lidos.filter(item => item.relevancia === "FORA").length, OUTRO: lidos.filter(item => item.relevancia === "OUTRO").length },
+    formatos,
+    lider: lider.format,
+    faixa: radarYoutubeCohortRange(lider),
+    formato: formatos[0]?.label ?? "Definido pela intenção do artigo",
+    ressalvas,
+    videos: comparaveis,
+  };
+}
+
+/*
+ * A CREDENCIAL NO NOME, POR LISTA FECHADA: os marcadores de autoridade da
+ * pesquisa do YouTube (dermatologista, médico, especialista, Dra., Dr.) e as
+ * profissões e conselhos equivalentes. "Profissional" sozinho não é credencial
+ * ("Maquiadora Profissional" declara ofício, não registro), e "explica" é
+ * marca de título, não de nome.
+ * 2026-10-09 · a lista única: a lacuna de autoridade da fotografia e o CSV de vídeo leem esta.
+ */
+const CREDENCIAL = /(?:^|[^a-z])(dra?|doutora?|medic[oa]|dermatologista|especialista|farmaceutic[oa]|nutricionista|biomedic[oa]|enfermeir[oa]|fisioterapeuta|psicolog[oa]|dentista|odontolog[oa]|esteticista|cosmetolog[oa]|advogad[oa]|crm|cro|crf|crn|crbm|coren|crefito|crp|oab)(?![a-z])/;
+
+/** 2026-10-07 · O marcador de credencial no texto (nome do autor, título ou canal), ou `null`. */
+export function radarYoutubeCredentialMarker(valor: string | null | undefined): string | null {
+  return semAcento(valor || "").match(CREDENCIAL)?.[1] ?? null;
+}
+
+/*
+ * ===== 2026-10-09 · O NÚCLEO DA PERTINÊNCIA, LIDO DA PRÓPRIA CORRIDA =====
+ *
+ * Quem congela (a tela) entrega a corrida, a intenção e os tópicos — não a
+ * principal nem as complementares. A corrida as tem: cada consulta diz de onde
+ * veio (`PRIMARY_KEYWORD`, `SECONDARY_KEYWORD`). Sem consulta da principal, o
+ * núcleo fica vazio e a pertinência não é julgada (todos entram, e a
+ * limitação diz).
+ */
+export function radarYoutubeAudienceOfRun(run: Pick<RadarYoutubeSearchRun, "queries">): { principalKeyword: string | null; complementaryKeywords: string[] } {
+  const principal = run.queries.find(consulta => consulta.origin === "PRIMARY_KEYWORD")?.text || null;
+  const complementares = run.queries.filter(consulta => consulta.origin === "SECONDARY_KEYWORD").map(consulta => consulta.text);
+  return { principalKeyword: principal, complementaryKeywords: complementares };
+}
+
+/*
+ * ===== 2026-10-09 · A DECISÃO DE FORMATO CURTO, UMA SÓ =====
+ *
+ * Cinco lugares decidiam "formato curto" e cada um de um jeito: a faixa da
+ * coorte líder da amostra INTEIRA com teto de 60s (sequência do CSV de vídeo,
+ * descartando a planta), os blocos GANCHO/ENTREGA do roteiro genérico, a
+ * saída SHORTS do multiformato, o tom da camada canônica e a semente do
+ * Redator. A régua agora é uma, pela amostra PERTINENTE:
+ *
+ *   - curto quando os Shorts pertinentes lideram e são ao menos
+ *     RADAR_YOUTUBE_MIN_COHORT (abaixo disso descrevem casos, não mercado);
+ *   - senão, o vídeo longo — o artigo-modelo é a referência e o vídeo do mesmo
+ *     assunto segue as seções dele.
+ *
+ * Formato curto NÃO é outro roteiro: é o RECORTE da planta (os capítulos que
+ * funcionam sozinhos viram a série de vídeos curtos). Quem monta a sequência
+ * (`portable-video-export.ts`) e o Redator usam esta decisão.
+ */
+export type RadarVideoFormatDecision = {
+  curto: boolean;
+  /** A coorte pertinente que lidera; `null` sem amostra pertinente. */
+  lider: "LONG_FORM" | "SHORTS" | null;
+  /** P25–P75 da coorte do formato decidido (Shorts no curto, longos no longo). */
+  faixa: { min: number; max: number } | null;
+  /** A faixa de cada coorte pertinente, para a tela e o CSV dizerem as duas. */
+  faixas: { longos: { min: number; max: number } | null; curtos: { min: number; max: number } | null };
+  /** Por que, em uma frase concluída. */
+  motivo: string;
+};
+
+export function radarVideoFormatDecision(coortes: { longos: RadarYoutubeCohort; curtos: RadarYoutubeCohort } | null): RadarVideoFormatDecision {
+  if (!coortes) {
+    return { curto: false, lider: null, faixa: null, faixas: { longos: null, curtos: null }, motivo: "sem amostra pertinente do YouTube: o vídeo segue o artigo-modelo, em formato longo" };
+  }
+  const { longos, curtos } = coortes;
+  const faixas = { longos: radarYoutubeCohortRange(longos), curtos: radarYoutubeCohortRange(curtos) };
+  if (!longos.videoCount && !curtos.videoCount) {
+    return { curto: false, lider: null, faixa: null, faixas, motivo: "nenhum vídeo pertinente na amostra do YouTube: o vídeo segue o artigo-modelo, em formato longo" };
+  }
+  const placar = `${curtos.videoCount} Short(s) × ${longos.videoCount} vídeo(s) longo(s) pertinentes`;
+  if (curtos.videoCount > longos.videoCount) {
+    return curtos.videoCount >= RADAR_YOUTUBE_MIN_COHORT
+      ? { curto: true, lider: "SHORTS", faixa: faixas.curtos, faixas, motivo: `os Shorts lideram a amostra pertinente (${placar}): o vídeo é o recorte da planta, um capítulo por vídeo curto` }
+      : { curto: false, lider: "SHORTS", faixa: faixas.longos, faixas, motivo: `os Shorts lideram a amostra pertinente (${placar}), mas abaixo de ${RADAR_YOUTUBE_MIN_COHORT} descrevem casos, não mercado: o vídeo segue o artigo-modelo, em formato longo` };
+  }
+  return { curto: false, lider: "LONG_FORM", faixa: faixas.longos, faixas, motivo: `os vídeos longos lideram a amostra pertinente (${placar}): o vídeo segue o artigo-modelo, em formato longo` };
+}
+
+/** 2026-10-09 · As coortes pertinentes de uma amostra, na forma que a decisão lê. */
+export const radarVideoFormatCohortsOf = (amostra: Pick<RadarVideoPertinentSample, "longos" | "curtos"> | null) =>
+  (amostra ? { longos: amostra.longos.coorte, curtos: amostra.curtos.coorte } : null);
+
+/**
+ * 2026-10-09 · A AMOSTRA PERTINENTE DE UMA CORRIDA, UMA SÓ CONTA. A fotografia
+ * nova, a tela do YouTube e o multiformato leem a corrida pela mesma régua: o
+ * núcleo vem de quem chama ou das consultas da corrida
+ * (`radarYoutubeAudienceOfRun`); sem núcleo, a pertinência não é julgada
+ * (`julgavel: false`) e todos os comparáveis entram como tema geral.
+ */
+export function radarYoutubeRunPertinentSample(
+  run: Pick<RadarYoutubeSearchRun, "queries" | "universe" | "provenance">,
+  audience?: RadarYoutubeBlueprintAudience | null,
+): { amostra: RadarVideoPertinentSample; julgavel: boolean; decisao: RadarVideoFormatDecision } {
+  const coortes = radarYoutubeFormatCohorts(run.universe);
+  const comparaveis = [...coortes.longForm, ...coortes.shorts];
+  const doRun = radarYoutubeAudienceOfRun(run);
+  const leitura = radarVideoAudienceReadingOf({
+    principalKeyword: audience?.principalKeyword ?? doRun.principalKeyword,
+    complementaryKeywords: audience?.complementaryKeywords ?? doRun.complementaryKeywords,
+    audience: audience?.audience ?? null,
+    titles: comparaveis.map(item => item.title),
+  });
+  const julgavel = leitura.nucleo.size > 0;
+  const amostra = radarVideoPertinentSample({ videos: comparaveis, relevancia: video => (julgavel ? radarVideoRelevance(video, leitura) : "GERAL"), collectedAt: run.provenance.collectedAt });
+  return { amostra, julgavel, decisao: radarVideoFormatDecision(radarVideoFormatCohortsOf(amostra)) };
+}
+
+/**
+ * 2026-10-09 · A conta pertinente na forma que o multiformato lê
+ * (`buildRadarMultimodalBlueprint({ youtubePertinence })`): quantos longos e
+ * Shorts pertinentes e se o formato decidido é o curto.
+ */
+export function radarYoutubeRunPertinence(run: Pick<RadarYoutubeSearchRun, "queries" | "universe" | "provenance">): { longForm: number; shorts: number; shortFormat: boolean } {
+  const { amostra, decisao } = radarYoutubeRunPertinentSample(run);
+  return { longForm: amostra.longos.coorte.videoCount, shorts: amostra.curtos.coorte.videoCount, shortFormat: decisao.curto };
 }
 
 /**
@@ -674,25 +1000,58 @@ export function radarYoutubeTitleOpportunities(padroes: readonly RadarYoutubeTit
 
 /* ========================= a montagem do blueprint ======================= */
 
+/*
+ * ===== 2026-10-09 · A RÉGUA QUE FEZ A FOTOGRAFIA =====
+ *
+ * A fotografia nova nasce da amostra pertinente e grava, entre as limitações,
+ * a linha que diz isso (com quantos entraram e quantos ficaram fora). É por
+ * ela — e não por campo novo no contrato — que quem lê sabe qual régua fez a
+ * fotografia: o contrato congelado não muda de forma, e a fotografia antiga
+ * (sem a linha) continua lida como foi gravada, com o mesmo hash.
+ */
+export const RADAR_YOUTUBE_PERTINENT_RULER = "Amostra pertinente (régua de 2026-10-09):";
+
+export type RadarYoutubeBlueprintRuler = "PERTINENTE" | "AMOSTRA_INTEIRA";
+
+export function radarYoutubeBlueprintRuler(blueprint: Pick<RadarYoutubeBlueprint, "limitations"> | null | undefined): RadarYoutubeBlueprintRuler {
+  return (blueprint?.limitations || []).some(item => item.startsWith(RADAR_YOUTUBE_PERTINENT_RULER)) ? "PERTINENTE" : "AMOSTRA_INTEIRA";
+}
+
+/**
+ * 2026-10-09 · Aditivo: o núcleo e o público de quem chama. Ausente, o núcleo
+ * sai das consultas da própria corrida (`radarYoutubeAudienceOfRun`) e o
+ * público fica sem leitura — a pertinência continua julgada pelo tema.
+ */
+export type RadarYoutubeBlueprintAudience = {
+  principalKeyword?: string | null;
+  complementaryKeywords?: readonly string[];
+  audience?: string | null;
+};
+
 export function buildRadarYoutubeBlueprint(input: {
   run: RadarYoutubeSearchRun;
   declaredIntent: string | null;
   editorialTopics: readonly string[];
   destination?: typeof RADAR_YOUTUBE_BLUEPRINT_DESTINATIONS[number];
   generatedAt: string;
+  audience?: RadarYoutubeBlueprintAudience | null;
 }): RadarYoutubeBlueprint {
   const { run } = input;
-  const coortes = radarYoutubeFormatCohorts(run.universe);
   const collectedAt = run.provenance.collectedAt;
 
-  const longForm = radarYoutubeCohort({ format: "LONG_FORM", entries: coortes.longForm, collectedAt });
-  const shorts = radarYoutubeCohort({ format: "SHORTS", entries: coortes.shorts, collectedAt });
-
-  const comparaveis = [...coortes.longForm, ...coortes.shorts];
-  const avFormats = radarYoutubeAvFormats(
-    radarYoutubeTitlePatterns(comparaveis.map(item => item.title)),
-    comparaveis.length,
-  );
+  /*
+   * 2026-10-09 · A FOTOGRAFIA NASCE DA AMOSTRA PERTINENTE (regra do dono: o
+   * processo do piloto substitui o antigo). A mesma régua do CSV de vídeo
+   * (`radarVideoRelevance`), lida da amostra comparável inteira: coortes,
+   * formatos, faixa, estratégia, títulos e lacunas saem só dos vídeos que
+   * falam com o público ou com o tema. Sem núcleo (a corrida não tem a
+   * consulta da principal), a pertinência não é julgada e todos entram.
+   */
+  const { amostra, julgavel, decisao } = radarYoutubeRunPertinentSample(run, input.audience);
+  const longForm = amostra.longos.coorte;
+  const shorts = amostra.curtos.coorte;
+  const comparaveis = amostra.videos;
+  const avFormats = amostra.formatos;
 
   /* Canais que repetem em qualquer coorte, somados — a leitura de domínio. */
   const porCanal = new Map<string, z.infer<typeof RadarYoutubeChannelSchema>>();
@@ -721,16 +1080,26 @@ export function buildRadarYoutubeBlueprint(input: {
     .sort((esquerda, direita) => direita.occurrenceCount - esquerda.occurrenceCount || esquerda.bestRank - direita.bestRank);
 
   /*
-   * A COORTE QUE GOVERNA A RECOMENDAÇÃO é a maior — e nunca as duas somadas.
-   *
-   * Recomendar duração a partir de long-form e Shorts juntos produziria uma
-   * faixa que nenhum dos dois formatos reconhece; é a proibição do §2.
+   * A COORTE QUE GOVERNA A RECOMENDAÇÃO é a do formato decidido — e nunca as
+   * duas somadas. Recomendar duração a partir de long-form e Shorts juntos
+   * produziria uma faixa que nenhum dos dois formatos reconhece (§2).
+   * 2026-10-09 · pela decisão única de formato (`radarVideoFormatDecision`):
+   * Shorts que lideram com menos de 4 vídeos pertinentes não governam.
    */
-  const coorteLider = shorts.videoCount > longForm.videoCount ? shorts : longForm;
+  const coorteDoFormato = decisao.curto ? shorts : longForm;
   const dominante = maiorFormato(avFormats);
+  const fora = { longos: amostra.longos.total - longForm.videoCount, curtos: amostra.curtos.total - shorts.videoCount };
+  const motivosDeFora = [
+    ...(amostra.foraDaConta.FORA ? [`${amostra.foraDaConta.FORA} fora do tema da busca`] : []),
+    ...(amostra.foraDaConta.OUTRO ? [`${amostra.foraDaConta.OUTRO} de outro público`] : []),
+  ];
 
   const limitations = [
     ...run.limitations,
+    /* 2026-10-09 · a régua que fez esta fotografia, dita com a conta (e é por esta linha que a leitura reconhece a fotografia nova). */
+    julgavel
+      ? `${RADAR_YOUTUBE_PERTINENT_RULER} ${longForm.videoCount} de ${amostra.longos.total} longos e ${shorts.videoCount} de ${amostra.curtos.total} Shorts entram na leitura (mesmo público, público vizinho e tema geral, pelo título e pelo canal)${motivosDeFora.length ? `; fora da conta: ${motivosDeFora.join(" e ")}` : ""}. Formato: ${decisao.motivo}.`
+      : `${RADAR_YOUTUBE_PERTINENT_RULER} a corrida não tem a consulta da keyword principal; os ${comparaveis.length} comparáveis entram na leitura sem julgamento de pertinência. Formato: ${decisao.motivo}.`,
     ...longForm.limitations.map(item => `LONG-FORM · ${item}`),
     ...shorts.limitations.map(item => `SHORTS · ${item}`),
     /*
@@ -757,12 +1126,13 @@ export function buildRadarYoutubeBlueprint(input: {
     recommended: {
       destination: input.destination || "BOTH",
       format: dominante ? dominante.label : "Definido pela intenção do artigo",
-      durationSecondsRange: faixaRecomendada(coorteLider),
-      strategy: estrategia({ coorte: coorteLider, formatos: avFormats, declaredIntent: input.declaredIntent, canaisRecorrentes: recurrentChannels }),
-      script: roteiro({ formatos: avFormats, declaredIntent: input.declaredIntent, shorts: coorteLider.format === "SHORTS" }),
+      durationSecondsRange: decisao.faixa,
+      strategy: estrategia({ coorte: coorteDoFormato, formatos: avFormats, declaredIntent: input.declaredIntent, canaisRecorrentes: recurrentChannels }),
+      /* 2026-10-09 · sem roteiro genérico: o roteiro do vídeo é a planta do artigo-modelo. */
+      script: [],
       scriptDisclaimer: RADAR_YOUTUBE_SCRIPT_DISCLAIMER,
-      titleOpportunities: radarYoutubeTitleOpportunities(coorteLider.titlePatterns),
-      gaps: lacunas({ topicos: input.editorialTopics, universo: run.universe, longForm, shorts }),
+      titleOpportunities: radarYoutubeTitleOpportunities(coorteDoFormato.titlePatterns),
+      gaps: radarYoutubePertinentGaps({ topicos: input.editorialTopics, universo: comparaveis, longForm, shorts, fora }),
     },
     limitations,
   });

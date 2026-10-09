@@ -67,6 +67,96 @@ export type RadarClaimGate =
 
 const texto = (valor: unknown): string => (typeof valor === "string" ? radarWritingDecodeEntities(valor.trim()).replace(/\s+/g, " ") : "");
 
+/*
+ * ===== 2026-10-09 (correção) · O RÓTULO DE TEMA NÃO É AFIRMAÇÃO — E ISSO SE DECIDE NA ORIGEM =====
+ *
+ * A planta real de leads ligava a "fonte oficial" rótulos de tema
+ * ("Definição de lead qualificado conforme fontes do setor", "Estatísticas
+ * sobre conversão de leads qualificados", "Diferença entre lead qualificado e
+ * interessado"): nada afirmam, e a trava casava a meta inteira com eles. As
+ * colunas do CSV filtravam o rótulo só para elas; o CSV de vídeo e o Redator
+ * montavam as afirmações sem o filtro — a mesma frase saía livre num
+ * entregável e "precisa de fonte" no outro. Agora (a) pula, aqui, o link SEM
+ * fonte do pacote que é rótulo de tema: todo consumidor recebe a mesma lista.
+ *
+ * E o rótulo é decidido pela CABEÇA, de lista fechada (a revisão mostrou que
+ * "forma de título + sem verbo da lista" tratava como rótulo "Resolução do CFM
+ * proíbe fotos de antes e depois", "Clínicas com perfil completo recebem mais
+ * ligações" e "Queda no alcance orgânico do Instagram" — afirmação normativa,
+ * de efeito e de direção, que pedem fonte). Rótulo é:
+ *   - cabeça de rótulo de lista fechada (Definição, Estatísticas, Dados,
+ *     Passos, Etapas, Diferença, Lista, Exemplos, Tipos, Métricas, Riscos,
+ *     Benefícios, Critérios, Dicas, Erros…), com "Principais", "Boas" ou
+ *     "Passo a passo" antes, seguida logo de preposição; ou
+ *   - "Como", "Quando" ou "Onde" + infinitivo;
+ * e, nos dois casos, sem número e sem verbo finito. Na dúvida, é afirmação: o
+ * link fica e a frase que o repete continua travando.
+ */
+const CABECA_DE_ROTULO: ReadonlySet<string> = new Set([
+  "definicao", "definicoes", "conceito", "conceitos", "estatistica", "estatisticas", "dados", "numeros", "passo", "passos", "etapa", "etapas",
+  "fases", "diferenca", "diferencas", "lista", "listas", "exemplo", "exemplos", "tipo", "tipos", "metrica", "metricas", "indicador", "indicadores",
+  "risco", "riscos", "beneficio", "beneficios", "vantagens", "desvantagens", "cuidados", "criterio", "criterios", "dicas", "estrategias",
+  "ferramentas", "fontes", "referencias", "regras", "normas", "comparacao", "comparativo", "panorama", "importancia", "erros", "mitos",
+  "praticas", "tecnicas", "formas", "maneiras", "modelos", "casos", "estudos", "pesquisas", "tendencias", "custos", "objetivos", "principios",
+  "requisitos", "impacto", "impactos", "efeitos", "causas", "sinais", "motivos", "razoes", "guia", "checklist", "resumo", "historico", "evolucao",
+]);
+/* O qualificador que pode vir antes da cabeça ("Principais erros de…", "Boas práticas para…"). */
+const QUALIFICADOR_DE_ROTULO: ReadonlySet<string> = new Set(["principais", "melhores", "boas", "diferentes", "novas", "novos", "ultimas", "ultimos"]);
+const PREPOSICAO_DE_ROTULO: ReadonlySet<string> = new Set([
+  "de", "do", "da", "dos", "das", "para", "pra", "sobre", "entre", "conforme", "em", "no", "na", "nos", "nas", "com", "por",
+  "pelo", "pela", "pelos", "pelas", "e", "ou", "x", "vs", "versus", "contra", "sem", "ao", "aos",
+]);
+/* Os verbos finitos acentuados que, sem acento, viram outra palavra ("é" → "e", "está" → "esta"). */
+const VERBOS_ACENTUADOS: ReadonlySet<string> = new Set(["é", "há", "são", "está", "estão", "têm", "será", "serão", "terá", "terão", "poderá", "deverá", "irá", "dá", "vê", "lê", "crê", "põe", "mantém", "obtém", "contém", "retém", "detém", "constrói", "destrói"]);
+const VERBOS_FINITOS: ReadonlySet<string> = new Set([
+  "sao", "foi", "foram", "era", "eram", "seria", "seriam", "estava", "estavam", "fica", "ficam", "tem", "tinha", "tinham", "havia", "houve",
+  "pode", "podem", "poderia", "deve", "devem", "deveria", "precisa", "precisam", "costuma", "costumam", "vai", "vao", "consegue", "conseguem",
+  "faz", "fazem", "traz", "trazem", "atrai", "atraem", "gera", "geram", "aumenta", "aumentam", "reduz", "reduzem", "diminui", "diminuem",
+  "melhora", "melhoram", "piora", "pioram", "ajuda", "ajudam", "mostra", "mostram", "indica", "indicam", "aponta", "apontam", "revela", "revelam",
+  "garante", "garantem", "permite", "permitem", "leva", "levam", "converte", "convertem", "favorece", "favorecem", "influencia", "influenciam",
+  "depende", "dependem", "funciona", "funcionam", "procura", "procuram", "busca", "buscam", "prefere", "preferem", "confia", "confiam",
+  "usa", "usam", "acessa", "acessam", "compra", "compram", "vende", "vendem", "cresce", "crescem", "cai", "caem", "sobe", "sobem", "chega", "chegam",
+  "passa", "passam", "vira", "viram", "exige", "exigem", "oferece", "oferecem", "cria", "criam", "deixa", "deixam", "representa", "representam",
+  "significa", "significam", "afeta", "afetam", "impacta", "impactam", "libera", "liberam", "entrega", "entregam", "atinge", "atingem",
+  "alcanca", "alcancam", "amplia", "ampliam", "eleva", "elevam", "dobra", "dobram", "estimula", "estimulam", "incentiva", "incentivam",
+  "facilita", "facilitam", "dificulta", "dificultam", "acelera", "aceleram", "impede", "impedem", "evita", "evitam", "resolve", "resolvem",
+  "substitui", "substituem", "complementa", "complementam", "vale", "valem", "rende", "rendem", "retorna", "retornam", "volta", "voltam",
+  "atende", "atendem", "recomenda", "recomendam", "sugere", "sugerem", "afirma", "afirmam", "diz", "dizem", "explica", "explicam",
+  "define", "definem", "considera", "consideram", "avalia", "avaliam", "mede", "medem", "registra", "registram", "exibe", "exibem",
+  "tende", "tendem", "compromete", "comprometem", "prejudica", "prejudicam", "beneficia", "beneficiam", "reforca", "reforcam",
+  "sustenta", "sustentam", "demonstra", "demonstram", "comprova", "comprovam", "confirma", "confirmam", "envolve", "envolvem",
+  "inclui", "incluem", "possui", "possuem", "mantem", "obtem", "produz", "produzem", "conduz", "conduzem", "merece", "merecem",
+  "conta", "contam", "basta", "bastam", "serve", "servem", "custa", "custam", "atrapalha", "atrapalham", "limita", "limitam",
+  "existe", "existem", "leem", "veem", "vem", "dao", "agrega", "agregam", "decide", "decidem", "escolhe", "escolhem", "pesquisa", "pesquisam",
+  "proibe", "proibem", "veda", "vedam", "segue", "seguem", "viola", "violam", "concentra", "concentram", "engaja", "engajam", "recebe", "recebem",
+  "perde", "perdem", "ganha", "ganham", "obriga", "obrigam", "autoriza", "autorizam", "regula", "regulam", "determina", "determinam",
+]);
+/* Terminação de verbo conjugado (presente plural, pretérito, -izar, -ecer); os nomes comuns com a mesma terminação ficam de fora. */
+const SUFIXO_VERBAL = /(?:izam?|ificam?|ecem?|aram|eram|iram|avam?|ou|eu|iu|am|em)$/;
+const SUFIXO_DE_NOME = /(?:gem|gram|omem|ovem|uvem|quem|alem|porem|tambem|ninguem|alguem)$|^(?:ordem|desordem)$/;
+const semAcento = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, "");
+const ehVerboFinito = (palavra: string): boolean => {
+  if (VERBOS_ACENTUADOS.has(palavra)) return true;
+  const chave = semAcento(palavra);
+  if (VERBOS_FINITOS.has(chave)) return true;
+  return chave.length >= 5 && SUFIXO_VERBAL.test(chave) && !SUFIXO_DE_NOME.test(chave);
+};
+
+/** 2026-10-09 (correção) · O texto é rótulo de tema (cabeça de lista fechada ou "Como" + infinitivo, sem verbo finito nem número), não afirmação. */
+export function radarClaimIsTopicLabel(valor: string | null | undefined): boolean {
+  const limpo = texto(valor).normalize("NFC").replace(/[.;:!?\s]+$/, "");
+  if (!limpo || /\d/.test(limpo) || /[.;!?]\s/.test(limpo)) return false;
+  const palavras = limpo.toLocaleLowerCase("pt-BR").split(/[^\p{L}\p{N}-]+/u).filter(Boolean);
+  if (!palavras.length || palavras.length > 14 || palavras.some(ehVerboFinito)) return false;
+  const chaves = palavras.map(semAcento);
+  /* "Como gerar leads qualificados": título de seção, não afirmação. */
+  if (["como", "quando", "onde"].includes(chaves[0])) return chaves.length >= 2 && /(?:ar|er|ir|or)$/.test(chaves[1]);
+  /* "Passo a passo para…", "Boas práticas para…", "Principais erros de…". */
+  const cabeca = chaves[0] === "passo" && chaves[1] === "a" && chaves[2] === "passo" ? 2 : QUALIFICADOR_DE_ROTULO.has(chaves[0]) ? 1 : 0;
+  if (!CABECA_DE_ROTULO.has(chaves[cabeca] ?? "")) return false;
+  return [cabeca + 1, cabeca + 2].some(indice => PREPOSICAO_DE_ROTULO.has(chaves[indice] ?? ""));
+}
+
 /* 2026-10-08 · `p` aceita null (aditivo): sem as projeções do pacote, só os links da planta (a) — (b) e (c) vêm do pacote. */
 export function radarPendingClaims(p: RadarWritingProjections | null, planta: RadarArticleBlueprintPayload | null): RadarPendingClaim[] {
   const saida: RadarPendingClaim[] = [];
@@ -77,6 +167,8 @@ export function radarPendingClaims(p: RadarWritingProjections | null, planta: Ra
       const afirmacao = texto(link.claim);
       if (!afirmacao) continue;
       const fonte = link.source ? fontes.get(link.source) ?? null : null;
+      /* 2026-10-09 (correção) · o rótulo de tema sem fonte do pacote não é afirmação: não trava frase nenhuma, em entregável nenhum. */
+      if (!fonte && radarClaimIsTopicLabel(afirmacao)) continue;
       saida.push({ texto: afirmacao, origem: "PLANTA", fonte: fonte ? { id: fonte.id, url: fonte.url, titulo: fonte.title } : null, secao: indice });
     }
   }
@@ -119,6 +211,13 @@ const raizesDistintivas = (frase: string, comuns: ReadonlySet<string>): string[]
   radarSemanticStems(texto(frase)).filter(raiz => !RADAR_WRITING_FUNCTION_WORDS.has(raiz) && !GENERICAS.has(raiz) && !comuns.has(raiz));
 
 const emComum = (da: readonly string[], com: readonly string[]) => da.filter(raiz => com.some(outra => mesmaRaiz(raiz, outra)));
+
+/*
+ * 2026-10-09 (correção) · onde um trecho da frase termina e outro começa: ";", ":", vírgula, travessão, "mas",
+ * "porém", "enquanto", "pois", "porque", e " e " que abre sujeito novo ("… e o pago traz…"). A vírgula conta: "…
+ * converter 3 vezes mais, segundo o atendimento de quem trabalha com estética" é a afirmação mais a atribuição.
+ */
+const QUEBRA_DE_ORACAO_COORDENADA = /\s*[;:,—–]\s*|\s+(?:mas|por[eé]m|enquanto|pois|porque)\s+|\s+e\s+(?=(?:o|a|os|as|um|uma|seu|sua|seus|suas)\s)/i;
 
 /**
  * As raízes da principal que estão em metade ou mais das seções da planta:
@@ -267,8 +366,12 @@ const FINALIDADE_DO_PRONOME = new RegExp(`\\b${PLATAFORMA_OU_CANAL}\\b.*\\b(?:el
 const FINALIDADE_COORDENADA = new RegExp(`^(?:(?:o|a|os|as|um|uma|seu|sua)\\s+)?${PLATAFORMA_OU_CANAL}\\b.*[,;]\\s*(?:(?:mas|e|porem)\\s+)?${FINALIDADE_VERBO}\\b`);
 const QUEBRA_DE_ORACAO = /[,;:()—–]/;
 const NEGA_O_VERBO = /^(?:nao|nunca|nem|jamais|nenhum|nenhuma|sem|ilusao|mito|falso|engano)$/;
-/* 2026-10-08 (correção) · o efeito de plataforma no infinitivo, depois de modal ou de "para": possibilidade ou finalidade, não afirmação. */
-const MODAL_OU_FINALIDADE = /^(?:pode|podem|poderia|poderiam|podera|poderao|tende|tendem|costuma|costumam|consegue|conseguem|para|pra)$/;
+/*
+ * 2026-10-08 (correção) · o efeito de plataforma no infinitivo, depois de modal ou de "para": possibilidade ou finalidade, não afirmação.
+ * 2026-10-09 · e depois de "como" e de "aprenda a"/"ensina a": o que se ensina a fazer. A meta e o H1 reais de tráfego
+ * ("… e como reduzir a dependência de anúncios na sua clínica") travavam como "afirmação sobre plataforma".
+ */
+const MODAL_OU_FINALIDADE = /^(?:pode|podem|poderia|poderiam|podera|poderao|tende|tendem|costuma|costumam|consegue|conseguem|para|pra|como|aprenda|aprendam|aprender|aprende|ensina|ensinam|ensinar|ensinamos)$/;
 const INFINITIVO_DO_EFEITO = /(?:ar|er|ir)$/;
 /* A causa que a frase dá: depois dela, a oração afirma por conta própria. */
 const CAUSA = /\b(?:porque|pois|ja que|uma vez que|afinal)\b|;/;
@@ -291,6 +394,73 @@ const SUBSTANTIVO_EM_R: ReadonlySet<string> = new Set(["lugar", "celular", "mulh
 /* O verbo normativo depois do público que só define o sujeito: "Quem procura um dentista quer saber…" — "já quer" é afirmação de estado e continua. */
 const VERBO_NORMATIVO = /(?<!\bja\s)\b(?:precisa|precisam|deve|devem|merece|merecem|quer|querem)\b/;
 
+/*
+ * ===== 2026-10-09 · O OBJETIVO DO QUE SE CRIA OU ENSINA NÃO É AFIRMAÇÃO (defeito 7 dos 8 CSVs do Silo) =====
+ *
+ * Os CSVs reais de 09/10 marcavam "precisa de fonte" em título, meta e
+ * promessa que só dizem o que o artigo ensina a fazer:
+ *   - H1 de promoções: "Promoções para estética: como criar ofertas que atraem
+ *     pacientes sem desvalorizar a clínica";
+ *   - meta de promoções: "Aprenda a criar promoções para estética que atraem
+ *     pacientes…"; a promessa: "…mostrando como criar ofertas que atraem…";
+ *   - o CTA de Instagram: "…construir uma presença orgânica que traz pacientes";
+ *   - o "Explicar" de tráfego: "Produção de conteúdo que atrai pacientes…".
+ * A oração relativa ("que atraem pacientes") descreve o OBJETIVO do que se
+ * cria ou se ensina — é orientação, não afirmação de que aquilo converte.
+ * Conta quando o efeito abre a oração relativa ("que <verbo>") e o
+ * antecedente, na mesma oração e a até seis palavras, é objeto de:
+ *   - "como + infinitivo" ("como criar ofertas que…");
+ *   - "aprenda a / ensina a + infinitivo" ("Aprenda a criar promoções… que…");
+ *   - verbo de criação no infinitivo, no imperativo ou nominalizado (criar,
+ *     montar, planejar, fazer, escrever, elaborar, produzir, construir,
+ *     desenvolver, preparar, estruturar, redigir, gravar; criação, produção…).
+ * E a PERGUNTA INDIRETA depois de verbo de conferir ("para avaliar se a
+ * promoção atrai o paciente certo", "Acompanhe quantos leads se tornam
+ * pacientes") pergunta, não afirma. "Por que" fica de fora: "Entenda por que
+ * X gera pacientes" pressupõe que gera.
+ *
+ * O que continua travando: "canais que convertem" sem verbo de criação ("Use o
+ * Instagram como vitrine, direcionando o público para canais que convertem,
+ * como o site e o WhatsApp"), o particípio que afirma ("Promoções bem
+ * planejadas atraem pacientes") e o comparativo ("Faça como as clínicas que
+ * lotam a agenda": "como" seguido de artigo não é "como + infinitivo" nem
+ * objeto do verbo de criação).
+ */
+/*
+ * 2026-10-09 (correção) · A ISENÇÃO ERA LARGA DEMAIS. "como + qualquer
+ * infinitivo" e "aprenda a + qualquer infinitivo" isentavam "Aprenda a
+ * direcionar o público para canais que convertem" e "Saiba como escolher
+ * canais que convertem"; a relativa com número, prazo ou comparação ("anúncios
+ * que convertem 10 vezes mais", "ofertas que lotam a agenda em uma semana")
+ * também passava, e "Faça parte das clínicas que lotam a agenda" e "Construir
+ * autoridade é o que traz pacientes" viravam objetivo. Agora:
+ *   - só o VERBO DE CRIAÇÃO abre o objetivo ("como criar", "aprenda a criar":
+ *     o "como"/"aprenda a" sozinho não basta — o verbo de criação já os cobre);
+ *   - "fazer/faça parte" não é criação;
+ *   - a relativa que QUANTIFICA (número, %, "vezes", "dobro", "mais que",
+ *     prazo como "em uma semana") afirma um resultado: trava;
+ *   - o predicativo de cópula ("é o que traz", "são os que") afirma: trava.
+ */
+const VERBO_DE_CRIACAO = "(?:cri(?:ar|e|em)|criacao|mont(?:ar|e|em)|montagem|planej(?:ar|e|em)|planejamento|fazer(?!\\s+parte\\b)|fac(?:a|am)(?!\\s+parte\\b)|escrev(?:er|a|am)|elabor(?:ar|e|em)|elaboracao|produz(?:ir|a|am)|producao|constru(?:ir|a|am)|construcao|desenvolv(?:er|a|am)|desenvolvimento|prepar(?:ar|e|em)|estrutur(?:ar|e|em)|redig(?:ir|a|am)|grav(?:ar|e|em))";
+/* O antecedente: até seis palavras na mesma oração, sem o "como" do comparativo. */
+const ANTECEDENTE = "(?:\\s+(?!como\\b)[^\\s,;:.!?()—–\"“”]+){1,6}?";
+const OBJETIVO_DO_QUE_SE_CRIA = new RegExp(`\\b${VERBO_DE_CRIACAO}${ANTECEDENTE}\\s+que\\s+(?:se\\s+)?$`);
+/* "é o que", "são os que", "foi a que": o predicativo de cópula afirma. */
+const PREDICATIVO_DE_COPULA = /\b(?:e|sao|foi|foram|era|eram|sera|serao|seria|seriam)\s+(?:o|a|os|as|aquilo|aquele|aquela|aqueles|aquelas)\s+que\s+(?:se\s+)?$/;
+/* A relativa que quantifica o efeito afirma um resultado ("10 vezes mais", "30%", "mais que os anúncios", "em uma semana"). */
+const RELATIVA_QUANTIFICADA = /\d|%|\b(?:vezes|dobro|triplo|metade)\b|\bmais\s+(?:que|do\s+que|de\s+\d)|\bem\s+(?:um|uma|dois|duas|tres|poucos|poucas|\d+)\s+(?:dia|dias|semana|semanas|mes|meses|hora|horas|minuto|minutos)\b/;
+const VERBO_DE_CONFERIR = "(?:avali(?:ar|e|em)|verific(?:ar|a)|verifiqu(?:e|em)|confer(?:ir|e)|confir(?:a|am)|saber|saib(?:a|am)|descobr(?:ir|e)|descubr(?:a|am)|test(?:ar|e|em)|chec(?:ar|a)|chequ(?:e|em)|medir|mec(?:a|am)|entend(?:er|a|am)|perceb(?:er|a|am)|identific(?:ar|a)|identifiqu(?:e|em)|analis(?:ar|e|em)|diagnostic(?:ar|a)|diagnostiqu(?:e|em)|acompanh(?:ar|e|em)|observ(?:ar|e|em)|ver|vej(?:a|am)|cont(?:ar|e|em)|calcul(?:ar|e|em)|compar(?:ar|e|em)|pergunt(?:ar|e|em))";
+const PERGUNTA_INDIRETA = new RegExp(`\\b${VERBO_DE_CONFERIR}\\s+(?:se|quant(?:o|a|os|as)|qual|quais)(?:\\s+[^\\s,;:.!?()—–\"“”]+){0,5}?\\s+$`);
+
+/** O efeito em `posicao` descreve o objetivo do que se cria ou ensina, ou está numa pergunta indireta: orientação, não afirmação. */
+function orientaPeloObjetivo(limpa: string, posicao: number): boolean {
+  const antes = limpa.slice(0, posicao);
+  if (PERGUNTA_INDIRETA.test(antes)) return true;
+  if (!OBJETIVO_DO_QUE_SE_CRIA.test(antes) || PREDICATIVO_DE_COPULA.test(antes)) return false;
+  /* 2026-10-09 (correção) · a relativa (até o fim da oração) que quantifica o efeito não é objetivo. */
+  return !RELATIVA_QUANTIFICADA.test(limpa.slice(posicao).split(QUEBRA_DE_ORACAO)[0] || "");
+}
+
 const normal = (valor: string) => texto(valor).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 /* A negação antes do verbo, na mesma oração: até cinco palavras para trás. */
@@ -299,9 +469,12 @@ function negadoAntes(limpa: string, posicao: number): boolean {
   return oracao.trim().split(/\s+/).filter(Boolean).slice(-5).some(palavra => NEGA_O_VERBO.test(palavra));
 }
 
-/* Alguma ocorrência AFIRMADA (sem negação antes do verbo): uma basta para pedir fonte. */
+/* Alguma ocorrência AFIRMADA (sem negação antes do verbo): uma basta para pedir fonte. 2026-10-09 · nem o objetivo do que se cria, nem a pergunta indireta. */
 function afirmaAlguma(limpa: string, regra: RegExp, posicaoDoVerbo: (achado: RegExpExecArray) => number = achado => achado.index): boolean {
-  for (const achado of limpa.matchAll(regra)) if (!negadoAntes(limpa, posicaoDoVerbo(achado))) return true;
+  for (const achado of limpa.matchAll(regra)) {
+    const posicao = posicaoDoVerbo(achado);
+    if (!negadoAntes(limpa, posicao) && !orientaPeloObjetivo(limpa, posicao)) return true;
+  }
   return false;
 }
 
@@ -336,12 +509,16 @@ function sentidoDaOracao(limpa: string): RadarPlatformClaimKind | null {
   }
   /* O efeito comercial é decidido pela polaridade da conversão, mesmo com mecanismo na frase ("O engajamento não garante pacientes"). */
   const comerciais = new Set([...limpa.matchAll(EFEITO_COMERCIAL)].map(achado => achado.index));
-  const efeitoDePlataforma = [...limpa.matchAll(new RegExp(EFEITO.source, "g"))].some(achado => !comerciais.has(achado.index) && !delimitadoPorModal(limpa, achado.index, achado[0]));
+  /* 2026-10-09 · o efeito que descreve o objetivo do que se cria ("Aprenda a criar anúncios que aumentam o alcance") ou que está numa pergunta indireta não afirma. */
+  const efeitoDePlataforma = [...limpa.matchAll(new RegExp(EFEITO.source, "g"))]
+    .some(achado => !comerciais.has(achado.index) && !delimitadoPorModal(limpa, achado.index, achado[0]) && !orientaPeloObjetivo(limpa, achado.index));
   const mecanismo = MECANISMO.test(limpa) || (RECURSO.test(limpa) && PLATAFORMA.test(limpa));
   if (mecanismo && efeitoDePlataforma) return "PLATAFORMA";
   for (const achado of limpa.matchAll(new RegExp(PLATAFORMA_ORDENA.source, "g"))) {
     const verbo = achado.groups?.verbo || "";
-    if (!delimitadoPorModal(limpa, achado.index + achado[0].length - verbo.length, verbo.split(/\s+/)[0])) return "PLATAFORMA";
+    const posicao = achado.index + achado[0].length - verbo.length;
+    /* 2026-10-09 · "Descubra se o Instagram prioriza vídeos curtos" pergunta; a plataforma como sujeito só afirma fora da pergunta indireta. */
+    if (!delimitadoPorModal(limpa, posicao, verbo.split(/\s+/)[0]) && !orientaPeloObjetivo(limpa, achado.index)) return "PLATAFORMA";
   }
   if (FINALIDADE_DO_SUJEITO.test(limpa) || FINALIDADE_DO_PRONOME.test(limpa) || FINALIDADE_COORDENADA.test(limpa)) return "PLATAFORMA";
   const verboDoGrupo = (achado: RegExpExecArray) => achado.index + achado[0].length - (achado.groups?.verbo?.length ?? 0);
@@ -453,12 +630,49 @@ export function radarClaimGate(
   if (!limpa) return { estado: "LIVRE" };
   const comuns = opcoes.comuns || new Set<string>();
   const daFrase = raizesDistintivas(limpa, comuns);
+  /* 2026-10-09 (correção) · as raízes de cada oração, para a semelhança alta do link da planta fora da seção dele. */
+  const oracoesDaFrase = limpa.split(QUEBRA_DE_ORACAO_COORDENADA).map(oracao => raizesDistintivas(oracao, comuns)).filter(raizes => raizes.length);
   const mesmaSecao = (afirmacao: RadarPendingClaim) => afirmacao.secao !== null && secao !== null && afirmacao.secao === secao;
   const cobre = (afirmacao: RadarPendingClaim) => {
     const daAfirmacao = raizesDistintivas(afirmacao.texto, comuns);
     const divididas = emComum(daAfirmacao, daFrase).length;
     if (mesmaSecao(afirmacao)) return divididas >= 2;
-    return divididas >= 2 && daAfirmacao.length > 0 && divididas / daAfirmacao.length >= 0.6;
+    if (divididas < 2 || !daAfirmacao.length || divididas / daAfirmacao.length < 0.6) return false;
+    /*
+     * 2026-10-09 · O LINK DA PLANTA FORA DA SEÇÃO DELE PEDE SEMELHANÇA ALTA, NÃO
+     * RAIZ SOLTA (defeito 7). A meta real de leads — "Entenda o que são leads
+     * qualificados, a diferença para leads interessados e como gerá-los…" —
+     * travava por "Diferença entre lead qualificado e interessado", o link da
+     * seção 6: a meta trazia as raízes do link espalhadas entre outras oito.
+     * Fora da seção que o escreveu, o link só alcança a frase que FALA dele:
+     * as raízes em comum são metade ou mais das raízes distintivas da frase,
+     * além dos 60% da afirmação. Na mesma seção vale a regra de antes (a seção
+     * declarou que a afirmação é dela); as afirmações do mercado, (b) e (c),
+     * também não mudam. A frase longa que cita a afirmação no meio de outras
+     * ainda passa pelo detector por sentido (d).
+     */
+    if (afirmacao.origem !== "PLANTA") return true;
+    /*
+     * 2026-10-09 (correção) · A SEMELHANÇA ALTA É MEDIDA POR ORAÇÃO, E A
+     * REPRODUÇÃO INTEIRA TRAVA SEMPRE. Medida sobre a frase inteira, ela
+     * soltava dois casos: (1) no CSV real de tráfego, "O orgânico sustenta a
+     * presença a longo prazo; o pago traz picos de tráfego quando necessário"
+     * reafirma o link "Tráfego orgânico constrói presença estável a longo
+     * prazo" numa oração e acrescenta outra — 3 de 7 raízes da frase, abaixo
+     * da metade; (2) a meta, o H1 ou a promessa longa que traz INTEIRA a
+     * afirmação da planta ("Descubra por que o Google responde por mais de 90%
+     * das buscas no Brasil e como…") — e o detector por sentido não tem régua
+     * para número. Agora a frase que traz 90% ou mais das raízes da afirmação
+     * a reproduz, seja qual for o tamanho; senão, basta UMA oração (separada
+     * por ";", ":", travessão, ", mas", ", e" ou " e " que abre sujeito) com
+     * 60% da afirmação e metade das raízes dela. A meta de leads passa porque
+     * os links dela são rótulos de tema, que (a) já não lista.
+     */
+    if (divididas / daAfirmacao.length >= 0.9) return true;
+    return oracoesDaFrase.some(daOracao => {
+      const naOracao = emComum(daAfirmacao, daOracao).length;
+      return naOracao >= 2 && naOracao / daAfirmacao.length >= 0.6 && emComum(daOracao, daAfirmacao).length / daOracao.length >= 0.5;
+    });
   };
   /* 2026-10-07 (revisão) · a frase que NEGA o que o mercado repete não o reproduz (a polaridade, acima); o link da planta trava nos dois sentidos. */
   const reproduz = (afirmacao: RadarPendingClaim) => afirmacao.origem === "PLANTA" || nega(limpa) === nega(afirmacao.texto);

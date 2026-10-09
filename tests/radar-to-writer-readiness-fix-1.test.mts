@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { sendRadarToWriter, type RadarWriterHandoffPorts } from "../lib/server/radar-writer-send.ts";
+import { RadarWriterSendError, sendRadarToWriter, type RadarWriterArticleBlueprintCheck, type RadarWriterHandoffPorts } from "../lib/server/radar-writer-send.ts";
 import { resolveRadarCanonicalDossier } from "../lib/server/radar-canonical-dossier.ts";
 import type { RadarCanonicalAuthorities } from "../lib/server/radar-canonical-authorities.ts";
 import { RadarAnalysisPayloadSchema } from "../lib/radar/analysis-contracts.ts";
@@ -193,6 +193,11 @@ async function enviar(opcoes: {
   googleCorrompido?: boolean;
   fundamento?: typeof FUNDAMENTO;
   fundamentoDepois?: typeof FUNDAMENTO;
+  /* 2026-10-09 · o que a leitura do artigo-modelo responde (padrão: a concluída do pacote) e o que ela recebeu. */
+  artigoModelo?: RadarWriterArticleBlueprintCheck;
+  pedidosDoArtigoModelo?: Array<Parameters<RadarWriterHandoffPorts["loadArticleBlueprint"]>[0]>;
+  /* 2026-10-09 (correção) · o Assunto no ArticleDNA da identidade, para a virada gravada no envio. */
+  assunto?: Record<string, unknown>;
 } = {}) {
   const analises = [analiseDoArtigo({ finalizada: opcoes.finalizada, legado: opcoes.legado, googleCorrompido: opcoes.googleCorrompido })];
   const radar = {
@@ -216,12 +221,17 @@ async function enviar(opcoes: {
       if (leiturasDoFundamento > 1 && opcoes.fundamentoDepois) return opcoes.fundamentoDepois;
       return opcoes.fundamento || FUNDAMENTO;
     },
-    loadArticleIdentity: async () => ({ article: ARTICLE_DNA as never, silo: null }),
+    loadArticleIdentity: async () => ({ article: (opcoes.assunto ? { ...ARTICLE_DNA, payload: { ...ARTICLE_DNA.payload, subject: opcoes.assunto } } : ARTICLE_DNA) as never, silo: null }),
     findWorkflowItem: async () => radar as never,
     findDocument: async () => documento,
     createDocument: async ({ document }) => { chamadas.push("createDocument"); documento = document; },
     transitionRadar: async () => { chamadas.push("transitionRadar"); },
     appendDecision: async () => { chamadas.push("appendDecision"); },
+    /* 2026-10-09 · o artigo-modelo obrigatório: esta bancada prova o envio com a planta concluída do pacote. */
+    loadArticleBlueprint: async pedido => {
+      opcoes.pedidosDoArtigoModelo?.push(pedido);
+      return opcoes.artigoModelo ?? { kind: "approved", versionNumber: 1 };
+    },
   };
 
   const resultado = await sendRadarToWriter({
@@ -464,6 +474,94 @@ test("J · reler não muda a prontidão, e reler não entrega", async () => {
   /* E a entrega continua sendo POST: nenhuma leitura a dispara. */
   const rota = await readFile(new URL("../app/api/editorial/radar-writer-handoff/route.ts", import.meta.url), "utf8");
   assert.equal(/export async function GET/.test(rota), false);
+});
+
+/* ===================== 2026-10-09 · o artigo-modelo obrigatório ===================== */
+
+/*
+ * Regra do dono: o envio ao Redator exige a planta CONCLUÍDA deste pacote — a
+ * mesma leitura do Redator (pela investigação congelada e pelo ArticleDNA).
+ * Sem ela, nada nasce no Redator e a esteira não se move; a recusa tem código
+ * próprio, que a tela e o MCP reconhecem para oferecer organizar.
+ */
+test("2026-10-09 · sem o artigo-modelo concluído, o envio recusa (409) e nada nasce no Redator; leitura falha é 503", async () => {
+  const pedidos: Array<Parameters<RadarWriterHandoffPorts["loadArticleBlueprint"]>[0]> = [];
+  await assert.rejects(
+    () => enviar({ finalizada: true, artigoModelo: { kind: "missing", reason: "nenhum artigo-modelo concluído para este pacote" }, pedidosDoArtigoModelo: pedidos }),
+    (erro: unknown) => {
+      assert.ok(erro instanceof RadarWriterSendError);
+      assert.equal(erro.code, "radar_handoff_article_blueprint_missing");
+      assert.equal(erro.status, 409);
+      assert.deepEqual(erro.readiness?.blocks.map(item => item.code), ["ARTICLE_BLUEPRINT_MISSING"]);
+      assert.match(erro.message, /artigo-modelo/);
+      return true;
+    },
+  );
+  /* A leitura recebe o pacote e a investigação do envio: o mesmo alvo do Redator. */
+  assert.equal(pedidos.length, 1);
+  assert.equal(pedidos[0].articleId, "artigo-1");
+  assert.ok(pedidos[0].bundleHash);
+  assert.equal(pedidos[0].investigation?.articleDnaVersionId, "dna-v3");
+  assert.ok(pedidos[0].investigation?.frozenAt);
+
+  await assert.rejects(
+    () => enviar({ finalizada: true, artigoModelo: { kind: "read_failed", reason: "banco indisponível" } }),
+    (erro: unknown) => erro instanceof RadarWriterSendError && erro.code === "radar_handoff_article_blueprint_unreadable" && erro.status === 503,
+  );
+
+  /* Com a planta concluída, o envio de antes: documento criado e esteira movida. */
+  const { chamadas } = await enviar({ finalizada: true, artigoModelo: { kind: "approved", versionNumber: 4 } });
+  assert.deepEqual(chamadas, ["createDocument", "transitionRadar", "appendDecision"]);
+});
+
+test("2026-10-09 · a conferência da planta vem depois das do pacote e antes de criar o documento", async () => {
+  const fonte = (await readFile(new URL("../lib/server/radar-writer-send.ts", import.meta.url), "utf8")).replace(/\/\*[\s\S]*?\*\//g, " ");
+  const vinculo = fonte.indexOf("radarEvidenceBundleMatchesArticle(bundle");
+  const planta = fonte.indexOf("await portas.loadArticleBlueprint(");
+  const criacao = fonte.indexOf("portas.createDocument(");
+  assert.ok(vinculo > 0 && planta > vinculo && criacao > planta, "a planta é conferida entre o vínculo do pacote e a criação do documento");
+  /*
+   * A porta real é a leitura do Redator. 2026-10-09 (correção) · com o conteúdo
+   * (uma consulta a mais, sem IA): o documento grava a virada do Assunto pela
+   * planta concluída, e não a frase genérica "sem planta em mãos".
+   */
+  assert.match(fonte, /readWriterApprovedArticleBlueprint\(\{ brandId \}, \{ articleId, bundleHash, investigation \}, \{ content: true \}\)/);
+  assert.match(fonte, /articleBlueprint: artigoModelo\.kind === "approved" \? artigoModelo\.blueprint \?\? null : null,/);
+  /* 2026-10-09 (correção) · a versão do ArticleDNA é a vigente em todas as portas (nunca a primeira que o banco devolve). */
+  assert.doesNotMatch(fonte, /artefatos\.articles\.find\(/);
+  /* (correção) · com a versão TRANSPORTADA pelo item do Radar nas três portas: existindo, ela vale. */
+  assert.equal((fonte.match(/radarCurrentArticleDnaVersion\(\{ versions: artefatos\.articles, events: artefatos\.events, brandId, articleId, transportedVersionId \}\)/g) || []).length, 3);
+  assert.match(fonte, /const transportada = radarTransportedArticleDnaVersionIdOf\(radarItem\);/);
+});
+
+/* =================== 2026-10-09 (correção) · o envio lê como o Redator =================== */
+
+test("2026-10-09 (correção) · a conferência leva o congelamento da Amazon do pacote, e o documento grava a virada pela seção da planta", async () => {
+  const pedidos: Array<Parameters<RadarWriterHandoffPorts["loadArticleBlueprint"]>[0]> = [];
+  const planta = {
+    title: { h1: "Pele oleosa: a rotina que funciona" },
+    sections: [
+      { h2: "Limpeza da pele oleosa", readerQuestion: "Como limpar a pele oleosa?", h3: [], answerFirst: "Com gel de limpeza." },
+      { h2: "Quando marcar uma consulta dermatológica online", readerQuestion: "Quando buscar a consulta dermatológica online?", h3: [], answerFirst: "Quando a oleosidade não cede." },
+    ],
+  };
+  const { documento } = await enviar({
+    finalizada: true,
+    pedidosDoArtigoModelo: pedidos,
+    artigoModelo: { kind: "approved", versionNumber: 2, blueprint: planta },
+    assunto: { phrase: "Consulta dermatológica online", note: "A marca atende por teleconsulta.", destinationUrl: "https://careglow.com.br/consulta-online" },
+  });
+  /*
+   * A investigação leva a chave da Amazon (null: este pacote não tem Amazon). Sem a
+   * chave, a escolha não conferia a Amazon e o envio aceitava a planta que o Redator
+   * recusa logo depois (Amazon congelada de novo depois da planta).
+   */
+  assert.equal(pedidos.length, 1);
+  assert.ok(pedidos[0].investigation && "amazonFrozenAt" in pedidos[0].investigation, "a conferência do envio não leva o congelamento da Amazon");
+  assert.equal(pedidos[0].investigation?.amazonFrozenAt, null);
+  const linhas = (documento as unknown as { importedContext: { editorialContext: string[] } }).importedContext.editorialContext;
+  assert.ok(linhas.some(linha => linha.startsWith('Seção da virada: "Quando marcar uma consulta dermatológica online", seção 2 do artigo-modelo concluído')), linhas.join("\n"));
+  assert.equal(linhas.some(linha => /que tratar do Assunto|Alerta do Radar/.test(linha)), false, "a virada sem planta em mãos (ou o alerta antigo) foi gravada");
 });
 
 /* ============================== a sentinela ============================== */

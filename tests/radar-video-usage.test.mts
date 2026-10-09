@@ -27,6 +27,7 @@ import {
 } from "../lib/radar/article-blueprint.ts";
 import { readRadarArticleVideoUsages, readRadarVideoUsagesForExport } from "../lib/server/radar-video-usage-read.ts";
 import { ARTIGO, entradaGoogle } from "./radar-portable-writing-fixtures.mts";
+import { comPlanta } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 import { comProductShell, montarRadar, React } from "./radar-dom-harness.mts";
 
 /*
@@ -411,11 +412,13 @@ test("D · sem modo, a projeção é byte a byte a de antes; com modo, 'Não usa
 });
 
 test("D · o CSV 'para escrever': cada modo vira a instrução certa, sem transcrição", () => {
-  const semModo = buildRadarWritingExportArticle(entradaGoogle({ videoContext: radarPortableVideoContext(camada()) }), CONTEXTO).row;
-  const vazio = buildRadarWritingExportArticle(entradaGoogle({ videoContext: radarPortableVideoContext(camada(), []) }), CONTEXTO).row;
+  /* 2026-10-09 · cada linha com a planta concluída da entrada (sem ela, o CSV "Para escrever" não é montado). */
+  const comAPlanta = (entrada: ReturnType<typeof entradaGoogle>) => buildRadarWritingExportArticle(entrada, comPlanta(entrada, CONTEXTO)).row;
+  const semModo = comAPlanta(entradaGoogle({ videoContext: radarPortableVideoContext(camada()) }));
+  const vazio = comAPlanta(entradaGoogle({ videoContext: radarPortableVideoContext(camada(), []) }));
   assert.deepEqual(vazio, semModo, "sem modo, a linha é a de antes");
 
-  const linha = buildRadarWritingExportArticle(entradaGoogle({ videoContext: radarPortableVideoContext(camada(), USOS) }), CONTEXTO).row;
+  const linha = comAPlanta(entradaGoogle({ videoContext: radarPortableVideoContext(camada(), USOS) }));
   const fontes = linha.fontes_e_especialista;
   /*
    * 2026-10-02 · pedido do dono: o bloco virou "Vídeos selecionados pela marca"
@@ -560,10 +563,11 @@ test("D · Incorporar: a seção que o artigo-modelo aprovado escolheu chega ao 
   const semSecao = exportar(null);
   assert.match(semSecao.fontes_e_especialista, /Incorporar no artigo · "Tour pela clínica"[^\n]*· seção: a que o vídeo responde \(o artigo-modelo não indicou\)/);
 
-  /* Sem artigo-modelo, a linha é exatamente a de antes. */
-  const semPlano = buildRadarWritingExportArticle(entradaGoogle({ videoContext: radarPortableVideoContext(camada(), USOS) }), CONTEXTO).row;
-  assert.match(semPlano.fontes_e_especialista, /· seção: a que o vídeo responde \(definir no artigo-modelo\)/);
-  assert.doesNotMatch(semPlano.fontes_e_especialista, /artigo-modelo aprovado/);
+  /* 2026-10-09 · sem artigo-modelo, nada sai (regra do dono): o "definir no artigo-modelo" só sobra para a planta antiga sem o retrato dos vídeos. */
+  assert.throws(
+    () => buildRadarWritingExportArticle(entradaGoogle({ videoContext: radarPortableVideoContext(camada(), USOS) }), CONTEXTO),
+    (erro: unknown) => (erro as { code?: string }).code === "needs_article_blueprint",
+  );
 });
 
 test("D · o modo não entra no pacote nem no hash: o núcleo lê ao vivo e só muda a projeção", () => {
