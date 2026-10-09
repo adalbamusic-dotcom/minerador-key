@@ -55,6 +55,9 @@ import {
 } from "./brand-voice.ts";
 import { radarClaimCommonStems, radarPendingClaims, radarSentenceNeedsSource, type RadarSentenceSourceVerdict } from "./pending-claims.ts";
 import { RADAR_SILO_ROLE_ASKS, radarSiloRoleText } from "./silo-role.ts";
+/* 2026-10-08 · P0-B e P1 · a régua do ruído de pesquisa (agente B) e a do cabeçalho que não vira seção (artigo-modelo da SERP). */
+import { radarMarketCitationIsNoise, radarReaderQuestionIsNoise, radarRegistrableDomain, type RadarResearchNoiseContext } from "./research-noise.ts";
+import { radarEditorialHeadingNoiseDependsOnUnit, radarEditorialHeadingNoiseReason, radarEditorialHeadingWithoutTemplate } from "./editorial-article-model.ts";
 
 /**
  * ===== O EXPORT "PARA ESCREVER" — o CSV que uma pessoa ou uma IA usa para escrever =====
@@ -159,7 +162,7 @@ export const RADAR_WRITING_EXPORT_LIMITS = {
   questions: 10,
   terms: 15,
   moves: 6,
-  specialistAnswerChars: 400,
+  /* 2026-10-08 (correção) · R10 · `specialistAnswerChars` saiu: a resposta aprovada do especialista vai inteira (P1 · fechamento). */
   verdictReasons: 4,
 } as const;
 
@@ -210,6 +213,13 @@ export type RadarWritingArticleContext = {
   blueprint?: RadarArticleBlueprintPayload | null;
   /** 2026-10-02 · Aditivo: a Skill de voz ATIVA da Marca, que a linha "Voz da marca" carrega (Adendo C). */
   brandVoice?: RadarBrandVoiceRef | null;
+  /**
+   * 2026-10-08 · P1 · Aditivo: a publicação de cada membro do Silo, por
+   * `articleId` (do ArticleDNA que o lote já leu), mesmo dos que não estão no
+   * arquivo: o link para um irmão publicado sai com a URL dele. Sem o mapa, o
+   * destino diz o que dizia.
+   */
+  siloPublications?: ReadonlyMap<string, RadarWritingPublication> | null;
 };
 
 export type RadarWritingExportArticle = {
@@ -628,13 +638,52 @@ export function radarWritingProjections(input: RadarPortableExportInput) {
     ...(blueprint?.limitations || []),
     ...editorial.limitations,
   ]);
+  const secoes = radarPortableFlatSections(editorial.sections);
+  const assunto = assuntoDe(input, editorial);
   return {
     blueprint, editorial, dna, serp, fontesExternas, linksDoPlano, keywords, seo, visual,
     video, especialista, serpObservada, lentes, concorrentes, autoridade, descoberta, prontidao, limitacoes,
-    secoes: radarPortableFlatSections(editorial.sections),
-    assunto: assuntoDe(input, editorial),
+    secoes,
+    assunto,
     /* 2026-10-02 · o tipo da unidade (artigo, landing page, página de serviço…), para as frases que dependem dele. */
     unidade: radarWritingUnitOf(input),
+    /*
+     * 2026-10-08 (correção) · o perfil da pesquisa: as réguas de cabeçalho de
+     * CONCORRENTE só valem para a estrutura que veio da SERP do Google. Os blocos
+     * do Amazon ("Conclusão", "Comparação resumida") são da própria plataforma.
+     */
+    perfil: input.profile,
+    /* 2026-10-08 · P1 · o contexto da régua do ruído de pesquisa: núcleo, temas, leitor e os sites concorrentes lidos. */
+    ruido: contextoDoRuido(input, dna, secoes, assunto, observado, concorrentes),
+  };
+}
+
+/*
+ * ===== 2026-10-08 · P1 · O CONTEXTO DO RUÍDO DE PESQUISA =====
+ *
+ * As réguas de `research-noise.ts` recebem o artigo por parâmetro: o núcleo
+ * (principal, complementares, Assunto e a cobertura que o ArticleDNA exige),
+ * os temas (os cabeçalhos e perguntas da estrutura), o leitor declarado e os
+ * domínios dos concorrentes lidos — sem o site da própria marca, que não é
+ * "produto de terceiro" nem "site do concorrente".
+ */
+function contextoDoRuido(
+  input: RadarPortableExportInput,
+  dna: ReturnType<typeof radarPortableArticleDna>,
+  secoes: readonly RadarPortableSection[],
+  assunto: AssuntoDeEscrita | null,
+  observado: RadarPortableExportInput["googleObserved"] | null,
+  concorrentes: ReturnType<typeof radarPortableCompetitorsStructure> | null,
+): RadarResearchNoiseContext {
+  const proprios = new Set([input.article.canonical, input.researchContext?.silo?.siloPageCanonical]
+    .map(valor => (valor ? radarRegistrableDomain(valor) : "")).filter(Boolean));
+  const dominios = [...(observado?.competitors || []).map(item => item.domain), ...(concorrentes?.competitors || []).map(item => item.domain)]
+    .filter((valor): valor is string => Boolean(valor) && !proprios.has(radarRegistrableDomain(valor)));
+  return {
+    core: [dna.principalKeyword, ...dna.secondaryKeywords, ...dna.narrativeReinforcements, assunto?.phrase, ...dna.mustCover],
+    topics: [...secoes.flatMap(secao => [secao.heading, secao.readerQuestion]), ...dna.mustCover],
+    audience: input.article.audience ?? null,
+    competitorDomains: [...new Set(dominios)],
   };
 }
 
@@ -675,6 +724,23 @@ type Membro = RadarSiloExportWritingContext["members"][number];
 
 const rotuloDoMembro = (membro: Pick<Membro, "principalKeyword" | "title" | "slug">): string =>
   texto(membro.principalKeyword) || semMolduraDoTema(membro.title) || texto(membro.slug) || "artigo sem título conhecido";
+
+/*
+ * 2026-10-08 (correção) · F1 · Os irmãos do Silo que estão no ar, para o
+ * artigo-modelo: o destino que a planta gravou como "planejado" sai com a URL.
+ * Do mesmo mapa de publicações do lote (`siloPublications`); sem ele, nada.
+ */
+function irmaosNoAr(contexto: RadarWritingArticleContext): Array<{ slug: string | null; labels: string[]; url: string }> | undefined {
+  if (!contexto.silo || !contexto.siloPublications?.size) return undefined;
+  const saida: Array<{ slug: string | null; labels: string[]; url: string }> = [];
+  for (const membro of contexto.silo.members) {
+    if (membro.articleId === contexto.articleId) continue;
+    const publicada = contexto.siloPublications.get(membro.articleId);
+    const url = publicada?.published ? texto(publicada.publishedUrl) || texto(publicada.canonical) : "";
+    if (url) saida.push({ slug: membro.slug, labels: [rotuloDoMembro(membro), texto(membro.title)].filter(Boolean), url });
+  }
+  return saida.length ? saida : undefined;
+}
 
 /**
  * O DESTINO DE UM LINK, PELO SILO — só quando ele é inequívoco.
@@ -735,7 +801,7 @@ function secaoNomeada(onde: string, secoes: readonly RadarPortableSection[], ser
   return promovido ? secoes.find(secao => secao.heading === promovido.section) ?? null : null;
 }
 
-function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, principal: string | null): LinkDeEscrita[] {
+function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, principal: string | null, plano: PlanoDaEstrutura | null = null): LinkDeEscrita[] {
   const silo = contexto.silo;
   const irmaos = (silo?.members || []).filter(membro => membro.articleId !== contexto.articleId);
   const pilar = irmaos.find(membro => membro.role === "Pilar") || null;
@@ -760,8 +826,20 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
       : `SiloPage "${silo?.label}"${paginaDoSilo.slug ? ` → /${paginaDoSilo.slug}` : ""} (${paginaDoSilo.status}: ${SE_NAO_PUBLICADO}; não invente URL)`
     : "SiloPage do Silo (endereço não registrado: a âncora fica como texto simples, sem link; não invente URL)";
 
+  /*
+   * 2026-10-08 · P1 · A PUBLICAÇÃO DE TODOS OS MEMBROS DO SILO. O CSV do Pilar
+   * dizia "destino ainda não publicado" para suportes que estão no ar (os
+   * próprios CSVs deles diziam "publicado"): o export só conhecia a publicação
+   * dos artigos do arquivo. O núcleo agora resolve a de todos os membros, do
+   * ArticleDNA que o lote já leu (`siloPublications`); o destino publicado sai
+   * com a URL.
+   */
+  const publicacaoDe = (membro: Membro) => contexto.siloPublications?.get(membro.articleId) ?? null;
   const destinoDoMembro = (membro: Membro | null, fallback: string | null, slugConhecido: string | null): string => {
     if (membro) {
+      const publicada = publicacaoDe(membro);
+      const url = publicada?.published ? texto(publicada.publishedUrl) || texto(publicada.canonical) : "";
+      if (url) return `${membro.role} "${rotuloDoMembro(membro)}" → ${url} (publicado)`;
       return `${membro.role} "${rotuloDoMembro(membro)}"${membro.slug ? ` → /${membro.slug}` : ""} (destino ainda não publicado: ${SE_NAO_PUBLICADO}; não invente URL)`;
     }
     if (slugConhecido) return `"${fallback || slugConhecido}" → /${slugConhecido} (destino ainda não publicado: ${SE_NAO_PUBLICADO}; não invente URL)`;
@@ -794,18 +872,28 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
   const membroPorNo = (no: string | null | undefined): Membro | null =>
     no ? irmaos.find(membro => `article:${membro.articleId}` === no) || null : null;
 
+  /* 2026-10-08 · P0-B · o que diz o assunto de cada destino (âncora, título do destino, nome do membro), para a distribuição pelas seções. */
+  const assuntoDoDestino = new Map<string, string[]>();
+  const anotarDestino = (ancora: string, textos: ReadonlyArray<string | null | undefined>) => {
+    const chave = radarWritingCompareKey(ancora);
+    assuntoDoDestino.set(chave, [...(assuntoDoDestino.get(chave) || []), ...textos.map(item => texto(item)).filter(Boolean)]);
+  };
+
   /* 1 · o plano de links que o Radar aplicou sobre o grafo aprovado. */
   for (const link of p.linksDoPlano) {
     const codigo = link.relationship.split(",")[0]?.trim() || "";
-    const secao = secaoNomeada(link.placement, p.secoes, p.serp);
+    const nomeada = secaoNomeada(link.placement, p.secoes, p.serp);
+    /* 2026-10-08 · P0-B · a seção que ficou fora da estrutura (título de post, "Não cobrir") não recebe link. */
+    const secao = nomeada && (!plano || plano.tituloDe(nomeada.heading)) ? nomeada : null;
     const membro = membroPorNo(link.targetNodeId)
       || (codigo === "SUPPORT_TO_PILLAR" ? pilar : membroDoDestino([link.targetTitle, link.suggestedAnchor], irmaos, genericas));
+    anotarDestino(link.suggestedAnchor, [link.suggestedAnchor, link.targetTitle, membro ? rotuloDoMembro(membro) : null, codigo === "ARTICLE_TO_SILO_PAGE" ? silo?.label : null]);
     registrar({
       ancora: link.suggestedAnchor,
       destino: codigo === "ARTICLE_TO_SILO_PAGE" ? destinoDaPagina : destinoDoMembro(membro, link.targetTitle, link.targetSlug),
       onde: secao
-        ? `seção "${secao.heading}"`
-        : lugarForaDoEscopo(link.placement)
+        ? `seção "${plano?.tituloDe(secao.heading) || secao.heading}"`
+        : lugarForaDoEscopo(link.placement) || (nomeada && !secao)
           ? `na seção que trata do assunto do destino (o ponto sugerido pela investigação está fora do escopo ${daUnidade(p.unidade).deste} ${p.unidade.noun})`
           : util(link.placement) ? cortar(link.placement, 140) : null,
       alternativas: [],
@@ -829,6 +917,7 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
       || (codigo === "SUPPORT_TO_PILLAR" && link.direcao === DIRECAO.SUPPORT_TO_PILLAR));
     if (jaCoberto) continue;
     const membro = codigo === "SUPPORT_TO_PILLAR" ? pilar : codigo === "ARTICLE_TO_SILO_PAGE" ? null : membroDoDestino(ancoras, irmaos, genericas);
+    anotarDestino(ancoras[0], [...ancoras, membro ? rotuloDoMembro(membro) : null, codigo === "ARTICLE_TO_SILO_PAGE" ? silo?.label : null]);
     registrar({
       ancora: ancoras[0],
       destino: codigo === "ARTICLE_TO_SILO_PAGE" ? destinoDaPagina : destinoDoMembro(membro, ancoras[0], null),
@@ -839,7 +928,77 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
       alvo: membro?.articleId ?? null,
     });
   }
-  return saida;
+  return plano ? distribuirPelasSecoes(saida, assuntoDoDestino, plano, p) : saida;
+}
+
+/*
+ * ===== 2026-10-08 · P0-B · OS LINKS PELAS SEÇÕES QUE TRATAM O DESTINO =====
+ *
+ * No CSV do Pilar, os 7 links (L1–L7) caíam todos em "O que caracteriza um
+ * lead qualificado?": o plano do Radar dava o mesmo ponto para todos. Agora
+ * cada link vai à seção que trata o assunto do destino — as palavras próprias
+ * do destino (âncora, título, nome do membro, sem as do núcleo do artigo) no
+ * título, na pergunta e nos pontos da seção —, e o ponto do plano fica quando
+ * nenhuma seção trata melhor o destino. Reserva: nenhuma seção leva mais de
+ * dois links (ou a média, se for maior); o excedente vai, na ordem, para a
+ * seção que trata o destino e, sem ela, para a primeira seção ainda sem link.
+ * O link sem seção nenhuma só ganha uma quando alguma seção trata o destino.
+ */
+function distribuirPelasSecoes(links: LinkDeEscrita[], assuntoDoDestino: ReadonlyMap<string, string[]>, plano: PlanoDaEstrutura, p: Projecoes): LinkDeEscrita[] {
+  const itens = plano.itens;
+  if (!itens.length || !links.length) return links;
+  const nucleo = raizesDoNucleo(p);
+  const raizesDoItem = itens.map(item => raizesDeEscrita([
+    item.titulo, item.pergunta || "",
+    ...[item.secao, ...item.absorvidas].flatMap(secao => [radarWritingStripHeadingTemplate(secao.heading), ...secao.coveragePoints]),
+  ].join(" ")));
+  const proprias = (link: LinkDeEscrita) => raizesDeEscrita((assuntoDoDestino.get(radarWritingCompareKey(link.ancora)) || [link.ancora]).join(" "))
+    .filter(raiz => !temRaiz(nucleo, raiz) && deAssunto(raiz));
+  const nota = (link: LinkDeEscrita, indice: number) => proprias(link).filter(raiz => temRaiz(raizesDoItem[indice], raiz)).length;
+
+  const lugar = links.map(link => {
+    const atual = link.secao ? itens.indexOf(plano.itemDe(link.secao) as ItemDaEstrutura) : -1;
+    const notas = itens.map((_, indice) => nota(link, indice));
+    const melhor = Math.max(...notas);
+    const indiceDoMelhor = notas.indexOf(melhor);
+    /* Com ponto no plano, basta tratar melhor o destino; sem ponto, a seção precisa trazer duas palavras próprias dele. */
+    if (atual >= 0 ? melhor > notas[atual] : melhor >= 2) return indiceDoMelhor;
+    return atual;
+  });
+
+  /* A reserva: nenhuma seção com todos os links. */
+  const comSecao = lugar.filter(indice => indice >= 0).length;
+  const limite = Math.max(2, Math.ceil(comSecao / itens.length));
+  /* Os primeiros links de cada seção ficam nela; os que passam do limite são os que se movem. */
+  const contagem = itens.map(() => 0);
+  const excedentes: number[] = [];
+  lugar.forEach((indice, posicao) => {
+    if (indice < 0) return;
+    if (contagem[indice] < limite) contagem[indice] += 1;
+    else excedentes.push(posicao);
+  });
+  for (const posicao of excedentes) {
+    const link = links[posicao];
+    const indice = lugar[posicao];
+    const notas = itens.map((_, outro) => nota(link, outro));
+    const livres = itens.map((_, outro) => outro).filter(outro => outro !== indice && contagem[outro] < limite);
+    if (!livres.length) {
+      contagem[indice] += 1;
+      continue;
+    }
+    const tratam = livres.filter(outro => notas[outro] > 0).sort((a, b) => notas[b] - notas[a] || a - b);
+    const destino = tratam[0] ?? livres.find(outro => contagem[outro] === 0) ?? livres.sort((a, b) => contagem[a] - contagem[b] || a - b)[0];
+    contagem[destino] += 1;
+    lugar[posicao] = destino;
+  }
+
+  return links.map((link, posicao) => {
+    const indice = lugar[posicao];
+    if (indice < 0) return link;
+    const item = itens[indice];
+    if (link.secao && plano.itemDe(link.secao) === item) return { ...link, onde: `seção "${item.titulo}"` };
+    return { ...link, secao: item.secao.heading, onde: `seção "${item.titulo}"` };
+  });
 }
 
 /* ============================== a autoridade ============================== */
@@ -896,7 +1055,31 @@ const conflitoDeYmyl = (p: Projecoes): string | null => conflitoDeYmylDetalhado(
 
 type TipoDoParecer = "FECHAMENTO" | "CTA" | "DIRETRIZ";
 export type RadarWritingSpecialistContribution = Contribuicao;
-type Contribuicao = { rotulo: string; linha: string; aviso: string | null; secao: string | null; tipo: TipoDoParecer | null; resposta: string };
+/*
+ * 2026-10-08 · P1 · `referencia` (aditivo): a linha da coluna de fontes para o
+ * parecer de fechamento, CTA ou diretriz, que já sai inteiro na coluna
+ * promessa_e_leitor — sem repetir o texto aprovado.
+ */
+type Contribuicao = { rotulo: string; linha: string; aviso: string | null; secao: string | null; tipo: TipoDoParecer | null; resposta: string; referencia?: string };
+
+/*
+ * ===== 2026-10-08 · P1 · A RESPOSTA APROVADA SAI INTEIRA =====
+ *
+ * A "Chamada final" e o bloco Especialista dos 8 CSVs do Silo terminavam em
+ * "…marcar uma consulta…": `contribution` é a SÍNTESE da resposta
+ * (`extractedSummary`, cortada por frase em `specialist-contribution-review`),
+ * e o export ainda cortava em 400 caracteres. O texto aprovado é a resposta
+ * original (`fullAnswer`): quando a síntese é só o começo dela, cortado com
+ * "…", sai a original inteira. Síntese organizada (outro texto) sai como foi
+ * aprovada — e nenhuma das duas é cortada aqui.
+ */
+export function radarWritingApprovedAnswer(item: { contribution: string; fullAnswer?: string | null }): string {
+  const sintese = texto(item.contribution);
+  const original = texto(item.fullAnswer).replace(/\s+/g, " ");
+  if (!original || !/(?:…|\.\.\.)$/.test(sintese)) return sintese;
+  const comeco = radarWritingCompareKey(sintese.replace(/(?:…|\.\.\.)$/, ""));
+  return comeco && radarWritingCompareKey(original).startsWith(comeco) ? original : sintese;
+}
 
 /*
  * A VOZ DO ESPECIALISTA NA VIRADA FINAL E NO CTA (SDD diretriz editorial, 2026-10-02).
@@ -917,16 +1100,16 @@ const tipoDoParecer = (kind: string | null | undefined): TipoDoParecer | null =>
 const vozDoEspecialista = (especialista: readonly Contribuicao[], tipo: TipoDoParecer) => especialista.filter(item => item.tipo === tipo);
 const falaDoEspecialista = (item: Contribuicao) => `${entreAspas(item.resposta)} (${item.rotulo}; atribuir como fala do especialista, sem inventar nome ou credencial)`;
 
-export function radarWritingSpecialistContributions(p: Projecoes): Contribuicao[] {
+/* 2026-10-08 · P0-B · `tituloDe` (opcional): a seção pelo título com que ela sai na coluna estrutura. */
+export function radarWritingSpecialistContributions(p: Projecoes, tituloDe: ((cabecalho: string) => string | null) | null = null): Contribuicao[] {
   if (p.especialista.state !== "RECEIVED") return [];
   return p.especialista.items.filter(item => item.approved).map((item, indice) => {
     const pergunta = texto(item.requirementQuestion) || texto(item.questionsSent[0]) || null;
     const assunto = p.autoridade?.specialistReviewRequirements.find(ponto => pergunta && radarWritingCompareKey(ponto.specificQuestion).includes(radarWritingCompareKey(pergunta).slice(0, 40)))?.topic
       || item.questionsSent.map(frase => frase.match(/["“]([^"”]+)["”]/)?.[1]).find(Boolean)
       || null;
-    const resposta = item.contribution.length > RADAR_WRITING_EXPORT_LIMITS.specialistAnswerChars
-      ? `${item.contribution.slice(0, RADAR_WRITING_EXPORT_LIMITS.specialistAnswerChars - 3).trimEnd()} […]`
-      : item.contribution;
+    /* 2026-10-08 · P1 · a resposta aprovada, inteira (sem o corte da síntese nem o de 400 caracteres). */
+    const resposta = radarWritingApprovedAnswer(item);
     const tipo = tipoDoParecer(item.kind);
     const aplicacao = tipo ? aplicacaoDoTipo(tipo, p.unidade) : ehPreenchimento(item.appliesTo) || /ainda n[aã]o definida/i.test(item.appliesTo) ? null : texto(item.appliesTo);
     const secao = aplicacao && !tipo ? p.secoes.find(secao => {
@@ -954,19 +1137,21 @@ export function radarWritingSpecialistContributions(p: Projecoes): Contribuicao[
     if (!aplicacao) avisos.push("sem ponto de aplicação no pacote: entra onde couber, como orientação");
     avisos.push(...item.limitations.map(semPontoFinal));
     const rotulo = `E${indice + 1}`;
+    const partes = (respostaDita: string) => [
+      `${rotulo} · Pergunta: ${entreAspas(assunto || pergunta || "ponto preparado pela investigação")}`,
+      `Resposta aprovada: ${respostaDita}`,
+      `Aplicar em: ${secao ? `seção "${tituloDe?.(secao.heading) || secao.heading}"` : aplicacao || "onde couber no texto, como orientação"}`,
+      `Atribuir como: ${semPontoFinal(item.classification).toLowerCase()} de especialista, sem inventar nome ou credencial`,
+      ...(avisos.length ? [`Atenção: ${avisos.join("; ")}`] : []),
+    ].join(" · ");
     return {
       rotulo,
       secao: secao?.heading ?? null,
       tipo,
       resposta,
       aviso: avisos.length ? avisos.join("; ") : null,
-      linha: [
-        `${rotulo} · Pergunta: ${entreAspas(assunto || pergunta || "ponto preparado pela investigação")}`,
-        `Resposta aprovada: ${entreAspas(resposta)}`,
-        `Aplicar em: ${secao ? `seção "${secao.heading}"` : aplicacao || "onde couber no texto, como orientação"}`,
-        `Atribuir como: ${semPontoFinal(item.classification).toLowerCase()} de especialista, sem inventar nome ou credencial`,
-        ...(avisos.length ? [`Atenção: ${avisos.join("; ")}`] : []),
-      ].join(" · "),
+      linha: partes(entreAspas(resposta)),
+      ...(tipo ? { referencia: partes("inteira na coluna promessa_e_leitor") } : {}),
     };
   });
 }
@@ -1161,8 +1346,10 @@ function naoAltere(publicado: boolean, assunto: Pick<AssuntoDeEscrita, "phrase">
  * 2026-10-02 · O PRÓXIMO PASSO DO LEITOR NUNCA INVENTA LINK. Sem link aprovado
  * no plano para aquele destino, a frase diz isso — o texto pode citar o próximo
  * conteúdo, mas o link é do Arquiteto.
+ * 2026-10-08 · D10: "peça ao Arquiteto" era espera aberta no entregável; a
+ * regra concluída é citar sem link.
  */
-export const RADAR_WRITING_NO_APPROVED_LINK = "(sem link aprovado no grafo: cite sem link ou peça ao Arquiteto; não crie o link)";
+export const RADAR_WRITING_NO_APPROVED_LINK = "(cite sem link: o grafo aprovado não traz esse link; não crie o link)";
 
 /**
  * ===== 2026-10-08 · C4 · A TRAVA DE FONTE NO CSV PARA ESCREVER =====
@@ -1181,31 +1368,70 @@ export function radarWritingSourceMark(frase: string, veredito: Pick<RadarSenten
   return `${corpo.replace(/[.;:\s]+$/, "")} (precisa de fonte: ${veredito.label})${comPonto ? "." : ""}`;
 }
 
-function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto: RadarWritingArticleContext, perguntaDeAbertura: string | null, especialista: readonly Contribuicao[] = [], links: readonly LinkDeEscrita[] = []): string {
+/*
+ * 2026-10-08 · P1 · A CONTINUAÇÃO DA LEITURA (o próximo artigo do Silo ou, no
+ * último, a SiloPage), com o link aprovado pelo grafo ou citada sem link. Uma
+ * régua só para a coluna promessa e para a planta (casos-reais F2: a planta
+ * imprimia "CTA:" e "Próximo passo:", duas chamadas).
+ */
+function continuacaoDoSilo(contexto: RadarWritingArticleContext, links: readonly LinkDeEscrita[]): string | null {
+  const destino = destinoDaContinuacao(contexto);
+  if (!destino) return null;
+  const link = destino.kind === "article"
+    ? links.find(item => item.alvo === destino.articleId) ?? null
+    : links.find(item => item.direcao === DIRECAO.ARTICLE_TO_SILO_PAGE) ?? null;
+  return radarWritingContinuationLine(destino, link?.rotulo ?? null);
+}
+
+/** 2026-10-08 (correção) · F2 · O destino da continuação: o próximo membro do Silo ou, no último, a SiloPage. */
+export type RadarWritingContinuation = { kind: "article" | "siloPage"; label: string; articleId: string | null; slug: string | null; names: string[] };
+
+function destinoDaContinuacao(contexto: RadarWritingArticleContext): RadarWritingContinuation | null {
+  const silo = contexto.silo;
+  if (!silo) return null;
+  const eu = silo.members.find(membro => membro.articleId === contexto.articleId) || null;
+  const proximo = eu ? silo.members.find(membro => membro.position === eu.position + 1) || null : null;
+  if (proximo) {
+    return { kind: "article", label: rotuloDoMembro(proximo), articleId: proximo.articleId, slug: proximo.slug, names: [rotuloDoMembro(proximo), texto(proximo.title), texto(proximo.principalKeyword)].filter(Boolean) };
+  }
+  if (!silo.siloPage) return null;
+  return { kind: "siloPage", label: silo.label, articleId: null, slug: silo.siloPage.slug ?? null, names: [silo.label] };
+}
+
+/** 2026-10-08 (correção) · F2 · A linha da continuação, com o rótulo do link aprovado (L…) ou citada sem link. */
+export function radarWritingContinuationLine(destino: Pick<RadarWritingContinuation, "kind" | "label">, rotuloDoLink: string | null): string {
+  const quem = destino.kind === "article" ? `o próximo artigo do Silo, ${entreAspas(destino.label)},` : `a SiloPage "${destino.label}"`;
+  return `Continuação (não é uma segunda chamada): no fechamento, apresente ${quem} como a leitura seguinte${rotuloDoLink ? `, com o link ${rotuloDoLink}` : ` ${RADAR_WRITING_NO_APPROVED_LINK}`}.`;
+}
+
+function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto: RadarWritingArticleContext, perguntaDeAbertura: string | null, especialista: readonly Contribuicao[] = [], links: readonly LinkDeEscrita[] = [], plano: PlanoDaEstrutura | null = null): string {
   const promessa = util(p.editorial.readerPromise) || util(semMolduraDoTema(input.article.promise) === texto(input.article.promise) ? input.article.promise : null);
   const leitor = util(input.article.audience);
   const direcaoDaAbertura = util(p.editorial.openingOrHook);
-  const fechamento = util(p.editorial.conclusion);
-  const chamada = util(p.editorial.cta);
-  const silo = contexto.silo;
-  const eu = silo?.members.find(membro => membro.articleId === contexto.articleId) || null;
-  const proximo = eu && silo ? silo.members.find(membro => membro.position === eu.position + 1) || null : null;
-  const linkParaOProximo = Boolean(proximo?.articleId) && links.some(link => link.alvo === proximo?.articleId);
-  const linkParaAPagina = links.some(link => link.direcao === DIRECAO.ARTICLE_TO_SILO_PAGE);
+  /* 2026-10-08 · P0-B · o fechamento do modelo montado com pedaço de keyword vira a instrução concluída. */
+  const fechamento = fechamentoDoModelo(p);
+  /* 2026-10-08 · P0-B · a chamada do modelo sem o molde ("Levar o leitor a montar a rotina… no dia a dia."). */
+  const chamada = util(p.editorial.cta)?.replace(/\s+no dia a dia(?=[.!?]?$)/i, "") ?? null;
   /* 2026-10-08 · C4 · promessa, abertura, fechamento e chamada: a frase que só entra com fonte leva a marca (a tese que nega passa). */
   const pendentes = radarPendingClaims(p, null);
   const comuns = radarClaimCommonStems(p, null);
   const comFonte = (frase: string) => radarWritingSourceMark(frase, radarSentenceNeedsSource(frase, { pendentes, comuns }));
-  const depois = silo
-    ? [
-      ...(proximo ? [`o próximo artigo do Silo, ${entreAspas(rotuloDoMembro(proximo))}${linkParaOProximo ? "" : ` ${RADAR_WRITING_NO_APPROVED_LINK}`}`] : []),
-      ...(silo.siloPage ? [`a SiloPage "${silo.label}"${linkParaAPagina ? "" : ` ${RADAR_WRITING_NO_APPROVED_LINK}`}`] : []),
-    ]
-    : [];
+  /*
+   * ===== 2026-10-08 · P1 · UM CTA SÓ, E O PRÓXIMO ARTIGO COMO CONTINUAÇÃO =====
+   *
+   * A coluna trazia "Chamada final — argumento do especialista" E "Próximo
+   * passo do leitor: o próximo artigo do Silo … ou a SiloPage …": duas
+   * chamadas no fim do mesmo texto. A regra concluída: a chamada é uma só — o
+   * argumento do especialista, quando há, ou a do modelo. O próximo artigo do
+   * Silo entra como CONTINUAÇÃO da leitura no fechamento (sem a SiloPage, que
+   * só entra no lugar dele quando o artigo é o último da ordem), com o link
+   * aprovado pelo grafo ou citado sem link.
+   */
+  const continuacao = continuacaoDoSilo(contexto, links);
   const linhas = [
     ...(promessa ? [`Promessa: ${comFonte(comPontoFinal(promessa))}`] : []),
     ...(leitor ? [`Leitor: ${comPontoFinal(leitor)}`] : []),
-    ...linhasDoTronco(p),
+    ...linhasDoTronco(p, plano),
     ...(perguntaDeAbertura ? [`Abertura: responder ${entreAspas(perguntaDeAbertura)} logo no primeiro parágrafo, de forma direta, antes de contextualizar.`] : []),
     ...(direcaoDaAbertura ? [`Direção da abertura: ${comFonte(comPontoFinal(direcaoDaAbertura))}`] : []),
     ...(vozDoEspecialista(especialista, "DIRETRIZ").map(item => `Diretriz do especialista (vale para ${daUnidade(p.unidade).o} ${p.unidade.noun} inteir${daUnidade(p.unidade).terminacao}): ${falaDoEspecialista(item)}.`)),
@@ -1213,10 +1439,10 @@ function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto:
       ? vozDoEspecialista(especialista, "FECHAMENTO").map(item => `Fechamento — virada final na voz do especialista: ${falaDoEspecialista(item)}.`)
       : fechamento ? [`Fechamento: ${comFonte(comPontoFinal(fechamento))}`] : []),
     ...(vozDoEspecialista(especialista, "CTA").length
-      ? vozDoEspecialista(especialista, "CTA").map(item => `Chamada final — argumento do especialista: ${falaDoEspecialista(item)}.`)
+      ? [`Chamada final (a única ${daUnidade(p.unidade).do} ${p.unidade.noun}) — argumento do especialista, inteiro: ${vozDoEspecialista(especialista, "CTA").map(falaDoEspecialista).join("; ")}.`]
       : chamada ? [`Chamada final: ${comFonte(comPontoFinal(chamada))}`] : []),
     ...linhaDoDestino(p),
-    ...(depois.length ? [`Próximo passo do leitor: ${depois.join(" ou ")}.`] : []),
+    ...(continuacao ? [continuacao] : []),
   ];
   return linhas.join("\n");
 }
@@ -1227,21 +1453,23 @@ function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto:
  * que o Radar sugeriu, ou o anfitrião onde a virada ficou como ponto a cobrir.
  * Só sem nada disso a posição fica com quem redige, e isso é dito.
  */
-function linhasDoTronco(p: Projecoes): string[] {
+function linhasDoTronco(p: Projecoes, plano: PlanoDaEstrutura | null = null): string[] {
   const assunto = p.assunto;
   if (!assunto) return [];
   const principal = texto(p.dna.principalKeyword);
   const posicao = assunto.turn?.suggestedPosition ?? null;
   const secao = assunto.turn?.turnSection ?? null;
   const contagem = secao ? `${secao.pages} de ${secao.sampleSize} página(s)` : "";
+  /* 2026-10-08 · P0-B · a seção nomeada pelo título com que ela sai na coluna estrutura (a pergunta do leitor). */
+  const titulo = (cabecalho: string) => plano?.tituloDe(cabecalho) || cabecalho;
   const onde = secao?.source === "OBSERVED_GROUP"
     ? secao.placement === "COVERAGE_POINT" && secao.hostHeading
-      ? `em ${entreAspas(secao.hostHeading)}, como ponto a cobrir (a amostra trata o Assunto em ${contagem})`
-      : `na seção ${entreAspas(secao.heading)} (a amostra já trata o Assunto em ${contagem})`
+      ? `em ${entreAspas(titulo(secao.hostHeading))}, como ponto a cobrir (a amostra trata o Assunto em ${contagem})`
+      : `na seção ${entreAspas(titulo(secao.heading))} (a amostra já trata o Assunto em ${contagem})`
     : posicao
-      ? `depois de ${entreAspas(posicao.afterHeading)}`
+      ? `depois de ${entreAspas(titulo(posicao.afterHeading))}`
       : secao?.placement === "COVERAGE_POINT" && secao.hostHeading
-        ? `como ponto a cobrir em ${entreAspas(secao.hostHeading)} (lugar deixado pelo Radar sem sinal na SERP; quem redige pode mudar)`
+        ? `como ponto a cobrir em ${entreAspas(titulo(secao.hostHeading))} (lugar deixado pelo Radar sem sinal na SERP; quem redige pode mudar)`
         : "onde quem redige decidir (sem sinal na SERP)";
   return [
     comPontoFinal(`Tronco (Assunto): ${assunto.phrase}${assunto.note ? ` — ${semPontoFinal(assunto.note)}` : ""}`),
@@ -1303,9 +1531,15 @@ export function radarWritingTitleIsUsable(titulo: string | null | undefined, pri
 
 function colunaTitulo(input: RadarPortableExportInput, p: Projecoes): { celula: string; tituloInutil: boolean } {
   const principal = p.dna.principalKeyword;
-  const titulo = radarWritingTitleIsUsable(p.editorial.title, principal) ? p.editorial.title : null;
+  /*
+   * 2026-10-08 · P0-B · o título picotado ("Como atrair cliente e praticidade:
+   * atrair clientes e fazer um pitch…", "Leads qualificados: qualificados e
+   * gerar…") também não é H1: a linha manda formular a partir da promessa.
+   */
+  const usavel = (item: string | null | undefined) => radarWritingTitleIsUsable(item, principal) && !radarWritingTitleIsFragmented(item, keywordsDoArtigo(p));
+  const titulo = usavel(p.editorial.title) ? p.editorial.title : null;
   const tituloInutil = Boolean(p.editorial.title) && !titulo;
-  const alternativas = p.editorial.alternateTitles.filter(item => radarWritingTitleIsUsable(item, principal)).slice(0, 2);
+  const alternativas = p.editorial.alternateTitles.filter(usavel).slice(0, 2);
   const direcao = util(p.blueprint?.profile === "GOOGLE" ? p.blueprint.recommended.titleDirection?.statement : null) || util(p.seo.seoTitleDirection);
   const restricoes = unicosPorChave(p.seo.metaDescriptionDirection.constraints.filter(item => !ehPreenchimento(item)), radarWritingCompareKey);
   const restricaoFalaDaPromessa = restricoes.some(item => /promessa/i.test(item));
@@ -1342,91 +1576,397 @@ export const RADAR_WRITING_SUBJECT_WORKING_TITLE = "- Título de trabalho do Rad
 const motivoProprio = (motivo: string) => motivo === RADAR_SUBJECT_MUST_COVER_REASON || !OBRIGATORIO_PADRAO.test(motivo);
 const VIRADA = /^virada para /i;
 
+/*
+ * ===== 2026-10-08 · P0-B · O TÍTULO DE TRABALHO DA SEÇÃO É A PERGUNTA DO LEITOR =====
+ *
+ * Sem artigo-modelo, a estrutura vinha do modelo editorial da SERP, que veste
+ * o cabeçalho do concorrente com um molde para não copiá-lo (§10): "Como X no
+ * dia a dia?", "O que considerar sobre X?", "Afinal, X?", "Na prática, o que
+ * X?". Nos CSVs reais isso deu "Como fazer um pitch de vendas eficiente? Guia
+ * para converter clientes no dia a dia?" e "Afinal, tudo certo sobre como
+ * atrair clientes para loja?" — e a própria voz da marca proíbe "O que
+ * considerar sobre…". O bloco guarda-chuva ("Atrair cliente e clientes",
+ * "Qualificados e gerar") é picotado de keyword.
+ *
+ * No CSV, a seção recebe a PERGUNTA DO LEITOR que ela responde, limpa (sem
+ * caixa alta, sem entidade). Sem pergunta utilizável, o cabeçalho sem o molde.
+ * O título é de trabalho: quem escreve o reescreve na voz, sem copiar o
+ * cabeçalho do concorrente — isso é dito no topo da coluna. O modelo editorial
+ * (e a tela do Radar) continua como é.
+ */
+export function radarWritingStripHeadingTemplate(cabecalho: string | null | undefined): string {
+  /* A régua mora no artigo-modelo (`radarEditorialHeadingWithoutTemplate`), a mesma das linhas da virada do Redator. */
+  return radarEditorialHeadingWithoutTemplate(radarWritingDecodeEntities(texto(cabecalho)));
+}
+
+/* As raízes de um título pelas cinco primeiras letras: "captar" e "captação", "cliente" e "clientes" são a mesma. */
+const raizCurta = (palavra: string) => palavra.slice(0, 5);
+const palavrasDeConteudo = (valor: string) => radarWritingCompareKey(valor).split(" ")
+  .filter(palavra => palavra.length >= 4 && !VAZIAS.has(palavra) && !RADAR_WRITING_FUNCTION_WORDS.has(palavra));
+
+/**
+ * ===== 2026-10-08 · P0-B · O TÍTULO PICOTADO =====
+ *
+ * "Como atrair cliente e praticidade: atrair clientes e fazer um pitch de
+ * vendas eficiente? guia para converter clientes", "Leads qualificados:
+ * qualificados e gerar e o que considerar sobre estratégias para gerar",
+ * "Como campanhas marketing e digital". O título sai montado com pedaços de
+ * keyword e de cabeçalho. É picotado quando: traz um molde ("o que considerar
+ * sobre", "no dia a dia", "Afinal,"), uma pergunta no meio, termina em
+ * preposição, repete a raiz de um lado do dois-pontos no
+ * outro, ou tem o bloco "A e B" sem verbo em que A é pedaço da keyword
+ * principal ("Pacientes dentista e tráfego"). O trecho que é uma keyword do
+ * artigo não conta como repetição ("tráfego pago e tráfego orgânico").
+ */
+export function radarWritingTitleIsFragmented(titulo: string | null | undefined, keywords: ReadonlyArray<string | null | undefined> = []): boolean {
+  const limpo = radarWritingDecodeEntities(texto(titulo)).replace(/\s+/g, " ").trim();
+  if (!limpo) return false;
+  const chave = radarWritingCompareKey(limpo);
+  if (/\b(?:o que considerar sobre|no dia a dia)\b/.test(chave) || /^(?:como )?(?:afinal|na pratica o que|o que explica o que)\b/.test(chave) || /:\s*afinal,/i.test(limpo)) return true;
+  if (/^como (?:o que|afinal|na pratica|qual|quais)\b/.test(chave)) return true;
+  if (/\?\s*\S/.test(limpo.replace(/[\s?!.…]+$/, ""))) return true;
+  const palavras = chave.split(" ");
+  const ultima = palavras[palavras.length - 1] || "";
+  if (["de", "da", "do", "das", "dos", "para", "entre", "e", "ou", "com", "sobre", "em", "a", "o", "que", "como"].includes(ultima)) return true;
+  const chavesDasKeywords = keywords.map(radarWritingCompareKey).filter(item => item.length > 3);
+  const semKeyword = (trecho: string) => chavesDasKeywords.reduce((atual, keyword) => atual.split(keyword).join(" "), trecho);
+  const segmentos = limpo.split(":").map(item => radarWritingCompareKey(item)).filter(Boolean);
+  if (segmentos.length >= 2) {
+    const antes = new Set(palavrasDeConteudo(semKeyword(segmentos[0])).map(raizCurta));
+    if (segmentos.slice(1).some(segmento => palavrasDeConteudo(segmento).some(palavra => antes.has(raizCurta(palavra))))) return true;
+  }
+  const principal = new Set(palavrasDeConteudo(keywords[0] || "").map(raizCurta));
+  for (const segmento of segmentos) {
+    for (const parte of semKeyword(segmento).split(/\s+e\s+o\s+que\s+|\s*,\s*/)) {
+      const bloco = parte.trim().match(/^(?:como\s+)?((?:\S+\s+){0,2}\S+)\s+e\s+(\S+)$/);
+      if (!bloco) continue;
+      const esquerda = palavrasDeConteudo(bloco[1]).map(raizCurta);
+      const direita = raizCurta(bloco[2]);
+      if (esquerda.length && (esquerda.includes(direita) || esquerda.every(raiz => principal.has(raiz)))) return true;
+    }
+  }
+  return false;
+}
+
+/* A pergunta como título: caixa de cabeçalho fora, entidade decodificada, espaço antes do "?" fora. */
+const perguntaComoTitulo = (valor: string) => semCaixaAlta(radarWritingDecodeEntities(valor).replace(/\s+\?/g, "?").replace(/\s+/g, " ").trim());
+
+/*
+ * ===== 2026-10-08 · P0-B · UMA RÉGUA SÓ PARA O "NÃO COBRIR" =====
+ *
+ * O item que a coluna cobrir_e_superar manda NÃO cobrir aparecia como H2 ou no
+ * "Cobrir:" da mesma estrutura: "Como identificar um lead qualificado na
+ * prática" (leads), "Como prospectar clientes pela Internet em 8 passos" e o
+ * ICP (captar), "como funciona o tráfego vindo de ferramentas de IA" (tráfego e
+ * captação). Agora o que é excluído sai de todas as colunas: o rótulo fora do
+ * escopo pela régua de sempre (`radarWritingOutOfScope`), e a pergunta que a
+ * coluna manda para outro artigo ou tópico do Silo pelo MESMO ITEM — as raízes
+ * de conteúdo de um e de outro coincidem (três quartos ou mais), para que
+ * "captar clientes" não saia só porque "Como captar clientes para atacado de
+ * açaí…" pertence a outro artigo.
+ */
+export function radarWritingSameItem(a: string | null | undefined, b: string | null | undefined): boolean {
+  const chaveA = radarWritingCompareKey(a);
+  const chaveB = radarWritingCompareKey(b);
+  if (!chaveA || !chaveB) return false;
+  if (chaveA === chaveB) return true;
+  const raizesA = raizesDeEscrita(a);
+  const raizesB = raizesDeEscrita(b);
+  if (Math.min(raizesA.length, raizesB.length) < 2) return false;
+  /*
+   * 2026-10-08 (correção) · o verbo e o particípio são a mesma raiz no MESMO
+   * ITEM: "Como qualificar um lead na prática?" (no "Não cobrir") e "Como
+   * identificar um lead qualificado na prática" (H2 do Pilar) — "qualificar" e
+   * "qualificad" dividem "qualifica". Só aqui: a régua comum não muda.
+   */
+  const mesmoRadical = (x: string, y: string) => {
+    let comum = 0;
+    while (comum < Math.min(x.length, y.length) && x[comum] === y[comum]) comum += 1;
+    return comum >= 7 && comum >= Math.min(x.length, y.length) - 2;
+  };
+  const comuns = raizesA.filter(raiz => temRaiz(raizesB, raiz) || raizesB.some(outra => mesmoRadical(raiz, outra))).length;
+  const uniao = raizesA.length + raizesB.length - comuns;
+  return uniao > 0 && comuns / uniao >= 0.75;
+}
+
+/** 2026-10-08 · P0-B · Uma seção (ou as seções iguais que ela absorveu) como sai na coluna estrutura. */
+type ItemDaEstrutura = {
+  secao: RadarPortableSection;
+  /** As seções do modelo com o mesmo título (a primeira subseção de um bloco guarda-chuva, por exemplo): saem nesta. */
+  absorvidas: RadarPortableSection[];
+  titulo: string;
+  nivel: 2 | 3;
+  /** A pergunta do leitor, quando ela não é o próprio título. */
+  pergunta: string | null;
+};
+
+type PlanoDaEstrutura = {
+  itens: ItemDaEstrutura[];
+  /** O título com que a seção do modelo sai no CSV; `null` quando ela ficou de fora. */
+  tituloDe: (cabecalho: string | null | undefined) => string | null;
+  /** O item onde a seção do modelo foi parar (ela mesma ou a que a absorveu). */
+  itemDe: (cabecalho: string | null | undefined) => ItemDaEstrutura | null;
+  omitidas: { faq: number; retoricas: number; ruido: number; excluidas: number };
+  /** Quantas seções saem com a pergunta do leitor como título (o aviso dos títulos de trabalho só vale com elas). */
+  titulosDePergunta: number;
+};
+
+const cabecalhosDoItem = (item: ItemDaEstrutura) => [item.secao, ...item.absorvidas].map(secao => secao.heading);
+
+function planoDaEstrutura(p: Projecoes, excluido: (valor: string | null | undefined) => boolean): PlanoDaEstrutura {
+  const itens: ItemDaEstrutura[] = [];
+  const destino = new Map<string, ItemDaEstrutura | null>();
+  const porTitulo = new Map<string, ItemDaEstrutura>();
+  const omitidas = { faq: 0, retoricas: 0, ruido: 0, excluidas: 0 };
+  let titulosDePergunta = 0;
+  const keywords = keywordsDoArtigo(p);
+  const titulosDeTrabalho = p.assunto ? radarSubjectTurnTitle(p.assunto.phrase) : null;
+  /*
+   * O ruído de cabeçalho da régua. Numa landing page, página de serviço ou
+   * categoria, o convite ao contato ("Ficou com alguma dúvida…?") e a chamada
+   * são da página (a mesma exceção de `radarWritingRhetoricalHeading`).
+   */
+  const ruidoDe = (valor: string | null | undefined) => {
+    /* 2026-10-08 (correção) · fora do Google, a seção é bloco da plataforma (Amazon), não cabeçalho de concorrente. */
+    if (p.perfil !== "GOOGLE") return null;
+    const motivo = radarEditorialHeadingNoiseReason(valor, p.ruido);
+    /* 2026-10-08 (correção) · R5 · a mesma lista do modelo: chamada, fecho e navegação de oferta são seção fora do artigo editorial. */
+    return motivo && !p.unidade.editorial && (radarEditorialHeadingNoiseDependsOnUnit(motivo, valor) || motivo === "encerramento") ? null : motivo;
+  };
+  const tirarTudo = (secao: RadarPortableSection) => { destino.set(secao.heading, null); secao.children.forEach(tirarTudo); };
+
+  const visitar = (secoes: readonly RadarPortableSection[], nivel: 2 | 3) => {
+    for (const secao of secoes) {
+      if (EH_FAQ.test(secao.heading)) { omitidas.faq += 1; tirarTudo(secao); continue; }
+      const obrigatoria = secao.mustCoverReasons.length > 0;
+      const daVirada = secao.mustCoverReasons.includes(RADAR_SUBJECT_MUST_COVER_REASON);
+      const deTrabalho = Boolean(titulosDeTrabalho) && secao.heading === titulosDeTrabalho;
+      /* A seção que o ArticleDNA exige nunca sai por estas réguas: a obrigatoriedade é decisão humana. */
+      if (!obrigatoria && radarWritingRhetoricalHeading(secao.heading, p.unidade)) { omitidas.retoricas += 1; tirarTudo(secao); continue; }
+      const cabecalho = radarWritingStripHeadingTemplate(secao.heading);
+      const crua = util(secao.readerQuestion);
+      const protegida = obrigatoria || daVirada || deTrabalho;
+      /*
+       * 2026-10-08 (correção) · a pergunta do leitor que é o mesmo item do "Não
+       * cobrir" sai SOZINHA: a seção fica, titulada pelo cabeçalho sem molde. No
+       * CSV de tráfego, "Quais são os outros tipos de tráfego?" levava junto a
+       * seção "tipos de tráfego orgânico" (e o respiro dela). A seção só sai
+       * quando o PRÓPRIO cabeçalho é o item excluído.
+       */
+      const perguntaExcluida = !protegida && Boolean(crua) && excluido(crua);
+      const pergunta = crua && !perguntaExcluida && !radarWritingRhetoricalQuestion(crua) && !ruidoDe(crua) ? perguntaComoTitulo(crua) : null;
+      if (!protegida && !pergunta && ruidoDe(cabecalho)) {
+        omitidas.ruido += 1;
+        destino.set(secao.heading, null);
+        visitar(secao.children, nivel);
+        continue;
+      }
+      if (!protegida && excluido(cabecalho)) {
+        omitidas.excluidas += 1;
+        destino.set(secao.heading, null);
+        visitar(secao.children, nivel);
+        continue;
+      }
+      const titulo = deTrabalho ? secao.heading
+        : pergunta || (radarWritingTitleIsFragmented(cabecalho, keywords) && secao.children.length ? null : cabecalho);
+      const tituloFinal = titulo
+        /* Bloco picotado sem pergunta: o título da primeira subseção, que então sai nele. */
+        || perguntaComoTitulo(util(secao.children[0]?.readerQuestion) || radarWritingStripHeadingTemplate(secao.children[0]?.heading))
+        || cabecalho;
+      const chave = radarWritingCompareKey(tituloFinal);
+      const mesmo = porTitulo.get(chave);
+      if (mesmo) {
+        /* O mesmo título já saiu (a primeira subseção de um bloco guarda-chuva repete a pergunta dele): a seção sai nele. */
+        mesmo.absorvidas.push(secao);
+        destino.set(secao.heading, mesmo);
+        visitar(secao.children, nivel);
+        continue;
+      }
+      const item: ItemDaEstrutura = {
+        secao, absorvidas: [], titulo: tituloFinal, nivel,
+        pergunta: pergunta && radarWritingCompareKey(pergunta) !== chave ? pergunta : null,
+      };
+      if (!deTrabalho && pergunta && tituloFinal === pergunta) titulosDePergunta += 1;
+      itens.push(item);
+      porTitulo.set(chave, item);
+      destino.set(secao.heading, item);
+      visitar(secao.children, 3);
+    }
+  };
+  visitar(p.editorial.sections, 2);
+
+  const itemDe = (cabecalho: string | null | undefined) => (cabecalho ? destino.get(cabecalho) ?? null : null);
+  return {
+    itens,
+    itemDe,
+    tituloDe: cabecalho => itemDe(cabecalho)?.titulo ?? null,
+    omitidas,
+    titulosDePergunta,
+  };
+}
+
+/*
+ * ===== 2026-10-08 (correção) · O TÍTULO DA SEÇÃO PARA QUEM NÃO MONTA O PLANO (o envio ao Redator) =====
+ *
+ * As linhas "Virada" e "Seção da virada" do Redator nomeavam a seção pelo
+ * cabeçalho sem molde, e o CSV pela pergunta do leitor (o título com que a
+ * seção sai na coluna estrutura): com PAA, as duas divergiam. Esta é a régua do
+ * título de `planoDaEstrutura` para uma seção do modelo — a pergunta do leitor
+ * utilizável (sem ruído e sem retórica) ou, sem ela, o cabeçalho sem molde; o
+ * título de trabalho da virada sintética fica como está. Fora dela ficam os
+ * casos que só o plano inteiro conhece (pergunta excluída pelo "Não cobrir",
+ * bloco picotado que herda o título da subseção).
+ */
+export function radarWritingSectionTitleResolver(
+  modelo: { sections: ReadonlyArray<RadarWritingModelSectionForTitle> } | null | undefined,
+  contexto: { core?: ReadonlyArray<string | null | undefined>; subjectPhrase?: string | null } = {},
+): (cabecalho: string | null | undefined) => string | null {
+  const porCabecalho = new Map<string, RadarWritingModelSectionForTitle>();
+  const visitar = (secoes: ReadonlyArray<RadarWritingModelSectionForTitle>) => {
+    for (const secao of secoes) {
+      if (!porCabecalho.has(secao.headingSuggestion)) porCabecalho.set(secao.headingSuggestion, secao);
+      visitar(secao.childSections || []);
+    }
+  };
+  visitar(modelo?.sections || []);
+  const deTrabalho = texto(contexto.subjectPhrase) ? radarSubjectTurnTitle(texto(contexto.subjectPhrase)) : null;
+  const ruido: RadarResearchNoiseContext = { core: contexto.core || [] };
+  return cabecalho => {
+    if (!cabecalho) return null;
+    if (deTrabalho && cabecalho === deTrabalho) return cabecalho;
+    const secao = porCabecalho.get(cabecalho);
+    if (!secao) return null;
+    const crua = util(secao.readerQuestion);
+    const pergunta = crua && !radarWritingRhetoricalQuestion(crua) && !radarEditorialHeadingNoiseReason(crua, ruido) ? perguntaComoTitulo(crua) : null;
+    return pergunta || radarWritingStripHeadingTemplate(cabecalho) || cabecalho;
+  };
+}
+
+export type RadarWritingModelSectionForTitle = { headingSuggestion: string; readerQuestion?: string | null; childSections?: ReadonlyArray<RadarWritingModelSectionForTitle> };
+
+/* 2026-10-08 · P0-B · O fechamento do modelo ("Retomar a resposta principal: pacientes dentista e tráfego.") picotado vira a instrução concluída. */
+function fechamentoDoModelo(p: Projecoes): string | null {
+  const fechamento = util(p.editorial.conclusion);
+  if (!fechamento) return null;
+  const retomada = fechamento.match(/^retomar a resposta principal:\s*(.+?)\.?$/i);
+  if (!retomada) return fechamento;
+  /* Sem o molde ("montar a rotina de skincare facial no dia a dia" → "montar a rotina de skincare facial"); picotado mesmo assim, a instrução. */
+  const semMolde = radarWritingStripHeadingTemplate(retomada[1].replace(/\s+no dia a dia$/i, "?")).replace(/\?$/, "");
+  const nucleo = semMolde.charAt(0).toLocaleLowerCase("pt-BR") + semMolde.slice(1);
+  return !nucleo || radarWritingTitleIsFragmented(nucleo, keywordsDoArtigo(p))
+    ? "Retomar a resposta principal (a da abertura) em poucas linhas, sem repetir o texto."
+    : nucleo === retomada[1] ? fechamento : `Retomar a resposta principal: ${nucleo}.`;
+}
+
+/*
+ * ===== 2026-10-08 · P1 · PROMOÇÕES: SEM ESTRUTURA DO MODELO, A PÁGINA PUBLICADA =====
+ *
+ * "Não: a investigação não produziu estrutura" — a SERP de "promoções estética"
+ * é de consumidor (cupom, compra coletiva) e o modelo da SERP não deu seção.
+ * Mas o artigo está PUBLICADO e a estrutura publicada (7 H2) foi lida. Sem
+ * estrutura do modelo e com a página lida, a referência é a página publicada
+ * (é atualização), e o arquivo não bloqueia por isso.
+ */
+function estruturaPublicadaDeReferencia(atual: { h1: string | null; h2: string[] }, lida: string): string {
+  const h2 = unicosPorChave(atual.h2.map(item => radarWritingDecodeEntities(item).replace(/\s+/g, " ").trim()).filter(Boolean), radarWritingCompareKey);
+  const conteudo = h2.filter(item => !EH_FAQ.test(item));
+  return [
+    `Estrutura de referência: a da página publicada (${lida}). A investigação não trouxe estrutura da SERP para este artigo; a atualização parte da página que está no ar.`,
+    "Ordem sugerida: a estrutura final e a extensão são decisão de quem redige. Os títulos são os publicados: reescreva-os na voz se precisar, sem tirar seção existente sem decisão humana registrada.",
+    ...conteudo.flatMap(item => ["", `## ${item}`, "- Atualizar: reescrever na voz, com as perguntas e os temas da coluna cobrir_e_superar que couberem aqui."]),
+    ...(conteudo.length < h2.length ? ["", RADAR_WRITING_LEGACY_FAQ] : []),
+  ].join("\n");
+}
+
 function colunaEstrutura(
   input: RadarPortableExportInput,
   p: Projecoes,
+  plano: PlanoDaEstrutura,
   links: readonly LinkDeEscrita[],
   especialista: readonly Contribuicao[],
   imagens: ReadonlyMap<string, string>,
   videos: ReadonlyMap<string, string[]>,
-  tocaForaDoEscopo: (valor: string | null | undefined) => boolean = () => false,
+  excluido: (valor: string | null | undefined) => boolean = () => false,
 ): { celula: string; faqOmitidas: number } {
-  const secoes = p.editorial.sections;
-  if (!secoes.length) return { celula: "", faqOmitidas: 0 };
-  let faqOmitidas = 0;
-  let retoricasOmitidas = 0;
+  if (!plano.itens.length) return { celula: "", faqOmitidas: plano.omitidas.faq };
   /*
-   * 2026-10-02 · FECHO RETÓRICO DE CONCORRENTE NÃO É SEÇÃO NEM PERGUNTA. Um
-   * "Aprendeu como…?" como cabeçalho sai da ordem sugerida (e isso é dito);
-   * como pergunta da seção, a seção volta a se guiar pelo objetivo. Ponto a
-   * cobrir que toca o "não cobrir" também sai — exceto o que o ArticleDNA
+   * 2026-10-02 · FECHO RETÓRICO DE CONCORRENTE NÃO É SEÇÃO NEM PERGUNTA. Ponto
+   * a cobrir que toca o "não cobrir" também sai — exceto o que o ArticleDNA
    * exige e a virada do Assunto, que nunca saem por esta régua.
+   * 2026-10-08 · P0-B · e o ponto que é título de post, encerramento ou
+   * propaganda de concorrente, ou que é o mesmo item de uma pergunta mandada a
+   * outro artigo (a régua única do "não cobrir").
    */
   const obrigatorios = new Set(p.dna.mustCover.map(radarWritingCompareKey));
-  /*
-   * 2026-10-02 · na estrutura, a régua é a da ESTRUTURA (revisão da frente):
-   * chamada para ação ("Pronto para agendar…?") é seção e conteúdo da página
-   * — de conversão numa landing page — e nunca sai como fecho de concorrente.
-   */
   const fechoDeConcorrente = (valor: string) => radarWritingRhetoricalHeading(valor, p.unidade);
+  const ruidoDoPonto = (ponto: string) => {
+    if (p.perfil !== "GOOGLE") return false;
+    const motivo = radarEditorialHeadingNoiseReason(ponto, p.ruido);
+    return Boolean(motivo) && !(!p.unidade.editorial && /^(?:encerramento|chamada para ação)$/.test(motivo || ""));
+  };
   const pontoDescartavel = (ponto: string) => !VIRADA.test(ponto) && !obrigatorios.has(radarWritingCompareKey(ponto))
-    && (fechoDeConcorrente(ponto) || tocaForaDoEscopo(ponto));
+    && (fechoDeConcorrente(ponto) || excluido(ponto) || ruidoDoPonto(ponto));
 
-  const escrever = (secao: RadarPortableSection): string[] => {
-    if (EH_FAQ.test(secao.heading)) { faqOmitidas += 1; return []; }
-    /* A seção que o ArticleDNA exige nunca sai por esta régua: a obrigatoriedade é decisão humana. */
-    if (!secao.mustCoverReasons.length && fechoDeConcorrente(secao.heading)) { retoricasOmitidas += 1; return []; }
-    const pergunta = util(secao.readerQuestion) && !radarWritingRhetoricalQuestion(texto(secao.readerQuestion)) ? util(secao.readerQuestion) : null;
-    const chaveDoTitulo = radarWritingCompareKey(secao.heading);
-    const daVirada = secao.mustCoverReasons.includes(RADAR_SUBJECT_MUST_COVER_REASON);
-    const candidatos = daVirada
-      ? [...secao.coveragePoints.filter(item => VIRADA.test(item)), ...secao.coveragePoints.filter(item => !VIRADA.test(item))]
-      : secao.coveragePoints;
-    const pontos = unicosPorChave(candidatos.filter(item => !ehPreenchimento(item) && !pontoDescartavel(item)), radarWritingCompareKey)
-      .filter(item => radarWritingCompareKey(item) !== radarWritingCompareKey(pergunta) && radarWritingCompareKey(item) !== chaveDoTitulo)
+  const escrever = (item: ItemDaEstrutura): string[] => {
+    const secoes = [item.secao, ...item.absorvidas];
+    const cabecalhos = new Set(cabecalhosDoItem(item));
+    const motivos = secoes.flatMap(secao => secao.mustCoverReasons);
+    const daVirada = motivos.includes(RADAR_SUBJECT_MUST_COVER_REASON);
+    const chaveDoTitulo = radarWritingCompareKey(item.titulo);
+    const candidatos = secoes.flatMap(secao => secao.coveragePoints);
+    const ordenados = daVirada ? [...candidatos.filter(ponto => VIRADA.test(ponto)), ...candidatos.filter(ponto => !VIRADA.test(ponto))] : candidatos;
+    const pontos = unicosPorChave(ordenados.filter(ponto => !ehPreenchimento(ponto) && !pontoDescartavel(ponto)), radarWritingCompareKey)
+      .filter(ponto => radarWritingCompareKey(ponto) !== chaveDoTitulo && radarWritingCompareKey(ponto) !== radarWritingCompareKey(item.pergunta))
       .slice(0, 4);
-    const obrigatoria = secao.mustCoverReasons.length > 0;
-    const motivosProprios = secao.mustCoverReasons.filter(motivoProprio);
-    const linksDaSecao = links.filter(link => link.secao === secao.heading).map(link => link.rotulo);
-    const doEspecialista = especialista.filter(item => item.secao === secao.heading).map(item => item.rotulo);
-    const deTrabalho = Boolean(p.assunto) && secao.heading === radarSubjectTurnTitle(p.assunto!.phrase);
-    const linhas = [
+    const motivosProprios = [...new Set(motivos.filter(motivoProprio))];
+    const linksDaSecao = links.filter(link => link.secao && cabecalhos.has(link.secao)).map(link => link.rotulo);
+    const doEspecialista = especialista.filter(contribuicao => contribuicao.secao && cabecalhos.has(contribuicao.secao)).map(contribuicao => contribuicao.rotulo);
+    const deVideo = [...new Set(secoes.flatMap(secao => videos.get(secao.heading) || []))];
+    const imagem = secoes.map(secao => imagens.get(secao.heading)).find(Boolean);
+    const deTrabalho = Boolean(p.assunto) && item.secao.heading === radarSubjectTurnTitle(p.assunto!.phrase);
+    const objetivo = util(item.secao.objective);
+    const fonte = secoes.find(secao => secao.sourceNeeded);
+    return [
       "",
-      `${"#".repeat(secao.level)} ${secao.heading}`,
+      `${"#".repeat(item.nivel)} ${item.titulo}`,
       ...(deTrabalho ? [RADAR_WRITING_SUBJECT_WORKING_TITLE] : []),
-      pergunta ? `- Responde: ${pergunta}` : `- Objetivo: ${comPontoFinal(secao.objective)}`,
+      ...(item.pergunta ? [`- Responde: ${item.pergunta}`] : !/\?$/.test(item.titulo) && objetivo ? [`- Objetivo: ${comPontoFinal(objetivo)}`] : []),
       ...(pontos.length ? [`- Cobrir: ${pontos.join(" · ")}`] : []),
-      ...(obrigatoria ? [`- Obrigatória pelo ArticleDNA${motivosProprios.length ? `: ${motivosProprios.map(semPontoFinal).join("; ")}` : ""}.`] : []),
-      ...(secao.sourceNeeded ? [`- Precisa de fonte: a afirmação central (${entreAspas(pergunta || secao.heading)}) só entra com uma das fontes listadas; sem fonte, escreva de forma qualificada ou omita.`] : []),
-      ...(secao.specialistRequired ? ["- Revisão profissional: uma afirmação desta seção pede revisão antes de publicar."] : []),
+      ...(motivos.length ? [`- Obrigatória pelo ArticleDNA${motivosProprios.length ? `: ${motivosProprios.map(semPontoFinal).join("; ")}` : ""}.`] : []),
+      ...(fonte ? [`- Precisa de fonte: a afirmação central (${entreAspas(item.pergunta || item.titulo)}) só entra com uma das fontes listadas; sem fonte, escreva de forma qualificada ou omita.`] : []),
+      ...(secoes.some(secao => secao.specialistRequired) ? ["- Revisão profissional: uma afirmação desta seção pede revisão antes de publicar."] : []),
       ...(doEspecialista.length ? [`- Especialista: ${doEspecialista.join(", ")}.`] : []),
-      ...(videos.get(secao.heading)?.length ? [`- Vídeo da marca: ${videos.get(secao.heading)!.join(", ")}.`] : []),
+      ...(deVideo.length ? [`- Vídeo da marca: ${deVideo.join(", ")}.`] : []),
       ...(linksDaSecao.length ? [`- Links: ${linksDaSecao.join(", ")}.`] : []),
-      ...(imagens.get(secao.heading) ? [`- Imagem: ${imagens.get(secao.heading)}.`] : []),
+      ...(imagem ? [`- Imagem: ${imagem}.`] : []),
     ];
-    return [...linhas, ...secao.children.flatMap(escrever)];
   };
 
   const medida = p.concorrentes?.sampleMeasures.find(item => radarWritingCompareKey(item.label) === "palavras") || null;
-  const corpo = secoes.flatMap(escrever);
+  const corpo = plano.itens.flatMap(escrever);
+  const { faq, retoricas, ruido, excluidas } = plano.omitidas;
   const cabecalho = [
     input.profile === "YOUTUBE"
       ? "Estrutura do roteiro de vídeo (não é estrutura de artigo). Ordem sugerida; a decisão final é de quem redige."
       : "Ordem sugerida: a estrutura final e a extensão são decisão de quem redige.",
+    /* 2026-10-08 · P0-B · o título de cada seção é a pergunta do leitor: de trabalho, para reescrever na voz. */
+    ...(plano.titulosDePergunta ? ["Títulos de trabalho: cada seção leva a pergunta do leitor que ela responde. Reescreva-os na voz da marca, sem copiar cabeçalho de concorrente."] : []),
     ...(medida && typeof medida.median === "number"
       ? [`Referência da SERP, não meta: os concorrentes comparáveis têm mediana de ${numeroBr(medida.median)} palavras${medida.centralRange ? ` (faixa central de ${numeroBr(medida.centralRange[0])} a ${numeroBr(medida.centralRange[1])})` : ""}.`]
       : []),
-    ...(faqOmitidas ? [`A seção de perguntas frequentes do modelo ficou de fora (sem FAQ): as perguntas vão dentro das seções.`] : []),
-    ...(retoricasOmitidas ? [`${retoricasOmitidas === 1 ? "A seção de fecho retórico de concorrente ficou" : `${retoricasOmitidas} seções de fecho retórico de concorrente ficaram`} de fora (ex.: "Aprendeu…?", "Gostou…?"): não é dúvida do leitor.`] : []),
+    ...(faq ? [`A seção de perguntas frequentes do modelo ficou de fora (sem FAQ): as perguntas vão dentro das seções.`] : []),
+    ...(retoricas ? [`${retoricas === 1 ? "A seção de fecho retórico de concorrente ficou" : `${retoricas} seções de fecho retórico de concorrente ficaram`} de fora (ex.: "Aprendeu…?", "Gostou…?"): não é dúvida do leitor.`] : []),
+    ...(ruido ? [`${ruido === 1 ? "Uma seção do modelo da SERP ficou" : `${ruido} seções do modelo da SERP ficaram`} de fora: título de post, encerramento ou propaganda de concorrente não é seção deste artigo.`] : []),
+    ...(excluidas ? [`${excluidas === 1 ? "Uma seção ficou de fora porque trata" : `${excluidas} seções ficaram de fora porque tratam`} de assunto da lista "Não cobrir" (coluna cobrir_e_superar).`] : []),
   ];
-  const fechamento = util(p.editorial.conclusion);
+  const fechamento = fechamentoDoModelo(p);
   const fechoDoEspecialista = vozDoEspecialista(especialista, "FECHAMENTO")[0] ?? null;
   const linhaDoFecho = fechoDoEspecialista
     ? `Fechamento: virada final na voz do especialista (${fechoDoEspecialista.rotulo}); ver promessa_e_leitor.`
     : fechamento ? `Fechamento: ${comPontoFinal(fechamento)}` : null;
   return {
     celula: [...cabecalho, ...corpo, ...(linhaDoFecho ? ["", linhaDoFecho] : [])].join("\n"),
-    faqOmitidas,
+    faqOmitidas: faq,
   };
 }
 
@@ -1549,8 +2089,13 @@ export function radarWritingOpeningQuestion(p: Projecoes, foraDoEscopo: (valor: 
     .map(unidade => unidade.questionOrNeed);
   const doBlueprint = p.blueprint?.profile === "GOOGLE" ? p.blueprint.observed.questions.map(item => item.statement) : [];
   const observadas = p.serp.questions.filter(item => STATUS_DE_PERGUNTA.has(item.status)).sort((a, b) => b.pages - a.pages).map(item => item.question);
-  /* 2026-10-02 · nem fecho retórico de concorrente, nem pergunta que toca o "não cobrir". */
-  const todas = [...centrais, ...doBlueprint, ...observadas].filter((valor): valor is string => Boolean(texto(valor)) && !radarWritingRhetoricalQuestion(valor) && !foraDoEscopo(valor));
+  /*
+   * 2026-10-02 · nem fecho retórico de concorrente, nem pergunta que toca o "não cobrir".
+   * 2026-10-08 · P1 · nem ruído de pesquisa: "👍As marcas e lojas de Estética são
+   * seguras e confiáveis?" abria o artigo de promoções escrito para a clínica.
+   */
+  const todas = [...centrais, ...doBlueprint, ...observadas].filter((valor): valor is string => Boolean(texto(valor)) && !radarWritingRhetoricalQuestion(valor) && !foraDoEscopo(valor)
+    && !radarReaderQuestionIsNoise(valor, p.ruido));
   /* Só raiz da PRINCIPAL vira cenário (ex.: "instagram"). */
   const daPrincipal = new Set(radarSemanticStems(texto(p.dna.principalKeyword) || ""));
   const onipresentes = new Set([...radarUbiquitousStems(todas)].filter(raiz => daPrincipal.has(raiz)));
@@ -1681,6 +2226,7 @@ function diferencialDoArtigo(
   p: Projecoes,
   contexto: RadarWritingArticleContext,
   tocaForaDoEscopo: (valor: string | null | undefined) => boolean,
+  plano: PlanoDaEstrutura | null = null,
 ): string | null {
   const nucleo = raizesDoNucleo(p);
   const cabecalhos = (input.competitorOutlines || []).flatMap(pagina => pagina.headings.filter(item => item.level === 2 || item.level === 3).map(item => raizesDeEscrita(item.text)));
@@ -1709,16 +2255,23 @@ function diferencialDoArtigo(
   const unicos = (radarWritingCompetitorTopicsOf(input, p)?.topics || []).filter(item => item.pages < 2);
   if (unicos.length) {
     /* O título e os H3 da seção dizem o assunto dela (peso 2); a resposta e o "Explicar", o que ela desenvolve (peso 1). */
+    /* 2026-10-08 · P0-B · sem planta, as seções como saem na coluna estrutura (título de trabalho, sem as que ficaram de fora). */
     const secoes = contexto.blueprint
       ? contexto.blueprint.blueprint.sections.map(secao => ({ titulo: secao.h2, nome: raizesDeEscrita([secao.h2, ...secao.h3].join(" ")), corpo: raizesDeEscrita([secao.readerQuestion, secao.answerFirst, ...secao.explain].join(" ")) }))
-      : p.secoes.map(secao => ({ titulo: secao.heading, nome: raizesDeEscrita(secao.heading), corpo: raizesDeEscrita([secao.readerQuestion || "", ...secao.coveragePoints].join(" ")) }));
+      : plano
+        ? plano.itens.map(item => {
+          const doItem = [item.secao, ...item.absorvidas];
+          return { titulo: item.titulo, nome: raizesDeEscrita([item.titulo, ...doItem.map(secao => radarWritingStripHeadingTemplate(secao.heading))].join(" ")), corpo: raizesDeEscrita([item.pergunta || "", ...doItem.flatMap(secao => secao.coveragePoints)].join(" ")) };
+        })
+        : p.secoes.map(secao => ({ titulo: secao.heading, nome: raizesDeEscrita(secao.heading), corpo: raizesDeEscrita([secao.readerQuestion || "", ...secao.coveragePoints].join(" ")) }));
     for (const tema of unicos) {
       const proprias = raizesDeEscrita([tema.label, ...tema.headings].join(" ")).filter(raiz => !temRaiz(nucleo, raiz) && deAssunto(raiz));
       if (proprias.length < 2) continue;
       const notas = secoes.map(item => proprias.reduce((soma, raiz) => soma + (temRaiz(item.nome, raiz) ? 2 : temRaiz(item.corpo, raiz) ? 1 : 0), 0));
       const melhor = Math.max(0, ...notas);
       const secao = melhor > 0 ? secoes[notas.indexOf(melhor)] : null;
-      if (secao) return `Diferencial possível: ${entreAspas(tema.label)}, tratado por 1 de ${tema.sampleSize} páginas comparáveis — aprofunde na seção ${entreAspas(secao.titulo)}, sem copiar o cabeçalho do concorrente.`;
+      /* 2026-10-08 · P1 · a recorrência dos temas conta SITES (`competitor-topics.ts`), sobre a lista impressa de páginas comparáveis. */
+      if (secao) return `Diferencial possível: ${entreAspas(tema.label)}, tratado por um só site entre as ${tema.sampleSize} páginas comparáveis — aprofunde na seção ${entreAspas(secao.titulo)}, sem copiar o cabeçalho do concorrente.`;
     }
   }
   return null;
@@ -1730,25 +2283,144 @@ function entregaDaPlanta(planta: RadarArticleBlueprintPayload | null): string | 
   return secao ? `Entrega concreta da planta: ${semPontoFinal(texto(secao.practical))} (seção ${entreAspas(secao.h2)}).` : null;
 }
 
+/*
+ * ===== 2026-10-08 · AS PERGUNTAS DA LINHA, ANTES DA ESTRUTURA =====
+ *
+ * As perguntas a responder e as que vão ao "Não cobrir" (outro artigo ou
+ * tópico do Silo, outro foco) saíam no fim da coluna cobrir_e_superar, depois
+ * da estrutura pronta. A régua única do "não cobrir" (P0-B) precisa delas
+ * ANTES: a pergunta que a coluna manda para outro artigo não pode ficar como
+ * ponto a cobrir da estrutura.
+ */
+type PerguntasDaLinha = {
+  /** As linhas "- pergunta (prioridade…)" a responder dentro das seções. */
+  linhas: string[];
+  /** As linhas do "Não cobrir" das perguntas de outro foco. */
+  foraDoFoco: string[];
+  /** As mesmas perguntas, cruas, para a régua do mesmo item. */
+  foraDoFocoPerguntas: string[];
+};
+
+/*
+ * 2026-10-02 · NENHUMA LISTA DA COLUNA cobrir_e_superar leva fecho retórico de
+ * concorrente nem texto que toca o "não cobrir". 2026-10-08 · P1 · nem o ruído
+ * de pesquisa: newsletter, inglês, encerramento, loja ou cupom fora do leitor,
+ * outra profissão, produto de concorrente, título de post.
+ */
+const descartavelNaPesquisa = (p: Projecoes, tocaForaDoEscopo: (valor: string | null | undefined) => boolean) =>
+  (valor: string | null | undefined): boolean => !texto(valor) || radarWritingRhetoricalQuestion(texto(valor)) || tocaForaDoEscopo(valor)
+    || radarReaderQuestionIsNoise(valor, p.ruido) || radarEditorialHeadingNoiseReason(valor, p.ruido) !== null;
+
+function perguntasDaLinha(
+  p: Projecoes,
+  contexto: RadarWritingArticleContext,
+  perguntaDeAbertura: string | null,
+  tocaForaDoEscopo: (valor: string | null | undefined) => boolean,
+): PerguntasDaLinha {
+  const descartar = descartavelNaPesquisa(p, tocaForaDoEscopo);
+  const naoProntas = new Set((p.descoberta?.answerableUnits || []).filter(unidade => unidade.readiness !== "READY").map(unidade => radarWritingCompareKey(unidade.questionOrNeed)));
+  const semFonte = new Set(radarWritingUnsupportedClaims(p.autoridade, p.serp).map(item => radarWritingCompareKey(item.afirmacao)));
+  const jaNaEstrutura = new Set(p.secoes.flatMap(secao => [radarWritingCompareKey(secao.readerQuestion), radarWritingCompareKey(secao.heading)]).filter(Boolean));
+  /*
+   * 2026-10-08 · C7 · com o artigo-modelo, a abertura e as seções são as DELE:
+   * a pergunta que a planta já responde não se repete aqui, e a "pergunta de
+   * abertura" do export (que a planta não usa) volta para a lista.
+   */
+  const planta = contexto.blueprint?.blueprint;
+  if (planta) for (const pergunta of [planta.opening.readerQuestion, ...planta.sections.map(secao => secao.readerQuestion)]) jaNaEstrutura.add(radarWritingCompareKey(pergunta));
+  else jaNaEstrutura.add(radarWritingCompareKey(perguntaDeAbertura));
+  /*
+   * 2026-10-08 (correção da revisão) · a pergunta que a planta usa como
+   * EVIDÊNCIA de uma seção ou da abertura (G1 "Como captar clientes pela
+   * internet?" na seção 5 do caso real) também já está na estrutura: ela não
+   * se repete nas perguntas a responder e nunca vai ao "Não cobrir" — o mesmo
+   * tema não pode ser obrigatório na estrutura e proibido aqui.
+   */
+  if (planta && contexto.blueprint) {
+    const textoDaEvidencia = new Map((contexto.blueprint.evidence || []).map(item => [item.id, item.text]));
+    for (const id of [...(planta.opening.evidence || []), ...planta.sections.flatMap(secao => secao.evidence || [])]) {
+      const dita = /^[PGDO]\d/i.test(id) ? textoDaEvidencia.get(id) : undefined;
+      if (dita) jaNaEstrutura.add(radarWritingCompareKey(dita.replace(/\s*\([^()]*p[áa]ginas?[^()]*\)\s*$/i, "")));
+    }
+  }
+  const candidatas = [
+    ...(p.descoberta?.questionCoverageRequirements || [])
+      .slice().sort((a, b) => ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[a.priority] ?? 3) - ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[b.priority] ?? 3))
+      .map(item => ({ pergunta: item.question, prioridade: PRIORIDADE[item.priority] || null })),
+    ...p.serp.questions.filter(item => STATUS_DE_PERGUNTA.has(item.status)).sort((a, b) => b.pages - a.pages)
+      .map(item => ({ pergunta: item.question, prioridade: null as string | null })),
+  ].map(item => ({ ...item, pergunta: semCaixaAlta(radarWritingDecodeEntities(item.pergunta).replace(/\s+\?/g, "?").trim()) }));
+  const elegiveis = unicosPorChave(candidatas, item => radarWritingCompareKey(item.pergunta))
+    .filter(item => !jaNaEstrutura.has(radarWritingCompareKey(item.pergunta)) && !descartar(item.pergunta) && !EH_FAQ.test(item.pergunta));
+  /* 2026-10-08 · C7 · só a pergunta DESTE artigo; a que só divide o cenário vai ao "Não cobrir", com o destino. */
+  const foco = focoDasPerguntas(p, contexto, elegiveis.map(item => item.pergunta));
+  const deOutroFoco = elegiveis.filter(item => !foco.doArtigo(item.pergunta));
+  return {
+    linhas: elegiveis.filter(item => foco.doArtigo(item.pergunta))
+      .slice(0, RADAR_WRITING_EXPORT_LIMITS.questions)
+      .map(item => {
+        const chave = radarWritingCompareKey(item.pergunta);
+        const insuficiente = naoProntas.has(chave) || semFonte.has(chave) || semFonte.has(chave.replace(/\s*$/, ""));
+        const marcas = [item.prioridade, insuficiente ? "material insuficiente: responder de forma qualificada ou só com fonte" : null].filter(Boolean);
+        return `- ${item.pergunta}${marcas.length ? ` (${marcas.join("; ")})` : ""}`;
+      }),
+    foraDoFoco: deOutroFoco.map(item => foco.destino(item.pergunta)),
+    foraDoFocoPerguntas: deOutroFoco.map(item => item.pergunta),
+  };
+}
+
+/*
+ * ===== 2026-10-08 · P1 · A INTENÇÃO DA SERP CONTRA A DECLARADA =====
+ *
+ * A SERP de "promoções estética" é de consumidor (cupom, compra coletiva) e o
+ * artigo é para a clínica. O CSV dizia "Explicar a divergência que o mercado
+ * repete sem resolver: O que o mercado repete sobre 'Intenção de busca'…" —
+ * instrução para o texto de um assunto que não é do texto. A divergência de
+ * intenção é decisão do Arquiteto (trocar a principal ou manter): fica dita
+ * como ressalva, sem bloquear, e o texto segue a intenção e o leitor declarados.
+ */
+function divergenciaDeIntencao(input: RadarPortableExportInput): string | null {
+  const conflitos = input.googleObserved?.conflicts ?? [];
+  const conflito = conflitos.find(item => item.dimension === "intent");
+  if (!conflito) return null;
+  const principal = texto(input.article.principalKeyword);
+  const leitor = util(input.article.audience);
+  const declarada = texto(conflito.articleSide) || intencaoLegivel(input.article.intent) || "a declarada";
+  const observada = texto(conflito.observedSide);
+  /*
+   * 2026-10-08 (correção) · a ressalva vale para todo conflito de intenção
+   * (informacional × comercial, nos dois sentidos): "página de consumidor" só
+   * quando o lado observado é comercial ou de consumidor; senão, "as páginas da
+   * SERP".
+   */
+  const deConsumidor = /comerci|transac|consumid|compra|loja|cupo|ofert|promo|produto/i.test(observada);
+  return `a SERP de ${principal ? entreAspas(principal) : "a keyword principal"} responde a outra intenção${observada ? ` (${semPontoFinal(observada)})` : ""} e o ArticleDNA declara ${semPontoFinal(declarada)}${leitor ? ` para ${semPontoFinal(leitor).charAt(0).toLowerCase()}${semPontoFinal(leitor).slice(1)}` : ""}: trocar a principal ou a intenção é decisão do Arquiteto; escreva pela intenção e pelo leitor declarados, sem copiar ${deConsumidor ? "a página de consumidor" : "as páginas da SERP"}`;
+}
+
 function colunaCobrir(
   input: RadarPortableExportInput,
   p: Projecoes,
   contexto: RadarWritingArticleContext,
   perguntaDeAbertura: string | null,
   tocaForaDoEscopo: (valor: string | null | undefined) => boolean = radarWritingOutOfScope(p, contexto.silo?.excludedTopics || []),
+  /* 2026-10-08 · P0-B · as perguntas calculadas antes da estrutura (a régua única do "não cobrir"); sem elas, calculadas aqui. */
+  perguntasProntas: PerguntasDaLinha | null = null,
+  plano: PlanoDaEstrutura | null = null,
 ): { celula: string; conflitos: string[] } {
   /* Só conflito que pede DECISÃO HUMANA vai ao veredito por aqui; o que o export resolve vira nota (2026-10-02). */
   const conflitos: string[] = [];
   const amostra = p.serp.sample?.comparablePages || (p.blueprint?.profile === "GOOGLE" ? p.blueprint.observed.comparablePages : 0) || 0;
   const maioria = Math.max(2, Math.ceil(amostra / 2));
-  const foraDoEscopo = p.serp.editorialCandidates.filter(item => item.verdict === "OUT_OF_SCOPE");
+  /* 2026-10-08 · P0-B · o rótulo fora do escopo que é o título de uma seção que a estrutura MANTÉM (exigida pelo ArticleDNA) não vai ao "Não cobrir". */
+  const titulosMantidos = (plano?.itens || []).map(item => item.titulo);
+  const foraDoEscopo = p.serp.editorialCandidates.filter(item => item.verdict === "OUT_OF_SCOPE" && !titulosMantidos.some(titulo => radarWritingSameItem(titulo, item.observedLabel)));
   /*
    * 2026-10-02 · NENHUMA LISTA DESTA CÉLULA leva fecho retórico de concorrente
    * nem texto que toca o "não cobrir" (antes: só igualdade de rótulo, e só a
    * abertura tirava a retórica). Vale para movimentos, perguntas, termos e o
-   * "já coberto pela maioria".
+   * "já coberto pela maioria". 2026-10-08 · P1 · nem ruído de pesquisa.
    */
-  const descartar = (valor: string | null | undefined) => !texto(valor) || radarWritingRhetoricalQuestion(texto(valor)) || tocaForaDoEscopo(valor);
+  const descartar = descartavelNaPesquisa(p, tocaForaDoEscopo);
   /*
    * 2026-10-02 · O CONFLITO QUE O EXPORT JÁ RESOLVE NÃO É RESSALVA. Assunto
    * fora do escopo que o pacote também listava como diferencial: o "não
@@ -1778,9 +2450,10 @@ function colunaCobrir(
     }
     if (conflitosComODna.has(chave)) return;
     const rotulo = entreAspas(radarWritingDecodeEntities(assunto));
+    /* 2026-10-08 · D10: "decisão humana pendente" virou a regra concluída — quem decide e o que o texto faz enquanto isso. */
     conflitosComODna.set(chave, declara
-      ? `o ArticleDNA declara ${rotulo} como diferencial e o pacote do Radar o marca como fora do escopo: decisão humana pendente (Radar ou Arquiteto), e o diagnóstico do Radar não muda o DNA; até lá, não o sustente como diferencial`
-      : `o ArticleDNA exige um ponto ligado a ${rotulo}, que o pacote do Radar marca como fora do escopo e também como diferencial: decisão humana pendente (Radar ou Arquiteto); até lá, cubra o que o ArticleDNA exige, sem sustentá-lo como diferencial`);
+      ? `o ArticleDNA declara ${rotulo} como diferencial e o pacote do Radar o marca como fora do escopo: cabe decisão humana (Radar ou Arquiteto), e o diagnóstico do Radar não muda o DNA; neste texto, não o sustente como diferencial`
+      : `o ArticleDNA exige um ponto ligado a ${rotulo}, que o pacote do Radar marca como fora do escopo e também como diferencial: cabe decisão humana (Radar ou Arquiteto); neste texto, cubra o que o ArticleDNA exige, sem sustentá-lo como diferencial`);
   };
 
   /* ---- como superar a SERP, a partir dos campos estruturados ---- */
@@ -1806,7 +2479,7 @@ function colunaCobrir(
    * diferenciais G/D da investigação (movimentos abaixo); e, sem nada disso, a
    * entrega concreta que a planta pede. Sem nenhum, o movimento não existe.
    */
-  const diferencial = diferencialDoArtigo(input, p, contexto, tocaForaDoEscopo);
+  const diferencial = diferencialDoArtigo(input, p, contexto, tocaForaDoEscopo, plano);
   if (diferencial) movimentos.push(diferencial);
   const antesDosDiferenciaisDaSerp = movimentos.length;
   if (p.blueprint?.profile === "GOOGLE") {
@@ -1827,10 +2500,14 @@ function colunaCobrir(
         continue;
       }
       if (citado && radarWritingRhetoricalQuestion(citado)) continue;
+      /* 2026-10-08 · P1 · o diferencial que cita título de post, propaganda ou ruído de pesquisa não é instrução. */
+      if (citado && descartar(citado)) continue;
       movimentos.push(comPontoFinal(item.statement));
     }
     for (const item of p.blueprint.observed.conflicts.slice(0, 2)) {
       if (descartar(item.statement)) continue;
+      /* 2026-10-08 · P1 · a divergência de INTENÇÃO não é assunto do texto: é decisão do Arquiteto, dita no veredito. */
+      if (/["“]inten[cç][aã]o de busca["”]/i.test(item.statement)) continue;
       movimentos.push(`Explicar a divergência que o mercado repete sem resolver: ${comPontoFinal(item.statement)}`);
     }
   }
@@ -1891,52 +2568,8 @@ function colunaCobrir(
     for (const eixo of p.blueprint.recommended.comparisonAxes.slice(0, 3)) movimentos.push(`Comparar por ${entreAspas(eixo.label)}${eixo.caveat ? ` (ressalva: ${semPontoFinal(eixo.caveat)})` : ""}.`);
   }
 
-  /* ---- perguntas dentro das seções ---- */
-  const naoProntas = new Set((p.descoberta?.answerableUnits || []).filter(unidade => unidade.readiness !== "READY").map(unidade => radarWritingCompareKey(unidade.questionOrNeed)));
-  const semFonte = new Set(radarWritingUnsupportedClaims(p.autoridade, p.serp).map(item => radarWritingCompareKey(item.afirmacao)));
-  const jaNaEstrutura = new Set(p.secoes.flatMap(secao => [radarWritingCompareKey(secao.readerQuestion), radarWritingCompareKey(secao.heading)]).filter(Boolean));
-  /*
-   * 2026-10-08 · C7 · com o artigo-modelo, a abertura e as seções são as DELE:
-   * a pergunta que a planta já responde não se repete aqui, e a "pergunta de
-   * abertura" do export (que a planta não usa) volta para a lista.
-   */
-  const planta = contexto.blueprint?.blueprint;
-  if (planta) for (const pergunta of [planta.opening.readerQuestion, ...planta.sections.map(secao => secao.readerQuestion)]) jaNaEstrutura.add(radarWritingCompareKey(pergunta));
-  else jaNaEstrutura.add(radarWritingCompareKey(perguntaDeAbertura));
-  /*
-   * 2026-10-08 (correção da revisão) · a pergunta que a planta usa como
-   * EVIDÊNCIA de uma seção ou da abertura (G1 "Como captar clientes pela
-   * internet?" na seção 5 do caso real) também já está na estrutura: ela não
-   * se repete nas perguntas a responder e nunca vai ao "Não cobrir" — o mesmo
-   * tema não pode ser obrigatório na estrutura e proibido aqui.
-   */
-  if (planta && contexto.blueprint) {
-    const textoDaEvidencia = new Map((contexto.blueprint.evidence || []).map(item => [item.id, item.text]));
-    for (const id of [...(planta.opening.evidence || []), ...planta.sections.flatMap(secao => secao.evidence || [])]) {
-      const dita = /^[PGDO]\d/i.test(id) ? textoDaEvidencia.get(id) : undefined;
-      if (dita) jaNaEstrutura.add(radarWritingCompareKey(dita.replace(/\s*\([^()]*p[áa]ginas?[^()]*\)\s*$/i, "")));
-    }
-  }
-  const candidatas = [
-    ...(p.descoberta?.questionCoverageRequirements || [])
-      .slice().sort((a, b) => ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[a.priority] ?? 3) - ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[b.priority] ?? 3))
-      .map(item => ({ pergunta: item.question, prioridade: PRIORIDADE[item.priority] || null })),
-    ...p.serp.questions.filter(item => STATUS_DE_PERGUNTA.has(item.status)).sort((a, b) => b.pages - a.pages)
-      .map(item => ({ pergunta: item.question, prioridade: null as string | null })),
-  ].map(item => ({ ...item, pergunta: semCaixaAlta(radarWritingDecodeEntities(item.pergunta).replace(/\s+\?/g, "?").trim()) }));
-  const elegiveis = unicosPorChave(candidatas, item => radarWritingCompareKey(item.pergunta))
-    .filter(item => !jaNaEstrutura.has(radarWritingCompareKey(item.pergunta)) && !descartar(item.pergunta) && !EH_FAQ.test(item.pergunta));
-  /* 2026-10-08 · C7 · só a pergunta DESTE artigo; a que só divide o cenário vai ao "Não cobrir", com o destino. */
-  const foco = focoDasPerguntas(p, contexto, elegiveis.map(item => item.pergunta));
-  const foraDoFoco = elegiveis.filter(item => !foco.doArtigo(item.pergunta)).map(item => foco.destino(item.pergunta));
-  const perguntas = elegiveis.filter(item => foco.doArtigo(item.pergunta))
-    .slice(0, RADAR_WRITING_EXPORT_LIMITS.questions)
-    .map(item => {
-      const chave = radarWritingCompareKey(item.pergunta);
-      const insuficiente = naoProntas.has(chave) || semFonte.has(chave) || semFonte.has(chave.replace(/\s*$/, ""));
-      const marcas = [item.prioridade, insuficiente ? "material insuficiente: responder de forma qualificada ou só com fonte" : null].filter(Boolean);
-      return `- ${item.pergunta}${marcas.length ? ` (${marcas.join("; ")})` : ""}`;
-    });
+  /* ---- perguntas dentro das seções (2026-10-08 · calculadas antes da estrutura, pela régua única do "não cobrir") ---- */
+  const { linhas: perguntas, foraDoFoco } = perguntasProntas ?? perguntasDaLinha(p, contexto, perguntaDeAbertura, tocaForaDoEscopo);
 
   /* ---- termos a nomear: rótulos de conceito com recorrência, nunca unigrama ---- */
   const termos = unicosPorChave([
@@ -1947,7 +2580,8 @@ function colunaCobrir(
       .filter(relacao => relacao.basis === "OBSERVED")
       .flatMap(relacao => [relacao.subject, relacao.object]),
   ].map(item => radarWritingDecodeEntities(item).trim()), radarWritingCompareKey)
-    .filter(item => !item.endsWith("?") && radarWritingContentWords(item).size >= 2 && !descartar(item))
+    /* 2026-10-08 (correção) · F8 · cabeçalho de FAQ não é tema a nomear (AGENTS §13: não sugerir FAQ). */
+    .filter(item => !item.endsWith("?") && radarWritingContentWords(item).size >= 2 && !descartar(item) && !EH_FAQ.test(item))
     .map(item => (item === item.toUpperCase() ? item.toLowerCase() : item))
     .slice(0, RADAR_WRITING_EXPORT_LIMITS.terms);
 
@@ -1961,8 +2595,9 @@ function colunaCobrir(
   const naoCobrir = [
     ...foraDoEscopo.map(item => `${entreAspas(radarWritingDecodeEntities(item.observedLabel))}: ${semPontoFinal(item.reason)}.`),
     ...foraDoFoco,
+    /* 2026-10-08 · D10: a nota diz a regra cumprida, sem "pendente". */
     ...(resolvidos.length
-      ? [`Nota: o pacote também listava ${resolvidos.map(entreAspas).join(", ")} como diferencial; aqui vale o "não cobrir" (resolvido neste arquivo, sem decisão pendente).`]
+      ? [`Nota: o pacote também listava ${resolvidos.map(entreAspas).join(", ")} como diferencial; aqui vale o "não cobrir" (resolvido neste arquivo: fica fora de todas as colunas).`]
       : []),
     ...(contexto.silo?.excludedTopics || []).map(item => `${entreAspas(item)}: fora da fronteira do Silo.`),
     ...(p.blueprint?.profile === "AMAZON"
@@ -2118,10 +2753,23 @@ export function radarWritingCompetitorTopicsOf(input: RadarPortableExportInput, 
   const paginas = input.competitorOutlines || [];
   if (!paginas.length) return null;
   const foraDoEscopo = radarWritingOutOfScope(p);
+  /*
+   * 2026-10-08 · P1 · UMA BASE SÓ: a lista impressa de páginas comparáveis
+   * ("N de 23" enquanto a lista dizia 12). Os esboços vão inteiros — o cromo de
+   * um site é reconhecido também pelas páginas dele fora da lista —, e o
+   * leitor declarado tira o consumo e a outra profissão (`competitor-topics.ts`).
+   */
+  const comparaveis = (p.concorrentes?.competitors || []).filter(item => item.comparable);
+  /* A base só vale quando os esboços lidos são dessa lista; sem nenhuma página em comum, a amostra é a de antes. */
+  const chaveDaPagina = (url: string | null | undefined) => texto(url).toLowerCase().replace(/^https?:\/\/(?:www\.)?/, "").replace(/[?#].*$/, "").replace(/\/+$/, "");
+  const daLista = new Set(comparaveis.map(item => chaveDaPagina(item.url)).filter(Boolean));
+  const comBase = paginas.some(pagina => daLista.has(chaveDaPagina(pagina.url)));
   return radarCompetitorTopics({
     pages: paginas,
     core: [p.dna.principalKeyword, ...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements, p.assunto?.phrase || ""].filter((valor): valor is string => Boolean(valor)),
     outOfScope: valor => foraDoEscopo(valor),
+    ...(comBase ? { basis: comparaveis.map(item => ({ url: item.url, domain: item.domain })) } : {}),
+    audience: input.article.audience ?? null,
   });
 }
 
@@ -2130,12 +2778,14 @@ function linhasDosTemas(input: RadarPortableExportInput, p: Projecoes): string[]
   if (!leitura?.topics.length) return [];
   const recorrentes = leitura.topics.filter(item => item.pages >= 2).slice(0, TEMAS_RECORRENTES_NA_LINHA);
   const unicos = leitura.topics.filter(item => item.pages < 2).slice(0, TEMAS_UNICOS_NA_LINHA);
+  /* 2026-10-08 · P1 · a recorrência conta SITES distintos (o menu repetido de um site não vira tema), sobre a lista impressa. */
+  const sites = leitura.sampleDomains || leitura.sampleSize;
   return [
-    `O que os concorrentes lidos cobrem (H2/H3 das ${leitura.sampleSize} páginas comparáveis; ${leitura.headingsRead} cabeçalhos lidos; a recorrência mostra o que a amostra trata, não o que funciona):`,
+    `O que os concorrentes lidos cobrem (H2/H3 das ${leitura.sampleSize} páginas comparáveis, de ${sites} site(s); ${leitura.headingsRead} cabeçalhos lidos; a recorrência conta sites e mostra o que a amostra trata, não o que funciona):`,
     ...(recorrentes.length
-      ? recorrentes.map(item => `- ${item.label} · ${item.pages} de ${item.sampleSize} páginas · ex.: ${item.headings.map(entreAspas).join("; ")}`)
-      : ["- Nenhum tema aparece em mais de uma página: a amostra trata o assunto de jeitos diferentes."]),
-    ...(unicos.length ? [`Tratado por 1 página só (diferencial possível, se servir ao leitor): ${unicos.map(item => entreAspas(item.label)).join("; ")}.`] : []),
+      ? recorrentes.map(item => `- ${item.label} · ${item.pages} de ${sites} sites · ex.: ${item.headings.map(entreAspas).join("; ")}`)
+      : ["- Nenhum tema aparece em mais de um site: a amostra trata o assunto de jeitos diferentes."]),
+    ...(unicos.length ? [`Tratado por 1 site só (diferencial possível, se servir ao leitor): ${unicos.map(item => entreAspas(item.label)).join("; ")}.`] : []),
   ];
 }
 
@@ -2169,9 +2819,16 @@ function colunaSerp(input: RadarPortableExportInput, p: Projecoes): string {
   });
   const formatos = (serp.diagnostic?.dominantFormats || []).filter(item => item && item !== "outro");
   const aiOverview = serp.features?.aiOverview || null;
-  const relacionadas = serp.relatedSearches.map(item => texto(item.term)).filter(Boolean).slice(0, 8);
+  /*
+   * 2026-10-08 (correção) · F5 · as buscas relacionadas passam pela mesma régua
+   * do PAA: marca de concorrente ("Magote promoção", "Uva rosa"), superstição
+   * ("Simpatias para atrair clientes") e outra profissão não são subtema.
+   */
+  const relacionadas = serp.relatedSearches.map(item => texto(item.term))
+    .filter(termo => termo && !radarWritingRhetoricalQuestion(termo) && !radarReaderQuestionIsNoise(termo, p.ruido)).slice(0, 8);
   /* 2026-10-02 · fecho retórico de concorrente não entra em lista nenhuma, nem na SERP resumida. */
-  const paa = serp.peopleAlsoAsk.map(item => texto(item.question)).filter(pergunta => pergunta && !radarWritingRhetoricalQuestion(pergunta)).slice(0, 6);
+  /* 2026-10-08 · P1 · nem o ruído de pesquisa (loja, cupom, outra profissão, produto de concorrente…) no PAA. */
+  const paa = serp.peopleAlsoAsk.map(item => texto(item.question)).filter(pergunta => pergunta && !radarWritingRhetoricalQuestion(pergunta) && !radarReaderQuestionIsNoise(pergunta, p.ruido)).slice(0, 6);
   const auxiliares = serp.auxiliaryQueries.filter(item => item.results.length).slice(0, 3).map(item =>
     `- ${entreAspas(item.query || "consulta auxiliar")} (${item.role}): ${item.results.slice(0, 4).map(resultado => resultado.domain).filter(Boolean).join(" · ")}`);
 
@@ -2244,7 +2901,13 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
     for (const item of modos) linhas.push(`- ${radarPortableVideoUsageLine(item, plano ? radarArticleBlueprintVideoSections(plano, item) : null)}`);
   }
 
-  const citadas = p.fontesExternas.filter(item => item.authorityClass !== "NAO_CLASSIFICADA");
+  /*
+   * 2026-10-08 · P1 · "Citadas pelo mercado" sem o ruído de pesquisa: aviso de
+   * cookie, selo, consulta de CPF/CNPJ, e-MEC, W3C, aposta, lei de rodapé fora do
+   * tema, institucional e o site do próprio concorrente; domínio oficial só fica
+   * quando o assunto da citação toca o tema do artigo (`research-noise.ts`).
+   */
+  const citadas = p.fontesExternas.filter(item => item.authorityClass !== "NAO_CLASSIFICADA" && !radarMarketCitationIsNoise(item, p.ruido));
   if (citadas.length) {
     /* 2026-10-08 (correção da revisão) · D10: a regra concluída, não "conferir antes de citar". */
     linhas.push("Citadas pelo mercado, sem verificação no pacote (só como referência delimitada, nunca como fonte da afirmação):");
@@ -2278,7 +2941,11 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
       ? `Especialista: sem contribuição aceita; ${pendentes} parecer(es) ainda não aceito(s) no Radar ficam fora deste texto.`
       : "Especialista: sem contribuição aceita.");
   if (especialista.length && pendentes) linhas.push(`- ${pendentes} parecer(es) ainda não aceito(s) no Radar ficam fora deste texto.`);
-  for (const item of especialista) linhas.push(`- ${item.linha}`);
+  /*
+   * 2026-10-08 · P1 · fechamento, CTA e diretriz já saem inteiros na promessa: aqui, a remissão (sem repetir o texto).
+   * Com o artigo-modelo, a promessa é a da planta, que não os traz: a resposta sai aqui, inteira.
+   */
+  for (const item of especialista) linhas.push(`- ${plano ? item.linha : item.referencia ?? item.linha}`);
 
   if (videos.length) {
     linhas.push("Trechos dos vídeos selecionados pela marca (embutir ou citar no ponto indicado, atribuído ao vídeo e ao canal; conferir o trecho no vídeo):");
@@ -2330,13 +2997,20 @@ const EVITAR = "Evitar: ";
  */
 export const RADAR_WRITING_MIN_RESPITES = 2;
 
-function colunaVisual(input: RadarPortableExportInput, p: Projecoes): { celula: string; imagens: Map<string, string> } {
+function colunaVisual(input: RadarPortableExportInput, p: Projecoes, planoDaLinha: PlanoDaEstrutura | null = null): { celula: string; imagens: Map<string, string> } {
   const imagens = new Map<string, string>();
-  /* A seção de fecho retórico que a estrutura omite também não recebe respiro (a mesma régua da estrutura, 2026-10-02). */
+  /*
+   * A seção de fecho retórico que a estrutura omite também não recebe respiro (a mesma régua da estrutura, 2026-10-02).
+   * 2026-10-08 · P0-B · nem a que saiu por ser título de post ou assunto do "Não cobrir"; e o respiro nomeia a seção
+   * pelo título com que ela sai na coluna estrutura (a pergunta do leitor), não pelo molde do modelo.
+   */
   const omitida = (secao: string | null) => {
-    if (!secao || !radarWritingRhetoricalHeading(secao, p.unidade)) return false;
+    if (!secao) return false;
+    if (planoDaLinha && p.secoes.some(item => item.heading === secao)) return planoDaLinha.tituloDe(secao) === null;
+    if (!radarWritingRhetoricalHeading(secao, p.unidade)) return false;
     return !p.secoes.find(item => item.heading === secao)?.mustCoverReasons.length;
   };
+  const tituloDaSecao = (secao: string | null) => (secao && planoDaLinha?.tituloDe(secao)) || secao;
   const respirosDoPacote = p.visual.respite.filter(imagem => !omitida(imagem.section)).slice(0, 3);
   const plano: RadarPortableImagePlan[] = [...(p.visual.cover ? [p.visual.cover] : []), ...respirosDoPacote];
   if (!plano.length) return { celula: "", imagens };
@@ -2395,7 +3069,7 @@ function colunaVisual(input: RadarPortableExportInput, p: Projecoes): { celula: 
     const faltam = [!alt ? "ALT" : null, !legenda ? "legenda" : null, !prompt ? "prompt" : null].filter(Boolean);
     if (faltam.length) aEscrever.push(`${nome} (${faltam.join(", ")})`);
     linhas.push([
-      `${nome} · ${capa ? "topo, junto do H1" : `seção "${imagem.section}"`} · ${imagem.recommendedAspectRatio}`,
+      `${nome} · ${capa ? "topo, junto do H1" : `seção "${tituloDaSecao(imagem.section)}"`} · ${imagem.recommendedAspectRatio}`,
       `função: ${semPontoFinal(funcaoDaImagem(imagem.purpose))}`,
       ...(alt ? [`ALT: ${alt}`] : []),
       ...(legenda && legenda !== alt ? [`legenda: ${legenda}`] : []),
@@ -2586,8 +3260,36 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   const publicacao = contexto.publication;
   const publicado = Boolean(publicacao?.published || input.article.publishedProtected);
 
-  const links = linksDeEscrita(p, contexto, principal);
-  const especialista = radarWritingSpecialistContributions(p);
+  /*
+   * 2026-10-02 · UMA régua de "não cobrir" para a linha inteira (pacote e
+   * Silo), e o tipo da unidade para as frases que falavam só de artigo.
+   * 2026-10-08 · P0-B · a régua sai ANTES da estrutura: o rótulo fora do escopo
+   * e a pergunta que a coluna cobrir_e_superar manda para outro artigo ou tópico
+   * do Silo (o mesmo item) saem de H2/H3 e do "Cobrir:" também.
+   */
+  const tocaForaDoEscopo = radarWritingOutOfScope(p, contexto.silo?.excludedTopics || []);
+  const perguntaDeAbertura = radarWritingOpeningQuestion(p, tocaForaDoEscopo);
+  const perguntas = perguntasDaLinha(p, contexto, perguntaDeAbertura, tocaForaDoEscopo);
+  const excluido = (valor: string | null | undefined) => tocaForaDoEscopo(valor)
+    || perguntas.foraDoFocoPerguntas.some(pergunta => radarWritingSameItem(pergunta, valor));
+  /*
+   * 2026-10-08 (correção) · a SEÇÃO inteira só sai pelo MESMO ITEM: o rótulo
+   * fora do escopo, o tópico excluído do Silo ou a pergunta mandada a outro
+   * foco. A régua de metade das palavras distintivas (`tocaForaDoEscopo`)
+   * continua só nos pontos de "Cobrir:": num rótulo de duas palavras distintivas
+   * bastava uma em comum, e "Como usar o Instagram para atrair pacientes?",
+   * promovida, saía por causa de "Instagram para restaurantes".
+   */
+  const itensExcluidos = [
+    ...p.serp.editorialCandidates.filter(item => item.verdict === "OUT_OF_SCOPE").map(item => item.observedLabel),
+    ...(contexto.silo?.excludedTopics || []),
+    ...perguntas.foraDoFocoPerguntas,
+  ];
+  const mesmoItemExcluido = (valor: string | null | undefined) => itensExcluidos.some(item => radarWritingSameItem(item, valor));
+  const plano = planoDaEstrutura(p, mesmoItemExcluido);
+
+  const links = linksDeEscrita(p, contexto, principal, plano);
+  const especialista = radarWritingSpecialistContributions(p, plano.tituloDe);
   /*
    * 2026-10-02 · O TRECHO QUE VAI AO TEXTO É O DE VÍDEO CITÁVEL (Adendo B).
    *
@@ -2605,7 +3307,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
       trecho: item.trecho,
       secao: p.secoes.find(secao => radarWritingCompareKey(secao.heading) === radarWritingCompareKey(item.brief.relatedSection))?.heading ?? null,
       /* 2026-10-02 · o canal do vídeo, quando o modo de uso o trouxe: a atribuição é a ele. */
-      linha: `V${indice + 1} · ${entreAspas(item.trecho.sourceTitle)}${texto(item.trecho.sourceChannel) ? ` · canal: ${texto(item.trecho.sourceChannel)}` : ""} (${item.trecho.startLabel}–${item.trecho.endLabel})${item.brief.relatedSection ? ` · seção "${item.brief.relatedSection}"` : ""} · ${semPontoFinal(item.brief.narrativePurpose)}${modoDoTrecho(item.trecho)}`,
+      linha: `V${indice + 1} · ${entreAspas(item.trecho.sourceTitle)}${texto(item.trecho.sourceChannel) ? ` · canal: ${texto(item.trecho.sourceChannel)}` : ""} (${item.trecho.startLabel}–${item.trecho.endLabel})${item.brief.relatedSection ? ` · seção "${plano.tituloDe(p.secoes.find(secao => radarWritingCompareKey(secao.heading) === radarWritingCompareKey(item.brief.relatedSection))?.heading) || item.brief.relatedSection}"` : ""} · ${semPontoFinal(item.brief.narrativePurpose)}${modoDoTrecho(item.trecho)}`,
     }));
   const videosPorSecao = new Map<string, string[]>();
   for (const item of videos) if (item.secao) videosPorSecao.set(item.secao, [...(videosPorSecao.get(item.secao) || []), item.rotulo]);
@@ -2627,18 +3329,25 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     ...(p.video.selected || []).map(item => ({ title: item.title, url: item.url, usage: item.usage, sourcesColumnLabel: null })),
   ];
 
-  /*
-   * 2026-10-02 · UMA régua de "não cobrir" para a linha inteira (pacote e
-   * Silo), e o tipo da unidade para as frases que falavam só de artigo.
-   */
-  const tocaForaDoEscopo = radarWritingOutOfScope(p, contexto.silo?.excludedTopics || []);
   const unidade = p.unidade;
   const formas = daUnidade(unidade);
 
-  const visual = colunaVisual(input, p);
-  const estrutura = colunaEstrutura(input, p, links, especialista, visual.imagens, videosPorSecao, tocaForaDoEscopo);
-  const perguntaDeAbertura = radarWritingOpeningQuestion(p, tocaForaDoEscopo);
-  const cobrir = colunaCobrir(input, p, contexto, perguntaDeAbertura, tocaForaDoEscopo);
+  const visual = colunaVisual(input, p, plano);
+  /*
+   * 2026-10-08 · P1 · SEM ESTRUTURA DO MODELO E COM A PÁGINA PUBLICADA LIDA, a
+   * referência é a página publicada (atualização): o arquivo não bloqueia.
+   */
+  const estruturaPublicada = publicado && !p.editorial.sections.length
+    ? publicacao?.currentStructure?.h2.length
+      ? { atual: publicacao.currentStructure, lida: "lida da página na exportação" }
+      : contexto.blueprint?.publishedStructure?.h2.length
+        ? { atual: contexto.blueprint.publishedStructure, lida: "lida ao montar o artigo-modelo" }
+        : null
+    : null;
+  const estrutura = estruturaPublicada
+    ? { celula: estruturaPublicadaDeReferencia(estruturaPublicada.atual, estruturaPublicada.lida), faqOmitidas: 0 }
+    : colunaEstrutura(input, p, plano, links, especialista, visual.imagens, videosPorSecao, excluido);
+  const cobrir = colunaCobrir(input, p, contexto, perguntaDeAbertura, tocaForaDoEscopo, perguntas, plano);
   const titulo = colunaTitulo(input, p);
 
   /* ---- o veredito ---- */
@@ -2655,7 +3364,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     const contagem = input.commercial.counts ? ` (${input.commercial.counts.observed} observados, ${input.commercial.counts.eligible} compatíveis com o alvo)` : "";
     bloqueios.push(`formato ${formato}, mas nenhum produto foi selecionado${contagem}; não há lista a construir`);
   }
-  if (!p.editorial.sections.length) bloqueios.push(`a investigação não produziu estrutura para ${formas.este} ${unidade.noun}`);
+  if (!p.editorial.sections.length && !estruturaPublicada) bloqueios.push(`a investigação não produziu estrutura para ${formas.este} ${unidade.noun}`);
 
   const conflitoYmyl = conflitoDeYmylDetalhado(p);
   if (conflitoYmyl) ressalvas.push(conflitoYmyl.texto);
@@ -2677,8 +3386,12 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   }
   const politica = radarWritingCompareKey(publicacao?.principalPolicy);
   if (publicado && politica !== "locked" && politica !== "revisable") ressalvas.push("principal publicada em estado desconhecido: não trocar até decisão humana");
-  if (titulo.tituloInutil) ressalvas.push("título de trabalho do pacote não utilizável (soma vários assuntos): formule o H1 a partir da promessa e da estrutura");
+  /* 2026-10-08 · P0-B · com o artigo-modelo, o título é o da planta: o do modelo da SERP não vira ressalva. */
+  if (titulo.tituloInutil && !contexto.blueprint) ressalvas.push("título de trabalho do pacote não utilizável (soma vários assuntos): formule o H1 a partir da promessa e da estrutura");
   if (!util(p.editorial.readerPromise) && input.profile !== "YOUTUBE") ressalvas.push("promessa ao leitor não definida no pacote");
+  /* 2026-10-08 · P1 · a SERP que responde a outra intenção: decisão do Arquiteto, dita sem bloquear. */
+  const intencaoDivergente = input.profile === "GOOGLE" ? divergenciaDeIntencao(input) : null;
+  if (intencaoDivergente) ressalvas.push(intencaoDivergente);
   for (const item of especialista) if (item.aviso) ressalvas.push(`especialista ${item.rotulo}: ${item.aviso}`);
   ressalvas.push(...cobrir.conflitos);
   /* 2026-10-08 · a planta que já posiciona links internos (coluna links_internos dela) não deixa o artigo isolado do Silo. */
@@ -2716,7 +3429,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     ordem: `${posicao} · ${papel || "Artigo"}`,
     pode_escrever: decisao.celula,
     artigo: colunaArtigo(input, p, contexto, papel),
-    promessa_e_leitor: conteudo(() => colunaPromessa(input, p, contexto, perguntaDeAbertura, especialista, links)),
+    promessa_e_leitor: conteudo(() => colunaPromessa(input, p, contexto, perguntaDeAbertura, especialista, links, plano)),
     titulo_e_seo: conteudo(() => titulo.celula),
     estrutura: conteudo(() => estrutura.celula),
     cobrir_e_superar: conteudo(() => cobrir.celula),
@@ -2740,6 +3453,16 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
       /* 2026-10-08 (correção da revisão) · a principal, para a ordem de leitura da busca "como …" também na planta antiga. */
       principal: texto(p.dna.principalKeyword),
       ...(publicado ? { currentH2: publicacao?.currentStructure?.h2 ?? null, keywords: keywordsDoArtigo(p) } : {}),
+      /* 2026-10-08 (correção) · F1 · os irmãos no ar (do mapa de publicações do lote): o destino planejado da planta sai publicado. */
+      publishedMembers: irmaosNoAr(contexto),
+      /*
+       * 2026-10-08 (correção) · F2 · UM CTA SÓ TAMBÉM NA PLANTA: a chamada do
+       * especialista (quando ele é CTA) ou a da planta; o "Próximo passo" vira a
+       * continuação para o próximo artigo do Silo, com o link aprovado ou citado
+       * sem link — a mesma linha do caminho sem planta.
+       */
+      continuation: destinoDaContinuacao(contexto),
+      specialistCta: vozDoEspecialista(especialista, "CTA").map(falaDoEspecialista).join("; ") || null,
     }));
   }
   if (contexto.brandVoice && !soIdentidade) {
@@ -2796,6 +3519,8 @@ export type RadarWritingTopRowInput = {
   brandVoice?: RadarBrandVoiceState;
   /** 2026-10-02 · Aditivo: a autoria foi lida (cada artigo diz quem assina). Ausente = texto de antes. */
   authorsKnown?: boolean;
+  /** 2026-10-08 · P1 · Aditivo: a publicação de cada membro do Silo, por `articleId`, para a ordem narrativa dizer "publicado" também dos que estão fora do arquivo. */
+  memberPublications?: ReadonlyMap<string, RadarWritingPublication> | null;
 };
 
 /**
@@ -2855,7 +3580,8 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
       ...(util(silo.boundary) ? [`Fronteira: ${comPontoFinal(silo.boundary || "")}`] : []),
       "Ordem narrativa:",
       ...silo.members.map(membro => {
-        const publicado = artigos.find(item => radarWritingCompareKey(item.label) === radarWritingCompareKey(membro.principalKeyword))?.published;
+        const publicado = artigos.find(item => radarWritingCompareKey(item.label) === radarWritingCompareKey(membro.principalKeyword))?.published
+          || Boolean(input.memberPublications?.get(membro.articleId)?.published);
         return `${membro.position} · ${papelLegivel(membro.role) || membro.role} · ${rotuloDoMembro(membro)}${membro.slug ? ` · /${membro.slug}` : ""} · ${membro.inThisFile ? "neste arquivo" : `fora do arquivo (${membro.statusLabel})`}${publicado ? " · publicado" : ""}`;
       }),
     ].join("\n")

@@ -76,7 +76,8 @@ test("o CSV mostra os temas, a limitação diz de qual camada fala, e o prompt l
   const fonte = await ler("lib/radar/portable-writing-export.ts");
   assert.match(fonte, /\.\.\.linhasDosComparaveis\(p\),\n\s+\.\.\.linhasDosTemas\(input, p\),/);
   assert.match(fonte, /O que os concorrentes lidos cobrem \(H2\/H3 das/);
-  assert.match(fonte, /Tratado por 1 página só \(diferencial possível, se servir ao leitor\)/);
+  /* 2026-10-08 · P1 · a recorrência conta sites (`competitor-topics.ts`): "1 site só". */
+  assert.match(fonte, /Tratado por 1 site só \(diferencial possível, se servir ao leitor\)/);
   assert.match(fonte, /limitacaoDaCamada\(item, amostra\)/);
   assert.match(fonte, /As \$\{paginasLidas\} páginas comparáveis, estas sim, foram lidas pela investigação/);
   assert.match(fonte, /leve as três linhas juntas para a IA: "\$\{topo\}", "Voz da marca" e esta/);

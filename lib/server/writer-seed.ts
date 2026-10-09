@@ -35,7 +35,7 @@ import {
 } from "@/lib/redator/writer-document-reads";
 import { getOperationalClient, mapPersistenceError } from "@/lib/server/editorial-db";
 import { WriterDeliverableError } from "@/lib/server/writer-deliverables";
-import { readWriterApprovedArticleBlueprint, readWriterBrandVoice } from "@/lib/server/writer-evidence-sources";
+import { readWriterApprovedArticleBlueprint, readWriterBrandVoice, writerBlueprintInvestigationOf, type WriterBlueprintInvestigation } from "@/lib/server/writer-evidence-sources";
 
 /*
  * 2026-10-02 · O artigo da semeadura sai da origem do Radar que a PRIMEIRA
@@ -52,6 +52,25 @@ const artigoDaOrigem = (linha: Record<string, unknown>): string | null => {
   return typeof articleId === "string" && articleId.trim() ? articleId : null;
 };
 
+/*
+ * 2026-10-08 · P0-A · A INVESTIGAÇÃO DO PACOTE, para o artigo-modelo: o instante
+ * do congelamento (`observedAt` do bundle, já lido nas fatias) e o ArticleDNA da
+ * origem e da referência que a PRIMEIRA consulta já traz. Sem consulta nova.
+ */
+const APELIDO_DO_ARTICLE_DNA = WRITER_SEED_DOCUMENT_SELECT.split(",")
+  .find(coluna => coluna.endsWith("->articleDnaRef"))?.split(":")[0] ?? null;
+
+const objeto = (valor: unknown): Record<string, unknown> | null => (valor && typeof valor === "object" && !Array.isArray(valor) ? valor as Record<string, unknown> : null);
+
+const investigacaoDaSemente = (linha: Record<string, unknown>, dossie: Record<string, unknown>): WriterBlueprintInvestigation | null => {
+  const observedAt = objeto(dossie.bundle)?.observedAt;
+  return writerBlueprintInvestigationOf({
+    bundleObservedAt: typeof observedAt === "string" ? observedAt : null,
+    radarOrigin: objeto(APELIDO_DA_ORIGEM ? linha[APELIDO_DA_ORIGEM] : null),
+    refs: { articleDnaRef: objeto(APELIDO_DO_ARTICLE_DNA ? linha[APELIDO_DO_ARTICLE_DNA] : null) },
+  });
+};
+
 /**
  * 2026-10-02 · SDD diretriz editorial, Adendos A e C · a voz corrente da Marca
  * e o artigo-modelo APROVADO do pacote, para roteiro e carrossel escreverem a
@@ -60,11 +79,11 @@ const artigoDaOrigem = (linha: Record<string, unknown>): string | null => {
  * como era. Mesmos leitores do leitor de evidências, na Marca autorizada, em
  * série como o resto desta leitura.
  */
-async function vozEArtigoModelo(brandId: string, alvo: { articleId: string | null; bundleHash: string; keywords: WriterBlueprintKeywords | null }): Promise<Pick<RadarFoundations, "brandVoice" | "articleBlueprint">> {
+async function vozEArtigoModelo(brandId: string, alvo: { articleId: string | null; bundleHash: string; keywords: WriterBlueprintKeywords | null; investigation?: WriterBlueprintInvestigation | null }): Promise<Pick<RadarFoundations, "brandVoice" | "articleBlueprint">> {
   const contexto = { brandId, client: getOperationalClient() };
   const voz = await readWriterBrandVoice(contexto, { content: true });
   const artigoModelo = alvo.articleId
-    ? await readWriterApprovedArticleBlueprint(contexto, { articleId: alvo.articleId, bundleHash: alvo.bundleHash }, { content: true })
+    ? await readWriterApprovedArticleBlueprint(contexto, { articleId: alvo.articleId, bundleHash: alvo.bundleHash, investigation: alvo.investigation ?? null }, { content: true })
     : null;
   const brandVoice = voz.kind === "current"
     ? writerBrandVoiceFoundation({ versionId: voz.meta.versionId, versionNumber: voz.meta.versionNumber, name: voz.name, lifecycle: voz.lifecycle, title: voz.title, sections: voz.sections })
@@ -114,7 +133,8 @@ export async function writerSeedDocument(brandId: string, documentId: string): P
   /* As linhas do envio (Assunto, F4.2) vêm do cabeçalho, pela mesma projeção do painel. */
   const fundamentos = radarFoundationsOfDossier(dossier, { editorialContext: head.editorialContext });
   /* 2026-10-02 · voz e artigo-modelo só quando existem: sem eles, os fundamentos são os do painel. */
-  const vivos = fundamentos ? await vozEArtigoModelo(brandId, { articleId: artigoDaOrigem(primeira), bundleHash: head.dossier.bundleHash, keywords: head.dossier.keywordContext }) : {};
+  /* 2026-10-08 · P0-A · com a investigação do pacote: a concluída do mesmo congelamento e ArticleDNA vale mesmo com o hash mudado por código. */
+  const vivos = fundamentos ? await vozEArtigoModelo(brandId, { articleId: artigoDaOrigem(primeira), bundleHash: head.dossier.bundleHash, keywords: head.dossier.keywordContext, investigation: investigacaoDaSemente(primeira, dossier) }) : {};
   return {
     document: head.document,
     foundations: fundamentos ? { ...fundamentos, ...vivos } : null,

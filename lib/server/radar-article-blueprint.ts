@@ -20,6 +20,15 @@ import {
 } from "@/lib/radar/article-blueprint";
 import { assembleRadarPortableExport, radarReadPublishedStructure } from "@/lib/server/radar-portable-export-core";
 import type { RadarWritingPublication } from "@/lib/radar/portable-writing-export";
+import {
+  radarArticleBlueprintFitsInvestigation,
+  radarArticleBlueprintInvestigationRefOf,
+  radarArticleBlueprintInvestigationRefToStore,
+  radarArticleBlueprintPick,
+  type RadarArticleBlueprintCurrentInvestigation,
+  type RadarArticleBlueprintInvestigationRef,
+  type RadarArticleBlueprintVersionMeta,
+} from "@/lib/radar/article-blueprint-freeze";
 import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
@@ -41,6 +50,12 @@ import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
  * do formato ganha UMA nova tentativa com saída mais curta — uma chamada a
  * mais, registrada no log e na versão. Enquanto o dono não aprova, o CSV já
  * sai com a proposta, marcada (`readRadarArticleBlueprintsForExport`).
+ *
+ * 2026-10-08 · P0-A · PRESAS À INVESTIGAÇÃO, NÃO SÓ AO HASH. O hash do dossiê
+ * muda com o código que lê a amostra; a versão nova grava também a
+ * investigação congelada e o ArticleDNA em que foi organizada
+ * (`payload.investigationRef`), e o `ifMissing`, a aprovação, o export e o
+ * Redator aceitam a concluída da mesma investigação (`lib/radar/article-blueprint-freeze.ts`).
  */
 
 export type RadarArticleBlueprintRow = {
@@ -90,8 +105,36 @@ async function montagemDoArtigo(input: { client: SupabaseClient; brandId: string
     throw new PipelineRuntimeError("CONFLICT", recusa?.reason || "O artigo não tem investigação finalizada: finalize antes de organizar o artigo-modelo da SERP.", 409);
   }
   const silo = montagem.planoDaSelecao?.files.find(arquivo => arquivo.articleIds.includes(input.articleId))?.writing ?? null;
-  return { montada, silo, publicacao: montagem.publicacoes.get(input.articleId) ?? null, brandVoice: montagem.brandVoice };
+  /* 2026-10-08 · P0-A · a investigação vigente (congelamento + ArticleDNA): a identidade estável da planta. */
+  const investigacao = montagem.congelamentos.get(input.articleId) ?? null;
+  /* 2026-10-08 (correção) · F1 · a publicação de todos os membros do Silo (o mapa do lote): o irmão no ar é destino publicado na planta. */
+  return { montada, silo, publicacao: montagem.publicacoes.get(input.articleId) ?? null, publicacoes: montagem.publicacoes, brandVoice: montagem.brandVoice, investigacao };
 }
+
+/*
+ * 2026-10-08 · P0-A · A VERSÃO QUE VALE PARA A INVESTIGAÇÃO VIGENTE, pela regra
+ * do export (`radarArticleBlueprintPick`): hash exato do dossiê ou, senão, a
+ * concluída do mesmo congelamento e ArticleDNA. Rascunho só pelo hash exato.
+ */
+export function radarArticleBlueprintRowForInvestigation(
+  versoes: readonly RadarArticleBlueprintRow[],
+  alvo: { bundleHash: string | null | undefined; investigation: RadarArticleBlueprintCurrentInvestigation | null },
+  opcoes: { drafts?: boolean } = {},
+): RadarArticleBlueprintRow | null {
+  const escolha = radarArticleBlueprintPick(versoes.map(metaDaVersao), alvo, opcoes);
+  return escolha ? versoes.find(item => item.id === escolha.id) ?? null : null;
+}
+
+/** 2026-10-08 · P0-A · a versão na forma que a regra pura confere (a referência gravada vem do payload). */
+function metaDaVersao(item: RadarArticleBlueprintRow): RadarArticleBlueprintVersionMeta {
+  return {
+    id: item.id, bundleHash: item.bundleHash, versionNumber: item.versionNumber, state: item.state, createdAt: item.createdAt,
+    investigationRef: (item.payload as { investigationRef?: unknown } | null)?.investigationRef,
+  };
+}
+
+/** 2026-10-08 · P0-A · a referência que a versão gravou (ausente na versão antiga). */
+const referenciaDa = (versao: RadarArticleBlueprintRow) => radarArticleBlueprintInvestigationRefOf((versao.payload as { investigationRef?: unknown } | null)?.investigationRef);
 
 export async function listRadarArticleBlueprints(client: SupabaseClient, brandId: string, articleId: string): Promise<RadarArticleBlueprintRow[]> {
   const leitura = await client.from("radar_article_blueprints").select(COLUNAS)
@@ -103,6 +146,8 @@ export async function listRadarArticleBlueprints(client: SupabaseClient, brandId
 async function gravarVersao(client: SupabaseClient, input: {
   brandId: string; articleId: string; bundleHash: string; origin: "ai" | "human_edit";
   payload: RadarArticleBlueprintPayload; validation: string[]; actorUserId: string;
+  /** 2026-10-08 · P0-A · sobre qual investigação congelada e ArticleDNA a planta foi organizada (nula na edição de versão antiga). */
+  investigationRef: RadarArticleBlueprintInvestigationRef | null;
 }): Promise<RadarArticleBlueprintRow> {
   const atuais = await listRadarArticleBlueprints(client, input.brandId, input.articleId);
   const versao = (atuais[0]?.versionNumber || 0) + 1;
@@ -119,7 +164,9 @@ async function gravarVersao(client: SupabaseClient, input: {
     brand_id: input.brandId, article_id: input.articleId, bundle_hash: input.bundleHash,
     version_number: versao, state: "APPROVED", approved_by: input.actorUserId, approved_at: agora, origin: input.origin,
     /* 2026-10-02 · a marca de aprovação é do export, nunca do banco. */
-    payload: radarArticleBlueprintPayloadToStore(input.payload), validation: input.validation, created_by: input.actorUserId,
+    /* 2026-10-08 · P0-A · a identidade estável vai junto (chave aditiva do payload; nenhuma coluna nova). */
+    payload: { ...radarArticleBlueprintPayloadToStore(input.payload), ...(input.investigationRef ? { investigationRef: radarArticleBlueprintInvestigationRefToStore(input.investigationRef) } : {}) },
+    validation: input.validation, created_by: input.actorUserId,
   }).select(COLUNAS).single();
   if (insercao.error) throw new PipelineRuntimeError("QUERY_FAILURE", `Não foi possível gravar o artigo-modelo: ${insercao.error.message}`, 503);
   return linhaDe(insercao.data as unknown as Record<string, unknown>);
@@ -264,26 +311,36 @@ export async function radarArticleBlueprintWithPublishedStructure(
  * 2026-10-08 · B1 · `readPublishedStructure` (opcional, para teste): o leitor
  * da página publicada; sem ele, o do export (`radarReadPublishedStructure`).
  */
-export async function generateRadarArticleBlueprint(input: { client: SupabaseClient; brandId: string; articleId: string; actorUserId: string; ifMissing?: boolean; readPublishedStructure?: RadarArticleBlueprintPublishedReader }): Promise<RadarArticleBlueprintRow> {
+export async function generateRadarArticleBlueprint(input: {
+  client: SupabaseClient; brandId: string; articleId: string; actorUserId: string; ifMissing?: boolean; readPublishedStructure?: RadarArticleBlueprintPublishedReader;
+  /** 2026-10-08 · P0-A · a montagem do artigo (opcional, para teste): sem ela, a do export (`montagemDoArtigo`). */
+  assemble?: typeof montagemDoArtigo;
+}): Promise<RadarArticleBlueprintRow> {
   /* 2026-10-08 (revisão) · o prazo único da rota (ver RADAR_ARTICLE_BLUEPRINT_ROUTE_BUDGET_MS). */
   const prazo = Date.now() + RADAR_ARTICLE_BLUEPRINT_ROUTE_BUDGET_MS;
   /* Onde gravar tem de existir ANTES da chamada paga: sem a tabela, nada de IA. */
   const existentes = await listRadarArticleBlueprints(input.client, input.brandId, input.articleId);
-  const { montada, silo, publicacao: semPagina, brandVoice } = await montagemDoArtigo(input);
+  const { montada, silo, publicacao: semPagina, publicacoes, brandVoice, investigacao } = await (input.assemble ?? montagemDoArtigo)(input);
   /* Só se faltar (encadeamento automático): o mesmo pacote já organizado não paga a IA de novo. */
   if (input.ifMissing) {
     const doPacote = existentes.filter(item => item.bundleHash === montada.bundleHash);
-    const reaproveitada = doPacote.find(item => item.state === "APPROVED") || doPacote[0];
+    /*
+     * 2026-10-08 · P0-A · nem a mesma investigação paga de novo: a concluída
+     * do mesmo congelamento e ArticleDNA vale com o hash do dossiê mudado por
+     * código — reaproveita, sem chamada paga. Re-congelada ou ArticleDNA novo: organiza.
+     */
+    const reaproveitada = doPacote.find(item => item.state === "APPROVED") || doPacote[0]
+      || radarArticleBlueprintRowForInvestigation(existentes, { bundleHash: montada.bundleHash, investigation: investigacao });
     if (reaproveitada) return reaproveitada;
   }
   /* 2026-10-08 · B1 · a página publicada entra no pedido (depois do reaproveitamento: reaproveitar não lê nada). */
   const publicacao = await radarArticleBlueprintWithPublishedStructure(semPagina, input.readPublishedStructure ?? radarReadPublishedStructure);
   /* A voz da marca (Skill corrente, Adendo C) entra em trechos por assunto, com teto (2026-10-02). */
-  const brief = buildRadarArticleBlueprintBrief({ entrada: montada.entrada, silo, articleId: input.articleId, publication: publicacao, brandVoice: brandVoice.kind === "available" ? brandVoice.voice : null });
+  const brief = buildRadarArticleBlueprintBrief({ entrada: montada.entrada, silo, articleId: input.articleId, publication: publicacao, brandVoice: brandVoice.kind === "available" ? brandVoice.voice : null, siloPublications: publicacoes ?? null });
   const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, brandId: input.brandId, client: input.client, quotaUnits: 1 });
   const resposta = await requestRadarArticleBlueprintAi({ provider, brief, articleId: input.articleId, deadlineAt: prazo });
   const fechada = await fecharArtigoModelo({ provider, brief, ai: resposta.ai, articleId: input.articleId, allowFix: resposta.calls === 1, deadlineAt: prazo });
-  return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: montada.bundleHash!, origin: "ai", payload: fechada.payload, validation: [...resposta.notes, ...fechada.notes], actorUserId: input.actorUserId });
+  return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: montada.bundleHash!, origin: "ai", payload: fechada.payload, validation: [...resposta.notes, ...fechada.notes], actorUserId: input.actorUserId, investigationRef: investigacao });
 }
 
 /**
@@ -345,7 +402,8 @@ export async function editRadarArticleBlueprint(input: { client: SupabaseClient;
   const base = versoes.find(item => item.id === input.blueprintId);
   if (!base) throw new PipelineRuntimeError("NO_DATA", "Versão do artigo-modelo não encontrada nesta marca.", 409);
   const payload = radarApplyArticleBlueprintEdit(base.payload, input.edit);
-  return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: base.bundleHash, origin: "human_edit", payload, validation: base.validation, actorUserId: input.actorUserId });
+  /* 2026-10-08 · P0-A · a edição é da MESMA investigação da versão editada: copia a referência dela (a antiga, sem referência, segue pela família do bundle_hash). */
+  return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: base.bundleHash, origin: "human_edit", payload, validation: base.validation, actorUserId: input.actorUserId, investigationRef: referenciaDa(base) });
 }
 
 /** Aprovar vale só para o pacote vigente: aprovar o de outro congelamento não chegaria a lugar nenhum. */
@@ -354,8 +412,10 @@ export async function approveRadarArticleBlueprint(input: { client: SupabaseClie
   const alvo = versoes.find(item => item.id === input.blueprintId);
   if (!alvo) throw new PipelineRuntimeError("NO_DATA", "Versão do artigo-modelo não encontrada nesta marca.", 409);
   if (alvo.state === "APPROVED") return alvo;
-  const { montada } = await montagemDoArtigo(input);
-  if (montada.bundleHash !== alvo.bundleHash) {
+  const { montada, investigacao } = await montagemDoArtigo(input);
+  /* 2026-10-08 · P0-A · vale também o rascunho antigo da mesma investigação (congelamento e ArticleDNA), com o hash do dossiê mudado por código. */
+  const daInvestigacao = investigacao ? radarArticleBlueprintFitsInvestigation(metaDaVersao(alvo), versoes.map(metaDaVersao), investigacao) : false;
+  if (montada.bundleHash !== alvo.bundleHash && !daInvestigacao) {
     throw new PipelineRuntimeError("CONFLICT", "Este artigo-modelo é de outro congelamento da investigação. Organize de novo sobre o pacote atual.", 409);
   }
   const atualizacao = await input.client.from("radar_article_blueprints")

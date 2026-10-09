@@ -48,7 +48,7 @@ import { radarAuxiliaryLensLabel, radarCanonicalLensLabel, radarFrozenLensView }
 import { radarCandidateEvidenceLabel } from "./radar-subject-turn-view";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
 import { RadarRefreezePanel, type RadarRefreezeHandlers } from "./radar-refreeze-panel";
-import { RadarArticleBlueprintPanel, radarPhase1Visible, useRadarArticleBlueprintForReport, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
+import { RadarArticleBlueprintPanel, radarArticleBlueprintFreezeOf, radarPhase1Visible, useRadarArticleBlueprintForReport, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
 
 /** A cobertura de lentes da SERP canônica viva, para a linha da consulta central. */
 function lenteDaCanonica(research: SerpResearchSnapshot | null | undefined) {
@@ -1354,9 +1354,10 @@ function ArticleContextBand({ model }: { model: RadarR3Model }) {
  * estado SEO em relação às diretrizes do Google e das respostas de IA. Não pede
  * revisão e não alerta: o que falta aparece como nota baixa no pilar.
  */
-function ReportSummaryPanel({ model, brandId = null, articleId = null }: { model: RadarR3Model; brandId?: string | null; articleId?: string | null }) {
+function ReportSummaryPanel({ model, brandId = null, articleId = null, articleDnaVersionId = null }: { model: RadarR3Model; brandId?: string | null; articleId?: string | null; articleDnaVersionId?: string | null }) {
   /* 2026-10-02 · o artigo-modelo da SERP do pacote vigente: estrutura e links passam a ler a planta. */
-  const planta = useRadarArticleBlueprintForReport(brandId, articleId, model.deepResearch?.finalizedBundle?.bundleHash ?? null);
+  /* 2026-10-08 · P0-A · e o pacote congelado inteiro (instante e id): a planta vale pelo congelamento, não pelo hash do dossiê. */
+  const planta = useRadarArticleBlueprintForReport(brandId, articleId, model.deepResearch?.finalizedBundle?.bundleHash ?? null, radarArticleBlueprintFreezeOf(model.deepResearch?.finalizedBundle ?? null, articleDnaVersionId));
   if (!model.deepResearch) return null;
   const materiais = model.r4?.existingContent || [];
   const resumo = buildRadarReportSummary({
@@ -1406,6 +1407,8 @@ function ReportSummaryPanel({ model, brandId = null, articleId = null }: { model
 
 export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, writerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, articleBlueprintJob = null, onResetInvestigation, googleRefreeze = null, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
   const [expandedArea, setExpandedArea] = useState<RadarR3Area | null>(null);
+  /* 2026-10-08 (correção) · o congelamento vigente com o ArticleDNA que a página conhece: o painel confere a versão nova pela referência gravada. */
+  const freezeComArticleDna = radarArticleBlueprintFreezeOf(model?.deepResearch?.finalizedBundle ?? null, expertContext?.articleDnaVersionId ?? null);
 
   /*
    * DUAS CAMADAS, E SÓ UMA DEPENDE DO ARTIGO — §2.3.2.
@@ -1519,7 +1522,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
           * investigação finalizada: ele organiza o pacote congelado.
           */}
         {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} refreeze={googleRefreeze ?? null} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)}
-          articleBlueprint={model.deepResearch.finalizedBundle && brandId && articleId ? <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} job={articleBlueprintJob} currentBundleHash={model.deepResearch.finalizedBundle.bundleHash} /> : null} />}
+          articleBlueprint={model.deepResearch.finalizedBundle && brandId && articleId ? <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} job={articleBlueprintJob} currentBundleHash={model.deepResearch.finalizedBundle.bundleHash} currentFreeze={freezeComArticleDna} /> : null} />}
         {/*
           * AMAZON NÃO É UM LUGAR SEPARADO — é um dos destinos da pesquisa.
           *
@@ -1585,7 +1588,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
         <RadarR3SpecialistPanel model={model} expertContext={expertContext} onExpertEvidenceChange={onExpertEvidenceChange} onTopicChange={onTopicChange} onTopicRemove={onTopicRemove} onTopicMove={onTopicMove} onTopicAdd={onTopicAdd} onTopicReview={onTopicReview} onTopicUndo={onTopicUndo} onTopicRedo={onTopicRedo} canUndoTopics={canUndoTopics} canRedoTopics={canRedoTopics} onTopicAdjacent={onTopicAdjacent} topicQueuePosition={topicQueuePosition} topicQueueTotal={topicQueueTotal} />
       </div>}
       {expandedArea === "relatorio" && <div key={model.articleId} className="space-y-3">
-        <ReportSummaryPanel model={model} brandId={brandId} articleId={articleId} />
+        <ReportSummaryPanel model={model} brandId={brandId} articleId={articleId} articleDnaVersionId={expertContext?.articleDnaVersionId ?? null} />
         <RadarR6ReportPanel report={model.r6Report} canonicalApproved={model.report.approved} onGenerate={onReportGenerate} informational />
       </div>}
     </div>

@@ -426,13 +426,14 @@ test("C4 · fora do artigo-modelo, promessa, fechamento e chamada final também 
 test("C5 · cabeçalhos dos concorrentes: autopromoção, nome solto, loja e conteúdo datado saem; os temas legítimos ficam", () => {
   const { linha } = csvDoCaso(plantaAntiga());
   const serp = linha.serp_resumida;
-  assert.match(serp, /O que os concorrentes lidos cobrem \(H2\/H3 das 6 páginas comparáveis; /);
+  /* 2026-10-08 · P1 · a recorrência dos temas conta SITES (o menu repetido de um site não vira tema). */
+  assert.match(serp, /O que os concorrentes lidos cobrem \(H2\/H3 das 6 páginas comparáveis, de 6 site\(s\); /);
   for (const ruido of [/com a Bagy/, /"Carol"/, /loja virtual/i, /catálogo online/i, /setembro|datas comemorativas/i]) assert.doesNotMatch(serp, ruido, String(ruido));
-  const unicos = linhas(serp).find(item => item.startsWith("Tratado por 1 página só"))!;
+  const unicos = linhas(serp).find(item => item.startsWith("Tratado por 1 site só"))!;
   assert.match(unicos, /"Destaques de forma estratégica"/);
   assert.match(unicos, /"Promova a interação nos comentários"/);
-  assert.match(serp, /^- Seguidores · 2 de 6 páginas · ex\.: "Interaja com os seguidores"$/m, "o tema fica; só o cabeçalho de autopromoção sai");
-  assert.match(serp, /^- Calendário de publicações · 2 de 6 páginas · /m, "o tema fica; só o cabeçalho datado sai");
+  assert.match(serp, /^- Seguidores · 2 de 6 sites · ex\.: "Interaja com os seguidores"$/m, "o tema fica; só o cabeçalho de autopromoção sai");
+  assert.match(serp, /^- Calendário de publicações · 2 de 6 sites · /m, "o tema fica; só o cabeçalho datado sai");
 
   /* A régua, para qualquer marca: a marca do domínio, e o núcleo que muda o que é ruído. */
   assert.equal(radarCompetitorBrandOf("www.bagy.com.br"), "bagy");
@@ -484,7 +485,8 @@ test("C6 · o diferencial vem da página publicada (o que a amostra não trata),
   const plantaDoTema = plantaAntiga();
   plantaDoTema.blueprint.sections[3] = { ...plantaDoTema.blueprint.sections[3], explain: ["Responder mensagens constrói relacionamento e confiança."] };
   const semPagina = csvDoCaso(plantaDoTema, { publicacao: publicacao(null) }).linha.cobrir_e_superar;
-  assert.match(semPagina, /^- Diferencial possível: "Promova a interação nos comentários", tratado por 1 de 6 páginas comparáveis — aprofunde na seção "Estratégias práticas para atrair clientes pelo Instagram", sem copiar o cabeçalho do concorrente\.$/m);
+  /* 2026-10-08 · P1 · a recorrência dos temas conta sites: "um só site entre as N páginas comparáveis". */
+  assert.match(semPagina, /^- Diferencial possível: "Promova a interação nos comentários", tratado por um só site entre as 6 páginas comparáveis — aprofunde na seção "Estratégias práticas para atrair clientes pelo Instagram", sem copiar o cabeçalho do concorrente\.$/m);
 
   /* Sem página e sem concorrentes lidos: a entrega concreta da planta; sem ela, o movimento não existe. */
   const comEntrega = plantaAntiga();
@@ -514,7 +516,8 @@ test("C7 · só a pergunta DESTE artigo fica para responder; a do outro tópico 
   const naoCobrir = linhas(cobrir.slice(cobrir.indexOf("Não cobrir:")));
   assert.ok(naoCobrir.includes("- \"Como captar clientes pelo WhatsApp?\": pertence a \"como atrair clientes pelo whatsapp\", outro tópico do Silo; não responder aqui."));
   assert.ok(naoCobrir.includes("- \"Como captar clientes pela internet?\": pertence ao artigo \"como captar um cliente\" do Silo; não responder aqui."));
-  assert.ok(naoCobrir.includes("- \"Como fazer um pitch de vendas eficiente? Guia para converter clientes\": outro foco; não trata de \"como atrair clientes pelo instagram\" nem das complementares."));
+  /* 2026-10-08 · P1 · título de post ("…? Guia para…") é ruído de pesquisa: sai de todas as listas, sem virar linha do "Não cobrir". */
+  assert.equal(cobrir.includes("pitch de vendas"), false, "o título de post sai de todas as listas");
   assert.ok(naoCobrir.includes("- \"O que fazer para vender muito no Instagram?\": outro foco; não trata de \"como atrair clientes pelo instagram\" nem das complementares."));
   assert.ok(naoCobrir.some(item => item.startsWith("- \"Como chamar a atenção no Instagram?\": ")), "o \"não cobrir\" do pacote continua");
   /* A pergunta que a planta já responde não se repete. */

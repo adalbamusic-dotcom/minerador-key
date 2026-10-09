@@ -97,6 +97,7 @@ import {
   countWriterSiteCatalog,
   readWriterApprovedArticleBlueprint,
   readWriterArticleBlueprintContent,
+  writerBlueprintInvestigationOf,
   readWriterArtifactVersionMeta,
   readWriterArticleProjection,
   readWriterBrandContextVersions,
@@ -339,7 +340,8 @@ export async function readWriterEvidenceManifest(context: WriterEvidenceContext,
    * entregue chega ao Redator. Só metadados aqui (id, versão, pacote, data);
    * o conteúdo vem nos fundamentos e na fatia `radar.blueprint/<id>`.
    */
-  const artigoModelo = await readWriterApprovedArticleBlueprint(context, { articleId: head.articleId, bundleHash: head.dossier?.bundleHash ?? null }, { content: false });
+  /* 2026-10-08 · P0-A · com a investigação do pacote: a concluída do mesmo congelamento e ArticleDNA vale mesmo com o hash mudado por código. */
+  const artigoModelo = await readWriterApprovedArticleBlueprint(context, { articleId: head.articleId, bundleHash: head.dossier?.bundleHash ?? null, investigation: writerBlueprintInvestigationOf(head) }, { content: false });
   if (artigoModelo.kind === "approved") {
     const { meta } = artigoModelo;
     fonte({
@@ -651,7 +653,7 @@ type PlantaEVoz = {
 
 async function plantaEVozDe(context: WriterEvidenceContext, head: WriterEvidenceHead): Promise<PlantaEVoz> {
   const [lido, voz] = await Promise.all([
-    readWriterApprovedArticleBlueprint(context, { articleId: head.articleId, bundleHash: head.dossier?.bundleHash ?? null }, { content: true }),
+    readWriterApprovedArticleBlueprint(context, { articleId: head.articleId, bundleHash: head.dossier?.bundleHash ?? null, investigation: writerBlueprintInvestigationOf(head) }, { content: true }),
     readWriterBrandVoice(context, { content: true }),
   ]);
   const absent: PlantaEVoz["absent"] = [];
@@ -1141,7 +1143,8 @@ async function prepararLista(chave: WriterEvidenceSourceKey, input: {
  */
 async function prepararArtigoModelo(context: WriterEvidenceContext, head: WriterEvidenceHead, chave: WriterEvidenceSourceKey): Promise<Preparado> {
   const dossie = head.dossier ?? recusar("Documento sem dossiê do Radar: não há pacote a que um artigo-modelo se prenda.");
-  const alvo = { articleId: head.articleId, bundleHash: dossie.bundleHash };
+  /* 2026-10-08 · P0-A · a mesma regra do manifesto: hash exato ou a concluída da mesma investigação do pacote. */
+  const alvo = { articleId: head.articleId, bundleHash: dossie.bundleHash, investigation: writerBlueprintInvestigationOf(head) };
   const lido = await readWriterApprovedArticleBlueprint(context, alvo, { content: false, strict: true });
   if (lido.kind === "table_missing") {
     throw new WriterEvidenceError("migration_pendente", lido.reason, { migration: "20261002120000_radar_artigo_modelo_e_uso_de_videos" });
@@ -1158,7 +1161,8 @@ async function prepararArtigoModelo(context: WriterEvidenceContext, head: Writer
     truncate: false,
     notice: "Artigo-modelo da SERP concluído no Radar para o pacote entregue: planta (títulos, seções, links e CTA), não evidência. Siga a forma; diante da evidência do pacote, vale a evidência e o conflito vira divergência.",
     load: async pedido => {
-      const lido = await readWriterArticleBlueprintContent(context, alvo, meta.id, chave.path[0] ?? null);
+      /* 2026-10-08 · P0-A · o conteúdo pelo pacote da VERSÃO (o mesmo do documento no hash exato; o do dossiê em que ela foi organizada na mesma investigação). */
+      const lido = await readWriterArticleBlueprintContent(context, { articleId: alvo.articleId, bundleHash: meta.bundleHash }, meta.id, chave.path[0] ?? null);
       /* 2026-10-08 · a planta inteira sai com os nomes atuais, como a projeção (artigo-modelo antigo incluído). */
       const conteudo = "blueprint" in lido ? { ...lido, blueprint: writerBlueprintWithCurrentNames(lido.blueprint, head.dossier?.keywordContext ?? null) } : lido;
       return linhasDe(chave.path.length ? navegar(conteudo, chave.path) : conteudo, pedido);

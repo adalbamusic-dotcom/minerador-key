@@ -34,7 +34,8 @@ import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
 import { radarVideoExportYoutubeOf } from "@/lib/radar/portable-video-export";
 import { radarVideoLensOrganicOf } from "@/lib/radar/video-competitive";
 import { readRadarVideoLensDigestsForExport } from "@/lib/server/radar-video-lens-digest-read";
-import { readRadarArticleBlueprintsForExport } from "@/lib/server/radar-article-blueprint-read";
+import { radarArticleBlueprintCurrentInvestigationOf, readRadarArticleBlueprintsForExport } from "@/lib/server/radar-article-blueprint-read";
+import type { RadarArticleBlueprintCurrentInvestigation } from "@/lib/radar/article-blueprint-freeze";
 import { readRadarVideoUsagesForExport } from "@/lib/server/radar-video-usage-read";
 import { readRadarBrandVoice } from "@/lib/server/radar-brand-voice";
 import { readRadarArticleAuthors } from "@/lib/server/radar-article-authors";
@@ -79,6 +80,13 @@ export type RadarPortableExportAssembly = {
    * UMA vez por lote, fora do congelamento e do hash.
    */
   brandVoice: RadarBrandVoiceState;
+  /**
+   * 2026-10-08 · P0-A · A investigação vigente de cada artigo montado: o
+   * congelamento e o ArticleDNA do dossiê, do que o laço JÁ leu. É a identidade
+   * estável do artigo-modelo (o hash do dossiê muda com o código); o export, o
+   * `ifMissing` e a gravação da versão a usam.
+   */
+  congelamentos: Map<string, RadarArticleBlueprintCurrentInvestigation>;
 };
 
 export async function assembleRadarPortableExport(input: {
@@ -146,6 +154,8 @@ export async function assembleRadarPortableExport(input: {
    * nova; o formato completo não usa este mapa.
    */
   const publicacoes = new Map<string, RadarWritingPublication>();
+  /* 2026-10-08 · P0-A · a investigação vigente de cada artigo (ver `RadarPortableExportAssembly.congelamentos`). */
+  const congelamentos = new Map<string, RadarArticleBlueprintCurrentInvestigation>();
 
   /*
    * 2026-10-02 · O MODO DE USO DOS VÍDEOS (SDD diretriz editorial, Adendo B, D6).
@@ -249,6 +259,18 @@ export async function assembleRadarPortableExport(input: {
 
     const { profile: perfil, bundle, blueprintView, keywordContext: keywords } = canonico.dossier;
     const payload = corrente.payload;
+
+    /*
+     * 2026-10-08 · P0-A · A IDENTIDADE ESTÁVEL DO ARTIGO-MODELO: o congelamento
+     * gravado (instante e pacote do Google) e a versão do ArticleDNA deste dossiê,
+     * com a vigência dela entre as versões que o lote já leu. Nenhuma leitura nova.
+     */
+    const investigacao = radarArticleBlueprintCurrentInvestigationOf({
+      analysisPayload: payload,
+      article,
+      articleVersions: artefatos.articles.filter(versao => versao.payload.articleId === articleId && versao.payload.brandId === input.brandId),
+    });
+    if (investigacao) congelamentos.set(articleId, investigacao);
 
     const comercial = perfil === "AMAZON" ? estadoComercialCanonico(payload) : null;
 
@@ -570,6 +592,8 @@ export async function assembleRadarPortableExport(input: {
       articleId: item.articleId,
       bundleHash: item.bundleHash,
       keywords: [item.entrada.article.principalKeyword || "", ...(item.entrada.article.secondaryKeywords || [])].filter(Boolean),
+      /* 2026-10-08 · P0-A · hash exato ou, senão, a concluída do mesmo congelamento e ArticleDNA: mudança de código não desliga a planta. */
+      investigation: congelamentos.get(item.articleId) ?? null,
     })));
     for (const item of montadas) item.blueprint = artigosModelo.get(item.articleId) ?? null;
   }
@@ -593,8 +617,35 @@ export async function assembleRadarPortableExport(input: {
    * publicadas do lote são lidas em paralelo; falha ou tempo esgotado deixa a
    * página como antes (a ressalva continua). Nada é gravado.
    */
+  /*
+   * 2026-10-08 · P1 · A PUBLICAÇÃO DE TODOS OS MEMBROS DO SILO. O CSV do Pilar
+   * dizia "destino ainda não publicado" para suportes que estão no ar: o mapa
+   * só tinha os artigos do arquivo. Os outros ArticleDNA da marca o lote JÁ
+   * leu (`artefatos.articles`, a versão de maior número de cada artigo): a
+   * publicação deles entra no mesmo mapa, sem leitura nova. A estrutura
+   * publicada continua lida só para os artigos do arquivo (abaixo).
+   */
+  const doArquivo = new Set(montadas.map(item => item.articleId));
+  const versaoMaisNova = new Map<string, VersionEnvelope<ArticleDNA>>();
+  for (const versao of artefatos.articles) {
+    if (versao.payload.brandId !== input.brandId) continue;
+    const atual = versaoMaisNova.get(versao.payload.articleId);
+    if (!atual || versao.versionNumber > atual.versionNumber) versaoMaisNova.set(versao.payload.articleId, versao);
+  }
+  for (const [articleId, versao] of versaoMaisNova) {
+    if (publicacoes.has(articleId)) continue;
+    const identidade = identidadeDoArticleDna(versao.payload);
+    publicacoes.set(articleId, {
+      published: identidade.published,
+      publishedUrl: identidade.publishedUrl,
+      canonical: identidade.canonical,
+      slug: identidade.slug,
+      principalPolicy: identidade.principalPolicy,
+    });
+  }
+
   if (input.readPublishedStructure) {
-    const lidas = [...publicacoes.entries()].filter(([, item]) => item.published && item.publishedUrl).slice(0, 10);
+    const lidas = [...publicacoes.entries()].filter(([articleId, item]) => doArquivo.has(articleId) && item.published && item.publishedUrl).slice(0, 10);
     await Promise.all(lidas.map(async ([articleId, item]) => {
       try {
         const estrutura = await input.readPublishedStructure!(item.publishedUrl!);
@@ -605,7 +656,7 @@ export async function assembleRadarPortableExport(input: {
     }));
   }
 
-  return { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice };
+  return { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice, congelamentos };
 }
 
 /** 2026-10-02 · O leitor real da estrutura publicada: o extrator das páginas concorrentes (GET, validação de URL, tempo limite). */

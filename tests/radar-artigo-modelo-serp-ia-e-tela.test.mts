@@ -290,7 +290,10 @@ test("a tela: o painel mora na Pesquisa, logo abaixo do modelo da SERP; o botão
   assert.equal(radarPhase1Visible(radarPhase1Action({ state: "AWAITING_REVIEW" as never, contextReady: true, hasPrimaryQuery: true, running: false, selected: 10, pending: 0, failed: 0, analyzed: 10 })).label, "Finalizar pesquisa · inclui 1 chamada de IA");
   const bancadaFora = semComentarios(fonte.slice(fonte.indexOf("export function RadarR3Workbench(")));
   /* 2026-10-02 · o painel recebe o congelamento vigente: mostra a versão do pacote atual, como o export. */
-  assert.match(bancadaFora, /articleBlueprint=\{model\.deepResearch\.finalizedBundle && brandId && articleId \? <RadarArticleBlueprintPanel brandId=\{brandId\} articleId=\{articleId\} job=\{articleBlueprintJob\} currentBundleHash=\{model\.deepResearch\.finalizedBundle\.bundleHash\} \/> : null\}/);
+  /* 2026-10-08 · P0-A · e o pacote congelado inteiro: a versão vale pelo congelamento, não pelo hash do dossiê. */
+  assert.match(bancadaFora, /articleBlueprint=\{model\.deepResearch\.finalizedBundle && brandId && articleId \? <RadarArticleBlueprintPanel brandId=\{brandId\} articleId=\{articleId\} job=\{articleBlueprintJob\} currentBundleHash=\{model\.deepResearch\.finalizedBundle\.bundleHash\} currentFreeze=\{freezeComArticleDna\} \/> : null\}/);
+  /* 2026-10-08 (correção) · o congelamento leva o ArticleDNA que a página conhece (o painel confere a referência gravada). */
+  assert.match(bancadaFora, /const freezeComArticleDna = radarArticleBlueprintFreezeOf\(model\?\.deepResearch\?\.finalizedBundle \?\? null, expertContext\?\.articleDnaVersionId \?\? null\);/);
   assert.equal((bancadaFora.match(/<RadarArticleBlueprintPanel/g) || []).length, 1, "um lugar só: o painel solto saiu");
 });
 
@@ -349,7 +352,7 @@ test("o painel mostra a versão do pacote vigente, pela mesma regra do export, e
   }
 
   const fonte = semComentarios(readFileSync(new URL("../modules/radar/radar-article-blueprint-panel.tsx", import.meta.url), "utf8"));
-  assert.match(fonte, /const escolha = radarArticleBlueprintPanelChoice\(versoes, currentBundleHash\);/);
+  assert.match(fonte, /const escolha = radarArticleBlueprintPanelChoice\(versoes, currentBundleHash, currentFreeze\);/);
   assert.equal(/const atual = versoes\[0\]/.test(fonte), false, "nunca mais a mais nova de qualquer congelamento");
   assert.match(fonte, /data-testid="radar-article-blueprint-other-freeze"/);
   assert.match(fonte, /data-testid="radar-article-blueprint-newer-draft"/);
@@ -386,8 +389,10 @@ test("refinalizada com a IA falhando: com o vigente informado, nada vai ao CSV; 
   assert.equal(radarArticleBlueprintPanelStateLabel({ state: "DRAFT", origin: "human_edit" }, false), "Versão antiga em rascunho — vai ao CSV assim mesmo; conclua ou organize de novo");
 
   const fonte = semComentarios(readFileSync(new URL("../modules/radar/radar-article-blueprint-panel.tsx", import.meta.url), "utf8"));
-  assert.match(fonte, /const vaiAoCsvConferido = Boolean\(atual && atual === vaiAoCsv && escolha\.currentConfirmed\);/);
-  assert.match(fonte, /radarArticleBlueprintPanelStateLabel\(atual, vaiAoCsvConferido\)/);
+  /* 2026-10-08 (correção) · conferido pela escolha (hash exato ou referência com o ArticleDNA da página), não só pelo congelamento informado. */
+  assert.match(fonte, /const vaiAoCsvConferido = Boolean\(atual && atual === vaiAoCsv && escolha\.deliveryConfirmed\);/);
+  /* 2026-10-08 (correção) · o 3º argumento: a versão do congelamento vigente sem o ArticleDNA conferido no painel. */
+  assert.match(fonte, /radarArticleBlueprintPanelStateLabel\(atual, vaiAoCsvConferido, Boolean\(atual && atual === vaiAoCsv && escolha\.currentConfirmed && !escolha\.deliveryConfirmed\)\)/);
   assert.equal((fonte.match(/"Concluído — vai ao CSV, ao Redator e ao MCP"/g) || []).length, 1, "o rótulo afirmativo mora só no helper, atrás da conferência");
 });
 

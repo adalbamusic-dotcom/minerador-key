@@ -451,7 +451,8 @@ test("H · links pelo silo: destino pelo slug do irmão, SiloPage, e o rótulo L
     "âncora alternativa é texto, e não lugar");
   assert.equal(/onde: âncoras alternativas/.test(pilar.links_internos), false);
   assert.match(pilar.links_internos, /Pilar → Suporte/);
-  assert.match(pilar.estrutura, /## Como montar a rotina de skincare facial no dia a dia\?[\s\S]*?- Links: L1\./);
+  /* 2026-10-08 · P0-B · a seção sai com a pergunta do leitor como título de trabalho (sem o molde "no dia a dia?"). */
+  assert.match(pilar.estrutura, /## Como montar a rotina de skincare facial\?\n[\s\S]*?- Links: L1\./);
   assert.equal(/territory|node|article-candidate/.test(pilar.links_internos), false);
 });
 
@@ -488,7 +489,8 @@ test("I · limites: célula até 6 mil (estrutura até 14 mil), artigo até 40 m
   const observado = base.googleObserved as unknown as Record<string, unknown> & { internalLinkPlan: Record<string, unknown> };
   const inflado = {
     ...base,
-    articleModel: { ...modelo, sections: Array.from({ length: 120 }, (_, indice) => ({ ...secaoLonga, id: `s${indice}`, headingSuggestion: `Seção ${indice} com um cabeçalho comprido o bastante para pesar na célula`, childSections: [] })) } as never,
+    /* 2026-10-08 · P0-B · cada seção com a sua pergunta: seções com a mesma pergunta do leitor saem numa só (a mesma necessidade). */
+    articleModel: { ...modelo, sections: Array.from({ length: 120 }, (_, indice) => ({ ...secaoLonga, id: `s${indice}`, headingSuggestion: `Seção ${indice} com um cabeçalho comprido o bastante para pesar na célula`, readerQuestion: `Pergunta ${indice} com um texto comprido o bastante para pesar na célula?`, childSections: [] })) } as never,
     googleObserved: {
       ...observado,
       internalLinkPlan: {

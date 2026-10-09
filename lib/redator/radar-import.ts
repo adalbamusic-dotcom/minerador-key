@@ -2,6 +2,7 @@ import type { ArticleDNA, ContentDocument, ContentDocumentV2, RadarDocumentOrigi
 import { legacyVersionReference, toVersionReference } from "../arquiteto/versioning.ts";
 import { radarWriterMayNotFor } from "./writer-handoff.ts";
 import { radarWriterSubjectOf, radarWriterSubjectTurnLines } from "./radar-subject-turn.ts";
+import { radarWritingSectionTitleResolver } from "../radar/portable-writing-export.ts";
 import { differentiationEditorialLines } from "../arquiteto/differentiation-note.ts";
 import type { RadarCanonicalDossier } from "../server/radar-canonical-dossier.ts";
 
@@ -329,6 +330,11 @@ export function buildRadarDocument(input: BuildRadarDocumentInput): ContentDocum
         subject: input.subject,
         turn: dossier.authorities?.google?.articleModel?.declaredSubject ?? null,
         principal: dossier.keywordContext.principal,
+        /* 2026-10-08 (correção) · a seção nomeada como no CSV (a pergunta do leitor utilizável), para a "Virada" dizer o mesmo. */
+        sectionTitle: radarWritingSectionTitleResolver(dossier.authorities?.google?.articleModel ?? null, {
+          core: [dossier.keywordContext.principal, ...(dossier.keywordContext.secondary || []), ...(dossier.keywordContext.narrativeReinforcements || [])],
+          subjectPhrase: radarWriterSubjectOf(input.subject)?.phrase ?? null,
+        }),
       }).concat(differentiationEditorialLines(input.differentiation)),
       visualGuidance: [],
       pendingDecisions: [],

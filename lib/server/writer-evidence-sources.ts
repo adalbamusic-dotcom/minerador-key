@@ -51,6 +51,7 @@ import {
   type SerpCacheQuery,
 } from "@/lib/editorial/serp-cache";
 import { BrandSkillSchema, NormalizedSkillSectionSchema } from "@/lib/marca/brand-skill-contracts";
+import { radarArticleBlueprintPick, type RadarArticleBlueprintVersionMeta } from "@/lib/radar/article-blueprint-freeze";
 import { effectiveBrandDnaVersionId } from "@/lib/marca/domain";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE } from "@/lib/minerador/keyword-semantic-qualification";
@@ -837,8 +838,44 @@ export async function readWriterBrandContextVersions(context: WriterEvidenceCont
 
 const MIGRATION_DO_ARTIGO_MODELO = "20261002120000_radar_artigo_modelo_e_uso_de_videos";
 
+/**
+ * 2026-10-08 · P0-A · A investigação do pacote entregue: o instante do
+ * congelamento (o `observedAt` do dossiê) e o ArticleDNA do envio. Com ela, o
+ * artigo-modelo concluído do MESMO congelamento e ArticleDNA vale mesmo com o
+ * hash do dossiê mudado por código entre organizar e enviar.
+ */
+export type WriterBlueprintInvestigation = {
+  frozenAt: string;
+  articleDnaVersionId: string;
+  articleDnaContentHash: string | null;
+  /** A entidade do ArticleDNA: a vigência da versão (para a planta antiga, sem a referência gravada) sai das versões dela. */
+  articleDnaEntityId: string | null;
+};
+
 /** O artigo e o pacote congelado do documento: é a eles que o artigo-modelo se prende. */
-export type WriterBlueprintTarget = { articleId: string; bundleHash: string | null };
+export type WriterBlueprintTarget = { articleId: string; bundleHash: string | null; investigation?: WriterBlueprintInvestigation | null };
+
+/**
+ * 2026-10-08 · P0-A · a investigação do pacote do documento, pelo cabeçalho que
+ * o leitor já tem (nada lido a mais): `observedAt` do dossiê e o vínculo do
+ * envio (`radarOrigin`), com a referência do ArticleDNA como reserva.
+ */
+export function writerBlueprintInvestigationOf(head: {
+  bundleObservedAt: string | null | undefined;
+  radarOrigin?: { articleDnaVersionId?: unknown; articleDnaContentHash?: unknown } | null;
+  refs?: { articleDnaRef?: { entityId?: unknown; versionId?: unknown; contentHash?: unknown } | null } | null;
+}): WriterBlueprintInvestigation | null {
+  const frozenAt = texto(head.bundleObservedAt);
+  const referencia = head.refs?.articleDnaRef ?? null;
+  const articleDnaVersionId = texto(head.radarOrigin?.articleDnaVersionId) ?? texto(referencia?.versionId);
+  if (!frozenAt || !articleDnaVersionId) return null;
+  return {
+    frozenAt,
+    articleDnaVersionId,
+    articleDnaContentHash: texto(head.radarOrigin?.articleDnaContentHash) ?? texto(referencia?.contentHash),
+    articleDnaEntityId: texto(referencia?.entityId),
+  };
+}
 
 export type WriterApprovedBlueprintMeta = { id: string; versionNumber: number | null; bundleHash: string; approvedAt: string | null };
 
@@ -878,6 +915,88 @@ function falhaDoArtigoModelo(error: ErroDoBanco, estrito: boolean): WriterApprov
 const linhasDaResposta = (data: unknown): Linha[] => (Array.isArray(data) ? data as Linha[] : data ? [data as Linha] : []);
 
 /**
+ * 2026-10-08 · P0-A · A VIGÊNCIA DA VERSÃO DO ARTICLEDNA DO PACOTE: quando ela
+ * passou a valer e quando a seguinte a substituiu. Só a planta antiga (sem a
+ * referência gravada) precisa disto; uma consulta de metadados da entidade,
+ * pela Marca. Falhou ou não achou: a vigência fica desconhecida e a planta
+ * antiga não vale (a dúvida não liga a planta); na leitura estrita, a falha sobe.
+ */
+async function vigenciaDoArticleDna(context: WriterEvidenceContext, investigacao: WriterBlueprintInvestigation, estrito: boolean): Promise<{ from: string | null; until: string | null }> {
+  if (!investigacao.articleDnaEntityId) return { from: null, until: null };
+  try {
+    const versoes = await linhas(writerEvidenceClient(context).from("editorial_artifact_versions").select("version_id,version_number,created_at")
+      .eq("marca_id", context.brandId).eq("artifact_type", "article_dna").eq("entity_id", investigacao.articleDnaEntityId));
+    const propria = versoes.find(item => item.version_id === investigacao.articleDnaVersionId);
+    const numeroProprio = propria ? numero(propria.version_number) : null;
+    if (!propria || numeroProprio === null) return { from: null, until: null };
+    const seguintes = versoes.filter(item => (numero(item.version_number) ?? 0) > numeroProprio)
+      .map(item => Date.parse(texto(item.created_at) ?? "")).filter(Number.isFinite);
+    return { from: texto(propria.created_at), until: seguintes.length ? new Date(Math.min(...seguintes)).toISOString() : null };
+  } catch (erro) {
+    if (estrito) throw erro;
+    console.warn("[writer-evidence] vigencia_do_article_dna_nao_lida", { message: erro instanceof Error ? erro.message.slice(0, 200) : "falha desconhecida" });
+    return { from: null, until: null };
+  }
+}
+
+/**
+ * 2026-10-08 · P0-A · A CONCLUÍDA DA MESMA INVESTIGAÇÃO, entre os metadados lidos
+ * (todas as versões do artigo, na Marca): a regra pura do Radar
+ * (`radarArticleBlueprintPick`, sem o hash exato, que já foi consultado). A
+ * vigência do ArticleDNA só é lida quando há planta antiga nascida depois do
+ * congelamento — o caso comum (planta nova, com a referência) não lê nada a mais.
+ */
+/*
+ * 2026-10-08 (correção) · O TETO DA PLANTA ANTIGA NO REDATOR. A planta sem a
+ * referência gravada vale pelo relógio ("nascida depois do congelamento do
+ * documento") — e isso só é seguro enquanto o congelamento do documento é o
+ * VIGENTE da análise. Re-congelada a investigação (F1 → F2), uma planta antiga
+ * organizada sobre F2 também nasceu depois de F1: o documento de F1 a
+ * receberia. O congelamento vigente sai dos três carimbos da última versão da
+ * análise (a mesma precedência de `radarFrozenObservedAtOfAnalysis`), uma
+ * leitura de metadados; diferente do documento, ou não lido, só vale a planta
+ * com a referência gravada. Documento enviado antes de 2026-09-19 (observedAt =
+ * hora do clique) nunca bate: fica só com o hash exato ou a referência.
+ */
+async function congelamentoVigenteDoArtigo(context: WriterEvidenceContext, articleId: string, estrito: boolean): Promise<string | null> {
+  try {
+    const [linha] = await linhas(writerEvidenceClient(context).from("editorial_workflow_items")
+      .select("gg:payload->analysisVersions->-1->payload->finalizedBundle->>frozenAt,amz:payload->analysisVersions->-1->payload->amazonFrozenInvestigation->>finalizedAt,yt:payload->analysisVersions->-1->payload->youtubeFrozenInvestigation->>finalizedAt")
+      .eq("marca_id", context.brandId).eq("stage", "radar").eq("article_id", articleId).limit(1));
+    return linha ? texto(linha.gg) ?? texto(linha.amz) ?? texto(linha.yt) : null;
+  } catch (erro) {
+    if (estrito) throw erro;
+    console.warn("[writer-evidence] congelamento_vigente_nao_lido", { message: erro instanceof Error ? erro.message.slice(0, 200) : "falha desconhecida" });
+    return null;
+  }
+}
+
+async function artigoModeloDaInvestigacao(context: WriterEvidenceContext, articleId: string, lidas: readonly Linha[], investigacao: WriterBlueprintInvestigation, estrito: boolean): Promise<Linha | null> {
+  const todas: Array<RadarArticleBlueprintVersionMeta & { linha: Linha }> = lidas.map(linha => ({
+    id: String(linha.id), bundleHash: String(linha.bundle_hash), versionNumber: numero(linha.version_number) ?? 0,
+    state: String(linha.state), createdAt: texto(linha.created_at), investigationRef: linha.ir, linha,
+  }));
+  const congelada = Date.parse(investigacao.frozenAt);
+  const semReferencia = (meta: RadarArticleBlueprintVersionMeta) => meta.investigationRef === null || meta.investigationRef === undefined;
+  const antigaDepoisDoCongelamento = todas.some(meta => meta.state === "APPROVED" && semReferencia(meta)
+    && Number.isFinite(congelada) && Date.parse(meta.createdAt ?? "") > congelada);
+  /* 2026-10-08 (correção) · o teto: a planta antiga só conta com o congelamento do documento ainda vigente. */
+  const vigente = antigaDepoisDoCongelamento ? await congelamentoVigenteDoArtigo(context, articleId, estrito) : null;
+  const congelamentoVigente = vigente !== null && Date.parse(vigente) === congelada;
+  const metas = congelamentoVigente ? todas : todas.filter(meta => !(meta.state === "APPROVED" && semReferencia(meta)));
+  const vigencia = antigaDepoisDoCongelamento && congelamentoVigente ? await vigenciaDoArticleDna(context, investigacao, estrito) : { from: null, until: null };
+  const escolha = radarArticleBlueprintPick(metas, {
+    bundleHash: null,
+    investigation: {
+      frozenAt: investigacao.frozenAt, frozenBundleId: null, frozenBundleHash: null,
+      articleDnaVersionId: investigacao.articleDnaVersionId, articleDnaContentHash: investigacao.articleDnaContentHash,
+      articleDnaFrom: vigencia.from, articleDnaUntil: vigencia.until,
+    },
+  });
+  return escolha ? metas.find(meta => meta.id === escolha.id)?.linha ?? null : null;
+}
+
+/**
  * O ARTIGO-MODELO APROVADO DO PACOTE ENTREGUE.
  *
  * Primeiro o aprovado do MESMO `bundleHash` do documento (o mais novo, se o
@@ -885,6 +1004,12 @@ const linhasDaResposta = (data: unknown): Linha[] => (Array.isArray(data) ? data
  * aprovado de OUTRO congelamento — que não vale para este documento e não é
  * servido como se valesse (invariante 30): o caminho é aprovar sobre o pacote
  * entregue ou o Radar reenviar o pacote atual.
+ *
+ * 2026-10-08 · P0-A · "outro congelamento" passa a ser o de verdade: com a
+ * investigação do pacote (`alvo.investigation`), a concluída organizada sobre o
+ * MESMO congelamento e ArticleDNA vale, ainda que o hash do dossiê tenha mudado
+ * por código entre organizar e enviar. `meta.bundleHash` é o da versão (o do
+ * documento no hash exato); quem lê o conteúdo usa ele.
  */
 export async function readWriterApprovedArticleBlueprint(
   context: WriterEvidenceContext,
@@ -908,13 +1033,48 @@ export async function readWriterApprovedArticleBlueprint(
       content: opcoes.content ? { blueprint: linha.bp, plan: linha.pl, linkCandidates: linha.lc, brandVoice: linha.bv, publishedStructure: linha.ps ?? null } : null,
     };
   }
-  const deOutroPacote = await cliente.from("radar_article_blueprints").select(COLUNAS_DO_ARTIGO_MODELO)
-    .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("state", "APPROVED")
-    .order("version_number", { ascending: false }).limit(1);
+  /*
+   * 2026-10-08 · P0-A · SEM O HASH EXATO, A MESMA INVESTIGAÇÃO. Com a
+   * investigação do pacote entregue, os metadados de todas as versões (data e
+   * a referência gravada, um caminho pequeno — nunca a planta) decidem pela
+   * regra do export: a concluída mais nova do mesmo congelamento e ArticleDNA.
+   * Sem ela, a consulta de antes (só dizer se há concluída de outro congelamento).
+   */
+  const investigacao = alvo.investigation ?? null;
+  const deOutroPacote = investigacao
+    ? await cliente.from("radar_article_blueprints").select(`${COLUNAS_DO_ARTIGO_MODELO},state,created_at,ir:payload->investigationRef`)
+      .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).in("state", ["APPROVED", "DRAFT"])
+      .order("version_number", { ascending: false }).limit(50)
+    : await cliente.from("radar_article_blueprints").select(COLUNAS_DO_ARTIGO_MODELO)
+      .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("state", "APPROVED")
+      .order("version_number", { ascending: false }).limit(1);
   const falhouDeNovo = falhaDoArtigoModelo(deOutroPacote.error, estrito);
   if (falhouDeNovo) return falhouDeNovo;
-  const [outra] = linhasDaResposta(deOutroPacote.data);
-  if (outra && outra.article_id === alvo.articleId) {
+  const daMarca = linhasDaResposta(deOutroPacote.data).filter(item => item.article_id === alvo.articleId && typeof item.id === "string");
+  if (investigacao) {
+    const escolhida = await artigoModeloDaInvestigacao(context, alvo.articleId, daMarca, investigacao, estrito);
+    if (escolhida) {
+      const bundleHash = String(escolhida.bundle_hash);
+      if (!opcoes.content) {
+        return { kind: "approved", meta: { id: String(escolhida.id), versionNumber: numero(escolhida.version_number), bundleHash, approvedAt: texto(escolhida.approved_at) }, content: null };
+      }
+      const conteudo = await cliente.from("radar_article_blueprints").select(`${COLUNAS_DO_ARTIGO_MODELO},${CAMINHOS_DO_ARTIGO_MODELO}`)
+        .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("bundle_hash", bundleHash).eq("state", "APPROVED").eq("id", String(escolhida.id))
+        .limit(1);
+      const falhouNoConteudo = falhaDoArtigoModelo(conteudo.error, estrito);
+      if (falhouNoConteudo) return falhouNoConteudo;
+      const [lida] = linhasDaResposta(conteudo.data);
+      if (lida && lida.id === escolhida.id && lida.article_id === alvo.articleId && lida.bundle_hash === bundleHash) {
+        return {
+          kind: "approved",
+          meta: { id: String(lida.id), versionNumber: numero(lida.version_number), bundleHash, approvedAt: texto(lida.approved_at) },
+          content: { blueprint: lida.bp, plan: lida.pl, linkCandidates: lida.lc, brandVoice: lida.bv, publishedStructure: lida.ps ?? null },
+        };
+      }
+    }
+  }
+  const outra = daMarca.find(item => !investigacao || item.state === "APPROVED");
+  if (outra) {
     return {
       kind: "other_bundle",
       reason: `o artigo-modelo concluído (v${numero(outra.version_number) ?? "?"}) é de outro congelamento da investigação e não vale para este documento: organize no Radar o artigo-modelo do pacote entregue, ou o Radar reenvia o pacote atual ao Redator`,

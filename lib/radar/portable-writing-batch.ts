@@ -94,6 +94,8 @@ export function radarPortableWritingExport(input: {
     silo,
     articleId: artigo.articleId,
     publication: input.publications?.get(artigo.articleId) ?? null,
+    /* 2026-10-08 · P1 · a publicação dos irmãos do Silo (o núcleo resolve a de todos os membros): destino publicado sai com a URL. */
+    ...(input.publications?.size ? { siloPublications: input.publications } : {}),
     ...(artigo.blueprint ? { blueprint: artigo.blueprint } : {}),
     ...(input.brandVoice?.kind === "available" ? { brandVoice: radarBrandVoiceRef(input.brandVoice.voice) } : {}),
     ...(siloInline ? { siloInline: true } : {}),
@@ -118,6 +120,7 @@ export function radarPortableWritingExport(input: {
       articles: artigos,
       siteUrl: enderecoDoSite(input.articles, umSilo),
       sharedVisualAvoid: compartilhado.shared,
+      ...(input.publications?.size ? { memberPublications: input.publications } : {}),
       ...(porLinha ? { siloPerRow: true } : {}),
       ...(input.brandVoice ? { brandVoice: input.brandVoice } : {}),
       ...(autoriaLida ? { authorsKnown: true } : {}),
@@ -154,6 +157,7 @@ export function radarPortableWritingExport(input: {
       articles: artigos,
       siteUrl: enderecoDoSite(doArquivo, silo),
       sharedVisualAvoid: compartilhado.shared,
+      ...(input.publications?.size ? { memberPublications: input.publications } : {}),
       ...(input.brandVoice ? { brandVoice: input.brandVoice } : {}),
       ...(autoriaLida ? { authorsKnown: true } : {}),
     });

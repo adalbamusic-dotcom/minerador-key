@@ -20,6 +20,7 @@ import {
   RADAR_WRITING_SUBJECT_H1_NO_SIGNAL,
   RADAR_WRITING_SUBJECT_WORKING_TITLE,
   buildRadarWritingExportArticle,
+  radarWritingStripHeadingTemplate,
   type RadarWritingArticleContext,
   type RadarWritingExportRow,
 } from "../lib/radar/portable-writing-export.ts";
@@ -157,14 +158,32 @@ function dentroDosLimites(row: RadarWritingExportRow) {
  *     orientação".
  * YouTube (linha só de identidade) ficou idêntico.
  */
+/*
+ * 2026-10-08 · renovado (P0-B e P1 da rodada dos 8 CSVs do Silo "Leads sem
+ * Tráfego Pago"). Prova: as cópias de HEAD de portable-writing-export,
+ * editorial-article-model e portable-writing-batch (carregador de
+ * redirecionamento, no scratchpad) devolvem exatamente o snapshot anterior; a
+ * diferença conferida linha a linha (silo 26, saúde 30, Google 22, saúde 26
+ * linhas) é só a pretendida:
+ *   - estrutura: o título de cada seção é a pergunta do leitor, sem o molde
+ *     ("## Como montar a rotina de skincare facial?", "## Qual a ordem dos
+ *     produtos?", "## Skincare facial para pele oleosa", "## O que causa acne?"),
+ *     sem a linha "Responde:" repetida, com a linha "Títulos de trabalho: …";
+ *   - fechamento e chamada do modelo sem o "no dia a dia";
+ *   - promessa_e_leitor: "Próximo passo do leitor" (próximo artigo OU SiloPage,
+ *     com "peça ao Arquiteto") → "Continuação (não é uma segunda chamada)", com
+ *     o L aprovado ou "cite sem link";
+ *   - plano visual e links: a seção nomeada pelo mesmo título da estrutura.
+ * Amazon e YouTube ficaram idênticos.
+ */
 const SNAPSHOT = {
-  silo: { sha: "8ad8178649a6e1a02bc12394e7940bc83886a198383c1e6977d767899344cd0a", len: 19342 },
-  saude: { sha: "51f2c45a4176fb6a51663496cdef247188d1751eaa456938b5966c22e6cd34a4", len: 24180 },
+  silo: { sha: "5228f469e71f99f0be8304b638aef550051d96e97b1a7c1271b53790c7a6d21d", len: 19169 },
+  saude: { sha: "d4ce9a3581dda3f6dbdd9a22fbc4adf5ccb73170de905104854e89de0caf51ab", len: 24043 },
   artigos: {
-    google: "b07c173f2a36b9940188c6922ffde482f7b2988754465b991327bda415ed8526",
+    google: "2152f3f83c52692475cc5b9dda0be249335a1719380c0376d6ad4f0427f55be5",
     amazon: "a0be57cdf211dd0dd86a47f10eda688c415f1ad9cfca5534ad64cc4faa54b84a",
     youtube: "0b0118248360fabc79e06be63916b91bd3f6aadd0c6b99fb06d3c4baabd5137a",
-    saude: "17f096dbe4b2089902be4361587e6d11203c616c3396eb6f59110fbeb42fabeb",
+    saude: "b95f296dabdad721e1790c376df74b3c8dbe70dff4b063d9a3d49ba862e5fe51",
   },
 };
 
@@ -220,9 +239,10 @@ test("F4.3 · promessa_e_leitor: tronco e virada ANTES da abertura; o lugar é o
   assert.ok(tronco > 0 && abertura === tronco + 2, "tronco e virada, nessa ordem, logo antes da abertura");
   assert.equal(promessa[tronco], "Tronco (Assunto): Consulta dermatológica online — A marca atende por teleconsulta.");
   assert.equal(promessa[tronco + 1],
-    "Virada: como ponto a cobrir em \"Como montar a rotina de skincare facial no dia a dia?\" (lugar deixado pelo Radar sem sinal na SERP; quem redige pode mudar), levar o leitor de skincare facial a Consulta dermatológica online; destino: https://careglow.com.br/consulta-online.");
+    /* 2026-10-08 · P0-B · a seção é nomeada pelo título com que sai na estrutura (a pergunta do leitor, sem o molde). */
+    "Virada: como ponto a cobrir em \"Como montar a rotina de skincare facial?\" (lugar deixado pelo Radar sem sinal na SERP; quem redige pode mudar), levar o leitor de skincare facial a Consulta dermatológica online; destino: https://careglow.com.br/consulta-online.");
   const estrutura = linhasDe(linha(entrada).estrutura);
-  assert.ok(estrutura.includes("## Como montar a rotina de skincare facial no dia a dia?"), "o anfitrião nomeado é o da estrutura");
+  assert.ok(estrutura.includes("## Como montar a rotina de skincare facial?"), "o anfitrião nomeado é o da estrutura");
 
   const destino = promessa.findIndex(item => item.startsWith("Destino da chamada: "));
   const chamada = promessa.findIndex(item => item.startsWith("Chamada final: "));
@@ -250,7 +270,7 @@ test("F4.3 · promessa_e_leitor: com bloco observado que já trata o Assunto, a 
   const promessa = linhasDe(linha(entrada).promessa_e_leitor);
   const virada = promessa.find(item => item.startsWith("Virada: ")) || "";
   assert.equal(virada,
-    `Virada: na seção "${turn.turnSection.heading}" (a amostra já trata o Assunto em ${contagem}), levar o leitor de skincare facial a Rotina de skincare facial.`);
+    `Virada: na seção "${radarWritingStripHeadingTemplate(turn.turnSection.heading)}" (a amostra já trata o Assunto em ${contagem}), levar o leitor de skincare facial a Rotina de skincare facial.`);
   assert.equal(virada.includes("sem sinal"), false);
   assert.equal(promessa.some(item => item.startsWith("Destino da chamada")), false, "sem destino, sem linha de destino");
 });
@@ -258,7 +278,7 @@ test("F4.3 · promessa_e_leitor: com bloco observado que já trata o Assunto, a 
 test("F4.3 · promessa_e_leitor: com posição sugerida pelo Radar, \"depois de <seção>\"; sem destino, sem \"destino:\"", () => {
   const promessa = linhasDe(linha(entradaCom(ORDEM)).promessa_e_leitor);
   assert.ok(promessa.includes("Tronco (Assunto): Ordem dos ácidos no rosto."));
-  assert.ok(promessa.includes("Virada: depois de \"Afinal, qual a ordem dos produtos?\", levar o leitor de skincare facial a Ordem dos ácidos no rosto."));
+  assert.ok(promessa.includes("Virada: depois de \"Qual a ordem dos produtos?\", levar o leitor de skincare facial a Ordem dos ácidos no rosto."));
   assert.equal(promessa.some(item => item.includes("destino:")), false);
 });
 
@@ -303,7 +323,8 @@ test("F4.3 · estrutura: a seção da virada vem do modelo do Radar, marcada pel
     assert.equal(estrutura.some(item => /^(Tronco|Virada:|Assunto)/.test(item)), false, "o export não escreve linha própria na estrutura");
 
     const editorial = radarPortableEditorialOf({ profile: "GOOGLE", principalKeyword: "skincare facial", articleModel: entrada.articleModel });
-    const doModelo = new Set(radarPortableFlatSections(editorial.sections).map(secao => secao.heading));
+    /* 2026-10-08 · P0-B · o título sai do modelo: o cabeçalho (sem o molde) ou a pergunta do leitor da seção. */
+    const doModelo = new Set(radarPortableFlatSections(editorial.sections).flatMap(secao => [secao.heading, radarWritingStripHeadingTemplate(secao.heading), secao.readerQuestion || ""]));
     for (const cabecalho of estrutura.filter(item => /^#{2,3} /.test(item)).map(item => item.replace(/^#+ /, ""))) {
       assert.ok(doModelo.has(cabecalho), `"${cabecalho}" não veio do modelo do Radar`);
     }

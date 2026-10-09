@@ -1,5 +1,54 @@
 # Backlog — Radar
 
+## Rodada dos 8 CSVs "Para escrever" (Silo "Leads sem Tráfego Pago") — consolidação e correção — 2026-10-08
+
+Validado manualmente: não. O detalhe, os testes e as limitações estão em `estado-atual.md`, na seção de mesma data.
+
+- [x] P0-A: o artigo-modelo vale pela investigação congelada.
+  - [x] Correção no Redator e no MCP: a planta antiga só vale com o congelamento do documento ainda vigente.
+  - [x] Correção no painel: segue a regra do export e confere o ArticleDNA informado pela página.
+  - [x] Re-congelar só o apoio mantém o artigo-modelo, e a tela e o catálogo passaram a dizer isso.
+- [x] P0-B, CSV sem artigo-modelo:
+  - [x] obrigatoriedade por termo de conteúdo (o tópico declarado pelo humano continua exigindo);
+  - [x] o cabeçalho de concorrente que não é seção sai (sensível à unidade, ao ano da principal e ao perfil Amazon);
+  - [x] títulos de trabalho;
+  - [x] H1 e H2 picotados viram instrução;
+  - [x] "Não cobrir" pelo mesmo item, e a pergunta excluída sai sozinha;
+  - [x] a "Virada" do Redator nomeia a seção como o CSV.
+- [x] P1, ruído de pesquisa: citações, perguntas, temas, buscas relacionadas, FAQ, superstição, promoção, órgão
+  oficial e outra profissão que trata do assunto.
+- [x] P1, fechamento, CTA e links: E1 inteiro, um CTA só e continuação, links distribuídos, irmão publicado (também
+  na planta) e link repetido da planta sai.
+- [x] P1, promoções: a estrutura publicada vira a referência, sem bloquear, e a ressalva de intenção fala do lado
+  observado.
+- [x] P1, plano visual do Instagram: cena proibida (também no texto da planta e em "antes e após", sem pegar cena de
+  marketing), âncora pelo título e descarte pelo título.
+- [x] Catálogo do MCP atualizado (`npm run test:agent` 65/65).
+- [ ] **Dono:** depois do deploy, exportar de novo os 8 CSVs e conferir títulos sem molde, "Obrigatória" só em termo
+  de conteúdo, links do Pilar espalhados, irmãos "(publicado)" também no CSV do Instagram, uma chamada só,
+  promoções sem bloqueio, E1 inteiro e o plano visual pelo título.
+- [ ] **Dono, Arquiteto:** rever as composições de captação (três intenções), campanhas (principal ampla demais) e
+  promoções (SERP de consumidor para página da clínica).
+- [ ] **Dono, Especialista:** atualizar o E1 do Pilar (uma frase só) e o do Instagram (contribuição antiga).
+- [ ] **Dono, com autorização (IA paga):** organizar o artigo-modelo dos artigos que nunca tiveram um.
+- [ ] Ainda em aberto:
+  - [ ] público da Marca no contexto do ruído, para julgar "outra profissão" nos artigos sem profissão no núcleo;
+  - [ ] Sebrae e entidades .com.br que ranqueiam;
+  - [ ] nome de produto do concorrente em "1 site só" (F12);
+  - [ ] a mesma unidade no modelo editorial (hoje só o CSV a conhece).
+
+## P0-A · Artigo-modelo pela investigação congelada — 2026-10-08
+
+- [x] Export (CSV "Para escrever", completo, vídeo e `get_article_for_writing`): hash exato ou a concluída do mesmo congelamento e ArticleDNA. Detalhe em `estado-atual.md`.
+- [x] `ifMissing` reaproveita a concluída da mesma investigação sem chamada paga; re-congelada ou ArticleDNA novo, organiza.
+- [x] A versão nova grava `payload.investigationRef`; a edição copia a da versão editada; a antiga vale pelo relógio.
+- [x] Redator e MCP (fundamentos, manifesto, fatia `radar.blueprint/<id>`, semeadura) pela mesma regra.
+- [x] Painel e Relatório reconhecem o congelamento vigente (a página passa o `finalizedBundle`).
+- [x] Catálogo do MCP atualizado.
+- [ ] **Dono (homologação):** depois do deploy, exportar de novo os 7 CSVs sem artigo-modelo e conferir que a planta concluída volta (sem nova chamada de IA). Se algum continuar sem, a planta antiga foi organizada antes do congelamento vigente ou de outra versão do ArticleDNA: aí organizar de novo é legítimo (1 chamada de IA paga, com autorização).
+- [ ] Aviso operacional "montado sobre o dossiê anterior à atualização" no painel: a tela não conhece o hash do dossiê ao vivo; exigiria a rota do painel montar o dossiê (leitura pesada) ou a página repassá-lo. Não feito.
+- [ ] O painel não confere o ArticleDNA (a tela não tem a versão dele); export e Redator conferem.
+
 ## Revisão do Papel no Silo (corretor) — 2026-10-08
 
 - [x] O Silo do item é o que o handoff resolveu (`row.siloId`), antes do da hidratação. A reconciliação de ArticleDNA territorial troca `hydration.silo.id` pelo `lista_id` do Minerador. Vale para planilha, perfil legado, página de análise, contexto de pesquisa e servidor (CSV completo e MCP). Detalhe em `estado-atual.md`.

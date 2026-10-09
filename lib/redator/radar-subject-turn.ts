@@ -1,5 +1,5 @@
 import { radarSubjectCtaDirection } from "../radar/declared-subject.ts";
-import type { RadarEditorialSubjectTurn } from "../radar/editorial-article-model.ts";
+import { radarEditorialHeadingWithoutTemplate, type RadarEditorialSubjectTurn } from "../radar/editorial-article-model.ts";
 
 /**
  * ===== A VIRADA PARA O ASSUNTO, ENTREGUE AO REDATOR — SDD do Assunto, F4.1 =====
@@ -94,6 +94,13 @@ export function radarWriterSubjectTurnLines(input: {
   subject: unknown;
   turn?: RadarEditorialSubjectTurn | null;
   principal: string | null | undefined;
+  /**
+   * 2026-10-08 (correção) · Aditivo: o título com que cada seção do modelo sai
+   * no CSV "Para escrever" (a pergunta do leitor utilizável ou o cabeçalho sem
+   * molde — `radarWritingSectionTitleResolver`). O envio o passa; sem ele (ou
+   * quando ele não conhece a seção), o cabeçalho sem molde, como antes.
+   */
+  sectionTitle?: ((cabecalho: string) => string | null) | null;
 }): string[] {
   const assunto = radarWriterSubjectOf(input.subject);
   if (!assunto) return [];
@@ -104,14 +111,22 @@ export function radarWriterSubjectTurnLines(input: {
   const principal = texto(input.principal);
 
   const posicao = turn?.suggestedPosition ?? null;
-  const secao = turn?.turnSection ?? null;
+  /*
+   * 2026-10-08 · P0-B (rodada dos 8 CSVs) · a seção nomeada sem o molde do
+   * modelo ("Como X no dia a dia?", "O que considerar sobre X?", "Afinal, X?"),
+   * pela mesma régua do CSV "Para escrever" — a linha continua igual à dele.
+   */
+  const semMolde = (cabecalho: string | null) => (cabecalho ? input.sectionTitle?.(cabecalho) || radarEditorialHeadingWithoutTemplate(cabecalho) || cabecalho : cabecalho);
+  const secao = turn?.turnSection
+    ? { ...turn.turnSection, heading: semMolde(turn.turnSection.heading) as string, hostHeading: semMolde(turn.turnSection.hostHeading) }
+    : null;
   const contagem = secao ? `${secao.pages} de ${secao.sampleSize} página(s)` : "";
   const onde = secao?.source === "OBSERVED_GROUP"
     ? secao.placement === "COVERAGE_POINT" && secao.hostHeading
       ? `em ${entreAspas(secao.hostHeading)}, como ponto a cobrir (a amostra trata o Assunto em ${contagem})`
       : `na seção ${entreAspas(secao.heading)} (a amostra já trata o Assunto em ${contagem})`
     : posicao
-      ? `depois de ${entreAspas(posicao.afterHeading)}`
+      ? `depois de ${entreAspas(semMolde(posicao.afterHeading) as string)}`
       : secao?.placement === "COVERAGE_POINT" && secao.hostHeading
         ? `como ponto a cobrir em ${entreAspas(secao.hostHeading)} (lugar deixado pelo Radar sem sinal na SERP; quem redige pode mudar)`
         : "onde quem redige decidir (sem sinal na SERP)";
