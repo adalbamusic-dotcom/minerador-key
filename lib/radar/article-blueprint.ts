@@ -32,6 +32,7 @@ import {
   type RadarWritingPublication,
 } from "./portable-writing-export.ts";
 import { radarPendingClaims, radarSentenceNeedsSource, type RadarPendingClaim } from "./pending-claims.ts";
+import { RADAR_SILO_ROLE_ASKS, radarSiloRoleIsPillar, radarSiloRoleIsSupport, radarSiloRoleText } from "./silo-role.ts";
 
 /**
  * ===== O ARTIGO-MODELO (SDD diretriz editorial, Adendo A — aprovado em 2026-10-02) =====
@@ -733,10 +734,30 @@ export function buildRadarArticleBlueprintBrief(input: {
   const lentesDaPrincipal = p.lentes?.keywords.find(item => item.role === "principal") || p.lentes?.keywords[0];
   if (lentesDaPrincipal?.divergence.statement) add("L", "lentes da SERP", lentesDaPrincipal.divergence.statement);
 
+  /*
+   * 2026-10-08 · O PAPEL NO SILO DO BRIEF É O DO ARQUITETO.
+   *
+   * A mesma regra do CSV "Para escrever": o papel do artigo no plano por Silo
+   * (SiloDNA vigente) e, sem ele, o papel que o export resolveu pela régua
+   * única. O Pilar recebia "support" (foto do envio) ou "Suporte" (formação), e
+   * a IA montava planta de Suporte para ele.
+   */
+  const membroDoArtigo = (input.silo?.members || []).find(item => item.articleId === input.articleId) || null;
+  const papelDoPlano = radarSiloRoleText(membroDoArtigo?.role);
+  const papelDoArtigo = papelDoPlano && (radarSiloRoleIsPillar(papelDoPlano) || radarSiloRoleIsSupport(papelDoPlano) || papelDoPlano === "Reforço narrativo")
+    ? papelDoPlano
+    : radarSiloRoleText(t(p.dna.siloRole)) || null;
+  /* O próprio artigo nunca é destino de link dele mesmo — nem pelo id, nem pelo slug. */
+  const slugProprio = radarWritingCompareKey(t(input.publication?.slug) || t(entrada.article.slug));
+  const ehOProprio = (membro: { articleId: string; slug: string | null }) =>
+    membro.articleId === input.articleId || Boolean(slugProprio && membro.slug && radarWritingCompareKey(membro.slug) === slugProprio);
+
   /* Os destinos possíveis dos links: o Silo inteiro, a SiloPage e o que o grafo aprovado pede. */
   const linkCandidates: RadarArticleBlueprintLinkCandidate[] = [];
   const doGrafo = new Set(p.linksDoPlano.map(link => radarWritingCompareKey(link.targetTitle)));
-  for (const membro of (input.silo?.members || []).filter(item => item.articleId !== input.articleId)) {
+  /* 2026-10-08 · o destino do grafo aprovado, por identidade (nó `article:<articleId>`), antes do texto. */
+  const noDoGrafo = new Set(p.linksDoPlano.map(link => link.targetNodeId).filter((no): no is string => Boolean(no)));
+  for (const membro of (input.silo?.members || []).filter(item => !ehOProprio(item))) {
     const rotulo = semMolduraDoTema(t(membro.principalKeyword) || t(membro.title) || t(membro.slug));
     if (!rotulo) continue;
     linkCandidates.push({
@@ -745,7 +766,7 @@ export function buildRadarArticleBlueprintBrief(input: {
       role: membro.role,
       destination: membro.slug ? `/${membro.slug}` : null,
       status: membro.slug ? "PLANNED" : "UNRESOLVED",
-      fromGraph: doGrafo.has(radarWritingCompareKey(rotulo)) || doGrafo.has(radarWritingCompareKey(membro.title)),
+      fromGraph: noDoGrafo.has(`article:${membro.articleId}`) || doGrafo.has(radarWritingCompareKey(rotulo)) || doGrafo.has(radarWritingCompareKey(membro.title)),
     });
   }
   const pagina = input.silo?.siloPage;
@@ -824,7 +845,7 @@ export function buildRadarArticleBlueprintBrief(input: {
       subject: p.assunto?.phrase ?? null,
       intent: t(p.dna.intent) || null,
       funnel: t(p.dna.funnel) || null,
-      siloRole: t(p.dna.siloRole) || null,
+      siloRole: papelDoArtigo,
       audience: t(entrada.article.audience) || null,
       promise: t(entrada.article.promise) || null,
       slug: t(publicacao?.slug) || t(entrada.article.slug) || null,
@@ -934,7 +955,8 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
     ...a.complementary.map(item => `Keyword complementar (${item.role}): ${item.keyword}${item.volume !== null ? ` · ${item.volume}/mês` : ""}`),
     ...(a.subject ? [`Assunto (tronco): ${a.subject}`] : []),
     `Intenção declarada: ${a.intent || "não declarada"}${a.funnel ? ` · funil ${a.funnel}` : ""}`,
-    `Papel no Silo: ${a.siloRole || "não declarado"}`,
+    /* 2026-10-08 · o que o papel pede vai junto: o Pilar distribui para os Suportes; o Suporte devolve ao Pilar. */
+    `Papel no Silo: ${a.siloRole || "não declarado"}${a.siloRole && RADAR_SILO_ROLE_ASKS[radarSiloRoleText(a.siloRole) || ""] ? ` — ${RADAR_SILO_ROLE_ASKS[radarSiloRoleText(a.siloRole) || ""]}` : ""}`,
     ...(a.audience ? [`Público: ${a.audience}`] : []),
     ...(a.promise ? [`Promessa declarada: ${a.promise}`] : []),
     ...(a.slug ? [`Slug: ${a.slug}`] : []),
@@ -1765,9 +1787,11 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
   if (ai.title.seoTitle.length > 65) notes.push(`SEO title com ${ai.title.seoTitle.length} caracteres (alvo ~60).`);
   if (ai.title.metaDescription.length > 165) notes.push(`Meta description com ${ai.title.metaDescription.length} caracteres (alvo ~155).`);
 
-  const pilar = brief.linkCandidates.find(item => /pilar/i.test(item.role));
+  /* 2026-10-08 (revisão) · só o Pilar DECIDIDO cobra o link: "Pilar (formação)" de Silo sem Pilar é sugestão, não destino obrigatório. */
+  const pilar = brief.linkCandidates.find(item => radarSiloRoleText(item.role) === "Pilar");
   const linksUsados = new Set(secoes.flatMap(secao => secao.internalLinks.map(link => link.candidate)));
-  if (pilar && /suporte|support/i.test(brief.article.siloRole || "") && !linksUsados.has(pilar.id)) notes.push(`Falta o link para o Pilar (${pilar.label}).`);
+  /* 2026-10-08 · só o Suporte deve link ao Pilar; o próprio Pilar nunca recebe esta nota. */
+  if (pilar && radarSiloRoleIsSupport(brief.article.siloRole) && !linksUsados.has(pilar.id)) notes.push(`Falta o link para o Pilar (${pilar.label}).`);
 
   const closingSpecialist = ai.closing.specialist && especialistas.has(ai.closing.specialist) ? ai.closing.specialist : null;
   if (brief.specialist.some(item => item.kind === "FECHAMENTO" || item.kind === "CTA") && !closingSpecialist) notes.push("O parecer de fechamento do especialista não foi usado na virada final.");

@@ -203,6 +203,12 @@ export const RADAR_FOUNDATION_USAGE_MAP: RadarFoundationEntry[] = [
     note: "Separa o próprio domínio dos concorrentes.",
   },
   {
+    field: "siloRole",
+    usage: ["REPORT_CONTEXT", "CONTEXT_ONLY"],
+    consumers: ["r3-workbench (Função)", "operational-view (Conteúdo)", "editorial-blueprint", "editorial-article-model", "editorial-profile-model", "foundation-profiles", "portable export (article_role)", "article-blueprint (Papel no Silo)"],
+    note: "2026-10-08 · O Papel no Silo pela régua única: SiloDNA vigente, depois a foto do envio, e só então a sugestão da formação (marcada). O Radar lê; nunca grava papel.",
+  },
+  {
     field: "silo.articleRole",
     usage: ["LINK_RESEARCH_INPUT", "CONTEXT_ONLY"],
     consumers: ["link-and-source-research", "foundation-profiles"],

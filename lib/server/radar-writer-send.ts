@@ -96,6 +96,16 @@ type ItemDeWorkflow = {
   updated_at: string;
 };
 
+/* 2026-10-08 · O Silo do item do Radar (resolvido pelo handoff), lido do payload sem reinterpretá-lo. */
+function siloDoItemDoRadar(item: ItemDeWorkflow): string | null {
+  const payload = item.payload && typeof item.payload === "object" ? item.payload as Record<string, unknown> : null;
+  const hidratado = payload?.hydration && typeof payload.hydration === "object"
+    ? (payload.hydration as { silo?: { id?: unknown } | null }).silo?.id
+    : null;
+  const valor = typeof payload?.siloId === "string" && payload.siloId.trim() ? payload.siloId : hidratado;
+  return typeof valor === "string" && valor.trim() ? valor.trim() : null;
+}
+
 /**
  * ============ AS FALHAS PARCIAIS PRECISAM SER TESTÁVEIS ============
  *
@@ -106,7 +116,12 @@ export type RadarWriterHandoffPorts = {
   loadRadarState: typeof radarStartPorts.loadRadarState;
   loadArticleFoundation: (input: { brandId: string; articleId: string }) => Promise<RadarEvidenceBinding | null>;
   /** O ArticleDNA e o Silo inteiros: a identidade do documento sai deles. */
-  loadArticleIdentity: (input: { brandId: string; articleId: string }) => Promise<{ article: VersionEnvelope<ArticleDNA>; silo: VersionEnvelope<SiloDNA> | null } | null>;
+  /*
+   * 2026-10-08 · `siloId` é o do RadarItem, resolvido pelo handoff do Arquiteto.
+   * O ArticleDNA territorial nasce sem `siloId` (o Silo mora no SiloDNA), e sem
+   * esta reserva o documento saía com a referência legada `silo:<articleId>`.
+   */
+  loadArticleIdentity: (input: { brandId: string; articleId: string; siloId?: string | null }) => Promise<{ article: VersionEnvelope<ArticleDNA>; silo: VersionEnvelope<SiloDNA> | null } | null>;
   findWorkflowItem: (input: { brandId: string; articleId: string; stage: "radar" }) => Promise<ItemDeWorkflow | null>;
   findDocument: (input: { brandId: string; articleId: string }) => Promise<ContentDocument | null>;
   createDocument: (input: { brandId: string; articleId: string; document: ContentDocument; articleDnaVersionId: string; slug: string; actorId: string }) => Promise<void>;
@@ -138,12 +153,12 @@ export const radarWriterHandoffPorts: RadarWriterHandoffPorts = {
     };
   },
 
-  async loadArticleIdentity({ brandId, articleId }) {
+  async loadArticleIdentity({ brandId, articleId, siloId: siloDoItem }) {
     const artefatos = await new ArtifactRepository().list(brandId);
     const article = artefatos.articles.find(version =>
       version.payload.articleId === articleId && version.payload.brandId === brandId);
     if (!article) return null;
-    const siloId = article.payload.siloId;
+    const siloId = article.payload.siloId || siloDoItem || null;
     const silo = siloId
       ? artefatos.silos.filter(version => version.payload.siloId === siloId)
         .sort((esquerda, direita) => direita.versionNumber - esquerda.versionNumber)[0] || null
@@ -182,7 +197,8 @@ export const radarWriterHandoffPorts: RadarWriterHandoffPorts = {
     const article = artefatos.articles.find(version =>
       version.payload.articleId === articleId && version.payload.brandId === brandId);
     if (!article) return RADAR_NO_AUTHORITIES;
-    return loadRadarCanonicalAuthorities({ brandId, articleId, article, analysis });
+    /* 2026-10-08 · os SiloDNA já lidos: o Papel no Silo do contexto sai do vigente. */
+    return loadRadarCanonicalAuthorities({ brandId, articleId, article, analysis, siloVersions: artefatos.silos });
   },
 
   async appendDecision({ brandId, workflowItemId, articleId, fromState, actorId }) {
@@ -296,7 +312,7 @@ export async function sendRadarToWriter(entrada: {
    */
   const prontidao = dossie.readiness;
 
-  const identidade = await portas.loadArticleIdentity(entrada);
+  const identidade = await portas.loadArticleIdentity({ brandId: entrada.brandId, articleId: entrada.articleId, siloId: siloDoItemDoRadar(radarItem) });
   if (!identidade) {
     throw new RadarWriterSendError("article_dna_not_found", "O ArticleDNA canônico deste artigo não foi encontrado.", 404);
   }

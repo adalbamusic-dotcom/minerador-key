@@ -35,6 +35,8 @@ import { radarHandoffReadiness } from "./handoff-readiness.ts";
 import { radarSearchModeLabel, type RadarPrimarySearchMode } from "./search-mode.ts";
 
 import type { RadarArticleResearchContext, RadarResearchKeyword } from "./article-research-context.ts";
+import { radarResearchContextSiloRole } from "./article-research-context.ts";
+import { radarSiloRoleLabelOrNull } from "./silo-role.ts";
 import type { RadarDeepResearchView } from "./deep-research-view.ts";
 import type { RadarPhase1Action } from "./serp-phase1.ts";
 
@@ -289,7 +291,8 @@ export function buildRadarArticleDnaSummary(context: RadarArticleResearchContext
     version: context.article.articleDnaVersionId,
     principal: principal?.identity.text || null,
     silo: context.silo?.siloName || context.silo?.siloId || null,
-    role: context.article.hierarchy,
+    /* 2026-10-08 · o Papel no Silo decidido no Arquiteto (SiloDNA), não a sugestão da formação. */
+    role: radarSiloRoleLabelOrNull(radarResearchContextSiloRole(context)),
     /*
      * "unknown" É AUSÊNCIA COM CARA DE VALOR.
      *

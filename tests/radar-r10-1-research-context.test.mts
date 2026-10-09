@@ -338,7 +338,8 @@ test("CONTRATO · os blocos do Arquiteto deixaram de ter o painel de diagnóstic
 
   // E a camada de contexto alimenta o motor, não só a tela.
   const page = readFileSync(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
-  assert.ok(page.includes("buildRadarArticleResearchContext({ item: row, article: article || null })"));
+  /* 2026-10-08 · com o SiloDNA vigente da linha: o Papel no Silo sai dele (radar-papel-no-silo). */
+  assert.ok(page.includes("buildRadarArticleResearchContext({ item: row, article: article || null, siloDna: siloDaLinha })"));
   assert.ok(page.includes("researchContext: data.researchContext"), "o relatório recebe o contexto");
 
   const relatorio = readFileSync(new URL("../lib/radar/competitive-report.ts", import.meta.url), "utf8");

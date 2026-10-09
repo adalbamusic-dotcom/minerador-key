@@ -54,6 +54,7 @@ import {
   type RadarBrandVoiceState,
 } from "./brand-voice.ts";
 import { radarClaimCommonStems, radarPendingClaims, radarSentenceNeedsSource, type RadarSentenceSourceVerdict } from "./pending-claims.ts";
+import { RADAR_SILO_ROLE_ASKS, radarSiloRoleText } from "./silo-role.ts";
 
 /**
  * ===== O EXPORT "PARA ESCREVER" — o CSV que uma pessoa ou uma IA usa para escrever =====
@@ -469,22 +470,15 @@ export const radarWritingContentWords = (valor: string | null | undefined): Set<
 
 /* ============================== os rótulos ============================== */
 
-const PAPEL: Record<string, string> = {
-  pillar: "Pilar", pilar: "Pilar",
-  support: "Suporte", suporte: "Suporte",
-  reforco_narrativo: "Reforço narrativo", "reforco narrativo": "Reforço narrativo",
-};
+/* 2026-10-08 · o rótulo e o que o papel pede vêm da régua única do Papel no Silo (`silo-role.ts`). */
+const papelLegivel = (valor: string | null | undefined): string | null => radarSiloRoleText(valor);
 
-const papelLegivel = (valor: string | null | undefined): string | null => {
-  const chave = radarWritingCompareKey(valor);
-  if (!chave) return null;
-  return PAPEL[chave] || PAPEL[chave.replace(/ /g, "_")] || texto(valor);
-};
+const O_QUE_O_PAPEL_PEDE: Readonly<Record<string, string>> = RADAR_SILO_ROLE_ASKS;
 
-const O_QUE_O_PAPEL_PEDE: Record<string, string> = {
-  Pilar: "cobre o tema com amplitude e aprofunda por links para os suportes",
-  Suporte: "aprofunda um recorte do tema e devolve o leitor ao Pilar",
-  "Reforço narrativo": "sustenta a narrativa do Silo sem disputar a keyword do Pilar",
+/* Papel que o plano por Silo dá ao membro: "sem silo" e "fora da composição" não são papel. */
+const papelDoMembro = (membro: { role: string } | null): string | null => {
+  if (!membro || membro.role === "sem silo" || membro.role === "fora da composição do SiloDNA") return null;
+  return papelLegivel(membro.role);
 };
 
 const INTENCAO: Record<string, string> = {
@@ -790,11 +784,22 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
     return Boolean(citado && foraDoEscopo.has(citado));
   };
 
+  /*
+   * 2026-10-08 · O DESTINO PELO NÓ DO GRAFO, ANTES DAS PALAVRAS.
+   *
+   * O grafo aprovado diz o nó de destino (`article:<articleId>`), e o Silo tem
+   * os membros com `articleId`: casar os dois é identidade. Casar palavras do
+   * título fica como reserva para o plano sem nó (o do Blueprint).
+   */
+  const membroPorNo = (no: string | null | undefined): Membro | null =>
+    no ? irmaos.find(membro => `article:${membro.articleId}` === no) || null : null;
+
   /* 1 · o plano de links que o Radar aplicou sobre o grafo aprovado. */
   for (const link of p.linksDoPlano) {
     const codigo = link.relationship.split(",")[0]?.trim() || "";
     const secao = secaoNomeada(link.placement, p.secoes, p.serp);
-    const membro = codigo === "SUPPORT_TO_PILLAR" ? pilar : membroDoDestino([link.targetTitle, link.suggestedAnchor], irmaos, genericas);
+    const membro = membroPorNo(link.targetNodeId)
+      || (codigo === "SUPPORT_TO_PILLAR" ? pilar : membroDoDestino([link.targetTitle, link.suggestedAnchor], irmaos, genericas));
     registrar({
       ancora: link.suggestedAnchor,
       destino: codigo === "ARTICLE_TO_SILO_PAGE" ? destinoDaPagina : destinoDoMembro(membro, link.targetTitle, link.targetSlug),
@@ -2574,7 +2579,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   const plantaAtual = contextoRecebido.blueprint ? radarArticleBlueprintWithCurrentNames(contextoRecebido.blueprint, keywordsDoArtigo(p)) : null;
   const contexto: RadarWritingArticleContext = plantaAtual && plantaAtual !== contextoRecebido.blueprint ? { ...contextoRecebido, blueprint: plantaAtual } : contextoRecebido;
   const membro = contexto.silo?.members.find(item => item.articleId === contexto.articleId) || null;
-  const papel = (membro && membro.role !== "sem silo" ? papelLegivel(membro.role) : null) || papelLegivel(p.dna.siloRole);
+  const papel = papelDoMembro(membro) || papelLegivel(p.dna.siloRole);
   const posicao = membro?.position ?? contexto.filePosition;
   const principal = texto(p.dna.principalKeyword) || null;
   const rotulo = principal || texto(input.article.slug) || "artigo sem keyword";

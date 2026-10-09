@@ -18,6 +18,8 @@
 
 import { radarConclusiveIntent, radarConclusiveIntents, radarDeclaredArticleIntent } from "./editorial-identity.ts";
 import type { RadarArticleResearchContext, RadarResearchKeyword } from "./article-research-context.ts";
+import { radarResearchContextSiloRole } from "./article-research-context.ts";
+import { radarSiloRoleLabelOrNull } from "./silo-role.ts";
 
 /**
  * AUSÊNCIA TEM TIPO.
@@ -154,7 +156,8 @@ export function buildRadarFoundationSections(context: RadarArticleResearchContex
         campo("Promessa", context.article.promise),
         /* "unknown" na tela do fundamento é PENDING: é isso que ele significa. */
         campo("Intenção do artigo", radarDeclaredArticleIntent(context.article), "PENDING"),
-        campo("Hierarquia", context.article.hierarchy),
+        /* 2026-10-08 · `ArticleDNA.hierarchy` é a sugestão da formação; o papel decidido está na seção Silo. */
+        campo("Hierarquia sugerida na formação", context.article.hierarchy),
         campo("Quantidade de keywords", context.keywords.length),
         campo("Tópicos editoriais", context.editorialTopics),
         campo("Estado do contexto", context.state),
@@ -169,7 +172,8 @@ export function buildRadarFoundationSections(context: RadarArticleResearchContex
         campo("SiloPage", silo?.siloPageSlug, "NOT_IN_THIS_VERSION"),
         campo("Canonical", silo?.siloPageCanonical, "NOT_IN_THIS_VERSION"),
         campo("Status de publicação", silo?.siloPagePublicationStatus, "NOT_IN_THIS_VERSION"),
-        campo("Papel do artigo no silo", silo?.articleRole),
+        /* 2026-10-08 · a régua única: SiloDNA vigente, foto do envio, formação (marcada). */
+        campo("Papel do artigo no silo", radarSiloRoleLabelOrNull(radarResearchContextSiloRole(context))),
       ],
     },
     {

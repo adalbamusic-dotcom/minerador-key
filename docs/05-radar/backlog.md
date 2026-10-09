@@ -1,5 +1,43 @@
 # Backlog — Radar
 
+## Revisão do Papel no Silo (corretor) — 2026-10-08
+
+- [x] O Silo do item é o que o handoff resolveu (`row.siloId`), antes do da hidratação. A reconciliação de ArticleDNA territorial troca `hydration.silo.id` pelo `lista_id` do Minerador. Vale para planilha, perfil legado, página de análise, contexto de pesquisa e servidor (CSV completo e MCP). Detalhe em `estado-atual.md`.
+- [x] Artigo fora da composição do SiloDNA vigente: "Fora da composição do SiloDNA vigente", sem cair na foto do envio. O contexto KGR deixou de usar a reserva do SiloDNA por fora da régua.
+- [x] Silo sem Pilar: plano por Silo, CSV "Para escrever" e artigo-modelo dizem "(formação)" ou "Papel não decidido no Silo". A nota "Falta o link para o Pilar" só vale para Pilar decidido.
+- [x] `targetNodeId` fora do `internal_links_resolved_json` do CSV completo (§13). A guarda do export-12 usa um id no formato real.
+- [x] O motivo "Formato editorial" do modo de análise usa a unidade (Artigo ou SiloPage), não o papel sugerido.
+- [x] Foto "support" sem SiloDNA vigente: a linha Função fica pendente, com "confirme no Arquiteto".
+- [x] Filtro Formato guardado com um papel (vista salva no navegador) é descartado.
+- [x] Catálogo do MCP: diz que o dossiê do Redator ficou fora da régua e que o papel decidido está no SiloDNA.
+- [ ] **Dono (homologação):** na marca 61d2e019, conferir:
+  - aba Resumo do detalhe de "leads qualificados": "Formato editorial: Artigo." no modo da investigação;
+  - planilha com a última vista: não abre vazia nem fica com "Formato: Todos" escondendo linhas;
+  - o resto da homologação da seção abaixo continua valendo.
+- [ ] **Dono (SQL de leitura, opcional):** conferir se há linha do Radar reconciliada com o Silo da hidratação diferente do Silo do item: `payload->>'siloId'` contra `payload->'hydration'->'silo'->>'id'` em `editorial_workflow_items` (stage radar).
+- [ ] Decidir: trocar `observed.identity.hierarchy` e `observed.internalLinkPlan.articleRole` pela régua no dossiê do Redator? Isso muda o hash de todo dossiê e desliga os artigos-modelo aprovados. Reorganizar é IA paga e exige autorização por artigo ou lote.
+- [ ] Versões de análise gravadas antes desta revisão guardam "Formato editorial: Suporte." no `modeRecommendation`. É só texto de motivo e não muda o modo; não regravar.
+
+## Papel no Silo pela decisão do Arquiteto — 2026-10-08
+
+- [x] Régua única do Papel no Silo (`lib/radar/silo-role.ts`): SiloDNA vigente → foto do envio → sugestão da formação (marcada "(formação)"); sem nenhuma, "Papel não decidido no Silo". Só leitura. Detalhe em `estado-atual.md`.
+- [x] Planilha (Artigo e busca), R3/Função, perfil, Workbench, faixa e Relatório, painel do especialista, perfil legado, página de análise, contexto KGR, Conteúdo, contexto editorial, fundamentos, blueprint editorial, modelos do artigo e do perfil, CSV completo, CSV "Para escrever", artigo-modelo e export por Silo usam a régua.
+- [x] Coluna Formato mostra a unidade, não o papel copiado na importação.
+- [x] O Pilar não recebe planta de Suporte, link para si mesmo (id ou slug) nem a nota "Falta o link para o Pilar".
+- [x] Links pelo nó do grafo aprovado no CSV "Para escrever" e no artigo-modelo (`targetNodeId` aditivo).
+- [x] MCP `get_article_for_writing` com o Silo do botão; envio ao Redator com o Silo do item quando o ArticleDNA não tem `siloId`.
+- [x] Card SERP do perfil lê a investigação (mesmo resumo da coluna Pesquisa).
+- [ ] **Dono (homologação):** no Radar da marca 61d2e019, conferir que planilha, perfil ("Silo / função") e Workbench mostram "leads qualificados · Pilar" e os outros 7 artigos como Suporte. Conferir também que o card SERP do perfil diz "Finalizado · Google · 26 de 38 analisada(s)".
+- [ ] **Dono (SQL de leitura, opcional):** ler `payload->'hydration'->'silo'->>'articleRole'` e `siloDnaVersionId` das 8 linhas de `editorial_workflow_items` (stage radar), e o `pillarArticleId` das versões do SiloDNA. A leitura mostra se os entregáveis já gerados (CSV completo, artigo-modelo, plano de links) saíram com "support".
+- [ ] Decidir: artigos-modelo e CSVs gerados antes com o papel errado precisam ser refeitos? Organizar de novo é IA paga e exige autorização por artigo ou lote.
+- [ ] Decidir: a coluna Formato mostra a unidade (como hoje), o formato observado na SERP, ou sai?
+- [ ] Decidir: o artigo-modelo pode propor link para irmão FORA do grafo aprovado? Hoje pode, e o candidato aparece sem a marca "pedido pelo grafo aprovado".
+- [ ] Decidir: quando o SiloDNA vigente diverge da foto do envio, só avisar (como hoje, na linha Função e no contexto editorial) ou bloquear o envio ao Redator até reenviar?
+- [ ] Decidir: mostrar a posição do Suporte na tela (Suporte 1..n pela `narrativeOrder`)? A régua já calcula.
+- [ ] Aviso de grafo de links mais novo depois do envio: `radarLinkContextIsStale` não tem consumidor, e a tela não carrega os grafos.
+- [ ] A comparação "Formato dominante" e o `expectedFormat` da coleta de apoio ainda leem `ArticleDNA.hierarchy`, e a spec diz que hierarquia não é formato. Trocar muda o modelo observado congelado e a entrada da coleta, então precisa de decisão sobre os pacotes já finalizados.
+- [ ] A reconciliação de versão nova do ArticleDNA ainda zera `hydration.silo`. A régua cobre com o SiloDNA vigente, e a foto só volta num novo envio.
+
 ## Revisão da Fase 1 automática e da lentidão (corretor) — 2026-10-08
 
 - [x] F1 · amostra vazia com todas as candidatas recusadas: as falhas são gravadas (sem carimbo), a análise para sem consolidar e a frase nomeia "Refazer Pesquisa Google" na área Pesquisa. Detalhe em `estado-atual.md`.

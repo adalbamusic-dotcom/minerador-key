@@ -25,6 +25,7 @@
 
 import type { ArticleDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
 import type { RadarItem } from "../editorial/operational-flow.ts";
+import { radarArticleSiloRole, type RadarArticleSiloRole } from "./silo-role.ts";
 
 /**
  * De quem é a ausência.
@@ -122,6 +123,11 @@ type Definicao = {
   transportado: boolean;
   /** A hidratação tinha o que resolver e não resolveu? Então a queda é dela. */
   quedaDeHidratacao?: () => boolean;
+  /**
+   * 2026-10-08 · Quando o campo tem autoridade própria (o Papel no Silo, que
+   * é do SiloDNA), ela responde antes da ordem hidratado → transporte → origem.
+   */
+  resolvido?: () => { value: string; source: RadarEditorialContextField["source"]; detail: string } | null;
   consequencia: string;
 };
 
@@ -131,6 +137,12 @@ export function buildRadarEditorialContext(input: {
   item: RadarItem | null;
   article: VersionEnvelope<ArticleDNA> | null;
   keyword: string | null | undefined;
+  /**
+   * 2026-10-08 · O Papel no Silo pela régua única, quando quem chama tem o
+   * SiloDNA vigente (a planilha). Sem ele, a mesma régua sobre a foto do
+   * envio e a sugestão da formação.
+   */
+  siloRole?: RadarArticleSiloRole | null;
 }): RadarEditorialContext {
   const resolution = "O contexto editorial pertence ao Arquiteto. Complete o ArticleDNA lá e reimporte esta linha; o Radar não edita identidade.";
 
@@ -153,6 +165,14 @@ export function buildRadarEditorialContext(input: {
   const strategy = item?.arquitetoStrategyContext || null;
   const silo = hydration?.silo || null;
   const legado = radarRowIsLegacy(item);
+  const papelNoSilo = input.siloRole || radarArticleSiloRole({
+    articleId: item?.articleId || dna?.articleId || "",
+    brandId: item?.brandId ?? null,
+    siloId: item?.siloId || silo?.id || null,
+    unitType: item?.unitType ?? null,
+    hydrationSilo: silo,
+    formationHint: texto(dna?.hierarchy) || texto(item?.hierarchy),
+  });
 
   const principalTexto = radarPrincipalHydrated(input.keyword) ? String(input.keyword).trim() : null;
   const principalHidratado = texto(hydration?.principalKeyword?.keyword);
@@ -244,6 +264,21 @@ export function buildRadarEditorialContext(input: {
       transporte: () => texto(item?.hierarchy),
       hidratado: () => texto(silo?.articleRole),
       transportado: true,
+      /*
+       * 2026-10-08 · QUEM DECIDE É O SILODNA. Os três valores acima não são
+       * equivalentes: `ArticleDNA.hierarchy` e `RadarItem.hierarchy` são a
+       * sugestão da formação; a decisão do Pilar é da fase Silos. A linha
+       * mostra a decisão e diz, quando divergem, que a formação é só sugestão.
+       */
+      resolvido: () => {
+        const papel = papelNoSilo;
+        if (papel.source === "NENHUMA") return null;
+        return {
+          value: papel.label,
+          source: papel.source === "HIDRATACAO" ? "HYDRATION" as const : "ARQUITETO" as const,
+          detail: papel.note || papel.label,
+        };
+      },
       consequencia: "Sem a função no silo, pilar e suporte são investigados como se fossem a mesma coisa.",
     },
     {
@@ -314,6 +349,10 @@ export function buildRadarEditorialContext(input: {
   ];
 
   const fields: RadarEditorialContextField[] = definicoes.map(definicao => {
+    const comAutoridade = definicao.resolvido?.() || null;
+    if (comAutoridade) {
+      return { key: definicao.key, label: definicao.label, value: comAutoridade.value, source: comAutoridade.source, classification: "AVAILABLE" as const, owner: null, detail: comAutoridade.detail };
+    }
     const naOrigem = definicao.arquiteto();
     const noTransporte = definicao.transporte();
     const naHidratacao = definicao.hidratado();

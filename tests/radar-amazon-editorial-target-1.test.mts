@@ -679,7 +679,8 @@ test("N e §29 · o ArticleDNA é o núcleo, e o intent não o redefine", () => 
     assert.equal(model.articleIdentity.articleDnaVersionId, "dna-v1");
     assert.equal(model.articleIdentity.principalKeyword, "óleo corporal nivea", `${tipo} mexeu na keyword principal`);
     assert.equal(model.articleIdentity.intentLabel, "Informacional", `${tipo} mexeu na intenção do Arquiteto`);
-    assert.equal(model.articleIdentity.siloRole, "SUPORTE");
+    /* 2026-10-08 · o papel sai pela régua única, em português: o "SUPORTE" da foto vira "Suporte", e o intent não o muda. */
+    assert.equal(model.articleIdentity.siloRole, "Suporte");
   }
 
   /*

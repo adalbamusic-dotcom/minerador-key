@@ -29,6 +29,7 @@
 import { ARTICLE_FUNNEL_LABELS, ARTICLE_INTENT_LABELS } from "../arquiteto/article-classification-closure.ts";
 import type { ArticleDNA, ArticleKeywordReference, VersionEnvelope } from "../arquiteto/contracts.ts";
 import type { RadarItem } from "../editorial/operational-flow.ts";
+import { radarArticleSiloRole, type RadarArticleSiloRole, type RadarSiloDnaVersionRoleSource } from "./silo-role.ts";
 
 export type RadarKeywordResolution = "FULL" | "PARTIAL" | "UNRESOLVED";
 
@@ -172,6 +173,16 @@ export type RadarArticleResearchContext = {
   /** Os textos resolvidos — a única fonte válida para análise textual. */
   resolvedKeywordTexts: string[];
   silo: RadarResearchSilo | null;
+  /*
+   * 2026-10-08 · O PAPEL NO SILO, PELA RÉGUA ÚNICA (`radarArticleSiloRole`).
+   *
+   * `silo.articleRole` (a foto do envio) e `article.hierarchy` (a sugestão da
+   * formação) continuam como vieram: o modelo observado os carrega e eles
+   * entram no hash do dossiê — trocá-los orfanaria o artigo-modelo aprovado.
+   * Quem MOSTRA ou ENTREGA o papel lê daqui. Opcional por retrocompatibilidade:
+   * sem ele, `radarResearchContextSiloRole` resolve pela foto e pela formação.
+   */
+  siloRole?: RadarArticleSiloRole;
   formationSerp: RadarResearchFormationSerp | null;
   internalLinks: RadarResearchInternalLinks | null;
   limitations: string[];
@@ -283,6 +294,12 @@ function temEstrategia(strategy: RadarResearchKeywordStrategy) {
 export function buildRadarArticleResearchContext(input: {
   item: RadarItem;
   article?: VersionEnvelope<ArticleDNA> | null;
+  /**
+   * 2026-10-08 · O SiloDNA vigente do Silo deste item, quando quem chama o
+   * tem (a tela: `pipeline.siloVersions`; o servidor: o lote já lido). É dele
+   * que sai o Papel no Silo. Ausente, vale a foto do envio.
+   */
+  siloDna?: RadarSiloDnaVersionRoleSource | null;
 }): RadarArticleResearchContext {
   const item = input.item;
   const dna = input.article?.payload || null;
@@ -388,6 +405,23 @@ export function buildRadarArticleResearchContext(input: {
   } : null;
   if (!silo) limitations.push("Nenhum contexto de Silo foi resolvido para esta linha.");
 
+  const siloRole = radarArticleSiloRole({
+    articleId: item.articleId,
+    brandId: item.brandId,
+    /* 2026-10-08 (revisão) · o Silo resolvido pelo handoff antes do da hidratação (a reconciliação o troca pelo `lista_id`). */
+    siloId: item.siloId || hydrationSilo?.id || null,
+    unitType: item.unitType,
+    siloDna: input.siloDna ?? null,
+    hydrationSilo,
+    formationHint: texto(dna?.hierarchy) || texto(item.hierarchy),
+  });
+  /*
+   * A divergência entre o SiloDNA vigente e o do envio fica em `siloRole`
+   * (`staleSnapshot` e `note`), e não em `limitations`: as limitações viajam
+   * para a investigação e para o dossiê, e uma frase nova ali mudaria o hash
+   * de um pacote que não mudou.
+   */
+
   /* -------------------------- SERP de formação ---------------------------- */
 
   const provenance = item.arquitetoSerpProvenance || null;
@@ -434,10 +468,29 @@ export function buildRadarArticleResearchContext(input: {
     editorialTopics,
     resolvedKeywordTexts,
     silo,
+    siloRole,
     formationSerp,
     internalLinks,
     limitations,
   };
+}
+
+/**
+ * 2026-10-08 · O Papel no Silo de um contexto — a leitura que todo modelo do
+ * Radar usa. Com o campo resolvido, ele; sem (contexto antigo ou montado à
+ * mão), a mesma régua sobre a foto do envio e a sugestão da formação.
+ */
+export function radarResearchContextSiloRole(context: RadarArticleResearchContext): RadarArticleSiloRole {
+  if (context.siloRole) return context.siloRole;
+  return radarArticleSiloRole({
+    articleId: context.article.articleId,
+    brandId: context.article.brandId,
+    siloId: context.silo?.siloId ?? null,
+    hydrationSilo: context.silo
+      ? { id: context.silo.siloId, siloDnaVersionId: context.silo.siloDnaVersionId, articleRole: context.silo.articleRole }
+      : null,
+    formationHint: context.article.hierarchy,
+  });
 }
 
 /** As keywords por papel, para o motor não ter que filtrar em cada chamada. */

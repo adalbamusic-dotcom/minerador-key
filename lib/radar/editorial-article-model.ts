@@ -56,6 +56,8 @@ import {
 } from "./declared-subject.ts";
 
 import type { RadarArticleResearchContext } from "./article-research-context.ts";
+import { radarResearchContextSiloRole } from "./article-research-context.ts";
+import { radarSiloRoleLabelOrNull } from "./silo-role.ts";
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
 import type { RadarEditorialBlueprint, RadarSectionCandidate } from "./editorial-blueprint.ts";
 import type { RadarFactualSupportStatus } from "./ai-discovery-context.ts";
@@ -1770,7 +1772,8 @@ export function buildRadarEditorialArticleModel(input: {
       principalKeyword: principal,
       intentLabel: intencao,
       funnelLabel: context.article.classification?.funnelLabel || null,
-      siloRole: context.silo?.articleRole || null,
+      /* 2026-10-08 · o Papel no Silo pela régua única, em português. */
+      siloRole: radarSiloRoleLabelOrNull(radarResearchContextSiloRole(context)),
     },
     titleSuggestion,
     titleAlternatives,

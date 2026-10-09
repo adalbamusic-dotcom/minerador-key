@@ -1,5 +1,241 @@
 # Estado atual — Radar
 
+## Revisão do Papel no Silo (corretor): Silo resolvido, fora da composição e Silo sem Pilar — 2026-10-08
+
+**Origem:** revisão adversarial da entrega "Papel no Silo" (seção logo abaixo). Foram 11 achados: 1 must-fix, 7
+should-fix e 3 nits. Os 11 foram confirmados no código e com fixture; nenhum era falso. Três pares descreviam o mesmo
+defeito (COB-3 = R2, F3 = R1, F4 = R3).
+
+**Fonte canônica do papel (não mudou):** o SiloDNA vigente do Silo do item (`pillarArticleId`, `supportArticleIds`,
+`narrativeOrder`), lido pela régua `radarArticleSiloRole` (`lib/radar/silo-role.ts`) com `resolveSiloHierarchyView`
+do Arquiteto. Na falta dele, a foto do envio (`hydration.silo.articleRole`). Por último, a sugestão da formação
+(`ArticleDNA.hierarchy`), marcada "(formação)". O Radar não grava papel.
+
+**Causas e correções (Verificado no código / Confirmado por teste):**
+
+1. **Silo errado depois da reconciliação (COB-3 / R2).** A régua achava o SiloDNA por `hydration.silo.id || row.siloId`.
+   Quando chega versão nova de um ArticleDNA territorial (sem `siloId`), a reconciliação remonta a hidratação sem o
+   Silo resolvido, e `hydration.silo.id` vira o `lista_id` da keyword do Minerador (`lib/radar/hydration.ts`). O
+   SiloDNA vigente sumia e o Pilar aparecia "Suporte (formação)". Agora vale `row.siloId || hydration.silo.id`: o Silo
+   que o handoff resolveu, na mesma ordem do envio ao Redator. Vale para a planilha, o perfil legado, a página de
+   análise, o contexto de pesquisa e o servidor (`radar-canonical-authorities.ts`, CSV completo e MCP); o contexto
+   editorial também.
+2. **Artigo fora da composição (F1).** Com o Pilar decidido no SiloDNA vigente e o artigo fora da composição, a régua
+   caía na foto do envio, que podia dizer "Pilar": dois Pilares no mesmo Silo, na tela, no CSV e no contexto KGR. Agora
+   a régua devolve "Fora da composição do SiloDNA vigente" (fonte `FORA_DA_COMPOSICAO`, não decidido). Ela informa o
+   Pilar do Silo e a nota "resolva no Arquiteto". A planilha e a página de análise deixaram de completar o
+   `pillarArticleId` do contexto KGR com o SiloDNA por fora da régua.
+3. **Silo sem Pilar no plano por Silo (F2).** `radarSiloDnaRoleOf` dava o papel legado de `articleRoles` (cópia da
+   formação) ou "Suporte" sem marca. O CSV "Para escrever" e o artigo-modelo, que preferem o papel do plano, diziam
+   "devolve o leitor ao Pilar" num Silo sem Pilar. Agora o plano diz "X (formação)" ou "Papel não decidido no Silo",
+   o mesmo rótulo da planilha. O artigo-modelo só cobra o link ao Pilar decidido, nunca ao "Pilar (formação)".
+4. **`targetNodeId` no CSV completo (R1 / F3, must-fix).** O nó do grafo (`article:…`) saía em
+   `internal_links_resolved_json`, contra a §13. O CSV completo tira o campo antes de serializar. A guarda §13 de
+   `radar-portable-export-12` passou a usar um id no formato real (`article:article-candidate:territory:…`): com
+   "a9" ela não via o vazamento.
+5. **"Formato editorial: Suporte." (COB-1).** O motivo do modo de análise (aba Resumo da página de análise e o
+   `modeRecommendation` gravado em cada versão de análise nova) usava `ArticleDNA.hierarchy`/`row.format`. Agora usa
+   `radarUnitFormatLabel` (Artigo ou SiloPage), a mesma régua da coluna Formato. Versões já gravadas ficam como estão.
+6. **Foto "support" sem confirmação (F5, nit).** O envio grava "support" também para Silo sem Pilar. Sem o SiloDNA
+   vigente em mãos, o "Suporte" da foto deixa de ser decisão: a linha Função fica "pendente" e diz "confirme no
+   Arquiteto". O rótulo não muda. O KGR é binário e continua usando a foto acima da sugestão da formação.
+7. **Filtro Formato guardado com papel (F4 / R3, nit).** A última vista da planilha volta do navegador e reaplicava
+   "Formato = Suporte", que não casa mais com nenhuma linha: planilha vazia com o seletor em "Todos". O guarda novo
+   `modules/radar/radar-format-filter-legacy.tsx` descarta o filtro quando o valor é um papel
+   (`radarFormatFilterIsLegacyRole`). Nenhum filtro válido é apagado, e o componente compartilhado da planilha não
+   mudou.
+8. **Dossiê do Redator (COB-2): corrigido só no catálogo, de propósito.** `observed.identity.hierarchy` (sugestão da
+   formação) e `observed.internalLinkPlan.articleRole` (foto do envio) continuam como estão. O modelo observado é
+   montado ao vivo e entra no hash do dossiê (`bundleHash`). Esse hash chaveia o artigo-modelo aprovado e o "mesmo
+   dossiê" do envio ao Redator: trocar os dois campos desligaria todo artigo-modelo aprovado, e reorganizar é IA
+   paga. O catálogo do MCP (`lib/agent/platform-catalog.ts`) deixou de dizer "a mesma régua" sem ressalva. Em "Ler o
+   dossiê do artigo", ele avisa que esses dois campos não são decisão e que o papel decidido está no SiloDNA
+   (`dna.silo`) e na linha "Papel no Silo" de `get_article_for_writing`.
+
+Correções à seção abaixo: `targetNodeId` agora de fato não sai no arquivo. A reconciliação do artigo territorial
+passou a ser coberta pela régua; antes não era.
+
+**Arquivos:**
+
+- Radar (proprietário): `lib/radar/silo-role.ts`, `strategy-context.ts`, `r3-workbench.ts`,
+  `article-research-context.ts`, `editorial-context.ts`, `article-blueprint.ts`, `portable-export.ts` e
+  `portable-evidence-pack.ts` (comentário); `lib/server/radar-canonical-authorities.ts`; `modules/radar/radar-page.tsx`,
+  `radar-analysis-page.tsx` e `radar-format-filter-legacy.tsx` (novo); `lib/agent/platform-catalog.ts` (notas).
+- Testes: `tests/radar-papel-no-silo.test.mts` (casos novos e estrutural reforçado), `tests/radar-portable-export-12.test.mts`
+  (id real do nó e asserção sem `targetNodeId`) e `tests/radar-investigacao-memo.test.mts` (âncora na ordem nova).
+- Compartilhados: nenhum contrato mudou. `RadarItem`, `hydration`, `ArticleDNA`, SiloDNA, grafo, modelo observado,
+  dossiê e pacote congelado estão intactos. `RadarSiloRoleSource` (do arquivo novo desta entrega) ganhou
+  `FORA_DA_COMPOSICAO`, e `buildRadarKgrStrategy` aceita `siloRole.source` opcional.
+
+**Consumidores preservados:** hash do dossiê e artigo-modelo aprovado (o modelo observado não mudou), plano de links
+congelado, export por Silo e CSV "Para escrever" com Pilar decidido (mesma saída), Redator e MCP.
+
+**Testes (Confirmado por teste, só fixtures):**
+
+- `tests/radar-papel-no-silo.test.mts`: casos novos para o artigo territorial reconciliado com `lista_id`, o artigo
+  fora da composição (tela, R3, KGR, CSV completo e CSV "Para escrever"), o Silo sem Pilar (plano, planilha, CSV
+  "Para escrever" e artigo-modelo), a foto "support" sem confirmação, o filtro Formato antigo e o `targetNodeId` fora
+  do CSV. O estrutural fixa a ordem do Silo, o KGR sem reserva, o motivo "Formato editorial" e o catálogo.
+- Reversões em cópias no scratchpad: 22 correções, cada uma desfeita sozinha, derrubam pelo menos um teste. É a prova
+  de que cada teste falha sem a correção.
+- `tests/radar-papel-no-silo.test.mts`: 22 testes (eram 17), todos passam.
+- `npm run test:radar`: 3095 testes, 3094 passam, 0 falhas, 1 pulado (pré-existente). Numa rodada anterior, o teste de
+  tempo `radar-especialista-sem-laco-dom` ("controle: sem o bail-out…", janela de 400 ms) falhou sob carga. Ele não
+  toca arquivo desta revisão, passa sozinho (duas vezes) e passou na rodada final.
+- `npm run test:redator`: 357/357. `npm run test:agent`: 65/65.
+- `npm run test:editorial`: 168/172. As 4 falhas são anteriores e iguais às da rodada do revisor (rotas de Conta, Admin,
+  Marca e Minerador/Arquiteto).
+- `tsc`: só os 2 erros pré-existentes de `.next/types` do Planejador. eslint nos arquivos tocados: 0 erros e 10 avisos
+  pré-existentes (código morto de `radar-page.tsx`). `git diff --check`: limpo.
+- `npm run test:visual-system`: 29/30, a mesma falha anterior em `components/editorial/professional-writer.tsx`
+  (Redator, fora desta revisão).
+
+**Validado manualmente:** não. A homologação na marca 61d2e019 é do dono. Nenhum SQL, nenhuma escrita no Supabase e
+nenhuma chamada a provider pago.
+
+**Limites:**
+
+- Versões de análise já gravadas guardam "Formato editorial: Suporte." no `modeRecommendation`; só as novas mudam.
+- O dossiê do Redator continua com `observed.identity.hierarchy` igual à formação (item 8). Trocar exige decisão do
+  dono sobre reorganizar os artigos-modelo aprovados.
+- O guarda do filtro Formato só roda com a barra global da planilha montada (é onde o seletor Formato aparece).
+
+## Papel no Silo: o Radar lê o que o Arquiteto decidiu — 2026-10-08
+
+**Relatado pelo usuário:** no Arquiteto, "leads qualificados" é o PILAR do Silo "Leads sem Tráfego Pago" (marca
+61d2e019); no Radar, a planilha dizia "leads qualificados · Suporte", a coluna Conteúdo "Leads sem Tráfego Pago ·
+Suporte · 6 keyword(s)" e o perfil "Silo / função: … · Suporte". Todos os oito artigos apareciam como Suporte. Palavras
+do dono: o papel "foi determinado no arquiteto e não pode ser mudado, e toda a estrutura do silo já foi definida lá
+junto com os links internos". No mesmo perfil, o card SERP dizia "Principais 0 · Pendentes 10 · Aguardando revisão
+SERP" ao lado de "Finalizado · Google · 26 de 38 analisada(s)".
+
+**Causa (Verificado no código e reproduzido com fixture):**
+
+- O Radar lia `RadarItem.hierarchy`. A importação (`lib/editorial/operational-flow.ts`) copia esse valor de
+  `ArticleDNA.hierarchy` e também o grava em `RadarItem.format`. Esse campo é a SUGESTÃO da formação, gravada antes
+  de o Silo existir. Hoje todo caminho de formação grava "Suporte" fixo, e a sucessora que materializa o Silo só
+  preenche `siloId`.
+- A decisão do Pilar é da fase Silos e fica no SiloDNA (`pillarArticleId`, `supportArticleIds`, `narrativeOrder`). O
+  Arquiteto, o export do Arquiteto e o MCP leem de lá (`resolveSiloHierarchyView`, LINK_HIERARCHY_AUTHORITY =
+  SILODNA).
+- A foto do envio (`hydration.silo.articleRole`) estava certa no envio, mas tem três limites:
+  - é binária: Silo sem Pilar vira "support" para todos;
+  - fica para trás quando o Pilar muda depois do envio;
+  - some na reconciliação, quando chega uma versão nova do ArticleDNA.
+- Só o export por Silo lia o SiloDNA direto. Por isso o CSV de 2026-10-07 dizia "1 · Pilar · leads qualificados".
+
+**Correção, só no Radar (Verificado no código / Confirmado por teste):**
+
+- **Régua única** `radarArticleSiloRole` em `lib/radar/silo-role.ts`. É domínio puro e só lê. A ordem das fontes:
+  1. o SiloDNA vigente do Silo do item (formado, mesma marca, mesmo Silo e com Pilar declarado), lido pela régua do
+     Arquiteto (`resolveSiloHierarchyView`, importada sem alteração);
+  2. a foto do envio;
+  3. a sugestão da formação, marcada "(formação)" e nunca tratada como decisão.
+
+  Sem nenhuma das três, a régua diz "Papel não decidido no Silo" e não inventa Suporte. Ela também devolve a fonte, a
+  posição do Suporte pela `narrativeOrder` e um aviso quando o SiloDNA vigente é outro que o do envio. O export por
+  Silo usa a mesma regra (`radarSiloDnaRoleOf`); o `papelNoSilo` de `portable-silo-export.ts` delega a ela.
+- **Leitores trocados para a régua:**
+  - planilha: coluna Artigo ("keyword · papel") e a busca;
+  - modelo R3: `model.hierarchy` e a linha "Função", que diz a fonte;
+  - perfil ("Silo / função"), Workbench ("Função"), faixa e Relatório ("Silo e papel") e painel do especialista;
+  - perfil legado e página de análise ("Função no silo");
+  - contexto KGR (`buildRadarKgrStrategy`: régua decidida → `pillarArticleId` do SiloDNA → sugestão);
+  - coluna Conteúdo (`buildRadarArticleDnaSummary`);
+  - contexto editorial ("Função no silo" com o SiloDNA como autoridade; quando diverge, a formação é dita sugestão);
+  - fundamentos ("Papel do artigo no silo"; o campo "Hierarquia" virou "Hierarquia sugerida na formação");
+  - blueprint editorial e modelos do artigo e do perfil (em português, não "pillar"/"support");
+  - CSV completo (`article_role` e "Papel no silo"), CSV "Para escrever" e artigo-modelo.
+- **Contexto de pesquisa:** ganhou a entrada opcional `siloDna` e o campo opcional `siloRole`, que guarda o resultado
+  da régua. `silo.articleRole` e `article.hierarchy` continuam como vieram, porque entram no hash do dossiê e no
+  modelo observado: trocá-los orfanaria pacotes que não mudaram.
+- **De onde vem o SiloDNA vigente:**
+  - na tela, de `pipeline.siloVersions` (`radarCurrentSiloDna`), e a memória da investigação passou a ter o SiloDNA
+    vigente na chave;
+  - no servidor, do que o lote já leu (`loadRadarCanonicalAuthorities({ siloVersions })`), sem leitura a mais. Isso
+    vale para o export, o envio ao Redator e o MCP.
+- **Coluna Formato:** deixou de mostrar o papel copiado (`RadarItem.format = ArticleDNA.hierarchy`) e mostra a unidade
+  (Artigo ou SiloPage). O campo gravado não muda.
+- **Artigo-modelo:**
+  - o papel do brief é o do plano por Silo (SiloDNA vigente) e, sem ele, o da régua;
+  - o pedido à IA diz o que o papel pede (o Pilar "cobre o tema com amplitude e aprofunda por links para os
+    suportes");
+  - o próprio artigo nunca é candidato a link, nem pelo id nem pelo slug;
+  - a nota "Falta o link para o Pilar" só vale para Suporte.
+- **Links pelo grafo aprovado:**
+  - o link portátil carrega o nó de destino (`targetNodeId`, aditivo e opcional, nunca sai no arquivo);
+  - o CSV "Para escrever" resolve o destino pelo nó (`article:<articleId>`) antes de casar palavras do título;
+  - o artigo-modelo marca "pedido pelo grafo aprovado" também pelo nó.
+- **MCP `get_article_for_writing`:** monta com o mesmo Silo do botão "Para escrever" (`selectionSiloContext` e
+  `selectionPlan`). Ordem, papéis, link Suporte → Pilar e SiloPage saem resolvidos. Nota atualizada em
+  `lib/agent/platform-catalog.ts`.
+- **Envio ao Redator:** quando o ArticleDNA territorial não tem `siloId`, o `siloDnaRef` do documento usa o Silo do
+  item do Radar (`siloId`, ou o da foto do envio). Antes caía na referência legada `silo:<articleId>`. A porta
+  `loadArticleIdentity` ganhou `siloId` opcional.
+- **Card SERP do perfil:** no Google com investigação, mostra o mesmo resumo da coluna Pesquisa (Status, Analisadas e
+  Referências). Fora do Google, mostra a projeção do perfil. Sem investigação, mostra o card de antes. Nenhum dado
+  muda.
+- **O Radar não grava papel:** nada volta ao ArticleDNA, ao SiloDNA nem ao grafo. Quem troca o Pilar é o Arquiteto.
+
+**Arquivos:**
+
+- Radar (proprietário):
+  - `lib/radar/`: `silo-role.ts` (novo), `r3-workbench.ts`, `article-research-context.ts`, `operational-view.ts`,
+    `strategy-context.ts`, `editorial-blueprint.ts`, `editorial-article-model.ts`, `editorial-profile-model.ts`,
+    `editorial-context.ts`, `foundation-profiles.ts`, `foundation-usage-map.ts`, `article-blueprint.ts`,
+    `portable-writing-export.ts`, `portable-evidence-pack.ts`, `portable-silo-export.ts` e `deep-research-view-memo.ts`;
+  - `lib/server/`: `radar-canonical-authorities.ts`, `radar-portable-export-core.ts` e `radar-writer-send.ts`;
+  - `modules/radar/`: `radar-page.tsx`, `radar-analysis-page.tsx` e `radar-r3-profile-mirror.tsx`;
+  - `lib/agent/platform-catalog.ts`: nota do MCP.
+- Compartilhados: nenhum contrato mudou. `resolveSiloHierarchyView` é só importado.
+  - `RadarItem.hierarchy`/`format`, `OperationalPublication.hierarchy`, `ArticleDNA.hierarchy` e
+    `hydration.silo.articleRole` ficam como estão.
+  - Campos novos, todos opcionais: `RadarArticleResearchContext.siloRole`, `RadarR3Model.siloRole` e
+    `RadarPortableInternalLink.targetNodeId`, além das entradas `siloDna`, `siloRole`, `siloVersions`, `siloId` e
+    `research`.
+  - Consumidores preservados: dossiê e pacote congelado (hash igual), modelo observado, plano de links, export por
+    Silo, testes do Redator e do MCP.
+
+**Testes (Confirmado por teste, só fixtures):**
+
+- `tests/radar-papel-no-silo.test.mts` tem 17 testes, pelo caminho real (handoff do Arquiteto → importação → leitores).
+  O fixture tem o Pilar no SiloDNA e "Suporte" no ArticleDNA, e o teste cobre:
+  - Pilar em todas as superfícies;
+  - Silo sem decisão: reserva da formação, marcada;
+  - SiloDNA de outra marca, de outro Silo ou em rascunho não empresta papel;
+  - Pilar trocado depois do envio: vale o vigente, com aviso;
+  - o Pilar não recebe planta de Suporte, link para si mesmo nem a nota de link ao Pilar;
+  - export por Silo e planilha dão a mesma resposta;
+  - links pelo nó do grafo;
+  - card SERP;
+  - fiação estrutural.
+- `tests/radar-to-writer-handoff-1.test.mts`: Q2 confere o Silo do item chegando à identidade do documento.
+- Seis testes existentes foram ajustados ao texto novo (papel em português, SiloDNA na chave da memória).
+- 43 mutantes, aplicados em cópias no scratchpad: 43 mortos.
+- Suítes: `npm run test:radar` (3089 passam, 1 pulado, 0 falhas), `npm run test:redator` (357/357) e
+  `npm run test:agent` (65/65).
+- `npm run test:visual-system`: 29/30. A falha é anterior a esta entrega: a dívida subiu em
+  `components/editorial/professional-writer.tsx` (Redator), que esta entrega não tocou e que não tem alteração no
+  working tree. Nenhum arquivo do Radar aparece na regressão.
+- `tsc`: só os 2 erros pré-existentes de `.next/types` do Planejador.
+- eslint nos arquivos tocados: 0 erros; os avisos são o código morto declarado do `radar-page.tsx`.
+
+**Ainda não verificado:**
+
+- Banco: não houve leitura nem SQL. A leitura sugerida está no backlog.
+- Homologação manual: é do dono.
+
+**Fica de fora, com motivo:**
+
+- **"Formato dominante" e `expectedFormat`:** a comparação de formato (`editorial-comparison.ts`) e a coleta de apoio
+  (`expectedFormat`) ainda leem `ArticleDNA.hierarchy`. A comparação entra no modelo observado congelado e o
+  `expectedFormat` entra na entrada da coleta SERP.
+- **Plano de links congelado:** o `articleRole` do plano continua sendo a foto do envio. Não tem leitor na tela.
+- **Reconciliação:** continua zerando a foto. A régua cobre isso com o SiloDNA vigente.
+- **Aviso de grafo mais novo depois do envio:** `radarLinkContextIsStale` não tem consumidor, porque a tela não
+  carrega os grafos.
+- **CSV de vídeo:** não usa papel.
+
 ## Revisão da Fase 1 automática e da lentidão: o que ainda segurava o automático — 2026-10-08
 
 **Relatado pelo usuário:** "O [Analisar concorrência · e finaliza (+ 1 chamada de IA)] não está funcionando com

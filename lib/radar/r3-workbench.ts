@@ -16,6 +16,7 @@ import type { RadarWorkbenchReferenceCounts } from "./workbench.ts";
 import type { RadarR4LocalArticleState } from "./r4-queue.ts";
 import type { RadarR6ConsolidatedReport } from "./r6-sequential.ts";
 import type { RadarSerpReviewCurrentness } from "./serp-review-state.ts";
+import { radarArticleSiloRole, type RadarArticleSiloRole } from "./silo-role.ts";
 
 /**
  * AS QUATRO ÁREAS DA PRIMEIRA CAMADA — quatro processos, quatro donos.
@@ -63,7 +64,10 @@ export type RadarR3Model = {
   title: string;
   keyword: string;
   silo: string;
+  /** 2026-10-08 · O Papel no Silo, lido pela régua única (SiloDNA vigente → foto do envio → formação). */
   hierarchy: string;
+  /** 2026-10-08 · A leitura completa do papel: fonte, aviso de foto antiga e sugestão da formação. Opcional. */
+  siloRole?: RadarArticleSiloRole;
   articleDnaVersion: string;
   publication: string;
   mode: string;
@@ -275,8 +279,32 @@ export function buildRadarR3Model(input: {
   reviewCurrentness?: RadarSerpReviewCurrentness;
   reviewedAt?: string | null;
   reviewHistory?: SerpReviewRecord[];
+  /**
+   * 2026-10-08 · O Papel no Silo já resolvido por quem tem o SiloDNA vigente
+   * (a tela). Sem ele, a régua lê a foto do envio e a sugestão da formação —
+   * nunca `RadarItem.hierarchy` como decisão.
+   */
+  siloRole?: RadarArticleSiloRole | null;
 }): RadarR3Model {
   const report = input.analysis?.payload.competitiveReport || null;
+  const papel = input.siloRole || radarArticleSiloRole({
+    articleId: input.row.articleId,
+    brandId: input.row.brandId,
+    siloId: input.row.siloId,
+    unitType: input.row.unitType,
+    hydrationSilo: input.row.hydration?.silo ?? null,
+    formationHint: input.article?.payload.hierarchy || input.row.hierarchy,
+  });
+  /* 2026-10-08 (revisão) · fora da composição do vigente, e o "Suporte" da foto sem confirmação, dizem o que falta. */
+  const fonteDoPapel = papel.source === "SILO_DNA"
+    ? `SiloDNA${papel.siloDnaVersionId ? " vigente" : ""} · decisão da fase Silos${papel.staleSnapshot ? " · o envio viu outra versão" : ""}`
+    : papel.source === "FORA_DA_COMPOSICAO"
+      ? "SiloDNA vigente · o artigo não está na composição · resolva no Arquiteto"
+      : papel.source === "HIDRATACAO"
+        ? `SiloDNA no envio ao Radar${papel.decided ? "" : " · confirme no Arquiteto"}`
+        : papel.source === "FORMACAO"
+          ? "Sugestão da formação (ArticleDNA) · o Silo não decidiu"
+          : papel.source === "UNIDADE" ? "Unidade do Silo" : "Nenhuma fonte declara o papel";
   const extractionPages = input.analysis?.payload.extractions || [];
   const sourceUrls = new Set<string>([
     ...input.references.map(reference => reference.url),
@@ -313,7 +341,7 @@ export function buildRadarR3Model(input: {
     { area: "DNA", data: "ArticleDNA", value: `${articleVersion} · ${principal}`, source: "ArticleDNA recebido do Arquiteto", state: input.article ? "preservado" : "pendente" },
     { area: "DNA", data: "KeywordDNAs", value: input.article ? `${input.article.payload.keywordReferences.length} referência(s) vinculada(s)` : "Não hidratado", source: "KeywordDNA referenciado pelo ArticleDNA", state: input.article ? "preservado" : "pendente" },
     { area: "DNA", data: "Silo", value: input.silo || "Não hidratado", source: "Contexto recebido do Arquiteto", state: input.silo ? "preservado" : "pendente" },
-    { area: "DNA", data: "Função", value: input.article?.payload.hierarchy || input.row.hierarchy || "Não informada", source: "ArticleDNA / contexto editorial", state: input.article ? "preservado" : "pendente" },
+    { area: "DNA", data: "Função", value: papel.label, source: fonteDoPapel, state: papel.decided ? "preservado" : "pendente" },
     { area: "DNA", data: "SiloDNA", value: input.row.siloId ? "Preservado" : "Não vinculado", source: "Vínculo de silo recebido do Arquiteto", state: input.row.siloId ? "preservado" : "pendente" },
     { area: "DNA", data: "Intenção", value: radarDeclaredArticleIntent(input.article?.payload) || radarConclusiveIntent(input.row.intent) || "Não informada", source: "ArticleDNA / KeywordDNA", state: input.article ? "preservado" : "pendente" },
     { area: "SERP", data: "Snapshot e referências", value: input.view ? `${input.view.provider} · ${input.view.organicResults.length} resultado(s) · ${input.referenceCounts.pending} pendente(s)` : "Ainda não coletado", source: input.view ? "Snapshot SERP do Radar" : "Aguardando coleta explícita", state: input.view ? "observado" : "pendente" },
@@ -344,7 +372,8 @@ export function buildRadarR3Model(input: {
     title: radarArticleDisplayTitle(input.article?.payload.promise || input.row.title),
     keyword: principal,
     silo: input.silo,
-    hierarchy: input.row.hierarchy,
+    hierarchy: papel.label,
+    siloRole: papel,
     articleDnaVersion: articleVersion,
     publication: input.publication,
     mode,

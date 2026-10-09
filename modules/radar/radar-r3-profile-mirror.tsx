@@ -2,20 +2,39 @@ import type { RadarR3Model } from "@/lib/radar/r3-workbench";
 import { Field } from "@/components/editorial/operational-screen-shared";
 import { radarR4AmazonStatusLabel, radarR4SerpStatusLabel } from "@/lib/radar/r4-queue";
 
+/*
+ * 2026-10-08 · A PESQUISA DO PERFIL É A MESMA DA COLUNA "PESQUISA".
+ *
+ * O card SERP lia a curadoria legada (Principais/Pendentes por resultado) e a
+ * fila R4 ("Aguardando revisão SERP") ao lado de uma investigação finalizada
+ * com "26 de 38 analisada(s)": duas autoridades na mesma tela. Quem tem a
+ * investigação canônica (a planilha) monta esta leitura UMA vez e a passa; sem
+ * ela, o card continua o de antes.
+ */
+export type RadarR3ProfileResearch = {
+  statusLabel: string;
+  detail: string;
+  analyzed: number | null;
+  references: number | null;
+};
+
 type RadarR3ProfileMirrorProps = {
   model: RadarR3Model;
   articleHref: string | null;
   architectHref: string | null;
+  research?: RadarR3ProfileResearch | null;
 };
 
 const section = "rounded-lg border border-divider bg-surface p-4";
 
-export function RadarR3ProfileMirror({ model, architectHref }: RadarR3ProfileMirrorProps) {
+export function RadarR3ProfileMirror({ model, architectHref, research = null }: RadarR3ProfileMirrorProps) {
   const r4 = model.r4;
   return <div className="space-y-4" aria-label="Espelho do Radar Workbench" data-testid="radar-r3-profile-mirror">
     <section className={section}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-module-accent">Perfil Radar · espelho do Workbench</p><h2 className="mt-1 text-lg font-semibold text-foreground">{model.title}</h2><p className="mt-1 text-sm text-text-muted">A tabela, o Workbench e este perfil usam os mesmos seletores R3. Expandir a linha não cria versão nem coleta dados.</p></div>{architectHref && <a className="inline-flex min-h-10 items-center rounded-md border border-divider px-3 py-2 text-sm text-foreground hover:border-context-accent hover:text-context-accent" href={architectHref}>Ver no Arquiteto</a>}</div><dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="ArticleDNA" value={model.articleDnaVersion}/><Field label="Keyword principal" tone="keyword" value={model.keyword}/><Field label="Silo / função" value={`${model.silo} · ${model.hierarchy}`}/><Field label="Modo" value={model.mode}/><Field label="Publicação" value={model.publication}/><Field label="Próxima ação" value={model.nextAction}/></dl></section>
     <div className="grid gap-4 xl:grid-cols-2">
-      <section className={section}><h3 className="text-base font-semibold text-foreground">SERP</h3><p className="mt-1 text-sm text-text-muted">{model.serp.provider} · {model.serp.resultCount} resultado(s) · última coleta {model.serp.latestCollection}</p><dl className="mt-4 grid grid-cols-2 gap-3"><Field label="Principais" value={model.serp.primaryCount}/><Field label="Pendentes" value={model.serp.pendingCount}/><Field label="Necessidades" value={model.serp.needs}/><Field label="Status" value={r4?.serp.state ? radarR4SerpStatusLabel(r4.serp.state) : model.serp.status}/></dl></section>
+      {research
+        ? <section className={section}><h3 className="text-base font-semibold text-foreground">SERP</h3><p className="mt-1 text-sm text-text-muted">{research.detail} · última coleta {model.serp.latestCollection}</p><dl className="mt-4 grid grid-cols-2 gap-3"><Field label="Analisadas" value={research.analyzed ?? "—"}/><Field label="Referências" value={research.references ?? "—"}/><Field label="Necessidades" value={model.serp.needs}/><Field label="Status" value={research.statusLabel}/></dl></section>
+        : <section className={section}><h3 className="text-base font-semibold text-foreground">SERP</h3><p className="mt-1 text-sm text-text-muted">{model.serp.provider} · {model.serp.resultCount} resultado(s) · última coleta {model.serp.latestCollection}</p><dl className="mt-4 grid grid-cols-2 gap-3"><Field label="Principais" value={model.serp.primaryCount}/><Field label="Pendentes" value={model.serp.pendingCount}/><Field label="Necessidades" value={model.serp.needs}/><Field label="Status" value={r4?.serp.state ? radarR4SerpStatusLabel(r4.serp.state) : model.serp.status}/></dl></section>}
       <section className={section}><h3 className="text-base font-semibold text-foreground">Amazon</h3><p className="mt-1 text-sm text-text-muted">{r4 ? radarR4AmazonStatusLabel(r4.amazon) : model.amazon.label} · {model.amazon.detail}</p><dl className="mt-4 grid grid-cols-3 gap-3"><Field label="Produtos" value={model.amazon.productCount}/><Field label="Reviews" value={model.amazon.reviewCount}/><Field label="Critérios" value={model.amazon.criteriaCount}/></dl></section>
       <section className={section}><h3 className="text-base font-semibold text-foreground">Conteúdo</h3><p className="mt-1 text-sm text-text-muted">Dossiê {model.content.articleDnaVersion} · principal: {model.content.principal}</p><dl className="mt-4 grid grid-cols-3 gap-3"><Field label="Necessidades" value={model.content.needs}/><Field label="Evidências" value={model.content.evidenceCount}/><Field label="Fontes" value={model.content.sourceCount}/></dl></section>
       <section className={section}><h3 className="text-base font-semibold text-foreground">Especialista</h3><p className="mt-1 text-sm text-text-muted">{model.specialist.expert} · {model.specialist.channel} · {model.specialist.status}</p><dl className="mt-4 grid grid-cols-3 gap-3"><Field label="Pedidos" value={model.specialist.requestsSent}/><Field label="Recebidas" value={model.specialist.contributionsReceived}/><Field label="Revisadas" value={model.specialist.reviewedEvidence}/></dl>{r4?.topics.items.length ? <p className="mt-3 text-sm text-text-muted">{r4.topics.items.length} pauta(s) local(is) · {r4.topics.state}</p> : null}</section>
