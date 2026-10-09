@@ -534,7 +534,9 @@ test("B6 · o ângulo é a entrega concreta que a amostra não tem; costurar tem
 /* ============================== B7 · a versão das regras ============================== */
 
 test("B7 · a versão das regras: gravada na planta, preservada na edição e no banco; a tela avisa a anterior e aponta o 'Organizar de novo', sem botão novo", async () => {
-  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-08");
+  /* 2026-10-09 · a coerência dos CSVs mudou o pedido e a conferência: a data das regras avançou. */
+  /* 2026-10-09b · o bloco comercial da Amazon e as exclusões dos reajustes entraram no pedido e na conferência. */
+  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-09b");
   const { payload } = organizar(resposta());
   assert.equal(payload.rulesVersion, RADAR_ARTICLE_BLUEPRINT_RULES_VERSION);
   assert.equal(radarArticleBlueprintPayloadToStore({ ...payload, approval: "APPROVED" }).rulesVersion, RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "vai ao banco");
@@ -551,8 +553,9 @@ test("B7 · a versão das regras: gravada na planta, preservada na edição e no
   const aviso = renderToStaticMarkup(createElement(RadarArticleBlueprintRulesNotice, { payload: antigo }));
   assert.match(aviso, /data-testid="radar-article-blueprint-rules-outdated"/);
   assert.match(aviso, /class="text-sm leading-6 text-pending"/);
-  assert.match(aviso, /montada com regras anteriores às atuais \(2026-10-08\)/);
-  assert.match(aviso, /use &quot;Organizar de novo \(IA\)&quot; \(1 chamada de IA\)/);
+  assert.match(aviso, new RegExp(`montada com regras anteriores às atuais \\(${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}\\)`));
+  /* 2026-10-09b · o custo dito é o real: a organização e, quando a conferência pede, a passada de correção. */
+  assert.match(aviso, /use &quot;Organizar de novo \(IA\)&quot; \(até 2 chamadas de IA\)/);
   assert.doesNotMatch(aviso, /<button/, "nenhum botão novo: o Organizar de novo já existe");
   assert.equal(renderToStaticMarkup(createElement(RadarArticleBlueprintRulesNotice, { payload })), "");
 

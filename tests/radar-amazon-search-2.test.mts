@@ -777,8 +777,13 @@ test("§24 · blueprint gravado leva a READY_TO_FINALIZE, e ele não oferece STA
   /*
    * 2026-10-02 · D9 (dono, "automático nos três"): READY_TO_FINALIZE SEM
    * PENDÊNCIA CONGELA SOZINHO. Com o apoio do Google coletado no pacote, a
-   * decisão automática é finalizar; sem o apoio gravado, nada congela e o
-   * motivo é dito — o botão manual continua sendo o caminho.
+   * decisão automática é finalizar.
+   *
+   * 2026-10-09 · REGRA DO DONO: a regra do Google na Amazon. Com blueprint,
+   * quem responde pelo apoio é o próprio blueprint: o que ele aplicou não é
+   * limitação; o SUPPORT_MISSING que ele declarou fica registrado e a
+   * investigação congela assim mesmo. Este teste fixava a parada antiga ("sem o
+   * apoio gravado, nada congela") — a asserção virou o comportamento novo.
    */
   const comApoio = radarProfileAutoFinalizeDecision({
     payload: {
@@ -788,10 +793,15 @@ test("§24 · blueprint gravado leva a READY_TO_FINALIZE, e ele não oferece STA
     profile: "AMAZON",
   });
   assert.equal(comApoio.next, "FINALIZE");
-  const semApoio = radarProfileAutoFinalizeDecision({ payload: { amazonSearch: run, amazonBlueprint: blueprintDe() }, profile: "AMAZON" });
-  assert.equal(semApoio.next, null);
-  assert.equal(semApoio.pending, true);
-  assert.match(semApoio.reason, /apoio do Google/);
+  assert.deepEqual(comApoio.limitations, []);
+  const semPacote = radarProfileAutoFinalizeDecision({ payload: { amazonSearch: run, amazonBlueprint: blueprintDe() }, profile: "AMAZON" });
+  assert.equal(semPacote.next, "FINALIZE", "o blueprint aplicou o apoio: nada a registrar");
+  assert.deepEqual(semPacote.limitations, []);
+  const semApoio = radarProfileAutoFinalizeDecision({ payload: { amazonSearch: run, amazonBlueprint: blueprintDe(false) }, profile: "AMAZON" });
+  assert.equal(semApoio.next, "FINALIZE", "o apoio ausente vira limitação registrada, não parada");
+  assert.equal(semApoio.pending, false);
+  assert.deepEqual(semApoio.limitations, [RADAR_AMAZON_SUPPORT_MISSING_LIMITATION]);
+  assert.match(semApoio.reason, /^Com limitação registrada: /);
 });
 
 /* ============================ §33 · o relatório ============================ */

@@ -18,6 +18,7 @@ import {
   finalArticleText, ProviderCarouselSeedSchema, ProviderScriptSeedSchema, scriptPayloadFromSeed,
   seedContextLines, CAROUSEL_SEED_SYSTEM_PROMPT, SCRIPT_SEED_SYSTEM_PROMPT,
 } from "../lib/redator/deliverable-seed.ts";
+import { planoDeVideo } from "./redator-piloto-plano-fixtures-2026-10-09.mts";
 
 const fonte = (caminho: string) => readFile(new URL(caminho, import.meta.url), "utf8");
 const ROTA = "../app/api/redator/seed/route.ts";
@@ -33,23 +34,24 @@ const fundamentos = (extra: Partial<RadarFoundations> = {}): RadarFoundations =>
   keyword: { principal: "skincare para pele oleosa", secondary: ["pele oleosa"], reinforcements: ["brilho"], resolution: null },
   recommendations: [{ output: "ARTICLE", label: "Artigo", objective: "cobrir o tema", reason: "a SERP é informacional", sourceSignals: ["10 páginas"] }],
   research: [{ source: "youtube", label: "YouTube", role: "PRIMARY", queries: 4, items: 38, frozenAt: null, limitations: ["sem transcrição de 6 vídeos"] }],
+  /* 2026-10-09 · a camada de vídeo é só o observado, com a régua da fotografia (o blueprint antigo não recomenda mais nada). */
   youtube: {
+    role: "PRIMARY", frozenAt: null,
     comparableVideos: 38, longForm: 26, shorts: 12, durationRange: "6–12 min",
     recurrentChannels: ["Canal A"], titlePatterns: ["rotina em N passos"], gaps: ["ninguém fala de sabonete"],
-    format: "tutorial de rotina", hookDirection: { statement: "comece pelo erro mais comum", sourceSignal: null },
-    titleDirections: [{ statement: "rotina para pele oleosa", sourceSignal: null }],
-    script: [{ block: "Abertura", objective: "prender", direction: "mostre o brilho" }],
-    tone: "direto", languageDirection: "segunda pessoa",
+    ruler: "AMOSTRA_INTEIRA",
   },
   multimodal: { youtubeLongForm: 26, youtubeShorts: 12, crossSerp: [{ signal: "vídeo na SERP", count: 3 }], sources: ["WEB_SERP"] },
+  review: null,
   evidence: { sources: ["WEB_SERP"], serpStanding: null, videoLibrary: null, specialist: false, observedPages: 10 },
   mustAnswer: ["O que é pele oleosa?"], mustCover: ["ácido salicílico"],
   limitations: ["amostra de 10 páginas"], writerMayNot: ["trocar a keyword principal"],
   ...extra,
 });
 
-const fonteSemente = (extra: Partial<{ finalArticle: string | null }> = {}) => ({
-  title: "Skincare para pele oleosa", foundations: fundamentos(), finalArticle: null, ...extra,
+/* 2026-10-09 · o plano do vídeo é o do CSV de vídeo (`radarVideoPlan`): a semente não roda sem ele. */
+const fonteSemente = (extra: Partial<{ finalArticle: string | null; plan: ReturnType<typeof planoDeVideo> }> = {}) => ({
+  title: "Skincare para pele oleosa", foundations: fundamentos(), finalArticle: null, plan: planoDeVideo(), ...extra,
 });
 
 const documento = (status: string, blocks: unknown[]): ContentDocument =>
@@ -98,15 +100,31 @@ test("02 · o contexto carrega o que o enunciado pede", () => {
   const linhas = seedContextLines(fonteSemente()).join("\n");
 
   assert.match(linhas, /Skincare para pele oleosa/);
-  assert.match(linhas, /Recomendação editorial do Radar/);
-  assert.match(linhas, /Artigo — cobrir o tema — razão: a SERP é informacional/);
+  /*
+   * 2026-10-09 (correção) · a "Recomendação editorial do Radar" (saídas da camada
+   * antiga, inclusive Shorts × vídeo longo pela amostra inteira) saiu do pedido:
+   * o formato é o do plano do vídeo, uma decisão só.
+   */
+  assert.doesNotMatch(linhas, /Recomendação editorial do Radar/);
+  assert.doesNotMatch(linhas, /Artigo — cobrir o tema — razão: a SERP é informacional/);
   assert.match(linhas, /YouTube \(primária\): 4 consulta\(s\), 38 item\(ns\)/);
-  assert.match(linhas, /38 vídeo\(s\) comparáveis, 26 long-form e 12 shorts/);
-  assert.match(linhas, /ninguém fala de sabonete/);         // lacunas
-  assert.match(linhas, /Formato vencedor: tutorial de rotina/);
+  /*
+   * 2026-10-09 · regra do piloto: o formato, os capítulos e os cortes vêm do
+   * plano do CSV de vídeo; o blueprint antigo (formato vencedor, gancho, tom,
+   * linguagem, estrutura sugerida e a amostra inteira) não entra mais.
+   */
+  assert.match(linhas, /Formato do vídeo: vídeo longo pelo artigo-modelo — os vídeos longos lideram a amostra pertinente/);
+  assert.match(linhas, /Amostra pertinente do YouTube: 9 vídeo\(s\) longo\(s\) e 2 Short\(s\)/);
+  assert.match(linhas, /1\. Limpeza: o primeiro passo da noite — pergunta do público: Qual sabonete usar à noite\?/);
+  assert.match(linhas, /Corte 1 \(capítulo 1, Limpeza: o primeiro passo da noite\)/);
+  assert.match(linhas, /Fica fora do texto publicável/);
+  for (const legado of [/Formato vencedor/, /Direção de gancho/, /^Tom:/m, /^Linguagem:/m, /Estrutura sugerida/, /ninguém fala de sabonete/, /26 long-form e 12 shorts/]) {
+    assert.doesNotMatch(linhas, legado, String(legado));
+  }
   assert.match(linhas, /Cruzamento de SERPs: vídeo na SERP \(3\)/);
-  assert.match(linhas, /Precisa responder:/);
-  assert.match(linhas, /Precisa cobrir:/);
+  /* 2026-10-09 (correção) · as perguntas do blueprint antigo não viram exigência: elas vêm nos capítulos (as seções da planta, com as exclusões). */
+  assert.doesNotMatch(linhas, /Precisa responder:/);
+  assert.doesNotMatch(linhas, /Precisa cobrir:/);
   assert.match(linhas, /Limitações declaradas/);
   assert.match(linhas, /amostra de 10 páginas/);
   assert.match(linhas, /O Redator NÃO pode:/);
@@ -127,7 +145,7 @@ test("03 · evidência individual não entra: a fonte é a projeção agregada",
     bundle: { raw: "payload inteiro do Radar" },
   } as unknown as Partial<RadarFoundations>);
 
-  const linhas = seedContextLines({ title: "T", foundations: comLixo, finalArticle: null }).join("\n");
+  const linhas = seedContextLines({ title: "T", foundations: comLixo, finalArticle: null, plan: planoDeVideo() }).join("\n");
   assert.doesNotMatch(linhas, /transcrição integral/);
   assert.doesNotMatch(linhas, /payload inteiro do Radar/);
 });
@@ -147,8 +165,10 @@ test("05 · roteiro e carrossel são gerações independentes", () => {
   const carrossel = buildCarouselSeedPrompt(source);
 
   assert.notEqual(roteiro, carrossel, "dois pedidos diferentes, não um derivado do outro");
-  assert.match(roteiro, /cenas/);
-  assert.match(carrossel, /slides/);
+  /* 2026-10-09 · as contagens são as do CSV de vídeo: capítulos + 2 cenas; capítulos + 2 lâminas. Nada de número fixo. */
+  assert.match(roteiro, /Monte o roteiro com 5 cenas: a abertura pelo gancho do plano, uma cena por capítulo do plano do vídeo \(3\)/);
+  assert.match(carrossel, /Monte o carrossel com 5 slides: a capa/);
+  assert.doesNotMatch(roteiro + carrossel, /4 a 8 cenas|5 a 8 slides/);
   assert.notEqual(SCRIPT_SEED_SYSTEM_PROMPT, CAROUSEL_SEED_SYSTEM_PROMPT);
   assert.match(CAROUSEL_SEED_SYSTEM_PROMPT, /não é roteiro fatiado/);
 
@@ -188,9 +208,15 @@ test("06 · a recomendação ARTICLE não impede nenhum dos dois formatos", () =
   const source = fonteSemente();
   assert.equal(source.foundations.recommendations[0]?.output, "ARTICLE");
 
-  /* Os dois prompts são montados normalmente, e a recomendação aparece como recomendação. */
+  /*
+   * Os dois prompts são montados normalmente. 2026-10-09 (correção) · a
+   * recomendação da camada antiga não entra no pedido (nem como recomendação):
+   * o formato e a estrutura saem do plano do vídeo; nada impede o roteiro nem o
+   * carrossel.
+   */
   for (const prompt of [buildScriptSeedPrompt(source), buildCarouselSeedPrompt(source)]) {
-    assert.match(prompt, /recomendação, não obrigação/);
+    assert.doesNotMatch(prompt, /recomendação, não obrigação|Recomendação editorial do Radar/);
+    assert.match(prompt, /Plano do vídeo pelo artigo-modelo/);
   }
 
   /* E o módulo não expõe nenhuma função que decida se pode gerar. */

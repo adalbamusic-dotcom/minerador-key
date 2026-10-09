@@ -43,6 +43,8 @@ import {
   planoDoSilo,
   vistaDoGoogleSobre,
 } from "./radar-portable-writing-fixtures.mts";
+import { buildRadarArticleBlueprintBrief, radarArticleBlueprintPrompt } from "../lib/radar/article-blueprint.ts";
+import { comPlanta, comPlantas } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 
 /*
  * ===== SDD do Assunto, F4 · Redator e export =====
@@ -90,8 +92,21 @@ function entradaCom(assunto: Assunto, ajustar?: (turn: RadarEditorialSubjectTurn
   return entradaGoogle({ articleModel, googleObserved: vista.observed, researchContext: contexto });
 }
 
-const linha = (entrada: RadarPortableExportInput): RadarWritingExportRow => buildRadarWritingExportArticle(entrada, CONTEXTO).row;
+/*
+ * 2026-10-09 · regra do dono: o CSV "Para escrever" sai só com o artigo-modelo
+ * concluído (a planta que a IA organizaria sobre o pacote, montada pela
+ * bancada). As linhas do Assunto que a coluna promessa e o título legados
+ * escreviam (tronco, virada, direção do H1) viraram matéria-prima do GERADOR:
+ * elas vão ao pedido do artigo-modelo (`pedidoDe`), e a coluna artigo diz o
+ * Assunto e o destino da virada.
+ */
+const linha = (entrada: RadarPortableExportInput): RadarWritingExportRow => buildRadarWritingExportArticle(entrada, comPlanta(entrada, CONTEXTO)).row;
+const pedidoDe = (entrada: RadarPortableExportInput) => {
+  const brief = buildRadarArticleBlueprintBrief({ entrada, silo: null, articleId: ARTIGO, publication: null });
+  return { brief, user: radarArticleBlueprintPrompt(brief).user.split("\n") };
+};
 const linhasDe = (celula: string) => celula.split("\n");
+const tudoDe = (row: RadarWritingExportRow) => RADAR_WRITING_EXPORT_COLUMNS.map(coluna => row[coluna]).join("\n");
 
 function dentroDosLimites(row: RadarWritingExportRow) {
   for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) {
@@ -176,27 +191,57 @@ function dentroDosLimites(row: RadarWritingExportRow) {
  *   - plano visual e links: a seção nomeada pelo mesmo título da estrutura.
  * Amazon e YouTube ficaram idênticos.
  */
+/*
+ * 2026-10-09 · renovado (coerência final dos 8 CSVs: defeitos 2 e 10). Prova:
+ * a cópia com SÓ portable-writing-export e portable-writing-batch de HEAD (no
+ * scratchpad, com o carregador de pacotes do repositório) devolve exatamente o
+ * snapshot anterior (os seis hashes); a diferença conferida linha a linha
+ * (silo 10 linhas, saúde 10) é só a pretendida:
+ *   - a "Continuação (não é uma segunda chamada): no fechamento…" sai da coluna
+ *     promessa_e_leitor e vira "- Leitura seguinte (opcional, não é uma
+ *     chamada): …" no corpo da seção dela, na coluna estrutura (defeito 10);
+ *   - a base única tem nome: "Páginas comparáveis lidas pela investigação (a
+ *     base das medidas e das contagens deste arquivo: 12 páginas comparáveis, de
+ *     12 sites)" e "(…; base: 12 páginas comparáveis, de 12 sites)" na referência
+ *     da SERP (defeito 2).
+ * Amazon e YouTube ficaram idênticos.
+ */
+/*
+ * 2026-10-09 · renovado (regra do dono: o CSV "Para escrever" sai só pela planta
+ * concluída). Sem planta a linha é recusada, então o snapshot passa a ser o da
+ * linha COM a planta da bancada (`radar-piloto-planta-fixtures-2026-10-09.mts`):
+ * título, promessa, estrutura, links e plano visual saem da planta; "Como
+ * superar" sai do que a planta decidiu. O que o snapshot guarda continua sendo a
+ * invariante da F4: sem Assunto, nenhuma linha dele (conferido acima, coluna a
+ * coluna) e o pedido do artigo-modelo sem as linhas do Assunto. YouTube (linha
+ * só de identidade, sem planta) ficou idêntico ao hash anterior.
+ */
 const SNAPSHOT = {
-  silo: { sha: "5228f469e71f99f0be8304b638aef550051d96e97b1a7c1271b53790c7a6d21d", len: 19169 },
-  saude: { sha: "d4ce9a3581dda3f6dbdd9a22fbc4adf5ccb73170de905104854e89de0caf51ab", len: 24043 },
+  silo: { sha: "5fc8511af93b43bfc065e16a0db1a9f75705a6b17727531de649ce229e7876ef", len: 22014 },
+  saude: { sha: "947069ff78a8b433622715db6b8d4a688e601aa8c21032280215b6348c776ac7", len: 25819 },
   artigos: {
-    google: "2152f3f83c52692475cc5b9dda0be249335a1719380c0376d6ad4f0427f55be5",
-    amazon: "a0be57cdf211dd0dd86a47f10eda688c415f1ad9cfca5534ad64cc4faa54b84a",
+    google: "c79eeb9d8ade1ec8473c75fa07e99627dcdfa57d752009fb18dea4d843e66688",
+    amazon: "37fd29dd34ef784dce6822f835c28d96b9e9af485d9bba61ca84d87fad4d6b0b",
     youtube: "0b0118248360fabc79e06be63916b91bd3f6aadd0c6b99fb06d3c4baabd5137a",
-    saude: "b95f296dabdad721e1790c376df74b3c8dbe70dff4b063d9a3d49ba862e5fe51",
+    saude: "82f260612a31a1b3d8aef0005b8538efc5cb39d0435d0e733ad9333620c6eabd",
   },
 };
 
 test("F4.4 · sem Assunto, as 13 colunas são byte a byte as do snapshot de antes da F4", () => {
-  const silo = radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
+  /* 2026-10-09 · cada artigo com a planta concluída dele (a investigação de vídeo como perfil primário não pede planta). */
+  const escrita = planoDoSilo().files[0].writing;
+  const silo = radarPortableWritingExport({ articles: comPlantas(montadasDoSilo(), escrita), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM });
   assert.equal(silo.files?.length, 1);
+  const SEM_ASSUNTO = /Assunto \(tronco\)|Virada do Assunto|Tronco \(Assunto\)|Direção do H1|destino da virada/;
+  assert.doesNotMatch(silo.files![0].csv, SEM_ASSUNTO);
   assert.equal(silo.files![0].csv.length, SNAPSHOT.silo.len);
   assert.equal(sha(silo.files![0].csv), SNAPSHOT.silo.sha, "o CSV por silo mudou sem Assunto");
 
   const saude = radarPortableWritingExport({
-    articles: montadasDoSiloSaude(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM,
+    articles: comPlantas(montadasDoSiloSaude(), escrita), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM,
     publications: new Map([[ARTIGO, PUBLICACAO_SEM_POLITICA]]),
   });
+  assert.doesNotMatch(saude.files![0].csv, SEM_ASSUNTO);
   assert.equal(saude.files![0].csv.length, SNAPSHOT.saude.len);
   assert.equal(sha(saude.files![0].csv), SNAPSHOT.saude.sha, "o CSV do silo de saúde mudou sem Assunto");
 
@@ -204,8 +249,12 @@ test("F4.4 · sem Assunto, as 13 colunas são byte a byte as do snapshot de ante
     google: entradaGoogle(), amazon: entradaAmazon(true), youtube: entradaYoutube(), saude: entradaGoogleSaude(),
   };
   for (const [nome, entrada] of Object.entries(artigos) as Array<[keyof typeof SNAPSHOT.artigos, RadarPortableExportInput]>) {
-    assert.equal(sha(JSON.stringify(buildRadarWritingExportArticle(entrada, CONTEXTO))), SNAPSHOT.artigos[nome], `${nome} mudou sem Assunto`);
+    const artigo = buildRadarWritingExportArticle(entrada, comPlanta(entrada, CONTEXTO));
+    assert.doesNotMatch(JSON.stringify(artigo), SEM_ASSUNTO, nome);
+    assert.equal(sha(JSON.stringify(artigo)), SNAPSHOT.artigos[nome], `${nome} mudou sem Assunto`);
   }
+  /* Sem Assunto, o pedido do artigo-modelo também não ganha as linhas dele. */
+  assert.equal(pedidoDe(entradaGoogle()).user.some(item => /^(Assunto \(tronco\)|Virada do Assunto|H1 com o Assunto)/.test(item)), false);
 });
 
 test("F4.4 · J: o modo técnico não ganha as linhas do Assunto", () => {
@@ -221,7 +270,8 @@ test("F4.3 · artigo: \"Assunto (tronco)\" logo abaixo da keyword principal, e o
   const artigo = linhasDe(linha(entradaCom(CONSULTA)).artigo);
   const principal = artigo.findIndex(item => item.startsWith("Keyword principal: "));
   assert.equal(artigo[principal], "Keyword principal: skincare facial");
-  assert.equal(artigo[principal + 1], "Assunto (tronco): Consulta dermatológica online");
+  /* 2026-10-09 · o destino da virada (que a coluna promessa legada dizia) sai aqui, ao lado do Assunto. */
+  assert.equal(artigo[principal + 1], "Assunto (tronco): Consulta dermatológica online — destino da virada: https://careglow.com.br/consulta-online");
   const naoAltere = artigo.find(item => item.startsWith("Não altere: ")) || "";
   assert.match(naoAltere, /a keyword principal; o papel no Silo; .*; o Assunto declarado \(não troque nem remova\)\.$/);
 
@@ -230,30 +280,26 @@ test("F4.3 · artigo: \"Assunto (tronco)\" logo abaixo da keyword principal, e o
     "o resto da coluna fica como era");
 });
 
+/*
+ * 2026-10-09 · o tronco, a virada e o destino vão ao PEDIDO do artigo-modelo
+ * (a planta decide onde e como); a coluna promessa é a da planta (leitor,
+ * promessa e ângulo) e não ganha linha legada do Assunto.
+ */
 test("F4.3 · promessa_e_leitor: tronco e virada ANTES da abertura; o lugar é o mesmo da estrutura; a chamada observada fica", () => {
   const entrada = entradaCom(CONSULTA);
   assert.equal(entrada.articleModel?.declaredSubject?.turnSection.placement, "COVERAGE_POINT", "o fixture deixa a virada como ponto a cobrir");
+  const { brief, user } = pedidoDe(entrada);
+  const tronco = user.findIndex(item => item.startsWith("Assunto (tronco): "));
+  assert.ok(tronco > 0, user.join("\n"));
+  assert.equal(user[tronco], "Assunto (tronco): Consulta dermatológica online — A marca atende por teleconsulta · destino da virada: https://careglow.com.br/consulta-online (o fechamento leva a ele)");
+  const host = entrada.articleModel!.declaredSubject!.turnSection.hostHeading!;
+  assert.equal(user[tronco + 1], `Virada do Assunto (leitura do Radar na SERP): como ponto a cobrir em "${host}" (lugar deixado pelo Radar sem sinal na SERP; a planta pode mudar)`);
+  assert.ok(brief.skeleton.some(item => item.heading === host), "o anfitrião nomeado é uma seção do esqueleto");
+
   const promessa = linhasDe(linha(entrada).promessa_e_leitor);
-  const tronco = promessa.findIndex(item => item.startsWith("Tronco (Assunto): "));
-  const abertura = promessa.findIndex(item => item.startsWith("Abertura: "));
-  assert.ok(tronco > 0 && abertura === tronco + 2, "tronco e virada, nessa ordem, logo antes da abertura");
-  assert.equal(promessa[tronco], "Tronco (Assunto): Consulta dermatológica online — A marca atende por teleconsulta.");
-  assert.equal(promessa[tronco + 1],
-    /* 2026-10-08 · P0-B · a seção é nomeada pelo título com que sai na estrutura (a pergunta do leitor, sem o molde). */
-    "Virada: como ponto a cobrir em \"Como montar a rotina de skincare facial?\" (lugar deixado pelo Radar sem sinal na SERP; quem redige pode mudar), levar o leitor de skincare facial a Consulta dermatológica online; destino: https://careglow.com.br/consulta-online.");
-  const estrutura = linhasDe(linha(entrada).estrutura);
-  assert.ok(estrutura.includes("## Como montar a rotina de skincare facial?"), "o anfitrião nomeado é o da estrutura");
-
-  const destino = promessa.findIndex(item => item.startsWith("Destino da chamada: "));
-  const chamada = promessa.findIndex(item => item.startsWith("Chamada final: "));
-  assert.ok(chamada > 0 && destino === chamada + 1, "o destino fica logo abaixo da chamada final observada");
-  assert.equal(promessa[destino], "Destino da chamada: Levar o leitor a https://careglow.com.br/consulta-online.");
-
-  const sem = linhasDe(linha(entradaGoogle()).promessa_e_leitor);
-  assert.deepEqual(promessa.filter((_, indice) => indice !== tronco && indice !== tronco + 1 && indice !== destino), sem,
-    "o resto da célula, inclusive a chamada final observada, fica igual");
-  assert.ok(sem.some(item => item.startsWith("Chamada final: ")));
-  assert.equal(sem.some(item => item.startsWith("Destino da chamada")), false);
+  assert.deepEqual(promessa.map(item => item.split(":")[0]), ["Leitor", "Promessa", "Ângulo"], "a promessa é a da planta");
+  assert.equal(promessa.some(item => /^(Tronco|Virada|Destino da chamada|Chamada final)/.test(item)), false);
+  assert.deepEqual(promessa, linhasDe(linha(entradaGoogle()).promessa_e_leitor), "a coluna fica igual: o Assunto está no pedido e na coluna artigo");
 });
 
 test("F4.3 · promessa_e_leitor: com bloco observado que já trata o Assunto, a virada é nele, nunca \"sem sinal\"", () => {
@@ -267,84 +313,89 @@ test("F4.3 · promessa_e_leitor: com bloco observado que já trata o Assunto, a 
   assert.equal(turn.suggestedPositionLabel, `Na seção "${turn.turnSection.heading}": é o bloco da amostra que já trata o Assunto (em ${contagem}).`);
   assert.notEqual(turn.suggestedPositionLabel, RADAR_SUBJECT_NO_SIGNAL);
 
-  const promessa = linhasDe(linha(entrada).promessa_e_leitor);
-  const virada = promessa.find(item => item.startsWith("Virada: ")) || "";
-  assert.equal(virada,
-    `Virada: na seção "${radarWritingStripHeadingTemplate(turn.turnSection.heading)}" (a amostra já trata o Assunto em ${contagem}), levar o leitor de skincare facial a Rotina de skincare facial.`);
+  const { user } = pedidoDe(entrada);
+  const virada = user.find(item => item.startsWith("Virada do Assunto")) || "";
+  assert.equal(virada, `Virada do Assunto (leitura do Radar na SERP): na seção "${turn.turnSection.heading}" (a amostra já trata o Assunto em ${contagem})`);
   assert.equal(virada.includes("sem sinal"), false);
-  assert.equal(promessa.some(item => item.startsWith("Destino da chamada")), false, "sem destino, sem linha de destino");
+  assert.ok(user.includes("Assunto (tronco): Rotina de skincare facial"), "sem destino, sem 'destino da virada'");
+  assert.ok(linhasDe(linha(entrada).artigo).includes("Assunto (tronco): Rotina de skincare facial"));
 });
 
 test("F4.3 · promessa_e_leitor: com posição sugerida pelo Radar, \"depois de <seção>\"; sem destino, sem \"destino:\"", () => {
-  const promessa = linhasDe(linha(entradaCom(ORDEM)).promessa_e_leitor);
-  assert.ok(promessa.includes("Tronco (Assunto): Ordem dos ácidos no rosto."));
-  assert.ok(promessa.includes("Virada: depois de \"Qual a ordem dos produtos?\", levar o leitor de skincare facial a Ordem dos ácidos no rosto."));
-  assert.equal(promessa.some(item => item.includes("destino:")), false);
+  const entrada = entradaCom(ORDEM);
+  const { user } = pedidoDe(entrada);
+  assert.ok(user.includes("Assunto (tronco): Ordem dos ácidos no rosto"));
+  const depois = entrada.articleModel!.declaredSubject!.suggestedPosition!.afterHeading;
+  assert.ok(user.includes(`Virada do Assunto (leitura do Radar na SERP): depois de "${depois}"`), user.join("\n"));
+  assert.equal(user.some(item => item.includes("destino da virada")), false);
+  assert.equal(tudoDe(linha(entrada)).includes("destino da virada"), false);
 });
 
 test("F4.3 · titulo_e_seo: a direção do H1 segue a sugestão do Radar, e a principal continua dona do H1", () => {
+  /* 2026-10-09 · a direção do H1 vai ao pedido do artigo-modelo ("H1 com o Assunto"); o título da linha é o da planta, com a principal. */
+  const h1 = (entrada: RadarPortableExportInput) => pedidoDe(entrada).user.find(item => item.startsWith("H1 com o Assunto: ")) || "";
   const titulo = (entrada: RadarPortableExportInput) => linhasDe(linha(entrada).titulo_e_seo);
-  const sem = titulo(entradaGoogle());
+  const LEGADO = /^(Direção do H1|Assunto em H2\/H3|Assunto no H1)/;
 
   const zeroDeN = entradaCom(CONSULTA).articleModel?.declaredSubject;
   assert.ok(zeroDeN?.alert, "0 de N páginas: o alerta está ligado");
   assert.equal(zeroDeN?.h1Complement.titlePages, 0);
   assert.equal(zeroDeN?.h1Complement.headingPages, 0);
-  assert.equal(zeroDeN?.h1Complement.label, RADAR_SUBJECT_NO_SIGNAL, "o modelo e o CSV dizem o mesmo: sem sinal");
+  assert.equal(zeroDeN?.h1Complement.label, RADAR_SUBJECT_NO_SIGNAL, "o modelo e o pedido dizem o mesmo: sem sinal");
+  assert.equal(h1(entradaCom(CONSULTA)), "H1 com o Assunto: sem sinal na SERP — o H1 é da principal", "0 de N é sem sinal na SERP");
   const semSinal = titulo(entradaCom(CONSULTA));
-  assert.ok(semSinal.includes(RADAR_WRITING_SUBJECT_H1_NO_SIGNAL), "0 de N é sem sinal na SERP");
-  assert.equal(semSinal.some(item => item.startsWith("Assunto em H2/H3")), false, "0 de N nunca vira \"Assunto em H2/H3\"");
-  assert.deepEqual(semSinal.filter(item => item !== RADAR_WRITING_SUBJECT_H1_NO_SIGNAL), sem);
+  assert.ok(semSinal.includes("H1: Skincare facial: o guia prático"), "a principal continua dona do H1 da planta");
+  assert.equal(semSinal.some(item => LEGADO.test(item)), false, "o título da linha é o da planta");
+  assert.equal(RADAR_WRITING_SUBJECT_H1_NO_SIGNAL.includes("O H1 é da principal"), true);
 
   assert.ok((entradaCom(ORDEM).articleModel?.declaredSubject?.h1Complement.headingPages ?? 0) > 0, "a amostra trata o Assunto em H2/H3");
-  const emH2 = titulo(entradaCom(ORDEM));
-  assert.ok(emH2.includes("Assunto em H2/H3 — o H1 é da principal."));
-  assert.deepEqual(emH2.filter(item => item !== "Assunto em H2/H3 — o H1 é da principal."), sem);
+  assert.equal(h1(entradaCom(ORDEM)), "H1 com o Assunto: Assunto em H2/H3 — o H1 é da principal");
 
-  const comComplemento = titulo(entradaCom(CONSULTA, turn => ({
+  const comComplemento = entradaCom(CONSULTA, turn => ({
     ...turn, h1Complement: { suggested: true, complement: turn.phrase, titlePages: 7, headingPages: 3, sampleSize: 12, label: "rótulo do Radar" },
-  })));
-  assert.ok(comComplemento.includes("Direção do H1: skincare facial + complemento \"Consulta dermatológica online\" (sugestão do Radar; a decisão é de quem redige)."));
-  assert.equal(comComplemento.some(item => item.startsWith("Assunto em H2/H3")), false);
+  }));
+  assert.equal(h1(comComplemento), "H1 com o Assunto: skincare facial + complemento \"Consulta dermatológica online\" (sugestão do Radar; o H1 continua da principal)");
 
-  const semLeitura = titulo(entradaCom(CONSULTA, turn => ({
+  const semLeitura = entradaCom(CONSULTA, turn => ({
     ...turn, h1Complement: { suggested: false, complement: null, titlePages: null, headingPages: null, sampleSize: 0, label: RADAR_SUBJECT_NO_SIGNAL },
-  })));
-  assert.ok(semLeitura.includes(RADAR_WRITING_SUBJECT_H1_NO_SIGNAL));
-  assert.equal(semLeitura.some(item => item.startsWith("Assunto em H2/H3")), false, "sem sinal, nunca \"Assunto em H2/H3\"");
+  }));
+  assert.equal(h1(semLeitura), "H1 com o Assunto: sem sinal na SERP — o H1 é da principal", "sem sinal, nunca \"Assunto em H2/H3\"");
+  assert.equal(h1(entradaGoogle()), "", "sem Assunto, sem a linha");
 });
 
 test("F4.3 · estrutura: a seção da virada vem do modelo do Radar, marcada pelo motivo do Assunto; nenhuma linha inventada", () => {
-  const motivo = `- Obrigatória pelo ArticleDNA: ${RADAR_SUBJECT_MUST_COVER_REASON.replace(/\.$/, "")}.`;
+  /*
+   * 2026-10-09 · a seção da virada chega ao ESQUELETO do gerador como veio do
+   * modelo do Radar, obrigatória (o motivo do Assunto); a estrutura da linha é
+   * a da planta, sem linha legada do Assunto.
+   */
   for (const assunto of [CONSULTA, ORDEM]) {
     const entrada = entradaCom(assunto);
-    const estrutura = linhasDe(linha(entrada).estrutura);
-    assert.ok(estrutura.includes(motivo), `${assunto.phrase}: a marcação traz o motivo próprio`);
-    assert.equal(estrutura.some(item => /^(Tronco|Virada:|Assunto)/.test(item)), false, "o export não escreve linha própria na estrutura");
-
+    const { brief } = pedidoDe(entrada);
     const editorial = radarPortableEditorialOf({ profile: "GOOGLE", principalKeyword: "skincare facial", articleModel: entrada.articleModel });
-    /* 2026-10-08 · P0-B · o título sai do modelo: o cabeçalho (sem o molde) ou a pergunta do leitor da seção. */
-    const doModelo = new Set(radarPortableFlatSections(editorial.sections).flatMap(secao => [secao.heading, radarWritingStripHeadingTemplate(secao.heading), secao.readerQuestion || ""]));
-    for (const cabecalho of estrutura.filter(item => /^#{2,3} /.test(item)).map(item => item.replace(/^#+ /, ""))) {
-      assert.ok(doModelo.has(cabecalho), `"${cabecalho}" não veio do modelo do Radar`);
+    const daVirada = radarPortableFlatSections(editorial.sections).filter(secao => secao.mustCoverReasons.includes(RADAR_SUBJECT_MUST_COVER_REASON)).map(secao => secao.heading);
+    assert.ok(daVirada.length >= 1, `${assunto.phrase}: o modelo marca a seção da virada`);
+    for (const cabecalho of daVirada) {
+      assert.equal(brief.skeleton.find(item => item.heading === cabecalho)?.mustCover, true, `${assunto.phrase}: "${cabecalho}" chega ao esqueleto, obrigatória`);
     }
+    const estrutura = linhasDe(linha(entrada).estrutura);
+    assert.equal(estrutura.some(item => /^(Tronco|Virada:|Assunto)/.test(item)), false, "o export não escreve linha própria na estrutura");
   }
 
-  const h3 = linhasDe(linha(entradaCom(ORDEM)).estrutura);
-  const virada = h3.indexOf(`### ${radarSubjectTurnTitle(ORDEM.phrase)}`);
-  assert.ok(virada > 0, "no H3, a seção sintética aparece como veio do modelo");
-  assert.equal(h3[virada + 1], RADAR_WRITING_SUBJECT_WORKING_TITLE, "o nome da seção no Radar é título de trabalho, não de publicação");
-  assert.equal(h3.slice(virada + 1, virada + 5).includes(motivo), true);
-  assert.equal(h3.filter(item => item === RADAR_WRITING_SUBJECT_WORKING_TITLE).length, 1, "só a seção sintética leva a marca");
+  /* No H3, a seção sintética chega como veio do modelo, filha do bloco que a recebe. */
+  const sintetica = pedidoDe(entradaCom(ORDEM)).brief.skeleton.find(item => item.heading === radarSubjectTurnTitle(ORDEM.phrase));
+  assert.ok(sintetica, "a seção sintética da virada chega ao esqueleto");
+  assert.equal(sintetica!.level, 3);
+  assert.equal(sintetica!.mustCover, true);
 
-  const ponto = linhasDe(linha(entradaCom(CONSULTA)).estrutura);
-  const cobrir = ponto.find(item => item.startsWith("- Cobrir: virada para "));
-  assert.equal(cobrir, "- Cobrir: virada para Consulta dermatológica online · Consulta dermatológica online: A marca atende por teleconsulta.",
-    "como ponto a cobrir, a virada vai à frente dos pontos do anfitrião");
+  /* Como ponto a cobrir, a virada vai à frente dos pontos do anfitrião. */
+  const host = entradaCom(CONSULTA).articleModel!.declaredSubject!.turnSection.hostHeading!;
+  const anfitriao = pedidoDe(entradaCom(CONSULTA)).brief.skeleton.find(item => item.heading === host);
+  assert.equal(anfitriao?.cover[0], "virada para Consulta dermatológica online", JSON.stringify(anfitriao));
 
-  const sem = linha(entradaGoogle()).estrutura;
-  assert.equal(sem.includes(RADAR_SUBJECT_MUST_COVER_REASON), false);
-  assert.equal(sem.includes(RADAR_WRITING_SUBJECT_WORKING_TITLE), false);
+  const sem = pedidoDe(entradaGoogle());
+  assert.equal(sem.user.join("\n").includes(RADAR_SUBJECT_MUST_COVER_REASON), false);
+  assert.equal(linha(entradaGoogle()).estrutura.includes(RADAR_WRITING_SUBJECT_WORKING_TITLE), false);
 });
 
 test("F4.3 · limites de caracteres respeitados com Assunto, nota no teto e destino longo", () => {
@@ -354,19 +405,24 @@ test("F4.3 · limites de caracteres respeitados com Assunto, nota no teto e dest
     destinationUrl: `https://careglow.com.br/${"consulta-online/".repeat(10)}agendar`,
   };
   for (const entrada of [entradaCom(longo), entradaCom(CONSULTA), entradaCom(ORDEM)]) dentroDosLimites(linha(entrada));
-  const promessa = linha(entradaCom(longo)).promessa_e_leitor;
-  assert.ok(promessa.includes(`— ${"n".repeat(280)}.`), "a nota sai inteira");
-  assert.ok(promessa.includes(`destino: ${longo.destinationUrl}.`));
+  /* 2026-10-09 · a nota e o destino vão inteiros ao pedido do artigo-modelo; o destino, também à coluna artigo. */
+  const tronco = pedidoDe(entradaCom(longo)).user.find(item => item.startsWith("Assunto (tronco): ")) || "";
+  assert.ok(tronco.includes(`— ${"n".repeat(280)} ·`), "a nota sai inteira");
+  assert.ok(tronco.includes(`destino da virada: ${longo.destinationUrl} (o fechamento leva a ele)`));
+  assert.ok(linha(entradaCom(longo)).artigo.includes(`destino da virada: ${longo.destinationUrl}`));
 });
 
 test("F4.3 · Assunto só no contexto (sem artigo-modelo): tronco, virada sem posição e H1 devolvido a quem redige", () => {
+  /* 2026-10-09 · sem a virada do modelo, o pedido diz que o lugar é da planta (sem sinal), e o destino sai do contexto, limpo. */
   const contexto = contextoCom(CONSULTA);
-  const row = linha(entradaGoogle({ researchContext: contexto }));
-  assert.ok(linhasDe(row.artigo).includes("Assunto (tronco): Consulta dermatológica online"));
-  assert.ok(linhasDe(row.promessa_e_leitor).some(item => item.startsWith("Virada: onde quem redige decidir (sem sinal na SERP)")));
-  assert.ok(linhasDe(row.titulo_e_seo).includes(RADAR_WRITING_SUBJECT_H1_NO_SIGNAL));
-  assert.ok(linhasDe(row.promessa_e_leitor).includes("Destino da chamada: Levar o leitor a https://careglow.com.br/consulta-online."),
-    "sem artigo-modelo, a direção para o destino sai do contexto");
+  const entrada = entradaGoogle({ researchContext: contexto });
+  const row = linha(entrada);
+  assert.ok(linhasDe(row.artigo).includes("Assunto (tronco): Consulta dermatológica online — destino da virada: https://careglow.com.br/consulta-online"), row.artigo);
+  const { user } = pedidoDe(entrada);
+  assert.ok(user.includes("Virada do Assunto (leitura do Radar na SERP): onde a planta decidir (sem sinal na SERP)"), user.join("\n"));
+  assert.ok(user.includes("H1 com o Assunto: sem sinal na SERP — o H1 é da principal"));
+  assert.ok(user.some(item => item.startsWith("Assunto (tronco): Consulta dermatológica online") && item.includes("destino da virada: https://careglow.com.br/consulta-online (o fechamento leva a ele)")),
+    "sem artigo-modelo do Radar, a direção para o destino sai do contexto");
 });
 
 /* ============================ F4.1 ============================ */

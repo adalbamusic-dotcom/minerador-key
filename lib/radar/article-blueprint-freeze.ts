@@ -26,6 +26,13 @@
  *
  * Módulo puro (sem servidor, sem banco): o leitor do export, o `ifMissing`, a
  * aprovação, o Redator e o painel usam as MESMAS funções.
+ *
+ * 2026-10-09 · A AMAZON CONGELADA ENTRA NO VÍNCULO, DE FORMA ADITIVA. A versão
+ * nova grava também `amazonFrozenAt` (o congelamento da Amazon na organização;
+ * null = sem Amazon). Com a chave dos dois lados, um congelamento NOVO da Amazon
+ * desliga a planta (o bloco comercial precisa entrar nela). A versão gravada
+ * antes, sem a chave, continua vinculada como era — nenhuma planta concluída se
+ * desliga por causa desta regra.
  */
 
 /** O que a versão nova grava no payload: sobre qual investigação congelada e qual ArticleDNA a planta foi organizada. */
@@ -39,6 +46,16 @@ export type RadarArticleBlueprintInvestigationRef = {
   /** O ArticleDNA do dossiê sobre o qual a planta foi organizada. */
   articleDnaVersionId: string;
   articleDnaContentHash: string | null;
+  /**
+   * 2026-10-09 · O CONGELAMENTO DA AMAZON TAMBÉM PRENDE A PLANTA (aditivo). O
+   * instante da investigação da Amazon congelada (`amazonFrozenInvestigation.finalizedAt`)
+   * quando a planta foi organizada; `null` = não havia Amazon congelada. AUSENTE
+   * (a chave nem existe) = versão gravada antes desta regra: ela continua
+   * vinculada, sem conferência da Amazon (congelamento é sagrado). Com a chave
+   * dos dois lados, um congelamento NOVO da Amazon desliga a planta, para o
+   * bloco comercial entrar na planta reorganizada.
+   */
+  amazonFrozenAt?: string | null;
 };
 
 /**
@@ -85,6 +102,8 @@ export function radarArticleBlueprintInvestigationRefOf(valor: unknown): RadarAr
     frozenBundleHash: texto(ref.frozenBundleHash),
     articleDnaVersionId,
     articleDnaContentHash: texto(ref.articleDnaContentHash),
+    /* 2026-10-09 · a chave só existe na versão gravada com a regra da Amazon: ausente, a versão continua sem a conferência. */
+    ...("amazonFrozenAt" in ref ? { amazonFrozenAt: texto(ref.amazonFrozenAt) } : {}),
   };
 }
 
@@ -96,7 +115,26 @@ export function radarArticleBlueprintInvestigationRefToStore(atual: RadarArticle
     frozenBundleHash: atual.frozenBundleHash,
     articleDnaVersionId: atual.articleDnaVersionId,
     articleDnaContentHash: atual.articleDnaContentHash,
+    /* 2026-10-09 · o congelamento da Amazon vigente na organização (null = sem Amazon congelada); quem não o conhece não grava a chave. */
+    ...(atual.amazonFrozenAt !== undefined ? { amazonFrozenAt: atual.amazonFrozenAt } : {}),
   };
+}
+
+/**
+ * 2026-10-09 · O MESMO CONGELAMENTO DA AMAZON. Só confere quando os dois lados
+ * conhecem a Amazon (a chave existe na versão gravada E quem lê sabe o
+ * congelamento vigente): a versão gravada antes desta regra, e o leitor que não
+ * lê a Amazon (o Redator, o painel antigo), passam como antes. Sem Amazon dos
+ * dois lados (null e null) é o mesmo; Amazon congelada depois da planta (null ×
+ * instante), re-congelada (outro instante) ou reaberta (instante × null) desliga.
+ */
+export function radarArticleBlueprintSameAmazonFreeze(
+  ref: Pick<RadarArticleBlueprintInvestigationRef, "amazonFrozenAt">,
+  atual: Pick<RadarArticleBlueprintInvestigationRef, "amazonFrozenAt">,
+): boolean {
+  if (ref.amazonFrozenAt === undefined || atual.amazonFrozenAt === undefined) return true;
+  if (ref.amazonFrozenAt === null || atual.amazonFrozenAt === null) return ref.amazonFrozenAt === atual.amazonFrozenAt;
+  return mesmoInstante(ref.amazonFrozenAt, atual.amazonFrozenAt);
 }
 
 /** O mesmo congelamento: mesmo instante e, quando os dois lados o têm, o mesmo pacote congelado. */
@@ -135,6 +173,8 @@ export function radarArticleBlueprintFitsInvestigation(
   if (ref) {
     if (!radarArticleBlueprintSameFreeze(ref, atual)) return false;
     if (ref.articleDnaVersionId !== atual.articleDnaVersionId) return false;
+    /* 2026-10-09 · congelamento novo da Amazon desliga a versão que o conhecia (a versão sem a chave segue vinculada). */
+    if (!radarArticleBlueprintSameAmazonFreeze(ref, atual)) return false;
     return !(ref.articleDnaContentHash && atual.articleDnaContentHash && ref.articleDnaContentHash !== atual.articleDnaContentHash);
   }
   const nascida = radarArticleBlueprintFamilyBornAt(versao, versoes);
@@ -190,6 +230,12 @@ export type RadarArticleBlueprintPanelFreeze = {
    * conferência de ArticleDNA, e o painel não afirma que ela vai.
    */
   articleDnaVersionId?: string | null;
+  /**
+   * 2026-10-09 · Aditivo: o congelamento da Amazon que a página conhece
+   * (`amazonFrozenInvestigation.finalizedAt`; null = sem Amazon congelada).
+   * Ausente = o painel não confere a Amazon, como antes.
+   */
+  amazonFrozenAt?: string | null;
 };
 
 /**
@@ -206,6 +252,8 @@ export function radarArticleBlueprintOfPanelFreeze(
   const ref = radarArticleBlueprintInvestigationRefOf(versao.investigationRef);
   if (ref) {
     if (!radarArticleBlueprintSameFreeze(ref, { frozenAt: congelamento.frozenAt, frozenBundleId: congelamento.bundleId ?? null })) return false;
+    /* 2026-10-09 · com o congelamento da Amazon que a página conhece, a mesma regra do export. */
+    if (!radarArticleBlueprintSameAmazonFreeze(ref, { amazonFrozenAt: congelamento.amazonFrozenAt })) return false;
     /* 2026-10-08 (correção) · com o ArticleDNA da página, a versão nova de OUTRO ArticleDNA não é do vigente (o export e o Redator a recusam). */
     return !(congelamento.articleDnaVersionId && ref.articleDnaVersionId !== congelamento.articleDnaVersionId);
   }

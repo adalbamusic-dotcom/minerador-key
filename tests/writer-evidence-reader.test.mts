@@ -874,7 +874,8 @@ test("fundamentos · ≤ 24 kB, com guardas, o que não pode redefinir, projeç�
   conferirLeituraEstreita();
   assert.ok(registros.every(registro => !registro.table.startsWith("rpc/")), "fundamentos não dependem da migration");
   const caminhosDoPacote = registros.filter(registro => registro.table === "content_documents").flatMap(registro => (registro.select || "").split(",")).filter(coluna => coluna.includes("->bundle->"));
-  assert.ok(caminhosDoPacote.length <= 8, `${caminhosDoPacote.length} caminhos do pacote`);
+  /* 2026-10-09 · + as três partes das afirmações do pacote (a trava do CSV na planta) e o congelamento da Amazon no cabeçalho. */
+  assert.ok(caminhosDoPacote.length <= 12, `${caminhosDoPacote.length} caminhos do pacote`);
   const consultasDoPacote = registros.filter(registro => registro.table === "content_documents" && (registro.select || "").includes("->bundle->") && !(registro.select || "").includes("h_schemaVersion"));
   assert.ok(consultasDoPacote.every(registro => (registro.select || "").split(",").filter(coluna => coluna.startsWith("p_")).length <= 5), "no máximo 5 caminhos por consulta");
 });
@@ -1473,9 +1474,20 @@ test("F4.1 · com Assunto gravado no envio: fundamentos, material por seção, p
     for (const [nome, lista] of [["fundamentos", fundamentos.writerMayNot], ["material", material.writerMayNot], ["pacote", pacote.writerMayNot], ["fatia", fatia.writerMayNot], ["cabeçalho", head.dossier?.writerMayNot ?? []]] as const) {
       assert.deepEqual([...lista], GRAVADA, `${nome}: a proibição do Assunto uma vez, no fim`);
     }
-    assert.deepEqual(fundamentos.editorialContext, LINHAS);
-    assert.deepEqual(material.editorialContext, LINHAS);
-    assert.deepEqual(pacote.editorialContext, LINHAS);
+    /*
+     * 2026-10-09 · regra do piloto: quem lê troca as linhas do Assunto gravadas
+     * no envio (a virada do modelo antigo, "sem sinal na SERP") pelas da planta
+     * concluída; sem planta neste pacote, a virada aponta a seção do
+     * artigo-modelo, sem lugar inventado. Tronco e destino continuam.
+     */
+    const { radarWriterSubjectTurnLinesFromBlueprint } = await import("../lib/redator/radar-subject-turn.ts");
+    const PELA_PLANTA = radarWriterSubjectTurnLinesFromBlueprint({ subject, blueprint: null, principal: "rotina pele oleosa" });
+    assert.equal(PELA_PLANTA[0], LINHAS[0], "o tronco é o mesmo");
+    assert.equal(PELA_PLANTA.at(-1), LINHAS.at(-1), "o destino é o mesmo");
+    assert.equal(PELA_PLANTA.some(linha => /sem sinal na SERP/.test(linha)), false, "a virada do modelo antigo sai");
+    assert.deepEqual(fundamentos.editorialContext, PELA_PLANTA);
+    assert.deepEqual(material.editorialContext, PELA_PLANTA);
+    assert.deepEqual(pacote.editorialContext, PELA_PLANTA);
     assert.deepEqual(fundamentos.article?.fields.subject, { phrase: subject.phrase, note: subject.note, destinationUrl: subject.destinationUrl });
     assert.ok(writerEvidenceJsonBytes(fundamentos) <= WRITER_EVIDENCE_LIMITS.foundationsMaxBytes);
     assert.equal(leiturasDasLinhas().length, 2, "fundamentos e material: uma leitura estreita cada");

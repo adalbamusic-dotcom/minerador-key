@@ -1,0 +1,1448 @@
+{
+  "_leia": "Congelamentos YouTube e Amazon tirados com o código de 2026-10-09 ANTES da regra nova de finalizar sozinho (consulta e apoio que falham viram limitação registrada). Gerado por fixture, sem provider. Não editar: os testes conferem o hash de cada um.",
+  "youtubeFrozenInvestigation": {
+    "frozenVersion": 1,
+    "finalizedAt": "2026-09-14T21:00:00.000Z",
+    "finalizedBy": "u",
+    "runRef": {
+      "runId": "run-yt-antiga",
+      "runVersion": 1,
+      "runFingerprint": "ytrun:b47271e1",
+      "collectedAt": "2026-09-14T18:51:07.000Z",
+      "provider": "dataforseo",
+      "endpoint": "/v3/serp/youtube/organic/live/advanced",
+      "queriesExecuted": 1,
+      "universeSize": 25,
+      "selectedVideoIds": []
+    },
+    "run": null,
+    "blueprint": {
+      "blueprintVersion": 1,
+      "runId": "run-yt-antiga",
+      "runFingerprint": "ytrun:b47271e1",
+      "generatedAt": "2026-09-14T19:00:00.000Z",
+      "observed": {
+        "declaredIntent": "INFORMATIONAL",
+        "universeSize": 25,
+        "comparableSize": 25,
+        "longForm": {
+          "format": "LONG_FORM",
+          "videoCount": 11,
+          "durationSeconds": {
+            "sampleSize": 11,
+            "p25": 679,
+            "median": 930,
+            "p75": 1008,
+            "min": 264,
+            "max": 1397
+          },
+          "views": {
+            "sampleSize": 11,
+            "p25": 28500,
+            "median": 67000,
+            "p75": 115000,
+            "min": 420,
+            "max": 514000
+          },
+          "ageMonths": {
+            "sampleSize": 11,
+            "p25": 12,
+            "median": 24,
+            "p75": 24,
+            "min": 4.03615453290018,
+            "max": 59.982278434808
+          },
+          "occurrence": {
+            "sampleSize": 11,
+            "p25": 1,
+            "median": 1,
+            "p75": 1,
+            "min": 1,
+            "max": 1
+          },
+          "dominantChannels": [
+            {
+              "channelId": "UCyXAk6wNyu_mqCau-J2yCCw",
+              "channelName": "Dra. Marina Hayashida",
+              "videos": 4,
+              "bestRank": 1
+            },
+            {
+              "channelId": "UCK9NhQvcfsGtle5iuqLFZcw",
+              "channelName": "Cams Castro",
+              "videos": 2,
+              "bestRank": 7
+            }
+          ],
+          "titlePatterns": [
+            {
+              "id": "ROTINA",
+              "label": "Rotina",
+              "count": 2,
+              "share": 0.18181818181818182
+            },
+            {
+              "id": "LISTA",
+              "label": "Lista (dicas, melhores, top)",
+              "count": 1,
+              "share": 0.09090909090909091
+            },
+            {
+              "id": "NAO_FACA",
+              "label": "Alerta / não faça",
+              "count": 1,
+              "share": 0.09090909090909091
+            },
+            {
+              "id": "PASSO_A_PASSO",
+              "label": "Passo a passo",
+              "count": 1,
+              "share": 0.09090909090909091
+            }
+          ],
+          "recurrentTerms": [
+            {
+              "term": "skincare",
+              "count": 9
+            },
+            {
+              "term": "nighttime",
+              "count": 6
+            },
+            {
+              "term": "routine",
+              "count": 4
+            },
+            {
+              "term": "night",
+              "count": 3
+            },
+            {
+              "term": "doing",
+              "count": 2
+            },
+            {
+              "term": "guide",
+              "count": 2
+            },
+            {
+              "term": "noturna",
+              "count": 2
+            },
+            {
+              "term": "rotina",
+              "count": 2
+            },
+            {
+              "term": "skin",
+              "count": 2
+            },
+            {
+              "term": "step",
+              "count": 2
+            },
+            {
+              "term": "tips",
+              "count": 2
+            }
+          ],
+          "limitations": []
+        },
+        "shorts": {
+          "format": "SHORTS",
+          "videoCount": 14,
+          "durationSeconds": {
+            "sampleSize": 14,
+            "p25": 16,
+            "median": 24,
+            "p75": 35,
+            "min": 6,
+            "max": 95
+          },
+          "views": {
+            "sampleSize": 14,
+            "p25": 70000,
+            "median": 202500,
+            "p75": 481500,
+            "min": 5800,
+            "max": 2700000
+          },
+          "ageMonths": {
+            "sampleSize": 14,
+            "p25": 12,
+            "median": 12,
+            "p75": 33,
+            "min": 9.982278434808002,
+            "max": 36.00067528106293
+          },
+          "occurrence": {
+            "sampleSize": 14,
+            "p25": 1,
+            "median": 1,
+            "p75": 1,
+            "min": 1,
+            "max": 1
+          },
+          "dominantChannels": [
+            {
+              "channelId": "UCyXAk6wNyu_mqCau-J2yCCw",
+              "channelName": "Dra. Marina Hayashida",
+              "videos": 2,
+              "bestRank": 17
+            }
+          ],
+          "titlePatterns": [
+            {
+              "id": "ROTINA",
+              "label": "Rotina",
+              "count": 4,
+              "share": 0.2857142857142857
+            },
+            {
+              "id": "NAO_FACA",
+              "label": "Alerta / não faça",
+              "count": 2,
+              "share": 0.14285714285714285
+            },
+            {
+              "id": "PERGUNTA",
+              "label": "Pergunta",
+              "count": 1,
+              "share": 0.07142857142857142
+            }
+          ],
+          "recurrentTerms": [
+            {
+              "term": "skincare",
+              "count": 11
+            },
+            {
+              "term": "routine",
+              "count": 6
+            },
+            {
+              "term": "nighttime",
+              "count": 5
+            },
+            {
+              "term": "rotina",
+              "count": 4
+            },
+            {
+              "term": "care",
+              "count": 3
+            },
+            {
+              "term": "noturno",
+              "count": 3
+            },
+            {
+              "term": "skin",
+              "count": 3
+            },
+            {
+              "term": "skincareroutine",
+              "count": 3
+            },
+            {
+              "term": "long",
+              "count": 2
+            },
+            {
+              "term": "night",
+              "count": 2
+            },
+            {
+              "term": "noturna",
+              "count": 2
+            },
+            {
+              "term": "ordem",
+              "count": 2
+            }
+          ],
+          "limitations": []
+        },
+        "avFormats": [
+          {
+            "id": "ROTINA",
+            "label": "Rotina",
+            "count": 6,
+            "share": 0.24
+          },
+          {
+            "id": "ALERTA",
+            "label": "Alerta / desmistificação",
+            "count": 3,
+            "share": 0.12
+          },
+          {
+            "id": "RANKING",
+            "label": "Ranking / lista",
+            "count": 1,
+            "share": 0.04
+          },
+          {
+            "id": "TUTORIAL",
+            "label": "Tutorial",
+            "count": 1,
+            "share": 0.04
+          }
+        ],
+        "recurrentChannels": [
+          {
+            "channelId": "UCyXAk6wNyu_mqCau-J2yCCw",
+            "channelName": "Dra. Marina Hayashida",
+            "videos": 6,
+            "bestRank": 1
+          },
+          {
+            "channelId": "UCK9NhQvcfsGtle5iuqLFZcw",
+            "channelName": "Cams Castro",
+            "videos": 2,
+            "bestRank": 7
+          }
+        ],
+        "crossQueryVideos": []
+      },
+      "recommended": {
+        "destination": "BOTH",
+        "format": "Rotina",
+        "durationSecondsRange": {
+          "min": 16,
+          "max": 35
+        },
+        "strategy": [
+          {
+            "dimension": "Linguagem e nível técnico",
+            "observedSignal": "Nenhum dos 14 título(s) invoca autoridade profissional explícita.",
+            "recommendedStrategy": "Linguagem direta e cotidiana; a credencial pode ficar no corpo, sem ocupar o título."
+          },
+          {
+            "dimension": "Promessa",
+            "observedSignal": "Nenhuma promessa de preço ou de resultado aparece de forma recorrente.",
+            "recommendedStrategy": "Há espaço para uma promessa concreta — a SERP está dominada por títulos descritivos."
+          },
+          {
+            "dimension": "Posicionamento",
+            "observedSignal": "2 canal(is) aparecem com mais de um vídeo; o mais recorrente tem 6.",
+            "recommendedStrategy": "Disputar por ÂNGULO, não por volume: os canais recorrentes já ocupam a busca genérica."
+          },
+          {
+            "dimension": "Urgência e recência",
+            "observedSignal": "A mediana de idade da coorte é de 12 mês(es).",
+            "recommendedStrategy": "O acervo é recente: a disputa é por qualidade e ângulo, não por atualização."
+          },
+          {
+            "dimension": "Foco e CTA",
+            "observedSignal": "A intenção declarada pelo Arquiteto é \"INFORMATIONAL\".",
+            "recommendedStrategy": "Foco educativo: CTA de continuidade (aprofundar, salvar, acompanhar a série)."
+          },
+          {
+            "dimension": "Formato",
+            "observedSignal": "O formato mais recorrente é Rotina (6 de 14).",
+            "recommendedStrategy": "Entregar em Rotina para competir no mesmo terreno — ou deliberadamente em outro, para diferenciar."
+          }
+        ],
+        "script": [
+          {
+            "block": "GANCHO",
+            "purpose": "Afirmar o resultado ou o erro nos primeiros 2 segundos.",
+            "derivedFrom": "formato dominante da SERP (Rotina)"
+          },
+          {
+            "block": "ENTREGA",
+            "purpose": "Uma informação só, completa e verificável.",
+            "derivedFrom": "formato dominante da SERP (Rotina)"
+          },
+          {
+            "block": "PROVA",
+            "purpose": "Demonstração rápida ou credencial que sustenta a afirmação.",
+            "derivedFrom": "formato dominante da SERP (Rotina)"
+          },
+          {
+            "block": "CORTE",
+            "purpose": "Encerrar no ponto alto, com CTA curto de continuidade.",
+            "derivedFrom": "formato dominante da SERP (Rotina)"
+          }
+        ],
+        "scriptDisclaimer": "Roteiro RECOMENDADO, derivado da intenção e do formato dominante da SERP. Não é a estrutura literal dos concorrentes: esta pesquisa não baixa nem transcreve vídeo.",
+        "titleOpportunities": [
+          "Passo a passo: nenhum título da amostra usa este padrão.",
+          "Como (instrucional): nenhum título da amostra usa este padrão.",
+          "Lista (dicas, melhores, top): nenhum título da amostra usa este padrão.",
+          "Ranking: nenhum título da amostra usa este padrão.",
+          "Comparação: nenhum título da amostra usa este padrão.",
+          "Problema → solução: nenhum título da amostra usa este padrão.",
+          "Vale a pena: nenhum título da amostra usa este padrão.",
+          "Custo-benefício: nenhum título da amostra usa este padrão.",
+          "Review / resenha: nenhum título da amostra usa este padrão.",
+          "Transformação: nenhum título da amostra usa este padrão.",
+          "Autoridade profissional: nenhum título da amostra usa este padrão."
+        ],
+        "gaps": []
+      },
+      "limitations": [
+        "Esta leitura usa apenas o que a SERP do YouTube entrega: título, canal, posição, duração, formato, visualizações e data. Nenhum vídeo foi baixado, assistido ou transcrito."
+      ]
+    },
+    "multimodal": {
+      "blueprint": {
+        "multimodalVersion": 1,
+        "generatedAt": "2026-09-14T20:00:00.000Z",
+        "observed": {
+          "googleFeatures": {
+            "featuresVersion": 1,
+            "keyword": "skin care noturno",
+            "itemTypes": [
+              "ai_overview",
+              "organic",
+              "people_also_ask",
+              "images",
+              "short_videos",
+              "video",
+              "people_also_search",
+              "popular_products"
+            ],
+            "aiOverview": {
+              "present": true,
+              "markdownLength": 2156,
+              "references": [
+                {
+                  "domain": "www.boticario.com.br",
+                  "title": "Skincare noturno: confira o passo a passo - O Boticário",
+                  "url": "https://www.boticario.com.br/dicas-de-beleza/conheca-quais-sao-as-etapas-do-skincare-noturno/"
+                },
+                {
+                  "domain": "www.minhafarmalar.com.br",
+                  "title": "3 passos indispensáveis para acordar com a pele mais bonita e protegida",
+                  "url": "https://www.minhafarmalar.com.br/skincare-noturno-3-passos-indispensaveis-para-acordar-com-a-pele-mais-bonita-e-protegida"
+                },
+                {
+                  "domain": "www.avon.com.br",
+                  "title": "Skincare noturno: o que usar e qual a melhor ordem? - Avon",
+                  "url": "https://www.avon.com.br/blog/pele/skincare-noturno"
+                }
+              ]
+            },
+            "organicCount": 6,
+            "questionMap": [
+              {
+                "question": "Qual ordem de skincare à noite?",
+                "source": "PEOPLE_ALSO_ASK"
+              },
+              {
+                "question": "Como fazer um skincare noturno?",
+                "source": "PEOPLE_ALSO_ASK"
+              },
+              {
+                "question": "Qual a rotina de skincare noturna?",
+                "source": "PEOPLE_ALSO_ASK"
+              },
+              {
+                "question": "O que devo usar no rosto à noite?",
+                "source": "PEOPLE_ALSO_ASK"
+              }
+            ],
+            "entityMap": [
+              {
+                "term": "Skin care noturno ordem",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Skincare noturno passo a passo",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Skincare noturno creamy",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Skincare noturno principia",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Kit skincare noturno",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Skincare noturno pele madura",
+                "source": "PEOPLE_ALSO_SEARCH"
+              },
+              {
+                "term": "Hidratantes faciais",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Abaixo de R$ 70",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Retinol",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Formação de colágeno",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Vitamina C",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Loção corporal",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Para pele seca",
+                "source": "REFINEMENT_CHIP"
+              },
+              {
+                "term": "Para bebês",
+                "source": "REFINEMENT_CHIP"
+              }
+            ],
+            "visualOpportunities": [
+              {
+                "alt": "Cronograma skin care: a ordem certa que transforma sua pele ...",
+                "sourceDomain": "modices.com.br"
+              },
+              {
+                "alt": "Kit Rotina Skincare Noturno (5 Produtos)",
+                "sourceDomain": "www.oceane.com.br"
+              },
+              {
+                "alt": "Rotina de skincare: passo a passo ideal para iniciantes",
+                "sourceDomain": "blog.lojasrenner.com.br"
+              },
+              {
+                "alt": "Uma rotina de skincare noturna pode transformar sua pele! Com ...",
+                "sourceDomain": "www.instagram.com"
+              }
+            ],
+            "videos": [
+              {
+                "title": "SKINCARE NOITE | Ordem de aplicação dos produtos  ...",
+                "url": "https://www.instagram.com/reel/DYKYR7htpKW/",
+                "domain": null,
+                "source": "RAISA LOPES",
+                "block": "VIDEO",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Qual a ordem do skincare noturno? Essa é uma ordem mais básica pra ...",
+                "url": "https://www.instagram.com/reel/DYsycpfv4c9/",
+                "domain": null,
+                "source": "Thaíse Santos | Farmacêutica",
+                "block": "VIDEO",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Limpeza e Hidratação: A Base do Skincare Noturno (Minha rotina) ...",
+                "url": "https://www.youtube.com/shorts/Ce6RKljTA1c",
+                "domain": null,
+                "source": "Dra. Marina Hayashida",
+                "block": "VIDEO",
+                "youtubeVideoId": "Ce6RKljTA1c",
+                "platform": "YOUTUBE"
+              },
+              {
+                "title": "SKINCARE NOITE | Ordem de aplicação dos produtos 🌑 ... enviado por RAISA LOPES em Instagram. Assistir em Instagram. 0:19",
+                "url": "https://www.instagram.com/reel/DYKYR7htpKW/",
+                "domain": "www.instagram.com",
+                "source": "RAISA LOPES",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Limpeza e Hidratação: A Base do Skincare Noturno (Minha rotina) ... enviado por Dra. Marina Hayashida em YouTube. Assistir em YouTube. 1:35",
+                "url": "https://www.youtube.com/shorts/Ce6RKljTA1c",
+                "domain": "www.youtube.com",
+                "source": "Dra. Marina Hayashida",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": "Ce6RKljTA1c",
+                "platform": "YOUTUBE"
+              },
+              {
+                "title": "Qual a ordem do skincare noturno? Essa é uma ordem mais básica pra ... enviado por Thaíse Santos | Farmacêutica em Instagram. Assistir em Instagram. 0:56",
+                "url": "https://www.instagram.com/reel/DYsycpfv4c9/",
+                "domain": "www.instagram.com",
+                "source": "Thaíse Santos | Farmacêutica",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Meu ritual de skincare noturno que faz TOTAL diferença! enviado por Scarlleth Moura | Maquiadora Profissional  em YouTube. Assistir em YouTube. 1:21",
+                "url": "https://www.youtube.com/shorts/g7OIwU193fw",
+                "domain": "google.com",
+                "source": "Scarlleth Moura | Maquiadora Profissional",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": "g7OIwU193fw",
+                "platform": "YOUTUBE"
+              },
+              {
+                "title": "Rotina de skincare NOTURNA 🌛 de uma CLT de 19 anos, que trabalhava ... enviado por RAISA LOPES em Instagram. Assistir em Instagram. 1:24",
+                "url": "https://www.instagram.com/reel/DbJkIqpRzN0/",
+                "domain": "www.instagram.com",
+                "source": "RAISA LOPES",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": null,
+                "platform": "INSTAGRAM"
+              },
+              {
+                "title": "Ordem Correta Do Skincare Noturno: Dicas Essenciais enviado por lafernandesss em TikTok. Assistir em TikTok. 0:18",
+                "url": "https://www.tiktok.com/@lafernandesss/video/7469906708723289399",
+                "domain": "www.tiktok.com",
+                "source": "lafernandesss",
+                "block": "SHORT_VIDEOS",
+                "youtubeVideoId": null,
+                "platform": "TIKTOK"
+              }
+            ],
+            "commercialSignals": {
+              "present": true,
+              "products": [
+                {
+                  "title": "Sérum Facial Noturno de Probióticos - Probiotic Night Serum 30ml",
+                  "seller": "Océane",
+                  "price": "R$ 89,90 agora",
+                  "rating": 4.8,
+                  "reviews": 151
+                },
+                {
+                  "title": "Creme Facial Retexturizador Noturno Sallve 30G",
+                  "seller": "Época Cosméticos Perfumaria",
+                  "price": "R$ 87,20 R$ 110",
+                  "rating": 4.6,
+                  "reviews": 1200
+                },
+                {
+                  "title": "Sérum Facial Noturno De Probióticos - Probiotic Night Serum 30Ml",
+                  "seller": "Drogasil.com.br",
+                  "price": "R$ 89,91",
+                  "rating": 4.8,
+                  "reviews": 151
+                },
+                {
+                  "title": "Creme Retexturizador Noturno Sallve",
+                  "seller": "Maquiare",
+                  "price": "R$ 109,90 agora",
+                  "rating": 4.6,
+                  "reviews": 1200
+                },
+                {
+                  "title": "Sérum Facial Noturno Océane De Probióticos 30ml",
+                  "seller": "Panvel",
+                  "price": "R$ 91,91",
+                  "rating": 4.8,
+                  "reviews": 151
+                }
+              ]
+            },
+            "contentFormatMap": {
+              "hasAiOverview": true,
+              "hasOrganic": true,
+              "hasQuestions": true,
+              "hasImages": true,
+              "hasVideo": true,
+              "hasShortVideos": true,
+              "hasProducts": true
+            },
+            "observedIntentSignals": [
+              "O Google mostra 5 produto(s) para esta busca: a intenção tem camada comercial.",
+              "O Google sintetiza a resposta num AI Overview e cita 3 fonte(s): a intenção tem resposta direta esperada.",
+              "4 pergunta(s) e expansões aparecem na SERP: a intenção é exploratória.",
+              "O Google devolve 9 peça(s) audiovisual(is), 6 em formato curto: vídeo compete nesta busca.",
+              "4 imagem(ns) aparecem na SERP: a intenção tem componente visual."
+            ],
+            "limitations": [
+              "Esta leitura usa apenas os blocos que a SERP do Google devolveu. Nenhuma página foi visitada e nenhum vídeo foi assistido."
+            ]
+          },
+          "youtubeLongForm": 11,
+          "youtubeShorts": 14,
+          "crossSerpVideos": [
+            {
+              "videoId": "Ce6RKljTA1c",
+              "title": "Limpeza e Hidratação: A Base do Skincare Noturno (Minha rotina) #shorts #skincare",
+              "youtubeBestRank": 51,
+              "googleBlock": "SHORT_VIDEOS",
+              "signal": "CROSS_PLATFORM",
+              "reason": "Está na posição 51 do YouTube e também no bloco de vídeos curtos do Google para a mesma intenção."
+            },
+            {
+              "videoId": "g7OIwU193fw",
+              "title": "Meu ritual de skincare noturno que faz TOTAL diferença! enviado por Scarlleth Moura | Maquiadora Profissional  em YouTube. Assistir em YouTube. 1:21",
+              "youtubeBestRank": 1,
+              "googleBlock": "SHORT_VIDEOS",
+              "signal": "GOOGLE_ONLY",
+              "reason": "O Google devolve este vídeo para a intenção e as nossas consultas de YouTube não o alcançaram."
+            }
+          ],
+          "sources": [
+            "GOOGLE_SERP",
+            "YOUTUBE_SERP"
+          ]
+        },
+        "recommended": {
+          "editorialOutput": "MULTIFORMAT_PACKAGE",
+          "rationale": [
+            "O Google devolve peça audiovisual para esta intenção (9 item(ns)): vídeo compete na busca de texto.",
+            "A SERP do YouTube tem 11 long-form e 14 Short(s) disputando a mesma intenção.",
+            "O Google mostra 5 produto(s): há camada comercial na intenção.",
+            "A SERP tem 6 resultado(s) orgânico(s): texto continua disputando.",
+            "Texto, vídeo longo e formato curto disputam a MESMA intenção: uma peça só deixaria duas frentes sem resposta."
+          ],
+          "pieces": [
+            {
+              "piece": "ARTIGO",
+              "role": "Peça principal: responde a intenção por escrito e sustenta a busca do Google.",
+              "derivedFrom": "6 resultado(s) orgânico(s) disputando a intenção.",
+              "sourceSignal": null,
+              "sourceQuestion": null,
+              "objective": null,
+              "suggestedAngle": null
+            },
+            {
+              "piece": "VIDEO_HERO",
+              "role": "Vídeo principal, no topo do artigo quando houver artigo.",
+              "derivedFrom": "11 long-form disputam esta intenção no YouTube.",
+              "sourceSignal": null,
+              "sourceQuestion": null,
+              "objective": null,
+              "suggestedAngle": null
+            },
+            {
+              "piece": "SHORT",
+              "role": "Short de uma ideia só: \"Qual ordem de skincare à noite?\".",
+              "derivedFrom": "Pergunta observada no bloco PEOPLE_ALSO_ASK da SERP.",
+              "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+              "sourceQuestion": "Qual ordem de skincare à noite?",
+              "objective": "Responder esta pergunta por completo, e só ela.",
+              "suggestedAngle": "Demonstração sequencial: mostre a ordem acontecendo, não explique a ordem."
+            },
+            {
+              "piece": "SHORT",
+              "role": "Short de uma ideia só: \"Como fazer um skincare noturno?\".",
+              "derivedFrom": "Pergunta observada no bloco PEOPLE_ALSO_ASK da SERP.",
+              "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+              "sourceQuestion": "Como fazer um skincare noturno?",
+              "objective": "Responder esta pergunta por completo, e só ela.",
+              "suggestedAngle": "Resposta direta nos primeiros segundos, com a prova logo atrás."
+            },
+            {
+              "piece": "SHORT",
+              "role": "Short de uma ideia só: \"Qual a rotina de skincare noturna?\".",
+              "derivedFrom": "Pergunta observada no bloco PEOPLE_ALSO_ASK da SERP.",
+              "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+              "sourceQuestion": "Qual a rotina de skincare noturna?",
+              "objective": "Responder esta pergunta por completo, e só ela.",
+              "suggestedAngle": "Resposta direta nos primeiros segundos, com a prova logo atrás."
+            },
+            {
+              "piece": "SHORT",
+              "role": "Short de uma ideia só: \"O que devo usar no rosto à noite?\".",
+              "derivedFrom": "Pergunta observada no bloco PEOPLE_ALSO_ASK da SERP.",
+              "sourceSignal": "Bloco PEOPLE_ALSO_ASK da SERP do Google.",
+              "sourceQuestion": "O que devo usar no rosto à noite?",
+              "objective": "Responder esta pergunta por completo, e só ela.",
+              "suggestedAngle": "Critério de escolha: mostre COMO decidir, não uma lista de marcas."
+            },
+            {
+              "piece": "IMAGEM",
+              "role": "Apoio visual nas seções em que a explicação é de ordem ou de passo.",
+              "derivedFrom": "4 imagem(ns) na SERP para esta intenção.",
+              "sourceSignal": null,
+              "sourceQuestion": null,
+              "objective": null,
+              "suggestedAngle": null
+            },
+            {
+              "piece": "SECAO_COMERCIAL",
+              "role": "Seção de critérios e recomendação de produto, ao fim da peça principal.",
+              "derivedFrom": "5 produto(s) que o Google mostra para esta busca.",
+              "sourceSignal": null,
+              "sourceQuestion": null,
+              "objective": null,
+              "suggestedAngle": null
+            }
+          ],
+          "mustAnswer": [
+            "Qual ordem de skincare à noite?",
+            "Como fazer um skincare noturno?",
+            "Qual a rotina de skincare noturna?",
+            "O que devo usar no rosto à noite?"
+          ],
+          "mustCover": [
+            "Skin care noturno ordem",
+            "Skincare noturno passo a passo",
+            "Skincare noturno creamy",
+            "Skincare noturno principia",
+            "Kit skincare noturno",
+            "Skincare noturno pele madura",
+            "Hidratantes faciais",
+            "Abaixo de R$ 70",
+            "Retinol",
+            "Formação de colágeno",
+            "Vitamina C",
+            "Loção corporal",
+            "Para pele seca",
+            "Para bebês"
+          ]
+        },
+        "limitations": [
+          "Leitura feita apenas com os blocos que as SERPs devolveram. Nenhuma página foi visitada, nenhum vídeo foi assistido ou transcrito."
+        ]
+      },
+      "researchSources": [
+        "WEB_SERP",
+        "YOUTUBE_SERP"
+      ],
+      "editorialOutput": "MULTIFORMAT_PACKAGE"
+    },
+    "limitations": [
+      "Esta leitura usa apenas o que a SERP do YouTube entrega: título, canal, posição, duração, formato, visualizações e data. Nenhum vídeo foi baixado, assistido ou transcrito.",
+      "Leitura feita apenas com os blocos que as SERPs devolveram. Nenhuma página foi visitada, nenhum vídeo foi assistido ou transcrito."
+    ]
+  },
+  "amazonFrozenInvestigation": {
+    "frozenVersion": 1,
+    "finalizedAt": "2026-09-15T14:00:00.000Z",
+    "finalizedBy": "user-1",
+    "originalEditorialIntent": {
+      "type": "TOP_BEST",
+      "desiredCount": 5,
+      "useCase": null,
+      "rankingCriteria": null,
+      "productClass": "protetor solar",
+      "brandFilter": null,
+      "setupSignature": "amzsetup:d897a1a8"
+    },
+    "runRef": {
+      "runId": "run-amz-antiga",
+      "runVersion": 1,
+      "runFingerprint": "amzf:46fe5e9f",
+      "collectedAt": "2026-09-15T12:00:05.000Z",
+      "provider": "dataforseo",
+      "endpoint": "/v3/merchant/amazon/products/live/advanced",
+      "languageCode": "pt_BR",
+      "queriesExecuted": 1,
+      "universeSize": 51
+    },
+    "supportRefs": [],
+    "observedSummary": {
+      "products": 51,
+      "organic": 51,
+      "sponsored": 1,
+      "sponsoredPlacements": 2,
+      "both": 1,
+      "withPrice": 50,
+      "withRating": 51,
+      "relatedSearches": 6
+    },
+    "competitiveBlueprint": {
+      "schemaVersion": 1,
+      "articleId": "artigo-1",
+      "articleDnaVersionId": "dna-1",
+      "articleDnaContentHash": null,
+      "researchRefs": [
+        {
+          "source": "AMAZON_SERP",
+          "role": "PRIMARY_COMPETITIVE_RESEARCH",
+          "ref": "run-amz-antiga",
+          "fingerprint": "amzf:46fe5e9f",
+          "collectedAt": "2026-09-15T12:00:05.000Z",
+          "sampleSize": 51
+        }
+      ],
+      "limitations": [
+        "Esta investigação não analisou textos de avaliações.",
+        "Esta investigação não abriu páginas individuais dos produtos.",
+        "Ratings e selos são sinais comerciais e reputacionais, não prova de qualidade.",
+        "O apoio de busca do Google não entrou nesta análise: perguntas, refinamentos e sinais de formato externos não foram considerados."
+      ],
+      "provenance": {
+        "generatedAt": "2026-09-15T13:00:00.000Z",
+        "frozenAt": "2026-09-15T14:00:00.000Z"
+      },
+      "profile": "AMAZON",
+      "observed": {
+        "products": 51,
+        "placementSignals": [
+          {
+            "id": "amz-organico",
+            "statement": "51 produto(s) aparecem organicamente nesta busca.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "51 de 51 produtos do universo.",
+            "count": 51
+          },
+          {
+            "id": "amz-patrocinado",
+            "statement": "1 produto(s) patrocinado(s) ocupam 2 posições pagas.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "2 ocorrência(s) paga(s) sobre 1 produto(s) distinto(s).",
+            "count": 1
+          },
+          {
+            "id": "amz-ambos",
+            "statement": "1 produto(s) aparecem organicamente e também compram espaço na mesma busca.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Presença simultânea em resultado orgânico e anúncio.",
+            "count": 1
+          }
+        ],
+        "priceSignals": [
+          {
+            "id": "amz-preco-faixa",
+            "statement": "Os preços exibidos vão de BRL 22,40 a BRL 143,20.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "50 de 51 produto(s) exibem preço na listagem.",
+            "count": 50
+          },
+          {
+            "id": "amz-preco-mediana",
+            "statement": "A mediana de preço da amostra é BRL 52,06.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Mediana de 50 preço(s) observado(s).",
+            "count": null
+          }
+        ],
+        "ratingSignals": [
+          {
+            "id": "amz-nota",
+            "statement": "A nota mediana dos produtos avaliados é 4,7.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "51 de 51 produto(s) têm avaliação.",
+            "count": 51
+          },
+          {
+            "id": "amz-votos",
+            "statement": "A mediana é de 3.500 avaliação(ões) por produto.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Volume de votos em 51 produto(s).",
+            "count": 51
+          }
+        ],
+        "purchaseSignals": [
+          {
+            "id": "amz-choice",
+            "statement": "1 produto(s) exibem o selo Amazon's Choice.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Selo atribuído pela loja, visível na listagem.",
+            "count": 1
+          },
+          {
+            "id": "amz-bestseller",
+            "statement": "2 produto(s) exibem o selo Mais Vendido.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Selo atribuído pela loja, visível na listagem.",
+            "count": 2
+          },
+          {
+            "id": "amz-compras",
+            "statement": "50 produto(s) declaram compras no último mês; o maior declara 900.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Contador de compras exibido pela loja na listagem.",
+            "count": 50
+          }
+        ],
+        "offerTextSignals": [
+          {
+            "id": "amz-oferta",
+            "statement": "A listagem exibe 3 texto(s) de oferta distinto(s).",
+            "grade": "OBSERVED_SERP",
+            "evidence": "R$ 10,00 · off · R$ 20,00",
+            "count": 3
+          },
+          {
+            "id": "amz-entrega",
+            "statement": "45 produto(s) anunciam prazo ou condição de entrega.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Mensagem de entrega exibida na listagem.",
+            "count": 45
+          }
+        ],
+        "relatedSearchSignals": [
+          {
+            "id": "amz-relacionada-1",
+            "statement": "A busca relacionada \"protetor solar\" acompanha esta consulta.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Bloco de buscas relacionadas da própria loja.",
+            "count": null
+          },
+          {
+            "id": "amz-relacionada-2",
+            "statement": "A busca relacionada \"protetor solar facial com cor\" acompanha esta consulta.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Bloco de buscas relacionadas da própria loja.",
+            "count": null
+          },
+          {
+            "id": "amz-relacionada-3",
+            "statement": "A busca relacionada \"hidratante facial\" acompanha esta consulta.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Bloco de buscas relacionadas da própria loja.",
+            "count": null
+          },
+          {
+            "id": "amz-relacionada-4",
+            "statement": "A busca relacionada \"protetor solar facial la roche-posay\" acompanha esta consulta.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Bloco de buscas relacionadas da própria loja.",
+            "count": null
+          },
+          {
+            "id": "amz-relacionada-5",
+            "statement": "A busca relacionada \"sabonete facial\" acompanha esta consulta.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Bloco de buscas relacionadas da própria loja.",
+            "count": null
+          },
+          {
+            "id": "amz-relacionada-6",
+            "statement": "A busca relacionada \"vitamina c facial\" acompanha esta consulta.",
+            "grade": "OBSERVED_SERP",
+            "evidence": "Bloco de buscas relacionadas da própria loja.",
+            "count": null
+          }
+        ],
+        "googleSupport": [],
+        "priceBands": [
+          {
+            "band": "ECONOMICO",
+            "observedValue": 37.2,
+            "currency": "BRL",
+            "observedAt": "2026-09-15T12:00:05.000Z",
+            "source": "Universo de produtos desta coleta da Amazon.",
+            "sampleSize": 18,
+            "method": "Tercil da amostra de 50 preço(s) observada nesta coleta.",
+            "rangeFrom": 22.4,
+            "rangeTo": 47.9
+          },
+          {
+            "band": "INTERMEDIARIO",
+            "observedValue": 53.41,
+            "currency": "BRL",
+            "observedAt": "2026-09-15T12:00:05.000Z",
+            "source": "Universo de produtos desta coleta da Amazon.",
+            "sampleSize": 16,
+            "method": "Tercil da amostra de 50 preço(s) observada nesta coleta.",
+            "rangeFrom": 47.9,
+            "rangeTo": 66.48
+          },
+          {
+            "band": "PREMIUM",
+            "observedValue": 81.13,
+            "currency": "BRL",
+            "observedAt": "2026-09-15T12:00:05.000Z",
+            "source": "Universo de produtos desta coleta da Amazon.",
+            "sampleSize": 16,
+            "method": "Tercil da amostra de 50 preço(s) observada nesta coleta.",
+            "rangeFrom": 66.48,
+            "rangeTo": 143.2
+          }
+        ],
+        "sufficiency": "Amostra de 51 produto(s), 50 com preço e 51 com avaliação — suficiente para faixas e agrupamentos, não para julgar produto individual."
+      },
+      "recommended": {
+        "offerDirection": [
+          {
+            "id": "amz-oferta-direcao",
+            "statement": "Mencionar condição de entrega onde ela muda a decisão, sem prometer prazo específico.",
+            "objective": "Cobrir um fator de compra observado sem assumir logística que varia.",
+            "sourceSignal": "amz-entrega"
+          }
+        ],
+        "positioning": {
+          "id": "amz-angulo-comercial",
+          "statement": "Tratar a decisão por faixa: são 3 faixas observadas, da mais econômica à mais cara.",
+          "objective": "Atender orçamentos diferentes sem prometer um valor que muda.",
+          "sourceSignal": "amz-preco-faixa"
+        },
+        "priceBandDirection": "INTERMEDIARIO",
+        "comparisonStructure": [
+          {
+            "id": "amz-comp-price_band",
+            "statement": "Incluir a coluna \"Faixa de preço\" na comparação.",
+            "objective": "Situar cada opção na prateleira sem prometer um valor que a loja muda amanhã.",
+            "sourceSignal": "amz-preco-faixa"
+          },
+          {
+            "id": "amz-comp-rating",
+            "statement": "Incluir a coluna \"Nota de avaliação\" na comparação.",
+            "objective": "Mostrar como compradores avaliaram cada opção.",
+            "sourceSignal": "amz-nota"
+          },
+          {
+            "id": "amz-comp-review_volume",
+            "statement": "Incluir a coluna \"Volume de avaliações\" na comparação.",
+            "objective": "Distinguir opção madura de opção recém-listada.",
+            "sourceSignal": "amz-votos"
+          },
+          {
+            "id": "amz-comp-visibility",
+            "statement": "Incluir a coluna \"Visibilidade na busca\" na comparação.",
+            "objective": "Registrar quem disputa atenção organicamente e quem compra espaço.",
+            "sourceSignal": "amz-ambos"
+          },
+          {
+            "id": "amz-comp-amazon_choice",
+            "statement": "Incluir a coluna \"Selo Amazon's Choice\" na comparação.",
+            "objective": "Registrar a escolha destacada pela própria loja.",
+            "sourceSignal": "amz-choice"
+          },
+          {
+            "id": "amz-comp-best_seller",
+            "statement": "Incluir a coluna \"Selo Mais Vendido\" na comparação.",
+            "objective": "Registrar o que a loja aponta como mais vendido.",
+            "sourceSignal": "amz-bestseller"
+          },
+          {
+            "id": "amz-comp-purchase_volume_signal",
+            "statement": "Incluir a coluna \"Compras declaradas no último mês\" na comparação.",
+            "objective": "Mostrar demanda recente, como a loja a declara.",
+            "sourceSignal": "amz-compras"
+          },
+          {
+            "id": "amz-comp-delivery_signal",
+            "statement": "Incluir a coluna \"Condição de entrega\" na comparação.",
+            "objective": "Comparar prazo e condição, que mudam a decisão de compra.",
+            "sourceSignal": "amz-entrega"
+          }
+        ],
+        "buyingGuideStructure": [
+          {
+            "id": "amz-guia",
+            "statement": "Abrir com critério de escolha antes de apresentar opções.",
+            "objective": "Entregar decisão, não catálogo.",
+            "sourceSignal": "amz-preco-faixa"
+          }
+        ],
+        "commercialArticleStructure": [
+          {
+            "id": "amz-comercial",
+            "statement": "Reservar seção comercial explícita, separada da parte informativa.",
+            "objective": "Atender a intenção de compra sem contaminar a explicação.",
+            "sourceSignal": "amz-patrocinado"
+          }
+        ],
+        "ctaDirection": {
+          "id": "amz-cta",
+          "statement": "Encaminhar para a comparação da própria página, sem prometer preço nem recomendar compra de um produto específico.",
+          "objective": "Fechar a decisão dentro do que a análise sustenta.",
+          "sourceSignal": "amz-organico"
+        },
+        "googleSeoSupport": [],
+        "supportState": "SUPPORT_MISSING",
+        "recommendedOutputs": [
+          {
+            "output": "COMPARISON",
+            "objective": "Ajudar a escolher entre opções reais da prateleira.",
+            "reason": "A busca devolve 51 produtos distintos e 8 eixos sustentados por campos coletados.",
+            "sourceSignals": [
+              "amz-preco-faixa",
+              "amz-nota",
+              "amz-votos"
+            ]
+          },
+          {
+            "output": "BUYING_GUIDE",
+            "objective": "Explicar como escolher antes de mostrar o que escolher.",
+            "reason": "Os preços observados se distribuem em 3 faixas distintas.",
+            "sourceSignals": [
+              "amz-preco-faixa"
+            ]
+          },
+          {
+            "output": "COMMERCIAL_ARTICLE",
+            "objective": "Atender a intenção de compra que a busca demonstra.",
+            "reason": "Há investimento em anúncio dentro da própria busca da loja.",
+            "sourceSignals": [
+              "amz-patrocinado"
+            ]
+          }
+        ],
+        "editorialAngle": {
+          "id": "amz-angulo-editorial",
+          "statement": "Organizar o texto em torno dos 8 critérios que a coleta sustenta, entregando decisão antes de lista.",
+          "objective": "Diferenciar de uma listagem de produtos, que é o que a própria loja já faz melhor.",
+          "sourceSignal": "amz-preco-faixa"
+        },
+        "commercialAngle": {
+          "id": "amz-angulo-comercial",
+          "statement": "Tratar a decisão por faixa: são 3 faixas observadas, da mais econômica à mais cara.",
+          "objective": "Atender orçamentos diferentes sem prometer um valor que muda.",
+          "sourceSignal": "amz-preco-faixa"
+        },
+        "differentiationDirection": [
+          {
+            "id": "amz-dif-visibilidade",
+            "statement": "Explicitar quais opções pagam por posição além de ranquear — a listagem não separa as duas coisas.",
+            "objective": "Entregar contexto que a loja não entrega.",
+            "sourceSignal": "amz-ambos"
+          },
+          {
+            "id": "amz-dif-maturidade",
+            "statement": "Distinguir opção com muitas avaliações de opção recém-listada com nota alta.",
+            "objective": "Impedir que média sem volume seja lida como consenso.",
+            "sourceSignal": "amz-votos"
+          },
+          {
+            "id": "amz-dif-sem-apoio",
+            "statement": "Repetir o apoio do Google antes de decidir formato e seção de dúvidas: esta análise não o teve.",
+            "objective": "Evitar que a ausência de sinal externo seja lida como ausência de demanda externa.",
+            "sourceSignal": "amz-organico"
+          }
+        ],
+        "titleDirections": [
+          {
+            "pattern": "protetor solar facial + recorte por faixa de preço + atualidade",
+            "objective": "Alcançar quem já chega com orçamento definido.",
+            "sourceSignals": [
+              "amz-preco-faixa"
+            ]
+          },
+          {
+            "pattern": "comparação + critério comercial observado + intenção",
+            "objective": "Prometer a decisão que o artigo realmente ajuda a tomar.",
+            "sourceSignals": [
+              "amz-preco-faixa",
+              "amz-nota"
+            ]
+          },
+          {
+            "pattern": "quantidade de opções avaliadas + critério de recorte",
+            "objective": "Declarar a extensão da análise antes do clique.",
+            "sourceSignals": [
+              "amz-organico"
+            ]
+          }
+        ],
+        "sectionDirections": [
+          {
+            "order": 1,
+            "headingDirection": "Abertura: a intenção, a promessa e o limite desta análise",
+            "objective": "Dizer o que o texto resolve e o que ele não alcança, antes de qualquer recomendação.",
+            "answersQuestion": null,
+            "mustCover": [
+              "intenção declarada: comercial",
+              "busca observada: protetor solar facial",
+              "o que foi observado",
+              "o que não foi analisado"
+            ],
+            "evidenceNeeded": "Declarar que avaliações e páginas de produto não foram analisadas.",
+            "sourceSignal": "amz-organico"
+          },
+          {
+            "order": 2,
+            "headingDirection": "Como escolher: os critérios que a busca sustenta",
+            "objective": "Entregar critério antes de entregar opção.",
+            "answersQuestion": null,
+            "mustCover": [
+              "Faixa de preço",
+              "Nota de avaliação",
+              "Volume de avaliações",
+              "Visibilidade na busca",
+              "Selo Amazon's Choice",
+              "Selo Mais Vendido",
+              "Compras declaradas no último mês",
+              "Condição de entrega"
+            ],
+            "evidenceNeeded": "Cada critério precisa citar o campo coletado que o sustenta.",
+            "sourceSignal": "amz-preco-faixa"
+          },
+          {
+            "order": 3,
+            "headingDirection": "Faixas de preço: como a prateleira se distribui",
+            "objective": "Situar o leitor na distribuição real, em faixa e não em valor fixo.",
+            "answersQuestion": null,
+            "mustCover": [
+              "ECONOMICO",
+              "INTERMEDIARIO",
+              "PREMIUM"
+            ],
+            "evidenceNeeded": "A faixa precisa declarar o método e a data da observação.",
+            "sourceSignal": "amz-preco-faixa"
+          },
+          {
+            "order": 4,
+            "headingDirection": "Comparação: as opções lado a lado, sem ranking de qualidade",
+            "objective": "Comparar por eixos observados, agrupando em vez de ordenar.",
+            "answersQuestion": null,
+            "mustCover": [
+              "Faixa de preço",
+              "Nota de avaliação",
+              "Volume de avaliações",
+              "Visibilidade na busca",
+              "Selo Amazon's Choice",
+              "Selo Mais Vendido",
+              "Compras declaradas no último mês",
+              "Condição de entrega"
+            ],
+            "evidenceNeeded": "Cada coluna precisa da ressalva do eixo ao lado do número.",
+            "sourceSignal": "amz-preco-faixa"
+          },
+          {
+            "order": 5,
+            "headingDirection": "Reputação: o que nota e volume de avaliações dizem — e o que não dizem",
+            "objective": "Usar o sinal reputacional sem transformá-lo em veredito de qualidade.",
+            "answersQuestion": null,
+            "mustCover": [
+              "nota mediana",
+              "volume de avaliações",
+              "o que a nota não mede"
+            ],
+            "evidenceNeeded": "Dizer explicitamente que nenhum texto de avaliação foi lido.",
+            "sourceSignal": "amz-nota"
+          },
+          {
+            "order": 6,
+            "headingDirection": "Opções observadas: o que aparece nesta busca e por quê",
+            "objective": "Mostrar presença competitiva com o motivo factual de cada citação.",
+            "answersQuestion": null,
+            "mustCover": [
+              "posição na busca",
+              "faixa de preço",
+              "sinal de reputação"
+            ],
+            "evidenceNeeded": "Cada produto citado precisa do motivo factual da citação, nunca de endosso.",
+            "sourceSignal": "amz-organico"
+          },
+          {
+            "order": 7,
+            "headingDirection": "Para quem cada faixa serve",
+            "objective": "Traduzir faixa e reputação em perfil de decisão, sem atribuir característica a produto.",
+            "answersQuestion": null,
+            "mustCover": [
+              "faixa",
+              "reputação observada",
+              "o que não dá para afirmar"
+            ],
+            "evidenceNeeded": "O recorte é editorial sobre preço e reputação — não é atributo do produto.",
+            "sourceSignal": "amz-preco-faixa"
+          },
+          {
+            "order": 8,
+            "headingDirection": "Conclusão: o que a análise sustenta",
+            "objective": "Retomar o critério, não eleger um vencedor.",
+            "answersQuestion": null,
+            "mustCover": [
+              "critério",
+              "limite da análise"
+            ],
+            "evidenceNeeded": null,
+            "sourceSignal": "amz-preco-faixa"
+          },
+          {
+            "order": 9,
+            "headingDirection": "Chamada final: o próximo passo do leitor",
+            "objective": "Encaminhar a decisão sem prometer preço nem endossar produto.",
+            "answersQuestion": null,
+            "mustCover": [
+              "próximo passo"
+            ],
+            "evidenceNeeded": null,
+            "sourceSignal": "amz-organico"
+          }
+        ],
+        "comparisonAxes": [
+          {
+            "axis": "PRICE_BAND",
+            "label": "Faixa de preço",
+            "objective": "Situar cada opção na prateleira sem prometer um valor que a loja muda amanhã.",
+            "sourceSignal": "amz-preco-faixa",
+            "caveat": "O preço observado vale para o instante da coleta."
+          },
+          {
+            "axis": "RATING",
+            "label": "Nota de avaliação",
+            "objective": "Mostrar como compradores avaliaram cada opção.",
+            "sourceSignal": "amz-nota",
+            "caveat": "Nota é reputação declarada por compradores, não medida de qualidade."
+          },
+          {
+            "axis": "REVIEW_VOLUME",
+            "label": "Volume de avaliações",
+            "objective": "Distinguir opção madura de opção recém-listada.",
+            "sourceSignal": "amz-votos",
+            "caveat": "Volume descreve maturidade do produto na loja, não desempenho."
+          },
+          {
+            "axis": "VISIBILITY",
+            "label": "Visibilidade na busca",
+            "objective": "Registrar quem disputa atenção organicamente e quem compra espaço.",
+            "sourceSignal": "amz-ambos",
+            "caveat": "Visibilidade paga é investimento do vendedor, não atributo do produto."
+          },
+          {
+            "axis": "AMAZON_CHOICE",
+            "label": "Selo Amazon's Choice",
+            "objective": "Registrar a escolha destacada pela própria loja.",
+            "sourceSignal": "amz-choice",
+            "caveat": "O selo é uma decisão comercial da loja, não um veredito independente."
+          },
+          {
+            "axis": "BEST_SELLER",
+            "label": "Selo Mais Vendido",
+            "objective": "Registrar o que a loja aponta como mais vendido.",
+            "sourceSignal": "amz-bestseller",
+            "caveat": "Volume de venda não indica adequação ao leitor deste artigo."
+          },
+          {
+            "axis": "PURCHASE_VOLUME_SIGNAL",
+            "label": "Compras declaradas no último mês",
+            "objective": "Mostrar demanda recente, como a loja a declara.",
+            "sourceSignal": "amz-compras",
+            "caveat": "O contador é declarado pela loja e não é auditável por nós."
+          },
+          {
+            "axis": "DELIVERY_SIGNAL",
+            "label": "Condição de entrega",
+            "objective": "Comparar prazo e condição, que mudam a decisão de compra.",
+            "sourceSignal": "amz-entrega",
+            "caveat": "A condição varia por região e por período."
+          }
+        ],
+        "comparisonGrouping": [
+          {
+            "id": "amz-grupo-faixa",
+            "statement": "Agrupar as opções pelas 3 faixas observadas, nomeando a faixa e não uma posição.",
+            "objective": "Comparar sem ordenar: a faixa descreve, a ordem julgaria.",
+            "sourceSignal": "amz-preco-faixa"
+          },
+          {
+            "id": "amz-grupo-reputacao",
+            "statement": "Agrupar por reputação observada — nota e volume de avaliações — dizendo que é reputação, não qualidade.",
+            "objective": "Usar o sinal sem deixá-lo passar por veredito.",
+            "sourceSignal": "amz-nota"
+          },
+          {
+            "id": "amz-grupo-visibilidade",
+            "statement": "Separar o que aparece organicamente do que compra espaço, e dizer qual é qual.",
+            "objective": "Impedir que investimento em anúncio seja lido como mérito do produto.",
+            "sourceSignal": "amz-ambos"
+          }
+        ],
+        "multimediaPlan": [],
+        "requiresEnrichment": [
+          "REVIEW_TEXT",
+          "PDP_ATTRIBUTES",
+          "PRODUCT_BENEFITS",
+          "BRAND_IDENTITY",
+          "CATEGORY_TAXONOMY"
+        ]
+      }
+    },
+    "editorialOutput": "COMPARISON",
+    "limitations": [
+      "Esta investigação não analisou textos de avaliações.",
+      "Esta investigação não abriu páginas individuais dos produtos.",
+      "Ratings e selos são sinais comerciais e reputacionais, não prova de qualidade.",
+      "O apoio de busca do Google não entrou nesta análise: perguntas, refinamentos e sinais de formato externos não foram considerados."
+    ]
+  }
+}

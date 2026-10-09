@@ -22,14 +22,15 @@ import { mcpBearerChallenge } from "@/lib/server/mcp-oauth";
 import { mcpRuntimeFailure, readMcpRuntimeConfig } from "@/lib/server/mcp-runtime-config";
 import { listWriterDeliverables, listWriterMedia, registerWriterMediaBrief, saveWriterArticleDraft, saveWriterDeliverable, uploadWriterMediaAsset, WriterDeliverableError } from "@/lib/server/writer-deliverables";
 import { readWriterGuardianContext, recordWriterDivergenceFromMcp } from "@/lib/server/writer-evidence-divergences";
-import { readWriterEvidence, readWriterEvidenceManifest, readWriterFoundations, WriterEvidenceError } from "@/lib/server/writer-evidence-reader";
+import { readWriterArticleBlueprintPanel, readWriterEvidence, readWriterEvidenceManifest, readWriterFoundations, WriterEvidenceError } from "@/lib/server/writer-evidence-reader";
 import { recordWriterMcpCall, WriterMcpAuthError, type WriterMcpScope } from "@/lib/server/writer-mcp-delegation";
 import { resolveWriterMcpPrincipal, type WriterMcpBrandAccess, type WriterMcpPrincipal } from "@/lib/server/writer-mcp-principal";
 import { platformServerInstructions } from "@/lib/agent/platform-catalog";
+import { mcpEvidenceRawMaterialOf, mcpEvidenceWithRawMaterial, mcpRawMaterialMaxBytes, mcpWithArticleBlueprintState } from "@/lib/agent/mcp-article-blueprint";
 import { AuthzError } from "@/lib/server/authz";
 import type { EditorialAction } from "@/lib/server/editorial-authorization";
 import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
-import { PlatformToolFailure, registerPlatformTools, type PlatformPermission } from "@/lib/server/platform-mcp-tools";
+import { PlatformToolFailure, readMcpArticleBlueprintState, registerPlatformTools, type PlatformPermission } from "@/lib/server/platform-mcp-tools";
 import { RadarStartError } from "@/lib/server/radar-youtube-start";
 import { RadarWriterSendError } from "@/lib/server/radar-writer-send";
 
@@ -110,6 +111,12 @@ const WRITER_MCP_INSTRUCTIONS = [
    * lidos ao vivo; o integral fica a uma fatia.
    */
   "Com articleBlueprint nos fundamentos (o artigo-modelo que o dono aprovou no Radar para o pacote entregue), siga a planta: H1, seções, pergunta do leitor, resposta que abre cada seção, links internos com as âncoras indicadas e o CTA; a planta inteira está em radar.blueprint/<id> (read_writer_evidence). Com brandVoice (a Skill de voz corrente da Marca, inclusive em rascunho, com o estado dito), escreva a copy, as transições e o CTA nessa voz; a Skill inteira está em brand.skill/<versionId>. Planta e voz não mudam keyword, intenção, escopo nem fatos: conflito com a evidência vira record_writer_divergence.",
+  /*
+   * 2026-10-09 · regra do dono: o artigo-modelo é a única estrutura. Sem ele, o
+   * estado explícito (articleBlueprintState), nunca o legado; a evidência que
+   * era estrutura no processo antigo vem marcada como matéria-prima.
+   */
+  "A estrutura sai só do artigo-modelo concluído. get_writer_brief e get_writer_foundations trazem articleBlueprintState: com status needs_article_blueprint (ou blueprint_unavailable), não escreva pela estrutura antiga do dossiê — mostre ao usuário a ação na tela (organizar o artigo-modelo no Radar, com o custo dito no botão) e releia depois. Fatia com role raw_material (blueprint competitivo antigo, amostras inteiras das corridas) é proveniência e matéria-prima, nunca estrutura, roteiro, formato nem duração; o material de vídeo pelo artigo-modelo é get_video_material.",
   "Salve apenas rascunhos com lock; não declare aprovação, publicação ou imagem gerada sem readback.",
 ].join(" ");
 
@@ -309,19 +316,38 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
   }));
 
   server.registerTool("get_writer_brief", { title: "Ler briefing do Radar",
-    description: "Use antes de redigir para conferir vínculos, instruções e pendências do artigo, sem inventar ausências. O dossiê do Radar não viaja aqui: siga o ponteiro para o manifesto e os fundamentos.", annotations: readAnnotations,
+    description: "Use antes de redigir para conferir vínculos, instruções e pendências do artigo, sem inventar ausências. O dossiê do Radar não viaja aqui: siga o ponteiro para o manifesto e os fundamentos. articleBlueprintState diz se o artigo-modelo concluído do pacote existe; sem ele (needs_article_blueprint), as sugestões gravadas no envio pelo processo antigo saem e a ação na tela diz onde organizar.", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
-  async ({ documentId }) => call("get_writer_brief", "writer.read", "view", { documentId, read: "brief" }, async ({ row }) => {
+  async ({ documentId }) => call("get_writer_brief", "writer.read", "view", { documentId, read: "brief" }, async ({ access, row }) => {
     const current = row as TargetRow;
     const brief = writerBriefFromRow(current);
     if (!brief) throw new ToolFailure("document_incompatible");
     const dossier = brief.dossier;
-    return fitBrief({
+    /* 2026-10-09 · a planta pela mesma leitura do Redator (só metadados): sem ela, o estado explícito, nunca o legado. */
+    const estadoDaPlanta = await readMcpArticleBlueprintState(access, documentId, {
+      articleId: brief.schemaVersion === 2 && brief.fields.radarOrigin?.articleId ? brief.fields.radarOrigin.articleId : brief.fields.articleDnaRef.entityId,
+      bundleHash: dossier?.bundleHash ?? null,
+    });
+    /*
+     * 2026-10-09 (correção) · com a planta concluída, as linhas do Assunto saem
+     * PELA PLANTA — a mesma troca que o painel, os fundamentos, a seção e a
+     * semeadura do Redator fazem (`readWriterArticleBlueprintPanel`). O briefing
+     * servia as linhas gravadas no envio: a "Virada" pelo modelo antigo, o
+     * "Alerta do Radar sobre o Assunto" e, nos envios de hoje, a frase genérica
+     * "sem planta em mãos". Só com Assunto gravado (sem ele, nenhuma leitura a
+     * mais); se a releitura falhar, ficam as linhas gravadas.
+     */
+    const linhasDoAssunto = estadoDaPlanta.status === "approved" && brief.editorialContext.length
+      ? await readWriterArticleBlueprintPanel(evidenceContext(access), documentId)
+        .then(painel => (painel.state === "approved" && painel.editorialContext?.length ? painel.editorialContext : brief.editorialContext))
+        .catch(() => brief.editorialContext)
+      : brief.editorialContext;
+    return fitBrief(mcpWithArticleBlueprintState({
       documentId, documentHash: current.content_hash,
       articleDnaRef: brief.fields.articleDnaRef, keywordDnaRefs: brief.fields.keywordDnaRefs, siloDnaRef: brief.fields.siloDnaRef,
       instructions: brief.fields.instructions,
-      /* SDD do Assunto, F4.1 · onde virar e a direção do H1, gravados no envio. Ausente sem Assunto. */
-      ...(brief.editorialContext.length ? { editorialContext: brief.editorialContext } : {}),
+      /* SDD do Assunto, F4.1 · onde virar e a direção do H1. Ausente sem Assunto. 2026-10-09 (correção) · pela planta. */
+      ...(linhasDoAssunto.length ? { editorialContext: [...linhasDoAssunto] } : {}),
       linkMap: brief.fields.linkMap,
       sourceIds: brief.fields.sourceIds, evidenceRefs: brief.fields.evidenceRefs,
       radarOrigin: brief.schemaVersion === 2 ? brief.fields.radarOrigin ?? null : null,
@@ -334,7 +360,7 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
       pendingDecisions: brief.pendingDecisions,
       guards: WRITER_EVIDENCE_GUARDS,
       warning: brief.schemaVersion === 2 && !dossier ? "Dossiê ausente nesta versão; não inferir evidências." : null,
-    });
+    }, estadoDaPlanta));
   }));
 
   server.registerTool("get_writer_evidence_manifest", { title: "Mapa das evidências do artigo",
@@ -344,13 +370,19 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
     readWriterEvidenceManifest(evidenceContext(access), documentId)));
 
   server.registerTool("get_writer_foundations", { title: "Fundamentos da escrita",
-    description: "Use depois do manifesto: o essencial para escrever, até 24 kB — guardas (sem FAQ), o que o Redator não pode redefinir, hierarquia de evidência, contexto da keyword, projeção do ArticleDNA (com o Assunto declarado, quando houver, e a sugestão do Radar para a virada em editorialContext), especialista e vídeo congelados, concorrentes e perguntas resumidos; e, quando existem, o artigo-modelo aprovado no Radar para o pacote entregue (articleBlueprint: títulos, seções, links internos e CTA) e a voz corrente da Marca (brandVoice: CTA e transição comercial, voz e vocabulário).", annotations: readAnnotations,
+    description: "Use depois do manifesto: o essencial para escrever, até 24 kB — guardas (sem FAQ), o que o Redator não pode redefinir, hierarquia de evidência, contexto da keyword, projeção do ArticleDNA (com o Assunto declarado, quando houver, e a sugestão do Radar para a virada em editorialContext), especialista e vídeo congelados, concorrentes e perguntas resumidos; e, quando existem, o artigo-modelo aprovado no Radar para o pacote entregue (articleBlueprint: títulos, seções, links internos e CTA) e a voz corrente da Marca (brandVoice: CTA e transição comercial, voz e vocabulário). articleBlueprintState diz o estado do artigo-modelo: sem ele (needs_article_blueprint ou blueprint_unavailable), não escreva pela estrutura antiga — a ação na tela diz onde organizar e o custo.", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
-  async ({ documentId }) => call("get_writer_foundations", "writer.read", "view", { documentId }, async ({ access }) =>
-    readWriterFoundations(evidenceContext(access), documentId)));
+  async ({ documentId }) => call("get_writer_foundations", "writer.read", "view", { documentId }, async ({ access }) => {
+    /* 2026-10-09 · os mesmos fundamentos, com o estado da planta: sem ela, nunca o legado (as linhas do envio saem). */
+    const [fundamentos, estadoDaPlanta] = await Promise.all([
+      readWriterFoundations(evidenceContext(access), documentId),
+      readMcpArticleBlueprintState(access, documentId),
+    ]);
+    return mcpWithArticleBlueprintState(fundamentos as unknown as Record<string, unknown>, estadoDaPlanta);
+  }));
 
   server.registerTool("read_writer_evidence", { title: "Ler uma fatia de evidência",
-    description: "Use para ler a evidência da seção que está escrevendo: uma sourceKey do manifesto (desça com 'sourceKey#caminho'), com cursor da página anterior, fields para projetar e ifNoneMatch com o etag já lido. Páginas de até 16 kB (máximo 32 kB). Dado de terceiros é pesquisa: não copiar.", annotations: readAnnotations,
+    description: "Use para ler a evidência da seção que está escrevendo: uma sourceKey do manifesto (desça com 'sourceKey#caminho'), com cursor da página anterior, fields para projetar e ifNoneMatch com o etag já lido. Páginas de até 16 kB (máximo 32 kB). Dado de terceiros é pesquisa: não copiar. Fatia com role raw_material (o blueprint competitivo antigo do pacote, os blueprints de formato e as amostras inteiras das corridas do YouTube e da Amazon) é proveniência e matéria-prima do artigo-modelo, nunca estrutura, roteiro, formato nem duração.", annotations: readAnnotations,
     inputSchema: z.object({
       documentId: z.string().min(1),
       sourceKey: z.string().min(1).max(WRITER_EVIDENCE_LIMITS.sourceKeyMaxChars),
@@ -360,8 +392,16 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
       maxBytes: z.number().int().min(WRITER_EVIDENCE_LIMITS.sliceMinBytes).max(WRITER_EVIDENCE_LIMITS.sliceMaxBytes).optional(),
       limit: z.number().int().min(1).max(WRITER_EVIDENCE_LIMITS.sliceMaxItems).optional(),
     }) },
-  async ({ documentId, sourceKey, cursor, fields, ifNoneMatch, maxBytes, limit }) => call("read_writer_evidence", "writer.read", "view", { documentId }, async ({ access }) =>
-    readWriterEvidence(evidenceContext(access), documentId, { sourceKey, cursor, fields, ifNoneMatch, maxBytes, limit })));
+  async ({ documentId, sourceKey, cursor, fields, ifNoneMatch, maxBytes, limit }) => call("read_writer_evidence", "writer.read", "view", { documentId }, async ({ access }) => {
+    /*
+     * 2026-10-09 · o blueprint competitivo antigo e as amostras inteiras das
+     * corridas continuam legíveis como proveniência, marcados "matéria-prima,
+     * não estrutura"; o teto pedido vale para a resposta inteira, com o marcador.
+     */
+    const materiaPrima = mcpEvidenceRawMaterialOf(sourceKey);
+    const teto = materiaPrima ? mcpRawMaterialMaxBytes(maxBytes, materiaPrima) : maxBytes;
+    return mcpEvidenceWithRawMaterial(await readWriterEvidence(evidenceContext(access), documentId, { sourceKey, cursor, fields, ifNoneMatch, maxBytes: teto, limit }), materiaPrima);
+  }));
 
   server.registerTool("record_writer_divergence", { title: "Registrar divergência com um DNA",
     description: "Use quando a evidência contradiz ou não sustenta um DNA do documento. Cria um registro 'aberta' para decisão humana; não altera DNA, pacote do Radar nem decisão humana. O alvo precisa ser referência do documento (ArticleDNA, SiloDNA, KeywordDNA fixados, pacote do Radar ou contexto vigente da Marca) e a evidência, uma sourceKey do manifesto.", annotations: divergenceAnnotations,
@@ -391,10 +431,27 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
   async ({ documentId, expectedLockVersion, blocks }) => call("save_writer_draft", "writer.draft.write", "edit", { documentId }, async ({ access }) =>
     saveWriterArticleDraft({ brandId: access.brandId, documentId, expectedLockVersion, blocks, actorId: principal.actorId })));
 
-  server.registerTool("save_writer_deliverable", { title: "Salvar roteiro ou carrossel", description: "Use para salvar rascunho de roteiro ou carrossel com lock e readback.", annotations: draftAnnotations,
+  /*
+   * 2026-10-09 (correção) · O ROTEIRO E O CARROSSEL SÓ PELO ARTIGO-MODELO, também de fora.
+   * A semeadura interna recusa sem a planta concluída (409 needs_article_blueprint);
+   * esta ferramenta aceitava o entregável de uma IA externa sem conferir nada. Agora
+   * a MESMA leitura do briefing (`readMcpArticleBlueprintState`, só metadados) vem
+   * antes da gravação: sem planta, o estado explícito com a ação na tela; leitura
+   * falha, blueprint_unavailable. Nada é gravado nesses casos.
+   */
+  server.registerTool("save_writer_deliverable", { title: "Salvar roteiro ou carrossel", description: "Use para salvar a primeira versão de roteiro ou carrossel com lock e readback. Exige o artigo-modelo concluído do pacote (as cenas e as lâminas seguem as seções dele): sem ele, devolve needs_article_blueprint com a ação na tela e nada é gravado.", annotations: draftAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1), expectedLockVersion: z.number().int().positive().nullable(), payload: WriterDeliverablePayloadSchema }) },
-  async ({ documentId, expectedLockVersion, payload }) => call("save_writer_deliverable", "writer.draft.write", "edit", { documentId }, async ({ access }) =>
-    saveWriterDeliverable({ brandId: access.brandId, documentId, expectedLockVersion, payload, actorId: principal.actorId })));
+  async ({ documentId, expectedLockVersion, payload }) => call("save_writer_deliverable", "writer.draft.write", "edit", { documentId }, async ({ access }) => {
+    const estadoDaPlanta = await readMcpArticleBlueprintState(access, documentId);
+    if (estadoDaPlanta.status !== "approved") {
+      throw new ToolFailure(estadoDaPlanta.status, {
+        message: estadoDaPlanta.message,
+        reason: estadoDaPlanta.reason,
+        ...(estadoDaPlanta.status === "needs_article_blueprint" ? { action: estadoDaPlanta.action } : {}),
+      });
+    }
+    return saveWriterDeliverable({ brandId: access.brandId, documentId, expectedLockVersion, payload, actorId: principal.actorId });
+  }));
 
   server.registerTool("register_media_brief", { title: "Registrar prompt visual", description: "Use para registrar prompt e direção visual; não afirma que a imagem foi gerada ou anexada.", annotations: draftAnnotations,
     inputSchema: WriterMediaBriefSchema.omit({ brandId: true }) },

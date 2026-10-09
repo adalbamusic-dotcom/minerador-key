@@ -23,7 +23,8 @@ import { z } from "zod";
 import { createRadarAnalysisSuccessor } from "../radar/analysis-contracts.ts";
 import { RadarAmazonSearchRunSchema, type RadarAmazonSearchRun } from "../radar/amazon-search-run.ts";
 import { RadarResearchPackageRecordSchema } from "../radar/research-package.ts";
-import { amazonCompetitiveBlueprintOfAnalysis } from "../radar/amazon-editorial.ts";
+import { amazonCompetitiveBlueprintOfAnalysis, radarAmazonBlueprintBaseOf, radarAmazonBlueprintNeedsNewBase } from "../radar/amazon-editorial.ts";
+import { radarCurrentArticleDnaVersion } from "../radar/article-dna-current.ts";
 import { buildRadarAmazonGoogleSupport, type RadarAmazonGoogleSupport } from "../radar/amazon-google-support.ts";
 import { radarAmazonEligibleCandidates } from "../radar/amazon-eligibility.ts";
 import {
@@ -205,8 +206,22 @@ async function montarBlueprintAmazon(
 
   /* O fundamento do artigo: intenção declarada e keyword. Nunca observação. */
   const artefatos = await new ArtifactRepository().list(entrada.brandId);
-  const article = artefatos.articles.find(version =>
-    version.payload.articleId === entrada.articleId && version.payload.brandId === entrada.brandId);
+  /*
+   * 2026-10-09 · a versão VIGENTE (a última aprovada), não a primeira que a leitura devolve.
+   * (correção) No Radar vale a TRANSPORTADA: a análise carrega a versão do item
+   * (a que o Arquiteto enviou), e a coleta da Amazon foi feita sobre ela.
+   */
+  const article = radarCurrentArticleDnaVersion({ versions: artefatos.articles, events: artefatos.events, brandId: entrada.brandId, articleId: entrada.articleId, transportedVersionId: payload.articleDnaVersionId });
+
+  /*
+   * 2026-10-09 · O BLUEPRINT SOBRE OS COMPATÍVEIS COM O ALVO (regra do piloto).
+   * A mesma elegibilidade da shortlist decide a base de faixas, critérios e
+   * reputação; sem configuração declarada, a prateleira inteira.
+   */
+  const configuracao = payload.amazonEditorialSetup;
+  const elegibilidade = configuracao
+    ? radarAmazonEligibleCandidates({ intent: configuracao.intent, target: configuracao.target, universe: corrida.universe })
+    : null;
 
   const referencias: RadarResearchRef[] = [{
     source: "AMAZON_SERP",
@@ -240,6 +255,7 @@ async function montarBlueprintAmazon(
     researchRefs: referencias,
     generatedAt: entrada.analyzedAt,
     frozenAt: null,
+    eligibility: elegibilidade,
   });
   return { blueprint, apoio };
 }
@@ -290,7 +306,24 @@ export async function finalizeRadarAmazonInvestigation(entrada: {
     );
   }
 
-  const fotografia = fotografiaAmazon(payload, corrida, blueprint, entrada.actorId, entrada.finalizedAt);
+  /*
+   * 2026-10-09 · O CONGELAMENTO NOVO SAI NA BASE NOVA (os compatíveis com o alvo).
+   *
+   * Um "Analisar" feito antes da regra deixou o blueprint sobre a prateleira
+   * inteira; congelá-lo assim manteria o processo antigo vivo. A análise é
+   * refeita aqui com a MESMA montagem de analisar (grátis: lê a coleta e o apoio
+   * gravados, nenhum provider). A fotografia já congelada não passa por aqui.
+   */
+  const configuracao = payload.amazonEditorialSetup;
+  const base = radarAmazonBlueprintBaseOf({
+    run: corrida,
+    eligibility: configuracao ? radarAmazonEligibleCandidates({ intent: configuracao.intent, target: configuracao.target, universe: corrida.universe }) : null,
+  });
+  const congelavel = radarAmazonBlueprintNeedsNewBase(blueprint, base)
+    ? (await montarBlueprintAmazon({ ...entrada, analyzedAt: entrada.finalizedAt }, payload, validarColetaAmazon(payload).pacote, corrida)).blueprint
+    : blueprint;
+
+  const fotografia = fotografiaAmazon(payload, corrida, congelavel, entrada.actorId, entrada.finalizedAt);
 
   /*
    * ============ §26 · A FOTOGRAFIA SUBSTITUI O BLUEPRINT VIVO ============

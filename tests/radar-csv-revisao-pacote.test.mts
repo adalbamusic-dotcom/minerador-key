@@ -189,9 +189,12 @@ test("o bloqueio por divergência diz o que divergiu; detalhe com id não entra"
   assert.equal(bloqueado.reasons.some(item => /8170a492/.test(item)), false);
 });
 
+/* 2026-10-09 · a planta é obrigatória no CSV: a abertura calculada pelo export (sem planta) saiu, e a coluna só remete à da planta. */
 test("com o artigo-modelo, 'cobrir e superar' remete à abertura dele em vez de dar outra", async () => {
   const fonte = (await readFile(new URL("../lib/radar/portable-writing-export.ts", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-  assert.match(fonte, /if \(contexto\.blueprint\) \{\n\s+movimentos\.push\("Abertura: a do artigo-modelo \(coluna estrutura\); as perguntas abaixo entram nas seções\."\);\n\s+\} else if \(perguntaDeAbertura\) \{/);
+  const semComentarios = fonte.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(semComentarios, /if \(planta\) movimentos\.push\("Abertura: a do artigo-modelo \(coluna estrutura\); as perguntas abaixo entram nas seções\."\);/);
+  assert.doesNotMatch(semComentarios, /movimentos\.push\(`Responder \$\{entreAspas\(perguntaDeAbertura\)\} logo no primeiro parágrafo/, "a abertura do export sem planta saiu");
 });
 
 test("a conferência aponta afirmação absoluta e seções quase iguais, como pendência da proposta", () => {

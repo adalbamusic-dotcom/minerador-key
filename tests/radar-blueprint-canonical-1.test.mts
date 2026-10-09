@@ -101,6 +101,22 @@ const canonico = () => buildRadarYoutubeCanonicalBlueprint({
   generatedAt: "2026-09-14T20:00:00.000Z",
 });
 
+/*
+ * 2026-10-09 · A FOTOGRAFIA GRAVADA ANTES DA RÉGUA DA AMOSTRA PERTINENTE (fixture
+ * gerada com o código de antes). Gancho, roteiro e Shorts da camada canônica
+ * continuam existindo para ELA — lida como foi gravada, com o mesmo hash —; a
+ * fotografia nova não os produz (o roteiro, o gancho e os cortes são os da
+ * planta do artigo-modelo).
+ */
+const ANTES = JSON.parse(await readFile(new URL("./fixtures/radar-youtube-congelado-antes-2026-10-09.json", import.meta.url), "utf8"));
+const canonicoAntigo = (multimodalDaFoto: unknown = ANTES.frozen.multimodal.blueprint) => buildRadarYoutubeCanonicalBlueprint({
+  articleId: "a1", articleDnaVersionId: "d1",
+  blueprint: ANTES.frozen.blueprint, multimodal: multimodalDaFoto as never,
+  researchRefs: [{ source: "YOUTUBE_SERP", role: "PRIMARY_COMPETITIVE_RESEARCH", ref: "run-1", fingerprint: "sig", collectedAt: null, sampleSize: universo.length }],
+  primaryKeyword: "skin care noturno",
+  generatedAt: "2026-09-14T20:00:00.000Z",
+});
+
 /* ============ §2 e §22 · o freeze compacto ============ */
 
 test("§2 · o novo freeze NÃO contém results nem universe — ele referencia", () => {
@@ -245,13 +261,11 @@ test("§12 · peça SEM sinal não vira Short, mesmo vindo do multimodal", () =>
     },
   };
 
-  const comOrfa = buildRadarYoutubeCanonicalBlueprint({
-    articleId: "a1", articleDnaVersionId: "d1",
-    blueprint: blueprintDeYoutube(), multimodal: contaminado as never,
-    researchRefs: [], primaryKeyword: null, generatedAt: "2026-09-14T20:00:00.000Z",
-  });
+  /* 2026-10-09 · o plano de Shorts da camada canônica só existe na fotografia antiga: é nela que a recusa da órfã se prova. */
+  const comOrfa = canonicoAntigo(contaminado);
 
-  const legitimos = canonico().recommended.shorts.length;
+  const legitimos = canonicoAntigo().recommended.shorts.length;
+  assert.ok(legitimos > 0);
   assert.equal(comOrfa.recommended.shorts.length, legitimos, "a peça órfã foi recusada");
   for (const short of comOrfa.recommended.shorts) assert.ok(short.sourceSignal && short.sourceQuestion);
 });
@@ -296,7 +310,9 @@ test("§10 · nenhum título de concorrente vira recomendação", () => {
 });
 
 test("§10 · o gancho é RECOMENDAÇÃO, e o contrato não tem onde guardá-lo como observação", () => {
-  const bp = canonico();
+  /* 2026-10-09 · a direção de gancho da camada canônica é da fotografia antiga; na nova, o gancho é o da planta (`radarVideoHookLine`). */
+  assert.equal(canonico().recommended.hookDirection, null, "a fotografia nova não deriva gancho do padrão de título");
+  const bp = canonicoAntigo();
   assert.ok(bp.recommended.hookDirection, "existe direção de gancho");
   assert.ok(bp.recommended.hookDirection.sourceSignal.length > 10, "e ela declara de onde veio");
 
@@ -311,7 +327,9 @@ test("§10 · o gancho é RECOMENDAÇÃO, e o contrato não tem onde guardá-lo 
 /* ============ §11 e §12 · roteiro e Shorts ============ */
 
 test("§11 · o roteiro é utilizável: bloco, objetivo, direção e origem", () => {
-  const bp = canonico();
+  /* 2026-10-09 · o roteiro genérico só existe na fotografia antiga (lida como foi gravada); a nova não o produz. */
+  assert.deepEqual(canonico().recommended.script, [], "a fotografia nova não tem roteiro genérico: o roteiro é a planta");
+  const bp = canonicoAntigo();
   assert.ok(bp.recommended.script.length >= 6, "hook, abertura, blocos, conclusão e CTA");
   for (const secao of bp.recommended.script) {
     assert.ok(secao.objective.length > 5, `${secao.block} sem objetivo`);
@@ -329,15 +347,19 @@ test("§11 · o roteiro é utilizável: bloco, objetivo, direção e origem", ()
   assert.throws(() => RadarYoutubeScriptSectionSchema.parse({ block: "Gancho", objective: "abrir", direction: "faça assim" }));
   assert.throws(() => RadarYoutubeScriptSectionSchema.parse({ block: "Gancho", objective: "abrir", direction: "faça assim", sourceSignal: "" }));
 
-  /* Tom, linguagem e nível técnico chegam preenchidos. */
-  assert.ok(bp.recommended.tone);
-  assert.ok(bp.recommended.languageDirection);
-  assert.ok(bp.recommended.technicalLevel);
-  assert.ok(bp.recommended.authorityDirection);
+  /* Tom, linguagem e nível técnico chegam preenchidos — nas duas réguas. */
+  for (const leitura of [bp, canonico()]) {
+    assert.ok(leitura.recommended.tone);
+    assert.ok(leitura.recommended.languageDirection);
+    assert.ok(leitura.recommended.technicalLevel);
+    assert.ok(leitura.recommended.authorityDirection);
+  }
 });
 
 test("§12 · cada Short nasce de um sinal — nunca de uma cota", () => {
-  const bp = canonico();
+  /* 2026-10-09 · um plano de Shorts só: na fotografia nova, os Shorts são os cortes da planta; o plano pelas perguntas do Google fica na antiga. */
+  assert.deepEqual(canonico().recommended.shorts, []);
+  const bp = canonicoAntigo();
   assert.ok(bp.recommended.shorts.length > 0, "a amostra real sustenta Shorts");
 
   for (const short of bp.recommended.shorts) {
@@ -349,16 +371,14 @@ test("§12 · cada Short nasce de um sinal — nunca de uma cota", () => {
   }
 
   /* Sem multimodal não há pergunta observada — e não se inventa Short. */
-  const semSinal = buildRadarYoutubeCanonicalBlueprint({
-    articleId: "a1", articleDnaVersionId: "d1",
-    blueprint: blueprintDeYoutube(), multimodal: null,
-    researchRefs: [], primaryKeyword: null, generatedAt: "2026-09-14T20:00:00.000Z",
-  });
+  const semSinal = canonicoAntigo(null);
   assert.deepEqual(semSinal.recommended.shorts, [], "cota fixa produziria peça sem origem");
 });
 
 test("§13 · a aplicação no artigo liga vídeo, Shorts e apoio do Google", () => {
-  const bp = canonico();
+  /* 2026-10-09 · na fotografia nova, a aplicação liga o vídeo e o apoio do Google; o Short é corte da planta. */
+  assert.ok(canonico().recommended.articleApplication.every(item => item.piece !== "SHORT"));
+  const bp = canonicoAntigo();
   const pecas = bp.recommended.articleApplication;
   assert.ok(pecas.length > 0);
   assert.ok(pecas.some(item => item.piece === "VIDEO_HERO"));

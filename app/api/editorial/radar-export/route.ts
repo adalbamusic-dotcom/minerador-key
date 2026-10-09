@@ -11,7 +11,11 @@ import {
 import { RADAR_EXPORT_MAX_ARTICLES } from "@/lib/radar/portable-silo-scope";
 import { radarPortableExportStreamResponse } from "@/lib/radar/portable-export-response";
 import {
+  radarExportNeedsArticleBlueprint,
+  radarExportNeedsArticleBlueprintIds,
   radarPortableExportEmptySilos,
+  radarPortableExportMissingBlueprints,
+  radarPortableExportNeedsBlueprintBody,
   radarPortableExportRows,
   radarPortableExportSiloFiles,
 } from "@/lib/radar/portable-export-batch";
@@ -72,6 +76,18 @@ import { radarPortableVideoExport } from "@/lib/radar/portable-video-export";
  * lote, com os artigos na ordem do silo e o contexto do silo em cada linha.
  * Uma chamada para o lote inteiro: chamar uma vez por silo repetiria a
  * leitura dos artefatos e dos snapshots da marca a cada silo.
+ *
+ * ==================== 2026-10-09 · O ARTIGO-MODELO É OBRIGATÓRIO ====================
+ *
+ * Regra do dono: "tudo que é de processos antigos tem que ser substituído
+ * pelos novos processos dos pilotos". Os quatro formatos (para escrever, vídeo,
+ * técnico e por Silo) exigem a planta CONCLUÍDA de cada artigo montado — a que
+ * o núcleo já leu (`radarArticleBlueprintPick`). Sem ela, a rota responde 409
+ * `needs_article_blueprint` com a lista do que falta, pelo título, e o teto do
+ * custo de organizar; a tela organiza em série e exporta. Nenhum arquivo sai
+ * pelo modelo editorial antigo. Nenhuma leitura a mais: a planta veio com a
+ * montagem. Sem `mode`, o padrão passa a ser "writing" (o técnico é pedido
+ * explícito, de auditoria).
  */
 
 const CorpoSchema = z.object({
@@ -81,9 +97,9 @@ const CorpoSchema = z.object({
   /** Aditivo: sem ele, a resposta é a de antes (um CSV para o lote). */
   groupBy: z.literal("silo").optional(),
   /**
-   * 2026-09-23 · Aditivo: o formato do CSV. Sem ele, a resposta é a de antes
-   * ("full", o formato completo/técnico): quem chamava continua recebendo as
-   * mesmas colunas. A tela manda "writing", o padrão dela.
+   * 2026-09-23 · Aditivo: o formato do CSV. A tela manda "writing", o padrão dela.
+   * 2026-10-09 · Sem ele, o padrão passa a ser "writing" (era "full"): o formato
+   * para escrever sai pelo artigo-modelo; o técnico é pedido explícito.
    */
   /*
    * 2026-10-02 · Aditivo: "video" é o CSV para vídeo e redes sociais — dados,
@@ -98,7 +114,9 @@ const noStoreHeaders = { "Cache-Control": "no-store" };
 export async function POST(request: Request) {
   try {
     const profile = await requireCanonicalSessionProfile();
-    const input = CorpoSchema.parse(await request.json());
+    const corpo = CorpoSchema.parse(await request.json());
+    /* 2026-10-09 · sem `mode`, o formato para escrever (pelo artigo-modelo). */
+    const input = { ...corpo, mode: corpo.mode ?? "writing" };
     await assertEditorialPermission(profile, input.brandId, "radar", "view");
 
     const { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice } = await assembleRadarPortableExport({
@@ -115,6 +133,20 @@ export async function POST(request: Request) {
       /* 2026-10-07 · o resumo orgânico das lentes extras (grátis, do cache) só serve ao CSV de vídeo: os outros formatos não o leem. */
       videoLensDigests: input.mode === "video",
     });
+
+    /*
+     * ===== 2026-10-09 · SEM O ARTIGO-MODELO, NENHUM FORMATO SAI =====
+     *
+     * Antes de qualquer projeção: cada artigo montado precisa da planta
+     * concluída. Falta em algum, 409 com a lista pelo título e o teto do custo
+     * (até 2 chamadas de IA por artigo); a tela organiza e pede de novo. Os
+     * recusados (não finalizados) vão junto, como no resto da rota.
+     */
+    /* 2026-10-09 (correção) · com o modo: no "writing", a investigação de vídeo como perfil primário não pede planta (um portão só com a escrita). */
+    const semArtigoModelo = radarPortableExportMissingBlueprints(montadas, null, { mode: input.mode });
+    if (semArtigoModelo.length) {
+      return NextResponse.json(radarPortableExportNeedsBlueprintBody({ missing: semArtigoModelo, refused: recusados }), { status: 409, headers: noStoreHeaders });
+    }
 
     /*
      * ===== 2026-10-02 · O FORMATO "PARA VÍDEO E REDES SOCIAIS" =====
@@ -136,6 +168,10 @@ export async function POST(request: Request) {
         }, { status: 409, headers: noStoreHeaders });
       }
       const video = radarPortableVideoExport({ articles: montadas, today: exportedAt, brandVoice, selectionPlan: planoDaSelecao });
+      /* 2026-10-09 · a função pura também pode dizer que falta a planta (contrato da rodada): o mesmo 409. */
+      if (radarExportNeedsArticleBlueprint(video)) {
+        return NextResponse.json(radarPortableExportNeedsBlueprintBody({ missing: radarPortableExportMissingBlueprints(montadas, radarExportNeedsArticleBlueprintIds(video)), refused: recusados }), { status: 409, headers: noStoreHeaders });
+      }
       const semYoutube = video.withoutYoutube ? ` ${video.withoutYoutube} sem pesquisa do YouTube: veja a coluna pode_gravar.` : "";
       return radarPortableExportStreamResponse({
         success: true,
@@ -158,7 +194,8 @@ export async function POST(request: Request) {
      * As MESMAS entradas (`montadas`), as MESMAS lentes e o MESMO plano do
      * formato completo — só a projeção muda: 13 colunas fixas, com uma linha
      * de topo por arquivo. Nenhuma leitura a mais: tudo o que a ponte usa já
-     * está em memória. Sem `mode`, nada disto roda e a resposta é a de antes.
+     * está em memória. 2026-10-09 · sem `mode`, ESTE ramo roda (o padrão passou
+     * a ser "writing"); o técnico é pedido explícito (`mode: "full"`).
      */
     if (input.mode === "writing") {
       if (!montadas.length) {
@@ -171,6 +208,10 @@ export async function POST(request: Request) {
         }, { status: 409, headers: noStoreHeaders });
       }
       const escrita = radarPortableWritingExport({ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt, brandVoice });
+      /* 2026-10-09 · a função pura também pode dizer que falta a planta (contrato da rodada): o mesmo 409. */
+      if (radarExportNeedsArticleBlueprint(escrita)) {
+        return NextResponse.json(radarPortableExportNeedsBlueprintBody({ missing: radarPortableExportMissingBlueprints(montadas, radarExportNeedsArticleBlueprintIds(escrita)), refused: recusados }), { status: 409, headers: noStoreHeaders });
+      }
       const bloqueados = escrita.blocked ? ` ${escrita.blocked} com bloqueio para escrever: veja a coluna pode_escrever.` : "";
       return radarPortableExportStreamResponse({
         success: true,
@@ -256,6 +297,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Pedido de exportação inválido.", details: error.issues }, { status: 400, headers: noStoreHeaders });
     }
     const mapped = authzErrorResponse(error);
-    return NextResponse.json({ success: false, error: mapped.message }, { status: mapped.status, headers: noStoreHeaders });
+    /* 2026-10-09 · a leitura do artigo-modelo que falhou (503) diz o código: nada foi montado sem a planta, e a tela não oferece organizar por isso. */
+    const semLeituraDaPlanta = error instanceof Error && (error as Error & { code?: unknown }).code === "blueprint_unavailable";
+    return NextResponse.json({ success: false, error: mapped.message, ...(semLeituraDaPlanta ? { code: "blueprint_unavailable" } : {}) }, { status: mapped.status, headers: noStoreHeaders });
   }
 }

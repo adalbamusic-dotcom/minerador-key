@@ -29,6 +29,7 @@
 
 import { z } from "zod";
 import type { RadarEvidenceSource } from "../radar/evidence-authority.ts";
+import { radarReaderQuestionNoiseReason, type RadarResearchNoiseContext } from "../radar/research-noise.ts";
 import {
   WRITER_EVIDENCE_GUARDS,
   truncateWriterThirdPartyText,
@@ -54,6 +55,12 @@ export const WRITER_SECTION_BUNDLE_PATHS: ReadonlyArray<readonly string[]> = Obj
   ["conflicts"], ["limitations"], ["specialist"], ["video"], ["observed", "competitors"],
   ["observed", "questions"], ["observed", "gaps"], ["observed", "entities"],
   ["observed", "authorityEvidence", "claims"], ["observed", "authorityEvidence", "marketVsFactConflicts"],
+  /*
+   * 2026-10-09 · a trava do CSV na planta de quem escreve (`radarPendingClaims`
+   * com as afirmações do pacote) precisa saber quais afirmações a fonte já
+   * sustenta: sem isto, toda afirmação YMYL do mercado travaria a frase.
+   */
+  ["observed", "authorityEvidence", "factualEvidence"],
 ]);
 
 type Linha = Record<string, unknown>;
@@ -86,7 +93,18 @@ export type WriterSectionMaterial = {
   absent: ReadonlyArray<{ field: string; reason: string }>;
 };
 
-export type WriterSectionFocus = { kind: "section" | "improve"; id: string | null; label: string };
+export type WriterSectionFocus = {
+  kind: "section" | "improve";
+  id: string | null;
+  label: string;
+  /**
+   * 2026-10-09 · Na melhoria de trecho, o H2 do documento sob o qual o trecho
+   * está (o mesmo título que a seção usaria). Com ele, a melhoria recebe a seção
+   * da planta desse H2 pelo mesmo casamento seguro da seção — antes, nunca
+   * recebia (a seção vinha sempre nula). Sem ele (trecho fora de seção), nula.
+   */
+  sectionLabel?: string | null;
+};
 
 export type WriterSectionSource = { sourceKey: string; level: RadarEvidenceSource; frozen: boolean };
 
@@ -157,7 +175,41 @@ export type WriterSectionEvidencePackage = {
   pendingDecisions: unknown[];
   absent: Array<{ field: string; reason: string }>;
   trimmed: Array<{ field: string; kept: number; total: number; readAt: string }>;
+  /**
+   * 2026-10-09 · Aditivo: quantos itens de pesquisa a régua de ruído do Radar
+   * tirou do pacote, por campo (newsletter, inglês, título de post, loja fora do
+   * leitor, outra profissão, área vizinha, superstição…). Ausente quando nada saiu.
+   */
+  noise?: Array<{ field: string; removed: number }>;
 };
+
+/* ============================ ruído de pesquisa ============================ */
+
+/**
+ * ===== 2026-10-09 · A RÉGUA DE RUÍDO ONDE O REDATOR LÊ PESQUISA =====
+ *
+ * Regra do piloto: o processo novo vale em toda operação. O CSV "Para escrever"
+ * e o CSV de vídeo já tiravam da pesquisa a pergunta que não é do leitor
+ * (newsletter, chamada, inglês, título de post, loja ou outra profissão fora do
+ * público, área vizinha, superstição, produto de concorrente) pela régua pura
+ * do Radar (`research-noise.ts`). O pacote da seção do Redator entregava a
+ * pesquisa crua. Agora as perguntas, as lacunas, as entidades e as afirmações do
+ * pacote passam pela MESMA régua, com o mesmo contexto do CSV: o núcleo
+ * (principal, complementares, Assunto, tópicos obrigatórios), os temas (as
+ * seções da planta), o público do ArticleDNA e os domínios dos concorrentes.
+ */
+export function writerSectionNoiseContext(material: Pick<WriterSectionMaterial, "keywordContext" | "article" | "articleBlueprint" | "sections">): RadarResearchNoiseContext {
+  const palavras = registro(material.keywordContext);
+  const campos = material.article?.fields ?? {};
+  const assunto = registro(campos.subject);
+  const obrigatorios = lista(campos.requiredTopics).map(texto);
+  return {
+    core: [texto(palavras?.principal), ...lista(palavras?.secondary).map(texto), ...lista(palavras?.narrativeReinforcements).map(texto), texto(assunto?.phrase), ...obrigatorios],
+    topics: [...(material.articleBlueprint?.sections ?? []).flatMap(secao => [secao.h2, secao.readerQuestion]), ...obrigatorios],
+    audience: texto(campos.audience),
+    competitorDomains: registros(material.sections["observed.competitors"]).map(item => texto(item.domain)),
+  };
+}
 
 /* ============================ relevância ============================ */
 
@@ -249,12 +301,20 @@ function secaoDaPlantaPara(secoes: readonly WriterBlueprintSection[], titulo: st
 /**
  * 2026-10-02 · O RECORTE DA PLANTA APROVADA PARA O FOCO. A seção da planta só
  * vem com casamento seguro (`secaoDaPlantaPara`); sem ele, `null` — a IA vê a
- * ordem dos H2 e a voz e não copia pergunta, H3 nem link de outra seção. Na
- * melhoria de trecho o foco é o texto selecionado, não um H2: nunca há seção
- * da planta (o trecho não ganha CTA nem link que mudem seu sentido).
+ * ordem dos H2 e a voz e não copia pergunta, H3 nem link de outra seção.
+ *
+ * 2026-10-09 · NA MELHORIA DE TRECHO, A SEÇÃO DO H2 DO TRECHO (regra do piloto:
+ * melhoria e reajuste seguem o artigo-modelo). Antes o foco era só o texto
+ * selecionado e a seção vinha sempre nula — a melhoria de um trecho publicado
+ * não via o que a planta pede para aquela seção nem para onde vai o H2 dela no
+ * mapa da página. Agora o H2 do documento sob o qual o trecho está
+ * (`focus.sectionLabel`) passa pelo MESMO casamento seguro; sem H2, nula. O
+ * prompt da melhoria continua proibindo acrescentar CTA, link, H3 ou afirmação
+ * que mude o sentido do trecho.
  */
 export function writerBlueprintForSection(planta: WriterArticleBlueprintFoundation, focus: WriterSectionFocus): WriterSectionBlueprint {
-  const secao = focus.kind === "section" ? secaoDaPlantaPara(planta.sections, focus.label) : null;
+  const titulo = focus.kind === "section" ? focus.label : focus.sectionLabel ?? null;
+  const secao = titulo ? secaoDaPlantaPara(planta.sections, titulo) : null;
   return {
     readAt: planta.readAt,
     version: planta.version,
@@ -271,6 +331,33 @@ export function writerBlueprintForSection(planta: WriterArticleBlueprintFoundati
     ...(planta.needsSource?.length ? { needsSource: planta.needsSource } : {}),
     ...(planta.publishedMap?.length ? { publishedMap: planta.publishedMap } : {}),
   };
+}
+
+/**
+ * 2026-10-09 · O H2 SOB O QUAL O TRECHO DA MELHORIA ESTÁ. O primeiro bloco do
+ * documento cujo texto contém o começo do trecho (ou que o trecho contém, numa
+ * seleção que atravessa blocos) diz a seção: vale o último H2 antes dele. O H1
+ * (título) e o trecho antes do primeiro H2 ficam sem seção; o H3 continua na
+ * seção do H2 que o contém. Puro, para a regra ser testada sem banco.
+ */
+export function writerImproveSectionLabel(
+  blocos: ReadonlyArray<{ type: string; level?: number; text?: string; items?: readonly string[] }>,
+  trecho: string,
+): string | null {
+  const plano = (valor: string) => normalizar(valor).replace(/\s+/g, " ").trim();
+  const alvo = plano(trecho);
+  if (!alvo) return null;
+  const comeco = alvo.slice(0, 120);
+  let h2: string | null = null;
+  for (const bloco of blocos) {
+    const corpo = bloco.type === "list" ? (bloco.items || []).join(" ") : bloco.text ?? "";
+    if (bloco.type === "heading" && bloco.level === 1) h2 = null;
+    if (bloco.type === "heading" && bloco.level === 2) h2 = (bloco.text ?? "").trim() || null;
+    const lido = plano(corpo);
+    if (!lido) continue;
+    if (lido.includes(comeco) || (lido.length >= 24 && alvo.includes(lido.slice(0, 120)))) return h2;
+  }
+  return null;
 }
 
 /** Ordena pela nota de relevância, estável pela ordem do Radar. */
@@ -347,48 +434,58 @@ const COMO_USAR = [
  * chamador escreve sem pacote e declara a ausência.
  */
 export function buildWriterSectionEvidencePackage(material: WriterSectionMaterial, focus: WriterSectionFocus): WriterSectionEvidencePackage | null {
-  const tokens = writerSectionTokens(focus.label);
+  /* 2026-10-09 · na melhoria, o H2 do trecho também orienta a relevância (o trecho sozinho tem poucas palavras de assunto). */
+  const tokens = writerSectionTokens([focus.label, focus.kind === "improve" ? focus.sectionLabel ?? "" : ""].join(" "));
   const secao = (caminho: string) => material.sections[caminho];
   const autoritativa = material.bundle?.serpAuthoritative === true;
   const nivel = (caminho: string[]) => writerEvidenceHierarchyOf({ family: "radar.bundle", bundlePath: caminho, serpAuthoritative: autoritativa }).level;
 
-  const perguntas = porRelevancia(registros(secao("observed.questions")), item =>
+  /* 2026-10-09 · a régua de ruído do Radar, com o contexto do CSV (ver `writerSectionNoiseContext`). */
+  const ruido = writerSectionNoiseContext(material);
+  const removidos: Array<{ field: string; removed: number }> = [];
+  const semRuido = <T>(campo: string, itens: T[], textoDoItem: (item: T) => string | null): T[] => {
+    const ficam = itens.filter(item => !radarReaderQuestionNoiseReason(textoDoItem(item), ruido));
+    if (ficam.length < itens.length) removidos.push({ field: campo, removed: itens.length - ficam.length });
+    return ficam;
+  };
+
+  const perguntas = semRuido("questions", porRelevancia(registros(secao("observed.questions")), item =>
     writerSectionScore(tokens, item.canonicalQuestion, ...lista(item.variants), item.conceptLabel))
     .map(item => ({
       id: texto(item.id), question: cortar(item.canonicalQuestion, 240) ?? "", pages: numero(item.pages), status: texto(item.status),
       declaredByArticle: typeof item.declaredByArticle === "boolean" ? item.declaredByArticle : null, matchesSection: item.matchesSection,
     }))
-    .filter(item => item.question);
+    .filter(item => item.question), item => item.question);
 
-  const lacunas = porRelevancia(registros(secao("observed.gaps")), item => writerSectionScore(tokens, item.subject, item.evidence))
+  const lacunas = semRuido("gaps", porRelevancia(registros(secao("observed.gaps")), item => writerSectionScore(tokens, item.subject, item.evidence))
     .map(item => ({
       subject: cortar(item.subject, 200) ?? "", against: texto(item.against), pagesCovering: numero(item.pagesCovering),
       sampleSize: numero(item.sampleSize), evidence: cortar(item.evidence, 300), matchesSection: item.matchesSection,
     }))
-    .filter(item => item.subject);
+    .filter(item => item.subject), item => item.subject);
 
   const entidadesCruas = registro(secao("observed.entities"));
-  const observadas = porRelevancia(([
+  const observadas = semRuido("entities.observed", porRelevancia(([
     ["shared", entidadesCruas?.shared], ["related", entidadesCruas?.related], ["marketOnly", entidadesCruas?.marketOnly],
   ] as const).flatMap(([kind, valor]) => registros(valor).map(item => ({ label: cortar(item.label, 120) ?? "", kind, pages: numero(item.pages) }))),
-  item => writerSectionScore(tokens, item.label)).filter(item => item.label);
+  item => writerSectionScore(tokens, item.label)).filter(item => item.label), item => item.label);
   const entidadesDoArtigo = lista(entidadesCruas?.article).map(item => cortar(item, 120)).filter((item): item is string => Boolean(item));
 
-  const afirmacoes = porRelevancia(registros(secao("observed.authorityEvidence.claims")), item => writerSectionScore(tokens, item.canonicalClaim))
+  const afirmacoes = semRuido("claims", porRelevancia(registros(secao("observed.authorityEvidence.claims")), item => writerSectionScore(tokens, item.canonicalClaim))
     .map(item => ({
       claimId: texto(item.claimId), claim: cortar(item.canonicalClaim, 300) ?? "", claimType: texto(item.claimType),
       ymyl: texto(registro(item.ymyl)?.relevance), recurrence: texto(registro(item.market)?.recurrence), confidence: texto(item.confidence),
       matchesSection: item.matchesSection,
     }))
-    .filter(item => item.claim);
+    .filter(item => item.claim), item => item.claim);
 
-  const mercadoVersusFato = porRelevancia(registros(secao("observed.authorityEvidence.marketVsFactConflicts")), item =>
+  const mercadoVersusFato = semRuido("marketVsFact", porRelevancia(registros(secao("observed.authorityEvidence.marketVsFactConflicts")), item =>
     writerSectionScore(tokens, item.canonicalClaim, item.marketObservation, item.factualPosition))
     .map(item => ({
       claimId: texto(item.claimId), claim: cortar(item.canonicalClaim, 300) ?? "", market: cortar(item.marketObservation, 300),
       factual: cortar(item.factualPosition, 300), impact: cortar(item.impact, 200), matchesSection: item.matchesSection,
     }))
-    .filter(item => item.claim);
+    .filter(item => item.claim), item => item.claim);
 
   const especialistaCru = registro(secao("specialist"));
   const especialista = especialistaCru ? {
@@ -450,7 +547,7 @@ export function buildWriterSectionEvidencePackage(material: WriterSectionMateria
     documentId: material.documentId,
     articleId: material.articleId,
     documentHash: material.documentHash,
-    focus: { kind: focus.kind, id: focus.id, label: cortar(focus.label, 300) ?? "" },
+    focus: { kind: focus.kind, id: focus.id, label: cortar(focus.label, 300) ?? "", ...(focus.kind === "improve" && focus.sectionLabel ? { sectionLabel: cortar(focus.sectionLabel, 300) } : {}) },
     guards: WRITER_EVIDENCE_GUARDS,
     howToUse: COMO_USAR,
     writerMayNot: [...material.writerMayNot],
@@ -474,6 +571,8 @@ export function buildWriterSectionEvidencePackage(material: WriterSectionMateria
     limitations: limitacoes,
     pendingDecisions: [...material.pendingDecisions],
     absent: [...material.absent],
+    /* 2026-10-09 · só quando a régua de ruído tirou algo: sem ruído, o pacote sai como antes. */
+    ...(removidos.length ? { noise: removidos } : {}),
   };
 
   const trimmed: WriterSectionEvidencePackage["trimmed"] = [];

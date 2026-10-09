@@ -190,10 +190,19 @@ export function radarActionOutcome(input: {
  * artigo-modelo da SERP. O acréscimo é dito no botão, antes do clique — nunca
  * descoberto na fatura.
  */
-export const RADAR_AUTO_FINALIZE_AI_COST = "+ 1 chamada de IA para organizar o artigo-modelo";
+/*
+ * 2026-10-09 (correção) · O TETO REAL, NÃO O CASO FELIZ. Organizar o artigo-modelo
+ * faz 1 chamada e, se a resposta vier cortada ou a conferência apontar o que
+ * corrigir, mais 1 — nunca as duas (`generateRadarArticleBlueprint`). Os botões de
+ * finalizar diziam "+ 1 chamada de IA" enquanto o export, o envio, o 409 e o MCP
+ * diziam "até 2 por artigo": agora todos dizem o teto, pela mesma constante.
+ */
+export const RADAR_ARTICLE_BLUEPRINT_MAX_AI_CALLS = 2;
+
+export const RADAR_AUTO_FINALIZE_AI_COST = `+ até ${RADAR_ARTICLE_BLUEPRINT_MAX_AI_CALLS} chamadas de IA para organizar o artigo-modelo`;
 
 /** O rótulo curto do botão que dispara a coleta (ou a análise, no Google). */
-export const radarAutoFinalizeButtonLabel = (label: string) => `${label} · e finaliza (+ 1 chamada de IA)`;
+export const radarAutoFinalizeButtonLabel = (label: string) => `${label} · e finaliza (+ até ${RADAR_ARTICLE_BLUEPRINT_MAX_AI_CALLS} chamadas de IA)`;
 
 /**
  * O BOTÃO MANUAL DE FINALIZAR TAMBÉM DIZ A IA — em qualquer perfil.
@@ -202,18 +211,45 @@ export const radarAutoFinalizeButtonLabel = (label: string) => `${label} · e fi
  * YouTube e Amazon passa a encadear a mesma organização que o do Google, e o
  * rótulo diz isso antes do clique.
  */
-export const radarFinalizeWithAiLabel = (label: string) => `${label} · inclui 1 chamada de IA`;
+export const radarFinalizeWithAiLabel = (label: string) => `${label} · inclui até ${RADAR_ARTICLE_BLUEPRINT_MAX_AI_CALLS} chamadas de IA`;
 
 /**
- * A explicação completa, para o ⓘ ou a linha sob o botão.
+ * 2026-10-09 · O QUE O FINALIZAR MANUAL DO YOUTUBE E DA AMAZON FAZ — dito antes do clique.
+ *
+ * O clique congela pela MESMA rotina do automático, e a regra do Google vale
+ * nos dois caminhos: a consulta que falhou e o apoio do Google que falhou ficam
+ * escritos na fotografia como limitação. O ⓘ diz isso e o custo da IA.
+ */
+export function radarProfileFinalizeNote(profile: "YOUTUBE" | "AMAZON"): string {
+  const consulta = profile === "AMAZON" ? "consulta da Amazon" : "consulta do YouTube";
+  return `Congela a investigação como está: ${consulta} que falhou e apoio do Google que falhou ficam registrados como limitação na fotografia. Em seguida a IA organiza o artigo-modelo da SERP (${RADAR_AUTO_FINALIZE_AI_COST}).`;
+}
+
+/**
+ * A explicação completa, para o ⓘ ou a linha sob o botão — YouTube e Amazon.
  *
  * 2026-10-02 · "coleta do apoio": repetir o apoio do Google também encadeia o
- * automático (YouTube e Amazon) — é ele que costuma fechar a pendência. Todo
- * botão que pode terminar em congelamento e IA diz isso antes do clique, não
- * só o da coleta principal.
+ * automático (YouTube e Amazon). Todo botão que pode terminar em congelamento e
+ * IA diz isso antes do clique, não só o da coleta principal.
+ *
+ * ====== 2026-10-09 · A REGRA DO GOOGLE, AGORA NOS DOIS PERFIS ======
+ *
+ * Regra do dono: o processo do piloto substitui o antigo. A nota antiga
+ * ("ao terminar sem pendência… com pendência, nada congela") chamava de
+ * pendência a consulta que falhou e o apoio que falhou; agora as duas viram
+ * limitação registrada e a investigação finaliza assim mesmo. A lista de
+ * paradas é a de `radarProfileAutoFinalizeDecision`, não uma versão menor; na
+ * Amazon, a coleta também analisa sozinha antes de congelar (sem chamada paga).
  */
-export function radarAutoFinalizeStartNote(etapa: "coleta" | "análise" | "coleta do apoio"): string {
-  return `Ao terminar sem pendência, a ${etapa} também finaliza a investigação e a IA organiza o artigo-modelo da SERP (${RADAR_AUTO_FINALIZE_AI_COST}). Com pendência, nada congela: a tela diz por quê e o botão de finalizar continua.`;
+export function radarAutoFinalizeStartNote(etapa: "coleta" | "análise" | "coleta do apoio", profile: "YOUTUBE" | "AMAZON"): string {
+  const encadeia = profile === "AMAZON" && etapa !== "análise"
+    ? `a ${etapa} também segue sozinha: analisa (sem chamada paga), finaliza a investigação e a IA organiza o artigo-modelo da SERP`
+    : `a ${etapa} também finaliza a investigação e a IA organiza o artigo-modelo da SERP`;
+  const paradas = profile === "AMAZON"
+    ? "coleta ainda em andamento ou sem nenhum produto; apoio do Google sem gravação confirmada; nenhum produto da coleta compatível com o alvo declarado (shortlist elegível vazia); configuração do alvo que não corresponde à coleta; gravação ou releitura do servidor não confirmadas"
+    : "coleta ainda em andamento ou sem nenhum vídeo; apoio do Google sem gravação confirmada; gravação ou releitura do servidor não confirmadas";
+  const consulta = profile === "AMAZON" ? "Consulta da Amazon" : "Consulta do YouTube";
+  return `Ao terminar, ${encadeia} (${RADAR_AUTO_FINALIZE_AI_COST}). ${consulta} que falhou e apoio do Google que falhou viram limitação registrada, e a investigação finaliza assim mesmo. Com pendência, nada congela — e pendência é só: ${paradas}. A tela diz por quê e onde continuar.`;
 }
 
 /**
@@ -224,7 +260,8 @@ export function radarAutoFinalizeStartNote(etapa: "coleta" | "análise" | "colet
  * consulta auxiliar que falhou: as duas viram limitação registrada no pacote
  * congelado, como no botão manual. Página que fica sem desfecho é lida de novo
  * uma vez. Só param o que pede decisão humana ou não tem o que congelar.
- * YouTube e Amazon continuam com a nota de `radarAutoFinalizeStartNote`.
+ * 2026-10-09 · YouTube e Amazon seguem a mesma regra, com a nota deles
+ * (`radarAutoFinalizeStartNote(etapa, perfil)`).
  */
 export function radarGoogleAutoFinalizeStartNote(): string {
   /*
@@ -279,14 +316,16 @@ export function radarAutoFinalizeDoneNotice(limitations: readonly string[]): str
  */
 export function radarPhase1WithAutoFinalize<T extends { id: string; label: string; info: string | null }>(acao: T, mode: RadarPrimarySearchMode = "WEB"): T {
   /*
-   * 2026-10-08 · a nota do Google diz a regra nova (finaliza com limitação;
-   * só para o que é decisão humana) — e SÓ no Google. O mesmo botão da Fase 1
-   * mostra "Iniciar Pesquisa YouTube/Amazon", e lá o automático continua na
-   * D9 (`radarProfileAutoFinalizeDecision` para por amostra incompleta e por
-   * consulta que falhou): prometer "não seguram" ali seria falso. O modo é o
-   * da ação (o do registro, ou o escolhido); sem ele, Google, como antes.
+   * 2026-10-08 · a nota do Google diz a regra dele. O mesmo botão da Fase 1
+   * mostra "Iniciar Pesquisa YouTube/Amazon", e lá vale a nota do perfil. O
+   * modo é o da ação (o do registro, ou o escolhido); sem ele, Google.
+   *
+   * 2026-10-09 · YouTube e Amazon deixaram a D9: consulta e apoio que falham
+   * viram limitação registrada, como no Google. A nota do perfil diz isso e as
+   * paradas próprias dele (na Amazon, shortlist vazia e alvo que não
+   * corresponde à coleta).
    */
-  const nota = mode === "WEB" ? radarGoogleAutoFinalizeStartNote() : radarAutoFinalizeStartNote("análise");
+  const nota = mode === "WEB" ? radarGoogleAutoFinalizeStartNote() : radarAutoFinalizeStartNote("análise", mode);
   if (acao.id === "ANALYZE_COMPETITION") {
     return { ...acao, label: radarAutoFinalizeButtonLabel(acao.label), info: [acao.info, nota].filter(Boolean).join(" ") };
   }

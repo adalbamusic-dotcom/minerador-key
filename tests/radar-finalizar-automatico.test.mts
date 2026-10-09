@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import {
   RADAR_PROFILE_STATE_LABELS,
+  RADAR_PROFILE_SUPPORT_MISSING_LIMITATION,
   radarProfileActionLabel,
   radarProfileAutoFinalizeDecision,
   radarProfileManualStepLabel,
@@ -162,6 +163,9 @@ test("D9 · YouTube sem pendência congela sozinho, e o botão manual concorda",
   const payload = { youtubeSearch: corridaYoutube(), supportResearch: apoioColetado };
   const automatico = radarProfileAutoFinalizeDecision({ payload, profile: "YOUTUBE" });
   assert.deepEqual({ next: automatico.next, pending: automatico.pending }, { next: "FINALIZE", pending: false });
+  /* 2026-10-09 · sem falha, nada a registrar — e a frase diz "sem pendência", como no Google. */
+  assert.deepEqual(automatico.limitations, []);
+  assert.match(automatico.reason, /^Sem pendência: 3 consulta\(s\) · 24 vídeo\(s\) na amostra/);
   assert.equal(radarYoutubeFinalizeDecision({ payload, profile: "YOUTUBE" }).shouldFreeze, true);
 
   /* O caso do mapeamento: acréscimo de vídeo num artigo com o Google base finalizado. */
@@ -169,20 +173,43 @@ test("D9 · YouTube sem pendência congela sozinho, e o botão manual concorda",
   assert.equal(acrescimo.next, "FINALIZE");
 });
 
-test("D9 · YouTube com pendência não congela, diz por quê, e o botão manual continua", () => {
-  const casos: Array<[string, Record<string, unknown>, RegExp, boolean]> = [
-    ["apoio do Google falhou", { youtubeSearch: corridaYoutube(), supportResearch: apoioFalho }, /apoio do Google falhou/, true],
-    ["uma consulta falhou", { youtubeSearch: corridaYoutube({ provenance: { queriesRequested: 3, queriesSucceeded: 2, queriesFailed: 1 } }), supportResearch: apoioColetado }, /1 consulta\(s\) da coleta falharam/, true],
-    ["coleta fechada como falha, com universo", { youtubeSearch: corridaYoutube({ state: "COLLECTION_FAILED" }), supportResearch: apoioColetado }, /falha/, true],
-    ["amostra vazia", { youtubeSearch: corridaYoutube({ universe: [] }), supportResearch: apoioColetado }, /nenhum vídeo/, true],
-    ["coleta em curso", { youtubeSearch: corridaYoutube({ state: "COLLECTING" }) }, /em andamento/, false],
-    ["apoio ainda não gravado", { youtubeSearch: corridaYoutube(), supportResearch: { collectedAt: null, failureReason: null } }, /apoio do Google ainda não está gravado/, false],
+/*
+ * 2026-10-09 · REGRA DO DONO: O PILOTO SUBSTITUI O ANTIGO. A D9 parava o YouTube
+ * por apoio que falhou e por consulta que falhou; agora vale a regra do Google:
+ * as duas viram limitação registrada e a investigação finaliza. Este teste
+ * fixava a parada antiga — a asserção virou o comportamento novo.
+ */
+test("2026-10-09 · YouTube: apoio e consulta que falham viram limitação registrada — e finaliza", () => {
+  const apoioFalhou = radarProfileAutoFinalizeDecision({ payload: { youtubeSearch: corridaYoutube(), supportResearch: apoioFalho }, profile: "YOUTUBE" });
+  assert.deepEqual({ next: apoioFalhou.next, pending: apoioFalhou.pending }, { next: "FINALIZE", pending: false });
+  assert.match(apoioFalhou.reason, /^Com limitação registrada: /);
+  assert.deepEqual(apoioFalhou.limitations, [RADAR_PROFILE_SUPPORT_MISSING_LIMITATION]);
+
+  const consultaFalhou = radarProfileAutoFinalizeDecision({
+    payload: { youtubeSearch: corridaYoutube({ provenance: { queriesRequested: 3, queriesSucceeded: 2, queriesFailed: 1 } }), supportResearch: apoioColetado },
+    profile: "YOUTUBE",
+  });
+  assert.equal(consultaFalhou.next, "FINALIZE");
+  assert.deepEqual(consultaFalhou.limitations, ["1 consulta(s) do YouTube falharam na coleta; o universo competitivo foi montado sem elas."]);
+  /* O botão manual concorda: ele já aceitava congelar nos dois casos. */
+  assert.equal(radarYoutubeFinalizeDecision({ payload: { youtubeSearch: corridaYoutube(), supportResearch: apoioFalho }, profile: "YOUTUBE" }).shouldFreeze, true);
+});
+
+test("2026-10-09 · YouTube: continua parando só o que não tem o que congelar ou pede gravação confirmada", () => {
+  const casos: Array<[string, Record<string, unknown>, RegExp, boolean, string | null]> = [
+    /* O congelamento recusaria estes dois: a frase não aponta o "Finalizar". */
+    ["coleta fechada como falha, com universo", { youtubeSearch: corridaYoutube({ state: "COLLECTION_FAILED" }), supportResearch: apoioColetado }, /sem nenhuma consulta concluída/, true, null],
+    ["amostra vazia", { youtubeSearch: corridaYoutube({ universe: [] }), supportResearch: apoioColetado }, /nenhum vídeo/, true, null],
+    ["coleta em curso", { youtubeSearch: corridaYoutube({ state: "COLLECTING" }) }, /em andamento/, false, null],
+    ["apoio ainda não gravado", { youtubeSearch: corridaYoutube(), supportResearch: { collectedAt: null, failureReason: null } }, /apoio do Google ainda não está gravado/, false, "Repetir apoio"],
   ];
-  for (const [nome, payload, motivo, botaoManualAceita] of casos) {
+  for (const [nome, payload, motivo, botaoManualAceita, botao] of casos) {
     const automatico = radarProfileAutoFinalizeDecision({ payload, profile: "YOUTUBE" });
     assert.equal(automatico.next, null, `${nome}: nada congela sozinho`);
     assert.equal(automatico.pending, true, nome);
     assert.match(automatico.reason, motivo, nome);
+    assert.deepEqual(automatico.limitations, [], `${nome}: quem para não registra nada`);
+    assert.equal(automatico.manualLabel, botao, `${nome}: o botão que a tela mostra`);
     assert.equal(radarYoutubeFinalizeDecision({ payload, profile: "YOUTUBE" }).shouldFreeze, botaoManualAceita, `${nome}: a decisão do botão manual não mudou`);
   }
 });
@@ -197,22 +224,35 @@ test("D9 · YouTube já congelado: o automático não tira outra fotografia e n�
 
 /* ======================= D9 · Amazon ======================= */
 
-test("D9 · Amazon: coleta OK → analisar; análise OK → congelar; apoio falho → nada", () => {
+test("D9 · Amazon: coleta OK → analisar; análise OK → congelar — e 2026-10-09: apoio falho também segue, com a limitação", () => {
   const coletada = radarProfileAutoFinalizeDecision({ payload: { amazonSearch: corridaAmazon(), researchPackage: pacoteAmazon("READY", "COLLECTED") }, profile: "AMAZON" });
   assert.equal(coletada.next, "ANALYZE", "a análise não tem provider e roda sozinha");
+  assert.deepEqual(coletada.limitations, []);
 
   const analisada = radarProfileAutoFinalizeDecision({ payload: { amazonSearch: corridaAmazon(), researchPackage: pacoteAmazon("READY", "COLLECTED"), amazonBlueprint: { profile: "AMAZON" } }, profile: "AMAZON" });
   assert.equal(analisada.next, "FINALIZE");
 
+  /*
+   * 2026-10-09 · REGRA DO DONO: a regra do Google na Amazon. O apoio que falhou
+   * não para mais: a análise roda (sem chamada paga) e declara SUPPORT_MISSING
+   * no blueprint, que vai à fotografia. A asserção antiga (parava) virou esta.
+   */
   const apoioFalhou = radarProfileAutoFinalizeDecision({ payload: { amazonSearch: corridaAmazon(), researchPackage: pacoteAmazon("PARTIAL_SUPPORT_FAILED", "FAILED") }, profile: "AMAZON" });
-  assert.deepEqual({ next: apoioFalhou.next, pending: apoioFalhou.pending }, { next: null, pending: true });
+  assert.deepEqual({ next: apoioFalhou.next, pending: apoioFalhou.pending }, { next: "ANALYZE", pending: false });
+  assert.deepEqual(apoioFalhou.limitations, [RADAR_PROFILE_SUPPORT_MISSING_LIMITATION]);
 
-  const analisadaSemApoio = radarProfileAutoFinalizeDecision({ payload: { amazonSearch: corridaAmazon(), researchPackage: pacoteAmazon("PARTIAL_SUPPORT_FAILED", "FAILED"), amazonBlueprint: { profile: "AMAZON" } }, profile: "AMAZON" });
-  assert.equal(analisadaSemApoio.next, null, "a análise sem apoio pede decisão humana para congelar");
-  assert.match(analisadaSemApoio.reason, /apoio do Google/);
+  /* Com blueprint, quem responde pelo apoio é o blueprint: o que ELE declarou é o que fica escrito. */
+  const analisadaSemApoio = radarProfileAutoFinalizeDecision({
+    payload: { amazonSearch: corridaAmazon(), researchPackage: pacoteAmazon("PARTIAL_SUPPORT_FAILED", "FAILED"), amazonBlueprint: { profile: "AMAZON", limitations: [RADAR_PROFILE_SUPPORT_MISSING_LIMITATION] } },
+    profile: "AMAZON",
+  });
+  assert.equal(analisadaSemApoio.next, "FINALIZE", "a análise sem apoio congela com a limitação registrada");
+  assert.match(analisadaSemApoio.reason, /^Com limitação registrada: /);
+  assert.deepEqual(analisadaSemApoio.limitations, [RADAR_PROFILE_SUPPORT_MISSING_LIMITATION]);
 
   const consultaFalhou = radarProfileAutoFinalizeDecision({ payload: { amazonSearch: corridaAmazon({ provenance: { queriesRequested: 2, queriesSucceeded: 1, queriesFailed: 1 } }), researchPackage: pacoteAmazon("READY", "COLLECTED") }, profile: "AMAZON" });
-  assert.equal(consultaFalhou.next, null);
+  assert.equal(consultaFalhou.next, "ANALYZE", "consulta que falhou não segura: vira limitação");
+  assert.deepEqual(consultaFalhou.limitations, ["1 consulta(s) da Amazon falharam na coleta; o universo competitivo foi montado sem elas."]);
 });
 
 test("D9 · o perfil Google não passa pela decisão dos acréscimos", () => {
@@ -278,16 +318,31 @@ test("D9 · Google finaliza sozinho quando a autoridade do botão diz pronto —
 /* ============== o que a tela diz: custo antes, motivo depois ============== */
 
 test("o botão que dispara a coleta diz que ela também finaliza e o custo da IA", () => {
-  assert.equal(RADAR_AUTO_FINALIZE_AI_COST, "+ 1 chamada de IA para organizar o artigo-modelo");
+  /* 2026-10-09 (correção) · o teto real: organizar + (nova tentativa OU correção). */
+  assert.equal(RADAR_AUTO_FINALIZE_AI_COST, "+ até 2 chamadas de IA para organizar o artigo-modelo");
   /* 2026-10-02 · revisão: repetir o apoio também encadeia o automático, e a nota dele diz isso. */
-  for (const etapa of ["coleta", "análise", "coleta do apoio"] as const) {
-    const nota = radarAutoFinalizeStartNote(etapa);
-    assert.ok(nota.includes(RADAR_AUTO_FINALIZE_AI_COST), etapa);
-    assert.ok(nota.includes(`a ${etapa} também finaliza a investigação`), etapa);
-    assert.match(nota, /Com pendência, nada congela/);
+  for (const perfil of ["YOUTUBE", "AMAZON"] as const) {
+    for (const etapa of ["coleta", "análise", "coleta do apoio"] as const) {
+      const nota = radarAutoFinalizeStartNote(etapa, perfil);
+      assert.ok(nota.includes(RADAR_AUTO_FINALIZE_AI_COST), `${perfil} · ${etapa}`);
+      assert.ok(nota.includes(`a ${etapa} também`), `${perfil} · ${etapa}`);
+      assert.ok(nota.includes("finaliza a investigação e a IA organiza o artigo-modelo da SERP"), `${perfil} · ${etapa}`);
+      /*
+       * 2026-10-09 · a regra do Google nos dois perfis: a nota antiga ("ao
+       * terminar sem pendência…") chamava de pendência a consulta e o apoio que
+       * falham. Agora a nota diz que eles viram limitação e lista as paradas.
+       */
+      assert.match(nota, /que falhou e apoio do Google que falhou viram limitação registrada, e a investigação finaliza assim mesmo/, `${perfil} · ${etapa}`);
+      assert.match(nota, /Com pendência, nada congela — e pendência é só: coleta ainda em andamento ou sem nenhum (vídeo|produto); apoio do Google sem gravação confirmada/, `${perfil} · ${etapa}`);
+      assert.equal(/Ao terminar sem pendência/.test(nota), false, "a nota antiga não volta");
+    }
   }
-  assert.match(radarAutoFinalizeButtonLabel("Iniciar pesquisa no YouTube"), /^Iniciar pesquisa no YouTube · e finaliza \(\+ 1 chamada de IA\)$/);
-  assert.equal(radarFinalizeWithAiLabel("Finalizar investigação"), "Finalizar investigação · inclui 1 chamada de IA");
+  assert.match(radarAutoFinalizeStartNote("coleta", "AMAZON"), /analisa \(sem chamada paga\), finaliza a investigação/);
+  assert.match(radarAutoFinalizeStartNote("coleta", "AMAZON"), /shortlist elegível vazia\); configuração do alvo que não corresponde à coleta/);
+  assert.equal(/shortlist|configuração do alvo/.test(radarAutoFinalizeStartNote("coleta", "YOUTUBE")), false, "as paradas da Amazon são só dela");
+  /* 2026-10-09 (correção) · o teto real no rótulo, antes do clique. */
+  assert.match(radarAutoFinalizeButtonLabel("Iniciar pesquisa no YouTube"), /^Iniciar pesquisa no YouTube · e finaliza \(\+ até 2 chamadas de IA\)$/);
+  assert.equal(radarFinalizeWithAiLabel("Finalizar investigação"), "Finalizar investigação · inclui até 2 chamadas de IA");
   assert.equal(
     radarAutoFinalizePendingNotice("O apoio do Google falhou.", "Finalizar investigação"),
     'Não finalizou sozinha: o apoio do Google falhou. Revise e use "Finalizar investigação" quando decidir.',

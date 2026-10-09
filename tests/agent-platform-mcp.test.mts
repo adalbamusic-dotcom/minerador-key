@@ -7,6 +7,7 @@ import { createWriterServer } from "../app/api/mcp/redator/route.ts";
 import {
   catalogRoutes,
   catalogToolNames,
+  PLATFORM_GUIDE_TOPICS,
   PLATFORM_OPERATIONS,
   PLATFORM_PLAYBOOKS,
   PLATFORM_STAGE_LABELS,
@@ -16,7 +17,26 @@ import {
 } from "../lib/agent/platform-catalog.ts";
 import { WRITER_MCP_DEFAULT_SCOPES, WRITER_MCP_SCOPES } from "../lib/redator/mcp-consent-domain.ts";
 import { PLATFORM_CATALOG_HASH } from "../lib/agent/catalog-hash.ts";
-import { compactSubjectCandidate } from "../lib/server/platform-mcp-tools.ts";
+import {
+  compactSubjectCandidate,
+  describeWriterSendFailure,
+  PlatformToolFailure,
+  radarMaterialOrFailure,
+  radarMaterialReadFailure,
+  sendArticlesToWriter,
+} from "../lib/server/platform-mcp-tools.ts";
+import {
+  MCP_ARTICLE_BLUEPRINT_SCREEN,
+  MCP_WRITER_NEEDS_ARTICLE_BLUEPRINT_MESSAGE,
+  mcpArticleBlueprintOrganizeAndExportLabel,
+  mcpArticleBlueprintStateOf,
+  mcpEvidenceRawMaterialOf,
+  mcpEvidenceWithRawMaterial,
+  mcpRawMaterialMaxBytes,
+  mcpWithArticleBlueprintState,
+} from "../lib/agent/mcp-article-blueprint.ts";
+import { RadarWriterSendError } from "../lib/server/radar-writer-send.ts";
+import { RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING } from "../lib/radar/handoff-readiness.ts";
 
 /**
  * O QUE AS IAS SABEM PRECISA ACOMPANHAR A PLATAFORMA.
@@ -370,14 +390,214 @@ test("F1 · medir Volume: sem aceite, sem planHash ou sem provider.spend é recu
   assert.equal(plano.code, "scope_denied"); assert.equal(plano.scope, "platform.read");
 });
 
+const semComentarios = (fonte: string) => fonte.replace(/\r\n/g, "\n").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+
 test("F1 · 'Para escrever' pelo MCP é leitura: pede platform.read e usa o mesmo núcleo da rota da tela", async () => {
   const semLeitura = harness(createWriterServer(principal([brand(["radar.write"])])));
   const recusa = toolText(await semLeitura(94, "tools/call", { name: "get_article_for_writing", arguments: { articleId: "artigo-1" } }));
   assert.equal(recusa.code, "scope_denied"); assert.equal(recusa.scope, "platform.read");
-  const ferramentas = read("lib/server/platform-mcp-tools.ts");
-  assert.match(ferramentas, /radarWritingExportForArticle\(/);
-  const rota = read("app/api/editorial/radar-export/route.ts");
-  assert.match(rota, /assembleRadarPortableExport\(\{/, "a tela e o MCP montam pelo mesmo núcleo");
-  const nucleo = read("lib/server/radar-portable-export-core.ts");
-  assert.doesNotMatch(nucleo.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " "), /collectRadarSerp|fetch\(|recordIntegrationUsage/, "exportar nunca chama provider");
+  /*
+   * 2026-10-09 · a ferramenta segue a rota passo a passo (lib/server/radar-mcp-material.ts):
+   * a mesma montagem, a mesma exigência do artigo-modelo ANTES da projeção e a mesma projeção.
+   * Antes chamava `radarWritingExportForArticle`, que não conferia a planta.
+   */
+  const ferramentas = semComentarios(read("lib/server/platform-mcp-tools.ts"));
+  assert.match(ferramentas, /radarMcpMaterialForArticle\(\{ brandId: access\.brandId, articleId, mode,/);
+  assert.match(ferramentas, /materialDoRadar\(access, articleId, "writing"\)/);
+  assert.doesNotMatch(ferramentas, /radarWritingExportForArticle/, "o caminho sem a exigência da planta saiu do MCP");
+  const material = semComentarios(read("lib/server/radar-mcp-material.ts"));
+  const rota = semComentarios(read("app/api/editorial/radar-export/route.ts"));
+  for (const passo of [/assembleRadarPortableExport\(\{/, /radarPortableExportMissingBlueprints\(/, /radarPortableVideoExport\(|projecoes\.video\(/, /radarPortableWritingExport\(|projecoes\.writing\(/]) {
+    assert.match(rota, passo, `a rota: ${passo}`);
+    assert.match(material, passo, `o MCP: ${passo}`);
+  }
+  /* A exigência da planta vem antes de qualquer projeção, como na rota. */
+  assert.ok(material.indexOf("radarPortableExportMissingBlueprints(montagem.montadas)") < material.indexOf("projecoes.video("), "a planta é conferida antes da projeção de vídeo");
+  assert.ok(material.indexOf("radarPortableExportMissingBlueprints(montagem.montadas)") < material.indexOf("projecoes.writing("), "a planta é conferida antes da projeção de escrita");
+  /* As mesmas chaves da rota em cada modo: o Silo da seleção, a estrutura publicada e, só no vídeo, o resumo das lentes. */
+  assert.match(material, /selectionSiloContext: true,/);
+  assert.match(material, /readPublishedStructure: radarReadPublishedStructure,/);
+  assert.match(material, /videoLensDigests: input\.mode === "video",/);
+  assert.match(rota, /videoLensDigests: input\.mode === "video",/);
+  const nucleo = semComentarios(read("lib/server/radar-portable-export-core.ts"));
+  for (const fonte of [nucleo, material]) {
+    assert.doesNotMatch(fonte, /collectRadarSerp|fetch\(|recordIntegrationUsage|deepseek|DeepSeek/i, "exportar nunca chama provider nem IA");
+  }
+});
+
+/* ============ 2026-10-09 · o artigo-modelo é obrigatório no MCP (regra do dono) ============ */
+
+/* As palavras que nenhum entregável novo pode ter (D10). */
+const D10 = /pend[eê]ncia|aguardando aprova|rascunho|fonte a obter|preencher|peça ao Arquiteto|confira se a coleta traz/i;
+
+test("2026-10-09 · get_video_material é leitura (platform.read + ver o Radar), sem custo e no catálogo", async () => {
+  const semLeitura = harness(createWriterServer(principal([brand(["radar.write", "writer.read"])])));
+  const recusa = toolText(await semLeitura(95, "tools/call", { name: "get_video_material", arguments: { articleId: "artigo-1" } }));
+  assert.equal(recusa.code, "scope_denied"); assert.equal(recusa.scope, "platform.read");
+  const operacao = PLATFORM_OPERATIONS.find(item => item.id === "radar.export_for_video")!;
+  assert.deepEqual(operacao.tools, ["get_video_material"]);
+  assert.equal(operacao.cost, "free");
+  assert.equal(operacao.access, "tool");
+  assert.deepEqual([...operacao.routes], ["/api/editorial/radar-export"]);
+  const ferramentas = semComentarios(read("lib/server/platform-mcp-tools.ts"));
+  assert.match(ferramentas, /call\("get_video_material", "platform\.read", \{ brandId \}, \[\{ module: "radar", action: "view" \}\]/);
+  assert.match(ferramentas, /materialDoRadar\(access, articleId, "video"\)/);
+});
+
+test("2026-10-09 · organizar o artigo-modelo NÃO é ferramenta MCP (chamada paga, escopo novo, SDD e decisão do dono)", () => {
+  const organizar = PLATFORM_OPERATIONS.find(item => item.id === "radar.article_blueprint")!;
+  assert.equal(organizar.access, "ui");
+  assert.equal(organizar.tools?.length ?? 0, 0);
+  assert.ok(!catalogToolNames().some(nome => /blueprint|organi[sz]e/i.test(nome)), catalogToolNames().join(", "));
+  assert.match(renderPlatformGuide("radar"), /Pelo MCP não se organiza o artigo-modelo/);
+});
+
+test("2026-10-09 · o estado da planta no Redator: aprovada, falta (com a ação e o custo) e leitura que falhou", () => {
+  const aprovada = mcpArticleBlueprintStateOf({ kind: "approved", meta: { id: "bp-1", versionNumber: 3, approvedAt: "2026-10-09T10:00:00Z" } });
+  assert.deepEqual(aprovada, { status: "approved", sourceKey: "radar.blueprint/bp-1", versionNumber: 3, approvedAt: "2026-10-09T10:00:00Z" });
+  for (const kind of ["none", "other_bundle", "no_bundle"] as const) {
+    const falta = mcpArticleBlueprintStateOf({ kind, reason: `motivo ${kind}` }, { screen: "https://app.test/marca--x/radar/artigo-1" });
+    assert.equal(falta.status, "needs_article_blueprint", kind);
+    if (falta.status !== "needs_article_blueprint") continue;
+    assert.equal(falta.reason, `motivo ${kind}`);
+    assert.equal(falta.action.who, "human");
+    assert.equal(falta.action.screen, "https://app.test/marca--x/radar/artigo-1");
+    assert.ok(falta.action.buttons.includes(MCP_ARTICLE_BLUEPRINT_SCREEN.organize));
+    assert.match(falta.action.cost, /Até 2 chamadas de IA/);
+    assert.match(falta.action.cost, /Pelo MCP não se organiza/);
+    assert.doesNotMatch(JSON.stringify(falta), D10, "D10 no estado do MCP");
+  }
+  for (const kind of ["read_failed", "table_missing"] as const) {
+    const falhou = mcpArticleBlueprintStateOf({ kind, reason: "falhou agora" });
+    assert.equal(falhou.status, "blueprint_unavailable", kind);
+    assert.equal("action" in falhou, false, "leitura que falhou não manda pagar para organizar");
+  }
+});
+
+test("2026-10-09 · briefing e fundamentos sem a planta: nunca o legado — as linhas do envio saem, o estado diz por quê", () => {
+  const base = { documentId: "doc-1", instructions: ["Siga a voz."], editorialContext: ["Virada: a seção 'X'", "Diferenciação: só o ângulo Y"], next: "Leia o manifesto." };
+  const aprovada = mcpArticleBlueprintStateOf({ kind: "approved", meta: { id: "bp-1", versionNumber: 1, approvedAt: null } });
+  const com = mcpWithArticleBlueprintState(base, aprovada);
+  assert.deepEqual(com.editorialContext, base.editorialContext, "com a planta, nada some");
+  assert.equal(com.next, base.next);
+  assert.equal(com.articleBlueprintState.status, "approved");
+
+  const falta = mcpArticleBlueprintStateOf({ kind: "none", reason: "nenhuma versão concluída" });
+  const sem = mcpWithArticleBlueprintState(base, falta) as Record<string, unknown> & { articleBlueprintState: Record<string, unknown> };
+  assert.equal("editorialContext" in sem, false, "as sugestões do modelo antigo não saem sem a planta");
+  assert.deepEqual(sem.instructions, base.instructions);
+  assert.deepEqual(sem.articleBlueprintState.omitted, ["editorialContext"]);
+  assert.match(String(sem.articleBlueprintState.omittedReason), /modelo editorial anterior/);
+  assert.ok(String(sem.next).startsWith(MCP_WRITER_NEEDS_ARTICLE_BLUEPRINT_MESSAGE), "o próximo passo começa pelo que falta");
+  assert.doesNotMatch(JSON.stringify(sem.articleBlueprintState), D10);
+
+  const semLinhas = mcpWithArticleBlueprintState({ documentId: "doc-2" }, falta) as Record<string, unknown> & { articleBlueprintState: Record<string, unknown> };
+  assert.equal("omitted" in semLinhas.articleBlueprintState, false, "nada omitido quando não havia linhas");
+  assert.equal("next" in semLinhas, false);
+});
+
+test("2026-10-09 · read_writer_evidence: o blueprint antigo e as amostras inteiras saem como matéria-prima, nunca como estrutura", () => {
+  for (const chave of [
+    "radar.bundle.competitiveBlueprint", "radar.bundle.competitiveBlueprint#recommended", "radar.bundle.formatBlueprints.video",
+    "radar.bundle.editorialOutputs", "run.youtube.universe", "run.youtube.results", "run.amazon.products", "run.amazon.results#2",
+  ]) {
+    const marcador = mcpEvidenceRawMaterialOf(chave);
+    assert.equal(marcador?.role, "raw_material", chave);
+    assert.match(marcador!.rawMaterial, /^Matéria-prima, não estrutura: /, chave);
+    assert.doesNotMatch(marcador!.rawMaterial, D10, chave);
+  }
+  assert.match(mcpEvidenceRawMaterialOf("run.youtube.universe")!.rawMaterial, /get_video_material/);
+  assert.match(mcpEvidenceRawMaterialOf("radar.bundle.competitiveBlueprint")!.rawMaterial, /artigo-modelo/);
+  for (const chave of ["radar.bundle.specialist", "radar.bundle.observed.questions", "run.youtube.queries", "radar.blueprint/bp-1", "run.amazon.shortlist", "chave inventada", "radar.bundle"]) {
+    assert.equal(mcpEvidenceRawMaterialOf(chave), null, chave);
+  }
+  const marcador = mcpEvidenceRawMaterialOf("run.youtube.universe")!;
+  const teto = mcpRawMaterialMaxBytes(16_384, marcador);
+  assert.ok(teto < 16_384 && teto + new TextEncoder().encode(JSON.stringify(marcador)).length <= 16_384, "a resposta inteira cabe no teto pedido");
+  assert.equal(mcpRawMaterialMaxBytes(1_024, marcador), 1_024, "nunca abaixo do mínimo da fatia");
+  assert.deepEqual(mcpEvidenceWithRawMaterial({ sourceKey: "run.youtube.universe", notModified: true, etag: "e" }, marcador), { sourceKey: "run.youtube.universe", notModified: true, etag: "e", ...marcador });
+  assert.deepEqual(mcpEvidenceWithRawMaterial({ sourceKey: "radar.bundle.specialist" }, null), { sourceKey: "radar.bundle.specialist" });
+});
+
+test("2026-10-09 · material do Radar: pronto passa; sem a planta, needs_article_blueprint com o que falta, o teto e a ação; a recusa de antes continua", () => {
+  const pronto = { status: "ready" as const, mode: "video" as const, csv: "a,b", filename: "x.csv", exportedAt: "2026-10-09T00:00:00Z", blocked: 0, withoutYoutube: 0 };
+  assert.equal(radarMaterialOrFailure(pronto), pronto);
+  const recusado = (() => { try { radarMaterialOrFailure({ status: "refused", mode: "writing", code: "radar_research_not_finalized", reason: "Finalize antes." }); } catch (erro) { return erro; } })();
+  assert.ok(recusado instanceof PlatformToolFailure);
+  assert.equal((recusado as PlatformToolFailure).code, "radar_research_not_finalized");
+  assert.deepEqual((recusado as PlatformToolFailure).details, { message: "Finalize antes." });
+
+  for (const mode of ["writing", "video"] as const) {
+    const falta = (() => { try { radarMaterialOrFailure({ status: "needs_article_blueprint", mode, missing: [{ articleId: "a1", title: "Rotina da manhã" }], maxAiCalls: 2, message: "Falta o artigo-modelo concluído deste artigo." }, "https://app.test/r/a1"); } catch (erro) { return erro; } })() as PlatformToolFailure;
+    assert.ok(falta instanceof PlatformToolFailure, mode);
+    assert.equal(falta.code, "needs_article_blueprint");
+    const detalhes = falta.details as { missingArticleBlueprints: unknown; maxAiCalls: number; action: { buttons: string[]; cost: string; afterwards: string; screen: string } };
+    assert.deepEqual(detalhes.missingArticleBlueprints, [{ articleId: "a1", title: "Rotina da manhã" }]);
+    assert.equal(detalhes.maxAiCalls, 2);
+    assert.ok(detalhes.action.buttons.includes(mcpArticleBlueprintOrganizeAndExportLabel(1)));
+    assert.equal(detalhes.action.screen, "https://app.test/r/a1");
+    assert.match(detalhes.action.afterwards, mode === "video" ? /get_video_material/ : /get_article_for_writing/);
+    assert.doesNotMatch(JSON.stringify(detalhes), D10);
+  }
+  const lida = radarMaterialReadFailure(Object.assign(new Error("Não foi possível ler o artigo-modelo de 1 artigo."), { code: "blueprint_unavailable" }));
+  assert.equal(lida?.code, "blueprint_unavailable");
+  assert.equal(radarMaterialReadFailure(new Error("outra")), null);
+});
+
+test("2026-10-09 · envio ao Redator sem a planta: a recusa do núcleo da tela ganha a ação na tela; o lote junta os que faltam", async () => {
+  const semPlanta = new RadarWriterSendError(RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING, "O envio ao Redator leva o artigo-modelo concluído desta investigação.", 409,
+    { ready: false, headline: "Pacote para o Redator bloqueado", blocks: [{ code: "ARTICLE_BLUEPRINT_MISSING", message: "organize o artigo-modelo", detail: "técnico" }] } as never);
+  const descrito = describeWriterSendFailure("a1", semPlanta, "https://app.test/r/a1") as unknown as Record<string, unknown> & { action: { buttons: string[]; screen: string } };
+  assert.equal(descrito.code, RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING);
+  assert.deepEqual(descrito.blocks, [{ code: "ARTICLE_BLUEPRINT_MISSING", message: "organize o artigo-modelo" }], "sem o detalhe técnico");
+  assert.ok(descrito.action.buttons.includes(MCP_ARTICLE_BLUEPRINT_SCREEN.organizeAndSend));
+  assert.equal(descrito.action.screen, "https://app.test/r/a1");
+  const outro = describeWriterSendFailure("a2", new RadarWriterSendError("radar_handoff_not_ready", "Não está pronto.", 409, null));
+  assert.equal("action" in outro, false, "só a falta da planta manda organizar");
+
+  const tudoFalhou = await sendArticlesToWriter(["a1", "a2"], async () => { throw semPlanta; }, id => `https://app.test/r/${id}`).catch(erro => erro);
+  assert.ok(tudoFalhou instanceof PlatformToolFailure);
+  assert.equal(tudoFalhou.code, "radar_writer_all_failed");
+  assert.deepEqual(tudoFalhou.details.needsArticleBlueprint, ["a1", "a2"]);
+  assert.match(String(tudoFalhou.details.summary), /2 sem o artigo-modelo concluído/);
+  const parte = await sendArticlesToWriter(["a1", "a3"], async id => { if (id === "a1") throw semPlanta; return { change: "CREATED", documentId: "doc-a3", headline: "ok" }; });
+  assert.equal(parte.sent, 1);
+  assert.deepEqual(parte.needsArticleBlueprint, ["a1"]);
+});
+
+test("2026-10-09 · o catálogo diz o processo novo: sem D9, sem 'o CSV sai sem artigo-modelo', sem roteiro pelo blueprint", () => {
+  const guia = PLATFORM_GUIDE_TOPICS.map(topico => renderPlatformGuide(topico)).join("\n");
+  assert.doesNotMatch(guia, /o CSV sai sem artigo-modelo/);
+  assert.doesNotMatch(guia, /os blocos da SERP do YouTube ficam como ritmo/);
+  assert.doesNotMatch(guia, /pendência faz parar e dizer o motivo e o botão manual/, "a D9 do YouTube e da Amazon saiu");
+  /*
+   * 2026-10-09 (correção) · a semeadura do Redator passou a ler o plano do CSV de
+   * vídeo (radarVideoPlan): o catálogo diz isso, e não mais "vem do processo
+   * anterior" nem "a melhoria nunca recebe seção da planta".
+   */
+  assert.doesNotMatch(guia, /vem do processo anterior, em substituição/);
+  assert.doesNotMatch(guia, /A melhoria de trecho nunca recebe seção da planta/);
+  assert.match(guia, /semeadura do roteiro e do carrossel \(\/api\/redator\/seed, 1 chamada de IA por entregável\) lê o MESMO plano do CSV de vídeo \(radarVideoPlan/);
+  assert.match(guia, /\/api\/redator\/article-blueprint/);
+  assert.match(guia, /save_writer_deliverable exige a mesma planta concluída/);
+  assert.doesNotMatch(guia, /sem pendência, finalizam sozinhos/);
+  for (const frase of [/needs_article_blueprint/, /get_video_material/, /articleBlueprintState/, /raw_material/, /'2026-10-09b'/, /amazonFrozenAt/, /regra 26/, /Organizar o artigo-modelo \(N\) · \+ até 2N chamadas de IA/]) {
+    assert.match(guia, frase, String(frase));
+  }
+  /*
+   * 2026-10-09 (correção) · no Radar vale a versão TRANSPORTADA pelo item (a que o
+   * Arquiteto enviou), e o cartão do Arquiteto não promete mais reinvestigar no
+   * Radar: o reenvio da versão nova ao Radar fica registrado como pendência.
+   */
+  assert.match(guia, /A versão do ArticleDNA que vale no Radar \(2026-10-09, correção\) é a TRANSPORTADA pelo item do Radar/);
+  assert.match(guia, /do ArticleDNA transportado pelo item do Radar \(radarArticleBlueprintPick\)/);
+  assert.match(guia, /reenvio da versão nova ao Radar, pendência registrada no backlog do Radar e do Arquiteto \(exige SDD\)/);
+  assert.match(guia, /mostra o botão 'Abrir Links internos', que só troca de aba \(sem custo\)/);
+  assert.doesNotMatch(guia, /Reinvestigar no Radar e reorganizar o artigo-modelo/, "o catálogo ainda oferece o caminho que não existe");
+  assert.doesNotMatch(guia, /é a vigente pela regra da mesa do Arquiteto/);
+  assert.doesNotMatch(guia, /o caminho é reinvestigar e reorganizar/);
+  /* As notas novas saem concluídas (D10). */
+  const novas = PLATFORM_OPERATIONS.flatMap(operacao => [operacao.howOnScreen, ...(operacao.notes ?? [])]).filter(texto => /2026-10-09/.test(texto) && /needs_article_blueprint|articleBlueprintState|raw_material|get_video_material/.test(texto));
+  assert.ok(novas.length >= 5, String(novas.length));
+  for (const texto of novas) assert.doesNotMatch(texto, D10, texto.slice(0, 120));
 });

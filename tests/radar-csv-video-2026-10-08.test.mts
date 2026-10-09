@@ -311,12 +311,15 @@ test("D10 · o CSV de vídeo INTEIRO (Marca, Voz da marca e as linhas) sai concl
   const planta = plantaDe(entrada, SECOES_DO_CASO);
   for (const status of ["active", "draft", "pending_approval"]) {
     const brandVoice: RadarBrandVoiceState = { kind: "available", voice: { ...VOZ, status } };
-    const { csv } = radarPortableVideoExport({
-      /* 2026-10-08 (correção da revisão) · a linha de saúde traz o especialista que responde outra coisa e a linha sem artigo-modelo nem público. */
-      articles: [{ entrada, blueprint: planta }, { entrada: entradaGoogle() }, { entrada: entradaGoogleSaude() }],
+    const saida = radarPortableVideoExport({
+      /* 2026-10-08 (correção da revisão) · a linha de saúde traz o especialista que responde outra coisa e a linha sem público. */
+      /* 2026-10-09 · toda linha leva a planta APPROVED: sem ela, o lote pede o artigo-modelo antes (needs_article_blueprint). */
+      articles: [{ entrada, blueprint: planta }, { entrada: entradaGoogle(), blueprint: plantaDe(entradaGoogle(), SECOES_DO_CASO) }, { entrada: entradaGoogleSaude(), blueprint: plantaDe(entradaGoogleSaude(), SECOES_DO_CASO) }],
       today: EXPORTADO_EM,
       brandVoice,
     });
+    assert.equal(saida.status, "ready");
+    const csv = saida.status === "ready" ? saida.csv : "";
     /* Os caminhos que já escreveram espera aberta estão no arquivo: o link sem fonte, a lista "Fica fora" e o rótulo da voz. */
     assert.match(csv, /a planta pede fonte oficial ou verificada; o pacote não tem/, status);
     assert.match(csv, /Fica fora do texto publicável/, status);
@@ -325,6 +328,32 @@ test("D10 · o CSV de vídeo INTEIRO (Marca, Voz da marca e as linhas) sai concl
     assert.match(csv, status === "active" ? /Skill ""AdalbaPro"" v1 \(ativa na Marca\)/ : /Skill ""AdalbaPro"" v1 \(versão corrente na Marca\)/, status);
     for (const proibida of D10_PROIBIDAS) assert.doesNotMatch(csv, proibida, `D10 com a Skill em ${status}: ${proibida}`);
   }
+});
+
+/*
+ * 2026-10-09 (correção · contrato-F4) · o CSV de vídeo lê a MESMA planta lida
+ * que o CSV para escrever e o Redator (`radarArticleBlueprintPayloadReading`):
+ * a premissa sai sem a moldura do Arquiteto e sem o segundo público, e a
+ * demonstração do capítulo sem o resultado atribuído a um caso sem fonte.
+ */
+test("2026-10-09 (correção · contrato-F4) · o vídeo lê a planta lida: premissa sem moldura nem segundo público, demonstração sem resultado atribuído", () => {
+  const entrada = entradaDoCaso();
+  const comDemonstracao = SECOES_DO_CASO.map((secao, indice) => (indice === 2
+    ? { ...secao, practical: "Demonstração: exemplo de um consultório que otimizou o perfil do Google e passou a receber mais ligações; mostrar antes e depois das configurações." }
+    : secao));
+  const planta = plantaDe(entrada, comDemonstracao);
+  const antiga = {
+    ...planta,
+    blueprint: {
+      ...planta.blueprint,
+      reader: "Donas de clínica de estética, e pacientes que procuram clínicas confiáveis.",
+      promise: "Cobrir com clareza o tema “como atrair clientes pelo instagram”, mostrando como ajustar o perfil para atrair clientes da região, e como pacientes podem encontrar clínicas confiáveis.",
+    },
+  };
+  const row = linhaDe(entrada, { blueprint: antiga });
+  const tudo = Object.values(row).join("\n");
+  assert.doesNotMatch(tudo, /Cobrir com clareza|pacientes podem encontrar|passou a receber mais ligações/);
+  assert.match(row.diretrizes_de_roteiro, /^Premissa do vídeo: .*ajustar o perfil para atrair clientes da região/m);
 });
 
 test("PROVIDER_CALLS = 0 e AI_CALLS = 0", () => {

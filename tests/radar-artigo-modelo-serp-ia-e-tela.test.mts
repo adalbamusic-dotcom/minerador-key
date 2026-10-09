@@ -182,11 +182,13 @@ test("o botão de finalizar diz que inclui a chamada de IA; as outras ações n�
   const finalizar = radarPhase1Action({ state: "AWAITING_REVIEW" as never, contextReady: true, hasPrimaryQuery: true, running: false, selected: 10, pending: 0, failed: 0, analyzed: 10 });
   assert.equal(finalizar.id, "FINALIZE_SERP");
   const comIa = radarPhase1WithArticleBlueprint(finalizar);
-  assert.equal(comIa.label, "Finalizar pesquisa · inclui 1 chamada de IA");
+  /* 2026-10-09 (correção) · o teto real no rótulo: até 2 chamadas (organizar + nova tentativa OU correção). */
+  assert.equal(comIa.label, "Finalizar pesquisa · inclui até 2 chamadas de IA");
   assert.equal(comIa.id, finalizar.id, "a ação e o handler são os da Fase 1");
-  assert.match(comIa.info!, /a IA organiza o artigo-modelo da SERP sobre o pacote congelado: 1 chamada de IA/);
+  assert.match(comIa.info!, /a IA organiza o artigo-modelo da SERP sobre o pacote congelado: até 2 chamadas de IA/);
+  assert.match(comIa.info!, /mais 1, nunca as duas/);
   assert.match(comIa.info!, /Se a IA falhar, a investigação continua finalizada/);
-  assert.match(radarPhase1WithArticleBlueprint(finalizar, 3).label, /inclui 3 chamadas de IA$/);
+  assert.match(radarPhase1WithArticleBlueprint(finalizar, 3).label, /inclui até 6 chamadas de IA$/);
   assert.equal(radarArticleBlueprintCallsLabel(1), "1 chamada de IA");
 
   const iniciar = radarPhase1Action({ state: "NOT_STARTED", contextReady: true, hasPrimaryQuery: true, running: false, selected: 0, pending: 0, failed: 0, analyzed: 0 });
@@ -277,21 +279,27 @@ test("finalizar → organizar: só depois do readback confirmado, e nada desfaz 
   assert.match(pagina(), /articleBlueprintJob=\{activeRadarItem \? blueprintJobs\[activeRadarItem\.articleId\] \?\? null : null\}/);
 });
 
-test("a tela: o painel mora na Pesquisa, logo abaixo do modelo da SERP; o botão de finalizar usa o aviso", () => {
+test("a tela: o painel mora na Pesquisa, como a referência do artigo; o esqueleto da SERP vem recolhido abaixo; o botão de finalizar usa o aviso", () => {
   const fonte = bancada();
   const pesquisa = semComentarios(trecho(fonte, "function DeepResearch(", "function Phase1Slot("));
   const modelo = pesquisa.indexOf("<RadarArticleModelSection model={view.articleModel} />");
   const painel = pesquisa.indexOf("{articleBlueprint && <div className=\"mt-3\">{articleBlueprint}</div>}");
-  assert.ok(modelo > 0 && painel > modelo, "o artigo-modelo da SERP vem logo depois do modelo do artigo");
+  /* 2026-10-09 · o artigo-modelo é a referência do artigo: vem primeiro; o modelo de antes virou o "Esqueleto da SERP", recolhido abaixo. */
+  assert.ok(painel > 0 && modelo > painel, "o artigo-modelo da SERP vem antes do esqueleto da SERP");
+  const esqueleto = pesquisa.slice(pesquisa.lastIndexOf("<details", modelo), modelo);
+  assert.match(esqueleto, /data-testid="radar-serp-skeleton"/, "o esqueleto da SERP saiu da posição principal, recolhido");
+  assert.match(esqueleto, /Esqueleto da SERP · o que a amostra mostra \(insumo do artigo-modelo\)/);
   assert.ok(painel < pesquisa.indexOf("{writerHandoff && <WriterHandoff"), "e antes da decisão de envio");
   const botao = semComentarios(trecho(fonte, "function Phase1Button(", "function RecoverSerpAction("));
   /* 2026-10-08 · o aviso da IA continua no botão, agora pela montagem única que a frase de parada também usa. */
   assert.match(botao, /const acao = radarPhase1Visible\(daFase1, mode\);/);
-  assert.equal(radarPhase1Visible(radarPhase1Action({ state: "AWAITING_REVIEW" as never, contextReady: true, hasPrimaryQuery: true, running: false, selected: 10, pending: 0, failed: 0, analyzed: 10 })).label, "Finalizar pesquisa · inclui 1 chamada de IA");
+  assert.equal(radarPhase1Visible(radarPhase1Action({ state: "AWAITING_REVIEW" as never, contextReady: true, hasPrimaryQuery: true, running: false, selected: 10, pending: 0, failed: 0, analyzed: 10 })).label, "Finalizar pesquisa · inclui até 2 chamadas de IA");
   const bancadaFora = semComentarios(fonte.slice(fonte.indexOf("export function RadarR3Workbench(")));
   /* 2026-10-02 · o painel recebe o congelamento vigente: mostra a versão do pacote atual, como o export. */
   /* 2026-10-08 · P0-A · e o pacote congelado inteiro: a versão vale pelo congelamento, não pelo hash do dossiê. */
-  assert.match(bancadaFora, /articleBlueprint=\{model\.deepResearch\.finalizedBundle && brandId && articleId \? <RadarArticleBlueprintPanel brandId=\{brandId\} articleId=\{articleId\} job=\{articleBlueprintJob\} currentBundleHash=\{model\.deepResearch\.finalizedBundle\.bundleHash\} currentFreeze=\{freezeComArticleDna\} \/> : null\}/);
+  /* 2026-10-09 · e também sem o Google congelado (Amazon ou YouTube), pela precedência do servidor; o painel diz à página se há planta (o envio ao Redator a exige). */
+  assert.match(bancadaFora, /articleBlueprint=\{congelamentoDoArtigoModelo && brandId && articleId \? <RadarArticleBlueprintPanel brandId=\{brandId\} articleId=\{articleId\} job=\{articleBlueprintJob\} currentBundleHash=\{model\.deepResearch\.finalizedBundle\?\.bundleHash \?\? null\} currentFreeze=\{congelamentoDoArtigoModelo\} onDeliveryChange=\{avisarEntregaDoArtigoModelo\(articleId\)\} \/> : null\}/);
+  assert.match(bancadaFora, /const congelamentoDoArtigoModelo = freezeComArticleDna \? radarArticleBlueprintFreezeOfInvestigation\(\{/);
   /* 2026-10-08 (correção) · o congelamento leva o ArticleDNA que a página conhece (o painel confere a referência gravada). */
   assert.match(bancadaFora, /const freezeComArticleDna = radarArticleBlueprintFreezeOf\(model\?\.deepResearch\?\.finalizedBundle \?\? null, expertContext\?\.articleDnaVersionId \?\? null\);/);
   assert.equal((bancadaFora.match(/<RadarArticleBlueprintPanel/g) || []).length, 1, "um lugar só: o painel solto saiu");
@@ -325,7 +333,9 @@ test("o painel mostra a versão do pacote vigente, pela mesma regra do export, e
 
   /* Reorganizado sobre um congelamento novo: a proposta nova é a do pacote vigente. */
   const reorganizado = [v("v3", 3, "DRAFT", "ai", "B"), v("v2", 2, "APPROVED", "ai", "A"), v("v1", 1, "DRAFT", "ai", "A")];
-  assert.equal(radarArticleBlueprintPanelChoice(reorganizado).shown?.id, "v3");
+  /* 2026-10-09 · o artigo-modelo obrigatório: o rascunho do vigente não vai às entregas (o export não o lê); fica à mão para concluir. */
+  assert.equal(radarArticleBlueprintPanelChoice(reorganizado).shown, null);
+  assert.equal(radarArticleBlueprintPanelChoice(reorganizado).newerDraft?.id, "v3");
   assert.equal(radarArticleBlueprintPanelChoice(reorganizado).newestFromOtherFreeze, null);
   /* Quem chama sabe que o vigente ainda é A: a aprovada de A vai ao CSV, e a v3 é de outro congelamento. */
   const sabendo = radarArticleBlueprintPanelChoice(reorganizado, "A");
@@ -385,8 +395,9 @@ test("refinalizada com a IA falhando: com o vigente informado, nada vai ao CSV; 
   /* 2026-10-02 · D10: organizar e editar gravam concluído; o rascunho é só de versões antigas. */
   assert.equal(radarArticleBlueprintPanelStateLabel({ state: "APPROVED", origin: "ai" }, true), "Concluído — vai ao CSV, ao Redator e ao MCP");
   assert.equal(radarArticleBlueprintPanelStateLabel({ state: "APPROVED", origin: "ai" }, false), "Concluído — vai aos entregáveis se for do congelamento vigente");
-  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "DRAFT", origin: "ai" }, true), "Versão antiga em rascunho — vai ao CSV assim mesmo; conclua ou organize de novo");
-  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "DRAFT", origin: "human_edit" }, false), "Versão antiga em rascunho — vai ao CSV assim mesmo; conclua ou organize de novo");
+  /* 2026-10-09 · o artigo-modelo obrigatório: o rascunho antigo não vai mais às entregas (o export exige a concluída). */
+  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "DRAFT", origin: "ai" }, true), "Versão antiga em rascunho — não vai às entregas; conclua esta versão ou organize de novo");
+  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "DRAFT", origin: "human_edit" }, false), "Versão antiga em rascunho — não vai às entregas; conclua esta versão ou organize de novo");
 
   const fonte = semComentarios(readFileSync(new URL("../modules/radar/radar-article-blueprint-panel.tsx", import.meta.url), "utf8"));
   /* 2026-10-08 (correção) · conferido pela escolha (hash exato ou referência com o ArticleDNA da página), não só pelo congelamento informado. */

@@ -35,7 +35,7 @@ import { startRadarDeepResearch, settleRadarDeepResearchQuery, finalizeRadarDeep
 import { radarCanonicalReusePlan, radarResearchResumption } from "@/lib/radar/research-resumption";
 import { radarResumableRemoteAnalysis, radarUnconfirmedClaimsNotice, type RadarRemoteOnlyClaim } from "@/lib/radar/remote-authority";
 import { freezeRadarEvidenceBundle, radarAuxiliaryFailureLimitation, radarGoogleAutoFinalizeDecision, radarGoogleRegisteredLimitations } from "@/lib/radar/investigation-finalization";
-import { RADAR_AUTO_FINALIZE_DONE_NOTICE, radarActionOutcome, radarAutoFinalizeDoneNotice, radarAutoFinalizePendingNotice, radarClaimAction, type RadarOperationalActionId } from "@/lib/radar/operational-actions";
+import { radarActionOutcome, radarAutoFinalizeDoneNotice, radarAutoFinalizePendingNotice, radarClaimAction, type RadarOperationalActionId } from "@/lib/radar/operational-actions";
 import { radarExtractionAccount, radarReconcileExtractionRound, type RadarExtractionRoundResponse } from "@/lib/radar/extraction-round";
 import { radarSufficiencyLabel } from "@/lib/radar/investigation-sufficiency";
 import { buildRadarResearchCuration, type RadarResearchDecision } from "@/lib/radar/research-curation";
@@ -46,7 +46,7 @@ import { RADAR_EXTRACTION_MAX_ATTEMPTS, radarExtractionFailureIsRecoverable } fr
 import { radarPhase1NextAction } from "@/lib/radar/serp-phase1";
 import { RADAR_DEFAULT_SEARCH_MODE, radarGoogleBaseCommitment, radarResearchPlanOfAnalysis, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
 import { buildRadarResearchPackage, radarProfileOfTarget, radarProfileSupportPlan, type RadarResearchPackage, type RadarResearchProfile, type RadarSupportResearchRecord } from "@/lib/radar/research-profile";
-import { radarAmazonReportEvidence, radarProfileAutoFinalizeDecision, radarProfileManualStepLabel, radarResearchProfileStateOfAnalysis, radarYoutubeFinalizeDecision, radarYoutubeReportEvidence, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
+import { RADAR_PROFILE_AREA_LABELS, radarAmazonReportEvidence, radarProfileAutoFinalizeDecision, radarProfileAutoFinalizePendingText, radarProfileManualStepLabel, radarProfileRegisteredLimitations, radarResearchProfileStateOfAnalysis, radarYoutubeFinalizeDecision, radarYoutubeReportEvidence, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
 import { buildRadarAmazonQueryPlan, radarAmazonQueryId, type RadarAmazonSearchRun } from "@/lib/radar/amazon-search-run";
 import { radarPrimaryProfileOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
 import { radarImportSiloGroups } from "@/lib/radar/import-silo-groups";
@@ -66,7 +66,8 @@ import {
 } from "@/lib/radar/portable-export-estimate";
 import { RADAR_STORED_ZIP_MIME, radarStoredZipOfTexts } from "@/lib/radar/stored-zip";
 import { radarCompetitiveBlueprintViewOfAnalysis, type RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
-import { buildRadarMultimodalBlueprint, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
+import type { RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
+import { radarMultimodalBlueprintOfRun } from "@/lib/radar/multimodal-of-run";
 import type { RadarSpecialistCounters } from "@/lib/radar/specialist-lifecycle";
 import { buildRadarArticleDnaSummary, buildRadarReportSummary, buildRadarResearchCardSummary, buildRadarSpecialistSummary, RADAR_OPERATIONAL_STATUS_LABEL, RADAR_OPERATIONAL_STATUS_ORDER, radarOperationalRow, type RadarOperationalTone } from "@/lib/radar/operational-view";
 import { radarExtractionBatches, radarExtractionErrorMessage } from "@/lib/radar/extraction-request";
@@ -84,7 +85,7 @@ import { RadarYoutubeSearchRunSchema, radarYoutubeApplySelection, radarYoutubeRe
 import { buildRadarYoutubeBlueprint } from "@/lib/radar/youtube-blueprint";
 import { freezeRadarYoutubeInvestigation, resolveRadarFrozenRun } from "@/lib/radar/youtube-evidence";
 import { RADAR_YOUTUBE_REFREEZE_LABELS, radarRefreezeDiagnosis, radarRefreezeDifferences, radarReopenedGooglePatch, type RadarRefreezeDiagnosis, type RadarRefreezeProfile } from "@/lib/radar/refreeze-repair";
-import { radarObservedDivergesFromFrozen } from "@/lib/radar/handoff-readiness";
+import { RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING, radarObservedDivergesFromFrozen } from "@/lib/radar/handoff-readiness";
 import type { RadarVideoSourceInputVerdict, RadarVideoSourceTextSummary } from "@/lib/radar/video-source";
 import { useRadarAreaLiveRead } from "./use-radar-area-live-read";
 
@@ -110,6 +111,17 @@ import { RadarR4BulkOperationsBar, RadarR5QueueProgress, type RadarR5QueueView }
 import { useRadarAnalysisReadback } from "./use-radar-analysis-readback";
 import { useRadarSerpReviewReadback } from "./use-radar-serp-review-readback";
 import { organizeRadarArticleBlueprintsInSeries, postRadarArticleBlueprintOrganize, radarArticleBlueprintSeriesSummary, radarPhase1VisibleLabel, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
+/* 2026-10-09 · o artigo-modelo obrigatório: organizar o que falta (custo no botão) e seguir com a entrega. */
+import {
+  RadarArticleBlueprintCostAction,
+  organizeRadarArticleBlueprintsThenRun,
+  radarArticleBlueprintBatchLabel,
+  radarArticleBlueprintBatchSummary,
+  radarArticleBlueprintOrganizeAndExportLabel,
+  radarArticleBlueprintProgressNotice,
+  radarExportMissingArticleBlueprintNotice,
+  radarExportMissingArticleBlueprints,
+} from "./radar-article-blueprint-panel";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
 
 /**
@@ -653,6 +665,43 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   /* §25 · o semáforo da entrega ao Redator, junto dos outros. */
   const [redatorBusy, setRedatorBusy] = useState(false);
 
+  /*
+   * ===== 2026-10-09 · O ARTIGO-MODELO OBRIGATÓRIO NA ENTREGA (regra do dono) =====
+   *
+   * O export que parou por falta de artigo-modelo guarda o que falta (pelo
+   * título) e o pedido que o gerou, para o PRÓPRIO botão do pedido dizer
+   * "Organizar N artigo(s)-modelo e exportar (+ até 2N chamadas de IA)" e, na
+   * confirmação, organizar em série e repetir o mesmo pedido no fim. O envio ao
+   * Redator recusado pelo mesmo motivo marca o artigo, para o botão do envio
+   * oferecer "Organizar o artigo-modelo e enviar". Estado de apresentação: a
+   * autoridade continua sendo o servidor, que confere a planta de novo.
+   */
+  type ExportParadoPorArtigoModelo = {
+    pedido: "dossies" | "silos";
+    modo: RadarExportMode | "video";
+    articleIds: string[];
+    faltando: Array<{ articleId: string; title: string }>;
+  };
+  const [faltaArtigoModelo, setFaltaArtigoModelo] = useState<ExportParadoPorArtigoModelo | null>(null);
+  /* O espelho síncrono do estado: o export que roda logo depois de organizar não pode ler a pendência velha do fechamento. */
+  const faltaArtigoModeloRef = useRef<ExportParadoPorArtigoModelo | null>(null);
+  const marcarFaltaArtigoModelo = (valor: ExportParadoPorArtigoModelo | null) => {
+    faltaArtigoModeloRef.current = valor;
+    setFaltaArtigoModelo(valor);
+  };
+  /* O mesmo pedido (formato, escopo e artigos) que parou: o clique no botão dele abre a confirmação do custo. */
+  const casaComOParado = (parado: ExportParadoPorArtigoModelo | null, pedido: ExportParadoPorArtigoModelo["pedido"], modo: ExportParadoPorArtigoModelo["modo"], articleIds: readonly string[]) =>
+    Boolean(parado && parado.pedido === pedido && parado.modo === modo
+      && parado.articleIds.length === articleIds.length && parado.articleIds.every(id => articleIds.includes(id)));
+  const pedidoParadoPorArtigoModelo = (pedido: ExportParadoPorArtigoModelo["pedido"], modo: ExportParadoPorArtigoModelo["modo"], articleIds: readonly string[]) =>
+    casaComOParado(faltaArtigoModeloRef.current, pedido, modo, articleIds);
+  /* Na tela (render), pelo estado: o rótulo do botão do pedido parado diz o custo. */
+  const rotuloDoExportParado = (pedido: ExportParadoPorArtigoModelo["pedido"], modo: ExportParadoPorArtigoModelo["modo"], articleIds: readonly string[]): string | null =>
+    faltaArtigoModelo && casaComOParado(faltaArtigoModelo, pedido, modo, articleIds) ? radarArticleBlueprintOrganizeAndExportLabel(faltaArtigoModelo.faltando.length) : null;
+  const [confirmandoArtigoModelo, setConfirmandoArtigoModelo] = useState(false);
+  const [organizandoArtigoModelo, setOrganizandoArtigoModelo] = useState(false);
+  const [envioSemArtigoModelo, setEnvioSemArtigoModelo] = useState<Record<string, true>>({});
+
   const analiseCorrenteDe = useCallback((row: RadarItem) =>
     row.analysisVersions.slice().sort((esquerda, direita) => direita.versionNumber - esquerda.versionNumber)[0] || null, []);
   /**
@@ -774,9 +823,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       .slice(-1)[0];
     const features = comFeatures?.research?.serpFeatures || null;
     if (!features && !corrida?.universe.length) return null;
-    return buildRadarMultimodalBlueprint({
+    /*
+     * 2026-10-09 · pela AMOSTRA PERTINENTE (`radarMultimodalBlueprintOfRun`): o
+     * congelamento novo gravava a saída SHORTS × vídeo longo e as contagens pela
+     * amostra inteira, ao lado da fotografia e do CSV que já leem a pertinente.
+     */
+    return radarMultimodalBlueprintOfRun({
       features,
-      youtubeUniverse: corrida?.universe || [],
+      run: corrida,
       generatedAt: new Date().toISOString(),
     });
   }, [analiseCorrenteDe, pipeline.serpRecords]);
@@ -2121,11 +2175,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       /*
        * 2026-10-02 · D9 · O APOIO QUE FECHA A PENDÊNCIA TAMBÉM FINALIZA.
        *
-       * O apoio era a pendência que segurava o congelamento. Coletado e
-       * gravado, a mesma releitura do START decide: sem outra pendência, a
-       * investigação congela sozinha e a IA organiza o artigo-modelo.
+       * Gravado, a mesma releitura do START decide e a investigação congela
+       * sozinha; a IA organiza o artigo-modelo.
+       *
+       * 2026-10-09 · regra do Google: o apoio que falhou DE NOVO também
+       * finaliza — com a limitação registrada. Só a gravação não confirmada
+       * do apoio fica de fora: o aviso dela diz para repetir.
        */
-      const automatico = apoio?.collectedAt && !naoGravado ? await finalizarYoutubeSemPendencia(target) : null;
+      const automatico = apoio && !naoGravado ? await finalizarYoutubeSemPendencia(target) : null;
       setNotice(automatico ? avisoComDesfechoAutomatico(avisoDoApoio, automatico) : avisoDoApoio);
     } finally { setYoutubeBusy(false); }
   };
@@ -2370,13 +2427,16 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * É a MESMA decisão que o encadeamento automático usa, lida do que está
    * gravado: a tela e o automático não podem discordar sobre o que é
    * pendência. Antes da primeira coleta não há o que explicar.
+   *
+   * 2026-10-09 · a frase inteira (motivo, área e o botão que continua) sai da
+   * autoridade: na Amazon, a shortlist vazia e o alvo que não corresponde à
+   * coleta apontam "Zerar pesquisa Amazon", que o rótulo do estado não sabia.
    */
   const pendenciaDoAutomatico = (row: RadarItem | null, perfil: "YOUTUBE" | "AMAZON") => {
     if (!row) return null;
     const leitura = { payload: analiseCorrenteDe(row)?.payload || null, profile: perfil };
     if (radarResearchProfileStateOfAnalysis(leitura).state === "NOT_STARTED") return null;
-    const decisao = radarProfileAutoFinalizeDecision(leitura);
-    return decisao.pending ? decisao.reason : null;
+    return radarProfileAutoFinalizePendingText(radarProfileAutoFinalizeDecision(leitura), perfil);
   };
 
   /**
@@ -2706,11 +2766,18 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * apoio e do [Analisar] — nunca de um efeito de render.
    *
    * Cada passo é decidido sobre a análise RELIDA DO SERVIDOR, por
-   * `radarProfileAutoFinalizeDecision`: apoio falho, consulta que falhou,
-   * amostra vazia ou análise sem apoio param tudo, e a frase diz por quê. Os
-   * passos são as MESMAS ações dos botões (analisar e finalizar não chamam
-   * provider; finalizar é idempotente no servidor). A IA só vem depois do
-   * congelamento confirmado, e a falha dela não desfaz nada.
+   * `radarProfileAutoFinalizeDecision`. Os passos são as MESMAS ações dos
+   * botões (analisar e finalizar não chamam provider; finalizar é idempotente
+   * no servidor). A IA só vem depois do congelamento confirmado, e a falha
+   * dela não desfaz nada.
+   *
+   * 2026-10-09 · A REGRA DO GOOGLE (regra do dono: o piloto substitui o
+   * antigo). Consulta da Amazon que falhou e apoio do Google que falhou não
+   * param mais: a investigação congela com a limitação registrada (a consulta,
+   * pela própria corrida no congelamento; o apoio, pelo SUPPORT_MISSING do
+   * blueprint) e o aviso diz qual. Param: coleta em andamento ou vazia, apoio
+   * sem gravação confirmada, shortlist elegível vazia e alvo que não
+   * corresponde à coleta — com o motivo, a área e o botão que continua.
    */
   const finalizarAmazonSemPendencia = async (target: RadarItem, antes: string) => {
     if (amazonEmVoo.current) return;
@@ -2723,18 +2790,17 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       for (let passo = 0; passo < 2; passo += 1) {
         const lida = await analiseConfirmadaNoServidor(target);
         if (!lida.ok) {
-          desfecho = { congelou: false, headline: null, message: radarAutoFinalizePendingNotice(lida.reason, "Finalizar investigação") };
+          desfecho = { congelou: false, headline: null, message: radarAutoFinalizePendingNotice(lida.reason, "Finalizar investigação", RADAR_PROFILE_AREA_LABELS.AMAZON) };
           break;
         }
         const leitura = { payload: lida.corrente.payload, profile: "AMAZON" as const };
         const decisaoAutomatica = radarProfileAutoFinalizeDecision(leitura);
         const estadoRelido = radarResearchProfileStateOfAnalysis(leitura);
         if (!decisaoAutomatica.next) {
-          const botaoManual = radarProfileManualStepLabel(estadoRelido);
           desfecho = {
             congelou: false,
             headline: estadoRelido.headline,
-            message: decisaoAutomatica.pending ? radarAutoFinalizePendingNotice(decisaoAutomatica.reason, botaoManual) : decisaoAutomatica.reason,
+            message: radarProfileAutoFinalizePendingText(decisaoAutomatica, "AMAZON") || decisaoAutomatica.reason,
           };
           break;
         }
@@ -2746,14 +2812,15 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         }
         const congelamento = await pedirAcaoAmazonSemProvider(target, "finalize", "Não foi possível finalizar a investigação Amazon.");
         await pipeline.reloadRadarAnalysis(target.articleId);
+        /* 2026-10-09 · congelou com limitação: o aviso diz qual — a mesma lista que a fotografia grava. */
         desfecho = congelamento.alreadyFrozen
           ? { congelou: false, headline: null, message: congelamento.headline || "Esta investigação já estava finalizada." }
-          : { congelou: true, headline: null, message: RADAR_AUTO_FINALIZE_DONE_NOTICE };
+          : { congelou: true, headline: null, message: radarAutoFinalizeDoneNotice(decisaoAutomatica.limitations) };
         break;
       }
     } catch (erro) {
       const motivo = erro instanceof Error ? erro.message : "erro não identificado";
-      desfecho = { congelou: false, headline: null, message: radarAutoFinalizePendingNotice(motivo, "Finalizar investigação") };
+      desfecho = { congelou: false, headline: null, message: radarAutoFinalizePendingNotice(motivo, "Finalizar investigação", RADAR_PROFILE_AREA_LABELS.AMAZON) };
     } finally {
       setAmazonBusy(false);
       amazonEmVoo.current = null;
@@ -2861,6 +2928,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       ? selecionados
       : pipeline.radarItems.map(linha => linha.articleId)).filter(Boolean);
     if (!alvo.length) { setNotice("Não há artigos nesta visão para exportar."); return; }
+    /* 2026-10-09 · o mesmo pedido que parou por falta de artigo-modelo: o botão agora organiza (confirmação com o custo) e exporta. */
+    if (pedidoParadoPorArtigoModelo("dossies", modo, alvo)) { setConfirmandoArtigoModelo(true); return; }
 
     setExportando(true);
     setNotice("");
@@ -2872,6 +2941,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         body: JSON.stringify({ brandId: selectedBrandId, articleIds: alvo, mode: modo }),
       });
       const corpo = await resposta.json().catch(() => ({}));
+      /* 2026-10-09 · sem o artigo-modelo de algum artigo, nada sai: o botão do pedido passa a organizar (custo dito) e exportar. */
+      const faltando = resposta.status === 409 ? radarExportMissingArticleBlueprints(corpo) : null;
+      if (faltando) {
+        marcarFaltaArtigoModelo({ pedido: "dossies", modo, articleIds: alvo, faltando });
+        setAvisoDeExport({ type: "warning", message: radarExportMissingArticleBlueprintNotice(faltando) });
+        return;
+      }
+      marcarFaltaArtigoModelo(null);
       if (!resposta.ok || !corpo?.success) throw new RadarExportRefusedError(corpo?.error || "Não foi possível exportar os dossiês.", corpo?.refused);
 
       baixarArquivoDoExport(new Blob([corpo.csv], { type: "text/csv;charset=utf-8" }), corpo.filename);
@@ -2950,6 +3027,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     /* Acima do teto do servidor o pedido voltaria 400 genérico: o aviso diz antes o que fazer. */
     const acimaDoTeto = radarSiloExportScopeLimitNotice(escopo);
     if (acimaDoTeto) { setAvisoDeExport(acimaDoTeto); return; }
+    /* 2026-10-09 · o mesmo pedido que parou por falta de artigo-modelo: o botão agora organiza (confirmação com o custo) e exporta. */
+    if (pedidoParadoPorArtigoModelo("silos", modo, escopo.articleIds)) { setConfirmandoArtigoModelo(true); return; }
 
     setExportando(true);
     setNotice("");
@@ -2961,6 +3040,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         body: JSON.stringify({ brandId: selectedBrandId, articleIds: escopo.articleIds, groupBy: "silo", mode: modo }),
       });
       const corpo = await resposta.json().catch(() => ({}));
+      /* 2026-10-09 · sem o artigo-modelo de algum artigo do Silo, nada sai: o botão do pedido passa a organizar (custo dito) e exportar. */
+      const faltando = resposta.status === 409 ? radarExportMissingArticleBlueprints(corpo) : null;
+      if (faltando) {
+        marcarFaltaArtigoModelo({ pedido: "silos", modo, articleIds: [...escopo.articleIds], faltando });
+        setAvisoDeExport({ type: "warning", message: radarExportMissingArticleBlueprintNotice(faltando) });
+        return;
+      }
+      marcarFaltaArtigoModelo(null);
       if (!resposta.ok || !corpo?.success) {
         throw new RadarExportRefusedError(corpo?.error || "Não foi possível exportar os silos.", corpo?.refused, corpo?.emptySilos);
       }
@@ -2984,6 +3071,82 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       setAvisoDeExport(avisoDeFalhaDoExport(erro, "Falha ao exportar os silos."));
     } finally {
       setExportando(false);
+    }
+  };
+
+  /*
+   * ===== 2026-10-09 · ORGANIZAR O QUE FALTA E EXPORTAR (regra do dono) =====
+   *
+   * O export que parou por falta de artigo-modelo: depois da confirmação (que
+   * diz o teto, até 2 chamadas por artigo, com a passada de correção), organiza
+   * em série os que a rota apontou — com o progresso no aviso do topo — e
+   * repete o MESMO pedido no fim. Com falha, não exporta: a entrega não sai sem
+   * o artigo-modelo. (2026-10-09, correção) Com `ifMissing`: o 409 é uma
+   * fotografia do instante; quem foi organizado pelo painel entre o 409 e o
+   * clique não é pago de novo (o servidor reaproveita só a concluída da mesma
+   * investigação), e o artigo sem planta é organizado do mesmo jeito.
+   */
+  const organizarArtigosModeloEExportar = async () => {
+    const parado = faltaArtigoModeloRef.current;
+    const marca = selectedBrandId;
+    setConfirmandoArtigoModelo(false);
+    if (!parado || !marca || organizandoArtigoModelo) return;
+    setOrganizandoArtigoModelo(true);
+    try {
+      const resultado = await organizeRadarArticleBlueprintsThenRun({
+        articleIds: parado.faltando.map(item => item.articleId),
+        organize: articleId => postRadarArticleBlueprintOrganize({ brandId: marca, articleId, ifMissing: true }),
+        onProgress: job => {
+          setBlueprintJobs(atual => ({ ...atual, [job.articleId]: job }));
+          if (job.state === "running") setAvisoDeExport({ type: "info", message: radarArticleBlueprintProgressNotice(job, "exportar") });
+        },
+        run: async () => {
+          /* O pedido seguinte não pode cair na pendência velha: o espelho é limpo antes de exportar. */
+          marcarFaltaArtigoModelo(null);
+          if (parado.pedido === "silos" && parado.modo !== "video") await exportarSilosCompletos(parado.modo);
+          else await exportarDossiesFinalizados(parado.modo);
+        },
+      });
+      if (!resultado.ran) {
+        const restantes = parado.faltando.filter(item => resultado.failed.some(falha => falha.articleId === item.articleId));
+        marcarFaltaArtigoModelo({ ...parado, faltando: restantes });
+        setAvisoDeExport({ type: "error", message: `${radarArticleBlueprintSeriesSummary(resultado)} Nada foi exportado: toda entrega sai pelo artigo-modelo.` });
+      }
+    } finally {
+      setOrganizandoArtigoModelo(false);
+    }
+  };
+
+  /*
+   * ===== 2026-10-09 · ORGANIZAR O ARTIGO-MODELO DO LOTE (barra de lote) =====
+   *
+   * "Organizar o artigo-modelo (N)" para a seleção ou para o Silo dela, em
+   * série, com o progresso no aviso do topo. "Só se faltar" (`ifMissing`): o
+   * artigo que já tem o artigo-modelo da investigação vigente não paga de novo
+   * — por isso o botão diz o TETO ("+ até 2N chamadas de IA").
+   */
+  const organizarArtigosModeloEmLote = async (articleIds: string[]) => {
+    const marca = selectedBrandId;
+    if (!marca || !articleIds.length || organizandoArtigoModelo) return;
+    setOrganizandoArtigoModelo(true);
+    try {
+      const resultado = await organizeRadarArticleBlueprintsInSeries({
+        articleIds,
+        organize: articleId => postRadarArticleBlueprintOrganize({ brandId: marca, articleId, ifMissing: true }),
+        onProgress: job => {
+          setBlueprintJobs(atual => ({ ...atual, [job.articleId]: job }));
+          if (job.state === "running") setNotice(radarArticleBlueprintProgressNotice(job));
+        },
+      });
+      setEnvioSemArtigoModelo(atual => {
+        if (!resultado.done.some(id => atual[id])) return atual;
+        const proximo = { ...atual };
+        for (const id of resultado.done) delete proximo[id];
+        return proximo;
+      });
+      setNotice(radarArticleBlueprintBatchSummary(resultado));
+    } finally {
+      setOrganizandoArtigoModelo(false);
     }
   };
 
@@ -3064,7 +3227,53 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       destinationLabel: noRedator ? "Rascunho disponível no Redator" : null,
       busy: redatorBusy,
       onSend: () => void enviarAoRedator(),
+      /* 2026-10-09 · o envio exige o artigo-modelo: recusado por falta dele, o botão organiza e envia (custo dito). */
+      articleBlueprintMissing: row ? Boolean(envioSemArtigoModelo[row.articleId]) : false,
+      onOrganizeAndSend: () => void organizarArtigoModeloEEnviar(),
     };
+  };
+
+  /*
+   * ===== 2026-10-09 · ORGANIZAR O ARTIGO-MODELO E ENVIAR (regra do dono) =====
+   *
+   * O envio exige a planta concluída da investigação vigente. Depois da
+   * confirmação (até 2 chamadas de IA, com a passada de correção), organiza e,
+   * concluída, envia pela MESMA porta do botão e do lote. Falhou a IA, nada é
+   * enviado: o documento do Redator não nasce sem o artigo-modelo.
+   *
+   * 2026-10-09 (correção) · com `ifMissing`: se a planta concluída desta
+   * investigação já existe (o envio recusou por outro motivo, ou alguém
+   * organizou pelo painel), ela é reaproveitada e nada é pago de novo.
+   */
+  const organizarArtigoModeloEEnviar = async () => {
+    const target = activeRadarItem;
+    if (!target) { setNotice("Selecione um artigo antes de enviar ao Redator."); return; }
+    setRedatorBusy(true);
+    try {
+      const resultado = await organizeRadarArticleBlueprintsThenRun({
+        articleIds: [target.articleId],
+        organize: articleId => postRadarArticleBlueprintOrganize({ brandId: target.brandId, articleId, ifMissing: true }),
+        onProgress: job => {
+          setBlueprintJobs(atual => ({ ...atual, [job.articleId]: job }));
+          if (job.state === "running") setNotice(radarArticleBlueprintProgressNotice(job, "enviar"));
+        },
+        run: () => postRadarWriterHandoff({ brandId: target.brandId, articleId: target.articleId }),
+      });
+      if (!resultado.ran) {
+        setNotice(`${radarArticleBlueprintSeriesSummary(resultado)} Nada foi enviado ao Redator.`);
+        return;
+      }
+      setEnvioSemArtigoModelo(atual => {
+        if (resultado.result.code === RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING || !atual[target.articleId]) return atual;
+        const proximo = { ...atual };
+        delete proximo[target.articleId];
+        return proximo;
+      });
+      await pipeline.reloadRadarAnalysis(target.articleId);
+      setNotice(resultado.result.message);
+    } finally {
+      setRedatorBusy(false);
+    }
   };
 
   /**
@@ -3086,6 +3295,10 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * botão individual seria a segunda autoridade de novo, com outro nome.
        */
       const resultado = await postRadarWriterHandoff({ brandId: target.brandId, articleId: target.articleId });
+      /* 2026-10-09 · recusado por falta do artigo-modelo: o botão do envio passa a organizar e enviar. */
+      if (resultado.code === RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING) {
+        setEnvioSemArtigoModelo(atual => (atual[target.articleId] ? atual : { ...atual, [target.articleId]: true }));
+      }
       await pipeline.reloadRadarAnalysis(target.articleId);
       setNotice(resultado.message);
     } finally {
@@ -3278,6 +3491,9 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * congelamento é a mesma rotina do botão. Com pendência nada congela, e
        * o aviso diz por quê; o botão manual continua.
        *
+       * 2026-10-09 · pendência agora é a do Google: consulta do YouTube e apoio
+       * que falharam não seguram — viram limitação registrada na fotografia.
+       *
        * O cabeçalho do aviso vem da MESMA projeção que o card lê (relida do
        * servidor), para o card e o aviso nunca dizerem coisas opostas. O pacote
        * montado acima responde só se a releitura não vier.
@@ -3425,6 +3641,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     return freezeRadarYoutubeInvestigation({
       run: entrada.run, blueprint, finalizedBy: sessionId(session), finalizedAt: new Date().toISOString(),
       multimodal: multimodal ? { blueprint: multimodal, researchSources: plano.sources } : null,
+      /*
+       * 2026-10-09 · O QUE FALHOU E NÃO SEGUROU FICA ESCRITO — no clique, no
+       * automático e no reparo, pela mesma lista que o aviso diz
+       * (`radarProfileRegisteredLimitations`): o apoio do Google que falhou e a
+       * consulta do YouTube que falhou (esta o congelamento também deriva da
+       * corrida). Lida sobre a corrida que está sendo congelada.
+       */
+      extraLimitations: radarProfileRegisteredLimitations({ payload: { ...(entrada.base?.payload || {}), youtubeSearch: entrada.run }, profile: "YOUTUBE" }),
     });
   };
 
@@ -3437,9 +3661,10 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * congela nada.
    *
    * 1. relê a análise do SERVIDOR (a rota do YouTube gravou por lá);
-   * 2. decide com `radarProfileAutoFinalizeDecision`, que é a decisão do botão
-   *    (`radarYoutubeFinalizeDecision`) mais as pendências que o automático não
-   *    assume: apoio falho ou pendente, consulta que falhou, amostra vazia;
+   * 2. decide com `radarProfileAutoFinalizeDecision` — 2026-10-09: a regra do
+   *    Google. Consulta do YouTube que falhou e apoio do Google que falhou não
+   *    param: viram limitação registrada na fotografia. Param só coleta em
+   *    andamento ou vazia e apoio cuja gravação não se confirmou;
    * 3. congela pela MESMA rotina do botão, sobre a base relida e a trava dela;
    * 4. só então pede à IA o artigo-modelo — e a falha dela não desfaz nada.
    *
@@ -3447,20 +3672,18 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
   const finalizarYoutubeSemPendencia = async (target: RadarItem): Promise<RadarDesfechoAutomatico> => {
     const lida = await analiseConfirmadaNoServidor(target);
-    if (!lida.ok) return { congelou: false, headline: null, message: radarAutoFinalizePendingNotice(lida.reason, "Finalizar investigação") };
+    if (!lida.ok) return { congelou: false, headline: null, message: radarAutoFinalizePendingNotice(lida.reason, "Finalizar investigação", RADAR_PROFILE_AREA_LABELS.YOUTUBE) };
 
     const leitura = { payload: lida.corrente.payload, profile: "YOUTUBE" as const };
     const decisaoAutomatica = radarProfileAutoFinalizeDecision(leitura);
     const projecaoRelida = radarResearchProfileStateOfAnalysis(leitura);
     const estadoRelido = projecaoRelida.headline;
-    /* O botão que a tela mostra NESTE estado — a frase não promete o que não está lá. */
-    const botaoManual = radarProfileManualStepLabel(projecaoRelida);
     const corrida = lida.corrente.payload.youtubeSearch;
     if (decisaoAutomatica.next !== "FINALIZE" || !corrida) {
       return {
         congelou: false,
         headline: estadoRelido,
-        message: decisaoAutomatica.pending ? radarAutoFinalizePendingNotice(decisaoAutomatica.reason, botaoManual) : decisaoAutomatica.reason,
+        message: radarProfileAutoFinalizePendingText(decisaoAutomatica, "YOUTUBE") || decisaoAutomatica.reason,
       };
     }
     try {
@@ -3469,12 +3692,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       return {
         congelou: true,
         headline: radarResearchProfileStateOfAnalysis({ payload: gravada.payload, profile: "YOUTUBE" }).headline,
-        message: RADAR_AUTO_FINALIZE_DONE_NOTICE,
+        /* 2026-10-09 · congelou com limitação: o aviso diz qual — a mesma lista que a fotografia grava. */
+        message: radarAutoFinalizeDoneNotice(decisaoAutomatica.limitations),
       };
     } catch (erro) {
       /* Conflito de trava (outra sessão gravou) ou gravação recusada: nada congelou, e é dito. */
       const motivo = erro instanceof Error ? erro.message : "erro não identificado";
-      return { congelou: false, headline: estadoRelido, message: radarAutoFinalizePendingNotice(`a gravação do congelamento não foi confirmada (${motivo}).`, botaoManual) };
+      /* O botão que a tela mostra NESTE estado — a frase não promete o que não está lá. */
+      return { congelou: false, headline: estadoRelido, message: radarAutoFinalizePendingNotice(`a gravação do congelamento não foi confirmada (${motivo}).`, radarProfileManualStepLabel(projecaoRelida), RADAR_PROFILE_AREA_LABELS.YOUTUBE) };
     }
   };
 
@@ -5253,8 +5478,43 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * §8 · "8 enviados" sozinho, num lote de 11, esconderia três artigos que
        * ninguém vai reabrir. As três contagens pedem ações diferentes.
        */
-      return void sendToWriter(eligible).then(resultados => setNotice(radarWriterHandoffBatchSummary(resultados)));
+      /*
+       * 2026-10-09 · os recusados por falta do artigo-modelo ficam marcados (o
+       * botão do envio passa a organizar e enviar) e o aviso diz o caminho em
+       * lote: "Organizar o artigo-modelo", na mesma barra.
+       */
+      return void sendToWriter(eligible).then(resultados => {
+        const semPlanta = resultados.filter(item => item.code === RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING).map(item => item.articleId);
+        if (semPlanta.length) setEnvioSemArtigoModelo(atual => ({ ...atual, ...Object.fromEntries(semPlanta.map(id => [id, true as const])) }));
+        setNotice([
+          radarWriterHandoffBatchSummary(resultados),
+          ...(semPlanta.length ? [`${semPlanta.length} sem o artigo-modelo desta investigação: selecione-os e use "Organizar o artigo-modelo" na barra de lote antes de enviar.`] : []),
+        ].join(" · "));
+      });
     }
+  };
+  /*
+   * ===== 2026-10-09 · "ORGANIZAR O ARTIGO-MODELO (N)" NA BARRA DE LOTE =====
+   *
+   * Para a seleção (os finalizados dela) e, quando o Silo das linhas
+   * selecionadas tem mais finalizados, para o Silo inteiro. Em série, com o
+   * progresso no aviso do topo, e o teto do custo no próprio botão.
+   */
+  const barraDoArtigoModelo = (rows: RadarItem[]) => {
+    const finalizado = (row: RadarItem) => Boolean(radarPrimaryProfileOfAnalysis(analiseCorrenteDe(row)?.payload || null));
+    const daSelecao = rows.filter(finalizado).map(row => row.articleId);
+    const escopo = radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds: rows.map(row => row.articleId), siloVersions: pipeline.siloVersions });
+    const prontos = new Set(pipeline.radarItems.filter(finalizado).map(row => row.articleId));
+    const doSilo = escopo.articleIds.filter(id => prontos.has(id));
+    if (!daSelecao.length && !doSilo.length) return null;
+    return <div className="flex flex-wrap items-center gap-2" data-testid="radar-artigo-modelo-lote" aria-label="Artigo-modelo em lote">
+      {organizandoArtigoModelo
+        ? <p className="text-sm text-pending" role="status">Organizando o artigo-modelo em série…</p>
+        : <>
+          {daSelecao.length > 0 && <RadarArticleBlueprintCostAction articles={daSelecao.length} label={radarArticleBlueprintBatchLabel(daSelecao.length)} onConfirm={() => void organizarArtigosModeloEmLote(daSelecao)} testId="radar-artigo-modelo-lote-selecao" />}
+          {doSilo.length > daSelecao.length && <RadarArticleBlueprintCostAction articles={doSilo.length} label={radarArticleBlueprintBatchLabel(doSilo.length, "silo")} onConfirm={() => void organizarArtigosModeloEmLote(doSilo)} testId="radar-artigo-modelo-lote-silo" />}
+        </>}
+    </div>;
   };
   const importable = approved.map(version => { const articleVersion = version as VersionEnvelope<ArticleDNA>; const suggestedSlug = String((articleVersion.payload as unknown as { suggestedSlug?: string }).suggestedSlug || ""); const alreadyImported = pipeline.radarItems.some(item => item.articleId === articleVersion.payload.articleId); return { ...articleVersion, payload: { ...articleVersion.payload, suggestedSlug }, suggestedSlug, id: articleVersion.versionId, alreadyImported, importStatus: alreadyImported ? "sent_radar" : "approved" }; });
   /*
@@ -5302,6 +5562,16 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const avisoDeTamanhoDoExport = escopoDoSilo ? radarSiloExportSizeNotice({ scope: escopoDoSilo, finalizedArticleIds: prontosDoExport, exportMode: "writing" }) : null;
     const avisoDeTamanhoDoExportTecnico = escopoDoSilo && avancadoDoExport ? radarSiloExportSizeNotice({ scope: escopoDoSilo, finalizedArticleIds: prontosDoExport, exportMode: "full" }) : null;
     const semSelecaoNoExport = selectedArticleIds.length === 0;
+    /*
+     * 2026-10-09 · O PRÓPRIO BOTÃO DO PEDIDO QUE PAROU diz o custo de organizar
+     * o artigo-modelo que falta; o clique abre a confirmação (o export confere
+     * o pedido parado e não pede de novo à rota).
+     */
+    const alvoDosSelecionados = menuDeExport ? (semSelecaoNoExport ? pipeline.radarItems.map(linha => linha.articleId) : [...selectedArticleIds]).filter(Boolean) : [];
+    const paradoDoCsv = escopoDoSilo ? rotuloDoExportParado(escopoDoExport === "silo" ? "silos" : "dossies", "writing", escopoDoExport === "silo" ? escopoDoSilo.articleIds : alvoDosSelecionados) : null;
+    const paradoDoVideo = menuDeExport ? rotuloDoExportParado("dossies", "video", alvoDosSelecionados) : null;
+    const paradoDoSiloTecnico = escopoDoSilo ? rotuloDoExportParado("silos", "full", escopoDoSilo.articleIds) : null;
+    const paradoDosSelecionadosTecnico = menuDeExport ? rotuloDoExportParado("dossies", "full", alvoDosSelecionados) : null;
     /*
      * Toda saída do card devolve o foco ao botão Exportar: Esc, a planilha e,
      * nos exports assíncronos, de novo quando o arquivo termina de sair (o
@@ -5393,7 +5663,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
             data-testid="radar-export-csv"
           >
             <Download className="h-4 w-4" aria-hidden="true" />
-            <span>Exportar CSV</span>
+            {/* 2026-10-09 · o pedido parado por falta de artigo-modelo: o próprio botão diz o custo de organizar e exportar. */}
+            <span>{paradoDoCsv ?? "Exportar CSV"}</span>
           </button>
           {/*
             * 2026-10-02 · A SAÍDA PARA VÍDEO E REDES SOCIAIS (pedido do dono).
@@ -5408,7 +5679,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
             className="mt-2 block w-full rounded border border-divider px-3 py-2 text-left text-sm text-foreground transition-colors hover:border-context-accent hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
             data-testid="radar-export-video"
           >
-            <strong className="block font-semibold">CSV para vídeo e redes sociais</strong>
+            <strong className="block font-semibold">{paradoDoVideo ?? "CSV para vídeo e redes sociais"}</strong>
             <span className="mt-0.5 block text-text-muted">Roteiro de YouTube e cortes: SERP do YouTube, perguntas, fatos com fonte e especialista, sem a estrutura do artigo. {semSelecaoNoExport ? "Vão todos os prontos." : "Vão os selecionados."}</span>
           </button>
           <div className="mt-3 border-t border-divider pt-2">
@@ -5432,7 +5703,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
                 className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
                 data-testid="radar-export-silos-tecnico"
               >
-                <strong className="block font-semibold">Silo completo · técnico</strong>
+                <strong className="block font-semibold">{paradoDoSiloTecnico ?? "Silo completo · técnico"}</strong>
                 <span className="mt-0.5 block text-text-muted">Um CSV por Silo, no formato completo.</span>
                 {avisoDeTamanhoDoExportTecnico ? <span className="mt-1 block" data-testid="radar-silos-size-estimate-tecnico"><strong className="font-semibold text-warning">{avisoDeTamanhoDoExportTecnico.title}:</strong> {avisoDeTamanhoDoExportTecnico.message}</span> : null}
               </button>
@@ -5443,7 +5714,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
                 className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
                 data-testid="radar-export-dossiers-tecnico"
               >
-                <strong className="block font-semibold">Artigos selecionados · técnico</strong>
+                <strong className="block font-semibold">{paradoDosSelecionadosTecnico ?? "Artigos selecionados · técnico"}</strong>
                 <span className="mt-0.5 block text-text-muted">{semSelecaoNoExport ? "Sem seleção: todos os artigos prontos do Radar." : "Sem o contexto do Silo."}</span>
               </button>
               <button
@@ -5492,6 +5763,15 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     ? "Nenhum artigo importado. Use “Importar do Arquiteto”."
     : loadStateSummary(diagnostico);
   return <div className="flex min-h-screen flex-col bg-background">{notice && <div className="shrink-0 border-b border-warning/40 bg-warning-soft/30 px-4 py-2 text-sm text-warning" role="status">{notice}</div>}{avisoDeExport && <div className={`shrink-0 border-b px-4 py-2 text-sm ${TOM_DO_AVISO_DE_EXPORT[avisoDeExport.type]}`} role={avisoDeExport.type === "error" ? "alert" : "status"} data-testid="radar-export-notice">{avisoDeExport.message}</div>}{/*
+    * 2026-10-09 · O EXPORT QUE PAROU POR FALTA DE ARTIGO-MODELO, COM O CAMINHO.
+    *
+    * O botão diz o teto antes do clique ("+ até 2N chamadas de IA"); o clique
+    * abre a confirmação, que cita a passada de correção; confirmado, organiza
+    * em série e exporta o mesmo pedido no fim. O botão do card que gerou o
+    * pedido diz o mesmo e abre a mesma confirmação.
+    */}{faltaArtigoModelo && faltaArtigoModelo.faltando.length > 0 && <div className="shrink-0 border-b border-divider bg-surface-subtle px-4 py-2" data-testid="radar-artigo-modelo-do-export">{organizandoArtigoModelo
+      ? <p className="text-sm text-pending" role="status">Organizando o artigo-modelo e, no fim, exportando…</p>
+      : <RadarArticleBlueprintCostAction articles={faltaArtigoModelo.faltando.length} label={radarArticleBlueprintOrganizeAndExportLabel(faltaArtigoModelo.faltando.length)} onConfirm={() => void organizarArtigosModeloEExportar()} open={confirmandoArtigoModelo} onOpenChange={setConfirmandoArtigoModelo} disabled={exportando} testId="radar-artigo-modelo-exportar" />}</div>}{/*
     * O NAVEGADOR FALHOU — E DIZ ISSO SEM ACUSAR A OPERAÇÃO.
     *
     * Este aviso nasceu de um defeito real: a falha da cópia de recuperação no
@@ -5636,7 +5916,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       lazyProvenance: lazyPesquisa[chaveLazy(activeRadarItem)]?.provenance || { state: "IDLE" as const, data: null, message: null },
       onLoadSample: () => void carregarParteDaPesquisa("sample"),
       onLoadProvenance: () => void carregarParteDaPesquisa("provenance"),
-    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} googleRefreeze={reparoDoCongelamento("GOOGLE")} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} research={pesquisaDoPerfil(row)} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importableAgrupado} groupOf={version => rotuloDoGrupoDeImportacao.get(version.id) || null} label={version => `${radarArticleDisplayTitle(version.payload.promise)} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
+    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} googleRefreeze={reparoDoCongelamento("GOOGLE")} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <div className="flex min-w-max flex-wrap items-center gap-2"><RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>{barraDoArtigoModelo(rows)}</div>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} research={pesquisaDoPerfil(row)} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importableAgrupado} groupOf={version => rotuloDoGrupoDeImportacao.get(version.id) || null} label={version => `${radarArticleDisplayTitle(version.payload.promise)} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
 }
 
 function RadarProfile({ r3, research, articleHref, architectHref }: { r3: RadarR3Model; research: RadarR3ProfileResearch | null; articleHref: string | null; architectHref: string | null }) {

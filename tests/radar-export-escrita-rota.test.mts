@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { register } from "node:module";
 import test from "node:test";
 import { ARTIGO, HOST_DO_BANCO, MARCA, PEDIDO_DO_SILO, instalarPostgrestSimulado, semearBanco, type Banco, type Pedido } from "./radar-export-leitura-fixtures.mts";
+/* 2026-10-09 · toda entrega exige o artigo-modelo concluído: a bancada semeia o de cada artigo finalizado. */
+import { comArtigosModeloConcluidos } from "./radar-piloto-artigo-modelo-fixtures-2026-10-09.mts";
 
 /*
  * ===== A ROTA NO FORMATO "PARA ESCREVER" — a mesma leitura, outra projeção =====
@@ -9,8 +11,8 @@ import { ARTIGO, HOST_DO_BANCO, MARCA, PEDIDO_DO_SILO, instalarPostgrestSimulado
  * A rota roda de verdade sobre o PostgREST simulado da bancada do export (o
  * cliente Supabase é o real; só o `fetch` é trocado). Três provas:
  *
- *   1 · sem `mode`, a resposta é a de antes, byte a byte igual a `mode: "full"`
- *       — quem já chamava a rota continua recebendo o formato completo;
+ *   1 · sem `mode`, a resposta é a do formato para escrever, byte a byte igual
+ *       a `mode: "writing"` (2026-10-09: o padrão deixou de ser o completo);
  *   2 · com `mode: "writing"`, a rota faz EXATAMENTE as mesmas leituras do
  *       formato completo (mesmas tabelas, mesmos parâmetros, só GET): o
  *       formato novo não lê nada a mais do banco;
@@ -70,7 +72,7 @@ class DataFixa extends DataReal {
 type Resposta = { status: number; texto: string; pedidos: Pedido[] };
 
 async function exportar(corpo: unknown): Promise<Resposta> {
-  banco = semearBanco();
+  banco = comArtigosModeloConcluidos(semearBanco());
   pedidos.length = 0;
   (globalThis as { Date: DateConstructor }).Date = DataFixa as unknown as DateConstructor;
   try {
@@ -87,19 +89,28 @@ const assinaturaDasLeituras = (lista: Pedido[]) => lista.map(pedido => `${pedido
 
 const primeiraLinhaDoCsv = (csv: string) => csv.replace(/^﻿/, "").split("\r\n")[0];
 
-/* ======================= 1 · sem `mode`, o de antes ======================= */
+/* ======================= 1 · sem `mode`, o formato para escrever ======================= */
 
+/*
+ * 2026-10-09 · O PADRÃO DA ROTA PASSOU A SER "writing" (regra do dono: o
+ * processo do piloto substitui o antigo). Sem `mode`, a resposta é a do
+ * formato para escrever, byte a byte; o técnico continua por pedido explícito.
+ */
 for (const [nome, corpo] of Object.entries({
   silo: { brandId: MARCA, articleIds: PEDIDO_DO_SILO, groupBy: "silo" },
   avulso: { brandId: MARCA, articleIds: PEDIDO_DO_SILO },
 })) {
-  test(`1 · ${nome}: sem 'mode' a resposta é a do formato completo, byte a byte`, async () => {
+  test(`1 · ${nome}: sem 'mode' a resposta é a do formato para escrever, byte a byte`, async () => {
     const semModo = await exportar(corpo);
+    const escrita = await exportar({ ...corpo, mode: "writing" });
     const completo = await exportar({ ...corpo, mode: "full" });
     assert.equal(semModo.status, 200, semModo.texto.slice(0, 300));
-    assert.equal(completo.texto, semModo.texto, "o padrão da rota deixou de ser o formato completo");
+    assert.equal(escrita.texto, semModo.texto, "o padrão da rota deixou de ser o formato para escrever");
+    assert.notEqual(completo.texto, semModo.texto, "sem 'mode' a rota voltou a mandar o formato completo");
     const csv = nome === "silo" ? JSON.parse(semModo.texto).files[0].csv : JSON.parse(semModo.texto).csv;
-    assert.match(primeiraLinhaDoCsv(csv), /"keyword_principal"/, "o formato completo perdeu as colunas de antes");
+    assert.equal(primeiraLinhaDoCsv(csv), RADAR_WRITING_EXPORT_COLUMNS.map(coluna => `"${coluna}"`).join(","));
+    const tecnico = nome === "silo" ? JSON.parse(completo.texto).files[0].csv : JSON.parse(completo.texto).csv;
+    assert.match(primeiraLinhaDoCsv(tecnico), /"keyword_principal"/, "o formato completo perdeu as colunas de antes");
   });
 }
 
@@ -114,7 +125,8 @@ test("1 · 'mode' fora do contrato é recusado, e o corpo continua estrito", asy
 
 test("2 · 'Para escrever' faz exatamente as leituras do formato completo — nenhuma a mais, nenhuma escrita", async () => {
   const corpo = { brandId: MARCA, articleIds: PEDIDO_DO_SILO, groupBy: "silo" };
-  const completo = await exportar(corpo);
+  /* 2026-10-09 · o completo pedido de forma explícita: sem `mode`, o padrão passou a ser o formato para escrever. */
+  const completo = await exportar({ ...corpo, mode: "full" });
   const escrita = await exportar({ ...corpo, mode: "writing" });
   assert.equal(escrita.status, 200, escrita.texto.slice(0, 300));
   assert.deepEqual(assinaturaDasLeituras(escrita.pedidos), assinaturaDasLeituras(completo.pedidos), "o formato novo mudou o que se lê do banco");
@@ -125,7 +137,7 @@ test("2 · 'Para escrever' faz exatamente as leituras do formato completo — ne
 /* ======================= 3 · o arquivo novo ======================= */
 
 test("3 · por silo: 13 colunas, a linha 'Silo' no topo, o nome 'para-escrever' e os recusados de antes", async () => {
-  const completo = JSON.parse((await exportar({ brandId: MARCA, articleIds: PEDIDO_DO_SILO, groupBy: "silo" })).texto);
+  const completo = JSON.parse((await exportar({ brandId: MARCA, articleIds: PEDIDO_DO_SILO, groupBy: "silo", mode: "full" })).texto);
   const escrita = JSON.parse((await exportar({ brandId: MARCA, articleIds: PEDIDO_DO_SILO, groupBy: "silo", mode: "writing" })).texto);
   assert.equal(escrita.success, true);
   assert.equal(escrita.mode, "writing");
@@ -160,7 +172,7 @@ test("3 · selecionados: um CSV do lote, com o Silo no topo quando a seleção �
 
 test("3 · só recusados: o mesmo 409 do formato completo", async () => {
   const corpo = { brandId: MARCA, articleIds: [ARTIGO.N, ARTIGO.V, ARTIGO.M] };
-  const completo = await exportar(corpo);
+  const completo = await exportar({ ...corpo, mode: "full" });
   assert.equal(completo.status, 409);
   const escrita = await exportar({ ...corpo, mode: "writing" });
   assert.equal(escrita.status, 409);

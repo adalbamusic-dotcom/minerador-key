@@ -546,6 +546,8 @@ async function executarColeta({ input, profile, inicio }: ColetaEmCurso) {
       role: "SEO_COMMERCIAL_SUPPORT",
       location: input.location,
       primaryKeyword: principal,
+      /* 2026-10-09 (correção) · a versão do item do Radar, conferida no START: o apoio não troca para uma sucessora aprovada depois do envio. */
+      articleDnaVersionId: input.articleDnaVersionId,
     })
     : null;
 
@@ -697,6 +699,8 @@ async function repetirApoio(entrada: {
       || pacoteAtual.supportResearch?.keyword
       || entrada.input.queries.find(consulta => consulta.origin === "PRIMARY_KEYWORD")?.text
       || null,
+    /* 2026-10-09 (correção) · a versão que a análise gravada carrega (a do item do Radar). */
+    articleDnaVersionId: corrente?.payload.articleDnaVersionId ?? entrada.input.articleDnaVersionId,
   });
 
   const supportResearch = {

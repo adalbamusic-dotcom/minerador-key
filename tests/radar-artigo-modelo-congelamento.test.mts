@@ -211,10 +211,13 @@ test("a investigação vigente sai do que o lote já leu: congelamento do perfil
   }), {
     frozenAt: CONGELADO_EM, frozenBundleId: "bundle:f1", frozenBundleHash: "aaaa1111",
     articleDnaVersionId: "dna-v2", articleDnaContentHash: "sha256:dna2",
+    /* 2026-10-09 · a investigação considerada não é só a do Google: o congelamento da Amazon (acréscimo de review) entra no vínculo. */
+    amazonFrozenAt: "2026-10-07T00:00:00.000Z",
     articleDnaFrom: "2026-10-01T10:00:00.000Z", articleDnaUntil: "2026-10-08T10:00:00.000Z",
   }, "o Google manda; a vigência fecha na versão seguinte mais antiga");
   const soAmazon = radarArticleBlueprintCurrentInvestigationOf({ analysisPayload: { amazonFrozenInvestigation: { finalizedAt: "2026-10-07T00:00:00.000Z" } }, article: { versionId: "dna-v2", createdAt: null, versionNumber: 2 } });
   assert.equal(soAmazon?.frozenAt, "2026-10-07T00:00:00.000Z");
+  assert.equal(soAmazon?.amazonFrozenAt, "2026-10-07T00:00:00.000Z");
   assert.equal(soAmazon?.frozenBundleId, null);
   assert.equal(soAmazon?.articleDnaUntil, null, "sem as versões, a vigência fica aberta");
   assert.equal(radarArticleBlueprintCurrentInvestigationOf({ analysisPayload: { finalizedBundle: null }, article: { versionId: "dna-v2" } }), null, "não congelada: sem investigação");

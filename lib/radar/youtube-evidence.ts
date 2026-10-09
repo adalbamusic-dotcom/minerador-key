@@ -3,6 +3,7 @@ import { RadarYoutubeBlueprintSchema, type RadarYoutubeBlueprint } from "./youtu
 import { RadarYoutubeSearchRunSchema, type RadarYoutubeSearchRun } from "./youtube-search-run.ts";
 import { RADAR_EDITORIAL_OUTPUTS, RadarMultimodalBlueprintSchema, type RadarMultimodalBlueprint } from "./multimodal-blueprint.ts";
 import { RADAR_RESEARCH_SOURCES, type RadarResearchSource } from "./search-mode.ts";
+import { radarRunFailedQueriesLimitation } from "./investigation-finalization.ts";
 
 /**
  * ===== O CONGELAMENTO E A EVIDÊNCIA — YOUTUBE_SEARCH_2 · §12 e §13 =====
@@ -129,6 +130,15 @@ export function freezeRadarYoutubeInvestigation(input: {
    * congelamento sai sem ela, e a ausência é a verdade sobre a investigação.
    */
   multimodal?: { blueprint: RadarMultimodalBlueprint; researchSources: readonly RadarResearchSource[] } | null;
+  /**
+   * 2026-10-09 · LIMITAÇÕES EXTRAS — aditivo.
+   *
+   * O que falhou e não segurou o congelamento (a regra do Google, agora nos
+   * três perfis): o apoio do Google que não veio, dito pela mesma frase que a
+   * tela mostra (`radarProfileRegisteredLimitations`). Ausente ou vazio, numa
+   * corrida sem consulta que falhou: a fotografia sai como saía.
+   */
+  extraLimitations?: readonly string[];
 }): RadarYoutubeFrozenInvestigation {
   if (input.run.state !== "COLLECTED") {
     throw new RadarYoutubeFinalizeError(
@@ -185,10 +195,18 @@ export function freezeRadarYoutubeInvestigation(input: {
         editorialOutput: input.multimodal.blueprint.recommended.editorialOutput,
       }
       : null,
+    /*
+     * 2026-10-09 · A CONSULTA DO YOUTUBE QUE FALHOU VIRA LIMITAÇÃO REGISTRADA —
+     * derivada da própria corrida, pela frase comum aos três perfis — e as
+     * extras vêm depois. Elas só se ACRESCENTAM ao fim: sem falha e sem extra,
+     * a lista é exatamente a de antes.
+     */
     limitations: [...new Set([
       ...input.run.limitations,
       ...input.blueprint.limitations,
       ...(input.multimodal?.blueprint.limitations || []),
+      ...radarRunFailedQueriesLimitation(input.run, "consulta(s) do YouTube"),
+      ...(input.extraLimitations || []).map(item => item.trim()).filter(Boolean),
     ])],
   });
 }

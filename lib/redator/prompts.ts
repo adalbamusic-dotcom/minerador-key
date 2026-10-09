@@ -1,6 +1,6 @@
 import type { ContentDocument } from "../arquiteto/contracts.ts";
 import { RedatorPromptContextSchema, type RedatorPromptContext } from "./contracts.ts";
-import { WRITER_EVIDENCE_GUARDS } from "./writer-evidence-catalog.ts";
+import { WRITER_BLUEPRINT_CONTINUATION_LABEL, WRITER_EVIDENCE_GUARDS } from "./writer-evidence-catalog.ts";
 import type { WriterSectionEvidencePackage } from "./writer-section-evidence.ts";
 
 const clamp = (value: string, max = 4000) => value.length > max ? `${value.slice(0, max)}…` : value;
@@ -87,8 +87,22 @@ const ALERT_FORMAT = "Cada item de alerts é um texto curto ou um objeto { messa
  * resolvedor, e brand_dna sem versão cai no BrandDNA aprovado — outro
  * artefato, trilha de decisão humana com o alvo errado.
  */
-const BLUEPRINT_SECTION_RULE = "Quando evidence.articleBlueprint existir, ele é o artigo-modelo da SERP concluído no Radar. evidence.articleBlueprint.section é a seção da planta para ESTE H2, e o servidor só a entrega quando o título casa com segurança: siga a pergunta do leitor, a resposta que abre a seção, os H3 e os links internos dela com a âncora indicada, sem criar link fora dela. Quando section é null, a seção alvo não tem par seguro na planta: valem só a ordem dos H2 (outline), a promessa e o leitor; não copie pergunta, H3 nem link de outra seção da planta. A virada, o CTA e o próximo passo do fechamento (closing) entram só quando a seção alvo fecha o artigo.";
-const BLUEPRINT_IMPROVE_RULE = "Quando evidence.articleBlueprint existir, ele é o artigo-modelo da SERP concluído no Radar e, na melhoria, só orienta a forma (promessa, leitor, ordem dos H2): não há seção da planta para o trecho, e você não acrescenta CTA, link, H3, pergunta nem afirmação que o trecho não tinha.";
+/*
+ * 2026-10-09 · O PRÓXIMO PASSO DA PLANTA É LEITURA SEGUINTE OPCIONAL (regra do
+ * piloto, a mesma do CSV): o servidor já tirou o próximo passo que CHAMA; o que
+ * sobra em closing.nextStep só aponta a leitura seguinte e nunca é uma segunda
+ * chamada no fechamento — o CTA é a única chamada do artigo.
+ */
+const BLUEPRINT_CONTINUATION_RULE = `closing.cta é a única chamada do artigo. closing.nextStep, quando existe, é a ${WRITER_BLUEPRINT_CONTINUATION_LABEL.toLocaleLowerCase("pt-BR")}: se couber, entra no corpo da seção que trata dela; nunca como segunda chamada no fechamento.`;
+const BLUEPRINT_SECTION_RULE = `Quando evidence.articleBlueprint existir, ele é o artigo-modelo da SERP concluído no Radar. evidence.articleBlueprint.section é a seção da planta para ESTE H2, e o servidor só a entrega quando o título casa com segurança: siga a pergunta do leitor, a resposta que abre a seção, os H3 e os links internos dela com a âncora indicada, sem criar link fora dela. Quando section é null, a seção alvo não tem par seguro na planta: valem só a ordem dos H2 (outline), a promessa e o leitor; não copie pergunta, H3 nem link de outra seção da planta. A virada e o CTA do fechamento (closing) entram só quando a seção alvo fecha o artigo. ${BLUEPRINT_CONTINUATION_RULE}`;
+/*
+ * 2026-10-09 · A MELHORIA TAMBÉM SEGUE O ARTIGO-MODELO (regra do piloto: melhoria
+ * de publicado e reajuste com os mesmos fundamentos). O servidor entrega a seção
+ * da planta do H2 sob o qual o trecho está (focus.sectionLabel), pelo mesmo
+ * casamento seguro da seção, e o mapa da página publicada vale também aqui. O
+ * trecho continua sem ganhar CTA, link, H3, pergunta ou afirmação que não tinha.
+ */
+const BLUEPRINT_IMPROVE_RULE = `Quando evidence.articleBlueprint existir, ele é o artigo-modelo da SERP concluído no Radar. Na melhoria, evidence.articleBlueprint.section é a seção da planta para o H2 sob o qual o trecho está (focus.sectionLabel), entregue só quando o título casa com segurança: o trecho melhorado responde à pergunta do leitor dessa seção e segue a resposta que a abre, na ordem dos H2 (outline), com a promessa e o leitor da planta. Quando section é null, a planta só orienta a forma (promessa, leitor, ordem dos H2). Em qualquer caso, você não acrescenta CTA, link, H3, pergunta nem afirmação que o trecho não tinha. ${BLUEPRINT_CONTINUATION_RULE}`;
 /*
  * 2026-10-08 · A TRAVA DE FONTE DA PLANTA (desenho da rodada, E1). O servidor
  * marca, pela régua por frase do Radar (`radarSentenceNeedsSource`), as frases
@@ -98,6 +112,12 @@ const BLUEPRINT_IMPROVE_RULE = "Quando evidence.articleBlueprint existir, ele é
  */
 const BLUEPRINT_SOURCE_RULE = "Quando evidence.articleBlueprint.needsSource ou evidence.articleBlueprint.section.needsSource existir, cada item é uma frase da planta (field diz de onde ela vem) que só entra no texto com uma fonte do pacote que a sustente (uma chave de evidence.sources): sem essa fonte, escreva-a delimitada (orientação ou possibilidade, sem afirmar como fato o efeito comercial, a conversão ou o comportamento do público) ou deixe-a fora; label é o motivo e nunca vai ao texto. A frase que nega o efeito (a tese da marca) não está na lista e entra como está.";
 const PUBLISHED_MAP_RULE = "Quando evidence.articleBlueprint.publishedMap existir, o artigo atualiza uma página publicada: cada item diz, em line, para onde vai um H2 de hoje. O conteúdo de um H2 de hoje que vai para a seção alvo é reescrito nela, na voz; nada da página sai sem a decisão registrada no item.";
+/*
+ * 2026-10-09 · D10 (decisão do dono: o entregável sai concluído) também no texto
+ * que a IA interna propõe. A regra não repete as palavras proibidas: diz a
+ * família delas, para o prompt não ensinar o vocabulário que proíbe.
+ */
+const DELIVERABLE_DONE_RULE = "O texto sai concluído: sem marca de trabalho por fazer (item em aberto, espera de aprovação, versão provisória, fonte que ainda falta, campo a completar ou pedido a outra área). O que não se sustenta fica fora ou delimitado no texto, e o motivo vai em alerts, nunca no texto.";
 const BRAND_VOICE_RULE = "Quando evidence.brandVoice existir, forma, copy, transições e CTA seguem a voz da marca (trechos cta e voice; statusLabel diz se a Skill é a ativa ou a versão corrente na Marca); o que a voz proíbe não entra. Planta e voz não mudam keyword, intenção, escopo nem fatos: diante da evidência, vale a evidência. Conflito entre planta, voz, DNA e evidência não se resolve em silêncio: devolva um alerta com evidenceSourceKey. Quando a voz entra no conflito, ela é a fonte citada (evidenceSourceKey = evidence.brandVoice.readAt), o targetKind é o do DNA do outro lado (article_dna quando não há DNA do outro lado) e o message diz o que a voz pede e o que o outro lado diz; não use targetKind brand_dna para a voz: esse alvo aponta o BrandDNA aprovado, não a Skill de voz.";
 
 export const SECTION_WRITING_SYSTEM_PROMPT = [
@@ -108,6 +128,7 @@ export const SECTION_WRITING_SYSTEM_PROMPT = [
   BLUEPRINT_SOURCE_RULE,
   PUBLISHED_MAP_RULE,
   BRAND_VOICE_RULE,
+  DELIVERABLE_DONE_RULE,
   "Devolva JSON conforme o schema: paragraphs (1 a 8 strings), alerts (lista). A resposta é uma proposta de IA e nunca é aprovação.",
   ALERT_FORMAT,
 ].join("\n");
@@ -123,7 +144,10 @@ export const IMPROVE_SYSTEM_PROMPT = [
   WRITING_GUARDS,
   BLUEPRINT_IMPROVE_RULE,
   BLUEPRINT_SOURCE_RULE,
+  /* 2026-10-09 · na melhoria de publicado, o mesmo mapa da página da seção (regra do piloto). */
+  PUBLISHED_MAP_RULE,
   BRAND_VOICE_RULE,
+  DELIVERABLE_DONE_RULE,
   "Devolva JSON conforme o schema: replacementText e alerts (lista). A resposta é uma proposta de IA e nunca é aprovação.",
   ALERT_FORMAT,
 ].join("\n");

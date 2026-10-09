@@ -164,8 +164,8 @@ export function RadarArticleModelSection({ model }: { model: RadarEditorialArtic
       */}
     <div className="flex flex-wrap items-baseline justify-between gap-2">
       <div>
-        <h3 className="text-base font-semibold text-foreground">Blueprint editorial</h3>
-        <p className="text-sm text-text-muted">Artigo-modelo competitivo</p>
+        <h3 className="text-base font-semibold text-foreground">Esqueleto da SERP</h3>
+        <p className="text-sm text-text-muted">Insumo do artigo-modelo, não a estrutura do artigo</p>
       </div>
       <span
         className={`text-sm ${model.readiness.state === "READY" ? "text-success" : "text-warning"}`}

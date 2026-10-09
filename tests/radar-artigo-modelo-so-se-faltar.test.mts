@@ -24,7 +24,14 @@ test("o servidor reaproveita a versão do MESMO pacote antes de resolver o provi
   const reaproveita = corpo.indexOf("if (input.ifMissing)");
   const provider = corpo.indexOf("resolveDeepSeekCanonicalConfig(");
   assert.ok(reaproveita > 0 && provider > reaproveita, "a checagem vem antes da chamada paga");
-  assert.match(corpo, /item\.bundleHash === montada\.bundleHash/);
+  /*
+   * 2026-10-09 · só a CONCLUÍDA do mesmo pacote (hash exato) ou da mesma
+   * investigação congelada e ArticleDNA: a regra única do export
+   * (`radarArticleBlueprintPick`, sem rascunho), e não mais "a primeira do
+   * mesmo hash", que devolvia o rascunho antigo.
+   */
+  assert.match(corpo, /radarArticleBlueprintRowForInvestigation\(existentes, \{ bundleHash: montada\.bundleHash, investigation: investigacao \}\)/);
+  assert.doesNotMatch(corpo.replace(/\/\*[\s\S]*?\*\//g, ""), /doPacote\[0\]/, "o rascunho do mesmo hash não é reaproveitado");
 });
 
 test("só o encadeamento automático manda ifMissing; o botão do painel organiza de novo", async () => {

@@ -36,6 +36,8 @@ import {
   montadasDoSiloSaude,
   planoDoSilo,
 } from "./radar-portable-writing-fixtures.mts";
+import { comPlanta, comPlantas, plantaDe } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
+import { buildRadarArticleBlueprintBrief, radarArticleBlueprintPrompt } from "../lib/radar/article-blueprint.ts";
 
 /*
  * ===== 2026-10-08 · P0-B E P1 · O CSV "PARA ESCREVER" SEM ARTIGO-MODELO =====
@@ -62,6 +64,17 @@ import {
  * da obrigatoriedade e do cabeçalho) ao CSV. As fixtures imitam os casos reais:
  * os cabeçalhos, perguntas e fontes vêm dos CSVs do dono; o resto é inventado.
  * No fim, a varredura D10 do CSV inteiro. PROVIDER_CALLS = 0.
+ *
+ * ===== 2026-10-09 · O CSV SEM ARTIGO-MODELO NÃO EXISTE MAIS (regra do dono) =====
+ *
+ * "Tudo que é de processos antigos tem que ser substituído pelos novos
+ * processos dos pilotos." A estrutura, o título, a promessa, o plano visual e
+ * os links pelo modelo editorial da SERP saíram do CSV: sem a planta concluída,
+ * a linha é recusada (`needs_article_blueprint`). O que esta suíte prova agora,
+ * por defeito: (a) sem planta, nada sai pelo legado; (b) o modelo editorial — a
+ * matéria-prima do gerador do artigo-modelo — continua limpo, e o esqueleto do
+ * pedido o recebe assim; (c) com a planta concluída, o resto da linha (fontes,
+ * perguntas, "Não cobrir", especialista, links publicados) mantém as correções.
  */
 
 const idasAoServidor: string[] = [];
@@ -187,7 +200,16 @@ function entradaDoArtigo(modelo: RadarEditorialArticleModel, principal: string, 
   };
 }
 
-const linhaDe = (entrada: RadarPortableExportInput, contexto: RadarWritingArticleContext = AVULSO): RadarWritingExportArticle => buildRadarWritingExportArticle(entrada, contexto);
+/* 2026-10-09 · a linha com a planta concluída (a que a IA organizaria sobre o pacote); `semPlanta` prova a recusa. */
+const linhaDe = (entrada: RadarPortableExportInput, contexto: RadarWritingArticleContext = AVULSO): RadarWritingExportArticle => buildRadarWritingExportArticle(entrada, comPlanta(entrada, contexto));
+const recusaSemPlanta = (entrada: RadarPortableExportInput, contexto: RadarWritingArticleContext = AVULSO) => assert.throws(
+  () => buildRadarWritingExportArticle(entrada, contexto),
+  (erro: unknown) => (erro as { code?: string }).code === "needs_article_blueprint",
+  "sem a planta concluída, nada sai pelo legado",
+);
+/* O esqueleto que o gerador do artigo-modelo recebe do modelo editorial (a matéria-prima). */
+const esqueletoDe = (entrada: RadarPortableExportInput, silo: RadarSiloExportWritingContext | null = null) =>
+  buildRadarArticleBlueprintBrief({ entrada, silo, articleId: ARTIGO, publication: null }).skeleton;
 const csvDe = (...artigos: RadarWritingExportArticle[]) => radarWritingExportCsv([
   buildRadarWritingTopRow({ label: "Marca", silo: null, articles: artigos, siteUrl: "https://adalbapro.com.br" }),
   ...artigos.map(item => item.row),
@@ -206,18 +228,23 @@ test("P0-B (1) · 'Obrigatória pelo ArticleDNA' só por termo de conteúdo: 'ga
   const modelo = modeloAtrair();
   const secoes = modelo.sections.flatMap(secao => [secao, ...secao.childSections]);
   assert.equal(secoes.some(secao => secao.mustCoverReasons.length), false, secoes.filter(secao => secao.mustCoverReasons.length).map(secao => secao.headingSuggestion).join(" | "));
-  const linha = linhaDe(entradaDoArtigo(modelo, ATRAIR, COMPLEMENTARES_ATRAIR));
+  const entrada = entradaDoArtigo(modelo, ATRAIR, COMPLEMENTARES_ATRAIR);
+  /* 2026-10-09 · sem planta, a linha é recusada; o esqueleto do gerador não marca obrigatória nenhuma seção de concorrente. */
+  recusaSemPlanta(entrada);
+  assert.equal(esqueletoDe(entrada).some(item => item.mustCover), false);
+  const linha = linhaDe(entrada);
   CSVS.push(csvDe(linha));
   assert.doesNotMatch(linha.row.estrutura, /Obrigatória pelo ArticleDNA/);
   assert.doesNotMatch(linha.row.estrutura, /ganhar dinheiro/i);
 
-  /* Com um tópico de CONTEÚDO na cobertura, a seção que o trata fica obrigatória — e só ela. */
+  /* Com um tópico de CONTEÚDO na cobertura, a seção que o trata fica obrigatória — e só ela (no modelo e no esqueleto do gerador). */
   const comTopico = modeloAtrair(["estratégia omnichannel"]);
   const exigidas = comTopico.sections.flatMap(secao => [secao, ...secao.childSections]).filter(secao => secao.mustCoverReasons.length);
   assert.deepEqual(exigidas.map(secao => /omnichannel/i.test(`${secao.headingSuggestion} ${secao.readerQuestion}`)), [true], exigidas.map(secao => secao.headingSuggestion).join(" | "));
-  const estrutura = linhaDe(entradaDoArtigo(comTopico, ATRAIR, COMPLEMENTARES_ATRAIR, { article: { ...entradaDoArtigo(comTopico, ATRAIR, COMPLEMENTARES_ATRAIR).article, mustCover: [ATRAIR, ...COMPLEMENTARES_ATRAIR, "estratégia omnichannel"] } })).row.estrutura;
-  assert.equal(estrutura.split("Obrigatória pelo ArticleDNA").length - 1, 1, estrutura);
-  assert.match(estrutura, /omnichannel[^\n]*\n(?:- [^\n]*\n)*- Obrigatória pelo ArticleDNA\./i);
+  const comOmnichannel = entradaDoArtigo(comTopico, ATRAIR, COMPLEMENTARES_ATRAIR, { article: { ...entradaDoArtigo(comTopico, ATRAIR, COMPLEMENTARES_ATRAIR).article, mustCover: [ATRAIR, ...COMPLEMENTARES_ATRAIR, "estratégia omnichannel"] } });
+  const obrigatorias = esqueletoDe(comOmnichannel).filter(item => item.mustCover);
+  assert.deepEqual(obrigatorias.map(item => /omnichannel/i.test(item.heading)), [true], obrigatorias.map(item => item.heading).join(" | "));
+  recusaSemPlanta(comOmnichannel);
 });
 
 /* ============================== (2) o cabeçalho que não é seção e o molde ============================== */
@@ -235,21 +262,22 @@ test("P0-B (2) · título de post, encerramento, propaganda, inglês e newslette
   assert.equal(radarEditorialHeadingNoiseReason("O que fazer para conquistar novos clientes? 10 dicas infalíveis", contexto), "título de post");
   assert.equal(radarEditorialHeadingNoiseReason("Onde estão os clientes com mais chances de conversão?", contexto), null);
 
-  const linha = linhaDe(entradaDoArtigo(modelo, ATRAIR, COMPLEMENTARES_ATRAIR));
+  /*
+   * 2026-10-09 · o ruído também não chega ao GERADOR: o esqueleto do pedido do
+   * artigo-modelo vem das seções do modelo, e o cabeçalho de concorrente ficou
+   * como evidência. Sem planta, nada sai; com ela, a estrutura é a da planta.
+   */
+  const entrada = entradaDoArtigo(modelo, ATRAIR, COMPLEMENTARES_ATRAIR);
+  recusaSemPlanta(entrada);
+  const doEsqueleto = esqueletoDe(entrada).map(item => item.heading).join("\n");
+  const linha = linhaDe(entrada);
   const estrutura = linha.row.estrutura;
   for (const ruido of [/pitch de vendas/i, /ganhar dinheiro/i, /13 dicas/, /Saiba mais/, /gostou de saber/i, /tudo certo sobre/i, /AlugueON/, /Why's/, /receber e-mails/, /10 dicas infalíveis/]) {
+    assert.doesNotMatch(doEsqueleto, ruido, `no esqueleto: ${String(ruido)}`);
     assert.doesNotMatch(estrutura, ruido, String(ruido));
   }
-  /* O molde não chega ao CSV: nem no título da seção, nem no respiro, nem no fechamento. */
-  for (const titulo of titulos(estrutura)) {
-    assert.doesNotMatch(titulo, /no dia a dia\?|O que considerar sobre|^#+ Afinal,|^#+ Na prática, o que/, titulo);
-  }
-  assert.doesNotMatch(`${linha.row.plano_visual}\n${linha.row.links_internos}\n${linha.row.promessa_e_leitor}`, /no dia a dia|O que considerar sobre|Afinal, /);
-  /* A pergunta do leitor é o título de trabalho, e isso é dito. */
-  assert.ok(titulos(estrutura).includes("## Como atrair clientes?"), titulos(estrutura).join(" | "));
-  assert.ok(titulos(estrutura).some(titulo => /^#{2,3} Onde estão os clientes com mais chances de conversão\?$/.test(titulo)));
-  assert.ok(titulos(estrutura).some(titulo => /^#{2,3} Praticidade para o cliente$/.test(titulo)), "sem pergunta, o cabeçalho sem o molde");
-  assert.match(estrutura, /^Títulos de trabalho: cada seção leva a pergunta do leitor que ela responde\. Reescreva-os na voz da marca, sem copiar cabeçalho de concorrente\.$/m);
+  assert.match(estrutura, /^ARTIGO-MODELO DA SERP \(planta concluída do artigo/);
+  assert.doesNotMatch(estrutura, /^Títulos de trabalho:|^Ordem sugerida/m, "as linhas da estrutura legada saíram");
 
   /* A régua de tirar o molde, para qualquer assunto. */
   assert.equal(radarWritingStripHeadingTemplate("Como montar a rotina de skincare facial no dia a dia?"), "Como montar a rotina de skincare facial?");
@@ -258,14 +286,13 @@ test("P0-B (2) · título de post, encerramento, propaganda, inglês e newslette
   assert.equal(radarWritingStripHeadingTemplate("Na prática, o que faz um captador de clientes?"), "O que faz um captador de clientes?");
   assert.equal(radarWritingStripHeadingTemplate("Como fidelizar clientes através do feedback? Saiba mais! no dia a dia?"), "Como fidelizar clientes através do feedback? Saiba mais!");
 
-  /* No export também (modelo antigo ou montado à mão): a seção de título de post sem pergunta utilizável sai, e isso é dito. */
+  /* Modelo antigo ou montado à mão com a seção de título de post: a régua a reconhece; sem planta, o export não a escreve (nada sai). */
   const comPost: RadarEditorialArticleModel = {
     ...modelo,
     sections: [...modelo.sections, { ...modelo.sections[0], id: "section:post", headingSuggestion: "Como fazer um pitch de vendas eficiente? Guia para converter clientes no dia a dia?", readerQuestion: "Como fazer um pitch de vendas eficiente? Guia para converter clientes", mustCoverReasons: [], childSections: [] }],
   };
-  const comPostNaEstrutura = linhaDe(entradaDoArtigo(comPost, ATRAIR, COMPLEMENTARES_ATRAIR)).row.estrutura;
-  assert.doesNotMatch(comPostNaEstrutura, /pitch de vendas/i);
-  assert.match(comPostNaEstrutura, /^Uma seção do modelo da SERP ficou de fora: título de post, encerramento ou propaganda de concorrente não é seção deste artigo\.$/m);
+  assert.notEqual(radarEditorialHeadingNoiseReason("Como fazer um pitch de vendas eficiente? Guia para converter clientes", contexto), null, "a régua reconhece o título de post");
+  recusaSemPlanta(entradaDoArtigo(comPost, ATRAIR, COMPLEMENTARES_ATRAIR));
 });
 
 /* ============================== (3) H1 e H2 picotados ============================== */
@@ -303,23 +330,29 @@ test("P0-B (3) · H1 picotado vira 'formule a partir da promessa'; o bloco picot
     sections: [...modelo.sections, bloco],
     conclusion: { ...modelo.conclusion, synthesis: "Retomar a resposta principal: atrair cliente e praticidade." },
   };
-  const linha = linhaDe(entradaDoArtigo(picotado, ATRAIR, COMPLEMENTARES_ATRAIR));
+  /*
+   * 2026-10-09 · o título picotado do modelo editorial não chega ao entregável:
+   * sem planta, a linha é recusada; com ela, H1, alternativas e fechamento são os
+   * da planta. Ao gerador, o título de trabalho vai dito como possivelmente
+   * malformado ("o H1 é seu").
+   */
+  const entrada = entradaDoArtigo(picotado, ATRAIR, COMPLEMENTARES_ATRAIR);
+  recusaSemPlanta(entrada);
+  const linha = linhaDe(entrada);
   CSVS.push(csvDe(linha));
-  assert.match(linha.row.titulo_e_seo, /^H1 de trabalho: não definido — formule a partir da promessa e da estrutura, com a keyword principal \("como atrair um cliente"\)\.$/m);
-  assert.doesNotMatch(linha.row.titulo_e_seo, /praticidade|pitch/i, "nenhuma alternativa picotada");
-  const estrutura = linha.row.estrutura;
-  assert.doesNotMatch(estrutura, /Atrair cliente e clientes/);
-  assert.equal(titulos(estrutura).filter(titulo => /O que é a captação de clientes\?$/.test(titulo)).length, 1, "a subseção que repete a pergunta sai no bloco");
-  assert.match(estrutura, /## O que é a captação de clientes\?\n- Cobrir: características da captação de clientes/);
-  assert.match(estrutura, /^Fechamento: Retomar a resposta principal \(a da abertura\) em poucas linhas, sem repetir o texto\.$/m);
-  assert.doesNotMatch(linha.row.promessa_e_leitor, /atrair cliente e praticidade/);
+  assert.match(linha.row.titulo_e_seo, /^H1: Como atrair um cliente: o guia prático$/m);
+  assert.doesNotMatch(linha.row.titulo_e_seo, /praticidade|pitch|H1 de trabalho/i, "nenhum título picotado");
+  assert.doesNotMatch(`${linha.row.estrutura}\n${linha.row.promessa_e_leitor}`, /atrair cliente e praticidade/);
+  const brief = buildRadarArticleBlueprintBrief({ entrada, silo: null, articleId: ARTIGO, publication: null });
+  assert.equal(brief.skeletonFrame.workingTitle, PICOTADOS[0][0]);
+  assert.match(radarArticleBlueprintPrompt(brief).user, /Título de trabalho do esqueleto: .* \(pode estar malformado; o H1 é seu, com a keyword principal\)/);
 });
 
 /* ============================== (4) uma régua só para o "não cobrir" ============================== */
 
 const pergunta = (canonicalQuestion: string, pages = 2) => ({ canonicalQuestion, status: "MARKET_QUESTION_UNDERCOVERED", pages, sampleSize: 12, declaredByArticle: false, evidence: `${pages} de 12` });
 
-test("P0-B (4) · o que está no 'Não cobrir' sai de H2/H3 e do 'Cobrir:' — o rótulo fora do escopo e a pergunta de outro tópico do Silo", () => {
+test("P0-B (4) · o que está no 'Não cobrir' sai de H2/H3 e do 'Cobrir:' — o rótulo fora do escopo e a pergunta de outro foco", () => {
   /* Leads: "Como identificar um lead qualificado na prática" era H2 e estava no "Não cobrir" (toca "Como qualificar um lead na prática?"). */
   sequencia = 0;
   const leads = buildRadarEditorialArticleModel({
@@ -332,10 +365,15 @@ test("P0-B (4) · o que está no 'Não cobrir' sai de H2/H3 e do 'Cobrir:' — o
     ], "leads qualificados"),
   });
   const comForaDoEscopo = { ...leads, candidates: [...leads.candidates, { id: "fora-1", observedLabel: "Como qualificar um lead na prática?", pages: 1, sampleSize: 23, dnaAligned: false, dnaRequired: false, intentFit: true, verdict: "OUT_OF_SCOPE" as const, reason: "O ArticleDNA não declara este assunto e ele não toca a composição de keywords: pertence a outro artigo.", sectionId: null }] };
-  const linhaLeads = linhaDe(entradaDoArtigo(comForaDoEscopo, "leads qualificados", ["gerar leads qualificados", "captação de leads qualificados"]));
+  const entradaLeads = entradaDoArtigo(comForaDoEscopo, "leads qualificados", ["gerar leads qualificados", "captação de leads qualificados"]);
+  /* 2026-10-09 · a régua chega ao GERADOR: a seção M que toca o "Não cobrir" vai marcada para descarte; sem planta, nada sai. */
+  recusaSemPlanta(entradaLeads);
+  assert.ok(esqueletoDe(entradaLeads).some(item => /identificar um lead qualificado na prática/i.test(item.heading) && item.outOfScope), "a seção M vai marcada fora do escopo");
+  const linhaLeads = linhaDe(entradaLeads);
   CSVS.push(csvDe(linhaLeads));
-  assert.doesNotMatch(linhaLeads.row.estrutura, /identificar um lead qualificado na prática/i);
-  assert.match(linhaLeads.row.estrutura, /^Uma seção ficou de fora porque trata de assunto da lista "Não cobrir" \(coluna cobrir_e_superar\)\.$/m);
+  /* A planta não organiza a seção: ela fica só como descarte do esqueleto, dito com o motivo. */
+  assert.doesNotMatch(linhaLeads.row.estrutura, /^#{2,3} .*identificar um lead qualificado na prática/im);
+  assert.match(linhaLeads.row.estrutura, /^Descartado do esqueleto da SERP: .*identificar um lead qualificado na prática[^"]*" \(fora do escopo do pacote\)/m);
   assert.match(linhaLeads.row.cobrir_e_superar, /- "Como qualificar um lead na prática\?": /);
 
   /* Tráfego: "como funciona o tráfego vindo de ferramentas de IA" no "Cobrir:" e a pergunta mandada a outro tópico do Silo. */
@@ -361,9 +399,15 @@ test("P0-B (4) · o que está no 'Não cobrir' sai de H2/H3 e do 'Cobrir:' — o
     includedTopics: ["trafego pago como funciona", "tráfego orgânico"], excludedTopics: [], siloPage: null,
     members: [{ articleId: ARTIGO, position: 1, title: "trafego organico e pago", principalKeyword: "trafego organico e pago", slug: "trafego-pago-vs-organico", role: "Suporte", statusLabel: "finalizado", inThisFile: true, reason: null }],
   } as RadarSiloExportWritingContext;
-  const linhaTrafego = linhaDe(entradaDoArtigo(trafego, "trafego organico e pago", ["tráfego orgânico"], { googleObserved: observado as never, dossierGaps: base.dossierGaps ? { ...base.dossierGaps, observed: observado as never } : null }), { ...AVULSO, topRowLabel: "Silo", silo });
+  /* 2026-10-09 · a planta que NÃO organizou a seção de IA (a que a cobre tiraria o "outro foco" do "Não cobrir": a regra 3a). */
+  const entradaTrafego = entradaDoArtigo(trafego, "trafego organico e pago", ["tráfego orgânico"], { googleObserved: observado as never, dossierGaps: base.dossierGaps ? { ...base.dossierGaps, observed: observado as never } : null });
+  const contextoTrafego = { ...AVULSO, topRowLabel: "Silo" as const, silo };
+  recusaSemPlanta(entradaTrafego, contextoTrafego);
+  const linhaTrafego = linhaDe(entradaTrafego, { ...contextoTrafego, blueprint: plantaDe(entradaTrafego, { silo, articleId: ARTIGO, semSecoes: /ferramentas de IA/i }) });
   CSVS.push(csvDe(linhaTrafego));
-  assert.match(linhaTrafego.row.cobrir_e_superar, /^- "Como funciona o tráfego vindo de ferramentas de IA\?": pertence a "trafego pago como funciona", outro tópico do Silo; não responder aqui\.$/m);
+  /* 2026-10-09 · Defeito 4 · "trafego pago como funciona" é keyword de "Tópicos incluídos", não artigo do Silo: não é dono; a pergunta vai como outro foco. */
+  assert.match(linhaTrafego.row.cobrir_e_superar, /^- "Como funciona o tráfego vindo de ferramentas de IA\?": outro foco; não trata de "trafego organico e pago" nem das complementares\.$/m);
+  assert.doesNotMatch(linhaTrafego.row.cobrir_e_superar, /outro tópico do Silo/);
   assert.doesNotMatch(linhaTrafego.row.estrutura, /ferramentas de IA/i, "o mesmo item não fica como seção nem como ponto a cobrir");
 
   /* O mesmo item, pela régua: três quartos das raízes; "captar clientes" não sai por causa de outro item maior. */
@@ -435,7 +479,9 @@ test("P1 (5) · fontes do mercado, perguntas, PAA, abertura e temas sem o ruído
 
   const serp = linha.row.serp_resumida;
   assert.match(serp, /^Pessoas também perguntam: Qual o segredo para atrair clientes\?$/m, "o PAA sem o cashback de consumidor");
-  assert.match(serp, new RegExp(`O que os concorrentes lidos cobrem \\(H2/H3 das ${comparaveis.length} páginas comparáveis, de \\d+ site\\(s\\); `), "uma base só: a lista impressa");
+  /* 2026-10-09 · Defeito 2 · a base única tem nome, o mesmo da lista impressa: "N páginas comparáveis, de S sites". */
+  assert.match(serp, new RegExp(`O que os concorrentes lidos cobrem \\(H2/H3 das ${comparaveis.length} páginas comparáveis, de \\d+ sites?; `), "uma base só: a lista impressa");
+  assert.match(serp, new RegExp(`Páginas comparáveis lidas pela investigação \\(a base das medidas e das contagens deste arquivo: ${comparaveis.length} páginas comparáveis, de \\d+ sites?\\):`), "a lista diz o mesmo nome");
   assert.doesNotMatch(serp, /Soluções de dados para personalizar/, "o menu repetido no mesmo site não é tema");
   assert.match(serp, new RegExp(`^- Parcerias · ${comparaveis.length} de \\d+ sites · `, "m"), "a recorrência conta sites da lista impressa, não as 11 páginas de fora");
 });
@@ -470,34 +516,39 @@ test("P1 (6) e (7) · a resposta aprovada sai inteira; um CTA só, e o próximo 
   assert.equal(radarWritingApprovedAnswer({ contribution: "Síntese organizada pela IA, outro texto.", fullAnswer: E1_INTEIRA }), "Síntese organizada pela IA, outro texto.", "a síntese organizada é a aprovada");
   assert.equal(radarWritingApprovedAnswer({ contribution: "é possível gerar leads com trafego orgânico sim", fullAnswer: "é possível gerar leads com trafego orgânico sim" }), "é possível gerar leads com trafego orgânico sim");
 
+  /*
+   * 2026-10-09 · a chamada e a continuação são as da PLANTA (a coluna promessa
+   * legada saiu): o CTA do especialista vai inteiro, como a única chamada, no
+   * fim da estrutura; a continuação é opcional, no corpo, com o link da planta
+   * para o próximo artigo ou citada sem link.
+   */
   const entrada = entradaDoArtigo(modeloAtrair(), ATRAIR, COMPLEMENTARES_ATRAIR, { specialistContext: especialistaCta(E1_SINTESE, E1_INTEIRA) });
-  const semLink = linhaDe(entrada, { ...AVULSO, topRowLabel: "Silo", silo: SILO_ATRAIR() });
+  const doSilo = { ...AVULSO, topRowLabel: "Silo" as const, silo: SILO_ATRAIR() };
+  recusaSemPlanta(entrada, doSilo);
+  const semLink = linhaDe(entrada, { ...doSilo, blueprint: plantaDe(entrada, { silo: SILO_ATRAIR(), articleId: ARTIGO, semLinks: true }) });
   CSVS.push(csvDe(semLink));
-  const promessa = linhas(semLink.row.promessa_e_leitor);
-  const chamadas = promessa.filter(item => /^Chamada final/.test(item));
+  const estrutura = linhas(semLink.row.estrutura);
+  const chamadas = estrutura.filter(item => /^CTA/.test(item));
   assert.equal(chamadas.length, 1, "uma chamada só");
   assert.ok(chamadas[0].includes("Assim, quem chega ao site já sabe o que você faz, onde atende e como agendar"), "a resposta aprovada, inteira");
   assert.doesNotMatch(chamadas[0], /marcar uma consulta…/);
-  assert.match(chamadas[0], /^Chamada final \(a única do artigo\) — argumento do especialista, inteiro: "/);
-  assert.equal(promessa.some(item => /^Próximo passo do leitor/.test(item)), false);
-  assert.ok(promessa.includes(`Continuação (não é uma segunda chamada): no fechamento, apresente o próximo artigo do Silo, "como captar um cliente", como a leitura seguinte ${RADAR_WRITING_NO_APPROVED_LINK}.`), promessa.join("\n"));
-  assert.doesNotMatch(semLink.row.promessa_e_leitor, /SiloPage/, "a SiloPage não vira segunda saída");
-  /* Na coluna de fontes, a remissão — sem repetir nem cortar o texto. */
-  assert.match(semLink.row.fontes_e_especialista, /E1 · Pergunta: "Que argumento o especialista usa para o chamado à ação deste artigo" · Resposta aprovada: inteira na coluna promessa_e_leitor · Aplicar em: chamada final \(CTA\)/);
+  assert.match(chamadas[0], /^CTA \(a única chamada\) — argumento do especialista, inteiro: "/);
+  assert.equal(estrutura.some(item => /^Próximo passo/.test(item)), false);
+  assert.doesNotMatch(semLink.row.promessa_e_leitor, /Continuação|Leitura seguinte|Chamada final|SiloPage/, "a promessa é a da planta, sem segunda saída");
+  assert.ok(estrutura.includes(`- Leitura seguinte (opcional, não é uma chamada): se couber, mencione o próximo artigo do Silo, "como captar um cliente", no corpo desta seção ${RADAR_WRITING_NO_APPROVED_LINK}; nunca como uma segunda chamada no fechamento.`), semLink.row.estrutura);
+  /* Na coluna de fontes, a resposta aprovada inteira (a planta não a repete na promessa). */
+  assert.match(semLink.row.fontes_e_especialista, /E1 · Pergunta: "Que argumento o especialista usa para o chamado à ação deste artigo" · Resposta aprovada: "É frustrante[^\n]*como agendar" · Aplicar em: chamada final \(CTA\)/);
   assert.doesNotMatch(semLink.row.fontes_e_especialista, /…/);
 
-  /* Com o link aprovado para o próximo artigo, a continuação leva o L dele. */
-  const observado = structuredClone(entrada.googleObserved) as unknown as Record<string, unknown> & { internalLinkPlan: Record<string, unknown> };
-  observado.internalLinkPlan = { ...observado.internalLinkPlan, outgoing: [
-    { nodeId: "article:sup-3", slug: "como-captar-um-cliente", approvedAnchorConcepts: ["como conquistar clientes novos"], relationTypes: ["SUPPORT_TO_SUPPORT"], targetRole: "support", anchor: { recommendedAnchor: "como conquistar clientes novos" }, preferredContexts: [], distribution: [], reason: "continuação" },
-  ] };
-  const comLink = linhaDe({ ...entrada, googleObserved: observado as never }, { ...AVULSO, topRowLabel: "Silo", silo: SILO_ATRAIR() });
-  assert.match(comLink.row.promessa_e_leitor, /^Continuação \(não é uma segunda chamada\): no fechamento, apresente o próximo artigo do Silo, "como captar um cliente", como a leitura seguinte, com o link L1\.$/m);
+  /* Com o link da planta para o próximo artigo, a continuação leva o L dele. */
+  const comLink = linhaDe(entrada, doSilo);
+  assert.match(comLink.row.estrutura, /^- Leitura seguinte \(opcional, não é uma chamada\): (?:o link L\d desta seção leva ao próximo artigo do Silo, "como captar um cliente"; se couber, apresente-o ali|se couber, mencione aqui o próximo artigo do Silo, "como captar um cliente", como a leitura seguinte — o link L\d)/m, comLink.row.estrutura);
+  assert.doesNotMatch(comLink.row.promessa_e_leitor, /Continuação|Leitura seguinte/);
 
   /* O último da ordem: a SiloPage é a continuação. */
   const ultimo = SILO_ATRAIR();
   ultimo.members = ultimo.members.slice(0, 2);
-  assert.match(linhaDe(entrada, { ...AVULSO, topRowLabel: "Silo", silo: ultimo }).row.promessa_e_leitor, /^Continuação \(não é uma segunda chamada\): no fechamento, apresente a SiloPage "Leads sem Tráfego Pago" como a leitura seguinte \(cite sem link: /m);
+  assert.match(linhaDe(entrada, { ...AVULSO, topRowLabel: "Silo", silo: ultimo, blueprint: plantaDe(entrada, { silo: ultimo, articleId: ARTIGO, semLinks: true }) }).row.estrutura, /^- Leitura seguinte \(opcional, não é uma chamada\): se couber, mencione a SiloPage "Leads sem Tráfego Pago" no corpo desta seção \(cite sem link: /m);
 });
 
 /* ============================== (8) e (9) os links do Pilar e a publicação dos irmãos ============================== */
@@ -547,8 +598,38 @@ const SILO_DO_PILAR = (): RadarSiloExportWritingContext => ({
   ],
 } as RadarSiloExportWritingContext);
 
-test("P1 (8) · Pilar: os links vão às seções que tratam o destino, e nenhuma seção leva todos", () => {
-  const linha = linhaDe(entradaDoPilar(), { ...AVULSO, topRowLabel: "Silo", silo: SILO_DO_PILAR() });
+/*
+ * 2026-10-09 · a distribuição dos links do Pilar é a da PLANTA: o gerador recebe
+ * cada membro do Silo como candidato K e a IA põe cada link na seção que trata o
+ * destino (no máximo três por seção, pela conferência). O CSV reproduz o lugar
+ * que a planta escolheu — a distribuição legada pelas seções do modelo saiu.
+ */
+const respostaDoPilar = (entrada: RadarPortableExportInput, membros: ReadonlyArray<[string, string, string]>) => {
+  const brief = buildRadarArticleBlueprintBrief({ entrada, silo: SILO_DO_PILAR(), articleId: ARTIGO, publication: null });
+  const secoes = brief.skeleton.filter(item => item.level === 2 && !item.outOfScope).slice(0, 4);
+  assert.equal(secoes.length, 4, brief.skeleton.map(item => item.heading).join(" | "));
+  const daCampanha = secoes.findIndex(item => /campanhas/i.test(item.heading));
+  assert.ok(daCampanha >= 0, "o esqueleto tem a seção de campanhas");
+  const links = secoes.map(() => [] as Array<{ candidate: string; anchor: string; reason: string }>);
+  membros.forEach(([, rotulo, ancora], indice) => {
+    const candidato = brief.linkCandidates.find(item => item.label.includes(rotulo));
+    assert.ok(candidato, `o membro "${rotulo}" chega ao gerador como candidato`);
+    const onde = /campanhas/i.test(ancora) ? daCampanha : [0, 1, 3][indice % 3];
+    links[onde].push({ candidate: candidato!.id, anchor: ancora, reason: "a seção trata o destino" });
+  });
+  return {
+    sections: secoes.map((item, indice) => ({
+      h2: item.heading, readerQuestion: item.readerQuestion || item.heading, answerFirst: `Resposta direta sobre ${item.heading.toLowerCase()}`, from: [item.id],
+      ...(links[indice].length ? { internalLinks: links[indice] } : {}),
+    })),
+  };
+};
+
+test("P1 (8) · Pilar: os links vão às seções que tratam o destino (as da planta), e nenhuma seção leva todos", () => {
+  const entrada = entradaDoPilar();
+  const doSilo = { ...AVULSO, topRowLabel: "Silo" as const, silo: SILO_DO_PILAR() };
+  recusaSemPlanta(entrada, doSilo);
+  const linha = linhaDe(entrada, { ...doSilo, blueprint: plantaDe(entrada, { silo: SILO_DO_PILAR(), articleId: ARTIGO, resposta: respostaDoPilar(entrada, MEMBROS_DO_PILAR) }) });
   CSVS.push(csvDe(linha));
   const links = linhas(linha.row.links_internos).filter(item => /^L\d · /.test(item));
   assert.equal(links.length, 7, linha.row.links_internos);
@@ -558,18 +639,18 @@ test("P1 (8) · Pilar: os links vão às seções que tratam o destino, e nenhum
     assert.ok(onde, `link sem seção: ${item}`);
     porSecao.set(onde!, (porSecao.get(onde!) || 0) + 1);
   }
-  assert.ok(Math.max(...porSecao.values()) <= 2, JSON.stringify([...porSecao]));
-  assert.ok(porSecao.size >= 4, "espalhados pelas seções");
+  assert.ok(Math.max(...porSecao.values()) <= 3, JSON.stringify([...porSecao]));
+  assert.ok(porSecao.size >= 3, "espalhados pelas seções");
   /* O destino de campanhas vai à seção que trata de campanha. */
-  assert.match(links.find(item => item.includes("âncora \"campanhas de marketing\""))!, /onde: seção "Campanhas que geram leads qualificados"/, `${linha.row.estrutura}\n${linha.row.links_internos}`);
-  /* Cada seção da estrutura nomeia os seus L. */
-  const estrutura = linha.row.estrutura;
-  const rotulos = [...estrutura.matchAll(/^- Links: (.+)\.$/gm)].flatMap(item => item[1].split(", "));
-  assert.deepEqual(rotulos.sort(), ["L1", "L2", "L3", "L4", "L5", "L6", "L7"]);
+  assert.match(links.find(item => item.includes("âncora \"campanhas de marketing\""))!, /onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*"/, `${linha.row.estrutura}\n${linha.row.links_internos}`);
+  /* Cada seção da estrutura nomeia os links dela: os sete, cada um uma vez. */
+  const naEstrutura = [...linha.row.estrutura.matchAll(/^- Link interno: âncora "([^"]+)"/gm)].map(item => item[1]);
+  assert.deepEqual(naEstrutura.sort(), MEMBROS_DO_PILAR.map(([, , ancora]) => ancora).sort());
 
-  /* Um link só, com lugar no plano: sem excesso, ele vai à seção que trata o destino, e não ao ponto genérico do plano. */
-  const umSo = linhaDe(entradaDoPilar(MEMBROS_DO_PILAR.slice(-1)), { ...AVULSO, topRowLabel: "Silo", silo: SILO_DO_PILAR() });
-  assert.match(umSo.row.links_internos, /^L1 · âncora "campanhas de marketing" .* · onde: seção "Campanhas que geram leads qualificados" · /m, umSo.row.links_internos);
+  /* Um link só: vai à seção que a planta escolheu, a que trata o destino. */
+  const umSo = entradaDoPilar(MEMBROS_DO_PILAR.slice(-1));
+  const linhaUmSo = linhaDe(umSo, { ...doSilo, blueprint: plantaDe(umSo, { silo: SILO_DO_PILAR(), articleId: ARTIGO, resposta: respostaDoPilar(umSo, MEMBROS_DO_PILAR.slice(-1)) }) });
+  assert.match(linhaUmSo.row.links_internos, /^L1 · âncora "campanhas de marketing" .* · onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*" · /m, linhaUmSo.row.links_internos);
 });
 
 test("P1 (9) · a publicação de todos os membros do Silo: destino publicado sai com a URL, mesmo fora do arquivo", async () => {
@@ -578,20 +659,22 @@ test("P1 (9) · a publicação de todos os membros do Silo: destino publicado sa
     ["sup-trafego", { published: true, publishedUrl: "https://adalbapro.com.br/leads-sem-trafego-pago/trafego-pago-vs-organico-para-clinica-de-estetica", canonical: null, slug: "trafego-pago-vs-organico-para-clinica-de-estetica", principalPolicy: "revisable" }],
     ["sup-captar", { published: false, publishedUrl: null, canonical: null, slug: "como-captar-um-cliente", principalPolicy: null }],
   ]);
+  /* 2026-10-09 · os links são os da planta; a publicação de cada destino é resolvida na hora do CSV. */
   const linha = linhaDe(entradaDoPilar(), { ...AVULSO, topRowLabel: "Silo", silo: SILO_DO_PILAR(), siloPublications: publicacoes });
   CSVS.push(csvDe(linha));
   const links = linha.row.links_internos;
   assert.match(links, /→ Suporte "instagram não traz pacientes" → https:\/\/adalbapro\.com\.br\/leads-sem-trafego-pago\/instagram-nao-traz-pacientes \(publicado\)/);
   assert.match(links, /→ Suporte "tráfego pago vs orgânico para clínica de estética" → https:\/\/adalbapro\.com\.br\/leads-sem-trafego-pago\/trafego-pago-vs-organico-para-clinica-de-estetica \(publicado\)/);
-  assert.match(links, /→ Suporte "como captar um cliente" → \/como-captar-um-cliente \(destino ainda não publicado: /, "o que não está no ar continua dito");
+  assert.match(links, /→ Suporte "como captar um cliente" → \/como-captar-um-cliente \(planejado, ainda não publicado\)/, "o que não está no ar continua dito");
+  assert.match(links, /^Destino planejado \(ainda não publicado\): o link entra com a URL final quando o destino estiver no ar/m);
 
   /* No lote: o mapa de publicações chega à linha de cada artigo e à ordem narrativa do topo. */
   const lote = radarPortableWritingExport({
-    articles: montadasDoSiloSaude(), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM,
+    articles: comPlantas(montadasDoSiloSaude(), planoDoSilo().files[0].writing), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM,
     publications: new Map([[ARTIGO_AMAZON, { published: true, publishedUrl: "https://careglow.com.br/skin-care-nivea", canonical: null, slug: "skin-care-nivea", principalPolicy: "locked" }]]),
   });
   const csv = lote.files![0].csv;
-  assert.match(csv, /âncora ""produtos nivea para a pele"" → Suporte ""skin care nivea"" → https:\/\/careglow\.com\.br\/skin-care-nivea \(publicado\)/);
+  assert.match(csv, /→ Suporte ""skin care nivea"" → https:\/\/careglow\.com\.br\/skin-care-nivea \(publicado\)/);
 
   /* O núcleo resolve a publicação dos irmãos do ArticleDNA que o lote já leu, e só lê a página dos artigos do arquivo. */
   const nucleo = await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8");
@@ -612,6 +695,12 @@ const H2_PROMOCOES = [
   "Por que escolher a AdalbaPro em vez de uma agência comum?",
 ];
 
+/*
+ * 2026-10-09 · a referência do publicado é o MAPA da planta: o artigo-modelo e
+ * os H2 da página lida, cada um com o destino dito (fica, entra na seção, sai
+ * por decisão registrada). Sem planta, nada sai; sem a página lida, a planta
+ * segue como atualização, com a ressalva de preservar o que a página tem.
+ */
 test("P1 (10) · promoções: sem estrutura do modelo e com a página publicada lida, a referência é a publicada, sem bloquear; a intenção divergente é decisão do Arquiteto", () => {
   const base = entradaGoogle();
   const observado = structuredClone(base.googleObserved) as unknown as Record<string, unknown>;
@@ -628,18 +717,23 @@ test("P1 (10) · promoções: sem estrutura do modelo e com a página publicada 
     slug: "promocoes-para-estetica", principalPolicy: "revisable",
     currentStructure: { h1: "Promoções para estética: quando o desconto atrai curioso e destrói margem", h2: H2_PROMOCOES, updatedAt: null },
   };
+  recusaSemPlanta(entrada, { ...AVULSO, publication: publicacao });
   const linha = linhaDe(entrada, { ...AVULSO, publication: publicacao });
   CSVS.push(csvDe(linha));
   assert.notEqual(linha.verdict, "Não", linha.row.pode_escrever);
   assert.doesNotMatch(linha.row.pode_escrever, /não produziu estrutura/);
-  assert.match(linha.row.estrutura, /^Estrutura de referência: a da página publicada \(lida da página na exportação\)\./);
-  for (const h2 of H2_PROMOCOES) assert.ok(linha.row.estrutura.includes(`## ${h2}`), h2);
+  assert.match(linha.row.estrutura, /^ARTIGO-MODELO DA SERP \(planta concluída do artigo/);
+  assert.doesNotMatch(linha.row.estrutura, /^Estrutura de referência:|estrutura sugerida/im, "a estrutura legada do publicado saiu");
+  /* Cada H2 publicado aparece com o destino dito (na estrutura da planta ou no mapa da coluna artigo). */
+  const comMapa = `${linha.row.estrutura}\n${linha.row.artigo}`;
+  for (const h2 of H2_PROMOCOES) assert.ok(comMapa.includes(h2.slice(0, 60)), h2);
   assert.match(linha.row.pode_escrever, /a SERP de "promoções estética" responde a outra intenção \(ofertas e cupons para o consumidor\) e o ArticleDNA declara transacional para responsável por clínica de estética: trocar a principal ou a intenção é decisão do Arquiteto; escreva pela intenção e pelo leitor declarados/);
   assert.match(linha.row.prompt, /^Escreva em português do Brasil o artigo descrito nesta linha/, "o prompt é de escrita, não de bloqueio");
 
-  /* Sem a página lida, o bloqueio de antes continua. */
+  /* Sem a página lida, a planta segue como atualização: nada é removido, e a ressalva diz o que preservar. */
   const semPagina = linhaDe(entrada, { ...AVULSO, publication: { ...publicacao, currentStructure: null } });
-  assert.equal(semPagina.verdict, "Não");
+  assert.notEqual(semPagina.verdict, "Não", semPagina.row.pode_escrever);
+  assert.match(semPagina.row.pode_escrever, /estrutura publicada atual indisponível: trate como atualização, preservando URL, slug, canonical e as seções existentes/);
 });
 
 /* ============================== D10 · o CSV inteiro ============================== */

@@ -50,6 +50,14 @@ import {
   type RadarResearchProfile,
 } from "./research-profile.ts";
 import { radarResearchPlanOfAnalysis } from "./search-mode.ts";
+import { radarAutoFinalizeStops, radarAutoFinalizeWithLimitations, radarRunFailedQueriesLimitation } from "./investigation-finalization.ts";
+import { radarAutoFinalizePendingNotice } from "./operational-actions.ts";
+import { RADAR_AMAZON_SUPPORT_MISSING_LIMITATION } from "./amazon-editorial.ts";
+import { RadarAmazonEditorialSetupSchema, radarAmazonTargetQueries } from "./amazon-editorial-target.ts";
+import { radarAmazonQueryId } from "./amazon-search-run.ts";
+import { radarAmazonEligibleCandidates } from "./amazon-eligibility.ts";
+import { radarAmazonSelectCandidates } from "./amazon-candidate-selection.ts";
+import type { RadarAmazonUniverseEntry } from "./amazon-search-model.ts";
 
 /*
  * ============ §24 · COLETA E ANÁLISE SÃO COISAS DIFERENTES ============
@@ -250,6 +258,31 @@ const objeto = (valor: unknown) =>
 const lista = (valor: unknown) => Array.isArray(valor) ? valor : [];
 
 /**
+ * 2026-10-09 · O APOIO DO GOOGLE, LIDO NUM LUGAR SÓ.
+ *
+ * A projeção pergunta "o apoio veio, falhou ou ainda não foi gravado?" e a
+ * limitação registrada pergunta a mesma coisa. Duas leituras divergiriam na
+ * primeira correção feita só numa delas. As regras são as de antes, inteiras:
+ * no pacote o apoio declara STATUS; nos campos soltos, só a data; o Google
+ * base já gravado satisfaz o apoio (2026-10-02).
+ */
+function leituraDoApoio(payload: unknown, profile: RadarResearchProfile) {
+  const analise = (objeto(payload) || {}) as LeituraDaAnalise;
+  const pacote = objeto(analise.researchPackage);
+  const apoioDoPacote = pacote ? objeto(pacote.supportResearch) : null;
+  const apoio = apoioDoPacote || objeto(analise.supportResearch);
+  const planejado = Boolean(RADAR_RESEARCH_PROFILE_PLANS[profile].supportRole);
+  const googleBaseGravado = radarResearchPlanOfAnalysis(payload).sources.includes("WEB_SERP");
+  const coletado = apoioDoPacote
+    ? apoioDoPacote.status === "COLLECTED"
+    : Boolean(apoio?.collectedAt) || (planejado && googleBaseGravado);
+  const falhou = apoioDoPacote
+    ? apoioDoPacote.status === "FAILED" || apoioDoPacote.status === "SKIPPED"
+    : Boolean(apoio?.failureReason) && !coletado;
+  return { planejado, coletado, falhou };
+}
+
+/**
  * ============ A PROJEÇÃO CANÔNICA ============
  *
  * `profile` vem de quem pergunta porque a chavinha é preferência de tela até o
@@ -330,14 +363,14 @@ export function radarResearchProfileStateOfAnalysis(input: {
    * YouTube grava `supportResearch` e não grava pacote.
    */
   const pacote = objeto(analise.researchPackage);
-  const apoioDoPacote = pacote ? objeto(pacote.supportResearch) : null;
-  const apoio = apoioDoPacote || objeto(analise.supportResearch);
 
-  const apoioPlanejado = Boolean(plano.supportRole);
   /*
    * No pacote o apoio declara STATUS; nos campos soltos, só a data. Ler as duas
    * formas aqui é o que permite o YouTube seguir como está enquanto a Amazon
    * usa o pacote.
+   *
+   * 2026-10-09 · a leitura mora em `leituraDoApoio`, a mesma que diz a
+   * limitação registrada quando o apoio falhou (`radarProfileRegisteredLimitations`).
    */
   /*
    * ====== 2026-10-02 · O GOOGLE BASE JÁ GRAVADO SATISFAZ O APOIO ======
@@ -358,13 +391,7 @@ export function radarResearchProfileStateOfAnalysis(input: {
    * próprio status: quem decide o apoio lá é o servidor, que já reaproveita
    * o snapshot existente.
    */
-  const googleBaseGravado = radarResearchPlanOfAnalysis(input.payload).sources.includes("WEB_SERP");
-  const apoioColetado = apoioDoPacote
-    ? apoioDoPacote.status === "COLLECTED"
-    : Boolean(apoio?.collectedAt) || (apoioPlanejado && googleBaseGravado);
-  const apoioFalhou = apoioDoPacote
-    ? apoioDoPacote.status === "FAILED" || apoioDoPacote.status === "SKIPPED"
-    : Boolean(apoio?.failureReason) && !apoioColetado;
+  const { planejado: apoioPlanejado, coletado: apoioColetado, falhou: apoioFalhou } = leituraDoApoio(input.payload, input.profile);
 
   /*
    * ============ §4 e §5 · A FOTOGRAFIA TEM PRECEDÊNCIA ============
@@ -686,29 +713,136 @@ export function radarYoutubeFinalizeDecision(input: {
 }
 
 /**
- * ====== 2026-10-02 · D9 · O QUE CONGELA SOZINHO — E O QUE ESPERA A PESSOA ======
+ * ====== 2026-10-09 · YOUTUBE E AMAZON FINALIZAM SOZINHOS COM A REGRA DO GOOGLE ======
  *
- * A regra antiga era "nada congela sozinho; só o clique". Decisão do dono em
- * 2026-10-02 ("automático nos três"): Google, YouTube e Amazon congelam
- * sozinhos quando a coleta — e a análise, onde ela existe — termina SEM
- * pendência; em seguida a IA organiza o artigo-modelo. O botão manual fica.
+ * Histórico: a regra de 2026-10-02 (D9, "automático nos três") congelava
+ * sozinho só SEM pendência, e chamava de pendência também a consulta que falhou
+ * e o apoio do Google que falhou. O Google deixou de parar por isso em
+ * 2026-10-08 (`radarGoogleAutoFinalizeDecision`). Regra do dono em 2026-10-09:
+ * "tudo que é de processos antigos tem que ser substituído pelos novos processos
+ * dos pilotos" — no YouTube e na Amazon também.
  *
- * Esta função responde, sobre o payload RELIDO DO SERVIDOR, qual passo a tela
- * pode encadear agora sem perguntar a ninguém: analisar (a Amazon analisa antes
- * de congelar), finalizar, ou nada — e, quando nada, POR QUÊ, numa frase que
- * vai à tela.
+ * A REGRA NOVA, A MESMA DO GOOGLE (`radarAutoFinalizeStops` e
+ * `radarAutoFinalizeWithLimitations`):
  *
- * Ela é mais estrita que `radarYoutubeFinalizeDecision`, de propósito. O botão
- * manual aceita congelar com o apoio falho, porque quem clica assume a
- * ausência. O automático não assume nada por ninguém. Pendência é: coleta em
- * curso, coleta que falhou (inteira ou em parte), amostra vazia, apoio do
- * Google pendente ou falho, análise que ainda não aconteceu.
+ *   - consulta do perfil que falhou e apoio do Google que falhou NÃO param: a
+ *     investigação finaliza e a limitação fica escrita no congelamento, pela
+ *     mesma frase que a tela diz (`radarProfileRegisteredLimitations`);
+ *   - param só o que não tem o que congelar ou pede decisão: coleta em
+ *     andamento, coleta que falhou sem universo, amostra vazia, apoio do Google
+ *     cuja gravação não foi confirmada (o retry dele está na tela) e, na
+ *     Amazon, shortlist elegível vazia e configuração do alvo que não
+ *     corresponde à coleta.
+ *
+ * Responde sobre o payload RELIDO DO SERVIDOR qual passo a tela encadeia agora:
+ * analisar (a Amazon analisa antes de congelar, sem chamada paga), finalizar,
+ * ou nada — e, quando nada, POR QUÊ e qual botão da tela continua.
  *
  * Vale para qualquer página, marca e assunto: só lê o estado gravado. O perfil
- * Google não passa por aqui — o pipeline dele tem decisão própria
- * (`radarGoogleAutoFinalizeDecision`, ao lado da prontidão de finalização).
+ * Google não passa por aqui — o pipeline dele tem decisão própria.
  */
 export type RadarProfileAutoStep = "ANALYZE" | "FINALIZE";
+
+/** 2026-10-09 · a área da tela onde cada perfil mostra os botões — a mesma da bancada. */
+export const RADAR_PROFILE_AREA_LABELS: Record<"YOUTUBE" | "AMAZON", string> = {
+  YOUTUBE: "+ YouTube (vídeo)",
+  AMAZON: "+ Amazon (review)",
+};
+
+/** 2026-10-09 · o botão de zerar da Amazon antes do congelamento — o caminho quando o alvo não sustenta a coleta. */
+export const RADAR_AMAZON_RESET_LABEL = "Zerar pesquisa Amazon";
+
+/**
+ * 2026-10-09 · O APOIO AUSENTE, DITO COMO LIMITAÇÃO — a mesma frase nos dois perfis.
+ *
+ * É a frase que o blueprint da Amazon já grava quando analisa sem o apoio
+ * (SUPPORT_MISSING); o YouTube passa a gravá-la no congelamento quando o apoio
+ * falhou. Uma frase só: a tela, o congelamento e quem lê depois dizem o mesmo.
+ */
+export const RADAR_PROFILE_SUPPORT_MISSING_LIMITATION = RADAR_AMAZON_SUPPORT_MISSING_LIMITATION;
+
+/**
+ * ====== 2026-10-09 · O QUE FICA ESCRITO QUANDO O PERFIL FINALIZA COM FALHA ======
+ *
+ * A mesma lista para a tela (o que o automático diz ao finalizar) e para o
+ * congelamento (o que a fotografia grava), no clique, no automático e no
+ * reparo:
+ *
+ *   - as consultas do perfil que falharam (`radarRunFailedQueriesLimitation`,
+ *     a frase do Google com o nome do perfil) — o congelamento as deriva da
+ *     própria corrida;
+ *   - o apoio do Google que falhou. No YouTube, quem congela passa esta frase
+ *     como limitação extra. Na Amazon, ela é a que o blueprint já gravou: com
+ *     blueprint, vale o que ELE declara; antes da análise, vale o status do
+ *     apoio (a análise sem apoio declara SUPPORT_MISSING).
+ *
+ * Google: vazio — o pipeline dele registra as próprias limitações.
+ */
+export function radarProfileRegisteredLimitations(input: { payload: unknown; profile: RadarResearchProfile }): string[] {
+  if (input.profile === "GOOGLE") return [];
+  const analise = objeto(input.payload) || {};
+  const corrida = objeto(input.profile === "AMAZON" ? analise.amazonSearch : analise.youtubeSearch);
+  const consultas = radarRunFailedQueriesLimitation(corrida, input.profile === "AMAZON" ? "consulta(s) da Amazon" : "consulta(s) do YouTube");
+  const apoio = leituraDoApoio(input.payload, input.profile);
+  const blueprintAmazon = input.profile === "AMAZON" ? objeto(analise.amazonBlueprint) : null;
+  const apoioAusente = blueprintAmazon
+    ? lista(blueprintAmazon.limitations).includes(RADAR_PROFILE_SUPPORT_MISSING_LIMITATION)
+    : apoio.planejado && apoio.falhou;
+  return [...consultas, ...(apoioAusente ? [RADAR_PROFILE_SUPPORT_MISSING_LIMITATION] : [])];
+}
+
+/**
+ * ====== 2026-10-09 · AS DUAS PARADAS DA AMAZON — com motivo e ação na tela ======
+ *
+ * Fora as paradas comuns, a Amazon só para quando congelar amarraria a
+ * fotografia a um artigo que a coleta não sustenta:
+ *
+ *   - CONFIGURAÇÃO QUE NÃO CORRESPONDE À COLETA: o alvo gravado não é o que
+ *     originou esta corrida — nem declarado no mesmo START (`declaredAt` igual
+ *     ao `startedAt` da corrida, que é como o servidor grava os dois), nem com
+ *     as mesmas consultas (`radarAmazonTargetQueries` → `radarAmazonQueryId`).
+ *   - SHORTLIST ELEGÍVEL VAZIA: nenhum produto da coleta é compatível com o alvo
+ *     (o ranking não tem candidato; nos produtos escolhidos, nenhum apareceu na
+ *     prateleira). O guia de compra não promete lista e passa.
+ *
+ * As duas pedem o mesmo caminho: zerar a pesquisa Amazon, corrigir o alvo e
+ * coletar de novo — e a coleta nova é paga, o que a frase diz antes.
+ * Sem configuração gravada (artigo anterior ao alvo editorial), nada a conferir.
+ */
+function paradaDaAmazon(analise: Record<string, unknown>): string | null {
+  const configuracao = RadarAmazonEditorialSetupSchema.safeParse(analise.amazonEditorialSetup);
+  const corrida = objeto(analise.amazonSearch);
+  if (!configuracao.success || !corrida) return null;
+  const { intent, target, declaredAt } = configuracao.data;
+
+  const esperadas = radarAmazonTargetQueries({ intent, target, primaryKeyword: null }).map(consulta => radarAmazonQueryId(consulta.text)).sort();
+  const coletadas = lista(objeto(corrida.fingerprint)?.queryIds).filter((id): id is string => typeof id === "string").sort();
+  const mesmoStart = typeof corrida.startedAt === "string" && corrida.startedAt === declaredAt;
+  const mesmasConsultas = esperadas.length > 0 && esperadas.join("|") === coletadas.join("|");
+  if (!mesmoStart && !mesmasConsultas) {
+    return "A configuração do alvo gravada não é a que originou esta coleta (as consultas coletadas não correspondem a ela); congelar amarraria a fotografia a um alvo que não foi pesquisado. Corrija o alvo e colete de novo — a coleta nova é paga.";
+  }
+
+  if (intent.type === "BUYING_GUIDE") return null;
+  const universo = lista(corrida.universe) as RadarAmazonUniverseEntry[];
+  const elegiveis = radarAmazonEligibleCandidates({ intent, target, universe: universo });
+  const ranking = intent.type === "TOP_BEST" || intent.type === "TOP_VALUE" || intent.type === "BEST_FOR_USE_CASE";
+  const shortlist = ranking
+    ? radarAmazonSelectCandidates({
+      intent,
+      universe: elegiveis.eligible,
+      observedCount: elegiveis.rawCount,
+      queryCount: lista(corrida.queries).filter(item => objeto(item)?.executed === true).length,
+    }).candidates.length
+    : elegiveis.eligible.length;
+  if (shortlist > 0) return null;
+
+  if (elegiveis.method === "TARGET_PRODUCTS") {
+    return "Nenhum dos produtos escolhidos para o artigo apareceu nesta coleta da prateleira: a shortlist elegível está vazia e não há leitura comercial do produto do artigo para congelar. Confira os produtos escolhidos e colete de novo — a coleta nova é paga.";
+  }
+  const alvo = [target.productClass, target.brandFilter].filter(Boolean).map(item => `"${item}"`).join(" e ");
+  return `Nenhum dos ${elegiveis.rawCount} produto(s) observado(s) é compatível com o alvo declarado${alvo ? ` (${alvo})` : ""}: a shortlist elegível está vazia e não há ${ranking ? "ranking" : "lista de produtos"} a construir. Ajuste o tipo de produto ou o filtro de marca e colete de novo — a coleta nova é paga.`;
+}
 
 /**
  * 2026-10-02 · D9 · QUAL BOTÃO RESOLVE A PENDÊNCIA, NESTE ESTADO.
@@ -737,65 +871,90 @@ export type RadarProfileAutoFinalizeDecision = {
   /** Parou por algo que pede olho humano — não por já estar finalizada. */
   pending: boolean;
   reason: string;
+  /**
+   * 2026-10-09 · o que fica escrito como limitação quando segue sozinho — a
+   * mesma lista que o congelamento grava. Vazio quando parou ou não há falha.
+   */
+  limitations: string[];
+  /**
+   * 2026-10-09 · o botão que a tela mostra para continuar quando parou, ou
+   * `null` quando nenhum resolve. A frase não promete botão que não está lá.
+   */
+  manualLabel: string | null;
 };
 
 export function radarProfileAutoFinalizeDecision(input: {
   payload: unknown;
   profile: RadarResearchProfile;
 }): RadarProfileAutoFinalizeDecision {
-  const parar = (reason: string): RadarProfileAutoFinalizeDecision => ({ next: null, pending: true, reason });
-
   if (input.profile === "GOOGLE") {
-    return { next: null, pending: false, reason: "A finalização do perfil Google é decidida pelo pipeline dele." };
+    return { next: null, pending: false, reason: "A finalização do perfil Google é decidida pelo pipeline dele.", limitations: [], manualLabel: null };
   }
 
   const projecao = radarResearchProfileStateOfAnalysis(input);
   const unidade = input.profile === "AMAZON" ? "produto" : "vídeo";
   const analise = objeto(input.payload) || {};
   const corrida = objeto(input.profile === "AMAZON" ? analise.amazonSearch : analise.youtubeSearch);
+  /* A parte comum é a do Google: quem para não registra nada; quem segue diz a limitação. */
+  const parar = (reason: string, manualLabel = radarProfileManualStepLabel(projecao)): RadarProfileAutoFinalizeDecision => {
+    const veredito = radarAutoFinalizeStops(reason);
+    return { next: null, pending: true, reason: veredito.reason, limitations: veredito.limitations, manualLabel };
+  };
+  const seguir = (next: RadarProfileAutoStep, prontidao: string): RadarProfileAutoFinalizeDecision => {
+    const veredito = radarAutoFinalizeWithLimitations(prontidao, radarProfileRegisteredLimitations(input));
+    return { next, pending: false, reason: veredito.reason, limitations: veredito.limitations, manualLabel: null };
+  };
 
   if (projecao.state === "FINALIZED") {
-    return { next: null, pending: false, reason: "A investigação já estava finalizada; nenhuma fotografia nova foi criada." };
+    return { next: null, pending: false, reason: "A investigação já estava finalizada; nenhuma fotografia nova foi criada.", limitations: [], manualLabel: null };
   }
   if (projecao.state === "NOT_STARTED") return parar("Ainda não há coleta para finalizar.");
   if (projecao.state === "FAILED") return parar("A coleta falhou e não há investigação utilizável para congelar.");
-  if (projecao.state === "COLLECTING") {
-    /* A corrida terminou e só o apoio falta: é ELE que segura, e a frase diz isso. */
-    const corridaEmCurso = corrida?.state === "COLLECTING" || projecao.counts.queries === 0;
-    return parar(!corridaEmCurso && projecao.support && !projecao.support.collected
-      ? "O apoio do Google ainda não está gravado; congelar agora deixaria a investigação sem ele."
-      : "A coleta ainda está em andamento; congelar agora fotografaria uma investigação pela metade.");
-  }
-  if (projecao.state === "PARTIAL_SUPPORT_FAILED") {
-    return parar("O apoio do Google falhou. Repita o apoio, ou finalize assumindo a ausência dele.");
-  }
 
   /*
-   * FALHA PARCIAL TAMBÉM É PENDÊNCIA.
+   * ============ o que não tem o que congelar ============
    *
-   * A projeção chama de pronta uma coleta que trouxe ALGUMA coisa — e está
-   * certa: jogá-la fora cobraria de novo o que foi pago. Mas congelar uma
-   * amostra que perdeu consultas é decidir que ela basta, e essa decisão é de
-   * quem lê a amostra.
+   * Nenhum botão de finalizar resolve estes casos (o congelamento recusaria),
+   * e a frase não aponta um: ela diz o que falta.
    */
-  const falhas = Number(objeto(corrida?.provenance)?.queriesFailed) || 0;
-  if (corrida?.state === "COLLECTION_FAILED" || falhas > 0) {
-    return parar(falhas
-      ? `${falhas} consulta(s) da coleta falharam; congelar com a amostra incompleta é decisão sua.`
-      : "A coleta terminou com falha; congelar o que veio é decisão sua.");
+  if (corrida?.state === "COLLECTING" || (projecao.state === "COLLECTING" && projecao.counts.queries === 0)) {
+    return parar("A coleta ainda está em andamento; congelar agora fotografaria uma investigação pela metade.", null);
   }
-  if (projecao.counts.videos === 0) return parar(`A coleta não trouxe nenhum ${unidade}; não há amostra para congelar.`);
-  if (projecao.support && !projecao.support.collected) {
-    return parar("O apoio do Google não foi coletado; congelar agora deixaria a investigação sem ele.");
+  if (!corrida || corrida.state !== "COLLECTED") {
+    return parar("A coleta terminou sem nenhuma consulta concluída; não há coleta para congelar.", null);
+  }
+  if (projecao.counts.videos === 0) return parar(`A coleta não trouxe nenhum ${unidade}; não há amostra para congelar.`, null);
+
+  /*
+   * ============ o apoio cuja gravação não foi confirmada ============
+   *
+   * Apoio que FALHOU vira limitação. Apoio que não falhou nem foi gravado é a
+   * gravação que não se confirmou (a trava de versão perdeu a corrida, ou o
+   * servidor não fechou o passo) — a mesma parada do Google ("gravação não
+   * confirmada"). O retry do apoio está na tela e reaproveita o snapshot que já
+   * existir. Na Amazon com blueprint, quem responde pelo apoio é o blueprint.
+   */
+  const apoio = leituraDoApoio(input.payload, input.profile);
+  const blueprintAmazon = input.profile === "AMAZON" && projecao.state === "READY_TO_FINALIZE";
+  if (apoio.planejado && !apoio.coletado && !apoio.falhou && !blueprintAmazon) {
+    return parar(
+      "O apoio do Google ainda não está gravado; congelar agora deixaria a investigação sem ele.",
+      input.profile === "AMAZON" ? radarProfileActionLabel("RETRY_SUPPORT", "AMAZON") : radarProfileManualStepLabel(projecao),
+    );
   }
 
+  const consultas = projecao.counts.queries;
+  const amostra = `${consultas} consulta(s) · ${projecao.counts.videos} ${unidade}(s) na amostra`;
+
   if (input.profile === "AMAZON") {
+    const parada = paradaDaAmazon(analise);
+    if (parada) return parar(parada, RADAR_AMAZON_RESET_LABEL);
     /* A Amazon analisa ANTES de congelar: sem blueprint, o passo é a análise (sem custo de provider). */
-    if (projecao.state === "READY") {
-      return { next: "ANALYZE", pending: false, reason: "Coleta sem pendência: a análise roda sozinha, sem chamada paga." };
+    if (projecao.state === "READY" || projecao.state === "PARTIAL_SUPPORT_FAILED") {
+      return seguir("ANALYZE", `${amostra}; a análise roda sozinha, sem chamada paga, e a investigação congela em seguida.`);
     }
     if (projecao.state === "READY_TO_FINALIZE") {
-      return { next: "FINALIZE", pending: false, reason: "Análise sem pendência: a investigação congela sozinha." };
+      return seguir("FINALIZE", `${amostra}; a investigação congela sozinha.`);
     }
     return parar("A investigação Amazon ainda não chegou ao ponto de congelar.");
   }
@@ -803,8 +962,22 @@ export function radarProfileAutoFinalizeDecision(input: {
   /* YouTube: a mesma autoridade do botão manual tem a última palavra. */
   const manual = radarYoutubeFinalizeDecision(input);
   return manual.shouldFreeze
-    ? { next: "FINALIZE", pending: false, reason: manual.reason }
+    ? seguir("FINALIZE", `${amostra}; a investigação congela sozinha.`)
     : parar(manual.reason);
+}
+
+/**
+ * 2026-10-09 · A FRASE DA PARADA, NUM LUGAR SÓ — para o painel e para o aviso.
+ *
+ * O motivo, a área e o botão que a tela mostra naquele estado. `null` quando o
+ * automático não parou (seguiu, ou a investigação já estava finalizada).
+ */
+export function radarProfileAutoFinalizePendingText(
+  decision: Pick<RadarProfileAutoFinalizeDecision, "pending" | "reason" | "manualLabel">,
+  profile: "YOUTUBE" | "AMAZON",
+): string | null {
+  if (!decision.pending) return null;
+  return radarAutoFinalizePendingNotice(decision.reason, decision.manualLabel, RADAR_PROFILE_AREA_LABELS[profile]);
 }
 
 /**

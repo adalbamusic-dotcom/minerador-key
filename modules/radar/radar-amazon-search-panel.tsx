@@ -6,10 +6,10 @@ import type { RadarAmazonFrozenInvestigation } from "@/lib/radar/amazon-evidence
 import type { RadarResearchProvenancePayload } from "@/lib/radar/research-read-model";
 import type { RadarResearchPackageRecord } from "@/lib/radar/research-package";
 import { radarPackageHeadline } from "@/lib/radar/research-package";
-import { radarProfileActionLabel, radarProfileManualStepLabel, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
+import { radarProfileActionLabel, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
 import type { RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
 import { RADAR_RESEARCH_SOURCE_ROLE_LABELS } from "@/lib/radar/research-profile";
-import { radarAutoFinalizeButtonLabel, radarAutoFinalizePendingNotice, radarAutoFinalizeStartNote, radarFinalizeWithAiLabel } from "@/lib/radar/operational-actions";
+import { radarAutoFinalizeButtonLabel, radarAutoFinalizeStartNote, radarFinalizeWithAiLabel, radarProfileFinalizeNote } from "@/lib/radar/operational-actions";
 import { RadarCompetitiveBlueprintSection } from "./radar-competitive-blueprint";
 import { RadarProfileBlueprintSection } from "./radar-profile-blueprint";
 import type { RadarEditorialProfileModel } from "@/lib/radar/editorial-profile-model";
@@ -82,6 +82,12 @@ export type RadarAmazonSearchPanelProps = {
    * Coleta sem pendência analisa e congela sozinha, e a IA organiza o
    * artigo-modelo. Com pendência nada congela, e a tela diz o motivo ao lado
    * dos botões manuais, que continuam. `null` quando não há pendência.
+   *
+   * 2026-10-09 · chega a FRASE INTEIRA (motivo, área e o botão que continua),
+   * montada pela autoridade (`radarProfileAutoFinalizePendingText`): na
+   * shortlist vazia e no alvo que não corresponde à coleta, o botão é "Zerar
+   * pesquisa Amazon", que o rótulo do estado não sabia. Pela regra do Google,
+   * consulta e apoio que falham já não aparecem aqui: viram limitação.
    */
   autoFinalizePending?: string | null;
   /**
@@ -174,7 +180,7 @@ function PacoteDaPesquisa({ pacote, busy, counts, onRetrySupport }: {
           className={`${button} ml-2`}
           disabled={busy}
           onClick={() => onRetrySupport?.()}
-          title={radarAutoFinalizeStartNote("coleta do apoio")}
+          title={radarAutoFinalizeStartNote("coleta do apoio", "AMAZON")}
           data-testid="radar-amazon-retry-support"
         >{radarAutoFinalizeButtonLabel(radarProfileActionLabel("RETRY_SUPPORT", "AMAZON"))}</button>}
       </li>}
@@ -271,7 +277,7 @@ export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReaso
           className={primary}
           disabled={busy || Boolean(blockedReason) || plannedQueries === 0}
           onClick={() => onStart?.()}
-          title={radarAutoFinalizeStartNote("coleta")}
+          title={radarAutoFinalizeStartNote("coleta", "AMAZON")}
           data-testid="radar-amazon-start"
         >{busy ? "Coletando…" : radarAutoFinalizeButtonLabel(projecao.state === "FAILED" ? "Tentar novamente Pesquisa Amazon" : "Iniciar Pesquisa Amazon")}</button>}
 
@@ -287,7 +293,7 @@ export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReaso
           className={primary}
           disabled={busy}
           onClick={() => onAnalyze?.()}
-          title={radarAutoFinalizeStartNote("análise")}
+          title={radarAutoFinalizeStartNote("análise", "AMAZON")}
           data-testid="radar-amazon-analyze"
         /*
          * §16 · O RÓTULO VEM DA PROJEÇÃO, e não daqui.
@@ -317,6 +323,7 @@ export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReaso
           className={button}
           disabled={busy}
           onClick={() => onFinalize?.()}
+          title={radarProfileFinalizeNote("AMAZON")}
           data-testid="radar-amazon-finalize"
         >{radarFinalizeWithAiLabel("Finalizar investigação")}</button>}
 
@@ -360,11 +367,14 @@ export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReaso
       * Antes da coleta, a linha diz que ela também analisa, finaliza e chama a
       * IA. Depois, se algo pediu olho humano, a linha diz POR QUE nada
       * congelou — ao lado dos botões manuais, que continuam.
+      *
+      * 2026-10-09 · a regra do Google: a nota diz que consulta e apoio que
+      * falham viram limitação registrada, e a frase da parada chega pronta.
       */}
     {!finalizada && !busy && autoFinalizePending && <p className="text-sm text-warning" role="status" data-testid="radar-amazon-auto-finalize-pending">
-      {radarAutoFinalizePendingNotice(autoFinalizePending, radarProfileManualStepLabel(projecao))}
+      {autoFinalizePending}
     </p>}
-    {!finalizada && !run && <p className="text-sm text-text-muted" data-testid="radar-amazon-auto-finalize-note">{radarAutoFinalizeStartNote("coleta")}</p>}
+    {!finalizada && !run && <p className="text-sm text-text-muted" data-testid="radar-amazon-auto-finalize-note">{radarAutoFinalizeStartNote("coleta", "AMAZON")}</p>}
 
     {/*
       * §27 · O QUE SUBSTITUI OS BOTÕES: o estado, dito.
@@ -402,7 +412,17 @@ export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReaso
       * "O que a pesquisa encontrou" continua útil — e continua sendo evidência.
       * O que a pessoa abre a aba para fazer é montar a seção comercial.
       */}
-    {editorialModel && <RadarProfileBlueprintSection model={editorialModel} />}
+    {/*
+      * 2026-10-09 (correção) · O MODELO COMERCIAL SAIU DA POSIÇÃO PRINCIPAL (regra do
+      * dono: o processo do piloto substitui o antigo). Ele é o esqueleto da
+      * prateleira — matéria-prima que o gerador do artigo-modelo recebe —, não o
+      * que vai ao Redator: fica recolhido, com o nome que diz isso. O artigo-modelo
+      * da SERP vem antes deste painel na aba (radar-r3-workbench).
+      */}
+    {editorialModel && <details className="rounded-md border border-divider bg-surface p-3" data-testid="radar-amazon-serp-skeleton">
+      <summary className="cursor-pointer text-sm font-semibold text-foreground">Esqueleto da SERP · o que a prateleira mostra (insumo do artigo-modelo)</summary>
+      <div className="mt-3"><RadarProfileBlueprintSection model={editorialModel} /></div>
+    </details>}
 
     {/*
       * ============ 1.3 · §2 e §10 · A PORTA ABRE SEMPRE QUE HÁ EVIDÊNCIA ============

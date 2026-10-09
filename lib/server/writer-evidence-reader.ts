@@ -61,6 +61,7 @@ import {
   writerBrandVoiceEntityId,
   writerBrandVoiceFoundation,
   writerBrandVoiceDeliverableStatusLabel,
+  WRITER_BLUEPRINT_CONTINUATION_LABEL,
   type WriterArticleBlueprintFoundation,
   type WriterBrandVoiceFoundation,
   type WriterEvidenceEnvelope,
@@ -75,7 +76,9 @@ import {
   type WriterManifestSourceRow,
   type WriterSliceRow,
 } from "@/lib/redator/writer-evidence-catalog";
-import { WRITER_BLUEPRINT_READING_RULES, writerArticleBlueprintForWriting, writerBlueprintWithCurrentNames } from "@/lib/redator/writer-blueprint-for-writing";
+import { WRITER_BLUEPRINT_READING_RULES, writerArticleBlueprintForWriting, writerBlueprintWithCurrentNames, type WriterBlueprintExclusions } from "@/lib/redator/writer-blueprint-for-writing";
+import { radarWriterEditorialContextWithBlueprint } from "@/lib/redator/radar-subject-turn";
+import { radarArticleDnaScopeExclusions } from "@/lib/radar/article-research-context";
 import { RADAR_WRITER_MAY_NOT, radarWriterMayNotWithSubject } from "@/lib/redator/writer-handoff";
 import { WRITER_SECTION_BUNDLE_PATHS, type WriterSectionMaterial } from "@/lib/redator/writer-section-evidence";
 import {
@@ -86,7 +89,9 @@ import {
   readWriterBundlePaths,
   readWriterEditorialContext,
   readWriterEvidenceHead,
+  writerEvidenceClient,
   writerEvidenceNow,
+  type WriterAmazonShortlistReader,
   type WriterEvidenceContext,
   type WriterEvidenceHead,
   type WriterManifestRpcRow,
@@ -305,13 +310,26 @@ export async function readWriterEvidenceManifest(context: WriterEvidenceContext,
         fonte({
           sourceKey: `run.${apelido}`, owner: "radar", status: "research_not_frozen", bytes: linha.bytes, items: linha.items,
           etag: writerEvidenceEtag(["run", apelido, origem.analysisVersionId, atualizada]), observedAt: atualizada, posteriorAoPacote: false,
-          note: apelido.startsWith("amazon.") ? "pesquisa, não congelada" : "corrida da versão entregue; pesquisa, não matéria-prima",
+          note: apelido.startsWith("amazon.") ? "pesquisa: a prateleira inteira da corrida; a shortlist congelada é run.amazon.shortlist" : "corrida da versão entregue; pesquisa, não matéria-prima",
         });
       }
       if (!corrida.length) ausentes.push({ sourceKey: "run", owner: "radar", reason: "sem corrida gravada para a versão de análise entregue" });
     }
-    if (head.dossier?.researchProfile === "AMAZON" || fontes.some(item => item.sourceKey.startsWith("run.amazon."))) {
-      ausentes.push({ sourceKey: "run.amazon.shortlist", owner: "radar", reason: "shortlist editorial não congelada pelo Radar; os produtos da corrida são pesquisa, não congelada (invariante 30)" });
+    /*
+     * 2026-10-09 · A SHORTLIST DA AMAZON CONGELADA É LIDA COMO CONGELADA (regra
+     * do piloto). Com a Amazon congelada no pacote (perfil ou review do Google),
+     * a shortlist é a do CSV — a parte comercial derivada da investigação
+     * congelada, com a assinatura da configuração conferida — e não mais "não
+     * congelada". Sem Amazon congelada, a ausência diz por quê.
+     */
+    if (head.bundleAmazonFrozenAt) {
+      fonte({
+        sourceKey: "run.amazon.shortlist", owner: "radar", status: "frozen", bytes: null, items: null,
+        etag: writerEvidenceEtag(["run.amazon.shortlist", head.dossier?.bundleHash, head.bundleAmazonFrozenAt]), observedAt: head.bundleAmazonFrozenAt, posteriorAoPacote: false,
+        note: "shortlist da Amazon congelada: os produtos compatíveis com o alvo, na ordem da seleção, com o link limpo, os critérios de comparação e o aviso de afiliado — a mesma do CSV; fora do pacote e do hash",
+      });
+    } else if (head.dossier?.researchProfile === "AMAZON" || fontes.some(item => item.sourceKey.startsWith("run.amazon."))) {
+      ausentes.push({ sourceKey: "run.amazon.shortlist", owner: "radar", reason: "a investigação da Amazon não está congelada neste pacote: sem shortlist congelada, os produtos da corrida são pesquisa (invariante 30)" });
     }
   }
 
@@ -647,31 +665,122 @@ const cortar = (valor: unknown, limite: number) => {
  */
 type PlantaEVoz = {
   articleBlueprint: WriterArticleBlueprintFoundation | null;
+  /** 2026-10-09 · A planta LIDA (nomes atuais e a leitura compartilhada), para a virada do Assunto. `null` sem planta concluída. */
+  blueprintRead: unknown;
   brandVoice: WriterBrandVoiceFoundation | null;
   absent: Array<{ field: string; reason: string }>;
+  /* 2026-10-09 (correção) · a leitura das plantas falhou (banco recusou ou tabela ausente): não é "falta organizar". */
+  blueprintUnreadable?: boolean;
 };
 
-async function plantaEVozDe(context: WriterEvidenceContext, head: WriterEvidenceHead): Promise<PlantaEVoz> {
+/** 2026-10-09 · O que a planta de quem escreve usa além dela: as afirmações do pacote (trava) e os campos do ArticleDNA (exclusões). */
+type ExtrasDaPlanta = { authorityEvidence?: unknown; articleFields?: Linha | null };
+
+/** 2026-10-09 · Os caminhos das afirmações do pacote que a trava do CSV lê (as que pedem fonte, as sustentadas e os conflitos). */
+const CAMINHOS_DAS_AFIRMACOES: ReadonlyArray<readonly string[]> = [
+  ["observed", "authorityEvidence", "claims"], ["observed", "authorityEvidence", "marketVsFactConflicts"], ["observed", "authorityEvidence", "factualEvidence"],
+];
+const afirmacoesDoPacote = (lidos: ReadonlyMap<string, unknown>): Linha | null => {
+  const [claims, conflitos, fatos] = CAMINHOS_DAS_AFIRMACOES.map(caminho => lidos.get(caminho.join(".")));
+  return claims === undefined && conflitos === undefined && fatos === undefined
+    ? null
+    : { claims: lista(claims), marketVsFactConflicts: lista(conflitos), factualEvidence: lista(fatos) };
+};
+
+/** 2026-10-09 · O núcleo do artigo: a principal, as complementares, os reforços e o Assunto. */
+function nucleoDoArtigo(head: WriterEvidenceHead, campos: Linha | null | undefined): string[] {
+  const palavras = head.dossier?.keywordContext;
+  return [palavras?.principal ?? null, ...(palavras?.secondary || []), ...(palavras?.narrativeReinforcements || []), texto(registro(campos?.subject)?.phrase)]
+    .filter((item): item is string => Boolean(item));
+}
+
+/** 2026-10-09 · As exclusões dos reajustes no ArticleDNA fixado, pela mesma régua do Radar; `null` sem exclusão. */
+function exclusoesDoArtigo(head: WriterEvidenceHead, campos: Linha | null | undefined): WriterBlueprintExclusions | null {
+  if (!campos) return null;
+  const core = nucleoDoArtigo(head, campos);
+  const items = radarArticleDnaScopeExclusions(campos as Parameters<typeof radarArticleDnaScopeExclusions>[0], core);
+  return items.length ? { items, core } : null;
+}
+
+/* A planta trouxe a página publicada que a IA viu (H2)? */
+const temPaginaLida = (valor: unknown) => lista(registro(valor)?.h2).some(item => texto(item));
+
+/** 2026-10-09 · Quanto a leitura da página publicada pode esperar antes de seguir sem ela. */
+export const WRITER_PUBLISHED_STRUCTURE_READ_MS = 4_000;
+
+/**
+ * 2026-10-09 · A PÁGINA PUBLICADA LIDA AGORA, como o CSV a lê, para a planta
+ * ANTIGA (sem a página que a IA viu) ganhar o mapa da atualização. Só com o
+ * leitor que quem chama passa (`context.readPublishedStructure`) e só no artigo
+ * publicado (`publishedIdentityRef` do ArticleDNA fixado). Falha, tempo
+ * esgotado ou página sem H2: segue sem ela, como no CSV.
+ */
+async function paginaPublicadaAgora(context: WriterEvidenceContext, head: WriterEvidenceHead): Promise<{ h1: string | null; h2: string[] } | null> {
+  const ler = context.readPublishedStructure;
+  if (!ler) return null;
+  try {
+    const projecao = await readWriterArticleProjection(context, head, ["publishedIdentityRef"]);
+    const publicada = registro(projecao?.fields.publishedIdentityRef);
+    const url = texto(publicada?.publishedUrl);
+    if (publicada?.publicationStatus !== "published_protected" || !url) return null;
+    const relogio: { id?: ReturnType<typeof setTimeout> } = {};
+    try {
+      return await Promise.race([ler(url), new Promise<null>(resolve => { relogio.id = setTimeout(() => resolve(null), WRITER_PUBLISHED_STRUCTURE_READ_MS); })]);
+    } finally {
+      if (relogio.id) clearTimeout(relogio.id);
+    }
+  } catch {
+    return null;
+  }
+}
+
+async function plantaEVozDe(context: WriterEvidenceContext, head: WriterEvidenceHead, extras: ExtrasDaPlanta = {}): Promise<PlantaEVoz> {
   const [lido, voz] = await Promise.all([
     readWriterApprovedArticleBlueprint(context, { articleId: head.articleId, bundleHash: head.dossier?.bundleHash ?? null, investigation: writerBlueprintInvestigationOf(head) }, { content: true }),
     readWriterBrandVoice(context, { content: true }),
   ]);
   const absent: PlantaEVoz["absent"] = [];
   let articleBlueprint: WriterArticleBlueprintFoundation | null = null;
+  let blueprintRead: unknown = null;
   if (lido.kind === "approved") {
-    /* 2026-10-08 · a projeção para quem escreve: nomes atuais, frases que pedem fonte e o mapa da atualização (writer-blueprint-for-writing.ts). */
-    articleBlueprint = lido.content
-      ? writerArticleBlueprintForWriting({ id: lido.meta.id, versionNumber: lido.meta.versionNumber, approvedAt: lido.meta.approvedAt, ...lido.content, keywords: head.dossier?.keywordContext ?? null })
+    /*
+     * 2026-10-08 · a projeção para quem escreve: nomes atuais, frases que pedem fonte e o mapa da atualização (writer-blueprint-for-writing.ts).
+     * 2026-10-09 · pela leitura do CSV: as fontes do pacote da planta, as exclusões do ArticleDNA, as afirmações do pacote na trava e, na planta
+     * antiga de artigo publicado, a página lida agora.
+     */
+    const conteudo = lido.content;
+    const keywords = head.dossier?.keywordContext ?? null;
+    const exclusions = exclusoesDoArtigo(head, extras.articleFields);
+    const currentStructure = conteudo && !temPaginaLida(conteudo.publishedStructure) ? await paginaPublicadaAgora(context, head) : null;
+    articleBlueprint = conteudo
+      ? writerArticleBlueprintForWriting({
+        id: lido.meta.id, versionNumber: lido.meta.versionNumber, approvedAt: lido.meta.approvedAt, ...conteudo,
+        keywords, exclusions, claims: { authorityEvidence: extras.authorityEvidence ?? null }, currentStructure,
+      })
       : null;
+    if (articleBlueprint && conteudo) blueprintRead = writerBlueprintWithCurrentNames(conteudo.blueprint, keywords, { sources: conteudo.sources, exclusions });
     if (!articleBlueprint) absent.push({ field: "articleBlueprint", reason: `o artigo-modelo aprovado está fora do contrato do Radar: leia radar.blueprint/${lido.meta.id}` });
-  } else if (lido.kind === "other_bundle" || lido.kind === "read_failed") {
+  } else if (lido.kind !== "no_bundle") {
+    /* 2026-10-09 · regra do piloto: sem planta, o estado explícito com o caminho (organizar no Radar) — nunca a estrutura de outro lugar. */
     absent.push({ field: "articleBlueprint", reason: lido.reason });
   }
+  const blueprintUnreadable = lido.kind === "read_failed" || lido.kind === "table_missing";
   const brandVoice = voz.kind === "current"
     ? writerBrandVoiceFoundation({ versionId: voz.meta.versionId, versionNumber: voz.meta.versionNumber, name: voz.name, lifecycle: voz.lifecycle, title: voz.title, sections: voz.sections })
     : null;
   if (voz.kind === "read_failed") absent.push({ field: "brandVoice", reason: voz.reason });
-  return { articleBlueprint, brandVoice, absent };
+  return { articleBlueprint, blueprintRead, brandVoice, absent, ...(blueprintUnreadable ? { blueprintUnreadable } : {}) };
+}
+
+/**
+ * 2026-10-09 · AS LINHAS DO ENVIO COM A VIRADA PELA PLANTA: com o Assunto no
+ * ArticleDNA fixado, as linhas do Assunto (gravadas no envio, às vezes pela
+ * régua antiga) são trocadas pelas da planta concluída; as outras ficam.
+ */
+function linhasDoEnvioPelaPlanta(head: WriterEvidenceHead, campos: Linha | null | undefined, linhas: readonly string[], planta: PlantaEVoz): string[] {
+  const assunto = campos?.subject;
+  if (!assunto) return [...linhas];
+  return radarWriterEditorialContextWithBlueprint(linhas, { subject: assunto, blueprint: planta.blueprintRead, principal: head.dossier?.keywordContext?.principal ?? null });
 }
 
 /** O próximo passo dos fundamentos. Sem planta e sem voz, o texto de sempre. */
@@ -679,6 +788,12 @@ function proximoPassoDosFundamentos(planta: PlantaEVoz): string {
   return [
     "Leia get_writer_evidence_manifest e, para a seção que está escrevendo, read_writer_evidence com a sourceKey do manifesto.",
     ...(planta.articleBlueprint ? ["articleBlueprint é o artigo-modelo que o dono aprovou no Radar para este pacote: siga a planta (H1, seções, pergunta do leitor, resposta que abre, links internos com a âncora indicada, fechamento e CTA); o integral está em articleBlueprint.readAt."] : []),
+    /* 2026-10-09 · regra do piloto: sem planta concluída, a estrutura não sai de outro lugar. */
+    ...(!planta.articleBlueprint && planta.absent.some(item => item.field === "articleBlueprint")
+      ? ["Sem o artigo-modelo concluído deste pacote, a estrutura não sai de outro lugar: organize o artigo-modelo no Radar (Pesquisa → Artigo-modelo da SERP) e leia os fundamentos de novo."]
+      : []),
+    /* 2026-10-09 · o próximo passo que sobra na leitura é a leitura seguinte, opcional (a mesma régua do CSV). */
+    ...(planta.articleBlueprint?.closing?.nextStep ? [`articleBlueprint.closing.nextStep é a ${WRITER_BLUEPRINT_CONTINUATION_LABEL.toLocaleLowerCase("pt-BR")}: se couber, no corpo da seção que trata dela; o CTA é a única chamada.`] : []),
     /* 2026-10-08 · só quando a planta os tem: sem frase marcada e sem mapa, o texto de antes. */
     ...(planta.articleBlueprint?.needsSource?.length || planta.articleBlueprint?.sections.some(secao => secao.needsSource?.length)
       ? ["needsSource (na planta e em cada seção) lista as frases que só entram com fonte do pacote: sem ela, escreva delimitado (orientação ou possibilidade, sem afirmar como fato o efeito, a conversão ou o comportamento do público) ou deixe fora; label é o motivo e não vai ao texto."]
@@ -699,13 +814,14 @@ function proximoPassoDosFundamentos(planta: PlantaEVoz): string {
  */
 export async function readWriterFoundations(context: WriterEvidenceContext, documentId: string): Promise<WriterFoundations> {
   const head = await readWriterEvidenceHead(context, documentId);
+  /* 2026-10-09 · e as afirmações do pacote, para a trava do CSV na planta (radarPendingClaims com o pacote). */
   const lidos = head.dossier
-    ? await readWriterBundlePaths(context, head, [["conflicts"], ["limitations"], ["specialist"], ["video"], ["observed", "competitors"], ["observed", "questions"]])
+    ? await readWriterBundlePaths(context, head, [["conflicts"], ["limitations"], ["specialist"], ["video"], ["observed", "competitors"], ["observed", "questions"], ...CAMINHOS_DAS_AFIRMACOES])
     : new Map<string, unknown>();
   const projecao = await readWriterArticleProjection(context, head);
-  /* As linhas da virada só existem com Assunto: sem ele, nenhuma consulta a mais. */
-  const linhasDaVirada = projecao?.fields.subject ? await readWriterEditorialContext(context, head) : [];
-  const plantaEVoz = await plantaEVozDe(context, head);
+  const plantaEVoz = await plantaEVozDe(context, head, { authorityEvidence: afirmacoesDoPacote(lidos), articleFields: projecao?.fields ?? null });
+  /* As linhas da virada só existem com Assunto: sem ele, nenhuma consulta a mais. 2026-10-09 · com a virada pela planta. */
+  const linhasDaVirada = projecao?.fields.subject ? linhasDoEnvioPelaPlanta(head, projecao.fields, await readWriterEditorialContext(context, head), plantaEVoz) : [];
   const ausentes: WriterFoundations["absent"] = [];
 
   const concorrentes = lista(lidos.get("observed.competitors")).map(registro).filter((item): item is Linha => Boolean(item))
@@ -780,6 +896,40 @@ export async function readWriterFoundations(context: WriterEvidenceContext, docu
   });
   if (!cabe) throw new WriterEvidenceError("source_too_large", "Os fundamentos não couberam no limite de 24 kB.");
   return cabe as WriterFoundations;
+}
+
+/* ===================== 2026-10-09 · o artigo-modelo no painel ===================== */
+
+/**
+ * O QUE O PAINEL DE FUNDAMENTOS MOSTRA DO ARTIGO-MODELO (regra do piloto).
+ *
+ * O painel do Redator lia só o documento (a projeção do dossiê) e mostrava a
+ * "Estrutura sugerida" do blueprint antigo do YouTube; o artigo-modelo, que é a
+ * referência de todo entregável, nunca aparecia. Agora o painel pede ao
+ * servidor a MESMA projeção dos fundamentos (o mesmo pick do CSV, a leitura
+ * compartilhada, a trava e o mapa da página) e as linhas do Assunto com a
+ * virada pela planta. Sem planta concluída: o estado explícito "ausente", com o
+ * motivo e o caminho (organizar no Radar) — nunca a estrutura de outro lugar.
+ */
+export type WriterArticleBlueprintPanel =
+  | { state: "approved"; articleId: string; blueprint: WriterArticleBlueprintFoundation; editorialContext: string[] | null }
+  | { state: "absent"; articleId: string | null; reason: string }
+  /* 2026-10-09 (correção) · a leitura falhou: a tela diz "não lido agora" e não oferece organizar (pago). */
+  | { state: "unreadable"; articleId: string | null; reason: string };
+
+export async function readWriterArticleBlueprintPanel(context: WriterEvidenceContext, documentId: string): Promise<WriterArticleBlueprintPanel> {
+  const head = await readWriterEvidenceHead(context, documentId);
+  if (!head.dossier) return { state: "absent", articleId: head.radarOrigin?.articleId ?? null, reason: "Este documento não veio do Radar com dossiê: não há artigo-modelo a que ele se prenda." };
+  const lidos = await readWriterBundlePaths(context, head, CAMINHOS_DAS_AFIRMACOES);
+  const projecao = await readWriterArticleProjection(context, head);
+  const planta = await plantaEVozDe(context, head, { authorityEvidence: afirmacoesDoPacote(lidos), articleFields: projecao?.fields ?? null });
+  if (!planta.articleBlueprint) {
+    const motivo = planta.absent.find(item => item.field === "articleBlueprint")?.reason ?? "nenhum artigo-modelo concluído para este pacote";
+    if (planta.blueprintUnreadable) return { state: "unreadable", articleId: head.articleId, reason: motivo };
+    return { state: "absent", articleId: head.articleId, reason: motivo };
+  }
+  const linhas = projecao?.fields.subject ? linhasDoEnvioPelaPlanta(head, projecao.fields, await readWriterEditorialContext(context, head), planta) : null;
+  return { state: "approved", articleId: head.articleId, blueprint: planta.articleBlueprint, editorialContext: linhas };
 }
 
 /* ================================== fatias ================================= */
@@ -961,7 +1111,7 @@ async function prepararCorrida(context: WriterEvidenceContext, head: WriterEvide
     hierarchy: writerEvidenceHierarchyOf({ family: "run" }),
     truncate: listagem,
     notice: alias.startsWith("amazon.")
-      ? "Produtos da corrida: pesquisa, não congelada. A shortlist editorial é conclusão do Radar e não está congelada."
+      ? "Produtos da corrida: pesquisa (a prateleira inteira). Os produtos do artigo são os da shortlist congelada (run.amazon.shortlist)."
       : "Corrida da versão de análise entregue: pesquisa, não matéria-prima.",
     load: async pedido => {
       const fields = pedido.fields ?? (listagem ? WRITER_RUN_DEFAULT_FIELDS[alias] as string[] | undefined : undefined);
@@ -1163,9 +1313,76 @@ async function prepararArtigoModelo(context: WriterEvidenceContext, head: Writer
     load: async pedido => {
       /* 2026-10-08 · P0-A · o conteúdo pelo pacote da VERSÃO (o mesmo do documento no hash exato; o do dossiê em que ela foi organizada na mesma investigação). */
       const lido = await readWriterArticleBlueprintContent(context, { articleId: alvo.articleId, bundleHash: meta.bundleHash }, meta.id, chave.path[0] ?? null);
-      /* 2026-10-08 · a planta inteira sai com os nomes atuais, como a projeção (artigo-modelo antigo incluído). */
-      const conteudo = "blueprint" in lido ? { ...lido, blueprint: writerBlueprintWithCurrentNames(lido.blueprint, head.dossier?.keywordContext ?? null) } : lido;
+      /*
+       * 2026-10-08 · a planta inteira sai com os nomes atuais, como a projeção (artigo-modelo antigo incluído).
+       * 2026-10-09 · e pela leitura do CSV: as fontes do pacote da planta e as exclusões do ArticleDNA fixado.
+       */
+      if (!("blueprint" in lido)) return linhasDe(chave.path.length ? navegar(lido, chave.path) : lido, pedido);
+      const fontes = "sources" in lido ? lido.sources : (await readWriterArticleBlueprintContent(context, { articleId: alvo.articleId, bundleHash: meta.bundleHash }, meta.id, "sources")).sources;
+      const campos = (await readWriterArticleProjection(context, head, ["angle", "differentiation", "antiCannibalizationBoundary", "excludedSubjects", "subject"]))?.fields ?? null;
+      const conteudo = { ...lido, blueprint: writerBlueprintWithCurrentNames(lido.blueprint, head.dossier?.keywordContext ?? null, { sources: fontes ?? null, exclusions: exclusoesDoArtigo(head, campos) }) };
       return linhasDe(chave.path.length ? navegar(conteudo, chave.path) : conteudo, pedido);
+    },
+  };
+}
+
+/** Os dois instantes descrevem o mesmo momento (o texto pode vir com `Z` ou com `+00:00`). */
+const mesmoInstante = (a: string | null | undefined, b: string | null | undefined): boolean => {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const [x, y] = [Date.parse(a), Date.parse(b)];
+  return Number.isFinite(x) && Number.isFinite(y) && x === y;
+};
+
+/** 2026-10-09 · A leitura do app: a MESMA montagem do CSV (carregada só quando a fatia é pedida). */
+const lerShortlistPelaMontagem: WriterAmazonShortlistReader = async ({ brandId, articleId, actorUserId, client }) => {
+  const { assembleRadarPortableExport } = await import("@/lib/server/radar-portable-export-core");
+  const montagem = await assembleRadarPortableExport({ brandId, articleIds: [articleId], supabase: client, actorUserId });
+  const montada = montagem.montadas.find(item => item.articleId === articleId);
+  if (!montada) return null;
+  const investigacao = montagem.congelamentos.get(articleId) ?? null;
+  return { frozenAt: investigacao?.frozenAt ?? null, amazonFrozenAt: investigacao?.amazonFrozenAt ?? null, commercial: montada.entrada.commercial ?? null };
+};
+
+/**
+ * 2026-10-09 · A SHORTLIST DA AMAZON CONGELADA, LIDA COMO CONGELADA (regra do
+ * piloto). É a parte comercial que o CSV entrega (`radarPortableCommercialOf`,
+ * em qualquer perfil): os produtos compatíveis com o alvo, na ordem da seleção,
+ * os links limpos, os critérios e o aviso de afiliado — recalculados sobre a
+ * corrida gravada, com a assinatura da configuração conferida. Vale só se a
+ * montagem leu o MESMO congelamento do pacote (o primário e o da Amazon); se o
+ * Radar recongelou, a de hoje é de outro pacote e não é servida (invariante 30).
+ */
+function prepararShortlistDaAmazon(context: WriterEvidenceContext, head: WriterEvidenceHead, chave: WriterEvidenceSourceKey): Preparado {
+  const congelada = head.bundleAmazonFrozenAt ?? null;
+  if (!congelada) {
+    throw new WriterEvidenceError("source_absent", "A investigação da Amazon não está congelada neste pacote: não há shortlist congelada, e os produtos da corrida são pesquisa (invariante 30).");
+  }
+  return {
+    identity: null,
+    origin: { entityId: head.articleId, versionId: null, contentHash: head.dossier?.bundleHash ?? null, collectedAt: congelada, status: "frozen" },
+    posteriorAoPacote: false,
+    hierarchy: { level: "OTHER_RADAR_EVIDENCE", note: "conclusão do Radar sobre a Amazon congelada (a mesma do CSV)" },
+    truncate: true,
+    notice: "Shortlist da Amazon congelada: só estes produtos entram como produto do artigo; o resto da prateleira é contexto e não ganha link. Preço e nota são da coleta: sem prometer preço atual nem tratar nota como prova de qualidade.",
+    load: async pedido => {
+      const ler = context.readAmazonShortlist ?? lerShortlistPelaMontagem;
+      const lida = await ler({ brandId: context.brandId, articleId: head.articleId, actorUserId: head.radarOrigin?.importedBy ?? head.articleId, client: writerEvidenceClient(context) });
+      if (!lida || !mesmoInstante(lida.amazonFrozenAt, congelada) || !mesmoInstante(lida.frozenAt, head.bundleObservedAt)) {
+        throw new WriterEvidenceError("source_absent", "A investigação (ou a Amazon) foi congelada de novo depois do envio: a shortlist de hoje é de outro congelamento e não vale para este documento; o Radar reenvia o pacote atual ao Redator (invariante 30).");
+      }
+      const comercial = lida.commercial;
+      const valor = {
+        frozenAt: congelada,
+        intent: comercial?.setup?.intent ?? null,
+        counts: comercial?.counts ?? null,
+        shortlistStatus: comercial?.shortlistStatus ?? null,
+        products: comercial?.products ?? [],
+        links: comercial?.links ?? [],
+        comparisonCriteria: [...(comercial?.comparisonCriteria ?? [])],
+        affiliateDisclosureRequired: comercial?.disclosureRequired ?? false,
+      };
+      return linhasDe(chave.path.length ? navegar(valor, chave.path) : valor, pedido);
     },
   };
 }
@@ -1257,8 +1474,9 @@ async function preparar(context: WriterEvidenceContext, head: WriterEvidenceHead
         "Contribuição de especialista posterior ao pacote aparece só como contagem; o conteúdo chega por reenvio do Radar (invariante 51).",
         { count: contagem });
     }
+    /* 2026-10-09 · a shortlist da Amazon congelada, pela montagem do CSV; sem Amazon congelada no pacote, a ausência diz por quê. */
     case "run.amazon.shortlist":
-      throw new WriterEvidenceError("source_absent", "A shortlist editorial da Amazon é conclusão do Radar e não está congelada; o Redator não a recalcula (invariante 30).");
+      return prepararShortlistDaAmazon(context, head, chave);
     case "dna.siloPage":
     case "dna.keyword.presentation":
       throw new WriterEvidenceError("source_absent", "Sem vínculo determinístico com o artigo: ausência declarada.");
@@ -1401,9 +1619,9 @@ export async function describeWriterEvidenceSource(
 export async function readWriterSectionMaterial(context: WriterEvidenceContext, head: WriterEvidenceHead): Promise<WriterSectionMaterial> {
   const lidos = head.dossier ? await readWriterBundlePaths(context, head, WRITER_SECTION_BUNDLE_PATHS) : new Map<string, unknown>();
   const projecao = await readWriterArticleProjection(context, head);
-  const linhasDaVirada = projecao?.fields.subject ? await readWriterEditorialContext(context, head) : [];
-  /* 2026-10-02 · a planta aprovada e a voz da marca, pela mesma leitura dos fundamentos. */
-  const plantaEVoz = await plantaEVozDe(context, head);
+  /* 2026-10-02 · a planta aprovada e a voz da marca, pela mesma leitura dos fundamentos (2026-10-09: com a trava do CSV e as exclusões do ArticleDNA). */
+  const plantaEVoz = await plantaEVozDe(context, head, { authorityEvidence: afirmacoesDoPacote(lidos), articleFields: projecao?.fields ?? null });
+  const linhasDaVirada = projecao?.fields.subject ? linhasDoEnvioPelaPlanta(head, projecao.fields, await readWriterEditorialContext(context, head), plantaEVoz) : [];
   const ausentes: WriterSectionMaterial["absent"][number][] = [];
   if (!head.dossier) ausentes.push({ field: "bundle", reason: "documento sem dossiê: não inferir evidências" });
   else if (head.dossier.researchProfile !== "GOOGLE") ausentes.push({ field: "questions/gaps/entities/claims", reason: `fotografia do Google ausente no perfil ${head.dossier.researchProfile}` });

@@ -34,6 +34,7 @@ import {
   type VersionReference,
 } from "@/lib/arquiteto/contracts";
 import { type WriterSliceRow } from "@/lib/redator/writer-evidence-catalog";
+import type { RadarPortableCommercial } from "@/lib/radar/portable-export";
 import { getOperationalClient, mapPersistenceError } from "@/lib/server/editorial-db";
 
 /* ================================ erros ================================= */
@@ -88,7 +89,29 @@ export type WriterEvidenceContext = {
   /** Injetável nos testes; no app, o cliente operacional (service role). */
   client?: SupabaseClient;
   now?: () => Date;
+  /**
+   * 2026-10-09 · Aditivo: o leitor da página publicada (H1 e H2) — o MESMO do
+   * CSV (`radarReadPublishedStructure`, só GET, com tempo limite). Com ele, a
+   * planta ANTIGA de um artigo publicado ganha o mapa da atualização, como no
+   * CSV. Ausente (testes, MCP), nada é lido.
+   */
+  readPublishedStructure?: (url: string) => Promise<{ h1: string | null; h2: string[] } | null>;
+  /**
+   * 2026-10-09 · Aditivo: a parte comercial da Amazon congelada do artigo, pela
+   * MESMA montagem do CSV (`assembleRadarPortableExport`). Injetável nos
+   * testes; ausente, a do app (lida só quando a fatia `run.amazon.shortlist`
+   * é pedida).
+   */
+  readAmazonShortlist?: WriterAmazonShortlistReader;
 };
+
+/** 2026-10-09 · O que a montagem do CSV diz da Amazon congelada de um artigo: os congelamentos que ela leu e a parte comercial. */
+export type WriterAmazonShortlistRead = {
+  frozenAt: string | null;
+  amazonFrozenAt: string | null;
+  commercial: RadarPortableCommercial | null;
+};
+export type WriterAmazonShortlistReader = (input: { brandId: string; articleId: string; actorUserId: string; client: SupabaseClient }) => Promise<WriterAmazonShortlistRead | null>;
 
 export const writerEvidenceClient = (context: WriterEvidenceContext): SupabaseClient => context.client ?? getOperationalClient();
 export const writerEvidenceNow = (context: WriterEvidenceContext): Date => (context.now ? context.now() : new Date());
@@ -134,6 +157,8 @@ const CAMINHOS_DO_CABECALHO: Readonly<Record<string, string>> = Object.freeze({
   x_writerMayNot: `${DOSSIE}->writerMayNot`,
   b_observedAt: `${DOSSIE}->bundle->observedAt`,
   b_serpStanding: `${DOSSIE}->bundle->serpStanding`,
+  /* 2026-10-09 · o congelamento da Amazon do pacote (perfil ou review): a escolha da planta é a do CSV também na Amazon. */
+  b_amazonFrozenAt: `${DOSSIE}->bundle->research->amazon->frozenAt`,
 });
 
 export const WRITER_EVIDENCE_HEAD_SELECT = [
@@ -172,6 +197,12 @@ export type WriterEvidenceHead = {
   pendingDecisions: z.infer<typeof PendenciasSchema>;
   dossier: z.infer<typeof DossieSemBundleSchema> | null;
   bundleObservedAt: string | null;
+  /**
+   * 2026-10-09 · O congelamento da Amazon do pacote (`bundle.research.amazon.frozenAt`);
+   * null = pacote sem Amazon. Ausente (undefined) só em cabeçalho montado fora
+   * desta leitura: a escolha da planta não confere a Amazon.
+   */
+  bundleAmazonFrozenAt?: string | null;
   serpStanding: z.infer<typeof PosicaoDaSerpSchema> | null;
 };
 
@@ -236,6 +267,7 @@ export function writerEvidenceHeadFromRow(linha: Record<string, unknown>, brandI
     pendingDecisions: pendencias.data,
     dossier,
     bundleObservedAt: dossier ? texto(linha.b_observedAt) : null,
+    ...(dossier ? { bundleAmazonFrozenAt: texto(linha.b_amazonFrozenAt) } : {}),
     serpStanding: dossier && posicao?.success ? posicao.data : null,
   };
 }

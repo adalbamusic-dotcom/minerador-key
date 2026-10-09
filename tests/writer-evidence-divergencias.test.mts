@@ -561,7 +561,8 @@ test("ESTRUTURAL · a IA só INSERE divergência; nada atualiza, apaga ou escrev
   for (const rota of ["../app/api/redator/section/route.ts", "../app/api/redator/improve/route.ts"]) {
     const fonte = semComentarios(rota);
     assert.doesNotMatch(fonte, /importedContext|dossier/, `${rota} não lê evidência do corpo do pedido`);
-    assert.match(fonte, /context: \{ brandId: input\.brandId \}/);
+    /* 2026-10-09 · a Marca do pedido e o leitor da página publicada do CSV (só GET): nada do corpo do pedido vira evidência. */
+    assert.match(fonte, /context: \{ brandId: input\.brandId, readPublishedStructure: radarReadPublishedStructure \}/);
   }
 });
 

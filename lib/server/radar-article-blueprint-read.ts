@@ -34,8 +34,16 @@ export function radarArticleBlueprintCurrentInvestigationOf(input: {
 }): RadarArticleBlueprintCurrentInvestigation | null {
   const frozenAt = radarFrozenObservedAtOfAnalysis(input.analysisPayload);
   if (!frozenAt || !input.article.versionId) return null;
-  const analise = input.analysisPayload as { finalizedBundle?: { bundleId?: unknown; bundleHash?: unknown } | null };
+  const analise = input.analysisPayload as { finalizedBundle?: { bundleId?: unknown; bundleHash?: unknown } | null; amazonFrozenInvestigation?: { finalizedAt?: unknown } | null };
   const congelado = radarPrimaryProfileOfAnalysis(input.analysisPayload) === "GOOGLE" ? analise.finalizedBundle ?? null : null;
+  /*
+   * 2026-10-09 · A INVESTIGAÇÃO CONSIDERADA NÃO É SÓ A DO GOOGLE. A Amazon
+   * congelada (como acréscimo de review ao Google, ou como perfil primário) entra
+   * na identidade da planta: o bloco comercial vai ao pedido, e um congelamento
+   * NOVO da Amazon desliga a planta para reorganizar. Sem Amazon congelada, null.
+   */
+  const amazon = analise.amazonFrozenInvestigation && typeof analise.amazonFrozenInvestigation === "object" ? analise.amazonFrozenInvestigation : null;
+  const amazonFrozenAt = typeof amazon?.finalizedAt === "string" && amazon.finalizedAt.trim() ? amazon.finalizedAt : null;
   const numero = input.article.versionNumber ?? null;
   const seguintes = numero === null ? [] : (input.articleVersions || [])
     .filter(versao => typeof versao.versionNumber === "number" && versao.versionNumber > numero)
@@ -47,6 +55,7 @@ export function radarArticleBlueprintCurrentInvestigationOf(input: {
     frozenBundleHash: typeof congelado?.bundleHash === "string" ? congelado.bundleHash : null,
     articleDnaVersionId: input.article.versionId,
     articleDnaContentHash: input.article.contentHash ?? null,
+    amazonFrozenAt,
     articleDnaFrom: input.article.createdAt ?? null,
     articleDnaUntil: seguintes.length ? new Date(Math.min(...seguintes)).toISOString() : null,
   };
@@ -78,6 +87,40 @@ const porArtigo = <T extends { articleId: string }>(linhas: readonly T[]): Map<s
 };
 
 /*
+ * ===== 2026-10-09 · A LEITURA DA PLANTA QUE FALHA NÃO VIRA LEGADO EM SILÊNCIO =====
+ *
+ * Regra do dono (2026-10-09): o artigo-modelo é o fundamento de todo
+ * entregável, e o processo antigo não fica como caminho alternativo. Antes, a
+ * leitura que falhava (tabela ausente, banco recusando, rede) voltava um mapa
+ * vazio e o CSV saía montado pelo modelo editorial legado, sem aviso. Agora a
+ * falha é um estado explícito (`blueprint_unavailable`, HTTP 503): a rota e o
+ * MCP devolvem o erro claro (`authzErrorResponse` lê o `status`), e nada é
+ * montado sem a planta. Planta que não existe continua sendo outra coisa: o
+ * artigo fica fora do mapa, e quem entrega devolve `needs_article_blueprint`.
+ */
+export const RADAR_ARTICLE_BLUEPRINT_UNAVAILABLE = "blueprint_unavailable" as const;
+
+export class RadarArticleBlueprintUnavailableError extends Error {
+  readonly code = RADAR_ARTICLE_BLUEPRINT_UNAVAILABLE;
+  readonly status = 503;
+  /** Os artigos cuja planta não pôde ser lida (todo o lote: a leitura é uma consulta só). */
+  readonly articleIds: string[];
+
+  constructor(articleIds: readonly string[], detalhe: string) {
+    super(`Não foi possível ler o artigo-modelo de ${articleIds.length === 1 ? "1 artigo" : `${articleIds.length} artigos`} (${detalhe}). Nada foi montado sem a planta: tente de novo em instantes.`);
+    this.name = "RadarArticleBlueprintUnavailableError";
+    this.articleIds = [...articleIds];
+  }
+}
+
+/** A falha da leitura: registrada no log e devolvida como estado explícito (nunca um mapa vazio). */
+function leituraIndisponivel(evento: string, articleIds: readonly string[], erro: unknown): never {
+  const mensagem = erro instanceof Error ? erro.message : typeof erro === "object" && erro && "message" in erro ? String((erro as { message: unknown }).message) : "falha desconhecida";
+  console.warn(`[radar-article-blueprint] ${evento}`, { message: mensagem.slice(0, 240), articles: articleIds.length });
+  throw new RadarArticleBlueprintUnavailableError(articleIds, "o banco não respondeu à leitura das plantas");
+}
+
+/*
  * 2026-10-08 · B4 · AS DUAS LEITURAS ENTREGAM A PLANTA COM OS NOMES ATUAIS.
  *
  * O artigo-modelo gravado antes da regra "use os nomes atuais" ainda manda
@@ -89,8 +132,9 @@ const porArtigo = <T extends { articleId: string }>(linhas: readonly T[]): Map<s
 /**
  * O EXPORT LÊ O APROVADO EM LOTE — uma consulta, filtrada pela marca.
  *
- * A leitura é contexto, não condição: se a tabela não existir ainda (migration
- * não aplicada) ou o banco recusar, o CSV sai como antes, sem artigo-modelo.
+ * 2026-10-09 · A leitura é CONDIÇÃO (o artigo-modelo é o fundamento): a falha
+ * vira `RadarArticleBlueprintUnavailableError` (`blueprint_unavailable`), nunca
+ * um mapa vazio que deixaria o entregável sair pelo legado.
  */
 export async function readApprovedRadarArticleBlueprints(
   client: SupabaseClient,
@@ -103,25 +147,23 @@ export async function readApprovedRadarArticleBlueprints(
   if (!comHash.length) return saida;
   /* 2026-10-08 · P0-A · com a investigação vigente, a data e o id entram para a regra do congelamento. */
   const comInvestigacao = comHash.some(item => item.investigation);
+  let leitura: { data: unknown; error: { message: string } | null };
   try {
-    const leitura = await client.from("radar_article_blueprints").select(comInvestigacao ? "id,article_id,bundle_hash,version_number,created_at,payload" : "article_id,bundle_hash,version_number,payload")
+    leitura = await client.from("radar_article_blueprints").select(comInvestigacao ? "id,article_id,bundle_hash,version_number,created_at,payload" : "article_id,bundle_hash,version_number,payload")
       .eq("brand_id", brandId).eq("state", "APPROVED").in("article_id", comHash.map(item => item.articleId))
       .order("version_number", { ascending: false });
-    if (leitura.error) {
-      console.warn("[radar-article-blueprint] approved_read_failed", { message: leitura.error.message.slice(0, 240) });
-      return saida;
-    }
-    const linhas = (leitura.data || []) as unknown as Array<Record<string, unknown>>;
-    const grupos = porArtigo(linhas.map((linha, indice) => ({ ...metaDaLinha(linha, indice, "APPROVED"), linha })));
-    for (const item of comHash) {
-      const versoes = grupos.get(item.articleId) || [];
-      const escolha = radarArticleBlueprintPick(versoes, { bundleHash: item.bundleHash, investigation: item.investigation ?? null });
-      const linha = escolha ? versoes.find(versao => versao.id === escolha.id)?.linha : undefined;
-      if (!linha) continue;
-      saida.set(item.articleId, radarArticleBlueprintWithCurrentNames(linha.payload as RadarArticleBlueprintPayload, keywordsDe.get(item.articleId)));
-    }
   } catch (erro) {
-    console.warn("[radar-article-blueprint] approved_read_failed", { message: erro instanceof Error ? erro.message.slice(0, 240) : "falha desconhecida" });
+    return leituraIndisponivel("approved_read_failed", comHash.map(item => item.articleId), erro);
+  }
+  if (leitura.error) return leituraIndisponivel("approved_read_failed", comHash.map(item => item.articleId), leitura.error);
+  const linhas = (leitura.data || []) as unknown as Array<Record<string, unknown>>;
+  const grupos = porArtigo(linhas.map((linha, indice) => ({ ...metaDaLinha(linha, indice, "APPROVED"), linha })));
+  for (const item of comHash) {
+    const versoes = grupos.get(item.articleId) || [];
+    const escolha = radarArticleBlueprintPick(versoes, { bundleHash: item.bundleHash, investigation: item.investigation ?? null });
+    const linha = escolha ? versoes.find(versao => versao.id === escolha.id)?.linha : undefined;
+    if (!linha) continue;
+    saida.set(item.articleId, radarArticleBlueprintWithCurrentNames(linha.payload as RadarArticleBlueprintPayload, keywordsDe.get(item.articleId)));
   }
   return saida;
 }
@@ -129,8 +171,13 @@ export async function readApprovedRadarArticleBlueprints(
 /**
  * 2026-10-02 · QUAL VERSÃO VAI AO CSV, por artigo e para o pacote VIGENTE.
  *
- * A aprovada mais nova; sem aprovada, a proposta mais nova da IA (ou a edição
- * do dono ainda não aprovada). Pura, para a regra ser testada sem banco.
+ * 2026-10-09 · SÓ A CONCLUÍDA (regra do dono: o artigo-modelo é o fundamento,
+ * e o processo antigo é substituído). A escolha é `radarArticleBlueprintPick`
+ * sem rascunho: o hash exato do dossiê ou, senão, a APPROVED mais nova do
+ * mesmo congelamento e do mesmo ArticleDNA. O rascunho antigo (anterior a
+ * 2026-10-02, quando toda versão passou a nascer concluída) não conta: o artigo
+ * fica sem planta, e quem entrega devolve `needs_article_blueprint`. Pura, para
+ * a regra ser testada sem banco.
  */
 export function radarArticleBlueprintExportChoice(
   linhas: ReadonlyArray<{ id: string; articleId: string; bundleHash: string; versionNumber: number; state: string; createdAt?: string | null; investigationRef?: unknown }>,
@@ -141,31 +188,25 @@ export function radarArticleBlueprintExportChoice(
   const saida = new Map<string, { id: string; approval: RadarArticleBlueprintApproval }>();
   for (const [articleId, versoes] of porArtigo(linhas)) {
     if (!hashes.has(articleId)) continue;
-    /* Hash exato (a concluída; sem ela, o rascunho antigo); senão, a concluída da investigação vigente. */
-    const escolha = radarArticleBlueprintPick(versoes, { bundleHash: hashes.get(articleId), investigation: investigacoes.get(articleId) ?? null }, { drafts: true });
+    /* Hash exato (a concluída); senão, a concluída da investigação vigente. Rascunho não vale. */
+    const escolha = radarArticleBlueprintPick(versoes, { bundleHash: hashes.get(articleId), investigation: investigacoes.get(articleId) ?? null });
     if (escolha) saida.set(articleId, { id: escolha.id, approval: escolha.approval });
   }
   return saida;
 }
 
 /**
- * 2026-10-02 · O ARTIGO-MODELO QUE O CSV LEVA: aprovado ou, sem ele, a proposta.
+ * 2026-10-02 · O ARTIGO-MODELO QUE O CSV LEVA.
  *
- * Decisão do dono: enquanto ele não aprova, o CSV JÁ SAI com a estrutura
- * organizada, marcada como proposta da IA. Duas consultas por lote, filtradas
- * pela marca: primeiro os metadados (sem payload), depois só os payloads
- * escolhidos — um Silo com muitas versões de rascunho não traz todas elas.
- * Cada payload sai com `approval` (o estado, que nunca é gravado).
+ * Duas consultas por lote, filtradas pela marca: primeiro os metadados (sem
+ * payload), depois só os payloads escolhidos. Cada payload sai com `approval`
+ * (o estado, que nunca é gravado).
  *
- * Tolerante como a leitura do aprovado: sem tabela ou com o banco recusando,
- * o CSV sai sem artigo-modelo. O Redator continua lendo só o APROVADO
- * (`readWriterApprovedArticleBlueprint`), por outro caminho.
- *
- * 2026-10-02 · A PROPOSTA LEVA AS PENDÊNCIAS. Junto do payload escolhido vêm a
- * `validation` da versão (o que o servidor achou ao conferir a resposta da IA)
- * e a `origin` (IA ou edição do dono) — colunas que já existem; nada novo é
- * gravado. Só a proposta as recebe, no objeto que passa (como `approval`); a
- * aprovada sai como antes.
+ * 2026-10-09 · SÓ A CONCLUÍDA, E A FALHA É ESTADO EXPLÍCITO. A proposta em
+ * rascunho deixou de ir ao CSV (a regra é a mesma do Redator e do `ifMissing`:
+ * `radarArticleBlueprintPick` sem rascunho), e a leitura que falha não devolve
+ * mais um mapa vazio — ela levanta `RadarArticleBlueprintUnavailableError`
+ * (`blueprint_unavailable`, 503), para nenhum entregável sair pelo legado.
  */
 export async function readRadarArticleBlueprintsForExport(
   client: SupabaseClient,
@@ -182,40 +223,35 @@ export async function readRadarArticleBlueprintsForExport(
    * caminho pequeno do payload (`ir`), nunca a planta.
    */
   const investigacoes = new Map(articles.filter(item => hashes.has(item.articleId) && item.investigation).map(item => [item.articleId, item.investigation!]));
+  const doLote = [...hashes.keys()];
+  let metadados: { data: unknown; error: { message: string } | null };
   try {
-    const metadados = await client.from("radar_article_blueprints").select(investigacoes.size ? "id,article_id,bundle_hash,version_number,state,created_at,ir:payload->investigationRef" : "id,article_id,bundle_hash,version_number,state")
-      .eq("brand_id", brandId).in("article_id", [...hashes.keys()]).in("state", ["APPROVED", "DRAFT"])
+    metadados = await client.from("radar_article_blueprints").select(investigacoes.size ? "id,article_id,bundle_hash,version_number,state,created_at,ir:payload->investigationRef" : "id,article_id,bundle_hash,version_number,state")
+      .eq("brand_id", brandId).in("article_id", doLote).eq("state", "APPROVED")
       .order("version_number", { ascending: false });
-    if (metadados.error) {
-      console.warn("[radar-article-blueprint] export_read_failed", { message: metadados.error.message.slice(0, 240) });
-      return saida;
-    }
-    const linhas = ((metadados.data || []) as unknown as Array<Record<string, unknown>>).map((linha, indice) => metaDaLinha(linha, indice));
-    const escolhidas = radarArticleBlueprintExportChoice(linhas, hashes, investigacoes);
-    if (!escolhidas.size) return saida;
-    const conteudo = await client.from("radar_article_blueprints").select("id,article_id,payload,validation,origin")
-      .eq("brand_id", brandId).in("id", [...escolhidas.values()].map(item => item.id));
-    if (conteudo.error) {
-      console.warn("[radar-article-blueprint] export_read_failed", { message: conteudo.error.message.slice(0, 240) });
-      return saida;
-    }
-    for (const linha of (conteudo.data || []) as unknown as Array<Record<string, unknown>>) {
-      const articleId = String(linha.article_id);
-      const escolha = escolhidas.get(articleId);
-      if (!escolha || escolha.id !== String(linha.id) || !linha.payload || typeof linha.payload !== "object") continue;
-      const validation = escolha.approval === "DRAFT" && Array.isArray(linha.validation)
-        ? (linha.validation as unknown[]).filter((nota): nota is string => typeof nota === "string" && Boolean(nota.trim()))
-        : [];
-      saida.set(articleId, {
-        ...radarArticleBlueprintWithCurrentNames(linha.payload as RadarArticleBlueprintPayload, keywordsDe.get(articleId)),
-        approval: escolha.approval,
-        /* 2026-10-02 · só a proposta leva as pendências e a origem (não gravadas no payload). */
-        ...(validation.length ? { validation } : {}),
-        ...(escolha.approval === "DRAFT" && (linha.origin === "ai" || linha.origin === "human_edit") ? { origin: linha.origin } : {}),
-      });
-    }
   } catch (erro) {
-    console.warn("[radar-article-blueprint] export_read_failed", { message: erro instanceof Error ? erro.message.slice(0, 240) : "falha desconhecida" });
+    return leituraIndisponivel("export_read_failed", doLote, erro);
+  }
+  if (metadados.error) return leituraIndisponivel("export_read_failed", doLote, metadados.error);
+  const linhas = ((metadados.data || []) as unknown as Array<Record<string, unknown>>).map((linha, indice) => metaDaLinha(linha, indice));
+  const escolhidas = radarArticleBlueprintExportChoice(linhas, hashes, investigacoes);
+  if (!escolhidas.size) return saida;
+  let conteudo: { data: unknown; error: { message: string } | null };
+  try {
+    conteudo = await client.from("radar_article_blueprints").select("id,article_id,payload")
+      .eq("brand_id", brandId).in("id", [...escolhidas.values()].map(item => item.id));
+  } catch (erro) {
+    return leituraIndisponivel("export_read_failed", doLote, erro);
+  }
+  if (conteudo.error) return leituraIndisponivel("export_read_failed", doLote, conteudo.error);
+  for (const linha of (conteudo.data || []) as unknown as Array<Record<string, unknown>>) {
+    const articleId = String(linha.article_id);
+    const escolha = escolhidas.get(articleId);
+    if (!escolha || escolha.id !== String(linha.id) || !linha.payload || typeof linha.payload !== "object") continue;
+    saida.set(articleId, {
+      ...radarArticleBlueprintWithCurrentNames(linha.payload as RadarArticleBlueprintPayload, keywordsDe.get(articleId)),
+      approval: escolha.approval,
+    });
   }
   return saida;
 }

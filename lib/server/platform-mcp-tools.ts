@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { PLATFORM_CATALOG_HASH } from "@/lib/agent/catalog-hash";
+import { MCP_ARTICLE_BLUEPRINT_SCREEN, MCP_WRITER_BLUEPRINT_UNAVAILABLE_MESSAGE, mcpArticleBlueprintAction, mcpArticleBlueprintOrganizeAndExportLabel, mcpArticleBlueprintStateOf, type McpArticleBlueprintState } from "@/lib/agent/mcp-article-blueprint";
 import { PLATFORM_GUIDE_TOPICS, renderPlatformGuide } from "@/lib/agent/platform-catalog";
 import { resolveNextActions } from "@/lib/agent/next-actions";
 import { pathOfUrl, SILO_ARTICLE_RANGE, SiloPlanSchema, validateSiloPlan } from "@/lib/agent/silo-plan";
@@ -29,7 +30,9 @@ import { SERP_EVIDENCE_RECORD_KEY } from "@/lib/minerador/serp-evidence-record";
 import { importSubjectDiscoveryWithCore, SubjectDiscoveryImportRequestSchema } from "@/lib/minerador/subject-discovery-import";
 import { runSubjectDiscoverySearch, SubjectDiscoverySearchRequestSchema, type SubjectDiscoveryExecuteResponse } from "@/lib/minerador/subject-discovery-search";
 import type { WriterMcpScope } from "@/lib/redator/mcp-consent-domain";
+import { RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING } from "@/lib/radar/handoff-readiness";
 import { WRITER_EVIDENCE_LIMITS, writerEvidenceJsonBytes } from "@/lib/redator/writer-evidence-catalog";
+import { buildTenantPath } from "@/lib/tenant-routing";
 import type { EditorialAction, EditorialModule } from "./editorial-authorization";
 import { getOperationalClient, mapPersistenceError, OptimisticLockError, PersistenceUnavailableError } from "./editorial-db";
 import { readPlatformState, readPublishedPagesForMatching, topicCandidatesFrom } from "./agent-platform-state";
@@ -38,10 +41,14 @@ import { PublishedReinforcementRequestSchema, handlePublishedReinforcement } fro
 import { publishedReinforcementReadDeps } from "./arquiteto-published-reinforcement-deps";
 import { applyKeywordDecisionEntries, constrainKeywordSnapshot, keywordDecisionBase, keywordDecisionEntries, readDecisionKeywords, runKeywordLogicWithCore, type DecisionKeywordRow } from "./minerador-keyword-decision-core";
 import { handleDifferentiationPlan } from "./arquiteto-differentiation";
+import { readMcpRuntimeConfig } from "./mcp-runtime-config";
 import { resolvePipelineContext } from "./pipeline-runtime";
+import type { RadarMcpMaterial } from "./radar-mcp-material";
 import { RadarWriterSendError, sendRadarToWriter } from "./radar-writer-send";
 import { projectVolumeResultForAgent, sliceWritingCsv, VOLUME_MEASURE_MAX_KEYWORDS } from "@/lib/agent/platform-tool-projections";
 import { RadarStartError } from "./radar-youtube-start";
+import { readWriterEvidenceHead } from "./writer-evidence-document";
+import { readWriterApprovedArticleBlueprint, writerBlueprintInvestigationOf } from "./writer-evidence-sources";
 import { ContentDocumentRepository } from "./editorial-repositories";
 import { makeApprovedWriterDocument, saveAndFinalizeWriterDocument } from "./writer-document-finalization";
 import { prepareWriterPublicationHandoff, sendWriterToPublications } from "./writer-publication-handoff";
@@ -479,10 +486,27 @@ export function reportArquitetoHandoff<R extends { importedKeywordIds: readonly 
  */
 export type WriterSendOutcome = Record<string, unknown> & { articleId: string; ok: boolean };
 
-export function describeWriterSendFailure(articleId: string, error: unknown): WriterSendOutcome {
+/*
+ * 2026-10-09 · O ENVIO EXIGE O ARTIGO-MODELO (regra do dono). O núcleo da tela
+ * (`sendRadarToWriter`) recusa sem a planta concluída do pacote, com o
+ * bloqueio ARTICLE_BLUEPRINT_MISSING; aqui a recusa ganha a ação na tela
+ * (onde organizar, os botões e o custo antes do clique). O MCP não organiza.
+ */
+export function describeWriterSendFailure(articleId: string, error: unknown, radarScreen: string | null = null): WriterSendOutcome {
   if (error instanceof RadarWriterSendError) {
     const blocks = (error.readiness?.blocks ?? []).map(({ code, message }) => ({ code, message }));
-    return { articleId, ok: false, code: error.code, message: error.message, ...(blocks.length ? { blocks } : {}) };
+    const semPlanta = error.code === RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING;
+    return {
+      articleId, ok: false, code: error.code, message: error.message, ...(blocks.length ? { blocks } : {}),
+      ...(semPlanta ? {
+        action: mcpArticleBlueprintAction({
+          articles: 1,
+          screen: radarScreen,
+          flowButton: MCP_ARTICLE_BLUEPRINT_SCREEN.organizeAndSend,
+          afterwards: "Com o artigo-modelo concluído, chame send_radar_to_writer de novo para este artigo.",
+        }),
+      } : {}),
+    };
   }
   if (error instanceof RadarStartError || error instanceof PersistenceUnavailableError || error instanceof OptimisticLockError) {
     return { articleId, ok: false, code: error.code, message: error.message };
@@ -494,6 +518,8 @@ export function describeWriterSendFailure(articleId: string, error: unknown): Wr
 export async function sendArticlesToWriter(
   articleIds: readonly string[],
   send: (articleId: string) => Promise<{ change: unknown; documentId: string; headline: string }>,
+  /** 2026-10-09 · Aditivo: o link da tela do artigo no Radar, para a recusa por falta do artigo-modelo dizer onde organizar. */
+  radarScreenOf: (articleId: string) => string | null = () => null,
 ) {
   const results: WriterSendOutcome[] = [];
   // Sequencial de propósito: cada envio grava sob trava otimista.
@@ -502,13 +528,90 @@ export async function sendArticlesToWriter(
       const resultado = await send(articleId);
       results.push({ articleId, ok: true, change: resultado.change, documentId: resultado.documentId, headline: resultado.headline });
     } catch (error) {
-      results.push(describeWriterSendFailure(articleId, error));
+      results.push(describeWriterSendFailure(articleId, error, radarScreenOf(articleId)));
     }
   }
   const enviados = results.filter(item => item.ok).length;
-  const summary = `${enviados} de ${results.length} artigo(s) no Redator.`;
-  if (!enviados) throw new PlatformToolFailure("radar_writer_all_failed", { summary, results });
-  return { summary, sent: enviados, failed: results.length - enviados, results };
+  /* 2026-10-09 · os recusados por falta do artigo-modelo, juntos: a IA mostra ao usuário onde organizar todos de uma vez. */
+  const semPlanta = results.filter(item => item.code === RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING).map(item => item.articleId);
+  const summary = `${enviados} de ${results.length} artigo(s) no Redator.${semPlanta.length ? ` ${semPlanta.length} sem o artigo-modelo concluído: organize-o no Radar (${MCP_ARTICLE_BLUEPRINT_SCREEN.where}) e envie de novo.` : ""}`;
+  const extra = semPlanta.length ? { needsArticleBlueprint: semPlanta } : {};
+  if (!enviados) throw new PlatformToolFailure("radar_writer_all_failed", { summary, ...extra, results });
+  return { summary, sent: enviados, failed: results.length - enviados, ...extra, results };
+}
+
+/* ================= 2026-10-09 · o material do Radar e a planta ================= */
+
+/** O link da tela do artigo no Radar (`/{brandRef}/radar/{articleId}`), quando a Marca e o endereço público são conhecidos. */
+export function radarArticleScreen(access: Pick<WriterMcpBrandAccess, "brandId" | "brandName">, articleId: string): string | null {
+  try {
+    const base = readMcpRuntimeConfig().publicBaseUrl || "";
+    return `${base}${buildTenantPath({ brandId: access.brandId, brandName: access.brandName, module: "radar" })}/${encodeURIComponent(articleId)}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * O MATERIAL (CSV "Para escrever" ou de vídeo) COMO RESPOSTA DA FERRAMENTA.
+ *
+ * Sem o artigo-modelo concluído, a falha `needs_article_blueprint` com o que
+ * falta pelo título, o teto do custo e a ação na tela — nunca um arquivo pelo
+ * modelo editorial antigo. A recusa de antes (investigação não finalizada)
+ * continua com o código e o motivo dela.
+ */
+export function radarMaterialOrFailure(material: RadarMcpMaterial, radarScreen: string | null = null): Extract<RadarMcpMaterial, { status: "ready" }> {
+  if (material.status === "ready") return material;
+  if (material.status === "refused") throw new PlatformToolFailure(material.code, { message: material.reason });
+  const ferramenta = material.mode === "video" ? "get_video_material" : "get_article_for_writing";
+  throw new PlatformToolFailure("needs_article_blueprint", {
+    message: material.message,
+    missingArticleBlueprints: material.missing,
+    maxAiCalls: material.maxAiCalls,
+    action: mcpArticleBlueprintAction({
+      articles: Math.max(1, material.missing.length),
+      screen: radarScreen,
+      flowButton: mcpArticleBlueprintOrganizeAndExportLabel(Math.max(1, material.missing.length)),
+      afterwards: `Com o artigo-modelo concluído, chame ${ferramenta} de novo.`,
+    }),
+  });
+}
+
+/** A leitura do artigo-modelo que falhou (503 `blueprint_unavailable`) vira falha com o código: nada foi montado sem a planta. */
+export function radarMaterialReadFailure(error: unknown): PlatformToolFailure | null {
+  const lido = error as { code?: unknown; message?: unknown } | null;
+  if (!lido || typeof lido !== "object" || lido.code !== "blueprint_unavailable") return null;
+  return new PlatformToolFailure("blueprint_unavailable", { message: typeof lido.message === "string" ? lido.message : "Não foi possível ler o artigo-modelo agora: tente de novo em instantes." });
+}
+
+/**
+ * O ESTADO DO ARTIGO-MODELO DE UM DOCUMENTO DO REDATOR, pela MESMA leitura do
+ * Redator e do envio (`readWriterApprovedArticleBlueprint`, só metadados, pelo
+ * pacote e pela investigação congelada do documento). Serve ao briefing e aos
+ * fundamentos do MCP: sem a planta, o estado explícito, nunca o legado.
+ */
+export async function readMcpArticleBlueprintState(
+  access: Pick<WriterMcpBrandAccess, "brandId" | "brandName">,
+  documentId: string,
+  /**
+   * O artigo e o pacote que o chamador já leu do documento (o briefing), para
+   * quando o cabeçalho do leitor não abre (documento gravado fora do contrato
+   * atual): a conferência cai no hash exato do pacote, sem a investigação.
+   */
+  reserva: { articleId: string; bundleHash: string | null } | null = null,
+): Promise<McpArticleBlueprintState> {
+  const contexto = { brandId: access.brandId };
+  let alvo: Parameters<typeof readWriterApprovedArticleBlueprint>[1];
+  try {
+    const head = await readWriterEvidenceHead(contexto, documentId);
+    alvo = { articleId: head.articleId, bundleHash: head.dossier?.bundleHash ?? null, investigation: writerBlueprintInvestigationOf(head) };
+  } catch (error) {
+    const motivo = error instanceof Error ? error.message : "o cabeçalho do documento não foi lido";
+    if (!reserva) return { status: "blueprint_unavailable", reason: motivo, message: MCP_WRITER_BLUEPRINT_UNAVAILABLE_MESSAGE };
+    alvo = { articleId: reserva.articleId, bundleHash: reserva.bundleHash, investigation: null };
+  }
+  const lido = await readWriterApprovedArticleBlueprint(contexto, alvo, { content: false });
+  return mcpArticleBlueprintStateOf(lido, { screen: radarArticleScreen(access, alvo.articleId) });
 }
 
 /** Une o bloco do Assunto ao evento auditado da mesma chamada MCP. */
@@ -1069,29 +1172,68 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("send_radar_to_writer", {
     title: "Enviar artigos do Radar ao Redator",
-    description: "Use quando o usuário já finalizou a investigação no Radar: cria o documento do Redator a partir do pacote, um artigo por vez (em lote, na ordem). Idempotente; documento existente com outro pacote nunca é sobrescrito. Reporte o desfecho de cada artigo: a falha traz o código, a mensagem e, quando a prontidão bloqueia, os bloqueios (blocks). Se nenhum artigo for enviado, a resposta é o erro radar_writer_all_failed com os resultados.",
+    description: [
+      "Use quando o usuário já finalizou a investigação no Radar: cria o documento do Redator a partir do pacote, um artigo por vez (em lote, na ordem). Idempotente; documento existente com outro pacote nunca é sobrescrito.",
+      "O envio exige o artigo-modelo da SERP concluído do pacote (o mesmo núcleo da tela): sem ele, o artigo é recusado com o código radar_handoff_article_blueprint_missing, o bloqueio ARTICLE_BLUEPRINT_MISSING e a ação na tela (onde organizar e o custo, até 2 chamadas de IA por artigo, dito no botão). O MCP não organiza o artigo-modelo: mostre ao usuário onde clicar.",
+      "Reporte o desfecho de cada artigo: a falha traz o código, a mensagem e, quando a prontidão bloqueia, os bloqueios (blocks). Se nenhum artigo for enviado, a resposta é o erro radar_writer_all_failed com os resultados.",
+    ].join(" "),
     inputSchema: z.object({ brandId: brandIdInput, articleIds: z.array(z.string().trim().min(1).max(256)).min(1).max(30) }),
     annotations: write,
   }, async ({ brandId, articleIds }) => call("send_radar_to_writer", "radar.write", { brandId },
     [{ module: "radar", action: "edit" }, { module: "redator", action: "create" }], async ({ access }) =>
-      sendArticlesToWriter(articleIds, articleId => sendRadarToWriter({ brandId: access.brandId, articleId, actorId: principal.actorId, sentAt: new Date().toISOString() }))));
+      sendArticlesToWriter(articleIds, articleId => sendRadarToWriter({ brandId: access.brandId, articleId, actorId: principal.actorId, sentAt: new Date().toISOString() }),
+        articleId => radarArticleScreen(access, articleId))));
 
   server.registerTool("get_article_for_writing", {
     title: "Material do artigo para escrever fora da plataforma",
     description: [
-      "Use quando o usuário vai escrever o artigo no ambiente dele (e não no Redator): devolve o MESMO CSV do botão 'Para escrever' do Radar, de um artigo com investigação finalizada.",
-      "Traz identidade da página (URL, slug e canonical protegidos quando publicada), principal e secundárias, SERP das 4 lentes, estrutura dos concorrentes, perguntas, fontes, autoridade, links internos, identidade visual e se pode escrever (coluna pode_escrever).",
-      `Grátis: só lê o que o Radar já congelou; nunca chama provider. Uma chamada por artigo; o CSV vem em partes de até ${Math.round(WRITING_CSV_PART_CHARS / 1000)} mil caracteres: peça part 1, 2, … até parts e junte na ordem.`,
-      "Artigo sem investigação finalizada volta recusado com o motivo; finalize no Radar antes.",
+      "Use quando o usuário vai escrever o artigo no ambiente dele (e não no Redator): devolve o MESMO CSV do botão 'Para escrever' do Radar, de um artigo com investigação finalizada e artigo-modelo da SERP concluído.",
+      "Título, promessa, estrutura, links internos e plano visual saem só do artigo-modelo; traz também identidade da página (URL, slug e canonical protegidos quando publicada), principal e secundárias, SERP das 4 lentes, perguntas, fontes, autoridade, identidade visual e se pode escrever (coluna pode_escrever).",
+      `Grátis: só lê o que o Radar já congelou; nunca chama provider nem IA. Uma chamada por artigo; o CSV vem em partes de até ${Math.round(WRITING_CSV_PART_CHARS / 1000)} mil caracteres: peça part 1, 2, … até parts e junte na ordem.`,
+      "Sem o artigo-modelo concluído, a resposta é o erro needs_article_blueprint com o que falta, o teto do custo de organizar e a ação na tela; nada sai pelo processo antigo. Artigo sem investigação finalizada volta recusado com o motivo; finalize no Radar antes.",
     ].join(" "),
     inputSchema: z.object({ brandId: brandIdInput, articleId: z.string().trim().min(1).max(256), part: z.number().int().min(1).max(200).optional() }),
     annotations: read,
   }, async ({ brandId, articleId, part }) => call("get_article_for_writing", "platform.read", { brandId }, [{ module: "radar", action: "view" }], async ({ access }) => {
-    const { radarWritingExportForArticle } = await import("./radar-portable-export-core");
-    const exported = await radarWritingExportForArticle({ brandId: access.brandId, articleId, supabase: getOperationalClient(), actorUserId: principal.actorId });
-    if (!exported.ok) throw new PlatformToolFailure(exported.code, { message: exported.reason });
-    return { articleId, filename: exported.filename, canWrite: !exported.blocked, exportedAt: exported.exportedAt, ...sliceWritingCsv(exported.csv, part ?? 1, WRITING_CSV_PART_CHARS) };
+    const pronto = await materialDoRadar(access, articleId, "writing");
+    return { articleId, filename: pronto.filename, canWrite: pronto.blocked === 0, exportedAt: pronto.exportedAt, ...sliceWritingCsv(pronto.csv, part ?? 1, WRITING_CSV_PART_CHARS) };
   }));
+
+  /*
+   * 2026-10-09 · O MATERIAL DO VÍDEO PELO MCP (inventário do YouTube, item 7).
+   *
+   * O MESMO CSV do botão "CSV para vídeo e redes sociais", pelo mesmo núcleo
+   * da rota (`radarMcpMaterialForArticle`, modo vídeo): capítulos = seções do
+   * artigo-modelo, cortes pela utilidade, formato decidido pela amostra
+   * pertinente e faixa de duração por coorte. Leitura, sem custo, com o
+   * escopo de leitura que já existe (platform.read + radar:view).
+   */
+  server.registerTool("get_video_material", {
+    title: "Material do vídeo (CSV para vídeo e redes sociais)",
+    description: [
+      "Use quando o artigo também vai virar vídeo, cortes ou carrossel: devolve o MESMO CSV do botão 'CSV para vídeo e redes sociais' do Radar, de um artigo com investigação finalizada e artigo-modelo da SERP concluído.",
+      "Os capítulos são as seções do artigo-modelo; os cortes são escolhidos pela utilidade; o formato é decidido pela amostra pertinente do YouTube (formato curto só quando os Shorts pertinentes lideram e são pelo menos 4, e aí o curto é o recorte do artigo-modelo); a duração é a faixa por coorte dos vídeos pertinentes; traz também o gancho, o CTA para o artigo, o carrossel, o storyboard e a cadeia competitiva.",
+      `Grátis: só lê o que o Radar já congelou (e o resumo do cache de SERP das lentes extras); nunca chama provider nem IA. Uma chamada por artigo; o CSV vem em partes de até ${Math.round(WRITING_CSV_PART_CHARS / 1000)} mil caracteres: peça part 1, 2, … até parts e junte na ordem. A coluna pode_gravar diz se há ressalva.`,
+      "Sem o artigo-modelo concluído, a resposta é o erro needs_article_blueprint com o que falta, o teto do custo de organizar e a ação na tela; não há roteiro pelo processo antigo. Artigo sem investigação finalizada volta recusado com o motivo.",
+    ].join(" "),
+    inputSchema: z.object({ brandId: brandIdInput, articleId: z.string().trim().min(1).max(256), part: z.number().int().min(1).max(200).optional() }),
+    annotations: read,
+  }, async ({ brandId, articleId, part }) => call("get_video_material", "platform.read", { brandId }, [{ module: "radar", action: "view" }], async ({ access }) => {
+    const pronto = await materialDoRadar(access, articleId, "video");
+    return { articleId, filename: pronto.filename, withoutYoutube: pronto.withoutYoutube > 0, exportedAt: pronto.exportedAt, ...sliceWritingCsv(pronto.csv, part ?? 1, WRITING_CSV_PART_CHARS) };
+  }));
+
+  /** O material do Radar de um artigo, pelo núcleo da rota de export; sem a planta, a falha explícita. */
+  async function materialDoRadar(access: WriterMcpBrandAccess, articleId: string, mode: "writing" | "video") {
+    const { radarMcpMaterialForArticle } = await import("./radar-mcp-material");
+    let material: RadarMcpMaterial;
+    try {
+      material = await radarMcpMaterialForArticle({ brandId: access.brandId, articleId, mode, supabase: getOperationalClient(), actorUserId: principal.actorId });
+    } catch (error) {
+      throw radarMaterialReadFailure(error) ?? error;
+    }
+    return radarMaterialOrFailure(material, radarArticleScreen(access, articleId));
+  }
 }
 
 /** Folga para o escape do JSON (aspas e quebras de linha do CSV) dentro do teto de bytes. */

@@ -6,6 +6,8 @@ import {
   RadarArticleBlueprintInvalidError,
   buildRadarArticleBlueprintBrief,
   radarApplyArticleBlueprintEdit,
+  radarArticleBlueprintCommercialOf,
+  radarArticleBlueprintCommercialOfBlock,
   radarArticleBlueprintAiFailure,
   radarArticleBlueprintAiFailureMessage,
   radarArticleBlueprintPayloadToStore,
@@ -19,6 +21,7 @@ import {
   type RadarArticleBlueprintPayload,
 } from "@/lib/radar/article-blueprint";
 import { assembleRadarPortableExport, radarReadPublishedStructure } from "@/lib/server/radar-portable-export-core";
+import type { RadarAmazonCommercialBlock } from "@/lib/radar/amazon-commercial-block";
 import type { RadarWritingPublication } from "@/lib/radar/portable-writing-export";
 import {
   radarArticleBlueprintFitsInvestigation,
@@ -56,6 +59,13 @@ import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
  * investigação congelada e o ArticleDNA em que foi organizada
  * (`payload.investigationRef`), e o `ifMissing`, a aprovação, o export e o
  * Redator aceitam a concluída da mesma investigação (`lib/radar/article-blueprint-freeze.ts`).
+ *
+ * 2026-10-09 · O ARTIGO-MODELO É O FUNDAMENTO ÚNICO (regra do dono: o processo
+ * do piloto substitui o antigo em toda operação). O `ifMissing` reaproveita só
+ * a CONCLUÍDA da mesma investigação congelada (Google e Amazon) e do mesmo
+ * ArticleDNA (`radarArticleBlueprintPick`, sem rascunho); o pedido recebe o
+ * bloco comercial da Amazon congelada e as exclusões dos reajustes no
+ * ArticleDNA; a versão grava também o congelamento da Amazon no vínculo.
  */
 
 export type RadarArticleBlueprintRow = {
@@ -323,20 +333,34 @@ export async function generateRadarArticleBlueprint(input: {
   const { montada, silo, publicacao: semPagina, publicacoes, brandVoice, investigacao } = await (input.assemble ?? montagemDoArtigo)(input);
   /* Só se faltar (encadeamento automático): o mesmo pacote já organizado não paga a IA de novo. */
   if (input.ifMissing) {
-    const doPacote = existentes.filter(item => item.bundleHash === montada.bundleHash);
     /*
      * 2026-10-08 · P0-A · nem a mesma investigação paga de novo: a concluída
      * do mesmo congelamento e ArticleDNA vale com o hash do dossiê mudado por
      * código — reaproveita, sem chamada paga. Re-congelada ou ArticleDNA novo: organiza.
+     *
+     * 2026-10-09 · SÓ A CONCLUÍDA (regra do dono). O `doPacote[0]` devolvia o
+     * rascunho antigo do mesmo hash como se a planta existisse — e o CSV, o
+     * Redator e o vídeo, que só aceitam a APPROVED, ficavam sem ela. A escolha é
+     * a regra única (`radarArticleBlueprintPick` sem rascunho): hash exato ou a
+     * APPROVED do mesmo congelamento (Google e Amazon) e do mesmo ArticleDNA.
      */
-    const reaproveitada = doPacote.find(item => item.state === "APPROVED") || doPacote[0]
-      || radarArticleBlueprintRowForInvestigation(existentes, { bundleHash: montada.bundleHash, investigation: investigacao });
+    const reaproveitada = radarArticleBlueprintRowForInvestigation(existentes, { bundleHash: montada.bundleHash, investigation: investigacao });
     if (reaproveitada) return reaproveitada;
   }
   /* 2026-10-08 · B1 · a página publicada entra no pedido (depois do reaproveitamento: reaproveitar não lê nada). */
   const publicacao = await radarArticleBlueprintWithPublishedStructure(semPagina, input.readPublishedStructure ?? radarReadPublishedStructure);
   /* A voz da marca (Skill corrente, Adendo C) entra em trechos por assunto, com teto (2026-10-02). */
-  const brief = buildRadarArticleBlueprintBrief({ entrada: montada.entrada, silo, articleId: input.articleId, publication: publicacao, brandVoice: brandVoice.kind === "available" ? brandVoice.voice : null, siloPublications: publicacoes ?? null });
+  /* 2026-10-09 (correção · casos-reais-F9) · a planta anterior (a aprovada mais recente) vence o item genérico do fora do escopo, como no CSV. */
+  const anterior = existentes.find(item => item.state === "APPROVED") ?? null;
+  /*
+   * 2026-10-09b · a Amazon congelada entra no pedido: o bloco comercial (formato,
+   * shortlist, critérios, aviso de afiliado) da projeção comercial do export, com
+   * o instante do congelamento que a planta grava no vínculo (`investigationRef`).
+   */
+  /* O bloco da Amazon congelada (agente AMZ), quando a montagem o traz; sem ele, a projeção comercial do export. */
+  const bloco = (montada as { amazonCommercialBlock?: RadarAmazonCommercialBlock | null }).amazonCommercialBlock ?? null;
+  const comercial = radarArticleBlueprintCommercialOfBlock(bloco) ?? radarArticleBlueprintCommercialOf(montada.entrada, investigacao?.amazonFrozenAt ?? null);
+  const brief = buildRadarArticleBlueprintBrief({ entrada: montada.entrada, silo, articleId: input.articleId, publication: publicacao, brandVoice: brandVoice.kind === "available" ? brandVoice.voice : null, siloPublications: publicacoes ?? null, previous: anterior?.payload ?? null, commercial: comercial });
   const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, brandId: input.brandId, client: input.client, quotaUnits: 1 });
   const resposta = await requestRadarArticleBlueprintAi({ provider, brief, articleId: input.articleId, deadlineAt: prazo });
   const fechada = await fecharArtigoModelo({ provider, brief, ai: resposta.ai, articleId: input.articleId, allowFix: resposta.calls === 1, deadlineAt: prazo });

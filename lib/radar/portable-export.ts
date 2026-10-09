@@ -73,6 +73,13 @@ import type { RadarSiloExportRowContext } from "./portable-silo-export.ts";
 import type { RadarAmazonUniverseEntry } from "./amazon-search-model.ts";
 import type { RadarArticleResearchContext } from "./article-research-context.ts";
 import type { RadarYoutubeUniverseEntry } from "./youtube-search-model.ts";
+/*
+ * 2026-10-09 · o técnico pelo artigo-modelo: as MESMAS colunas da planta que o
+ * CSV "Para escrever" lê. Só o TIPO: quem monta a linha passa a planta já lida
+ * (`radarPortableExportBlueprintOf`, no lote) — importar o módulo da planta
+ * aqui fecharia um ciclo de módulos (planta → CSV para escrever → este arquivo).
+ */
+import type { RadarArticleBlueprintAi, RadarArticleBlueprintPayload } from "./article-blueprint.ts";
 
 export { RADAR_EXPORT_BLUEPRINT_TYPE };
 
@@ -526,6 +533,14 @@ export type RadarWriterBriefInput = {
   media: string;
   commercial: string;
   limitations: readonly string[];
+  /**
+   * 2026-10-09 (correção) · Aditivo: a linha tem o artigo-modelo concluído. O brief
+   * vira contrato de escrita SÓ pela planta: o objetivo e o formato saem do
+   * ArticleDNA e da planta (não do modelo editorial antigo), e a "ESTRATÉGIA PARA
+   * SUPERAR A SERP" sai do brief (continua na coluna de auditoria
+   * serp_outperformance_strategy_md). SEO e evidência chegam já pela planta.
+   */
+  fromBlueprint?: boolean;
 };
 
 /**
@@ -552,9 +567,11 @@ export function radarWriterBriefMarkdown(input: RadarWriterBriefInput): string {
   const missao = [
     `Escreva um conteúdo sobre ${assunto}.`,
     "",
-    `Objetivo do leitor: ${editorial.objective || dna.intent || "encontrar respondido o que foi procurar."}`,
+    `Objetivo do leitor: ${(input.fromBlueprint ? dna.intent : editorial.objective || dna.intent) || "encontrar respondido o que foi procurar."}`,
     `Resultado esperado: ${editorial.readerPromise || "um conteúdo que cumpre o ArticleDNA e a estrutura recomendada abaixo."}`,
-    `Formato: ${editorial.blueprintType}${editorial.editorialOutput ? ` · ${editorial.editorialOutput}` : ""}`,
+    input.fromBlueprint
+      ? "Formato: o do artigo-modelo da SERP concluído — a estrutura completa abaixo é o contrato."
+      : `Formato: ${editorial.blueprintType}${editorial.editorialOutput ? ` · ${editorial.editorialOutput}` : ""}`,
   ];
 
   const contrato = [
@@ -615,14 +632,15 @@ export function radarWriterBriefMarkdown(input: RadarWriterBriefInput): string {
     "respeitar as necessidades de revisão profissional;",
     "aplicar somente os links internos planejados;",
     "respeitar as limitações — o que a coleta não alcançou não vira afirmação;",
-    "sinalizar qualquer dependência que continue sem resolução.",
+    /* 2026-10-09 (correção) · D10: o texto sai concluído — nada de "sinalizar dependência" no texto. */
+    "o que não tem fonte do pacote entra delimitado ou fica fora do texto.",
   ]));
 
   return [
     ...secao("MISSÃO", missao),
     ...secao("ARTICLE DNA", contrato),
     ...secao("RADIOGRAFIA COMPETITIVA", embutir(input.radiography)),
-    ...secao("ESTRATÉGIA PARA SUPERAR A SERP", embutir(input.strategy)),
+    ...secao("ESTRATÉGIA PARA SUPERAR A SERP", input.fromBlueprint ? [] : embutir(input.strategy)),
     ...secao("TÍTULO E PROMESSA", titulo),
     ...secao("ESTRUTURA COMPLETA", embutir(input.outline)),
     ...secao("SEO", embutir(input.seo)),
@@ -642,14 +660,36 @@ export function radarWriterBriefMarkdown(input: RadarWriterBriefInput): string {
  * divergiriam na primeira edição. O prompt aponta para o brief; o brief é o
  * contrato.
  */
+/*
+ * 2026-10-09 · O TÉCNICO SEM ARTIGO-MODELO NÃO MANDA ESCREVER (regra do dono).
+ * O contrato de escrita é o artigo-modelo concluído: sem a planta na linha, o
+ * formato completo é auditoria do que o Radar gravou e o prompt diz isso. A
+ * rota só entrega o técnico com a planta de cada artigo; este texto vale para
+ * quem monta a linha sem ela (leitura de auditoria).
+ */
 export const RADAR_EXTERNAL_WRITER_PROMPT = [
-  "Você receberá um dossiê editorial produzido pelo Minerador Key.",
+  "Você receberá um dossiê técnico (auditoria) produzido pelo Minerador Key.",
   "",
-  "Use writer_brief_md como contrato editorial. Escreva o conteúdo completo obedecendo ao ArticleDNA, à intenção, à estrutura e às evidências.",
+  "writer_brief_md resume o que o Radar gravou nesta investigação. Esta linha não traz o artigo-modelo do Radar, que é o contrato de escrita: para escrever, use o CSV \"Para escrever\", que sai pelo artigo-modelo.",
   "",
   "Não invente fatos. Quando uma dependência não estiver resolvida, não a transforme em afirmação factual.",
   "",
-  "Não copie concorrentes. Use a radiografia competitiva para produzir uma resposta mais completa e clara.",
+  "Não copie concorrentes. Use a radiografia competitiva como evidência, nunca como modelo de texto.",
+].join("\n");
+
+/*
+ * 2026-10-09 · COM O ARTIGO-MODELO, O TÉCNICO TEM CONTRATO. Título, promessa,
+ * abertura, estrutura, links e plano visual de writer_brief_md e de outline_md
+ * saem da planta concluída — a mesma do CSV "Para escrever" e do Redator.
+ */
+export const RADAR_EXTERNAL_WRITER_PROMPT_FROM_BLUEPRINT = [
+  "Você receberá um dossiê editorial produzido pelo Minerador Key, com o artigo-modelo concluído do Radar.",
+  "",
+  "Use writer_brief_md como contrato editorial: título, promessa, abertura, estrutura (outline_md), links e plano visual são os do artigo-modelo. Escreva o conteúdo completo obedecendo ao ArticleDNA, à intenção, ao artigo-modelo e às evidências.",
+  "",
+  "Não invente fatos. O que o artigo-modelo marca como afirmação que só entra com fonte do pacote entra com a fonte ou de forma qualificada.",
+  "",
+  "Não copie concorrentes. Use a radiografia competitiva como evidência, nunca como modelo de texto.",
 ].join("\n");
 
 /* ========================= a montagem da linha ========================= */
@@ -733,6 +773,27 @@ export type RadarPortableExportInput = {
   dossierGaps?: RadarPortableDossierGapsInput | null;
   /** O contexto do silo, só no export por silo → `silo_context_md` / `silo_context_json`. */
   siloContext?: RadarSiloExportRowContext | null;
+  /**
+   * 2026-10-09 · Aditivo: o artigo-modelo concluído deste pacote (o que a rota
+   * exige de cada artigo), já lido (`radarPortableExportBlueprintOf`). Com ele,
+   * título, promessa, abertura, estrutura, links e plano visual da linha saem
+   * da planta, e o prompt manda escrever por ela. `null`: a planta não existe
+   * (a linha é auditoria e a situação da investigação diz isso). Ausente: a
+   * linha de antes, com o prompt de auditoria.
+   */
+  articleBlueprint?: RadarPortableExportBlueprint | null;
+};
+
+/**
+ * 2026-10-09 · A PLANTA COMO A LINHA DO TÉCNICO A RECEBE: o payload concluído,
+ * as colunas que o CSV "Para escrever" lê (`radarArticleBlueprintColumns`) e a
+ * planta lida (`radarArticleBlueprintReading`). Montada no lote, por
+ * `radarPortableExportBlueprintOf`.
+ */
+export type RadarPortableExportBlueprint = {
+  payload: RadarArticleBlueprintPayload;
+  columns: { promessa_e_leitor: string; titulo_e_seo: string; estrutura: string; links_internos: string; plano_visual: string };
+  reading: RadarArticleBlueprintAi;
 };
 
 /**
@@ -890,9 +951,39 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
 
   /* ===================== identidade, SEO e visual ===================== */
 
+  /*
+   * ===== 2026-10-09 · O TÉCNICO PELO ARTIGO-MODELO (regra do dono) =====
+   *
+   * "Tudo que é de processos antigos tem que ser substituído pelos novos
+   * processos dos pilotos." Com a planta concluída, o contrato de escrita da
+   * linha — título, SEO, promessa, abertura, fechamento, estrutura, links e
+   * plano visual — sai dela, pelas MESMAS colunas que o CSV "Para escrever" lê
+   * (`radarArticleBlueprintColumns`). O modelo editorial antigo fica só nas
+   * colunas de evidência (radiografia, estratégia, evidência por seção), que
+   * são auditoria do que a SERP mostrou. Sem planta, a linha é a de antes e o
+   * prompt é o de auditoria.
+   */
+  const planta = input.articleBlueprint && input.articleBlueprint.payload.approval !== "DRAFT" ? input.articleBlueprint : null;
+  const colunasDaPlanta = planta ? planta.columns : null;
+  const lida = planta ? planta.reading : null;
+  const comTitulo = (titulo: string, corpo: string) => [`# ${titulo}`, "", corpo].join("\n");
+  const editorialDoContrato: RadarPortableEditorial = lida
+    ? {
+      ...editorial,
+      title: lida.title.h1,
+      alternateTitles: [...lida.title.alternatives],
+      readerPromise: lida.promise,
+      openingOrHook: `responder "${lida.opening.readerQuestion}" no primeiro parágrafo${lida.opening.direction ? ` — ${lida.opening.direction}` : ""}`,
+      conclusion: lida.closing.turn,
+      cta: lida.closing.cta,
+      ctaDestination: undefined,
+    }
+    : editorial;
+
+  /* 2026-10-09 · o título de trabalho e o H1 da identidade: os do artigo-modelo, quando ele existe. */
   const identidade = radarPortableArticleIdentity({
     dna,
-    editorial,
+    editorial: editorialDoContrato,
     profile: input.profile,
     slug: input.article.slug,
     canonical: input.article.canonical ?? null,
@@ -904,12 +995,21 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     inboundRelations: input.googleObserved?.internalLinkPlan.incoming.length ?? 0,
   });
 
-  const seo = radarPortableSeoMetadata({
-    editorial, dna, blueprint,
+  const seoDoModelo = radarPortableSeoMetadata({
+    editorial: editorialDoContrato, dna, blueprint,
     slug: input.article.slug,
     canonical: input.article.canonical ?? null,
     protectedFields: input.article.protectedFields || [],
   });
+  /* 2026-10-09 · com a planta, SEO title e meta description estão decididos: os dela. */
+  const seo = lida
+    ? {
+      ...seoDoModelo,
+      seoTitle: lida.title.seoTitle,
+      metaDescription: lida.title.metaDescription,
+      notDefinedAtThisStage: seoDoModelo.notDefinedAtThisStage.filter(campo => campo !== "seoTitle" && campo !== "metaDescription"),
+    }
+    : seoDoModelo;
 
   const visual = radarPortableVisualPlan({
     editorial, blueprint,
@@ -959,18 +1059,33 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
   const secaoEvidenciaMd = radarSectionEvidenceMarkdown(sectionEvidence);
   const fontesMd = radarSourcesMarkdown({ serpSources, externalSources });
 
+  /* 2026-10-09 · a estrutura, os links e o plano visual do contrato: os da planta, quando ela existe. */
+  const outlineDaLinha = colunasDaPlanta ? comTitulo("Estrutura do artigo-modelo", colunasDaPlanta.estrutura) : outline;
+  const linksDaLinha = colunasDaPlanta ? comTitulo("Links internos do artigo-modelo", colunasDaPlanta.links_internos) : linksMd;
+  const visualDaLinha = colunasDaPlanta ? comTitulo("Plano visual do artigo-modelo", colunasDaPlanta.plano_visual) : visualMd;
+
+  /*
+   * 2026-10-09 (correção) · COM A PLANTA, O BRIEF É SÓ DELA. O "SEO" do modelo
+   * antigo (perguntas, aplicações, "Precisa de fonte") e as "FONTES E EVIDÊNCIAS"
+   * pelos blocos legados saem: o SEO é o título, o SEO title e a meta da planta, e
+   * as fontes são as do pacote (SERP e externas). A estratégia fica só na coluna
+   * de auditoria.
+   */
+  const seoDaLinha = colunasDaPlanta ? comTitulo("SEO do artigo-modelo", colunasDaPlanta.titulo_e_seo) : seoMd;
+  const evidenciaDaLinha = colunasDaPlanta ? fontesMd : evidencia;
   const brief = radarWriterBriefMarkdown({
     dna,
-    editorial,
+    editorial: editorialDoContrato,
     radiography: radiografia,
     strategy: estrategia,
-    outline,
-    seo: seoMd,
-    internalLinks: linksMd,
-    evidence: evidencia,
-    media: visualMd,
+    outline: outlineDaLinha,
+    seo: seoDaLinha,
+    internalLinks: linksDaLinha,
+    evidence: evidenciaDaLinha,
+    media: visualDaLinha,
     commercial: comercial,
     limitations: limitacoes,
+    ...(colunasDaPlanta ? { fromBlueprint: true } : {}),
   });
 
   const naoAfirmar = radarCannotAssertFrom({
@@ -998,7 +1113,21 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
   const serpObservada = input.serpObserved ? radarPortableSerpObservedColumns(input.serpObserved) : null;
   const serpResumo = input.serpObserved ? radarPortableSerpObservedBriefMarkdown(radarPortableSerpObserved(input.serpObserved)) : "";
   const serpLentes = input.serpLenses ? radarPortableSerpLensesColumns(input.serpLenses) : null;
-  const lacunas = input.dossierGaps ? radarPortableDossierGapColumns(input.dossierGaps) : null;
+  /*
+   * 2026-10-09 · A situação da investigação diz só o que a linha entrega: se o
+   * artigo-modelo vai junto (quando a rota o informou) e se a parte comercial
+   * está nas colunas desta linha.
+   */
+  const lacunas = input.dossierGaps
+    ? radarPortableDossierGapColumns({
+      ...input.dossierGaps,
+      status: {
+        ...input.dossierGaps.status,
+        commercialDelivered: Boolean(input.commercial),
+        ...(input.articleBlueprint === undefined ? {} : { articleBlueprint: planta ? "APPROVED" as const : "MISSING" as const }),
+      },
+    })
+    : null;
   const contextoDoSilo = input.siloContext ?? null;
 
   const contexto = radarWriterContextMarkdown({
@@ -1010,16 +1139,16 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     ].join("\n"),
     keywords: keywordsMd,
     intent: dna.intent ? `${dna.intent}${serp.intent?.note ? ` — ${serp.intent.note}` : ""}` : null,
-    outline,
+    outline: outlineDaLinha,
     radiography: radiografia,
     strategy: estrategia,
     serpEvidence: serpEvidenciaMd,
     serpObserved: serpResumo,
     sectionEvidence: secaoEvidenciaMd,
     sources: fontesMd,
-    internalLinks: linksMd,
+    internalLinks: linksDaLinha,
     visualIdentity: visualIdentidadeMd,
-    visualPlan: visualMd,
+    visualPlan: visualDaLinha,
     video: videoMd,
     specialist: especialistaMd,
     commercial: comercial,
@@ -1047,9 +1176,10 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     research_profile: input.profile,
     editorial_output: texto(editorial.editorialOutput),
 
-    suggested_title: texto(editorial.title),
-    alternate_titles: emLinha(editorial.alternateTitles),
-    reader_promise: texto(editorial.readerPromise),
+    /* 2026-10-09 · com o artigo-modelo, título, alternativas e promessa são os dele. */
+    suggested_title: texto(editorialDoContrato.title),
+    alternate_titles: emLinha(editorialDoContrato.alternateTitles),
+    reader_promise: texto(editorialDoContrato.readerPromise),
     must_cover: emLinha(dna.mustCover),
 
     /*
@@ -1070,11 +1200,12 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     seo_metadata_json: json(seo),
 
     /* ===== o WRITING BRIEF — a decisão editorial condensada ===== */
-    outline_md: outline,
+    /* 2026-10-09 · a estrutura e os links do contrato: os do artigo-modelo, quando ele existe. */
+    outline_md: outlineDaLinha,
     competitive_radiography_md: radiografia,
     serp_outperformance_strategy_md: estrategia,
     seo_requirements_md: seoMd,
-    internal_links_md: linksMd,
+    internal_links_md: linksDaLinha,
     evidence_and_sources_md: evidencia,
     source_needs_md: editorial.sourceNeeds.length ? ["# Precisa de fonte", "", ...editorial.sourceNeeds.map(item => `- ${item}`)].join("\n") : "",
     specialist_needs_md: editorial.specialistNeeds.length ? ["# Precisa de revisão profissional", "", ...editorial.specialistNeeds.map(item => `- ${item}`)].join("\n") : "",
@@ -1083,10 +1214,11 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
 
     /* ===== 1.2A · a identidade e o plano visual ===== */
     visual_identity_md: visualIdentidadeMd,
-    visual_plan_md: visualMd,
+    visual_plan_md: visualDaLinha,
     /* §22 · ausência EXPLÍCITA:  legível, e não uma célula em branco. */
-    cover_image_plan_json: JSON.stringify(visual.cover),
-    respite_images_plan_json: json(visual.respite),
+    /* 2026-10-09 · com o artigo-modelo, a capa e os respiros são os do plano visual dele. */
+    cover_image_plan_json: lida ? JSON.stringify(lida.visual.find(item => item.slot === "CAPA") ?? visual.cover) : JSON.stringify(visual.cover),
+    respite_images_plan_json: lida ? json(lida.visual.filter(item => item.slot !== "CAPA")) : json(visual.respite),
     visual_evidence_json: json(visual.evidence),
 
     /* ===== o EVIDENCE PACK — a evidência que sustenta o brief ===== */
@@ -1119,11 +1251,13 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
 
     /* ===== §18 · a célula que se cola inteira em outra IA ===== */
     writer_context_md: contexto,
-    external_writer_prompt_md: RADAR_EXTERNAL_WRITER_PROMPT,
+    /* 2026-10-09 · o prompt manda escrever só com o artigo-modelo na linha; sem ele, é o de auditoria. */
+    external_writer_prompt_md: planta ? RADAR_EXTERNAL_WRITER_PROMPT_FROM_BLUEPRINT : RADAR_EXTERNAL_WRITER_PROMPT,
 
     /* §18 do 1.1 · o apoio de automação. */
     article_dna_compact_json: json(dna),
-    outline_json: json(editorial.sections),
+    /* 2026-10-09 · as seções do artigo-modelo (lidas como o CSV "Para escrever" as lê), quando ele existe. */
+    outline_json: lida ? json(lida.sections) : json(editorial.sections),
     ...(contextoDoSilo ? { silo_context_json: contextoDoSilo.silo_context_json } : {}),
 
     exported_at: input.exportedAt,

@@ -28,6 +28,7 @@ import { RADAR_WRITER_SUBJECT_H1_NO_SIGNAL, radarWriterSubjectTurnLines } from "
 import { ContentDocumentSchema, type ContentDocument } from "../lib/arquiteto/contracts.ts";
 import { toListingForm, type ListedContentDocument } from "../lib/editorial/content-document-listing.ts";
 import { ASSUNTO, PRINCIPAL, documentoDoPainel, linhasDoAssunto, viradaObservada } from "./redator-assunto-painel-fixtures.mts";
+import { planoDeVideo } from "./redator-piloto-plano-fixtures-2026-10-09.mts";
 
 let chamadasDeRede = 0;
 globalThis.fetch = (() => { chamadasDeRede += 1; return Promise.reject(new Error("REDE PROIBIDA NESTE TESTE")); }) as typeof fetch;
@@ -39,16 +40,23 @@ const semComentarios = (texto: string) => texto
   .replace(/^\s*\/\/[^\n]*/gm, " ");
 const sha = (texto: string) => createHash("sha256").update(texto).digest("hex");
 const fundamentos = (editorialContext?: string[]) => radarFoundationsOf(documentoDoPainel(editorialContext));
-const fonteDaSemente = (editorialContext?: string[]) => ({ title: "rotina de skincare", foundations: fundamentos(editorialContext)!, finalArticle: null });
+/* 2026-10-09 · a semente recebe o plano do vídeo do CSV (regra do piloto). */
+const fonteDaSemente = (editorialContext?: string[]) => ({ title: "rotina de skincare", foundations: fundamentos(editorialContext)!, finalArticle: null, plan: planoDeVideo() });
 
 /*
  * Medidos em 2026-09-24 com `radar-foundations.ts` e `deliverable-seed.ts`
  * do HEAD (copiados para fora do repositório, imports reescritos) sobre esta
  * mesma fixture: projeção e prompts saíram IGUAIS aos do código novo, com
  * `editorialContext` ausente e com `[]`.
+ *
+ * 2026-10-09 · remedidos com a régua do piloto (a camada de vídeo só com o
+ * observado, a camada de review e a semente pelo plano do CSV de vídeo). O
+ * invariante é o mesmo: sem linhas do Assunto, ausente e `[]` dão a MESMA
+ * projeção e os MESMOS prompts, sem chave nova.
  */
-const SHA_DA_PROJECAO_DO_HEAD = "104497fe9c85da5f";
-const SHA_DOS_PROMPTS_DO_HEAD = "7b664c0588e00a4e";
+const SHA_DA_PROJECAO_DO_HEAD = "5c32785f72886435";
+/* 2026-10-09 (correção) · remedido: a "Recomendação editorial do Radar" e "Precisa responder/cobrir" saíram da semente. */
+const SHA_DOS_PROMPTS_DO_HEAD = "3b961f518a18bb9b";
 
 test("P1 · sem linhas, a projeção é a do HEAD, byte a byte, e não ganha chave", () => {
   for (const [nome, linhas] of [["ausente", undefined], ["vazia", []]] as const) {
@@ -169,7 +177,8 @@ test("R2 · semeadura com Assunto: roteiro e carrossel recebem as MESMAS linhas,
   assert.ok(inicio > 0, "o cabeçalho do Assunto está no contexto");
   assert.match(contexto[inicio - 1], /^Reforços narrativos: /, "logo depois das keywords");
   assert.deepEqual(contexto.slice(inicio + 1, inicio + 1 + linhas.length), linhas.map(linha => `- ${linha}`));
-  assert.match(contexto[inicio + 1 + linhas.length], /^Recomendação editorial do Radar/);
+  /* 2026-10-09 (correção) · a "Recomendação editorial do Radar" saiu do pedido: logo depois do Assunto vêm as camadas de pesquisa. */
+  assert.match(contexto[inicio + 1 + linhas.length], /^Camadas de pesquisa/);
   for (const prompt of [buildScriptSeedPrompt(fonteSemente), buildCarouselSeedPrompt(fonteSemente)]) {
     for (const linha of linhas) assert.ok(prompt.includes(`- ${linha}`), linha);
   }
@@ -218,8 +227,14 @@ test("L2 · linhas fora do contrato tornam o documento incompatível, como a lei
 
 test("E1 · o painel mostra o Assunto no topo, pela projeção, em texto de 14px", async () => {
   const painel = semComentarios(await fonte("../modules/redator/writer-radar-foundations-panel.tsx"));
-  assert.match(painel, /radarFoundationsSubjectOf\(fundamentos\)/, "o Assunto sai da MESMA projeção");
-  assert.doesNotMatch(painel, /importedContext|editorialContext/, "o painel não lê o documento por fora da projeção");
+  /*
+   * 2026-10-09 · o Assunto sai da MESMA projeção — as linhas do documento pela
+   * projeção ou, com o artigo-modelo lido, as linhas com a virada pela planta
+   * que o servidor devolve. O painel nunca lê o documento por fora da projeção.
+   */
+  assert.match(painel, /radarFoundationsSubjectOf\(linhasDoAssunto \? \{ editorialContext: linhasDoAssunto \} : null\)/, "o Assunto sai da MESMA projeção");
+  assert.match(painel, /leitura\.editorialContext \? leitura\.editorialContext : fundamentos\?\.editorialContext/);
+  assert.doesNotMatch(painel, /importedContext/, "o painel não lê o documento por fora da projeção");
   const topo = painel.indexOf("<AssuntoDoArtigo");
   assert.ok(topo > 0 && topo < painel.indexOf('testid="recommendation"'), "o bloco vem antes da recomendação");
   assert.match(painel, /\{assunto && <AssuntoDoArtigo assunto=\{assunto\}\/>\}/, "sem Assunto, o bloco não existe");

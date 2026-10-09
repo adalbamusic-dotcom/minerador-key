@@ -51,7 +51,7 @@ export function RadarBlueprintSummaryCard({ blueprint }: { blueprint: RadarEdito
 
   return <details className={secao} data-testid="radar-blueprint">
     <summary className="cursor-pointer">
-      <span className="text-base font-semibold text-foreground">Blueprint editorial</span>
+      <span className="text-base font-semibold text-foreground">Esqueleto da SERP</span>
       <span className={`ml-2 text-sm ${tom}`} data-testid="radar-blueprint-readiness">{resumo.readinessLabel}</span>
     </summary>
 

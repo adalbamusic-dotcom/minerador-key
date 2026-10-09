@@ -51,7 +51,9 @@ import {
   type SerpCacheQuery,
 } from "@/lib/editorial/serp-cache";
 import { BrandSkillSchema, NormalizedSkillSectionSchema } from "@/lib/marca/brand-skill-contracts";
-import { radarArticleBlueprintPick, type RadarArticleBlueprintVersionMeta } from "@/lib/radar/article-blueprint-freeze";
+import type { RadarArticleBlueprintCurrentInvestigation, RadarArticleBlueprintVersionMeta } from "@/lib/radar/article-blueprint-freeze";
+import { radarArticleBlueprintExportChoice, RadarArticleBlueprintUnavailableError } from "@/lib/server/radar-article-blueprint-read";
+import { writerArticleBlueprintPick, writerBlueprintNeedsFreezeGuard } from "@/lib/redator/writer-blueprint-pick";
 import { effectiveBrandDnaVersionId } from "@/lib/marca/domain";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE } from "@/lib/minerador/keyword-semantic-qualification";
@@ -850,6 +852,14 @@ export type WriterBlueprintInvestigation = {
   articleDnaContentHash: string | null;
   /** A entidade do ArticleDNA: a vigência da versão (para a planta antiga, sem a referência gravada) sai das versões dela. */
   articleDnaEntityId: string | null;
+  /**
+   * 2026-10-09 · O congelamento da Amazon do pacote entregue
+   * (`bundle.research.amazon.frozenAt`; null = o pacote não tem Amazon). Com ele,
+   * a escolha é a do CSV também na Amazon: a planta que conhecia outro
+   * congelamento da Amazon não vale. Ausente = não conferido (quem não lê o
+   * pacote, como o envio, passa como antes).
+   */
+  amazonFrozenAt?: string | null;
 };
 
 /** O artigo e o pacote congelado do documento: é a eles que o artigo-modelo se prende. */
@@ -862,6 +872,8 @@ export type WriterBlueprintTarget = { articleId: string; bundleHash: string | nu
  */
 export function writerBlueprintInvestigationOf(head: {
   bundleObservedAt: string | null | undefined;
+  /** 2026-10-09 · `bundle.research.amazon.frozenAt` do pacote; ausente = não lido (sem conferência da Amazon). */
+  bundleAmazonFrozenAt?: string | null;
   radarOrigin?: { articleDnaVersionId?: unknown; articleDnaContentHash?: unknown } | null;
   refs?: { articleDnaRef?: { entityId?: unknown; versionId?: unknown; contentHash?: unknown } | null } | null;
 }): WriterBlueprintInvestigation | null {
@@ -874,25 +886,32 @@ export function writerBlueprintInvestigationOf(head: {
     articleDnaVersionId,
     articleDnaContentHash: texto(head.radarOrigin?.articleDnaContentHash) ?? texto(referencia?.contentHash),
     articleDnaEntityId: texto(referencia?.entityId),
+    ...(head.bundleAmazonFrozenAt !== undefined ? { amazonFrozenAt: texto(head.bundleAmazonFrozenAt) } : {}),
   };
 }
 
 export type WriterApprovedBlueprintMeta = { id: string; versionNumber: number | null; bundleHash: string; approvedAt: string | null };
 
 export type WriterApprovedBlueprintRead =
-  | { kind: "approved"; meta: WriterApprovedBlueprintMeta; content: { blueprint: unknown; plan: unknown; linkCandidates: unknown; brandVoice: unknown; publishedStructure?: unknown } | null }
+  | { kind: "approved"; meta: WriterApprovedBlueprintMeta; content: { blueprint: unknown; plan: unknown; linkCandidates: unknown; brandVoice: unknown; publishedStructure?: unknown; sources?: unknown } | null }
   | { kind: "no_bundle" | "none" | "other_bundle" | "table_missing" | "read_failed"; reason: string };
 
 const COLUNAS_DO_ARTIGO_MODELO = "id,article_id,bundle_hash,version_number,approved_at";
 /**
  * Só os caminhos que a projeção usa (planta, medidas do plano, candidatos a
- * link e a versão da voz). `evidence` e `sources`, a maior parte do payload,
- * ficam para a fatia `radar.blueprint/<id>`. Nunca `payload` nu.
+ * link e a versão da voz). `evidence`, a maior parte do payload, fica para a
+ * fatia `radar.blueprint/<id>`. Nunca `payload` nu.
  *
  * 2026-10-08 · e a página publicada que a IA viu ao montar (`publishedStructure`,
  * H1 e H2; ausente em versão antiga): é dela que sai o mapa da atualização.
+ *
+ * 2026-10-09 · e as fontes do pacote da planta (`sources`: id, URL, título e a
+ * afirmação, poucas e curtas): a leitura compartilhada com o CSV
+ * (`radarArticleBlueprintPayloadReading`) e a trava só aceitam como fonte a que
+ * o pacote da planta tem.
  */
-const CAMINHOS_DO_ARTIGO_MODELO = "bp:payload->blueprint,pl:payload->measures->plan,lc:payload->linkCandidates,bv:payload->brandVoice,ps:payload->publishedStructure";
+const CAMINHOS_DO_ARTIGO_MODELO = "bp:payload->blueprint,pl:payload->measures->plan,lc:payload->linkCandidates,bv:payload->brandVoice,ps:payload->publishedStructure,src:payload->sources";
+const conteudoDaLinha = (linha: Linha) => ({ blueprint: linha.bp, plan: linha.pl, linkCandidates: linha.lc, brandVoice: linha.bv, publishedStructure: linha.ps ?? null, sources: linha.src ?? null });
 
 type ErroDoBanco = { code?: string; message?: string } | null;
 
@@ -971,29 +990,40 @@ async function congelamentoVigenteDoArtigo(context: WriterEvidenceContext, artic
   }
 }
 
-async function artigoModeloDaInvestigacao(context: WriterEvidenceContext, articleId: string, lidas: readonly Linha[], investigacao: WriterBlueprintInvestigation, estrito: boolean): Promise<Linha | null> {
+/*
+ * 2026-10-09 · A ESCOLHA É A DO CSV (`writerArticleBlueprintPick`, que chama
+ * `radarArticleBlueprintPick`): o hash exato do pacote e, senão, a concluída do
+ * mesmo congelamento, ArticleDNA e Amazon. O teto da planta antiga e a vigência
+ * do ArticleDNA só são lidos quando há planta antiga nascida depois do
+ * congelamento e o hash exato não decidiu — o caso comum não lê nada a mais.
+ */
+async function artigoModeloEscolhido(
+  context: WriterEvidenceContext,
+  articleId: string,
+  lidas: readonly Linha[],
+  alvo: { bundleHash: string; investigation: WriterBlueprintInvestigation | null },
+  estrito: boolean,
+): Promise<Linha | null> {
   const todas: Array<RadarArticleBlueprintVersionMeta & { linha: Linha }> = lidas.map(linha => ({
     id: String(linha.id), bundleHash: String(linha.bundle_hash), versionNumber: numero(linha.version_number) ?? 0,
-    state: String(linha.state), createdAt: texto(linha.created_at), investigationRef: linha.ir, linha,
+    state: String(linha.state ?? "APPROVED"), createdAt: texto(linha.created_at), investigationRef: linha.ir, linha,
   }));
-  const congelada = Date.parse(investigacao.frozenAt);
-  const semReferencia = (meta: RadarArticleBlueprintVersionMeta) => meta.investigationRef === null || meta.investigationRef === undefined;
-  const antigaDepoisDoCongelamento = todas.some(meta => meta.state === "APPROVED" && semReferencia(meta)
-    && Number.isFinite(congelada) && Date.parse(meta.createdAt ?? "") > congelada);
+  const daLinha = (escolha: { id: string } | null) => (escolha ? todas.find(meta => meta.id === escolha.id)?.linha ?? null : null);
+  const exata = writerArticleBlueprintPick(todas, { bundleHash: alvo.bundleHash, investigation: null });
+  if (exata || !alvo.investigation) return daLinha(exata);
+  const investigacao = alvo.investigation;
+  const antigaDepoisDoCongelamento = writerBlueprintNeedsFreezeGuard(todas, investigacao.frozenAt);
   /* 2026-10-08 (correção) · o teto: a planta antiga só conta com o congelamento do documento ainda vigente. */
   const vigente = antigaDepoisDoCongelamento ? await congelamentoVigenteDoArtigo(context, articleId, estrito) : null;
-  const congelamentoVigente = vigente !== null && Date.parse(vigente) === congelada;
-  const metas = congelamentoVigente ? todas : todas.filter(meta => !(meta.state === "APPROVED" && semReferencia(meta)));
+  const congelamentoVigente = vigente !== null && Date.parse(vigente) === Date.parse(investigacao.frozenAt);
   const vigencia = antigaDepoisDoCongelamento && congelamentoVigente ? await vigenciaDoArticleDna(context, investigacao, estrito) : { from: null, until: null };
-  const escolha = radarArticleBlueprintPick(metas, {
-    bundleHash: null,
-    investigation: {
-      frozenAt: investigacao.frozenAt, frozenBundleId: null, frozenBundleHash: null,
-      articleDnaVersionId: investigacao.articleDnaVersionId, articleDnaContentHash: investigacao.articleDnaContentHash,
-      articleDnaFrom: vigencia.from, articleDnaUntil: vigencia.until,
-    },
-  });
-  return escolha ? metas.find(meta => meta.id === escolha.id)?.linha ?? null : null;
+  return daLinha(writerArticleBlueprintPick(todas, {
+    bundleHash: alvo.bundleHash,
+    investigation: investigacao,
+    articleDnaFrom: vigencia.from,
+    articleDnaUntil: vigencia.until,
+    frozenStillCurrent: congelamentoVigente,
+  }));
 }
 
 /**
@@ -1019,68 +1049,76 @@ export async function readWriterApprovedArticleBlueprint(
   if (!alvo.bundleHash) return { kind: "no_bundle", reason: "documento sem dossiê do Radar: o artigo-modelo se prende ao pacote congelado" };
   const cliente = writerEvidenceClient(context);
   const estrito = opcoes.strict === true;
-  const doPacote = await cliente.from("radar_article_blueprints")
-    .select(opcoes.content ? `${COLUNAS_DO_ARTIGO_MODELO},${CAMINHOS_DO_ARTIGO_MODELO}` : COLUNAS_DO_ARTIGO_MODELO)
-    .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("bundle_hash", alvo.bundleHash).eq("state", "APPROVED")
-    .order("version_number", { ascending: false }).limit(1);
-  const falhou = falhaDoArtigoModelo(doPacote.error, estrito);
-  if (falhou) return falhou;
-  const [linha] = linhasDaResposta(doPacote.data);
-  if (linha && typeof linha.id === "string" && linha.article_id === alvo.articleId && linha.bundle_hash === alvo.bundleHash) {
-    return {
-      kind: "approved",
-      meta: { id: linha.id, versionNumber: numero(linha.version_number), bundleHash: alvo.bundleHash, approvedAt: texto(linha.approved_at) },
-      content: opcoes.content ? { blueprint: linha.bp, plan: linha.pl, linkCandidates: linha.lc, brandVoice: linha.bv, publishedStructure: linha.ps ?? null } : null,
-    };
-  }
   /*
-   * 2026-10-08 · P0-A · SEM O HASH EXATO, A MESMA INVESTIGAÇÃO. Com a
-   * investigação do pacote entregue, os metadados de todas as versões (data e
-   * a referência gravada, um caminho pequeno — nunca a planta) decidem pela
-   * regra do export: a concluída mais nova do mesmo congelamento e ArticleDNA.
-   * Sem ela, a consulta de antes (só dizer se há concluída de outro congelamento).
+   * 2026-10-09 · UMA LEITURA DE METADADOS, A ESCOLHA DO CSV. Todas as versões
+   * concluídas do artigo (data e a referência gravada, um caminho pequeno —
+   * nunca a planta) e a regra pura do export (`writerArticleBlueprintPick`): o
+   * hash exato do pacote e, senão, a concluída mais nova do mesmo congelamento,
+   * ArticleDNA e Amazon. Depois, só o conteúdo da escolhida.
    */
+  const metadados = await cliente.from("radar_article_blueprints").select(`${COLUNAS_DO_ARTIGO_MODELO},state,created_at,ir:payload->investigationRef`)
+    .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("state", "APPROVED")
+    .order("version_number", { ascending: false }).limit(50);
+  const falhou = falhaDoArtigoModelo(metadados.error, estrito);
+  if (falhou) return falhou;
+  const daMarca = linhasDaResposta(metadados.data).filter(item => item.article_id === alvo.articleId && typeof item.id === "string");
   const investigacao = alvo.investigation ?? null;
-  const deOutroPacote = investigacao
-    ? await cliente.from("radar_article_blueprints").select(`${COLUNAS_DO_ARTIGO_MODELO},state,created_at,ir:payload->investigationRef`)
-      .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).in("state", ["APPROVED", "DRAFT"])
-      .order("version_number", { ascending: false }).limit(50)
-    : await cliente.from("radar_article_blueprints").select(COLUNAS_DO_ARTIGO_MODELO)
-      .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("state", "APPROVED")
-      .order("version_number", { ascending: false }).limit(1);
-  const falhouDeNovo = falhaDoArtigoModelo(deOutroPacote.error, estrito);
-  if (falhouDeNovo) return falhouDeNovo;
-  const daMarca = linhasDaResposta(deOutroPacote.data).filter(item => item.article_id === alvo.articleId && typeof item.id === "string");
-  if (investigacao) {
-    const escolhida = await artigoModeloDaInvestigacao(context, alvo.articleId, daMarca, investigacao, estrito);
-    if (escolhida) {
-      const bundleHash = String(escolhida.bundle_hash);
-      if (!opcoes.content) {
-        return { kind: "approved", meta: { id: String(escolhida.id), versionNumber: numero(escolhida.version_number), bundleHash, approvedAt: texto(escolhida.approved_at) }, content: null };
-      }
-      const conteudo = await cliente.from("radar_article_blueprints").select(`${COLUNAS_DO_ARTIGO_MODELO},${CAMINHOS_DO_ARTIGO_MODELO}`)
-        .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("bundle_hash", bundleHash).eq("state", "APPROVED").eq("id", String(escolhida.id))
-        .limit(1);
-      const falhouNoConteudo = falhaDoArtigoModelo(conteudo.error, estrito);
-      if (falhouNoConteudo) return falhouNoConteudo;
-      const [lida] = linhasDaResposta(conteudo.data);
-      if (lida && lida.id === escolhida.id && lida.article_id === alvo.articleId && lida.bundle_hash === bundleHash) {
-        return {
-          kind: "approved",
-          meta: { id: String(lida.id), versionNumber: numero(lida.version_number), bundleHash, approvedAt: texto(lida.approved_at) },
-          content: { blueprint: lida.bp, plan: lida.pl, linkCandidates: lida.lc, brandVoice: lida.bv, publishedStructure: lida.ps ?? null },
-        };
-      }
+  const escolhida = await artigoModeloEscolhido(context, alvo.articleId, daMarca, { bundleHash: alvo.bundleHash, investigation: investigacao }, estrito);
+  if (escolhida) {
+    const bundleHash = String(escolhida.bundle_hash);
+    if (!opcoes.content) {
+      return { kind: "approved", meta: { id: String(escolhida.id), versionNumber: numero(escolhida.version_number), bundleHash, approvedAt: texto(escolhida.approved_at) }, content: null };
+    }
+    const conteudo = await cliente.from("radar_article_blueprints").select(`${COLUNAS_DO_ARTIGO_MODELO},${CAMINHOS_DO_ARTIGO_MODELO}`)
+      .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("bundle_hash", bundleHash).eq("state", "APPROVED").eq("id", String(escolhida.id))
+      .limit(1);
+    const falhouNoConteudo = falhaDoArtigoModelo(conteudo.error, estrito);
+    if (falhouNoConteudo) return falhouNoConteudo;
+    const [lida] = linhasDaResposta(conteudo.data);
+    if (lida && lida.id === escolhida.id && lida.article_id === alvo.articleId && lida.bundle_hash === bundleHash) {
+      return {
+        kind: "approved",
+        meta: { id: String(lida.id), versionNumber: numero(lida.version_number), bundleHash, approvedAt: texto(lida.approved_at) },
+        content: conteudoDaLinha(lida),
+      };
     }
   }
-  const outra = daMarca.find(item => !investigacao || item.state === "APPROVED");
+  const outra = daMarca[0];
   if (outra) {
     return {
       kind: "other_bundle",
       reason: `o artigo-modelo concluído (v${numero(outra.version_number) ?? "?"}) é de outro congelamento da investigação e não vale para este documento: organize no Radar o artigo-modelo do pacote entregue, ou o Radar reenvia o pacote atual ao Redator`,
     };
   }
-  return { kind: "none", reason: "nenhum artigo-modelo concluído para este pacote: a estrutura fica por conta de quem escreve" };
+  /* 2026-10-09 · regra do piloto: sem planta, nada pelo legado — a ausência diz o caminho (organizar no Radar), não "fica por conta de quem escreve". */
+  return { kind: "none", reason: "nenhum artigo-modelo concluído para este pacote: organize o artigo-modelo no Radar (Pesquisa → Artigo-modelo da SERP; até 2 chamadas de IA por artigo, ditas no botão) e o Redator passa a recebê-lo" };
+}
+
+/**
+ * 2026-10-09 · A VERSÃO QUE O CSV LEU, pelos metadados: a escolha do export
+ * (`radarArticleBlueprintExportChoice`) com o hash do dossiê montado e a
+ * investigação vigente que a montagem leu. A semeadura usa o conteúdo da
+ * montagem (o mesmo do CSV) e daqui só o id, a versão e a data. Falha de
+ * leitura: o estado explícito do export (`blueprint_unavailable`).
+ */
+export async function readWriterExportBlueprintMeta(
+  context: WriterEvidenceContext,
+  alvo: { articleId: string; bundleHash: string | null; investigation: RadarArticleBlueprintCurrentInvestigation | null },
+): Promise<{ id: string; versionNumber: number | null; approvedAt: string | null } | null> {
+  if (!alvo.bundleHash) return null;
+  const { data, error } = await writerEvidenceClient(context).from("radar_article_blueprints")
+    .select(`${COLUNAS_DO_ARTIGO_MODELO},state,created_at,ir:payload->investigationRef`)
+    .eq("brand_id", context.brandId).eq("article_id", alvo.articleId).eq("state", "APPROVED")
+    .order("version_number", { ascending: false }).limit(50);
+  if (error) throw new RadarArticleBlueprintUnavailableError([alvo.articleId], "o banco não respondeu à leitura das plantas");
+  const lidas = linhasDaResposta(data).filter(linha => linha.article_id === alvo.articleId && typeof linha.id === "string");
+  const escolha = radarArticleBlueprintExportChoice(
+    lidas.map(linha => ({ id: String(linha.id), articleId: alvo.articleId, bundleHash: String(linha.bundle_hash), versionNumber: numero(linha.version_number) ?? 0, state: String(linha.state), createdAt: texto(linha.created_at), investigationRef: linha.ir })),
+    new Map([[alvo.articleId, alvo.bundleHash]]),
+    new Map([[alvo.articleId, alvo.investigation]]),
+  ).get(alvo.articleId);
+  const linha = escolha ? lidas.find(item => item.id === escolha.id) : null;
+  return linha ? { id: String(linha.id), versionNumber: numero(linha.version_number), approvedAt: texto(linha.approved_at) } : null;
 }
 
 /** As chaves do payload do artigo-modelo que a fatia serve, cada uma por caminho. 2026-10-08 · + a página publicada que a IA viu (aditivo; ausente em versão antiga). */

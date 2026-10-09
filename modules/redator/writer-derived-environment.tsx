@@ -566,7 +566,7 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
               <p className="mb-3 rounded border border-dashed border-border p-3 text-xs text-text-muted">
                 Selecione uma {rotuloParte.toLowerCase()} para trabalhar a mídia dela.
               </p>
-              <WriterRadarFoundationsPanel document={document} compact/>
+              <WriterRadarFoundationsPanel document={document} compact brandId={brandId}/>
             </>}
       </aside>
     </div>

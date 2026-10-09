@@ -1,15 +1,13 @@
 import "server-only";
 import { ArtifactRepository, SerpSnapshotRepository } from "@/lib/server/editorial-repositories";
-import { radarStartPorts } from "@/lib/server/radar-youtube-start";
 import { radarExportArticleReads } from "@/app/api/editorial/radar-export/_leitura-do-artigo";
 import { resolveRadarCanonicalDossier } from "@/lib/server/radar-canonical-dossier";
 import { radarFrozenObservedAtOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
-import { buildRadarEditorialCommercialModel, buildRadarEditorialVideoModel } from "@/lib/radar/editorial-profile-model";
+import { buildRadarEditorialVideoModel } from "@/lib/radar/editorial-profile-model";
 import { loadRadarCanonicalAuthorities } from "@/lib/server/radar-canonical-authorities";
 import { radarPortableSpecialistContext, radarPortableVideoContext } from "@/lib/radar/portable-annex-context";
-import { radarAmazonEligibleCandidates } from "@/lib/radar/amazon-eligibility";
-import { radarAmazonSelectCandidates } from "@/lib/radar/amazon-candidate-selection";
-import { radarAmazonSetupSignature } from "@/lib/radar/amazon-editorial-target";
+import { radarAmazonFrozenCommercialBlock, radarPortableCommercialOf } from "@/lib/radar/amazon-commercial-block";
+import { radarCurrentArticleDnaVersion } from "@/lib/radar/article-dna-current";
 import type { RadarPortableCommercial, RadarPortableExportInput } from "@/lib/radar/portable-export";
 import { radarDeclaredArticleIntent } from "@/lib/radar/editorial-identity";
 import { radarResearchContextSiloRole } from "@/lib/radar/article-research-context";
@@ -30,7 +28,6 @@ import {
   radarSiloMemberDescriptorsWithTitles,
   type RadarPortableExportAssembledArticle,
 } from "@/lib/radar/portable-export-batch";
-import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
 import { radarVideoExportYoutubeOf } from "@/lib/radar/portable-video-export";
 import { radarVideoLensOrganicOf } from "@/lib/radar/video-competitive";
 import { readRadarVideoLensDigestsForExport } from "@/lib/server/radar-video-lens-digest-read";
@@ -191,9 +188,20 @@ export async function assembleRadarPortableExport(input: {
 
   /* O mesmo artigo pedido duas vezes é um artigo. */
   for (const articleId of [...new Set(input.articleIds)]) {
-    const article = artefatos.articles.find(version =>
-      version.payload.articleId === articleId && version.payload.brandId === input.brandId);
-    if (!article) {
+    /*
+     * 2026-10-09 · A VERSÃO VIGENTE, NÃO A PRIMEIRA QUE A LEITURA DEVOLVE.
+     *
+     * `ArtifactRepository.list` não ordena: com duas versões do artigo (o
+     * reajuste grava uma sucessora), o `find()` escolhia conforme a ordem do
+     * banco. A regra é a da plataforma — a última aprovada; sem aprovada, a
+     * mais nova viva (`radarCurrentArticleDnaVersion`).
+     *
+     * 2026-10-09 (correção) · Aqui ela só confere que o artigo existe nesta
+     * marca (a mesma recusa, antes de ler o item). A versão do dossiê é a
+     * TRANSPORTADA, escolhida logo depois da análise corrente.
+     */
+    const daMesa = radarCurrentArticleDnaVersion({ versions: artefatos.articles, events: artefatos.events, brandId: input.brandId, articleId });
+    if (!daMesa) {
       recusados.push({ articleId, code: "article_dna_not_found", reason: "O ArticleDNA canônico não foi encontrado para esta marca." });
       itensDoSilo.push(faltante(articleId, "O ArticleDNA canônico não foi encontrado para esta marca.", null));
       continue;
@@ -210,9 +218,24 @@ export async function assembleRadarPortableExport(input: {
     const corrente = await radarExportArticleReads.currentAnalysis({ brandId: input.brandId, articleId });
     if (!corrente) {
       recusados.push({ articleId, code: "radar_item_not_found", reason: "Não há investigação gravada para este artigo." });
-      itensDoSilo.push(faltante(articleId, "Não há investigação gravada para este artigo.", article));
+      itensDoSilo.push(faltante(articleId, "Não há investigação gravada para este artigo.", daMesa));
       continue;
     }
+
+    /*
+     * 2026-10-09 (correção) · NO RADAR, A VERSÃO É A TRANSPORTADA PELO ITEM.
+     *
+     * A análise corrente carrega a versão do item do Radar (a que o Arquiteto
+     * enviou; a investigação, o congelamento e a planta foram feitos sobre ela).
+     * Uma sucessora aprovada depois ("Gravar melhorias") não troca a versão do
+     * dossiê: o item continua nela até o reenvio da versão nova ao Radar. Sem a
+     * versão no acervo, vale a regra da mesa (e a prontidão diz a divergência).
+     * Nenhuma leitura nova: o acervo e a análise já estão em memória.
+     */
+    const article = radarCurrentArticleDnaVersion({
+      versions: artefatos.articles, events: artefatos.events, brandId: input.brandId, articleId,
+      transportedVersionId: corrente.payload.articleDnaVersionId,
+    }) ?? daMesa;
 
     const fundamento = {
       brandId: input.brandId,
@@ -272,18 +295,27 @@ export async function assembleRadarPortableExport(input: {
     });
     if (investigacao) congelamentos.set(articleId, investigacao);
 
-    const comercial = perfil === "AMAZON" ? estadoComercialCanonico(payload) : null;
+    /*
+     * 2026-10-09 · A PARTE COMERCIAL EM QUALQUER PERFIL (regra do piloto).
+     *
+     * Com o Google finalizado e a Amazon como review, o CSV saía sem produtos,
+     * sem aviso de afiliado e sem a recusa "nenhum produto". A projeção sai da
+     * Amazon CONGELADA (`radarPortableCommercialOf`): no perfil AMAZON, a de
+     * sempre; nos outros, o blueprint de `formatBlueprints.review`. Fora do
+     * pacote e do hash. O modelo comercial só vira modelo do PERFIL no AMAZON —
+     * no Google ele nunca substitui o modelo do artigo.
+     */
+    const projecaoComercial = radarPortableCommercialOf({
+      profile: perfil,
+      payload,
+      context: contexto,
+      profileBlueprint: blueprintView.blueprint ?? null,
+    });
+    const comercial = projecaoComercial.state;
 
     const modeloDoPerfil = contexto && blueprintView.blueprint
       ? perfil === "AMAZON" && blueprintView.blueprint.profile === "AMAZON"
-        ? buildRadarEditorialCommercialModel({
-          context: contexto,
-          blueprint: blueprintView.blueprint,
-          setup: comercial?.setup ?? null,
-          selection: comercial?.selection ?? null,
-          eligibility: comercial?.eligibility ?? null,
-          universe: comercial?.universe || [],
-        })
+        ? projecaoComercial.model
         : perfil === "YOUTUBE" && blueprintView.blueprint.profile === "YOUTUBE"
           ? buildRadarEditorialVideoModel({ context: contexto, blueprint: blueprintView.blueprint })
           : null
@@ -342,17 +374,8 @@ export async function assembleRadarPortableExport(input: {
       reviewsReadable: revisoes.available,
     });
 
-    const planoComercial: RadarPortableCommercial | null = perfil === "AMAZON"
-      ? {
-        setup: comercial?.setup ?? null,
-        counts: comercial?.counts ?? null,
-        products: (modeloDoPerfil?.promotionLinks || []).map(link => ({ asin: link.asin, productName: link.productName })),
-        links: modeloDoPerfil?.promotionLinks || [],
-        comparisonCriteria: modeloDoPerfil?.comparisonCriteria || [],
-        disclosureRequired: Boolean(modeloDoPerfil?.affiliateDisclosureRequired),
-        shortlistStatus: modeloDoPerfil?.shortlistStatus ?? null,
-      }
-      : null;
+    /* 2026-10-09 · no AMAZON, o plano de sempre; com a Amazon como review, o mesmo plano sobre a Amazon congelada. */
+    const planoComercial: RadarPortableCommercial | null = projecaoComercial.commercial;
 
     const entrada: RadarPortableExportInput = {
       profile: perfil,
@@ -448,6 +471,13 @@ export async function assembleRadarPortableExport(input: {
         generatedAt: exportedAt,
       }),
       bundleHash: bundle.bundleHash,
+      /*
+       * 2026-10-09 (correção) · o bloco comercial COMPLETO da Amazon congelada,
+       * para o gerador do artigo-modelo (faixas de preço, regras, limitações e o
+       * esqueleto comercial como matéria-prima). Fora do pacote e do hash; sem
+       * Amazon congelada, `null`. Nenhuma leitura nova: o payload já está aqui.
+       */
+      amazonCommercialBlock: radarAmazonFrozenCommercialBlock({ payload, context: contexto }),
     });
 
     identificacao.push({
@@ -680,95 +710,19 @@ export async function radarReadPublishedStructure(url: string): Promise<{ h1: st
   };
 }
 
-/**
- * O formato "Para escrever" de UM artigo, para quem escreve fora da plataforma
- * (MCP `get_article_for_writing`): a mesma projeção do botão "Para escrever",
- * com a linha de topo da marca e a linha do artigo, no mesmo CSV.
+/*
+ * 2026-10-09 (correção) · `radarWritingExportForArticle` saiu: o MCP passou a
+ * `radarMcpMaterialForArticle` (lib/server/radar-mcp-material.ts), que confere o
+ * artigo-modelo ANTES da projeção, como a rota. Ela chamava a projeção sem a
+ * conferência, e o 409 da planta subia como exceção para quem a chamasse.
  */
-export async function radarWritingExportForArticle(input: {
-  brandId: string;
-  articleId: string;
-  supabase: LeitorDoCache;
-  actorUserId: string;
-}): Promise<
-  | { ok: true; csv: string; filename: string | null; blocked: boolean; exportedAt: string }
-  | { ok: false; code: string; reason: string }
-> {
-  /*
-   * 2026-10-08 · O MCP RECEBE O MESMO SILO QUE O BOTÃO "PARA ESCREVER".
-   *
-   * Sem `selectionSiloContext`, o CSV do MCP saía sem a ordem do Silo: o papel
-   * vinha só da foto do envio, o link Suporte → Pilar ficava "destino não
-   * resolvido" e a SiloPage, "endereço não registrado". Com ele, a ordem, os
-   * papéis e os destinos saem do SiloDNA vigente — a mesma montagem da tela.
-   */
-  const montagem = await assembleRadarPortableExport({ brandId: input.brandId, articleIds: [input.articleId], supabase: input.supabase, actorUserId: input.actorUserId, readPublishedStructure: radarReadPublishedStructure, selectionSiloContext: true });
-  if (!montagem.montadas.length) {
-    const recusa = montagem.recusados[0];
-    return { ok: false, code: recusa?.code ?? "radar_export_empty", reason: recusa?.reason ?? "O artigo não tem investigação finalizada para exportar." };
-  }
-  const escrita = radarPortableWritingExport({ articles: montagem.montadas, lenses: montagem.lentes, plan: null, selectionPlan: montagem.planoDaSelecao, publications: montagem.publicacoes, today: montagem.exportedAt, brandVoice: montagem.brandVoice });
-  return { ok: true, csv: escrita.csv ?? "", filename: escrita.filename, blocked: escrita.blocked > 0, exportedAt: montagem.exportedAt };
-}
 
-/* ===================== §10 · o estado comercial canônico ===================== */
-
-type Payload = Awaited<ReturnType<typeof radarStartPorts.loadRadarState>> extends { analyses: Array<infer T> } | null
-  ? T extends { payload: infer P } ? P : never
-  : never;
-
-/**
- * ===== §10 · A AMAZON EXPORTA O ESTADO CANÔNICO, E SÓ ELE =====
- *
- * ==================== O RISCO QUE ISTO FECHA ====================
- *
- * O blueprint comercial vem da FOTOGRAFIA congelada. A shortlist e os links não
- * podem vir dela: a fotografia guarda as conclusões e o resumo, não o universo
- * — então eles precisam ser recalculados sobre a corrida gravada.
- *
- * Se alguém trocou a configuração DEPOIS de congelar, a corrida gravada passou
- * a descrever outra investigação. Recalcular a shortlist sobre ela produziria
- * produtos de um alvo ao lado de um blueprint de outro — e o CSV não teria como
- * mostrar a diferença.
- *
- * A assinatura da configuração material existe exatamente para responder isso.
- * Quando ela não bate, a leitura comercial não sai: o blueprint congelado
- * continua descrevendo o artigo, e a lista de produtos fica vazia porque vazia
- * é a verdade sobre o que pode ser afirmado.
+/*
+ * §10 · o estado comercial canônico (a assinatura da configuração confere a
+ * corrida antes da shortlist) mudou-se em 2026-10-09 para
+ * `lib/radar/amazon-commercial-block.ts` (`radarAmazonCommercialStateOf`), sem
+ * mudar a regra: a projeção comercial passou a valer em qualquer perfil.
  */
-function estadoComercialCanonico(payload: Payload) {
-  const setup = payload.amazonEditorialSetup ?? null;
-  const corrida = payload.amazonSearch ?? null;
-  const congelada = payload.amazonFrozenInvestigation ?? null;
-
-  if (!setup || !corrida) {
-    return { setup, universe: [], eligibility: null, selection: null, counts: null };
-  }
-
-  const assinaturaCongelada = congelada?.originalEditorialIntent?.setupSignature ?? null;
-  const assinaturaCorrente = radarAmazonSetupSignature(setup);
-  if (assinaturaCongelada && assinaturaCongelada !== assinaturaCorrente) {
-    return { setup, universe: [], eligibility: null, selection: null, counts: null };
-  }
-
-  const eligibility = radarAmazonEligibleCandidates({
-    intent: setup.intent, target: setup.target, universe: corrida.universe,
-  });
-  const selection = radarAmazonSelectCandidates({
-    intent: setup.intent,
-    universe: eligibility.eligible,
-    observedCount: eligibility.rawCount,
-    queryCount: corrida.queries.filter(item => item.executed).length,
-  });
-
-  return {
-    setup,
-    universe: corrida.universe,
-    eligibility,
-    selection,
-    counts: { observed: eligibility.rawCount, eligible: eligibility.eligible.length, shortlist: selection.candidates.length },
-  };
-}
 
 /* ===================== §1 e §5 do addendum · o fundamento da página ===================== */
 

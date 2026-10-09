@@ -59,7 +59,9 @@ export function radarHandoffOutcomeOfCode(code: string | null | undefined): Rada
      * infraestrutura onde existe decisão editorial pendente.
      */
     || code === "radar_handoff_document_exists"
-    || code === "radar_handoff_inconsistent") return "BLOCKED_NOT_READY";
+    || code === "radar_handoff_inconsistent"
+    /* 2026-10-09 · sem o artigo-modelo concluído o artigo NÃO está pronto: é bloqueio (o caminho é organizar), não falha. */
+    || code === "radar_handoff_article_blueprint_missing") return "BLOCKED_NOT_READY";
   return "FAILED";
 }
 

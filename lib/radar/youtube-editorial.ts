@@ -38,7 +38,7 @@ import {
   type RadarYoutubeCanonicalBlueprint,
   type RadarYoutubeScriptSection,
 } from "./competitive-blueprint.ts";
-import type { RadarYoutubeBlueprint } from "./youtube-blueprint.ts";
+import { radarVideoFormatDecision, radarYoutubeBlueprintRuler, type RadarYoutubeBlueprint } from "./youtube-blueprint.ts";
 import type { RadarMultimodalBlueprint } from "./multimodal-blueprint.ts";
 
 /* ================== §10 · títulos: do padrão à direção ================== */
@@ -284,7 +284,14 @@ export function radarYoutubeScript(input: {
 export function radarYoutubeCommunication(blueprint: RadarYoutubeBlueprint) {
   const shorts = blueprint.observed.shorts.videoCount;
   const longForm = blueprint.observed.longForm.videoCount;
-  const curtoDomina = shorts > longForm;
+  /*
+   * 2026-10-09 · na fotografia da amostra pertinente, o "curto domina" é a
+   * decisão única de formato (`radarVideoFormatDecision`); a fotografia antiga
+   * continua lida pela conta de antes — mesma leitura, mesmo hash.
+   */
+  const curtoDomina = radarYoutubeBlueprintRuler(blueprint) === "PERTINENTE"
+    ? radarVideoFormatDecision({ longos: blueprint.observed.longForm, curtos: blueprint.observed.shorts }).curto
+    : shorts > longForm;
 
   return {
     tone: curtoDomina
@@ -396,6 +403,21 @@ export function buildRadarYoutubeCanonicalBlueprint(input: {
   const { blueprint, multimodal } = input;
   const perguntas = multimodal?.recommended.mustAnswer || [];
   const lacunaDeAutoridade = blueprint.recommended.gaps.some(item => item.kind === "AUTORIDADE_ESCASSA");
+  /*
+   * ===== 2026-10-09 · A CAMADA CANÔNICA DERIVA DA RÉGUA QUE FEZ A FOTOGRAFIA =====
+   *
+   * Regra do dono: o processo antigo é substituído pelo do piloto. Na
+   * fotografia NOVA (amostra pertinente), o roteiro genérico ("Gancho →
+   * Abertura → Bloco 1 · fundamento…"), o gancho derivado do padrão de título
+   * e o plano de Shorts pelas perguntas do Google saem como saída: o roteiro,
+   * o gancho e os cortes do vídeo são os da planta do artigo-modelo (CSV de
+   * vídeo e Redator, pela mesma função). Fica o que é leitura da amostra
+   * pertinente: títulos, comunicação e onde o vídeo entra no artigo.
+   *
+   * A fotografia ANTIGA é lida exatamente como antes: esta camada entra no
+   * dossiê do perfil YouTube, e mudá-la mudaria o hash de pacote já congelado.
+   */
+  const novaRegua = radarYoutubeBlueprintRuler(blueprint) === "PERTINENTE";
 
   const observed = {
     comparableVideos: blueprint.observed.comparableSize,
@@ -416,7 +438,7 @@ export function buildRadarYoutubeCanonicalBlueprint(input: {
       canal.videos,
     )),
     durationRange: blueprint.recommended.durationSecondsRange
-      ? `Entre ${blueprint.recommended.durationSecondsRange.min}s e ${blueprint.recommended.durationSecondsRange.max}s na coorte dominante.`
+      ? `Entre ${blueprint.recommended.durationSecondsRange.min}s e ${blueprint.recommended.durationSecondsRange.max}s na ${novaRegua ? "coorte pertinente do formato decidido" : "coorte dominante"}.`
       : null,
     viewsRange: null,
     recency: null,
@@ -437,11 +459,12 @@ export function buildRadarYoutubeCanonicalBlueprint(input: {
       gap.evidence,
     )) as RadarObservedSignal[],
     sufficiency: blueprint.observed.comparableSize >= 4
-      ? `${blueprint.observed.comparableSize} vídeo(s) comparáveis sustentam a leitura.`
-      : `Amostra pequena: ${blueprint.observed.comparableSize} vídeo(s) comparáveis. A leitura é indicativa.`,
+      ? `${blueprint.observed.comparableSize} vídeo(s) ${novaRegua ? "pertinentes" : "comparáveis"} sustentam a leitura.`
+      : `Amostra pequena: ${blueprint.observed.comparableSize} vídeo(s) ${novaRegua ? "pertinentes" : "comparáveis"}. A leitura é indicativa.`,
   };
 
-  const shorts = radarYoutubeShortsPlan({ multimodal });
+  /* 2026-10-09 · na fotografia nova, os Shorts são os cortes da planta (um plano só), não as perguntas do Google. */
+  const shorts = novaRegua ? [] : radarYoutubeShortsPlan({ multimodal });
   const comunicacao = radarYoutubeCommunication(blueprint);
 
   return RadarCompetitiveBlueprintSchema.parse({
@@ -456,8 +479,9 @@ export function buildRadarYoutubeCanonicalBlueprint(input: {
       format: blueprint.recommended.format,
       durationDirection: observed.durationRange,
       titleDirections: radarYoutubeTitleDirections({ blueprint, primaryKeyword: input.primaryKeyword }),
-      hookDirection: radarYoutubeHookDirection({ blueprint, primaryQuestion: perguntas[0] || null }),
-      script: radarYoutubeScript({ blueprint, questions: perguntas, hasAuthorityGap: lacunaDeAutoridade }),
+      /* 2026-10-09 · o gancho e o roteiro da fotografia nova são os da planta (`radarVideoPlan`): aqui, nenhum genérico. */
+      hookDirection: novaRegua ? null : radarYoutubeHookDirection({ blueprint, primaryQuestion: perguntas[0] || null }),
+      script: novaRegua ? [] : radarYoutubeScript({ blueprint, questions: perguntas, hasAuthorityGap: lacunaDeAutoridade }),
       tone: comunicacao.tone,
       languageDirection: comunicacao.languageDirection,
       technicalLevel: comunicacao.technicalLevel,

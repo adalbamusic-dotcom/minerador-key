@@ -380,5 +380,6 @@ test("pacote · os caminhos que a IA interna lê estão presos às medidas: nenh
   const soma = [...medidos.values()].reduce((total, bytes) => total + bytes, 0);
   assert.ok(soma <= ORCAMENTO, `o pacote leria ${soma} B por pedido`);
   assert.ok(medidos.has("observed.authorityEvidence"), "as afirmações de autoridade contam pela medida do pai, uma vez só");
-  assert.equal(medidos.size, WRITER_SECTION_BUNDLE_PATHS.length - 1);
+  /* 2026-10-09 · as três partes das afirmações (claims, conflitos e as sustentadas, para a trava do CSV) contam pelo mesmo pai. */
+  assert.equal(medidos.size, WRITER_SECTION_BUNDLE_PATHS.length - 2);
 });

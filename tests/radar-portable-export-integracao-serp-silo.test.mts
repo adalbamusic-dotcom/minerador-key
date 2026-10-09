@@ -575,7 +575,9 @@ test("C · as proibições do Redator entram nas regras — e nenhuma regra se r
     assert.match(texto, /não substituir a composição de secundárias por decisão própria/, `${coluna} sem a proibição das secundárias`);
     const regras = texto.slice(texto.lastIndexOf("# REGRAS")).split("\n").filter(linha => linha.startsWith("- "));
     assert.equal(new Set(regras).size, regras.length, `${coluna} repetiu uma regra`);
-    assert.match(regras[regras.length - 1], /sinalizar qualquer dependência que continue sem resolução\.$/, `${coluna} · a regra que fecha a lista deixou de ser a última`);
+    /* 2026-10-09 (correção) · D10: a regra que fecha a lista diz o caminho concluído (delimitado ou fora), sem "sinalizar dependência". */
+    assert.match(regras[regras.length - 1], /o que não tem fonte do pacote entra delimitado ou fica fora do texto\.$/, `${coluna} · a regra que fecha a lista deixou de ser a última`);
+    assert.doesNotMatch(texto, /sinalizar qualquer dependência/, `${coluna} · a regra antiga voltou`);
   }
 });
 

@@ -413,6 +413,8 @@ async function enviar(opcoes: {
     },
     transitionRadar: async () => { chamadas.push("transitionRadar"); },
     appendDecision: async () => { chamadas.push("appendDecision"); },
+    /* 2026-10-09 · o artigo-modelo obrigatório: esta bancada prova o envio com a planta concluída do pacote. */
+    loadArticleBlueprint: async () => ({ kind: "approved", versionNumber: 1 }),
   };
 
   const resultado = await sendRadarToWriter({
@@ -939,7 +941,7 @@ test("Assunto · o envio GRAVA a proibição do Assunto no recibo e no documento
     const base = contexto();
     return { ...base, article: { ...base.article, subject: { phrase: ASSUNTO.phrase, note: ASSUNTO.note, destinationUrl: ASSUNTO.destinationUrl } } } as RadarArticleResearchContext;
   };
-  const { radarWriterSubjectTurnLines } = await import("../lib/redator/radar-subject-turn.ts");
+  const { radarWriterSubjectTurnLines, radarWriterSubjectTurnLinesFromBlueprint } = await import("../lib/redator/radar-subject-turn.ts");
   const { RADAR_WRITER_MAY_NOT_SUBJECT } = await import("../lib/redator/writer-handoff.ts");
 
   /*
@@ -962,25 +964,36 @@ test("Assunto · o envio GRAVA a proibição do Assunto no recibo e no documento
   const documento = ContentDocumentV2Schema.parse(com.documento);
   assert.deepEqual(documento.importedContext.dossier?.writerMayNot, gravada, "o documento: a mesma lista do recibo");
 
+  /*
+   * 2026-10-09 · regra do piloto: a virada do envio sai da PLANTA concluída
+   * (`radarWriterSubjectTurnLinesFromBlueprint`), não da sugestão do modelo
+   * editorial antigo (`declaredSubject`, matéria-prima do gerador). A porta de
+   * planta desta bancada não devolve o `blueprint`, então as linhas são as de
+   * "planta não em mãos": apontam a seção do artigo-modelo concluído que tratar
+   * do Assunto, sem lugar inventado; quem lê depois (fundamentos, seção,
+   * semeadura, painel) troca pela seção da planta.
+   */
   const turn = autoridades.google!.articleModel.declaredSubject;
-  assert.ok(turn, "a F3 monta a virada no artigo-modelo");
+  assert.ok(turn, "a F3 ainda monta a virada no modelo antigo (matéria-prima do gerador)");
   const linhas = documento.importedContext.editorialContext;
-  assert.deepEqual(linhas, radarWriterSubjectTurnLines({ subject: ASSUNTO, turn, principal: PRINCIPAL }));
-  for (const prefixo of ["Tronco (Assunto): ", "Virada: ", "Seção da virada: ", "Destino da chamada: "]) {
+  assert.deepEqual(linhas, radarWriterSubjectTurnLinesFromBlueprint({ subject: ASSUNTO, blueprint: null, principal: PRINCIPAL }));
+  assert.notDeepEqual(linhas, radarWriterSubjectTurnLines({ subject: ASSUNTO, turn, principal: PRINCIPAL }), "a virada do modelo antigo não volta");
+  for (const prefixo of ["Tronco (Assunto): ", "Virada: ", "Destino da chamada: "]) {
     assert.ok(linhas.some(item => item.startsWith(prefixo)), `${prefixo} não chegou ao Redator`);
   }
   assert.ok(linhas.some(item => /^(Direção do H1: |Assunto em H2\/H3|Assunto no H1: )/.test(item)), "a direção do H1 não chegou ao Redator");
+  assert.equal(linhas.some(item => item.startsWith("Alerta do Radar sobre o Assunto: ")), false, "o alerta era leitura da amostra");
 
   /* O dossiê é o que o Radar congelou: o bundle entregue é o do recibo, sem o artigo-modelo dentro. */
   assert.deepEqual(documento.importedContext.dossier?.bundle, JSON.parse(JSON.stringify(com.writerBundle.bundle)));
   assert.equal("articleModel" in (documento.importedContext.dossier?.bundle || {}), false);
   assert.equal("declaredSubject" in (documento.importedContext.dossier?.bundle || {}), false);
 
-  /* Sem a fotografia do Google (o caso real de YOUTUBE e AMAZON), as linhas devolvem a decisão, sem inventar lugar. */
+  /* Sem a fotografia do Google (o caso real de YOUTUBE e AMAZON), as linhas são as mesmas: o modelo antigo não entra. */
   const semFoto = await enviar({ autoridades: { ...autoridades, google: null }, artigo: artigo as typeof ARTICLE_DNA });
   const linhasSemFoto = ContentDocumentV2Schema.parse(semFoto.documento).importedContext.editorialContext;
-  assert.deepEqual(linhasSemFoto, radarWriterSubjectTurnLines({ subject: ASSUNTO, turn: null, principal: PRINCIPAL }));
-  assert.ok(linhasSemFoto.some(item => item.startsWith("Virada: onde quem redige decidir (sem sinal na SERP)")));
+  assert.deepEqual(linhasSemFoto, linhas);
+  assert.ok(linhasSemFoto.some(item => item.startsWith("Virada: na seção do artigo-modelo concluído que tratar do Assunto")));
   assert.deepEqual(semFoto.writerBundle.writerMayNot, gravada);
 });
 

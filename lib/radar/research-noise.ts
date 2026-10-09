@@ -321,6 +321,15 @@ const NAVEGACAO = new RegExp(`^(?:${[
   "trabalhe conosco", "imprensa", "blog", "home", "inicio", "menu", "login", "entrar", "categorias", "tags", "arquivos", "clientes",
   "nossos clientes", "parceiros", "nossos parceiros", "consulta", "links uteis", "mapa do site", "configuracoes da galeria",
   "previa do icone do site", "politica de privacidade", "termos de uso", "aviso de privacidade", "cookies",
+  /*
+   * 2026-10-09 · defeito 13: "Biblioteca de Marketing" era o primeiro tema do CSV
+   * de "como atrair um cliente" ("7 de 11 sites") — o menu da biblioteca de
+   * materiais de um site; "Informações" e "Exclusivo pra você" iam ao "Tratado
+   * por 1 site só". Rótulo inteiro, como os outros: "Crie uma biblioteca de
+   * conteúdos para a clínica" continua tema.
+   */
+  "biblioteca", "biblioteca de marketing", "biblioteca de vendas", "biblioteca de conteudo", "biblioteca de conteudos",
+  "biblioteca de materiais", "biblioteca de recursos", "informacoes", "mais informacoes", "exclusivo pra voce", "exclusivo para voce",
 ].join("|")})$`);
 /*
  * Mensagem de tela e o aviso de cookie, em qualquer lugar do cabeçalho. Do
@@ -514,11 +523,14 @@ export type RadarMarketCitation = {
 const CITACAO_DE_RODAPE: ReadonlyArray<{ motivo: string; termos: RegExp; nucleo: RegExp | null }> = [
   { motivo: "cookie ou consentimento", termos: /\b(?:cookies?|cookiedatabase|consentimento|consent|tcf|gdpr|leia mais sobre esses objetivos|politica de privacidade|privacy)\b/, nucleo: /\b(?:cookies?|consentimento|privacidade|lgpd)\b/ },
   { motivo: "selo ou credenciamento", termos: /\b(?:selos?|credenciamento|bbb|reclame ?aqui|site (?:blindado|seguro)|antifraude)\b/, nucleo: /\b(?:selos?|certificac\w*|credenciamento|reputacao)\b/ },
-  { motivo: "consulta de CPF ou CNPJ", termos: /\b(?:cpf|cnpj|pessoa (?:fisica|juridica)|spcbrasil)\b/, nucleo: /\b(?:cpf|cnpj|credito|inadimplen\w*)\b/ },
+  /* 2026-10-09 (correção · casos-reais-F10) · "SPC Brasil" em duas palavras, Serasa e Boa Vista (o CSV real de captar citava a carta do SPC). */
+  { motivo: "consulta de CPF ou CNPJ", termos: /\b(?:cpf|cnpj|pessoa (?:fisica|juridica)|spcbrasil|spc brasil|serasa|boa vista scpc)\b/, nucleo: /\b(?:cpf|cnpj|credito|inadimplen\w*)\b/ },
   { motivo: "diploma ou e-MEC", termos: /\b(?:e ?mec|emec|diplomas?|mentorweb)\b/, nucleo: /\b(?:diplomas?|faculdade\w*|graduac\w*|curso superior|ensino superior)\b/ },
   { motivo: "tutorial técnico do W3C", termos: /\b(?:w3c|w3|wai|abrir em uma nova aba)\b/, nucleo: /\b(?:acessibilidade|html|texto alternativo|alt text)\b/ },
   { motivo: "aposta ou jogo", termos: /\b(?:apostas?|betano|bet365|bet|cassino|casino|slots?|fortune tiger|fortuna tiger|tigrinho|jogo do tigre|jogo da fortuna|roleta|blaze|games)\b/, nucleo: /\b(?:apostas?|jogos?|cassino)\b/ },
   { motivo: "lei de rodapé", termos: /\b(?:lai|lgpd|lei de acesso a informacao|lei geral de protecao de dados|marco civil|l12527|l13709\w*|l12965)\b/, nucleo: /\b(?:lgpd|dados pessoais|privacidade|acesso a informacao|transparencia|marco civil)\b/ },
+  /* 2026-10-09 (correção · casos-reais-F10) · a tela de login ou de controle de acesso ("/spc/controleacesso/autenticacao/entry.action") não é fonte. */
+  { motivo: "página de login ou de acesso", termos: /\b(?:controleacesso|controle de acesso|autenticacao|login|logon|signin|sign in|minha conta|area do cliente|area restrita)\b/, nucleo: /\b(?:login|autenticacao|senha|area do cliente|seguranca da conta)\b/ },
 ];
 /* Página institucional (sobre, contato, termos) — de quem for. */
 const PAGINA_INSTITUCIONAL = /\b(?:sobre nos|quem somos|trabalhe conosco|fale conosco|termos de uso|central de ajuda|nossa historia|institucional)\b/;
@@ -589,12 +601,61 @@ export function radarMarketCitationNoiseReason(citacao: RadarMarketCitation, con
   if (area) return `fora do tema (${area})`;
   const oficial = CLASSE_OFICIAL.test(plano(citacao.authorityClass)) || DOMINIO_OFICIAL.test(dominio.replace(/^www\./, ""));
   if (oficial) {
-    const familias = familiasDe(plano(assunto));
+    const doOrgao = assuntoDoOficial(citacao, caminho, assunto);
+    const familias = familiasDe(plano(doOrgao));
     const publico = familiasDe(plano(`${juntar(contexto.core)} ${juntar(contexto.audience)}`));
     const daProfissao = [...familias].some(familia => publico.has(familia));
-    if (!daProfissao && !tocaOTema(assunto, contexto, SERVICO_DO_PORTAL)) return "oficial fora do tema";
+    if (!daProfissao && !tocaOTema(doOrgao, contexto, SERVICO_DO_PORTAL)) return "oficial fora do tema";
   }
   return null;
+}
+
+/*
+ * ===== 2026-10-09 · O ASSUNTO DA FONTE OFICIAL É O DELA (defeito 13 dos 8 CSVs do Silo) =====
+ *
+ * O CSV real de "como atrair um cliente" ainda listava "CVM —
+ * https://www.gov.br/cvm/pt-br" e "Atendimento CVM — …/canais_atendimento/
+ * consultas-reclamacoes-denuncias" como citadas pelo mercado. A âncora e o
+ * caminho diziam o órgão e o balcão do portal; quem "tocava o tema" era a
+ * SEÇÃO do concorrente em que o link aparecia ("Como atrair clientes") — e a
+ * seção do concorrente toca o tema sempre, porque a página é sobre ele.
+ *
+ * O assunto da fonte oficial é o que ELA diz: a âncora e o caminho do
+ * endereço. A seção do concorrente só decide quando âncora e caminho não dizem
+ * assunto nenhum: âncora "clique aqui" no endereço raiz do portal, ou o artigo
+ * científico citado pelo domínio ("pmc.ncbi.nlm.nih.gov" →
+ * /articles/PMC9311318/), que só a seção diz do que trata. Não contam como
+ * assunto: palavra de serviço do portal ("atendimento", "canais",
+ * "consultas"), de link ("clique", "aqui", "acesse"), de endereço ("articles",
+ * "index", "pt", "br"), os pedaços do próprio domínio e o identificador com
+ * número.
+ */
+const DE_LINK = new Set(["clique", "aqui", "acesse", "acessar", "link", "links", "site", "pagina", "saiba", "veja", "confira", "leia", "fonte", "fontes", "www", "gov", "http", "https"].map(raiz));
+const DE_ENDERECO = new Set([
+  "articles", "article", "artigo", "artigos", "post", "posts", "pagina", "paginas", "page", "pages", "index", "view", "abstract", "full", "pdf",
+  "doc", "docs", "download", "downloads", "arquivo", "arquivos", "content", "conteudo", "conteudos", "html", "htm", "php", "aspx", "jsp",
+].map(raiz));
+
+/*
+ * 2026-10-09 (correção · suites-R4) · LEI, RESOLUÇÃO, RDC, CÓDIGO E MANUAL NOMEIAM O
+ * INSTRUMENTO, NÃO O ASSUNTO DO ARTIGO. "Código de Defesa do Consumidor" numa
+ * seção "Cuidados legais nas promoções de estética", "RDC nº 96/2008" em "Regras
+ * de publicidade…" e "Resolução CFM 2.336/2023" em "O que o CFM permite na
+ * publicidade médica" saíam como "oficial fora do tema": a âncora falava do
+ * instrumento e decidia sozinha. A fonte regulatória que nomeia o instrumento
+ * volta à régua de antes (âncora, caminho E a seção em que o mercado a cita);
+ * a home do órgão sem instrumento ("CVM", "Atendimento CVM") continua pela
+ * âncora e sai.
+ */
+const INSTRUMENTO_NORMATIVO = /\b(?:lei|leis|resolucao|resolucoes|rdc|portaria|decreto|codigo|norma|normas|normativa|instrucao normativa|manual|cartilha|guia|nota tecnica|regulamento|estatuto|ccivil)\b/;
+
+function assuntoDoOficial(citacao: RadarMarketCitation, caminho: string, comAsSecoes: string): string {
+  const proprio = [citacao.title || "", caminho.replace(/[/_.-]+/g, " ")].join(" · ");
+  if (INSTRUMENTO_NORMATIVO.test(plano(proprio))) return comAsSecoes;
+  const doDominio = new Set(plano(`${partesDaUrl(citacao.url || "").host} ${citacao.domain || ""}`).split(" ").filter(Boolean).map(raiz));
+  const dizAssunto = [...raizesDeConteudo(proprio)]
+    .some(item => !SERVICO_DO_PORTAL.has(item) && !DE_LINK.has(item) && !DE_ENDERECO.has(item) && !doDominio.has(item) && !/\d/.test(item));
+  return dizAssunto ? proprio : comAsSecoes;
 }
 
 /** 2026-10-08 · A fonte citada pelo mercado não serve a este artigo (ver `radarMarketCitationNoiseReason`). */

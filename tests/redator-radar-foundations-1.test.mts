@@ -129,11 +129,19 @@ test("A · o dossiê do artigo de YouTube vira fundamentos completos para o rote
   assert.deepEqual(f.youtube.recurrentChannels, ["O canal \"Dra. Marina Hayashida\" aparece mais de uma vez."]);
   assert.deepEqual(f.youtube.titlePatterns, ["Títulos usam o enquadramento \"Rotina\"."]);
 
-  /* blueprint multimodal */
-  assert.equal(f.youtube.format, "Rotina");
-  assert.equal(f.youtube.hookDirection?.statement, "Abra contrariando a promessa que a amostra repete.");
-  assert.deepEqual(f.youtube.script.map(p => p.block), ["Gancho", "Rotina"]);
+  /*
+   * 2026-10-09 · regra do piloto: a camada de vídeo é só o OBSERVADO, com a
+   * régua da fotografia. O que o blueprint antigo recomendava (formato
+   * vencedor, gancho, tom, linguagem, títulos e o roteiro genérico) não entra:
+   * o roteiro sai do artigo-modelo pela leitura do CSV de vídeo.
+   */
+  assert.equal(f.youtube.role, "PRIMARY");
+  assert.equal(f.youtube.ruler, "AMOSTRA_INTEIRA", "fotografia congelada antes da régua: lida como foi gravada");
+  for (const legado of ["format", "hookDirection", "titleDirections", "script", "tone", "languageDirection"]) {
+    assert.equal(legado in f.youtube, false, `${legado} saiu da projeção`);
+  }
   assert.equal(f.multimodal?.youtubeLongForm, 38);
+  assert.equal(f.review, null, "sem Amazon no pacote, sem camada de review");
 
   /* SERP/evidências disponíveis */
   assert.deepEqual(f.evidence.sources, ["YOUTUBE_SERP"]);
@@ -213,7 +221,8 @@ test("F · DOSSIER_VISIBLE_IN_SCRIPT = YES · DOSSIER_VISIBLE_IN_CAROUSEL = YES 
   const ambiente = semComentarios(await fonte("../modules/redator/writer-derived-environment.tsx"));
   assert.match(ambiente, /import \{ WriterRadarFoundationsPanel \} from "@\/modules\/redator\/writer-radar-foundations-panel"/);
   /* Roteiro e carrossel são o MESMO componente, discriminado por `kind`: um painel serve aos dois. */
-  assert.match(ambiente, /cenaSelecionada\s*\?\s*<WriterMediaAnchorPanel[\s\S]*?:\s*<>[\s\S]*?<WriterRadarFoundationsPanel document=\{document\} compact\/>/,
+  /* 2026-10-09 · com a Marca, para o painel ler o artigo-modelo concluído do pacote. */
+  assert.match(ambiente, /cenaSelecionada\s*\?\s*<WriterMediaAnchorPanel[\s\S]*?:\s*<>[\s\S]*?<WriterRadarFoundationsPanel document=\{document\} compact brandId=\{brandId\}\/>/,
     "sem cena aberta o painel direito precisa ser o dossiê; com cena aberta, a mídia dela");
   assert.match(ambiente, /document\?: ContentDocument \| null/);
   /* Metadados opcionais continuam recolhidos e secundários. */
@@ -224,14 +233,17 @@ test("F · DOSSIER_VISIBLE_IN_SCRIPT = YES · DOSSIER_VISIBLE_IN_CAROUSEL = YES 
 test("G · DOSSIER_VISIBLE_IN_ARTICLE = YES — o artigo lê a MESMA projeção", async () => {
   const writer = semComentarios(await fonte("../components/editorial/professional-writer.tsx"));
   assert.match(writer, /import \{ WriterRadarFoundationsPanel \} from "@\/modules\/redator\/writer-radar-foundations-panel"/);
-  assert.match(writer, /<WriterRadarFoundationsPanel document=\{selected\}\/>/);
+  assert.match(writer, /<WriterRadarFoundationsPanel document=\{selected\} brandId=\{selectedBrandId\}\/>/);
   /* E o ambiente derivado recebe o documento de origem — não uma cópia. */
   assert.match(writer, /<WriterDerivedEnvironment[^>]*document=\{selected\}/);
   const painel = semComentarios(await fonte("../modules/redator/writer-radar-foundations-panel.tsx"));
   assert.match(painel, /radarFoundationsOf\(document\)/, "o painel lê a projeção compartilhada, não o bundle cru");
-  for (const secao of ["recommendation", "research", "youtube", "blueprint", "evidence", "coverage", "limitations", "writer-may-not"]) {
+  /* 2026-10-09 · o bloco "Blueprint multimodal" (formato vencedor, gancho, tom, linguagem, estrutura sugerida) saiu; entraram o artigo-modelo, o cruzamento e a review. */
+  for (const secao of ["recommendation", "research", "youtube", "cross-serp", "review", "evidence", "coverage", "limitations", "writer-may-not"]) {
     assert.ok(painel.includes(`testid="${secao}"`), `seção ${secao} ausente do painel`);
   }
+  assert.ok(painel.includes('data-radar-foundations-section="article-blueprint"'), "o artigo-modelo tem bloco próprio");
+  assert.equal(painel.includes('testid="blueprint"'), false, "o bloco do blueprint antigo saiu");
 });
 
 test("H · EDITORIAL_OUTPUT_BLOCKS_DERIVED_FORMATS = NO — recomendação é exibida, não decide aba", async () => {
@@ -242,7 +254,14 @@ test("H · EDITORIAL_OUTPUT_BLOCKS_DERIVED_FORMATS = NO — recomendação é ex
   assert.equal(/editorialOutput|recommendations|radarFoundationsOf/.test(writer), false, "a tela do artigo passou a decidir formato pela recomendação");
   assert.equal(/editorialOutput|recommendations|radarFoundationsOf/.test(ambiente), false, "o ambiente derivado passou a decidir pela recomendação");
   const painel = semComentarios(await fonte("../modules/redator/writer-radar-foundations-panel.tsx"));
-  assert.match(painel, /não limita o formato/);
+  /*
+   * 2026-10-09 (correção) · a recomendação continua exibida e continua não sendo
+   * gate; agora dita como o que é — matéria-prima do blueprint anterior: a
+   * estrutura e o formato são os do artigo-modelo (e a saída Shorts × vídeo
+   * longo não aparece: o formato do vídeo é o do plano).
+   */
+  assert.match(painel, /sugestão do blueprint anterior — a estrutura e o formato são os do artigo-modelo/);
+  assert.match(painel, /Recomendação editorial \(matéria-prima do artigo-modelo\)/);
   /* Um documento cuja recomendação é ARTICLE ainda produz roteiro e carrossel. */
   const f = radarFoundationsOf(documentoV2());
   assert.equal(f?.recommendations[0].output, "ARTICLE");
@@ -267,14 +286,25 @@ test("J · a projeção e o painel não gravam nada no rascunho", async () => {
   assert.ok(escritas.length > 0);
   for (const escrita of escritas) assert.equal(/dossier|foundations|bundle/i.test(escrita), false, `escrita no rascunho com dossiê: ${escrita}`);
   const painel = semComentarios(await fonte("../modules/redator/writer-radar-foundations-panel.tsx"));
-  assert.equal(/fetch\(|setDraft|onChange=|useState\(/.test(painel), false, "o painel é somente leitura");
+  /*
+   * 2026-10-09 · o painel passou a LER o artigo-modelo do pacote (regra do
+   * piloto): uma leitura GET da rota do Redator, e nada mais. Continua sem
+   * escrever no rascunho e sem nenhum outro pedido de rede.
+   */
+  assert.equal(/setDraft|onChange=|method:\s*"(POST|PUT|PATCH|DELETE)"/.test(painel), false, "o painel é somente leitura");
+  assert.deepEqual(painel.match(/fetch\(`[^`]*`/g), ["fetch(`/api/redator/article-blueprint?brandId=${encodeURIComponent(marca)}&documentId=${encodeURIComponent(documentId)}`"], "a única chamada é a leitura do artigo-modelo");
 });
 
 test("K · PROVIDER_CALL_REQUIRED = NO · MIGRATION_REQUIRED = NO · AI = 0", async () => {
   for (const caminho of ["../lib/redator/radar-foundations.ts", "../modules/redator/writer-radar-foundations-panel.tsx"]) {
     const texto = semComentarios(await fonte(caminho));
-    assert.equal(/fetch\(|dataforseo|openai|anthropic|supabase|server-only/i.test(texto), false, `${caminho} sai do cliente`);
+    assert.equal(/dataforseo|openai|anthropic|supabase|server-only/i.test(texto), false, `${caminho} sai do cliente`);
   }
+  /* 2026-10-09 · a projeção continua sem rede; o painel só lê a rota do Redator (que não chama provider nem IA). */
+  assert.equal(/fetch\(/.test(semComentarios(await fonte("../lib/redator/radar-foundations.ts"))), false);
+  const rota = semComentarios(await fonte("../app/api/redator/article-blueprint/route.ts"));
+  assert.match(rota, /export async function GET/);
+  assert.equal(/generateStructuredAI|resolveDeepSeekCanonicalConfig|export async function (POST|PUT|PATCH|DELETE)/.test(rota), false, "a rota do painel não chama IA nem grava");
   /* Nenhum contrato mudou: o dossiê continua no campo que já existia. */
   const contratos = await fonte("../lib/arquiteto/contracts.ts");
   assert.match(contratos, /dossier: RadarWriterDossierSchema\.nullable\(\)\.default\(null\)/);
@@ -496,6 +526,7 @@ test("O · ESTRUTURAL · a semeadura lê pelo módulo estreito, por Marca, em s�
   assert.match(leitor, /radarFoundationsOfDossier\(dossier, \{ editorialContext: head\.editorialContext \}\)/);
 
   const rota = semComentarios(await fonte("../app/api/redator/seed/route.ts"));
-  assert.match(rota, /const \{ document, foundations, contentHash \} = await writerSeedDocument\(input\.brandId, input\.documentId\)/);
+  /* 2026-10-09 · e o plano do vídeo do CSV, com o ator da sessão (a montagem do export). */
+  assert.match(rota, /const \{ document, foundations, contentHash, plan \} = await writerSeedDocument\(input\.brandId, input\.documentId, \{ actorUserId: profile\.userId \}\)/);
   assert.doesNotMatch(rota, /radarFoundationsOf\(|from "@\/lib\/redator\/radar-foundations"/);
 });

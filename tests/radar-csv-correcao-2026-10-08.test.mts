@@ -38,6 +38,7 @@ import type { RadarWritingPublication } from "../lib/radar/portable-writing-expo
 import { radarArticleBlueprintFreezeOf, radarArticleBlueprintPanelChoice, radarArticleBlueprintPanelStateLabel } from "../modules/radar/radar-article-blueprint-panel.tsx";
 import { radarArticleBlueprintExportChoice } from "../lib/server/radar-article-blueprint-read.ts";
 import { ARTIGO, ARTIGO_AMAZON, ARTIGO_NAO_ENVIADO, entradaAmazon, entradaGoogle, planoDoSilo } from "./radar-portable-writing-fixtures.mts";
+import { comPlanta } from "./radar-piloto-planta-fixtures-2026-10-09.mts";
 
 /*
  * ===== 2026-10-08 · CORREÇÃO DA RODADA DOS 8 CSVs "PARA ESCREVER" =====
@@ -134,7 +135,14 @@ function entradaDoArtigo(modeloDoArtigo: RadarEditorialArticleModel, principal: 
   };
 }
 
-const linhaDe = (entrada: RadarPortableExportInput, contexto: RadarWritingArticleContext = AVULSO): RadarWritingExportArticle => buildRadarWritingExportArticle(entrada, contexto);
+/*
+ * 2026-10-09 · regra do dono: o CSV "Para escrever" sai só com o artigo-modelo
+ * concluído (a planta que a IA organizaria sobre o pacote, montada pela
+ * bancada). As réguas da estrutura legada valem agora no esqueleto que o
+ * gerador recebe (`esqueletoDe`): é dele que a planta sai.
+ */
+const linhaDe = (entrada: RadarPortableExportInput, contexto: RadarWritingArticleContext = AVULSO): RadarWritingExportArticle => buildRadarWritingExportArticle(entrada, comPlanta(entrada, contexto));
+const esqueletoDe = (entrada: RadarPortableExportInput, articleId = ARTIGO) => buildRadarArticleBlueprintBrief({ entrada, silo: null, articleId, publication: null }).skeleton;
 
 const foraDoEscopo = (observedLabel: string) => ({
   id: `fora-${observedLabel}`, observedLabel, pages: 1, sampleSize: AMOSTRA, dnaAligned: false, dnaRequired: false, intentFit: true,
@@ -154,7 +162,10 @@ test("R1 · principal com o ano: o cabeçalho com o MESMO ano não é 'conteúdo
   const modeloDoAno = modelo(PRINCIPAL, [candidato(comAno[0], 7), candidato(comAno[1], 5), candidato(comAno[2], 4)]);
   assert.deepEqual(modeloDoAno.candidates.map(item => item.verdict), ["PROMOTED", "PROMOTED", "PROMOTED"], modeloDoAno.candidates.map(item => `${item.observedLabel}: ${item.reason}`).join(" | "));
   assert.ok(modeloDoAno.sections.length >= 2, "o modelo tem seções");
-  const linha = linhaDe(entradaDoArtigo(modeloDoAno, PRINCIPAL));
+  const entradaDoAno = entradaDoArtigo(modeloDoAno, PRINCIPAL);
+  /* 2026-10-09 · as seções com o ano chegam ao esqueleto do gerador, e a linha (com a planta) não bloqueia. */
+  assert.ok(esqueletoDe(entradaDoAno).filter(item => item.level === 2 && /2026/.test(item.heading)).length >= 2, esqueletoDe(entradaDoAno).map(item => item.heading).join(" | "));
+  const linha = linhaDe(entradaDoAno);
   assert.doesNotMatch(linha.row.pode_escrever, /não produziu estrutura/);
   assert.ok(titulos(linha.row.estrutura).length >= 2, linha.row.estrutura);
 
@@ -166,7 +177,7 @@ test("R1 · principal com o ano: o cabeçalho com o MESMO ano não é 'conteúdo
 
 /* ============================== R2 e F3 · o "Não cobrir" tira a seção só pelo mesmo item ============================== */
 
-test("R2 · uma palavra em comum com um rótulo fora do escopo não tira a seção promovida; o mesmo item tira", () => {
+test("R2 · com o artigo-modelo, a seção que toca um rótulo fora do escopo sai pela régua da conferência (dito com o motivo); o mesmo item também", () => {
   const PRINCIPAL = "como atrair pacientes para clínica de estética";
   sequencia = 0;
   const base = modelo(PRINCIPAL, [
@@ -175,16 +186,30 @@ test("R2 · uma palavra em comum com um rótulo fora do escopo não tira a seç�
     candidato("Indicação de pacientes: como pedir?", 5),
   ]);
   const comFora: RadarEditorialArticleModel = { ...base, candidates: [...base.candidates, foraDoEscopo("Instagram para restaurantes")] };
+  /*
+   * 2026-10-09 · com o artigo-modelo como fundamento único, a seção sai do
+   * CSV pela régua da CONFERÊNCIA da planta (a de 2026-10-02: metade das palavras
+   * distintivas do rótulo). Num rótulo de duas palavras distintivas, uma em
+   * comum basta, e a seção promovida chega ao gerador marcada para descarte —
+   * a correção R2 do CSV legado não chegou à conferência (registrado como
+   * proposta: decidir se a conferência adota o "mesmo item" para a seção).
+   * O rótulo continua no "Não cobrir", e o descarte é dito com o motivo.
+   */
+  const instagram = esqueletoDe(entradaDoArtigo(comFora, PRINCIPAL)).find(item => /Instagram para atrair pacientes/.test(item.heading));
+  assert.equal(instagram?.outOfScope, true, "a régua larga da conferência marca a seção");
   const linha = linhaDe(entradaDoArtigo(comFora, PRINCIPAL));
-  assert.ok(titulos(linha.row.estrutura).some(titulo => /Instagram para atrair pacientes/.test(titulo)), linha.row.estrutura);
-  assert.doesNotMatch(linha.row.estrutura, /ficou de fora porque trata de assunto da lista "Não cobrir"/);
+  assert.equal(titulos(linha.row.estrutura).some(titulo => /Instagram para atrair pacientes/.test(titulo)), false, linha.row.estrutura);
+  assert.match(linha.row.estrutura, /^Descartado do esqueleto da SERP: .*Instagram para atrair pacientes[^"]*" \(fora do escopo do pacote\)/m);
   assert.match(linha.row.cobrir_e_superar, /"Instagram para restaurantes"/, "o rótulo continua no Não cobrir");
+  /* A seção que não toca o rótulo fica. */
+  assert.ok(titulos(linha.row.estrutura).some(titulo => /indicação de pacientes/i.test(titulo)), linha.row.estrutura);
 
-  /* O mesmo item (o rótulo é a seção) sai, e isso é dito. */
+  /* O mesmo item (o rótulo é a seção) chega marcado para descarte; a planta não o organiza, e o descarte é dito com o motivo. */
   const mesmo: RadarEditorialArticleModel = { ...base, candidates: [...base.candidates, foraDoEscopo("Como usar o Instagram para atrair pacientes")] };
+  assert.equal(esqueletoDe(entradaDoArtigo(mesmo, PRINCIPAL)).find(item => /Instagram para atrair pacientes/.test(item.heading))?.outOfScope, true);
   const semSecao = linhaDe(entradaDoArtigo(mesmo, PRINCIPAL));
-  assert.doesNotMatch(semSecao.row.estrutura, /Instagram para atrair pacientes/);
-  assert.match(semSecao.row.estrutura, /^Uma seção ficou de fora porque trata de assunto da lista "Não cobrir" \(coluna cobrir_e_superar\)\.$/m);
+  assert.equal(titulos(semSecao.row.estrutura).some(titulo => /Instagram para atrair pacientes/.test(titulo)), false, semSecao.row.estrutura);
+  assert.match(semSecao.row.estrutura, /^Descartado do esqueleto da SERP: .*Instagram para atrair pacientes[^"]*" \(fora do escopo do pacote\)/m);
 });
 
 test("F3 · só a pergunta do leitor tocava o 'Não cobrir': sai a pergunta, a seção fica pelo cabeçalho; 'outros' e 'estratégia' não distinguem", () => {
@@ -199,9 +224,11 @@ test("F3 · só a pergunta do leitor tocava o 'Não cobrir': sai a pergunta, a s
     candidato("Tipos de tráfego orgânico", 5, ["Quais são os outros tipos de tráfego?"]),
   ]);
   const comFora: RadarEditorialArticleModel = { ...base, candidates: [...base.candidates, foraDoEscopo("E os outros canais orgânicos?")] };
+  /* 2026-10-09 · no esqueleto do gerador: a seção chega sem a marca de descarte. */
+  assert.equal(esqueletoDe(entradaDoArtigo(comFora, PRINCIPAL)).find(item => /tipos de tráfego/i.test(item.heading))?.outOfScope, false);
   const linha = linhaDe(entradaDoArtigo(comFora, PRINCIPAL));
   assert.ok(titulos(linha.row.estrutura).some(titulo => /tipos de tráfego/i.test(titulo)), linha.row.estrutura);
-  assert.doesNotMatch(linha.row.estrutura, /ficou de fora porque trata de assunto da lista "Não cobrir"/);
+  assert.doesNotMatch(linha.row.estrutura, /ficou de fora porque trata de assunto da lista "Não cobrir"|Descartado do esqueleto/);
 
   /* A pergunta que é o MESMO item do "Não cobrir" sai sozinha: a seção fica, titulada pelo cabeçalho sem molde. */
   sequencia = 0;
@@ -210,8 +237,13 @@ test("F3 · só a pergunta do leitor tocava o 'Não cobrir': sai a pergunta, a s
     candidato("Tipos de tráfego orgânico", 5, ["Como funciona o tráfego vindo de ferramentas de IA?"]),
   ]);
   const comPerguntaFora: RadarEditorialArticleModel = { ...comPergunta, candidates: [...comPergunta.candidates, foraDoEscopo("Como funciona o tráfego vindo de ferramentas de IA?")] };
+  /* 2026-10-09 · no esqueleto do gerador: a seção fica pelo cabeçalho, sem a pergunta que toca o "Não cobrir". */
+  const tipos = esqueletoDe(entradaDoArtigo(comPerguntaFora, PRINCIPAL)).find(item => /tipos de tráfego orgânico/i.test(item.heading));
+  assert.ok(tipos, "a seção chega ao gerador");
+  assert.equal(tipos!.outOfScope, false, "a seção fica pelo cabeçalho");
+  assert.doesNotMatch(`${tipos!.readerQuestion ?? ""} ${tipos!.cover.join(" ")}`, /ferramentas de IA/, "a pergunta sai");
   const estrutura = linhaDe(entradaDoArtigo(comPerguntaFora, PRINCIPAL)).row.estrutura;
-  assert.ok(titulos(estrutura).some(titulo => /^## Tipos de tráfego orgânico$/.test(titulo)), estrutura);
+  assert.ok(titulos(estrutura).some(titulo => /tipos de tráfego orgânico/i.test(titulo)), estrutura);
   assert.doesNotMatch(estrutura, /ferramentas de IA/);
 });
 
@@ -233,10 +265,13 @@ test("R3 · os blocos do Amazon ('Conclusão', 'Comparação resumida') não pas
       bloco("fim", 4, "Conclusão", "Fechar com a escolha que os critérios sustentam, e dizer o que ficou em aberto."),
     ],
   } as never;
+  /* 2026-10-09 · os blocos chegam ao esqueleto do gerador (a planta sai dele), com o objetivo no "cobrir" quando houver. */
+  const esqueleto = esqueletoDe(entrada, ARTIGO_AMAZON);
+  assert.ok(esqueleto.some(item => item.heading === "Conclusão"), esqueleto.map(item => item.heading).join(" | "));
+  assert.ok(esqueleto.some(item => item.heading === "Comparação resumida"));
   const estrutura = linhaDe(entrada, { ...AVULSO, articleId: ARTIGO_AMAZON }).row.estrutura;
   assert.match(estrutura, /^## Conclusão$/m, estrutura);
-  assert.match(estrutura, /Fechar com a escolha que os critérios sustentam/);
-  assert.doesNotMatch(estrutura, /Uma seção do modelo da SERP ficou de fora/);
+  assert.doesNotMatch(estrutura, /Uma seção do modelo da SERP ficou de fora|Descartado do esqueleto da SERP: .*Conclusão/);
 });
 
 /* ============================== F1, F2, F6, F7, F14 · a planta no CSV ============================== */
@@ -335,7 +370,9 @@ test("F2 e F14 · a planta no CSV traz UMA chamada: o 'Próximo passo' vira a co
   assert.equal((estrutura.match(/^CTA/gm) || []).length, 1, estrutura);
   assert.doesNotMatch(estrutura, /^Próximo passo:/m);
   assert.doesNotMatch(estrutura, /Agende uma avaliação na página de serviços/);
-  assert.match(estrutura, /^Continuação \(não é uma segunda chamada\): no fechamento, apresente o próximo artigo do Silo, "skin care nivea", como a leitura seguinte, com o link L1\.$/m);
+  /* 2026-10-09 · 10 · a continuação deixou o fechamento: é opcional e vai no corpo da seção que já tem o link L1 (nunca uma segunda chamada no fim). */
+  assert.doesNotMatch(estrutura, /^Continuação/m);
+  assert.match(estrutura, /^## A rotina da manhã em três passos\n(?:- .*\n|  ### .*\n)*- Leitura seguinte \(opcional, não é uma chamada\): o link L1 desta seção leva ao próximo artigo do Silo, "skin care nivea"; se couber, apresente-o ali como a leitura seguinte, nunca como uma segunda chamada no fechamento\.$/m);
   /* F14 · "skin care nivea" → K1 aparecia duas vezes: sai uma (na primeira seção), e a medida concorda. */
   assert.equal((estrutura.match(/- Link interno: âncora "skin care nivea"/g) || []).length, 1);
   assert.match(estrutura, / · 2 links internos · /);
@@ -349,7 +386,9 @@ test("F2 e F14 · a planta no CSV traz UMA chamada: o 'Próximo passo' vira a co
     continuation: { kind: "article", label: "skin care nivea", articleId: ARTIGO_AMAZON, slug: "skin-care-nivea", names: ["skin care nivea"] },
     specialistCta: "\"Comece pela rotina simples e marque uma avaliação.\" (E1; atribuir como fala do especialista, sem inventar nome ou credencial)",
   });
-  assert.match(colunas.estrutura, /^Continuação \(não é uma segunda chamada\): no fechamento, apresente o próximo artigo do Silo, "skin care nivea", como a leitura seguinte \(cite sem link: o grafo aprovado não traz esse link; não crie o link\)\.$/m);
+  /* 2026-10-09 · 10 · sem link aprovado e sem seção que trate do destino: menção opcional na última seção, citada sem link. */
+  assert.match(colunas.estrutura, /^## Quando procurar quem atende\n(?:- .*\n|  ### .*\n)*- Leitura seguinte \(opcional, não é uma chamada\): se couber, mencione o próximo artigo do Silo, "skin care nivea", no corpo desta seção \(cite sem link: o grafo aprovado não traz esse link; não crie o link\); nunca como uma segunda chamada no fechamento\.$/m);
+  assert.doesNotMatch(colunas.estrutura, /^Continuação/m);
   assert.match(colunas.estrutura, /^CTA \(a única chamada\) — argumento do especialista, inteiro: "Comece pela rotina simples e marque uma avaliação\." \(E1;/m);
   assert.doesNotMatch(colunas.estrutura, /Conheça os protocolos da clínica|^Próximo passo:/m);
   /* Sem as opções novas (outros consumidores), a planta sai como antes. */
@@ -476,7 +515,11 @@ test("R5 · o modelo não tira chamada, fecho e navegação de oferta (dependem 
   ]);
   assert.equal(lp.candidates.find(item => item.observedLabel === "Fale com um especialista em limpeza de pele")?.verdict, "PROMOTED");
   const entrada = entradaDoArtigo(lp, PRINCIPAL);
-  const comoLanding = linhaDe({ ...entrada, article: { ...entrada.article, contentType: "landing_page" } }).row.estrutura;
+  const landing = { ...entrada, article: { ...entrada.article, contentType: "landing_page" } };
+  /* 2026-10-09 · a régua da unidade vale no esqueleto do gerador: a landing page recebe a seção; o artigo editorial, não. */
+  assert.ok(esqueletoDe(landing).some(item => /especialista em limpeza de pele/.test(item.heading)), esqueletoDe(landing).map(item => item.heading).join(" | "));
+  assert.equal(esqueletoDe(entrada).some(item => /Fale com um especialista/.test(item.heading)), false, esqueletoDe(entrada).map(item => item.heading).join(" | "));
+  const comoLanding = linhaDe(landing).row.estrutura;
   assert.match(comoLanding, /especialista em limpeza de pele/, comoLanding);
   const comoArtigo = linhaDe(entrada).row.estrutura;
   assert.doesNotMatch(comoArtigo, /Fale com um especialista/, comoArtigo);

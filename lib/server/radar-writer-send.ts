@@ -41,7 +41,8 @@
 import { RadarWriterBundleRecordSchema, type RadarAnalysisVersion, type RadarWriterBundleRecord } from "../radar/analysis-contracts.ts";
 import { radarFrozenObservedAtOfAnalysis } from "../radar/evidence-bundle-runtime.ts";
 import { assertRadarEvidenceBundleIntegrity, radarEvidenceBundleMatchesArticle, type RadarEvidenceBinding, type RadarEvidenceBundle } from "../radar/evidence-bundle.ts";
-import type { RadarHandoffReadiness } from "../radar/handoff-readiness.ts";
+import { RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING, radarArticleBlueprintMissingBlock, type RadarHandoffReadiness } from "../radar/handoff-readiness.ts";
+import { readWriterApprovedArticleBlueprint, type WriterBlueprintInvestigation } from "./writer-evidence-sources.ts";
 import { ContentDocumentSchema, type ArticleDNA, type ContentDocument, type SiloDNA, type VersionEnvelope } from "../arquiteto/contracts.ts";
 import { buildRadarDocument, radarDocumentId, radarWriterDocumentIdentity, resolveRadarImportEligibility, type RadarImportOutcome } from "../redator/radar-import.ts";
 import { radarWriterMayNotFor } from "../redator/writer-handoff.ts";
@@ -50,6 +51,8 @@ import { resolveRadarCanonicalDossier } from "./radar-canonical-dossier.ts";
 import { RADAR_NO_AUTHORITIES, loadRadarCanonicalAuthorities, type RadarCanonicalAuthorities } from "./radar-canonical-authorities.ts";
 import { ArtifactRepository, ContentDocumentRepository, DecisionEventRepository, WorkflowRepository } from "./editorial-repositories.ts";
 import { contentHash } from "../arquiteto/versioning.ts";
+import { radarCurrentArticleDnaVersion, radarTransportedArticleDnaVersionIdOf } from "../radar/article-dna-current.ts";
+import { writerBlueprintWithCurrentNames } from "../redator/writer-blueprint-for-writing.ts";
 
 export class RadarWriterSendError extends Error {
   readonly code: string;
@@ -114,14 +117,19 @@ function siloDoItemDoRadar(item: ItemDeWorkflow): string | null {
  */
 export type RadarWriterHandoffPorts = {
   loadRadarState: typeof radarStartPorts.loadRadarState;
-  loadArticleFoundation: (input: { brandId: string; articleId: string }) => Promise<RadarEvidenceBinding | null>;
+  /*
+   * 2026-10-09 (correção) · `transportedVersionId` (aditivo, nas três leituras do
+   * ArticleDNA): a versão que o item do Radar transporta. Existindo no acervo,
+   * ela vale, mesmo com uma sucessora aprovada depois do envio.
+   */
+  loadArticleFoundation: (input: { brandId: string; articleId: string; transportedVersionId?: string | null }) => Promise<RadarEvidenceBinding | null>;
   /** O ArticleDNA e o Silo inteiros: a identidade do documento sai deles. */
   /*
    * 2026-10-08 · `siloId` é o do RadarItem, resolvido pelo handoff do Arquiteto.
    * O ArticleDNA territorial nasce sem `siloId` (o Silo mora no SiloDNA), e sem
    * esta reserva o documento saía com a referência legada `silo:<articleId>`.
    */
-  loadArticleIdentity: (input: { brandId: string; articleId: string; siloId?: string | null }) => Promise<{ article: VersionEnvelope<ArticleDNA>; silo: VersionEnvelope<SiloDNA> | null } | null>;
+  loadArticleIdentity: (input: { brandId: string; articleId: string; siloId?: string | null; transportedVersionId?: string | null }) => Promise<{ article: VersionEnvelope<ArticleDNA>; silo: VersionEnvelope<SiloDNA> | null } | null>;
   findWorkflowItem: (input: { brandId: string; articleId: string; stage: "radar" }) => Promise<ItemDeWorkflow | null>;
   findDocument: (input: { brandId: string; articleId: string }) => Promise<ContentDocument | null>;
   createDocument: (input: { brandId: string; articleId: string; document: ContentDocument; articleDnaVersionId: string; slug: string; actorId: string }) => Promise<void>;
@@ -134,16 +142,53 @@ export type RadarWriterHandoffPorts = {
    */
   transitionRadar: (input: { id: string; expectedLock: number; actorId: string }) => Promise<void>;
   appendDecision: (input: { brandId: string; workflowItemId: string; articleId: string; fromState: string; actorId: string }) => Promise<void>;
-  loadCanonicalAuthorities: (input: { brandId: string; articleId: string; analysis: RadarAnalysisVersion }) => Promise<RadarCanonicalAuthorities>;
+  loadCanonicalAuthorities: (input: { brandId: string; articleId: string; analysis: RadarAnalysisVersion; transportedVersionId?: string | null }) => Promise<RadarCanonicalAuthorities>;
+  /**
+   * 2026-10-09 · O ARTIGO-MODELO OBRIGATÓRIO. A planta concluída que o Redator
+   * vai ler para ESTE pacote — a MESMA leitura do Redator
+   * (`readWriterApprovedArticleBlueprint`: hash exato do dossiê ou a concluída
+   * do mesmo congelamento e ArticleDNA). Só metadados, nunca a planta.
+   */
+  loadArticleBlueprint: (input: { brandId: string; articleId: string; bundleHash: string; investigation: WriterBlueprintInvestigation | null }) => Promise<RadarWriterArticleBlueprintCheck>;
 };
 
+/** 2026-10-09 · o que o envio precisa saber da planta: existe a concluída deste pacote, não existe, ou a leitura falhou. */
+export type RadarWriterArticleBlueprintCheck =
+  /*
+   * 2026-10-09 (correção) · `blueprint`, aditivo: a planta LIDA (nomes atuais e a
+   * leitura do CSV), para o documento gravar a virada do Assunto pela seção
+   * dela. A bancada que não a devolve continua válida (a virada sai "sem planta
+   * em mãos", e o Redator a troca na leitura).
+   */
+  | { kind: "approved"; versionNumber: number | null; blueprint?: unknown }
+  | { kind: "missing"; reason: string }
+  | { kind: "read_failed"; reason: string };
+
+/** 2026-10-09 · o código da recusa por falta de planta (do módulo puro, para a tela e o MCP o reconhecerem). */
+export { RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING };
+
+/*
+ * 2026-10-09 · A VERSÃO DO ARTICLEDNA É A VIGENTE, NÃO A PRIMEIRA QUE O BANCO
+ * DEVOLVE. As três portas abaixo escolhiam com `find()` sobre uma lista sem
+ * ordem — numa tabela que só recebe insert, quase sempre a versão MAIS ANTIGA —
+ * enquanto o export e o gerador do artigo-modelo já usam a regra da plataforma
+ * (`radarCurrentArticleDnaVersion`). Com duas versões (reajuste "Melhoria
+ * gravada"), o envio conferia a planta com outro ArticleDNA, recusava a planta
+ * recém-organizada e a tela oferecia organizar de novo (pago), em laço. Uma
+ * regra só: a última aprovada, a mesma do export, da planta e da semeadura.
+ *
+ * 2026-10-09 (correção) · NO RADAR, A TRANSPORTADA. O serviço lê o item do Radar
+ * antes e passa a versão que ele transporta (a que o Arquiteto enviou; o pacote
+ * e a planta foram feitos sobre ela). Uma sucessora aprovada depois do envio
+ * ("Gravar melhorias") não troca a versão: o item continua nela até o reenvio
+ * da versão nova ao Radar. Sem versão transportada, a regra da mesa.
+ */
 export const radarWriterHandoffPorts: RadarWriterHandoffPorts = {
   loadRadarState: input => radarStartPorts.loadRadarState(input),
 
-  async loadArticleFoundation({ brandId, articleId }) {
+  async loadArticleFoundation({ brandId, articleId, transportedVersionId }) {
     const artefatos = await new ArtifactRepository().list(brandId);
-    const article = artefatos.articles.find(version =>
-      version.payload.articleId === articleId && version.payload.brandId === brandId);
+    const article = radarCurrentArticleDnaVersion({ versions: artefatos.articles, events: artefatos.events, brandId, articleId, transportedVersionId });
     if (!article) return null;
     return {
       brandId,
@@ -153,10 +198,9 @@ export const radarWriterHandoffPorts: RadarWriterHandoffPorts = {
     };
   },
 
-  async loadArticleIdentity({ brandId, articleId, siloId: siloDoItem }) {
+  async loadArticleIdentity({ brandId, articleId, siloId: siloDoItem, transportedVersionId }) {
     const artefatos = await new ArtifactRepository().list(brandId);
-    const article = artefatos.articles.find(version =>
-      version.payload.articleId === articleId && version.payload.brandId === brandId);
+    const article = radarCurrentArticleDnaVersion({ versions: artefatos.articles, events: artefatos.events, brandId, articleId, transportedVersionId });
     if (!article) return null;
     const siloId = article.payload.siloId || siloDoItem || null;
     const silo = siloId
@@ -192,13 +236,32 @@ export const radarWriterHandoffPorts: RadarWriterHandoffPorts = {
     await new WorkflowRepository().transitionState(id, expectedLock, "sent_writer", actorId);
   },
 
-  async loadCanonicalAuthorities({ brandId, articleId, analysis }) {
+  async loadCanonicalAuthorities({ brandId, articleId, analysis, transportedVersionId }) {
     const artefatos = await new ArtifactRepository().list(brandId);
-    const article = artefatos.articles.find(version =>
-      version.payload.articleId === articleId && version.payload.brandId === brandId);
+    const article = radarCurrentArticleDnaVersion({ versions: artefatos.articles, events: artefatos.events, brandId, articleId, transportedVersionId });
     if (!article) return RADAR_NO_AUTHORITIES;
     /* 2026-10-08 · os SiloDNA já lidos: o Papel no Silo do contexto sai do vigente. */
     return loadRadarCanonicalAuthorities({ brandId, articleId, article, analysis, siloVersions: artefatos.silos });
+  },
+
+  /*
+   * 2026-10-09 · a leitura do Redator: "existe a concluída deste pacote?".
+   * (correção) Com o conteúdo — uma consulta a mais por envio, sem IA —, para o
+   * documento gravar a virada do Assunto pela planta, e não a frase genérica
+   * "sem planta em mãos" que o briefing do MCP servia como estava gravada.
+   */
+  async loadArticleBlueprint({ brandId, articleId, bundleHash, investigation }) {
+    const lido = await readWriterApprovedArticleBlueprint({ brandId }, { articleId, bundleHash, investigation }, { content: true });
+    if (lido.kind === "approved") {
+      return {
+        kind: "approved",
+        versionNumber: lido.meta.versionNumber,
+        blueprint: lido.content ? writerBlueprintWithCurrentNames(lido.content.blueprint, null, { sources: lido.content.sources }) : null,
+      };
+    }
+    /* Sem tabela ou com o banco recusando, não dá para conferir: é falha, não "falta organizar". */
+    if (lido.kind === "read_failed" || lido.kind === "table_missing") return { kind: "read_failed", reason: lido.reason };
+    return { kind: "missing", reason: lido.reason };
   },
 
   async appendDecision({ brandId, workflowItemId, articleId, fromState, actorId }) {
@@ -230,13 +293,19 @@ export async function sendRadarToWriter(entrada: {
    *
    * A identidade NÃO vem da análise: ela viria envelhecida junto com a
    * evidência, e um dossiê antigo pareceria atual para sempre.
+   *
+   * 2026-10-09 (correção) · Ela vem do ITEM do Radar: a versão que ele
+   * transporta é a que o Arquiteto enviou, e o acervo a confirma mesmo com uma
+   * sucessora aprovada depois. O item é lido antes, e as recusas continuam na
+   * ordem de antes (ArticleDNA ausente primeiro).
    */
-  const article = await portas.loadArticleFoundation(entrada);
+  const radarItem = await portas.findWorkflowItem({ brandId: entrada.brandId, articleId: entrada.articleId, stage: "radar" });
+  const transportada = radarTransportedArticleDnaVersionIdOf(radarItem);
+  const article = await portas.loadArticleFoundation({ brandId: entrada.brandId, articleId: entrada.articleId, transportedVersionId: transportada });
   if (!article) {
     throw new RadarWriterSendError("article_dna_not_found", "O ArticleDNA canônico deste artigo não foi encontrado.", 404);
   }
 
-  const radarItem = await portas.findWorkflowItem({ brandId: entrada.brandId, articleId: entrada.articleId, stage: "radar" });
   if (!radarItem) {
     throw new RadarWriterSendError("radar_workflow_item_not_found", "O item do Radar não foi encontrado no fluxo operacional.", 404);
   }
@@ -267,7 +336,7 @@ export async function sendRadarToWriter(entrada: {
   const documentoExistente = await portas.findDocument({ brandId: entrada.brandId, articleId: entrada.articleId });
 
   const autoridades = await portas.loadCanonicalAuthorities({
-    brandId: entrada.brandId, articleId: entrada.articleId, analysis: corrente,
+    brandId: entrada.brandId, articleId: entrada.articleId, analysis: corrente, transportedVersionId: transportada,
   });
 
   /*
@@ -312,7 +381,7 @@ export async function sendRadarToWriter(entrada: {
    */
   const prontidao = dossie.readiness;
 
-  const identidade = await portas.loadArticleIdentity({ brandId: entrada.brandId, articleId: entrada.articleId, siloId: siloDoItemDoRadar(radarItem) });
+  const identidade = await portas.loadArticleIdentity({ brandId: entrada.brandId, articleId: entrada.articleId, siloId: siloDoItemDoRadar(radarItem), transportedVersionId: transportada });
   if (!identidade) {
     throw new RadarWriterSendError("article_dna_not_found", "O ArticleDNA canônico deste artigo não foi encontrado.", 404);
   }
@@ -416,6 +485,49 @@ export async function sendRadarToWriter(entrada: {
     throw new RadarWriterSendError("radar_handoff_binding_mismatch", vinculo.reason, 409, prontidao);
   }
 
+  /*
+   * ===== 2026-10-09 · O ARTIGO-MODELO É OBRIGATÓRIO NO ENVIO (regra do dono) =====
+   *
+   * "Tudo que é de processos antigos tem que ser substituído pelos novos
+   * processos dos pilotos." O documento do Redator nasce para ser escrito pela
+   * planta concluída deste pacote — a MESMA que o Redator lê depois
+   * (`readWriterApprovedArticleBlueprint`, pela investigação congelada e pelo
+   * ArticleDNA). Sem ela, nada é criado: a recusa nomeia o passo que falta, e a
+   * tela e o MCP oferecem organizar (o custo dito antes do clique). A planta não
+   * entra no pacote nem no hash: o congelamento continua o mesmo.
+   */
+  const congeladoEm = radarFrozenObservedAtOfAnalysis(corrente.payload);
+  const artigoModelo = await portas.loadArticleBlueprint({
+    brandId: entrada.brandId,
+    articleId: entrada.articleId,
+    bundleHash: bundle.bundleHash,
+    /*
+     * 2026-10-09 (correção) · com o congelamento da Amazon do pacote, como o
+     * Redator, o CSV e o MCP leem: a planta organizada antes de a Amazon ser
+     * congelada (de novo) não vale aqui também — sem isto o envio aceitava a
+     * planta que o Redator recusa logo depois, e o documento nascia sem
+     * artigo-modelo legível. O pacote já está em memória: nada lido a mais.
+     */
+    investigation: congeladoEm
+      ? {
+        frozenAt: congeladoEm, articleDnaVersionId: article.articleDnaVersionId, articleDnaContentHash: article.articleDnaContentHash, articleDnaEntityId: identidade.article.entityId ?? null,
+        amazonFrozenAt: (bundle as RadarEvidenceBundle).research?.amazon?.frozenAt ?? null,
+      }
+      : null,
+  });
+  if (artigoModelo.kind === "read_failed") {
+    throw new RadarWriterSendError("radar_handoff_article_blueprint_unreadable", `Não foi possível conferir o artigo-modelo deste artigo: ${artigoModelo.reason}. Nada foi enviado ao Redator.`, 503);
+  }
+  if (artigoModelo.kind === "missing") {
+    const bloqueio = radarArticleBlueprintMissingBlock();
+    throw new RadarWriterSendError(
+      RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING,
+      bloqueio.message,
+      409,
+      { ready: false, headline: "Pacote para o Redator bloqueado", blocks: [bloqueio] },
+    );
+  }
+
   const record = recibo;
   const analysisVersionId = corrente.versionId;
   const change: RadarWriterHandoffChange = "CREATED";
@@ -429,7 +541,7 @@ export async function sendRadarToWriter(entrada: {
    * pacote stale faria o Redator escrever sobre evidência de um artigo que já
    * é outro — exatamente o que a identidade existe para impedir.
    */
-  const fundamentoAgora = await portas.loadArticleFoundation(entrada);
+  const fundamentoAgora = await portas.loadArticleFoundation({ brandId: entrada.brandId, articleId: entrada.articleId, transportedVersionId: transportada });
   if (!fundamentoAgora
     || fundamentoAgora.articleDnaVersionId !== article.articleDnaVersionId
     || fundamentoAgora.articleDnaContentHash !== article.articleDnaContentHash) {
@@ -447,6 +559,17 @@ export async function sendRadarToWriter(entrada: {
   const radarAtual = await portas.findWorkflowItem({ brandId: entrada.brandId, articleId: entrada.articleId, stage: "radar" });
   if (!radarAtual) {
     throw new RadarWriterSendError("radar_workflow_item_not_found", "O item do Radar não foi encontrado no fluxo operacional.", 404);
+  }
+  /*
+   * 2026-10-09 (correção) · com a versão transportada, o fundamento relido acima
+   * é o mesmo por construção (versão imutável). O que pode mudar no meio é o
+   * ITEM passar a transportar outra versão: aí o pacote descreve a anterior.
+   */
+  if (radarTransportedArticleDnaVersionIdOf(radarAtual) !== transportada) {
+    throw new RadarWriterSendError(
+      "radar_handoff_blocked_stale",
+      "O ArticleDNA mudou durante o envio: o pacote descreve outra versão do artigo e não foi entregue ao Redator.",
+    );
   }
 
   /*
@@ -477,6 +600,11 @@ export async function sendRadarToWriter(entrada: {
     now: entrada.sentAt,
     /* A nota de diferenciação da MESMA versão (SDD 2026-09-27, §5). */
     differentiation: identidade.article.payload.differentiation ?? null,
+    /*
+     * 2026-10-09 (correção) · a planta concluída conferida acima: a virada do
+     * Assunto é gravada pela seção dela (`radarWriterSubjectTurnLinesFromBlueprint`).
+     */
+    articleBlueprint: artigoModelo.kind === "approved" ? artigoModelo.blueprint ?? null : null,
     /* O Assunto da MESMA versão do ArticleDNA que a identidade fixa (F4.1). */
     subject: identidade.article.payload.subject ?? null,
   }));

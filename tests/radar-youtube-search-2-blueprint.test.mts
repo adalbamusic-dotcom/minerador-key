@@ -127,8 +127,15 @@ test("§2 · LONG_FORM e SHORTS têm estatística própria — nunca somada", ()
 
   assert.equal(longForm.format, "LONG_FORM");
   assert.equal(shorts.format, "SHORTS");
+  /*
+   * 2026-10-09 · a fotografia nasce da amostra PERTINENTE (régua do piloto): dos
+   * 7 Shorts, 4 ficam fora da conta ("Rotina de skincare barata" só cita o que
+   * todo título cita; um em inglês; dois sem o tema da busca). A linha da régua
+   * diz a conta.
+   */
   assert.equal(longForm.videoCount, 6);
-  assert.equal(shorts.videoCount, 7);
+  assert.equal(shorts.videoCount, 3);
+  assert.ok(blueprint.limitations.some(item => /^Amostra pertinente \(régua de 2026-10-09\): 6 de 6 longos e 3 de 7 Shorts entram na leitura/.test(item)), blueprint.limitations.join(" | "));
   assert.equal(longForm.videoCount + shorts.videoCount, blueprint.observed.comparableSize);
 
   /*
@@ -289,39 +296,42 @@ test("§5 · OBSERVED_VS_RECOMMENDED_SEPARATED — cada recomendação carrega o
 
 /* ======================= §6 · o roteiro recomendado ====================== */
 
-test("§6 · SCRIPT_RECOMMENDATION — e o aviso viaja com o dado", () => {
+test("§6 · SEM ROTEIRO GENÉRICO (2026-10-09): a fotografia nova grava script vazio — e o aviso continua no contrato", () => {
   const blueprint = blueprintReal();
 
-  assert.ok(blueprint.recommended.script.length >= 4);
-  for (const bloco of blueprint.recommended.script) {
-    assert.ok(bloco.purpose.length > 10);
-    /* Cada bloco diz DE ONDE veio; recomendação sem lastro é palpite. */
-    assert.ok(bloco.derivedFrom.length > 5, `bloco sem origem: ${bloco.block}`);
-  }
+  /*
+   * 2026-10-09 · regra do dono: o processo antigo é substituído. O roteiro
+   * "HOOK → CONTEXTO → BLOCO 1…" era o mesmo esqueleto para qualquer tema; o
+   * roteiro do vídeo é a planta do artigo-modelo (capítulos = seções), montado
+   * no CSV de vídeo e no Redator pela mesma função.
+   */
+  assert.deepEqual(blueprint.recommended.script, []);
 
   /*
-   * NUNCA DECLARAR QUE ESTA É A ESTRUTURA DOS CONCORRENTES — §6 é explícito.
-   *
-   * Sem transcript não sabemos a estrutura de vídeo nenhum. O aviso é campo do
-   * contrato, não rodapé de tela: quem consumir em outro módulo recebe junto.
+   * O campo do aviso continua no contrato congelado (fotografia antiga o lê com
+   * o roteiro que ela gravou), e a fotografia nova o carrega igual.
    */
   assert.equal(blueprint.recommended.scriptDisclaimer, RADAR_YOUTUBE_SCRIPT_DISCLAIMER);
   assert.match(blueprint.recommended.scriptDisclaimer, /não é a estrutura literal dos concorrentes/i);
   assert.match(blueprint.recommended.scriptDisclaimer, /não baixa nem transcreve/i);
 });
 
-test("§6 · SHORT não recebe roteiro de long-form encurtado", () => {
+test("§6 · o formato curto é a decisão única pela amostra pertinente — sem roteiro de Short genérico", () => {
   const corrida = corridaReal();
-  /* Uma SERP só de Shorts: a coorte líder passa a ser a curta. */
+  /* Uma SERP só de Shorts, com 3 pertinentes: abaixo de 4 eles descrevem casos — o vídeo segue a planta, em formato longo, sem faixa inventada. */
   const soShorts = { ...corrida, universe: corrida.universe.filter(item => item.universeClass === "COMPARABLE_SHORT") };
-  const blueprint = buildRadarYoutubeBlueprint({ run: soShorts, declaredIntent: "INFORMATIONAL", editorialTopics: [], generatedAt: "2026-09-14T19:00:00.000Z" });
+  const poucos = buildRadarYoutubeBlueprint({ run: soShorts, declaredIntent: "INFORMATIONAL", editorialTopics: [], generatedAt: "2026-09-14T19:00:00.000Z" });
+  assert.deepEqual(poucos.recommended.script, []);
+  assert.equal(poucos.recommended.durationSecondsRange, null);
+  assert.ok(poucos.limitations.some(item => /descrevem casos, não mercado: o vídeo segue o artigo-modelo, em formato longo/.test(item)), poucos.limitations.join(" | "));
 
-  const blocos = blueprint.recommended.script.map(item => item.block);
-  assert.deepEqual(blocos, ["GANCHO", "ENTREGA", "PROVA", "CORTE"], "o Short tem estrutura própria");
-  assert.equal(blocos.includes("CONTEXTO"), false, "um Short não tem contexto e desenvolvimento");
-
-  /* E a faixa de duração recomendada é a da coorte curta, não a somada. */
-  assert.ok(blueprint.recommended.durationSecondsRange!.max < 180, JSON.stringify(blueprint.recommended.durationSecondsRange));
+  /* Com 4 Shorts pertinentes, o formato é curto e a faixa é a da coorte curta, não a somada. */
+  const pertinentes = soShorts.universe.filter(item => /pele oleosa/i.test(item.title));
+  const quatro = { ...soShorts, universe: [...pertinentes, ...pertinentes.slice(0, 4 - pertinentes.length + 1).map((item, indice) => ({ ...item, videoId: `${item.videoId}x${indice}` }))] };
+  const curto = buildRadarYoutubeBlueprint({ run: quatro, declaredIntent: "INFORMATIONAL", editorialTopics: [], generatedAt: "2026-09-14T19:00:00.000Z" });
+  assert.ok(curto.observed.shorts.videoCount >= 4);
+  assert.deepEqual(curto.recommended.script, [], "um Short não ganha roteiro genérico: é o recorte da planta");
+  assert.ok(curto.recommended.durationSecondsRange!.max < 180, JSON.stringify(curto.recommended.durationSecondsRange));
 });
 
 /* ==================== §7 · duração em faixa, não número ================== */
@@ -333,23 +343,23 @@ test("§7 · DURATION_RANGES — P25 a P75, e nunca um número mágico", () => {
   assert.ok(faixa.min < faixa.max, "é faixa, não ponto");
 
   /*
-   * A FAIXA SAI DA COORTE LÍDER — e na SERP real ela é a de Shorts.
+   * A FAIXA SAI DA COORTE DO FORMATO DECIDIDO — e nunca das duas somadas.
    *
-   * São 7 Shorts contra 6 long-form. Recomendar a partir do long-form aqui
-   * mandaria mirar 13 minutos num terreno onde a maioria dos concorrentes
-   * entrega em menos de dois — e somar as duas coortes produziria uma faixa
-   * que nenhum dos formatos reconhece.
+   * Na amostra inteira eram 7 Shorts contra 6 long-form, e a faixa era a dos
+   * Shorts. 2026-10-09 · pela amostra PERTINENTE são 3 Shorts contra 6 longos:
+   * os longos lideram e a faixa é a deles. Somar as duas coortes produziria
+   * uma faixa que nenhum dos formatos reconhece.
    */
   const lider = blueprint.observed.shorts.videoCount > blueprint.observed.longForm.videoCount
     ? blueprint.observed.shorts
     : blueprint.observed.longForm;
-  assert.equal(lider.format, "SHORTS", `a coorte líder desta SERP é a de Shorts (${blueprint.observed.shorts.videoCount} × ${blueprint.observed.longForm.videoCount})`);
-  assert.equal(faixa.min, lider.durationSeconds.p25, "o piso é o P25 da coorte líder");
-  assert.equal(faixa.max, lider.durationSeconds.p75, "o teto é o P75 da coorte líder");
+  assert.equal(lider.format, "LONG_FORM", `a coorte pertinente que lidera é a de longos (${blueprint.observed.shorts.videoCount} × ${blueprint.observed.longForm.videoCount})`);
+  assert.equal(faixa.min, lider.durationSeconds.p25, "o piso é o P25 da coorte do formato");
+  assert.equal(faixa.max, lider.durationSeconds.p75, "o teto é o P75 da coorte do formato");
 
   /* E a faixa recomendada NÃO cai entre as duas medianas — o que seria a mistura. */
-  const medianaLong = blueprint.observed.longForm.durationSeconds.median!;
-  assert.ok(faixa.max < medianaLong, `a faixa recomendada (${faixa.max}s) invadiu o território do long-form (${medianaLong}s)`);
+  const medianaCurta = blueprint.observed.shorts.durationSeconds.median!;
+  assert.ok(faixa.min > medianaCurta, `a faixa recomendada (${faixa.min}s) invadiu o território dos Shorts (${medianaCurta}s)`);
 
   /* Sem duração observável, não se inventa faixa. */
   const corrida = corridaReal();
@@ -422,10 +432,11 @@ test("§9 · COMPETITIVE_GAPS nascem da diferença entre o ArticleDNA e a SERP",
     semCobertura.recommended.gaps.some(item => item.kind === "AUTORIDADE_ESCASSA"), false,
     "a SERP real tem médicos no topo: autoridade não é lacuna aqui",
   );
+  /* 2026-10-09 · títulos do tema (a fotografia lê a amostra pertinente): sem o tema, todos ficariam fora da conta. */
   const semMedicos = buildRadarYoutubeBlueprint({
     run: {
       ...corridaReal(),
-      universe: corridaReal().universe.map(item => ({ ...item, title: "Video generico", channelName: "Canal Qualquer" })),
+      universe: corridaReal().universe.map((item, indice) => ({ ...item, title: `Skincare para pele oleosa: vídeo ${indice + 1}`, channelName: "Canal Qualquer" })),
     },
     declaredIntent: null, editorialTopics: [], generatedAt: "2026-09-14T19:00:00.000Z",
   });
@@ -437,8 +448,9 @@ test("§9 · COMPETITIVE_GAPS nascem da diferença entre o ArticleDNA e a SERP",
   const corrida = corridaReal();
   const soLongForm = { ...corrida, universe: corrida.universe.filter(item => item.universeClass === "COMPARABLE_LONG_FORM") };
   const semShorts = buildRadarYoutubeBlueprint({ run: soLongForm, declaredIntent: null, editorialTopics: [], generatedAt: "2026-09-14T19:00:00.000Z" });
-  /* 2026-10-02 · a frase diz o que a AMOSTRA mostra ("Nenhum Short identificado na amostra coletada"), não que não há disputa. */
-  assert.ok(semShorts.recommended.gaps.some(item => item.kind === "FORMATO_AUSENTE" && /^Nenhum Short identificado na amostra coletada/.test(item.statement)));
+  /* 2026-10-02 · a frase diz o que a AMOSTRA mostra, não que não há disputa. 2026-10-09 · D10: concluída, sem "confira se a coleta traz". */
+  assert.ok(semShorts.recommended.gaps.some(item => item.kind === "FORMATO_AUSENTE" && item.statement === "Nenhum Short pertinente na amostra coletada: não é oportunidade comprovada — a coleta não trouxe esse formato."));
+  assert.ok(!semShorts.recommended.gaps.some(item => /confira se a coleta traz/.test(item.statement)));
 });
 
 /* ==================== §10 e §11 · o blueprint final ==================== */

@@ -30,6 +30,12 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = "chave-de-teste";
 
 const { createWriterServer } = await import("../app/api/mcp/redator/route.ts");
 const { writerSeedDocument } = await import("../lib/server/writer-seed.ts");
+/*
+ * 2026-10-09 · a semeadura monta o plano do vídeo pela montagem do CSV (regra do piloto). Estes testes provam
+ * só as leituras do documento: a montagem é injetada vazia (o Radar recusou montar), e nada sai do banco por ela.
+ */
+const portasSemMontagem = { assemble: async () => ({ montadas: [], recusados: [], congelamentos: new Map(), publicacoes: new Map(), planoDaSelecao: null, brandVoice: { kind: "none" } }) as never, blueprintMeta: async () => null };
+const semear = (brandId: string, documentId: string) => writerSeedDocument(brandId, documentId, { actorUserId: "ator-mcp", ports: portasSemMontagem });
 const { WriterDeliverableError } = await import("../lib/server/writer-deliverables.ts");
 const { runGuardian } = await import("../lib/redator/guardian.ts");
 const { radarFoundationsOf } = await import("../lib/redator/radar-foundations.ts");
@@ -184,8 +190,24 @@ function saveDraftRpc(body: Record<string, unknown>) {
 let artifactRows: Array<Record<string, unknown>> = [];
 let artifactReadFailure: string | null = null;
 
+/*
+ * 2026-10-09 · o artigo-modelo no falso (vazio por padrão: nenhuma planta).
+ * O briefing e os fundamentos do MCP conferem a planta pela leitura do
+ * Redator; o filtro é o do PostgREST (`eq.` e `in.(…)` em qualquer coluna).
+ */
+let blueprintRows: Array<Record<string, unknown>> = [];
+const filtraPorParametros = (rows: Array<Record<string, unknown>>, params: URLSearchParams) => rows.filter(row => {
+  for (const [coluna, valor] of params) {
+    if (["select", "order", "limit", "offset"].includes(coluna)) continue;
+    if (valor.startsWith("eq.") && String(row[coluna]) !== valor.slice(3)) return false;
+    if (valor.startsWith("in.(") && !valor.slice(4, -1).split(",").map(item => item.replace(/^"|"$/g, "")).includes(String(row[coluna]))) return false;
+  }
+  return true;
+});
+
 /* Responde só o necessário para a cadeia de autorização chegar ao work(). */
 function answer(table: string, select: string | null, params: URLSearchParams): unknown[] {
+  if (table === "radar_article_blueprints") return filtraPorParametros(blueprintRows, params).map(row => project(row, select));
   if (table === "editorial_artifact_versions") {
     const eq = (name: string) => (params.get(name) || "").replace(/^eq\./, "");
     return artifactRows
@@ -341,8 +363,26 @@ test("D4 · documento e briefing leem caminhos numa leitura só, sem o dossiê; 
   assert.deepEqual(briefResult.instructions, completo.instructions);
   assert.ok(briefResult.guards.some(guarda => /FAQ/.test(guarda)), "o briefing leva a guarda de FAQ");
   assert.equal(briefResult.warning, null);
-  assert.deepEqual(documentSelects(), [WRITER_BRIEF_SELECT]);
+  /*
+   * 2026-10-09 · o briefing confere o artigo-modelo pela leitura do Redator: o
+   * cabeçalho estreito do leitor (caminhos, nunca o payload) e os metadados da
+   * planta. Este documento não abre no cabeçalho (gravado fora do contrato
+   * atual): a conferência cai no hash exato do pacote, e sem planta o estado é
+   * explícito — nunca o legado.
+   */
+  const { WRITER_EVIDENCE_HEAD_SELECT } = await import("../lib/server/writer-evidence-document.ts");
+  assert.deepEqual(documentSelects(), [WRITER_BRIEF_SELECT, WRITER_EVIDENCE_HEAD_SELECT]);
   assert.ok(!bareColumns(WRITER_BRIEF_SELECT).includes("payload"));
+  assert.ok(!bareColumns(WRITER_EVIDENCE_HEAD_SELECT).includes("payload"));
+  const estadoDaPlanta = briefResult.articleBlueprintState as { status: string; action?: { who: string } };
+  assert.equal(estadoDaPlanta.status, "needs_article_blueprint");
+  assert.equal(estadoDaPlanta.action?.who, "human");
+  const leituraDaPlanta = queries.filter(query => query.table === "radar_article_blueprints");
+  assert.ok(leituraDaPlanta.length >= 1, "a planta é conferida");
+  for (const leitura of leituraDaPlanta) {
+    assert.ok(leitura.filters.includes(`brand_id=eq.${brandA.brandId}`), leitura.filters);
+    assert.doesNotMatch(leitura.select || "", /payload->blueprint|(^|,)payload(,|$)/, "só metadados da planta");
+  }
   const lidoDoBriefing = queries.find(query => query.table === "content_documents")?.responseBody || "";
   assert.doesNotMatch(lidoDoBriefing, new RegExp(PESO_NAO_LIDO));
   assert.ok(writerEvidenceJsonBytes(briefResult) <= WRITER_EVIDENCE_LIMITS.sliceMaxBytes);
@@ -413,8 +453,9 @@ test("Fase 0 · as linhas da virada não entram no cabeçalho comum; um caminho 
   const fonte = readFileSync(new URL("../lib/server/writer-evidence-reader.ts", import.meta.url), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   const chamadas = fonte.match(/readWriterEditorialContext\(context, head\)/g) || [];
-  assert.equal(chamadas.length, 2, "fundamentos e material, e mais ninguém");
-  assert.equal((fonte.match(/projecao\?\.fields\.subject \? await readWriterEditorialContext\(context, head\) : \[\]/g) || []).length, 2, "só com Assunto");
+  /* 2026-10-09 · e o painel do artigo-modelo, que mostra o Assunto com a virada pela planta (regra do piloto). */
+  assert.equal(chamadas.length, 3, "fundamentos, material e o painel do artigo-modelo, e mais ninguém");
+  assert.equal((fonte.match(/projecao\?\.fields\.subject \? linhasDoEnvioPelaPlanta\(head, projecao\.fields, await readWriterEditorialContext\(context, head\), \w+\) : (\[\]|null)/g) || []).length, 3, "só com Assunto, e com a virada pela planta");
 });
 
 test("Fase 0 · Guardião de outra Marca continua document_not_found, sem autorização nem auditoria depois", async () => {
@@ -584,7 +625,7 @@ const documentSelectsOf = (list: Query[]) => list.filter(query => query.table ==
 test("Fase 0 · a semeadura lê só os caminhos dos fundamentos, sempre pela Marca, e projeta o mesmo", async () => {
   resetV2();
   queries.length = 0;
-  const { document: lido, foundations, contentHash } = await writerSeedDocument(brandA.brandId, documentV2);
+  const { document: lido, foundations, contentHash } = await semear(brandA.brandId, documentV2);
   const completo = ContentDocumentSchema.parse(payloadV2());
 
   assert.deepEqual(foundations, radarFoundationsOf(completo), "os fundamentos são os mesmos do documento inteiro");
@@ -604,13 +645,13 @@ test("Fase 0 · a semeadura lê só os caminhos dos fundamentos, sempre pela Mar
 
 test("Fase 0 · semeadura: documento sem dossiê para na primeira consulta; outra Marca é document_not_found", async () => {
   queries.length = 0;
-  const v1 = await writerSeedDocument(brandA.brandId, documentA);
+  const v1 = await semear(brandA.brandId, documentA);
   assert.equal(v1.foundations, null);
   assert.equal(v1.document.schemaVersion, 2);
   assert.deepEqual(documentSelectsOf(queries), [WRITER_SEED_DOCUMENT_SELECT]);
 
   queries.length = 0;
-  await assert.rejects(writerSeedDocument(brandA.brandId, documentB),
+  await assert.rejects(semear(brandA.brandId, documentB),
     (error: unknown) => error instanceof WriterDeliverableError && error.code === "document_not_found" && error.status === 404);
   assert.deepEqual(documentSelectsOf(queries), [WRITER_SEED_DOCUMENT_SELECT]);
 });
@@ -620,7 +661,7 @@ test("Fase 0 · semeadura: dossiê fora do contrato é incompatível; pacote tro
   const quebrado = structuredClone(payloadV2()) as Record<string, unknown> & { importedContext: { dossier: Record<string, unknown> } };
   delete quebrado.importedContext.dossier.keywordContext;
   fullRows[documentV2] = { ...fullRows[documentV2], payload: quebrado };
-  await assert.rejects(writerSeedDocument(brandA.brandId, documentV2),
+  await assert.rejects(semear(brandA.brandId, documentV2),
     (error: unknown) => error instanceof WriterDeliverableError && error.code === "document_incompatible" && error.status === 422);
 
   /* Vínculo com o ArticleDNA fora do contrato: a leitura inteira recusava, a estreita também, na primeira consulta. */
@@ -630,7 +671,7 @@ test("Fase 0 · semeadura: dossiê fora do contrato é incompatível; pacote tro
   fullRows[documentV2] = { ...fullRows[documentV2], payload: semArtigo };
   assert.equal(ContentDocumentSchema.safeParse(semArtigo).success, false, "a leitura inteira recusaria");
   queries.length = 0;
-  await assert.rejects(writerSeedDocument(brandA.brandId, documentV2),
+  await assert.rejects(semear(brandA.brandId, documentV2),
     (error: unknown) => error instanceof WriterDeliverableError && error.code === "document_incompatible" && error.status === 422);
   assert.deepEqual(documentSelectsOf(queries), [WRITER_SEED_DOCUMENT_SELECT]);
 
@@ -643,7 +684,7 @@ test("Fase 0 · semeadura: dossiê fora do contrato é incompatível; pacote tro
     fullRows[documentV2] = { ...fullRows[documentV2], payload: trocado };
   };
   try {
-    await assert.rejects(writerSeedDocument(brandA.brandId, documentV2),
+    await assert.rejects(semear(brandA.brandId, documentV2),
       (error: unknown) => error instanceof WriterDeliverableError && error.code === "document_changed" && error.status === 409);
   } finally { afterDocumentRead = null; resetV2(); }
 });
@@ -967,23 +1008,86 @@ test("F4.2 · Guardião do MCP: com Assunto no ArticleDNA fixado, dois AVISOS (v
   } finally { artifactRows = []; artifactReadFailure = null; delete fullRows[id]; }
 });
 
-test("F4.1 · briefing do MCP: as linhas do envio saem em editorialContext; lista vazia não acrescenta chave", async () => {
+test("F4.1 · briefing do MCP: com o artigo-modelo concluído, as linhas do envio saem em editorialContext; lista vazia não acrescenta chave", async () => {
   const comLinhas = "writer:doc-assunto-briefing";
   const semLinhas = "writer:doc-assunto-briefing-vazio";
   const LINHAS = ["Tronco (Assunto): Consulta dermatológica online.", "Virada: onde quem redige decidir (sem sinal na SERP), levar o leitor de skin care noturno a Consulta dermatológica online."];
   briefRow(comLinhas, base => ({ ...base, importedContext: { ...(base.importedContext as Record<string, unknown>), editorialContext: LINHAS } }));
   briefRow(semLinhas, base => ({ ...base, importedContext: { ...(base.importedContext as Record<string, unknown>), editorialContext: [] } }));
+  /* 2026-10-09 · a planta concluída do mesmo pacote (o hash exato do dossiê do documento). */
+  blueprintRows = [{
+    id: "bp-briefing-1", brand_id: brandA.brandId, article_id: "artigo-e1", bundle_hash: "bundle-hash:e1", state: "APPROVED",
+    version_number: 2, approved_at: "2026-09-20T10:00:00+00:00", created_at: "2026-09-20T10:00:00+00:00", payload: { schemaVersion: 1 },
+  }];
   try {
     queries.length = 0;
     const brief = await callTool("get_writer_brief", { documentId: comLinhas });
     assert.equal(brief.ok, true, JSON.stringify(brief));
-    assert.deepEqual((brief.result as Record<string, unknown>).editorialContext, LINHAS);
-    assert.deepEqual(documentSelects(), [WRITER_BRIEF_SELECT]);
+    const resultado = brief.result as Record<string, unknown> & { articleBlueprintState: { status: string; sourceKey?: string } };
+    assert.deepEqual(resultado.editorialContext, LINHAS);
+    assert.equal(resultado.articleBlueprintState.status, "approved");
+    assert.equal(resultado.articleBlueprintState.sourceKey, "radar.blueprint/bp-briefing-1");
+    assert.equal(documentSelects()[0], WRITER_BRIEF_SELECT);
     assert.match(WRITER_BRIEF_SELECT, /r_editorialContext:payload->importedContext->editorialContext/);
     const vazio = await callTool("get_writer_brief", { documentId: semLinhas });
     assert.equal(vazio.ok, true, JSON.stringify(vazio));
     assert.equal("editorialContext" in (vazio.result as Record<string, unknown>), false, "sem linhas, o briefing de antes");
     const v1 = await callTool("get_writer_brief", { documentId: documentA });
     assert.equal("editorialContext" in (v1.result as Record<string, unknown>), false);
-  } finally { delete fullRows[comLinhas]; delete fullRows[semLinhas]; }
+
+    /*
+     * 2026-10-09 · regra do dono: SEM o artigo-modelo concluído, nunca o
+     * legado. As linhas do envio (sugestões do modelo editorial anterior) saem,
+     * e o estado diz o quê, por quê e onde organizar.
+     */
+    blueprintRows = [];
+    const semPlanta = await callTool("get_writer_brief", { documentId: comLinhas });
+    assert.equal(semPlanta.ok, true, JSON.stringify(semPlanta));
+    const semResultado = semPlanta.result as Record<string, unknown> & { articleBlueprintState: { status: string; omitted?: string[]; omittedReason?: string; action?: { buttons: string[]; cost: string } } };
+    assert.equal("editorialContext" in semResultado, false, "as linhas do envio não saem sem a planta");
+    assert.equal(semResultado.articleBlueprintState.status, "needs_article_blueprint");
+    assert.deepEqual(semResultado.articleBlueprintState.omitted, ["editorialContext"]);
+    assert.match(String(semResultado.articleBlueprintState.omittedReason), /modelo editorial anterior/);
+    assert.match(String(semResultado.articleBlueprintState.action?.cost), /Até 2 chamadas de IA/);
+    assert.doesNotMatch(JSON.stringify(semResultado.articleBlueprintState), /pend[eê]ncia|aguardando aprova|rascunho|preencher/i, "D10");
+  } finally { blueprintRows = []; delete fullRows[comLinhas]; delete fullRows[semLinhas]; }
+});
+
+test("2026-10-09 · fundamentos do MCP: o estado da planta junto; sem ela, o próximo passo começa pelo que falta", async () => {
+  blueprintRows = [];
+  const sem = await callTool("get_writer_foundations", { documentId: documentEvid });
+  assert.equal(sem.ok, true, JSON.stringify(sem));
+  const semResultado = sem.result as Record<string, unknown> & { articleBlueprintState: { status: string }; next: string };
+  assert.equal(semResultado.articleBlueprintState.status, "needs_article_blueprint");
+  assert.match(semResultado.next, /^Este documento não tem o artigo-modelo concluído/);
+  assert.ok(Buffer.byteLength(JSON.stringify(semResultado)) <= WRITER_EVIDENCE_LIMITS.foundationsMaxBytes);
+  blueprintRows = [{
+    id: "bp-fundamentos-1", brand_id: brandA.brandId, article_id: "artigo-e1", bundle_hash: "bundle-hash:e1", state: "APPROVED",
+    version_number: 1, approved_at: "2026-09-20T10:00:00+00:00", created_at: "2026-09-20T10:00:00+00:00", payload: { schemaVersion: 1 },
+  }];
+  try {
+    const com = await callTool("get_writer_foundations", { documentId: documentEvid });
+    assert.equal(com.ok, true, JSON.stringify(com));
+    const comResultado = com.result as Record<string, unknown> & { articleBlueprintState: { status: string; sourceKey: string }; next: string };
+    assert.equal(comResultado.articleBlueprintState.status, "approved");
+    assert.equal(comResultado.articleBlueprintState.sourceKey, "radar.blueprint/bp-fundamentos-1");
+    assert.doesNotMatch(comResultado.next, /^Este documento não tem o artigo-modelo/);
+  } finally { blueprintRows = []; }
+});
+
+test("2026-10-09 · read_writer_evidence: o blueprint competitivo antigo sai marcado como matéria-prima; a evidência comum, sem marca", async () => {
+  const comum = await callTool("read_writer_evidence", { documentId: documentEvid, sourceKey: "radar.bundle.specialist" });
+  assert.equal(comum.ok, true, JSON.stringify(comum));
+  assert.equal("role" in (comum.result as Record<string, unknown>), false);
+  /* As saídas que o blueprint antigo sugeria (pequenas, lidas direto do pacote): proveniência, com o marcador. */
+  const antigo = await callTool("read_writer_evidence", { documentId: documentEvid, sourceKey: "radar.bundle.editorialOutputs" });
+  assert.equal(antigo.ok, true, JSON.stringify(antigo));
+  const envelope = antigo.result as Record<string, unknown> & { etag: string };
+  assert.equal(envelope.role, "raw_material");
+  assert.match(String(envelope.rawMaterial), /^Matéria-prima, não estrutura: /);
+  assert.ok(JSON.stringify(envelope).includes("Cobrir a intenção."), "o dado continua servido como proveniência");
+  assert.ok(Buffer.byteLength(JSON.stringify(envelope)) <= WRITER_EVIDENCE_LIMITS.sliceDefaultBytes, "o teto pedido vale para a resposta inteira");
+  const igual = await callTool("read_writer_evidence", { documentId: documentEvid, sourceKey: "radar.bundle.editorialOutputs", ifNoneMatch: envelope.etag });
+  assert.equal((igual.result as Record<string, unknown>).notModified, true);
+  assert.equal((igual.result as Record<string, unknown>).role, "raw_material", "o 'não mudou' também diz que é matéria-prima");
 });

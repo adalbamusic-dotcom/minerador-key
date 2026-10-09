@@ -53,13 +53,14 @@ export async function startRadarAmazonRun(
   },
   ports: RadarStartPorts,
 ): Promise<{ run: RadarAmazonSearchRun; analysis: RadarAnalysisVersion; currentMode: RadarPrimarySearchMode | null }> {
-  const article = await ports.loadArticle({ brandId: input.brandId, articleId: input.articleId });
+  /* 2026-10-09 (correção) · a versão do item do Radar (a que a tela manda) é a transportada: o acervo a confirma, como no START do YouTube. */
+  const article = await ports.loadArticle({ brandId: input.brandId, articleId: input.articleId, transportedVersionId: input.articleDnaVersionId });
   if (!article) throw new RadarStartError("article_dna_not_found", "O ArticleDNA canônico deste artigo não foi encontrado para esta marca.", 404);
   if (article.versionId !== input.articleDnaVersionId) {
     throw new RadarStartError("radar_article_dna_mismatch", "A versão do ArticleDNA enviada diverge da versão canônica do artigo.", 409);
   }
 
-  const contexto = await ensureRadarAnalysisContext({ brandId: input.brandId, articleId: input.articleId, actorId: input.actorId }, ports);
+  const contexto = await ensureRadarAnalysisContext({ brandId: input.brandId, articleId: input.articleId, actorId: input.actorId, articleDnaVersionId: input.articleDnaVersionId }, ports);
 
   /*
    * O ALVO SAI DO QUE ESTÁ GRAVADO, e a fonte é aditiva.

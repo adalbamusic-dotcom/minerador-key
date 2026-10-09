@@ -359,7 +359,8 @@ test("2 · o vídeo inteiro: os pertinentes do topo, o que atravessa Google e Yo
   assert.match(cadeia, /^- Referência: pertinentes mais bem posicionados no YouTube: "[^"]+" — https:\/\/www\.youtube\.com\/watch\?v=[\w-]+ · /m);
   assert.match(cadeia, /atravessa as duas buscas: "Limpeza e Hidratação: A Base do Skincare Noturno \(Minha rotina\)[^"]*" \(posição \d+ no YouTube e no bloco de vídeos curtos do Google\)/);
   /* 2026-10-07 (revisão) · a faixa é a do formato que a sequência segue (aqui o curto: a SERP aponta Shorts), não a da coorte que lidera. */
-  assert.match(cadeia, /^- Observação: padrões de título dos pertinentes: [^;]+; faixa \S+ a \S+ \(Shorts pertinentes\)$/m);
+  /* 2026-10-09 · o rótulo diz a régua da leitura: os padrões são os dos pertinentes. */
+  assert.match(cadeia, /^- Observação: padrões de título \(pertinentes\): [^;]+; faixa \S+ a \S+ \(Shorts pertinentes\)$/m);
   const longos = linhaDe(entradaNoturno(), { youtube: youtubeLongos(["Skin care noturno: a ordem certa", "Rotina de skin care noturno", "Skin care noturno simples", "Erros no skin care noturno"], 0) }).cadeia_competitiva;
   assert.doesNotMatch(longos, /^- Oportunidade: .*Nenhum Short identificado/m, "a falta de Shorts é limite da amostra, dito na coluna de curtos");
 });
@@ -468,12 +469,14 @@ test("D10 e teto: o CSV inteiro com as colunas novas sai concluído (sem pendên
     assert.doesNotMatch(row[coluna], /cortado no limite da célula/, coluna);
   }
   assert.match(row.cadeia_competitiva, /^Capítulo 6 · /m, "a cadeia chega ao último capítulo");
-  const { csv } = radarPortableVideoExport({ articles: [artigo], today: EXPORTADO_EM, brandVoice: voz as never });
+  /* 2026-10-09 · o lote devolve o estado; com a planta APPROVED, "ready" e o CSV. */
+  const csvDo = (saida: ReturnType<typeof radarPortableVideoExport>) => (assert.equal(saida.status, "ready"), saida.status === "ready" ? saida.csv : "");
+  const csv = csvDo(radarPortableVideoExport({ articles: [artigo], today: EXPORTADO_EM, brandVoice: voz as never }));
   /* 2026-10-07 (revisão) · "rascunho" e "falta conferir" entraram na varredura; e a Skill de voz nos três estados da Marca (o rótulo do estado vazava). */
   const PROIBIDAS = [/pend[eê]ncia/i, /pendente de/i, /aguardando/i, /confira antes de aprovar/i, /rascunho/i, /falta conferir/i];
   for (const proibida of PROIBIDAS) assert.doesNotMatch(csv, proibida, `D10: ${proibida}`);
   for (const status of ["draft", "pending_approval"]) {
-    const noEstado = radarPortableVideoExport({ articles: [artigo], today: EXPORTADO_EM, brandVoice: { ...voz, voice: { ...voz.voice, status } } as never }).csv;
+    const noEstado = csvDo(radarPortableVideoExport({ articles: [artigo], today: EXPORTADO_EM, brandVoice: { ...voz, voice: { ...voz.voice, status } } as never }));
     for (const proibida of PROIBIDAS) assert.doesNotMatch(noEstado, proibida, `D10 com a Skill em ${status}: ${proibida}`);
     assert.match(lerCsv(noEstado)[1].pode_gravar, /Skill "Marca" v1 \(versão corrente na Marca\)/);
   }
@@ -543,11 +546,17 @@ test("a única leitura nova: o resumo das lentes extras em modo digest, por lote
   const laco = nucleo.slice(nucleo.indexOf("for (const articleId of"), nucleo.indexOf("const lentes ="));
   assert.doesNotMatch(laco, /readRadarVideoLensDigestsForExport|lookupSerpCache/, "leitura por artigo");
   assert.equal((nucleo.match(/readMineradorKeywordTargetCodes\(/g) || []).length, 1, "o resumo reusa os pedidos: nenhuma leitura de alvo a mais");
-  /* A rota liga só no modo vídeo; o MCP (radarWritingExportForArticle) não passa a flag. */
+  /*
+   * A rota liga só no modo vídeo. 2026-10-09 (correção) · o MCP monta por
+   * `radarMcpMaterialForArticle` (radar-mcp-material.ts), que liga a flag pelo
+   * MESMO critério da rota — no modo "writing" (get_article_for_writing) ela
+   * fica desligada. A antiga `radarWritingExportForArticle` saiu do núcleo.
+   */
   assert.match(rota, /videoLensDigests: input\.mode === "video",/);
-  const doMcp = nucleo.slice(nucleo.indexOf("export async function radarWritingExportForArticle"));
-  assert.match(doMcp, /assembleRadarPortableExport\(\{[^}]*\}\)/);
-  assert.doesNotMatch(doMcp, /videoLensDigests/);
+  const doMcp = semComentarios(await readFile(new URL("../lib/server/radar-mcp-material.ts", import.meta.url), "utf8"));
+  assert.match(doMcp, /assembleRadarPortableExport\(\{/);
+  assert.match(doMcp, /videoLensDigests: input\.mode === "video",/);
+  assert.doesNotMatch(nucleo, /export async function radarWritingExportForArticle/, "o caminho sem a conferência da planta voltou ao núcleo");
   assert.match(nucleo, /if \(input\.videoLensDigests && montadas\.length\) \{/);
 });
 
@@ -590,12 +599,16 @@ test("revisão · a abertura dos cortes conta os Shorts do tema e aponta para a 
   assert.doesNotMatch(linha.cortes_para_redes, /58s/, "outro público não entra na mediana dos cortes");
 });
 
-test("revisão · a cadeia diz a faixa do formato que a sequência segue: vídeo longo com a faixa dos longos pertinentes, e a liderança dos Shorts dita", () => {
+test("revisão · a cadeia diz a faixa do formato decidido — e o formato segue a amostra pertinente (2026-10-09), não a amostra inteira", () => {
   /*
    * 2026-10-07 (revisão) · 3 longos do público, 6 longos de outro público e 5
-   * Shorts do público: a fotografia lidera por longos (9 > 5) e a sequência é
-   * longa; os pertinentes lideram por Shorts (5 > 3). A cadeia juntava "vídeo
-   * longo" com a faixa dos Shorts ("25s a 45s").
+   * Shorts do público: a amostra inteira lidera por longos (9 > 5); os
+   * pertinentes lideram por Shorts (5 > 3). A cadeia juntava "vídeo longo" com
+   * a faixa dos Shorts ("25s a 45s").
+   * 2026-10-09 · a regra do dono: o formato É o dos pertinentes (decisão única).
+   * Com 5 Shorts pertinentes contra 3 longos, formato curto — a série é o
+   * recorte da planta — e a faixa é a dos Shorts pertinentes. A divergência
+   * "a sequência segue a leitura gravada" deixou de existir.
    */
   const misto = youtubeMisto([
     ...[540, 600, 660].map((segundos, n) => ({ title: `Pele oleosa à noite: parte ${n + 1}`, segundos })),
@@ -603,10 +616,12 @@ test("revisão · a cadeia diz a faixa do formato que a sequência segue: vídeo
     ...[15, 25, 35, 45, 55].map((segundos, n) => ({ title: `Pele oleosa em segundos, dica ${n + 1}`, segundos, short: true })),
   ]);
   const linha = linhaDe(entradaNoturno(), { youtube: misto });
-  assert.match(linha.intencao_e_formato, /^Divergência: [^\n]*os pertinentes, o formato curto \(Shorts\)\. A sequência do vídeo segue a leitura gravada da pesquisa/m, "a divergência continua dita na intenção");
+  assert.match(linha.intencao_e_formato, /^Formato do vídeo: formato curto \(Shorts\) — os Shorts lideram a amostra pertinente \(5 Short\(s\) × 3 vídeo\(s\) longo\(s\) pertinentes\)/m);
+  assert.match(linha.intencao_e_formato, /^Faixa por coorte \(pertinentes, P25–P75; referência, não meta\): longos \d+min\S* a \d+min\S* · Shorts \d+s a \d+s$/m);
+  assert.doesNotMatch(linha.intencao_e_formato, /A sequência do vídeo segue a leitura gravada/);
   const cadeia = linha.cadeia_competitiva;
-  assert.match(cadeia, /^- Formato: vídeo longo, faixa \d+min\S* a \d+min\S* \(longos pertinentes\), \d+ capítulo\(s\)$/m);
-  assert.match(cadeia, /^- Observação: [^\n]*faixa \d+min\S* a \d+min\S* \(longos pertinentes\); os pertinentes lideram por Shorts \(divergência registrada em intencao_e_formato\)$/m);
+  assert.match(cadeia, /^- Formato: formato curto \(Shorts pertinentes lideram\) — a série de vídeos curtos é o recorte da planta, um capítulo por vídeo, faixa \d+s a \d+s \(Shorts pertinentes\)$/m);
+  assert.match(cadeia, /^- Observação: [^\n]*faixa \d+s a \d+s \(Shorts pertinentes\)$/m);
   assert.doesNotMatch(cadeia, /vídeo longo, faixa \d+s a/, "vídeo longo nunca com a faixa dos Shorts");
 });
 

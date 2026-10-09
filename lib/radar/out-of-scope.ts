@@ -1,5 +1,7 @@
 import { radarSemanticStem } from "./semantic-concept-model.ts";
 import { radarWritingCompareKey } from "./portable-writing-export.ts";
+/* 2026-10-09 · a voz da marca entra no guarda das sugestões (defeito 5). */
+import { radarBrandVoiceExclusionOf, type RadarBrandVoiceExclusion } from "./brand-voice.ts";
 
 /**
  * ===== A RÉGUA ÚNICA DO "NÃO COBRIR" (2026-10-02) =====
@@ -106,4 +108,92 @@ export function radarOutOfScopeMatcher(input: {
     return rotulos.some(rotulo => rotulo.chave === chave || (rotulo.distintivas.length > 0
       && rotulo.distintivas.filter(raiz => doTexto.has(raiz)).length >= Math.max(1, Math.ceil(rotulo.distintivas.length / 2))));
   };
+}
+
+/*
+ * ===== 2026-10-09 · O QUE UMA SUGESTÃO NÃO PODE SUGERIR (defeitos 3c, 5 e 6 dos 8 CSVs do Silo) =====
+ *
+ * Nos CSVs reais de 09/10, as sugestões contradiziam o próprio arquivo:
+ *   - 3(c): "Diferencial possível: 'Como identificar leads qualificados'" ao lado
+ *     da nota que o põe fora; "Sustentar…", temas e perguntas sugeriam o que o
+ *     "Não cobrir" proíbe;
+ *   - 5: "Diferenciar em 'Ative o Instagram Shopping'" com a voz da marca
+ *     proibindo Instagram Shopping;
+ *   - 6: "Sustentar 'como atrair um cliente' como diferencial" e "Sustentar
+ *     'como ganhar um cliente'…" — sustentar a própria keyword não é diferencial.
+ *
+ * Duas réguas puras, para quem monta "Como superar", temas, perguntas e o
+ * brief do artigo-modelo:
+ *   - `radarSuggestionGuard`: a sugestão toca um rótulo do "Não cobrir" (a
+ *     régua única acima, rótulo a rótulo, para dizer qual) ou uma exclusão da
+ *     voz da marca (`radarBrandVoiceExclusions`)? A voz vem primeiro: é
+ *     exclusão dura, vale até contra o que a SERP mostra;
+ *   - `radarSuggestionRestatesKeyword`: o assunto da sugestão É a principal ou
+ *     uma complementar (as mesmas raízes, sem palavra vazia, verbo de abertura
+ *     nem palavra de formato)? "Como ganhar clientes pelo Instagram" não é
+ *     "como ganhar um cliente": tem assunto a mais.
+ * Os rótulos passados ao guarda são os que FICARAM no "Não cobrir" (depois de
+ * a planta vencer o item genérico, regra 3a); quem monta decide a lista.
+ *
+ * A sugestão pode vir inteira ("Sustentar \"X\" como diferencial.",
+ * "Diferencial possível: \"X\", … aprofunde na seção \"Y\""): o assunto é o
+ * PRIMEIRO trecho entre aspas — a seção onde aprofundar não é o que se sugere.
+ * Sem aspas, o texto todo (tema, pergunta).
+ */
+const assuntoDaSugestao = (sugestao: string | null | undefined): string => {
+  const valor = String(sugestao || "").trim();
+  return /["“]([^"”]+)["”]/.exec(valor)?.[1]?.trim() || valor;
+};
+
+export type RadarSuggestionVeto =
+  | { kind: "VOZ_DA_MARCA"; label: string; rule: string }
+  | { kind: "NAO_COBRIR"; label: string };
+
+export function radarSuggestionGuard(input: {
+  /** Os rótulos que ficaram no "Não cobrir" (fora do escopo, outro artigo do Silo, fronteira do Silo). */
+  labels: ReadonlyArray<string | null | undefined>;
+  /** O núcleo do artigo: principal, complementares e Assunto (não distinguem um rótulo). */
+  core: ReadonlyArray<string | null | undefined>;
+  /** As exclusões da voz da marca (`radarBrandVoiceExclusions`). */
+  voice?: ReadonlyArray<RadarBrandVoiceExclusion>;
+}): (sugestao: string | null | undefined) => RadarSuggestionVeto | null {
+  /*
+   * O molde que o modelo editorial pendura na pergunta ("… na prática no dia a
+   * dia?") não é assunto: sem ele, "Como identificar um lead qualificado na
+   * prática no dia a dia?" alcança "Como identificar leads qualificados". O
+   * rótulo dito ao leitor continua o original.
+   */
+  const semMolde = (rotulo: string) => rotulo.replace(/\s+(?:no dia a dia|na pr[aá]tica)\b/gi, "").trim();
+  const porRotulo = [...new Set(input.labels.map(rotulo => String(rotulo || "").trim()).filter(Boolean))]
+    .map(rotulo => ({ rotulo, toca: radarOutOfScopeMatcher({ labels: [semMolde(rotulo) || rotulo], core: input.core }) }));
+  const voz = input.voice || [];
+  return sugestao => {
+    const assunto = assuntoDaSugestao(sugestao);
+    if (!assunto) return null;
+    const exclusao = radarBrandVoiceExclusionOf(assunto, voz);
+    if (exclusao) return { kind: "VOZ_DA_MARCA", label: exclusao.label, rule: exclusao.rule };
+    const tocado = porRotulo.find(item => item.toca(assunto));
+    return tocado ? { kind: "NAO_COBRIR", label: tocado.rotulo } : null;
+  };
+}
+
+/** 2026-10-09 · A keyword (principal ou complementar) que a sugestão só repete, ou null. */
+export function radarSuggestionRestatesKeyword(
+  sugestao: string | null | undefined,
+  keywords: ReadonlyArray<string | null | undefined>,
+): string | null {
+  const genericas = raizesQueNaoDistinguem();
+  /* O radical não é uniforme no número ("cliente" fica "cliente", "clientes" vira "client"): sem o "s" e a vogal final, os dois conversam. */
+  const uniforme = (raiz: string) => raiz.replace(/s$/, "").replace(/(?<=.{4})[aeo]$/, "");
+  const assunto = (valor: string | null | undefined) =>
+    [...new Set([...raizesDe(valor)].filter(raiz => !genericas.has(raiz)).map(uniforme))].sort().join(" ");
+  const citado = assuntoDaSugestao(sugestao);
+  const chave = radarWritingCompareKey(citado);
+  const daSugestao = assunto(citado);
+  if (!chave) return null;
+  for (const keyword of keywords) {
+    if (!radarWritingCompareKey(keyword)) continue;
+    if (radarWritingCompareKey(keyword) === chave || (daSugestao && assunto(keyword) === daSugestao)) return String(keyword).trim();
+  }
+  return null;
 }

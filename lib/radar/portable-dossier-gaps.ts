@@ -313,6 +313,19 @@ export type RadarPortableResearchStatusInput = {
    * como antes.
    */
   frozenLenses?: Pick<RadarPortableFrozenLensesInput, "profile" | "block" | "frozenAt"> | null;
+  /**
+   * 2026-10-09 · Aditivo: o artigo-modelo concluído desta investigação, como o
+   * export o leu. "APPROVED": a célula diz que a planta vai junto; "MISSING":
+   * bloqueia (o envio ao Redator exige a planta). Ausente ou nulo: a regra de
+   * antes, e a célula não promete a planta.
+   */
+  articleBlueprint?: "APPROVED" | "MISSING" | null;
+  /**
+   * 2026-10-09 · Aditivo: a linha leva a parte comercial (plano, produtos e
+   * links)? Com a Amazon acrescentada, a célula diz o que está no arquivo —
+   * nunca promete colunas que não saíram. Ausente: a frase não cita colunas.
+   */
+  commercialDelivered?: boolean | null;
 };
 
 /* ------------------------ a prontidão para o Redator ------------------------ */
@@ -364,6 +377,11 @@ const BLOQUEIO: Record<string, { motivo: string; acao: string }> = {
     motivo: "o fundamento do artigo não traz a versão e a impressão de conteúdo do ArticleDNA",
     acao: "confira no Arquiteto se o ArticleDNA deste artigo está aprovado",
   },
+  /* 2026-10-09 · o artigo-modelo obrigatório: o envio ao Redator leva a planta concluída da investigação vigente. */
+  ARTICLE_BLUEPRINT_MISSING: {
+    motivo: "o artigo-modelo concluído desta investigação não foi organizado",
+    acao: "organize o artigo-modelo da SERP no Radar (Pesquisa → Artigo-modelo da SERP)",
+  },
 };
 
 export type RadarPortableWriterReadiness = {
@@ -386,13 +404,18 @@ export type RadarPortableWriterReadiness = {
  * O artigo continua saindo: o CSV é pesquisa, e esconder a linha apagaria
  * trabalho legítimo. O que muda é que ele sai ROTULADO.
  */
-export function radarPortableWriterReadiness(input: Pick<RadarPortableResearchStatusInput, "readiness" | "articleDnaIdentityComplete">): RadarPortableWriterReadiness {
+export function radarPortableWriterReadiness(input: Pick<RadarPortableResearchStatusInput, "readiness" | "articleDnaIdentityComplete" | "articleBlueprint">): RadarPortableWriterReadiness {
   const blocos: RadarPortableReadinessBlock[] = [...input.readiness.blocks];
   if (input.articleDnaIdentityComplete === false) {
     blocos.push({ code: "ARTICLE_DNA_IDENTITY_INCOMPLETE", message: "O fundamento do artigo não traz a versão e a impressão de conteúdo do ArticleDNA." });
   }
+  /* 2026-10-09 · sem a planta concluída, o Redator recusaria o envio: a linha sai rotulada. */
+  const semPlanta = input.articleBlueprint === "MISSING" && !blocos.some(bloco => bloco.code === "ARTICLE_BLUEPRINT_MISSING");
+  if (semPlanta) {
+    blocos.push({ code: "ARTICLE_BLUEPRINT_MISSING", message: "O artigo-modelo concluído desta investigação não foi organizado." });
+  }
 
-  const pronto = input.readiness.ready && input.articleDnaIdentityComplete !== false;
+  const pronto = input.readiness.ready && input.articleDnaIdentityComplete !== false && input.articleBlueprint !== "MISSING";
   if (pronto) return { state: "READY", label: RADAR_PORTABLE_WRITER_READY_LABEL, reasons: [], actions: [] };
 
   const motivos = blocos.map(motivoDoBloqueio);
@@ -475,8 +498,16 @@ export function radarPortableResearchStatusMarkdown(input: RadarPortableResearch
 
   /* ---- a prontidão vem primeiro: é o que decide como o resto é lido ---- */
   linhas.push("## Prontidão para o Redator", "");
+  /*
+   * 2026-10-09 · A CÉLULA DIZ SÓ O QUE É ENTREGUE. O envio ao Redator exige o
+   * artigo-modelo concluído: com ele conferido pelo export, a frase diz que a
+   * investigação e a planta vão juntas; sem a informação, diz só o que a regra
+   * de prontidão conferiu (a investigação), sem prometer a importação.
+   */
   if (prontidao.state === "READY") {
-    linhas.push(`**${prontidao.label}.** Pela regra de prontidão do Radar, a plataforma aceitaria importar este dossiê no Redator agora.`);
+    linhas.push(input.articleBlueprint === "APPROVED"
+      ? `**${prontidao.label}.** A investigação congelada e o artigo-modelo concluído desta investigação vão juntos neste arquivo; pela regra de prontidão do Radar, a plataforma aceitaria importar este dossiê no Redator agora.`
+      : `**${prontidao.label}.** A investigação congelada passa na regra de prontidão do Radar; o envio ao Redator leva junto o artigo-modelo concluído desta investigação.`);
   } else {
     linhas.push(
       `**${prontidao.label}.** Este artigo sai no CSV porque a investigação foi finalizada, mas o Redator da plataforma recusaria importá-lo agora. Use o dossiê como pesquisa e não o trate como pacote aprovado até resolver o bloqueio.`,
@@ -569,12 +600,23 @@ export function radarPortableResearchStatusMarkdown(input: RadarPortableResearch
   const formatos = bundle.formatBlueprints;
   if (formatos?.video || formatos?.review) {
     linhas.push("", "## Acréscimos de formato (o Google é a base)", "");
+    /*
+     * 2026-10-09 · O QUE É ENTREGUE, NÃO O QUE O PACOTE GUARDA. O roteiro do
+     * vídeo sai pelo artigo-modelo no CSV para vídeo (o blueprint de vídeo do
+     * pacote é insumo, não saída). A parte comercial é dita pelo que a linha
+     * leva: com as colunas, onde estão; sem elas, que este arquivo não as traz.
+     */
     if (formatos.video) {
-      linhas.push(`- Vídeo: investigação do YouTube acrescentada${formatos.video.frozenAt ? `, congelada em ${instante(formatos.video.frozenAt) || formatos.video.frozenAt}` : ""}. O artigo também vira vídeo; o roteiro sai do blueprint de vídeo do pacote.`);
+      linhas.push(`- Vídeo: investigação do YouTube acrescentada${formatos.video.frozenAt ? `, congelada em ${instante(formatos.video.frozenAt) || formatos.video.frozenAt}` : ""}. O artigo também vira vídeo; o roteiro sai pelo artigo-modelo, no CSV para vídeo e redes sociais.`);
     }
     if (formatos.review) {
       const tipo = typeof formatos.review.intent?.type === "string" ? ` (${limpo(formatos.review.intent.type)})` : "";
-      linhas.push(`- Review${tipo}: investigação da Amazon acrescentada${formatos.review.frozenAt ? `, congelada em ${instante(formatos.review.frozenAt) || formatos.review.frozenAt}` : ""}. O artigo também vira review; produtos, critérios e aviso de afiliado saem do blueprint comercial do pacote.`);
+      const comercial = input.commercialDelivered === true
+        ? " O artigo também vira review: produtos, critérios e aviso de afiliado estão em commercial_plan_md, selected_products_json e promotion_links_json."
+        : input.commercialDelivered === false
+          ? " A investigação comercial está congelada no pacote; este arquivo não traz produtos nem aviso de afiliado."
+          : " O artigo também vira review sobre a investigação comercial congelada.";
+      linhas.push(`- Review${tipo}: investigação da Amazon acrescentada${formatos.review.frozenAt ? `, congelada em ${instante(formatos.review.frozenAt) || formatos.review.frozenAt}` : ""}.${comercial}`);
     }
   }
 
