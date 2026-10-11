@@ -1,5 +1,14 @@
 # Backlog — Radar
 
+## Mesa sem estourar o tempo do banco — 2026-10-11
+
+- [x] Listagem do Radar pela tabela (543 ms → 48 ms, mesmos bytes).
+- [x] Listagem dos documentos por função de uma leitura (11,7 s → 186 ms), com o select antigo de reserva.
+- [ ] Dono: aplicar `supabase/migrations/20261011120000_listagem_documentos_uma_leitura.sql`.
+- [ ] SDD (estrutural): listagem leve do Radar (resumo por item, versões sob demanda), documento do Redator com
+  referência ao pacote do Radar em vez da cópia de 2–6 MB, mesa sem versões antigas de ArticleDNA.
+- [ ] Fora do Radar: a seção invitations da mesa cai porque `brand_invitations` não existe no banco.
+
 ## Comunicação humana guiada pela SERP — 2026-10-11
 
 Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo) e no Adendo G da SDD da diretriz
