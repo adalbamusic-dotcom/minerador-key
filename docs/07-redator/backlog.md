@@ -1,5 +1,27 @@
 # Backlog — Redator
 
+## Comunicação humana guiada pela SERP — 2026-10-11
+
+Detalhe em `docs/07-redator/estado-atual.md` e `docs/05-radar/estado-atual.md` (seções de mesma data). **Validado
+manualmente: não.**
+
+- [x] Prompts de seção e de melhoria, fundamentos, semente e MCP com a diretriz pela fonte única.
+- [x] Leitura "2026-10-11b": keyword no começo do SEO title (troca das metades) e `h2Merges` (Regra 8).
+- [ ] Validação manual (dono): ler `get_writer_foundations` e escrever uma seção pelo Redator no caso real.
+- [ ] Proposta: quando `h2Merges` existir num documento já criado, oferecer ao humano juntar o H2 como H3 no editor.
+- [ ] Corrigir a asserção antiga de `tests/redator-artigo-modelo-e-voz.test.mts` (âncora natural "Rotina de skin"),
+  da rodada de 2026-10-11 da âncora.
+
+## Âncora natural na planta lida — 2026-10-11
+
+Detalhe em `docs/07-redator/estado-atual.md` e `docs/05-radar/estado-atual.md` (seções de mesma data). **Validado
+manualmente: não.**
+
+- [x] Leitura compartilhada com os candidatos da planta (âncora natural), regras de leitura "2026-10-11".
+- [x] A frase da regra da âncora no prompt da seção, nos fundamentos e nas instruções do MCP.
+- [x] Destino do link pela URL canônica que a planta nova grava no candidato.
+- [ ] Proposta: bloco "Publicação" (Silo, slug, URL canônica, situação) nos fundamentos do Redator.
+
 ## Regra do piloto em todas as operações — 2026-10-09
 
 Detalhe em `docs/07-redator/estado-atual.md` e `docs/05-radar/estado-atual.md` (seções de mesma data). **Validado

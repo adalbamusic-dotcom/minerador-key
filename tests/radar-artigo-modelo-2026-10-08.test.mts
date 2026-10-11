@@ -536,7 +536,9 @@ test("B6 · o ângulo é a entrega concreta que a amostra não tem; costurar tem
 test("B7 · a versão das regras: gravada na planta, preservada na edição e no banco; a tela avisa a anterior e aponta o 'Organizar de novo', sem botão novo", async () => {
   /* 2026-10-09 · a coerência dos CSVs mudou o pedido e a conferência: a data das regras avançou. */
   /* 2026-10-09b · o bloco comercial da Amazon e as exclusões dos reajustes entraram no pedido e na conferência. */
-  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-09b");
+  /* 2026-10-11 · a âncora natural (conceitos do grafo e URL canônica de cada candidato K; nunca a keyword inteira do destino). */
+  /* 2026-10-11b · a diretriz de comunicação humana guiada pela SERP (regras 27 e 28 do pedido; notas da regra 28 na conferência). */
+  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-11b");
   const { payload } = organizar(resposta());
   assert.equal(payload.rulesVersion, RADAR_ARTICLE_BLUEPRINT_RULES_VERSION);
   assert.equal(radarArticleBlueprintPayloadToStore({ ...payload, approval: "APPROVED" }).rulesVersion, RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "vai ao banco");

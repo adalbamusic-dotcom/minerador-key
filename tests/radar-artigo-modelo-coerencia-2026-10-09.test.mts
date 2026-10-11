@@ -499,7 +499,8 @@ test("10 · a conferência põe o link do CTA na última seção; a planta antig
 
   const colunas = radarArticleBlueprintColumns(plantaAntiga(iaDoInstagram()));
   assert.match(colunas.links_internos, /^Aplique somente estes 6 link\(s\)/m);
-  assert.ok(linhas(colunas.links_internos).includes(`L6 · âncora "serviços de SEO para clínicas" → Página da marca (Skill de voz) "Página da marca /servicos/seo-para-clinicas" → ${PAGINA_COMERCIAL} (publicado) · onde: seção "O Instagram continua no jogo, mas no lugar certo" · por quê: o CTA do fechamento cita esta página`), colunas.links_internos);
+  /* 2026-10-11 · a âncora é a sugerida; a da página da marca é o trecho do CTA (não passa pela régua da keyword inteira). */
+  assert.ok(linhas(colunas.links_internos).includes(`L6 · âncora sugerida "serviços de SEO para clínicas" → Página da marca (Skill de voz) "Página da marca /servicos/seo-para-clinicas" → ${PAGINA_COMERCIAL} (publicado) · onde: seção "O Instagram continua no jogo, mas no lugar certo" · por quê: o CTA do fechamento cita esta página`), colunas.links_internos);
   assert.ok(linhas(colunas.estrutura).includes("Link da chamada: L6, âncora \"serviços de SEO para clínicas\" → Página da marca /servicos/seo-para-clinicas (no fim da última seção, junto da chamada)."), colunas.estrutura);
   assert.match(colunas.estrutura, / · 6 links internos · /);
   assert.equal((colunas.estrutura.match(/^CTA/gm) || []).length, 1);

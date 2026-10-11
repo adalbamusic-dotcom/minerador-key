@@ -135,6 +135,8 @@ export type WriterSectionBlueprint = {
    */
   needsSource?: WriterBlueprintSourceNeed[];
   publishedMap?: WriterBlueprintPublishedMapItem[];
+  /** 2026-10-11 · Aditivo, só com mais de 6 H2 na planta lida: a Regra 8 (qual seção entra como H3 de qual). */
+  h2Merges?: WriterArticleBlueprintFoundation["h2Merges"];
 };
 
 export type WriterSectionEvidencePackage = {
@@ -330,6 +332,8 @@ export function writerBlueprintForSection(planta: WriterArticleBlueprintFoundati
     /* 2026-10-08 · a seção casada leva as frases dela em `section.needsSource`; aqui, as de fora das seções e o mapa. */
     ...(planta.needsSource?.length ? { needsSource: planta.needsSource } : {}),
     ...(planta.publishedMap?.length ? { publishedMap: planta.publishedMap } : {}),
+    /* 2026-10-11 · a Regra 8 (de 3 a 6 H2), quando a planta lida passa de 6. */
+    ...(planta.h2Merges?.length ? { h2Merges: planta.h2Merges } : {}),
   };
 }
 

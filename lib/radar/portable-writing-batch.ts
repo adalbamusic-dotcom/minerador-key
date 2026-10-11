@@ -18,6 +18,7 @@ import {
   type RadarWritingPublication,
 } from "./portable-writing-export.ts";
 import { radarBrandVoiceExclusions, radarBrandVoiceRef, type RadarBrandVoiceState } from "./brand-voice.ts";
+import type { RadarAnchorLedger } from "./natural-anchor.ts";
 
 /**
  * ===== A MONTAGEM DO LOTE NO FORMATO "PARA ESCREVER" — a ponte pura da rota =====
@@ -86,6 +87,8 @@ export function radarPortableWritingExport(input: {
     posicao: number,
     silo: RadarSiloExportWritingContext | null,
     siloInline = false,
+    /* 2026-10-11 · o livro de âncoras do arquivo: a mesma âncora não se repete, para o mesmo destino, entre as linhas. */
+    anchorLedger: RadarAnchorLedger | null = null,
   ): RadarWritingExportArticle => buildRadarWritingExportArticle({
     ...artigo.entrada,
     serpLenses: {
@@ -107,6 +110,7 @@ export function radarPortableWritingExport(input: {
     ...(exclusoesDaVoz.length ? { brandVoiceExclusions: exclusoesDaVoz } : {}),
     ...(palavrasDosMembros.size > 1 ? { siloMemberKeywords: palavrasDosMembros } : {}),
     ...(siloInline ? { siloInline: true } : {}),
+    ...(anchorLedger ? { anchorLedger } : {}),
   });
 
   if (!input.plan) {
@@ -120,7 +124,14 @@ export function radarPortableWritingExport(input: {
     const umSilo = silos.length === 1 && silos[0]?.kind === "silo" ? silos[0] : null;
     const porLinha = !umSilo && siloDe.size > 0;
     const rotulo = umSilo ? "Silo" : "Marca";
-    const artigos = input.articles.map((artigo, indice) => montar(artigo, rotulo, indice + 1, siloDe.get(artigo.articleId) ?? null, porLinha));
+    /* 2026-10-11 · um livro de âncoras por Silo do arquivo (a variedade vale entre os artigos do mesmo Silo). */
+    const livros = new Map<RadarSiloExportWritingContext | null, RadarAnchorLedger>();
+    const livroDe = (silo: RadarSiloExportWritingContext | null) => {
+      const atual = livros.get(silo) ?? new Map();
+      livros.set(silo, atual);
+      return atual;
+    };
+    const artigos = input.articles.map((artigo, indice) => montar(artigo, rotulo, indice + 1, siloDe.get(artigo.articleId) ?? null, porLinha, livroDe(siloDe.get(artigo.articleId) ?? null)));
     const compartilhado = radarWritingShareVisualAvoid(artigos.map(item => item.row));
     const topo = buildRadarWritingTopRow({
       label: rotulo,
@@ -155,7 +166,9 @@ export function radarPortableWritingExport(input: {
     const doArquivo = arquivo.articleIds
       .map(articleId => porId.get(articleId))
       .filter((artigo): artigo is RadarPortableExportAssembledArticle => Boolean(artigo));
-    const artigos = doArquivo.map((artigo, indice) => montar(artigo, topo, indice + 1, silo));
+    /* 2026-10-11 · o livro de âncoras deste arquivo (um Silo): a mesma âncora não se repete, para o mesmo destino, entre as linhas. */
+    const livro: RadarAnchorLedger = new Map();
+    const artigos = doArquivo.map((artigo, indice) => montar(artigo, topo, indice + 1, silo, false, livro));
     exportados += artigos.length;
     bloqueados += artigos.filter(item => item.verdict === "Não").length;
     const compartilhado = radarWritingShareVisualAvoid(artigos.map(item => item.row));

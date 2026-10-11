@@ -105,7 +105,8 @@ export function radarMcpMaterialOf(
   }
 
   if (mode === "video") {
-    const video = projecoes.video({ articles: montagem.montadas, today: montagem.exportedAt, brandVoice: montagem.brandVoice, selectionPlan: montagem.planoDaSelecao });
+    /* 2026-10-11 · com as publicações, como a rota: a identidade de publicação do artigo da linha (a mesma do CSV para escrever). */
+    const video = projecoes.video({ articles: montagem.montadas, today: montagem.exportedAt, brandVoice: montagem.brandVoice, selectionPlan: montagem.planoDaSelecao, publications: montagem.publicacoes });
     if (radarExportNeedsArticleBlueprint(video)) return precisaDaPlanta(mode, montagem, radarExportNeedsArticleBlueprintIds(video));
     return { status: "ready", mode, csv: video.csv, filename: video.filename, exportedAt: montagem.exportedAt, blocked: 0, withoutYoutube: video.withoutYoutube };
   }

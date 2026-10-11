@@ -199,7 +199,7 @@ export async function writerSeedPlanOf(input: {
     })
     : null;
   /* A virada lê a planta pela mesma leitura (nomes atuais, fontes do pacote e exclusões). */
-  const lidaParaVirada = articleBlueprint ? writerBlueprintWithCurrentNames(versao.blueprint, input.keywords, { sources: versao.sources, exclusions: exclusoes }) : null;
+  const lidaParaVirada = articleBlueprint ? writerBlueprintWithCurrentNames(versao.blueprint, input.keywords, { sources: versao.sources, exclusions: exclusoes, linkCandidates: versao.linkCandidates }) : null;
   const editorialContext = radarWriterEditorialContextWithBlueprint(input.editorialContext, {
     subject: entrada.researchContext?.article.subject ?? null,
     blueprint: lidaParaVirada,

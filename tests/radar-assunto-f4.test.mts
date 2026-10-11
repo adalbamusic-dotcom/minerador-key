@@ -216,14 +216,34 @@ function dentroDosLimites(row: RadarWritingExportRow) {
  * coluna) e o pedido do artigo-modelo sem as linhas do Assunto. YouTube (linha
  * só de identidade, sem planta) ficou idêntico ao hash anterior.
  */
+/*
+ * 2026-10-11 · snapshot refeito de propósito: a âncora natural (âncora sugerida,
+ * nunca a keyword inteira do destino), o bloco "Publicação" no topo da coluna
+ * artigo, a ordem narrativa com a URL canônica e a situação e o destino novo pela
+ * URL canônica planejada mudam o CSV. O que o teste prova continua: sem Assunto,
+ * nenhuma linha dele entra, e o arquivo é byte a byte o desta versão.
+ */
+/*
+ * 2026-10-11b · snapshot refeito de propósito: a diretriz de comunicação humana
+ * guiada pela SERP (Adendo G). Prova: tirando do CSV novo SÓ o que a diretriz
+ * acrescenta — a regra geral 12 da linha de topo (e o "Não altere" que volta a
+ * 12), o "Em resumo" do prompt de cada linha, as linhas "Título pela SERP…" da
+ * coluna titulo_e_seo e o bloco "Voz e SEO pela SERP" da estrutura —, os seis
+ * hashes voltam exatamente aos de antes (script no scratchpad da sessão). Sem
+ * Assunto, nenhuma linha dele entra.
+ */
+/*
+ * 2026-10-11c · âncora: o recorte não corta mais termo composto nem tira o sujeito. Prova: com a régua
+ * anterior o CSV volta ao hash de cima (55e15f94…); a única diferença é a âncora L3 "care noturno" → "noturno".
+ */
 const SNAPSHOT = {
-  silo: { sha: "5fc8511af93b43bfc065e16a0db1a9f75705a6b17727531de649ce229e7876ef", len: 22014 },
-  saude: { sha: "947069ff78a8b433622715db6b8d4a688e601aa8c21032280215b6348c776ac7", len: 25819 },
+  silo: { sha: "9bb68e2f7d3cb5a08f0181e48eb2c5d3f531173ce82e7f179416f8e7ab49571a", len: 31337 },
+  saude: { sha: "f5b374acb998b6606aa3e5171d6ebd08477fe6d66b8bfcc304c44d71f2584818", len: 35063 },
   artigos: {
-    google: "c79eeb9d8ade1ec8473c75fa07e99627dcdfa57d752009fb18dea4d843e66688",
-    amazon: "37fd29dd34ef784dce6822f835c28d96b9e9af485d9bba61ca84d87fad4d6b0b",
-    youtube: "0b0118248360fabc79e06be63916b91bd3f6aadd0c6b99fb06d3c4baabd5137a",
-    saude: "82f260612a31a1b3d8aef0005b8538efc5cb39d0435d0e733ad9333620c6eabd",
+    google: "f16940c66d6dcb73ab9581de7cefead87bc708f48d7421eceb133c09cec1a42e",
+    amazon: "17b62d1bf5c9381dc3cbcef4175b8d83b4e2601ff4910439bed4bf75f8828dca",
+    youtube: "b96c0ca13361591af1c900db882e7afdd12e0ac3dd5e90f9b97b0288e935cf3e",
+    saude: "ee46f22cbfde9f472d837075431fa437dc00e3826066c63d73ff7ebc75050572",
   },
 };
 

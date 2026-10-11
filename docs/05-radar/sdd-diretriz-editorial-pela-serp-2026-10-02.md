@@ -497,3 +497,174 @@ reescritas como instrução concluída.
   artigo-modelo (aviso de regras anteriores, mapa, parágrafos) e ler `get_writer_foundations` pelo MCP; depois,
   regerar os artigos-modelo anteriores às regras de 2026-10-08 e decidir a ordem de publicação dos destinos
   planejados.
+
+## Adendo G — Comunicação humana guiada pela SERP (2026-10-11) — PEDIDO DO DONO, IMPLEMENTADO EM CÓDIGO
+
+**Status:** verificado no código e confirmado por teste (fixtures, sem provider nem IA); validado manualmente:
+não — a homologação é do dono. Módulo proprietário: Radar; Redator e catálogo MCP com mudanças aditivas
+(AGENTS §4). Definição completa para humanos: `docs/compartilhado/diretriz-de-comunicacao-humana.md`.
+
+### G.1 Pedido e origem
+
+Dono no chat (2026-10-11), com dois documentos dele ("Diretrizes de comunicação humana" e "Visão estratégica
+muito forte sobre a apatia dos conteúdos gerados por IA"): "pode colocar as regras, e que as definições tem que
+ser bem claras tanto para as IAs como para humanos… isso tem que ser corroborado ou tem que acompanhar as coletas
+da SERP, a ideia não é inventar algo novo e sim seguir os passos que a SERP mandar mas com essa inclinação de uma
+comunicação mais humana, colocando no centro a semântica… com o diferencial de um tom de politicamente incorreto
+e no começo no nível 3 e no final no nível 2 de compreensão do público alvo… Pode aplicar". Junto, as observações
+do Guardião de SEO do site dele sobre um artigo de teste (isca genérica, título sem gancho, keyword fora do
+início e do primeiro H2, mais de 6 H2, fechamento comercial fraco, falta de sinais de autoridade local, capa e
+imagem no corpo) e o pedido de que a SERP ajude no meta title, nos metadados e no CTA.
+
+### G.2 Contrato
+
+- **Uma fonte só:** `lib/radar/human-voice-guideline.ts`, módulo puro (só importa a frase da âncora natural).
+  `RADAR_HUMAN_VOICE_GUIDELINE_VERSION = "2026-10-11"`; as regras (`RADAR_HUMAN_VOICE_RULES` e
+  `RADAR_HUMAN_VOICE_SERP_RULES`, cada uma com o que é, como aplicar e exemplo bom × ruim); o núcleo
+  (`RADAR_HUMAN_VOICE_CORE`), a precedência (`RADAR_HUMAN_VOICE_PRECEDENCE`) e o resumo do que a SERP guia
+  (`RADAR_HUMAN_VOICE_SERP_SUMMARY`); as funções que montam o texto de cada entregável
+  (`radarHumanVoicePromptBlock`, `radarHumanVoiceWritingRule`, `radarHumanVoiceBrandVoiceRowNote`,
+  `radarHumanVoiceRedatorRule`, `radarHumanVoiceVideoRule`, `radarHumanVoiceCatalogNote`); e as conferências
+  puras (`radarHumanVoiceGenericBait`, `radarHumanVoiceStartsWithKeyword`, `radarHumanVoiceKeywordEarly`,
+  `radarHumanVoiceHeadingHasKeyword`, `radarHumanVoiceTitleWithKeywordFirst`).
+- **Versões:** `RADAR_ARTICLE_BLUEPRINT_RULES_VERSION = "2026-10-11b"` (pedido e conferência mudaram; o aviso
+  da tela diz o que 2026-10-11b acrescenta e que a planta aprovada continua valendo) e
+  `WRITER_BLUEPRINT_READING_RULES = "2026-10-11b"` (o etag da fatia `radar.blueprint/<id>` muda uma vez).
+- **Campos aditivos e opcionais, sem migration:** `RadarArticleBlueprintReadingOptions.principal?`,
+  `RadarArticleBlueprintReading.h2Merges` (resultado da leitura, nunca gravado),
+  `WriterArticleBlueprintFoundation.h2Merges?` e `WriterSectionBlueprint.h2Merges?` (presentes só com mais de 6
+  H2). Nenhum payload gravado muda; o pacote congelado e o hash não mudam; nenhuma ferramenta MCP nova; a Skill
+  de voz da Marca não foi editada.
+
+### G.3 Precedência (decisões desta rodada)
+
+1. **A SERP manda na substância.** Intenção, funil, tópicos, perguntas, cobertura, medidas e formato saem da
+   investigação, como antes (SERP > lógica > IA). A diretriz manda na VOZ. As dores e os ganchos são as
+   perguntas reais da SERP (PAA, buscas relacionadas, títulos e promessas do topo), nunca inventados; a regra 27
+   do pedido diz que a diretriz não cria seção, H3, pergunta nem tópico.
+2. **Voz visceral, "politicamente incorreta" no sentido do dono:** sem eufemismo nem suavização corporativa;
+   emoção reconhecível; ironia, sarcasmo, indireta e duplo sentido permitidos; ritmo irregular e oralidade com
+   moderação; primeira pessoa quando quem assina é o especialista. **O alvo da provocação** é a situação, a
+   receita, o mercado ou o "algoritmo", nunca a dignidade da leitora — como nos exemplos do próprio dono ("o
+   marketing que te venderam").
+3. **Erros "humanos" viram naturalidade de fala.** Oralidade, repetição intencional, frase quebrada, começo
+   com "E" ou "Mas", palavras fortes. **Não** há erro de ortografia ou de concordância proposital no texto
+   publicável. **Decisão a confirmar com o dono:** o Guardião de SEO e a autoria E-E-A-T leem qualidade, e o
+   erro proposital vira ruído na correção (e a Skill v1 também o proíbe). A constante
+   `RADAR_HUMAN_VOICE_INTENTIONAL_ERRORS = false` documenta o estado; nenhuma função gera erro, e ligá-la exige
+   implementar a geração e uma nova decisão registrada.
+4. **Fatos continuam travados.** A trava de fonte (`lib/radar/pending-claims.ts`) e o D10 não mudaram. Sobre
+   anúncio de saúde e estética no Google e na Meta, o texto fala da dificuldade real (reprovação, bloqueio na
+   prática, banimento, conta caindo, dinheiro jogado fora) na voz de quem assina, sem afirmar proibição universal
+   como fato ("não vai falar que está proibido, o que tem que falar é mais da dificuldade", do documento do
+   dono). Dor, perda, medo de perder e contraste estão liberados; escassez e urgência só com dado real da clínica.
+5. **E-E-A-T em primeira pessoa:** com o especialista da aba Especialista, a voz pode ser a dele; experiência só
+   como relato delimitado (parecer aceito, fala dos vídeos da marca), sem caso inventado.
+6. **Consciência: começo no nível 3, fim no nível 2.** Nível 3 (abertura): a leitora já reconhece o problema e
+   já tentou as receitas (posts, feed, anúncio, agência) — a abertura mostra por que falham. Nível 2 (virada e
+   fechamento): ela ainda não entende a busca orgânica como solução — o texto explica sem sigla, com a estrutura
+   própria no Google. **Ambiguidade registrada:** o projeto descreve consciência por texto ("Consciente do
+   problema ou tema", "Consciente das soluções", "Consciente da solução", `lib/arquiteto/keyword-dna-engine.ts`),
+   sem número; e o documento do dono chama de "nível 2" quem "sabe que tem um problema, mas acha que a solução é
+   a receita de bolo". Por isso cada nível vai escrito por extenso em todo entregável; se o dono quiser outra
+   numeração, muda só a frase.
+7. **Skill de voz da marca (v1, dado da Marca):** onde a Skill suaviza o tom, vale esta diretriz (a decisão mais
+   recente do dono); onde a Skill protege fato, oferta, preço, credencial ou a dignidade da leitora, a Skill
+   continua valendo. A linha "Voz da marca" dos dois CSVs diz isso (`radarHumanVoiceBrandVoiceRowNote`).
+
+### G.4 O que muda em cada entregável
+
+- **Pedido do artigo-modelo:** regra 3 (o H1 começa pela principal), regra 16 (de 3 a 6 seções; o excedente vira
+  H3), regras 27 (voz) e 28 (título, meta, primeiro H2, de 3 a 6 H2, autoridade local, fechamento em 4 tempos,
+  capa e imagem no corpo) da fonte única; o formato pede 2 alternativas (as 3 opções); a passada de correção
+  cobra a regra 28.
+- **Conferência da planta nova:** notas que pedem ação (a passada de correção as resolve; fechando, ficam só no
+  painel) para H1 e SEO title fora do começo, isca genérica no H1, nas alternativas, no SEO title e na meta,
+  meta sem a keyword nos primeiros 60 caracteres, menos de 3 opções de título, primeiro H2 sem a keyword e mais
+  de 6 H2. Correção sem IA: "A: keyword…" no SEO title e nas alternativas vira "Keyword…: A" (só trocam as
+  metades), dita como feita.
+- **Leitura compartilhada da planta gravada (CSV, vídeo, Redator, MCP, técnico):** com a principal, a mesma
+  troca de metades no SEO title e nas alternativas; e a Regra 8 (`h2Merges`, ver G.5). O payload não muda.
+- **CSV "Para escrever":** regra geral 12 da linha "Silo"/"Marca" (`radarHumanVoiceWritingRule`; o "Não
+  altere" passa a 13); linha "Voz da marca" com a precedência; `titulo_e_seo` com "Título pela SERP" (as 3
+  opções), os ajustes concluídos de cada opção, do SEO title e da meta, o "Gancho pela SERP" (P e B dão a dor;
+  os títulos S do topo dão o contraste e as iscas que eles prometem) e a regra da meta; `estrutura` com a seção
+  que entra como H3 marcada "H3 do H2 acima", a contagem de H2 da Regra 8 e o bloco "Voz e SEO pela SERP"
+  (primeira frase com a keyword, primeiro H2, H2, autoridade local, fechamento em 4 tempos, imagens) antes da
+  lista de afirmações; `plano_visual` com a capa obrigatória e a imagem no corpo quando faltam; o prompt da linha
+  manda escrever na voz humana das regras gerais, com a keyword no começo do H1, na primeira frase e no
+  primeiro H2.
+- **CSV de vídeo:** regra geral da linha de topo (`radarHumanVoiceVideoRule`), linha "Voz da marca" com a
+  precedência, título do vídeo com a principal no começo e o gancho de contraste, descrição que abre pela dor e
+  pela keyword, e a linha "Voz" no prompt do roteiro.
+- **Redator:** prompts de escrita de seção e de melhoria (`radarHumanVoiceRedatorRule` e a regra de
+  `h2Merges`), fundamentos (núcleo e precedência quando há artigo-modelo; a linha de `h2Merges`) e semente de
+  roteiro e carrossel (`radarHumanVoiceVideoRule`).
+- **MCP:** instruções de escrita do servidor (`radarHumanVoiceRedatorRule`) e a nota do catálogo
+  (`radarHumanVoiceCatalogNote`, AGENTS §17.1); `get_article_for_writing` e `get_video_material` entregam os
+  mesmos CSVs.
+- **Links internos:** a regra da âncora natural de 2026-10-11 continua a única (referenciada, não duplicada).
+
+### G.5 Mais de 6 H2 na planta gravada
+
+**Escolha: a leitura decide e o entregável diz; a planta não é reescrita.** Mover uma seção para dentro de
+outra na leitura mexeria na numeração dos links (L), no mapa da página publicada, no "seção N" das
+complementares, na âncora das imagens e — o mais arriscado — na seção que o Redator casa pelo título do H2 em
+documentos já criados. Então `radarArticleBlueprintH2Merges` decide, sem IA, qual seção entra como H3 de qual
+(nunca a primeira, que responde à busca, nem a última, que fecha com o CTA; sai primeiro a mais redundante com
+uma vizinha, pelas palavras próprias de H2, pergunta e H3, e ela entra na vizinha com que mais divide; sem
+cadeia), e cada entregável diz isso como instrução concluída: no CSV, a seção sai logo depois da que a recebe,
+como "### <H2> (H3 do H2 acima, pela Regra 8…)", com os H3 dela como tópicos, os links, a imagem e as evidências
+inteiros; a medida diz "6 H2 (Regra 8: 1 seção da planta entra como H3)". O Redator recebe `h2Merges` (pelos
+H2) e a regra no prompt; as seções da projeção não somem. A conferência da planta nova usa a mesma régua.
+**Caso real "como atrair um cliente" (7 H2):** "Como conquistar clientes com experiência e fidelização?" entra
+como H3 de "Como conseguir mais clientes com canais e presença?" (que já tinha o H3 "Atendimento: o diferencial
+que fideliza").
+
+### G.6 Conflitos com a Skill v1 e proposta de v2 (para o dono aplicar na Marca)
+
+A Skill v1 ("AdalbaPro", corrente na Marca) já protege a dignidade da leitora, proíbe erro de português
+fabricado, pede emoções reconhecíveis e descreve o nível de consciência ("reconhece o problema, conhece algumas
+tentativas e ainda não compreende as possibilidades da busca orgânica"). Onde ela **suaviza** — o exemplo de
+desenvolvimento "vale conferir onde o público está", a leitura de "politicamente incorreto" só como "confrontar
+receitas repetidas", a ausência de ironia, sarcasmo, indireta, oralidade e primeira pessoa do especialista — vale
+esta diretriz. Onde ela **protege** — fato, oferta, preço, credencial, "não sugerir que o orgânico é gratuito,
+imediato ou garantido", "não inventar escritório, endereço ou equipe", a dignidade da leitora, sem travessão na
+copy, sem liderar com siglas — a Skill vale. Proposta de texto para a seção "Voz" da v2 (não aplicada; a Skill é
+dado da Marca):
+
+> **Voz: humana, visceral e provocadora.** Escrever como gente fala: frases curtas e longas, pergunta direta,
+> repetição intencional, "E" e "Mas" no começo da frase, "pra" e "tá" com moderação. Sem eufemismo e sem tom
+> corporativo morno: problema é problema, barreira é barreira. Ironia, sarcasmo, indireta e duplo sentido são
+> bem-vindos quando miram a situação, a receita pronta, o mercado, a agência de posts e anúncios ou o
+> "algoritmo" — nunca a inteligência, a aparência ou a dignidade da profissional, que é aliada. Emoções da
+> rotina (cansaço, frustração, dinheiro perdido, raiva da receita que não funciona, alívio) ligadas a uma
+> situação concreta e a uma explicação útil. Quando quem assina é o especialista, a primeira pessoa é dele ("eu
+> vejo no consultório…"), só com relato real. Sobre anúncio de saúde e estética, falar da dificuldade (campanha
+> reprovada, conta caindo, verba parada), nunca de proibição universal. Abertura para quem já tentou posts,
+> feed, anúncio e agência; fechamento que explica, sem sigla, a estrutura própria no Google, em 4 tempos (dor,
+> estrutura, facilidade, diagnóstico). O texto publicado sai correto: naturalidade vem da fala, não de erro.
+>
+> Exemplo de tom: "Você posta. Posta de novo. E a mensagem que chega é de quem mora a 80 km."
+>
+> Evitar: "Sua clínica está invisível e vai morrer se não agir agora." (urgência inventada) e "Você ainda não
+> entendeu o básico?" (ataca a leitora).
+
+### G.7 Testes, limites e rollback
+
+- **Testes:** `tests/radar-voz-humana-serp-2026-10-11.test.mts` (em `npm run test:radar`): a mesma fonte no
+  pedido, na linha "Silo", na linha "Voz da marca", no Redator, no vídeo, na semente e no catálogo; a
+  precedência (a SERP decide os tópicos; a leitura não cria nem tira seção); a trava de fonte travando a
+  afirmação de plataforma sem fonte; título e meta (keyword no começo, isca genérica, 3 opções, troca de metades
+  sem mudar o payload); primeiro H2; de 3 a 6 H2 na planta nova e o caso real de 7 H2; fechamento em 4 tempos
+  com CTA único; capa e imagem no corpo; D10; sem erro proposital nas instruções. Os testes antigos que fixavam
+  a versão 2026-10-11, a medida sem espaço e o plano visual só com a capa passaram a provar o comportamento novo.
+- **Limites:** as conferências leem palavras, não sentido (isca, keyword no começo, recorte forte do H2); a voz
+  dos campos da planta gravada (promessa, títulos, abertura, respostas, virada, CTA) só muda organizando de novo
+  (até 2 chamadas de IA, decisão do dono); a Regra 8 conta as seções da planta — o H2 da página publicada mantido
+  como seção própria pelo mapa da atualização soma e não entra na conta; a trava de fonte não pega "proíbe",
+  "bloqueia" nem "praticamente impossível" sobre plataforma (o próprio exemplo do dono, "no Google, tráfego pago
+  para estética é praticamente impossível", passa sem marca) — a diretriz manda dizer a dificuldade, mas a régua
+  por frase não mudou nesta rodada (o pedido a manteve); o CSV de vídeo não aplica a Regra 8 aos capítulos.
+- **Rollback:** reverter o código. Nada gravado mudou: as plantas novas ganham `rulesVersion = "2026-10-11b"` e
+  continuam legíveis pelo código anterior (ele só não diz o aviso certo).

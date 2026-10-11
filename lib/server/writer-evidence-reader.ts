@@ -79,6 +79,8 @@ import {
 import { WRITER_BLUEPRINT_READING_RULES, writerArticleBlueprintForWriting, writerBlueprintWithCurrentNames, type WriterBlueprintExclusions } from "@/lib/redator/writer-blueprint-for-writing";
 import { radarWriterEditorialContextWithBlueprint } from "@/lib/redator/radar-subject-turn";
 import { radarArticleDnaScopeExclusions } from "@/lib/radar/article-research-context";
+import { RADAR_NATURAL_ANCHOR_RULE } from "@/lib/radar/natural-anchor-rule";
+import { RADAR_HUMAN_VOICE_CORE, RADAR_HUMAN_VOICE_H2, RADAR_HUMAN_VOICE_PRECEDENCE } from "@/lib/radar/human-voice-guideline";
 import { RADAR_WRITER_MAY_NOT, radarWriterMayNotWithSubject } from "@/lib/redator/writer-handoff";
 import { WRITER_SECTION_BUNDLE_PATHS, type WriterSectionMaterial } from "@/lib/redator/writer-section-evidence";
 import {
@@ -758,7 +760,8 @@ async function plantaEVozDe(context: WriterEvidenceContext, head: WriterEvidence
         keywords, exclusions, claims: { authorityEvidence: extras.authorityEvidence ?? null }, currentStructure,
       })
       : null;
-    if (articleBlueprint && conteudo) blueprintRead = writerBlueprintWithCurrentNames(conteudo.blueprint, keywords, { sources: conteudo.sources, exclusions });
+    /* 2026-10-11 · com os candidatos da planta: a âncora natural, a mesma leitura do CSV. */
+    if (articleBlueprint && conteudo) blueprintRead = writerBlueprintWithCurrentNames(conteudo.blueprint, keywords, { sources: conteudo.sources, exclusions, linkCandidates: conteudo.linkCandidates });
     if (!articleBlueprint) absent.push({ field: "articleBlueprint", reason: `o artigo-modelo aprovado está fora do contrato do Radar: leia radar.blueprint/${lido.meta.id}` });
   } else if (lido.kind !== "no_bundle") {
     /* 2026-10-09 · regra do piloto: sem planta, o estado explícito com o caminho (organizar no Radar) — nunca a estrutura de outro lugar. */
@@ -787,7 +790,8 @@ function linhasDoEnvioPelaPlanta(head: WriterEvidenceHead, campos: Linha | null 
 function proximoPassoDosFundamentos(planta: PlantaEVoz): string {
   return [
     "Leia get_writer_evidence_manifest e, para a seção que está escrevendo, read_writer_evidence com a sourceKey do manifesto.",
-    ...(planta.articleBlueprint ? ["articleBlueprint é o artigo-modelo que o dono aprovou no Radar para este pacote: siga a planta (H1, seções, pergunta do leitor, resposta que abre, links internos com a âncora indicada, fechamento e CTA); o integral está em articleBlueprint.readAt."] : []),
+    /* 2026-10-11 · a âncora sugerida pela régua da âncora natural (a mesma frase do CSV e do MCP). */
+    ...(planta.articleBlueprint ? [`articleBlueprint é o artigo-modelo que o dono aprovou no Radar para este pacote: siga a planta (H1, seções, pergunta do leitor, resposta que abre, links internos com a âncora sugerida, fechamento e CTA); o integral está em articleBlueprint.readAt. ${RADAR_NATURAL_ANCHOR_RULE}`] : []),
     /* 2026-10-09 · regra do piloto: sem planta concluída, a estrutura não sai de outro lugar. */
     ...(!planta.articleBlueprint && planta.absent.some(item => item.field === "articleBlueprint")
       ? ["Sem o artigo-modelo concluído deste pacote, a estrutura não sai de outro lugar: organize o artigo-modelo no Radar (Pesquisa → Artigo-modelo da SERP) e leia os fundamentos de novo."]
@@ -802,6 +806,11 @@ function proximoPassoDosFundamentos(planta: PlantaEVoz): string {
       ? ["articleBlueprint.publishedMap é o mapa da atualização da página publicada: cada H2 de hoje tem o destino na planta (line); o conteúdo dele é reescrito na seção indicada, e nada sai sem a decisão registrada ali."]
       : []),
     ...(planta.brandVoice ? ["brandVoice é a voz corrente da Marca: forma, copy, transições e CTA seguem ela (statusLabel diz se é a ativa ou a versão corrente na Marca); a Skill inteira está em brandVoice.readAt."] : []),
+    /* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP (a mesma fonte do CSV, do pedido e do MCP) e a Regra 8 da planta lida. */
+    ...(planta.articleBlueprint ? [`${RADAR_HUMAN_VOICE_CORE} ${RADAR_HUMAN_VOICE_PRECEDENCE}`] : []),
+    ...(planta.articleBlueprint?.h2Merges?.length
+      ? [`articleBlueprint.h2Merges (Regra 8 do Guia: de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} H2): cada seção listada entra como H3 dentro da seção into, com a cobertura inteira.`]
+      : []),
     ...(planta.articleBlueprint || planta.brandVoice ? ["Planta e voz não mudam keyword, intenção, escopo nem fatos: conflito com a evidência vira record_writer_divergence."] : []),
     "As perguntas orientam a cobertura dentro do texto — nunca uma seção de FAQ.",
   ].join(" ");

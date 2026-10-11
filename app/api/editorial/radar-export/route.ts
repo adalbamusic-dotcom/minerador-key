@@ -167,7 +167,8 @@ export async function POST(request: Request) {
           refused: recusados,
         }, { status: 409, headers: noStoreHeaders });
       }
-      const video = radarPortableVideoExport({ articles: montadas, today: exportedAt, brandVoice, selectionPlan: planoDaSelecao });
+      /* 2026-10-11 · com as publicações (o mesmo mapa do CSV para escrever): a identidade de publicação do artigo de cada linha. */
+      const video = radarPortableVideoExport({ articles: montadas, today: exportedAt, brandVoice, selectionPlan: planoDaSelecao, publications: publicacoes });
       /* 2026-10-09 · a função pura também pode dizer que falta a planta (contrato da rodada): o mesmo 409. */
       if (radarExportNeedsArticleBlueprint(video)) {
         return NextResponse.json(radarPortableExportNeedsBlueprintBody({ missing: radarPortableExportMissingBlueprints(montadas, radarExportNeedsArticleBlueprintIds(video)), refused: recusados }), { status: 409, headers: noStoreHeaders });

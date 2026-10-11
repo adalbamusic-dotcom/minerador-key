@@ -548,7 +548,8 @@ test("3(b) · o assunto de OUTRO ARTIGO do Silo fica no 'Não cobrir'; a seção
   const estrutura = artigo.row.estrutura;
   const daSecao = estrutura.slice(estrutura.indexOf("## Como captar clientes: estratégias práticas"), estrutura.indexOf("## Como conquistar um cliente na primeira abordagem"));
   assert.match(daSecao, /^- Outro artigo do Silo: "O que mais atrai cliente para uma loja física\?" é assunto do artigo "como atrair um cliente"; aqui só mencione e linke para "como atrair um cliente" \(link L2\), sem responder a pergunta\.$/m, daSecao);
-  assert.match(artigo.row.links_internos, /^L2 · âncora "como atrair um cliente" → Suporte "como atrair um cliente"/m, "o L é o mesmo da coluna de links");
+  /* 2026-10-11 · a âncora é a sugerida: um recorte natural, nunca a keyword inteira do destino. */
+  assert.match(artigo.row.links_internos, /^L2 · âncora sugerida "atrair um cliente" → Suporte "como atrair um cliente"/m, "o L é o mesmo da coluna de links");
   /* Sem link da planta para o artigo, cita sem link. */
   const semLink = PLANTA_CAPTAR();
   semLink.blueprint.sections[2] = { ...semLink.blueprint.sections[2], internalLinks: [] };
@@ -707,7 +708,7 @@ test("10 · planta antiga do Instagram: o CTA que cita a página comercial ganha
   const ctx = contexto(SILO_LEADS("sup-instagram", 2), { blueprint: antiga });
   const artigo = buildRadarWritingExportArticle(entrada({ principal: "como atrair clientes pelo instagram", complementares: ["instagram não traz pacientes"] }), ctx);
   guardar(ctx, artigo.row);
-  assert.match(artigo.row.links_internos, /^L4 · âncora "serviços de SEO para clínicas" → Página da marca \(Skill de voz\) "Página da marca \/servicos\/seo-para-clinicas" → https:\/\/adalbapro\.com\.br\/servicos\/seo-para-clinicas \(publicado\) · onde: seção "O Instagram continua no jogo, mas no lugar certo"/m);
+  assert.match(artigo.row.links_internos, /^L4 · âncora sugerida "serviços de SEO para clínicas" → Página da marca \(Skill de voz\) "Página da marca \/servicos\/seo-para-clinicas" → https:\/\/adalbapro\.com\.br\/servicos\/seo-para-clinicas \(publicado\) · onde: seção "O Instagram continua no jogo, mas no lugar certo"/m);
   assert.match(artigo.row.estrutura, /^Link da chamada: L4, âncora "serviços de SEO para clínicas" → Página da marca \/servicos\/seo-para-clinicas \(no fim da última seção, junto da chamada\)\.$/m);
   const fechamento = artigo.row.estrutura.slice(artigo.row.estrutura.indexOf("\nFechamento:"));
   assert.doesNotMatch(fechamento, /Continuação|Leitura seguinte|Próximo passo/, "o fechamento tem uma chamada só");

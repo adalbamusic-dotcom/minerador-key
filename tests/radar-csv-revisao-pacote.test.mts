@@ -114,11 +114,12 @@ test("CSV: URL de evidência inteira, destino pelo nome, prefixo provável e pro
   assert.doesNotMatch(`${colunas.estrutura}\n${colunas.links_internos}`, /Cobrir com clareza/, "a moldura da promessa não é nome de destino");
   /* 2026-10-02 · UM destino por link: o caminho com o prefixo; a confirmação e o slug do Arquiteto vão como pendência. */
   /* 2026-10-02 · D10: sem "pendência" no entregável. */
-  assert.match(colunas.links_internos, /Pilar "leads qualificados" → \/leads-sem-trafego-pago\/qualificados \(planejado: caminho do Silo, o mesmo prefixo da URL publicada deste artigo; slug do Arquiteto \/qualificados\)/);
+  /* 2026-10-11 · sem o Silo de hoje (só a URL publicada deste artigo), o prefixo dela ainda monta o caminho do destino novo, dito concluído. */
+  assert.match(colunas.links_internos, /Pilar "leads qualificados" → \/leads-sem-trafego-pago\/qualificados \(novo, ainda não publicado: o link entra quando o destino estiver no ar; caminho do Silo pelo prefixo da URL publicada deste artigo\)/);
   assert.doesNotMatch(colunas.links_internos, /pendência/);
   assert.equal((colunas.links_internos.match(/^L1 · [^\n]*→ \//gm) || []).length, 1);
-  assert.doesNotMatch(colunas.links_internos, /\(planejado[^)]*\) \(planejado/, "nada de dois status no mesmo link");
-  assert.match(colunas.links_internos, /→ \/leads-sem-trafego-pago\/captacao \(planejado/, "caminho que já tem o prefixo não ganha outro");
+  assert.doesNotMatch(colunas.links_internos, /\(novo[^)]*\) \(novo/, "nada de dois status no mesmo link");
+  assert.match(colunas.links_internos, /→ \/leads-sem-trafego-pago\/captacao \(novo, ainda não publicado/, "caminho que já tem o prefixo não ganha outro");
   assert.match(colunas.links_internos, /→ https:\/\/exemplo\.com\.br\/servicos \(publicado\)/, "publicado não muda");
   assert.doesNotMatch(colunas.plano_visual.split("Respiro")[0], /Proporção:/, "o prompt da capa já diz a proporção");
   assert.match(colunas.plano_visual, /Respiro 1[\s\S]*Proporção: 4:3 \(referência/);

@@ -447,7 +447,8 @@ export function radarPortableExportBlueprintOf(
     return {
       payload,
       columns: radarArticleBlueprintColumns(payload),
-      reading: radarArticleBlueprintReading(payload.blueprint, { sources }).blueprint,
+      /* 2026-10-11 · com os candidatos da planta: a âncora natural, a mesma leitura do CSV, do vídeo e do Redator. */
+      reading: radarArticleBlueprintReading(payload.blueprint, { sources, linkCandidates: payload.linkCandidates }).blueprint,
     };
   }
   const p = radarWritingProjections(entrada);
@@ -461,7 +462,8 @@ export function radarPortableExportBlueprintOf(
       principal: textoLimpo(p.dna.principalKeyword) || null,
       continuation: null,
     }),
-    reading: radarArticleBlueprintReading(payload.blueprint, { sources, withoutCallInNextStep: true, ...(exclusions ? { exclusions } : {}) }).blueprint,
+    /* 2026-10-11b · com a principal: a keyword no começo do SEO title e das alternativas (regra 28), a mesma leitura do CSV "Para escrever". */
+    reading: radarArticleBlueprintReading(payload.blueprint, { sources, withoutCallInNextStep: true, linkCandidates: payload.linkCandidates, principal: textoLimpo(p.dna.principalKeyword) || null, ...(exclusions ? { exclusions } : {}) }).blueprint,
   };
 }
 

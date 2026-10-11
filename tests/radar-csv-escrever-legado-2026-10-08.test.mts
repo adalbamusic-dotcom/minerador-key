@@ -642,15 +642,16 @@ test("P1 (8) · Pilar: os links vão às seções que tratam o destino (as da pl
   assert.ok(Math.max(...porSecao.values()) <= 3, JSON.stringify([...porSecao]));
   assert.ok(porSecao.size >= 3, "espalhados pelas seções");
   /* O destino de campanhas vai à seção que trata de campanha. */
-  assert.match(links.find(item => item.includes("âncora \"campanhas de marketing\""))!, /onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*"/, `${linha.row.estrutura}\n${linha.row.links_internos}`);
+  assert.match(links.find(item => item.includes("âncora sugerida \"campanhas de marketing\""))!, /onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*"/, `${linha.row.estrutura}\n${linha.row.links_internos}`);
   /* Cada seção da estrutura nomeia os links dela: os sete, cada um uma vez. */
-  const naEstrutura = [...linha.row.estrutura.matchAll(/^- Link interno: âncora "([^"]+)"/gm)].map(item => item[1]);
+  /* 2026-10-11 · a estrutura diz o L e a âncora sugerida (a natural da IA fica como veio). */
+  const naEstrutura = [...linha.row.estrutura.matchAll(/^- Link interno L\d+: âncora sugerida "([^"]+)"/gm)].map(item => item[1]);
   assert.deepEqual(naEstrutura.sort(), MEMBROS_DO_PILAR.map(([, , ancora]) => ancora).sort());
 
   /* Um link só: vai à seção que a planta escolheu, a que trata o destino. */
   const umSo = entradaDoPilar(MEMBROS_DO_PILAR.slice(-1));
   const linhaUmSo = linhaDe(umSo, { ...doSilo, blueprint: plantaDe(umSo, { silo: SILO_DO_PILAR(), articleId: ARTIGO, resposta: respostaDoPilar(umSo, MEMBROS_DO_PILAR.slice(-1)) }) });
-  assert.match(linhaUmSo.row.links_internos, /^L1 · âncora "campanhas de marketing" .* · onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*" · /m, linhaUmSo.row.links_internos);
+  assert.match(linhaUmSo.row.links_internos, /^L1 · âncora sugerida "campanhas de marketing" .* · onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*" · /m, linhaUmSo.row.links_internos);
 });
 
 test("P1 (9) · a publicação de todos os membros do Silo: destino publicado sai com a URL, mesmo fora do arquivo", async () => {
@@ -665,8 +666,9 @@ test("P1 (9) · a publicação de todos os membros do Silo: destino publicado sa
   const links = linha.row.links_internos;
   assert.match(links, /→ Suporte "instagram não traz pacientes" → https:\/\/adalbapro\.com\.br\/leads-sem-trafego-pago\/instagram-nao-traz-pacientes \(publicado\)/);
   assert.match(links, /→ Suporte "tráfego pago vs orgânico para clínica de estética" → https:\/\/adalbapro\.com\.br\/leads-sem-trafego-pago\/trafego-pago-vs-organico-para-clinica-de-estetica \(publicado\)/);
-  assert.match(links, /→ Suporte "como captar um cliente" → \/como-captar-um-cliente \(planejado, ainda não publicado\)/, "o que não está no ar continua dito");
-  assert.match(links, /^Destino planejado \(ainda não publicado\): o link entra com a URL final quando o destino estiver no ar/m);
+  /* 2026-10-11 · o destino novo sai com a URL canônica planejada (identidade de publicação) e quando o link entra. */
+  assert.match(links, /→ Suporte "como captar um cliente" → https:\/\/adalbapro\.com\.br\/(?:[a-z-]+\/)?como-captar-um-cliente \(novo, ainda não publicado: o link entra quando o destino estiver no ar\)/, "o que não está no ar continua dito");
+  assert.match(links, /^Destino novo \(ainda não publicado\): o link entra quando o destino estiver no ar/m);
 
   /* No lote: o mapa de publicações chega à linha de cada artigo e à ordem narrativa do topo. */
   const lote = radarPortableWritingExport({

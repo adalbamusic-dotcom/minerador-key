@@ -343,15 +343,16 @@ test("F1 · o irmão do Silo no ar sai PUBLICADO na planta (URL e '(publicado)')
   const planta = plantaAntiga();
   assert.deepEqual(planta.linkCandidates.map(item => item.status), ["PLANNED", "PLANNED"], "a planta gravou os irmãos como planejados");
   const comUmNoAr = linhaDe(entradaGoogle(), contextoDoSilo(new Map([[ARTIGO_AMAZON, publicacao(NIVEA_NO_AR)]]), planta)).row.links_internos;
-  assert.match(comUmNoAr, new RegExp(`^L1 · âncora "skin care nivea" → Suporte "skin care nivea" → ${NIVEA_NO_AR.replace(/[./]/g, "\\$&")} \\(publicado\\)`, "m"), comUmNoAr);
-  assert.match(comUmNoAr, /^L2 · âncora "máscara facial" → Suporte "máscara facial".*planejado/m);
-  assert.match(comUmNoAr, /^Destino planejado \(ainda não publicado\)/m, "a máscara facial ainda não está no ar");
+  /* 2026-10-11 · âncora sugerida (recorte natural); o destino novo pela URL canônica planejada (slug no caminho do Silo). */
+  assert.match(comUmNoAr, new RegExp(`^L1 · âncora sugerida "skin care" → Suporte "skin care nivea" → ${NIVEA_NO_AR.replace(/[./]/g, "\\$&")} \\(publicado\\)`, "m"), comUmNoAr);
+  assert.match(comUmNoAr, /^L2 · âncora sugerida "máscara" → Suporte "máscara facial" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/mascara-facial \(novo, ainda não publicado: o link entra quando o destino estiver no ar\)/m);
+  assert.match(comUmNoAr, /^Destino novo \(ainda não publicado\)/m, "a máscara facial ainda não está no ar");
 
   const todosNoAr = linhaDe(entradaGoogle(), contextoDoSilo(new Map([
     [ARTIGO_AMAZON, publicacao(NIVEA_NO_AR)],
     [ARTIGO_NAO_ENVIADO, publicacao("https://careglow.com.br/cuidados-com-a-pele/mascara-facial")],
   ]), planta)).row.links_internos;
-  assert.doesNotMatch(todosNoAr, /Destino planejado|ainda não publicado|planejado:/, todosNoAr);
+  assert.doesNotMatch(todosNoAr, /Destino novo|Destino planejado|ainda não publicado|planejado:/, todosNoAr);
   assert.match(todosNoAr, /mascara-facial \(publicado\)/);
 
   /* Na geração, o irmão no ar já entra na planta como destino publicado. */
@@ -374,7 +375,8 @@ test("F2 e F14 · a planta no CSV traz UMA chamada: o 'Próximo passo' vira a co
   assert.doesNotMatch(estrutura, /^Continuação/m);
   assert.match(estrutura, /^## A rotina da manhã em três passos\n(?:- .*\n|  ### .*\n)*- Leitura seguinte \(opcional, não é uma chamada\): o link L1 desta seção leva ao próximo artigo do Silo, "skin care nivea"; se couber, apresente-o ali como a leitura seguinte, nunca como uma segunda chamada no fechamento\.$/m);
   /* F14 · "skin care nivea" → K1 aparecia duas vezes: sai uma (na primeira seção), e a medida concorda. */
-  assert.equal((estrutura.match(/- Link interno: âncora "skin care nivea"/g) || []).length, 1);
+  /* 2026-10-11 · a mesma âncora para o mesmo destino recebe a mesma troca: o repetido continua saindo uma vez só. */
+  assert.equal((estrutura.match(/- Link interno L\d+: âncora sugerida "skin care"/g) || []).length, 1);
   assert.match(estrutura, / · 2 links internos · /);
   const links = linhaDe(entradaGoogle(), contextoDoSilo(new Map(), plantaAntiga())).row.links_internos;
   assert.match(links, /^Aplique somente estes 2 link\(s\)/m, links);
