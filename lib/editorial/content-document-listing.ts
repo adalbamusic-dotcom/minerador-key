@@ -221,3 +221,21 @@ export function listedContentDocumentFromRow(row: Readonly<Record<string, unknow
   if (Object.keys(contexto).length) documento.importedContext = contexto;
   return ListedContentDocumentSchema.parse(documento);
 }
+
+/**
+ * 2026-10-11 · O MESMO documento listado, a partir do payload que a função
+ * `editorial_content_documents_listing` devolve (lido uma vez no banco, já sem o
+ * bundle do dossiê). Monta a mesma linha projetada que o select por caminhos
+ * produziria e passa pela MESMA remontagem — os dois caminhos não divergem.
+ */
+export function listedContentDocumentFromListingPayload(payload: unknown): ListedContentDocument {
+  const objeto = (valor: unknown): Record<string, unknown> => (valor && typeof valor === "object" && !Array.isArray(valor) ? valor as Record<string, unknown> : {});
+  const documento = objeto(payload);
+  const contexto = objeto(documento.importedContext);
+  const dossie = objeto(contexto.dossier);
+  const linha: Record<string, unknown> = {};
+  for (const campo of CAMPOS_DO_DOCUMENTO) linha[`${APELIDO.documento}${campo}`] = documento[campo] ?? null;
+  for (const campo of CAMPOS_DO_CONTEXTO) linha[`${APELIDO.contexto}${campo}`] = contexto[campo] ?? null;
+  for (const campo of CAMPOS_DO_DOSSIE) linha[`${APELIDO.dossie}${campo}`] = dossie[campo] ?? null;
+  return listedContentDocumentFromRow(linha);
+}

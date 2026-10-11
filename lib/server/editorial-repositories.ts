@@ -10,7 +10,7 @@ import { BrandInvitationSchema, CollaboratorRoleSchema, OperationalPublicationSc
 import type { SavedGridView } from "../editorial/data-grid";
 import { SavedGridViewSchema } from "../editorial/data-grid";
 import { firstIssueMessage, rejectedPaths, type IncompatibleRecord } from "../editorial/partial-read.ts";
-import { completeWithStoredBundle, CONTENT_DOCUMENT_LISTING_SELECT, listedContentDocumentFromRow, type PartialContentDocument } from "../editorial/content-document-listing.ts";
+import { completeWithStoredBundle, CONTENT_DOCUMENT_LISTING_SELECT, listedContentDocumentFromListingPayload, listedContentDocumentFromRow, type PartialContentDocument } from "../editorial/content-document-listing.ts";
 import { getOperationalClient, mapPersistenceError, OptimisticLockError } from "./editorial-db";
 import { contentHash } from "../arquiteto/versioning";
 import type { SerpCollectionRecord, SerpReviewRecord } from "../editorial/contracts";
@@ -150,7 +150,23 @@ const WORKFLOW_VIEW_LISTAGEM = "editorial_workflow_items_listagem";
  * migration deixaria o workspace editorial inteiro sem leitura. E definitivo
  * na vida do processo: uma vez que a view falte, nao se insiste a cada carga.
  */
-let fonteDaListagemWorkflow: string = WORKFLOW_VIEW_LISTAGEM;
+/*
+ * 2026-10-11 · A LISTAGEM LÊ A TABELA. Medido em produção (marca adalbapro, 9
+ * itens do Radar): a view devolvia os MESMOS bytes da tabela (4,4 MB nos dois) e
+ * custava 543 ms de banco contra 48 ms da tabela — a função jsonb por linha não
+ * economizava nada e gastava CPU que, junto da listagem dos documentos, levava a
+ * seção "workflow" ao statement_timeout. A poda em TypeScript, abaixo, continua
+ * sendo a autoridade do que sai. A view fica no banco, sem uso.
+ */
+let fonteDaListagemWorkflow: string = WORKFLOW_TABELA;
+void WORKFLOW_VIEW_LISTAGEM;
+
+/** A função de listagem dos documentos ainda não existe no banco (migration 20261011120000 não aplicada). */
+function funcaoDeListagemAusente(error: { code?: string | null; message?: string | null } | null): boolean {
+  if (!error) return false;
+  const code = String(error.code || "");
+  return code === "PGRST202" || code === "42883" || String(error.message || "").includes("editorial_content_documents_listing");
+}
 
 function viewDeWorkflowAusente(error: { code?: string | null; message?: string | null } | null): boolean {
   if (!error) return false;
@@ -731,12 +747,32 @@ export class ContentDocumentRepository {
    * detalhe completo é `findDetail`, para o documento aberto.
    */
   async list(marcaId: string, userId: string) {
-    const { data, error } = await client().from("content_documents").select(`id,content_hash,lock_version,updated_at,${CONTENT_DOCUMENT_LISTING_SELECT}`).eq("marca_id", marcaId).order("updated_at", { ascending: false });
-    unwrap(data, error); const rows = (data || []) as unknown as Array<Record<string, unknown> & { id: string; content_hash: string; lock_version: number; updated_at: string }>;
+    /*
+     * 2026-10-11 · UMA LEITURA POR DOCUMENTO. Os ~40 caminhos JSON do select
+     * abaixo descomprimem o payload inteiro (2 a 6 MB, quase tudo bundle do Radar)
+     * uma vez por caminho: 11,7 s em produção, acima do limite de 8 s. A função
+     * `editorial_content_documents_listing` lê o payload uma vez e tira o bundle
+     * no banco (186 ms, 6 KB). Sem a função (migration ainda não aplicada), o
+     * select antigo continua valendo. O documento listado é o mesmo nos dois.
+     */
+    const viaFuncao = await client().rpc("editorial_content_documents_listing", { p_marca_id: marcaId });
+    let rows: Array<{ id: string; content_hash: string; lock_version: number; updated_at: string; document: ReturnType<typeof listedContentDocumentFromRow> }>;
+    if (!viaFuncao.error) {
+      rows = ((viaFuncao.data || []) as Array<{ id: string; content_hash: string; lock_version: number; updated_at: string; payload: unknown }>)
+        .map(row => ({ id: row.id, content_hash: row.content_hash, lock_version: row.lock_version, updated_at: row.updated_at, document: listedContentDocumentFromListingPayload(row.payload) }));
+    } else if (funcaoDeListagemAusente(viaFuncao.error)) {
+      const { data, error } = await client().from("content_documents").select(`id,content_hash,lock_version,updated_at,${CONTENT_DOCUMENT_LISTING_SELECT}`).eq("marca_id", marcaId).order("updated_at", { ascending: false });
+      unwrap(data, error);
+      rows = ((data || []) as unknown as Array<Record<string, unknown> & { id: string; content_hash: string; lock_version: number; updated_at: string }>)
+        .map(row => ({ id: row.id, content_hash: row.content_hash, lock_version: row.lock_version, updated_at: row.updated_at, document: listedContentDocumentFromRow(row) }));
+    } else {
+      unwrap(viaFuncao.data, viaFuncao.error);
+      rows = [];
+    }
     const ids = rows.map(row => row.id);
     const states = ids.length ? await client().from("content_document_user_states").select("*").eq("user_id", userId).in("document_id", ids) : { data: [], error: null };
     unwrap(states.data, states.error); const stateMap = new Map((states.data || []).map(row => [row.document_id, row]));
-    return rows.map(row => { const state = stateMap.get(row.id); return { document: listedContentDocumentFromRow(row), contentHash: row.content_hash, lockVersion: row.lock_version, updatedAt: isoDate(row.updated_at),
+    return rows.map(row => { const state = stateMap.get(row.id); return { document: row.document, contentHash: row.content_hash, lockVersion: row.lock_version, updatedAt: isoDate(row.updated_at),
       userState: state ? { cursorPosition: state.cursor_position, scrollTop: state.scroll_top, leftPanelOpen: state.left_panel_open, rightPanelOpen: state.right_panel_open, lastOpenedAt: isoDate(state.last_opened_at) } : null }; });
   }
 

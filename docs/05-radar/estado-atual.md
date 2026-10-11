@@ -1,5 +1,30 @@
 # Estado atual — Radar
 
+## Mesa sem estourar o tempo do banco — 2026-10-11
+
+**Verificado no código, confirmado por teste e medido no banco (só leitura). Validado manualmente: não.**
+
+- **Sintoma (dono, depois da leitura em fluxo):** "Seção(ões) que não puderam ser lidas: workflow (A operação no banco
+  excedeu o tempo limite…) · documents (idem) · invitations (tabela ausente)"; a planilha seguia com a cópia local (só o
+  piloto). Não era a Vercel: era o banco passando do statement_timeout de 8 s do authenticator.
+- **Medido:** documentos do Redator: 2 linhas, 8,43 MB (importedContext com o bundle do Radar copiado: 2,2 e 5,9 MB). O
+  select da listagem pede ~40 caminhos JSON e cada um descomprime o payload inteiro: 11,7 s; lendo o payload uma vez
+  numa variável e tirando o bundle: 186 ms e 6 KB. Listagem do Radar: a view devolvia os mesmos 4,4 MB da tabela e
+  custava 543 ms contra 48 ms. Workspace inteiro: 10,95 MB (4,17 MB Radar + 6,55 MB de 102 versões de ArticleDNA).
+- **Correção:** `WorkflowRepository.list` lê a tabela (a poda em TypeScript segue sendo a autoridade);
+  `ContentDocumentRepository.list` chama a função `editorial_content_documents_listing` (migration
+  `supabase/migrations/20261011120000_listagem_documentos_uma_leitura.sql`, só leitura, SECURITY INVOKER, execução só
+  do service_role) e volta ao select antigo enquanto a função não existir (PGRST202/42883). O documento listado é o
+  mesmo pelos dois caminhos (`listedContentDocumentFromListingPayload` remonta pela mesma `listedContentDocumentFromRow`).
+- **Migration a aplicar pelo dono:** sem ela a seção documents continua lenta. Rollback: `DROP FUNCTION
+  public.editorial_content_documents_listing(uuid);` (o código volta sozinho ao select antigo).
+- **Testes:** `tests/radar-lista-leve-2026-10-11.test.mts` (4). A seção invitations falha por tabela ausente
+  (`brand_invitations`), anterior e fora do Radar.
+- **Limite (estrutural, SDD):** cada item do Radar guarda todas as versões de análise (300–870 KB por artigo), cada
+  documento do Redator guarda uma cópia do pacote do Radar (2–6 MB) e cada versão de ArticleDNA tem ~65–117 KB
+  (quase tudo `keywordReferences`). A mesa lê tudo de uma vez. Isso não escala com volume real, em qualquer
+  hospedagem: precisa de listagem leve (resumo por item) e de o documento guardar a referência do pacote, não a cópia.
+
 ## Comunicação humana guiada pela SERP — 2026-10-11
 
 **Verificado no código e confirmado por teste (fixtures do caso real "como atrair um cliente"; PROVIDER_CALLS = 0,
