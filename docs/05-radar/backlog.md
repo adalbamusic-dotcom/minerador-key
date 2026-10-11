@@ -1,5 +1,45 @@
 # Backlog — Radar
 
+## Comunicação humana guiada pela SERP — 2026-10-11
+
+Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo) e no Adendo G da SDD da diretriz
+editorial. **Validado manualmente: não.**
+
+- [x] Fonte única `lib/radar/human-voice-guideline.ts` e documento `docs/compartilhado/diretriz-de-comunicacao-humana.md`.
+- [x] Pedido do artigo-modelo (regras 3, 16, 27 e 28; regras "2026-10-11b") e conferência da planta nova.
+- [x] Leitura compartilhada: keyword no começo do SEO title e das alternativas (troca das metades) e Regra 8 (`h2Merges`).
+- [x] CSV "Para escrever" (regra geral 12, linha "Voz da marca", título pela SERP, bloco "Voz e SEO", capa e imagem),
+  CSV de vídeo, Redator, semente e MCP pela mesma fonte.
+- [ ] Validação manual (dono): reexportar o CSV de "como atrair um cliente" e conferir as 3 opções de título, o
+  gancho pela SERP, a seção juntada pela Regra 8 e o bloco "Voz e SEO".
+- [ ] Decisão do dono: erro proposital (hoje desligado, `RADAR_HUMAN_VOICE_INTENTIONAL_ERRORS = false`).
+- [ ] Decisão do dono: a numeração dos níveis de consciência (hoje escritos por extenso: abertura nível 3, fechamento
+  nível 2).
+- [ ] Dono, na Marca: aplicar (ou não) a v2 da Skill de voz proposta no Adendo G (G.6).
+- [ ] Proposta: a trava de fonte marcar "proíbe", "bloqueia" e "praticamente impossível" sobre plataforma (hoje passam).
+- [ ] Proposta: Regra 8 também contando os H2 da página publicada mantidos pelo mapa da atualização.
+- [ ] Organizar de novo (pago, decisão do dono) as plantas que devem sair inteiras na voz nova.
+
+## Âncora natural e identidade de publicação — 2026-10-11
+
+Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo). **Validado manualmente: não.**
+
+- [x] Régua única da âncora natural (`radarNaturalAnchor`): conceito do grafo, recorte da âncora, recorte do rótulo;
+  nunca a keyword inteira do destino; variedade na planta e no lote do Silo; nunca a mesma âncora para dois destinos.
+- [x] Pedido do artigo-modelo (regra 6, conceitos e URL no candidato K, regras "2026-10-11"), conferência da planta
+  nova e leitura compartilhada da planta gravada (sem mudar payload nem hash).
+- [x] CSV "Para escrever": cabeçalho com a regra, "âncora sugerida", "outras formulações", URL canônica do destino,
+  "Link interno Ln" na estrutura, regra geral 9.
+- [x] Identidade de publicação única (`radarPublicationIdentity`): bloco "Publicação" na coluna artigo, ordem
+  narrativa com URL canônica e situação, linha "Silo" em português claro, destino novo pela URL planejada.
+- [x] CSV de vídeo com o mesmo bloco e a mesma URL; Redator e MCP pela mesma leitura e pela mesma frase da regra.
+- [ ] Validação manual (dono): reexportar o CSV de "como atrair um cliente" e conferir as 9 âncoras sugeridas, a URL
+  canônica de cada destino e o bloco "Publicação".
+- [ ] Proposta: levar o bloco "Publicação" do próprio artigo aos fundamentos do Redator (exige ler SiloDNA/SiloPage no
+  servidor do Redator).
+- [ ] Proposta: o Redator ler os conceitos de âncora do grafo também na planta antiga (hoje só a planta nova os leva no
+  candidato K).
+
 ## Lista do Radar e importação — 2026-10-09 (correção em produção)
 
 Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo). **Validado manualmente: não.**

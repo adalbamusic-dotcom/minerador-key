@@ -55,6 +55,34 @@ import { RADAR_SILO_ROLE_ASKS, radarSiloRoleIsPillar, radarSiloRoleIsSupport, ra
 import { radarResearchContextScopeExclusions, type RadarResearchScopeExclusion } from "./article-research-context.ts";
 import { RADAR_AMAZON_INTENT_LABELS } from "./amazon-editorial-target.ts";
 import type { RadarAmazonCommercialBlock } from "./amazon-commercial-block.ts";
+/* 2026-10-11 · a âncora natural (uma régua só) e a identidade de publicação (Silo, slug, URL canônica, situação). */
+import {
+  RADAR_NATURAL_ANCHOR_PROMPT_RULE,
+  RADAR_NATURAL_ANCHOR_RULE,
+  radarAnchorDestinationKey,
+  radarAnchorGraphConcepts,
+  radarAnchorKey,
+  radarNaturalAnchor,
+  radarNaturalAnchorFormulations,
+  type RadarAnchorLedger,
+  type RadarNaturalAnchorReason,
+} from "./natural-anchor.ts";
+import { radarSiloPublicationIdentities, type RadarPublicationIdentity } from "./publication-identity.ts";
+/* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP (uma fonte só: pedido, conferência, leitura e colunas). */
+import {
+  RADAR_HUMAN_VOICE_CLOSING_STEPS,
+  RADAR_HUMAN_VOICE_GUIDELINE_VERSION,
+  RADAR_HUMAN_VOICE_H2,
+  RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS,
+  RADAR_HUMAN_VOICE_LOCAL_AUTHORITY,
+  RADAR_HUMAN_VOICE_TITLE_OPTIONS,
+  radarHumanVoiceGenericBait,
+  radarHumanVoiceHeadingHasKeyword,
+  radarHumanVoiceKeywordEarly,
+  radarHumanVoicePromptBlock,
+  radarHumanVoiceStartsWithKeyword,
+  radarHumanVoiceTitleWithKeywordFirst,
+} from "./human-voice-guideline.ts";
 
 /**
  * ===== O ARTIGO-MODELO (SDD diretriz editorial, Adendo A — aprovado em 2026-10-02) =====
@@ -199,8 +227,24 @@ export const RADAR_ARTICLE_BLUEPRINT_LIMITS = Object.freeze({
  * gravam no ArticleDNA (`excludedSubjects`, a nota de diferenciação e a
  * fronteira anticanibalização) como fora do escopo DURO; a conferência tira a
  * seção que as cobre.
+ *
+ * 2026-10-11 · a âncora natural: cada candidato K leva os conceitos de âncora
+ * do grafo aprovado para aquele destino e a URL canônica dele; a regra 6 manda
+ * a âncora ser um recorte natural da ideia do destino, nunca a keyword inteira
+ * dele, sem repetir; a conferência troca a âncora que é a keyword inteira
+ * (`radarNaturalAnchor`). A planta aprovada não é desligada: a leitura já
+ * aplica a mesma régua.
+ *
+ * 2026-10-11b · a diretriz de comunicação humana guiada pela SERP
+ * (`human-voice-guideline.ts`, Adendo G): o pedido ganha as regras 27 (voz) e 28
+ * (título, meta, primeiro H2, de 3 a 6 H2, autoridade local, fechamento em 4
+ * tempos, capa e imagem no corpo); a conferência aponta a keyword fora do começo
+ * do H1 e do SEO title, a isca genérica, a meta sem a keyword cedo, menos de 3
+ * opções de título, o primeiro H2 sem a keyword e mais de 6 H2. A planta
+ * aprovada não é desligada: a leitura já põe a keyword no começo das
+ * alternativas quando é só trocar as metades, e diz qual seção entra como H3.
  */
-export const RADAR_ARTICLE_BLUEPRINT_RULES_VERSION = "2026-10-09b";
+export const RADAR_ARTICLE_BLUEPRINT_RULES_VERSION = "2026-10-11b";
 
 const t = (valor: unknown): string => (typeof valor === "string" ? valor.trim() : "");
 const corte = (valor: string, limite: number) => (valor.length > limite ? `${valor.slice(0, limite - 1).trimEnd()}…` : valor);
@@ -418,8 +462,21 @@ export type RadarArticleBlueprintLinkCandidate = {
   destination: string | null;
   status: "PUBLISHED" | "PLANNED" | "UNRESOLVED";
   fromGraph: boolean;
+  /**
+   * 2026-10-11 · Aditivo: os conceitos de âncora do grafo aprovado para este
+   * destino (arestas de SAÍDA deste artigo): o universo de formulação da âncora,
+   * nunca a âncora final. Ausente sem conceito e nas versões anteriores.
+   */
+  anchorConcepts?: string[];
+  /**
+   * 2026-10-11 · Aditivo: a URL canônica do destino pela identidade de
+   * publicação (`radarPublicationIdentity`): a publicada, preservada, ou a
+   * planejada pelo slug no caminho do Silo. Ausente quando não pôde ser montada
+   * e nas versões anteriores.
+   */
+  url?: string;
 };
-export type RadarArticleBlueprintSource = { id: string; url: string; title: string; claim: string };
+export type RadarArticleBlueprintSource ={ id: string; url: string; title: string; claim: string };
 
 export type RadarArticleBlueprintMeasures = {
   comparablePages: number;
@@ -1136,6 +1193,21 @@ export function buildRadarArticleBlueprintBrief(input: {
   const doGrafo = new Set(p.linksDoPlano.map(link => radarWritingCompareKey(link.targetTitle)));
   /* 2026-10-08 · o destino do grafo aprovado, por identidade (nó `article:<articleId>`), antes do texto. */
   const noDoGrafo = new Set(p.linksDoPlano.map(link => link.targetNodeId).filter((no): no is string => Boolean(no)));
+  /*
+   * 2026-10-11 · OS CONCEITOS DE ÂNCORA DO GRAFO APROVADO E A URL CANÔNICA DE
+   * CADA DESTINO. Os conceitos vêm das arestas de SAÍDA deste artigo (o grafo é
+   * só lido); a URL, da identidade de publicação (a publicada, preservada, ou a
+   * planejada pelo slug no caminho do Silo) — a mesma do CSV.
+   */
+  const conceitosDoGrafo = radarAnchorGraphConcepts(entrada.researchContext?.internalLinks?.edges);
+  const identidades = radarSiloPublicationIdentities({
+    silo: input.silo,
+    publications: input.siloPublications ?? null,
+    siteUrls: [input.publication?.publishedUrl, input.publication?.canonical, entrada.article.canonical],
+    extraPublications: [input.publication],
+  });
+  const comConceitos = (conceitos: readonly string[] | undefined) => (conceitos?.length ? { anchorConcepts: [...conceitos] } : {});
+  const comUrl = (identidade: RadarPublicationIdentity | null | undefined) => (identidade?.url ? { url: identidade.url } : {});
   for (const membro of (input.silo?.members || []).filter(item => !ehOProprio(item))) {
     const rotulo = semMolduraDoTema(t(membro.principalKeyword) || t(membro.title) || t(membro.slug));
     if (!rotulo) continue;
@@ -1149,6 +1221,8 @@ export function buildRadarArticleBlueprintBrief(input: {
       destination: noAr || (membro.slug ? `/${membro.slug}` : null),
       status: noAr ? "PUBLISHED" : membro.slug ? "PLANNED" : "UNRESOLVED",
       fromGraph: noDoGrafo.has(`article:${membro.articleId}`) || doGrafo.has(radarWritingCompareKey(rotulo)) || doGrafo.has(radarWritingCompareKey(membro.title)),
+      ...comConceitos(conceitosDoGrafo.byArticleId.get(membro.articleId)),
+      ...comUrl(identidades.members.get(membro.articleId)),
     });
   }
   const pagina = input.silo?.siloPage;
@@ -1161,6 +1235,8 @@ export function buildRadarArticleBlueprintBrief(input: {
       destination: publicada || t(pagina.canonical) || (pagina.slug ? `/${pagina.slug}` : null),
       status: publicada ? "PUBLISHED" : pagina.canonical || pagina.slug ? "PLANNED" : "UNRESOLVED",
       fromGraph: false,
+      ...comConceitos(conceitosDoGrafo.siloPage),
+      ...comUrl(identidades.siloPage),
     });
   }
 
@@ -1265,7 +1341,8 @@ export function buildRadarArticleBlueprintBrief(input: {
     evidence,
     linkCandidates,
     graphLinks: [
-      ...p.linksDoPlano.map(link => `${link.relationship.split(",")[0]?.trim() || "link"}: âncora "${link.suggestedAnchor}" → ${link.targetTitle}`),
+      /* 2026-10-11 · o que o plano do grafo sugere é conceito de âncora (universo de formulação), não a âncora final: a regra 6 manda o recorte natural. */
+      ...p.linksDoPlano.map(link => `${link.relationship.split(",")[0]?.trim() || "link"}: conceito de âncora "${link.suggestedAnchor}" → ${link.targetTitle}`),
       ...p.dna.internalLinkRequirements.filter(item => !UUID.test(item)),
     ].slice(0, 12),
     sources,
@@ -1348,11 +1425,13 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
     /* 2026-10-09b · com o bloco comercial, a shortlist (Z) e os critérios (Q) também são citáveis. */
     `1. Use só o que está no pacote. Cite pelos ids dados (M, S, P, B, A, C, G, D, Y, F, O, L${brief.commercial ? ", Z, Q" : ""}). Nunca invente id, número, estudo, autor, depoimento ou URL.`,
     "2. A SERP manda na intenção (Google e respostas de IA): responda a intenção que a busca mostra, com o recorte do leitor da marca. Se a amostra for de outro público, diga como adaptar ao leitor.",
-    "3. Dê sentido a TODAS as keywords: onde cada uma entra (H1, H2, H3, corpo) e por quê, sem forçar repetição. O H1 traz a keyword principal inteira, em frase natural.",
+    /* 2026-10-11b · a keyword no começo do H1 (regra 28, diretriz de comunicação humana). */
+    "3. Dê sentido a TODAS as keywords: onde cada uma entra (H1, H2, H3, corpo) e por quê, sem forçar repetição. O H1 começa pela keyword principal inteira, em frase natural (regra 28).",
     "4. ORGANIZE O ESQUELETO: cada seção diz de onde vem no campo \"from\" (ids M do esqueleto e/ou ids de evidência). Pode renomear, reordenar, juntar e descartar seções M — o descarte vai em \"discarded\" com o motivo (se o motivo cita a seção que cobre o assunto, cite-a pelo título do H2, nunca pelo número). Só acrescente seção nova quando uma evidência (P, C, G, D, B, A, O) a sustenta, e cite-a. Não cubra o que está em 'fora do escopo'. Sem seção de perguntas frequentes (FAQ): as perguntas entram nas seções.",
     "5. Cada seção abre respondendo a pergunta dela (resposta clara, citável por IA), depois explica. Negrito só em termo ou entidade, nunca frase inteira.",
     /* 2026-10-09 · 10 · o CTA que cita a página comercial leva o link dela, na seção que fecha o artigo. */
-    "6. Links internos: só para os candidatos K dados, com âncora natural e o motivo. Inclua o link para o Pilar quando o artigo for Suporte e para a SiloPage quando houver. Distribua pelas seções certas. Quando o CTA cita a página comercial da marca (o candidato 'Página da marca'), o link para ela entra no plano, na ÚLTIMA seção (a que fecha o artigo), com a âncora que o CTA usa.",
+    /* 2026-10-11 · a âncora natural: recorte da ideia do destino, pelos conceitos do grafo, nunca a keyword inteira dele, sem repetir. */
+    `6. Links internos: só para os candidatos K dados, com âncora natural e o motivo. ${RADAR_NATURAL_ANCHOR_PROMPT_RULE} Inclua o link para o Pilar quando o artigo for Suporte e para a SiloPage quando houver. Distribua pelas seções certas. Quando o CTA cita a página comercial da marca (o candidato 'Página da marca'), o link para ela entra no plano, na ÚLTIMA seção (a que fecha o artigo), com a âncora que o CTA usa.`,
     /* 2026-10-09 · 8 · pseudo-afirmação (rótulo de tema) não é afirmação a sustentar. */
     "7. Links externos: só onde uma afirmação precisa de reforço; use a fonte X quando existir; sem fonte X, source = null (o redator vai obter uma fonte oficial). claim é a FRASE afirmativa que o texto vai dizer, com sujeito e verbo ('O algoritmo do Instagram prioriza…'), nunca rótulo de tema ('Estatísticas sobre conversão de leads', 'Passos para gerar leads', 'Definição de lead conforme fontes do setor'): sem afirmação a sustentar, não há link externo.",
     /* 2026-10-08 · B2: a abertura e a 1ª seção respondem à busca; a tese da marca vem depois. */
@@ -1368,7 +1447,8 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
       : []),
     `14. TIPO DA UNIDADE: a planta segue o tipo (aqui: ${a.unit.label}${a.unit.format ? `, formato ${a.unit.format}` : ""}). Guia ou artigo responde e ensina; review ou comparativo traz critérios, prós e contras e veredito; landing page ou página de serviço traz problema, oferta, prova, objeções e CTA; SiloPage apresenta o tema e distribui para os artigos do Silo.`,
     "15. AUTORIA (E-E-A-T): quando o pacote disser quem assina, o eeat cita essa pessoa pelo nome cadastrado, sem credencial além do cadastro; sem quem assine, diga em eeat que falta definir.",
-    `16. TAMANHO: no máximo ${L.sections} seções, ${L.h3} H3 por seção e ${L.explain} itens em explain; uma frase por campo de texto. A resposta inteira cabe em ~4 mil tokens.`,
+    /* 2026-10-11b · a Regra 8 do Guia do dono: de 3 a 6 H2 (o teto técnico de L.sections continua como guarda da resposta). */
+    `16. TAMANHO: de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} seções (H2; o que a SERP pede além disso vira H3, regra 28), ${L.h3} H3 por seção e ${L.explain} itens em explain; uma frase por campo de texto. A resposta inteira cabe em ~4 mil tokens.`,
     /* 2026-10-08 · B3: a regra fala do SENTIDO (efeito comercial, comportamento, plataforma) e da polaridade, como a régua `radarSentenceNeedsSource`. */
     "17. AFIRMAÇÕES: answerFirst e explain não transformam a dificuldade do leitor em regra universal ('foi desenhado para', 'nunca', 'sempre', 'raramente', 'pacientes prontos para comprar') sem evidência citada. Afirmar como fato um efeito comercial ('converte', 'canais que convertem', 'gera agendamentos', 'traz pacientes', 'enche a agenda'), o comportamento do público ('pacientes procuram no Google, não no Instagram') ou o funcionamento de plataforma ou algoritmo pede fonte X do pacote; sem ela, escreva de forma delimitada (orientação, possibilidade, experiência da marca) e registre a afirmação em externalLinks com source = null. A tese da marca que NEGA um efeito ('o Instagram, sozinho, não enche a agenda') pode ser dita. Não prescreva gratuidade, urgência, oferta exclusiva, condição especial, depoimento nem antes/depois como receita: só se a voz da marca e o pacote sustentarem.",
     "19. UMA ENTREGA POR SEÇÃO: cada seção entrega algo diferente ao leitor (diagnóstico, ajuste, conteúdo, próximo passo, alternativa…); duas seções não tratam do mesmo assunto com nomes diferentes ('como usar de forma estratégica' e 'estratégias práticas' são a mesma). O conteúdo prático chega cedo, logo depois do diagnóstico. Cada H2 responde uma pergunta DIFERENTE do leitor: estratégias, aplicação e um canal do mesmo assunto não são três seções (uma seção que já trata do canal nos H3 ou no explain não ganha outra só para ele). Um H3 nunca repete o H2 de outra seção (nem um H2 da página publicada que virou seção própria).",
@@ -1392,6 +1472,8 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
     ...(brief.dnaExclusions?.length
       ? ["26. EXCLUSÕES DO ARTICLEDNA: o que 'Fora do escopo' marca como 'exclusão do ArticleDNA' foi decidido no Arquiteto (reajuste do artigo): não entra em seção, H3, pergunta, explain, diferencial, ângulo nem demonstração, nem como 'o que os concorrentes cobrem'. Quando a exclusão é de outro artigo, o texto no máximo o menciona e linka para ele, se ele for candidato K."]
       : []),
+    /* 2026-10-11b · a diretriz de comunicação humana guiada pela SERP (Adendo G): a voz (27) e o título, a meta, a estrutura e o fechamento (28), da fonte única. */
+    ...radarHumanVoicePromptBlock(),
     ...(opcoes.short
       ? ["SAÍDA CURTA (a resposta anterior veio cortada ou fora do formato): no máximo 5 seções, 2 H3 por seção, 2 itens em explain, sem alternatives, uma frase curta por campo e prompts de imagem de até 250 caracteres. Feche o JSON."]
       : []),
@@ -1442,7 +1524,8 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
     ...(moldura.closing ? [`Fecho do esqueleto: ${moldura.closing}`] : []),
     "",
     ...linhas("Evidências da SERP (cite pelo id)", brief.evidence.map(item => `${item.id} · ${item.kind}: ${item.text}`)),
-    ...linhas("Candidatos a link interno (use o id K)", brief.linkCandidates.map(item => `${item.id} · ${item.role} · ${item.label} · ${item.destination || "sem endereço"} · ${item.status === "PUBLISHED" ? "publicado" : item.status === "PLANNED" ? "planejado" : "não resolvido"}${item.fromGraph ? " · pedido pelo grafo aprovado" : ""}`)),
+    /* 2026-10-11 · com a URL canônica do destino e os conceitos de âncora do grafo aprovado para ele (a âncora é recorte deles, nunca a keyword inteira). */
+    ...linhas("Candidatos a link interno (use o id K)", brief.linkCandidates.map(item => `${item.id} · ${item.role} · ${item.label} · ${item.url || item.destination || "sem endereço"} · ${item.status === "PUBLISHED" ? "publicado" : item.status === "PLANNED" ? "planejado" : "não resolvido"}${item.fromGraph ? " · pedido pelo grafo aprovado" : ""}${item.anchorConcepts?.length ? ` · conceitos de âncora do grafo: ${item.anchorConcepts.map(conceito => `"${conceito}"`).join(", ")}` : ""}`)),
     ...linhas("Grafo aprovado (links que o Arquiteto pediu)", brief.graphLinks),
     ...linhas("Fontes verificadas (id X)", brief.sources.map(item => `${item.id} · ${item.title} · ${item.url} · sustenta: ${item.claim}`)),
     ...linhas("Afirmações que o mercado repete SEM fonte (não afirmar como fato)", brief.unsupportedClaims),
@@ -1485,7 +1568,8 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
     JSON.stringify({
       keywordPlan: { reading: "como as keywords se atendem juntas", principalPlacement: ["H1", "primeiro parágrafo"], complementary: [{ keyword: "", placement: "H2 x", reason: "" }], slugNote: null },
       reader: "", promise: "", angle: { statement: "", evidence: ["S1"] },
-      title: { h1: "", alternatives: [""], seoTitle: "até 60 caracteres", metaDescription: "até 155 caracteres" },
+      /* 2026-10-11b · as 3 opções de título: o H1 e 2 alternativas, todas pela keyword principal (regra 28). */
+      title: { h1: "keyword principal no começo + gancho", alternatives: ["", ""], seoTitle: "até 60 caracteres, keyword no começo", metaDescription: "até 155 caracteres, keyword nos primeiros 60" },
       opening: { readerQuestion: "", direction: "", evidence: ["P1"] },
       sections: [{ h2: "", readerQuestion: "", answerFirst: "", from: ["M1", "P2"], h3: [""], explain: [""], paragraphs: 3, bold: ["termo"], terms: ["termo LSI"], evidence: ["C1"], specialist: null, video: null, internalLinks: [{ candidate: "K1", anchor: "", reason: "" }], externalLinks: [{ claim: "", sourceType: "fonte oficial", source: null }], image: "R1", practical: null }],
       discarded: [{ id: "M3", reason: "" }],
@@ -1512,6 +1596,8 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
         "No plano visual: a imagem que pede antes e depois, resultado clínico ou promessa visual de resultado ganha outra cena, que explique a ideia da seção (prompt, conceito, ALT e legenda sem essas cenas), e cada respiro aponta a seção pelo título do H2.",
         /* 2026-10-09 · 11 e 12 · H2 sobrepostos e um leitor só também voltam corrigidos. */
         "E ainda: cada H2 responde uma pergunta diferente (junte as seções sobrepostas ou dê a cada uma a sua entrega), o leitor é um público só, e a seção que fala com quem compra é reescrita para o leitor declarado (o que o negócio ganha e perde com aquilo), nunca um guia para o consumidor.",
+        /* 2026-10-11b · a regra 28 também volta corrigida (diretriz de comunicação humana). */
+        `Pela regra 28: H1, as 2 alternativas e o SEO title começam pela keyword principal e trocam a isca genérica pela dor e pelo contraste que a SERP mostra; a meta traz a keyword nos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS} caracteres; o primeiro H2 traz a keyword ou um recorte forte dela; de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} seções, com a cobertura que sobra como H3 da seção mais próxima pelo sentido (nada da cobertura some).`,
         ...opcoes.fix.pending.map(item => `- ${item}`),
         "Planta anterior:",
         JSON.stringify(opcoes.fix.previous),
@@ -2659,6 +2745,73 @@ export function radarArticleBlueprintOverlappingSections(
 }
 
 /*
+ * ===== 2026-10-11 · A REGRA 8 DO GUIA DO DONO: DE 3 A 6 H2 =====
+ *
+ * Pedido do dono (diretriz de comunicação humana, Adendo G): o artigo tem de 3 a
+ * 6 H2; a cobertura que a SERP pede além disso vira H3, sem sumir. A planta
+ * gravada do caso real ("como atrair um cliente") tem 7 H2.
+ *
+ * Por que a leitura NÃO reescreve as seções da planta gravada: mover uma seção
+ * para dentro de outra mexe na numeração dos links (L), no mapa da página
+ * publicada, no "seção N" das complementares, na âncora das imagens e na seção
+ * que o Redator casa pelo título do H2 de documentos já criados. Em vez disso, a
+ * leitura DECIDE, sem IA, qual seção entra como H3 de qual (`h2Merges`), e cada
+ * entregável diz isso como instrução concluída: a seção continua inteira (links,
+ * imagem, evidências), só que escrita como H3 da vizinha mais próxima pelo
+ * sentido. O payload e o hash não mudam.
+ *
+ * A régua: nunca a primeira seção (responde à busca) nem a última (fecha com o
+ * CTA); entre as do meio, primeiro as que ainda não receberam outra, sai a que
+ * mais divide palavras próprias com uma vizinha (a mais redundante), e ela entra
+ * na vizinha com que mais divide (empate: a anterior). Empate entre candidatas:
+ * a mais perto do fim. Sem cadeia: quando uma seção que já recebeu outra sai, o
+ * que ela recebeu vai junto para a nova vizinha.
+ */
+export type RadarArticleBlueprintH2Merge = {
+  /** A seção da planta (0-based, na ordem lida) que entra como H3. */
+  section: number;
+  /** A seção vizinha (0-based) que a recebe. */
+  into: number;
+};
+
+export function radarArticleBlueprintH2Merges(
+  secoes: ReadonlyArray<{ h2: string; readerQuestion?: string | null; h3?: readonly string[] | null }>,
+  comuns: ReadonlySet<string> = new Set(),
+  maximo: number = RADAR_HUMAN_VOICE_H2.max,
+): RadarArticleBlueprintH2Merge[] {
+  if (!Array.isArray(secoes) || secoes.length <= maximo) return [];
+  const raizes = secoes.map(secao => raizesProprias([t(secao?.h2), t(secao?.readerQuestion), ...((Array.isArray(secao?.h3) ? secao.h3 : []).map(t))].join(" "), comuns));
+  const divide = (a: number, b: number) => raizes[a].filter(raiz => raizes[b].some(outra => mesmaRaizDaSecao(raiz, outra))).length;
+  const vivas = secoes.map((_, indice) => indice);
+  const receberam = new Set<number>();
+  const merges: RadarArticleBlueprintH2Merge[] = [];
+  while (vivas.length > maximo) {
+    let escolhida: { posicao: number; into: number; pontos: number } | null = null;
+    /* Primeiro as que não receberam outra; se todas do meio já receberam, qualquer uma do meio (a que ela recebeu vai junto). */
+    const livres = vivas.slice(1, -1).some(indice => !receberam.has(indice));
+    for (let posicao = 1; posicao < vivas.length - 1; posicao += 1) {
+      const indice = vivas[posicao];
+      if (livres && receberam.has(indice)) continue;
+      const anterior = vivas[posicao - 1];
+      const seguinte = vivas[posicao + 1];
+      const comAnterior = divide(indice, anterior);
+      const comSeguinte = divide(indice, seguinte);
+      const into = comSeguinte > comAnterior ? seguinte : anterior;
+      const pontos = Math.max(comAnterior, comSeguinte);
+      if (!escolhida || pontos >= escolhida.pontos) escolhida = { posicao, into, pontos };
+    }
+    if (!escolhida) break;
+    const saindo = vivas[escolhida.posicao];
+    /* Sem cadeia: o que a seção que sai tinha recebido vai junto para a vizinha (todo H3 aponta um H2 que fica). */
+    for (const item of merges) if (item.into === saindo) item.into = escolhida.into;
+    merges.push({ section: saindo, into: escolhida.into });
+    receberam.add(escolhida.into);
+    vivas.splice(escolhida.posicao, 1);
+  }
+  return merges.sort((a, b) => a.section - b.section);
+}
+
+/*
  * 2026-10-09 (correção) · 12 · O PÚBLICO DUPLO NO TÍTULO. A alternativa real
  * de promoções era "Promoções estética: guia prático para clínicas e
  * pacientes": a régua do leitor só olhava "…, e pacientes que…". No H1, nas
@@ -2721,7 +2874,116 @@ export function radarArticleBlueprintTurnWithoutCall(virada: string): string {
  * link e continua nas colunas. A planta que já segue as regras volta como o
  * MESMO objeto.
  */
+/*
+ * ===== 2026-10-11 · A ÂNCORA NATURAL NA PLANTA (nova e gravada) =====
+ *
+ * Uma régua só (`radarNaturalAnchor`), aplicada a cada link interno da planta:
+ * a conferência da planta nova e a leitura compartilhada da planta gravada
+ * (CSV "Para escrever", CSV de vídeo, Redator e MCP). A âncora natural e
+ * inédita passa como veio; a que é a keyword inteira do destino, ou repete a
+ * âncora já usada para ele (nesta planta ou, com o livro do lote, em outro
+ * artigo do Silo), vira o conceito do grafo aprovado ou o recorte do rótulo. O
+ * mesmo link repetido (mesma âncora, mesmo destino) recebe a mesma troca — a
+ * coluna de links o mostra uma vez só (F14). A página da marca (o link do CTA)
+ * não passa pela régua: a âncora dela é o trecho do CTA.
+ */
+export type RadarArticleBlueprintAnchorTarget = {
+  /** As keywords do destino que a âncora não repete inteiras (o rótulo do candidato entra sempre). */
+  keywords?: readonly string[] | null;
+  /** Os conceitos de âncora do grafo aprovado para o destino (vencem os gravados no candidato). */
+  concepts?: readonly string[] | null;
+};
+
+export type RadarArticleBlueprintAnchorOptions = {
+  /** O que quem chama sabe do destino (o CSV, pelo Silo e pelo grafo); ausente = só o candidato. */
+  targetOf?: ((candidate: RadarArticleBlueprintLinkCandidate) => RadarArticleBlueprintAnchorTarget | null) | null;
+  /** O livro de âncoras do lote do Silo: lido para não repetir e acrescentado com as âncoras desta planta. */
+  ledger?: RadarAnchorLedger | null;
+};
+
+export type RadarArticleBlueprintAnchorChange = { section: string; candidate: string; from: string; to: string; reason: RadarNaturalAnchorReason };
+
+type LinkInternoLido = { candidate: string; anchor: string; reason?: string | null };
+
+const ehPaginaDaMarca = (candidato: Pick<RadarArticleBlueprintLinkCandidate, "role">) => /p[aá]gina da marca/i.test(candidato.role);
+
+/** O nome do destino que a régua lê: a SiloPage pelo nome do Silo, o membro sem a moldura da promessa. */
+const rotuloDoCandidato = (candidato: Pick<RadarArticleBlueprintLinkCandidate, "label" | "role">) =>
+  (candidato.role === "SiloPage" ? candidato.label.replace(/^SiloPage\s+/i, "").replace(/^["“]|["”]$/g, "") : semMolduraDoTema(candidato.label));
+
+export function radarArticleBlueprintNaturalAnchors<S extends { h2: string; internalLinks: LinkInternoLido[] }>(
+  sections: readonly S[],
+  candidates: readonly RadarArticleBlueprintLinkCandidate[] | null | undefined,
+  opcoes: RadarArticleBlueprintAnchorOptions = {},
+): { sections: S[]; changes: RadarArticleBlueprintAnchorChange[] } {
+  const porId = new Map((Array.isArray(candidates) ? candidates : []).filter(item => item && typeof item.id === "string").map(item => [item.id, item]));
+  const changes: RadarArticleBlueprintAnchorChange[] = [];
+  if (!porId.size) return { sections: sections as S[], changes };
+  const usadasNaPlanta = new Map<string, Set<string>>();
+  const trocas = new Map<string, string>();
+  let mudou = false;
+  const lidas = sections.map(secao => {
+    if (!secao || typeof secao !== "object" || !Array.isArray(secao.internalLinks)) return secao;
+    let mudouASecao = false;
+    const links = secao.internalLinks.map(link => {
+      const candidato = link && typeof link.anchor === "string" ? porId.get(link.candidate) : undefined;
+      if (!candidato || ehPaginaDaMarca(candidato)) return link;
+      const destino = radarAnchorDestinationKey({ role: candidato.role, destination: candidato.destination, label: rotuloDoCandidato(candidato) });
+      const chaveDaTroca = `${candidato.id}|${radarAnchorKey(link.anchor)}`;
+      let escolhida = trocas.get(chaveDaTroca);
+      if (escolhida === undefined) {
+        const alvo = opcoes.targetOf?.(candidato) ?? null;
+        const lida = radarNaturalAnchor({
+          anchor: link.anchor,
+          targetLabel: rotuloDoCandidato(candidato),
+          targetKeywords: alvo?.keywords ?? null,
+          graphConcepts: alvo?.concepts?.length ? alvo.concepts : candidato.anchorConcepts ?? null,
+          usedAnchors: [...(opcoes.ledger?.get(destino) || []), ...(usadasNaPlanta.get(destino) || [])],
+          /* A âncora que já leva a OUTRO destino nesta planta não serve a este. */
+          takenAnchors: [...usadasNaPlanta].filter(([outro]) => outro !== destino).flatMap(([, ancoras]) => [...ancoras]),
+        });
+        escolhida = lida.anchor;
+        trocas.set(chaveDaTroca, escolhida);
+        if (lida.changed && lida.reason) changes.push({ section: secao.h2, candidate: candidato.id, from: link.anchor, to: lida.anchor, reason: lida.reason });
+        usadasNaPlanta.set(destino, new Set([...(usadasNaPlanta.get(destino) || []), radarAnchorKey(escolhida)]));
+      }
+      if (escolhida === link.anchor) return link;
+      mudouASecao = true;
+      return { ...link, anchor: escolhida };
+    });
+    if (!mudouASecao) return secao;
+    mudou = true;
+    return { ...secao, internalLinks: links };
+  });
+  if (opcoes.ledger) {
+    for (const [destino, usadas] of usadasNaPlanta) opcoes.ledger.set(destino, new Set([...(opcoes.ledger.get(destino) || []), ...usadas]));
+  }
+  return { sections: mudou ? lidas : sections as S[], changes };
+}
+
+/** 2026-10-11 · As outras formulações de um destino: os conceitos do grafo, na forma natural, que não são a âncora escolhida. */
+export function radarArticleBlueprintAnchorAlternatives(
+  candidato: RadarArticleBlueprintLinkCandidate,
+  anchor: string,
+  alvo: RadarArticleBlueprintAnchorTarget | null = null,
+): string[] {
+  if (ehPaginaDaMarca(candidato)) return [];
+  const rotulo = rotuloDoCandidato(candidato);
+  return radarNaturalAnchorFormulations({
+    targetKeywords: [rotulo, ...(alvo?.keywords || [])],
+    graphConcepts: alvo?.concepts?.length ? alvo.concepts : candidato.anchorConcepts ?? null,
+  }).filter(item => radarAnchorKey(item) !== radarAnchorKey(anchor)).slice(0, 3);
+}
+
 export type RadarArticleBlueprintReadingOptions = {
+  /**
+   * 2026-10-11 · Os candidatos a link da planta (`payload.linkCandidates`): com
+   * eles, a âncora de cada link passa pela régua da âncora natural. Ausente =
+   * as âncoras como foram gravadas (`radarArticleBlueprintPayloadReading` os passa).
+   */
+  linkCandidates?: readonly RadarArticleBlueprintLinkCandidate[] | null;
+  /** 2026-10-11 · O que quem chama sabe dos destinos e o livro de âncoras do lote (o CSV "Para escrever"). */
+  anchors?: RadarArticleBlueprintAnchorOptions | null;
   /** Os ids das fontes do pacote. Ausente = todo id de fonte gravado no link conta como fonte (o Redator não lê `payload.sources`). */
   sources?: ReadonlySet<string> | null;
   /** A chamada que vale (a do especialista, quando ele é CTA). Ausente = o CTA da planta. */
@@ -2742,6 +3004,13 @@ export type RadarArticleBlueprintReadingOptions = {
    * (`removedSections`). Ausente = como antes.
    */
   exclusions?: { items: readonly RadarResearchScopeExclusion[]; core: readonly string[] } | null;
+  /**
+   * 2026-10-11b · A keyword principal do artigo (a planta não a grava). Com ela,
+   * a leitura põe a keyword no começo do SEO title e das alternativas quando é
+   * só trocar as metades ("A: keyword…" → "Keyword…: A", regra 28), e as raízes
+   * dela não distinguem uma seção da outra na Regra 8. Ausente = como antes.
+   */
+  principal?: string | null;
 };
 
 export type RadarArticleBlueprintReading = {
@@ -2752,6 +3021,14 @@ export type RadarArticleBlueprintReading = {
   removedLabels: number;
   /** 2026-10-09b · As seções (e os H3) que cobriam uma exclusão do ArticleDNA, com a exclusão tocada. Vazio sem exclusão. */
   removedSections: Array<{ section: string; h3: string | null; exclusion: RadarResearchScopeExclusion; internalLinks: number }>;
+  /** 2026-10-11 · As âncoras que a régua da âncora natural trocou. Vazio sem candidatos ou sem troca. */
+  anchorChanges: RadarArticleBlueprintAnchorChange[];
+  /**
+   * 2026-10-11b · A Regra 8 do Guia (de 3 a 6 H2) na planta lida: a seção que
+   * entra como H3 de uma vizinha, pelos índices de `blueprint.sections` (a planta
+   * lida não muda as seções). Vazio com 6 H2 ou menos.
+   */
+  h2Merges: RadarArticleBlueprintH2Merge[];
 };
 
 /* O próximo passo que CHAMA (segunda chamada comercial), e não só aponta a leitura seguinte. */
@@ -2852,7 +3129,12 @@ export function radarArticleBlueprintReading(blueprint: RadarArticleBlueprintAi,
   const comForma = lidas.filter(ehSecaoLida);
   const semRepetido = radarArticleBlueprintH3WithoutRepeatedH2(comForma);
   let proxima = 0;
-  const sections = lidas.map(secao => (ehSecaoLida(secao) ? semRepetido.sections[proxima++] : secao)) as SecaoLida[];
+  const semAncoras = lidas.map(secao => (ehSecaoLida(secao) ? semRepetido.sections[proxima++] : secao)) as SecaoLida[];
+  /* 2026-10-11 · a âncora natural: com os candidatos da planta, a âncora que é a keyword inteira do destino (ou repete) vira o recorte. */
+  const ancoras = opcoes.linkCandidates?.length
+    ? radarArticleBlueprintNaturalAnchors(semAncoras, opcoes.linkCandidates, opcoes.anchors ?? {})
+    : { sections: semAncoras, changes: [] as RadarArticleBlueprintAnchorChange[] };
+  const sections = ancoras.sections;
 
   const negocio = radarArticleBlueprintReaderBusiness(blueprint.reader);
   const reader = typeof blueprint.reader === "string" ? radarArticleBlueprintWithoutSecondAudience(blueprint.reader) : blueprint.reader;
@@ -2863,17 +3145,21 @@ export function radarArticleBlueprintReading(blueprint: RadarArticleBlueprintAi,
 
   const titulo = blueprint.title;
   const semDuplo = (valor: unknown) => (typeof valor === "string" ? radarArticleBlueprintTitleWithoutSecondAudience(valor) : valor);
+  /* 2026-10-11b · regra 28 na planta gravada: a keyword no começo do SEO title e das alternativas quando é só trocar as metades (sem IA). */
+  const principalDaLeitura = t(opcoes.principal ?? "");
+  const comKeyword = (valor: unknown) => (typeof valor === "string" && principalDaLeitura ? radarHumanVoiceTitleWithKeywordFirst(valor, principalDaLeitura) : valor);
   const alternativas: unknown[] = Array.isArray(titulo?.alternatives) ? titulo.alternatives : [];
-  const alternativasLidas = alternativas.map(semDuplo);
+  const alternativasLidas = alternativas.map(item => comKeyword(semDuplo(item)));
+  const seoTitleLido = titulo ? comKeyword(semDuplo(titulo.seoTitle)) : undefined;
   const mesmoTitulo = !titulo || (
-    semDuplo(titulo.h1) === titulo.h1 && semDuplo(titulo.seoTitle) === titulo.seoTitle && semDuplo(titulo.metaDescription) === titulo.metaDescription
+    semDuplo(titulo.h1) === titulo.h1 && seoTitleLido === titulo.seoTitle && semDuplo(titulo.metaDescription) === titulo.metaDescription
     && alternativasLidas.every((item, indice) => item === alternativas[indice])
   );
   const title = mesmoTitulo ? titulo : {
     ...titulo,
     h1: semDuplo(titulo.h1) as string,
     alternatives: alternativasLidas as string[],
-    seoTitle: semDuplo(titulo.seoTitle) as string,
+    seoTitle: seoTitleLido as string,
     metaDescription: semDuplo(titulo.metaDescription) as string,
   };
 
@@ -2897,12 +3183,24 @@ export function radarArticleBlueprintReading(blueprint: RadarArticleBlueprintAi,
       ...(publishedMap !== mapaGravado ? { publishedMap: publishedMap as RadarArticleBlueprintAi["publishedMap"] } : {}),
       ...(mesmoPlanoDeKeywords ? {} : { keywordPlan: { ...planoDeKeywords, complementary: complementares } }),
     };
-  return { blueprint: lida, removedH3: semRepetido.removed, removedLabels, removedSections };
+  /*
+   * 2026-10-11b · A Regra 8 (de 3 a 6 H2) na planta lida: a decisão de qual seção
+   * entra como H3 de qual, sem mexer nas seções (ver `radarArticleBlueprintH2Merges`).
+   * As palavras do artigo (principal e núcleo das exclusões) não distinguem seção.
+   */
+  const comunsDaRegra8 = new Set(radarSemanticStems(principalDaLeitura));
+  const secoesDaRegra8 = (Array.isArray(lida.sections) ? lida.sections : []).filter(ehSecaoLida);
+  const h2Merges = secoesDaRegra8.length === (Array.isArray(lida.sections) ? lida.sections.length : 0) ? radarArticleBlueprintH2Merges(secoesDaRegra8, comunsDaRegra8) : [];
+  return { blueprint: lida, removedH3: semRepetido.removed, removedLabels, removedSections, anchorChanges: ancoras.changes, h2Merges };
 }
 
-/** 2026-10-09 (correção) · O payload com a planta lida (`radarArticleBlueprintReading`); o MESMO objeto quando nada muda. */
+/**
+ * 2026-10-09 (correção) · O payload com a planta lida (`radarArticleBlueprintReading`); o MESMO objeto quando nada muda.
+ * 2026-10-11 · com os candidatos da própria planta: a âncora natural vale em toda leitura do payload (sem mudar o gravado nem o hash).
+ */
 export function radarArticleBlueprintPayloadReading<P extends RadarArticleBlueprintPayload>(payload: P, opcoes: Omit<RadarArticleBlueprintReadingOptions, "sources"> = {}): P {
-  const { blueprint } = radarArticleBlueprintReading(payload.blueprint, { ...opcoes, sources: new Set(payload.sources.map(item => item.id)) });
+  const candidatos = opcoes.linkCandidates ?? (Array.isArray(payload.linkCandidates) ? payload.linkCandidates : null);
+  const { blueprint } = radarArticleBlueprintReading(payload.blueprint, { ...opcoes, linkCandidates: candidatos, sources: new Set(payload.sources.map(item => item.id)) });
   return blueprint === payload.blueprint ? payload : { ...payload, blueprint };
 }
 
@@ -2934,16 +3232,43 @@ const O_QUE_09_10_ACRESCENTA = "a conferência do rótulo de tema usado como lin
 const O_QUE_09_10B_ACRESCENTA = "o bloco comercial da Amazon congelada no pedido (shortlist, critérios de comparação, regra de review e aviso de afiliado), o congelamento da Amazon no vínculo da planta e as exclusões que os reajustes gravam no ArticleDNA (assuntos excluídos, nota de diferenciação e fronteira anticanibalização) como fora do escopo duro";
 const ORGANIZAR_DE_NOVO = "\"Organizar de novo (IA)\" (até 2 chamadas de IA)";
 
+/*
+ * 2026-10-11 · O QUE AS REGRAS 2026-10-11 ACRESCENTAM (a âncora natural): o
+ * pedido leva os conceitos de âncora do grafo e a URL canônica de cada destino,
+ * e a âncora deixa de ser a keyword inteira do destino. A leitura já aplica a
+ * régua da âncora em todo entregável: organizar de novo é só para a IA escolher
+ * as âncoras pelos conceitos do grafo.
+ */
+const O_QUE_11_10_ACRESCENTA = "a âncora natural nos links internos (um trecho da ideia do destino, pelos conceitos de âncora do grafo aprovado, nunca a keyword inteira dele, sem repetir a mesma âncora para o mesmo destino) e a URL canônica de cada destino no pedido";
+const A_LEITURA_JA_TROCA_A_ANCORA = "Os entregáveis (CSV para escrever, CSV de vídeo, Redator e MCP) já trocam, ao ler esta versão, a âncora que é a keyword inteira do destino pelo recorte natural";
+
+/*
+ * 2026-10-11b · O QUE AS REGRAS 2026-10-11b ACRESCENTAM (a diretriz de comunicação
+ * humana guiada pela SERP, Adendo G). A leitura já diz, nos entregáveis, a voz,
+ * as 3 opções de título com a keyword no começo (trocando as metades quando dá),
+ * qual seção entra como H3 pela Regra 8 e o fechamento em 4 tempos; a voz nos
+ * campos da planta (promessa, título, meta, abertura, resposta de cada seção,
+ * virada e CTA) só entra organizando de novo.
+ */
+const O_QUE_11_10B_ACRESCENTA = `a diretriz de comunicação humana guiada pela SERP (${RADAR_HUMAN_VOICE_GUIDELINE_VERSION}): a voz visceral e sem eufemismo nos campos que viram texto, o H1 e o SEO title com a keyword no começo e o gancho de contraste (${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções, sem isca genérica), a meta com a keyword cedo, o primeiro H2 com a keyword, de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} H2, os sinais de autoridade local e o fechamento em 4 tempos`;
+const A_LEITURA_JA_DIZ_A_VOZ = "Os entregáveis já trazem a diretriz como regra concluída ao ler esta versão (a voz, as opções de título com a keyword no começo quando basta trocar as metades, a seção que entra como H3 pela Regra 8 e o fechamento em 4 tempos); a voz nos próprios campos da planta só entra organizando de novo";
+
 export function radarArticleBlueprintRulesNoticeText(payload: Pick<RadarArticleBlueprintPayload, "rulesVersion"> | null | undefined): string | null {
   if (!radarArticleBlueprintRulesOutdated(payload)) return null;
+  if (payload!.rulesVersion === "2026-10-11") {
+    return `Esta versão foi montada com as regras de 2026-10-11. As de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION} acrescentam ${O_QUE_11_10B_ACRESCENTA}. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} quando quiser a planta inteira na voz nova.`;
+  }
+  if (payload!.rulesVersion === "2026-10-09b") {
+    return `Esta versão foi montada com as regras de 2026-10-09b. As de 2026-10-11 acrescentam ${O_QUE_11_10_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10B_ACRESCENTA}. ${A_LEITURA_JA_TROCA_A_ANCORA}. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} se quiser que a IA escolha as âncoras pelos conceitos do grafo e escreva a planta na voz nova.`;
+  }
   if (payload!.rulesVersion === "2026-10-09") {
     /* 2026-10-09b · o que a leitura já faz, dito com exatidão: a exclusão do ArticleDNA sai da planta lida pelo CSV "Para escrever". */
-    return `Esta versão foi montada com as regras de 2026-10-09. As de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION} acrescentam ${O_QUE_09_10B_ACRESCENTA}. O CSV para escrever já tira, ao ler esta versão, a seção que cobre uma exclusão do ArticleDNA; o bloco comercial da Amazon só entra na planta organizando de novo. Use ${ORGANIZAR_DE_NOVO} quando o artigo tiver Amazon congelada ou se quiser que a IA refaça a planta com as regras novas.`;
+    return `Esta versão foi montada com as regras de 2026-10-09. As de 2026-10-09b acrescentam ${O_QUE_09_10B_ACRESCENTA}; as de 2026-10-11, ${O_QUE_11_10_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10B_ACRESCENTA}. O CSV para escrever já tira, ao ler esta versão, a seção que cobre uma exclusão do ArticleDNA, e ${A_LEITURA_JA_TROCA_A_ANCORA.charAt(0).toLocaleLowerCase("pt-BR")}${A_LEITURA_JA_TROCA_A_ANCORA.slice(1)}; o bloco comercial da Amazon só entra na planta organizando de novo. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} quando o artigo tiver Amazon congelada ou se quiser que a IA refaça a planta com as regras novas.`;
   }
   if (payload!.rulesVersion === "2026-10-08") {
-    return `Esta versão foi montada com as regras de 2026-10-08. As de 2026-10-09 acrescentam ${O_QUE_09_10_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_09_10B_ACRESCENTA}. Os entregáveis (CSV para escrever, CSV de vídeo e Redator) já aplicam essas correções ao ler esta versão, e o CSV para escrever tira a seção que cobre uma exclusão do ArticleDNA; o bloco comercial da Amazon só entra organizando de novo. Use ${ORGANIZAR_DE_NOVO} só se quiser que a IA refaça a planta com as regras novas ou se o artigo tiver Amazon congelada.`;
+    return `Esta versão foi montada com as regras de 2026-10-08. As de 2026-10-09 acrescentam ${O_QUE_09_10_ACRESCENTA}; as de 2026-10-09b, ${O_QUE_09_10B_ACRESCENTA}; as de 2026-10-11, ${O_QUE_11_10_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10B_ACRESCENTA}. Os entregáveis (CSV para escrever, CSV de vídeo e Redator) já aplicam essas correções ao ler esta versão, e o CSV para escrever tira a seção que cobre uma exclusão do ArticleDNA; o bloco comercial da Amazon só entra organizando de novo. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} só se quiser que a IA refaça a planta com as regras novas ou se o artigo tiver Amazon congelada.`;
   }
-  return `Esta versão foi montada com regras anteriores às atuais (${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}): a planta não leu a página publicada, nem conferiu a abertura pela busca, os nomes atuais de produtos e as cenas repetidas (as regras de 2026-10-09 acrescentam ${O_QUE_09_10_ACRESCENTA}, e as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_09_10B_ACRESCENTA}; os entregáveis já aplicam na leitura o que é de leitura). Para refazer com as regras atuais, use ${ORGANIZAR_DE_NOVO}; até lá, os entregáveis seguem com esta versão.`;
+  return `Esta versão foi montada com regras anteriores às atuais (${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}): a planta não leu a página publicada, nem conferiu a abertura pela busca, os nomes atuais de produtos e as cenas repetidas (as regras de 2026-10-09 acrescentam ${O_QUE_09_10_ACRESCENTA}; as de 2026-10-09b, ${O_QUE_09_10B_ACRESCENTA}; as de 2026-10-11, ${O_QUE_11_10_ACRESCENTA}; e as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10B_ACRESCENTA}; os entregáveis já aplicam na leitura o que é de leitura). Para refazer com as regras atuais, use ${ORGANIZAR_DE_NOVO}; até lá, os entregáveis seguem com esta versão.`;
 }
 
 /* 2026-10-08 · B3 · os sentidos da régua que a conferência aponta (a afirmação listada pela planta já tem link externo). */
@@ -3151,12 +3476,24 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
    */
   const linkDoCta = radarArticleBlueprintCtaLink(ai.closing.cta, brief.linkCandidates);
   const ctaSemLink = linkDoCta && !semH3Repetido.sections.some(secao => secao.internalLinks.some(link => link.candidate === linkDoCta.candidate.id));
-  const secoes = ctaSemLink && semH3Repetido.sections.length
+  const secoesComCta = ctaSemLink && semH3Repetido.sections.length
     ? semH3Repetido.sections.map((secao, indice, todas) => (indice === todas.length - 1
       ? { ...secao, internalLinks: [...secao.internalLinks, { candidate: linkDoCta.candidate.id, anchor: linkDoCta.anchor, reason: "o CTA do fechamento cita esta página" }] }
       : secao))
     : semH3Repetido.sections;
-  if (ctaSemLink && secoes.length) notes.push(`O CTA cita a página comercial (${linkDoCta.candidate.label}): o link entrou na planta, na seção "${secoes[secoes.length - 1].h2}", com a âncora "${linkDoCta.anchor}".`);
+  if (ctaSemLink && secoesComCta.length) notes.push(`O CTA cita a página comercial (${linkDoCta.candidate.label}): o link entrou na planta, na seção "${secoesComCta[secoesComCta.length - 1].h2}", com a âncora "${linkDoCta.anchor}".`);
+  /*
+   * 2026-10-11 · A ÂNCORA NATURAL NA PLANTA NOVA: a âncora que é a keyword
+   * inteira do destino (ou a repete com 4 palavras ou mais), ou que repete a
+   * mesma âncora para o mesmo destino em outra seção, vira o conceito do grafo
+   * aprovado ou o recorte do rótulo (`radarNaturalAnchor`). Correção aplicada,
+   * dita na nota.
+   */
+  const ancorasNaturais = radarArticleBlueprintNaturalAnchors(secoesComCta, brief.linkCandidates);
+  for (const item of ancorasNaturais.changes) {
+    notes.push(`Seção "${item.section}": âncora "${item.from}" ajustada para "${item.to}" — ${item.reason === "keyword" ? "a âncora é um trecho natural da ideia do destino, nunca a keyword inteira dele" : item.reason === "repeated" ? "a mesma âncora já levava a este destino em outra seção" : "a mesma âncora já levava a outro destino"}.`);
+  }
+  const secoes = ancorasNaturais.sections;
   /*
    * 2026-10-02 · AFIRMAÇÃO ABSOLUTA E SEÇÕES QUASE IGUAIS — a revisão do CSV
    * real achou as duas na proposta mesmo com a regra no pedido ("foi feito para
@@ -3315,6 +3652,50 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
   }
   if (ai.title.seoTitle.length > 65) notes.push(`SEO title com ${ai.title.seoTitle.length} caracteres (alvo ~60).`);
   if (ai.title.metaDescription.length > 165) notes.push(`Meta description com ${ai.title.metaDescription.length} caracteres (alvo ~155).`);
+  /*
+   * 2026-10-11b · A REGRA 28 (diretriz de comunicação humana guiada pela SERP,
+   * Adendo G; as observações do Guardião de SEO do dono). A keyword principal no
+   * começo do H1 e do SEO title (as alternativas e o SEO title que só precisam
+   * trocar as metades "A: keyword…" são corrigidos abaixo, sem IA), sem isca
+   * genérica, a meta com a keyword cedo, as 3 opções de título e o primeiro H2
+   * com a keyword. São notas que pedem ação: a passada de correção as resolve;
+   * fechando, ficam só no painel (D10).
+   */
+  const principalDoArtigo = brief.article.principal;
+  if (raizesDaPrincipal.length && !faltamNoH1.length && !radarHumanVoiceStartsWithKeyword(ai.title.h1, principalDoArtigo)) {
+    notes.push(`O H1 não começa pela keyword principal ("${principalDoArtigo}"): reescreva antes de aprovar (regra 28).`);
+  }
+  const titulosComKeywordNoComeco = {
+    seoTitle: radarHumanVoiceTitleWithKeywordFirst(ai.title.seoTitle, principalDoArtigo),
+    alternatives: ai.title.alternatives.map(item => radarHumanVoiceTitleWithKeywordFirst(item, principalDoArtigo)),
+  };
+  if (!radarHumanVoiceStartsWithKeyword(titulosComKeywordNoComeco.seoTitle, principalDoArtigo)) {
+    notes.push(`O SEO title ("${corte(ai.title.seoTitle, 100)}") não começa pela keyword principal: reescreva antes de aprovar (regra 28).`);
+  }
+  titulosComKeywordNoComeco.alternatives.forEach((item, indice) => {
+    if (!radarHumanVoiceStartsWithKeyword(item, principalDoArtigo)) notes.push(`A alternativa de título ${indice + 1} ("${corte(item, 100)}") não começa pela keyword principal: reescreva antes de aprovar (regra 28).`);
+  });
+  for (const [onde, valor] of [["O H1", ai.title.h1], ["O SEO title", ai.title.seoTitle], ["A meta description", ai.title.metaDescription], ...ai.title.alternatives.map((item, indice) => [`A alternativa de título ${indice + 1}`, item] as const)] as const) {
+    const isca = radarHumanVoiceGenericBait(valor, nucleo);
+    if (isca) notes.push(`${onde} usa isca genérica ("${isca}"): troque pela dor e pelo contraste comercial que a SERP mostra antes de aprovar (regra 28).`);
+  }
+  if (!radarHumanVoiceKeywordEarly(ai.title.metaDescription, principalDoArtigo)) {
+    notes.push(`A meta description não traz a keyword principal nos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS} caracteres: reescreva antes de aprovar (regra 28).`);
+  }
+  if (1 + ai.title.alternatives.length < RADAR_HUMAN_VOICE_TITLE_OPTIONS) {
+    notes.push(`O título tem ${1 + ai.title.alternatives.length} opção(ões): a regra pede ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} (o H1 e 2 alternativas, regra 28).`);
+  }
+  if (secoes[0] && !radarHumanVoiceHeadingHasKeyword(secoes[0].h2, principalDoArtigo)) {
+    notes.push(`O primeiro H2 ("${secoes[0].h2}") não traz a keyword principal nem um recorte forte dela: reescreva antes de aprovar (regra 28).`);
+  }
+  /* A Regra 8 do Guia (de 3 a 6 H2): a mesma decisão da leitura compartilhada (`radarArticleBlueprintH2Merges`). */
+  /* As raízes da principal não distinguem seção — a mesma régua da leitura (sem a moldura do esqueleto, para a decisão ser a mesma nos dois lados). */
+  const juntasPelaRegra8 = radarArticleBlueprintH2Merges(secoes, new Set(radarSemanticStems(principalDoArtigo)));
+  if (juntasPelaRegra8.length && opcoes.close) {
+    notes.push(`Regra 8 (de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} H2): a planta ficou com ${secoes.length} H2; os entregáveis leem ${juntasPelaRegra8.map(item => `"${secoes[item.section].h2}" como H3 de "${secoes[item.into].h2}"`).join("; ")}, sem perder cobertura.`);
+  } else if (juntasPelaRegra8.length) {
+    notes.push(`A planta tem ${secoes.length} H2: a regra pede de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} (Regra 8 do Guia) — junte a cobertura que sobra como H3 da seção mais próxima pelo sentido antes de aprovar.`);
+  }
 
   /* 2026-10-08 (revisão) · só o Pilar DECIDIDO cobra o link: "Pilar (formação)" de Silo sem Pilar é sugestão, não destino obrigatório. */
   const pilar = brief.linkCandidates.find(item => radarSiloRoleText(item.role) === "Pilar");
@@ -3448,9 +3829,19 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
     seoTitle: radarArticleBlueprintTitleWithoutSecondAudience(ai.title.seoTitle),
     metaDescription: radarArticleBlueprintTitleWithoutSecondAudience(ai.title.metaDescription),
   };
-  const tituloMudou = tituloLido.h1 !== ai.title.h1 || tituloLido.seoTitle !== ai.title.seoTitle || tituloLido.metaDescription !== ai.title.metaDescription
+  const tituloSemDuplo = tituloLido.h1 !== ai.title.h1 || tituloLido.seoTitle !== ai.title.seoTitle || tituloLido.metaDescription !== ai.title.metaDescription
     || tituloLido.alternatives.some((item, indice) => item !== ai.title.alternatives[indice]);
-  if (tituloMudou) notes.push("Um leitor só: o título, as alternativas, o SEO title ou a meta falavam com dois públicos (\"para clínicas e pacientes\"); o segundo saiu.");
+  if (tituloSemDuplo) notes.push("Um leitor só: o título, as alternativas, o SEO title ou a meta falavam com dois públicos (\"para clínicas e pacientes\"); o segundo saiu.");
+  /* 2026-10-11b · regra 28: a alternativa e o SEO title "A: keyword…" viram "Keyword…: A" (só trocam as metades; correção dita como feita). */
+  const seoComKeyword = radarHumanVoiceTitleWithKeywordFirst(tituloLido.seoTitle, brief.article.principal);
+  const alternativasComKeyword = tituloLido.alternatives.map(item => radarHumanVoiceTitleWithKeywordFirst(item, brief.article.principal));
+  const keywordNoComeco = seoComKeyword !== tituloLido.seoTitle || alternativasComKeyword.some((item, indice) => item !== tituloLido.alternatives[indice]);
+  if (keywordNoComeco) {
+    tituloLido.seoTitle = seoComKeyword;
+    tituloLido.alternatives = alternativasComKeyword;
+    notes.push("Regra 28: a keyword principal foi para o começo do SEO title ou das alternativas (as duas metades do título trocaram de lugar, sem reescrever palavra).");
+  }
+  const tituloMudou = tituloSemDuplo || keywordNoComeco;
 
   /* 2026-10-08 (correção) · F7 · o motivo do descarte cita a seção pelo título (o número lido na ordem da IA), nunca pelo índice. */
   const tituloNaOrdemDaIa = (numero: number) => {
@@ -3691,7 +4082,10 @@ function prefixoDaUrlPublicada(article: { slug: string | null; publishedUrl: str
  * 2026-10-02 · A MARCA DA PROPOSTA. Enquanto o dono não aprova, o CSV já sai
  * com a estrutura organizada — e diz, no topo de cada coluna, que é proposta.
  */
-export const RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK = "PROPOSTA DA IA — aguardando aprovação no Radar (Pesquisa → Artigo-modelo da SERP)";
+/** 2026-10-11 · O destino novo, dito concluído em cada L: a URL canônica planejada e quando o link entra. */
+export const RADAR_ARTICLE_BLUEPRINT_NEW_DESTINATION = "novo, ainda não publicado: o link entra quando o destino estiver no ar";
+
+export const RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK ="PROPOSTA DA IA — aguardando aprovação no Radar (Pesquisa → Artigo-modelo da SERP)";
 
 /**
  * 2026-10-02 · AS SEÇÕES DO PLANO APROVADO EM QUE UM VÍDEO ENTRA (Adendo B).
@@ -3827,7 +4221,41 @@ export type RadarArticleBlueprintColumnsOptions = {
    * mapa da atualização. Ausente = como antes.
    */
   exclusions?: { items: readonly RadarResearchScopeExclusion[]; core: readonly string[] } | null;
+  /**
+   * 2026-10-11 · Os destinos dos links pelo Silo de hoje: a identidade de
+   * publicação (URL canônica e situação, `radarPublicationIdentity`), as
+   * keywords do destino e os conceitos de âncora do grafo aprovado. Com eles, o
+   * link aponta para a URL canônica do destino e a âncora passa pela régua com
+   * o que o Silo sabe. Ausente = o candidato gravado (como antes).
+   */
+  linkTargets?: readonly RadarArticleBlueprintLinkTarget[];
+  /** 2026-10-11 · O livro de âncoras do lote do Silo: a mesma âncora não se repete para o mesmo destino em outra linha. */
+  anchorLedger?: RadarAnchorLedger | null;
 };
+
+/** 2026-10-11 · Um destino de link como o Silo o conhece hoje (o membro ou a SiloPage). */
+export type RadarArticleBlueprintLinkTarget = {
+  kind: "article" | "siloPage";
+  slug: string | null;
+  labels: ReadonlyArray<string | null | undefined>;
+  keywords?: readonly string[];
+  concepts?: readonly string[];
+  identity: RadarPublicationIdentity;
+};
+
+/** 2026-10-11 · O destino do Silo de um candidato: a SiloPage pelo papel; o membro pelo slug do endereço ou pelo nome. */
+export function radarArticleBlueprintLinkTargetOf(
+  candidato: RadarArticleBlueprintLinkCandidate,
+  alvos: readonly RadarArticleBlueprintLinkTarget[] | null | undefined,
+): RadarArticleBlueprintLinkTarget | null {
+  if (!alvos?.length || ehPaginaDaMarca(candidato)) return null;
+  if (candidato.role === "SiloPage") return alvos.find(alvo => alvo.kind === "siloPage") ?? null;
+  const caminho = radarWritingCompareKey(t(candidato.destination).replace(/[?#].*$/, "").replace(/\/+$/, "").split("/").pop() || "");
+  const nome = radarWritingCompareKey(rotuloDoCandidato(candidato));
+  return alvos.find(alvo => alvo.kind === "article" && Boolean(caminho) && radarWritingCompareKey(alvo.slug) === caminho)
+    ?? alvos.find(alvo => alvo.kind === "article" && Boolean(nome) && alvo.labels.some(rotulo => radarWritingCompareKey(rotulo) === nome))
+    ?? null;
+}
 
 export function radarArticleBlueprintColumns(
   payload: RadarArticleBlueprintPayload,
@@ -3865,7 +4293,25 @@ export function radarArticleBlueprintColumns(
    * passo, que a continuação decide.
    */
   /* 2026-10-09b · com as exclusões do ArticleDNA, a seção que as cobre sai na leitura (a nota vai ao fim da estrutura). */
-  const leitura = radarArticleBlueprintReading(payload.blueprint, { sources: new Set(payload.sources.map(item => item.id)), cta: chamada, ...(opcoes.exclusions?.items.length ? { exclusions: opcoes.exclusions } : {}) });
+  /*
+   * 2026-10-11 · e com a âncora natural: os candidatos da planta, o que o Silo
+   * sabe de cada destino (keywords e conceitos do grafo) e o livro de âncoras do
+   * lote — a mesma leitura do Redator, do vídeo e do MCP.
+   */
+  const alvoDoCandidato = (candidato: RadarArticleBlueprintLinkCandidate) => radarArticleBlueprintLinkTargetOf(candidato, opcoes.linkTargets);
+  const alvoDaAncora = (candidato: RadarArticleBlueprintLinkCandidate): RadarArticleBlueprintAnchorTarget | null => {
+    const alvo = alvoDoCandidato(candidato);
+    return alvo ? { keywords: alvo.keywords ?? null, concepts: alvo.concepts ?? null } : null;
+  };
+  const leitura = radarArticleBlueprintReading(payload.blueprint, {
+    sources: new Set(payload.sources.map(item => item.id)),
+    cta: chamada,
+    ...(opcoes.exclusions?.items.length ? { exclusions: opcoes.exclusions } : {}),
+    linkCandidates: Array.isArray(payload.linkCandidates) ? payload.linkCandidates : null,
+    anchors: { targetOf: alvoDaAncora, ledger: opcoes.anchorLedger ?? null },
+    /* 2026-10-11b · a principal: a keyword no começo do SEO title e das alternativas (regra 28) e a Regra 8 (de 3 a 6 H2). */
+    principal: opcoes.principal ?? null,
+  });
   const lidas = { sections: leitura.blueprint.sections };
   const secoesExcluidas = leitura.removedSections.filter(item => item.h3 === null);
   const h3Excluidos = leitura.removedSections.filter(item => item.h3 !== null);
@@ -3904,9 +4350,23 @@ export function radarArticleBlueprintColumns(
       (caminho && radarWritingCompareKey(publicado.slug) === caminho) || (nome && publicado.labels.some(rotulo => radarWritingCompareKey(rotulo) === nome)));
     return membro ? t(membro.url) || null : null;
   };
+  /*
+   * 2026-10-11 · O DESTINO PELA IDENTIDADE DE PUBLICAÇÃO DE HOJE: com o Silo
+   * (`linkTargets`), o link aponta para a URL canônica do destino — a publicada,
+   * preservada, ou a planejada pelo slug no caminho do Silo
+   * (https://site/<silo>/<slug>, nunca só "/<slug>") — e diz a situação dele.
+   * Sem o Silo, a URL que a planta nova gravou no candidato; sem ela, como antes.
+   */
   const candidato = new Map(payload.linkCandidates.map(item => {
+    const identidade = alvoDoCandidato(item)?.identity ?? null;
+    if (identidade) {
+      const destination = identidade.url || identidade.address || item.destination;
+      const status: RadarArticleBlueprintLinkCandidate["status"] = identidade.published && destination ? "PUBLISHED" : destination ? "PLANNED" : "UNRESOLVED";
+      return [item.id, { ...item, destination, status, ...(identidade.url ? { url: identidade.url } : {}) }];
+    }
     const url = noAr(item);
-    return [item.id, url ? { ...item, destination: url, status: "PUBLISHED" as const } : item];
+    if (url) return [item.id, { ...item, destination: url, status: "PUBLISHED" as const }];
+    return [item.id, item.status === "PLANNED" && t(item.url) ? { ...item, destination: t(item.url) } : item];
   }));
   const fonte = new Map(payload.sources.map(item => [item.id, item]));
   /*
@@ -3915,15 +4375,16 @@ export function radarArticleBlueprintColumns(
    * este artigo for ao ar antes), e "marque a âncora" era marcador por
    * preencher. A regra vai uma vez, no topo dos links; cada link diz o estado.
    */
-  const status = (item: RadarArticleBlueprintLinkCandidate) => item.status === "PUBLISHED" ? "publicado" : item.status === "PLANNED" ? "planejado, ainda não publicado" : "sem endereço no pacote: a âncora fica como texto simples, sem link";
+  /* 2026-10-11 · o destino novo diz, concluído, quando o link entra (a regra inteira vai uma vez no topo da coluna). */
+  const status = (item: RadarArticleBlueprintLinkCandidate) => item.status === "PUBLISHED" ? "publicado" : item.status === "PLANNED" ? RADAR_ARTICLE_BLUEPRINT_NEW_DESTINATION : "sem endereço no pacote: a âncora fica como texto simples, sem link";
   /* 2026-10-02 · versões gravadas antes guardam o rótulo com a moldura da promessa: limpa na leitura. */
   const rotuloDoDestino = (item: RadarArticleBlueprintLinkCandidate) => semMolduraDoTema(item.label);
   const prefixo = prefixoDaUrlPublicada(publicacao);
   const enderecoDoDestino = (item: RadarArticleBlueprintLinkCandidate): string => {
     if (!item.destination) return "";
     if (item.status === "PLANNED" && prefixo && item.destination.startsWith("/") && !item.destination.startsWith(`${prefixo}/`)) {
-      /* 2026-10-02 · UM destino por link: o caminho com o prefixo do Silo; o slug do Arquiteto e a confirmação vão como pendência, à parte. */
-      return ` → ${prefixo}${item.destination} (planejado: caminho do Silo, o mesmo prefixo da URL publicada deste artigo; slug do Arquiteto ${item.destination})`;
+      /* 2026-10-02 · UM destino por link: o caminho com o prefixo do Silo (a URL publicada deste artigo). 2026-10-11 · só sem a identidade de publicação. */
+      return ` → ${prefixo}${item.destination} (${RADAR_ARTICLE_BLUEPRINT_NEW_DESTINATION}; caminho do Silo pelo prefixo da URL publicada deste artigo)`;
     }
     return ` → ${item.destination} (${status(item)})`;
   };
@@ -3961,6 +4422,13 @@ export function radarArticleBlueprintColumns(
   }
   const linksDaSecao = (secao: RadarArticleBlueprintAi["sections"][number]) => secao.internalLinks.filter(link => linksUnicos.has(link));
   const linksRepetidos = b.sections.reduce((soma, secao) => soma + secao.internalLinks.length, 0) - linksUnicos.size;
+  /* 2026-10-11 · o número L de cada link (a mesma numeração da coluna links_internos), para a estrutura dizer qual é. */
+  const numeroDoLink = new Map(b.sections.flatMap(secao => linksDaSecao(secao)).map((link, indice) => [link, indice + 1]));
+  /* 2026-10-11 · a âncora sugerida e, quando o grafo as dá, as outras formulações (conceitos na forma natural, sem a keyword inteira do destino). */
+  const outrasFormulacoes = (link: RadarArticleBlueprintAi["sections"][number]["internalLinks"][number]): string[] => {
+    const destino = payload.linkCandidates.find(item => item.id === link.candidate);
+    return destino ? radarArticleBlueprintAnchorAlternatives(destino, link.anchor, alvoDaAncora(destino)) : [];
+  };
   /*
    * 2026-10-08 (correção) · F6 · antes e depois no texto da planta antiga
    * (resposta e "Explicar"): sai só o trecho da cena; a frase que era só a cena
@@ -4230,6 +4698,78 @@ export function radarArticleBlueprintColumns(
     return `Link da chamada: L${posicao + 1}, âncora "${link.anchor}" → ${rotuloDoDestino(linkDoCta.candidate)}${naUltima ? " (no fim da última seção, junto da chamada)" : ` (já posicionado na seção "${secao}")`}.`;
   })();
 
+  /*
+   * ===== 2026-10-11b · A DIRETRIZ DE COMUNICAÇÃO HUMANA NA PLANTA LIDA (Adendo G) =====
+   *
+   * Vale para a planta gravada (sem IA, sem mudar payload nem hash) e para a nova:
+   *   - Regra 8 (de 3 a 6 H2): a seção que a leitura decidiu juntar sai como H3
+   *     da vizinha, logo depois dela, com tudo o que tinha (os H3 dela viram
+   *     tópicos, os links e a imagem continuam);
+   *   - o bloco "Voz e SEO pela SERP" no fim da estrutura: a primeira frase com
+   *     a keyword, o primeiro H2, a contagem de H2, os sinais de autoridade local,
+   *     o fechamento em 4 tempos e as imagens no corpo;
+   *   - na coluna de título, as 3 opções e o gancho pela SERP.
+   * Tudo como instrução concluída (D10): o que dá para corrigir sem IA já vem
+   * corrigido na leitura; o resto é regra explícita para quem escreve.
+   */
+  const keywordsDoCsv = [t(opcoes.principal ?? ""), ...(opcoes.keywords || []).map(item => t(item))].filter(Boolean);
+  const evidenciasDe = (prefixo: string, quantas: number) => (Array.isArray(payload.evidence) ? payload.evidence : [])
+    .filter(item => item && typeof item.id === "string" && new RegExp(`^${prefixo}\\d`).test(item.id) && t(item.text)).slice(0, quantas);
+  const tituloDoOrganico = (texto: string) => corte(t(texto).split(" · ")[0].replace(/^["“]|["”]$/g, ""), 90);
+  const opcoesDoTitulo = [b.title.h1, ...b.title.alternatives].map(item => t(item)).filter(Boolean).slice(0, RADAR_HUMAN_VOICE_TITLE_OPTIONS);
+  const ajustesDoTitulo: string[] = [];
+  const conferirTitulo = (quem: string, valor: string, comKeywordNoComeco: boolean) => {
+    if (!t(valor)) return;
+    if (comKeywordNoComeco && t(opcoes.principal ?? "") && !radarHumanVoiceStartsWithKeyword(valor, t(opcoes.principal ?? ""))) ajustesDoTitulo.push(`- Ajuste ${quem}: comece pela keyword principal ("${t(opcoes.principal ?? "")}").`);
+    const isca = radarHumanVoiceGenericBait(valor, keywordsDoCsv);
+    if (isca) ajustesDoTitulo.push(`- Ajuste ${quem}: troque "${isca}" pela dor e pelo contraste comercial que a SERP mostra (gancho abaixo).`);
+  };
+  opcoesDoTitulo.forEach((opcao, indice) => conferirTitulo(indice === 0 ? "do H1" : `da alternativa ${indice}`, opcao, true));
+  conferirTitulo("do SEO title", b.title.seoTitle, true);
+  conferirTitulo("da meta description", b.title.metaDescription, false);
+  if (t(opcoes.principal ?? "") && t(b.title.metaDescription) && !radarHumanVoiceKeywordEarly(b.title.metaDescription, t(opcoes.principal ?? ""))) {
+    ajustesDoTitulo.push(`- Ajuste da meta description: a keyword principal nos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS} caracteres.`);
+  }
+  if (opcoesDoTitulo.length < RADAR_HUMAN_VOICE_TITLE_OPTIONS) {
+    ajustesDoTitulo.push(`- Escreva mais ${contagem(RADAR_HUMAN_VOICE_TITLE_OPTIONS - opcoesDoTitulo.length, "opção", "opções")} no mesmo molde: a keyword principal no começo e outro gancho de contraste.`);
+  }
+  const dores = [...evidenciasDe("P", 2), ...evidenciasDe("B", 2)].map(item => `${item.id} "${corte(t(item.text).replace(/\s*\(\d+ de \d+ páginas\)$/, ""), 90)}"`);
+  const topo = evidenciasDe("S", 3).map(item => `${item.id} "${tituloDoOrganico(item.text)}"`);
+  const iscasDoTopo = [...new Set(evidenciasDe("S", 10).map(item => radarHumanVoiceGenericBait(tituloDoOrganico(item.text), keywordsDoCsv)).filter((item): item is string => Boolean(item)))];
+  const linhasDoTituloPelaSerp = [
+    `Título pela SERP (diretriz de comunicação humana ${RADAR_HUMAN_VOICE_GUIDELINE_VERSION}): ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções (o H1 e as alternativas acima), cada uma com a keyword principal no começo e um gancho de dor e contraste comercial diferente; nunca isca genérica ("guia prático", "dicas", "o que é", "tudo sobre"). O SEO title segue a opção escolhida, até ~60 caracteres.`,
+    ...ajustesDoTitulo,
+    ...(dores.length || topo.length
+      ? [`Gancho pela SERP: ${dores.length ? `a dor vem das perguntas reais (${dores.join("; ")})` : "a dor vem das perguntas da abertura e das seções"}${topo.length ? `; o contraste, dos títulos do topo (${topo.join("; ")})${iscasDoTopo.length ? `, que prometem ${iscasDoTopo.map(item => `"${item}"`).join(", ")}: o título promete a saída que eles não dão` : ": o título promete o que eles não prometem"}` : ""}.`]
+      : []),
+    "Meta description pela SERP: dor, contraste, o que a leitora ganha e por que clicar mesmo com resposta de IA no topo (autoridade, serviço real, experiência de quem assina); keyword nos primeiros 60 caracteres; até ~155 caracteres.",
+  ];
+  const juntaDe = new Map(leitura.h2Merges.map(item => [item.section, item.into]));
+  /* A seção que entra como H3 vem logo depois da que a recebe (o "## " mais perto acima dela é sempre o H2 dela). */
+  const ordemDasSecoes = b.sections.flatMap((_, indice) => (juntaDe.has(indice)
+    ? []
+    : [indice, ...leitura.h2Merges.filter(item => item.into === indice).map(item => item.section)]));
+  const h2DaLeitura = b.sections.length - juntaDe.size;
+  const principalDoCsv = t(opcoes.principal ?? "");
+  const primeiroH2 = b.sections[ordemDasSecoes[0] ?? 0]?.h2 ?? "";
+  const respiros = b.visual.filter(item => /^R\d/i.test(t(item.slot))).length;
+  const temCapa = b.visual.some(item => /^CAPA$/i.test(t(item.slot)));
+  const vozESeo = [
+    `Voz e SEO pela SERP (diretriz de comunicação humana ${RADAR_HUMAN_VOICE_GUIDELINE_VERSION}, regra geral da linha de topo):`,
+    `- Primeira frase do corpo: traz ${principalDoCsv ? `"${principalDoCsv}"` : "a keyword principal"} e entra na dor da SERP, para quem já tentou posts, feed, anúncio e agência (nível 3).`,
+    principalDoCsv && primeiroH2 && !radarHumanVoiceHeadingHasKeyword(primeiroH2, principalDoCsv)
+      ? `- Primeiro H2: escreva "${primeiroH2}" com a keyword principal ou um recorte forte dela, sem mudar a pergunta da seção.`
+      : `- Primeiro H2: "${primeiroH2}" já traz a keyword principal (ou um recorte forte dela).`,
+    juntaDe.size
+      ? `- H2: ${h2DaLeitura} (Regra 8 do Guia: de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max}). A planta tem ${b.sections.length} seções: ${juntaDe.size === 1 ? "a marcada" : `as ${juntaDe.size} marcadas`} "H3 do H2 acima" ${juntaDe.size === 1 ? "entra" : "entram"} como H3, com a cobertura, os links e a imagem.`
+      : `- H2: ${b.sections.length} (Regra 8 do Guia: de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max}).`,
+    `- Autoridade local: 2 ou 3 sinais, onde o trecho pedir (${RADAR_HUMAN_VOICE_LOCAL_AUTHORITY.join("; ")}).`,
+    `- Fechamento em 4 tempos: ${RADAR_HUMAN_VOICE_CLOSING_STEPS.join(" → ")}; a virada e o fim explicam a busca orgânica sem sigla (nível 2).`,
+    temCapa && respiros
+      ? `- Imagens: capa e ${contagem(respiros, "imagem", "imagens")} no corpo, nas seções indicadas.`
+      : `- Imagens: ${temCapa ? "a capa está no plano; " : "a capa é obrigatória (prompt a partir do H1, sem texto legível); "}${respiros ? `${contagem(respiros, "imagem", "imagens")} no corpo` : `ponha ao menos uma imagem útil no corpo, na seção "${b.sections[Math.min(1, b.sections.length - 1)]?.h2 ?? primeiroH2}", explicando a ideia dela`}.`,
+  ];
+
   const estrutura = [
     "ARTIGO-MODELO DA SERP (planta concluída do artigo; a redação é de quem escreve).",
     ...(payload.unit ? [`Tipo da unidade: ${payload.unit.label}${payload.unit.format ? ` · formato: ${payload.unit.format}` : ""}.`] : []),
@@ -4237,7 +4777,8 @@ export function radarArticleBlueprintColumns(
     /* 2026-10-08 · C3 · link externo é o que tem fonte do pacote; a afirmação sem fonte sai delimitada, sem link. */
     /* 2026-10-08 (correção da revisão) · os H2 da página que ficam como seção própria SOMAM ao plano: a medida diz isso, não só "5 H2". */
     /* 2026-10-09b · a seção que saiu pela exclusão do ArticleDNA sai também da conta (H2, H3 e links dela). */
-    `Medidas do plano: ${Math.max(0, m.plan.sections - secoesExcluidas.length)} H2${mantidosDaPagina ? ` (+ ${contagem(mantidosDaPagina, "H2 da página publicada mantido como seção própria", "H2 da página publicada mantidos como seções próprias")})` : ""} · ${Math.max(0, m.plan.h3 - h3Removidos)} H3 · ${paragrafosNaMedida} · ${contagem(m.plan.bold, "negrito", "negritos")} · ${contagem(m.plan.images, "imagem", "imagens")} (capa + ${contagem(m.plan.respites, "respiro", "respiros")}) · ${contagem(Math.max(0, m.plan.internalLinks + (ctaSemLink ? 1 : 0) - linksRepetidos - secoesExcluidas.reduce((soma, item) => soma + item.internalLinks, 0)), "link interno", "links internos")} · ${contagem(externosComFonte, "link externo", "links externos")}${delimitadas ? ` (${contagem(delimitadas, "afirmação delimitada", "afirmações delimitadas")}, sem link)` : ""}${m.plan.wordsMin && m.plan.wordsMax ? ` · ${m.plan.wordsMin}–${m.plan.wordsMax} palavras` : ""}.`,
+    /* 2026-10-11b · a seção que entra como H3 pela Regra 8 sai da conta de H2 e entra na de H3. */
+    `Medidas do plano: ${Math.max(0, m.plan.sections - secoesExcluidas.length - juntaDe.size)} H2${juntaDe.size ? ` (Regra 8: ${contagem(juntaDe.size, "seção da planta entra como H3", "seções da planta entram como H3")})` : ""}${mantidosDaPagina ? ` (+ ${contagem(mantidosDaPagina, "H2 da página publicada mantido como seção própria", "H2 da página publicada mantidos como seções próprias")})` : ""} · ${Math.max(0, m.plan.h3 - h3Removidos) + juntaDe.size} H3 · ${paragrafosNaMedida} · ${contagem(m.plan.bold, "negrito", "negritos")} · ${contagem(m.plan.images, "imagem", "imagens")} (capa + ${contagem(m.plan.respites, "respiro", "respiros")}) · ${contagem(Math.max(0, m.plan.internalLinks + (ctaSemLink ? 1 : 0) - linksRepetidos - secoesExcluidas.reduce((soma, item) => soma + item.internalLinks, 0)), "link interno", "links internos")} · ${contagem(externosComFonte, "link externo", "links externos")}${delimitadas ? ` (${contagem(delimitadas, "afirmação delimitada", "afirmações delimitadas")}, sem link)` : ""}${m.plan.wordsMin && m.plan.wordsMax ? ` · ${m.plan.wordsMin}–${m.plan.wordsMax} palavras` : ""}.`,
     /* 2026-10-09 · Defeito 2 · com a base única do export, a linha fala dela (o mesmo nome da lista impressa); sem ela, as medidas gravadas. */
     opcoes.sampleMeasures
       ? `Concorrentes comparáveis (${opcoes.sampleMeasures.label}): mediana de ${opcoes.sampleMeasures.words.median ?? "?"} palavras, ${opcoes.sampleMeasures.h2 ?? "?"} H2, ${opcoes.sampleMeasures.h3 ?? "?"} H3, ${opcoes.sampleMeasures.paragraphs ?? "?"} parágrafos, ${opcoes.sampleMeasures.images ?? "?"} imagens.`
@@ -4251,8 +4792,11 @@ export function radarArticleBlueprintColumns(
     ...(ordemDaBusca ? [ordemDaBusca] : []),
     ...(ficamDepois(0).length ? [`Logo depois da abertura, a página publicada continua com ${citados(ficamDepois(0))}: seção própria, reescrita na voz.${ficamDepois(0).flatMap(item => imagensDaPagina(item.current).map(vaga => ` Imagem: ${vaga} em "${corte(item.current, 80)}".`)).join("")}`] : []),
     "",
-    ...b.sections.flatMap((secao, indice) => [
-      `## ${secao.h2}`,
+    /* 2026-10-11b · na ordem da Regra 8: a seção que entra como H3 vem logo depois da que a recebe. */
+    ...ordemDasSecoes.map(indice => ({ secao: b.sections[indice], indice })).flatMap(({ secao, indice }, posicaoNaOrdem) => [
+      ...(juntaDe.has(indice)
+        ? [`### ${secao.h2} (H3 do H2 acima, pela Regra 8 do Guia: de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} H2; a cobertura fica inteira)`]
+        : [`## ${secao.h2}`]),
       /* 2026-10-09 (correção) · 12 · na seção enquadrada, a pergunta diz de que lado é respondida. */
       `- Pergunta do leitor: ${secao.readerQuestion}${paraOLeitor(secao) ? ` (responda do ponto de vista de quem vende: o que ${negocioDoLeitor} ganha e perde com isso, não como quem compra escolhe)` : ""}`,
       ...origemDaSecao(payload, secao),
@@ -4260,12 +4804,13 @@ export function radarArticleBlueprintColumns(
       /* 2026-10-09 · 12 · a seção que fala com quem compra, num artigo para quem vende: o enquadramento concluído. */
       ...(enquadramento(secao) ? [enquadramento(secao)!] : []),
       ...(absorvidos(indice + 1).length ? [`- Da página publicada, entra aqui (reescrito na voz): ${citados(absorvidos(indice + 1))}`] : []),
-      ...secao.h3.map(h3 => `  ### ${h3}`),
+      ...secao.h3.map(h3 => (juntaDe.has(indice) ? `  - Tópico dentro deste H3 (sem novo H2): ${h3}` : `  ### ${h3}`)),
       ...secao.explain.flatMap(item => semCena(item) ?? []).map(item => `- Explicar: ${comFonte(item, indice)}${paraOLeitor(secao) && orientaQuemCompra(item) ? reescritaParaOLeitor : ""}`),
       `- ~${paragrafosDoPlano?.perSection[indice] ?? secao.paragraphs} parágrafo(s)${secao.bold.length ? ` · negrito em: ${secao.bold.join(", ")}` : ""}`,
       ...(secao.terms.length ? [`- Termos a nomear: ${secao.terms.join(" · ")}`] : []),
       ...(secao.evidence.length ? [`- Evidências: ${rotuloDaEvidencia(payload, secao.evidence, lentesDoDominio, opcoes.evidenceText ?? null).join("; ")}`] : []),
-      ...linksDaSecao(secao).map(link => { const destino = candidato.get(link.candidate); return `- Link interno: âncora "${link.anchor}" → ${destino ? rotuloDoDestino(destino) : link.candidate}`; }),
+      /* 2026-10-11 · a âncora é sugerida (trecho natural da ideia do destino, nunca a keyword inteira dele), com o L da coluna de links. */
+      ...linksDaSecao(secao).map(link => { const destino = candidato.get(link.candidate); return `- Link interno L${numeroDoLink.get(link) ?? "?"}: âncora sugerida "${link.anchor}" → ${destino ? rotuloDoDestino(destino) : link.candidate}`; }),
       ...secao.externalLinks.map(link => linhaDoLinkExterno(link, indice)),
       /* 2026-10-09 · Defeito 3(b) · o assunto de outro artigo do Silo que a seção toca: só mencione e linke (a nota vem do CSV). */
       ...(opcoes.sectionNotes?.(secao, indice, rotuloDoLinkPara) ?? []),
@@ -4278,7 +4823,7 @@ export function radarArticleBlueprintColumns(
       /* 2026-10-09 · 10 · a continuação, opcional, no corpo da seção dela. */
       ...(continuacao?.secao === indice ? [continuacao.linha] : []),
       ...ficamDepois(indice + 1).map(item => `- Depois desta seção, a página publicada continua com "${corte(item.current, 80)}": seção própria, reescrita na voz.${imagensDaPagina(item.current).length ? ` Imagem: ${imagensDaPagina(item.current).join(", ")}.` : ""}`),
-      ...(indice < b.sections.length - 1 ? [""] : []),
+      ...(posicaoNaOrdem < ordemDasSecoes.length - 1 ? [""] : []),
     ]),
     ...(descartados.length
       ? ["", `Descartado do esqueleto da SERP: ${descartados.map(item => `${item.id}${doEsqueleto.get(item.id) ? ` "${doEsqueleto.get(item.id)!.heading}"` : ""}${item.reason ? ` (${radarArticleBlueprintSectionRefsByTitle(item.reason, tituloDaPlanta(item))})` : ""}`).join("; ")}.`]
@@ -4299,6 +4844,9 @@ export function radarArticleBlueprintColumns(
     /* 2026-10-09 · 10 · com a continuação dita pelo CSV, o fechamento não ganha segunda saída: ela está no corpo, na seção dela. */
     ...(!comContinuacao && b.closing.nextStep ? [`Próximo passo: ${proximoPassoMarcado}`] : []),
     ...(b.eeat.length ? ["", `E-E-A-T: ${b.eeat.join(" · ")}`] : []),
+    /* 2026-10-11b · a diretriz de comunicação humana, no que é desta planta (Adendo G); a lista de afirmações continua fechando a coluna. */
+    "",
+    ...vozESeo,
     /* 2026-10-08 · C4 · a lista concluída: o que só entra com fonte do pacote ou delimitado (a regra geral 5). */
     ...(travadas.size
       ? ["", `Afirmações que só entram com fonte do pacote ou delimitadas (regra geral 5): ${[...travadas.values()].join("; ")}. Sem fonte do pacote, escreva de forma qualificada ou omita; nenhuma ganha link externo sem fonte.`]
@@ -4307,16 +4855,24 @@ export function radarArticleBlueprintColumns(
 
   const links = b.sections.flatMap(secao => linksDaSecao(secao).map(link => ({ secao: secao.h2, link })));
   const comDestinoPlanejado = links.some(({ link }) => candidato.get(link.candidate)?.status === "PLANNED");
+  /*
+   * 2026-10-11 · A ÂNCORA NATURAL E O DESTINO PELO SLUG. O cabeçalho diz a
+   * regra da âncora (a MESMA frase do Redator e do MCP, `RADAR_NATURAL_ANCHOR_RULE`)
+   * e que só os L indicados entram; cada L traz a âncora sugerida (o recorte),
+   * as outras formulações quando o grafo as dá, e a URL canônica do destino (a
+   * publicada ou a planejada pelo slug no caminho do Silo), com a situação.
+   */
   const linksInternos = links.length
     ? [
-      `Aplique somente estes ${links.length} link(s), com a âncora indicada (pode ajustar concordância):`,
-      /* 2026-10-08 · C9 · a regra do destino planejado, uma vez: condicional e concluída. */
-      ...(comDestinoPlanejado ? ["Destino planejado (ainda não publicado): o link entra com a URL final quando o destino estiver no ar junto com este artigo ou antes; se este artigo for ao ar primeiro, a âncora fica como texto simples, sem link (nunca link quebrado). O caminho planejado não é endereço publicado: não invente domínio nem URL."] : []),
+      `Aplique somente estes ${links.length} link(s) (L1, L2…), sem criar outros. ${RADAR_NATURAL_ANCHOR_RULE} Use a âncora sugerida (pode ajustar concordância) ou uma das outras formulações; o link aponta para a URL canônica do destino, a do slug dele.`,
+      /* 2026-10-08 · C9 · a regra do destino novo, uma vez: condicional e concluída. */
+      ...(comDestinoPlanejado ? [`Destino novo (ainda não publicado): o link entra quando o destino estiver no ar, junto com este artigo ou antes; se este artigo for ao ar primeiro, a âncora fica como texto simples, sem link (nunca link quebrado). Não invente outro domínio nem outra URL.`] : []),
       ...links.map(({ secao, link }, indice) => {
         const destino = candidato.get(link.candidate);
         /* 2026-10-09 · o candidato da SiloPage já se chama `SiloPage "X"`: com o papel na frente, sai `SiloPage "X"`, sem repetir. */
         const nomeDoDestino = destino ? (destino.role === "SiloPage" && /^SiloPage\s/.test(rotuloDoDestino(destino)) ? rotuloDoDestino(destino) : `${destino.role} "${rotuloDoDestino(destino)}"`) : "";
-        return `L${indice + 1} · âncora "${link.anchor}" → ${destino ? `${nomeDoDestino}${enderecoDoDestino(destino) || ` (${status(destino)})`}` : link.candidate} · onde: seção "${secao}"${link.reason ? ` · por quê: ${link.reason}` : ""}`;
+        const outras = outrasFormulacoes(link);
+        return `L${indice + 1} · âncora sugerida "${link.anchor}"${outras.length ? ` · outras formulações: ${outras.map(item => `"${item}"`).join(", ")}` : ""} → ${destino ? `${nomeDoDestino}${enderecoDoDestino(destino) || ` (${status(destino)})`}` : link.candidate} · onde: seção "${secao}"${link.reason ? ` · por quê: ${link.reason}` : ""}`;
       }),
     ].join("\n")
     : "Nenhum link interno no artigo-modelo.";
@@ -4329,6 +4885,8 @@ export function radarArticleBlueprintColumns(
       `SEO title: ${seoTitleMarcado}`,
       `Meta description: ${metaMarcada}`,
       `Keyword principal em: ${b.keywordPlan.principalPlacement.join(", ") || "H1 e primeiro parágrafo"}`,
+      /* 2026-10-11b · regra 28: as 3 opções, o ajuste de cada uma e o gancho pela SERP (instrução concluída). */
+      ...linhasDoTituloPelaSerp,
     ].join("\n")),
     estrutura,
     links_internos: (linksInternos),
@@ -4342,6 +4900,9 @@ export function radarArticleBlueprintColumns(
         ...(item.alt ? [`  ALT: ${item.alt}`] : []),
         ...(item.caption ? [`  Legenda: ${item.caption}`] : []),
       ].join("\n")),
+      /* 2026-10-11b · capa obrigatória e ao menos uma imagem útil no corpo (diretriz, regra das imagens): a planta antiga sem elas ganha a instrução concluída. */
+      ...(temCapa ? [] : [`Capa (obrigatória): escreva o prompt a partir do H1 ("${t(b.title.h1)}"), cena editorial sem texto legível, 16:9; ALT pela keyword principal.`]),
+      ...(respiros ? [] : [`Imagem no corpo (ao menos uma): na seção "${b.sections[Math.min(1, b.sections.length - 1)]?.h2 ?? primeiroH2}", explicando a ideia dela, 4:3, sem antes e depois nem promessa de resultado.`]),
       ...cenasRepetidas,
     ].join("\n")),
   };

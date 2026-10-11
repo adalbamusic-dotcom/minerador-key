@@ -62,16 +62,19 @@
  */
 
 import {
+  radarArticleBlueprintH2Merges,
   radarArticleBlueprintPayloadReading,
   radarArticleBlueprintPublishedMapLine,
   radarArticleBlueprintPublishedMapReading,
   radarArticleBlueprintReading,
   radarArticleBlueprintWithCurrentNames,
   type RadarArticleBlueprintAi,
+  type RadarArticleBlueprintLinkCandidate,
   type RadarArticleBlueprintPayload,
   type RadarArticleBlueprintPublishedStructure,
 } from "../radar/article-blueprint.ts";
 import { radarClaimCommonStems, radarPendingClaims, radarSentenceNeedsSource, type RadarPendingClaim } from "../radar/pending-claims.ts";
+import { radarSemanticStems } from "../radar/semantic-concept-model.ts";
 import type { RadarResearchScopeExclusion } from "../radar/article-research-context.ts";
 import type { RadarWritingProjections } from "../radar/portable-writing-export.ts";
 import {
@@ -88,8 +91,17 @@ import {
  *
  * 2026-10-09b · a leitura passou a usar as fontes do pacote da planta e as
  * exclusões do ArticleDNA (a mesma do CSV): a fatia muda de novo.
+ *
+ * 2026-10-11 · e a âncora natural (`radarNaturalAnchor`, pelos candidatos da
+ * planta): a âncora que é a keyword inteira do destino vira o recorte natural,
+ * como no CSV — a fatia muda de novo.
+ *
+ * 2026-10-11b · e a diretriz de comunicação humana (Adendo G): com a principal,
+ * a keyword vai para o começo do SEO title quando é só trocar as metades, e a
+ * Regra 8 (de 3 a 6 H2) diz qual seção entra como H3 (`h2Merges`) — a fatia
+ * muda de novo.
  */
-export const WRITER_BLUEPRINT_READING_RULES = "2026-10-09b";
+export const WRITER_BLUEPRINT_READING_RULES = "2026-10-11b";
 
 export const WRITER_BLUEPRINT_FOR_WRITING_LIMITS = Object.freeze({
   /** Frases marcadas fora das seções (promessa, ângulo, título, abertura, fechamento). */
@@ -118,6 +130,12 @@ export type WriterBlueprintReadingOptions = {
   sources?: unknown;
   /** As exclusões do ArticleDNA: a seção (ou o H3) que cobre um assunto excluído sai, como no CSV. */
   exclusions?: WriterBlueprintExclusions | null;
+  /**
+   * 2026-10-11 · `payload.linkCandidates` da versão aprovada: com eles, a âncora
+   * de cada link passa pela régua da âncora natural do CSV (nunca a keyword
+   * inteira do destino). Ausente = as âncoras gravadas.
+   */
+  linkCandidates?: unknown;
 };
 
 /**
@@ -169,6 +187,23 @@ export function writerBlueprintSourcesOf(valor: unknown): RadarArticleBlueprintP
     .filter(item => item.id);
 }
 
+/** 2026-10-11 · Os candidatos a link da planta, com a forma que a régua da âncora natural lê; `null` = não informados. */
+export function writerBlueprintLinkCandidatesOf(valor: unknown): RadarArticleBlueprintLinkCandidate[] | null {
+  if (!Array.isArray(valor)) return null;
+  return registrosDe(valor)
+    .map(item => ({
+      id: textoDe(item.id),
+      label: textoDe(item.label),
+      role: textoDe(item.role),
+      destination: textoDe(item.destination) || null,
+      status: (item.status === "PUBLISHED" || item.status === "PLANNED" ? item.status : "UNRESOLVED") as RadarArticleBlueprintLinkCandidate["status"],
+      fromGraph: item.fromGraph === true,
+      ...(textosDe(item.anchorConcepts).length ? { anchorConcepts: textosDe(item.anchorConcepts) } : {}),
+      ...(textoDe(item.url) ? { url: textoDe(item.url) } : {}),
+    }))
+    .filter(item => item.id && item.label);
+}
+
 /**
  * A PLANTA COM OS NOMES ATUAIS E A LEITURA DO CSV, tolerante ao que o banco
  * devolveu. A troca e a leitura são as do Radar; aqui só a guarda: planta sem
@@ -203,12 +238,17 @@ export function writerBlueprintWithCurrentNames(
    */
   const fontes = writerBlueprintSourcesOf(opcoes.sources);
   const exclusions = opcoes.exclusions?.items.length ? { exclusions: opcoes.exclusions } : {};
+  /* 2026-10-11 · a âncora natural: os candidatos da planta, com a forma que a régua lê (id, rótulo, papel e destino). */
+  const candidatos = writerBlueprintLinkCandidatesOf(opcoes.linkCandidates);
+  const comCandidatos = candidatos?.length ? { linkCandidates: candidatos } : {};
+  /* 2026-10-11b · com a principal: a keyword no começo do SEO title quando é só trocar as metades (regra 28), como no CSV. */
+  const comPrincipal = textoDe(keywords?.principal) ? { principal: textoDe(keywords?.principal) } : {};
   try {
     if (fontes) {
       const payload = { blueprint: comNomes, sources: fontes } as unknown as RadarArticleBlueprintPayload;
-      return radarArticleBlueprintPayloadReading(payload, { withoutCallInNextStep: true, ...exclusions }).blueprint;
+      return radarArticleBlueprintPayloadReading(payload, { withoutCallInNextStep: true, ...exclusions, ...comCandidatos, ...comPrincipal }).blueprint;
     }
-    return radarArticleBlueprintReading(comNomes as RadarArticleBlueprintAi, { withoutCallInNextStep: true, ...exclusions }).blueprint;
+    return radarArticleBlueprintReading(comNomes as RadarArticleBlueprintAi, { withoutCallInNextStep: true, ...exclusions, ...comCandidatos, ...comPrincipal }).blueprint;
   } catch {
     return comNomes;
   }
@@ -395,7 +435,8 @@ function mapaDaAtualizacao(
  */
 export function writerArticleBlueprintForWriting(input: WriterArticleBlueprintForWritingInput): WriterArticleBlueprintFoundation | null {
   const { publishedStructure, currentStructure, keywords, sources, exclusions, claims, ...base } = input;
-  const blueprint = writerBlueprintWithCurrentNames(base.blueprint, keywords, { sources, exclusions });
+  /* 2026-10-11 · com os candidatos da planta: a âncora natural, a mesma leitura do CSV. */
+  const blueprint = writerBlueprintWithCurrentNames(base.blueprint, keywords, { sources, exclusions, linkCandidates: base.linkCandidates });
   const projetada = writerArticleBlueprintFoundation({ ...base, blueprint });
   const planta = registro(blueprint);
   if (!projetada || !planta) return projetada;
@@ -411,12 +452,20 @@ export function writerArticleBlueprintForWriting(input: WriterArticleBlueprintFo
     return marcadas.length ? { ...secao, needsSource: marcadas } : secao;
   });
   const mapa = mapaDaAtualizacao(planta, publishedStructure, currentStructure, keywords, exclusions);
+  /*
+   * 2026-10-11b · A REGRA 8 (de 3 a 6 H2) pela MESMA régua da leitura do CSV
+   * (`radarArticleBlueprintH2Merges`, as raízes da principal não distinguem
+   * seção), sobre as seções projetadas, pelos H2.
+   */
+  const juntas = radarArticleBlueprintH2Merges(projetada.sections, new Set(radarSemanticStems(textoDe(keywords?.principal))))
+    .map(item => ({ section: projetada.sections[item.section].h2, into: projetada.sections[item.into].h2 }));
   const mudouSecao = sections.some((secao, posicao) => secao !== projetada.sections[posicao]);
-  if (!topo.length && !mudouSecao && !mapa.length) return projetada;
+  if (!topo.length && !mudouSecao && !mapa.length && !juntas.length) return projetada;
   return {
     ...projetada,
     sections: mudouSecao ? sections : projetada.sections,
     ...(topo.length ? { needsSource: topo } : {}),
     ...(mapa.length ? { publishedMap: mapa } : {}),
+    ...(juntas.length ? { h2Merges: juntas } : {}),
   };
 }

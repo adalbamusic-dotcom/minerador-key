@@ -1,5 +1,56 @@
 # Estado atual — Redator
 
+## Comunicação humana guiada pela SERP — 2026-10-11
+
+**Verificado no código e confirmado por teste (fixtures; PROVIDER_CALLS = 0). Validado manualmente: não.** Módulo
+proprietário da rodada: Radar (`docs/05-radar/estado-atual.md`, seção de mesma data; Adendo G da SDD da diretriz
+editorial); o Redator recebeu mudanças aditivas, todas pela fonte única `lib/radar/human-voice-guideline.ts`.
+
+- **Prompts:** `SECTION_WRITING_SYSTEM_PROMPT` e `IMPROVE_SYSTEM_PROMPT` levam `radarHumanVoiceRedatorRule()` (o
+  núcleo, a precedência, a primeira frase com a keyword, o fechamento em 4 tempos, os sinais de autoridade local e a
+  primeira pessoa só de quem assina); a escrita de seção leva também a regra de `h2Merges`.
+- **Leitura da planta:** `WRITER_BLUEPRINT_READING_RULES = "2026-10-11b"` (a fatia `radar.blueprint/<id>` muda uma
+  vez). Com `keywords.principal`, a leitura compartilhada põe a keyword no começo do SEO title quando é só trocar as
+  metades; `writerArticleBlueprintForWriting` devolve `h2Merges` (aditivo, pelos H2) quando a planta passa de 6 H2,
+  pela mesma régua do CSV; as seções da projeção não somem (documentos já criados casam pelo H2).
+  `WriterSectionBlueprint.h2Merges` leva o mesmo à seção.
+- **Fundamentos:** com artigo-modelo, o próximo passo leva o núcleo e a precedência; com `h2Merges`, a linha da Regra 8.
+- **Semente de roteiro e carrossel:** `REGRAS_COMUNS` leva `radarHumanVoiceVideoRule()`.
+- **MCP:** as instruções de escrita do servidor levam `radarHumanVoiceRedatorRule()`; o catálogo tem a nota da diretriz.
+- **Arquivos:** `lib/redator/prompts.ts`, `lib/redator/writer-blueprint-for-writing.ts`,
+  `lib/redator/writer-evidence-catalog.ts`, `lib/redator/writer-section-evidence.ts`, `lib/redator/deliverable-seed.ts`,
+  `lib/server/writer-evidence-reader.ts`, `app/api/mcp/redator/route.ts`. Consumidores preservados: campos e opções
+  só aditivos; sem planta acima de 6 H2, sem `h2Merges`.
+- **Testes:** `test:redator` 357/357, `test:agent` 73/73, `test:redator:dom` 19/19; paridade com o CSV em
+  `tests/radar-voz-humana-serp-2026-10-11.test.mts`. `test:redator:mcp` 149/150 — a falha (âncora "Rotina de skin")
+  é da rodada da âncora natural, anterior a esta.
+- **Limitação:** o Redator escreve por H2 do documento; com `h2Merges`, a seção que entra como H3 continua sendo um
+  H2 no documento já criado, e a IA a escreve como H3 só quando escreve a seção que a recebe.
+
+## Âncora natural na planta lida — 2026-10-11
+
+**Verificado no código e confirmado por teste (fixtures; PROVIDER_CALLS = 0). Validado manualmente: não.** Módulo
+proprietário da rodada: Radar (`docs/05-radar/estado-atual.md`, seção de mesma data); o Redator recebeu mudanças
+aditivas.
+
+- **A mesma leitura do CSV, com os candidatos da planta:** `writerBlueprintWithCurrentNames` aceita
+  `linkCandidates` (`writerBlueprintLinkCandidatesOf`, tolerante ao que o banco devolve) e os passa à leitura
+  compartilhada do Radar; `writerArticleBlueprintForWriting`, os fundamentos (`blueprintRead`) e a semeadura os
+  passam. A âncora que é a keyword inteira do destino vira o recorte natural — a mesma do CSV no caso real.
+- **`WRITER_BLUEPRINT_READING_RULES = "2026-10-11"`:** a fatia `radar.blueprint/<id>` muda com a leitura.
+- **A regra em texto é a do Radar** (`RADAR_NATURAL_ANCHOR_RULE`): no prompt da seção (`lib/redator/prompts.ts`,
+  "links internos dela com a âncora sugerida"), no próximo passo dos fundamentos e nas instruções do MCP
+  (`app/api/mcp/redator/route.ts`).
+- **Destino do link:** a projeção (`writerArticleBlueprintFoundation`) usa a URL canônica que a planta nova grava no
+  candidato (`url`), quando há; sem ela, o destino gravado, como antes.
+- **Arquivos:** `lib/redator/writer-blueprint-for-writing.ts`, `lib/redator/writer-evidence-catalog.ts`,
+  `lib/redator/prompts.ts`, `lib/server/writer-evidence-reader.ts`, `lib/server/writer-seed.ts`,
+  `app/api/mcp/redator/route.ts`. Consumidores preservados: opções só aditivas; sem candidatos, a leitura de antes.
+- **Testes:** `test:redator` 357 e `test:agent` 73 passam; paridade com o CSV em
+  `tests/radar-ancora-natural-e-slug-2026-10-11.test.mts`.
+- **Limitação:** o Redator não lê o grafo nem o Silo de hoje: na planta antiga, sem os conceitos no candidato, a âncora
+  sai do recorte da própria âncora ou do rótulo.
+
 ## Regra do piloto em todas as operações — 2026-10-09
 
 **Verificado no código e confirmado por teste (fixtures; PROVIDER_CALLS = 0). Validado manualmente: não.** Módulo

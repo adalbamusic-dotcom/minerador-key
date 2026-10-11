@@ -58,9 +58,16 @@ import {
   radarWritingSpreadsheetSafe,
   radarWritingUnitOf,
   radarWritingUnsupportedClaims,
+  radarWritingPublicationIdentities,
   type RadarWritingProjections,
+  type RadarWritingPublication,
   type RadarWritingUnit,
 } from "./portable-writing-export.ts";
+/* 2026-10-11 · a identidade de publicação (o artigo que o vídeo leva: Silo, slug, URL canônica e situação), a mesma do CSV para escrever. */
+import { radarPublicationIdentityLines, type RadarPublicationIdentity } from "./publication-identity.ts";
+import type { RadarSiloExportWritingContext } from "./portable-silo-export.ts";
+/* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP (a mesma fonte do CSV para escrever, do Redator e do MCP). */
+import { radarHumanVoiceBrandVoiceRowNote, radarHumanVoiceVideoRule } from "./human-voice-guideline.ts";
 /* 2026-10-07 · a trava de fonte (item 5) e a leitura competitiva (item 1) moram em módulos próprios do Radar. */
 /* 2026-10-08 · e a régua por frase (`radarSentenceNeedsSource`, a mesma porta lida por sentido) serve às checagens de sim ou não. */
 import { radarClaimCommonStems, radarClaimGate, radarClaimGateReason, radarPendingClaims, radarSentenceNeedsSource, type RadarClaimGate, type RadarPendingClaim } from "./pending-claims.ts";
@@ -331,7 +338,7 @@ function publicoDaVoz(voz: RadarBrandVoiceState | undefined): { texto: string; o
   };
 }
 
-function colunaTema(input: RadarPortableExportInput, p: RadarWritingProjections, voz: RadarBrandVoiceState | undefined): string {
+function colunaTema(input: RadarPortableExportInput, p: RadarWritingProjections, voz: RadarBrandVoiceState | undefined, identidade: RadarPublicationIdentity | null = null): string {
   const principal = texto(p.dna.principalKeyword);
   const complementares = unicos([...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements])
     .filter(item => radarWritingCompareKey(item) !== radarWritingCompareKey(principal));
@@ -359,6 +366,8 @@ function colunaTema(input: RadarPortableExportInput, p: RadarWritingProjections,
     publico,
     ...(util(input.article.promise) ? [`Promessa ao público: ${util(input.article.promise)}`] : []),
     ...(texto(input.article.siloName) ? [`Tema maior (Silo): ${texto(input.article.siloName)}`] : []),
+    /* 2026-10-11 · o artigo que o vídeo leva, para conferir e aprovar no momento de postar: o mesmo bloco do CSV para escrever. */
+    ...(identidade ? ["", "Artigo da marca que o vídeo leva:", ...radarPublicationIdentityLines(identidade)] : []),
   ].join("\n");
 }
 
@@ -1934,11 +1943,12 @@ function colunaRoteiro(
   publicavel: AberturaPublicavel | null,
   /* 2026-10-07 (revisão) · o nível de encolhimento dos capítulos da planta (NIVEIS_DO_ROTEIRO); o texto inteiro no primeiro. */
   nivel: NivelDoRoteiro,
-  extras: { decisao: RadarVideoFormatDecision; oportunidadesDeTitulo?: readonly string[] },
+  extras: { decisao: RadarVideoFormatDecision; oportunidadesDeTitulo?: readonly string[]; destino?: string },
 ): string {
   const contribuicoes = radarWritingSpecialistContributions(p);
   const cta = contribuicoes.find(item => item.tipo === "CTA") || contribuicoes.find(item => item.tipo === "FECHAMENTO") || null;
-  const destino = texto(input.article.canonical) || (texto(input.article.slug) ? `/${texto(input.article.slug)}` : "");
+  /* 2026-10-11 · o endereço do artigo pela identidade de publicação (a URL canônica completa), o mesmo da linha. */
+  const destino = extras.destino ?? (texto(input.article.canonical) || (texto(input.article.slug) ? `/${texto(input.article.slug)}` : ""));
   const unidade = radarWritingUnitOf(input);
   const { capitulos, curto } = sequencia;
   const premissa = publicavel ? publicavel.premissa : radarVideoPremise(artigoModelo);
@@ -1969,12 +1979,13 @@ function colunaRoteiro(
   );
   /* 2026-10-09 · o título parte do H1 da planta (já pela trava); os padrões são os que a amostra PERTINENTE não usa. */
   const oportunidades = (extras.oportunidadesDeTitulo || []).slice(0, 4);
-  linhas.push(`Título do vídeo: parta do título da planta${publicavel?.capa ? ` (${entreAspas(publicavel.capa)})` : ""}, com a principal reconhecível${oportunidades.length ? `; padrões de título que os vídeos pertinentes não usam (espaço para diferenciar): ${oportunidades.join(" · ")}` : ""}.`);
+  linhas.push(`Título do vídeo: parta do título da planta${publicavel?.capa ? ` (${entreAspas(publicavel.capa)})` : ""}, com a principal no começo e o gancho de dor e contraste da diretriz de comunicação humana (nunca "dicas" nem "guia")${oportunidades.length ? `; padrões de título que os vídeos pertinentes não usam (espaço para diferenciar): ${oportunidades.join(" · ")}` : ""}.`);
   const virada = publicavel?.virada ?? null;
   const ctaDaPlanta = publicavel?.ctaDaPlanta ?? null;
   linhas.push(
     `Fechamento: ${cta ? `a fala ${cta.rotulo} do especialista` : virada ? `a virada da planta — ${semPontoFinal(virada)}` : "a premissa do vídeo, retomada em uma frase"}; ${ctaDaPlanta ? `CTA da planta — ${semPontoFinal(ctaDaPlanta)} — ` : "CTA "}para ${destino ? `${aUnidade(unidade)} (${destino})` : `${aUnidade(unidade)} da marca`}, sem prometer resultado.`,
-    `Descrição: resumo em duas linhas, ${curto ? "o capítulo de cada vídeo" : `os ${capitulos.length} capítulos com tempo`}, fontes citadas e o link ${daUnidade(unidade)}${destino ? ` (${destino})` : ""}.`,
+    /* 2026-10-11 · a descrição abre pela dor e pela keyword (diretriz de comunicação humana). */
+    `Descrição: resumo em duas linhas que abre pela dor e pela keyword principal, ${curto ? "o capítulo de cada vídeo" : `os ${capitulos.length} capítulos com tempo`}, fontes citadas e o link ${daUnidade(unidade)}${destino ? ` (${destino})` : ""}.`,
     ...linhasDoVideoNoArtigo(unidade, artigoModelo, destino),
     "Não inventar depoimento, número, estudo, autor nem credencial. Fala de terceiros só citada e atribuída.",
   );
@@ -2540,6 +2551,8 @@ function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: {
       "2) O carrossel desta linha, com o texto publicável de cada lâmina (título e apoio curto) e o visual de storyboard_visual, sem instrução interna no texto da lâmina; frase listada em \"Fica fora do texto publicável\" não entra em lâmina nem legenda, e na fala só entra delimitada.",
       "Estilo visual: só o que storyboard_visual registra como observado e o que quem abrir as referências anotar; não descreva estilo de imagem que ninguém viu.",
       "Não copie títulos nem falas de concorrentes. Não invente fato, número, estudo, depoimento, autor ou credencial. Fala do especialista só a que está nesta linha, atribuída.",
+      /* 2026-10-11 · a voz da diretriz de comunicação humana (regra geral da linha de topo, fonte única). */
+      "Voz: a comunicação humana guiada pela SERP da última regra geral da linha de topo — gancho, títulos (a keyword principal no começo e o contraste com o que os vídeos do topo prometem), descrição, fala e lâminas no mesmo contraste do artigo, com um CTA só.",
     ].join("\n");
   }
   /*
@@ -2571,6 +2584,8 @@ function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: {
     "3) O carrossel desta linha, com o texto publicável de cada lâmina (título e apoio curto) e o visual de storyboard_visual, sem instrução interna no texto da lâmina; frase listada em \"Fica fora do texto publicável\" não entra em lâmina nem legenda, e na fala só entra delimitada.",
     "Estilo visual: só o que storyboard_visual registra como observado e o que quem abrir as referências anotar; não descreva estilo de imagem que ninguém viu.",
     "Não copie títulos nem falas de concorrentes. Não invente fato, número, estudo, depoimento, autor ou credencial. Fala do especialista só a que está nesta linha, atribuída.",
+      /* 2026-10-11 · a voz da diretriz de comunicação humana (regra geral da linha de topo, fonte única). */
+      "Voz: a comunicação humana guiada pela SERP da última regra geral da linha de topo — gancho, títulos (a keyword principal no começo e o contraste com o que os vídeos do topo prometem), descrição, fala e lâminas no mesmo contraste do artigo, com um CTA só.",
   ].join("\n");
 }
 
@@ -3242,9 +3257,18 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
    */
   lentesCongeladas?: RadarPortableFrozenLensesInput | null;
   lensDigests?: RadarVideoLensOrganicReading | null;
+  /**
+   * 2026-10-11 · Aditivos: a publicação do artigo, o Silo dele (o do plano da
+   * seleção) e a publicação dos membros — para a identidade de publicação
+   * (Silo, slug, URL canônica e situação) ser a mesma do CSV para escrever.
+   * Ausentes, o que o contexto de pesquisa do artigo sabe (nome do Silo e SiloPage).
+   */
+  publication?: RadarWritingPublication | null;
+  silo?: RadarSiloExportWritingContext | null;
+  siloPublications?: ReadonlyMap<string, RadarWritingPublication> | null;
 }): RadarVideoExportArticle {
   const l = leituraDaLinha(input, contexto);
-  const { p, principal, unidade, foraDoEscopo, perguntas, youtube, artigoModelo, removidasDaPlanta, trava, publicavel, sequencia, decisao, pertinentes, inteira, escolha, destino, publico, leitura } = l;
+  const { p, principal, unidade, foraDoEscopo, perguntas, youtube, artigoModelo, removidasDaPlanta, trava, publicavel, sequencia, decisao, pertinentes, inteira, escolha, destino, publico, leitura, identidade } = l;
   const abertura = publicavel.perguntaDoGancho ?? null;
   const vozAtiva = contexto.brandVoiceActive ?? contexto.brandVoice?.kind === "available";
 
@@ -3280,7 +3304,7 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
    * ficam o CTA, as regras e a lista "Fica fora do texto publicável".
    */
   const linhaDaVoz = vozAtiva ? ['Voz da marca: gancho, fala, CTA e descrição seguem a linha "Voz da marca" deste arquivo (vocabulário, o que a marca não faz e a página comercial que ela permite citar).'] : [];
-  const roteiro = primeiraQueCabe(NIVEIS_DO_ROTEIRO.map(nivel => () => [colunaRoteiro(input, p, abertura, sequencia, artigoModelo, publicavel, nivel, { decisao, oportunidadesDeTitulo: serp?.oportunidadesDeTitulo ?? [] }), ...linhaDaVoz].join("\n")));
+  const roteiro = primeiraQueCabe(NIVEIS_DO_ROTEIRO.map(nivel => () => [colunaRoteiro(input, p, abertura, sequencia, artigoModelo, publicavel, nivel, { decisao, oportunidadesDeTitulo: serp?.oportunidadesDeTitulo ?? [], destino }), ...linhaDaVoz].join("\n")));
   const concorrenciaCurta = temConcorrenciaCurta(competitiva);
   /* 2026-10-09 (correção) · o que a exclusão do ArticleDNA tirou da planta, dito uma vez e concluído (D10). */
   const notaDasExclusoes = removidasDaPlanta.length
@@ -3290,7 +3314,7 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
   const row: RadarVideoExportRow = {
     ordem: String(contexto.position),
     pode_gravar: pode,
-    tema_e_publico: colunaTema(input, p, contexto.brandVoice),
+    tema_e_publico: colunaTema(input, p, contexto.brandVoice, identidade),
     intencao_e_formato: colunaIntencao(input, p, youtube, decisao, pertinentes, inteira),
     serp_youtube: colunaSerpYoutube(p, youtube, foraDoEscopo, publico, { pertinentes, topicos: p.dna.mustCover }),
     /* 2026-10-07 · cada pergunta diz de onde vem (Pessoas também perguntam, N de M páginas, necessidade central). */
@@ -3383,7 +3407,9 @@ function leituraDaLinha(input: RadarPortableExportInput, contexto: Omit<Contexto
    */
   const exclusoesDoDna = radarWritingBlueprintExclusions(input, p);
   const lidaDaPlanta = aprovada
-    ? radarArticleBlueprintReading(aprovada.blueprint, { sources: new Set(aprovada.sources.map(item => item.id)), withoutCallInNextStep: true, ...(exclusoesDoDna ? { exclusions: exclusoesDoDna } : {}) })
+    /* 2026-10-11 · com os candidatos da planta: a âncora natural, a mesma leitura do CSV para escrever e do Redator. */
+    /* 2026-10-11b · e com a principal: a keyword no começo do SEO title e das alternativas (regra 28), a mesma leitura do CSV. */
+    ? radarArticleBlueprintReading(aprovada.blueprint, { sources: new Set(aprovada.sources.map(item => item.id)), withoutCallInNextStep: true, linkCandidates: aprovada.linkCandidates, principal: texto(p.dna.principalKeyword) || null, ...(exclusoesDoDna ? { exclusions: exclusoesDoDna } : {}) })
     : null;
   const artigoModelo = aprovada && lidaDaPlanta ? (lidaDaPlanta.blueprint === aprovada.blueprint ? aprovada : { ...aprovada, blueprint: lidaDaPlanta.blueprint }) : null;
   const removidasDaPlanta = lidaDaPlanta?.removedSections ?? [];
@@ -3423,8 +3449,14 @@ function leituraDaLinha(input: RadarPortableExportInput, contexto: Omit<Contexto
     curto: decisao.curto,
   };
   const escolha = escolhaDosCortes(sequencia, p, artigoModelo, trava);
-  const destino = texto(input.article.canonical) || (texto(input.article.slug) ? `/${texto(input.article.slug)}` : "");
-  return { p, principal, unidade, foraDoEscopo, perguntas, youtube, artigoModelo, removidasDaPlanta, trava, publicavel, sequencia, decisao, pertinentes, inteira, escolha, destino, publico, leitura };
+  /*
+   * 2026-10-11 · O ARTIGO QUE O VÍDEO LEVA, PELA IDENTIDADE DE PUBLICAÇÃO: a URL
+   * publicada (preservada) ou a planejada pelo slug no caminho do Silo — nunca
+   * só "/<slug>" quando o Silo é conhecido. A mesma função do CSV para escrever.
+   */
+  const identidade = radarWritingPublicationIdentities(input, { silo: contexto.silo ?? null, siloPublications: contexto.siloPublications ?? null, publication: contexto.publication ?? null }).article;
+  const destino = identidade.url ?? identidade.address ?? "";
+  return { p, principal, identidade, unidade, foraDoEscopo, perguntas, youtube, artigoModelo, removidasDaPlanta, trava, publicavel, sequencia, decisao, pertinentes, inteira, escolha, destino, publico, leitura };
 }
 
 export const RADAR_VIDEO_GENERAL_RULES = [
@@ -3435,6 +3467,8 @@ export const RADAR_VIDEO_GENERAL_RULES = [
   "Cada vídeo leva o público para o artigo da marca (link na descrição e no CTA).",
   /* 2026-10-02 · o vídeo do mesmo assunto também entra na página (pedido do dono). */
   "O vídeo pode fazer parte do artigo: incorporado na seção indicada em cada linha (Vídeo × artigo).",
+  /* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP (pedido do dono, Adendo G): a mesma frase da fonte única. */
+  radarHumanVoiceVideoRule(),
 ];
 
 const APRESENTADOR_E_IDENTIDADE = "Apresentador e identidade visual: em storyboard_visual de cada linha (rosto só de quem fala de fato, pela aba Especialista; a Marca não guarda paleta, tipografia nem logo).";
@@ -3512,7 +3546,8 @@ export function buildRadarVideoBrandVoiceRow(state: RadarBrandVoiceState | undef
     ...vazio,
     ordem: "Voz da marca",
     pode_gravar: [
-      `Vale para todos os vídeos deste arquivo: ${radarBrandVoiceDeliverableLabel(state.voice)}. O tema vem de cada linha; o público, a voz, o CTA e o que a marca não faz vêm desta.`,
+      /* 2026-10-11 · a precedência entre a Skill e a diretriz de comunicação humana (Adendo G), pela fonte única. */
+      `Vale para todos os vídeos deste arquivo: ${radarBrandVoiceDeliverableLabel(state.voice)}. O tema vem de cada linha; o público, a voz, o CTA e o que a marca não faz vêm desta. ${radarHumanVoiceBrandVoiceRowNote()}`,
       ...(soDoArtigo.length ? [`Fica fora desta linha (vale para o artigo, não para o vídeo): ${soDoArtigo.map(titulo).join("; ")}.`] : []),
     ].join("\n"),
     tema_e_publico: radarBrandVoiceText(fora(por.reader).filter(secao => !ehComercial.has(secao))),
@@ -3588,15 +3623,22 @@ export function radarPortableVideoExport(input: {
    * ser o do CSV para escrever. Sem plano, como antes: só os rótulos do pacote.
    */
   selectionPlan?: Pick<RadarSiloExportPlan, "files"> | null;
+  /** 2026-10-11 · Aditivo: a publicação de cada artigo (o mesmo mapa do CSV para escrever), para a identidade de publicação da linha. */
+  publications?: ReadonlyMap<string, RadarWritingPublication> | null;
 }): RadarVideoExportResult {
   /* 2026-10-09 · a planta APPROVED é obrigatória: sem ela (ou sem seção), o estado explícito, antes de montar qualquer linha. */
   const semPlanta = input.articles.filter(artigo => !radarVideoApprovedBlueprint(artigo.blueprint)?.blueprint.sections.length);
   if (semPlanta.length) return { status: "needs_article_blueprint", articleIds: [...new Set(semPlanta.map(idDoArtigo))] };
   const ativa = input.brandVoice?.kind === "available";
   const excluidosDoSilo = new Map<string, string[]>();
+  /* 2026-10-11 · o Silo de cada artigo (do plano da seleção), para a identidade de publicação. */
+  const siloDoArtigo = new Map<string, RadarSiloExportWritingContext>();
   for (const arquivo of input.selectionPlan?.files || []) {
     if (!arquivo.writing) continue;
-    for (const articleId of arquivo.articleIds) excluidosDoSilo.set(articleId, arquivo.writing.excludedTopics);
+    for (const articleId of arquivo.articleIds) {
+      excluidosDoSilo.set(articleId, arquivo.writing.excludedTopics);
+      siloDoArtigo.set(articleId, arquivo.writing);
+    }
   }
   const artigos = input.articles.map((artigo, indice) => buildRadarVideoExportArticle(artigo.entrada, {
     position: indice + 1,
@@ -3607,6 +3649,9 @@ export function radarPortableVideoExport(input: {
     ...(artigo.articleId && excluidosDoSilo.has(artigo.articleId) ? { siloExcludedTopics: excluidosDoSilo.get(artigo.articleId) } : {}),
     lentesCongeladas: artigo.lentesCongeladas ?? null,
     lensDigests: artigo.lensDigests ?? null,
+    ...(artigo.articleId && input.publications?.get(artigo.articleId) ? { publication: input.publications.get(artigo.articleId)! } : {}),
+    ...(artigo.articleId && siloDoArtigo.has(artigo.articleId) ? { silo: siloDoArtigo.get(artigo.articleId)! } : {}),
+    ...(input.publications?.size ? { siloPublications: input.publications } : {}),
   }));
   const voz = buildRadarVideoBrandVoiceRow(input.brandVoice);
   return {

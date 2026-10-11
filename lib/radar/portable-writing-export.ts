@@ -68,6 +68,21 @@ import { radarMarketCitationIsNoise, radarReaderQuestionIsNoise, radarRegistrabl
 import { radarEditorialHeadingNoiseReason, radarEditorialHeadingWithoutTemplate } from "./editorial-article-model.ts";
 /* 2026-10-09b · as exclusões que os reajustes gravam no ArticleDNA (o "Não cobrir" e a planta lida). */
 import { radarResearchContextScopeExclusions, type RadarResearchScopeExclusion } from "./article-research-context.ts";
+/* 2026-10-11 · a âncora natural (a regra em texto e os conceitos do grafo) e a identidade de publicação (Silo, slug, URL canônica, situação). */
+import { RADAR_NATURAL_ANCHOR_RULE } from "./natural-anchor-rule.ts";
+/* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP: a regra geral da linha de topo e a precedência na linha "Voz da marca". */
+import { radarHumanVoiceBrandVoiceRowNote, radarHumanVoiceWritingRule } from "./human-voice-guideline.ts";
+import { radarAnchorGraphConcepts, type RadarAnchorLedger } from "./natural-anchor.ts";
+import {
+  RADAR_PUBLICATION_PUBLISHED,
+  radarPublicationIdentity,
+  radarPublicationIdentityLines,
+  radarSiloPagePublished,
+  radarSiloPublicationIdentities,
+  type RadarPublicationIdentity,
+  type RadarSiloPublicationIdentities,
+} from "./publication-identity.ts";
+import type { RadarArticleBlueprintLinkTarget } from "./article-blueprint.ts";
 
 /**
  * ===== O EXPORT "PARA ESCREVER" — o CSV que uma pessoa ou uma IA usa para escrever =====
@@ -267,6 +282,12 @@ export type RadarWritingArticleContext = {
    * é de "como atrair um cliente"). Sem o mapa, o dono é só a principal do membro.
    */
   siloMemberKeywords?: ReadonlyMap<string, readonly string[]> | null;
+  /**
+   * 2026-10-11 · Aditivo: o livro de âncoras do arquivo (um por Silo no lote):
+   * a âncora que uma linha sugeriu para um destino não se repete, para o mesmo
+   * destino, na linha seguinte. Ausente = a variedade vale só dentro da planta.
+   */
+  anchorLedger?: RadarAnchorLedger | null;
 };
 
 export type RadarWritingExportArticle = {
@@ -898,6 +919,121 @@ function irmaosNoAr(contexto: RadarWritingArticleContext): Array<{ slug: string 
 }
 
 /*
+ * ===== 2026-10-11 · A IDENTIDADE DE PUBLICAÇÃO: Silo, slug, URL canônica e situação =====
+ *
+ * Uma função só (`radarPublicationIdentity`) para este artigo, a SiloPage e
+ * cada membro do Silo: o bloco "Publicação (para conferir e aprovar no momento de postar)" da
+ * coluna artigo, a ordem narrativa e o destino de cada link saem dela. O Silo é
+ * o do arquivo; sem ele (dossiê avulso), o que o contexto de pesquisa do artigo
+ * sabe (nome do Silo e SiloPage).
+ */
+type SiloDaIdentidade = Pick<RadarSiloExportWritingContext, "kind" | "label" | "siloPage"> & { members: ReadonlyArray<{ articleId: string; slug: string | null }> };
+
+function siloDaIdentidade(input: RadarPortableExportInput, silo: RadarSiloExportWritingContext | null | undefined): SiloDaIdentidade | null {
+  if (silo?.kind === "silo") return silo;
+  const doContexto = input.researchContext?.silo ?? null;
+  const nome = texto(doContexto?.siloName) || texto(input.article.siloName);
+  if (!nome) return null;
+  const temPagina = Boolean(texto(doContexto?.siloPageSlug) || texto(doContexto?.siloPageCanonical));
+  return {
+    kind: "silo",
+    label: nome,
+    siloPage: temPagina ? { slug: texto(doContexto?.siloPageSlug) || null, canonical: texto(doContexto?.siloPageCanonical) || null, publishedUrl: null, status: texto(doContexto?.siloPagePublicationStatus) } : null,
+    members: [],
+  };
+}
+
+export type RadarWritingPublicationIdentities = RadarSiloPublicationIdentities & { article: RadarPublicationIdentity };
+
+/** A identidade de publicação deste artigo e do Silo dele (a SiloPage e os membros), pela régua única. */
+export function radarWritingPublicationIdentities(
+  input: RadarPortableExportInput,
+  contexto: Pick<RadarWritingArticleContext, "silo" | "siloPublications" | "publication">,
+): RadarWritingPublicationIdentities {
+  const silo = siloDaIdentidade(input, contexto.silo);
+  const publicacao = contexto.publication;
+  const identidades = radarSiloPublicationIdentities({
+    silo,
+    publications: contexto.siloPublications ?? null,
+    siteUrls: [publicacao?.publishedUrl, publicacao?.canonical, input.article.canonical, input.researchContext?.silo?.siloPageCanonical],
+    extraPublications: [publicacao],
+  });
+  const article = radarPublicationIdentity({
+    slug: texto(publicacao?.slug) || texto(input.article.slug),
+    published: Boolean(publicacao?.published || input.article.publishedProtected),
+    publishedUrl: publicacao?.publishedUrl ?? null,
+    canonical: texto(publicacao?.canonical) || texto(input.article.canonical) || null,
+    silo: silo ? { label: silo.label, page: silo.siloPage ? { ...silo.siloPage, published: radarSiloPagePublished(silo.siloPage) } : null, baseUrl: identidades.siloBaseUrl } : null,
+    siteOrigin: identidades.siteOrigin,
+  });
+  return { ...identidades, article };
+}
+
+/**
+ * 2026-10-11 · OS DESTINOS DOS LINKS PELO SILO DE HOJE: cada membro (menos este
+ * artigo) e a SiloPage, com a identidade de publicação, as keywords do destino
+ * que a âncora não repete inteiras e os conceitos de âncora do grafo aprovado
+ * (arestas de saída deste artigo). Sem o Silo do arquivo, nenhum.
+ */
+function destinosDosLinks(input: RadarPortableExportInput, contexto: RadarWritingArticleContext, identidades: RadarWritingPublicationIdentities): RadarArticleBlueprintLinkTarget[] | undefined {
+  const silo = contexto.silo?.kind === "silo" ? contexto.silo : null;
+  if (!silo) return undefined;
+  const grafo = radarAnchorGraphConcepts(input.researchContext?.internalLinks?.edges);
+  const alvos: RadarArticleBlueprintLinkTarget[] = [];
+  for (const membro of silo.members) {
+    if (membro.articleId === contexto.articleId) continue;
+    const identidade = identidades.members.get(membro.articleId);
+    if (!identidade) continue;
+    const doLote = contexto.siloMemberKeywords?.get(membro.articleId) ?? null;
+    alvos.push({
+      kind: "article",
+      slug: identidade.slug ?? membro.slug,
+      labels: [rotuloDoMembro(membro), texto(membro.title)].filter(Boolean),
+      keywords: [...(doLote?.length ? doLote : [texto(membro.principalKeyword)])].map(item => texto(item)).filter(Boolean),
+      concepts: grafo.byArticleId.get(membro.articleId) ?? [],
+      identity: identidade,
+    });
+  }
+  if (identidades.siloPage) {
+    alvos.push({ kind: "siloPage", slug: identidades.siloPage.slug, labels: [silo.label], keywords: [silo.label], concepts: grafo.siloPage, identity: identidades.siloPage });
+  }
+  return alvos.length ? alvos : undefined;
+}
+
+/*
+ * 2026-10-11 · O MEMBRO NA ORDEM NARRATIVA: papel, nome, URL canônica completa
+ * e situação ("publicado" ou "novo, ainda não publicado"). O estado do membro no
+ * Radar entra só quando diz algo a quem escreve (outro Silo, não enviado, não
+ * finalizado), em português claro; "fora desta seleção" e "neste arquivo" saem.
+ */
+const ESTADO_DO_MEMBRO_EM_LINGUAGEM_CLARA: Readonly<Record<string, string>> = Object.freeze({
+  "não finalizado": "investigação ainda não finalizada no Radar",
+  "no Radar sob outro silo": "registrado no Radar em outro Silo",
+  "não enviado ao Radar": "ainda não enviado ao Radar",
+});
+
+/** 2026-10-11 · O membro sem linha no arquivo, dito em português claro (no lugar de "fora do arquivo (fora desta seleção)"). */
+export const RADAR_WRITING_ONLY_LINK_DESTINATIONS = "Os artigos sem \"←\" não têm linha neste arquivo: aparecem aqui só como destinos de link.";
+
+export const radarWritingMemberStateLine = (statusLabel: string | null | undefined): string | null =>
+  ESTADO_DO_MEMBRO_EM_LINGUAGEM_CLARA[texto(statusLabel)] ?? null;
+
+function linhaDaOrdemNarrativa(
+  membro: RadarSiloExportWritingContext["members"][number],
+  identidade: RadarPublicationIdentity | null,
+  marca: string,
+): string {
+  const endereco = identidade?.url ?? identidade?.address ?? (membro.slug ? `/${membro.slug}` : null);
+  const estado = radarWritingMemberStateLine(membro.statusLabel);
+  return [
+    `${membro.position} · ${papelLegivel(membro.role) || membro.role} · ${rotuloDoMembro(membro)}`,
+    ...(endereco ? [identidade?.url ? endereco : `${endereco} (endereço sem Silo definido)`] : []),
+    identidade?.shortSituation ?? "novo, ainda não publicado",
+    ...(estado ? [estado] : []),
+  ].join(" · ") + marca;
+}
+
+/*
  * 2026-10-09 · OS LINKS INTERNOS SÃO OS DA PLANTA. A coluna links_internos pelo
  * plano de links do pacote (o destino casado pelo Silo, a seção pela estrutura
  * legada, a distribuição pelas seções) saiu com a estrutura legada: a planta
@@ -1194,9 +1330,17 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
   const funil = legivelOuNulo(p.dna.funnel);
   const publicacao = contexto.publication;
   const publicado = Boolean(publicacao?.published || input.article.publishedProtected);
-  const slug = texto(publicacao?.slug) || texto(input.article.slug);
+  /*
+   * 2026-10-11 · NO TOPO, A PUBLICAÇÃO PARA CONFERIR ANTES DE POSTAR: Silo, URL
+   * do Silo, slug, URL canônica (a publicada, preservada, ou a planejada pelo
+   * slug no caminho do Silo) e situação. O "Slug:" solto e o canonical do novo
+   * saíram daqui: estão no bloco.
+   */
+  const identidade = radarWritingPublicationIdentities(input, contexto).article;
 
   const linhas = [
+    ...radarPublicationIdentityLines(identidade),
+    "",
     `Keyword principal: ${principal || "não resolvida no pacote"}`,
     /* 2026-10-09 · o destino da virada do Assunto (a coluna promessa legada que o dizia saiu; a planta o recebe no pedido). */
     ...(p.assunto ? [`Assunto (tronco): ${p.assunto.phrase}${p.assunto.destinationUrl ? ` — destino da virada: ${radarWritingCleanUrl(p.assunto.destinationUrl)}` : ""}`] : []),
@@ -1210,7 +1354,6 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
     ...(intencao ? [`Intenção: ${[intencao, funil].filter(Boolean).join(" · ")}`] : []),
     ...(papel ? [`Papel no Silo: ${papel}${O_QUE_O_PAPEL_PEDE[papel] ? ` — ${O_QUE_O_PAPEL_PEDE[papel]}` : ""}`] : []),
     ...(formatoLegivel(input, p.editorial) ? [`Formato: ${formatoLegivel(input, p.editorial)}`] : []),
-    ...(slug ? [`Slug: ${slug}`] : []),
   ];
 
   /*
@@ -1240,11 +1383,9 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
           : "Principal: estado desconhecido — não trocar até decisão humana",
       RADAR_WRITING_LEGACY_FAQ,
     );
-  } else if (texto(input.article.canonical)) {
-    linhas.push(`Canonical: ${texto(input.article.canonical)}`);
   }
 
-  if (contexto.siloInline) linhas.push(...siloNaLinha(contexto));
+  if (contexto.siloInline) linhas.push(...siloNaLinha(contexto, radarWritingPublicationIdentities(input, contexto)));
   if (input.authors !== undefined && input.authors !== null) linhas.push(linhaDeAutoria(input.authors, p.unidade));
   linhas.push(`Não altere: ${naoAltere(publicado, p.assunto).join("; ")}.`);
   return linhas.join("\n");
@@ -1272,19 +1413,25 @@ const linhaDeAutoria = radarWritingAuthorLine;
  * SiloPage, sem os irmãos que os links pedem. Quando a seleção cruza Silos, o
  * contexto de cada um vai na linha do próprio artigo, curto.
  */
-function siloNaLinha(contexto: RadarWritingArticleContext): string[] {
+function siloNaLinha(contexto: RadarWritingArticleContext, identidades: RadarWritingPublicationIdentities | null = null): string[] {
   const silo = contexto.silo;
   if (!silo || silo.kind !== "silo") return ["Silo: sem silo resolvido no Radar; escreva sem pressupor ordem narrativa nem irmãos."];
   const pagina = silo.siloPage;
-  const endereco = pagina ? pagina.publishedUrl || pagina.canonical || (pagina.slug ? `/${pagina.slug}` : null) : null;
+  const endereco = identidades?.siloPage?.url ?? (pagina ? pagina.publishedUrl || pagina.canonical || (pagina.slug ? `/${pagina.slug}` : null) : null);
   return [
     /* 2026-10-08 · D10: o estado do Silo dito sem "rascunho" (a composição continua podendo mudar). */
     `Silo: ${silo.label}${silo.draft ? " (em formação no Arquiteto: a composição pode mudar)" : ""}`,
     ...(util(silo.centralEntity) ? [`Tema central do Silo: ${silo.centralEntity}`] : []),
     ...(pagina ? [`SiloPage: ${endereco || "endereço não registrado"} (${pagina.status})`] : []),
     ...(silo.excludedTopics.length ? [`Fora do Silo (não cobrir): ${silo.excludedTopics.join(" · ")}`] : []),
-    "Ordem narrativa do Silo:",
-    ...silo.members.map(membro => `${membro.position} · ${papelLegivel(membro.role) || membro.role} · ${rotuloDoMembro(membro)}${membro.slug ? ` · /${membro.slug}` : ""}${membro.articleId === contexto.articleId ? " · ESTE ARTIGO" : membro.inThisFile ? " · neste arquivo" : ` · ${membro.statusLabel}`}`),
+    /* 2026-10-11 · cada membro com a URL canônica completa e a situação; este artigo leva "← este artigo". */
+    "Ordem narrativa do Silo (papel · artigo · URL canônica · situação):",
+    ...silo.members.map(membro => linhaDaOrdemNarrativa(
+      membro,
+      membro.articleId === contexto.articleId && identidades ? identidades.article : identidades?.members.get(membro.articleId) ?? null,
+      membro.articleId === contexto.articleId ? " ← este artigo" : membro.inThisFile ? " ← linha deste arquivo" : "",
+    )),
+    ...(silo.members.some(membro => !membro.inThisFile && membro.articleId !== contexto.articleId) ? [RADAR_WRITING_ONLY_LINK_DESTINATIONS] : []),
   ];
 }
 
@@ -2910,7 +3057,7 @@ function colunaPrompt(contexto: RadarWritingArticleContext, especificas: readonl
   }
   const topo = contexto.topRowLabel;
   return [
-    `Escreva em português do Brasil ${formas.o} ${unidade.noun} descrit${formas.terminacao} nesta linha, com as regras gerais da linha "${topo}" deste arquivo (${contexto.brandVoice ? `leve as três linhas juntas para a IA: "${topo}", "Voz da marca" e esta` : "leve as duas linhas juntas para a IA"}). Em resumo: siga o artigo-modelo da coluna estrutura (seções, medidas, links e imagens da planta), e a redação é de quem escreve; keyword principal no H1, no primeiro parágrafo e com naturalidade no corpo; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown${unidade.editorial ? ", com a data de atualização visível" : ""}.`,
+    `Escreva em português do Brasil ${formas.o} ${unidade.noun} descrit${formas.terminacao} nesta linha, com as regras gerais da linha "${topo}" deste arquivo (${contexto.brandVoice ? `leve as três linhas juntas para a IA: "${topo}", "Voz da marca" e esta` : "leve as duas linhas juntas para a IA"}). Em resumo: siga o artigo-modelo da coluna estrutura (seções, medidas, links e imagens da planta), e a redação é de quem escreve, na voz humana das regras gerais; keyword principal no começo do H1, na primeira frase, no primeiro H2 e com naturalidade no corpo; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown${unidade.editorial ? ", com a data de atualização visível" : ""}.`,
     ...(especificas.length ? [`${formas.neste} ${unidade.noun}:`, ...especificas.map(item => `- ${comPontoFinal(item)}`)] : []),
     /* 2026-10-02 · D10 (decisão do dono): o prompt sai fechado — sem "proposta" nem "aguardando aprovação". */
   ].join("\n");
@@ -3376,6 +3523,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
    * para marcar a frase que só entra com fonte e o destino de cada H2.
    */
   if (contexto.blueprint && !soIdentidade) {
+    const alvosDosLinks = destinosDosLinks(input, contexto, radarWritingPublicationIdentities(input, contexto));
     Object.assign(linha, radarArticleBlueprintColumns(contexto.blueprint, videosAoVivo, { slug: texto(publicacao?.slug) || texto(input.article.slug), publishedUrl: texto(publicacao?.publishedUrl) }, radarWritingDomainLenses(p.lentes), {
       /* 2026-10-09b · as exclusões dos reajustes no ArticleDNA: a seção da planta que as cobre sai, com a nota concluída. */
       ...(exclusoesDoDna.length ? { exclusions: { items: exclusoesDoDna, core: keywordsDoArtigo(p) } } : {}),
@@ -3386,6 +3534,13 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
       ...(publicado ? { currentH2: publicacao?.currentStructure?.h2 ?? null, keywords: keywordsDoArtigo(p) } : {}),
       /* 2026-10-08 (correção) · F1 · os irmãos no ar (do mapa de publicações do lote): o destino planejado da planta sai publicado. */
       publishedMembers: irmaosNoAr(contexto),
+      /*
+       * 2026-10-11 · os destinos pelo Silo de hoje (URL canônica e situação pela
+       * identidade de publicação, keywords e conceitos de âncora do grafo) e o
+       * livro de âncoras do arquivo: a âncora natural, variando entre as linhas.
+       */
+      ...(alvosDosLinks ? { linkTargets: alvosDosLinks } : {}),
+      ...(contexto.anchorLedger ? { anchorLedger: contexto.anchorLedger } : {}),
       /*
        * 2026-10-08 (correção) · F2 · UM CTA SÓ TAMBÉM NA PLANTA: a chamada do
        * especialista (quando ele é CTA) ou a da planta; o "Próximo passo" vira a
@@ -3440,10 +3595,13 @@ export const RADAR_WRITING_GENERAL_RULES = [
   "Conflito entre fonte factual e o que o mercado repete fica escrito dos dois lados.",
   "Cada seção abre respondendo a pergunta dela, nomeando o termo, de forma compreensível fora da página.",
   "Imagens: uma capa e dois ou três respiros, no ponto indicado em cada artigo. Tom visual: editorial e direto, fotografia ou ilustração de contexto real; a imagem serve à compreensão, não à decoração.",
-  "Links internos: só os indicados em cada artigo (L1, L2…), com a âncora e o destino dados; sem criar outros.",
+  /* 2026-10-11 · a âncora natural (a mesma frase do pedido, do Redator e do MCP) e o destino pela URL canônica do slug. */
+  `Links internos: só os indicados em cada artigo (L1, L2…), sem criar outros, cada um para a URL canônica do destino. ${RADAR_NATURAL_ANCHOR_RULE}`,
   /* 2026-10-09 · a estrutura é a do artigo-modelo (regra do dono: o fundamento único); a redação continua de quem escreve. */
   "A estrutura de cada artigo é a do artigo-modelo da SERP (coluna estrutura): siga as seções, as medidas, os links e as imagens da planta; a redação é de quem escreve.",
   "Ler não é mudar: se o que você apurar divergir da definição do artigo, registre a divergência para decisão humana; o texto não redefine keyword, intenção nem Silo.",
+  /* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP (pedido do dono, Adendo G): a mesma frase da fonte única. */
+  radarHumanVoiceWritingRule(),
 ] as const;
 
 export type RadarWritingTopRowInput = {
@@ -3488,18 +3646,32 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
   const comPaginas = artigos.some(item => Boolean(item.unitNoun));
   const paraAsUnidades = (frase: string) => (comPaginas ? frase.replace(/\bcada artigo\b/g, "cada artigo ou página").replace(/\bdo artigo\b/g, "do artigo ou da página") : frase);
 
+  /*
+   * 2026-10-11 · O ARQUIVO DITO EM PORTUGUÊS CLARO. "Com ressalva: 1 de 8
+   * artigos do Silo estão neste arquivo. - fora do arquivo: … (fora desta
+   * seleção)" não dizia nada útil a quem escreve: o arquivo parcial não é
+   * ressalva (os outros artigos são destinos de link, com a URL canônica e a
+   * situação na ordem narrativa). Ressalva continua sendo o que pede cuidado:
+   * artigo bloqueado, Silo em formação, autoria fora do arquivo ou tema de saúde.
+   * O estado do membro que diz algo (outro Silo, não enviado, não finalizado)
+   * vai em português claro.
+   */
   const resumo = silo
-    ? `${artigos.length} de ${silo.members.length} artigos do Silo estão neste arquivo`
+    ? artigos.length >= silo.members.length
+      ? `Este arquivo traz os ${silo.members.length} artigos do Silo`
+      : `Este arquivo traz ${artigos.length} dos ${silo.members.length} artigos do Silo; os outros aparecem na ordem narrativa como destinos de link, com a URL canônica e a situação de cada um`
     : `${artigos.length} artigo(s) neste arquivo`;
+  const comEstado = fora.map(membro => ({ membro, estado: radarWritingMemberStateLine(membro.statusLabel) })).filter(item => item.estado);
   const motivos = [
     `${resumo}${bloqueados.length ? `; ${bloqueados.length} com bloqueio (${bloqueados.slice(0, 4).map(item => entreAspas(item.label)).join(", ")})` : ""}`,
-    ...(fora.length ? [`fora do arquivo: ${fora.slice(0, 6).map(membro => `${entreAspas(rotuloDoMembro(membro))} (${membro.statusLabel})`).join(", ")}`] : []),
+    ...(comEstado.length ? [`na ordem narrativa: ${comEstado.slice(0, 6).map(({ membro, estado }) => `${entreAspas(rotuloDoMembro(membro))} (${estado})`).join(", ")}`] : []),
     input.authorsKnown
       ? paraAsUnidades(`autoria: cada artigo diz quem assina (o especialista da aba Especialista); revisor não faz parte deste arquivo${saude ? " (há tema de saúde: autoria e revisão reais são exigidas)" : ""}`)
       : `${input.brandVoice?.kind === "available" ? "autor e revisor" : "voz da marca, autor e revisor"} não fazem parte deste arquivo: defina-os antes de publicar${saude ? " (há tema de saúde: autoria e revisão reais são exigidas)" : ""}`,
     ...(silo?.draft ? ["o Silo está em formação no Arquiteto: a composição pode mudar"] : []),
   ];
-  const verdict: RadarWritingVerdict = artigos.length && bloqueados.length === artigos.length ? "Não" : "Com ressalva";
+  const comRessalva = bloqueados.length > 0 || Boolean(silo?.draft) || !input.authorsKnown || saude;
+  const verdict: RadarWritingVerdict = artigos.length && bloqueados.length === artigos.length ? "Não" : comRessalva ? "Com ressalva" : "Sim";
   const pode = [
     `${verdict}: ${comPontoFinal(motivos[0])}`,
     ...motivos.slice(1).map(item => `- ${comPontoFinal(item)}`),
@@ -3507,7 +3679,10 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
 
   const site = origemDe(input.siteUrl);
   const pagina = silo?.siloPage || null;
-  const enderecoDaPagina = pagina ? pagina.publishedUrl || pagina.canonical || (pagina.slug ? `/${pagina.slug}` : null) : null;
+  /* 2026-10-11 · a SiloPage e cada membro pela identidade de publicação (URL canônica completa e situação). */
+  const identidades = radarSiloPublicationIdentities({ silo, publications: input.memberPublications ?? null, siteUrls: [input.siteUrl] });
+  const enderecoDaPagina = identidades.siloPage?.url ?? (pagina ? pagina.publishedUrl || pagina.canonical || (pagina.slug ? `/${pagina.slug}` : null) : null);
+  const umArtigoSo = artigos.length === 1;
   const artigo = silo
     ? [
       `Silo: ${silo.label}`,
@@ -3519,12 +3694,20 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
       ...(silo.includedTopics.length ? [`Tópicos incluídos: ${silo.includedTopics.join(" · ")}`] : []),
       ...(silo.excludedTopics.length ? [`Fora do Silo (não cobrir): ${silo.excludedTopics.join(" · ")}`] : []),
       ...(util(silo.boundary) ? [`Fronteira: ${comPontoFinal(silo.boundary || "")}`] : []),
-      "Ordem narrativa:",
+      /*
+       * 2026-10-11 · CADA MEMBRO COM A URL CANÔNICA COMPLETA E A SITUAÇÃO: o slug
+       * solto ("/qualificados") e "fora do arquivo (fora desta seleção)" saíram.
+       * O artigo que tem linha neste arquivo leva "← este artigo" (ou "← linha
+       * deste arquivo", com mais de uma linha); os outros são destinos de link.
+       */
+      "Ordem narrativa (papel · artigo · URL canônica · situação):",
       ...silo.members.map(membro => {
-        const publicado = artigos.find(item => radarWritingCompareKey(item.label) === radarWritingCompareKey(membro.principalKeyword))?.published
-          || Boolean(input.memberPublications?.get(membro.articleId)?.published);
-        return `${membro.position} · ${papelLegivel(membro.role) || membro.role} · ${rotuloDoMembro(membro)}${membro.slug ? ` · /${membro.slug}` : ""} · ${membro.inThisFile ? "neste arquivo" : `fora do arquivo (${membro.statusLabel})`}${publicado ? " · publicado" : ""}`;
+        const publicadoNaLinha = artigos.find(item => radarWritingCompareKey(item.label) === radarWritingCompareKey(membro.principalKeyword))?.published;
+        const lida = identidades.members.get(membro.articleId) ?? null;
+        const identidade = lida && publicadoNaLinha && !lida.published ? { ...lida, published: true, shortSituation: "publicado", situation: RADAR_PUBLICATION_PUBLISHED } : lida;
+        return linhaDaOrdemNarrativa(membro, identidade, membro.inThisFile ? (umArtigoSo ? " ← este artigo" : " ← linha deste arquivo") : "");
       }),
+      ...(silo.members.some(membro => !membro.inThisFile) ? [RADAR_WRITING_ONLY_LINK_DESTINATIONS] : []),
     ].join("\n")
     : [
       input.silo?.kind === "no_silo"
@@ -3588,7 +3771,8 @@ export function buildRadarWritingBrandVoiceRow(state: RadarBrandVoiceState | und
   /* 2026-10-08 · C1 · D10: "Versão 1 da Skill de voz, corrente na Marca." — o estado de tela ("em rascunho") fica nas telas do Radar e da Marca. */
   return finalizarLinha({
     ordem: "Voz da marca",
-    pode_escrever: `Vale para todas as linhas deste arquivo: ${radarBrandVoiceDeliverableLabel(voz)}. O dossiê de cada artigo decide o assunto; esta linha decide a forma, o CTA e o que a marca não faz. Em conflito, registre a divergência para decisão humana.`,
+    /* 2026-10-11 · a precedência entre a Skill e a diretriz de comunicação humana (Adendo G), pela fonte única. */
+    pode_escrever: `Vale para todas as linhas deste arquivo: ${radarBrandVoiceDeliverableLabel(voz)}. O dossiê de cada artigo decide o assunto; esta linha decide a forma, o CTA e o que a marca não faz. ${radarHumanVoiceBrandVoiceRowNote()} Em conflito, registre a divergência para decisão humana.`,
     artigo: `${voz.title || voz.name}\nVersão ${voz.version} da Skill de voz, ${radarBrandVoiceDeliverableStatusLabel(voz.status)} na Marca.`,
     promessa_e_leitor: radarBrandVoiceText(por.reader),
     titulo_e_seo: radarBrandVoiceText(por.title),

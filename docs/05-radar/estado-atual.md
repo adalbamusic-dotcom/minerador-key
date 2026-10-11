@@ -1,5 +1,150 @@
 # Estado atual — Radar
 
+## Comunicação humana guiada pela SERP — 2026-10-11
+
+**Verificado no código e confirmado por teste (fixtures do caso real "como atrair um cliente"; PROVIDER_CALLS = 0,
+AI_CALLS = 0). Validado manualmente: não.** Pedido do dono com dois documentos dele ("Diretrizes de comunicação
+humana" e "Visão estratégica muito forte sobre a apatia dos conteúdos gerados por IA") e as observações do
+Guardião de SEO do site dele. Contrato, precedência e limites: Adendo G de
+`docs/05-radar/sdd-diretriz-editorial-pela-serp-2026-10-02.md`; definição para humanos:
+`docs/compartilhado/diretriz-de-comunicacao-humana.md`. Sem schema novo, sem migration, sem escrita no banco; a
+Skill de voz da Marca não foi editada; o Arquiteto não foi tocado.
+
+- **Uma fonte só:** `lib/radar/human-voice-guideline.ts` (`RADAR_HUMAN_VOICE_GUIDELINE_VERSION = "2026-10-11"`): 9
+  regras de voz e 8 do que a SERP guia na página, cada uma com o que é, como aplicar e exemplo bom × ruim; o núcleo
+  (`RADAR_HUMAN_VOICE_CORE`), a precedência e o resumo de título, meta e CTA; as funções que montam o texto do
+  pedido, da linha "Silo", da linha "Voz da marca", do Redator, do vídeo e do catálogo; e as conferências puras
+  (isca genérica, keyword no começo, keyword cedo na meta, recorte forte no H2, troca das metades do título).
+- **Precedência:** a SERP manda na substância (intenção, tópicos, perguntas, cobertura, medidas, formato); a
+  diretriz, na voz. A provocação mira a situação, a receita, o mercado ou o "algoritmo", nunca a leitora. Onde a
+  Skill de voz suaviza o tom, vale a diretriz; onde ela protege fato, oferta, preço, credencial ou a dignidade da
+  leitora, vale a Skill. A trava de fonte e o D10 não mudaram. Consciência por extenso: abertura no nível 3 (quem
+  já tentou posts, feed, anúncio e agência), virada e fechamento no nível 2 (a busca orgânica explicada sem sigla).
+- **Erro proposital: desligado** (`RADAR_HUMAN_VOICE_INTENTIONAL_ERRORS = false`); a naturalidade vem da fala.
+  Decisão a confirmar com o dono.
+- **Artigo-modelo:** `RADAR_ARTICLE_BLUEPRINT_RULES_VERSION = "2026-10-11b"`. Pedido: regra 3 (H1 começa pela
+  principal), 16 (de 3 a 6 seções), 27 (voz) e 28 (título, meta, primeiro H2, H2, autoridade local, fechamento em 4
+  tempos, imagens); o formato pede 2 alternativas. Conferência: notas que pedem ação para keyword fora do começo do
+  H1 e do SEO title, isca genérica, meta sem a keyword nos primeiros 60 caracteres, menos de 3 opções, primeiro H2
+  sem a keyword e mais de 6 H2; correção sem IA da forma "A: keyword…" no SEO title e nas alternativas. O aviso da
+  tela diz o que 2026-10-11b acrescenta às plantas de 2026-10-11 e anteriores; a planta aprovada continua valendo.
+- **Leitura compartilhada (planta gravada):** com a principal (`principal?`, aditivo), a mesma troca das metades; a
+  Regra 8 do Guia (`radarArticleBlueprintH2Merges`, resultado `h2Merges`, nunca gravado) decide qual seção entra
+  como H3 de qual, sem mexer nas seções (links, imagens, mapa da página e Redator intactos). Caso real de 7 H2: "Como
+  conquistar clientes com experiência e fidelização?" entra como H3 de "Como conseguir mais clientes com canais e
+  presença?".
+- **CSV "Para escrever":** regra geral 12 da linha de topo (o "Não altere" passa a 13); linha "Voz da marca" com a
+  precedência; `titulo_e_seo` com "Título pela SERP" (3 opções), os ajustes concluídos (no caso real: "guia prático"
+  na alternativa 1 e no SEO title, "descubra" na meta), o "Gancho pela SERP" (perguntas P e buscas B para a dor;
+  títulos S do topo para o contraste) e a regra da meta; `estrutura` com a seção juntada marcada "H3 do H2 acima",
+  a medida "6 H2 (Regra 8: …)" e o bloco "Voz e SEO pela SERP" antes da lista de afirmações; `plano_visual` com a
+  capa obrigatória e a imagem no corpo quando faltam; prompt da linha com a voz humana e a keyword no começo do H1,
+  na primeira frase e no primeiro H2. Técnico (`radarPortableExportBlueprintOf`) pela mesma leitura.
+- **CSV de vídeo:** regra geral (`radarHumanVoiceVideoRule`), linha "Voz da marca" com a precedência, título do
+  vídeo com a principal no começo e o contraste, descrição pela dor e pela keyword, linha "Voz" no prompt.
+- **MCP e catálogo:** `radarHumanVoiceCatalogNote` em `radar.export_for_writing` (AGENTS §17.1); instruções de
+  escrita do servidor com `radarHumanVoiceRedatorRule`; `get_article_for_writing` e `get_video_material` entregam os
+  mesmos CSVs.
+- **Arquivos:** novos `lib/radar/human-voice-guideline.ts`, `docs/compartilhado/diretriz-de-comunicacao-humana.md`,
+  `tests/radar-voz-humana-serp-2026-10-11.test.mts` (19 testes); alterados `lib/radar/article-blueprint.ts`,
+  `lib/radar/portable-writing-export.ts`, `lib/radar/portable-video-export.ts`, `lib/radar/portable-export-batch.ts`,
+  `lib/agent/platform-catalog.ts`, `app/api/mcp/redator/route.ts`, os do Redator (seção de mesma data em
+  `docs/07-redator/estado-atual.md`), a SDD (Adendo G) e os testes que fixavam o texto antigo (versão das regras e
+  da leitura, aviso, plano visual só com a capa, snapshot F4 — refeito depois de provar que, sem o que a diretriz
+  acrescenta, os seis hashes voltam aos de antes). Consumidores preservados: opções e campos só aditivos.
+- **Testes:** `npm run test:radar` 3.432 (3.431 pass, 0 fail, 1 skipped); `npm run test:redator` 357/357;
+  `npm run test:agent` 73/73; `npm run test:arquiteto` 2.737/2.737; `npm run test:editorial` 168/172 (as 4 falhas
+  antigas); `tsc` só com os 2 erros antigos de `.next/types/validator.ts`; eslint sem erro nos tocados; `git diff
+  --check` limpo. `npm run test:redator:mcp` 149/150: a falha é da âncora natural de 2026-10-11 ("rotina de skin
+  care" → "Rotina de skin" em `tests/redator-artigo-modelo-e-voz.test.mts`), anterior a esta rodada.
+- **Limites:** as conferências leem palavras, não sentido; a voz nos campos da planta gravada só muda organizando
+  de novo (até 2 chamadas de IA, decisão do dono); a Regra 8 conta só as seções da planta (H2 publicado mantido pelo
+  mapa da atualização soma); a trava de fonte não pega "proíbe", "bloqueia" nem "praticamente impossível" sobre
+  plataforma (o exemplo do dono "no Google, tráfego pago para estética é praticamente impossível" passa sem marca);
+  o CSV de vídeo não aplica a Regra 8 aos capítulos.
+
+## Âncora natural e identidade de publicação — 2026-10-11
+
+**Correção do recorte (2026-10-11c, verificado no código e confirmado por teste; validado manualmente: não):** o recorte
+da âncora não corta mais o rótulo pela primeira ou pela última palavra quando ele tem preposição ("rotina de skin
+care" virava "rotina de skin"; agora sai o núcleo "rotina"), e "<sujeito> não <predicado>" sai pelo sujeito
+("Instagram não traz pacientes" → "Instagram", não mais "não traz pacientes"). Nome composto sem preposição
+continua perdendo o qualificador do fim ("skin care nivea" → "skin care"); se esse recorte já leva a outro destino,
+sai o qualificador ("noturno"). Snapshot F4 refeito com prova: com a régua anterior o CSV volta ao hash antigo; a
+única diferença é a âncora L3. test:redator:mcp volta a 150/150.
+
+
+**Verificado no código e confirmado por teste (fixtures que imitam o CSV real; PROVIDER_CALLS = 0, AI_CALLS = 0).
+Validado manualmente: não.** Nada reexportado: os CSVs reais o dono reexporta. Sem schema novo, sem migration, sem
+escrita no banco. O Arquiteto (grafo e DNAs) é só lido.
+
+- **Caso real:** o CSV "Para escrever" de "como atrair um cliente" (11/10) mandava "Aplique somente estes 9 link(s),
+  com a âncora indicada", e cada L trazia a keyword principal INTEIRA do destino; o texto saiu "A comparação de
+  [tráfego pago vs orgânico para clínica de estética](…)". A ordem narrativa mostrava só "/qualificados" e
+  "/como-captar-um-cliente" com "fora do arquivo (fora desta seleção)"; o destino novo saía sem o caminho do Silo; o
+  artigo novo não dizia o canonical.
+- **Âncora natural — uma régua só** (`lib/radar/natural-anchor.ts`, `radarNaturalAnchor({ anchor, targetLabel,
+  targetKeywords, graphConcepts, usedAnchors, takenAnchors })`; a frase da regra em `lib/radar/natural-anchor-rule.ts`,
+  `RADAR_NATURAL_ANCHOR_RULE` e `RADAR_NATURAL_ANCHOR_PROMPT_RULE`): a âncora é um trecho natural da ideia do destino,
+  nunca a keyword principal inteira dele (comparada por `radarWritingCompareKey`, palavra a palavra no singular) nem
+  frase que a contenha inteira com 4 palavras ou mais; varia (não repete para o mesmo destino em outra seção nem em
+  outro artigo do Silo) e não leva a dois destinos. A troca, em ordem: o conceito de âncora do grafo aprovado para o
+  destino (só arestas de SAÍDA deste artigo, `radarAnchorGraphConcepts`; recortado quando traz a keyword inteira), a
+  própria âncora recortada, o recorte do rótulo (sem interrogativo no começo e sem "para <público>"; "X sem Y" vira
+  "X" ou "sem Y"). Resultados reais: "tráfego pago vs orgânico para clínica de estética" → "tráfego pago vs orgânico";
+  "promoções para estética" → "promoções"; "como captar um cliente" → "captar um cliente"; "como gerar leads
+  qualificados" (Pilar "leads qualificados") → "gerar leads qualificados"; "campanhas de marketing para clínica de
+  estética sem anúncios" → "campanhas de marketing sem anúncios"; "Leads sem Tráfego Pago" (SiloPage) → "sem tráfego
+  pago". A página da marca (link do CTA) segue com a âncora do CTA.
+- **Onde vale:** pedido do artigo-modelo (regra 6 nova; cada candidato K leva `anchorConcepts` e `url`, aditivos;
+  regras `RADAR_ARTICLE_BLUEPRINT_RULES_VERSION = "2026-10-11"`, com aviso próprio para as plantas de 09b — a planta
+  aprovada não é desligada); conferência da planta nova (`radarSanitizeArticleBlueprint`, nota de correção, não
+  pendência); leitura compartilhada da planta gravada (`radarArticleBlueprintReading` com `linkCandidates`;
+  `radarArticleBlueprintPayloadReading` os passa sozinha), sem mudar payload nem hash; CSV "Para escrever" (com os
+  destinos do Silo e o livro de âncoras do arquivo, `RadarAnchorLedger`, um por Silo no lote); CSV de vídeo e Redator
+  pela mesma leitura; MCP pelo mesmo arquivo.
+- **Coluna links_internos:** o cabeçalho diz a regra (a mesma frase do Redator e do MCP) e que só os L indicados
+  entram; cada L traz "âncora sugerida", "outras formulações" quando o grafo as dá, e a URL canônica do destino; o
+  destino novo diz "novo, ainda não publicado: o link entra quando o destino estiver no ar". A estrutura diz "Link
+  interno Ln: âncora sugerida …". A regra geral 9 da linha "Silo" diz a mesma regra.
+- **Identidade de publicação — uma função só** (`lib/radar/publication-identity.ts`, `radarPublicationIdentity` e
+  `radarSiloPublicationIdentities`): Silo, URL do Silo, slug, URL canônica e situação. Publicado: a URL publicada ou o
+  canonical gravado, preservados (o gravado vence o calculado). Novo: o canonical gravado; senão <URL da SiloPage>/<slug>;
+  sem SiloPage com endereço, o caminho do Silo lido dos irmãos já publicados (`radarSiloBaseFromPublished`); sem ele,
+  <origem do site>/<slug>; sem nada, só o slug com "endereço sem Silo definido".
+- **No CSV:** a coluna artigo abre com o bloco "Publicação (para conferir e aprovar no momento de postar)" (Silo · URL
+  do Silo · Slug · URL canônica · Situação); o "Slug:" solto e o canonical do novo saíram de lá. A ordem narrativa (no
+  topo e na linha, quando a seleção cruza Silos) traz papel, nome, URL canônica completa e situação de cada membro,
+  com "← este artigo"; "fora do arquivo", "fora desta seleção" e "neste arquivo" saíram; os estados do Radar que dizem
+  algo vão em português claro ("ainda não enviado ao Radar", "registrado no Radar em outro Silo", "investigação ainda
+  não finalizada no Radar"). A linha "Silo" diz "Este arquivo traz N dos M artigos do Silo; os outros aparecem na
+  ordem narrativa como destinos de link…" e só é "Com ressalva" com artigo bloqueado, Silo em formação, autoria fora
+  do arquivo ou tema de saúde (senão "Sim").
+- **Desvio do texto pedido:** o bloco se chama "Publicação (para conferir e aprovar no momento de postar)", e não
+  "(conferir antes de postar)", porque "conferir antes" é espera proibida pelo D10 desde 2026-10-08 (as varreduras
+  antigas a recusam).
+- **CSV de vídeo:** `tema_e_publico` traz o mesmo bloco ("Artigo da marca que o vídeo leva:"); a descrição e o CTA
+  levam a mesma URL canônica (a rota e o MCP passam as publicações ao vídeo).
+- **Arquivos:** novos `lib/radar/natural-anchor.ts`, `lib/radar/natural-anchor-rule.ts`,
+  `lib/radar/publication-identity.ts`, `tests/radar-ancora-natural-e-slug-2026-10-11.test.mts` (18 testes); alterados
+  `lib/radar/article-blueprint.ts`, `lib/radar/portable-writing-export.ts`, `lib/radar/portable-writing-batch.ts`,
+  `lib/radar/portable-video-export.ts`, `lib/radar/portable-export-batch.ts`, `app/api/editorial/radar-export/route.ts`,
+  `lib/server/radar-mcp-material.ts`, `lib/agent/platform-catalog.ts`, `app/api/mcp/redator/route.ts` e os do Redator
+  (`docs/07-redator/estado-atual.md`). Testes antigos atualizados para o comportamento novo (sem apagar cobertura):
+  formato "âncora sugerida", destino novo pela URL canônica, ordem narrativa, versão das regras e snapshot F4.4.
+- **Consumidores preservados:** tipos só com campos opcionais (`anchorConcepts`, `url` no candidato; `linkTargets`,
+  `anchorLedger` nas opções das colunas; `anchorLedger` no contexto da linha; `publication`, `silo`,
+  `siloPublications` no vídeo; `publications` no lote de vídeo); sem eles, as colunas usam o candidato gravado e o
+  prefixo da URL publicada deste artigo, como antes. `RADAR_SILO_MEMBER_STATUS_LABEL` ("fora desta seleção") não mudou:
+  continua na tela e no CSV técnico; o "Para escrever" não o imprime mais.
+- **Testes:** `npm run test:radar` 3413 (3412 passam, 1 pulado); `test:redator` 357; `test:agent` 73;
+  `test:arquiteto` 2737; `test:editorial` só as 4 falhas antigas; `tsc` só os 2 erros antigos de
+  `.next/types/validator.ts`; eslint nos tocados e `git diff --check` limpos.
+- **Limitações:** o Redator e o MCP do Redator leem a planta gravada sem o grafo nem o Silo de hoje: a planta antiga
+  sai com o recorte da própria âncora ou do rótulo (no caso real, igual ao CSV); a planta nova (2026-10-11) leva os
+  conceitos e a URL no candidato. O bloco "Publicação" do próprio artigo não foi levado aos fundamentos do Redator
+  (exige ler SiloDNA/SiloPage no servidor do Redator).
+
 ## Lista do Radar e importação do Arquiteto — 2026-10-09 (correção em produção)
 
 **Verificado no código, confirmado por teste e medido no banco (leitura só de dados, autorizada pelo dono). Validado

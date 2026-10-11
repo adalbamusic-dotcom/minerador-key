@@ -198,9 +198,11 @@ test("A · a linha de topo do silo: ordem narrativa inteira, faltas ditas uma ve
   const topo = dados[0];
   assert.match(topo.artigo, /^Silo: Cuidados com a Pele/);
   assert.match(topo.artigo, /SiloPage: https:\/\/careglow\.com\.br\/cuidados-com-a-pele \(nova, ainda não publicada\)/);
-  assert.match(topo.artigo, /3 · Suporte · máscara facial · \/mascara-facial · fora do arquivo \(não enviado ao Radar\)/,
+  /* 2026-10-11 · cada membro com a URL canônica completa e a situação; o estado no Radar em português claro; "fora do arquivo" saiu. */
+  assert.match(topo.artigo, /^3 · Suporte · máscara facial · https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/mascara-facial · novo, ainda não publicado · ainda não enviado ao Radar$/m,
     "o irmão fora do arquivo precisa estar na ordem, para os links resolverem");
-  assert.match(topo.pode_escrever, /^Com ressalva: 3 de 4 artigos do Silo estão neste arquivo; 2 com bloqueio \("skin care nivea", "skin care noturno"\)\./);
+  assert.doesNotMatch(topo.artigo, /fora do arquivo|fora desta seleção/);
+  assert.match(topo.pode_escrever, /^Com ressalva: Este arquivo traz 3 dos 4 artigos do Silo; os outros aparecem na ordem narrativa como destinos de link, com a URL canônica e a situação de cada um; 2 com bloqueio \("skin care nivea", "skin care noturno"\)\./);
   assert.match(topo.pode_escrever, /voz da marca, autor e revisor não fazem parte deste arquivo/);
   assert.match(topo.promessa_e_leitor, /^Marca: site careglow\.com\.br\./);
   assert.equal(/Pendente/i.test(topo.promessa_e_leitor), false, "o público 'Pendente de enriquecimento' atravessou");
@@ -476,12 +478,13 @@ test("G · plano visual: o da planta — uma capa e até três respiros, e ALT d
  */
 test("H · links pelo silo, pela planta: destino pelo slug do irmão, SiloPage, e o rótulo L aparece na seção", () => {
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
-  assert.match(pilar.links_internos, /^Aplique somente estes 4 link\(s\), com a âncora indicada/);
-  assert.match(pilar.links_internos, /L1 · âncora "skin care nivea" → Suporte "skin care nivea" → \/skin-care-nivea \(planejado, ainda não publicado\) · onde: seção "/);
-  assert.match(pilar.links_internos, /âncora "skin care noturno" → Suporte "skin care noturno" → \/skin-care-noturno/);
-  assert.match(pilar.links_internos, /âncora "Cuidados com a Pele" → SiloPage "Cuidados com a Pele" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele/, "a SiloPage não repete o papel no nome");
+  /* 2026-10-11 · âncora sugerida (recorte natural, nunca a keyword inteira do destino, e nunca a mesma para dois destinos) e a URL canônica pelo slug no caminho do Silo. */
+  assert.match(pilar.links_internos, /^Aplique somente estes 4 link\(s\) \(L1, L2…\), sem criar outros\. A âncora de cada link interno é um trecho natural/);
+  assert.match(pilar.links_internos, /L1 · âncora sugerida "skin care" → Suporte "skin care nivea" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/skin-care-nivea \(novo, ainda não publicado: o link entra quando o destino estiver no ar\) · onde: seção "/);
+  assert.match(pilar.links_internos, /âncora sugerida "(?!skin care noturno"|skin care")[^"]+" → Suporte "skin care noturno" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/skin-care-noturno/);
+  assert.match(pilar.links_internos, /âncora sugerida "(?!Cuidados com a Pele")[^"]+" → SiloPage "Cuidados com a Pele" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele/, "a SiloPage não repete o papel no nome");
   assert.doesNotMatch(pilar.links_internos, /SiloPage "SiloPage/);
-  assert.match(pilar.estrutura, /^- Link interno: âncora "skin care nivea" → skin care nivea$/m, "a estrutura leva o link na seção dele");
+  assert.match(pilar.estrutura, /^- Link interno L1: âncora sugerida "skin care" → skin care nivea$/m, "a estrutura leva o link na seção dele");
   assert.doesNotMatch(pilar.links_internos, /distribuídos pelas seções|Pilar → Suporte/, "a coluna pelo plano de links do pacote saiu");
   assert.equal(/territory|node|article-candidate/.test(pilar.links_internos), false);
 });

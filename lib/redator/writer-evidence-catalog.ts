@@ -1121,7 +1121,18 @@ export type WriterArticleBlueprintFoundation = {
    */
   needsSource?: WriterBlueprintSourceNeed[];
   publishedMap?: WriterBlueprintPublishedMapItem[];
+  /**
+   * 2026-10-11 · Aditivo, presente só quando a planta lida passa de 6 H2: a
+   * Regra 8 do Guia do dono (de 3 a 6 H2), decidida pela leitura compartilhada
+   * do Radar (`radarArticleBlueprintH2Merges`). Cada item: o H2 da seção da
+   * planta que entra como H3 (`section`) e o H2 que a recebe (`into`). A planta
+   * gravada não muda. Ver `lib/redator/writer-blueprint-for-writing.ts`.
+   */
+  h2Merges?: WriterBlueprintH2Merge[];
 };
+
+/** 2026-10-11 · Regra 8: a seção da planta que entra como H3 de outra (pelos H2). */
+export type WriterBlueprintH2Merge = { section: string; into: string };
 
 export type WriterBrandVoiceFoundation = {
   versionId: string;
@@ -1186,7 +1197,8 @@ export function writerArticleBlueprintFoundation(input: {
       return {
         anchor: cortarTexto(link.anchor, L.anchorChars) ?? "",
         label: cortarTexto(candidato?.label, L.labelChars),
-        destination: cortarTexto(candidato?.destination, L.destinationChars),
+        /* 2026-10-11 · a URL canônica do destino que a planta nova grava (`url`, pela identidade de publicação do Radar) vence o caminho "/<slug>". */
+        destination: cortarTexto(typeof candidato?.url === "string" && candidato.url.trim() ? candidato.url : candidato?.destination, L.destinationChars),
         status: cortarTexto(candidato?.status, 20),
       };
     }).filter(link => link.anchor),

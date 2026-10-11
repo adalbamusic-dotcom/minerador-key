@@ -229,7 +229,9 @@ test("B · seleção de um Silo só: o Silo vai para a linha de topo, com a orde
   const [topo, pilar] = lerCsv(saida.csv || "");
   assert.equal(topo.ordem, "Silo");
   assert.match(topo.artigo, /^Silo: Cuidados com a Pele/);
-  assert.match(topo.artigo, /fora do arquivo \(fora desta seleção\)/);
+  /* 2026-10-11 · o irmão sem linha no arquivo é dito em português claro (só destino de link), com a URL canônica e a situação. */
+  assert.doesNotMatch(topo.artigo, /fora do arquivo|fora desta seleção/);
+  assert.match(topo.artigo, /Os artigos sem "←" não têm linha neste arquivo: aparecem aqui só como destinos de link\./);
   assert.match(pilar.ordem, /^1 · Pilar$/);
   assert.match(pilar.artigo, /Papel no Silo: Pilar/);
 });
@@ -242,8 +244,9 @@ test("B · seleção que cruza Silos: o contexto vai na linha de cada artigo", (
   assert.equal(topo.ordem, "Marca");
   assert.match(topo.artigo, /^Artigos selecionados de mais de um Silo/);
   assert.match(pilar.artigo, /Silo: Cuidados com a Pele/);
-  assert.match(pilar.artigo, /Ordem narrativa do Silo:/);
-  assert.match(pilar.artigo, /ESTE ARTIGO/);
+  /* 2026-10-11 · a ordem narrativa com a URL canônica e a situação; o artigo da linha leva "← este artigo". */
+  assert.match(pilar.artigo, /Ordem narrativa do Silo \(papel · artigo · URL canônica · situação\):/);
+  assert.match(pilar.artigo, / ← este artigo$/m);
   assert.match(outro.artigo, /Silo: sem silo resolvido no Radar/);
   assert.notEqual(ARTIGO_AMAZON, ARTIGO);
 });

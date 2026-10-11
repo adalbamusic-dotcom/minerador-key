@@ -1063,10 +1063,17 @@ test("2026-10-08 (correção) · o próximo passo real é orientação: não vai
 test("2026-10-08 · planta para quem escreve · sem nome antigo, sem frase marcada e sem página lida, a projeção é byte a byte a de antes", () => {
   const bruto = planta("Rotina de skin care noturno em 5 passos");
   const base = { id: plantaAprovada, versionNumber: 3, approvedAt: null, blueprint: bruto.blueprint as unknown, plan: bruto.measures.plan, linkCandidates: bruto.linkCandidates, brandVoice: bruto.brandVoice };
-  assert.equal(
-    JSON.stringify(writerArticleBlueprintForWriting({ ...base, publishedStructure: null, keywords: { principal: "skin care noturno", secondary: [] } })),
-    JSON.stringify(writerArticleBlueprintFoundation(base)),
-  );
+  /*
+   * 2026-10-11 · a âncora natural (régua compartilhada `radarNaturalAnchor`) vale também aqui: a âncora que é a
+   * keyword inteira do destino ("rotina de skin care") vira um recorte. Fora as âncoras, a projeção é a de antes.
+   */
+  const lidaParaEscrever = JSON.parse(JSON.stringify(writerArticleBlueprintForWriting({ ...base, publishedStructure: null, keywords: { principal: "skin care noturno", secondary: [] } })));
+  const fundacao = JSON.parse(JSON.stringify(writerArticleBlueprintFoundation(base)));
+  const ancoraDaRotina = lidaParaEscrever.sections[0].internalLinks[0].anchor as string;
+  assert.notEqual(ancoraDaRotina.toLowerCase(), "rotina de skin care", "a keyword inteira do destino não é âncora");
+  assert.doesNotMatch(ancoraDaRotina, /skin$/i, "o recorte não corta termo composto ao meio");
+  fundacao.sections[0].internalLinks[0].anchor = ancoraDaRotina;
+  assert.equal(JSON.stringify(lidaParaEscrever), JSON.stringify(fundacao));
   assert.equal(writerArticleBlueprintForWriting({ ...base, blueprint: { title: {} } }), null, "sem seções, fora do contrato, como a projeção");
 
   /* A keyword que traz o nome antigo o preserva; a menção ao nome anterior fica; sem troca, o mesmo objeto. */

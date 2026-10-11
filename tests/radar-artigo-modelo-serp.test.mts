@@ -435,11 +435,14 @@ test("CSV: campo que veio vazio não deixa rótulo solto", () => {
   assert.doesNotMatch(colunas.links_internos, /por quê: $/m);
   assert.match(colunas.links_internos, /onde: seção "Por que o perfil não traz pacientes"$/m);
   /* 2026-10-02 · prompt sem proporção ganha a referência (capa 16:9, respiro 4:3). */
-  assert.equal(colunas.plano_visual, "Plano visual: 1 imagem(ns).\nCapa\n  Prompt: consultório\n  Proporção: 16:9 (referência; ajuste ao layout do site e à voz da marca)");
+  /* 2026-10-11 · diretriz de comunicação humana (imagens): só com a capa, a planta ganha a instrução concluída da imagem útil no corpo, depois das imagens. */
+  const corpo = /\nImagem no corpo \(ao menos uma\): na seção "[^"]+", explicando a ideia dela, 4:3, sem antes e depois nem promessa de resultado\.$/;
+  assert.match(colunas.plano_visual, corpo);
+  assert.equal(colunas.plano_visual.replace(corpo, ""), "Plano visual: 1 imagem(ns).\nCapa\n  Prompt: consultório\n  Proporção: 16:9 (referência; ajuste ao layout do site e à voz da marca)");
   /* Com os campos preenchidos, o texto é o de antes. */
   const cheio = structuredClone(payload) as RadarArticleBlueprintPayload;
   cheio.blueprint.visual = [{ slot: "CAPA", section: null, concept: "agenda cheia", prompt: "consultório", alt: "Consultório com agenda", caption: "A agenda vem do perfil" }];
-  assert.equal(radarArticleBlueprintColumns(cheio).plano_visual, "Plano visual: 1 imagem(ns).\nCapa · agenda cheia\n  Prompt: consultório\n  Proporção: 16:9 (referência; ajuste ao layout do site e à voz da marca)\n  ALT: Consultório com agenda\n  Legenda: A agenda vem do perfil");
+  assert.equal(radarArticleBlueprintColumns(cheio).plano_visual.replace(corpo, ""), "Plano visual: 1 imagem(ns).\nCapa · agenda cheia\n  Prompt: consultório\n  Proporção: 16:9 (referência; ajuste ao layout do site e à voz da marca)\n  ALT: Consultório com agenda\n  Legenda: A agenda vem do perfil");
 });
 
 /*

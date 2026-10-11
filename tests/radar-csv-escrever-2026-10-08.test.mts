@@ -15,6 +15,7 @@ import {
 } from "../lib/radar/portable-writing-export.ts";
 import { radarCompetitorBrandOf, radarCompetitorHeadingIsNoise, radarCompetitorTopics, type RadarCompetitorOutlinePage } from "../lib/radar/competitor-topics.ts";
 import { radarArticleBlueprintColumns, type RadarArticleBlueprintPayload } from "../lib/radar/article-blueprint.ts";
+import { RADAR_NATURAL_ANCHOR_RULE } from "../lib/radar/natural-anchor-rule.ts";
 import { radarPortableWritingExport } from "../lib/radar/portable-writing-batch.ts";
 import type { RadarBrandVoice, RadarBrandVoiceState } from "../lib/radar/brand-voice.ts";
 import type { RadarPortableExportInput } from "../lib/radar/portable-export.ts";
@@ -583,26 +584,28 @@ test("C8 · sem material próprio da marca: sem relato, sem inventar, sem marcad
 test("C9 · destino planejado: instrução concluída e condicional, nunca endereço publicado nem link quebrado", () => {
   const { linha } = csvDoCaso(plantaAntiga());
   const links = linhas(linha.links_internos);
-  assert.equal(links[0], "Aplique somente estes 6 link(s), com a âncora indicada (pode ajustar concordância):");
-  assert.equal(links[1], "Destino planejado (ainda não publicado): o link entra com a URL final quando o destino estiver no ar junto com este artigo ou antes; se este artigo for ao ar primeiro, a âncora fica como texto simples, sem link (nunca link quebrado). O caminho planejado não é endereço publicado: não invente domínio nem URL.");
-  assert.equal(links.filter(item => /^L\d · .*\(planejado/.test(item)).length, 5, "5 planejados");
-  assert.ok(links.some(item => /^L6 · âncora "SEO para clínicas" → .* → https:\/\/adalbapro\.com\.br\/servicos\/seo-para-clinicas \(publicado\)/.test(item)), "1 publicado");
-  assert.match(linha.links_internos, /→ Pilar "leads qualificados" → \/leads-sem-trafego-pago\/qualificados \(planejado: caminho do Silo/);
+  /* 2026-10-11 · o cabeçalho diz a regra da âncora natural (a mesma frase do Redator e do MCP) e só os L indicados; o destino novo, concluído. */
+  assert.equal(links[0], `Aplique somente estes 6 link(s) (L1, L2…), sem criar outros. ${RADAR_NATURAL_ANCHOR_RULE} Use a âncora sugerida (pode ajustar concordância) ou uma das outras formulações; o link aponta para a URL canônica do destino, a do slug dele.`);
+  assert.equal(links[1], "Destino novo (ainda não publicado): o link entra quando o destino estiver no ar, junto com este artigo ou antes; se este artigo for ao ar primeiro, a âncora fica como texto simples, sem link (nunca link quebrado). Não invente outro domínio nem outra URL.");
+  assert.equal(links.filter(item => /^L\d · .*\(novo, ainda não publicado/.test(item)).length, 5, "5 novos");
+  assert.ok(links.some(item => /^L6 · âncora sugerida "SEO para clínicas" → .* → https:\/\/adalbapro\.com\.br\/servicos\/seo-para-clinicas \(publicado\)/.test(item)), "1 publicado");
+  assert.match(linha.links_internos, /→ Pilar "leads qualificados" → (?:https:\/\/adalbapro\.com\.br)?\/leads-sem-trafego-pago\/qualificados \(novo, ainda não publicado/);
   assert.doesNotMatch(linha.links_internos, /use o caminho|marque a âncora|não resolvido: marque/);
   /* 2026-10-09 · no lote do Silo, cada artigo com a planta dele: a mesma regra, uma vez por linha, no destino do Silo. */
   const saude = radarPortableWritingExport({ articles: comPlantas(montadasDoSiloSaude(), planoDoSilo().files[0].writing), lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM }).files![0].csv;
-  assert.match(saude, /Destino planejado \(ainda não publicado\): o link entra com a URL final quando o destino estiver no ar junto com este artigo ou antes; se este artigo for ao ar primeiro, a âncora fica como texto simples, sem link \(nunca link quebrado\)\. O caminho planejado não é endereço publicado: não invente domínio nem URL\./);
+  assert.match(saude, /Destino novo \(ainda não publicado\): o link entra quando o destino estiver no ar, junto com este artigo ou antes; se este artigo for ao ar primeiro, a âncora fica como texto simples, sem link \(nunca link quebrado\)\. Não invente outro domínio nem outra URL\./);
   assert.doesNotMatch(saude, /use o slug planejado|marque a âncora|destino ainda não publicado: o link entra/);
   /* Sem planejado, a regra não aparece. */
   const soPublicado = plantaAntiga();
   soPublicado.blueprint.sections = soPublicado.blueprint.sections.map(item => ({ ...item, internalLinks: item.internalLinks.filter(link => link.candidate === "K6") }));
-  assert.doesNotMatch(radarArticleBlueprintColumns(soPublicado).links_internos, /Destino planejado/);
+  assert.doesNotMatch(radarArticleBlueprintColumns(soPublicado).links_internos, /Destino novo|Destino planejado/);
   /* Sem a URL publicada (sem prefixo), o planejado diz o estado; o destino sem endereço fica como texto simples. */
   const semPrefixo = plantaAntiga();
   semPrefixo.linkCandidates = semPrefixo.linkCandidates.map(item => (item.id === "K3" ? { ...item, status: "UNRESOLVED" as const, destination: null } : item));
   const colunaSemPrefixo = linhas(radarArticleBlueprintColumns(semPrefixo).links_internos);
-  assert.ok(colunaSemPrefixo.some(item => item.startsWith("L1 · âncora \"tráfego pago vs orgânico\" → Suporte \"tráfego pago vs orgânico para clínica de estética\" → /trafego-pago-vs-organico-para-clinica-de-estetica (planejado, ainda não publicado) · ")));
-  assert.ok(colunaSemPrefixo.some(item => item.startsWith("L3 · âncora \"como atrair um cliente\" → Suporte \"como atrair um cliente\" (sem endereço no pacote: a âncora fica como texto simples, sem link) · ")));
+  /* 2026-10-11 · a âncora natural da IA fica; a que é a keyword inteira do destino vira o recorte ("como atrair um cliente" → "atrair um cliente"). */
+  assert.ok(colunaSemPrefixo.some(item => item.startsWith("L1 · âncora sugerida \"tráfego pago vs orgânico\" → Suporte \"tráfego pago vs orgânico para clínica de estética\" → /trafego-pago-vs-organico-para-clinica-de-estetica (novo, ainda não publicado: o link entra quando o destino estiver no ar) · ")), colunaSemPrefixo.join("\n"));
+  assert.ok(colunaSemPrefixo.some(item => item.startsWith("L3 · âncora sugerida \"atrair um cliente\" → Suporte \"como atrair um cliente\" (sem endereço no pacote: a âncora fica como texto simples, sem link) · ")), colunaSemPrefixo.join("\n"));
 });
 
 test("D10 no resto do arquivo: o parecer ainda não aceito e o Silo em formação são ditos sem espera aberta", () => {

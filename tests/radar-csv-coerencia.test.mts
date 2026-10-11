@@ -375,7 +375,8 @@ test("5 · continuação do leitor: opcional, no corpo da seção dela; sem link
   /* A planta com o link para o Suporte "skin care nivea": a continuação vai à seção do link, com o L dele. */
   const com = linha(entradaGoogleSaude(), contexto).estrutura;
   const secaoDoLink = com.slice(com.indexOf("## Como montar a rotina de skincare facial"), com.indexOf("\n## ", com.indexOf("## Como montar a rotina de skincare facial") + 3));
-  assert.match(secaoDoLink, /^- Link interno: âncora "skin care nivea" → skin care nivea$/m, com);
+  /* 2026-10-11 · a estrutura diz o L e a âncora sugerida (recorte natural, nunca a keyword inteira do destino). */
+  assert.match(secaoDoLink, /^- Link interno L1: âncora sugerida "skin care" → skin care nivea$/m, com);
   assert.match(secaoDoLink, /^- Leitura seguinte \(opcional, não é uma chamada\): o link L1 desta seção leva ao próximo artigo do Silo, "skin care nivea"; se couber, apresente-o ali como a leitura seguinte, nunca como uma segunda chamada no fechamento\.$/m);
   assert.equal(com.includes(RADAR_WRITING_NO_APPROVED_LINK), false);
   /* Sem Silo, não há continuação a dizer. */
@@ -622,7 +623,8 @@ test("9 · o tipo da unidade: landing page, página de serviço e review falam d
   const saidaDoVideo = radarPortableVideoExport({ articles: [{ entrada: comTipo("landing_page"), blueprint: plantaConcluidaDaBancada("Skincare facial: a rotina da manhã") }], today: EXPORTADO_EM });
   assert.equal(saidaDoVideo.status, "ready");
   const video = saidaDoVideo.status === "ready" ? saidaDoVideo.csv : "";
-  assert.match(video, /CTA para a landing page \(\/skincare-facial\)/);
+  /* 2026-10-11 · o endereço é a URL canônica da identidade de publicação (o slug no caminho do Silo), não só "/<slug>". */
+  assert.match(video, /CTA para a landing page \(https:\/\/[^\s)]*\/skincare-facial\)/);
   assert.match(video, /o link da landing page/);
   assert.match(video, /Cada vídeo leva o público para o artigo ou a página da marca/);
 });

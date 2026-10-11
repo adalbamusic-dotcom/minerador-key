@@ -61,6 +61,8 @@ import { z } from "zod";
 import { novaCena } from "./script-scenes.ts";
 import { radarFoundationsSubjectOf, type RadarFoundations } from "./radar-foundations.ts";
 import { radarBrandVoiceDeliverableLabel } from "../radar/brand-voice.ts";
+/* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP (fonte única do Radar). */
+import { radarHumanVoiceVideoRule } from "../radar/human-voice-guideline.ts";
 import type { RadarVideoPlan } from "../radar/portable-video-export.ts";
 import { WRITER_BLUEPRINT_CONTINUATION_LABEL } from "./writer-evidence-catalog.ts";
 import type { WriterDeliverablePayload } from "./multiformat-contracts.ts";
@@ -336,6 +338,8 @@ const REGRAS_COMUNS = [
    * "inclusive nos CTAs".
    */
   "Quando o contexto trouxer 'Voz da marca (copy e CTA)', escreva gancho, texto, legenda e closingCta nessa voz, sem o que ela proíbe. A voz e o artigo-modelo não mudam keyword, intenção nem fatos.",
+  /* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP: a MESMA frase do CSV de vídeo (fonte única). */
+  radarHumanVoiceVideoRule(),
   /* 2026-10-08 · a régua por frase do Radar; 2026-10-09 · e a trava do CSV de vídeo. */
   "Frase listada em 'Frases do artigo-modelo que só entram com fonte' ou em 'Fica fora do texto publicável' não vira afirmação no gancho, nas cenas, nos slides, na legenda nem no closingCta: na fala, só delimitada (orientação ou possibilidade); em texto na tela, lâmina e legenda, fica fora.",
   /* 2026-10-09 · D10: o entregável sai concluído (a regra diz a família, sem ensinar as palavras). */
