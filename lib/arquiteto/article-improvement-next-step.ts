@@ -97,7 +97,7 @@ export function resolveImprovementNextStep(input: ImprovementNextStepInput): Imp
     return { kind: "resume_apply", sentence: "A gravação das melhorias que você aceitou parou no meio. Ela continua de onde parou.", button: "Continuar" };
   }
   if (!input.hasRun) {
-    return { kind: "prepare", sentence: "Comece aqui: busque keywords com volume para cada publicado e Assunto. O Google Ads é grátis; a leitura da IA usa a Connection DeepSeek da marca.", button: "1 · Buscar keywords (grátis)" };
+    return { kind: "prepare", sentence: "Comece aqui: busque keywords com volume para cada publicado e Assunto. O Google Ads é grátis; a leitura da IA usa a IA da plataforma (OpenRouter).", button: "1 · Buscar keywords (grátis)" };
   }
   if (input.paidQueries > 0 && !input.accepted) {
     return { kind: "validate", sentence: "Confira no Google as keywords com volume antes de gravar. Você vê o custo antes.", button: improvementValidateLabel(input.paidQueries, input.costMaxUsd) };

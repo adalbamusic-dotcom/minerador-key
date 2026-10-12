@@ -191,7 +191,7 @@ export async function POST(request: Request) {
           module: "arquiteto",
           resultStatus: "succeeded",
           units: 1,
-          idempotencyKey: `deepseek:territorial_ai:${operationRequestId}:${question.questionId}`,
+          idempotencyKey: `${provider.provider}:territorial_ai:${operationRequestId}:${question.questionId}`,
           metadata: { operationRequestId, operationKind: "territorial_ai", questionId: question.questionId },
         });
 
@@ -206,7 +206,7 @@ export async function POST(request: Request) {
           resultStatus: "failed",
           units: 1,
           errorCode: "TERRITORIAL_AI_FAILED",
-          idempotencyKey: `deepseek:territorial_ai:${operationRequestId}:${question.questionId}:failed`,
+          idempotencyKey: `${provider.provider}:territorial_ai:${operationRequestId}:${question.questionId}:failed`,
           metadata: { operationRequestId, operationKind: "territorial_ai", questionId: question.questionId },
         }).catch(() => undefined);
         failures.push({

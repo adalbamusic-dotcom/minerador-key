@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createGoogleAdsRestClient } from "@/lib/google/ads/client";
 import { GoogleAdsError } from "@/lib/google/ads/errors";
 import { GoogleAdsPlatformConfigError, type GoogleAdsPlatformConfig } from "@/lib/google/ads/config";
@@ -8,14 +10,15 @@ import {
   measureDataForSeoAllintitle,
   type DataForSeoSerpConfig,
 } from "@/lib/minerador/dataforseo-serp-core";
-import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL } from "@/lib/server/deepseek-canonical";
+import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL, OPENROUTER_DEFAULT_MODEL, readOpenRouterModel } from "@/lib/server/deepseek-canonical";
+import { OPENROUTER_KEY_URL } from "@/lib/openrouter-model-config";
 import { GoogleCloudMediaError } from "@/lib/server/google-cloud/contracts";
 import { probeGoogleCloudSpeech, probeGoogleCloudStorage, probeYouTubeData } from "@/lib/server/google-cloud/health";
 import type { StorageClientFactory } from "@/lib/server/google-cloud/storage-operation";
 import { parseTelegramBotToken, parseTelegramSecret } from "@/lib/server/telegram/contracts";
 import { getTelegramBot, TelegramApiError } from "@/lib/server/telegram/adapter";
 
-export type PlatformHealthProviderKey = "google_ads" | "dataforseo" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";
+export type PlatformHealthProviderKey = "google_ads" | "dataforseo" | "openrouter" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";
 export type PlatformHealthOperation = "speech" | "storage" | "youtube" | "telegram_get_me" | "telegram_webhook";
 
 export type PlatformHealthProbeResult = {
@@ -189,6 +192,71 @@ async function probeDeepSeek(secretPayload: string, metadata: unknown, fetchImpl
   };
 }
 
+/**
+ * Health check da OpenRouter: GET /api/v1/key. Não gera texto e não consome
+ * crédito; confirma que a chave existe, se está autorizada e quanto limite resta.
+ * A chave da env do servidor tem precedência, como no resolvedor de IA.
+ */
+async function probeOpenRouter(secretPayload: string, metadata: unknown, fetchImpl: typeof fetch, environment: NodeJS.ProcessEnv = process.env): Promise<PlatformHealthProbeResult> {
+  const envKey = environment.OPENROUTER_API_KEY?.trim();
+  const apiKey = envKey || parseSecretObject(secretPayload, ["OPENROUTER_API_KEY"], "openrouter").OPENROUTER_API_KEY;
+  const credentialSource = envKey ? "environment" : "connection";
+  let response: Response;
+  try {
+    response = await fetchImpl(OPENROUTER_KEY_URL, {
+      method: "GET",
+      headers: { authorization: `Bearer ${apiKey}`, accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new PlatformHealthCheckError(502, "PLATFORM_HEALTH_PROVIDER_FAILED", "A OpenRouter está indisponível.", null, { stage: "key_endpoint", httpStatus: null, credentialSource });
+  }
+  const requestId = response.headers.get("x-request-id") || response.headers.get("cf-ray");
+  let parsed: unknown = null;
+  try { parsed = await response.json(); } catch { /* mapped below */ }
+  if (!response.ok) {
+    const authenticatedFailure = response.status === 401 || response.status === 403;
+    throw new PlatformHealthCheckError(
+      authenticatedFailure ? 502 : 503,
+      authenticatedFailure ? "PLATFORM_HEALTH_AUTHENTICATION_FAILED" : "PLATFORM_HEALTH_PROVIDER_FAILED",
+      authenticatedFailure ? "A chave OpenRouter não foi autorizada." : "A OpenRouter está indisponível.",
+      requestId,
+      { stage: "key_endpoint", httpStatus: String(response.status), credentialSource },
+    );
+  }
+  const data = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as { data?: unknown }).data : null;
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new PlatformHealthCheckError(502, "PLATFORM_HEALTH_INVALID_RESPONSE", "A OpenRouter retornou uma resposta inválida para o health check.", requestId, { stage: "key_endpoint", httpStatus: String(response.status), credentialSource });
+  }
+  const record = data as Record<string, unknown>;
+  const numberText = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+  let currentModel: string = OPENROUTER_DEFAULT_MODEL;
+  try {
+    currentModel = readOpenRouterModel(metadata, environment).model;
+  } catch {
+    currentModel = environment.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT_MODEL;
+  }
+  return {
+    providerKey: "openrouter",
+    providerRequestRef: requestId,
+    costAmount: null,
+    currentModel,
+    // O endpoint da chave não lista modelos; a disponibilidade só se prova na primeira geração.
+    currentModelAvailable: null,
+    details: {
+      stage: "key_endpoint",
+      httpStatus: String(response.status),
+      credentialSource,
+      currentModel,
+      usage: numberText(record.usage),
+      limit: record.limit === null ? "sem limite" : numberText(record.limit),
+      limitRemaining: record.limit_remaining === null ? "sem limite" : numberText(record.limit_remaining),
+      freeTier: String(record.is_free_tier === true),
+    },
+  };
+}
+
 async function probeTelegram(secretPayload: string, operation: "telegram_get_me" | "telegram_webhook" | undefined, fetchImpl: typeof fetch): Promise<PlatformHealthProbeResult> {
   let botToken: string;
   try {
@@ -254,6 +322,7 @@ export async function runPlatformProviderHealthProbe(input: {
     if (input.providerKey === "google_ads") return await probeGoogleAds(fetchImpl, input.googleAdsConfig);
     if (!input.secretPayload) throw new PlatformHealthCheckError(409, "PLATFORM_HEALTH_SECRET_INVALID", `A credencial salva de ${input.providerKey} está incompleta.`);
     if (input.providerKey === "dataforseo") return await probeDataForSeo(input.secretPayload, fetchImpl);
+    if (input.providerKey === "openrouter") return await probeOpenRouter(input.secretPayload, input.metadata, fetchImpl);
     if (input.providerKey === "deepseek") return await probeDeepSeek(input.secretPayload, input.metadata, fetchImpl);
     if (input.providerKey === "google_cloud") {
       const probe = input.healthOperation === "storage"

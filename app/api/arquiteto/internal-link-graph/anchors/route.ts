@@ -157,7 +157,7 @@ export async function POST(request: Request) {
         module: "arquiteto",
         resultStatus: "succeeded",
         units: candidatos.length,
-        idempotencyKey: `deepseek:link_anchors:${operationRequestId}`,
+        idempotencyKey: `${provider.provider}:link_anchors:${operationRequestId}`,
         metadata: { operationRequestId, operationKind: "link_anchors", siloId: parsed.data.siloId },
       });
 
@@ -179,7 +179,7 @@ export async function POST(request: Request) {
         resultStatus: "failed",
         units: candidatos.length,
         errorCode: "LINK_ANCHORS_FAILED",
-        idempotencyKey: `deepseek:link_anchors:${operationRequestId}:failed`,
+        idempotencyKey: `${provider.provider}:link_anchors:${operationRequestId}:failed`,
         metadata: { operationRequestId, operationKind: "link_anchors", siloId: parsed.data.siloId },
       });
       return NextResponse.json({ success: false, error: publicFailureMessage(error) }, { status: 502 });

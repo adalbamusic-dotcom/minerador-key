@@ -205,7 +205,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
       <div className="min-w-0">
         <h3 className="flex items-center gap-1.5 font-semibold text-foreground" data-testid="architect-improvement-how">
           {ARTICLE_IMPROVEMENT_LABEL}
-          <InfoHint title="Como funciona" description="1 · Buscar keywords com volume para cada publicado e Assunto (Google Ads grátis; a leitura da IA usa a Connection DeepSeek da marca): primeiro os pares da SERP que já estão no cache, depois a leitura da IA na lista da marca (confira o motivo de cada uma), depois a leitura da lista pelo código (keywords que são o núcleo do slug, com a palavra do próprio slug) e, só para quem ficar sem nada, busca nova no Google Ads. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
+          <InfoHint title="Como funciona" description="1 · Buscar keywords com volume para cada publicado e Assunto (Google Ads grátis; a leitura da IA usa a IA da plataforma (OpenRouter)): primeiro os pares da SERP que já estão no cache, depois a leitura da IA na lista da marca (confira o motivo de cada uma), depois a leitura da lista pelo código (keywords que são o núcleo do slug, com a palavra do próprio slug) e, só para quem ficar sem nada, busca nova no Google Ads. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
         </h3>
         <p className="text-text-muted">URL, slug e canonical nunca mudam.</p>
         <p className="text-text-muted" data-testid="architect-improvement-scope">{selectedTargetIds.length

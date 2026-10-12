@@ -200,3 +200,55 @@ test("failed global DeepSeek health check marks error and never returns ready or
   assert.equal((fake.updates.at(-1)?.lifecycle_status), "error");
   assert.doesNotMatch(JSON.stringify(fake.updates.at(-1)), new RegExp(SECRET));
 });
+
+async function withOpenRouterEnv<T>(env: { OPENROUTER_API_KEY?: string; OPENROUTER_MODEL?: string }, callback: () => Promise<T>) {
+  const previous = { key: process.env.OPENROUTER_API_KEY, model: process.env.OPENROUTER_MODEL };
+  delete process.env.OPENROUTER_API_KEY;
+  delete process.env.OPENROUTER_MODEL;
+  Object.assign(process.env, env);
+  try {
+    return await callback();
+  } finally {
+    if (typeof previous.key === "undefined") delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = previous.key;
+    if (typeof previous.model === "undefined") delete process.env.OPENROUTER_MODEL; else process.env.OPENROUTER_MODEL = previous.model;
+  }
+}
+
+test("OpenRouter health consulta só /api/v1/key, sem gerar texto, e prefere a chave da env", async () => {
+  const calls: Array<{ url: string; authorization: string }> = [];
+  const result = await withOpenRouterEnv({ OPENROUTER_API_KEY: "env-openrouter-key" }, () => runPlatformProviderHealthProbe({
+    providerKey: "openrouter",
+    secretPayload: JSON.stringify({ OPENROUTER_API_KEY: SECRET }),
+    metadata: { openrouter_model: "deepseek/deepseek-v4-pro-0813" },
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), authorization: String((init?.headers as Record<string, string>).authorization) });
+      return response({ data: { label: "fixture", usage: 5.34, limit: 50, limit_remaining: 44.66, is_free_tier: false } }, 200, { "x-request-id": "openrouter-request" });
+    },
+  }));
+  assert.deepEqual(calls, [{ url: "https://openrouter.ai/api/v1/key", authorization: "Bearer env-openrouter-key" }]);
+  assert.equal(result.providerKey, "openrouter");
+  assert.equal(result.currentModel, "openai/gpt-6-luna-pro:batch");
+  assert.equal(result.currentModelAvailable, null);
+  assert.equal(result.details.credentialSource, "environment");
+  assert.equal(result.details.limitRemaining, "44.66");
+  assert.equal(result.providerRequestRef, "openrouter-request");
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET));
+});
+
+test("OpenRouter health sem env usa a chave do Secret Store e sanitiza a recusa", async () => {
+  await withOpenRouterEnv({}, async () => {
+    let authorization = "";
+    await assert.rejects(
+      runPlatformProviderHealthProbe({
+        providerKey: "openrouter",
+        secretPayload: JSON.stringify({ OPENROUTER_API_KEY: SECRET }),
+        fetchImpl: async (_url, init) => {
+          authorization = String((init?.headers as Record<string, string>).authorization);
+          return response({ error: { message: SECRET } }, 401);
+        },
+      }),
+      (error: unknown) => error instanceof Error && "code" in error && error.code === "PLATFORM_HEALTH_AUTHENTICATION_FAILED" && !error.message.includes(SECRET),
+    );
+    assert.equal(authorization, `Bearer ${SECRET}`);
+  });
+});

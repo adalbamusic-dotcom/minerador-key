@@ -28,7 +28,7 @@ export const INTEGRATION_CAPABILITY_OPERATIONS = [
 export type IntegrationCapabilityOperation = typeof INTEGRATION_CAPABILITY_OPERATIONS[number];
 
 export const PLATFORM_ACCESS_POLICY = "HOMOLOGATION_ALLOW_ALL" as const;
-export type IntegrationResourceProviderKey = "google_ads" | "dataforseo" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";
+export type IntegrationResourceProviderKey = "google_ads" | "dataforseo" | "deepseek" | "openrouter" | "google_cloud" | "youtube_data" | "telegram";
 
 /** Provider identity is enforced after the canonical capability resolves. */
 export const INTEGRATION_CAPABILITY_PROVIDER_REQUIREMENTS: Record<string, IntegrationResourceProviderKey> = {
@@ -37,7 +37,8 @@ export const INTEGRATION_CAPABILITY_PROVIDER_REQUIREMENTS: Record<string, Integr
   "dataforseo.allintitle": "dataforseo",
   "dataforseo.serp_compatibility": "dataforseo",
   "dataforseo.keyword_research": "dataforseo",
-  ai_generation: "deepseek",
+  // IA canônica desde 2026-10-11. Rollback: voltar as duas linhas para "deepseek".
+  ai_generation: "openrouter",
   "google_cloud.speech_transcription": "google_cloud",
   "google_cloud.storage_media": "google_cloud",
   "youtube.video_metadata": "youtube_data",
@@ -50,7 +51,7 @@ export const INTEGRATION_CAPABILITY_PROVIDER_REQUIREMENTS: Record<string, Integr
  * usage ledger. They are deliberately not an authorization boundary.
  */
 export const INTEGRATION_RESOURCE_BY_OPERATION: Partial<Record<IntegrationCapabilityOperation, IntegrationResourceProviderKey>> = {
-  ai_generation: "deepseek",
+  ai_generation: "openrouter",
   keyword_discovery: "google_ads",
   keyword_metrics: "google_ads",
   allintitle: "dataforseo",

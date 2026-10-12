@@ -73,6 +73,8 @@ type RevalidationDiagnostic = StructuredAIDiagnostic & {
   route: "/api/revalidate-structure";
   stage: "request_validation" | "connection_resolution" | "provider_request" | "response_parsing" | "proposal_validation" | "completed";
   modelResolved: string | null;
+  /** Provider da Connection de IA resolvida; gravado na revisão de keywords do Arquiteto. */
+  provider: string | null;
   failureStage: ArchitectDeepSeekFailureStage | null;
   proposalValidated: boolean;
 };
@@ -85,6 +87,7 @@ function createRevalidationDiagnostic(correlationId: string): RevalidationDiagno
     providerResolved: false,
     model: null,
     modelResolved: null,
+    provider: null,
     thinkingMode: null,
     requestStarted: false,
     httpStatus: null,
@@ -123,6 +126,7 @@ export async function POST(req: Request) {
     diagnostic.providerResolved = true;
     diagnostic.model = provider.model;
     diagnostic.modelResolved = provider.model;
+    diagnostic.provider = provider.provider;
     diagnostic.thinkingMode = provider.thinkingMode;
     const coverage = logicalCoverageGate(parsed.data);
     if (!coverage.ok) return rejection(coverage.rejection);

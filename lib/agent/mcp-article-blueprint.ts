@@ -80,7 +80,7 @@ export function mcpArticleBlueprintAction(input: {
     who: "human",
     where: MCP_ARTICLE_BLUEPRINT_SCREEN.where,
     buttons: botoes,
-    cost: `Até ${mcpArticleBlueprintMaxCalls(artigos)} chamadas de IA (DeepSeek da plataforma, cota da marca): 1 por artigo para organizar e, se a resposta vier cortada ou a conferência apontar o que corrigir, mais 1. O botão diz o custo antes do clique, e a tela pede confirmação. Pelo MCP não se organiza: mostre ao usuário onde clicar.`,
+    cost: `Até ${mcpArticleBlueprintMaxCalls(artigos)} chamadas de IA (IA da plataforma pela OpenRouter, cota da marca): 1 por artigo para organizar e, se a resposta vier cortada ou a conferência apontar o que corrigir, mais 1. O botão diz o custo antes do clique, e a tela pede confirmação. Pelo MCP não se organiza: mostre ao usuário onde clicar.`,
     afterwards: input.afterwards,
     ...(input.screen ? { screen: input.screen } : {}),
   };

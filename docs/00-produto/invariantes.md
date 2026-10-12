@@ -39,8 +39,10 @@
   grant, binding ou quota próprios.
 - Google Ads é infraestrutura fixa da Plataforma, com configuração server-side
   e rotação do OAuth Refresh Token pelo Admin global. DataForSEO é a
-  infraestrutura compartilhada de SERP/orgânico; DeepSeek é a IA canônica
-  compartilhada. Nenhum desses recursos vira autorização por módulo.
+  infraestrutura compartilhada de SERP/orgânico; OpenRouter é a IA canônica
+  compartilhada desde 2026-10-11, com DeepSeek só como reserva de rollback
+  ([adendo](../compartilhado/adendo-ia-openrouter-2026-10-11.md)). Nenhum desses
+  recursos vira autorização por módulo.
 - Google Cloud Speech-to-Text, Cloud Storage e YouTube Data API são operações
   compartilhadas. Speech produz transcrição, Storage distingue original de
   processamento temporário e YouTube fornece somente metadata; nenhum deles

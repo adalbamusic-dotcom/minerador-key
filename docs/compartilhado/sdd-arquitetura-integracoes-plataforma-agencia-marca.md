@@ -6,6 +6,10 @@
 - **Escopo:** contratos conceituais de conexões, capacidades, grants, bindings, consumo, segurança e transferência de marca
 - **Fora do escopo:** código, schema, migrations, RLS, provider, segredo, UI, rota, teste de conexão e operação remota
 
+### Adendo de precedência — DeepSeek → OpenRouter — 2026-10-11
+
+Este adendo vale sobre o de 2026-08-19 logo abaixo. Por decisão do dono, a capability `ai_generation` voltou a resolver a Connection global OpenRouter, com modelo padrão `openai/gpt-6-luna-pro:batch` e chave `OPENROUTER_API_KEY` na env do servidor com precedência sobre o Secret Store. A Connection DeepSeek fica READY como reserva de rollback, sem receber chamadas e sem fallback automático. Contrato, consumidores, riscos e rollback estão no [adendo da IA OpenRouter](adendo-ia-openrouter-2026-10-11.md).
+
 ### Adendo de precedência — OpenRouter → DeepSeek — Fase 1 — 2026-08-19
 
 O [adendo arquitetônico histórico do corte OpenRouter → DeepSeek](../_arquivo/2026-08-documentacao-legada/adendo-corte-openrouter-deepseek-fase-1-2026-08-19.md) e sua [auditoria vinculada](../_arquivo/2026-08-documentacao-legada/auditoria-corte-openrouter-deepseek-fase-1-2026-08-19.md) registram a precedência sobre referências anteriores de IA nesta SDD. OpenRouter está superseded como provider canônico; DeepSeek Official API é o único provider ativo previsto para a primeira fase, em uma Connection `platform`, com modelo explícito `deepseek-v4-pro`, sem fallback ou roteamento paralelo. Esta anotação registra decisão e auditoria; não autoriza implementação, migration, Connection remota ou chamada paga.

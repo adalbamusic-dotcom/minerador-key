@@ -1,9 +1,9 @@
 /**
  * Compatibility error contract for routes that still map shared provider
- * failures. New AI operations must resolve a Connection through
- * deepseek-canonical.ts; this module deliberately has no ENV resolver.
+ * failures. New AI operations must resolve the platform AI Connection through
+ * deepseek-canonical.ts (OpenRouter since 2026-10-11); this module has no ENV resolver.
  */
-export type AIProviderId = "deepseek";
+export type AIProviderId = "openrouter" | "deepseek";
 
 export type AIProviderErrorCode =
   | "AI_PROVIDER_NOT_CONFIGURED"
@@ -45,7 +45,7 @@ export function resolveAIProvider(_env: AIProviderEnvironment = process.env): ne
   void _env;
   throw new AIProviderConfigurationError(
     "AI_PROVIDER_CONNECTION_REQUIRED",
-    "Operações novas de IA devem resolver uma Connection DeepSeek server-side.",
+    "Operações novas de IA devem resolver a Connection de IA da plataforma server-side.",
   );
 }
 

@@ -4,12 +4,13 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Database, KeyRound, Loader2, Plus, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
 import type { IntegrationAdminHealthCheck, PlatformIntegrationsSnapshot } from "@/lib/server/platform-integrations-admin";
 import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL } from "@/lib/deepseek-model-config";
+import { OPENROUTER_BASE_URL, OPENROUTER_DEFAULT_MODEL } from "@/lib/openrouter-model-config";
 import { useNoticeBridge } from "@/components/global-notice-center";
 
 const capabilityOperations = ["ai_generation", "keyword_discovery", "keyword_metrics", "allintitle", "serp_compatibility", "transactional_email", "speech_transcription", "storage_media", "youtube_video_metadata", "telegram_message_send", "telegram_file_fetch", "keyword_research"] as const;
 const environments = ["development", "test", "staging", "production"] as const;
 type IntegrationView = "overview" | "connections" | "agencies" | "usage";
-type SupportedProviderKey = "google_ads" | "dataforseo" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";
+type SupportedProviderKey = "google_ads" | "dataforseo" | "openrouter" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";
 
 const integrationViews: Array<{ id: IntegrationView; label: string }> = [
   { id: "overview", label: "Integrações" },
@@ -61,11 +62,18 @@ const supportedApiDefinitions: Array<{
     description: "Connection global da Plataforma; Agências ativas usam o resource sem grant por operação.",
   },
   {
-    key: "deepseek",
-    name: "DeepSeek",
+    key: "openrouter",
+    name: "OpenRouter",
     group: "IA",
     origin: "Plataforma",
-    description: `Connection global da Plataforma; modelo DeepSeek V4 Pro (${DEEPSEEK_DEFAULT_MODEL}).`,
+    description: `IA canônica da plataforma desde 2026-10-11. Modelo padrão: ${OPENROUTER_DEFAULT_MODEL}.`,
+  },
+  {
+    key: "deepseek",
+    name: "DeepSeek (reserva)",
+    group: "IA",
+    origin: "Plataforma",
+    description: `Reserva para rollback. Não recebe chamadas desde 2026-10-11 (${DEEPSEEK_DEFAULT_MODEL}).`,
   },
   {
     key: "google_cloud",
@@ -106,8 +114,8 @@ const sourceContracts = [
   {
     name: "IA",
     source: "Plataforma",
-    contract: "Connection global READY → Agência ativa → Brand autorizada; modelo operacional separado",
-    providerKeys: ["deepseek"],
+    contract: "Connection global OpenRouter READY → Agência ativa → Brand autorizada; modelo operacional separado",
+    providerKeys: ["openrouter"],
   },
   {
     name: "Google Cloud Media",
@@ -138,6 +146,7 @@ type ApiFormState = {
   label: string;
   dataforseoLogin: string;
   dataforseoPassword: string;
+  openrouterApiKey: string;
   deepseekApiKey: string;
   googleAdsRefreshToken: string;
   googleCloudServiceAccount: string;
@@ -152,6 +161,7 @@ const emptyApiForm: ApiFormState = {
   label: "",
   dataforseoLogin: "",
   dataforseoPassword: "",
+  openrouterApiKey: "",
   deepseekApiKey: "",
   googleAdsRefreshToken: "",
   googleCloudServiceAccount: "",
@@ -228,6 +238,13 @@ function sourceEvidence(data: PlatformIntegrationsSnapshot, providerKeys: readon
   return { label: ready ? "Configurada" : "Precisa validar", tone: ready ? "text-success" : "text-warning", detail: `${providerLabel}. Connections da Plataforma: ${connectionLabel}.` };
 }
 
+function openRouterModelSourceLabel(source: PlatformIntegrationsSnapshot["openRouterRuntime"]["modelSource"]) {
+  if (source === "environment") return "Definido por OPENROUTER_MODEL na env do servidor.";
+  if (source === "connection") return "Definido na metadata da Connection.";
+  if (source === "invalid_environment") return "OPENROUTER_MODEL tem valor inválido; as chamadas de IA vão falhar até corrigir a env.";
+  return "Sem OPENROUTER_MODEL na env; vale o padrão do código.";
+}
+
 function apiStatus(data: PlatformIntegrationsSnapshot, definition: (typeof supportedApiDefinitions)[number]) {
   const provider = data.providers.find((item) => item.providerKey === definition.key);
   const connection = data.platformConnections.find((item) => item.providerKey === definition.key && item.environment === "production");
@@ -284,11 +301,24 @@ function apiStatus(data: PlatformIntegrationsSnapshot, definition: (typeof suppo
       tone: "text-pending",
       detail: definition.key === "deepseek"
         ? `Modelo: DeepSeek V4 Pro (${DEEPSEEK_DEFAULT_MODEL}). Endpoint canônico: ${DEEPSEEK_BASE_URL}. Nenhuma connection global foi encontrada.`
-        : "Nenhuma connection global da Plataforma foi encontrada.",
+        : definition.key === "openrouter"
+          ? `Modelo: ${data.openRouterRuntime.model}. Endpoint: ${OPENROUTER_BASE_URL}. Nenhuma connection global foi encontrada.`
+          : "Nenhuma connection global da Plataforma foi encontrada.",
     };
   }
   if (!connection.secretConfigured) {
     return { label: "Não configurado", tone: "text-pending", detail: "A connection existe, mas a credencial ainda não foi salva." };
+  }
+  if (definition.key === "openrouter") {
+    const runtime = data.openRouterRuntime;
+    const chave = runtime.apiKeyInEnvironment ? "chave lida da env do servidor (OPENROUTER_API_KEY)" : "chave lida do Secret Store da Connection";
+    if (connection.lifecycleStatus !== "ready") {
+      return { label: "Precisa validar", tone: "text-warning", detail: `Credencial configurada; a connection precisa estar READY para a IA funcionar. Use Testar conexão. Modelo: ${runtime.model}.` };
+    }
+    if (runtime.modelSource === "invalid_environment") {
+      return { label: "Erro", tone: "text-danger", detail: `OPENROUTER_MODEL inválido na env do servidor (${runtime.model}). Corrija a env e refaça o deploy.` };
+    }
+    return { label: "Configurado", tone: "text-success", detail: `Connection READY. Modelo em uso: ${runtime.model}. ${openRouterModelSourceLabel(runtime.modelSource)} Credencial: ${chave}.` };
   }
   if (connection.lifecycleStatus !== "ready") {
     return {
@@ -415,7 +445,9 @@ export default function PlatformIntegrationsPanel() {
       }
       return;
     }
-    const secretPayload = editingProvider === "deepseek"
+    const secretPayload = editingProvider === "openrouter"
+      ? JSON.stringify({ OPENROUTER_API_KEY: apiForm.openrouterApiKey })
+      : editingProvider === "deepseek"
       ? JSON.stringify({ DEEPSEEK_API_KEY: apiForm.deepseekApiKey })
       : editingProvider === "google_cloud"
         ? apiForm.googleCloudServiceAccount
@@ -617,8 +649,15 @@ export default function PlatformIntegrationsPanel() {
                <div className="rounded-md border border-foreground/15 bg-foreground/5 p-4 text-sm"><p className="font-semibold">Configuração estática — somente leitura</p><div className="mt-3 grid gap-2 sm:grid-cols-2"><p>Developer Token: <strong>{data.googleAdsStaticConfig.developerTokenConfigured ? "Configurado" : "Não configurado"}</strong></p><p>Client ID: <strong>{data.googleAdsStaticConfig.clientIdConfigured ? "Configurado" : "Não configurado"}</strong></p><p>Client Secret: <strong>{data.googleAdsStaticConfig.clientSecretConfigured ? "Configurado" : "Não configurado"}</strong></p><p>Login Customer ID: <strong>{data.googleAdsStaticConfig.loginCustomerIdConfigured ? "Configurado" : "Não configurado"}</strong></p><p>Research Customer ID: <strong>{data.googleAdsStaticConfig.researchCustomerIdConfigured ? "Configurado" : "Não configurado"}</strong></p><p>API version: <strong>{data.googleAdsStaticConfig.apiVersionConfigured ? "Configurado" : "Não configurado"}</strong></p></div><p className="mt-3 text-foreground/70">Esses valores continuam em ENV/Vercel server-side. A interface não lê nem altera seus conteúdos.</p></div>
                <div className="rounded-md border border-foreground/15 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold">OAuth Refresh Token</p><span className="text-sm font-semibold text-foreground/70">Estado: {data.platformConnections.find((item) => item.providerKey === "google_ads" && item.environment === "production")?.secretConfigured ? "Configurado" : "Não configurado"}</span></div><label className="mt-4 block text-sm">Novo refresh token<input className={input} type="password" autoComplete="new-password" value={apiForm.googleAdsRefreshToken} onChange={(event) => updateApiForm("googleAdsRefreshToken", event.target.value)} required aria-describedby="google-ads-refresh-token-help" /><span id="google-ads-refresh-token-help" className="mt-1 block text-sm leading-5 text-foreground/65">Usado somente para substituir o segredo salvo. O valor atual nunca é exibido.</span></label><p className="mt-3 text-sm leading-5 text-foreground/65">Atualizar o token não executa health check. Depois do salvamento, use “Testar conexão” para validar o OAuth explicitamente.</p></div>
                <div className="flex flex-wrap items-center justify-end gap-2"><button type="button" className={secondary} disabled={saving} onClick={() => { setEditingProvider(null); setApiForm(emptyApiForm); }}>Cancelar</button><button type="submit" className={primary} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}Atualizar token</button></div>
-             </form> : editingProvider === "deepseek" ? <form className="mt-5 space-y-5 border-t border-foreground/15 pt-5" onSubmit={configureApi}>
-              <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold">DeepSeek oficial</p><p className="mt-1 text-sm text-foreground/65">Origem: Plataforma · provider único da IA nesta fase, sem fallback.</p></div><button type="button" className={secondary} disabled={saving} onClick={() => { setEditingProvider(null); setApiForm(emptyApiForm); }}>Cancelar</button></div>
+             </form> : editingProvider === "openrouter" ? <form className="mt-5 space-y-5 border-t border-foreground/15 pt-5" onSubmit={configureApi}>
+              <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold">OpenRouter</p><p className="mt-1 text-sm text-foreground/65">Origem: Plataforma · IA canônica da plataforma, sem fallback para outro provider.</p></div><button type="button" className={secondary} disabled={saving} onClick={() => { setEditingProvider(null); setApiForm(emptyApiForm); }}>Cancelar</button></div>
+              <p className="rounded-md border border-foreground/15 bg-foreground/5 p-3 text-sm leading-5 text-foreground/70">Chave na env do servidor (OPENROUTER_API_KEY): <strong>{data.openRouterRuntime.apiKeyInEnvironment ? "configurada" : "não configurada"}</strong>. Quando existe, a env tem precedência sobre a chave salva aqui.</p>
+              <label className="block text-sm">API Key<input className={input} type="password" autoComplete="new-password" value={apiForm.openrouterApiKey} onChange={(event) => updateApiForm("openrouterApiKey", event.target.value)} required aria-describedby="openrouter-key-help" /><span id="openrouter-key-help" className="mt-1 block text-sm leading-5 text-foreground/65">Obrigatória para salvar. O valor segue somente para o servidor e não é reexibido.</span></label>
+              <div className="grid gap-4 md:grid-cols-2"><label className="text-sm">Modelo em uso<input className={input} value={data.openRouterRuntime.model} readOnly aria-readonly="true" /><span className="mt-1 block text-sm leading-5 text-foreground/65">{openRouterModelSourceLabel(data.openRouterRuntime.modelSource)} Padrão do código: {OPENROUTER_DEFAULT_MODEL}.</span></label><label className="text-sm">Endpoint<input className={input} value={OPENROUTER_BASE_URL} readOnly aria-readonly="true" /></label></div>
+              <p className="rounded-md border border-foreground/15 bg-foreground/5 p-3 text-sm leading-5 text-foreground/70">Salvar grava a credencial no Secret Store/Vault da Connection global. O salvamento não executa health check; use “Testar conexão”, que só consulta a chave e não gasta crédito.</p>
+              <div className="flex flex-wrap items-center justify-end gap-2"><button type="submit" className={primary} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}Salvar configuração</button></div>
+            </form> : editingProvider === "deepseek" ? <form className="mt-5 space-y-5 border-t border-foreground/15 pt-5" onSubmit={configureApi}>
+              <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold">DeepSeek (reserva)</p><p className="mt-1 text-sm text-foreground/65">Origem: Plataforma · reserva para rollback; a IA da plataforma usa a OpenRouter.</p></div><button type="button" className={secondary} disabled={saving} onClick={() => { setEditingProvider(null); setApiForm(emptyApiForm); }}>Cancelar</button></div>
               <label className="block text-sm">API Key<input className={input} type="password" autoComplete="new-password" value={apiForm.deepseekApiKey} onChange={(event) => updateApiForm("deepseekApiKey", event.target.value)} required aria-describedby="deepseek-key-help" /><span id="deepseek-key-help" className="mt-1 block text-sm leading-5 text-foreground/65">Obrigatória para salvar. O valor segue somente para o servidor e não é reexibido.</span></label>
               <div className="grid gap-4 md:grid-cols-2"><label className="text-sm">Modelo<input className={input} value={DEEPSEEK_DEFAULT_MODEL} readOnly aria-readonly="true" /><span className="mt-1 block text-sm leading-5 text-foreground/65">DeepSeek V4 Pro · ID técnico fixo nesta fase.</span></label><label className="text-sm">Endpoint<input className={input} value={DEEPSEEK_BASE_URL} readOnly aria-readonly="true" /></label></div>
               <p className="rounded-md border border-foreground/15 bg-foreground/5 p-3 text-sm leading-5 text-foreground/70">Salvar configura a Connection global e grava a credencial no Secret Store/Vault. O salvamento não executa health check; use “Testar conexão” somente depois, quando quiser validar explicitamente.</p>
@@ -675,12 +714,12 @@ export default function PlatformIntegrationsPanel() {
               <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="connections-title" className="text-lg font-semibold">Connections técnicas da Plataforma</h2><p className="mt-1 text-sm text-foreground/70">Visão de governança persistida. Configurações concretas devem usar os formulários de API acima.</p></div><Database className="h-5 w-5 text-context-accent" aria-hidden="true" /></div>
               {data.platformConnections.length ? <div className="mt-4 divide-y divide-foreground/10">{data.platformConnections.map((connection) => <div key={connection.id} className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><div><p className="text-sm font-semibold">{connection.label || connection.providerName}</p><p className="mt-1 text-sm text-foreground/65">{connection.providerName} · {connection.environment} · {statusLabel(connection.lifecycleStatus)}</p>{connection.providerKey === "telegram" ? <><p className="mt-1 text-sm text-foreground/60">Bot: {connection.telegramBotUsername ? "@" + connection.telegramBotUsername : "não confirmado"}</p><p className="mt-1 break-all text-sm text-foreground/60">Webhook: {connection.telegramWebhookConfigured ? connection.telegramWebhookUrl || "Configurado" : "Não configurado"}</p></> : null}</div><p className="text-sm text-foreground/70">Credencial: {connection.secretConfigured ? "Configurada" : "Não configurada"}</p></div>)}</div> : emptyState("Nenhuma connection da Plataforma configurada.")}
               <form className="mt-5 grid gap-3 border-t border-foreground/15 pt-5 sm:grid-cols-3" onSubmit={createConnection}>
-                <label className="text-sm">Provider<select className={input} value={connectionForm.providerId} onChange={(event) => setConnectionForm({ ...connectionForm, providerId: event.target.value })} required><option value="">Selecione um provider</option>{data.providers.filter((provider) => provider.status !== "legacy" && provider.providerKey !== "deepseek").map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select></label>
+                <label className="text-sm">Provider<select className={input} value={connectionForm.providerId} onChange={(event) => setConnectionForm({ ...connectionForm, providerId: event.target.value })} required><option value="">Selecione um provider</option>{data.providers.filter((provider) => provider.status !== "legacy" && provider.providerKey !== "deepseek" && provider.providerKey !== "openrouter").map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select></label>
                 <label className="text-sm">Ambiente<select className={input} value={connectionForm.environment} onChange={(event) => setConnectionForm({ ...connectionForm, environment: event.target.value })}>{environments.map((environment) => <option key={environment} value={environment}>{environment}</option>)}</select></label>
                 <label className="text-sm">Nome/identificador<input className={input} value={connectionForm.label} onChange={(event) => setConnectionForm({ ...connectionForm, label: event.target.value })} required /></label>
-                <div className="sm:col-span-3"><button className={primary} disabled={saving || !data.providers.some((provider) => provider.status !== "legacy" && provider.providerKey !== "deepseek")}><Database className="h-4 w-4" />Criar connection em DRAFT</button></div>
+                <div className="sm:col-span-3"><button className={primary} disabled={saving || !data.providers.some((provider) => provider.status !== "legacy" && provider.providerKey !== "deepseek" && provider.providerKey !== "openrouter")}><Database className="h-4 w-4" />Criar connection em DRAFT</button></div>
               </form>
-              <p className="mt-3 text-sm text-foreground/60">Este caminho técnico cria apenas uma connection DRAFT, sem segredo. DeepSeek é configurada pelo fluxo operacional acima para preservar a Connection canônica e o Secret Store/Vault existente.</p>
+              <p className="mt-3 text-sm text-foreground/60">Este caminho técnico cria apenas uma connection DRAFT, sem segredo. OpenRouter e DeepSeek são configuradas pelo fluxo operacional acima para preservar a Connection canônica e o Secret Store/Vault existente.</p>
             </section>
           </div>
         </details>

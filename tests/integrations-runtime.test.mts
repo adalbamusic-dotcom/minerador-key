@@ -68,7 +68,7 @@ function authorizationRepository(activeAgencyIds: string[] = [AGENCY_A]): Canoni
 function dependencies(input: {
   activeAgencyIds?: string[];
   capability?: IntegrationCapabilityRow | null;
-  providerKey?: "google_ads" | "dataforseo" | "deepseek";
+  providerKey?: "google_ads" | "dataforseo" | "deepseek" | "openrouter";
   connections?: IntegrationConnectionRow[];
 } = {}): IntegrationRuntimeDependencies & { usage: IntegrationUsageEvent[]; calls: Record<string, number> } {
   const technicalCapability = input.capability === undefined ? capability() : input.capability;
@@ -155,16 +155,20 @@ test("a missing technical catalog row does not become an entitlement denial", as
   assert.equal(resource.quota.status, "UNLIMITED");
 });
 
-test("DataForSEO and DeepSeek map to their provider resources", async (t) => {
+test("DataForSEO and OpenRouter map to their provider resources", async (t) => {
   await t.test("DataForSEO", async () => {
     const resource = await resolveIntegrationResourceForActor(input({ operation: "allintitle" }), dependencies({ providerKey: "dataforseo", capability: capability({ capability_key: "dataforseo.allintitle", operation_kind: "allintitle" }) }));
     assert.equal(resource.resourceKey, "dataforseo");
     assert.equal(resource.connection.providerKey, "dataforseo");
   });
-  await t.test("DeepSeek", async () => {
-    const resource = await resolveIntegrationResourceForActor(input({ operation: "ai_generation" }), dependencies({ providerKey: "deepseek", capability: capability({ capability_key: "ai_generation", operation_kind: "ai_generation" }) }));
-    assert.equal(resource.resourceKey, "deepseek");
-    assert.equal(resource.connection.providerKey, "deepseek");
+  // IA canônica desde 2026-10-11: ai_generation resolve a OpenRouter.
+  await t.test("OpenRouter", async () => {
+    const resource = await resolveIntegrationResourceForActor(input({ operation: "ai_generation" }), dependencies({ providerKey: "openrouter", capability: capability({ capability_key: "ai_generation", operation_kind: "ai_generation" }) }));
+    assert.equal(resource.resourceKey, "openrouter");
+    assert.equal(resource.connection.providerKey, "openrouter");
+  });
+  await t.test("a Connection DeepSeek de reserva não atende ai_generation", async () => {
+    await expectCode(() => resolveIntegrationResourceForActor(input({ operation: "ai_generation" }), dependencies({ providerKey: "deepseek", capability: capability({ capability_key: "ai_generation", operation_kind: "ai_generation" }) })), "INTEGRATION_CONNECTION_MISSING");
   });
 });
 

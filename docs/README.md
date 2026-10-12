@@ -51,6 +51,7 @@ Quando houver conflito, registrar a divergência e seguir a fonte de maior prece
 | [SDD — integrações](compartilhado/sdd-arquitetura-integracoes-plataforma-agencia-marca.md) | Define o destino arquitetônico de connections, capabilities, grants, bindings, uso, segredos e transferência. |
 | [SDD — lifecycle global da Plataforma](compartilhado/sdd-lifecycle-global-plataforma-2026-08-20.md) | Define histórico de sessão, publicação canônica, impacto, delete transacional, recuperação de 24 horas, purge e cleanup controlado. |
 | [Plano de cleanup da homologação 0047](compartilhado/0047-test-cleanup-plan-2026-08-20.md) | Registra a allowlist UUID, impacto, execução e readback da limpeza controlada. |
+| [Adendo — IA da plataforma volta para a OpenRouter](compartilhado/adendo-ia-openrouter-2026-10-11.md) | Fonte de precedência da IA desde 2026-10-11: OpenRouter como provider de `ai_generation`, DeepSeek como reserva de rollback. |
 | [Runbook — homologação DeepSeek Fase 3](compartilhado/runbook-homologacao-deepseek-fase-3-2026-08-19.md) | Registra o preflight remoto read-only, o bloqueio atual e o procedimento manual futuro sem expor segredos. |
 | [Plano de implementação da geração canônica](compartilhado/plano-implementacao-geracao-canonica.md) | Define o caminho por fases, gates, confirmação remota, backfill, rollback, testes e smoke. |
 | [Pipeline editorial, papéis e handoffs](00-produto/pipeline-editorial-papeis-handoffs.md) | Consolida as entradas, saídas, decisões humanas e limites de cada área. |

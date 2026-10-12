@@ -5,7 +5,7 @@ import { isTenantId } from "@/lib/tenant-routing";
 import { getGoogleAdsStaticConfigStatus, normalizeGoogleAdsCustomerId, normalizeGoogleAdsRefreshToken, GoogleAdsPlatformConfigError, type GoogleAdsStaticConfigStatus } from "@/lib/google/ads/config";
 import { createIntegrationSecretStore, IntegrationSecretStoreError } from "@/lib/server/integration-secret-store";
 import { PlatformHealthCheckError, runPlatformProviderHealthProbe, type PlatformHealthOperation, type PlatformHealthProviderKey } from "@/lib/server/platform-integrations-health";
-import { DEEPSEEK_DEFAULT_MODEL } from "@/lib/server/deepseek-canonical";
+import { DEEPSEEK_DEFAULT_MODEL, DeepSeekCanonicalError, OPENROUTER_DEFAULT_MODEL, readOpenRouterModel } from "@/lib/server/deepseek-canonical";
 import {
   GOOGLE_CLOUD_SERVICE_ACCOUNT_SECRET_DESCRIPTION,
   GOOGLE_CLOUD_SERVICE_ACCOUNT_SECRET_NAME,
@@ -41,7 +41,7 @@ import type { StorageClientFactory } from "@/lib/server/google-cloud/storage-ope
 type QueryClient = Pick<SupabaseClient, "from">;
 type SecretMutationClient = Pick<SupabaseClient, "from" | "rpc">;
 
-export type SupportedPlatformProviderKey = "google_ads" | "dataforseo" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";
+export type SupportedPlatformProviderKey = "google_ads" | "dataforseo" | "openrouter" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";
 
 export const PLATFORM_ACCESS_POLICY = "HOMOLOGATION_ALLOW_ALL" as const;
 export type PlatformAccessPolicy = typeof PLATFORM_ACCESS_POLICY;
@@ -52,7 +52,8 @@ export const PLATFORM_CAPABILITY_CATALOG = [
   { capabilityKey: "dataforseo.keyword_research", providerKey: "dataforseo", operationKind: "keyword_research", unitName: "request" },
   { capabilityKey: "google_ads_keyword_discovery", providerKey: "google_ads", operationKind: "keyword_discovery", unitName: "request" },
   { capabilityKey: "google_ads_keyword_metrics", providerKey: "google_ads", operationKind: "keyword_metrics", unitName: "request" },
-  { capabilityKey: "ai_generation", providerKey: "deepseek", operationKind: "ai_generation", unitName: "request" },
+  // IA canônica desde 2026-10-11; a Connection DeepSeek fica só como reserva de rollback.
+  { capabilityKey: "ai_generation", providerKey: "openrouter", operationKind: "ai_generation", unitName: "request" },
   { capabilityKey: "google_cloud.speech_transcription", providerKey: "google_cloud", operationKind: "speech_transcription", unitName: "request" },
   { capabilityKey: "google_cloud.storage_media", providerKey: "google_cloud", operationKind: "storage_media", unitName: "request" },
   { capabilityKey: "youtube.video_metadata", providerKey: "youtube_data", operationKind: "youtube_video_metadata", unitName: "request" },
@@ -65,6 +66,7 @@ export type PlatformCapabilityCatalogEntry = (typeof PLATFORM_CAPABILITY_CATALOG
 const SUPPORTED_PLATFORM_PROVIDERS: Record<SupportedPlatformProviderKey, { displayName: string; secretName: string; secretDescription: string }> = {
   google_ads: { displayName: "Google Ads", secretName: "google_ads_platform", secretDescription: "Google Ads platform credential" },
   dataforseo: { displayName: "DataForSEO", secretName: "dataforseo_platform", secretDescription: "DataForSEO platform credential" },
+  openrouter: { displayName: "OpenRouter", secretName: "openrouter_platform", secretDescription: "OpenRouter platform credential" },
   deepseek: { displayName: "DeepSeek", secretName: "deepseek_platform", secretDescription: "DeepSeek platform credential" },
   google_cloud: { displayName: "Google Cloud Media", secretName: GOOGLE_CLOUD_SERVICE_ACCOUNT_SECRET_NAME, secretDescription: GOOGLE_CLOUD_SERVICE_ACCOUNT_SECRET_DESCRIPTION },
   youtube_data: { displayName: "YouTube Data API", secretName: YOUTUBE_DATA_API_KEY_SECRET_NAME, secretDescription: YOUTUBE_DATA_API_KEY_SECRET_DESCRIPTION },
@@ -181,6 +183,8 @@ export type IntegrationAdminAgency = {
 export type PlatformIntegrationsSnapshot = {
   platformAccessPolicy: PlatformAccessPolicy;
   googleAdsStaticConfig: GoogleAdsStaticConfigStatus;
+  /** Só booleanos e o slug do modelo: a chave nunca sai do servidor. */
+  openRouterRuntime: { apiKeyInEnvironment: boolean; model: string; modelSource: "environment" | "connection" | "default" | "invalid_environment" };
   providers: IntegrationAdminProvider[];
   capabilities: IntegrationAdminCapability[];
   platformConnections: IntegrationAdminConnection[];
@@ -208,6 +212,7 @@ export function providerKeyForPlatformCapability(capabilityKey: string): Support
   if (catalogEntry) return catalogEntry.providerKey;
   if (normalized.startsWith("google_ads.") || normalized.startsWith("google_ads_")) return "google_ads";
   if (normalized.startsWith("dataforseo.") || normalized.startsWith("dataforseo_")) return "dataforseo";
+  if (normalized.startsWith("openrouter.") || normalized.startsWith("openrouter_")) return "openrouter";
   if (normalized.startsWith("deepseek.") || normalized.startsWith("deepseek_")) return "deepseek";
   if (normalized.startsWith("google_cloud.") || normalized.startsWith("google_cloud_")) return "google_cloud";
   if (normalized.startsWith("youtube.") || normalized.startsWith("youtube_")) return "youtube_data";
@@ -301,6 +306,31 @@ function readGoogleAdsResearchCustomerId(metadata: unknown) {
   }
 }
 
+/** Modelo efetivo da OpenRouter, com a mesma precedência do resolvedor (env → metadata conhecida → padrão). */
+function readOpenRouterConfiguredModel(metadata: unknown) {
+  try {
+    return readOpenRouterModel(metadata).model;
+  } catch (error) {
+    if (error instanceof DeepSeekCanonicalError) return process.env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT_MODEL;
+    throw error;
+  }
+}
+
+function readOpenRouterRuntimeStatus(connectionMetadata: unknown): PlatformIntegrationsSnapshot["openRouterRuntime"] {
+  let model: string = OPENROUTER_DEFAULT_MODEL;
+  let modelSource: "environment" | "connection" | "default" | "invalid_environment" = "default";
+  try {
+    const resolved = readOpenRouterModel(connectionMetadata);
+    model = resolved.model;
+    modelSource = resolved.modelSource;
+  } catch (error) {
+    if (!(error instanceof DeepSeekCanonicalError)) throw error;
+    model = process.env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT_MODEL;
+    modelSource = "invalid_environment";
+  }
+  return { apiKeyInEnvironment: Boolean(process.env.OPENROUTER_API_KEY?.trim()), model, modelSource };
+}
+
 function readDeepSeekConfiguredModel(metadata: unknown) {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return DEEPSEEK_DEFAULT_MODEL;
   const record = metadata as Record<string, unknown>;
@@ -358,7 +388,7 @@ export async function readPlatformIntegrations(client: QueryClient): Promise<Pla
       environment: row.environment,
       lifecycleStatus: row.lifecycle_status,
       secretConfigured: Boolean(row.secret_ref?.trim()),
-      configuredModel: providerKey === "deepseek" ? readDeepSeekConfiguredModel(row.metadata) : null,
+      configuredModel: providerKey === "deepseek" ? readDeepSeekConfiguredModel(row.metadata) : providerKey === "openrouter" ? readOpenRouterConfiguredModel(row.metadata) : null,
       managerCustomerIdConfigured: providerKey === "google_ads" && hasGoogleAdsManagerCustomerId(row.metadata),
       researchCustomerId: providerKey === "google_ads" ? readGoogleAdsResearchCustomerId(row.metadata) : null,
       healthCheck,
@@ -450,6 +480,7 @@ export async function readPlatformIntegrations(client: QueryClient): Promise<Pla
   return {
     platformAccessPolicy: PLATFORM_ACCESS_POLICY,
     googleAdsStaticConfig,
+    openRouterRuntime: readOpenRouterRuntimeStatus(((connectionsResult.data || []) as Array<{ provider_id: string; environment: string; metadata: unknown }>).find((row) => providerById.get(row.provider_id)?.provider_key === "openrouter" && row.environment === "production")?.metadata ?? null),
     providers: operationalProviders.map((row) => ({ id: row.id, providerKey: row.provider_key, displayName: row.display_name, status: row.status })),
     capabilities: capabilities.map((row) => ({ id: row.id, capabilityKey: row.capability_key, operationKind: row.operation_kind, environment: row.environment, unitName: row.unit_name, status: row.status })),
     platformConnections,
@@ -1151,7 +1182,7 @@ export async function rotatePlatformGoogleAdsRefreshToken(client: SecretMutation
   }
 }
 
-const SUPPORTED_PLATFORM_PROVIDER_KEYS = ["google_ads", "dataforseo", "deepseek", "google_cloud", "youtube_data", "telegram"] as const;
+const SUPPORTED_PLATFORM_PROVIDER_KEYS = ["google_ads", "dataforseo", "openrouter", "deepseek", "google_cloud", "youtube_data", "telegram"] as const;
 
 type PreparedPlatformConnection = {
   id: string;
@@ -1271,7 +1302,9 @@ function normalizeSupportedProviderSecret(providerKey: Exclude<SupportedPlatform
   }
   const allowedFields = providerKey === "dataforseo"
     ? ["DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD"]
-    : ["DEEPSEEK_API_KEY"];
+    : providerKey === "openrouter"
+      ? ["OPENROUTER_API_KEY"]
+      : ["DEEPSEEK_API_KEY"];
   const record = parsed as Record<string, unknown>;
   if (Object.keys(record).some((field) => !allowedFields.includes(field))) {
     throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_SECRET_PAYLOAD_INVALID", "A credencial informada contém campos não permitidos.");
@@ -1352,6 +1385,7 @@ export async function configureSupportedPlatformProvider(client: SecretMutationC
     ...connection.metadata,
     label,
     ...(providerKey === "deepseek" ? { deepseek_model: DEEPSEEK_DEFAULT_MODEL } : {}),
+    ...(providerKey === "openrouter" ? { openrouter_model: OPENROUTER_DEFAULT_MODEL } : {}),
     ...(providerKey === "google_cloud" ? {
       google_cloud_media: {
         ...(connection.metadata.google_cloud_media && typeof connection.metadata.google_cloud_media === "object" && !Array.isArray(connection.metadata.google_cloud_media) ? connection.metadata.google_cloud_media as Record<string, unknown> : {}),
@@ -1408,7 +1442,7 @@ export async function configureSupportedPlatformProvider(client: SecretMutationC
   };
 }
 
-const PLATFORM_HEALTH_PROVIDER_KEYS = ["google_ads", "dataforseo", "deepseek", "google_cloud", "youtube_data", "telegram"] as const;
+const PLATFORM_HEALTH_PROVIDER_KEYS = ["google_ads", "dataforseo", "openrouter", "deepseek", "google_cloud", "youtube_data", "telegram"] as const;
 
 function isPlatformHealthProviderKey(value: string): value is PlatformHealthProviderKey {
   return PLATFORM_HEALTH_PROVIDER_KEYS.includes(value as PlatformHealthProviderKey);
