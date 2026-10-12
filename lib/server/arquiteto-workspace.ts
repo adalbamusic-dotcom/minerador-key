@@ -17,6 +17,9 @@ import {
   resolveCanonicalMineradorArquitetoImportEligibility,
   type MineradorKeywordHandoffSource,
 } from "@/lib/arquiteto/minerador-handoff";
+import type { EditorialGroupFilter } from "@/lib/editorial/editorial-groups";
+import { articleIdsInGroupFilter, closeKeywordSetOverArticles, groupScopeId } from "@/lib/editorial/article-groups";
+import { readArticleGroupMemberships, readKeywordIdsInGroupFilter } from "@/lib/editorial/article-groups-store";
 
 type WorkflowRow = {
   id: string;
@@ -67,16 +70,26 @@ function workflowSnapshot(row: WorkflowRow) {
   };
 }
 
-async function listArchitectWorkflowItems(context: PipelineContext) {
-  const result = await context.supabase
+async function listArchitectWorkflowItems(context: PipelineContext, subjectIds?: readonly string[]) {
+  const build = () => context.supabase
     .from("editorial_workflow_items")
     .select("id,marca_id,subject_type,subject_id,article_id,stage,state,source_entity_id,source_version_id,source_content_hash,payload,lock_version,created_at,updated_at")
     .eq("marca_id", context.brandId)
     .eq("subject_type", "keyword")
-    .eq("stage", "architect")
-    .order("updated_at", { ascending: false });
-  if (result.error) readFailure(result.error);
-  return (result.data || []) as WorkflowRow[];
+    .eq("stage", "architect");
+  if (!subjectIds) {
+    const result = await build().order("updated_at", { ascending: false });
+    if (result.error) readFailure(result.error);
+    return (result.data || []) as WorkflowRow[];
+  }
+  // F2 · leitura por grupo: só os itens das keywords do recorte, na mesma ordem.
+  const rows: WorkflowRow[] = [];
+  for (const batch of uuidBatches(subjectIds)) {
+    const result = await build().in("subject_id", batch);
+    if (result.error) readFailure(result.error);
+    rows.push(...((result.data || []) as WorkflowRow[]));
+  }
+  return rows.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
 }
 
 function receivedKeywordIdsOf(rows: readonly WorkflowRow[]) {
@@ -136,10 +149,10 @@ async function listBrandKeywordIndex(context: PipelineContext) {
 }
 
 /** Linha inteira só das keywords pedidas, vivas e da marca. */
-async function listBrandKeywordsByIds(context: PipelineContext, ids: readonly string[]) {
+async function listBrandKeywordsByIds(context: PipelineContext, ids: readonly string[], columns: string = ARQUITETO_KEYWORD_ROW_COLUMNS) {
   const rows: BrandKeywordRow[] = [];
   for (const batch of uuidBatches(ids)) {
-    const result = await context.supabase.from("minerador_keywords").select(ARQUITETO_KEYWORD_ROW_COLUMNS).eq("brand_id", context.brandId).is("deleted_at", null).in("id", batch);
+    const result = await context.supabase.from("minerador_keywords").select(columns).eq("brand_id", context.brandId).is("deleted_at", null).in("id", batch);
     if (result.error) readFailure(result.error);
     rows.push(...((result.data || []) as unknown as BrandKeywordRow[]));
   }
@@ -481,14 +494,43 @@ export type CanonicalArquitetoWorkspaceOptions = {
    * `analise_semantica`.
    */
   keywordDetail?: "full";
+  /**
+   * F2 · LEITURA POR GRUPO (SDD 2026-10-12 §8). Ausente ou "Todos os grupos"
+   * = a leitura de sempre, sem nenhuma consulta a mais. Com um grupo (ou "Sem
+   * grupo"), as keywords e os itens da mesa são só os do recorte — fechado
+   * por artigo: um artigo nunca chega com parte das keywords.
+   */
+  groupFilter?: EditorialGroupFilter;
 };
+
+/** As keywords do recorte: as do grupo + as dos artigos do grupo, fechadas por artigo. */
+async function keywordScopeForGroup(context: PipelineContext, filter: Exclude<EditorialGroupFilter, { kind: "all" }>) {
+  const indisponivel = () => new PipelineRuntimeError("CONFLICT", "GROUPS_NOT_AVAILABLE: os grupos ainda não estão disponíveis neste banco.", 409);
+  const leitura = await readArticleGroupMemberships(context.supabase, context.brandId);
+  if (!leitura.ok) throw indisponivel();
+  const doGrupo = await readKeywordIdsInGroupFilter(context.supabase, context.brandId, filter);
+  if (!doGrupo.ok) throw indisponivel();
+  const artigos = articleIdsInGroupFilter(filter, leitura.memberships.values()) || new Set<string>();
+  const semente = [
+    ...doGrupo.ids,
+    ...leitura.articles.filter(article => artigos.has(article.articleId)).flatMap(article => [...article.keywordIds, ...(article.subjectKeywordId ? [article.subjectKeywordId] : [])]),
+  ];
+  return {
+    groupId: groupScopeId(filter) || "",
+    keywordIds: [...closeKeywordSetOverArticles(semente, leitura.articles)],
+    articleIds: [...artigos],
+  };
+}
 
 export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, options: CanonicalArquitetoWorkspaceOptions = {}) {
   const fullKeywordDetail = options.keywordDetail === "full";
-  const workflowRowsRead = listArchitectWorkflowItems(context);
+  const recorte = options.groupFilter && options.groupFilter.kind !== "all" ? await keywordScopeForGroup(context, options.groupFilter) : null;
+  const workflowRowsRead = listArchitectWorkflowItems(context, recorte?.keywordIds);
   const [allWorkflowRows, availableKeywords, artifacts, brandRow, receivedKeywordRows] = await Promise.all([
     workflowRowsRead,
-    fullKeywordDetail ? listBrandKeywords(context) : listBrandKeywordIndex(context),
+    recorte
+      ? listBrandKeywordsByIds(context, recorte.keywordIds, fullKeywordDetail ? ARQUITETO_KEYWORD_ROW_COLUMNS : ARQUITETO_KEYWORD_INDEX_COLUMNS)
+      : fullKeywordDetail ? listBrandKeywords(context) : listBrandKeywordIndex(context),
     listArquitetoArtifacts(context),
     // Catálogo `marcas.silos_existentes`: estado remoto da MESMA Brand, escrito
     // pela criação manual de Silo. Chega pelo read-model canônico em vez de ser
@@ -562,6 +604,8 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
     aiReviews,
     statuses: artifacts.statuses.filter(item => relatedVersionIds.has(item.versionId)),
     brandSiloCatalog: readBrandSiloCatalog(brandRow.data?.silos_existentes),
+    // Aditivo, só com grupo: a resposta é PARCIAL e diz qual recorte é.
+    ...(recorte ? { groupScope: { groupId: recorte.groupId, keywordIds: recorte.keywordIds, articleIds: recorte.articleIds, partial: true as const } } : {}),
   };
 }
 

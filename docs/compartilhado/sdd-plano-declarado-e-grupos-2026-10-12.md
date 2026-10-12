@@ -1,10 +1,11 @@
 # SDD — Plano declarado, grupos por cor e guarda de retrabalho — 2026-10-12
 
 > **Status: APROVADA PELO DONO em 2026-10-12 — entrega em fases (§15).**
-> Decisões da §17 registradas na §18. F1 (grupos no Minerador) e a ampliação
-> do Silo (D3) foram implementadas em 2026-10-12 (ver
-> `docs/03-minerador/estado-atual.md` e `docs/04-arquiteto/estado-atual.md`);
-> F2–F6 continuam pendentes. Migration, SQL remoto, commit, push e deploy
+> Decisões da §17 registradas na §18. F1 (grupos no Minerador), a ampliação
+> do Silo (D3) e a F2 (grupo no Arquiteto e no Radar, leitura por grupo) foram
+> implementadas em 2026-10-12 (ver `docs/03-minerador/estado-atual.md`,
+> `docs/04-arquiteto/estado-atual.md` e `docs/05-radar/estado-atual.md`);
+> F3–F6 continuam pendentes. Migration, SQL remoto, commit, push e deploy
 > continuam com o dono (`AGENTS.md` §15). Toda leitura de banco citada aqui foi
 > `SELECT` (`npx supabase db query --linked`), em 2026-10-12.
 
@@ -969,5 +970,37 @@ Onde a SDD só fazia a pergunta, vale a proposta do próprio texto.
 | Fase | Estado em 2026-10-12 |
 |---|---|
 | D3 (Silo de 4 a 30) | implementado; testes com Silo de 15 e de 30 artigos |
-| F1 (grupos no Minerador) | código e testes prontos; **M1 a aplicar pelo dono**; validado manualmente: não |
-| F2–F6 | pendentes |
+| F1 (grupos no Minerador) | no ar (commit `b3a5d30`) e M1 aplicada — relatado pelo dono, que testou as etiquetas no Minerador (a M1 conferida por SELECT: `editorial_groups`, `editorial_group_articles` e `group_id` existem) |
+| F2 (Arquiteto, Radar e leitura por grupo) | código e testes prontos em 2026-10-12; **sem migration nova** (usa `editorial_group_articles` da M1); validado manualmente: não. Detalhe abaixo |
+| F3–F6 | pendentes |
+
+#### F2 — como foi feita (2026-10-12)
+
+- **Regra da herança** (uma só, `lib/editorial/article-groups.ts` → `inheritArticleGroup`): o grupo do Assunto
+  do ArticleDNA; sem ele, o da principal; sem os dois, o grupo com mais keywords do artigo (principal,
+  secundárias e reforços); empate = sem grupo, com o conflito visível; nenhuma com grupo = sem grupo. A
+  etiqueta gravada em `editorial_group_articles` vence a herança e nunca é trocada por ela.
+- **Núcleo único** (`lib/editorial/article-group-core.ts`, repositório `lib/editorial/article-groups-store.ts`,
+  o único escritor da tabela, conferido por teste estrutural): prévia e gravação de "Etiquetar artigos pelo
+  grupo das keywords" (aditivo, `ignoreDuplicates`), etiqueta aditiva ao gravar o ArticleDNA
+  (`appendArquitetoArtifact`, só com `PERSISTED`) e ao importar no Radar (depois da releitura), e o "Mover
+  para <grupo> / Voltar ao grupo das keywords" do rodapé (origem `human`). A formação e a importação nunca
+  falham por causa do grupo; marca sem grupo nas keywords do artigo paga uma leitura só.
+- **Rota** `/api/editorial/groups/articles`: GET (grupo efetivo dos artigos e, com `include=keywords`, das
+  keywords com grupo), POST `preview|apply` e PATCH (mover). Escrever exige edição no Arquiteto ou no Radar.
+- **Leitura por grupo** (§8): `GET /api/editorial/workspace?groupId=` e `GET /api/arquiteto/workspace?groupId=`
+  (uuid ou `sem-grupo`; inválido = 400). Sem o parâmetro, as mesmas consultas e o mesmo corpo de antes (teste).
+  Com ele, a mesa lê só os itens do Radar, ArticleDNA/SiloDNA (os Silos que têm esses artigos), documentos,
+  publicações e SERP dos artigos do grupo efetivo, e a resposta leva `groupScope` (parcial). O Arquiteto lê
+  só as keywords e itens do grupo, **fechados por artigo** (`closeKeywordSetOverArticles`): nenhum artigo chega
+  com parte das keywords. O fluxo em partes, a listagem do Radar pela tabela e a função
+  `editorial_content_documents_listing` continuam iguais (o recorte filtra o que a função devolve).
+- **Telas:** o mesmo `EditorialGroupSelector` no topo do Arquiteto (abas Artigos e Silos) e do Radar, a mesma
+  etiqueta e a faixa de 4 px; grupo na URL e o último usado lembrado com a mesma chave do Minerador. O filtro é
+  **de tela**: a mesa continua lida inteira e o cache e a cópia local nunca recebem um recorte — a leitura
+  parcial pela tela (cache por grupo) fica para depois da medição do peso.
+- **WifiConecta (SELECT, 2026-10-12):** 1 grupo ("laranja", 56 keywords, 0 artigos etiquetados); os 8
+  ArticleDNA vigentes têm todas as keywords em "laranja". Os 8 recebem "laranja": 7 pelo Assunto
+  (`04320a9b`, `4339882e`, `4ac4d315`, `6d5d87cd`, `a1306160`, `d59f40a5`, `f6c2f85e`) e "plano vivo controle"
+  (`article-candidate:territory:9c75c3a7…:679b1bb2`, sem Assunto) pela principal. A SiloPage
+  `territory:9c75c3a7…` mostra "laranja" porque todos os artigos dela concordam.

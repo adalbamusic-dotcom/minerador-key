@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { architectPatchKeywordReadInput, loadCanonicalArquitetoWorkspace, readArchitectPatchKeywords } from "@/lib/server/arquiteto-workspace";
 import { pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
+import { parseGroupIdQuery } from "@/lib/editorial/article-groups";
 import { resolvePipelineContext, PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
 import { WorkflowRepository } from "@/lib/server/pipeline-repositories";
 import { ArticleKgrIdentitySchema, SiloCandidateMarkSchema } from "@/lib/arquiteto/contracts";
@@ -134,11 +135,16 @@ export async function handleArchitectWorkspaceRead(request: Request) {
   try {
     const searchParams = new URL(request.url).searchParams;
     const query = QuerySchema.parse({ brandId: searchParams.get("brandId") || "" });
+    // F2 · `groupId` opcional (uuid ou "sem-grupo"); ausente = a leitura de sempre. Inválido é 400, nunca "todos" em silêncio.
+    const grupo = parseGroupIdQuery(searchParams.get("groupId"));
+    if (!grupo.ok) return NextResponse.json({ success: false, error: "groupId inválido.", code: "INVALID_CONTEXT" }, { status: 400 });
     const context = await resolvePipelineContext({ brandId: query.brandId, module: "arquiteto", action: "view" });
     // Hidratação é LEITURA: o boot devolve o parecer já gravado e nunca
     // dispara consulta nova ao provider.
     const [workspace, territories, siloWorkingCopies, territorialSerp, articleFormationSerp, territorialAi, architectureMarker, articleFormationMarker] = await Promise.all([
-      loadCanonicalArquitetoWorkspace(context, { keywordDetail: keywordDetailOf(searchParams) }),
+      grupo.filter.kind === "all"
+        ? loadCanonicalArquitetoWorkspace(context, { keywordDetail: keywordDetailOf(searchParams) })
+        : loadCanonicalArquitetoWorkspace(context, { keywordDetail: keywordDetailOf(searchParams), groupFilter: grupo.filter }),
       listTerritoryWorkflowItems(context),
       listSiloWorkingCopies(context),
       listTerritorialSerpAssessments(context),

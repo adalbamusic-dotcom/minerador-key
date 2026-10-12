@@ -306,7 +306,8 @@ test("subject igual ao da versão anterior: grava sem conferir a keyword (quem c
   const version = await envelope("article-marketing-clinicas", artigo(anterior));
   const persisted = await appendArquitetoArtifact(context(db), "article_dna", version);
   assert.equal(persisted.status, "PERSISTED");
-  assert.equal(db.calls.some(call => call.table === "minerador_keywords" || call.table === "editorial_workflow_items"), false);
+  // F2 dos grupos (2026-10-12): depois de gravar, a etiqueta aditiva lê só o grupo das keywords do artigo — não é o guarda do Assunto.
+  assert.equal(db.calls.some(call => (call.table === "minerador_keywords" && call.columns !== "id,keyword,group_id") || call.table === "editorial_workflow_items"), false);
 });
 
 test("sem Assunto: nenhuma leitura nova, a gravação é a de antes", async () => {
@@ -316,6 +317,8 @@ test("sem Assunto: nenhuma leitura nova, a gravação é a de antes", async () =
   assert.deepEqual(db.calls.map(call => `${call.table}|${call.op}|${call.columns}`), [
     "editorial_artifact_versions|select|*",
     "editorial_artifact_versions|insert|*",
+    // F2 dos grupos (2026-10-12): depois de gravar, UMA leitura do grupo das keywords do artigo; sem grupo, nada mais.
+    "minerador_keywords|select|id,keyword,group_id",
   ]);
 });
 
@@ -424,7 +427,8 @@ test("Q7: a versão anterior já tinha o Assunto como principal, nada é relido"
   const db = banco({ previousSubject: anterior, previousPrincipal: ASSUNTO });
   const persisted = await appendArquitetoArtifact(context(db), "article_dna", await envelope("article-marketing-clinicas", artigo(anterior, ASSUNTO)));
   assert.equal(persisted.status, "PERSISTED");
-  assert.equal(db.calls.some(call => call.table === "minerador_keywords" || call.table === "editorial_workflow_items"), false);
+  // F2 dos grupos (2026-10-12): depois de gravar, a etiqueta aditiva lê só o grupo das keywords do artigo — não é o guarda do Assunto.
+  assert.equal(db.calls.some(call => (call.table === "minerador_keywords" && call.columns !== "id,keyword,group_id") || call.table === "editorial_workflow_items"), false);
 });
 
 /* ------------------ consolidação canônica do Silo (RPC A) ------------------ */

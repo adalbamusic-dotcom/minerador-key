@@ -1,5 +1,29 @@
 # Estado atual — Radar
 
+## Grupos por cor no Radar e leitura da mesa por grupo (F2) — 2026-10-12
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** SDD
+`docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` (F2). Sem migration nova, sem escrita remota,
+sem chamada paga.
+
+- **Tela:** o mesmo seletor de grupo do Minerador no topo da planilha ("Sem grupo" conta artigos do Radar), a
+  etiqueta (bolinha + nome) embaixo da keyword na coluna Artigo e a faixa de 4 px na célula do número. O item
+  herda o grupo pelo ARTIGO (etiqueta gravada ou grupo das keywords). No rodapé da seleção: "Grupo ▸ Mover
+  para <grupo> / Voltar ao grupo das keywords"; no menu do seletor, "Etiquetar artigos pelo grupo das keywords"
+  com prévia dos artigos do Radar. O grupo ativo é recorte de TELA (`rowFilter` no grid): a tabela recebe
+  `pipeline.radarItems` inteira, o guarda do expansor procura nela e o cache/cópia local nunca recebe recorte.
+- **Importar do Arquiteto:** depois da releitura confirmada, o artigo ainda sem etiqueta recebe a do grupo das
+  keywords (aditivo, nunca lança, mesmo núcleo do "Etiquetar").
+- **Mesa por grupo:** `GET /api/editorial/workspace?groupId=<uuid|sem-grupo>` lê só os artigos do grupo
+  efetivo — itens do Radar (`.in("article_id")` em blocos de 100, ainda pela tabela), ArticleDNA e os SiloDNA
+  que têm esses artigos, publicações e SERP; documentos pela mesma função `editorial_content_documents_listing`,
+  filtrados pelo artigo. A resposta sai pelo mesmo fluxo em partes (`radarPortableExportStreamResponse`) e leva
+  `groupScope` (parcial). Sem `groupId`, as mesmas oito leituras e o mesmo corpo (teste com e sem tabelas de
+  grupo). `groupId` inválido = 400 `invalid_group_id`; sem a M1 = 409 `GROUPS_NOT_AVAILABLE`.
+- **Isolamento:** grupo, etiqueta, ArticleDNA e keyword de outra marca nunca entram (teste).
+- **Testes:** `tests/radar-grupos-f2.test.mts` (mesa por grupo com o PostgREST simulado, resposta idêntica sem
+  `groupId`, isolamento, faixa/etiqueta no grid e na aba Silos, seletor e prévia em DOM). Contagens (2026-10-12): `test:arquiteto` 2794/2794 (era 2773; +21); `test:arquiteto:servidor` 104/104; `test:arquiteto:lentes` 81/81; `test:radar` 3459 · 3458 · 1 pulado (era 3449; +10); `test:redator` 357/357; `test:agent` 73/73; Minerador por glob 1204 · 1176 · 28 (as mesmas 28 da base, por nome); `test:minerador:dom` 4/4; `test:editorial` 172 · 168 · 4 (as 4 antigas); `tsc` 0 erros; ESLint sem problema novo (Arquiteto 121 = HEAD, Radar 10 avisos = HEAD); guard visual sem dívida nova; `git diff --check` limpo.
+
 ## Nome do arquivo do CSV — 2026-10-12
 
 Pedido do dono, verificado no código e confirmado por teste; validado manualmente: não. O CSV "Para escrever" de um

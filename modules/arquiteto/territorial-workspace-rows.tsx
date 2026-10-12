@@ -4,6 +4,8 @@ import React from "react";
 import type { TerritorialGroup, TerritorialHeaderRow, TerritorialKeywordRow, TerritorialSurface } from "@/lib/arquiteto/territorial-surface";
 import type { TerritorialProcessCell } from "@/lib/arquiteto/territorial-review";
 import { SubjectConservationBadge } from "./subject-panels";
+import { EditorialGroupTag } from "@/components/editorial/group-tag";
+import { EDITORIAL_GROUP_COLOR_CLASSES, type EditorialGroupSummary } from "@/lib/editorial/editorial-groups";
 
 /**
  * Projeção territorial das linhas da planilha do Arquiteto (modo Silos).
@@ -493,6 +495,7 @@ function KeywordRow({
   vinculo = null,
   expandida = false,
   onToggleExpand,
+  group = null,
 }: {
   row: TerritorialKeywordRow;
   keywordLabel: string;
@@ -508,6 +511,8 @@ function KeywordRow({
   vinculo?: KeywordVinculoLine | null;
   expandida?: boolean;
   onToggleExpand?: (keywordId: string) => void;
+  /** 2026-10-12 · F2 dos grupos: o grupo da keyword (faixa + etiqueta, como no Minerador). */
+  group?: Pick<EditorialGroupSummary, "name" | "color"> | null;
 }) {
   const hypothesis = row.hypothesis;
   const head = hypothesis?.headKeywordId ?? null;
@@ -522,7 +527,7 @@ function KeywordRow({
   const hasMembership = Boolean(row.territoryRef || row.existingSiloId);
   return (
     <tr data-testid="architect-territorial-keyword-row" className="border-b border-divider/60">
-      <td colSpan={99} className="px-3 py-2">
+      <td colSpan={99} className={`px-3 py-2 ${group ? EDITORIAL_GROUP_COLOR_CLASSES[group.color].stripe : ""}`}>
         <div className={`${TERRITORIAL_GRID} text-sm`}>
           {/* Unidade */}
           <span className="flex min-w-0 items-center gap-2">
@@ -553,6 +558,7 @@ function KeywordRow({
             )}
             <span className="shrink-0 rounded border border-divider px-1.5 text-xs font-bold uppercase tracking-widest text-text-muted">Keyword</span>
             <span className="truncate font-medium text-keyword" title={keywordLabel}>{keywordLabel}</span>
+            {group ? <EditorialGroupTag name={group.name} color={group.color} className="shrink-0" /> : null}
           </span>
           {/* Origem da keyword é o Minerador; o silo aparece no detalhe. */}
           <Cell value="Minerador" />
@@ -772,6 +778,7 @@ export function TerritorialWorkspaceRows({
   selection = null,
   dnaByKeywordId = null,
   vinculoByKeywordId = null,
+  groupForKeyword = null,
 }: {
   surface: TerritorialSurface;
   /** Texto da KeywordDNA; o componente não vai buscar dado por conta própria. */
@@ -798,6 +805,8 @@ export function TerritorialWorkspaceRows({
   decisionByRef?: ReadonlyMap<string, string> | null;
   /** Evidência longa, exibida só na expansão. */
   detailsByRef?: ReadonlyMap<string, readonly { label: string; value: string }[]> | null;
+  /** 2026-10-12 · F2 dos grupos: o grupo de cada keyword (ausente = sem etiqueta, como antes). */
+  groupForKeyword?: ((keywordId: string) => Pick<EditorialGroupSummary, "name" | "color"> | null) | null;
 }) {
   // Recolher é conveniência de leitura: nenhum dado sai da mesa nem da busca.
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
@@ -896,6 +905,7 @@ export function TerritorialWorkspaceRows({
                       vinculo={vinculoByKeywordId?.get(row.keywordId) ?? null}
                       expandida={expandidas.has(row.keywordId)}
                       onToggleExpand={alternarExpansao}
+                      group={groupForKeyword ? groupForKeyword(row.keywordId) : null}
                     />
                   ))}
                 </React.Fragment>

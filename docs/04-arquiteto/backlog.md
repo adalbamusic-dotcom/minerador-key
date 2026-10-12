@@ -1,3 +1,17 @@
+## Grupos por cor no Arquiteto e leitura por grupo (F2) — 2026-10-12
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Seletor de grupo, faixa e etiqueta nas abas Artigos e Silos (mesmo componente do Minerador).
+- [x] Grupo do artigo herdado das keywords (Assunto → principal → maioria; empate sem grupo), regra única testada.
+- [x] "Etiquetar artigos pelo grupo das keywords" com prévia; etiqueta aditiva ao formar o ArticleDNA.
+- [x] Rodapé: "Mover para <grupo>" e "Voltar ao grupo das keywords".
+- [x] `groupId` opcional em `GET /api/arquiteto/workspace` (fechado por artigo; sem parâmetro, igual a antes).
+- [ ] **Dono:** homologar na WifiConecta (etiquetar os 8 artigos, filtrar "laranja", F5 com `?grupo=`).
+- [ ] Medir o peso da mesa por grupo (AdalbaPro) e decidir a leitura parcial pela tela (cache por grupo).
+- [ ] Artefatos e territórios do Arquiteto por grupo (hoje continuam da marca inteira na leitura com `groupId`).
+- [ ] F3/F4 da SDD: plano declarado (Fase A e Fase B), principal declarada fixa, papel no Silo.
+
 ## Silo amplo: de 4 a 30 artigos (D3) — 2026-10-12
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
@@ -6,7 +20,7 @@ Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
 - [x] Âncoras do grafo em lotes de 40 conexões (Silo de 14+ artigos era recusado pela rota).
 - [x] Mapa do Silo mostra todos os Suportes.
 - [ ] Dono: gerar âncoras num Silo de 15+ artigos e conferir os lotes na tela.
-- [ ] F2 da SDD de grupos: seletor de grupo e leitura por grupo na mesa do Arquiteto.
+- [x] F2 da SDD de grupos: seletor de grupo e leitura por grupo na mesa do Arquiteto (2026-10-12, seção acima).
 
 ## Fechamento do Silo sem site e melhoria sem retrabalho — 2026-10-12 (WifiConecta)
 

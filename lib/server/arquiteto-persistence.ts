@@ -29,6 +29,8 @@ import {
 } from "./pipeline-repositories";
 import { assertDeclaredSubjectWrite, SubjectWriteRefusedError } from "./arquiteto-subject-guard";
 import type { SubjectActorMode } from "@/lib/arquiteto/declared-subject-guard";
+import { articleKeywordIndex } from "@/lib/editorial/article-groups";
+import { ensureArticleGroupsFromKeywordsWithCore } from "@/lib/editorial/article-group-core";
 
 export type ArquitetoArtifactType = Extract<ArtifactType, "article_dna" | "silo_dna" | "silo_page" | "article_architecture_ai_review">;
 export type ArquitetoArtifactVersion =
@@ -319,6 +321,28 @@ export async function appendArquitetoArtifact(
     changeReason: version.changeReason,
     createdAt: version.createdAt,
   });
+
+  /*
+   * F2 DOS GRUPOS (SDD 2026-10-12 §6.2-9) · AO FORMAR, O ARTIGO RECEBE O GRUPO
+   * DAS KEYWORDS — aditivo: só grava etiqueta que ainda não existe, pelo mesmo
+   * núcleo do "Etiquetar artigos pelo grupo das keywords". Nunca lança e nunca
+   * muda o resultado desta gravação: grupo é organização, não significado.
+   */
+  if (type === "article_dna" && result.status === "PERSISTED") {
+    const dna = payload as ArticleDNA;
+    await ensureArticleGroupsFromKeywordsWithCore(context.supabase, {
+      brandId: context.brandId,
+      actorUserId: context.actorUserId,
+      articles: [articleKeywordIndex({
+        articleId: dna.articleId,
+        principalKeywordId: dna.principalKeywordId,
+        subjectKeywordId: dna.subject?.keywordId ?? null,
+        secondaryKeywordIds: dna.secondaryKeywordIds,
+        narrativeReinforcementIds: dna.narrativeReinforcementIds,
+      })],
+      trigger: "formation",
+    });
+  }
 
   return {
     status: result.status,

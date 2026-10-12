@@ -4,7 +4,10 @@ import { z } from "zod";
 import { requireCanonicalSessionProfile, authzErrorResponse } from "@/lib/server/authz";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { ArtifactRepository, ContentDocumentRepository, InvitationRepository, PublicationRepository, SerpSnapshotRepository, ViewPreferenceRepository, WorkflowRepository } from "@/lib/server/editorial-repositories";
-import { PersistenceUnavailableError } from "@/lib/server/editorial-db";
+import { getOperationalClient, PersistenceUnavailableError } from "@/lib/server/editorial-db";
+import { articleIdsInGroupFilter, groupScopeId, parseGroupIdQuery } from "@/lib/editorial/article-groups";
+import { readArticleGroupMemberships, readSiloIdsForArticles } from "@/lib/editorial/article-groups-store";
+import { GROUPS_NOT_AVAILABLE } from "@/lib/editorial/editorial-groups";
 import { PersistedEditorialWorkspaceSchema } from "@/lib/editorial/persistence-contracts";
 import type { RadarItem } from "@/lib/editorial/operational-flow";
 import { radarPortableExportStreamResponse } from "@/lib/radar/portable-export-response";
@@ -53,15 +56,40 @@ export async function GET(request: NextRequest) {
     }
     await assertEditorialPermission(profile, marcaId, "marca", "view");
 
+    /*
+     * 2026-10-12 · F2 DOS GRUPOS — `groupId` OPCIONAL (SDD §8).
+     *
+     * Sem o parâmetro, nada abaixo muda: as mesmas oito leituras de sempre e o
+     * mesmo corpo. Com ele (`uuid` ou `sem-grupo`), o servidor resolve os
+     * artigos do recorte pelo grupo EFETIVO (etiqueta gravada ou herança das
+     * keywords) e lê só eles: itens do Radar, ArticleDNA/SiloDNA (os Silos que
+     * têm esses artigos), documentos, publicações e SERP. Convites e
+     * preferências são da marca e continuam inteiros. A resposta ganha
+     * `groupScope`: quem a recebe sabe que é PARCIAL e não pode trocar a lista
+     * inteira por ela.
+     */
+    const grupo = parseGroupIdQuery(request.nextUrl.searchParams.get("groupId"));
+    if (!grupo.ok) return NextResponse.json({ requestId, code: "invalid_group_id", error: "Grupo inválido." }, { status: 400 });
+    let recorte: { groupId: string; articleIds: string[]; entityIds: string[] } | null = null;
+    if (grupo.filter.kind !== "all") {
+      const operacional = getOperationalClient();
+      const leitura = await readArticleGroupMemberships(operacional, marcaId);
+      if (!leitura.ok) return NextResponse.json({ requestId, code: GROUPS_NOT_AVAILABLE, error: "Os grupos ainda não estão disponíveis neste banco." }, { status: 409 });
+      const articleIds = [...(articleIdsInGroupFilter(grupo.filter, leitura.memberships.values()) || [])];
+      const siloIds = await readSiloIdsForArticles(operacional, marcaId, articleIds);
+      recorte = { groupId: groupScopeId(grupo.filter) || "", articleIds, entityIds: [...articleIds, ...siloIds] };
+    }
+    const doRecorte = recorte ? { articleIds: recorte.articleIds } : {};
+
     const settled = await Promise.allSettled([
-      new WorkflowRepository().list(marcaId),
-      new ArtifactRepository().list(marcaId),
+      new WorkflowRepository().list(marcaId, doRecorte),
+      recorte ? new ArtifactRepository().listScoped(marcaId, recorte.entityIds) : new ArtifactRepository().list(marcaId),
       new ContentDocumentRepository().list(marcaId, profile.userId),
-      new PublicationRepository().list(marcaId),
+      new PublicationRepository().list(marcaId, doRecorte),
       new InvitationRepository().list(marcaId),
       new ViewPreferenceRepository().list(marcaId, profile.userId),
-      new SerpSnapshotRepository().list(marcaId),
-      new SerpSnapshotRepository().listReviews(marcaId),
+      new SerpSnapshotRepository().list(marcaId, undefined, recorte?.articleIds),
+      new SerpSnapshotRepository().listReviews(marcaId, undefined, recorte?.articleIds),
     ]);
 
     const falhas: FalhaDeSecao[] = [];
@@ -74,7 +102,12 @@ export async function GET(request: NextRequest) {
 
     const workflow = valor(0, { radar: [] as RadarItem[], incompatible: [] as IncompatibleRecord[] });
     const artifacts = valor(1, { articles: [], silos: [], events: [], incompatible: [] as IncompatibleRecord[] });
-    const documents = valor(2, [] as never[]);
+    /* A listagem dos documentos é a função de banco de sempre (leve); o recorte filtra o que ela devolveu, pelo artigo do documento. */
+    const artigosDoRecorte = recorte ? new Set(recorte.articleIds) : null;
+    const documentosLidos = valor(2, [] as never[]);
+    const documents = artigosDoRecorte
+      ? documentosLidos.filter(registro => artigosDoRecorte.has(String((registro as { document?: { articleDnaRef?: { entityId?: unknown } } }).document?.articleDnaRef?.entityId ?? "")))
+      : documentosLidos;
     const publications = valor(3, [] as never[]);
     const invitations = valor(4, [] as never[]);
     const views = valor(5, [] as never[]);
@@ -137,6 +170,7 @@ export async function GET(request: NextRequest) {
       incompatible: incompatible.length,
       failedSections: falhas.map(falha => falha.secao),
       radarArticleIds: workflow.radar.map(item => item.articleId),
+      groupScope: recorte ? { groupId: recorte.groupId, articles: recorte.articleIds.length } : null,
     });
 
     /*
@@ -153,6 +187,9 @@ export async function GET(request: NextRequest) {
      * mesmo JSON: `resposta.json()` junta os pedaços e nenhum consumidor muda.
      * Os erros acima continuam em `NextResponse.json`: são pequenos.
      */
+    if (recorte) {
+      return radarPortableExportStreamResponse({ requestId, data: parsed.data, groupScope: { groupId: recorte.groupId, articleIds: recorte.articleIds, partial: true } });
+    }
     return radarPortableExportStreamResponse({ requestId, data: parsed.data });
   } catch (error) {
     if (error instanceof PersistenceUnavailableError) {

@@ -12,6 +12,8 @@ import { OptimisticLockError, PersistenceUnavailableError } from "@/lib/server/e
 import { WorkflowCommandSchema } from "@/lib/editorial/persistence-contracts";
 import { articleApprovalIssues, importArticlesToRadar, RadarItemSchema } from "@/lib/editorial/operational-flow";
 import { contentHash } from "@/lib/arquiteto/versioning";
+import { articleKeywordIndex } from "@/lib/editorial/article-groups";
+import { ensureArticleGroupsFromKeywordsWithCore } from "@/lib/editorial/article-group-core";
 
 /*
  * CORTE 2 · `approved → sent_planner` saiu, e `sent_planner → approved` também.
@@ -117,6 +119,8 @@ export async function POST(request: NextRequest) {
           sourceVersionId: version.versionId,
         });
         confirmedRadar.push(RadarItemSchema.parse({...readback!.payload as object,id:readback!.id,lockVersion:readback!.lock_version,state:readback!.state}));
+        /* F2 dos grupos · o item do Radar herda o grupo pelo artigo: artigo ainda sem etiqueta recebe a das keywords (aditivo, nunca lança). */
+        await ensureArticleGroupsFromKeywordsWithCore(db, { brandId: command.brandId, actorUserId: profile.userId, trigger: "radar_import", articles: [articleKeywordIndex({ articleId: version.payload.articleId, principalKeywordId: version.payload.principalKeywordId, subjectKeywordId: version.payload.subject?.keywordId ?? null, secondaryKeywordIds: version.payload.secondaryKeywordIds, narrativeReinforcementIds: version.payload.narrativeReinforcementIds })] });
        } catch (error) {
         /* Recusa de regra (409) é do artigo, não do lote. Infraestrutura (502, 503, banco) continua parando tudo. */
         if (error instanceof AuthzError && error.status === 409) {
