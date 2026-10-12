@@ -5,6 +5,7 @@ import { PipelineRuntimeError, pipelineErrorFromSupabase } from "./pipeline-runt
 import { readRpcDomainError } from "@/lib/arquiteto/silo-working-copy-record";
 import { canonicalVersionFromRow } from "./arquiteto-persistence";
 import { assertConsolidatedSiloSubject } from "./arquiteto-subject-guard";
+import { linkDeclaredPlanGroupToSilo, type SiloGroupLinkOutcome } from "./arquiteto-silo-group-link";
 import { TERRITORY_SUBJECT_TYPE, TERRITORY_WORKFLOW_STAGE, parseTerritoryWorkflowRow } from "@/lib/arquiteto/territory-record";
 import {
   SILO_WORKING_COPY_STAGE,
@@ -83,6 +84,11 @@ export type SiloConsolidationResult = {
   siloDna: unknown;
   siloPage: unknown;
   workingCopy: unknown;
+  /**
+   * F4 — o grupo do plano declarado ligado ao Silo (`editorial_groups.silo_id`).
+   * Aditivo e nunca fatal: `failed` não desfaz a consolidação.
+   */
+  groupLink?: SiloGroupLinkOutcome;
 };
 
 const WORKFLOW_COLUMNS =
@@ -362,6 +368,16 @@ export async function consolidateSiloFromWorkingCopy(
   const siloDnaEnvelope = canonicalVersionFromRow("silo_dna", data.siloDna as Record<string, unknown>);
   const siloPageEnvelope = canonicalVersionFromRow("silo_page", data.siloPage as Record<string, unknown>);
 
+  /*
+   * F4 — DEPOIS do readback, nunca antes: o Silo já está gravado e confirmado.
+   * O vínculo do grupo do plano é aditivo e não derruba a consolidação.
+   */
+  const consolidado = siloDnaEnvelope as VersionEnvelope<SiloDNA>;
+  const groupLink = await linkDeclaredPlanGroupToSilo(context, {
+    siloId: consolidado.payload.siloId,
+    articleVersionIds: consolidado.payload.articleReferences.map(reference => reference.articleDnaVersionId),
+  });
+
   return {
     persistence: "PERSISTED",
     source: "CANONICAL_REMOTE",
@@ -372,5 +388,6 @@ export async function consolidateSiloFromWorkingCopy(
     siloDna: siloDnaEnvelope,
     siloPage: siloPageEnvelope,
     workingCopy: data.workingCopy,
+    groupLink,
   };
 }

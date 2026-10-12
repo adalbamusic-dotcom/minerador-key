@@ -18,6 +18,7 @@ import { applySerpDecisionToArticle, buildClassificationEvidence, resolveArticle
 import { resolveApprovedArticleSerpGate, type ApprovedSerpRecord } from "@/lib/arquiteto/approved-article-serp-gate";
 import { readArticleKgrDecision } from "@/lib/arquiteto/article-kgr-decision";
 import { readArchitectSubjectStanding, planSubjectAttachment, attachSubjectToArticleDna } from "@/lib/arquiteto/declared-subject";
+import { applyDeclaredPlanToArticleDna, declaredPlanAppliedTo, declaredPlanForGroup } from "@/lib/arquiteto/declared-plan-formation";
 import { shortSeedsOf, sharesTheme } from "@/lib/minerador/short-seeds";
 import { ARTICLE_IMPROVEMENT_VERSION, volumelessPrincipalSwap, carriesSlugCore, planArticleImprovements, improvementEditorialFit, isListReading, serpSupportedMembers, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence } from "@/lib/arquiteto/article-improvement";
 import { buildImprovementAiPrompt, editorialAiRecord, improvementAiEligibleTargets, improvementAiList, improvementAiTargets, IMPROVEMENT_AI_TIMEOUT_MS, validateImprovementAiPicks, type ImprovementEditorialAi } from "@/lib/arquiteto/article-improvement-ai";
@@ -120,12 +121,15 @@ function sourceHash(target: ImprovementTarget, workspace: Workspace, rows: Map<s
     const decision = object(row.articleFormationDecision);
     return { id, territoryRef: text(row.territoryRef), formationRef: text(row.articleFormationRef), role: text(decision.role), decisionSource: text(decision.source), published: Boolean(row.isPublished), post: text(row.primaryKeywordPolicy), dnaVersion: row.keywordDnaRef?.versionId ?? null };
   };
-  const identity = { id: target.id, kind: target.kind, theme: target.theme, primaryId: target.primaryId, post: target.post, memberIds: target.memberIds, territoryRef: target.territoryRef, slug: target.slug, url: target.url, canonical: target.canonical };
+  const identity = { id: target.id, kind: target.kind, theme: target.theme, primaryId: target.primaryId, post: target.post, memberIds: target.memberIds, territoryRef: target.territoryRef, slug: target.slug, url: target.url, canonical: target.canonical,
+    // F4 — o plano declarado muda o artigo: entra na impressão digital só quando existe.
+    ...(target.declaredPrincipalId ? { declaredPrincipalId: target.declaredPrincipalId } : {}), ...(target.declaredPlanPending ? { declaredPlanPending: true } : {}) };
   return hash({ target: identity, article: article?.contentHash ?? null, members: target.memberIds.map(member) });
 }
 async function readInputs(context: PipelineContext, requested?: string[]) {
   const [workspace, brand, territories] = await Promise.all([loadCanonicalArquitetoWorkspace(context, { keywordDetail: "full" }), readDifferentiationBrandKeywords(context), listTerritoryWorkflowItems(context)]);
   const rows = projected(workspace, context.brandId), targets: ImprovementTarget[] = [];
+  const waitingDeclaredPrincipal: string[] = [];
   const owned = new Map<string, string>();
   for (const a of workspace.articleDnas) for (const reference of a.payload.keywordReferences) owned.set(reference.keywordId, a.payload.subject?.keywordId ?? a.payload.articleId);
   for (const page of brand.pages) {
@@ -144,7 +148,15 @@ async function readInputs(context: PipelineContext, requested?: string[]) {
     const standing = readArchitectSubjectStanding(row);
     if (!standing.declared || !standing.received || targets.some(t => t.memberIds.includes(row.id))) continue;
     const article = workspace.articleDnas.find(a => a.payload.subject?.keywordId === row.id);
-    targets.push({ id: row.id, kind: "subject", theme: standing.phrase, note: standing.note, primaryId: article?.payload.principalKeywordId ?? null, post: "free", memberIds: article?.payload.keywordReferences.map(r => r.keywordId) ?? [], territoryRef: text(row.territoryRef), slug: article?.payload.suggestedSlug ?? null, url: null, canonical: null, signals: signals(row) });
+    // F4 — a principal declarada ainda não chegou ao Arquiteto: o Assunto espera (nunca ganha principal sugerida).
+    if (standing.plan?.declaredPrincipal && !rows.has(standing.plan.declaredPrincipal.keywordId)) {
+      waitingDeclaredPrincipal.push(`“${standing.phrase}” aguarda a principal declarada “${standing.plan.declaredPrincipal.phrase}” chegar ao Arquiteto (aprove-a no Minerador e envie).`);
+      continue;
+    }
+    targets.push({ id: row.id, kind: "subject", theme: standing.phrase, note: standing.note, primaryId: article?.payload.principalKeywordId ?? null, post: "free", memberIds: article?.payload.keywordReferences.map(r => r.keywordId) ?? [], territoryRef: text(row.territoryRef), slug: article?.payload.suggestedSlug ?? null, url: null, canonical: null, signals: signals(row),
+      // F4 — principal declarada no plano (pacote aprovado do Assunto): fixa; e o plano ainda não aplicado ao DNA (D8).
+      ...(standing.plan?.declaredPrincipal ? { declaredPrincipalId: standing.plan.declaredPrincipal.keywordId } : {}),
+      ...(standing.plan && article && !declaredPlanAppliedTo(article.payload, standing) ? { declaredPlanPending: true } : {}) });
   }
   for (const target of targets) {
     const territory = territories.find(t => t.territoryRef === target.territoryRef)?.territory;
@@ -173,7 +185,7 @@ async function readInputs(context: PipelineContext, requested?: string[]) {
     const googleAds = String(r.volume_source ?? object(r.demandEvidence).source ?? "").toLowerCase() === "google_ads";
     return { id: r.id, keyword: r.keyword, volume: r.volume_search ?? null, volumeValidated: googleAds && (r.volume_search ?? 0) > 0, signals: signals(r), ownerId: owned.get(r.id) ?? formacaoDoAlvo.get(text(r.articleFormationRef) ?? "") ?? (text(r.articleFormationRef) && object(r.articleFormationDecision).source === "human" ? `formation:${r.articleFormationRef}` : null), published: Boolean(r.isPublished) || brand.pages.some(p => p.keywordId === r.id), territoryRef: text(r.territoryRef), external: false, ...(googleAds ? { googleAdsMeasured: true } : {}) };
   });
-  return { workspace, rows, targets: selected, keywords };
+  return { workspace, rows, targets: selected, keywords, waitingDeclaredPrincipal };
 }
 type EvidenceRead = { evidence: ImprovementEvidence[]; ranking: Record<string, boolean | null> };
 async function evidenceOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]): Promise<EvidenceRead> {
@@ -202,6 +214,9 @@ function makeGroup(target: ImprovementTarget, proposal: ImprovementProposal, row
   const keywords = proposal.memberIds.map(id => rows.get(id)).filter((r): r is Row => Boolean(r));
   if (keywords.length !== proposal.memberIds.length || !proposal.principalId || !target.territoryRef) throw refusal("Composição sem membros, principal ou Silo suficiente.");
   const group: ProvisionalArticleGroup = { id: target.id, keywordIds: proposal.memberIds, keywords, publishedAnchorId: target.kind === "published" ? target.id : null, territoryRef: target.territoryRef, suggestedSiloId: null, suggestedSiloName: null, evidence: { lexical: 0, intent: 0, entities: 0, silo: 1, combined: 0 }, confidence: 0, alerts: proposal.reasons, principalSuggestion: { keywordId: proposal.principalId, score: 0, breakdown: { cobertura: 0, intencao: 0, centralidadeSemantica: 0, aderenciaMarca: 0, potencialComercial: 0, volume: 0, dificuldade: 0, qualidadeSlug: 0, ancoraPublicada: target.kind === "published" ? 1 : 0, serp: null }, justificativa: proposal.reasons, pendencias: [] }, roles: Object.fromEntries(proposal.memberIds.map(id => [id, id === proposal.principalId ? "principal" : "secundaria"])), suggestedHierarchy: "Suporte", architectureStatus: "architecture_confirmed" };
+  // F4 — o artigo de um Assunto com plano: papel e escopo do plano no adapter.
+  const plano = target.kind === "subject" && rows.get(target.id) ? declaredPlanForGroup(readArchitectSubjectStanding(rows.get(target.id)!)) : undefined;
+  if (plano) group.declaredPlan = plano;
   groupContexts.set(group, target);
   return group;
 }
@@ -458,6 +473,7 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     run.inputsHash = stableHash(improvementInputsFingerprint({ version: run.version, brandId: run.brandId, sourceHashes: run.sourceHashes, keywords: input.keywords }));
     const seed = improvementReuseSeed(await findReusableRun(context, run.inputsHash), { version: run.version, brandId: run.brandId, inputsHash: run.inputsHash, now: new Date() });
     run.reusedFromRunId = seed?.fromRunId ?? null;
+    run.notices.push(...input.waitingDeclaredPrincipal);
     if (seed) {
       run.keywords = seed.keywords;
       if (seed.editorialAi) run.editorialAi = seed.editorialAi;
@@ -949,7 +965,8 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   if (newIds.length) {
     const create = await runtime.authorize("minerador", "create"), edit = await runtime.authorize("minerador", "edit"), approve = await runtime.authorize("minerador", "approve");
     const phrases = newIds.map(id => run.keywords.find(k => k.id === id)!);
-    const imported = await importSubjectDiscoveryWithCore({ brandId: context.brandId, actorUserId: context.actorUserId, supabase: create.supabase, request: { importRequestId: stableUuid(run.runId, target.id, "import"), searchId: run.runId, subjectKeywordId: null, subjectPhrase: target.theme, items: phrases.map(k => ({ keyword: k.keyword, origins: ["ads_keyword_seed"], evidence: [`Google Ads: descoberta e Volume medido para ${target.theme}`] })) } });
+    // F4 (SDD 2026-10-12 §6.2-7) — o alvo `subject` é o próprio Assunto: a keyword nova nasce ligada a ele (e herda o grupo dele).
+    const imported = await importSubjectDiscoveryWithCore({ brandId: context.brandId, actorUserId: context.actorUserId, supabase: create.supabase, request: { importRequestId: stableUuid(run.runId, target.id, "import"), searchId: run.runId, subjectKeywordId: target.kind === "subject" ? target.id : null, subjectPhrase: target.theme, items: phrases.map(k => ({ keyword: k.keyword, origins: ["ads_keyword_seed"], evidence: [`Google Ads: descoberta e Volume medido para ${target.theme}`] })) } });
     if (!imported.ok) throw refusal(imported.reason);
     const brand = await readDifferentiationBrandKeywords(context);
     const ids = phrases.map(k => brand.existingByNormalized.get(normalizeKeyword(k.keyword)));
@@ -1012,6 +1029,10 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
     const attached = attachSubjectToArticleDna(payload, attachment.subject);
     if (!attached.ok) throw refusal(attached.reason);
     payload = attached.value;
+    // F4 — o plano declarado: papel = hierarquia, escopo = promessa; principal diferente da declarada é recusa (D11).
+    const comPlano = applyDeclaredPlanToArticleDna(payload, readArchitectSubjectStanding(input.rows.get(target.id)!));
+    if (!comPlano.ok) throw refusal(comPlano.reason);
+    payload = ArticleDNASchema.parse(comPlano.value);
   }
   /*
    * A SUCESSORA FALA DA COMPOSIÇÃO NOVA (regra do dono, 2026-10-01).
@@ -1084,7 +1105,7 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   const [readback, markerReadback] = await Promise.all([loadCanonicalArquitetoWorkspace(context), readbackArticleFormationMarker(context)]);
   const dna = readback.articleDnas.find(a => a.versionId === written.version.versionId), rows = projected(readback, context.brandId);
   if (!dna || dna.contentHash !== written.version.contentHash || !markerReadback.payload.concludedFormations.some(f => f.materializedArticleId === payload.articleId && f.formationBaseHash === baseHash(group)) || members.some(id => text(rows.get(id)?.articleFormationRef) !== formationRef || object(rows.get(id)?.articleFormationDecision).role !== (id === principalId ? "principal" : "secundaria") || (transfers.includes(id) && text(rows.get(id)?.territoryRef) !== target.territoryRef)) || proposal.removeIds.some(id => text(rows.get(id)?.articleFormationRef))) throw refusal("A releitura não confirmou DNA, composição e marcador. Revise o progresso antes de retomar.");
-  const material = proposal.addIds.length > 0 || proposal.removeIds.length > 0 || proposal.principalId !== proposal.currentPrimaryId || proposal.exclusions.length > 0;
+  const material = proposal.addIds.length > 0 || proposal.removeIds.length > 0 || proposal.principalId !== proposal.currentPrimaryId || proposal.exclusions.length > 0 || Boolean(target.declaredPlanPending);
   return { targetId: target.id, status: material ? "improved" : currentArticle ? "unchanged" : "dna_created", message: `${material ? "Melhoria material gravada e relida." : currentArticle ? "Composição já adequada." : "Primeiro ArticleDNA criado; composição não foi ampliada."}${liberadas.length ? ` A tabela voltou a bater com o artigo: ${liberadas.map(id => `“${input.rows.get(id)?.keyword ?? id}”`).join(", ")} ${liberadas.length === 1 ? "foi liberada" : "foram liberadas"} para “Keywords não agrupadas” (nenhuma foi apagada).` : ""}${logicaAplicada ? ` A Lógica do Minerador preencheu intenção, nicho e funil de ${logicaAplicada} keyword(s) sem intenção (aprovar continua no Minerador).` : ""}`, versionId: dna.versionId };
 }
 

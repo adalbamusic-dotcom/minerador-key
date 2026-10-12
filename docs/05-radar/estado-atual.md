@@ -12,6 +12,7 @@ sem chamada paga.
   para <grupo> / Voltar ao grupo das keywords"; no menu do seletor, "Etiquetar artigos pelo grupo das keywords"
   com prévia dos artigos do Radar. O grupo ativo é recorte de TELA (`rowFilter` no grid): a tabela recebe
   `pipeline.radarItems` inteira, o guarda do expansor procura nela e o cache/cópia local nunca recebe recorte.
+- **2026-10-12 · etiqueta ao lado do sino:** o seletor saiu do slot de abas e virou o botão-ícone de etiqueta imediatamente ao lado do sino (`topbar.groupTag` do grid → `groupTag` da topbar global; cinza = "Todos os grupos", colorido = grupo ativo; o mesmo menu). Verificado no código e confirmado por teste (`tests/radar-grupos-etiqueta-topbar.test.mts`). Validado manualmente: não.
 - **Importar do Arquiteto:** depois da releitura confirmada, o artigo ainda sem etiqueta recebe a do grupo das
   keywords (aditivo, nunca lança, mesmo núcleo do "Etiquetar").
 - **Mesa por grupo:** `GET /api/editorial/workspace?groupId=<uuid|sem-grupo>` lê só os artigos do grupo

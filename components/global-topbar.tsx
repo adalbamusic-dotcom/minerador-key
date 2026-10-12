@@ -42,6 +42,11 @@ export type GlobalTopbarModuleControls = {
   };
   actions?: ReactNode;
   tabs?: ReactNode;
+  /**
+   * 2026-10-12 · botão-ícone de etiqueta do grupo (EditorialGroupSelector),
+   * renderizado IMEDIATAMENTE ao lado do sino. Ausente = nada muda na barra.
+   */
+  groupTag?: ReactNode;
 };
 
 export type GlobalTopbarPageControls = {
@@ -254,6 +259,7 @@ export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTab
     <div className={`flex min-w-0 ${redatorLayout ? "flex-initial" : "flex-1"} items-center justify-end gap-1 overflow-visible`}>
       {model.moduleId === "minerador" && moduleActionsContent ? <div className="min-w-0 flex-1 max-w-[min(52vw,52rem)] overflow-hidden" data-topbar-module-actions>{moduleActionsContent}</div> : null}
       {moduleTabsContent ? <div className="min-w-0 shrink-0" data-topbar-module-tabs>{moduleTabsContent}</div> : null}
+      {moduleControls?.groupTag ? <div className="flex shrink-0 items-center" data-topbar-group-tag>{moduleControls.groupTag}</div> : null}
       <NotificationBell />
       <ContextHelpCenter key={contextHelpArea || "none"} area={contextHelpArea} />
       <ProfilePopover />

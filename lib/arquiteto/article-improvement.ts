@@ -25,6 +25,14 @@ export type ImprovementTarget = {
   memberIds: string[]; territoryRef: string | null; slug: string | null;
   url: string | null; canonical: string | null; signals: KeywordDnaSignals;
   siloContext?: { centralEntity: string | null; macroIntent: string | null; slug: string | null };
+  /**
+   * F4 (SDD 2026-10-12 §6.2-7; ADR-022 D1-bis) — a principal declarada no plano
+   * do Silo, lida do pacote aprovado do Assunto. Fixa: a melhoria nunca a troca
+   * (`needsPrimary` falso), mesmo sem volume.
+   */
+  declaredPrincipalId?: string | null;
+  /** F4 — o DNA vigente ainda não tem a promessa e o papel do plano (D8: versão nova). */
+  declaredPlanPending?: boolean;
 };
 /** Evidence is supplied by the canonical cache reader, never inferred from volume. */
 export type ImprovementEvidence = {
@@ -208,6 +216,8 @@ export function editorialAiBarrier(target: ImprovementTarget, candidate: Improve
  * núcleo do slug. Travado, Posto desconhecido e página que ranqueia ficam.
  */
 export function editorialAiPrincipalBlock(target: ImprovementTarget, current: ImprovementKeyword | undefined, candidate: ImprovementKeyword, blocksSwap: boolean | null | undefined): string | null {
+  // F4 — a principal declarada no plano do Silo é fixa.
+  if (target.declaredPrincipalId) return "a principal foi declarada no plano do Silo";
   if (target.post === "locked") return "o Posto é Travado";
   if (target.post !== "free") return "o Posto não foi declarado";
   if (current?.volumeValidated) return "a principal atual já tem volume";
@@ -292,8 +302,11 @@ export function planArticleImprovements(input: {
 }): ImprovementProposal[] {
   const byId = new Map(input.keywords.map(k => [k.id, k]));
   const observations = new Map(input.evidence.map(e => [`${e.targetId}:${e.keywordId}`, e]));
+  /** F4 — a principal declarada de um Assunto do plano pertence ao artigo dele; nunca reforça outro. */
+  const declaredOwner = new Map(input.targets.filter(t => t.declaredPrincipalId).map(t => [t.declaredPrincipalId!, t.id]));
   const eligible = input.targets.flatMap(target => input.keywords.flatMap(candidate => {
     if (candidate.published || !candidate.volumeValidated || !(candidate.volume! > 0) || (candidate.ownerId && candidate.ownerId !== target.id)) return [];
+    if (declaredOwner.has(candidate.id) && declaredOwner.get(candidate.id) !== target.id) return [];
     const evidence = observations.get(`${target.id}:${candidate.id}`);
     if (evidence?.contradiction) return [];
     const editorial = improvementEditorialFit(target, candidate);
@@ -324,6 +337,8 @@ export function planArticleImprovements(input: {
     const fitting = candidate && (!fit?.conflict || fit.conflictKind === "intent" && proof?.complete && proof.sharedPages >= 3) && !proof?.contradiction;
     if (candidate?.published || id === t.primaryId || (fitting && candidate?.volumeValidated && candidate.volume! > 0)) fixed.set(id, t.id);
   }
+  // F4 — a principal declarada ocupa a vaga dela no artigo do plano, com ou sem volume.
+  for (const t of input.targets) if (t.declaredPrincipalId) fixed.set(t.declaredPrincipalId, t.id);
   const owners = allocateReinforcementChoices({
     targets: input.targets.map(t => ({ id: t.id, capacity: Math.max(0, 6 - [...fixed.values()].filter(id => id === t.id).length), priority: (byId.get(t.primaryId ?? "")?.volumeValidated ? 10 : 0) + (t.kind === "published" ? 0 : 1) })),
     edges: eligible, fixed,
@@ -340,10 +355,11 @@ export function planArticleImprovements(input: {
      * digital para dentistas" 70 → "marketing para dentistas" 210). O Assunto
      * segue como antes: ganha a principal de maior volume.
      */
-    const needsPrimary = target.kind === "subject"
+    // F4 — com principal declarada no plano, a melhoria nunca troca a principal (D1-bis).
+    const needsPrimary = target.declaredPrincipalId ? false : target.kind === "subject"
       ? !old?.volumeValidated || (candidates[0]?.volume ?? 0) > (old.volume ?? 0)
       : target.post === "free" && !old?.volumeValidated;
-    const principalId = needsPrimary ? candidates[0]?.id ?? target.primaryId : target.primaryId;
+    const principalId = target.declaredPrincipalId ?? (needsPrimary ? candidates[0]?.id ?? target.primaryId : target.primaryId);
     // Avoid churn: a weak support leaves only when there is a real replacement.
     const weak = target.memberIds.filter(id => !kept.includes(id));
     const removeIds = added.length ? weak.slice(0, Math.max(0, target.memberIds.length + added.length - 6)) : [];
@@ -377,7 +393,7 @@ export function planArticleImprovements(input: {
     }
   }
   guardCannibalPairs(input.targets, proposals, byId, () => true);
-  if (input.listReading === false) return proposals;
+  if (input.listReading === false) return enforceDeclaredPrincipals(input.targets, proposals, byId);
   /*
    * 4 · LEITURA DA LISTA PELO CÓDIGO (dono, 2026-09-30: "não está se
    * aproveitando bem das keywords da lista"). Quem ficou sem proposta pronta —
@@ -441,6 +457,47 @@ export function planArticleImprovements(input: {
     if (troca) proposals[index] = troca;
   });
   for (const p of proposals) { p.exclusions = [...new Set(p.exclusions)]; p.reasons = [...new Set(p.reasons)]; }
+  return enforceDeclaredPrincipals(input.targets, proposals, byId);
+}
+
+/** F4 — o motivo que a prévia mostra quando a principal declarada assume. */
+export const DECLARED_PRINCIPAL_IMPROVEMENT_REASON = "Principal declarada no plano do Silo: cabeceira fixa (D1-bis), mesmo sem volume medido.";
+export const DECLARED_PLAN_PENDING_REASON = "Plano declarado: a descrição do escopo vira a promessa e o papel do plano vira a hierarquia (D8).";
+
+/**
+ * F4 — A ÚLTIMA PALAVRA É DO PLANO. Qualquer leitura acima (pares da SERP, IA,
+ * núcleo do slug) pode ter proposto outra principal; aqui a declarada volta a
+ * ser a principal, entra nos membros (a antiga fica como secundária) e o teto
+ * de seis é respeitado tirando a última entrada nova. Sem plano, nada muda.
+ */
+function enforceDeclaredPrincipals(targets: readonly ImprovementTarget[], proposals: ImprovementProposal[], byId: ReadonlyMap<string, ImprovementKeyword>): ImprovementProposal[] {
+  targets.forEach((target, index) => {
+    const declarada = target.declaredPrincipalId;
+    if (!declarada) return;
+    const p = proposals[index];
+    const membros = [...new Set([declarada, ...p.memberIds])];
+    while (membros.length > IMPROVEMENT_ARTICLE_MAX_KEYWORDS) {
+      const sai = [...p.addIds].reverse().find(id => id !== declarada && membros.includes(id));
+      if (!sai) break;
+      membros.splice(membros.indexOf(sai), 1);
+      p.addIds = p.addIds.filter(id => id !== sai);
+      p.aiReasons = p.aiReasons?.filter(item => item.keywordId !== sai);
+    }
+    const trocou = declarada !== target.primaryId;
+    if (trocou && !p.addIds.includes(declarada) && !target.memberIds.includes(declarada)) p.addIds = [...p.addIds, declarada];
+    p.principalId = declarada;
+    p.memberIds = membros;
+    p.transfers = p.addIds.filter(id => byId.get(id)?.territoryRef !== target.territoryRef);
+    if (p.angle === "" || trocou) p.angle = angleOf(byId.get(declarada)) || p.angle;
+    p.reasons = p.reasons.filter(reason => !/^Principal com volume escolhida na lista|^Nova principal sustentada|^Principal com demanda medida/.test(reason));
+    p.reasons.push(trocou ? `${DECLARED_PRINCIPAL_IMPROVEMENT_REASON} “${byId.get(target.primaryId ?? "")?.keyword ?? target.theme}” fica como secundária.` : DECLARED_PRINCIPAL_IMPROVEMENT_REASON);
+    if (target.declaredPlanPending) p.reasons.push(DECLARED_PLAN_PENDING_REASON);
+    if (target.territoryRef && (trocou || p.addIds.length || target.declaredPlanPending)) {
+      p.status = "ready";
+      p.evidenceBasis = p.evidenceBasis ?? "editorial_and_candidate_serp";
+    }
+    p.reasons = [...new Set(p.reasons)];
+  });
   return proposals;
 }
 

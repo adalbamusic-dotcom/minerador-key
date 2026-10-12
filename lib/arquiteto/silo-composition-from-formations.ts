@@ -137,6 +137,11 @@ export type CanonicalSiloClosurePlan =
     supportFormationRefs: string[];
     narrativeOrder: string[];
     pillarReason: string;
+    /**
+     * F4 — presente só quando o Pilar veio do plano declarado (SDD 2026-10-12
+     * §6.2-6, D7). Ausente: Pilar derivado por cobertura, como sempre.
+     */
+    pillarSource?: "declared_plan";
     /** 3º: a SiloPage, pareada ao SiloDNA na mesma transação. */
     expectedArticles: number;
     expectedSiloDna: 1;
@@ -148,6 +153,12 @@ export function buildCanonicalSiloClosurePlan(input: {
   /** Bloqueios do Silo, já resolvidos por `resolveSiloClosureReadiness`. */
   blockers: readonly { code: string; detail: string }[];
   principalVolumeByKeywordId?: ReadonlyMap<string, number | null>;
+  /**
+   * F4 — o Pilar e a ordem que o PLANO DECLARADO já decidiu, resolvidos por
+   * `resolveDeclaredSiloPlan` sobre estas mesmas formações. Opcional: ausente
+   * (ou com um Pilar que não é formação deste Silo), o plano é o de sempre.
+   */
+  declaredPillar?: { pillarRef: string; orderedRefs: readonly string[]; reason: string } | null;
 }): CanonicalSiloClosurePlan {
   if (input.blockers.length) {
     return { state: "BLOCKED", blockers: input.blockers.map(item => ({ ...item })) };
@@ -167,6 +178,33 @@ export function buildCanonicalSiloClosurePlan(input: {
     return {
       state: "BLOCKED",
       blockers: [{ code: "PILLAR_NOT_DERIVED", detail: composicao.pillarReason }],
+    };
+  }
+
+  /*
+   * O PLANO DECLARADO VENCE A COBERTURA. O dono declarou o Pilar e a ordem antes
+   * de qualquer formação: aqui não há palpite a fazer, há decisão a obedecer.
+   * Só vale quando o Pilar declarado é uma formação deste Silo e a ordem cobre
+   * exatamente as formações — senão, a derivação por cobertura de sempre.
+   */
+  const refs = input.formations.map(item => item.candidateRef);
+  const declarado = input.declaredPillar;
+  if (declarado
+    && refs.includes(declarado.pillarRef)
+    && declarado.orderedRefs[0] === declarado.pillarRef
+    && declarado.orderedRefs.length === refs.length
+    && refs.every(ref => declarado.orderedRefs.includes(ref))) {
+    return {
+      state: "READY",
+      materializationOrder: formationsAwaitingMaterialization(input.formations).map(item => item.candidateRef),
+      pillarFormationRef: declarado.pillarRef,
+      supportFormationRefs: declarado.orderedRefs.slice(1),
+      narrativeOrder: [...declarado.orderedRefs],
+      pillarReason: declarado.reason,
+      pillarSource: "declared_plan",
+      expectedArticles: input.formations.length,
+      expectedSiloDna: 1,
+      expectedSiloPage: 1,
     };
   }
 

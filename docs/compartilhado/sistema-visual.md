@@ -235,6 +235,13 @@ Regras:
   por interpolação;
 - seletor de grupo compartilhado: `components/editorial/group-selector.tsx`;
   etiqueta: `components/editorial/group-tag.tsx`.
+- desde 2026-10-12 o seletor é um **botão-ícone de etiqueta** (`Tag`, área de
+  36 × 36 px) na topbar global, imediatamente ao lado do sino
+  (`GlobalTopbarModuleControls.groupTag`), no Minerador, no Arquiteto e no
+  Radar: o ícone mostra só a cor do grupo ativo (classes literais
+  `text-group-<cor>`), o padrão "Todos os grupos" é o cinza neutro
+  `text-muted`, e o nome vai no tooltip e no `aria-label`; o menu lista uma
+  bolinha + nome por grupo, com setas, Home/End e Esc.
 
 ### 5.1 Semântica obrigatória de status
 

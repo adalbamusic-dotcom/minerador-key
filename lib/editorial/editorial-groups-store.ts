@@ -90,7 +90,9 @@ export async function readEditorialGroup(client: Client, brandId: string, groupI
 export type EditorialGroupEventInput = {
   groupId: string;
   /* `article_assigned` (F2): etiqueta de artigo gravada, movida ou devolvida à herança. */
-  eventType: "created" | "renamed" | "recolored" | "keywords_assigned" | "keywords_unassigned" | "article_assigned" | "archived" | "reactivated";
+  eventType: "created" | "renamed" | "recolored" | "keywords_assigned" | "keywords_unassigned" | "article_assigned" | "archived" | "reactivated"
+    /* F4 (plano declarado): o plano do Silo gravado no grupo e o vínculo com o Silo consolidado. */
+    | "plan_declared" | "plan_changed" | "silo_linked";
   payload: Record<string, unknown>;
 };
 
@@ -194,4 +196,190 @@ export async function updateEditorialGroup(client: Client, input: {
     events: plano.events.map(event => ({ groupId: atual.id, eventType: event.eventType, payload: event.payload })),
   });
   return { ok: true, group: releitura.group, eventRecorded };
+}
+
+/* ========================================================================== */
+/* F4 — PLANO DECLARADO NO GRUPO (SDD 2026-10-12 §5.2, §5.3, §6.1-2)            */
+/* ========================================================================== */
+
+export type EditorialGroupPlanRow = {
+  id: string;
+  name: string;
+  color: EditorialGroupColor;
+  origin: "declared_plan" | "manual";
+  status: EditorialGroupStatus;
+  plan: Record<string, unknown> | null;
+  planVersion: number;
+  planHash: string | null;
+  siloId: string | null;
+  lockVersion: number;
+};
+
+const PLAN_COLUMNS = "id,marca_id,name,color,origin,status,plan,plan_version,plan_hash,silo_id,lock_version";
+
+function planRowOf(row: unknown, brandId: string): EditorialGroupPlanRow | null {
+  if (!row || typeof row !== "object") return null;
+  const r = row as Record<string, unknown>;
+  if (r.marca_id !== brandId || typeof r.id !== "string" || typeof r.name !== "string") return null;
+  return {
+    id: r.id,
+    name: r.name,
+    color: r.color as EditorialGroupColor,
+    origin: r.origin === "declared_plan" ? "declared_plan" : "manual",
+    status: r.status === "archived" ? "archived" : "active",
+    plan: r.plan && typeof r.plan === "object" && !Array.isArray(r.plan) ? r.plan as Record<string, unknown> : null,
+    planVersion: typeof r.plan_version === "number" ? r.plan_version : 0,
+    planHash: typeof r.plan_hash === "string" ? r.plan_hash : null,
+    siloId: typeof r.silo_id === "string" ? r.silo_id : null,
+    lockVersion: typeof r.lock_version === "number" && r.lock_version > 0 ? r.lock_version : 1,
+  };
+}
+
+/** O grupo com o plano (a view de resumo não carrega o jsonb). Só desta marca. */
+export async function readEditorialGroupPlan(client: Client, brandId: string, groupId: string): Promise<{ ok: true; group: EditorialGroupPlanRow | null } | GroupsUnavailable> {
+  const { data, error } = await client.from("editorial_groups").select(PLAN_COLUMNS).eq("marca_id", brandId).eq("id", groupId).maybeSingle();
+  if (error) {
+    if (isEditorialGroupsSchemaMissing(error)) return groupsUnavailable();
+    throw new EditorialGroupsPersistenceError(error, "ler o plano dos");
+  }
+  return { ok: true, group: planRowOf(data, brandId) };
+}
+
+/** Os grupos da marca que têm plano declarado (nome, slug e objetivo do Silo). */
+export async function listEditorialGroupPlans(client: Client, brandId: string): Promise<{ ok: true; groups: EditorialGroupPlanRow[] } | GroupsUnavailable> {
+  const { data, error } = await client.from("editorial_groups").select(PLAN_COLUMNS).eq("marca_id", brandId).not("plan", "is", null);
+  if (error) {
+    if (isEditorialGroupsSchemaMissing(error)) return groupsUnavailable();
+    throw new EditorialGroupsPersistenceError(error, "listar os planos dos");
+  }
+  return { ok: true, groups: ((data || []) as unknown[]).map(row => planRowOf(row, brandId)).filter((row): row is EditorialGroupPlanRow => Boolean(row)) };
+}
+
+/**
+ * Cria o grupo de um plano declarado (origem `declared_plan`), com o plano já
+ * gravado e `plan_version = 1`. Mesmas validações de nome e cor do grupo manual.
+ */
+export async function createDeclaredPlanGroup(client: Client, input: {
+  brandId: string;
+  actorUserId: string;
+  name: unknown;
+  color: unknown;
+  plan: Record<string, unknown>;
+  planHash: string;
+}): Promise<{ ok: true; group: EditorialGroupPlanRow; eventRecorded: boolean } | EditorialGroupRefusal | GroupsUnavailable> {
+  const listing = await listEditorialGroupSummaries(client, input.brandId);
+  if (!listing.ok) return listing;
+  const validado = validateNewEditorialGroup(input, listing.groups.filter(group => group.status === "active"));
+  if (!validado.ok) return validado;
+  const { data, error } = await client.from("editorial_groups").insert({
+    marca_id: input.brandId,
+    name: validado.name,
+    color: validado.color,
+    origin: "declared_plan",
+    plan: input.plan,
+    plan_version: 1,
+    plan_hash: input.planHash,
+    created_by: input.actorUserId,
+    updated_by: input.actorUserId,
+  }).select("id").single();
+  if (error) {
+    if (isEditorialGroupsSchemaMissing(error)) return groupsUnavailable();
+    if (error.code === "23505") return { ok: false, code: "GROUP_NAME_TAKEN", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_NAME_TAKEN };
+    throw new EditorialGroupsPersistenceError(error, "criar o grupo do plano entre os");
+  }
+  const id = (data as { id?: unknown } | null)?.id;
+  if (typeof id !== "string") throw new EditorialGroupsPersistenceError(null, "confirmar a criação do grupo do plano entre os");
+  const releitura = await readEditorialGroupPlan(client, input.brandId, id);
+  if (!releitura.ok) return releitura;
+  if (!releitura.group || releitura.group.planHash !== input.planHash || releitura.group.planVersion !== 1) {
+    throw new EditorialGroupsPersistenceError(null, "reler o grupo do plano entre os");
+  }
+  const eventRecorded = await appendEditorialGroupEvents(client, {
+    brandId: input.brandId,
+    actorUserId: input.actorUserId,
+    events: [
+      { groupId: id, eventType: "created", payload: { name: validado.name, color: validado.color, origin: "declared_plan" } },
+      { groupId: id, eventType: "plan_declared", payload: { planVersion: 1, planHash: input.planHash } },
+    ],
+  });
+  return { ok: true, group: releitura.group, eventRecorded };
+}
+
+/**
+ * Grava (ou regrava) o plano num grupo EXISTENTE desta marca, com trava
+ * otimista. Mesmo `plan_hash` = nada muda (`changed: false`, versão igual).
+ * Um grupo manual passa a `declared_plan` (o CHECK do banco exige essa origem
+ * para ter plano).
+ */
+export async function declareEditorialGroupPlan(client: Client, input: {
+  brandId: string;
+  actorUserId: string;
+  groupId: string;
+  plan: Record<string, unknown>;
+  planHash: string;
+}): Promise<{ ok: true; group: EditorialGroupPlanRow; changed: boolean; eventRecorded: boolean } | EditorialGroupRefusal | GroupsUnavailable> {
+  const lido = await readEditorialGroupPlan(client, input.brandId, input.groupId);
+  if (!lido.ok) return lido;
+  const atual = lido.group;
+  if (!atual) return { ok: false, code: "GROUP_NOT_FOUND", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_NOT_FOUND };
+  if (atual.status !== "active") return { ok: false, code: "GROUP_ARCHIVED", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_ARCHIVED };
+  if (atual.origin === "declared_plan" && atual.planHash === input.planHash && atual.plan) return { ok: true, group: atual, changed: false, eventRecorded: true };
+  const proximaVersao = atual.planVersion + 1;
+  const { data, error } = await client.from("editorial_groups").update({
+    origin: "declared_plan",
+    plan: input.plan,
+    plan_version: proximaVersao,
+    plan_hash: input.planHash,
+    lock_version: atual.lockVersion + 1,
+    updated_by: input.actorUserId,
+    updated_at: new Date().toISOString(),
+  }).eq("marca_id", input.brandId).eq("id", atual.id).eq("lock_version", atual.lockVersion).select("id");
+  if (error) {
+    if (isEditorialGroupsSchemaMissing(error)) return groupsUnavailable();
+    throw new EditorialGroupsPersistenceError(error, "gravar o plano nos");
+  }
+  if (!Array.isArray(data) || data.length !== 1) return { ok: false, code: "GROUP_STALE", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_STALE };
+  const releitura = await readEditorialGroupPlan(client, input.brandId, atual.id);
+  if (!releitura.ok) return releitura;
+  if (!releitura.group || releitura.group.planHash !== input.planHash || releitura.group.planVersion !== proximaVersao) {
+    throw new EditorialGroupsPersistenceError(null, "reler o plano gravado nos");
+  }
+  const eventRecorded = await appendEditorialGroupEvents(client, {
+    brandId: input.brandId,
+    actorUserId: input.actorUserId,
+    events: [{ groupId: atual.id, eventType: atual.plan ? "plan_changed" : "plan_declared", payload: { planVersion: proximaVersao, planHash: input.planHash, previousPlanHash: atual.planHash } }],
+  });
+  return { ok: true, group: releitura.group, changed: true, eventRecorded };
+}
+
+/**
+ * Liga o grupo ao Silo consolidado (`editorial_groups.silo_id`, 1:1 por marca).
+ * Aditivo: já ligado ao mesmo Silo = nada muda; ligado a OUTRO Silo = recusa
+ * (desligar é decisão humana, fora desta fase).
+ */
+export async function linkEditorialGroupSilo(client: Client, input: {
+  brandId: string;
+  actorUserId: string;
+  groupId: string;
+  siloId: string;
+}): Promise<{ ok: true; changed: boolean } | { ok: false; code: "GROUP_NOT_FOUND" | "GROUP_SILO_TAKEN"; message: string } | GroupsUnavailable> {
+  const lido = await readEditorialGroupPlan(client, input.brandId, input.groupId);
+  if (!lido.ok) return lido;
+  if (!lido.group) return { ok: false, code: "GROUP_NOT_FOUND", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_NOT_FOUND };
+  if (lido.group.siloId === input.siloId) return { ok: true, changed: false };
+  if (lido.group.siloId) return { ok: false, code: "GROUP_SILO_TAKEN", message: `O grupo já está ligado ao Silo ${lido.group.siloId}.` };
+  const { data, error } = await client.from("editorial_groups").update({
+    silo_id: input.siloId,
+    lock_version: lido.group.lockVersion + 1,
+    updated_by: input.actorUserId,
+    updated_at: new Date().toISOString(),
+  }).eq("marca_id", input.brandId).eq("id", lido.group.id).eq("lock_version", lido.group.lockVersion).is("silo_id", null).select("id");
+  if (error) {
+    if (isEditorialGroupsSchemaMissing(error)) return groupsUnavailable();
+    if (error.code === "23505") return { ok: false, code: "GROUP_SILO_TAKEN", message: "Outro grupo desta marca já está ligado a este Silo." };
+    throw new EditorialGroupsPersistenceError(error, "ligar o Silo aos");
+  }
+  if (!Array.isArray(data) || data.length !== 1) return { ok: false, code: "GROUP_SILO_TAKEN", message: "O grupo mudou em outra sessão; recarregue." };
+  await appendEditorialGroupEvents(client, { brandId: input.brandId, actorUserId: input.actorUserId, events: [{ groupId: lido.group.id, eventType: "silo_linked", payload: { siloId: input.siloId } }] });
+  return { ok: true, changed: true };
 }

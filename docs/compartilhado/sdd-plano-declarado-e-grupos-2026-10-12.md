@@ -5,7 +5,8 @@
 > do Silo (D3) e a F2 (grupo no Arquiteto e no Radar, leitura por grupo) foram
 > implementadas em 2026-10-12 (ver `docs/03-minerador/estado-atual.md`,
 > `docs/04-arquiteto/estado-atual.md` e `docs/05-radar/estado-atual.md`);
-> F3–F6 continuam pendentes. Migration, SQL remoto, commit, push e deploy
+> F3 e F4 (plano declarado) foram implementadas em 2026-10-12 (§18.1); F5–F6
+> continuam pendentes. Migration, SQL remoto, commit, push e deploy
 > continuam com o dono (`AGENTS.md` §15). Toda leitura de banco citada aqui foi
 > `SELECT` (`npx supabase db query --linked`), em 2026-10-12.
 
@@ -741,55 +742,115 @@ Leitura obrigatória antes de codar: `docs/compartilhado/sistema-visual.md` e
 
 ## 11. Reimportar o plano e aproveitar a WifiConecta
 
-Executado pelo **dono**, pela tela (ou MCP com aceite), depois de F1–F4. Nada
-pago, nada apagado. Cada passo com releitura.
+**Runbook para o DONO executar pela tela, depois do deploy da F3 (sozinha) e da
+F4.** Nada pago, nada apagado definitivamente, cada passo com releitura. Marca
+`d4fa133a-13bd-4bf7-bfd1-d0f22253f223`. Nenhum agente executa este runbook.
 
-1. **Importar o plano** (prévia): a prévia deve mostrar os 8 Assuntos como "já
-   existe" (ids do §3), as principais 1, 2, 4, 6, 7 como "já existe, com
-   volume" e as 3, 5, 8 como "já existe, sem volume (D2-bis)"; e as sobras
-   `5ea8448a` (nome do Silo) e `e2fe761a` (rótulo colado) como "não faz parte
-   do plano". Confirmar o Pilar (D7: artigo 1, "melhor plano de internet
-   residencial"). Grupo "Planos e contratação", cor à
-   escolha (ex.: amarelo).
-2. **Aplicar:** cria o grupo; grava `keyword_subject.plan` nos 8 Assuntos e
-   `keyword_declared_principal` nas 8 principais; carimba `group_id` nos 8
-   Assuntos, nas 8 principais, nas sustentações ligadas por
-   `subject_discovery` (inclui "plano vivo controle" e "assine claro
-   internet") e em "planos de internet" (palavra da SiloPage). Os pacotes
-   mudam: os 8 Assuntos e as 5 principais com volume voltam a "em revisão".
-3. **Lógica** (grátis, determinística) nas 3 principais `bruto`; **reaprovar**
-   os 16 itens (8 Assuntos + 8 principais) pela exceção D2/D2-bis.
-4. **Sobras:** `5ea8448a` e `e2fe761a` para a lixeira (recuperável, D9).
-5. **Artigos** (Arquiteto, mesmo caminho de formação, aba Artigos):
-   - 1, 2, 4, 6, 7: composição e principal iguais; versão nova só se D8 = sim
-     (`promise` = escopo, `hierarchy` = papel). Guarda: `fresh` só para o que
-     mudou.
-   - 3 (`6d5d87cd`): principal → `65bf5bc8`; "claro ou vivo" e "vivo ou claro"
-     ficam como secundárias; v4.
-   - 8 (`a1306160`): principal → `11a34ba3`; "contratar internet residencial"
-     vira secundária; v5.
-   - 5 (`9df07c7b`): ArticleDNA v1 com principal `f7a6c14b`; a única keyword da
-     lista do Assunto ("assine claro internet") é oferecida; se o DNA não
-     converge, fica em "não agrupadas" do grupo, com motivo.
-   - SERP das três principais sem volume: conforme D2 (padrão: evidência das
-     sustentações, sem pagar; opção paga ≈ 12 consultas, até ~US$ 0,05, só com
-     clique e prévia).
-6. **Desfazer "plano vivo controle":** evento `rejected` na versão
-   `14e82c40-150e-4024-aa2f-2addd84d60ed` do ArticleDNA
-   `article-candidate:territory:9c75c3a7…:679b1bb2`, motivo "fora do plano
-   declarado"; a keyword `679b1bb2` volta para "Keywords não agrupadas" do
-   grupo (não é apagada). Não há item no Radar nem documento para ela. Precisa
-   da operação nova "Retirar artigo do Silo" (F4), que grava o evento e a nova
-   versão do SiloDNA na mesma ação.
-7. **Fechar o Silo:** SiloDNA e SiloPage v2 de `territory:9c75c3a7…` — nome
-   "Planos e contratação", slug `planos-de-internet` (inalterado, não
-   publicado), objetivo declarado, `pillarArticleId` = Pilar declarado (D7),
-   suportes = os outros 7 (com o 5, sem "plano vivo controle"),
-   `narrativeOrder` = ordem do plano. `editorial_groups.silo_id` =
-   `territory:9c75c3a7-15e1-4655-b627-c08e394b4606`.
-8. **Conferência final** (SELECT): 8 ArticleDNA vigentes com a principal
-   declarada, nenhum artigo do grupo sem `subject`, nenhuma keyword do grupo
-   fora de artigo e de "não agrupadas", SiloDNA v2 com o Pilar declarado.
+**Estado conferido por SELECT em 2026-10-12 (fim do dia):** 1 grupo, "laranja"
+(`a9d5c87b…`, origem `manual`, sem plano), com as 56 keywords vivas; 8
+ArticleDNA vigentes (7 dos Assuntos 1, 2, 3, 4, 6, 7, 8, com `entity_id` = id
+do Assunto, e o solto "plano vivo controle"
+`article-candidate:territory:9c75c3a7…:679b1bb2`); **SiloDNA v1 e SiloPage v1
+aprovados existem** (`territory:9c75c3a7…`, "planos de internet", slug
+`planos-de-internet`, Pilar = artigo 3 `6d5d87cd`, "plano vivo controle" entre
+os suportes, sem o artigo 5) — o pedido de 2026-10-12 dizia "nenhum
+SiloDNA/SiloPage", mas o banco os tem; a cópia de trabalho
+`silo-working-copy:territory:9c75c3a7…` está em `draft` com o Pilar escolhido =
+artigo 3 (claro ou vivo). As três principais declaradas sem volume
+(`65bf5bc8` "Claro Vivo ou TIM internet", `f7a6c14b` "quantos Mega de internet
+preciso", `11a34ba3` "contratar internet residencial em São Paulo") estão
+`bruto`, ainda não chegaram ao Arquiteto e **não têm SERP no cache** (0 entradas).
+As sobras `5ea8448a` "Planos e contratação" e `e2fe761a` "Palavra-chave:
+internet disponível no meu CEP" estão `bruto`.
+
+1. **Importar o plano (prévia).** Minerador da WifiConecta → barra do topo,
+   ao lado de "Colar keywords" e "Importar CSV" → **"Importar plano do Silo"**
+   → colar o texto do plano (o do §0/§17, "Silo 1 — Planos de internet…") em
+   "Plano do Silo (texto colado ou tabela)" → em "Grupo do plano", **"Grupo
+   existente" → "laranja"** (use o existente: as sustentações já estão nele;
+   um grupo novo deixaria as sustentações no "laranja" e fora das regras do
+   plano) → **"Gerar prévia"**. Conferir na prévia:
+   - Silo "Planos e contratação", slug `planos-de-internet`, o objetivo;
+   - os 8 Assuntos como "já existe como Assunto"; Pilar = artigo 1;
+   - principais 1, 2, 4, 6, 7 "já existe, com volume"; 3, 5, 8 "já existe, sem
+     volume (D2-bis: aprova sem volume)";
+   - sobras: "Planos e contratação" (nome do Silo) e "Palavra-chave: internet
+     disponível no meu CEP" (rótulo) como "não faz parte do plano";
+   - "itens aprovados voltam a Em revisão": 13 (8 Assuntos + 5 principais);
+   - **nenhum impedimento**. Se aparecer impedimento ou linha não entendida, pare.
+2. **Gravar o plano.** **"Declarar plano"** → esperar "8 artigo(s)
+   declarado(s), reciprocidade confirmada em 8; falhas: 0" e "plano v1" →
+   "Fechar". Releitura (SELECT): `editorial_groups` "laranja" com
+   `origin = 'declared_plan'`, `plan_version = 1`, `plan->>'siloName' =
+   'Planos e contratação'`; os 8 Assuntos com `analise_semantica->
+   'keyword_subject'->'plan'` (ordem 1–8, papel, escopo) e as 8 principais com
+   `analise_semantica->'keyword_declared_principal'` apontando de volta.
+   (Opcional: renomear o grupo para "Planos e contratação" — a rota PATCH
+   existe; o menu de renomear na tela é pendência do backlog. O nome do grupo
+   não muda nada no plano.)
+3. **Sobras para a lixeira (D9).** Minerador → Processar Keywords → marcar
+   "Planos e contratação" e "Palavra-chave: internet disponível no meu CEP" →
+   rodapé → **"Excluir"** → confirmar (vão para a lixeira, recuperáveis por
+   "Restaurar").
+4. **Lógica e reaprovação (grátis).** Marcar as 3 principais `bruto` → rodapé
+   → **"Lógica"** (se a coluna já mostrar a Lógica feita, pule). Depois marcar
+   os 16 itens (8 Assuntos + 8 principais) → Revisão Humana em grupo pelo
+   rodapé → **"Concluir revisão"** → status "aprovado" (a D2/D2-bis só pede a
+   Lógica). Marcar os 16 → **"Enviar ao Arquiteto"**.
+5. **Artigos pelo caminho de sempre (Arquiteto → Artigos).** Cartão "Próximo
+   passo" → **"1 · Buscar keywords (grátis)"** (com os 8 Assuntos marcados na
+   planilha, ou nada marcado = todos). Conferir na tabela da análise:
+   - artigos 1, 2, 4, 6, 7: mesma principal e o motivo "Plano declarado: a
+     descrição do escopo vira a promessa e o papel do plano vira a hierarquia
+     (D8)";
+   - artigo 3: principal "Claro Vivo ou TIM internet" com "Principal declarada
+     no plano do Silo: cabeceira fixa (D1-bis)… “claro ou vivo” fica como
+     secundária"; artigo 8: "contratar internet residencial em São Paulo", com
+     "contratar internet residencial" como secundária; artigo 5: artigo novo
+     com "quantos Mega de internet preciso";
+   - a principal declarada entra no Silo `planos de internet` pela
+     transferência da prévia.
+   **Não clicar "2 · Validar no Google (pago)".** Marcar só 1, 2, 4, 6, 7 →
+   **"3 · Gravar melhorias"** → **"Confirmar e aplicar"**. Resultado esperado:
+   versão nova de cada um, `hierarchy` = papel (1 = Pilar), `promise` = escopo,
+   mesma composição.
+   - **Artigos 3, 5 e 8 — limite desta entrega:** a gravação exige o parecer
+     SERP da composição nas 4 lentes, e as três principais declaradas não têm
+     SERP no cache. Sem pagar, "Gravar melhorias" recusa ("SERP da composição
+     incompleta"). As saídas são (a) esperar a D2(a) — parecer pelas
+     sustentações com volume, sem pagar — que ficou para a F5/F6, ou (b) a
+     coleta paga por clique, D2(b): "2 · Validar no Google" mostra o custo antes
+     (estimativa da SDD: ≈ 12 consultas, até ~US$ 0,05) e só roda com
+     "Autorizar este custo". **Decisão do dono; não faça sem decidir.**
+6. **Retirar "plano vivo controle".** Arquiteto → **aba Silos** → Silo
+   consolidado "planos de internet" → no artigo "plano vivo controle" →
+   **"Retirar artigo do Silo"** → prévia → motivo "fora do plano declarado" →
+   **"Confirmar retirada"**. Grava o evento `rejected` na versão
+   `14e82c40-150e-4024-aa2f-2addd84d60ed` com o motivo e o novo par
+   SiloDNA/SiloPage sem o artigo (v2), com releitura. Não há item no Radar nem
+   documento. **Limite conhecido:** a leitura da mesa do Arquiteto ainda não
+   aplica o evento `rejected` às keywords do artigo (usa a última versão sem
+   olhar o status), então `679b1bb2` pode continuar aparecendo no artigo
+   rejeitado da aba Artigos em vez de "Keywords não agrupadas"; nada é apagado.
+   Corrigir essa leitura é mudança compartilhada (pendência F5).
+7. **Fechar o Silo com o Pilar declarado.** **Ainda não há caminho pela tela para a WifiConecta.** O Pilar declarado entra
+   como decisão humana ("Pilar declarado no plano por <ator> em <data>") no
+   fechamento automático e na formação manual da aba Silos, com nome, slug (se
+   não publicado) e objetivo do plano e a ordem do plano — mas só para Silo
+   **ainda não consolidado**: o fechamento pula território consolidado, e trocar
+   o Pilar de um Silo consolidado (aqui, do artigo 3 para o artigo 1, D7) não
+   existe hoje. Quando existir (pendência F5), o resultado esperado é SiloDNA e
+   SiloPage v+1 com nome "Planos e contratação", slug `planos-de-internet`
+   (inalterado, não publicado), objetivo declarado, Pilar = artigo 1
+   (`4339882e`), suportes = os outros 7 (com o 5, sem "plano vivo controle") e
+   `narrativeOrder` = ordem do plano; ao consolidar, o servidor grava
+   `editorial_groups.silo_id` = `territory:9c75c3a7-15e1-4655-b627-c08e394b4606`
+   (vínculo aditivo, nunca derruba a consolidação).
+8. **Conferência final (SELECT):** 8 ArticleDNA vigentes com a principal
+   declarada (depois do passo 5 completo), nenhum artigo do grupo sem
+   `subject`, nenhuma keyword do grupo fora de artigo e de "não agrupadas",
+   SiloDNA com o Pilar = artigo 1 (`4339882e`) e
+   `editorial_groups.silo_id = 'territory:9c75c3a7-15e1-4655-b627-c08e394b4606'`.
 
 ## 12. Consumidores e riscos
 
@@ -972,7 +1033,9 @@ Onde a SDD só fazia a pergunta, vale a proposta do próprio texto.
 | D3 (Silo de 4 a 30) | implementado; testes com Silo de 15 e de 30 artigos |
 | F1 (grupos no Minerador) | no ar (commit `b3a5d30`) e M1 aplicada — relatado pelo dono, que testou as etiquetas no Minerador (a M1 conferida por SELECT: `editorial_groups`, `editorial_group_articles` e `group_id` existem) |
 | F2 (Arquiteto, Radar e leitura por grupo) | código e testes prontos em 2026-10-12; **sem migration nova** (usa `editorial_group_articles` da M1); validado manualmente: não. Detalhe abaixo |
-| F3–F6 | pendentes |
+| F3 (Fase A do plano) | código e testes prontos em 2026-10-12; **deploy sozinho, antes da F4**; sem migration; validado manualmente: não |
+| F4 (Fase B do plano) | código e testes prontos em 2026-10-12; **sem migration nova**; validado manualmente: não. Detalhe abaixo; runbook da WifiConecta no §11 |
+| F5–F6 | pendentes (`declare_silo_plan` já entrou na F4) |
 
 #### F2 — como foi feita (2026-10-12)
 
@@ -1004,3 +1067,37 @@ Onde a SDD só fazia a pergunta, vale a proposta do próprio texto.
   (`04320a9b`, `4339882e`, `4ac4d315`, `6d5d87cd`, `a1306160`, `d59f40a5`, `f6c2f85e`) e "plano vivo controle"
   (`article-candidate:territory:9c75c3a7…:679b1bb2`, sem Assunto) pela principal. A SiloPage
   `territory:9c75c3a7…` mostra "laranja" porque todos os artigos dela concordam.
+
+#### F3 e F4 — como foram feitas (2026-10-12)
+
+- **Contrato (F3):** `lib/minerador/declared-plan.ts` (zod, sem ciclo de import); `keyword_subject.plan`
+  (`groupId`, `planVersion`, `order` 1..30 — o mesmo teto de `SILO_ARTICLE_RANGE` —, `role`, `scope` até 1.200
+  numa linha, `declaredPrincipal`) e `keyword_declared_principal` (+ `_actor`, `_at`, `_history`) lidos por
+  `resolveKeywordSubject(...).plan` e `resolveDeclaredPrincipal`; `KeywordDna.subject.plan` e
+  `KeywordDna.declaredPrincipal` opcionais `.strict()`; no Arquiteto, `ArchitectSubjectStanding.plan` e
+  `.declaredPrincipal` só do pacote aprovado. Writers antigos preservam o plano. Emenda D1-bis escrita no
+  ADR-022. O vínculo do Silo planejado com o grupo é `editorial_groups.plan` (M1, sem coluna nova) e
+  `editorial_groups.silo_id` gravado na consolidação.
+- **Minerador (F4):** núcleo único `importDeclaredPlanWithCore` (`lib/minerador/declared-plan-import-core.ts`),
+  rota `POST /api/minerador/marcas/[brandId]/plans/import`, diálogo "Importar plano do Silo"
+  (`modules/minerador/declared-plan-import-dialog.tsx`, na barra do topo do Minerador) e ferramenta MCP
+  `declare_silo_plan` (escopo `minerador.write`, permissão `minerador:edit`, aceite do usuário no `apply`) —
+  o mesmo núcleo. D2-bis em `resolveApprovalReadiness` (`DECLARED_PRINCIPAL_APPROVAL_REASON`). A Pesquisa por
+  Assunto carimba o grupo do Assunto nas keywords sem grupo. Repositório do grupo:
+  `createDeclaredPlanGroup`, `declareEditorialGroupPlan` (trava otimista, `plan_hash` = mesma versão),
+  `linkEditorialGroupSilo`.
+- **Arquiteto (F4):** principal declarada como cabeceira fixa e lista do Assunto antes do grupo
+  (`reservePriorityArticleGroups`/`planSiloArticleFormation`); D6 (nada solto) antes dos núcleos e dos
+  excedentes; portaria `DECLARED_PLAN_PRESERVED`; `ProvisionalArticleGroup.declaredPlan` → `hierarchy` e
+  `promise` no adapter; melhoria com `needsPrimary` falso, plano aplicado ao DNA (D8) e `subjectKeywordId` do
+  Assunto na keyword nova; Pilar declarado no Silo pelo `chooseSiloWorkingCopyPillar`/decisão humana
+  (`lib/arquiteto/silo-declared-plan.ts`); "Retirar artigo do Silo" (rota
+  `POST /api/arquiteto/silo-article-withdrawal`). Catálogo atualizado (AGENTS §17.1).
+- **Testes:** `test:arquiteto` 2838/2838, `test:arquiteto:servidor` 111/111, `test:arquiteto:lentes` 81/81,
+  `test:radar` 3466 (3465 + 1 pulado), `test:redator` 357/357, `test:agent` 78/78, Minerador por glob
+  1225 com as mesmas 28 falhas antigas, `test:editorial` 172 com as 4 antigas; `tsc` 0; `git diff --check` limpo.
+- **Não feito nesta fase (pendências):** D2(a) (parecer pelas sustentações, sem pagar) — sem ela, os artigos 3,
+  5 e 8 da WifiConecta só gravam com a coleta paga D2(b); trocar o Pilar de Silo já consolidado; a mesa aplicar
+  o evento `rejected` às keywords do artigo retirado; selos visuais do plano no Arquiteto (§9.6); "Tirar do
+  plano" pela tela; vereditos `contradicts_declared`/`parallel_path` do guarda (F5).
+- **Validado manualmente: não.** A homologação e o runbook do §11 são do dono.

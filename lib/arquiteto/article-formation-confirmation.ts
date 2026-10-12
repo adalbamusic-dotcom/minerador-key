@@ -298,6 +298,14 @@ export const CONCLUSION_GATE_CODES = [
    * contrato quando algum artigo do lote tem Assunto preso.
    */
   "SUBJECT_PRINCIPAL_REQUIRES_VOLUME",
+  /**
+   * F4 (SDD 2026-10-12 §6.2-4) — o artigo de um Assunto com PLANO DECLARADO
+   * mantém a principal declarada, e toda keyword da lista do Assunto (a
+   * Pesquisa por Assunto) está no artigo ou em "Keywords não agrupadas" do
+   * grupo, com motivo. O papel declarado vira a hierarquia na gravação. Só
+   * aparece quando algum artigo do lote é de Assunto com plano.
+   */
+  "DECLARED_PLAN_PRESERVED",
 ] as const;
 
 export type ConclusionGateCode = (typeof CONCLUSION_GATE_CODES)[number];
@@ -373,6 +381,12 @@ export function validateFormationConclusion(input: {
   subjectVolumeValidated?: ReadonlyMap<string, boolean>;
   /** Frase de cada Assunto, só para a mensagem. */
   subjectLabels?: ReadonlyMap<string, string>;
+  /**
+   * F4 — o plano declarado de cada Assunto (pacote aprovado), por `keywordId`:
+   * a principal declarada e a lista do Assunto que precisa ficar no artigo ou
+   * em "não agrupadas" do grupo.
+   */
+  declaredPlans?: ReadonlyMap<string, DeclaredPlanGateInput>;
 }): ConclusionVerdict {
   const candidatos = input.universes.flatMap(universe =>
     universe.candidates.map(candidate => ({ candidate, siloRef: universe.siloRef })));
@@ -546,6 +560,17 @@ export function validateFormationConclusion(input: {
     });
   }
 
+  const violacoesDoPlano = declaredPlanViolations(input);
+  if (violacoesDoPlano.checked) {
+    gates.push({
+      code: "DECLARED_PLAN_PRESERVED",
+      ok: violacoesDoPlano.byCandidate.size === 0,
+      detail: violacoesDoPlano.byCandidate.size === 0
+        ? "Os artigos do plano declarado mantêm a principal declarada e toda keyword da lista do Assunto está no artigo ou em não agrupadas do grupo."
+        : `${violacoesDoPlano.byCandidate.size} artigo(s) contradizem o plano declarado: ${[...violacoesDoPlano.byCandidate.values()].flat().join(" ")} Mude o plano no Minerador; a formação não troca o que foi declarado.`,
+    });
+  }
+
   /**
    * Só as contradições estruturais barram o lote inteiro.
    *
@@ -572,6 +597,8 @@ export function validateFormationConclusion(input: {
     // Q7 — Assunto sem Volume validado como principal daria slug e KGR a
     // uma frase sem busca (D1).
     "SUBJECT_PRINCIPAL_REQUIRES_VOLUME",
+    // F4 — contradizer o plano declarado não tem "refazer mesmo assim" (D11).
+    "DECLARED_PLAN_PRESERVED",
   ];
 
   return {
@@ -581,6 +608,54 @@ export function validateFormationConclusion(input: {
     approved: input.plan.approved.length,
     blocked: input.plan.blocked.length,
   };
+}
+
+/** F4 — o plano de um Assunto como a portaria o confere. */
+export type DeclaredPlanGateInput = {
+  principalKeywordId: string | null;
+  /** A lista do Assunto (`subject_discovery.subjectKeywordIds` que apontam para ele). */
+  subjectListKeywordIds?: readonly string[];
+  /** Frase da principal declarada, só para a mensagem. */
+  principalLabel?: string | null;
+};
+
+/**
+ * F4 — DECLARED_PLAN_PRESERVED, por candidato. A principal do artigo de um
+ * Assunto com plano é a declarada; a keyword da lista do Assunto está no
+ * próprio artigo ou em "Keywords não agrupadas" (com motivo) — nunca em outro
+ * artigo nem fora da mesa.
+ */
+export function declaredPlanViolations(input: {
+  universes: readonly ArticleFormationUniverse[];
+  plan: ArticleFormationConfirmationPlan;
+  declaredPlans?: ReadonlyMap<string, DeclaredPlanGateInput>;
+  subjectLabels?: ReadonlyMap<string, string>;
+}): { checked: boolean; byCandidate: Map<string, string[]> } {
+  const byCandidate = new Map<string, string[]>();
+  if (!input.declaredPlans?.size) return { checked: false, byCandidate };
+  const aprovados = new Set(input.plan.approved.map(entry => entry.candidateRef));
+  const candidatos = input.universes.flatMap(universe => universe.candidates);
+  const diferidas = new Set(input.universes.flatMap(universe => [
+    ...(universe.deferredKeywords || []).map(item => item.keywordId),
+    ...universe.ungroupedKeywordIds,
+  ]));
+  let checked = false;
+  for (const candidate of candidatos) {
+    const assunto = candidate.subjectKeywordId;
+    const plano = assunto ? input.declaredPlans.get(assunto) : undefined;
+    if (!assunto || !plano || !aprovados.has(candidate.candidateRef)) continue;
+    checked = true;
+    const motivos: string[] = [];
+    const nome = input.subjectLabels?.get(assunto) || assunto;
+    if (plano.principalKeywordId && candidate.principalKeywordId !== plano.principalKeywordId) {
+      motivos.push(`o artigo do Assunto “${nome}” não tem a principal declarada${plano.principalLabel ? ` (“${plano.principalLabel}”)` : ""}.`);
+    }
+    const noArtigo = new Set(candidate.keywords.map(item => item.keywordId));
+    const perdidas = (plano.subjectListKeywordIds || []).filter(keywordId => !noArtigo.has(keywordId) && !diferidas.has(keywordId));
+    if (perdidas.length) motivos.push(`${perdidas.length} keyword(s) da lista do Assunto “${nome}” estão fora do artigo e de não agrupadas.`);
+    if (motivos.length) byCandidate.set(candidate.candidateRef, motivos);
+  }
+  return { checked, byCandidate };
 }
 
 export type ConclusionHeldOut = { candidateRef: string; reasons: string[] };
@@ -634,6 +709,7 @@ export function readyConclusionSubset(input: Parameters<typeof validateFormation
       && input.subjectVolumeValidated?.get(candidate.subjectKeywordId) !== true) {
       barrar(ref, "tem o Assunto como principal sem Volume validado");
     }
+    for (const motivo of declaredPlanViolations(input).byCandidate.get(ref) || []) barrar(ref, motivo);
     const campos = input.unresolvedClassifications?.get(ref) || [];
     if (campos.length) barrar(ref, `classificação não resolvida: ${campos.join(", ")}`);
     const gate = input.serpGates.get(ref);

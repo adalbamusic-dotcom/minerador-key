@@ -247,14 +247,16 @@ export function deterministicArticleDnaPayload(group: ProvisionalArticleGroup, b
     // ao payload. Sem ele o ArticleDNA só descobre o próprio Silo pelo consenso
     // das keywords — e passa a mudar de pai sempre que uma delas se mover.
     ...(group.territoryRef ? { territoryRef: group.territoryRef } : {}),
-    hierarchy: group.suggestedHierarchy, suggestedSlug, canonical: publicationIdentity?.status === "coherent" ? publicationIdentity.canonical || null : null,
+    // F4 (SDD 2026-10-12 §6.2-5) — o papel declarado no plano do Silo é a hierarquia; sem plano, a sugestão de sempre.
+    hierarchy: group.declaredPlan?.role ?? group.suggestedHierarchy, suggestedSlug, canonical: publicationIdentity?.status === "coherent" ? publicationIdentity.canonical || null : null,
     mainIntent: intentProfile.primaryIntent,
     intentProfile, volumeStrategy, hierarchyStrategy, strategicPurpose, keywordStrategy, unitClassification, unitPurpose, serpStrategy,
     // Só intenção conhecida: "Pendente" é a revisão do Minerador por fazer, não uma intenção auxiliar.
     auxiliaryIntents: [...new Set(group.keywords.filter(keyword => keyword.id !== principalId).map(keyword => firstKnownIntentLabel(...keywordIntentLabels(keyword))).filter((label): label is string => Boolean(label)))],
     audience: text(semantic.publico, pending), problem: text(semantic.problema_percebido, pending), desiredResult: text(semantic.resultado_desejado, pending),
     journeyStage: text(semantic.etapa_jornada, pending), brandObjective: text(semantic.objetivo_marca, pending),
-    promise: text(semantic.promessa, `Cobrir com clareza o tema “${principal.keyword}”.`), angle: text(semantic.angulo, pending), cta: text(semantic.cta, pending),
+    // F4 — a descrição do escopo declarada no plano é a promessa do artigo (no lugar da moldura genérica).
+    promise: group.declaredPlan?.scope || text(semantic.promessa, `Cobrir com clareza o tema “${principal.keyword}”.`), angle: text(semantic.angulo, pending), cta: text(semantic.cta, pending),
     coverage: group.keywords.map(keyword => keyword.keyword), excludedSubjects: stringList(semantic.assuntos_excluidos),
     antiCannibalizationBoundary: text(semantic.fronteira_anti_canibalizacao, `Manter a cobertura centrada em “${principal.keyword}” e revisar sobreposições antes da publicação.`),
     nearbyArticleIds: [], differentiation: [], entities, requiredTopics: group.keywords.map(keyword => keyword.keyword),

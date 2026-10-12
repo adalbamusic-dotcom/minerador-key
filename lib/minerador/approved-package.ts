@@ -5,7 +5,7 @@ import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 import { hasCompleteLogicalOutputContract } from "./logical-processor.ts";
 import { readCanonicalKeywordDna } from "./logical-read-model.ts";
 import { SERP_EVIDENCE_RECORD_KEY } from "./serp-evidence-record.ts";
-import { resolveKeywordSubject } from "./keyword-subject.ts";
+import { resolveDeclaredPrincipal, resolveKeywordSubject } from "./keyword-subject.ts";
 
 /**
  * Pacote aprovado da keyword — o retrato que o Arquiteto consome.
@@ -98,6 +98,19 @@ export function resolveApprovalReadiness(input: {
   }
 
   /*
+   * EXCEÇÃO D2-bis (SDD 2026-10-12 §6.1-3; ADR-022, emenda D1-bis). A
+   * principal declarada no plano do Silo é cabeceira fixa e pode não ter
+   * busca medida ("Claro Vivo ou TIM internet"): como o Assunto, dispensa
+   * Volume e KGR. A Lógica continua exigida. Vale pela marca recíproca
+   * `keyword_declared_principal`, que só o núcleo do plano grava; a trava no
+   * envio ao Arquiteto (`resolveHandoffApprovalGate`) usa esta mesma função.
+   */
+  if (resolveDeclaredPrincipal(semantic).mark) {
+    if (missing.length === 0) return { ok: true, missing, reason: null };
+    return { ok: false, missing, reason: DECLARED_PRINCIPAL_APPROVAL_REASON };
+  }
+
+  /*
    * Volume é PROCESSO EXECUTADO (decisão do dono, 2026-09-25): medição Google
    * Ads com número >= 0, ou a resposta do Google Ads sem média gravada
    * (`volume_eligibility` `unavailable`, `provider: "google_ads"`, com data).
@@ -138,6 +151,9 @@ export function resolveApprovalReadiness(input: {
 
 /** Motivo da exceção D2 quando falta a Lógica de um Assunto declarado. */
 export const SUBJECT_APPROVAL_REASON = "Assunto declarado: dispensa Volume e KGR; a Lógica continua exigida." as const;
+
+/** Motivo da exceção D2-bis quando falta a Lógica de uma principal declarada no plano. */
+export const DECLARED_PRINCIPAL_APPROVAL_REASON = "Principal declarada no plano do Silo: dispensa Volume e KGR; a Lógica continua exigida." as const;
 
 /*
  * TRAVA DE APROVAÇÃO NO ENVIO AO ARQUITETO (SDD 2026-09-24, F1.7 e P10; Q3, Q9).

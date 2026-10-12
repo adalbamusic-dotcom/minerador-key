@@ -14,9 +14,20 @@ SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md`. Detalhe em 
 - [ ] Renomear, recolorir e arquivar pela tela (a rota PATCH já existe; falta o menu no seletor).
 - [ ] Importação de keywords com grupo ativo carimbando o grupo (hoje entram "Sem grupo").
 - [ ] F2: seletor no Arquiteto e no Radar, `groupId` nas mesas, `editorial_group_articles` com prévia.
-- [ ] F3/F4: plano declarado (importar a tabela do plano, principal declarada, D2-bis, papel no Silo).
+- [x] F3/F4: plano declarado (importar o plano colado ou a tabela, principal declarada, D2-bis, papel no Silo) — código e testes em 2026-10-12; **validado manualmente: não** (ver "Plano declarado do Silo" abaixo).
 - [ ] F5: guarda de retrabalho e "Histórico do grupo" (lê `editorial_group_events`).
-- [ ] F6: Redator/Publicações por grupo, `declare_silo_plan` e `groupId` no MCP.
+- [ ] F6: Redator/Publicações por grupo e `groupId` no MCP (`declare_silo_plan` já entrou na F4).
+
+## Plano declarado do Silo (F3/F4) — 2026-10-12
+
+SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` (§18.1). **Validado manualmente: não.**
+
+- [x] Fase A: leitores de `keyword_subject.plan` e `keyword_declared_principal` (`KeywordDna` opcional e `.strict()`); emenda D1-bis no ADR-022.
+- [x] Fase B: "Importar plano do Silo" (tela, rota e `declare_silo_plan` pelo mesmo núcleo), D2-bis, grupo das sustentações.
+- [ ] Dono: deploy da F3 sozinha, depois da F4; homologar o diálogo (dark mode, 360/768/1024/1440 px, foco, Esc) e o runbook da §11 na WifiConecta.
+- [ ] D2(a): parecer SERP do artigo pelas sustentações com volume quando a principal declarada não tem volume (hoje a gravação no Arquiteto pede as 4 lentes da principal, pagas).
+- [ ] "Tirar do plano" (retirar o plano de um Assunto sem retirar o Assunto) pela tela; hoje só reimportando o plano ou retirando o Assunto.
+- [ ] Menu "Renomear/Recolorir" do grupo na tela (a rota PATCH existe).
 
 ## Núcleo da Lógica e da aprovação no servidor — 2026-09-28
 

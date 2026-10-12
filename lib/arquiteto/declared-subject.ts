@@ -30,7 +30,8 @@
 
 import { keywordDnaFromPackage, type KeywordDna } from "../minerador/keyword-dna.ts";
 import type { ApprovedKeywordPackage } from "../minerador/approved-package.ts";
-import { isKeywordSubjectActorId, KEYWORD_SUBJECT_LABEL, resolveKeywordSubject } from "../minerador/keyword-subject.ts";
+import { isKeywordSubjectActorId, KEYWORD_SUBJECT_LABEL, resolveDeclaredPrincipal, resolveKeywordSubject } from "../minerador/keyword-subject.ts";
+import type { DeclaredArticlePlan, DeclaredPrincipalMark } from "../minerador/declared-plan.ts";
 import { deriveProcessorRevalidation } from "../minerador/processor-revalidation.ts";
 import { readSubjectDiscoveryBlock } from "../minerador/subject-discovery-import.ts";
 import { normalizeKeyword } from "../minerador/keyword-import-core.ts";
@@ -166,6 +167,17 @@ export type ArchitectSubjectStanding = {
    * como `subject`, ou como membro por ato humano explícito.
    */
   heldOutOfFormation: boolean;
+  /**
+   * PLANO DECLARADO (SDD 2026-10-12, F3 = Fase A): o artigo do plano deste
+   * Assunto, lido do PACOTE APROVADO pelo resolver do Minerador. `null` sem
+   * plano, sem declaração ou sem pacote (a linha viva nunca vale como plano).
+   */
+  plan: DeclaredArticlePlan | null;
+  /**
+   * Esta keyword é a principal declarada de um Assunto do plano (marca
+   * recíproca), lida do pacote aprovado. `null` quando não é.
+   */
+  declaredPrincipal: DeclaredPrincipalMark | null;
 };
 
 /**
@@ -196,6 +208,8 @@ export function readArchitectSubjectStanding(keyword: RecordLike): ArchitectSubj
       destinationUrl: declared ? dna.subject?.destinationUrl ?? null : null,
       volumeValidated,
       heldOutOfFormation: declared && !volumeValidated,
+      plan: declared ? dna.subject?.plan ?? null : null,
+      declaredPrincipal: dna.declaredPrincipal ?? null,
     };
   }
 
@@ -217,7 +231,18 @@ export function readArchitectSubjectStanding(keyword: RecordLike): ArchitectSubj
     destinationUrl: subject.destinationUrl,
     volumeValidated,
     heldOutOfFormation: subject.declared && !volumeValidated,
+    // Sem pacote aprovado não há plano: o Arquiteto só obedece ao que o humano aprovou.
+    plan: null,
+    declaredPrincipal: null,
   };
+}
+
+/**
+ * A marca de principal declarada lida da LINHA viva (sem pacote), só para
+ * avisar na tela que existe um plano à espera da aprovação. Nunca decide nada.
+ */
+export function liveDeclaredPrincipalMark(keyword: RecordLike): DeclaredPrincipalMark | null {
+  return resolveDeclaredPrincipal(asRecord(keyword.analise_semantica)).mark;
 }
 
 /* -------------------------------------------------------------- conservação */

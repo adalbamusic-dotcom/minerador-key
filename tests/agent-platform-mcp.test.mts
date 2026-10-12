@@ -603,3 +603,105 @@ test("2026-10-09 · o catálogo diz o processo novo: sem D9, sem 'o CSV sai sem 
   assert.ok(novas.length >= 5, String(novas.length));
   for (const texto of novas) assert.doesNotMatch(texto, D10, texto.slice(0, 120));
 });
+
+/* ====== 2026-10-12 · F4 da SDD do plano declarado: declare_silo_plan e a retirada do Silo ====== */
+
+const planoArgs = {
+  mode: "preview",
+  text: "Silo: Planos e contratação\n1 | melhor plano de internet residencial | plano de internet residencial | Pilar | Como escolher",
+  group: { mode: "new", name: "Planos", color: "azul" },
+};
+
+test("F4 · declare_silo_plan está no catálogo (humano, aceite no chat, grátis) e no servidor como escrita", async () => {
+  const operacao = PLATFORM_OPERATIONS.find(item => item.id === "minerador.declare_silo_plan")!;
+  assert.ok(operacao, "a operação do plano do Silo existe");
+  assert.deepEqual(operacao.tools, ["declare_silo_plan"]);
+  assert.equal(operacao.stage, "minerador");
+  assert.equal(operacao.decision, "human");
+  assert.equal(operacao.access, "tool");
+  assert.equal(operacao.chatConfirmationRequired, true);
+  assert.equal(operacao.cost, "free");
+  assert.deepEqual([...operacao.routes], ["/api/minerador/marcas/[brandId]/plans/import"]);
+  assert.match(operacao.howOnScreen, /'Importar plano do Silo'[\s\S]*'Gerar prévia'[\s\S]*nome e cor[\s\S]*'Declarar plano'/);
+  const guia = renderPlatformGuide("minerador");
+  for (const regra of [/principal declarada é fixa/, /aprova sem Volume/, /o Arquiteto não a troca/, /Keywords não agrupadas do grupo/, /Pilar declarado entra no Silo como decisão humana/]) {
+    assert.match(guia, regra, String(regra));
+  }
+  assert.match(renderPlatformGuide("seo"), /Plano declarado do Silo: a principal declarada é fixa/);
+
+  const send = harness(createWriterServer(principal([brand(["platform.read", "minerador.write"])])));
+  await send(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
+  const tools = (await send(2, "tools/list", {})).result?.tools as Array<{ name: string; annotations?: { readOnlyHint?: boolean }; inputSchema?: { properties?: Record<string, unknown> } }>;
+  const ferramenta = tools.find(tool => tool.name === "declare_silo_plan");
+  assert.ok(ferramenta, "o servidor anuncia declare_silo_plan");
+  assert.equal(ferramenta.annotations?.readOnlyHint, false);
+  for (const campo of ["mode", "text", "plan", "group", "importRequestId", "userConfirmation", "brandId"]) {
+    assert.ok(ferramenta.inputSchema?.properties && campo in ferramenta.inputSchema.properties, campo);
+  }
+});
+
+test("F4 · declare_silo_plan recusa apply sem aceite, sem importRequestId e com texto E plano — antes de qualquer leitura", async () => {
+  const send = harness(createWriterServer(principal([brand(["platform.read", "minerador.write"])])));
+  const semAceite = toolText(await send(96, "tools/call", { name: "declare_silo_plan", arguments: { ...planoArgs, mode: "apply", importRequestId: "00000000-0000-4000-8000-0000000000cc" } }));
+  assert.equal(semAceite.code, "human_confirmation_required");
+  const semPedido = toolText(await send(97, "tools/call", { name: "declare_silo_plan", arguments: { ...planoArgs, mode: "apply", userConfirmation: "pode declarar o plano" } }));
+  assert.equal(semPedido.code, "import_request_required");
+  const plano = { silo: { name: "Planos e contratação" }, articles: [{ order: 1, subject: "melhor plano de internet residencial", role: "Pilar", scope: "Como escolher" }] };
+  const osDois = toolText(await send(98, "tools/call", { name: "declare_silo_plan", arguments: { ...planoArgs, plan: plano } }));
+  assert.equal(osDois.code, "plan_required");
+  const nenhum = toolText(await send(99, "tools/call", { name: "declare_silo_plan", arguments: { mode: "preview", group: planoArgs.group } }));
+  assert.equal(nenhum.code, "plan_required");
+});
+
+test("F4 · declare_silo_plan pede minerador.write e só age na Marca do grant", async () => {
+  const soLeitura = harness(createWriterServer(principal([brand(["platform.read"])])));
+  const recusa = toolText(await soLeitura(100, "tools/call", { name: "declare_silo_plan", arguments: planoArgs }));
+  assert.equal(recusa.code, "scope_denied");
+  assert.equal(recusa.scope, "minerador.write");
+  const outraMarca = harness(createWriterServer(principal([brand(["platform.read", "minerador.write"])])));
+  const fora = toolText(await outraMarca(101, "tools/call", { name: "declare_silo_plan", arguments: { ...planoArgs, brandId: "00000000-0000-4000-8000-0000000000ff" } }));
+  assert.equal(fora.code, "brand_not_authorized");
+});
+
+test("F4 · preview e apply passam pelo MESMO núcleo da rota da tela; a ferramenta não grava Assunto, principal nem grupo por conta própria", () => {
+  const fonte = semComentarios(read("lib/server/platform-mcp-tools.ts"));
+  const inicio = fonte.indexOf('server.registerTool("declare_silo_plan"');
+  assert.ok(inicio > 0);
+  const ferramenta = fonte.slice(inicio, fonte.indexOf("server.registerTool(", inicio + 30));
+  assert.match(ferramenta, /call\("declare_silo_plan", "minerador\.write", \{ brandId, humanConfirmation: mode === "apply" \? userConfirmation : null \}, \[\{ module: "minerador", action: "edit" \}\]/);
+  assert.equal((ferramenta.match(/importDeclaredPlanWithCore\(/g) || []).length, 1, "uma chamada só, para preview e apply");
+  assert.match(ferramenta, /importDeclaredPlanWithCore\(\{\s*brandId: access\.brandId,\s*actorUserId: principal\.actorId,/, "a Marca vem do grant autorizado e o ator da conexão");
+  /* O cliente das tabelas de grupo é o operacional, o mesmo que a rota usa (editorialGroupsClient É getOperationalClient). */
+  assert.match(ferramenta, /const db = getOperationalClient\(\);/);
+  assert.match(ferramenta, /keywordsClient: db,\s*groupsClient: db,/);
+  assert.match(semComentarios(read("lib/server/editorial-groups.ts")), /export const editorialGroupsClient = \(\) => getOperationalClient\(\);/, "se o cliente da rota mudar, o MCP precisa mudar junto");
+  assert.match(ferramenta, /channel: mcpChannel\(access, requestId\),/, "a declaração fica ligada à chamada auditada");
+  assert.match(ferramenta, /\.from\("marcas"\)\.select\("id,site_url"\)\.eq\("id", access\.brandId\)/);
+  assert.doesNotMatch(ferramenta, /brandId: brandId\b|\.eq\("id", brandId\)|\.eq\("brand_id", brandId\)/, "a Marca nunca vem do corpo");
+  assert.doesNotMatch(ferramenta, /keyword_subject|keyword_declared_principal|setKeywordSubject|setDeclaredPrincipal|importSubjectsWithCore|importKeywordsWithCore|assignKeywordGroupWithCore|declareEditorialGroupPlan|createDeclaredPlanGroup|from\("minerador_keywords"\)|from\("editorial_groups"\)|\.update\(|\.insert\(|\.upsert\(/,
+    "a ferramenta só chama o núcleo");
+  const guarda = ferramenta.indexOf("human_confirmation_required");
+  const pedido = ferramenta.indexOf("import_request_required");
+  const nucleo = ferramenta.indexOf("importDeclaredPlanWithCore(");
+  assert.ok(guarda > 0 && pedido > guarda && nucleo > pedido, "aceite → importRequestId → núcleo, nesta ordem");
+  assert.ok(ferramenta.indexOf("human_confirmation_required") < ferramenta.indexOf('call("declare_silo_plan"'), "a recusa vem antes do invólucro (sem leitura nem auditoria)");
+  const rota = semComentarios(read("app/api/minerador/marcas/[brandId]/plans/import/route.ts"));
+  assert.match(rota, /importDeclaredPlanWithCore\(\{/, "a rota da tela chama o mesmo núcleo");
+  assert.match(rota, /groupsClient: editorialGroupsClient\(\),/);
+});
+
+test("F4 · retirar artigo do Silo é operação de tela, nunca ferramenta MCP", () => {
+  const retirada = PLATFORM_OPERATIONS.find(item => item.id === "arquiteto.withdraw_silo_article")!;
+  assert.ok(retirada, "a operação de retirada existe");
+  assert.equal(retirada.stage, "arquiteto");
+  assert.equal(retirada.access, "ui");
+  assert.equal(retirada.decision, "human");
+  assert.equal(retirada.tools?.length ?? 0, 0);
+  assert.deepEqual([...retirada.routes], ["/api/arquiteto/silo-article-withdrawal"]);
+  assert.match(retirada.howOnScreen, /aba Silos[\s\S]*'Retirar artigo do Silo'[\s\S]*prévia[\s\S]*'Confirmar retirada'/);
+  assert.match(retirada.produces.join(" "), /rejeitado, com o motivo/);
+  assert.match(retirada.produces.join(" "), /Nova versão do SiloDNA e da SiloPage sem o artigo/);
+  assert.match(retirada.produces.join(" "), /Keywords não agrupadas/);
+  assert.match((retirada.notes ?? []).join(" "), /O Pilar não sai por aqui/);
+  assert.ok(!catalogToolNames().some(nome => /withdraw|retir|remove_article|delete/i.test(nome)), catalogToolNames().join(", "));
+});
