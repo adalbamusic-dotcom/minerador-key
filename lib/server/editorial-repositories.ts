@@ -28,6 +28,27 @@ import {
 } from "./serp-persistence-adapter";
 
 const client = () => getOperationalClient();
+
+/*
+ * 2026-10-12 · F2 DOS GRUPOS — LEITURA POR RECORTE.
+ *
+ * As listagens da mesa aceitam um recorte opcional (os artigos de um grupo,
+ * SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` §8).
+ * Sem recorte, a consulta é a mesma de sempre, byte a byte. Com recorte, o
+ * `.in()` vai em blocos de 100 (a URL do PostgREST tem limite) e recorte vazio
+ * não consulta nada.
+ */
+const BLOCO_DO_RECORTE = 100;
+async function lerEmBlocos(ids: readonly string[], ler: (bloco: string[]) => PromiseLike<{ data: unknown; error: unknown }>): Promise<{ data: unknown[] | null; error: unknown }> {
+  const unicos = [...new Set(ids)];
+  const data: unknown[] = [];
+  for (let indice = 0; indice < unicos.length; indice += BLOCO_DO_RECORTE) {
+    const resposta = await ler(unicos.slice(indice, indice + BLOCO_DO_RECORTE));
+    if (resposta.error) return { data: null, error: resposta.error };
+    data.push(...(Array.isArray(resposta.data) ? resposta.data : []));
+  }
+  return { data, error: null };
+}
 const unwrap = <T>(data: T | null, error: unknown) => { if (error) mapPersistenceError(error); return data; };
 const isoDate = (value: string) => {
   const parsed = new Date(value);
@@ -83,7 +104,13 @@ export class ArtifactRepository {
   }
 
   async list(marcaId: string) {
-    const { data, error } = await client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId).in("artifact_type", ["article_dna", "silo_dna"]);
+    return this.listScoped(marcaId, null);
+  }
+
+  /** F2 · `entityIds` = só estes artefatos (leitura por grupo); `null` = a marca inteira, a leitura de sempre. */
+  async listScoped(marcaId: string, entityIds: readonly string[] | null) {
+    const consulta = () => client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId).in("artifact_type", ["article_dna", "silo_dna"]);
+    const { data, error } = entityIds ? await lerEmBlocos(entityIds, ids => consulta().in("entity_id", ids)) : await consulta();
     unwrap(data, error);
     const articles: VersionEnvelope<ArticleDNA>[] = []; const silos: VersionEnvelope<SiloDNA>[] = [];
     const incompatible: IncompatibleRecord[] = [];
@@ -175,7 +202,8 @@ function viewDeWorkflowAusente(error: { code?: string | null; message?: string |
 }
 
 export class WorkflowRepository {
-  async list(marcaId: string) {
+  /** F2 · `scope.articleIds` = só os artigos do recorte (grupo); sem recorte, a leitura de sempre. */
+  async list(marcaId: string, scope: { articleIds?: readonly string[] } = {}) {
     /*
      * A CONSULTA E QUE PRECISA CORTAR — nao a poda logo abaixo.
      *
@@ -190,11 +218,14 @@ export class WorkflowRepository {
      * resultado. Por isso ela permanece rodando: nao e redundancia, e quem
      * decide.
      */
-    const lerDe = async (fonte: string) => client()
+    const consultaDe = (fonte: string) => client()
       .from(fonte)
       .select("id,marca_id,article_id,stage,state,payload,lock_version,created_at,updated_at")
       .eq("marca_id", marcaId)
       .eq("stage", "radar");
+    const lerDe = async (fonte: string) => scope.articleIds
+      ? await lerEmBlocos(scope.articleIds, ids => consultaDe(fonte).in("article_id", ids)) as unknown as Awaited<ReturnType<typeof consultaDe>>
+      : await consultaDe(fonte);
 
     let { data, error } = await lerDe(fonteDaListagemWorkflow);
     if (error && fonteDaListagemWorkflow !== WORKFLOW_TABELA && viewDeWorkflowAusente(error)) {
@@ -630,11 +661,15 @@ export class SerpSnapshotRepository {
     return canonicalUuidOrNull(row?.id);
   }
 
-  async list(marcaId: string, articleId?: string) {
+  /** F2 · `articleIds` = só os artigos do recorte (grupo); ausente = a leitura de sempre. */
+  async list(marcaId: string, articleId?: string, articleIds?: readonly string[]) {
     try {
-      let query = client().from("editorial_serp_snapshots").select("id,marca_id,article_id,source_version_id,snapshot_version,previous_snapshot_id,content_hash,status,payload,created_by,created_at").eq("marca_id", marcaId).order("snapshot_version", { ascending: true });
+      const consulta = () => client().from("editorial_serp_snapshots").select("id,marca_id,article_id,source_version_id,snapshot_version,previous_snapshot_id,content_hash,status,payload,created_by,created_at").eq("marca_id", marcaId).order("snapshot_version", { ascending: true });
+      let query = consulta();
       if (articleId) query = query.eq("article_id", articleId);
-      const { data, error } = await query;
+      const { data, error } = articleIds
+        ? await lerEmBlocos(articleIds, ids => consulta().in("article_id", ids)).then(lido => ({ ...lido, data: lido.data ? [...lido.data as Array<{ snapshot_version: number }>].sort((a, b) => a.snapshot_version - b.snapshot_version) : null })) as unknown as Awaited<typeof query>
+        : await query;
       unwrap(data, error);
       const records = (data || []).map(row => {
         const typedRow = row as unknown as Pick<SerpSnapshotPersistenceRow, "source_version_id" | "payload">;
@@ -693,11 +728,14 @@ export class SerpSnapshotRepository {
     }
   }
 
-  async listReviews(marcaId: string, articleId?: string) {
+  async listReviews(marcaId: string, articleId?: string, articleIds?: readonly string[]) {
     try {
-      let query = client().from("editorial_serp_reviews").select("id,marca_id,article_id,snapshot_id,source_version_id,status,reviewed_by,payload,created_at").eq("marca_id", marcaId).order("created_at", { ascending: true });
+      const consulta = () => client().from("editorial_serp_reviews").select("id,marca_id,article_id,snapshot_id,source_version_id,status,reviewed_by,payload,created_at").eq("marca_id", marcaId).order("created_at", { ascending: true });
+      let query = consulta();
       if (articleId) query = query.eq("article_id", articleId);
-      const { data, error } = await query;
+      const { data, error } = articleIds
+        ? await lerEmBlocos(articleIds, ids => consulta().in("article_id", ids)).then(lido => ({ ...lido, data: lido.data ? [...lido.data as Array<{ created_at: string }>].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))) : null })) as unknown as Awaited<typeof query>
+        : await query;
       unwrap(data, error);
       const reviews = (data || []).map(row => parseStoredSerpReviewPayload(row.payload, row as unknown as SerpReviewPersistenceRow));
       return { reviews, available: true };
@@ -957,8 +995,10 @@ export class PublicationProtectionError extends Error {
 }
 
 export class PublicationRepository {
-  async list(marcaId: string) {
-    const { data, error } = await client().from("publication_records").select("payload,status,lock_version,updated_at").eq("marca_id", marcaId);
+  /** F2 · `scope.articleIds` = só os artigos do recorte (grupo); sem recorte, a leitura de sempre. */
+  async list(marcaId: string, scope: { articleIds?: readonly string[] } = {}) {
+    const consulta = () => client().from("publication_records").select("payload,status,lock_version,updated_at").eq("marca_id", marcaId);
+    const { data, error } = scope.articleIds ? await lerEmBlocos(scope.articleIds, ids => consulta().in("article_id", ids)) as unknown as Awaited<ReturnType<typeof consulta>> : await consulta();
     unwrap(data, error); return (data || []).map(row => OperationalPublicationSchema.parse({ ...(row.payload as object), state: row.status, lockVersion: row.lock_version, updatedAt: isoDate(row.updated_at) }));
   }
   async create(marcaId: string, publication: OperationalPublication, actorId: string) {

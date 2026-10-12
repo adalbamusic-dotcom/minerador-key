@@ -203,7 +203,7 @@ da keyword**.
 
 Decisão D4 do dono (SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md`,
 2026-10-12). Um **grupo editorial** é uma etiqueta de organização (nome + cor)
-que separa keywords — e, nas próximas fases, artigos e Silos — por lote de
+que separa keywords — e, desde a F2 (2026-10-12), artigos, SiloPages e itens do Radar — por lote de
 trabalho. São cinco cores, expostas como aliases em `app/globals.css`, sem
 nenhum valor bruto novo:
 

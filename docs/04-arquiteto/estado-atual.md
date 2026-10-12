@@ -1,3 +1,51 @@
+## Grupos por cor no Arquiteto e leitura por grupo (F2) — 2026-10-12
+
+```text
+SDD = docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md (F2; dono: Arquiteto/Radar) · MIGRATION_NOVA = 0 (usa editorial_group_articles da M1)
+ESCRITA_REMOTA = 0 · SQL_REMOTO = só SELECT de leitura · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** Pedido do dono: "as tags no
+minerador funcionam, mas tem que também estar nas planilhas do arquiteto e do radar… só pra ter organizado
+todas as planilhas".
+
+- **O que o dono vê (abas Artigos e Silos):** o mesmo seletor do Minerador no começo das ações do topo
+  ("Todos os grupos", "Sem grupo", cada grupo com bolinha, nome e contagem, "Novo grupo"); grupo na URL
+  (`?grupo=`) e o último usado lembrado só no navegador, com a MESMA chave do Minerador. Na aba Artigos, a
+  linha do artigo ganha a faixa de 4 px na célula do número e a etiqueta (bolinha + nome) embaixo da keyword
+  principal; a SiloPage mostra a etiqueta quando todos os artigos dela são do mesmo grupo. Na aba Silos, a
+  linha da keyword ganha a faixa e a etiqueta do grupo da própria keyword. O menu do seletor tem "Etiquetar
+  artigos pelo grupo das keywords" (prévia → "Gravar N etiqueta(s)"); o rodapé dos artigos selecionados tem
+  "Grupo ▸ Mover para <grupo> / Voltar ao grupo das keywords".
+- **De onde vem o grupo do artigo:** regra única `inheritArticleGroup` (`lib/editorial/article-groups.ts`) —
+  Assunto do ArticleDNA → principal → o grupo com mais keywords do artigo; empate = sem grupo (conflito
+  visível). A etiqueta gravada em `editorial_group_articles` vence a herança. Linha ainda sem Definição gravada
+  usa a mesma regra sobre as keywords da linha.
+- **Núcleo único** `lib/editorial/article-group-core.ts` (repositório `lib/editorial/article-groups-store.ts`,
+  único escritor da tabela): prévia/gravação aditiva, etiqueta ao gravar o ArticleDNA
+  (`appendArquitetoArtifact`, só com `PERSISTED`; nunca lança; uma leitura só quando as keywords do artigo não
+  têm grupo), mover pelo rodapé (origem `human`). Rota `/api/editorial/groups/articles` (GET, POST
+  `preview|apply`, PATCH); escrever exige edição no Arquiteto ou no Radar.
+- **Leitura por grupo:** `GET /api/arquiteto/workspace?groupId=<uuid|sem-grupo>` lê só as keywords e itens do
+  recorte, fechados por artigo (`closeKeywordSetOverArticles`), com `groupScope`; sem o parâmetro, as mesmas
+  consultas e o mesmo resultado de antes. Artefatos (ArticleDNA/SiloDNA/SiloPage) e territórios continuam da
+  marca inteira nesta fase. A tela continua lendo a mesa inteira e filtra na tela.
+- **WifiConecta (SELECT, 2026-10-12):** grupo "laranja" com as 56 keywords; nenhuma etiqueta de artigo gravada
+  ainda. Os 8 ArticleDNA vigentes recebem "laranja": 7 pelo Assunto e "plano vivo controle" pela principal.
+- **Compartilhados (aditivos):** `components/editorial/group-selector.tsx` (`ungroupedDetail`, `menuFooter`),
+  `components/editorial/operational-data-grid.tsx` (`rowStripeClassName`, `renderBulkBarAside`, `rowFilter`),
+  `lib/editorial/editorial-groups-store.ts` (evento `article_assigned`), `lib/server/editorial-groups.ts`
+  (`assertCanTagEditorialArticles`), `modules/arquiteto/territorial-workspace-rows.tsx` (`groupForKeyword`),
+  `modules/arquiteto/article-silo-rows.tsx` (`groupTag`), `lib/agent/platform-catalog.ts`
+  (`arquiteto.article_groups`). Consumidores preservados: Minerador (não mudou), Publicações (grid sem as props
+  novas), Redator, MCP (sem ferramenta nova).
+- **Testes:** `tests/arquiteto-grupos-f2.test.mts` (no `test:arquiteto`), `tests/arquiteto-grupos-f2-servidor.test.mts`
+  (no `test:arquiteto:servidor`), `tests/radar-grupos-f2.test.mts` (glob do `test:radar`). Atualizado com o
+  motivo: `tests/arquiteto-assunto-guarda-servidor.test.mts` (a gravação passa a ler o grupo das keywords
+  depois do insert; o guarda do Assunto não mudou). Contagens (2026-10-12): `test:arquiteto` 2794/2794 (era 2773; +21); `test:arquiteto:servidor` 104/104; `test:arquiteto:lentes` 81/81; `test:radar` 3459 · 3458 · 1 pulado (era 3449; +10); `test:redator` 357/357; `test:agent` 73/73; Minerador por glob 1204 · 1176 · 28 (as mesmas 28 da base, por nome); `test:minerador:dom` 4/4; `test:editorial` 172 · 168 · 4 (as 4 antigas); `tsc` 0 erros; ESLint sem problema novo (Arquiteto 121 = HEAD, Radar 10 avisos = HEAD); guard visual sem dívida nova; `git diff --check` limpo.
+- **Pendente:** homologação do dono na WifiConecta (seletor, "Etiquetar artigos pelo grupo das keywords",
+  mover pelo rodapé, F5 com `?grupo=`, outra marca sem grupo); medição do peso por grupo na AdalbaPro.
+
 ## Silo amplo: de 4 a 30 artigos (D3) — 2026-10-12
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.** Decisão D3 do dono na SDD

@@ -1,5 +1,16 @@
 # Backlog — Radar
 
+## Grupos por cor no Radar e mesa por grupo (F2) — 2026-10-12
+
+Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Seletor, etiqueta e faixa na planilha do Radar; mover pelo rodapé; "Etiquetar" com prévia.
+- [x] Importar do Arquiteto etiqueta o artigo sem etiqueta (aditivo).
+- [x] `groupId` opcional na mesa (`GET /api/editorial/workspace`) e na listagem do Radar; sem parâmetro, igual.
+- [ ] **Dono:** homologar (filtrar por grupo, mover um artigo, voltar ao grupo das keywords).
+- [ ] Leitura parcial pela tela com cache por grupo (só depois da medição do peso; hoje a tela lê a mesa inteira).
+- [ ] F6 da SDD: Redator e Publicações por grupo; `groupId` no MCP.
+
 ## Keywords proibidas por destino nas âncoras — 2026-10-11 (regras "2026-10-11c")
 
 Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo). **Validado manualmente: não.**

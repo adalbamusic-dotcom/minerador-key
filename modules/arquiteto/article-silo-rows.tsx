@@ -56,12 +56,15 @@ export function ArticleSiloPageRow({
   expanded,
   onToggleSelected,
   onToggleExpanded,
+  groupTag = null,
 }: {
   view: ArticleSiloView;
   selected: boolean;
   expanded: boolean;
   onToggleSelected: () => void;
   onToggleExpanded: () => void;
+  /** 2026-10-12 · F2 dos grupos: a etiqueta do grupo dos artigos desta SiloPage (quando todos concordam). */
+  groupTag?: React.ReactNode;
 }) {
   const novos = view.counts.articles + view.counts.candidates + view.counts.published;
 
@@ -103,6 +106,7 @@ export function ArticleSiloPageRow({
           <span className={`mt-0.5 block font-mono text-sm ${view.siloSlug ? "text-identity-slug" : "text-text-muted"}`} title={view.siloSlug || undefined}>
             {view.siloSlug || "página ainda não definida"}
           </span>
+          {groupTag ? <span className="mt-1 block">{groupTag}</span> : null}
         </td>
         <Cell align="center">{view.counts.keywords} kw · {novos} page{novos === 1 ? "" : "s"}</Cell>
         <Cell align="center">—</Cell>

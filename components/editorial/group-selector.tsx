@@ -36,6 +36,8 @@ export function EditorialGroupSelector({
   onCreate,
   disabled = false,
   canCreate = true,
+  ungroupedDetail,
+  menuFooter,
 }: {
   groups: readonly EditorialGroupSummary[];
   ungroupedCount: number;
@@ -44,6 +46,10 @@ export function EditorialGroupSelector({
   onCreate?: (name: string, color: EditorialGroupColor) => Promise<{ ok: true; group: EditorialGroupSummary } | { ok: false; message: string }>;
   disabled?: boolean;
   canCreate?: boolean;
+  /** F2 · texto ao lado de "Sem grupo" (o Radar conta artigos, não keywords). Ausente = contagem de keywords, como no Minerador. */
+  ungroupedDetail?: string;
+  /** F2 · ações extras no fim do menu (ex.: "Etiquetar artigos pelo grupo das keywords"); recebe o fechar. */
+  menuFooter?: (close: () => void) => ReactNode;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -125,7 +131,7 @@ export function EditorialGroupSelector({
       <AnchoredPopover open={open} onClose={fechar} triggerRef={triggerRef} ariaLabel="Grupo da planilha">
         <div role="menu" aria-label="Grupos" className="flex flex-col gap-0.5">
           {opcao("todos", { kind: "all" }, <span>Todos os grupos</span>, "")}
-          {opcao("sem-grupo", { kind: "none" }, <span>Sem grupo</span>, `${ungroupedCount} keyword${ungroupedCount === 1 ? "" : "s"}`)}
+          {opcao("sem-grupo", { kind: "none" }, <span>Sem grupo</span>, ungroupedDetail ?? `${ungroupedCount} keyword${ungroupedCount === 1 ? "" : "s"}`)}
           {ativos.length ? <div role="separator" className="my-1 border-t border-divider" /> : null}
           {ativos.map(group => opcao(group.id, { kind: "group", groupId: group.id }, <><EditorialGroupDot color={group.color} /><span className="min-w-0 break-words">{group.name}</span></>, editorialGroupCountLabel(group)))}
         </div>
@@ -175,6 +181,7 @@ export function EditorialGroupSelector({
             )}
           </div>
         ) : null}
+        {menuFooter ? <div className="mt-2 border-t border-divider pt-2">{menuFooter(fechar)}</div> : null}
       </AnchoredPopover>
     </>
   );

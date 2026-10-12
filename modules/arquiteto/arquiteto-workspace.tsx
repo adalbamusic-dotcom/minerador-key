@@ -388,6 +388,10 @@ import {
   isSupabaseTokenExpirationError,
   withSupabaseSelectRetry,
 } from "@/lib/supabase/browser-authenticated-client";
+import { useEditorialGroups } from "@/components/editorial/use-editorial-groups";
+import { EditorialGroupSelector } from "@/components/editorial/group-selector";
+import { ArticleGroupMoveSelect, ArticleGroupRowTag, ArticleGroupTagMenuItem, ArticleGroupTaggingDialog, articleGroupMoveNotice, editorialGroupStripeClass } from "@/components/editorial/article-group-controls";
+import { articleKeywordIndex, filterRowsByEditorialGroup, inheritArticleGroup, sharedGroupOf } from "@/lib/editorial/article-groups";
 // Labels rendered by the identity resolver: SERP de fortalecimento · SERP de arquitetura do publicado · SERP de formação.
 import {
   Loader2,
@@ -751,6 +755,14 @@ export default function ArquitetoPage() {
   // Data
   const [siloOptions, setSiloOptions] = useState<CanonicalSiloOption[]>([]);
   const [masterList, setMasterList] = useState<any[]>([]);
+  /*
+   * 2026-10-12 · F2 DOS GRUPOS (SDD docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md
+   * §6.2 e §9) — o mesmo seletor e a mesma etiqueta do Minerador, nas abas
+   * Artigos e Silos. O artigo herda o grupo das keywords; o filtro é de TELA
+   * (a mesa continua lida inteira e o recorte nunca a substitui, §8).
+   */
+  const arquitetoGroups = useEditorialGroups({ brandId: selectedBrandId || null, enabled: sessionStatus === "authenticated", includeKeywords: true });
+  const [arquitetoGroupTaggingOpen, setArquitetoGroupTaggingOpen] = useState(false);
 
   /*
    * OS SINAIS DO KEYWORDDNA NASCEM AQUI, ANTES DE QUEM OS USA.
@@ -6441,6 +6453,40 @@ export default function ArquitetoPage() {
   }, [articleDnaEntryFor, liveSubjectAnchors]);
 
   /**
+   * F2 · O GRUPO DA LINHA DO ARTIGO. Com Definição gravada: o grupo efetivo do
+   * artigo, lido do servidor (etiqueta gravada ou herança). Em formação, sem
+   * Definição: a MESMA regra de herança (Assunto → principal → maioria das
+   * keywords), aplicada às keywords da linha. Nunca muda o artigo.
+   */
+  const articleGroupInfoFor = useCallback((article: (typeof articlesList)[number]): { groupId: string | null; persisted: boolean; articleId: string | null } => {
+    const dnaArticleId = articleDnaForGrid(articleEntityIdFor(article), article.candidateRef)?.payload.articleId ?? null;
+    const doServidor = dnaArticleId ? arquitetoGroups.articleGroupById.get(dnaArticleId) : undefined;
+    if (doServidor) return { groupId: doServidor.groupId, persisted: doServidor.persisted, articleId: dnaArticleId };
+    const herdado = inheritArticleGroup(articleKeywordIndex({
+      articleId: dnaArticleId || String(article.id),
+      principalKeywordId: article.mainKeywordObj?.id != null ? String(article.mainKeywordObj.id) : null,
+      subjectKeywordId: articleSubjectFor(article)?.keywordId ?? null,
+      keywordIds: (article.supportKeywords || []).map((keyword: { id?: unknown } | null) => keyword?.id != null ? String(keyword.id) : null),
+    }), arquitetoGroups.keywordGroupById);
+    return { groupId: herdado.groupId, persisted: false, articleId: dnaArticleId };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [articleDnaForGrid, articleSubjectFor, arquitetoGroups.articleGroupById, arquitetoGroups.keywordGroupById]);
+
+  /** Rodapé · "Grupo ▸ Mover para… / Voltar ao grupo das keywords" dos artigos selecionados. */
+  const moverArtigosDeGrupo = async (groupId: string | null) => {
+    const linhas = articlesList.filter(art => selectedArticleIds.has(art.id));
+    const ids = [...new Set(linhas.map(art => articleGroupInfoFor(art).articleId).filter((id): id is string => Boolean(id)))];
+    const semDefinicao = linhas.filter(art => !articleGroupInfoFor(art).articleId).length;
+    if (!ids.length) {
+      showNotification("warning", "Os artigos selecionados ainda não têm Definição gravada: eles herdam o grupo das keywords. Para mudar, mova as keywords no Minerador.");
+      return;
+    }
+    const destino = groupId ? arquitetoGroups.groupById.get(groupId)?.name ?? null : null;
+    const aviso = articleGroupMoveNotice(await arquitetoGroups.moveArticles(ids, groupId), destino);
+    showNotification(aviso.tone, semDefinicao ? `${aviso.message} ${semDefinicao} sem Definição gravada continua(m) com o grupo das keywords.` : aviso.message);
+  };
+
+  /**
    * A ÚNICA leitura de "quais conflitos estruturais este artigo ainda carrega".
    *
    * A autoridade é o CENÁRIO REVISADO, em QUALQUER aba: cada candidato carrega
@@ -7019,8 +7065,10 @@ export default function ArquitetoPage() {
       return true;
     });
     // Filtro "Assuntos" (F2.2): só os artigos que o Assunto escolhido sustenta.
-    return filterBySubject(porCampos, workspaceMode === "articles" ? activeSubjectFilter : null, art => articleSubjectFor(art)?.keywordId ?? null);
-  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode, activeSubjectFilter, articleSubjectFor]);
+    const porAssunto = filterBySubject(porCampos, workspaceMode === "articles" ? activeSubjectFilter : null, art => articleSubjectFor(art)?.keywordId ?? null);
+    // F2 · o grupo ativo no topo recorta o que aparece; a lista de artigos continua inteira.
+    return filterRowsByEditorialGroup(porAssunto, arquitetoGroups.filter, art => articleGroupInfoFor(art).groupId) as typeof porAssunto;
+  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode, activeSubjectFilter, articleSubjectFor, arquitetoGroups.filter, articleGroupInfoFor]);
 
   const ungroupedKeywords = useMemo(
     () => masterList.filter(keyword => keyword.clusterId === null || keyword.clusterId === undefined || keyword.clusterId === "" || keyword.clusterId === 0),
@@ -9418,6 +9466,18 @@ export default function ArquitetoPage() {
     });
     return { ...territorialSurface.surface, groups };
   }, [territorialSurface, siloScope]);
+  /* F2 · o grupo ativo no topo também recorta a aba Silos, pela keyword (a linha desta aba). */
+  const groupScopedTerritorialSurface = useMemo(() => {
+    if (arquitetoGroups.filter.kind === "all") return scopedTerritorialSurface;
+    const groups = scopedTerritorialSurface.groups
+      .map(group => ({ ...group, rows: filterRowsByEditorialGroup(group.rows, arquitetoGroups.filter, row => arquitetoGroups.keywordGroupById.get(row.keywordId) ?? null) as typeof group.rows }))
+      .filter(group => group.rows.length > 0);
+    return { ...scopedTerritorialSurface, groups };
+  }, [scopedTerritorialSurface, arquitetoGroups.filter, arquitetoGroups.keywordGroupById]);
+  const groupForKeyword = useCallback((keywordId: string) => {
+    const groupId = arquitetoGroups.keywordGroupById.get(keywordId);
+    return groupId ? arquitetoGroups.groupById.get(groupId) ?? null : null;
+  }, [arquitetoGroups.keywordGroupById, arquitetoGroups.groupById]);
 
   /** Base do que a IA analisou; espelha o que o servidor recebe. */
   const territorialAiBaseHashOf = useCallback((question: { questionId: string; kind: string; territoryRef: string | null }) => {
@@ -17412,6 +17472,18 @@ export default function ArquitetoPage() {
     topbarHandlersRef.current.toggleExportMenu = () => setExportMenuOpen(current => !current);
   });
 
+  // F2 · o seletor de grupo, o mesmo do Minerador, no começo das ações do topo.
+  const seletorDeGrupoDoArquiteto = useMemo(() => (arquitetoGroups.available
+    ? <EditorialGroupSelector
+      groups={arquitetoGroups.groups}
+      ungroupedCount={arquitetoGroups.ungroupedKeywordCount}
+      filter={arquitetoGroups.filter}
+      onChange={arquitetoGroups.setFilter}
+      onCreate={arquitetoGroups.createGroup}
+      menuFooter={fechar => <ArticleGroupTagMenuItem pending={arquitetoGroups.untaggedInheritedCount} onClick={() => { fechar(); setArquitetoGroupTaggingOpen(true); }} />}
+    />
+    : null), [arquitetoGroups.available, arquitetoGroups.groups, arquitetoGroups.ungroupedKeywordCount, arquitetoGroups.filter, arquitetoGroups.setFilter, arquitetoGroups.createGroup, arquitetoGroups.untaggedInheritedCount]);
+
   const globalTopbarControls = useMemo<GlobalTopbarModuleControls>(() => ({
     moduleId: "arquiteto",
     tabs: <nav className="flex items-center gap-0.5" aria-label="Áreas do Arquiteto" role="tablist" data-arquiteto-topbar-tabs>
@@ -17434,6 +17506,7 @@ export default function ArquitetoPage() {
       open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "arquiteto" } })),
      },
      actions: <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto xl:overflow-visible" data-arquiteto-topbar-actions>
+        {seletorDeGrupoDoArquiteto}
         {workspaceMode !== "silos" && <>
           <select
             aria-label="Filtrar por status"
@@ -17567,7 +17640,7 @@ export default function ArquitetoPage() {
         ? <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} shrink-0 tabular-nums text-text-muted`} aria-label="Keywords na estrutura de silos">{territorialSurface.surface.counts.keywords} keywords</span>
         : <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} shrink-0 tabular-nums text-text-muted`} aria-label="Artigos e keywords aguardando decisão de silo">{filteredArticles.length} artigos{visiblePipelineRows.length ? ` · ${visiblePipelineRows.length} aguardando` : ""}</span>}
     </div>,
-  }), [acceptedArticleDnas, activeLogicalTask, exportMenuOpen, filterHierarquia, filterStatus, filteredArticles.length, generatingStrategic, masterHistory.canRedo, masterHistory.canUndo, masterHistory.entries.length, masterList.length, pendingSiloReview, searchQuery, selectedBrandId, session?.user?.email, siloConsolidating, siloReviewBusy, siloWorkingCopies.length, territorialSurface, visiblePipelineRows.length, workspaceMode]);
+  }), [seletorDeGrupoDoArquiteto, acceptedArticleDnas, activeLogicalTask, exportMenuOpen, filterHierarquia, filterStatus, filteredArticles.length, generatingStrategic, masterHistory.canRedo, masterHistory.canUndo, masterHistory.entries.length, masterList.length, pendingSiloReview, searchQuery, selectedBrandId, session?.user?.email, siloConsolidating, siloReviewBusy, siloWorkingCopies.length, territorialSurface, visiblePipelineRows.length, workspaceMode]);
   const globalTopbarControlsRef = useRef<GlobalTopbarModuleControls>(globalTopbarControls);
   globalTopbarControlsRef.current = globalTopbarControls;
 
@@ -18888,7 +18961,8 @@ export default function ArquitetoPage() {
                         return proximo;
                       }),
                     }}
-                    surface={scopedTerritorialSurface}
+                    surface={groupScopedTerritorialSurface}
+                    groupForKeyword={arquitetoGroups.available ? groupForKeyword : null}
                     vinculoByKeywordId={territorialVinculoLines}
                     keywordLabelFor={keywordId => masterList.find(item => String(item.id) === keywordId)?.keyword || keywordId}
                   />
@@ -19075,6 +19149,7 @@ export default function ArquitetoPage() {
                             expanded={expandedArticleRefs.has(view.siloRef)}
                             onToggleSelected={() => toggleSiloPageSelection(pageId)}
                             onToggleExpanded={() => toggleArticleUnitExpansion(view.siloRef)}
+                            groupTag={(() => { const groupId = sharedGroupOf(group.articles.map(art => articleGroupInfoFor(art).groupId)); const resumo = groupId ? arquitetoGroups.groupById.get(groupId) : null; return resumo ? <ArticleGroupRowTag group={resumo}/> : null; })()}
                           />
                         );
                       })()}
@@ -19216,6 +19291,9 @@ export default function ArquitetoPage() {
                     });
                     // O botão individual e o lote perguntam ao MESMO portão.
                     const articleClosingIssues = articleClosingBlockers(closingCandidateFor(art), "approve");
+                    // F2 · faixa e etiqueta do grupo (herdado das keywords ou gravado no artigo).
+                    const grupoDaLinha = articleGroupInfoFor(art);
+                    const grupoDaLinhaResumo = grupoDaLinha.groupId ? arquitetoGroups.groupById.get(grupoDaLinha.groupId) ?? null : null;
 
                   return (
                     <React.Fragment key={art.id}>
@@ -19227,7 +19305,7 @@ export default function ArquitetoPage() {
                         className={`border-b border-divider transition-colors ${isExpanded ? "border-l-2 border-l-module-accent bg-surface-elevated hover:bg-surface-elevated" : art.isPublished ? "border-l-2 border-l-danger" : ""} ${pendingAiReview ? "border-l-2 border-l-warning" : ""} ${isExpanded ? "" : selectedArticleIds.has(art.id) ? "bg-selected hover:bg-surface-elevated" : art.isPublished ? "bg-danger-soft hover:bg-surface-elevated" : "hover:bg-surface-elevated"}`}
                       >
 
-                        <td className="sticky left-0 z-10 w-9 border-r border-slate-800/60 bg-slate-950 px-2 py-1 text-right font-mono text-[11px] tabular-nums text-slate-500">
+                        <td className={`sticky left-0 z-10 w-9 border-r border-slate-800/60 bg-slate-950 px-2 py-1 text-right font-mono text-[11px] tabular-nums text-slate-500 ${editorialGroupStripeClass(grupoDaLinhaResumo)}`}>
                           {filteredArticles.findIndex(candidate => candidate.id === art.id) + 1}
                         </td>
 
@@ -19257,7 +19335,7 @@ export default function ArquitetoPage() {
                         <td className="border-r border-slate-800/60 px-3 py-2">{/* O rótulo diz o que a unidade É: com ArticleDNA canônico ela deixou de estar "em formação". */}<p className={`text-sm font-semibold uppercase tracking-wider ${art.isPublished ? "text-success" : articleDnaVersion ? "text-positive-soft" : formacao.formationConcluded ? "text-positive-soft" : "text-module-accent"}`}>{formacao.unitLabel}</p><p className="mt-0.5 text-xs text-text-muted" data-testid="architect-formation-conclusion-detail">{formacao.unitDetail}</p>{/* O papel no Silo tem coluna própria: repeti-lo aqui daria dois lugares
                             para o mesmo fato, e eles divergem no primeiro caso de borda. */}</td>
                         {/* Keyword principal */}
-                        <td className="min-w-0 border-r border-slate-800/60 px-3 py-2"><p className="break-words text-sm font-semibold text-keyword" title={art.keywordPrincipal}>{art.keywordPrincipal}</p>{art.isPublished ? (publicationUrlFor(art) ? <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="mt-1 block max-w-[280px] truncate font-mono text-xs text-identity-published underline decoration-identity-published/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus select-all">{publicationUrlFor(art)}</a> : <span className="mt-1 block truncate font-mono text-xs text-identity-published">URL não recebida · /{art.slug}</span>) : <input type="text" value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug} onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)} onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }} onBlur={e => { if (!articleIdentityContext.slugProtected) persistArticleIdentityField(art, "computedSlug", e.target.value); }} disabled={articleIdentityContext.slugProtected} className={`${ARCHITECT_UI.control} mt-1 h-7 w-full max-w-[280px] font-mono text-xs text-identity-new disabled:cursor-not-allowed disabled:opacity-70`} />}</td>
+                        <td className="min-w-0 border-r border-slate-800/60 px-3 py-2"><p className="break-words text-sm font-semibold text-keyword" title={art.keywordPrincipal}>{art.keywordPrincipal}</p><ArticleGroupRowTag group={grupoDaLinhaResumo} inherited={!grupoDaLinha.persisted} className="mt-1"/>{art.isPublished ? (publicationUrlFor(art) ? <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="mt-1 block max-w-[280px] truncate font-mono text-xs text-identity-published underline decoration-identity-published/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus select-all">{publicationUrlFor(art)}</a> : <span className="mt-1 block truncate font-mono text-xs text-identity-published">URL não recebida · /{art.slug}</span>) : <input type="text" value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug} onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)} onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }} onBlur={e => { if (!articleIdentityContext.slugProtected) persistArticleIdentityField(art, "computedSlug", e.target.value); }} disabled={articleIdentityContext.slugProtected} className={`${ARCHITECT_UI.control} mt-1 h-7 w-full max-w-[280px] font-mono text-xs text-identity-new disabled:cursor-not-allowed disabled:opacity-70`} />}</td>
                         <td className="border-r border-slate-800/60 px-2 py-2 text-center text-sm text-foreground">{art.supportKeywords.length + 1} {art.supportKeywords.length === 0 ? "keyword" : "keywords"}</td>
                         {workspaceMode !== "silos" && <td className="border-r border-divider px-2 py-2 text-center">{(() => {
                           /*
@@ -20282,10 +20360,20 @@ export default function ArquitetoPage() {
              {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button type="button" onClick={() => { void applyGlobalStatus(); }} disabled={updating} data-testid="architect-mark-ready-for-radar" title="Aplica o status global escolhido aos artigos selecionados após validação e confirmação remota." className={`${ARCHITECT_UI.footerButton} border-module-accent/45 text-module-accent hover:border-module-accent disabled:cursor-not-allowed disabled:opacity-40`}><ShieldCheck className="h-3 w-3" aria-hidden="true"/>Aplicar status</button>}
              {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && selectedArticleRadarGateIssues.length > 0 && <button type="button" onClick={() => { setRepairMessage(null); setRepairOpen(true); }} data-testid="architect-open-repair" title="Mostra o que bloqueia cada artigo selecionado e o que pode ser reparado. O diagnostico nao altera nada." className={`${ARCHITECT_UI.footerButton} border-warning/45 text-warning hover:border-warning`}>Diagnosticar e reparar</button>}
              {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button onClick={() => { void sendSelectedToRadar(); }} disabled={!canSendSelectedArticlesToRadarNow} title={canSendSelectedArticlesToRadarNow ? "Enviar ao Radar os artigos com status Pronto para Radar" : sendToRadarBlocker} className={`${ARCHITECT_UI.footerButton} border-context-accent/45 text-context-accent hover:border-context-accent disabled:cursor-not-allowed disabled:opacity-40`}><ArrowRight className="h-3 w-3"/>Enviar ao Radar</button>}
+            {articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && arquitetoGroups.available && <ArticleGroupMoveSelect activeGroups={arquitetoGroups.groups.filter(group => group.status === "active")} disabled={updating} onMove={groupId => { void moverArtigosDeGrupo(groupId); }} />}
             <button onClick={() => { markSelectionInteraction("clear-selection"); setSelectedArticleIds(new Set()); setSelectedSiloPageIds(new Set()); lastSelectionAnchorId.current = null; }} className={ARCHITECT_UI.footerButton}>Limpar seleção</button>
           </div>
         </footer>
       )}
+
+      <ArticleGroupTaggingDialog
+        open={arquitetoGroupTaggingOpen}
+        onClose={() => setArquitetoGroupTaggingOpen(false)}
+        groupById={arquitetoGroups.groupById}
+        loadPreview={() => arquitetoGroups.previewTagging()}
+        apply={arquitetoGroups.applyTagging}
+        onDone={(message, tone) => showNotification(tone, message)}
+      />
 
       {repairOpen && <ArticleRepairPanel
         planos={articleRepairPlans.map(item => item.plano)}

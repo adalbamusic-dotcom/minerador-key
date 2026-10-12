@@ -26,6 +26,20 @@ export async function assertCanReadEditorialGroups(profile: CanonicalSessionProf
   return context;
 }
 
+/**
+ * F2 · Etiquetar ou mover ARTIGO de grupo: quem edita no Arquiteto ou no
+ * Radar (as duas planilhas mostram o grupo do artigo e têm o rodapé).
+ */
+const ETIQUETADORES_DE_ARTIGO: readonly TenantModule[] = ["arquiteto", "radar"];
+
+export async function assertCanTagEditorialArticles(profile: CanonicalSessionProfile, brandId: string) {
+  const context = await resolveTenantContext({ brandId, profile });
+  if (!context.isGlobalAdmin && !ETIQUETADORES_DE_ARTIGO.some(module => context.permissions.includes(`${module}:edit`))) {
+    throw new AuthzError(403, "BRAND_ACCESS_DENIED: etiquetar artigo exige edição no Arquiteto ou no Radar desta marca.");
+  }
+  return context;
+}
+
 export const EDITORIAL_GROUP_REFUSAL_STATUS: Record<EditorialGroupRefusalCode | typeof GROUPS_NOT_AVAILABLE, number> = {
   GROUP_NAME_INVALID: 400,
   GROUP_COLOR_INVALID: 400,

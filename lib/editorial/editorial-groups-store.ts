@@ -89,7 +89,8 @@ export async function readEditorialGroup(client: Client, brandId: string, groupI
 
 export type EditorialGroupEventInput = {
   groupId: string;
-  eventType: "created" | "renamed" | "recolored" | "keywords_assigned" | "keywords_unassigned" | "archived" | "reactivated";
+  /* `article_assigned` (F2): etiqueta de artigo gravada, movida ou devolvida à herança. */
+  eventType: "created" | "renamed" | "recolored" | "keywords_assigned" | "keywords_unassigned" | "article_assigned" | "archived" | "reactivated";
   payload: Record<string, unknown>;
 };
 
