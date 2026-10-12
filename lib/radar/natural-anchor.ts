@@ -25,6 +25,20 @@
  * "para <público>"). O grafo e os DNAs são só lidos: o Arquiteto não se adapta
  * ao Radar.
  *
+ * 2026-10-11c · KEYWORDS PROIBIDAS POR DESTINO (regra do dono, reforçada: "não
+ * pode repetir as keywords de jeito nenhum… vai virar uma salada de keywords em
+ * todos os artigos e isso vai causar muita horizontalidade dos artigos"). O CSV
+ * real de "como atrair um cliente" ainda sugeria "gerar leads qualificados"
+ * (complementar inteira do Pilar). Agora:
+ *   - a lista de cada destino é a principal, as complementares e os reforços do
+ *     ArticleDNA dele, mais o rótulo (da SiloPage, o nome do Silo);
+ *   - a âncora é inválida quando É uma delas ou CONTÉM inteira qualquer uma de 2
+ *     palavras ou mais (sem acento, caixa e plural); trecho curto de uma
+ *     keyword, que não é ela inteira, continua permitido;
+ *   - sem conceito do grafo nem recorte válido (e livre), a régua NÃO inventa
+ *     âncora: devolve a instrução "escreva com as palavras da sua frase a ideia
+ *     do destino…" (`free`), e o entregável diz as keywords proibidas.
+ *
  * Domínio puro: sem banco, sem rede, sem IA.
  */
 
@@ -35,8 +49,16 @@
  * constantes de topo de outros módulos.
  */
 import { radarWritingCompareKey } from "./portable-writing-export.ts";
+import { RADAR_FREE_ANCHOR_INSTRUCTION, radarAnchorIsFree } from "./natural-anchor-rule.ts";
 
-export { RADAR_NATURAL_ANCHOR_PROMPT_RULE, RADAR_NATURAL_ANCHOR_RULE } from "./natural-anchor-rule.ts";
+export {
+  RADAR_FREE_ANCHOR_INSTRUCTION,
+  RADAR_NATURAL_ANCHOR_PROMPT_RULE,
+  RADAR_NATURAL_ANCHOR_RULE,
+  RADAR_NATURAL_ANCHOR_WRITER_NOTE,
+  radarAnchorIsFree,
+  radarFreeAnchorInstruction,
+} from "./natural-anchor-rule.ts";
 
 /** Quem leu quais âncoras para cada destino: a variedade no lote do Silo (a chave do destino → as âncoras usadas). */
 export type RadarAnchorLedger = Map<string, Set<string>>;
@@ -51,6 +73,10 @@ export type RadarNaturalAnchorResult = {
   reason: RadarNaturalAnchorReason | null;
   /** Os conceitos do grafo, na forma natural, que não são a âncora escolhida (as "outras formulações"). */
   alternatives: string[];
+  /** 2026-10-11c · Sem formulação válida: `anchor` é a instrução (`RADAR_FREE_ANCHOR_INSTRUCTION`), não um texto de âncora. */
+  free: boolean;
+  /** 2026-10-11c · As keywords do destino que nunca são âncora (o rótulo primeiro), sem repetição. */
+  forbidden: string[];
 };
 
 const t = (valor: unknown): string => (typeof valor === "string" ? valor.replace(/\s+/g, " ").trim() : "");
@@ -73,16 +99,30 @@ export function radarAnchorKey(valor: string | null | undefined): string {
 
 const palavrasDe = (valor: string): string[] => radarWritingCompareKey(valor).split(" ").filter(Boolean);
 
-/** A âncora É a keyword inteira do destino, ou a contém inteira com 4 palavras ou mais. */
+/**
+ * A âncora É uma keyword do destino, ou CONTÉM inteira uma keyword do destino de
+ * 2 palavras ou mais (2026-10-11c: antes, só com a âncora de 4 palavras ou mais).
+ * O trecho curto de uma keyword, que não é ela inteira, passa.
+ */
 export function radarAnchorRepeatsKeyword(anchor: string, keywords: readonly (string | null | undefined)[]): boolean {
   const chave = radarAnchorKey(anchor);
   if (!chave) return false;
-  const longa = palavrasDe(anchor).length >= 4;
   return keywords.some(keyword => {
     const alvo = radarAnchorKey(keyword);
     if (!alvo) return false;
-    return chave === alvo || (longa && ` ${chave} `.includes(` ${alvo} `));
+    return chave === alvo || (alvo.includes(" ") && ` ${chave} `.includes(` ${alvo} `));
   });
+}
+
+/** 2026-10-11c · A lista que o entregável diz ("não use como âncora"): o rótulo e as keywords do destino, sem repetir (sem acento, caixa e plural). */
+export function radarAnchorForbiddenList(label: string | null | undefined, keywords: readonly (string | null | undefined)[] | null | undefined = []): string[] {
+  const saida: string[] = [];
+  for (const item of [semAspas(t(label)), ...(keywords || []).map(valor => semAspas(t(valor)))]) {
+    const chave = radarAnchorKey(item);
+    if (!chave || saida.some(atual => radarAnchorKey(atual) === chave)) continue;
+    saida.push(item);
+  }
+  return saida;
 }
 
 /* Palavras que não abrem nem fecham uma âncora natural. */
@@ -215,8 +255,12 @@ export function radarNaturalAnchorFormulations(input: { targetKeywords: readonly
  * A âncora natural e inédita volta como veio. A que é a keyword inteira (ou a
  * repete), a já usada para o destino e a que já leva a outro destino viram o
  * primeiro conceito do grafo, recorte da própria âncora ou recorte do rótulo
- * que passa na régua e está livre; sem livre, a keyword inteira vira o primeiro recorte que passa na
- * régua (repetir é melhor que a keyword inteira) e a âncora natural fica.
+ * que passa na régua e está livre.
+ *
+ * 2026-10-11c · Sem formulação válida e livre, a régua não inventa: a âncora
+ * vira a instrução (`RADAR_FREE_ANCHOR_INSTRUCTION`, `free: true`) — quem
+ * escreve diz a ideia do destino com as palavras da frase. A instrução gravada
+ * (planta nova) passa como veio.
  */
 export function radarNaturalAnchor(input: {
   anchor: string;
@@ -229,22 +273,29 @@ export function radarNaturalAnchor(input: {
   const original = t(input.anchor);
   const rotulo = semAspas(input.targetLabel);
   const keywords = [rotulo, ...(input.targetKeywords || [])].filter((item): item is string => Boolean(t(item)));
+  const forbidden = radarAnchorForbiddenList(rotulo, input.targetKeywords);
   const usadas = new Set([...(input.usedAnchors || [])].map(radarAnchorKey).filter(Boolean));
   const tomadas = new Set([...(input.takenAnchors || [])].map(radarAnchorKey).filter(Boolean));
   const formulacoes = radarNaturalAnchorFormulations({ targetKeywords: keywords, graphConcepts: input.graphConcepts });
   const alternativas = (escolhida: string) => formulacoes.filter(item => radarAnchorKey(item) !== radarAnchorKey(escolhida));
+  /* 2026-10-11c · a instrução gravada (planta nova sem formulação válida) passa como veio: não é texto de âncora. */
+  if (radarAnchorIsFree(original)) {
+    const livres = formulacoes.filter(item => !usadas.has(radarAnchorKey(item)) && !tomadas.has(radarAnchorKey(item)));
+    return { anchor: original, changed: false, reason: null, alternatives: livres, free: true, forbidden };
+  }
   const chave = radarAnchorKey(original);
   const repete = radarAnchorRepeatsKeyword(original, keywords);
   const usada = usadas.has(chave);
   const tomada = tomadas.has(chave);
-  if (original && !repete && !usada && !tomada) return { anchor: original, changed: false, reason: null, alternatives: alternativas(original) };
-  /* A ordem: o conceito do grafo; a própria âncora recortada (sem interrogativo nem "para <público>": "como gerar leads qualificados" → "gerar leads qualificados"); o recorte do rótulo. */
+  if (original && !repete && !usada && !tomada) return { anchor: original, changed: false, reason: null, alternatives: alternativas(original), free: false, forbidden };
+  /* A ordem: o conceito do grafo; a própria âncora recortada (sem interrogativo nem "para <público>"); o recorte do rótulo. Só o que não é keyword do destino nem a contém. */
   const opcoes = [...formulacoes, radarAnchorTrim(original), ...radarAnchorCuts(rotulo)].filter(item => t(item) && !radarAnchorRepeatsKeyword(item, keywords));
   const livre = (item: string) => !usadas.has(radarAnchorKey(item)) && !tomadas.has(radarAnchorKey(item)) && radarAnchorKey(item) !== chave;
-  const escolhida = opcoes.find(livre)
-    ?? (repete ? opcoes.find(item => !tomadas.has(radarAnchorKey(item))) ?? opcoes[0] : undefined);
-  if (!escolhida) return { anchor: original, changed: false, reason: null, alternatives: alternativas(original) };
-  return { anchor: escolhida, changed: true, reason: repete ? "keyword" : usada ? "repeated" : "taken", alternatives: alternativas(escolhida) };
+  const escolhida = opcoes.find(livre);
+  const reason: RadarNaturalAnchorReason = repete ? "keyword" : usada ? "repeated" : "taken";
+  /* 2026-10-11c · sem formulação válida e livre: a instrução, nunca uma âncora inventada nem a keyword repetida. */
+  if (!escolhida) return { anchor: RADAR_FREE_ANCHOR_INSTRUCTION, changed: true, reason, alternatives: [], free: true, forbidden };
+  return { anchor: escolhida, changed: true, reason, alternatives: alternativas(escolhida), free: false, forbidden };
 }
 
 /* ============================== o grafo aprovado ============================== */

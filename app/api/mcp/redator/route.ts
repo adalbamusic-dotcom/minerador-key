@@ -27,7 +27,7 @@ import { recordWriterMcpCall, WriterMcpAuthError, type WriterMcpScope } from "@/
 import { resolveWriterMcpPrincipal, type WriterMcpBrandAccess, type WriterMcpPrincipal } from "@/lib/server/writer-mcp-principal";
 import { platformServerInstructions } from "@/lib/agent/platform-catalog";
 /* 2026-10-11 · a regra da âncora natural: a MESMA frase do CSV "Para escrever" e dos fundamentos do Redator. */
-import { RADAR_NATURAL_ANCHOR_RULE } from "@/lib/radar/natural-anchor-rule";
+import { RADAR_NATURAL_ANCHOR_RULE, RADAR_NATURAL_ANCHOR_WRITER_NOTE } from "@/lib/radar/natural-anchor-rule";
 import { radarHumanVoiceRedatorRule } from "@/lib/radar/human-voice-guideline";
 import { mcpEvidenceRawMaterialOf, mcpEvidenceWithRawMaterial, mcpRawMaterialMaxBytes, mcpWithArticleBlueprintState } from "@/lib/agent/mcp-article-blueprint";
 import { AuthzError } from "@/lib/server/authz";
@@ -113,7 +113,7 @@ const WRITER_MCP_INSTRUCTIONS = [
    * dono aprovou no Radar e a voz corrente da Marca chegam pelos fundamentos,
    * lidos ao vivo; o integral fica a uma fatia.
    */
-  `Com articleBlueprint nos fundamentos (o artigo-modelo que o dono aprovou no Radar para o pacote entregue), siga a planta: H1, seções, pergunta do leitor, resposta que abre cada seção, links internos com a âncora sugerida e o CTA (${RADAR_NATURAL_ANCHOR_RULE}); a planta inteira está em radar.blueprint/<id> (read_writer_evidence). Com brandVoice (a Skill de voz corrente da Marca, inclusive em rascunho, com o estado dito), escreva a copy, as transições e o CTA nessa voz; a Skill inteira está em brand.skill/<versionId>. Planta e voz não mudam keyword, intenção, escopo nem fatos: conflito com a evidência vira record_writer_divergence.`,
+  `Com articleBlueprint nos fundamentos (o artigo-modelo que o dono aprovou no Radar para o pacote entregue), siga a planta: H1, seções, pergunta do leitor, resposta que abre cada seção, links internos com a âncora sugerida e o CTA (${RADAR_NATURAL_ANCHOR_RULE} ${RADAR_NATURAL_ANCHOR_WRITER_NOTE}); a planta inteira está em radar.blueprint/<id> (read_writer_evidence). Com brandVoice (a Skill de voz corrente da Marca, inclusive em rascunho, com o estado dito), escreva a copy, as transições e o CTA nessa voz; a Skill inteira está em brand.skill/<versionId>. Planta e voz não mudam keyword, intenção, escopo nem fatos: conflito com a evidência vira record_writer_divergence.`,
   /*
    * 2026-10-09 · regra do dono: o artigo-modelo é a única estrutura. Sem ele, o
    * estado explícito (articleBlueprintState), nunca o legado; a evidência que

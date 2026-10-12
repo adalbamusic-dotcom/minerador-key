@@ -358,7 +358,8 @@ test("título · a conferência da planta nova aponta keyword fora do começo, i
   assert.ok(notes.includes("Regra 28: a keyword principal foi para o começo do SEO title ou das alternativas (as duas metades do título trocaram de lugar, sem reescrever palavra)."));
   assert.equal(radarArticleBlueprintPendingNotes(["Regra 28: a keyword principal foi para o começo do SEO title ou das alternativas (as duas metades do título trocaram de lugar, sem reescrever palavra)."]).pending.length, 0, "a troca é correção, não pendência");
   assert.equal(payload.rulesVersion, RADAR_ARTICLE_BLUEPRINT_RULES_VERSION);
-  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-11b");
+  /* 2026-10-11c · as regras avançaram no mesmo dia (keywords proibidas por destino); a diretriz continua nelas. */
+  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-11c");
   /* O pedido manda as 3 opções e a passada de correção as cobra. */
   const pedido = radarArticleBlueprintPrompt(brief);
   assert.match(pedido.user, /"alternatives":\["",""\]/);
@@ -399,7 +400,7 @@ test("título · a planta gravada 'Para clínicas: como atrair um cliente' sai c
     linkCandidates: gravada.linkCandidates, brandVoice: null, sources: gravada.sources, keywords: { principal: PRINCIPAL, secondary: COMPLEMENTARES },
   })!;
   assert.equal(redator.seoTitle, "Como atrair um cliente: Sem anúncio");
-  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-11b");
+  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-11c");
 });
 
 /* ============================== 5 · o primeiro H2 e a primeira frase ============================== */
@@ -451,7 +452,8 @@ test("H2 · a planta gravada real de 7 H2: a leitura junta 'fidelização' como 
   assert.ok(estrutura.includes("- H2: 6 (Regra 8 do Guia: de 3 a 6). A planta tem 7 seções: a marcada \"H3 do H2 acima\" entra como H3, com a cobertura, os links e a imagem."));
   for (const item of gravada.blueprint.sections) assert.equal(row.estrutura.split(item.h2).length - 1 >= 1, true, `a seção "${item.h2}" continua na estrutura`);
   /* Links e imagens não mudam de número nem de lugar. */
-  assert.match(row.links_internos, /^L1 · âncora sugerida "tráfego pago vs orgânico"/m);
+  /* 2026-10-11c · a linha L diz a instrução e o recorte como exemplo. */
+  assert.match(row.links_internos, /^L1 · âncora: escreva com as palavras da sua frase a ideia do destino \([^)]*\), em 2 a 4 palavras; por exemplo "tráfego pago vs orgânico"/m);
   assert.match(row.plano_visual, /^Respiro 3 · seção "Como a presença orgânica complementa a atração de clientes\?"/m);
 
   const redator = writerArticleBlueprintForWriting({
@@ -513,7 +515,9 @@ test("D10 · o CSV do caso real, a linha 'Silo', a linha 'Voz da marca', o víde
   const aviso = radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11" })!;
   assert.match(aviso, /^Esta versão foi montada com as regras de 2026-10-11\. As de 2026-10-11b acrescentam a diretriz de comunicação humana guiada pela SERP \(2026-10-11\)/);
   semD10(aviso, "aviso das regras");
-  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11b" }), null);
+  /* 2026-10-11c · a de 11/10b ganha o aviso das keywords proibidas por destino, também concluído. */
+  semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11b" })!, "aviso 2026-10-11b");
+  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" }), null);
   assert.doesNotMatch(tudoDaLinha(artigo.row), /dependência/i, "a palavra que casa com a régua do D10 não entra");
 });
 

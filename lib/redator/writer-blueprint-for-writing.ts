@@ -62,6 +62,7 @@
  */
 
 import {
+  radarArticleBlueprintAnchorForbidden,
   radarArticleBlueprintH2Merges,
   radarArticleBlueprintPayloadReading,
   radarArticleBlueprintPublishedMapLine,
@@ -100,8 +101,13 @@ import {
  * a keyword vai para o começo do SEO title quando é só trocar as metades, e a
  * Regra 8 (de 3 a 6 H2) diz qual seção entra como H3 (`h2Merges`) — a fatia
  * muda de novo.
+ *
+ * 2026-10-11c · e as keywords proibidas por destino: a âncora que é uma keyword
+ * do destino (a gravada no candidato K ou, na planta antiga, o rótulo) ou a
+ * contém vira a formulação válida ou a instrução, e cada link diz
+ * `avoidAsAnchor` — a fatia muda de novo.
  */
-export const WRITER_BLUEPRINT_READING_RULES = "2026-10-11b";
+export const WRITER_BLUEPRINT_READING_RULES = "2026-10-11c";
 
 export const WRITER_BLUEPRINT_FOR_WRITING_LIMITS = Object.freeze({
   /** Frases marcadas fora das seções (promessa, ângulo, título, abertura, fechamento). */
@@ -200,6 +206,8 @@ export function writerBlueprintLinkCandidatesOf(valor: unknown): RadarArticleBlu
       fromGraph: item.fromGraph === true,
       ...(textosDe(item.anchorConcepts).length ? { anchorConcepts: textosDe(item.anchorConcepts) } : {}),
       ...(textoDe(item.url) ? { url: textoDe(item.url) } : {}),
+      /* 2026-10-11c · as keywords do destino que a planta nova grava: nunca âncora. */
+      ...(textosDe(item.keywords).length ? { keywords: textosDe(item.keywords) } : {}),
     }))
     .filter(item => item.id && item.label);
 }
@@ -437,7 +445,20 @@ export function writerArticleBlueprintForWriting(input: WriterArticleBlueprintFo
   const { publishedStructure, currentStructure, keywords, sources, exclusions, claims, ...base } = input;
   /* 2026-10-11 · com os candidatos da planta: a âncora natural, a mesma leitura do CSV. */
   const blueprint = writerBlueprintWithCurrentNames(base.blueprint, keywords, { sources, exclusions, linkCandidates: base.linkCandidates });
-  const projetada = writerArticleBlueprintFoundation({ ...base, blueprint });
+  /*
+   * 2026-10-11c · cada candidato leva `avoidAsAnchor` (as keywords do destino,
+   * pela MESMA régua do CSV: o rótulo e as keywords gravadas no candidato K);
+   * a projeção o põe em cada link. A página da marca não tem lista.
+   */
+  const candidatosLidos = new Map((writerBlueprintLinkCandidatesOf(base.linkCandidates) || []).map(item => [item.id, item]));
+  const linkCandidates = Array.isArray(base.linkCandidates)
+    ? base.linkCandidates.map(item => {
+      const lido = registro(item) ? candidatosLidos.get(textoDe((item as Linha).id)) : undefined;
+      const proibidas = lido ? radarArticleBlueprintAnchorForbidden(lido) : [];
+      return proibidas.length ? { ...(item as Linha), avoidAsAnchor: proibidas } : item;
+    })
+    : base.linkCandidates;
+  const projetada = writerArticleBlueprintFoundation({ ...base, blueprint, linkCandidates });
   const planta = registro(blueprint);
   if (!projetada || !planta) return projetada;
 

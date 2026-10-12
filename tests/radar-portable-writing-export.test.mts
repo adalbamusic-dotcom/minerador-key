@@ -479,12 +479,13 @@ test("G · plano visual: o da planta — uma capa e até três respiros, e ALT d
 test("H · links pelo silo, pela planta: destino pelo slug do irmão, SiloPage, e o rótulo L aparece na seção", () => {
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
   /* 2026-10-11 · âncora sugerida (recorte natural, nunca a keyword inteira do destino, e nunca a mesma para dois destinos) e a URL canônica pelo slug no caminho do Silo. */
-  assert.match(pilar.links_internos, /^Aplique somente estes 4 link\(s\) \(L1, L2…\), sem criar outros\. A âncora de cada link interno é um trecho natural/);
-  assert.match(pilar.links_internos, /L1 · âncora sugerida "skin care" → Suporte "skin care nivea" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/skin-care-nivea \(novo, ainda não publicado: o link entra quando o destino estiver no ar\) · onde: seção "/);
-  assert.match(pilar.links_internos, /âncora sugerida "(?!skin care noturno"|skin care")[^"]+" → Suporte "skin care noturno" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/skin-care-noturno/);
-  assert.match(pilar.links_internos, /âncora sugerida "(?!Cuidados com a Pele")[^"]+" → SiloPage "Cuidados com a Pele" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele/, "a SiloPage não repete o papel no nome");
+  /* 2026-10-11c · cada L diz a ideia do destino nas palavras da frase, o recorte como exemplo e as keywords proibidas do destino. */
+  assert.match(pilar.links_internos, /^Aplique somente estes 4 link\(s\) \(L1, L2…\), sem criar outros\. A âncora de cada link interno diz, com as palavras da própria frase, a ideia do destino/);
+  assert.match(pilar.links_internos, /L1 · âncora: escreva com as palavras da sua frase a ideia do destino \([^)]*\), em 2 a 4 palavras; por exemplo "skin care" · não use como âncora: "skin care nivea" → Suporte "skin care nivea" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/skin-care-nivea \(novo, ainda não publicado: o link entra quando o destino estiver no ar\) · onde: seção "/);
+  assert.match(pilar.links_internos, /por exemplo "(?!skin care noturno"|skin care")[^"]+" · não use como âncora: "skin care noturno" → Suporte "skin care noturno" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/skin-care-noturno/);
+  assert.match(pilar.links_internos, /por exemplo "(?!Cuidados com a Pele")[^"]+" · não use como âncora: "Cuidados com a Pele" → SiloPage "Cuidados com a Pele" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele/, "a SiloPage não repete o papel no nome");
   assert.doesNotMatch(pilar.links_internos, /SiloPage "SiloPage/);
-  assert.match(pilar.estrutura, /^- Link interno L1: âncora sugerida "skin care" → skin care nivea$/m, "a estrutura leva o link na seção dele");
+  assert.match(pilar.estrutura, /^- Link interno L1 → skin care nivea: âncora com as palavras da sua frase, dizendo a ideia do destino \(por exemplo "skin care"\); não use como âncora: "skin care nivea"$/m, "a estrutura leva o link na seção dele");
   assert.doesNotMatch(pilar.links_internos, /distribuídos pelas seções|Pilar → Suporte/, "a coluna pelo plano de links do pacote saiu");
   assert.equal(/territory|node|article-candidate/.test(pilar.links_internos), false);
 });

@@ -527,7 +527,8 @@ test("6 · o destino do link sai pelo nó do grafo aprovado, e não casando pala
     .map((item, indice) => (indice === 0 ? { ...item, internalLinks: [{ candidate: candidato!.id, anchor: "produtos nivea para a pele", reason: "pedido pelo grafo aprovado" }] } : item));
   const planta = plantaDe(entradaGoogleSaude(), { silo: contexto.silo as never, articleId: ARTIGO, resposta: { sections: secoes } });
   const links = buildRadarWritingExportArticle(entradaGoogleSaude(), { ...contexto, blueprint: planta } as never).row.links_internos;
-  const doNo = links.split("\n").find(linha => linha.includes("âncora sugerida \"produtos nivea para a pele\"")) || "";
+  /* 2026-10-11c · a âncora natural da planta vai como exemplo na linha L ("por exemplo …"). */
+  const doNo = links.split("\n").find(linha => linha.includes("por exemplo \"produtos nivea para a pele\"")) || "";
   /* 2026-10-11 · o destino pela URL canônica do slug (identidade de publicação): o caminho do Silo + "/hidratante-facial-noturno". */
   assert.match(doNo, /→ Suporte "hidratante facial noturno" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/hidratante-facial-noturno/, links);
   assert.doesNotMatch(doNo, /skin-care-nivea/);

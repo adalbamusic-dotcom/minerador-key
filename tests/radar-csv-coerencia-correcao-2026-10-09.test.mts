@@ -428,7 +428,8 @@ test("casos-reais-F12, contrato-F4, suites-R7 · o Redator recebe a mesma planta
   /* 2026-10-09b · a leitura passou a ser a do CSV (fontes reais, exclusões do ArticleDNA, continuação opcional): o etag muda com ela. */
   /* 2026-10-11 · e a âncora natural pelos candidatos da planta: o etag muda de novo. */
   /* 2026-10-11b · a leitura passou a ter a principal (keyword no começo do SEO title) e a Regra 8 (h2Merges): a fatia muda. */
-  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-11b");
+  /* 2026-10-11c · e as keywords proibidas por destino (avoidAsAnchor em cada link): a fatia muda de novo. */
+  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-11c");
   const fatia = writerBlueprintWithCurrentNames(promocoes.blueprint) as RadarArticleBlueprintPayload["blueprint"];
   assert.equal(fatia.promise, doRedatorP.promise);
   /* A planta que já segue as regras volta como o MESMO objeto. */
@@ -575,7 +576,9 @@ test("casos-reais-F13, contrato-F5, suites-R6 · o aviso do painel diz o que fal
   /* 2026-10-09b · as regras avançaram (Amazon congelada e exclusões dos reajustes): a de 09/10 também ganha o aviso, que diz só o que 09b acrescenta. */
   /* 2026-10-11 · as regras avançaram de novo (a âncora natural): a lista diz o que cada data acrescentou. */
   /* 2026-10-11b · e de novo (a diretriz de comunicação humana guiada pela SERP). */
-  assert.match(semVersao, /^Esta versão foi montada com regras anteriores às atuais \(2026-10-11b\): a planta não leu a página publicada/);
+  /* 2026-10-11c · e de novo (as keywords proibidas por destino). */
+  assert.match(semVersao, /^Esta versão foi montada com regras anteriores às atuais \(2026-10-11c\): a planta não leu a página publicada/);
+  assert.match(semVersao, /as de 2026-10-11b, a diretriz de comunicação humana/);
   assert.match(semVersao, /as de 2026-10-11, a âncora natural nos links internos/);
   const de0910 = radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-09" })!;
   assert.match(de0910, /^Esta versão foi montada com as regras de 2026-10-09\. As de 2026-10-09b acrescentam o bloco comercial da Amazon congelada/);
@@ -588,7 +591,11 @@ test("casos-reais-F13, contrato-F5, suites-R6 · o aviso do painel diz o que fal
   const de1110 = radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11" })!;
   assert.match(de1110, /^Esta versão foi montada com as regras de 2026-10-11\. As de 2026-10-11b acrescentam a diretriz de comunicação humana guiada pela SERP/);
   assert.doesNotMatch(de1110, D10);
-  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11b" }), null);
+  /* 2026-10-11c · a de 11/10b ganha o aviso que diz só o que 11/10c acrescenta (as keywords proibidas por destino); a de 11/10c não tem aviso. */
+  const de1110b = radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11b" })!;
+  assert.match(de1110b, /^Esta versão foi montada com as regras de 2026-10-11b\. As de 2026-10-11c acrescentam as keywords proibidas por destino/);
+  assert.doesNotMatch(de1110b, D10);
+  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" }), null);
   assert.doesNotMatch(de0910b, D10);
   const tela = renderToStaticMarkup(createElement(RadarArticleBlueprintRulesNotice, { payload: { rulesVersion: "2026-10-08" } }));
   assert.match(tela, /data-testid="radar-article-blueprint-rules-outdated"/);

@@ -1,5 +1,60 @@
 # Estado atual — Radar
 
+## Keywords proibidas por destino nas âncoras — 2026-10-11 (regras "2026-10-11c")
+
+**Verificado no código e confirmado por teste (fixtures do caso real "como atrair um cliente"; PROVIDER_CALLS = 0,
+AI_CALLS = 0). Validado manualmente: não.** Regra do dono, reforçada hoje: "não pode repetir as keywords de jeito
+nenhum… vai virar uma salada de keywords em todos os artigos". O CSV real de 11/10 ainda sugeria "gerar leads
+qualificados" (complementar inteira do Pilar), "campanhas de marketing sem anúncios" e "captação de pacientes"; o
+redator externo ignorou e escreveu a ideia na frase ("contatos com interesse compatível", "captação sem anúncios",
+"curtidas sem agendamento", "ações sem mídia", "condições promocionais", "captação própria"). Sem schema novo, sem
+migration, sem escrita no banco; o Arquiteto (grafo e DNAs) é só lido.
+
+- **Lista por destino:** principal, complementares e reforços do ArticleDNA do membro do Silo, mais o rótulo; da
+  SiloPage, o nome do Silo (e a entidade central). A montagem do export (`lib/server/radar-portable-export-core.ts`)
+  lê o texto que cada referência do ArticleDNA guarda (`keywordDnaSnapshot.sourceKeywordSnapshot.keyword`, a mesma
+  fonte da hidratação do Radar), do acervo que o lote já tem em memória, e o põe em `RadarWritingPublication.keywords`
+  (aditivo); o artigo do lote leva as do dossiê. Fora do lote, sem texto na referência, vale a principal.
+- **Régua (`lib/radar/natural-anchor.ts`):** `radarAnchorRepeatsKeyword` invalida a âncora que É uma keyword do
+  destino ou CONTÉM inteira uma de 2 palavras ou mais (sem acento, caixa e plural; antes, só com a âncora de 4
+  palavras ou mais). Trecho curto continua permitido. `radarNaturalAnchor` devolve `free` e `forbidden`: sem conceito
+  do grafo nem recorte válido e livre, a âncora vira a instrução `RADAR_FREE_ANCHOR_INSTRUCTION` ("escreva com as
+  palavras da sua frase a ideia do destino, em 2 a 4 palavras"), nunca uma âncora inventada nem a keyword repetida; a
+  instrução gravada passa como veio e não entra no livro de âncoras. A variedade no lote do Silo continua.
+- **Pedido e planta nova (`lib/radar/article-blueprint.ts`):** cada candidato K grava `keywords` (aditivo) e o pedido
+  diz "keywords do destino, nunca âncora: …"; o brief recebe o campo opcional `siloMemberKeywords` (sem ele, as da
+  publicação do membro). A regra 6 manda a ideia do destino nas palavras da frase
+  (`RADAR_NATURAL_ANCHOR_PROMPT_RULE`). A conferência troca a âncora inválida pela formulação válida ou pela
+  instrução, com nota de correção aplicada (não pede ação). `RADAR_ARTICLE_BLUEPRINT_RULES_VERSION = "2026-10-11c"`; a planta de
+  11/10b ganha o aviso, e nenhuma planta aprovada é desligada.
+- **Leitura compartilhada (planta gravada):** sem mudar payload nem hash; usa as keywords que o chamador passa
+  (`targetOf` do CSV ou o campo novo `anchors.linkTargets`), mais as gravadas no candidato; sem nada, o rótulo.
+- **CSV "Para escrever":** toda linha L de membro ou SiloPage diz `âncora: escreva com as palavras da sua frase a
+  ideia do destino (<o "por quê" do link>), em 2 a 4 palavras`, `; por exemplo "…"` só com formulação válida e
+  `· não use como âncora: "…"` com as keywords do destino; o "por quê" vai na ideia (sai do fim da linha). A
+  estrutura diz `- Link interno Ln → destino: âncora com as palavras da sua frase… (por exemplo "…"); não use como
+  âncora: …`. A regra geral 9 e o cabeçalho da coluna usam a regra nova (`RADAR_NATURAL_ANCHOR_RULE`). A página da
+  marca segue com o trecho do CTA ("âncora: o trecho do CTA que cita a página, por exemplo …").
+- **Redator e MCP:** `WRITER_BLUEPRINT_READING_RULES = "2026-10-11c"`; cada link da planta traz `avoidAsAnchor`
+  (mesma régua, `radarArticleBlueprintAnchorForbidden`); prompts, fundamentos e a instrução do MCP somam
+  `RADAR_NATURAL_ANCHOR_WRITER_NOTE`. O CSV de vídeo usa a mesma leitura e não mostra âncora. Catálogo do MCP
+  (`lib/agent/platform-catalog.ts`, AGENTS §17.1): entrada "Keywords proibidas por destino nas âncoras (2026-10-11c)".
+- **Arquivos:** `lib/radar/natural-anchor-rule.ts`, `lib/radar/natural-anchor.ts`, `lib/radar/article-blueprint.ts`,
+  `lib/radar/portable-writing-export.ts` (compartilhado: campo opcional `keywords` na publicação; consumidores
+  preservados: CSV, vídeo, artigo-modelo, MCP), `lib/server/radar-portable-export-core.ts`,
+  `lib/radar/human-voice-guideline.ts` (versões na nota do catálogo), `lib/redator/writer-blueprint-for-writing.ts`,
+  `lib/redator/writer-evidence-catalog.ts` (campo opcional `avoidAsAnchor`), `lib/redator/prompts.ts`,
+  `lib/server/writer-evidence-reader.ts`, `app/api/mcp/redator/route.ts`, `lib/agent/platform-catalog.ts`.
+- **Testes:** `tests/radar-ancora-natural-e-slug-2026-10-11.test.mts` (28: as três sugestões ruins inválidas, as
+  âncoras do redator válidas, linha L com e sem exemplo, conferência com a instrução, paridade Redator/MCP/vídeo,
+  D10) e as asserções de formato atualizadas em 13 arquivos. Snapshot de `tests/radar-assunto-f4.test.mts` refeito:
+  prova por script de que só as 19 linhas de âncora mudam em cada CSV. test:radar 3446 (3445 passam, 1 pulado),
+  test:redator 357, test:redator:mcp 150, test:agent 73, test:arquiteto 2737, test:editorial só as 4 falhas antigas;
+  tsc só os 2 erros antigos de `.next/types/validator.ts`; eslint sem erro; `git diff --check` limpo.
+- **Limites:** o Redator, na planta gravada antes de 11c, conhece só o rótulo do destino (as keywords dos membros
+  vêm da montagem do export, que ele não faz): o CSV e o MCP já dizem a lista inteira, o Redator a terá ao organizar
+  de novo. As keywords dos membros no texto do teste são supostas (fixture); as reais saem do ArticleDNA.
+
 ## Mesa sem estourar o tempo do banco — 2026-10-11
 
 **Verificado no código, confirmado por teste e medido no banco (só leitura). Validado manualmente: não.**

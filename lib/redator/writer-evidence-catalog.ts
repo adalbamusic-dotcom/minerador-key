@@ -1078,7 +1078,15 @@ export const WRITER_BLUEPRINT_PROJECTION_LIMITS = Object.freeze({
  */
 export const WRITER_BLUEPRINT_CONTINUATION_LABEL = "Leitura seguinte (opcional, não é uma chamada)";
 
-export type WriterBlueprintLink = { anchor: string; label: string | null; destination: string | null; status: string | null };
+export type WriterBlueprintLink = {
+  anchor: string; label: string | null; destination: string | null; status: string | null;
+  /**
+   * 2026-10-11c · Aditivo: as keywords do destino que nunca são âncora (régua
+   * do Radar, `radarArticleBlueprintAnchorForbidden`, posta no candidato por
+   * `writerArticleBlueprintForWriting`). Ausente na página da marca e sem candidato.
+   */
+  avoidAsAnchor?: string[];
+};
 /**
  * 2026-10-08 · Uma frase da planta que só entra no texto com fonte do pacote
  * (régua por frase do Radar, `radarSentenceNeedsSource`): `field` diz de onde
@@ -1194,12 +1202,15 @@ export function writerArticleBlueprintFoundation(input: {
     h3: listaDe(secao.h3).map(item => cortarTexto(item, L.h3Chars)).filter((item): item is string => Boolean(item)),
     internalLinks: registrosDe(secao.internalLinks).map(link => {
       const candidato = candidatos.get(String(link.candidate ?? "")) ?? null;
+      /* 2026-10-11c · as keywords do destino que nunca são âncora, quando o candidato as traz. */
+      const proibidas = listaDe(candidato?.avoidAsAnchor).map(item => cortarTexto(item, L.labelChars)).filter((item): item is string => Boolean(item));
       return {
         anchor: cortarTexto(link.anchor, L.anchorChars) ?? "",
         label: cortarTexto(candidato?.label, L.labelChars),
         /* 2026-10-11 · a URL canônica do destino que a planta nova grava (`url`, pela identidade de publicação do Radar) vence o caminho "/<slug>". */
         destination: cortarTexto(typeof candidato?.url === "string" && candidato.url.trim() ? candidato.url : candidato?.destination, L.destinationChars),
         status: cortarTexto(candidato?.status, 20),
+        ...(proibidas.length ? { avoidAsAnchor: proibidas } : {}),
       };
     }).filter(link => link.anchor),
   })).filter(secao => secao.h2);

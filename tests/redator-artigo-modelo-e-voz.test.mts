@@ -1073,6 +1073,13 @@ test("2026-10-08 · planta para quem escreve · sem nome antigo, sem frase marca
   assert.notEqual(ancoraDaRotina.toLowerCase(), "rotina de skin care", "a keyword inteira do destino não é âncora");
   assert.doesNotMatch(ancoraDaRotina, /skin$/i, "o recorte não corta termo composto ao meio");
   fundacao.sections[0].internalLinks[0].anchor = ancoraDaRotina;
+  /*
+   * 2026-10-11c · e cada link de membro diz as keywords do destino que nunca são âncora (`avoidAsAnchor`, a
+   * mesma régua do CSV); a página da marca e o candidato que não existe não ganham a lista. Fora isso, a de antes.
+   */
+  assert.deepEqual(lidaParaEscrever.sections[0].internalLinks[0].avoidAsAnchor, ["Rotina de skin care"]);
+  assert.equal(lidaParaEscrever.sections[1].internalLinks.some((link: { avoidAsAnchor?: unknown }) => link.avoidAsAnchor), false);
+  fundacao.sections[0].internalLinks[0].avoidAsAnchor = ["Rotina de skin care"];
   assert.equal(JSON.stringify(lidaParaEscrever), JSON.stringify(fundacao));
   assert.equal(writerArticleBlueprintForWriting({ ...base, blueprint: { title: {} } }), null, "sem seções, fora do contrato, como a projeção");
 

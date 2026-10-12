@@ -585,10 +585,11 @@ test("C9 · destino planejado: instrução concluída e condicional, nunca ender
   const { linha } = csvDoCaso(plantaAntiga());
   const links = linhas(linha.links_internos);
   /* 2026-10-11 · o cabeçalho diz a regra da âncora natural (a mesma frase do Redator e do MCP) e só os L indicados; o destino novo, concluído. */
-  assert.equal(links[0], `Aplique somente estes 6 link(s) (L1, L2…), sem criar outros. ${RADAR_NATURAL_ANCHOR_RULE} Use a âncora sugerida (pode ajustar concordância) ou uma das outras formulações; o link aponta para a URL canônica do destino, a do slug dele.`);
+  /* 2026-10-11c · cada L diz a ideia do destino e as keywords dele que não podem ser âncora; o exemplo é só exemplo. */
+  assert.equal(links[0], `Aplique somente estes 6 link(s) (L1, L2…), sem criar outros. ${RADAR_NATURAL_ANCHOR_RULE} Cada L diz a ideia do destino e as keywords dele que não podem ser âncora; o exemplo, quando há, é só exemplo (pode ajustar concordância ou escrever outro com as palavras da frase); o link aponta para a URL canônica do destino, a do slug dele.`);
   assert.equal(links[1], "Destino novo (ainda não publicado): o link entra quando o destino estiver no ar, junto com este artigo ou antes; se este artigo for ao ar primeiro, a âncora fica como texto simples, sem link (nunca link quebrado). Não invente outro domínio nem outra URL.");
   assert.equal(links.filter(item => /^L\d · .*\(novo, ainda não publicado/.test(item)).length, 5, "5 novos");
-  assert.ok(links.some(item => /^L6 · âncora sugerida "SEO para clínicas" → .* → https:\/\/adalbapro\.com\.br\/servicos\/seo-para-clinicas \(publicado\)/.test(item)), "1 publicado");
+  assert.ok(links.some(item => /^L6 · âncora: o trecho do CTA que cita a página, por exemplo "SEO para clínicas" → .* → https:\/\/adalbapro\.com\.br\/servicos\/seo-para-clinicas \(publicado\)/.test(item)), "1 publicado");
   assert.match(linha.links_internos, /→ Pilar "leads qualificados" → (?:https:\/\/adalbapro\.com\.br)?\/leads-sem-trafego-pago\/qualificados \(novo, ainda não publicado/);
   assert.doesNotMatch(linha.links_internos, /use o caminho|marque a âncora|não resolvido: marque/);
   /* 2026-10-09 · no lote do Silo, cada artigo com a planta dele: a mesma regra, uma vez por linha, no destino do Silo. */
@@ -604,8 +605,9 @@ test("C9 · destino planejado: instrução concluída e condicional, nunca ender
   semPrefixo.linkCandidates = semPrefixo.linkCandidates.map(item => (item.id === "K3" ? { ...item, status: "UNRESOLVED" as const, destination: null } : item));
   const colunaSemPrefixo = linhas(radarArticleBlueprintColumns(semPrefixo).links_internos);
   /* 2026-10-11 · a âncora natural da IA fica; a que é a keyword inteira do destino vira o recorte ("como atrair um cliente" → "atrair um cliente"). */
-  assert.ok(colunaSemPrefixo.some(item => item.startsWith("L1 · âncora sugerida \"tráfego pago vs orgânico\" → Suporte \"tráfego pago vs orgânico para clínica de estética\" → /trafego-pago-vs-organico-para-clinica-de-estetica (novo, ainda não publicado: o link entra quando o destino estiver no ar) · ")), colunaSemPrefixo.join("\n"));
-  assert.ok(colunaSemPrefixo.some(item => item.startsWith("L3 · âncora sugerida \"atrair um cliente\" → Suporte \"como atrair um cliente\" (sem endereço no pacote: a âncora fica como texto simples, sem link) · ")), colunaSemPrefixo.join("\n"));
+  /* 2026-10-11c · o recorte vai como exemplo, com as keywords proibidas do destino. */
+  assert.ok(colunaSemPrefixo.some(item => /^L1 · âncora: escreva com as palavras da sua frase a ideia do destino \([^)]*\), em 2 a 4 palavras; por exemplo "tráfego pago vs orgânico" · não use como âncora: "tráfego pago vs orgânico para clínica de estética" → Suporte "tráfego pago vs orgânico para clínica de estética" → \/trafego-pago-vs-organico-para-clinica-de-estetica \(novo, ainda não publicado: o link entra quando o destino estiver no ar\) · /.test(item)), colunaSemPrefixo.join("\n"));
+  assert.ok(colunaSemPrefixo.some(item => /^L3 · âncora: escreva com as palavras da sua frase a ideia do destino \([^)]*\), em 2 a 4 palavras; por exemplo "atrair um cliente" · não use como âncora: "como atrair um cliente" → Suporte "como atrair um cliente" \(sem endereço no pacote: a âncora fica como texto simples, sem link\) · /.test(item)), colunaSemPrefixo.join("\n"));
 });
 
 test("D10 no resto do arquivo: o parecer ainda não aceito e o Silo em formação são ditos sem espera aberta", () => {
