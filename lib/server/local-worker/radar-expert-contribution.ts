@@ -150,10 +150,12 @@ export function createRadarExpertContributionWorkerProcessor(input: RadarContrib
     const brief = await getExpertBrief({ brandId: contribution.brandId, briefId: contribution.briefId, expertId: contribution.expertId }, workerClient);
     if (!brief) throw new Error("EXPERT_BRIEF_NOT_FOUND");
     await markExpertContributionProcessing({ ...contributionIdentity(contribution) }, workerClient);
+    let organizer = input.organize ? "injected" : "platform_ai";
     const organization = input.organize
       ? await input.organize({ job, contribution, brief })
       : await (async () => {
         const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, brandId: contribution.brandId, client });
+        organizer = provider.provider;
         const generated = await generateStructuredAI({ provider, system: RADAR_EXPERT_ORGANIZATION_SYSTEM_PROMPT, user: buildRadarExpertOrganizationPrompt({ briefTitle: brief.title, questions: brief.questions, radarContext: brief.radarContext, transcript }), schema: RadarExpertOrganizationSchema, maxTokens: 3500 });
         return validateRadarExpertOrganization({ transcript, organization: generated });
       })();
@@ -161,8 +163,8 @@ export function createRadarExpertContributionWorkerProcessor(input: RadarContrib
     if (!record(validatedOrganization).organizedText) throw new Error("EXPERT_ORGANIZATION_EMPTY");
     return {
       status: "COMPLETED" as const,
-      payload: { organizedLength: text(record(validatedOrganization).organizedText).length, provider: input.organize ? "injected" : "deepseek" },
-      writeback: { kind: "expert_contribution_organization" as const, ...contributionIdentity(contribution), organizationPayload: { ...validatedOrganization, provider: input.organize ? "injected" : "deepseek", sourceTranscriptHash: createHash("sha256").update(transcript, "utf8").digest("hex"), humanDecisionRequired: true } },
+      payload: { organizedLength: text(record(validatedOrganization).organizedText).length, provider: organizer },
+      writeback: { kind: "expert_contribution_organization" as const, ...contributionIdentity(contribution), organizationPayload: { ...validatedOrganization, provider: organizer, sourceTranscriptHash: createHash("sha256").update(transcript, "utf8").digest("hex"), humanDecisionRequired: true } },
     };
   };
 }

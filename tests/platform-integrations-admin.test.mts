@@ -34,7 +34,8 @@ test("leitura usa somente a camada server-side real e sanitiza secrets", async (
   assert.match(panel, /DEEPSEEK_BASE_URL/);
 });
 
-test("catálogos permanecem separados e OpenRouter não é cadastrado como provider operacional", async () => {
+// 2026-10-11: a OpenRouter voltou como IA canônica; a DeepSeek fica como reserva de rollback.
+test("catálogos permanecem separados e a OpenRouter é o provider operacional de IA", async () => {
   const service = await read("lib/server/platform-integrations-admin.ts");
   const panel = await read("modules/admin/platform-integrations-panel.tsx");
   assert.match(service, /createPlatformIntegrationProvider/);
@@ -47,7 +48,10 @@ test("catálogos permanecem separados e OpenRouter não é cadastrado como provi
   assert.match(panel, /DataForSEO/);
   assert.match(panel, /DeepSeek/);
   assert.match(panel, /key: "deepseek"/);
-  assert.doesNotMatch(panel, /OpenRouter/);
+  assert.match(panel, /key: "openrouter"/);
+  assert.match(panel, /DeepSeek \(reserva\)/);
+  assert.match(service, /capabilityKey: "ai_generation", providerKey: "openrouter"/);
+  assert.doesNotMatch(service, /capabilityKey: "ai_generation", providerKey: "deepseek"/);
   assert.match(panel, /sem fallback silencioso/);
   assert.match(panel, /Distribuição por Agência/);
   assert.match(panel, /Configurações das APIs/);
@@ -116,6 +120,10 @@ test("Admin expõe configurações canônicas sem health check automático", asy
   assert.doesNotMatch(panel, /Configuração remota ainda não realizada|não cadastra segredo/);
   assert.doesNotMatch(service, /INTEGRATIONS_REMOTE_CONFIGURATION_PENDING|DEEPSEEK_REMOTE_CONFIGURATION_PENDING/);
   assert.match(service, /deepseek_model: DEEPSEEK_DEFAULT_MODEL/);
+  assert.match(service, /openrouter_model: OPENROUTER_DEFAULT_MODEL/);
+  assert.match(service, /\["OPENROUTER_API_KEY"\]/);
+  assert.match(panel, /OPENROUTER_BASE_URL/);
+  assert.match(panel, /OPENROUTER_API_KEY/);
 });
 
 test("política de homologação materializa a cadeia canônica sem bypass", async () => {
@@ -142,8 +150,7 @@ test("distribuição ativa não oferece grants manuais por capability", async ()
   const panel = await read("modules/admin/platform-integrations-panel.tsx");
   assert.match(panel, /data\.platformAccessPolicy/);
   assert.match(panel, /Disponibilidade dos resources da Plataforma/);
-  for (const resource of ["Google Ads", "DataForSEO", "DeepSeek"]) assert.match(panel, new RegExp(resource));
-  assert.doesNotMatch(panel, /OpenRouter/);
+  for (const resource of ["Google Ads", "DataForSEO", "OpenRouter", "DeepSeek"]) assert.match(panel, new RegExp(resource));
   assert.match(panel, /Distribuição por Agência/);
   assert.doesNotMatch(panel, /Configuração avançada\/futura[^\n]*grants manuais por capability/);
   assert.doesNotMatch(panel, /Conceder e criar binding da Agência/);

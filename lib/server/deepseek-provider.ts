@@ -62,12 +62,14 @@ export function extractDeepSeekTextContent(value: unknown): string | null {
   return text || null;
 }
 
-export async function requestDeepSeekChatCompletion(input: DeepSeekProviderRequest): Promise<{
+export type ChatCompletionResult = {
   response: Response;
   envelope: Record<string, unknown>;
   content: string | null;
   diagnostic: DeepSeekProviderResponseDiagnostic;
-}> {
+};
+
+export async function requestDeepSeekChatCompletion(input: DeepSeekProviderRequest): Promise<ChatCompletionResult> {
   const response = await fetchProviderResponse(input.apiUrl, {
     method: "POST",
     headers: {
@@ -78,15 +80,22 @@ export async function requestDeepSeekChatCompletion(input: DeepSeekProviderReque
     body: JSON.stringify(buildDeepSeekChatRequest(input)),
     signal: input.signal,
   }, input.fetchImpl || fetch);
+  return parseChatCompletionResponse(response, "DeepSeek");
+}
 
+/**
+ * Leitura do envelope chat/completions no formato OpenAI, comum à DeepSeek e à
+ * OpenRouter. Só lê: conteúdo, raciocínio e uso de tokens.
+ */
+export async function parseChatCompletionResponse(response: Response, providerLabel: string): Promise<ChatCompletionResult> {
   let raw: unknown;
   try {
     raw = await response.json();
   } catch {
-    throw new ProviderRequestError("O provider DeepSeek retornou um envelope inválido.", 502, "AI_PROVIDER_INVALID_RESPONSE");
+    throw new ProviderRequestError(`O provider ${providerLabel} retornou um envelope inválido.`, 502, "AI_PROVIDER_INVALID_RESPONSE");
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new ProviderRequestError("O provider DeepSeek retornou um envelope inválido.", 502, "AI_PROVIDER_INVALID_RESPONSE");
+    throw new ProviderRequestError(`O provider ${providerLabel} retornou um envelope inválido.`, 502, "AI_PROVIDER_INVALID_RESPONSE");
   }
   const envelope = raw as Record<string, unknown>;
   const choices = Array.isArray(envelope.choices) ? envelope.choices : [];

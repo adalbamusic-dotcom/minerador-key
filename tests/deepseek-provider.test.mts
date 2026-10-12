@@ -61,6 +61,10 @@ test("DeepSeek retorna content vazio para o chamador validar explicitamente", as
     contentPresent: false,
     contentLength: 0,
     reasoningPresent: false,
+    reasoningLength: 0,
+    completionTokens: null,
+    reasoningTokens: null,
+    promptTokens: null,
   });
 });
 

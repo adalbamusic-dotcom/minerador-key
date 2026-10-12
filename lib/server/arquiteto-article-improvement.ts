@@ -248,7 +248,7 @@ function editorialAiFailureMessage(error: unknown): string {
   const code = error && typeof error === "object" ? String((error as { code?: unknown }).code ?? "") : "";
   if (code === "AI_TIMEOUT" || (error instanceof Error && error.name === "AbortError")) return AI_TIMEOUT_MESSAGE;
   if (code === "AI_OUTPUT_INVALID" || code === "AI_PROVIDER_INVALID_RESPONSE") return "A resposta da IA veio fora do formato.";
-  if (/CONNECTION|CREDENTIAL|PROVIDER_INVALID|NOT_CONFIGURED/i.test(code)) return "A Connection DeepSeek da marca não está disponível.";
+  if (/CONNECTION|CREDENTIAL|PROVIDER_INVALID|NOT_CONFIGURED/i.test(code)) return "A Connection de IA da plataforma (OpenRouter) não está disponível.";
   return "A IA está indisponível.";
 }
 /**
@@ -1014,7 +1014,7 @@ export function improvementRuntime(context: PipelineContext): ImprovementRuntime
   return {
     context,
     authorize: (module, action) => resolvePipelineContext({ brandId: context.brandId, module, action }, { requireActorUserId: async () => context.actorUserId }),
-    // A Connection DeepSeek resolvida como nas outras rotas do Arquiteto (cliente da sessão).
+    // A Connection de IA resolvida como nas outras rotas do Arquiteto (cliente da sessão).
     editorialAi: prompt => proposeArticleImprovementAiPicks({ actorUserId: context.actorUserId, brandId: context.brandId, client: context.supabase, ...prompt }),
   };
 }

@@ -223,8 +223,8 @@ export function radarArticleBlueprintCostConfirmation(artigos: number): string {
   const teto = radarArticleBlueprintMaxCalls(total);
   return [
     total === 1
-      ? `Isto faz até ${teto} chamadas de IA (DeepSeek, cota da marca) sobre a investigação congelada: 1 para organizar o artigo-modelo e, se a resposta vier cortada ou a conferência apontar o que corrigir, mais 1 — a nova tentativa ou a passada de correção, nunca as duas.`
-      : `Isto faz até ${teto} chamadas de IA (DeepSeek, cota da marca), em série, um artigo por vez: 1 por artigo para organizar o artigo-modelo e, se a resposta vier cortada ou a conferência apontar o que corrigir, mais 1 — a nova tentativa ou a passada de correção (no máximo ${RADAR_ARTICLE_BLUEPRINT_MAX_CALLS_PER_ARTICLE} por artigo).`,
+      ? `Isto faz até ${teto} chamadas de IA (IA da plataforma, OpenRouter, cota da marca) sobre a investigação congelada: 1 para organizar o artigo-modelo e, se a resposta vier cortada ou a conferência apontar o que corrigir, mais 1 — a nova tentativa ou a passada de correção, nunca as duas.`
+      : `Isto faz até ${teto} chamadas de IA (IA da plataforma, OpenRouter, cota da marca), em série, um artigo por vez: 1 por artigo para organizar o artigo-modelo e, se a resposta vier cortada ou a conferência apontar o que corrigir, mais 1 — a nova tentativa ou a passada de correção (no máximo ${RADAR_ARTICLE_BLUEPRINT_MAX_CALLS_PER_ARTICLE} por artigo).`,
     "Cada artigo pode levar até 4 minutos; a falha de um não para os outros e não desfaz nenhuma investigação.",
   ].join(" ");
 }
@@ -268,7 +268,7 @@ export function radarPhase1WithArticleBlueprint(acao: RadarPhase1Action, artigos
     label: artigos <= 1 ? radarFinalizeWithAiLabel(acao.label) : `${acao.label} · inclui até ${teto} chamadas de IA`,
     info: [
       acao.info,
-      `Depois de congelar, a IA organiza o artigo-modelo da SERP sobre o pacote congelado: até ${teto} chamadas de IA (DeepSeek, cota da marca) — 1 por artigo para organizar e, se a resposta vier cortada ou a conferência apontar o que corrigir, mais 1, nunca as duas.`,
+      `Depois de congelar, a IA organiza o artigo-modelo da SERP sobre o pacote congelado: até ${teto} chamadas de IA (IA da plataforma, OpenRouter, cota da marca) — 1 por artigo para organizar e, se a resposta vier cortada ou a conferência apontar o que corrigir, mais 1, nunca as duas.`,
       "Se a IA falhar, a investigação continua finalizada e o painel \"Artigo-modelo da SERP\" oferece organizar de novo. O artigo-modelo sai concluído: com pendência na conferência, a IA corrige numa chamada a mais.",
     ].filter(Boolean).join(" "),
   };

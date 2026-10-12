@@ -2,9 +2,50 @@ import "server-only";
 import type { ZodType } from "zod";
 import { parseStructuredJson, StructuredOutputError } from "@/lib/arquiteto/structured-output";
 import { ProviderRequestError } from "@/lib/arquiteto/provider-client";
-import { requestDeepSeekChatCompletion } from "@/lib/server/deepseek-provider";
+import { requestDeepSeekChatCompletion, type ChatCompletionResult } from "@/lib/server/deepseek-provider";
+import { requestOpenRouterChatCompletion } from "@/lib/server/openrouter-provider";
 import type { DeepSeekCanonicalResolution, DeepSeekThinkingMode } from "@/lib/server/deepseek-canonical";
 import type { AIProviderErrorCode } from "@/lib/server/ai-provider-config";
+
+type AIProviderHandle = Pick<DeepSeekCanonicalResolution, "provider" | "apiKey" | "apiUrl" | "model" | "extraHeaders" | "thinkingMode">;
+
+function isSupportedProvider(provider: { provider: unknown }) {
+  return provider.provider === "openrouter" || provider.provider === "deepseek";
+}
+
+/** Uma única porta para o provider da Connection resolvida. */
+function requestChatCompletion(provider: AIProviderHandle, input: {
+  system: string;
+  user: string;
+  maxTokens: number;
+  thinkingMode: DeepSeekThinkingMode;
+  responseFormat: "json_object" | "text";
+  signal: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<ChatCompletionResult> {
+  const common = {
+    apiUrl: provider.apiUrl,
+    apiKey: provider.apiKey,
+    model: provider.model,
+    system: input.system,
+    user: input.user,
+    extraHeaders: provider.extraHeaders,
+    signal: input.signal,
+    maxTokens: input.maxTokens,
+    thinkingMode: input.thinkingMode,
+    responseFormat: input.responseFormat,
+    fetchImpl: input.fetchImpl,
+  };
+  return provider.provider === "openrouter" ? requestOpenRouterChatCompletion(common) : requestDeepSeekChatCompletion(common);
+}
+
+/** Resposta vazia porque o raciocínio consumiu o teto: repetir com o mesmo teto só gasta crédito. */
+function emptyContentError(finishReason: string | null) {
+  if (finishReason === "length") {
+    return new StructuredAIError("A IA gastou todo o limite de tokens antes de responder. Tente de novo; se repetir, avise o administrador da plataforma.", 502, undefined, "AI_PROVIDER_ERROR");
+  }
+  return new StructuredAIError("O provider de IA não retornou conteúdo utilizável.", 502, undefined, "AI_PROVIDER_INVALID_RESPONSE");
+}
 
 /**
  * Operação de saída textual: o provider responde em texto puro e a aplicação é
@@ -21,7 +62,7 @@ export async function generatePlainTextAI({
   fetchImpl,
   onDiagnostic,
 }: {
-  provider: Pick<DeepSeekCanonicalResolution, "provider" | "apiKey" | "apiUrl" | "model" | "extraHeaders" | "thinkingMode">;
+  provider: AIProviderHandle;
   system: string;
   user: string;
   timeoutMs?: number;
@@ -33,8 +74,8 @@ export async function generatePlainTextAI({
   if (user.length > 250_000) {
     throw new StructuredAIError("Payload estrategico excede o limite permitido.", 413, undefined, "AI_REQUEST_INVALID");
   }
-  if (provider.provider !== "deepseek") {
-    throw new StructuredAIError("A camada compartilhada de IA aceita somente a Connection DeepSeek.", 409, undefined, "AI_PROVIDER_INVALID");
+  if (!isSupportedProvider(provider)) {
+    throw new StructuredAIError("A camada compartilhada de IA aceita somente a Connection de IA da plataforma (OpenRouter ou DeepSeek).", 409, undefined, "AI_PROVIDER_INVALID");
   }
 
   const resolvedTimeout = timeoutMs ?? (Number(process.env.AI_TIMEOUT_MS) || 180_000);
@@ -61,13 +102,9 @@ export async function generatePlainTextAI({
   try {
     diagnostic.requestStarted = true;
     onDiagnostic?.({ ...diagnostic });
-    const result = await requestDeepSeekChatCompletion({
-      apiUrl: provider.apiUrl,
-      apiKey: provider.apiKey,
-      model: provider.model,
+    const result = await requestChatCompletion(provider, {
       system,
       user,
-      extraHeaders: provider.extraHeaders,
       signal: controller.signal,
       maxTokens,
       thinkingMode: thinkingMode ?? provider.thinkingMode,
@@ -78,9 +115,7 @@ export async function generatePlainTextAI({
     diagnostic.providerDurationMs = Date.now() - startedAt;
     onDiagnostic?.({ ...diagnostic });
     const text = result.content?.trim() || "";
-    if (!text) {
-      throw new StructuredAIError("O provider DeepSeek não retornou conteúdo utilizável.", 502, undefined, "AI_PROVIDER_INVALID_RESPONSE");
-    }
+    if (!text) throw emptyContentError(result.diagnostic.finishReason);
     return text;
   } catch (error) {
     if (error instanceof ProviderRequestError) {
@@ -166,7 +201,7 @@ export async function generateStructuredAI<T>({
   fetchImpl,
   onDiagnostic,
 }: {
-  provider: Pick<DeepSeekCanonicalResolution, "provider" | "apiKey" | "apiUrl" | "model" | "extraHeaders" | "thinkingMode">;
+  provider: AIProviderHandle;
   system: string;
   user: string;
   schema: ZodType<T>;
@@ -180,8 +215,8 @@ export async function generateStructuredAI<T>({
     throw new StructuredAIError("Payload estrategico excede o limite permitido.", 413, undefined, "AI_REQUEST_INVALID");
   }
 
-  if (provider.provider !== "deepseek") {
-    throw new StructuredAIError("A camada compartilhada de IA aceita somente a Connection DeepSeek.", 409, undefined, "AI_PROVIDER_INVALID");
+  if (!isSupportedProvider(provider)) {
+    throw new StructuredAIError("A camada compartilhada de IA aceita somente a Connection de IA da plataforma (OpenRouter ou DeepSeek).", 409, undefined, "AI_PROVIDER_INVALID");
   }
 
   // Timeout pode ser configurado via env (AI_TIMEOUT_MS). Default 180s.
@@ -208,23 +243,18 @@ export async function generateStructuredAI<T>({
     try {
       diagnostic.requestStarted = true;
       onDiagnostic?.({ ...diagnostic });
-      const result = await requestDeepSeekChatCompletion({
-        apiUrl: provider.apiUrl,
-        apiKey: provider.apiKey,
-        model: provider.model,
+      const result = await requestChatCompletion(provider, {
         system,
         user,
-        extraHeaders: provider.extraHeaders,
         signal: controller.signal,
         maxTokens,
         thinkingMode: thinkingMode ?? provider.thinkingMode,
+        responseFormat: "json_object",
         fetchImpl,
       });
       Object.assign(diagnostic, result.diagnostic);
       onDiagnostic?.({ ...diagnostic });
-      if (!result.content) {
-        throw new StructuredAIError("O provider DeepSeek não retornou conteúdo utilizável.", 502, undefined, "AI_PROVIDER_INVALID_RESPONSE");
-      }
+      if (!result.content) throw emptyContentError(result.diagnostic.finishReason);
 
       try {
         const parsed = parseStructuredJson(result.content);

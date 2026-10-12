@@ -1,5 +1,16 @@
 # Backlog — Admin
 
+## IA da plataforma pela OpenRouter — 2026-10-11
+
+- [x] Rotear `ai_generation` para a Connection OpenRouter e manter a DeepSeek como reserva de rollback.
+- [x] Ler a chave de `OPENROUTER_API_KEY` com precedência sobre o Secret Store e o modelo de `OPENROUTER_MODEL`, com padrão `openai/gpt-6-luna-pro:batch`.
+- [x] Card OpenRouter no Admin, health check sem custo e testes `test:ai-provider` no agregado.
+- [ ] Usuário: cadastrar `OPENROUTER_API_KEY` na Vercel (Production e Preview) e, se quiser fixar, `OPENROUTER_MODEL`; fazer deploy.
+- [ ] Usuário: no Admin, Integrações, clicar Testar conexão no card OpenRouter e confirmar limite restante.
+- [ ] Usuário: uma geração real curta e readback do evento em `integration_usage_events` com a Connection OpenRouter.
+- [ ] Decidir depois do primeiro uso se a variante batch cabe nos timeouts; se não, trocar `OPENROUTER_MODEL` para `openai/gpt-6-luna-pro`.
+- [ ] Opcional, com autorização de escrita remota: atualizar a metadata `openrouter_model` da Connection, que ainda guarda o modelo DeepSeek de 2026-08.
+
 ## Exclusão de convite direto e link de 24 horas — 2026-09-14
 
 - [x] Documentar autorização e escopo na SDD do Admin.
