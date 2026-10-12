@@ -8,7 +8,7 @@
 
 ### Adendo de precedência — DeepSeek → OpenRouter — 2026-10-11
 
-Este adendo vale sobre o de 2026-08-19 logo abaixo. Por decisão do dono, a capability `ai_generation` voltou a resolver a Connection global OpenRouter, com modelo padrão `openai/gpt-6-luna-pro`, sem a variante `:batch`, que não funciona no endpoint de chat, e chave `OPENROUTER_API_KEY` na env do servidor com precedência sobre o Secret Store. A Connection DeepSeek fica READY como reserva de rollback, sem receber chamadas e sem fallback automático. Contrato, consumidores, riscos e rollback estão no [adendo da IA OpenRouter](adendo-ia-openrouter-2026-10-11.md).
+Este adendo vale sobre o de 2026-08-19 logo abaixo. Por decisão do dono, a capability `ai_generation` voltou a resolver a Connection global OpenRouter, com modelo padrão `anthropic/claude-haiku-5.5` desde 2026-10-12, sem variantes `:batch`, que não funcionam no endpoint de chat, e chave `OPENROUTER_API_KEY` na env do servidor com precedência sobre o Secret Store. A Connection DeepSeek fica READY como reserva de rollback, sem receber chamadas e sem fallback automático. Contrato, consumidores, riscos e rollback estão no [adendo da IA OpenRouter](adendo-ia-openrouter-2026-10-11.md).
 
 ### Adendo de precedência — OpenRouter → DeepSeek — Fase 1 — 2026-08-19
 

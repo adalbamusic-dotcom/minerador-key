@@ -227,7 +227,7 @@ test("OpenRouter health consulta só /api/v1/key, sem gerar texto, e prefere a c
   }));
   assert.deepEqual(calls, [{ url: "https://openrouter.ai/api/v1/key", authorization: "Bearer env-openrouter-key" }]);
   assert.equal(result.providerKey, "openrouter");
-  assert.equal(result.currentModel, "openai/gpt-6-luna-pro");
+  assert.equal(result.currentModel, "anthropic/claude-haiku-5.5");
   assert.equal(result.currentModelAvailable, null);
   assert.equal(result.details.credentialSource, "environment");
   assert.equal(result.details.limitRemaining, "44.66");

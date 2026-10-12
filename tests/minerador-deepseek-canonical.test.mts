@@ -128,7 +128,7 @@ test("com OPENROUTER_API_KEY na env, a chave vem da env e o Secret Store não é
   // A metadata remota ainda aponta para um modelo DeepSeek: ela é ignorada e vale o padrão.
   assert.equal(result.model, OPENROUTER_DEFAULT_MODEL);
   assert.equal(result.modelSource, "default");
-  assert.equal(result.model, "openai/gpt-6-luna-pro");
+  assert.equal(result.model, "anthropic/claude-haiku-5.5");
 });
 
 test("sem a env, a chave sai do Secret Store da Connection no formato { OPENROUTER_API_KEY }", async () => {
@@ -172,6 +172,11 @@ test("a variante :batch na env é recusada com instrução, em vez de virar um 4
     (error: unknown) => error instanceof DeepSeekCanonicalError && error.code === "OPENROUTER_MODEL_NOT_ALLOWED" && error.status === 409 && /sem :batch/.test(error.message),
   );
   assert.equal(OPENROUTER_DEFAULT_MODEL.endsWith(":batch"), false);
+  // Sem o prefixo do fornecedor não é um ID da OpenRouter.
+  assert.throws(
+    () => readOpenRouterModel(null, { OPENROUTER_MODEL: "claude-haiku-5.5" }),
+    (error: unknown) => error instanceof DeepSeekCanonicalError && error.code === "OPENROUTER_MODEL_NOT_ALLOWED",
+  );
 });
 
 test("cabeçalho HTTP-Referer só usa URL http(s) válida; X-Title vai sempre", () => {

@@ -12,8 +12,8 @@
 O dono pediu, em 2026-10-11, para deixar de trabalhar com a DeepSeek e gastar os
 créditos já existentes na OpenRouter. A capability `ai_generation` passa a
 resolver a Connection global **OpenRouter**. O modelo padrão é
-`openai/gpt-6-luna-pro`. O dono escolheu a variante `:batch`, mas ela não funciona
-no endpoint de chat; veja a correção de 2026-10-12 abaixo.
+`anthropic/claude-haiku-5.5`, escolhido em 2026-10-12. A primeira escolha, a variante
+`:batch` do GPT-6 Luna Pro, não funciona no endpoint de chat; veja a correção abaixo.
 
 A Connection DeepSeek continua READY no banco, mas não recebe chamadas. Ela fica
 como reserva para rollback.
@@ -22,11 +22,20 @@ como reserva para rollback.
 
 A primeira chamada real devolveu "O provider de IA respondeu com erro HTTP 404". Uma chamada de diagnóstico autorizada pelo dono mostrou a mensagem que a plataforma descarta: a OpenRouter recusa `openai/gpt-6-luna-pro:batch` no endpoint chat/completions, porque essa variante usa um adaptador de lote. A mesma chamada com `openai/gpt-6-luna-pro` voltou HTTP 200 em cerca de 2 segundos, com JSON válido.
 
-- O padrão do código passou a ser `openai/gpt-6-luna-pro`.
+- O padrão do código passou a ser `openai/gpt-6-luna-pro`, depois trocado pelo Claude Haiku 5.5.
 - `OPENROUTER_MODEL` terminado em `:batch` agora é recusado pelo resolvedor com 409 e uma instrução clara, antes de qualquer chamada.
 - A lista de modelos conhecidos da metadata não tem mais variantes batch.
 - Custo das duas chamadas de diagnóstico: a recusada não foi cobrada; a aceita custou US$ 0,000165.
 - A suposição anterior, de que a variante batch era síncrona pela metade do preço, estava errada.
+
+## Escolha do modelo em 2026-10-12 — Claude Haiku 5.5
+
+Depois de comparar o catálogo da OpenRouter por custo, contexto, saída máxima e suporte a JSON, o dono escolheu `anthropic/claude-haiku-5.5` como modelo padrão. Ele tem o mesmo preço do GPT-6 Luna Pro, US$ 0,10 por milhão de tokens de entrada e US$ 0,50 de saída, e dez provedores na OpenRouter.
+
+- Uma chamada de diagnóstico no formato da plataforma voltou HTTP 200 em cerca de 1,7 segundo, com JSON válido e texto em português. Custo: US$ 0,000048.
+- O código não marca pontos de cache para a Anthropic, então a parte repetida dos prompts não tem desconto, ao contrário do GPT-6 Luna Pro e do Gemini.
+- Gemini 3.8 Flash também foi testado e funcionou, mas custa cerca de 7 vezes mais por chamada.
+- A conexão nativa com a Anthropic, sem a OpenRouter, fica para uma etapa futura com adendo próprio.
 
 ## Contrato anterior
 
