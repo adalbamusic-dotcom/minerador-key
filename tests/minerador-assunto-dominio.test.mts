@@ -292,7 +292,9 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
  * Um chamador novo exige mudar este teste de propósito.
  */
 const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
-  setKeywordSubject: ["lib/minerador/keyword-import-core.ts", "lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx"],
+  // 2026-10-12 (SDD do plano declarado §6.1-2): o núcleo do plano do Silo grava
+  // `keyword_subject.plan` no Assunto declarado e declara pelo núcleo de sempre.
+  setKeywordSubject: ["lib/minerador/keyword-import-core.ts", "lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx", "lib/minerador/declared-plan-import-core.ts"],
   withdrawKeywordSubject: ["lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx"],
   // 2026-09-24 (pedido do dono): o seletor Vínculo único grava as três
   // escolhas de uma vez por planVinculoBatchChoices, que chama o
@@ -302,7 +304,10 @@ const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   // delegada): o MCP declara Assunto e decide o Vínculo SÓ com o aceite do
   // usuário no chat. O teste P4b abaixo prova a guarda antes de cada chamada.
   planVinculoBatchChoices: ["modules/minerador/minerador-workspace.tsx", "lib/server/platform-mcp-tools.ts"],
-  importSubjectsWithCore: ["app/api/minerador/marcas/[brandId]/subjects/import/route.ts", "lib/server/platform-mcp-tools.ts"],
+  importSubjectsWithCore: ["app/api/minerador/marcas/[brandId]/subjects/import/route.ts", "lib/server/platform-mcp-tools.ts", "lib/minerador/declared-plan-import-core.ts"],
+  // 2026-10-12 (F4): o plano do Silo tem um núcleo só — a rota da tela e a
+  // ferramenta MCP `declare_silo_plan` (com a guarda do aceite, P4b).
+  importDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/import/route.ts", "lib/server/platform-mcp-tools.ts"],
 };
 
 /** Chamador de IA autorizado — isento da regex de "caminho de IA", e só ele. */
@@ -314,6 +319,7 @@ const SUBJECT_WRITE_DEFINED_IN: Record<string, string> = {
   planVinculoBatch: "lib/minerador/vinculo-batch.ts",
   planVinculoBatchChoices: "lib/minerador/vinculo-batch.ts",
   importSubjectsWithCore: "lib/minerador/keyword-import-core.ts",
+  importDeclaredPlanWithCore: "lib/minerador/declared-plan-import-core.ts",
 };
 
 test("P4: a gravação do Assunto só tem os chamadores da lista fechada — nenhum caminho de IA ou MCP", () => {
@@ -351,6 +357,13 @@ test("P4b: o MCP só grava Assunto/Vínculo depois da guarda do aceite humano", 
   // declare_subjects: a guarda de aceite vem antes da chamada ao núcleo.
   const declarar = source.slice(source.indexOf('registerTool("declare_subjects"'), source.indexOf("importSubjectsWithCore(", source.indexOf('registerTool("declare_subjects"')));
   assert.match(declarar, /mode === "apply" && !userConfirmation[\s\S]*human_confirmation_required/);
+
+  // declare_silo_plan (F4): aceite e importRequestId antes do núcleo do plano.
+  const planoInicio = source.indexOf('registerTool("declare_silo_plan"');
+  assert.ok(planoInicio > 0, "a ferramenta do plano do Silo existe");
+  const plano = source.slice(planoInicio, source.indexOf("importDeclaredPlanWithCore(", planoInicio));
+  assert.match(plano, /mode === "apply" && !userConfirmation[\s\S]*human_confirmation_required/);
+  assert.match(plano, /mode === "apply" && !importRequestId[\s\S]*import_request_required/);
 
   // set_keyword_vinculo: aceite + hash antes; a aplicação só depois de conferir o hash da prévia.
   const vinculoInicio = source.indexOf('registerTool("set_keyword_vinculo"');

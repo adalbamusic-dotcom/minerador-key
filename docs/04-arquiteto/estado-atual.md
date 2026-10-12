@@ -1,3 +1,66 @@
+## Plano declarado do Silo no Arquiteto (F4 = Fase B) — 2026-10-12
+
+```text
+SDD = docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md (F3/F4; §6.2) · ADR-022, emenda D1-bis
+MIGRATION_NOVA = 0 · CAMPO_NOVO_EM_ARTICLEDNA/SILODNA = 0 (só ProvisionalArticleGroup.declaredPlan, opcional)
+ESCRITA_REMOTA = 0 · SQL_REMOTO = só SELECT de leitura · CHAMADA_PAGA = 0 · CHAMADA_IA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** O plano chega ao Arquiteto pelo
+PACOTE APROVADO do Assunto (`ArchitectSubjectStanding.plan`, lido pelo resolver do Minerador; a linha viva
+nunca vale como plano). Leituras únicas em `lib/arquiteto/declared-plan-formation.ts`.
+
+- **Formação (`planSiloArticleFormation`, `reservePriorityArticleGroups`):** o Assunto com plano e a principal
+  declarada presente no Silo forma o artigo dele ANTES dos outros, na ordem do plano, com a principal como
+  cabeceira fixa (sem `suggestPrincipal`, mesmo sem volume); sustentações primeiro da lista da Pesquisa por
+  Assunto (`subject_discovery`), depois das demais keywords do MESMO grupo, nada de fora do grupo; teto de seis.
+  O candidato já nasce com o Assunto preso (`subjectKeywordId`). O Assunto do plano cuja principal ainda não
+  chegou ao Silo espera, com aviso — nunca recebe principal sugerida. **Nada solto (D6):** a sustentação
+  devolvida pelo artigo do plano e a keyword do grupo do plano sem encaixe saem antes dos núcleos e dos
+  excedentes (a causa do artigo solto "plano vivo controle") e ficam em "Keywords não agrupadas" do grupo, com
+  o motivo e a ação "anexe a um artigo do plano (decisão humana)"; artigos do plano não recebem livres de fora.
+  Sem plano, a saída é idêntica à de antes (teste).
+- **Portaria `DECLARED_PLAN_PRESERVED`** (`article-formation-confirmation.ts`, estrutural, sem "refazer mesmo
+  assim"): principal = declarada e toda keyword da lista do Assunto no artigo ou em não agrupadas; tira o artigo
+  dos prontos. Só aparece com artigo de plano no lote. `SUBJECT_PRINCIPAL_REQUIRES_VOLUME` continua.
+- **Papel e promessa:** o adapter (`deterministicArticleDnaPayload`) usa `group.declaredPlan` — `hierarchy` =
+  papel, `promise` = escopo (no lugar da moldura "Cobrir com clareza o tema…"); a materialização do Concluir e a
+  melhoria passam o plano; a melhoria aplica `applyDeclaredPlanToArticleDna` no DNA vigente e recusa principal
+  diferente da declarada.
+- **Melhoria (`planArticleImprovements` e servidor):** com principal declarada, `needsPrimary = false`; a
+  declarada assume (a antiga fica secundária), entra nos membros, não reforça outro alvo e a IA não a troca;
+  plano ainda não aplicado ao DNA = versão nova (D8). O Assunto cuja principal declarada não chegou ao Arquiteto
+  sai dos alvos, com aviso. A keyword nova da busca de um Assunto nasce ligada a ele (`subjectKeywordId` =
+  o Assunto; antes `null`) e herda o grupo dele.
+- **Limite conhecido:** a gravação da melhoria e a portaria pedem o parecer SERP da composição nas 4 lentes,
+  inclusive da principal; a principal declarada sem volume ainda não tem SERP e a coleta é paga (D2(b)). A
+  D2(a) — parecer pelas sustentações com volume — ficou para depois (backlog).
+- **Testes:** `tests/arquiteto-principal-declarada.test.mts` (fixture da WifiConecta: principal fixa,
+  "plano vivo controle" nunca solto, teto, grupo, espera, saída idêntica sem plano) e
+  `tests/arquiteto-plano-declarado-portaria.test.mts` (portaria, papel e promessa, leituras únicas, melhoria sem
+  trocar a principal, servidor), ambos em `test:arquiteto`.
+- **Silo com Pilar declarado** (`lib/arquiteto/silo-declared-plan.ts`, `silo-formation.ts`,
+  `silo-composition-from-formations.ts`, `silo-consolidation.ts`): quando todos os artigos do Silo são de
+  Assuntos com plano do mesmo grupo e exatamente um é Pilar, o fechamento automático e a formação manual da aba
+  Silos usam esse Pilar como decisão humana ("Pilar declarado no plano por <ator> em <data>"), a ordem do plano,
+  e nome, objetivo e slug (só se não publicado) de `editorial_groups.plan`; `pillarScores` fica informativo;
+  0/2+ Pilares ou grupos mistos = regra de hoje, com aviso. Ao consolidar, o servidor liga
+  `editorial_groups.silo_id` (`lib/server/arquiteto-silo-group-link.ts`, aditivo, nunca derruba a
+  consolidação). Só vale para Silo ainda não consolidado.
+- **"Retirar artigo do Silo"** (aba Silos → cartão "Consolidada" → "Suporte · <keyword>" → "Retirar artigo do
+  Silo" → prévia → "Motivo da retirada (obrigatório)" → "Confirmar retirada"; rota
+  `POST /api/arquiteto/silo-article-withdrawal`, domínio `lib/arquiteto/silo-article-withdrawal.ts`, servidor
+  `lib/server/arquiteto-silo-article-withdrawal.ts`): grava o evento `rejected` na versão vigente do
+  ArticleDNA (id determinístico) e o par SiloDNA/SiloPage v+1 sem o artigo por `persistSiloPairAtomic`, com
+  releitura. Recusa Pilar, publicado, artigo fora do Silo, prévia vencida e artigo já no Radar/Redator/
+  Publicações. Não é ferramenta MCP (§17.1).
+- **Limites conhecidos (pendência):** (1) a mesa do Arquiteto ainda incorpora as keywords de ArticleDNA
+  rejeitado (`listArquitetoArtifacts`/`articleDnaKeywordIds` ignoram `editorial_version_status_events`):
+  depois da retirada a keyword pode não voltar a "Keywords não agrupadas"; (2) trocar o Pilar de Silo JÁ
+  consolidado não tem caminho; (3) o InternalLinkGraph fica sobre a versão anterior do Silo até ser gerado de
+  novo. Testes: `tests/arquiteto-silo-pilar-declarado.test.mts`, `tests/arquiteto-silo-retirada.test.mts`
+  (`test:arquiteto`) e `tests/arquiteto-silo-retirada-servidor.test.mts` (`test:arquiteto:servidor`).
+
 ## Grupos por cor no Arquiteto e leitura por grupo (F2) — 2026-10-12
 
 ```text
@@ -17,6 +80,7 @@ todas as planilhas".
   linha da keyword ganha a faixa e a etiqueta do grupo da própria keyword. O menu do seletor tem "Etiquetar
   artigos pelo grupo das keywords" (prévia → "Gravar N etiqueta(s)"); o rodapé dos artigos selecionados tem
   "Grupo ▸ Mover para <grupo> / Voltar ao grupo das keywords".
+- **2026-10-12 · etiqueta ao lado do sino:** o seletor saiu do começo das ações e virou o botão-ícone de etiqueta imediatamente ao lado do sino (`groupTag` da topbar global; cinza = "Todos os grupos", colorido = grupo ativo; o mesmo menu com "Etiquetar artigos pelo grupo das keywords"). Verificado no código e confirmado por teste (`tests/radar-grupos-etiqueta-topbar.test.mts`, `tests/arquiteto-grupos-f2.test.mts`). Validado manualmente: não.
 - **De onde vem o grupo do artigo:** regra única `inheritArticleGroup` (`lib/editorial/article-groups.ts`) —
   Assunto do ArticleDNA → principal → o grupo com mais keywords do artigo; empate = sem grupo (conflito
   visível). A etiqueta gravada em `editorial_group_articles` vence a herança. Linha ainda sem Definição gravada

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { hasKeywordApprovalRecord, normalizeKeyword } from "./keyword-import-core.ts";
 import { isKeywordSubjectActorId, resolveKeywordSubject } from "./keyword-subject.ts";
+import { assignKeywordGroupWithCore } from "./keyword-group-core.ts";
 
 /**
  * PESQUISA POR ASSUNTO — IMPORT AO PROCESSADOR (SDD 2026-09-24, F1b.7).
@@ -258,6 +259,12 @@ export type SubjectDiscoveryImportResult =
     /** As linhas que já existem e ficaram sem a origem, com o motivo. */
     notAffected: SubjectDiscoveryImportRow[];
     counts: SubjectDiscoveryImportCounts;
+    /**
+     * F4 (SDD 2026-10-12 §6.1-4, aditivo) — o grupo do Assunto carimbado nas
+     * keywords sem grupo deste envio. A de outro grupo não muda (D5): só é
+     * contada. Ausente quando o Assunto não tem grupo (ou sem a M1).
+     */
+    group?: { groupId: string; stamped: number; inOtherGroup: number };
   }
   | { ok: false; code: SubjectDiscoveryImportRefusalCode; reason: string };
 
@@ -567,13 +574,53 @@ async function runSubjectDiscoveryImport(input: {
     row.reason = `Não foi possível criar a keyword (${safeDatabaseErrorCode(insert.error)}).`;
   }
 
+  const group = subject.keywordId ? await stampSubjectGroup(supabase, brandId, actorUserId, subject.keywordId, rows) : null;
   return {
     ok: true,
     importRequestId: request.importRequestId,
     searchId: request.searchId,
     subject: { keywordId: subject.keywordId, status: subject.status, reason: subject.reason },
+    ...(group ? { group } : {}),
     rows,
     notAffected: rows.filter(row => SUBJECT_DISCOVERY_NOT_AFFECTED_OUTCOMES.includes(row.outcome)),
     counts: countRows(rows),
   };
+}
+
+/**
+ * F4 — A SUSTENTAÇÃO HERDA O GRUPO DO ASSUNTO (SDD 2026-10-12 §6.1-4).
+ *
+ * Só depois das escritas do envio, só nas keywords deste envio SEM grupo, pelo
+ * escritor único de `group_id` (`assignKeywordGroupWithCore`). A keyword que já
+ * está em outro grupo não muda (D5): é contada, para a tela avisar. O grupo é
+ * organização: nada de `analise_semantica`, status ou aprovação muda. Nunca
+ * derruba o import — sem a M1, sem grupo no Assunto ou com falha, devolve `null`.
+ */
+async function stampSubjectGroup(
+  client: SupabaseClient,
+  brandId: string,
+  actorUserId: string,
+  subjectKeywordId: string,
+  rows: readonly SubjectDiscoveryImportRow[],
+): Promise<{ groupId: string; stamped: number; inOtherGroup: number } | null> {
+  try {
+    const assunto = await client.from("minerador_keywords").select("id,group_id").eq("brand_id", brandId).eq("id", subjectKeywordId).is("deleted_at", null).maybeSingle();
+    const groupId = !assunto.error && assunto.data && typeof (assunto.data as { group_id?: unknown }).group_id === "string" ? (assunto.data as { group_id: string }).group_id : null;
+    if (!groupId) return null;
+    const ids = [...new Set(rows.filter(row => row.keywordId && ["created", "recorded", "already_recorded", "not_recorded_approval", "not_recorded_limit"].includes(row.outcome)).map(row => row.keywordId!))];
+    if (!ids.length) return { groupId, stamped: 0, inOtherGroup: 0 };
+    const atuais = new Map<string, string | null>();
+    for (let start = 0; start < ids.length; start += ID_CHUNK) {
+      const lidas = await client.from("minerador_keywords").select("id,group_id").eq("brand_id", brandId).in("id", ids.slice(start, start + ID_CHUNK)).is("deleted_at", null);
+      if (lidas.error) return null;
+      for (const row of (lidas.data || []) as Array<{ id: unknown; group_id?: unknown }>) atuais.set(String(row.id), typeof row.group_id === "string" ? row.group_id : null);
+    }
+    const semGrupo = ids.filter(id => atuais.has(id) && !atuais.get(id));
+    const inOtherGroup = ids.filter(id => atuais.get(id) && atuais.get(id) !== groupId).length;
+    if (!semGrupo.length) return { groupId, stamped: 0, inOtherGroup };
+    const etiqueta = await assignKeywordGroupWithCore({ brandId, actorUserId, keywordIds: semGrupo, groupId, keywordsClient: client, groupsClient: client });
+    return { groupId, stamped: etiqueta.ok ? etiqueta.moved.length : 0, inOtherGroup };
+  } catch {
+    return null;
+  }
 }

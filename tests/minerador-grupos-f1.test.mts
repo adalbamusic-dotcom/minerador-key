@@ -448,8 +448,8 @@ test("F1-19 · tela do Minerador: recorte por grupo só quando há filtro, chave
   assert.match(tela, /if \(!keywordGroups\.ready\) \{[\s\S]{0,400}fetchDataActiveKeyRef\.current = null;[\s\S]{0,300}setKeywords\(\[\]\)/, "troca de marca não deixa linha da outra marca na tela");
   assert.match(tela, /keywordGroups\.filter\.kind === "all" \? qualificationVersionCachePruneForListing\(loadedKeywords\.length\) : "loaded-entities"/, "carga recortada não poda o cache das outras keywords");
   assert.match(tela, /isEditorialGroupsSchemaMissing\(keywordsError\)[\s\S]{0,200}keywordGroups\.markUnavailable\(\)/);
-  assert.match(tela, /tabs: sectionTabsWithGroupSelector,/);
-  assert.match(tela, /const sectionTabsWithGroupSelector = useMemo\(\(\) => \(keywordGroups\.available\s*\?/, "seletor só com a migration; memo para não reciclar o registro da topbar");
+  assert.match(tela, /tabs: sectionTabs,\s*groupTag: groupTagButton,/, "2026-10-12 · o seletor é o botão-ícone ao lado do sino, fora das abas");
+  assert.match(tela, /const groupTagButton = useMemo\(\(\) => \(keywordGroups\.available\s*\?/, "seletor só com a migration; memo para não reciclar o registro da topbar");
   assert.match(tela, /EDITORIAL_GROUP_COLOR_CLASSES\[rowGroup\.color\]\.stripe/);
   assert.match(tela, /<EditorialGroupTag name=\{rowGroup\.name\} color=\{rowGroup\.color\}/);
   assert.doesNotMatch(tela, /border-l-group-\$\{|bg-group-\$\{/, "classe de cor nunca por interpolação");

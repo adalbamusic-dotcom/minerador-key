@@ -20,6 +20,9 @@ import { GOOGLE_ADS_DISCOVERY_LANGUAGES } from "@/lib/minerador/google-ads-disco
 import { subjectDiscoveryEstimate, subjectDiscoveryHasVolume } from "@/lib/minerador/subject-discovery-volume";
 import { deriveKgrVisualState, KGR_FULL_RANGE_LIMIT, kgrApplicabilityLabel } from "@/lib/minerador/kgr-applicability";
 import { importSubjectsWithCore, type SubjectImportChannel } from "@/lib/minerador/keyword-import-core";
+import { EDITORIAL_GROUP_COLORS } from "@/lib/editorial/editorial-groups";
+import { DECLARED_PLAN_ARTICLES_MAX, DECLARED_PLAN_ROLES, DECLARED_PLAN_SCOPE_MAX } from "@/lib/minerador/declared-plan";
+import { importDeclaredPlanWithCore } from "@/lib/minerador/declared-plan-import-core";
 import { KEYWORD_PAGE_TYPE_KEY, KEYWORD_PAGE_TYPE_STANCE_KEY, keywordPageTypeStance } from "@/lib/minerador/keyword-page-type";
 import { KEYWORD_SUBJECT_AT_KEY, KEYWORD_SUBJECT_KEY, KEYWORD_SUBJECT_ORIGIN_KEY } from "@/lib/minerador/keyword-subject";
 import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
@@ -62,7 +65,8 @@ import type { WriterMcpBrandAccess, WriterMcpPrincipal } from "./writer-mcp-prin
  * SDD: `docs/compartilhado/sdd-plataforma-para-agentes-mcp-2026-09-26.md` §3.4.
  *
  * Toda ferramenta que escreve chama o MESMO núcleo que a rota da tela chama —
- * `importSubjectsWithCore`, `runSubjectDiscoverySearch` com as portas de
+ * `importSubjectsWithCore`, `importDeclaredPlanWithCore` (plano do Silo),
+ * `runSubjectDiscoverySearch` com as portas de
  * `buildSubjectDiscoveryPorts`, `importSubjectDiscoveryWithCore`,
  * `createMineradorArquitetoHandoff`, `sendRadarToWriter`. Nenhuma regra de
  * negócio nasce aqui: o agente é mais um cliente das operações de domínio,
@@ -161,6 +165,34 @@ const confirmationInput = z.string().trim().min(3).max(500)
   .describe("As palavras do usuário aceitando esta ação, como ele escreveu no chat. Fica gravado na trilha de auditoria.");
 
 const asText = (value: unknown): PlatformToolResult => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
+
+/*
+ * O PLANO DO SILO PELO MCP (SDD 2026-10-12 §6.5, F4).
+ *
+ * O mesmo contrato da rota da tela (`/api/minerador/marcas/[brandId]/plans/import`):
+ * o texto colado OU o plano já estruturado, e o grupo escolhido (existente ou
+ * novo com nome e cor). As recusas de conteúdo (Pilar, ordem, principal sem
+ * volume igual ao Assunto) são do núcleo, iguais para a tela e para a IA.
+ */
+const DeclaredSiloPlanInput = z.object({
+  silo: z.object({
+    name: z.string().trim().min(1).max(200).describe("Nome do Silo. Nunca vira keyword."),
+    slug: z.string().trim().max(200).nullable().optional().describe("Slug da página do Silo, se o plano trouxer."),
+    objective: z.string().max(4000).nullable().optional(),
+  }).strict(),
+  articles: z.array(z.object({
+    order: z.number().int().min(1).max(99).describe("A ordem do artigo no plano (1 = primeiro)."),
+    subject: z.string().trim().min(1).max(400).describe("A frase do Assunto do artigo."),
+    principal: z.string().trim().max(400).nullable().optional().describe("A keyword principal declarada (fixa; aprova sem Volume)."),
+    role: z.enum(DECLARED_PLAN_ROLES).describe("Exatamente um Pilar no plano; os demais são Suporte."),
+    scope: z.string().max(DECLARED_PLAN_SCOPE_MAX * 2).describe(`A descrição do escopo do artigo, uma linha, até ${DECLARED_PLAN_SCOPE_MAX} caracteres.`),
+  }).strict()).min(1).max(DECLARED_PLAN_ARTICLES_MAX + 10),
+}).strict();
+
+const DeclaredPlanGroupInput = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("existing"), groupId: z.string().uuid() }).strict(),
+  z.object({ mode: z.literal("new"), name: z.string().max(200).nullable().optional(), color: z.enum(EDITORIAL_GROUP_COLORS) }).strict(),
+]).describe("O grupo do plano: um grupo existente da marca, ou um novo (nome opcional — sem ele, o nome do Silo — e uma das 5 cores).");
 
 /*
  * AS PERMISSÕES DAS LEITURAS SÃO AS DAS TELAS (R5).
@@ -763,6 +795,66 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
         channel: mcpChannel(access, requestId),
       });
       if (!result.ok) throw new PlatformToolFailure(result.code, { message: result.reason });
+      return result;
+    });
+  });
+
+  server.registerTool("declare_silo_plan", {
+    title: "Importar plano do Silo no Minerador",
+    description: [
+      "Use quando o usuário trouxer o plano de um Silo (nome, e por artigo: ordem, Assunto, keyword principal, papel Pilar/Suporte e descrição do escopo) e ACEITAR declará-lo no chat. É o botão 'Importar plano do Silo' do Minerador, pelo mesmo núcleo (importDeclaredPlanWithCore).",
+      "Envie o texto colado (text) OU o plano estruturado (plan), nunca os dois, e o grupo: existente (groupId) ou novo (nome opcional e cor: amarelo, azul, verde, lima ou laranja).",
+      "mode 'preview' não grava: devolve cada artigo com o estado do Assunto e da principal, as sobras de imports anteriores (que não fazem parte do plano), as sustentações e os impedimentos (blockers; com algum, canApply é false). Mostre a prévia ao usuário.",
+      "mode 'apply' exige userConfirmation (as palavras do aceite) e importRequestId (uuid; repita o mesmo ao tentar de novo o mesmo envio): cria ou acha o grupo, declara os Assuntos com o plano, importa as principais que faltam, etiqueta tudo com o grupo e devolve o resultado relido.",
+      "A principal declarada é fixa (aprova sem Volume; o Arquiteto não troca). Nada do grupo vira artigo solto. Sem custo.",
+    ].join(" "),
+    inputSchema: z.object({
+      brandId: brandIdInput,
+      mode: z.enum(["preview", "apply"]),
+      text: z.string().max(60000).optional().describe("O plano do Silo como o usuário colou (tabela ou texto)."),
+      plan: DeclaredSiloPlanInput.optional(),
+      group: DeclaredPlanGroupInput,
+      importRequestId: z.string().uuid().optional().describe("Obrigatório no apply. Repita o mesmo id ao tentar de novo o mesmo envio."),
+      userConfirmation: confirmationInput.optional(),
+    }),
+    annotations: write,
+  }, async ({ brandId, mode, text, plan, group, importRequestId, userConfirmation }) => {
+    if (mode === "apply" && !userConfirmation) {
+      return asText({ ok: false, code: "human_confirmation_required", message: "Declarar o plano do Silo é decisão humana (ADR-022). Mostre a prévia, peça o aceite e envie as palavras dele em userConfirmation." });
+    }
+    if (mode === "apply" && !importRequestId) {
+      return asText({ ok: false, code: "import_request_required", message: "O apply precisa de importRequestId (uuid). Gere um e repita o mesmo ao tentar de novo o mesmo envio." });
+    }
+    if (Boolean(text?.trim()) === Boolean(plan)) {
+      return asText({ ok: false, code: "plan_required", message: "Envie o texto colado (text) ou o plano estruturado (plan) — um dos dois." });
+    }
+    return call("declare_silo_plan", "minerador.write", { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, [{ module: "minerador", action: "edit" }], async ({ access, requestId }) => {
+      /*
+       * Os clientes, como nas outras escritas do MCP (declare_subjects): o
+       * operacional, depois de o invólucro conferir grant, escopo, Agência e
+       * permissão. As tabelas de grupo só aceitam escrita do servidor; a rota
+       * da tela usa `editorialGroupsClient()`, que É `getOperationalClient()`
+       * (lib/server/editorial-groups.ts). Aquele módulo não é importado aqui
+       * porque traz `next/server` (respostas HTTP da rota), que o MCP não usa.
+       */
+      const db = getOperationalClient();
+      const brand = await db.from("marcas").select("id,site_url").eq("id", access.brandId).maybeSingle();
+      if (brand.error) mapPersistenceError(brand.error);
+      const siteUrl = (brand.data as { site_url?: unknown } | null)?.site_url;
+      const result = await importDeclaredPlanWithCore({
+        brandId: access.brandId,
+        actorUserId: principal.actorId,
+        keywordsClient: db,
+        groupsClient: db,
+        mode,
+        text: plan ? null : text ?? null,
+        plan: plan ?? null,
+        group,
+        importRequestId: mode === "apply" ? importRequestId ?? null : null,
+        channel: mcpChannel(access, requestId),
+        brandSiteUrl: typeof siteUrl === "string" ? siteUrl : null,
+      });
+      if (!result.ok) throw new PlatformToolFailure(result.code, { message: result.reason, ...(result.blockers ? { blockers: result.blockers } : {}) });
       return result;
     });
   });

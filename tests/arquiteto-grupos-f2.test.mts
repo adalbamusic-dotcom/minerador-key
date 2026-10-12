@@ -374,7 +374,9 @@ test("formação e importação etiquetam DEPOIS de gravar, e só quando gravou"
 test("tela do Arquiteto · seletor no topo, faixa e etiqueta nas abas Artigos e Silos, filtro de tela, rodapé e prévia", () => {
   const tela = semComentarios(read("modules/arquiteto/arquiteto-workspace.tsx"));
   assert.match(tela, /useEditorialGroups\(\{ brandId: selectedBrandId \|\| null, enabled: sessionStatus === "authenticated", includeKeywords: true \}\)/);
-  assert.match(tela, /data-arquiteto-topbar-actions>\s*\{seletorDeGrupoDoArquiteto\}/);
+  // 2026-10-12 · o seletor é o botão-ícone de etiqueta ao lado do sino (groupTag), fora das ações.
+  assert.match(tela, /groupTag: seletorDeGrupoDoArquiteto,/);
+  assert.doesNotMatch(tela, /data-arquiteto-topbar-actions>\s*\{seletorDeGrupoDoArquiteto\}/);
   assert.match(tela, /<EditorialGroupSelector[\s\S]{0,400}menuFooter=/);
   assert.match(tela, /title=\{art\.keywordPrincipal\}>\{art\.keywordPrincipal\}<\/p><ArticleGroupRowTag group=\{grupoDaLinhaResumo\}/);
   assert.match(tela, /editorialGroupStripeClass\(grupoDaLinhaResumo\)/);
@@ -390,7 +392,7 @@ test("tela do Radar · seletor no topo, faixa e etiqueta na linha, rodapé, e a 
   const tela = semComentarios(read("modules/radar/radar-page.tsx"));
   // A tabela recebe a lista INTEIRA (o guarda do expansor procura nela) e o recorte vai como filtro de tela.
   assert.match(tela, /rows=\{pipeline\.radarItems\} rowFilter=\{filtroDoGrupo\} rowStripeClassName=\{row => editorialGroupStripeClass\(grupoDoItem\(row\)\)\}/);
-  assert.match(tela, /renderActions: renderTopbarActions, tabs: seletorDeGrupoDoRadar \}\}/);
+  assert.match(tela, /renderActions: renderTopbarActions, groupTag: seletorDeGrupoDoRadar \}\}/);
   assert.match(tela, /<ArticleGroupRowTag group=\{grupoDoItem\(row\)\}/);
   assert.match(tela, /renderBulkBarAside=\{rows => gruposDoRadar\.available \? <ArticleGroupMoveSelect/);
   assert.match(tela, /editorialGroupFilterMatches\(gruposDoRadar\.filter, gruposDoRadar\.articleGroupById\.get\(row\.articleId\)/);

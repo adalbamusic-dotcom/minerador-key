@@ -126,6 +126,7 @@ import { KeywordTableColumnResizeHandle, KeywordTableRowResizeHandle, useKeyword
 import { MineradorProcessAction } from "./minerador-process-action";
 import { DiscoverySourceControls, type DiscoverySourceControlsHandle, type DiscoverySourceResponse } from "./discovery/discovery-source-controls";
 import { DiscoverySourceTopbarActions } from "./discovery/discovery-source-topbar-actions";
+import { DeclaredPlanImportButton, DeclaredPlanImportDialog, type DeclaredPlanAppliedIds } from "./declared-plan-import-dialog";
 import { subjectSearchLinkHref } from "./discovery/subject-search-model";
 import {
   createAuthenticatedBrowserClient,
@@ -1070,7 +1071,12 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     const count = payload.summary.approved;
     showNotification("success", `${count} keyword(s) ${count === 1 ? "adicionada" : "adicionadas"} à Descoberta. Abra Descobrir Keywords para revisar.`);
   }, [showNotification]);
-  const discoverySourceActions = useMemo(() => <DiscoverySourceTopbarActions onManual={() => discoverySourceControlsRef.current?.openManual()} onCsv={() => discoverySourceControlsRef.current?.openCsv()} />, []);
+  // "Importar plano do Silo" (SDD 2026-10-12 §9.4) fica junto das entradas de import; sem os grupos (409), some.
+  const [planImportOpen, setPlanImportOpen] = useState(false);
+  const discoverySourceActions = useMemo(() => <>
+    <DiscoverySourceTopbarActions onManual={() => discoverySourceControlsRef.current?.openManual()} onCsv={() => discoverySourceControlsRef.current?.openCsv()} />
+    {keywordGroups.available ? <DeclaredPlanImportButton onClick={() => setPlanImportOpen(true)} /> : null}
+  </>, [keywordGroups.available]);
 
   const pushKeywordsHistory = (snapshot = keywords, label = "Alteração na planilha de keywords") => keywordHistory.capture(label, snapshot);
 
@@ -1596,6 +1602,29 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     });
     showNotification("success", `${result.createdIds.length} Assunto(s) criado(s) e ${result.declaredIds.length} keyword(s) existente(s) declarada(s) no Processador.`);
     await runAutomaticSubjectLogic(rows);
+  };
+
+  /**
+   * Plano do Silo declarado (a rota grava e relê; esta tela só relê). As
+   * principais voltam pela mesma leitura da listagem; os Assuntos seguem o
+   * caminho do import de Assuntos, inclusive a Lógica automática do Assunto.
+   */
+  const handleDeclaredPlanApplied = async (applied: DeclaredPlanAppliedIds) => {
+    void keywordGroups.refresh();
+    const principalIds = applied.principalIds.filter(id => !applied.subjectIds.includes(id));
+    if (principalIds.length > 0 && selectedBrandId) {
+      try {
+        const byId = await readCanonicalKeywordRows(principalIds, { source: fonteDaListagem });
+        const rows = principalIds.map(id => byId.get(id)).filter((row): row is KeywordItem => Boolean(row));
+        setKeywords(current => {
+          const known = new Set(current.map(item => item.id));
+          return [...rows.filter(row => !known.has(row.id)), ...current.map(item => byId.get(item.id) || item)];
+        });
+      } catch (error) {
+        showNotification("error", `O plano foi declarado, mas a tabela não conseguiu reler as principais: ${error instanceof Error ? error.message : "erro desconhecido"}. Recarregue a página.`, { code: "DECLARED_PLAN_READBACK_FAILED" });
+      }
+    }
+    await handleSubjectsImported({ createdIds: applied.createdSubjectIds, declaredIds: applied.subjectIds.filter(id => !applied.createdSubjectIds.includes(id)) });
   };
 
   const loadRecoverableKeywords = useCallback(async (brandId: string): Promise<KeywordItem[]> => {
@@ -3772,21 +3801,18 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
   };
 
-  // As abas de seção continuam no slot global; o seletor de grupo (F1) entra
-  // ao lado delas só quando a migration M1 existe. Memo: o registro da topbar
-  // não pode receber um elemento novo a cada render.
-  const sectionTabsWithGroupSelector = useMemo(() => (keywordGroups.available
-    ? <div className="flex min-w-0 items-center gap-1.5">
-      {sectionTabs}
-      <EditorialGroupSelector
-        groups={keywordGroups.groups}
-        ungroupedCount={keywordGroups.ungroupedCount}
-        filter={keywordGroups.filter}
-        onChange={keywordGroups.setFilter}
-        onCreate={keywordGroups.createGroup}
-      />
-    </div>
-    : sectionTabs), [sectionTabs, keywordGroups.available, keywordGroups.groups, keywordGroups.ungroupedCount, keywordGroups.filter, keywordGroups.setFilter, keywordGroups.createGroup]);
+  // O seletor de grupo (F1) é o botão-ícone de etiqueta ao lado do sino
+  // (groupTag da topbar global), só quando a migration M1 existe. Memo: o
+  // registro da topbar não pode receber um elemento novo a cada render.
+  const groupTagButton = useMemo(() => (keywordGroups.available
+    ? <EditorialGroupSelector
+      groups={keywordGroups.groups}
+      ungroupedCount={keywordGroups.ungroupedCount}
+      filter={keywordGroups.filter}
+      onChange={keywordGroups.setFilter}
+      onCreate={keywordGroups.createGroup}
+    />
+    : null), [keywordGroups.available, keywordGroups.groups, keywordGroups.ungroupedCount, keywordGroups.filter, keywordGroups.setFilter, keywordGroups.createGroup]);
 
   const { registerControls, unregisterControls } = useGlobalTopbarControlsRegistration();
   useEffect(() => {
@@ -3835,11 +3861,12 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
         <AppMenu active="minerador" countLabel={topbarVisibleKeywordCount > 0 ? `${topbarVisibleKeywordCount} termos` : undefined} />
       </div>,
-      tabs: sectionTabsWithGroupSelector,
+      tabs: sectionTabs,
+      groupTag: groupTagButton,
     };
     registerControls(globalTopbarControls);
     return () => unregisterControls(globalTopbarControls.moduleId);
-  }, [discoverySourceActions, organizeFilterSummary, organizeFilterTitle, organizeOpen, redoKeywords, searchQuery, sectionTabs, showNotification, topbarCanRedo, topbarCanUndo, topbarHistoryCount, topbarSelectedCount, topbarVisibleKeywordCount, undoKeywords, registerControls, unregisterControls, keywordHistory.entries.length, sectionTabsWithGroupSelector]);
+  }, [discoverySourceActions, organizeFilterSummary, organizeFilterTitle, organizeOpen, redoKeywords, searchQuery, sectionTabs, showNotification, topbarCanRedo, topbarCanUndo, topbarHistoryCount, topbarSelectedCount, topbarVisibleKeywordCount, undoKeywords, registerControls, unregisterControls, keywordHistory.entries.length, groupTagButton]);
 
   if (sessionStatus === "loading") {
     return (
@@ -3948,6 +3975,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       {/* Só o Processador passa `subjectEntry`: o select "Esta lista é"
           (Assunto / Keyword) não entra no Descobrir (SDD 2026-09-24, F1.3). */}
       <DiscoverySourceControls ref={discoverySourceControlsRef} brandRef={brandRef} preliminaryIntent="Informativa" preliminaryFunnel="TOFU" onComplete={handleDiscoverySourceComplete} subjectEntry onSubjectsImported={result => void handleSubjectsImported(result)} />
+      {planImportOpen && selectedBrandId && keywordGroups.available ? <DeclaredPlanImportDialog key={selectedBrandId} brandId={selectedBrandId} groups={keywordGroups.activeGroups} onClose={() => setPlanImportOpen(false)} onApplied={applied => void handleDeclaredPlanApplied(applied)} onUnavailable={() => { setPlanImportOpen(false); keywordGroups.markUnavailable(); }} /> : null}
 
       {/* Blocos opcionais acima da planilha (Organizar, prévia do Site,
           conferência manual, recuperação): juntos têm um teto e rolam por

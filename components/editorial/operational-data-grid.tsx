@@ -62,6 +62,8 @@ export interface OperationalDataGridTopbar<T extends { id: string }> {
    * precisa continuar disponível quando a superfície aberta não é uma planilha.
    */
   tabs?: React.ReactNode;
+  /** 2026-10-12 · botão-ícone de etiqueta do grupo, ao lado do sino (GlobalTopbarModuleControls.groupTag). */
+  groupTag?: React.ReactNode;
 }
 
 export interface OperationalDataGridProps<T extends { id: string }> {
@@ -216,7 +218,7 @@ export function OperationalDataGrid<T extends { id: string }>({ module, userId, 
   const topbarActions = topbar?.renderActions(topbarApi);
 
   return <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-divider bg-background" aria-label={`Planilha ${module}`}>
-    {topbar ? <OperationalDataGridTopbarBridge moduleId={topbar.moduleId} search={search} setSearch={setSearchValue} history={topbar.history} actions={topbarActions} tabs={topbar.tabs} /> : null}
+    {topbar ? <OperationalDataGridTopbarBridge moduleId={topbar.moduleId} search={search} setSearch={setSearchValue} history={topbar.history} actions={topbarActions} tabs={topbar.tabs} groupTag={topbar.groupTag} /> : null}
     <CompactSavedViews userId={userId} brandId={brandId} module={module} values={{ search, filters: JSON.stringify(filters), sort: JSON.stringify(sort), hidden: JSON.stringify([...hidden]), widths: JSON.stringify(widths), pageSize: String(pageSize), orderMode, manualOrder: JSON.stringify(manualOrder) }} onApply={applyLastConfiguration}/>
     {!topbar ? <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-divider bg-background p-2">
       {title && <div className="mr-2 min-w-36 shrink-0"><h1 className="text-[12px] font-bold uppercase tracking-wider text-foreground">{title}</h1>{description && <p className="max-w-56 truncate text-[12px] text-text-muted">{description}</p>}</div>}
@@ -245,7 +247,7 @@ export function OperationalDataGrid<T extends { id: string }>({ module, userId, 
   </section>;
 }
 
-function OperationalDataGridTopbarBridge({ moduleId, search, setSearch, history, actions, tabs }: {
+function OperationalDataGridTopbarBridge({ moduleId, search, setSearch, history, actions, tabs, groupTag }: {
   moduleId: string;
   search: string;
   setSearch: (value: string) => void;
@@ -253,6 +255,7 @@ function OperationalDataGridTopbarBridge({ moduleId, search, setSearch, history,
   actions: React.ReactNode;
   /** Navegação da área, quando o módulo tiver mais de uma. Vive fora das ações. */
   tabs?: React.ReactNode;
+  groupTag?: React.ReactNode;
 }) {
   const { registerControls, unregisterControls } = useGlobalTopbarControlsRegistration();
   const controls = useMemo<GlobalTopbarModuleControls>(() => ({
@@ -260,8 +263,9 @@ function OperationalDataGridTopbarBridge({ moduleId, search, setSearch, history,
     search: { getValue: () => search, setValue: setSearch },
     ...(history ? { history } : {}),
     ...(tabs !== undefined ? { tabs } : {}),
+    ...(groupTag !== undefined ? { groupTag } : {}),
     actions: <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto xl:overflow-visible" data-operational-topbar-actions>{actions}</div>,
-  }), [actions, history, moduleId, search, setSearch, tabs]);
+  }), [actions, groupTag, history, moduleId, search, setSearch, tabs]);
 
   useEffect(() => {
     registerControls(controls);

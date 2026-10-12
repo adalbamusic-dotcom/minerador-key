@@ -1,5 +1,73 @@
 # Estado atual — Minerador
 
+## Plano declarado do Silo (F3 = Fase A e F4 = Fase B) — 2026-10-12
+
+```text
+SDD = docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md (F3 e F4; dono: Minerador → Arquiteto) · ADR-022, emenda D1-bis
+MIGRATION_NOVA = 0 (jsonb aditivo em analise_semantica; grupo e silo_id já existem pela M1) · DEPLOY = F3 sozinha, depois F4
+ESCRITA_REMOTA = 0 · SQL_REMOTO = só SELECT de leitura · CHAMADA_PAGA = 0 · CHAMADA_IA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+Persistência remota (Supabase) pelo cliente do usuário (keywords, RLS) e pelo
+operacional (tabelas de grupo); nada foi gravado no banco nesta entrega.
+
+- **Contrato (F3, Fase A — só leitura):** `keyword_subject.plan` no Assunto
+  (`groupId`, `planVersion`, `order` 1..30, `role` Pilar/Suporte, `scope` até
+  1.200 caracteres numa linha, `declaredPrincipal`) e a marca recíproca
+  `keyword_declared_principal` (+ `_actor`, `_at`, `_history`) na principal.
+  Contrato em `lib/minerador/declared-plan.ts`; leitura única em
+  `resolveKeywordSubject(...).plan` e `resolveDeclaredPrincipal`
+  (`lib/minerador/keyword-subject.ts`); `KeywordDna.subject.plan` e
+  `KeywordDna.declaredPrincipal` opcionais e `.strict()`. O pacote antigo e o
+  novo passam no mesmo leitor; os writers de sempre preservam o plano
+  (`setKeywordSubject` sem `plan` não o apaga). O plano entra no hash do
+  pacote aprovado (é significado); o grupo não.
+- **D2-bis (F4):** a principal declarada aprova sem Volume e sem KGR, como o
+  Assunto; a Lógica continua exigida (`DECLARED_PRINCIPAL_APPROVAL_REASON`). A
+  trava do envio ao Arquiteto usa a mesma função.
+- **Importar plano do Silo (F4):** núcleo único
+  `lib/minerador/declared-plan-import-core.ts` (`importDeclaredPlanWithCore`,
+  prévia/gravação, idempotente pelo `plan_hash`), rota
+  `POST /api/minerador/marcas/[brandId]/plans/import`, tela
+  `modules/minerador/declared-plan-import-dialog.tsx` e ferramenta MCP
+  `declare_silo_plan` (mesmo núcleo). O parser aceita o texto que o dono cola
+  ("Silo N — …", "Nome:", "Slug:", "Objetivo:", "1. Título", "Artigo pilar •
+  Palavra-chave: …", descrição), a tabela `# | Assunto | Keyword principal |
+  Papel | Descrição`, numeração "1)"/"Artigo 2:"/"3 -", "Pilar" em linha
+  própria e rótulos colados; o que não entende vai para a prévia com o número
+  da linha. Recusas: sem artigos, mais de 30, sem nome do Silo, slug inválido,
+  0 ou 2+ Pilares, ordem/Assunto/principal repetidos, escopo ausente ou acima
+  de 1.200, principal igual ao Assunto sem Volume, Assunto de outro plano,
+  principal que é outro Assunto, principal publicada ou declarada em outro
+  Assunto. A prévia lista as sobras de imports anteriores (o nome do Silo
+  colado como keyword, a frase com "Palavra-chave:") como "não faz parte do
+  plano" — a lixeira é ato do dono (D9) — e quantos aprovados voltam a "Em
+  revisão" (R2). A gravação cria ou usa o grupo (`editorial_groups.plan`,
+  `plan_version`, `plan_hash`; grupo manual passa a `declared_plan`), declara
+  os Assuntos por `importSubjectsWithCore`, importa as principais que faltam
+  por `importKeywordsWithCore`, etiqueta Assuntos e principais e as
+  sustentações da Pesquisa por Assunto sem grupo (D5: a de outro grupo não
+  muda) por `assignKeywordGroupWithCore`, grava plano e marca na mesma passada
+  e só anuncia sucesso depois da releitura da reciprocidade.
+- **Pesquisa por Assunto:** `importSubjectDiscoveryWithCore` carimba o grupo do
+  Assunto nas keywords do envio sem grupo (`result.group`, aditivo; nunca
+  derruba o import). A melhoria do Arquiteto passa o próprio Assunto como
+  `subjectKeywordId` (a linha que gravava `null`).
+- **MCP:** o MCP usa o cliente operacional para as keywords (como
+  `declare_subjects`), depois de conferir escopo `minerador.write`, permissão
+  `minerador:edit` e o aceite do usuário no `apply`; a rota da tela usa o
+  cliente do usuário (RLS).
+- **Testes:** `tests/minerador-plano-declarado.test.mts` (parser com o texto
+  real, variações, sobras, recusas, núcleo com banco falso da WifiConecta,
+  isolamento entre marcas, idempotência),
+  `tests/minerador-plano-declarado-aprovacao.test.mts` (D2-bis, Fase A),
+  `tests/minerador-plano-declarado-tela.test.mts` (diálogo) e a lista fechada
+  de chamadores em `tests/minerador-assunto-dominio.test.mts`.
+- **Limites:** a homologação é do dono; o runbook da WifiConecta está na §11
+  da SDD. A SERP das principais sem volume (D2(a): parecer pelas sustentações)
+  não foi implementada nesta entrega.
+
 ## Grupos por cor no Minerador (F1) — 2026-10-12
 
 ```text
@@ -12,6 +80,8 @@ ESCRITA_REMOTA = 0 · SQL_REMOTO = só SELECT de leitura · CHAMADA_PAGA = 0 · 
 **Verificado no código e confirmado por teste. Validado manualmente: não.** A
 persistência é remota (Supabase), mas só existe depois que o dono aplicar a
 M1; até lá o recurso fica escondido e o Minerador lê exatamente como antes.
+
+- **2026-10-12 · etiqueta ao lado do sino:** o seletor largo saiu das abas e virou o botão-ícone de etiqueta imediatamente ao lado do sino (`groupTag` da topbar global; cinza = "Todos os grupos", colorido = grupo ativo; mesmo menu, URL e lembrança). Verificado no código e confirmado por teste (`tests/radar-grupos-etiqueta-topbar.test.mts`). Validado manualmente: não.
 
 - **Banco (M1, a aplicar):** `editorial_groups` (nome, cor, origem, status,
   plano do Silo para a F4, `lock_version`), `editorial_group_articles` (vazia

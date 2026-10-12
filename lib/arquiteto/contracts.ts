@@ -622,6 +622,12 @@ export const ProvisionalArticleGroupSchema = z.object({
   groupingReasons: z.array(ProvisionalGroupingReasonSchema).optional(),
   architectureStatus: ArticleArchitectureStatusSchema.optional(),
   kgrIdentity: ArticleKgrIdentitySchema.optional(),
+  /**
+   * F4 (SDD 2026-10-12 §6.2-5) — o artigo de um Assunto com PLANO DECLARADO:
+   * o papel vira `hierarchy` e o escopo vira `promise` no adapter. Opcional e
+   * aditivo: sem plano, o grupo e o ArticleDNA são os de sempre.
+   */
+  declaredPlan: z.object({ role: z.enum(["Pilar", "Suporte"]), scope: z.string().min(1).max(1200) }).strict().optional(),
 });
 
 export type ProvisionalArticleGroup = z.infer<typeof ProvisionalArticleGroupSchema>;

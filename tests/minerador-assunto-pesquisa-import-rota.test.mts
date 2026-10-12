@@ -62,7 +62,8 @@ test("estrutural: o núcleo não chama rede, provider nem IA", async () => {
   assert.doesNotMatch(core, /fetch\(/);
   assert.doesNotMatch(core, /from "[^"]*(dataforseo|google|serp|openai|anthropic|deepseek|ai-|llm)[^"]*"/i);
   const imports = [...core.matchAll(/from "([^"]+)"/g)].map(match => match[1]).sort();
-  assert.deepEqual(imports, ["./keyword-import-core.ts", "./keyword-subject.ts", "@supabase/supabase-js", "zod"]);
+  // F4 (SDD 2026-10-12 §6.1-4): o grupo do Assunto é carimbado pelo escritor único de group_id (sem rede).
+  assert.deepEqual(imports, ["./keyword-group-core.ts", "./keyword-import-core.ts", "./keyword-subject.ts", "@supabase/supabase-js", "zod"]);
 });
 
 test("estrutural: toda leitura e escrita do núcleo filtra pela marca", async () => {

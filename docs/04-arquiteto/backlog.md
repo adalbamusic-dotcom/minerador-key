@@ -1,3 +1,18 @@
+## Plano declarado do Silo no Arquiteto (F4) — 2026-10-12
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. SDD §18.1. **Validado manualmente: não.**
+
+- [x] Formação com a principal declarada fixa, sustentações da lista do Assunto e do grupo, nada solto (D6).
+- [x] Portaria `DECLARED_PLAN_PRESERVED`; papel → `hierarchy` e escopo → `promise` (adapter, Concluir e melhoria).
+- [x] Melhoria: `needsPrimary` falso com principal declarada; keyword nova ligada ao Assunto (`subjectKeywordId`).
+- [x] Pilar declarado no Silo como decisão humana (Silo ainda não consolidado); `editorial_groups.silo_id` na consolidação.
+- [x] "Retirar artigo do Silo" (aba Silos, Silo consolidado, rota e testes).
+- [ ] D2(a): parecer SERP do artigo pelas sustentações com volume quando a principal declarada não tem volume (hoje pede as 4 lentes da principal, pagas).
+- [ ] Trocar o Pilar de um Silo JÁ consolidado (D7 na WifiConecta: artigo 3 → artigo 1).
+- [ ] A mesa e `listArquitetoArtifacts` aplicarem o evento `rejected` às keywords do ArticleDNA (a keyword do artigo retirado voltar a "Keywords não agrupadas").
+- [ ] Aviso visível do plano na tela (selo "Plano declarado"/"Principal declarada" na linha e no cartão do Silo, §9.6) — hoje o plano aparece pelos motivos da formação e da melhoria.
+- [ ] Dono: homologar na tela e executar o runbook da §11 da SDD.
+
 ## Grupos por cor no Arquiteto e leitura por grupo (F2) — 2026-10-12
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**

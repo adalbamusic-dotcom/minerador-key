@@ -1,4 +1,6 @@
 import type { ArticleDNA, SiloDNA, SiloPage, VersionEnvelope } from "./contracts.ts";
+import type { DeclaredSiloPlan } from "../minerador/declared-plan.ts";
+import { applyDeclaredSiloIdentity, orderIdsByDeclaredPlan, resolveDeclaredSiloPlan, type DeclaredSiloPlanEntry } from "./silo-declared-plan.ts";
 
 type ArticleVersion = VersionEnvelope<ArticleDNA>;
 type ExistingSiloVersion = VersionEnvelope<SiloDNA>;
@@ -64,6 +66,24 @@ export type SiloWorkingCopy = {
     articleIds: string[];
     protectedFields: Array<"brand" | "url" | "slug" | "canonical">;
   };
+  /**
+   * F4 — o plano declarado valeu para esta cópia (SDD 2026-10-12 §6.2-6).
+   * Ausente = cópia sem plano, idêntica à de antes.
+   */
+  declaredPlan?: {
+    groupId: string;
+    planVersion: number;
+    pillarArticleId: string;
+    orderedArticleIds: string[];
+    reason: string;
+    objective: string | null;
+  };
+};
+
+/** O plano declarado que a formação pode receber: os Assuntos com plano e o Silo planejado de cada grupo. */
+export type SiloFormationDeclaredPlanInput = {
+  entries: readonly DeclaredSiloPlanEntry[];
+  groupPlans?: ReadonlyMap<string, DeclaredSiloPlan>;
 };
 
 export type SiloFormationResult = {
@@ -298,6 +318,8 @@ export function formSiloWorkingCopies(input: {
   existingSiloVersions?: readonly ExistingSiloVersion[];
   existingSiloPageVersions?: readonly ExistingSiloPageVersion[];
   reservedCandidates?: readonly ReservedSiloCandidate[];
+  /** F4 — opcional. Ausente: a saída é exatamente a de antes. */
+  declaredPlan?: SiloFormationDeclaredPlanInput | null;
 }): SiloFormationResult {
   const existing = [...(input.existingSiloVersions || [])].filter(version => version.payload.brandId === input.brandId);
   const pages = [...(input.existingSiloPageVersions || [])].filter(version => version.payload.brandId === input.brandId);
@@ -358,7 +380,9 @@ export function formSiloWorkingCopies(input: {
   }
 
   const candidateOnlyIds = reserved.filter(candidate => !copies.some(copy => copy.reservedCandidateIds.includes(candidate.id))).map(candidate => candidate.id);
-  return { workingCopies: copies, unassignedArticleIds: articles.filter(article => !assigned.has(article.payload.articleId)).map(article => article.payload.articleId), reservedCandidateOnlyIds: candidateOnlyIds };
+  const declared = input.declaredPlan;
+  const finais = declared ? copies.map(copy => applyDeclaredPlanToWorkingCopy(copy, articles, declared)) : copies;
+  return { workingCopies: finais, unassignedArticleIds: articles.filter(article => !assigned.has(article.payload.articleId)).map(article => article.payload.articleId), reservedCandidateOnlyIds: candidateOnlyIds };
 }
 
 /**
@@ -379,6 +403,79 @@ export function chooseSiloWorkingCopyPillar(copy: SiloWorkingCopy, articleId: st
     supportArticleIds: copy.articleReferences.map(reference => reference.articleId).filter(id => id !== articleId),
     articleReferences: copy.articleReferences.map(reference => ({ ...reference, role: reference.articleId === articleId ? "pillar_candidate" : "support", rationale: reference.articleId === articleId ? "Escolha humana de Pilar provisório; confirmação final pendente." : "Suporte provisório escolhido após ajuste humano." })),
     reasons: [...copy.reasons, "Pilar provisório alterado por decisão humana; nenhuma versão consolidada foi criada."],
+  };
+}
+
+/**
+ * F4 — O PILAR DECLARADO NO PLANO (SDD 2026-10-12 §6.2-6, D7).
+ *
+ * Quando todos os artigos da cópia são de Assuntos com plano do MESMO grupo e
+ * exatamente um foi declarado Pilar, a cópia nasce com esse Pilar — escolhido
+ * por `chooseSiloWorkingCopyPillar`, porque é decisão humana (a do plano), e não
+ * heurística. `pillarScores` continua calculado, só como informação. A ordem
+ * segue a do plano; nome e slug vêm do Silo planejado do grupo (slug só se a
+ * SiloPage não está publicada). Qualquer outra situação: a cópia de hoje, com
+ * o aviso em `reasons` (nunca em `conflicts`, que bloqueiam a consolidação).
+ */
+export function applyDeclaredPlanToWorkingCopy(
+  copy: SiloWorkingCopy,
+  articleVersions: readonly ArticleVersion[],
+  declared: SiloFormationDeclaredPlanInput,
+): SiloWorkingCopy {
+  const ids = copy.articleReferences.map(reference => reference.articleId);
+  const porId = new Map(articleVersions.map(version => [version.payload.articleId, version.payload]));
+  const resolucao = resolveDeclaredSiloPlan({
+    units: ids.map(articleId => {
+      const article = porId.get(articleId);
+      return {
+        ref: articleId,
+        principalKeywordId: article?.principalKeywordId ?? "",
+        keywordIds: article?.keywordReferences.map(reference => reference.keywordId) ?? [],
+        subjectKeywordId: article?.subject?.keywordId ?? null,
+      };
+    }),
+    entries: declared.entries,
+  });
+  if (!resolucao.applies) {
+    return resolucao.warnings.length ? { ...copy, reasons: [...copy.reasons, ...resolucao.warnings] } : copy;
+  }
+  const comPilar = orderSiloWorkingCopyByDeclaredPlan(chooseSiloWorkingCopyPillar(copy, resolucao.pillarRef), resolucao.orderedRefs);
+  const ordem = comPilar.articleReferences.map(reference => reference.articleId);
+  const plano = declared.groupPlans?.get(resolucao.groupId) ?? null;
+  const identidade = applyDeclaredSiloIdentity(
+    { name: comPilar.name, slug: comPilar.slug, protectedIdentity: false, publishedSlug: null },
+    plano,
+    { pagePublished: comPilar.publishedProtection.siloPageIds.length > 0 },
+  );
+  return {
+    ...comPilar,
+    name: identidade.name,
+    slug: identidade.slug,
+    siloPage: { ...comPilar.siloPage, slug: identidade.slug },
+    reasons: [...comPilar.reasons, `${resolucao.reason}.`],
+    declaredPlan: {
+      groupId: resolucao.groupId,
+      planVersion: resolucao.planVersion,
+      pillarArticleId: resolucao.pillarRef,
+      orderedArticleIds: ordem,
+      reason: resolucao.reason,
+      objective: plano?.objective ?? null,
+    },
+  };
+}
+
+/**
+ * A ordem de leitura do plano aplicada à cópia: o Pilar da cópia à frente e os
+ * demais na `order` declarada. Nenhum artigo entra nem sai; só a ordem muda.
+ */
+export function orderSiloWorkingCopyByDeclaredPlan(copy: SiloWorkingCopy, orderedRefs: readonly string[]): SiloWorkingCopy {
+  const pilar = copy.pillarCandidateArticleId;
+  const ordem = orderIdsByDeclaredPlan(copy.articleReferences.map(reference => reference.articleId), orderedRefs, pilar);
+  const posicao = new Map(ordem.map((articleId, index) => [articleId, index]));
+  return {
+    ...copy,
+    articleReferences: [...copy.articleReferences].sort((esquerda, direita) => (posicao.get(esquerda.articleId) ?? 0) - (posicao.get(direita.articleId) ?? 0)),
+    supportArticleIds: orderIdsByDeclaredPlan(copy.supportArticleIds, orderedRefs, null),
   };
 }
 

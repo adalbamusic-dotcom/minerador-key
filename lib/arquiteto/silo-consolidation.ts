@@ -98,6 +98,11 @@ export type SiloConsolidationInput = {
   pendingAiOperations?: number;
   serpAssessments?: readonly SerpFormationAssessment[];
   /**
+   * F4 — o objetivo do Silo declarado no plano do grupo (`editorial_groups.plan`,
+   * SDD 2026-10-12 §5.4). Opcional: ausente ou vazio, o objetivo é o de sempre.
+   */
+  declaredObjective?: string | null;
+  /**
    * Identidade publicada herdada de um Silo nascido do Site/Sitemap.
    *
    * Existe porque o candidato pode ter página no ar SEM SiloPage canônica
@@ -285,7 +290,7 @@ export function buildConsolidatedSiloDnaPayload(input: SiloConsolidationInput): 
     name: input.copy.name,
     centralEntity,
     centralEntitySource: previous?.centralEntitySource || "keyword_dna",
-    objective: previous?.objective?.trim() || base.objective,
+    objective: input.declaredObjective?.trim() || previous?.objective?.trim() || base.objective,
     audience: previous?.audience?.trim() || base.audience,
     macroProblem: previous?.macroProblem?.trim() || base.macroProblem,
     dominantIntent: input.territory?.macroIntent?.trim() || previous?.dominantIntent?.trim() || base.dominantIntent,

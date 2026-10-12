@@ -1,4 +1,5 @@
 import type { SitePageType } from "../marca/site-contracts.ts";
+import { readDeclaredArticlePlan, readDeclaredPrincipalMark, sameDeclaredArticlePlan, type DeclaredArticlePlan, type DeclaredPrincipalMark } from "./declared-plan.ts";
 
 /**
  * ASSUNTO — a terceira declaração do Vínculo (SDD 2026-09-24, F1.1).
@@ -60,6 +61,12 @@ export type KeywordSubjectDeclaration = {
   note: string | null;
   destinationUrl: string | null;
   destinationCheck: DestinationCheck | null;
+  /**
+   * PLANO DECLARADO (SDD 2026-10-12 §5.3, F3 = Fase A). Opcional: ausente é o
+   * Assunto sem plano, com parse e hash de sempre. Só o núcleo do plano
+   * (`declared-plan-import-core.ts`) o grava, pelo `setKeywordSubject`.
+   */
+  plan?: DeclaredArticlePlan;
 };
 
 export type KeywordSubjectResolution = {
@@ -67,6 +74,8 @@ export type KeywordSubjectResolution = {
   note: string | null;
   destinationUrl: string | null;
   destinationCheck: DestinationCheck | null;
+  /** O artigo do plano declarado; `null` sem plano ou com plano malformado (nunca derruba a leitura). */
+  plan: DeclaredArticlePlan | null;
   /** Declarado sem nota: a coluna marca "Assunto sem nota" até o humano completar. */
   noteMissing: boolean;
   actorId: string | null;
@@ -82,6 +91,8 @@ export type KeywordSubjectHistoryEntry = {
   actorId: string;
   changedAt: string;
   origin: KeywordSubjectOrigin;
+  /** Só quando a mudança envolveu o plano declarado (F4): o resumo, sem o escopo. */
+  plan?: { groupId: string; planVersion: number; order: number; role: string; declaredPrincipalKeywordId: string | null } | null;
 };
 
 export type KeywordSubjectRefusalCode =
@@ -89,7 +100,8 @@ export type KeywordSubjectRefusalCode =
   | "NOTE_TOO_LONG"
   | "NOTE_MULTILINE"
   | "DESTINATION_UNCHECKED"
-  | "ORIGIN_INVALID";
+  | "ORIGIN_INVALID"
+  | "PLAN_INVALID";
 
 export type KeywordSubjectWriteResult =
   | { ok: true; semantic: Record<string, unknown>; changed: boolean }
@@ -138,6 +150,7 @@ const UNDECLARED: KeywordSubjectResolution = {
   note: null,
   destinationUrl: null,
   destinationCheck: null,
+  plan: null,
   noteMissing: false,
   actorId: null,
   declaredAt: null,
@@ -154,6 +167,7 @@ export function resolveKeywordSubject(semantic: Semantic): KeywordSubjectResolut
     note,
     destinationUrl: text(record.destinationUrl),
     destinationCheck: readDestinationCheck(record.destinationCheck),
+    plan: readDeclaredArticlePlan(record.plan),
     noteMissing: note === null,
     actorId: text(semantic?.[KEYWORD_SUBJECT_ACTOR_KEY]),
     declaredAt: text(semantic?.[KEYWORD_SUBJECT_AT_KEY]),
@@ -214,14 +228,24 @@ export type SetKeywordSubjectInput = {
   actorId: string;
   changedAt: string;
   origin: KeywordSubjectOrigin;
+  /**
+   * Plano declarado (F4). `undefined` preserva o plano gravado (os writers de
+   * sempre não o apagam); `null` retira; um valor grava. Só o núcleo do plano
+   * passa este campo.
+   */
+  plan?: DeclaredArticlePlan | null;
 };
+
+function planSummary(plan: DeclaredArticlePlan | null): KeywordSubjectHistoryEntry["plan"] {
+  return plan ? { groupId: plan.groupId, planVersion: plan.planVersion, order: plan.order, role: plan.role, declaredPrincipalKeywordId: plan.declaredPrincipal?.keywordId ?? null } : null;
+}
 
 /**
  * Declara o Assunto, ou troca nota e destino de uma declaração existente.
  *
- * `changed: false` quando a declaração já existe com a mesma nota e o mesmo
- * destino — reimportar ou repetir o lote não regrava nada. Uma nova
- * conferência do catálogo, sozinha, não é mudança.
+ * `changed: false` quando a declaração já existe com a mesma nota, o mesmo
+ * destino e o mesmo plano — reimportar ou repetir o lote não regrava nada.
+ * Uma nova conferência do catálogo, sozinha, não é mudança.
  */
 export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectInput): KeywordSubjectWriteResult {
   const current = { ...(semantic || {}) };
@@ -238,7 +262,12 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
   }
 
   const previous = resolveKeywordSubject(current);
-  if (previous.declared && previous.note === note.note && previous.destinationUrl === destinationUrl) {
+  let plan: DeclaredArticlePlan | null = previous.plan;
+  if (input.plan !== undefined) {
+    plan = input.plan === null ? null : readDeclaredArticlePlan(input.plan);
+    if (input.plan !== null && !plan) return refuse(current, "PLAN_INVALID", "O plano declarado do Assunto não fecha o contrato (ordem, papel, escopo de até 1.200 caracteres numa linha, principal).");
+  }
+  if (previous.declared && previous.note === note.note && previous.destinationUrl === destinationUrl && sameDeclaredArticlePlan(previous.plan, plan)) {
     return { ok: true, semantic: current, changed: false };
   }
 
@@ -251,12 +280,14 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
     actorId: input.actorId.trim(),
     changedAt: input.changedAt,
     origin: input.origin,
+    ...(input.plan !== undefined || !sameDeclaredArticlePlan(previous.plan, plan) ? { plan: planSummary(plan) } : {}),
   });
   const declaration: KeywordSubjectDeclaration = {
     declared: true,
     note: note.note,
     destinationUrl,
     destinationCheck,
+    ...(plan ? { plan } : {}),
   };
   return {
     ok: true,
@@ -307,4 +338,102 @@ export function withdrawKeywordSubject(
       [KEYWORD_SUBJECT_HISTORY_KEY]: history,
     },
   };
+}
+
+/* ========================================================================== */
+/* PRINCIPAL DECLARADA NO PLANO (SDD 2026-10-12 §5.3; ADR-022, emenda D1-bis) */
+/* ========================================================================== */
+
+/**
+ * A marca recíproca da principal declarada, no padrão de chaves do Assunto:
+ *
+ *   keyword_declared_principal          { subjectKeywordId, groupId, planVersion } | null
+ *   keyword_declared_principal_actor    auth.users.id
+ *   keyword_declared_principal_at       ISO 8601
+ *   keyword_declared_principal_history  append-only
+ *
+ * O Assunto aponta para a principal (`keyword_subject.plan.declaredPrincipal`)
+ * e a principal aponta de volta, gravados pelo MESMO núcleo na mesma operação.
+ * Divergência vira conflito visível ("principal declarada sem reciprocidade"),
+ * nunca correção silenciosa. Entra no hash do pacote aprovado (é significado).
+ */
+export const KEYWORD_DECLARED_PRINCIPAL_KEY = "keyword_declared_principal" as const;
+export const KEYWORD_DECLARED_PRINCIPAL_ACTOR_KEY = "keyword_declared_principal_actor" as const;
+export const KEYWORD_DECLARED_PRINCIPAL_AT_KEY = "keyword_declared_principal_at" as const;
+export const KEYWORD_DECLARED_PRINCIPAL_HISTORY_KEY = "keyword_declared_principal_history" as const;
+
+export const KEYWORD_DECLARED_PRINCIPAL_LABEL = "Principal declarada" as const;
+
+export type DeclaredPrincipalResolution = {
+  mark: DeclaredPrincipalMark | null;
+  actorId: string | null;
+  declaredAt: string | null;
+};
+
+/** A leitura única da marca. Valor malformado não vira principal declarada. */
+export function resolveDeclaredPrincipal(semantic: Semantic): DeclaredPrincipalResolution {
+  const mark = readDeclaredPrincipalMark(semantic?.[KEYWORD_DECLARED_PRINCIPAL_KEY]);
+  return mark
+    ? { mark, actorId: text(semantic?.[KEYWORD_DECLARED_PRINCIPAL_ACTOR_KEY]), declaredAt: text(semantic?.[KEYWORD_DECLARED_PRINCIPAL_AT_KEY]) }
+    : { mark: null, actorId: null, declaredAt: null };
+}
+
+type DeclaredPrincipalHistoryEntry = { previous: DeclaredPrincipalMark | null; next: DeclaredPrincipalMark | null; actorId: string; changedAt: string };
+
+const samePrincipalMark = (left: DeclaredPrincipalMark | null, right: DeclaredPrincipalMark | null) =>
+  (!left && !right) || Boolean(left && right && left.subjectKeywordId === right.subjectKeywordId && left.groupId === right.groupId && left.planVersion === right.planVersion);
+
+/**
+ * Grava (ou retira, com `mark: null`) a marca de principal declarada. Mesma
+ * marca = `changed: false`. O ator é `auth.users.id`; a IA nunca declara.
+ */
+export function setDeclaredPrincipal(
+  semantic: Semantic,
+  input: { mark: DeclaredPrincipalMark | null; actorId: string; changedAt: string },
+): KeywordSubjectWriteResult {
+  const current = { ...(semantic || {}) };
+  if (!isKeywordSubjectActorId(input.actorId)) {
+    return refuse(current, "ACTOR_REQUIRED", "Declarar a principal do plano exige o usuário autenticado (auth.users.id).");
+  }
+  const next = input.mark === null ? null : readDeclaredPrincipalMark(input.mark);
+  if (input.mark !== null && !next) return refuse(current, "PLAN_INVALID", "A marca de principal declarada não fecha o contrato (Assunto, grupo e versão do plano).");
+  const previous = resolveDeclaredPrincipal(current).mark;
+  if (samePrincipalMark(previous, next)) return { ok: true, semantic: current, changed: false };
+  const history = Array.isArray(current[KEYWORD_DECLARED_PRINCIPAL_HISTORY_KEY])
+    ? [...(current[KEYWORD_DECLARED_PRINCIPAL_HISTORY_KEY] as DeclaredPrincipalHistoryEntry[])]
+    : [];
+  history.push({ previous, next, actorId: input.actorId.trim(), changedAt: input.changedAt });
+  return {
+    ok: true,
+    changed: true,
+    semantic: {
+      ...current,
+      [KEYWORD_DECLARED_PRINCIPAL_KEY]: next,
+      [KEYWORD_DECLARED_PRINCIPAL_ACTOR_KEY]: input.actorId.trim(),
+      [KEYWORD_DECLARED_PRINCIPAL_AT_KEY]: input.changedAt,
+      [KEYWORD_DECLARED_PRINCIPAL_HISTORY_KEY]: history,
+    },
+  };
+}
+
+/**
+ * A reciprocidade conferida na releitura: o plano do Assunto aponta para a
+ * principal e a principal aponta de volta para o Assunto, no mesmo grupo e na
+ * mesma versão do plano.
+ */
+export function declaredPrincipalReciprocity(input: {
+  subjectKeywordId: string;
+  subjectSemantic: Semantic;
+  principalKeywordId: string;
+  principalSemantic: Semantic;
+}): { ok: true } | { ok: false; reason: string } {
+  const plan = resolveKeywordSubject(input.subjectSemantic).plan;
+  const mark = resolveDeclaredPrincipal(input.principalSemantic).mark;
+  if (!plan || plan.declaredPrincipal?.keywordId !== input.principalKeywordId) {
+    return { ok: false, reason: "O Assunto não aponta para esta principal declarada." };
+  }
+  if (!mark || mark.subjectKeywordId !== input.subjectKeywordId || mark.groupId !== plan.groupId || mark.planVersion !== plan.planVersion) {
+    return { ok: false, reason: "Principal declarada sem reciprocidade: a principal não aponta de volta para o Assunto deste plano." };
+  }
+  return { ok: true };
 }

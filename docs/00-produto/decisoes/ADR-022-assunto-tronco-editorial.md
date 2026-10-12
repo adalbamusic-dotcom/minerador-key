@@ -52,6 +52,38 @@ KGR, volume principal e intenção dominante. Quando há Assunto declarado, ele 
 o fundamento do artigo e o destino da virada, e a principal é a âncora de busca
 que leva o leitor até lá.
 
+### Emenda D1-bis — a principal declarada no plano do Silo (2026-10-12)
+
+- **Status:** Aceita pelo dono do produto em 2026-10-12 (D1 da §17 da SDD
+  `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md`). Escrita na
+  F3; vale a partir da F4.
+- **O que muda no item 1 (D1).** Quando o humano declara o plano do Silo, cada
+  artigo do plano pode trazer uma **principal declarada**: a keyword que ele
+  escolheu para a cabeceira do artigo. Ela é **fixa**: o Arquiteto não roda a
+  sugestão de principal (`suggestPrincipal`) nesse artigo, a melhoria não a
+  troca por uma candidata com mais volume, e o Radar não a substitui. Slug e H1
+  saem dela, mesmo **sem volume medido**: o KGR fica "não aplicável" e o volume
+  aparece como "sem medição" até o Redator (risco R1 da SDD, aceito pelo dono).
+- **O que muda no item 2 (D2) — D2-bis.** A principal declarada se aprova no
+  Minerador **sem Volume e sem KGR**, como o Assunto; a Lógica continua
+  exigida. A exceção vale pela marca recíproca
+  `analise_semantica.keyword_declared_principal`, gravada só pelo núcleo do
+  plano, e a mesma função decide a tela, o servidor e a trava de envio.
+- **O que não muda.** O Assunto continua não sendo principal sem Volume
+  validado (Q7): uma principal declarada igual à frase do Assunto só vale com
+  Volume validado. O Assunto continua tronco, fora das seis keywords. A
+  declaração continua humana, com ator e data; a IA só propõe pelo MCP e grava
+  com o aceite do usuário no chat.
+- **Onde mora.** O artigo do plano (ordem, papel Pilar/Suporte, escopo de até
+  1.200 caracteres, principal declarada) fica em `keyword_subject.plan` do
+  Assunto e a marca recíproca em `keyword_declared_principal` da principal —
+  as duas dentro do pacote aprovado (hash). O Silo planejado (nome, slug,
+  objetivo) fica no grupo editorial (`editorial_groups.plan`), fora do hash.
+- **Mudança de contrato em duas fases.** A Fase A (F3) só ensina os leitores
+  (`KeywordDna.subject.plan` e `KeywordDna.declaredPrincipal`, opcionais e
+  `.strict()`); a Fase B (F4) passa a gravar. Depois do deploy da Fase A,
+  nenhum rollback volta para antes dela.
+
 ## Consequências
 
 - Um tema sem demanda pode orientar artigos sem inventar volume nem distorcer
