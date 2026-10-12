@@ -63,9 +63,65 @@ export const LinkAnchorProposalSchema = z.object({
 }).strict();
 export type LinkAnchorProposal = z.infer<typeof LinkAnchorProposalSchema>;
 
+/**
+ * ===== LOTE DA IA DE ÂNCORAS — 40 CONEXÕES E 40 PÁGINAS POR CHAMADA =====
+ *
+ * O esqueleto de um Silo com N artigos tem 2 + 3 × (N − 1) conexões
+ * (`buildStructuralLinkConnections`): 20 com 7 artigos, 41 com 14, 89 com 30.
+ * Com o Silo amplo (D3 do dono, 2026-10-12: até 30 artigos) um pedido só
+ * passava do teto da rota a partir de 14 artigos e era recusado inteiro — e o
+ * teto existe por orçamento de resposta (cada conexão devolve até oito
+ * conceitos com motivo), não por gosto. Por isso a tela divide em lotes com
+ * `batchLinkAnchorRequests`, e a rota e a resposta usam as MESMAS constantes.
+ */
+export const LINK_ANCHOR_MAX_CANDIDATES_PER_CALL = 40;
+export const LINK_ANCHOR_MAX_UNITS_PER_CALL = 40;
+
 export const LinkAnchorResponseSchema = z.object({
-  proposals: z.array(LinkAnchorProposalSchema).min(1).max(40),
+  proposals: z.array(LinkAnchorProposalSchema).min(1).max(LINK_ANCHOR_MAX_CANDIDATES_PER_CALL),
 }).strict();
+
+/**
+ * Divide o pedido de âncoras em lotes que a rota aceita.
+ *
+ * Mantém a ordem das conexões; cada lote leva só as páginas que as suas
+ * conexões citam (no máximo `maxUnits`) e no máximo `maxCandidates` conexões.
+ * Conexão que cita página ausente fica fora — a rota a descartaria do mesmo
+ * jeito, e mandá-la sozinha podia gerar lote com menos de duas páginas.
+ * Domínio puro: não chama a rota nem a IA.
+ */
+export function batchLinkAnchorRequests<
+  Unit extends { ref: string },
+  Candidate extends { sourceRef: string; targetRef: string },
+>(
+  units: readonly Unit[],
+  candidates: readonly Candidate[],
+  limits: { maxCandidates?: number; maxUnits?: number } = {},
+): Array<{ units: Unit[]; candidates: Candidate[] }> {
+  const maxCandidates = Math.max(1, limits.maxCandidates ?? LINK_ANCHOR_MAX_CANDIDATES_PER_CALL);
+  const maxUnits = Math.max(2, limits.maxUnits ?? LINK_ANCHOR_MAX_UNITS_PER_CALL);
+  const unitByRef = new Map(units.map(unit => [unit.ref, unit]));
+  const ordemDe = new Map(units.map((unit, index) => [unit.ref, index]));
+  const lotes: Array<{ refs: Set<string>; candidates: Candidate[] }> = [];
+  let atual: { refs: Set<string>; candidates: Candidate[] } | null = null;
+  for (const candidate of candidates) {
+    if (!unitByRef.has(candidate.sourceRef) || !unitByRef.has(candidate.targetRef) || candidate.sourceRef === candidate.targetRef) continue;
+    const novas = [candidate.sourceRef, candidate.targetRef].filter(ref => !atual?.refs.has(ref));
+    if (!atual || atual.candidates.length >= maxCandidates || atual.refs.size + novas.length > maxUnits) {
+      atual = { refs: new Set(), candidates: [] };
+      lotes.push(atual);
+    }
+    atual.refs.add(candidate.sourceRef);
+    atual.refs.add(candidate.targetRef);
+    atual.candidates.push(candidate);
+  }
+  return lotes.map(lote => ({
+    units: [...lote.refs]
+      .sort((esquerda, direita) => (ordemDe.get(esquerda) ?? 0) - (ordemDe.get(direita) ?? 0))
+      .map(ref => unitByRef.get(ref) as Unit),
+    candidates: lote.candidates,
+  }));
+}
 
 /* ------------------------- os fatos que ela recebe ----------------------- */
 

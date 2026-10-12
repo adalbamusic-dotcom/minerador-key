@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  LINK_ANCHOR_MAX_CANDIDATES_PER_CALL,
+  LINK_ANCHOR_MAX_UNITS_PER_CALL,
   LINK_ANCHOR_SYSTEM_PROMPT,
   LinkAnchorResponseSchema,
   buildLinkAnchorPrompt,
@@ -52,13 +54,14 @@ const UnitSchema = z.object({
 const RequestSchema = z.object({
   brandId: z.string().uuid(),
   siloId: z.string().min(1),
-  units: z.array(UnitSchema).min(2).max(40),
+  // Lote: a tela divide Silos grandes com `batchLinkAnchorRequests` (D3, 2026-10-12).
+  units: z.array(UnitSchema).min(2).max(LINK_ANCHOR_MAX_UNITS_PER_CALL),
   candidates: z.array(z.object({
     sourceRef: z.string().min(1),
     targetRef: z.string().min(1),
     relationType: InternalLinkGraphRelationTypeSchema,
     structuralReason: z.string().min(1),
-  }).strict()).min(1).max(40),
+  }).strict()).min(1).max(LINK_ANCHOR_MAX_CANDIDATES_PER_CALL),
 }).strict();
 
 /**

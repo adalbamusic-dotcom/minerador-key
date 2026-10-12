@@ -154,7 +154,8 @@ test("G/H · leitura e F5 não chamam provider", () => {
   }
   // O carregamento do Perfil reidrata a partir do artifact, não da sessão.
   // O terceiro argumento só escolhe a poda do cache de versões imutáveis (E8).
-  assert.ok(workspace.includes("const persistedQualifications = await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)), qualificationVersionCachePruneForListing(loadedKeywords.length))"));
+  // 2026-10-12 (F1 dos grupos): com grupo ativo a carga é recorte, e a poda só alcança o que carregou.
+  assert.ok(workspace.includes("const persistedQualifications = await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)), keywordGroups.filter.kind === \"all\" ? qualificationVersionCachePruneForListing(loadedKeywords.length) : \"loaded-entities\")"));
   assert.ok(!workspace.includes('localStorage.setItem("semanticQualifications'));
   assert.ok(!workspace.includes('sessionStorage.setItem("semanticQualifications'));
 });

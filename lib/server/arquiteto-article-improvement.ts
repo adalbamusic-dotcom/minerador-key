@@ -46,6 +46,8 @@ import { createGoogleAdsKeywordAccount } from "@/lib/google/ads/account";
 import { generateGoogleAdsKeywordIdeas } from "@/lib/google/ads/keyword-ideas";
 import type { GoogleAdsKeywordIdeasInput } from "@/lib/google/ads/contracts";
 import { stableUuid } from "./arquiteto-published-reinforcement";
+import { improvementAiUsageKey, improvementInputsFingerprint, improvementReuseSeed, IMPROVEMENT_DISCOVERY_REQUEST_LIMIT, IMPROVEMENT_REUSE_WINDOW_MS, type ImprovementReusableRun } from "@/lib/arquiteto/article-improvement-reuse";
+import type { GoogleAdsDiscoveryUsageKeySuffix } from "@/lib/minerador/google-ads-discovery-usage";
 
 const refusal = (message: string) => new PipelineRuntimeError("CONFLICT", message, 409);
 const SUBJECT_TYPE = "article_improvement_run";
@@ -70,13 +72,25 @@ export type ImprovementRun = {
   collect?: { doneGroupIds: string[]; remaining: number; reservedRemaining: number; phase: "collect" | "refresh"; totalGroups?: number };
   /** A leitura editorial da IA na lista: feita uma vez no prepare e reaproveitada (nunca repetida) no collect. */
   editorialAi?: ImprovementEditorialAi;
+  /** Impressão digital dos insumos (alvos, fontes, lista): igual = reaproveita IA, medições e busca (2026-10-12). */
+  inputsHash?: string;
+  /** A execução de onde vieram a leitura da IA e a busca, sem chamada nova. */
+  reusedFromRunId?: string | null;
+  /** Busca nova no Google Ads: só sob pedido explícito; os alvos sem proposta ficam à vista para o pedido. */
+  discovery?: { requested: boolean; gapTargetIds: string[]; requests: number };
 };
+/** Uma chamada que custa ou conta cota, para `integration_usage_events`. */
+export type ImprovementUsageEvent =
+  | { kind: "editorial_ai"; runId: string; resultStatus: "succeeded" | "failed"; errorCode: string | null; targets: number; listSize: number }
+  | { kind: "google_ads_discovery"; runId: string; resultStatus: "succeeded" | "failed"; errorCode: string | null; suffix: GoogleAdsDiscoveryUsageKeySuffix; providerReference: string | null; receivedCount: number | null };
 export { ArticleImprovementRequestSchema } from "@/lib/arquiteto/article-improvement-request";
 import type { ArticleImprovementRequest } from "@/lib/arquiteto/article-improvement-request";
 type ContextResolver = (module: string, action: string) => Promise<PipelineContext>;
 /** A IA da leitura editorial (injetável; ausente = IA desligada, a jornada segue pelas regras). */
 export type ImprovementEditorialAiCall = (prompt: { system: string; user: string; timeoutMs: number }) => Promise<unknown>;
 export type ImprovementRuntime = { context: PipelineContext; authorize: ContextResolver; editorialAi?: ImprovementEditorialAiCall; editorialAiTimeoutMs?: number;
+  /** Grava o uso da IA e da busca no registro de uso (injetável; ausente = não registra). */
+  recordUsage?: (event: ImprovementUsageEvent) => Promise<void>;
   /** Prazo (desde o início da requisição) para começar a ler o parecer de uma composição; testes encurtam. */
   compositionDeadlineMs?: number };
 
@@ -256,6 +270,19 @@ function editorialAiFailureMessage(error: unknown): string {
  * chamada em lote por execução; a resposta fica no run e o collect só a relê.
  * Falha, tempo esgotado ou IA desligada: um aviso e a jornada segue pelas regras.
  */
+/**
+ * Registro de uso (2026-10-12): a IA e a busca no Google Ads da melhoria não
+ * apareciam em `integration_usage_events`. O registro não derruba a jornada —
+ * a chamada já aconteceu —, mas a falha dele fica dita na execução.
+ */
+async function recordImprovementUsage(runtime: ImprovementRuntime, run: ImprovementRun, event: ImprovementUsageEvent) {
+  if (!runtime.recordUsage) return;
+  try { await runtime.recordUsage(event); }
+  catch {
+    const aviso = "O registro de uso de uma chamada desta preparação não foi confirmado (a chamada aconteceu).";
+    if (!run.notices.includes(aviso)) run.notices.push(aviso);
+  }
+}
 async function readEditorialAi(runtime: ImprovementRuntime, run: ImprovementRun, ranking: Record<string, boolean | null>) {
   if (run.editorialAi) return;
   const eligible = improvementAiEligibleTargets(run.targets, run.proposals).length;
@@ -272,7 +299,15 @@ async function readEditorialAi(runtime: ImprovementRuntime, run: ImprovementRun,
     const timeoutMs = runtime.editorialAiTimeoutMs ?? IMPROVEMENT_AI_TIMEOUT_MS;
     // O provider aborta no limite; a corrida garante o mesmo limite para qualquer implementação injetada.
     const prompt = buildImprovementAiPrompt({ targets, list, keywords: run.keywords, ranking });
-    const raw = await withDeadline(runtime.editorialAi({ system: prompt.system, user: prompt.user, timeoutMs }), timeoutMs + 2000);
+    let raw: unknown;
+    try { raw = await withDeadline(runtime.editorialAi({ system: prompt.system, user: prompt.user, timeoutMs }), timeoutMs + 2000); }
+    catch (error) {
+      // A chamada saiu: tempo esgotado ou recusa do provider também ficam no registro de uso.
+      const code = error && typeof error === "object" ? String((error as { code?: unknown }).code ?? "") : "";
+      await recordImprovementUsage(runtime, run, { kind: "editorial_ai", runId: run.runId, resultStatus: "failed", errorCode: /^[A-Za-z0-9_-]{1,80}$/.test(code) ? code : "ARTICLE_IMPROVEMENT_AI_FAILED", targets: targets.length, listSize: list.length });
+      throw error;
+    }
+    await recordImprovementUsage(runtime, run, { kind: "editorial_ai", runId: run.runId, resultStatus: "succeeded", errorCode: null, targets: targets.length, listSize: list.length });
     const checked = validateImprovementAiPicks(raw, { targets, keywords: run.keywords, listIds: list.map(k => k.id), aliases: prompt.aliases });
     run.editorialAi = editorialAiRecord({ ...base, status: "answered", picks: checked.picks, rejected: checked.rejected });
     if (checked.rejected.length) run.notices.push(`Leitura da IA: ${checked.rejected.length} sugestão(ões) recusada(s) pelas regras do código (formato, id fora da lista, sem volume, já publicada, de outro artigo, contradiz o slug ou a restrição do tema, outro público ou nicho, sem o núcleo do assunto, cabeça genérica ou mais de 3 por alvo). Veja cada recusa em “Sugestões da IA recusadas”.`);
@@ -322,21 +357,32 @@ async function measureOldVolumes(context: PipelineContext, run: ImprovementRun) 
   }
 }
 
-async function discover(context: PipelineContext, targets: ImprovementTarget[], existing: ImprovementKeyword[], notices: string[], budgetMs = 35000) {
+async function discover(runtime: ImprovementRuntime, run: ImprovementRun, targets: ImprovementTarget[], existing: ImprovementKeyword[], notices: string[], budgetMs = 35000) {
+  const context = runtime.context;
   const canonical = await resolveGoogleAdsCanonicalContext({ actorUserId: context.actorUserId, agencyId: null, brandId: context.brandId, operation: "discovery" });
   const { client } = await createGoogleAdsCanonicalClient({ context: canonical });
   const account = createGoogleAdsKeywordAccount({ customerId: canonical.customerId, loginCustomerId: canonical.managerCustomerId });
   const memo = new Set<string>(), found = new Map(existing.map(k => [normalizeKeyword(k.keyword), k]));
   // One request per page (theme + URL together); a second, broader one only
   // when the first brings back nothing new. Budget covers every target once.
-  const LIMIT = 40, BUDGET_MS = budgetMs, started = Date.now();
+  const LIMIT = IMPROVEMENT_DISCOVERY_REQUEST_LIMIT, BUDGET_MS = budgetMs, started = Date.now();
   let requests = 0;
   const pending: string[] = [];
   const ask = async (seed: GoogleAdsKeywordIdeasInput["seed"]): Promise<number> => {
     const seedKey = JSON.stringify(seed);
     if (memo.has(seedKey)) return 0;
     memo.add(seedKey); requests++;
-    const result = await generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId, loginCustomerId: account.loginCustomerId ?? undefined }, targeting: targetingToProviderInput(canonical.targeting ?? defaultGoogleAdsCanonicalTargeting()), seed, pageSize: 500 }, account);
+    if (run.discovery) run.discovery.requests = requests;
+    // Uma chave por chamada da mesma execução (o mesmo sufixo por página da Descoberta).
+    const suffix = `${seed.kind === "keyword_and_url" ? "url_seed" : "keyword_seed"}:p${requests}` as GoogleAdsDiscoveryUsageKeySuffix;
+    let result: Awaited<ReturnType<typeof generateGoogleAdsKeywordIdeas>>;
+    try { result = await generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId, loginCustomerId: account.loginCustomerId ?? undefined }, targeting: targetingToProviderInput(canonical.targeting ?? defaultGoogleAdsCanonicalTargeting()), seed, pageSize: 500 }, account); }
+    catch (error) {
+      const code = error && typeof error === "object" ? String((error as { code?: unknown }).code ?? "") : "";
+      await recordImprovementUsage(runtime, run, { kind: "google_ads_discovery", runId: run.runId, resultStatus: "failed", errorCode: /^[A-Za-z0-9_-]{1,80}$/.test(code) ? code : "GOOGLE_ADS_DISCOVERY_FAILED", suffix, providerReference: null, receivedCount: null });
+      throw error;
+    }
+    await recordImprovementUsage(runtime, run, { kind: "google_ads_discovery", runId: run.runId, resultStatus: "succeeded", errorCode: null, suffix, providerReference: (result as { requestId?: string | null }).requestId ?? null, receivedCount: result.ideas.length });
     let fresh = 0;
     for (const idea of result.ideas) {
       const phrase = idea.keyword, normalized = normalizeKeyword(phrase);
@@ -374,6 +420,22 @@ async function findRun(context: PipelineContext, runId: string) {
   if (run.version !== ARTICLE_IMPROVEMENT_VERSION || run.brandId !== context.brandId || run.actorId !== context.actorUserId) throw refusal("Execução incompatível ou pertencente a outro ator.");
   return { id: String(result.data.id), lock: Number(result.data.lock_version), run };
 }
+/**
+ * A última execução da marca com os mesmos insumos, dentro da janela. Leitura
+ * que falha não derruba a preparação: ela segue como preparação nova.
+ */
+async function findReusableRun(context: PipelineContext, inputsHash: string): Promise<ImprovementReusableRun | null> {
+  try {
+    const since = new Date(Date.now() - IMPROVEMENT_REUSE_WINDOW_MS).toISOString();
+    const result = await context.supabase.from("editorial_workflow_items").select("payload,created_at")
+      .eq("marca_id", context.brandId).eq("subject_type", SUBJECT_TYPE).eq("stage", "architect")
+      .eq("payload->>inputsHash", inputsHash).gte("created_at", since)
+      .order("created_at", { ascending: false }).limit(1);
+    if (result.error) return null;
+    const payload = (result.data as Array<{ payload?: unknown }> | null)?.[0]?.payload;
+    return payload && typeof payload === "object" ? payload as ImprovementReusableRun : null;
+  } catch { return null; }
+}
 async function saveRun(context: PipelineContext, current: Awaited<ReturnType<typeof findRun>>, run: ImprovementRun) {
   await new WorkflowRepository(context).update(current.id, current.lock, { state: run.state, payload: run as unknown as Record<string, unknown> });
   const readback = await findRun(context, run.runId);
@@ -390,7 +452,17 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     const input = await readInputs(context, request.targetIds);
     const run: ImprovementRun = { version: ARTICLE_IMPROVEMENT_VERSION, runId: randomUUID(), brandId: context.brandId, actorId: context.actorUserId, createdAt: new Date().toISOString(), state: "prepared", leaseUntil: null, decisionHash: "", sourceHashes: Object.fromEntries(input.targets.map(t => [t.id, sourceHash(t, input.workspace, input.rows)])), targets: input.targets, keywords: input.keywords, beforeAssignments: Object.fromEntries([...input.rows].map(([id, row]) => [id, Object.fromEntries(Object.entries(object(object(row.canonicalWorkflow).payload)).filter(([key]) => ["territoryRef", "territoryAssignment", "articleFormationRef", "articleFormationDecision", "articleSubjectAnchor", "workingArticleId"].includes(key)))])), proposals: [], costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] }, reservedCostUsd: 0, notices: [], outcomes: [], acceptedIds: null };
     const started = Date.now();
-    await measureOldVolumes(context, run);
+    // 0 · MESMOS INSUMOS, MESMA LEITURA (2026-10-12): a execução anterior com a
+    // mesma impressão digital dá a leitura da IA, as medições e a busca; nada
+    // disso é chamado de novo. O cache da SERP (grátis) é relido abaixo.
+    run.inputsHash = stableHash(improvementInputsFingerprint({ version: run.version, brandId: run.brandId, sourceHashes: run.sourceHashes, keywords: input.keywords }));
+    const seed = improvementReuseSeed(await findReusableRun(context, run.inputsHash), { version: run.version, brandId: run.brandId, inputsHash: run.inputsHash, now: new Date() });
+    run.reusedFromRunId = seed?.fromRunId ?? null;
+    if (seed) {
+      run.keywords = seed.keywords;
+      if (seed.editorialAi) run.editorialAi = seed.editorialAi;
+      run.notices.push(seed.notice);
+    } else await measureOldVolumes(context, run);
     const { evidence, ranking } = await evidenceOf(context, run.targets, run.keywords);
     // 1 · pares da SERP (cache).
     run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, listReading: false });
@@ -398,13 +470,19 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     await readEditorialAi(runtime, run, ranking);
     // 2b · leitura da lista pelo código (núcleo do slug) para quem a IA não resolveu.
     run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, editorialPicks: run.editorialAi?.picks });
-    // 3 · busca nova no Google Ads só para quem ainda ficou sem nada. O tempo
-    // que a IA usou sai do orçamento da busca: o prepare inteiro fica abaixo de 120 s.
+    // 3 · busca nova no Google Ads só para quem ainda ficou sem nada — e só
+    // quando o dono pede (`discover: true`, com o custo dito antes do clique).
+    // Nunca automática (2026-10-12). O tempo que a IA usou sai do orçamento da
+    // busca: o prepare inteiro fica abaixo de 120 s.
     const gaps = run.targets.filter(t => run.proposals.find(p => p.targetId === t.id)?.status !== "ready" && run.proposals.find(p => p.targetId === t.id)?.status !== "adequate");
+    run.discovery = { requested: request.discover === true, gapTargetIds: gaps.map(t => t.id), requests: 0 };
     const discoverBudgetMs = Math.max(5000, Math.min(35000, PREPARE_SEARCH_DEADLINE_MS - (Date.now() - started)));
-    if (gaps.length) try { run.keywords = await discover(context, gaps, run.keywords, run.notices, discoverBudgetMs); } catch (error) { run.notices.push(`Pesquisa gratuita incompleta: ${error instanceof Error ? error.message : "provider indisponível"}. O acervo continua válido.`); }
+    if (gaps.length && request.discover === true) try { run.keywords = await discover(runtime, run, gaps, run.keywords, run.notices, discoverBudgetMs); } catch (error) { run.notices.push(`Busca nova no Google Ads incompleta: ${error instanceof Error ? error.message : "provider indisponível"}. O acervo continua válido.`); }
     await refreshPlan(runtime, run, input.rows, started + (runtime.compositionDeadlineMs ?? COMPOSITION_DEADLINE_MS));
     await planSerpRefreshes(context, run, input);
+    // Quem segue sem proposta depois da conferência é quem a busca nova poderia ajudar.
+    run.discovery.gapTargetIds = run.targets.filter(t => { const status = run.proposals.find(p => p.targetId === t.id)?.status; return status !== "ready" && status !== "adequate"; }).map(t => t.id);
+    if (!run.discovery.requested && run.discovery.gapTargetIds.length) run.notices.push(`${run.discovery.gapTargetIds.length} publicado(s) ou Assunto(s) ficaram sem proposta só com a lista da marca. A busca nova no Google Ads não roda sozinha: peça em “Buscar keywords novas no Google Ads”, com o custo dito antes.`);
     run.decisionHash = decisionHashOf(run);
     await new WorkflowRepository(context).create({ subjectType: SUBJECT_TYPE, subjectId: run.runId, stage: "architect", state: "prepared", sourceEntityId: run.runId, payload: run as unknown as Record<string, unknown> });
     return (await findRun(context, run.runId)).run;
@@ -1016,7 +1094,37 @@ export function improvementRuntime(context: PipelineContext): ImprovementRuntime
     authorize: (module, action) => resolvePipelineContext({ brandId: context.brandId, module, action }, { requireActorUserId: async () => context.actorUserId }),
     // A Connection de IA resolvida como nas outras rotas do Arquiteto (cliente da sessão).
     editorialAi: prompt => proposeArticleImprovementAiPicks({ actorUserId: context.actorUserId, brandId: context.brandId, client: context.supabase, ...prompt }),
+    recordUsage: event => recordImprovementUsageEvent(context, event),
   };
+}
+
+/**
+ * O MESMO caminho do registro de uso das outras chamadas (2026-10-12): a IA
+ * como a revisão territorial e o DataForSEO (`recordIntegrationUsage*` sobre a
+ * resource da Connection), a busca como a Descoberta do Minerador
+ * (`recordGoogleAdsDiscoveryUsage`, módulo `arquiteto`). Sem schema novo.
+ * Carregado sob demanda: o registro só abre o repositório quando há o que gravar.
+ */
+async function recordImprovementUsageEvent(context: PipelineContext, event: ImprovementUsageEvent): Promise<void> {
+  const [{ createIntegrationRuntimeRepository, recordIntegrationUsageForResource }, { createCanonicalAuthorizationRepository }] = await Promise.all([import("./integrations-runtime"), import("./canonical-authorization")]);
+  const dependencies = { repository: createIntegrationRuntimeRepository(context.supabase), authorizationRepository: createCanonicalAuthorizationRepository(context.supabase) };
+  if (event.kind === "editorial_ai") {
+    const { resolveDeepSeekCanonicalConfig } = await import("./deepseek-canonical");
+    const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: context.actorUserId, agencyId: null, brandId: context.brandId, client: context.supabase });
+    await recordIntegrationUsageForResource({
+      resource: provider.resource, operation: "module_operation", module: "arquiteto", resultStatus: event.resultStatus, units: 1,
+      errorCode: event.errorCode, idempotencyKey: improvementAiUsageKey(provider.provider, event.runId, event.resultStatus),
+      metadata: { operationRequestId: event.runId, operationKind: "article_improvement_ai", targets: event.targets, listSize: event.listSize },
+    }, dependencies);
+    return;
+  }
+  const { recordGoogleAdsDiscoveryUsage } = await import("@/lib/minerador/google-ads-discovery-usage");
+  await recordGoogleAdsDiscoveryUsage({
+    actorUserId: context.actorUserId, agencyId: null, brandId: context.brandId, operationRequestId: event.runId,
+    resultStatus: event.resultStatus, providerReference: event.providerReference, errorCode: event.errorCode,
+    receivedCount: event.receivedCount ?? undefined, normalizedCount: event.receivedCount ?? undefined,
+    usageKeySuffix: event.suffix, module: "arquiteto", dependencies,
+  });
 }
 
 /** Send only the terms shown in the preview, rather than the full brand pool. */

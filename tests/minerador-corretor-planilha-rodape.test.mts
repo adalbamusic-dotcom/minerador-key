@@ -180,6 +180,9 @@ test("rodapé: nenhuma ação cortada em silêncio e o Potencial sem largura fix
   assert.equal((bar.match(/min-\[1800px\]:block/g) || []).length, 1, "Status");
   assert.equal((bar.match(/min-\[1800px\]:hidden"/g) || []).length, 2, "Status e Excluir em Mais ações");
   assert.match(bar, /min-\[1800px\]:flex lg:px-2"/, "Excluir no rodapé só em tela larga");
+  // 2026-10-12 (F1 dos grupos): "Grupo" no rodapé de 1700px para cima e em Mais ações abaixo disso.
+  assert.equal((bar.match(/ min-\[1700px\]:block /g) || []).length, 1, "Grupo no rodapé");
+  assert.equal((bar.match(/ min-\[1700px\]:hidden"/g) || []).length, 1, "Grupo em Mais ações");
 });
 
 test("KGR em grupo passa por confirmação: a seta no select fechado não grava", () => {

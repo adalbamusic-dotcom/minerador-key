@@ -1,3 +1,92 @@
+## Silo amplo: de 4 a 30 artigos (D3) — 2026-10-12
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** Decisão D3 do dono na SDD
+`docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md`: os projetos novos têm 15 artigos por Silo ou mais, e um lançamento de 14 a 15 artigos pode ir num
+Silo só ou em 2 ou 3. Sem schema novo, sem migration, sem chamada paga.
+
+- `lib/agent/silo-plan.ts`: `SILO_ARTICLE_RANGE = { min: 4, max: 30 }` (era 4–7); o contrato `SiloPlanSchema`
+  aceita até 30 (era 20). De 8 a 30 é tamanho normal: nenhum aviso, nenhuma exceção. A ferramenta MCP
+  `validate_silo_plan` lê a constante; o catálogo (`lib/agent/platform-catalog.ts`) diz "de 4 a 30".
+- **Grafo de links:** o esqueleto tem 2 + 3 × (N − 1) conexões (89 com 30 artigos). A rota de âncoras
+  (`/api/arquiteto/internal-link-graph/anchors`) recusava pedidos com mais de 40 conexões — Silo de 14+ artigos
+  falhava inteiro. A tela agora divide em lotes (`batchLinkAnchorRequests`, `lib/arquiteto/link-anchor-ai.ts`;
+  40 conexões e 40 páginas por chamada, as mesmas constantes da rota). Silo de 15 = 2 lotes; de 30 = 3 lotes,
+  cada um uma chamada de IA pelo mesmo botão. Lote que falha depois de outros já respondidos guarda o que veio e
+  diz qual falhou.
+- **Mapa do Silo:** `modules/arquiteto/arquiteto-workbench.tsx` mostrava só os 6 primeiros Suportes; agora
+  mostra todos.
+- Conferido sem mudança: ordem narrativa (`resolveSiloCompositionFromFormations`, `buildConsolidatedSiloDnaPayload`),
+  distribuição de funil (só avisos de mistura), score de Pilar (capacidade de suporte satura em 1), SERP em
+  blocos de 20 e ArticleDNA um por chamada.
+- **Testes:** `tests/arquiteto-silo-amplo-d3.test.mts` 18/18 (planos de 15 e 30, 31 recusado, esqueleto,
+  lotes de âncoras com 7/13/14/15/30 artigos, ordem narrativa, mapa, MCP e catálogo) entrou no
+  `test:arquiteto`; `tests/agent-topic-silo.test.mts` (09) e `tests/arquiteto-workbench.test.mts` atualizados
+  para o tamanho novo. `test:arquiteto` 2773/2773; `test:arquiteto:lentes` 81/81; `test:radar` 3449 · 3448 ·
+  1 pulado; `test:agent` 73/73; `test:editorial` 172 · 168 · 4 (as 4 falhas antigas); `tsc` 0 erros.
+
+## Fechamento do Silo sem site e melhoria sem retrabalho — 2026-10-12 (WifiConecta)
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** Marca do diagnóstico: WifiConecta
+(`d4fa133a-13bd-4bf7-bfd1-d0f22253f223`). Sem schema novo, sem migration, sem chamada paga nos testes.
+
+**Fechamento do Silo (persistência remota; o servidor não mudou):**
+
+- Causa: com `marcas.site_url` NULL, a URL canônica da SiloPage nova (`plannedSiloPageCanonical`, site + slug) saía
+  null, o portão da SiloPage recusava (`SILO_PAGE_APPROVAL_CANONICAL_MISSING`) e o servidor devolvia
+  `SILO_PAGE_APPROVAL_GATE_MISSING` depois do clique. O dono já declarou o site.
+- `lib/arquiteto/silo-consolidation-operation.ts` (aditivo): `SILO_SITE_REQUIRED_MESSAGE`,
+  `siloPageCanonicalRefusal`, `siloConsolidationFailureDisposition` e `siloConsolidationOperationForRetry`.
+- `modules/arquiteto/arquiteto-workspace.tsx`: antes de montar e enviar o envelope, o fechamento recusa no cliente
+  com "Declare o site da marca em Marca → Site para fechar o Silo (a URL canônica da página do Silo nasce do site +
+  slug)" (página publicada sem canonical no catálogo pede a sincronização do site). A prévia "O que a confirmação vai
+  fechar" mostra a mesma frase para a SiloPage gravada e, agora, também para a cópia de trabalho aberta sem SiloPage
+  gravada (identidade resolvida como no fechamento: slug do Silo + catálogo + site).
+- Retomada: recusa 409 de domínio de portão anterior à RPC (`SILO_PAGE_APPROVAL_*`, `SILO_NOT_READY*`,
+  `HUMAN_SILO_CONSOLIDATION_REQUIRED`, recusas de binding de artigo/Pilar/território/identidade publicada) DESCARTA a
+  operação congelada; a próxima tentativa remonta o envelope. Rede, 5xx, `STALE_WORKING_COPY`,
+  `WORKING_COPY_ALREADY_CONSUMED` e recusa da RPC continuam indeterminados e a retomada reenvia o mesmo corpo. Operação
+  congelada com SiloPage aprovada e canonical null nunca é retomada (nunca passou no portão).
+
+**Melhoria de artigos sem retrabalho (`lib/server/arquiteto-article-improvement.ts`):**
+
+- Causa: cada "Preparar" criava um runId novo, chamava a IA editorial e rodava `discover` no Google Ads de novo (9
+  execuções numa tarde; uma trouxe 575 keywords de fora da lista), sem registro em `integration_usage_events`.
+- Reaproveitamento: a execução grava `inputsHash` (alvos, `sourceHashes` e a lista da marca antes da medição,
+  `lib/arquiteto/article-improvement-reuse.ts`). Preparar de novo com a mesma impressão, na mesma marca e dentro de 24
+  h, cria uma execução nova semeada pela anterior (`reusedFromRunId`): leitura da IA, medições de volume e keywords da
+  busca voltam sem chamada nova de IA nem de Google Ads; só o cache da SERP (grátis) é relido, então "Buscar de novo"
+  continua valendo. Leitura da IA que falhou é tentada de novo. Tudo no payload JSONB da execução (sem schema).
+- Busca nova sob pedido: `discover: true` no pedido (aditivo em `lib/arquiteto/article-improvement-request.ts`). Sem
+  ele, o prepare não chama `discover`; a execução lista os alvos sem proposta (`discovery.gapTargetIds`) e avisa. No
+  painel (`modules/arquiteto/article-improvement-panel.tsx`), "Buscar keywords novas no Google Ads (N)" abre a
+  confirmação com o custo antes do clique (até 2 chamadas por alvo, teto 40, sem custo em dólar, 1 unidade da cota de
+  Descoberta por chamada).
+- Registro de uso: a leitura da IA (`recordIntegrationUsageForResource` sobre a resource da Connection de IA, chave
+  `{provider}:article_improvement_ai:{runId}`) e cada chamada da busca (`recordGoogleAdsDiscoveryUsage`, módulo
+  `arquiteto`, sufixo `url_seed:pN`/`keyword_seed:pN`) entram em `integration_usage_events`. Falha do registro não
+  derruba a preparação e fica dita na execução. A medição de volume (métricas históricas, grátis) continua sem
+  registro, como no resto da plataforma (não há capability para ela).
+- Catálogo do MCP (`lib/agent/platform-catalog.ts`) e descrição de `improve_articles`
+  (`lib/server/platform-mcp-tools.ts`): site da marca como pré-condição do fechamento do Silo; melhoria sem busca
+  automática paga e com reaproveitamento.
+
+**Arquivos compartilhados e consumidores preservados:** `lib/server/platform-mcp-tools.ts` (só texto da ferramenta;
+esquema herda o campo opcional `discover`); `package.json` (teste novo em `test:arquiteto`). Execuções antigas, sem
+`inputsHash`, nunca são semente; o tipo `ImprovementRun` só ganhou campos opcionais.
+
+**Testes:** `tests/arquiteto-fechamento-e-retrabalho-2026-10-12.test.mts` (18, em `test:arquiteto`: recusa sem site,
+prévia com cópia de trabalho, descarte no 409 e retomada no 5xx pelo cliente real com `fetch` simulado, semente,
+busca sob pedido, custo na tela, registro de uso) e 5 casos novos em
+`tests/arquiteto-article-improvement-server.test.mts` (`test:arquiteto:lentes`, núcleo real: zero chamada nova de IA
+e de busca no segundo Preparar, insumo diferente prepara de novo, IA falha é refeita, busca só sob pedido com o registro
+de cada chamada, registro que falha não derruba). `test:arquiteto` 2755/2755, `test:arquiteto:lentes` 81/81,
+`test:arquiteto:dom` 17/17, `test:agent` 73/73, `test:radar` 3449 (3448 + 1 pulado), `test:editorial` só as 4 falhas
+antigas, `tsc` sem erro, eslint sem achado novo nas linhas tocadas, `git diff --check` limpo.
+
+**Limitações:** a recusa no cliente lê `site_url` da lista de marcas carregada; com o site recém-declarado, a tela
+precisa recarregar as marcas. A janela de 24 h é fixa. A semente vale para a mesma marca com qualquer ator (a execução
+nova é do ator atual).
+
 ## Cartão do Arquiteto revertido — 2026-10-09 (regra do dono)
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.** Regra do dono: "no arquiteto não tem que

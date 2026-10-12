@@ -1,3 +1,30 @@
+## Silo amplo: de 4 a 30 artigos (D3) — 2026-10-12
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Teto do Silo de 7 para 30 (mínimo 4), sem aviso para 8+, na validação, no MCP e no catálogo.
+- [x] Âncoras do grafo em lotes de 40 conexões (Silo de 14+ artigos era recusado pela rota).
+- [x] Mapa do Silo mostra todos os Suportes.
+- [ ] Dono: gerar âncoras num Silo de 15+ artigos e conferir os lotes na tela.
+- [ ] F2 da SDD de grupos: seletor de grupo e leitura por grupo na mesa do Arquiteto.
+
+## Fechamento do Silo sem site e melhoria sem retrabalho — 2026-10-12 (WifiConecta)
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Fechar o Silo sem site da marca recusa no cliente com a frase do que fazer, antes de enviar.
+- [x] A prévia "O que a confirmação vai fechar" avisa também na cópia de trabalho sem SiloPage gravada.
+- [x] Recusa 409 de domínio descarta a operação congelada; rede/5xx continuam com retomada segura.
+- [x] "Preparar" com os mesmos insumos reaproveita a execução anterior (zero chamada nova de IA e de busca).
+- [x] Busca nova no Google Ads só sob pedido explícito, com o custo dito antes do clique.
+- [x] IA e busca da melhoria em `integration_usage_events`.
+- [ ] **Dono:** homologar na WifiConecta — fechar o Silo com o site declarado (recarregar a tela antes) e preparar
+  duas vezes a melhoria, conferindo o aviso de reaproveitamento e o registro de uso.
+- [ ] Proposta (sem schema): botão "Preparar do zero" para ignorar a semente quando o dono quiser outra leitura da
+  IA com os mesmos insumos (hoje a janela de 24 h é fixa).
+- [ ] Proposta (sem schema): a recusa do fechamento ler o site no servidor junto com o workspace, sem depender da
+  lista de marcas carregada na tela.
+
 ## Cartão do Arquiteto revertido — 2026-10-09 (regra do dono)
 
 - [x] O passo "reinvestigate" ("Abrir Links internos") saiu; os três arquivos do Arquiteto voltaram ao commit 638a807.

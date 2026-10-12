@@ -4,6 +4,8 @@ export const ArticleImprovementRequestSchema = z.object({
   runId: z.string().uuid().optional(), targetIds: z.array(z.string().min(1)).max(200).optional(),
   decisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   authorizedCostUsd: z.number().positive().max(1).optional(), approveNewKeywords: z.boolean().optional(),
+  /** Busca nova no Google Ads no prepare: só quando o dono pede (2026-10-12). Ausente = não busca. */
+  discover: z.boolean().optional(),
 }).strict().superRefine((v, c) => {
   if (v.action !== "prepare" && !v.runId) c.addIssue({ code: "custom", message: "runId é obrigatório." });
   if ((v.action === "apply" || v.action === "collect") && !v.decisionHash) c.addIssue({ code: "custom", message: "Use o hash da prévia vigente." });

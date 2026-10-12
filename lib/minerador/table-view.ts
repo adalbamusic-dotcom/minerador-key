@@ -21,6 +21,8 @@ export type MineradorTableRow = {
   lista_id: string | null;
   analise_semantica?: Record<string, unknown> & { nicho_override?: string } | null;
   volume_source?: string | null;
+  /** Grupo editorial (F1, SDD 2026-10-12): só é carregado; filtro e faixa vivem na tela. */
+  group_id?: string | null;
 };
 
 export type MineradorTableList = { id: string; nome: string };

@@ -8,7 +8,7 @@ import { topicCoverage, normalizeTopicText } from "./topic-match.ts";
 /**
  * ===== VALIDAR UM SILO PROPOSTO PELA IA =====
  *
- * Domínio puro. A IA propõe o silo — nome, página do silo, 4 a 7 artigos — e
+ * Domínio puro. A IA propõe o silo — nome, página do silo, de 4 a 30 artigos — e
  * a plataforma confere pelas regras da casa e pelo que a marca já tem. Nada é
  * gravado: o plano vive na conversa até o usuário aceitar, e o que o
  * materializa é a declaração dos Assuntos no Minerador.
@@ -24,13 +24,22 @@ import { topicCoverage, normalizeTopicText } from "./topic-match.ts";
  * ==================== TRÊS NÍVEIS ====================
  *
  * `block`   — o plano não pode seguir assim (URL já publicada, slug repetido,
- *             pilar ausente ou duplicado, fora de 4 a 7).
+ *             pilar ausente ou duplicado, fora de 4 a 30).
  * `warning` — pode seguir, mas a IA precisa falar com o usuário (intenção
  *             repetida, funil sem TOFU, slug fraco ou diferente do da casa).
  * `info`    — o que ainda vai ser decidido depois (keyword sem medição).
  */
 
-export const SILO_ARTICLE_RANGE = { min: 4, max: 7 } as const;
+/**
+ * Tamanho do Silo: de 4 a 30 artigos (D3 do dono, 2026-10-12).
+ *
+ * Os projetos novos têm 15 artigos por Silo ou mais, e um lançamento de 14 a
+ * 15 artigos pode ir num Silo só ou ser distribuído em 2 ou 3. De 8 a 30 é
+ * tamanho normal: não há aviso nem exceção para Silo grande. O mínimo continua
+ * 4 (Pilar + 3 Suportes). É a fonte única: o MCP, o catálogo e os testes leem
+ * daqui.
+ */
+export const SILO_ARTICLE_RANGE = { min: 4, max: 30 } as const;
 
 const FUNIS = ["TOFU", "MOFU", "BOFU"] as const;
 const INTENCOES = ["informacional", "comercial", "transacional", "navegacional"] as const;
@@ -49,7 +58,7 @@ export const SiloPlanSchema = z.object({
     role: z.enum(["Pilar", "Suporte"]),
     funnel: z.enum(FUNIS),
     intent: z.enum(INTENCOES),
-  })).min(1).max(20),
+  })).min(1).max(SILO_ARTICLE_RANGE.max),
 });
 export type SiloPlan = z.infer<typeof SiloPlanSchema>;
 
@@ -116,7 +125,7 @@ export function validateSiloPlan(input: SiloPlan, context: SiloPlanContext): Val
   /* ---- tamanho e hierarquia ---- */
   const total = input.articles.length;
   if (total < SILO_ARTICLE_RANGE.min || total > SILO_ARTICLE_RANGE.max) {
-    add("block", "articles", `O silo inicial tem de ${SILO_ARTICLE_RANGE.min} a ${SILO_ARTICLE_RANGE.max} artigos; a proposta tem ${total}.`);
+    add("block", "articles", `O silo tem de ${SILO_ARTICLE_RANGE.min} a ${SILO_ARTICLE_RANGE.max} artigos; a proposta tem ${total}.`);
   }
   const pilares = input.articles.filter(article => article.role === "Pilar").length;
   if (pilares !== 1) add("block", "articles.role", `O silo precisa de exatamente 1 Pilar; a proposta tem ${pilares}.`);
