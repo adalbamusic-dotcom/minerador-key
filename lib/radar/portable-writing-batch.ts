@@ -150,7 +150,11 @@ export function radarPortableWritingExport(input: {
       blocked: artigos.filter(item => item.verdict === "Não").length,
       csv: artigos.length ? radarWritingExportCsv([topo, ...(voz ? [voz] : []), ...compartilhado.rows]) : "",
       filename: radarWritingExportBatchFilename({
-        articles: input.articles.map(item => ({ slug: item.entrada.article.slug, keyword: item.entrada.article.principalKeyword })),
+        articles: input.articles.map(item => {
+          /* 2026-10-12 · a posição e o papel no Silo entram no nome do arquivo de um artigo só. */
+          const membro = siloDe.get(item.articleId)?.members.find(entrada => entrada.articleId === item.articleId) ?? null;
+          return { slug: item.entrada.article.slug, keyword: item.entrada.article.principalKeyword, position: membro?.position ?? null, role: membro?.role ?? null };
+        }),
         today: input.today,
       }),
       files: null,

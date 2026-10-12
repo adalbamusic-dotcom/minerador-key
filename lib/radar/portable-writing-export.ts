@@ -3853,10 +3853,18 @@ export function radarWritingExportSiloFilename(nomeCompleto: string): string {
   return nomeCompleto.replace(/\.csv$/, "-para-escrever.csv");
 }
 
-export function radarWritingExportBatchFilename(input: { articles: readonly { slug: string | null; keyword: string | null }[]; today: string }): string {
+/*
+ * 2026-10-12 · pedido do dono: o arquivo de UM artigo diz onde ele fica no Silo e o
+ * slug, para reconhecer de relance ("01-pilar-qualificados-para-escrever.csv",
+ * "08-suporte-como-atrair-um-cliente-para-escrever.csv"). Sem Silo, o nome de antes.
+ */
+export function radarWritingExportBatchFilename(input: { articles: readonly { slug: string | null; keyword: string | null; position?: number | null; role?: string | null }[]; today: string }): string {
   if (input.articles.length === 1) {
     const unico = input.articles[0];
     const base = nomeLimpo(texto(unico.slug) || texto(unico.keyword) || "artigo");
+    const posicao = typeof unico.position === "number" && unico.position > 0 ? String(unico.position).padStart(2, "0") : "";
+    const papel = nomeLimpo(texto(unico.role));
+    if (posicao) return `${posicao}-${papel ? `${papel}-` : ""}${base || "artigo"}-para-escrever.csv`;
     return `artigo-${base || "artigo"}-para-escrever.csv`;
   }
   return `artigos-para-escrever-${input.today.slice(0, 10)}.csv`;
