@@ -783,7 +783,9 @@ export function buildArchitectFlowProjection(
   const supportStep = 148;
   let siloY = 18;
   snapshot.silos.forEach(silo => {
-    const supportArticleIds = silo.supportArticleIds.slice(0, 6);
+    // Todos os Suportes: o Silo vai até 30 artigos (D3, 2026-10-12). O corte
+    // em 6 escondia do mapa os Suportes 7 em diante sem dizer nada.
+    const supportArticleIds = silo.supportArticleIds;
     const supportStackHeight = supportArticleIds.length > 0
       ? supportNodeHeight + (supportArticleIds.length - 1) * supportStep
       : 0;

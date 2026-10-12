@@ -659,7 +659,9 @@ test("workspace: actor da sessão canônica, carga do Perfil poda a Marca, refre
   assert.ok(loader.includes("actorUserId,"));
   assert.ok(!/email/i.test(loader), "a chave do cache não usa e-mail");
   assert.ok(loader.includes('cachePrune: QualificationVersionCachePrune = "loaded-entities"'), "padrão conservador");
-  assert.ok(workspace.includes("await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)), qualificationVersionCachePruneForListing(loadedKeywords.length))"), "a carga do Perfil só poda a Marca inteira quando a listagem veio inteira");
+  // 2026-10-12 (F1 dos grupos): com um grupo ativo a listagem é um recorte da
+  // Marca, então a poda fica restrita às keywords carregadas.
+  assert.ok(workspace.includes("await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)), keywordGroups.filter.kind === \"all\" ? qualificationVersionCachePruneForListing(loadedKeywords.length) : \"loaded-entities\")"), "a carga do Perfil só poda a Marca inteira quando a listagem veio inteira");
   assert.ok(workspace.includes("await loadSemanticQualifications(selectedBrandId, persistedQualificationIds);"), "refresh parcial usa o padrão");
   assert.ok(workspace.includes("createIndexedDbQualificationVersionCacheStorage()"));
 });

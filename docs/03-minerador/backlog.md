@@ -1,5 +1,23 @@
 # Backlog — Minerador
 
+## Grupos por cor (F1) — 2026-10-12
+
+SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md`. Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Migration M1 e rollback escritos (`20261013120000_grupos_editoriais`), com guardas e pós-checagem.
+- [x] Domínio, repositório, núcleo (`assignKeywordGroupWithCore`) e rotas de grupos.
+- [x] Seletor de grupo na topbar do Minerador, grupo na URL, último usado lembrado localmente.
+- [x] Faixa e etiqueta de cor nas linhas; "Grupo ▸ Mover para… / Tirar do grupo" no rodapé.
+- [x] Funciona sem a migration (409 `GROUPS_NOT_AVAILABLE` esconde o recurso).
+- [x] Testes com fixtures, incluindo isolamento entre marcas.
+- [ ] Dono: aplicar a M1 e homologar na tela.
+- [ ] Renomear, recolorir e arquivar pela tela (a rota PATCH já existe; falta o menu no seletor).
+- [ ] Importação de keywords com grupo ativo carimbando o grupo (hoje entram "Sem grupo").
+- [ ] F2: seletor no Arquiteto e no Radar, `groupId` nas mesas, `editorial_group_articles` com prévia.
+- [ ] F3/F4: plano declarado (importar a tabela do plano, principal declarada, D2-bis, papel no Silo).
+- [ ] F5: guarda de retrabalho e "Histórico do grupo" (lê `editorial_group_events`).
+- [ ] F6: Redator/Publicações por grupo, `declare_silo_plan` e `groupId` no MCP.
+
 ## Núcleo da Lógica e da aprovação no servidor — 2026-09-28
 
 - [x] Extrair do MCP a Lógica e a aprovação com compare-and-swap e releitura (`lib/server/minerador-keyword-decision-core.ts`), usadas pelo MCP e pelo Reforçar publicados.

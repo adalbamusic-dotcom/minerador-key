@@ -54,6 +54,21 @@
   --warning-soft: color-mix(in srgb, var(--warning) 18%, transparent);
   --pending-soft: color-mix(in srgb, var(--pending) 18%, transparent);
   --danger-soft: color-mix(in srgb, var(--danger) 18%, transparent);
+  /*
+   * Cores de GRUPO (sistema-visual §5.0.2; SDD de grupos 2026-10-12, D4).
+   * Aliases de tokens existentes — nenhum valor bruto novo. A cor do grupo
+   * marca a faixa de 4 px e a bolinha; o nome do grupo sempre aparece junto.
+   */
+  --group-amarelo: var(--pending);
+  --group-azul: var(--context-accent);
+  --group-verde: var(--positive-soft);
+  --group-lima: var(--highlight);
+  --group-laranja: var(--warning);
+  --group-amarelo-soft: color-mix(in srgb, var(--group-amarelo) 18%, transparent);
+  --group-azul-soft: color-mix(in srgb, var(--group-azul) 18%, transparent);
+  --group-verde-soft: color-mix(in srgb, var(--group-verde) 18%, transparent);
+  --group-lima-soft: color-mix(in srgb, var(--group-lima) 18%, transparent);
+  --group-laranja-soft: color-mix(in srgb, var(--group-laranja) 18%, transparent);
   --ui-label-info-gap: 2px;
   --ui-label-control-gap: 4px;
 }
@@ -100,6 +115,16 @@
   --color-warning-soft: var(--warning-soft);
   --color-pending-soft: var(--pending-soft);
   --color-danger-soft: var(--danger-soft);
+  --color-group-amarelo: var(--group-amarelo);
+  --color-group-azul: var(--group-azul);
+  --color-group-verde: var(--group-verde);
+  --color-group-lima: var(--group-lima);
+  --color-group-laranja: var(--group-laranja);
+  --color-group-amarelo-soft: var(--group-amarelo-soft);
+  --color-group-azul-soft: var(--group-azul-soft);
+  --color-group-verde-soft: var(--group-verde-soft);
+  --color-group-lima-soft: var(--group-lima-soft);
+  --color-group-laranja-soft: var(--group-laranja-soft);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
 }

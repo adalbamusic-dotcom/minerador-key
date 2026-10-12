@@ -48,7 +48,7 @@ import { persistArticleFormationMarker } from "@/lib/arquiteto/canonical-workspa
 import { anchorRemoteTerritoryForSilo, buildCanonicalWorkflowWorkspaceItems, confirmRemoteSiloCandidate, undoRemoteSiloCandidate, createRemoteSiloCandidate, persistArchitectureMarker, updateRemoteTerritoryContext, consolidateRemoteSiloFromWorkingCopy, createRemoteSiloWorkingCopy, loadCanonicalArquitetoWorkspace, persistArchitectWorkingCopy, updateRemoteSiloWorkingCopy, type CanonicalSiloWorkingCopy, type CanonicalTerritory, type CanonicalWorkspaceSnapshot, type RemoteArticleFormationSerp, persistMineradorArquitetoHandoff } from "@/lib/arquiteto/canonical-workspace";
 import { absolutePublishedUrl, applySiloIdentityToProposal, classifySiloWorkingCopyFailure, consolidatedTerritoryRefsOf, deriveSupportArticleIds, draftSiloWorkingCopyFromProposal, humanExclusion, humanPillarSelection, proposalFromRemoteWorkingCopy, resolveAuthoritativeSiloWorkingCopies, resolveProposalTerritoryRef, resolveSiloWorkingCopyIdentity, siloWorkingCopyIsReadOnly } from "@/lib/arquiteto/silo-working-copy-bridge";
 import type { SiloWorkingCopyState } from "@/lib/arquiteto/silo-working-copy-record";
-import { markSiloConsolidationIndeterminate, openSiloConsolidationOperation, registerSiloConsolidationAttempt, settleSiloConsolidationOperation, siloConsolidationRequestBody, type SiloConsolidationOperation } from "@/lib/arquiteto/silo-consolidation-operation";
+import { markSiloConsolidationIndeterminate, openSiloConsolidationOperation, registerSiloConsolidationAttempt, siloConsolidationFailureDisposition, siloConsolidationOperationForRetry, siloConsolidationRequestBody, siloPageCanonicalRefusal, type SiloConsolidationOperation } from "@/lib/arquiteto/silo-consolidation-operation";
 import { CANONICAL_IMPORTABILITY, type CanonicalImportability } from "@/lib/arquiteto/minerador-handoff";
 import { buildTerritorialLandscape } from "@/lib/arquiteto/territorial-landscape";
 import { deriveTerritorialLogic, territorialAssignmentsFromWorkflowPayloads } from "@/lib/arquiteto/territorial-logic";
@@ -299,6 +299,7 @@ import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import { aggregateArticleProcessReadModels, articleAiStateLabel, articleReviewStateLabel, deriveArticleProcessReadModel, type ArticleProcessReadModel } from "@/lib/arquiteto/article-process-read-model";
 import { selectArticlePanelProcessTab } from "@/lib/arquiteto/article-panel-tab-navigation";
 import { suggestInternalLinkAnchorConcepts } from "@/lib/arquiteto/link-anchor-concepts";
+import { batchLinkAnchorRequests } from "@/lib/arquiteto/link-anchor-ai";
 import { applyHumanEditorialUnitDecision, suggestEditorialUnitClassification } from "@/lib/arquiteto/unit-strategy";
 import { mergeScopedArticleProcessOutput, resolveArticleProcessScope, scopedArticleProcessNotification } from "@/lib/arquiteto/article-process-scope";
 import { architectFunctionalErrorMessage, type ArchitectFunctionalOperation } from "@/lib/arquiteto/functional-messages";
@@ -2842,13 +2843,11 @@ export default function ArquitetoPage() {
 
         // Retry reusa a operação congelada. Reconstruir o envelope geraria
         // versionId/createdAt novos e a RPC não reconheceria o replay.
-        const inFlight = pendingConsolidationRef.current;
-        let operation = inFlight
-          && inFlight.territoryRef === territoryRef
-          && inFlight.workingCopyExpectedLock === remote.lockVersion
-          && inFlight.state !== "settled"
-          ? inFlight
-          : null;
+        // Operação com SiloPage aprovada e sem canonical nunca foi gravada: remonta (2026-10-12).
+        let operation = siloConsolidationOperationForRetry(pendingConsolidationRef.current, {
+          territoryRef,
+          workingCopyExpectedLock: remote.lockVersion,
+        });
 
         if (!operation) {
           const articleVersions = remote.workingCopy.articleRefs
@@ -2946,6 +2945,9 @@ export default function ArquitetoPage() {
               }
               : null,
           });
+          // Sem canonical o portão da SiloPage recusa no servidor: a tela recusa antes, com o que fazer.
+          const semCanonical = siloPageCanonicalRefusal(identidadePublicavel);
+          if (semCanonical) throw new Error(semCanonical);
 
           const prepared = await createSiloConsolidationVersions(
             {
@@ -3054,12 +3056,16 @@ export default function ArquitetoPage() {
           consolidados.push(territoryRef);
           pendingConsolidationRef.current = null;
         } catch (error) {
-          // A operação NÃO é descartada: o servidor pode ter commitado, e um
-          // envelope novo viraria escrita dupla. Ela fica guardada para o retry.
-          pendingConsolidationRef.current = markSiloConsolidationIndeterminate(
-            pendingConsolidationRef.current!,
-            error instanceof Error ? error.message : "falha sem resposta conclusiva",
-          );
+          // Recusa 409 de portão anterior à RPC: nada foi gravado, e reenviar o
+          // mesmo corpo repetiria a recusa. A próxima tentativa remonta o envelope.
+          // Rede, 5xx ou readback: a operação NÃO é descartada — o servidor pode ter
+          // commitado, e um envelope novo viraria escrita dupla. Fica para o retry.
+          pendingConsolidationRef.current = siloConsolidationFailureDisposition(error) === "discard"
+            ? null
+            : markSiloConsolidationIndeterminate(
+              pendingConsolidationRef.current!,
+              error instanceof Error ? error.message : "falha sem resposta conclusiva",
+            );
           throw error;
         }
       }
@@ -6101,7 +6107,7 @@ export default function ArquitetoPage() {
     const origem = brands.find(item => item.id === selectedBrandId)?.site_url ?? null;
     const semBarras = (valor: unknown) => String(valor ?? "").trim().replace(/^\/+|\/+$/g, "");
 
-    return Object.values(acceptedSiloPages).map(pageVersion => {
+    const paginasGravadas = Object.values(acceptedSiloPages).map(pageVersion => {
       const pagina = pageVersion.payload;
       const slug = semBarras(pagina.slug);
       const siloDnaVersion = acceptedSiloDnas[String(pagina.siloId)];
@@ -6175,12 +6181,74 @@ export default function ArquitetoPage() {
         ready: portaria?.state === "approved",
         // Fechado = SiloDNA e SiloPage aprovados: não há mais o que confirmar (2026-09-30).
         closed: Boolean(aprovadaAgora) && Boolean(siloDnaVersion) && effectiveVersionStatus(siloDnaVersion!.versionId, versionEvents) === "approved",
-        blockers: portaria && portaria.state === "blocked"
-          ? portaria.blockers.map(item => `${item.code}: ${item.detail}`)
-          : siloDnaVersion ? [] : ["SILO_DNA_AUSENTE: consolide o Silo antes de aprovar a página."],
+        blockers: [
+          // A frase do que fazer vem antes do código do portão (2026-10-12).
+          ...(aprovadaAgora ? [] : [siloPageCanonicalRefusal(identidade)].filter((motivo): motivo is string => Boolean(motivo))),
+          ...(portaria && portaria.state === "blocked"
+            ? portaria.blockers.map(item => `${item.code}: ${item.detail}`)
+            : siloDnaVersion ? [] : ["SILO_DNA_AUSENTE: consolide o Silo antes de aprovar a página."]),
+        ],
       };
     });
-  }, [acceptedSiloPages, acceptedSiloDnas, siloPageAuthorities, brandSiteSnapshot, brands, selectedBrandId, versionEvents]);
+
+    /*
+     * CÓPIA DE TRABALHO SEM SILOPAGE GRAVADA (2026-10-12).
+     *
+     * O aviso acima só enxergava SiloPage já gravada; a primeira consolidação
+     * de um Silo novo descobria a falta do site pela recusa do servidor. A
+     * identidade é resolvida como no fechamento (slug do Silo + catálogo +
+     * site), e a linha só aparece quando a URL canônica não pode nascer.
+     */
+    const territoriosComPagina = new Set(Object.values(acceptedSiloPages)
+      .map(version => String(version.payload.territoryRef || ""))
+      .filter(Boolean));
+    const semPaginaGravada = remoteSiloWorkingCopies
+      .filter(remote => !siloWorkingCopyIsReadOnly(remote, consolidatedTerritoryRefs))
+      .filter(remote => !territoriosComPagina.has(remote.workingCopy.territoryRef))
+      .flatMap(remote => {
+        const territorio = remoteTerritories.find(item => item.territoryRef === remote.workingCopy.territoryRef);
+        if (!territorio) return [];
+        const identidadeDoSilo = resolveSiloWorkingCopyIdentity({
+          territoryName: territorio.territory.name || null,
+          centralEntity: territorio.territory.centralEntity || null,
+          publishedSlug: territorio.territory.slugState?.publishedSlug ?? null,
+          publishedCanonical: territorio.territory.slugState?.publishedCanonical ?? null,
+          confirmedSlug: territorio.territory.slugState?.confirmed ?? null,
+          proposedSlug: (territorio.territory.slugState?.proposals || [])
+            .find(proposal => proposal.source === "human")?.slug ?? null,
+        });
+        const slug = semBarras(identidadeDoSilo.slug);
+        const entrada = (brandSiteSnapshot?.catalog || [])
+          .find(item => semBarras(String(item.normalizedUrl || "").replace(/^[^/]*\//, "")) === slug) || null;
+        const identidade = resolveSiloPagePublicationIdentity({
+          slug,
+          brandSiteUrl: origem,
+          observation: entrada
+            ? {
+              verificationStatus: entrada.verificationStatus,
+              resolvedUrl: entrada.resolvedUrl ?? null,
+              declaredCanonicalUrl: entrada.declaredCanonicalUrl ?? null,
+              normalizedCanonicalUrl: entrada.normalizedCanonicalUrl ?? null,
+              lastVerifiedAt: entrada.lastSeenAt ?? null,
+            }
+            : null,
+        });
+        const motivo = siloPageCanonicalRefusal(identidade);
+        if (!motivo) return [];
+        return [{
+          siloId: `working-copy:${remote.workingCopy.territoryRef}`,
+          label: String(identidadeDoSilo.name || remote.workingCopy.name || remote.workingCopy.territoryRef),
+          siloDna: "não consolidado",
+          siloPage: "cópia de trabalho, ainda não gravada",
+          canonical: "ausente",
+          publication: identidade.publicationStatus === "published" ? "publicada" : "ainda não publicada",
+          ready: false,
+          closed: false,
+          blockers: [motivo],
+        }];
+      });
+    return [...paginasGravadas, ...semPaginaGravada];
+  }, [acceptedSiloPages, acceptedSiloDnas, siloPageAuthorities, brandSiteSnapshot, brands, selectedBrandId, versionEvents, remoteSiloWorkingCopies, remoteTerritories, consolidatedTerritoryRefs]);
 
   /**
    * O QUE FALTA PARA A CÓPIA DE TRABALHO VOLTAR A REPRESENTAR OS APROVADOS.
@@ -8905,16 +8973,39 @@ export default function ArquitetoPage() {
         relationType: edge.relationType,
         structuralReason: edge.reason,
       }));
-      const resposta = await callStrategicApi<{
+      /*
+       * Em lotes de até 40 conexões (D3, 2026-10-12): um Silo de 30 artigos
+       * tem 89 conexões no esqueleto, e um pedido só passava do teto da rota a
+       * partir de 14 artigos. Os lotes rodam em sequência; se um falhar depois
+       * de outros já respondidos, o que veio é guardado e a falha é dita — a
+       * conexão sem resposta segue com os conceitos de partida.
+       */
+      const lotes = batchLinkAnchorRequests(units, candidates);
+      const resposta: {
         proposals: { sourceRef: string; targetRef: string; anchorConcepts: { text: string }[] }[];
         rejected: { sourceRef: string; targetRef: string; anchor: string; code: string }[];
-        summary: string;
-      }>("/api/arquiteto/internal-link-graph/anchors", {
-        brandId: selectedBrandId,
-        siloId,
-        units,
-        candidates,
-      });
+      } = { proposals: [], rejected: [] };
+      let falhaDoLote: string | null = null;
+      for (let indice = 0; indice < lotes.length; indice += 1) {
+        try {
+          const parcial = await callStrategicApi<{
+            proposals: { sourceRef: string; targetRef: string; anchorConcepts: { text: string }[] }[];
+            rejected: { sourceRef: string; targetRef: string; anchor: string; code: string }[];
+            summary: string;
+          }>("/api/arquiteto/internal-link-graph/anchors", {
+            brandId: selectedBrandId,
+            siloId,
+            units: lotes[indice].units,
+            candidates: lotes[indice].candidates,
+          });
+          resposta.proposals.push(...parcial.proposals);
+          resposta.rejected.push(...parcial.rejected);
+        } catch (error) {
+          if (!resposta.proposals.length && !resposta.rejected.length) throw error;
+          falhaDoLote = `O lote ${indice + 1} de ${lotes.length} falhou: ${error instanceof Error ? error.message : "erro desconhecido"}`;
+          break;
+        }
+      }
       // O conceito chega como OBJETO — texto, relação semântica e motivo. A
       // aresta guarda só o texto: atribuir o objeto inteiro fazia o contrato do
       // grafo recusar a working copy inteira, e a recusa acontecia depois da IA
@@ -8948,7 +9039,11 @@ export default function ArquitetoPage() {
       await persistLinksWorkingCopy(persistida, "edit");
       const aceitas = resposta.proposals.length;
       const recusadas = resposta.rejected.length;
-      showNotification("success", `${aceitas} conexão(ões) com âncoras da IA · ${recusadas} devolvida(s) para revisão humana. A proposta é revisável: nada foi aprovado.`);
+      if (falhaDoLote) {
+        showNotification("warning", `${aceitas} conexão(ões) com âncoras da IA · ${recusadas} devolvida(s) para revisão humana. ${falhaDoLote}. As conexões desse lote em diante seguem com os conceitos de partida; gere de novo para completar. Nada foi aprovado.`);
+        return persistida;
+      }
+      showNotification("success", `${aceitas} conexão(ões) com âncoras da IA · ${recusadas} devolvida(s) para revisão humana${lotes.length > 1 ? ` (${lotes.length} lotes)` : ""}. A proposta é revisável: nada foi aprovado.`);
       return persistida;
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "Não foi possível gerar o mapa de âncoras.");

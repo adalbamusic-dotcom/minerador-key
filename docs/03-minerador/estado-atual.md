@@ -1,5 +1,85 @@
 # Estado atual — Minerador
 
+## Grupos por cor no Minerador (F1) — 2026-10-12
+
+```text
+SDD = docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md (aprovada pelo dono em 2026-10-12; fase F1; dono do módulo: Minerador)
+MIGRATION = supabase/migrations/20261013120000_grupos_editoriais.sql — NÃO APLICADA (o dono aplica)
+ROLLBACK = supabase/rollback/20261013120000_grupos_editoriais.rollback.sql
+ESCRITA_REMOTA = 0 · SQL_REMOTO = só SELECT de leitura · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** A
+persistência é remota (Supabase), mas só existe depois que o dono aplicar a
+M1; até lá o recurso fica escondido e o Minerador lê exatamente como antes.
+
+- **Banco (M1, a aplicar):** `editorial_groups` (nome, cor, origem, status,
+  plano do Silo para a F4, `lock_version`), `editorial_group_articles` (vazia
+  até a F2), `editorial_group_events` (append-only, gatilho recusa UPDATE e
+  DELETE), `minerador_keywords.group_id` com FK composta
+  `(group_id, brand_id) → editorial_groups(id, marca_id)` e `ON DELETE
+  RESTRICT`, `minerador_keywords_listagem` com `group_id` no fim e
+  `editorial_group_summary` (contagens). Escrita nas tabelas de grupo só pelo
+  servidor (`service_role`); `authenticated` só lê, por `can_access_brand`.
+  Guardas `GRUPOS_PRE` e pós-checagem `GRUPOS_POS`; nenhum dado é mexido.
+- **Código:** domínio `lib/editorial/editorial-groups.ts`; repositório
+  `lib/editorial/editorial-groups-store.ts`; servidor
+  `lib/server/editorial-groups.ts`; núcleo
+  `lib/minerador/keyword-group-core.ts` (`assignKeywordGroupWithCore`, o
+  escritor único de `group_id`, conferido por teste estrutural).
+- **Rotas:** `GET /api/editorial/groups?marcaId=` (grupos + "Sem grupo"; lê
+  quem vê qualquer área editorial da marca), `POST` (criar: nome + cor) e
+  `PATCH` (renomear, recolorir, arquivar, reativar, com `lockVersion`) com
+  `minerador:edit`; `POST /api/minerador/marcas/[brandId]/keywords/group`
+  (`{ keywordIds, groupId | null }`, `minerador:edit`). Sem a M1: `409
+  GROUPS_NOT_AVAILABLE`.
+- **Tela (Processar Keywords):** seletor `components/editorial/group-selector.tsx`
+  ao lado das abas da topbar ("Todos os grupos", "Sem grupo", cada grupo com
+  bolinha, nome e contagem, e "Novo grupo" com as 5 cores nomeadas); faixa de
+  4 px na primeira célula e etiqueta (`components/editorial/group-tag.tsx`)
+  embaixo da keyword; "Grupo ▸ Mover para… / Tirar do grupo" no rodapé
+  (≥ 1700 px) e em "Mais ações" (abaixo disso). Hook
+  `modules/minerador/use-minerador-groups.ts`.
+- **Leitura por grupo:** a listagem do navegador ganha `.eq("group_id", id)`
+  ou `.is("group_id", null)`; "Todos os grupos" é a leitura de antes. A chave
+  da carga inclui o grupo; com grupo ativo, a poda do cache local da
+  Qualificação fica em `loaded-entities` (não apaga entradas das keywords de
+  fora do recorte). Se a coluna faltar com filtro ligado, a tela esconde o
+  recurso e relê tudo.
+- **Grupo ativo (D12):** a URL `?grupo=<id>` ou `?grupo=sem-grupo` é a fonte;
+  o último usado na marca fica em `localStorage`
+  (`minerador-key:grupo-ativo:<brandId>`) só como conveniência, com
+  try/catch; nada é limpo. Grupo sumido ou arquivado volta a "Todos".
+- **Etiquetar:** grava só `group_id` (pacote aprovado, status, DNA e
+  aprovação ficam intactos), em blocos de 200, e a linha só muda com o que o
+  UPDATE devolveu (releitura); o histórico registra `keywords_assigned` no
+  destino e `keywords_unassigned` na origem. Linha que saiu do grupo ativo
+  sai da visão, com o aviso. Assunto/principal com plano declarado (F4) já é
+  recusado (`KEYWORD_PLAN_ANCHORED`).
+- **Isolamento:** grupo é lido na marca da rota; keyword de outra marca é "não
+  encontrada" e nunca é escrita; a FK composta e a RLS repetem a regra no banco.
+  Na troca de marca a planilha espera a decisão de grupos da marca nova sem
+  mostrar linha da anterior.
+- **Decisão de tela:** a etiqueta fica na célula da keyword, sem coluna
+  "Grupo" nova — preserva o contrato de larguras da planilha
+  (`useKeywordTableResponsiveWidths`). Coluna dedicada fica como opção.
+- **Compartilhados (aditivos):** `app/globals.css` (aliases `--group-*`),
+  `docs/compartilhado/sistema-visual.md` §5.0.2, `lib/minerador/table-view.ts`
+  (`group_id?` opcional no tipo), `lib/agent/platform-catalog.ts` (operação
+  `minerador.keyword_groups`). Consumidores preservados: a listagem sem grupo,
+  o Arquiteto (não lê grupo), o MCP (sem ferramenta nova).
+- **Testes:** `tests/minerador-grupos-f1.test.mts` 20/20 (domínio, repositório e
+  núcleo com banco de mentira, isolamento entre marcas, migration, tela,
+  paleta). Atualizados com o motivo: `minerador-qualificacao-cache-versoes`,
+  `minerador-semantic-qualification-persistence` (poda com grupo ativo) e
+  `minerador-corretor-planilha-rodape` (breakpoint do "Grupo"). Minerador por
+  glob 1204 · 1176 · 28 (as mesmas 28 da base, por nome); `test:minerador:dom`
+  4/4; `test:agent` 73/73; `tsc` 0 erros; ESLint limpo nos arquivos novos e o
+  workspace com os mesmos 27 problemas do HEAD; `git diff --check` limpo.
+- **Pendente (dono):** aplicar a M1 (ensaio, `db query -f`, `migration repair`)
+  e homologar na tela: criar grupo, etiquetar, trocar de grupo, F5 com
+  `?grupo=`, outra marca sem o grupo.
+
 ## Medir Volume pelo MCP — 2026-09-30
 
 ```text

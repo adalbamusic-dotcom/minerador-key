@@ -162,7 +162,8 @@ describe("Workbench de processos do Arquiteto", () => {
     assert.match(siloProjection, /const siloPageColumnX = 8/);
     assert.match(siloProjection, /const pillarColumnX = 280/);
     assert.match(siloProjection, /const supportColumnX = 552/);
-    assert.match(siloProjection, /const supportArticleIds = silo\.supportArticleIds\.slice\(0, 6\)/);
+    // D3 (dono, 2026-10-12): Silo de até 30 artigos — o mapa mostra todos os Suportes.
+    assert.match(siloProjection, /const supportArticleIds = silo\.supportArticleIds;/);
     assert.match(siloProjection, /const supportStep = 148/);
     assert.match(siloProjection, /let siloY = 18/);
     assert.match(siloProjection, /siloY \+= siloHeight \+ siloGap/);

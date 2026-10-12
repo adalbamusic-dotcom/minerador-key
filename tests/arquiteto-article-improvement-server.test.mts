@@ -38,7 +38,13 @@ class Query {
   filters: [string, any][] = [];
   eq(k: string, v: any) { this.filters.push([k,v]); return this; }
   select() { return this; }
-  async maybeSingle() { return { data: clone(journal.find(r => this.filters.every(([k,v]) => r[k] === v)) ?? null), error: null }; }
+  // A busca da execução reaproveitável (2026-10-12): filtro por campo do payload, mais recente primeiro.
+  gte() { return this; }
+  order() { return this; }
+  limit() { return this; }
+  matches(r: any) { return this.filters.every(([k,v]) => k.startsWith("payload->>") ? r.payload?.[k.slice(10)] === v : r[k] === v); }
+  async maybeSingle() { return { data: clone(journal.find(r => this.matches(r)) ?? null), error: null }; }
+  then(resolve: any, reject: any) { return Promise.resolve({ data: journal.filter(r => this.matches(r)).reverse().map(clone), error: null }).then(resolve, reject); }
 }
 const context: any = { brandId, actorUserId, module: "arquiteto", action: "edit", supabase: { from: () => new Query() } };
 const runtime: any = { context, authorize: async (module: string, action: string) => ({ ...context, module, action }) };
@@ -99,7 +105,7 @@ mock.module("../lib/server/arquiteto-article-formation-marker-store.ts", { named
 } });
 mock.module("../lib/server/pipeline-repositories.ts", { namedExports: { WorkflowRepository: class {
   context: any; constructor(c: any){this.context=c;}
-  async create(input: any){ journal.push({id:"journal", marca_id:this.context.brandId,subject_type:input.subjectType,subject_id:input.subjectId,stage:input.stage,payload:jsonb(clone(input.payload)),lock_version:1}); }
+  async create(input: any){ journal.push({id:journal.length?`journal-${journal.length}`:"journal", marca_id:this.context.brandId,subject_type:input.subjectType,subject_id:input.subjectId,stage:input.stage,payload:jsonb(clone(input.payload)),lock_version:1}); }
   async update(id: string,lock: number,input: any){const r=journal.find(r=>r.id===id&&r.marca_id===this.context.brandId); assert.equal(r.lock_version,lock); Object.assign(r,{...clone(input),...(input.payload?{payload:jsonb(clone(input.payload))}:{})});r.lock_version++;return{data:clone(r)};}
 } } });
 const subjectImportActual = await import("../lib/minerador/subject-discovery-import.ts");
@@ -177,7 +183,7 @@ test("external idea is qualified only after acceptance; real ID replaces tempora
   setup();external=true;rows=rows.slice(0,1);
   const logic=deriveLogicalKeywordBatchItem({id:oldId,keyword:discoveredPhrase,location:null,intent:null,analise_semantica:{}},null,new Date().toISOString());
   rows[0].analise_semantica=logic.update.analise_semantica;rows[0].canonicalWorkflow.payload.approvedDna.analiseSemantica=logic.update.analise_semantica;rows[0].canonicalWorkflow.payload.semanticQualification={};
-  const run=await prepare();assert.equal(run.proposals[0].status,"ready",JSON.stringify(run.proposals));assert.equal(qualification.length,0);assert.equal(rows.length,1);
+  const run=await handleArticleImprovement(runtime,{brandId,action:"prepare",discover:true});assert.equal(run.proposals[0].status,"ready",JSON.stringify(run.proposals));assert.equal(qualification.length,0);assert.equal(rows.length,1);
   await assert.rejects(()=>apply(run),/explicitamente/);
   const result=await handleArticleImprovement(runtime,{brandId,action:"apply",runId:run.runId,decisionHash:run.decisionHash,approveNewKeywords:true});
   assert.equal(result.outcomes[0].status,"improved",JSON.stringify(result.outcomes));assert.deepEqual(qualification,["import","logic","metrics","approve","handoff"]);
@@ -282,7 +288,7 @@ test("IA com id inventado ou keyword barrada não vira proposta; só o que passa
 test("falha da IA não derruba: aviso único e a ordem segue lista → busca nova no Google Ads", async () => {
   setup(); listCandidate(); external = true;
   const { runtime: comIa } = aiRuntime(async () => { throw new Error("A IA excedeu o tempo limite."); });
-  const run = await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  const run = await handleArticleImprovement(comIa, { brandId, action: "prepare", discover: true });
   assert.equal(run.editorialAi?.status, "failed");
   assert.equal(run.notices.filter(n => /Leitura da IA indisponível agora/.test(n)).length, 1);
   assert.deepEqual(events.slice(0, 2), ["ia", "busca"], "a IA na lista vem antes da busca nova");
@@ -528,4 +534,94 @@ test("keyword que está na formação da mesa do publicado e fora do DNA é do p
   const liberada = rows.find(r => r.id === sobra);
   assert.equal(liberada.articleFormationRef ?? null, null, "liberada da formação da mesa");
   assert.match(result.outcomes[0].message, /keyword antiga sem volume validado.*liberada para “Keywords não agrupadas”/);
+});
+
+/*
+ * MELHORIA SEM RETRABALHO (WifiConecta, 2026-10-12). Nove "Preparar" numa
+ * tarde, cada um com IA e busca nova no Google Ads de novo. Agora: mesmos
+ * insumos reaproveitam a execução anterior (zero chamada nova de IA e de
+ * busca), a busca nova só roda sob pedido, e as duas chamadas vão para o
+ * registro de uso (integration_usage_events) pelo runtime injetado.
+ */
+function usageRuntime(base: any) {
+  const usage: any[] = [];
+  return { usage, runtime: { ...base, recordUsage: async (event: any) => { usage.push(event); } } };
+}
+
+test("2026-10-12 · Preparar de novo com os mesmos insumos reaproveita a execução: zero chamada nova de IA e de busca", async () => {
+  setup(); listCandidate();
+  const { prompts, runtime: comIa } = aiRuntime(async () => aiPick);
+  const { usage, runtime: comUso } = usageRuntime(comIa);
+  const primeira = await handleArticleImprovement(comUso, { brandId, action: "prepare" });
+  assert.equal(prompts.length, 1);
+  assert.equal(primeira.reusedFromRunId, null);
+  assert.match(primeira.inputsHash ?? "", /^[a-f0-9]{64}$/);
+  assert.deepEqual(usage.map(u => [u.kind, u.resultStatus, u.runId]), [["editorial_ai", "succeeded", primeira.runId]], "a IA vai para o registro de uso");
+  const medidasAntes = legacyAsked.length;
+  const segunda = await handleArticleImprovement(comUso, { brandId, action: "prepare" });
+  assert.equal(prompts.length, 1, "a IA não é chamada de novo");
+  assert.ok(!events.includes("busca"), "nenhuma busca nova no Google Ads");
+  assert.equal(usage.length, 1, "nada novo no registro de uso");
+  assert.notEqual(segunda.runId, primeira.runId);
+  assert.equal(segunda.reusedFromRunId, primeira.runId);
+  assert.equal(segunda.editorialAi?.status, "answered");
+  assert.deepEqual(segunda.proposals.map(p => [p.targetId, p.status, p.evidenceBasis]), primeira.proposals.map(p => [p.targetId, p.status, p.evidenceBasis]));
+  assert.ok(segunda.notices.some(n => /reaproveitei a leitura da IA/.test(n)), JSON.stringify(segunda.notices));
+  assert.equal(legacyAsked.length, medidasAntes, "as medições também não são repetidas");
+});
+
+test("2026-10-12 · insumo diferente (lista mudou) prepara de novo, com a IA", async () => {
+  setup(); listCandidate();
+  const { prompts, runtime: comIa } = aiRuntime(async () => aiPick);
+  await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  rows[1].volume_search = 480;
+  const outra = await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  assert.equal(prompts.length, 2);
+  assert.equal(outra.reusedFromRunId, null);
+});
+
+test("2026-10-12 · leitura da IA que falhou não é semente: só ela é tentada de novo", async () => {
+  setup(); listCandidate();
+  let falhar = true;
+  const { prompts, runtime: comIa } = aiRuntime(async () => { if (falhar) throw new Error("A IA excedeu o tempo limite."); return aiPick; });
+  const { usage, runtime: comUso } = usageRuntime(comIa);
+  const primeira = await handleArticleImprovement(comUso, { brandId, action: "prepare" });
+  assert.equal(primeira.editorialAi?.status, "failed");
+  assert.deepEqual(usage.map(u => [u.kind, u.resultStatus]), [["editorial_ai", "failed"]], "a chamada que falhou também fica no registro");
+  falhar = false;
+  const segunda = await handleArticleImprovement(comUso, { brandId, action: "prepare" });
+  assert.equal(prompts.length, 2);
+  assert.equal(segunda.reusedFromRunId, primeira.runId);
+  assert.equal(segunda.editorialAi?.status, "answered");
+  assert.ok(segunda.notices.some(n => /tinha falhado e foi tentada de novo/.test(n)));
+});
+
+test("2026-10-12 · a busca nova no Google Ads só roda sob pedido, e cada chamada vai para o registro de uso", async () => {
+  setup(); external = true; rows = rows.slice(0, 1);
+  const logic = deriveLogicalKeywordBatchItem({ id: oldId, keyword: discoveredPhrase, location: null, intent: null, analise_semantica: {} }, null, new Date().toISOString());
+  rows[0].analise_semantica = logic.update.analise_semantica; rows[0].canonicalWorkflow.payload.approvedDna.analiseSemantica = logic.update.analise_semantica; rows[0].canonicalWorkflow.payload.semanticQualification = {};
+  const { usage, runtime: comUso } = usageRuntime(runtime);
+  const semPedido = await handleArticleImprovement(comUso, { brandId, action: "prepare" });
+  assert.ok(!events.includes("busca"), "prepare sem pedido não busca");
+  assert.equal(semPedido.discovery?.requested, false);
+  assert.deepEqual(semPedido.discovery?.gapTargetIds, [oldId]);
+  assert.notEqual(semPedido.proposals[0].status, "ready");
+  assert.ok(semPedido.notices.some(n => /não roda sozinha/.test(n)), JSON.stringify(semPedido.notices));
+  assert.equal(usage.length, 0);
+  const comPedido = await handleArticleImprovement(comUso, { brandId, action: "prepare", discover: true });
+  assert.deepEqual(events.filter(e => e === "busca").length, 1);
+  assert.equal(comPedido.discovery?.requested, true);
+  assert.equal(comPedido.discovery?.requests, 1);
+  assert.equal(comPedido.reusedFromRunId, semPedido.runId, "a busca pedida reaproveita o resto da preparação");
+  assert.equal(comPedido.proposals[0].status, "ready", JSON.stringify(comPedido.proposals));
+  assert.deepEqual(usage.map(u => [u.kind, u.resultStatus, u.runId, u.suffix, u.receivedCount]), [["google_ads_discovery", "succeeded", comPedido.runId, "url_seed:p1", 1]]);
+});
+
+test("2026-10-12 · registro de uso que falha não derruba a preparação e fica dito", async () => {
+  setup(); listCandidate();
+  const { runtime: comIa } = aiRuntime(async () => aiPick);
+  const run = await handleArticleImprovement({ ...comIa, recordUsage: async () => { throw new Error("ledger fora"); } }, { brandId, action: "prepare" });
+  assert.equal(run.state, "prepared");
+  assert.equal(run.editorialAi?.status, "answered");
+  assert.equal(run.notices.filter(n => /registro de uso de uma chamada desta preparação não foi confirmado/.test(n)).length, 1);
 });

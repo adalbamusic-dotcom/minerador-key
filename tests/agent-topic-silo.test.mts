@@ -87,12 +87,12 @@ test("08 · plano correto passa, com slugs preenchidos e próximos passos", () =
   assert.match(resultado.nextSteps.join(" "), /declare_subjects/);
 });
 
-test("09 · fora de 4 a 7 artigos é bloqueio", () => {
+test("09 · fora de 4 a 30 artigos é bloqueio (D3, 2026-10-12)", () => {
   const plano = planoBom();
   plano.articles = plano.articles.slice(0, 3);
   const resultado = validateSiloPlan(plano, contextoVazio);
   assert.equal(resultado.ok, false);
-  assert.ok(resultado.issues.some(issue => issue.severity === "block" && /4 a 7/.test(issue.message)));
+  assert.ok(resultado.issues.some(issue => issue.severity === "block" && /4 a 30/.test(issue.message)));
 });
 
 test("10 · sem Pilar, ou com dois, é bloqueio", () => {

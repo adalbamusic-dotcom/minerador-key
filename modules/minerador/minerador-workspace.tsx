@@ -109,6 +109,10 @@ import { applyApproval, resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERA
 import type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";
 import { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legacy-import";
 import { KeywordTableBulkBarShell } from "./keyword-table/keyword-table-bulk-bar-shell";
+import { useMineradorGroups } from "./use-minerador-groups";
+import { EditorialGroupSelector } from "@/components/editorial/group-selector";
+import { EditorialGroupTag } from "@/components/editorial/group-tag";
+import { EDITORIAL_GROUP_COLOR_CLASSES, editorialGroupFilterMatches, isEditorialGroupsSchemaMissing } from "@/lib/editorial/editorial-groups";
 import { KeywordTableEmptyState } from "./keyword-table/keyword-table-empty-state";
 import { KeywordTableHeader } from "./keyword-table/keyword-table-header";
 import { KeywordTableOrganizeButton } from "./keyword-table/keyword-table-organize-button";
@@ -174,7 +178,12 @@ interface KeywordItem {
   created_at?: string;
   deleted_at?: string | null;
   purge_after?: string | null;
+  /** Grupo editorial da keyword (F1, SDD 2026-10-12). Ausente antes da migration M1. */
+  group_id?: string | null;
 }
+
+/** Valor do seletor "Grupo" do rodapé que tira as selecionadas do grupo. */
+const GROUP_BATCH_REMOVE = "__sem_grupo__";
 
 function keywordPublicationProtected(item: Pick<KeywordItem, "status" | "analise_semantica">): boolean {
   return resolveKeywordPublication({ status: item.status, semantic: item.analise_semantica || null }).isPublished;
@@ -494,6 +503,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   // Cache das versões imutáveis da Qualificação (E8), em banco IndexedDB próprio.
   const qualificationVersionCache = useMemo(() => createIndexedDbQualificationVersionCacheStorage(), []);
   const activeBrand = brands.find(b => b.id === selectedBrandId) || null;
+  // Grupos por cor (F1, SDD 2026-10-12): sem a migration M1 o recurso some e a
+  // planilha lê como antes. O grupo ativo vai na URL (?grupo=) e a planilha
+  // espera essa decisão antes de carregar, para não ler duas vezes.
+  const keywordGroups = useMineradorGroups({ brandId: selectedBrandId || null, enabled: sessionStatus === "authenticated" });
 
 
 
@@ -1611,7 +1624,20 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       setLoading(false);
       return;
     }
-    const fetchKey = `${selectedBrandId || "sem-marca"}|${sessionStatus}`;
+    if (!keywordGroups.ready) {
+      // Espera a decisão dos grupos DESTA marca (uma leitura só). Enquanto
+      // isso, nenhuma carga em voo de outra marca é aplicada e nenhuma linha
+      // de outra marca fica na tela.
+      fetchDataActiveKeyRef.current = null;
+      if (fetchDataLoadedKeyRef.current && !fetchDataLoadedKeyRef.current.startsWith(`${selectedBrandId}|`)) {
+        fetchDataLoadedKeyRef.current = null;
+        setKeywords([]);
+        setSelectedIds(new Set());
+      }
+      setLoading(true);
+      return;
+    }
+    const fetchKey = `${selectedBrandId || "sem-marca"}|${sessionStatus}|grupo:${keywordGroups.filterKey}`;
     if (fetchDataInFlightRef.current === fetchKey || fetchDataLoadedKeyRef.current === fetchKey) return;
     fetchDataInFlightRef.current = fetchKey;
     fetchDataActiveKeyRef.current = fetchKey;
@@ -1642,7 +1668,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       // 2. Carrega as keywords pertencentes a estes silos ou sem silo (lista_id is null)
       const loadedKeywords = await withSupabaseSelectRetry(async () => {
         const allowedListIds = loadedLists.map(l => l.id);
-        const lerDe = async (fonte: string) => {
+        const filtroDeGrupo = keywordGroups.filter;
+        const lerDe = async (fonte: string, comGrupo = true) => {
           let query = supabase
             .from(fonte)
              .select("*")
@@ -1656,6 +1683,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           } else {
             query = query.is("lista_id", null);
           }
+          // Recorte do grupo ativo (F1). "Todos os grupos" é a leitura de antes.
+          if (comGrupo && filtroDeGrupo.kind === "group") query = query.eq("group_id", filtroDeGrupo.groupId);
+          else if (comGrupo && filtroDeGrupo.kind === "none") query = query.is("group_id", null);
           return query;
         };
 
@@ -1664,6 +1694,12 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           // Migration ainda não aplicada: a tela funciona, só sem a economia.
           fonteDaListagem = MINERADOR_KEYWORDS_TABLE;
           ({ data: keywordsData, error: keywordsError } = await lerDe(MINERADOR_KEYWORDS_TABLE));
+        }
+        if (keywordsError && filtroDeGrupo.kind !== "all" && isEditorialGroupsSchemaMissing(keywordsError)) {
+          // A coluna de grupo não existe (migration M1 não aplicada): esconde o
+          // recurso e lê tudo, como antes.
+          keywordGroups.markUnavailable();
+          ({ data: keywordsData, error: keywordsError } = await lerDe(fonteDaListagem, false));
         }
         if (keywordsError) throw keywordsError;
         return keywordsData || [];
@@ -1703,7 +1739,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       // cache pode tirar tudo que não é vigente deste actor+Marca. Se a
       // listagem bateu no teto de linhas do PostgREST, ela pode ter vindo
       // cortada, e a poda fica restrita às keywords desta carga.
-      const persistedQualifications = await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)), qualificationVersionCachePruneForListing(loadedKeywords.length))
+      const persistedQualifications = await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)), keywordGroups.filter.kind === "all" ? qualificationVersionCachePruneForListing(loadedKeywords.length) : "loaded-entities")
         .catch(() => null);
       // A Marca pode ter mudado durante a leitura: a Qualificação de uma Marca
       // nunca entra no estado de outra.
@@ -2054,7 +2090,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     } else if (sessionStatus === "unauthenticated") {
       setLoading(false);
     }
-  }, [selectedBrandId, sessionStatus, supabase]);
+    // O recorte do grupo entra na chave da carga: trocar de grupo relê.
+  }, [selectedBrandId, sessionStatus, supabase, keywordGroups.ready, keywordGroups.filterKey]);
 
   /**
    * Expandir traz as séries de medição desta keyword — e só dela.
@@ -3689,6 +3726,68 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     setFilterProcess("Todos");
   };
 
+  /**
+   * "Grupo ▸ Mover para… / Tirar do grupo" (F1). Grava pela rota — o escritor
+   * único de group_id — e só muda a linha que o servidor confirmou na
+   * releitura. Mexe só no grupo: status, aprovação e DNA ficam como estão.
+   */
+  const handleBatchGroup = async (choice: string) => {
+    if (!choice || !keywordGroups.available) return;
+    const ids = [...selectedIds];
+    if (ids.length === 0) {
+      showNotification("error", "Selecione pelo menos uma keyword.");
+      return;
+    }
+    const targetGroupId = choice === GROUP_BATCH_REMOVE ? null : choice;
+    const destino = targetGroupId ? keywordGroups.groupById.get(targetGroupId) : null;
+    if (targetGroupId && !destino) {
+      showNotification("error", "Grupo não encontrado nesta marca. Abra o seletor de grupo para recarregar.");
+      return;
+    }
+    setUpdating(true);
+    try {
+      const result = await keywordGroups.assignKeywords(ids, targetGroupId);
+      if (!result.ok) {
+        showNotification("error", result.message, { code: result.code, stage: "keyword_group" });
+        return;
+      }
+      const confirmed = new Set(result.moved);
+      const continuaNaVisao = editorialGroupFilterMatches(keywordGroups.filter, targetGroupId);
+      setKeywords(current => current
+        .map(item => confirmed.has(item.id) ? { ...item, group_id: targetGroupId } : item)
+        .filter(item => continuaNaVisao || !confirmed.has(item.id)));
+      if (!continuaNaVisao && confirmed.size) {
+        setSelectedIds(current => new Set([...current].filter(id => !confirmed.has(id))));
+      }
+      const partes = [targetGroupId
+        ? `${result.moved.length} keyword(s) movida(s) para o grupo "${destino?.name}"`
+        : `${result.moved.length} keyword(s) tirada(s) do grupo`];
+      if (result.unchanged.length) partes.push(`${result.unchanged.length} já estava(m) nele`);
+      if (result.refused.length) partes.push(`${result.refused.length} recusada(s): ${result.refused[0].message}`);
+      if (result.notConfirmed.length) partes.push(`${result.notConfirmed.length} sem confirmação do servidor — recarregue a página`);
+      if (!continuaNaVisao && confirmed.size) partes.push("as movidas saíram desta visão do grupo");
+      showNotification(result.refused.length || result.notConfirmed.length ? "warning" : "success", `${partes.join(" · ")}.`);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  // As abas de seção continuam no slot global; o seletor de grupo (F1) entra
+  // ao lado delas só quando a migration M1 existe. Memo: o registro da topbar
+  // não pode receber um elemento novo a cada render.
+  const sectionTabsWithGroupSelector = useMemo(() => (keywordGroups.available
+    ? <div className="flex min-w-0 items-center gap-1.5">
+      {sectionTabs}
+      <EditorialGroupSelector
+        groups={keywordGroups.groups}
+        ungroupedCount={keywordGroups.ungroupedCount}
+        filter={keywordGroups.filter}
+        onChange={keywordGroups.setFilter}
+        onCreate={keywordGroups.createGroup}
+      />
+    </div>
+    : sectionTabs), [sectionTabs, keywordGroups.available, keywordGroups.groups, keywordGroups.ungroupedCount, keywordGroups.filter, keywordGroups.setFilter, keywordGroups.createGroup]);
+
   const { registerControls, unregisterControls } = useGlobalTopbarControlsRegistration();
   useEffect(() => {
     const globalTopbarControls: GlobalTopbarModuleControls = {
@@ -3736,11 +3835,11 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
         <AppMenu active="minerador" countLabel={topbarVisibleKeywordCount > 0 ? `${topbarVisibleKeywordCount} termos` : undefined} />
       </div>,
-      tabs: sectionTabs,
+      tabs: sectionTabsWithGroupSelector,
     };
     registerControls(globalTopbarControls);
     return () => unregisterControls(globalTopbarControls.moduleId);
-  }, [discoverySourceActions, organizeFilterSummary, organizeFilterTitle, organizeOpen, redoKeywords, searchQuery, sectionTabs, showNotification, topbarCanRedo, topbarCanUndo, topbarHistoryCount, topbarSelectedCount, topbarVisibleKeywordCount, undoKeywords, registerControls, unregisterControls, keywordHistory.entries.length]);
+  }, [discoverySourceActions, organizeFilterSummary, organizeFilterTitle, organizeOpen, redoKeywords, searchQuery, sectionTabs, showNotification, topbarCanRedo, topbarCanUndo, topbarHistoryCount, topbarSelectedCount, topbarVisibleKeywordCount, undoKeywords, registerControls, unregisterControls, keywordHistory.entries.length, sectionTabsWithGroupSelector]);
 
   if (sessionStatus === "loading") {
     return (
@@ -4031,10 +4130,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           <KeywordTableEmptyState className="p-16">
             <AlertTriangle className="w-6 h-6 text-slate-655 mx-auto mb-2" />
             <p className="font-bold text-slate-400">
-              {keywords.length === 0 ? "Nenhuma palavra-chave encontrada" : "Nenhuma keyword corresponde aos filtros atuais"}
+              {keywords.length === 0 && keywordGroups.filter.kind !== "all" ? "Nenhuma keyword neste grupo" : keywords.length === 0 ? "Nenhuma palavra-chave encontrada" : "Nenhuma keyword corresponde aos filtros atuais"}
             </p>
             <p className="text-[10px] text-slate-600 mt-1">
-              {keywords.length === 0 ? "Insira palavras do banco ou importe candidatas da Descoberta." : `${keywords.length} keyword(s) carregada(s), mas nenhuma corresponde à organização atual.`}
+              {keywords.length === 0 && keywordGroups.filter.kind !== "all" ? "Escolha 'Todos os grupos' no seletor do topo, ou selecione keywords e use Grupo ▸ Mover para… no rodapé." : keywords.length === 0 ? "Insira palavras do banco ou importe candidatas da Descoberta." : `${keywords.length} keyword(s) carregada(s), mas nenhuma corresponde à organização atual.`}
             </p>
           </KeywordTableEmptyState>
         ) : (
@@ -4284,6 +4383,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                     : "border-pending/50 bg-pending-soft text-pending";
 
                 const isExpanded = expandedRowId === item.id;
+                // Faixa e etiqueta do grupo (F1): cor só na faixa, nome sempre escrito.
+                const rowGroup = keywordGroups.available && item.group_id ? keywordGroups.groupById.get(item.group_id) : undefined;
 
                 return (
                   <Fragment key={item.id}>
@@ -4302,7 +4403,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                           : "hover:bg-surface-subtle"
                       }`}
                     >
-                      <td className="w-8 border-r border-divider/70 px-0.5 py-1 text-center">
+                      <td data-keyword-group-stripe={rowGroup ? rowGroup.color : undefined} className={`w-8 border-r border-divider/70 px-0.5 py-1 text-center ${rowGroup ? EDITORIAL_GROUP_COLOR_CLASSES[rowGroup.color].stripe : ""}`}>
                         <KeywordTableDragHandle
                           id={item.id}
                           label={item.keyword}
@@ -4336,6 +4437,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             >
                               {item.keyword}
                             </div>
+                            {rowGroup ? <EditorialGroupTag name={rowGroup.name} color={rowGroup.color} className="mt-0.5" /> : null}
                             {/* O endereço mora ao lado da palavra-chave, inteiro e
                                 com cor própria: é a identidade da página, não um
                                 detalhe do vínculo. Aparece assim que há URL
@@ -4769,6 +4871,23 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               Vínculo
               <ChevronDown className="h-4 w-4" aria-hidden="true" />
             </button>
+            {/* Grupo por cor (F1): mover as selecionadas para um grupo ou tirar do grupo. */}
+            {keywordGroups.available && (
+              <select
+                defaultValue=""
+                disabled={bulkActionProcessing || updating}
+                aria-label="Grupo das selecionadas"
+                data-keyword-group-batch
+                onChange={(event) => { const choice = event.target.value; event.currentTarget.value = ""; if (choice) void handleBatchGroup(choice); }}
+                className={`hidden min-h-9 w-20 shrink-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 min-[1700px]:block sm:w-24 sm:px-2 ${BULK_SELECT_THEME}`}
+                title="Mover as keywords selecionadas para um grupo, ou tirar do grupo. Muda só o grupo: status, aprovação e DNA ficam como estão."
+              >
+                <option value="">Grupo</option>
+                {keywordGroups.activeGroups.length === 0 ? <option value="" disabled>Crie um grupo no seletor do topo</option> : null}
+                {keywordGroups.activeGroups.map(group => <option key={group.id} value={group.id}>Mover para {group.name}</option>)}
+                <option value={GROUP_BATCH_REMOVE}>Tirar do grupo</option>
+              </select>
+            )}
             {/* Ordem do fluxo humano: KGR → Vínculo → concluir revisão → definir status. */}
             <MineradorProcessAction
               title="Concluir a revisão humana das selecionadas"
@@ -4851,6 +4970,23 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                   <span>Vínculo</span>
                   <ChevronRight className="h-4 w-4" aria-hidden="true" />
                 </button>
+                {keywordGroups.available && (
+                  <label className="flex items-center justify-between gap-3 rounded px-3 py-2 text-sm font-medium text-text-muted min-[1700px]:hidden">
+                    <span>Grupo</span>
+                    <select
+                      defaultValue=""
+                      disabled={bulkActionProcessing || updating}
+                      aria-label="Grupo das selecionadas"
+                      onChange={(event) => { const choice = event.target.value; event.currentTarget.value = ""; if (choice) { setMoreActionsOpen(false); void handleBatchGroup(choice); } }}
+                      className={`min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 ${BULK_SELECT_THEME}`}
+                    >
+                      <option value="">Selecionar</option>
+                      {keywordGroups.activeGroups.length === 0 ? <option value="" disabled>Crie um grupo no seletor do topo</option> : null}
+                      {keywordGroups.activeGroups.map(group => <option key={group.id} value={group.id}>Mover para {group.name}</option>)}
+                      <option value={GROUP_BATCH_REMOVE}>Tirar do grupo</option>
+                    </select>
+                  </label>
+                )}
                 <InfoHint title="Enviar ao Arquiteto" description="Envia as keywords aprovadas para a etapa de formação de artigos.">
                   <button
                     type="button"

@@ -5,6 +5,7 @@ import { OperationProgress } from "./operation-progress";
 import { ARTICLE_IMPROVEMENT_LABEL, IMPROVEMENT_AI_LABEL, IMPROVEMENT_LIST_CORE_LABEL, isListReading } from "@/lib/arquiteto/article-improvement";
 import { ARTICLES_NEW_ANCHOR, ARTICLES_SOBRAS_ANCHOR, improvementApplyLabel, improvementValidateLabel, resolveImprovementNextStep } from "@/lib/arquiteto/article-improvement-next-step";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
+import { improvementDiscoveryCostSentence } from "@/lib/arquiteto/article-improvement-reuse";
 
 const statuses = { ready: "Pronto para aplicar", adequate: "Já adequado", insufficient_evidence: "Evidência insuficiente", no_alternative: "Sem alternativa compatível" };
 const outcomes = { improved: "Melhoria gravada", dna_created: "DNA criado", unchanged: "Sem mudança material", insufficient_evidence: "Evidência insuficiente", failed: "Falha recuperável" };
@@ -23,7 +24,7 @@ function originOf(p: Proposal, run: ImprovementRun): string | null {
 
 type Activity = { action: "prepare" | "collect" | "apply" | "status"; startedAt: number };
 const ACTIVITY_LABELS: Record<Activity["action"], string> = {
-  prepare: "Buscando keywords (Google Ads e leitura da IA)",
+  prepare: "Buscando keywords (lista da marca e leitura da IA)",
   collect: "Validando no Google",
   apply: "Gravando as melhorias",
   status: "Lendo o andamento",
@@ -63,7 +64,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [activity]);
-  const [confirm, setConfirm] = useState<"apply" | "collect" | null>(null);
+  const [confirm, setConfirm] = useState<"apply" | "collect" | "discover" | null>(null);
   const confirmRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { if (confirm) confirmRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [confirm]);
   useEffect(() => {
@@ -77,13 +78,15 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     }).catch(() => { if (active) setError("Não foi possível ler a análise anterior. Toque em “Atualizar”."); });
     return () => { active = false; mounted.current = false; };
   }, [brandId]);
-  async function send(action: "prepare" | "collect" | "apply" | "status", current = run): Promise<ImprovementRun> {
+  async function send(action: "prepare" | "collect" | "apply" | "status", current = run, options: { discover?: boolean } = {}): Promise<ImprovementRun> {
     const response = await fetch("/api/arquiteto/article-improvement", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ brandId, action,
       ...(action !== "prepare" ? { runId: current?.runId } : {}),
       ...(action === "collect" || action === "apply" ? { decisionHash: current?.decisionHash } : {}),
       ...(action === "collect" ? { authorizedCostUsd: current?.costs.estimatedCostUsd.max } : {}),
       ...(action === "apply" && !current?.acceptedIds ? { targetIds: [...selected], approveNewKeywords: true } : {}),
       ...(action === "prepare" && selectedTargetIds.length ? { targetIds: [...selectedTargetIds] } : {}),
+      // Busca nova no Google Ads só quando o dono pede, depois de ver o custo (2026-10-12).
+      ...(action === "prepare" && options.discover ? { discover: true } : {}),
     }) });
     // The platform answers a timeout with an HTML page, not JSON.
     const body = await response.json().catch(() => { throw new Error("TEMPO_ESGOTADO"); });
@@ -91,12 +94,12 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     if (!mounted.current || body.data.brandId !== brandId) throw new Error("A marca ativa mudou; consulte o andamento na marca de origem.");
     setRun(body.data); setLeaseActive(Boolean(body.data.leaseUntil && Date.parse(body.data.leaseUntil) > Date.now())); return body.data as ImprovementRun;
   }
-  async function execute(action: "prepare" | "collect" | "apply" | "status") {
+  async function execute(action: "prepare" | "collect" | "apply" | "status", options: { discover?: boolean } = {}) {
     setBusy(true); setError(null); setConfirm(null);
     const startedAt = Date.now();
     setActivity({ action, startedAt }); setNow(startedAt);
     try {
-      let current = await send(action);
+      let current = await send(action, run, options);
       if (action === "apply") {
         // One editorial acceptance; these requests resume the persisted accepted
         // batch, rather than asking the human to approve each internal step.
@@ -148,6 +151,8 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
   const pendingApply = Boolean(run && !done && (selected.size > 0 || run.acceptedIds?.length));
   const collecting = run?.state === "collecting";
   const needsCost = Boolean(run && !collecting && run.costs.paidQueries > 0 && !run.acceptedIds);
+  // Alvos que seguem sem proposta e ainda não tiveram a busca nova pedida nesta preparação.
+  const discoveryGaps = run && !collecting && !run.acceptedIds && run.state === "prepared" && !run.discovery?.requested ? run.discovery?.gapTargetIds.length ?? 0 : 0;
   /*
    * PRÓXIMO PASSO: uma frase e um botão, no topo. O botão do cartão faz o
    * MESMO ato do botão equivalente da fileira, que então sai da fileira para
@@ -205,7 +210,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
       <div className="min-w-0">
         <h3 className="flex items-center gap-1.5 font-semibold text-foreground" data-testid="architect-improvement-how">
           {ARTICLE_IMPROVEMENT_LABEL}
-          <InfoHint title="Como funciona" description="1 · Buscar keywords com volume para cada publicado e Assunto (Google Ads grátis; a leitura da IA usa a IA da plataforma (OpenRouter)): primeiro os pares da SERP que já estão no cache, depois a leitura da IA na lista da marca (confira o motivo de cada uma), depois a leitura da lista pelo código (keywords que são o núcleo do slug, com a palavra do próprio slug) e, só para quem ficar sem nada, busca nova no Google Ads. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
+          <InfoHint title="Como funciona" description="1 · Buscar keywords com volume para cada publicado e Assunto (Google Ads grátis; a leitura da IA usa a IA da plataforma (OpenRouter)): primeiro os pares da SERP que já estão no cache, depois a leitura da IA na lista da marca (confira o motivo de cada uma), depois a leitura da lista pelo código (keywords que são o núcleo do slug, com a palavra do próprio slug) e, só para quem ficar sem nada e quando você pedir (o custo é dito antes), busca nova no Google Ads. Buscar de novo com os mesmos alvos e a mesma lista reaproveita a leitura da IA, as medições e a busca, sem chamar de novo. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
         </h3>
         <p className="text-text-muted">URL, slug e canonical nunca mudam.</p>
         <p className="text-text-muted" data-testid="architect-improvement-scope">{selectedTargetIds.length
@@ -217,16 +222,19 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
         {!pendingApply && !collecting && !inCard("prepare") && <button className={buttonClassName} disabled={!brandId || busy || leaseActive} onClick={() => void execute("prepare")}>Buscar keywords (grátis)</button>}
         {pendingApply && !collecting && !inCard("resume_apply") && !inCard("apply") && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => run?.acceptedIds ? void execute("apply") : setConfirm("apply")}>{run?.acceptedIds ? "Continuar melhorias aceitas" : needsCost ? `Gravar sem validar (${selected.size})` : improvementApplyLabel(selected.size, false)}</button>}
         {pendingApply && !run?.acceptedIds && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => void execute("prepare")}>Buscar de novo</button>}
+        {discoveryGaps > 0 && <button className={buttonClassName} disabled={!brandId || busy || leaseActive} onClick={() => setConfirm("discover")}>Buscar keywords novas no Google Ads ({discoveryGaps})</button>}
         {needsCost && !inCard("validate") && <button className={buttonClassName} disabled={busy} onClick={() => setConfirm("collect")}>{improvementValidateLabel(run?.costs.paidQueries ?? 0, run?.costs.estimatedCostUsd.max ?? 0, false)}</button>}
         {run && (leaseActive || run.state === "applying") && !inCard("refresh") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("status")}>Atualizar</button>}
       </div>
     </div>
     {/* A confirmação abre logo abaixo dos botões: embaixo da tabela ela ficava fora da tela e o botão parecia não responder. */}
     {confirm && run && <div ref={confirmRef} className="mt-3 rounded-md border border-divider bg-surface-subtle p-3" role="region" aria-label="Confirmar prévia">
-      {confirm === "apply"
+      {confirm === "discover"
+        ? <><h4 className="font-semibold text-foreground">Busca nova no Google Ads</h4><p className="text-foreground">{improvementDiscoveryCostSentence(discoveryGaps)}</p><p className="text-text-muted">A leitura da IA e as medições desta preparação são reaproveitadas: nada disso é chamado de novo.</p></>
+        : confirm === "apply"
         ? <><h4 className="font-semibold text-foreground">Confirmar estas melhorias</h4><p className="text-foreground">Você aceita as trocas de principal Livre, as keywords que entram e saem, as mudanças de Silo e a aprovação das keywords novas nos {selected.size} item(ns) marcado(s). O servidor faz o resto e relê o resultado. Principal travada e identidade publicada ficam como estão. Nada é publicado nem reescrito no site.</p></>
         : <><h4 className="font-semibold text-foreground">Plano de SERP · {run.costs.paidQueries} chamada(s)</h4><p className="text-foreground">Custo estimado: US$ {run.costs.estimatedCostUsd.min.toFixed(4)} a {run.costs.estimatedCostUsd.max.toFixed(4)}. Teto da execução: US$ 1. O que já foi pago é reaproveitado. Cancelar não impede aplicar o que já está pronto.</p><ul className="my-2 list-disc pl-5 text-text-muted">{run.costs.missingDetails.map((raw, i) => { const item = raw as { keyword?: string; lens?: string; reason?: string }; return <li key={i}>{item.keyword} · {item.lens} · {item.reason}</li>; })}</ul></>}
-      <div className="mt-3 flex gap-2"><button className={buttonClassName} onClick={() => setConfirm(null)}>Cancelar</button><button className={primaryButtonClassName} onClick={() => void execute(confirm)}>{confirm === "apply" ? "Confirmar e aplicar" : "Autorizar este custo"}</button></div>
+      <div className="mt-3 flex gap-2"><button className={buttonClassName} onClick={() => setConfirm(null)}>Cancelar</button><button className={primaryButtonClassName} onClick={() => void (confirm === "discover" ? execute("prepare", { discover: true }) : execute(confirm))}>{confirm === "apply" ? "Confirmar e aplicar" : confirm === "discover" ? "Buscar no Google Ads" : "Autorizar este custo"}</button></div>
     </div>}
     {busy && <p role="status" className="sr-only">Processando; o andamento fica guardado no servidor.</p>}
     {error && <p role="alert" className="mt-2 text-warning">{error}</p>}

@@ -199,6 +199,43 @@ contagens (`3 keywords`), identificadores (`principalKeywordId`), rótulos de
 coluna, nomes de lista e textos de origem. O papel vale para o **valor textual
 da keyword**.
 
+### 5.0.2 Cores de grupo
+
+Decisão D4 do dono (SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md`,
+2026-10-12). Um **grupo editorial** é uma etiqueta de organização (nome + cor)
+que separa keywords — e, nas próximas fases, artigos e Silos — por lote de
+trabalho. São cinco cores, expostas como aliases em `app/globals.css`, sem
+nenhum valor bruto novo:
+
+| Cor do grupo | Alias | Token base |
+| --- | --- | --- |
+| Amarelo | `group-amarelo` | `pending` |
+| Azul | `group-azul` | `context-accent` |
+| Verde | `group-verde` | `positive-soft` |
+| Lima | `group-lima` | `highlight` |
+| Laranja | `group-laranja` | `warning` |
+
+Cada alias tem a versão suave `group-<cor>-soft` (o token a 18 % com
+`color-mix`). Ficam de fora de propósito: `module-accent` (interação),
+`action-accent` (ação), `danger`, `success`, `keyword` e as identidades.
+
+Regras:
+
+- a cor do grupo aparece **só** como faixa de 4 px à esquerda da linha
+  (`border-l-4 border-l-group-<cor>`), bolinha e borda/fundo suave da
+  etiqueta — **nunca a linha inteira pintada** (§8);
+- **nunca só a cor**: o nome do grupo sempre aparece junto (etiqueta com texto
+  de pelo menos 14 px, em `foreground`) — a cor reaproveita tons que também
+  marcam status (amarelo = `pending`, laranja = `warning`), e o nome desfaz a
+  ambiguidade (§11);
+- a etiqueta de grupo não é badge de status e não substitui nenhum;
+- a keyword continua `text-keyword` dentro de uma linha com grupo;
+- as classes por cor são literais em `lib/editorial/editorial-groups.ts`
+  (`EDITORIAL_GROUP_COLOR_CLASSES`): nenhum componente monta o nome da classe
+  por interpolação;
+- seletor de grupo compartilhado: `components/editorial/group-selector.tsx`;
+  etiqueta: `components/editorial/group-tag.tsx`.
+
 ### 5.1 Semântica obrigatória de status
 
 | Status | Token | Significado |
