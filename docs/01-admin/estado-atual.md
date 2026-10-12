@@ -2,11 +2,12 @@
 
 ## IA da plataforma pela OpenRouter — implementação local de 2026-10-11
 
-- **Decisão do dono:** deixar a DeepSeek e usar os créditos da OpenRouter. A capability `ai_generation` resolve a Connection global OpenRouter; modelo padrão `openai/gpt-6-luna-pro:batch`. Fonte: [adendo](../compartilhado/adendo-ia-openrouter-2026-10-11.md).
+- **Decisão do dono:** deixar a DeepSeek e usar os créditos da OpenRouter. A capability `ai_generation` resolve a Connection global OpenRouter; modelo padrão `openai/gpt-6-luna-pro`. Fonte: [adendo](../compartilhado/adendo-ia-openrouter-2026-10-11.md).
 - **Verificado no código:** runtime, resolvedor canônico, camada `structured-ai`, cliente OpenRouter, health check por `GET /api/v1/key`, card OpenRouter no painel de Integrações e DeepSeek rotulada como reserva. A chave `OPENROUTER_API_KEY` da env do servidor tem precedência sobre o Secret Store; a Connection continua sendo a âncora de autorização e do ledger.
 - **Estado remoto lido em 2026-10-11, sem escrita:** provider `openrouter` ativo; Connection global de produção READY com segredo; metadata ainda com o modelo antigo `deepseek/deepseek-v4-pro-0813`, que o código ignora. Connection DeepSeek READY e intocada.
 - **Confirmado por teste:** `test:ai-provider` com 42 testes, health check da OpenRouter, `test:integrations-runtime`, `test:arquiteto`, `test:agent`, `test:radar` e `test:redator` verdes; TypeScript e lint direcionado limpos. Nenhum teste chama a OpenRouter.
-- **Ainda não verificado:** painel renderizado com login de Admin, env na Vercel, deploy e a primeira geração real. A latência da variante batch contra os timeouts de 120 a 180 segundos só se prova no uso real.
+- **Correção de 2026-10-12:** a primeira geração real deu HTTP 404. A chamada de diagnóstico autorizada mostrou que a OpenRouter recusa a variante `:batch` no endpoint de chat. Sem `:batch`, a mesma chamada voltou HTTP 200 em cerca de 2 segundos. O padrão passou a ser `openai/gpt-6-luna-pro` e o resolvedor recusa `:batch` com instrução.
+- **Ainda não verificado:** painel renderizado com login de Admin, deploy com a correção e uma geração real pela plataforma.
 - **Falhas preexistentes fora do escopo:** probe DataForSEO em `platform-integrations-health`, `user-worker-1` sobre a duração da rota de melhoria de publicados, ajuda contextual que ainda espera o Planejador e uma checagem estrutural da revisão do Arquiteto.
 
 ## Exclusão de convite direto e 24 horas — implementação local de 2026-09-14

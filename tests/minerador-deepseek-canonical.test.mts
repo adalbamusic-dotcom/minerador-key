@@ -128,7 +128,7 @@ test("com OPENROUTER_API_KEY na env, a chave vem da env e o Secret Store não é
   // A metadata remota ainda aponta para um modelo DeepSeek: ela é ignorada e vale o padrão.
   assert.equal(result.model, OPENROUTER_DEFAULT_MODEL);
   assert.equal(result.modelSource, "default");
-  assert.equal(result.model, "openai/gpt-6-luna-pro:batch");
+  assert.equal(result.model, "openai/gpt-6-luna-pro");
 });
 
 test("sem a env, a chave sai do Secret Store da Connection no formato { OPENROUTER_API_KEY }", async () => {
@@ -156,11 +156,22 @@ test("credencial ausente ou fora do formato falha com código OpenRouter, sem pr
 
 test("modelo: OPENROUTER_MODEL vence, a metadata só vale com modelo conhecido e slug inválido é recusado", () => {
   assert.deepEqual(readOpenRouterModel(LEGACY_METADATA, { OPENROUTER_MODEL: "openai/gpt-6-luna-pro" }), { model: "openai/gpt-6-luna-pro", modelSource: "environment" });
-  assert.deepEqual(readOpenRouterModel({ openrouter_model: "openai/gpt-6-luna:batch" }, {}), { model: "openai/gpt-6-luna:batch", modelSource: "connection" });
+  assert.deepEqual(readOpenRouterModel({ openrouter_model: "openai/gpt-6.1-sol" }, {}), { model: "openai/gpt-6.1-sol", modelSource: "connection" });
+  // Metadata com a variante batch não é modelo conhecido: cai no padrão.
+  assert.deepEqual(readOpenRouterModel({ openrouter_model: "openai/gpt-6-luna-pro:batch" }, {}), { model: OPENROUTER_DEFAULT_MODEL, modelSource: "default" });
   assert.deepEqual(readOpenRouterModel({ openrouter: { model: "openai/gpt-6-luna" } }, {}), { model: "openai/gpt-6-luna", modelSource: "connection" });
   assert.deepEqual(readOpenRouterModel(LEGACY_METADATA, {}), { model: OPENROUTER_DEFAULT_MODEL, modelSource: "default" });
   assert.deepEqual(readOpenRouterModel(null, { OPENROUTER_MODEL: "   " }), { model: OPENROUTER_DEFAULT_MODEL, modelSource: "default" });
   assert.throws(() => readOpenRouterModel(null, { OPENROUTER_MODEL: "gpt 6 luna" }), (error: unknown) => error instanceof DeepSeekCanonicalError && error.code === "OPENROUTER_MODEL_NOT_ALLOWED" && error.status === 409);
+});
+
+// 2026-10-12: a OpenRouter respondeu 404 "cannot be used with the chat/completions endpoint (adapter OpenAIBatchAdapter)".
+test("a variante :batch na env é recusada com instrução, em vez de virar um 404 mudo do provider", () => {
+  assert.throws(
+    () => readOpenRouterModel(null, { OPENROUTER_MODEL: "openai/gpt-6-luna-pro:batch" }),
+    (error: unknown) => error instanceof DeepSeekCanonicalError && error.code === "OPENROUTER_MODEL_NOT_ALLOWED" && error.status === 409 && /sem :batch/.test(error.message),
+  );
+  assert.equal(OPENROUTER_DEFAULT_MODEL.endsWith(":batch"), false);
 });
 
 test("cabeçalho HTTP-Referer só usa URL http(s) válida; X-Title vai sempre", () => {

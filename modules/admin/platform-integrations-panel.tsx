@@ -241,7 +241,7 @@ function sourceEvidence(data: PlatformIntegrationsSnapshot, providerKeys: readon
 function openRouterModelSourceLabel(source: PlatformIntegrationsSnapshot["openRouterRuntime"]["modelSource"]) {
   if (source === "environment") return "Definido por OPENROUTER_MODEL na env do servidor.";
   if (source === "connection") return "Definido na metadata da Connection.";
-  if (source === "invalid_environment") return "OPENROUTER_MODEL tem valor inválido; as chamadas de IA vão falhar até corrigir a env.";
+  if (source === "invalid_environment") return "OPENROUTER_MODEL tem valor inválido ou usa a variante :batch, que não funciona no endpoint de chat; as chamadas de IA vão falhar até corrigir a env.";
   return "Sem OPENROUTER_MODEL na env; vale o padrão do código.";
 }
 
@@ -316,7 +316,7 @@ function apiStatus(data: PlatformIntegrationsSnapshot, definition: (typeof suppo
       return { label: "Precisa validar", tone: "text-warning", detail: `Credencial configurada; a connection precisa estar READY para a IA funcionar. Use Testar conexão. Modelo: ${runtime.model}.` };
     }
     if (runtime.modelSource === "invalid_environment") {
-      return { label: "Erro", tone: "text-danger", detail: `OPENROUTER_MODEL inválido na env do servidor (${runtime.model}). Corrija a env e refaça o deploy.` };
+      return { label: "Erro", tone: "text-danger", detail: `OPENROUTER_MODEL inválido na env do servidor (${runtime.model}). Se terminar em :batch, use o mesmo ID sem :batch. Corrija a env e refaça o deploy.` };
     }
     return { label: "Configurado", tone: "text-success", detail: `Connection READY. Modelo em uso: ${runtime.model}. ${openRouterModelSourceLabel(runtime.modelSource)} Credencial: ${chave}.` };
   }
