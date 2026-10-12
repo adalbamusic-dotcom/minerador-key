@@ -1,5 +1,12 @@
 # Estado atual — Radar
 
+## Nome do arquivo do CSV — 2026-10-12
+
+Pedido do dono, verificado no código e confirmado por teste; validado manualmente: não. O CSV "Para escrever" de um
+artigo só sai como `<posição no Silo>-<papel>-<slug>-para-escrever.csv` (ex.: `01-pilar-qualificados-para-escrever.csv`,
+`08-suporte-como-atrair-um-cliente-para-escrever.csv`). Sem Silo, o nome de antes (`artigo-<slug>-para-escrever.csv`);
+vários artigos e por Silo, os nomes de antes. Teste: `tests/radar-nome-do-arquivo-2026-10-12.test.mts`.
+
 ## Keywords proibidas por destino nas âncoras — 2026-10-11 (regras "2026-10-11c")
 
 **Verificado no código e confirmado por teste (fixtures do caso real "como atrair um cliente"; PROVIDER_CALLS = 0,
