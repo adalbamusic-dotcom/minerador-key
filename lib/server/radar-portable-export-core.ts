@@ -485,12 +485,16 @@ export async function assembleRadarPortableExport(input: {
       keyword: keywords.principal,
     });
 
+    /* 2026-10-11c · e as keywords do artigo (as do dossiê): quem linka para ele não as usa como âncora. */
+    const keywordsDoDossie = [keywords.principal, ...(keywords.secondary || []), ...(keywords.narrativeReinforcements || [])]
+      .filter((palavra): palavra is string => typeof palavra === "string" && Boolean(palavra.trim()));
     publicacoes.set(articleId, {
       published: fundamentoDoArtigo.published,
       publishedUrl: fundamentoDoArtigo.publishedUrl,
       canonical: fundamentoDoArtigo.canonical,
       slug: fundamentoDoArtigo.slug,
       principalPolicy: fundamentoDoArtigo.principalPolicy,
+      ...(keywordsDoDossie.length ? { keywords: keywordsDoDossie } : {}),
     });
 
     /*
@@ -665,12 +669,15 @@ export async function assembleRadarPortableExport(input: {
   for (const [articleId, versao] of versaoMaisNova) {
     if (publicacoes.has(articleId)) continue;
     const identidade = identidadeDoArticleDna(versao.payload);
+    /* 2026-10-11c · as keywords do membro pelo texto que cada referência do ArticleDNA guarda (sem leitura nova): nunca âncora de quem linka para ele. */
+    const keywordsDoMembro = keywordsDoArticleDna(versao.payload);
     publicacoes.set(articleId, {
       published: identidade.published,
       publishedUrl: identidade.publishedUrl,
       canonical: identidade.canonical,
       slug: identidade.slug,
       principalPolicy: identidade.principalPolicy,
+      ...(keywordsDoMembro.length ? { keywords: keywordsDoMembro } : {}),
     });
   }
 
@@ -737,6 +744,28 @@ export async function radarReadPublishedStructure(url: string): Promise<{ h1: st
  * `publishedIdentityRef` VENCE o slug sugerido: quando a página está publicada,
  * o endereço real é o que está no ar — e é ele que não pode ser reescrito.
  */
+/*
+ * 2026-10-11c · AS KEYWORDS DE UM ARTICLEDNA, PELO TEXTO DA PRÓPRIA REFERÊNCIA.
+ *
+ * Cada referência guarda o snapshot da KeywordDNA com o texto
+ * (`keywordDnaSnapshot.sourceKeywordSnapshot.keyword`) — a mesma fonte que a
+ * hidratação do Radar usa sem a lista do Minerador e que o Arquiteto usa para
+ * os conceitos de âncora. Principal, complementares e reforços, nessa ordem;
+ * referência sem texto fica de fora (id não é texto). Só leitura do acervo que
+ * o lote já tem em memória.
+ */
+function keywordsDoArticleDna(payload: unknown): string[] {
+  const dna = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const referencias = Array.isArray(dna.keywordReferences) ? dna.keywordReferences as Array<Record<string, unknown>> : [];
+  const textoDa = (keywordId: unknown) => {
+    const referencia = referencias.find(item => item && item.keywordId === keywordId);
+    const snapshot = (referencia?.keywordDnaSnapshot as { sourceKeywordSnapshot?: { keyword?: unknown } } | undefined)?.sourceKeywordSnapshot;
+    return typeof snapshot?.keyword === "string" ? snapshot.keyword.replace(/\s+/g, " ").trim() : "";
+  };
+  const ids = [dna.principalKeywordId, ...(Array.isArray(dna.secondaryKeywordIds) ? dna.secondaryKeywordIds : []), ...(Array.isArray(dna.narrativeReinforcementIds) ? dna.narrativeReinforcementIds : [])];
+  return [...new Set(ids.map(textoDa).filter(Boolean))];
+}
+
 function identidadeDoArticleDna(payload: unknown) {
   const dna = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
   const objeto = (valor: unknown) =>

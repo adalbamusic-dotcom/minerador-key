@@ -642,16 +642,17 @@ test("P1 (8) · Pilar: os links vão às seções que tratam o destino (as da pl
   assert.ok(Math.max(...porSecao.values()) <= 3, JSON.stringify([...porSecao]));
   assert.ok(porSecao.size >= 3, "espalhados pelas seções");
   /* O destino de campanhas vai à seção que trata de campanha. */
-  assert.match(links.find(item => item.includes("âncora sugerida \"campanhas de marketing\""))!, /onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*"/, `${linha.row.estrutura}\n${linha.row.links_internos}`);
+  /* 2026-10-11c · a âncora natural da IA vai como exemplo ("por exemplo …"). */
+  assert.match(links.find(item => item.includes("por exemplo \"campanhas de marketing\""))!, /onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*"/, `${linha.row.estrutura}\n${linha.row.links_internos}`);
   /* Cada seção da estrutura nomeia os links dela: os sete, cada um uma vez. */
   /* 2026-10-11 · a estrutura diz o L e a âncora sugerida (a natural da IA fica como veio). */
-  const naEstrutura = [...linha.row.estrutura.matchAll(/^- Link interno L\d+: âncora sugerida "([^"]+)"/gm)].map(item => item[1]);
+  const naEstrutura = [...linha.row.estrutura.matchAll(/^- Link interno L\d+ → [^:]+: âncora com as palavras da sua frase, dizendo a ideia do destino \(por exemplo "([^"]+)"\)/gm)].map(item => item[1]);
   assert.deepEqual(naEstrutura.sort(), MEMBROS_DO_PILAR.map(([, , ancora]) => ancora).sort());
 
   /* Um link só: vai à seção que a planta escolheu, a que trata o destino. */
   const umSo = entradaDoPilar(MEMBROS_DO_PILAR.slice(-1));
   const linhaUmSo = linhaDe(umSo, { ...doSilo, blueprint: plantaDe(umSo, { silo: SILO_DO_PILAR(), articleId: ARTIGO, resposta: respostaDoPilar(umSo, MEMBROS_DO_PILAR.slice(-1)) }) });
-  assert.match(linhaUmSo.row.links_internos, /^L1 · âncora sugerida "campanhas de marketing" .* · onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*" · /m, linhaUmSo.row.links_internos);
+  assert.match(linhaUmSo.row.links_internos, /^L1 · âncora: escreva com as palavras da sua frase a ideia do destino \([^)]*\), em 2 a 4 palavras; por exemplo "campanhas de marketing" .* · onde: seção "[^"]*[Cc]ampanhas que geram leads qualificados[^"]*"$/m, linhaUmSo.row.links_internos);
 });
 
 test("P1 (9) · a publicação de todos os membros do Silo: destino publicado sai com a URL, mesmo fora do arquivo", async () => {

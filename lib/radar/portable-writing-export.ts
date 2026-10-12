@@ -232,6 +232,14 @@ export type RadarWritingPublication = {
    * precisa preservar o que existe, em vez de reescrever às cegas.
    */
   currentStructure?: { h1: string | null; h2: string[]; updatedAt: string | null } | null;
+  /**
+   * 2026-10-11c · Aditivo: as keywords do ArticleDNA do artigo (principal,
+   * complementares e reforços, pelo texto que cada referência guarda). Quem é
+   * destino de link não as vê como âncora (`radarAnchorRepeatsKeyword`). A
+   * montagem do export (`radar-portable-export-core`) as lê do acervo que já
+   * está em memória; ausente = só a principal do membro.
+   */
+  keywords?: readonly string[] | null;
 };
 
 export type RadarWritingArticleContext = {
@@ -985,17 +993,19 @@ function destinosDosLinks(input: RadarPortableExportInput, contexto: RadarWritin
     const identidade = identidades.members.get(membro.articleId);
     if (!identidade) continue;
     const doLote = contexto.siloMemberKeywords?.get(membro.articleId) ?? null;
+    /* 2026-10-11c · as keywords do ArticleDNA do membro: as do lote; fora do lote, as que a montagem leu do acervo (na publicação); sem as duas, a principal. */
+    const doAcervo = contexto.siloPublications?.get(membro.articleId)?.keywords ?? null;
     alvos.push({
       kind: "article",
       slug: identidade.slug ?? membro.slug,
       labels: [rotuloDoMembro(membro), texto(membro.title)].filter(Boolean),
-      keywords: [...(doLote?.length ? doLote : [texto(membro.principalKeyword)])].map(item => texto(item)).filter(Boolean),
+      keywords: [texto(membro.principalKeyword), ...(doLote?.length ? doLote : doAcervo?.length ? doAcervo : [])].map(item => texto(item)).filter(Boolean),
       concepts: grafo.byArticleId.get(membro.articleId) ?? [],
       identity: identidade,
     });
   }
   if (identidades.siloPage) {
-    alvos.push({ kind: "siloPage", slug: identidades.siloPage.slug, labels: [silo.label], keywords: [silo.label], concepts: grafo.siloPage, identity: identidades.siloPage });
+    alvos.push({ kind: "siloPage", slug: identidades.siloPage.slug, labels: [silo.label], keywords: [silo.label, texto(silo.centralEntity)].filter(Boolean), concepts: grafo.siloPage, identity: identidades.siloPage });
   }
   return alvos.length ? alvos : undefined;
 }

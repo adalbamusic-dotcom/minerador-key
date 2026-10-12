@@ -344,8 +344,9 @@ test("F1 · o irmão do Silo no ar sai PUBLICADO na planta (URL e '(publicado)')
   assert.deepEqual(planta.linkCandidates.map(item => item.status), ["PLANNED", "PLANNED"], "a planta gravou os irmãos como planejados");
   const comUmNoAr = linhaDe(entradaGoogle(), contextoDoSilo(new Map([[ARTIGO_AMAZON, publicacao(NIVEA_NO_AR)]]), planta)).row.links_internos;
   /* 2026-10-11 · âncora sugerida (recorte natural); o destino novo pela URL canônica planejada (slug no caminho do Silo). */
-  assert.match(comUmNoAr, new RegExp(`^L1 · âncora sugerida "skin care" → Suporte "skin care nivea" → ${NIVEA_NO_AR.replace(/[./]/g, "\\$&")} \\(publicado\\)`, "m"), comUmNoAr);
-  assert.match(comUmNoAr, /^L2 · âncora sugerida "máscara" → Suporte "máscara facial" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/mascara-facial \(novo, ainda não publicado: o link entra quando o destino estiver no ar\)/m);
+  /* 2026-10-11c · a linha L diz a instrução, o recorte como exemplo e as keywords proibidas do destino. */
+  assert.match(comUmNoAr, new RegExp(`^L1 · âncora: escreva com as palavras da sua frase a ideia do destino \\(o assunto de "skin care nivea"\\), em 2 a 4 palavras; por exemplo "skin care" · não use como âncora: "skin care nivea" → Suporte "skin care nivea" → ${NIVEA_NO_AR.replace(/[./]/g, "\\$&")} \\(publicado\\)`, "m"), comUmNoAr);
+  assert.match(comUmNoAr, /^L2 · âncora: escreva com as palavras da sua frase a ideia do destino \(o assunto de "máscara facial"\), em 2 a 4 palavras; por exemplo "máscara" · não use como âncora: "máscara facial" → Suporte "máscara facial" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele\/mascara-facial \(novo, ainda não publicado: o link entra quando o destino estiver no ar\)/m);
   assert.match(comUmNoAr, /^Destino novo \(ainda não publicado\)/m, "a máscara facial ainda não está no ar");
 
   const todosNoAr = linhaDe(entradaGoogle(), contextoDoSilo(new Map([
@@ -376,7 +377,7 @@ test("F2 e F14 · a planta no CSV traz UMA chamada: o 'Próximo passo' vira a co
   assert.match(estrutura, /^## A rotina da manhã em três passos\n(?:- .*\n|  ### .*\n)*- Leitura seguinte \(opcional, não é uma chamada\): o link L1 desta seção leva ao próximo artigo do Silo, "skin care nivea"; se couber, apresente-o ali como a leitura seguinte, nunca como uma segunda chamada no fechamento\.$/m);
   /* F14 · "skin care nivea" → K1 aparecia duas vezes: sai uma (na primeira seção), e a medida concorda. */
   /* 2026-10-11 · a mesma âncora para o mesmo destino recebe a mesma troca: o repetido continua saindo uma vez só. */
-  assert.equal((estrutura.match(/- Link interno L\d+: âncora sugerida "skin care"/g) || []).length, 1);
+  assert.equal((estrutura.match(/- Link interno L\d+ → [^:]+: âncora com as palavras da sua frase, dizendo a ideia do destino \(por exemplo "skin care"\)/g) || []).length, 1);
   assert.match(estrutura, / · 2 links internos · /);
   const links = linhaDe(entradaGoogle(), contextoDoSilo(new Map(), plantaAntiga())).row.links_internos;
   assert.match(links, /^Aplique somente estes 2 link\(s\)/m, links);

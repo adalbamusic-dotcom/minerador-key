@@ -1,5 +1,20 @@
 # Backlog — Radar
 
+## Keywords proibidas por destino nas âncoras — 2026-10-11 (regras "2026-10-11c")
+
+Detalhe em `docs/05-radar/estado-atual.md` (seção de mesma data, no topo). **Validado manualmente: não.**
+
+- [x] Régua: a âncora não é keyword do destino nem contém inteira uma de 2 palavras ou mais; sem formulação válida,
+  a instrução (nunca âncora inventada).
+- [x] Keywords de cada membro pelo ArticleDNA (texto da referência), na montagem do export; campo opcional no pedido.
+- [x] Pedido (regra 6 e lista em cada K), conferência (instrução no lugar do recorte ruim), leitura compartilhada.
+- [x] CSV "Para escrever" (linhas L, estrutura, regra geral 9), Redator e MCP (`avoidAsAnchor`), catálogo do MCP.
+- [ ] Validação manual (dono): reexportar o CSV de "como atrair um cliente" e conferir as linhas L ("não use como
+  âncora" com as keywords reais de cada destino e a instrução onde nada escapa).
+- [ ] Redator na planta gravada antes de 11c: hoje só conhece o rótulo do destino; levar as keywords dos membros aos
+  fundamentos exige leitura do acervo no Redator (proposta, fora deste escopo) ou organizar a planta de novo (pago).
+- [ ] Organizar de novo (pago, decisão do dono) as plantas em que a IA deve escrever as âncoras com a lista no pedido.
+
 ## Mesa sem estourar o tempo do banco — 2026-10-11
 
 - [x] Listagem do Radar pela tabela (543 ms → 48 ms, mesmos bytes).

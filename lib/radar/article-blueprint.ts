@@ -57,11 +57,15 @@ import { RADAR_AMAZON_INTENT_LABELS } from "./amazon-editorial-target.ts";
 import type { RadarAmazonCommercialBlock } from "./amazon-commercial-block.ts";
 /* 2026-10-11 · a âncora natural (uma régua só) e a identidade de publicação (Silo, slug, URL canônica, situação). */
 import {
+  RADAR_FREE_ANCHOR_INSTRUCTION,
   RADAR_NATURAL_ANCHOR_PROMPT_RULE,
   RADAR_NATURAL_ANCHOR_RULE,
   radarAnchorDestinationKey,
+  radarAnchorForbiddenList,
   radarAnchorGraphConcepts,
+  radarAnchorIsFree,
   radarAnchorKey,
+  radarFreeAnchorInstruction,
   radarNaturalAnchor,
   radarNaturalAnchorFormulations,
   type RadarAnchorLedger,
@@ -243,8 +247,15 @@ export const RADAR_ARTICLE_BLUEPRINT_LIMITS = Object.freeze({
  * opções de título, o primeiro H2 sem a keyword e mais de 6 H2. A planta
  * aprovada não é desligada: a leitura já põe a keyword no começo das
  * alternativas quando é só trocar as metades, e diz qual seção entra como H3.
+ *
+ * 2026-10-11c · keywords proibidas por destino (regra do dono): cada candidato K
+ * leva as keywords do destino (principal, complementares e reforços do
+ * ArticleDNA; da SiloPage, o nome do Silo); a regra 6 manda a ideia do destino
+ * nas palavras da frase, nunca uma keyword dele nem frase que contenha uma; a
+ * conferência troca a âncora inválida pela formulação válida ou, sem ela, pela
+ * instrução. A planta aprovada não é desligada: a leitura já aplica a régua.
  */
-export const RADAR_ARTICLE_BLUEPRINT_RULES_VERSION = "2026-10-11b";
+export const RADAR_ARTICLE_BLUEPRINT_RULES_VERSION = "2026-10-11c";
 
 const t = (valor: unknown): string => (typeof valor === "string" ? valor.trim() : "");
 const corte = (valor: string, limite: number) => (valor.length > limite ? `${valor.slice(0, limite - 1).trimEnd()}…` : valor);
@@ -475,6 +486,14 @@ export type RadarArticleBlueprintLinkCandidate = {
    * e nas versões anteriores.
    */
   url?: string;
+  /**
+   * 2026-10-11c · Aditivo: as keywords do destino, que nunca são âncora — a
+   * principal, as complementares e os reforços do ArticleDNA do membro (o
+   * rótulo primeiro); da SiloPage, o nome do Silo. Ausente na página da marca e
+   * nas versões anteriores (a leitura usa o que o chamador passar e, sem nada,
+   * o rótulo).
+   */
+  keywords?: string[];
 };
 export type RadarArticleBlueprintSource ={ id: string; url: string; title: string; claim: string };
 
@@ -1058,6 +1077,13 @@ export function buildRadarArticleBlueprintBrief(input: {
    * (`radarArticleBlueprintCommercialOf`). Ausente ou null, o pedido é o de antes.
    */
   commercial?: RadarArticleBlueprintCommercial | null;
+  /**
+   * 2026-10-11c · Aditivo: as keywords de cada membro do Silo (principal,
+   * complementares e reforços do ArticleDNA), por articleId — as que a âncora
+   * nunca é. Sem o mapa, valem as da publicação do membro
+   * (`siloPublications…keywords`); sem as duas, a principal do membro.
+   */
+  siloMemberKeywords?: ReadonlyMap<string, readonly string[]> | null;
 }): RadarArticleBlueprintBrief {
   const p = radarWritingProjections(input.entrada);
   const entrada = input.entrada;
@@ -1208,12 +1234,18 @@ export function buildRadarArticleBlueprintBrief(input: {
   });
   const comConceitos = (conceitos: readonly string[] | undefined) => (conceitos?.length ? { anchorConcepts: [...conceitos] } : {});
   const comUrl = (identidade: RadarPublicationIdentity | null | undefined) => (identidade?.url ? { url: identidade.url } : {});
+  /* 2026-10-11c · as keywords do destino, gravadas no candidato K (aditivo): o rótulo primeiro, sem repetir. */
+  const comKeywords = (rotulo: string, keywords: readonly (string | null | undefined)[]) => {
+    const lista = radarAnchorForbiddenList(rotulo, keywords);
+    return lista.length ? { keywords: lista } : {};
+  };
   for (const membro of (input.silo?.members || []).filter(item => !ehOProprio(item))) {
     const rotulo = semMolduraDoTema(t(membro.principalKeyword) || t(membro.title) || t(membro.slug));
     if (!rotulo) continue;
     /* 2026-10-08 (correção) · F1 · o irmão que já está no ar é destino publicado, com a URL (não "planejado"). */
     const publicacaoDoMembro = input.siloPublications?.get(membro.articleId) ?? null;
     const noAr = publicacaoDoMembro?.published ? t(publicacaoDoMembro.publishedUrl) || t(publicacaoDoMembro.canonical) : "";
+    const doMembro = input.siloMemberKeywords?.get(membro.articleId);
     linkCandidates.push({
       id: `K${linkCandidates.length + 1}`,
       label: rotulo,
@@ -1223,6 +1255,7 @@ export function buildRadarArticleBlueprintBrief(input: {
       fromGraph: noDoGrafo.has(`article:${membro.articleId}`) || doGrafo.has(radarWritingCompareKey(rotulo)) || doGrafo.has(radarWritingCompareKey(membro.title)),
       ...comConceitos(conceitosDoGrafo.byArticleId.get(membro.articleId)),
       ...comUrl(identidades.members.get(membro.articleId)),
+      ...comKeywords(rotulo, [t(membro.principalKeyword), ...(doMembro?.length ? doMembro : publicacaoDoMembro?.keywords || [])]),
     });
   }
   const pagina = input.silo?.siloPage;
@@ -1237,6 +1270,7 @@ export function buildRadarArticleBlueprintBrief(input: {
       fromGraph: false,
       ...comConceitos(conceitosDoGrafo.siloPage),
       ...comUrl(identidades.siloPage),
+      ...comKeywords(t(input.silo?.label), [t(input.silo?.centralEntity)]),
     });
   }
 
@@ -1525,7 +1559,7 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
     "",
     ...linhas("Evidências da SERP (cite pelo id)", brief.evidence.map(item => `${item.id} · ${item.kind}: ${item.text}`)),
     /* 2026-10-11 · com a URL canônica do destino e os conceitos de âncora do grafo aprovado para ele (a âncora é recorte deles, nunca a keyword inteira). */
-    ...linhas("Candidatos a link interno (use o id K)", brief.linkCandidates.map(item => `${item.id} · ${item.role} · ${item.label} · ${item.url || item.destination || "sem endereço"} · ${item.status === "PUBLISHED" ? "publicado" : item.status === "PLANNED" ? "planejado" : "não resolvido"}${item.fromGraph ? " · pedido pelo grafo aprovado" : ""}${item.anchorConcepts?.length ? ` · conceitos de âncora do grafo: ${item.anchorConcepts.map(conceito => `"${conceito}"`).join(", ")}` : ""}`)),
+    ...linhas("Candidatos a link interno (use o id K)", brief.linkCandidates.map(item => `${item.id} · ${item.role} · ${item.label} · ${item.url || item.destination || "sem endereço"} · ${item.status === "PUBLISHED" ? "publicado" : item.status === "PLANNED" ? "planejado" : "não resolvido"}${item.fromGraph ? " · pedido pelo grafo aprovado" : ""}${item.keywords?.length ? ` · keywords do destino, nunca âncora: ${item.keywords.map(keyword => `"${keyword}"`).join(", ")}` : ""}${item.anchorConcepts?.length ? ` · conceitos de âncora do grafo: ${item.anchorConcepts.map(conceito => `"${conceito}"`).join(", ")}` : ""}`)),
     ...linhas("Grafo aprovado (links que o Arquiteto pediu)", brief.graphLinks),
     ...linhas("Fontes verificadas (id X)", brief.sources.map(item => `${item.id} · ${item.title} · ${item.url} · sustenta: ${item.claim}`)),
     ...linhas("Afirmações que o mercado repete SEM fonte (não afirmar como fato)", brief.unsupportedClaims),
@@ -2897,6 +2931,14 @@ export type RadarArticleBlueprintAnchorTarget = {
 export type RadarArticleBlueprintAnchorOptions = {
   /** O que quem chama sabe do destino (o CSV, pelo Silo e pelo grafo); ausente = só o candidato. */
   targetOf?: ((candidate: RadarArticleBlueprintLinkCandidate) => RadarArticleBlueprintAnchorTarget | null) | null;
+  /**
+   * 2026-10-11c · Aditivo: os destinos do Silo de hoje (keywords e conceitos de
+   * cada um), para quem não monta `targetOf` (a leitura compartilhada da planta
+   * antiga). O candidato casa pelo slug ou pelo nome
+   * (`radarArticleBlueprintLinkTargetOf`). Sem `targetOf` nem destinos, valem as
+   * keywords gravadas no candidato e, sem elas, o rótulo.
+   */
+  linkTargets?: readonly RadarArticleBlueprintLinkTarget[] | null;
   /** O livro de âncoras do lote do Silo: lido para não repetir e acrescentado com as âncoras desta planta. */
   ledger?: RadarAnchorLedger | null;
 };
@@ -2932,12 +2974,12 @@ export function radarArticleBlueprintNaturalAnchors<S extends { h2: string; inte
       const chaveDaTroca = `${candidato.id}|${radarAnchorKey(link.anchor)}`;
       let escolhida = trocas.get(chaveDaTroca);
       if (escolhida === undefined) {
-        const alvo = opcoes.targetOf?.(candidato) ?? null;
+        const alvo = radarArticleBlueprintAnchorTargetOf(candidato, opcoes);
         const lida = radarNaturalAnchor({
           anchor: link.anchor,
           targetLabel: rotuloDoCandidato(candidato),
-          targetKeywords: alvo?.keywords ?? null,
-          graphConcepts: alvo?.concepts?.length ? alvo.concepts : candidato.anchorConcepts ?? null,
+          targetKeywords: alvo.keywords,
+          graphConcepts: alvo.concepts,
           usedAnchors: [...(opcoes.ledger?.get(destino) || []), ...(usadasNaPlanta.get(destino) || [])],
           /* A âncora que já leva a OUTRO destino nesta planta não serve a este. */
           takenAnchors: [...usadasNaPlanta].filter(([outro]) => outro !== destino).flatMap(([, ancoras]) => [...ancoras]),
@@ -2945,7 +2987,8 @@ export function radarArticleBlueprintNaturalAnchors<S extends { h2: string; inte
         escolhida = lida.anchor;
         trocas.set(chaveDaTroca, escolhida);
         if (lida.changed && lida.reason) changes.push({ section: secao.h2, candidate: candidato.id, from: link.anchor, to: lida.anchor, reason: lida.reason });
-        usadasNaPlanta.set(destino, new Set([...(usadasNaPlanta.get(destino) || []), radarAnchorKey(escolhida)]));
+        /* 2026-10-11c · a instrução não é âncora: não entra no livro nem impede outro destino. */
+        if (!lida.free) usadasNaPlanta.set(destino, new Set([...(usadasNaPlanta.get(destino) || []), radarAnchorKey(escolhida)]));
       }
       if (escolhida === link.anchor) return link;
       mudouASecao = true;
@@ -2969,10 +3012,40 @@ export function radarArticleBlueprintAnchorAlternatives(
 ): string[] {
   if (ehPaginaDaMarca(candidato)) return [];
   const rotulo = rotuloDoCandidato(candidato);
+  const lido = radarArticleBlueprintAnchorTargetOf(candidato, { targetOf: () => alvo });
   return radarNaturalAnchorFormulations({
-    targetKeywords: [rotulo, ...(alvo?.keywords || [])],
-    graphConcepts: alvo?.concepts?.length ? alvo.concepts : candidato.anchorConcepts ?? null,
+    targetKeywords: [rotulo, ...lido.keywords],
+    graphConcepts: lido.concepts,
   }).filter(item => radarAnchorKey(item) !== radarAnchorKey(anchor)).slice(0, 3);
+}
+
+/**
+ * 2026-10-11c · O QUE A RÉGUA SABE DE UM DESTINO: as keywords (as de quem chama —
+ * `targetOf` ou os destinos do Silo — somadas às gravadas no candidato K) e os
+ * conceitos de âncora do grafo (os de quem chama vencem os gravados).
+ */
+export function radarArticleBlueprintAnchorTargetOf(
+  candidato: RadarArticleBlueprintLinkCandidate,
+  opcoes: Pick<RadarArticleBlueprintAnchorOptions, "targetOf" | "linkTargets"> | null = null,
+): { keywords: string[]; concepts: readonly string[] | null } {
+  const doSilo = opcoes?.targetOf
+    ? opcoes.targetOf(candidato)
+    : (() => {
+      const alvo = radarArticleBlueprintLinkTargetOf(candidato, opcoes?.linkTargets);
+      return alvo ? { keywords: alvo.keywords ?? null, concepts: alvo.concepts ?? null } : null;
+    })();
+  const keywords = [...(doSilo?.keywords || []), ...(Array.isArray(candidato.keywords) ? candidato.keywords : [])]
+    .map(item => t(item)).filter(Boolean);
+  return { keywords: [...new Set(keywords)], concepts: doSilo?.concepts?.length ? doSilo.concepts : candidato.anchorConcepts ?? null };
+}
+
+/** 2026-10-11c · "Não use como âncora": o rótulo e as keywords do destino (vazio na página da marca, cuja âncora é o trecho do CTA). */
+export function radarArticleBlueprintAnchorForbidden(
+  candidato: RadarArticleBlueprintLinkCandidate,
+  opcoes: Pick<RadarArticleBlueprintAnchorOptions, "targetOf" | "linkTargets"> | null = null,
+): string[] {
+  if (ehPaginaDaMarca(candidato)) return [];
+  return radarAnchorForbiddenList(rotuloDoCandidato(candidato), radarArticleBlueprintAnchorTargetOf(candidato, opcoes).keywords);
 }
 
 export type RadarArticleBlueprintReadingOptions = {
@@ -3253,22 +3326,34 @@ const A_LEITURA_JA_TROCA_A_ANCORA = "Os entregáveis (CSV para escrever, CSV de 
 const O_QUE_11_10B_ACRESCENTA = `a diretriz de comunicação humana guiada pela SERP (${RADAR_HUMAN_VOICE_GUIDELINE_VERSION}): a voz visceral e sem eufemismo nos campos que viram texto, o H1 e o SEO title com a keyword no começo e o gancho de contraste (${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções, sem isca genérica), a meta com a keyword cedo, o primeiro H2 com a keyword, de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} H2, os sinais de autoridade local e o fechamento em 4 tempos`;
 const A_LEITURA_JA_DIZ_A_VOZ = "Os entregáveis já trazem a diretriz como regra concluída ao ler esta versão (a voz, as opções de título com a keyword no começo quando basta trocar as metades, a seção que entra como H3 pela Regra 8 e o fechamento em 4 tempos); a voz nos próprios campos da planta só entra organizando de novo";
 
+/*
+ * 2026-10-11c · O QUE AS REGRAS 2026-10-11c ACRESCENTAM (keywords proibidas por
+ * destino). A leitura já aplica a régua em todo entregável, com as keywords que
+ * o Silo de hoje conhece: organizar de novo é só para a IA escrever as âncoras
+ * com a lista no pedido.
+ */
+const O_QUE_11_10C_ACRESCENTA = "as keywords proibidas por destino nos links internos (a âncora nunca é a principal, uma complementar ou um reforço do destino, nem frase que contenha inteira uma delas; sem formulação válida, a planta diz a instrução de escrever a ideia do destino com as palavras da frase) e a lista dessas keywords em cada candidato do pedido";
+const A_LEITURA_JA_TIRA_AS_KEYWORDS = "Os entregáveis (CSV para escrever, Redator e MCP) já dizem, ao ler esta versão, as keywords de cada destino que não podem ser âncora e trocam a âncora que é uma delas pela formulação válida ou pela instrução";
+
 export function radarArticleBlueprintRulesNoticeText(payload: Pick<RadarArticleBlueprintPayload, "rulesVersion"> | null | undefined): string | null {
   if (!radarArticleBlueprintRulesOutdated(payload)) return null;
+  if (payload!.rulesVersion === "2026-10-11b") {
+    return `Esta versão foi montada com as regras de 2026-10-11b. As de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION} acrescentam ${O_QUE_11_10C_ACRESCENTA}. ${A_LEITURA_JA_TIRA_AS_KEYWORDS}. Use ${ORGANIZAR_DE_NOVO} só se quiser que a IA escreva as âncoras com a lista no pedido.`;
+  }
   if (payload!.rulesVersion === "2026-10-11") {
-    return `Esta versão foi montada com as regras de 2026-10-11. As de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION} acrescentam ${O_QUE_11_10B_ACRESCENTA}. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} quando quiser a planta inteira na voz nova.`;
+    return `Esta versão foi montada com as regras de 2026-10-11. As de 2026-10-11b acrescentam ${O_QUE_11_10B_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10C_ACRESCENTA}. ${A_LEITURA_JA_DIZ_A_VOZ}. ${A_LEITURA_JA_TIRA_AS_KEYWORDS}. Use ${ORGANIZAR_DE_NOVO} quando quiser a planta inteira na voz nova.`;
   }
   if (payload!.rulesVersion === "2026-10-09b") {
-    return `Esta versão foi montada com as regras de 2026-10-09b. As de 2026-10-11 acrescentam ${O_QUE_11_10_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10B_ACRESCENTA}. ${A_LEITURA_JA_TROCA_A_ANCORA}. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} se quiser que a IA escolha as âncoras pelos conceitos do grafo e escreva a planta na voz nova.`;
+    return `Esta versão foi montada com as regras de 2026-10-09b. As de 2026-10-11 acrescentam ${O_QUE_11_10_ACRESCENTA}; as de 2026-10-11b, ${O_QUE_11_10B_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10C_ACRESCENTA}. ${A_LEITURA_JA_TROCA_A_ANCORA}. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} se quiser que a IA escolha as âncoras pelos conceitos do grafo e escreva a planta na voz nova.`;
   }
   if (payload!.rulesVersion === "2026-10-09") {
     /* 2026-10-09b · o que a leitura já faz, dito com exatidão: a exclusão do ArticleDNA sai da planta lida pelo CSV "Para escrever". */
-    return `Esta versão foi montada com as regras de 2026-10-09. As de 2026-10-09b acrescentam ${O_QUE_09_10B_ACRESCENTA}; as de 2026-10-11, ${O_QUE_11_10_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10B_ACRESCENTA}. O CSV para escrever já tira, ao ler esta versão, a seção que cobre uma exclusão do ArticleDNA, e ${A_LEITURA_JA_TROCA_A_ANCORA.charAt(0).toLocaleLowerCase("pt-BR")}${A_LEITURA_JA_TROCA_A_ANCORA.slice(1)}; o bloco comercial da Amazon só entra na planta organizando de novo. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} quando o artigo tiver Amazon congelada ou se quiser que a IA refaça a planta com as regras novas.`;
+    return `Esta versão foi montada com as regras de 2026-10-09. As de 2026-10-09b acrescentam ${O_QUE_09_10B_ACRESCENTA}; as de 2026-10-11, ${O_QUE_11_10_ACRESCENTA}; as de 2026-10-11b, ${O_QUE_11_10B_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10C_ACRESCENTA}. O CSV para escrever já tira, ao ler esta versão, a seção que cobre uma exclusão do ArticleDNA, e ${A_LEITURA_JA_TROCA_A_ANCORA.charAt(0).toLocaleLowerCase("pt-BR")}${A_LEITURA_JA_TROCA_A_ANCORA.slice(1)}; o bloco comercial da Amazon só entra na planta organizando de novo. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} quando o artigo tiver Amazon congelada ou se quiser que a IA refaça a planta com as regras novas.`;
   }
   if (payload!.rulesVersion === "2026-10-08") {
-    return `Esta versão foi montada com as regras de 2026-10-08. As de 2026-10-09 acrescentam ${O_QUE_09_10_ACRESCENTA}; as de 2026-10-09b, ${O_QUE_09_10B_ACRESCENTA}; as de 2026-10-11, ${O_QUE_11_10_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10B_ACRESCENTA}. Os entregáveis (CSV para escrever, CSV de vídeo e Redator) já aplicam essas correções ao ler esta versão, e o CSV para escrever tira a seção que cobre uma exclusão do ArticleDNA; o bloco comercial da Amazon só entra organizando de novo. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} só se quiser que a IA refaça a planta com as regras novas ou se o artigo tiver Amazon congelada.`;
+    return `Esta versão foi montada com as regras de 2026-10-08. As de 2026-10-09 acrescentam ${O_QUE_09_10_ACRESCENTA}; as de 2026-10-09b, ${O_QUE_09_10B_ACRESCENTA}; as de 2026-10-11, ${O_QUE_11_10_ACRESCENTA}; as de 2026-10-11b, ${O_QUE_11_10B_ACRESCENTA}; as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10C_ACRESCENTA}. Os entregáveis (CSV para escrever, CSV de vídeo e Redator) já aplicam essas correções ao ler esta versão, e o CSV para escrever tira a seção que cobre uma exclusão do ArticleDNA; o bloco comercial da Amazon só entra organizando de novo. ${A_LEITURA_JA_DIZ_A_VOZ}. Use ${ORGANIZAR_DE_NOVO} só se quiser que a IA refaça a planta com as regras novas ou se o artigo tiver Amazon congelada.`;
   }
-  return `Esta versão foi montada com regras anteriores às atuais (${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}): a planta não leu a página publicada, nem conferiu a abertura pela busca, os nomes atuais de produtos e as cenas repetidas (as regras de 2026-10-09 acrescentam ${O_QUE_09_10_ACRESCENTA}; as de 2026-10-09b, ${O_QUE_09_10B_ACRESCENTA}; as de 2026-10-11, ${O_QUE_11_10_ACRESCENTA}; e as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10B_ACRESCENTA}; os entregáveis já aplicam na leitura o que é de leitura). Para refazer com as regras atuais, use ${ORGANIZAR_DE_NOVO}; até lá, os entregáveis seguem com esta versão.`;
+  return `Esta versão foi montada com regras anteriores às atuais (${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}): a planta não leu a página publicada, nem conferiu a abertura pela busca, os nomes atuais de produtos e as cenas repetidas (as regras de 2026-10-09 acrescentam ${O_QUE_09_10_ACRESCENTA}; as de 2026-10-09b, ${O_QUE_09_10B_ACRESCENTA}; as de 2026-10-11, ${O_QUE_11_10_ACRESCENTA}; as de 2026-10-11b, ${O_QUE_11_10B_ACRESCENTA}; e as de ${RADAR_ARTICLE_BLUEPRINT_RULES_VERSION}, ${O_QUE_11_10C_ACRESCENTA}; os entregáveis já aplicam na leitura o que é de leitura). Para refazer com as regras atuais, use ${ORGANIZAR_DE_NOVO}; até lá, os entregáveis seguem com esta versão.`;
 }
 
 /* 2026-10-08 · B3 · os sentidos da régua que a conferência aponta (a afirmação listada pela planta já tem link externo). */
@@ -3491,7 +3576,11 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
    */
   const ancorasNaturais = radarArticleBlueprintNaturalAnchors(secoesComCta, brief.linkCandidates);
   for (const item of ancorasNaturais.changes) {
-    notes.push(`Seção "${item.section}": âncora "${item.from}" ajustada para "${item.to}" — ${item.reason === "keyword" ? "a âncora é um trecho natural da ideia do destino, nunca a keyword inteira dele" : item.reason === "repeated" ? "a mesma âncora já levava a este destino em outra seção" : "a mesma âncora já levava a outro destino"}.`);
+    const motivo = item.reason === "keyword" ? "a âncora nunca é uma keyword do destino nem frase que contenha uma delas" : item.reason === "repeated" ? "a mesma âncora já levava a este destino em outra seção" : "a mesma âncora já levava a outro destino";
+    /* 2026-10-11c · sem formulação válida, a âncora vira a instrução (quem escreve diz a ideia com as palavras da frase). */
+    notes.push(radarAnchorIsFree(item.to)
+      ? `Seção "${item.section}": âncora "${item.from}" ajustada para a instrução "${RADAR_FREE_ANCHOR_INSTRUCTION}" — ${motivo}; sem outra formulação válida, quem escreve diz a ideia do destino com as palavras da frase.`
+      : `Seção "${item.section}": âncora "${item.from}" ajustada para "${item.to}" — ${motivo}.`);
   }
   const secoes = ancorasNaturais.sections;
   /*
@@ -4424,10 +4513,29 @@ export function radarArticleBlueprintColumns(
   const linksRepetidos = b.sections.reduce((soma, secao) => soma + secao.internalLinks.length, 0) - linksUnicos.size;
   /* 2026-10-11 · o número L de cada link (a mesma numeração da coluna links_internos), para a estrutura dizer qual é. */
   const numeroDoLink = new Map(b.sections.flatMap(secao => linksDaSecao(secao)).map((link, indice) => [link, indice + 1]));
-  /* 2026-10-11 · a âncora sugerida e, quando o grafo as dá, as outras formulações (conceitos na forma natural, sem a keyword inteira do destino). */
-  const outrasFormulacoes = (link: RadarArticleBlueprintAi["sections"][number]["internalLinks"][number]): string[] => {
+  /*
+   * 2026-10-11c · A ÂNCORA DE CADA LINK, DITA COMO INSTRUÇÃO (regra do dono: as
+   * keywords do destino nunca são âncora). Cada L diz a ideia do destino a
+   * escrever com as palavras da frase e as keywords dele que não servem; a
+   * formulação válida da planta (e as outras do grafo) vai como exemplo, não
+   * como ordem; sem formulação válida, nenhum texto de âncora é inventado. A
+   * página da marca (link do CTA) segue com o trecho do CTA.
+   */
+  type LinkDaPlanta = RadarArticleBlueprintAi["sections"][number]["internalLinks"][number];
+  const ancoraDoLink = (link: LinkDaPlanta): { marca: boolean; exemplos: string[]; proibidas: string[] } => {
     const destino = payload.linkCandidates.find(item => item.id === link.candidate);
-    return destino ? radarArticleBlueprintAnchorAlternatives(destino, link.anchor, alvoDaAncora(destino)) : [];
+    if (!destino) return { marca: false, exemplos: radarAnchorIsFree(link.anchor) ? [] : [link.anchor], proibidas: [] };
+    if (ehPaginaDaMarca(destino)) return { marca: true, exemplos: [link.anchor], proibidas: [] };
+    const outras = radarArticleBlueprintAnchorAlternatives(destino, link.anchor, alvoDaAncora(destino));
+    const exemplos = [...(radarAnchorIsFree(link.anchor) ? [] : [link.anchor]), ...outras].slice(0, 3);
+    return { marca: false, exemplos, proibidas: radarArticleBlueprintAnchorForbidden(destino, { targetOf: alvoDaAncora }) };
+  };
+  const entreAspas = (itens: readonly string[], separador: string) => itens.map(item => `"${item}"`).join(separador);
+  /* A ideia do destino: o "por quê" do link (sem o ponto final) ou, sem ele, o assunto do destino. */
+  const ideiaDoLink = (link: LinkDaPlanta, destino: RadarArticleBlueprintLinkCandidate | undefined): string => {
+    const motivo = t(link.reason).replace(/[.;:\s]+$/, "");
+    if (motivo) return /^\p{Lu}\p{Ll}/u.test(motivo) ? `${motivo.charAt(0).toLocaleLowerCase("pt-BR")}${motivo.slice(1)}` : motivo;
+    return destino ? `o assunto de "${rotuloDoDestino(destino)}"` : "";
   };
   /*
    * 2026-10-08 (correção) · F6 · antes e depois no texto da planta antiga
@@ -4810,7 +4918,15 @@ export function radarArticleBlueprintColumns(
       ...(secao.terms.length ? [`- Termos a nomear: ${secao.terms.join(" · ")}`] : []),
       ...(secao.evidence.length ? [`- Evidências: ${rotuloDaEvidencia(payload, secao.evidence, lentesDoDominio, opcoes.evidenceText ?? null).join("; ")}`] : []),
       /* 2026-10-11 · a âncora é sugerida (trecho natural da ideia do destino, nunca a keyword inteira dele), com o L da coluna de links. */
-      ...linksDaSecao(secao).map(link => { const destino = candidato.get(link.candidate); return `- Link interno L${numeroDoLink.get(link) ?? "?"}: âncora sugerida "${link.anchor}" → ${destino ? rotuloDoDestino(destino) : link.candidate}`; }),
+      /* 2026-10-11c · a âncora com as palavras da frase; o exemplo é só exemplo, e as keywords do destino nunca são âncora. */
+      ...linksDaSecao(secao).map(link => {
+        const destino = candidato.get(link.candidate);
+        const ancora = ancoraDoLink(link);
+        const como = ancora.marca
+          ? `âncora do CTA${ancora.exemplos.length ? ` (por exemplo ${entreAspas(ancora.exemplos, " ou ")})` : ""}`
+          : `âncora com as palavras da sua frase, dizendo a ideia do destino${ancora.exemplos.length ? ` (por exemplo ${entreAspas(ancora.exemplos, " ou ")})` : ""}`;
+        return `- Link interno L${numeroDoLink.get(link) ?? "?"} → ${destino ? rotuloDoDestino(destino) : link.candidate}: ${como}${ancora.proibidas.length ? `; não use como âncora: ${entreAspas(ancora.proibidas, ", ")}` : ""}`;
+      }),
       ...secao.externalLinks.map(link => linhaDoLinkExterno(link, indice)),
       /* 2026-10-09 · Defeito 3(b) · o assunto de outro artigo do Silo que a seção toca: só mencione e linke (a nota vem do CSV). */
       ...(opcoes.sectionNotes?.(secao, indice, rotuloDoLinkPara) ?? []),
@@ -4861,18 +4977,26 @@ export function radarArticleBlueprintColumns(
    * e que só os L indicados entram; cada L traz a âncora sugerida (o recorte),
    * as outras formulações quando o grafo as dá, e a URL canônica do destino (a
    * publicada ou a planejada pelo slug no caminho do Silo), com a situação.
+   *
+   * 2026-10-11c · cada L diz a instrução (a ideia do destino, com as palavras da
+   * frase), o exemplo só quando há formulação válida e "não use como âncora" com
+   * as keywords do destino.
    */
   const linksInternos = links.length
     ? [
-      `Aplique somente estes ${links.length} link(s) (L1, L2…), sem criar outros. ${RADAR_NATURAL_ANCHOR_RULE} Use a âncora sugerida (pode ajustar concordância) ou uma das outras formulações; o link aponta para a URL canônica do destino, a do slug dele.`,
+      `Aplique somente estes ${links.length} link(s) (L1, L2…), sem criar outros. ${RADAR_NATURAL_ANCHOR_RULE} Cada L diz a ideia do destino e as keywords dele que não podem ser âncora; o exemplo, quando há, é só exemplo (pode ajustar concordância ou escrever outro com as palavras da frase); o link aponta para a URL canônica do destino, a do slug dele.`,
       /* 2026-10-08 · C9 · a regra do destino novo, uma vez: condicional e concluída. */
       ...(comDestinoPlanejado ? [`Destino novo (ainda não publicado): o link entra quando o destino estiver no ar, junto com este artigo ou antes; se este artigo for ao ar primeiro, a âncora fica como texto simples, sem link (nunca link quebrado). Não invente outro domínio nem outra URL.`] : []),
       ...links.map(({ secao, link }, indice) => {
         const destino = candidato.get(link.candidate);
         /* 2026-10-09 · o candidato da SiloPage já se chama `SiloPage "X"`: com o papel na frente, sai `SiloPage "X"`, sem repetir. */
         const nomeDoDestino = destino ? (destino.role === "SiloPage" && /^SiloPage\s/.test(rotuloDoDestino(destino)) ? rotuloDoDestino(destino) : `${destino.role} "${rotuloDoDestino(destino)}"`) : "";
-        const outras = outrasFormulacoes(link);
-        return `L${indice + 1} · âncora sugerida "${link.anchor}"${outras.length ? ` · outras formulações: ${outras.map(item => `"${item}"`).join(", ")}` : ""} → ${destino ? `${nomeDoDestino}${enderecoDoDestino(destino) || ` (${status(destino)})`}` : link.candidate} · onde: seção "${secao}"${link.reason ? ` · por quê: ${link.reason}` : ""}`;
+        const paraOnde = `→ ${destino ? `${nomeDoDestino}${enderecoDoDestino(destino) || ` (${status(destino)})`}` : link.candidate} · onde: seção "${secao}"`;
+        const ancora = ancoraDoLink(link);
+        /* A página da marca: o trecho do CTA, com o "por quê" no fim, como antes. */
+        if (ancora.marca) return `L${indice + 1} · âncora: o trecho do CTA que cita a página${ancora.exemplos.length ? `, por exemplo ${entreAspas(ancora.exemplos, " ou ")}` : ""} ${paraOnde}${link.reason ? ` · por quê: ${link.reason}` : ""}`;
+        /* 2026-10-11c · a instrução com a ideia (o "por quê" do link), o exemplo quando há e as keywords proibidas do destino. */
+        return `L${indice + 1} · âncora: ${radarFreeAnchorInstruction(ideiaDoLink(link, destino))}${ancora.exemplos.length ? `; por exemplo ${entreAspas(ancora.exemplos, " ou ")}` : ""}${ancora.proibidas.length ? ` · não use como âncora: ${entreAspas(ancora.proibidas, ", ")}` : ""} ${paraOnde}`;
       }),
     ].join("\n")
     : "Nenhum link interno no artigo-modelo.";

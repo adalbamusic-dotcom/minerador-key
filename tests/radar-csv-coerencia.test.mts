@@ -376,7 +376,8 @@ test("5 · continuação do leitor: opcional, no corpo da seção dela; sem link
   const com = linha(entradaGoogleSaude(), contexto).estrutura;
   const secaoDoLink = com.slice(com.indexOf("## Como montar a rotina de skincare facial"), com.indexOf("\n## ", com.indexOf("## Como montar a rotina de skincare facial") + 3));
   /* 2026-10-11 · a estrutura diz o L e a âncora sugerida (recorte natural, nunca a keyword inteira do destino). */
-  assert.match(secaoDoLink, /^- Link interno L1: âncora sugerida "skin care" → skin care nivea$/m, com);
+  /* 2026-10-11c · com as palavras da frase, o recorte como exemplo e as keywords proibidas do destino. */
+  assert.match(secaoDoLink, /^- Link interno L1 → skin care nivea: âncora com as palavras da sua frase, dizendo a ideia do destino \(por exemplo "skin care"\); não use como âncora: "skin care nivea"$/m, com);
   assert.match(secaoDoLink, /^- Leitura seguinte \(opcional, não é uma chamada\): o link L1 desta seção leva ao próximo artigo do Silo, "skin care nivea"; se couber, apresente-o ali como a leitura seguinte, nunca como uma segunda chamada no fechamento\.$/m);
   assert.equal(com.includes(RADAR_WRITING_NO_APPROVED_LINK), false);
   /* Sem Silo, não há continuação a dizer. */

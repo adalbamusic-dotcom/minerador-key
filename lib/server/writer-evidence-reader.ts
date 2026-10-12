@@ -79,7 +79,7 @@ import {
 import { WRITER_BLUEPRINT_READING_RULES, writerArticleBlueprintForWriting, writerBlueprintWithCurrentNames, type WriterBlueprintExclusions } from "@/lib/redator/writer-blueprint-for-writing";
 import { radarWriterEditorialContextWithBlueprint } from "@/lib/redator/radar-subject-turn";
 import { radarArticleDnaScopeExclusions } from "@/lib/radar/article-research-context";
-import { RADAR_NATURAL_ANCHOR_RULE } from "@/lib/radar/natural-anchor-rule";
+import { RADAR_NATURAL_ANCHOR_RULE, RADAR_NATURAL_ANCHOR_WRITER_NOTE } from "@/lib/radar/natural-anchor-rule";
 import { RADAR_HUMAN_VOICE_CORE, RADAR_HUMAN_VOICE_H2, RADAR_HUMAN_VOICE_PRECEDENCE } from "@/lib/radar/human-voice-guideline";
 import { RADAR_WRITER_MAY_NOT, radarWriterMayNotWithSubject } from "@/lib/redator/writer-handoff";
 import { WRITER_SECTION_BUNDLE_PATHS, type WriterSectionMaterial } from "@/lib/redator/writer-section-evidence";
@@ -791,7 +791,7 @@ function proximoPassoDosFundamentos(planta: PlantaEVoz): string {
   return [
     "Leia get_writer_evidence_manifest e, para a seção que está escrevendo, read_writer_evidence com a sourceKey do manifesto.",
     /* 2026-10-11 · a âncora sugerida pela régua da âncora natural (a mesma frase do CSV e do MCP). */
-    ...(planta.articleBlueprint ? [`articleBlueprint é o artigo-modelo que o dono aprovou no Radar para este pacote: siga a planta (H1, seções, pergunta do leitor, resposta que abre, links internos com a âncora sugerida, fechamento e CTA); o integral está em articleBlueprint.readAt. ${RADAR_NATURAL_ANCHOR_RULE}`] : []),
+    ...(planta.articleBlueprint ? [`articleBlueprint é o artigo-modelo que o dono aprovou no Radar para este pacote: siga a planta (H1, seções, pergunta do leitor, resposta que abre, links internos com a âncora sugerida, fechamento e CTA); o integral está em articleBlueprint.readAt. ${RADAR_NATURAL_ANCHOR_RULE} ${RADAR_NATURAL_ANCHOR_WRITER_NOTE}`] : []),
     /* 2026-10-09 · regra do piloto: sem planta concluída, a estrutura não sai de outro lugar. */
     ...(!planta.articleBlueprint && planta.absent.some(item => item.field === "articleBlueprint")
       ? ["Sem o artigo-modelo concluído deste pacote, a estrutura não sai de outro lugar: organize o artigo-modelo no Radar (Pesquisa → Artigo-modelo da SERP) e leia os fundamentos de novo."]

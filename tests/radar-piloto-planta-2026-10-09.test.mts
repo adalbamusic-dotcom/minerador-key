@@ -580,9 +580,11 @@ test("7 · o H2 publicado sobre o assunto excluído sai do mapa, com o motivo do
 test("8 · as regras 2026-10-09b: a planta nova sai com elas; o aviso da de 09/10 diz o que mudou e o custo real, sem palavra do D10", () => {
   /* 2026-10-11 · as regras avançaram (a âncora natural): a planta nova sai com 2026-10-11, e a de 09b ganha o aviso dela. */
   /* 2026-10-11b · e a diretriz de comunicação humana guiada pela SERP: a planta nova sai com 2026-10-11b, e a de 11/10 ganha o aviso. */
-  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-11b");
-  assert.equal(plantaDe(entradaGoogle(), { articleId: ARTIGO }).rulesVersion, "2026-10-11b");
-  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11b" }), null);
+  /* 2026-10-11c · e as keywords proibidas por destino: a planta nova sai com 2026-10-11c, e a de 11/10b ganha o aviso. */
+  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-11c");
+  assert.equal(plantaDe(entradaGoogle(), { articleId: ARTIGO }).rulesVersion, "2026-10-11c");
+  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" }), null);
+  semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11b" }) || "", "aviso 2026-10-11b");
   semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11" }) || "", "aviso 2026-10-11");
   semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-09b" }) || "", "aviso 2026-10-09b");
   const aviso = radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-09" })!;

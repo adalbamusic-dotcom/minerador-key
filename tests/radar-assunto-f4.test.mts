@@ -236,9 +236,21 @@ function dentroDosLimites(row: RadarWritingExportRow) {
  * 2026-10-11c · âncora: o recorte não corta mais termo composto nem tira o sujeito. Prova: com a régua
  * anterior o CSV volta ao hash de cima (55e15f94…); a única diferença é a âncora L3 "care noturno" → "noturno".
  */
+/*
+ * 2026-10-11c · keywords proibidas por destino (snapshot refeito de propósito). Prova
+ * (script no scratchpad da sessão, com o mesmo montador deste teste): o CSV de antes
+ * reproduz os hashes anteriores (9bb68e2f… e f5b374ac…); comparado posição a posição
+ * com o de depois, os dois CSVs têm o mesmo número de linhas (262 e 291) e só 19
+ * linhas mudam em cada um, todas de âncora — a regra geral 9 da linha "Silo", o
+ * cabeçalho da coluna links_internos, as linhas "L1…L4 · âncora: …" (instrução,
+ * exemplo e "não use como âncora") e as "- Link interno Ln → …" da estrutura. No
+ * segundo artigo do lote, "máscara" e "cuidados" já usados para o mesmo destino
+ * viram a instrução (a variedade do livro de âncoras). Os quatro artigos avulsos
+ * ficaram idênticos.
+ */
 const SNAPSHOT = {
-  silo: { sha: "9bb68e2f7d3cb5a08f0181e48eb2c5d3f531173ce82e7f179416f8e7ab49571a", len: 31337 },
-  saude: { sha: "f5b374acb998b6606aa3e5171d6ebd08477fe6d66b8bfcc304c44d71f2584818", len: 35063 },
+  silo: { sha: "4be7e971c7c13357c3c65bbf62290bdd6d6cfbbf9ab09aa2aa98a868e0066f1d", len: 33929 },
+  saude: { sha: "ba83b7807aac70c1b83a42d1bb909e3f5f1c95e89124d9dd77978b654c59d472", len: 37655 },
   artigos: {
     google: "f16940c66d6dcb73ab9581de7cefead87bc708f48d7421eceb133c09cec1a42e",
     amazon: "17b62d1bf5c9381dc3cbcef4175b8d83b4e2601ff4910439bed4bf75f8828dca",

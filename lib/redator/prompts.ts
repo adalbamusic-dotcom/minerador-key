@@ -2,7 +2,7 @@ import type { ContentDocument } from "../arquiteto/contracts.ts";
 import { RedatorPromptContextSchema, type RedatorPromptContext } from "./contracts.ts";
 import { WRITER_BLUEPRINT_CONTINUATION_LABEL, WRITER_EVIDENCE_GUARDS } from "./writer-evidence-catalog.ts";
 /* 2026-10-11 · a regra da âncora natural: a MESMA frase do CSV "Para escrever" e do MCP. */
-import { RADAR_NATURAL_ANCHOR_RULE } from "../radar/natural-anchor-rule.ts";
+import { RADAR_NATURAL_ANCHOR_RULE, RADAR_NATURAL_ANCHOR_WRITER_NOTE } from "../radar/natural-anchor-rule.ts";
 /* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP: a MESMA fonte do pedido do artigo-modelo, do CSV, do vídeo e do MCP. */
 import { RADAR_HUMAN_VOICE_H2, radarHumanVoiceRedatorRule } from "../radar/human-voice-guideline.ts";
 import type { WriterSectionEvidencePackage } from "./writer-section-evidence.ts";
@@ -98,7 +98,7 @@ const ALERT_FORMAT = "Cada item de alerts é um texto curto ou um objeto { messa
  * chamada no fechamento — o CTA é a única chamada do artigo.
  */
 const BLUEPRINT_CONTINUATION_RULE = `closing.cta é a única chamada do artigo. closing.nextStep, quando existe, é a ${WRITER_BLUEPRINT_CONTINUATION_LABEL.toLocaleLowerCase("pt-BR")}: se couber, entra no corpo da seção que trata dela; nunca como segunda chamada no fechamento.`;
-const BLUEPRINT_SECTION_RULE = `Quando evidence.articleBlueprint existir, ele é o artigo-modelo da SERP concluído no Radar. evidence.articleBlueprint.section é a seção da planta para ESTE H2, e o servidor só a entrega quando o título casa com segurança: siga a pergunta do leitor, a resposta que abre a seção, os H3 e os links internos dela com a âncora sugerida, sem criar link fora dela. ${RADAR_NATURAL_ANCHOR_RULE} Quando section é null, a seção alvo não tem par seguro na planta: valem só a ordem dos H2 (outline), a promessa e o leitor; não copie pergunta, H3 nem link de outra seção da planta. A virada e o CTA do fechamento (closing) entram só quando a seção alvo fecha o artigo. ${BLUEPRINT_CONTINUATION_RULE}`;
+const BLUEPRINT_SECTION_RULE = `Quando evidence.articleBlueprint existir, ele é o artigo-modelo da SERP concluído no Radar. evidence.articleBlueprint.section é a seção da planta para ESTE H2, e o servidor só a entrega quando o título casa com segurança: siga a pergunta do leitor, a resposta que abre a seção, os H3 e os links internos dela com a âncora sugerida, sem criar link fora dela. ${RADAR_NATURAL_ANCHOR_RULE} ${RADAR_NATURAL_ANCHOR_WRITER_NOTE} Quando section é null, a seção alvo não tem par seguro na planta: valem só a ordem dos H2 (outline), a promessa e o leitor; não copie pergunta, H3 nem link de outra seção da planta. A virada e o CTA do fechamento (closing) entram só quando a seção alvo fecha o artigo. ${BLUEPRINT_CONTINUATION_RULE}`;
 /*
  * 2026-10-09 · A MELHORIA TAMBÉM SEGUE O ARTIGO-MODELO (regra do piloto: melhoria
  * de publicado e reajuste com os mesmos fundamentos). O servidor entrega a seção
