@@ -12,10 +12,30 @@
 O dono pediu, em 2026-10-11, para deixar de trabalhar com a DeepSeek e gastar os
 créditos já existentes na OpenRouter. A capability `ai_generation` passa a
 resolver a Connection global **OpenRouter**. O modelo padrão é
-`openai/gpt-6-luna-pro:batch`.
+`anthropic/claude-haiku-5.5`, escolhido em 2026-10-12. A primeira escolha, a variante
+`:batch` do GPT-6 Luna Pro, não funciona no endpoint de chat; veja a correção abaixo.
 
 A Connection DeepSeek continua READY no banco, mas não recebe chamadas. Ela fica
 como reserva para rollback.
+
+## Correção de 2026-10-12 — a variante batch não funciona no chat
+
+A primeira chamada real devolveu "O provider de IA respondeu com erro HTTP 404". Uma chamada de diagnóstico autorizada pelo dono mostrou a mensagem que a plataforma descarta: a OpenRouter recusa `openai/gpt-6-luna-pro:batch` no endpoint chat/completions, porque essa variante usa um adaptador de lote. A mesma chamada com `openai/gpt-6-luna-pro` voltou HTTP 200 em cerca de 2 segundos, com JSON válido.
+
+- O padrão do código passou a ser `openai/gpt-6-luna-pro`, depois trocado pelo Claude Haiku 5.5.
+- `OPENROUTER_MODEL` terminado em `:batch` agora é recusado pelo resolvedor com 409 e uma instrução clara, antes de qualquer chamada.
+- A lista de modelos conhecidos da metadata não tem mais variantes batch.
+- Custo das duas chamadas de diagnóstico: a recusada não foi cobrada; a aceita custou US$ 0,000165.
+- A suposição anterior, de que a variante batch era síncrona pela metade do preço, estava errada.
+
+## Escolha do modelo em 2026-10-12 — Claude Haiku 5.5
+
+Depois de comparar o catálogo da OpenRouter por custo, contexto, saída máxima e suporte a JSON, o dono escolheu `anthropic/claude-haiku-5.5` como modelo padrão. Ele tem o mesmo preço do GPT-6 Luna Pro, US$ 0,10 por milhão de tokens de entrada e US$ 0,50 de saída, e dez provedores na OpenRouter.
+
+- Uma chamada de diagnóstico no formato da plataforma voltou HTTP 200 em cerca de 1,7 segundo, com JSON válido e texto em português. Custo: US$ 0,000048.
+- O código não marca pontos de cache para a Anthropic, então a parte repetida dos prompts não tem desconto, ao contrário do GPT-6 Luna Pro e do Gemini.
+- Gemini 3.8 Flash também foi testado e funcionou, mas custa cerca de 7 vezes mais por chamada.
+- A conexão nativa com a Anthropic, sem a OpenRouter, fica para uma etapa futura com adendo próprio.
 
 ## Contrato anterior
 
@@ -34,7 +54,7 @@ como reserva para rollback.
 | Roteamento | `ai_generation` → `openrouter` nos dois mapas do runtime. |
 | Âncora | A Connection OpenRouter global precisa estar READY e com segredo. Ela continua sendo a âncora de autorização e do ledger de uso. |
 | Chave | `OPENROUTER_API_KEY` da env do servidor tem precedência. Sem env, vale o segredo da Connection no formato `{ "OPENROUTER_API_KEY": "..." }`. |
-| Modelo | `OPENROUTER_MODEL` da env, se for um slug válido. Senão, a metadata da Connection, só se apontar para um modelo conhecido. Senão, o padrão do código. |
+| Modelo | `OPENROUTER_MODEL` da env, se for um slug válido e sem `:batch`. Senão, a metadata da Connection, só se apontar para um modelo conhecido. Senão, o padrão do código. |
 | Raciocínio | Sem `temperature`. O modo de Thinking da operação vira `reasoning.effort`: desligado vira `low`, padrão vira `medium`, ligado vira `high`. O raciocínio não volta na resposta, mas é cobrado. |
 | Orçamento | Na OpenRouter `max_tokens` inclui o raciocínio. Cada operação continua pedindo só o orçamento da resposta. O cliente soma uma folga de 8 mil, 16 mil ou 32 mil tokens conforme o esforço, até o teto do modelo. |
 | Erros | HTTP 402 vira mensagem de crédito. Erro do provedor de origem dentro de um HTTP 200 vira erro com o status de origem. Resposta vazia cortada por tamanho vira erro próprio e não é repetida automaticamente. |
@@ -70,10 +90,10 @@ Alterações aditivas nesses consumidores:
 
 ## Riscos
 
-- **Latência da variante batch.** Ela tem a metade do preço, mas pode demorar
-  mais. O timeout padrão das operações é 180 segundos e a melhoria de publicados
-  tem 120 segundos de função. Se houver estouro, troque `OPENROUTER_MODEL` para
-  `openai/gpt-6-luna-pro` na Vercel e refaça o deploy, sem mudar código.
+- **Variante batch.** Não funciona no endpoint de chat e agora é recusada no
+  resolvedor. O timeout padrão das operações é 180 segundos e a melhoria de
+  publicados tem 120 segundos de função; a chamada de diagnóstico sem batch levou
+  cerca de 2 segundos.
 - **Custo do raciocínio.** O modo pro raciocina muito. A folga de tokens limita o
   teto, não o gasto real. O consumo aparece no painel da OpenRouter.
 - **Health check marca erro.** Como nos outros providers, um teste de conexão

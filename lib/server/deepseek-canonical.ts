@@ -16,6 +16,7 @@ import {
   OPENROUTER_API_URL,
   OPENROUTER_BASE_URL,
   OPENROUTER_DEFAULT_MODEL,
+  isOpenRouterBatchVariant,
   isOpenRouterKnownModel,
   isOpenRouterModelSlug,
 } from "@/lib/openrouter-model-config";
@@ -132,6 +133,11 @@ export function readOpenRouterModel(metadata: unknown, environment: EnvironmentR
   if (fromEnv) {
     if (!isOpenRouterModelSlug(fromEnv)) {
       throw new DeepSeekCanonicalError("OPENROUTER_MODEL_NOT_ALLOWED", "OPENROUTER_MODEL não é um identificador de modelo válido da OpenRouter.", 409);
+    }
+    // A OpenRouter devolve 404 para `:batch` em chat/completions. Recusar aqui
+    // troca um "erro HTTP 404" mudo por uma instrução que o operador entende.
+    if (isOpenRouterBatchVariant(fromEnv)) {
+      throw new DeepSeekCanonicalError("OPENROUTER_MODEL_NOT_ALLOWED", `OPENROUTER_MODEL usa a variante :batch (${fromEnv}), que a OpenRouter não aceita no endpoint de chat. Use o mesmo ID sem :batch.`, 409);
     }
     return { model: fromEnv, modelSource: "environment" };
   }

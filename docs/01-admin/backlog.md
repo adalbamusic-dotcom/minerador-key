@@ -3,12 +3,17 @@
 ## IA da plataforma pela OpenRouter — 2026-10-11
 
 - [x] Rotear `ai_generation` para a Connection OpenRouter e manter a DeepSeek como reserva de rollback.
-- [x] Ler a chave de `OPENROUTER_API_KEY` com precedência sobre o Secret Store e o modelo de `OPENROUTER_MODEL`, com padrão `openai/gpt-6-luna-pro:batch`.
+- [x] Ler a chave de `OPENROUTER_API_KEY` com precedência sobre o Secret Store e o modelo de `OPENROUTER_MODEL`, com padrão `anthropic/claude-haiku-5.5`; `:batch` é recusado porque não funciona no endpoint de chat.
 - [x] Card OpenRouter no Admin, health check sem custo e testes `test:ai-provider` no agregado.
 - [ ] Usuário: cadastrar `OPENROUTER_API_KEY` na Vercel (Production e Preview) e, se quiser fixar, `OPENROUTER_MODEL`; fazer deploy.
 - [ ] Usuário: no Admin, Integrações, clicar Testar conexão no card OpenRouter e confirmar limite restante.
 - [ ] Usuário: uma geração real curta e readback do evento em `integration_usage_events` com a Connection OpenRouter.
-- [ ] Decidir depois do primeiro uso se a variante batch cabe nos timeouts; se não, trocar `OPENROUTER_MODEL` para `openai/gpt-6-luna-pro`.
+- [x] Diagnosticar o HTTP 404 da primeira geração real: variante `:batch` recusada no endpoint de chat; corrigido o padrão do código.
+- [x] Escolher o modelo padrão: `anthropic/claude-haiku-5.5`, testado no formato da plataforma.
+- [ ] Usuário: fazer deploy da correção; a variável `OPENROUTER_MODEL` já foi retirada da Vercel.
+- [ ] Futuro, com adendo próprio: conectar o Claude de forma nativa pela API da Anthropic, sem a OpenRouter.
+- [ ] Avaliar marcar pontos de cache nas chamadas à Anthropic, para ter desconto na parte repetida dos prompts.
+- [ ] Avaliar depois o endpoint flex da OpenAI na OpenRouter, que atende o modelo sem batch pelo preço da batch, com latência maior.
 - [ ] Opcional, com autorização de escrita remota: atualizar a metadata `openrouter_model` da Connection, que ainda guarda o modelo DeepSeek de 2026-08.
 
 ## Exclusão de convite direto e link de 24 horas — 2026-09-14

@@ -12,19 +12,32 @@ export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1" as const;
 export const OPENROUTER_API_URL = `${OPENROUTER_BASE_URL}/chat/completions` as const;
 export const OPENROUTER_KEY_URL = `${OPENROUTER_BASE_URL}/key` as const;
 
-/** Escolha do dono em 2026-10-11: variante batch, servida pela OpenAI pela metade do preço normal. */
-export const OPENROUTER_DEFAULT_MODEL = "openai/gpt-6-luna-pro:batch" as const;
+/**
+ * Escolha do dono em 2026-10-12: Claude Haiku 5.5 pela OpenRouter, pelo
+ * equilíbrio entre custo e qualidade no volume da plataforma. A conexão nativa
+ * com a Anthropic fica para depois.
+ *
+ * Histórico: em 2026-10-11 o padrão era `openai/gpt-6-luna-pro:batch`, que a
+ * OpenRouter recusou com 404 em chat/completions ("adapter OpenAIBatchAdapter").
+ */
+export const OPENROUTER_DEFAULT_MODEL = "anthropic/claude-haiku-5.5" as const;
 
 /**
  * Modelos que a metadata da Connection pode fixar. A env aceita qualquer slug
  * válido da OpenRouter, porque quem a escreve é o operador da plataforma.
  */
 export const OPENROUTER_KNOWN_MODELS = [
-  "openai/gpt-6-luna-pro:batch",
+  "anthropic/claude-haiku-5.5",
   "openai/gpt-6-luna-pro",
-  "openai/gpt-6-luna:batch",
   "openai/gpt-6-luna",
+  "openai/gpt-6.1-sol",
+  "openai/gpt-6.1-sol-pro",
 ] as const;
+
+/** A variante `:batch` usa um adaptador de lote e não atende chat/completions. */
+export function isOpenRouterBatchVariant(value: string) {
+  return /:batch$/i.test(value.trim());
+}
 
 export type OpenRouterKnownModel = (typeof OPENROUTER_KNOWN_MODELS)[number];
 
