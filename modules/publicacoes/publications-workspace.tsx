@@ -20,6 +20,9 @@ import { isPartialContentDocument } from "@/lib/editorial/content-document-listi
 import { useNoticeBridge } from "@/components/global-notice-center";
 import Link from "next/link";
 import { PUBLICATIONS_LIBRARY_DEFAULT_FILTER, PUBLICATIONS_LIBRARY_FILTERS, PUBLICATIONS_LIBRARY_FILTER_LABELS, filterEditorialLibrary, projectEditorialLibrary, writerHrefForRow, type EditorialLibraryFilter } from "@/lib/publicacoes/editorial-library";
+import { useEditorialGroups } from "@/components/editorial/use-editorial-groups";
+import { ArticleGroupRowTag, editorialGroupStripeClass } from "@/components/editorial/article-group-controls";
+import { EDITORIAL_GROUP_COLOR_LABELS, EDITORIAL_GROUP_URL_NONE, editorialGroupFilterMatches, isEditorialGroupColor, type EditorialGroupSummary } from "@/lib/editorial/editorial-groups";
 
 const btn = "inline-flex h-7 items-center rounded border border-divider bg-surface-subtle px-2.5 text-[10px] font-bold text-foreground/75 transition-colors hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40";
 const field = "h-7 w-full rounded border border-divider bg-surface-subtle px-2 text-[10px] text-foreground outline-none transition-colors hover:border-module-accent/25 focus:border-module-accent/45";
@@ -48,6 +51,19 @@ export function PublicationsWorkspace() {
   useNoticeBridge({ notice, module: "publicacoes", area: "Publicações", title: "Publicações", fallbackSeverity: "INFO" });
   const historyValue = useMemo(() => ({ operationalPublications: pipeline.operationalPublications }), [pipeline.operationalPublications]);
   const history = useLocalHistory("publicacoes", historyValue, snapshot => pipeline.restoreOperationalSnapshot("publicacoes", snapshot), 30, selectedBrandId || "sem-marca");
+  /*
+   * 2026-10-12 · F6 · O GRUPO DE COR EM PUBLICAÇÕES: a etiqueta da barra global
+   * (escolha DESTA área) filtra a Biblioteca e as abas da planilha; cada linha
+   * ganha a faixa e a etiqueta do grupo do artigo. Só leitura e só tela; o
+   * grupo efetivo dos artigos é lido depois da mesa (ou na hora, com uma cor).
+   */
+  const gruposDePublicacoes = useEditorialGroups({ brandId: selectedBrandId || null, enabled: Boolean(selectedBrandId), area: "publicacoes", mainReady: !pipeline.loading });
+  const grupoDoArtigo = (articleId: string): EditorialGroupSummary | null => { const id = gruposDePublicacoes.articleGroupById.get(articleId)?.groupId; return id ? gruposDePublicacoes.groupById.get(id) ?? null : null; };
+  const doGrupo = (articleId: string) => gruposDePublicacoes.filter.kind === "all" || editorialGroupFilterMatches(gruposDePublicacoes.filter, gruposDePublicacoes.articleGroupById.get(articleId)?.groupId ?? null);
+  const filtroDoGrupo = useMemo(() => (gruposDePublicacoes.filter.kind === "all" ? undefined : (row: PublicationRow) => editorialGroupFilterMatches(gruposDePublicacoes.filter, gruposDePublicacoes.articleGroupById.get(row.articleId)?.groupId ?? null)), [gruposDePublicacoes.filter, gruposDePublicacoes.articleGroupById]);
+  const vazioPeloGrupo = gruposDePublicacoes.filterKey === "pendente" ? "Lendo o grupo dos conteúdos…"
+    : gruposDePublicacoes.choice === EDITORIAL_GROUP_URL_NONE ? "Nenhum conteúdo sem grupo nesta lista."
+      : isEditorialGroupColor(gruposDePublicacoes.choice) ? `Nenhum conteúdo na cor ${EDITORIAL_GROUP_COLOR_LABELS[gruposDePublicacoes.choice]} nesta lista.` : null;
 
   if (pipeline.loading && !pipeline.snapshot) return <div className="flex min-h-[50vh] items-center justify-center text-xs text-slate-500"><Loader2 className="mr-2 h-4 w-4 animate-spin"/>Carregando Publicações…</div>;
   if (!pipeline.snapshot || !selectedBrandId) return <EmptyPipelineState title="Marca sem dados" description={pipeline.error || "Selecione uma marca autorizada."}/>;
@@ -71,7 +87,11 @@ export function PublicationsWorkspace() {
     publications: pipeline.operationalPublications,
     updatedAtByDocument: pipeline.documentUpdatedAt,
   });
-  const libraryVisible = filterEditorialLibrary(libraryRows, libraryStatus);
+  const libraryDoEixo = filterEditorialLibrary(libraryRows, libraryStatus);
+  /* 2026-10-12 · F6 · o recorte do grupo vem por cima do eixo de entrega (os dois filtros valem juntos). */
+  const libraryVisible = libraryDoEixo.filter(row => doGrupo(row.articleId));
+  const conteudosSemGrupo = gruposDePublicacoes.articlesReady ? libraryRows.filter(row => !gruposDePublicacoes.articleGroupById.get(row.articleId)?.groupId).length : null;
+  const semGrupoNaEtiqueta = conteudosSemGrupo === null ? "" : `${conteudosSemGrupo} conteúdo${conteudosSemGrupo === 1 ? "" : "s"}`;
   const rows = allRows.filter(row => tab === "published" ? row.state === "published" && (!isWorkflow(row) || !row.updateRequested) : tab === "updates" ? isWorkflow(row) && row.updateRequested : tab === "queue" ? ["ready_to_export", "queued", "exported"].includes(row.state) : ["approved", "ready_to_export"].includes(row.state));
 
 
@@ -110,7 +130,7 @@ export function PublicationsWorkspace() {
 
   const exportManifest = () => { downloadFile("publicacoes.csv", "text/csv;charset=utf-8", createPublicationsCsv(pipeline.operationalPublications)); setNotice("Manifesto CSV exportado."); };
   const columns: OperationalGridColumn<PublicationRow>[] = [
-    { id: "title", header: "Conteúdo", value: row => row.title, pinned: "left", sortable: true, width: 250 },
+    { id: "title", header: "Conteúdo", value: row => row.title, pinned: "left", sortable: true, width: 250, render: row => <span className="flex min-w-0 flex-col items-start gap-1"><span className="max-w-full truncate">{row.title}</span><ArticleGroupRowTag group={grupoDoArtigo(row.articleId)} inherited={!gruposDePublicacoes.articleGroupById.get(row.articleId)?.persisted}/></span> },
     { id: "unitType", header: "Unidade", value: row => row.unitType === "silo_page" ? "Página do silo" : "Artigo", width: 95 },
     { id: "slug", header: "Slug", value: row => row.slug, width: 180, render: row => <code>/{row.slug}</code> },
     { id: "silo", header: "Silo", value: row => row.siloId, width: 130 },
@@ -173,7 +193,7 @@ export function PublicationsWorkspace() {
   </>;
 
   return <div className="flex h-screen min-h-0 flex-col">{notice && <div className="shrink-0 border-b border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-[9px] text-amber-300">{notice}</div>}
-    <HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="publicacoes" showHistory={false} showUndoRedo={false}/>{tab === "library" ? <><PublicacoesAreaTabs tabs={areaTabs}/><BibliotecaEditorial rows={libraryVisible} status={libraryStatus} onStatus={setLibraryStatus} brandRef={activeBrandRef}/></> : <OperationalDataGrid module={`publicacoes:${tab}`} userId={sessionId(session)} brandId={selectedBrandId} rows={rows} columns={columns} topbar={{ moduleId: "publicacoes", tabs: areaTabs, history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "publicacoes" } })), undoLabel: "Desfazer publicação", redoLabel: "Refazer publicação", historyLabel: "Histórico de Publicações", undoTitle: "Desfazer alteração em Publicações", redoTitle: "Refazer alteração em Publicações", historyTitle: count => `Histórico de Publicações (${count})` }, renderActions: renderTopbarActions }} emptyTitle="Nenhum conteúdo nesta aba." renderActions={row => <PublicationRowActions row={row} busy={busyId === row.id} onAction={runAction} onExport={exportPublication} onNotice={setNotice}/>} renderExpanded={row => <PublicationExpanded row={row}/>}/>}
+    <HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="publicacoes" showHistory={false} showUndoRedo={false}/>{tab === "library" ? <><PublicacoesAreaTabs tabs={areaTabs} ungroupedDetail={semGrupoNaEtiqueta}/><BibliotecaEditorial rows={libraryVisible} status={libraryStatus} onStatus={setLibraryStatus} brandRef={activeBrandRef} groupOf={grupoDoArtigo} emptyByGroup={libraryDoEixo.length > 0 && libraryVisible.length === 0 ? vazioPeloGrupo : null}/></> : <OperationalDataGrid module={`publicacoes:${tab}`} userId={sessionId(session)} brandId={selectedBrandId} rows={rows} rowFilter={filtroDoGrupo} rowStripeClassName={row => editorialGroupStripeClass(grupoDoArtigo(row.articleId))} columns={columns} topbar={{ moduleId: "publicacoes", tabs: areaTabs, groupTagUngroupedDetail: semGrupoNaEtiqueta, history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "publicacoes" } })), undoLabel: "Desfazer publicação", redoLabel: "Refazer publicação", historyLabel: "Histórico de Publicações", undoTitle: "Desfazer alteração em Publicações", redoTitle: "Refazer alteração em Publicações", historyTitle: count => `Histórico de Publicações (${count})` }, renderActions: renderTopbarActions }} emptyTitle="Nenhum conteúdo nesta aba." renderActions={row => <PublicationRowActions row={row} busy={busyId === row.id} onAction={runAction} onExport={exportPublication} onNotice={setNotice}/>} renderExpanded={row => <PublicationExpanded row={row}/>}/>}
 
   </div>;
 }
@@ -223,9 +243,10 @@ function Detail({ label, value }: { label: string; value: string }) { return <di
  * Como as duas superfícies nunca coexistem, o slot de controles do módulo — que
  * é único, último registro vence — recebe sempre exatamente um dono.
  */
-function PublicacoesAreaTabs({ tabs }: { tabs: ReactNode }) {
+function PublicacoesAreaTabs({ tabs, ungroupedDetail }: { tabs: ReactNode; ungroupedDetail?: string }) {
   const { registerControls, unregisterControls } = useGlobalTopbarControlsRegistration();
-  const controls = useMemo<GlobalTopbarModuleControls>(() => ({ moduleId: "publicacoes", tabs }), [tabs]);
+  /* 2026-10-12 · F6 · o "Sem grupo" da etiqueta conta conteúdos (vazio até o grupo dos artigos chegar). */
+  const controls = useMemo<GlobalTopbarModuleControls>(() => ({ moduleId: "publicacoes", tabs, ...(ungroupedDetail !== undefined ? { groupTagUngroupedDetail: ungroupedDetail } : {}) }), [tabs, ungroupedDetail]);
   useEffect(() => {
     registerControls(controls);
     return () => unregisterControls(controls.moduleId);
@@ -233,11 +254,15 @@ function PublicacoesAreaTabs({ tabs }: { tabs: ReactNode }) {
   return null;
 }
 
-function BibliotecaEditorial({ rows, status, onStatus, brandRef }: {
+function BibliotecaEditorial({ rows, status, onStatus, brandRef, groupOf, emptyByGroup = null }: {
   rows: ReturnType<typeof projectEditorialLibrary>;
   status: EditorialLibraryFilter;
   onStatus: (value: EditorialLibraryFilter) => void;
   brandRef: string | null | undefined;
+  /** 2026-10-12 · F6 · o grupo (cor e nome) do artigo de cada documento, para a faixa e a etiqueta. */
+  groupOf?: (articleId: string) => EditorialGroupSummary | null;
+  /** 2026-10-12 · F6 · a lista do eixo tem documentos, mas nenhum na cor escolhida: a frase do recorte. */
+  emptyByGroup?: string | null;
 }) {
   const tomRedator: Record<string, string> = { RASCUNHO: "border-warning/40 text-warning", FINALIZADO: "border-context-accent/50 text-context-accent" };
   const tomEntrega: Record<string, string> = { NAO_ENTREGUE: "border-divider text-text-muted", RECEBIDO: "border-context-accent/50 text-context-accent", PUBLICADO: "border-success/50 text-success" };
@@ -257,16 +282,19 @@ function BibliotecaEditorial({ rows, status, onStatus, brandRef }: {
         </button>)}
       <span className="ml-auto text-[10px] text-text-muted">{rows.length} documento(s)</span>
     </div>
-    {!rows.length
+    {!rows.length && emptyByGroup
+      ? <p className="text-sm text-text-muted" role="status" data-publicacoes-lista-grupo-vazia>{emptyByGroup}</p>
+      : !rows.length
       ? <EmptyPipelineState
           title={status === "NAO_ENTREGUE" ? "Nenhum documento aguardando entrega" : "Publicações ainda não recebeu nada"}
           description={status === "NAO_ENTREGUE"
             ? "Todo documento do Redator já foi entregue a Publicações, ou ainda não existe documento nenhum para esta marca."
             : "Finalizar no Redator não entrega: o documento só entra aqui depois de “Enviar a Publicações”, com o registro persistido e relido. Use “Ainda no Redator” para ver o que está produzido e ainda não foi entregue."}/>
-      : <ul className="space-y-2">{rows.map(row => <li key={row.id} className={card}>
+      : <ul className="space-y-2">{rows.map(row => <li key={row.id} className={`${card} ${editorialGroupStripeClass(groupOf?.(row.articleId))}`} data-biblioteca-grupo={groupOf?.(row.articleId)?.color || undefined}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-xs font-semibold text-foreground">{row.title}</p>
+              {groupOf?.(row.articleId) ? <span className="mt-1 block"><ArticleGroupRowTag group={groupOf(row.articleId)}/></span> : null}
               <p className="mt-0.5 text-[10px] text-text-muted">
                 /{row.slug || "sem-slug"} · origem {row.origin === "radar" ? "Radar" : "Planejador (histórico)"}
                 {row.updatedAt ? ` · atualizado em ${new Date(row.updatedAt).toLocaleString("pt-BR")}` : ""}

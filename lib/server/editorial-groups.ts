@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { AuthzError, type CanonicalSessionProfile } from "@/lib/server/authz";
 import { getOperationalClient } from "@/lib/server/editorial-db";
 import { resolveTenantContext, type TenantModule } from "@/lib/server/tenant-context";
-import { GROUPS_NOT_AVAILABLE, type EditorialGroupRefusalCode } from "@/lib/editorial/editorial-groups";
+import { canEnsureEditorialGroupColor, GROUPS_NOT_AVAILABLE, type EditorialGroupRefusalCode } from "@/lib/editorial/editorial-groups";
 
 /**
  * GRUPOS EDITORIAIS NO SERVIDOR (F1).
@@ -36,6 +36,19 @@ export async function assertCanTagEditorialArticles(profile: CanonicalSessionPro
   const context = await resolveTenantContext({ brandId, profile });
   if (!context.isGlobalAdmin && !ETIQUETADORES_DE_ARTIGO.some(module => context.permissions.includes(`${module}:edit`))) {
     throw new AuthzError(403, "BRAND_ACCESS_DENIED: etiquetar artigo exige edição no Arquiteto ou no Radar desta marca.");
+  }
+  return context;
+}
+
+/**
+ * 2026-10-12 · cores fixas: garantir o grupo de uma COR (para mover ou
+ * etiquetar por cor) é de quem edita em qualquer das três planilhas que movem
+ * coisas de grupo — Minerador (keywords), Arquiteto ou Radar (artigos).
+ */
+export async function assertCanEnsureEditorialGroupColor(profile: CanonicalSessionProfile, brandId: string) {
+  const context = await resolveTenantContext({ brandId, profile });
+  if (!canEnsureEditorialGroupColor(context)) {
+    throw new AuthzError(403, "BRAND_ACCESS_DENIED: mover para uma cor exige edição no Minerador, no Arquiteto ou no Radar desta marca.");
   }
   return context;
 }

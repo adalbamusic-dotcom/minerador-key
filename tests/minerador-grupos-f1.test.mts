@@ -19,7 +19,7 @@ import {
   serializeEditorialGroupFilter,
   validateNewEditorialGroup,
 } from "../lib/editorial/editorial-groups.ts";
-import { createEditorialGroup, listEditorialGroupSummaries, readEditorialGroup, updateEditorialGroup } from "../lib/editorial/editorial-groups-store.ts";
+import { createEditorialGroup, ensureEditorialGroupForColor, listEditorialGroupSummaries, readEditorialGroup, updateEditorialGroup } from "../lib/editorial/editorial-groups-store.ts";
 import { assignKeywordGroupWithCore, KEYWORD_GROUP_ID_CHUNK } from "../lib/minerador/keyword-group-core.ts";
 
 /**
@@ -413,7 +413,10 @@ test("F1-17 · rota de grupos: leitura por quem vê a marca, escrita com minerad
   const rota = semComentarios(read("app/api/editorial/groups/route.ts"));
   assert.match(rota, /export async function GET/);
   assert.match(rota, /assertCanReadEditorialGroups\(profile, brandId\)/);
-  assert.equal((rota.match(/module: "minerador", action: "edit"/g) || []).length, 2, "POST e PATCH");
+  // 2026-10-12 · "Gerenciar" a cor: o PATCH passou a exigir edição no Minerador, no Arquiteto OU no Radar
+  // (as três áreas mostram a etiqueta); o POST com nome continua com minerador:edit.
+  assert.equal((rota.match(/module: "minerador", action: "edit"/g) || []).length, 1, "POST com nome");
+  assert.match(rota.slice(rota.indexOf("export async function PATCH")), /assertCanEnsureEditorialGroupColor\(profile, input\.marcaId\)/, "PATCH = Gerenciar");
   const servidor = read("lib/server/editorial-groups.ts");
   assert.match(servidor, /GROUPS_NOT_AVAILABLE: 409/);
   assert.match(servidor, /import "server-only"/);
@@ -444,20 +447,30 @@ test("F1-19 · tela do Minerador: recorte por grupo só quando há filtro, chave
   const tela = semComentarios(read("modules/minerador/minerador-workspace.tsx"));
   assert.match(tela, /if \(comGrupo && filtroDeGrupo\.kind === "group"\) query = query\.eq\("group_id", filtroDeGrupo\.groupId\)/);
   assert.match(tela, /else if \(comGrupo && filtroDeGrupo\.kind === "none"\) query = query\.is\("group_id", null\)/);
+  // 2026-10-12 · cores fixas: a cor lê todos os grupos ativos dela; cor sem grupo não consulta nada.
+  assert.match(tela, /else if \(comGrupo && filtroDeGrupo\.kind === "groups"\) query = query\.in\("group_id", \[\.\.\.filtroDeGrupo\.groupIds\]\)/);
+  assert.match(tela, /if \(filtroDeGrupo\.kind === "groups" && filtroDeGrupo\.groupIds\.length === 0\) return \[\];/);
   assert.match(tela, /\|grupo:\$\{keywordGroups\.filterKey\}/);
   assert.match(tela, /if \(!keywordGroups\.ready\) \{[\s\S]{0,400}fetchDataActiveKeyRef\.current = null;[\s\S]{0,300}setKeywords\(\[\]\)/, "troca de marca não deixa linha da outra marca na tela");
   assert.match(tela, /keywordGroups\.filter\.kind === "all" \? qualificationVersionCachePruneForListing\(loadedKeywords\.length\) : "loaded-entities"/, "carga recortada não poda o cache das outras keywords");
   assert.match(tela, /isEditorialGroupsSchemaMissing\(keywordsError\)[\s\S]{0,200}keywordGroups\.markUnavailable\(\)/);
-  assert.match(tela, /tabs: sectionTabs,\s*groupTag: groupTagButton,/, "2026-10-12 · o seletor é o botão-ícone ao lado do sino, fora das abas");
-  assert.match(tela, /const groupTagButton = useMemo\(\(\) => \(keywordGroups\.available\s*\?/, "seletor só com a migration; memo para não reciclar o registro da topbar");
+  // 2026-10-12 · a etiqueta é da topbar global (fixa, na hora): o Minerador não registra nada para ela.
+  assert.doesNotMatch(tela, /<EditorialGroupSelector|groupTag/, "o Minerador não monta mais o seletor");
+  assert.match(tela, /const continuaNaVisao = keywordGroups\.keepsInView\(targetColor\);/);
+  assert.match(tela, /const garantido = await keywordGroups\.ensureColorGroup\(targetColor\);[\s\S]{0,400}targetGroupId = garantido\.group\.id;[\s\S]{0,200}await keywordGroups\.assignKeywords\(ids, targetGroupId\)/, "mover por cor garante o grupo da cor antes de etiquetar");
+  assert.equal((tela.match(/EDITORIAL_GROUP_COLORS\.map\(color => \{ const nome = editorialGroupCustomName\(color, keywordGroups\.groups\); return <option key=\{color\} value=\{color\}>Mover para \{EDITORIAL_GROUP_COLOR_LABELS\[color\]\}/g) || []).length, 2, "os dois selects do rodapé listam as 5 cores");
+  assert.doesNotMatch(tela, /Crie um grupo no seletor do topo/);
   assert.match(tela, /EDITORIAL_GROUP_COLOR_CLASSES\[rowGroup\.color\]\.stripe/);
   assert.match(tela, /<EditorialGroupTag name=\{rowGroup\.name\} color=\{rowGroup\.color\}/);
   assert.doesNotMatch(tela, /border-l-group-\$\{|bg-group-\$\{/, "classe de cor nunca por interpolação");
   const hook = semComentarios(read("modules/minerador/use-minerador-groups.ts"));
-  assert.match(hook, /window\.history\.replaceState/);
-  assert.match(hook, /try \{\s*window\.localStorage\.setItem/);
-  assert.match(hook, /try \{\s*return window\.localStorage\.getItem/);
-  assert.doesNotMatch(hook, /localStorage\.(removeItem|clear)\(/, "nunca limpa o armazenamento local");
+  assert.match(hook, /useAreaGroupFilter\(alvo, "minerador"\)/);
+  assert.match(hook, /ready: !alvo \|\| !recorte\.pending/, "só uma cor sem cache espera a lista de grupos");
+  const estado = semComentarios(read("components/editorial/editorial-group-area-store.ts"));
+  assert.match(estado, /window\.history\.replaceState/);
+  assert.match(estado, /try \{\s*if \(typeof window !== "undefined"\) window\.localStorage\.setItem/);
+  assert.match(estado, /try \{\s*return typeof window === "undefined" \? null : window\.localStorage\.getItem/);
+  assert.doesNotMatch(hook + estado, /localStorage\.(removeItem|clear)\(/, "nunca limpa o armazenamento local");
 });
 
 test("F1-20 · paleta registrada: aliases de tokens em globals.css (sem valor bruto) e §5.0.2 no sistema visual", () => {
@@ -473,4 +486,90 @@ test("F1-20 · paleta registrada: aliases de tokens em globals.css (sem valor br
   assert.match(doc, /### 5\.0\.2 Cores de grupo/);
   const seletor = read("components/editorial/group-selector.tsx");
   assert.doesNotMatch(seletor, /text-xs|text-\[1[0-3]px\]/, "texto essencial com 14 px ou mais");
+});
+
+/* ================= 2026-10-12 · cores fixas: garantir o grupo da cor ================= */
+
+test("F1-21 · garantir a cor: grupo ativo da cor volta como está (vários = o mais antigo); nada é escrito", async () => {
+  const db = new FakeDb();
+  const novo = grupo(db, MARCA_A, { name: "Plano B", color: "laranja", created_at: "2026-10-12T12:00:00+00:00" });
+  const antigo = grupo(db, MARCA_A, { name: "laranja", color: "laranja", created_at: "2026-10-01T12:00:00+00:00" });
+  grupo(db, MARCA_B, { name: "da outra", color: "azul", created_at: "2026-09-01T12:00:00+00:00" });
+  const garantido = await ensureEditorialGroupForColor(db, { brandId: MARCA_A, actorUserId: ATOR, color: "laranja" });
+  assert.ok(garantido.ok);
+  assert.equal(garantido.ok && garantido.group.id, antigo.id, "o mais antigo da cor");
+  assert.equal(garantido.ok && garantido.outcome, "existing");
+  assert.notEqual(garantido.ok && garantido.group.id, novo.id);
+  assert.equal(db.updates.length, 0);
+  assert.equal(db.editorial_groups.length, 3, "nenhum grupo novo");
+  assert.equal(db.editorial_group_events.length, 0, "nenhum evento");
+});
+
+test("F1-22 · garantir a cor: só arquivado da cor → reativa (evento); nome tomado por outro ativo → reativa com o nome da cor", async () => {
+  const db = new FakeDb();
+  const arquivado = grupo(db, MARCA_A, { name: "laranja", color: "laranja", status: "archived", created_at: "2026-10-01T00:00:00+00:00" });
+  const garantido = await ensureEditorialGroupForColor(db, { brandId: MARCA_A, actorUserId: ATOR, color: "laranja" });
+  assert.ok(garantido.ok);
+  assert.equal(garantido.ok && garantido.outcome, "reactivated");
+  assert.equal(garantido.ok && garantido.group.id, arquivado.id);
+  assert.equal(arquivado.status, "active");
+  assert.deepEqual(db.editorial_group_events.map(event => event.event_type), ["reactivated"]);
+
+  const db2 = new FakeDb();
+  const velho = grupo(db2, MARCA_A, { name: "Planos", color: "verde", status: "archived", created_at: "2026-10-01T00:00:00+00:00" });
+  grupo(db2, MARCA_A, { name: "Planos", color: "azul", created_at: "2026-10-02T00:00:00+00:00" });
+  const reativado = await ensureEditorialGroupForColor(db2, { brandId: MARCA_A, actorUserId: ATOR, color: "verde" });
+  assert.ok(reativado.ok, reativado.ok ? "" : reativado.message);
+  assert.equal(reativado.ok && reativado.group.id, velho.id);
+  assert.equal(velho.status, "active");
+  assert.equal(velho.name, "Verde", "o nome que colidia vira o nome da cor");
+});
+
+test("F1-23 · garantir a cor: sem grupo da cor → cria com o nome da cor (\"Laranja 2\" se o nome já é de outra cor); outra marca não conta", async () => {
+  const db = new FakeDb();
+  grupo(db, MARCA_B, { name: "Laranja", color: "laranja", created_at: "2026-10-01T00:00:00+00:00" });
+  const criado = await ensureEditorialGroupForColor(db, { brandId: MARCA_A, actorUserId: ATOR, color: "laranja" });
+  assert.ok(criado.ok);
+  assert.equal(criado.ok && criado.outcome, "created");
+  assert.equal(criado.ok && criado.group.name, "Laranja");
+  assert.equal(criado.ok && criado.group.marcaId, MARCA_A);
+  assert.deepEqual(db.editorial_group_events.map(event => [event.event_type, event.marca_id]), [["created", MARCA_A]]);
+  const deNovo = await ensureEditorialGroupForColor(db, { brandId: MARCA_A, actorUserId: ATOR, color: "laranja" });
+  assert.equal(deNovo.ok && deNovo.group.id, criado.ok && criado.group.id, "idempotente: a segunda vez devolve o mesmo");
+
+  const db2 = new FakeDb();
+  grupo(db2, MARCA_A, { name: "Laranja", color: "azul", created_at: "2026-10-01T00:00:00+00:00" });
+  const segundo = await ensureEditorialGroupForColor(db2, { brandId: MARCA_A, actorUserId: ATOR, color: "laranja" });
+  assert.equal(segundo.ok && segundo.group.name, "Laranja 2");
+  assert.equal(segundo.ok && segundo.group.color, "laranja");
+
+  const invalida = await ensureEditorialGroupForColor(db, { brandId: MARCA_A, actorUserId: ATOR, color: "roxo" });
+  assert.equal((invalida as { code: string }).code, "GROUP_COLOR_INVALID");
+});
+
+test("F1-24 · garantir a cor: duas abas ao mesmo tempo — a segunda relê e devolve o grupo da primeira", async () => {
+  const db = new FakeDb();
+  const original = db.from.bind(db);
+  let leiturasDeGrupos = 0;
+  db.from = (table: string) => {
+    if (table === "editorial_groups" && ++leiturasDeGrupos === 2) {
+      // Entre a leitura e o insert, a outra aba cria o grupo da mesma cor.
+      grupo(db, MARCA_A, { name: "Laranja", color: "laranja", created_at: "2026-10-12T00:00:00+00:00" });
+    }
+    return original(table);
+  };
+  const garantido = await ensureEditorialGroupForColor(db, { brandId: MARCA_A, actorUserId: ATOR, color: "laranja" });
+  assert.ok(garantido.ok, garantido.ok ? "" : garantido.message);
+  assert.equal(garantido.ok && garantido.outcome, "existing");
+  assert.equal(db.editorial_groups.filter(row => row.color === "laranja").length, 1, "nenhum grupo duplicado");
+});
+
+test("F1-25 · rota: POST sem nome garante a cor com permissão de edição no Minerador, no Arquiteto ou no Radar; com nome segue como antes", () => {
+  const rota = semComentarios(read("app/api/editorial/groups/route.ts"));
+  assert.match(rota, /name: z\.string\(\)\.max\(400\)\.optional\(\),/);
+  assert.match(rota, /if \(input\.name === undefined\) \{\s*const permitido = await assertCanEnsureEditorialGroupColor\(profile, input\.marcaId\);\s*const garantido = await ensureEditorialGroupForColor\(editorialGroupsClient\(\), \{ brandId: permitido\.brandId, actorUserId: permitido\.actorUserId, color: input\.color \}\);/);
+  const servidor = semComentarios(read("lib/server/editorial-groups.ts"));
+  assert.match(servidor, /export async function assertCanEnsureEditorialGroupColor[\s\S]{0,200}if \(!canEnsureEditorialGroupColor\(context\)\) \{\s*throw new AuthzError\(403,/);
+  const tela = semComentarios(read("components/editorial/editorial-group-area-store.ts"));
+  assert.match(tela, /body: JSON\.stringify\(\{ marcaId: brandId, color \}\)/, "a tela pede só a cor");
 });

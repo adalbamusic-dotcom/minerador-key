@@ -1,3 +1,20 @@
+## F5 · Guarda de retrabalho — 2026-10-12
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. SDD §10 e §18.1. **Validado manualmente: não.**
+
+- [x] Radar lê só `subject_type = 'article'` (pré-requisito; sobe ANTES de qualquer linha `operation_ledger` existir).
+- [x] Domínio `lib/editorial/rework-guard.ts` e servidor `lib/server/rework-guard.ts` (linha `operation_ledger`, últimas 20 tentativas).
+- [x] Melhoria: mesma execução com os mesmos insumos; "Refazer mesmo assim" com motivo; busca não se repete; Assunto com lista do Minerador não busca.
+- [x] Coleta paga da SERP: a mesma composição paga e inconclusiva não é paga de novo (`REWORK_SAME_REFUSAL`).
+- [x] Gravação do ArticleDNA: `DECLARED_PLAN_CONTRADICTION` e `REWORK_PARALLEL_PATH` antes de gravar; conclusão no registro.
+- [x] Fechamento do Silo: a mesma recusa volta 409 sem chegar à RPC; aviso em "Fechamento dos Silos".
+- [x] Retirada e plano no Silo: registro com o grupo e `rework` na prévia/recusa.
+- [x] Componente `components/editorial/rework-notice.tsx`; MCP e catálogo.
+- [ ] **Dono:** homologar na WifiConecta — preparar a melhoria duas vezes (o mesmo runId volta com "Já feito com os mesmos insumos"), "Refazer mesmo assim" com motivo, e conferir as linhas `operation_ledger` por SELECT depois de uma retirada.
+- [ ] Override do fechamento automático pela tela (hoje só pela rota com `reworkOverride`); decidir se vale um botão.
+- [ ] Fingerprint do fechamento com o estado lido só no servidor (versões dos artigos fora do envelope), se aparecer recusa repetida injusta.
+- [ ] `costUsd` por artigo na coleta paga (hoje nulo; o custo exato fica em `integration_usage_events`).
+
 ## Plano declarado do Silo no Arquiteto (F4) — 2026-10-12
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. SDD §18.1. **Validado manualmente: não.**
@@ -7,10 +24,16 @@ Detalhe em `docs/04-arquiteto/estado-atual.md`. SDD §18.1. **Validado manualmen
 - [x] Melhoria: `needsPrimary` falso com principal declarada; keyword nova ligada ao Assunto (`subjectKeywordId`).
 - [x] Pilar declarado no Silo como decisão humana (Silo ainda não consolidado); `editorial_groups.silo_id` na consolidação.
 - [x] "Retirar artigo do Silo" (aba Silos, Silo consolidado, rota e testes).
-- [ ] D2(a): parecer SERP do artigo pelas sustentações com volume quando a principal declarada não tem volume (hoje pede as 4 lentes da principal, pagas).
-- [ ] Trocar o Pilar de um Silo JÁ consolidado (D7 na WifiConecta: artigo 3 → artigo 1).
-- [ ] A mesa e `listArquitetoArtifacts` aplicarem o evento `rejected` às keywords do ArticleDNA (a keyword do artigo retirado voltar a "Keywords não agrupadas").
-- [ ] Aviso visível do plano na tela (selo "Plano declarado"/"Principal declarada" na linha e no cartão do Silo, §9.6) — hoje o plano aparece pelos motivos da formação e da melhoria.
+- [x] D2(a): parecer SERP do artigo pelas sustentações com volume e as 4 lentes no cache quando a principal declarada não tem volume nem SERP no cache (2026-10-12, mesmo núcleo da rota da SERP; proveniência em `serpStrategy.rationale`; D2(b) paga continua opcional).
+- [x] Trocar o Pilar de um Silo JÁ consolidado (D7 na WifiConecta: artigo 3 → artigo 1): "Aplicar o plano declarado ao Silo" na aba Silos, rota `/api/arquiteto/silo-declared-plan` e ferramenta MCP `apply_declared_plan_to_silo` (2026-10-12).
+- [ ] A cópia de trabalho do Silo consolidado continua com o Pilar antigo (histórico; a tela mostra o Pilar do SiloDNA vigente). Decidir se ela acompanha a versão nova (mudança de working copy com lock; fora deste escopo).
+- [x] Teste de integração da melhoria (`tests/arquiteto-article-improvement-server.test.mts`) com Assunto de plano declarado e principal sem volume (D2(a) no "Gravar melhorias") — 2026-10-12 (F5): grava com a principal declarada, papel e escopo do plano e a proveniência; sem parecer, a linha fica sem evidência e nada é gravado.
+- [x] "Gravar melhorias" ainda rotula o botão da fileira como "Gravar sem validar (n)" quando sobram consultas pagas opcionais da D2(b); trocar o texto quando todas forem opcionais — 2026-10-12 (F5, `improvementRowApplyLabel`).
+- [x] A mesa aplicar o evento `rejected` (2026-10-12, na leitura `loadCanonicalArquitetoWorkspace`; nada é apagado).
+- [ ] `listArquitetoArtifacts`, a retirada e o handoff do Minerador (`articleDnaKeywordIds`) ainda leem só o status da linha.
+- [x] A formação automática não reagrupa a keyword liberada (D6 decidido pelo dono): fica presa em "Keywords não agrupadas" do grupo, com o motivo, até decisão humana — 2026-10-12 (F5).
+- [x] Aviso visível do plano na tela (selo "Plano declarado"/"Principal declarada" na linha e no cartão do Silo, §9.6) — 2026-10-12: "Pilar do plano · nº", "Suporte do plano · nº", "Principal declarada", "Principal ≠ declarada" (aviso) e "Fora do plano" na linha do artigo; "Plano declarado · Pilar: …" na SiloPage (aba Artigos) e no cartão do Silo (aba Silos). Só leitura do pacote aprovado; validado manualmente: não.
+- [ ] Os selos leem o pacote aprovado: depois de "Tirar do plano" no Minerador, o artigo só passa a "Fora do plano" depois da reaprovação e do novo envio (comportamento de propósito; dono confirma na homologação).
 - [ ] Dono: homologar na tela e executar o runbook da §11 da SDD.
 
 ## Grupos por cor no Arquiteto e leitura por grupo (F2) — 2026-10-12

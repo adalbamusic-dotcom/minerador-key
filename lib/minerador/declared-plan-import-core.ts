@@ -1,11 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { contentHash } from "../arquiteto/versioning.ts";
-import { EDITORIAL_GROUP_COLORS, isEditorialGroupColor, isEditorialGroupsSchemaMissing, normalizeEditorialGroupName, type EditorialGroupColor } from "../editorial/editorial-groups.ts";
+import { EDITORIAL_GROUP_COLOR_LABELS, EDITORIAL_GROUP_COLORS, editorialGroupNameKey, isEditorialGroupColor, isEditorialGroupsSchemaMissing, normalizeEditorialGroupName, type EditorialGroupColor } from "../editorial/editorial-groups.ts";
 import {
-  createDeclaredPlanGroup,
   declareEditorialGroupPlan,
+  ensureEditorialGroupForColor,
   listEditorialGroupSummaries,
+  readActiveEditorialGroupIdForColor,
   readEditorialGroupPlan,
+  updateEditorialGroup,
   type EditorialGroupPlanRow,
 } from "../editorial/editorial-groups-store.ts";
 import {
@@ -66,8 +68,18 @@ const ID_CHUNK = 200;
 const PAGE = 1000;
 const LIVE_COLUMNS = "id,keyword,status,group_id,volume_search,results_allintitle";
 
+/**
+ * O grupo do plano. 2026-10-12 · F6 (decisão do dono: o plano é POR COR) ·
+ * `color` é a forma de sempre: a cor que já tem grupo ativo leva o plano para
+ * ele; a cor sem grupo ganha o grupo pelo MESMO caminho do mover por cor
+ * (`ensureEditorialGroupForColor`: reativa o arquivado da cor ou cria) e o nome
+ * do Silo (ou o `name` dado). `new` é o mesmo que `color` (o diálogo e os
+ * chamadores de antes): nunca nascem dois grupos da mesma cor. `existing` é o
+ * uuid de um grupo (compatibilidade).
+ */
 export type DeclaredPlanGroupChoice =
   | { mode: "existing"; groupId: string }
+  | { mode: "color"; color: EditorialGroupColor | string; name?: string | null }
   | { mode: "new"; name?: string | null; color: EditorialGroupColor | string };
 
 /** O plano já estruturado (MCP): o mesmo contrato do texto colado, sem o parser. */
@@ -284,6 +296,8 @@ type Classified = {
   semantics: Map<string, Semantic>;
   groupRow: EditorialGroupPlanRow | null;
   parsed: ParsedDeclaredPlan;
+  /** A escolha resolvida: a cor com grupo ativo vira `existing`; a sem grupo, `new` (criada no apply pela cor). */
+  group: { mode: "existing"; groupId: string } | { mode: "new"; name: string; color: EditorialGroupColor | null };
 };
 
 async function classify(input: {
@@ -299,11 +313,20 @@ async function classify(input: {
   const siloPlan = declaredSiloPlanOf(parsed);
   const planHash = parsed.refusals.length ? null : await declaredPlanHash(parsed);
 
-  // Grupo escolhido ou novo.
+  // Grupo escolhido ou novo. 2026-10-12 · F6 · pela cor: a cor que já tem grupo ativo leva o plano para ele.
+  let escolha: DeclaredPlanGroupChoice = input.group;
+  if (escolha.mode !== "existing" && isEditorialGroupColor(escolha.color)) {
+    const daCor = await readActiveEditorialGroupIdForColor(input.groupsClient, brandId, escolha.color);
+    if (!daCor.ok) return { ok: false, code: "GROUPS_NOT_AVAILABLE", reason: daCor.message };
+    if (daCor.groupId) {
+      notices.push(`A cor ${EDITORIAL_GROUP_COLOR_LABELS[escolha.color]} já tem grupo nesta marca: o plano vai para ele (um grupo por cor).`);
+      escolha = { mode: "existing", groupId: daCor.groupId };
+    }
+  }
   let groupRow: EditorialGroupPlanRow | null = null;
   let groupPreview: DeclaredPlanPreview["group"];
-  if (input.group.mode === "existing") {
-    const lido = await readEditorialGroupPlan(input.groupsClient, brandId, input.group.groupId);
+  if (escolha.mode === "existing") {
+    const lido = await readEditorialGroupPlan(input.groupsClient, brandId, escolha.groupId);
     if (!lido.ok) return { ok: false, code: "GROUPS_NOT_AVAILABLE", reason: lido.message };
     groupRow = lido.group;
     if (!groupRow) {
@@ -316,8 +339,8 @@ async function classify(input: {
       groupPreview = { mode: "existing", groupId: groupRow.id, name: groupRow.name, color: groupRow.color, hadPlan: Boolean(groupRow.plan), planVersion: groupRow.planVersion, samePlan };
     }
   } else {
-    const name = normalizeEditorialGroupName(input.group.name || siloPlan?.siloName || "") || "";
-    const color = isEditorialGroupColor(input.group.color) ? input.group.color : null;
+    const name = normalizeEditorialGroupName(escolha.name || siloPlan?.siloName || "") || "";
+    const color = isEditorialGroupColor(escolha.color) ? escolha.color : null;
     if (!name) blockers.push("Dê um nome ao grupo (padrão: o nome do Silo).");
     if (!color) blockers.push(`Escolha a cor do grupo: ${EDITORIAL_GROUP_COLORS.join(", ")}.`);
     const listing = await listEditorialGroupSummaries(input.groupsClient, brandId);
@@ -433,6 +456,7 @@ async function classify(input: {
     semantics,
     groupRow,
     parsed,
+    group: groupPreview.mode === "existing" ? { mode: "existing", groupId: groupPreview.groupId } : { mode: "new", name: groupPreview.name, color: groupPreview.color },
   };
 }
 
@@ -499,18 +523,32 @@ async function applyPlan(input: {
   // 1 — o grupo e o Silo planejado.
   const siloPlan = preview.siloPlan!;
   const planHash = preview.planHash!;
-  let groupId: string;
-  let planVersion: number;
-  if (input.group.mode === "existing") {
-    const gravado = await declareEditorialGroupPlan(groupsClient, { brandId, actorUserId, groupId: input.group.groupId, plan: siloPlan as unknown as Record<string, unknown>, planHash });
-    if (!gravado.ok) return gravado.code === "GROUPS_NOT_AVAILABLE" ? { ok: false, code: "GROUPS_NOT_AVAILABLE", reason: gravado.message } : { ok: false, code: "GROUP_REFUSED", reason: gravado.message };
-    groupId = gravado.group.id;
-    planVersion = gravado.group.planVersion;
+  const escolha = classified.group;
+  let alvo: string;
+  let nomeDoSilo: string | null = null;
+  if (escolha.mode === "existing") {
+    alvo = escolha.groupId;
   } else {
-    const criado = await createDeclaredPlanGroup(groupsClient, { brandId, actorUserId, name: preview.group.name, color: input.group.color, plan: siloPlan as unknown as Record<string, unknown>, planHash });
-    if (!criado.ok) return criado.code === "GROUPS_NOT_AVAILABLE" ? { ok: false, code: "GROUPS_NOT_AVAILABLE", reason: criado.message } : { ok: false, code: "GROUP_REFUSED", reason: criado.message };
-    groupId = criado.group.id;
-    planVersion = criado.group.planVersion;
+    /*
+     * 2026-10-12 · F6 · a cor sem grupo ganha o grupo pelo MESMO caminho do
+     * mover por cor (`ensureEditorialGroupForColor`): reativa o arquivado da cor
+     * ou cria; outra aba que criou o da cor no meio do caminho é reaproveitada.
+     * Nunca dois grupos da mesma cor.
+     */
+    if (!escolha.color) return { ok: false, code: "GROUP_REFUSED", reason: `Escolha a cor do grupo: ${EDITORIAL_GROUP_COLORS.join(", ")}.` };
+    const garantido = await ensureEditorialGroupForColor(groupsClient, { brandId, actorUserId, color: escolha.color });
+    if (!garantido.ok) return garantido.code === "GROUPS_NOT_AVAILABLE" ? { ok: false, code: "GROUPS_NOT_AVAILABLE", reason: garantido.message } : { ok: false, code: "GROUP_REFUSED", reason: garantido.message };
+    alvo = garantido.group.id;
+    // O grupo que acabou de nascer (ou voltar) com o nome da cor recebe o nome do Silo (ou o dado).
+    if (garantido.outcome !== "existing" && escolha.name && editorialGroupNameKey(garantido.group.name) !== editorialGroupNameKey(escolha.name)) nomeDoSilo = escolha.name;
+  }
+  const gravado = await declareEditorialGroupPlan(groupsClient, { brandId, actorUserId, groupId: alvo, plan: siloPlan as unknown as Record<string, unknown>, planHash });
+  if (!gravado.ok) return gravado.code === "GROUPS_NOT_AVAILABLE" ? { ok: false, code: "GROUPS_NOT_AVAILABLE", reason: gravado.message } : { ok: false, code: "GROUP_REFUSED", reason: gravado.message };
+  const groupId = gravado.group.id;
+  const planVersion = gravado.group.planVersion;
+  if (nomeDoSilo) {
+    const renomeado = await updateEditorialGroup(groupsClient, { brandId, actorUserId, groupId, lockVersion: gravado.group.lockVersion, name: nomeDoSilo });
+    if (!renomeado.ok) notices.push(`O grupo ficou com o nome "${gravado.group.name}": ${renomeado.message}`);
   }
 
   // 2 — os Assuntos, pelo núcleo de sempre (cria as novas; declara as existentes).

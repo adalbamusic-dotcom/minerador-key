@@ -1,5 +1,31 @@
 # Estado atual — Redator
 
+## F6 · Etiqueta de cor e lista de documentos por grupo — 2026-10-12
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** SDD
+`docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` §6.4 e §9.1-A (adendo F6 no §18.1). Sem mudança de
+contrato, sem migration, sem escrita.
+
+- **Etiqueta na barra global:** `EDITORIAL_GROUP_AREAS` ganhou `redator` (e `publicacoes`); a própria `GlobalTopbar`
+  renderiza o ícone de etiqueta ao lado do sino, com a escolha DESTA área (`minerador-key:grupo-ativo:${brandId}:redator`,
+  `?grupo=<cor>` na URL da página do Redator). A lista de grupos da marca entra pelo cache local e é lida em segundo
+  plano (a mesma das outras áreas). Nenhum arquivo da topbar mudou.
+- **Lista de documentos** (`components/editorial/professional-writer.tsx`, coluna da esquerda): mostra só os
+  documentos cujo artigo (`articleDnaRef.entityId`) está no grupo escolhido; cada linha ganha a faixa de 4 px e a
+  etiqueta (bolinha + nome, `ArticleGroupRowTag`). Vazio pelo recorte: "Nenhum documento na cor X ainda." / "Nenhum
+  documento sem grupo." / "Lendo o grupo dos documentos…". O "Sem grupo" do menu conta documentos.
+- **Não atrasa o carregamento:** o grupo efetivo dos artigos (`GET /api/editorial/groups/articles`, leitura pesada)
+  só começa depois de a mesa carregar (`mainReady: !pipeline.loading`) ou na hora quando há uma cor escolhida — o
+  mesmo `useEditorialGroups` do Arquiteto e do Radar.
+- **Só a lista:** a regra do documento ativo (`resolveActiveDocument`, `availableIds` = todos os documentos), o
+  editor, o autosave e o envio a Publicações continuam lendo todos os documentos. O Redator só mostra e filtra: o
+  grupo de um documento muda pelo artigo (Arquiteto ou Radar).
+- **MCP:** `get_article_for_writing` (material do Radar) leva o grupo e a promessa declarada (ver o estado do Radar);
+  `get_platform_state` com `group` recorta também os documentos do Redator pelo artigo.
+- **Testes:** `tests/radar-grupos-f6-entregaveis.test.mts` (Redator, estrutural) e `tests/radar-grupos-etiqueta-topbar.test.mts`
+  (a etiqueta aparece na topbar do Redator, DOM). `test:redator` e `test:redator:mcp` sem regressão (contagens no
+  adendo F6 da SDD).
+
 ## Comunicação humana guiada pela SERP — 2026-10-11
 
 **Verificado no código e confirmado por teste (fixtures; PROVIDER_CALLS = 0). Validado manualmente: não.** Módulo

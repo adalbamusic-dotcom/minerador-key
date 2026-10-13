@@ -1,5 +1,14 @@
 # Backlog — Redator
 
+## F6 · Etiqueta de cor e lista de documentos por grupo — 2026-10-12
+
+Detalhe em `docs/07-redator/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Etiqueta de cor na barra global do Redator, com a escolha da área.
+- [x] Lista de documentos filtrada pela cor; faixa e etiqueta na linha; "Sem grupo" conta documentos.
+- [ ] **Dono:** homologar (escolher uma cor no Redator, ver a lista mudar; voltar a "Todos os grupos"; F5 mantém a cor).
+- [ ] Proposta: teste DOM da lista do Redator filtrada (hoje a cobertura é estrutural + topbar em DOM).
+
 ## Comunicação humana guiada pela SERP — 2026-10-11
 
 Detalhe em `docs/07-redator/estado-atual.md` e `docs/05-radar/estado-atual.md` (seções de mesma data). **Validado

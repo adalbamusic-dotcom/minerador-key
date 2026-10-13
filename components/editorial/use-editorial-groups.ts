@@ -2,13 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  EDITORIAL_GROUP_URL_PARAM,
-  editorialGroupLastUsedStorageKey,
-  resolveEditorialGroupFilter,
-  sameEditorialGroupFilter,
-  serializeEditorialGroupFilter,
+  ensureEditorialColorGroup,
+  markBrandEditorialGroupsUnavailable,
+  refreshBrandEditorialGroups,
+  useAreaGroupFilter,
+} from "@/components/editorial/editorial-group-area-store";
+import {
+  EDITORIAL_GROUP_CHOICE_ALL,
+  EDITORIAL_GROUP_COLOR_LABELS,
+  type EditorialGroupArea,
   type EditorialGroupColor,
-  type EditorialGroupFilter,
+  type EditorialGroupScreenFilter,
   type EditorialGroupSummary,
 } from "@/lib/editorial/editorial-groups";
 import type { ArticleGroupOrigin } from "@/lib/editorial/article-groups";
@@ -17,89 +21,53 @@ import type { ArticleGroupPreviewEntry } from "@/lib/editorial/article-group-cor
 /**
  * GRUPOS NO ARQUITETO E NO RADAR (F2) — o mesmo comportamento do Minerador.
  *
- * - Grupos: `GET /api/editorial/groups`; grupo EFETIVO de cada artigo (e, no
- *   Arquiteto, de cada keyword com grupo): `GET /api/editorial/groups/articles`.
- *   `409 GROUPS_NOT_AVAILABLE` (M1 não aplicada) ou qualquer falha = recurso
- *   escondido; a planilha continua como antes.
- * - Grupo ativo (D12): a URL (`?grupo=`) é a fonte; o último usado na marca
- *   fica no `localStorage` (a MESMA chave do Minerador, para as três planilhas
- *   abrirem no mesmo grupo) só como conveniência, com try/catch. Nada é limpo.
- * - O filtro é de TELA: a mesa continua lida inteira e a lista de origem
- *   nunca é trocada pelo recorte (SDD §8: leitura parcial nunca substitui a
- *   lista inteira).
- * - Etiquetar e mover: `POST`/`PATCH /api/editorial/groups/articles` — o mesmo
- *   núcleo da formação e da importação. A tela só muda depois da releitura.
+ * 2026-10-12 · cores fixas e "não atrapalhar o carregamento" (adendo do §9.1):
+ *
+ * - A escolha (a cor, "todos" ou "sem-grupo") é DESTA ÁREA e vem do estado leve
+ *   compartilhado com a etiqueta da topbar (`editorial-group-area-store`); a
+ *   lista de grupos da marca é a mesma das três áreas (cache local na hora,
+ *   servidor em segundo plano, uma leitura por sessão).
+ * - O grupo EFETIVO de cada artigo (e, no Arquiteto, de cada keyword com grupo)
+ *   vem de `GET /api/editorial/groups/articles`, que é PESADO (varre as versões
+ *   de ArticleDNA da marca). Ele só começa DEPOIS que a mesa principal da área
+ *   carregou (`mainReady`) — ou na hora, quando há uma cor ou "sem-grupo"
+ *   escolhidos. Nunca em paralelo ao carregamento inicial com "todos".
+ * - O filtro é de TELA: a mesa continua lida inteira e a lista de origem nunca
+ *   é trocada pelo recorte (SDD §8). Enquanto os artigos não chegam, um recorte
+ *   escolhido não mostra nada (não mostra "tudo" por engano).
+ * - Mover e etiquetar: `POST`/`PATCH /api/editorial/groups/articles` — o mesmo
+ *   núcleo da formação e da importação. Mover para uma cor garante antes o
+ *   grupo dela no servidor. A tela só muda depois da releitura.
  *
  * Tudo é "desta marca": resposta de outra marca (troca no meio da leitura) é
  * descartada.
  */
 
-const TODOS: EditorialGroupFilter = { kind: "all" };
-
 export type EditorialArticleGroup = { groupId: string | null; origin: ArticleGroupOrigin | null; persisted: boolean; conflict: boolean };
 
-type Loaded = {
+type LoadedArticles = {
   brandId: string;
-  available: boolean;
-  groups: EditorialGroupSummary[];
-  ungroupedKeywordCount: number;
+  includeKeywords: boolean;
   articles: Map<string, EditorialArticleGroup>;
   keywords: Map<string, string>;
 };
 
-const vazio = (brandId: string): Loaded => ({ brandId, available: false, groups: [], ungroupedKeywordCount: 0, articles: new Map(), keywords: new Map() });
-
-function lerUrl(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return new URL(window.location.href).searchParams.get(EDITORIAL_GROUP_URL_PARAM);
-  } catch {
-    return null;
-  }
-}
-
-function gravarUrl(filter: EditorialGroupFilter) {
-  if (typeof window === "undefined") return;
-  try {
-    const url = new URL(window.location.href);
-    const valor = serializeEditorialGroupFilter(filter);
-    if (valor) url.searchParams.set(EDITORIAL_GROUP_URL_PARAM, valor);
-    else url.searchParams.delete(EDITORIAL_GROUP_URL_PARAM);
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-  } catch {
-    /* A URL é conveniência de compartilhamento; o estado da tela continua valendo. */
-  }
-}
-
-function lerLembranca(brandId: string): string | null {
-  try {
-    return window.localStorage.getItem(editorialGroupLastUsedStorageKey(brandId));
-  } catch {
-    return null;
-  }
-}
-
-function gravarLembranca(brandId: string, filter: EditorialGroupFilter) {
-  try {
-    window.localStorage.setItem(editorialGroupLastUsedStorageKey(brandId), serializeEditorialGroupFilter(filter) ?? "todos");
-  } catch {
-    /* Sem armazenamento local: só não lembra. */
-  }
-}
+const SEM_ARTIGOS = new Map<string, EditorialArticleGroup>();
+const SEM_KEYWORDS = new Map<string, string>();
+const NADA_AINDA: EditorialGroupScreenFilter = { kind: "groups", color: null, groupIds: [] };
+const TODOS: EditorialGroupScreenFilter = { kind: "all" };
 
 async function lerJson(url: string, init?: RequestInit) {
   const response = await fetch(url, { cache: "no-store", ...init }).catch(() => null);
   const body = response ? await response.json().catch(() => ({})) : {};
-  return { ok: Boolean(response && response.ok && body?.success === true), body: body as Record<string, unknown> };
+  return { ok: Boolean(response && response.ok && body?.success === true), status: response?.status ?? 0, body: body as Record<string, unknown> };
 }
 
-async function lerTudo(brandId: string, includeKeywords: boolean): Promise<Loaded> {
+async function lerArtigos(brandId: string, includeKeywords: boolean): Promise<LoadedArticles | "unavailable" | null> {
   const marca = encodeURIComponent(brandId);
-  const [grupos, artigos] = await Promise.all([
-    lerJson(`/api/editorial/groups?marcaId=${marca}`),
-    lerJson(`/api/editorial/groups/articles?marcaId=${marca}${includeKeywords ? "&include=keywords" : ""}`),
-  ]);
-  if (!grupos.ok || !artigos.ok || !Array.isArray(grupos.body.groups) || !Array.isArray(artigos.body.articles)) return vazio(brandId);
+  const artigos = await lerJson(`/api/editorial/groups/articles?marcaId=${marca}${includeKeywords ? "&include=keywords" : ""}`);
+  if (!artigos.ok) return artigos.status === 409 && artigos.body.code === "GROUPS_NOT_AVAILABLE" ? "unavailable" : null;
+  if (!Array.isArray(artigos.body.articles)) return null;
   const articles = new Map<string, EditorialArticleGroup>();
   for (const item of artigos.body.articles as Array<Record<string, unknown>>) {
     if (typeof item.articleId !== "string") continue;
@@ -114,14 +82,7 @@ async function lerTudo(brandId: string, includeKeywords: boolean): Promise<Loade
   for (const item of (Array.isArray(artigos.body.keywords) ? artigos.body.keywords : []) as Array<Record<string, unknown>>) {
     if (typeof item.id === "string" && typeof item.groupId === "string") keywords.set(item.id, item.groupId);
   }
-  return {
-    brandId,
-    available: true,
-    groups: grupos.body.groups as EditorialGroupSummary[],
-    ungroupedKeywordCount: typeof grupos.body.ungroupedKeywordCount === "number" ? grupos.body.ungroupedKeywordCount : 0,
-    articles,
-    keywords,
-  };
+  return { brandId, includeKeywords, articles, keywords };
 }
 
 export type ArticleGroupTagPreviewResponse = { ok: true; entries: ArticleGroupPreviewEntry[]; willTagCount: number } | { ok: false; message: string };
@@ -132,74 +93,71 @@ export type ArticleGroupMoveResponse =
 
 const mensagem = (body: Record<string, unknown>, padrao: string) => typeof body.message === "string" ? body.message : padrao;
 
-export function useEditorialGroups({ brandId, enabled, includeKeywords = false }: { brandId: string | null; enabled: boolean; includeKeywords?: boolean }) {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [chosen, setChosen] = useState<{ brandId: string; filter: EditorialGroupFilter } | null>(null);
-  const brandRef = useRef<string | null>(brandId);
+export function useEditorialGroups({ brandId, enabled, includeKeywords = false, area, mainReady = true }: {
+  brandId: string | null;
+  enabled: boolean;
+  includeKeywords?: boolean;
+  /** A área dona da escolha (cada área lembra a sua). */
+  area: EditorialGroupArea;
+  /** A mesa principal da área já carregou: só então a leitura pesada dos artigos começa com "todos". */
+  mainReady?: boolean;
+}) {
+  const alvo = enabled && brandId ? brandId : null;
+  const recorte = useAreaGroupFilter(alvo, area);
+  const [loaded, setLoaded] = useState<LoadedArticles | null>(null);
+  const [leituraFalhou, setLeituraFalhou] = useState<string | null>(null);
+  const brandRef = useRef<string | null>(alvo);
   useEffect(() => {
-    brandRef.current = brandId;
-  }, [brandId]);
+    brandRef.current = alvo;
+  }, [alvo]);
+
+  const available = Boolean(alvo) && recorte.available;
+  const precisaDosArtigos = available && (mainReady || recorte.choice !== EDITORIAL_GROUP_CHOICE_ALL || recorte.pending);
+  const atual = loaded && loaded.brandId === alvo && loaded.includeKeywords === includeKeywords ? loaded : null;
+  const jaTentou = leituraFalhou === `${alvo}:${includeKeywords}`;
 
   useEffect(() => {
-    if (!enabled || !brandId) return;
+    if (!precisaDosArtigos || !alvo || atual || jaTentou) return;
     let vigente = true;
-    void lerTudo(brandId, includeKeywords).then(resultado => {
-      if (!vigente) return;
+    void lerArtigos(alvo, includeKeywords).then(resultado => {
+      if (!vigente || brandRef.current !== alvo) return;
+      if (resultado === "unavailable") { markBrandEditorialGroupsUnavailable(alvo); return; }
+      if (!resultado) { setLeituraFalhou(`${alvo}:${includeKeywords}`); return; }
       setLoaded(resultado);
-      const inicial = resultado.available
-        ? resolveEditorialGroupFilter({ fromUrl: lerUrl(), remembered: lerLembranca(brandId), groups: resultado.groups }).filter
-        : TODOS;
-      setChosen({ brandId, filter: inicial });
-      if (resultado.available) gravarUrl(inicial);
     });
     return () => { vigente = false; };
-  }, [brandId, enabled, includeKeywords]);
+  }, [precisaDosArtigos, alvo, includeKeywords, atual, jaTentou]);
 
-  const atual = loaded && loaded.brandId === brandId ? loaded : null;
-  const available = Boolean(enabled && brandId && atual?.available);
-  const filter = available && chosen && chosen.brandId === brandId ? chosen.filter : TODOS;
-  const groups = useMemo(() => (available && atual ? atual.groups : []), [available, atual]);
-  const groupById = useMemo(() => new Map(groups.map(group => [group.id, group])), [groups]);
-  const articleGroupById = useMemo(() => (available && atual ? atual.articles : new Map<string, EditorialArticleGroup>()), [available, atual]);
-  const keywordGroupById = useMemo(() => (available && atual ? atual.keywords : new Map<string, string>()), [available, atual]);
+  const groups = useMemo(() => (available ? recorte.groups.groups : []), [available, recorte.groups.groups]);
+  const groupById = useMemo(() => new Map<string, EditorialGroupSummary>(groups.map(group => [group.id, group])), [groups]);
+  const articleGroupById = available && atual ? atual.articles : SEM_ARTIGOS;
+  const keywordGroupById = available && atual ? atual.keywords : SEM_KEYWORDS;
+  /** Um recorte escolhido sem os artigos ainda não mostra nada (nunca "tudo" por engano). */
+  const filterKey = !available || recorte.filter.kind === "all" ? "todos" : atual ? recorte.filterKey : "pendente";
+  const recorteDaArea = recorte.filter;
+  const filter = useMemo<EditorialGroupScreenFilter>(() => (filterKey === "todos" ? TODOS : filterKey === "pendente" ? NADA_AINDA : recorteDaArea), [filterKey, recorteDaArea]);
 
   const refresh = useCallback(async () => {
-    const alvo = brandRef.current;
-    if (!alvo) return;
-    const resultado = await lerTudo(alvo, includeKeywords);
-    if (brandRef.current !== alvo || !resultado.available) return;
+    const marca = brandRef.current;
+    if (!marca) return;
+    void refreshBrandEditorialGroups(marca);
+    const resultado = await lerArtigos(marca, includeKeywords);
+    if (brandRef.current !== marca || !resultado || resultado === "unavailable") return;
     setLoaded(resultado);
   }, [includeKeywords]);
 
-  const setFilter = useCallback((next: EditorialGroupFilter) => {
-    const alvo = brandRef.current;
-    if (!alvo) return;
-    setChosen(current => (current && current.brandId === alvo && sameEditorialGroupFilter(current.filter, next) ? current : { brandId: alvo, filter: next }));
-    gravarUrl(next);
-    gravarLembranca(alvo, next);
-  }, []);
-
-  const createGroup = useCallback(async (name: string, color: EditorialGroupColor): Promise<{ ok: true; group: EditorialGroupSummary } | { ok: false; message: string }> => {
-    const alvo = brandRef.current;
-    if (!alvo) return { ok: false, message: "Marca ativa ausente." };
-    const { ok, body } = await lerJson("/api/editorial/groups", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ marcaId: alvo, name, color }) });
-    if (!ok || !body.group) return { ok: false, message: mensagem(body, "Não foi possível criar o grupo.") };
-    await refresh();
-    return { ok: true, group: body.group as EditorialGroupSummary };
-  }, [refresh]);
-
   const previewTagging = useCallback(async (articleIds?: readonly string[]): Promise<ArticleGroupTagPreviewResponse> => {
-    const alvo = brandRef.current;
-    if (!alvo) return { ok: false, message: "Marca ativa ausente." };
-    const { ok, body } = await lerJson("/api/editorial/groups/articles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ marcaId: alvo, mode: "preview", ...(articleIds ? { articleIds } : {}) }) });
+    const marca = brandRef.current;
+    if (!marca) return { ok: false, message: "Marca ativa ausente." };
+    const { ok, body } = await lerJson("/api/editorial/groups/articles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ marcaId: marca, mode: "preview", ...(articleIds ? { articleIds } : {}) }) });
     if (!ok || !Array.isArray(body.entries)) return { ok: false, message: mensagem(body, "Não foi possível montar a prévia.") };
     return { ok: true, entries: body.entries as ArticleGroupPreviewEntry[], willTagCount: typeof body.willTagCount === "number" ? body.willTagCount : 0 };
   }, []);
 
   const applyTagging = useCallback(async (articleIds: readonly string[]): Promise<ArticleGroupTagApplyResponse> => {
-    const alvo = brandRef.current;
-    if (!alvo) return { ok: false, message: "Marca ativa ausente." };
-    const { ok, body } = await lerJson("/api/editorial/groups/articles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ marcaId: alvo, mode: "apply", articleIds }) });
+    const marca = brandRef.current;
+    if (!marca) return { ok: false, message: "Marca ativa ausente." };
+    const { ok, body } = await lerJson("/api/editorial/groups/articles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ marcaId: marca, mode: "apply", articleIds }) });
     if (!ok) return { ok: false, message: mensagem(body, "Não foi possível gravar o grupo dos artigos.") };
     await refresh();
     const contar = (value: unknown) => (Array.isArray(value) ? value.length : 0);
@@ -207,9 +165,9 @@ export function useEditorialGroups({ brandId, enabled, includeKeywords = false }
   }, [refresh]);
 
   const moveArticles = useCallback(async (articleIds: readonly string[], groupId: string | null): Promise<ArticleGroupMoveResponse> => {
-    const alvo = brandRef.current;
-    if (!alvo) return { ok: false, message: "Marca ativa ausente." };
-    const { ok, body } = await lerJson("/api/editorial/groups/articles", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ marcaId: alvo, articleIds, groupId }) });
+    const marca = brandRef.current;
+    if (!marca) return { ok: false, message: "Marca ativa ausente." };
+    const { ok, body } = await lerJson("/api/editorial/groups/articles", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ marcaId: marca, articleIds, groupId }) });
     if (!ok) return { ok: false, message: mensagem(body, "Não foi possível mover os artigos de grupo.") };
     await refresh();
     const lista = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
@@ -223,25 +181,43 @@ export function useEditorialGroups({ brandId, enabled, includeKeywords = false }
     };
   }, [refresh]);
 
+  /**
+   * Rodapé · "Mover para <cor>" (garante o grupo da cor no servidor antes) ou
+   * "Voltar ao grupo das keywords" (`null`). Devolve também o rótulo do destino.
+   */
+  const moveArticlesToColor = useCallback(async (articleIds: readonly string[], color: EditorialGroupColor | null): Promise<{ result: ArticleGroupMoveResponse; destino: string | null }> => {
+    const marca = brandRef.current;
+    if (!marca) return { result: { ok: false, message: "Marca ativa ausente." }, destino: null };
+    if (!color) return { result: await moveArticles(articleIds, null), destino: null };
+    const garantido = await ensureEditorialColorGroup(marca, color);
+    if (!garantido.ok) return { result: { ok: false, message: garantido.message }, destino: null };
+    const rotulo = EDITORIAL_GROUP_COLOR_LABELS[color];
+    const destino = garantido.group.name === rotulo ? rotulo : `${rotulo} (${garantido.group.name})`;
+    return { result: await moveArticles(articleIds, garantido.group.id), destino };
+  }, [moveArticles]);
+
   /** Artigos com grupo herdado ainda sem etiqueta gravada (o atalho do menu mostra o número). */
   const untaggedInheritedCount = useMemo(() => [...articleGroupById.values()].filter(item => !item.persisted && item.groupId).length, [articleGroupById]);
 
   return {
     available,
+    /** O grupo efetivo dos artigos já chegou (a leitura pesada terminou). */
+    articlesReady: Boolean(atual),
     groups,
     groupById,
-    ungroupedKeywordCount: available && atual ? atual.ungroupedKeywordCount : 0,
+    ungroupedKeywordCount: available ? recorte.groups.ungroupedKeywordCount ?? 0 : 0,
+    choice: recorte.choice,
+    setChoice: recorte.setChoice,
     filter,
-    filterKey: available ? serializeEditorialGroupFilter(filter) ?? "todos" : "todos",
-    setFilter,
+    filterKey,
     refresh,
-    createGroup,
     articleGroupById,
     keywordGroupById,
     untaggedInheritedCount,
     previewTagging,
     applyTagging,
     moveArticles,
+    moveArticlesToColor,
   };
 }
 

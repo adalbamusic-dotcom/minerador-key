@@ -29,6 +29,8 @@ import {
 } from "./pipeline-repositories";
 import { assertDeclaredSubjectWrite, SubjectWriteRefusedError } from "./arquiteto-subject-guard";
 import type { SubjectActorMode } from "@/lib/arquiteto/declared-subject-guard";
+import { ReworkRefusedError } from "./rework-guard";
+import { assertArticleDnaAgainstDeclaredPlan } from "./arquiteto-rework-guard";
 import { articleKeywordIndex } from "@/lib/editorial/article-groups";
 import { ensureArticleGroupsFromKeywordsWithCore } from "@/lib/editorial/article-group-core";
 
@@ -301,6 +303,15 @@ export async function appendArquitetoArtifact(
       actorMode: options.subjectActor,
     });
   }
+  /*
+   * F5 · GUARDA DE RETRABALHO (SDD 2026-10-12 §10.3): antes de gravar o
+   * ArticleDNA, a principal e o papel declarados no plano não mudam
+   * (`DECLARED_PLAN_CONTRADICTION`) e nada vira artigo solto em grupo com plano
+   * (`REWORK_PARALLEL_PATH`). A restauração de backup grava a história como ela foi.
+   */
+  if (type === "article_dna" && options.subjectActor !== "restored") {
+    await assertArticleDnaAgainstDeclaredPlan(context, { entityId: version.entityId, article: payload as ArticleDNA, previousVersionId: version.previousVersionId ?? null });
+  }
   const repository = new ArtifactVersionRepository(context);
   const sourceVersionId = type === "silo_page"
     ? await assertCanonicalSiloDnaSource(repository, context, payload as SiloPage)
@@ -488,6 +499,10 @@ export async function listArquitetoArtifacts(context: PipelineContext) {
 }
 
 export function pipelineArtifactErrorResponse(error: unknown) {
+  // F5 — a recusa da guarda leva o código próprio e o registro anterior (§10.4).
+  if (error instanceof ReworkRefusedError) {
+    return { status: error.status, body: { success: false, error: error.message, code: error.reworkCode, rework: { verdict: error.assessment.verdict, previous: error.assessment.previous, reasons: error.assessment.reasons, canOverride: error.assessment.canOverride, message: error.assessment.message } } };
+  }
   if (error instanceof SubjectWriteRefusedError) {
     return { status: error.status, body: { success: false, error: error.message, code: error.code, subjectCode: error.subjectCode } };
   }

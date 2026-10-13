@@ -1,5 +1,130 @@
 # Estado atual — Minerador
 
+## Gerenciar a cor, Histórico do grupo e "Tirar do plano" — 2026-10-12
+
+```text
+SDD = docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md (§9.1-A, §10.4, §6.1-5; adendo "interface dos grupos e do plano" na §18.1)
+Módulo dono = Compartilhado/editorial (grupos), com o núcleo do plano no Minerador e os selos no Arquiteto
+MIGRATION_NOVA = 0 · ESCRITA_REMOTA = 0 · SQL_REMOTO = 0 · CHAMADA_PAGA = 0 · CHAMADA_IA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Gerenciar a cor** (menu da etiqueta ao lado do sino → engrenagem "Gerenciar a cor <cor>" em cada cor que já
+  tem grupo; só aparece com a lista do servidor, que traz a trava otimista): "Nome (opcional)" (vazio = o nome da
+  cor), "Trocar a cor" (só para cor LIVRE; a ocupada aparece desabilitada com o nome do grupo dono e o servidor
+  recusa com `GROUP_COLOR_TAKEN` — dois grupos nunca são juntados; o nome que era só a cor acompanha a cor nova) e
+  "Liberar a cor" (arquiva; só sem keywords — inclusive na lixeira —, artigos etiquetados, plano ou Silo ligado; a
+  recusa `GROUP_NOT_EMPTY` diz as contagens). `PATCH /api/editorial/groups` agora passa por
+  `manageEditorialGroup` (`lib/editorial/editorial-group-manage{,-store}.ts`), que grava pelo `updateEditorialGroup`
+  de sempre (lock, releitura, evento `renamed`/`recolored`/`archived`) e exige edição no Minerador, no Arquiteto ou
+  no Radar (`assertCanEnsureEditorialGroupColor`; antes só `minerador:edit`). `status: "archived"` antigo = liberar;
+  `status: "active"` é recusado (reativar acontece ao mover para a cor). A tela relê a lista e só diz "Gravado e
+  relido" quando o grupo aparece nela com o valor novo; ao trocar a cor, a escolha das áreas que olhavam a cor
+  antiga acompanha o grupo (`followEditorialGroupColorChange`).
+- **Histórico do grupo** (menu da etiqueta, com uma cor escolhida): `GET /api/editorial/groups/history?marcaId=&groupId=`
+  (até 10; leitura de quem vê a marca), lido só quando o dono abre. Junta `editorial_group_events` e as tentativas
+  do registro do guarda (`editorial_workflow_items`, `subject_type = 'operation_ledger'`, `payload.groupId`), com
+  tipo, data, ator ("Você" / "Outro membro · id curto"), resultado, custo e "Abrir resultado" (só caminho interno).
+  Registro do guarda ausente ou ilegível não derruba: aparecem só os eventos e a tela avisa
+  (`lib/editorial/group-history{,-store}.ts`).
+- **Tirar do plano** (Gerenciar da cor do plano → "Plano do Silo" → "Ver artigos do plano" → "Tirar do plano" →
+  prévia → "Confirmar: tirar do plano"): núcleo `withdrawFromDeclaredPlanWithCore`
+  (`lib/minerador/declared-plan-withdraw-core.ts`), rota `GET|POST /api/minerador/marcas/[brandId]/plans/withdraw`
+  (GET lista com leitura; POST com `minerador:edit`). Prévia com `decisionHash`; aplicar só com o mesmo hash. Ordem:
+  ensaio das escritas (recusa antes de gravar) → grupo com o plano restante pelo `declareEditorialGroupPlan`
+  (`plan_version + 1`, `plan_hash` = o do texto restante, evento `plan_changed` com `withdrawal`) → principal sem
+  `keyword_declared_principal` → Assunto sem `keyword_subject.plan` (continua declarado, mesma nota e destino) →
+  releitura. Reaplicar depois de falha no meio é seguro (o grupo não sobe de versão de novo). Não muda `group_id`,
+  não regrava os outros Assuntos do plano, não tira o Pilar (recusa `PILLAR_CANNOT_LEAVE`). Fora do plano, o
+  Assunto e a principal deixam de estar presos ao grupo (`KEYWORD_PLAN_ANCHORED` não vale mais para eles).
+- **Decisão registrada (menor versão coerente):** a keyword não é tirada do artigo nem do grupo; o artigo que já
+  existe no Arquiteto continua até a decisão humana lá ("Retirar artigo do Silo" solta as keywords para "Keywords
+  não agrupadas" do grupo). Sem ferramenta MCP (só tela). O plano sai do pacote aprovado: Assunto e principal
+  aprovados voltam para "Em revisão" (a prévia conta); a principal fora do plano volta a precisar de Volume.
+- **Arquivos compartilhados (aditivos):** `lib/editorial/editorial-groups-store.ts` (`eventPayload` opcional no
+  `declareEditorialGroupPlan`), `app/api/editorial/groups/route.ts` (PATCH), `components/editorial/group-selector.tsx`
+  (engrenagem por cor, "Histórico do grupo", diálogos no `TopbarGroupTag`), `components/editorial/editorial-group-area-store.ts`
+  (`followEditorialGroupColorChange`), `lib/agent/platform-catalog.ts` (operações
+  `editorial.group_manage_and_history` e `minerador.withdraw_from_declared_plan`), `tests/plano-declarado-fake-db.mts`
+  (`in` com caminho JSON e `limit`). Novos: `components/editorial/group-manage-{client.ts,dialogs.tsx}`,
+  `app/api/editorial/groups/history/route.ts`. Consumidores preservados: POST com cor/nome, leitura dos grupos,
+  `/groups/articles`, import do plano, `declare_silo_plan`. `minerador-workspace.tsx` não foi tocado.
+- **Testes:** `tests/editorial-grupos-gerenciar-historico.test.mts` (10, em `test:editorial`),
+  `tests/minerador-plano-tirar-do-plano.test.mts` (6, glob do Minerador), `tests/radar-grupos-gerenciar-historico-dom.test.mts`
+  (5, DOM, `test:radar`), `tests/arquiteto-selos-do-plano.test.mts` (4, `test:arquiteto`); listas fechadas ajustadas de
+  propósito em `tests/minerador-assunto-dominio.test.mts` (o núcleo da retirada chama `setKeywordSubject`) e F1-17 em
+  `tests/minerador-grupos-f1.test.mts` (PATCH = Gerenciar). Suítes (antes → depois): `test:arquiteto` 2849 → 2853,
+  `test:agent` 79 → 88 (as outras frentes também acrescentaram), `test:radar` 3484 → 3503 (1 pulado; 1 falha de outra
+  frente, `radar-artigo-modelo-congelamento`), `test:editorial` 172 → 182 com as 4 falhas antigas, Minerador por glob
+  1252 → 1258 com as MESMAS 25 falhas (por nome), `tsc` 0.
+- **Pendências:** homologação manual do dono (dark mode, 360/768/1024/1440 px, foco e Esc nos dois diálogos);
+  nome do ator no histórico (hoje "Você"/id curto, sem expor e-mail); "Tirar do plano" pelo MCP (não feito, de propósito).
+
+## Etiqueta de grupo: cores fixas, fixa na topbar e por área — 2026-10-12
+
+```text
+SDD = docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md §9.1-A (adendo de 2026-10-12) · módulo dono: Compartilhado/editorial (grupos)
+MIGRATION_NOVA = 0 · ESCRITA_REMOTA = 0 · SQL_REMOTO = 0 · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Cores fixas:** cada cor da paleta é o grupo. A etiqueta (ícone ao lado do
+  sino) abre um select de cores: "Todos os grupos" (cinza), Amarelo, Azul,
+  Verde, Lima, Laranja e "Sem grupo"; o nome próprio do grupo da cor (ex.: o
+  de um plano de Silo) aparece discreto ao lado; contagens só quando já
+  chegaram. O formulário "Novo grupo" saiu (`components/editorial/group-selector.tsx`).
+- **Fixa na topbar global:** `components/global-topbar.tsx` renderiza
+  `TopbarGroupTag` sozinha, na hora, no Minerador, no Arquiteto e no Radar
+  (marca ativa + sessão autenticada). O Minerador não registra mais nada para
+  ela; Arquiteto e Radar só dão o rodapé do menu (`groupTagMenuFooter`).
+- **Por área:** `components/editorial/editorial-group-area-store.ts` guarda a
+  escolha por `brandId + área` (lembrada em
+  `minerador-key:grupo-ativo:${brandId}:${area}` com a COR; try/catch; nada é
+  limpo). `?grupo=<cor>` / `sem-grupo` / uuid antigo na URL da página aberta.
+- **Carregamento:** lista de grupos lida uma vez por marca na sessão, em
+  segundo plano, com o cache de apresentação `minerador-key:grupos:${brandId}`
+  na hora. A planilha do Minerador não espera os grupos com "Todos"/"Sem grupo"
+  nem com cor resolvida pelo cache (`useMineradorGroups().ready`); cor sem
+  grupo = vazio com "Nenhuma keyword na cor X ainda", sem consulta; cor com
+  vários grupos ativos lê todos (`.in("group_id", …)`).
+- **Mover por cor:** os dois selects "Grupo" do rodapé listam "Mover para
+  <cor>" + "Tirar do grupo"; o grupo da cor é garantido no servidor antes
+  (`POST /api/editorial/groups { marcaId, color }` →
+  `ensureEditorialGroupForColor`: o ativo da cor, senão reativa o arquivado,
+  senão cria "Laranja"). Filtrar nunca escreve.
+- **Importar plano do Silo:** escolhe a cor; a cor com grupo ativo leva o plano
+  para ele (`existing`), a sem grupo cria o grupo da cor com o nome do Silo
+  (`new`, `name: null`).
+- **Arquivos:** `lib/editorial/editorial-groups.ts` (escolha, recorte de tela
+  `groups`, chaves, cache, `canEnsureEditorialGroupColor`),
+  `lib/editorial/editorial-groups-store.ts` (ensure),
+  `lib/editorial/article-groups.ts` (`filterRowsByEditorialGroup` aceita o
+  recorte de tela), `lib/server/editorial-groups.ts`,
+  `app/api/editorial/groups/route.ts`, `components/editorial/*` (store,
+  seletor, hook do Arquiteto/Radar, rodapé), `components/global-topbar.tsx`,
+  `components/editorial/operational-data-grid.tsx`,
+  `modules/minerador/{use-minerador-groups.ts,minerador-workspace.tsx,declared-plan-import-dialog.tsx}`,
+  `modules/arquiteto/arquiteto-workspace.tsx` (5 pontos pequenos),
+  `modules/radar/radar-page.tsx`, `lib/agent/platform-catalog.ts`.
+  Consumidores preservados: rotas de leitura por `groupId` (uuid/sem-grupo),
+  POST com nome (comportamento antigo), PATCH, `/groups/articles`, MCP
+  `declare_silo_plan`.
+- **Testes:** `tests/radar-grupos-cores-fixas.test.mts` (novo),
+  `tests/radar-grupos-etiqueta-topbar.test.mts` (reescrito), F1-21..25 em
+  `tests/minerador-grupos-f1.test.mts`, e ajustes em
+  `tests/arquiteto-grupos-f2.test.mts` e `tests/radar-grupos-f2.test.mts`.
+  Suítes (antes → depois): `test:radar` 3465 → 3483 (+1 pulado, 0 falhas); `test:agent` 78 → 78;
+  `test:editorial` 172 com as 4 falhas antigas; Minerador por glob 1225 → 1230 com as MESMAS
+  28 falhas antigas; `test:arquiteto` 2838 → 2837 + 1 falha em
+  `arquiteto-serp-cache-formacao` (A3/A5), que lê `lib/server/arquiteto-serp-http.ts` — arquivo
+  em edição pelo outro agente, não tocado aqui; `tsc` 0 erros; eslint dos arquivos tocados sem erro.
+- **Limitação:** o `git` normaliza fim de linha; o `minerador-workspace.tsx`
+  tinha 9 linhas só-LF no meio do CRLF e o editor as deixou CRLF (diff do git
+  não muda). Renomear/recolorir/arquivar pela tela continua fora (a rota
+  PATCH existe).
+
 ## Plano declarado do Silo (F3 = Fase A e F4 = Fase B) — 2026-10-12
 
 ```text

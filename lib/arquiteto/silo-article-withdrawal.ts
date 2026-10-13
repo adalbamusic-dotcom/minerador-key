@@ -34,7 +34,7 @@ export const SILO_ARTICLE_WITHDRAWAL_ROUTE = "/api/arquiteto/silo-article-withdr
 
 /** A mesma frase de dívida que a consolidação escreve num Silo sem suporte. */
 export const SHALLOW_SILO_GAP = "Silo raso: nenhum Article de suporte na composição consolidada.";
-const SHALLOW_SILO_PENDING = "Revisão de segunda passada: definir os Articles de suporte que dão profundidade a este Silo.";
+export const SHALLOW_SILO_PENDING ="Revisão de segunda passada: definir os Articles de suporte que dão profundidade a este Silo.";
 
 export const SILO_ARTICLE_WITHDRAWAL_REASON_MIN = 3;
 export const SILO_ARTICLE_WITHDRAWAL_REASON_MAX = 500;

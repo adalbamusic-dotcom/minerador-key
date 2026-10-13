@@ -1,37 +1,47 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { Check, Loader2, Plus, Tag } from "lucide-react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Check, History, Settings2, Tag } from "lucide-react";
 import { AnchoredPopover } from "@/components/editorial/anchored-popover";
 import { EditorialGroupDot } from "@/components/editorial/group-tag";
+import { useAreaGroupFilter } from "@/components/editorial/editorial-group-area-store";
+import { EditorialGroupHistoryDialog, EditorialGroupManageDialog } from "@/components/editorial/group-manage-dialogs";
 import {
-  EDITORIAL_GROUP_COLOR_CLASSES,
+  activeEditorialGroupsOfColor,
+  EDITORIAL_GROUP_CHOICE_ALL,
   EDITORIAL_GROUP_COLOR_LABELS,
   EDITORIAL_GROUP_COLORS,
-  EDITORIAL_GROUP_NAME_MAX,
+  EDITORIAL_GROUP_URL_NONE,
+  editorialGroupChoiceLabel,
   editorialGroupCountLabel,
-  sameEditorialGroupFilter,
+  editorialGroupCustomName,
+  type EditorialGroupArea,
+  type EditorialGroupChoice,
   type EditorialGroupColor,
-  type EditorialGroupFilter,
   type EditorialGroupSummary,
 } from "@/lib/editorial/editorial-groups";
 
 /**
- * SELETOR DE GRUPO — compartilhado pelas planilhas (SDD 2026-10-12 §9.1).
+ * SELETOR DE GRUPO — a etiqueta de cor da topbar global (SDD 2026-10-12 §9.1).
  *
- * 2026-10-12 · pedido do dono: o seletor largo virou um BOTÃO-ÍCONE de
- * etiqueta que mora na topbar global, IMEDIATAMENTE AO LADO DO SINO
- * (`GlobalTopbarModuleControls.groupTag`), no Minerador, no Arquiteto e no
- * Radar. O ícone mostra só a COR do grupo ativo; sem filtro ("Todos os
- * grupos") fica no cinza neutro (`text-muted`). O nome vai no tooltip e no
- * `aria-label` — a cor nunca aparece sozinha para quem lê (§5.0.2).
+ * 2026-10-12 · adendo "cores fixas" (pedido do dono: "coloca umas cores
+ * prefixados e pronto", "essa tag tem que estar no global fixado", "não pode
+ * atrapalhar o carregamento"):
  *
- * O menu é um select de etiquetas: uma bolinha por grupo com o NOME ao lado,
- * "Todos os grupos" (cinza), "Sem grupo", "Novo grupo" (nome + cor) e as ações
- * extras do módulo (`menuFooter`). Trocar de grupo é um clique. Teclado: setas
- * (e Home/End) navegam, Esc fecha e devolve o foco ao botão.
+ *   · cada cor da paleta É o grupo: o menu é um select de CORES — "Todos os
+ *     grupos" (cinza, padrão), Amarelo, Azul, Verde, Lima, Laranja, "Sem grupo"
+ *     e o rodapé do módulo. Nada para escrever: o formulário "Novo grupo" saiu;
+ *   · se o grupo de uma cor tem um nome próprio (ex.: o nome de um plano de
+ *     Silo), ele aparece discretamente ao lado da cor;
+ *   · as contagens só aparecem quando já chegaram do servidor — nunca seguram o
+ *     menu;
+ *   · a topbar global renderiza este botão SEMPRE e na hora, ao lado do sino,
+ *     no Minerador, no Arquiteto e no Radar (`TopbarGroupTag`); a escolha é de
+ *     cada área (`editorial-group-area-store`).
  *
- * Não grava filtro: quem usa decide URL e lembrança (D12).
+ * O ícone só muda de cor (cinza = todos). O nome vai no tooltip e no
+ * `aria-label` — a cor nunca aparece sozinha para quem lê (§5.0.2). Teclado:
+ * setas (e Home/End) navegam, Esc fecha e devolve o foco ao botão.
  */
 
 const OPTION_CLASS = "flex min-h-9 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent";
@@ -50,45 +60,54 @@ const NEUTRAL_TAG_ICON_CLASS = "text-text-muted";
 
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
 
+/** Soma as contagens dos grupos ativos de uma cor (normalmente um só). */
+function contagemDaCor(groups: readonly EditorialGroupSummary[], color: EditorialGroupColor): string {
+  const daCor = activeEditorialGroupsOfColor(groups, color);
+  if (!daCor.length) return "";
+  return editorialGroupCountLabel({
+    keywordCount: daCor.reduce((soma, group) => soma + group.keywordCount, 0),
+    articleCount: daCor.reduce((soma, group) => soma + group.articleCount, 0),
+  });
+}
+
 export function EditorialGroupSelector({
-  groups,
-  ungroupedCount,
-  filter,
-  onChange,
-  onCreate,
+  choice,
+  onChoose,
+  groups = [],
+  countsReady = false,
+  ungroupedDetail = null,
   disabled = false,
-  canCreate = true,
-  ungroupedDetail,
   menuFooter,
+  onManageColor,
+  onOpenHistory,
 }: {
-  groups: readonly EditorialGroupSummary[];
-  ungroupedCount: number;
-  filter: EditorialGroupFilter;
-  onChange: (filter: EditorialGroupFilter) => void;
-  onCreate?: (name: string, color: EditorialGroupColor) => Promise<{ ok: true; group: EditorialGroupSummary } | { ok: false; message: string }>;
+  choice: EditorialGroupChoice;
+  onChoose: (choice: EditorialGroupChoice) => void;
+  /** Os grupos da marca (para o nome próprio da cor e as contagens). Pode vir vazio: as cores são fixas. */
+  groups?: readonly EditorialGroupSummary[];
+  /** As contagens já chegaram do servidor (o cache local não tem contagens). */
+  countsReady?: boolean;
+  /** Texto ao lado de "Sem grupo" (o Radar conta artigos). Nulo = nada. */
+  ungroupedDetail?: string | null;
   disabled?: boolean;
-  canCreate?: boolean;
-  /** F2 · texto ao lado de "Sem grupo" (o Radar conta artigos, não keywords). Ausente = contagem de keywords, como no Minerador. */
-  ungroupedDetail?: string;
-  /** F2 · ações extras no fim do menu (ex.: "Etiquetar artigos pelo grupo das keywords"); recebe o fechar. */
+  /** Ações extras do módulo no fim do menu (ex.: "Etiquetar artigos pelo grupo das keywords"); recebe o fechar. */
   menuFooter?: (close: () => void) => ReactNode;
+  /**
+   * 2026-10-12 · "Gerenciar" a cor que já tem grupo (nome, trocar para cor
+   * livre, liberar). Sem a função, o item não aparece.
+   */
+  onManageColor?: (color: EditorialGroupColor) => void;
+  /** 2026-10-12 · "Histórico do grupo" (§10.4), quando há uma cor escolhida. Sem a função, o item não aparece. */
+  onOpenHistory?: () => void;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [color, setColor] = useState<EditorialGroupColor>("amarelo");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const nameId = useId();
-  const errorId = useId();
   const menuId = useId();
 
-  const ativos = groups.filter(group => group.status === "active");
-  const atual = filter.kind === "group" ? ativos.find(group => group.id === filter.groupId) || null : null;
-  const rotulo = filter.kind === "none" ? "Sem grupo" : atual ? `Grupo: ${atual.name}` : "Todos os grupos";
-  const corDoIcone = atual ? GROUP_TAG_ICON_CLASSES[atual.color] : NEUTRAL_TAG_ICON_CLASS;
+  const nomeProprio = choice !== EDITORIAL_GROUP_CHOICE_ALL && choice !== EDITORIAL_GROUP_URL_NONE ? editorialGroupCustomName(choice, groups) : null;
+  const rotulo = nomeProprio ? `${editorialGroupChoiceLabel(choice)} · ${nomeProprio}` : editorialGroupChoiceLabel(choice);
+  const corDoIcone = choice !== EDITORIAL_GROUP_CHOICE_ALL && choice !== EDITORIAL_GROUP_URL_NONE ? GROUP_TAG_ICON_CLASSES[choice] : NEUTRAL_TAG_ICON_CLASS;
 
   // Ao abrir, o foco vai para a opção escolhida (ou a primeira): setas já funcionam.
   useEffect(() => {
@@ -108,23 +127,19 @@ export function EditorialGroupSelector({
 
   const fechar = () => {
     setOpen(false);
-    setCreating(false);
-    setError(null);
     setDevolverFoco(contador => contador + 1);
   };
-  const escolher = (next: EditorialGroupFilter) => {
-    onChange(next);
+  const escolher = (next: EditorialGroupChoice) => {
+    onChoose(next);
     fechar();
   };
 
   const navegar = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!NAV_KEYS.has(event.key)) return;
-    const origem = event.target as HTMLElement;
-    if (origem.tagName === "INPUT") return; // o nome e as cores do "Novo grupo" usam as setas nativas
     const itens = [...(menuRef.current?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? [])];
     if (!itens.length) return;
     event.preventDefault();
-    const posicao = itens.indexOf(origem);
+    const posicao = itens.indexOf(event.target as HTMLElement);
     const proximo = event.key === "Home" ? 0
       : event.key === "End" ? itens.length - 1
       : event.key === "ArrowDown" ? (posicao + 1) % itens.length
@@ -140,34 +155,10 @@ export function EditorialGroupSelector({
     }
   };
 
-  const criar = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!onCreate || saving) return;
-    const limpo = name.replace(/\s+/g, " ").trim();
-    if (!limpo) {
-      setError("Dê um nome ao grupo.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const resultado = await onCreate(limpo, color);
-      if (!resultado.ok) {
-        setError(resultado.message);
-        return;
-      }
-      setName("");
-      setColor("amarelo");
-      escolher({ kind: "group", groupId: resultado.group.id });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const opcao = (key: string, alvo: EditorialGroupFilter, conteudo: ReactNode, detalhe: string) => {
-    const selecionado = sameEditorialGroupFilter(filter, alvo);
+  const opcao = (alvo: EditorialGroupChoice, conteudo: ReactNode, detalhe: string) => {
+    const selecionado = choice === alvo;
     return (
-      <button key={key} type="button" role="menuitemradio" aria-checked={selecionado} onClick={() => escolher(alvo)} className={`${OPTION_CLASS} ${selecionado ? "bg-selected" : ""}`}>
+      <button key={alvo} type="button" role="menuitemradio" aria-checked={selecionado} data-group-choice={alvo} onClick={() => escolher(alvo)} className={`${OPTION_CLASS} ${selecionado ? "bg-selected" : ""}`}>
         <span className="flex min-w-0 flex-1 items-center gap-2">{conteudo}</span>
         {detalhe ? <span className="shrink-0 text-sm text-text-muted">{detalhe}</span> : null}
         <Check aria-hidden="true" className={`h-4 w-4 shrink-0 ${selecionado ? "text-module-accent" : "invisible"}`} />
@@ -181,7 +172,7 @@ export function EditorialGroupSelector({
         ref={triggerRef}
         type="button"
         data-editorial-group-selector
-        data-group-tag-color={atual ? atual.color : filter.kind === "none" ? "sem-grupo" : "todos"}
+        data-group-tag-color={choice}
         disabled={disabled}
         onClick={() => (open ? fechar() : setOpen(true))}
         onKeyDown={abrirPeloTeclado}
@@ -193,65 +184,89 @@ export function EditorialGroupSelector({
         className="relative inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent active:bg-foreground/15 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Tag aria-hidden="true" data-group-tag-icon className={`h-5 w-5 ${corDoIcone}`} />
-        {filter.kind === "none" ? <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-text-muted bg-background" /> : null}
+        {choice === EDITORIAL_GROUP_URL_NONE ? <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-text-muted bg-background" /> : null}
       </button>
       <AnchoredPopover open={open} onClose={fechar} triggerRef={triggerRef} ariaLabel="Grupo da planilha">
         <div ref={menuRef} onKeyDown={navegar}>
-          <div id={menuId} role="menu" aria-label="Grupos" className="flex flex-col gap-0.5">
-            {opcao("todos", { kind: "all" }, <><span aria-hidden="true" className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-text-muted" /><span>Todos os grupos</span></>, "")}
-            {opcao("sem-grupo", { kind: "none" }, <><span aria-hidden="true" className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-text-muted" /><span>Sem grupo</span></>, ungroupedDetail ?? `${ungroupedCount} keyword${ungroupedCount === 1 ? "" : "s"}`)}
-            {ativos.length ? <div role="separator" className="my-1 border-t border-divider" /> : null}
-            {ativos.map(group => opcao(group.id, { kind: "group", groupId: group.id }, <><EditorialGroupDot color={group.color} /><span className="min-w-0 break-words">{group.name}</span></>, editorialGroupCountLabel(group)))}
-          </div>
-          {canCreate && onCreate ? (
-            <div className="mt-2 border-t border-divider pt-2">
-              {!creating ? (
-                <button type="button" onClick={() => setCreating(true)} className={OPTION_CLASS}>
-                  <Plus aria-hidden="true" className="h-4 w-4 text-text-muted" />
-                  Novo grupo
+          <div id={menuId} role="menu" aria-label="Grupos por cor" className="flex flex-col gap-0.5">
+            {opcao(EDITORIAL_GROUP_CHOICE_ALL, <><span aria-hidden="true" className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-text-muted" /><span>Todos os grupos</span></>, "")}
+            <div role="separator" className="my-1 border-t border-divider" />
+            {EDITORIAL_GROUP_COLORS.map(color => {
+              const nome = editorialGroupCustomName(color, groups);
+              const item = opcao(color, <>
+                <EditorialGroupDot color={color} />
+                <span>{EDITORIAL_GROUP_COLOR_LABELS[color]}</span>
+                {nome ? <span className="min-w-0 truncate text-sm text-text-muted" data-group-custom-name>{nome}</span> : null}
+              </>, countsReady ? contagemDaCor(groups, color) : "");
+              if (!onManageColor || !activeEditorialGroupsOfColor(groups, color).length) return item;
+              // "Gerenciar" fica AO LADO da opção (nunca botão dentro de botão).
+              return (
+                <div key={color} className="flex items-center gap-0.5">
+                  <div className="min-w-0 flex-1">{item}</div>
+                  <button type="button" role="menuitem" data-group-manage-open={color} onClick={() => { fechar(); onManageColor(color); }} aria-label={`Gerenciar a cor ${EDITORIAL_GROUP_COLOR_LABELS[color]}`} title={`Gerenciar a cor ${EDITORIAL_GROUP_COLOR_LABELS[color]}: nome, trocar a cor, liberar a cor`} className="inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent">
+                    <Settings2 aria-hidden="true" className="h-4 w-4" />
+                  </button>
+                </div>
+              );
+            })}
+            <div role="separator" className="my-1 border-t border-divider" />
+            {opcao(EDITORIAL_GROUP_URL_NONE, <><span aria-hidden="true" className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-text-muted" /><span>Sem grupo</span></>, ungroupedDetail || "")}
+            {onOpenHistory && choice !== EDITORIAL_GROUP_CHOICE_ALL && choice !== EDITORIAL_GROUP_URL_NONE && activeEditorialGroupsOfColor(groups, choice).length ? (
+              <>
+                <div role="separator" className="my-1 border-t border-divider" />
+                <button type="button" role="menuitem" data-group-history-open onClick={() => { fechar(); onOpenHistory(); }} className={OPTION_CLASS}>
+                  <History aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
+                  <span className="min-w-0 flex-1">Histórico do grupo</span>
                 </button>
-              ) : (
-                <form onSubmit={criar} className="flex flex-col gap-2" aria-label="Novo grupo">
-                  <label htmlFor={nameId} className="text-sm font-medium text-text-muted">Nome do grupo</label>
-                  <input
-                    id={nameId}
-                    autoFocus
-                    value={name}
-                    maxLength={EDITORIAL_GROUP_NAME_MAX}
-                    onChange={event => setName(event.target.value)}
-                    aria-invalid={Boolean(error)}
-                    aria-describedby={error ? errorId : undefined}
-                    className="min-h-9 rounded border border-divider bg-background px-2 py-1.5 text-sm text-foreground focus:border-module-accent focus:outline-none"
-                  />
-                  <fieldset className="flex flex-col gap-1">
-                    <legend className="mb-1 text-sm font-medium text-text-muted">Cor</legend>
-                    <div className="flex flex-wrap gap-1">
-                      {EDITORIAL_GROUP_COLORS.map(opcaoCor => (
-                        <label key={opcaoCor} className={`inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded border px-2 text-sm text-foreground transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-module-accent ${color === opcaoCor ? `${EDITORIAL_GROUP_COLOR_CLASSES[opcaoCor].chip}` : "border-divider hover:bg-surface-subtle"}`}>
-                          <input type="radio" name="editorial-group-color" value={opcaoCor} checked={color === opcaoCor} onChange={() => setColor(opcaoCor)} className="sr-only" />
-                          <EditorialGroupDot color={opcaoCor} />
-                          {EDITORIAL_GROUP_COLOR_LABELS[opcaoCor]}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                  {error ? <p id={errorId} role="alert" className="text-sm text-danger">{error}</p> : null}
-                  <div className="flex items-center justify-end gap-2">
-                    <button type="button" onClick={() => { setCreating(false); setError(null); }} className="min-h-9 rounded px-3 text-sm font-medium text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent">
-                      Cancelar
-                    </button>
-                    <button type="submit" disabled={saving} className="inline-flex min-h-9 items-center gap-1.5 rounded bg-action-accent px-3 text-sm font-medium text-foreground transition-colors hover:bg-action-accent/85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:cursor-not-allowed disabled:opacity-50">
-                      {saving ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
-                      Criar grupo
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          ) : null}
+              </>
+            ) : null}
+          </div>
           {menuFooter ? <div className="mt-2 border-t border-divider pt-2">{menuFooter(fechar)}</div> : null}
         </div>
       </AnchoredPopover>
+    </>
+  );
+}
+
+/**
+ * A ETIQUETA FIXA DA TOPBAR GLOBAL: lê a escolha DESTA área e a lista de
+ * grupos da marca (cache local na hora; servidor em segundo plano). Aparece
+ * imediatamente — não espera a planilha nem a lista. Some só quando o banco
+ * não tem os grupos (migration ausente).
+ */
+export function TopbarGroupTag({ brandId, area, menuFooter, ungroupedDetail }: {
+  brandId: string;
+  area: EditorialGroupArea;
+  menuFooter?: (close: () => void) => ReactNode;
+  /** O módulo pode trocar o texto do "Sem grupo" (o Radar conta artigos). */
+  ungroupedDetail?: string;
+}) {
+  const recorte = useAreaGroupFilter(brandId, area);
+  // 2026-10-12 · "Gerenciar" e "Histórico do grupo": nada é lido até o clique.
+  const [gerenciar, setGerenciar] = useState<string | null>(null);
+  const [historico, setHistorico] = useState<{ color: EditorialGroupColor; groupIds: string[] } | null>(null);
+  if (!recorte.available) return null;
+  const servidor = recorte.groups.source === "server";
+  const semGrupo = ungroupedDetail
+    ?? (servidor && typeof recorte.groups.ungroupedKeywordCount === "number"
+      ? `${recorte.groups.ungroupedKeywordCount} keyword${recorte.groups.ungroupedKeywordCount === 1 ? "" : "s"}`
+      : null);
+  const corEscolhida = recorte.choice !== EDITORIAL_GROUP_CHOICE_ALL && recorte.choice !== EDITORIAL_GROUP_URL_NONE ? recorte.choice : null;
+  return (
+    <>
+      <EditorialGroupSelector
+        choice={recorte.choice}
+        onChoose={recorte.setChoice}
+        groups={recorte.groups.groups}
+        countsReady={servidor}
+        ungroupedDetail={semGrupo}
+        menuFooter={menuFooter}
+        // Gerenciar só com a lista do SERVIDOR (o cache local não tem contagens nem a trava otimista).
+        onManageColor={servidor ? color => setGerenciar(activeEditorialGroupsOfColor(recorte.groups.groups, color)[0]?.id ?? null) : undefined}
+        onOpenHistory={corEscolhida ? () => setHistorico({ color: corEscolhida, groupIds: activeEditorialGroupsOfColor(recorte.groups.groups, corEscolhida).map(group => group.id) }) : undefined}
+      />
+      {gerenciar ? <EditorialGroupManageDialog brandId={brandId} groupId={gerenciar} groups={recorte.groups.groups} onClose={() => setGerenciar(null)} /> : null}
+      {historico ? <EditorialGroupHistoryDialog brandId={brandId} color={historico.color} groupIds={historico.groupIds} groups={recorte.groups.groups} onClose={() => setHistorico(null)} /> : null}
     </>
   );
 }

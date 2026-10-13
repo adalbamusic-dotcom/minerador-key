@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       expectedSiloDnaVersionId: parsed.expectedSiloDnaVersionId ?? null,
     });
     if (result.state === "REFUSED") {
-      return NextResponse.json({ success: false, error: result.message, code: result.code }, { status: 409 });
+      return NextResponse.json({ success: false, error: result.message, code: result.code, ...(result.rework ? { rework: result.rework } : {}) }, { status: 409 });
     }
     return NextResponse.json({ success: true, data: result });
   } catch (error) {

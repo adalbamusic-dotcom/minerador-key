@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   EDITORIAL_GROUP_REFUSAL_MESSAGES,
   GROUPS_NOT_AVAILABLE,
+  editorialGroupNameForColor,
+  isEditorialGroupColor,
   isEditorialGroupsSchemaMissing,
   parseEditorialGroupSummaryRow,
   planEditorialGroupUpdate,
@@ -148,6 +150,93 @@ export async function createEditorialGroup(client: Client, input: {
     events: [{ groupId: id, eventType: "created", payload: { name: validado.name, color: validado.color, origin: "manual" } }],
   });
   return { ok: true, group: releitura.group, eventRecorded };
+}
+
+/* ========================================================================== */
+/* 2026-10-12 · CORES FIXAS — cada cor da paleta É o grupo (adendo do §9.1)    */
+/* ========================================================================== */
+
+export type EnsureColorGroupOutcome = "existing" | "reactivated" | "created";
+
+type ColorGroupRow = { id: string; status: EditorialGroupStatus; createdAt: string };
+
+/** Os grupos desta marca com a cor, o mais antigo primeiro (`created_at`). */
+async function readColorGroupRows(client: Client, brandId: string, color: EditorialGroupColor): Promise<{ ok: true; rows: ColorGroupRow[] } | GroupsUnavailable> {
+  const { data, error } = await client.from("editorial_groups").select("id,marca_id,color,status,created_at").eq("marca_id", brandId).eq("color", color);
+  if (error) {
+    if (isEditorialGroupsSchemaMissing(error)) return groupsUnavailable();
+    throw new EditorialGroupsPersistenceError(error, "ler a cor dos");
+  }
+  const rows = ((data || []) as Array<Record<string, unknown>>)
+    .filter(row => row.marca_id === brandId && row.color === color && typeof row.id === "string")
+    .map(row => ({ id: row.id as string, status: (row.status === "archived" ? "archived" : "active") as EditorialGroupStatus, createdAt: typeof row.created_at === "string" ? row.created_at : "" }))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  return { ok: true, rows };
+}
+
+/**
+ * 2026-10-12 · F6 · O grupo ATIVO de uma cor nesta marca (vários = o mais antigo
+ * por `created_at`, a mesma escolha de `ensureEditorialGroupForColor`), sem
+ * escrever nada. Null = a cor ainda não tem grupo ativo.
+ */
+export async function readActiveEditorialGroupIdForColor(client: Client, brandId: string, color: EditorialGroupColor): Promise<{ ok: true; groupId: string | null } | GroupsUnavailable> {
+  const lidos = await readColorGroupRows(client, brandId, color);
+  if (!lidos.ok) return lidos;
+  return { ok: true, groupId: lidos.rows.find(row => row.status === "active")?.id ?? null };
+}
+
+/**
+ * Garante o grupo de uma COR nesta marca, para mover/etiquetar por cor:
+ *
+ *   1. há grupo ATIVO com a cor → devolve (vários = o mais antigo); nada muda;
+ *   2. senão, há um ARQUIVADO com a cor → reativa (trava otimista, evento
+ *      `reactivated`); se o nome dele colide com outro ativo, reativa com o
+ *      nome da cor ("Laranja", "Laranja 2"…);
+ *   3. senão, cria o grupo manual com o nome = rótulo da cor.
+ *
+ * Duas abas garantindo a mesma cor ao mesmo tempo: a segunda cai no índice
+ * único do nome (`GROUP_NAME_TAKEN`) e relê — devolve o grupo que a primeira
+ * criou, em vez de recusar. Filtrar por uma cor NUNCA chama isto: só mover.
+ */
+export async function ensureEditorialGroupForColor(client: Client, input: {
+  brandId: string;
+  actorUserId: string;
+  color: unknown;
+}): Promise<{ ok: true; group: EditorialGroupSummary; outcome: EnsureColorGroupOutcome; eventRecorded: boolean } | EditorialGroupRefusal | GroupsUnavailable> {
+  if (!isEditorialGroupColor(input.color)) return { ok: false, code: "GROUP_COLOR_INVALID", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_COLOR_INVALID };
+  const color = input.color;
+  for (let tentativa = 0; tentativa < 2; tentativa += 1) {
+    const lidos = await readColorGroupRows(client, input.brandId, color);
+    if (!lidos.ok) return lidos;
+    const ativo = lidos.rows.find(row => row.status === "active");
+    if (ativo) {
+      const releitura = await readEditorialGroup(client, input.brandId, ativo.id);
+      if (!releitura.ok) return releitura;
+      if (releitura.group) return { ok: true, group: releitura.group, outcome: "existing", eventRecorded: true };
+      continue;
+    }
+    const listing = await listEditorialGroupSummaries(client, input.brandId);
+    if (!listing.ok) return listing;
+    const ativos = listing.groups.filter(group => group.status === "active");
+    const arquivado = lidos.rows.find(row => row.status === "archived");
+    if (arquivado) {
+      const resumo = listing.groups.find(group => group.id === arquivado.id);
+      if (resumo) {
+        let reativado = await updateEditorialGroup(client, { brandId: input.brandId, actorUserId: input.actorUserId, groupId: resumo.id, lockVersion: resumo.lockVersion, status: "active" });
+        if (!reativado.ok && reativado.code === "GROUP_NAME_TAKEN") {
+          reativado = await updateEditorialGroup(client, { brandId: input.brandId, actorUserId: input.actorUserId, groupId: resumo.id, lockVersion: resumo.lockVersion, status: "active", name: editorialGroupNameForColor(color, ativos) });
+        }
+        if (reativado.ok) return { ok: true, group: reativado.group, outcome: "reactivated", eventRecorded: reativado.eventRecorded };
+        if (reativado.code !== "GROUP_STALE" && reativado.code !== "GROUP_NAME_TAKEN") return reativado;
+        continue;
+      }
+    }
+    const criado = await createEditorialGroup(client, { brandId: input.brandId, actorUserId: input.actorUserId, name: editorialGroupNameForColor(color, ativos), color });
+    if (criado.ok) return { ok: true, group: criado.group, outcome: "created", eventRecorded: criado.eventRecorded };
+    if (criado.code !== "GROUP_NAME_TAKEN") return criado;
+    // Corrida: outra aba acabou de criar. Relê a cor uma vez.
+  }
+  return { ok: false, code: "GROUP_STALE", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_STALE };
 }
 
 /** Renomear, recolorir, arquivar ou reativar, com trava otimista (`lock_version`). */
@@ -317,6 +406,8 @@ export async function declareEditorialGroupPlan(client: Client, input: {
   groupId: string;
   plan: Record<string, unknown>;
   planHash: string;
+  /** 2026-10-12 · aditivo: detalhe a mais no evento (ex.: `withdrawal` do "Tirar do plano"). */
+  eventPayload?: Record<string, unknown>;
 }): Promise<{ ok: true; group: EditorialGroupPlanRow; changed: boolean; eventRecorded: boolean } | EditorialGroupRefusal | GroupsUnavailable> {
   const lido = await readEditorialGroupPlan(client, input.brandId, input.groupId);
   if (!lido.ok) return lido;
@@ -347,7 +438,7 @@ export async function declareEditorialGroupPlan(client: Client, input: {
   const eventRecorded = await appendEditorialGroupEvents(client, {
     brandId: input.brandId,
     actorUserId: input.actorUserId,
-    events: [{ groupId: atual.id, eventType: atual.plan ? "plan_changed" : "plan_declared", payload: { planVersion: proximaVersao, planHash: input.planHash, previousPlanHash: atual.planHash } }],
+    events: [{ groupId: atual.id, eventType: atual.plan ? "plan_changed" : "plan_declared", payload: { ...(input.eventPayload ?? {}), planVersion: proximaVersao, planHash: input.planHash, previousPlanHash: atual.planHash } }],
   });
   return { ok: true, group: releitura.group, changed: true, eventRecorded };
 }

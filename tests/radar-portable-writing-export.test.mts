@@ -685,7 +685,8 @@ test("K · a rota: 'mode' opcional, padrão para escrever (2026-10-09), e o ramo
   assert.match(rota, /if \(input\.mode === "writing"\) \{/);
   const ramo = rota.slice(rota.indexOf("if (input.mode === \"writing\") {"), rota.indexOf("const linhaPorArtigo ="));
   /* 2026-10-02 · a voz da marca (SDD diretriz editorial, Adendo C) vai ao formato para escrever, lida no núcleo. */
-  assert.match(ramo, /radarPortableWritingExport\(\{ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt, brandVoice \}\)/);
+  /* 2026-10-12 · F6 · o grupo (cor e nome) de cada artigo vem da MESMA montagem, só quando há (sem leitura no ramo). */
+  assert.match(ramo, /radarPortableWritingExport\(\{ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt, brandVoice, \.\.\.\(grupos\.size \? \{ groups: grupos \} : \{\}\) \}\)/);
   assert.equal(/await |Repository\(|lookupSerpCache|supabase|\.from\(/.test(ramo), false, "o ramo 'Para escrever' faz leitura própria");
   assert.equal(/radarPortableExportCsv|buildRadarPortableExportRow/.test(ramo), false, "o ramo novo monta o formato completo");
   /* A página publicada sai do ArticleDNA já lido no laço. */

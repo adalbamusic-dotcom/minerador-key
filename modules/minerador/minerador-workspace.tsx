@@ -110,9 +110,8 @@ import type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";
 import { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legacy-import";
 import { KeywordTableBulkBarShell } from "./keyword-table/keyword-table-bulk-bar-shell";
 import { useMineradorGroups } from "./use-minerador-groups";
-import { EditorialGroupSelector } from "@/components/editorial/group-selector";
 import { EditorialGroupTag } from "@/components/editorial/group-tag";
-import { EDITORIAL_GROUP_COLOR_CLASSES, editorialGroupFilterMatches, isEditorialGroupsSchemaMissing } from "@/lib/editorial/editorial-groups";
+import { EDITORIAL_GROUP_COLOR_CLASSES, EDITORIAL_GROUP_COLOR_LABELS, EDITORIAL_GROUP_COLORS, editorialGroupCustomName, isEditorialGroupColor, isEditorialGroupsSchemaMissing } from "@/lib/editorial/editorial-groups";
 import { KeywordTableEmptyState } from "./keyword-table/keyword-table-empty-state";
 import { KeywordTableHeader } from "./keyword-table/keyword-table-header";
 import { KeywordTableOrganizeButton } from "./keyword-table/keyword-table-organize-button";
@@ -1654,9 +1653,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       return;
     }
     if (!keywordGroups.ready) {
-      // Espera a decisão dos grupos DESTA marca (uma leitura só). Enquanto
-      // isso, nenhuma carga em voo de outra marca é aplicada e nenhuma linha
-      // de outra marca fica na tela.
+      // 2026-10-12 · só uma COR escolhida sem cache nenhum espera a lista de
+      // grupos desta marca; "Todos os grupos" e "Sem grupo" nunca esperam.
+      // Enquanto isso, nenhuma carga em voo de outra marca é aplicada e
+      // nenhuma linha de outra marca fica na tela.
       fetchDataActiveKeyRef.current = null;
       if (fetchDataLoadedKeyRef.current && !fetchDataLoadedKeyRef.current.startsWith(`${selectedBrandId}|`)) {
         fetchDataLoadedKeyRef.current = null;
@@ -1714,9 +1714,14 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           }
           // Recorte do grupo ativo (F1). "Todos os grupos" é a leitura de antes.
           if (comGrupo && filtroDeGrupo.kind === "group") query = query.eq("group_id", filtroDeGrupo.groupId);
+          else if (comGrupo && filtroDeGrupo.kind === "groups") query = query.in("group_id", [...filtroDeGrupo.groupIds]);
           else if (comGrupo && filtroDeGrupo.kind === "none") query = query.is("group_id", null);
           return query;
         };
+
+        // 2026-10-12 · cores fixas: cor sem grupo ainda (ou grupos ilegíveis
+        // agora) = planilha vazia com o aviso, sem consulta inútil.
+        if (filtroDeGrupo.kind === "groups" && filtroDeGrupo.groupIds.length === 0) return [];
 
         let { data: keywordsData, error: keywordsError } = await lerDe(fonteDaListagem);
         if (keywordsError && fonteDaListagem !== MINERADOR_KEYWORDS_TABLE && viewDeListagemAusente(keywordsError)) {
@@ -3767,29 +3772,38 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       showNotification("error", "Selecione pelo menos uma keyword.");
       return;
     }
-    const targetGroupId = choice === GROUP_BATCH_REMOVE ? null : choice;
-    const destino = targetGroupId ? keywordGroups.groupById.get(targetGroupId) : null;
-    if (targetGroupId && !destino) {
-      showNotification("error", "Grupo não encontrado nesta marca. Abra o seletor de grupo para recarregar.");
-      return;
-    }
+    // 2026-10-12 · cores fixas: o rodapé escolhe a COR; o grupo dela é
+    // garantido no servidor (o ativo da cor, o arquivado reativado ou um novo).
+    const targetColor = choice === GROUP_BATCH_REMOVE ? null : isEditorialGroupColor(choice) ? choice : undefined;
+    if (targetColor === undefined) return;
     setUpdating(true);
     try {
+      let targetGroupId: string | null = null;
+      let destino: { name: string } | null = null;
+      if (targetColor) {
+        const garantido = await keywordGroups.ensureColorGroup(targetColor);
+        if (!garantido.ok) {
+          showNotification("error", garantido.message, { code: garantido.code, stage: "keyword_group_color" });
+          return;
+        }
+        targetGroupId = garantido.group.id;
+        destino = { name: garantido.group.name };
+      }
       const result = await keywordGroups.assignKeywords(ids, targetGroupId);
       if (!result.ok) {
         showNotification("error", result.message, { code: result.code, stage: "keyword_group" });
         return;
       }
       const confirmed = new Set(result.moved);
-      const continuaNaVisao = editorialGroupFilterMatches(keywordGroups.filter, targetGroupId);
+      const continuaNaVisao = keywordGroups.keepsInView(targetColor);
       setKeywords(current => current
         .map(item => confirmed.has(item.id) ? { ...item, group_id: targetGroupId } : item)
         .filter(item => continuaNaVisao || !confirmed.has(item.id)));
       if (!continuaNaVisao && confirmed.size) {
         setSelectedIds(current => new Set([...current].filter(id => !confirmed.has(id))));
       }
-      const partes = [targetGroupId
-        ? `${result.moved.length} keyword(s) movida(s) para o grupo "${destino?.name}"`
+      const partes = [targetColor
+        ? `${result.moved.length} keyword(s) movida(s) para ${EDITORIAL_GROUP_COLOR_LABELS[targetColor]}${destino && destino.name !== EDITORIAL_GROUP_COLOR_LABELS[targetColor] ? ` ("${destino.name}")` : ""}`
         : `${result.moved.length} keyword(s) tirada(s) do grupo`];
       if (result.unchanged.length) partes.push(`${result.unchanged.length} já estava(m) nele`);
       if (result.refused.length) partes.push(`${result.refused.length} recusada(s): ${result.refused[0].message}`);
@@ -3801,19 +3815,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
   };
 
-  // O seletor de grupo (F1) é o botão-ícone de etiqueta ao lado do sino
-  // (groupTag da topbar global), só quando a migration M1 existe. Memo: o
-  // registro da topbar não pode receber um elemento novo a cada render.
-  const groupTagButton = useMemo(() => (keywordGroups.available
-    ? <EditorialGroupSelector
-      groups={keywordGroups.groups}
-      ungroupedCount={keywordGroups.ungroupedCount}
-      filter={keywordGroups.filter}
-      onChange={keywordGroups.setFilter}
-      onCreate={keywordGroups.createGroup}
-    />
-    : null), [keywordGroups.available, keywordGroups.groups, keywordGroups.ungroupedCount, keywordGroups.filter, keywordGroups.setFilter, keywordGroups.createGroup]);
-
+  // 2026-10-12 · a etiqueta de cor do grupo é da topbar global (fixa, ao lado
+  // do sino, na hora): o Minerador não registra mais nada para ela.
   const { registerControls, unregisterControls } = useGlobalTopbarControlsRegistration();
   useEffect(() => {
     const globalTopbarControls: GlobalTopbarModuleControls = {
@@ -3862,11 +3865,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         <AppMenu active="minerador" countLabel={topbarVisibleKeywordCount > 0 ? `${topbarVisibleKeywordCount} termos` : undefined} />
       </div>,
       tabs: sectionTabs,
-      groupTag: groupTagButton,
     };
     registerControls(globalTopbarControls);
     return () => unregisterControls(globalTopbarControls.moduleId);
-  }, [discoverySourceActions, organizeFilterSummary, organizeFilterTitle, organizeOpen, redoKeywords, searchQuery, sectionTabs, showNotification, topbarCanRedo, topbarCanUndo, topbarHistoryCount, topbarSelectedCount, topbarVisibleKeywordCount, undoKeywords, registerControls, unregisterControls, keywordHistory.entries.length, groupTagButton]);
+  }, [discoverySourceActions, organizeFilterSummary, organizeFilterTitle, organizeOpen, redoKeywords, searchQuery, sectionTabs, showNotification, topbarCanRedo, topbarCanUndo, topbarHistoryCount, topbarSelectedCount, topbarVisibleKeywordCount, undoKeywords, registerControls, unregisterControls, keywordHistory.entries.length]);
 
   if (sessionStatus === "loading") {
     return (
@@ -4158,10 +4160,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           <KeywordTableEmptyState className="p-16">
             <AlertTriangle className="w-6 h-6 text-slate-655 mx-auto mb-2" />
             <p className="font-bold text-slate-400">
-              {keywords.length === 0 && keywordGroups.filter.kind !== "all" ? "Nenhuma keyword neste grupo" : keywords.length === 0 ? "Nenhuma palavra-chave encontrada" : "Nenhuma keyword corresponde aos filtros atuais"}
+              {keywords.length === 0 && keywordGroups.emptyLabel ? keywordGroups.emptyLabel : keywords.length === 0 ? "Nenhuma palavra-chave encontrada" : "Nenhuma keyword corresponde aos filtros atuais"}
             </p>
             <p className="text-[10px] text-slate-600 mt-1">
-              {keywords.length === 0 && keywordGroups.filter.kind !== "all" ? "Escolha 'Todos os grupos' no seletor do topo, ou selecione keywords e use Grupo ▸ Mover para… no rodapé." : keywords.length === 0 ? "Insira palavras do banco ou importe candidatas da Descoberta." : `${keywords.length} keyword(s) carregada(s), mas nenhuma corresponde à organização atual.`}
+              {keywords.length === 0 && keywordGroups.emptyLabel ? (keywordGroups.readFailed ? "Escolha 'Todos os grupos' na etiqueta ao lado do sino, ou recarregue a página." : "Escolha 'Todos os grupos' na etiqueta ao lado do sino, ou selecione keywords e use Grupo ▸ Mover para… no rodapé.") : keywords.length === 0 ? "Insira palavras do banco ou importe candidatas da Descoberta." : `${keywords.length} keyword(s) carregada(s), mas nenhuma corresponde à organização atual.`}
             </p>
           </KeywordTableEmptyState>
         ) : (
@@ -4911,8 +4913,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                 title="Mover as keywords selecionadas para um grupo, ou tirar do grupo. Muda só o grupo: status, aprovação e DNA ficam como estão."
               >
                 <option value="">Grupo</option>
-                {keywordGroups.activeGroups.length === 0 ? <option value="" disabled>Crie um grupo no seletor do topo</option> : null}
-                {keywordGroups.activeGroups.map(group => <option key={group.id} value={group.id}>Mover para {group.name}</option>)}
+                {EDITORIAL_GROUP_COLORS.map(color => { const nome = editorialGroupCustomName(color, keywordGroups.groups); return <option key={color} value={color}>Mover para {EDITORIAL_GROUP_COLOR_LABELS[color]}{nome ? ` (${nome})` : ""}</option>; })}
                 <option value={GROUP_BATCH_REMOVE}>Tirar do grupo</option>
               </select>
             )}
@@ -5009,8 +5010,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                       className={`min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 ${BULK_SELECT_THEME}`}
                     >
                       <option value="">Selecionar</option>
-                      {keywordGroups.activeGroups.length === 0 ? <option value="" disabled>Crie um grupo no seletor do topo</option> : null}
-                      {keywordGroups.activeGroups.map(group => <option key={group.id} value={group.id}>Mover para {group.name}</option>)}
+                      {EDITORIAL_GROUP_COLORS.map(color => { const nome = editorialGroupCustomName(color, keywordGroups.groups); return <option key={color} value={color}>Mover para {EDITORIAL_GROUP_COLOR_LABELS[color]}{nome ? ` (${nome})` : ""}</option>; })}
                       <option value={GROUP_BATCH_REMOVE}>Tirar do grupo</option>
                     </select>
                   </label>

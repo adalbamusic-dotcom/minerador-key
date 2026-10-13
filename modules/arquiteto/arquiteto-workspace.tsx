@@ -313,6 +313,9 @@ import { applyDeclaredSiloIdentity, declaredPillarForFormations, declaredSubject
 import { listEditorialGroupPlans } from "@/lib/editorial/editorial-groups-store";
 import { readDeclaredSiloPlan, type DeclaredSiloPlan } from "@/lib/minerador/declared-plan";
 import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
+import { SiloDeclaredPlanPanel } from "./silo-declared-plan-panel";
+import { rejectedArticleReleaseHold } from "@/lib/arquiteto/rejected-article-release";
+import { ReworkNotice } from "@/components/editorial/rework-notice";
 import {
   SiloReviewProposalSchema,
   applySiloAiProposal,
@@ -394,8 +397,10 @@ import {
   withSupabaseSelectRetry,
 } from "@/lib/supabase/browser-authenticated-client";
 import { useEditorialGroups } from "@/components/editorial/use-editorial-groups";
-import { EditorialGroupSelector } from "@/components/editorial/group-selector";
+import type { EditorialGroupColor } from "@/lib/editorial/editorial-groups";
 import { ArticleGroupMoveSelect, ArticleGroupRowTag, ArticleGroupTagMenuItem, ArticleGroupTaggingDialog, articleGroupMoveNotice, editorialGroupStripeClass } from "@/components/editorial/article-group-controls";
+import { articleDeclaredPlanSeals, declaredPlanPillarLabel, siloDeclaredPlanSeal } from "@/lib/arquiteto/declared-plan-seals";
+import { DeclaredPlanSeals } from "./declared-plan-seals";
 import { articleKeywordIndex, filterRowsByEditorialGroup, inheritArticleGroup, sharedGroupOf } from "@/lib/editorial/article-groups";
 // Labels rendered by the identity resolver: SERP de fortalecimento · SERP de arquitetura do publicado · SERP de formação.
 import {
@@ -766,7 +771,9 @@ export default function ArquitetoPage() {
    * Artigos e Silos. O artigo herda o grupo das keywords; o filtro é de TELA
    * (a mesa continua lida inteira e o recorte nunca a substitui, §8).
    */
-  const arquitetoGroups = useEditorialGroups({ brandId: selectedBrandId || null, enabled: sessionStatus === "authenticated", includeKeywords: true });
+  // 2026-10-12 · cores fixas: a escolha é do Arquiteto (independente das outras áreas) e a leitura pesada do grupo dos artigos só começa depois da mesa.
+  const { loading: mesaDoArquitetoCarregando } = useEditorialPipeline();
+  const arquitetoGroups = useEditorialGroups({ brandId: selectedBrandId || null, enabled: sessionStatus === "authenticated", includeKeywords: true, area: "arquiteto", mainReady: !mesaDoArquitetoCarregando });
   const [arquitetoGroupTaggingOpen, setArquitetoGroupTaggingOpen] = useState(false);
 
   /*
@@ -1079,6 +1086,8 @@ export default function ArquitetoPage() {
   const [siloWorkingCopyUndo, setSiloWorkingCopyUndo] = useState<SiloWorkingCopy[] | null>(null);
   const [siloReviewBusy, setSiloReviewBusy] = useState(false);
   const [siloConsolidating, setSiloConsolidating] = useState(false);
+  /** F5 — "a mesma recusa de <data>" do fechamento, por Silo (a guarda do servidor recusou antes da RPC). */
+  const [closureReworkByTerritory, setClosureReworkByTerritory] = useState<Record<string, string>>({});
   // AUTORIDADE REMOTA da working copy de Silo. `siloWorkingCopies` acima segue
   // sendo só a PROPOSTA inicial: assim que existe linha remota para o
   // território, é esta lista que manda.
@@ -3115,12 +3124,15 @@ export default function ArquitetoPage() {
             createStatusEvent(canonicalPage.versionId, "approved", actorUserId, "SiloPage aprovada no mesmo ato humano que confirmou a arquitetura, pelo gate próprio da página."),
           ]);
           consolidados.push(territoryRef);
+          setClosureReworkByTerritory(atual => { if (!(territoryRef in atual)) return atual; const proximo = { ...atual }; delete proximo[territoryRef]; return proximo; });
           pendingConsolidationRef.current = null;
         } catch (error) {
           // Recusa 409 de portão anterior à RPC: nada foi gravado, e reenviar o
           // mesmo corpo repetiria a recusa. A próxima tentativa remonta o envelope.
           // Rede, 5xx ou readback: a operação NÃO é descartada — o servidor pode ter
           // commitado, e um envelope novo viraria escrita dupla. Fica para o retry.
+          // F5 — a guarda recusou o MESMO pedido já recusado: o aviso fica no Fechamento dos Silos até um insumo mudar.
+          if (error instanceof Error && (error as { code?: unknown }).code === "REWORK_SAME_REFUSAL") setClosureReworkByTerritory(atual => ({ ...atual, [territoryRef]: error.message.replace(/^REWORK_SAME_REFUSAL:\s*/, "") }));
           pendingConsolidationRef.current = siloConsolidationFailureDisposition(error) === "discard"
             ? null
             : markSiloConsolidationIndeterminate(
@@ -5890,6 +5902,8 @@ export default function ArquitetoPage() {
           // declarada Assunto sem Volume, ela continua principal do artigo dela.
           ...(!publicada && subjectHeldOut.has(String(keyword.id)) ? { subjectHeldOut: true } : {}),
           ...(!publicada && subjectFormationTrunks.has(String(keyword.id)) ? { subjectAnchored: true } : {}),
+          // F5 · D6 — liberada de artigo retirado do Silo: fica em não agrupadas até decisão humana.
+          ...(!publicada && rejectedArticleReleaseHold((keyword as { canonicalWorkflow?: { payload?: unknown } }).canonicalWorkflow?.payload) ? { releasedHold: rejectedArticleReleaseHold((keyword as { canonicalWorkflow?: { payload?: unknown } }).canonicalWorkflow?.payload) } : {}),
           };
         });
 
@@ -6538,7 +6552,7 @@ export default function ArquitetoPage() {
   }, [articleDnaForGrid, articleSubjectFor, arquitetoGroups.articleGroupById, arquitetoGroups.keywordGroupById]);
 
   /** Rodapé · "Grupo ▸ Mover para… / Voltar ao grupo das keywords" dos artigos selecionados. */
-  const moverArtigosDeGrupo = async (groupId: string | null) => {
+  const moverArtigosDeGrupo = async (color: EditorialGroupColor | null) => {
     const linhas = articlesList.filter(art => selectedArticleIds.has(art.id));
     const ids = [...new Set(linhas.map(art => articleGroupInfoFor(art).articleId).filter((id): id is string => Boolean(id)))];
     const semDefinicao = linhas.filter(art => !articleGroupInfoFor(art).articleId).length;
@@ -6546,8 +6560,8 @@ export default function ArquitetoPage() {
       showNotification("warning", "Os artigos selecionados ainda não têm Definição gravada: eles herdam o grupo das keywords. Para mudar, mova as keywords no Minerador.");
       return;
     }
-    const destino = groupId ? arquitetoGroups.groupById.get(groupId)?.name ?? null : null;
-    const aviso = articleGroupMoveNotice(await arquitetoGroups.moveArticles(ids, groupId), destino);
+    const { result, destino } = await arquitetoGroups.moveArticlesToColor(ids, color);
+    const aviso = articleGroupMoveNotice(result, destino);
     showNotification(aviso.tone, semDefinicao ? `${aviso.message} ${semDefinicao} sem Definição gravada continua(m) com o grupo das keywords.` : aviso.message);
   };
 
@@ -8690,9 +8704,25 @@ export default function ArquitetoPage() {
     }
     return papeis;
   }, [acceptedSiloDnas]);
+  /*
+   * 2026-10-12 · SELOS DO PLANO DECLARADO (SDD §9 item 6): "Pilar do plano",
+   * "Suporte do plano · nº", "Principal declarada", "Fora do plano". Só leitura
+   * do pacote aprovado (`subjectStandings`) e do grupo efetivo do artigo; entra
+   * na revisão da linha para a linha memoizada redesenhar quando o plano chega.
+   */
+  const declaredPlanSealsFor = useCallback((article: (typeof articlesList)[number]) => {
+    const grupo = articleGroupInfoFor(article).groupId;
+    const resumo = grupo ? arquitetoGroups.groupById.get(grupo) : undefined;
+    return articleDeclaredPlanSeals({
+      subjectKeywordId: articleSubjectFor(article)?.keywordId ?? null,
+      principalKeywordId: article.mainKeywordObj?.id != null ? String(article.mainKeywordObj.id) : null,
+      standingOf: keywordId => subjectStandings.get(keywordId),
+      groupHasPlan: Boolean(resumo && (resumo.origin === "declared_plan" || resumo.planVersion > 0)),
+    });
+  }, [articleGroupInfoFor, articleSubjectFor, arquitetoGroups.groupById, subjectStandings]);
   const articleRowRevision = useMemo(
-    () => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId }),
-    [articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId],
+    () => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor }),
+    [articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor],
   );
 
   /** §4/§5 — as relações da AUTORIDADE, classificadas e legíveis. */
@@ -15861,6 +15891,8 @@ export default function ArquitetoPage() {
       // Um clique humano novo reabre a retomada automática: a tentativa anterior
       // pode ter sido recusada por algo que esta conclusão acabou de resolver.
       closureResumptionAttempted.current.clear();
+      // F5 — um clique humano novo relê o aviso da guarda: se nada mudou, o servidor o devolve de novo.
+      setClosureReworkByTerritory({});
       for (const siloRef of territoriosDoLote) {
         // A mesma leitura do fechamento: órfão não conta e aprovado sem conclusão entra.
         const leituraDoSilo = closureFormationsForSilo({
@@ -17590,17 +17622,10 @@ export default function ArquitetoPage() {
     topbarHandlersRef.current.toggleExportMenu = () => setExportMenuOpen(current => !current);
   });
 
-  // F2 · o seletor de grupo, o mesmo do Minerador: botão-ícone de etiqueta ao lado do sino (groupTag).
-  const seletorDeGrupoDoArquiteto = useMemo(() => (arquitetoGroups.available
-    ? <EditorialGroupSelector
-      groups={arquitetoGroups.groups}
-      ungroupedCount={arquitetoGroups.ungroupedKeywordCount}
-      filter={arquitetoGroups.filter}
-      onChange={arquitetoGroups.setFilter}
-      onCreate={arquitetoGroups.createGroup}
-      menuFooter={fechar => <ArticleGroupTagMenuItem pending={arquitetoGroups.untaggedInheritedCount} onClick={() => { fechar(); setArquitetoGroupTaggingOpen(true); }} />}
-    />
-    : null), [arquitetoGroups.available, arquitetoGroups.groups, arquitetoGroups.ungroupedKeywordCount, arquitetoGroups.filter, arquitetoGroups.setFilter, arquitetoGroups.createGroup, arquitetoGroups.untaggedInheritedCount]);
+  // F2 · 2026-10-12: a etiqueta de cor é da topbar global (fixa, ao lado do sino); o Arquiteto só acrescenta o atalho no fim do menu.
+  const rodapeDaEtiquetaDoArquiteto = useMemo(() => (arquitetoGroups.available
+    ? (fechar: () => void) => <ArticleGroupTagMenuItem pending={arquitetoGroups.untaggedInheritedCount} onClick={() => { fechar(); setArquitetoGroupTaggingOpen(true); }} />
+    : undefined), [arquitetoGroups.available, arquitetoGroups.untaggedInheritedCount]);
 
   const globalTopbarControls = useMemo<GlobalTopbarModuleControls>(() => ({
     moduleId: "arquiteto",
@@ -17623,7 +17648,7 @@ export default function ArquitetoPage() {
       redo: () => topbarHandlersRef.current.redoMasterList(),
       open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "arquiteto" } })),
      },
-     groupTag: seletorDeGrupoDoArquiteto,
+     groupTagMenuFooter: rodapeDaEtiquetaDoArquiteto,
      actions: <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto xl:overflow-visible" data-arquiteto-topbar-actions>
         {workspaceMode !== "silos" && <>
           <select
@@ -17758,7 +17783,7 @@ export default function ArquitetoPage() {
         ? <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} shrink-0 tabular-nums text-text-muted`} aria-label="Keywords na estrutura de silos">{territorialSurface.surface.counts.keywords} keywords</span>
         : <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} shrink-0 tabular-nums text-text-muted`} aria-label="Artigos e keywords aguardando decisão de silo">{filteredArticles.length} artigos{visiblePipelineRows.length ? ` · ${visiblePipelineRows.length} aguardando` : ""}</span>}
     </div>,
-  }), [seletorDeGrupoDoArquiteto, acceptedArticleDnas, activeLogicalTask, exportMenuOpen, filterHierarquia, filterStatus, filteredArticles.length, generatingStrategic, masterHistory.canRedo, masterHistory.canUndo, masterHistory.entries.length, masterList.length, pendingSiloReview, searchQuery, selectedBrandId, session?.user?.email, siloConsolidating, siloReviewBusy, siloWorkingCopies.length, territorialSurface, visiblePipelineRows.length, workspaceMode]);
+  }), [rodapeDaEtiquetaDoArquiteto, acceptedArticleDnas, activeLogicalTask, exportMenuOpen, filterHierarquia, filterStatus, filteredArticles.length, generatingStrategic, masterHistory.canRedo, masterHistory.canUndo, masterHistory.entries.length, masterList.length, pendingSiloReview, searchQuery, selectedBrandId, session?.user?.email, siloConsolidating, siloReviewBusy, siloWorkingCopies.length, territorialSurface, visiblePipelineRows.length, workspaceMode]);
   const globalTopbarControlsRef = useRef<GlobalTopbarModuleControls>(globalTopbarControls);
   globalTopbarControlsRef.current = globalTopbarControls;
 
@@ -18070,6 +18095,12 @@ export default function ArquitetoPage() {
                     <section className="mb-4 rounded border border-divider bg-surface p-3" data-testid="architect-silo-closure-status-silos">
                       <p className="text-sm font-semibold text-foreground">Fechamento dos Silos</p>
                       <p className="text-sm leading-6 text-text-muted">Um Silo fecha sozinho quando todos os artigos dele estão concluídos: na aba Artigos, marque os artigos do Silo e clique em “Concluir formação”. “Confirmar propostas novas” não fecha Silo.</p>
+                      {/* F5 — a guarda do servidor: o mesmo fechamento já recusado não vai à RPC de novo até um insumo mudar. */}
+                      {Object.entries(closureReworkByTerritory).map(([territoryRef, message]) => (
+                        <ReworkNotice key={territoryRef} testId="architect-silo-closure-rework"
+                          rework={{ verdict: "same_refusal", previous: null, reasons: [], blocks: true, canOverride: false, code: "REWORK_SAME_REFUSAL", message }}
+                          changeHint="O fechamento roda de novo sozinho quando algo muda: o site da marca, a cópia de trabalho do Silo, o Pilar ou um artigo concluído. Repetir sem mudar nada repetiria a mesma recusa." />
+                      ))}
                       <ul className="mt-1 grid gap-1">
                         {siloClosureSummaries.map(item => (
                           <li key={item.territoryRef} className={`text-sm leading-6 ${item.state === "waiting" ? "text-warning" : item.state === "closing" ? "text-foreground" : "text-positive-soft"}`}>{item.text}</li>
@@ -18728,12 +18759,28 @@ export default function ArquitetoPage() {
                     <div className="min-w-0">
                       <p className="truncate text-base font-semibold text-foreground" title={name}>{name}</p>
                       <p className="mt-1 text-sm text-text-muted">/{slug} · {articleIds.length} ArticleDNA(s) · {entry.authority === "REMOTE" ? "persistida no servidor" : "proposta local"}</p>
+                      {(() => {
+                        // 2026-10-12 · selo "Plano declarado" com o Pilar declarado (SDD §9 item 6): só leitura.
+                        const grupoDoSilo = sharedGroupOf(articleIds.map(articleId => arquitetoGroups.articleGroupById.get(articleId)?.groupId ?? null));
+                        const resumo = grupoDoSilo ? arquitetoGroups.groupById.get(grupoDoSilo) : undefined;
+                        const selo = resumo ? siloDeclaredPlanSeal({ groupHasPlan: resumo.origin === "declared_plan" || resumo.planVersion > 0, planVersion: resumo.planVersion, pillarLabel: declaredPlanPillarLabel(subjectStandings.values(), resumo.id) }) : null;
+                        return selo ? <DeclaredPlanSeals seals={[selo]} className="mt-1"/> : null;
+                      })()}
                     </div>
                     <span className="shrink-0 rounded border border-module-accent/40 bg-module-accent/10 px-2 py-1 text-xs font-semibold text-module-accent">{readOnly ? "Consolidada" : entry.authority === "REMOTE" ? "Remota" : "Provisório"}</span>
                   </div>
                   {readOnly ? (
                     // Silo fechado: o Pilar está gravado no SiloDNA e não se escolhe mais aqui.
-                    <><p className="mt-3 text-sm text-text-muted" data-testid="architect-silo-pillar-closed">Pilar · fechado com o Silo: <span className="font-semibold text-foreground">{pillarArticleId ? articleLabel(pillarArticleId) : "—"}</span></p>
+                    // O Pilar do Silo fechado é o do SiloDNA vigente (pode ter mudado depois, pelo plano declarado).
+                    <><p className="mt-3 text-sm text-text-muted" data-testid="architect-silo-pillar-closed">Pilar · fechado com o Silo: <span className="font-semibold text-foreground">{(siloDoPar?.payload.pillarArticleId ?? pillarArticleId) ? articleLabel(siloDoPar?.payload.pillarArticleId ?? pillarArticleId) : "—"}</span></p>
+                    {/* 2026-10-12 — "Aplicar o plano declarado ao Silo": prévia → confirmação, SiloDNA e SiloPage v+1. */}
+                    {siloDoPar && selectedBrandId && <SiloDeclaredPlanPanel
+                      brandId={selectedBrandId}
+                      siloId={siloDoPar.payload.siloId}
+                      classNames={{ button: ARCHITECT_UI.footerButton, primaryButton: ARCHITECT_UI.primaryButton }}
+                      notify={showNotification}
+                      onApplied={() => setCanonicalWorkspaceReload(current => current + 1)}
+                    />}
                     {/* F4 — "Retirar artigo do Silo": prévia → motivo → confirmação, nos suportes do SiloDNA vigente. */}
                     {siloDoPar && selectedBrandId && <SiloArticleWithdrawalPanel
                       brandId={selectedBrandId}
@@ -19278,7 +19325,7 @@ export default function ArquitetoPage() {
                             expanded={expandedArticleRefs.has(view.siloRef)}
                             onToggleSelected={() => toggleSiloPageSelection(pageId)}
                             onToggleExpanded={() => toggleArticleUnitExpansion(view.siloRef)}
-                            groupTag={(() => { const groupId = sharedGroupOf(group.articles.map(art => articleGroupInfoFor(art).groupId)); const resumo = groupId ? arquitetoGroups.groupById.get(groupId) : null; return resumo ? <ArticleGroupRowTag group={resumo}/> : null; })()}
+                            groupTag={(() => { const groupId = sharedGroupOf(group.articles.map(art => articleGroupInfoFor(art).groupId)); const resumo = groupId ? arquitetoGroups.groupById.get(groupId) : null; if (!resumo) return null; const seloDoPlano = siloDeclaredPlanSeal({ groupHasPlan: resumo.origin === "declared_plan" || resumo.planVersion > 0, planVersion: resumo.planVersion, pillarLabel: declaredPlanPillarLabel(subjectStandings.values(), resumo.id) }); return <><ArticleGroupRowTag group={resumo}/>{seloDoPlano ? <DeclaredPlanSeals seals={[seloDoPlano]} className="ml-1"/> : null}</>; })()}
                           />
                         );
                       })()}
@@ -19464,7 +19511,7 @@ export default function ArquitetoPage() {
                         <td className="border-r border-slate-800/60 px-3 py-2">{/* O rótulo diz o que a unidade É: com ArticleDNA canônico ela deixou de estar "em formação". */}<p className={`text-sm font-semibold uppercase tracking-wider ${art.isPublished ? "text-success" : articleDnaVersion ? "text-positive-soft" : formacao.formationConcluded ? "text-positive-soft" : "text-module-accent"}`}>{formacao.unitLabel}</p><p className="mt-0.5 text-xs text-text-muted" data-testid="architect-formation-conclusion-detail">{formacao.unitDetail}</p>{/* O papel no Silo tem coluna própria: repeti-lo aqui daria dois lugares
                             para o mesmo fato, e eles divergem no primeiro caso de borda. */}</td>
                         {/* Keyword principal */}
-                        <td className="min-w-0 border-r border-slate-800/60 px-3 py-2"><p className="break-words text-sm font-semibold text-keyword" title={art.keywordPrincipal}>{art.keywordPrincipal}</p><ArticleGroupRowTag group={grupoDaLinhaResumo} inherited={!grupoDaLinha.persisted} className="mt-1"/>{art.isPublished ? (publicationUrlFor(art) ? <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="mt-1 block max-w-[280px] truncate font-mono text-xs text-identity-published underline decoration-identity-published/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus select-all">{publicationUrlFor(art)}</a> : <span className="mt-1 block truncate font-mono text-xs text-identity-published">URL não recebida · /{art.slug}</span>) : <input type="text" value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug} onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)} onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }} onBlur={e => { if (!articleIdentityContext.slugProtected) persistArticleIdentityField(art, "computedSlug", e.target.value); }} disabled={articleIdentityContext.slugProtected} className={`${ARCHITECT_UI.control} mt-1 h-7 w-full max-w-[280px] font-mono text-xs text-identity-new disabled:cursor-not-allowed disabled:opacity-70`} />}</td>
+                        <td className="min-w-0 border-r border-slate-800/60 px-3 py-2"><p className="break-words text-sm font-semibold text-keyword" title={art.keywordPrincipal}>{art.keywordPrincipal}</p><ArticleGroupRowTag group={grupoDaLinhaResumo} inherited={!grupoDaLinha.persisted} className="mt-1"/><DeclaredPlanSeals seals={declaredPlanSealsFor(art)} className="mt-1"/>{art.isPublished ? (publicationUrlFor(art) ? <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="mt-1 block max-w-[280px] truncate font-mono text-xs text-identity-published underline decoration-identity-published/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus select-all">{publicationUrlFor(art)}</a> : <span className="mt-1 block truncate font-mono text-xs text-identity-published">URL não recebida · /{art.slug}</span>) : <input type="text" value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug} onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)} onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }} onBlur={e => { if (!articleIdentityContext.slugProtected) persistArticleIdentityField(art, "computedSlug", e.target.value); }} disabled={articleIdentityContext.slugProtected} className={`${ARCHITECT_UI.control} mt-1 h-7 w-full max-w-[280px] font-mono text-xs text-identity-new disabled:cursor-not-allowed disabled:opacity-70`} />}</td>
                         <td className="border-r border-slate-800/60 px-2 py-2 text-center text-sm text-foreground">{art.supportKeywords.length + 1} {art.supportKeywords.length === 0 ? "keyword" : "keywords"}</td>
                         {workspaceMode !== "silos" && <td className="border-r border-divider px-2 py-2 text-center">{(() => {
                           /*
@@ -20489,7 +20536,7 @@ export default function ArquitetoPage() {
              {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button type="button" onClick={() => { void applyGlobalStatus(); }} disabled={updating} data-testid="architect-mark-ready-for-radar" title="Aplica o status global escolhido aos artigos selecionados após validação e confirmação remota." className={`${ARCHITECT_UI.footerButton} border-module-accent/45 text-module-accent hover:border-module-accent disabled:cursor-not-allowed disabled:opacity-40`}><ShieldCheck className="h-3 w-3" aria-hidden="true"/>Aplicar status</button>}
              {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && selectedArticleRadarGateIssues.length > 0 && <button type="button" onClick={() => { setRepairMessage(null); setRepairOpen(true); }} data-testid="architect-open-repair" title="Mostra o que bloqueia cada artigo selecionado e o que pode ser reparado. O diagnostico nao altera nada." className={`${ARCHITECT_UI.footerButton} border-warning/45 text-warning hover:border-warning`}>Diagnosticar e reparar</button>}
              {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button onClick={() => { void sendSelectedToRadar(); }} disabled={!canSendSelectedArticlesToRadarNow} title={canSendSelectedArticlesToRadarNow ? "Enviar ao Radar os artigos com status Pronto para Radar" : sendToRadarBlocker} className={`${ARCHITECT_UI.footerButton} border-context-accent/45 text-context-accent hover:border-context-accent disabled:cursor-not-allowed disabled:opacity-40`}><ArrowRight className="h-3 w-3"/>Enviar ao Radar</button>}
-            {articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && arquitetoGroups.available && <ArticleGroupMoveSelect activeGroups={arquitetoGroups.groups.filter(group => group.status === "active")} disabled={updating} onMove={groupId => { void moverArtigosDeGrupo(groupId); }} />}
+            {articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && arquitetoGroups.available && <ArticleGroupMoveSelect groups={arquitetoGroups.groups} disabled={updating} onMove={color => { void moverArtigosDeGrupo(color); }} />}
             <button onClick={() => { markSelectionInteraction("clear-selection"); setSelectedArticleIds(new Set()); setSelectedSiloPageIds(new Set()); lastSelectionAnchorId.current = null; }} className={ARCHITECT_UI.footerButton}>Limpar seleção</button>
           </div>
         </footer>

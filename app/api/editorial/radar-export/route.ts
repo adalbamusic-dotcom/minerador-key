@@ -119,7 +119,7 @@ export async function POST(request: Request) {
     const input = { ...corpo, mode: corpo.mode ?? "writing" };
     await assertEditorialPermission(profile, input.brandId, "radar", "view");
 
-    const { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice } = await assembleRadarPortableExport({
+    const { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice, grupos } = await assembleRadarPortableExport({
       brandId: input.brandId,
       articleIds: input.articleIds,
       groupBy: input.mode === "video" ? undefined : input.groupBy,
@@ -208,7 +208,8 @@ export async function POST(request: Request) {
           ...(plano ? { warnings: plano.warnings, emptySilos: radarPortableExportEmptySilos(plano) } : {}),
         }, { status: 409, headers: noStoreHeaders });
       }
-      const escrita = radarPortableWritingExport({ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt, brandVoice });
+      /* 2026-10-12 · F6 · com o grupo (cor e nome) de cada artigo: a linha "Grupo" e a promessa declarada na coluna artigo. */
+      const escrita = radarPortableWritingExport({ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt, brandVoice, ...(grupos.size ? { groups: grupos } : {}) });
       /* 2026-10-09 · a função pura também pode dizer que falta a planta (contrato da rodada): o mesmo 409. */
       if (radarExportNeedsArticleBlueprint(escrita)) {
         return NextResponse.json(radarPortableExportNeedsBlueprintBody({ missing: radarPortableExportMissingBlueprints(montadas, radarExportNeedsArticleBlueprintIds(escrita)), refused: recusados }), { status: 409, headers: noStoreHeaders });

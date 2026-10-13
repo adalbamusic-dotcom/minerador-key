@@ -241,7 +241,7 @@ test("seletor · \"Sem grupo\" conta artigos no Radar e o menu traz \"Etiquetar 
   const tela = await montarRadar();
   let abriu = 0;
   await tela.render(React.createElement(EditorialGroupSelector, {
-    groups: [LARANJA], ungroupedCount: 2, ungroupedDetail: "2 artigos", filter: { kind: "all" }, onChange: () => undefined,
+    choice: "todos", onChoose: () => undefined, groups: [LARANJA], countsReady: true, ungroupedDetail: "2 artigos",
     menuFooter: (fechar: () => void) => React.createElement("button", { type: "button", "data-article-group-tag-open": true, onClick: () => { fechar(); abriu += 1; } }, "Etiquetar artigos pelo grupo das keywords"),
   }));
   await tela.click(tela.container.querySelector("[data-editorial-group-selector]") as HTMLElement);

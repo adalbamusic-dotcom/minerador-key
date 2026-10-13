@@ -44,6 +44,12 @@ export type ImprovementNextStepInput = {
   accepted: boolean;
   /** Consultas pagas que ainda faltam validar. */
   paidQueries: number;
+  /**
+   * D2(a) (SDD 2026-10-12 §17): das `paidQueries`, as que só coletariam a SERP
+   * de uma principal declarada já coberta pelo parecer das sustentações. São
+   * opcionais (D2(b)): não fazem do "Validar no Google" o próximo passo.
+   */
+  optionalPaidQueries?: number;
   /** Teto estimado do custo dessas consultas, em US$. */
   costMaxUsd: number;
   /** Linhas prontas e marcadas para gravar. */
@@ -75,6 +81,18 @@ export function improvementApplyLabel(selectedCount: number, numbered = true): s
   return `${numbered ? "3 · " : ""}Gravar melhorias (${selectedCount})`;
 }
 
+/**
+ * O botão de gravar NA FILEIRA (sem número). "Gravar sem validar (n)" só
+ * quando ainda falta validação OBRIGATÓRIA; se tudo o que falta pagar é a
+ * D2(b) opcional (principal declarada já coberta pelo parecer das
+ * sustentações, D2(a)), gravar não é "sem validar": é o "Gravar melhorias".
+ */
+export function improvementRowApplyLabel(input: { selectedCount: number; paidQueries: number; optionalPaidQueries?: number; accepted?: boolean }): string {
+  if (input.accepted) return "Continuar melhorias aceitas";
+  const obrigatorias = input.paidQueries - Math.max(0, input.optionalPaidQueries ?? 0);
+  return obrigatorias > 0 ? `Gravar sem validar (${input.selectedCount})` : improvementApplyLabel(input.selectedCount, false);
+}
+
 export function resolveImprovementNextStep(input: ImprovementNextStepInput): ImprovementNextStep {
   const done = input.state === "complete";
   // Enquanto a tela trabalha, dizer "parou no meio" com o botão desabilitado confundia: diga o que está acontecendo.
@@ -99,7 +117,7 @@ export function resolveImprovementNextStep(input: ImprovementNextStepInput): Imp
   if (!input.hasRun) {
     return { kind: "prepare", sentence: "Comece aqui: busque keywords com volume para cada publicado e Assunto. O Google Ads é grátis; a leitura da IA usa a IA da plataforma (OpenRouter).", button: "1 · Buscar keywords (grátis)" };
   }
-  if (input.paidQueries > 0 && !input.accepted) {
+  if (input.paidQueries - Math.max(0, input.optionalPaidQueries ?? 0) > 0 && !input.accepted) {
     return { kind: "validate", sentence: "Confira no Google as keywords com volume antes de gravar. Você vê o custo antes.", button: improvementValidateLabel(input.paidQueries, input.costMaxUsd) };
   }
   if (input.selectedCount > 0 && !done) {

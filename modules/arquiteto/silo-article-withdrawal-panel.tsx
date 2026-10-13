@@ -13,6 +13,8 @@
  */
 
 import { useState } from "react";
+import { ReworkNotice } from "@/components/editorial/rework-notice";
+import type { ReworkView } from "@/lib/editorial/rework-guard";
 import {
   SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL,
   SILO_ARTICLE_WITHDRAWAL_CONFIRM_LABEL,
@@ -26,6 +28,8 @@ type Preview = {
   article: { articleId: string; label: string };
   changes: string[];
   warnings: string[];
+  /** F5 — o aviso da guarda de retrabalho (ausente = nunca feito). */
+  rework?: ReworkView;
 };
 
 type Props = {
@@ -124,6 +128,8 @@ export function SiloArticleWithdrawalPanel({ brandId, siloId, articles, classNam
               className={`mt-1 w-full ${classNames.control}`}
               placeholder="Ex.: fora do plano declarado"
             />
+            {/* F5 — a guarda de retrabalho, acima dos botões. */}
+            <ReworkNotice rework={previa.rework} testId="silo-article-withdrawal-rework" />
             <div className="mt-3 flex flex-wrap gap-2">
               <button type="button" className={classNames.dangerButton} disabled={ocupado || !motivoValido} onClick={() => void confirmar()}>
                 {ocupado ? "Gravando…" : SILO_ARTICLE_WITHDRAWAL_CONFIRM_LABEL}

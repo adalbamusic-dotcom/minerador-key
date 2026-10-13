@@ -622,7 +622,8 @@ test("F4 · declare_silo_plan está no catálogo (humano, aceite no chat, gráti
   assert.equal(operacao.chatConfirmationRequired, true);
   assert.equal(operacao.cost, "free");
   assert.deepEqual([...operacao.routes], ["/api/minerador/marcas/[brandId]/plans/import"]);
-  assert.match(operacao.howOnScreen, /'Importar plano do Silo'[\s\S]*'Gerar prévia'[\s\S]*nome e cor[\s\S]*'Declarar plano'/);
+  // 2026-10-12 · cores fixas: o grupo do plano é escolhido pela COR (nada para escrever).
+  assert.match(operacao.howOnScreen, /'Importar plano do Silo'[\s\S]*escolher a COR do grupo[\s\S]*'Gerar prévia'[\s\S]*'Declarar plano'/);
   const guia = renderPlatformGuide("minerador");
   for (const regra of [/principal declarada é fixa/, /aprova sem Volume/, /o Arquiteto não a troca/, /Keywords não agrupadas do grupo/, /Pilar declarado entra no Silo como decisão humana/]) {
     assert.match(guia, regra, String(regra));
@@ -704,4 +705,38 @@ test("F4 · retirar artigo do Silo é operação de tela, nunca ferramenta MCP",
   assert.match(retirada.produces.join(" "), /Keywords não agrupadas/);
   assert.match((retirada.notes ?? []).join(" "), /O Pilar não sai por aqui/);
   assert.ok(!catalogToolNames().some(nome => /withdraw|retir|remove_article|delete/i.test(nome)), catalogToolNames().join(", "));
+});
+
+/* ====== 2026-10-12 · plano declarado no Silo consolidado (SDD §11 passo 7) ====== */
+
+test("plano no Silo · operação no catálogo (humana, aceite no chat, grátis), ferramenta anunciada e a mesma rota da tela", async () => {
+  const operacao = PLATFORM_OPERATIONS.find(item => item.id === "arquiteto.apply_declared_plan_to_silo")!;
+  assert.ok(operacao, "a operação existe");
+  assert.equal(operacao.decision, "human");
+  assert.equal(operacao.access, "tool");
+  assert.equal(operacao.chatConfirmationRequired, true);
+  assert.equal(operacao.cost, "free");
+  assert.deepEqual([...(operacao.tools ?? [])], ["apply_declared_plan_to_silo"]);
+  assert.deepEqual([...operacao.routes], ["/api/arquiteto/silo-declared-plan"]);
+  assert.match(operacao.howOnScreen, /aba Silos[\s\S]*'Aplicar o plano declarado ao Silo'[\s\S]*prévia[\s\S]*'Confirmar o plano no Silo'/);
+  assert.match((operacao.notes ?? []).join(" "), /Links internos/);
+
+  const send = harness(createWriterServer(principal([brand(["platform.read", "arquiteto.write", "platform.decide"])])));
+  await send(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
+  const tools = (await send(2, "tools/list", {})).result?.tools as Array<{ name: string; annotations?: { readOnlyHint?: boolean } }>;
+  const ferramenta = tools.find(tool => tool.name === "apply_declared_plan_to_silo");
+  assert.ok(ferramenta, "o servidor anuncia apply_declared_plan_to_silo");
+  assert.equal(ferramenta.annotations?.readOnlyHint, false);
+
+  const semAceite = toolText(await send(3, "tools/call", { name: "apply_declared_plan_to_silo", arguments: { siloId: "territory:x", mode: "apply", decisionHash: "a".repeat(64) } }));
+  assert.equal(semAceite.code, "human_confirmation_required");
+  const semHash = toolText(await send(4, "tools/call", { name: "apply_declared_plan_to_silo", arguments: { siloId: "territory:x", mode: "apply", userConfirmation: "pode aplicar o plano no Silo" } }));
+  assert.equal(semHash.code, "decision_hash_required");
+
+  const fonte = semComentarios(read("lib/server/platform-mcp-tools.ts"));
+  const inicio = fonte.indexOf('server.registerTool("apply_declared_plan_to_silo"');
+  const corpo = fonte.slice(inicio, fonte.indexOf("server.registerTool(", inicio + 30));
+  assert.match(corpo, /handleSiloDeclaredPlan\(siloDeclaredPlanRuntime\(context\)/, "o MESMO núcleo da rota");
+  assert.match(corpo, /"platform\.decide"/);
+  assert.match(semComentarios(read("app/api/arquiteto/silo-declared-plan/route.ts")), /handleSiloDeclaredPlan\(siloDeclaredPlanRuntime\(context\)/);
 });

@@ -33,6 +33,7 @@ import { mcpEvidenceRawMaterialOf, mcpEvidenceWithRawMaterial, mcpRawMaterialMax
 import { AuthzError } from "@/lib/server/authz";
 import type { EditorialAction } from "@/lib/server/editorial-authorization";
 import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
+import { ReworkRefusedError } from "@/lib/server/rework-guard";
 import { PlatformToolFailure, readMcpArticleBlueprintState, registerPlatformTools, type PlatformPermission } from "@/lib/server/platform-mcp-tools";
 import { RadarStartError } from "@/lib/server/radar-youtube-start";
 import { RadarWriterSendError } from "@/lib/server/radar-writer-send";
@@ -256,6 +257,8 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
       const code = error instanceof ToolFailure ? error.code
         : error instanceof PlatformToolFailure ? error.code
         : error instanceof AuthzError ? "permission_denied"
+        // F5 — a recusa da guarda de retrabalho sai com o código próprio (REWORK_SAME_REFUSAL, DECLARED_PLAN_CONTRADICTION…).
+        : error instanceof ReworkRefusedError ? error.reworkCode
         : error instanceof PipelineRuntimeError || error instanceof RadarStartError || error instanceof RadarWriterSendError ? String((error as { code: unknown }).code)
         : error instanceof WriterEvidenceError ? error.code
         : error instanceof OptimisticLockError ? "conflict"
@@ -264,6 +267,7 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
       // O motivo do leitor (onde descer, o que falta) ajuda a IA; nunca carrega payload nem segredo.
       const details = error instanceof ToolFailure ? error.details
         : error instanceof PlatformToolFailure ? error.details
+        : error instanceof ReworkRefusedError ? { message: error.message, rework: { verdict: error.assessment.verdict, previous: error.assessment.previous, canOverride: error.assessment.canOverride } }
         : error instanceof AuthzError || error instanceof PipelineRuntimeError || error instanceof RadarStartError || error instanceof RadarWriterSendError ? { message: error.message }
         : error instanceof WriterEvidenceError && error.code !== "document_not_found" ? { message: error.message, ...error.details }
         : {};

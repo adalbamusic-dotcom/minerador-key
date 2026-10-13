@@ -622,7 +622,9 @@ export function planSiloArticleFormation(input: {
     // F4 — o Assunto do plano tem principal declarada; não é a própria principal por volume.
     && !(assuntosDoPlano.has(keyword.keywordId) && input.declaredPlans?.get(keyword.keywordId)?.principalKeywordId));
   const livres = input.keywords.filter(keyword => !keyword.isPublished && !holdouts.has(keyword.keywordId)
-    && !keyword.humanFormationRef && !declarado(keyword.keywordId) && !principaisDoPlano.has(keyword.keywordId));
+    && !keyword.humanFormationRef && !declarado(keyword.keywordId) && !principaisDoPlano.has(keyword.keywordId)
+    // F5 · D6 — a liberada de artigo retirado não é reagrupada sozinha: só decisão humana.
+    && !keyword.releasedHold);
 
   // F4 — o Assunto do plano que espera a principal declarada não entra na sugestão de principal.
   const assuntosDoPlanoEsperando = new Set(planos
@@ -644,6 +646,9 @@ export function planSiloArticleFormation(input: {
   const nucleusByKeywordId = new Map<string, SiloFormationNucleusInfo>();
   const separations: SiloFormationPlan["separations"] = [];
   const deferred = new Map(reserva.deferred);
+  for (const keyword of input.keywords) {
+    if (keyword.releasedHold && !keyword.humanFormationRef && !keyword.isPublished && !deferred.has(keyword.keywordId)) deferred.set(keyword.keywordId, keyword.releasedHold);
+  }
 
   /*
    * ÂNCORAS COM VAGA: publicadas e Assuntos. Toda livre que sobra de um

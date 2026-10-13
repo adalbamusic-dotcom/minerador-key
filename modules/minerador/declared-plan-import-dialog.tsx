@@ -9,7 +9,6 @@ import {
   EDITORIAL_GROUP_COLORS,
   EDITORIAL_GROUP_COLOR_CLASSES,
   EDITORIAL_GROUP_COLOR_LABELS,
-  EDITORIAL_GROUP_NAME_MAX,
   editorialGroupCountLabel,
   type EditorialGroupColor,
   type EditorialGroupSummary,
@@ -27,13 +26,23 @@ import type { DeclaredPlanApplyArticle, DeclaredPlanPreview } from "@/lib/minera
  *   2. "Declarar plano" (`mode: "apply"`) manda o MESMO texto e o MESMO grupo
  *      da prévia, com esse `importRequestId`, e só fica habilitado com
  *      `canApply`;
- *   3. qualquer mudança no texto ou no grupo descarta a prévia (é preciso
+ *   3. qualquer mudança no texto ou na cor descarta a prévia (é preciso
  *      gerar outra antes de declarar);
  *   4. o resultado só aparece depois da resposta do `apply` (a rota relê e
  *      confere a reciprocidade); a planilha é relida pelo `onApplied`.
  *
  * `409 GROUPS_NOT_AVAILABLE` (migration dos grupos ausente) esconde o recurso.
+ *
+ * 2026-10-12 · cores fixas (adendo do §9.1): o grupo do plano é escolhido pela
+ * COR, sem nome para escrever. Se a marca já tem um grupo ativo daquela cor, o
+ * plano vai para ele (`{ mode: "existing", groupId }`); senão nasce o grupo da
+ * cor com o nome do Silo (`{ mode: "new", name: null, color }` — a rota já usa
+ * o nome do Silo como padrão).
  */
+
+/** O grupo ativo da cor (o primeiro da lista); nenhum = o plano cria o grupo da cor. */
+const groupOfColor = (groups: readonly EditorialGroupSummary[], color: EditorialGroupColor) =>
+  groups.find(group => group.status === "active" && group.color === color) ?? null;
 
 const PLAN_IMPORT_ROUTE = (brandId: string) => `/api/minerador/marcas/${encodeURIComponent(brandId)}/plans/import`;
 
@@ -119,7 +128,7 @@ export function DeclaredPlanImportDialog({
   onUnavailable,
 }: {
   brandId: string;
-  /** Os grupos ATIVOS da marca, para "Grupo existente". */
+  /** Os grupos ATIVOS da marca: a cor que já tem grupo leva o plano para ele. */
   groups: readonly EditorialGroupSummary[];
   onClose: () => void;
   onApplied: (applied: DeclaredPlanAppliedIds) => void;
@@ -127,9 +136,6 @@ export function DeclaredPlanImportDialog({
   onUnavailable: () => void;
 }) {
   const [text, setText] = useState("");
-  const [groupMode, setGroupMode] = useState<"new" | "existing">("new");
-  const [groupId, setGroupId] = useState<string>(groups[0]?.id ?? "");
-  const [newName, setNewName] = useState("");
   const [color, setColor] = useState<EditorialGroupColor>(EDITORIAL_GROUP_COLORS[0]);
   const [phase, setPhase] = useState<"idle" | "previewing" | "applying">("idle");
   const [preview, setPreview] = useState<{ request: PlanRequest; importRequestId: string; result: DeclaredPlanPreview } | null>(null);
@@ -137,7 +143,7 @@ export function DeclaredPlanImportDialog({
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
-  const ids = { text: useId(), name: useId(), title: useId() };
+  const ids = { text: useId(), title: useId() };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -152,7 +158,7 @@ export function DeclaredPlanImportDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  /** Mudou o texto ou o grupo: a prévia anterior não vale mais. */
+  /** Mudou o texto ou a cor: a prévia anterior não vale mais. */
   const invalidate = () => {
     setPreview(null);
     setApplied(null);
@@ -161,8 +167,8 @@ export function DeclaredPlanImportDialog({
 
   const currentRequest = (): PlanRequest | null => {
     if (!text.trim()) return null;
-    if (groupMode === "existing") return groupId ? { text, group: { mode: "existing", groupId } } : null;
-    return { text, group: { mode: "new", name: newName.trim() || null, color } };
+    const existente = groupOfColor(groups, color);
+    return { text, group: existente ? { mode: "existing", groupId: existente.id } : { mode: "new", name: null, color } };
   };
 
   const handlePreview = async (event?: FormEvent) => {
@@ -191,7 +197,6 @@ export function DeclaredPlanImportDialog({
       const resolvedRequest: PlanRequest = request.group.mode === "new" && !request.group.name && result.group.mode === "new" && result.group.name
         ? { text: request.text, group: { ...request.group, name: result.group.name } }
         : request;
-      if (resolvedRequest !== request && resolvedRequest.group.mode === "new") setNewName(resolvedRequest.group.name || "");
       setPreview({ request: resolvedRequest, importRequestId: crypto.randomUUID(), result });
     } finally {
       busyRef.current = false;
@@ -256,7 +261,7 @@ export function DeclaredPlanImportDialog({
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-divider px-4 py-3">
           <div className="min-w-0">
             <h2 id={ids.title} className="text-base font-semibold text-foreground">Importar plano do Silo</h2>
-            <p className="mt-1 text-sm leading-6 text-text-muted">Cole o plano, escolha o grupo e gere a prévia. A prévia não grava nada; nada é pago e nada é apagado.</p>
+            <p className="mt-1 text-sm leading-6 text-text-muted">Cole o plano, escolha a cor do grupo e gere a prévia. A prévia não grava nada; nada é pago e nada é apagado.</p>
           </div>
           <button type="button" onClick={onClose} disabled={busy} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Fechar" title="Fechar">
             <X className="h-4 w-4" aria-hidden="true" />
@@ -282,56 +287,20 @@ export function DeclaredPlanImportDialog({
             </div>
 
             <fieldset className="flex flex-col gap-2">
-              <legend className="mb-1 text-sm font-medium text-foreground">Grupo do plano</legend>
-              <div className="flex flex-wrap gap-2">
-                <label className={`inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-module-accent/30 ${groupMode === "new" ? "border-module-accent/50 bg-selected" : "border-divider hover:bg-surface-subtle"}`}>
-                  <input type="radio" name="declared-plan-group-mode" value="new" checked={groupMode === "new"} onChange={() => { setGroupMode("new"); invalidate(); }} className="sr-only" />
-                  Grupo novo
-                </label>
-                <label className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-sm transition-colors focus-within:ring-2 focus-within:ring-module-accent/30 ${groups.length === 0 ? "cursor-not-allowed border-divider text-text-muted opacity-60" : groupMode === "existing" ? "cursor-pointer border-module-accent/50 bg-selected text-foreground" : "cursor-pointer border-divider text-foreground hover:bg-surface-subtle"}`}>
-                  <input type="radio" name="declared-plan-group-mode" value="existing" checked={groupMode === "existing"} disabled={groups.length === 0} onChange={() => { setGroupMode("existing"); invalidate(); }} className="sr-only" />
-                  Grupo existente{groups.length === 0 ? " (nenhum grupo ativo nesta marca)" : ""}
-                </label>
-              </div>
-
-              {groupMode === "new" ? (
-                <div className="flex flex-col gap-3">
-                  <div className="flex max-w-md flex-col gap-1">
-                    <label htmlFor={ids.name} className="text-sm font-medium text-text-muted">Nome do grupo</label>
-                    <input
-                      id={ids.name}
-                      value={newName}
-                      maxLength={EDITORIAL_GROUP_NAME_MAX}
-                      onChange={event => { setNewName(event.target.value); invalidate(); }}
-                      className={internalField}
-                    />
-                    <p className="text-sm text-text-muted">Em branco, o grupo recebe o nome do Silo da prévia.</p>
-                  </div>
-                  <fieldset className="flex flex-col gap-1">
-                    <legend className="mb-1 text-sm font-medium text-text-muted">Cor do grupo</legend>
-                    <div className="flex flex-wrap gap-1">
-                      {EDITORIAL_GROUP_COLORS.map(option => (
-                        <label key={option} className={`inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded border px-2 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-module-accent/30 ${color === option ? EDITORIAL_GROUP_COLOR_CLASSES[option].chip : "border-divider hover:bg-surface-subtle"}`}>
-                          <input type="radio" name="declared-plan-group-color" value={option} checked={color === option} onChange={() => { setColor(option); invalidate(); }} className="sr-only" />
-                          <EditorialGroupDot color={option} />
-                          {EDITORIAL_GROUP_COLOR_LABELS[option]}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                </div>
-              ) : (
-                <div className="flex max-h-48 flex-col gap-1 overflow-y-auto" role="radiogroup" aria-label="Grupo existente">
-                  {groups.map(group => (
-                    <label key={group.id} className={`flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-module-accent/30 ${groupId === group.id ? "border-module-accent/50 bg-selected" : "border-divider hover:bg-surface-subtle"}`}>
-                      <input type="radio" name="declared-plan-group-id" value={group.id} checked={groupId === group.id} onChange={() => { setGroupId(group.id); invalidate(); }} className="sr-only" />
-                      <EditorialGroupDot color={group.color} />
-                      <span className="min-w-0 flex-1 break-words font-medium">{group.name}</span>
-                      <span className="shrink-0 text-text-muted">{EDITORIAL_GROUP_COLOR_LABELS[group.color]} · {editorialGroupCountLabel(group)}</span>
+              <legend className="mb-1 text-sm font-medium text-foreground">Cor do grupo do plano</legend>
+              <div className="flex flex-col gap-1" role="radiogroup" aria-label="Cor do grupo do plano">
+                {EDITORIAL_GROUP_COLORS.map(option => {
+                  const existente = groupOfColor(groups, option);
+                  return (
+                    <label key={option} data-declared-plan-color={option} className={`flex min-h-9 cursor-pointer flex-wrap items-center gap-2 rounded-md border px-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-module-accent/30 ${color === option ? EDITORIAL_GROUP_COLOR_CLASSES[option].chip : "border-divider hover:bg-surface-subtle"}`}>
+                      <input type="radio" name="declared-plan-group-color" value={option} checked={color === option} onChange={() => { setColor(option); invalidate(); }} className="sr-only" />
+                      <EditorialGroupDot color={option} />
+                      <span className="font-medium">{EDITORIAL_GROUP_COLOR_LABELS[option]}</span>
+                      <span className="min-w-0 flex-1 break-words text-text-muted">{existente ? `grupo existente: ${existente.name} · ${editorialGroupCountLabel(existente)}` : "grupo novo, com o nome do Silo"}</span>
                     </label>
-                  ))}
-                </div>
-              )}
+                  );
+                })}
+              </div>
             </fieldset>
 
             <div className="flex flex-wrap items-center gap-2">

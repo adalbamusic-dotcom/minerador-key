@@ -38,9 +38,15 @@ import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core"
 import { IntegrationRuntimeError, integrationRuntimeErrorResponse, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { readbackArticleFormationSerpAssessment, saveArticleFormationSerpAssessment } from "@/lib/server/arquiteto-article-serp-store";
+import { recordSerpFormationOutcomes, serpFormationReworkGate, serpReworkView } from "@/lib/server/arquiteto-serp-rework-guard";
 import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
+import { resolveDeclaredPrincipal } from "@/lib/minerador/keyword-subject";
 import { serpIntentReadingOf,
   NO_VOLUME_NOT_OBSERVED_REASON,
+  applyDeclaredPrincipalSupportBasis,
+  declaredPrincipalSupportBasisReason,
+  selectDeclaredPrincipalSupports,
+  type DeclaredPrincipalSupportSelection,
   formationLensesMarkerOf,
   interpretArticleSerp,
   interpretArticleSerpAcrossLenses,
@@ -84,6 +90,11 @@ const RequestSchema = z.object({
   recollectStaleLenses: z.boolean().default(false),
   /** Reinterpreta somente a SERP já guardada; nenhuma falta pode chamar o provider. */
   cacheOnly: z.boolean().default(false),
+  /**
+   * F5 — "Refazer mesmo assim" (D11): recoletar pago a MESMA composição que
+   * já deu parecer inconclusivo, com o motivo dito pelo humano.
+   */
+  reworkOverride: z.object({ reason: z.string().trim().min(5).max(500) }).strict().optional(),
 });
 
 type SerpQueryDiagnostic = DataForSeoSerpProviderDiagnostic & {
@@ -336,11 +347,34 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
     const pipelineContext = authorizedContext ?? await resolvePipelineContext({ brandId: parsed.data.brandId, module: "arquiteto", action: "edit" });
     if (pipelineContext.brandId !== parsed.data.brandId || pipelineContext.module !== "arquiteto" || !["edit", "approve"].includes(pipelineContext.action)) return NextResponse.json({ success: false, error: "Contexto não autorizado." }, { status: 403 });
 
-    const groups = parsed.data.groups;
-    const totalKeywords = groups.reduce((total, group) => total + group.keywords.length, 0) + parsed.data.siloCandidates.length;
-    if (groups.some(group => group.keywords.length !== group.keywordIds.length)) {
+    if (parsed.data.groups.some(group => group.keywords.length !== group.keywordIds.length)) {
       return NextResponse.json({ success: false, error: "O grupo contém keywords divergentes entre IDs e objetos." }, { status: 422 });
     }
+    /*
+     * F5 · GUARDA DE RETRABALHO (SDD 2026-10-12 §10.3). Só onde se pode pagar
+     * (plano e execução paga): o artigo cuja coleta paga da MESMA composição já
+     * deu parecer inconclusivo sai do plano e da execução — nada é pago por
+     * ele de novo — e volta como falha `REWORK_SAME_REFUSAL`, com a recusa
+     * anterior. A leitura só com cache (grátis) nunca é barrada.
+     */
+    const reworkGate = parsed.data.mode === "plan" || !parsed.data.cacheOnly
+      ? await serpFormationReworkGate(pipelineContext, {
+        groups: parsed.data.groups,
+        formationBaseHashes: parsed.data.formationBaseHashes,
+        lenses: parsed.data.lenses ?? (parsed.data.device ? [parsed.data.device] : ["default"]),
+        resultLimit: parsed.data.resultLimit,
+        location: parsed.data.location,
+        language: parsed.data.language,
+        override: parsed.data.reworkOverride,
+      })
+      : null;
+    const barradosPelaGuarda = new Set(reworkGate?.refused.map(item => item.articleId) ?? []);
+    const groups = parsed.data.groups.filter(group => !barradosPelaGuarda.has(group.publishedAnchorId || group.id));
+    if (reworkGate && reworkGate.refused.length && !groups.length) {
+      const [primeiro] = reworkGate.refused;
+      return NextResponse.json({ success: false, code: "REWORK_SAME_REFUSAL", error: `REWORK_SAME_REFUSAL: ${primeiro.assessment.message}`, rework: { verdict: "same_refusal", previous: primeiro.assessment.previous, canOverride: true, message: primeiro.assessment.message, articles: serpReworkView(reworkGate) }, diagnostic }, { status: 409 });
+    }
+    const totalKeywords = groups.reduce((total, group) => total + group.keywords.length, 0) + parsed.data.siloCandidates.length;
     const operationRequestId = diagnostic.correlationId;
     // Um único instante por requisição: validade do cache e `collectedAt` das faltas pagas.
     const now = new Date();
@@ -463,6 +497,47 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
     }
 
     /*
+     * D2(a) — PARECER PELAS SUSTENTAÇÕES (SDD 2026-10-12 §17, decidido pelo
+     * dono: "(a) padrão, (b) opcional"). Só na validação SOMENTE COM CACHE: a
+     * principal DECLARADA no plano (marca `keyword_declared_principal`), sem
+     * volume e sem a SERP no cache, não é consultada; o parecer usa as
+     * sustentações do artigo com volume e as 4 lentes no cache. Nada é pago e
+     * o plano pago (D2(b), "Validar no Google") continua contando a principal.
+     * Sem sustentação em cache, vale a regra de sempre: sem parecer, sem custo.
+     */
+    const supportSelectionByArticle = new Map<string, DeclaredPrincipalSupportSelection>();
+    if (parsed.data.mode === "execute" && parsed.data.cacheOnly && !requested.legacy) {
+      let posicao = 0;
+      const canonicaEmCache = new Map<string, boolean>();
+      groups.forEach((group, indice) => group.keywords.forEach(keyword => {
+        canonicaEmCache.set(`${indice}|${keyword.id}`, Boolean(metaLookups[posicao]?.hit));
+        posicao += 1;
+      }));
+      const extraEmCache = new Map<string, boolean>();
+      extraSlotsWanted.forEach((item, index) => extraEmCache.set(`${item.articleId}|${item.keyword.id}|${serpCacheLensLabel(item.extraLens)}`, Boolean(extraMetaLookups[index]?.hit)));
+      groups.forEach((group, indice) => {
+        const articleId = group.publishedAnchorId || group.id;
+        const principalId = group.principalSuggestion.keywordId;
+        const principal = group.keywords.find(keyword => keyword.id === principalId);
+        if (!principal) return;
+        const selecao = selectDeclaredPrincipalSupports({
+          principalKeywordId: principalId,
+          principalDeclared: Boolean(resolveDeclaredPrincipal(principal.analise_semantica ?? null).mark),
+          principalHasVolume: hasSearchVolume(principal.volume_search),
+          principalCached: canonicaEmCache.get(`${indice}|${principalId}`) === true,
+          candidates: group.keywords.filter(keyword => keyword.id !== principalId).map(keyword => ({
+            keywordId: keyword.id,
+            keyword: keyword.keyword,
+            volume: typeof keyword.volume_search === "number" ? keyword.volume_search : null,
+            lensesCached: canonicaEmCache.get(`${indice}|${keyword.id}`) === true
+              && requested.extras.every(extraLens => extraEmCache.get(`${articleId}|${keyword.id}|${serpCacheLensLabel(extraLens)}`) === true),
+          })),
+        });
+        if (selecao) supportSelectionByArticle.set(articleId, selecao);
+      });
+    }
+
+    /*
      * O PLANO DE CHAMADAS PAGAS (A6). Uma consulta por keyword × lente. A
      * Principal é sempre paga se faltar; no KGR leve, as outras buscas — e as
      * lentes extras da própria Principal — só se ela for ambígua: entram como
@@ -556,7 +631,9 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
           });
         }
       });
-      return NextResponse.json({ success: true, data: { mode: "plan", plan: { ...plan, missingDetails }, lenses: lensLabels, requestedKeywordCount: totalKeywords }, diagnostic });
+      return NextResponse.json({ success: true, data: { mode: "plan", plan: { ...plan, missingDetails }, lenses: lensLabels, requestedKeywordCount: totalKeywords,
+        // F5 — os artigos fora do plano pago pela guarda (a mesma recusa), com o registro anterior.
+        ...(reworkGate?.refused.length ? { rework: { articles: serpReworkView(reworkGate) } } : {}) }, diagnostic });
     }
     if (parsed.data.cacheOnly && (parsed.data.authorizedPaidQueries !== 0 || parsed.data.payMissingExtraLenses || parsed.data.recollectStaleLenses)) {
       return NextResponse.json({ success: false, error: "A validação somente com cache exige orçamento zero e nenhuma recoleta." }, { status: 400 });
@@ -938,6 +1015,8 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
     };
 
     const extraLensesByArticle = new Map<string, ArticleExtraLenses>();
+    /** D2(a): a proveniência do parecer pelas sustentações, por artigo (já filtrada pelas lentes). */
+    const appliedSupportBasis = new Map<string, { principalKeywordId: string; anchorKeywordId: string; supportKeywordIds: string[] }>();
     /**
      * D6 — OS CONTADORES FALAM A VERDADE.
      *
@@ -983,6 +1062,45 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
       };
       const principalIndex = group.keywords.findIndex(keyword => keyword.id === principalId);
       if (principalIndex < 0) throw new Error("KeywordDNA principal ausente no grupo.");
+      /*
+       * D2(a): a principal declarada sem SERP não é lida; só as sustentações
+       * escolhidas, do cache. Sustentação com alguma lente faltando no digest
+       * sai do parecer (fica entre as não observadas) quando outra fica inteira.
+       */
+      const apoio = supportSelectionByArticle.get(articleId);
+      if (apoio) {
+        const sustentacoes = apoio.supportKeywordIds
+          .map(id => group.keywords.find(keyword => keyword.id === id))
+          .filter((keyword): keyword is NonNullable<typeof keyword> => Boolean(keyword));
+        const corpos = await readCachedBodies(sustentacoes);
+        let snapshotsApoio = await Promise.all(sustentacoes.map(keyword => collect(keyword, group.keywords.indexOf(keyword), corpos)));
+        let usadas = sustentacoes;
+        let extrasApoio = await readExtraLenses({ articleId, articleDnaVersionId, observed: usadas });
+        const incompletas = new Set(extrasApoio.missing.map(item => item.keywordId).filter((id): id is string => Boolean(id)));
+        if (incompletas.size && usadas.some(keyword => !incompletas.has(keyword.id))) {
+          usadas = usadas.filter(keyword => !incompletas.has(keyword.id));
+          snapshotsApoio = snapshotsApoio.filter(snapshot => usadas.some(keyword => keyword.id === snapshot.keywordId));
+          extrasApoio = await readExtraLenses({ articleId, articleDnaVersionId, observed: usadas });
+        }
+        extraLensesByArticle.set(articleId, extrasApoio);
+        const supportBasis = {
+          kind: "declared_principal_supports" as const,
+          principalKeywordId: principalId,
+          anchorKeywordId: usadas[0].id,
+          supportKeywordIds: usadas.map(keyword => keyword.id),
+          reason: declaredPrincipalSupportBasisReason(group.keywords[principalIndex].keyword, usadas.map(keyword => keyword.keyword)),
+        };
+        appliedSupportBasis.set(articleId, supportBasis);
+        const keywordDnaReferencesApoio = references.map(reference => reference.keywordDnaSnapshot).filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
+        if (keywordDnaReferencesApoio.length !== references.length) throw new Error("KeywordDNA integral ausente na formação do assessment.");
+        const anterior = parsed.data.previousAssessments?.[articleId];
+        return buildSerpFormationAssessment({ brandId: parsed.data.brandId, articleId, articleDnaVersionId, createdBy: profile.userId,
+          previousVersionId: anterior?.id || null, previousVersion: anterior?.version || 0,
+          principalKeywordId: principalId, assessmentMode: identityContext.mode, validationProfile, keywordReferences: references, keywordDnaReferences: keywordDnaReferencesApoio, snapshots: snapshotsApoio,
+          queriedKeywordDnaIds: snapshotsApoio.map(snapshot => snapshot.keywordId),
+          formationBaseHash: parsed.data.formationBaseHashes?.[articleId] || null,
+          supportBasis });
+      }
       const principalSnapshot = await collect(group.keywords[principalIndex], principalIndex, principalBodies);
       const snapshots = [principalSnapshot];
       const principalAmbiguous = principalSnapshot.diagnostic.verdict === "possivel_conflito"
@@ -1017,6 +1135,11 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
     // lote; falha específica de um Article preserva os assessments válidos.
     const assessments: Awaited<ReturnType<typeof buildSerpFormationAssessment>>[] = [];
     const failures: SerpArticleFailure[] = [];
+    // F5 — o artigo barrado pela guarda não foi pago nem lido: falha própria, com a recusa anterior.
+    for (const barrado of reworkGate?.refused ?? []) {
+      const group = parsed.data.groups.find(item => (item.publishedAnchorId || item.id) === barrado.articleId);
+      failures.push({ articleId: barrado.articleId, principalKeywordId: group?.principalSuggestion.keywordId ?? "", stage: "request_validation", code: "REWORK_SAME_REFUSAL", message: barrado.assessment.message, retryable: false });
+    }
     settledAssessments.forEach((settled, index) => {
       const group = groups[index];
       if (settled.status === "fulfilled") {
@@ -1121,13 +1244,19 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
       } else {
         const extras = extraLensesByArticle.get(assessment.articleId);
         const primaryLabel = serpCacheLensLabel(lens);
+        // D2(a): os pares são lidos contra a sustentação de maior volume; o parecer volta a falar da principal declarada.
+        const apoio = appliedSupportBasis.get(assessment.articleId);
+        const rotulo = (id: string) => group.keywords.find(keyword => String(keyword.id) === id)?.keyword || id;
         const across = interpretArticleSerpAcrossLenses({
           candidateRef: assessment.articleId,
           primary: { lens: primaryLabel, members },
           extras: extras?.extras || [],
-          principalKeywordId: group.principalSuggestion.keywordId,
+          principalKeywordId: apoio ? apoio.anchorKeywordId : group.principalSuggestion.keywordId,
           notObserved,
         });
+        const parecer = apoio
+          ? applyDeclaredPrincipalSupportBasis(across, { principalKeywordId: apoio.principalKeywordId, principalLabel: rotulo(apoio.principalKeywordId), anchorLabel: rotulo(apoio.anchorKeywordId), supportLabels: apoio.supportKeywordIds.map(rotulo) })
+          : across;
         const missing: SerpLensesMarker["missing"] = extras?.missing || [];
         const collectedAtByLens = new Map<string, string[]>([[primaryLabel, assessment.snapshots.map(snapshot => snapshot.collectedAt)], ...(extras?.collectedAtByLens || new Map<string, string[]>())]);
         // O portão de datas é por keyword: a lente principal e as extras da MESMA busca.
@@ -1135,14 +1264,14 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         for (const snapshot of assessment.snapshots) collectedAtByKeyword.set(snapshot.keywordId, [snapshot.collectedAt, ...(extras?.collectedAtByKeyword.get(snapshot.keywordId) || [])]);
         lensesMarker = formationLensesMarkerOf({
           requested: lensLabels,
-          interpretation: across,
+          interpretation: parecer,
           collectedAtByLens,
           collectedAtByKeyword,
           missing,
           withExtras: requested.extras.length > 0,
         });
-        interpretation = across;
-        leituraDasLentes = across.intentReading;
+        interpretation = parecer;
+        leituraDasLentes = parecer.intentReading;
         lensSummaries.push({ candidateRef: assessment.articleId, lenses: lensesMarker });
       }
 
@@ -1184,6 +1313,10 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         throw new Error(`O readback do parecer ${assessment.articleId} não devolveu a composição gravada.`);
       }
       persisted.push({ candidateRef: saved.candidateRef, verdict: lido.payload.verdict, workflowItemId: saved.workflowItemId });
+      // F5 — só a coleta PAGA entra no registro da guarda (a leitura do cache é grátis e repetível).
+      if (reworkGate && articlesWithPaidSerp.has(assessment.articleId)) {
+        await recordSerpFormationOutcomes(pipelineContext, reworkGate, [{ articleId: assessment.articleId, verdict: lido.payload.verdict, recommendation: interpretation.recommendation, workflowItemId: saved.workflowItemId }]);
+      }
     }
 
     diagnostic.assessmentSucceeded = assessments.length > 0;
@@ -1193,7 +1326,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
     const articleSources = assessments
       .filter(assessment => persistedRefs.has(assessment.articleId))
       .map(assessment => ({ articleId: assessment.articleId, source: articlesWithPaidSerp.has(assessment.articleId) ? "collected" as const : "reused" as const }));
-    return NextResponse.json({ success: true, data: { assessments, persisted, articleSources, failures, summary: { requestedArticles: groups.length, completedArticles: assessments.length, failedArticles: failures.length }, siloCandidateEvidence, queryCount: assessments.reduce((total, assessment) => total + assessment.queryCount, 0), candidateQueryCount: siloCandidateEvidence.filter(item => item.snapshot).length, requestedKeywordCount: totalKeywords, mode: "keyword_individual", lenses: lensLabels, plan, paidQueries: budget.used, lensSummaries }, diagnostic });
+    return NextResponse.json({ success: true, data: { assessments, persisted, articleSources, failures, summary: { requestedArticles: parsed.data.groups.length, completedArticles: assessments.length, failedArticles: failures.length }, siloCandidateEvidence, queryCount: assessments.reduce((total, assessment) => total + assessment.queryCount, 0), candidateQueryCount: siloCandidateEvidence.filter(item => item.snapshot).length, requestedKeywordCount: totalKeywords, mode: "keyword_individual", lenses: lensLabels, plan, paidQueries: budget.used, lensSummaries }, diagnostic });
   } catch (error) {
     if (error instanceof DataForSeoCanonicalError || error instanceof DataForSeoSerpError) {
       if (!diagnostic.internalCode) diagnostic.internalCode = error instanceof DataForSeoCanonicalError ? "SERP_CONNECTION_RESOLUTION_FAILED" : "SERP_REQUEST_FAILED";

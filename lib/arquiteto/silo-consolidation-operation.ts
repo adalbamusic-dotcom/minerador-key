@@ -211,6 +211,8 @@ export type SiloConsolidationFailureDisposition = "discard" | "indeterminate";
 export function siloConsolidationFailureDisposition(error: unknown): SiloConsolidationFailureDisposition {
   if (!error || typeof error !== "object") return "indeterminate";
   const candidate = error as { code?: unknown; message?: unknown; status?: unknown };
+  // F5 — a guarda recusou ANTES da RPC ("a mesma recusa de <data>"): nada foi gravado.
+  if (candidate.code === "REWORK_SAME_REFUSAL" || (typeof candidate.message === "string" && candidate.message.trim().startsWith("REWORK_SAME_REFUSAL"))) return "discard";
   if (typeof candidate.status === "number" && candidate.status !== 409) return "indeterminate";
   if (candidate.code !== "CONFLICT") return "indeterminate";
   const message = typeof candidate.message === "string" ? candidate.message.trim() : "";

@@ -42,6 +42,9 @@ import type { RadarCanonicalItemIdentity } from "@/lib/server/radar-canonical-au
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { radarCompetitorOutlinesOf, radarIsNavigationHeading, radarIsSiteIdentityHeading } from "@/lib/radar/competitor-topics";
 import { extractCompetitorPage } from "@/lib/radar/competitor-extractor";
+import { readArticleGroupLabels } from "@/lib/editorial/article-group-labels";
+import type { EditorialGroupLabel } from "@/lib/editorial/editorial-group-scope";
+import { getOperationalClient } from "@/lib/server/editorial-db";
 
 /**
  * ===== O DOSSIÊ PORTÁTIL, MONTADO NUM LUGAR SÓ (SDD MCP ponta a ponta, F1) =====
@@ -84,6 +87,12 @@ export type RadarPortableExportAssembly = {
    * `ifMissing` e a gravação da versão a usam.
    */
   congelamentos: Map<string, RadarArticleBlueprintCurrentInvestigation>;
+  /**
+   * 2026-10-12 · F6 (SDD do plano declarado e grupos, §6.4) · o grupo (cor e
+   * nome) de cada artigo montado, pelo grupo efetivo. Só leitura; falha ou banco
+   * sem os grupos = mapa vazio, e o arquivo sai como antes.
+   */
+  grupos: Map<string, EditorialGroupLabel>;
 };
 
 export async function assembleRadarPortableExport(input: {
@@ -693,7 +702,23 @@ export async function assembleRadarPortableExport(input: {
     }));
   }
 
-  return { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice, congelamentos };
+  /*
+   * 2026-10-12 · F6 · o grupo de cada artigo do arquivo (etiqueta gravada ou
+   * herança das keywords), lido estreito e só para os montados. O cliente é o
+   * operacional, filtrado pela marca que a rota e o MCP já autorizaram (as
+   * tabelas de grupo e o índice do ArticleDNA são lidos como na rota de grupos).
+   */
+  const grupos = montadas.length
+    ? await (async () => {
+      try {
+        return await readArticleGroupLabels(getOperationalClient(), input.brandId, montadas.map(item => item.articleId));
+      } catch {
+        return new Map<string, EditorialGroupLabel>();
+      }
+    })()
+    : new Map<string, EditorialGroupLabel>();
+
+  return { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice, congelamentos, grupos };
 }
 
 /** 2026-10-02 · O leitor real da estrutura publicada: o extrator das páginas concorrentes (GET, validação de URL, tempo limite). */

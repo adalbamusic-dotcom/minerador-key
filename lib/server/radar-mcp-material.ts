@@ -9,6 +9,7 @@ import {
 import { radarPortableVideoExport } from "@/lib/radar/portable-video-export";
 import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
 import { assembleRadarPortableExport, radarReadPublishedStructure, type RadarPortableExportAssembly } from "./radar-portable-export-core";
+import type { EditorialGroupLabel } from "@/lib/editorial/editorial-group-scope";
 
 /**
  * ===== 2026-10-09 · O MATERIAL DO MCP PELO MESMO NÚCLEO DA ROTA DE EXPORT =====
@@ -46,6 +47,8 @@ export type RadarMcpMaterial =
     blocked: number;
     /** Só no modo "video": artigos sem a pesquisa do YouTube gravada (a coluna pode_gravar diz). */
     withoutYoutube: number;
+    /** 2026-10-12 · F6 · Aditivo, só no modo "writing" com um artigo: o grupo (cor e nome) dele, ou null. */
+    group?: EditorialGroupLabel | null;
   }
   | {
     status: "needs_article_blueprint";
@@ -58,7 +61,9 @@ export type RadarMcpMaterial =
   | { status: "refused"; mode: RadarMcpMaterialMode; code: string; reason: string };
 
 /** O que a projeção pura precisa da montagem (a rota lê os mesmos campos). */
-export type RadarMcpMaterialAssembly = Pick<RadarPortableExportAssembly, "exportedAt" | "montadas" | "recusados" | "publicacoes" | "lentes" | "plano" | "planoDaSelecao" | "brandVoice">;
+export type RadarMcpMaterialAssembly = Pick<RadarPortableExportAssembly, "exportedAt" | "montadas" | "recusados" | "publicacoes" | "lentes" | "plano" | "planoDaSelecao" | "brandVoice">
+  /* 2026-10-12 · F6 · o grupo de cada artigo (a montagem real sempre o traz; ausente = sem a linha do grupo). */
+  & Partial<Pick<RadarPortableExportAssembly, "grupos">>;
 
 /** As projeções puras do arquivo; injetáveis só para teste. */
 export type RadarMcpMaterialProjections = {
@@ -116,6 +121,7 @@ export function radarMcpMaterialOf(
     escrita = projecoes.writing({
       articles: montagem.montadas, lenses: montagem.lentes, plan: montagem.plano, selectionPlan: montagem.planoDaSelecao,
       publications: montagem.publicacoes, today: montagem.exportedAt, brandVoice: montagem.brandVoice,
+      ...(montagem.grupos?.size ? { groups: montagem.grupos } : {}),
     });
   } catch (erro) {
     const ids = idsDaRecusaLancada(erro);
@@ -123,7 +129,8 @@ export function radarMcpMaterialOf(
     throw erro;
   }
   if (radarExportNeedsArticleBlueprint(escrita)) return precisaDaPlanta(mode, montagem, radarExportNeedsArticleBlueprintIds(escrita));
-  return { status: "ready", mode, csv: escrita.csv ?? "", filename: escrita.filename, exportedAt: montagem.exportedAt, blocked: escrita.blocked, withoutYoutube: 0 };
+  const grupo = montagem.montadas.length === 1 ? montagem.grupos?.get(montagem.montadas[0].articleId) ?? null : null;
+  return { status: "ready", mode, csv: escrita.csv ?? "", filename: escrita.filename, exportedAt: montagem.exportedAt, blocked: escrita.blocked, withoutYoutube: 0, group: grupo };
 }
 
 /**

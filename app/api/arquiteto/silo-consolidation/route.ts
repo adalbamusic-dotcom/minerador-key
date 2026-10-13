@@ -44,6 +44,8 @@ const RequestSchema = z.object({
   siloPageApproval: SiloPageApprovalDecisionSchema.nullish(),
   siloDna: VersionedSiloDNASchema,
   siloPage: VersionedSiloPageSchema,
+  // F5 — "Refazer mesmo assim" (D11): repetir a mesma consolidação já recusada, com o motivo.
+  reworkOverride: z.object({ reason: z.string().trim().min(5).max(500) }).strict().optional(),
 }).strict();
 
 export async function POST(request: Request) {
@@ -63,7 +65,7 @@ export async function POST(request: Request) {
       statuses: { siloDna: parsed.siloDnaStatus, siloPage: parsed.siloPageStatus },
       decision: parsed.decision,
       siloPageApproval: parsed.siloPageApproval ?? null,
-    });
+    }, { reworkOverride: parsed.reworkOverride });
     return NextResponse.json({ success: true, data: persisted });
   } catch (error) {
     if (error instanceof z.ZodError) {

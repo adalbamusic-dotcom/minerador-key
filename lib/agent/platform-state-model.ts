@@ -99,4 +99,15 @@ export type PlatformStateSnapshot = {
   /** O que foi cortado para caber, dito em vez de escondido. */
   truncated: string[];
   readAt: string;
+  /**
+   * 2026-10-12 · F6 · Aditivo: o recorte por grupo pedido (`group` no MCP). Ausente
+   * = a marca inteira, como antes. Com ele, keywords, Assuntos, artigos, Silos,
+   * itens do Radar e documentos são só os do grupo; as páginas publicadas são o
+   * site inteiro (não têm grupo).
+   */
+  group?: {
+    choice: string;
+    description: string;
+    groups: Array<{ groupId: string; color: string; colorLabel: string; name: string; text: string }>;
+  };
 };

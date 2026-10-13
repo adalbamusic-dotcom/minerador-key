@@ -1,5 +1,40 @@
 # Estado atual — Radar
 
+## F6 · Radar, entregáveis e MCP por grupo — 2026-10-12
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** SDD
+`docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` §6.3, §6.4, §6.5 e §9.1-A (adendo F6 no §18.1).
+Dono desta parte: Radar (o Redator, Publicações e o MCP registram a sua nos próprios documentos). Sem migration, sem
+SQL remoto, sem escrita no banco, sem chamada paga.
+
+- **Mesa do Radar:** conferido no código — a etiqueta da barra global (escolha da área "radar"), o filtro de tela
+  (`rowFilter`), a faixa de 4 px e a etiqueta na coluna Artigo já estavam completos desde a F2/adendo das cores fixas.
+  Nada mudou nesta fase além do teste que trava isso (`tests/radar-grupos-f6-entregaveis.test.mts`).
+- **Regra 24 do artigo-modelo** (`lib/radar/article-blueprint.ts`): a promessa do plano chega ao pedido como
+  "Promessa declarada: …" sem a moldura para apagar (o adapter do Arquiteto já grava `promise = plan.scope`); a regra
+  ganhou a frase "Quando vier 'Promessa declarada' (no plano do Silo, a descrição do artigo declarada pelo dono),
+  promise parte dela: o mesmo escopo e o mesmo leitor …; nunca amplia, estreita nem troca o escopo declarado".
+  `RADAR_ARTICLE_BLUEPRINT_RULES_VERSION` **não** mudou (é esclarecimento da regra 24; mudar a versão marcaria todas
+  as plantas gravadas como antigas). A nova versão do ArticleDNA continua chegando como "Atualização disponível"; o
+  Radar não troca principal nem reagrupa.
+- **CSV "Para escrever" e `get_article_for_writing` (mesma montagem):** `assembleRadarPortableExport` lê o grupo
+  EFETIVO dos artigos montados (`readArticleGroupLabels` em `lib/editorial/article-group-labels.ts`, sobre
+  `readArticleGroupMemberships`: etiqueta gravada ou herança das keywords), com o cliente operacional filtrado pela
+  marca já autorizada. A coluna artigo ganha, logo depois do bloco "Publicação", `Grupo: <cor> · <nome>` (só a cor
+  quando o nome é o da cor) e a promessa declarada do ArticleDNA (`Promessa declarada no plano do Silo: …` quando o
+  grupo é de plano; a moldura "Cobrir com clareza o tema …" nunca aparece) — `radarWritingGroupLines`. Artigo sem
+  grupo: o arquivo de antes, byte a byte (teste). A leitura que falha ou o banco sem a M1 = sem a linha; nunca
+  segura o arquivo. O MCP devolve também `group` (`color`, `colorLabel`, `name`, `text`) ou `null`. D10: nada de
+  pendência nas linhas novas.
+- **Arquivos:** `lib/radar/article-blueprint.ts` (regra 24), `lib/radar/portable-writing-export.ts`
+  (`group` no contexto e `radarWritingGroupLines`), `lib/radar/portable-writing-batch.ts` (`groups`),
+  `lib/server/radar-portable-export-core.ts` (`grupos` na montagem), `lib/server/radar-mcp-material.ts`,
+  `app/api/editorial/radar-export/route.ts`, `lib/server/platform-mcp-tools.ts` (`get_article_for_writing`).
+  Compartilhados novos: `lib/editorial/editorial-group-scope.ts` (rótulo e recorte, puro) e
+  `lib/editorial/article-group-labels.ts` (leitura).
+- **Testes:** `tests/radar-grupos-f6-entregaveis.test.mts` (10) e as áreas novas em
+  `tests/radar-grupos-etiqueta-topbar.test.mts` (+4). Contagens no adendo F6 da SDD.
+
 ## Grupos por cor no Radar e leitura da mesa por grupo (F2) — 2026-10-12
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.** SDD

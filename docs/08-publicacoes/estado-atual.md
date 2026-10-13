@@ -1,4 +1,24 @@
 # Estado atual — Publicações
+
+## F6 · Etiqueta de cor e listas por grupo — 2026-10-12
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** SDD
+`docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` §6.4 e §9.1-A (adendo F6 no §18.1). Sem mudança de
+contrato, sem migration, sem escrita.
+
+- **Etiqueta na barra global:** a área `publicacoes` entrou em `EDITORIAL_GROUP_AREAS`; o ícone de etiqueta aparece
+  ao lado do sino, com a escolha DESTA área (lembrada por marca e área; `?grupo=<cor>` na URL de Publicações).
+- **Listas** (`modules/publicacoes/publications-workspace.tsx`): a Biblioteca (por cima do eixo de entrega, os dois
+  filtros juntos) e as abas Fila, Publicados e Atualizações (`rowFilter` do grid) mostram só os conteúdos cujo artigo
+  está no grupo escolhido; cada linha ganha a faixa de 4 px e a etiqueta (bolinha + nome) — na planilha, embaixo do
+  título. O "Sem grupo" do menu conta conteúdos da Biblioteca. Vazio pelo recorte, a Biblioteca diz "Nenhum conteúdo
+  na cor X nesta lista.".
+- **Não atrasa o carregamento:** o grupo dos artigos só é lido depois da mesa (ou na hora, com uma cor escolhida),
+  pelo mesmo `useEditorialGroups`. Só mostra e filtra; registro, exportação, URL e reedição não mudam.
+- **Testes:** `tests/radar-grupos-f6-entregaveis.test.mts` (estrutural) e `tests/radar-grupos-etiqueta-topbar.test.mts`
+  (topbar em DOM). Contagens no adendo F6 da SDD.
+
+## Auditoria de 2026-07-20
 - **Última auditoria:** 2026-07-20.
 - **Funcionando:** importação idempotente de aprovados, biblioteca, fila explícita, exportação local real em Markdown/JSON/CSV, registro manual de destino/URL, histórico operacional, solicitação de atualização e reedição. **Verificado no código e confirmado por testes direcionados.**
 - **Protegido:** item publicado permanece em `published` durante reedição; slug, vínculo de documento/plano, unidade e URL final são protegidos server-side. A sincronização de autosave também não rebaixa um publicado. **Verificado no código.**

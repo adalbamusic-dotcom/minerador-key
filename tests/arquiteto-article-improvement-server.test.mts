@@ -29,6 +29,10 @@ let diverge = new Set<string>();
 // Volume de outra era (provider antigo): medido de novo no Google Ads no preparo, gravado no "Gravar melhorias".
 let legacyVolumes = new Map<string, number | null>(), legacyAsked: string[] = [], legacyFail = false, measured: string[][] = [];
 let logicRan: string[] = [];
+// D2(a): a principal declarada sem volume cujo parecer vem das sustentações (o que a rota real da SERP devolve).
+let supportBasisPrincipal: string | null = null;
+// D2(a): a principal declarada sem SERP no cache e sem sustentação com as 4 lentes — a rota não devolve parecer.
+let noSerpPrincipal: string | null = null;
 const discoveredPhrase = "captação de pacientes para clínica de estética";
 const clone = (v: any) => structuredClone(v);
 // Postgres JSONB does not keep key order and drops undefined: the mock behaves the same.
@@ -51,7 +55,7 @@ const runtime: any = { context, authorize: async (module: string, action: string
 mock.module("../lib/server/arquiteto-territory-store.ts", { namedExports: { listTerritoryWorkflowItems: async () => [{territoryRef:territory,territory:{lifecycleStatus:"confirmed",centralEntity:"clínica de estética",macroIntent:"Informativa",slugState:{publishedSlug:"captacao-de-pacientes"}}}] } });
 const workspace = () => ({ workflowItems: [], keywords: clone(rows), articleDnas: clone(articles), siloDnas: [] });
 function setup() {
-  journal=[]; articles=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];disjoint=new Set();events=[];incompleteUntilPaid=false;diverge=new Set();legacyVolumes=new Map();legacyAsked=[];legacyFail=false;measured=[];logicRan=[];
+  journal=[]; articles=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];disjoint=new Set();events=[];incompleteUntilPaid=false;diverge=new Set();legacyVolumes=new Map();legacyAsked=[];legacyFail=false;measured=[];logicRan=[];supportBasisPrincipal=null;noSerpPrincipal=null;
   rows = [oldId,newId].map((id,i) => ({ id, brand_id: brandId, keyword: i ? "captação de pacientes para clínica de estética" : "como captar clientes para clínica de estética", intent: "Informativa", volume_search: i ? 50 : null, volume_source: i ? "google_ads" : null, analise_semantica: semantic, isPublished: !i, publishedUrl: !i ? url : undefined, primaryKeywordPolicy: !i ? "reviewable" : "free", territoryRef: i ? "territory:other" : territory, keywordDnaRef: { entityId: id, versionId: `${id}:v1`, contentHash: `sha256:${"a".repeat(64)}` }, canonicalWorkflow: { id: `workflow-${id}`, lockVersion: 1, payload: { semanticQualification: { intent: "Informativa", semanticState: "conclusive" }, approvedDna: { analiseSemantica: semantic } } } }));
 }
 mock.module("../lib/arquiteto/canonical-workspace.ts", { namedExports: { buildCanonicalWorkflowWorkspaceItems: (_w: any,k: any) => k } });
@@ -81,7 +85,8 @@ mock.module("../lib/server/arquiteto-serp-http.ts", { namedExports: { handleArch
   if (body.authorizedPaidQueries) { paid += body.authorizedPaidQueries; incompleteUntilPaid = false; }
   else assert.equal(body.cacheOnly, true, "no implicit provider call");
   for (const group of body.groups) {
-    const record = { candidateRef: group.id, payload: { formationBaseHash: body.formationBaseHashes[group.id], verdict: group.keywordIds.some((id: string) => diverge.has(id)) ? "DIVERGENCE" : "INCONCLUSIVE", interpretation: { lenses: { perLens: SERP_SUBJECT_LENS_LABELS.map(lens => ({ lens, pairs: group.keywordIds.filter((id: string) => diverge.has(id)).map((id: string) => ({ left: group.principalSuggestion.keywordId, right: id, level: "nenhuma" })) })), requested: SERP_SUBJECT_LENS_LABELS, observed: incomplete || incompleteUntilPaid ? SERP_SUBJECT_LENS_LABELS.slice(0,3) : SERP_SUBJECT_LENS_LABELS, missing: incomplete || incompleteUntilPaid ? ["mobile-ios"] : [] } }, assessment: { id: `assessment:${group.id}`, contentHash: `sha256:${"b".repeat(64)}`, keywordDnaReferences: group.keywordIds.map((keywordId: string) => ({ keywordId })), recommendations: group.keywordIds.map((keywordId: string) => ({ keywordId, currentRole: wrongRole ? "secundaria" : group.roles[keywordId] })) } } };
+    if (noSerpPrincipal && group.principalSuggestion.keywordId === noSerpPrincipal) continue;
+    const record = { candidateRef: group.id, payload: { formationBaseHash: body.formationBaseHashes[group.id], verdict: group.keywordIds.some((id: string) => diverge.has(id)) ? "DIVERGENCE" : "INCONCLUSIVE", interpretation: { lenses: { perLens: SERP_SUBJECT_LENS_LABELS.map(lens => ({ lens, pairs: group.keywordIds.filter((id: string) => diverge.has(id)).map((id: string) => ({ left: group.principalSuggestion.keywordId, right: id, level: "nenhuma" })) })), requested: SERP_SUBJECT_LENS_LABELS, observed: incomplete || incompleteUntilPaid ? SERP_SUBJECT_LENS_LABELS.slice(0,3) : SERP_SUBJECT_LENS_LABELS, missing: incomplete || incompleteUntilPaid ? ["mobile-ios"] : [] } }, assessment: { id: `assessment:${group.id}`, contentHash: `sha256:${"b".repeat(64)}`, keywordDnaReferences: group.keywordIds.map((keywordId: string) => ({ keywordId })), recommendations: group.keywordIds.map((keywordId: string) => ({ keywordId, currentRole: wrongRole ? "secundaria" : group.roles[keywordId] })), ...(supportBasisPrincipal && group.principalSuggestion.keywordId === supportBasisPrincipal ? { supportBasis: { kind: "declared_principal_supports", principalKeywordId: supportBasisPrincipal, anchorKeywordId: group.keywordIds.find((id: string) => id !== supportBasisPrincipal), supportKeywordIds: group.keywordIds.filter((id: string) => id !== supportBasisPrincipal), reason: "Parecer pelas sustentações: “captação de pacientes para clínica de estética” — a principal declarada “Claro Vivo ou TIM internet” não tem volume nem SERP no cache (D2a); nenhuma coleta nova foi feita." } } : {}) } } };
     assessments = [...assessments.filter(a => a.candidateRef !== group.id), record];
   }
   return json({});
@@ -562,11 +567,14 @@ test("2026-10-12 · Preparar de novo com os mesmos insumos reaproveita a execuç
   assert.equal(prompts.length, 1, "a IA não é chamada de novo");
   assert.ok(!events.includes("busca"), "nenhuma busca nova no Google Ads");
   assert.equal(usage.length, 1, "nada novo no registro de uso");
-  assert.notEqual(segunda.runId, primeira.runId);
-  assert.equal(segunda.reusedFromRunId, primeira.runId);
+  // F5 (guarda de retrabalho): mesmos insumos e a mesma prévia = a MESMA execução, com o aviso; nenhuma linha nova (as 9 viram 1).
+  assert.equal(segunda.runId, primeira.runId);
+  assert.equal(journal.filter(r => r.subject_type === "article_improvement_run").length, 1);
+  assert.equal(segunda.rework?.verdict, "same_inputs_reuse");
+  assert.equal(segunda.rework?.previous?.resultRef, primeira.runId);
+  assert.match(segunda.rework?.message ?? "", /^Já feito com os mesmos insumos em \d\d\/\d\d às \d\d:\d\d — \d+ alvo\(s\), IA leu a lista/);
   assert.equal(segunda.editorialAi?.status, "answered");
   assert.deepEqual(segunda.proposals.map(p => [p.targetId, p.status, p.evidenceBasis]), primeira.proposals.map(p => [p.targetId, p.status, p.evidenceBasis]));
-  assert.ok(segunda.notices.some(n => /reaproveitei a leitura da IA/.test(n)), JSON.stringify(segunda.notices));
   assert.equal(legacyAsked.length, medidasAntes, "as medições também não são repetidas");
 });
 
@@ -624,4 +632,102 @@ test("2026-10-12 · registro de uso que falha não derruba a preparação e fica
   assert.equal(run.state, "prepared");
   assert.equal(run.editorialAi?.status, "answered");
   assert.equal(run.notices.filter(n => /registro de uso de uma chamada desta preparação não foi confirmado/.test(n)).length, 1);
+});
+
+/*
+ * F5 · GUARDA DE RETRABALHO (SDD 2026-10-12 §10.3). O registro da melhoria é a
+ * própria execução (`inputsHash`): "Refazer mesmo assim" só com motivo; a busca
+ * já feita com os mesmos insumos não se repete; o Assunto com lista da
+ * Pesquisa por Assunto do Minerador não entra na busca nova.
+ */
+test("F5 · Refazer mesmo assim (com motivo): a IA é chamada de novo e a execução nova diz o motivo", async () => {
+  setup(); listCandidate();
+  const { prompts, runtime: comIa } = aiRuntime(async () => aiPick);
+  const primeira = await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  const refeita = await handleArticleImprovement(comIa, { brandId, action: "prepare", reworkOverride: { reason: "quero outra leitura da IA" } });
+  assert.equal(prompts.length, 2, "com motivo, a IA é chamada de novo");
+  assert.notEqual(refeita.runId, primeira.runId);
+  assert.equal(refeita.reusedFromRunId, null);
+  assert.equal(refeita.reworkOverride?.reason, "quero outra leitura da IA");
+  assert.equal(refeita.rework?.verdict, "same_inputs_reuse");
+  assert.ok(refeita.notices.some(n => /Refeito com os mesmos insumos .* por pedido \(“quero outra leitura da IA”\)/.test(n)), JSON.stringify(refeita.notices));
+});
+
+test("F5 · a busca nova no Google Ads já feita com os mesmos insumos não é repetida", async () => {
+  setup(); external = true; rows = rows.slice(0, 1);
+  const logic = deriveLogicalKeywordBatchItem({ id: oldId, keyword: discoveredPhrase, location: null, intent: null, analise_semantica: {} }, null, new Date().toISOString());
+  rows[0].analise_semantica = logic.update.analise_semantica; rows[0].canonicalWorkflow.payload.approvedDna.analiseSemantica = logic.update.analise_semantica; rows[0].canonicalWorkflow.payload.semanticQualification = {};
+  await handleArticleImprovement(runtime, { brandId, action: "prepare" });
+  const comPedido = await handleArticleImprovement(runtime, { brandId, action: "prepare", discover: true });
+  assert.equal(events.filter(e => e === "busca").length, 1);
+  const deNovo = await handleArticleImprovement(runtime, { brandId, action: "prepare", discover: true });
+  assert.equal(events.filter(e => e === "busca").length, 1, "nenhuma chamada nova de ideias de keywords");
+  assert.equal(deNovo.runId, comPedido.runId, "a mesma execução volta, com o aviso");
+  assert.equal(deNovo.rework?.verdict, "same_inputs_reuse");
+});
+
+test("F5 · Assunto com lista da Pesquisa por Assunto do Minerador não entra na busca nova (as sustentações saem da lista)", async () => {
+  setup(); external = false;
+  const subject = linhaDaMesa({ id: oldId, keyword: "Como transformar interesse em agendamento na clínica", brandId, semantic: { ...semantic, ...declarado("Apresentar os serviços e conduzir os contatos para a agenda.") } });
+  rows[0] = { ...rows[0], ...subject, isPublished: false, publishedUrl: undefined }; rows[0].canonicalWorkflow.lockVersion = 1;
+  // A sustentação que a Pesquisa por Assunto trouxe para ele, ainda sem volume: o Assunto fica sem proposta.
+  rows[1] = { ...rows[1], volume_search: null, volume_source: null, analise_semantica: { ...semantic, subject_discovery: { version: 1, searches: [], subjectKeywordIds: [oldId] } } };
+  const run = await handleArticleImprovement(runtime, { brandId, action: "prepare", discover: true });
+  assert.equal(run.targets[0].kind, "subject");
+  assert.ok(!events.includes("busca"), "nenhuma busca nova para o Assunto com lista");
+  assert.deepEqual(run.discovery?.gapTargetIds, [], "o Assunto com lista não conta como alvo da busca");
+  assert.notEqual(run.proposals[0].status, "ready", "o Assunto ficou sem proposta: sem a guarda, ele seria alvo da busca");
+  assert.ok(run.notices.some(n => /Assunto\(s\) com lista da Pesquisa por Assunto do Minerador não entram na busca nova/.test(n)), JSON.stringify(run.notices));
+});
+
+/*
+ * D2(a) NO "GRAVAR MELHORIAS" (backlog do Arquiteto, SDD 2026-10-12 §17): o
+ * Assunto do plano declarado com a principal declarada SEM volume e SEM SERP
+ * no cache. O parecer vem das sustentações (sem pagar) e o ArticleDNA nasce com
+ * a principal declarada, o papel e o escopo do plano e a proveniência em
+ * `serpStrategy.rationale`. Sem o parecer pelas sustentações, recusa e aponta
+ * a D2(b) — nada é gravado.
+ */
+const declaredId = "aaaaaaaa-0000-4000-8000-00000000000d";
+const planGroupId = "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b";
+function declaredPlanScenario() {
+  setup();
+  const plan = { groupId: planGroupId, planVersion: 1, order: 3, role: "Suporte", scope: "Compara as três operadoras para o CEP da pessoa, sem prometer preço.", declaredPrincipal: { keywordId: declaredId, phrase: "Claro Vivo ou TIM internet" } };
+  const subjectSemantic = { ...semantic, ...declarado("Comparar as operadoras."), keyword_subject: { declared: true, note: "Comparar as operadoras.", destinationUrl: null, destinationCheck: null, plan } };
+  const subject = linhaDaMesa({ id: oldId, keyword: "Claro, Vivo ou TIM: qual escolher", brandId, semantic: subjectSemantic });
+  rows[0] = { ...rows[0], ...subject, isPublished: false, publishedUrl: undefined }; rows[0].canonicalWorkflow.lockVersion = 1;
+  rows[1] = { ...rows[1], territoryRef: territory };
+  const principal = linhaDaMesa({ id: declaredId, keyword: "Claro Vivo ou TIM internet", brandId, semantic: { ...semantic, keyword_declared_principal: { subjectKeywordId: oldId, groupId: planGroupId, planVersion: 1 } } });
+  rows.push({ ...clone(rows[1]), ...principal, volume_search: null, volume_source: null, territoryRef: territory, keywordDnaRef: { entityId: declaredId, versionId: `${declaredId}:v1`, contentHash: `sha256:${"d".repeat(64)}` }, canonicalWorkflow: { ...(principal.canonicalWorkflow as object), id: `workflow-${declaredId}`, lockVersion: 1 } });
+}
+
+test("D2(a) · Gravar melhorias do Assunto do plano: principal declarada sem volume, parecer pelas sustentações, papel e escopo do plano no ArticleDNA", async () => {
+  declaredPlanScenario(); supportBasisPrincipal = declaredId;
+  const run = await prepare();
+  const proposta = run.proposals.find(p => p.targetId === oldId)!;
+  assert.equal(proposta.status, "ready", JSON.stringify(run.proposals));
+  assert.equal(proposta.principalId, declaredId, "a principal declarada é cabeceira fixa (D1-bis)");
+  assert.equal(paid, 0);
+  const result = await apply(run);
+  assert.equal(result.outcomes[0].status, "improved", JSON.stringify(result.outcomes));
+  assert.equal(paid, 0, "nada foi pago: o parecer veio das sustentações no cache (D2a)");
+  const dna = articles[0].payload;
+  assert.equal(dna.principalKeywordId, declaredId);
+  assert.equal(dna.subject.keywordId, oldId);
+  assert.equal(dna.hierarchy, "Suporte", "o papel do plano vira a hierarquia");
+  assert.equal(dna.promise, "Compara as três operadoras para o CEP da pessoa, sem prometer preço.", "o escopo do plano vira a promessa");
+  assert.ok(dna.serpStrategy.rationale.some((line: string) => line.startsWith("Parecer pelas sustentações")), JSON.stringify(dna.serpStrategy.rationale));
+});
+
+test("D2(a) · sem parecer pelas sustentações, Gravar melhorias recusa e aponta a D2(b); nada é gravado", async () => {
+  declaredPlanScenario(); supportBasisPrincipal = null; noSerpPrincipal = declaredId;
+  const run = await prepare();
+  const proposta = run.proposals.find(p => p.targetId === oldId)!;
+  // Sem parecer, a linha não fica pronta: a principal declarada continua fixa e o motivo é dito (a saída é a D2(b), paga, por clique).
+  assert.equal(proposta.status, "insufficient_evidence", JSON.stringify(run.proposals));
+  assert.equal(proposta.principalId, declaredId);
+  assert.ok(proposta.reasons.includes("sem parecer da SERP"), JSON.stringify(proposta.reasons));
+  await assert.rejects(() => handleArticleImprovement(runtime, { brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash, targetIds: [oldId] }), /prontas/);
+  assert.equal(articles.length, 0, "nenhum ArticleDNA sem parecer");
+  assert.equal(paid, 0);
 });

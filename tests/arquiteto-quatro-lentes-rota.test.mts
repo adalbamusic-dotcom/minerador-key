@@ -287,7 +287,8 @@ test("A6 · `plan` não chama o provider, não resolve credencial, não registra
   assert.deepEqual(usos, []);
   assert.deepEqual(gravados, []);
   // Só `meta` foi lido do cache — nenhum corpo, nenhum digest.
-  const leiturasDoCache = banco.consultas.filter(consulta => consulta.tabela === "editorial_workflow_items");
+  // F5 — a guarda de retrabalho lê a linha dela (operation_ledger) antes do plano pago; o cache continua só em meta.
+  const leiturasDoCache = banco.consultas.filter(consulta => consulta.tabela === "editorial_workflow_items" && !consulta.filtros.some(filtro => filtro.coluna === "subject_type" && filtro.valor === "operation_ledger"));
   assert.ok(leiturasDoCache.length > 0);
   assert.ok(leiturasDoCache.every(consulta => consulta.colunas === "subject_id,meta:payload->meta"));
 });
@@ -475,7 +476,8 @@ test("A6/A3 · paga EXATAMENTE as lentes que faltam, sem corpo nas extras, com a
   assert.deepEqual(pedidosAoProvider.map(pedido => pedido.os).sort(), ["android", "android", "ios", "ios"]);
   assert.equal(corpo.data.paidQueries, 4);
   // As extras pagas gravam meta, observação e digest — nunca o corpo.
-  const extras = banco.linhas("editorial_workflow_items").filter(linha => (linha.payload as { meta: { lens: { device: string } } }).meta.lens.device === "mobile");
+  // F5 — a linha da guarda (operation_ledger) não é cache: fica de fora desta contagem.
+  const extras = banco.linhas("editorial_workflow_items").filter(linha => linha.subject_type !== "operation_ledger" && (linha.payload as { meta: { lens: { device: string } } }).meta.lens.device === "mobile");
   assert.equal(extras.length, 4);
   assert.ok(extras.every(linha => !("body" in (linha.payload as object)) && "digest" in (linha.payload as object)));
   // O uso de cada lente paga, com a lente na chave: nada registrado por acerto.
@@ -983,4 +985,103 @@ test("correção A3 · PATCH: a edição genérica passa pela trava da primária
   const inexistente = await patchWorkspace({ territoryUpdates: [{ territoryRef: "territory:88888888-8888-4888-8888-888888888888", expectedLock: 1, territory: { name: "x" } }] });
   assert.equal(inexistente.status, 409);
   assert.equal(territoriosGravados.length, 1);
+});
+
+/* ------------- D2(a): parecer pelas sustentações (SDD 2026-10-12 §17) ------------- */
+
+const KW_DECLARADA = "55555555-5555-4555-8555-555555555555";
+const KW_SUST_MAIOR = "66666666-6666-4666-8666-666666666666";
+const KW_SUST_MENOR = "77777777-7777-4777-8777-777777777777";
+const MARCA_DECLARADA = { subjectKeywordId: "88888888-8888-4888-8888-888888888888", groupId: "99999999-9999-4999-8999-999999999999", planVersion: 1 };
+const comVolume = (id: string, texto: string, volume: number | null, extraSemantica: Record<string, unknown> = {}) => {
+  const base = keyword(id, texto);
+  return { ...base, volume_search: volume, analise_semantica: { ...base.analise_semantica, ...extraSemantica } };
+};
+const grupoDeclarado = (comMarca = true) => ({
+  ...grupo,
+  id: "artigo-declarado",
+  keywordIds: [KW_DECLARADA, KW_SUST_MENOR, KW_SUST_MAIOR],
+  keywords: [
+    comVolume(KW_DECLARADA, "claro vivo ou tim internet", null, comMarca ? { keyword_declared_principal: MARCA_DECLARADA } : {}),
+    comVolume(KW_SUST_MENOR, "claro ou vivo", 90),
+    comVolume(KW_SUST_MAIOR, "vivo ou claro internet", 320),
+  ],
+  principalSuggestion: { ...grupo.principalSuggestion, keywordId: KW_DECLARADA },
+  roles: { [KW_DECLARADA]: "principal", [KW_SUST_MENOR]: "secundaria", [KW_SUST_MAIOR]: "secundaria" },
+});
+const semearSustentacoes = async () => {
+  for (const [texto, id] of [["claro ou vivo", KW_SUST_MENOR], ["vivo ou claro internet", KW_SUST_MAIOR]] as const) {
+    for (let lente = 0; lente < 4; lente += 1) await semear(texto, id, lente);
+  }
+  pedidosAoProvider.length = 0;
+};
+const somenteCache = { mode: "execute", cacheOnly: true, authorizedPaidQueries: 0, payMissingExtraLenses: false, formationBaseHashes: { "artigo-declarado": "base-1" } };
+
+test("D2(a) · principal declarada sem volume e sem SERP: o parecer vem das sustentações, nas 4 lentes, sem pagar, com a proveniência", async () => {
+  recomecar();
+  await semearSustentacoes();
+  const { status, corpo } = await chamar({ ...somenteCache, groups: [grupoDeclarado()] });
+  assert.equal(status, 200, JSON.stringify(corpo).slice(0, 600));
+  assert.deepEqual(pedidosAoProvider, [], "nenhuma coleta nova");
+  assert.deepEqual(usos, []);
+  assert.equal(resolucoes, 0);
+  assert.equal(corpo.data.failures.length, 0);
+  const assessment = corpo.data.assessments[0];
+  assert.equal(assessment.supportBasis.kind, "declared_principal_supports");
+  assert.equal(assessment.supportBasis.principalKeywordId, KW_DECLARADA);
+  assert.equal(assessment.supportBasis.anchorKeywordId, KW_SUST_MAIOR, "a referência dos pares é a sustentação de maior volume");
+  assert.deepEqual(assessment.supportBasis.supportKeywordIds, [KW_SUST_MAIOR, KW_SUST_MENOR]);
+  assert.match(assessment.supportBasis.reason, /^Parecer pelas sustentações: “vivo ou claro internet”, “claro ou vivo”/);
+  assert.ok(!assessment.queriedKeywordDnaIds.includes(KW_DECLARADA), "a principal declarada não é consultada");
+  // A composição observada reconhece a principal declarada e responde pela composição inteira.
+  const { serpAssessmentComposition, serpCompositionMismatch } = await import("../lib/arquiteto/published-formation-serp.ts");
+  const lentes = gravados[0].interpretation?.lenses as { observed: string[]; missing: unknown[] };
+  assert.deepEqual(lentes.observed, ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"]);
+  assert.deepEqual(lentes.missing, []);
+  const composicao = serpAssessmentComposition(assessment, lentes);
+  assert.equal(composicao?.principalKeywordId, KW_DECLARADA);
+  assert.equal(serpCompositionMismatch(composicao, { keywordIds: [KW_DECLARADA, KW_SUST_MENOR, KW_SUST_MAIOR], principalKeywordId: KW_DECLARADA }), null);
+  // O parecer fala da principal declarada e diz de onde veio; a declarada fica entre as não observadas, com o motivo.
+  const interpretacao = gravados[0].interpretation as { principalVerdict: string; principalReason: string; groupReason: string; notObserved: Array<{ keywordId: string; reason: string }> };
+  assert.equal(interpretacao.principalVerdict, "PRINCIPAL_SUPPORTED");
+  assert.match(interpretacao.principalReason, /Principal declarada no plano \(D1-bis\)/);
+  assert.match(interpretacao.principalReason, /Parecer pelas sustentações/);
+  assert.match(interpretacao.groupReason, /referência dos pares: “vivo ou claro internet”/);
+  assert.ok(interpretacao.notObserved.some(item => item.keywordId === KW_DECLARADA && /D2a/.test(item.reason)));
+  assert.equal(gravados[0].verdict, "COMPATIBLE", "o mesmo corpo nas duas sustentações: convergem nas 4 lentes");
+});
+
+test("D2(a) · sem a marca de principal declarada, vale a regra de sempre: sem a SERP da principal, sem parecer e sem custo", async () => {
+  recomecar();
+  await semearSustentacoes();
+  const { status, corpo } = await chamar({ ...somenteCache, groups: [grupoDeclarado(false)] });
+  assert.equal(status, 200, JSON.stringify(corpo).slice(0, 600));
+  assert.equal(corpo.data.assessments.length, 0);
+  assert.equal(corpo.data.failures.length, 1);
+  assert.match(corpo.data.failures[0].message, /não está no cache/);
+  assert.deepEqual(pedidosAoProvider, []);
+  assert.deepEqual(gravados, []);
+});
+
+test("D2(a) · nenhuma sustentação com as 4 lentes no cache: nada de parecer, nada pago", async () => {
+  recomecar();
+  // Só a canônica de uma sustentação: falta lente, não serve de base.
+  await semear("vivo ou claro internet", KW_SUST_MAIOR, 0);
+  pedidosAoProvider.length = 0;
+  const { status, corpo } = await chamar({ ...somenteCache, groups: [grupoDeclarado()] });
+  assert.equal(status, 200, JSON.stringify(corpo).slice(0, 600));
+  assert.equal(corpo.data.assessments.length, 0);
+  assert.equal(corpo.data.failures.length, 1);
+  assert.deepEqual(pedidosAoProvider, []);
+  assert.deepEqual(usos, []);
+});
+
+test("D2(b) continua opcional: o plano pago ainda conta as 4 lentes da principal declarada", async () => {
+  recomecar();
+  await semearSustentacoes();
+  const { status, corpo } = await chamar({ mode: "plan", groups: [grupoDeclarado()], formationBaseHashes: { "artigo-declarado": "base-1" } });
+  assert.equal(status, 200);
+  assert.equal(corpo.data.plan.paidQueries, 4, "só as 4 lentes da principal declarada; as sustentações estão no cache");
+  assert.ok(corpo.data.plan.missingDetails.every((item: { keyword: string }) => item.keyword === "claro vivo ou tim internet"));
+  assert.deepEqual(pedidosAoProvider, []);
 });

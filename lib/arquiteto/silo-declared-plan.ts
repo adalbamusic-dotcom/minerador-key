@@ -104,6 +104,10 @@ export function declaredSubjectAuthorship(row: Record<string, unknown>): { decla
  * Assunto como principal; o Assunto como membro. Dois candidatos pelo mesmo
  * critério = ambíguo, e ambíguo não é plano.
  */
+export function declaredPlanEntryForUnit(unit: DeclaredSiloPlanUnit, entries: readonly DeclaredSiloPlanEntry[]): DeclaredSiloPlanEntry | null {
+  return entryFor(unit, entries);
+}
+
 function entryFor(unit: DeclaredSiloPlanUnit, entries: readonly DeclaredSiloPlanEntry[]): DeclaredSiloPlanEntry | null {
   const unico = (lista: DeclaredSiloPlanEntry[]) => (lista.length === 1 ? lista[0] : null);
   const assunto = text(unit.subjectKeywordId);
