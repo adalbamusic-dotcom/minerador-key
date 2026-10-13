@@ -2099,3 +2099,8 @@ Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-
 - [x] `test:agent` 44/44 e `test:minerador:dom` 4/4 passaram; TypeScript passou.
 - [ ] Medição de Volume/Resultados/KGR continua como ação da tela até compartilhar
   a execução, orçamento e readback com o servidor MCP. Nenhum provider foi chamado.
+
+## 2026-10-13 · Porta única do plano
+
+- [ ] Dono: excluir pela tela as 36 linhas soltas do plano do Silo 2 que entraram na Descoberta da WifiConecta antes da portaria.
+- [ ] Teste DOM de ponta a ponta do card "Cadastrar Assuntos" (colar no nome → linhas preenchidas → prévia).

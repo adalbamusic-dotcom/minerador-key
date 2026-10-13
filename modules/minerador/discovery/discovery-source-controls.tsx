@@ -7,6 +7,7 @@ import type { DiscoveryCandidate } from "@/lib/minerador/discovery-keywords";
 import { normalizeDiscoverySourceEntries, parseDiscoveryCsvRows, parseManualKeywords, parseManualSubjects, type DiscoverySourceEntryInput } from "@/lib/minerador/discovery-sources";
 import type { SubjectImportClassification, SubjectImportCounts, SubjectImportOutcome, SubjectImportRow } from "@/lib/minerador/keyword-import-core";
 import { useNoticeBridge } from "@/components/global-notice-center";
+import { looksLikeSiloPlanText, SILO_PLAN_IN_KEYWORD_ENTRY_MESSAGE } from "@/lib/minerador/plan-text-detector";
 
 type SourceKind = "manual" | "csv";
 /** "Esta lista é" (SDD 2026-09-24, F1.3). Só existe com `subjectEntry`. */
@@ -145,7 +146,10 @@ export const DiscoverySourceControls = forwardRef<DiscoverySourceControlsHandle,
   subjectEntry?: boolean;
   /** Chamado depois de aplicar um import de Assuntos, com o que foi criado e o que foi declarado. */
   onSubjectsImported?: (result: { createdIds: string[]; declaredIds: string[] }) => void;
-}>(function DiscoverySourceControls({ brandRef, preliminaryIntent, preliminaryFunnel, onComplete, subjectEntry, onSubjectsImported }, ref) {
+  /** 2026-10-13 · texto de plano de Silo colado aqui não vira keyword: abre "Cadastrar Assuntos" com ele. */
+  onPlanText?: (text: string) => void;
+}>(function DiscoverySourceControls({ brandRef, preliminaryIntent, preliminaryFunnel, onComplete, subjectEntry, onSubjectsImported, onPlanText }, ref) {
+  const [planText, setPlanText] = useState("");
   const [open, setOpen] = useState<SourceKind | null>(null);
   const [entryKind, setEntryKind] = useState<EntryKind>("subject");
   const [csvRows, setCsvRows] = useState<unknown[][] | null>(null);
@@ -180,7 +184,7 @@ export const DiscoverySourceControls = forwardRef<DiscoverySourceControlsHandle,
   }, [brandRef, lists.length, open]);
 
   const resetSubject = () => { setSubjectPreview(null); setSubjectSelected(new Set()); setSubjectResult(null); };
-  const close = () => { if (!submitting) { setOpen(null); setError(""); resetSubject(); } };
+  const close = () => { if (!submitting) { setOpen(null); setError(""); setPlanText(""); resetSubject(); } };
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -213,6 +217,10 @@ export const DiscoverySourceControls = forwardRef<DiscoverySourceControlsHandle,
     openCsv: () => openSource("csv"),
   }), [openSource]);
   const postSource = async (source: SourceKind, entries: DiscoverySourceEntryInput[]) => {
+    // Plano de Silo não é lista de keywords: nada vai para a Descoberta.
+    const bruto = source === "manual" ? manualText : (csvRows || []).map(row => (Array.isArray(row) ? row : [row]).map(cell => String(cell ?? "")).join(" ")).join("\n");
+    if (looksLikeSiloPlanText(bruto)) { setError(""); setPlanText(bruto); return; }
+    setPlanText("");
     if (!entries.length) { setError(source === "manual" ? "Cole pelo menos uma keyword." : "O CSV não contém keywords reconhecidas."); return; }
     setSubmitting(true); setError("");
     try {
@@ -429,6 +437,10 @@ export const DiscoverySourceControls = forwardRef<DiscoverySourceControlsHandle,
             </div>
           </div>}
           {error && <p className="rounded border border-danger/45 bg-danger-soft px-3 py-2 text-sm leading-6 text-danger" role="alert">{error}</p>}
+          {planText ? <div className="flex flex-col gap-2 rounded border border-warning/45 bg-warning-soft px-3 py-2" role="alert" data-discovery-plan-text-refused>
+            <p className="text-sm leading-6 text-foreground">{SILO_PLAN_IN_KEYWORD_ENTRY_MESSAGE}</p>
+            {onPlanText ? <button type="button" className={`${primaryButton} w-full sm:w-auto sm:self-end`} onClick={() => { const texto = planText; setPlanText(""); setOpen(null); setManualText(""); setCsvPreview(null); setFileName(""); onPlanText(texto); }}>Abrir em Cadastrar Assuntos</button> : null}
+          </div> : null}
         </div>
       </section>
     </div>}

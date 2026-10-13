@@ -123,9 +123,8 @@ import { KeywordTableDragHandle, KeywordTableOrderModeSelect } from "./keyword-t
 import { useKeywordTableOrder } from "./keyword-table/use-keyword-table-order";
 import { KeywordTableColumnResizeHandle, KeywordTableRowResizeHandle, useKeywordTableColumnResize, useKeywordTableRowResize } from "./keyword-table/keyword-table-resize";
 import { MineradorProcessAction } from "./minerador-process-action";
-import { DiscoverySourceControls, type DiscoverySourceControlsHandle, type DiscoverySourceResponse } from "./discovery/discovery-source-controls";
-import { DiscoverySourceTopbarActions } from "./discovery/discovery-source-topbar-actions";
 import { SubjectCadastroButton, SubjectCadastroCard, type DeclaredPlanAppliedIds } from "./subject-cadastro-card";
+import { SUBJECT_CADASTRO_URL_PARAM, takeSubjectCadastroText } from "./subject-cadastro-handoff";
 import { subjectSearchLinkHref } from "./discovery/subject-search-model";
 import {
   createAuthenticatedBrowserClient,
@@ -559,7 +558,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   // nunca substituí-la silenciosamente. F5 descarta a tentativa e mantém vN.
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const discoverySourceControlsRef = useRef<DiscoverySourceControlsHandle>(null);
   const fetchDataInFlightRef = useRef<string | null>(null);
   const fetchDataLoadedKeyRef = useRef<string | null>(null);
   const fetchDataActiveKeyRef = useRef<string | null>(null);
@@ -1066,16 +1064,33 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     clearProcessAttempt(ids.filter(id => !confirmed.has(id) && !failedSet.has(id)), step);
   };
 
-  const handleDiscoverySourceComplete = useCallback((payload: DiscoverySourceResponse) => {
-    const count = payload.summary.approved;
-    showNotification("success", `${count} keyword(s) ${count === 1 ? "adicionada" : "adicionadas"} à Descoberta. Abra Descobrir Keywords para revisar.`);
-  }, [showNotification]);
   // "Cadastrar Assuntos" (SDD 2026-10-13, cadastro único) fica junto das entradas de import; sem os grupos (409), some.
   const [planImportOpen, setPlanImportOpen] = useState(false);
+  // 2026-10-13 · texto de plano que chegou pela porta errada (colar/CSV) ou pelo Descobrir (`?cadastrar=1`).
+  const [planInitialText, setPlanInitialText] = useState("");
+  const abrirCadastroDeAssuntos = useCallback((texto = "") => {
+    if (!keywordGroups.available) {
+      showNotification("error", "Cadastrar Assuntos precisa dos grupos por cor, que ainda não estão disponíveis nesta marca.");
+      return;
+    }
+    setPlanInitialText(texto);
+    setPlanImportOpen(true);
+  }, [keywordGroups.available, showNotification]);
+  // 2026-10-13 · pedido do dono: no Processador só fica "Cadastrar Assuntos". Colar keywords e
+  // Importar CSV levam à Descoberta e moram só no Descobrir (lá recusam texto de plano).
   const discoverySourceActions = useMemo(() => <>
-    <DiscoverySourceTopbarActions onManual={() => discoverySourceControlsRef.current?.openManual()} onCsv={() => discoverySourceControlsRef.current?.openCsv()} />
-    {keywordGroups.available ? <SubjectCadastroButton onClick={() => setPlanImportOpen(true)} /> : null}
-  </>, [keywordGroups.available]);
+    {keywordGroups.available ? <SubjectCadastroButton onClick={() => abrirCadastroDeAssuntos()} /> : null}
+  </>, [keywordGroups.available, abrirCadastroDeAssuntos]);
+  // Chegou do Descobrir com `?cadastrar=1`: abre o card (com o texto deixado lá, se houver) e limpa o parâmetro da URL.
+  useEffect(() => {
+    if (!keywordGroups.available || !selectedBrandId || typeof window === "undefined") return;
+    let url: URL;
+    try { url = new URL(window.location.href); } catch { return; }
+    if (url.searchParams.get(SUBJECT_CADASTRO_URL_PARAM) !== "1") return;
+    url.searchParams.delete(SUBJECT_CADASTRO_URL_PARAM);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    abrirCadastroDeAssuntos(takeSubjectCadastroText(selectedBrandId));
+  }, [keywordGroups.available, selectedBrandId, abrirCadastroDeAssuntos]);
 
   const pushKeywordsHistory = (snapshot = keywords, label = "Alteração na planilha de keywords") => keywordHistory.capture(label, snapshot);
 
@@ -3975,10 +3990,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       <HistoryControls moduleId="minerador" showHistory={false} showUndoRedo={false} entries={keywordHistory.entries} canUndo={keywordHistory.canUndo} canRedo={keywordHistory.canRedo}
         onUndo={undoKeywords} onRedo={redoKeywords} onRestore={keywordHistory.restore} compact presentation="popover"/>
       {/* 2026-10-13 · cadastro único (SDD sdd-cadastro-assunto-na-keyword): o
-          colar/CSV do Processador é só de keyword; o Assunto entra pelo card
-          "Cadastrar Assuntos", dentro da keyword. Sem `subjectEntry`. */}
-      <DiscoverySourceControls ref={discoverySourceControlsRef} brandRef={brandRef} preliminaryIntent="Informativa" preliminaryFunnel="TOFU" onComplete={handleDiscoverySourceComplete} />
-      {planImportOpen && selectedBrandId && keywordGroups.available ? <SubjectCadastroCard key={selectedBrandId} brandId={selectedBrandId} groups={keywordGroups.activeGroups} onClose={() => setPlanImportOpen(false)} onApplied={applied => void handleDeclaredPlanApplied(applied)} onUnavailable={() => { setPlanImportOpen(false); keywordGroups.markUnavailable(); }} /> : null}
+          Processador tem uma porta só, o card "Cadastrar Assuntos"; o Assunto
+          entra dentro da keyword. Colar/CSV de keyword ficam no Descobrir. */}
+      {planImportOpen && selectedBrandId && keywordGroups.available ? <SubjectCadastroCard key={selectedBrandId} brandId={selectedBrandId} groups={keywordGroups.activeGroups} initialText={planInitialText} onClose={() => { setPlanImportOpen(false); setPlanInitialText(""); }} onApplied={applied => void handleDeclaredPlanApplied(applied)} onUnavailable={() => { setPlanImportOpen(false); keywordGroups.markUnavailable(); }} /> : null}
 
       {/* Blocos opcionais acima da planilha (Organizar, prévia do Site,
           conferência manual, recuperação): juntos têm um teto e rolam por

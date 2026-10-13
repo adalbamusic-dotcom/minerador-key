@@ -78,7 +78,7 @@ test("o card tem cor, destino (Silo novo, Silo existente, artigo publicado) e, p
   assert.match(CARD, /new_silo: "Silo novo", existing_silo: "Silo existente", published: "Artigo publicado"/);
   assert.match(CARD, /auto: "Automática \(pelo volume\)", locked: "Travada", free: "Livre"/);
   for (const coluna of ["Assunto (título)", "Keyword", "Detalhes", "Papel", "Trava"]) assert.ok(CARD.includes(`>${coluna}</th>`), coluna);
-  assert.match(CARD, /parseDeclaredPlanText\(colado\)/, "colar o plano em texto preenche as linhas");
+  assert.match(CARD, /const preencherDoTexto = \(texto: string = colado\) => \{[\s\S]*?parseDeclaredPlanText\(texto\)/, "colar o plano em texto preenche as linhas");
   assert.match(CARD, /method: "GET", groupId/, "Silo existente lê as linhas gravadas (leitura compatível)");
   assert.match(CARD, /linhaVazia\(1, "Pilar"\)/, "no Silo novo a primeira linha nasce Pilar");
   assert.match(CARD, /maxLength=\{DECLARED_PLAN_SCOPE_MAX\}/);
@@ -93,12 +93,13 @@ test("GROUPS_NOT_AVAILABLE esconde o recurso", () => {
 test("o botão \"Cadastrar Assuntos\" é a única porta: o diálogo antigo saiu e o Processador não declara Assunto", () => {
   assert.match(CARD, /aria-label="Cadastrar Assuntos"/);
   const acoes = trecho(TELA, "const discoverySourceActions = useMemo(", "]);");
-  assert.match(acoes, /keywordGroups\.available \? <SubjectCadastroButton onClick=\{\(\) => setPlanImportOpen\(true\)\} \/> : null/);
+  assert.match(acoes, /keywordGroups\.available \? <SubjectCadastroButton onClick=\{\(\) => abrirCadastroDeAssuntos\(\)\} \/> : null/);
+  assert.match(trecho(TELA, "const abrirCadastroDeAssuntos = useCallback(", "}, ["), /setPlanImportOpen\(true\)/);
   assert.match(TELA, /<SubjectCadastroCard key=\{selectedBrandId\} brandId=\{selectedBrandId\} groups=\{keywordGroups\.activeGroups\}/);
   assert.equal(existsSync(join(ROOT, "modules/minerador/declared-plan-import-dialog.tsx")), false, "o diálogo \"Importar plano do Silo\" saiu");
   assert.doesNotMatch(TELA, /DeclaredPlanImportDialog|DeclaredPlanImportButton/);
-  const fonte = trecho(TELA, "<DiscoverySourceControls ", "/>");
-  assert.doesNotMatch(fonte, /subjectEntry/, "o colar/CSV do Processador é só de keyword");
+  // 2026-10-13 · pedido do dono: o Processador não tem mais colar/CSV de keyword (moram no Descobrir).
+  assert.doesNotMatch(TELA, /<DiscoverySourceControls\b/, "o Processador tem uma porta só, o card");
   const releitura = trecho(TELA, "const handleDeclaredPlanApplied = async", "const loadRecoverableKeywords");
   assert.match(releitura, /await handleSubjectsImported\(/);
   assert.doesNotMatch(releitura, /\.update\(|\.insert\(|\.upsert\(/, "a tela não grava: só relê");

@@ -1,0 +1,25 @@
+Silo 2 — Wi-Fi, fibra óptica e qualidade da internet
+Nome: Wi-Fi e fibra óptica
+Slug: /wifi-e-fibra/
+Objetivo: conquistar tráfego de pessoas que querem entender a tecnologia, melhorar a conexão ou descobrir se precisam trocar de plano.
+9. Internet fibra óptica ou internet comum: qual a diferença e qual escolher?
+Artigo pilar • Palavra-chave: internet fibra óptica
+Explicar tecnologias de acesso, vantagens, limitações e o que observar na contratação.
+10. Qual a diferença entre internet e Wi-Fi? Entenda antes de contratar
+Palavra-chave: diferença entre internet e Wi-Fi
+Esclarecer a diferença entre a conexão da operadora e a rede sem fio dentro de casa.
+11. Wi-Fi lento em casa: 10 causas comuns e como melhorar a conexão
+Palavra-chave: Wi-Fi lento
+Abordar posicionamento do roteador, interferência, aparelhos conectados e testes de velocidade.
+12. Quantos Mega de internet precisa para assistir Netflix, YouTube e streaming?
+Palavra-chave: internet para streaming
+Explicar consumo de banda por qualidade de vídeo e quantidade de telas simultâneas.
+13. Qual a melhor internet para jogar online? Velocidade, ping e estabilidade
+Palavra-chave: melhor internet para jogos online
+Mostrar por que latência, estabilidade e tipo de conexão importam além dos Mega contratados.
+14. Internet para home office: qual velocidade e conexão são ideais?
+Palavra-chave: internet para home office
+Abordar videochamadas, upload, estabilidade e uso simultâneo da rede pela família.
+15. Teste de velocidade da internet: como saber se você recebe o que contratou?
+Palavra-chave: teste de velocidade da internet
+Ensinar a testar a conexão, interpretar download, upload e ping e identificar possíveis problemas.
