@@ -245,14 +245,181 @@ export function resolveEditorialGroupFilter(input: {
   return { filter: { kind: "all" }, source: "default" };
 }
 
+/**
+ * 2026-10-12 · CORES FIXAS (adendo do §9.1): na TELA, uma cor escolhida no
+ * seletor vira o recorte de TODOS os grupos ATIVOS daquela cor (`groups`). Daqui
+ * em diante há um grupo por cor por marca (`ensureEditorialGroupForColor`), mas
+ * um legado com duas etiquetas da mesma cor continua aparecendo inteiro.
+ * `color: null` com `groupIds: []` = "ainda decidindo" (não mostra nada).
+ * Só cliente: as rotas de leitura continuam com `EditorialGroupFilter`.
+ */
+export type EditorialGroupScreenFilter =
+  | EditorialGroupFilter
+  | { kind: "groups"; color: EditorialGroupColor | null; groupIds: readonly string[] };
+
 /** A linha pertence ao recorte ativo? */
-export function editorialGroupFilterMatches(filter: EditorialGroupFilter, groupId: string | null | undefined): boolean {
+export function editorialGroupFilterMatches(filter: EditorialGroupScreenFilter, groupId: string | null | undefined): boolean {
   if (filter.kind === "all") return true;
   if (filter.kind === "none") return !groupId;
+  if (filter.kind === "groups") return Boolean(groupId) && filter.groupIds.includes(groupId as string);
   return groupId === filter.groupId;
 }
 
-/** Chave da lembrança local por marca (D12). Nunca é fonte de verdade. */
+/* ------------------- cores fixas: escolha por área (D12) ------------------- */
+
+/**
+ * As áreas que mostram a etiqueta de grupo na topbar global. Cada uma lembra a
+ * SUA escolha (pedido do dono, 2026-10-12: "tem que funcionar de forma
+ * independente em cada área"). F6 (2026-10-12): o Redator e Publicações
+ * entram — o documento e a publicação herdam o grupo pelo artigo, só leitura.
+ */
+export const EDITORIAL_GROUP_AREAS = ["minerador", "arquiteto", "radar", "redator", "publicacoes"] as const;
+export type EditorialGroupArea = (typeof EDITORIAL_GROUP_AREAS)[number];
+export const isEditorialGroupArea = (value: unknown): value is EditorialGroupArea =>
+  typeof value === "string" && (EDITORIAL_GROUP_AREAS as readonly string[]).includes(value);
+
+/** A escolha do seletor: uma das 5 cores, "todos" (padrão, cinza) ou "sem-grupo". */
+export type EditorialGroupChoice = "todos" | typeof EDITORIAL_GROUP_URL_NONE | EditorialGroupColor;
+export const EDITORIAL_GROUP_CHOICE_ALL = "todos" as const;
+
+/**
+ * Lê `?grupo=` (ou a lembrança): a cor, "todos", "sem-grupo" ou, por
+ * compatibilidade com os links de antes, o uuid de um grupo (`legacyGroupId`,
+ * resolvido pela cor quando a lista de grupos chega). Vazio ou inválido = null.
+ */
+export function parseEditorialGroupChoice(raw: string | null | undefined): EditorialGroupChoice | { legacyGroupId: string } | null {
+  const valor = (raw || "").trim().toLowerCase();
+  if (!valor) return null;
+  if (valor === EDITORIAL_GROUP_CHOICE_ALL) return EDITORIAL_GROUP_CHOICE_ALL;
+  if (valor === EDITORIAL_GROUP_URL_NONE) return EDITORIAL_GROUP_URL_NONE;
+  if (isEditorialGroupColor(valor)) return valor;
+  if (UUID.test(valor)) return { legacyGroupId: valor };
+  return null;
+}
+
+/** O uuid antigo vira a cor do grupo (ativo); grupo sumido ou arquivado = "todos" (D12). */
+export function editorialGroupChoiceFromLegacyId(groupId: string, groups: readonly Pick<EditorialGroupSummary, "id" | "color" | "status">[]): EditorialGroupChoice {
+  const grupo = groups.find(group => group.id === groupId.toLowerCase() && group.status === "active");
+  return grupo ? grupo.color : EDITORIAL_GROUP_CHOICE_ALL;
+}
+
+/** O valor de `?grupo=` para a escolha; "todos" tira o parâmetro. */
+export const serializeEditorialGroupChoice = (choice: EditorialGroupChoice): string | null =>
+  choice === EDITORIAL_GROUP_CHOICE_ALL ? null : choice;
+
+/** Os grupos ATIVOS de uma cor, o mais antigo primeiro quando a data existe. */
+export function activeEditorialGroupsOfColor<T extends Pick<EditorialGroupSummary, "color" | "status">>(groups: readonly T[], color: EditorialGroupColor): T[] {
+  return groups.filter(group => group.color === color && group.status === "active");
+}
+
+/**
+ * O recorte de TELA da escolha. `groups: null` = a lista de grupos desta
+ * marca ainda não chegou (nem do cache): uma cor ainda não sabe quais ids
+ * mostrar (`pending`), mas "todos" e "sem-grupo" já sabem — e por isso nunca
+ * esperam a leitura dos grupos.
+ */
+export function resolveEditorialGroupScreenFilter(
+  choice: EditorialGroupChoice,
+  groups: readonly Pick<EditorialGroupSummary, "id" | "color" | "status">[] | null,
+): { pending: true; filter: EditorialGroupScreenFilter } | { pending: false; filter: EditorialGroupScreenFilter } {
+  if (choice === EDITORIAL_GROUP_CHOICE_ALL) return { pending: false, filter: { kind: "all" } };
+  if (choice === EDITORIAL_GROUP_URL_NONE) return { pending: false, filter: { kind: "none" } };
+  if (!groups) return { pending: true, filter: { kind: "groups", color: choice, groupIds: [] } };
+  return { pending: false, filter: { kind: "groups", color: choice, groupIds: activeEditorialGroupsOfColor(groups, choice).map(group => group.id).sort() } };
+}
+
+/** Chave estável do recorte (entra na chave da carga do Minerador). */
+export function editorialGroupScreenFilterKey(filter: EditorialGroupScreenFilter): string {
+  if (filter.kind === "all") return "todos";
+  if (filter.kind === "none") return EDITORIAL_GROUP_URL_NONE;
+  if (filter.kind === "group") return filter.groupId;
+  return `${filter.color ?? "pendente"}:${[...filter.groupIds].sort().join(",")}`;
+}
+
+/** Depois de mover para `targetColor` (null = tirar do grupo), a linha continua na visão? */
+export function editorialGroupChoiceKeeps(choice: EditorialGroupChoice, targetColor: EditorialGroupColor | null): boolean {
+  if (choice === EDITORIAL_GROUP_CHOICE_ALL) return true;
+  if (choice === EDITORIAL_GROUP_URL_NONE) return targetColor === null;
+  return targetColor === choice;
+}
+
+/** Texto do botão (tooltip e `aria-label`): a cor nunca aparece sozinha (§5.0.2). */
+export function editorialGroupChoiceLabel(choice: EditorialGroupChoice): string {
+  if (choice === EDITORIAL_GROUP_CHOICE_ALL) return "Todos os grupos";
+  if (choice === EDITORIAL_GROUP_URL_NONE) return "Sem grupo";
+  return `Grupo: ${EDITORIAL_GROUP_COLOR_LABELS[choice]}`;
+}
+
+/**
+ * O nome próprio do grupo da cor, quando ele não é só o rótulo da cor (ex.: o
+ * nome de um plano de Silo). Mostrado discretamente ao lado da cor.
+ */
+export function editorialGroupCustomName(color: EditorialGroupColor, groups: readonly Pick<EditorialGroupSummary, "color" | "status" | "name">[]): string | null {
+  const nomes = [...new Set(activeEditorialGroupsOfColor(groups, color).map(group => group.name.replace(/\s+/g, " ").trim()))]
+    .filter(nome => editorialGroupNameKey(nome) !== editorialGroupNameKey(EDITORIAL_GROUP_COLOR_LABELS[color]));
+  return nomes.length ? nomes.join(" · ") : null;
+}
+
+/**
+ * O nome do grupo novo de uma cor: o rótulo da cor ("Laranja"); se outro grupo
+ * ATIVO já usa esse nome (em outra cor), "Laranja 2", "Laranja 3"…
+ */
+export function editorialGroupNameForColor(color: EditorialGroupColor, activeGroups: readonly { name: string }[]): string {
+  const usados = new Set(activeGroups.map(group => editorialGroupNameKey(group.name)));
+  const base = EDITORIAL_GROUP_COLOR_LABELS[color];
+  if (!usados.has(editorialGroupNameKey(base))) return base;
+  for (let n = 2; n < 1000; n += 1) {
+    const nome = `${base} ${n}`;
+    if (!usados.has(editorialGroupNameKey(nome))) return nome;
+  }
+  return `${base} ${Date.now()}`;
+}
+
+/**
+ * Quem pode GARANTIR o grupo de uma cor (mover/etiquetar por cor): quem edita
+ * no Minerador (keywords), no Arquiteto ou no Radar (artigos), ou o admin global.
+ */
+export const EDITORIAL_GROUP_COLOR_ENSURERS = ["minerador", "arquiteto", "radar"] as const;
+export const canEnsureEditorialGroupColor = (context: { isGlobalAdmin?: boolean; permissions: readonly string[] }) =>
+  Boolean(context.isGlobalAdmin) || EDITORIAL_GROUP_COLOR_ENSURERS.some(module => context.permissions.includes(`${module}:edit`));
+
+/** Lembrança local da escolha, por marca E por área. Nunca é fonte de verdade. */
+export const editorialGroupAreaStorageKey = (brandId: string, area: EditorialGroupArea) => `minerador-key:grupo-ativo:${brandId}:${area}`;
+
+/** Cache de APRESENTAÇÃO da lista de grupos da marca (id, cor, nome, status). */
+export const editorialGroupsCacheStorageKey = (brandId: string) => `minerador-key:grupos:${brandId}`;
+
+export type EditorialGroupCacheEntry = Pick<EditorialGroupSummary, "id" | "color" | "name" | "status">;
+
+/** Lê o cache local; qualquer coisa fora do contrato é descartada (nunca lança). */
+export function parseEditorialGroupsCache(raw: string | null | undefined): EditorialGroupCacheEntry[] | null {
+  if (!raw) return null;
+  try {
+    const lido = JSON.parse(raw) as unknown;
+    if (!Array.isArray(lido)) return null;
+    const saida: EditorialGroupCacheEntry[] = [];
+    for (const item of lido) {
+      if (!item || typeof item !== "object") continue;
+      const r = item as Record<string, unknown>;
+      if (typeof r.id !== "string" || !UUID.test(r.id) || !isEditorialGroupColor(r.color) || typeof r.name !== "string" || !r.name.trim()) continue;
+      if (r.status !== "active" && r.status !== "archived") continue;
+      saida.push({ id: r.id.toLowerCase(), color: r.color, name: r.name, status: r.status });
+    }
+    return saida;
+  } catch {
+    return null;
+  }
+}
+
+export const serializeEditorialGroupsCache = (groups: readonly EditorialGroupCacheEntry[]) =>
+  JSON.stringify(groups.map(group => ({ id: group.id, color: group.color, name: group.name, status: group.status })));
+
+/**
+ * Chave da lembrança local por marca (D12). Nunca é fonte de verdade.
+ * Até 2026-10-12 as três áreas dividiam esta chave; desde as cores fixas cada
+ * área lembra a sua (`editorialGroupAreaStorageKey`). A chave antiga não é
+ * mais lida nem limpa.
+ */
 export const editorialGroupLastUsedStorageKey = (brandId: string) => `minerador-key:grupo-ativo:${brandId}`;
 
 /* ----------------------- implantação sem a migration ---------------------- */

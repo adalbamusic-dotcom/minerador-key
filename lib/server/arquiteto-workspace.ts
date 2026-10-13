@@ -11,6 +11,7 @@ import { isApprovedForArchitect } from "@/lib/minerador/editorial-status";
 import { resolveKeywordSubject } from "@/lib/minerador/keyword-subject";
 import { validateSubjectDestination } from "@/lib/minerador/subject-destination";
 import { articleDnaIncorporatedKeywordIds } from "@/lib/arquiteto/declared-subject";
+import { releaseRejectedArticles } from "@/lib/arquiteto/rejected-article-release";
 import {
   buildMineradorArquitetoHandoffPlan,
   MINERADOR_ARQUITETO_RECEIVED_STATE,
@@ -49,6 +50,28 @@ function latestByEntity<T extends { entityId: string; versionNumber: number }>(v
     if (!current || version.versionNumber > current.versionNumber) latest.set(version.entityId, version);
   }
   return [...latest.values()];
+}
+
+/**
+ * Os eventos de status das versões vigentes de ArticleDNA, na ordem de
+ * `occurred_at` (o último vence). A tabela de eventos não tem `marca_id`: o
+ * recorte é pelos `version_id` já lidos da marca. Lido em blocos.
+ */
+async function readArticleVersionEvents(context: PipelineContext, versionIds: readonly string[]) {
+  const ids = [...new Set(versionIds)];
+  const eventos: Array<{ versionId: string; status: string; occurredAt: string | null; reason: string | null }> = [];
+  for (let inicio = 0; inicio < ids.length; inicio += 100) {
+    const result = await context.supabase
+      .from("editorial_version_status_events")
+      .select("version_id,status,occurred_at,reason")
+      .in("version_id", ids.slice(inicio, inicio + 100))
+      .order("occurred_at", { ascending: true });
+    if (result.error) readFailure(result.error);
+    for (const row of (result.data || []) as Array<{ version_id?: unknown; status?: unknown; occurred_at?: unknown; reason?: unknown }>) {
+      eventos.push({ versionId: String(row.version_id ?? ""), status: String(row.status ?? ""), occurredAt: typeof row.occurred_at === "string" ? row.occurred_at : null, reason: typeof row.reason === "string" ? row.reason : null });
+    }
+  }
+  return eventos.sort((left, right) => (left.occurredAt ? Date.parse(left.occurredAt) : 0) - (right.occurredAt ? Date.parse(right.occurredAt) : 0));
 }
 
 function workflowSnapshot(row: WorkflowRow) {
@@ -551,9 +574,22 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
     throw new PipelineRuntimeError("CONFLICT", "O workflow canônico referencia uma keyword que não está disponível na mesma Brand.", 409);
   }
 
-  const articleDnas = latestByEntity(artifacts.articleDnas).filter(version =>
+  const articleDnasVigentes = latestByEntity(artifacts.articleDnas).filter(version =>
     version.payload.keywordReferences.some(reference => keywordIds.has(reference.keywordId)),
   );
+  /*
+   * A MESA APLICA O EVENTO `rejected` (2026-10-12). "Retirar artigo do Silo"
+   * rejeita a versão vigente por evento; a linha continua `approved`. O artigo
+   * rejeitado sai dos ativos e as keywords dele que nenhum artigo ativo usa
+   * voltam para "Keywords não agrupadas" — só na leitura, nada é apagado.
+   */
+  const liberacao = releaseRejectedArticles({
+    articleDnas: articleDnasVigentes,
+    statuses: artifacts.statuses,
+    events: await readArticleVersionEvents(context, articleDnasVigentes.map(version => version.versionId)),
+    workflowItems: workflowRows.map(workflowSnapshot),
+  });
+  const articleDnas = liberacao.articleDnas;
   // A elegibilidade é estrutural: status canônico, Brand, lifecycle e
   // duplicação. Nenhuma dimensão semântica participa desta decisão.
   const importEligibility = resolveCanonicalMineradorArquitetoImportEligibility({
@@ -594,7 +630,7 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
 
   return {
     source: "CANONICAL_REMOTE" as const,
-    workflowItems: workflowRows.map(workflowSnapshot),
+    workflowItems: liberacao.workflowItems,
     importEligibility,
     keywords,
     availableKeywords,
@@ -602,8 +638,10 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
     siloDnas,
     siloPages,
     aiReviews,
-    statuses: artifacts.statuses.filter(item => relatedVersionIds.has(item.versionId)),
+    statuses: liberacao.statuses.filter(item => relatedVersionIds.has(item.versionId)),
     brandSiloCatalog: readBrandSiloCatalog(brandRow.data?.silos_existentes),
+    // Aditivo, só quando há: os artigos cuja versão vigente foi rejeitada e as keywords liberadas.
+    ...(liberacao.rejected.length ? { rejectedArticles: liberacao.rejected } : {}),
     // Aditivo, só com grupo: a resposta é PARCIAL e diz qual recorte é.
     ...(recorte ? { groupScope: { groupId: recorte.groupId, keywordIds: recorte.keywordIds, articleIds: recorte.articleIds, partial: true as const } } : {}),
   };

@@ -83,9 +83,11 @@ class PlanFakeQuery implements PromiseLike<{ data: unknown; error: unknown; coun
     this.filters.push(row => (row[column] ?? null) !== null);
     return this;
   }
-  in(column: string, values: readonly unknown[]) { this.filters.push(row => values.includes(row[column])); return this; }
+  // 2026-10-12 · também com caminho JSON (`payload->>groupId`), como o PostgREST.
+  in(column: string, values: readonly unknown[]) { this.filters.push(row => values.includes(caminho(row, column))); return this; }
   order() { return this; }
   range(from: number, to: number) { this.faixa = [from, to]; return this; }
+  limit(n: number) { this.faixa = [0, n - 1]; return this; }
   insert(rows: Row | Row[]) { this.op = "insert"; this.payload = rows; return this; }
   update(patch: Row) { this.op = "update"; this.payload = patch; return this; }
   maybeSingle() { this.singleMode = "maybe"; return this; }

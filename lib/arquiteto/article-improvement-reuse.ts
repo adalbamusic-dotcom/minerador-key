@@ -1,5 +1,6 @@
 import type { ImprovementKeyword } from "./article-improvement.ts";
 import type { ImprovementEditorialAi } from "./article-improvement-ai.ts";
+import type { ReworkPrevious } from "../editorial/rework-guard.ts";
 
 /*
  * MELHORIA SEM RETRABALHO (WifiConecta, 2026-10-12).
@@ -55,7 +56,44 @@ export type ImprovementReusableRun = {
   inputsHash?: string;
   keywords: ImprovementKeyword[];
   editorialAi?: ImprovementEditorialAi;
+  /* F5 — o que a guarda mostra da execução anterior (todos já estão no payload da execução). */
+  actorId?: string;
+  state?: string;
+  decisionHash?: string;
+  targets?: readonly unknown[];
+  costs?: { paidQueries?: number };
+  discovery?: { requested?: boolean; requests?: number };
 };
+
+/**
+ * F5 — A EXECUÇÃO ANTERIOR COMO REGISTRO DA GUARDA (SDD 2026-10-12 §10.1).
+ *
+ * A melhoria tem registro próprio (`article_improvement_run`, com `inputsHash`):
+ * a guarda o lê e não grava linha `operation_ledger`. O resumo é o do aviso
+ * "Já feito com os mesmos insumos em 12/10 às 17:30 — 8 alvos, IA leu a lista,
+ * 0 consultas pagas".
+ */
+export function improvementReworkPrevious(previous: ImprovementReusableRun | null | undefined): ReworkPrevious | null {
+  if (!previous?.inputsHash || !previous.createdAt) return null;
+  const alvos = previous.targets?.length ?? 0;
+  const ia = previous.editorialAi?.status === "answered" ? "IA leu a lista" : previous.editorialAi?.status === "failed" ? "a leitura da IA falhou" : "sem leitura da IA";
+  const busca = previous.discovery?.requested ? `, ${previous.discovery.requests ?? 0} chamada(s) da busca nova no Google Ads` : "";
+  const pagas = previous.costs?.paidQueries ?? 0;
+  return {
+    kind: "article_improvement_prepare",
+    fingerprint: previous.inputsHash,
+    at: previous.createdAt,
+    actorId: previous.actorId ?? "",
+    outcome: "succeeded",
+    outcomeCode: previous.state ? `RUN_${previous.state.toUpperCase()}` : null,
+    resultRef: previous.runId,
+    costUsd: null,
+    message: null,
+    attempts: 1,
+    source: "article_improvement_run",
+    summary: `${alvos} alvo(s), ${ia}${busca}, ${pagas} consulta(s) paga(s) no plano`,
+  };
+}
 
 export type ImprovementReuseSeed = {
   fromRunId: string;

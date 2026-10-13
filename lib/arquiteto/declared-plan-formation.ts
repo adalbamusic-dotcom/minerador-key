@@ -12,6 +12,7 @@ import type { ArticleDNA } from "./contracts.ts";
 import type { ArchitectSubjectStanding, SubjectSupportSuggestion } from "./declared-subject.ts";
 import type { DeclaredPlanFormationInput } from "./article-formation-priority.ts";
 import type { DeclaredPlanGateInput } from "./article-formation-confirmation.ts";
+import { DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX } from "./article-serp-interpretation.ts";
 
 type StandingWithPlan = Pick<ArchitectSubjectStanding, "keywordId" | "brandId" | "declared" | "received" | "approvedPackageRef" | "plan">;
 
@@ -91,4 +92,28 @@ export function declaredPlanAppliedTo(article: Pick<ArticleDNA, "hierarchy" | "p
   if (!plan) return true;
   return article.hierarchy === plan.role && article.promise === plan.scope
     && (!plan.declaredPrincipal || article.principalKeywordId === plan.declaredPrincipal.keywordId);
+}
+
+/**
+ * D2(a) — A PROVENIÊNCIA DO PARECER NO DNA (SDD 2026-10-12 §17).
+ *
+ * Quando o parecer da SERP veio das sustentações (principal declarada sem
+ * volume e sem SERP no cache), o ArticleDNA diz isso em `serpStrategy.rationale`
+ * — campo que já existe; nenhum campo novo no ArticleDNA (§5.4). A linha é
+ * TROCADA a cada versão, nunca acumulada; sem parecer pelas sustentações, a
+ * linha antiga sai (a proveniência não pode mentir sobre a versão nova). Não é
+ * pendência: o artigo fica concluído (D10).
+ */
+export function applySerpSupportBasisProvenance(
+  article: ArticleDNA,
+  basisReason: string | null,
+  fallbackStrategy?: ArticleDNA["serpStrategy"],
+): ArticleDNA {
+  const strategy = article.serpStrategy ?? (basisReason ? fallbackStrategy : undefined);
+  if (!strategy) return article;
+  const demais = strategy.rationale.filter(line => !line.startsWith(DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX));
+  const rationale = basisReason ? [...demais, basisReason] : demais;
+  if (!rationale.length) return article;
+  if (article.serpStrategy && rationale.length === article.serpStrategy.rationale.length && rationale.every((line, index) => line === article.serpStrategy!.rationale[index])) return article;
+  return { ...article, serpStrategy: { ...strategy, rationale } };
 }

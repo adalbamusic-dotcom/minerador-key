@@ -1,5 +1,18 @@
 # Backlog — Radar
 
+## F6 · Radar, entregáveis e MCP por grupo — 2026-10-12
+
+Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Regra 24 do artigo-modelo parte da promessa declarada (sem mudar a versão das regras).
+- [x] CSV "Para escrever" e `get_article_for_writing`: linha do grupo e promessa declarada (D10), pela mesma montagem.
+- [x] Mesa do Radar: etiqueta, filtro e faixa conferidos (já completos desde a F2).
+- [ ] **Dono:** homologar com a WifiConecta (grupo laranja): exportar "Para escrever" de um artigo do plano e ver a
+  linha do grupo e a promessa declarada; pelo MCP, `get_article_for_writing` com `group`.
+- [ ] Proposta: o CSV de vídeo ("CSV para vídeo e redes sociais") não leva o grupo nesta fase (fora do escopo §6.4).
+- [ ] Proposta: se o dono quiser a planta já gravada refeita com a frase nova da regra 24, decidir se a versão das
+  regras sobe (marcaria todas as plantas como antigas).
+
 ## Grupos por cor no Radar e mesa por grupo (F2) — 2026-10-12
 
 Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
@@ -9,7 +22,7 @@ Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
 - [x] `groupId` opcional na mesa (`GET /api/editorial/workspace`) e na listagem do Radar; sem parâmetro, igual.
 - [ ] **Dono:** homologar (filtrar por grupo, mover um artigo, voltar ao grupo das keywords).
 - [ ] Leitura parcial pela tela com cache por grupo (só depois da medição do peso; hoje a tela lê a mesa inteira).
-- [ ] F6 da SDD: Redator e Publicações por grupo; `groupId` no MCP.
+- [x] F6 da SDD: Redator e Publicações por grupo; `group` no MCP (2026-10-12, seção acima).
 
 ## Keywords proibidas por destino nas âncoras — 2026-10-11 (regras "2026-10-11c")
 

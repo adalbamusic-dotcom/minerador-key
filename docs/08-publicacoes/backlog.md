@@ -17,6 +17,9 @@ Primeiro documento final e destino de publicação.
 ## Descartado
 Publicar automaticamente na ausência de aprovação humana.
 ## Concluídos recentes
+- 2026-10-12 · F6 da SDD do plano declarado e grupos: etiqueta de cor na barra global e listas (Biblioteca, Fila,
+  Publicados, Atualizações) filtradas pelo grupo do artigo, com faixa e etiqueta. **Validado manualmente: não** —
+  homologação do dono pendente (escolher uma cor em Publicações e conferir as quatro listas).
 - Auditoria documental inicial em 2026-07-20.
 - SDD e implementação de fila, exportações, publicação manual, URL protegida, atualização e histórico em 2026-07-20.
 

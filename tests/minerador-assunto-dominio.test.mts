@@ -294,7 +294,9 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   // 2026-10-12 (SDD do plano declarado §6.1-2): o núcleo do plano do Silo grava
   // `keyword_subject.plan` no Assunto declarado e declara pelo núcleo de sempre.
-  setKeywordSubject: ["lib/minerador/keyword-import-core.ts", "lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx", "lib/minerador/declared-plan-import-core.ts"],
+  // 2026-10-12 (SDD do plano §6.1-5, "Tirar do plano"): o núcleo da retirada
+  // tira `keyword_subject.plan` (o Assunto continua declarado); só a rota da tela o chama.
+  setKeywordSubject: ["lib/minerador/keyword-import-core.ts", "lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx", "lib/minerador/declared-plan-import-core.ts", "lib/minerador/declared-plan-withdraw-core.ts"],
   withdrawKeywordSubject: ["lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx"],
   // 2026-09-24 (pedido do dono): o seletor Vínculo único grava as três
   // escolhas de uma vez por planVinculoBatchChoices, que chama o
@@ -308,6 +310,8 @@ const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   // 2026-10-12 (F4): o plano do Silo tem um núcleo só — a rota da tela e a
   // ferramenta MCP `declare_silo_plan` (com a guarda do aceite, P4b).
   importDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/import/route.ts", "lib/server/platform-mcp-tools.ts"],
+  // 2026-10-12: "Tirar do plano" é só da tela (prévia → decisão humana); nenhuma ferramenta MCP.
+  withdrawFromDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/withdraw/route.ts"],
 };
 
 /** Chamador de IA autorizado — isento da regex de "caminho de IA", e só ele. */
@@ -320,6 +324,7 @@ const SUBJECT_WRITE_DEFINED_IN: Record<string, string> = {
   planVinculoBatchChoices: "lib/minerador/vinculo-batch.ts",
   importSubjectsWithCore: "lib/minerador/keyword-import-core.ts",
   importDeclaredPlanWithCore: "lib/minerador/declared-plan-import-core.ts",
+  withdrawFromDeclaredPlanWithCore: "lib/minerador/declared-plan-withdraw-core.ts",
 };
 
 test("P4: a gravação do Assunto só tem os chamadores da lista fechada — nenhum caminho de IA ou MCP", () => {

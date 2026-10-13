@@ -373,16 +373,19 @@ test("formação e importação etiquetam DEPOIS de gravar, e só quando gravou"
 
 test("tela do Arquiteto · seletor no topo, faixa e etiqueta nas abas Artigos e Silos, filtro de tela, rodapé e prévia", () => {
   const tela = semComentarios(read("modules/arquiteto/arquiteto-workspace.tsx"));
-  assert.match(tela, /useEditorialGroups\(\{ brandId: selectedBrandId \|\| null, enabled: sessionStatus === "authenticated", includeKeywords: true \}\)/);
-  // 2026-10-12 · o seletor é o botão-ícone de etiqueta ao lado do sino (groupTag), fora das ações.
-  assert.match(tela, /groupTag: seletorDeGrupoDoArquiteto,/);
-  assert.doesNotMatch(tela, /data-arquiteto-topbar-actions>\s*\{seletorDeGrupoDoArquiteto\}/);
-  assert.match(tela, /<EditorialGroupSelector[\s\S]{0,400}menuFooter=/);
+  // 2026-10-12 · cores fixas: a escolha é do Arquiteto e a leitura pesada dos artigos espera a mesa.
+  assert.match(tela, /useEditorialGroups\(\{ brandId: selectedBrandId \|\| null, enabled: sessionStatus === "authenticated", includeKeywords: true, area: "arquiteto", mainReady: !mesaDoArquitetoCarregando \}\)/);
+  assert.match(tela, /const \{ loading: mesaDoArquitetoCarregando \} = useEditorialPipeline\(\);/);
+  // A etiqueta é da topbar global; o Arquiteto só acrescenta o atalho no fim do menu.
+  assert.match(tela, /groupTagMenuFooter: rodapeDaEtiquetaDoArquiteto,/);
+  assert.match(tela, /const rodapeDaEtiquetaDoArquiteto = useMemo\(\(\) => \(arquitetoGroups\.available\s*\?\s*\(fechar: \(\) => void\) => <ArticleGroupTagMenuItem/);
+  assert.doesNotMatch(tela, /<EditorialGroupSelector|groupTag:/, "o Arquiteto não monta mais o seletor");
   assert.match(tela, /title=\{art\.keywordPrincipal\}>\{art\.keywordPrincipal\}<\/p><ArticleGroupRowTag group=\{grupoDaLinhaResumo\}/);
   assert.match(tela, /editorialGroupStripeClass\(grupoDaLinhaResumo\)/);
   assert.match(tela, /filterRowsByEditorialGroup\(porAssunto, arquitetoGroups\.filter/);
   assert.match(tela, /surface=\{groupScopedTerritorialSurface\}\s*groupForKeyword=/);
-  assert.match(tela, /<ArticleGroupMoveSelect activeGroups=/);
+  assert.match(tela, /<ArticleGroupMoveSelect groups=\{arquitetoGroups\.groups\} disabled=\{updating\} onMove=\{color => \{ void moverArtigosDeGrupo\(color\); \}\} \/>/);
+  assert.match(tela, /await arquitetoGroups\.moveArticlesToColor\(ids, color\)/, "mover por cor garante o grupo da cor antes");
   assert.match(tela, /<ArticleGroupTaggingDialog/);
   // A mesa e a cópia local continuam inteiras: o filtro não escreve em masterList nem nas fontes.
   assert.doesNotMatch(tela, /setMasterList\([^)]*filterRowsByEditorialGroup/);
@@ -392,7 +395,10 @@ test("tela do Radar · seletor no topo, faixa e etiqueta na linha, rodapé, e a 
   const tela = semComentarios(read("modules/radar/radar-page.tsx"));
   // A tabela recebe a lista INTEIRA (o guarda do expansor procura nela) e o recorte vai como filtro de tela.
   assert.match(tela, /rows=\{pipeline\.radarItems\} rowFilter=\{filtroDoGrupo\} rowStripeClassName=\{row => editorialGroupStripeClass\(grupoDoItem\(row\)\)\}/);
-  assert.match(tela, /renderActions: renderTopbarActions, groupTag: seletorDeGrupoDoRadar \}\}/);
+  assert.match(tela, /renderActions: renderTopbarActions, groupTagMenuFooter: rodapeDaEtiquetaDoRadar, groupTagUngroupedDetail: /);
+  assert.match(tela, /useEditorialGroups\(\{ brandId: selectedBrandId \|\| null, enabled: Boolean\(selectedBrandId\), area: "radar", mainReady: !pipeline\.loading \}\)/);
+  assert.doesNotMatch(tela, /<EditorialGroupSelector/, "o Radar não monta mais o seletor");
+  assert.match(tela, /<ArticleGroupMoveSelect groups=\{gruposDoRadar\.groups\} onMove=\{color => void moverItensDeGrupo\(rows, color\)\}\/>/);
   assert.match(tela, /<ArticleGroupRowTag group=\{grupoDoItem\(row\)\}/);
   assert.match(tela, /renderBulkBarAside=\{rows => gruposDoRadar\.available \? <ArticleGroupMoveSelect/);
   assert.match(tela, /editorialGroupFilterMatches\(gruposDoRadar\.filter, gruposDoRadar\.articleGroupById\.get\(row\.articleId\)/);
@@ -404,8 +410,11 @@ test("a mesa no navegador continua lendo inteira: o recorte por grupo é só da 
   assert.match(contexto, /fetch\(`\/api\/editorial\/workspace\?marcaId=\$\{encodeURIComponent\(selectedBrandId\)\}`, \{ cache: "no-store" \}\)/);
   assert.doesNotMatch(contexto, /groupId/);
   const hook = semComentarios(read("components/editorial/use-editorial-groups.ts"));
-  assert.match(hook, /editorialGroupLastUsedStorageKey\(brandId\)/, "a mesma lembrança local do Minerador (D12)");
-  assert.doesNotMatch(hook, /localStorage\.(removeItem|clear)/, "nada é limpo");
+  // 2026-10-12 · cores fixas: a escolha é de cada área (lembrança por área no estado compartilhado com a topbar).
+  assert.match(hook, /useAreaGroupFilter\(alvo, area\)/);
+  const estado = semComentarios(read("components/editorial/editorial-group-area-store.ts"));
+  assert.match(estado, /editorialGroupAreaStorageKey\(brandId, area\)/, "lembrança local por marca E por área (D12)");
+  assert.doesNotMatch(hook + estado, /localStorage\.(removeItem|clear)/, "nada é limpo");
 });
 
 test("catálogo do MCP · a rota nova e o processo de grupos no Arquiteto e no Radar", () => {

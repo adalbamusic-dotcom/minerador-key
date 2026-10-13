@@ -21,6 +21,8 @@ import { subjectDiscoveryEstimate, subjectDiscoveryHasVolume } from "@/lib/miner
 import { deriveKgrVisualState, KGR_FULL_RANGE_LIMIT, kgrApplicabilityLabel } from "@/lib/minerador/kgr-applicability";
 import { importSubjectsWithCore, type SubjectImportChannel } from "@/lib/minerador/keyword-import-core";
 import { EDITORIAL_GROUP_COLORS } from "@/lib/editorial/editorial-groups";
+import { listEditorialGroupSummaries } from "@/lib/editorial/editorial-groups-store";
+import { EDITORIAL_GROUP_MCP_INPUT_HINT, resolveEditorialGroupMcpScope } from "@/lib/editorial/editorial-group-scope";
 import { DECLARED_PLAN_ARTICLES_MAX, DECLARED_PLAN_ROLES, DECLARED_PLAN_SCOPE_MAX } from "@/lib/minerador/declared-plan";
 import { importDeclaredPlanWithCore } from "@/lib/minerador/declared-plan-import-core";
 import { KEYWORD_PAGE_TYPE_KEY, KEYWORD_PAGE_TYPE_STANCE_KEY, keywordPageTypeStance } from "@/lib/minerador/keyword-page-type";
@@ -189,10 +191,17 @@ const DeclaredSiloPlanInput = z.object({
   }).strict()).min(1).max(DECLARED_PLAN_ARTICLES_MAX + 10),
 }).strict();
 
+/*
+ * 2026-10-12 · F6 (decisão do dono) · o grupo do plano é a COR: a cor que já
+ * tem grupo leva o plano para ele; a sem grupo ganha o grupo pelo mesmo caminho
+ * do mover por cor, com o nome do Silo. `new` (a forma de antes) é a mesma
+ * coisa; `existing` aceita o uuid de um grupo (compatibilidade).
+ */
 const DeclaredPlanGroupInput = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("color"), color: z.enum(EDITORIAL_GROUP_COLORS), name: z.string().max(200).nullable().optional() }).strict(),
   z.object({ mode: z.literal("existing"), groupId: z.string().uuid() }).strict(),
   z.object({ mode: z.literal("new"), name: z.string().max(200).nullable().optional(), color: z.enum(EDITORIAL_GROUP_COLORS) }).strict(),
-]).describe("O grupo do plano: um grupo existente da marca, ou um novo (nome opcional — sem ele, o nome do Silo — e uma das 5 cores).");
+]).describe("O grupo do plano é a COR: { mode: 'color', color: amarelo | azul | verde | lima | laranja, name? }. Se a cor já tem grupo nesta marca, o plano vai para ele; se não, o grupo da cor nasce com o nome do Silo (ou o name dado). Nunca há dois grupos da mesma cor. { mode: 'existing', groupId } (uuid) e { mode: 'new', … } continuam aceitos e seguem a mesma regra.");
 
 /*
  * AS PERMISSÕES DAS LEITURAS SÃO AS DAS TELAS (R5).
@@ -651,6 +660,40 @@ export function mcpChannel(access: WriterMcpBrandAccess, requestId: string): Sub
   return { kind: "mcp", grantId: access.grantId, requestId };
 }
 
+/*
+ * 2026-10-12 · F6 (SDD do plano declarado e grupos, §6.5) · O RECORTE POR GRUPO
+ * DAS LEITURAS DO MCP. `group` aceita a cor ("laranja"), "sem-grupo" e o uuid
+ * de um grupo (compatibilidade); a lista de grupos é a da marca autorizada (o
+ * uuid de outra marca não existe aqui). Sem o parâmetro, nada de grupo é lido.
+ */
+export const platformGroupInput = z.string().trim().max(80).optional()
+  .describe(`Recorte por grupo de cor: ${EDITORIAL_GROUP_MCP_INPUT_HINT}. Sem ele, a marca inteira.`);
+
+export async function resolvePlatformGroupScope(brandId: string, raw: string | null | undefined) {
+  if (!raw || !raw.trim()) return null;
+  /* Formato e "sem-grupo"/"todos" se decidem sem ler o banco; a cor e o uuid precisam da lista desta marca. */
+  const semLista = resolveEditorialGroupMcpScope(raw, []);
+  if (!semLista.ok && semLista.code === "group_invalid") throw new PlatformToolFailure(semLista.code, { message: semLista.message });
+  if (semLista.ok && semLista.scope.kind !== "groups") return semLista.scope.kind === "all" ? null : semLista.scope;
+  const lista = await listEditorialGroupSummaries(getOperationalClient(), brandId);
+  if (!lista.ok) throw new PlatformToolFailure(lista.code, { message: lista.message });
+  const resolvido = resolveEditorialGroupMcpScope(raw, lista.groups);
+  if (!resolvido.ok) throw new PlatformToolFailure(resolvido.code, { message: resolvido.message });
+  return resolvido.scope.kind === "all" ? null : resolvido.scope;
+}
+
+/** O que a resposta diz do recorte (a cor, os grupos dela e a frase). */
+function grupoDaResposta(scope: Awaited<ReturnType<typeof resolvePlatformGroupScope>>) {
+  if (!scope) return {};
+  return {
+    group: {
+      choice: scope.kind === "none" ? "sem-grupo" : scope.color,
+      description: scope.description,
+      groups: scope.kind === "none" ? [] : scope.groups.map(item => ({ groupId: item.groupId, color: item.color, colorLabel: item.colorLabel, name: item.name, text: item.text })),
+    },
+  };
+}
+
 export function registerPlatformTools(server: McpServer, principal: WriterMcpPrincipal, call: PlatformCall) {
   const read = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: true } as const;
@@ -670,11 +713,13 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("get_platform_state", {
     title: "Retrato da marca",
-    description: "Use antes de propor qualquer coisa: o que a marca já tem — Assuntos, keywords por status, silos com pilar e suportes, artigos (promessa, slug, principal, etapa), itens do Radar, documentos do Redator, páginas publicadas — e o link de cada tela. Exige ver Marca, Minerador, Arquiteto, Radar e Redator.",
-    inputSchema: z.object({ brandId: brandIdInput }),
+    description: "Use antes de propor qualquer coisa: o que a marca já tem — Assuntos, keywords por status, silos com pilar e suportes, artigos (promessa, slug, principal, etapa), itens do Radar, documentos do Redator, páginas publicadas — e o link de cada tela. Exige ver Marca, Minerador, Arquiteto, Radar e Redator. Com group (a cor, ex.: 'laranja', ou 'sem-grupo'), só o que é daquele grupo — keywords e Assuntos pelo grupo da keyword; artigos, Silos, itens do Radar e documentos pelo grupo do artigo — e a resposta traz group; as páginas publicadas são sempre o site inteiro.",
+    inputSchema: z.object({ brandId: brandIdInput, group: platformGroupInput }),
     annotations: read,
-  }, async ({ brandId }) => call("get_platform_state", "platform.read", { brandId }, PLATFORM_READ_PERMISSIONS, async ({ access }) =>
-    readPlatformState(access.brandId)));
+  }, async ({ brandId, group }) => call("get_platform_state", "platform.read", { brandId }, PLATFORM_READ_PERMISSIONS, async ({ access }) => {
+    const recorte = await resolvePlatformGroupScope(access.brandId, group);
+    return recorte ? readPlatformState(access.brandId, { group: recorte }) : readPlatformState(access.brandId);
+  }));
 
   server.registerTool("find_topic_in_platform", {
     title: "O tema já existe?",
@@ -698,21 +743,28 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       "intent e funnel são os canônicos (SERP > humano > lógica), com a origem em intentSource/funnelSource; intent nulo é intenção ainda não resolvida (intentLabel diz o estado).",
       `kgrFull é KGR < ${kgrLimit} (${kgrLimit} exato não é pleno). O KGR só conta como critério quando kgrApplicability não é 'not_applicable': nesse caso kgr e kgrFull vêm nulos e kgrUse é 'nao_utilizada' — é o padrão desde 2026-09-28; só a decisão humana 'Aplicável' liga o KGR. Resultados e KGR não são requisito para aprovar.`,
       "pageType vem resolvido: type, source (human, site ou default), stance (potential ou declared) e o rótulo da tela; keyword publicada como silo já é silo declarado.",
+      "group (opcional) recorta pelo grupo de cor, como o seletor da tela: a cor ('laranja'), 'sem-grupo' ou o uuid de um grupo; a resposta traz group (a cor, os grupos dela e a frase). Cor sem grupo nesta marca = lista vazia, dita em group.description.",
     ].join(" "),
     inputSchema: z.object({
       brandId: brandIdInput,
       status: z.enum(MINERADOR_EDITORIAL_STATUSES).optional(),
       subjectsOnly: z.boolean().default(false),
       search: z.string().trim().max(120).optional(),
+      group: platformGroupInput,
       limit: z.number().int().min(1).max(200).default(50),
       offset: z.number().int().min(0).max(20_000).default(0),
     }),
     annotations: read,
-  }, async ({ brandId, status, subjectsOnly, search, limit, offset }) =>
+  }, async ({ brandId, status, subjectsOnly, search, group, limit, offset }) =>
     call("list_platform_keywords", "platform.read", { brandId }, [{ module: "minerador", action: "view" }], async ({ access }) => {
+      const recorte = await resolvePlatformGroupScope(access.brandId, group);
+      /* 2026-10-12 · F6 · cor sem grupo nesta marca: nada a ler (nunca "tudo" por engano). */
+      if (recorte?.kind === "groups" && !recorte.groupIds.length) return { total: 0, offset, keywords: [], ...grupoDaResposta(recorte) };
       let query = getOperationalClient().from("minerador_keywords")
         .select(PLATFORM_KEYWORD_SELECT, { count: "exact" })
         .eq("brand_id", access.brandId).is("deleted_at", null);
+      if (recorte?.kind === "none") query = query.is("group_id", null);
+      if (recorte?.kind === "groups") query = query.in("group_id", recorte.groupIds);
       if (status) query = query.eq("status", status);
       if (subjectsOnly) query = query.filter("analise_semantica->keyword_subject->>declared", "eq", "true");
       if (search) query = query.ilike("keyword", `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
@@ -722,6 +774,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
         total: count ?? null,
         offset,
         keywords: ((data || []) as unknown as Array<Record<string, unknown>>).map(projectPlatformKeywordRow),
+        ...grupoDaResposta(recorte),
       };
     }));
 
@@ -803,9 +856,9 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     title: "Importar plano do Silo no Minerador",
     description: [
       "Use quando o usuário trouxer o plano de um Silo (nome, e por artigo: ordem, Assunto, keyword principal, papel Pilar/Suporte e descrição do escopo) e ACEITAR declará-lo no chat. É o botão 'Importar plano do Silo' do Minerador, pelo mesmo núcleo (importDeclaredPlanWithCore).",
-      "Envie o texto colado (text) OU o plano estruturado (plan), nunca os dois, e o grupo: existente (groupId) ou novo (nome opcional e cor: amarelo, azul, verde, lima ou laranja).",
+      "Envie o texto colado (text) OU o plano estruturado (plan), nunca os dois, e o grupo pela COR: group { mode: 'color', color: amarelo, azul, verde, lima ou laranja, name opcional }. A cor que já tem grupo recebe o plano; a cor sem grupo ganha o grupo com o nome do Silo. Um grupo por cor por marca.",
       "mode 'preview' não grava: devolve cada artigo com o estado do Assunto e da principal, as sobras de imports anteriores (que não fazem parte do plano), as sustentações e os impedimentos (blockers; com algum, canApply é false). Mostre a prévia ao usuário.",
-      "mode 'apply' exige userConfirmation (as palavras do aceite) e importRequestId (uuid; repita o mesmo ao tentar de novo o mesmo envio): cria ou acha o grupo, declara os Assuntos com o plano, importa as principais que faltam, etiqueta tudo com o grupo e devolve o resultado relido.",
+      "mode 'apply' exige userConfirmation (as palavras do aceite) e importRequestId (uuid; repita o mesmo ao tentar de novo o mesmo envio): usa o grupo da cor (ou o garante, como o mover por cor), declara os Assuntos com o plano, importa as principais que faltam, etiqueta tudo com o grupo e devolve o resultado relido.",
       "A principal declarada é fixa (aprova sem Volume; o Arquiteto não troca). Nada do grupo vira artigo solto. Sem custo.",
     ].join(" "),
     inputSchema: z.object({
@@ -1260,6 +1313,43 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     });
   });
 
+  /*
+   * 2026-10-12 · SDD do plano declarado §11 passo 7 (D7): o plano no Silo já
+   * consolidado — Pilar, ordem, nome, objetivo e slug (se não publicado). O
+   * MESMO núcleo da rota /api/arquiteto/silo-declared-plan; a aprovação é
+   * decisão humana aceita no chat, com o decisionHash da prévia.
+   */
+  server.registerTool("apply_declared_plan_to_silo", {
+    title: "Aplicar o plano declarado ao Silo",
+    description: [
+      "Decisão delegada pelo usuário no chat para um Silo JÁ consolidado: troca o Pilar pelo Pilar declarado no plano, aplica a ordem do plano, o nome e o objetivo do Silo planejado e o slug (só se a SiloPage não estiver publicada nem tiver canonical). Grava SiloDNA e SiloPage em versão nova (as aprovadas ficam no histórico) e liga o grupo do plano ao Silo.",
+      "Faça mode=preview e mostre ao usuário as mudanças e os avisos; só depois do aceite explícito chame mode=apply com o mesmo decisionHash e userConfirmation contendo as palavras do usuário. Sem mudança real, não há versão nova.",
+      "Recusa: artigo fora do plano ainda no Silo (retire na tela, 'Retirar artigo do Silo'), Pilar atual publicado, plano que não vale para os artigos do Silo. URL, slug e canonical publicados nunca mudam. Depois de aplicar, o grafo de links internos precisa ser processado de novo na tela (Links internos).",
+    ].join(" "),
+    inputSchema: z.object({
+      brandId: brandIdInput,
+      siloId: z.string().trim().min(1).max(256).describe("O siloId do SiloDNA (ex.: territory:<uuid>)."),
+      mode: z.enum(["preview", "apply"]),
+      decisionHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+      userConfirmation: confirmationInput.optional(),
+    }),
+    annotations: write,
+  }, async ({ brandId, siloId, mode, decisionHash, userConfirmation }) => {
+    if (mode === "apply" && (!userConfirmation || !decisionHash)) {
+      return asText({ ok: false, code: !userConfirmation ? "human_confirmation_required" : "decision_hash_required", message: "Mostre a prévia, aguarde o aceite específico do usuário e aplique com o mesmo decisionHash." });
+    }
+    const scopes = mode === "apply" ? ["arquiteto.write", "platform.decide"] as const : ["platform.read"] as const;
+    const permissions = mode === "apply" ? [{ module: "arquiteto", action: "edit" } as const, { module: "arquiteto", action: "approve" } as const] : [{ module: "arquiteto", action: "view" } as const];
+    return call("apply_declared_plan_to_silo", scopes, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, permissions, async ({ access }) => {
+      const context = await resolvePipelineContext({ brandId: access.brandId, module: "arquiteto", action: mode === "apply" ? "edit" : "view" }, { requireActorUserId: async () => principal.actorId });
+      const { handleSiloDeclaredPlan, siloDeclaredPlanRuntime } = await import("./arquiteto-silo-declared-plan");
+      const result = await handleSiloDeclaredPlan(siloDeclaredPlanRuntime(context), { siloId, mode, decisionHash: decisionHash?.toLowerCase() ?? null });
+      // F5 — a recusa leva o veredito da guarda ("a mesma recusa de <data>"), quando há.
+      if (result.state === "REFUSED") throw new PlatformToolFailure(result.code === "STALE_DECISION" ? "decision_stale" : `silo_plan_${result.code.toLowerCase()}`, { message: result.message, ...(result.rework ? { rework: result.rework } : {}) });
+      return mode === "preview" ? { ...result, readOnly: true } : { ...result, readbackConfirmed: result.state === "APPLIED" };
+    });
+  });
+
   /* ================================ Radar ============================= */
 
   server.registerTool("send_radar_to_writer", {
@@ -1281,6 +1371,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     description: [
       "Use quando o usuário vai escrever o artigo no ambiente dele (e não no Redator): devolve o MESMO CSV do botão 'Para escrever' do Radar, de um artigo com investigação finalizada e artigo-modelo da SERP concluído.",
       "Título, promessa, estrutura, links internos e plano visual saem só do artigo-modelo; traz também identidade da página (URL, slug e canonical protegidos quando publicada), principal e secundárias, SERP das 4 lentes, perguntas, fontes, autoridade, identidade visual e se pode escrever (coluna pode_escrever).",
+      "Artigo com grupo de cor: a coluna artigo diz o grupo (a cor e o nome, ex.: 'Grupo: Laranja · Planos e contratação') e a promessa declarada do ArticleDNA (no plano do Silo, a descrição do artigo), e a resposta traz group (color, colorLabel, name, text) ou null.",
       `Grátis: só lê o que o Radar já congelou; nunca chama provider nem IA. Uma chamada por artigo; o CSV vem em partes de até ${Math.round(WRITING_CSV_PART_CHARS / 1000)} mil caracteres: peça part 1, 2, … até parts e junte na ordem.`,
       "Sem o artigo-modelo concluído, a resposta é o erro needs_article_blueprint com o que falta, o teto do custo de organizar e a ação na tela; nada sai pelo processo antigo. Artigo sem investigação finalizada volta recusado com o motivo; finalize no Radar antes.",
     ].join(" "),
@@ -1288,7 +1379,8 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     annotations: read,
   }, async ({ brandId, articleId, part }) => call("get_article_for_writing", "platform.read", { brandId }, [{ module: "radar", action: "view" }], async ({ access }) => {
     const pronto = await materialDoRadar(access, articleId, "writing");
-    return { articleId, filename: pronto.filename, canWrite: pronto.blocked === 0, exportedAt: pronto.exportedAt, ...sliceWritingCsv(pronto.csv, part ?? 1, WRITING_CSV_PART_CHARS) };
+    const grupo = pronto.group ? { color: pronto.group.color, colorLabel: pronto.group.colorLabel, name: pronto.group.name, text: pronto.group.text } : null;
+    return { articleId, filename: pronto.filename, canWrite: pronto.blocked === 0, exportedAt: pronto.exportedAt, group: grupo, ...sliceWritingCsv(pronto.csv, part ?? 1, WRITING_CSV_PART_CHARS) };
   }));
 
   /*

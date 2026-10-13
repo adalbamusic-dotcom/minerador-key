@@ -18,7 +18,8 @@ import { applySerpDecisionToArticle, buildClassificationEvidence, resolveArticle
 import { resolveApprovedArticleSerpGate, type ApprovedSerpRecord } from "@/lib/arquiteto/approved-article-serp-gate";
 import { readArticleKgrDecision } from "@/lib/arquiteto/article-kgr-decision";
 import { readArchitectSubjectStanding, planSubjectAttachment, attachSubjectToArticleDna } from "@/lib/arquiteto/declared-subject";
-import { applyDeclaredPlanToArticleDna, declaredPlanAppliedTo, declaredPlanForGroup } from "@/lib/arquiteto/declared-plan-formation";
+import { applyDeclaredPlanToArticleDna, applySerpSupportBasisProvenance, declaredPlanAppliedTo, declaredPlanForGroup } from "@/lib/arquiteto/declared-plan-formation";
+import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import { shortSeedsOf, sharesTheme } from "@/lib/minerador/short-seeds";
 import { ARTICLE_IMPROVEMENT_VERSION, volumelessPrincipalSwap, carriesSlugCore, planArticleImprovements, improvementEditorialFit, isListReading, serpSupportedMembers, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence } from "@/lib/arquiteto/article-improvement";
 import { buildImprovementAiPrompt, editorialAiRecord, improvementAiEligibleTargets, improvementAiList, improvementAiTargets, IMPROVEMENT_AI_TIMEOUT_MS, validateImprovementAiPicks, type ImprovementEditorialAi } from "@/lib/arquiteto/article-improvement-ai";
@@ -27,7 +28,8 @@ import { buildSerpSubjectIndex, SERP_SUBJECT_LENS_LABELS } from "@/lib/arquiteto
 import { createVersionEnvelope } from "@/lib/arquiteto/versioning";
 import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
 import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";
-import { importSubjectDiscoveryWithCore } from "@/lib/minerador/subject-discovery-import";
+import { importSubjectDiscoveryWithCore, readSubjectDiscoveryBlock } from "@/lib/minerador/subject-discovery-import";
+import { assessRework, decideRework, formatReworkWhen, reworkView, type ReworkView } from "@/lib/editorial/rework-guard";
 import { loadCanonicalArquitetoWorkspace, createMineradorArquitetoHandoff } from "./arquiteto-workspace";
 import { readDifferentiationBrandKeywords, readPublishedFootprints } from "./arquiteto-differentiation-store";
 import { proposeArticleImprovementAiPicks, readGoogleAdsAverageVolumes } from "./arquiteto-differentiation-runtime";
@@ -47,7 +49,7 @@ import { createGoogleAdsKeywordAccount } from "@/lib/google/ads/account";
 import { generateGoogleAdsKeywordIdeas } from "@/lib/google/ads/keyword-ideas";
 import type { GoogleAdsKeywordIdeasInput } from "@/lib/google/ads/contracts";
 import { stableUuid } from "./arquiteto-published-reinforcement";
-import { improvementAiUsageKey, improvementInputsFingerprint, improvementReuseSeed, IMPROVEMENT_DISCOVERY_REQUEST_LIMIT, IMPROVEMENT_REUSE_WINDOW_MS, type ImprovementReusableRun } from "@/lib/arquiteto/article-improvement-reuse";
+import { improvementAiUsageKey, improvementInputsFingerprint, improvementReuseSeed, improvementReworkPrevious, IMPROVEMENT_DISCOVERY_REQUEST_LIMIT, IMPROVEMENT_REUSE_WINDOW_MS, type ImprovementReusableRun } from "@/lib/arquiteto/article-improvement-reuse";
 import type { GoogleAdsDiscoveryUsageKeySuffix } from "@/lib/minerador/google-ads-discovery-usage";
 
 const refusal = (message: string) => new PipelineRuntimeError("CONFLICT", message, 409);
@@ -60,7 +62,9 @@ const object = (v: unknown): Record<string, unknown> => v && typeof v === "objec
 type Row = ArchitectKeyword & Record<string, unknown>;
 type Workspace = Awaited<ReturnType<typeof loadCanonicalArquitetoWorkspace>>;
 type Outcome = { targetId: string; status: "improved" | "dna_created" | "unchanged" | "insufficient_evidence" | "failed"; message: string; versionId?: string };
-type CostPlan = { paidQueries: number; estimatedCostUsd: { min: number; max: number }; missingDetails: unknown[]; cacheUnavailable?: boolean };
+type CostPlan = { paidQueries: number; estimatedCostUsd: { min: number; max: number }; missingDetails: unknown[]; cacheUnavailable?: boolean;
+  /** D2(a): das `paidQueries`, as que só coletariam a SERP de principal declarada já coberta pelo parecer das sustentações (opcionais, D2(b)). */
+  optionalPaidQueries?: number };
 export type ImprovementRun = {
   version: number; runId: string; brandId: string; actorId: string; createdAt: string;
   state: "prepared" | "collecting" | "applying" | "complete"; decisionHash: string;
@@ -79,6 +83,10 @@ export type ImprovementRun = {
   reusedFromRunId?: string | null;
   /** Busca nova no Google Ads: só sob pedido explícito; os alvos sem proposta ficam à vista para o pedido. */
   discovery?: { requested: boolean; gapTargetIds: string[]; requests: number };
+  /** F5 — o veredito da guarda de retrabalho na preparação (ausente = nunca feito com estes insumos). */
+  rework?: ReworkView;
+  /** F5 — "Refazer mesmo assim" (D11): o motivo dito e quando. */
+  reworkOverride?: { reason: string; at: string };
 };
 /** Uma chamada que custa ou conta cota, para `integration_usage_events`. */
 export type ImprovementUsageEvent =
@@ -185,7 +193,21 @@ async function readInputs(context: PipelineContext, requested?: string[]) {
     const googleAds = String(r.volume_source ?? object(r.demandEvidence).source ?? "").toLowerCase() === "google_ads";
     return { id: r.id, keyword: r.keyword, volume: r.volume_search ?? null, volumeValidated: googleAds && (r.volume_search ?? 0) > 0, signals: signals(r), ownerId: owned.get(r.id) ?? formacaoDoAlvo.get(text(r.articleFormationRef) ?? "") ?? (text(r.articleFormationRef) && object(r.articleFormationDecision).source === "human" ? `formation:${r.articleFormationRef}` : null), published: Boolean(r.isPublished) || brand.pages.some(p => p.keywordId === r.id), territoryRef: text(r.territoryRef), external: false, ...(googleAds ? { googleAdsMeasured: true } : {}) };
   });
-  return { workspace, rows, targets: selected, keywords, waitingDeclaredPrincipal };
+  /*
+   * F5 — ASSUNTO COM LISTA DO MINERADOR NÃO BUSCA (SDD 2026-10-12 §10.3). O
+   * Assunto que a Pesquisa por Assunto já serviu (alguma keyword recebida traz
+   * `subject_discovery.subjectKeywordIds` com ele) tira as sustentações dessa
+   * lista: a busca nova no Google Ads não roda para ele.
+   */
+  const subjectsWithMineradorList = new Set<string>();
+  const subjectIds = new Set(targets.filter(t => t.kind === "subject").map(t => t.id));
+  if (subjectIds.size) for (const row of rows.values()) {
+    const approved = object(object(object(row.canonicalWorkflow).payload).approvedDna);
+    for (const semantic of [object(row.analise_semantica), object(approved.analiseSemantica)]) {
+      for (const id of readSubjectDiscoveryBlock(semantic).subjectKeywordIds) if (subjectIds.has(id) && id !== row.id) subjectsWithMineradorList.add(id);
+    }
+  }
+  return { workspace, rows, targets: selected, keywords, waitingDeclaredPrincipal, subjectsWithMineradorList };
 }
 type EvidenceRead = { evidence: ImprovementEvidence[]; ranking: Record<string, boolean | null> };
 async function evidenceOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]): Promise<EvidenceRead> {
@@ -459,6 +481,8 @@ async function saveRun(context: PipelineContext, current: Awaited<ReturnType<typ
   return readback;
 }
 const decisionHashOf = (run: ImprovementRun) => hash({ version: run.version, brandId: run.brandId, actorId: run.actorId, sources: run.sourceHashes, proposals: run.proposals, keywords: run.keywords, costs: run.costs });
+/** F5 — a mesma prévia, comparada pelo conteúdo (o JSONB reordena chaves; `decisionHash` é do texto). */
+const previewSignatureOf = (run: Pick<ImprovementRun, "version" | "brandId" | "actorId" | "sourceHashes" | "proposals" | "keywords" | "costs">) => stableHash({ version: run.version, brandId: run.brandId, actorId: run.actorId, sources: run.sourceHashes, proposals: run.proposals, keywords: run.keywords, costs: run.costs });
 
 export async function handleArticleImprovement(runtime: ImprovementRuntime, request: ArticleImprovementRequest): Promise<ImprovementRun> {
   const context = runtime.context;
@@ -471,7 +495,22 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     // mesma impressão digital dá a leitura da IA, as medições e a busca; nada
     // disso é chamado de novo. O cache da SERP (grátis) é relido abaixo.
     run.inputsHash = stableHash(improvementInputsFingerprint({ version: run.version, brandId: run.brandId, sourceHashes: run.sourceHashes, keywords: input.keywords }));
-    const seed = improvementReuseSeed(await findReusableRun(context, run.inputsHash), { version: run.version, brandId: run.brandId, inputsHash: run.inputsHash, now: new Date() });
+    /*
+     * F5 · GUARDA DE RETRABALHO (SDD 2026-10-12 §10.3). O registro é a própria
+     * execução anterior (mesmo `inputsHash`, na janela): `same_inputs_reuse`
+     * devolve o que ela já leu. "Refazer mesmo assim" (motivo, D11) chama de
+     * novo a IA, as medições e — se pedida — a busca.
+     */
+    const anterior = await findReusableRun(context, run.inputsHash);
+    const rework = assessRework({ kind: "article_improvement_prepare", fingerprint: run.inputsHash, previous: improvementReworkPrevious(anterior), policy: { sameInputs: "reuse", sameRefusal: "inform" } });
+    const decisao = decideRework(rework, request.reworkOverride);
+    const refazer = decisao.proceed && decisao.overridden && Boolean(decisao.overrideReason);
+    if (refazer) {
+      run.reworkOverride = { reason: decisao.overrideReason!, at: run.createdAt };
+      run.notices.push(`Refeito com os mesmos insumos da preparação de ${formatReworkWhen(anterior!.createdAt)} por pedido (“${decisao.overrideReason}”): a leitura da IA, as medições e a busca pedida foram feitas de novo.`);
+    }
+    if (rework.verdict !== "fresh") run.rework = reworkView(rework)!;
+    const seed = refazer ? null : improvementReuseSeed(anterior, { version: run.version, brandId: run.brandId, inputsHash: run.inputsHash, now: new Date() });
     run.reusedFromRunId = seed?.fromRunId ?? null;
     run.notices.push(...input.waitingDeclaredPrincipal);
     if (seed) {
@@ -483,23 +522,43 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     // 1 · pares da SERP (cache).
     run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, listReading: false });
     // 2 · leitura da IA na lista existente, só para quem ficou sem proposta pronta.
+    const iaAntes = run.editorialAi;
     await readEditorialAi(runtime, run, ranking);
+    const iaChamadaAgora = !iaAntes && Boolean(run.editorialAi) && run.editorialAi!.status !== "skipped" && run.editorialAi!.status !== "off";
     // 2b · leitura da lista pelo código (núcleo do slug) para quem a IA não resolveu.
     run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, editorialPicks: run.editorialAi?.picks });
     // 3 · busca nova no Google Ads só para quem ainda ficou sem nada — e só
     // quando o dono pede (`discover: true`, com o custo dito antes do clique).
     // Nunca automática (2026-10-12). O tempo que a IA usou sai do orçamento da
     // busca: o prepare inteiro fica abaixo de 120 s.
-    const gaps = run.targets.filter(t => run.proposals.find(p => p.targetId === t.id)?.status !== "ready" && run.proposals.find(p => p.targetId === t.id)?.status !== "adequate");
+    // F5 — Assunto com lista da Pesquisa por Assunto do Minerador não busca: as sustentações saem da lista dele.
+    const comLista = (t: ImprovementTarget) => t.kind === "subject" && input.subjectsWithMineradorList.has(t.id);
+    const gaps = run.targets.filter(t => !comLista(t) && run.proposals.find(p => p.targetId === t.id)?.status !== "ready" && run.proposals.find(p => p.targetId === t.id)?.status !== "adequate");
     run.discovery = { requested: request.discover === true, gapTargetIds: gaps.map(t => t.id), requests: 0 };
     const discoverBudgetMs = Math.max(5000, Math.min(35000, PREPARE_SEARCH_DEADLINE_MS - (Date.now() - started)));
-    if (gaps.length && request.discover === true) try { run.keywords = await discover(runtime, run, gaps, run.keywords, run.notices, discoverBudgetMs); } catch (error) { run.notices.push(`Busca nova no Google Ads incompleta: ${error instanceof Error ? error.message : "provider indisponível"}. O acervo continua válido.`); }
+    const assuntosComLista = run.targets.filter(t => comLista(t) && run.proposals.find(p => p.targetId === t.id)?.status !== "ready" && run.proposals.find(p => p.targetId === t.id)?.status !== "adequate");
+    if (assuntosComLista.length && request.discover === true) run.notices.push(`${assuntosComLista.length} Assunto(s) com lista da Pesquisa por Assunto do Minerador não entram na busca nova no Google Ads: as sustentações saem da lista dele (${assuntosComLista.slice(0, 3).map(t => t.theme).join("; ")}${assuntosComLista.length > 3 ? "…" : ""}).`);
+    // F5 — a busca já feita com estes mesmos insumos não é repetida (as keywords dela vêm na semente); só com "Refazer mesmo assim".
+    const buscaJaFeita = !refazer && Boolean(seed) && anterior?.discovery?.requested === true && (anterior.discovery.requests ?? 0) > 0;
+    if (gaps.length && request.discover === true && buscaJaFeita) run.notices.push(`A busca nova no Google Ads já foi feita com estes mesmos insumos em ${formatReworkWhen(anterior!.createdAt)}: as keywords dela foram reaproveitadas, sem chamada nova. Para buscar de novo, use “Refazer mesmo assim” com o motivo.`);
+    else if (gaps.length && request.discover === true) try { run.keywords = await discover(runtime, run, gaps, run.keywords, run.notices, discoverBudgetMs); } catch (error) { run.notices.push(`Busca nova no Google Ads incompleta: ${error instanceof Error ? error.message : "provider indisponível"}. O acervo continua válido.`); }
     await refreshPlan(runtime, run, input.rows, started + (runtime.compositionDeadlineMs ?? COMPOSITION_DEADLINE_MS));
     await planSerpRefreshes(context, run, input);
     // Quem segue sem proposta depois da conferência é quem a busca nova poderia ajudar.
-    run.discovery.gapTargetIds = run.targets.filter(t => { const status = run.proposals.find(p => p.targetId === t.id)?.status; return status !== "ready" && status !== "adequate"; }).map(t => t.id);
+    run.discovery.gapTargetIds = run.targets.filter(t => { const status = run.proposals.find(p => p.targetId === t.id)?.status; return !comLista(t) && status !== "ready" && status !== "adequate"; }).map(t => t.id);
     if (!run.discovery.requested && run.discovery.gapTargetIds.length) run.notices.push(`${run.discovery.gapTargetIds.length} publicado(s) ou Assunto(s) ficaram sem proposta só com a lista da marca. A busca nova no Google Ads não roda sozinha: peça em “Buscar keywords novas no Google Ads”, com o custo dito antes.`);
     run.decisionHash = decisionHashOf(run);
+    /*
+     * F5 — MESMOS INSUMOS, MESMA EXECUÇÃO (as 9 da WifiConecta viram 1). Sem
+     * chamada nova nesta preparação (IA e busca vieram da semente) e com a
+     * mesma prévia (`decisionHash`), a execução anterior — ainda preparada, do
+     * mesmo ator — é devolvida com o aviso, e nenhuma linha nova nasce.
+     */
+    const anteriorPreparada = anterior as unknown as ImprovementRun | null;
+    if (!refazer && seed && !iaChamadaAgora && run.discovery.requests === 0 && anteriorPreparada
+      && anteriorPreparada.state === "prepared" && anteriorPreparada.actorId === run.actorId && previewSignatureOf(anteriorPreparada) === previewSignatureOf(run)) {
+      return { ...anteriorPreparada, ...(run.rework ? { rework: run.rework } : {}) };
+    }
     await new WorkflowRepository(context).create({ subjectType: SUBJECT_TYPE, subjectId: run.runId, stage: "architect", state: "prepared", sourceEntityId: run.runId, payload: run as unknown as Record<string, unknown> });
     return (await findRun(context, run.runId)).run;
   }
@@ -654,6 +713,8 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
   }
   // Uma leitura dos pareceres para todas as composições conferidas (antes: uma por composição).
   type Checked = { proposal: ImprovementProposal; group: ProvisionalArticleGroup };
+  /** D2(a): principais declaradas cujo parecer veio das sustentações — a coleta paga delas é opcional. */
+  const principaisPeloApoio = new Set<string>();
   const judge = async (batch: Checked[], allowShrink: boolean): Promise<ImprovementProposal[]> => {
     if (!batch.length) return [];
     let assessments: Awaited<ReturnType<typeof listArticleFormationSerpAssessments>> = [];
@@ -712,6 +773,12 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
           if (proposal.evidenceBasis === "editorial_ai") proposal.reasons.push("A IA sugeriu esta composição, mas a SERP dela não confirmou: nada entra.");
           if (proposal.evidenceBasis === "list_core") proposal.reasons.push("A lista sugeriu esta composição, mas a SERP dela não confirmou: nada entra.");
         } else if (assessment.payload.verdict === "INCONCLUSIVE") proposal.reasons.push("SERP da composição inconclusiva nas quatro lentes: o aceite humano confirma este fundamento editorial, sem tratar a inconclusão como prova de compatibilidade.");
+        // D2(a): o parecer veio das sustentações, sem custo; a coleta da própria principal declarada fica opcional (D2(b)).
+        const apoio = (assessment?.payload.assessment as { supportBasis?: SerpFormationAssessment["supportBasis"] } | undefined)?.supportBasis;
+        if (proposal.status === "ready" && apoio && apoio.principalKeywordId === proposal.principalId) {
+          proposal.reasons.push(`${apoio.reason} “Validar no Google” é opcional (D2b): só coletaria a SERP da própria principal declarada.`);
+          principaisPeloApoio.add(apoio.principalKeywordId);
+        }
       } catch { unreadable(proposal); }
     }
     return shrunk;
@@ -753,7 +820,10 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
     catch { unreadable(proposal); }
   }
   await judge(reservas, false);
-  run.costs = { paidQueries: calls, estimatedCostUsd: { min: Number(minimum.toFixed(6)), max: Number(maximum.toFixed(6)) }, missingDetails: details, ...(cacheUnavailable ? { cacheUnavailable: true } : {}) };
+  // D2(a) é o padrão: as consultas que só serviriam à SERP da principal declarada já coberta pelas sustentações são opcionais (D2(b)).
+  const textosOpcionais = new Set([...principaisPeloApoio].map(id => run.keywords.find(k => k.id === id)?.keyword).filter((value): value is string => Boolean(value)));
+  const opcionais = textosOpcionais.size ? details.filter(raw => textosOpcionais.has(String(object(raw).keyword ?? ""))).length : 0;
+  run.costs = { paidQueries: calls, estimatedCostUsd: { min: Number(minimum.toFixed(6)), max: Number(maximum.toFixed(6)) }, missingDetails: details, ...(cacheUnavailable ? { cacheUnavailable: true } : {}), ...(opcionais ? { optionalPaidQueries: Math.min(opcionais, calls) } : {}) };
 }
 
 /*
@@ -990,9 +1060,18 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   const final = { ...proposal, principalId, memberIds: members }, group = makeGroup(target, final, input.rows);
   // No provider call here: the approved final composition is evaluated against
   // the cache in this same action, without a second editorial confirmation.
-  await serpOperation(context, group, "execute", 0);
+  // D2(a): principal declarada no plano aprovado, sem volume — o parecer pode vir das sustentações (sem custo).
+  const principalDeclarada = target.kind === "subject" && Boolean(target.declaredPrincipalId) && target.declaredPrincipalId === principalId;
+  const semParecerDaDeclarada = () => refusal(`A principal declarada “${input.rows.get(principalId)?.keyword ?? principalId}” não tem SERP no cache e nenhuma sustentação com volume do artigo tem as 4 lentes no cache: não há base para o parecer pelas sustentações (D2a). Nada foi gravado. Para gravar, use “Validar no Google” (pago; o custo aparece antes de autorizar).`);
+  try { await serpOperation(context, group, "execute", 0); }
+  catch (error) { if (principalDeclarada && !hasSearchVolume(input.rows.get(principalId)?.volume_search)) throw semParecerDaDeclarada(); throw error; }
   const assessment = (await listArticleFormationSerpAssessments(context)).find(a => a.candidateRef === group.id && a.payload.formationBaseHash === baseHash(group));
-  if (!assessment) throw refusal("O parecer da composição final não foi relido.");
+  if (!assessment) {
+    if (principalDeclarada && !hasSearchVolume(input.rows.get(principalId)?.volume_search)) throw semParecerDaDeclarada();
+    throw refusal("O parecer da composição final não foi relido.");
+  }
+  const apoioDoParecer = (assessment.payload.assessment as { supportBasis?: SerpFormationAssessment["supportBasis"] }).supportBasis ?? null;
+  if (apoioDoParecer && (!principalDeclarada || apoioDoParecer.principalKeywordId !== principalId)) throw refusal("O parecer pelas sustentações só vale para a principal declarada no plano aprovado deste artigo. Nada foi gravado.");
   const interpretation = object(assessment.payload.interpretation), lenses = object(interpretation.lenses);
   const mismatch = serpCompositionMismatch(serpAssessmentComposition(assessment.payload.assessment, lenses), { keywordIds: members, principalKeywordId: principalId, roles: Object.fromEntries(group.keywordIds.map(id => [id, id === group.principalSuggestion.keywordId ? "principal" as const : "secundaria" as const])) });
   if (mismatch) throw refusal(`O parecer não responde à composição aceita: ${mismatch}.`);
@@ -1074,6 +1153,8 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
     // A SERP tem a última palavra: intenção e funil que ela decidiu entram no DNA.
     payload = ArticleDNASchema.parse(classificacao ? applySerpDecisionToArticle(comClassificacao, classificacao) : comClassificacao);
   }
+  // D2(a) — de onde veio o parecer fica escrito no DNA (serpStrategy.rationale), trocado a cada versão; não é pendência.
+  payload = ArticleDNASchema.parse(applySerpSupportBasisProvenance(payload, apoioDoParecer?.reason ?? null, recalculated.serpStrategy));
   payload = withHumanArticleApproval(payload, { entityId: assessment.payload.assessment.id, versionId: `${assessment.payload.assessment.id}:${assessment.payload.formationBaseHash}`, contentHash: assessment.payload.assessment.contentHash });
   const formationRef = text(input.rows.get(target.memberIds[0] ?? target.id)?.articleFormationRef) ?? `article-formation:${stableUuid(context.brandId, target.id, "improvement")}`;
   // The provider uses the published identity; the workbench uses the working
@@ -1093,7 +1174,7 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   });
   // Build and validate the DNA before changing its working copy. Existing approved
   // versions remain immutable if any later write fails.
-  const version = await createVersionEnvelope({ entityId: payload.articleId, versionNumber: (currentArticle?.versionNumber ?? 0) + 1, previousVersionId: currentArticle?.versionId ?? null, origin: "human", changeReason: `Melhorar publicados e formar Assuntos: composição e diferenciação aceitas na prévia. [run:${run.runId}]`, createdBy: context.actorUserId, payload });
+  const version = await createVersionEnvelope({ entityId: payload.articleId, versionNumber: (currentArticle?.versionNumber ?? 0) + 1, previousVersionId: currentArticle?.versionId ?? null, origin: "human", changeReason: `Melhorar publicados e formar Assuntos: composição e diferenciação aceitas na prévia.${apoioDoParecer ? ` ${apoioDoParecer.reason}` : ""} [run:${run.runId}]`, createdBy: context.actorUserId, payload });
   const issues = articleApprovalRevalidationIssues({ version, authorizedBrandId: context.brandId });
   if (issues.length) throw refusal(`A aprovação não passou na revalidação: ${issues.map(i => i.detail).join(" ")}`);
   await responseData(await handleArchitectWorkspacePatch(internalRequest("/api/arquiteto/workspace", { brandId: context.brandId, updates }, "PATCH"), context));

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Loader2, Tags, X } from "lucide-react";
 import { EditorialGroupTag } from "@/components/editorial/group-tag";
-import { EDITORIAL_GROUP_COLOR_CLASSES, type EditorialGroupSummary } from "@/lib/editorial/editorial-groups";
+import { EDITORIAL_GROUP_COLOR_CLASSES, EDITORIAL_GROUP_COLOR_LABELS, EDITORIAL_GROUP_COLORS, editorialGroupCustomName, isEditorialGroupColor, type EditorialGroupColor, type EditorialGroupSummary } from "@/lib/editorial/editorial-groups";
 import type { ArticleGroupPreviewEntry } from "@/lib/editorial/article-group-core";
 import type { ArticleGroupMoveResponse, ArticleGroupTagApplyResponse, ArticleGroupTagPreviewResponse } from "@/components/editorial/use-editorial-groups";
 
@@ -157,14 +157,18 @@ export function ArticleGroupTaggingDialog({ open, onClose, groupById, labelFor, 
 const MOVE_RETURN = "__voltar_ao_grupo_das_keywords__";
 
 /**
- * Rodapé: "Grupo ▸ Mover para <grupo> / Voltar ao grupo das keywords" para
- * os artigos selecionados — o mesmo gesto do Minerador. Muda só o grupo.
+ * Rodapé: "Grupo ▸ Mover para <cor> / Voltar ao grupo das keywords" para os
+ * artigos selecionados — o mesmo gesto do Minerador. 2026-10-12 · cores fixas:
+ * as 5 cores da paleta, sempre (nada para criar antes); o nome próprio do grupo
+ * da cor aparece entre parênteses. Muda só o grupo.
  */
-export function ArticleGroupMoveSelect({ activeGroups, disabled = false, className = "", onMove }: {
-  activeGroups: readonly EditorialGroupSummary[];
+export function ArticleGroupMoveSelect({ groups = [], disabled = false, className = "", onMove }: {
+  /** Os grupos da marca, só para mostrar o nome próprio de uma cor. */
+  groups?: readonly EditorialGroupSummary[];
   disabled?: boolean;
   className?: string;
-  onMove: (groupId: string | null) => void;
+  /** A cor escolhida (o grupo dela é garantido no servidor por quem chama) ou null = voltar ao grupo das keywords. */
+  onMove: (color: EditorialGroupColor | null) => void;
 }) {
   return (
     <select
@@ -172,13 +176,12 @@ export function ArticleGroupMoveSelect({ activeGroups, disabled = false, classNa
       disabled={disabled}
       aria-label="Grupo dos artigos selecionados"
       data-article-group-move
-      title="Mover os artigos selecionados para um grupo, ou devolvê-los ao grupo das keywords. Muda só o grupo: definição, versão, status e aprovação ficam como estão."
-      onChange={event => { const escolha = event.target.value; event.currentTarget.value = ""; if (escolha) onMove(escolha === MOVE_RETURN ? null : escolha); }}
+      title="Mover os artigos selecionados para uma cor, ou devolvê-los ao grupo das keywords. Muda só o grupo: definição, versão, status e aprovação ficam como estão."
+      onChange={event => { const escolha = event.target.value; event.currentTarget.value = ""; if (escolha === MOVE_RETURN) onMove(null); else if (isEditorialGroupColor(escolha)) onMove(escolha); }}
       className={`min-h-9 shrink-0 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
     >
       <option value="">Grupo</option>
-      {activeGroups.length === 0 ? <option value="" disabled>Crie um grupo no seletor do topo</option> : null}
-      {activeGroups.map(group => <option key={group.id} value={group.id}>Mover para {group.name}</option>)}
+      {EDITORIAL_GROUP_COLORS.map(color => { const nome = editorialGroupCustomName(color, groups); return <option key={color} value={color}>Mover para {EDITORIAL_GROUP_COLOR_LABELS[color]}{nome ? ` (${nome})` : ""}</option>; })}
       <option value={MOVE_RETURN}>Voltar ao grupo das keywords</option>
     </select>
   );
@@ -188,7 +191,7 @@ export function ArticleGroupMoveSelect({ activeGroups, disabled = false, classNa
 export function articleGroupMoveNotice(result: ArticleGroupMoveResponse, destino: string | null): { message: string; tone: "success" | "warning" | "error" } {
   if (!result.ok) return { message: result.message, tone: "error" };
   const partes = [destino
-    ? `${result.moved.length} artigo(s) movido(s) para o grupo "${destino}"`
+    ? `${result.moved.length} artigo(s) movido(s) para ${destino}`
     : `${result.returnedToKeywords.length} artigo(s) de volta ao grupo das keywords`];
   if (result.unchanged.length) partes.push(`${result.unchanged.length} já estava(m) assim`);
   if (result.refused.length) partes.push(`${result.refused.length} recusado(s): ${result.refused[0].message}`);

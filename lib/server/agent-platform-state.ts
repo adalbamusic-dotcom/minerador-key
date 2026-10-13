@@ -5,7 +5,23 @@ import type { TopicCandidate } from "@/lib/agent/topic-match";
 import { resolveEditorialKeywordStatus } from "@/lib/minerador/editorial-status";
 import { radarFrozenObservedAtOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
 import { buildTenantPath } from "@/lib/tenant-routing";
+import { editorialGroupFilterMatches } from "@/lib/editorial/editorial-groups";
+import type { EditorialGroupMcpScope } from "@/lib/editorial/editorial-group-scope";
+import { readArticleGroupMemberships } from "@/lib/editorial/article-groups-store";
 import { getOperationalClient, mapPersistenceError } from "./editorial-db";
+
+/**
+ * 2026-10-12 · F6 (SDD do plano declarado e grupos, §6.5 e §8) · o recorte por
+ * grupo do retrato. Sem ele, as MESMAS consultas e o mesmo retrato de antes.
+ * Com ele: keywords e Assuntos pelo `group_id`; artigos, Silos (os que têm
+ * algum artigo do grupo), itens do Radar e documentos pelo grupo EFETIVO do
+ * artigo (`readArticleGroupMemberships`, o ponto único da rota de grupos).
+ */
+export type PlatformStateGroupScope = Exclude<EditorialGroupMcpScope, { kind: "all" }>;
+
+function filtroDoRecorte(scope: PlatformStateGroupScope) {
+  return scope.kind === "none" ? { kind: "none" as const } : { kind: "groups" as const, color: scope.color, groupIds: scope.groupIds };
+}
 import { readMcpRuntimeConfig } from "./mcp-runtime-config";
 
 /**
@@ -74,9 +90,12 @@ function ultimaPorEntidade(rows: Row[]): Row[] {
   return [...porEntidade.values()];
 }
 
-export async function readPlatformState(brandId: string): Promise<PlatformStateSnapshot> {
+export async function readPlatformState(brandId: string, options: { group?: PlatformStateGroupScope | null } = {}): Promise<PlatformStateSnapshot> {
   const db = getOperationalClient();
   const truncated: string[] = [];
+  const recorte = options.group ?? null;
+  const filtro = recorte ? filtroDoRecorte(recorte) : null;
+  const doGrupo = (groupId: unknown) => !filtro || editorialGroupFilterMatches(filtro, typeof groupId === "string" ? groupId : null);
 
   /* ---- Marca ---- */
   const marca = await db.from("marcas").select("id,nome,site_url,nicho").eq("id", brandId).maybeSingle();
@@ -85,9 +104,10 @@ export async function readPlatformState(brandId: string): Promise<PlatformStateS
   const brandName = texto(brandRow.nome) || "Marca";
 
   /* ---- Minerador ---- */
-  const keywords = await paginar((from, to) => db.from("minerador_keywords")
-    .select("id,status").eq("brand_id", brandId).is("deleted_at", null).order("id").range(from, to), TETO.keywordsLidas);
-  if (keywords.cortado) truncated.push(`minerador: contadas as primeiras ${TETO.keywordsLidas} keywords`);
+  const keywordsLidas = await paginar((from, to) => db.from("minerador_keywords")
+    .select(recorte ? "id,status,group_id" : "id,status").eq("brand_id", brandId).is("deleted_at", null).order("id").range(from, to), TETO.keywordsLidas);
+  if (keywordsLidas.cortado) truncated.push(`minerador: contadas as primeiras ${TETO.keywordsLidas} keywords`);
+  const keywords = recorte ? { ...keywordsLidas, rows: keywordsLidas.rows.filter(row => doGrupo(row.group_id)) } : keywordsLidas;
   const byStatus: Record<string, number> = {};
   const aprovadas: string[] = [];
   for (const row of keywords.rows) {
@@ -97,13 +117,17 @@ export async function readPlatformState(brandId: string): Promise<PlatformStateS
     if (status === "aprovado") aprovadas.push(String(row.id));
   }
 
-  const assuntos = await db.from("minerador_keywords")
-    .select("id,keyword,status,subject:analise_semantica->keyword_subject")
+  const assuntosBase = db.from("minerador_keywords")
+    .select(recorte ? "id,keyword,status,group_id,subject:analise_semantica->keyword_subject" : "id,keyword,status,subject:analise_semantica->keyword_subject")
     .eq("brand_id", brandId).is("deleted_at", null)
-    .filter("analise_semantica->keyword_subject->>declared", "eq", "true")
-    .order("keyword").limit(TETO.assuntos + 1);
+    .filter("analise_semantica->keyword_subject->>declared", "eq", "true");
+  /* Com o recorte, o filtro do grupo vai à consulta (o teto conta só os do grupo). */
+  const assuntosDoRecorte = !filtro ? assuntosBase
+    : filtro.kind === "none" ? assuntosBase.is("group_id", null)
+      : assuntosBase.in("group_id", filtro.groupIds.length ? [...filtro.groupIds] : ["00000000-0000-0000-0000-000000000000"]);
+  const assuntos = await assuntosDoRecorte.order("keyword").limit(TETO.assuntos + 1);
   if (assuntos.error) mapPersistenceError(assuntos.error);
-  const assuntoRows = (assuntos.data || []) as Row[];
+  const assuntoRows = ((assuntos.data || []) as unknown as Row[]).filter(row => doGrupo(row.group_id));
   if (assuntoRows.length > TETO.assuntos) truncated.push(`minerador: listados os primeiros ${TETO.assuntos} Assuntos`);
 
   /* ---- Arquiteto: keywords recebidas e estado dos artigos ---- */
@@ -120,7 +144,19 @@ export async function readPlatformState(brandId: string): Promise<PlatformStateS
   const artigosRows = await paginar((from, to) => db.from("editorial_artifact_versions")
     .select("entity_id,version_number,articleId:payload->>articleId,promise:payload->>promise,slug:payload->>suggestedSlug,siloId:payload->>siloId,hierarchy:payload->>hierarchy,journeyStage:payload->>journeyStage,mainIntent:payload->>mainIntent,principalKeywordId:payload->>principalKeywordId,canonical:payload->>canonical")
     .eq("marca_id", brandId).eq("artifact_type", "article_dna").order("entity_id").range(from, to), TETO.artigos * 20);
-  const artigos = ultimaPorEntidade(artigosRows.rows).slice(0, TETO.artigos);
+  /* 2026-10-12 · F6 · com o recorte, o grupo efetivo de cada artigo (lido uma vez por id; sem recorte, nada é lido). */
+  const grupoDoArtigo = new Map<string, string | null>();
+  const lerGruposDosArtigos = async (ids: readonly string[]) => {
+    const faltam = [...new Set(ids)].filter(id => id && !grupoDoArtigo.has(id));
+    if (!recorte || !faltam.length) return;
+    const lidas = await readArticleGroupMemberships(db, brandId, { articleIds: faltam });
+    for (const id of faltam) grupoDoArtigo.set(id, lidas.ok ? lidas.memberships.get(id)?.groupId ?? null : null);
+  };
+  const artigoDoGrupo = (id: string | null) => !recorte || (Boolean(id) && doGrupo(grupoDoArtigo.get(id as string) ?? null));
+  const idDoArtigo = (row: Row) => texto(row.articleId) || String(row.entity_id);
+  const ultimosArtigos = ultimaPorEntidade(artigosRows.rows);
+  await lerGruposDosArtigos(ultimosArtigos.map(idDoArtigo));
+  const artigos = ultimosArtigos.filter(row => artigoDoGrupo(idDoArtigo(row))).slice(0, TETO.artigos);
   if (artigos.length >= TETO.artigos) truncated.push(`arquiteto: listados os primeiros ${TETO.artigos} artigos`);
 
   const principalIds = [...new Set(artigos.map(row => texto(row.principalKeywordId)).filter((id): id is string => Boolean(id)))];
@@ -170,9 +206,19 @@ export async function readPlatformState(brandId: string): Promise<PlatformStateS
     .eq("marca_id", brandId).eq("stage", "radar").eq("subject_type", "article").limit(TETO.artigos);
   if (radar.error) mapPersistenceError(radar.error);
 
-  const documentos = await db.from("content_documents")
+  const documentosLidos = await db.from("content_documents")
     .select("id,article_id,title,status:payload->>status").eq("marca_id", brandId).order("updated_at", { ascending: false }).limit(TETO.documentos);
-  if (documentos.error) mapPersistenceError(documentos.error);
+  if (documentosLidos.error) mapPersistenceError(documentosLidos.error);
+  /* 2026-10-12 · F6 · o item do Radar e o documento herdam o grupo pelo artigo. */
+  const radarLido = ((radar.data || []) as unknown as Row[]);
+  await lerGruposDosArtigos([...radarLido.map(row => String(row.subject_id)), ...((documentosLidos.data || []) as Row[]).map(row => texto(row.article_id) || "")]);
+  const radarDoRecorte = radarLido.filter(row => artigoDoGrupo(String(row.subject_id)));
+  const documentos = { data: ((documentosLidos.data || []) as Row[]).filter(row => artigoDoGrupo(texto(row.article_id))) };
+  const artigosDoRecorte = new Set(artigos.map(idDoArtigo));
+  const silosDoRecorte = (silos: Row[]) => !recorte ? silos : silos.filter(silo => {
+    const membros = [texto(silo.pillarArticleId), ...(Array.isArray(silo.supportArticleIds) ? (silo.supportArticleIds as unknown[]).map(String) : [])];
+    return membros.some(id => id && artigosDoRecorte.has(id));
+  });
 
   /* ---- Publicados ---- */
   const publicados = await db.from("brand_site_catalog_entries")
@@ -225,7 +271,7 @@ export async function readPlatformState(brandId: string): Promise<PlatformStateS
           canonical: texto(row.canonical),
         };
       }),
-      silos: silosAtuais.slice(0, TETO.silos).map(row => {
+      silos: silosDoRecorte(silosAtuais).slice(0, TETO.silos).map(row => {
         const siloId = texto(row.siloId) || String(row.entity_id);
         const pagina = paginaPorSilo.get(siloId);
         return {
@@ -245,7 +291,7 @@ export async function readPlatformState(brandId: string): Promise<PlatformStateS
     },
     radar: {
       // O parser tipado do supabase-js não lê o índice -1; o PostgREST lê (conferido em 2026-09-26).
-      items: ((radar.data || []) as unknown as Row[]).map(row => {
+      items: radarDoRecorte.map(row => {
         const articleId = String(row.subject_id);
         // A precedência Amazon > YouTube > Google é a da casa: remonta os carimbos e pergunta a ela.
         const finalizedAt = radarFrozenObservedAtOfAnalysis({
@@ -276,6 +322,13 @@ export async function readPlatformState(brandId: string): Promise<PlatformStateS
     },
     truncated,
     readAt: new Date().toISOString(),
+    ...(recorte ? {
+      group: {
+        choice: recorte.kind === "none" ? "sem-grupo" : recorte.color,
+        description: recorte.description,
+        groups: recorte.kind === "none" ? [] : recorte.groups.map(item => ({ groupId: item.groupId, color: item.color, colorLabel: item.colorLabel, name: item.name, text: item.text })),
+      },
+    } : {}),
   };
 }
 

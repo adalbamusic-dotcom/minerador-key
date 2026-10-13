@@ -315,6 +315,9 @@ test("sem Assunto: nenhuma leitura nova, a gravação é a de antes", async () =
   const version = await envelope("article-marketing-clinicas", artigo());
   await appendArquitetoArtifact(context(db), "article_dna", version);
   assert.deepEqual(db.calls.map(call => `${call.table}|${call.op}|${call.columns}`), [
+    // F5 (guarda de retrabalho, 2026-10-12): ArticleDNA NOVO sem Assunto lê UMA vez o grupo da principal antes de
+    // gravar (caminho paralelo: artigo solto em grupo com plano). Sem grupo, nada mais; versão nova de artigo existente não lê.
+    "minerador_keywords|select|id,keyword,group_id",
     "editorial_artifact_versions|select|*",
     "editorial_artifact_versions|insert|*",
     // F2 dos grupos (2026-10-12): depois de gravar, UMA leitura do grupo das keywords do artigo; sem grupo, nada mais.

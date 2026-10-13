@@ -7,6 +7,7 @@ import {
   IMPROVEMENT_NOTHING_ANYWHERE_SENTENCE,
   IMPROVEMENT_NO_PENDING_SENTENCE,
   improvementApplyLabel,
+  improvementRowApplyLabel,
   improvementValidateLabel,
   resolveImprovementNextStep,
   type ImprovementNextStepInput,
@@ -74,8 +75,10 @@ test("os números 1 · 2 · 3 ficam só no cartão; a fileira mostra os outros a
   const fileira = painel.slice(painel.indexOf("<div className=\"flex flex-wrap gap-2\">"), painel.indexOf("{confirm && run &&"));
   assert.ok(fileira.length > 0);
   assert.doesNotMatch(fileira, /[123] · /, "nenhum botão numerado na fileira");
-  assert.match(fileira, /improvementApplyLabel\(selected\.size, false\)/);
-  assert.match(fileira, /Gravar sem validar/);
+  // F5 (backlog): o rótulo da fileira sai de uma função só; "Gravar sem validar" só com validação obrigatória pendente.
+  assert.match(fileira, /improvementRowApplyLabel\(\{ selectedCount: selected\.size/);
+  assert.equal(improvementRowApplyLabel({ selectedCount: 3, paidQueries: 4 }), "Gravar sem validar (3)");
+  assert.equal(improvementRowApplyLabel({ selectedCount: 3, paidQueries: 4, optionalPaidQueries: 1 }), "Gravar sem validar (3)");
   // O parágrafo dos três passos fica no InfoHint "Como funciona" (pedido do dono, 2026-09-30), não num bloco aberto.
   assert.match(painel, /<InfoHint title="Como funciona" description="1 · Buscar keywords/);
   assert.doesNotMatch(painel, /<summary className="cursor-pointer">Como funciona<\/summary>/);

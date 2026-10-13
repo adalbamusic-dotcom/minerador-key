@@ -386,7 +386,8 @@ test("a linha re-renderiza ao entrar em Links: a coluna tem célula", () => {
    */
   assert.equal(codigo.includes("const articleRowRevision = useMemo("), true);
   // E o papel lido do SiloDNA (Artigos e Links, 2026-09-30) também re-renderiza a linha.
-  assert.equal(codigo.includes("() => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId })"), true);
+  // 2026-10-12: os selos do plano declarado (SDD §9 item 6) também redesenham a linha.
+  assert.equal(codigo.includes("() => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor })"), true);
   assert.equal(codigo.includes("revision={articleRowRevision}"), true);
   assert.equal(codigo.includes("revision={articleTableRenderRevision}"), false, "as linhas não podem mais comparar a revisão antiga");
 });

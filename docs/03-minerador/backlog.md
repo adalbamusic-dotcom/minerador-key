@@ -1,5 +1,18 @@
 # Backlog — Minerador
 
+## Etiqueta de grupo: cores fixas, topbar global e por área — 2026-10-12
+
+SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` §9.1-A. Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Cada cor é o grupo: select de cores na etiqueta, sem "Novo grupo"; nome próprio do grupo da cor ao lado.
+- [x] Etiqueta fixa na topbar global, ao lado do sino, na hora (Minerador, Arquiteto, Radar); módulos só dão o rodapé.
+- [x] Escolha por área (lembrança por marca e área com a cor; `?grupo=<cor>`; uuid antigo aceito).
+- [x] Lista de grupos uma vez por sessão, em segundo plano, com cache local; Minerador não espera com Todos/Sem grupo; artigos do Arquiteto/Radar só depois da mesa.
+- [x] Mover por cor (Minerador e Arquiteto/Radar) com o grupo da cor garantido no servidor; plano do Silo por cor.
+- [ ] Dono: homologar na tela (abrir as três áreas, trocar cores em cada uma, mover keywords/artigos para uma cor nova, F5, link com `?grupo=laranja`, dark mode e 360/768/1440 px).
+- [ ] Renomear/recolorir/arquivar pela tela (a rota PATCH existe; com cores fixas, recolorir pode juntar duas cores — decidir com o dono).
+- [ ] Medir o peso de `GET /api/editorial/groups/articles` (435 ms só no banco na AdalbaPro) e, se preciso, um índice/leitura estreita própria.
+
 ## Grupos por cor (F1) — 2026-10-12
 
 SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md`. Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
@@ -11,11 +24,11 @@ SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md`. Detalhe em 
 - [x] Funciona sem a migration (409 `GROUPS_NOT_AVAILABLE` esconde o recurso).
 - [x] Testes com fixtures, incluindo isolamento entre marcas.
 - [ ] Dono: aplicar a M1 e homologar na tela.
-- [ ] Renomear, recolorir e arquivar pela tela (a rota PATCH já existe; falta o menu no seletor).
+- [x] Renomear, recolorir e arquivar pela tela — 2026-10-12: "Gerenciar a cor" no menu da etiqueta (nome opcional, trocar só para cor livre, liberar só vazia); validado manualmente: não.
 - [ ] Importação de keywords com grupo ativo carimbando o grupo (hoje entram "Sem grupo").
 - [ ] F2: seletor no Arquiteto e no Radar, `groupId` nas mesas, `editorial_group_articles` com prévia.
 - [x] F3/F4: plano declarado (importar o plano colado ou a tabela, principal declarada, D2-bis, papel no Silo) — código e testes em 2026-10-12; **validado manualmente: não** (ver "Plano declarado do Silo" abaixo).
-- [ ] F5: guarda de retrabalho e "Histórico do grupo" (lê `editorial_group_events`).
+- [ ] F5: guarda de retrabalho — "Histórico do grupo" feito em 2026-10-12 (lê `editorial_group_events` e as linhas `operation_ledger`, tolerando que não existam); o guarda em si é da frente F5 (validado manualmente: não).
 - [ ] F6: Redator/Publicações por grupo e `groupId` no MCP (`declare_silo_plan` já entrou na F4).
 
 ## Plano declarado do Silo (F3/F4) — 2026-10-12
@@ -26,8 +39,10 @@ SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` (§18.1). **
 - [x] Fase B: "Importar plano do Silo" (tela, rota e `declare_silo_plan` pelo mesmo núcleo), D2-bis, grupo das sustentações.
 - [ ] Dono: deploy da F3 sozinha, depois da F4; homologar o diálogo (dark mode, 360/768/1024/1440 px, foco, Esc) e o runbook da §11 na WifiConecta.
 - [ ] D2(a): parecer SERP do artigo pelas sustentações com volume quando a principal declarada não tem volume (hoje a gravação no Arquiteto pede as 4 lentes da principal, pagas).
-- [ ] "Tirar do plano" (retirar o plano de um Assunto sem retirar o Assunto) pela tela; hoje só reimportando o plano ou retirando o Assunto.
-- [ ] Menu "Renomear/Recolorir" do grupo na tela (a rota PATCH existe).
+- [x] "Tirar do plano" (retirar o plano de um Assunto sem retirar o Assunto) pela tela — 2026-10-12: Gerenciar a cor → "Plano do Silo" → prévia → confirmação; núcleo `withdrawFromDeclaredPlanWithCore`; validado manualmente: não.
+- [ ] Dono decide: "Tirar do plano" pelo MCP (com prévia, `decisionHash` e aceite no chat, escopo `platform.decide`) — hoje só pela tela.
+- [ ] Nome do ator no "Histórico do grupo" (hoje "Você" ou "Outro membro · id curto", sem expor e-mail).
+- [x] Menu "Renomear/Recolorir" do grupo na tela — 2026-10-12 ("Gerenciar a cor").
 
 ## Núcleo da Lógica e da aprovação no servidor — 2026-09-28
 

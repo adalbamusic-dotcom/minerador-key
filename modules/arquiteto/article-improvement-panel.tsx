@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { InfoHint } from "@/components/info-hint";
 import { OperationProgress } from "./operation-progress";
 import { ARTICLE_IMPROVEMENT_LABEL, IMPROVEMENT_AI_LABEL, IMPROVEMENT_LIST_CORE_LABEL, isListReading } from "@/lib/arquiteto/article-improvement";
-import { ARTICLES_NEW_ANCHOR, ARTICLES_SOBRAS_ANCHOR, improvementApplyLabel, improvementValidateLabel, resolveImprovementNextStep } from "@/lib/arquiteto/article-improvement-next-step";
+import { ARTICLES_NEW_ANCHOR, ARTICLES_SOBRAS_ANCHOR, improvementRowApplyLabel, improvementValidateLabel, resolveImprovementNextStep } from "@/lib/arquiteto/article-improvement-next-step";
+import { ReworkNotice } from "@/components/editorial/rework-notice";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
 import { improvementDiscoveryCostSentence } from "@/lib/arquiteto/article-improvement-reuse";
 
@@ -78,7 +79,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     }).catch(() => { if (active) setError("Não foi possível ler a análise anterior. Toque em “Atualizar”."); });
     return () => { active = false; mounted.current = false; };
   }, [brandId]);
-  async function send(action: "prepare" | "collect" | "apply" | "status", current = run, options: { discover?: boolean } = {}): Promise<ImprovementRun> {
+  async function send(action: "prepare" | "collect" | "apply" | "status", current = run, options: { discover?: boolean; reworkReason?: string } = {}): Promise<ImprovementRun> {
     const response = await fetch("/api/arquiteto/article-improvement", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ brandId, action,
       ...(action !== "prepare" ? { runId: current?.runId } : {}),
       ...(action === "collect" || action === "apply" ? { decisionHash: current?.decisionHash } : {}),
@@ -87,6 +88,8 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
       ...(action === "prepare" && selectedTargetIds.length ? { targetIds: [...selectedTargetIds] } : {}),
       // Busca nova no Google Ads só quando o dono pede, depois de ver o custo (2026-10-12).
       ...(action === "prepare" && options.discover ? { discover: true } : {}),
+      // F5 — "Refazer mesmo assim" (D11): os mesmos insumos de novo, só com o motivo dito.
+      ...(action === "prepare" && options.reworkReason ? { reworkOverride: { reason: options.reworkReason } } : {}),
     }) });
     // The platform answers a timeout with an HTML page, not JSON.
     const body = await response.json().catch(() => { throw new Error("TEMPO_ESGOTADO"); });
@@ -94,7 +97,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     if (!mounted.current || body.data.brandId !== brandId) throw new Error("A marca ativa mudou; consulte o andamento na marca de origem.");
     setRun(body.data); setLeaseActive(Boolean(body.data.leaseUntil && Date.parse(body.data.leaseUntil) > Date.now())); return body.data as ImprovementRun;
   }
-  async function execute(action: "prepare" | "collect" | "apply" | "status", options: { discover?: boolean } = {}) {
+  async function execute(action: "prepare" | "collect" | "apply" | "status", options: { discover?: boolean; reworkReason?: string } = {}) {
     setBusy(true); setError(null); setConfirm(null);
     const startedAt = Date.now();
     setActivity({ action, startedAt }); setNow(startedAt);
@@ -164,6 +167,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     leaseActive,
     accepted: Boolean(run?.acceptedIds),
     paidQueries: run?.costs.paidQueries ?? 0,
+    optionalPaidQueries: run?.costs.optionalPaidQueries ?? 0,
     costMaxUsd: run?.costs.estimatedCostUsd.max ?? 0,
     selectedCount: selected.size,
     readyCount: ready,
@@ -204,6 +208,9 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
       </div>
       <button className={primaryButtonClassName} disabled={nextDisabled} title={next.kind === "select" ? "Marque ao menos uma linha na tabela abaixo." : undefined} onClick={runNext}>{next.button}</button>
     </div>
+    {/* F5 — a guarda de retrabalho, acima dos botões: "já feito com os mesmos insumos em <data>". */}
+    {run?.rework && !run.acceptedIds && run.state === "prepared" && <ReworkNotice rework={run.rework} busy={busy || leaseActive} buttonClassName={buttonClassName} testId="architect-improvement-rework"
+      onOverride={reason => void execute("prepare", { reworkReason: reason })} />}
     {/* Os números (1 · 2 · 3) ficam só no cartão: na fileira, os outros atos
         aparecem sem número para não disputar com o próximo passo. */}
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -220,7 +227,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
       <div className="flex flex-wrap gap-2">
         {collecting && !inCard("resume_collect") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("collect")}>Continuar validação (sem custo novo)</button>}
         {!pendingApply && !collecting && !inCard("prepare") && <button className={buttonClassName} disabled={!brandId || busy || leaseActive} onClick={() => void execute("prepare")}>Buscar keywords (grátis)</button>}
-        {pendingApply && !collecting && !inCard("resume_apply") && !inCard("apply") && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => run?.acceptedIds ? void execute("apply") : setConfirm("apply")}>{run?.acceptedIds ? "Continuar melhorias aceitas" : needsCost ? `Gravar sem validar (${selected.size})` : improvementApplyLabel(selected.size, false)}</button>}
+        {pendingApply && !collecting && !inCard("resume_apply") && !inCard("apply") && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => run?.acceptedIds ? void execute("apply") : setConfirm("apply")}>{improvementRowApplyLabel({ selectedCount: selected.size, paidQueries: needsCost ? run?.costs.paidQueries ?? 0 : 0, optionalPaidQueries: run?.costs.optionalPaidQueries ?? 0, accepted: Boolean(run?.acceptedIds) })}</button>}
         {pendingApply && !run?.acceptedIds && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => void execute("prepare")}>Buscar de novo</button>}
         {discoveryGaps > 0 && <button className={buttonClassName} disabled={!brandId || busy || leaseActive} onClick={() => setConfirm("discover")}>Buscar keywords novas no Google Ads ({discoveryGaps})</button>}
         {needsCost && !inCard("validate") && <button className={buttonClassName} disabled={busy} onClick={() => setConfirm("collect")}>{improvementValidateLabel(run?.costs.paidQueries ?? 0, run?.costs.estimatedCostUsd.max ?? 0, false)}</button>}

@@ -222,6 +222,8 @@ export class WorkflowRepository {
       .from(fonte)
       .select("id,marca_id,article_id,stage,state,payload,lock_version,created_at,updated_at")
       .eq("marca_id", marcaId)
+      // F5 (SDD 2026-10-12 §6.3): só artigos. A linha do guarda (`operation_ledger`) nunca entra na mesa do Radar.
+      .eq("subject_type", "article")
       .eq("stage", "radar");
     const lerDe = async (fonte: string) => scope.articleIds
       ? await lerEmBlocos(scope.articleIds, ids => consultaDe(fonte).in("article_id", ids)) as unknown as Awaited<ReturnType<typeof consultaDe>>

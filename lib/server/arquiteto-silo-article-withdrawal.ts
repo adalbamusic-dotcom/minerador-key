@@ -10,6 +10,9 @@ import type { PipelineContext } from "./pipeline-runtime";
 import { PipelineRuntimeError } from "./pipeline-runtime";
 import { listArquitetoArtifacts, persistSiloPairAtomic } from "./arquiteto-persistence";
 import { ArtifactRepository } from "./editorial-repositories";
+import { reworkGuardPort, type ReworkGuardPort, type ReworkOperation } from "./rework-guard";
+import { operationFingerprint, reworkView, type ReworkView } from "@/lib/editorial/rework-guard";
+import { readArticleGroupMemberships } from "@/lib/editorial/article-groups-store";
 
 /**
  * ===== RETIRAR ARTIGO DO SILO — SERVIDOR (F4) =====
@@ -58,6 +61,10 @@ export type SiloArticleWithdrawalDeps = {
   appendRejection: (event: VersionStatusEvent) => Promise<void>;
   readRejection: (eventId: string) => Promise<{ versionId: string; status: string } | null>;
   now?: () => string;
+  /** F5 — a guarda de retrabalho (linha `operation_ledger`); ausente = sem guarda. */
+  rework?: ReworkGuardPort;
+  /** F5 — o grupo do artigo, para o histórico do grupo (melhor esforço). */
+  groupOf?: (articleId: string) => Promise<string | null>;
 };
 
 export type SiloArticleWithdrawalPreview = {
@@ -70,6 +77,8 @@ export type SiloArticleWithdrawalPreview = {
   remainingArticleIds: string[];
   changes: string[];
   warnings: string[];
+  /** F5 — o que a guarda diz destes insumos (ausente = nunca feito). */
+  rework?: ReworkView;
 };
 
 export type SiloArticleWithdrawalApplied = {
@@ -85,7 +94,7 @@ export type SiloArticleWithdrawalApplied = {
   warnings: string[];
 };
 
-export type SiloArticleWithdrawalRefused = { state: "REFUSED"; code: SiloArticleWithdrawalRefusalCode; message: string };
+export type SiloArticleWithdrawalRefused = { state: "REFUSED"; code: SiloArticleWithdrawalRefusalCode; message: string; rework?: ReworkView };
 
 export type SiloArticleWithdrawalResult = SiloArticleWithdrawalPreview | SiloArticleWithdrawalApplied | SiloArticleWithdrawalRefused;
 
@@ -98,6 +107,7 @@ export async function handleSiloArticleWithdrawal(
   request: SiloArticleWithdrawalRequest,
 ): Promise<SiloArticleWithdrawalResult> {
   const artifacts = await deps.listArtifacts();
+  const downstreamStages = await deps.readDownstreamStages(request.articleId);
   const plan = planSiloArticleWithdrawal({
     brandId: deps.brandId,
     siloId: request.siloId,
@@ -107,14 +117,42 @@ export async function handleSiloArticleWithdrawal(
     siloPageVersions: artifacts.siloPages,
     articleDnaVersions: artifacts.articleDnas,
     statuses: artifacts.statuses,
-    downstreamStages: await deps.readDownstreamStages(request.articleId),
+    downstreamStages,
     expectedSiloDnaVersionId: request.expectedSiloDnaVersionId ?? null,
     previewOnly: request.mode === "preview",
   });
-  if (!plan.ok) return { state: "REFUSED", code: plan.code, message: plan.message };
+
+  /*
+   * F5 · GUARDA DE RETRABALHO (SDD 2026-10-12 §10.1): a retirada não tem
+   * registro próprio, então ganha a linha do guarda. Insumos: o Silo vigente,
+   * a versão vigente do artigo e as etapas posteriores — o motivo é texto e
+   * não muda o resultado. A prévia diz "já feito"/"a mesma recusa de <data>";
+   * a aplicação registra o desfecho.
+   */
+  const operation: ReworkOperation | null = deps.rework ? {
+    kind: "silo_article_withdrawal",
+    fingerprint: await operationFingerprint("silo_article_withdrawal", {
+      siloId: request.siloId,
+      articleId: request.articleId,
+      siloDnaVersionId: latestOf(artifacts.siloDnas, version => version.payload.siloId === request.siloId)?.versionId ?? null,
+      articleVersionId: latestOf(artifacts.articleDnas, version => version.payload.articleId === request.articleId || version.entityId === request.articleId)?.versionId ?? null,
+      downstreamStages: [...downstreamStages].sort(),
+    }),
+    groupId: await deps.groupOf?.(request.articleId).catch(() => null) ?? null,
+    inputsSummary: `Retirar o artigo ${request.articleId} do Silo ${request.siloId}.`,
+    policy: { sameInputs: "reuse", sameRefusal: "inform" },
+  } : null;
+  const rework = operation && deps.rework ? await deps.rework.check(operation) : null;
+  const reworkField = rework && rework.verdict !== "fresh" ? { rework: reworkView(rework)! } : {};
+
+  if (!plan.ok) {
+    if (request.mode === "apply" && operation && deps.rework) await deps.rework.record(operation, { outcome: "refused", outcomeCode: plan.code, message: plan.message, resultRef: request.siloId, costUsd: 0 });
+    return { state: "REFUSED", code: plan.code, message: rework?.verdict === "same_refusal" ? `${plan.message} ${rework.message}` : plan.message, ...reworkField };
+  }
 
   if (request.mode === "preview") {
     return {
+      ...reworkField,
       mode: "preview",
       state: "READY",
       siloId: plan.siloId,
@@ -150,6 +188,9 @@ export async function handleSiloArticleWithdrawal(
   if (!evento || evento.status !== "rejected" || evento.versionId !== plan.article.versionId) divergencias.push("o evento de rejeição do ArticleDNA não voltou na releitura");
   if (divergencias.length) {
     throw new PipelineRuntimeError("QUERY_FAILURE", `A retirada não foi confirmada pela releitura: ${divergencias.join("; ")}.`, 503);
+  }
+  if (operation && deps.rework) {
+    await deps.rework.record(operation, { outcome: "succeeded", outcomeCode: "ARTICLE_WITHDRAWN", resultRef: gravado.siloDna.versionId, costUsd: 0, message: `“${plan.article.label}” retirado do Silo (motivo: ${request.reason.trim().slice(0, 200)}).` });
   }
 
   return {
@@ -201,6 +242,15 @@ export function siloArticleWithdrawalRuntime(context: PipelineContext): SiloArti
       if (result.error) throw result.error;
       const row = result.data as { version_id?: unknown; status?: unknown } | null;
       return row ? { versionId: String(row.version_id ?? ""), status: String(row.status ?? "") } : null;
+    },
+    rework: reworkGuardPort(context),
+    groupOf: async articleId => {
+      try {
+        const lido = await readArticleGroupMemberships(context.supabase, context.brandId, { articleIds: [articleId] });
+        return lido.ok ? lido.memberships.get(articleId)?.groupId ?? null : null;
+      } catch {
+        return null;
+      }
     },
   };
 }

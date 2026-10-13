@@ -109,6 +109,8 @@ export type ArticleFormationKeyword = {
   subjectHeldOut?: boolean;
   /** Tronco de pelo menos um artigo (`isAnchoredSubject`): nunca volta como sobra. */
   subjectAnchored?: boolean;
+  /** F5 · D6 — liberada de artigo retirado do Silo: fora da formação automática até decisão humana (o motivo). */
+  releasedHold?: string | null;
 };
 
 export type ArticleCandidate = {
@@ -634,7 +636,7 @@ export function buildArticleFormationUniverse(input: {
       retidos.push(keyword);
       continue;
     }
-    if (input.deferredKeywordIds?.has(keyword.keywordId) && !keyword.humanFormationRef && !keyword.isPublished) {
+    if ((input.deferredKeywordIds?.has(keyword.keywordId) || keyword.releasedHold) && !keyword.humanFormationRef && !keyword.isPublished) {
       adiadas.push(keyword);
       continue;
     }
@@ -650,6 +652,8 @@ export function buildArticleFormationUniverse(input: {
   const usadas = new Set<string>();
   const diferidas = new Set<string>();
   const motivosDeFora = new Map<string, string>(input.deferredKeywordIds || []);
+  // F5 · D6 — a liberada de artigo retirado diz por que ficou em não agrupadas.
+  for (const keyword of adiadas) if (keyword.releasedHold && !motivosDeFora.has(keyword.keywordId)) motivosDeFora.set(keyword.keywordId, keyword.releasedHold);
   const candidates: ArticleCandidate[] = [];
   /*
    * D2/D3 — O ARTIGO SOZINHO NÃO É "ISOLADO" QUANDO É PUBLICADO OU ASSUNTO.

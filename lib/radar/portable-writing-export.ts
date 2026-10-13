@@ -39,6 +39,7 @@ import type { RadarSiloExportWritingContext } from "./portable-silo-export.ts";
 import {
   radarArticleBlueprintColumns,
   radarArticleBlueprintMeasures,
+  radarArticleBlueprintPromiseWithoutFrame,
   type RadarArticleBlueprintColumnsOptions,
   radarArticleBlueprintPublishedMapLine,
   radarArticleBlueprintPublishedMapReading,
@@ -83,6 +84,7 @@ import {
   type RadarSiloPublicationIdentities,
 } from "./publication-identity.ts";
 import type { RadarArticleBlueprintLinkTarget } from "./article-blueprint.ts";
+import type { EditorialGroupLabel } from "../editorial/editorial-group-scope.ts";
 
 /**
  * ===== O EXPORT "PARA ESCREVER" — o CSV que uma pessoa ou uma IA usa para escrever =====
@@ -296,7 +298,32 @@ export type RadarWritingArticleContext = {
    * destino, na linha seguinte. Ausente = a variedade vale só dentro da planta.
    */
   anchorLedger?: RadarAnchorLedger | null;
+  /**
+   * 2026-10-12 · F6 (SDD do plano declarado e grupos, §6.4) · Aditivo: o grupo
+   * (cor e nome) do artigo, lido pelo grupo efetivo (`readArticleGroupLabels`).
+   * Com ele, a coluna artigo diz o grupo e a promessa declarada do ArticleDNA
+   * (sem a moldura padrão). Ausente ou nulo = a linha de antes, byte a byte.
+   */
+  group?: EditorialGroupLabel | null;
 };
+
+/**
+ * 2026-10-12 · F6 · AS LINHAS DO GRUPO NA COLUNA ARTIGO: a cor (sempre escrita)
+ * e o nome próprio do grupo; e a promessa declarada do ArticleDNA — no plano de
+ * Silo, a descrição do artigo declarada pelo dono —, sem a moldura padrão do
+ * Arquiteto ("Cobrir com clareza o tema …"; só a moldura = nenhuma linha). O
+ * título, a promessa ao leitor e a estrutura continuam os do artigo-modelo.
+ * Concluído (D10): nada de pendência no entregável.
+ */
+export function radarWritingGroupLines(group: EditorialGroupLabel | null | undefined, promise: string | null | undefined): string[] {
+  if (!group) return [];
+  const declarada = radarArticleBlueprintPromiseWithoutFrame(promise);
+  const semMoldura = declarada && declarada === texto(promise);
+  return [
+    `Grupo: ${group.text}`,
+    ...(semMoldura ? [`Promessa declarada${group.origin === "declared_plan" ? " no plano do Silo" : ""}: ${declarada}`] : []),
+  ];
+}
 
 export type RadarWritingExportArticle = {
   row: RadarWritingExportRow;
@@ -1350,6 +1377,8 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
 
   const linhas = [
     ...radarPublicationIdentityLines(identidade),
+    /* 2026-10-12 · F6 · o grupo (cor e nome) e a promessa declarada, só quando o artigo tem grupo. */
+    ...radarWritingGroupLines(contexto.group, input.article.promise),
     "",
     `Keyword principal: ${principal || "não resolvida no pacote"}`,
     /* 2026-10-09 · o destino da virada do Assunto (a coluna promessa legada que o dizia saiu; a planta o recebe no pedido). */

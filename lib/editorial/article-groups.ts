@@ -1,4 +1,4 @@
-import { EDITORIAL_GROUP_URL_NONE, type EditorialGroupFilter } from "./editorial-groups.ts";
+import { EDITORIAL_GROUP_URL_NONE, editorialGroupFilterMatches, type EditorialGroupFilter, type EditorialGroupScreenFilter } from "./editorial-groups.ts";
 
 /**
  * ===== GRUPO DO ARTIGO — DOMÍNIO PURO (F2) =====
@@ -289,12 +289,10 @@ export function articleIdsInGroupFilter(filter: EditorialGroupFilter, membership
  * Filtro de TELA: devolve as linhas do recorte e nunca muda a lista de origem.
  * "Todos" devolve a MESMA referência (nada é recalculado nem reordenado).
  */
-export function filterRowsByEditorialGroup<T>(rows: readonly T[], filter: EditorialGroupFilter, groupOf: (row: T) => string | null | undefined): readonly T[] {
+export function filterRowsByEditorialGroup<T>(rows: readonly T[], filter: EditorialGroupScreenFilter, groupOf: (row: T) => string | null | undefined): readonly T[] {
   if (filter.kind === "all") return rows;
-  return rows.filter(row => {
-    const grupo = groupOf(row) || null;
-    return filter.kind === "none" ? !grupo : grupo === filter.groupId;
-  });
+  // 2026-10-12 · cores fixas: o recorte de uma cor cobre todos os grupos ativos dela.
+  return rows.filter(row => editorialGroupFilterMatches(filter, groupOf(row) || null));
 }
 
 /**

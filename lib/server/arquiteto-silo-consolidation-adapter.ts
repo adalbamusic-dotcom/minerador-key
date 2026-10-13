@@ -6,6 +6,9 @@ import { readRpcDomainError } from "@/lib/arquiteto/silo-working-copy-record";
 import { canonicalVersionFromRow } from "./arquiteto-persistence";
 import { assertConsolidatedSiloSubject } from "./arquiteto-subject-guard";
 import { linkDeclaredPlanGroupToSilo, type SiloGroupLinkOutcome } from "./arquiteto-silo-group-link";
+import { runUnderReworkGuard } from "./rework-guard";
+import { operationFingerprint, type ReworkOverride } from "@/lib/editorial/rework-guard";
+import { siloConsolidationFailureDisposition } from "@/lib/arquiteto/silo-consolidation-operation";
 import { TERRITORY_SUBJECT_TYPE, TERRITORY_WORKFLOW_STAGE, parseTerritoryWorkflowRow } from "@/lib/arquiteto/territory-record";
 import {
   SILO_WORKING_COPY_STAGE,
@@ -199,7 +202,7 @@ async function loadArticleVersions(
   });
 }
 
-export async function consolidateSiloFromWorkingCopy(
+async function consolidateSiloFromWorkingCopyCore(
   context: PipelineContext,
   request: SiloConsolidationRequest,
 ): Promise<SiloConsolidationResult> {
@@ -390,4 +393,54 @@ export async function consolidateSiloFromWorkingCopy(
     workingCopy: data.workingCopy,
     groupLink,
   };
+}
+
+/**
+ * F5 · GUARDA DE RETRABALHO NO FECHAMENTO DO SILO (SDD 2026-10-12 §10.3).
+ *
+ * O núcleo único da consolidação (rota da tela; o fechamento automático usa a
+ * mesma rota). A recusa de domínio ANTES da gravação (os portões de
+ * `SILO_CONSOLIDATION_PRE_WRITE_REFUSAL_PREFIXES`) fica registrada com os
+ * insumos; o MESMO pedido de novo, sem nada mudado, volta 409
+ * `REWORK_SAME_REFUSAL` com "a mesma recusa de <data>" e não chega à RPC.
+ * "Refazer mesmo assim" com motivo (D11) passa. Falha de rede, 5xx e
+ * conflito de lock não são recusa: a retomada com o mesmo envelope segue livre.
+ */
+export async function consolidateSiloFromWorkingCopy(
+  context: PipelineContext,
+  request: SiloConsolidationRequest,
+  options: { reworkOverride?: ReworkOverride } = {},
+): Promise<SiloConsolidationResult> {
+  const operation = {
+    kind: "silo_consolidation" as const,
+    fingerprint: await operationFingerprint("silo_consolidation", siloConsolidationReworkInputs(request)),
+    inputsSummary: `Fechamento do Silo ${request.territoryRef} (cópia de trabalho v${request.workingCopyExpectedLock}).`,
+    policy: { sameInputs: "ignore" as const, sameRefusal: "block" as const },
+  };
+  return runUnderReworkGuard(context, operation, {
+    override: options.reworkOverride,
+    // Só a recusa de domínio ANTES da RPC é "a mesma recusa"; rede, 5xx e lock seguem retomáveis.
+    classifyFailure: error => siloConsolidationFailureDisposition(error) === "discard" ? "refused" : "failed",
+    success: result => ({ outcomeCode: "SILO_CONSOLIDATED", resultRef: typeof (result.siloDna as { versionId?: unknown } | null)?.versionId === "string" ? (result.siloDna as { versionId: string }).versionId : request.territoryRef, costUsd: 0 }),
+  }, () => consolidateSiloFromWorkingCopyCore(context, request));
+}
+
+/** O que muda o resultado do fechamento — sem os ids e instantes gerados a cada clique. */
+const VOLATILE_KEYS = new Set(["versionId", "previousVersionId", "createdAt", "updatedAt", "decidedAt", "approvedAt", "actorUserId", "contentHash", "siloPageVersionId", "siloPageContentHash", "siloDnaVersionId"]);
+function semVolateis(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(semVolateis);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([key]) => !VOLATILE_KEYS.has(key)).map(([key, item]) => [key, semVolateis(item)]));
+}
+export function siloConsolidationReworkInputs(request: SiloConsolidationRequest) {
+  return semVolateis({
+    territoryRef: request.territoryRef,
+    territoryExpectedLock: request.territoryExpectedLock,
+    workingCopyExpectedLock: request.workingCopyExpectedLock,
+    statuses: request.statuses,
+    decision: request.decision,
+    siloPageApproval: request.siloPageApproval ?? null,
+    siloDna: request.siloDna.payload,
+    siloPage: request.siloPage.payload,
+  });
 }

@@ -6,6 +6,7 @@ import { assertEditorialPermission } from "@/lib/server/editorial-authorization"
 import { requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { pipelineArtifactErrorResponse, } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
+import { recordFormationConclusion } from "@/lib/server/arquiteto-rework-guard";
 
 /**
  * Registra o cenário de formação de Artigos processado/confirmado.
@@ -35,6 +36,8 @@ export async function POST(request: Request) {
     // Gravar não é sucesso: sucesso é o remoto devolver o que foi gravado.
     await saveArticleFormationMarker(context, parsed.data.marker);
     const readback = await readbackArticleFormationMarker(context);
+    // F5 — a conclusão vai para o histórico (linha do guarda); melhor esforço, nunca derruba a resposta.
+    if (parsed.data.marker.confirmation.status !== "none") await recordFormationConclusion(context, parsed.data.marker);
 
     return NextResponse.json({ success: true, data: { marker: readback.payload, updatedAt: readback.updatedAt } });
   } catch (error) {

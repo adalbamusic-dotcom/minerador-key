@@ -19,6 +19,7 @@ import {
 } from "./portable-writing-export.ts";
 import { radarBrandVoiceExclusions, radarBrandVoiceRef, type RadarBrandVoiceState } from "./brand-voice.ts";
 import type { RadarAnchorLedger } from "./natural-anchor.ts";
+import type { EditorialGroupLabel } from "../editorial/editorial-group-scope.ts";
 
 /**
  * ===== A MONTAGEM DO LOTE NO FORMATO "PARA ESCREVER" — a ponte pura da rota =====
@@ -68,6 +69,8 @@ export function radarPortableWritingExport(input: {
   /** 2026-10-02 · Aditivo: a voz da marca (Adendo C). Ativa: linha própria e referência em cada artigo. */
   brandVoice?: RadarBrandVoiceState;
   publications?: ReadonlyMap<string, RadarWritingPublication>;
+  /** 2026-10-12 · F6 · Aditivo: o grupo (cor e nome) de cada artigo, por `articleId`. Sem o mapa, nada muda. */
+  groups?: ReadonlyMap<string, EditorialGroupLabel>;
   today: string;
 }): RadarPortableWritingExportResult {
   const lentesDe = radarPortableExportLensLookupsFor(input.lenses.lookups);
@@ -111,6 +114,7 @@ export function radarPortableWritingExport(input: {
     ...(palavrasDosMembros.size > 1 ? { siloMemberKeywords: palavrasDosMembros } : {}),
     ...(siloInline ? { siloInline: true } : {}),
     ...(anchorLedger ? { anchorLedger } : {}),
+    ...(input.groups?.get(artigo.articleId) ? { group: input.groups.get(artigo.articleId) } : {}),
   });
 
   if (!input.plan) {

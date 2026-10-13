@@ -786,8 +786,120 @@ export function interpretArticleSerpAcrossLenses(input: {
   };
 }
 
+/* -------------- D2(a): o parecer pelas sustentações (2026-10-12) -------------- */
+
+/**
+ * PRINCIPAL DECLARADA SEM VOLUME E SEM SERP NO CACHE — O PARECER VEM DAS
+ * SUSTENTAÇÕES (SDD `sdd-plano-declarado-e-grupos-2026-10-12.md` §17, D2(a)).
+ *
+ * A principal declarada no plano (D1-bis) é cabeceira fixa por decisão humana:
+ * a SERP não a troca. Sem volume, a SERP dela nunca é coletada sem pedido
+ * (regra A3); a coleta paga por clique continua sendo a D2(b). Na validação só
+ * com cache, o parecer da composição usa as SUSTENTAÇÕES do artigo que têm
+ * volume e as 4 lentes no cache — nada é pago — e a proveniência fica escrita.
+ */
+export const DECLARED_PRINCIPAL_NOT_OBSERVED_REASON = "Principal declarada no plano (D1-bis), sem volume e sem SERP no cache: não é coletada sem pedido; o parecer vem das sustentações com volume (D2a). Não conta como convergente nem como de fora.";
+
+/** O prefixo da proveniência do parecer pelas sustentações: o DNA, a tela e os testes leem por aqui. */
+export const DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX = "Parecer pelas sustentações" as const;
+
+/** A proveniência legível: "Parecer pelas sustentações: “a”, “b” — …". Uma escrita só. */
+export function declaredPrincipalSupportBasisReason(principalLabel: string, supportLabels: readonly string[]): string {
+  return `${DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX}: ${supportLabels.map(label => `“${label}”`).join(", ")} — a principal declarada “${principalLabel}” não tem volume nem SERP no cache (D2a); nenhuma coleta nova foi feita.`;
+}
+
+export type DeclaredPrincipalSupportCandidate = {
+  keywordId: string;
+  keyword: string;
+  volume: number | null;
+  /** A busca está no cache nas lentes pedidas (as 4 do produto): a canônica e todas as extras. */
+  lensesCached: boolean;
+};
+
+export type DeclaredPrincipalSupportSelection = {
+  principalKeywordId: string;
+  /** A sustentação de maior volume: a referência dos pares do parecer. */
+  anchorKeywordId: string;
+  /** As sustentações usadas, por volume (maior primeiro). */
+  supportKeywordIds: string[];
+};
+
+/**
+ * Quando o parecer vem das sustentações, e de quais. `null` = não se aplica
+ * (principal não declarada, com volume, ou já com SERP no cache) ou não há
+ * sustentação com volume e as 4 lentes no cache — aí vale a regra de sempre
+ * (sem a SERP da principal, a validação só com cache não tem parecer).
+ */
+export function selectDeclaredPrincipalSupports(input: {
+  principalKeywordId: string;
+  principalDeclared: boolean;
+  principalHasVolume: boolean;
+  principalCached: boolean;
+  candidates: readonly DeclaredPrincipalSupportCandidate[];
+}): DeclaredPrincipalSupportSelection | null {
+  if (!input.principalDeclared || input.principalHasVolume || input.principalCached) return null;
+  const sustentacoes = input.candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ candidate }) => candidate.keywordId !== input.principalKeywordId && typeof candidate.volume === "number" && candidate.volume > 0 && candidate.lensesCached)
+    .sort((left, right) => (right.candidate.volume ?? 0) - (left.candidate.volume ?? 0) || left.index - right.index)
+    .map(({ candidate }) => candidate.keywordId);
+  if (!sustentacoes.length) return null;
+  return { principalKeywordId: input.principalKeywordId, anchorKeywordId: sustentacoes[0], supportKeywordIds: sustentacoes };
+}
+
+/**
+ * Reescreve o parecer calculado com a sustentação de maior volume como
+ * referência dos pares (`principalKeywordId` = âncora) para dizer a verdade:
+ * a cabeceira é a principal DECLARADA, que a SERP não avaliou nem troca; o
+ * veredito é o do agrupamento das sustentações; a principal fica entre as não
+ * observadas, com o motivo da D2(a).
+ */
+export function applyDeclaredPrincipalSupportBasis(
+  interpretation: ArticleSerpLensesInterpretation,
+  basis: { principalKeywordId: string; principalLabel: string; anchorLabel: string; supportLabels: readonly string[] },
+): ArticleSerpLensesInterpretation {
+  const referencia = `“${basis.anchorLabel}”`;
+  const groupReason = `${DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX} (referência dos pares: ${referencia}, a de maior volume). ${interpretation.group.reason
+    .replaceAll("da Principal", `de ${referencia}`)
+    .replaceAll("com a Principal", `com ${referencia}`)
+    .replaceAll("a Principal", referencia)}`;
+  const group: GroupVerdict = { ...interpretation.group, reason: groupReason };
+  const principal: PrincipalVerdict = {
+    kind: "PRINCIPAL_SUPPORTED",
+    principalKeywordId: basis.principalKeywordId,
+    principalAlternativeKeywordId: null,
+    reason: `Principal declarada no plano (D1-bis): “${basis.principalLabel}” é a cabeceira por decisão humana e a SERP não a troca. ${declaredPrincipalSupportBasisReason(basis.principalLabel, basis.supportLabels)}`,
+    coverage: interpretation.principal.coverage,
+  };
+  const verdict = group.kind === "SPLIT_RECOMMENDED" || group.kind === "REMOVE_KEYWORD_RECOMMENDED"
+    ? "DIVERGENCE" as const
+    : group.kind === "INCONCLUSIVE" ? "INCONCLUSIVE" as const : "COMPATIBLE" as const;
+  const recommendation = group.outsiders.length
+    ? `Separar ${group.outsiders.map(item => `"${item.keyword}"`).join(" e ")} deste artigo.`
+    : verdict === "COMPATIBLE"
+      ? "Manter a composição como está."
+      : "Decidir explicitamente: a evidência não confirma nem rejeita.";
+  const outras = interpretation.notObserved.filter(item => item.keywordId !== basis.principalKeywordId);
+  const declarada = interpretation.notObserved.find(item => item.keywordId === basis.principalKeywordId);
+  const notObserved: UnobservedKeyword[] = [
+    { keywordId: basis.principalKeywordId, keyword: declarada?.keyword || basis.principalLabel, role: "principal", reason: DECLARED_PRINCIPAL_NOT_OBSERVED_REASON },
+    ...outras,
+  ];
+  const observadas = interpretation.lensReadings.filter(reading => reading.verdict !== null);
+  return {
+    ...interpretation,
+    principal,
+    group,
+    verdict,
+    recommendation,
+    reason: `${group.reason} ${principal.reason}`.trim(),
+    notObserved,
+    agreeingLenses: observadas.filter(reading => reading.verdict === verdict).length,
+  };
+}
+
 /** Os fatos que o parecer lê de um snapshot normalizado — a mesma leitura da rota. */
-export const serpResultFactsOf = (snapshot: ObservedSnapshotLike): SerpResultFact[] =>
+export const serpResultFactsOf =(snapshot: ObservedSnapshotLike): SerpResultFact[] =>
   (snapshot.organicResults || []).map(factOf);
 
 /**

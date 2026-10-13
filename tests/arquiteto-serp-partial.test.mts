@@ -64,7 +64,8 @@ test("o route isola por Article e devolve failures e summary aditivos", () => {
   assert.match(route, /const settledAssessments = await Promise\.allSettled\(groups\.map\(async group => \{/);
   assert.match(route, /if \(error instanceof DataForSeoCanonicalError \|\| error instanceof IntegrationRuntimeError\) throw error;/);
   assert.match(route, /failures\.push\(describeArticleFailure\(\{/);
-  assert.match(route, /summary: \{ requestedArticles: groups\.length, completedArticles: assessments\.length, failedArticles: failures\.length \}/);
+  // F5 — o pedido inteiro conta (o artigo barrado pela guarda de retrabalho entra como falha, não some).
+  assert.match(route, /summary: \{ requestedArticles: parsed\.data\.groups\.length, completedArticles: assessments\.length, failedArticles: failures\.length \}/);
   assert.match(route, /type SerpArticleFailure = \{/);
   assert.match(route, /retryable: boolean;/);
 });

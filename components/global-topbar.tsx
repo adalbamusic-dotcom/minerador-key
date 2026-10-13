@@ -11,6 +11,8 @@ import { SessionLogoutButton } from "@/components/auth/session-logout-button";
 import { useBrand } from "@/components/brand-context";
 import { GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY } from "@/components/global-topbar-control";
 import { resolveContextHelpArea } from "@/lib/context-help";
+import { TopbarGroupTag } from "@/components/editorial/group-selector";
+import { isEditorialGroupArea } from "@/lib/editorial/editorial-groups";
 
 type TopbarMode = "page" | "module";
 
@@ -43,10 +45,14 @@ export type GlobalTopbarModuleControls = {
   actions?: ReactNode;
   tabs?: ReactNode;
   /**
-   * 2026-10-12 · botão-ícone de etiqueta do grupo (EditorialGroupSelector),
-   * renderizado IMEDIATAMENTE ao lado do sino. Ausente = nada muda na barra.
+   * 2026-10-12 · a etiqueta de cor do grupo é da TOPBAR (fixa, ao lado do sino,
+   * no Minerador, no Arquiteto e no Radar), não do módulo: ela aparece na hora,
+   * sem esperar a planilha. O módulo só acrescenta ações no fim do menu
+   * (ex.: "Etiquetar artigos pelo grupo das keywords"), que recebem o fechar.
    */
-  groupTag?: ReactNode;
+  groupTagMenuFooter?: (close: () => void) => ReactNode;
+  /** Texto ao lado de "Sem grupo" quando o módulo conta outra coisa (o Radar conta artigos). */
+  groupTagUngroupedDetail?: string;
 };
 
 export type GlobalTopbarPageControls = {
@@ -223,6 +229,14 @@ export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTab
   const moduleTabsContent = moduleControls?.tabs;
   const registeredPageTabs = pageControls?.tabs !== undefined ? pageControls.tabs : pageTabs;
   const registeredPageActions = pageControls?.actions !== undefined ? pageControls.actions : pageActions;
+  /*
+   * 2026-10-12 · ETIQUETA DE GRUPO FIXA: a topbar mesma a renderiza, sempre e
+   * na hora, ao lado do sino, nas três planilhas que têm grupo. A escolha é de
+   * cada área e a lista de grupos é lida em segundo plano (cache local primeiro).
+   */
+  const { selectedBrandId: marcaDaEtiqueta } = useBrand();
+  const { status: sessaoDaEtiqueta } = useSupabaseSession();
+  const areaDaEtiqueta = model.mode === "module" && isEditorialGroupArea(model.moduleId) ? model.moduleId : null;
 
   return <header className={`sticky top-0 z-40 flex h-10 shrink-0 items-center border-b border-divider bg-background/95 pl-14 pr-2 backdrop-blur-sm lg:pl-3 ${model.moduleId === "minerador" ? "max-sm:pl-2" : ""}`} data-global-topbar data-topbar-mode={model.mode}>
     <div className={`flex min-w-0 ${model.moduleId === "minerador" ? "max-sm:hidden" : ""} ${arquitetoLayout ? "flex-1 xl:flex-[0.6]" : redatorLayout ? "flex-initial" : "flex-1"} items-center gap-1.5`}>
@@ -259,7 +273,7 @@ export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTab
     <div className={`flex min-w-0 ${redatorLayout ? "flex-initial" : "flex-1"} items-center justify-end gap-1 overflow-visible`}>
       {model.moduleId === "minerador" && moduleActionsContent ? <div className="min-w-0 flex-1 max-w-[min(52vw,52rem)] overflow-hidden" data-topbar-module-actions>{moduleActionsContent}</div> : null}
       {moduleTabsContent ? <div className="min-w-0 shrink-0" data-topbar-module-tabs>{moduleTabsContent}</div> : null}
-      {moduleControls?.groupTag ? <div className="flex shrink-0 items-center" data-topbar-group-tag>{moduleControls.groupTag}</div> : null}
+      {areaDaEtiqueta && marcaDaEtiqueta && sessaoDaEtiqueta === "authenticated" ? <div className="flex shrink-0 items-center" data-topbar-group-tag><TopbarGroupTag key={`${marcaDaEtiqueta}:${areaDaEtiqueta}`} brandId={marcaDaEtiqueta} area={areaDaEtiqueta} menuFooter={moduleControls?.groupTagMenuFooter} ungroupedDetail={moduleControls?.groupTagUngroupedDetail} /></div> : null}
       <NotificationBell />
       <ContextHelpCenter key={contextHelpArea || "none"} area={contextHelpArea} />
       <ProfilePopover />

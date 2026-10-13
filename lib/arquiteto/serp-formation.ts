@@ -145,8 +145,23 @@ export const SerpFormationAssessmentSchema = z.object({
    * são tratadas como desatualizadas, nunca como atuais.
    */
   formationBaseHash: z.string().min(1).optional(),
+  /**
+   * D2(a) (SDD 2026-10-12 §17) — de onde veio o parecer quando a principal é
+   * DECLARADA, sem volume e sem SERP no cache: das sustentações com volume e as
+   * 4 lentes no cache, sem coleta nova. A principal declarada não tem snapshot
+   * nem recomendação; é por aqui que a composição observada a reconhece.
+   * Opcional e aditivo: ausente, o parecer é o de sempre.
+   */
+  supportBasis: z.object({
+    kind: z.literal("declared_principal_supports"),
+    principalKeywordId: z.string().min(1),
+    anchorKeywordId: z.string().min(1),
+    supportKeywordIds: z.array(z.string().min(1)).min(1),
+    reason: z.string().min(1),
+  }).strict().optional(),
 }).strict();
 export type SerpFormationAssessment = z.infer<typeof SerpFormationAssessmentSchema>;
+export type SerpFormationSupportBasis = NonNullable<SerpFormationAssessment["supportBasis"]>;
 
 export const SerpPublicationVerificationSchema = z.object({
   schemaVersion: z.literal(1),
@@ -532,6 +547,8 @@ export async function buildSerpFormationAssessment(input: {
   createdAt?: string;
   /** Composição observada; viaja com a evidência para provar currency. */
   formationBaseHash?: string | null;
+  /** D2(a): o parecer veio das sustentações (principal declarada sem SERP). */
+  supportBasis?: SerpFormationSupportBasis | null;
 }): Promise<SerpFormationAssessment> {
   const createdAt = input.createdAt || new Date().toISOString();
   const assessmentMode = input.assessmentMode || "formacao";
@@ -568,6 +585,7 @@ export async function buildSerpFormationAssessment(input: {
     // A evidência carimba a composição que observou; sem isso não há como
     // provar depois que ela ainda descreve o artigo de agora.
     ...(input.formationBaseHash ? { formationBaseHash: input.formationBaseHash } : {}),
+    ...(input.supportBasis ? { supportBasis: input.supportBasis } : {}),
   };
   return SerpFormationAssessmentSchema.parse({ ...draft, contentHash: await contentHash(draft) });
 }

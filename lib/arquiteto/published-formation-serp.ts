@@ -63,7 +63,7 @@ function lentesCompletas(marker: unknown): boolean | undefined {
  */
 export function serpAssessmentComposition(assessment: unknown, lensesMarker?: unknown): SerpAssessmentComposition | null {
   if (!assessment || typeof assessment !== "object") return null;
-  const registro = assessment as { recommendations?: unknown; keywordDnaReferences?: unknown; evaluationStatus?: unknown };
+  const registro = assessment as { recommendations?: unknown; keywordDnaReferences?: unknown; evaluationStatus?: unknown; supportBasis?: unknown };
   const lerLista = (valor: unknown) => Array.isArray(valor)
     ? valor.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && typeof (item as { keywordId?: unknown }).keywordId === "string")
     : [];
@@ -73,7 +73,17 @@ export function serpAssessmentComposition(assessment: unknown, lensesMarker?: un
     ...lerLista(registro.keywordDnaReferences).map(item => String(item.keywordId)),
   ])];
   if (!ids.length) return null;
-  const principal = recomendacoes.find(item => item.currentRole === "principal")?.keywordId ?? null;
+  /*
+   * D2(a) — a principal declarada sem SERP não tem recomendação: o parecer veio
+   * das sustentações e diz isso em `supportBasis`. Só aí a principal é lida de
+   * lá, e só quando ela está na composição observada; fora disso, parecer sem
+   * a principal consultada continua sem principal (e não responde).
+   */
+  const base = registro.supportBasis && typeof registro.supportBasis === "object" ? registro.supportBasis as { kind?: unknown; principalKeywordId?: unknown } : null;
+  const declarada = base?.kind === "declared_principal_supports" && typeof base.principalKeywordId === "string" && ids.includes(base.principalKeywordId)
+    ? base.principalKeywordId
+    : null;
+  const principal = recomendacoes.find(item => item.currentRole === "principal")?.keywordId ?? declarada;
   const roles: Record<string, SerpArticleRole> = {};
   for (const item of recomendacoes) {
     if (item.currentRole === "principal" || item.currentRole === "secundaria" || item.currentRole === "reforco_narrativo") roles[item.keywordId] = item.currentRole;

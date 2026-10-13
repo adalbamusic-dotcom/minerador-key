@@ -568,7 +568,8 @@ test("Papel no Silo aparece em Artigos e em Links, lido do SiloDNA aprovado de t
   assert.match(codigo, /if \(version\.payload\.pillarArticleId\) papeis\.set\(String\(version\.payload\.pillarArticleId\), "PILAR"\);/);
   assert.match(codigo, /\?\? siloRoleByArticleId\.get\(String\(articleDnaVersion\?\.payload\.articleId \|\| ""\)\);/);
   assert.equal(codigo.includes('{workspaceMode === "links" && <th className="relative border-r border-divider px-2 py-2 text-center">Papel no Silo</th>}'), false);
-  assert.match(codigo, /\{ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId \}/);
+  // 2026-10-12: + os selos do plano declarado (SDD §9 item 6), que também redesenham a linha.
+  assert.match(codigo, /\{ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor \}/);
 });
 
 test("conclusão só fica desatualizada quando a composição DO ARTIGO mudou, não o lote", () => {

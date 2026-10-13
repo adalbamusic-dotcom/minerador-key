@@ -5,8 +5,12 @@
 > do Silo (D3) e a F2 (grupo no Arquiteto e no Radar, leitura por grupo) foram
 > implementadas em 2026-10-12 (ver `docs/03-minerador/estado-atual.md`,
 > `docs/04-arquiteto/estado-atual.md` e `docs/05-radar/estado-atual.md`);
-> F3 e F4 (plano declarado) foram implementadas em 2026-10-12 (§18.1); F5–F6
-> continuam pendentes. Migration, SQL remoto, commit, push e deploy
+> F3 e F4 (plano declarado) foram implementadas em 2026-10-12 (§18.1); a F6
+> (Radar, Redator, Publicações e MCP por grupo) também, em 2026-10-12 (adendo F6
+> no §18.1); a interface dos grupos e do plano (Gerenciar a cor, Histórico do grupo,
+> selos do plano no Arquiteto e "Tirar do plano") também, em 2026-10-12 (adendo
+> no §18.1); a F5 (guarda de retrabalho) também, em 2026-10-12 (adendo F5 no
+> §18.1). Migration, SQL remoto, commit, push e deploy
 > continuam com o dono (`AGENTS.md` §15). Toda leitura de banco citada aqui foi
 > `SELECT` (`npx supabase db query --linked`), em 2026-10-12.
 
@@ -648,6 +652,8 @@ Leitura obrigatória antes de codar: `docs/compartilhado/sistema-visual.md` e
    cor, **nome** e contagem ("54 keywords · 8 artigos"). O grupo ativo vai na URL
    (`?grupo=<id>`, sobrevive a F5 e é compartilhável); o último escolhido por
    marca fica no `localStorage` só como conveniência (try/catch).
+   **Substituído em 2026-10-12 pelo adendo §9.1-A** (cores fixas, etiqueta
+   fixa na topbar global, escolha por área).
 2. **Cor nas linhas** — faixa de 4 px à esquerda (`border-l-4`) com o token do
    grupo e coluna "Grupo" com etiqueta de nome (texto ≥ 14 px, fundo
    `color-mix` do token a ~18 %). **Nunca a linha inteira pintada** (§8: "não
@@ -668,12 +674,81 @@ Leitura obrigatória antes de codar: `docs/compartilhado/sistema-visual.md` e
    Silo) e cor (5 amostras com nome) → "Criar grupo e declarar plano". Sucesso
    só depois da releitura.
 5. **Grupo manual e lote** — "Novo grupo" no seletor; no rodapé do Minerador,
-   "Grupo ▸ Mover para… / Tirar do grupo" para as selecionadas. Arquiteto e
+   "Grupo ▸ Mover para… / Tirar do grupo" para as selecionadas. (2026-10-12:
+   "Novo grupo" saiu; o rodapé move para uma das 5 cores — §9.1-A.) Arquiteto e
    Radar mostram o grupo; não o atribuem (herdam).
 6. **Plano no Arquiteto** — no cartão do Silo, selo "Plano declarado" com o
    Pilar declarado; na linha do artigo, "Principal declarada" ao lado da
    keyword; divergência entre proposta e plano aparece como aviso do guarda
    (§10.4), nunca como troca.
+
+### 9.1-A Adendo de 2026-10-12 — cores fixas, etiqueta global, escolha por área
+
+Pedido do dono (literal): "estão boa as tags mas vc não colou eles por cores,
+para não ficar escrevendo, e acho que essa tag tem que estar no global fixado e
+não de forma independente, e ele esta demorando em carregar, ele é para ser um
+item de seleção (…) coloca umas cores prefixados e pronto, e até pode e tem que
+funcionar de forma independente em cada área, mas não pode atrapalhar o
+carregamento."
+
+1. **Cada cor da paleta É o grupo** (um grupo por cor por marca daqui em
+   diante). O seletor é um select de cores: "Todos os grupos" (cinza, padrão),
+   Amarelo, Azul, Verde, Lima, Laranja, "Sem grupo" e o rodapé do módulo. O
+   formulário "Novo grupo" (nome) saiu. Se o grupo de uma cor tem nome próprio
+   (ex.: o nome de um plano de Silo), ele aparece discretamente ao lado da cor.
+   Contagens só quando já chegaram do servidor; nunca seguram o menu.
+2. **Garantir o grupo da cor no servidor** — `ensureEditorialGroupForColor`
+   (`lib/editorial/editorial-groups-store.ts`): grupo ativo com a cor (vários =
+   o mais antigo por `created_at`) → devolve; senão o arquivado da cor →
+   reativa (se o nome colide com outro ativo, reativa com o nome da cor); senão
+   cria o manual com o nome da cor ("Laranja"; "Laranja 2" se o nome já é de
+   outro grupo ativo). A corrida entre duas abas cai no índice único do nome e
+   relê. `POST /api/editorial/groups` aceita `{ marcaId, color }` sem nome
+   (com nome, o comportamento antigo, `minerador:edit`); o ensure exige edição
+   no Minerador, no Arquiteto ou no Radar (`canEnsureEditorialGroupColor`).
+   **Filtrar por uma cor nunca escreve**; só mover/etiquetar chama o ensure.
+3. **Fixo na topbar global** — a `GlobalTopbar` renderiza a etiqueta ela
+   mesma (`TopbarGroupTag`), sempre e na hora, imediatamente antes do sino, no
+   Minerador, no Arquiteto e no Radar (`model.moduleId` + marca ativa de
+   `useBrand()` + sessão autenticada). Some só quando o banco não tem os grupos
+   (409). O módulo não registra mais `groupTag`; só acrescenta ações no fim
+   do menu (`groupTagMenuFooter`, ex.: "Etiquetar artigos pelo grupo das
+   keywords") e, no Radar, o texto do "Sem grupo" (`groupTagUngroupedDetail`).
+4. **Independente por área (D12 revisto)** — estado leve de cliente
+   (`components/editorial/editorial-group-area-store.ts`, módulo +
+   `useSyncExternalStore`) com a escolha por `brandId + área`, lembrada em
+   `localStorage` `minerador-key:grupo-ativo:${brandId}:${area}` guardando a
+   COR, "todos" ou "sem-grupo" (try/catch; nada é limpo; a chave única antiga
+   não é mais lida). A URL `?grupo=<cor>` (e "sem-grupo"; o uuid antigo vira a
+   cor quando a lista chega) vale na página da área aberta e é lida antes do
+   primeiro uso; abrir um link não troca a lembrança.
+5. **Não atrapalhar o carregamento** — a lista de grupos da marca é lida uma
+   vez por sessão, em segundo plano, compartilhada pelas três áreas, com cache
+   de apresentação em `localStorage` `minerador-key:grupos:${brandId}` (id,
+   cor, nome, status) que entra na hora; relida depois de escrever. No
+   Minerador a carga das keywords não espera a lista com "todos"/"sem-grupo"
+   nem quando o cache resolve a cor; cor sem grupo = planilha vazia com
+   "Nenhuma keyword na cor X ainda", sem consulta; cache errado se corrige
+   sozinho (a chave do recorte muda e a planilha relê uma vez). No Arquiteto e
+   no Radar, `GET /api/editorial/groups/articles` (pesado) só começa depois da
+   mesa da área (`useEditorialPipeline().loading`), ou na hora quando há cor ou
+   "sem-grupo"; enquanto não chega, o recorte não mostra nada (nunca "tudo" por
+   engano).
+6. **Mover e plano por cor** — rodapé do Minerador (os dois selects) e
+   `ArticleGroupMoveSelect` do Arquiteto/Radar: "Mover para <cor>" (5 cores) e
+   "Tirar do grupo"/"Voltar ao grupo das keywords", com o ensure antes. Diálogo
+   "Importar plano do Silo": escolhe a cor; a cor com grupo ativo vira
+   `{ mode: "existing", groupId }`, a sem grupo `{ mode: "new", name: null,
+   color }` (o nome padrão continua o do Silo).
+7. **Recorte de tela** — `EditorialGroupScreenFilter` (só cliente) acrescenta
+   `{ kind: "groups", color, groupIds }` = todos os grupos ATIVOS da cor (o
+   legado com duas etiquetas da mesma cor aparece inteiro). As rotas de leitura
+   continuam com `EditorialGroupFilter` (uuid/sem-grupo), sem mudança.
+
+Sem migration, sem SQL remoto, sem escrita no banco nesta entrega. Verificado
+no código e confirmado por teste (`tests/radar-grupos-cores-fixas.test.mts`,
+`tests/radar-grupos-etiqueta-topbar.test.mts`, F1-21..25 em
+`tests/minerador-grupos-f1.test.mts`). **Validado manualmente: não.**
 
 ## 10. Guarda de retrabalho
 
@@ -785,9 +860,10 @@ internet disponível no meu CEP" estão `bruto`.
    'Planos e contratação'`; os 8 Assuntos com `analise_semantica->
    'keyword_subject'->'plan'` (ordem 1–8, papel, escopo) e as 8 principais com
    `analise_semantica->'keyword_declared_principal'` apontando de volta.
-   (Opcional: renomear o grupo para "Planos e contratação" — a rota PATCH
-   existe; o menu de renomear na tela é pendência do backlog. O nome do grupo
-   não muda nada no plano.)
+   (Opcional: renomear o grupo para "Planos e contratação" — desde o adendo
+   "interface dos grupos e do plano" (§18.1), pela tela: etiqueta ao lado do
+   sino → engrenagem "Gerenciar a cor Laranja" → "Nome (opcional)" → "Salvar
+   nome". O nome do grupo não muda nada no plano.)
 3. **Sobras para a lixeira (D9).** Minerador → Processar Keywords → marcar
    "Planos e contratação" e "Palavra-chave: internet disponível no meu CEP" →
    rodapé → **"Excluir"** → confirmar (vão para a lixeira, recuperáveis por
@@ -810,42 +886,56 @@ internet disponível no meu CEP" estão `bruto`.
      com "quantos Mega de internet preciso";
    - a principal declarada entra no Silo `planos de internet` pela
      transferência da prévia.
-   **Não clicar "2 · Validar no Google (pago)".** Marcar só 1, 2, 4, 6, 7 →
-   **"3 · Gravar melhorias"** → **"Confirmar e aplicar"**. Resultado esperado:
-   versão nova de cada um, `hierarchy` = papel (1 = Pilar), `promise` = escopo,
-   mesma composição.
-   - **Artigos 3, 5 e 8 — limite desta entrega:** a gravação exige o parecer
-     SERP da composição nas 4 lentes, e as três principais declaradas não têm
-     SERP no cache. Sem pagar, "Gravar melhorias" recusa ("SERP da composição
-     incompleta"). As saídas são (a) esperar a D2(a) — parecer pelas
-     sustentações com volume, sem pagar — que ficou para a F5/F6, ou (b) a
-     coleta paga por clique, D2(b): "2 · Validar no Google" mostra o custo antes
-     (estimativa da SDD: ≈ 12 consultas, até ~US$ 0,05) e só roda com
-     "Autorizar este custo". **Decisão do dono; não faça sem decidir.**
+   **Não clicar "2 · Validar no Google (pago)".** Marcar 1, 2, 3, 4, 5, 6, 7 e 8
+   → **"3 · Gravar melhorias"** (na fileira pode aparecer como "Gravar sem
+   validar (n)") → **"Confirmar e aplicar"**. Resultado esperado: versão nova
+   de cada um, `hierarchy` = papel (1 = Pilar), `promise` = escopo.
+   - **Artigos 3, 5 e 8 — D2(a), adendo de 2026-10-12:** as três principais
+     declaradas não têm volume nem SERP no cache; o parecer da composição vem das
+     SUSTENTAÇÕES do artigo com volume e as 4 lentes no cache, sem pagar. A linha
+     da análise diz "Parecer pelas sustentações: “…” … (D2a)" e que "Validar no
+     Google" é opcional (D2b); o cartão "Próximo passo" não manda pagar por causa
+     delas. O ArticleDNA grava a mesma frase em `serpStrategy.rationale`
+     (proveniência, não pendência). Se um desses artigos não tiver NENHUMA
+     sustentação com volume e as 4 lentes no cache (o artigo 5 pode não ter, se
+     a única keyword dele é a principal declarada), "Gravar melhorias" recusa
+     dizendo isso; a saída é a D2(b), "2 · Validar no Google", com o custo antes
+     e "Autorizar este custo". **Decisão do dono; não faça sem decidir.**
 6. **Retirar "plano vivo controle".** Arquiteto → **aba Silos** → Silo
    consolidado "planos de internet" → no artigo "plano vivo controle" →
    **"Retirar artigo do Silo"** → prévia → motivo "fora do plano declarado" →
    **"Confirmar retirada"**. Grava o evento `rejected` na versão
    `14e82c40-150e-4024-aa2f-2addd84d60ed` com o motivo e o novo par
    SiloDNA/SiloPage sem o artigo (v2), com releitura. Não há item no Radar nem
-   documento. **Limite conhecido:** a leitura da mesa do Arquiteto ainda não
-   aplica o evento `rejected` às keywords do artigo (usa a última versão sem
-   olhar o status), então `679b1bb2` pode continuar aparecendo no artigo
-   rejeitado da aba Artigos em vez de "Keywords não agrupadas"; nada é apagado.
-   Corrigir essa leitura é mudança compartilhada (pendência F5).
-7. **Fechar o Silo com o Pilar declarado.** **Ainda não há caminho pela tela para a WifiConecta.** O Pilar declarado entra
-   como decisão humana ("Pilar declarado no plano por <ator> em <data>") no
-   fechamento automático e na formação manual da aba Silos, com nome, slug (se
-   não publicado) e objetivo do plano e a ordem do plano — mas só para Silo
-   **ainda não consolidado**: o fechamento pula território consolidado, e trocar
-   o Pilar de um Silo consolidado (aqui, do artigo 3 para o artigo 1, D7) não
-   existe hoje. Quando existir (pendência F5), o resultado esperado é SiloDNA e
-   SiloPage v+1 com nome "Planos e contratação", slug `planos-de-internet`
-   (inalterado, não publicado), objetivo declarado, Pilar = artigo 1
-   (`4339882e`), suportes = os outros 7 (com o 5, sem "plano vivo controle") e
-   `narrativeOrder` = ordem do plano; ao consolidar, o servidor grava
-   `editorial_groups.silo_id` = `territory:9c75c3a7-15e1-4655-b627-c08e394b4606`
-   (vínculo aditivo, nunca derruba a consolidação).
+   documento. **Adendo de 2026-10-12:** a leitura da mesa aplica o evento
+   `rejected` — o artigo rejeitado sai da aba Artigos e `679b1bb2` aparece em
+   "Keywords não agrupadas" (só na leitura; nada é apagado). Faça este passo
+   ANTES do 7: com "plano vivo controle" no Silo, o passo 7 recusa ("fora do
+   plano") e aponta esta ação.
+7. **Aplicar o plano declarado ao Silo (adendo de 2026-10-12: caminho pela
+   tela).** Arquiteto → **aba Silos** → cartão do Silo consolidado "planos de
+   internet" → **"Aplicar o plano declarado ao Silo"** → conferir a prévia:
+   - "Pilar: “claro ou vivo” → “melhor plano de internet residencial” (Pilar
+     declarado no plano por <ator> em <data>)" e "“claro ou vivo” deixa de ser o
+     Pilar e fica como suporte";
+   - "Entram como suporte: …" (o artigo 5, se já tiver ArticleDNA deste Silo);
+   - a ordem de leitura 1–8 do plano; nome "Planos e contratação"; objetivo
+     declarado; "Slug `planos-de-internet`, URL e canonical ficam como estão";
+   - "SiloDNA v2 → v3 e SiloPage v2 → v3" (v1 → v2 se o passo 6 não gravou);
+   - avisos: o grafo de links internos (processar de novo na aba Links
+     internos) e, se houver, "O artigo N do plano ainda não tem ArticleDNA neste
+     Silo" (grave-o no passo 5 e aplique de novo).
+   → **"Confirmar o plano no Silo"** → esperar a notificação com a releitura e
+   "O grupo “laranja” ficou ligado a este Silo". Recusas possíveis: "Fora do
+   plano: “plano vivo controle”" (faça o passo 6), "O Pilar atual está publicado"
+   (não é o caso). Releitura (SELECT): SiloDNA vigente com `pillarArticleId` =
+   artigo 1 (`4339882e…`), `narrativeOrder` = ordem do plano, `name` = "Planos e
+   contratação"; SiloPage vigente apontando para ele, slug `planos-de-internet`;
+   `editorial_groups.silo_id` = `territory:9c75c3a7-15e1-4655-b627-c08e394b4606`.
+   Depois: aba **Links internos** → processar os links do Silo de novo (a base
+   passa para a versão nova; arestas com papel incompatível saem com o motivo).
+   Pelo MCP, o mesmo ato é `apply_declared_plan_to_silo` (prévia → aceite →
+   apply com o mesmo `decisionHash`).
 8. **Conferência final (SELECT):** 8 ArticleDNA vigentes com a principal
    declarada (depois do passo 5 completo), nenhum artigo do grupo sem
    `subject`, nenhuma keyword do grupo fora de artigo e de "não agrupadas",
@@ -1014,7 +1104,8 @@ Onde a SDD só fazia a pergunta, vale a proposta do próprio texto.
 - **D12 · Seletor ao abrir:** **Decidido: o último grupo usado**, lembrado só
   como conveniência local do navegador (`localStorage`, por marca); o grupo
   ativo de verdade é o da URL (`?grupo=`). Sem lembrança válida, "Todos os
-  grupos".
+  grupos". **Revisto em 2026-10-12 (§9.1-A):** a lembrança é por marca E por
+  área e guarda a cor.
 
 ## 18. Decisão
 
@@ -1035,7 +1126,9 @@ Onde a SDD só fazia a pergunta, vale a proposta do próprio texto.
 | F2 (Arquiteto, Radar e leitura por grupo) | código e testes prontos em 2026-10-12; **sem migration nova** (usa `editorial_group_articles` da M1); validado manualmente: não. Detalhe abaixo |
 | F3 (Fase A do plano) | código e testes prontos em 2026-10-12; **deploy sozinho, antes da F4**; sem migration; validado manualmente: não |
 | F4 (Fase B do plano) | código e testes prontos em 2026-10-12; **sem migration nova**; validado manualmente: não. Detalhe abaixo; runbook da WifiConecta no §11 |
-| F5–F6 | pendentes (`declare_silo_plan` já entrou na F4) |
+| F6 (Radar, Redator, Publicações e MCP por grupo) | código e testes prontos em 2026-10-12; **sem migration**, sem escrita remota, sem chamada paga; `declare_silo_plan` passou a ser POR COR (decisão do dono); validado manualmente: não. Adendo F6 abaixo |
+| F5 (guarda de retrabalho) | código e testes prontos em 2026-10-12; **sem migration, sem tabela nova**, sem escrita remota (só SELECT do schema), sem chamada paga; **ordem de deploy: o filtro `subject_type = 'article'` do Radar sobe antes (ou junto) de qualquer linha `operation_ledger`**; validado manualmente: não. Três pendências feitas antes (D2(a), plano no Silo consolidado, `rejected` na mesa) e o adendo F5 abaixo |
+| Interface dos grupos e do plano | código e testes prontos em 2026-10-12: "Gerenciar a cor" (nome opcional, trocar para cor livre, liberar só vazia), "Histórico do grupo" (§10.4, eventos + `operation_ledger`), selos do plano no Arquiteto (§9 item 6) e "Tirar do plano"; **sem migration**, sem escrita remota, sem chamada paga; validado manualmente: não. Adendo abaixo |
 
 #### F2 — como foi feita (2026-10-12)
 
@@ -1101,3 +1194,165 @@ Onde a SDD só fazia a pergunta, vale a proposta do próprio texto.
   o evento `rejected` às keywords do artigo retirado; selos visuais do plano no Arquiteto (§9.6); "Tirar do
   plano" pela tela; vereditos `contradicts_declared`/`parallel_path` do guarda (F5).
 - **Validado manualmente: não.** A homologação e o runbook do §11 são do dono.
+
+#### Adendo de 2026-10-12 — D2(a), plano no Silo consolidado e `rejected` na mesa
+
+Dono do módulo: Arquiteto. Sem migration, sem escrita remota, sem chamada paga, sem campo novo em ArticleDNA/SiloDNA.
+Detalhe completo em `docs/04-arquiteto/estado-atual.md` (seção do mesmo dia).
+
+- **D2(a) (decidido: (a) padrão, (b) opcional):** no MESMO núcleo da SERP de formação (`handleArchitectFormationSerp`), na
+  validação só com cache: principal com `keyword_declared_principal`, sem volume e sem a lente canônica no cache não é consultada;
+  o parecer usa as sustentações do artigo com volume e as 4 lentes no cache e é reescrito para falar da principal declarada (nunca
+  "alternativa melhor"). Proveniência: `supportBasis` no parecer (opcional), `serpStrategy.rationale` e `changeReason` no ArticleDNA
+  ("Parecer pelas sustentações: …"). "Gravar melhorias" só aceita isso para a principal declarada do pacote aprovado; sem sustentação
+  em cache recusa e aponta a D2(b). O plano pago continua contando a principal declarada (D2(b) por clique, custo antes), mas essas
+  consultas ficam opcionais e o cartão não manda pagar por elas.
+- **Plano no Silo consolidado (D7):** "Aplicar o plano declarado ao Silo" (aba Silos; rota `/api/arquiteto/silo-declared-plan`;
+  ferramenta MCP `apply_declared_plan_to_silo` com prévia/`decisionHash`/aceite e `platform.decide`; catálogo
+  `arquiteto.apply_declared_plan_to_silo`). O mesmo núcleo do fechamento decide o plano; a escrita é a do par canônico
+  (`persistSiloPairAtomic`) com releitura; depois, `linkDeclaredPlanGroupToSilo`. SiloDNA e SiloPage v+1 só com mudança real;
+  URL/slug/canonical publicados nunca mudam; Pilar atual publicado é conflito explícito; artigo fora do plano no Silo é recusa que
+  aponta "Retirar artigo do Silo". InternalLinkGraph: fica sobre a base anterior; o caminho existente (Links internos → processar de
+  novo, `rebaseInternalLinkGraph`) refaz a base — dito na prévia e no resultado.
+- **`rejected` na mesa:** `loadCanonicalArquitetoWorkspace` lê os eventos das versões vigentes e aplica `releaseRejectedArticles`
+  (puro): o artigo com a versão vigente rejeitada sai dos ativos e as keywords que só ele usava chegam sem a atribuição a ele —
+  voltam para "Keywords não agrupadas". Só leitura; nada é apagado. Consumidores: mesa, melhoria, Reforçar publicados, plano no Silo.
+- **Testes:** `test:arquiteto` 2849/2849 (era 2838), `test:arquiteto:servidor` 114/114 (era 111), `test:arquiteto:lentes` 85/85 (era
+  81; +4 da D2(a) na rota real), `test:agent` 79/79 (era 78), `test:redator` 357/357, `test:radar` 3484 (3483 + 1 pulado; a base subiu
+  com o trabalho paralelo de grupos), `tsc` 0.
+- **Limites:** a cópia de trabalho do Silo consolidado continua com o Pilar antigo (histórico; a tela mostra o Pilar do SiloDNA);
+  `listArquitetoArtifacts` e o handoff do Minerador ainda leem só o status da linha; a formação automática pode reagrupar a keyword
+  liberada (decisão do dono, D6); sem teste de integração da melhoria com Assunto de plano (cobertura pela rota e por testes puros).
+- **Validado manualmente: não.** O runbook do §11 (passos 5–7 atualizados) é do dono.
+
+#### Adendo F6 de 2026-10-12 — Radar, Redator, Publicações e MCP por grupo
+
+Cada área é dona da sua parte (Radar, Redator, Publicações; MCP/catálogo pelo `AGENTS.md` §17.1). Sem migration, sem
+SQL remoto, sem escrita no banco, sem chamada paga, sem campo novo em ArticleDNA/SiloDNA. Detalhe em
+`docs/05-radar/estado-atual.md`, `docs/07-redator/estado-atual.md` e `docs/08-publicacoes/estado-atual.md`.
+
+- **Etiqueta nas cinco áreas (§6.4, §9.1-A):** `EDITORIAL_GROUP_AREAS` ganhou `redator` e `publicacoes`; a `GlobalTopbar`
+  (sem mudança no arquivo) já renderiza a etiqueta para toda área da lista, com a escolha por área. Redator: a lista de
+  documentos filtra pela cor, com faixa e etiqueta; Publicações: Biblioteca, Fila, Publicados e Atualizações filtram, com
+  faixa e etiqueta. O grupo efetivo dos artigos (`useEditorialGroups`) só é lido depois da mesa ou com uma cor escolhida.
+  Só tela; contratos iguais.
+- **Radar (§6.3):** a mesa já tinha etiqueta, filtro e faixa (conferido). A regra 24 do artigo-modelo ganhou a frase da
+  promessa declarada (parte dela, sem ampliar nem trocar o escopo); `RADAR_ARTICLE_BLUEPRINT_RULES_VERSION` não mudou.
+- **Entregáveis:** o CSV "Para escrever" e `get_article_for_writing` (a mesma montagem) levam `Grupo: <cor> · <nome>` e a
+  promessa declarada na coluna artigo (`radarWritingGroupLines`; sem moldura; D10); o MCP devolve também `group`. Artigo
+  sem grupo: o arquivo de antes, byte a byte. Leitura do grupo por `readArticleGroupLabels` (efetivo, estreita, nunca
+  segura o arquivo).
+- **MCP (§6.5):** o parâmetro é `group` (não `groupId`): a COR ("laranja"), "sem-grupo" ou o uuid de antes, em
+  `get_platform_state` (keywords e Assuntos pelo grupo da keyword; artigos, Silos, itens do Radar e documentos pelo grupo
+  efetivo do artigo; publicadas = o site inteiro) e `list_platform_keywords`; cor sem grupo = recorte vazio dito em
+  `group.description`. Sem o parâmetro, as consultas de antes. Recorte puro em `lib/editorial/editorial-group-scope.ts`.
+- **`declare_silo_plan` POR COR (recomendação aprovada pelo dono):** `group { mode: "color", color, name? }`. No núcleo
+  único (`importDeclaredPlanWithCore`): a cor que já tem grupo ativo recebe o plano (`readActiveEditorialGroupIdForColor`,
+  a mesma escolha do ensure); a sem grupo ganha o grupo no `apply` por `ensureEditorialGroupForColor` (reativa o arquivado
+  da cor ou cria), depois `declareEditorialGroupPlan` e o nome do Silo (ou o `name`). `mode: "new"` (o diálogo da tela)
+  segue a mesma regra; `existing` (uuid) continua aceito. Nunca dois grupos da mesma cor. `createDeclaredPlanGroup` ficou
+  sem chamador (continua exportado no repositório).
+- **Catálogo:** notas de `minerador.keyword_groups`, `minerador.declare_silo_plan`, `arquiteto.article_groups` (título e
+  tela com Redator e Publicações) e `radar.export_for_writing`.
+- **Testes:** novos `tests/radar-grupos-f6-entregaveis.test.mts` (10, no glob do Radar) e `tests/agent-grupos-f6-mcp.test.mts`
+  (9, em `test:agent`); `tests/radar-grupos-etiqueta-topbar.test.mts` cobre Redator e Publicações (+4); dois testes
+  estruturais do Radar atualizados para a montagem com `grupos`. Contagens: `test:radar` 3498 (3497 + 1 pulado; era 3484);
+  `test:agent` 88/88 (era 79); `test:redator` 357/357; `test:redator:mcp` 150/150; `test:editorial` 172 com as 4 antigas;
+  Minerador por glob 1236 com as mesmas 28 falhas antigas (por nome); `tsc` 0. `test:arquiteto` 2853 com 4 falhas em
+  arquivos do Arquiteto em edição paralela (`arquiteto-artigos-simples`, `arquiteto-links-observabilidade`,
+  `arquiteto-retomada-fechamento`, `arquiteto-serp-partial`) — não tocados nesta fase.
+- **Limites:** o CSV de vídeo não leva o grupo; Redator e Publicações sem teste DOM da lista filtrada (estrutural + topbar
+  em DOM); a leitura do grupo no export roda também no formato completo e no de vídeo (a montagem é uma só).
+- **Validado manualmente: não.** Homologação do dono.
+
+#### Adendo de 2026-10-12 — interface dos grupos e do plano (Gerenciar a cor, Histórico do grupo, selos, Tirar do plano)
+
+Dono do módulo: Compartilhado/editorial (grupos), com o núcleo do plano no Minerador e pontos no Arquiteto. Sem migration,
+sem escrita remota, sem SQL remoto, sem chamada paga nem de IA, sem campo novo em ArticleDNA/SiloDNA. Detalhe em
+`docs/03-minerador/estado-atual.md` e `docs/04-arquiteto/estado-atual.md` (seções do mesmo dia).
+
+- **Gerenciar a cor (decisão aplicada, recomendada e aprovada):** no menu da etiqueta, engrenagem por cor que já tem grupo
+  (só com a lista do servidor). (a) **Nome (opcional)** — vazio = o nome da cor; (b) **Trocar a cor** — só para cor LIVRE;
+  ocupada = recusa `GROUP_COLOR_TAKEN` explicando que juntaria dois grupos (nunca funde); o nome que era só a cor
+  acompanha a cor nova; a escolha das áreas que olhavam a cor antiga acompanha o grupo; (c) **Liberar a cor** — arquiva,
+  só sem keywords (inclusive na lixeira, porque são restauráveis), artigos etiquetados, plano ou Silo ligado; senão
+  `GROUP_NOT_EMPTY` com as contagens. `PATCH /api/editorial/groups` = `manageEditorialGroup` →
+  `updateEditorialGroup` de sempre (trava otimista, releitura, evento). **Mudança de permissão (aditiva):** o PATCH passou
+  de `minerador:edit` para edição no Minerador, no Arquiteto ou no Radar (a mesma regra do "garantir a cor"), porque as
+  três áreas mostram a etiqueta. `status: "archived"` continua aceito (= liberar).
+- **Histórico do grupo (§10.4):** `GET /api/editorial/groups/history` (leitura de quem vê a marca; até 10 grupos, os da cor
+  escolhida), lido só ao abrir. Fontes: `editorial_group_events` e as tentativas de `operation_ledger`
+  (`editorial_workflow_items`, filtro `payload->>groupId`), no formato do §10.1; leitura tolerante (linha sem data ou de
+  outro grupo é descartada; erro no registro do guarda vira aviso, não falha). Link do resultado só se for caminho
+  interno. Ator: "Você" ou "Outro membro · id curto" (sem expor e-mail; nome do ator fica no backlog).
+- **Selos do plano no Arquiteto (§9 item 6):** "Pilar do plano · 1º" / "Suporte do plano · nº", "Principal declarada",
+  "Principal ≠ declarada" (aviso, nunca troca) e "Fora do plano" na linha do artigo; "Plano declarado · Pilar: …" na
+  SiloPage (aba Artigos) e no cartão do Silo (aba Silos). Só leitura do pacote aprovado (`ArchitectSubjectStanding`).
+- **Tirar do plano (§6.1 item 5; a SDD só dizia "sair do plano antes de mover"):** menor versão coerente, registrada aqui.
+  Núcleo `withdrawFromDeclaredPlanWithCore` (`lib/minerador/declared-plan-withdraw-core.ts`; rota
+  `/api/minerador/marcas/[brandId]/plans/withdraw`, POST com `minerador:edit`): prévia com `decisionHash` → aplicar só com
+  o mesmo hash → grupo com o plano restante pelo `declareEditorialGroupPlan` (`plan_version + 1`; `plan_hash` = o que
+  reimportar o texto restante daria; evento `plan_changed` com `withdrawal`, via o novo `eventPayload` opcional) →
+  principal sem a marca → Assunto sem `keyword_subject.plan` (ainda declarado) → releitura. Decisões: o Assunto e a
+  principal **ficam no grupo** (nenhum `group_id` muda) e deixam de estar presos a ele; os outros Assuntos do plano não
+  são regravados (guardam o `planVersion` do ato, que é proveniência); o Pilar não sai (`PILLAR_CANNOT_LEAVE`: trocar o
+  Pilar = reimportar o plano); o artigo do Arquiteto não é tocado — o Arquiteto só obedece ao pacote aprovado, então o
+  selo "Fora do plano" aparece depois da reaprovação e do novo envio, e "Retirar artigo do Silo" continua sendo o caminho
+  para as keywords do artigo voltarem a "Keywords não agrupadas" do grupo. Nada é apagado. **Sem ferramenta MCP** (só
+  tela); o catálogo descreve o caminho (`minerador.withdraw_from_declared_plan`).
+- **Catálogo (AGENTS §17.1):** operações `editorial.group_manage_and_history` e `minerador.withdraw_from_declared_plan`
+  (as duas `access: "ui"`, grátis, decisão humana), com os selos descritos nas notas.
+- **Testes:** `tests/editorial-grupos-gerenciar-historico.test.mts` (10, `test:editorial`),
+  `tests/minerador-plano-tirar-do-plano.test.mts` (6, glob do Minerador), `tests/radar-grupos-gerenciar-historico-dom.test.mts`
+  (5, DOM, `test:radar`), `tests/arquiteto-selos-do-plano.test.mts` (4, `test:arquiteto`); listas/regex ajustadas de
+  propósito: `tests/minerador-assunto-dominio.test.mts` (novo chamador de `setKeywordSubject`),
+  F1-17 de `tests/minerador-grupos-f1.test.mts` (PATCH = Gerenciar), `tests/arquiteto-links-observabilidade.test.mts` e
+  `tests/arquiteto-retomada-fechamento.test.mts` (a revisão da linha ganhou `declaredPlanSealsFor` — eram as duas falhas
+  "em edição paralela" citadas no adendo F6). Suítes no fim: `test:arquiteto` 2853/2853, `test:agent` 88/88,
+  `test:radar` 3503 (3501 + 1 pulado + 1 falha de outra frente: `radar-artigo-modelo-congelamento`, export do Radar),
+  `test:editorial` 182 com as 4 falhas antigas, Minerador por glob 1258 com as MESMAS 25 falhas antigas (por nome),
+  `tsc` 0, eslint dos arquivos tocados sem erro.
+- **Validado manualmente: não.** Homologação do dono (dark mode, 360/768/1024/1440 px, foco, Esc, os dois diálogos).
+
+#### Adendo F5 de 2026-10-12 — guarda de retrabalho completa
+
+Dono do módulo: Arquiteto (domínio compartilhado em `lib/editorial`). Sem migration, sem tabela nova, sem escrita remota (o
+schema de `editorial_workflow_items` foi conferido por SELECT: sem CHECK em `subject_type`, UNIQUE `(marca_id, subject_type,
+subject_id, stage)`, `source_entity_id` não vazio, `state` 1..80, `source_version_id` FK opcional; os 12 itens do Radar são
+`article`), sem chamada paga, sem campo novo em ArticleDNA/SiloDNA. Detalhe em `docs/04-arquiteto/estado-atual.md`.
+
+- **§6.3 (pré-requisito):** `WorkflowRepository.list` lê `subject_type = 'article'` e `stage = 'radar'`. Os outros leitores
+  de `editorial_workflow_items` filtram por `subject_type`, por `article_id` (nulo na linha do guarda) ou no código. A linha do
+  guarda usa `source_entity_id = subject_id` (o ciclo de exclusão da keyword não a alcança).
+- **§10.1:** domínio `lib/editorial/rework-guard.ts` (`operationFingerprint` = `contentHash`; `assessRework` com política por
+  operação; `decideRework`; linha `operation_ledger` com as últimas 20 tentativas `{ at, actorId, outcome, outcomeCode,
+  resultRef, costUsd, message?, overrideReason? }`, `kind`, `fingerprint`, `groupId`, `inputsSummary`; nomes canônicos em
+  `REWORK_OPERATION_LABELS`). Servidor `lib/server/rework-guard.ts` (`checkRework`, `recordOperation` melhor esforço e
+  idempotente, `runUnderReworkGuard`, `ReworkRefusedError`, porta `reworkGuardPort`). Registro próprio reaproveitado: a
+  execução da melhoria (`inputsHash`) e o registro de uso; ganham linha a coleta PAGA da SERP por artigo, a conclusão da
+  formação (rota do marcador), a recusa da gravação do ArticleDNA, o fechamento do Silo, a retirada e o plano no Silo.
+- **§10.2/§10.3:** melhoria — mesma execução devolvida com `rework` (as 9 viram 1), `reworkOverride` refaz IA e medições,
+  busca não repetida, Assunto com lista do Minerador fora da busca; SERP paga — a mesma composição paga e inconclusiva sai do
+  plano e volta como falha `REWORK_SAME_REFUSAL` (todos barrados = 409); ArticleDNA — `DECLARED_PLAN_CONTRADICTION` (mudança
+  da principal ou do papel para longe do plano, lida do pacote aprovado do Assunto) e `REWORK_PARALLEL_PATH` (ArticleDNA novo
+  sem Assunto, não publicado, principal em grupo com plano), sem override; fechamento — a mesma recusa anterior à RPC volta 409
+  `REWORK_SAME_REFUSAL` sem chegar à RPC. "Refazer mesmo assim" (D11) aceito para `same_inputs_reuse` e `same_refusal` com
+  motivo (≥ 5 caracteres); nunca para plano declarado nem caminho paralelo.
+- **§10.4:** `components/editorial/rework-notice.tsx` acima dos botões da melhoria, das prévias do plano no Silo e da
+  retirada, e em "Fechamento dos Silos". As respostas trazem `rework: { verdict, previous, … }`; o MCP devolve o código e o
+  `rework` (`app/api/mcp/redator/route.ts`), `improve_articles` aceita `reworkOverride`; catálogo atualizado.
+- **D6 (decisão do dono):** a keyword liberada por artigo rejeitado fica em "Keywords não agrupadas" do grupo dela, com o
+  motivo; a formação automática não a reagrupa (`releasedHold`); formação humana posterior à rejeição a tira daí.
+- **Backlog do Arquiteto:** "Gravar sem validar (n)" só com validação obrigatória pendente (`improvementRowApplyLabel`);
+  teste de integração da melhoria com Assunto de plano declarado e principal sem volume (D2(a)).
+- **Ordem de deploy:** o filtro do Radar (`subject_type = 'article'`) sobe ANTES ou JUNTO de qualquer código que grave
+  `operation_ledger` — no mesmo deploy da F5 serve, porque nenhuma linha existe antes dele. Nada depende de migration.
+- **Testes:** `test:arquiteto` 2867/2867 (era 2849), `test:arquiteto:servidor` 122/122 (era 114), `test:arquiteto:lentes`
+  90/90 (era 85), `test:agent` 88/88, `test:redator` 357/357, `test:redator:mcp` 150/150, `test:editorial` 182 com as 4 falhas
+  antigas (mesmos nomes), `tsc` 0. Os números de base incluem o trabalho das frentes paralelas do mesmo dia.
+- **Limites:** o fingerprint do fechamento usa o envelope (sem ids e datas) e os locks — estado lido só no servidor que mude
+  sem mudar o envelope pede "Refazer mesmo assim" pela rota; o fechamento automático não oferece override na tela; `costUsd` por
+  artigo da coleta paga fica nulo (o custo exato está em `integration_usage_events`); a lista do Assunto fora do artigo e de não
+  agrupadas segue conferida pela portaria `DECLARED_PLAN_PRESERVED` da tela (a gravação confere principal e papel).
+- **Validado manualmente: não.** Homologação do dono: preparar a melhoria duas vezes na WifiConecta, "Refazer mesmo assim"
+  com motivo, retirar "plano vivo controle" e conferir as linhas `operation_ledger` por SELECT.

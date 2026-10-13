@@ -1,3 +1,186 @@
+## F5 · Guarda de retrabalho completa — 2026-10-12
+
+```text
+SDD = docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md (§6.3, §10.1–10.4, §15 item 5, §17 D6/D11, §18.1)
+Módulo dono = Arquiteto (domínio compartilhado em lib/editorial) · MIGRATION_NOVA = 0 · TABELA_NOVA = 0 · ESCRITA_REMOTA = 0
+SQL_REMOTO = só SELECT (schema de editorial_workflow_items) · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Pré-requisito do Radar (§6.3):** `WorkflowRepository.list` (`lib/server/editorial-repositories.ts`) filtra
+  `subject_type = 'article'` além de `stage = 'radar'`. Conferido no banco (SELECT, 2026-10-12): os 12 itens do Radar
+  são `article`; não há CHECK em `subject_type`; UNIQUE `(marca_id, subject_type, subject_id, stage)`; `source_entity_id`
+  não vazio; `state` 1..80; `source_version_id` FK opcional. Os demais leitores de `editorial_workflow_items` filtram por
+  `subject_type`, por `article_id` (a linha do guarda tem `article_id` nulo) ou fazem o filtro no código (backup,
+  homologação "do zero" preserva tipos fora da lista). A linha do guarda usa `source_entity_id = subject_id`: o ciclo de
+  exclusão da keyword (que casa `subject_id`/`source_entity_id` com o id da keyword) não a alcança.
+- **Domínio** `lib/editorial/rework-guard.ts` (puro): `operationFingerprint` (`contentHash` de `versioning.ts`),
+  `assessRework` (fresh / same_inputs_reuse / same_refusal / contradicts_declared / parallel_path, com política por
+  operação), `decideRework` ("Refazer mesmo assim" só com motivo ≥ 5 caracteres; nunca para plano declarado nem caminho
+  paralelo), a linha `operation_ledger` (`appendReworkLedgerAttempt`, últimas 20 tentativas; falha transitória não é
+  "a mesma recusa"), `reworkView`/`readReworkView`, `reworkHistoryEntries` e `REWORK_OPERATION_LABELS`.
+- **Servidor** `lib/server/rework-guard.ts`: `checkRework`, `recordOperation` (melhor esforço, relê, idempotente pelo
+  instante), `runUnderReworkGuard`, `ReworkRefusedError` (409, `CONFLICT` + `reworkCode`) e a porta
+  `reworkGuardPort`. `pipelineArtifactErrorResponse` devolve `code` = `REWORK_SAME_INPUTS` / `REWORK_SAME_REFUSAL` /
+  `DECLARED_PLAN_CONTRADICTION` / `REWORK_PARALLEL_PATH` e `rework: { verdict, previous, reasons, canOverride, message }`;
+  a rota do MCP (`app/api/mcp/redator/route.ts`) devolve o mesmo código e o `rework`.
+- **Pontos de chamada (§10.3), todos no núcleo:**
+  - *Preparar melhoria / leitura da IA / busca no Google Ads* (`arquiteto-article-improvement.ts`): o registro é a
+    própria execução (`inputsHash`, `improvementReworkPrevious`). Mesmos insumos + mesma prévia (comparada pelo conteúdo)
+    + nenhuma chamada nova = devolve A MESMA execução com `rework` (as 9 da WifiConecta viram 1, nenhuma linha nova).
+    `reworkOverride: { reason }` refaz IA e medições. A busca já feita com os mesmos insumos não se repete; Assunto com
+    lista da Pesquisa por Assunto do Minerador (`subject_discovery`) não entra na busca nem conta como alvo dela.
+  - *Coleta paga da SERP* (`arquiteto-serp-http.ts` + `lib/server/arquiteto-serp-rework-guard.ts`): a coleta PAGA de um
+    artigo é registrada (inconclusiva = recusa). A mesma composição (artigo, base, principal, membros, lentes) paga e
+    inconclusiva sai do plano pago (`data.rework.articles` na prévia) e volta como falha `REWORK_SAME_REFUSAL`; todos
+    barrados = 409. A leitura só com cache nunca é barrada. A melhoria (collect) passa pelo mesmo ponto.
+  - *Formação / conclusão* (`appendArquitetoArtifact` → `lib/server/arquiteto-rework-guard.ts`): antes de gravar o
+    ArticleDNA, `DECLARED_PLAN_CONTRADICTION` quando a versão nova MUDA a principal para longe da declarada ou o papel
+    para longe do plano (lido do pacote aprovado do Assunto; versão que só carrega o estado anterior ao plano passa) e
+    `REWORK_PARALLEL_PATH` para ArticleDNA NOVO sem Assunto, não publicado, com a principal em grupo com plano. Restauração
+    de backup não passa. Sem mudança de principal/papel, só uma leitura estreita da versão vigente; artigo existente sem
+    Assunto, nenhuma. A conclusão (rota do marcador) entra no registro (`recordFormationConclusion`). A lista do Assunto
+    fora do artigo e de não agrupadas continua conferida pela portaria `DECLARED_PLAN_PRESERVED` (tela).
+  - *Fechamento do Silo* (`consolidateSiloFromWorkingCopy`, `runUnderReworkGuard`): a recusa de domínio antes da RPC fica
+    registrada com os insumos (sem ids/datas do clique); o mesmo pedido volta 409 `REWORK_SAME_REFUSAL` sem chegar à RPC.
+    A tela descarta a operação congelada e mostra o aviso em "Fechamento dos Silos" até um insumo mudar (o fechamento é
+    automático: não há botão a desabilitar no fluxo padrão; o servidor é quem barra). `reworkOverride` na rota.
+  - *Retirar artigo do Silo* e *Aplicar o plano declarado ao Silo*: linha `operation_ledger` (com o grupo), `rework` na
+    prévia e na recusa ("a mesma recusa de <data>").
+- **D6 (decisão do dono):** a keyword liberada por artigo rejeitado ganha a marca de leitura `rejectedArticleRelease`
+  (`releaseRejectedArticles`) e fica em "Keywords não agrupadas" com o motivo; `planSiloArticleFormation` e
+  `buildArticleFormationUniverse` não a reagrupam (`releasedHold`); formação humana posterior à rejeição a tira daqui.
+- **Tela:** `components/editorial/rework-notice.tsx` (token `warning`, ≥ 14 px, `InfoHint` com o que mudar, "Refazer
+  mesmo assim" com motivo só quando o servidor aceita) acima dos botões da melhoria, da prévia do plano no Silo, da prévia
+  da retirada e no "Fechamento dos Silos". Fileira da melhoria: "Gravar sem validar (n)" só com validação obrigatória
+  pendente; só D2(b) opcional = "Gravar melhorias (n)" (`improvementRowApplyLabel`).
+- **MCP/catálogo:** `improve_articles` aceita `reworkOverride` e devolve `rework`; `apply_declared_plan_to_silo` devolve
+  `rework` na prévia e na recusa; catálogo com as notas da guarda e a regra de conduta.
+- **Testes:** `tests/editorial-rework-guard.test.mts` (11) e `tests/arquiteto-guarda-retrabalho-d6.test.mts` (3) no
+  `test:arquiteto`; `tests/arquiteto-guarda-retrabalho-servidor.test.mts` (8) no `test:arquiteto:servidor`; 5 novos em
+  `tests/arquiteto-article-improvement-server.test.mts` (guarda + integração D2(a) do "Gravar melhorias") no
+  `test:arquiteto:lentes`. Ajustados de propósito: a reprepara igual devolve a mesma execução
+  (`arquiteto-article-improvement-server`), a rota da SERP lê a linha do guarda (`arquiteto-quatro-lentes-rota`), o
+  ArticleDNA novo sem Assunto lê uma vez o grupo da principal (`arquiteto-assunto-guarda-servidor`), o rótulo da fileira
+  (`arquiteto-artigos-simples`) e `requestedArticles` do pedido inteiro (`arquiteto-serp-partial`).
+- **Limites:** o fingerprint do fechamento não inclui estado lido só no servidor (ex.: versões de artigos fora do
+  envelope) — se algo externo mudar sem mudar o envelope, a saída é "Refazer mesmo assim" pela rota; a tela do
+  fechamento automático não oferece o override. `costUsd` da coleta paga por artigo fica nulo (o custo exato está em
+  `integration_usage_events`). "Histórico do grupo" (outra frente) lê o formato do §10.1; os nomes canônicos das
+  operações estão em `REWORK_OPERATION_LABELS`.
+
+## Selos do plano declarado e o menu da etiqueta (Gerenciar, Histórico, Tirar do plano) — 2026-10-12
+
+```text
+SDD = docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md (§9 item 6, §9.1-A, §10.4; adendo "interface dos grupos e do plano" na §18.1)
+Módulo dono = Compartilhado/editorial, com pontos no Arquiteto · MIGRATION_NOVA = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Selos (só leitura do pacote aprovado, `ArchitectSubjectStanding.plan`/`.declaredPrincipal`):** domínio puro
+  `lib/arquiteto/declared-plan-seals.ts` e componente `modules/arquiteto/declared-plan-seals.tsx` (texto ≥ 14 px, borda
+  `divider`, divergência em `warning`; cor nunca sozinha; o título explica). Na linha do artigo (aba Artigos), ao lado da
+  etiqueta do grupo: "Pilar do plano · 1º" / "Suporte do plano · nº", "Principal declarada" (a principal do artigo é a
+  declarada), "Principal ≠ declarada" (aviso; nada é trocado) e "Fora do plano" (grupo do artigo com plano, Assunto sem
+  plano). Na SiloPage (aba Artigos) e no cartão do Silo (aba Silos): "Plano declarado · Pilar: <principal do Pilar>".
+  `declaredPlanSealsFor` entrou em `articleRowRevision` (a linha memoizada redesenha quando o plano ou os grupos chegam).
+  Pontos tocados em `modules/arquiteto/arquiteto-workspace.tsx`: 2 imports, o `useCallback` + a revisão, a célula da
+  linha, o `groupTag` da SiloPage e o cartão do Silo.
+- **Menu da etiqueta (topbar, também no Arquiteto):** "Gerenciar a cor" (nome opcional, trocar para cor livre, liberar
+  a cor vazia), "Histórico do grupo" (eventos + registro do guarda, lido só ao abrir) e, no Gerenciar de um grupo com
+  plano, "Tirar do plano" (núcleo do Minerador, prévia e `decisionHash`). Detalhe em `docs/03-minerador/estado-atual.md`.
+  No Arquiteto nada muda até a reaprovação no Minerador: o artigo que saiu do plano mostra "Fora do plano" depois do
+  novo envio; "Retirar artigo do Silo" continua sendo o caminho para soltar as keywords dele.
+- **Testes:** `tests/arquiteto-selos-do-plano.test.mts` (4) no `test:arquiteto`; ajustados de propósito
+  `tests/arquiteto-links-observabilidade.test.mts` e `tests/arquiteto-retomada-fechamento.test.mts` (a revisão da linha
+  ganhou `declaredPlanSealsFor`). Falhas encontradas e NÃO causadas aqui (arquivos em edição por outra frente):
+  `tests/arquiteto-serp-partial.test.mts` ("o route isola por Article…", lê `lib/server/arquiteto-serp-http.ts`) e
+  `tests/arquiteto-artigos-simples.test.mts` ("os números 1 · 2 · 3…", lê `modules/arquiteto/article-improvement-panel.tsx`).
+- **Guard visual:** `scripts/check-visual-system.mjs` acusa `arquiteto-workspace.tsx` 105 (baseline 97); nenhuma das
+  linhas acusadas é das edições desta entrega (as dela usam só tokens).
+
+## Pendências da fase do plano declarado: D2(a), plano no Silo consolidado e `rejected` na mesa — 2026-10-12
+
+```text
+SDD = docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md (§11 passos 5–7, §17 D2/D7, §18.1) · dono do módulo = Arquiteto
+MIGRATION_NOVA = 0 · CAMPO_NOVO_EM_ARTICLEDNA/SILODNA = 0 · ESCRITA_REMOTA = 0 · SQL_REMOTO = 0 · CHAMADA_PAGA = 0 · CHAMADA_IA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**1 · D2(a) — parecer SERP pelas sustentações (decidido: (a) padrão, (b) opcional).** Verificado no código e confirmado por teste.
+
+- Núcleo único: a rota da SERP de formação (`lib/server/arquiteto-serp-http.ts`, `handleArchitectFormationSerp`), só na validação
+  SOMENTE COM CACHE e com o pedido de 4 lentes. Quando a principal do grupo tem a marca `keyword_declared_principal`, não tem volume e
+  não tem a lente canônica no cache, ela não é consultada: o parecer usa as sustentações do artigo com volume e as 4 lentes no cache
+  (`selectDeclaredPrincipalSupports`; maior volume primeiro). Sustentação com lente faltando no digest sai do parecer quando outra fica
+  inteira. Os pares são lidos contra a sustentação de maior volume e o parecer é reescrito para falar da principal declarada
+  (`applyDeclaredPrincipalSupportBasis`): nunca "alternativa melhor", a declarada fica entre as não observadas com o motivo D2a, o
+  veredito é o do agrupamento das sustentações. Nenhuma coleta nova; o plano pago (`mode: plan`) continua contando as 4 lentes da
+  principal declarada — é a D2(b), "2 · Validar no Google", com o custo antes.
+- Proveniência: o parecer leva `supportBasis` (`SerpFormationAssessmentSchema`, opcional e aditivo); `serpAssessmentComposition`
+  só reconhece a principal sem recomendação quando o parecer diz que veio das sustentações. O ArticleDNA grava a linha "Parecer pelas
+  sustentações: “…” — a principal declarada “…” não tem volume nem SERP no cache (D2a); nenhuma coleta nova foi feita." em
+  `serpStrategy.rationale` (campo existente; trocada a cada versão, retirada quando o parecer volta a ser o da principal —
+  `applySerpSupportBasisProvenance`) e no `changeReason` da versão. Não é pendência (D10).
+- "3 · Gravar melhorias" (`lib/server/arquiteto-article-improvement.ts`, `applyTarget`): aceita o parecer pelas sustentações só para a
+  principal declarada do pacote aprovado do Assunto (`target.declaredPrincipalId`); sem nenhuma sustentação em cache, recusa com
+  "A principal declarada “…” não tem SERP no cache e nenhuma sustentação com volume do artigo tem as 4 lentes no cache … use “Validar
+  no Google” (pago; o custo aparece antes de autorizar)". No preparo, a linha diz a proveniência e que a D2(b) é opcional; as consultas
+  só da principal declarada coberta viram `costs.optionalPaidQueries` e o cartão "Próximo passo" não as põe como próximo passo
+  (`resolveImprovementNextStep`). A principal declarada nunca é trocada por volume.
+
+**2 · "Aplicar o plano declarado ao Silo" (Silo já consolidado; D7).** Verificado no código e confirmado por teste.
+
+- Pura: `lib/arquiteto/silo-declared-plan-application.ts` (`planSiloDeclaredPlanApplication`, `buildSiloDeclaredPlanVersions`), com o
+  MESMO núcleo do fechamento (`resolveDeclaredSiloPlan`, `applyDeclaredSiloIdentity`, `declaredPlanEntryForUnit` — exportado de
+  `silo-declared-plan.ts` sem mudar a regra). Servidor: `lib/server/arquiteto-silo-declared-plan.ts` (lê pela mesma leitura da mesa, o
+  plano de cada Assunto do pacote aprovado e o Silo planejado de `editorial_groups.plan`; grava pelo `persistSiloPairAtomic`; relê;
+  depois liga `editorial_groups.silo_id` pelo `linkDeclaredPlanGroupToSilo`). Rota `POST /api/arquiteto/silo-declared-plan` (preview com
+  leitura; apply com edição + aprovação e o `decisionHash` da prévia). Tela: `modules/arquiteto/silo-declared-plan-panel.tsx`, no cartão
+  do Silo consolidado da aba Silos. MCP: `apply_declared_plan_to_silo` (preview `platform.read`; apply com aceite no chat, mesmo
+  `decisionHash`, `arquiteto.write` + `platform.decide`, permissões de edição e aprovação). Catálogo: `arquiteto.apply_declared_plan_to_silo`.
+- O que faz: Pilar = artigo `Pilar` do plano; suportes e `narrativeOrder` na ordem do plano (o Pilar antigo vira suporte; artigo do plano
+  já gravado deste Silo — mesmo `siloId` ou território — entra); `articleReferences` nas versões vigentes; papéis com "Pilar declarado no
+  plano por <ator> em <data>"; `linkMap`, `hierarchySignals`, `keywordPackageRefs`, `serpAssessmentRefs`/`serpGuidelines` refeitos;
+  nome e objetivo do Silo planejado; território, entidade central, fronteira e Assunto do Silo não mudam. SiloPage: Pilar, suportes,
+  seções na ordem nova (título escrito por gente fica), slug do plano só sem publicação e sem canonical; URL e canonical nunca mudam.
+  SiloDNA e SiloPage v+1 (as aprovadas ficam no histórico); sem mudança real não há versão (`UNCHANGED`).
+- Recusas: artigo fora do plano ainda no Silo (aponta "Retirar artigo do Silo"), Pilar atual publicado quando o Pilar muda (conflito
+  explícito), plano de mais de um grupo ou sem Pilar, Silo sem aprovação, par incoerente, prévia vencida (versão ou hash).
+- InternalLinkGraph: a versão nova do Silo deixa o grafo aprovado sobre a base anterior (o hash da base muda; `isInternalLinkGraphStale`).
+  Não há regeneração paralela: a prévia e o resultado avisam para processar os links de novo na aba Links internos, cujo caminho existente
+  (`rebaseInternalLinkGraph`) leva as arestas que ainda cabem nos papéis novos e descarta, com o motivo, as que não cabem. A retirada já
+  avisava o mesmo.
+- A aba Silos mostra o Pilar do SiloDNA vigente no Silo consolidado (antes, o da cópia de trabalho). A cópia de trabalho do Silo
+  consolidado não é alterada (histórico; backlog).
+
+**3 · A mesa aplica o evento `rejected`.** Verificado no código e confirmado por teste.
+
+- `loadCanonicalArquitetoWorkspace` (`lib/server/arquiteto-workspace.ts`) lê os eventos de status das versões vigentes de ArticleDNA
+  (`editorial_version_status_events`, em blocos de 100) e aplica `releaseRejectedArticles` (`lib/arquiteto/rejected-article-release.ts`,
+  puro): status efetivo = último evento, senão o da linha; entidade com a versão vigente rejeitada sai de `articleDnas` (a anterior não
+  volta); as keywords dela que nenhum artigo ativo usa chegam na projeção do item de workflow sem `clusterId`/`provisionalGroupId`/
+  `workingArticleId` que apontavam para o artigo rejeitado e sem a formação humana anterior à rejeição (decisão posterior fica). O status
+  da versão rejeitada vai como `rejected`; `rejectedArticles` é aditivo na resposta. Nada é apagado nem regravado.
+- Consumidores (mesma leitura): GET `/api/arquiteto/workspace` (mesa), a melhoria (`readInputs`: o artigo rejeitado não é mais dono das
+  keywords), o Reforçar publicados (`artigoDaKeyword`) e a aplicação do plano no Silo. Sem rejeição, a resposta é a mesma de antes (teste).
+  Ficam com o status da linha: `listArquitetoArtifacts` (retirada, persistência), `articleDnaKeywordIds` do handoff do Minerador.
+
+**Arquivos:** novos `lib/arquiteto/silo-declared-plan-application.ts`, `lib/arquiteto/rejected-article-release.ts`,
+`lib/server/arquiteto-silo-declared-plan.ts`, `app/api/arquiteto/silo-declared-plan/route.ts`, `modules/arquiteto/silo-declared-plan-panel.tsx`,
+`tests/arquiteto-plano-no-silo-e-d2a.test.mts` (11, em `test:arquiteto`), `tests/arquiteto-plano-no-silo-servidor.test.mts` (3, em
+`test:arquiteto:servidor`); alterados `lib/arquiteto/article-serp-interpretation.ts`, `serp-formation.ts`, `published-formation-serp.ts`,
+`declared-plan-formation.ts`, `article-improvement-next-step.ts`, `silo-declared-plan.ts` (export), `silo-article-withdrawal.ts` (export),
+`lib/server/arquiteto-serp-http.ts`, `arquiteto-article-improvement.ts`, `arquiteto-workspace.ts`, `platform-mcp-tools.ts`,
+`lib/agent/platform-catalog.ts`, `modules/arquiteto/article-improvement-panel.tsx` (uma linha), `modules/arquiteto/arquiteto-workspace.tsx`
+(import + Pilar do SiloDNA + painel, na aba Silos), `package.json` (dois testes), `tests/arquiteto-quatro-lentes-rota.test.mts` (+4, D2(a)
+na rota real), `tests/agent-platform-mcp.test.mts` (+1). Compartilhados: o schema do parecer (campo opcional), a composição observada (só
+com `supportBasis`), a leitura da mesa (só com `rejected`).
+
+**Testes (antes → depois):** `test:arquiteto` 2838 → 2849; `test:arquiteto:servidor` 111 → 114; `test:arquiteto:lentes` 81 → 85;
+`test:agent` 78 → 79; `test:redator` 357 → 357; `test:radar` 3466 → 3484 (3483 + 1 pulado; a base subiu com o trabalho paralelo de grupos); `tsc` 0. Validado manualmente: não.
+
 ## Plano declarado do Silo no Arquiteto (F4 = Fase B) — 2026-10-12
 
 ```text

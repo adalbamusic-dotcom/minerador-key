@@ -277,7 +277,8 @@ test("o núcleo do export passa a investigação vigente que o laço já leu (ne
   const nucleo = (await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   assert.match(nucleo, /const investigacao = radarArticleBlueprintCurrentInvestigationOf\(\{\n\s+analysisPayload: payload,\n\s+article,\n\s+articleVersions: artefatos\.articles\.filter\(versao => versao\.payload\.articleId === articleId && versao\.payload\.brandId === input\.brandId\),\n\s+\}\);/);
   assert.match(nucleo, /investigation: congelamentos\.get\(item\.articleId\) \?\? null,/);
-  assert.match(nucleo, /return \{ exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice, congelamentos \};/);
+  /* 2026-10-12 · F6 · a montagem leva também o grupo de cada artigo (só leitura). */
+  assert.match(nucleo, /return \{ exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice, congelamentos, grupos \};/);
 });
 
 /* ============================== o ifMissing e a gravação ============================== */
