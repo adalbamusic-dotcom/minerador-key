@@ -287,8 +287,16 @@ export function buildArchitectureWorkingProposal(input: {
    * humana, não declaração do site.
    */
   publishedSiloConflicts?: ReadonlyMap<string, string>;
+  /**
+   * 2026-10-13 · os grupos com PLANO DECLARADO (SDD do cadastro único §3.5):
+   * o Silo planejado (nome, slug, o território já ligado ao grupo) e as
+   * keywords do grupo. Elas seguem o plano; a análise automática não as
+   * reorganiza. Ausente = a proposta de antes.
+   */
+  declaredPlanGroups?: readonly { groupId: string; label: string; siloName: string; siloSlug: string | null; territoryRef: string | null; keywordIds: readonly string[] }[];
 }): ArchitectureWorkingProposal {
   const dnaPorKeyword = new Map(input.keywords.map(item => [item.keywordId, item]));
+  const emGrupoComPlano = new Set((input.declaredPlanGroups || []).flatMap(grupo => grupo.keywordIds));
   const keywordTexts = new Map(input.keywords.map(item => [item.keywordId, item.text]));
 
   const silos = new Map<string, ProposalSilo>();
@@ -342,7 +350,8 @@ export function buildArchitectureWorkingProposal(input: {
   const ehPublicada = (keywordId: string) => Boolean(input.publishedKeywordIds?.has(keywordId));
 
   const sementeLexica = (cluster: ClusterAnalysis): string | null => {
-    const livre = (keywordId: string) => !declaredNotSilo(declaracaoDe(keywordId)) && !ehPublicada(keywordId);
+    // 2026-10-13 · keyword de grupo com plano declarado nunca é semente léxica (segue o plano).
+    const livre = (keywordId: string) => !declaredNotSilo(declaracaoDe(keywordId)) && !ehPublicada(keywordId) && !emGrupoComPlano.has(keywordId);
     if (cluster.headKeywordId && livre(cluster.headKeywordId)) return cluster.headKeywordId;
     return cluster.memberKeywordIds.find(livre) ?? null;
   };
@@ -538,8 +547,53 @@ export function buildArchitectureWorkingProposal(input: {
   const publicadasSemSilo = new Set([...keywordTexts.keys()]
     .filter(keywordId => ehPublicada(keywordId) && !resolvidasPorDeclaracao.has(keywordId)));
   for (const keywordId of publicadasSemSilo) resolvidasPorDeclaracao.add(keywordId);
+
+  /*
+   * 2026-10-13 · O PLANO DECLARADO NÃO É REORGANIZADO (SDD
+   * `sdd-cadastro-assunto-na-keyword-2026-10-13.md` §3.5). As keywords de um
+   * grupo com plano declarado seguem o plano: vão juntas para o Silo do plano
+   * (o já ligado ao grupo, o existente com o mesmo slug, ou um candidato novo
+   * com o nome e o slug do plano). O léxico não as espalha nem as usa como
+   * semente de outro Silo. O publicado continua com o Silo que o site declara.
+   */
+  const pelaPlano = new Map<string, string>();
+  for (const grupo of input.declaredPlanGroups || []) {
+    const membros = grupo.keywordIds.filter(keywordId => keywordTexts.has(keywordId) && !resolvidasPorDeclaracao.has(keywordId));
+    if (!membros.length) continue;
+    const slug = grupo.siloSlug || input.slugOf(grupo.siloName);
+    let key = (grupo.territoryRef && silos.has(grupo.territoryRef) ? grupo.territoryRef : null) ?? slugsExistentes.get(slug) ?? null;
+    if (!key) {
+      key = `proposed:${slug}`;
+      if (!silos.has(key)) {
+        silos.set(key, {
+          key, territoryRef: null, name: grupo.siloName, slug,
+          seedKeywordId: membros[0],
+          primaryKeywordDeclaration: null,
+          source: "proposed",
+          reason: `Silo do plano declarado (grupo ${grupo.label}): nome e slug vêm do plano; a análise automática não reorganiza as keywords dele.`,
+        });
+        nucleoDoSilo.set(key, identityCore(grupo.siloName));
+        intencaoDoSilo.set(key, null);
+      }
+    }
+    for (const keywordId of membros) {
+      const dna = dnaPorKeyword.get(keywordId) ?? null;
+      resolvidasPorDeclaracao.add(keywordId);
+      pelaPlano.set(keywordId, key);
+      assignments.push({
+        keywordId,
+        siloKey: key,
+        reason: `Segue o plano declarado do grupo ${grupo.label}: "Processar arquitetura" não reorganiza keywords de grupo com plano.`,
+        membershipState: silos.get(key)?.source === "proposed" ? "new_silo_candidate" : "existing_silo_match",
+        basis: ["Plano declarado do Silo no Minerador (grupo)"],
+        dnaVersionId: dna?.dnaVersionId ?? null,
+        dnaContentHash: dna?.dnaContentHash ?? null,
+      });
+    }
+  }
+
   /** Já tem destino fora do léxico: não entra em `unassigned` por grupo. */
-  const destinoDoSite = (keywordId: string) => siloPelaUrl.has(keywordId) || publicadasSemSilo.has(keywordId);
+  const destinoDoSite = (keywordId: string) => siloPelaUrl.has(keywordId) || publicadasSemSilo.has(keywordId) || pelaPlano.has(keywordId);
 
   /** O Silo declarado dentro do grupo, se houver: é ele que atrai os vizinhos. */
   const siloDeclaradoDoGrupo = (cluster: ClusterAnalysis): string | null => {

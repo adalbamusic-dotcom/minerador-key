@@ -1,4 +1,5 @@
-import type { ArchitectSubjectStanding } from "./declared-subject.ts";
+import { planLockOfStanding, type ArchitectSubjectStanding } from "./declared-subject.ts";
+import type { DeclaredPrincipalLockView } from "../minerador/declared-plan.ts";
 
 /**
  * ===== SELOS DO PLANO DECLARADO NO ARQUITETO (SDD 2026-10-12 §9, item 6) =====
@@ -21,7 +22,11 @@ export type DeclaredPlanSealKind =
   | "plan_pillar"
   | "plan_support"
   | "outside_plan"
-  | "silo_plan";
+  | "silo_plan"
+  /** 2026-10-13 · a keyword do plano está LIVRE e é a principal (o Arquiteto pode propor outra). */
+  | "free_principal"
+  /** 2026-10-13 · a keyword LIVRE do plano foi trocada por outra principal; o Assunto continua no artigo. */
+  | "free_principal_replaced";
 
 export type DeclaredPlanSeal = {
   kind: DeclaredPlanSealKind;
@@ -33,7 +38,7 @@ export type DeclaredPlanSeal = {
   tone: "neutral" | "warning";
 };
 
-type Standing = Pick<ArchitectSubjectStanding, "plan" | "declaredPrincipal">;
+type Standing = Pick<ArchitectSubjectStanding, "plan" | "declaredPrincipal"> & { keywordId?: string; planLock?: DeclaredPrincipalLockView | null };
 
 /**
  * Os selos da linha do ARTIGO.
@@ -53,16 +58,23 @@ export function articleDeclaredPlanSeals(input: {
   /** O grupo efetivo do artigo tem plano declarado (`origin = declared_plan`). */
   groupHasPlan: boolean;
 }): DeclaredPlanSeal[] {
-  const plan = input.subjectKeywordId ? input.standingOf(input.subjectKeywordId)?.plan ?? null : null;
+  const standing = input.subjectKeywordId ? input.standingOf(input.subjectKeywordId) ?? null : null;
+  const plan = standing?.plan ?? null;
   const selos: DeclaredPlanSeal[] = [];
   if (plan) {
     selos.push(plan.role === "Pilar"
       ? { kind: "plan_pillar", label: `Pilar do plano · ${plan.order}º`, title: `Pilar declarado no plano do Silo (posição ${plan.order} do plano v${plan.planVersion}).`, tone: "neutral" }
       : { kind: "plan_support", label: `Suporte do plano · ${plan.order}º`, title: `Suporte declarado no plano do Silo (posição ${plan.order} do plano v${plan.planVersion}).`, tone: "neutral" });
     const declarada = plan.declaredPrincipal;
-    if (declarada) {
+    // 2026-10-13 · TRAVA (SDD do cadastro único): livre não é divergência — é a troca permitida.
+    const trava = planLockOfStanding({ plan, keywordId: input.subjectKeywordId!, ...(standing && "planLock" in standing ? { planLock: standing.planLock } : {}) });
+    if (declarada && trava?.state === "free") {
+      selos.push(input.principalKeywordId === declarada.keywordId
+        ? { kind: "free_principal", label: "Keyword livre", title: `“${declarada.phrase}” está LIVRE (${trava.label}): o Arquiteto pode propor outra principal pela SERP/volume, com decisão humana; o Assunto, o papel e a ordem ficam neste artigo. Para fixá-la, trave no Minerador (Cadastrar Assuntos).`, tone: "neutral" }
+        : { kind: "free_principal_replaced", label: "Livre · principal trocada", title: `A keyword livre do plano (“${declarada.phrase}”) foi trocada por uma principal melhor pela SERP/volume; o Assunto continua neste artigo.`, tone: "neutral" });
+    } else if (declarada) {
       if (input.principalKeywordId === declarada.keywordId) {
-        selos.push({ kind: "declared_principal", label: "Principal declarada", title: `“${declarada.phrase}” é a principal declarada no plano: cabeceira fixa (D1-bis). O Arquiteto não troca o que foi declarado.`, tone: "neutral" });
+        selos.push({ kind: "declared_principal", label: "Principal declarada", title: `“${declarada.phrase}” é a principal declarada no plano: cabeceira fixa (${trava?.label ?? "D1-bis"}). O Arquiteto não troca o que foi travado; destravar é no Minerador (Cadastrar Assuntos).`, tone: "neutral" });
       } else {
         selos.push({ kind: "principal_diverges", label: "Principal ≠ declarada", title: `O plano declara “${declarada.phrase}” como principal, e este artigo está com outra. Nada é trocado sozinho: grave a melhoria do artigo ou mude o plano no Minerador.`, tone: "warning" });
       }

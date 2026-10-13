@@ -1,5 +1,14 @@
 # Backlog — Radar
 
+## Assunto legível em todo painel — 2026-10-13
+
+Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Planilha, perfil expandido, foco, página do artigo e "Importar artigos aprovados" com "Assunto · …".
+- [ ] **Dono:** conferir na tela que cada linha do Radar é identificável pelo Assunto.
+- [ ] Busca da planilha pelo Assunto sem mudar o CSV da grade (pede um texto de busca próprio na `OperationalDataGrid`).
+- [ ] Ler a frase da versão TRANSPORTADA pelo item (`articleDnaVersionId`) quando a mesa trouxer mais de uma versão por artigo.
+
 ## F6 · Radar, entregáveis e MCP por grupo — 2026-10-12
 
 Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**

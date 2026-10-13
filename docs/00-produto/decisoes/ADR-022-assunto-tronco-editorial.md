@@ -84,6 +84,35 @@ que leva o leitor até lá.
   `.strict()`); a Fase B (F4) passa a gravar. Depois do deploy da Fase A,
   nenhum rollback volta para antes dela.
 
+### Emenda D1-ter — o Assunto mora na keyword; a principal tem trava (2026-10-13)
+
+- **Status:** Aceita pelo dono do produto em 2026-10-13 (SDD
+  `docs/compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md`).
+- **Cadastro único.** O Assunto passa a ser cadastrado DENTRO de uma keyword
+  (`keyword_subject.entry = { title, source: "cadastro" }`, com o plano do
+  artigo em `keyword_subject.plan` e a marca recíproca apontando para a própria
+  keyword). Nenhuma linha "Assunto" solta nasce: o título é texto do cadastro.
+  A frase do Assunto no Arquiteto (`ArticleDNA.subject.phrase`) é o título.
+  Uma porta só: o card "Cadastrar Assuntos" do Minerador e a ferramenta MCP
+  `declare_silo_plan`, pelo mesmo núcleo. "Colar Assuntos" no Processador, a
+  declaração da frase pela Pesquisa por Assunto e `declare_subjects` saíram.
+- **O que muda no item 1 (D1) e na D1-bis — a trava.** A principal do plano é
+  **travada** quando a keyword tem Volume medido > 0 (ou quando o humano trava à
+  mão) e **livre** sem volume (ou destravada à mão). Travada = a regra da D1-bis
+  (cabeceira fixa). Livre = a formação e a melhoria podem propor outra principal
+  pela SERP/volume, com decisão humana na prévia, nova versão e histórico; o
+  Assunto, o papel e a ordem continuam presos ao artigo. Medir o Volume (por
+  clique do dono) trava a automática sem nova escrita.
+- **Q7 revista.** A keyword que carrega o Assunto pode ser a principal do
+  próprio artigo sem volume (é keyword, não título). O Assunto antigo (frase em
+  linha própria) continua sem poder ser principal sem Volume validado.
+- **Planos anteriores.** Plano gravado antes (Assunto e principal em linhas
+  separadas) fica **travado** pela declaração até o humano destravar no card
+  (decisão humana confirmada não muda sozinha — `AGENTS.md` §9).
+- **Publicado como destino.** O Assunto declarado na keyword publicada continua
+  sem mudar URL, slug, canonical nem principal; as keywords do cadastro entram
+  como sustentações dele (item 7).
+
 ## Consequências
 
 - Um tema sem demanda pode orientar artigos sem inventar volume nem distorcer

@@ -1,4 +1,8 @@
 # Backlog — Publicações
+## Assunto legível — 2026-10-13
+- [x] Grade e Biblioteca mostram "Assunto · …" quando o artigo tem Assunto.
+- [ ] **Dono:** conferir na tela.
+
 ## Agora
 - **Objetivo:** validar manualmente com fixture a jornada completa: importação, fila, download, URL manual, atualização e reedição.
   - **Módulo proprietário:** Publicações

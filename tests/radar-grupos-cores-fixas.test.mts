@@ -60,7 +60,7 @@ const { TopbarGroupTag } = await import("../components/editorial/group-selector.
 const { useMineradorGroups } = await import("../modules/minerador/use-minerador-groups.ts");
 const { useEditorialGroups } = await import("../components/editorial/use-editorial-groups.ts");
 const { ArticleGroupMoveSelect } = await import("../components/editorial/article-group-controls.tsx");
-const { DeclaredPlanImportDialog } = await import("../modules/minerador/declared-plan-import-dialog.tsx");
+const { SubjectCadastroCard } = await import("../modules/minerador/subject-cadastro-card.tsx");
 const dominio = await import("../lib/editorial/editorial-groups.ts");
 
 const LARANJA_ID = "11111111-aaaa-4aaa-8aaa-000000000001";
@@ -347,22 +347,27 @@ test("rodapé dos artigos · as 5 cores sempre, com o nome próprio; e voltar ao
   tela.destroy();
 });
 
-test("plano do Silo · escolhe a COR: cor com grupo vai para ele; cor sem grupo nasce com o nome do Silo", async () => {
+test("cadastro de Assuntos · escolhe a COR: cor com grupo vai para ele; cor sem grupo nasce pela cor (2026-10-13)", async () => {
   limpar();
   roteiro = () => ({ status: 422, body: { success: false, code: "PLAN_INVALID", message: "só o pedido interessa aqui" } });
   const tela = await harness.montarRadar();
-  await tela.render(React.createElement(DeclaredPlanImportDialog, { brandId: MARCA, groups: [resumo(LARANJA_ID, "laranja", "laranja")], onClose: nada, onApplied: nada, onUnavailable: nada }));
-  assert.equal(documento().querySelector("[data-minerador-declared-plan-dialog] input:not([type='radio'])"), null, "nada para escrever além do plano");
-  assert.match(documento().querySelector("[data-declared-plan-color='laranja']")?.textContent || "", /grupo existente: laranja/);
-  assert.match(documento().querySelector("[data-declared-plan-color='azul']")?.textContent || "", /grupo novo, com o nome do Silo/);
-  await tela.type(documento().querySelector("[data-minerador-declared-plan-dialog] textarea") as HTMLElement, "Silo 1 — Planos\n1. Artigo\nPalavra-chave: plano");
-  const gerar = () => [...documento().querySelectorAll("button")].find(botao => /Gerar prévia/.test(botao.textContent || "")) as HTMLElement;
-  await tela.click(documento().querySelector("[data-declared-plan-color='laranja'] input") as HTMLElement);
-  await tela.click(gerar());
+  await tela.render(React.createElement(SubjectCadastroCard, { brandId: MARCA, groups: [resumo(LARANJA_ID, "laranja", "laranja")], onClose: nada, onApplied: nada, onUnavailable: nada }));
+  assert.match(documento().querySelector("[data-subject-cadastro-color='laranja']")?.getAttribute("title") || "", /grupo existente: laranja/);
+  assert.match(documento().querySelector("[data-subject-cadastro-color='azul']")?.getAttribute("title") || "", /grupo novo/);
+  const colar = [...documento().querySelectorAll("[data-minerador-subject-cadastro-card] textarea")][0] as HTMLElement;
+  await tela.type(colar, ["Silo 1 — Planos", "1. Artigo", "Artigo pilar • Palavra-chave: plano", "Escopo do artigo."].join(String.fromCharCode(10)));
+  const botao = (texto: RegExp) => [...documento().querySelectorAll("button")].find(item => texto.test(item.textContent || "")) as HTMLElement;
+  await tela.click(botao(/Preencher as linhas/));
+  await tela.click(documento().querySelector("[data-subject-cadastro-color='laranja'] input") as HTMLElement);
+  await tela.click(botao(/Gerar prévia/));
   await esperar();
-  assert.deepEqual((chamadas.at(-1)!.body as { group: unknown }).group, { mode: "existing", groupId: LARANJA_ID });
-  await tela.click(documento().querySelector("[data-declared-plan-color='azul'] input") as HTMLElement);
-  await tela.click(gerar());
+  const pedido = chamadas.at(-1)!.body as { group: unknown; destination: unknown; plan: { silo: { name: string }; articles: Array<{ subject: string; principal: string; role: string; lock: string }> } };
+  assert.deepEqual(pedido.group, { mode: "existing", groupId: LARANJA_ID });
+  assert.deepEqual(pedido.destination, { kind: "new_silo" });
+  assert.equal(pedido.plan.silo.name, "Planos");
+  assert.deepEqual(pedido.plan.articles.map(article => [article.subject, article.principal, article.role, article.lock]), [["Artigo", "plano", "Pilar", "auto"]]);
+  await tela.click(documento().querySelector("[data-subject-cadastro-color='azul'] input") as HTMLElement);
+  await tela.click(botao(/Gerar prévia/));
   await esperar();
   assert.deepEqual((chamadas.at(-1)!.body as { group: unknown }).group, { mode: "new", name: null, color: "azul" });
   tela.destroy();

@@ -19,7 +19,6 @@ import {
   buildSubjectSearchRequest,
   countSubjectCandidatesHiddenWithoutVolume,
   declaredSubjectOptions,
-  defaultDeclarePhraseAsSubject,
   filterSubjectCandidates,
   subjectIdFromApply,
   subjectPhraseDeclarationPlan,
@@ -416,9 +415,15 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
 
   const openImport = useCallback((selectedCount: number) => {
     if (!activeRecord || !selectedCount) return;
-    const subject = activeRecord.result.subject;
     const already = activeRecord.declaredSubjectKeywordId;
-    const choice = already ? { offered: false, checked: false } : defaultDeclarePhraseAsSubject({ subjectKeywordId: subject.subjectKeywordId, phraseExistingKeywordId: subject.phraseExistingKeywordId });
+    /*
+     * 2026-10-13 · cadastro único (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`
+     * §3.1): o Assunto entra só pelo card "Cadastrar Assuntos", dentro da
+     * keyword. Declarar a frase pesquisada aqui criaria um Assunto solto: a
+     * oferta não aparece mais; sem Assunto cadastrado, as keywords entram sem
+     * vínculo (e o diálogo diz isso).
+     */
+    const choice = { offered: false, checked: false };
     setImportDialog({
       searchId: activeRecord.searchId,
       importRequestId: crypto.randomUUID(),

@@ -29,13 +29,19 @@ export function declaredPlanArticleContradictions(input: {
   next: ArticleWriteSnapshot;
   previous?: ArticleWriteSnapshot | null;
   subjectLabel?: string | null;
+  /**
+   * 2026-10-13 · TRAVA (SDD do cadastro único §3.5): a principal do plano está
+   * travada? Livre = trocá-la não é contradição (a formação/melhoria pode
+   * propor outra com decisão humana). Ausente = travada (o contrato de antes).
+   */
+  principalLocked?: boolean;
 }): string[] {
   const plan = input.plan;
   if (!plan) return [];
   const motivos: string[] = [];
   const previous = input.previous ?? null;
   const nome = input.subjectLabel ? `do Assunto “${input.subjectLabel}”` : "do Assunto";
-  const declarada = plan.declaredPrincipal?.keywordId ?? null;
+  const declarada = input.principalLocked === false ? null : plan.declaredPrincipal?.keywordId ?? null;
   if (declarada && input.next.principalKeywordId !== declarada
     && (!previous || previous.principalKeywordId !== input.next.principalKeywordId)) {
     motivos.push(`a principal do artigo ${nome} deixaria de ser a declarada (“${plan.declaredPrincipal!.phrase}”).`);

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";
 import { useBrand } from "@/components/brand-context";
 import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
+import { ArticleSubjectLine, articleSubjectPhraseOf } from "@/components/editorial/article-subject-line";
 import type { RadarAnalysisVersion, RadarExpertEvidence } from "@/lib/radar/analysis-contracts";
 import { buildRadarBenchmark, createRadarAnalysisSuccessor, createRadarAnalysisVersion, RadarExtractionPageSchema, radarApprovedPackageOf, suggestRadarAnalysisMode } from "@/lib/radar/analysis-contracts";
 import { radarReconcileExtractionRound, type RadarExtractionRoundResponse } from "@/lib/radar/extraction-round";
@@ -699,6 +700,8 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
           <div>
             {radarOverviewHref ? <button className="text-base text-context-accent underline" onClick={() => router.push(radarOverviewHref)}>← Voltar ao Radar</button> : <button className="text-base text-context-accent" disabled>← Voltar ao Radar</button>}
             <h1 className="mt-3 text-2xl font-semibold text-foreground">{identity.title}</h1>
+            {/* 2026-10-13 · pedido do dono: o Assunto do ArticleDNA, legível, abaixo do título. */}
+            <ArticleSubjectLine phrase={articleSubjectPhraseOf(article.payload)} className="mt-2"/>
             <p className="mt-2 text-base text-foreground/85">{identity.publication.label} · Silo: {identity.siloName || "não hidratado"} · {selectedMode === "kgr_light" ? "KGR leve" : "Competitivo completo"} · etapa: {tabLabels[tab]}</p>
             <p className="mt-1 text-sm text-text-muted">Definição do artigo · v{article.versionNumber} · Evidências {analysis ? `v${analysis.versionNumber}` : "ainda não iniciadas"}</p>
           </div>

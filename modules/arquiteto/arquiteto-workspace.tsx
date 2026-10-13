@@ -191,6 +191,7 @@ import {
   sameDeclaredSubject,
   splitUngroupedBySubjectAnchor,
   subjectConservationLabel,
+  subjectMayBePrincipal,
   SUBJECT_SUGGESTED_TRUNK_LABEL,
   suggestSubjectFromSilo,
   suggestSubjectSupport,
@@ -351,6 +352,7 @@ import { KeywordDnaReadonlyPanel } from "@/components/editorial/keyword-dna-read
 import { InfoHint } from "@/components/info-hint";
 import { CompactSavedViews } from "@/components/editorial/compact-saved-views";
 import { WorkflowImportDialog, WorkflowStatusBadge } from "@/components/editorial/workflow-status";
+import { ArticleSubjectLine, articleSubjectPhraseOf } from "@/components/editorial/article-subject-line";
 import { DeleteConfirmation, PublishedDeleteConfirmation } from "@/components/lifecycle/delete-confirmation";
 import { DangerApprovalDialog } from "@/components/editorial/danger-approval-dialog";
 import { BackgroundTaskNotice } from "@/components/editorial/background-task-notice";
@@ -10996,6 +10998,38 @@ export default function ArquitetoPage() {
     return mapa;
   }, [architectureKeywordVinculos, architectureKeywordDeclarations, subjectAnchorCarriers, ungroupedSubjectLabels]);
 
+  /*
+   * 2026-10-13 · "PROCESSAR ARQUITETURA" RESPEITA O PLANO DECLARADO (SDD
+   * `sdd-cadastro-assunto-na-keyword-2026-10-13.md` §3.5). Os grupos com plano
+   * vêm dos Assuntos do pacote aprovado; o Silo planejado (nome, slug, Silo já
+   * ligado) é lido uma vez por marca; as keywords de cada grupo vêm do grupo
+   * efetivo da mesa. Elas seguem o plano: a análise automática não as espalha.
+   */
+  const gruposComPlanoChave = useMemo(() => [...new Set([...subjectStandings.values()]
+    .filter(standing => standing.declared && standing.received && standing.approvedPackageRef && standing.plan && standing.brandId === selectedBrandId)
+    .map(standing => standing.plan!.groupId))].sort().join(","), [subjectStandings, selectedBrandId]);
+  const [silosDosPlanos, setSilosDosPlanos] = useState<{ brandId: string; groups: Array<{ groupId: string; label: string; siloName: string; siloSlug: string | null; territoryRef: string | null }> } | null>(null);
+  useEffect(() => {
+    if (!selectedBrandId || !gruposComPlanoChave) return;
+    let vigente = true;
+    const ids = new Set(gruposComPlanoChave.split(","));
+    void listEditorialGroupPlans(supabase, selectedBrandId).then(lido => {
+      if (!vigente || !lido.ok) return;
+      setSilosDosPlanos({ brandId: selectedBrandId, groups: lido.groups.flatMap(group => {
+        const plano = readDeclaredSiloPlan(group.plan);
+        return plano && ids.has(group.id) ? [{ groupId: group.id, label: group.name, siloName: plano.siloName, siloSlug: plano.siloSlug, territoryRef: group.siloId }] : [];
+      }) });
+    }).catch(() => undefined);
+    return () => { vigente = false; };
+  }, [selectedBrandId, gruposComPlanoChave]);
+  const declaredPlanGroupsForArchitecture = useMemo(() => {
+    if (!silosDosPlanos || silosDosPlanos.brandId !== selectedBrandId) return [];
+    const grupoDe = arquitetoGroups.keywordGroupById;
+    return silosDosPlanos.groups
+      .map(group => ({ ...group, keywordIds: masterList.map(keyword => String(keyword.id)).filter(id => grupoDe.get(id) === group.groupId) }))
+      .filter(group => group.keywordIds.length > 0);
+  }, [silosDosPlanos, selectedBrandId, arquitetoGroups.keywordGroupById, masterList]);
+
   const architectureProposal = useMemo(() => buildArchitectureWorkingProposal({
     analysis: architectureAnalysis,
     existingSilos: [
@@ -11020,7 +11054,9 @@ export default function ArquitetoPage() {
     publishedKeywordIds: publishedArchitectureKeywordIds,
     publishedSiloHeadByArticle: publishedSiloMembership.siloHeadByArticle,
     publishedSiloConflicts: new Map(publishedSiloMembership.conflicts.map(item => [item.keywordId, item.reason])),
-  }), [architectureAnalysis, territorialSurface, architectureKeywordSignals, architectureKeywordDeclarations, subjectSets, publishedArchitectureKeywordIds, publishedSiloMembership]);
+    // 2026-10-13 · as keywords de grupo com plano declarado seguem o plano.
+    ...(declaredPlanGroupsForArchitecture.length ? { declaredPlanGroups: declaredPlanGroupsForArchitecture } : {}),
+  }), [architectureAnalysis, territorialSurface, architectureKeywordSignals, architectureKeywordDeclarations, subjectSets, publishedArchitectureKeywordIds, publishedSiloMembership, declaredPlanGroupsForArchitecture]);
 
   /**
    * Itens canônicos das keywords, para as edições escreverem com `expectedLock`.
@@ -12580,7 +12616,7 @@ export default function ArquitetoPage() {
           },
         });
         if (!plan.ok) throw new Error(plan.reason);
-        const result = attachSubjectToArticleDna(payload, plan.subject, { principalVolumeValidated: standing?.volumeValidated === true });
+        const result = attachSubjectToArticleDna(payload, plan.subject, { principalVolumeValidated: subjectMayBePrincipal(standing) });
         if (!result.ok) throw new Error(result.reason);
         if (!result.changed) {
           showNotification("warning", "Esta unidade já tem este Assunto, do mesmo pacote aprovado. Nenhuma versão nova foi criada.");
@@ -14688,7 +14724,7 @@ export default function ArquitetoPage() {
           }
           if (subject) {
             const comAssunto = attachSubjectToArticleDna(artigoDaFormacao, subject, {
-              principalVolumeValidated: subjectStandings.get(subject.keywordId)?.volumeValidated === true,
+              principalVolumeValidated: subjectMayBePrincipal(subjectStandings.get(subject.keywordId)),
             });
             if (!comAssunto.ok) {
               showNotification("warning", `Um artigo não foi concluído: ${comAssunto.reason}`);
@@ -15661,6 +15697,8 @@ export default function ArquitetoPage() {
         serpGates: articleSerpGates,
         // Q7 — Assunto como principal só com Volume validado no pacote aprovado.
         subjectVolumeValidated: new Map([...subjectStandings].map(([keywordId, standing]) => [keywordId, standing.volumeValidated])),
+        // 2026-10-13 · cadastro único (ADR-022 D1-ter): o Assunto que mora na keyword pode ser a principal sem volume.
+        subjectCarriedByKeyword: new Set([...subjectStandings].filter(([, standing]) => standing.carriesSubject).map(([keywordId]) => keywordId)),
         subjectLabels: new Map([...subjectStandings].filter(([, standing]) => standing.declared).map(([keywordId, standing]) => [keywordId, standing.phrase])),
         // F4 — DECLARED_PLAN_PRESERVED: a principal declarada e a lista do Assunto no artigo ou em não agrupadas.
         declaredPlans: declaredPlanGateInputs({
@@ -18176,6 +18214,9 @@ export default function ArquitetoPage() {
                     onProcess={() => { void processArchitecture(); }}
                     preflight={siloPagePreflight}
                     proposal={architectureProposal.counters}
+                    declaredPlanNotice={declaredPlanGroupsForArchitecture.length
+                      ? `${declaredPlanGroupsForArchitecture.reduce((total, group) => total + group.keywordIds.length, 0)} keyword(s) de ${declaredPlanGroupsForArchitecture.length} grupo(s) com plano declarado (${declaredPlanGroupsForArchitecture.map(group => `${group.label} → ${group.siloName}`).join("; ")}) seguem o plano: "Processar arquitetura" não as reorganiza.`
+                      : null}
                     pendingAssigned={architectureProposalPending.pendentes}
                     currentAssigned={masterList.filter(item => typeof item.territoryRef === "string" && item.territoryRef).length}
                     restore={{
@@ -18275,11 +18316,11 @@ export default function ArquitetoPage() {
                 <p className="text-sm font-semibold text-foreground">Hierarquia do Silo <span className="font-normal text-text-muted">· declarada pelo SiloDNA</span></p>
                 <div className="mt-2 space-y-1.5 text-sm leading-6">
                   {linksHierarchy.siloPage && <p><span className="mr-1.5 rounded border border-module-accent/40 px-1 py-0.5 text-[11px] font-semibold text-module-accent">SILOPAGE</span><span className="font-medium text-foreground">{linksHierarchy.siloPage.label}</span>{linksHierarchy.siloPage.slug && <span className="ml-1 font-mono text-xs text-text-muted">/{linksHierarchy.siloPage.slug.replace(/^\/+/, "")}</span>}</p>}
-                  {linksHierarchy.pillar && <p><span className="mr-1.5 rounded border border-positive-soft/40 px-1 py-0.5 text-[11px] font-semibold text-positive-soft">PILAR</span><span className="font-medium text-foreground">{linksHierarchy.pillar.label}</span>{linksHierarchy.pillar.slug && <span className="ml-1 font-mono text-xs text-text-muted">/{linksHierarchy.pillar.slug.replace(/^\/+/, "")}</span>}</p>}
+                  {linksHierarchy.pillar && <p><span className="mr-1.5 rounded border border-positive-soft/40 px-1 py-0.5 text-[11px] font-semibold text-positive-soft">PILAR</span><span className="font-medium text-foreground">{linksHierarchy.pillar.label}</span>{linksHierarchy.pillar.slug && <span className="ml-1 font-mono text-xs text-text-muted">/{linksHierarchy.pillar.slug.replace(/^\/+/, "")}</span>}<ArticleSubjectLine as="span" phrase={articleSubjectPhraseOf(acceptedArticleDnas[linksHierarchy.pillar.id]?.payload)} testId="architect-link-pillar-subject"/></p>}
                   {linksHierarchy.supports.length > 0 && <div>
                     <p className="text-text-muted">Suportes ({linksHierarchy.supports.length})</p>
                     <ul className="mt-1 space-y-0.5">
-                      {linksHierarchy.supports.map(unit => <li key={unit.id}><span className="mr-1.5 rounded border border-divider px-1 py-0.5 text-[11px] font-semibold text-text-muted">{unit.role}</span><span className="text-foreground">{unit.label}</span>{unit.slug && <span className="ml-1 font-mono text-xs text-text-muted">/{unit.slug.replace(/^\/+/, "")}</span>}</li>)}
+                      {linksHierarchy.supports.map(unit => <li key={unit.id}><span className="mr-1.5 rounded border border-divider px-1 py-0.5 text-[11px] font-semibold text-text-muted">{unit.role}</span><span className="text-foreground">{unit.label}</span>{unit.slug && <span className="ml-1 font-mono text-xs text-text-muted">/{unit.slug.replace(/^\/+/, "")}</span>}<ArticleSubjectLine as="span" phrase={articleSubjectPhraseOf(acceptedArticleDnas[unit.id]?.payload)} testId="architect-link-support-subject"/></li>)}
                     </ul>
                   </div>}
                 </div>
@@ -18316,13 +18357,15 @@ export default function ArquitetoPage() {
                       <span className="font-medium text-foreground">{row.target.label}</span>
                       {row.target.slug && <span className="ml-1 font-mono text-xs text-text-muted">/{row.target.slug.replace(/^\/+/, "")}</span>}
                     </p>
+                    {/* 2026-10-13 · o Assunto de cada ponta que é artigo (sem frase, nada: a lista é densa). */}
+                    {(["source", "target"] as const).map(ponta => row[ponta].nodeId.startsWith("article:") ? <ArticleSubjectLine key={ponta} phrase={articleSubjectPhraseOf(acceptedArticleDnas[row[ponta].nodeId.slice("article:".length)]?.payload)} showEmpty={false} className="mt-0.5" testId="architect-link-edge-subject"/> : null)}
                     {row.anchorConcept && <p className="text-xs text-text-muted">Conceito de âncora: <span className="text-foreground">{row.anchorConcept}</span></p>}
                     <p className="text-xs text-text-muted">Razão: {row.reason}</p>
                     <p className="text-xs text-text-muted">Tipo: <span className="font-mono">{row.relationType}</span> · prioridade {row.priority} · origem {row.origin}</p>
                   </li>)}
                 </ul>
               </div>}
-              {linksSelectedNode && <div className="mt-3 rounded border border-divider bg-surface px-2.5 py-2 text-sm leading-6"><p className="font-semibold text-foreground">Nó selecionado</p><p className="mt-1 text-text-muted">{linksSelectedNode.snapshot.label || linksSelectedNode.nodeId} · {linksSelectedNode.nodeType} · {linksSelectedNode.architecturalRole || "sem papel"}</p><p className="mt-1 text-text-muted">A seleção só altera o contexto visual; nenhum DNA é expandido.</p></div>}
+              {linksSelectedNode && <div className="mt-3 rounded border border-divider bg-surface px-2.5 py-2 text-sm leading-6"><p className="font-semibold text-foreground">Nó selecionado</p><p className="mt-1 text-text-muted">{linksSelectedNode.snapshot.label || linksSelectedNode.nodeId} · {linksSelectedNode.nodeType} · {linksSelectedNode.architecturalRole || "sem papel"}</p>{linksSelectedNode.nodeId.startsWith("article:") ? <ArticleSubjectLine phrase={articleSubjectPhraseOf(acceptedArticleDnas[linksSelectedNode.nodeId.slice("article:".length)]?.payload)} className="mt-1" testId="architect-link-node-subject"/> : null}<p className="mt-1 text-text-muted">A seleção só altera o contexto visual; nenhum DNA é expandido.</p></div>}
               {linksSelectedEdge && linksWorkingCopy && <div key={linksSelectedEdge.edgeId} className="mt-3 rounded border border-module-accent/35 bg-surface p-3" data-testid="architect-link-edge-editor">
                 <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-semibold text-foreground">Relação selecionada</p><p className="mt-1 text-xs text-text-muted">{linksSelectedEdge.edgeId} · origem {linksSelectedEdge.origin}</p></div><button type="button" onClick={() => void handleDeleteLinkEdge()} className={`${ARCHITECT_UI.footerButton} border-danger/40 text-danger hover:border-danger`}><Trash2 className="h-3.5 w-3.5" aria-hidden="true" />Remover</button></div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -18754,6 +18797,8 @@ export default function ArquitetoPage() {
                   const keyword = reference?.keywordDnaSnapshot?.sourceKeywordSnapshot.keyword;
                   return typeof keyword === "string" && keyword.trim() ? keyword : articleId;
                 };
+                // 2026-10-13 · pedido do dono: o Assunto de cada artigo do Silo (ArticleDNA.subject.phrase), legível.
+                const articleSubject = (articleId: string) => articleSubjectPhraseOf(acceptedArticleDnas[articleId]?.payload);
                 return <div key={entry.territoryRef} className="rounded-lg border border-module-accent/35 bg-surface-subtle p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -18773,6 +18818,7 @@ export default function ArquitetoPage() {
                     // Silo fechado: o Pilar está gravado no SiloDNA e não se escolhe mais aqui.
                     // O Pilar do Silo fechado é o do SiloDNA vigente (pode ter mudado depois, pelo plano declarado).
                     <><p className="mt-3 text-sm text-text-muted" data-testid="architect-silo-pillar-closed">Pilar · fechado com o Silo: <span className="font-semibold text-foreground">{(siloDoPar?.payload.pillarArticleId ?? pillarArticleId) ? articleLabel(siloDoPar?.payload.pillarArticleId ?? pillarArticleId) : "—"}</span></p>
+                    {(siloDoPar?.payload.pillarArticleId ?? pillarArticleId) ? <ArticleSubjectLine phrase={articleSubject(siloDoPar?.payload.pillarArticleId ?? pillarArticleId)} className="mt-1" testId="architect-silo-pillar-subject"/> : null}
                     {/* 2026-10-12 — "Aplicar o plano declarado ao Silo": prévia → confirmação, SiloDNA e SiloPage v+1. */}
                     {siloDoPar && selectedBrandId && <SiloDeclaredPlanPanel
                       brandId={selectedBrandId}
@@ -18785,7 +18831,7 @@ export default function ArquitetoPage() {
                     {siloDoPar && selectedBrandId && <SiloArticleWithdrawalPanel
                       brandId={selectedBrandId}
                       siloId={siloDoPar.payload.siloId}
-                      articles={siloDoPar.payload.supportArticleIds.map(articleId => ({ articleId, label: articleLabel(articleId) }))}
+                      articles={siloDoPar.payload.supportArticleIds.map(articleId => ({ articleId, label: articleLabel(articleId), subjectPhrase: articleSubject(articleId) }))}
                       classNames={{ button: ARCHITECT_UI.footerButton, dangerButton: ARCHITECT_UI.dangerButton, control: ARCHITECT_UI.control }}
                       notify={showNotification}
                       onApplied={() => setCanonicalWorkspaceReload(current => current + 1)}
@@ -18796,8 +18842,12 @@ export default function ArquitetoPage() {
                     <option value="">Sem Pilar decidido</option>
                     {articleIds.map(articleId => <option key={articleId} value={articleId}>{articleLabel(articleId)}</option>)}
                   </select>
+                  {pillarArticleId ? <ArticleSubjectLine phrase={articleSubject(pillarArticleId)} className="mt-1" testId="architect-silo-pillar-subject"/> : null}
                   </>}
-                  <p className="mt-2 text-sm leading-6 text-text-muted">Suportes: {supportArticleIds.length ? supportArticleIds.map(articleLabel).join(" · ") : "nenhum"}</p>
+                  {supportArticleIds.length ? <div className="mt-2 text-sm leading-6 text-text-muted" data-testid="architect-silo-supports">
+                    <p>Suportes:</p>
+                    <ul className="mt-1 space-y-1">{supportArticleIds.map(articleId => <li key={articleId} className="min-w-0"><span className="text-foreground">Suporte · {articleLabel(articleId)}</span><ArticleSubjectLine phrase={articleSubject(articleId)} testId="architect-silo-support-subject"/></li>)}</ul>
+                  </div> : <p className="mt-2 text-sm leading-6 text-text-muted">Suportes: nenhum</p>}
                   {exclusions.length > 0 && <p className="mt-2 text-sm leading-6 text-text-muted">Excluídos por decisão humana: {exclusions.map(exclusion => articleLabel(exclusion.articleId)).join(" · ")}</p>}
                   {remote && !readOnly && (
                     <label className="mt-2 block text-sm font-semibold text-text-muted" htmlFor={`silo-exclude-${entry.territoryRef}`}>Excluir um Article deste Silo</label>
@@ -19289,8 +19339,8 @@ export default function ArquitetoPage() {
                                     <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">CTA</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.cta}</dd></div>
                                     <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Indexação</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.indexationStatus}</dd></div>
                                     <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Seções</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.sections.length} seção(ões)</dd></div>
-                                    <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Pilar</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.pillarArticleId || "—"}</dd></div>
-                                    <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Suportes</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.supportArticleIds.join(", ") || "—"}</dd></div>
+                                    <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Pilar</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.pillarArticleId || "—"}{pageVersion.payload.pillarArticleId ? <ArticleSubjectLine phrase={articleSubjectPhraseOf(acceptedArticleDnas[pageVersion.payload.pillarArticleId]?.payload)} testId="architect-silopage-pillar-subject"/> : null}</dd></div>
+                                    <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Suportes</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.supportArticleIds.length ? pageVersion.payload.supportArticleIds.map(supportId => <span key={supportId} className="block">{supportId}<ArticleSubjectLine as="span" phrase={articleSubjectPhraseOf(acceptedArticleDnas[supportId]?.payload)} testId="architect-silopage-support-subject"/></span>) : "—"}</dd></div>
                                     {pageVersion.payload.humanPendingDecisions.length > 0 && (
                                       <div className="sm:col-span-2 rounded border border-amber-900/40 bg-amber-950/20 p-2">
                                         <dt className="text-[8px] font-bold uppercase tracking-wider text-amber-400">Pendências humanas</dt>
@@ -19470,6 +19520,9 @@ export default function ArquitetoPage() {
                     // F2 · faixa e etiqueta do grupo (herdado das keywords ou gravado no artigo).
                     const grupoDaLinha = articleGroupInfoFor(art);
                     const grupoDaLinhaResumo = grupoDaLinha.groupId ? arquitetoGroups.groupById.get(grupoDaLinha.groupId) ?? null : null;
+                    // 2026-10-13 · pedido do dono: o Assunto/tema na cabeceira da linha, para identificar o artigo.
+                    const assuntoDaLinhaRef = articleSubjectFor(art);
+                    const assuntoDaLinha = assuntoDaLinhaRef ? (assuntoDaLinhaRef.subject?.phrase || keywordLabelById.get(assuntoDaLinhaRef.keywordId) || null) : null;
 
                   return (
                     <React.Fragment key={art.id}>
@@ -19511,7 +19564,7 @@ export default function ArquitetoPage() {
                         <td className="border-r border-slate-800/60 px-3 py-2">{/* O rótulo diz o que a unidade É: com ArticleDNA canônico ela deixou de estar "em formação". */}<p className={`text-sm font-semibold uppercase tracking-wider ${art.isPublished ? "text-success" : articleDnaVersion ? "text-positive-soft" : formacao.formationConcluded ? "text-positive-soft" : "text-module-accent"}`}>{formacao.unitLabel}</p><p className="mt-0.5 text-xs text-text-muted" data-testid="architect-formation-conclusion-detail">{formacao.unitDetail}</p>{/* O papel no Silo tem coluna própria: repeti-lo aqui daria dois lugares
                             para o mesmo fato, e eles divergem no primeiro caso de borda. */}</td>
                         {/* Keyword principal */}
-                        <td className="min-w-0 border-r border-slate-800/60 px-3 py-2"><p className="break-words text-sm font-semibold text-keyword" title={art.keywordPrincipal}>{art.keywordPrincipal}</p><ArticleGroupRowTag group={grupoDaLinhaResumo} inherited={!grupoDaLinha.persisted} className="mt-1"/><DeclaredPlanSeals seals={declaredPlanSealsFor(art)} className="mt-1"/>{art.isPublished ? (publicationUrlFor(art) ? <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="mt-1 block max-w-[280px] truncate font-mono text-xs text-identity-published underline decoration-identity-published/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus select-all">{publicationUrlFor(art)}</a> : <span className="mt-1 block truncate font-mono text-xs text-identity-published">URL não recebida · /{art.slug}</span>) : <input type="text" value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug} onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)} onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }} onBlur={e => { if (!articleIdentityContext.slugProtected) persistArticleIdentityField(art, "computedSlug", e.target.value); }} disabled={articleIdentityContext.slugProtected} className={`${ARCHITECT_UI.control} mt-1 h-7 w-full max-w-[280px] font-mono text-xs text-identity-new disabled:cursor-not-allowed disabled:opacity-70`} />}</td>
+                        <td className="min-w-0 border-r border-slate-800/60 px-3 py-2"><div data-article-row-subject className="mb-1"><ArticleSubjectLine phrase={assuntoDaLinha}/></div><p className="break-words text-sm font-semibold text-keyword" title={art.keywordPrincipal}>{art.keywordPrincipal}</p><ArticleGroupRowTag group={grupoDaLinhaResumo} inherited={!grupoDaLinha.persisted} className="mt-1"/><DeclaredPlanSeals seals={declaredPlanSealsFor(art)} className="mt-1"/>{art.isPublished ? (publicationUrlFor(art) ? <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="mt-1 block max-w-[280px] truncate font-mono text-xs text-identity-published underline decoration-identity-published/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus select-all">{publicationUrlFor(art)}</a> : <span className="mt-1 block truncate font-mono text-xs text-identity-published">URL não recebida · /{art.slug}</span>) : <input type="text" value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug} onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)} onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }} onBlur={e => { if (!articleIdentityContext.slugProtected) persistArticleIdentityField(art, "computedSlug", e.target.value); }} disabled={articleIdentityContext.slugProtected} className={`${ARCHITECT_UI.control} mt-1 h-7 w-full max-w-[280px] font-mono text-xs text-identity-new disabled:cursor-not-allowed disabled:opacity-70`} />}</td>
                         <td className="border-r border-slate-800/60 px-2 py-2 text-center text-sm text-foreground">{art.supportKeywords.length + 1} {art.supportKeywords.length === 0 ? "keyword" : "keywords"}</td>
                         {workspaceMode !== "silos" && <td className="border-r border-divider px-2 py-2 text-center">{(() => {
                           /*
@@ -19810,6 +19863,8 @@ export default function ArquitetoPage() {
                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                   <div className="min-w-0">
                                     <p className="text-sm font-semibold text-foreground">Resumo do artigo</p>
+                                    {/* 2026-10-13 · pedido do dono: o Assunto (mesma fonte da cabeceira da linha) antes da principal. */}
+                                    <ArticleSubjectLine phrase={assuntoDaLinha} className="mt-1" testId="architect-expanded-subject"/>
                                     <p className="mt-1 break-words text-base font-semibold text-keyword">{art.keywordPrincipal}</p>
                                   </div>
                                   <span className="rounded-md border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground">{art.isPublished ? "Publicado" : "Novo"}</span>
@@ -20553,6 +20608,7 @@ export default function ArquitetoPage() {
 
       {repairOpen && <ArticleRepairPanel
         planos={articleRepairPlans.map(item => item.plano)}
+        subjectOf={articleId => articleSubjectPhraseOf(articleRepairPlans.find(item => item.plano.articleId === articleId)?.dna?.payload)}
         busy={repairBusy}
         mensagem={repairMessage}
         onReexecutar={articleId => { void repararRegistroDoArtigo(articleId); }}

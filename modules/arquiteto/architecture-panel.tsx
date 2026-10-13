@@ -76,6 +76,7 @@ export function ArchitecturePanel({
   consolidation,
   preflight,
   proposal,
+  declaredPlanNotice = null,
   currentAssigned,
   pendingAssigned,
   restore,
@@ -207,6 +208,11 @@ export function ArchitecturePanel({
     EXPLICIT_UNASSIGNED: number;
     BLOCKED: number;
   } | null;
+  /**
+   * 2026-10-13 · o aviso do plano declarado (SDD do cadastro único §3.5): as
+   * keywords de grupo com plano seguem o plano; a análise não as reorganiza.
+   */
+  declaredPlanNotice?: string | null;
 
   /**
    * `null` quando a fase está no caminho básico.
@@ -440,6 +446,7 @@ export function ArchitecturePanel({
                 {proposal.BLOCKED} bloqueio(s)
               </p>
             )}
+            {declaredPlanNotice ? <p className="mt-1 text-sm leading-6 text-text-muted" data-testid="architect-architecture-declared-plan">{declaredPlanNotice}</p> : null}
             <p className="mt-1 text-sm text-text-muted" data-testid="architect-scenario-state">
               Estado: <span className="text-foreground">{scenarioState}</span> · Confiança: <span className="text-foreground">{summary.confidence}</span>
             </p>

@@ -1,3 +1,23 @@
+## Trava da keyword do plano e "Processar arquitetura" — 2026-10-13
+
+SDD `docs/compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md`. Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Standing com título, trava e Assunto na própria keyword; formação com principal livre; portarias, guarda, melhoria e selos obedecem à trava.
+- [x] "Processar arquitetura" não reorganiza keywords de grupo com plano declarado (Silo do plano, motivo e aviso no painel).
+- [ ] Dono: homologar com o Silo 2 (artigo com keyword livre trocada na prévia; travada mantida) e "Processar arquitetura" com as keywords do grupo do Silo 2.
+- [ ] Teste DOM do aviso do plano no painel da arquitetura e dos selos "Keyword livre".
+
+## Assunto legível em todo painel — 2026-10-13
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Planilha, painel expandido, cartão do Silo (Pilar/Suportes), retirada, Página do Silo, Links internos (painel lateral) e reparo pontual com "Assunto · …".
+- [ ] **Dono:** conferir na tela da WifiConecta que cada artigo é identificável pelo Assunto (planilha, painel expandido, aba Silos e Links internos).
+- [ ] Cartões do mapa (React Flow) dos Links internos e dos Silos: levar `subject` por `links.nodeDisplay` e medir a altura do cartão antes (frase longa pode sobrepor a fileira de baixo).
+- [ ] Painel de melhoria (linhas de publicados) e revisão da formação: mostrar o Assunto quando a frente de formação/melhoria fechar.
+- [ ] "Aplicar o plano declarado ao Silo": a prévia vem em frases do servidor; mostrar o Assunto por artigo exige prévia estruturada.
+
+
 ## F5 · Guarda de retrabalho — 2026-10-12
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. SDD §10 e §18.1. **Validado manualmente: não.**

@@ -163,6 +163,13 @@ export function SubjectSearchPlanDialog({ controller }: { controller: SubjectSea
   </div>;
 }
 
+/**
+ * 2026-10-13 · cadastro único (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`):
+ * a Pesquisa por Assunto não declara mais a frase pesquisada. Sem Assunto
+ * cadastrado, as keywords entram sem vínculo — e a tela diz isso.
+ */
+export const SUBJECT_SEARCH_CADASTRO_HINT = "Esta frase não é um Assunto cadastrado: as keywords entram sem vínculo com Assunto. Para ligá-las a um Assunto, cadastre-o em \"Cadastrar Assuntos\" (o Assunto mora na keyword) e pesquise a partir dele." as const;
+
 export function SubjectSearchImportDialog({ controller, selectedKeys, selectedItemCount, selectedWithoutVolume = 0, subjectPhraseSelected }: { controller: SubjectSearchController; selectedKeys: ReadonlySet<string>; selectedItemCount: number; selectedWithoutVolume?: number; subjectPhraseSelected: boolean }) {
   const dialog = controller.importDialog;
   const record = controller.activeRecord;
@@ -189,7 +196,7 @@ export function SubjectSearchImportDialog({ controller, selectedKeys, selectedIt
         ? <p className="text-sm leading-6 text-foreground/85">As keywords entram ligadas a este Assunto declarado.</p>
         : dialog.declaredId && !dialog.offered
           ? <p className="text-sm leading-6 text-foreground/85">A frase já foi declarada como Assunto num envio anterior desta busca: as keywords entram ligadas a ela.</p>
-          : dialog.offered && <div className="space-y-2 rounded border border-divider bg-surface-subtle p-3" data-subject-search-declare>
+          : !dialog.offered ? <p className="text-sm leading-6 text-text-muted" data-subject-search-cadastro-hint>{SUBJECT_SEARCH_CADASTRO_HINT}</p> : <div className="space-y-2 rounded border border-divider bg-surface-subtle p-3" data-subject-search-declare>
             <label className="flex items-start gap-2 text-sm leading-6 text-foreground">
               <input type="checkbox" className="mt-1 h-4 w-4" checked={dialog.declare} disabled={dialog.submitting || done || Boolean(dialog.declaredId)} onChange={event => controller.setDeclare(event.target.checked)} />
               <span>{declarePhraseAsSubjectLabel(subject.phrase)}</span>

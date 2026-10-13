@@ -306,7 +306,9 @@ const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   // delegada): o MCP declara Assunto e decide o Vínculo SÓ com o aceite do
   // usuário no chat. O teste P4b abaixo prova a guarda antes de cada chamada.
   planVinculoBatchChoices: ["modules/minerador/minerador-workspace.tsx", "lib/server/platform-mcp-tools.ts"],
-  importSubjectsWithCore: ["app/api/minerador/marcas/[brandId]/subjects/import/route.ts", "lib/server/platform-mcp-tools.ts", "lib/minerador/declared-plan-import-core.ts"],
+  // 2026-10-13 (SDD do cadastro único §3.1): a rota do Processador e a ferramenta
+  // declare_subjects saíram; só o núcleo do cadastro declara o Assunto (dentro da keyword).
+  importSubjectsWithCore: ["lib/minerador/declared-plan-import-core.ts"],
   // 2026-10-12 (F4): o plano do Silo tem um núcleo só — a rota da tela e a
   // ferramenta MCP `declare_silo_plan` (com a guarda do aceite, P4b).
   importDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/import/route.ts", "lib/server/platform-mcp-tools.ts"],
@@ -359,9 +361,9 @@ test("P4: a gravação do Assunto só tem os chamadores da lista fechada — nen
 test("P4b: o MCP só grava Assunto/Vínculo depois da guarda do aceite humano", () => {
   const source = stripComments(readFileSync(join(ROOT, MCP_ACEITE_CALLER), "utf8"));
 
-  // declare_subjects: a guarda de aceite vem antes da chamada ao núcleo.
-  const declarar = source.slice(source.indexOf('registerTool("declare_subjects"'), source.indexOf("importSubjectsWithCore(", source.indexOf('registerTool("declare_subjects"')));
-  assert.match(declarar, /mode === "apply" && !userConfirmation[\s\S]*human_confirmation_required/);
+  // 2026-10-13: declare_subjects saiu (o Assunto solto); o MCP não chama mais o import de Assuntos direto.
+  assert.equal(source.indexOf('registerTool("declare_subjects"'), -1);
+  assert.doesNotMatch(source, /importSubjectsWithCore\(/);
 
   // declare_silo_plan (F4): aceite e importRequestId antes do núcleo do plano.
   const planoInicio = source.indexOf('registerTool("declare_silo_plan"');

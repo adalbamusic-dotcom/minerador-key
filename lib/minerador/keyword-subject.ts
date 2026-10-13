@@ -1,5 +1,5 @@
 import type { SitePageType } from "../marca/site-contracts.ts";
-import { readDeclaredArticlePlan, readDeclaredPrincipalMark, sameDeclaredArticlePlan, type DeclaredArticlePlan, type DeclaredPrincipalMark } from "./declared-plan.ts";
+import { readDeclaredArticlePlan, readDeclaredPrincipalMark, readSubjectEntry, sameDeclaredArticlePlan, sameSubjectEntry, type DeclaredArticlePlan, type DeclaredPrincipalMark, type SubjectEntry } from "./declared-plan.ts";
 
 /**
  * ASSUNTO — a terceira declaração do Vínculo (SDD 2026-09-24, F1.1).
@@ -67,6 +67,12 @@ export type KeywordSubjectDeclaration = {
    * (`declared-plan-import-core.ts`) o grava, pelo `setKeywordSubject`.
    */
   plan?: DeclaredArticlePlan;
+  /**
+   * CADASTRO ÚNICO (SDD 2026-10-13 §3.2). Opcional: o Assunto (título, origem e,
+   * no destino publicado, os detalhes) cadastrado DENTRO desta keyword. Ausente
+   * = Assunto anterior, cuja frase é o texto da própria linha.
+   */
+  entry?: SubjectEntry;
 };
 
 export type KeywordSubjectResolution = {
@@ -76,6 +82,8 @@ export type KeywordSubjectResolution = {
   destinationCheck: DestinationCheck | null;
   /** O artigo do plano declarado; `null` sem plano ou com plano malformado (nunca derruba a leitura). */
   plan: DeclaredArticlePlan | null;
+  /** O Assunto cadastrado dentro da keyword (título); `null` no formato anterior ou malformado. */
+  entry: SubjectEntry | null;
   /** Declarado sem nota: a coluna marca "Assunto sem nota" até o humano completar. */
   noteMissing: boolean;
   actorId: string | null;
@@ -92,7 +100,9 @@ export type KeywordSubjectHistoryEntry = {
   changedAt: string;
   origin: KeywordSubjectOrigin;
   /** Só quando a mudança envolveu o plano declarado (F4): o resumo, sem o escopo. */
-  plan?: { groupId: string; planVersion: number; order: number; role: string; declaredPrincipalKeywordId: string | null } | null;
+  plan?: { groupId: string; planVersion: number; order: number; role: string; declaredPrincipalKeywordId: string | null; lock?: string | null } | null;
+  /** 2026-10-13 · só quando a mudança envolveu o Assunto cadastrado na keyword: o título. */
+  entryTitle?: string | null;
 };
 
 export type KeywordSubjectRefusalCode =
@@ -151,6 +161,7 @@ const UNDECLARED: KeywordSubjectResolution = {
   destinationUrl: null,
   destinationCheck: null,
   plan: null,
+  entry: null,
   noteMissing: false,
   actorId: null,
   declaredAt: null,
@@ -168,11 +179,21 @@ export function resolveKeywordSubject(semantic: Semantic): KeywordSubjectResolut
     destinationUrl: text(record.destinationUrl),
     destinationCheck: readDestinationCheck(record.destinationCheck),
     plan: readDeclaredArticlePlan(record.plan),
+    entry: readSubjectEntry(record.entry),
     noteMissing: note === null,
     actorId: text(semantic?.[KEYWORD_SUBJECT_ACTOR_KEY]),
     declaredAt: text(semantic?.[KEYWORD_SUBJECT_AT_KEY]),
     origin: readOrigin(semantic?.[KEYWORD_SUBJECT_ORIGIN_KEY]),
   };
+}
+
+/**
+ * A FRASE DO ASSUNTO, a leitura única (SDD 2026-10-13 §3.2): o título
+ * cadastrado dentro da keyword; no formato anterior, o texto da própria linha.
+ * É o que vira `ArticleDNA.subject.phrase`.
+ */
+export function subjectPhraseOf(keywordText: string, resolution: Pick<KeywordSubjectResolution, "entry">): string {
+  return resolution.entry?.title || keywordText.trim();
 }
 
 /** `"Assunto · declarado"`, `"Assunto sem nota"` ou `null`. */
@@ -234,10 +255,16 @@ export type SetKeywordSubjectInput = {
    * passa este campo.
    */
   plan?: DeclaredArticlePlan | null;
+  /**
+   * 2026-10-13 · o Assunto cadastrado na keyword (título, origem, detalhes).
+   * Mesma regra do `plan`: `undefined` preserva, `null` retira, valor grava.
+   * Só o núcleo do cadastro (`declared-plan-import-core.ts`) passa este campo.
+   */
+  entry?: SubjectEntry | null;
 };
 
 function planSummary(plan: DeclaredArticlePlan | null): KeywordSubjectHistoryEntry["plan"] {
-  return plan ? { groupId: plan.groupId, planVersion: plan.planVersion, order: plan.order, role: plan.role, declaredPrincipalKeywordId: plan.declaredPrincipal?.keywordId ?? null } : null;
+  return plan ? { groupId: plan.groupId, planVersion: plan.planVersion, order: plan.order, role: plan.role, declaredPrincipalKeywordId: plan.declaredPrincipal?.keywordId ?? null, ...(plan.lock ? { lock: plan.lock } : {}) } : null;
 }
 
 /**
@@ -267,7 +294,12 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
     plan = input.plan === null ? null : readDeclaredArticlePlan(input.plan);
     if (input.plan !== null && !plan) return refuse(current, "PLAN_INVALID", "O plano declarado do Assunto não fecha o contrato (ordem, papel, escopo de até 1.200 caracteres numa linha, principal).");
   }
-  if (previous.declared && previous.note === note.note && previous.destinationUrl === destinationUrl && sameDeclaredArticlePlan(previous.plan, plan)) {
+  let entry: SubjectEntry | null = previous.entry;
+  if (input.entry !== undefined) {
+    entry = input.entry === null ? null : readSubjectEntry(input.entry);
+    if (input.entry !== null && !entry) return refuse(current, "PLAN_INVALID", "O Assunto cadastrado na keyword não fecha o contrato (título de até 300 caracteres numa linha; detalhes de até 1.200).");
+  }
+  if (previous.declared && previous.note === note.note && previous.destinationUrl === destinationUrl && sameDeclaredArticlePlan(previous.plan, plan) && sameSubjectEntry(previous.entry, entry)) {
     return { ok: true, semantic: current, changed: false };
   }
 
@@ -281,6 +313,7 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
     changedAt: input.changedAt,
     origin: input.origin,
     ...(input.plan !== undefined || !sameDeclaredArticlePlan(previous.plan, plan) ? { plan: planSummary(plan) } : {}),
+    ...(!sameSubjectEntry(previous.entry, entry) ? { entryTitle: entry?.title ?? null } : {}),
   });
   const declaration: KeywordSubjectDeclaration = {
     declared: true,
@@ -288,6 +321,7 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
     destinationUrl,
     destinationCheck,
     ...(plan ? { plan } : {}),
+    ...(entry ? { entry } : {}),
   };
   return {
     ok: true,

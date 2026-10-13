@@ -9,12 +9,13 @@
  * Domínio puro: sem React, sem storage, sem rede.
  */
 import type { ArticleDNA } from "./contracts.ts";
-import type { ArchitectSubjectStanding, SubjectSupportSuggestion } from "./declared-subject.ts";
+import { freePlanPrincipal, lockedPlanPrincipal, type ArchitectSubjectStanding, type SubjectSupportSuggestion } from "./declared-subject.ts";
+import type { DeclaredPrincipalLockView } from "../minerador/declared-plan.ts";
 import type { DeclaredPlanFormationInput } from "./article-formation-priority.ts";
 import type { DeclaredPlanGateInput } from "./article-formation-confirmation.ts";
 import { DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX } from "./article-serp-interpretation.ts";
 
-type StandingWithPlan = Pick<ArchitectSubjectStanding, "keywordId" | "brandId" | "declared" | "received" | "approvedPackageRef" | "plan">;
+type StandingWithPlan = Pick<ArchitectSubjectStanding, "keywordId" | "brandId" | "declared" | "received" | "approvedPackageRef" | "plan"> & { planLock?: DeclaredPrincipalLockView | null };
 
 /** Os Assuntos com plano que o Arquiteto pode obedecer: declarados, recebidos, com pacote aprovado, desta marca. */
 export function declaredPlanStandings<T extends StandingWithPlan>(standings: readonly T[], brandId: string | null): T[] {
@@ -22,14 +23,24 @@ export function declaredPlanStandings<T extends StandingWithPlan>(standings: rea
   return standings.filter(standing => standing.declared && standing.received && standing.approvedPackageRef && standing.brandId === brandId && standing.plan);
 }
 
-/** O plano de cada Assunto como a formação o recebe. */
+/**
+ * O plano de cada Assunto como a formação o recebe. 2026-10-13 · a TRAVA
+ * (SDD do cadastro único §3.3): só a principal travada é cabeceira fixa
+ * (`principalKeywordId`); a livre vai em `freePrincipalKeywordId` — a
+ * formação pode propor outra principal pela SERP/volume e, sem candidata
+ * melhor, usa a livre.
+ */
 export function declaredPlanFormationInputs(input: { standings: readonly StandingWithPlan[]; brandId: string | null }): Map<string, DeclaredPlanFormationInput> {
-  return new Map(declaredPlanStandings(input.standings, input.brandId).map(standing => [standing.keywordId, {
-    principalKeywordId: standing.plan!.declaredPrincipal?.keywordId ?? null,
-    groupId: standing.plan!.groupId,
-    order: standing.plan!.order,
-    role: standing.plan!.role,
-  }]));
+  return new Map(declaredPlanStandings(input.standings, input.brandId).map(standing => {
+    const livre = freePlanPrincipal(standing);
+    return [standing.keywordId, {
+      principalKeywordId: lockedPlanPrincipal(standing)?.keywordId ?? null,
+      ...(livre ? { freePrincipalKeywordId: livre.keywordId } : {}),
+      groupId: standing.plan!.groupId,
+      order: standing.plan!.order,
+      role: standing.plan!.role,
+    }];
+  }));
 }
 
 /**
@@ -51,11 +62,13 @@ export function declaredPlanGateInputs(input: {
   labelOf?: (keywordId: string) => string | null;
 }): Map<string, DeclaredPlanGateInput> {
   return new Map(declaredPlanStandings(input.standings, input.brandId).map(standing => {
-    const principalKeywordId = standing.plan!.declaredPrincipal?.keywordId ?? null;
+    // 2026-10-13 · só a principal TRAVADA é conferida; a livre pode ser trocada (decisão humana na prévia).
+    const fixa = lockedPlanPrincipal(standing);
+    const principalKeywordId = fixa?.keywordId ?? null;
     return [standing.keywordId, {
       principalKeywordId,
       subjectListKeywordIds: [...(input.subjectLists?.get(standing.keywordId) || [])],
-      principalLabel: standing.plan!.declaredPrincipal?.phrase ?? (principalKeywordId ? input.labelOf?.(principalKeywordId) ?? null : null),
+      principalLabel: fixa?.phrase ?? (principalKeywordId ? input.labelOf?.(principalKeywordId) ?? null : null),
     }];
   }));
 }
@@ -75,23 +88,25 @@ export type DeclaredPlanArticleApplication =
  * do DNA não é a declarada — a contradição do plano não tem "refazer mesmo
  * assim" (D11): muda-se o plano no Minerador.
  */
-export function applyDeclaredPlanToArticleDna(article: ArticleDNA, standing: Pick<ArchitectSubjectStanding, "plan" | "keywordId"> | null | undefined): DeclaredPlanArticleApplication {
+export function applyDeclaredPlanToArticleDna(article: ArticleDNA, standing: (Pick<ArchitectSubjectStanding, "plan" | "keywordId"> & { planLock?: DeclaredPrincipalLockView | null }) | null | undefined): DeclaredPlanArticleApplication {
   const plan = standing?.plan;
   if (!plan) return { ok: true, value: article, changed: false };
-  const declarada = plan.declaredPrincipal?.keywordId ?? null;
-  if (declarada && article.principalKeywordId !== declarada) {
-    return { ok: false, code: "DECLARED_PRINCIPAL_CONTRADICTION", reason: `A principal do artigo não é a principal declarada no plano (“${plan.declaredPrincipal!.phrase}”). Mude o plano no Minerador; o Arquiteto não troca o que foi declarado.` };
+  // 2026-10-13 · só a principal TRAVADA contradiz; a livre pode ter sido trocada pela SERP/volume.
+  const fixa = lockedPlanPrincipal(standing);
+  if (fixa && article.principalKeywordId !== fixa.keywordId) {
+    return { ok: false, code: "DECLARED_PRINCIPAL_CONTRADICTION", reason: `A principal do artigo não é a principal travada no plano (“${fixa.phrase}”). Destrave a keyword no Minerador (Cadastrar Assuntos) ou mude o plano; o Arquiteto não troca o que foi travado.` };
   }
   if (article.hierarchy === plan.role && article.promise === plan.scope) return { ok: true, value: article, changed: false };
   return { ok: true, value: { ...article, hierarchy: plan.role, promise: plan.scope }, changed: true };
 }
 
 /** O plano de um ArticleDNA já está aplicado (papel e promessa)? Sem plano = sim. */
-export function declaredPlanAppliedTo(article: Pick<ArticleDNA, "hierarchy" | "promise" | "principalKeywordId">, standing: Pick<ArchitectSubjectStanding, "plan"> | null | undefined): boolean {
+export function declaredPlanAppliedTo(article: Pick<ArticleDNA, "hierarchy" | "promise" | "principalKeywordId">, standing: (Pick<ArchitectSubjectStanding, "plan"> & { keywordId?: string; planLock?: DeclaredPrincipalLockView | null }) | null | undefined): boolean {
   const plan = standing?.plan;
   if (!plan) return true;
+  const fixa = lockedPlanPrincipal({ plan, keywordId: standing?.keywordId ?? "", ...(standing && "planLock" in standing ? { planLock: standing.planLock } : {}) });
   return article.hierarchy === plan.role && article.promise === plan.scope
-    && (!plan.declaredPrincipal || article.principalKeywordId === plan.declaredPrincipal.keywordId);
+    && (!fixa || article.principalKeywordId === fixa.keywordId);
 }
 
 /**

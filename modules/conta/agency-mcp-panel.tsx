@@ -116,7 +116,7 @@ export function AgencyMcpPanel({ data, saving, agencyRef, mutate, reload, notify
         { text: "Informe o nome Minerador Key e a URL HTTPS exibida acima. Deixe Client ID e Client Secret em Advanced settings vazios: o endpoint publica OAuth e registro dinâmico." },
         { text: "Clique em Connect. O login desta plataforma abre; entre com sua conta normal e confira Marca e permissões na tela de consentimento." },
         { text: "Selecione platform.read, as áreas necessárias e, se você quer delegar decisões aceitas no chat, marque platform.decide conscientemente. Esta permissão vem desmarcada; provider.spend também." },
-        { text: "Ative o conector na conversa e teste nesta ordem: get_platform_guide → get_platform_state → find_topic_in_platform → declare_subjects em preview. O preview não grava." },
+        { text: "Ative o conector na conversa e teste nesta ordem: get_platform_guide → get_platform_state → find_topic_in_platform → declare_silo_plan em preview. O preview não grava." },
       ],
     },
     custom: {

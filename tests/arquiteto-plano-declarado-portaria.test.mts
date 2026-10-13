@@ -150,6 +150,9 @@ test("servidor da melhoria (estrutural): a keyword nova do Assunto nasce ligada 
   assert.match(fonte, /subjectKeywordId: target\.kind === "subject" \? target\.id : null/);
   assert.doesNotMatch(fonte, /subjectKeywordId: null, subjectPhrase/);
   assert.match(fonte, /applyDeclaredPlanToArticleDna\(payload/);
-  assert.match(fonte, /declaredPrincipalId: standing\.plan\.declaredPrincipal\.keywordId/);
+  // 2026-10-13 · só a principal TRAVADA é fixa; a livre é a principal atual e pode ser trocada.
+  assert.match(fonte, /declaredPrincipalId: fixa\.keywordId/);
+  assert.match(fonte, /const fixa = lockedPlanPrincipal\(standing\);/);
+  assert.match(fonte, /primaryId: article\?\.payload\.principalKeywordId \?\? livre\?\.keywordId \?\? null/);
   assert.match(fonte, /declaredPrincipalId: target\.declaredPrincipalId/);
 });

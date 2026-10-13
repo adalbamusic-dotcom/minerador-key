@@ -1,5 +1,18 @@
 # Estado atual — Publicações
 
+## Assunto legível nas linhas — 2026-10-13
+
+Pedido do dono (2026-10-13): "coloca sempre o assunto no painel para que seja legível". Só a keyword principal não identificava o artigo.
+
+**Verificado no código e confirmado por teste. Validado manualmente: não (homologação é do dono).** Sem migration, sem escrita remota, sem SQL, sem chamada paga.
+
+- Componente compartilhado `components/editorial/article-subject-line.tsx`: `ArticleSubjectLine` (rótulo "Assunto · " em `text-text-muted`, frase inteira em `text-foreground`, 14 px, quebra de linha, `title` com a frase; sem frase, "Sem Assunto" em `text-text-muted`, ou nada com `showEmpty={false}`) e `articleSubjectPhraseOf` (lê `subject.phrase` do ArticleDNA). Só lê: não busca, não grava.
+- `WorkflowImportDialog` (`components/editorial/workflow-status.tsx`) e `ImportPanel` (`components/editorial/operational-screen-shared.tsx`) ganharam `subjectOf` opcional (aditivo): com ele a linha abre com o Assunto e a busca casa com a frase; sem ele, o render é o de sempre (consumidores preservados: Arquiteto, ImportPanel sem `subjectOf`).
+- Fonte: o ArticleDNA da mesa (`pipeline.articleVersions[row.articleId].payload.subject.phrase`), já em memória.
+- Onde aparece: coluna "Conteúdo" da grade (Fila, Publicados, Atualizações) e cada linha da Biblioteca, acima do título.
+- Decisão desta área: só aparece quando HÁ Assunto (`showEmpty={false}`). Publicados antigos e itens do histórico (Planejador) não ganham "Sem Assunto", para não poluir a lista.
+- Arquivo: `modules/publicacoes/publications-workspace.tsx`. Teste: `tests/redator-assunto-legivel.test.mts` (ligações). O CSV de Publicações não mudou.
+
 ## F6 · Etiqueta de cor e listas por grupo — 2026-10-12
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.** SDD

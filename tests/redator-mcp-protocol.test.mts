@@ -54,7 +54,7 @@ test("MCP inicializa e anuncia ferramentas com anotações de leitura/escrita", 
   // As da plataforma: leitura é leitura; as que escrevem se anunciam como escrita.
   for (const name of ["get_platform_guide", "get_platform_state", "find_topic_in_platform", "list_platform_keywords", "get_next_actions", "validate_silo_plan"])
     assert.equal(byName.get(name)?.annotations?.readOnlyHint, true, name);
-  for (const name of ["declare_subjects", "search_subject_keywords", "import_subject_keywords", "send_keywords_to_arquiteto", "send_radar_to_writer"])
+  for (const name of ["declare_silo_plan", "search_subject_keywords", "import_subject_keywords", "send_keywords_to_arquiteto", "send_radar_to_writer"])
     assert.equal(byName.get(name)?.annotations?.readOnlyHint, false, name);
   // Aprovar, excluir e publicar continuam fora — no Redator e na plataforma inteira (AGENTS.md §9).
   for (const name of ["approve_writer_document", "publish_document", "delete_writer_document", "update_article_dna", "resolve_writer_divergence",

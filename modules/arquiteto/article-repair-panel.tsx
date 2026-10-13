@@ -16,6 +16,7 @@
 
 import { useState } from "react";
 import { AlertTriangle, ShieldCheck, Wrench, X } from "lucide-react";
+import { ArticleSubjectLine } from "@/components/editorial/article-subject-line";
 import type { ArticleRepairPlan, ArticleRepairStep, RepairClass } from "@/lib/arquiteto/article-repair";
 import { ARTICLE_SERP_HUMAN_DECISIONS, type ArticleSerpHumanDecision } from "@/lib/arquiteto/article-serp-record";
 
@@ -105,8 +106,10 @@ function Passo({ passo, onReexecutar, onDecidir, busy }: {
   );
 }
 
-export function ArticleRepairPanel({ planos, busy, mensagem, onReexecutar, onDecidir, onClose }: {
+export function ArticleRepairPanel({ planos, busy, mensagem, onReexecutar, onDecidir, onClose, subjectOf }: {
   planos: readonly ArticleRepairPlan[];
+  /** 2026-10-13 · aditivo: a frase do Assunto do ArticleDNA de cada artigo, mostrada legível sob o rótulo. */
+  subjectOf?: (articleId: string) => string | null | undefined;
   busy: boolean;
   mensagem: { tom: "erro" | "sucesso" | "progresso"; texto: string } | null;
   onReexecutar: (articleId: string, code: string) => void;
@@ -145,6 +148,7 @@ export function ArticleRepairPanel({ planos, busy, mensagem, onReexecutar, onDec
         ) : comBloqueio.map(plano => (
           <section key={plano.articleId} className="mt-4" data-repair-article={plano.articleId}>
             <p className="text-sm font-semibold text-foreground">{plano.label}</p>
+            {subjectOf && <ArticleSubjectLine phrase={subjectOf(plano.articleId)} className="mt-0.5" testId="architect-repair-subject"/>}
             <ul className="mt-2 space-y-2">
               {plano.bloqueios.map(passo => (
                 <Passo key={passo.code} passo={passo} busy={busy}

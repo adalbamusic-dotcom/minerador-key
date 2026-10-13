@@ -67,3 +67,44 @@ test("tela: os selos entram na linha do artigo, na SiloPage e no cartão do Silo
   assert.doesNotMatch(selo, /onClick|<button/, "selo só informa");
   assert.doesNotMatch(selo, /#[0-9a-f]{3,6}\b|rgb\(|bg-(red|green|yellow|orange|blue)-/i, "só tokens");
 });
+
+test("a linha do artigo mostra o Assunto/tema na cabeceira (ou \"Sem Assunto\"), pela mesma fonte do selo", () => {
+  const tela = readFileSync(join(process.cwd(), "modules", "arquiteto", "arquiteto-workspace.tsx"), "utf8");
+  assert.match(tela, /const assuntoDaLinhaRef = articleSubjectFor\(art\);/);
+  assert.match(tela, /assuntoDaLinhaRef\.subject\?\.phrase \|\| keywordLabelById\.get\(assuntoDaLinhaRef\.keywordId\)/, "frase gravada no ArticleDNA ou o texto da keyword do Assunto em formação; nunca id cru");
+  const celula = tela.slice(tela.indexOf("data-article-row-subject"), tela.indexOf("data-article-row-subject") + 400);
+  /* 2026-10-13 · a cabeceira passou a usar o componente compartilhado (mesmo texto em todas as áreas). */
+  assert.match(celula, /<ArticleSubjectLine phrase=\{assuntoDaLinha\}\/>/);
+  const componente = readFileSync(join(process.cwd(), "components", "editorial", "article-subject-line.tsx"), "utf8");
+  assert.match(componente, /ARTICLE_SUBJECT_LABEL = "Assunto · "/);
+  assert.match(componente, /ARTICLE_SUBJECT_EMPTY = "Sem Assunto"/, "artigo sem Assunto aparece como tal, em vez de sumir");
+  assert.ok(tela.indexOf("data-article-row-subject") < tela.indexOf("title={art.keywordPrincipal}>{art.keywordPrincipal}"), "o Assunto vem antes da keyword principal");
+});
+
+test("2026-10-13 · o Assunto legível nos outros painéis do Arquiteto (componente compartilhado, mesma fonte)", () => {
+  const limpar = (texto: string) => texto.replace(/\{\/\*[\s\S]*?\*\/\}/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/[^\n]*/gm, " ");
+  const tela = limpar(readFileSync(join(process.cwd(), "modules", "arquiteto", "arquiteto-workspace.tsx"), "utf8"));
+  // painel expandido: o Assunto da linha antes da principal
+  assert.match(tela, /Resumo do artigo<\/p>\s*<ArticleSubjectLine phrase=\{assuntoDaLinha\} className="mt-1" testId="architect-expanded-subject"\/>\s*<p className="mt-1 break-words text-base font-semibold text-keyword">\{art\.keywordPrincipal\}<\/p>/);
+  // cartão do Silo: Pilar (fechado e em escolha), cada Suporte, retirada
+  assert.match(tela, /const articleSubject = \(articleId: string\) => articleSubjectPhraseOf\(acceptedArticleDnas\[articleId\]\?\.payload\);/);
+  assert.equal((tela.match(/testId="architect-silo-pillar-subject"/g) || []).length, 2, "Pilar fechado e Pilar em escolha");
+  assert.match(tela, /Suporte · \{articleLabel\(articleId\)\}<\/span><ArticleSubjectLine phrase=\{articleSubject\(articleId\)\} testId="architect-silo-support-subject"\/>/);
+  assert.match(tela, /\{ articleId, label: articleLabel\(articleId\), subjectPhrase: articleSubject\(articleId\) \}/);
+  // SiloPage: Pilar e Suportes
+  assert.match(tela, /testId="architect-silopage-pillar-subject"/);
+  assert.match(tela, /testId="architect-silopage-support-subject"/);
+  // Links internos: hierarquia, relações (só artigos) e nó selecionado
+  assert.match(tela, /acceptedArticleDnas\[linksHierarchy\.pillar\.id\]\?\.payload\)\} testId="architect-link-pillar-subject"/);
+  assert.match(tela, /acceptedArticleDnas\[unit\.id\]\?\.payload\)\} testId="architect-link-support-subject"/);
+  assert.match(tela, /row\[ponta\]\.nodeId\.startsWith\("article:"\) \? <ArticleSubjectLine key=\{ponta\}[^>]*showEmpty=\{false\}/);
+  assert.match(tela, /testId="architect-link-node-subject"/);
+  // reparo pontual
+  assert.match(tela, /subjectOf=\{articleId => articleSubjectPhraseOf\(articleRepairPlans\.find\(item => item\.plano\.articleId === articleId\)\?\.dna\?\.payload\)\}/);
+  const reparo = limpar(readFileSync(join(process.cwd(), "modules", "arquiteto", "article-repair-panel.tsx"), "utf8"));
+  assert.match(reparo, /\{plano\.label\}<\/p>\s*\{subjectOf && <ArticleSubjectLine phrase=\{subjectOf\(plano\.articleId\)\}/);
+  const retirada = limpar(readFileSync(join(process.cwd(), "modules", "arquiteto", "silo-article-withdrawal-panel.tsx"), "utf8"));
+  assert.match(retirada, /articles: ReadonlyArray<\{ articleId: string; label: string; subjectPhrase\?: string \| null \}>/);
+  assert.match(retirada, /"subjectPhrase" in article \? <ArticleSubjectLine as="span" phrase=\{article\.subjectPhrase\}/);
+  assert.match(retirada, /Prévia · \{previa\.article\.label\}<\/p>\s*\{\(\(\) => \{ const doAberto/);
+});

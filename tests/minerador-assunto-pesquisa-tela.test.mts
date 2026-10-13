@@ -171,20 +171,16 @@ test("lista local: texto da tela, política e armazenamento só em IndexedDB pr�
   assert.match(results, /Descartar esta busca/);
 });
 
-test("envio: 'Declarar também' com padrão da Q14, F1.3 (prévia e apply) antes da rota da F1b, e o texto do volume", () => {
+test("envio (cadastro único, 2026-10-13): a pesquisa não declara a frase; sem Assunto cadastrado, entra sem vínculo e a tela diz isso", () => {
   const importDialog = dialogs.slice(dialogs.indexOf("export function SubjectSearchImportDialog"));
-  assert.match(importDialog, /declarePhraseAsSubjectLabel\(subject\.phrase\)/);
   assert.match(importDialog, /\{SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT\}/);
-  assert.match(importDialog, /\{SUBJECT_SEARCH_UNDECLARED_TEXT\}/);
+  assert.match(importDialog, /!dialog\.offered \? <p className="text-sm leading-6 text-text-muted" data-subject-search-cadastro-hint>\{SUBJECT_SEARCH_CADASTRO_HINT\}<\/p>/);
+  assert.match(dialogs, /SUBJECT_SEARCH_CADASTRO_HINT = "Esta frase não é um Assunto cadastrado/);
   const openImport = between(hook, "const openImport = useCallback", "const setDeclare");
-  assert.match(openImport, /defaultDeclarePhraseAsSubject\(\{ subjectKeywordId: subject\.subjectKeywordId, phraseExistingKeywordId: subject\.phraseExistingKeywordId \}\)/);
+  assert.match(openImport, /const choice = \{ offered: false, checked: false \};/, "a oferta de declarar a frase não aparece mais");
+  assert.doesNotMatch(openImport, /defaultDeclarePhraseAsSubject/);
   const confirmImport = between(hook, "const confirmImport = useCallback", "return {\n");
-  const apply = confirmImport.indexOf("mode: \"apply\"");
-  const f1bImport = confirmImport.indexOf("/subject-discovery/import");
-  assert.ok(apply > 0 && f1bImport > apply, "a declaração pela F1.3 vem antes do import da F1b");
-  assert.match(hook, /postSubjects\(\{ mode: "preview", source: "manual", entries: \[subjectEntry\(record\)\] \}\)/);
-  assert.match(hook, /\/subjects\/import`/);
-  assert.match(confirmImport, /if \(!subjectId\) throw new Error\(/, "declaração que falha não importa nada");
+  assert.match(confirmImport, /if \(dialog\.offered && dialog\.declare && !dialog\.declaredId\)/, "a declaração só rodaria com a oferta, que não existe mais");
   assert.match(confirmImport, /body: JSON\.stringify\(\{ importRequestId: dialog\.importRequestId, searchId: record\.searchId, subjectKeywordId: subjectId, subjectPhrase: record\.result\.subject\.phrase, items \}\)/);
   assert.match(model, /if \(candidate\.isSubjectPhrase \|\| candidate\.normalizedKeyword === normalizedPhrase\) \{ skippedSubjectPhrase \+= 1; continue; \}/);
 });

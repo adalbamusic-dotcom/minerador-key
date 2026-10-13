@@ -1,5 +1,12 @@
 # Backlog — Redator
 
+## Assunto legível — 2026-10-13
+
+Detalhe em `docs/07-redator/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Lista de documentos, cabeçalho do documento aberto e "Importar do Radar" com "Assunto · …".
+- [ ] **Dono:** conferir na tela que cada documento é identificável pelo Assunto.
+
 ## F6 · Etiqueta de cor e lista de documentos por grupo — 2026-10-12
 
 Detalhe em `docs/07-redator/estado-atual.md`. **Validado manualmente: não.**

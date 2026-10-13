@@ -17,7 +17,7 @@ import { resolveKeywordDnaSignals } from "@/lib/arquiteto/keyword-dna-signals";
 import { applySerpDecisionToArticle, buildClassificationEvidence, resolveArticleClassification, unresolvedClassifications, ARTICLE_INTENT_LABELS, ARTICLE_FUNNEL_LABELS } from "@/lib/arquiteto/article-classification-closure";
 import { resolveApprovedArticleSerpGate, type ApprovedSerpRecord } from "@/lib/arquiteto/approved-article-serp-gate";
 import { readArticleKgrDecision } from "@/lib/arquiteto/article-kgr-decision";
-import { readArchitectSubjectStanding, planSubjectAttachment, attachSubjectToArticleDna } from "@/lib/arquiteto/declared-subject";
+import { readArchitectSubjectStanding, planSubjectAttachment, attachSubjectToArticleDna, freePlanPrincipal, lockedPlanPrincipal, subjectMayBePrincipal } from "@/lib/arquiteto/declared-subject";
 import { applyDeclaredPlanToArticleDna, applySerpSupportBasisProvenance, declaredPlanAppliedTo, declaredPlanForGroup } from "@/lib/arquiteto/declared-plan-formation";
 import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import { shortSeedsOf, sharesTheme } from "@/lib/minerador/short-seeds";
@@ -161,9 +161,18 @@ async function readInputs(context: PipelineContext, requested?: string[]) {
       waitingDeclaredPrincipal.push(`“${standing.phrase}” aguarda a principal declarada “${standing.plan.declaredPrincipal.phrase}” chegar ao Arquiteto (aprove-a no Minerador e envie).`);
       continue;
     }
-    targets.push({ id: row.id, kind: "subject", theme: standing.phrase, note: standing.note, primaryId: article?.payload.principalKeywordId ?? null, post: "free", memberIds: article?.payload.keywordReferences.map(r => r.keywordId) ?? [], territoryRef: text(row.territoryRef), slug: article?.payload.suggestedSlug ?? null, url: null, canonical: null, signals: signals(row),
-      // F4 — principal declarada no plano (pacote aprovado do Assunto): fixa; e o plano ainda não aplicado ao DNA (D8).
-      ...(standing.plan?.declaredPrincipal ? { declaredPrincipalId: standing.plan.declaredPrincipal.keywordId } : {}),
+    /*
+     * 2026-10-13 · TRAVA (SDD do cadastro único §3.5): só a principal TRAVADA é
+     * fixa (`declaredPrincipalId`); a LIVRE é a principal atual enquanto o artigo
+     * não existe e a melhoria pode propor outra pela SERP/volume (decisão humana
+     * na prévia). A keyword do plano, travada ou livre, é `planPrincipalId` (D2(a)).
+     */
+    const fixa = lockedPlanPrincipal(standing);
+    const livre = freePlanPrincipal(standing);
+    targets.push({ id: row.id, kind: "subject", theme: standing.phrase, note: standing.note, primaryId: article?.payload.principalKeywordId ?? livre?.keywordId ?? null, post: "free", memberIds: article?.payload.keywordReferences.map(r => r.keywordId) ?? [], territoryRef: text(row.territoryRef), slug: article?.payload.suggestedSlug ?? null, url: null, canonical: null, signals: signals(row),
+      // F4 — principal declarada no plano (pacote aprovado do Assunto): fixa SÓ quando travada; e o plano ainda não aplicado ao DNA (D8).
+      ...(fixa ? { declaredPrincipalId: fixa.keywordId } : {}),
+      ...(standing.plan?.declaredPrincipal ? { planPrincipalId: standing.plan.declaredPrincipal.keywordId } : {}),
       ...(standing.plan && article && !declaredPlanAppliedTo(article.payload, standing) ? { declaredPlanPending: true } : {}) });
   }
   for (const target of targets) {
@@ -1061,7 +1070,8 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   // No provider call here: the approved final composition is evaluated against
   // the cache in this same action, without a second editorial confirmation.
   // D2(a): principal declarada no plano aprovado, sem volume — o parecer pode vir das sustentações (sem custo).
-  const principalDeclarada = target.kind === "subject" && Boolean(target.declaredPrincipalId) && target.declaredPrincipalId === principalId;
+  // 2026-10-13 · a keyword do plano, travada ou livre (a livre que ficou principal também vale).
+  const principalDeclarada = target.kind === "subject" && Boolean(target.declaredPrincipalId ?? target.planPrincipalId) && (target.declaredPrincipalId ?? target.planPrincipalId) === principalId;
   const semParecerDaDeclarada = () => refusal(`A principal declarada “${input.rows.get(principalId)?.keyword ?? principalId}” não tem SERP no cache e nenhuma sustentação com volume do artigo tem as 4 lentes no cache: não há base para o parecer pelas sustentações (D2a). Nada foi gravado. Para gravar, use “Validar no Google” (pago; o custo aparece antes de autorizar).`);
   try { await serpOperation(context, group, "execute", 0); }
   catch (error) { if (principalDeclarada && !hasSearchVolume(input.rows.get(principalId)?.volume_search)) throw semParecerDaDeclarada(); throw error; }
@@ -1105,7 +1115,7 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   if (target.kind === "subject") {
     const attachment = planSubjectAttachment({ brandId: context.brandId, keyword: input.rows.get(target.id)!, actorUserId: context.actorUserId, attachedAt: now, target: { principalKeywordId: principalId, excludedSubjects: payload.excludedSubjects } });
     if (!attachment.ok) throw refusal(attachment.reason);
-    const attached = attachSubjectToArticleDna(payload, attachment.subject);
+    const attached = attachSubjectToArticleDna(payload, attachment.subject, { principalVolumeValidated: subjectMayBePrincipal(readArchitectSubjectStanding(input.rows.get(target.id)!)) });
     if (!attached.ok) throw refusal(attached.reason);
     payload = attached.value;
     // F4 — o plano declarado: papel = hierarquia, escopo = promessa; principal diferente da declarada é recusa (D11).

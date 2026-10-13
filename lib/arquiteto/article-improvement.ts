@@ -31,6 +31,11 @@ export type ImprovementTarget = {
    * (`needsPrimary` falso), mesmo sem volume.
    */
   declaredPrincipalId?: string | null;
+  /**
+   * 2026-10-13 · a keyword do plano (travada OU livre). Livre, a melhoria pode
+   * trocá-la; ela continua valendo para o parecer pelas sustentações (D2(a)).
+   */
+  planPrincipalId?: string | null;
   /** F4 — o DNA vigente ainda não tem a promessa e o papel do plano (D8: versão nova). */
   declaredPlanPending?: boolean;
 };
