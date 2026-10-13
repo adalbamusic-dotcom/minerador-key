@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { canCompleteHumanReview, completeHumanReview } from "../lib/minerador/human-review.ts";
 import { planHumanReviewCompletionBatch } from "../lib/minerador/human-review-completion-batch.ts";
-import { partitionSubjectKeywords } from "../lib/minerador/vinculo-screen.ts";
 import { processorCpcCell, processorVolumeCell, PROCESSOR_PROCESSED_EMPTY_HINT } from "../lib/minerador/processor-table-cells.ts";
 import { candidatesAnsweredWithoutVolume, discoveryVolumeCell } from "../lib/minerador/discovery-table-cells.ts";
 import { candidateMatchesDiscoveryOrganization, EMPTY_DISCOVERY_ORGANIZATION } from "../lib/minerador/discovery-organization.ts";
@@ -47,14 +46,19 @@ function kgrCalculable(extra: Record<string, unknown> = {}) {
 
 const subject = { keyword_subject: { declared: true, note: null, destinationUrl: null, destinationCheck: null } };
 
-test("Assunto anula o KGR também na conclusão: o lote conclui e o KGR em grupo continua pulando", () => {
+test("2026-10-13: a keyword que carrega Assunto é tratada como qualquer keyword na conclusão e no KGR", () => {
   // 2026-09-28: o KGR é opcional (padrão "não aplicável") e não trava nem sem Assunto.
   assert.equal(canCompleteHumanReview(kgrCalculable()).pendingKgrDecision, undefined, "sem Assunto, o KGR calculável também não é mais exigido");
 
   const semantic = kgrCalculable(subject);
   assert.equal(canCompleteHumanReview(semantic).pendingKgrDecision, undefined);
   const completed = completeHumanReview({ semantic, intent: "Informativa", actorId: "human-1", completedAt: "2026-09-24T12:00:00.000Z" });
-  assert.equal((completed.human_review as { kgrDecisionReviewed: boolean }).kgrDecisionReviewed, true);
+  const plain = completeHumanReview({ semantic: kgrCalculable(), intent: "Informativa", actorId: "human-1", completedAt: "2026-09-24T12:00:00.000Z" });
+  assert.equal(
+    (completed.human_review as { kgrDecisionReviewed: boolean }).kgrDecisionReviewed,
+    (plain.human_review as { kgrDecisionReviewed: boolean }).kgrDecisionReviewed,
+    "o Assunto não dispensa mais a decisão do KGR: igual à keyword sem Assunto",
+  );
   assert.equal(completed.kgr_aplicabilidade, "pending", "a conclusão não inventa a aplicabilidade");
 
   const keyword = { id: "a", keyword: "seo para clínicas", intent: "Informativa", analise_semantica: semantic };
@@ -62,11 +66,7 @@ test("Assunto anula o KGR também na conclusão: o lote conclui e o KGR em grupo
   assert.deepEqual(plan.pendingKgrIds, []);
   assert.equal(plan.updates.length, 1);
 
-  const partition = partitionSubjectKeywords([keyword]);
-  assert.deepEqual(partition.subjects.map(item => item.id), ["a"]);
-  assert.equal(partition.eligible.length, 0);
-
-  assert.match(panels, /const subjectLocksKgr = subjectDeclared;/, "a Revisão desliga o KGR sempre que há Assunto");
+  assert.doesNotMatch(panels, /subjectLocksKgr|subjectDeclared/, "a Revisão não desliga mais o KGR por causa do Assunto");
 });
 
 test("Volume em grupo: keyword que o Google Ads não devolve termina em 0 apagado, não em — nem Erro", () => {
@@ -156,10 +156,10 @@ test("selects nativos: tema compartilhado alcança optgroup e respeita o tema cl
   // que carrega o mesmo tema.
   const reviewSelects = panels.match(/<select[\s\S]*?<\/select>/g) || [];
   const vinculoSelects = vinculoSelectsSource.match(/<select[\s\S]*?<\/select>/g) || [];
-  assert.ok(reviewSelects.length + vinculoSelects.length >= 5);
+  assert.ok(reviewSelects.length + vinculoSelects.length >= 4);
   for (const select of reviewSelects) assert.match(select, /NATIVE_SELECT_THEME/, "todo select da Revisão abre no tema");
   assert.match(vinculoSelectsSource, /export const VINCULO_SELECT_CLASS = `[^`]*\$\{NATIVE_SELECT_THEME\}`;/);
-  assert.equal(vinculoSelects.length, 3, "os três selects do Vínculo");
+  assert.equal(vinculoSelects.length, 2, "os dois selects do Vínculo (o Assunto saiu em 2026-10-13)");
   for (const select of vinculoSelects) assert.match(select, /className=\{VINCULO_SELECT_CLASS\}/, "os selects do Vínculo abrem no tema");
 });
 
@@ -197,7 +197,7 @@ test("KGR em grupo passa por confirmação: a seta no select fechado não grava"
   assert.match(dialog, /role="dialog"/);
   assert.match(dialog, /void handleBatchKgrApplicability\(nextApplicability as KgrApplicability\)/);
   assert.match(dialog, /disabled=\{updating \|\| bulkActionProcessing \|\| kgrBatchPreview\.updates === 0\}/);
-  assert.match(workspace, /describeSubjectSkipped\(subjects\.length, "KGR"\)\]\.filter/, "a prévia conta os Assuntos pulados");
+  assert.doesNotMatch(workspace, /describeSubjectSkipped/, "2026-10-13: a keyword com Assunto entra no KGR em grupo como qualquer keyword");
 });
 
 test("texto vivo curto e relógio do bloco: dá para ver que o lote segue vivo", async () => {

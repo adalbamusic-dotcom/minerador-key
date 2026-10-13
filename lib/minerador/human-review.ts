@@ -1,7 +1,6 @@
 import { hasHumanKgrDecision, readKgrApplicability, setKgrApplicability, type KgrApplicability } from "./kgr-applicability.ts";
 import { readCanonicalKeywordDna } from "./logical-read-model.ts";
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
-import { resolveKeywordSubject } from "./keyword-subject.ts";
 
 /**
  * Revisão Humana do KeywordDNA.
@@ -33,15 +32,11 @@ export type HumanReviewAction =
    * obrigatório — informa o Arquiteto, não trava o Minerador.
    */
   | { type: "page_type"; pageType: KeywordPageType; stance?: KeywordPageTypeStance }
-  /**
-   * Assunto (SDD 2026-09-24, F1.4): a terceira declaração do Vínculo.
-   * `declared: true` declara, ou troca nota e destino; `declared: false`
-   * retira. Quem grava é `setKeywordSubject`/`withdrawKeywordSubject`, com o
-   * `auth.users.id` da sessão e origem `review`. O destino passa antes por
-   * `validateSubjectDestination`. Só o humano dispara esta ação (P4).
+  /*
+   * O Assunto saiu da Revisão Humana em 2026-10-13 (pedido do dono): não há
+   * mais ação "subject". Ele mora na keyword e entra só pelo card "Cadastrar
+   * Assuntos"; o painel o mostra só leitura.
    */
-  | { type: "subject"; declared: true; note?: string | null; destinationUrl?: string | null }
-  | { type: "subject"; declared: false }
   | { type: "reopen" }
   | { type: "cancel" }
   | { type: "complete" };
@@ -366,9 +361,8 @@ function kgrIsCalculable(semantic: Semantic | null | undefined): boolean {
   // KGR applicability is a review gate only when the two current Processor
   // measurements make the calculation real. Imported/top-level snapshots or
   // an old persisted score must not turn into a new KGR obligation.
-  // O Assunto anula o KGR (pedido do dono, 2026-09-24): keyword declarada
-  // como Assunto não carrega a decisão de aplicabilidade como pendência.
-  if (resolveKeywordSubject(semantic).declared) return false;
+  // 2026-10-13: a keyword que carrega Assunto é tratada como qualquer keyword
+  // (pedido do dono) — o KGR vale para ela como para as outras.
   return deriveProcessorRevalidation({ semantic: semantic || {} }).kgr.ready;
 }
 

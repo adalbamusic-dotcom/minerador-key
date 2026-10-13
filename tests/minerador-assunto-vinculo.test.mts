@@ -88,12 +88,12 @@ test("com Assunto, subject e subjectLabel entram e a frase ganha ' · Assunto ·
   });
 });
 
-test("declarado sem nota: rótulo 'Assunto sem nota'", () => {
-  const declared = setKeywordSubject({}, { note: null, actorId: ACTOR, changedAt: AT, origin: "batch" });
+test("declarado sem nota (2026-10-13): a nota não é mais editável, o rótulo não a cobra", () => {
+  const declared = setKeywordSubject({}, { note: null, actorId: ACTOR, changedAt: AT, origin: "import" });
   assert.ok(declared.ok);
   const vinculo = resolveKeywordVinculo({ status: "bruto", semantic: declared.semantic });
-  assert.equal(vinculo.subjectLabel, "Assunto sem nota");
-  assert.equal(keywordVinculoSummary(vinculo), "Livre · Artigo · potencial · Assunto sem nota");
+  assert.equal(vinculo.subjectLabel, "Assunto · declarado");
+  assert.equal(keywordVinculoSummary(vinculo), "Livre · Artigo · potencial · Assunto · declarado", "a frase do Arquiteto continua dizendo que a keyword carrega um Assunto");
 });
 
 test("o Assunto não é tipo de página: enum do Minerador e declaração do Arquiteto intactos", () => {

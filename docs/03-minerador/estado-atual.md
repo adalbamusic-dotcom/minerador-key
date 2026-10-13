@@ -1,5 +1,80 @@
 # Estado atual — Minerador
 
+## O Assunto sai do Vínculo e aparece no painel da keyword — 2026-10-13
+
+```text
+Pedido do dono (2026-10-13): "apagar essa questão do Assunto/tema do Vínculo, tanto da coluna como dos seletores,
+porque na planilha já não vai mais existir assuntos, só keywords e dentro dessas keywords estão os assuntos";
+"falta colocar no painel do DNA das keywords o assunto/tema e essas keywords têm que ser tratadas como qualquer keyword".
+SDD = docs/compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md (§11, andamento C7)
+MIGRATION_NOVA = 0 · ESCRITA_REMOTA = 0 · SQL_REMOTO = só SELECT · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Vínculo sem Assunto.** A Revisão Humana (`components/editorial/dna-panels.tsx`) e o painel "Vínculo das
+  selecionadas" têm só **Posto de principal** e **Potencial de página** (`components/editorial/vinculo-selects.tsx`
+  perdeu `VinculoSubjectSelect`/`VinculoSubjectFields`). Saíram o select "Assunto" (Declarado/Não), "Nota: o que
+  é, para quem", "Página de destino", o aviso "Com Assunto declarado, o KGR e o Posto de principal não se
+  aplicam" e o "Assunto: …" do resumo e da coluna Vínculo, que ficam "Livre · Artigo · potencial"
+  (`keywordVinculoChoicesSummary`). O "Buscar sustentação" saiu da coluna.
+- **Uma porta só também no servidor.** `planVinculoBatch`/`planVinculoBatchChoices` (`lib/minerador/vinculo-batch.ts`)
+  recusam `subject_declare` e `subject_withdraw` com `SUBJECT_ENTRY_MOVED` e a mensagem
+  `VINCULO_SUBJECT_ENTRY_MOVED_REASON` ("Cadastrar Assuntos" / `declare_silo_plan` / "Tirar do plano"), antes de
+  qualquer gravação. A ferramenta MCP `set_keyword_vinculo` aceita esses dois `kind` só para responder
+  `{ ok: false, code: "subject_entry_moved" }` (sem 500, sem leitura do banco). Não há rota HTTP do Vínculo: a
+  tela grava pelo cliente autenticado (RLS), e a tela não chama mais `setKeywordSubject`/`withdrawKeywordSubject`
+  (lista fechada de chamadores atualizada em `tests/minerador-assunto-dominio.test.mts`).
+- **Decisão sobre `subject_withdraw`:** saiu de todas as portas. Motivo medido no banco (SELECT, WifiConecta): as 7
+  keywords do Silo "Wi-Fi e fibra óptica" (azul, cadastro de 2026-10-13) tiveram o Assunto retirado pelo
+  "Assunto: Não" do Vínculo (6 pelo lote, 1 pela Revisão), o que apagou o título e o plano de dentro da keyword e
+  deixou a marca de principal (`keyword_declared_principal`) órfã. Retirar um artigo do plano é "Tirar do plano"
+  (`declared-plan-withdraw-core.ts`). Para o Assunto anterior SEM plano não há mais porta de retirada: fica como
+  está até o dono decidir a conversão (abaixo).
+- **"Assunto deste artigo" no painel do DNA** (`SubjectArticleBlock` em `dna-panels.tsx`, lido por
+  `resolveSubjectArticleView` em `lib/minerador/subject-article-view.ts`): bloco só leitura no Perfil da keyword
+  (antes da Revisão Humana) com título, detalhes (`plan.scope` ou `entry.details`), papel e posição ("Suporte ·
+  artigo 3"), grupo (etiqueta da cor com o nome) e trava com o porquê (`declaredPrincipalLock`: travada pelo volume,
+  livre sem volume medido, à mão, declarada antes do cadastro único; "protegida pela página publicada" no destino
+  publicado). Dica: "Para mudar, use Cadastrar Assuntos → Silo existente." Mantém "Buscar sustentação" (a Pesquisa
+  por Assunto continua o caminho das sustentações: plano grátis, execução só com confirmação). Também mostra: a
+  principal declarada do formato anterior ("principal declarada do Assunto X") e a **marca órfã** (aviso com o
+  último título do histórico e a dica de recadastrar). Nada no bloco grava.
+- **Keyword que carrega Assunto = qualquer keyword.** Sem tratamento especial de tela ou regra: o KGR não é mais
+  desligado nem forçado "Não aplicável" (`human-review.ts`, `dna-panels.tsx`), o Posto não é mais desligado nem
+  pulado no lote (`vinculo-batch.ts`), o KGR em grupo não pula mais Assuntos (tela e MCP `set_kgr_applicability`,
+  que devolve `skippedSubjects: 0` por compatibilidade). **Única exceção mantida, no portão de aprovação**
+  (`approved-package.ts`): a D2-bis (marca de principal declarada do plano de Silo) continua aprovando só com a
+  Lógica, porque a keyword LIVRE do cadastro (sem volume medido) precisa chegar ao Arquiteto, que é quem a troca.
+  A D2 (Assunto dispensa Volume) ficou restrita ao Assunto do formato anterior (frase própria, sem `entry`), para
+  não recusar no envio as aprovações já feitas sob ela (8 Assuntos aprovados da WifiConecta, AGENTS.md §9). O
+  Assunto do cadastro sem plano (destino "Artigo publicado") segue a regra normal.
+- **Card:** "Colar plano em texto" aparece também no "Silo existente" (com o Silo escolhido); o artigo colado que já
+  está gravado (mesma keyword ou mesmo título) fica como está.
+- **Rótulo:** `keywordSubjectLabel` não diz mais "Assunto sem nota" (a nota não é editável); o selo do cabeçalho do
+  Perfil e a frase do Arquiteto (`keywordVinculoSummary`) continuam dizendo "Assunto · declarado".
+
+**WifiConecta (SELECT em 2026-10-13, nada escrito):**
+
+- Grupo **laranja** (`a9d5c87b…`, origem `manual`, `plan_version 0`, sem plano): 8 Assuntos no **formato antigo**
+  — a linha É o título ("Como escolher o melhor plano de internet residencial para sua casa?", "Claro, Vivo ou
+  TIM: qual internet residencial escolher?", …), aprovados, **sem plano e sem principal declarada**, com ~25
+  sustentações ligadas por `subject_discovery`. Todos estão no Arquiteto: 2 a 7 versões de ArticleDNA e 14 a 39
+  itens de workflow cada. Não aparecem em "Silo existente" (o grupo não tem plano).
+- Grupo **azul** "Wi-Fi e fibra óptica" (`07fec332…`, plano v1, 7 artigos): as 7 keywords estão em bruto, com a
+  marca de principal mas **sem** `keyword_subject` (retirado pelo Vínculo antigo); o card mostra "Silo existente →
+  Azul" vazio. Nenhuma chegou ao Arquiteto.
+- **Conversão automática NÃO implementada** (risco): a linha-título laranja é Assunto vivo no Arquiteto (ArticleDNA
+  com versões); mandá-la à lixeira tiraria do Arquiteto uma keyword recebida (AGENTS.md §10) e mudaria o tronco de
+  artigos aprovados. Caminho recomendado no relatório e no backlog.
+
+**Testes:** novos `tests/minerador-assunto-fora-do-vinculo.test.mts` (bloco só leitura nos dois formatos, marca
+órfã, trava, aprovação com a D2-bis e a D2 restrita, estrutura da tela); reescritos para o contrato novo
+`minerador-assunto-lote`, `-assunto-tela-lote`, `-assunto-rodape-separado`, `-vinculo-selects-comuns`,
+`-vinculo-seletor-unico`, `-corretor-planilha-rodape`, `-assunto-dominio`, `-assunto-tela-estrutura`,
+`-assunto-fechamento-f1b`, `-assunto-pesquisa-tela`, `-assunto-vinculo`, `-plano-porta-unica` e
+`vinculo-selects-dom`. Suítes no fim desta seção do relatório da SDD (§11).
+
 ## Cadastro único: o Assunto mora na keyword — 2026-10-13
 
 ```text

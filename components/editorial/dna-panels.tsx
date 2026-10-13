@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { ArticleDNA, SiloDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { legacyVersionReference } from "@/lib/arquiteto/versioning";
 import { useBrand } from "@/components/brand-context";
@@ -26,15 +26,17 @@ import { readSiteOrigin } from "@/lib/minerador/publication-link";
 import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS } from "@/lib/minerador/editorial-status";
 import { keywordPageTypeStance, parseKeywordPageTypeChoice } from "@/lib/minerador/keyword-page-type";
 import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
-import type { KeywordSubjectResolution } from "@/lib/minerador/keyword-subject";
-import { subjectReviewWarning, vinculoSelectValues } from "@/lib/minerador/vinculo-screen";
+import { resolveSubjectArticleView, subjectArticlePositionLabel, type SubjectArticleGroup, type SubjectArticleView } from "@/lib/minerador/subject-article-view";
+import { vinculoSelectValues } from "@/lib/minerador/vinculo-screen";
+import { isEditorialGroupColor } from "@/lib/editorial/editorial-groups";
+import { EditorialGroupTag } from "./group-tag";
 import { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";
 import { keywordUrlRelationLabel } from "@/lib/minerador/publication-link";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { mineradorProcessPresentation, type MineradorProcessAttempt, type MineradorProcessName, type MineradorProcessState } from "@/lib/minerador/process-state";
 import { createSemanticConsolidationDraft, resolveSemanticAxis, semanticConsolidationBySerp, type SemanticAxisResolution, type SemanticConsolidationAxis, type SemanticConsolidationAxisDraft, type SemanticConsolidationDraft, type SemanticSerpStrength } from "@/lib/minerador/semantic-consolidation-draft";
 import { ConfidenceBadge, ProvenancePanel, VersionBadge } from "./pipeline-ui";
-import { VinculoPageTypeSelect, VinculoPostSelect, VinculoSubjectFields, VinculoSubjectSelect } from "./vinculo-selects";
+import { VinculoPageTypeSelect, VinculoPostSelect } from "./vinculo-selects";
 
 type ProfileRecord = Record<string, unknown>;
 type ProfileFieldValue = unknown;
@@ -442,8 +444,6 @@ function HumanReviewPanel({
   open,
   onOpenChange,
   reviewDraftActive = false,
-  approvedForArchitect = false,
-  onSubjectSearch,
 }: {
   semantic: ProfileRecord;
   intent?: string | null;
@@ -459,10 +459,6 @@ function HumanReviewPanel({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   reviewDraftActive?: boolean;
-  /** Aprovada de fato (status efetivo): gravar ou retirar o Assunto a leva para Em revisão (F1.5). */
-  approvedForArchitect?: boolean;
-  /** F1b.1: com o Assunto declarado, abre o Descobrir no modo Por Assunto pelo mesmo link da linha do Processador. */
-  onSubjectSearch?: () => void;
   status?: string | null;
   keywordId?: string;
 }) {
@@ -489,12 +485,9 @@ function HumanReviewPanel({
   // Decisão humana disponível é decisão concreta esperando escolha — nunca a
   // ausência de clique. Sem nada a decidir, o painel se declara de leitura.
   const pendingHumanDecisions = completion.pendingFields.length + (completion.pendingKgrDecision ? 1 : 0);
-  // O Assunto anula o KGR e o Posto (pedido do dono, 2026-09-24): não há busca
-  // a medir nem vaga a disputar. A conclusão também não cobra o KGR de um
-  // Assunto (human-review.ts), então a revisão nunca fica presa. O Potencial
-  // de página vale.
-  const subjectDeclared = vinculo.subject?.declared === true;
-  const subjectLocksKgr = subjectDeclared;
+  // 2026-10-13 (pedido do dono): a keyword que carrega um Assunto é tratada
+  // como qualquer keyword — KGR, Posto e Potencial valem para ela como para as
+  // outras. O Assunto aparece só leitura no bloco "Assunto deste artigo".
   const reviewUiState = deriveHumanReviewUiState({ completed: reviewCompleted, pendingDecisions: pendingHumanDecisions });
   const setOpen = (next: boolean) => {
     if (open === undefined) setUncontrolledOpen(next);
@@ -530,8 +523,8 @@ function HumanReviewPanel({
     </section>
 
     <section aria-label="Aplicabilidade do KGR" className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-divider bg-surface px-2.5 py-2">
-      <div className="min-w-0"><p className="text-sm font-semibold text-foreground">Aplicabilidade do KGR</p><p className="text-sm text-text-muted">{subjectLocksKgr ? "Com Assunto declarado, o KGR não se aplica a esta keyword." : "Opcional: o padrão é não aplicável e aplicar é escolha sua. A decisão não altera o score nem o status."}</p>{!subjectLocksKgr && kgrLegacyPending && <p data-kgr-legacy-pending className="text-sm text-text-muted">Valor legado “Pendente”, lido como não aplicável até você decidir.</p>}{!subjectLocksKgr && isInKgrInterestVolumeRange(volume) && <p data-kgr-interest-range className="text-sm text-text-muted">{KGR_INTEREST_VOLUME_RANGE_LABEL}. Só informativo: não aplica o KGR.</p>}</div>
-      <select aria-label="Aplicabilidade do KGR na revisão humana" value={kgrLegacyPending ? "pending" : kgrApplicability} disabled={statusUpdating || reviewLocked || subjectLocksKgr} title={subjectLocksKgr ? "Com Assunto declarado, o KGR não se aplica." : undefined} onChange={event => void onAction?.({ type: "kgr", applicability: event.target.value as KgrApplicability })} className={`min-h-9 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60 ${NATIVE_SELECT_THEME}`}>
+      <div className="min-w-0"><p className="text-sm font-semibold text-foreground">Aplicabilidade do KGR</p><p className="text-sm text-text-muted">Opcional: o padrão é não aplicável e aplicar é escolha sua. A decisão não altera o score nem o status.</p>{kgrLegacyPending && <p data-kgr-legacy-pending className="text-sm text-text-muted">Valor legado “Pendente”, lido como não aplicável até você decidir.</p>}{isInKgrInterestVolumeRange(volume) && <p data-kgr-interest-range className="text-sm text-text-muted">{KGR_INTEREST_VOLUME_RANGE_LABEL}. Só informativo: não aplica o KGR.</p>}</div>
+      <select aria-label="Aplicabilidade do KGR na revisão humana" value={kgrLegacyPending ? "pending" : kgrApplicability} disabled={statusUpdating || reviewLocked} onChange={event => void onAction?.({ type: "kgr", applicability: event.target.value as KgrApplicability })} className={`min-h-9 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60 ${NATIVE_SELECT_THEME}`}>
         {kgrLegacyPending ? <option value="pending" disabled>Pendente (legado)</option> : null}
         <option value="not_applicable">Não aplicável</option>
         <option value="applicable">Aplicável</option>
@@ -544,16 +537,16 @@ function HumanReviewPanel({
         ? "Esta keyword pertence a uma publicação. Diga se ela está travada ao slug e o que a página é."
         : "Nenhuma publicação declarada: a keyword está livre e o tipo é potencial. Nada aqui é obrigatório, e nada trava a escolha."}</p>
 
-      {/* Os mesmos três selects do painel "Vínculo das selecionadas" do
-          rodapé (vinculo-selects.tsx): aqui cada escolha vira a ação da
-          keyword; o Assunto espera a gravação no ReviewSubjectControl. */}
+      {/* Os mesmos selects do painel "Vínculo das selecionadas" do rodapé
+          (vinculo-selects.tsx): aqui cada escolha vira a ação da keyword. O
+          Assunto saiu do Vínculo (2026-10-13): aparece só leitura no bloco
+          "Assunto deste artigo" do painel. */}
       <VinculoPostSelect
         id={`review-primary-post-${keywordId}`}
         className="mt-2"
         aria-label="Posto de principal na revisão humana"
         value={vinculoSelects.post}
-        disabled={statusUpdating || reviewLocked || !onAction || subjectDeclared}
-        subjectDeclared={subjectDeclared}
+        disabled={statusUpdating || reviewLocked || !onAction}
         onChange={value => { if (value === "locked" || value === "reviewable") void onAction?.({ type: "primary_policy", policy: value }); }}
       />
 
@@ -567,40 +560,10 @@ function HumanReviewPanel({
         onChange={value => { const choice = parseKeywordPageTypeChoice(value); if (!choice) return; void onAction?.(vinculo.publicationDeclared ? { type: "page_type", pageType: choice.pageType } : { type: "page_type", pageType: choice.pageType, stance: choice.stance }); }}
       />
 
-      {subjectDeclared ? (
-        <p data-review-subject-overrides className="mt-1 text-sm text-text-muted">Com Assunto declarado, o KGR e o Posto de principal não se aplicam; o Potencial de página continua valendo.</p>
-      ) : null}
-
-      <ReviewSubjectControl
-        key={`${vinculo.subject?.declared ? "declared" : "none"}|${vinculo.subject?.note ?? ""}|${vinculo.subject?.destinationUrl ?? ""}`}
-        keywordId={keywordId}
-        subject={vinculo.subject ?? null}
-        approved={approvedForArchitect}
-        disabled={statusUpdating || reviewLocked || !onAction}
-        onAction={onAction}
-      />
-
-      {/* F1b.1: "Buscar sustentação" também na Revisão; a URL leva só o id. */}
-      {vinculo.subjectLabel && onSubjectSearch ? (
-        <div className="mt-1.5 flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <p className="min-w-0 flex-1 text-sm text-text-muted">Pesquisa keywords que sustentam este Assunto. Nada é pago antes de você confirmar o custo.</p>
-          <button
-            type="button"
-            data-review-subject-search-link
-            onClick={onSubjectSearch}
-            className="min-h-9 shrink-0 rounded-md border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:border-context-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent/30"
-            title="Abre o Descobrir no modo Por Assunto com este Assunto. Nada é pago antes de você confirmar o custo."
-          >
-            Buscar sustentação
-          </button>
-        </div>
-      ) : null}
-
-      <p className="mt-1 text-sm text-text-muted">
+      <p data-review-vinculo-summary className="mt-1 text-sm text-text-muted">
         <span className="font-semibold text-foreground">{vinculo.postLabel}</span>
         {" · "}
         <span className="font-semibold text-foreground">{vinculo.pageTypeLabel}</span>
-        {vinculo.subjectLabel ? <>{" · "}<span data-review-subject-label className="font-semibold text-context-accent">{vinculo.subjectLabel}</span></> : null}
         {" — "}
         {vinculo.pageType.source === "human"
           ? vinculo.pageType.humanDeclared ? "declarado por alguém desta marca: o Arquiteto respeita o tipo." : "escolhido por alguém desta marca."
@@ -638,82 +601,76 @@ function HumanReviewPanel({
 }
 
 /**
- * ASSUNTO NA REVISÃO HUMANA (SDD 2026-09-24, F1.4 e F1.5): a terceira
- * declaração do Vínculo. Não / Declarado, com a nota (até 280 caracteres, uma
- * linha) e a página de destino, ambas opcionais.
+ * ASSUNTO DESTE ARTIGO — bloco SÓ LEITURA do painel da keyword (pedido do
+ * dono, 2026-10-13: "na planilha já não vai mais existir assuntos, só keywords
+ * e dentro dessas keywords estão os assuntos"; "falta colocar no painel do DNA
+ * das keywords o assunto/tema").
  *
- * Nada é gravado ao mudar o select: a escolha fica aqui até o humano gravar,
- * e numa aprovada o aviso de rebaixamento aparece ANTES da confirmação. Quem
- * grava é a tela do Processador, com o `auth.users.id` da sessão e origem
- * `review`. A IA nunca chega aqui (P4).
+ * Mostra o que a keyword carrega — título, detalhes, papel/posição, grupo (cor)
+ * e trava, com o porquê — lido por `resolveSubjectArticleView`. Nada aqui
+ * grava: a porta única é o card "Cadastrar Assuntos". "Buscar sustentação"
+ * continua aqui (abre a Pesquisa por Assunto; nada é pago antes de você
+ * confirmar o custo).
  */
-function ReviewSubjectControl({
-  keywordId,
-  subject,
-  approved,
-  disabled,
-  onAction,
-}: {
-  keywordId?: string;
-  subject: KeywordSubjectResolution | null;
-  approved: boolean;
-  disabled: boolean;
-  onAction?: (action: HumanReviewAction) => void | Promise<void>;
-}) {
-  const selectId = useId();
-  const declared = subject?.declared === true;
-  const savedNote = subject?.note ?? "";
-  const savedDestination = subject?.destinationUrl ?? "";
-  const [choice, setChoice] = useState<"none" | "declared">(declared ? "declared" : "none");
-  const [note, setNote] = useState(savedNote);
-  const [destination, setDestination] = useState(savedDestination);
-  const nextDeclared = choice === "declared";
-  const dirty = nextDeclared !== declared
-    || (nextDeclared && (note.trim() !== savedNote || destination.trim() !== savedDestination));
-  const warning = dirty ? subjectReviewWarning({ approved, currentlyDeclared: declared, nextDeclared }) : null;
-  const reset = () => {
-    setChoice(declared ? "declared" : "none");
-    setNote(savedNote);
-    setDestination(savedDestination);
-  };
-  const save = () => {
-    if (!onAction || !dirty) return;
-    void onAction(nextDeclared
-      ? { type: "subject", declared: true, note: note.trim() || null, destinationUrl: destination.trim() || null }
-      : { type: "subject", declared: false });
-  };
-  return <div data-review-subject data-keyword-id={keywordId} className="mt-1.5 min-w-0">
-    <VinculoSubjectSelect
-      id={selectId}
-      value={choice}
-      disabled={disabled}
-      onChange={value => setChoice(value === "declared" ? "declared" : "none")}
-    />
+export function SubjectArticleBlock({ view, onSubjectSearch }: { view: SubjectArticleView; onSubjectSearch?: () => void }) {
+  const group = view.group && isEditorialGroupColor(view.group.color) ? { color: view.group.color, name: view.group.name } : null;
+  const groupCell = group
+    ? <EditorialGroupTag name={group.name} color={group.color} />
+    : <span className="text-text-muted">Sem grupo</span>;
+  return <section data-keyword-subject-article={view.kind} aria-label="Assunto deste artigo" className="min-w-0 rounded-md border border-context-accent/35 bg-surface-subtle p-2.5">
+    <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+      <h3 className="min-w-0 break-words text-base font-semibold tracking-tight text-foreground">ASSUNTO DESTE ARTIGO</h3>
+      <span className="text-sm font-medium text-text-muted">somente leitura</span>
+    </header>
 
-    {nextDeclared && (
-      <VinculoSubjectFields
-        note={note}
-        destination={destination}
-        disabled={disabled}
-        onNoteChange={setNote}
-        onDestinationChange={setDestination}
-      />
-    )}
-
-    {dirty && (
-      <div role="group" aria-label="Gravar o Assunto" className="mt-1.5 flex min-w-0 flex-wrap items-center justify-between gap-2">
-        {warning
-          ? <p role="note" data-subject-demotion-warning className="min-w-0 flex-1 text-sm text-warning">{warning}</p>
-          : <p className="min-w-0 flex-1 text-sm text-text-muted">{nextDeclared ? "A Lógica roda sozinha depois de gravar, se ainda faltar. Nada é aprovado." : "Retirar mantém o histórico da declaração."}</p>}
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <button type="button" onClick={reset} disabled={disabled} className="min-h-9 rounded-md border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:border-context-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">Descartar</button>
-          <button type="button" onClick={save} disabled={disabled || !onAction} className="min-h-9 rounded-md border border-context-accent/50 px-3 text-sm font-semibold text-context-accent transition-colors hover:bg-context-accent/10 disabled:cursor-not-allowed disabled:opacity-50">
-            {warning ? "Confirmar e gravar" : nextDeclared ? "Gravar Assunto" : "Retirar Assunto"}
+    {view.kind === "subject" ? <>
+      <p data-subject-article-title className="mt-1.5 min-w-0 break-words text-base font-semibold text-foreground [overflow-wrap:anywhere]">{view.title}</p>
+      <p className="text-sm text-text-muted">{view.format === "cadastro"
+        ? "Cadastro único: o Assunto mora nesta keyword, que passa pelos processos como qualquer keyword."
+        : "Formato anterior ao cadastro único: a frase desta linha é o próprio Assunto."}</p>
+      <dl className="mt-2 grid min-w-0 gap-x-3 gap-y-1.5 text-sm sm:grid-cols-2">
+        <div className="min-w-0 sm:col-span-2"><dt className="text-text-muted">Detalhes</dt><dd data-subject-article-details className="mt-0.5 break-words text-foreground">{view.details || <span className="text-text-muted">Sem detalhes</span>}</dd></div>
+        <div className="min-w-0"><dt className="text-text-muted">Papel e posição</dt><dd className="mt-0.5 text-foreground">{subjectArticlePositionLabel(view) || <span className="text-text-muted">Sem plano de Silo</span>}</dd></div>
+        <div className="min-w-0"><dt className="text-text-muted">Grupo</dt><dd className="mt-0.5 flex flex-wrap items-center gap-2">{groupCell}</dd></div>
+        <div className="min-w-0 sm:col-span-2">
+          <dt className="text-text-muted">Trava da keyword</dt>
+          {view.lock
+            ? <dd data-subject-article-lock={view.lock.state} className="mt-0.5"><span className={`font-semibold ${view.lock.state === "free" ? "text-pending" : "text-foreground"}`}>{view.lock.label}</span><span className="block text-text-muted">{view.lock.reason}</span></dd>
+            : <dd className="mt-0.5 text-text-muted">Sem trava: este Assunto não está num plano de Silo.</dd>}
+        </div>
+        {view.principalElsewhere ? (
+          <div className="min-w-0 sm:col-span-2"><dt className="text-text-muted">Principal declarada (em outra linha)</dt><dd className="mt-0.5 break-words text-keyword">{view.principalElsewhere.phrase}</dd></div>
+        ) : null}
+      </dl>
+      {onSubjectSearch ? (
+        <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <p className="min-w-0 flex-1 text-sm text-text-muted">Pesquisa keywords que sustentam este Assunto. Nada é pago antes de você confirmar o custo.</p>
+          <button
+            type="button"
+            data-subject-article-search-link
+            onClick={onSubjectSearch}
+            className="min-h-9 shrink-0 rounded-md border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:border-context-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent/30"
+            title="Abre o Descobrir no modo Por Assunto com este Assunto. Nada é pago antes de você confirmar o custo."
+          >
+            Buscar sustentação
           </button>
         </div>
-      </div>
-    )}
-  </div>;
+      ) : null}
+    </> : view.kind === "principal_of_subject" ? <>
+      <p className="mt-1.5 text-sm text-foreground">Esta keyword é a principal declarada do Assunto {view.subjectTitle ? <span className="font-semibold">“{view.subjectTitle}”</span> : "de outra linha"} (formato anterior ao cadastro único).</p>
+      <dl className="mt-2 grid min-w-0 gap-x-3 gap-y-1.5 text-sm sm:grid-cols-2">
+        <div className="min-w-0"><dt className="text-text-muted">Grupo</dt><dd className="mt-0.5 flex flex-wrap items-center gap-2">{groupCell}</dd></div>
+        <div className="min-w-0"><dt className="text-text-muted">Trava da keyword</dt><dd data-subject-article-lock={view.lock.state} className="mt-0.5"><span className="font-semibold text-foreground">{view.lock.label}</span><span className="block text-text-muted">{view.lock.reason}</span></dd></div>
+      </dl>
+    </> : <>
+      <p data-subject-article-orphan className="mt-1.5 text-sm text-warning">Esta keyword ainda é a principal do plano do grupo, mas o Assunto foi retirado dela{view.lastTitle ? <> (último título: <span className="font-semibold">“{view.lastTitle}”</span>)</> : null}. O artigo não aparece mais no plano do Silo.</p>
+      <dl className="mt-2 grid min-w-0 gap-x-3 gap-y-1.5 text-sm sm:grid-cols-2">
+        <div className="min-w-0"><dt className="text-text-muted">Grupo</dt><dd className="mt-0.5 flex flex-wrap items-center gap-2">{groupCell}</dd></div>
+      </dl>
+    </>}
+
+    <p data-subject-article-hint className="mt-2 text-sm text-text-muted">{view.hint}</p>
+  </section>;
 }
 
 function TechnicalDetails({ semantic, reference, showProvenance, googleAdsValidated, dataForSeoValidated, kgrHistory }: { semantic: ProfileRecord; reference: ReturnType<typeof legacyVersionReference>; showProvenance: boolean; googleAdsValidated: boolean; dataForSeoValidated: boolean; kgrHistory?: ProfileRecord[] }) {
@@ -823,14 +780,20 @@ export function KeywordDnaPanel({
   showProvenance = true,
   allowPublishedWorkflowStatus = true,
   onSubjectSearch,
+  subjectGroupOf,
+  subjectKeywordTextOf,
 }: {
   keyword: { id: string; keyword: string; intent?: string | null; status?: string | null; volume_search?: number | null; results_allintitle?: number | null; kgr_score?: number | null; volume_source?: string | null; analise_semantica?: ProfileRecord | null };
   onWorkflowStatusChange?: (status: string) => void | Promise<void>;
   onHumanReviewAction?: (action: HumanReviewAction) => void | Promise<void>;
   humanReviewOpen?: boolean;
   onHumanReviewOpenChange?: (open: boolean) => void;
-  /** Assunto declarado: o workspace passa o mesmo `router.push(subjectSearchLinkHref(...))` da linha. */
+  /** Assunto na keyword: o workspace passa o mesmo `router.push(subjectSearchLinkHref(...))` da linha ("Buscar sustentação"). */
   onSubjectSearch?: () => void;
+  /** O grupo (cor e nome) pelo id, para o bloco "Assunto deste artigo". */
+  subjectGroupOf?: (groupId: string) => SubjectArticleGroup;
+  /** O texto de uma keyword pelo id (o Assunto do formato anterior, em outra linha). */
+  subjectKeywordTextOf?: (keywordId: string) => string | null;
   reviewDraftActive?: boolean;
   statusUpdating?: boolean;
   visualPosition?: number;
@@ -882,6 +845,16 @@ export function KeywordDnaPanel({
     semantic.keyword_overview_measurement,
   );
   const processorRevalidation = canonicalSnapshot.processor;
+  // O Assunto que a keyword carrega (2026-10-13): só leitura, pela mesma
+  // leitura da trava do cadastro (o volume validado desta keyword decide a trava automática).
+  const subjectArticle = resolveSubjectArticleView({
+    keywordId: keyword.id,
+    keyword: keyword.keyword,
+    semantic,
+    volume: { validated: processorRevalidation.volume.validated, value: typeof processorRevalidation.volume.value === "number" ? processorRevalidation.volume.value : null },
+    groupOf: subjectGroupOf,
+    keywordTextOf: subjectKeywordTextOf,
+  });
   const processStates = canonicalSnapshot.process;
   const logicalProcessComplete = processStates.logic.complete;
   const googleAdsStageComplete = processStates.volume.complete;
@@ -1129,6 +1102,11 @@ export function KeywordDnaPanel({
       {<div className="min-w-0 md:col-span-2 xl:col-span-2" data-keyword-profile-stage="semantic-consolidation">
         <SemanticConsolidationPanel draft={semanticConsolidation} qualification={semanticQualification} serpCollecting={serpCollecting} serpFailed={serpFailed} />
       </div>}
+      {subjectArticle ? (
+        <div className="min-w-0 xl:col-span-2" data-keyword-profile-stage="subject">
+          <SubjectArticleBlock view={subjectArticle} onSubjectSearch={subjectArticle.kind === "subject" ? onSubjectSearch : undefined} />
+        </div>
+      ) : null}
       <div className="min-w-0 xl:col-span-2" data-keyword-profile-stage="human-review">
         <HumanReviewPanel
           semantic={semantic}
@@ -1145,8 +1123,6 @@ export function KeywordDnaPanel({
           open={humanReviewOpen}
           onOpenChange={onHumanReviewOpenChange}
           reviewDraftActive={reviewDraftActive}
-          approvedForArchitect={editorialStatus.kind === "resolved" && editorialStatus.status === "aprovado"}
-          onSubjectSearch={onSubjectSearch}
           status={keyword.status}
           keywordId={keyword.id}
         />

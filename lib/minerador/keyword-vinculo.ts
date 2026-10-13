@@ -98,29 +98,19 @@ export function keywordVinculoSummary(vinculo: KeywordVinculo): string {
 }
 
 /**
- * A terceira escolha quando não há Assunto declarado. A coluna mostra o
- * default do Assunto como já mostra "Livre" e "Artigo · potencial": as três
- * escolhas aparecem sempre, venham do padrão ou do usuário (pedido do dono,
- * 2026-09-24). Mesma palavra do select: "Não".
+ * As escolhas do Vínculo, na ordem dos selects: Posto e Potencial. Desde
+ * 2026-10-13 o Assunto não é escolha do Vínculo (pedido do dono: "na planilha
+ * já não vai mais existir assuntos, só keywords e dentro dessas keywords estão
+ * os assuntos"): ele entra pelo card "Cadastrar Assuntos" e o painel da
+ * keyword o mostra só leitura. A coluna e o resumo ficam "Livre · Artigo ·
+ * potencial".
  */
-export const KEYWORD_VINCULO_NO_SUBJECT_LABEL = "Assunto: Não" as const;
-/** Com Assunto declarado, a mesma palavra do select: "Declarado". */
-export const KEYWORD_VINCULO_SUBJECT_DECLARED_LABEL = "Assunto: Declarado" as const;
-/** Declarado sem nota: a coluna avisa que falta completar na Revisão Humana. */
-export const KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL = "Assunto: Declarado, sem nota" as const;
-
-/** As três escolhas do Vínculo, na ordem dos selects: Posto, Potencial e Assunto. */
-export function keywordVinculoChoiceLabels(vinculo: KeywordVinculo): { post: string; pageType: string; subject: string } {
-  const subject = !vinculo.subject?.declared
-    ? KEYWORD_VINCULO_NO_SUBJECT_LABEL
-    : vinculo.subject.noteMissing
-      ? KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL
-      : KEYWORD_VINCULO_SUBJECT_DECLARED_LABEL;
-  return { post: vinculo.postLabel, pageType: vinculo.pageTypeLabel, subject };
+export function keywordVinculoChoiceLabels(vinculo: KeywordVinculo): { post: string; pageType: string } {
+  return { post: vinculo.postLabel, pageType: vinculo.pageTypeLabel };
 }
 
-/** `Livre · Artigo · potencial · Assunto: Não`: as três escolhas numa frase. */
+/** `Livre · Artigo · potencial`: as escolhas do Vínculo numa frase. */
 export function keywordVinculoChoicesSummary(vinculo: KeywordVinculo): string {
   const labels = keywordVinculoChoiceLabels(vinculo);
-  return `${labels.post} · ${labels.pageType} · ${labels.subject}`;
+  return `${labels.post} · ${labels.pageType}`;
 }

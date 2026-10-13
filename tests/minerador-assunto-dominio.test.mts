@@ -9,7 +9,6 @@ import {
   KEYWORD_SUBJECT_KEY,
   KEYWORD_SUBJECT_LABEL,
   KEYWORD_SUBJECT_NOTE_MAX,
-  KEYWORD_SUBJECT_WITHOUT_NOTE_LABEL,
   isKeywordSubjectActorId,
   keywordSubjectLabel,
   normalizeKeywordSubjectNote,
@@ -134,7 +133,7 @@ test("retirar grava keyword_subject: null, não apaga o histórico e sem declara
   assert.equal(twice.changed, false);
 });
 
-test("nota: até 280 caracteres, uma linha só; vazia vira null e a coluna diz 'Assunto sem nota'", () => {
+test("nota: até 280 caracteres, uma linha só; vazia vira null (desde 2026-10-13 o rótulo não cobra mais a nota)", () => {
   const limit = "x".repeat(KEYWORD_SUBJECT_NOTE_MAX);
   assert.equal(KEYWORD_SUBJECT_NOTE_MAX, 280);
   assert.deepEqual(normalizeKeywordSubjectNote(limit), { ok: true, note: limit });
@@ -154,8 +153,7 @@ test("nota: até 280 caracteres, uma linha só; vazia vira null e a coluna diz '
   const resolved = resolveKeywordSubject(blank.semantic);
   assert.equal(resolved.note, null);
   assert.equal(resolved.noteMissing, true);
-  assert.equal(keywordSubjectLabel(resolved), KEYWORD_SUBJECT_WITHOUT_NOTE_LABEL);
-  assert.equal(KEYWORD_SUBJECT_WITHOUT_NOTE_LABEL, "Assunto sem nota");
+  assert.equal(keywordSubjectLabel(resolved), KEYWORD_SUBJECT_LABEL, "a nota não é mais editável (o Assunto saiu do Vínculo): nada de 'Assunto sem nota'");
 });
 
 test("ator: só auth.users.id; e-mail, local-user e vazio são recusados e nada é gravado", () => {
@@ -296,8 +294,10 @@ const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   // `keyword_subject.plan` no Assunto declarado e declara pelo núcleo de sempre.
   // 2026-10-12 (SDD do plano §6.1-5, "Tirar do plano"): o núcleo da retirada
   // tira `keyword_subject.plan` (o Assunto continua declarado); só a rota da tela o chama.
-  setKeywordSubject: ["lib/minerador/keyword-import-core.ts", "lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx", "lib/minerador/declared-plan-import-core.ts", "lib/minerador/declared-plan-withdraw-core.ts"],
-  withdrawKeywordSubject: ["lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx"],
+  // 2026-10-13 (pedido do dono): o Vínculo — Revisão Humana, lote e MCP — não
+  // declara nem retira Assunto; vinculo-batch.ts e a tela saíram da lista.
+  setKeywordSubject: ["lib/minerador/keyword-import-core.ts", "lib/minerador/declared-plan-import-core.ts", "lib/minerador/declared-plan-withdraw-core.ts"],
+  withdrawKeywordSubject: [],
   // 2026-09-24 (pedido do dono): o seletor Vínculo único grava as três
   // escolhas de uma vez por planVinculoBatchChoices, que chama o
   // planVinculoBatch passo a passo no próprio arquivo; a tela só chama o novo.
@@ -382,4 +382,9 @@ test("P4b: o MCP só grava Assunto/Vínculo depois da guarda do aceite humano", 
   assert.match(vinculo, /"platform\.decide"/, "aplicar exige o escopo opt-in");
   // O posto da principal publicada fica fora (adendo §3; AGENTS.md §11).
   assert.doesNotMatch(vinculo, /kind: z\.literal\("post"\)/);
+  // 2026-10-13: o Assunto saiu do Vínculo — subject_declare/subject_withdraw são
+  // recusados ANTES de qualquer leitura ou gravação, com a porta única na mensagem.
+  const recusa = vinculo.indexOf('if (action.kind === "subject_declare" || action.kind === "subject_withdraw")');
+  assert.ok(recusa > 0 && recusa < guarda, "a recusa vem antes da guarda e do núcleo");
+  assert.match(vinculo.slice(recusa, guarda), /code: "subject_entry_moved", message: VINCULO_SUBJECT_ENTRY_MOVED_REASON/);
 });

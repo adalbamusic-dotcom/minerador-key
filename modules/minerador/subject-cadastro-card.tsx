@@ -183,9 +183,15 @@ export function SubjectCadastroCard({
       if (lido.silo.rawSlug) setSiloSlug(lido.silo.rawSlug);
       if (lido.silo.objective) setSiloObjective(lido.silo.objective);
     }
-    const novas = lido.articles.map(article => ({ ...linhaVazia(article.order, article.role), title: article.subject, keyword: article.principal ?? "", details: article.scope, lock: article.lock ?? "auto" as const }));
-    setLinhas(current => [...current.filter(linha => linha.stored), ...novas]);
-    setColagemAviso(`${novas.length} artigo(s) lido(s) do texto${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
+    const lidas = lido.articles.map(article => ({ ...linhaVazia(article.order, article.role), title: article.subject, keyword: article.principal ?? "", details: article.scope, lock: article.lock ?? "auto" as const }));
+    // No Silo existente, o artigo colado que já está gravado (mesma keyword ou mesmo título) fica como está.
+    const chave = (value: string) => value.trim().toLocaleLowerCase("pt-BR");
+    const gravadas = linhas.filter(linha => linha.stored);
+    const jaGravada = (linha: Linha) => gravadas.some(gravada => (gravada.keyword && linha.keyword && chave(gravada.keyword) === chave(linha.keyword)) || (gravada.title && chave(gravada.title) === chave(linha.title)));
+    const novas = lidas.filter(linha => !jaGravada(linha));
+    setLinhas([...gravadas, ...novas]);
+    const repetidas = lidas.length - novas.length;
+    setColagemAviso(`${novas.length} artigo(s) lido(s) do texto${repetidas ? `; ${repetidas} já gravado(s) no Silo ficam como estão` : ""}${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
     invalidate();
   };
 
@@ -418,8 +424,10 @@ export function SubjectCadastroCard({
               </div>
             ) : null}
 
-            {destino !== "existing_silo" ? (
-              <details className="rounded-md border border-divider px-3 py-2" open>
+            {/* 2026-10-13 · também no Silo existente: colar o texto acrescenta as linhas
+                novas às gravadas (o cabeçalho do Silo colado é ignorado ali). */}
+            {destino !== "existing_silo" || existingGroupId ? (
+              <details className="rounded-md border border-divider px-3 py-2" open={destino !== "existing_silo"}>
                 <summary className="cursor-pointer text-sm font-medium text-foreground">Colar plano em texto</summary>
                 <div className="mt-2 flex flex-col gap-2">
                   <label htmlFor={ids.paste} className="text-sm text-text-muted">Formato: “Silo 2 — …”, “Nome:”, “Slug:”, “Objetivo:” e, por artigo, “9. Título”, “Palavra-chave: …” (com “Artigo pilar •” no Pilar), a descrição e, se quiser, “Trava: travada” ou “Trava: livre”.</label>

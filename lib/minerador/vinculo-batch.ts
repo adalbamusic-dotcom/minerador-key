@@ -10,28 +10,31 @@ import {
   type KeywordPageType,
   type KeywordPageTypeStance,
 } from "./keyword-page-type.ts";
-import {
-  isKeywordSubjectActorId,
-  normalizeKeywordSubjectNote,
-  resolveKeywordSubject,
-  setKeywordSubject,
-  withdrawKeywordSubject,
-  type DestinationCheck,
-} from "./keyword-subject.ts";
+import { isKeywordSubjectActorId } from "./keyword-subject.ts";
 import { resolveKeywordVinculo } from "./keyword-vinculo.ts";
 import { readPublicationLink, readSiteOrigin } from "./publication-link.ts";
 import { primaryPostLabel, setPrimaryKeywordPolicy } from "./primary-keyword-policy.ts";
-import { validateSubjectDestination, type SubjectDestinationCatalogHit } from "./subject-destination.ts";
 
 /**
  * VÍNCULO EM GRUPO — o plano puro do seletor Vínculo do rodapé
- * (SDD 2026-09-24, F1.6; um seletor com três grupos, pedido do dono).
+ * (SDD 2026-09-24, F1.6; revisto em 2026-10-13: o Assunto saiu do Vínculo).
  *
- * Três grupos de escolha única, todos humanos (o KGR fica ao lado, com plano próprio):
+ * Dois grupos de escolha única, todos humanos (o KGR fica ao lado, com plano próprio):
  *
  *   Posto de principal    Travado ao slug · Livre — só em publicadas
  *   Potencial de página   os 4 tipos × potencial/declarado (enum intacto)
- *   Assunto               Declarar (nota e destino opcionais, iguais para o lote) · Retirar
+ *
+ * O ASSUNTO NÃO É MAIS DO VÍNCULO (pedido do dono, 2026-10-13: "na planilha já
+ * não vai mais existir assuntos, só keywords e dentro dessas keywords estão os
+ * assuntos"). A única porta é o card "Cadastrar Assuntos" (MCP
+ * `declare_silo_plan`); tirar um artigo do plano é "Tirar do plano". As ações
+ * antigas `subject_declare`/`subject_withdraw` continuam no tipo só para serem
+ * RECUSADAS com `SUBJECT_ENTRY_MOVED` (resposta compatível, nunca 500): o
+ * "Assunto: Não" do Vínculo retirava o Assunto do cadastro da keyword e
+ * deixava a marca de principal órfã.
+ *
+ * A keyword que carrega Assunto é tratada como qualquer keyword: o Posto e o
+ * Potencial valem para ela como para as outras.
  *
  * O plano não escreve nada. Ele diz o que gravar em cada `id` (sempre com o
  * `brand_id` da marca ativa), o que pular e por quê, e quantas aprovadas vão
@@ -43,21 +46,17 @@ import { validateSubjectDestination, type SubjectDestinationCatalogHit } from ".
  *  - ator = `auth.users.id`; sem ele, nada é planejado (nunca e-mail, nunca
  *    "local-user");
  *  - keyword de outra marca é pulada, nunca escrita;
- *  - o destino é conferido UMA vez para o lote (F1.2); recusado, nada é
- *    planejado e a tela diz por quê;
- *  - declarar numa keyword que JÁ é Assunto não troca a nota nem o destino
- *    dela: a troca é por keyword, na Revisão Humana (mesma regra do import);
  *  - o posto só vale para publicadas; as demais são puladas e contadas;
  *  - o Potencial "potencial" não vale para publicadas (o tipo delas já é
- *    declaração pela publicação): são puladas e contadas;
- *  - o Assunto anula o posto: keyword com Assunto declarado é pulada e
- *    contada. O Potencial de página vale também para o Assunto.
+ *    declaração pela publicação): são puladas e contadas.
  *
  * Domínio puro.
  */
 
 export type VinculoBatchAction =
+  /** Recusada desde 2026-10-13 (`SUBJECT_ENTRY_MOVED`): o Assunto só entra por "Cadastrar Assuntos". */
   | { kind: "subject_declare"; note?: string | null; destinationUrl?: string | null }
+  /** Recusada desde 2026-10-13 (`SUBJECT_ENTRY_MOVED`): tirar do plano é "Tirar do plano". */
   | { kind: "subject_withdraw" }
   | { kind: "page_type"; pageType: KeywordPageType; stance?: KeywordPageTypeStance }
   | { kind: "post"; policy: "locked" | "reviewable" };
@@ -76,7 +75,7 @@ export type VinculoBatchKeyword = {
   analise_semantica?: Record<string, unknown> | null;
 };
 
-export type VinculoBatchSkipReason = "other_brand" | "unchanged" | "already_declared" | "not_published" | "refused" | "subject_declared" | "published_potential";
+export type VinculoBatchSkipReason = "other_brand" | "unchanged" | "not_published" | "published_potential";
 
 export type VinculoBatchUpdate = {
   id: string;
@@ -90,6 +89,10 @@ export type VinculoBatchUpdate = {
 
 export type VinculoBatchSkip = { id: string; keyword: string; reason: VinculoBatchSkipReason; detail?: string };
 
+/** O Assunto saiu do Vínculo: a mensagem aponta a porta única. */
+export const VINCULO_SUBJECT_ENTRY_MOVED_REASON =
+  "O Assunto não é mais do Vínculo: ele mora dentro da keyword e entra só por \"Cadastrar Assuntos\" (no MCP, declare_silo_plan). Para tirar um artigo do plano, use \"Tirar do plano\"." as const;
+
 export type VinculoBatchPlan =
   | {
     ok: true;
@@ -99,12 +102,10 @@ export type VinculoBatchPlan =
     counts: Record<VinculoBatchSkipReason, number> & { updates: number; approvedToReview: number };
     /** "12 aprovadas desta seleção vão para Em revisão" — `null` sem aprovadas. */
     demotionWarning: string | null;
-    /** Aviso da página de destino (sem site cadastrado, fora do catálogo). */
-    destinationNotice: string | null;
     /** Rótulo da ação para a confirmação e o progresso. */
     actionLabel: string;
   }
-  | { ok: false; code: "ACTOR_REQUIRED" | "BRAND_REQUIRED" | "INVALID_ACTION" | "NOTE_TOO_LONG" | "NOTE_MULTILINE" | "INVALID_URL" | "NOT_HTTPS" | "OUTSIDE_BRAND_SITE"; reason: string };
+  | { ok: false; code: "ACTOR_REQUIRED" | "BRAND_REQUIRED" | "INVALID_ACTION" | "SUBJECT_ENTRY_MOVED"; reason: string };
 
 export type PlanVinculoBatchInput = {
   keywords: readonly VinculoBatchKeyword[];
@@ -114,10 +115,6 @@ export type PlanVinculoBatchInput = {
   /** `auth.users.id` da sessão. */
   actorId: string | null | undefined;
   changedAt: string;
-  /** `marcas.site_url`, para conferir o destino do lote. */
-  brandSiteUrl?: string | null;
-  /** O que a busca no catálogo achou para o destino do lote, se buscou. */
-  destinationCatalog?: SubjectDestinationCatalogHit | null;
 };
 
 function packageInput(keyword: VinculoBatchKeyword, semantic: Record<string, unknown> | null): ApprovedPackageInput {
@@ -139,9 +136,7 @@ function effectivelyApproved(keyword: VinculoBatchKeyword, semantic: Record<stri
 }
 
 export function vinculoBatchActionLabel(action: VinculoBatchAction): string {
-  // Mesmo vocabulário do select do Assunto (Não · Declarado), como o Posto e o Potencial.
-  if (action.kind === "subject_declare") return "Assunto: Declarado";
-  if (action.kind === "subject_withdraw") return "Assunto: Não";
+  if (action.kind === "subject_declare" || action.kind === "subject_withdraw") return "Assunto (fora do Vínculo)";
   if (action.kind === "page_type") {
     return action.stance
       ? `Potencial de página: ${keywordPageTypeStanding(action.pageType, { declared: action.stance === "declared" })}`
@@ -157,8 +152,11 @@ function demotionWarning(count: number): string | null {
     : `${count} aprovadas desta seleção vão para Em revisão.`;
 }
 
+function isSubjectAction(action: VinculoBatchAction): boolean {
+  return action.kind === "subject_declare" || action.kind === "subject_withdraw";
+}
+
 function validAction(action: VinculoBatchAction): boolean {
-  if (action.kind === "subject_declare" || action.kind === "subject_withdraw") return true;
   if (action.kind === "page_type") {
     return (KEYWORD_PAGE_TYPES as readonly string[]).includes(action.pageType)
       && (action.stance === undefined || (KEYWORD_PAGE_TYPE_STANCES as readonly string[]).includes(action.stance));
@@ -175,28 +173,8 @@ export function planVinculoBatch(input: PlanVinculoBatchInput): VinculoBatchPlan
   }
   const actorId = input.actorId.trim();
   const action = input.action;
+  if (action && isSubjectAction(action)) return { ok: false, code: "SUBJECT_ENTRY_MOVED", reason: VINCULO_SUBJECT_ENTRY_MOVED_REASON };
   if (!action || !validAction(action)) return { ok: false, code: "INVALID_ACTION", reason: "Escolha uma ação do Vínculo." };
-
-  // Nota e destino do lote: conferidos uma vez, antes de qualquer keyword.
-  let note: string | null = null;
-  let destinationUrl: string | null = null;
-  let destinationCheck: DestinationCheck | null = null;
-  let destinationNotice: string | null = null;
-  if (action.kind === "subject_declare") {
-    const normalized = normalizeKeywordSubjectNote(action.note);
-    if (!normalized.ok) return { ok: false, code: normalized.code, reason: normalized.reason };
-    note = normalized.note;
-    const destination = validateSubjectDestination({
-      rawUrl: action.destinationUrl,
-      brandSiteUrl: input.brandSiteUrl,
-      checkedAt: input.changedAt,
-      catalog: input.destinationCatalog ?? null,
-    });
-    if (!destination.ok) return { ok: false, code: destination.code, reason: destination.reason };
-    destinationUrl = destination.destinationUrl;
-    destinationCheck = destination.destinationCheck;
-    destinationNotice = destination.notice;
-  }
 
   const updates: VinculoBatchUpdate[] = [];
   const skipped: VinculoBatchSkip[] = [];
@@ -212,25 +190,7 @@ export function planVinculoBatch(input: PlanVinculoBatchInput): VinculoBatchPlan
     const current = keyword.analise_semantica || null;
     let next: Record<string, unknown> | null = null;
 
-    if (action.kind === "subject_declare") {
-      if (resolveKeywordSubject(current).declared) {
-        skip(keyword, "already_declared");
-        continue;
-      }
-      const result = setKeywordSubject(current, { note, destinationUrl, destinationCheck, actorId, changedAt: input.changedAt, origin: "batch" });
-      if (!result.ok) {
-        skip(keyword, "refused", result.reason);
-        continue;
-      }
-      next = result.changed ? result.semantic : null;
-    } else if (action.kind === "subject_withdraw") {
-      const result = withdrawKeywordSubject(current, { actorId, changedAt: input.changedAt, origin: "batch" });
-      if (!result.ok) {
-        skip(keyword, "refused", result.reason);
-        continue;
-      }
-      next = result.changed ? result.semantic : null;
-    } else if (action.kind === "page_type") {
+    if (action.kind === "page_type") {
       const evidence = readSiteOrigin(current);
       const published = readPublicationLink({ status: keyword.status, evidence }).state === "published";
       // Na publicada o tipo já é declaração pela publicação: a tela individual
@@ -248,13 +208,9 @@ export function planVinculoBatch(input: PlanVinculoBatchInput): VinculoBatchPlan
         published,
       });
       next = result.changed ? result.semantic : null;
-    } else {
-      // O Assunto anula o posto: a keyword declarada Assunto não disputa vaga.
-      if (resolveKeywordSubject(current).declared) {
-        skip(keyword, "subject_declared");
-        continue;
-      }
-      // Posto: só publicadas, como o handler individual.
+    } else if (action.kind === "post") {
+      // Posto: só publicadas, como o handler individual. A keyword que carrega
+      // Assunto é tratada como qualquer keyword (2026-10-13).
       if (!isKeywordPublished({ status: keyword.status, semantic: current })) {
         skip(keyword, "not_published");
         continue;
@@ -288,10 +244,7 @@ export function planVinculoBatch(input: PlanVinculoBatchInput): VinculoBatchPlan
     approvedToReview: updates.filter(update => update.demotesApproval).length,
     other_brand: 0,
     unchanged: 0,
-    already_declared: 0,
     not_published: 0,
-    refused: 0,
-    subject_declared: 0,
     published_potential: 0,
   };
   for (const entry of skipped) counts[entry.reason] += 1;
@@ -303,22 +256,17 @@ export function planVinculoBatch(input: PlanVinculoBatchInput): VinculoBatchPlan
     skipped,
     counts,
     demotionWarning: demotionWarning(counts.approvedToReview),
-    destinationNotice,
     actionLabel: vinculoBatchActionLabel(action),
   };
 }
 
 /**
- * VÍNCULO EM GRUPO COM TRÊS ESCOLHAS DE UMA VEZ (pedido do dono, 2026-09-24:
- * os três selects separados poluíam o rodapé; voltou um seletor "Vínculo" só,
- * com um grupo de escolha única para cada parte).
+ * VÍNCULO EM GRUPO COM AS ESCOLHAS DE UMA VEZ (pedido do dono, 2026-09-24: um
+ * seletor "Vínculo" só, com um grupo de escolha única para cada parte).
  *
  * Cada grupo pode ficar sem escolha; no máximo uma ação por grupo. A ordem de
- * aplicação é fixa — Assunto → Potencial de página → Posto — porque o Assunto
- * decide se o posto se aplica: retirar o Assunto antes deixa o posto valer
- * para a keyword, e a que segue Assunto é pulada e contada no Posto.
- * "Declarar Assunto" junto com um Posto é recusado: o posto não se aplica a
- * Assunto (a tela desliga o grupo; o domínio não confia só na tela).
+ * aplicação é fixa — Potencial de página → Posto. Ação de Assunto é recusada
+ * (`SUBJECT_ENTRY_MOVED`), antes de qualquer gravação.
  *
  * Cada passo é o mesmo `planVinculoBatch`, sobre o `analise_semantica` que o
  * passo anterior deixou. O resultado junta tudo numa gravação por keyword:
@@ -332,18 +280,15 @@ export type VinculoBatchChoicesPlan =
     updates: VinculoBatchUpdate[];
     counts: { updates: number; approvedToReview: number };
     demotionWarning: string | null;
-    destinationNotice: string | null;
     actionLabel: string;
-    /** Houve "Declarar Assunto" entre as escolhas (a Lógica automática segue). */
-    declaresSubject: boolean;
   }
-  | { ok: false; code: Extract<VinculoBatchPlan, { ok: false }>["code"] | "NO_CHOICE" | "DUPLICATE_GROUP" | "POST_WITH_SUBJECT"; reason: string };
+  | { ok: false; code: Extract<VinculoBatchPlan, { ok: false }>["code"] | "NO_CHOICE" | "DUPLICATE_GROUP"; reason: string };
 
 export type PlanVinculoBatchChoicesInput = Omit<PlanVinculoBatchInput, "action"> & { actions: readonly VinculoBatchAction[] };
 
 function actionGroup(action: VinculoBatchAction): "subject" | "page_type" | "post" {
-  if (action.kind === "subject_declare" || action.kind === "subject_withdraw") return "subject";
-  return action.kind;
+  if (isSubjectAction(action)) return "subject";
+  return action.kind as "page_type" | "post";
 }
 
 const CHOICE_ORDER = { subject: 0, page_type: 1, post: 2 } as const;
@@ -351,13 +296,10 @@ const CHOICE_ORDER = { subject: 0, page_type: 1, post: 2 } as const;
 export function planVinculoBatchChoices(input: PlanVinculoBatchChoicesInput): VinculoBatchChoicesPlan {
   const actions = Array.isArray(input.actions) ? input.actions.filter(Boolean) : [];
   if (actions.length === 0) return { ok: false, code: "NO_CHOICE", reason: "Escolha ao menos uma opção do Vínculo." };
+  if (actions.some(isSubjectAction)) return { ok: false, code: "SUBJECT_ENTRY_MOVED", reason: VINCULO_SUBJECT_ENTRY_MOVED_REASON };
   const groups = actions.map(actionGroup);
   if (new Set(groups).size !== groups.length) {
     return { ok: false, code: "DUPLICATE_GROUP", reason: "Cada grupo do Vínculo aceita uma escolha só." };
-  }
-  const declaresSubject = actions.some(action => action.kind === "subject_declare");
-  if (declaresSubject && groups.includes("post")) {
-    return { ok: false, code: "POST_WITH_SUBJECT", reason: "Com Assunto Declarado, o Posto de principal não se aplica: deixe o Posto como está." };
   }
   const ordered = [...actions].sort((left, right) => CHOICE_ORDER[actionGroup(left)] - CHOICE_ORDER[actionGroup(right)]);
 
@@ -391,9 +333,7 @@ export function planVinculoBatchChoices(input: PlanVinculoBatchChoicesInput): Vi
     updates,
     counts: { updates: updates.length, approvedToReview },
     demotionWarning: demotionWarning(approvedToReview),
-    destinationNotice: steps.find(step => step.action.kind === "subject_declare")?.destinationNotice ?? null,
     actionLabel: steps.map(step => step.actionLabel).join(" · "),
-    declaresSubject,
   };
 }
 
@@ -401,7 +341,9 @@ export function planVinculoBatchChoices(input: PlanVinculoBatchChoicesInput): Vi
  * Colunas do readback estreito do lote (F1.6): só as declarações (Assunto,
  * tipo de página com o peso potencial/declarado, posto), em vez
  * de `select("*")` (~0,5 kB contra ~9,5 kB por linha). A leitura filtra
- * `id` + `brand_id` + `deleted_at is null`; quem a executa é a tela.
+ * `id` + `brand_id` + `deleted_at is null`; quem a executa é a tela. O Assunto
+ * continua conferido: o Vínculo não o escreve, e a releitura prova que ele
+ * ficou como estava.
  */
 export const VINCULO_BATCH_READBACK_COLUMNS =
   "id,brand_id,analise_semantica->keyword_subject,analise_semantica->keyword_page_type,analise_semantica->keyword_page_type_stance,analise_semantica->primary_keyword_policy" as const;
@@ -435,7 +377,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 }
 
 /**
- * O readback confirma a escrita: mesma marca e as três chaves iguais ao que
+ * O readback confirma a escrita: mesma marca e as chaves iguais ao que
  * foi gravado, sem depender da ordem das chaves que o JSONB devolve. Não
  * percebe chave alheia perdida por escrita concorrente — o limite da SDD
  * (F1.6), que só `row_version` fecha.

@@ -14,9 +14,7 @@ import { resolveKeywordVinculo } from "../lib/minerador/keyword-vinculo.ts";
 import { planVinculoBatch, vinculoBatchReadbackMatches, type VinculoBatchKeyword } from "../lib/minerador/vinculo-batch.ts";
 import {
   VINCULO_BATCH_CHOICE_GROUPS,
-  describeSubjectSkipped,
   describeVinculoBatchConfirmation,
-  partitionSubjectKeywords,
   vinculoBatchActionFromChoice,
   vinculoBatchChoiceSections,
 } from "../lib/minerador/vinculo-screen.ts";
@@ -28,9 +26,10 @@ import {
 } from "../lib/arquiteto/editorial-unit-declaration.ts";
 
 /**
- * RODAPÉ COM QUATRO SELECTS SEPARADOS E POTENCIAL DE PÁGINA COM 8 VALORES
- * (pedido do dono, 2026-09-24). KGR, Posto de principal, Potencial de página e
- * Assunto; o Assunto anula KGR e Posto, e o Potencial vale para ele. Fixtures
+ * RODAPÉ COM SELECTS SEPARADOS E POTENCIAL DE PÁGINA COM 8 VALORES
+ * (pedido do dono, 2026-09-24). KGR, Posto de principal e Potencial de página;
+ * desde 2026-10-13 o Assunto saiu do Vínculo e a keyword que o carrega é
+ * tratada como qualquer keyword (KGR, Posto e Potencial valem). Fixtures
  * puras, sem rede nem provider; REAL_PROVIDER_CALLS_IN_TESTS = 0.
  */
 
@@ -128,11 +127,11 @@ test("publicada continua como hoje: o tipo é declaração pela publicação", (
   assert.equal(keywordPageTypeStance(vinculo.pageType), "declared");
 });
 
-test("Vínculo: três grupos separados, cada um com seus valores (hoje dentro do seletor único do rodapé)", () => {
-  const [post, pageType, subject] = VINCULO_BATCH_CHOICE_GROUPS;
+test("Vínculo: dois grupos separados (o Assunto saiu em 2026-10-13), cada um com seus valores", () => {
+  assert.equal(VINCULO_BATCH_CHOICE_GROUPS.length, 2);
+  const [post, pageType] = VINCULO_BATCH_CHOICE_GROUPS;
   assert.equal(post.ariaLabel, "Posto de principal das selecionadas");
   assert.equal(pageType.ariaLabel, "Potencial de página das selecionadas");
-  assert.equal(subject.ariaLabel, "Assunto das selecionadas");
   assert.deepEqual(vinculoBatchChoiceSections(pageType).map(section => [section.label, section.options.length]), [["Potencial", 4], ["Declarado", 4]]);
   assert.deepEqual(vinculoBatchChoiceSections(post).map(section => section.label), [null]);
   for (const option of pageType.options) assert.equal(vinculoBatchActionFromChoice(option.value)?.kind, "page_type");
@@ -141,17 +140,16 @@ test("Vínculo: três grupos separados, cada um com seus valores (hoje dentro do
   assert.equal(vinculoBatchActionFromChoice("page_type:declared:assunto"), null);
 });
 
-test("o Assunto anula o posto: pulado e contado na confirmação", () => {
+test("2026-10-13: o Assunto não anula mais o posto — a keyword que o carrega é tratada como qualquer keyword", () => {
   const publishedSubject = row(1, subjectOf({ ...PUBLISHED_ORIGIN }));
   const published = row(2, { ...PUBLISHED_ORIGIN });
   const plan = planVinculoBatch({ keywords: [publishedSubject, published], brandId: BRAND, action: { kind: "post", policy: "reviewable" }, actorId: ACTOR, changedAt: AT });
   assert.ok(plan.ok);
   if (!plan.ok) return;
-  assert.deepEqual(plan.updates.map(update => update.id), [published.id]);
-  assert.equal(plan.counts.subject_declared, 1);
-  assert.deepEqual(plan.skipped, [{ id: publishedSubject.id, keyword: publishedSubject.keyword, reason: "subject_declared" }]);
+  assert.deepEqual(plan.updates.map(update => update.id), [publishedSubject.id, published.id]);
+  assert.deepEqual(plan.skipped, []);
   const text = describeVinculoBatchConfirmation(plan);
-  assert.ok(text.details.includes("1 keyword é Assunto e foi pulada: o posto não se aplica a Assunto."));
+  assert.doesNotMatch(text.details.join(" "), /Assunto/);
 });
 
 test("o Potencial de página vale para o Assunto, com o peso e o readback", () => {
@@ -176,14 +174,11 @@ test("o Potencial de página vale para o Assunto, com o peso e o readback", () =
   assert.equal(!noActor.ok && noActor.code, "ACTOR_REQUIRED", "ator é o auth.users.id, nunca e-mail");
 });
 
-test("KGR em grupo: o Assunto sai do lote e o aviso conta", () => {
-  const items = [row(1, subjectOf({ nicho: "Clínicas" })), row(2), row(3, subjectOf({}))];
-  const { eligible, subjects } = partitionSubjectKeywords(items);
-  assert.deepEqual(eligible.map(item => item.id), [uuid(2)]);
-  assert.deepEqual(subjects.map(item => item.id), [uuid(1), uuid(3)]);
-  assert.equal(describeSubjectSkipped(2, "KGR"), "2 keywords são Assunto e foram puladas: o KGR não se aplica a Assunto.");
-  assert.equal(describeSubjectSkipped(1, "KGR"), "1 keyword é Assunto e foi pulada: o KGR não se aplica a Assunto.");
-  assert.equal(describeSubjectSkipped(0, "KGR"), null);
+test("2026-10-13: KGR em grupo inclui a keyword que carrega Assunto (nada de pular por ser Assunto)", () => {
+  const workspace = stripComments(readFileSync(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8"));
+  assert.doesNotMatch(workspace, /partitionSubjectKeywords|describeSubjectSkipped/);
+  const kgrHandler = workspace.slice(workspace.indexOf("const handleBatchKgrApplicability = async"), workspace.indexOf("const handleBatchCompleteHumanReview = async"));
+  assert.match(kgrHandler, /planKgrApplicabilityBatch\(\s*keywords\.filter\(item => selectedIds\.has\(item\.id\)\),/);
 });
 
 test("Arquiteto: o declarado humano é decisão que a formação respeita, enum intacto", () => {
@@ -220,11 +215,6 @@ test("tela: Importar CSV na barra, KGR e Vínculo no rodapé, tema escuro e Revi
   assert.ok(nativeSelects.length >= 4);
   for (const select of nativeSelects) assert.match(select, /BULK_SELECT_THEME/, "todo select do rodapé abre escuro");
 
-  const kgrHandler = workspace.slice(workspace.indexOf("const handleBatchKgrApplicability = async"), workspace.indexOf("const handleBatchCompleteHumanReview = async"));
-  assert.match(kgrHandler, /partitionSubjectKeywords\(/);
-  assert.match(kgrHandler, /planKgrApplicabilityBatch\(\s*eligible,/);
-  assert.match(kgrHandler, /describeSubjectSkipped\(subjects\.length, "KGR"\)/);
-
   const pageTypeBranch = workspace.slice(workspace.indexOf('if (action.type === "page_type")'), workspace.indexOf('if (action.type === "primary_policy")'));
   assert.match(pageTypeBranch, /actorUserId/);
   assert.doesNotMatch(pageTypeBranch, /"usuario"|session\?\.user\?\.email/);
@@ -232,9 +222,11 @@ test("tela: Importar CSV na barra, KGR e Vínculo no rodapé, tema escuro e Revi
   assert.match(pageTypeBranch, /vinculoReadbackConfirmed\(/);
   assert.match(pageTypeBranch, /stance: action\.stance/);
 
-  assert.match(panels, /const subjectDeclared = vinculo\.subject\?\.declared === true;/);
-  assert.match(panels, /disabled=\{statusUpdating \|\| reviewLocked \|\| !onAction \|\| subjectDeclared\}/, "Posto desligado com Assunto");
-  assert.match(panels, /disabled=\{statusUpdating \|\| reviewLocked \|\| subjectLocksKgr\}/, "KGR desligado com Assunto, salvo se a conclusão exigir");
+  // 2026-10-13 (pedido do dono): a keyword que carrega Assunto é tratada como
+  // qualquer keyword — o Posto e o KGR não se desligam mais por causa dele.
+  assert.doesNotMatch(panels, /subjectDeclared|subjectLocksKgr/);
+  assert.match(panels, /aria-label="Posto de principal na revisão humana"\s+value=\{vinculoSelects\.post\}\s+disabled=\{statusUpdating \|\| reviewLocked \|\| !onAction\}/);
+  assert.match(panels, /disabled=\{statusUpdating \|\| reviewLocked\} onChange=\{event => void onAction\?\.\(\{ type: "kgr"/);
   // 2026-09-24 (pedido do dono): os selects do Vínculo viraram um componente
   // comum com o rodapé (vinculo-selects.tsx), que entrega o valor já lido.
   assert.match(panels, /parseKeywordPageTypeChoice\(value\)/);

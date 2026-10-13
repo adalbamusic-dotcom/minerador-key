@@ -5,9 +5,6 @@ import test from "node:test";
 import { keywordPageTypeChoices, setKeywordPageType } from "../lib/minerador/keyword-page-type.ts";
 import { setKeywordSubject } from "../lib/minerador/keyword-subject.ts";
 import {
-  KEYWORD_VINCULO_NO_SUBJECT_LABEL,
-  KEYWORD_VINCULO_SUBJECT_DECLARED_LABEL,
-  KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL,
   keywordVinculoChoiceLabels,
   keywordVinculoChoicesSummary,
   keywordVinculoSummary,
@@ -19,13 +16,11 @@ import {
   VINCULO_MIXED_LABEL,
   VINCULO_MIXED_VALUE,
   VINCULO_POST_SELECT_OPTIONS,
-  VINCULO_SUBJECT_SELECT_OPTIONS,
   chooseVinculoBatchSelect,
   commonVinculoSelectValues,
   describeVinculoBatchChoicesConfirmation,
   vinculoBatchActionsFromChoices,
   vinculoBatchChoiceToSelect,
-  vinculoBatchPostDisabled,
   vinculoBatchSelectValue,
   vinculoPublishedCurrentPageTypeOption,
   vinculoSelectToBatchChoice,
@@ -99,36 +94,35 @@ const shared = stripComments(readFileSync(new URL("../components/editorial/vincu
 const hook = stripComments(readFileSync(new URL("../modules/minerador/keyword-table/use-keyword-table-responsive-widths.ts", import.meta.url), "utf8"));
 const architect = stripComments(readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8"));
 
-test("um vocabulário só: os rótulos e valores da Revisão Humana, sem Não mudar", () => {
+test("um vocabulário só: os rótulos e valores da Revisão Humana, sem Não mudar (e, desde 2026-10-13, sem Assunto)", () => {
   assert.deepEqual(VINCULO_POST_SELECT_OPTIONS.map(option => [option.value, option.label]), [["reviewable", "Livre"], ["locked", "Travado ao slug"]]);
-  assert.deepEqual(VINCULO_SUBJECT_SELECT_OPTIONS.map(option => [option.value, option.label]), [["none", "Não"], ["declared", "Declarado"]]);
   assert.equal(VINCULO_MIXED_LABEL, "Valores diferentes");
   for (const source of [shared, panels, workspace]) assert.doesNotMatch(source, /Não mudar/);
 
   const nova = resolveKeywordVinculo({ status: "bruto", semantic: { nicho: "Clínicas" } });
-  assert.deepEqual(vinculoSelectValues(nova), { post: "reviewable", page_type: "potential:article", subject: "none" }, "o default é valor do select, não ausência");
+  assert.deepEqual(vinculoSelectValues(nova), { post: "reviewable", page_type: "potential:article" }, "o default é valor do select, não ausência");
   const assunto = resolveKeywordVinculo({ status: "bruto", semantic: declaredSubject(silo()) });
-  assert.deepEqual(vinculoSelectValues(assunto), { post: "reviewable", page_type: "declared:silo", subject: "declared" });
+  assert.deepEqual(vinculoSelectValues(assunto), { post: "reviewable", page_type: "declared:silo" }, "a keyword que carrega Assunto mostra os mesmos selects");
 
-  for (const [key, value, choice] of [["post", "locked", "post:locked"], ["post", "reviewable", "post:reviewable"], ["page_type", "declared:landing_page", "page_type:declared:landing_page"], ["subject", "declared", "subject:declare"], ["subject", "none", "subject:withdraw"]] as const) {
+  for (const [key, value, choice] of [["post", "locked", "post:locked"], ["post", "reviewable", "post:reviewable"], ["page_type", "declared:landing_page", "page_type:declared:landing_page"]] as const) {
     assert.equal(vinculoSelectToBatchChoice(key, value), choice);
     assert.equal(vinculoBatchChoiceToSelect(key, choice), value);
   }
   assert.equal(vinculoSelectToBatchChoice("post", VINCULO_MIXED_VALUE), "", "o marcador nunca vira escolha");
   assert.equal(vinculoSelectToBatchChoice("page_type", "declared:assunto"), "");
+  assert.deepEqual(EMPTY_VINCULO_BATCH_CHOICES, { post: "", page_type: "" });
 });
 
 test("em grupo, cada select mostra o valor comum ou Valores diferentes", () => {
   const iguais = commonVinculoSelectValues([row(1), row(2)]);
-  assert.deepEqual(iguais, { post: "reviewable", page_type: "potential:article", subject: "none", publishedOnly: false });
-  for (const key of ["post", "page_type", "subject"] as const) assert.equal(vinculoBatchSelectValue(key, EMPTY_VINCULO_BATCH_CHOICES, iguais), iguais[key]);
+  assert.deepEqual(iguais, { post: "reviewable", page_type: "potential:article", publishedOnly: false });
+  for (const key of ["post", "page_type"] as const) assert.equal(vinculoBatchSelectValue(key, EMPTY_VINCULO_BATCH_CHOICES, iguais), iguais[key]);
 
   const misturadas = commonVinculoSelectValues([row(1), row(2, silo()), row(3, declaredSubject({ nicho: "Clínicas" }))]);
   assert.equal(misturadas.post, "reviewable");
   assert.equal(misturadas.page_type, null);
-  assert.equal(misturadas.subject, null);
+  assert.equal("subject" in misturadas, false, "o Assunto não é mais valor comum do Vínculo");
   assert.equal(vinculoBatchSelectValue("page_type", EMPTY_VINCULO_BATCH_CHOICES, misturadas), VINCULO_MIXED_VALUE);
-  assert.equal(vinculoBatchSelectValue("subject", EMPTY_VINCULO_BATCH_CHOICES, misturadas), VINCULO_MIXED_VALUE);
   assert.equal(vinculoBatchSelectValue("page_type", { ...EMPTY_VINCULO_BATCH_CHOICES, page_type: "page_type:declared:silo" }, misturadas), "declared:silo", "a mudança do humano aparece no select");
 
   assert.equal(commonVinculoSelectValues([row(1, { ...PUBLISHED_ORIGIN }), row(2, { ...PUBLISHED_ORIGIN })]).publishedOnly, true, "todas publicadas: só os 4 declarados");
@@ -139,7 +133,7 @@ test("em grupo, cada select mostra o valor comum ou Valores diferentes", () => {
 test("só o select que o humano mudou vira gravação; voltar ao valor comum desfaz", () => {
   const keywords = [row(1), row(2, silo())];
   const common = commonVinculoSelectValues(keywords);
-  const start = { ...EMPTY_VINCULO_BATCH_CHOICES, note: "", destination: "" };
+  const start = { ...EMPTY_VINCULO_BATCH_CHOICES };
 
   assert.deepEqual(vinculoBatchActionsFromChoices(start), [], "abrir o painel não grava nada");
   assert.equal(chooseVinculoBatchSelect(start, "page_type", VINCULO_MIXED_VALUE, common), start, "Valores diferentes não é escolha");
@@ -157,52 +151,34 @@ test("só o select que o humano mudou vira gravação; voltar ao valor comum des
   assert.equal(plan.updates[0].semantic.keyword_page_type_actor, ACTOR, "ator = auth.users.id");
   assert.ok(describeVinculoBatchChoicesConfirmation(plan).steps[0].details.includes("1 já estava assim."));
 
-  const semAssuntoComum = commonVinculoSelectValues([row(1)]);
-  const desfeito = chooseVinculoBatchSelect(chooseVinculoBatchSelect(start, "subject", "declared", semAssuntoComum), "subject", "none", semAssuntoComum);
-  assert.equal(desfeito.subject, "", "voltar ao comum desfaz a escolha");
+  const sozinha = commonVinculoSelectValues([row(1)]);
+  const ida = chooseVinculoBatchSelect(start, "page_type", "declared:silo", sozinha);
+  const volta = chooseVinculoBatchSelect(ida, "page_type", "potential:article", sozinha);
+  assert.equal(volta.page_type, "", "voltar ao comum desfaz a escolha");
 });
 
-test("Assunto Declarado desliga o Posto, escolhido agora ou comum a todas", () => {
-  const start = { ...EMPTY_VINCULO_BATCH_CHOICES, note: "", destination: "" };
-  const novas = commonVinculoSelectValues([row(1, { ...PUBLISHED_ORIGIN })]);
-  const travado = chooseVinculoBatchSelect(start, "post", "locked", novas);
-  const comPosto = travado.post === "" ? chooseVinculoBatchSelect(start, "post", "reviewable", novas) : travado;
-  assert.notEqual(comPosto.post, "", "um posto diferente do comum fica escolhido");
-  const declarando = chooseVinculoBatchSelect(comPosto, "subject", "declared", novas);
-  assert.equal(declarando.subject, "subject:declare");
-  assert.equal(declarando.post, "", "Declarar limpa o Posto");
-  assert.equal(vinculoBatchPostDisabled(declarando, novas), true);
-
-  const assuntos = commonVinculoSelectValues([row(1, declaredSubject({ ...PUBLISHED_ORIGIN })), row(2, declaredSubject({ nicho: "Clínicas" }))]);
-  assert.equal(assuntos.subject, "declared");
-  assert.equal(vinculoBatchPostDisabled(start, assuntos), true, "todas Assunto: o Posto não se aplica, como na Revisão");
-  const retirando = chooseVinculoBatchSelect(start, "subject", "none", assuntos);
-  assert.equal(retirando.subject, "subject:withdraw");
-  assert.equal(vinculoBatchPostDisabled(retirando, assuntos), false, "Retirar libera o Posto");
-  const comPostoDepois = chooseVinculoBatchSelect(retirando, "post", "locked", assuntos);
-  assert.equal(comPostoDepois.post, "post:locked");
-  const deVolta = chooseVinculoBatchSelect(comPostoDepois, "subject", "declared", assuntos);
-  assert.equal(deVolta.subject, "", "voltou ao comum");
-  assert.equal(deVolta.post, "", "o Posto não fica escolhido atrás de um select desligado");
-  assert.deepEqual(vinculoBatchActionsFromChoices(deVolta), []);
+test("2026-10-13: o Posto não se desliga mais por causa do Assunto, nem no grupo", () => {
+  const start = { ...EMPTY_VINCULO_BATCH_CHOICES };
+  const assuntos = commonVinculoSelectValues([row(1, declaredSubject({ ...PUBLISHED_ORIGIN })), row(2, declaredSubject({ ...PUBLISHED_ORIGIN }))]);
+  const comPosto = chooseVinculoBatchSelect(start, "post", "reviewable", assuntos);
+  assert.equal(comPosto.post, "post:reviewable", "Assuntos publicados: o Posto vale como para qualquer keyword");
+  assert.deepEqual(vinculoBatchActionsFromChoices(comPosto), [{ kind: "post", policy: "reviewable" }]);
+  assert.doesNotMatch(shared, /subjectDeclared|VinculoSubjectSelect|VinculoSubjectFields/);
 });
 
-test("coluna Vínculo: as três escolhas, default ou do usuário, pelo resolvedor", () => {
+test("coluna Vínculo: as duas escolhas (Posto e Potencial), default ou do usuário — nada de Assunto", () => {
   const nova = resolveKeywordVinculo({ status: "bruto", semantic: { nicho: "Clínicas" } });
-  assert.equal(KEYWORD_VINCULO_NO_SUBJECT_LABEL, "Assunto: Não");
-  assert.deepEqual(keywordVinculoChoiceLabels(nova), { post: "Livre", pageType: "Artigo · potencial", subject: "Assunto: Não" });
-  assert.equal(keywordVinculoChoicesSummary(nova), "Livre · Artigo · potencial · Assunto: Não");
+  assert.deepEqual(keywordVinculoChoiceLabels(nova), { post: "Livre", pageType: "Artigo · potencial" });
+  assert.equal(keywordVinculoChoicesSummary(nova), "Livre · Artigo · potencial");
   assert.equal(keywordVinculoSummary(nova), "Livre · Artigo · potencial", "a frase anterior continua a mesma para quem já a usa");
 
   const assunto = resolveKeywordVinculo({ status: "bruto", semantic: declaredSubject(silo()) });
-  assert.equal(KEYWORD_VINCULO_SUBJECT_DECLARED_LABEL, "Assunto: Declarado", "a palavra do select do Assunto");
-  assert.equal(keywordVinculoChoicesSummary(assunto), "Livre · Silo · declarado · Assunto: Declarado");
-  const semNota = setKeywordSubject({ nicho: "Clínicas" }, { note: null, actorId: ACTOR, changedAt: AT, origin: "review" });
+  assert.equal(keywordVinculoChoicesSummary(assunto), "Livre · Silo · declarado", "a keyword que carrega Assunto: o resumo não fala do Assunto");
+  const semNota = setKeywordSubject({ nicho: "Clínicas" }, { note: null, actorId: ACTOR, changedAt: AT, origin: "import" });
   assert.ok(semNota.ok);
   const assuntoSemNota = resolveKeywordVinculo({ status: "bruto", semantic: semNota.ok ? semNota.semantic : {} });
-  assert.equal(KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL, "Assunto: Declarado, sem nota");
-  assert.equal(keywordVinculoChoiceLabels(assuntoSemNota).subject, KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL);
-  assert.equal(assuntoSemNota.subjectLabel, "Assunto sem nota", "o rótulo antigo continua para quem já o lê");
+  assert.equal(keywordVinculoChoicesSummary(assuntoSemNota), "Livre · Artigo · potencial");
+  assert.equal(assuntoSemNota.subjectLabel, "Assunto · declarado", "a nota não é mais editável: nada de 'Assunto sem nota'");
 
   const cell = workspace.slice(
     workspace.indexOf(`<td data-keyword-vinculo-cell className="border-r border-divider/70 px-2 py-1 text-center whitespace-nowrap">`),
@@ -210,10 +186,10 @@ test("coluna Vínculo: as três escolhas, default ou do usuário, pelo resolvedo
   );
   assert.ok(cell.length > 0);
   assert.match(cell, /data-keyword-vinculo-choices title=\{keywordVinculoChoicesSummary\(vinculo\)\}/, "a frase inteira no título da célula");
-  assert.match(cell, /\{vinculo\.postLabel\}[\s\S]*\{vinculo\.pageTypeLabel\}[\s\S]*\{vinculo\.subjectLabel \? \(\s*<span\s+data-keyword-subject-label[\s\S]*?\{keywordVinculoChoiceLabels\(vinculo\)\.subject\}[\s\S]*?\) : \(\s*<span\s+data-keyword-vinculo-no-subject[\s\S]*?\{keywordVinculoChoiceLabels\(vinculo\)\.subject\}/, "Posto, Potencial e Assunto, nessa ordem, com a palavra do select");
-  assert.doesNotMatch(cell, />\s*\{vinculo\.subjectLabel\}\s*</, "o texto do Assunto vem das três escolhas, não do rótulo antigo");
+  assert.match(cell, /\{vinculo\.postLabel\}[\s\S]*\{vinculo\.pageTypeLabel\}/, "Posto e Potencial, nessa ordem");
+  assert.doesNotMatch(cell, /subject|Assunto|Buscar sustentação/, "o Assunto saiu da coluna Vínculo");
+  assert.doesNotMatch(workspace, /Assunto: Não|Assunto: Declarado|data-keyword-vinculo-no-subject|data-keyword-subject-label/);
   assert.doesNotMatch(workspace, /w-\[120px\] border-r border-divider\/70 px-(?:2 py-1|3 py-2) text-center whitespace-nowrap/, "sem a largura morta de 120px: o <col> manda");
-  assert.match(workspace, /Nota em branco: a coluna marca &quot;\{KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL\}&quot;/);
   assert.doesNotMatch(cell, /text-\[(?:9|10|11|12|13)px\]|\btext-xs\b/, "texto de 14px");
   assert.equal((workspace.match(/resolveKeywordVinculo\(/g) || []).length, 1, "a coluna resolve uma vez; o painel lê pelo domínio");
 });

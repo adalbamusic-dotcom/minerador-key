@@ -307,6 +307,32 @@ Minerador por glob 1236 → 1245 com as MESMAS 28 falhas antigas (comparadas por
 arquivos novos/tocados sem erro; `git diff --check` limpo. **Validado manualmente: não** (homologação do dono).
 Nenhuma migration; nenhuma escrita no banco; nenhuma chamada paga.
 
+### 11.1 C7 · O Assunto sai do Vínculo (pedido do dono, 2026-10-13, mesma autorização)
+
+Palavras do dono: "apagar essa questão do Assunto/tema do Vínculo, tanto da coluna como dos seletores, porque na
+planilha já não vai mais existir assuntos, só keywords e dentro dessas keywords estão os assuntos"; "falta colocar
+no painel do DNA das keywords o assunto/tema e essas keywords têm que ser tratadas como qualquer keyword".
+
+| Item | Estado em 2026-10-13 |
+|---|---|
+| Vínculo sem Assunto (Revisão Humana, lote, coluna, resumo "Livre · Artigo · potencial") | feito |
+| `subject_declare`/`subject_withdraw` recusados (`SUBJECT_ENTRY_MOVED` no domínio; `subject_entry_moved` no MCP `set_keyword_vinculo`) | feito |
+| `subject_withdraw` | **removido de todas as portas**: o "Assunto: Não" apagou o Assunto (título e plano) das 7 keywords do Silo azul da WifiConecta e deixou a marca de principal órfã. Tirar do plano = "Tirar do plano". Assunto anterior sem plano: sem porta de retirada até a decisão da conversão |
+| Bloco só leitura "Assunto deste artigo" no painel do DNA (`resolveSubjectArticleView`, `SubjectArticleBlock`), com "Buscar sustentação" | feito |
+| Keyword que carrega Assunto = qualquer keyword (KGR, Posto, KGR em grupo, MCP do KGR) | feito; **exceção mínima mantida na aprovação**: D2-bis (marca de principal do plano) aprova só com a Lógica, para a keyword livre chegar ao Arquiteto; D2 restrita ao Assunto anterior (sem `entry`), para não recusar aprovações já feitas |
+| Conversão do Assunto antigo da WifiConecta (laranja) | **não implementada** (os 8 Assuntos-título estão no Arquiteto com ArticleDNA versionado; mandar a linha à lixeira violaria AGENTS.md §10). Caminho descrito no backlog do Minerador; exige SDD própria |
+| Catálogo MCP | feito (`test:agent` verde) |
+
+Consumidores conferidos: `approved-package.ts` (portão e handoff, mesma função), `keyword-dna.ts` (sem mudança: o
+`subject` continua no KeywordDNA), Arquiteto (sem mudança: as regras do Arquiteto sobre Assunto sem volume — Q7,
+`published-primary-swap`, sugestões — continuam como na C4), Radar/Redator (sem mudança).
+
+Suítes da C7 (antes → depois, mesma árvore): Minerador por glob 1249 → 1251 com as MESMAS 28 falhas antigas
+(comparadas por nome, TAP); `test:agent` 88 → 88; `test:arquiteto` 2876 → 2876; `test:arquiteto:servidor` 122;
+`test:radar` 3509 (1 pulado, 0 falha); `test:redator:mcp` 150 → 150; `test:minerador:dom` 4; `test:editorial`
+182 com as 4 falhas antigas; `tsc` 0; eslint dos arquivos tocados sem erro novo; `git diff --check` limpo.
+Leitura remota só por SELECT. **Validado manualmente: não.**
+
 ## 12. Decisões pendentes do dono
 
 - Volume medido **= 0** conta como "sem volume" (livre). Recomendação: sim
