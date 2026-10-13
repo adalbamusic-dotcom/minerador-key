@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useGlobalTopbarControlsRegistration, type GlobalTopbarModuleControls } from "@/components/global-topbar";
 import { useNoticeBridge, useNoticeCenter } from "@/components/global-notice-center";
 import { applyDiscoveryFilters, type DiscoveryFilterSummary } from "@/lib/minerador/discovery-persistence";
@@ -11,6 +12,8 @@ import { DiscoveryFilterRow } from "./discovery-filter-row";
 import { DiscoverySearchRow } from "./discovery-search-row";
 import { DiscoverySourceControls, type DiscoverySourceControlsHandle, type DiscoverySourceResponse } from "./discovery-source-controls";
 import { DiscoverySourceTopbarActions } from "./discovery-source-topbar-actions";
+import { SubjectCadastroButton } from "../subject-cadastro-card";
+import { stashSubjectCadastroText, subjectCadastroHref } from "../subject-cadastro-handoff";
 import { DiscoveryTablePlaceholder } from "./discovery-table-placeholder";
 import { SubjectSearchFields } from "./subject-search-fields";
 import { SubjectSearchResults } from "./subject-search-results";
@@ -162,7 +165,12 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
   const hasSeoData = useMemo(() => Boolean(executedSearch?.acceptedCandidates.some(candidate => readDiscoveryResult(candidate) !== null || readDiscoveryKeywordDifficulty(candidate) !== null)), [executedSearch]);
 
   const searchDraft = useMemo<DiscoverySearchDraft>(() => ({ seed, relationshipMode: relation, preliminaryIntent, preliminaryFunnel, language, countryCode: "BR", selectedStates: states, volumeFilter: volume, cpcFilter: cpc, includeTerms, excludeTerms, includeAdultKeywords, discoveryMode, discoveryFocus }), [seed, relation, preliminaryIntent, preliminaryFunnel, language, states, volume, cpc, includeTerms, excludeTerms, includeAdultKeywords, discoveryMode, discoveryFocus]);
-  const sourceActions = useMemo(() => <DiscoverySourceTopbarActions onManual={() => sourceControlsRef.current?.openManual()} onCsv={() => sourceControlsRef.current?.openCsv()} />, []);
+  // 2026-10-13 · "Cadastrar Assuntos" também aqui, e primeiro: o card mora no Processador, então o botão leva até ele.
+  const router = useRouter();
+  const sourceActions = useMemo(() => <>
+    <SubjectCadastroButton onClick={() => router.push(subjectCadastroHref(brandRef))} />
+    <DiscoverySourceTopbarActions onManual={() => sourceControlsRef.current?.openManual()} onCsv={() => sourceControlsRef.current?.openCsv()} />
+  </>, [router, brandRef]);
 
   useEffect(() => {
     const globalTopbarControls: GlobalTopbarModuleControls = {
@@ -263,7 +271,7 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
   const clearFilters = () => { setDiscoveryMode(initialDraft.discoveryMode || "keyword"); setDiscoveryFocus(initialDraft.discoveryFocus || "all_customer"); setSeed(initialDraft.seed); setRelation(initialDraft.relationshipMode); setPreliminaryIntent(initialDraft.preliminaryIntent); setPreliminaryFunnel(initialDraft.preliminaryFunnel); setLanguage(initialDraft.language); setStates(initialDraft.selectedStates); setVolume(initialDraft.volumeFilter); setCpc(initialDraft.cpcFilter); setResultPreset(DISCOVERY_SEO_DEFAULT_PRESET); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset(DISCOVERY_SEO_DEFAULT_PRESET); setKeywordDifficultyMin(""); setKeywordDifficultyMax(""); setIncludeTerms(initialDraft.includeTerms); setExcludeTerms(initialDraft.excludeTerms); setIncludeAdultKeywords(initialDraft.includeAdultKeywords); setNotice(null); };
 
   return <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-x-clip px-0 py-5" aria-label="Descobrir Keywords" aria-busy={loading}>
-    <DiscoverySourceControls ref={sourceControlsRef} brandRef={brandRef} preliminaryIntent={preliminaryIntent} preliminaryFunnel={preliminaryFunnel} onComplete={acceptSourceResult} />
+    <DiscoverySourceControls ref={sourceControlsRef} brandRef={brandRef} preliminaryIntent={preliminaryIntent} preliminaryFunnel={preliminaryFunnel} onComplete={acceptSourceResult} onPlanText={texto => { stashSubjectCadastroText(brandIdFromRef(brandRef), texto); router.push(subjectCadastroHref(brandRef)); }} />
     <DiscoverySearchRow searchKind={searchKind} onSearchKindChange={changeSearchKind} subjectFields={<SubjectSearchFields controller={subjectSearch} />} discoveryFocus={discoveryFocus} setDiscoveryFocus={setDiscoveryFocus} seed={seed} setSeed={setSeed} relation={relation} setRelation={setRelation} intent={preliminaryIntent} setIntent={setPreliminaryIntent} funnel={preliminaryFunnel} setFunnel={setPreliminaryFunnel} language={language} setLanguage={setLanguage} states={states} setStates={setStates} onSubmit={discover} />
     {subjectSearchOpen ? <SubjectSearchResults controller={subjectSearch} /> : <>
     <DiscoveryFilterRow discoveryMode={discoveryMode} volume={volume} setVolume={setVolume} cpc={cpc} setCpc={setCpc} resultPreset={resultPreset} setResultPreset={setResultPreset} resultMin={resultMin} setResultMin={setResultMin} resultMax={resultMax} setResultMax={setResultMax} keywordDifficultyPreset={keywordDifficultyPreset} setKeywordDifficultyPreset={setKeywordDifficultyPreset} keywordDifficultyMin={keywordDifficultyMin} setKeywordDifficultyMin={setKeywordDifficultyMin} keywordDifficultyMax={keywordDifficultyMax} setKeywordDifficultyMax={setKeywordDifficultyMax} hasSeoData={hasSeoData} serpMeasurementEnabled={serpMeasurementEnabled} includeTerms={includeTerms} setIncludeTerms={setIncludeTerms} excludeTerms={excludeTerms} setExcludeTerms={setExcludeTerms} includeAdultKeywords={includeAdultKeywords} setIncludeAdultKeywords={setIncludeAdultKeywords} activeFilterPopover={activeFilterPopover} setActiveFilterPopover={setActiveFilterPopover} onDiscover={discover} onClear={clearFilters} loading={loading} canSubmit={seed.trim().length >= 2} />

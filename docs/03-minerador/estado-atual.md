@@ -6275,3 +6275,12 @@ número antigo contava keywords de outras duas marcas. O novo é o correto.
   `minerador_keywords`; não chama provider nem consome créditos.
 - **Ainda não verificado:** escrita remota com Claude; as medições de Volume,
   Resultados e KGR seguem fora do MCP e continuam exigindo operação na tela.
+
+## 2026-10-13 · Plano entra por uma porta só (pedido do dono)
+
+- Caso real: o plano do Silo 2 da WifiConecta foi colado em "Colar keywords" e virou 36 linhas soltas na Descoberta ("Nome: …", "Slug: …", títulos e descrições).
+- **Verificado no código / confirmado por teste:** colar e CSV de keyword recusam texto de plano ANTES de gravar (`lib/minerador/plan-text-detector.ts`, portaria em `postSource`) e oferecem "Abrir em Cadastrar Assuntos" com o texto.
+- O Processador tem uma porta só, "Cadastrar Assuntos" (colar/CSV de keyword moram só no Descobrir, que ganhou o mesmo botão, primeiro, levando ao card por `?cadastrar=1`).
+- No card, colar o plano em qualquer campo (nome, slug, objetivo, colar em texto, título/keyword/detalhes da linha) preenche tudo; "Colar plano em texto" abre aberto; o botão mostra o nome sempre.
+- Testes: `tests/minerador-plano-porta-unica.test.mts` (+ ajustes em `minerador-assunto-tela-estrutura`, `minerador-discovery-sources`, `minerador-plano-declarado-tela`). Minerador por glob: 1271, as mesmas 25 falhas antigas. Validado manualmente: não.
+- Pendente do dono: as 36 linhas soltas que já estão na Descoberta da WifiConecta (excluir é decisão dele, pela tela).

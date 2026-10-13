@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
 import { AlertTriangle, CheckCircle2, ListOrdered, Loader2, Plus, Trash2, X } from "lucide-react";
 import { GLOBAL_TOPBAR_ACTION_CONTROL } from "@/components/global-topbar-control";
 import { internalButton, internalButtonPrimary, internalField } from "@/components/editorial/internal-page-visual";
@@ -14,6 +14,7 @@ import {
   type EditorialGroupSummary,
 } from "@/lib/editorial/editorial-groups";
 import { DECLARED_PLAN_SCOPE_MAX, SUBJECT_ENTRY_TITLE_MAX, parseDeclaredPlanText, type DeclaredPlanLockChoice, type DeclaredPlanRole } from "@/lib/minerador/declared-plan";
+import { looksLikeSiloPlanText } from "@/lib/minerador/plan-text-detector";
 import type { DeclaredPlanApplyArticle, DeclaredPlanCardRow, DeclaredPlanPreview } from "@/lib/minerador/declared-plan-import-core";
 
 /**
@@ -100,7 +101,7 @@ export function SubjectCadastroButton({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" className={GLOBAL_TOPBAR_ACTION_CONTROL} onClick={onClick} aria-label="Cadastrar Assuntos" title="Cadastrar Assuntos" data-minerador-subject-cadastro>
       <ListOrdered className="h-3.5 w-3.5" aria-hidden="true" />
-      <span className="hidden xl:inline">Cadastrar Assuntos</span>
+      <span>Cadastrar Assuntos</span>
     </button>
   );
 }
@@ -111,8 +112,11 @@ export function SubjectCadastroCard({
   onClose,
   onApplied,
   onUnavailable,
+  initialText = "",
 }: {
   brandId: string;
+  /** 2026-10-13 · plano colado na porta errada ("Colar keywords"/CSV): o card abre com ele e preenche as linhas. */
+  initialText?: string;
   /** Os grupos ATIVOS da marca (a cor que já tem grupo leva o cadastro para ele). */
   groups: readonly EditorialGroupSummary[];
   onClose: () => void;
@@ -128,7 +132,7 @@ export function SubjectCadastroCard({
   const [existingGroupId, setExistingGroupId] = useState("");
   const [publishedUrl, setPublishedUrl] = useState("");
   const [linhas, setLinhas] = useState<Linha[]>(() => [linhaVazia(1, "Pilar")]);
-  const [colado, setColado] = useState("");
+  const [colado, setColado] = useState(initialText);
   const [colagemAviso, setColagemAviso] = useState<string | null>(null);
   const [phase, setPhase] = useState<"idle" | "loading" | "previewing" | "applying">("idle");
   const [preview, setPreview] = useState<{ request: CadastroRequest; importRequestId: string; result: DeclaredPlanPreview } | null>(null);
@@ -171,9 +175,9 @@ export function SubjectCadastroCard({
   };
 
   /** "Colar plano em texto": o parser de sempre preenche o topo e as linhas. */
-  const preencherDoTexto = () => {
-    if (!colado.trim()) return;
-    const lido = parseDeclaredPlanText(colado);
+  const preencherDoTexto = (texto: string = colado) => {
+    if (!texto.trim()) return;
+    const lido = parseDeclaredPlanText(texto);
     if (destino === "new_silo") {
       if (lido.silo.name) setSiloName(lido.silo.name);
       if (lido.silo.rawSlug) setSiloSlug(lido.silo.rawSlug);
@@ -183,6 +187,28 @@ export function SubjectCadastroCard({
     setLinhas(current => [...current.filter(linha => linha.stored), ...novas]);
     setColagemAviso(`${novas.length} artigo(s) lido(s) do texto${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
     invalidate();
+  };
+
+  // O texto trazido de outra porta preenche as linhas uma vez, ao abrir (nada é gravado: a prévia continua sendo do dono).
+  const preencheuInicial = useRef(false);
+  useEffect(() => {
+    if (preencheuInicial.current || !initialText.trim()) return;
+    preencheuInicial.current = true;
+    preencherDoTexto();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * 2026-10-13 · colar o plano em QUALQUER campo do card preenche tudo: o dono
+   * colou o plano no "Nome do Silo" (campo de uma linha juntou o texto) e as
+   * linhas ficaram vazias, à espera de "Preencher as linhas".
+   */
+  const colarPlano = (event: ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const texto = event.clipboardData.getData("text");
+    if (!looksLikeSiloPlanText(texto)) return;
+    event.preventDefault();
+    setColado(texto);
+    preencherDoTexto(texto);
   };
 
   /** Silo existente: as linhas gravadas aparecem no formato do card (leitura compatível). */
@@ -371,15 +397,15 @@ export function SubjectCadastroCard({
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="flex flex-col gap-1">
                   <label htmlFor={ids.name} className="text-sm font-medium text-foreground">Nome do Silo</label>
-                  <input id={ids.name} value={siloName} maxLength={120} onChange={event => { setSiloName(event.target.value); invalidate(); }} className={internalField} placeholder="Wi-Fi e fibra óptica" />
+                  <input id={ids.name} value={siloName} maxLength={120} onPaste={colarPlano} onChange={event => { setSiloName(event.target.value); invalidate(); }} className={internalField} placeholder="Wi-Fi e fibra óptica" />
                 </div>
                 <div className="flex flex-col gap-1">
                   <label htmlFor={ids.slug} className="text-sm font-medium text-foreground">Slug</label>
-                  <input id={ids.slug} value={siloSlug} maxLength={200} onChange={event => { setSiloSlug(event.target.value); invalidate(); }} className={internalField} placeholder="/wifi-e-fibra/" />
+                  <input id={ids.slug} value={siloSlug} maxLength={200} onPaste={colarPlano} onChange={event => { setSiloSlug(event.target.value); invalidate(); }} className={internalField} placeholder="/wifi-e-fibra/" />
                 </div>
                 <div className="flex flex-col gap-1 md:col-span-1">
                   <label htmlFor={ids.objective} className="text-sm font-medium text-foreground">Objetivo</label>
-                  <input id={ids.objective} value={siloObjective} maxLength={1200} onChange={event => { setSiloObjective(event.target.value); invalidate(); }} className={internalField} />
+                  <input id={ids.objective} value={siloObjective} maxLength={1200} onPaste={colarPlano} onChange={event => { setSiloObjective(event.target.value); invalidate(); }} className={internalField} />
                 </div>
               </div>
             ) : null}
@@ -393,13 +419,13 @@ export function SubjectCadastroCard({
             ) : null}
 
             {destino !== "existing_silo" ? (
-              <details className="rounded-md border border-divider px-3 py-2">
+              <details className="rounded-md border border-divider px-3 py-2" open>
                 <summary className="cursor-pointer text-sm font-medium text-foreground">Colar plano em texto</summary>
                 <div className="mt-2 flex flex-col gap-2">
                   <label htmlFor={ids.paste} className="text-sm text-text-muted">Formato: “Silo 2 — …”, “Nome:”, “Slug:”, “Objetivo:” e, por artigo, “9. Título”, “Palavra-chave: …” (com “Artigo pilar •” no Pilar), a descrição e, se quiser, “Trava: travada” ou “Trava: livre”.</label>
-                  <textarea id={ids.paste} value={colado} onChange={event => setColado(event.target.value)} rows={6} maxLength={60000} spellCheck={false} className={`${internalField} min-h-32 resize-y leading-6`} />
+                  <textarea id={ids.paste} value={colado} onPaste={colarPlano} onChange={event => setColado(event.target.value)} rows={6} maxLength={60000} spellCheck={false} className={`${internalField} min-h-32 resize-y leading-6`} />
                   <div className="flex flex-wrap items-center gap-2">
-                    <button type="button" onClick={preencherDoTexto} disabled={busy || !colado.trim()} className={internalButton}>Preencher as linhas</button>
+                    <button type="button" onClick={() => preencherDoTexto()} disabled={busy || !colado.trim()} className={internalButton}>Preencher as linhas</button>
                     {colagemAviso ? <span className="text-sm text-text-muted" role="status">{colagemAviso}</span> : null}
                   </div>
                 </div>
@@ -431,9 +457,9 @@ export function SubjectCadastroCard({
                           </select>
                         </td>
                       ) : null}
-                      <td className="px-2 py-2"><input aria-label={`Assunto da linha ${index + 1}`} value={linha.title} maxLength={SUBJECT_ENTRY_TITLE_MAX} disabled={busy} onChange={event => mudarLinha(linha.key, { title: event.target.value })} className={internalField} placeholder={publicado && index > 0 ? "(o da primeira linha)" : "Título do artigo"} /></td>
-                      <td className="px-2 py-2"><input aria-label={`Keyword da linha ${index + 1}`} value={linha.keyword} maxLength={400} disabled={busy || (linha.stored && Boolean(linha.keyword))} onChange={event => mudarLinha(linha.key, { keyword: event.target.value })} className={`${internalField} text-keyword`} placeholder="keyword" /></td>
-                      <td className="px-2 py-2"><textarea aria-label={`Detalhes da linha ${index + 1}`} value={linha.details} maxLength={DECLARED_PLAN_SCOPE_MAX} rows={2} disabled={busy} onChange={event => mudarLinha(linha.key, { details: event.target.value.replace(/[\r\n]+/g, " ") })} className={`${internalField} resize-y leading-6`} placeholder={publicado && index > 0 ? "(os da primeira linha)" : "O que o artigo cobre (até 1.200)"} /></td>
+                      <td className="px-2 py-2"><input aria-label={`Assunto da linha ${index + 1}`} onPaste={colarPlano} value={linha.title} maxLength={SUBJECT_ENTRY_TITLE_MAX} disabled={busy} onChange={event => mudarLinha(linha.key, { title: event.target.value })} className={internalField} placeholder={publicado && index > 0 ? "(o da primeira linha)" : "Título do artigo"} /></td>
+                      <td className="px-2 py-2"><input aria-label={`Keyword da linha ${index + 1}`} onPaste={colarPlano} value={linha.keyword} maxLength={400} disabled={busy || (linha.stored && Boolean(linha.keyword))} onChange={event => mudarLinha(linha.key, { keyword: event.target.value })} className={`${internalField} text-keyword`} placeholder="keyword" /></td>
+                      <td className="px-2 py-2"><textarea aria-label={`Detalhes da linha ${index + 1}`} onPaste={colarPlano} value={linha.details} maxLength={DECLARED_PLAN_SCOPE_MAX} rows={2} disabled={busy} onChange={event => mudarLinha(linha.key, { details: event.target.value.replace(/[\r\n]+/g, " ") })} className={`${internalField} resize-y leading-6`} placeholder={publicado && index > 0 ? "(os da primeira linha)" : "O que o artigo cobre (até 1.200)"} /></td>
                       {!publicado ? (
                         <td className="px-2 py-2">
                           <select aria-label={`Trava da linha ${index + 1}`} value={linha.lock} disabled={busy} onChange={event => mudarLinha(linha.key, { lock: event.target.value === "locked" ? "locked" : event.target.value === "free" ? "free" : "auto" })} className={internalField}>

@@ -108,8 +108,10 @@ test("fontes locais usam os modais existentes e os gatilhos ficam na GlobalTopba
   assert.match(topbarActions, /data-minerador-discovery-source-actions/);
   assert.match(discoveryPage, /actions: sourceActions/);
   assert.match(discoveryPage, /<DiscoverySourceControls ref=\{sourceControlsRef\}/);
-  assert.match(workspace, /<DiscoverySourceControls ref=\{discoverySourceControlsRef\}/);
-  assert.match(workspace, /DiscoverySourceTopbarActions/);
+  // 2026-10-13 · pedido do dono: colar/CSV de keyword (que vão para a Descoberta) moram só no Descobrir;
+  // o Processador tem uma porta só, "Cadastrar Assuntos".
+  assert.doesNotMatch(workspace, /<DiscoverySourceControls\b/);
+  assert.doesNotMatch(workspace, /<DiscoverySourceTopbarActions\b/);
   assert.match(controls, /discovery\/sources/);
   assert.doesNotMatch(controls, /fetch\([^)]*google-ads/);
 });
@@ -144,7 +146,7 @@ test("Processador não mantém botões visíveis concorrentes de CSV ou Manual",
   assert.doesNotMatch(toolbar, /<span>Manual<\/span>/);
   assert.match(toolbar, /<span className="hidden xl:inline">Exportar<\/span>/);
   assert.match(workspace, /const discoverySourceActions = useMemo/);
-  assert.match(workspace, /DiscoverySourceControls ref=\{discoverySourceControlsRef\}/);
+  assert.doesNotMatch(workspace, /DiscoverySourceControls ref=\{discoverySourceControlsRef\}/);
 });
 
 test("rota multi-source persiste somente candidatas e não cria keyword oficial", async () => {
