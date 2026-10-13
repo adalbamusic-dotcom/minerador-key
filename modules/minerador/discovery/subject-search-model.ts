@@ -39,7 +39,12 @@ export const SUBJECT_SEARCH_DECLARED_HELP = "Com um Assunto declarado, o servido
 export const SUBJECT_SEARCH_LOCAL_LIST_TEXT = "Lista guardada só neste navegador. Só o envio ao Processador salva no banco. Limpar os dados do navegador apaga a lista. Repetir a pesquisa consulta o Google Ads de novo, sem custo.";
 export const SUBJECT_SEARCH_LOCAL_POLICY_TEXT = "Cada busca vale 30 dias neste navegador, e ficam no máximo 10 por marca. A vencida e a mais antiga saem sozinhas.";
 export const SUBJECT_SEARCH_MEMORY_ONLY_TEXT = "O armazenamento deste navegador não respondeu: a lista está só na memória e não sobrevive ao recarregar a página.";
-export const SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT = "O volume será medido de novo no Processador, pelo Google Ads, sem custo.";
+/**
+ * 2026-10-13 (SDD acelerar-fluxo, item 8): o Volume vai pelo recibo do
+ * servidor, não pelo navegador; sem recibo (busca antiga, banco sem a M-A), o
+ * Processador mede como antes.
+ */
+export const SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT = "O Volume que a pesquisa mediu no Google Ads vai junto, pelo recibo guardado no servidor (sem medir de novo), e a Lógica roda sozinha. Sem recibo, o Volume é medido no Processador, sem custo.";
 export const SUBJECT_SEARCH_UNDECLARED_TEXT = "Para ligar estas keywords a um Assunto, declare-o antes, aqui ou no Processador.";
 export const SUBJECT_SEARCH_PLAN_TEXT = "Nada é consultado antes de você confirmar. O plano é confirmado inteiro: a frase, a página de destino e a segmentação do Google Ads que você vê são as que a pesquisa usa.";
 /** O resumo do plano sem chamada paga (o de hoje, só Google Ads). */

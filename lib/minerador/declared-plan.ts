@@ -503,8 +503,8 @@ export type DeclaredPlanLeftoverReason = "silo_name" | "pasted_label";
  * Uma keyword JÁ GRAVADA na marca que parece sobra de um import anterior do
  * plano: o nome do Silo colado como keyword ("Planos e contratação") ou uma
  * frase com o rótulo colado ("Palavra-chave: internet disponível no meu CEP").
- * A prévia mostra como "não faz parte do plano"; nada é apagado aqui (D9: a
- * lixeira é ato do dono, recuperável).
+ * A prévia mostra como "não faz parte do plano"; nada é apagado aqui (D9:
+ * excluir é ato do dono — e, para keyword não publicada, apaga de vez).
  */
 export function declaredPlanLeftoverReason(keyword: string, plan: Pick<ParsedDeclaredPlan, "silo">): DeclaredPlanLeftoverReason | null {
   const chave = normalizeKeyword(keyword);

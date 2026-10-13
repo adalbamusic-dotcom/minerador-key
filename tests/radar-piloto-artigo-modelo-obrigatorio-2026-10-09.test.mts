@@ -408,7 +408,8 @@ test("E · a tela: o botão do próprio pedido diz o custo; a barra de lote orga
   const lote = pagina.slice(pagina.indexOf("const organizarArtigosModeloEmLote"), pagina.indexOf("const fronteiraDoRedator"));
   assert.match(lote, /postRadarArticleBlueprintOrganize\(\{ brandId: marca, articleId, ifMissing: true \}\)/);
   assert.match(lote, /setNotice\(radarArticleBlueprintProgressNotice\(job\)\)/);
-  assert.match(pagina, /renderBulkBar=\{rows => <div className="flex min-w-max flex-wrap items-center gap-2"><RadarR4BulkOperationsBar selectedRows=\{selectedSnapshotsFor\(rows\)\} onAction=\{handleBulkAction\}\/>\{barraDoArtigoModelo\(rows\)\}<\/div>\}/);
+  /* 2026-10-13 · "Pesquisar e finalizar (N artigos)" vem antes, na mesma barra. */
+  assert.match(pagina, /renderBulkBar=\{rows => <div className="flex min-w-max flex-wrap items-center gap-2">\{barraDoLoteDePesquisa\(rows\)\}<RadarR4BulkOperationsBar selectedRows=\{selectedSnapshotsFor\(rows\)\} onAction=\{handleBulkAction\}\/>\{barraDoArtigoModelo\(rows\)\}<\/div>\}/);
   const barra = pagina.slice(pagina.indexOf("const barraDoArtigoModelo"), pagina.indexOf("const importable ="));
   assert.match(barra, /label=\{radarArticleBlueprintBatchLabel\(daSelecao\.length\)\}/);
   assert.match(barra, /label=\{radarArticleBlueprintBatchLabel\(doSilo\.length, "silo"\)\}/);

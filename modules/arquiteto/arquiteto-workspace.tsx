@@ -156,7 +156,9 @@ import { partitionMaterializedArticles, summarizeLegacyArticles } from "@/lib/ar
 import { observedFromArticleDna, readbackMaterializedArticles, type MaterializationReadback, type MaterializedArticleExpectation } from "@/lib/arquiteto/article-materialization-readback";
 import { articleSerpParecerFromAssessment } from "@/lib/arquiteto/article-serp-interpretation";
 import { SERP_LENS_LABELS, describeQualificationLenses, describeSerpLensesMarker, describeSerpLensesMissing, mergeSerpPaidPlans, type SerpPaidPlan, type SerpPaidPlanChoice } from "@/lib/arquiteto/serp-lens-plan";
-import { TERRITORIAL_AI_BLOCK_SIZE, TERRITORIAL_AI_KEYWORD_LIMIT, TERRITORIAL_SERP_BLOCK_SIZE, executePaidSerpBlocks, formatSerpBlockProgress, planPaidSerpBlocks, runPaidSerpBlocks, serpBlockPrefix, splitFormationSerpBlocks, splitTerritorialAiQuestions, territorialAiKeywordScope } from "@/lib/arquiteto/serp-blocks";
+import { TERRITORIAL_AI_BLOCK_SIZE, TERRITORIAL_AI_KEYWORD_LIMIT, TERRITORIAL_SERP_BLOCK_SIZE, choiceForSerpBlock, executePaidSerpBlocks, formatSerpBlockProgress, planPaidSerpBlocks, runPaidSerpBlocks, serpBlockPrefix, splitFormationSerpBlocks, splitTerritorialAiQuestions, territorialAiKeywordScope } from "@/lib/arquiteto/serp-blocks";
+import { architectArticleNoticeLabel } from "@/lib/arquiteto/article-notice-label";
+import { allintitleBlockAuthorization, allintitlePrincipalsOfProcessing, createProcessingCostDialog, type ProcessingClickContinuation, type ProcessingCostAsk } from "@/lib/arquiteto/article-processing-click";
 import { runProgressiveBatch } from "@/lib/ui/batch-progress";
 import { SerpPaidPlanDialog } from "./serp-paid-plan-dialog";
 import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, articleSerpIntentOf, articleSerpLensesComplete, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
@@ -315,6 +317,7 @@ import { listEditorialGroupPlans } from "@/lib/editorial/editorial-groups-store"
 import { readDeclaredSiloPlan, type DeclaredSiloPlan } from "@/lib/minerador/declared-plan";
 import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
 import { SiloDeclaredPlanPanel } from "./silo-declared-plan-panel";
+import { SubjectConversionPanel } from "./subject-conversion-panel";
 import { rejectedArticleReleaseHold } from "@/lib/arquiteto/rejected-article-release";
 import { ReworkNotice } from "@/components/editorial/rework-notice";
 import {
@@ -399,7 +402,7 @@ import {
   withSupabaseSelectRetry,
 } from "@/lib/supabase/browser-authenticated-client";
 import { useEditorialGroups } from "@/components/editorial/use-editorial-groups";
-import type { EditorialGroupColor } from "@/lib/editorial/editorial-groups";
+import { EDITORIAL_GROUP_COLOR_LABELS, type EditorialGroupColor } from "@/lib/editorial/editorial-groups";
 import { ArticleGroupMoveSelect, ArticleGroupRowTag, ArticleGroupTagMenuItem, ArticleGroupTaggingDialog, articleGroupMoveNotice, editorialGroupStripeClass } from "@/components/editorial/article-group-controls";
 import { articleDeclaredPlanSeals, declaredPlanPillarLabel, siloDeclaredPlanSeal } from "@/lib/arquiteto/declared-plan-seals";
 import { DeclaredPlanSeals } from "./declared-plan-seals";
@@ -3344,8 +3347,7 @@ export default function ArquitetoPage() {
     const id = (keyword as { canonicalWorkflow?: { id?: unknown } } | null | undefined)?.canonicalWorkflow?.id;
     return typeof id === "string" && id ? id : null;
   };
-  const measureArticleAllintitle = async (principalKeywordIds: readonly string[], recollect: boolean, fromProcessing = false) => {
-    if (!selectedBrandId) return;
+  const allintitleTargetsOf = (principalKeywordIds: readonly string[]) => {
     const vistos = new Set<string>();
     const alvos: { workflowItemId: string; keywordId: string }[] = [];
     let semVolume = 0;
@@ -3360,39 +3362,67 @@ export default function ArquitetoPage() {
       if (!workflowItemId) { semItem += 1; continue; }
       alvos.push({ workflowItemId, keywordId });
     }
+    const blocos: (typeof alvos)[] = [];
+    for (let inicio = 0; inicio < alvos.length; inicio += ARTICLE_ALLINTITLE_BLOCK_SIZE) blocos.push(alvos.slice(inicio, inicio + ARTICLE_ALLINTITLE_BLOCK_SIZE));
+    return { alvos, blocos, semVolume, semItem };
+  };
+  const requestArticleAllintitle = async (bloco: readonly { workflowItemId: string }[], recollect: boolean, extra: Record<string, unknown>) => {
+    const response = await fetch("/api/arquiteto/article-allintitle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brandId: selectedBrandId, articles: bloco.map(item => ({ workflowItemId: item.workflowItemId })), recollect, ...extra }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível medir o allintitle do artigo.");
+    return body;
+  };
+  /*
+   * SDD acelerar 2026-10-13, item 3: o plano do allintitle (grátis) sai no
+   * início de "Processar artigos", para entrar no MESMO diálogo do clique.
+   */
+  const planArticleAllintitle = async (principalKeywordIds: readonly string[]): Promise<{ title: string; plan: SerpPaidPlan } | null> => {
+    if (!selectedBrandId || !principalKeywordIds.length) return null;
+    const { alvos, blocos } = allintitleTargetsOf(principalKeywordIds);
+    if (!alvos.length) return null;
+    const planos: SerpPaidPlan[] = [];
+    for (const bloco of blocos) planos.push((await requestArticleAllintitle(bloco, false, { mode: "plan" })).data.plan as SerpPaidPlan);
+    return { title: `allintitle da Principal de ${alvos.length} artigo(s) com "Aplicar KGR: Sim"`, plan: mergeSerpPaidPlans(planos) };
+  };
+  const planArticleAllintitleRef = useRef(planArticleAllintitle);
+  planArticleAllintitleRef.current = planArticleAllintitle;
+  const measureArticleAllintitle = async (principalKeywordIds: readonly string[], recollect: boolean, fromProcessing = false, preauthorized?: { choice: SerpPaidPlanChoice | null; ceiling: number }) => {
+    if (!selectedBrandId) return;
+    const { alvos, blocos, semVolume, semItem } = allintitleTargetsOf(principalKeywordIds);
     if (!alvos.length) {
       if (!fromProcessing) showNotification("warning", semVolume ? "A Principal não tem volume no Google Ads: sem volume não há KGR, e o allintitle não é medido." : "A Principal ainda não está na cópia de trabalho canônica: recarregue o Arquiteto e tente de novo.");
       return;
     }
     setArticleAllintitleBusy(true);
     try {
-      const pedir = async (bloco: typeof alvos, extra: Record<string, unknown>) => {
-        const response = await fetch("/api/arquiteto/article-allintitle", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ brandId: selectedBrandId, articles: bloco.map(item => ({ workflowItemId: item.workflowItemId })), recollect, ...extra }),
-        });
-        const body = await response.json().catch(() => null);
-        if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível medir o allintitle do artigo.");
-        return body;
-      };
-      const blocos: (typeof alvos)[] = [];
-      for (let inicio = 0; inicio < alvos.length; inicio += ARTICLE_ALLINTITLE_BLOCK_SIZE) blocos.push(alvos.slice(inicio, inicio + ARTICLE_ALLINTITLE_BLOCK_SIZE));
+      const pedir = (bloco: typeof alvos, extra: Record<string, unknown>) => requestArticleAllintitle(bloco, recollect, extra);
       const planos: SerpPaidPlan[] = [];
       for (const bloco of blocos) planos.push((await pedir(bloco, { mode: "plan" })).data.plan as SerpPaidPlan);
-      const escolha = await askSerpPaidPlan(recollect
-        ? "Recalcular allintitle da Principal · chamada paga"
-        : `Allintitle da Principal · 1 consulta por artigo · ${alvos.length} artigo(s)`, mergeSerpPaidPlans(planos), false);
+      // Dentro de "Processar artigos" a escolha já veio do diálogo único do clique.
+      const escolha = preauthorized
+        ? preauthorized.choice
+        : await askSerpPaidPlan(recollect
+          ? "Recalcular allintitle da Principal · chamada paga"
+          : `Allintitle da Principal · 1 consulta por artigo · ${alvos.length} artigo(s)`, mergeSerpPaidPlans(planos), false);
       if (!escolha) {
         showNotification("warning", "Allintitle cancelado: nenhuma chamada foi paga. O KGR não aplicável não bloqueia nada.");
         return;
       }
+      let teto = preauthorized ? preauthorized.ceiling : Number.POSITIVE_INFINITY;
       let medidos = 0;
       let reaproveitados = 0;
       const falhas: string[] = [];
       const linhas = new Map<string, Record<string, unknown>>();
       for (let indice = 0; indice < blocos.length; indice += 1) {
-        const body = await pedir(blocos[indice], { mode: "execute", authorizedPaidQueries: planos[indice].paidQueries });
+        const autorizadas = preauthorized
+          ? allintitleBlockAuthorization(choiceForSerpBlock(escolha, planos[indice]).authorizedPaidQueries, teto)
+          : planos[indice].paidQueries;
+        teto -= autorizadas;
+        const body = await pedir(blocos[indice], { mode: "execute", authorizedPaidQueries: autorizadas });
         const itens: Array<{ status?: string }> = Array.isArray(body.data?.items) ? body.data.items : [];
         medidos += itens.filter(item => item.status === "measured").length;
         reaproveitados += itens.filter(item => item.status === "reused").length;
@@ -3966,7 +3996,8 @@ export default function ArquitetoPage() {
     reusedIds: string[];
     pendingReasons: Map<string, string>;
   };
-  const confirmSerpValidation = async (requestedGroups: ProvisionalArticleGroup[]): Promise<SerpValidationOutcome> => {
+  const confirmSerpValidation = async (requestedGroups: ProvisionalArticleGroup[], options: { ask?: ProcessingCostAsk } = {}): Promise<SerpValidationOutcome> => {
+    const perguntar: ProcessingCostAsk = options.ask ?? askSerpPaidPlan;
     const semResultado = (status: SerpValidationOutcome["status"], motivo?: string): SerpValidationOutcome => ({
       status, completedIds: [], collectedIds: [], reusedIds: [],
       pendingReasons: new Map(motivo ? requestedGroups.map(group => [group.publishedAnchorId || group.id, motivo] as const) : []),
@@ -4042,7 +4073,7 @@ export default function ArquitetoPage() {
           ...planejamento.merged,
           missingDetails: planejamento.plans.flatMap(blockPlan => blockPlan?.missingDetails || []),
         };
-        choice = await askSerpPaidPlan(blocosDaSerp.length > 1
+        choice = await perguntar(blocosDaSerp.length > 1
           ? `Validar SERP · plano de chamadas pagas · ${requestedGroups.length} artigos em ${blocosDaSerp.length} blocos`
           : "Validar SERP · plano de chamadas pagas", mergedFormationPlan, true, true);
         if (!choice?.retryCacheRead) break;
@@ -4054,7 +4085,9 @@ export default function ArquitetoPage() {
         return semResultado("cancelled", "A validação foi interrompida antes da escolha do plano.");
       }
       if (choice.cacheOnly) {
-        showNotification("warning", "Pagamento cancelado: nenhuma chamada será paga. Os artigos com evidência completa no cache recebem parecer; os que dependem de coleta ficam pendentes com o motivo.");
+        showNotification("warning", options.ask
+          ? "Validação pelo cache, sem pagar nesta etapa (o custo deste clique já foi decidido num diálogo só). Os artigos com evidência completa no cache recebem parecer; os que dependem de coleta ficam pendentes com o motivo."
+          : "Pagamento cancelado: nenhuma chamada será paga. Os artigos com evidência completa no cache recebem parecer; os que dependem de coleta ficam pendentes com o motivo.");
       }
       setSerpExecution(current => ({ ...current, ...Object.fromEntries(requestedGroups.map(group => [group.publishedAnchorId || group.id, { status: "processing" as const, queryCount: group.keywords.length, completed: 0 }])) }));
       type SerpBlockResult = {
@@ -4972,11 +5005,21 @@ export default function ArquitetoPage() {
         const paginas = Object.values(acceptedSiloPages);
         const contexto: Record<string, RadarArticleHandoffContext> = {};
         const semSilo: string[] = [];
+        // Item 12 (SDD acelerar 2026-10-13): a recusa nomeia o artigo por Assunto (ou principal) e slug.
+        const nomeDoArtigo = (articleId: string, fallback: string) => {
+          const envelope = selecionados.find(item => item.version.payload.articleId === articleId)?.version;
+          return architectArticleNoticeLabel({
+            subjectPhrase: envelope ? articleSubjectPhraseOf(envelope.payload) : null,
+            principal: articleLabelFor(articleId),
+            slug: envelope?.payload.suggestedSlug,
+            fallback,
+          });
+        };
         for (const entry of selecionados) {
           const resolucao = resolveCanonicalSiloForArticle({
             article: entry.version.payload, siloVersions: siloVersoes, siloPageVersions: paginas,
           });
-          if (!resolucao.ok) { semSilo.push(`${entry.version.payload.promise}: ${resolucao.reason}`); continue; }
+          if (!resolucao.ok) { semSilo.push(`${nomeDoArtigo(entry.version.payload.articleId, entry.version.payload.articleId)}: ${resolucao.reason}`); continue; }
           const grafo = findApprovedGraphForSilo({ silo: resolucao.context, graphs: grafos });
           const registro = remoteArticleSerp.find(item => item.candidateRef === entry.version.payload.articleId)?.payload;
           contexto[entry.version.payload.articleId] = {
@@ -5001,7 +5044,7 @@ export default function ArquitetoPage() {
         }
         const result = await importApprovedToRadar(articleIds, masterList as Array<Record<string, unknown>>, serpByArticle, contexto, approvedLinkGraphs);
         articlesSent = result.imported; skipped += result.skipped;
-        for (const item of result.blocked) semSilo.push(`${item.label}: ${item.reasons.join(" ")}`);
+        for (const item of result.blocked) semSilo.push(`${nomeDoArtigo(item.articleId, item.label)}: ${item.reasons.join(" ")}`);
         // Recusa é DECLARADA, nunca item mudo — e depois do envio, para incluir
         // o que o importador barrou além do que a resolução já tinha barrado.
         if (semSilo.length) showNotification("warning", `Bloqueado no handoff: ${semSilo.join(" ")}`);
@@ -5079,7 +5122,8 @@ export default function ArquitetoPage() {
         }];
       });
       try {
-        const response = await fetch(`/api/editorial/workspace?marcaId=${encodeURIComponent(brandId)}`, { cache: "no-store" });
+        // Só os itens do Radar são lidos aqui: a mesa leve (SDD acelerar, item 6) basta e pesa menos.
+        const response = await fetch(`/api/editorial/workspace?marcaId=${encodeURIComponent(brandId)}&detail=light`, { cache: "no-store" });
         if (cancelado) return;
         if (!response.ok) {
           setPendingRadarSmokeReadback(null);
@@ -5772,6 +5816,29 @@ export default function ArquitetoPage() {
       if (!terminou) serpSubjectRequestedKey.current = "";
     };
   }, [workspaceMode, serpSubjectKey, selectedBrandId, serpSubjectReadPlan, serpSubjectReload]);
+  /*
+   * RELER O "MESMO ASSUNTO" E ESPERAR (SDD acelerar 2026-10-13, item 3).
+   *
+   * Depois de pagar a SERP do lote, "Processar artigos" segue no MESMO clique:
+   * pede a releitura (o mesmo efeito acima, sem custo) e espera a mesa
+   * renderizar com o índice novo — só então a formação refeita está nos refs
+   * do clique. Falha na releitura devolve `false` e o clique para com o aviso.
+   */
+  const serpSubjectWaitersRef = useRef<Array<(ok: boolean) => void>>([]);
+  useEffect(() => {
+    if (serpSubjectRead.state !== "ready" && serpSubjectRead.state !== "failed") return;
+    const esperando = serpSubjectWaitersRef.current.splice(0);
+    for (const avisar of esperando) avisar(serpSubjectRead.state === "ready");
+  }, [serpSubjectRead]);
+  const rereadSerpSubject = (): Promise<boolean> => {
+    if (workspaceMode !== "articles" || !serpSubjectKey) return Promise.resolve(false);
+    return new Promise<boolean>(resolve => {
+      serpSubjectWaitersRef.current.push(resolve);
+      setSerpSubjectReload(current => current + 1);
+    });
+  };
+  const rereadSerpSubjectRef = useRef(rereadSerpSubject);
+  rereadSerpSubjectRef.current = rereadSerpSubject;
   /** O índice da mesa: uma leitura para a formação, a troca e o diagnóstico. */
   const serpSubjectIndex = useMemo(
     () => serpSubjectRead.data && serpSubjectRead.brandId === selectedBrandId ? buildSerpSubjectIndex(serpSubjectRead.data.footprints) : null,
@@ -7178,6 +7245,8 @@ export default function ArquitetoPage() {
     isDeclaredSubject: keywordId => subjectStandings.get(keywordId)?.declared === true,
     // D3 — o Assunto com artigo sugerido pela formação não é "aguardando sustentação".
     suggestedTrunkKeywordIds: new Set(articleFormationUniverses.flatMap(universe => universe.suggestedTrunkSubjectKeywordIds || [])),
+    // 2026-10-13 · a linha-título convertida fica aqui com o selo "convertida → <keyword>".
+    convertedTitleOf: keywordId => subjectStandings.get(keywordId)?.convertedTo ?? null,
   }), [ungroupedArticleKeywords, subjectAnchorCarriers, subjectStandings, articleFormationUniverses]);
   const ungroupedSubjectLabels = useMemo(
     () => new Map(ungroupedSubjectView.ungrouped.map(item => [item.keywordId, item.label])),
@@ -8879,6 +8948,26 @@ export default function ArquitetoPage() {
     // que não dá para processar: dependência upstream nomeada vem antes de
     // qualquer estado interno da tela.
   }, [acceptedArticleDnas, articleDnaEntryFor, articlesList, linksApprovedGraph, linksIsDirty, linksLoading, linksSaveState, linksSelectedContext, linksWorkingCopy]);
+  /*
+   * SDD acelerar 2026-10-13, item 10 — "PROCESSAR LINKS DE NOVO" depois de
+   * aplicar o plano: a tela vai para Links internos com o Silo escolhido e,
+   * quando a fase pode processar (grafo carregado), roda o mesmo
+   * `processarLinks` do botão (custo das âncoras dito por ele, como sempre).
+   */
+  const [linksProcessPending, setLinksProcessPending] = useState<string | null>(null);
+  const processarLinksRef = useRef<(() => Promise<void>) | null>(null);
+  processarLinksRef.current = processarLinks;
+  useEffect(() => {
+    if (!linksProcessPending || workspaceMode !== "links") return;
+    if (!linksSelectedContext || String(linksSelectedContext.siloId) !== linksProcessPending) return;
+    if (linksLoading || linksSaveState === "loading" || linksSaveState === "saving") return;
+    setLinksProcessPending(null);
+    if (!linksPhaseReading.canProcess) {
+      showNotification("warning", `Links internos deste Silo: ${linksPhaseReading.processBlocker || "não dá para processar agora"}.`);
+      return;
+    }
+    void processarLinksRef.current?.();
+  }, [linksProcessPending, workspaceMode, linksSelectedContext, linksLoading, linksSaveState, linksPhaseReading, showNotification]);
   const updateLinkEdge = async (edgeId: string, patch: Partial<Pick<InternalLinkGraphEdge, "sourceNodeId" | "targetNodeId" | "relationType" | "reason" | "priority" | "anchorConcepts">>) => {
     const current = linkEdgeById.get(edgeId);
     if (!current || !linksWorkingCopy) return;
@@ -10577,7 +10666,8 @@ export default function ArquitetoPage() {
    * cache, "empty" sem keyword com volume e "cancelled" quando a pessoa não
    * autorizou o pagamento.
    */
-  const collectArticleBatchSerp = async (siloRefs: readonly string[]): Promise<"collected" | "cached" | "empty" | "cancelled"> => {
+  const collectArticleBatchSerp = async (siloRefs: readonly string[], options: { ask?: ProcessingCostAsk } = {}): Promise<"collected" | "cached" | "empty" | "cancelled"> => {
+    const perguntar: ProcessingCostAsk = options.ask ?? askSerpPaidPlan;
     if (!selectedBrandId || !siloRefs.length) return "empty";
     // A cabeça da SiloPage com volume também entra (correção de 2026-09-28):
     // "todas as keywords com volume" do lote. Ela não forma Article, mas a SERP
@@ -10602,7 +10692,7 @@ export default function ArquitetoPage() {
       itemIdsOf: bloco => bloco.map(item => item.keywordId),
       plan: async bloco => (await pedirBloco(bloco, { mode: "plan" })).data.plan as SerpPaidPlan,
       // Nunca "só a principal": a coleta é sempre nas 4 lentes.
-      ask: merged => askSerpPaidPlan(`Primeira coleta da SERP do lote · 4 lentes · ${describeArticleBatchSerpLot(lote)}`, merged, false),
+      ask: merged => perguntar(`Primeira coleta da SERP do lote · 4 lentes · ${describeArticleBatchSerpLot(lote)}`, merged, false),
       onProgress: snapshot => setSerpBlockProgress(lote.blocks.length > 1 ? { process: "formation_serp", text: formatSerpBlockProgress(snapshot) } : null),
       execute: async (bloco, escolha) => {
         const body = await pedirBloco(bloco, { mode: "execute", authorizedPaidQueries: escolha.authorizedPaidQueries });
@@ -10628,12 +10718,11 @@ export default function ArquitetoPage() {
     }), { reused: 0, collected: 0, gaps: 0 });
     const falhasDeBloco = resultado.blockFailures.length;
     if (somas.collected > 0) {
-      // O cache mudou: a mesa relê o "mesmo assunto" (sem custo) e a formação é refeita.
-      setSerpSubjectReload(current => current + 1);
+      // O cache mudou: quem chamou relê o "mesmo assunto" (sem custo) e refaz a formação no mesmo clique.
       showNotification(somas.gaps || falhasDeBloco ? "warning" : "success", `SERP do lote coletada: ${somas.collected} lente(s) paga(s) agora, ${somas.reused} do cache · ${describeArticleBatchSerpLot(lote)}`
-        + (somas.gaps ? ` · ${somas.gaps} lente(s) sem resposta` : "")
+        + (somas.gaps ? ` · ${somas.gaps} lente(s) sem resposta (recolete pelo artigo, ato separado)` : "")
         + (falhasDeBloco ? ` · ${falhasDeBloco} bloco(s) com falha` : "")
-        + ". A formação foi refeita com a SERP; clique em Processar artigos de novo para o parecer de cada artigo (pelo cache, sem custo).");
+        + ". Relendo o índice \"mesmo assunto\" e seguindo para o parecer de cada artigo pelo cache, sem custo.");
       return "collected";
     }
     return "cached";
@@ -11029,6 +11118,23 @@ export default function ArquitetoPage() {
       .map(group => ({ ...group, keywordIds: masterList.map(keyword => String(keyword.id)).filter(id => grupoDe.get(id) === group.groupId) }))
       .filter(group => group.keywordIds.length > 0);
   }, [silosDosPlanos, selectedBrandId, arquitetoGroups.keywordGroupById, masterList]);
+  /*
+   * SDD acelerar 2026-10-13, item 4 — UMA PORTA PARA O PLANO. Os grupos com
+   * plano declarado na mesa viram os botões "Formar os artigos do plano · cor"
+   * do painel da melhoria; e a keyword de cada um é reconhecida pelas outras
+   * portas (Processar artigos e a formação automática), que apontam para lá.
+   */
+  const gruposDoPlanoNaMesa = useMemo(() => declaredPlanGroupsForArchitecture.flatMap(group => {
+    const cor = arquitetoGroups.groupById.get(group.groupId)?.color;
+    return cor ? [{ color: cor as string, label: `${EDITORIAL_GROUP_COLOR_LABELS[cor]}${group.label ? ` (${group.label})` : ""}`, keywordIds: group.keywordIds }] : [];
+  }), [declaredPlanGroupsForArchitecture, arquitetoGroups.groupById]);
+  const planoPorKeyword = useMemo(() => {
+    const mapa = new Map<string, string>();
+    for (const grupo of gruposDoPlanoNaMesa) for (const id of grupo.keywordIds) mapa.set(id, grupo.label);
+    return mapa;
+  }, [gruposDoPlanoNaMesa]);
+  const planoPorKeywordRef = useRef(planoPorKeyword);
+  planoPorKeywordRef.current = planoPorKeyword;
 
   const architectureProposal = useMemo(() => buildArchitectureWorkingProposal({
     analysis: architectureAnalysis,
@@ -13953,8 +14059,9 @@ export default function ArquitetoPage() {
       showNotification(refused.length?"warning":"success",(body.data.confirmed?.length || 0)+" artigo(s) confirmados. "+refused.map((r:{articleId:string;blockers:string[]})=>r.articleId+": "+r.blockers.join(" ")).join(" · "));
     } catch(error){showNotification("error",error instanceof Error?error.message:"Falha no status global.");} finally{setUpdating(false);}
   };
-  const markSelectedReadyForRadar = async (depoisDaSerp = false) => {
-    if(workspaceMode !== "links") return;
+  // O desfecho é devolvido para "Marcar Pronto para Radar e enviar" (SDD acelerar 2026-10-13, item 5) encadear o envio.
+  const markSelectedReadyForRadar = async (depoisDaSerp = false): Promise<"marked" | "already" | "serp_reread" | "none" | "failed"> => {
+    if(workspaceMode !== "links") return "none";
     /*
      * SERP VELHA NÃO É RECUSA: É RELEITURA (pedido do dono, 2026-09-30).
      *
@@ -13977,7 +14084,7 @@ export default function ArquitetoPage() {
         showNotification("info", `${grupos.length} artigo(s) com a SERP anterior à composição atual. Relendo pelo cache primeiro; só lente que falta entra no plano de pagamento. Depois a marcação continua.`);
         await confirmSerpValidationRef.current(grupos);
         setPendingReadyRetry(true);
-        return;
+        return "serp_reread";
       }
     }
     const plano = planReadyForRadarBatch(selectedArticleOperational.map(item => item.input));
@@ -13998,7 +14105,7 @@ export default function ArquitetoPage() {
           recusas.length ? `Recusados: ${recusas.join(" · ")}` : "",
         ].filter(Boolean).join(" ") || "Nenhum artigo selecionado.",
       );
-      return;
+      return plano.alreadyReady.length ? "already" : "none";
     }
 
     setUpdating(true);
@@ -14022,8 +14129,10 @@ export default function ArquitetoPage() {
         resultado.confirmed.length ? (todas.length ? "warning" : "success") : "error",
         partes.join(" ") || "Nada mudou.",
       );
+      return resultado.confirmed.length ? "marked" : plano.alreadyReady.length ? "already" : "failed";
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "A gravação do status operacional falhou.");
+      return "failed";
     } finally {
       setUpdating(false);
     }
@@ -14031,11 +14140,65 @@ export default function ArquitetoPage() {
 
   const markReadyRef = useRef(markSelectedReadyForRadar);
   markReadyRef.current = markSelectedReadyForRadar;
+  /*
+   * "MARCAR PRONTO PARA RADAR E ENVIAR" (SDD acelerar 2026-10-13, item 5): o
+   * envio só sai depois da marcação relida, num render seguinte (o portão do
+   * envio lê o status gravado). `readySendChainRef` diz que a marcação em curso
+   * é a do encadeamento; `readySendStage` = "send" dispara o envio.
+   */
+  const readySendChainRef = useRef(false);
+  const [readySendStage, setReadySendStage] = useState<"idle" | "send">("idle");
+  const seguirParaEnvio = (desfecho: Awaited<ReturnType<typeof markSelectedReadyForRadar>>) => {
+    if (!readySendChainRef.current || desfecho === "serp_reread") return;
+    readySendChainRef.current = false;
+    if (desfecho === "marked" || desfecho === "already") setReadySendStage("send");
+    else showNotification("warning", "Nada foi enviado ao Radar: a marcação de Pronto para Radar não foi confirmada (motivo acima).");
+  };
+  const seguirParaEnvioRef = useRef(seguirParaEnvio);
+  seguirParaEnvioRef.current = seguirParaEnvio;
   useEffect(() => {
     if (!pendingReadyRetry || serpBusy || updating) return;
     setPendingReadyRetry(false);
-    void markReadyRef.current(true);
+    void markReadyRef.current(true).then(desfecho => seguirParaEnvioRef.current(desfecho));
   }, [pendingReadyRetry, serpBusy, updating]);
+  const sendToRadarRef = useRef(sendSelectedToRadar);
+  sendToRadarRef.current = sendSelectedToRadar;
+  useEffect(() => {
+    if (readySendStage !== "send" || updating || serpBusy) return;
+    /*
+     * Recusa por artigo: o portão do envio recusa o lote inteiro quando um
+     * selecionado não está Pronto. O encadeamento estreita a seleção aos que
+     * ficaram prontos (relidos), diz quem ficou de fora e envia os outros.
+     */
+    const ficam = selectedArticleOperational.flatMap((item, indice) =>
+      canSendToRadar(item.state.workflowStatus) && !item.input.gateIssues.length ? [selectedArticlesForRadar[indice]?.id].filter((id): id is string => Boolean(id)) : []);
+    if (ficam.length !== selectedArticleOperational.length) {
+      const fora = selectedArticleOperational.filter(item => !(canSendToRadar(item.state.workflowStatus) && !item.input.gateIssues.length));
+      showNotification("warning", `${fora.length} artigo(s) do Silo não vão ao Radar agora: ${fora.map(item => `${item.label} (${item.input.gateIssues.join(" ") || WORKFLOW_STATUS_LABELS[item.state.workflowStatus]})`).join(" · ")}.`);
+      if (!ficam.length) { setReadySendStage("idle"); return; }
+      setSelectedArticleIds(new Set(ficam));
+      return;
+    }
+    setReadySendStage("idle");
+    void sendToRadarRef.current();
+  }, [readySendStage, updating, serpBusy, selectedArticleOperational, selectedArticlesForRadar, showNotification]);
+  /** Os artigos do Silo aberto em Links internos — o escopo de "Marcar Pronto para Radar e enviar". */
+  const linksSiloArticleIds = useMemo(() => linksSelectedContext
+    ? articlesList.filter(article => linksSiloOfArticle(article) === String(linksSelectedContext.siloId)).map(article => article.id)
+    : [], [articlesList, linksSelectedContext]);
+  const [readySendPreviewOpen, setReadySendPreviewOpen] = useState(false);
+  const openReadySendPreview = () => {
+    if (!linksSiloArticleIds.length) return;
+    // A prévia lê o MESMO portão da marcação e do envio: o escopo vira a seleção.
+    setSelectedArticleIds(new Set(linksSiloArticleIds));
+    setReadySendPreviewOpen(true);
+  };
+  const confirmReadySend = async () => {
+    setReadySendPreviewOpen(false);
+    readySendChainRef.current = true;
+    const desfecho = await markReadyRef.current();
+    seguirParaEnvioRef.current(desfecho);
+  };
 
   /**
    * Candidatos que JÁ têm ArticleDNA aprovado equivalente.
@@ -14317,7 +14480,7 @@ export default function ArquitetoPage() {
    * Determinístico neste corte: sem SERP e sem IA. Nada é materializado; o
    * resultado é PROPOSTA de formação sobre um read-model.
    */
-  const processArticleFormation = useCallback(async (automatic?: { candidateRefs: readonly string[]; finalizeSubject?: string }) => {
+  const processArticleFormation = useCallback(async (automatic?: { candidateRefs: readonly string[]; finalizeSubject?: string }, continuacao?: ProcessingClickContinuation) => {
     if (!selectedBrandId) return;
     // A leitura é a do clique. Ver `formationScopeRef`.
     const requestedRefs = automatic?.candidateRefs?.length ? new Set(automatic.candidateRefs) : null;
@@ -14335,6 +14498,24 @@ export default function ArquitetoPage() {
       showNotification("warning", "A formação automática aguarda a releitura das composições atualizadas; nenhum artigo foi descartado.");
       return;
     }
+    /*
+     * SDD acelerar 2026-10-13, item 4 — UMA PORTA PARA O PLANO. Artigo de grupo
+     * com plano declarado não roda aqui (nem pela formação automática): a porta
+     * é "Formar os artigos do plano · cor", a melhoria recortada pelo grupo, que
+     * obedece ao plano, à trava e à guarda de retrabalho. Nada é gravado.
+     */
+    const doPlano = selecionados
+      .flatMap(universe => universe.candidates)
+      .filter(candidate => escopo.candidateRefs.has(candidate.candidateRef))
+      .flatMap(candidate => {
+        const plano = [candidate.principalKeywordId, ...candidate.keywords.map(item => item.keywordId)].map(id => planoPorKeywordRef.current.get(id)).find(Boolean);
+        return plano ? [{ nome: masterListRef.current.find(item => String(item.id) === candidate.principalKeywordId)?.keyword || candidate.candidateRef, plano }] : [];
+      });
+    if (doPlano.length) {
+      const planos = [...new Set(doPlano.map(item => item.plano))];
+      showNotification("warning", `${doPlano.length === 1 ? `"${doPlano[0].nome}" é` : `${doPlano.length} artigos selecionados são`} do plano ${planos.join(", ")}: use "Formar os artigos do plano · ${planos[0]}" no painel da melhoria (acima). Os artigos sem plano seguem por aqui — desmarque os do plano. Nada foi processado.`);
+      return;
+    }
     setFormationBusy(true);
     try {
       if (!selecionados.length) {
@@ -14345,23 +14526,65 @@ export default function ArquitetoPage() {
        * 1. PRIMEIRA COLETA DA SERP DO LOTE (SDD 2026-09-28, fatia A2) — antes
        * da formação, nas 4 lentes, só keywords com volume, cache primeiro.
        * Quando algo foi pago, o índice "mesmo assunto" é relido e a formação
-       * muda: o parecer fica para o próximo clique, já pelo cache. Tudo no
-       * cache segue direto. Cancelar o pagamento segue com o que houver no
+       * muda: o parecer sai no MESMO clique, pelo cache. Tudo no cache segue
+       * direto. Cancelar o pagamento segue com o que houver no
        * cache, como antes. A finalização automática do Assunto não coleta aqui.
        */
-      if (!automatic) {
-        const silosDoLote = [...new Set(selecionados.map(universe => universe.siloRef).filter((ref): ref is string => typeof ref === "string" && ref.length > 0))];
-        const coletaDoLote = await collectArticleBatchSerpRef.current(silosDoLote);
-        if (coletaDoLote === "collected") return;
+      /*
+       * SDD acelerar 2026-10-13, item 3 — UM CLIQUE E UM DIÁLOGO.
+       *
+       * O allintitle é só do artigo com "Aplicar KGR: Sim" (com "não
+       * aplicável", o padrão, nada é medido nem perguntado) e o plano dele (grátis)
+       * entra no PRIMEIRO diálogo com custo do clique — SERP do lote ou
+       * validação. Depois desse diálogo, nenhum passo do clique pergunta de novo.
+       * Pagou a SERP do lote: o índice "mesmo assunto" é relido (sem custo) e o
+       * clique segue para o parecer pelo cache, sem pedir um segundo clique.
+       */
+      const aplicaKgr = (candidate: { candidateRef: string; principalKeywordId: string }) => {
+        const principal = masterListRef.current.find(item => String(item.id) === candidate.principalKeywordId);
+        const dna = articleDnaEntryFor({ candidateRef: candidate.candidateRef }).version;
+        return readArticleKgrDecision({
+          kgrIdentity: mergeArticleAllintitleEvidence(dna?.payload.kgrIdentity, principal?.kgrIdentity),
+          principal,
+          principalKeywordId: candidate.principalKeywordId,
+          supports: [],
+        }).applyKgr;
+      };
+      let clique = continuacao;
+      if (!clique) {
+        const principaisComKgr = automatic ? [] : allintitlePrincipalsOfProcessing(
+          selecionados.flatMap(universe => universe.candidates).filter(candidate => escopo.candidateRefs.has(candidate.candidateRef)),
+          aplicaKgr,
+        );
+        const planoDoAllintitle = principaisComKgr.length ? await planArticleAllintitleRef.current(principaisComKgr) : null;
+        clique = { principaisComKgr, planoDoAllintitle, dialogo: createProcessingCostDialog({ ask: askSerpPaidPlan, extra: planoDoAllintitle }) };
       }
-      // Etapa 4 (allintitle da Principal, uma consulta por artigo): depois do parecer.
-      const principaisDoEscopo = selecionados
-        .flatMap(universe => universe.candidates)
-        .filter(candidate => escopo.candidateRefs.has(candidate.candidateRef))
-        .map(candidate => candidate.principalKeywordId);
+      const { principaisComKgr, planoDoAllintitle, dialogo: dialogoDoClique } = clique;
+      if (!automatic && !continuacao) {
+        const silosDoLote = [...new Set(selecionados.map(universe => universe.siloRef).filter((ref): ref is string => typeof ref === "string" && ref.length > 0))];
+        const coletaDoLote = await collectArticleBatchSerpRef.current(silosDoLote, { ask: dialogoDoClique.ask });
+        if (coletaDoLote === "collected") {
+          const relido = await rereadSerpSubjectRef.current();
+          if (!relido) {
+            showNotification("warning", "A SERP do lote foi coletada e está no cache, mas a releitura do índice \"mesmo assunto\" falhou. Clique em \"Reler o cache de SERP\" e depois em Processar artigos: o parecer sai pelo cache, sem custo.");
+            return;
+          }
+          // A formação mudou com a SERP: o resto do clique segue pelo fechamento
+          // de AGORA (a formação refeita), com o mesmo diálogo já decidido.
+          await processArticleFormationRef.current(undefined, clique);
+          return;
+        }
+      }
+      // Etapa 4 (allintitle da Principal, só com "Aplicar KGR: Sim"): depois do parecer.
+      // O fim do clique: mede o que foi autorizado e diz o que ficou fora dele.
       const medirAllintitleDoEscopo = async () => {
-        if (automatic || !principaisDoEscopo.length) return;
-        await measureArticleAllintitleRef.current(principaisDoEscopo, false, true);
+        if (!automatic && planoDoAllintitle) {
+          const escolha = await dialogoDoClique.extraChoice();
+          await measureArticleAllintitleRef.current(principaisComKgr, false, true, { choice: escolha, ceiling: planoDoAllintitle.plan.paidQueries });
+        }
+        if (dialogoDoClique.deferredPaidQueries > 0) {
+          showNotification("warning", `${dialogoDoClique.deferredPaidQueries} consulta(s) paga(s) ficaram fora deste clique (o custo já tinha sido decidido num diálogo só). Os artigos que dependem delas aparecem pendentes com o motivo; recolete pelo artigo, como ato separado.`);
+        }
       };
       const marcador = await persistArticleFormationMarker(selectedBrandId, {
         contractVersion: ARTICLE_FORMATION_MARKER_CONTRACT_VERSION,
@@ -14438,7 +14661,7 @@ export default function ArquitetoPage() {
       }
       const inicio = describeArticleRunStartPlain({ candidates: resumoDaFormacao.candidates, withoutOpinion: pendentes.length });
       showNotification(inicio.tone, inicio.message);
-      const resultadoDaSerp = await confirmSerpValidation(pendentes);
+      const resultadoDaSerp = await confirmSerpValidation(pendentes, { ask: dialogoDoClique.ask });
       /*
        * D6 — coletada é só o que pagou SERP nesta execução e voltou no
        * readback; reaproveitada é o parecer novo feito só com o cache. O que
@@ -14461,7 +14684,9 @@ export default function ArquitetoPage() {
     } finally {
       setFormationBusy(false);
     }
-  }, [anunciarBloqueios, readoutDaExecucao, structuralRevisions, selectedBrandId, articleFormationBase, serpGroupsForCandidates, showNotification]);
+  }, [anunciarBloqueios, readoutDaExecucao, structuralRevisions, selectedBrandId, articleFormationBase, serpGroupsForCandidates, showNotification, articleDnaEntryFor, askSerpPaidPlan]);
+  const processArticleFormationRef = useRef(processArticleFormation);
+  processArticleFormationRef.current = processArticleFormation;
 
   /**
    * Cria os ArticleDNA dos candidatos aprovados.
@@ -18041,7 +18266,53 @@ export default function ArquitetoPage() {
                       >
                         Confirmar links internos
                       </button>
+                      {/* SDD acelerar 2026-10-13, item 5: depois do grafo aprovado, Pronto para Radar + envio numa decisão. */}
+                      {linksApprovedGraph && !linksPhaseReading.graphStale && !linksIsDirty && linksSiloArticleIds.length > 0 && (
+                        <button
+                          type="button"
+                          data-testid="architect-links-ready-and-send"
+                          onClick={openReadySendPreview}
+                          disabled={updating || serpBusy || readySendPreviewOpen || readySendStage !== "idle"}
+                          title="Mostra cada artigo do Silo com o que falta; confirmar marca Pronto para Radar (com releitura) e envia ao Radar (com releitura). Os dois botões de sempre continuam."
+                          className={ARCHITECT_UI.importButton}
+                        >
+                          {`Marcar Pronto para Radar e enviar os ${linksSiloArticleIds.length} artigos deste Silo`}
+                        </button>
+                      )}
                     </div>
+                    {readySendPreviewOpen && (() => {
+                      const plano = planReadyForRadarBatch(selectedArticleOperational.map(item => item.input));
+                      const recusa = new Map(plano.refused.map(item => [item.articleId, item.blockers.join(" ")] as const));
+                      const prontos = new Set(plano.alreadyReady);
+                      const vao = plano.eligible.length + plano.alreadyReady.length;
+                      return (
+                        <section className="mt-3 rounded-md border border-divider p-3" data-testid="architect-links-ready-and-send-preview">
+                          <p className="text-sm font-semibold text-foreground">Prévia · {selectedArticleOperational.length} artigo(s) do Silo</p>
+                          <p className="mt-1 text-sm leading-6 text-text-muted">Confirmar marca Pronto para Radar os que podem (o servidor confere e relê) e, em seguida, envia ao Radar os que ficarem prontos. Quem não pode fica de fora com o motivo; os outros seguem. Nada é pago.</p>
+                          <ul className="mt-2 divide-y divide-divider">
+                            {selectedArticleOperational.map(item => {
+                              const dna = acceptedArticleDnas[item.input.articleId];
+                              const nome = architectArticleNoticeLabel({ subjectPhrase: dna ? articleSubjectPhraseOf(dna.payload) : null, principal: item.label, slug: dna?.payload.suggestedSlug, fallback: item.input.articleId });
+                              const motivo = recusa.get(item.input.articleId);
+                              return (
+                                <li key={item.input.articleId} className="py-1.5 text-sm leading-6">
+                                  <span className="text-foreground">{nome}</span>
+                                  <span className={`ml-2 ${motivo ? "text-warning" : "text-text-muted"}`}>
+                                    {motivo ? `· não vai: ${motivo}` : item.input.sentToRadar ? "· já está no Radar (não muda)" : prontos.has(item.input.articleId) ? "· já Pronto para Radar · será enviado" : "· será marcado e enviado"}
+                                  </span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button type="button" data-testid="architect-links-ready-and-send-confirm" onClick={() => { void confirmReadySend(); }} disabled={updating || serpBusy || vao === 0} className={ARCHITECT_UI.primaryButton}>
+                              {`Confirmar: marcar e enviar ${vao}`}
+                            </button>
+                            <button type="button" onClick={() => setReadySendPreviewOpen(false)} disabled={updating} className={ARCHITECT_UI.toolbarButton}>Cancelar</button>
+                          </div>
+                        </section>
+                      );
+                    })()}
                   </div>
                 ),
               }}
@@ -18819,6 +19090,13 @@ export default function ArquitetoPage() {
                     // O Pilar do Silo fechado é o do SiloDNA vigente (pode ter mudado depois, pelo plano declarado).
                     <><p className="mt-3 text-sm text-text-muted" data-testid="architect-silo-pillar-closed">Pilar · fechado com o Silo: <span className="font-semibold text-foreground">{(siloDoPar?.payload.pillarArticleId ?? pillarArticleId) ? articleLabel(siloDoPar?.payload.pillarArticleId ?? pillarArticleId) : "—"}</span></p>
                     {(siloDoPar?.payload.pillarArticleId ?? pillarArticleId) ? <ArticleSubjectLine phrase={articleSubject(siloDoPar?.payload.pillarArticleId ?? pillarArticleId)} className="mt-1" testId="architect-silo-pillar-subject"/> : null}
+                    {/* 2026-10-13 — Conversão do formato anterior: o Assunto dos artigos passa da linha-título para a keyword (antes de aplicar o plano ao Silo). */}
+                    {siloDoPar && selectedBrandId && <div className="mt-2"><SubjectConversionPanel
+                      brandId={selectedBrandId}
+                      classNames={{ button: ARCHITECT_UI.footerButton, primaryButton: ARCHITECT_UI.primaryButton }}
+                      notify={showNotification}
+                      onApplied={() => setCanonicalWorkspaceReload(current => current + 1)}
+                    /></div>}
                     {/* 2026-10-12 — "Aplicar o plano declarado ao Silo": prévia → confirmação, SiloDNA e SiloPage v+1. */}
                     {siloDoPar && selectedBrandId && <SiloDeclaredPlanPanel
                       brandId={selectedBrandId}
@@ -18826,6 +19104,7 @@ export default function ArquitetoPage() {
                       classNames={{ button: ARCHITECT_UI.footerButton, primaryButton: ARCHITECT_UI.primaryButton }}
                       notify={showNotification}
                       onApplied={() => setCanonicalWorkspaceReload(current => current + 1)}
+                      onProcessLinks={siloId => { setSelectedArticleIds(new Set()); setWorkspaceMode("links"); handleLinksSiloChange(siloId); setLinksProcessPending(siloId); }}
                     />}
                     {/* F4 — "Retirar artigo do Silo": prévia → motivo → confirmação, nos suportes do SiloDNA vigente. */}
                     {siloDoPar && selectedBrandId && <SiloArticleWithdrawalPanel
@@ -18949,7 +19228,8 @@ export default function ArquitetoPage() {
           */}
         {/* Publicados marcados na planilha: "Buscar keywords" analisa só eles (sem marcação, todos). */}
         {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
-          selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))} />}
+          selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))}
+          planGroups={gruposDoPlanoNaMesa.map(grupo => ({ color: grupo.color, label: grupo.label }))} />}
         {/* Artigos novos: os dois atos da formação continuam à mão sem abrir
             os detalhes. Mesmos handlers e mesmas travas do painel de formação. */}
         {articleMode && (

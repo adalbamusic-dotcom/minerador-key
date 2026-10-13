@@ -24,6 +24,13 @@ import { assignKeywordGroupWithCore } from "./keyword-group-core.ts";
  * LÊ a declaração, e a frase declarada no mesmo envio não entra como item.
  *
  * Nenhuma chamada paga, nenhuma tabela da Descoberta, nenhuma RPC.
+ *
+ * 2026-10-13 (SDD `sdd-acelerar-fluxo-do-plano-2026-10-13.md`, item 8): com o
+ * recibo do SERVIDOR da pesquisa (porta `volume`, montada fora daqui), a
+ * keyword nova — ou existente sem medição, não publicada e fora do plano —
+ * recebe a média do Google Ads que a pesquisa mediu, como Volume validado com
+ * proveniência; e a porta `runLogic` roda a Lógica nas keywords do envio. O
+ * corpo continua sem métrica: o navegador nunca é fonte de volume.
  */
 
 export const SUBJECT_DISCOVERY_KEY = "subject_discovery" as const;
@@ -111,8 +118,12 @@ export type SubjectDiscoverySearchEntry = {
   subjectPhrase: string;
   origins: SubjectDiscoveryOrigin[];
   evidence: string[];
-  /** Q11: o texto veio do navegador; nada aqui foi conferido no provider. */
-  provenanceVerified: false;
+  /**
+   * Q11: o texto veio do navegador. `true` só quando o recibo do SERVIDOR da
+   * pesquisa (M-A, SDD acelerar-fluxo 2026-10-13, item 8) traz esta keyword
+   * nesta marca; sem recibo (busca antiga, MCP sem recibo), `false` como antes.
+   */
+  provenanceVerified: boolean;
 };
 
 export type SubjectDiscoveryBlock = {
@@ -161,7 +172,7 @@ function readSearchEntry(value: unknown): SubjectDiscoverySearchEntry | null {
     subjectPhrase: typeof record.subjectPhrase === "string" ? record.subjectPhrase : "",
     origins: normalizeSubjectDiscoveryOrigins(record.origins),
     evidence: normalizeSubjectDiscoveryEvidence(record.evidence),
-    provenanceVerified: false,
+    provenanceVerified: record.provenanceVerified === true,
   };
 }
 
@@ -232,7 +243,55 @@ export type SubjectDiscoveryImportRow = {
   outcome: SubjectDiscoveryImportOutcome;
   keywordId: string | null;
   reason: string | null;
+  /**
+   * Aditivo (SDD acelerar-fluxo 2026-10-13, item 8): o Volume que o recibo da
+   * pesquisa deu a esta keyword, ou por que não deu. Ausente sem recibo.
+   */
+  volume?: { outcome: "written"; value: number; measuredAt: string } | { outcome: "skipped"; code: string; reason: string };
 };
+
+/**
+ * A PORTA DO VOLUME (item 8). Montada no servidor a partir do recibo da
+ * pesquisa (`minerador_subject_search_receipts`), lido pela marca da rota e
+ * pelo `searchId`. O núcleo não lê o recibo nem conhece o provider: pergunta à
+ * porta. Sem porta (ou sem recibo), o import é o de antes, byte a byte.
+ */
+export type SubjectDiscoveryImportVolumeExisting = {
+  status: string | null;
+  volume_search: number | null;
+  results_allintitle: number | null;
+  kgr_score: number | null;
+  volume_source: string | null;
+  analise_semantica: Record<string, unknown> | null;
+};
+
+export type SubjectDiscoveryImportVolumeDecision =
+  | { ok: true; patch: { volume_search: number; volume_source: "google_ads"; kgr_score: number | null; analise_semantica: Record<string, unknown> }; value: number; measuredAt: string }
+  | { ok: false; code: string; reason: string };
+
+export type SubjectDiscoveryImportVolumePort = {
+  receipt: "found" | "not_found" | "unavailable" | "failed";
+  decide: (normalizedKeyword: string, existing: SubjectDiscoveryImportVolumeExisting) => SubjectDiscoveryImportVolumeDecision;
+  /** A keyword está no recibo desta marca (a origem passa a conferida). */
+  verified: (normalizedKeyword: string) => boolean;
+};
+
+/** A Lógica do botão do Minerador, no servidor (`runKeywordLogicWithCore`), injetada pela rota e pelo MCP. */
+export type SubjectDiscoveryImportLogicPort = (keywordIds: string[]) => Promise<{ applied: number; unchanged: number; failed: number }>;
+
+export type SubjectDiscoveryImportVolumeSummary = {
+  receipt: SubjectDiscoveryImportVolumePort["receipt"];
+  written: number;
+  skipped: number;
+};
+
+export type SubjectDiscoveryImportLogicSummary = { ran: boolean; applied: number; unchanged: number; failed: number; error: string | null };
+
+/** A linha nova do import: nada medido antes. */
+const FRESH_VOLUME_EXISTING: SubjectDiscoveryImportVolumeExisting = { status: "bruto", volume_search: null, results_allintitle: null, kgr_score: null, volume_source: null, analise_semantica: {} };
+
+/** Colunas das elegíveis quando há recibo: as do pacote de volume, para não sobrescrever medição. */
+export const SUBJECT_DISCOVERY_ELIGIBLE_VOLUME_COLUMNS = "id,status,analise_semantica,volume_search,results_allintitle,kgr_score,volume_source" as const;
 
 export type SubjectDiscoveryImportCounts = {
   received: number;
@@ -271,6 +330,10 @@ export type SubjectDiscoveryImportResult =
      * contada. Ausente quando o Assunto não tem grupo (ou sem a M1).
      */
     group?: { groupId: string; stamped: number; inOtherGroup: number };
+    /** Aditivo (item 8): o que o recibo deu de Volume. Ausente sem a porta. */
+    volume?: SubjectDiscoveryImportVolumeSummary;
+    /** Aditivo (item 8): a Lógica rodada nas keywords deste envio. Ausente sem a porta. */
+    logic?: SubjectDiscoveryImportLogicSummary;
   }
   | { ok: false; code: SubjectDiscoveryImportRefusalCode; reason: string };
 
@@ -368,6 +431,10 @@ export async function importSubjectDiscoveryWithCore(input: {
   supabase: SupabaseClient;
   request: SubjectDiscoveryImportRequest;
   now?: string;
+  /** Item 8: o Volume do recibo da pesquisa. Ausente = o import de antes. */
+  volume?: SubjectDiscoveryImportVolumePort | null;
+  /** Item 8: a Lógica nas keywords criadas/registradas por este envio. Ausente = não roda. */
+  runLogic?: SubjectDiscoveryImportLogicPort | null;
 }): Promise<SubjectDiscoveryImportResult> {
   const brandId = typeof input.brandId === "string" ? input.brandId.trim() : "";
   if (!brandId) return { ok: false, code: "BRAND_REQUIRED", reason: "A marca ativa é necessária para importar." };
@@ -395,9 +462,13 @@ async function runSubjectDiscoveryImport(input: {
   supabase: SupabaseClient;
   request: SubjectDiscoveryImportRequest;
   now?: string;
+  volume?: SubjectDiscoveryImportVolumePort | null;
+  runLogic?: SubjectDiscoveryImportLogicPort | null;
 }): Promise<SubjectDiscoveryImportResult> {
   const { brandId, actorUserId, supabase, request } = input;
   const now = input.now || new Date().toISOString();
+  // Só com o recibo encontrado nesta marca o volume entra; nos outros casos, o import de antes.
+  const volumeReady = input.volume && input.volume.receipt === "found" ? input.volume : null;
   const subjectPhrase = oneLine(request.subjectPhrase, SUBJECT_DISCOVERY_PHRASE_MAX);
 
   // A conferência do Assunto vem antes de qualquer escrita.
@@ -446,7 +517,7 @@ async function runSubjectDiscoveryImport(input: {
     (liveId ? existing : fresh).push({ row, item });
   }
 
-  const entryFor = (item: SubjectDiscoveryImportItem): SubjectDiscoverySearchEntry => ({
+  const entryFor = (item: SubjectDiscoveryImportItem, normalizedKeyword: string): SubjectDiscoverySearchEntry => ({
     searchId: request.searchId,
     importRequestId: request.importRequestId,
     importedAt: now,
@@ -455,8 +526,11 @@ async function runSubjectDiscoveryImport(input: {
     subjectPhrase,
     origins: normalizeSubjectDiscoveryOrigins(item.origins),
     evidence: normalizeSubjectDiscoveryEvidence(item.evidence),
-    provenanceVerified: false,
+    provenanceVerified: volumeReady ? volumeReady.verified(normalizedKeyword) : false,
   });
+  const volumeOf = (decision: SubjectDiscoveryImportVolumeDecision): NonNullable<SubjectDiscoveryImportRow["volume"]> => decision.ok
+    ? { outcome: "written", value: decision.value, measuredAt: decision.measuredAt }
+    : { outcome: "skipped", code: decision.code, reason: decision.reason };
 
   // Existentes, passo 1: só o registro de aprovação (~0,3 kB cada).
   const existingIds = [...new Set(existing.map(pending => pending.row.keywordId!))];
@@ -484,7 +558,9 @@ async function runSubjectDiscoveryImport(input: {
   }
 
   // Existentes, passo 2: a coluna inteira só das elegíveis, no máximo 50.
-  const full = await readByIds<{ id: unknown; status?: unknown; analise_semantica?: unknown }>(supabase, brandId, eligible.map(pending => pending.row.keywordId!), SUBJECT_DISCOVERY_ELIGIBLE_COLUMNS);
+  type EligibleRow = { id: unknown; status?: unknown; analise_semantica?: unknown; volume_search?: unknown; results_allintitle?: unknown; kgr_score?: unknown; volume_source?: unknown };
+  const full = await readByIds<EligibleRow>(supabase, brandId, eligible.map(pending => pending.row.keywordId!), volumeReady ? SUBJECT_DISCOVERY_ELIGIBLE_VOLUME_COLUMNS : SUBJECT_DISCOVERY_ELIGIBLE_COLUMNS);
+  const numberOrNull = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : null;
   for (const pending of eligible) {
     const { row, item } = pending;
     const id = row.keywordId!;
@@ -494,18 +570,28 @@ async function runSubjectDiscoveryImport(input: {
       row.reason = SUBJECT_DISCOVERY_REASONS.not_recorded_changed;
       continue;
     }
-    const next = appendSubjectDiscoverySearch(current.analise_semantica, entryFor(item));
+    // Item 8: o recibo pode dar o Volume à existente sem medição (nunca sobrescreve, nunca à do plano).
+    const decision = volumeReady ? volumeReady.decide(row.normalizedKeyword, {
+      status: typeof current.status === "string" ? current.status : null,
+      volume_search: numberOrNull(current.volume_search),
+      results_allintitle: numberOrNull(current.results_allintitle),
+      kgr_score: numberOrNull(current.kgr_score),
+      volume_source: typeof current.volume_source === "string" ? current.volume_source : null,
+      analise_semantica: asRecord(current.analise_semantica),
+    }) : null;
+    const next = appendSubjectDiscoverySearch(decision?.ok ? decision.patch.analise_semantica : current.analise_semantica, entryFor(item, row.normalizedKeyword));
     if (!next.changed) {
       row.outcome = "already_recorded";
       row.reason = SUBJECT_DISCOVERY_REASONS.already_recorded;
       continue;
     }
     const statusRead = typeof current.status === "string" ? current.status : null;
+    const volumeColumns = decision?.ok ? { volume_search: decision.patch.volume_search, volume_source: decision.patch.volume_source, kgr_score: decision.patch.kgr_score } : {};
     // Update condicionado: sem registro de aprovação e com o status lido. Uma
     // aprovação feita entre a leitura e a escrita não é apagada.
     let update = supabase
       .from("minerador_keywords")
-      .update({ analise_semantica: next.semantic })
+      .update({ analise_semantica: next.semantic, ...volumeColumns })
       .eq("id", id)
       .eq("brand_id", brandId)
       .is("deleted_at", null)
@@ -524,6 +610,7 @@ async function runSubjectDiscoveryImport(input: {
       continue;
     }
     row.outcome = "recorded";
+    if (decision) row.volume = volumeOf(decision);
   }
 
   /*
@@ -545,9 +632,13 @@ async function runSubjectDiscoveryImport(input: {
     return concurrentByKey?.get(normalizedKeyword) ?? null;
   };
 
-  // Novas: `bruto`, sem lista e sem métrica, com o bloco. O insert devolve só o id.
+  // Novas: `bruto`, sem lista, com o bloco. Sem recibo, sem métrica (como
+  // sempre); com o recibo da pesquisa, o Volume do Google Ads que ela mediu
+  // (item 8). O insert devolve só o id.
   for (const { row, item } of fresh) {
-    const block = appendSubjectDiscoverySearch({}, entryFor(item)).semantic;
+    const decision = volumeReady ? volumeReady.decide(row.normalizedKeyword, FRESH_VOLUME_EXISTING) : null;
+    const block = appendSubjectDiscoverySearch(decision?.ok ? decision.patch.analise_semantica : {}, entryFor(item, row.normalizedKeyword)).semantic;
+    const volumeColumns = decision?.ok ? { volume_source: decision.patch.volume_source, kgr_score: decision.patch.kgr_score } : {};
     const insert = await supabase
       .from("minerador_keywords")
       .insert({
@@ -555,9 +646,10 @@ async function runSubjectDiscoveryImport(input: {
         brand_id: brandId,
         lista_id: null,
         status: "bruto",
-        volume_search: null,
+        volume_search: decision?.ok ? decision.patch.volume_search : null,
         results_allintitle: null,
         analise_semantica: block,
+        ...volumeColumns,
       })
       .select("id")
       .single();
@@ -565,6 +657,7 @@ async function runSubjectDiscoveryImport(input: {
     if (!insert.error && insertedId) {
       row.keywordId = String(insertedId);
       row.outcome = "created";
+      if (decision) row.volume = volumeOf(decision);
       liveByKey.set(row.normalizedKeyword, row.keywordId);
       continue;
     }
@@ -581,16 +674,42 @@ async function runSubjectDiscoveryImport(input: {
   }
 
   const group = subject.keywordId ? await stampSubjectGroup(supabase, brandId, actorUserId, subject.keywordId, rows) : null;
+  const volume: SubjectDiscoveryImportVolumeSummary | null = input.volume ? {
+    receipt: input.volume.receipt,
+    written: rows.filter(row => row.volume?.outcome === "written").length,
+    skipped: rows.filter(row => row.volume?.outcome === "skipped").length,
+  } : null;
+  const logic = input.runLogic ? await runLogicAfterImport(input.runLogic, rows) : null;
   return {
     ok: true,
     importRequestId: request.importRequestId,
     searchId: request.searchId,
     subject: { keywordId: subject.keywordId, status: subject.status, reason: subject.reason },
     ...(group ? { group } : {}),
+    ...(volume ? { volume } : {}),
+    ...(logic ? { logic } : {}),
     rows,
     notAffected: rows.filter(row => SUBJECT_DISCOVERY_NOT_AFFECTED_OUTCOMES.includes(row.outcome)),
     counts: countRows(rows),
   };
+}
+
+/**
+ * Item 8 — A LÓGICA NO MESMO NÚCLEO. Depois das escritas, a Lógica do botão do
+ * Minerador (grátis, determinística, preserva decisão humana) roda nas keywords
+ * que este envio criou ou registrou: com o Volume do recibo, elas chegam
+ * prontas para a aprovação. A falha da Lógica nunca derruba o import: o envio
+ * já está gravado, e a tela diz para rodar a Lógica pelo botão.
+ */
+async function runLogicAfterImport(runLogic: SubjectDiscoveryImportLogicPort, rows: readonly SubjectDiscoveryImportRow[]): Promise<SubjectDiscoveryImportLogicSummary> {
+  const ids = [...new Set(rows.filter(row => row.keywordId && (row.outcome === "created" || row.outcome === "recorded")).map(row => row.keywordId!))];
+  if (!ids.length) return { ran: false, applied: 0, unchanged: 0, failed: 0, error: null };
+  try {
+    const result = await runLogic(ids);
+    return { ran: true, applied: result.applied, unchanged: result.unchanged, failed: result.failed, error: null };
+  } catch {
+    return { ran: false, applied: 0, unchanged: 0, failed: ids.length, error: "A Lógica não rodou agora: o envio está gravado; rode a Lógica pelo botão do Processador (grátis)." };
+  }
 }
 
 /**

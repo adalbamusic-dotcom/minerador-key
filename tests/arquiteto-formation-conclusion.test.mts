@@ -333,7 +333,8 @@ test("reprocessar é dono da SERP; concluir só pede a que falta, pelo mesmo cam
   // pedia as 8 keywords do Silo porque lia o resumo do lote inteiro.
   assert.match(corpoReprocessar, /resumoSerp\.needsCollection/);
   assert.doesNotMatch(corpoReprocessar, /articleSerpGateSummary/);
-  assert.match(corpoReprocessar, /await confirmSerpValidation\(pendentes\)/);
+  // SDD acelerar 2026-10-13, item 3 (mudança declarada): a validação usa o diálogo único do clique.
+  assert.match(corpoReprocessar, /await confirmSerpValidation\(pendentes, \{ ask: dialogoDoClique\.ask \}\)/);
   assert.match(corpoReprocessar, /if \(!pendentes\.length\)/);
 
   const concluir = workspace.slice(workspace.indexOf("const confirmArticleFormation"));

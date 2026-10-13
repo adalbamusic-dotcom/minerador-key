@@ -113,3 +113,21 @@ validar o artigo já formado, preservando a decisão editorial.
 - O sinal `kgrOpportunity` do motor de candidatas (volume ≥ 120) e o filtro
   do Descobrir (120–499) não mudam neste adendo. Alinhar os dois à faixa
   150–550 exige fatia própria, com testes de formação.
+
+## Adendo 2026-10-13 — Volume da Pesquisa por Assunto
+
+- **Status:** aprovado pelo dono em 2026-10-13 com a SDD
+  `docs/compartilhado/sdd-acelerar-fluxo-do-plano-2026-10-13.md` (itens 7 e 8,
+  decisão D8; migration M-A `20261014120000_recibos_da_pesquisa_por_assunto.sql`,
+  aplicada pelo dono). Implementação: verificado no código e confirmado por
+  teste; validação manual pendente.
+
+A média mensal do Google Ads devolvida pela Pesquisa por Assunto e guardada no
+recibo do servidor (`minerador_subject_search_receipts`, só inclusões) vale
+como Volume validado da keyword importada, com proveniência
+(`origin: subject_search`, `measurementKind: keyword_ideas`, `receiptRef`,
+`measuredAt` = data da pesquisa). Não sobrescreve medição válida, não vale para
+keyword publicada nem para a que carrega Assunto ou marca de principal do plano
+(a trava D1-ter só muda por medição explícita). Ausência continua ausência
+(item 6). O navegador nunca é fonte de volume: sem recibo, a keyword entra sem
+volume e é medida pelo botão Volume, como antes.

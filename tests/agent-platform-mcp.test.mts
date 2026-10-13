@@ -212,8 +212,12 @@ test("12 · o guia funciona sem Marca autorizada: é conteúdo da plataforma, n�
   const body = toolText(await send(3, "tools/call", { name: "get_platform_guide", arguments: { topic: "playbooks" } }));
   assert.equal(body.ok, true);
   assert.match(String(body.guide), /silo/i);
-  assert.match(String(body.guide), /Formar artigos automaticamente/);
-  assert.match(String(body.guide), /ainda não dispara essa operação por ferramenta/);
+  // SDD acelerar 2026-10-13, item 13 (mudança declarada): o playbook leva à porta única por situação.
+  assert.doesNotMatch(String(body.guide), /Formar artigos automaticamente/);
+  assert.match(String(body.guide), /Uma porta por situação para formar os artigos/);
+  assert.match(String(body.guide), /improve_articles com group: <cor>: prepare → prévia → aceite do usuário → apply/);
+  assert.match(String(body.guide), /Formar os artigos do plano · <cor>/);
+  assert.match(String(body.guide), /decide_keywords \(prévia → aceite do usuário no chat → apply com o hash\)/);
   assert.equal(body.catalogHash, PLATFORM_CATALOG_HASH);
   assert.match(PLATFORM_CATALOG_HASH, /^[0-9a-f]{64}$/);
 });
@@ -594,7 +598,9 @@ test("2026-10-09 · o catálogo diz o processo novo: sem D9, sem 'o CSV sai sem 
    */
   assert.match(guia, /A versão do ArticleDNA que vale no Radar \(2026-10-09, correção\) é a TRANSPORTADA pelo item do Radar/);
   assert.match(guia, /do ArticleDNA transportado pelo item do Radar \(radarArticleBlueprintPick\)/);
-  assert.match(guia, /reenvio da versão nova ao Radar, pendência registrada no backlog do Radar e do Arquiteto \(exige SDD\)/);
+  /* 2026-10-13 · F5: a pendência virou a adoção no Radar (mudança declarada desta asserção). */
+  assert.match(guia, /Levar a versão nova ao Radar é a adoção no Radar \(radar\.adopt_architect_version, desde 2026-10-13\)/);
+  assert.doesNotMatch(guia, /reenvio da versão nova ao Radar, pendência registrada/);
   /* 2026-10-09 · o cartão do Arquiteto voltou ao de antes da rodada: o Arquiteto não ganha passo do Radar. */
   assert.match(guia, /o cartão é o de sempre: o Arquiteto não ganha passo do Radar/);
   assert.doesNotMatch(guia, /Abrir Links internos/);
@@ -744,4 +750,68 @@ test("plano no Silo · operação no catálogo (humana, aceite no chat, grátis)
   assert.match(corpo, /handleSiloDeclaredPlan\(siloDeclaredPlanRuntime\(context\)/, "o MESMO núcleo da rota");
   assert.match(corpo, /"platform\.decide"/);
   assert.match(semComentarios(read("app/api/arquiteto/silo-declared-plan/route.ts")), /handleSiloDeclaredPlan\(siloDeclaredPlanRuntime\(context\)/);
+});
+
+/* ====== 2026-10-13 · conversão do Assunto do formato anterior (SDD sdd-conversao-assunto-legado) ====== */
+
+test("conversão · duas operações no catálogo (humanas, aceite no chat, grátis), ferramentas anunciadas, mesmos núcleos das rotas e aceite antes de qualquer leitura", async () => {
+  const minerador = PLATFORM_OPERATIONS.find(item => item.id === "minerador.convert_legacy_subjects")!;
+  const arquiteto = PLATFORM_OPERATIONS.find(item => item.id === "arquiteto.update_article_subject")!;
+  for (const [operacao, ferramenta, rota] of [[minerador, "convert_legacy_subjects", "/api/minerador/marcas/[brandId]/plans/convert"], [arquiteto, "update_article_subject", "/api/arquiteto/subject-conversion"]] as const) {
+    assert.ok(operacao, ferramenta);
+    assert.equal(operacao.decision, "human");
+    assert.equal(operacao.access, "tool");
+    assert.equal(operacao.chatConfirmationRequired, true);
+    assert.equal(operacao.cost, "free");
+    assert.deepEqual([...(operacao.tools ?? [])], [ferramenta]);
+    assert.deepEqual([...operacao.routes], [rota]);
+  }
+  assert.match((minerador.notes ?? []).join(" "), /nunca é excluída/);
+  assert.match((minerador.notes ?? []).join(" "), /exclusão definitiva/);
+
+  const send = harness(createWriterServer(principal([brand(["platform.read", "minerador.write", "arquiteto.write", "platform.decide"])])));
+  const semAceite = toolText(await send(90, "tools/call", { name: "convert_legacy_subjects", arguments: { mode: "apply", groupId: "a9d5c87b-59aa-4e49-8357-3fa893d4cd2d", importRequestId: "00000000-0000-4000-8000-0000000000d1", rows: [] } }));
+  assert.equal(semAceite.code, "human_confirmation_required");
+  const semHash = toolText(await send(91, "tools/call", { name: "update_article_subject", arguments: { mode: "apply", userConfirmation: "pode atualizar o Assunto dos artigos" } }));
+  assert.equal(semHash.code, "decision_hash_required");
+
+  const fonte = semComentarios(read("lib/server/platform-mcp-tools.ts"));
+  const corpo = (nome: string) => { const inicio = fonte.indexOf(`server.registerTool("${nome}"`); return fonte.slice(inicio, fonte.indexOf("server.registerTool(", inicio + 30)); };
+  assert.match(corpo("convert_legacy_subjects"), /convertLegacySubjectsWithCore\(/);
+  assert.match(corpo("convert_legacy_subjects"), /serverConversionFollowUp\(/);
+  assert.match(corpo("update_article_subject"), /handleArticleSubjectConversion\(context/);
+  assert.match(corpo("update_article_subject"), /"platform\.decide"/);
+});
+
+/* ====== 2026-10-13 · F5 · o Radar acompanha o Arquiteto (SDD acelerar-fluxo-do-plano, item 14) ====== */
+
+test("F5 · adopt_architect_version: decisão humana no catálogo, aceite e hash antes de qualquer leitura, mesmo núcleo da rota", async () => {
+  const operacao = PLATFORM_OPERATIONS.find(item => item.id === "radar.adopt_architect_version")!;
+  assert.ok(operacao);
+  assert.equal(operacao.stage, "radar");
+  assert.equal(operacao.decision, "human");
+  assert.equal(operacao.access, "tool");
+  assert.equal(operacao.chatConfirmationRequired, true);
+  assert.equal(operacao.cost, "free");
+  assert.deepEqual([...(operacao.tools ?? [])], ["adopt_architect_version"]);
+  assert.deepEqual([...operacao.routes], ["/api/editorial/radar-architect-update"]);
+  assert.match(operacao.howOnScreen, /Atualização disponível do Arquiteto/);
+  assert.match((operacao.notes ?? []).join(" "), /NÃO é o 'Atualização disponível' da publicação/);
+
+  const send = harness(createWriterServer(principal([brand(["platform.read", "radar.write", "platform.decide"])])));
+  await send(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
+  const semAceite = toolText(await send(92, "tools/call", { name: "adopt_architect_version", arguments: { mode: "apply", decisionHash: "a".repeat(64) } }));
+  assert.equal(semAceite.code, "human_confirmation_required");
+  const semHash = toolText(await send(93, "tools/call", { name: "adopt_architect_version", arguments: { mode: "apply", userConfirmation: "pode adotar a versão nova" } }));
+  assert.equal(semHash.code, "decision_hash_required");
+
+  const fonte = semComentarios(read("lib/server/platform-mcp-tools.ts"));
+  const inicio = fonte.indexOf('server.registerTool("adopt_architect_version"');
+  const corpo = fonte.slice(inicio, fonte.indexOf("server.registerTool(", inicio + 30));
+  assert.match(corpo, /adoptArchitectVersionWithCore\(store/);
+  assert.match(corpo, /previewArchitectUpdatesWithCore\(store/);
+  assert.match(corpo, /\["radar\.write", "platform\.decide"\]/);
+  const rota = semComentarios(read("app/api/editorial/radar-architect-update/route.ts"));
+  assert.match(rota, /adoptArchitectVersionWithCore\(supabaseRadarArchitectAdoptionStore\(\)/);
+  assert.match(rota, /previewArchitectUpdatesWithCore\(supabaseRadarArchitectAdoptionStore\(\)/);
 });

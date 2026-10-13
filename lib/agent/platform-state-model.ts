@@ -87,6 +87,13 @@ export type PlatformStateSnapshot = {
       finalizedAt: string | null;
       /** Já existe documento no Redator para este artigo. */
       hasDocument: boolean;
+      /**
+       * 2026-10-13 · F5 · "Atualização disponível do Arquiteto": o item transporta
+       * uma versão do ArticleDNA e o Arquiteto já aprovou outra, mais nova. A
+       * adoção é decisão humana (adopt_architect_version). Opcional: leitor
+       * antigo segue igual.
+       */
+      architectUpdate?: { label: string; fromVersionNumber: number; toVersionNumber: number; howToAdopt: string } | null;
     }>;
   };
   redator: {

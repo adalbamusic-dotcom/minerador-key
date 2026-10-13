@@ -8,6 +8,7 @@ import {
   SubjectDiscoveryImportRequestSchema,
   type SubjectDiscoveryImportRefusalCode,
 } from "@/lib/minerador/subject-discovery-import";
+import { subjectDiscoveryImportPorts } from "@/lib/server/subject-search-receipts";
 
 /**
  * PESQUISA POR ASSUNTO — IMPORT AO PROCESSADOR (SDD 2026-09-24, F1b.7).
@@ -17,6 +18,11 @@ import {
  * permissão é a do import da Descoberta (`minerador:create`). O corpo não
  * aceita métrica, marca nem ator. Nenhuma chamada paga, nenhuma tabela nem RPC
  * da Descoberta: quem escreve, estreito, é o núcleo.
+ *
+ * 2026-10-13 (SDD `sdd-acelerar-fluxo-do-plano-2026-10-13.md`, item 8): o Volume
+ * vem do recibo que o SERVIDOR gravou na execução da pesquisa (lido pela marca
+ * da rota e pelo `searchId`), nunca do corpo; e a Lógica roda nas keywords do
+ * envio. Sem o recibo (M-A não aplicada, busca antiga), o import de antes.
  */
 
 export const dynamic = "force-dynamic";
@@ -47,11 +53,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const profile = await requireCanonicalSessionProfile();
     const context = await requireTenantPermission({ brandId, actorUserId: profile.userId, module: "minerador", action: "create", profile });
 
+    // Item 8 (SDD acelerar-fluxo 2026-10-13): o recibo do servidor da pesquisa dá
+    // o Volume; a Lógica roda no mesmo núcleo. Sem recibo, o import de antes.
+    const ports = await subjectDiscoveryImportPorts({ brandId: context.brandId, searchId: input.searchId, db: profile.supabase });
     const result = await importSubjectDiscoveryWithCore({
       brandId: context.brandId,
       actorUserId: context.actorUserId,
       supabase: profile.supabase,
       request: input,
+      volume: ports.volume,
+      runLogic: ports.runLogic,
     });
     if (!result.ok) return failure(result.code, REFUSAL_STATUS[result.code], result.reason, { requestId }, "subject_discovery_import_validation");
     return NextResponse.json({ success: true, requestId, ...result });

@@ -169,7 +169,8 @@ test("02 · a leitura da mesa só começa com consumidor montado", () => {
   assert.match(hook, /useEditorialPipeline deve ser usado dentro de EditorialPipelineProvider\./, "fora do provider continua falhando");
   /* As duas rotas pesadas continuam com um único chamador no provider. */
   assert.equal(provider.split("/api/inteligencia?marcaId=").length - 1, 1);
-  assert.equal(provider.split("/api/editorial/workspace?marcaId=").length - 1, 1);
+  // SDD acelerar 2026-10-13, item 6 (mudança declarada): a URL da mesa sai de `workspaceReadUrl` (recorte e leve), um chamador só.
+  assert.equal(provider.split("workspaceReadUrl(selectedBrandId").length - 1, 1);
 });
 
 test("03 · o conjunto de consumidores da mesa é exatamente o mapeado", () => {

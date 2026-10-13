@@ -35,6 +35,7 @@ import { declaredPrincipalLock, type DeclaredArticlePlan, type DeclaredPrincipal
 import { deriveProcessorRevalidation } from "../minerador/processor-revalidation.ts";
 import { readSubjectDiscoveryBlock } from "../minerador/subject-discovery-import.ts";
 import { normalizeKeyword } from "../minerador/keyword-import-core.ts";
+import { CONVERTED_TITLE_LABEL, readSubjectConversion, type SubjectConversion } from "../minerador/subject-conversion.ts";
 import {
   ArticleDNASchema,
   DeclaredSubjectSchema,
@@ -193,6 +194,19 @@ export type ArchitectSubjectStanding = {
   planLock?: DeclaredPrincipalLockView | null;
   /** 2026-10-13 · o Volume medido no pacote (só para a trava automática). */
   volumeValue?: number | null;
+  /**
+   * 2026-10-13 · CONVERSÃO (SDD `sdd-conversao-assunto-legado-2026-10-13.md`):
+   * esta keyword recebeu o Assunto de uma linha-título do formato anterior
+   * (bloco `keyword_subject_conversion` do PACOTE aprovado). `null` = não.
+   */
+  conversion?: SubjectConversion | null;
+  /**
+   * 2026-10-13 · esta keyword É uma linha-título convertida: o Assunto agora mora
+   * em `keywordId`. Só preenchido por `readArchitectSubjectStandings` (precisa do
+   * índice da mesa); a leitura avulsa não sabe. Convertida = `declared: false`,
+   * fora da formação, em "não agrupadas" com o selo próprio.
+   */
+  convertedTo?: { keywordId: string; phrase: string; articleId: string | null } | null;
 };
 
 /** A trava da principal do plano de um Assunto (a gravada no standing ou a calculada sem volume). */
@@ -261,6 +275,8 @@ export function readArchitectSubjectStanding(keyword: RecordLike): ArchitectSubj
       carriesSubject,
       planLock: plan ? declaredPrincipalLock(plan, { subjectKeywordId: keywordId, volume: carriesSubject ? { validated: volumeValidated, value: volumeValue } : null }) : null,
       volumeValue,
+      // A conversão só vale com o Assunto cadastrado na própria keyword (o bloco nasce junto do `entry`). Aditivo: só aparece quando há.
+      ...(declared && dna.subject?.entry && readSubjectConversion(pkg.analiseSemantica) ? { conversion: readSubjectConversion(pkg.analiseSemantica) } : {}),
     };
   }
 
@@ -289,6 +305,52 @@ export function readArchitectSubjectStanding(keyword: RecordLike): ArchitectSubj
     planLock: null,
     volumeValue: null,
   };
+}
+
+/* ----------------------------------------- conversão do formato anterior */
+
+export type ArchitectConvertedTitle = { keywordId: string; phrase: string; articleId: string | null };
+
+/**
+ * 2026-10-13 · O ÍNDICE DA MESA T → K (SDD `sdd-conversao-assunto-legado-2026-10-13.md`
+ * §6): a linha-título T está convertida quando uma keyword RECEBIDA, desta marca,
+ * carrega no PACOTE aprovado o Assunto com o bloco de conversão apontando para T.
+ * T não é tocada no Minerador; a conversão é derivada daqui.
+ */
+export function architectConvertedTitles(standings: Iterable<ArchitectSubjectStanding>): Map<string, ArchitectConvertedTitle> {
+  const index = new Map<string, ArchitectConvertedTitle>();
+  for (const standing of standings) {
+    const conversion = standing.conversion;
+    if (!conversion || !standing.declared || !standing.received || !standing.approvedPackageRef || conversion.fromKeywordId === standing.keywordId) continue;
+    if (!index.has(conversion.fromKeywordId)) index.set(conversion.fromKeywordId, { keywordId: standing.keywordId, phrase: standing.phrase, articleId: conversion.articleId });
+  }
+  return index;
+}
+
+/** O selo da linha-título convertida em "não agrupadas". */
+export function convertedTitleConservationLabel(target: Pick<ArchitectConvertedTitle, "phrase">): string {
+  return `${CONVERTED_TITLE_LABEL} → ${target.phrase} · não forma artigo`;
+}
+
+/**
+ * Os standings da mesa, com a conversão aplicada: a linha-título convertida deixa
+ * de ser Assunto (`declared: false`, sem plano), fica fora da formação
+ * (`heldOutOfFormation`) e diz para onde o Assunto foi (`convertedTo`). As demais
+ * saem exatamente como `readArchitectSubjectStanding` as lê.
+ */
+export function readArchitectSubjectStandings(keywords: Iterable<RecordLike>): Map<string, ArchitectSubjectStanding> {
+  const standings = new Map<string, ArchitectSubjectStanding>();
+  for (const keyword of keywords) {
+    const standing = readArchitectSubjectStanding(keyword);
+    if (standing.keywordId) standings.set(standing.keywordId, standing);
+  }
+  const convertidas = architectConvertedTitles(standings.values());
+  for (const [titleId, target] of convertidas) {
+    const standing = standings.get(titleId);
+    if (!standing || standing.brandId !== standings.get(target.keywordId)?.brandId) continue;
+    standings.set(titleId, { ...standing, declared: false, plan: null, heldOutOfFormation: true, convertedTo: target });
+  }
+  return standings;
 }
 
 /**
@@ -384,6 +446,11 @@ export function splitUngroupedBySubjectAnchor(input: {
    * e não com "aguardando sustentação" — a tela e a formação dizem o mesmo.
    */
   suggestedTrunkKeywordIds?: ReadonlySet<string>;
+  /**
+   * 2026-10-13 · aditivo: a linha-título convertida (o Assunto mora noutra
+   * keyword). Fica em "não agrupadas" com o selo próprio — nunca some.
+   */
+  convertedTitleOf?: (keywordId: string) => ArchitectConvertedTitle | null | undefined;
 }): UngroupedSubjectView {
   const view: UngroupedSubjectView = { ungrouped: [], anchored: [] };
   for (const raw of input.ungroupedKeywordIds) {
@@ -391,6 +458,11 @@ export function splitUngroupedBySubjectAnchor(input: {
     const articleCount = countSubjectAnchors(keywordId, input.articles);
     if (articleCount > 0) {
       view.anchored.push({ keywordId, label: subjectTrunkLabel(articleCount), articleCount });
+      continue;
+    }
+    const convertida = input.convertedTitleOf?.(keywordId);
+    if (convertida) {
+      view.ungrouped.push({ keywordId, label: convertedTitleConservationLabel(convertida) });
       continue;
     }
     const declarado = input.isDeclaredSubject(keywordId);
@@ -432,8 +504,11 @@ export function subjectFormationSets(input: {
   articles: readonly SubjectAnchorCarrier[];
 }): { heldOut: Set<string>; anchored: Set<string> } {
   const heldOut = new Set<string>();
-  for (const keyword of input.keywords) {
-    if (readArchitectSubjectStanding(keyword).heldOutOfFormation) heldOut.add(String(keyword.id));
+  // 2026-10-13 · a linha-título convertida também fica fora da formação (as demais, linha a linha, como antes).
+  const standings = input.keywords.map(keyword => readArchitectSubjectStanding(keyword));
+  const convertidas = architectConvertedTitles(standings);
+  for (const standing of standings) {
+    if (standing.heldOutOfFormation || convertidas.has(standing.keywordId)) heldOut.add(standing.keywordId);
   }
   return { heldOut, anchored: trunkAnchoredKeywordIds(input.articles) };
 }
@@ -885,13 +960,15 @@ export function suggestSubjectSupport(input: {
     const serpRecusa = serpMedida?.strength === "weak" || serpMedida?.strength === "none";
     if (serpForte) signals.push("serp_shared_pages");
     const discovery = readSubjectDiscoveryBlock(pkg.analiseSemantica);
-    const byId = discovery.subjectKeywordIds.includes(subjectId);
+    // 2026-10-13 · a lista da linha-título convertida vale para a keyword que agora carrega o Assunto (alias derivado).
+    const aliases = subjectStanding.conversion ? [subjectId, subjectStanding.conversion.fromKeywordId] : [subjectId];
+    const byId = discovery.subjectKeywordIds.some(id => aliases.includes(id));
     const byPhrase = !byId && discovery.searches.some(search => normalizeKeyword(search.subjectPhrase) === subjectPhrase);
     if (byId) signals.push("subject_discovery");
     if (byPhrase) signals.push("subject_discovery_phrase");
     const discoveryEvidence = byId || byPhrase
       ? [...new Set(discovery.searches
-        .filter(search => byId ? search.subjectKeywordId === subjectId : normalizeKeyword(search.subjectPhrase) === subjectPhrase)
+        .filter(search => byId ? aliases.includes(String(search.subjectKeywordId)) : normalizeKeyword(search.subjectPhrase) === subjectPhrase)
         .flatMap(search => search.evidence))].slice(0, 3)
       : [];
 

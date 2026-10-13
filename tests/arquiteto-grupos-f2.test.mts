@@ -405,10 +405,13 @@ test("tela do Radar · seletor no topo, faixa e etiqueta na linha, rodapé, e a 
   assert.doesNotMatch(tela, /pipeline\.radarItems\s*=/, "o recorte nunca substitui a lista");
 });
 
-test("a mesa no navegador continua lendo inteira: o recorte por grupo é só da tela", () => {
+test("a mesa no navegador: fora do Radar lê inteira; no Radar, só a cor (SDD acelerar 2026-10-13, item 6)", () => {
+  // Mudança declarada (item 6): o pipeline pede o recorte da cor só na rota do Radar; sem recorte a URL é a de sempre.
   const contexto = semComentarios(read("components/editorial-pipeline-context.tsx"));
-  assert.match(contexto, /fetch\(`\/api\/editorial\/workspace\?marcaId=\$\{encodeURIComponent\(selectedBrandId\)\}`, \{ cache: "no-store" \}\)/);
-  assert.doesNotMatch(contexto, /groupId/);
+  assert.match(contexto, /fetch\(workspaceReadUrl\(selectedBrandId, recorte\), \{ cache: "no-store" \}\)/);
+  assert.match(contexto, /useAreaGroupFilter\(rotaDoRadar \? selectedBrandId \|\| null : null, "radar"\)/);
+  const escopo = semComentarios(read("lib/editorial/workspace-read-scope.ts"));
+  assert.match(escopo, /return `\/api\/editorial\/workspace\?\$\{partes\.join\("&"\)\}`;/);
   const hook = semComentarios(read("components/editorial/use-editorial-groups.ts"));
   // 2026-10-12 · cores fixas: a escolha é de cada área (lembrança por área no estado compartilhado com a topbar).
   assert.match(hook, /useAreaGroupFilter\(alvo, area\)/);

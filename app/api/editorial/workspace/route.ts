@@ -11,6 +11,8 @@ import { GROUPS_NOT_AVAILABLE } from "@/lib/editorial/editorial-groups";
 import { PersistedEditorialWorkspaceSchema } from "@/lib/editorial/persistence-contracts";
 import type { RadarItem } from "@/lib/editorial/operational-flow";
 import { radarPortableExportStreamResponse } from "@/lib/radar/portable-export-response";
+import { lightArtifactSelection } from "@/lib/editorial/workspace-read-scope";
+import type { ArticleDNA, SiloDNA, VersionEnvelope, VersionStatusEvent } from "@/lib/arquiteto/contracts";
 
 const QuerySchema = z.string().uuid();
 
@@ -101,7 +103,34 @@ export async function GET(request: NextRequest) {
     };
 
     const workflow = valor(0, { radar: [] as RadarItem[], incompatible: [] as IncompatibleRecord[] });
-    const artifacts = valor(1, { articles: [], silos: [], events: [], incompatible: [] as IncompatibleRecord[] });
+    const artifactsLidos = valor(1, { articles: [] as VersionEnvelope<ArticleDNA>[], silos: [] as VersionEnvelope<SiloDNA>[], events: [] as VersionStatusEvent[], incompatible: [] as IncompatibleRecord[] });
+    /*
+     * 2026-10-13 · `detail=light` (SDD acelerar-fluxo, item 6; SDD 2026-10-12 §8).
+     * Sem o parâmetro, nada muda. Com ele, de cada ArticleDNA/SiloDNA só a
+     * vigente e a última aprovada (com os eventos delas), mais as versões que um
+     * item do Radar ou um documento referenciam. O histórico inteiro de um
+     * artefato sai por `GET /api/editorial/workspace/versions`.
+     */
+    const leve = request.nextUrl.searchParams.get("detail") === "light";
+    const documentosParaReferencia = leve ? (settled[2].status === "fulfilled" ? settled[2].value as unknown[] : []) : [];
+    const artifacts = leve ? (() => {
+      const referenciadas = new Set<string>([
+        ...workflow.radar.map(item => item.articleDnaVersionId),
+        ...documentosParaReferencia.flatMap(registro => {
+          const ref = (registro as { document?: { articleDnaRef?: { versionId?: unknown }; siloDnaRef?: { versionId?: unknown } } }).document;
+          return [ref?.articleDnaRef?.versionId, ref?.siloDnaRef?.versionId].filter((id): id is string => typeof id === "string");
+        }),
+      ]);
+      const escolhidos = lightArtifactSelection({
+        articles: artifactsLidos.articles,
+        silos: artifactsLidos.silos,
+        events: artifactsLidos.events,
+        articleOf: version => ({ versionId: version.versionId, versionNumber: version.versionNumber, entityKey: version.payload.articleId }),
+        siloOf: version => ({ versionId: version.versionId, versionNumber: version.versionNumber, entityKey: version.payload.siloId }),
+        keepVersionIds: referenciadas,
+      });
+      return { ...artifactsLidos, articles: escolhidos.articles, silos: escolhidos.silos, events: escolhidos.events };
+    })() : artifactsLidos;
     /* A listagem dos documentos é a função de banco de sempre (leve); o recorte filtra o que ela devolveu, pelo artigo do documento. */
     const artigosDoRecorte = recorte ? new Set(recorte.articleIds) : null;
     const documentosLidos = valor(2, [] as never[]);

@@ -666,9 +666,10 @@ test("Links segue a seleção, e 'Pronto para Radar' relê a SERP velha antes de
   // O Silo do grafo acompanha as linhas marcadas quando são todas de um Silo fechado.
   assert.match(codigo, /if \(silos\.size !== 1\) return;/);
   assert.match(codigo, /handleLinksSiloChange\(siloId\);/);
-  const marcar = codigo.slice(codigo.indexOf("const markSelectedReadyForRadar = async (depoisDaSerp = false) => {"));
+  const marcar = codigo.slice(codigo.indexOf('const markSelectedReadyForRadar = async (depoisDaSerp = false): Promise<"marked" | "already" | "serp_reread" | "none" | "failed"> => {') /* SDD acelerar item 5: devolve o desfecho */);
   const corpo = marcar.slice(0, marcar.indexOf("\n  const markReadyRef"));
   assert.match(corpo, /return estado === "stale" \|\| estado === "missing" \|\| estado === "incomplete";/);
   assert.match(corpo, /await confirmSerpValidationRef\.current\(grupos\);\s*setPendingReadyRetry\(true\);/);
-  assert.match(codigo, /void markReadyRef\.current\(true\);/);
+  // SDD acelerar item 5 (mudança declarada): a marcação refeita continua a cadeia "marcar e enviar".
+  assert.match(codigo, /void markReadyRef\.current\(true\)\.then\(desfecho => seguirParaEnvioRef\.current\(desfecho\)\);/);
 });

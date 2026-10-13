@@ -83,6 +83,14 @@ export type DeclaredPlanArticleApplication =
   | { ok: false; code: "DECLARED_PRINCIPAL_CONTRADICTION"; reason: string };
 
 /**
+ * O caminho inteiro para trocar a principal travada (SDD acelerar 2026-10-13,
+ * item 12): a mensagem diz cada clique, do Minerador de volta ao Arquiteto.
+ */
+export function declaredPrincipalLockedMessage(phrase: string): string {
+  return `A principal está travada no plano (“${phrase}”). Para trocar: Minerador → Cadastrar Assuntos → trava "Livre" → aprovar e enviar a keyword ao Arquiteto → aqui, Artigos → refazer a melhoria do artigo. O Arquiteto não troca o que foi travado.`;
+}
+
+/**
  * Aplica o plano num ArticleDNA já montado (a melhoria parte do DNA vigente):
  * `hierarchy` = papel declarado, `promise` = escopo. Recusa quando a principal
  * do DNA não é a declarada — a contradição do plano não tem "refazer mesmo
@@ -94,7 +102,7 @@ export function applyDeclaredPlanToArticleDna(article: ArticleDNA, standing: (Pi
   // 2026-10-13 · só a principal TRAVADA contradiz; a livre pode ter sido trocada pela SERP/volume.
   const fixa = lockedPlanPrincipal(standing);
   if (fixa && article.principalKeywordId !== fixa.keywordId) {
-    return { ok: false, code: "DECLARED_PRINCIPAL_CONTRADICTION", reason: `A principal do artigo não é a principal travada no plano (“${fixa.phrase}”). Destrave a keyword no Minerador (Cadastrar Assuntos) ou mude o plano; o Arquiteto não troca o que foi travado.` };
+    return { ok: false, code: "DECLARED_PRINCIPAL_CONTRADICTION", reason: declaredPrincipalLockedMessage(fixa.phrase) };
   }
   if (article.hierarchy === plan.role && article.promise === plan.scope) return { ok: true, value: article, changed: false };
   return { ok: true, value: { ...article, hierarchy: plan.role, promise: plan.scope }, changed: true };

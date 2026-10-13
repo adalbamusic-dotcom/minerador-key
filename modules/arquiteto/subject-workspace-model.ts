@@ -2,6 +2,8 @@ import {
   countSubjectAnchors,
   planSubjectAttachment,
   readArchitectSubjectStanding,
+  readArchitectSubjectStandings,
+  convertedTitleConservationLabel,
   resolveAttachedSubjectStanding,
   subjectTrunkLabel,
   SUBJECT_ANOTHER_ATTACHED_REASON,
@@ -79,13 +81,13 @@ export function subjectUnitLabel(type: EditorialArticleUnitType | null | undefin
 
 /** O que a mesa sabe do Assunto de cada keyword, lido uma vez pelo domínio. */
 export function readSubjectStandings(keywords: readonly SubjectRow[]): Map<string, ArchitectSubjectStanding> {
-  const mapa = new Map<string, ArchitectSubjectStanding>();
-  for (const keyword of keywords) {
-    const id = String(keyword.id ?? "");
-    if (!id) continue;
-    mapa.set(id, readArchitectSubjectStanding(keyword));
-  }
-  return mapa;
+  /*
+   * 2026-10-13 · com a conversão do formato anterior aplicada
+   * (`readArchitectSubjectStandings`): a linha-título convertida deixa de ser
+   * Assunto em todas as listas da mesa e fica fora da formação. Sem conversão,
+   * cada standing é o de `readArchitectSubjectStanding`, como antes.
+   */
+  return readArchitectSubjectStandings(keywords.filter(keyword => String(keyword.id ?? "")));
 }
 
 /** Os Assuntos declarados sem Volume validado: fora da formação automática. */
@@ -242,7 +244,8 @@ export function buildSubjectFilterEntries(input: {
       destinationUrl: standing.destinationUrl,
       volumeValidated: standing.volumeValidated,
       articleCount,
-      label: withdrawn ? SUBJECT_WITHDRAWN_LABEL : articleCount > 0 ? subjectTrunkLabel(articleCount) : SUBJECT_AWAITING_SUPPORT_LABEL,
+      // 2026-10-13 · a linha-título convertida ainda presa: o Assunto já mora na keyword nova; falta atualizar o artigo.
+      label: standing.convertedTo && withdrawn ? `${convertedTitleConservationLabel(standing.convertedTo)} · atualize o Assunto do artigo` : withdrawn ? SUBJECT_WITHDRAWN_LABEL : articleCount > 0 ? subjectTrunkLabel(articleCount) : SUBJECT_AWAITING_SUPPORT_LABEL,
       attachable: declaredHere && standing.approvedPackageRef !== null,
       withdrawn,
     });

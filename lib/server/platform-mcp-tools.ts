@@ -56,6 +56,7 @@ import { ContentDocumentRepository } from "./editorial-repositories";
 import { makeApprovedWriterDocument, saveAndFinalizeWriterDocument } from "./writer-document-finalization";
 import { prepareWriterPublicationHandoff, sendWriterToPublications } from "./writer-publication-handoff";
 import { buildSubjectDiscoveryPorts } from "./subject-discovery-runtime";
+import { subjectDiscoveryImportPorts } from "./subject-search-receipts";
 import { requireTenantPermission } from "./tenant-context";
 import type { WriterMcpBrandAccess, WriterMcpPrincipal } from "./writer-mcp-principal";
 
@@ -455,6 +456,9 @@ export function projectSubjectSearchForAgent(body: SubjectDiscoveryExecuteRespon
     ledgerWarning: body.ledgerWarning,
     existingCheckFailed: body.existingCheckFailed,
     notices: body.notices,
+    /* Item 8 (SDD acelerar-fluxo 2026-10-13): o recibo do servidor; "recorded" = o import grava o Volume medido. */
+    ...(body.receipt ? { receipt: body.receipt } : {}),
+    ...(body.batchId ? { batchId: body.batchId } : {}),
     /* Os três valores do import, já prontos (J6): a mesma ligação que a tela faz. */
     importWith: {
       tool: "import_subject_keywords",
@@ -880,6 +884,85 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     });
   });
 
+  /*
+   * 2026-10-13 · CONVERTER O FORMATO ANTERIOR (SDD
+   * `sdd-conversao-assunto-legado-2026-10-13.md` §13): o MESMO núcleo da rota
+   * `/api/minerador/marcas/[brandId]/plans/convert` (`readConversionDraftWithCore`
+   * e `convertLegacySubjectsWithCore`, que passa pelo núcleo do cadastro). Ler e
+   * prever são leitura; converter grava, aprova (D2-bis) e envia ao Arquiteto,
+   * só com o aceite do usuário no chat.
+   */
+  server.registerTool("convert_legacy_subjects", {
+    title: "Converter Assuntos do formato anterior (o Assunto passa a morar na keyword)",
+    description: [
+      "No formato anterior, o Assunto era uma linha própria (o título) e a principal vinha de outra linha. Converter leva o Assunto para DENTRO da keyword que carrega o artigo (por padrão, a principal que o artigo já tem no Arquiteto), grava o plano do grupo com o Silo consolidado, roda a Lógica (grátis), aprova (só a Lógica, D2-bis) e envia ao Arquiteto. A linha-título não é tocada nem vai para a lixeira: fica arquivada como histórico.",
+      "mode 'read' (leitura): o rascunho do grupo — cada linha-título, o artigo, a keyword sugerida, as alternativas (secundária do artigo não pode carregar o Assunto), os detalhes pré-preenchidos com a promessa vigente, o Silo e a ordem do SiloDNA. mode 'preview' (leitura): a prévia do cadastro, com impedimentos (canApply). mode 'apply': exige userConfirmation (as palavras do aceite) e importRequestId (uuid; repita o mesmo ao tentar de novo).",
+      "Depois de aplicar, o artigo no Arquiteto precisa da versão nova: chame update_article_subject (prévia → aceite → apply). Sem custo: nenhuma chamada de provider nem de IA.",
+    ].join(" "),
+    inputSchema: z.object({
+      brandId: brandIdInput,
+      mode: z.enum(["read", "preview", "apply"]),
+      groupId: z.string().uuid().describe("O grupo (cor) das linhas-título."),
+      silo: z.object({ name: z.string().trim().min(1).max(200), slug: z.string().trim().max(200).nullable().optional(), objective: z.string().max(4000).nullable().optional() }).strict().nullable().optional().describe("Só quando o grupo ainda não tem plano (padrão: o do rascunho)."),
+      rows: z.array(z.object({
+        fromKeywordId: z.string().uuid(),
+        articleId: z.string().min(1).max(400).nullable(),
+        order: z.number().int().min(1).max(DECLARED_PLAN_ARTICLES_MAX),
+        role: z.enum(DECLARED_PLAN_ROLES),
+        title: z.string().trim().min(1).max(400),
+        keyword: z.string().trim().min(1).max(400),
+        scope: z.string().max(DECLARED_PLAN_SCOPE_MAX * 2),
+        lock: z.enum(DECLARED_PLAN_LOCK_CHOICES).nullable().optional(),
+      }).strict()).max(DECLARED_PLAN_ARTICLES_MAX).optional(),
+      importRequestId: z.string().uuid().optional(),
+      userConfirmation: confirmationInput.optional(),
+    }),
+    annotations: write,
+  }, async ({ brandId, mode, groupId, silo, rows, importRequestId, userConfirmation }) => {
+    if (mode === "apply" && !userConfirmation) {
+      return asText({ ok: false, code: "human_confirmation_required", message: "Converter o Assunto é decisão humana (ADR-022): mostre a prévia, peça o aceite e envie as palavras dele em userConfirmation." });
+    }
+    if (mode === "apply" && !importRequestId) {
+      return asText({ ok: false, code: "import_request_required", message: "O apply precisa de importRequestId (uuid). Gere um e repita o mesmo ao tentar de novo." });
+    }
+    if (mode !== "read" && !rows?.length) {
+      return asText({ ok: false, code: "rows_required", message: "Envie as linhas (rows) do rascunho que o usuário aceitou converter (use mode 'read' para obtê-las)." });
+    }
+    const scopes = mode === "apply" ? ["minerador.write", "platform.decide", "arquiteto.write"] as const : ["platform.read"] as const;
+    const permissions = mode === "apply"
+      ? [{ module: "minerador", action: "edit" } as const, { module: "minerador", action: "approve" } as const, { module: "arquiteto", action: "create" } as const]
+      : [{ module: "minerador", action: "view" } as const];
+    return call("convert_legacy_subjects", scopes, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, permissions, async ({ access, requestId }) => {
+      const db = getOperationalClient();
+      const { convertLegacySubjectsWithCore, readConversionDraftWithCore } = await import("@/lib/minerador/subject-conversion-core");
+      if (mode === "read") {
+        const draft = await readConversionDraftWithCore({ brandId: access.brandId, keywordsClient: db, groupsClient: db, groupId });
+        if (!draft.ok) throw new PlatformToolFailure(draft.code, { message: draft.reason });
+        return { ...draft, readOnly: true };
+      }
+      const brand = await db.from("marcas").select("id,site_url").eq("id", access.brandId).maybeSingle();
+      if (brand.error) mapPersistenceError(brand.error);
+      const siteUrl = (brand.data as { site_url?: unknown } | null)?.site_url;
+      const { serverConversionFollowUp } = await import("./minerador-subject-conversion");
+      const result = await convertLegacySubjectsWithCore({
+        brandId: access.brandId,
+        actorUserId: principal.actorId,
+        keywordsClient: db,
+        groupsClient: db,
+        mode,
+        groupId,
+        silo: silo ?? null,
+        rows: rows ?? [],
+        importRequestId: mode === "apply" ? importRequestId ?? null : null,
+        brandSiteUrl: typeof siteUrl === "string" ? siteUrl : null,
+        channel: mcpChannel(access, requestId),
+        followUp: mode === "apply" ? serverConversionFollowUp(access.brandId, principal.actorId) : null,
+      });
+      if (!result.ok) throw new PlatformToolFailure(result.code, { message: result.reason, ...(result.blockers ? { blockers: result.blockers } : {}) });
+      return mode === "preview" ? { ...result, readOnly: true } : result;
+    });
+  });
+
   /* ================= decisões humanas aceitas no chat ================= */
 
   server.registerTool("decide_keywords", {
@@ -1114,7 +1197,8 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       "Só com o aceite dele chame request.mode 'execute' com authorizedPlan (planHash e maxCostUsd do plano), userConfirmation e um operationRequestId UUID v4 novo — repetido só numa nova tentativa do MESMO execute. Executar exige também o escopo provider.spend.",
       `targeting: language ${subjectSearchLanguagesText()}; selectedStates ['Todos os estados'] ou siglas de UF (ex.: ['SP','RJ']); keywordPlanNetwork 'GOOGLE_SEARCH'; includeAdultKeywords false.`,
       `O execute volta compacto, em até ${Math.round(PLATFORM_TOOL_RESULT_MAX_BYTES / 1024)} kB: candidatas na ordem de relevância com keyword, volume (Google Ads), origins e uma evidência; o que não coube vem declarado em trimmed.`,
-      "As candidatas NÃO são gravadas e a mesma execução não pode ser repetida: escolha com o usuário e envie com import_subject_keywords usando os valores de importWith.",
+      "As candidatas NÃO viram keyword sozinhas e a mesma execução não pode ser repetida: escolha com o usuário e envie com import_subject_keywords usando os valores de importWith.",
+      "O servidor guarda o recibo da execução com a média do Google Ads de cada candidata (receipt.status 'recorded'): o import usa esse recibo para gravar o Volume, sem medir de novo. Para pesquisar as linhas de um cadastro em lote, mande o mesmo request.batchId (UUID) em cada execução.",
     ].join(" "),
     inputSchema: z.object({ brandId: brandIdInput, request: SubjectDiscoverySearchRequestSchema, userConfirmation: confirmationInput.optional() }),
     annotations: paid,
@@ -1137,7 +1221,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("import_subject_keywords", {
     title: "Importar candidatas ao Processador",
-    description: "Use depois de escolher com o usuário as keywords de sustentação (em grupo ou uma a uma): leva ao Processador do Minerador, ligadas ao Assunto. Uma chamada por Assunto, com os valores de importWith da busca: searchId = operationRequestId da busca; subjectKeywordId = subject.subjectKeywordId da busca (ou o id do Assunto declarado); subjectPhrase = subject.phrase. items[].origins e evidence vêm da candidata. Métricas não vão no envio — o Processador mede. Numa nova tentativa do mesmo envio, repita searchId e importRequestId.",
+    description: "Use depois de escolher com o usuário as keywords de sustentação (em grupo ou uma a uma): leva ao Processador do Minerador, ligadas ao Assunto. Uma chamada por Assunto, com os valores de importWith da busca: searchId = operationRequestId da busca; subjectKeywordId = subject.subjectKeywordId da busca (ou o id do Assunto declarado); subjectPhrase = subject.phrase. items[].origins e evidence vêm da candidata. Métricas não vão no envio: com o searchId da busca, o servidor lê o recibo que gravou na execução e grava a média do Google Ads como Volume validado (keyword nova, ou existente sem medição, não publicada e fora do plano; a do plano se mede com measure_keywords) e roda a Lógica nas keywords do envio — a resposta traz volume e logic. Sem recibo (busca antiga), meça com measure_keywords. Numa nova tentativa do mesmo envio, repita searchId e importRequestId.",
     inputSchema: z.object({
       brandId: brandIdInput,
       request: SubjectDiscoveryImportRequestSchema.partial({ searchId: true, importRequestId: true }),
@@ -1149,7 +1233,9 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       searchId: request.searchId ?? crypto.randomUUID(),
       importRequestId: request.importRequestId ?? crypto.randomUUID(),
     });
-    const result = await importSubjectDiscoveryWithCore({ brandId: access.brandId, actorUserId: principal.actorId, supabase: getOperationalClient(), request: completo });
+    // Item 8 (SDD acelerar-fluxo 2026-10-13): as MESMAS portas da rota — o Volume do recibo do servidor e a Lógica.
+    const importPorts = await subjectDiscoveryImportPorts({ brandId: access.brandId, searchId: completo.searchId, db: getOperationalClient() });
+    const result = await importSubjectDiscoveryWithCore({ brandId: access.brandId, actorUserId: principal.actorId, supabase: getOperationalClient(), request: completo, volume: importPorts.volume, runLogic: importPorts.runLogic });
     if (!result.ok) throw new PlatformToolFailure(result.code, { message: result.reason });
     return { ...result, searchId: completo.searchId, importRequestId: completo.importRequestId };
   }));
@@ -1278,7 +1364,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("improve_articles", {
     title: "Melhorar publicados e formar Assuntos",
-    description: "Uma jornada para todos os publicados e Assuntos da marca. prepare: acervo, DNAs, cache e uma leitura editorial da IA na lista da marca (consome a IA da plataforma pela OpenRouter); exige aceite que cite a IA. Mesmos insumos reaproveitam a execução anterior sem chamar a IA de novo. Busca nova no Google Ads só com discover: true, depois de aceite que cite o custo (até 2 chamadas por alvo sem proposta, teto 40, cota de Descoberta, sem custo em dólar); nunca automática. status: retomar. Linha com evidenceBasis editorial_ai é sugestão da IA: mostre o motivo de cada keyword e peça conferência. Mostre principal, entradas/saídas, transferências, enfoques, evidência e custos. collect: só com aceite específico do plano vigente e teto total US$ 1. apply: só após aceite editorial da prévia vigente, incluindo novas keywords; cada chamada avança um artigo, até state complete. Não reescreve nem publica no site. Principal Livre pode trocar; Travada, URLs, slugs, canonical e Silo publicados preservados. Nenhuma troca de sinônimos é apresentada como solução de canibalização.",
+    description: "Uma jornada para todos os publicados e Assuntos da marca. prepare: acervo, DNAs, cache e uma leitura editorial da IA na lista da marca (consome a IA da plataforma pela OpenRouter); exige aceite que cite a IA. Mesmos insumos reaproveitam a execução anterior sem chamar a IA de novo. Busca nova no Google Ads só com discover: true, depois de aceite que cite o custo (até 2 chamadas por alvo sem proposta, teto 40, cota de Descoberta, sem custo em dólar); nunca automática. status: retomar. Linha com evidenceBasis editorial_ai é sugestão da IA: mostre o motivo de cada keyword e peça conferência. Mostre principal, entradas/saídas, transferências, enfoques, evidência e custos. collect: só com aceite específico do plano vigente e teto total US$ 1. apply: só após aceite editorial da prévia vigente, incluindo novas keywords; cada chamada avança um artigo, até state complete. Não reescreve nem publica no site. Principal Livre pode trocar; Travada, URLs, slugs, canonical e Silo publicados preservados. Nenhuma troca de sinônimos é apresentada como solução de canibalização. group (opcional: a cor, o id do grupo ou sem-grupo) recorta o prepare ao grupo — alvos e lista só do grupo, proteção da marca inteira; é a porta única para formar os artigos de um grupo com plano declarado ('Formar os artigos do plano · cor').",
     inputSchema: ArticleImprovementRequestSchema.safeExtend({ userConfirmation: confirmationInput.optional() }),
     annotations: write,
   }, async ({ userConfirmation, ...request }) => {
@@ -1303,17 +1389,19 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     description: [
       "Decisão delegada pelo usuário no chat para um Silo JÁ consolidado: troca o Pilar pelo Pilar declarado no plano, aplica a ordem do plano, o nome e o objetivo do Silo planejado e o slug (só se a SiloPage não estiver publicada nem tiver canonical). Grava SiloDNA e SiloPage em versão nova (as aprovadas ficam no histórico) e liga o grupo do plano ao Silo.",
       "Faça mode=preview e mostre ao usuário as mudanças e os avisos; só depois do aceite explícito chame mode=apply com o mesmo decisionHash e userConfirmation contendo as palavras do usuário. Sem mudança real, não há versão nova.",
-      "Recusa: artigo fora do plano ainda no Silo (retire na tela, 'Retirar artigo do Silo'), Pilar atual publicado, plano que não vale para os artigos do Silo. URL, slug e canonical publicados nunca mudam. Depois de aplicar, o grafo de links internos precisa ser processado de novo na tela (Links internos).",
+      "Recusa: Pilar atual publicado, plano que não vale para os artigos do Silo. Artigo fora do plano ainda no Silo: com withdrawNonPlan: true a prévia o lista com 'retirar do Silo' marcado (ArticleDNA preservado, keywords de volta a não agrupadas) e o apply retira (núcleo da retirada) e aplica o plano numa decisão, com um decisionHash só; sem withdrawNonPlan, a recusa de sempre. Retirada que falha para tudo e o plano não é aplicado. URL, slug e canonical publicados nunca mudam. Depois de aplicar, o grafo de links internos precisa ser processado de novo na tela (Links internos → Processar links).",
     ].join(" "),
     inputSchema: z.object({
       brandId: brandIdInput,
       siloId: z.string().trim().min(1).max(256).describe("O siloId do SiloDNA (ex.: territory:<uuid>)."),
       mode: z.enum(["preview", "apply"]),
       decisionHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+      withdrawNonPlan: z.boolean().optional().describe("SDD acelerar 2026-10-13, item 10: retirar do Silo os artigos fora do plano e aplicar o plano numa decisão."),
+      withdrawArticleIds: z.array(z.string().min(1)).max(60).optional().describe("Os artigos fora do plano que o usuário manteve marcados para retirar (ausente = todos)."),
       userConfirmation: confirmationInput.optional(),
     }),
     annotations: write,
-  }, async ({ brandId, siloId, mode, decisionHash, userConfirmation }) => {
+  }, async ({ brandId, siloId, mode, decisionHash, withdrawNonPlan, withdrawArticleIds, userConfirmation }) => {
     if (mode === "apply" && (!userConfirmation || !decisionHash)) {
       return asText({ ok: false, code: !userConfirmation ? "human_confirmation_required" : "decision_hash_required", message: "Mostre a prévia, aguarde o aceite específico do usuário e aplique com o mesmo decisionHash." });
     }
@@ -1322,10 +1410,47 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     return call("apply_declared_plan_to_silo", scopes, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, permissions, async ({ access }) => {
       const context = await resolvePipelineContext({ brandId: access.brandId, module: "arquiteto", action: mode === "apply" ? "edit" : "view" }, { requireActorUserId: async () => principal.actorId });
       const { handleSiloDeclaredPlan, siloDeclaredPlanRuntime } = await import("./arquiteto-silo-declared-plan");
-      const result = await handleSiloDeclaredPlan(siloDeclaredPlanRuntime(context), { siloId, mode, decisionHash: decisionHash?.toLowerCase() ?? null });
+      const result = withdrawNonPlan
+        ? await (await import("./arquiteto-silo-plan-with-withdrawal")).handleSiloDeclaredPlanWithWithdrawal(siloDeclaredPlanRuntime(context), (await import("./arquiteto-silo-article-withdrawal")).siloArticleWithdrawalRuntime(context), { siloId, mode, withdrawArticleIds: withdrawArticleIds ?? null, decisionHash: decisionHash?.toLowerCase() ?? null })
+        : await handleSiloDeclaredPlan(siloDeclaredPlanRuntime(context), { siloId, mode, decisionHash: decisionHash?.toLowerCase() ?? null });
       // F5 — a recusa leva o veredito da guarda ("a mesma recusa de <data>"), quando há.
-      if (result.state === "REFUSED") throw new PlatformToolFailure(result.code === "STALE_DECISION" ? "decision_stale" : `silo_plan_${result.code.toLowerCase()}`, { message: result.message, ...(result.rework ? { rework: result.rework } : {}) });
+      if (result.state === "REFUSED") throw new PlatformToolFailure(result.code === "STALE_DECISION" ? "decision_stale" : `silo_plan_${result.code.toLowerCase()}`, { message: result.message, ...("rework" in result && result.rework ? { rework: result.rework } : {}), ...("articleIds" in result && result.articleIds ? { articleIds: result.articleIds } : {}) });
       return mode === "preview" ? { ...result, readOnly: true } : { ...result, readbackConfirmed: result.state === "APPLIED" };
+    });
+  });
+
+  /*
+   * 2026-10-13 · CONVERSÃO DO FORMATO ANTERIOR, lado do Arquiteto (SDD
+   * `sdd-conversao-assunto-legado-2026-10-13.md` §7): o MESMO núcleo da rota
+   * /api/arquiteto/subject-conversion. A versão nova do ArticleDNA nasce
+   * aprovada, decisão humana aceita no chat com o decisionHash da prévia.
+   */
+  server.registerTool("update_article_subject", {
+    title: "Atualizar o Assunto dos artigos (conversão do formato anterior)",
+    description: [
+      "Depois de convert_legacy_subjects, cada artigo cujo Assunto ainda aponta para a linha-título ganha uma versão nova do ArticleDNA com o Assunto na keyword nova (pacote aprovado dela), o papel e a promessa do plano. A principal, o slug e as keywords do artigo não mudam; as versões anteriores ficam no histórico.",
+      "Faça mode=preview e mostre ao usuário a troca de cada artigo e os impedimentos; só depois do aceite explícito chame mode=apply com o mesmo decisionHash e userConfirmation. Sem artigo pendente, a resposta é nothing_to_convert. Com o plano do grupo, o passo seguinte é apply_declared_plan_to_silo.",
+    ].join(" "),
+    inputSchema: z.object({
+      brandId: brandIdInput,
+      mode: z.enum(["preview", "apply"]),
+      articleIds: z.array(z.string().trim().min(1).max(400)).max(60).optional(),
+      decisionHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+      userConfirmation: confirmationInput.optional(),
+    }),
+    annotations: write,
+  }, async ({ brandId, mode, articleIds, decisionHash, userConfirmation }) => {
+    if (mode === "apply" && (!userConfirmation || !decisionHash)) {
+      return asText({ ok: false, code: !userConfirmation ? "human_confirmation_required" : "decision_hash_required", message: "Mostre a prévia, aguarde o aceite específico do usuário e aplique com o mesmo decisionHash." });
+    }
+    const scopes = mode === "apply" ? ["arquiteto.write", "platform.decide"] as const : ["platform.read"] as const;
+    const permissions = mode === "apply" ? [{ module: "arquiteto", action: "edit" } as const, { module: "arquiteto", action: "approve" } as const] : [{ module: "arquiteto", action: "view" } as const];
+    return call("update_article_subject", scopes, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, permissions, async ({ access }) => {
+      const context = await resolvePipelineContext({ brandId: access.brandId, module: "arquiteto", action: mode === "apply" ? "edit" : "view" }, { requireActorUserId: async () => principal.actorId });
+      const { handleArticleSubjectConversion } = await import("./arquiteto-subject-conversion");
+      const result = await handleArticleSubjectConversion(context, { mode, articleIds: articleIds ?? null, decisionHash: decisionHash?.toLowerCase() ?? null });
+      if (result.state === "REFUSED") throw new PlatformToolFailure(result.code === "STALE_DECISION" ? "decision_stale" : result.code.toLowerCase(), { message: result.message });
+      return mode === "preview" ? { ...result, readOnly: true } : { ...result, readbackConfirmed: result.state === "APPLIED" && result.failed === 0 };
     });
   });
 
@@ -1344,6 +1469,49 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     [{ module: "radar", action: "edit" }, { module: "redator", action: "create" }], async ({ access }) =>
       sendArticlesToWriter(articleIds, articleId => sendRadarToWriter({ brandId: access.brandId, articleId, actorId: principal.actorId, sentAt: new Date().toISOString() }),
         articleId => radarArticleScreen(access, articleId))));
+
+  /*
+   * 2026-10-13 · F5 (SDD acelerar-fluxo-do-plano, item 14) · O RADAR ACOMPANHA O
+   * ARQUITETO. O MESMO núcleo da rota /api/editorial/radar-architect-update:
+   * prévia com platform.read; adoção com radar.write + platform.decide, aceite
+   * do usuário no chat e o decisionHash da prévia. Nada pago, nada de IA; o
+   * Arquiteto não é tocado.
+   */
+  server.registerTool("adopt_architect_version", {
+    title: "Adotar no Radar a versão nova do ArticleDNA",
+    description: [
+      "Quando o Arquiteto aprova uma versão nova de um artigo que já está no Radar, o item mostra 'Atualização disponível do Arquiteto · vN → vM' (rótulo do Radar, diferente do 'Atualização disponível' da publicação). mode=preview lista os itens atrás, o que mudou (principal, slug, keywords, papel, promessa/escopo, Assunto), a classe (mesma base de pesquisa, composição mudou, principal mudou), o que continua valendo, o que fica para refazer, o custo e quem é recusado e por quê.",
+      "Mostre a prévia ao usuário; só depois do aceite explícito chame mode=apply com os mesmos articleIds (ou o mesmo siloId) e o decisionHash da prévia, e userConfirmation com as palavras do usuário. Desmarcar um artigo é a recusa por item: tire-o de articleIds e gere a prévia de novo para ter o hash daquele conjunto.",
+      "A adoção troca o item para a versão nova pelo mesmo caminho do envio, reaproveita a investigação que continua válida numa versão nova da análise e marca o que precisa ser refeito; a releitura do servidor confirma. Nada pago e nada de IA na adoção; refazer uma pesquisa (quando a prévia diz) é na tela, com o custo no botão.",
+      "Recusas: investigação congelada, pacote aprovado ou enviado ao Redator (a troca só depois de um congelamento novo, que esta fase ainda não faz: o item e os entregáveis seguem na versão enviada), slug publicado que mudaria, Silo não resolvido. O Radar não reagrupa, não troca a principal por conta própria nem muda slug, canonical ou URL publicada.",
+    ].join(" "),
+    inputSchema: z.object({
+      brandId: brandIdInput,
+      mode: z.enum(["preview", "apply"]),
+      articleIds: z.array(z.string().trim().min(1).max(400)).max(60).optional(),
+      siloId: z.string().trim().min(1).max(400).optional().describe("Recorte pelo Silo (o lote do Silo)."),
+      decisionHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+      userConfirmation: confirmationInput.optional(),
+    }),
+    annotations: write,
+  }, async ({ brandId, mode, articleIds, siloId, decisionHash, userConfirmation }) => {
+    if (mode === "apply" && (!userConfirmation || !decisionHash)) {
+      return asText({ ok: false, code: !userConfirmation ? "human_confirmation_required" : "decision_hash_required", message: "Mostre a prévia, aguarde o aceite específico do usuário e aplique com o mesmo decisionHash." });
+    }
+    const scopes = mode === "apply" ? ["radar.write", "platform.decide"] as const : ["platform.read"] as const;
+    const permissions = mode === "apply" ? [{ module: "radar", action: "edit" } as const] : [{ module: "radar", action: "view" } as const];
+    return call("adopt_architect_version", scopes, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, permissions, async ({ access }) => {
+      const { adoptArchitectVersionWithCore, previewArchitectUpdatesWithCore } = await import("./radar-architect-adoption");
+      const { supabaseRadarArchitectAdoptionStore } = await import("./radar-architect-adoption-store");
+      const store = supabaseRadarArchitectAdoptionStore(getOperationalClient());
+      const previa = await previewArchitectUpdatesWithCore(store, { brandId: access.brandId, articleIds: articleIds ?? null, siloId: siloId ?? null });
+      if (mode === "preview") return { ...previa, screen: "Radar → faixa 'Atualização disponível do Arquiteto' → 'Ver e adotar'" };
+      const escolhidos = previa.items.filter(item => item.adoptable).map(item => item.articleId);
+      const resultado = await adoptArchitectVersionWithCore(store, { brandId: access.brandId, actorId: principal.actorId, articleIds: articleIds?.length ? articleIds : escolhidos, decisionHash: decisionHash!.toLowerCase() });
+      if (resultado.state === "REFUSED") throw new PlatformToolFailure(resultado.code === "STALE_DECISION" ? "decision_stale" : "nothing_to_adopt", { message: resultado.message });
+      return resultado;
+    });
+  });
 
   server.registerTool("get_article_for_writing", {
     title: "Material do artigo para escrever fora da plataforma",

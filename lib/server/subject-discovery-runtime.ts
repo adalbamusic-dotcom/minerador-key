@@ -13,6 +13,7 @@ import { createGoogleAdsKeywordAccount } from "@/lib/google/ads/account";
 import { generateGoogleAdsKeywordIdeas } from "@/lib/google/ads/keyword-ideas";
 import { createGoogleAdsCanonicalClient, resolveGoogleAdsCanonicalContext } from "./google-ads-canonical";
 import { recordGoogleAdsDiscoveryUsage } from "@/lib/minerador/google-ads-discovery-usage";
+import { recordSubjectSearchReceipt } from "./subject-search-receipts";
 import {
   type SubjectDiscoveryExecutionPorts,
   type SubjectDiscoveryOpenExecutionOptions,
@@ -206,6 +207,8 @@ export function buildSubjectDiscoveryPorts({ profile, context, input, usage }: {
           }, account);
           return {
             requestId: page.requestId,
+            // Item 8 (SDD acelerar-fluxo 2026-10-13): a versão da API vai para o recibo.
+            providerVersion: page.ideas[0]?.providerVersion ?? null,
             ideas: page.ideas.map(idea => ({
               keyword: idea.keyword,
               averageMonthlySearches: idea.averageMonthlySearches,
@@ -238,6 +241,9 @@ export function buildSubjectDiscoveryPorts({ profile, context, input, usage }: {
         },
       };
     },
+    // Item 8 (SDD acelerar-fluxo 2026-10-13): o recibo do servidor (M-A), pela
+    // marca da rota e o ator autenticado. Sem a tabela, `unavailable` (não lança).
+    recordReceipt: draft => recordSubjectSearchReceipt({ brandId: context.brandId, actorId: profile.userId, draft }),
   };
   return ports;
 }

@@ -613,6 +613,17 @@ function HumanReviewPanel({
  * confirmar o custo).
  */
 export function SubjectArticleBlock({ view, onSubjectSearch }: { view: SubjectArticleView; onSubjectSearch?: () => void }) {
+  // 2026-10-13 · a linha-título convertida: o Assunto mora agora em outra keyword (conversão do formato anterior).
+  if (view.kind === "converted_title") {
+    return <section data-keyword-subject-article="converted_title" aria-label="Assunto deste artigo" className="min-w-0 rounded-md border border-context-accent/35 bg-surface-subtle p-2.5">
+      <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <h3 className="min-w-0 break-words text-base font-semibold tracking-tight text-foreground">ASSUNTO DESTE ARTIGO</h3>
+        <span className="text-sm font-medium text-text-muted">somente leitura</span>
+      </header>
+      <p data-subject-article-converted className="mt-1.5 text-sm text-foreground">Linha-título convertida: o Assunto desta frase agora mora na keyword <span className="font-semibold text-keyword">{view.keyword ?? view.keywordId}</span>. Esta linha fica como histórico e não forma artigo.</p>
+      <p data-subject-article-hint className="mt-2 text-sm text-text-muted">{view.hint}</p>
+    </section>;
+  }
   const group = view.group && isEditorialGroupColor(view.group.color) ? { color: view.group.color, name: view.group.name } : null;
   const groupCell = group
     ? <EditorialGroupTag name={group.name} color={group.color} />
@@ -640,6 +651,9 @@ export function SubjectArticleBlock({ view, onSubjectSearch }: { view: SubjectAr
         </div>
         {view.principalElsewhere ? (
           <div className="min-w-0 sm:col-span-2"><dt className="text-text-muted">Principal declarada (em outra linha)</dt><dd className="mt-0.5 break-words text-keyword">{view.principalElsewhere.phrase}</dd></div>
+        ) : null}
+        {view.convertedFrom ? (
+          <div className="min-w-0 sm:col-span-2"><dt className="text-text-muted">Convertido do formato anterior</dt><dd data-subject-article-converted-from className="mt-0.5 break-words text-foreground">linha-título “{view.convertedFrom.phrase}” (arquivada, não excluída)</dd></div>
         ) : null}
       </dl>
       {onSubjectSearch ? (
@@ -782,6 +796,7 @@ export function KeywordDnaPanel({
   onSubjectSearch,
   subjectGroupOf,
   subjectKeywordTextOf,
+  subjectConvertedTitleOf,
 }: {
   keyword: { id: string; keyword: string; intent?: string | null; status?: string | null; volume_search?: number | null; results_allintitle?: number | null; kgr_score?: number | null; volume_source?: string | null; analise_semantica?: ProfileRecord | null };
   onWorkflowStatusChange?: (status: string) => void | Promise<void>;
@@ -794,6 +809,8 @@ export function KeywordDnaPanel({
   subjectGroupOf?: (groupId: string) => SubjectArticleGroup;
   /** O texto de uma keyword pelo id (o Assunto do formato anterior, em outra linha). */
   subjectKeywordTextOf?: (keywordId: string) => string | null;
+  /** 2026-10-13 · a linha-título convertida: para qual keyword o Assunto foi (conversão do formato anterior). */
+  subjectConvertedTitleOf?: (keywordId: string) => { keywordId: string; keyword: string | null } | null;
   reviewDraftActive?: boolean;
   statusUpdating?: boolean;
   visualPosition?: number;
@@ -854,6 +871,7 @@ export function KeywordDnaPanel({
     volume: { validated: processorRevalidation.volume.validated, value: typeof processorRevalidation.volume.value === "number" ? processorRevalidation.volume.value : null },
     groupOf: subjectGroupOf,
     keywordTextOf: subjectKeywordTextOf,
+    convertedTo: subjectConvertedTitleOf?.(keyword.id) ?? null,
   });
   const processStates = canonicalSnapshot.process;
   const logicalProcessComplete = processStates.logic.complete;

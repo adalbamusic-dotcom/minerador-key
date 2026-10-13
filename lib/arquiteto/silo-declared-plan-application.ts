@@ -49,7 +49,9 @@ export const SILO_DECLARED_PLAN_REFUSALS = {
   PILLAR_PUBLISHED: "O Pilar atual está publicado: trocar o Pilar de uma página no ar é conflito que esta ação não resolve (URL, slug e canonical ficam como estão). Decida no Silo antes.",
 } as const;
 export type SiloDeclaredPlanRefusalCode = keyof typeof SILO_DECLARED_PLAN_REFUSALS;
-export type SiloDeclaredPlanRefusal = { ok: false; code: SiloDeclaredPlanRefusalCode; message: string };
+export type SiloDeclaredPlanRefusal = { ok: false; code: SiloDeclaredPlanRefusalCode; message: string;
+  /** SDD acelerar 2026-10-13, item 10 (aditivo): em NON_PLAN_ARTICLES, os artigos fora do plano — a prévia oferece retirá-los. */
+  articleIds?: string[] };
 
 type Status = { versionId: string; status: string };
 
@@ -151,7 +153,7 @@ export function planSiloDeclaredPlanApplication(input: SiloDeclaredPlanInput): S
 
   const semPlano = atuaisIds.filter(id => entradaDe(id)?.plan.groupId !== grupo);
   if (semPlano.length) {
-    return refuse("NON_PLAN_ARTICLES", `Fora do plano: ${semPlano.map(id => `“${label(id)}”`).join(", ")}. Retire pelo “Retirar artigo do Silo” antes de aplicar o plano.`);
+    return { ...refuse("NON_PLAN_ARTICLES", `Fora do plano: ${semPlano.map(id => `“${label(id)}”`).join(", ")}. Marque “retirar do Silo” na prévia (ou retire pelo “Retirar artigo do Silo”) antes de aplicar o plano.`), articleIds: semPlano };
   }
 
   // Artigos do plano que ainda não estão no Silo: entram quando já são deste Silo (siloId ou território) e de nenhum outro.
@@ -180,7 +182,7 @@ export function planSiloDeclaredPlanApplication(input: SiloDeclaredPlanInput): S
   const unidades = [...atuaisIds, ...extras].map(id => unitOf(artigos.get(id)!));
   const presentes = new Set(unidades.map(unit => declaredPlanEntryForUnit(unit, entradasDoGrupo)?.subjectKeywordId).filter(Boolean));
   for (const entrada of [...entradasDoGrupo].sort((a, b) => a.plan.order - b.plan.order)) {
-    if (!presentes.has(entrada.subjectKeywordId)) avisos.push(`O artigo ${entrada.plan.order} do plano ainda não tem ArticleDNA neste Silo: grave-o na aba Artigos e aplique o plano de novo para ele entrar.`);
+    if (!presentes.has(entrada.subjectKeywordId)) avisos.push(`O artigo ${entrada.plan.order} do plano ainda não tem ArticleDNA neste Silo: forme-o em Artigos → “Formar os artigos do plano” e aplique o plano de novo para ele entrar.`);
   }
 
   const resolucao = resolveDeclaredSiloPlan({ units: unidades, entries: entradasDoGrupo });

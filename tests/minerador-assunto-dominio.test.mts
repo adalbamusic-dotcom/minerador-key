@@ -311,9 +311,14 @@ const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   importSubjectsWithCore: ["lib/minerador/declared-plan-import-core.ts"],
   // 2026-10-12 (F4): o plano do Silo tem um núcleo só — a rota da tela e a
   // ferramenta MCP `declare_silo_plan` (com a guarda do aceite, P4b).
-  importDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/import/route.ts", "lib/server/platform-mcp-tools.ts"],
+  // 2026-10-13 (SDD da conversão do formato anterior): a conversão passa pelo MESMO núcleo do cadastro.
+  importDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/import/route.ts", "lib/minerador/subject-conversion-core.ts", "lib/server/platform-mcp-tools.ts"],
+  // 2026-10-13: converter tem a rota da tela e a ferramenta MCP `convert_legacy_subjects` (com a guarda do aceite).
+  convertLegacySubjectsWithCore: ["app/api/minerador/marcas/[brandId]/plans/convert/route.ts", "lib/server/platform-mcp-tools.ts"],
   // 2026-10-12: "Tirar do plano" é só da tela (prévia → decisão humana); nenhuma ferramenta MCP.
-  withdrawFromDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/withdraw/route.ts"],
+  // 2026-10-13 (SDD acelerar, item 15 — mudança declarada): "Tirar do plano" numa confirmação chama o
+  // MESMO núcleo pelas dependências da mesma rota da tela (`chain`); continua sem ferramenta MCP.
+  withdrawFromDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/withdraw/route.ts", "lib/server/declared-plan-withdraw-chain-runtime.ts"],
 };
 
 /** Chamador de IA autorizado — isento da regex de "caminho de IA", e só ele. */
@@ -326,6 +331,7 @@ const SUBJECT_WRITE_DEFINED_IN: Record<string, string> = {
   planVinculoBatchChoices: "lib/minerador/vinculo-batch.ts",
   importSubjectsWithCore: "lib/minerador/keyword-import-core.ts",
   importDeclaredPlanWithCore: "lib/minerador/declared-plan-import-core.ts",
+  convertLegacySubjectsWithCore: "lib/minerador/subject-conversion-core.ts",
   withdrawFromDeclaredPlanWithCore: "lib/minerador/declared-plan-withdraw-core.ts",
 };
 

@@ -21,6 +21,9 @@ import { OperationalPublicationSchema, RadarItemSchema, approvedArticleVersions,
  * Com eles, some o último acoplamento de produção entre o pipeline e o módulo.
  */
 import { useBrand } from "./brand-context";
+import { usePathname } from "next/navigation";
+import { useAreaGroupFilter } from "./editorial/editorial-group-area-store";
+import { mergeScopedById, scopedRecoveryKey, workspaceReadScopeFor, workspaceReadUrl, type WorkspaceGroupScreenFilter, type WorkspaceReadScope } from "@/lib/editorial/workspace-read-scope";
 import { useSupabaseSession } from "./auth/supabase-session-context";
 import { updateBrandWorkspace } from "@/lib/editorial/workspace";
 import { describeLocalRecoveryFailure, localRecoveryNoticeAfterCanonicalRead, localRecoveryWarning, LOCAL_RECOVERY_SAVED, type LocalRecoveryOutcome } from "@/lib/editorial/local-recovery";
@@ -166,6 +169,17 @@ function latestVersionByKey<T extends { versionNumber: number }>(current: Record
   return result;
 }
 
+/*
+ * SDD acelerar 2026-10-13, item 6 · a chave da cópia local DESTE momento, por
+ * `actor:marca`: o provider a registra a cada render. Com a memória só de um
+ * grupo (leitura recortada sem leitura inteira antes), a cópia vai para a chave
+ * do recorte e nunca sobrescreve a da marca inteira.
+ */
+const chaveDaCopiaPorMarca = new Map<string, string>();
+function chaveDaCopiaDoRecorte(actorUserId: string, brandId: string): string {
+  return chaveDaCopiaPorMarca.get(`${actorUserId}:${brandId}`) ?? workflowRecoveryStorageKey(actorUserId, brandId);
+}
+
 function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: BrandWorkspace, record: SerpCollectionRecord | null, review?: SerpReviewRecord): LocalRecoveryOutcome {
   if (typeof window === "undefined") return { saved: false, reason: "não há navegador neste contexto de execução" };
   try {
@@ -189,7 +203,7 @@ function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: 
       aiReviewAnnotations: workspace.aiReviewAnnotations,
       savedAt: new Date().toISOString(),
     });
-    window.localStorage.setItem(workflowRecoveryStorageKey(actorUserId, brandId), JSON.stringify(recovery));
+    window.localStorage.setItem(chaveDaCopiaDoRecorte(actorUserId, brandId), JSON.stringify(recovery));
     return LOCAL_RECOVERY_SAVED;
   } catch (error) {
     return { saved: false, reason: describeLocalRecoveryFailure(error) };
@@ -219,7 +233,7 @@ function saveLocalRadarAnalysisRecovery(actorUserId: string, brandId: string, wo
       aiReviewAnnotations: workspace.aiReviewAnnotations,
       savedAt: new Date().toISOString(),
     });
-    window.localStorage.setItem(workflowRecoveryStorageKey(actorUserId, brandId), JSON.stringify(recovery));
+    window.localStorage.setItem(chaveDaCopiaDoRecorte(actorUserId, brandId), JSON.stringify(recovery));
     return LOCAL_RECOVERY_SAVED;
   } catch (error) {
     return { saved: false, reason: describeLocalRecoveryFailure(error) };
@@ -383,6 +397,45 @@ const LEITURA_AUTOMATICA_PRAZO_MS = 120_000;
 export function EditorialPipelineProvider({ children }: { children: React.ReactNode }) {
   const { selectedBrandId } = useBrand();
   const { actorUserId, sessionEpoch } = useSupabaseSession();
+  /*
+   * ===== 2026-10-13 · O RADAR LÊ SÓ A COR ESCOLHIDA (SDD acelerar-fluxo, item 6) =====
+   *
+   * Na rota do Radar, a mesa pede ao servidor só o recorte da cor da etiqueta
+   * (`groupId`) e só a vigente e a última aprovada de cada artefato
+   * (`detail=light`). "Todos os grupos" é a leitura de sempre (com `light`).
+   * A cor ainda resolvendo ESPERA (nunca lê tudo por engano); a leitura de um
+   * recorte só troca o que é dele (os merges abaixo preservam os outros
+   * grupos). Fora do Radar — Arquiteto, Redator, Publicações — nada muda: o
+   * Arquiteto ainda roda operações que precisam da marca inteira na tela.
+   */
+  const pathname = usePathname();
+  const rotaDoRadar = /(^|\/)radar(\/|$)/.test(pathname || "");
+  const recorteDoRadar = useAreaGroupFilter(rotaDoRadar ? selectedBrandId || null : null, "radar");
+  const escopoDaMesa = useMemo(() => rotaDoRadar
+    ? workspaceReadScopeFor({ filter: recorteDoRadar.filter as WorkspaceGroupScreenFilter, pending: recorteDoRadar.pending, detail: "light" })
+    : { ready: true, scope: null as WorkspaceReadScope | null },
+  // A chave do recorte basta: o objeto do filtro é estável enquanto ela não muda.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [rotaDoRadar, recorteDoRadar.filterKey, recorteDoRadar.pending]);
+  const escopoDaMesaRef = useRef(escopoDaMesa);
+  escopoDaMesaRef.current = escopoDaMesa;
+  /** A leitura inteira já aconteceu nesta chave: a memória é um superconjunto e a cópia local volta à chave de sempre. */
+  const leituraInteiraFeita = useRef(new Set<string>());
+  /** A leitura que esperou a cor resolver (o `sourceSnapshot` dela). */
+  const leituraEsperandoEscopo = useRef<{ pending: boolean; snapshot?: EditorialSnapshot }>({ pending: false });
+  /** A última leitura foi recortada (grupo) ou leve: fora do Radar, a mesa precisa da leitura inteira de novo. */
+  const ultimaLeituraRecortada = useRef<"inteira" | "leve" | "grupo">("inteira");
+  /*
+   * A cópia local de um recorte tem chave própria (`…:<groupId>`): a memória só
+   * com uma cor nunca sobrescreve a cópia da marca inteira. Depois de uma
+   * leitura inteira, a memória é um superconjunto e volta à chave de sempre.
+   */
+  const chaveDaCopiaLocal = useCallback(() => {
+    if (!actorUserId || !selectedBrandId) return undefined;
+    const base = workflowRecoveryStorageKey(actorUserId, selectedBrandId);
+    if (leituraInteiraFeita.current.has(`${actorUserId}:${selectedBrandId}`) || ultimaLeituraRecortada.current !== "grupo") return base;
+    return scopedRecoveryKey(base, escopoDaMesaRef.current.scope?.groupId);
+  }, [actorUserId, selectedBrandId]);
   const [workspaces, setWorkspaces] = useState<Record<string, BrandWorkspace>>({});
   const [snapshots, setSnapshots] = useState<Record<string, EditorialSnapshot>>({});
   const [loading, setLoading] = useState(false);
@@ -498,8 +551,14 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     if (!selectedBrandId || !actorUserId) return;
     const actorAtStart = actorUserId;
     const epochAtStart = sessionEpoch;
+    // Item 6: a cor ainda resolvendo espera — a leitura sai quando o recorte é conhecido.
+    const escopo = escopoDaMesaRef.current;
+    if (!escopo.ready) { leituraEsperandoEscopo.current = { pending: true, snapshot: sourceSnapshot }; return; }
+    leituraEsperandoEscopo.current = { pending: false };
+    const recorte = escopo.scope;
+    const chaveDaLeitura = `${actorUserId}:${selectedBrandId}`;
     try {
-      const response = await fetch(`/api/editorial/workspace?marcaId=${encodeURIComponent(selectedBrandId)}`, { cache: "no-store" });
+      const response = await fetch(workspaceReadUrl(selectedBrandId, recorte), { cache: "no-store" });
       if (actorUserId !== actorAtStart || sessionEpoch !== epochAtStart) return;
       if (!response.ok) {
         // Falha de leitura PERMANECE falha. Antes ela virava lista vazia e a
@@ -521,6 +580,16 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         return;
       }
       const body = await response.json(); const persisted = PersistedEditorialWorkspaceSchema.parse(body.data);
+      // Item 6: resposta PARCIAL (um grupo) só troca o que é do grupo; o resto da memória fica.
+      const artigosDoRecorte = body?.groupScope?.partial === true && Array.isArray(body.groupScope.articleIds)
+        ? new Set<string>(body.groupScope.articleIds.filter((id: unknown): id is string => typeof id === "string"))
+        : null;
+      if (!artigosDoRecorte && recorte?.detail !== "light") leituraInteiraFeita.current.add(chaveDaLeitura);
+      ultimaLeituraRecortada.current = artigosDoRecorte ? "grupo" : recorte?.detail === "light" ? "leve" : "inteira";
+      {
+        const base = workflowRecoveryStorageKey(actorUserId, selectedBrandId);
+        chaveDaCopiaPorMarca.set(chaveDaLeitura, artigosDoRecorte && !leituraInteiraFeita.current.has(chaveDaLeitura) ? scopedRecoveryKey(base, recorte?.groupId) : base);
+      }
       updateWorkspace(current => {
         const articleVersions = latestVersionByKey(current.articleVersions, persisted.articleVersions, version => version.payload.articleId);
         const siloVersions = latestVersionByKey(current.siloVersions, persisted.siloVersions, version => version.payload.siloId);
@@ -570,7 +639,10 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         documentUserStates: { ...current.documentUserStates, ...Object.fromEntries(persisted.documents.filter(record => record.userState).map(record => [record.document.id, record.userState!])) },
         /* A autoridade chegou: daqui em diante um mapa vazio quer dizer vazio mesmo. */
         documentUserStatesReady: true,
-         operationalPublications: persisted.publications, invitations: persisted.invitations,
+         operationalPublications: artigosDoRecorte
+           ? mergeScopedById(current.operationalPublications, persisted.publications, publication => artigosDoRecorte.has(publication.articleId))
+           : persisted.publications,
+         invitations: persisted.invitations,
        }; });
     } catch (error) {
       /* 2026-10-09 · a falha que deixava a planilha na cópia local não deixava rastro: agora fica no console. */
@@ -582,6 +654,28 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
           message: "Nao foi possivel falar com o servidor. O que aparece aqui e recuperacao local." } }));
     }
   }, [actorUserId, selectedBrandId, sessionEpoch, snapshots, updateWorkspace, workspaceKey]);
+
+  /*
+   * Item 6 · quando o recorte muda, a mesa relê: a cor resolveu (a leitura que
+   * esperava sai agora), a cor mudou no Radar (lê o recorte novo; o que já está
+   * em memória de outra cor fica), ou a tela saiu do Radar depois de uma leitura
+   * recortada/leve (o Arquiteto e as outras áreas precisam da leitura inteira).
+   */
+  const chaveDoEscopo = `${escopoDaMesa.ready ? "pronto" : "esperando"}:${escopoDaMesa.scope?.groupId ?? "todos"}:${escopoDaMesa.scope?.detail ?? "full"}`;
+  const chaveDoEscopoAnterior = useRef(chaveDoEscopo);
+  useEffect(() => {
+    if (chaveDoEscopoAnterior.current === chaveDoEscopo) return;
+    chaveDoEscopoAnterior.current = chaveDoEscopo;
+    if (!escopoDaMesa.ready || !selectedBrandId || !actorUserId) return;
+    const esperando = leituraEsperandoEscopo.current;
+    if (esperando.pending) { void reloadOperational(esperando.snapshot); return; }
+    if (!snapshots[workspaceKey]) return;
+    const ultima = ultimaLeituraRecortada.current;
+    const precisa = escopoDaMesa.scope?.groupId
+      ? true
+      : escopoDaMesa.scope ? ultima === "grupo" : ultima !== "inteira";
+    if (precisa) void reloadOperational();
+  }, [chaveDoEscopo, escopoDaMesa, actorUserId, selectedBrandId, snapshots, workspaceKey, reloadOperational]);
 
   const reload = useCallback(async () => {
     if (!selectedBrandId || !actorUserId) return;
@@ -731,7 +825,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         aiReviewAnnotations: current.aiReviewAnnotations,
         savedAt: new Date().toISOString(),
       });
-      window.localStorage.setItem(workflowRecoveryStorageKey(actorUserId, selectedBrandId), JSON.stringify(recovery));
+      window.localStorage.setItem(chaveDaCopiaLocal() ?? workflowRecoveryStorageKey(actorUserId, selectedBrandId), JSON.stringify(recovery));
     } catch (error) {
       // Recovery is best-effort and must never interrupt an editorial action.
       /* Sem espaço, a próxima tentativa custaria o mesmo e falharia igual. */
@@ -739,7 +833,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [actorUserId, selectedBrandId, workspaces, workspaceKey]);
+  }, [actorUserId, selectedBrandId, workspaces, workspaceKey, chaveDaCopiaLocal]);
 
   useEffect(() => {
     /* E2: a carga fria da mesa espera o primeiro consumidor. */

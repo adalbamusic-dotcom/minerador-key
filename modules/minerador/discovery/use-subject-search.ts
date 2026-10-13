@@ -35,6 +35,7 @@ import {
   type SubjectSearchLocalConfig,
   type SubjectSearchLocalRecord,
 } from "./subject-search-local-store";
+import { postSubjectSearch, subjectDiscoveryImportRoute, subjectImportResultText, type SubjectDiscoveryImportRouteResponse } from "./subject-search-client";
 
 /**
  * PESQUISA POR ASSUNTO — estado e ações da tela (SDD 2026-09-24, F1b.1,
@@ -90,7 +91,6 @@ export type SubjectSearchImportDialogState = {
 };
 
 type SubjectImportRouteResponse = { success?: boolean; message?: string; rows?: Array<SubjectPhrasePreviewRow & { index?: number }>; notices?: string[]; diagnostic?: unknown };
-type SubjectDiscoveryImportRouteResponse = { success?: boolean; message?: string; code?: string; subject?: SubjectDiscoverySubjectCheck; rows?: SubjectDiscoveryImportRow[]; notAffected?: SubjectDiscoveryImportRow[]; counts?: SubjectDiscoveryImportCounts };
 
 function brandIdFromRef(brandRef: string) { return brandRef.split("--").at(-1)?.trim() || ""; }
 
@@ -254,12 +254,9 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
     busyRef.current = true;
     setPlanning(true); setFieldError(null); setPlanError(null);
     try {
-      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(brandId)}/subject-discovery/search`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(buildSubjectSearchRequest({ mode: "plan", ...config })),
-      });
-      const payload = await readJson(response);
+      // A mesma chamada da pesquisa em lote do cadastro (subject-search-client.ts).
+      const response = await postSubjectSearch(brandId, buildSubjectSearchRequest({ mode: "plan", ...config }));
+      const payload = response.payload;
       if (response.ok && payload && (payload as SubjectDiscoveryPlanResponse).success === true) {
         const body = payload as SubjectDiscoveryPlanResponse;
         setPlanState({ plan: body.plan, subject: body.subject, config, operationRequestId: crypto.randomUUID(), message: null, blocked: false });
@@ -295,12 +292,8 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
     setExecuting(true); setPlanError(null);
     publishNotice({ severity: "PENDING", title: "Pesquisa por Assunto", message: "Consultando o Google Ads (frase e página de destino) pelo plano confirmado…", source: "workflow", module: "minerador", area: "Descoberta de keywords" });
     try {
-      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(brandId)}/subject-discovery/search`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(buildSubjectSearchRequest({ mode: "execute", ...config, operationRequestId, authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd } })),
-      });
-      const payload = await readJson(response);
+      const response = await postSubjectSearch(brandId, buildSubjectSearchRequest({ mode: "execute", ...config, operationRequestId, authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd } }));
+      const payload = response.payload;
       if (response.ok && payload && (payload as SubjectDiscoveryExecuteResponse).success === true) {
         const result = payload as SubjectDiscoveryExecuteResponse;
         const now = new Date().toISOString();
@@ -474,7 +467,7 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
         const declared = subjectId;
         setImportDialog(current => current ? { ...current, declaredId: declared } : current);
       }
-      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(brandId)}/subject-discovery/import`, {
+      const response = await fetch(subjectDiscoveryImportRoute(brandId), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ importRequestId: dialog.importRequestId, searchId: record.searchId, subjectKeywordId: subjectId, subjectPhrase: record.result.subject.phrase, items }),
@@ -492,7 +485,7 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
       publishNotice({
         severity: counts.failed ? "WARNING" : "SUCCESS",
         title: "Envio ao Processador",
-        message: `${counts.created} criada(s) · ${counts.recorded} já existia(m) e receberam a origem · ${counts.notAffected} sem a origem gravada · ${counts.failed} falha(s).`,
+        message: subjectImportResultText(payload),
         source: "persistence",
         confirmed: !counts.failed,
         module: "minerador",

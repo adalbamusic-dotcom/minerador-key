@@ -20,8 +20,11 @@ import { SubjectDiscoverySearchRequestSchema, runSubjectDiscoverySearch } from "
  *
  * A marca é a da rota; o ator é `auth.users.id`. As candidatas voltam ao
  * navegador e NÃO são gravadas: esta rota não escreve em
- * `minerador_discovery_*` nem em `minerador_keywords`. O banco recebe só o
- * uso do Google Ads no ledger.
+ * `minerador_discovery_*` nem em `minerador_keywords`. O banco recebe o uso
+ * do Google Ads no ledger e, desde 2026-10-13 (SDD acelerar-fluxo, itens 7 e
+ * 8), o RECIBO da execução (`minerador_subject_search_receipts`, só inclusões,
+ * pelo servidor) com a média do Google Ads de cada candidata — a fonte do
+ * Volume no import. `batchId` (opcional) junta as pesquisas de um lote.
  */
 
 export const dynamic = "force-dynamic";

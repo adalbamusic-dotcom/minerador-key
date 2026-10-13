@@ -245,11 +245,15 @@ test("M · aprovação e seleção sobrevivem à reexecução", () => {
   // Nenhum caminho de reprocesso rebaixa status: só handleUpdateStatus escreve.
   // São dois writes porque aprovar grava o pacote junto, mas os dois moram
   // dentro do mesmo handler — é isso que o caso guarda.
+  // SDD acelerar 2026-10-13, item 2 (mudança declarada): a aprovação saiu do
+  // navegador para o servidor (rota approve-and-send, núcleo do decide_keywords);
+  // sobra um write de status na tela, o dos outros status, no mesmo handler.
   const writes = workspace.split(".update({ status:").length - 1;
-  assert.equal(writes, 2, "status é escrito só no caminho da decisão humana");
+  assert.equal(writes, 1, "status é escrito só no caminho da decisão humana");
+  assert.match(workspace, /approveOneOnServer\(idsToUpdate\[0\]\)/);
   assert.equal(statusHandler.split(".update({ status:").length - 1, writes, "todo write de status vive em handleUpdateStatus");
   assert.ok(statusHandler.includes(".update({ status: normalizedStatus })"));
-  assert.ok(statusHandler.includes(".update({ status: normalizedStatus, analise_semantica: semantica })"));
+  assert.ok(!statusHandler.includes(".update({ status: normalizedStatus, analise_semantica: semantica })"), "aprovar não grava mais pelo navegador");
   // Seleção e linha expandida só mudam por ação do usuário ou troca de Marca.
   for (const handler of ["const handleBatchQualify", "const handleQualifySelected"]) {
     const start = workspace.indexOf(handler);

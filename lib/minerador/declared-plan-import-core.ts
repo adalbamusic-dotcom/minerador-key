@@ -37,6 +37,7 @@ import {
 import { importKeywordsWithCore, importSubjectsWithCore, type SubjectImportChannel } from "./keyword-import-core.ts";
 import { assignKeywordGroupWithCore } from "./keyword-group-core.ts";
 import { isKeywordPublished } from "./keyword-lifecycle.ts";
+import { DECLARED_PLAN_LEFTOVER_BLOCKED, classifyDeclaredPlanLeftovers } from "./declared-plan-leftovers.ts";
 import {
   declaredPrincipalReciprocity,
   isKeywordSubjectActorId,
@@ -48,6 +49,7 @@ import {
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 import { readSiteOrigin } from "./publication-link.ts";
 import { importSubjectDiscoveryWithCore } from "./subject-discovery-import.ts";
+import { SUBJECT_CONVERSION_KEY, convertedTitleIndex, isConvertibleLegacySubject, readSubjectConversion, setSubjectConversion, type ConvertedTitle } from "./subject-conversion.ts";
 import { validateSubjectDestination } from "./subject-destination.ts";
 
 /**
@@ -93,6 +95,7 @@ const ID_CHUNK = 200;
 const PAGE = 1000;
 const LIVE_COLUMNS = "id,keyword,status,group_id,volume_search,results_allintitle";
 const SUBJECT_SCAN_COLUMNS = "id,ks:analise_semantica->keyword_subject";
+const CONVERSION_SCAN_COLUMNS = "id,keyword,ks:analise_semantica->keyword_subject,kc:analise_semantica->keyword_subject_conversion";
 
 /**
  * O grupo do cadastro. A COR é a forma de sempre (§9.1-A, F6): a cor que já tem
@@ -113,6 +116,15 @@ export type SubjectCadastroDestination =
   | { kind: "new_silo" }
   | { kind: "existing_silo"; groupId: string }
   | { kind: "published"; url: string };
+
+/**
+ * 2026-10-13 · CONVERTER O ASSUNTO DO FORMATO ANTERIOR (SDD
+ * `sdd-conversao-assunto-legado-2026-10-13.md` §5): o artigo `order` do cadastro
+ * é a conversão da linha-título `fromKeywordId` (o Assunto anterior, sem plano).
+ * O Assunto passa a morar na keyword do artigo (`principal`); a linha-título não
+ * é tocada. `articleId` = o artigo do Arquiteto cujo `subject` apontava para ela.
+ */
+export type SubjectConversionRequest = { order: number; fromKeywordId: string; articleId?: string | null };
 
 /** O cadastro já estruturado (card e MCP): `subject` = título do Assunto, `principal` = a keyword que o carrega. */
 export type StructuredDeclaredPlan = {
@@ -188,6 +200,8 @@ export type DeclaredPlanPreviewArticle = {
   problems: string[];
   /** Itens aprovados deste artigo que voltam para "Em revisão" ao gravar (R2). */
   approvedToReview: number;
+  /** 2026-10-13 · conversão do formato anterior: a linha-título que deixa de carregar o Assunto. Ausente = cadastro comum. */
+  conversion?: { fromKeywordId: string; fromPhrase: string; articleId: string | null } | null;
 };
 
 export type DeclaredPlanPreview = {
@@ -204,7 +218,15 @@ export type DeclaredPlanPreview = {
   /** Artigos já gravados no plano do grupo que esta prévia não mexe (ficam como estão). */
   keptArticles: Array<{ order: number; title: string; keyword: string | null; role: DeclaredPlanRole }>;
   /** Keywords já gravadas que são sobra de import: não fazem parte do plano (D9: lixeira é ato do dono). */
-  leftovers: Array<{ keywordId: string; keyword: string; reason: "silo_name" | "pasted_label"; label: string }>;
+  leftovers: Array<{
+    keywordId: string;
+    keyword: string;
+    reason: "silo_name" | "pasted_label";
+    label: string;
+    /** Aditivo (SDD acelerar-fluxo 2026-10-13, item 9): não publicada e nunca enviada ao Arquiteto. */
+    deletable?: boolean;
+    blockedReason?: string | null;
+  }>;
   supports: { total: number; withoutGroup: number; inOtherGroup: number };
   approvedToReview: number;
   /** Impedimentos: com qualquer um, `apply` recusa. */
@@ -335,6 +357,23 @@ async function readStoredArticles(client: Client, brandId: string, groupId: stri
   }
 }
 
+/**
+ * 2026-10-13 · CONVERSÃO (SDD `sdd-conversao-assunto-legado-2026-10-13.md` §6):
+ * o índice T → K da marca (linhas-título já convertidas). Lê só o Assunto e o
+ * bloco de conversão (estreito). Uma linha-título convertida nunca é adotada de
+ * novo como Assunto do formato anterior.
+ */
+async function readConvertedTitles(client: Client, brandId: string): Promise<Map<string, ConvertedTitle>> {
+  const rows: Array<{ id: string; keyword: string | null; semantic: Record<string, unknown> }> = [];
+  for (let from = 0; ; from += PAGE) {
+    const page = await client.from("minerador_keywords").select(CONVERSION_SCAN_COLUMNS).eq("brand_id", brandId).is("deleted_at", null).order("id", { ascending: true }).range(from, from + PAGE - 1);
+    if (page.error) throw page.error;
+    const data = (page.data || []) as unknown as Array<{ id: unknown; keyword?: unknown; ks?: unknown; kc?: unknown }>;
+    for (const row of data) if (row.kc) rows.push({ id: String(row.id), keyword: typeof row.keyword === "string" ? row.keyword : null, semantic: { [SUBJECT_CONVERSION_KEY]: row.kc, keyword_subject: row.ks } });
+    if (data.length < PAGE) return convertedTitleIndex(rows);
+  }
+}
+
 /** As sustentações da Pesquisa por Assunto dos Assuntos do plano (proveniência `subject_discovery`). */
 async function readSupportRows(client: Client, brandId: string, subjectIds: ReadonlySet<string>): Promise<Array<{ id: string; groupId: string | null }>> {
   if (!subjectIds.size) return [];
@@ -424,6 +463,8 @@ type Resolved = {
   /** O Assunto cadastrado a gravar (`undefined` = manter o gravado). */
   nextEntry: SubjectEntry | null | undefined;
   change: "new" | "changed" | "unchanged";
+  /** 2026-10-13 · a conversão a gravar em K (bloco `keyword_subject_conversion`). */
+  conversion?: { fromKeywordId: string; fromPhrase: string; articleId: string | null } | null;
 };
 
 type Classified = {
@@ -461,9 +502,11 @@ async function classify(input: {
   group: DeclaredPlanGroupChoice;
   destination?: SubjectCadastroDestination | null;
   brandSiteUrl?: string | null;
+  conversions?: readonly SubjectConversionRequest[] | null;
   now: string;
 }): Promise<Classified | { ok: false; code: "GROUPS_NOT_AVAILABLE"; reason: string }> {
   const { brandId, parsed } = input;
+  const conversionByOrder = new Map((input.conversions ?? []).map(item => [item.order, item]));
   const destino = input.destination ?? null;
   const publicado = destino?.kind === "published";
   const blockers: string[] = [];
@@ -512,7 +555,14 @@ async function classify(input: {
   }
   const keywordOf = (id: string) => liveById.get(id)?.keyword ?? "";
 
-  if (publicado) return classifyPublished({ ...input, destination: destino, live, liveByKey, groupRow, groupPreview, blockers, notices });
+  if (publicado) {
+    if (conversionByOrder.size) blockers.push("A conversão do formato anterior é para Silo (novo ou existente), não para artigo publicado.");
+    return classifyPublished({ ...input, destination: destino, live, liveByKey, groupRow, groupPreview, blockers, notices });
+  }
+
+  // 2026-10-13 · as linhas-título já convertidas (T → K) nunca voltam a ser adotadas como Assunto anterior.
+  const precisaIndice = conversionByOrder.size > 0 || parsed.articles.some(article => liveByKey.has(chave(article.subject)));
+  const convertidas = precisaIndice ? await readConvertedTitles(input.keywordsClient, brandId) : new Map<string, ConvertedTitle>();
 
   const stored = await readStoredArticles(input.keywordsClient, brandId, targetGroupId, keywordOf);
   const storedPlan = groupRow ? readDeclaredSiloPlan(groupRow.plan) : null;
@@ -536,6 +586,7 @@ async function classify(input: {
       if (id) matchedIds.add(id);
     }
   }
+  for (const conversao of conversionByOrder.values()) matchedIds.add(conversao.fromKeywordId);
   const semantics = await readSemantics(input.keywordsClient, brandId, [...matchedIds]);
 
   const usados = new Set<string>();
@@ -546,6 +597,25 @@ async function classify(input: {
     const title = article.subject;
     if (!title.trim()) problems.push(`Artigo ${article.order}: falta o Assunto (título).`);
     const keywordRow = article.principal ? liveByKey.get(chave(article.principal)) ?? null : null;
+
+    // 0 — 2026-10-13 · conversão do formato anterior: a linha-título deixa o Assunto para a keyword do artigo.
+    const conversao = conversionByOrder.get(article.order) ?? null;
+    let conversion: Resolved["conversion"] = null;
+    if (conversao) {
+      const tituloRow = liveById.get(conversao.fromKeywordId) ?? null;
+      const tituloSemantic = tituloRow ? semantics.get(tituloRow.id) ?? {} : {};
+      const jaConvertida = convertidas.get(conversao.fromKeywordId);
+      const kSemantic = keywordRow ? semantics.get(keywordRow.id) ?? {} : {};
+      const kAssunto = resolveKeywordSubject(kSemantic);
+      if (!tituloRow) problems.push(`Artigo ${article.order}: a linha-título a converter não existe mais nesta marca.`);
+      else if (jaConvertida && jaConvertida.keywordId !== keywordRow?.id) problems.push(`Artigo ${article.order}: "${tituloRow.keyword}" já foi convertida para "${jaConvertida.keyword ?? jaConvertida.keywordId}". Desfaça aquela conversão antes de escolher outra keyword.`);
+      else if (!jaConvertida && !isConvertibleLegacySubject(tituloSemantic)) problems.push(`Artigo ${article.order}: "${tituloRow.keyword}" não é um Assunto do formato anterior sem plano; nada a converter.`);
+      if (!article.principal) problems.push(`Artigo ${article.order}: escolha a keyword que passa a carregar o Assunto.`);
+      else if (tituloRow && keywordRow && keywordRow.id === tituloRow.id) problems.push(`Artigo ${article.order}: a keyword escolhida é a própria linha-título; escolha a keyword que carrega o artigo (a principal, por padrão).`);
+      else if (keywordRow && kAssunto.declared && !kAssunto.entry && keywordRow.id !== tituloRow?.id) problems.push(`Artigo ${article.order}: "${keywordRow.keyword}" já é um Assunto do formato anterior; escolha outra keyword.`);
+      if (tituloRow) conversion = { fromKeywordId: tituloRow.id, fromPhrase: tituloRow.keyword, articleId: conversao.articleId ?? null };
+      if (tituloRow && !problems.length) notices.push(`Artigo ${article.order}: o Assunto sai da linha-título "${tituloRow.keyword}" e passa a morar em "${article.principal}"; a linha-título fica arquivada (não vai para a lixeira).`);
+    }
 
     // 1 — o artigo já gravado neste plano (cadastro pela keyword; anterior pelo Assunto ou pela principal).
     const livre = (item: StoredArticle) => !usados.has(item.subjectId);
@@ -566,7 +636,7 @@ async function classify(input: {
     } else {
       const titleRow = liveByKey.get(chave(title)) ?? null;
       const titleSubject = titleRow ? resolveKeywordSubject(semantics.get(titleRow.id) ?? {}) : null;
-      if (titleRow && titleSubject?.declared && (!keywordRow || titleRow.id !== keywordRow.id)) {
+      if (!conversao && titleRow && titleSubject?.declared && !convertidas.has(titleRow.id) && (!keywordRow || titleRow.id !== keywordRow.id)) {
         shape = "legacy";
         subjectRow = titleRow;
         notices.push(`Artigo ${article.order}: "${title}" já é um Assunto gravado (anterior ao cadastro único) e continua na linha dele.`);
@@ -640,13 +710,18 @@ async function classify(input: {
       };
       const entryNext = nextEntry === undefined ? match.entry : nextEntry;
       if (principalRow && sameDeclaredArticleContent(match.plan, nextContent) && sameSubjectEntry(match.entry, entryNext)) change = "unchanged";
+      // A conversão ainda não gravada em K muda o artigo, mesmo com o plano igual.
+      if (change === "unchanged" && conversion) {
+        const gravada = readSubjectConversion(semantics.get(subjectRow.id) ?? {});
+        if (!gravada || gravada.fromKeywordId !== conversion.fromKeywordId || gravada.articleId !== conversion.articleId) change = "changed";
+      }
     }
     if (escolha === "auto" && shape === "legacy" && !storedLock) notices.push(`Artigo ${article.order}: trava "automática" num Assunto anterior ao cadastro único = travada pela declaração.`);
 
     const aprovados = change === "unchanged" ? [] : [subjectRow, principalRow && principalRow !== subjectRow ? principalRow : null].filter((row): row is LiveRow => Boolean(row) && row!.status === "aprovado");
     approvedToReview += aprovados.length;
     blockers.push(...problems);
-    resolved.push({ article, shape, stored: match, subjectRow, keywordRow: principalRow, nextLock, nextEntry, change });
+    resolved.push({ article, shape, stored: match, subjectRow, keywordRow: principalRow, nextLock, nextEntry, change, conversion });
     return {
       order: article.order,
       role: article.role,
@@ -660,6 +735,7 @@ async function classify(input: {
       lock: lockView ? { choice: nextLock ?? "auto", state: lockView.state, origin: lockView.origin, label: lockView.label } : null,
       problems,
       approvedToReview: aprovados.length,
+      ...(conversion ? { conversion } : {}),
     };
   });
 
@@ -682,12 +758,15 @@ async function classify(input: {
   if (groupRow?.plan && planHash && groupRow.planHash !== planHash) notices.push(`O plano do grupo "${groupRow.name}" passa de v${groupRow.planVersion} para v${groupRow.planVersion + 1}.`);
 
   const planKeys = new Set(merged.flatMap(article => [article.subject, article.principal]).filter((phrase): phrase is string => Boolean(phrase)).map(chave));
-  const leftovers = live
+  const leftoversBase = live
     .filter(row => !planKeys.has(chave(row.keyword)))
     .map(row => ({ row, reason: declaredPlanLeftoverReason(row.keyword, { silo }) }))
     .filter((item): item is { row: LiveRow; reason: "silo_name" | "pasted_label" } => Boolean(item.reason))
     .map(item => ({ keywordId: item.row.id, keyword: item.row.keyword, reason: item.reason, label: DECLARED_PLAN_LEFTOVER_LABELS[item.reason] }));
-  if (leftovers.length) notices.push(`${leftovers.length} keyword(s) já gravada(s) parecem sobra de import (nome do Silo ou rótulo colado): ficam fora do plano; mande para a lixeira se quiser (recuperável).`);
+  // 2026-10-13 · SDD acelerar-fluxo, item 9 (D9): só a sobra não publicada e nunca enviada ao Arquiteto é oferecida para exclusão.
+  const leftoverDeletion = await classifyDeclaredPlanLeftovers(input.keywordsClient, brandId, leftoversBase.map(item => item.keywordId));
+  const leftovers = leftoversBase.map(item => ({ ...item, ...(leftoverDeletion.get(item.keywordId) ?? { deletable: false, blockedReason: DECLARED_PLAN_LEFTOVER_BLOCKED.unknown }) }));
+  if (leftovers.length) notices.push(`${leftovers.length} keyword(s) já gravada(s) parecem sobra de import (nome do Silo ou rótulo colado): ficam fora do plano. Excluir é decisão sua e apaga de vez (keyword não publicada não vai para uma lixeira recuperável).`);
 
   const subjectIdsOfPlan = new Set([...kept.map(item => item.subjectId), ...resolved.map(item => item.subjectRow?.id).filter((id): id is string => Boolean(id))]);
   const supports = await readSupportRows(input.keywordsClient, brandId, subjectIdsOfPlan);
@@ -871,6 +950,8 @@ export async function importDeclaredPlanWithCore(input: {
   importRequestId?: string | null;
   channel?: SubjectImportChannel;
   brandSiteUrl?: string | null;
+  /** 2026-10-13 · conversão do formato anterior (SDD `sdd-conversao-assunto-legado-2026-10-13.md`). Ausente = cadastro comum. */
+  conversions?: readonly SubjectConversionRequest[] | null;
   now?: string;
 }): Promise<DeclaredPlanImportResult> {
   const brandId = typeof input.brandId === "string" ? input.brandId.trim() : "";
@@ -889,7 +970,7 @@ export async function importDeclaredPlanWithCore(input: {
     inFlight.add(lockKey);
   }
   try {
-    const classified = await classify({ brandId, keywordsClient: input.keywordsClient, groupsClient: input.groupsClient, parsed, group: input.group, destination: input.destination ?? null, brandSiteUrl: input.brandSiteUrl ?? null, now });
+    const classified = await classify({ brandId, keywordsClient: input.keywordsClient, groupsClient: input.groupsClient, parsed, group: input.group, destination: input.destination ?? null, brandSiteUrl: input.brandSiteUrl ?? null, conversions: input.conversions ?? null, now });
     if ("ok" in classified) return classified;
     if (input.mode === "preview") return { ok: true, mode: "preview", ...classified.preview };
     if (!classified.preview.canApply) return { ok: false, code: "PLAN_BLOCKED", reason: "O cadastro tem impedimentos: corrija e gere a prévia de novo.", blockers: classified.preview.blockers };
@@ -1088,6 +1169,13 @@ async function applyPlan(input: {
         mudou = mudou || marcada.changed;
       }
     }
+    // 2026-10-13 · conversão: K guarda de onde o Assunto veio (a linha-título não é tocada).
+    if (item.conversion) {
+      const convertida = setSubjectConversion(subjectNext, { conversion: item.conversion, actorId: actorUserId, changedAt: now });
+      if (!convertida.ok) { results.push({ ...base, subjectKeywordId: subjectId, principalKeywordId: principalId, outcome: "failed", reason: convertida.reason }); continue; }
+      subjectNext = convertida.semantic;
+      mudou = mudou || convertida.changed;
+    }
     if (subjectNext !== subjectSemantic && !await write(subjectId, subjectNext)) { results.push({ ...base, subjectKeywordId: subjectId, principalKeywordId: principalId, outcome: "failed", reason: "O cadastro do Assunto não foi confirmado." }); continue; }
     expectedVersion.set(subjectId, planVersion);
     results.push({ ...base, subjectKeywordId: subjectId, principalKeywordId: principalId, outcome: mudou ? "declared" : "unchanged", reason: null });
@@ -1095,6 +1183,7 @@ async function applyPlan(input: {
 
   // 6 — releitura e reciprocidade.
   const releitura = await readSemantics(keywordsClient, brandId, anchorIds);
+  const conversaoPorOrdem = new Map(resolved.filter(item => item.conversion).map(item => [item.article.order, item.conversion!]));
   let reciprocityConfirmed = 0;
   for (const result of results) {
     if (result.outcome === "failed" || !result.subjectKeywordId) continue;
@@ -1104,6 +1193,13 @@ async function applyPlan(input: {
     if (!lido.plan || lido.plan.groupId !== groupId || lido.plan.planVersion !== versao) {
       result.outcome = "failed";
       result.reason = "A releitura não encontrou o plano gravado no Assunto.";
+      continue;
+    }
+    const pedida = conversaoPorOrdem.get(result.order);
+    const gravada = pedida ? readSubjectConversion(subjectSemantic) : null;
+    if (pedida && (!gravada || gravada.fromKeywordId !== pedida.fromKeywordId || gravada.articleId !== pedida.articleId)) {
+      result.outcome = "failed";
+      result.reason = "A releitura não encontrou a conversão gravada na keyword.";
       continue;
     }
     if (!result.principalKeywordId) { reciprocityConfirmed += 1; continue; }
