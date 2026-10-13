@@ -178,7 +178,7 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     notes: [
       "Sempre `preview` antes de `apply`. A prévia não grava e mostra, por artigo, o estado do Assunto e da principal, as sobras de imports anteriores (não fazem parte do plano; mandar para a lixeira é ato do dono), as sustentações e os impedimentos. Com impedimento, o `apply` recusa (PLAN_BLOCKED): corrija o plano e gere a prévia de novo.",
       "No `apply`, envie em `userConfirmation` as palavras do aceite e um `importRequestId` (uuid) — o mesmo ao repetir o mesmo envio. Envie o texto colado (`text`) ou o plano estruturado (`plan`), nunca os dois. O nome do Silo nunca vira keyword.",
-      "O Assunto mora DENTRO da keyword (2026-10-13, ADR-022 D1-ter): `subject` é o título (nunca vira keyword), `principal` é a keyword que o carrega (obrigatória, mesmo sem volume). A keyword aprova sem Volume e sem KGR (D2/D2-bis; a Lógica continua exigida).",
+      "O Assunto mora DENTRO da keyword (2026-10-13, ADR-022 D1-ter): `subject` é o título (nunca vira keyword), `principal` é a keyword que o carrega (obrigatória, mesmo sem volume). Ela é tratada como qualquer keyword (Lógica, Volume por clique, KGR, Posto, Potencial); no plano de Silo ela aprova sem Volume e sem KGR, só com a Lógica (D2-bis, a marca de principal declarada), para a keyword livre chegar ao Arquiteto. No destino 'Artigo publicado' (sem plano) segue a regra normal da aprovação.",
       "TRAVA (D1-ter): keyword com Volume medido > 0 entra TRAVADA — é a principal fixa, o Arquiteto só busca sustentações; sem volume (ou medida 0) entra LIVRE — o Arquiteto pode propor outra principal pela SERP/volume na prévia (decisão humana), mantendo o Assunto, o papel e a ordem no artigo. `lock: 'locked'|'free'` fixa à mão; `'auto'` volta ao volume; omitido mantém o gravado. Medir o Volume (clique, pago, com prévia) já trava a automática. Planos anteriores ao cadastro único ficam travados até o usuário mudar.",
       "Destino (`destination`): `new_silo` (padrão; uma cor que já tem OUTRO Silo é recusada), `existing_silo` com `groupId` (acréscimo: os artigos gravados ficam como estão e não voltam a revisão; tirar artigo é 'Tirar do plano' na tela) e `published` com `url` (o Assunto vai para a keyword da página publicada — URL, slug, canonical e principal intocados — e as keywords entram como reforço dela pelo caminho de 'Melhorar publicados').",
       "Nada do grupo do plano vira artigo solto: a sustentação que não cabe em artigo do plano fica em Keywords não agrupadas do grupo (D6).",
@@ -365,14 +365,14 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
       "Volume pelo MCP (2026-09-30): measure_keywords, o mesmo núcleo do botão Volume (blocos de 200, releitura de cada keyword). Primeiro mode 'plan' (grátis): keywords existentes, blocos e planHash. Depois 'execute' com o planHash, o aceite do usuário e o escopo provider.spend: sem custo em dinheiro, mas gasta a cota do Google Ads da marca. Até 500 keywords por chamada. Desfechos: medida, sem_media (processada, sem dado; não é falha) e falhou (com o motivo); cota atingida para o lote e o que já voltou fica gravado. Resultados (allintitle/KD, pago) continua só na tela.",
       "Resultados (SERP) é opcional e pago, cerca de US$ 0,025 a 0,036 por keyword (estimativa). A primeira coleta da SERP acontece no Arquiteto, aba Artigos, só para keywords com volume. O que já foi coletado continua legível como proveniência.",
       "Resultados nunca coleta keyword sem volume (nulo, zero ou ainda não medido): ela fica fora do lote e a confirmação diz quantas. Meça o Volume antes.",
-      "Com Assunto declarado, aprovar dispensa Volume e KGR: só a Lógica é exigida.",
+      "A keyword que carrega um Assunto do cadastro é tratada como qualquer keyword (2026-10-13): Lógica, Volume (por clique), KGR, Posto e Potencial valem para ela. Única exceção na aprovação: a keyword do plano de Silo (marca de principal declarada, D2-bis) aprova só com a Lógica, para a keyword LIVRE sem volume medido chegar ao Arquiteto, que pode trocá-la. O Assunto anterior (frase própria, sem o Assunto cadastrado dentro) continua dispensando Volume (D2), para não recusar aprovações já feitas.",
     ],
   },
   {
     id: "minerador.review_and_approve",
     stage: "minerador",
     title: "Revisar e aprovar keywords",
-    purpose: "Decisão humana sobre cada keyword: Vínculo (Assunto, tipo de página, posto), revisão concluída e aprovação.",
+    purpose: "Decisão humana sobre cada keyword: Vínculo (tipo de página e posto), revisão concluída e aprovação.",
     requires: ["Keywords com Volume e Lógica"],
     produces: ["Keywords 'aprovado', prontas para o Arquiteto"],
     cost: "free",
@@ -385,6 +385,7 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     routes: [],
     notes: [
       "Tipo de página 'silo' marca a keyword que será a cabeça do silo (a página do silo). Declare-o para a keyword do silo.",
+      "O Vínculo NÃO tem mais Assunto (pedido do dono, 2026-10-13): nada de select 'Assunto' na Revisão Humana, no 'Vínculo das selecionadas' nem na coluna Vínculo (o resumo é 'Livre · Artigo · potencial'). O Assunto mora dentro da keyword e entra só pelo card 'Cadastrar Assuntos' (MCP declare_silo_plan); tirar um artigo do plano é 'Tirar do plano'. set_keyword_vinculo com kind subject_declare/subject_withdraw é recusado com subject_entry_moved. O painel da keyword mostra o Assunto só leitura ('Assunto deste artigo': título, detalhes, papel/posição, cor e trava), com 'Buscar sustentação'.",
       "O Vínculo, o KGR e a aprovação podem ser aplicados pelo MCP só após prévia, aceite específico, hash vigente e readback. Conteúdo publicado segue protegido.",
       "Aprovar exige só Lógica e Volume (Google Ads, inclusive a resposta sem média). Resultados e KGR não são exigidos para aprovar, concluir a revisão nem enviar ao Arquiteto.",
       "`set_kgr_applicability` é opcional: o padrão é 'não aplicável'; só a decisão humana 'Aplicável' liga o KGR. O 'pending' legado é lido como não aplicável. A faixa de volume de interesse para KGR (150 a 550) é só informativa.",

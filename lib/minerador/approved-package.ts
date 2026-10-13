@@ -91,8 +91,17 @@ export function resolveApprovalReadiness(input: {
    * `volume_search = null` faria a keyword nunca ser aprovável. A Lógica
    * continua exigida — local, sem provider — e dá ao Arquiteto a hipótese de
    * intenção e funil.
+   *
+   * 2026-10-13 (pedido do dono: "essas keywords têm que ser tratadas como
+   * qualquer keyword"): a D2 fica SÓ para o Assunto do formato anterior — a
+   * frase própria, sem o Assunto cadastrado dentro da keyword (`entry`) —, para
+   * não recusar no envio as aprovações já feitas sob ela (AGENTS.md §9). A
+   * keyword que carrega o Assunto do cadastro segue a regra normal; a do plano
+   * de Silo continua passando pela D2-bis abaixo (a marca de principal), que é
+   * o que leva a keyword LIVRE, sem volume medido, até o Arquiteto que a troca.
    */
-  if (resolveKeywordSubject(semantic).declared) {
+  const subjectResolution = resolveKeywordSubject(semantic);
+  if (subjectResolution.declared && !subjectResolution.entry) {
     if (missing.length === 0) return { ok: true, missing, reason: null };
     return { ok: false, missing, reason: SUBJECT_APPROVAL_REASON };
   }

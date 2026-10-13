@@ -8,12 +8,10 @@ import { planVinculoBatchChoices, vinculoBatchReadbackMatches, type VinculoBatch
 import {
   EMPTY_VINCULO_BATCH_CHOICES,
   VINCULO_BATCH_CHOICE_GROUPS,
-  VINCULO_BATCH_POST_DISABLED_BY_SUBJECT,
   applyVinculoBatchChoice,
   describeVinculoBatchChoicesConfirmation,
   describeVinculoBatchChoicesResult,
   vinculoBatchActionsFromChoices,
-  vinculoBatchGroupDisabled,
 } from "../lib/minerador/vinculo-screen.ts";
 
 /**
@@ -21,8 +19,8 @@ import {
  *
  *  1. uma rolagem vertical só — a página não rola, a planilha ocupa a sobra;
  *  2. a barra do rodapé só existe com seleção feita pelo humano;
- *  3. um seletor "Vínculo" só, com três grupos de escolha única (Posto,
- *     Potencial, Assunto), "Declarar Assunto" desliga o Posto, e "Aplicar"
+ *  3. um seletor "Vínculo" só, com grupos de escolha única (Posto e
+ *     Potencial; o Assunto saiu do Vínculo em 2026-10-13), e "Aplicar"
  *     grava as escolhas de uma vez, com a mesma confirmação e o mesmo readback.
  *
  * Fixtures puras, sem rede, banco nem provider; REAL_PROVIDER_CALLS_IN_TESTS = 0.
@@ -85,90 +83,64 @@ const workspace = stripComments(readFileSync(new URL("../modules/minerador/miner
 const tableShell = stripComments(readFileSync(new URL("../modules/minerador/keyword-table/keyword-table-shell.tsx", import.meta.url), "utf8"));
 const bulkBarShell = stripComments(readFileSync(new URL("../modules/minerador/keyword-table/keyword-table-bulk-bar-shell.tsx", import.meta.url), "utf8"));
 
-const DECLARE = "subject:declare";
-const WITHDRAW = "subject:withdraw";
-
-test("painel: três grupos de escolha única, cada um pode ficar sem escolha", () => {
-  assert.deepEqual(VINCULO_BATCH_CHOICE_GROUPS.map(group => group.label), ["Posto de principal", "Potencial de página", "Assunto"]);
-  assert.deepEqual(EMPTY_VINCULO_BATCH_CHOICES, { post: "", page_type: "", subject: "" });
+test("painel: dois grupos de escolha única (Posto e Potencial), cada um pode ficar sem escolha", () => {
+  assert.deepEqual(VINCULO_BATCH_CHOICE_GROUPS.map(group => group.label), ["Posto de principal", "Potencial de página"]);
+  assert.deepEqual(EMPTY_VINCULO_BATCH_CHOICES, { post: "", page_type: "" });
   assert.deepEqual(vinculoBatchActionsFromChoices(EMPTY_VINCULO_BATCH_CHOICES), [], "sem escolha, nada a gravar");
   assert.deepEqual(
-    vinculoBatchActionsFromChoices({ post: "post:locked", page_type: "page_type:declared:silo", subject: WITHDRAW }),
-    [{ kind: "post", policy: "locked" }, { kind: "page_type", pageType: "silo", stance: "declared" }, { kind: "subject_withdraw" }],
+    vinculoBatchActionsFromChoices({ post: "post:locked", page_type: "page_type:declared:silo" }),
+    [{ kind: "post", policy: "locked" }, { kind: "page_type", pageType: "silo", stance: "declared" }],
     "uma ação por grupo",
   );
-  assert.equal(vinculoBatchActionsFromChoices({ post: "", page_type: "page_type:declared:assunto", subject: "" }), null, "valor desconhecido não grava nada pela metade");
-  assert.equal(vinculoBatchActionsFromChoices({ post: "subject:declare", page_type: "", subject: "" }), null, "valor de outro grupo não entra");
-});
-
-test("Declarar Assunto desliga o Posto: só duas escolhas", () => {
-  assert.equal(vinculoBatchGroupDisabled("post", { subject: DECLARE }), true);
-  assert.equal(vinculoBatchGroupDisabled("post", { subject: WITHDRAW }), false);
-  assert.equal(vinculoBatchGroupDisabled("page_type", { subject: DECLARE }), false, "o Potencial vale para o Assunto");
-  assert.equal(vinculoBatchGroupDisabled("subject", { subject: DECLARE }), false);
-  assert.match(VINCULO_BATCH_POST_DISABLED_BY_SUBJECT, /Posto de principal não se aplica/);
-
-  const withPost = applyVinculoBatchChoice({ ...EMPTY_VINCULO_BATCH_CHOICES, note: "", destination: "" }, "post", "post:reviewable");
+  assert.equal(vinculoBatchActionsFromChoices({ post: "", page_type: "page_type:declared:assunto" }), null, "valor desconhecido não grava nada pela metade");
+  assert.equal(vinculoBatchActionsFromChoices({ post: "subject:declare", page_type: "" }), null, "o valor antigo do Assunto não entra");
+  const withPost = applyVinculoBatchChoice({ ...EMPTY_VINCULO_BATCH_CHOICES }, "post", "post:reviewable");
   assert.equal(withPost.post, "post:reviewable");
-  const declaring = applyVinculoBatchChoice(withPost, "subject", DECLARE);
-  assert.equal(declaring.post, "", "marcar Declarar limpa o Posto");
-  assert.equal(declaring.note, "", "o resto do estado fica");
-  assert.equal(applyVinculoBatchChoice(withPost, "subject", WITHDRAW).post, "post:reviewable", "Retirar não mexe no Posto");
-
-  const actions = vinculoBatchActionsFromChoices({ post: "post:locked", page_type: "", subject: DECLARE }, { note: "Serviço", destinationUrl: null });
-  assert.deepEqual(actions, [{ kind: "subject_declare", note: "Serviço", destinationUrl: null }], "Posto desligado é ignorado");
 });
 
-test("Aplicar grava as escolhas de uma vez: uma gravação por keyword, com o readback das quatro chaves", () => {
+test("Aplicar grava as escolhas de uma vez: uma gravação por keyword, com o readback das chaves (o Assunto relido intacto)", () => {
   const plan = planVinculoBatchChoices({
     keywords: [row(1), row(2, { analise_semantica: declared({ nicho: "Clínicas" }) }), row(3, { brand_id: OTHER_BRAND })],
     brandId: BRAND,
-    actions: [{ kind: "page_type", pageType: "landing_page", stance: "declared" }, { kind: "subject_declare", note: "Serviço para clínicas" }],
+    actions: [{ kind: "page_type", pageType: "landing_page", stance: "declared" }],
     actorId: ACTOR,
     changedAt: AT,
-    brandSiteUrl: SITE,
   });
   assert.ok(plan.ok);
   if (!plan.ok) return;
-  assert.deepEqual(plan.steps.map(step => step.action.kind), ["subject_declare", "page_type"], "Assunto antes do Potencial");
+  assert.deepEqual(plan.steps.map(step => step.action.kind), ["page_type"]);
   assert.deepEqual(plan.updates.map(update => update.id), [uuid(1), uuid(2)], "uma gravação por keyword; outra marca nunca");
-  assert.equal(plan.actionLabel, "Assunto: Declarado · Potencial de página: Landing page · declarado");
-  assert.equal(plan.declaresSubject, true);
+  assert.equal(plan.actionLabel, "Potencial de página: Landing page · declarado");
 
   const [first, second] = plan.updates;
   assert.equal(first.brandId, BRAND);
-  assert.equal((first.semantic.keyword_subject as { declared?: boolean }).declared, true, "o Assunto e o Potencial no mesmo semantic");
+  assert.equal(first.semantic.keyword_subject, undefined, "o Vínculo não declara Assunto");
   assert.equal(first.semantic.keyword_page_type, "landing_page");
   assert.equal(first.semantic.keyword_page_type_stance, "declared");
   assert.equal(first.semantic.keyword_page_type_actor, ACTOR, "ator = auth.users.id");
-  assert.equal(second.semantic.keyword_page_type, "landing_page", "já era Assunto: só o Potencial muda");
+  assert.equal((second.semantic.keyword_subject as { declared?: boolean }).declared, true, "a keyword que carrega Assunto recebe o Potencial e mantém o Assunto");
 
   const good = {
-    id: first.id, brand_id: BRAND, keyword_subject: first.semantic.keyword_subject,
-    keyword_page_type: "landing_page", keyword_page_type_stance: "declared", primary_keyword_policy: first.semantic.primary_keyword_policy ?? null,
+    id: second.id, brand_id: BRAND, keyword_subject: second.semantic.keyword_subject,
+    keyword_page_type: "landing_page", keyword_page_type_stance: "declared", primary_keyword_policy: second.semantic.primary_keyword_policy ?? null,
   };
-  assert.equal(vinculoBatchReadbackMatches(first, good), true);
-  assert.equal(vinculoBatchReadbackMatches(first, { ...good, keyword_subject: null }), false, "o readback confere o Assunto");
-  assert.equal(vinculoBatchReadbackMatches(first, { ...good, keyword_page_type_stance: "potential" }), false, "e o Potencial");
+  assert.equal(vinculoBatchReadbackMatches(second, good), true);
+  assert.equal(vinculoBatchReadbackMatches(second, { ...good, keyword_subject: null }), false, "o readback confere que o Assunto ficou");
+  assert.equal(vinculoBatchReadbackMatches(second, { ...good, keyword_page_type_stance: "potential" }), false, "e o Potencial");
 
   const text = describeVinculoBatchChoicesConfirmation(plan);
   assert.equal(text.summary, "2 keywords serão gravadas.");
-  assert.deepEqual(text.steps.map(step => step.summary), [
-    "Assunto: Declarado: 1 keyword será gravada.",
-    "Potencial de página: Landing page · declarado: 2 keywords serão gravadas.",
-  ]);
-  assert.ok(text.steps[0].details.some(detail => detail.startsWith("1 já é Assunto e fica como está")), text.steps[0].details.join(" / "));
-  assert.equal(describeVinculoBatchChoicesResult(plan, 2), "Assunto: Declarado · Potencial de página: Landing page · declarado: 2 keywords gravadas e conferidas.");
+  assert.deepEqual(text.steps.map(step => step.summary), ["Potencial de página: Landing page · declarado: 2 keywords serão gravadas."]);
+  assert.equal(describeVinculoBatchChoicesResult(plan, 2), "Potencial de página: Landing page · declarado: 2 keywords gravadas e conferidas.");
 });
 
 test("a confirmação conta as aprovadas que vão para Em revisão uma vez só", async () => {
   const plan = planVinculoBatchChoices({
-    keywords: [await approvedRow(1), await approvedRow(2), row(3)],
+    keywords: [await approvedRow(1, { ...PUBLISHED_ORIGIN }), await approvedRow(2, { ...PUBLISHED_ORIGIN }), row(3)],
     brandId: BRAND,
-    actions: [{ kind: "subject_declare" }, { kind: "page_type", pageType: "silo", stance: "potential" }],
+    actions: [{ kind: "post", policy: "reviewable" }, { kind: "page_type", pageType: "silo", stance: "declared" }],
     actorId: ACTOR,
     changedAt: AT,
-    brandSiteUrl: SITE,
   });
   assert.ok(plan.ok);
   if (!plan.ok) return;
@@ -177,39 +149,27 @@ test("a confirmação conta as aprovadas que vão para Em revisão uma vez só",
   assert.equal(describeVinculoBatchChoicesConfirmation(plan).warning, "2 aprovadas desta seleção vão para Em revisão.");
 });
 
-test("Assuntos pulados no Posto; Retirar antes do Posto deixa o Posto valer", () => {
+test("2026-10-13: Assunto não pula mais o Posto; ação de Assunto é recusada (SUBJECT_ENTRY_MOVED)", () => {
   const publishedSubject = row(1, { analise_semantica: declared({ ...PUBLISHED_ORIGIN }) });
   const published = row(2, { analise_semantica: { ...PUBLISHED_ORIGIN } });
   const onlyPost = planVinculoBatchChoices({ keywords: [publishedSubject, published, row(3)], brandId: BRAND, actions: [{ kind: "post", policy: "reviewable" }], actorId: ACTOR, changedAt: AT });
   assert.ok(onlyPost.ok);
   if (!onlyPost.ok) return;
-  assert.deepEqual(onlyPost.updates.map(update => update.id), [uuid(2)]);
+  assert.deepEqual(onlyPost.updates.map(update => update.id), [uuid(1), uuid(2)], "a keyword com Assunto é tratada como qualquer keyword");
   const details = describeVinculoBatchChoicesConfirmation(onlyPost).steps[0].details;
-  assert.ok(details.includes("1 keyword é Assunto e foi pulada: o posto não se aplica a Assunto."), details.join(" / "));
   assert.ok(details.some(detail => detail.startsWith("1 não publicada foi pulada")), details.join(" / "));
+  assert.doesNotMatch(details.join(" "), /Assunto/);
 
-  const withdrawThenPost = planVinculoBatchChoices({
-    keywords: [publishedSubject],
-    brandId: BRAND,
-    actions: [{ kind: "post", policy: "reviewable" }, { kind: "subject_withdraw" }],
-    actorId: ACTOR,
-    changedAt: AT,
-  });
-  assert.ok(withdrawThenPost.ok);
-  if (!withdrawThenPost.ok) return;
-  assert.deepEqual(withdrawThenPost.steps.map(step => step.action.kind), ["subject_withdraw", "post"]);
-  assert.equal(withdrawThenPost.updates.length, 1);
-  assert.equal(withdrawThenPost.updates[0].semantic.keyword_subject, null, "o Assunto saiu");
-  assert.ok(withdrawThenPost.updates[0].semantic.primary_keyword_policy, "sem o Assunto, o posto se aplica");
-  assert.equal(withdrawThenPost.declaresSubject, false);
+  for (const action of [{ kind: "subject_withdraw" as const }, { kind: "subject_declare" as const }]) {
+    const refused = planVinculoBatchChoices({ keywords: [publishedSubject], brandId: BRAND, actions: [{ kind: "post", policy: "reviewable" }, action], actorId: ACTOR, changedAt: AT });
+    assert.equal(!refused.ok && refused.code, "SUBJECT_ENTRY_MOVED", action.kind);
+  }
 });
 
-test("o domínio recusa o que a tela desliga, sem ator e sem escolha", () => {
+test("o domínio recusa sem ator e sem escolha", () => {
   const keywords = [row(1)];
   const base = { keywords, brandId: BRAND, actorId: ACTOR, changedAt: AT };
-  const both = planVinculoBatchChoices({ ...base, actions: [{ kind: "subject_declare" }, { kind: "post", policy: "locked" }] });
-  assert.equal(!both.ok && both.code, "POST_WITH_SUBJECT");
-  const twice = planVinculoBatchChoices({ ...base, actions: [{ kind: "subject_declare" }, { kind: "subject_withdraw" }] });
+  const twice = planVinculoBatchChoices({ ...base, actions: [{ kind: "post", policy: "locked" }, { kind: "post", policy: "reviewable" }] });
   assert.equal(!twice.ok && twice.code, "DUPLICATE_GROUP");
   const none = planVinculoBatchChoices({ ...base, actions: [] });
   assert.equal(!none.ok && none.code, "NO_CHOICE");
@@ -217,8 +177,6 @@ test("o domínio recusa o que a tela desliga, sem ator e sem escolha", () => {
   assert.equal(!noActor.ok && noActor.code, "ACTOR_REQUIRED", "ator é o auth.users.id, nunca e-mail");
   const noBrand = planVinculoBatchChoices({ ...base, brandId: "", actions: [{ kind: "page_type", pageType: "silo" }] });
   assert.equal(!noBrand.ok && noBrand.code, "BRAND_REQUIRED");
-  const badDestination = planVinculoBatchChoices({ ...base, brandSiteUrl: SITE, actions: [{ kind: "subject_declare", destinationUrl: "http://clinicaexemplo.com.br/x" }] });
-  assert.equal(badDestination.ok, false, "destino recusado: nada é planejado");
 });
 
 test("rodapé não renderiza sem seleção, e nada seleciona pelo humano", () => {

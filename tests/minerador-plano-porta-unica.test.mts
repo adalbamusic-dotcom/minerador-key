@@ -75,7 +75,11 @@ test("no card, colar o plano em qualquer campo preenche tudo; o colar fica abert
     assert.match(linha, /onPaste=\{colarPlano\}/, campo);
   }
   assert.equal((card.match(/aria-label=\{`(?:Assunto|Keyword|Detalhes) da linha \$\{index \+ 1\}`\} onPaste=\{colarPlano\}/g) || []).length, 3, "título, keyword e detalhes das linhas");
-  assert.match(card, /<details className="rounded-md border border-divider px-3 py-2" open>/);
+  // 2026-10-13: o colar também aparece no Silo existente (escolhido), fechado ali; no Silo novo fica aberto.
+  assert.match(card, /\{destino !== "existing_silo" \|\| existingGroupId \? \(\s*<details className="rounded-md border border-divider px-3 py-2" open=\{destino !== "existing_silo"\}>/);
+  const preencher = card.slice(card.indexOf("const preencherDoTexto"), card.indexOf("const preencheuInicial"));
+  assert.match(preencher, /const novas = lidas\.filter\(linha => !jaGravada\(linha\)\);/, "no Silo existente, o artigo colado que já está gravado fica como está");
+  assert.match(preencher, /setLinhas\(\[\.\.\.gravadas, \.\.\.novas\]\);/);
   assert.match(card, /<span>Cadastrar Assuntos<\/span>/);
   assert.match(card, /useState\(initialText\)/);
 });

@@ -54,36 +54,34 @@ test("painel Admin lista keyword_research entre as operações de capability, co
   assert.match(panel, /capabilityOperations\.map\(\(operation\) => <option key=\{operation\} value=\{operation\}>/);
 });
 
-test("Revisão Humana mostra Buscar sustentação no Vínculo só com o Assunto declarado e um caminho recebido", () => {
-  const review = functionBody(dnaPanels, "function HumanReviewPanel(");
-  const vinculoStart = review.indexOf('aria-label="Vínculo da keyword"');
-  assert.ok(vinculoStart >= 0);
-  const vinculoEnd = review.indexOf("</section>", vinculoStart);
-  const vinculo = review.slice(vinculoStart, vinculoEnd);
-  assert.match(vinculo, /\{vinculo\.subjectLabel && onSubjectSearch \? \(/);
-  assert.match(vinculo, /data-review-subject-search-link/);
-  assert.match(vinculo, /onClick=\{onSubjectSearch\}/);
-  assert.match(vinculo, /Buscar sustentação/);
-  assert.match(vinculo, /type="button"/);
-  assert.match(review, /onSubjectSearch\?: \(\) => void;/);
-  assert.doesNotMatch(review, /router\.push|window\.location|href=|subjectSearchLinkHref|modo=assunto/, "o painel compartilhado não monta rota");
-  const button = vinculo.slice(vinculo.indexOf("data-review-subject-search-link"), vinculo.indexOf("Buscar sustentação"));
+test("2026-10-13: Buscar sustentação mora no bloco só leitura 'Assunto deste artigo', com o caminho recebido", () => {
+  const block = functionBody(dnaPanels, "export function SubjectArticleBlock(");
+  assert.match(block, /\{onSubjectSearch \? \(/);
+  assert.match(block, /data-subject-article-search-link/);
+  assert.match(block, /onClick=\{onSubjectSearch\}/);
+  assert.match(block, /Buscar sustentação/);
+  assert.match(block, /type="button"/);
+  assert.doesNotMatch(block, /router\.push|window\.location|href=|subjectSearchLinkHref|modo=assunto/, "o painel compartilhado não monta rota");
+  const button = block.slice(block.indexOf("data-subject-article-search-link"), block.indexOf("Buscar sustentação"));
   assert.match(button, /text-sm/);
   assert.match(button, /min-h-9/);
   assert.doesNotMatch(button, /text-\[(?:9|10|11|12|13)px\]|text-xs|#[0-9a-f]{3,6}|rgb\(/i);
+  // A Revisão Humana não tem mais o botão (o Assunto saiu do Vínculo).
+  const review = functionBody(dnaPanels, "function HumanReviewPanel(");
+  assert.doesNotMatch(review, /Buscar sustentação|onSubjectSearch/);
 });
 
-test("KeywordDnaPanel só repassa onSubjectSearch; o workspace usa o mesmo link da linha do Processador", () => {
+test("KeywordDnaPanel só repassa onSubjectSearch ao bloco do Assunto; o workspace usa o mesmo link de antes", () => {
   const dna = functionBody(dnaPanels, "export function KeywordDnaPanel(");
   assert.match(dna, /\n  onSubjectSearch,\n|\r\n  onSubjectSearch,\r\n/);
   assert.match(dna, /onSubjectSearch\?: \(\) => void;/);
-  assert.match(dna, /<HumanReviewPanel[\s\S]*?onSubjectSearch=\{onSubjectSearch\}[\s\S]*?\/>/);
+  assert.match(dna, /<SubjectArticleBlock view=\{subjectArticle\} onSubjectSearch=\{subjectArticle\.kind === "subject" \? onSubjectSearch : undefined\} \/>/);
 
   const rowLink = "router.push(subjectSearchLinkHref(brandRef, item.id))";
   const uses = workspace.split(rowLink).length - 1;
-  assert.equal(uses, 2, "a linha e a Revisão usam o mesmo caminho");
+  assert.equal(uses, 1, "um caminho só: o do painel (o botão saiu da coluna Vínculo)");
   assert.match(workspace, /<KeywordDnaPanel[\s\S]*?onSubjectSearch=\{item\.id \? \(\) => router\.push\(subjectSearchLinkHref\(brandRef, item\.id\)\) : undefined\}/);
-  assert.match(workspace, /data-subject-search-link[\s\S]{0,80}onClick=\{\(\) => router\.push\(subjectSearchLinkHref\(brandRef, item\.id\)\)\}/);
+  assert.doesNotMatch(workspace, /data-subject-search-link/);
 });
 
 test("ajuda do modo Por Assunto explica fontes, custo antes, lista no navegador e a regra de não fabricar termos", () => {

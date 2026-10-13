@@ -196,8 +196,9 @@ test("a tela não fabrica candidata nem declara por fora: nada de setKeywordSubj
   assert.match(hook, /\.select\("id,keyword,keyword_subject:analise_semantica->keyword_subject"\)\s*\.eq\("brand_id", brandId\)\s*\.is\("deleted_at", null\)/);
 });
 
-test("Processador: 'Buscar sustentação' na linha do Assunto declarado abre o Descobrir só com o id", () => {
-  assert.match(workspace, /\{vinculo\.subjectLabel && item\.id \? \(\s*<button[\s\S]{0,120}data-subject-search-link\s+onClick=\{\(\) => router\.push\(subjectSearchLinkHref\(brandRef, item\.id\)\)\}[\s\S]{0,700}Buscar sustentação/);
+test("Processador: 'Buscar sustentação' (no painel da keyword que carrega o Assunto) abre o Descobrir só com o id", () => {
+  // 2026-10-13: o botão saiu da coluna Vínculo e mora no bloco "Assunto deste artigo" do painel.
+  assert.match(workspace, /<KeywordDnaPanel[\s\S]*?onSubjectSearch=\{item\.id \? \(\) => router\.push\(subjectSearchLinkHref\(brandRef, item\.id\)\) : undefined\}/);
   assert.equal((workspace.match(/resolveKeywordVinculo\(/g) || []).length, 1, "a coluna continua resolvendo uma vez");
   assert.match(model, /return `\/\$\{brandRef\}\/minerador\/descobrir\?modo=assunto&assunto=\$\{encodeURIComponent\(keywordId\)\}`;/);
   assert.match(page, /const link = parseSubjectSearchLink\(window\.location\.search\);/);

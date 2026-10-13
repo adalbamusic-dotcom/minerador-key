@@ -1,5 +1,20 @@
 # Backlog — Minerador
 
+## O Assunto sai do Vínculo e aparece no painel da keyword — 2026-10-13
+
+Pedido do dono de 2026-10-13. Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Vínculo (Revisão Humana, "Vínculo das selecionadas", coluna, resumo) só com Posto e Potencial; "Buscar sustentação" saiu da coluna.
+- [x] `subject_declare`/`subject_withdraw` recusados com `SUBJECT_ENTRY_MOVED` no domínio do lote e no MCP `set_keyword_vinculo` (`subject_entry_moved`); a tela não grava mais Assunto.
+- [x] Bloco só leitura "Assunto deste artigo" no painel do DNA (título, detalhes, papel/posição, cor, trava e porquê; marca órfã; formato anterior), com "Buscar sustentação".
+- [x] Keyword que carrega Assunto tratada como qualquer keyword (KGR, Posto, KGR em grupo, MCP do KGR); D2-bis mantida no portão; D2 restrita ao Assunto anterior.
+- [x] Catálogo MCP atualizado (`minerador.review_and_approve`, `declare_silo_plan`, `measure_keywords`).
+- [ ] Dono: homologar o painel (bloco do Assunto em keyword do cadastro, do formato anterior e com marca órfã), o Vínculo sem Assunto (individual e em grupo), dark mode e 360/768/1024/1440 px.
+- [ ] **WifiConecta · azul (Wi-Fi e fibra óptica):** recadastrar os 7 artigos pelo card (Silo existente → Azul → "Colar plano em texto" com o mesmo texto do Silo 2 → prévia → Cadastrar). As keywords existem e já têm a marca de principal; o card as reconhece (estado "mesma keyword, sem volume"). Os títulos estão no histórico (`keyword_subject_history.entryTitle`); os detalhes precisam do texto original.
+- [ ] **WifiConecta · laranja (8 Assuntos no formato antigo, já no Arquiteto):** decidir com o dono a conversão. Recomendação: NÃO mandar a linha-título à lixeira enquanto o ArticleDNA a usar como tronco; a conversão segura exige SDD própria (escolher, por artigo, a keyword que passa a carregar o Assunto entre as sustentações, mover `entry`/`plan` para ela por um núcleo com prévia, decisão humana, nova versão do ArticleDNA pelo Arquiteto e só então tirar a linha-título pela lixeira de sempre).
+- [ ] Sem porta para retirar o Assunto anterior SEM plano (o select do Vínculo saiu): decidir se a conversão acima basta ou se "Tirar do plano" deve aceitar também o Assunto solto.
+- [ ] Limpar código morto: `withdrawKeywordSubject` não tem mais chamador (fica exportado até a decisão acima).
+
 ## Cadastro único: o Assunto mora na keyword — 2026-10-13
 
 SDD `docs/compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md` (ADR-022 D1-ter). Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**

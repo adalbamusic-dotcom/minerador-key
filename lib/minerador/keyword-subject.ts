@@ -22,9 +22,10 @@ import { readDeclaredArticlePlan, readDeclaredPrincipalMark, readSubjectEntry, s
  *
  * A IA nunca declara Assunto (P4). Este módulo não sabe quem o chama; a
  * garantia é estrutural, por lista fechada de chamadores
- * (tests/minerador-assunto-dominio.test.mts): a tela do Minerador, o plano do
- * lote do Vínculo (`vinculo-batch.ts`, chamado só pela tela) e o núcleo do
- * import (`keyword-import-core.ts`, chamado só pela rota do import).
+ * (tests/minerador-assunto-dominio.test.mts). Desde 2026-10-13 o Vínculo (tela,
+ * lote e MCP `set_keyword_vinculo`) não declara nem retira Assunto: a porta é o
+ * card "Cadastrar Assuntos" (`declared-plan-import-core.ts`), e tirar do plano é
+ * `declared-plan-withdraw-core.ts`.
  *
  * Domínio puro. Não persiste, não busca, não chama provider.
  */
@@ -43,7 +44,6 @@ export type KeywordSubjectOrigin = typeof KEYWORD_SUBJECT_ORIGINS[number];
 
 /** Rótulos que a tela mostra. Nenhuma tela escreve estes textos por conta própria. */
 export const KEYWORD_SUBJECT_LABEL = "Assunto · declarado" as const;
-export const KEYWORD_SUBJECT_WITHOUT_NOTE_LABEL = "Assunto sem nota" as const;
 
 /**
  * Conferência da página de destino (F1.2). `hostMatchesBrand` é a parte
@@ -196,10 +196,13 @@ export function subjectPhraseOf(keywordText: string, resolution: Pick<KeywordSub
   return resolution.entry?.title || keywordText.trim();
 }
 
-/** `"Assunto · declarado"`, `"Assunto sem nota"` ou `null`. */
+/**
+ * `"Assunto · declarado"` ou `null`. Desde 2026-10-13 a nota não é mais
+ * editável (o Assunto saiu do Vínculo; os detalhes vêm do card "Cadastrar
+ * Assuntos"), então a falta dela não vira mais "Assunto sem nota".
+ */
 export function keywordSubjectLabel(resolution: KeywordSubjectResolution): string | null {
-  if (!resolution.declared) return null;
-  return resolution.noteMissing ? KEYWORD_SUBJECT_WITHOUT_NOTE_LABEL : KEYWORD_SUBJECT_LABEL;
+  return resolution.declared ? KEYWORD_SUBJECT_LABEL : null;
 }
 
 /**

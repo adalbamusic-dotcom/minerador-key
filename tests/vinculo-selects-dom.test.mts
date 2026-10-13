@@ -3,16 +3,15 @@ import test from "node:test";
 import { montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
 
 /*
- * OS TRÊS SELECTS DO VÍNCULO, RENDERIZADOS (pedido do dono, 2026-09-24).
+ * OS SELECTS DO VÍNCULO, RENDERIZADOS (pedido do dono, 2026-09-24).
  *
  * O componente real (`vinculo-selects.tsx`) no DOM:
  *
- *   1. Posto, Potencial e Assunto com os rótulos e valores da Revisão Humana,
- *      e nenhum "Não mudar";
+ *   1. Posto e Potencial com os rótulos e valores da Revisão Humana, e nenhum
+ *      "Não mudar" (o Assunto saiu do Vínculo em 2026-10-13);
  *   2. em grupo, o marcador "Valores diferentes" aparece selecionado e
  *      desabilitado, e escolher um valor de verdade o substitui;
- *   3. só o select que o humano mudou vira ação; voltar ao valor comum desfaz;
- *   4. Assunto Declarado desliga o Posto e abre nota e destino.
+ *   3. só o select que o humano mudou vira ação; voltar ao valor comum desfaz.
  *
  * Roda em `pnpm run test:minerador:dom` (e dentro de `pnpm test`), com o
  * loader de runtime dos testes de DOM.
@@ -20,19 +19,18 @@ import { montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts
  * Fixtures, sem rede.
  */
 
-const { VinculoPageTypeSelect, VinculoPostSelect, VinculoSubjectFields, VinculoSubjectSelect } = await import("../components/editorial/vinculo-selects.tsx");
+const { VinculoPageTypeSelect, VinculoPostSelect } = await import("../components/editorial/vinculo-selects.tsx");
 const {
   EMPTY_VINCULO_BATCH_CHOICES,
   chooseVinculoBatchSelect,
   commonVinculoSelectValues,
-  isSubjectDeclareChoice,
   vinculoBatchActionsFromChoices,
-  vinculoBatchPostDisabled,
   vinculoBatchSelectValue,
 } = await import("../lib/minerador/vinculo-screen.ts");
 const { setKeywordPageType } = await import("../lib/minerador/keyword-page-type.ts");
+const { setKeywordSubject } = await import("../lib/minerador/keyword-subject.ts");
 
-type Choices = typeof EMPTY_VINCULO_BATCH_CHOICES & { note: string; destination: string };
+type Choices = typeof EMPTY_VINCULO_BATCH_CHOICES;
 
 let chamadasDeRede = 0;
 globalThis.fetch = (() => { chamadasDeRede += 1; return Promise.reject(new Error("REDE PROIBIDA NESTE TESTE")); }) as typeof fetch;
@@ -41,6 +39,7 @@ const ACTOR = "3f0c9a52-8b1e-4c7d-9f2a-5e6b7c8d9e0f";
 const AT = "2026-09-24T12:00:00+00:00";
 const nova = { status: "bruto", analise_semantica: { nicho: "Clínicas" } };
 const siloDeclarado = { status: "bruto", analise_semantica: setKeywordPageType({ nicho: "Clínicas" }, { pageType: "silo", stance: "declared", actorId: ACTOR, changedAt: AT }).semantic };
+const comAssunto = { status: "bruto", analise_semantica: (setKeywordSubject({ nicho: "Clínicas" }, { note: null, actorId: ACTOR, changedAt: AT, origin: "import" }) as { semantic: Record<string, unknown> }).semantic };
 
 let tela: RadarDomScreen | null = null;
 test.beforeEach(async () => { tela = await montarRadar(); });
@@ -49,17 +48,12 @@ test.afterEach(() => { tela?.destroy(); tela = null; });
 /** O painel do rodapé em miniatura: o mesmo estado e as mesmas funções do workspace. */
 function Painel({ items, onChoices }: { items: { status: string; analise_semantica: Record<string, unknown> }[]; onChoices: (choices: Choices) => void }) {
   const common = React.useMemo(() => commonVinculoSelectValues(items), [items]);
-  const [choices, setChoices] = React.useState<Choices>({ ...EMPTY_VINCULO_BATCH_CHOICES, note: "", destination: "" });
+  const [choices, setChoices] = React.useState<Choices>({ ...EMPTY_VINCULO_BATCH_CHOICES });
   React.useEffect(() => { onChoices(choices); }, [choices, onChoices]);
-  const choose = (key: "post" | "page_type" | "subject", value: string) => setChoices(current => chooseVinculoBatchSelect(current, key, value, common));
-  const postLocked = vinculoBatchPostDisabled(choices, common);
+  const choose = (key: "post" | "page_type", value: string) => setChoices(current => chooseVinculoBatchSelect(current, key, value, common));
   return React.createElement("div", null,
-    React.createElement(VinculoPostSelect, { id: "post", value: vinculoBatchSelectValue("post", choices, common), disabled: postLocked, subjectDeclared: postLocked, onChange: (value: string) => choose("post", value) }),
+    React.createElement(VinculoPostSelect, { id: "post", value: vinculoBatchSelectValue("post", choices, common), onChange: (value: string) => choose("post", value) }),
     React.createElement(VinculoPageTypeSelect, { id: "page-type", value: vinculoBatchSelectValue("page_type", choices, common), published: common.publishedOnly, currentValue: common.page_type, onChange: (value: string) => choose("page_type", value) }),
-    React.createElement(VinculoSubjectSelect, { id: "subject", value: vinculoBatchSelectValue("subject", choices, common), onChange: (value: string) => choose("subject", value) }),
-    isSubjectDeclareChoice(choices.subject)
-      ? React.createElement(VinculoSubjectFields, { batch: true, note: choices.note, destination: choices.destination, onNoteChange: () => {}, onDestinationChange: () => {} })
-      : null,
   );
 }
 
@@ -73,19 +67,20 @@ function optionTexts(element: HTMLSelectElement): string[] {
   return [...element.querySelectorAll("option")].map(option => option.textContent || "");
 }
 
-test("os rótulos e valores da Revisão Humana, sem Não mudar", async () => {
+test("os rótulos e valores da Revisão Humana, sem Não mudar e, desde 2026-10-13, sem Assunto", async () => {
   let last: Choices | null = null;
-  await tela!.render(React.createElement(Painel, { items: [nova, nova], onChoices: (choices: Choices) => { last = choices; } }));
+  await tela!.render(React.createElement(Painel, { items: [nova, comAssunto], onChoices: (choices: Choices) => { last = choices; } }));
   assert.equal(tela!.container.querySelector("label[for=post]")?.textContent, "Posto de principal");
   assert.equal(tela!.container.querySelector("label[for=page-type]")?.textContent, "Potencial de página");
-  assert.equal(tela!.container.querySelector("label[for=subject]")?.textContent, "Assunto");
+  assert.equal(tela!.container.querySelectorAll("select").length, 2, "só Posto e Potencial");
+  assert.equal(tela!.container.querySelector("[data-vinculo-select=subject]"), null);
+  assert.doesNotMatch(tela!.text(), /Assunto|Declarado$|Nota: o que é/);
   assert.deepEqual(optionTexts(select("post")), ["Livre", "Travado ao slug"]);
   assert.equal(optionTexts(select("page-type")).length, 8, "4 potenciais e 4 declarados");
-  assert.deepEqual(optionTexts(select("subject")), ["Não", "Declarado"]);
-  assert.doesNotMatch(tela!.text(), /Não mudar|Valores diferentes/);
+  assert.doesNotMatch(tela!.text(), /Não mudar|Valores diferentes/, "a keyword com Assunto tem os mesmos valores das outras");
   assert.equal(select("post").value, "reviewable", "o default aparece como valor");
+  assert.equal(select("post").disabled, false, "o Posto não se desliga por causa do Assunto");
   assert.equal(select("page-type").value, "potential:article");
-  assert.equal(select("subject").value, "none");
   assert.deepEqual(vinculoBatchActionsFromChoices(last!), [], "nada a gravar sem mudança");
   assert.equal(chamadasDeRede, 0);
 });
@@ -107,22 +102,15 @@ test("Valores diferentes aparece desabilitado e some quando o humano escolhe", a
   assert.deepEqual(vinculoBatchActionsFromChoices(last!), [{ kind: "page_type", pageType: "landing_page", stance: "declared" }], "só o select mudado grava");
 });
 
-test("voltar ao valor comum desfaz; Assunto Declarado desliga o Posto e abre nota e destino", async () => {
+test("voltar ao valor comum desfaz", async () => {
   let last: Choices | null = null;
   await tela!.render(React.createElement(Painel, { items: [nova, nova], onChoices: (choices: Choices) => { last = choices; } }));
   await tela!.select(select("post"), "locked");
   assert.equal(last!.post, "post:locked");
   await tela!.select(select("post"), "reviewable");
   assert.equal(last!.post, "", "o valor de todas não grava");
-
   await tela!.select(select("post"), "locked");
-  await tela!.select(select("subject"), "declared");
-  assert.equal(select("post").disabled, true);
-  assert.equal(select("post").title, "Com Assunto declarado, o Posto de principal não se aplica.");
-  assert.equal(last!.post, "", "Declarar limpa o Posto");
-  assert.ok(tela!.container.querySelector("[data-vinculo-subject-fields]"), "nota e destino com Declarado");
-  assert.match(tela!.text(), /Nota: o que é, para quem/);
-  assert.deepEqual(vinculoBatchActionsFromChoices(last!, { note: "", destinationUrl: "" }), [{ kind: "subject_declare", note: null, destinationUrl: null }]);
+  assert.deepEqual(vinculoBatchActionsFromChoices(last!), [{ kind: "post", policy: "locked" }]);
   assert.equal(chamadasDeRede, 0);
 });
 

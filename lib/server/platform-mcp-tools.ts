@@ -13,9 +13,8 @@ import { MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus } from "@/l
 import { readKgrApplicability } from "@/lib/minerador/kgr-applicability";
 import { planKgrApplicabilityBatch } from "@/lib/minerador/kgr-applicability-batch";
 import { KEYWORD_PAGE_TYPES, KEYWORD_PAGE_TYPE_STANCES } from "@/lib/minerador/keyword-page-type";
-import { planVinculoBatchChoices, type VinculoBatchAction, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";
+import { planVinculoBatchChoices, VINCULO_SUBJECT_ENTRY_MOVED_REASON, type VinculoBatchAction, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";
 import { vinculoReadbackConfirmed } from "@/lib/minerador/vinculo-screen";
-import { resolveKeywordSubject } from "@/lib/minerador/keyword-subject";
 import { GOOGLE_ADS_DISCOVERY_LANGUAGES } from "@/lib/minerador/google-ads-discovery-catalog";
 import { subjectDiscoveryEstimate, subjectDiscoveryHasVolume } from "@/lib/minerador/subject-discovery-volume";
 import { deriveKgrVisualState, KGR_FULL_RANGE_LIMIT, kgrApplicabilityLabel } from "@/lib/minerador/kgr-applicability";
@@ -922,7 +921,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("set_kgr_applicability", {
     title: "Decidir aplicabilidade do KGR",
-    description: "Decisão aceita pelo usuário no chat para keywords selecionadas. Use mode=preview e depois mode=apply com o mesmo decisionHash e userConfirmation. Reusa planKgrApplicabilityBatch; Assuntos declarados são preservados e ficam fora da decisão.",
+    description: "Decisão aceita pelo usuário no chat para keywords selecionadas. Use mode=preview e depois mode=apply com o mesmo decisionHash e userConfirmation. Reusa planKgrApplicabilityBatch. Desde 2026-10-13 a keyword que carrega um Assunto é tratada como qualquer keyword (o KGR vale para ela); skippedSubjects fica 0, por compatibilidade.",
     inputSchema: z.object({
       brandId: brandIdInput,
       mode: z.enum(["preview", "apply"]),
@@ -940,8 +939,9 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     const permission = mode === "apply" ? "edit" as const : "view" as const;
     return call("set_kgr_applicability", scope, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, [{ module: "minerador", action: permission }], async ({ access }) => {
       const { rows, missingCount } = await readDecisionKeywords(access.brandId, keywordIds);
-      const eligible = rows.filter(row => !resolveKeywordSubject(row.analise_semantica).declared);
-      const skippedSubjects = rows.length - eligible.length;
+      // 2026-10-13: a keyword que carrega Assunto é tratada como qualquer keyword.
+      const eligible = rows;
+      const skippedSubjects = 0;
       const plan = planKgrApplicabilityBatch(eligible.map(row => ({ id: row.id, keyword: row.keyword, analise_semantica: row.analise_semantica })), applicability, { actorId: principal.actorId, decidedAt: "decision-preview" });
       const entries = [
         ...plan.updates.map(item => ({ id: item.id, keyword: item.keyword, current: item.previous, proposed: applicability, outcome: "ready" as const })),
@@ -959,7 +959,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("set_keyword_vinculo", {
     title: "Decidir Vínculo das keywords",
-    description: "Altera o tipo/potencial de página (inclui 'silo', a cabeça do silo), somente após o aceite específico no chat. Use mode=preview e depois mode=apply com o mesmo decisionHash. Usa planVinculoBatchChoices e o readback do Minerador. O posto (travado/revisável) da principal publicada NÃO é alterável pelo MCP: é decisão na tela do Minerador. Publicação, slug, canonical e marca permanecem protegidos.",
+    description: "Altera o tipo/potencial de página (inclui 'silo', a cabeça do silo), somente após o aceite específico no chat. Use mode=preview e depois mode=apply com o mesmo decisionHash. Usa planVinculoBatchChoices e o readback do Minerador. O posto (travado/revisável) da principal publicada NÃO é alterável pelo MCP: é decisão na tela do Minerador. Publicação, slug, canonical e marca permanecem protegidos. O Assunto NÃO é do Vínculo (2026-10-13): kind subject_declare/subject_withdraw é recusado com subject_entry_moved — o Assunto entra só por declare_silo_plan (o card 'Cadastrar Assuntos') e sai do plano por 'Tirar do plano' na tela.",
     inputSchema: z.object({
       brandId: brandIdInput,
       mode: z.enum(["preview", "apply"]),
@@ -971,12 +971,22 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
        */
       action: z.discriminatedUnion("kind", [
         z.object({ kind: z.literal("page_type"), pageType: z.enum(KEYWORD_PAGE_TYPES), stance: z.enum(KEYWORD_PAGE_TYPE_STANCES) }),
+        /*
+         * 2026-10-13: o Assunto saiu do Vínculo. Estes dois valores existem só
+         * para a recusa ser clara (`subject_entry_moved`, apontando "Cadastrar
+         * Assuntos"/declare_silo_plan) em vez de um erro de validação mudo.
+         */
+        z.object({ kind: z.literal("subject_declare") }).passthrough(),
+        z.object({ kind: z.literal("subject_withdraw") }).passthrough(),
       ]),
       decisionHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
       userConfirmation: confirmationInput.optional(),
     }),
     annotations: write,
   }, async ({ brandId, mode, keywordIds, action, decisionHash, userConfirmation }) => {
+    if (action.kind === "subject_declare" || action.kind === "subject_withdraw") {
+      return asText({ ok: false, code: "subject_entry_moved", message: VINCULO_SUBJECT_ENTRY_MOVED_REASON });
+    }
     if (mode === "apply" && (!userConfirmation || !decisionHash)) {
       return asText({ ok: false, code: !userConfirmation ? "human_confirmation_required" : "decision_hash_required", message: "Mostre a prévia, aguarde o aceite específico do usuário e reaplique com o decisionHash da mesma prévia." });
     }
