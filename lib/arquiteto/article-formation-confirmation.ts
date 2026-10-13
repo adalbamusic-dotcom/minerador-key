@@ -379,6 +379,12 @@ export function validateFormationConclusion(input: {
    * Ausente para um Assunto que é principal = sem Volume validado.
    */
   subjectVolumeValidated?: ReadonlyMap<string, boolean>;
+  /**
+   * 2026-10-13 · CADASTRO ÚNICO (ADR-022 D1-ter): Assuntos que MORAM na própria
+   * keyword. A keyword pode ser a principal do artigo sem volume (é keyword, não
+   * título); a portaria Q7 não vale para eles.
+   */
+  subjectCarriedByKeyword?: ReadonlySet<string>;
   /** Frase de cada Assunto, só para a mensagem. */
   subjectLabels?: ReadonlyMap<string, string>;
   /**
@@ -547,7 +553,8 @@ export function validateFormationConclusion(input: {
   if (comAssunto.length) {
     const assuntoPrincipalSemVolume = comAssunto.filter(({ candidate }) =>
       candidate.subjectKeywordId === candidate.principalKeywordId
-      && input.subjectVolumeValidated?.get(candidate.subjectKeywordId!) !== true);
+      && input.subjectVolumeValidated?.get(candidate.subjectKeywordId!) !== true
+      && !input.subjectCarriedByKeyword?.has(candidate.subjectKeywordId!));
     const nomes = [...new Set(assuntoPrincipalSemVolume.map(({ candidate }) =>
       input.subjectLabels?.get(candidate.subjectKeywordId!) || candidate.subjectKeywordId!))];
     gates.push({
@@ -706,7 +713,8 @@ export function readyConclusionSubset(input: Parameters<typeof validateFormation
     })) barrar(ref, "reúne buscas de Silos diferentes");
     if (candidate.conflicts.some(conflito => conflito.toLowerCase().includes("publicado"))) barrar(ref, "colide com conteúdo publicado");
     if (candidate.subjectKeywordId && candidate.subjectKeywordId === candidate.principalKeywordId
-      && input.subjectVolumeValidated?.get(candidate.subjectKeywordId) !== true) {
+      && input.subjectVolumeValidated?.get(candidate.subjectKeywordId) !== true
+      && !input.subjectCarriedByKeyword?.has(candidate.subjectKeywordId)) {
       barrar(ref, "tem o Assunto como principal sem Volume validado");
     }
     for (const motivo of declaredPlanViolations(input).byCandidate.get(ref) || []) barrar(ref, motivo);

@@ -1,5 +1,57 @@
 # Estado atual — Minerador
 
+## Cadastro único: o Assunto mora na keyword — 2026-10-13
+
+```text
+SDD = docs/compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md (aprovada pelo dono em 2026-10-13)
+ADR = ADR-022, emenda D1-ter · Módulo dono = Minerador (consumidores: Arquiteto, MCP/catálogo)
+MIGRATION_NOVA = 0 · ESCRITA_REMOTA = 0 · SQL_REMOTO = 0 · CHAMADA_PAGA = 0 · CHAMADA_IA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Card "Cadastrar Assuntos"** (`modules/minerador/subject-cadastro-card.tsx`, barra do topo, ao lado de "Colar
+  keywords" e "Importar CSV"; some com 409 `GROUPS_NOT_AVAILABLE`): destino (Silo novo com Nome/Slug/Objetivo ·
+  Silo existente · Artigo publicado por URL), cor (as 5 fixas; a cor com grupo vai para ele), "Colar plano em
+  texto" → "Preencher as linhas" (`parseDeclaredPlanText`, agora com "Trava: travada|livre|automática") e, por
+  linha, #, Papel (a 1ª do Silo novo nasce Pilar), Assunto (título, até 300), Keyword, Detalhes (até 1.200, uma
+  linha) e Trava (Automática pelo volume · Travada · Livre). "Gerar prévia" → "Cadastrar" (o mesmo pedido e o
+  `importRequestId` da prévia) → resultado relido; a planilha relê as linhas e roda a Lógica automática (grátis).
+  No Silo existente as linhas gravadas aparecem (`GET /api/minerador/marcas/[brandId]/plans/import?groupId=`) e
+  não saem pelo card ("Tirar do plano" é o caminho).
+- **Uma porta só.** O diálogo "Importar plano do Silo" saiu (arquivo removido); o colar/CSV do Processador é só de
+  keyword (sem `subjectEntry`); a Pesquisa por Assunto não declara mais a frase pesquisada (sem Assunto
+  cadastrado, as sustentações entram sem vínculo e o diálogo diz isso); `POST …/subjects/import` responde 410
+  `SUBJECT_ENTRY_MOVED`; a ferramenta MCP `declare_subjects` saiu. `importSubjectsWithCore` continua, chamado só
+  pelo núcleo do cadastro (lista fechada de chamadores atualizada).
+- **Modelo** (`lib/minerador/declared-plan.ts`, `keyword-subject.ts`, `keyword-dna.ts`, aditivo em jsonb): na
+  keyword K, `keyword_subject = { declared, entry: { title, source: "cadastro" }, plan: { …, declaredPrincipal:
+  { keywordId: K }, lock? } }` e `keyword_declared_principal = { subjectKeywordId: K, … }`. Nenhuma linha de título
+  nasce. `subjectPhraseOf` = título (ou o texto da linha no formato anterior). `KeywordDna.subject.entry` e
+  `plan.lock` opcionais (`.strict()`).
+- **Trava** (`declaredPrincipalLock`): manual gravada vence; Assunto na própria keyword → travada com Volume
+  validado > 0, livre sem (medida 0 = livre); plano anterior (Assunto e principal em linhas separadas) → travada
+  pela declaração. Medir o volume (clique) já trava a automática, sem escrita nova.
+- **Núcleo** (`importDeclaredPlanWithCore`, o mesmo da rota e do MCP): destino `new_silo` / `existing_silo` /
+  `published`; **acréscimo** (casa as linhas com os artigos gravados do grupo; a que não mudou não é regravada nem
+  volta a "Em revisão"; nenhum artigo sai); "Silo novo" numa cor com OUTRO Silo é recusado; artigo sem keyword é
+  recusado ("o Assunto entra sempre por trás de uma keyword"); keyword publicada no Silo é recusada (use o destino
+  publicado); Assunto anterior com a mesma frase é adotado no formato dele. Destino publicado: o Assunto (título e
+  detalhes) é declarado na keyword publicada (URL/slug/canonical/principal intocados) e as keywords entram como
+  sustentações dela por `importSubjectDiscoveryWithCore` (origem nova `cadastro`), com a cor.
+- **Leitura compatível** (`readDeclaredPlanCardRows`): o plano gravado no formato do card — é a conversão do Silo
+  1 da WifiConecta sem regravar nada.
+- **Testes:** `tests/minerador-cadastro-assunto-na-keyword.test.mts` (10: parser do Silo 2, trava, `entry`,
+  prévia/aplicar/releitura do Silo 2, acréscimo no Silo existente, recusas, destino publicado, leitura compatível,
+  estrutural); ajustados de propósito: `minerador-plano-declarado` (D1-ter: frase = keyword sem volume entra
+  livre), `minerador-plano-declarado-tela` (o card), `minerador-assunto-import-rota` (rota aposentada),
+  `minerador-assunto-dominio` (chamadores), `minerador-assunto-pesquisa-tela` (sem declarar a frase),
+  `radar-grupos-cores-fixas` (DOM do card). Contagens no fim desta seção da SDD (§11).
+- **Limites:** o select "Esta lista é" e o fluxo de Assunto continuam no código de `discovery-source-controls.tsx`
+  sem chamador (prop `subjectEntry` nunca passada) — limpeza no backlog; o card não tem teste DOM de ponta a ponta
+  (o DOM cobre a cor e o pedido da prévia); destino publicado exige a keyword publicada com Vínculo formal
+  (`site_origin` publicado) e não grava a origem em keyword já aprovada (para não tirar a aprovação).
+
 ## Gerenciar a cor, Histórico do grupo e "Tirar do plano" — 2026-10-12
 
 ```text

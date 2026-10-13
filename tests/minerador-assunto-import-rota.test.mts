@@ -22,31 +22,15 @@ async function source(path: string) {
 const ROUTE = "app/api/minerador/marcas/[brandId]/subjects/import/route.ts";
 const CONTROLS = "modules/minerador/discovery/discovery-source-controls.tsx";
 
-test("rota: permissão do Minerador como em /discovery/sources, marca da rota e núcleo irmão", async () => {
+test("rota aposentada em 2026-10-13 (cadastro único): 410 sem ler nem gravar; o Assunto entra só pelo card", async () => {
   const route = await source(ROUTE);
-  assert.match(route, /export async function POST\(/);
-  assert.doesNotMatch(route, /export async function (GET|PUT|PATCH|DELETE)\(/);
-  assert.match(route, /requireCanonicalSessionProfile\(\)/);
-  assert.match(route, /requireTenantPermission\(\{ brandId, actorUserId: profile\.userId, module: "minerador", action: "edit", profile \}\)/);
-  assert.match(route, /isTenantId\(brandId\)/);
-  assert.match(route, /importSubjectsWithCore\(/);
-  assert.match(route, /brandId: context\.brandId/);
-  assert.match(route, /actorUserId: context\.actorUserId/);
-  assert.match(route, /mode: z\.enum\(\["preview", "apply"\]\)/);
-  assert.match(route, /declareExistingIds: z\.array\(z\.string\(\)\.uuid\(\)\)/);
-  assert.match(route, /IMPORT_REQUEST_IN_PROGRESS: 409/);
-});
-
-test("rota: nada de brandId no corpo, select(*), métrica aceita ou import órfão", async () => {
-  const route = await source(ROUTE);
-  const schema = route.slice(route.indexOf("const SubjectEntrySchema"), route.indexOf("const REFUSAL_STATUS"));
-  assert.doesNotMatch(schema, /brandId|brand_id|actor/i, "marca e ator nunca vêm do corpo");
-  assert.doesNotMatch(schema, /volume|results|cpc|intent|funnel/i, "o import de Assunto não aceita métrica nem intenção");
-  assert.doesNotMatch(route, /select\("\*"\)/);
-  assert.doesNotMatch(route, /analise_semantica/, "a rota não lê analise_semantica: quem lê, estreito, é o núcleo");
-  assert.match(route, /from\("marcas"\)\.select\("id,site_url"\)\.eq\("id", context\.brandId\)/);
-  assert.match(route, /from\("minerador_keyword_lists"\)\.select\("id,nome,marca_id"\)\.eq\("marca_id", context\.brandId\)/);
-  assert.doesNotMatch(route, /\.insert\(|\.update\(|\.rpc\(/, "a rota não escreve por fora do núcleo");
+  assert.match(route, /export async function POST\(\)/);
+  assert.match(route, /SUBJECT_ENTRY_MOVED/);
+  assert.match(route, /status: 410/);
+  assert.doesNotMatch(route, /importSubjectsWithCore|\.from\(|\.insert\(|\.update\(|requireCanonicalSessionProfile/, "a rota aposentada não lê nem grava nada");
+  const tela = await source("modules/minerador/minerador-workspace.tsx");
+  const controles = tela.slice(tela.indexOf("<DiscoverySourceControls "), tela.indexOf("/>", tela.indexOf("<DiscoverySourceControls ")));
+  assert.doesNotMatch(controles, /subjectEntry/, "o Processador não oferece mais \"Esta lista é: Assunto\"");
 });
 
 test("núcleo: importKeywordsWithCore e KeywordImportSource continuam como estavam", async () => {

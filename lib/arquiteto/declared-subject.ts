@@ -30,8 +30,8 @@
 
 import { keywordDnaFromPackage, type KeywordDna } from "../minerador/keyword-dna.ts";
 import type { ApprovedKeywordPackage } from "../minerador/approved-package.ts";
-import { isKeywordSubjectActorId, KEYWORD_SUBJECT_LABEL, resolveDeclaredPrincipal, resolveKeywordSubject } from "../minerador/keyword-subject.ts";
-import type { DeclaredArticlePlan, DeclaredPrincipalMark } from "../minerador/declared-plan.ts";
+import { isKeywordSubjectActorId, KEYWORD_SUBJECT_LABEL, resolveDeclaredPrincipal, resolveKeywordSubject, subjectPhraseOf } from "../minerador/keyword-subject.ts";
+import { declaredPrincipalLock, type DeclaredArticlePlan, type DeclaredPrincipalLockView, type DeclaredPrincipalMark } from "../minerador/declared-plan.ts";
 import { deriveProcessorRevalidation } from "../minerador/processor-revalidation.ts";
 import { readSubjectDiscoveryBlock } from "../minerador/subject-discovery-import.ts";
 import { normalizeKeyword } from "../minerador/keyword-import-core.ts";
@@ -178,7 +178,50 @@ export type ArchitectSubjectStanding = {
    * recíproca), lida do pacote aprovado. `null` quando não é.
    */
   declaredPrincipal: DeclaredPrincipalMark | null;
+  /**
+   * 2026-10-13 · CADASTRO ÚNICO (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`):
+   * o Assunto mora NESTA keyword (a principal declarada do plano é ela mesma).
+   * Ela pode ser a principal do próprio artigo sem volume (ADR-022 D1-ter) e
+   * não sai da formação automática.
+   */
+  carriesSubject?: boolean;
+  /**
+   * 2026-10-13 · a TRAVA da principal do plano (`declaredPrincipalLock`):
+   * travada = principal fixa; livre = a formação/melhoria pode propor outra.
+   * `null` sem principal declarada. Ausente (standing antigo) = calculada.
+   */
+  planLock?: DeclaredPrincipalLockView | null;
+  /** 2026-10-13 · o Volume medido no pacote (só para a trava automática). */
+  volumeValue?: number | null;
 };
+
+/** A trava da principal do plano de um Assunto (a gravada no standing ou a calculada sem volume). */
+export function planLockOfStanding(standing: Pick<ArchitectSubjectStanding, "plan" | "keywordId"> & { planLock?: DeclaredPrincipalLockView | null } | null | undefined): DeclaredPrincipalLockView | null {
+  if (!standing?.plan) return null;
+  if (standing.planLock !== undefined) return standing.planLock;
+  return declaredPrincipalLock(standing.plan, { subjectKeywordId: standing.keywordId, volume: null });
+}
+
+/** A principal FIXA do plano (só travada). Livre ou sem principal = `null`. */
+export function lockedPlanPrincipal(standing: Pick<ArchitectSubjectStanding, "plan" | "keywordId"> & { planLock?: DeclaredPrincipalLockView | null } | null | undefined): { keywordId: string; phrase: string } | null {
+  const lock = planLockOfStanding(standing);
+  return lock && lock.state === "locked" ? { keywordId: lock.keywordId, phrase: lock.phrase } : null;
+}
+
+/** A principal LIVRE do plano (pode ser trocada pela SERP/volume, com decisão humana). */
+export function freePlanPrincipal(standing: Pick<ArchitectSubjectStanding, "plan" | "keywordId"> & { planLock?: DeclaredPrincipalLockView | null } | null | undefined): { keywordId: string; phrase: string } | null {
+  const lock = planLockOfStanding(standing);
+  return lock && lock.state === "free" ? { keywordId: lock.keywordId, phrase: lock.phrase } : null;
+}
+
+/**
+ * O Assunto pode ser a própria principal do artigo? Com Volume validado (Q7), ou
+ * quando ele MORA na keyword (cadastro único, ADR-022 D1-ter): aí a frase é uma
+ * keyword de verdade, não um título.
+ */
+export function subjectMayBePrincipal(standing: Pick<ArchitectSubjectStanding, "volumeValidated"> & { carriesSubject?: boolean } | null | undefined): boolean {
+  return Boolean(standing?.volumeValidated || standing?.carriesSubject);
+}
 
 /**
  * O que o Arquiteto sabe do Assunto de uma keyword da mesa.
@@ -197,19 +240,27 @@ export function readArchitectSubjectStanding(keyword: RecordLike): ArchitectSubj
   if (pkg && dna) {
     const declared = dna.subject?.declared === true;
     const volumeValidated = dna.metrics.volume.validated;
+    const plan = declared ? dna.subject?.plan ?? null : null;
+    const carriesSubject = Boolean(plan?.declaredPrincipal && plan.declaredPrincipal.keywordId === keywordId);
+    const volumeValue = dna.metrics.volume.value;
     return {
       keywordId,
       brandId: text(pkg.brandId) ?? text(keyword.brand_id),
-      phrase: pkg.keyword.trim(),
+      // 2026-10-13 · a frase do Assunto é o título cadastrado na keyword; sem ele, o texto da linha.
+      phrase: declared ? subjectPhraseOf(pkg.keyword, { entry: dna.subject?.entry ?? null }) : pkg.keyword.trim(),
       received,
       approvedPackageRef,
       declared,
       note: declared ? dna.subject?.note ?? null : null,
       destinationUrl: declared ? dna.subject?.destinationUrl ?? null : null,
       volumeValidated,
-      heldOutOfFormation: declared && !volumeValidated,
-      plan: declared ? dna.subject?.plan ?? null : null,
+      // O Assunto que mora na keyword é membro do próprio artigo: não sai da formação.
+      heldOutOfFormation: declared && !volumeValidated && !carriesSubject,
+      plan,
       declaredPrincipal: dna.declaredPrincipal ?? null,
+      carriesSubject,
+      planLock: plan ? declaredPrincipalLock(plan, { subjectKeywordId: keywordId, volume: carriesSubject ? { validated: volumeValidated, value: volumeValue } : null }) : null,
+      volumeValue,
     };
   }
 
@@ -223,7 +274,7 @@ export function readArchitectSubjectStanding(keyword: RecordLike): ArchitectSubj
   return {
     keywordId,
     brandId: text(keyword.brand_id),
-    phrase: text(keyword.keyword) ?? "",
+    phrase: subject.declared ? subjectPhraseOf(text(keyword.keyword) ?? "", subject) : text(keyword.keyword) ?? "",
     received,
     approvedPackageRef: null,
     declared: subject.declared,
@@ -234,6 +285,9 @@ export function readArchitectSubjectStanding(keyword: RecordLike): ArchitectSubj
     // Sem pacote aprovado não há plano: o Arquiteto só obedece ao que o humano aprovou.
     plan: null,
     declaredPrincipal: null,
+    carriesSubject: false,
+    planLock: null,
+    volumeValue: null,
   };
 }
 
@@ -463,8 +517,8 @@ export function planSubjectAttachment(input: {
     if (member && SUPPORT_ROLES.has(member.role)) {
       return refuse("SUPPORT_ROLE", "O Assunto não pode ser secundária nem reforço do mesmo artigo.");
     }
-    if (target.principalKeywordId === standing.keywordId && !standing.volumeValidated) {
-      return refuse("PRINCIPAL_WITHOUT_VOLUME", "O Assunto só pode ser a própria principal com Volume validado no pacote aprovado.");
+    if (target.principalKeywordId === standing.keywordId && !subjectMayBePrincipal(standing)) {
+      return refuse("PRINCIPAL_WITHOUT_VOLUME", "O Assunto só pode ser a própria principal com Volume validado no pacote aprovado (ou quando ele mora na keyword, cadastro único).");
     }
     const phrase = normalizeKeyword(standing.phrase);
     if ((target.excludedSubjects || []).some(excluded => normalizeKeyword(excluded) === phrase)) {

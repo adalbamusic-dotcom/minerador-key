@@ -1,5 +1,18 @@
 # Backlog — Minerador
 
+## Cadastro único: o Assunto mora na keyword — 2026-10-13
+
+SDD `docs/compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md` (ADR-022 D1-ter). Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Card "Cadastrar Assuntos" (destino, cor, linhas com Assunto/keyword/detalhes/papel/trava, colar plano em texto, prévia → cadastrar → releitura).
+- [x] Assunto dentro da keyword (`keyword_subject.entry`), trava (`plan.lock` manual; automática pelo volume), leitores compatíveis com o formato anterior.
+- [x] Núcleo único com destino (Silo novo / existente em acréscimo / publicado) e leitura compatível do plano gravado.
+- [x] Portas antigas fora: diálogo do plano, "Esta lista é: Assunto", declarar a frase na Pesquisa por Assunto, rota `subjects/import` (410), MCP `declare_subjects`.
+- [ ] Dono: homologar o card (Silo 2 em outra cor; Silo 1 como "Silo existente → Laranja", só leitura), dark mode, 360/768/1024/1440 px, foco e Esc.
+- [ ] Limpar o fluxo de Assunto morto em `discovery-source-controls.tsx` (prop `subjectEntry` sem chamador) e as funções de declarar a frase em `subject-search-model.ts`.
+- [ ] Decidir com o dono: volume medido = 0 conta como "sem volume" (aplicado: livre).
+- [ ] Teste DOM de ponta a ponta do card (prévia com bloqueio, Silo existente carregando as linhas, destino publicado).
+
 ## Etiqueta de grupo: cores fixas, topbar global e por área — 2026-10-12
 
 SDD `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` §9.1-A. Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**

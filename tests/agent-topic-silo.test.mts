@@ -84,7 +84,7 @@ test("08 · plano correto passa, com slugs preenchidos e próximos passos", () =
   assert.equal(resultado.plan.siloPage.slug, "skincare-pele-oleosa");
   assert.equal(resultado.plan.articles[1].slug, "como-limpar");
   assert.equal(resultado.plan.articles[1].path, "skincare-pele-oleosa/como-limpar");
-  assert.match(resultado.nextSteps.join(" "), /declare_subjects/);
+  assert.match(resultado.nextSteps.join(" "), /declare_silo_plan/);
 });
 
 test("09 · fora de 4 a 30 artigos é bloqueio (D3, 2026-10-12)", () => {

@@ -1,5 +1,19 @@
 # Estado atual — Redator
 
+## Assunto legível na lista e no documento aberto — 2026-10-13
+
+Pedido do dono (2026-10-13): "coloca sempre o assunto no painel para que seja legível". Só a keyword principal não identificava o artigo.
+
+**Verificado no código e confirmado por teste. Validado manualmente: não (homologação é do dono).** Sem migration, sem escrita remota, sem SQL, sem chamada paga.
+
+- Componente compartilhado `components/editorial/article-subject-line.tsx`: `ArticleSubjectLine` (rótulo "Assunto · " em `text-text-muted`, frase inteira em `text-foreground`, 14 px, quebra de linha, `title` com a frase; sem frase, "Sem Assunto" em `text-text-muted`, ou nada com `showEmpty={false}`) e `articleSubjectPhraseOf` (lê `subject.phrase` do ArticleDNA). Só lê: não busca, não grava.
+- `WorkflowImportDialog` (`components/editorial/workflow-status.tsx`) e `ImportPanel` (`components/editorial/operational-screen-shared.tsx`) ganharam `subjectOf` opcional (aditivo): com ele a linha abre com o Assunto e a busca casa com a frase; sem ele, o render é o de sempre (consumidores preservados: Arquiteto, ImportPanel sem `subjectOf`).
+- Fonte: `writerDocumentSubjectPhrase` (`lib/redator/document-subject.ts`, puro): o ArticleDNA da mesa (`pipeline.articleVersions[articleDnaRef.entityId]`); sem ele, a linha do tronco gravada no envio (`importedContext.editorialContext`, pela mesma projeção do painel de fundamentos — está também na cópia de listagem). Nenhuma leitura nova.
+- Onde aparece: lista de documentos (antes do título), cabeçalho do documento aberto (acima da folha, fora do papel branco) e diálogo "Importar do Radar" (`subjectOf`).
+- Entregáveis: `get_article_for_writing` já devolve o CSV "Para escrever" com `Assunto (tronco): …`; nada mudou.
+- Arquivos: `components/editorial/professional-writer.tsx`, `lib/redator/document-subject.ts`, `package.json` (o teste novo entra em `test:redator`).
+- Testes: `tests/redator-assunto-legivel.test.mts` (fonte e ligações). `test:redator` 357 → 361.
+
 ## F6 · Etiqueta de cor e lista de documentos por grupo — 2026-10-12
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.** SDD

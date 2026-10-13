@@ -17,7 +17,7 @@ import "server-only";
  */
 
 import type { ArticleDNA } from "@/lib/arquiteto/contracts";
-import { readArchitectSubjectStanding } from "@/lib/arquiteto/declared-subject";
+import { lockedPlanPrincipal, readArchitectSubjectStanding } from "@/lib/arquiteto/declared-subject";
 import { declaredPlanArticleContradictions, declaredPlanParallelPath } from "@/lib/arquiteto/declared-plan-rework";
 import type { ArticleFormationMarkerPayload } from "@/lib/arquiteto/article-formation-marker";
 import { readKeywordGroupInfo } from "@/lib/editorial/article-groups-store";
@@ -65,7 +65,8 @@ async function readSubjectPlan(context: PipelineContext, subjectKeywordId: strin
     const keyword = await readSubjectGuardKeyword(context, subjectKeywordId);
     if (!keyword || String(keyword.brand_id ?? "") !== context.brandId) return null;
     const standing = readArchitectSubjectStanding(keyword);
-    return standing.plan ? { plan: standing.plan, phrase: standing.phrase } : null;
+    // 2026-10-13 · a trava: só a principal TRAVADA é contradição; a livre pode ser trocada.
+    return standing.plan ? { plan: standing.plan, phrase: standing.phrase, principalLocked: Boolean(lockedPlanPrincipal(standing)) } : null;
   } catch {
     return null;
   }
@@ -110,7 +111,7 @@ export async function assertArticleDnaAgainstDeclaredPlan(context: PipelineConte
     const subject = await readSubjectPlan(context, article.subject.keywordId);
     if (!subject) return null;
     groupId = subject.plan.groupId;
-    contradictions = declaredPlanArticleContradictions({ plan: subject.plan, next: article, previous: previous.snapshot, subjectLabel: subject.phrase });
+    contradictions = declaredPlanArticleContradictions({ plan: subject.plan, next: article, previous: previous.snapshot, subjectLabel: subject.phrase, principalLocked: subject.principalLocked });
   } else {
     // Caminho paralelo é só do artigo NOVO (o envelope diz): versão nova de artigo existente não lê nada a mais.
     if (article.publishedIdentityRef || input.previousVersionId) return null;

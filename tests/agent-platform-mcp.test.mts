@@ -252,10 +252,13 @@ test("14 · com mais de uma Marca, a leitura exige brandId", async () => {
   assert.equal(body.code, "brand_required");
 });
 
-test("15 · declarar Assunto sem o aceite do usuário é recusado antes de qualquer escrita (ADR-022)", async () => {
+test("15 · cadastrar Assunto sem o aceite do usuário é recusado antes de qualquer escrita (ADR-022); declare_subjects saiu (2026-10-13)", async () => {
   const send = harness(createWriterServer(principal([brand(["platform.read", "minerador.write"])])));
-  const body = toolText(await send(6, "tools/call", { name: "declare_subjects", arguments: { mode: "apply", entries: [{ keyword: "seo para clínicas" }] } }));
+  const body = toolText(await send(6, "tools/call", { name: "declare_silo_plan", arguments: { mode: "apply", importRequestId: "00000000-0000-4000-8000-0000000000c1", text: ["Nome: X", "1. Título", "Artigo pilar • Palavra-chave: seo para clínicas", "Escopo."].join(String.fromCharCode(10)), group: { mode: "color", color: "azul" } } }));
   assert.equal(body.code, "human_confirmation_required");
+  const nomes = ((await send(7, "tools/list", {})).result?.tools as Array<{ name: string }>).map(tool => tool.name);
+  assert.ok(nomes.includes("declare_silo_plan"));
+  assert.equal(nomes.includes("declare_subjects"), false, "a porta do Assunto solto saiu: o cadastro único é declare_silo_plan");
 });
 
 const pedidoPago = {
@@ -623,12 +626,14 @@ test("F4 · declare_silo_plan está no catálogo (humano, aceite no chat, gráti
   assert.equal(operacao.cost, "free");
   assert.deepEqual([...operacao.routes], ["/api/minerador/marcas/[brandId]/plans/import"]);
   // 2026-10-12 · cores fixas: o grupo do plano é escolhido pela COR (nada para escrever).
-  assert.match(operacao.howOnScreen, /'Importar plano do Silo'[\s\S]*escolher a COR do grupo[\s\S]*'Gerar prévia'[\s\S]*'Declarar plano'/);
+  // 2026-10-13 · cadastro único: o card "Cadastrar Assuntos" (destino, cor, linhas, trava).
+  assert.match(operacao.howOnScreen, /'Cadastrar Assuntos'[\s\S]*COR do grupo[\s\S]*'Gerar prévia'[\s\S]*'Cadastrar'/);
   const guia = renderPlatformGuide("minerador");
-  for (const regra of [/principal declarada é fixa/, /aprova sem Volume/, /o Arquiteto não a troca/, /Keywords não agrupadas do grupo/, /Pilar declarado entra no Silo como decisão humana/]) {
+  for (const regra of [/O Assunto mora DENTRO da keyword/, /aprova sem Volume/, /entra TRAVADA/, /LIVRE/, /Keywords não agrupadas do grupo/, /Pilar declarado entra no Silo como decisão humana/]) {
     assert.match(guia, regra, String(regra));
   }
-  assert.match(renderPlatformGuide("seo"), /Plano declarado do Silo: a principal declarada é fixa/);
+  assert.match(renderPlatformGuide("seo"), /Plano declarado do Silo: a principal declarada TRAVADA é fixa/);
+  assert.match(renderPlatformGuide("seo"), /O Assunto mora na keyword/);
 
   const send = harness(createWriterServer(principal([brand(["platform.read", "minerador.write"])])));
   await send(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });

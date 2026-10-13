@@ -19,16 +19,15 @@ import { resolveKeywordSubject } from "@/lib/minerador/keyword-subject";
 import { GOOGLE_ADS_DISCOVERY_LANGUAGES } from "@/lib/minerador/google-ads-discovery-catalog";
 import { subjectDiscoveryEstimate, subjectDiscoveryHasVolume } from "@/lib/minerador/subject-discovery-volume";
 import { deriveKgrVisualState, KGR_FULL_RANGE_LIMIT, kgrApplicabilityLabel } from "@/lib/minerador/kgr-applicability";
-import { importSubjectsWithCore, type SubjectImportChannel } from "@/lib/minerador/keyword-import-core";
+import type { SubjectImportChannel } from "@/lib/minerador/keyword-import-core";
 import { EDITORIAL_GROUP_COLORS } from "@/lib/editorial/editorial-groups";
 import { listEditorialGroupSummaries } from "@/lib/editorial/editorial-groups-store";
 import { EDITORIAL_GROUP_MCP_INPUT_HINT, resolveEditorialGroupMcpScope } from "@/lib/editorial/editorial-group-scope";
-import { DECLARED_PLAN_ARTICLES_MAX, DECLARED_PLAN_ROLES, DECLARED_PLAN_SCOPE_MAX } from "@/lib/minerador/declared-plan";
+import { DECLARED_PLAN_ARTICLES_MAX, DECLARED_PLAN_LOCK_CHOICES, DECLARED_PLAN_ROLES, DECLARED_PLAN_SCOPE_MAX } from "@/lib/minerador/declared-plan";
 import { importDeclaredPlanWithCore } from "@/lib/minerador/declared-plan-import-core";
 import { KEYWORD_PAGE_TYPE_KEY, KEYWORD_PAGE_TYPE_STANCE_KEY, keywordPageTypeStance } from "@/lib/minerador/keyword-page-type";
 import { KEYWORD_SUBJECT_AT_KEY, KEYWORD_SUBJECT_KEY, KEYWORD_SUBJECT_ORIGIN_KEY } from "@/lib/minerador/keyword-subject";
 import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
-import type { LegacyImportList } from "@/lib/minerador/legacy-import";
 import { LOGICAL_OUTPUT_CONTRACT_KEY } from "@/lib/minerador/logical-processor";
 import { readCanonicalKeywordDna } from "@/lib/minerador/logical-read-model";
 import { SERP_EVIDENCE_RECORD_KEY } from "@/lib/minerador/serp-evidence-record";
@@ -67,7 +66,7 @@ import type { WriterMcpBrandAccess, WriterMcpPrincipal } from "./writer-mcp-prin
  * SDD: `docs/compartilhado/sdd-plataforma-para-agentes-mcp-2026-09-26.md` §3.4.
  *
  * Toda ferramenta que escreve chama o MESMO núcleo que a rota da tela chama —
- * `importSubjectsWithCore`, `importDeclaredPlanWithCore` (plano do Silo),
+ * `importDeclaredPlanWithCore` (cadastro único de Assuntos, 2026-10-13),
  * `runSubjectDiscoverySearch` com as portas de
  * `buildSubjectDiscoveryPorts`, `importSubjectDiscoveryWithCore`,
  * `createMineradorArquitetoHandoff`, `sendRadarToWriter`. Nenhuma regra de
@@ -181,15 +180,26 @@ const DeclaredSiloPlanInput = z.object({
     name: z.string().trim().min(1).max(200).describe("Nome do Silo. Nunca vira keyword."),
     slug: z.string().trim().max(200).nullable().optional().describe("Slug da página do Silo, se o plano trouxer."),
     objective: z.string().max(4000).nullable().optional(),
-  }).strict(),
+  }).strict().nullable().optional().describe("Obrigatório no Silo novo; omita no Silo existente (vem do grupo) e no artigo publicado."),
   articles: z.array(z.object({
     order: z.number().int().min(1).max(99).describe("A ordem do artigo no plano (1 = primeiro)."),
-    subject: z.string().trim().min(1).max(400).describe("A frase do Assunto do artigo."),
-    principal: z.string().trim().max(400).nullable().optional().describe("A keyword principal declarada (fixa; aprova sem Volume)."),
+    subject: z.string().trim().max(400).describe("O Assunto do artigo (o título). Nunca vira keyword: mora dentro da keyword."),
+    principal: z.string().trim().max(400).nullable().optional().describe("A keyword que carrega o Assunto (obrigatória). Com volume medido entra travada; sem volume, livre."),
     role: z.enum(DECLARED_PLAN_ROLES).describe("Exatamente um Pilar no plano; os demais são Suporte."),
-    scope: z.string().max(DECLARED_PLAN_SCOPE_MAX * 2).describe(`A descrição do escopo do artigo, uma linha, até ${DECLARED_PLAN_SCOPE_MAX} caracteres.`),
+    scope: z.string().max(DECLARED_PLAN_SCOPE_MAX * 2).describe(`Os detalhes do artigo, uma linha, até ${DECLARED_PLAN_SCOPE_MAX} caracteres.`),
+    lock: z.enum(DECLARED_PLAN_LOCK_CHOICES).nullable().optional().describe("Trava da keyword: auto (pelo volume medido; padrão), locked (travada à mão) ou free (livre à mão). Omitida = mantém a gravada."),
   }).strict()).min(1).max(DECLARED_PLAN_ARTICLES_MAX + 10),
 }).strict();
+
+/*
+ * 2026-10-13 · o DESTINO do cadastro (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`
+ * §3.4): Silo novo, Silo existente (acréscimo) ou artigo publicado (URL).
+ */
+const SubjectCadastroDestinationInput = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("new_silo") }).strict(),
+  z.object({ kind: z.literal("existing_silo"), groupId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("published"), url: z.string().trim().min(1).max(2048) }).strict(),
+]).describe("Destino: { kind: 'new_silo' } (padrão), { kind: 'existing_silo', groupId } (acrescenta artigos; os gravados ficam) ou { kind: 'published', url } (o Assunto vai para a página publicada e as keywords entram como reforço dela).");
 
 /*
  * 2026-10-12 · F6 (decisão do dono) · o grupo do plano é a COR: a cor que já
@@ -803,63 +813,20 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   /* ============================== Minerador =========================== */
 
-  server.registerTool("declare_subjects", {
-    title: "Declarar Assuntos no Minerador",
-    description: "Use depois que o usuário ACEITAR os Assuntos no chat (a IA propõe; só o humano declara — ADR-022). mode 'preview' não grava e classifica cada frase (nova, já existe, publicada); mode 'apply' grava, exige userConfirmation com as palavras do aceite, e só declara frases já existentes se vierem em declareExistingIds. A declaração fica marcada como feita pelo MCP, ligada a esta chamada na auditoria. rows[].keywordId de cada Assunto é o subjectKeywordId da pesquisa por Assunto.",
-    inputSchema: z.object({
-      brandId: brandIdInput,
-      mode: z.enum(["preview", "apply"]),
-      entries: z.array(z.object({
-        keyword: z.string().trim().min(1).max(400).describe("A frase do Assunto."),
-        note: z.string().max(280).nullable().optional().describe("O que é e para quem, em até 280 caracteres."),
-        destinationUrl: z.string().max(2048).nullable().optional().describe("Página de destino no site da marca (https, mesmo domínio)."),
-      })).min(1).max(200),
-      declareExistingIds: z.array(z.string().uuid()).max(200).default([]),
-      defaultListaId: z.string().trim().max(120).nullable().optional(),
-      importRequestId: z.string().uuid().optional().describe("Repita o mesmo id ao tentar de novo o mesmo envio."),
-      userConfirmation: confirmationInput.optional(),
-    }),
-    annotations: write,
-  }, async ({ brandId, mode, entries, declareExistingIds, defaultListaId, importRequestId, userConfirmation }) => {
-    if (mode === "apply" && !userConfirmation) {
-      return asText({ ok: false, code: "human_confirmation_required", message: "Declarar Assunto é decisão humana (ADR-022). Mostre o preview, peça o aceite e envie as palavras dele em userConfirmation." });
-    }
-    return call("declare_subjects", "minerador.write", { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, [{ module: "minerador", action: "edit" }], async ({ access, requestId }) => {
-      const db = getOperationalClient();
-      const [lists, brand] = await Promise.all([
-        db.from("minerador_keyword_lists").select("id,nome,marca_id").eq("marca_id", access.brandId),
-        db.from("marcas").select("id,site_url").eq("id", access.brandId).maybeSingle(),
-      ]);
-      if (lists.error) mapPersistenceError(lists.error);
-      if (brand.error) mapPersistenceError(brand.error);
-      const siteUrl = (brand.data as { site_url?: unknown } | null)?.site_url;
-      const result = await importSubjectsWithCore({
-        brandId: access.brandId,
-        actorUserId: principal.actorId,
-        supabase: db,
-        mode,
-        source: "manual",
-        items: entries,
-        declareExistingIds,
-        importRequestId: mode === "apply" ? importRequestId ?? crypto.randomUUID() : null,
-        lists: (lists.data || []) as LegacyImportList[],
-        defaultListaId: defaultListaId ?? null,
-        brandSiteUrl: typeof siteUrl === "string" ? siteUrl : null,
-        channel: mcpChannel(access, requestId),
-      });
-      if (!result.ok) throw new PlatformToolFailure(result.code, { message: result.reason });
-      return result;
-    });
-  });
+  /*
+   * 2026-10-13 · `declare_subjects` SAIU (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`
+   * §3.1): ela criava o Assunto solto, numa linha própria. O Assunto entra só
+   * pelo cadastro único — `declare_silo_plan` abaixo, o mesmo núcleo do card.
+   */
 
   server.registerTool("declare_silo_plan", {
-    title: "Importar plano do Silo no Minerador",
+    title: "Cadastrar Assuntos no Minerador (cadastro único)",
     description: [
-      "Use quando o usuário trouxer o plano de um Silo (nome, e por artigo: ordem, Assunto, keyword principal, papel Pilar/Suporte e descrição do escopo) e ACEITAR declará-lo no chat. É o botão 'Importar plano do Silo' do Minerador, pelo mesmo núcleo (importDeclaredPlanWithCore).",
-      "Envie o texto colado (text) OU o plano estruturado (plan), nunca os dois, e o grupo pela COR: group { mode: 'color', color: amarelo, azul, verde, lima ou laranja, name opcional }. A cor que já tem grupo recebe o plano; a cor sem grupo ganha o grupo com o nome do Silo. Um grupo por cor por marca.",
-      "mode 'preview' não grava: devolve cada artigo com o estado do Assunto e da principal, as sobras de imports anteriores (que não fazem parte do plano), as sustentações e os impedimentos (blockers; com algum, canApply é false). Mostre a prévia ao usuário.",
-      "mode 'apply' exige userConfirmation (as palavras do aceite) e importRequestId (uuid; repita o mesmo ao tentar de novo o mesmo envio): usa o grupo da cor (ou o garante, como o mover por cor), declara os Assuntos com o plano, importa as principais que faltam, etiqueta tudo com o grupo e devolve o resultado relido.",
-      "A principal declarada é fixa (aprova sem Volume; o Arquiteto não troca). Nada do grupo vira artigo solto. Sem custo.",
+      "É o card 'Cadastrar Assuntos' do Minerador, pelo mesmo núcleo (importDeclaredPlanWithCore) — a única porta para o Assunto desde 2026-10-13. O Assunto mora DENTRO da keyword: por artigo, o título (subject), a keyword que o carrega (principal, obrigatória), os detalhes (scope), o papel Pilar/Suporte, a ordem e a trava (lock). Nenhuma linha de título vira keyword.",
+      "Use quando o usuário trouxer o plano de um Silo novo, artigos para um Silo existente ou keywords para reforçar um artigo publicado, e ACEITAR cadastrar no chat. Envie o texto colado (text) OU o plano estruturado (plan), nunca os dois; o grupo pela COR (group { mode: 'color', color: amarelo, azul, verde, lima ou laranja, name opcional }) e o destino (destination: new_silo, existing_silo com groupId, ou published com url).",
+      "Trava: keyword com volume medido entra TRAVADA (o Arquiteto a usa como principal e só busca sustentações); sem volume, LIVRE (o Arquiteto pode propor outra principal pela SERP/volume, mantendo o Assunto, o papel e a ordem no artigo). lock: 'locked' ou 'free' fixa à mão; 'auto' volta ao volume. Planos anteriores ao cadastro único ficam travados até o usuário mudar.",
+      "Silo existente é acréscimo: os artigos já gravados ficam como estão; tirar artigo do plano é pela tela ('Tirar do plano'). Artigo publicado: o Assunto vai para a keyword da página (URL, slug, canonical e principal intocados) e as keywords entram como reforço dela.",
+      "mode 'preview' não grava: devolve cada artigo com o título, a keyword, a trava efetiva, o que muda, as sobras e os impedimentos (blockers; com algum, canApply é false). Mostre a prévia ao usuário. mode 'apply' exige userConfirmation (as palavras do aceite) e importRequestId (uuid; repita o mesmo ao tentar de novo): cria as keywords que faltam como Bruto, grava o Assunto e o plano nelas, etiqueta com a cor e devolve o resultado relido. Sem custo.",
     ].join(" "),
     inputSchema: z.object({
       brandId: brandIdInput,
@@ -867,11 +834,12 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       text: z.string().max(60000).optional().describe("O plano do Silo como o usuário colou (tabela ou texto)."),
       plan: DeclaredSiloPlanInput.optional(),
       group: DeclaredPlanGroupInput,
+      destination: SubjectCadastroDestinationInput.optional(),
       importRequestId: z.string().uuid().optional().describe("Obrigatório no apply. Repita o mesmo id ao tentar de novo o mesmo envio."),
       userConfirmation: confirmationInput.optional(),
     }),
     annotations: write,
-  }, async ({ brandId, mode, text, plan, group, importRequestId, userConfirmation }) => {
+  }, async ({ brandId, mode, text, plan, group, destination, importRequestId, userConfirmation }) => {
     if (mode === "apply" && !userConfirmation) {
       return asText({ ok: false, code: "human_confirmation_required", message: "Declarar o plano do Silo é decisão humana (ADR-022). Mostre a prévia, peça o aceite e envie as palavras dele em userConfirmation." });
     }
@@ -883,7 +851,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     }
     return call("declare_silo_plan", "minerador.write", { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, [{ module: "minerador", action: "edit" }], async ({ access, requestId }) => {
       /*
-       * Os clientes, como nas outras escritas do MCP (declare_subjects): o
+       * Os clientes, como nas outras escritas do MCP: o
        * operacional, depois de o invólucro conferir grant, escopo, Agência e
        * permissão. As tabelas de grupo só aceitam escrita do servidor; a rota
        * da tela usa `editorialGroupsClient()`, que É `getOperationalClient()`
@@ -903,6 +871,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
         text: plan ? null : text ?? null,
         plan: plan ?? null,
         group,
+        destination: destination ?? null,
         importRequestId: mode === "apply" ? importRequestId ?? null : null,
         channel: mcpChannel(access, requestId),
         brandSiteUrl: typeof siteUrl === "string" ? siteUrl : null,
@@ -1129,7 +1098,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     title: "Pesquisar keywords de sustentação por Assunto",
     description: [
       "Use para achar as buscas reais em torno de um Assunto (Google Ads: frase e página de destino).",
-      "Se o Assunto já está declarado, passe request.subjectKeywordId (de declare_subjects rows[].keywordId ou de get_platform_state minerador.subjects[].keywordId): o servidor relê a frase, a nota e a página de destino, e o destino alimenta a fonte por URL. Sem ele, request.phrase.",
+      "Se o Assunto já está declarado, passe request.subjectKeywordId (de declare_silo_plan articles[].subjectKeywordId ou de get_platform_state minerador.subjects[].keywordId): o servidor relê a frase, a nota e a página de destino, e o destino alimenta a fonte por URL. Sem ele, request.phrase.",
       "Sempre primeiro request.mode 'plan' (grátis): devolve o plano (sem custo no DataForSEO; usa a cota do Google Ads). Mostre o plano ao usuário.",
       "Custo em dinheiro: zero (o Google Ads não cobra a consulta). A ferramenta continua marcada como de provider porque a execução gasta a cota do Google Ads da marca: por isso o aceite do usuário e o escopo provider.spend. Não apresente a pesquisa como gasto em dinheiro.",
       "Só com o aceite dele chame request.mode 'execute' com authorizedPlan (planHash e maxCostUsd do plano), userConfirmation e um operationRequestId UUID v4 novo — repetido só numa nova tentativa do MESMO execute. Executar exige também o escopo provider.spend.",

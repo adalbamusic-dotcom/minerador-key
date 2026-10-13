@@ -1,3 +1,33 @@
+## O Arquiteto obedece à trava da keyword (cadastro único) — 2026-10-13
+
+SDD `docs/compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md` §3.3/§3.5 (ADR-022 D1-ter). Dono do módulo nesta parte: Arquiteto (o cadastro é do Minerador).
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** Sem migration, sem escrita remota, sem SQL, sem chamada paga, sem campo novo em ArticleDNA/SiloDNA.
+
+- **Standing** (`readArchitectSubjectStanding`): `phrase` = título cadastrado na keyword (sem título, o texto da linha — Assuntos anteriores não mudam); `carriesSubject` (o Assunto mora na própria keyword), `planLock` (`declaredPrincipalLock`, pelo Volume do pacote), `volumeValue`. A keyword que carrega o Assunto não é "retida" (`heldOutOfFormation` falso) e pode ser a principal do próprio artigo sem volume (`subjectMayBePrincipal`; Q7 revista só para ela). Leituras: `lockedPlanPrincipal`, `freePlanPrincipal`, `planLockOfStanding`.
+- **Formação** (`planSiloArticleFormation`/`reservePriorityArticleGroups`): `DeclaredPlanFormationInput.principalKeywordId` só com trava; `freePrincipalKeywordId` com a livre. Âncora livre: `suggestPrincipal` entre a livre (se tiver volume) e as sustentações com volume da lista do Assunto; uma melhor assume e a keyword que carrega o Assunto fica como tronco (fora das seis); sem candidata, a livre é a principal. Papel e ordem continuam do plano (`declaredPlanArticles`); o candidato nasce com o Assunto preso. A principal do plano que é Assunto não é retida (`automaticHoldoutIds`).
+- **Portarias e guarda:** `DECLARED_PLAN_PRESERVED` confere só a principal travada; `SUBJECT_PRINCIPAL_REQUIRES_VOLUME` isenta `subjectCarriedByKeyword`; `applyDeclaredPlanToArticleDna`/`declaredPlanAppliedTo` só recusam principal travada; `declaredPlanArticleContradictions` ganhou `principalLocked` (o servidor passa a trava lida do pacote) — papel continua conferido sempre.
+- **Melhoria** (`lib/server/arquiteto-article-improvement.ts`): `declaredPrincipalId` só com trava; a livre é a principal atual quando o artigo ainda não existe (`primaryId`), e a proposta pode trocá-la (decisão humana na prévia); `planPrincipalId` mantém o D2(a) (parecer pelas sustentações) para a keyword do plano, travada ou livre; prender o Assunto que é a principal passa `principalVolumeValidated` pela mesma regra.
+- **Selos:** "Keyword livre" (a livre é a principal) e "Livre · principal trocada" (neutros) no lugar de "Principal ≠ declarada"; "Principal declarada" diz a trava no título.
+- **"Processar arquitetura" respeita o plano:** `buildArchitectureWorkingProposal({ declaredPlanGroups })` põe as keywords de grupo com plano declarado juntas no Silo do plano (o ligado ao grupo, o existente com o mesmo slug ou um candidato com nome/slug do plano), com o motivo "Segue o plano declarado do grupo …"; elas nunca são semente léxica. A mesa lê os planos dos grupos uma vez por marca e o painel da arquitetura diz quantas keywords seguiram o plano. Sem plano, a proposta e o hash são os de antes.
+- **Testes:** `tests/arquiteto-trava-da-keyword.test.mts` (7, em `test:arquiteto`); `tests/arquiteto-plano-declarado-portaria.test.mts` ajustado de propósito (a melhoria fixa só a travada).
+- **Limites:** o grupo efetivo das keywords no Arquiteto só chega depois da mesa (o aviso do plano em "Processar arquitetura" aparece quando ele chega); sem teste DOM do painel; a troca da livre pela melhoria depende da evidência de sempre (SERP no cache/IA na lista).
+
+## Assunto legível em todo painel do Arquiteto — 2026-10-13
+
+Pedido do dono (2026-10-13): "coloca sempre o assunto no painel para que seja legível". Só a keyword principal não identificava o artigo.
+
+**Verificado no código e confirmado por teste. Validado manualmente: não (homologação é do dono).** Sem migration, sem escrita remota, sem SQL, sem chamada paga.
+
+- Componente compartilhado `components/editorial/article-subject-line.tsx`: `ArticleSubjectLine` (rótulo "Assunto · " em `text-text-muted`, frase inteira em `text-foreground`, 14 px, quebra de linha, `title` com a frase; sem frase, "Sem Assunto" em `text-text-muted`, ou nada com `showEmpty={false}`) e `articleSubjectPhraseOf` (lê `subject.phrase` do ArticleDNA). Só lê: não busca, não grava.
+- `WorkflowImportDialog` (`components/editorial/workflow-status.tsx`) e `ImportPanel` (`components/editorial/operational-screen-shared.tsx`) ganharam `subjectOf` opcional (aditivo): com ele a linha abre com o Assunto e a busca casa com a frase; sem ele, o render é o de sempre (consumidores preservados: Arquiteto, ImportPanel sem `subjectOf`).
+- Fonte: `articleSubjectFor(art)` na planilha e no painel expandido (frase gravada no ArticleDNA ou, em formação, o texto da keyword do Assunto); nos demais pontos, `acceptedArticleDnas[articleId].payload.subject.phrase` (já em memória).
+- Onde aparece: cabeceira da linha da planilha de Artigos (agora pelo componente compartilhado); cabeçalho do painel expandido ("Resumo do artigo", antes da principal); cartão do Silo na aba Silos (Pilar fechado, Pilar em escolha e cada "Suporte · …", que passou de texto corrido para lista); painel "Retirar artigo do Silo" (cada suporte e a prévia; prop aditiva `subjectPhrase`); "Página do Silo" (Pilar e Suportes); aba Links internos (hierarquia Pilar/Suportes, relações — só ponta que é artigo e só quando há frase — e nó selecionado); painel de reparo pontual (prop aditiva `subjectOf`).
+- Arquivos: `modules/arquiteto/arquiteto-workspace.tsx`, `modules/arquiteto/silo-article-withdrawal-panel.tsx`, `modules/arquiteto/article-repair-panel.tsx`.
+- Testes: `tests/arquiteto-selos-do-plano.test.mts` (ligações, estrutural sem comentários) e `tests/radar-assunto-legivel-dom.test.mts` caso 06 (retirada e reparo no DOM). `check-visual-system`: nenhuma violação nova nas linhas tocadas.
+- Lacunas: os cartões do mapa (React Flow) dos Links internos e dos Silos não mostram o Assunto (altura fixa dos cartões; ver backlog); painel de melhoria e revisão da formação ("Tirar este artigo do Silo" dentro do painel expandido) ficaram de fora porque formação/melhoria estão com outra frente em paralelo — o cabeçalho do painel expandido, logo acima, já mostra o Assunto; "Aplicar o plano declarado ao Silo" não tem linha por artigo (a prévia são frases do servidor).
+
+
 ## F5 · Guarda de retrabalho completa — 2026-10-12
 
 ```text

@@ -244,8 +244,10 @@ test("Lógica automática usa a mesma rotina do botão Lógica, depois das três
   }
 });
 
-test("o import com Assunto só existe no Processador; o Descobrir não recebe as props", () => {
-  assert.match(workspace, /<DiscoverySourceControls ref=\{discoverySourceControlsRef\}[^>]*\bsubjectEntry\b[^>]*onSubjectsImported=\{result => void handleSubjectsImported\(result\)\}/);
+test("cadastro único (2026-10-13): nem o Processador nem o Descobrir importam Assunto pelo colar/CSV; a releitura dos Assuntos é a do card", () => {
+  assert.match(workspace, /<DiscoverySourceControls ref=\{discoverySourceControlsRef\}/);
+  assert.doesNotMatch(workspace, /<DiscoverySourceControls ref=\{discoverySourceControlsRef\}[^>]*\bsubjectEntry\b/, "o Assunto entra só pelo card \"Cadastrar Assuntos\"");
+  assert.match(workspace, /await handleSubjectsImported\(\{ createdIds: applied\.createdSubjectIds/);
   assert.match(discoveryPage, /<DiscoverySourceControls /);
   assert.doesNotMatch(discoveryPage, /subjectEntry|onSubjectsImported/);
   const imported = handlerBody(workspace, "handleSubjectsImported");

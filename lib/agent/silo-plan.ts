@@ -214,7 +214,7 @@ export function validateSiloPlan(input: SiloPlan, context: SiloPlanContext): Val
   const nextSteps = ok
     ? [
       "Mostre o plano ao usuário e peça o aceite (ele pode trocar, remover ou pedir outros temas).",
-      "Com o aceite: declare_subjects (preview → apply) com os Assuntos dos artigos e o da página do silo, enviando o aceite em userConfirmation.",
+      "Com o aceite: declare_silo_plan (preview → apply), o cadastro único — por artigo, o título do Assunto, a keyword que o carrega e os detalhes —, enviando o aceite em userConfirmation.",
       "Depois: search_subject_keywords por Assunto (plan → confirmação → execute) e import_subject_keywords com as escolhidas.",
       "Peça ao usuário para marcar na Revisão Humana do Minerador o tipo de página 'silo' na keyword da página do silo.",
     ]

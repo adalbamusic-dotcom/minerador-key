@@ -5,7 +5,7 @@ import { readSerpEvidenceRecord } from "./serp-evidence-record.ts";
 import { isFullyConsolidatedQualification, qualificationConsolidatedAxes, type KeywordSemanticQualification } from "./keyword-semantic-qualification.ts";
 import { approvedPackageSignature, type ApprovedKeywordPackage } from "./approved-package.ts";
 import { KEYWORD_SUBJECT_ORIGINS, resolveDeclaredPrincipal, resolveKeywordSubject } from "./keyword-subject.ts";
-import { DeclaredArticlePlanSchema, DeclaredPrincipalMarkSchema } from "./declared-plan.ts";
+import { DeclaredArticlePlanSchema, DeclaredPrincipalMarkSchema, SubjectEntrySchema } from "./declared-plan.ts";
 
 /**
  * KEYWORDDNA FECHADO — o contrato que o Minerador exporta.
@@ -126,6 +126,12 @@ export const KeywordDnaSchema = z.object({
      * principal declarada do artigo deste Assunto. Só leitura; ausente = sem plano.
      */
     plan: DeclaredArticlePlanSchema.optional(),
+    /**
+     * Cadastro único (SDD 2026-10-13 §3.2): o Assunto (título, origem, detalhes
+     * no destino publicado) cadastrado DENTRO desta keyword. Só leitura; ausente
+     * = Assunto anterior (a frase é o texto da linha).
+     */
+    entry: SubjectEntrySchema.optional(),
   }).strict().optional(),
   /**
    * F3 = Fase A — esta keyword é a principal declarada de um Assunto do plano
@@ -356,6 +362,7 @@ export function keywordDnaFromRow(input: KeywordDnaRowInput): KeywordDna {
       declaredAt: subject.declaredAt,
       origin: subject.origin,
       ...(subject.plan ? { plan: subject.plan } : {}),
+      ...(subject.entry ? { entry: subject.entry } : {}),
     };
   }
   const declaredPrincipal = resolveDeclaredPrincipal(semantic).mark;

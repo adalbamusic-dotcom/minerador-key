@@ -340,8 +340,12 @@ test("isolamento e recusas: grupo de outra marca, principal igual ao Assunto sem
   const igual = await core(db, { text: "Nome: X\n1. Claro, Vivo ou TIM: qual internet residencial escolher?\nArtigo pilar • Palavra-chave: Claro, Vivo ou TIM: qual internet residencial escolher?\nEscopo." });
   assert.ok(igual.ok && igual.mode === "preview");
   if (igual.ok && igual.mode === "preview") {
+    // 2026-10-13 · D1-ter (SDD do cadastro único): a keyword que carrega o Assunto pode ser a
+    // principal sem volume — entra LIVRE (o Arquiteto pode propor outra), não é mais recusa.
     assert.equal(igual.articles[0].principal.state, "same_as_subject_without_volume");
-    assert.equal(igual.canApply, false);
+    assert.equal(igual.articles[0].shape, "cadastro");
+    assert.equal(igual.articles[0].lock?.state, "free");
+    assert.equal(igual.canApply, true);
   }
   const bloqueado = await core(db, { mode: "apply", importRequestId: "8c3e2f40-1111-4222-8333-444455556666", text: "Nome: X\n1. A\nPalavra-chave: a\nE." });
   assert.equal(bloqueado.ok, false);

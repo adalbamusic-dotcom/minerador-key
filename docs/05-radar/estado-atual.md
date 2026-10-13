@@ -1,5 +1,21 @@
 # Estado atual — Radar
 
+## Assunto legível em todo painel do Radar — 2026-10-13
+
+Pedido do dono (2026-10-13): "coloca sempre o assunto no painel para que seja legível". Só a keyword principal não identificava o artigo.
+
+**Verificado no código e confirmado por teste. Validado manualmente: não (homologação é do dono).** Sem migration, sem escrita remota, sem SQL, sem chamada paga.
+
+- Componente compartilhado `components/editorial/article-subject-line.tsx`: `ArticleSubjectLine` (rótulo "Assunto · " em `text-text-muted`, frase inteira em `text-foreground`, 14 px, quebra de linha, `title` com a frase; sem frase, "Sem Assunto" em `text-text-muted`, ou nada com `showEmpty={false}`) e `articleSubjectPhraseOf` (lê `subject.phrase` do ArticleDNA). Só lê: não busca, não grava.
+- `WorkflowImportDialog` (`components/editorial/workflow-status.tsx`) e `ImportPanel` (`components/editorial/operational-screen-shared.tsx`) ganharam `subjectOf` opcional (aditivo): com ele a linha abre com o Assunto e a busca casa com a frase; sem ele, o render é o de sempre (consumidores preservados: Arquiteto, ImportPanel sem `subjectOf`).
+- Fonte: o ArticleDNA que a mesa já carrega (`pipeline.articleVersions[articleId].payload.subject.phrase`; o item do Radar não embute o payload) e, no perfil e no cabeçalho do foco, o mesmo dado pelo contexto de pesquisa (`model.researchContext.article.subject.phrase`). Nenhuma leitura nova.
+- Onde aparece: coluna "Artigo" da planilha (o Assunto abre a célula, antes do título); perfil expandido (sob o título); cabeçalho do artigo em foco (Workbench); página `/{brandRef}/radar/{articleId}` (sob o H1); diálogo "Importar artigos aprovados" (cada linha, e a busca casa com a frase).
+- Sem contexto de pesquisa, o perfil e o foco não afirmam "Sem Assunto" (não mostram nada); a planilha, a página e a importação mostram "Sem Assunto".
+- Entregáveis: o CSV "Para escrever" já levava `Assunto (tronco): …` na coluna `artigo` (linha condicional; sem Assunto, igual) e `get_article_for_writing` devolve o mesmo CSV — nada mudou; guardado por teste em `tests/redator-assunto-legivel.test.mts`.
+- Arquivos: `modules/radar/radar-page.tsx`, `modules/radar/radar-r3-profile-mirror.tsx`, `modules/radar/radar-r3-workbench.tsx`, `modules/radar/radar-analysis-page.tsx`.
+- Testes: `tests/radar-assunto-legivel-dom.test.mts` (componente e diálogo no DOM, ligações do Radar; o caso 06 renderiza a retirada e o reparo do Arquiteto no mesmo harness de DOM). `test:radar` 3503 → 3509 (1 pulado, o de antes).
+- Lacuna: a frase vem da última versão do ArticleDNA na mesa, que pode ser mais nova que a transportada pelo item; a busca da planilha não casa com o Assunto (o `value` da coluna também alimenta o CSV da grade e ficou intacto).
+
 ## F6 · Radar, entregáveis e MCP por grupo — 2026-10-12
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.** SDD

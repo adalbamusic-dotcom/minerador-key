@@ -145,7 +145,21 @@ export function reservePriorityArticleGroups(input: {
    * saem primeiro da lista do Assunto (a claim de `subjectClaims`), depois das
    * demais keywords do MESMO grupo; nada de fora do grupo.
    */
-  declaredPlanAnchors?: readonly { subjectKeywordId: string; principal: ArticleFormationKeyword; groupId: string; order: number }[];
+  declaredPlanAnchors?: readonly {
+    subjectKeywordId: string;
+    principal: ArticleFormationKeyword;
+    groupId: string;
+    order: number;
+    /**
+     * 2026-10-13 · TRAVA (SDD do cadastro único §3.3): `free` = a principal do
+     * plano está LIVRE — a sugestão de principal roda entre ela (se tiver
+     * volume) e as sustentações com volume da lista do Assunto; sem candidata,
+     * a livre fica. Ausente = travada (cabeceira fixa, como a D1-bis).
+     */
+    free?: boolean;
+    /** A principal livre tem Volume validado (concorre na sugestão). */
+    principalEligible?: boolean;
+  }[];
   /** F4 — o grupo de cada keyword (`group_id`); `null`/ausente = sem grupo. */
   groupOf?: (keywordId: string) => string | null;
   /** F4 — keywords de grupo com plano: não reforçam publicado nem Assunto fora do plano. */
@@ -286,12 +300,29 @@ export function reservePriorityArticleGroups(input: {
   const principaisDoPlano = new Set((input.declaredPlanAnchors || []).map(anchor => anchor.principal.keywordId));
   for (const anchor of [...(input.declaredPlanAnchors || [])].sort((left, right) => left.order - right.order || left.subjectKeywordId.localeCompare(right.subjectKeywordId))) {
     if (assuntosComArtigo.has(anchor.subjectKeywordId) || publishedIds.has(anchor.subjectKeywordId)) continue;
-    const principal = anchor.principal;
-    const livre = (keywordId: string) => available.has(keywordId) && !claimed.has(keywordId) && !principaisDoPlano.has(keywordId) && keywordId !== principal.keywordId;
-    const daLista = [...new Set(input.subjectClaims.filter(claim => claim.subjectKeywordId === anchor.subjectKeywordId).flatMap(claim => claim.keywordIds))]
+    const declarada = anchor.principal;
+    const livre = (keywordId: string) => available.has(keywordId) && !claimed.has(keywordId) && !principaisDoPlano.has(keywordId) && keywordId !== declarada.keywordId;
+    const daListaToda = [...new Set(input.subjectClaims.filter(claim => claim.subjectKeywordId === anchor.subjectKeywordId).flatMap(claim => claim.keywordIds))]
       .filter(livre)
       .map(keywordId => available.get(keywordId)!);
-    for (const keyword of daLista) donoDaSustentacao.set(keyword.keywordId, anchor.subjectKeywordId);
+    for (const keyword of daListaToda) donoDaSustentacao.set(keyword.keywordId, anchor.subjectKeywordId);
+    /*
+     * 2026-10-13 · PRINCIPAL LIVRE: a sugestão de principal de sempre roda entre
+     * a livre (se tiver volume) e as sustentações com volume da lista do
+     * Assunto. Uma melhor assume; a livre que carrega o Assunto fica como o
+     * tronco do artigo (fora das seis), e a livre do plano anterior entra como
+     * candidata a secundária. Sem candidata melhor, a livre é a principal.
+     */
+    let principal = declarada;
+    if (anchor.free) {
+      const elegiveis = daListaToda.filter(keyword => input.principalEligibleKeywordIds.has(keyword.keywordId));
+      const sugerida = suggestPrincipal({ keywords: [...(anchor.principalEligible ? [declarada] : []), ...elegiveis], siloTokens: input.siloTokens });
+      const outra = sugerida && sugerida.keywordId !== declarada.keywordId ? daListaToda.find(keyword => keyword.keywordId === sugerida.keywordId) : undefined;
+      if (outra) principal = outra;
+    }
+    const daLista = principal === declarada
+      ? daListaToda
+      : [...daListaToda.filter(keyword => keyword.keywordId !== principal.keywordId), ...(declarada.keywordId !== anchor.subjectKeywordId ? [declarada] : [])];
     const frase = serp ? input.keywordOf?.(anchor.subjectKeywordId) ?? null : null;
     const proprias = compativeis(principal, daLista, input.siloTokens, MAX_ARTICLE_KEYWORDS - 1, [principal], serp ? { index: serp, subject: frase } : null);
     const vagas = MAX_ARTICLE_KEYWORDS - 1 - proprias.length;
@@ -309,7 +340,7 @@ export function reservePriorityArticleGroups(input: {
     assuntosComArtigo.add(anchor.subjectKeywordId);
     for (const keywordId of artigo) claimed.add(keywordId);
     for (const keyword of daLista) {
-      if (artigo.includes(keyword.keywordId)) continue;
+      if (artigo.includes(keyword.keywordId) || keyword === declarada) continue;
       releasedSupports.set(keyword.keywordId, { subjectKeywordId: anchor.subjectKeywordId, principalKeywordId: principal.keywordId });
     }
   }
@@ -455,7 +486,10 @@ export type SiloFormationPlan = {
 
 /** F4 — o plano de um Assunto, como a formação o recebe (lido do pacote aprovado). */
 export type DeclaredPlanFormationInput = {
+  /** A principal TRAVADA (cabeceira fixa). `null` sem principal ou com ela livre. */
   principalKeywordId: string | null;
+  /** 2026-10-13 · a principal LIVRE do plano (pode ser trocada pela SERP/volume; sem candidata, fica). */
+  freePrincipalKeywordId?: string | null;
   groupId: string;
   order: number;
   role: "Pilar" | "Suporte";
@@ -596,17 +630,22 @@ export function planSiloArticleFormation(input: {
     .filter(([subjectKeywordId]) => !porId.get(subjectKeywordId)?.isPublished);
   const grupoDe = (keywordId: string) => input.groupOfKeyword?.get(keywordId) ?? null;
   const gruposComPlano = new Set(planos.map(([, plano]) => plano.groupId));
+  const principalDoPlano = (plano: DeclaredPlanFormationInput) => plano.principalKeywordId ?? plano.freePrincipalKeywordId ?? null;
   const ancorasDoPlano = planos.flatMap(([subjectKeywordId, plano]) => {
-    const principal = plano.principalKeywordId ? porId.get(plano.principalKeywordId) : undefined;
+    const id = principalDoPlano(plano);
+    const principal = id ? porId.get(id) : undefined;
     if (!principal || principal.isPublished || principal.humanFormationRef || holdouts.has(principal.keywordId)) return [];
-    return [{ subjectKeywordId, principal, groupId: plano.groupId, order: plano.order }];
+    const livre = !plano.principalKeywordId && Boolean(plano.freePrincipalKeywordId);
+    return [{ subjectKeywordId, principal, groupId: plano.groupId, order: plano.order, ...(livre ? { free: true, principalEligible: comVolume(principal.keywordId) } : {}) }];
   });
   const assuntosDoPlano = new Set(planos.map(([subjectKeywordId]) => subjectKeywordId));
   const principaisDoPlano = new Set(ancorasDoPlano.map(anchor => anchor.principal.keywordId));
+  // 2026-10-13 · artigo do plano = o do Assunto com âncora, mesmo quando a principal livre foi trocada.
+  const assuntosComAncoraDoPlano = new Set(ancorasDoPlano.map(anchor => anchor.subjectKeywordId));
   const declaredPlanNotices: string[] = [];
   for (const [subjectKeywordId, plano] of planos) {
     if (!porId.has(subjectKeywordId) || ancorasDoPlano.some(anchor => anchor.subjectKeywordId === subjectKeywordId)) continue;
-    if (!plano.principalKeywordId) continue;
+    if (!principalDoPlano(plano)) continue;
     declaredPlanNotices.push(`Assunto "${nome(subjectKeywordId)}" (artigo ${plano.order} do plano) aguarda a principal declarada chegar a este Silo: aprove-a no Minerador e envie ao Arquiteto.`);
   }
   const presoAoGrupoDoPlano = (keywordId: string) => {
@@ -620,7 +659,7 @@ export function planSiloArticleFormation(input: {
   const assuntosPrincipais = input.keywords.filter(keyword => !keyword.isPublished && declarado(keyword.keywordId) && comVolume(keyword.keywordId)
     && !holdouts.has(keyword.keywordId) && !keyword.humanFormationRef
     // F4 — o Assunto do plano tem principal declarada; não é a própria principal por volume.
-    && !(assuntosDoPlano.has(keyword.keywordId) && input.declaredPlans?.get(keyword.keywordId)?.principalKeywordId));
+    && !(assuntosDoPlano.has(keyword.keywordId) && principalDoPlano(input.declaredPlans!.get(keyword.keywordId)!)));
   const livres = input.keywords.filter(keyword => !keyword.isPublished && !holdouts.has(keyword.keywordId)
     && !keyword.humanFormationRef && !declarado(keyword.keywordId) && !principaisDoPlano.has(keyword.keywordId)
     // F5 · D6 — a liberada de artigo retirado não é reagrupada sozinha: só decisão humana.
@@ -628,7 +667,7 @@ export function planSiloArticleFormation(input: {
 
   // F4 — o Assunto do plano que espera a principal declarada não entra na sugestão de principal.
   const assuntosDoPlanoEsperando = new Set(planos
-    .filter(([subjectKeywordId, plano]) => plano.principalKeywordId && !ancorasDoPlano.some(anchor => anchor.subjectKeywordId === subjectKeywordId))
+    .filter(([subjectKeywordId, plano]) => principalDoPlano(plano) && !ancorasDoPlano.some(anchor => anchor.subjectKeywordId === subjectKeywordId))
     .map(([subjectKeywordId]) => subjectKeywordId));
   const reserva = reservePriorityArticleGroups({
     published: publicadas,
@@ -660,7 +699,7 @@ export function planSiloArticleFormation(input: {
     ...reserva.publishedGroups.map(group => ({ kind: "published" as const, principal: porId.get(group.principalKeywordId)!, keywordIds: [...group.keywordIds] })),
     ...reserva.subjectGroups.map(group => ({ kind: "subject" as const, principal: porId.get(group.principalKeywordId)!, keywordIds: [...group.keywordIds], subjectKeywordId: group.subjectKeywordId,
       // F4 — artigo do plano: composição pelo plano, não recebe livre de fora do grupo.
-      ...(assuntosDoPlano.has(group.subjectKeywordId) && principaisDoPlano.has(group.principalKeywordId) ? { planned: true } : {}) })),
+      ...(assuntosComAncoraDoPlano.has(group.subjectKeywordId) ? { planned: true } : {}) })),
   ].filter(ancora => Boolean(ancora.principal));
   /** D2.2 — o porquê de cada livre que a SERP levou a uma âncora (só com índice). */
   const porqueNaAncora = new Map<string, string[]>();
@@ -1004,7 +1043,11 @@ export function planSiloArticleFormation(input: {
   const suggestedSubjectByCandidateRef = new Map(ancoras
     .filter(ancora => ancora.kind === "subject" && ancora.subjectKeywordId)
     .map(ancora => [`article-candidate:${input.siloRef}:${ancora.principal.keywordId}`, ancora.subjectKeywordId!]));
-  const principaisDeAssunto = new Set(assuntosPrincipais.map(keyword => keyword.keywordId));
+  // 2026-10-13 · o Assunto que mora na própria keyword (cadastro único) é a principal da âncora dele: não é retido.
+  const principaisDeAssunto = new Set([
+    ...assuntosPrincipais.map(keyword => keyword.keywordId),
+    ...ancoras.filter(ancora => ancora.kind === "subject" && ancora.planned).map(ancora => ancora.principal.keywordId),
+  ]);
 
   const universe = buildArticleFormationUniverse({
     groups: [

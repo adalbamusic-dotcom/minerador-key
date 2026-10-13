@@ -4,8 +4,8 @@ import { isTenantId } from "@/lib/tenant-routing";
 import { AuthzError, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { requireTenantPermission } from "@/lib/server/tenant-context";
 import { EDITORIAL_GROUP_COLORS } from "@/lib/editorial/editorial-groups";
-import { DECLARED_PLAN_ARTICLES_MAX, DECLARED_PLAN_ROLES, DECLARED_PLAN_SCOPE_MAX } from "@/lib/minerador/declared-plan";
-import { importDeclaredPlanWithCore, type DeclaredPlanImportRefusalCode } from "@/lib/minerador/declared-plan-import-core";
+import { DECLARED_PLAN_ARTICLES_MAX, DECLARED_PLAN_LOCK_CHOICES, DECLARED_PLAN_ROLES, DECLARED_PLAN_SCOPE_MAX } from "@/lib/minerador/declared-plan";
+import { importDeclaredPlanWithCore, readDeclaredPlanCardRows, type DeclaredPlanImportRefusalCode } from "@/lib/minerador/declared-plan-import-core";
 import { EDITORIAL_GROUP_REFUSAL_STATUS, editorialGroupsClient, editorialGroupsFailure, safeDatabaseCode } from "@/lib/server/editorial-groups";
 
 /**
@@ -21,20 +21,34 @@ import { EDITORIAL_GROUP_REFUSAL_STATUS, editorialGroupsClient, editorialGroupsF
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+/*
+ * 2026-10-13 · CADASTRO ÚNICO (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`):
+ * o card manda as linhas estruturadas (`subject` = título do Assunto,
+ * `principal` = a keyword que o carrega, `lock` = automática/travada/livre) e
+ * o destino (Silo novo, Silo existente ou artigo publicado). O Silo é opcional
+ * no destino publicado e no Silo existente (vem do grupo).
+ */
 const StructuredPlanSchema = z.object({
   silo: z.object({
     name: z.string().trim().min(1).max(200),
     slug: z.string().trim().max(200).nullable().optional(),
     objective: z.string().max(4000).nullable().optional(),
-  }).strict(),
+  }).strict().nullable().optional(),
   articles: z.array(z.object({
     order: z.number().int().min(1).max(99),
-    subject: z.string().trim().min(1).max(400),
+    subject: z.string().trim().max(400),
     principal: z.string().trim().max(400).nullable().optional(),
     role: z.enum(DECLARED_PLAN_ROLES),
     scope: z.string().max(DECLARED_PLAN_SCOPE_MAX * 2),
+    lock: z.enum(DECLARED_PLAN_LOCK_CHOICES).nullable().optional(),
   }).strict()).min(1).max(DECLARED_PLAN_ARTICLES_MAX + 10),
 }).strict();
+
+const DestinationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("new_silo") }).strict(),
+  z.object({ kind: z.literal("existing_silo"), groupId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("published"), url: z.string().trim().min(1).max(2048) }).strict(),
+]);
 
 const RequestSchema = z.object({
   mode: z.enum(["preview", "apply"]),
@@ -44,6 +58,7 @@ const RequestSchema = z.object({
     z.object({ mode: z.literal("existing"), groupId: z.string().uuid() }).strict(),
     z.object({ mode: z.literal("new"), name: z.string().max(200).nullable().optional(), color: z.enum(EDITORIAL_GROUP_COLORS) }).strict(),
   ]),
+  destination: DestinationSchema.optional(),
   importRequestId: z.string().uuid().optional(),
 }).strict().refine(value => Boolean(value.text?.trim()) !== Boolean(value.plan), "Envie o texto colado ou o plano estruturado (um dos dois).");
 
@@ -80,6 +95,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       text: input.text ?? null,
       plan: input.plan ?? null,
       group: input.group,
+      destination: input.destination ?? null,
       importRequestId: input.importRequestId ?? null,
       brandSiteUrl,
     });
@@ -89,5 +105,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (error instanceof ZodError) return editorialGroupsFailure("INVALID_PLAN_IMPORT_REQUEST", 400, "O pedido de importação do plano é inválido.", { requestId, issues: error.issues.map(issue => ({ path: issue.path, code: issue.code, message: issue.message })) });
     if (error instanceof AuthzError) return editorialGroupsFailure(error.status === 401 ? "PLAN_IMPORT_UNAUTHENTICATED" : "PLAN_IMPORT_AUTHORIZATION_FAILED", error.status, error.message, { requestId });
     return editorialGroupsFailure("PLAN_IMPORT_FAILED", 503, "O plano do Silo não pôde ser importado agora.", { requestId, databaseCode: safeDatabaseCode(error) });
+  }
+}
+
+/**
+ * GET `?groupId=` — o plano GRAVADO do grupo no formato do card (leitura
+ * compatível, SDD 2026-10-13 §5): título, keyword, detalhes, papel, ordem e
+ * trava de cada artigo. Só leitura; nada é regravado por ler.
+ */
+export async function GET(request: NextRequest, { params }: { params: Promise<{ brandId: string }> }) {
+  const requestId = crypto.randomUUID();
+  try {
+    const { brandId } = await params;
+    if (!isTenantId(brandId)) return editorialGroupsFailure("BRAND_NOT_FOUND", 404, "Marca inválida.", { requestId });
+    const groupId = request.nextUrl.searchParams.get("groupId") || "";
+    if (!z.string().uuid().safeParse(groupId).success) return editorialGroupsFailure("INVALID_PLAN_READ_REQUEST", 400, "Informe o grupo (groupId).", { requestId });
+    const profile = await requireCanonicalSessionProfile();
+    const context = await requireTenantPermission({ brandId, actorUserId: profile.userId, module: "minerador", action: "view", profile });
+    const result = await readDeclaredPlanCardRows({ brandId: context.brandId, keywordsClient: profile.supabase, groupsClient: editorialGroupsClient(), groupId });
+    if (!result.ok) return editorialGroupsFailure(result.code, result.code === "GROUP_NOT_FOUND" ? 404 : EDITORIAL_GROUP_REFUSAL_STATUS.GROUPS_NOT_AVAILABLE, result.reason, { requestId });
+    return NextResponse.json({ success: true, requestId, ...result });
+  } catch (error) {
+    if (error instanceof AuthzError) return editorialGroupsFailure(error.status === 401 ? "PLAN_IMPORT_UNAUTHENTICATED" : "PLAN_IMPORT_AUTHORIZATION_FAILED", error.status, error.message, { requestId });
+    return editorialGroupsFailure("PLAN_READ_FAILED", 503, "O plano do Silo não pôde ser lido agora.", { requestId, databaseCode: safeDatabaseCode(error) });
   }
 }

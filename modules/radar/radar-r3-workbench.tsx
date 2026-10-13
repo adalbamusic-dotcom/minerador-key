@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, FileCheck2, Search, UserRound, Video } from "lucide-react";
 import { RADAR_R3_AREAS, type RadarR3Area, type RadarR3Model } from "@/lib/radar/r3-workbench";
+import { ArticleSubjectLine } from "@/components/editorial/article-subject-line";
 import type { RadarR6ExpertEvidenceInput, RadarR6ExpertTopicContext } from "@/lib/radar/r6-sequential";
 import { radarR4SerpStatusLabel, type RadarR4AmazonState } from "@/lib/radar/r4-queue";
 import { radarSufficiencyLabel } from "@/lib/radar/investigation-sufficiency";
@@ -1575,6 +1576,8 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
     <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-context-accent">Radar</p>
       <h1 className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">{model.title}</h1>
+      {/* 2026-10-13 · pedido do dono: o Assunto do ArticleDNA (pelo contexto de pesquisa), legível, no cabeçalho. */}
+      <ArticleSubjectLine phrase={model.researchContext?.article.subject?.phrase} showEmpty={Boolean(model.researchContext)} className="basis-full"/>
     </header>
     <ArticleContextBand model={model} />
     <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{RADAR_R3_AREAS.map(area => <AreaCard key={area} area={area} copy={area === "videos" ? copyDeVideos : areaCopy(area, model, searchMode, researchProjection)} expanded={expandedArea === area} onToggle={() => setExpandedArea(current => current === area ? null : area)} />)}</div>

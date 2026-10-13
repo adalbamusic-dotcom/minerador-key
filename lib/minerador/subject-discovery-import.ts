@@ -28,8 +28,14 @@ import { assignKeywordGroupWithCore } from "./keyword-group-core.ts";
 
 export const SUBJECT_DISCOVERY_KEY = "subject_discovery" as const;
 
-/** Origem de cada candidata, na ordem das fontes da F1b.2. */
-export const SUBJECT_DISCOVERY_ORIGINS = ["ads_keyword_seed", "ads_url_seed", "labs_related", "labs_category", "labs_ranked"] as const;
+/**
+ * Origem de cada candidata, na ordem das fontes da F1b.2. `cadastro`
+ * (2026-10-13, SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md` §3.4): a
+ * keyword digitada pelo dono no card "Cadastrar Assuntos" como sustentação do
+ * Assunto de uma página publicada — sem provider, sem custo. Leitor antigo
+ * descarta a origem desconhecida (`normalizeSubjectDiscoveryOrigins`).
+ */
+export const SUBJECT_DISCOVERY_ORIGINS = ["ads_keyword_seed", "ads_url_seed", "labs_related", "labs_category", "labs_ranked", "cadastro"] as const;
 export type SubjectDiscoveryOrigin = typeof SUBJECT_DISCOVERY_ORIGINS[number];
 
 export const SUBJECT_DISCOVERY_IMPORT_MAX_ITEMS = 600;

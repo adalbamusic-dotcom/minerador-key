@@ -14,6 +14,7 @@
 
 import { useState } from "react";
 import { ReworkNotice } from "@/components/editorial/rework-notice";
+import { ArticleSubjectLine } from "@/components/editorial/article-subject-line";
 import type { ReworkView } from "@/lib/editorial/rework-guard";
 import {
   SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL,
@@ -36,7 +37,8 @@ type Props = {
   brandId: string;
   siloId: string;
   /** Os suportes do SiloDNA vigente (o Pilar não sai por aqui). */
-  articles: ReadonlyArray<{ articleId: string; label: string }>;
+  /** 2026-10-13 · `subjectPhrase` (aditivo): o Assunto do ArticleDNA, mostrado legível em cada suporte e na prévia. */
+  articles: ReadonlyArray<{ articleId: string; label: string; subjectPhrase?: string | null }>;
   classNames: { button: string; dangerButton: string; control: string };
   notify: (type: "success" | "error" | "warning", message: string) => void;
   onApplied: () => void;
@@ -102,7 +104,7 @@ export function SiloArticleWithdrawalPanel({ brandId, siloId, articles, classNam
       <ul className="space-y-1">
         {articles.map(article => (
           <li key={article.articleId} className="flex flex-wrap items-center justify-between gap-2 text-sm text-text-muted">
-            <span className="min-w-0 truncate" title={article.label}>Suporte · <span className="text-foreground">{article.label}</span></span>
+            <span className="min-w-0 flex-1"><span className="block truncate" title={article.label}>Suporte · <span className="text-foreground">{article.label}</span></span>{"subjectPhrase" in article ? <ArticleSubjectLine as="span" phrase={article.subjectPhrase} testId="silo-withdrawal-subject"/> : null}</span>
             <button type="button" className={classNames.button} disabled={ocupado} onClick={() => void abrirPrevia(article.articleId)} aria-expanded={aberto === article.articleId}>
               {SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}
             </button>
@@ -115,6 +117,7 @@ export function SiloArticleWithdrawalPanel({ brandId, siloId, articles, classNam
             <p className="text-sm text-text-muted">Montando a prévia da retirada…</p>
           ) : <>
             <p className="text-sm font-semibold text-foreground">Prévia · {previa.article.label}</p>
+            {(() => { const doAberto = articles.find(article => article.articleId === aberto); return doAberto && "subjectPhrase" in doAberto ? <ArticleSubjectLine phrase={doAberto.subjectPhrase} className="mt-1"/> : null; })()}
             <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-text-muted">
               {previa.changes.map(change => <li key={change}>{change}</li>)}
             </ul>

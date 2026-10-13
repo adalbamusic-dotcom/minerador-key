@@ -56,6 +56,18 @@ export const DECLARED_PLAN_OBJECTIVE_MAX = 1200;
 const LINE_BREAK = /[\r\n\u2028\u2029]/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * A TRAVA DA PRINCIPAL (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`
+ * §3.3; ADR-022, emenda D1-ter). Gravada só quando o humano escolhe à mão
+ * (`plan.lock`); ausente = automática (pelo volume medido da keyword que carrega
+ * o Assunto) ou, no plano anterior ao cadastro único, travada pela declaração.
+ */
+export const DECLARED_PLAN_LOCKS = ["locked", "free"] as const;
+export type DeclaredPlanLock = (typeof DECLARED_PLAN_LOCKS)[number];
+/** A escolha do card: "auto" não grava nada (a trava segue o volume). */
+export const DECLARED_PLAN_LOCK_CHOICES = ["auto", "locked", "free"] as const;
+export type DeclaredPlanLockChoice = (typeof DECLARED_PLAN_LOCK_CHOICES)[number];
+
 /** O artigo do plano, gravado em `keyword_subject.plan` do Assunto. */
 export const DeclaredArticlePlanSchema = z.object({
   /** `editorial_groups.id` no ato: proveniência da declaração (FK lógica, não do banco). */
@@ -65,10 +77,106 @@ export const DeclaredArticlePlanSchema = z.object({
   order: z.number().int().min(1).max(DECLARED_PLAN_ARTICLES_MAX),
   role: z.enum(DECLARED_PLAN_ROLES),
   scope: z.string().trim().min(1).max(DECLARED_PLAN_SCOPE_MAX).refine(value => !LINE_BREAK.test(value), "O escopo precisa caber numa linha só."),
-  /** A principal declarada: cabeceira fixa do artigo (D1-bis). `null` = sem principal declarada. */
+  /**
+   * A principal declarada (D1-bis). No cadastro único (2026-10-13) é a PRÓPRIA
+   * keyword que carrega o Assunto. Fixa só quando travada (`declaredPrincipalLock`).
+   * `null` = sem principal declarada.
+   */
   declaredPrincipal: z.object({ keywordId: z.string().min(1), phrase: z.string().trim().min(1) }).strict().nullable(),
+  /** 2026-10-13 · trava MANUAL. Ausente = automática (pelo volume) ou, no plano anterior, travada pela declaração. */
+  lock: z.enum(DECLARED_PLAN_LOCKS).optional(),
 }).strict();
 export type DeclaredArticlePlan = z.infer<typeof DeclaredArticlePlanSchema>;
+
+/* -------------------------------------------- o Assunto dentro da keyword */
+
+/** O título do Assunto: uma linha, até 300 caracteres (viaja até o H1/CSV). */
+export const SUBJECT_ENTRY_TITLE_MAX = 300;
+
+/**
+ * O ASSUNTO CADASTRADO DENTRO DA KEYWORD (SDD 2026-10-13 §3.2): o título que o
+ * dono escreveu no card, a origem do cadastro e, só no destino "artigo
+ * publicado" (sem plano de Silo), os detalhes. No Silo, os detalhes moram em
+ * `plan.scope` (viram a promessa do ArticleDNA). Nenhuma linha "Assunto" solta
+ * nasce: o título é texto do cadastro, não keyword.
+ */
+export const SubjectEntrySchema = z.object({
+  title: z.string().trim().min(1).max(SUBJECT_ENTRY_TITLE_MAX).refine(value => !LINE_BREAK.test(value), "O título do Assunto precisa caber numa linha só."),
+  source: z.literal("cadastro"),
+  details: z.string().trim().min(1).max(DECLARED_PLAN_SCOPE_MAX).refine(value => !LINE_BREAK.test(value), "Os detalhes precisam caber numa linha só.").optional(),
+}).strict();
+export type SubjectEntry = z.infer<typeof SubjectEntrySchema>;
+
+export function readSubjectEntry(value: unknown): SubjectEntry | null {
+  if (value === null || value === undefined) return null;
+  const parsed = SubjectEntrySchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+export function sameSubjectEntry(left: SubjectEntry | null, right: SubjectEntry | null): boolean {
+  if (!left || !right) return !left && !right;
+  return left.title === right.title && left.source === right.source && (left.details ?? null) === (right.details ?? null);
+}
+
+export type DeclaredPrincipalLockOrigin = "manual" | "volume" | "declared";
+export type DeclaredPrincipalLockView = {
+  state: DeclaredPlanLock;
+  origin: DeclaredPrincipalLockOrigin;
+  /** A keyword que a trava protege (a principal do plano). */
+  keywordId: string;
+  phrase: string;
+  /** O Assunto mora na própria keyword (cadastro único). */
+  carriedByKeyword: boolean;
+  label: string;
+};
+
+export const DECLARED_PLAN_LOCK_ORIGIN_LABELS: Record<DeclaredPrincipalLockOrigin, string> = {
+  manual: "escolhida à mão",
+  volume: "pelo volume medido",
+  declared: "declarada antes do cadastro único",
+};
+
+/** O volume vale para a trava automática só quando validado E maior que zero (medido 0 = sem volume). */
+export function hasLockingVolume(volume: { validated: boolean; value: number | null } | null | undefined): boolean {
+  return Boolean(volume?.validated) && typeof volume?.value === "number" && volume.value > 0;
+}
+
+/**
+ * A TRAVA EFETIVA da principal do plano — a leitura única (Minerador e
+ * Arquiteto perguntam aqui):
+ *
+ *   1. `plan.lock` gravado → o valor (origem `manual`);
+ *   2. o Assunto mora na própria keyword (`declaredPrincipal.keywordId ===
+ *      subjectKeywordId`) → travada com Volume validado > 0, livre sem
+ *      (origem `volume`) — medir o volume, por clique, já trava;
+ *   3. plano anterior (Assunto e principal em linhas separadas) → travada
+ *      (origem `declared`): decisão humana já confirmada (AGENTS.md §9).
+ *
+ * Sem principal declarada, `null`. `volume` é o da principal (no cadastro
+ * único, o da própria keyword); `null` = desconhecido (vale como sem volume).
+ */
+export function declaredPrincipalLock(
+  plan: Pick<DeclaredArticlePlan, "declaredPrincipal" | "lock"> | null | undefined,
+  input: { subjectKeywordId: string; volume?: { validated: boolean; value: number | null } | null },
+): DeclaredPrincipalLockView | null {
+  const principal = plan?.declaredPrincipal;
+  if (!principal) return null;
+  const carriedByKeyword = principal.keywordId === input.subjectKeywordId;
+  let state: DeclaredPlanLock;
+  let origin: DeclaredPrincipalLockOrigin;
+  if (plan!.lock) { state = plan!.lock; origin = "manual"; }
+  else if (carriedByKeyword) { state = hasLockingVolume(input.volume) ? "locked" : "free"; origin = "volume"; }
+  else { state = "locked"; origin = "declared"; }
+  const label = state === "locked"
+    ? `Travada · ${DECLARED_PLAN_LOCK_ORIGIN_LABELS[origin]}`
+    : `Livre · ${origin === "manual" ? DECLARED_PLAN_LOCK_ORIGIN_LABELS.manual : "sem volume medido"}`;
+  return { state, origin, keywordId: principal.keywordId, phrase: principal.phrase, carriedByKeyword, label };
+}
+
+/** A principal FIXA do plano: só quando travada. Livre (ou sem principal) = `null`. */
+export function lockedDeclaredPrincipal(lock: DeclaredPrincipalLockView | null | undefined): { keywordId: string; phrase: string } | null {
+  return lock && lock.state === "locked" ? { keywordId: lock.keywordId, phrase: lock.phrase } : null;
+}
 
 /** A marca recíproca, gravada em `keyword_declared_principal` da principal. */
 export const DeclaredPrincipalMarkSchema = z.object({
@@ -109,10 +217,19 @@ export function readDeclaredSiloPlan(value: unknown): DeclaredSiloPlan | null {
 
 export function sameDeclaredArticlePlan(left: DeclaredArticlePlan | null, right: DeclaredArticlePlan | null): boolean {
   if (!left || !right) return !left && !right;
-  return left.groupId === right.groupId && left.planVersion === right.planVersion && left.order === right.order
-    && left.role === right.role && left.scope === right.scope
+  return left.groupId === right.groupId && left.planVersion === right.planVersion && sameDeclaredArticleContent(left, right);
+}
+
+/**
+ * O mesmo artigo do plano, sem olhar a versão: ordem, papel, escopo, principal e
+ * trava. É o que o cadastro usa para não regravar (nem mandar de volta a "Em
+ * revisão") a linha que não mudou ao acrescentar artigos num Silo existente.
+ */
+export function sameDeclaredArticleContent(left: Omit<DeclaredArticlePlan, "groupId" | "planVersion">, right: Omit<DeclaredArticlePlan, "groupId" | "planVersion">): boolean {
+  return left.order === right.order && left.role === right.role && left.scope === right.scope
     && (left.declaredPrincipal?.keywordId ?? null) === (right.declaredPrincipal?.keywordId ?? null)
-    && (left.declaredPrincipal?.phrase ?? null) === (right.declaredPrincipal?.phrase ?? null);
+    && (left.declaredPrincipal?.phrase ?? null) === (right.declaredPrincipal?.phrase ?? null)
+    && (left.lock ?? null) === (right.lock ?? null);
 }
 
 /* ------------------------------------------------------------- o texto colado */
@@ -128,6 +245,8 @@ export type ParsedPlanArticle = {
   scope: string;
   /** Linha do título no texto (1-based), para a prévia apontar. */
   line: number;
+  /** 2026-10-13 · a trava escolhida ("Trava: travada|livre|automática"); ausente = automática. */
+  lock?: DeclaredPlanLockChoice;
 };
 
 export type DeclaredPlanRefusalCode =
@@ -142,7 +261,9 @@ export type DeclaredPlanRefusalCode =
   | "PRINCIPAL_REPEATED"
   | "SCOPE_MISSING"
   | "SCOPE_TOO_LONG"
-  | "OBJECTIVE_TOO_LONG";
+  | "OBJECTIVE_TOO_LONG"
+  | "TITLE_TOO_LONG"
+  | "ORDER_OUT_OF_RANGE";
 
 export type DeclaredPlanRefusal = { code: DeclaredPlanRefusalCode; message: string; order?: number };
 
@@ -177,6 +298,17 @@ const ARTICLE_START = /^\s*(?:artigo\s*)?(\d{1,2})\s*(?:[.)ºª:]|\s[—–-])\s
 const PRINCIPAL_LINE = /^\s*(?:(.*?)\s*[•·|\-–—]\s*)?(?:palavra[\s-]?chave|keyword(?:\s+principal)?|principal)\s*[:：]\s*(.+?)\s*$/i;
 const ROLE_ONLY_LINE = /^\s*(?:papel\s*[:：]\s*)?(?:artigo\s+)?(pilar|suporte)\s*\.?\s*$/i;
 const ROLE_LINE = /^\s*papel\s*[:：]\s*(pilar|suporte)\b/i;
+/** 2026-10-13 · "Trava: travada", "Trava: livre", "Trava: automática". */
+const LOCK_LINE = /^\s*trava\s*[:：]\s*(travad[ao]|livre|autom[aá]tic[ao])\s*\.?\s*$/i;
+
+/** "travada" → locked; "livre" → free; "automática" → auto. Outro texto = `null`. */
+export function readDeclaredPlanLockChoice(value: unknown): DeclaredPlanLockChoice | null {
+  const texto = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (/^(travad[ao]|locked)$/.test(texto)) return "locked";
+  if (/^(livre|free)$/.test(texto)) return "free";
+  if (/^(autom[aá]tic[ao]|auto)$/.test(texto)) return "auto";
+  return null;
+}
 
 /** Tira o rótulo colado ("Palavra-chave: x" → "x"), aspas e pontuação final solta. */
 export function cleanDeclaredPhrase(value: string): string {
@@ -219,7 +351,7 @@ export function parseDeclaredPlanText(text: string): ParsedDeclaredPlan {
   const silo: ParsedDeclaredPlan["silo"] = { heading: null, name: null, slug: null, rawSlug: null, objective: null };
   const articles: ParsedPlanArticle[] = [];
   const unparsed: ParsedDeclaredPlan["unparsed"] = [];
-  type Draft = { order: number; subject: string; principal: string | null; pillar: boolean; scope: string[]; line: number };
+  type Draft = { order: number; subject: string; principal: string | null; pillar: boolean; scope: string[]; line: number; lock?: DeclaredPlanLockChoice };
   let atual: Draft | null = null;
   let ultimoCampo: "objective" | null = null;
   const drafts: Draft[] = [];
@@ -286,6 +418,12 @@ export function parseDeclaredPlanText(text: string): ParsedDeclaredPlan {
       if (principal[1] && /\bpilar\b/i.test(principal[1])) draft.pillar = true;
       return;
     }
+    const trava = linha.match(LOCK_LINE);
+    if (trava) {
+      const escolha = readDeclaredPlanLockChoice(trava[1]);
+      if (escolha) draft.lock = escolha;
+      return;
+    }
     const papel = linha.match(ROLE_LINE) || linha.match(ROLE_ONLY_LINE);
     if (papel) {
       if (papel[1].toLowerCase() === "pilar") draft.pillar = true;
@@ -303,6 +441,7 @@ export function parseDeclaredPlanText(text: string): ParsedDeclaredPlan {
       role: draft.pillar ? "Pilar" : "Suporte",
       scope: draft.scope.join(" ").replace(/\s+/g, " ").trim(),
       line: draft.line,
+      ...(draft.lock ? { lock: draft.lock } : {}),
     });
   }
   if (!silo.name && silo.heading) silo.name = silo.heading;
@@ -346,6 +485,8 @@ export function validateParsedDeclaredPlan(plan: Pick<ParsedDeclaredPlan, "silo"
     } else {
       notices.push(`Artigo ${article.order} sem "Palavra-chave:": entra sem principal declarada e o Arquiteto escolhe pela regra de sempre.`);
     }
+    if (article.subject.length > SUBJECT_ENTRY_TITLE_MAX) refusals.push({ code: "TITLE_TOO_LONG", message: `O título do artigo ${article.order} tem ${article.subject.length} caracteres; o limite é ${SUBJECT_ENTRY_TITLE_MAX}.`, order: article.order });
+    if (!Number.isInteger(article.order) || article.order < 1 || article.order > DECLARED_PLAN_ARTICLES_MAX) refusals.push({ code: "ORDER_OUT_OF_RANGE", message: `A ordem ${article.order} está fora de 1 a ${DECLARED_PLAN_ARTICLES_MAX}.`, order: article.order });
     if (!article.scope) refusals.push({ code: "SCOPE_MISSING", message: `Artigo ${article.order} sem descrição: escreva o escopo na linha de baixo.`, order: article.order });
     else if (article.scope.length > DECLARED_PLAN_SCOPE_MAX) refusals.push({ code: "SCOPE_TOO_LONG", message: `A descrição do artigo ${article.order} tem ${article.scope.length} caracteres; o limite é ${DECLARED_PLAN_SCOPE_MAX}.`, order: article.order });
   }

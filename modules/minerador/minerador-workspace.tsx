@@ -125,7 +125,7 @@ import { KeywordTableColumnResizeHandle, KeywordTableRowResizeHandle, useKeyword
 import { MineradorProcessAction } from "./minerador-process-action";
 import { DiscoverySourceControls, type DiscoverySourceControlsHandle, type DiscoverySourceResponse } from "./discovery/discovery-source-controls";
 import { DiscoverySourceTopbarActions } from "./discovery/discovery-source-topbar-actions";
-import { DeclaredPlanImportButton, DeclaredPlanImportDialog, type DeclaredPlanAppliedIds } from "./declared-plan-import-dialog";
+import { SubjectCadastroButton, SubjectCadastroCard, type DeclaredPlanAppliedIds } from "./subject-cadastro-card";
 import { subjectSearchLinkHref } from "./discovery/subject-search-model";
 import {
   createAuthenticatedBrowserClient,
@@ -1070,11 +1070,11 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     const count = payload.summary.approved;
     showNotification("success", `${count} keyword(s) ${count === 1 ? "adicionada" : "adicionadas"} à Descoberta. Abra Descobrir Keywords para revisar.`);
   }, [showNotification]);
-  // "Importar plano do Silo" (SDD 2026-10-12 §9.4) fica junto das entradas de import; sem os grupos (409), some.
+  // "Cadastrar Assuntos" (SDD 2026-10-13, cadastro único) fica junto das entradas de import; sem os grupos (409), some.
   const [planImportOpen, setPlanImportOpen] = useState(false);
   const discoverySourceActions = useMemo(() => <>
     <DiscoverySourceTopbarActions onManual={() => discoverySourceControlsRef.current?.openManual()} onCsv={() => discoverySourceControlsRef.current?.openCsv()} />
-    {keywordGroups.available ? <DeclaredPlanImportButton onClick={() => setPlanImportOpen(true)} /> : null}
+    {keywordGroups.available ? <SubjectCadastroButton onClick={() => setPlanImportOpen(true)} /> : null}
   </>, [keywordGroups.available]);
 
   const pushKeywordsHistory = (snapshot = keywords, label = "Alteração na planilha de keywords") => keywordHistory.capture(label, snapshot);
@@ -3974,10 +3974,11 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
       <HistoryControls moduleId="minerador" showHistory={false} showUndoRedo={false} entries={keywordHistory.entries} canUndo={keywordHistory.canUndo} canRedo={keywordHistory.canRedo}
         onUndo={undoKeywords} onRedo={redoKeywords} onRestore={keywordHistory.restore} compact presentation="popover"/>
-      {/* Só o Processador passa `subjectEntry`: o select "Esta lista é"
-          (Assunto / Keyword) não entra no Descobrir (SDD 2026-09-24, F1.3). */}
-      <DiscoverySourceControls ref={discoverySourceControlsRef} brandRef={brandRef} preliminaryIntent="Informativa" preliminaryFunnel="TOFU" onComplete={handleDiscoverySourceComplete} subjectEntry onSubjectsImported={result => void handleSubjectsImported(result)} />
-      {planImportOpen && selectedBrandId && keywordGroups.available ? <DeclaredPlanImportDialog key={selectedBrandId} brandId={selectedBrandId} groups={keywordGroups.activeGroups} onClose={() => setPlanImportOpen(false)} onApplied={applied => void handleDeclaredPlanApplied(applied)} onUnavailable={() => { setPlanImportOpen(false); keywordGroups.markUnavailable(); }} /> : null}
+      {/* 2026-10-13 · cadastro único (SDD sdd-cadastro-assunto-na-keyword): o
+          colar/CSV do Processador é só de keyword; o Assunto entra pelo card
+          "Cadastrar Assuntos", dentro da keyword. Sem `subjectEntry`. */}
+      <DiscoverySourceControls ref={discoverySourceControlsRef} brandRef={brandRef} preliminaryIntent="Informativa" preliminaryFunnel="TOFU" onComplete={handleDiscoverySourceComplete} />
+      {planImportOpen && selectedBrandId && keywordGroups.available ? <SubjectCadastroCard key={selectedBrandId} brandId={selectedBrandId} groups={keywordGroups.activeGroups} onClose={() => setPlanImportOpen(false)} onApplied={applied => void handleDeclaredPlanApplied(applied)} onUnavailable={() => { setPlanImportOpen(false); keywordGroups.markUnavailable(); }} /> : null}
 
       {/* Blocos opcionais acima da planilha (Organizar, prévia do Site,
           conferência manual, recuperação): juntos têm um teto e rolam por
