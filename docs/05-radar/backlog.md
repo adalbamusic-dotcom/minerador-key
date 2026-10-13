@@ -1,5 +1,51 @@
 # Backlog — Radar
 
+## F5 · O Radar acompanha o Arquiteto ("Atualização disponível do Arquiteto") — 2026-10-13
+
+SDD `docs/compartilhado/sdd-acelerar-fluxo-do-plano-2026-10-13.md`, item 14 / fase F5. Detalhe em
+`docs/05-radar/estado-atual.md`. **Validado manualmente: não** (homologação é do dono).
+
+- [x] Detecção só lendo (índice canônico × versão transportada), rótulo próprio "Atualização disponível do Arquiteto ·
+  vN → vM" (o "Atualização disponível" da publicação não mudou), classificação pura (`classifyArchitectUpdate`).
+- [x] Prévia + uma confirmação + recusa por item, por Silo e por recorte da cor; hash da decisão; releitura e evento
+  `adopt_architect_version`; o item é montado pelo `importArticlesToRadar` (mesmo caminho do envio).
+- [x] Investigação reaproveitada numa versão nova da análise (mesma base: impressão reapontada; composição: marcada
+  para refazer; principal: RESET do Google), corrida copiada para a versão nova.
+- [x] MCP `adopt_architect_version` (prévia `platform.read`; aplicar `radar.write` + `platform.decide` + aceite + hash),
+  `get_platform_state` com `radar.items[].architectUpdate`, catálogo (`radar.adopt_architect_version`).
+- [ ] **F5.b (próxima rodada, exige o desenho do recongelamento no servidor):** item FINALIZADO (Google/YouTube/Amazon
+  congelado), com pacote aprovado ou enviado ao Redator. Hoje a prévia o mostra com o motivo e a adoção recusa
+  (`frozen_investigation`, `approved_package`, `sent_to_writer`): pela D11 a troca só acontece depois do congelamento
+  novo sobre vM. Falta: refazer a fotografia sobre vM sem provider quando `same_research_basis` (hoje o recongelamento
+  do Google é montado no navegador, pela mesma rotina de "Finalizar"), trocar o item e a análise numa escrita só e
+  reorganizar o artigo-modelo (até 2 chamadas de IA, dito no botão); nos outros casos, coletar o que falta (lote do
+  item 11) e finalizar.
+- [ ] Coletas do YouTube/Amazon em andamento (não congeladas) seguem com a impressão da vN: a prévia avisa "confira antes
+  de finalizar"; reapontar a impressão da corrida (como a do Google) fica para a F5.b.
+- [ ] Links internos: a adoção carrega as relações aprovadas no envio; quando o grafo aprovado ainda não cobre a vM, a
+  prévia declara a lacuna (não bloqueia). Ler o grafo novo no servidor fica para a F5.b.
+- [ ] **Dono:** homologar com um artigo em pesquisa (não finalizado): "Gravar melhorias" no Arquiteto → Radar → faixa
+  → "Ver e adotar" → conferir a prévia → adotar → readback por SELECT (`source_version_id`, `payload->>articleDnaVersionId`,
+  última `analysisVersions` com a versão nova, evento `adopt_architect_version`).
+
+## "Pesquisar e finalizar (N artigos)" na barra de lote — 2026-10-13
+
+Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Lote pela mesma sequência do botão (`startDeepResearch` → `analyzeSerpSelection` → `finalizeInvestigation`),
+  em série, com prévia de custo, confirmação humana, recusa por item e releitura do servidor no fim.
+- [x] Barra de lote só com o caminho do piloto ("Pesquisar e finalizar", "Organizar o artigo-modelo", "Enviar ao Redator").
+- [x] Catálogo do agente (`radar.investigate`).
+- [ ] **Dono:** homologar com um Silo pequeno (3–4 artigos, um já finalizado): conferir a prévia (teto e pulados), o
+  progresso por artigo, um artigo parado com motivo e, no banco, as versões finalizadas e o artigo-modelo concluído.
+- [ ] Código morto candidato a remoção (sem botão desde 2026-10-13; exige ajustar os testes estruturais que os leem):
+  `startSerpBatch` + `RadarR5QueueProgress`/`focusQueueView`, `reviewSelected`, `approveSelected`,
+  `prepareTopicsBatch`, `approveTopicsBatch`, `prepareReportBatch`, `reviewSpecialistSelected` e os ramos
+  correspondentes de `handleBulkAction`; em `lib/radar/r4-queue.ts`, as operações sem tela de `availableBulkActions`.
+- [ ] Proposta: concorrência pequena (2 artigos) exigiria tirar os handlers do artigo ativo do render e um guarda
+  por artigo no lugar de `radarClaimAction` (hoje cego ao artigo de propósito) — decisão de contrato, fora deste lote.
+- [ ] Proposta: lote equivalente para YouTube/Amazon (acréscimos), se o dono quiser — hoje ficam fora com motivo.
+
 ## Assunto legível em todo painel — 2026-10-13
 
 Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
@@ -155,7 +201,7 @@ confirmado por teste. **Validado manualmente: não.**
 - [ ] Proposta (F8): expor o `videoPlan` numa leitura de servidor e mostrar capítulos e cortes na aba YouTube.
 - [ ] Proposta (F17): trava de fonte e varredura D10 no `save_writer_deliverable`; plano de vídeo em
   `get_writer_foundations`.
-- [ ] **Proposta (exige SDD e autorização; mudança de workflow): Reenvio da versão nova do ArticleDNA ao Radar.** Atualiza o item existente do Radar (`source_version_id`, `articleDnaVersionId`, `articleDnaContentHash`, `hydration`) e depois reinvestiga e reorganiza o artigo-modelo (custo dito antes do clique). Sem isso, o reajuste de artigo já enviado não chega ao Radar: o `import_radar` exige Pronto para Radar e faz upsert com `ignoreDuplicates` (não muda o item que existe), e o Arquiteto recusa reenviar o artigo já entregue. Hoje o Radar segue na versão transportada pelo item (correção desta rodada; antes desta proposta, a
+- [x] ~~**Proposta (exige SDD e autorização; mudança de workflow): Reenvio da versão nova do ArticleDNA ao Radar.**~~ Resolvida em 2026-10-13 pela F5 da SDD `sdd-acelerar-fluxo-do-plano-2026-10-13.md` sem reenvio: o Radar ADOTA a versão nova ("Atualização disponível do Arquiteto" → "Ver e adotar"); o item finalizado fica para a F5.b (ver o topo deste backlog). Texto original: Atualiza o item existente do Radar (`source_version_id`, `articleDnaVersionId`, `articleDnaContentHash`, `hydration`) e depois reinvestiga e reorganiza o artigo-modelo (custo dito antes do clique). Sem isso, o reajuste de artigo já enviado não chega ao Radar: o `import_radar` exige Pronto para Radar e faz upsert com `ignoreDuplicates` (não muda o item que existe), e o Arquiteto recusa reenviar o artigo já entregue. Hoje o Radar segue na versão transportada pelo item (correção desta rodada; antes desta proposta, a
   coleta, a fotografia, a planta e o envio ao Redator ficam na versão do envio do Arquiteto). Registrada também no backlog do Arquiteto.
 - [ ] Proposta: Relatório lendo a planta por linha (hoje PENDING para todo finalizado); `useRadarArticleBlueprintForReport`
   sem o Google congelado; `amazon-observed` com a suficiência no lugar de "A coleta não devolveu produtos"; aviso

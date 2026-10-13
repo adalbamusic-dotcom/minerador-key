@@ -320,7 +320,7 @@ no painel do DNA das keywords o assunto/tema e essas keywords têm que ser trata
 | `subject_withdraw` | **removido de todas as portas**: o "Assunto: Não" apagou o Assunto (título e plano) das 7 keywords do Silo azul da WifiConecta e deixou a marca de principal órfã. Tirar do plano = "Tirar do plano". Assunto anterior sem plano: sem porta de retirada até a decisão da conversão |
 | Bloco só leitura "Assunto deste artigo" no painel do DNA (`resolveSubjectArticleView`, `SubjectArticleBlock`), com "Buscar sustentação" | feito |
 | Keyword que carrega Assunto = qualquer keyword (KGR, Posto, KGR em grupo, MCP do KGR) | feito; **exceção mínima mantida na aprovação**: D2-bis (marca de principal do plano) aprova só com a Lógica, para a keyword livre chegar ao Arquiteto; D2 restrita ao Assunto anterior (sem `entry`), para não recusar aprovações já feitas |
-| Conversão do Assunto antigo da WifiConecta (laranja) | **não implementada** (os 8 Assuntos-título estão no Arquiteto com ArticleDNA versionado; mandar a linha à lixeira violaria AGENTS.md §10). Caminho descrito no backlog do Minerador; exige SDD própria |
+| Conversão do Assunto antigo da WifiConecta (laranja) | **SDD própria aprovada e implementada em 2026-10-13**: `docs/compartilhado/sdd-conversao-assunto-legado-2026-10-13.md` ("Converter formato anterior" no card; "Conversões pendentes do Assunto" no Arquiteto; MCP `convert_legacy_subjects`/`update_article_subject`). A linha-título NÃO vai para a lixeira (que, para keyword não publicada, apaga de vez): fica arquivada por derivação. Execução real pelo dono (runbook §18) |
 | Catálogo MCP | feito (`test:agent` verde) |
 
 Consumidores conferidos: `approved-package.ts` (portão e handoff, mesma função), `keyword-dna.ts` (sem mudança: o

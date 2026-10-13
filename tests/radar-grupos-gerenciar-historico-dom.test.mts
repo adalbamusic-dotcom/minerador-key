@@ -192,7 +192,8 @@ test("tirar do plano · no Gerenciar de um grupo com plano: lista, prévia com o
     if (method === "GET" && url.startsWith("/api/editorial/groups?")) return { status: 200, body: { success: true, available: true, groups: grupos, ungroupedKeywordCount: 0 } };
     if (url.endsWith(`/plans/withdraw?groupId=${LARANJA_ID}`)) return { status: 200, body: { success: true, mode: "list", group: plano, articles: [artigo(1, "Pilar", "Como escolher", false), artigo(2, "Suporte", "Barata", true)] } };
     if (method === "POST" && url.endsWith("/plans/withdraw") && body!.mode === "preview") return { status: 200, body: { success: true, mode: "preview", group: plano, article: artigo(2, "Suporte", "Barata", true), remainingArticles: 1, nextPlanVersion: 2, approvedToReview: 1, effects: ["O Assunto “Barata” continua declarado.", "Nada é apagado."], decisionHash: "hash-da-previa" } };
-    if (method === "POST" && url.endsWith("/plans/withdraw") && body!.mode === "apply") return { status: 200, body: { success: true, mode: "apply", planVersion: 2, notices: [], readback: { subjectPlanRemoved: true } } };
+    // SDD acelerar 2026-10-13, item 15 (mudança declarada): "Tirar do plano" numa confirmação devolve os passos.
+    if (method === "POST" && url.endsWith("/plans/withdraw") && body!.mode === "apply") return { status: 200, body: { success: true, mode: "apply", chain: { complete: true, steps: [{ step: "plan", outcome: "done", message: "Plano v2 gravado e relido." }, { step: "approve_and_send", outcome: "done", message: "1 keyword(s) reaprovada(s) e enviada(s)." }, { step: "silo", outcome: "already", message: "O artigo não está em Silo no Arquiteto." }] } } };
     return "pendente";
   };
   const tela = await harness.montarRadar();
@@ -211,7 +212,8 @@ test("tirar do plano · no Gerenciar de um grupo com plano: lista, prévia com o
   await tela.click($("[data-declared-plan-confirm]")!);
   await esperar();
   const aplicar = chamadas.find(chamada => chamada.body?.mode === "apply");
-  assert.deepEqual(aplicar?.body, { groupId: LARANJA_ID, subjectKeywordId: "s2", mode: "apply", decisionHash: "hash-da-previa" });
-  assert.match($("[data-testid='declared-plan-notice']")!.textContent || "", /“Barata” saiu do plano\. Plano v2 gravado e relido\./);
+  assert.deepEqual(aplicar?.body, { groupId: LARANJA_ID, subjectKeywordId: "s2", mode: "apply", decisionHash: "hash-da-previa", chain: { reapproveAndSend: true, withdrawFromSilo: true } });
+  assert.match($("[data-testid='declared-plan-notice']")!.textContent || "", /“Barata” saiu do plano; cada passo foi relido\./);
+  assert.match($("[data-declared-plan-chain-steps]")!.textContent || "", /Plano v2 gravado e relido\./);
   tela.destroy();
 });

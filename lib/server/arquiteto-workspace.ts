@@ -320,7 +320,19 @@ function isCanonicalHandoffStatus(status: string | null | undefined) {
   return normalized === "aprovado" || normalized === "publicado";
 }
 
-async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywordIds: readonly string[]) {
+/**
+ * Keyword que o envio em MODO PARCIAL deixou fora, com o motivo dela (SDD
+ * `sdd-acelerar-fluxo-do-plano-2026-10-13.md`, item 2). No modo de sempre o
+ * lote inteiro é recusado com 409; no parcial, só ela fica fora.
+ */
+export type HandoffRefusal = { keywordId: string; keyword: string; reason: string };
+
+/** Motivo da keyword pedida que não está aprovada (ou foi mexida depois) — a mesma regra do envio de sempre. */
+export const HANDOFF_NOT_APPROVED_REASON = "Não aprovada no Minerador, ou aprovada e alterada depois (o pacote aprovado divergiu): aprove-a de novo.";
+
+async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywordIds: readonly string[], options: { partial?: boolean } = {}) {
+  const partial = options.partial === true;
+  const refused: HandoffRefusal[] = [];
   const requested = new Set(requestedKeywordIds);
   // O banco filtra pelos ids pedidos (R7): a marca inteira não sai mais do
   // Postgres para ser descartada aqui. Id de outra marca, apagado ou fora do
@@ -339,8 +351,20 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
 
   // Aprovada de verdade: coluna aprovada E pacote não divergente. Keyword
   // mexida depois da aprovação fica em revisão e não reabastece o Arquiteto.
-  const eligibleKeywords = keywords.filter(keyword =>
+  let eligibleKeywords = keywords.filter(keyword =>
     isCanonicalHandoffStatus(typeof keyword.status === "string" ? keyword.status : null) && keywordIsApproved(keyword));
+  // Modo parcial: cada recusa fica fora SOZINHA, com o motivo; o lote segue.
+  const recusar = (lista: readonly { keyword: (typeof keywords)[number]; reason: string }[]) => {
+    const fora = new Set(lista.map(entry => entry.keyword.id));
+    for (const entry of lista) refused.push({ keywordId: entry.keyword.id, keyword: entry.keyword.keyword, reason: entry.reason });
+    eligibleKeywords = eligibleKeywords.filter(keyword => !fora.has(keyword.id));
+  };
+  if (partial) {
+    const elegiveis = new Set(eligibleKeywords.map(keyword => keyword.id));
+    for (const keyword of keywords) {
+      if (!elegiveis.has(keyword.id)) refused.push({ keywordId: keyword.id, keyword: keyword.keyword, reason: HANDOFF_NOT_APPROVED_REASON });
+    }
+  }
   // Leitura opcional: a Qualificação Semântica enriquece o pacote quando existe.
   // Ausência, evidência mista ou insuficiente não bloqueiam o handoff — o
   // pacote transporta honestamente o que há, sem inventar Intenção nem Funil.
@@ -357,7 +381,9 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
     const workflow = workflowByKeywordId.get(keyword.id);
     return !articleIds.has(keyword.id) && Boolean(workflow && workflow.state !== MINERADOR_ARQUITETO_RECEIVED_STATE);
   });
-  if (blocked.length) {
+  if (blocked.length && partial) {
+    recusar(blocked.map(keyword => ({ keyword, reason: "Já tem um item remoto no Arquiteto em outro estado; o envio normal não o sobrescreve." })));
+  } else if (blocked.length) {
     throw new PipelineRuntimeError("CONFLICT", "Uma ou mais keywords já possuem workflow remoto incompatível com o handoff normal.", 409);
   }
 
@@ -386,7 +412,9 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
     }),
   }));
   const refusedByApproval = approvalGates.filter(entry => entry.gate.verdict === "refuse");
-  if (refusedByApproval.length) {
+  if (refusedByApproval.length && partial) {
+    recusar(refusedByApproval.map(entry => ({ keyword: entry.keyword, reason: `A aprovação está incompleta para o envio ao Arquiteto. ${entry.gate.reason || ""}`.trim() })));
+  } else if (refusedByApproval.length) {
     const first = refusedByApproval[0];
     const reason = `"${first.keyword.keyword}": ${first.gate.reason}`;
     throw new PipelineRuntimeError(
@@ -429,7 +457,9 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
       return [{ keyword, reason }];
     });
     const refusedByDestination = destinationProblems.filter(entry => !existingKeywordIds.has(entry.keyword.id));
-    if (refusedByDestination.length) {
+    if (refusedByDestination.length && partial) {
+      recusar(refusedByDestination);
+    } else if (refusedByDestination.length) {
       const first = refusedByDestination[0];
       const reason = `"${first.keyword.keyword}": ${first.reason}`;
       throw new PipelineRuntimeError(
@@ -466,6 +496,7 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
     plan,
     eligibleKeywordIds: eligibleKeywords.map(keyword => keyword.id),
     approvalAlerts,
+    refused,
   };
 }
 
@@ -647,18 +678,39 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
   };
 }
 
-export async function createMineradorArquitetoHandoff(context: PipelineContext, keywordIds: readonly string[]) {
+/**
+ * O envio do Minerador ao Arquiteto. `options.partial` (aditivo, SDD acelerar
+ * 2026-10-13 item 2): a keyword que não passa fica fora com o motivo em
+ * `refused`, e as outras seguem — sem 409 do lote. Sem a opção, o de sempre
+ * (rota `/api/arquiteto/handoff` e MCP inalterados).
+ */
+export async function createMineradorArquitetoHandoff(context: PipelineContext, keywordIds: readonly string[], options: { partial?: boolean } = {}) {
   const uniqueIds = [...new Set(keywordIds)];
   if (!uniqueIds.length) throw new PipelineRuntimeError("INVALID_CONTEXT", "Selecione ao menos uma keyword do Minerador.", 400);
 
-  const prepared = await prepareCanonicalHandoff(context, uniqueIds);
+  const prepared = await prepareCanonicalHandoff(context, uniqueIds, options);
   await persistCanonicalHandoff(context, prepared);
-  const confirmation = await prepareCanonicalHandoff(context, uniqueIds);
+  const confirmation = await prepareCanonicalHandoff(context, uniqueIds, options);
   if (confirmation.plan.rows.length || confirmation.eligibleKeywordIds.length !== prepared.eligibleKeywordIds.length) {
     throw new PipelineRuntimeError("QUERY_FAILURE", "O handoff remoto não pôde ser confirmado.", 503);
   }
 
+  /*
+   * SDD acelerar 2026-10-13, item 1 — depois da releitura do recebimento, o
+   * Silo do plano declarado (quando as keywords são de um grupo com plano) é
+   * achado/criado, confirmado e recebe as keywords do grupo. Nunca derruba o
+   * envio: o desfecho volta em `declaredPlanSilos` (aditivo, só quando há).
+   */
+  let declaredPlanSilos: Awaited<ReturnType<typeof import("./arquiteto-declared-plan-silo")["materializeDeclaredPlanSilo"]>> = [];
+  try {
+    const { materializeDeclaredPlanSilo } = await import("./arquiteto-declared-plan-silo");
+    declaredPlanSilos = await materializeDeclaredPlanSilo(context, prepared.plan.importedKeywordIds);
+  } catch {
+    declaredPlanSilos = [];
+  }
+
   return {
+    ...(declaredPlanSilos.length ? { declaredPlanSilos } : {}),
     persistence: prepared.plan.createdKeywordIds.length ? "PERSISTED" as const : "UNCHANGED" as const,
     source: "CANONICAL_REMOTE" as const,
     importedKeywordIds: prepared.plan.importedKeywordIds,
@@ -666,5 +718,18 @@ export async function createMineradorArquitetoHandoff(context: PipelineContext, 
     existingKeywordIds: prepared.plan.existingKeywordIds,
     // Aditivo: só aparece quando a trava de aprovação tem alerta.
     ...(prepared.approvalAlerts.length ? { approvalAlerts: prepared.approvalAlerts } : {}),
+    // Aditivo: só no modo parcial e só quando alguma ficou fora.
+    ...(options.partial && prepared.refused.length ? { refused: prepared.refused } : {}),
   };
+}
+
+/**
+ * A prévia do envio parcial, só leitura (as mesmas leituras de sempre, nada é
+ * gravado): quais iriam, quais já estão no Arquiteto e quais ficam fora.
+ */
+export async function previewMineradorArquitetoHandoff(context: PipelineContext, keywordIds: readonly string[]) {
+  const uniqueIds = [...new Set(keywordIds)];
+  if (!uniqueIds.length) return { eligibleKeywordIds: [] as string[], existingKeywordIds: [] as string[], refused: [] as HandoffRefusal[] };
+  const prepared = await prepareCanonicalHandoff(context, uniqueIds, { partial: true });
+  return { eligibleKeywordIds: prepared.eligibleKeywordIds, existingKeywordIds: prepared.plan.existingKeywordIds, refused: prepared.refused };
 }

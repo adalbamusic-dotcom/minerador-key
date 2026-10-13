@@ -3,7 +3,9 @@ import { PLATFORM_STAGES, type PlatformStage } from "@/lib/agent/platform-catalo
 import type { PlatformStateSnapshot } from "@/lib/agent/platform-state-model";
 import type { TopicCandidate } from "@/lib/agent/topic-match";
 import { resolveEditorialKeywordStatus } from "@/lib/minerador/editorial-status";
+import { convertedTitleIndex } from "@/lib/minerador/subject-conversion";
 import { radarFrozenObservedAtOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
+import { radarArchitectUpdateLabel } from "@/lib/radar/architect-update";
 import { buildTenantPath } from "@/lib/tenant-routing";
 import { editorialGroupFilterMatches } from "@/lib/editorial/editorial-groups";
 import type { EditorialGroupMcpScope } from "@/lib/editorial/editorial-group-scope";
@@ -118,7 +120,7 @@ export async function readPlatformState(brandId: string, options: { group?: Plat
   }
 
   const assuntosBase = db.from("minerador_keywords")
-    .select(recorte ? "id,keyword,status,group_id,subject:analise_semantica->keyword_subject" : "id,keyword,status,subject:analise_semantica->keyword_subject")
+    .select(recorte ? "id,keyword,status,group_id,subject:analise_semantica->keyword_subject,conv:analise_semantica->keyword_subject_conversion" : "id,keyword,status,subject:analise_semantica->keyword_subject,conv:analise_semantica->keyword_subject_conversion")
     .eq("brand_id", brandId).is("deleted_at", null)
     .filter("analise_semantica->keyword_subject->>declared", "eq", "true");
   /* Com o recorte, o filtro do grupo vai à consulta (o teto conta só os do grupo). */
@@ -127,7 +129,10 @@ export async function readPlatformState(brandId: string, options: { group?: Plat
       : assuntosBase.in("group_id", filtro.groupIds.length ? [...filtro.groupIds] : ["00000000-0000-0000-0000-000000000000"]);
   const assuntos = await assuntosDoRecorte.order("keyword").limit(TETO.assuntos + 1);
   if (assuntos.error) mapPersistenceError(assuntos.error);
-  const assuntoRows = ((assuntos.data || []) as unknown as Row[]).filter(row => doGrupo(row.group_id));
+  // 2026-10-13 · a linha-título convertida (formato anterior) não é mais Assunto: o Assunto mora na keyword que a aponta.
+  const linhasDeAssunto = (assuntos.data || []) as unknown as Row[];
+  const convertidas = convertedTitleIndex(linhasDeAssunto.map(row => ({ id: String(row.id), keyword: typeof row.keyword === "string" ? row.keyword : null, semantic: { keyword_subject: row.subject, keyword_subject_conversion: row.conv ?? null } })));
+  const assuntoRows = linhasDeAssunto.filter(row => doGrupo(row.group_id) && !convertidas.has(String(row.id)));
   if (assuntoRows.length > TETO.assuntos) truncated.push(`minerador: listados os primeiros ${TETO.assuntos} Assuntos`);
 
   /* ---- Arquiteto: keywords recebidas e estado dos artigos ---- */
@@ -142,7 +147,7 @@ export async function readPlatformState(brandId: string, options: { group?: Plat
 
   /* ---- Arquiteto: DNAs, pela última versão, por caminho jsonb ---- */
   const artigosRows = await paginar((from, to) => db.from("editorial_artifact_versions")
-    .select("entity_id,version_number,articleId:payload->>articleId,promise:payload->>promise,slug:payload->>suggestedSlug,siloId:payload->>siloId,hierarchy:payload->>hierarchy,journeyStage:payload->>journeyStage,mainIntent:payload->>mainIntent,principalKeywordId:payload->>principalKeywordId,canonical:payload->>canonical")
+    .select("entity_id,version_number,version_id,status,articleId:payload->>articleId,promise:payload->>promise,slug:payload->>suggestedSlug,siloId:payload->>siloId,hierarchy:payload->>hierarchy,journeyStage:payload->>journeyStage,mainIntent:payload->>mainIntent,principalKeywordId:payload->>principalKeywordId,canonical:payload->>canonical")
     .eq("marca_id", brandId).eq("artifact_type", "article_dna").order("entity_id").range(from, to), TETO.artigos * 20);
   /* 2026-10-12 · F6 · com o recorte, o grupo efetivo de cada artigo (lido uma vez por id; sem recorte, nada é lido). */
   const grupoDoArtigo = new Map<string, string | null>();
@@ -202,7 +207,7 @@ export async function readPlatformState(brandId: string, options: { group?: Plat
    * no fim, e a poda preserva a corrente.
    */
   const radar = await db.from("editorial_workflow_items")
-    .select("subject_id,state,amz:payload->analysisVersions->-1->payload->amazonFrozenInvestigation->>finalizedAt,yt:payload->analysisVersions->-1->payload->youtubeFrozenInvestigation->>finalizedAt,gg:payload->analysisVersions->-1->payload->finalizedBundle->>frozenAt")
+    .select("subject_id,state,transported:payload->>articleDnaVersionId,amz:payload->analysisVersions->-1->payload->amazonFrozenInvestigation->>finalizedAt,yt:payload->analysisVersions->-1->payload->youtubeFrozenInvestigation->>finalizedAt,gg:payload->analysisVersions->-1->payload->finalizedBundle->>frozenAt")
     .eq("marca_id", brandId).eq("stage", "radar").eq("subject_type", "article").limit(TETO.artigos);
   if (radar.error) mapPersistenceError(radar.error);
 
@@ -211,6 +216,14 @@ export async function readPlatformState(brandId: string, options: { group?: Plat
   if (documentosLidos.error) mapPersistenceError(documentosLidos.error);
   /* 2026-10-12 · F6 · o item do Radar e o documento herdam o grupo pelo artigo. */
   const radarLido = ((radar.data || []) as unknown as Row[]);
+  /* F5 · a última APROVADA de cada artigo, pela coluna de status (a prévia de adopt_architect_version confere com o índice canônico). */
+  const ultimaAprovadaPorArtigo = new Map<string, Row>();
+  for (const versao of artigosRows.rows) {
+    if (texto(versao.status) !== "approved") continue;
+    const id = idDoArtigo(versao);
+    const atual = ultimaAprovadaPorArtigo.get(id);
+    if (!atual || Number(versao.version_number) > Number(atual.version_number)) ultimaAprovadaPorArtigo.set(id, versao);
+  }
   await lerGruposDosArtigos([...radarLido.map(row => String(row.subject_id)), ...((documentosLidos.data || []) as Row[]).map(row => texto(row.article_id) || "")]);
   const radarDoRecorte = radarLido.filter(row => artigoDoGrupo(String(row.subject_id)));
   const documentos = { data: ((documentosLidos.data || []) as Row[]).filter(row => artigoDoGrupo(texto(row.article_id))) };
@@ -300,7 +313,13 @@ export async function readPlatformState(brandId: string, options: { group?: Plat
           ...(texto(row.gg) ? { finalizedBundle: { frozenAt: row.gg } } : {}),
         });
         const hasDocument = ((documentos.data || []) as Row[]).some(doc => texto(doc.article_id) === articleId);
-        return { articleId, state: String(row.state), finalizedAt, hasDocument };
+        /* 2026-10-13 · F5 (SDD acelerar-fluxo, item 14): o item atrás de uma versão aprovada mais nova do ArticleDNA. */
+        const transportada = artigosRows.rows.find(versao => texto(versao.version_id) === texto(row.transported));
+        const aprovada = ultimaAprovadaPorArtigo.get(articleId);
+        const architectUpdate = transportada && aprovada && aprovada.version_id !== transportada.version_id && Number(aprovada.version_number) > Number(transportada.version_number)
+          ? { label: radarArchitectUpdateLabel(Number(transportada.version_number), Number(aprovada.version_number)), fromVersionNumber: Number(transportada.version_number), toVersionNumber: Number(aprovada.version_number), howToAdopt: "adopt_architect_version (mode=preview) ou, na tela, Radar → 'Ver e adotar'" }
+          : null;
+        return { articleId, state: String(row.state), finalizedAt, hasDocument, architectUpdate };
       }),
     },
     redator: {

@@ -1,5 +1,6 @@
 import { declaredPrincipalLock, type DeclaredPlanRole } from "./declared-plan.ts";
 import { KEYWORD_SUBJECT_HISTORY_KEY, resolveDeclaredPrincipal, resolveKeywordSubject } from "./keyword-subject.ts";
+import { readSubjectConversion } from "./subject-conversion.ts";
 
 /**
  * "ASSUNTO DESTE ARTIGO" — o bloco SÓ LEITURA do painel da keyword
@@ -49,6 +50,15 @@ export type SubjectArticleView =
     /** Sem plano de Silo (Assunto anterior solto, ou Assunto de página publicada). */
     withoutPlan: boolean;
     hint: string;
+    /** 2026-10-13 · aditivo: o Assunto veio de uma linha-título do formato anterior (conversão). */
+    convertedFrom?: { keywordId: string; phrase: string };
+  }
+  | {
+    /** 2026-10-13 · esta linha é uma linha-título CONVERTIDA: o Assunto agora mora em outra keyword. */
+    kind: "converted_title";
+    keywordId: string;
+    keyword: string | null;
+    hint: string;
   }
   | {
     /** Formato anterior: esta keyword é a principal declarada de um Assunto em outra linha. */
@@ -77,7 +87,11 @@ export type SubjectArticleViewInput = {
   volume?: { validated: boolean; value: number | null } | null;
   groupOf?: (groupId: string) => SubjectArticleGroup;
   keywordTextOf?: (keywordId: string) => string | null;
+  /** 2026-10-13 · esta linha é uma linha-título convertida (índice da marca, `convertedTitleIndex`). */
+  convertedTo?: { keywordId: string; keyword: string | null } | null;
 };
+
+export const SUBJECT_ARTICLE_CONVERTED_HINT = "A linha-título fica arquivada como histórico: não a exclua (a exclusão de keyword não publicada é definitiva). Para desfazer, converta de volta pela keyword que carrega o Assunto." as const;
 
 const LOCK_REASONS = {
   volume_locked: "Com volume medido, o Arquiteto a usa como principal e só busca sustentações.",
@@ -117,8 +131,13 @@ export function resolveSubjectArticleView(input: SubjectArticleViewInput): Subje
   const subject = resolveKeywordSubject(input.semantic);
   const groupOf = (groupId: string | null): SubjectArticleGroup => (groupId && input.groupOf ? input.groupOf(groupId) : null);
 
+  // 2026-10-13 · a linha-título convertida não é mais Assunto: diz para onde ele foi.
+  if (input.convertedTo && subject.declared && !subject.entry) {
+    return { kind: "converted_title", keywordId: input.convertedTo.keywordId, keyword: input.convertedTo.keyword, hint: SUBJECT_ARTICLE_CONVERTED_HINT };
+  }
   if (subject.declared) {
     const plan = subject.plan;
+    const conversao = readSubjectConversion(input.semantic);
     const principal = plan?.declaredPrincipal ?? null;
     const carried = Boolean(principal && principal.keywordId === input.keywordId);
     const format: "cadastro" | "anterior" = subject.entry || carried ? "cadastro" : "anterior";
@@ -137,6 +156,7 @@ export function resolveSubjectArticleView(input: SubjectArticleViewInput): Subje
       principalElsewhere: principal && !carried ? { keywordId: principal.keywordId, phrase: principal.phrase } : null,
       withoutPlan: !plan,
       hint: SUBJECT_ARTICLE_EDIT_HINT,
+      ...(conversao && subject.entry ? { convertedFrom: { keywordId: conversao.fromKeywordId, phrase: conversao.fromPhrase } } : {}),
     };
   }
 

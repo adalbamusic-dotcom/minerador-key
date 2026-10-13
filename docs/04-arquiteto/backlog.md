@@ -1,3 +1,32 @@
+## Acelerar o fluxo do plano (SDD 2026-10-13) — Arquiteto
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] F1 · item 3: "Processar artigos" num clique (releitura e parecer pelo cache no mesmo clique) e num diálogo de custo; allintitle só com "Aplicar KGR: Sim".
+- [x] F1 · item 12: principal travada com o caminho inteiro; recusa do envio ao Radar por Assunto + slug.
+- [ ] Dono: homologar "Processar artigos" com SERP a pagar (um diálogo, sem segundo clique), com "Aplicar KGR: Sim" num artigo e "não aplicável" nos outros; dark mode e 360/768/1024/1440 px.
+- [ ] Teste DOM do clique completo (coleta → releitura → parecer).
+- [x] F2 · item 5: "Marcar Pronto para Radar e enviar os N artigos deste Silo" (prévia, marcação com releitura, envio com recusa por artigo).
+- [x] F4 · item 1: Silo do plano achado/criado, confirmado e com as keywords do grupo no envio ao Arquiteto.
+- [x] F4 · item 4: "Formar os artigos do plano · cor" (melhoria recortada pelo grupo); Processar artigos aponta para ela.
+- [x] F4 · item 10: "Aplicar o plano ao Silo" já com a retirada (um hash) e "Processar links de novo".
+- [x] F4 · item 15: "Tirar do plano" numa confirmação (plano → reaprovar e enviar → retirar do Silo), retomável.
+- [ ] Dono: homologar F4 na WifiConecta — enviar uma cor com plano sem Silo (Silo criado e confirmado; as keywords nele), "Formar os artigos do plano · cor", "Aplicar o plano" com um artigo fora, "Tirar do plano" de um suporte num Silo; readback por SELECT.
+- [ ] Item 15 · "Mudar a trava" numa cadeia própria (hoje: cadastro + reaprovar/enviar no card e a porta do item 4 no Arquiteto).
+- [ ] Sobras escondidas para grupo com plano (D6 da SDD 2026-10-12) — conferir na tela; não mexido nesta frente.
+- [ ] Dono: homologar o item 5 num Silo com um artigo bloqueado (os outros seguem) e um com a SERP velha (relê e continua).
+- [ ] F2 · item 6 na mesa do Arquiteto: ler só a cor exige levar ao servidor (ou exigir leitura inteira antes de) Processar arquitetura, canibalização, Reforçar publicados e links entre Silos — não feito.
+
+## Atualizar o Assunto dos artigos (conversão do formato anterior) — 2026-10-13
+
+SDD `docs/compartilhado/sdd-conversao-assunto-legado-2026-10-13.md`. Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Standing com a conversão do pacote; linha-título convertida fora da formação e em "não agrupadas" com selo; alias da lista do Assunto; melhoria espera a atualização.
+- [x] `reanchorSubjectOnArticleDna` + servidor/rota/painel "Conversões pendentes do Assunto" + MCP `update_article_subject` + catálogo.
+- [ ] Dono: na WifiConecta, "Atualizar o Assunto dos artigos" (7 artigos) e "Aplicar o plano declarado ao Silo", com readback (SDD §18 passos 7–9).
+- [ ] Painel também na aba Artigos (hoje só no cartão do Silo consolidado).
+- [ ] Verificar o portão do Radar com SiloDNA que fixa versão anterior do artigo (sem caso real hoje).
+
 ## Trava da keyword do plano e "Processar arquitetura" — 2026-10-13
 
 SDD `docs/compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md`. Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**

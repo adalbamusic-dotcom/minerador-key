@@ -1,5 +1,133 @@
 # Estado atual — Radar
 
+## F2 · O Radar lê só a cor escolhida (item 6, compartilhado) — 2026-10-13
+
+SDD `docs/compartilhado/sdd-acelerar-fluxo-do-plano-2026-10-13.md`, item 6. **Verificado no código e confirmado por teste. Validado manualmente: não.** Nenhum arquivo de `modules/radar` ou `lib/radar` foi alterado.
+
+- Na rota do Radar, `components/editorial-pipeline-context.tsx` pede `/api/editorial/workspace` com o `groupId` da cor da etiqueta (área "radar") e `detail=light` (de cada ArticleDNA/SiloDNA só a vigente, a última aprovada e as versões que um item do Radar ou um documento referenciam, com os eventos delas). "Todos os grupos" lê a marca inteira, leve. A cor ainda resolvendo espera; cor com mais de um grupo lê tudo.
+- A leitura de uma cor nunca tira da memória as outras (itens do Radar, SERP e documentos já se fundiam assim; publicações passaram a se fundir pelo recorte). A cópia local do recorte tem chave própria (`…:<groupId>`) enquanto não houve leitura inteira. Fora do Radar, depois de uma leitura recortada ou leve, a mesa relê inteira.
+- Histórico de um artefato sob demanda: `GET /api/editorial/workspace/versions?marcaId=&entityId=`.
+- **A medir pelo dono:** bytes da mesa por cor na AdalbaPro (meta < 1 MB por cor; sem número prometido antes de medir).
+
+## F5 · O Radar acompanha o Arquiteto ("Atualização disponível do Arquiteto") — 2026-10-13
+
+SDD `docs/compartilhado/sdd-acelerar-fluxo-do-plano-2026-10-13.md` (aprovada e autorizada pelo dono), item 14 / fase
+F5. Módulo proprietário: Radar. Regra do dono (2026-10-09): o Radar se adapta ao Arquiteto, nunca exige reenvio nem
+mexe nele.
+
+**Verificado no código e confirmado por teste. Validado manualmente: não (homologação é do dono).** Sem migration, sem
+SQL, sem campo novo no `RadarItem`, sem chamada paga nem IA (teste com armazém em memória e `fetch` roteirizado).
+
+- **O que o dono vê e clica:** na tela do Radar, sob o título "Planilha", a faixa **"Atualização disponível do
+  Arquiteto · N artigo(s)"** (só aparece quando há item atrás; vale o recorte da cor) → **"Ver e adotar"** → a prévia,
+  agrupada por Silo: por artigo, "Atualização disponível do Arquiteto · vN → vM", a classe, "O que mudou" (principal,
+  slug, keywords que entraram/saíram, papel das keywords, qualificação, promessa, escopo, Assunto, papel no Silo,
+  intenção), "Continua valendo", "Fica para refazer" e "Custo". Marca-se o Silo inteiro ("Marcar o Silo inteiro (k)")
+  ou item a item; desmarcar é a recusa por item; o recusado pela regra aparece com o motivo e não marca. **"Adotar a
+  versão nova (k)"** grava; o aviso do topo diz quantos o servidor confirmou e o motivo dos recusados, e a mesa é
+  relida.
+- **Rótulo próprio:** `RADAR_ARCHITECT_UPDATE_LABEL` (`lib/radar/architect-update.ts`), eixo de transferência
+  (AGENTS §12). O "Atualização disponível" de `lib/radar/editorial-identity.ts` (identidade de publicação) não mudou.
+- **Detecção (só leitura):** a versão transportada (`payload->>articleDnaVersionId` / `source_version_id`) contra a
+  vigente aprovada do artigo no índice canônico do Arquiteto (`buildCanonicalIndex`, a régua do envio); mais nova, do
+  mesmo artigo e da mesma marca (`detectArchitectUpdate`). A listagem lê só a cabeça das linhas; o payload só de quem
+  tem versão nova.
+- **Classificação pura (`classifyArchitectUpdate`):** `principal_changed` (principal ou slug), `composition_changed`
+  (keywords entraram/saíram, papel ou qualificação do KeywordDNA mudou) e `same_research_basis` (o resto).
+- **Adoção (`adoptArchitectVersionWithCore`, `lib/server/radar-architect-adoption.ts`):** confere o hash da seleção
+  contra o estado de agora (prévia vencida não grava), a trava otimista e o hash do ArticleDNA; monta o item pelo
+  MESMO `importArticlesToRadar` + `RadarItemSchema` do envio, com o Silo resolvido no servidor
+  (`resolveCanonicalSiloForArticle` sobre o SiloDNA/SiloPage aprovados) e os links do envio; troca só os campos do
+  Arquiteto (`RADAR_ARCHITECT_ITEM_FIELDS`) — id, estado, datas e histórico de análises ficam; grava uma versão nova
+  da análise (a corrida vai antes, como `guardarCorridas`): mesma base → a impressão da investigação é reapontada só
+  nas partes do artigo (a tela continua comparando keywords, Silo, formação e links); composição → a impressão fica
+  (a tela marca "refazer a pesquisa", cache primeiro); principal → o MESMO `buildRadarResetPayload` zera o Google
+  (Vídeos, Especialista, YouTube e Amazon ficam) e a proveniência da SERP da formação sai. As decisões de keyword
+  acompanham o conjunto novo. Releitura (`radarReadbackMatches` + `payload.articleDnaVersionId`) e evento
+  `adopt_architect_version` em `editorial_decision_events`. Só escreve a linha `stage = radar`.
+- **Recusas nesta fase:** investigação congelada (Google, YouTube ou Amazon — olhando a última do array e a de maior
+  número), pacote aprovado, enviado ao Redator (D11: a troca só depois do congelamento novo, ainda não automático — o
+  item e os entregáveis seguem na versão enviada), slug publicado que mudaria, Silo não resolvido.
+- **Depois de adotar:** o export, o artigo-modelo e `get_article_for_writing` usam a versão nova pelo caminho que já
+  existe (a análise corrente passa a carregar a vM) — dado novo, não regra nova.
+- **MCP e catálogo (AGENTS §17.1):** ferramenta `adopt_architect_version` (prévia `platform.read` + ver o Radar;
+  aplicar `radar.write` + `platform.decide` + editar o Radar + aceite no chat + `decisionHash`), operação
+  `radar.adopt_architect_version`, rota `/api/editorial/radar-architect-update`; `get_platform_state` traz
+  `radar.items[].architectUpdate`; os textos do catálogo que diziam "o reenvio ainda não existe" foram corrigidos.
+- **Entregáveis intocados:** nada mudou em `article-blueprint*.ts`, `human-voice-guideline.ts`, `natural-anchor*.ts`,
+  `publication-identity.ts`, `editorial-identity.ts`, `portable-writing-*.ts`, export portátil, `get_article_for_writing`
+  nem no Redator; o teste E0 continua verde com os mesmos hashes.
+- **Arquivos:** novos `lib/radar/architect-update.ts`, `lib/server/radar-architect-adoption.ts`,
+  `lib/server/radar-architect-adoption-store.ts`, `app/api/editorial/radar-architect-update/route.ts`,
+  `modules/radar/radar-architect-update-panel.tsx`, `tests/radar-f5-adocao-versao-arquiteto-2026-10-13.test.mts`,
+  `tests/radar-f5-adocao-tela-2026-10-13.test.mts`; alterados `modules/radar/radar-page.tsx` (faixa sob "Planilha"),
+  `lib/server/platform-mcp-tools.ts`, `lib/agent/platform-catalog.ts`, `lib/server/agent-platform-state.ts`,
+  `lib/agent/platform-state-model.ts` (campo opcional) e `tests/agent-platform-mcp.test.mts` (asserção da pendência
+  trocada de propósito + teste da ferramenta).
+- **Limites:** item finalizado/enviado fica para a F5.b (backlog); coletas do YouTube/Amazon não congeladas seguem com a
+  impressão da vN (a prévia avisa); links internos seguem os do envio (lacuna declarada quando o grafo aprovado não
+  cobre a vM); a prévia da faixa lê a marca inteira (cabeças + índice canônico) ao abrir a planilha e quando o recorte
+  muda.
+
+## "Pesquisar e finalizar (N artigos)" na barra de lote — 2026-10-13
+
+Achado da auditoria do fluxo: investigar era por artigo — abrir, "Iniciar Pesquisa Google", "Analisar concorrência · e
+finaliza" (cerca de 3 cliques por artigo, 24 num Silo de 8) — e a barra de lote ainda oferecia o processo antigo.
+Autorização do dono (2026-10-13): "pode implementar, que seja tudo para melhorar e acelerar esse fluxo … sobre os
+entregáveis não muda nem apaga nada das últimas arrumações". Módulo proprietário: Radar.
+
+**Verificado no código e confirmado por teste. Validado manualmente: não (homologação é do dono).** Sem migration, sem
+SQL, sem escrita remota fora das rotas que o botão do artigo já usa, sem chamada paga em teste (fixtures; sentinela de
+`fetch`).
+
+- **O que o dono clica:** marcar os artigos na planilha (ou o Silo pela etiqueta/seleção) → barra de lote →
+  "Pesquisar e finalizar (N artigos)" → a prévia mostra quem segue, quem é pulado (já finalizado, sem custo), quem
+  fica fora e por quê, e o teto → "Confirmar e pesquisar". Uma faixa sob o cabeçalho diz "Artigo k de N · "título" ·
+  pesquisando no Google / analisando a concorrência e finalizando…"; no fim, o desfecho de cada artigo com o motivo de
+  quem parou, e o aviso do topo com a contagem confirmada no servidor.
+- **Um caminho só (regra do piloto):** o lote abre cada artigo (`selectAndActivate`, como o clique na linha), espera o
+  render dele e chama o handler do botão do render mais recente — `startDeepResearch`, `analyzeSerpSelection` (que
+  congela sozinho pela rotina do automático) e `finalizeInvestigation` —, escolhido pela Fase 1 que a tela resolveu
+  (`radarPhase1Action`) e pelo mesmo mapa do botão (`RADAR_PHASE1_HANDLER`). Cache primeiro e as 4 lentes são os da
+  coleta do botão; congelamento, releitura e IA do artigo-modelo são os do automático. Em série: o guarda de ação do
+  Radar é um por vez (`radarClaimAction`), e a IA do artigo-modelo também (o passo que pode finalizar espera a do
+  artigo anterior; a coleta do artigo seguinte já pode correr enquanto isso).
+- **Prévia de custo (`planRadarResearchBatch`, `lib/radar/research-batch.ts`):** por artigo que inicia a pesquisa,
+  (consulta central se ainda não gravada — `radarCanonicalReusePlan` — + auxiliares que o START executaria) × 4 lentes
+  DataForSEO no pior caso; até 2 chamadas de IA por artigo para o artigo-modelo (só se faltar). Artigo que já está em
+  "Analisar concorrência" não tem consulta paga. Nada roda sem "Confirmar e pesquisar" (`confirmed`).
+- **Travas do lote:** já finalizado é pulado (nem aberto); YouTube/Amazon, contexto não resolvido, ação indisponível,
+  "Refazer" depois de pesquisa sem página analisável (pesquisa paga nova) e intenção da SERP em conflito ficam fora,
+  com motivo. Nenhum artigo é pesquisado (pago) duas vezes no mesmo lote; passo que não avança, passo que lança e
+  artigo que não abre param só aquele artigo, com a última mensagem da tela como motivo. Finalização manual em lote
+  só sem conflito de intenção (a mesma parada do automático do Google).
+- **Releitura do fim:** espera a IA do último artigo-modelo e relê cada finalizado no servidor
+  (`analiseConfirmadaNoServidor`); o que a tela deu como finalizado e a releitura não confirmou volta como parado
+  (`radarResearchBatchConfirmReadback`). O resumo diz finalizados confirmados, pulados, parados (com motivo) e o
+  artigo-modelo concluído/com falha.
+- **Barra de lote (processo antigo fora da tela):** `RADAR_PILOT_BULK_OPERATIONS = ["writer"]` em
+  `modules/radar/radar-r4-bulk-operations-bar.tsx`. Saíram da tela "Iniciar lote SERP", "Atualizar SERP selecionada
+  (cache primeiro)", "Revisar SERP", "Aprovar SERP", "Preparar pautas", "Aprovar selecionadas", "Enviar ao
+  especialista · fundação Telegram bloqueada", "Revisar contribuição" e "Gerar relatório", e os contadores de pautas.
+  Ficam "Pesquisar e finalizar (N artigos)", "Organizar o artigo-modelo (N)" (seleção e Silo) e "Enviar ao Redator".
+  Os handlers antigos continuam no código (testes estruturais os leem); ver backlog.
+- **Progresso:** `RadarR5QueueProgress` não serviu — o vocabulário dela é o do lote SERP ("aguardando revisão");
+  o lote tem a própria faixa (`RadarResearchBatchProgressStrip`).
+- **Catálogo (AGENTS §17.1):** `radar.investigate` (`howOnScreen` e nota) descreve o lote. Não há ferramenta MCP
+  equivalente: a pesquisa é paga e a confirmação é humana, na tela.
+- **Entregáveis intocados:** nada mudou em `lib/radar/article-blueprint.ts`, `human-voice-guideline.ts`,
+  `natural-anchor*.ts`, `publication-identity.ts`, `portable-writing-*.ts`, export portátil, `get_article_for_writing`
+  nem no Redator.
+- **Arquivos:** `lib/radar/research-batch.ts` (novo, domínio puro), `modules/radar/radar-page.tsx`,
+  `modules/radar/radar-r4-bulk-operations-bar.tsx`, `lib/agent/platform-catalog.ts`; testes
+  `tests/radar-pesquisa-em-lote-2026-10-13.test.mts` (novo), `tests/radar-tela-quatro-lentes-correcoes.test.mts`
+  (o teste de DOM da barra passou a provar que as operações antigas não aparecem) e
+  `tests/radar-piloto-artigo-modelo-obrigatorio-2026-10-09.test.mts` (a barra ganhou `barraDoLoteDePesquisa`).
+- **Limites:** o lote anda pelo render (o artigo em curso fica aberto na tela); abrir outro artigo no meio para o
+  artigo em curso com motivo. Passo que não muda a Fase 1 espera até 20 s antes de ser dado como "não avançou". A IA
+  do artigo-modelo espera no máximo 5 min por artigo antes de o lote seguir. O teto de auxiliares usa o plano
+  (`executable`), que pode contar keyword que a pesquisa depois dispensa por falta de volume — é teto, não previsão.
+
 ## Assunto legível em todo painel do Radar — 2026-10-13
 
 Pedido do dono (2026-10-13): "coloca sempre o assunto no painel para que seja legível". Só a keyword principal não identificava o artigo.

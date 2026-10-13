@@ -17,7 +17,7 @@ import { resolveKeywordDnaSignals } from "@/lib/arquiteto/keyword-dna-signals";
 import { applySerpDecisionToArticle, buildClassificationEvidence, resolveArticleClassification, unresolvedClassifications, ARTICLE_INTENT_LABELS, ARTICLE_FUNNEL_LABELS } from "@/lib/arquiteto/article-classification-closure";
 import { resolveApprovedArticleSerpGate, type ApprovedSerpRecord } from "@/lib/arquiteto/approved-article-serp-gate";
 import { readArticleKgrDecision } from "@/lib/arquiteto/article-kgr-decision";
-import { readArchitectSubjectStanding, planSubjectAttachment, attachSubjectToArticleDna, freePlanPrincipal, lockedPlanPrincipal, subjectMayBePrincipal } from "@/lib/arquiteto/declared-subject";
+import { readArchitectSubjectStanding, readArchitectSubjectStandings, planSubjectAttachment, attachSubjectToArticleDna, freePlanPrincipal, lockedPlanPrincipal, subjectMayBePrincipal } from "@/lib/arquiteto/declared-subject";
 import { applyDeclaredPlanToArticleDna, applySerpSupportBasisProvenance, declaredPlanAppliedTo, declaredPlanForGroup } from "@/lib/arquiteto/declared-plan-formation";
 import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import { shortSeedsOf, sharesTheme } from "@/lib/minerador/short-seeds";
@@ -30,6 +30,10 @@ import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
 import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";
 import { importSubjectDiscoveryWithCore, readSubjectDiscoveryBlock } from "@/lib/minerador/subject-discovery-import";
 import { assessRework, decideRework, formatReworkWhen, reworkView, type ReworkView } from "@/lib/editorial/rework-guard";
+import { isEditorialGroupColor, type EditorialGroupFilter } from "@/lib/editorial/editorial-groups";
+import { parseGroupIdQuery } from "@/lib/editorial/article-groups";
+import { listEditorialGroupSummaries } from "@/lib/editorial/editorial-groups-store";
+import { getOperationalClient } from "./editorial-db";
 import { loadCanonicalArquitetoWorkspace, createMineradorArquitetoHandoff } from "./arquiteto-workspace";
 import { readDifferentiationBrandKeywords, readPublishedFootprints } from "./arquiteto-differentiation-store";
 import { proposeArticleImprovementAiPicks, readGoogleAdsAverageVolumes } from "./arquiteto-differentiation-runtime";
@@ -77,6 +81,8 @@ export type ImprovementRun = {
   collect?: { doneGroupIds: string[]; remaining: number; reservedRemaining: number; phase: "collect" | "refresh"; totalGroups?: number };
   /** A leitura editorial da IA na lista: feita uma vez no prepare e reaproveitada (nunca repetida) no collect. */
   editorialAi?: ImprovementEditorialAi;
+  /** SDD acelerar 2026-10-13, item 4: o recorte do grupo lido no prepare ("Formar os artigos do plano · cor"). Ausente = marca inteira. */
+  groupScope?: { requested: string; filter: "group" | "none"; groupId: string | null };
   /** Impressão digital dos insumos (alvos, fontes, lista): igual = reaproveita IA, medições e busca (2026-10-12). */
   inputsHash?: string;
   /** A execução de onde vieram a leitura da IA e a busca, sem chamada nova. */
@@ -134,8 +140,27 @@ function sourceHash(target: ImprovementTarget, workspace: Workspace, rows: Map<s
     ...(target.declaredPrincipalId ? { declaredPrincipalId: target.declaredPrincipalId } : {}), ...(target.declaredPlanPending ? { declaredPlanPending: true } : {}) };
   return hash({ target: identity, article: article?.contentHash ?? null, members: target.memberIds.map(member) });
 }
-async function readInputs(context: PipelineContext, requested?: string[]) {
-  const [workspace, brand, territories] = await Promise.all([loadCanonicalArquitetoWorkspace(context, { keywordDetail: "full" }), readDifferentiationBrandKeywords(context), listTerritoryWorkflowItems(context)]);
+/*
+ * SDD acelerar 2026-10-13, item 4 — "FORMAR OS ARTIGOS DO PLANO · <cor>": o
+ * recorte do grupo vem como cor, uuid ou "sem-grupo". Os alvos e a lista da
+ * marca passam a ser só os do grupo (fechado por artigo, pelo leitor de
+ * sempre); a proteção (publicados da marca inteira, canibalização) continua
+ * lendo a marca inteira.
+ */
+async function resolveImprovementGroup(context: PipelineContext, requested: string): Promise<{ filter: Exclude<EditorialGroupFilter, { kind: "all" }>; scope: NonNullable<ImprovementRun["groupScope"]> }> {
+  const valor = requested.trim().toLowerCase();
+  const direto = parseGroupIdQuery(valor);
+  if (direto.ok && direto.filter.kind === "none") return { filter: direto.filter, scope: { requested: valor, filter: "none", groupId: null } };
+  if (direto.ok && direto.filter.kind === "group") return { filter: direto.filter, scope: { requested: valor, filter: "group", groupId: direto.filter.groupId } };
+  if (!isEditorialGroupColor(valor)) throw refusal(`Grupo desconhecido: “${requested}”. Use a cor, o id do grupo ou “sem-grupo”.`);
+  const lidos = await listEditorialGroupSummaries(getOperationalClient(), context.brandId);
+  if (!lidos.ok) throw refusal("Os grupos ainda não estão disponíveis neste banco.");
+  const ativos = lidos.groups.filter(group => group.status === "active" && group.color === valor);
+  if (ativos.length !== 1) throw refusal(ativos.length ? `A cor ${valor} tem mais de um grupo ativo: use o id do grupo.` : `Nenhum grupo ativo na cor ${valor} nesta marca.`);
+  return { filter: { kind: "group", groupId: ativos[0].id }, scope: { requested: valor, filter: "group", groupId: ativos[0].id } };
+}
+async function readInputs(context: PipelineContext, requested?: string[], groupFilter?: Exclude<EditorialGroupFilter, { kind: "all" }>) {
+  const [workspace, brand, territories] = await Promise.all([loadCanonicalArquitetoWorkspace(context, { keywordDetail: "full", ...(groupFilter ? { groupFilter } : {}) }), readDifferentiationBrandKeywords(context), listTerritoryWorkflowItems(context)]);
   const rows = projected(workspace, context.brandId), targets: ImprovementTarget[] = [];
   const waitingDeclaredPrincipal: string[] = [];
   const owned = new Map<string, string>();
@@ -152,9 +177,22 @@ async function readInputs(context: PipelineContext, requested?: string[]) {
     targets.push(target);
     for (const member of target.memberIds) if (article || !owned.has(member)) owned.set(member, id);
   }
+  // 2026-10-13 · com a conversão do formato anterior aplicada: a linha-título convertida não é mais Assunto.
+  const standings = readArchitectSubjectStandings(rows.values());
   for (const row of rows.values()) {
-    const standing = readArchitectSubjectStanding(row);
+    const standing = standings.get(row.id) ?? readArchitectSubjectStanding(row);
     if (!standing.declared || !standing.received || targets.some(t => t.memberIds.includes(row.id))) continue;
+    /*
+     * 2026-10-13 · CONVERSÃO (SDD `sdd-conversao-assunto-legado-2026-10-13.md` R1):
+     * o Assunto já mora nesta keyword, mas o artigo ainda aponta para a
+     * linha-título. Até "Atualizar o Assunto do artigo", ele espera — nunca
+     * nasce um segundo artigo para a mesma keyword.
+     */
+    const convertendo = standing.conversion?.articleId ? workspace.articleDnas.find(a => a.payload.articleId === standing.conversion!.articleId && a.payload.subject?.keywordId !== row.id) : undefined;
+    if (convertendo) {
+      waitingDeclaredPrincipal.push(`“${standing.phrase}” aguarda “Atualizar o Assunto do artigo” no Arquiteto (o Assunto saiu da linha-título e passou para “${row.keyword}”).`);
+      continue;
+    }
     const article = workspace.articleDnas.find(a => a.payload.subject?.keywordId === row.id);
     // F4 — a principal declarada ainda não chegou ao Arquiteto: o Assunto espera (nunca ganha principal sugerida).
     if (standing.plan?.declaredPrincipal && !rows.has(standing.plan.declaredPrincipal.keywordId)) {
@@ -210,10 +248,16 @@ async function readInputs(context: PipelineContext, requested?: string[]) {
    */
   const subjectsWithMineradorList = new Set<string>();
   const subjectIds = new Set(targets.filter(t => t.kind === "subject").map(t => t.id));
+  // 2026-10-13 · a lista da linha-título convertida é a lista da keyword que agora carrega o Assunto (alias derivado; nada é regravado).
+  const aliasDoAssunto = new Map<string, string>();
+  for (const standing of standings.values()) if (standing.conversion && standing.declared) aliasDoAssunto.set(standing.conversion.fromKeywordId, standing.keywordId);
   if (subjectIds.size) for (const row of rows.values()) {
     const approved = object(object(object(row.canonicalWorkflow).payload).approvedDna);
     for (const semantic of [object(row.analise_semantica), object(approved.analiseSemantica)]) {
-      for (const id of readSubjectDiscoveryBlock(semantic).subjectKeywordIds) if (subjectIds.has(id) && id !== row.id) subjectsWithMineradorList.add(id);
+      for (const lido of readSubjectDiscoveryBlock(semantic).subjectKeywordIds) {
+        const id = subjectIds.has(lido) ? lido : aliasDoAssunto.get(lido) ?? lido;
+        if (subjectIds.has(id) && id !== row.id) subjectsWithMineradorList.add(id);
+      }
     }
   }
   return { workspace, rows, targets: selected, keywords, waitingDeclaredPrincipal, subjectsWithMineradorList };
@@ -497,13 +541,17 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
   const context = runtime.context;
   if (request.brandId !== context.brandId) throw refusal("Marca divergente do contexto autorizado.");
   if (request.action === "prepare") {
-    const input = await readInputs(context, request.targetIds);
+    const recorte = request.group ? await resolveImprovementGroup(context, request.group) : null;
+    const input = await readInputs(context, request.targetIds, recorte?.filter);
     const run: ImprovementRun = { version: ARTICLE_IMPROVEMENT_VERSION, runId: randomUUID(), brandId: context.brandId, actorId: context.actorUserId, createdAt: new Date().toISOString(), state: "prepared", leaseUntil: null, decisionHash: "", sourceHashes: Object.fromEntries(input.targets.map(t => [t.id, sourceHash(t, input.workspace, input.rows)])), targets: input.targets, keywords: input.keywords, beforeAssignments: Object.fromEntries([...input.rows].map(([id, row]) => [id, Object.fromEntries(Object.entries(object(object(row.canonicalWorkflow).payload)).filter(([key]) => ["territoryRef", "territoryAssignment", "articleFormationRef", "articleFormationDecision", "articleSubjectAnchor", "workingArticleId"].includes(key)))])), proposals: [], costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] }, reservedCostUsd: 0, notices: [], outcomes: [], acceptedIds: null };
     const started = Date.now();
     // 0 · MESMOS INSUMOS, MESMA LEITURA (2026-10-12): a execução anterior com a
     // mesma impressão digital dá a leitura da IA, as medições e a busca; nada
     // disso é chamado de novo. O cache da SERP (grátis) é relido abaixo.
-    run.inputsHash = stableHash(improvementInputsFingerprint({ version: run.version, brandId: run.brandId, sourceHashes: run.sourceHashes, keywords: input.keywords }));
+    // Sem recorte, a impressão digital de sempre; com ele, o recorte entra (execuções de grupos diferentes não se confundem).
+    const digital = improvementInputsFingerprint({ version: run.version, brandId: run.brandId, sourceHashes: run.sourceHashes, keywords: input.keywords });
+    if (recorte) run.groupScope = recorte.scope;
+    run.inputsHash = stableHash(recorte ? { ...(digital as Record<string, unknown>), groupScope: recorte.scope.groupId ?? recorte.scope.filter } : digital);
     /*
      * F5 · GUARDA DE RETRABALHO (SDD 2026-10-12 §10.3). O registro é a própria
      * execução anterior (mesmo `inputsHash`, na janela): `same_inputs_reuse`

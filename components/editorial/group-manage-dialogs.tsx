@@ -4,7 +4,9 @@ import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { Loader2, X } from "lucide-react";
 import { EditorialGroupDot, EditorialGroupTag } from "@/components/editorial/group-tag";
 import {
-  applyDeclaredPlanWithdraw,
+  applyDeclaredPlanWithdrawChain,
+  type DeclaredPlanWithdrawChainOptions,
+  type DeclaredPlanWithdrawChainStep,
   loadDeclaredPlanArticles,
   loadEditorialGroupHistory,
   manageEditorialColorGroup,
@@ -215,6 +217,13 @@ function DeclaredPlanSection({ brandId, groupId }: { brandId: string; groupId: s
   const [aviso, setAviso] = useState<Aviso>(null);
   const [previa, setPrevia] = useState<DeclaredPlanWithdrawPreview | null>(null);
   const [busy, setBusy] = useState(false);
+  /*
+   * SDD acelerar 2026-10-13, item 15 — "Tirar do plano" numa confirmação: a
+   * prévia lista os efeitos no Minerador e no Arquiteto; reaprovar+enviar e
+   * retirar do Silo vêm marcados. Cada passo é feito pelo núcleo do dono.
+   */
+  const [opcoes, setOpcoes] = useState<DeclaredPlanWithdrawChainOptions>({ reapproveAndSend: true, withdrawFromSilo: true });
+  const [passos, setPassos] = useState<DeclaredPlanWithdrawChainStep[] | null>(null);
 
   const ler = async () => {
     setCarregando(true);
@@ -232,8 +241,9 @@ function DeclaredPlanSection({ brandId, groupId }: { brandId: string; groupId: s
     setBusy(true);
     setAviso(null);
     try {
-      const resultado = await previewDeclaredPlanWithdraw(brandId, groupId, article.subject.keywordId);
+      const resultado = await previewDeclaredPlanWithdraw(brandId, groupId, article.subject.keywordId, opcoes);
       if (!resultado.ok) { setAviso({ tone: "danger", text: resultado.message }); return; }
+      setPassos(null);
       setPrevia(resultado.preview);
     } finally {
       setBusy(false);
@@ -244,9 +254,12 @@ function DeclaredPlanSection({ brandId, groupId }: { brandId: string; groupId: s
     if (!previa || busy) return;
     setBusy(true);
     try {
-      const resultado = await applyDeclaredPlanWithdraw(brandId, groupId, previa.article.subject.keywordId, previa.decisionHash);
+      const resultado = await applyDeclaredPlanWithdrawChain(brandId, groupId, previa.article.subject.keywordId, previa.decisionHash, opcoes);
       if (!resultado.ok) { setAviso({ tone: "danger", text: resultado.message }); return; }
-      setAviso({ tone: "success", text: `“${previa.article.subject.phrase}” saiu do plano. Plano v${resultado.planVersion} gravado e relido.${resultado.notices.length ? ` ${resultado.notices.join(" ")}` : ""} Reaprove no Minerador o que voltou para “Em revisão”.` });
+      setPassos(resultado.steps);
+      setAviso({ tone: resultado.complete ? "success" : "warning", text: resultado.complete
+        ? `“${previa.article.subject.phrase}” saiu do plano; cada passo foi relido.`
+        : `“${previa.article.subject.phrase}”: parte da sequência ficou pendente (veja os passos). Repita “Tirar do plano”: o que já foi feito não se repete.` });
       setPrevia(null);
       await ler();
     } finally {
@@ -282,7 +295,17 @@ function DeclaredPlanSection({ brandId, groupId }: { brandId: string; groupId: s
       {previa ? (
         <div className="space-y-2 rounded-md border border-warning/40 p-3" data-declared-plan-preview>
           <p className="text-sm font-semibold">Prévia · tirar “{previa.article.subject.phrase}” do plano</p>
-          <ul className="list-disc space-y-1 pl-5 text-sm leading-5">{previa.effects.map(efeito => <li key={efeito}>{efeito}</li>)}</ul>
+          <ul className="list-disc space-y-1 pl-5 text-sm leading-5">{(previa.chain?.effects ?? previa.effects).map(efeito => <li key={efeito}>{efeito}</li>)}</ul>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" className="h-4 w-4" checked={opcoes.reapproveAndSend} disabled={busy} onChange={event => setOpcoes(atual => ({ ...atual, reapproveAndSend: event.target.checked }))} data-declared-plan-chain-reapprove />
+            Reaprovar e reenviar ao Arquiteto o que voltar para “Em revisão”
+          </label>
+          {previa.chain?.arquiteto ? (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" className="h-4 w-4" checked={opcoes.withdrawFromSilo} disabled={busy || !previa.chain.arquiteto.canWithdraw} onChange={event => setOpcoes(atual => ({ ...atual, withdrawFromSilo: event.target.checked }))} data-declared-plan-chain-silo />
+              Retirar “{previa.chain.arquiteto.label}” do Silo no Arquiteto
+            </label>
+          ) : null}
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy} onClick={() => void confirmar()} className={BOTAO_PRIMARIO} data-declared-plan-confirm>
               {busy ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}Confirmar: tirar do plano
@@ -290,6 +313,11 @@ function DeclaredPlanSection({ brandId, groupId }: { brandId: string; groupId: s
             <button type="button" disabled={busy} onClick={() => setPrevia(null)} className={BOTAO}>Cancelar</button>
           </div>
         </div>
+      ) : null}
+      {passos ? (
+        <ul className="list-disc space-y-1 pl-5 text-sm leading-5" data-declared-plan-chain-steps>
+          {passos.map(passo => <li key={passo.step}><span className="font-semibold">{passo.step === "plan" ? "Plano" : passo.step === "approve_and_send" ? "Reaprovar e enviar" : "Silo no Arquiteto"}</span> · {passo.message}</li>)}
+        </ul>
       ) : null}
     </section>
   );

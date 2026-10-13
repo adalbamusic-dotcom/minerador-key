@@ -41,7 +41,7 @@ export function ImprovementProgress({ activity, now, done, total, unit }: { acti
     note="o andamento fica guardado no servidor" testId="architect-improvement-progress" />;
 }
 
-function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [] }: {
+function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], planGroups = [] }: {
   brandId: string | null; onApplied: () => void; buttonClassName: string; primaryButtonClassName: string;
   /** A aba mostra Sobras agora: sem elas, o cartão não manda para um lugar vazio. */
   hasLeftovers?: boolean;
@@ -51,6 +51,12 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
    * valendo só para as linhas marcadas na tabela desta análise.
    */
   selectedTargetIds?: readonly string[];
+  /**
+   * SDD acelerar 2026-10-13, item 4: os grupos com plano declarado na mesa. Para
+   * eles a porta é uma só, "Formar os artigos do plano · <cor>" (o prepare
+   * recortado pelo grupo).
+   */
+  planGroups?: ReadonlyArray<{ color: string; label: string }>;
 }) {
   const mounted = useRef(false);
   const [leaseActive, setLeaseActive] = useState(false);
@@ -79,7 +85,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     }).catch(() => { if (active) setError("Não foi possível ler a análise anterior. Toque em “Atualizar”."); });
     return () => { active = false; mounted.current = false; };
   }, [brandId]);
-  async function send(action: "prepare" | "collect" | "apply" | "status", current = run, options: { discover?: boolean; reworkReason?: string } = {}): Promise<ImprovementRun> {
+  async function send(action: "prepare" | "collect" | "apply" | "status", current = run, options: { discover?: boolean; reworkReason?: string; group?: string } = {}): Promise<ImprovementRun> {
     const response = await fetch("/api/arquiteto/article-improvement", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ brandId, action,
       ...(action !== "prepare" ? { runId: current?.runId } : {}),
       ...(action === "collect" || action === "apply" ? { decisionHash: current?.decisionHash } : {}),
@@ -90,6 +96,8 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
       ...(action === "prepare" && options.discover ? { discover: true } : {}),
       // F5 — "Refazer mesmo assim" (D11): os mesmos insumos de novo, só com o motivo dito.
       ...(action === "prepare" && options.reworkReason ? { reworkOverride: { reason: options.reworkReason } } : {}),
+      // Item 4: "Formar os artigos do plano · <cor>" recorta o prepare ao grupo; "Buscar de novo" mantém o recorte da execução.
+      ...(action === "prepare" && options.group ? { group: options.group } : {}),
     }) });
     // The platform answers a timeout with an HTML page, not JSON.
     const body = await response.json().catch(() => { throw new Error("TEMPO_ESGOTADO"); });
@@ -97,7 +105,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     if (!mounted.current || body.data.brandId !== brandId) throw new Error("A marca ativa mudou; consulte o andamento na marca de origem.");
     setRun(body.data); setLeaseActive(Boolean(body.data.leaseUntil && Date.parse(body.data.leaseUntil) > Date.now())); return body.data as ImprovementRun;
   }
-  async function execute(action: "prepare" | "collect" | "apply" | "status", options: { discover?: boolean; reworkReason?: string } = {}) {
+  async function execute(action: "prepare" | "collect" | "apply" | "status", options: { discover?: boolean; reworkReason?: string; group?: string } = {}) {
     setBusy(true); setError(null); setConfirm(null);
     const startedAt = Date.now();
     setActivity({ action, startedAt }); setNow(startedAt);
@@ -220,6 +228,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
           <InfoHint title="Como funciona" description="1 · Buscar keywords com volume para cada publicado e Assunto (Google Ads grátis; a leitura da IA usa a IA da plataforma (OpenRouter)): primeiro os pares da SERP que já estão no cache, depois a leitura da IA na lista da marca (confira o motivo de cada uma), depois a leitura da lista pelo código (keywords que são o núcleo do slug, com a palavra do próprio slug) e, só para quem ficar sem nada e quando você pedir (o custo é dito antes), busca nova no Google Ads. Buscar de novo com os mesmos alvos e a mesma lista reaproveita a leitura da IA, as medições e a busca, sem chamar de novo. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
         </h3>
         <p className="text-text-muted">URL, slug e canonical nunca mudam.</p>
+        {run?.groupScope && <p className="text-text-muted" data-testid="architect-improvement-group-scope">Esta análise leu só o grupo {run.groupScope.requested} (alvos e lista do grupo; os publicados da marca inteira continuam protegidos).</p>}
         <p className="text-text-muted" data-testid="architect-improvement-scope">{selectedTargetIds.length
           ? `A busca analisa só os ${selectedTargetIds.length} publicado(s) marcado(s) na planilha.`
           : "Sem publicado marcado na planilha, a busca analisa todos. Gravar vale só para as linhas marcadas abaixo."}</p>
@@ -227,8 +236,9 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
       <div className="flex flex-wrap gap-2">
         {collecting && !inCard("resume_collect") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("collect")}>Continuar validação (sem custo novo)</button>}
         {!pendingApply && !collecting && !inCard("prepare") && <button className={buttonClassName} disabled={!brandId || busy || leaseActive} onClick={() => void execute("prepare")}>Buscar keywords (grátis)</button>}
+        {!pendingApply && !collecting && planGroups.map(grupo => <button key={grupo.color} data-testid="architect-improvement-plan-group" className={buttonClassName} disabled={!brandId || busy || leaseActive} title="A porta única para os artigos deste plano: a melhoria lê só a lista do grupo e obedece ao plano, à trava e à guarda de retrabalho." onClick={() => void execute("prepare", { group: grupo.color })}>Formar os artigos do plano · {grupo.label}</button>)}
         {pendingApply && !collecting && !inCard("resume_apply") && !inCard("apply") && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => run?.acceptedIds ? void execute("apply") : setConfirm("apply")}>{improvementRowApplyLabel({ selectedCount: selected.size, paidQueries: needsCost ? run?.costs.paidQueries ?? 0 : 0, optionalPaidQueries: run?.costs.optionalPaidQueries ?? 0, accepted: Boolean(run?.acceptedIds) })}</button>}
-        {pendingApply && !run?.acceptedIds && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => void execute("prepare")}>Buscar de novo</button>}
+        {pendingApply && !run?.acceptedIds && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => void execute("prepare", run?.groupScope ? { group: run.groupScope.requested } : {})}>Buscar de novo</button>}
         {discoveryGaps > 0 && <button className={buttonClassName} disabled={!brandId || busy || leaseActive} onClick={() => setConfirm("discover")}>Buscar keywords novas no Google Ads ({discoveryGaps})</button>}
         {needsCost && !inCard("validate") && <button className={buttonClassName} disabled={busy} onClick={() => setConfirm("collect")}>{improvementValidateLabel(run?.costs.paidQueries ?? 0, run?.costs.estimatedCostUsd.max ?? 0, false)}</button>}
         {run && (leaseActive || run.state === "applying") && !inCard("refresh") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("status")}>Atualizar</button>}

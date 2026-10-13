@@ -16,6 +16,10 @@ import {
 import { DECLARED_PLAN_SCOPE_MAX, SUBJECT_ENTRY_TITLE_MAX, parseDeclaredPlanText, type DeclaredPlanLockChoice, type DeclaredPlanRole } from "@/lib/minerador/declared-plan";
 import { looksLikeSiloPlanText } from "@/lib/minerador/plan-text-detector";
 import type { DeclaredPlanApplyArticle, DeclaredPlanCardRow, DeclaredPlanPreview } from "@/lib/minerador/declared-plan-import-core";
+import { SubjectConversionDialog } from "./subject-conversion-dialog";
+import { SubjectSearchBatchPanel } from "./discovery/subject-search-batch-panel";
+import { subjectSearchBatchLines } from "./discovery/subject-search-batch-model";
+import { CADASTRO_FOLLOW_UP_TEXTS, cadastroLeftoversToDelete, cadastroReapprovalIds, requestCadastroReapproval, type CadastroReapprovalResult } from "./subject-cadastro-follow-up";
 
 /**
  * CADASTRAR ASSUNTOS — O CARD ÚNICO (SDD
@@ -113,6 +117,9 @@ export function SubjectCadastroCard({
   onApplied,
   onUnavailable,
   initialText = "",
+  onDeleteLeftovers,
+  onViewInSheet,
+  onKeywordsChanged,
 }: {
   brandId: string;
   /** 2026-10-13 · plano colado na porta errada ("Colar keywords"/CSV): o card abre com ele e preenche as linhas. */
@@ -120,8 +127,19 @@ export function SubjectCadastroCard({
   /** Os grupos ATIVOS da marca (a cor que já tem grupo leva o cadastro para ele). */
   groups: readonly EditorialGroupSummary[];
   onClose: () => void;
-  onApplied: (applied: DeclaredPlanAppliedIds) => void;
+  /** Pode devolver a promessa da releitura: a reaprovação (item 9) espera por ela. */
+  onApplied: (applied: DeclaredPlanAppliedIds) => void | Promise<void>;
   onUnavailable: () => void;
+  /**
+   * Item 9 (SDD acelerar-fluxo 2026-10-13): abre a MESMA confirmação de exclusão
+   * do Minerador (prévia do servidor + nome digitado) para as sobras marcadas.
+   * Keyword não publicada sai de vez: a planilha não tem lixeira recuperável para ela.
+   */
+  onDeleteLeftovers?: (keywordIds: string[]) => void;
+  /** Item 9: filtra a planilha pela cor do cadastro e seleciona as linhas. */
+  onViewInSheet?: (input: { color: EditorialGroupColor; keywordIds: string[] }) => void;
+  /** Itens 7 e 9: keywords que mudaram depois do cadastro (sustentações enviadas, reaprovadas), para a planilha reler. */
+  onKeywordsChanged?: (keywordIds: string[]) => void;
 }) {
   const silosExistentes = groups.filter(group => group.status === "active" && group.origin === "declared_plan" && group.planVersion > 0);
   const [destino, setDestino] = useState<Destino>("new_silo");
@@ -138,6 +156,15 @@ export function SubjectCadastroCard({
   const [preview, setPreview] = useState<{ request: CadastroRequest; importRequestId: string; result: DeclaredPlanPreview } | null>(null);
   const [applied, setApplied] = useState<ApplyResult | null>(null);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
+  /** Item 9 (SDD acelerar-fluxo 2026-10-13): decisões do dono na prévia; NUNCA marcadas por padrão. */
+  const [excluirSobras, setExcluirSobras] = useState(false);
+  const [reaprovar, setReaprovar] = useState(false);
+  const [reaprovacao, setReaprovacao] = useState<CadastroReapprovalResult | "running" | null>(null);
+  const [exclusaoPedida, setExclusaoPedida] = useState(0);
+  /** 2026-10-13 · "Converter formato anterior" (SDD `sdd-conversao-assunto-legado-2026-10-13.md`). */
+  const [conversaoAberta, setConversaoAberta] = useState(false);
+  const conversaoAbertaRef = useRef(false);
+  useEffect(() => { conversaoAbertaRef.current = conversaoAberta; }, [conversaoAberta]);
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
   const ids = { title: useId(), paste: useId(), name: useId(), slug: useId(), objective: useId(), url: useId(), existing: useId() };
@@ -149,7 +176,7 @@ export function SubjectCadastroCard({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busyRef.current) onClose();
+      if (event.key === "Escape" && !busyRef.current && !conversaoAbertaRef.current) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -160,6 +187,10 @@ export function SubjectCadastroCard({
     setPreview(null);
     setApplied(null);
     setRefusal(null);
+    setExcluirSobras(false);
+    setReaprovar(false);
+    setReaprovacao(null);
+    setExclusaoPedida(0);
   };
   const mudarLinha = (key: string, patch: Partial<Linha>) => {
     setLinhas(current => current.map(linha => linha.key === key ? { ...linha, ...patch } : linha));
@@ -271,6 +302,10 @@ export function SubjectCadastroCard({
     setRefusal(null);
     setApplied(null);
     setPreview(null);
+    setExcluirSobras(false);
+    setReaprovar(false);
+    setReaprovacao(null);
+    setExclusaoPedida(0);
     try {
       const answer = await callCadastro(brandId, { method: "POST", body: { mode: "preview", plan: request.plan, group: request.group, destination: request.destination } });
       if (!mountedRef.current) return;
@@ -328,7 +363,21 @@ export function SubjectCadastroCard({
       setApplied(result);
       const subjectIds = [...new Set(result.articles.map(article => article.subjectKeywordId).filter((id): id is string => Boolean(id)))];
       const principalIds = [...new Set(result.articles.map(article => article.principalKeywordId).filter((id): id is string => Boolean(id)))];
-      onApplied({ subjectIds, createdSubjectIds: result.createdSubjectIds, principalIds });
+      // A planilha relê (e roda a Lógica automática do Assunto) antes da reaprovação: um passo de cada vez.
+      await Promise.resolve(onApplied({ subjectIds, createdSubjectIds: result.createdSubjectIds, principalIds })).catch(() => undefined);
+      // Item 9: só depois do cadastro gravado e relido, e só o que o dono marcou na prévia.
+      const reaprovaveis = reaprovar ? cadastroReapprovalIds(preview.result) : [];
+      if (reaprovaveis.length) {
+        setReaprovacao("running");
+        const reapproval = await requestCadastroReapproval(brandId, reaprovaveis);
+        if (mountedRef.current) setReaprovacao(reapproval);
+        if (reapproval.ok) onKeywordsChanged?.(reaprovaveis);
+      }
+      const sobras = excluirSobras ? cadastroLeftoversToDelete(preview.result).deletable.map(item => item.keywordId) : [];
+      if (sobras.length && onDeleteLeftovers && mountedRef.current) {
+        setExclusaoPedida(sobras.length);
+        onDeleteLeftovers(sobras);
+      }
     } finally {
       busyRef.current = false;
       if (mountedRef.current) setPhase("idle");
@@ -342,6 +391,16 @@ export function SubjectCadastroCard({
   const unchangedCount = applied ? applied.articles.filter(article => article.outcome === "unchanged").length : 0;
   const failures = applied ? applied.articles.filter(article => article.outcome === "failed") : [];
   const publicado = destino === "published";
+  // Item 9: o que a prévia já sabe (sobras que podem sair e aprovadas que voltam a "Em revisão").
+  const sobrasOferecidas = result ? cadastroLeftoversToDelete(result) : { deletable: [], blocked: [] };
+  const reaprovaveisPrevia = result ? cadastroReapprovalIds(result) : [];
+  const corDoCadastro: EditorialGroupColor = preview?.result.group.color ?? corEfetiva;
+  const idsDoCadastro = applied ? [...new Set(applied.articles.flatMap(article => [article.subjectKeywordId, article.principalKeywordId]).filter((id): id is string => Boolean(id)))] : [];
+  // Item 7: uma linha do lote por Assunto gravado; título e keyword vêm da prévia (mesma ordem).
+  const linhasDoLote = applied ? subjectSearchBatchLines(applied.articles.map(article => {
+    const daPrevia = preview?.result.articles.find(item => item.order === article.order) ?? null;
+    return { ...article, title: article.title || daPrevia?.title || "", keyword: daPrevia?.principal.phrase ?? null };
+  })) : [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4 font-sans" role="dialog" aria-modal="true" aria-labelledby={ids.title} data-minerador-subject-cadastro-card>
@@ -351,6 +410,9 @@ export function SubjectCadastroCard({
             <h2 id={ids.title} className="text-base font-semibold text-foreground">Cadastrar Assuntos</h2>
             <p className="mt-1 text-sm leading-6 text-text-muted">O Assunto mora na keyword: cada linha é um artigo, com o título, a keyword que o carrega e os detalhes. Keyword com volume medido entra travada; sem volume, livre. A prévia não grava nada; nada é pago.</p>
           </div>
+          <button type="button" onClick={() => setConversaoAberta(true)} disabled={busy} className={internalButton} data-subject-cadastro-converter title="Assuntos cadastrados como linha própria (o título) passam a morar na keyword do artigo">
+            Converter formato anterior
+          </button>
           <button type="button" onClick={onClose} disabled={busy} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Fechar" title="Fechar">
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -515,6 +577,39 @@ export function SubjectCadastroCard({
 
           {result ? <CadastroPreview result={result} /> : null}
 
+          {result && result.canApply && !applied && (sobrasOferecidas.deletable.length > 0 || sobrasOferecidas.blocked.length > 0 || reaprovaveisPrevia.length > 0) ? (
+            <fieldset className="mt-4 flex flex-col gap-3 rounded-md border border-divider px-3 py-3 text-sm leading-6" data-subject-cadastro-follow-up>
+              <legend className="px-1 font-semibold text-foreground">{CADASTRO_FOLLOW_UP_TEXTS.title}</legend>
+              {sobrasOferecidas.deletable.length > 0 && onDeleteLeftovers ? (
+                <label className="flex items-start gap-2" data-subject-cadastro-excluir-sobras>
+                  <input type="checkbox" className="mt-1 h-4 w-4" checked={excluirSobras} disabled={busy} onChange={event => setExcluirSobras(event.target.checked)} />
+                  <span>
+                    <span className="font-semibold text-danger">{CADASTRO_FOLLOW_UP_TEXTS.deleteLabel(sobrasOferecidas.deletable.length)}</span>
+                    <span className="block text-text-muted">{CADASTRO_FOLLOW_UP_TEXTS.deleteHelp}</span>
+                    <span className="block text-foreground">{sobrasOferecidas.deletable.map(item => item.keyword).join(" · ")}</span>
+                  </span>
+                </label>
+              ) : null}
+              {sobrasOferecidas.blocked.length > 0 ? (
+                <div className="text-text-muted">
+                  <p>{CADASTRO_FOLLOW_UP_TEXTS.deleteBlocked(sobrasOferecidas.blocked.length)}</p>
+                  <ul className="list-disc pl-5">
+                    {sobrasOferecidas.blocked.map(item => <li key={item.keywordId}><span className="text-keyword">{item.keyword}</span> — {item.blockedReason || "não conferida"}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+              {reaprovaveisPrevia.length > 0 ? (
+                <label className="flex items-start gap-2" data-subject-cadastro-reaprovar>
+                  <input type="checkbox" className="mt-1 h-4 w-4" checked={reaprovar} disabled={busy} onChange={event => setReaprovar(event.target.checked)} />
+                  <span>
+                    <span className="font-semibold text-foreground">{CADASTRO_FOLLOW_UP_TEXTS.reapproveLabel(reaprovaveisPrevia.length)}</span>
+                    <span className="block text-text-muted">{CADASTRO_FOLLOW_UP_TEXTS.reapproveHelp}</span>
+                  </span>
+                </label>
+              ) : null}
+            </fieldset>
+          ) : null}
+
           {applied ? (
             <div role="status" className={`mt-4 rounded-md border px-3 py-2 text-sm leading-6 ${applied.failed > 0 ? "border-warning/40" : "border-success/40"}`} data-subject-cadastro-applied>
               <p className={`flex items-center gap-2 font-semibold ${applied.failed > 0 ? "text-warning" : "text-success"}`}>
@@ -532,8 +627,32 @@ export function SubjectCadastroCard({
                   {applied.notices.map(notice => <li key={notice}>{notice}</li>)}
                 </ul>
               ) : null}
+              {reaprovacao === "running" ? <p className="mt-1 flex items-center gap-2 text-foreground" data-subject-cadastro-reaprovacao><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Reaprovando (Lógica e aprovação)…</p> : null}
+              {reaprovacao && reaprovacao !== "running" ? (
+                <div className="mt-1" data-subject-cadastro-reaprovacao>
+                  {reaprovacao.ok ? (
+                    <p className={reaprovacao.refused.length ? "text-warning" : "text-success"}>Reaprovação: {reaprovacao.approved} aprovada(s){reaprovacao.unchanged ? `, ${reaprovacao.unchanged} já estavam aprovadas` : ""}{reaprovacao.refused.length ? `, ${reaprovacao.refused.length} não puderam ser aprovadas` : ""}.</p>
+                  ) : <p className="text-danger">{reaprovacao.message}</p>}
+                  {reaprovacao.ok && reaprovacao.refused.length ? (
+                    <ul className="list-disc space-y-1 pl-5 text-foreground">
+                      {reaprovacao.refused.map(item => <li key={item.id}><span className="text-keyword">{item.keyword || item.id}</span> — {item.reason}</li>)}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+              {exclusaoPedida > 0 ? <p className="mt-1 text-foreground" data-subject-cadastro-exclusao>A confirmação de exclusão das {exclusaoPedida} sobra(s) foi aberta: nada é apagado sem o nome digitado nela.</p> : null}
+              {onViewInSheet && idsDoCadastro.length ? (
+                <div className="mt-2">
+                  <button type="button" onClick={() => onViewInSheet({ color: corDoCadastro, keywordIds: idsDoCadastro })} className={internalButton} data-subject-cadastro-ver-na-planilha>
+                    <EditorialGroupDot color={corDoCadastro} />
+                    Ver na planilha (cor {EDITORIAL_GROUP_COLOR_LABELS[corDoCadastro]})
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
+
+          {applied ? <SubjectSearchBatchPanel brandId={brandId} lines={linhasDoLote} onImported={onKeywordsChanged} /> : null}
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-divider px-4 py-3">
@@ -545,11 +664,13 @@ export function SubjectCadastroCard({
           </button>
         </div>
       </div>
+      {conversaoAberta ? <SubjectConversionDialog brandId={brandId} groups={groups} onClose={() => setConversaoAberta(false)} onApplied={onApplied} /> : null}
     </div>
   );
 }
 
-function CadastroPreview({ result }: { result: DeclaredPlanPreview }) {
+/** A prévia do cadastro (também usada pela conversão do formato anterior, que passa pelo mesmo núcleo). */
+export function CadastroPreview({ result }: { result: DeclaredPlanPreview }) {
   const silo = result.silo;
   return (
     <section className="mt-4 flex flex-col gap-4 border-t border-divider pt-4" aria-label="Prévia do cadastro" data-subject-cadastro-preview>

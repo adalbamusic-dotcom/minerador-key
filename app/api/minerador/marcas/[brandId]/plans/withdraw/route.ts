@@ -27,6 +27,13 @@ const RequestSchema = z.object({
   subjectKeywordId: z.string().trim().min(1).max(200),
   mode: z.enum(["preview", "apply"]),
   decisionHash: z.string().trim().min(1).max(200).optional(),
+  /**
+   * SDD acelerar 2026-10-13, item 15 — "Tirar do plano" numa confirmação: com
+   * `chain`, a prévia lista os efeitos nos dois módulos e aplicar executa cada
+   * passo pelo núcleo do dono (plano → reaprovar e enviar → retirar do Silo).
+   * Ausente = o comportamento de sempre (só o plano).
+   */
+  chain: z.object({ reapproveAndSend: z.boolean().default(true), withdrawFromSilo: z.boolean().default(true) }).strict().optional(),
 }).strict();
 
 const REFUSAL_STATUS: Record<DeclaredPlanWithdrawRefusalCode, number> = {
@@ -78,6 +85,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const input = RequestSchema.parse(await request.json());
     const profile = await requireCanonicalSessionProfile();
     const context = await requireTenantPermission({ brandId, actorUserId: profile.userId, module: "minerador", action: "edit", profile });
+    if (input.chain) {
+      const { withdrawChainResponse } = await import("@/lib/server/declared-plan-withdraw-chain-runtime");
+      const resposta = await withdrawChainResponse({ brandId: context.brandId, actorUserId: context.actorUserId, profile, input: { ...input, chain: input.chain } });
+      if (!resposta.ok) return editorialGroupsFailure(resposta.code, REFUSAL_STATUS[resposta.code as DeclaredPlanWithdrawRefusalCode] ?? 409, resposta.reason, { requestId });
+      return NextResponse.json({ success: true, requestId, ...resposta.body });
+    }
     const result = await withdrawFromDeclaredPlanWithCore({
       brandId: context.brandId,
       actorUserId: context.actorUserId,

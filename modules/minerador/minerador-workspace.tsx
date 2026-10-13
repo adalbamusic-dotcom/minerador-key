@@ -63,6 +63,7 @@ import { primaryKeywordPolicyLabel, readPrimaryKeywordPolicy, setPrimaryKeywordP
 import { keywordPageTypeLabel, keywordPageTypeStanding, setKeywordPageType } from "@/lib/minerador/keyword-page-type";
 import { keywordVinculoChoicesSummary, resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
 import { isKeywordSubjectActorId } from "@/lib/minerador/keyword-subject";
+import { convertedTitleIndex } from "@/lib/minerador/subject-conversion";
 import { planVinculoBatchChoices, VINCULO_BATCH_READBACK_COLUMNS, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";
 import {
   chooseVinculoBatchSelect,
@@ -98,7 +99,12 @@ import {
   resolveKeywordPublication,
 } from "@/lib/minerador/keyword-lifecycle";
 import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS, MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus, type EditorialKeywordStatus } from "@/lib/minerador/editorial-status";
-import { applyApproval, resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE } from "@/lib/minerador/approved-package";
+import { resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE, type ApprovalRequirement } from "@/lib/minerador/approved-package";
+import { approvalBlockerLabel } from "@/lib/minerador/approval-blockers";
+import { ApproveAndSendDialog, callApproveAndSend } from "./approve-and-send-dialog";
+
+/** Teto de "Aprovar e enviar ao Arquiteto" por pedido (o mesmo da rota). */
+const APPROVE_AND_SEND_MAX = 500;
 import type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";
 import { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legacy-import";
 import { KeywordTableBulkBarShell } from "./keyword-table/keyword-table-bulk-bar-shell";
@@ -514,6 +520,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   // Estados de Controle/Status
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  // "Aprovar e enviar ao Arquiteto" (SDD acelerar 2026-10-13, item 2): o pedido aberto no diálogo.
+  const [approveAndSendRequest, setApproveAndSendRequest] = useState<{ keywordIds: string[]; scopeLabel: string; send: boolean } | null>(null);
   const [, setImporting] = useState(false);
   const [queueProcessing, setQueueProcessing] = useState(false);
   const [, setQueueProgress] = useState(0);
@@ -782,6 +790,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   }, [keywordGroups.available, keywordGroups.groupById]);
   const keywordTextById = useMemo(() => new Map(keywords.map(item => [item.id, item.keyword])), [keywords]);
   const subjectKeywordTextOf = useCallback((keywordId: string) => keywordTextById.get(keywordId) ?? null, [keywordTextById]);
+  // 2026-10-13 · conversão do formato anterior: a linha-título convertida diz para qual keyword o Assunto foi.
+  const convertedTitles = useMemo(() => convertedTitleIndex(keywords.map(item => ({ id: item.id, keyword: item.keyword, semantic: (item.analise_semantica && typeof item.analise_semantica === "object" ? item.analise_semantica : null) as Record<string, unknown> | null }))), [keywords]);
+  const subjectConvertedTitleOf = useCallback((keywordId: string) => convertedTitles.get(keywordId) ?? null, [convertedTitles]);
   useEffect(() => {
     if (!vinculoBatchDialogOpen) return;
     // O painel recebe o foco ao abrir; marcar opções não o tira dali.
@@ -1519,6 +1530,46 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
     await handleSubjectsImported({ createdIds: applied.createdSubjectIds, declaredIds: applied.subjectIds.filter(id => !applied.createdSubjectIds.includes(id)) });
   };
+
+  /*
+   * 2026-10-13 · SDD acelerar-fluxo, itens 7 e 9 (card "Cadastrar Assuntos"):
+   * releitura das keywords que mudaram depois do cadastro (sustentações
+   * enviadas, reaprovadas) e "Ver na planilha (cor X)", que filtra pela cor e
+   * seleciona as linhas depois da carga daquela cor. Filtrar nunca escreve.
+   */
+  const handleCadastroKeywordsChanged = async (ids: string[]) => {
+    const unique = [...new Set(ids.filter(Boolean))];
+    if (!unique.length || !selectedBrandId) return;
+    try {
+      const byId = await readCanonicalKeywordRows(unique, { source: fonteDaListagem });
+      const rows = unique.map(id => byId.get(id)).filter((row): row is KeywordItem => Boolean(row));
+      setKeywords(current => {
+        const known = new Set(current.map(item => item.id));
+        return [...rows.filter(row => !known.has(row.id)), ...current.map(item => byId.get(item.id) || item)];
+      });
+    } catch (error) {
+      showNotification("error", `As keywords foram gravadas, mas a tabela não conseguiu relê-las: ${error instanceof Error ? error.message : "erro desconhecido"}. Recarregue a página.`, { code: "CADASTRO_FOLLOW_UP_READBACK_FAILED" });
+    }
+  };
+  const pendingSheetSelectionRef = useRef<string[] | null>(null);
+  const handleCadastroViewInSheet = (input: { color: (typeof EDITORIAL_GROUP_COLORS)[number]; keywordIds: string[] }) => {
+    setPlanImportOpen(false);
+    setPlanInitialText("");
+    if (keywordGroups.choice === input.color) {
+      const present = input.keywordIds.filter(id => keywords.some(item => item.id === id));
+      setSelectedIds(new Set(present));
+      return;
+    }
+    pendingSheetSelectionRef.current = input.keywordIds;
+    keywordGroups.setChoice(input.color);
+  };
+  useEffect(() => {
+    const pending = pendingSheetSelectionRef.current;
+    if (!pending || loading || fetchDataLoadedKeyRef.current?.endsWith(`grupo:${keywordGroups.filterKey}`) !== true) return;
+    pendingSheetSelectionRef.current = null;
+    const present = pending.filter(id => keywords.some(item => item.id === id));
+    if (present.length) setSelectedIds(new Set(present));
+  }, [keywords, loading, keywordGroups.filterKey, setSelectedIds]);
 
   const loadRecoverableKeywords = useCallback(async (brandId: string): Promise<KeywordItem[]> => {
     const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(brandId)}/keywords/recoverable`, { cache: "no-store" });
@@ -2666,6 +2717,78 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   // AtualizaÃ§Ã£o direta da lista/grupo pertencente na cÃ©lula (com suporte a aplicaÃ§Ã£o em massa)
 
   // AtualizaÃ§Ã£o direta do status na cÃ©lula da tabela (com suporte a aplicaÃ§Ã£o em massa)
+  /*
+   * "APROVAR E ENVIAR AO ARQUITETO" (SDD acelerar 2026-10-13, item 2): para a
+   * seleção ou, sem seleção, para a cor ativa da planilha. O diálogo mostra a
+   * prévia do servidor e confirma uma vez; o sucesso só aparece depois da
+   * releitura das linhas tocadas.
+   */
+  const openApproveAndSend = (ids: readonly string[], scopeLabel: string, send = true) => {
+    if (!selectedBrandId) return;
+    const unicos = [...new Set(ids)];
+    if (!unicos.length) {
+      showNotification("info", "Selecione keywords ou escolha uma cor na etiqueta de grupo para aprovar e enviar.");
+      return;
+    }
+    if (unicos.length > APPROVE_AND_SEND_MAX) {
+      showNotification("error", `São ${unicos.length} keywords; aprovar e enviar aceita até ${APPROVE_AND_SEND_MAX} por vez. Selecione uma parte da cor.`);
+      return;
+    }
+    setApproveAndSendRequest({ keywordIds: unicos, scopeLabel, send });
+  };
+  const openApproveAndSendForScope = () => {
+    if (selectedIds.size > 0) {
+      openApproveAndSend([...selectedIds], `${selectedIds.size} selecionada(s)`);
+      return;
+    }
+    const filtro = keywordGroups.filter;
+    if (filtro.kind !== "group" || !isEditorialGroupColor(keywordGroups.choice)) {
+      showNotification("info", "Selecione keywords ou escolha uma cor na etiqueta de grupo: sem seleção, \"Aprovar e enviar\" vale para a cor ativa.");
+      return;
+    }
+    openApproveAndSend(keywords.map(item => item.id), `Cor ${EDITORIAL_GROUP_COLOR_LABELS[keywordGroups.choice]} · ${keywords.length} keyword(s) da planilha`);
+  };
+  // A topbar registra os controles num efeito: o clique lê a versão de agora pelo ref, sem re-registrar a cada render.
+  const openApproveAndSendForScopeRef = useRef(openApproveAndSendForScope);
+  openApproveAndSendForScopeRef.current = openApproveAndSendForScope;
+  const rereadAfterApproval = async (ids: readonly string[]) => {
+    if (!ids.length) return true;
+    const relidas = await readCanonicalKeywordRows(ids);
+    setKeywords(current => current.map(item => relidas.get(item.id) || item));
+    // Motivo da aprovação: o Volume valeu pela resposta sem média oficial (dito depois da releitura).
+    const semMediaOficial = [...relidas.values()].filter(item => String(item.status || "").toLowerCase() === "aprovado" && resolveApprovalReadiness({
+      semantic: item.analise_semantica || null,
+      intent: item.intent,
+      volumeSearch: item.volume_search,
+      resultsAllintitle: item.results_allintitle,
+    }).notes?.includes(VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE)).length;
+    if (semMediaOficial > 0) showNotification("info", `${VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE} em ${semMediaOficial} keyword(s) aprovada(s).`);
+    return ids.every(id => relidas.has(id));
+  };
+  const approveOneOnServer = async (keywordId: string) => {
+    if (!selectedBrandId) return;
+    const nome = keywords.find(item => item.id === keywordId)?.keyword || "keyword";
+    setUpdating(true);
+    try {
+      const previa = await callApproveAndSend(selectedBrandId, { mode: "preview", keywordIds: [keywordId], send: false });
+      if (!previa.ok) { showNotification("error", previa.refusal.message); return; }
+      const linha = (previa.data.lines as Array<{ action: string; missing: ApprovalRequirement[]; reasons: string[] }> | undefined)?.[0];
+      if (!linha || linha.action === "blocked") {
+        showNotification("error", `"${nome}" ainda não pode ser aprovada: ${linha ? [...linha.missing.map(approvalBlockerLabel), ...linha.reasons].join(" · ") : "a keyword não foi encontrada"}.`, { code: "APPROVAL_INCOMPLETE", stage: "approval_gate", persistent: true });
+        return;
+      }
+      if (linha.action === "unchanged") { showNotification("info", `"${nome}" já estava aprovada.`); return; }
+      const aplicado = await callApproveAndSend(selectedBrandId, { mode: "apply", keywordIds: [keywordId], send: false, decisionHash: previa.data.decisionHash });
+      if (!aplicado.ok) { showNotification("error", aplicado.refusal.message); return; }
+      const confirmada = await rereadAfterApproval([keywordId]);
+      const resultado = (aplicado.data.results as Array<{ outcome: string; reason: string | null }> | undefined)?.[0];
+      if (resultado?.outcome === "approved" && confirmada) showNotification("success", `"${nome}" aprovada, conferida na releitura.`);
+      else showNotification("warning", `"${nome}": ${resultado?.reason || "a releitura não confirmou a aprovação; recarregue o Minerador para conferir."}`);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const handleUpdateStatus = async (id: string | null, status: string) => {
     try {
       const rawIds = id === null ? Array.from(selectedIds) : selectedIds.has(id) ? Array.from(selectedIds) : [id];
@@ -2698,99 +2821,34 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
        * resultado legítimo da análise; exigir conclusão tornaria impossível
        * aprovar uma keyword cuja evidência está genuinamente dividida.
        */
+      /*
+       * SDD acelerar 2026-10-13, item 2: APROVAR PASSA PELO SERVIDOR — o mesmo
+       * núcleo do MCP `decide_keywords` (readiness, `applyApproval`, ator
+       * autenticado, compare-and-swap e releitura). O navegador não grava mais
+       * o status de aprovação. Em lote, a prévia diz cada motivo e cada linha
+       * pode ser desmarcada; uma keyword só vai direto, com o motivo se não puder.
+       */
       if (normalizedStatus === "aprovado") {
-        const incompletas = idsToUpdate
-          .map(wordId => ({ wordId, item: keywords.find(k => k.id === wordId) }))
-          .filter(({ item }) => !resolveApprovalReadiness({
-            semantic: item?.analise_semantica || null,
-            intent: item?.intent,
-            volumeSearch: item?.volume_search,
-            resultsAllintitle: item?.results_allintitle,
-          }).ok);
-        if (incompletas.length) {
-          const primeira = incompletas[0].item;
-          const motivo = resolveApprovalReadiness({
-            semantic: primeira?.analise_semantica || null,
-            intent: primeira?.intent,
-            volumeSearch: primeira?.volume_search,
-            resultsAllintitle: primeira?.results_allintitle,
-          }).reason;
-          showNotification("error", incompletas.length === 1
-            ? `"${primeira?.keyword || "keyword"}" ainda não pode ser aprovada. ${motivo}`
-            : `${incompletas.length} keyword(s) ainda não podem ser aprovadas. ${motivo}`, {
-            code: "APPROVAL_INCOMPLETE",
-            stage: "approval_gate",
-            persistent: true,
-            diagnostic: { pendentes: incompletas.map(({ item }) => item?.keyword).filter(Boolean).slice(0, 10) },
-          });
+        if (idsToUpdate.length > 1) {
+          openApproveAndSend(idsToUpdate, `${idsToUpdate.length} selecionada(s) · só aprovar (sem enviar)`, false);
           return;
         }
+        await approveOneOnServer(idsToUpdate[0]);
+        return;
       }
       pushKeywordsHistory(keywords, `Alterar status de ${idsToUpdate.length} keyword(s) para ${status}`);
 
-      /*
-       * Aprovar grava o registro do pacote junto com o status: hash, assinatura,
-       * autor, data e versão. É esse registro que distingue depois "mexeram na
-       * keyword" de "reexecutaram e deu igual".
-       */
-      const aprovadoEm = new Date().toISOString();
-      const semanticaPorId = new Map<string, KeywordSemantic>();
-      if (normalizedStatus === "aprovado") {
-        for (const wordId of idsToUpdate) {
-          const item = keywords.find(k => k.id === wordId);
-          if (!item || !selectedBrandId) continue;
-          semanticaPorId.set(wordId, await applyApproval({
-            keywordId: wordId,
-            brandId: selectedBrandId,
-            keyword: item.keyword,
-            intent: item.intent,
-            volumeSearch: item.volume_search,
-            resultsAllintitle: item.results_allintitle,
-            kgrScore: item.kgr_score,
-            listaId: item.lista_id,
-            semantic: item.analise_semantica || null,
-            approvedAt: aprovadoEm,
-            approvedBy: session?.user?.id || "usuario",
-          }) as KeywordSemantic);
-        }
-        for (const [wordId, semantica] of semanticaPorId) {
-          const { error: approvalError } = await supabase
-            .from("minerador_keywords")
-            .update({ status: normalizedStatus, analise_semantica: semantica })
-            .eq("id", wordId)
-            .eq("brand_id", selectedBrandId)
-            .is("deleted_at", null);
-          if (approvalError) throw approvalError;
-        }
-      } else {
-        const { error } = await supabase
-            .from("minerador_keywords")
-          .update({ status: normalizedStatus })
-          .in("id", idsToUpdate)
-          .eq("brand_id", selectedBrandId)
-          .is("deleted_at", null);
-
-        if (error) throw error;
-      }
+      const { error } = await supabase
+        .from("minerador_keywords")
+        .update({ status: normalizedStatus })
+        .in("id", idsToUpdate)
+        .eq("brand_id", selectedBrandId)
+        .is("deleted_at", null);
+      if (error) throw error;
 
       const idSet = new Set(idsToUpdate);
-      setKeywords(prev => prev.map(k => idSet.has(k.id)
-        ? { ...k, status: normalizedStatus, ...(semanticaPorId.has(k.id) ? { analise_semantica: semanticaPorId.get(k.id) } : {}) }
-        : k));
-      // Motivo da aprovação: o Volume valeu pela resposta sem média oficial.
-      const semMediaOficial = normalizedStatus === "aprovado"
-        ? idsToUpdate.filter(wordId => {
-          const item = keywords.find(k => k.id === wordId);
-          return resolveApprovalReadiness({
-            semantic: item?.analise_semantica || null,
-            intent: item?.intent,
-            volumeSearch: item?.volume_search,
-            resultsAllintitle: item?.results_allintitle,
-          }).notes?.includes(VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE);
-        }).length
-        : 0;
-      const notaSemMedia = semMediaOficial > 0 ? ` ${VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE} em ${semMediaOficial} keyword(s).` : "";
-      showNotification("success", `Status atualizado para ${idsToUpdate.length} palavra(s). ${protectedCount > 0 ? `${protectedCount} publicada(s) preservada(s).` : ""}${notaSemMedia}`);
+      setKeywords(prev => prev.map(k => idSet.has(k.id) ? { ...k, status: normalizedStatus } : k));
+      showNotification("success", `Status atualizado para ${idsToUpdate.length} palavra(s). ${protectedCount > 0 ? `${protectedCount} publicada(s) preservada(s).` : ""}`);
     } catch (err: any) {
       console.error(err);
       showNotification("error", "Falha ao salvar status.");
@@ -3733,6 +3791,20 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
             (padrão Assunto), o mesmo de antes, agora alcançável pela barra. */}
         {discoverySourceActions}
 
+        {/* SDD acelerar 2026-10-13, item 2: com uma cor ativa, aprovar e enviar a cor inteira (ou a seleção). */}
+        {isEditorialGroupColor(keywordGroups.choice) ? (
+          <button
+            type="button"
+            data-approve-and-send-scope
+            onClick={() => openApproveAndSendForScopeRef.current()}
+            className="flex min-h-8 shrink-0 items-center gap-1 rounded-md border border-divider px-2 text-xs font-medium text-foreground transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent"
+            title={`Aprovar e enviar ao Arquiteto: ${topbarSelectedCount > 0 ? "as selecionadas" : `a cor ${EDITORIAL_GROUP_COLOR_LABELS[keywordGroups.choice]} inteira`}, com prévia e recusa por item`}
+          >
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            <span className="max-xl:hidden">Aprovar e enviar</span>
+          </button>
+        ) : null}
+
         <button
           type="button"
           onClick={() => {
@@ -3753,7 +3825,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     };
     registerControls(globalTopbarControls);
     return () => unregisterControls(globalTopbarControls.moduleId);
-  }, [discoverySourceActions, organizeFilterSummary, organizeFilterTitle, organizeOpen, redoKeywords, searchQuery, sectionTabs, showNotification, topbarCanRedo, topbarCanUndo, topbarHistoryCount, topbarSelectedCount, topbarVisibleKeywordCount, undoKeywords, registerControls, unregisterControls, keywordHistory.entries.length]);
+  }, [discoverySourceActions, organizeFilterSummary, organizeFilterTitle, organizeOpen, redoKeywords, searchQuery, sectionTabs, showNotification, topbarCanRedo, topbarCanUndo, topbarHistoryCount, topbarSelectedCount, topbarVisibleKeywordCount, undoKeywords, registerControls, unregisterControls, keywordHistory.entries.length, keywordGroups.choice]);
 
   if (sessionStatus === "loading") {
     return (
@@ -3858,7 +3930,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       {/* 2026-10-13 · cadastro único (SDD sdd-cadastro-assunto-na-keyword): o
           Processador tem uma porta só, o card "Cadastrar Assuntos"; o Assunto
           entra dentro da keyword. Colar/CSV de keyword ficam no Descobrir. */}
-      {planImportOpen && selectedBrandId && keywordGroups.available ? <SubjectCadastroCard key={selectedBrandId} brandId={selectedBrandId} groups={keywordGroups.activeGroups} initialText={planInitialText} onClose={() => { setPlanImportOpen(false); setPlanInitialText(""); }} onApplied={applied => void handleDeclaredPlanApplied(applied)} onUnavailable={() => { setPlanImportOpen(false); keywordGroups.markUnavailable(); }} /> : null}
+      {planImportOpen && selectedBrandId && keywordGroups.available ? <SubjectCadastroCard key={selectedBrandId} brandId={selectedBrandId} groups={keywordGroups.activeGroups} initialText={planInitialText} onClose={() => { setPlanImportOpen(false); setPlanInitialText(""); }} onApplied={applied => handleDeclaredPlanApplied(applied)} onUnavailable={() => { setPlanImportOpen(false); keywordGroups.markUnavailable(); }} onDeleteLeftovers={ids => void handleBatchDelete(false, ids)} onViewInSheet={handleCadastroViewInSheet} onKeywordsChanged={ids => void handleCadastroKeywordsChanged(ids)} /> : null}
 
       {/* Blocos opcionais acima da planilha (Organizar, prévia do Site,
           conferência manual, recuperação): juntos têm um teto e rolam por
@@ -4620,6 +4692,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             onSubjectSearch={item.id ? () => router.push(subjectSearchLinkHref(brandRef, item.id)) : undefined}
                             subjectGroupOf={subjectGroupOf}
                             subjectKeywordTextOf={subjectKeywordTextOf}
+                            subjectConvertedTitleOf={subjectConvertedTitleOf}
                             onPublicationAction={(action) => handlePublicationLinkAction(item, action)}
                             allowPublishedWorkflowStatus={false}
                             statusUpdating={updating}
@@ -4648,6 +4721,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       </KeywordTableShell>
       {selectedIds.size > 0 && <div aria-hidden="true" data-bulk-bar-spacer className="h-11 shrink-0" />}
 
+      {approveAndSendRequest && selectedBrandId ? (
+        <ApproveAndSendDialog
+          brandId={selectedBrandId}
+          keywordIds={approveAndSendRequest.keywordIds}
+          scopeLabel={approveAndSendRequest.scopeLabel}
+          send={approveAndSendRequest.send}
+          onClose={() => setApproveAndSendRequest(null)}
+          onApplied={touched => rereadAfterApproval(touched)}
+        />
+      ) : null}
       {/* FOOTER BATCH ACTIONS BAR */}
       {selectedIds.size > 0 && (
         <KeywordTableBulkBarShell className="font-sans">
@@ -4780,6 +4863,17 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               onClick={() => void handleBatchCompleteHumanReview()}
               disabled={bulkActionProcessing || updating || selectedIds.size === 0}
               activeClassName={bulkActionStateClass("review")}
+            />
+            {/* SDD acelerar 2026-10-13, item 2: aprovar e enviar numa decisão, visível (fora de "Mais ações"). */}
+            <MineradorProcessAction
+              title="Aprovar e enviar ao Arquiteto"
+              description="Abre a prévia do servidor para as selecionadas: quais serão aprovadas e enviadas, quais já estão aprovadas e só vão, e quais não podem ir (com o motivo de cada uma). Desmarque o que não deve ir e confirme uma vez. Aprova pelo mesmo núcleo do MCP e envia pelo envio de sempre; a recusa de uma keyword não para as outras. Nada é pago."
+              label="Aprovar e enviar"
+              ariaLabel="Aprovar e enviar ao Arquiteto as selecionadas"
+              labelClassName="inline"
+              icon={<ArrowRight className="h-4 w-4" aria-hidden="true" />}
+              onClick={() => openApproveAndSendForScope()}
+              disabled={bulkActionProcessing || updating || architectHandoffSending || selectedIds.size === 0}
             />
             <select
               defaultValue=""

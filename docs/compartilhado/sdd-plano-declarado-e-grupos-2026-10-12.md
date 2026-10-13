@@ -1357,3 +1357,16 @@ subject_id, stage)`, `source_entity_id` não vazio, `state` 1..80, `source_versi
   agrupadas segue conferida pela portaria `DECLARED_PLAN_PRESERVED` da tela (a gravação confere principal e papel).
 - **Validado manualmente: não.** Homologação do dono: preparar a melhoria duas vezes na WifiConecta, "Refazer mesmo assim"
   com motivo, retirar "plano vivo controle" e conferir as linhas `operation_ledger` por SELECT.
+
+## Nota de correção — 2026-10-13 (SDD `sdd-acelerar-fluxo-do-plano-2026-10-13.md`, item 13, D14)
+
+Correção de texto, sem reescrever o histórico acima:
+
+- **§4, princípio 5, e §6.3 (Radar):** "a nova versão do ArticleDNA pela 'Atualização disponível' de sempre" está
+  **errado** para o código de hoje. No Radar, "Atualização disponível" é o rótulo da **publicação**
+  (`lib/radar/editorial-identity.ts`, `update_due`/`updateRequested` de Publicações). Uma versão nova do ArticleDNA
+  **não** aparece no Radar: o item segue na versão transportada. O aviso de versão nova do Arquiteto no Radar é o item
+  14 da SDD de aceleração, com texto próprio — **"Atualização disponível do Arquiteto"** (outra frente, F5).
+- **§11, passo 3 ("vão para a lixeira, recuperáveis por Restaurar"):** errado para keyword **não publicada**: a
+  "lixeira" do Minerador é `DELETE` definitivo (a própria tela diz "Excluir definitivamente", com nome digitado). Só a
+  publicada tem restauração. Excluir sobra continua decisão humana, com a confirmação de exclusão definitiva.

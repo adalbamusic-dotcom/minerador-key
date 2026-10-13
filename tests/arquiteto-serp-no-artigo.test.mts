@@ -79,18 +79,24 @@ test("A2 · blocos cabem no teto da rota keyword-serp e o escopo do ledger é es
 
 test("A2 · Processar artigos coleta o lote ANTES da formação, sempre nas 4 lentes, e keyword-serp continua o núcleo", () => {
   const processar = workspace.slice(workspace.indexOf("const processArticleFormation = useCallback("));
-  const coleta = processar.indexOf("collectArticleBatchSerpRef.current(silosDoLote)");
+  const coleta = processar.indexOf("collectArticleBatchSerpRef.current(silosDoLote, { ask: dialogoDoClique.ask })");
   const marcador = processar.indexOf("persistArticleFormationMarker(");
   assert.ok(coleta > 0 && coleta < marcador, "a coleta do lote vem antes do marcador da formação");
-  assert.match(processar, /if \(coletaDoLote === "collected"\) return;/);
+  // SDD acelerar 2026-10-13, item 3 (mudança declarada): pagou a SERP do lote,
+  // o MESMO clique relê o "mesmo assunto" e segue pela formação refeita.
+  assert.doesNotMatch(processar, /if \(coletaDoLote === "collected"\) return;/);
+  assert.match(processar, /if \(coletaDoLote === "collected"\) \{\s*const relido = await rereadSerpSubjectRef\.current\(\);/);
+  assert.match(processar, /await processArticleFormationRef\.current\(undefined, clique\);/);
   const lote = workspace.slice(workspace.indexOf("const collectArticleBatchSerp = async"), workspace.indexOf("const collectArticleBatchSerpRef = useRef"));
   assert.match(lote, /fetch\("\/api\/arquiteto\/keyword-serp"/);
   // Correção de 2026-09-28: a cabeça da SiloPage com volume também é coletada ("todas as keywords com volume").
   assert.ok(lote.includes("planArticleBatchSerpLot({ keywords: masterListRef.current, siloRefs })"));
   // Nunca "só a principal": o terceiro argumento do diálogo é `false`.
-  assert.match(lote, /askSerpPaidPlan\(`Primeira coleta da SERP do lote · 4 lentes · \$\{describeArticleBatchSerpLot\(lote\)\}`, merged, false\)/);
+  assert.match(lote, /perguntar\(`Primeira coleta da SERP do lote · 4 lentes · \$\{describeArticleBatchSerpLot\(lote\)\}`, merged, false\)/);
   assert.match(lote, /authorizedPaidQueries: escolha\.authorizedPaidQueries/);
-  assert.match(lote, /setSerpSubjectReload\(current => current \+ 1\)/);
+  assert.doesNotMatch(lote, /clique em Processar artigos de novo/);
+  const releitura = workspace.slice(workspace.indexOf("const rereadSerpSubject = ()"), workspace.indexOf("const rereadSerpSubjectRef = useRef"));
+  assert.match(releitura, /setSerpSubjectReload\(current => current \+ 1\)/);
 });
 
 test("A2 · o plano da coleta nunca oferece só a lente principal", () => {

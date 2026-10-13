@@ -101,7 +101,9 @@ export type SiloDeclaredPlanApplied = {
 };
 
 export type SiloDeclaredPlanUnchanged = { mode: "apply"; state: "UNCHANGED"; siloId: string; message: string };
-export type SiloDeclaredPlanRefused = { state: "REFUSED"; code: SiloDeclaredPlanRefusalCode | "STALE_DECISION"; message: string; rework?: ReworkView };
+export type SiloDeclaredPlanRefused = { state: "REFUSED"; code: SiloDeclaredPlanRefusalCode | "STALE_DECISION"; message: string; rework?: ReworkView;
+  /** SDD acelerar 2026-10-13, item 10 (aditivo): os artigos fora do plano (NON_PLAN_ARTICLES). */
+  articleIds?: string[] };
 export type SiloDeclaredPlanResult = SiloDeclaredPlanPreview | SiloDeclaredPlanApplied | SiloDeclaredPlanUnchanged | SiloDeclaredPlanRefused;
 
 const hash = (value: unknown) => createHash("sha256").update(stableJson(value)).digest("hex");
@@ -159,7 +161,7 @@ export async function handleSiloDeclaredPlan(deps: SiloDeclaredPlanDeps, request
 
   if (!plan.ok) {
     if (request.mode === "apply" && operation && deps.rework) await deps.rework.record(operation, { outcome: "refused", outcomeCode: plan.code, message: plan.message, resultRef: request.siloId, costUsd: 0 });
-    return { state: "REFUSED", code: plan.code, message: rework?.verdict === "same_refusal" ? `${plan.message} ${rework.message}` : plan.message, ...reworkField };
+    return { state: "REFUSED", code: plan.code, message: rework?.verdict === "same_refusal" ? `${plan.message} ${rework.message}` : plan.message, ...reworkField, ...(plan.articleIds ? { articleIds: plan.articleIds } : {}) };
   }
 
   if (request.mode === "preview") {

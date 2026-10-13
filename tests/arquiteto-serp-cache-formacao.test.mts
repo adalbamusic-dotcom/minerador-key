@@ -1026,7 +1026,9 @@ test("A6 · 'Validar SERP': as quatro lentes, o plano primeiro, e só a escolha 
   assert.match(corpo, /lenses: \[\.\.\.SERP_LENS_LABELS\]/);
   assert.doesNotMatch(corpo, /device: "desktop"/, "a tela não pede mais uma lente só");
   const plano = corpo.indexOf('{ ...serpRequest, mode: "plan" }');
-  const escolha = corpo.indexOf("await askSerpPaidPlan(");
+  // SDD acelerar 2026-10-13, item 3 (mudança declarada): o diálogo é `perguntar` — o de sempre ou o único do clique.
+  assert.match(corpo, /const perguntar: ProcessingCostAsk = options\.ask \?\? askSerpPaidPlan;/);
+  const escolha = corpo.indexOf("await perguntar(");
   const execucao = corpo.indexOf('{ ...serpRequest, mode: "execute", ...choice }');
   assert.ok(plano > -1 && escolha > plano && execucao > escolha, "plano → escolha → execução");
   // Prévia interrompida sem escolha não paga e não marca nenhum artigo como em processamento.
@@ -1037,7 +1039,7 @@ test("A6 · 'Validar SERP': as quatro lentes, o plano primeiro, e só a escolha 
   // Cache ilegível: tentar ler de novo refaz o plano, sem pagar.
   assert.match(cancelar, /if \(!choice\?\.retryCacheRead\) break;/);
   // Quem chamou (o processamento da formação) só conta coletado/reaproveitado depois do readback.
-  assert.match(mesa, /const resultadoDaSerp = await confirmSerpValidation\(pendentes\);/);
+  assert.match(mesa, /const resultadoDaSerp = await confirmSerpValidation\(pendentes, \{ ask: dialogoDoClique\.ask \}\);/);
   assert.match(mesa, /collected: new Set\(resultadoDaSerp\.collectedIds\),\s*reused: new Set\(resultadoDaSerp\.reusedIds\),/);
   assert.ok(cancelar.indexOf('status: "processing"') > cancelar.indexOf("if (!choice)"), "o estado de processamento só depois da escolha");
 });

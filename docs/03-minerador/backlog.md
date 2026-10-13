@@ -1,5 +1,37 @@
 # Backlog — Minerador
 
+## Acelerar o fluxo do plano (SDD 2026-10-13) — Minerador
+
+Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] F1 · item 12: aprovar em lote diz todos os motivos, agrupados.
+- [x] F2 · item 2: "Aprovar e enviar ao Arquiteto" por cor/seleção, prévia com recusa por item, aprovação da tela pelo servidor, encadeamento único (conversão e reaprovação do card usam o mesmo).
+- [ ] Dono: homologar "Aprovar e enviar" com um lote misto (aprovar, só enviar, bloqueadas), desmarcar uma, Status → aprovado de uma e de várias; dark mode e 360/768/1024/1440 px.
+- [ ] Teste DOM do diálogo "Aprovar e enviar".
+- [x] F4 · item 15 (parte do Minerador): "Tirar do plano" numa confirmação (`chain` na rota `plans/withdraw`; reaprovar e reenviar pelo encadeamento único).
+- [ ] Dono: homologar "Tirar do plano" com as duas caixas marcadas e com uma desmarcada.
+- [x] F3 · item 8: recibo do servidor na execução da Pesquisa por Assunto; o import grava o Volume do recibo (com proveniência) e roda a Lógica; sem recibo, o de antes.
+- [x] F3 · item 7: "Buscar sustentação para os N artigos" no card, um plano somado, uma confirmação, tabela por artigo com "Só com volume", uma confirmação de envio.
+- [x] Item 9: "Excluir as k sobras (apaga de vez)", "Reaprovar as N" (rota `plans/reapprove`) e "Ver na planilha (cor X)".
+- [ ] **Dono: aplicar a M-A ANTES do deploy da F3** (ensaio por `RAISE EXCEPTION 'ENSAIO'`, `db query -f`, `migration repair`, conferência por SELECT) — `supabase/migrations/20261014120000_recibos_da_pesquisa_por_assunto.sql`. Sem ela, o deploy não quebra: só não grava volume pelo import (aviso "recibo indisponível").
+- [ ] Dono: homologar o lote (2–3 linhas, quota do Google Ads), conferir no banco por SELECT o recibo (`minerador_subject_search_receipts`) e `volume_measurement.origin = 'subject_search'` nas sustentações importadas; dark mode e 360/768/1024/1440 px.
+- [ ] Dono: homologar "Excluir as k sobras" (confirmação com nome digitado) e "Reaprovar as N" com um Silo existente que volta aprovadas a "Em revisão".
+- [ ] D7 opcional: escolher o título (até 200 caracteres) como semente de uma linha do lote.
+- [ ] Trocar a rota `plans/reapprove` pela rota do item 2 (F2, "Aprovar e enviar") quando ela existir, e oferecer "e enviar ao Arquiteto".
+- [ ] Teste DOM do painel do lote (plano → confirmar → marcar → enviar) com portas falsas.
+
+## Converter o Assunto do formato anterior — 2026-10-13
+
+SDD `docs/compartilhado/sdd-conversao-assunto-legado-2026-10-13.md` (aprovada; D1–D10 pela recomendação). Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Núcleo (`subject-conversion*.ts` + `importDeclaredPlanWithCore` com `conversions`), rota `plans/convert`, diálogo "Converter formato anterior" no card, painel do DNA, MCP `convert_legacy_subjects`, catálogo.
+- [x] A linha-título nunca é excluída (a lixeira de não publicada apaga de vez); fica arquivada por derivação. Aviso "recuperável" das sobras corrigido.
+- [ ] Dono: runbook da WifiConecta laranja (SDD §18) depois do deploy, com readback no banco a cada etapa; decidir antes "plano vivo controle" (D5: retirar do Silo).
+- [ ] Botão "Desfazer conversão" (hoje: procedimento da SDD §10).
+- [ ] Filtro da planilha para esconder/mostrar "Linhas-título convertidas".
+- [ ] Conversão de Assunto anterior COM plano (principal em outra linha) e de artigo publicado (fora desta fase).
+- [ ] Teste DOM do diálogo (seleção, prévia, converter) e homologação em dark mode e 360/768/1024/1440 px.
+
 ## O Assunto sai do Vínculo e aparece no painel da keyword — 2026-10-13
 
 Pedido do dono de 2026-10-13. Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
@@ -11,7 +43,7 @@ Pedido do dono de 2026-10-13. Detalhe em `docs/03-minerador/estado-atual.md`. **
 - [x] Catálogo MCP atualizado (`minerador.review_and_approve`, `declare_silo_plan`, `measure_keywords`).
 - [ ] Dono: homologar o painel (bloco do Assunto em keyword do cadastro, do formato anterior e com marca órfã), o Vínculo sem Assunto (individual e em grupo), dark mode e 360/768/1024/1440 px.
 - [ ] **WifiConecta · azul (Wi-Fi e fibra óptica):** recadastrar os 7 artigos pelo card (Silo existente → Azul → "Colar plano em texto" com o mesmo texto do Silo 2 → prévia → Cadastrar). As keywords existem e já têm a marca de principal; o card as reconhece (estado "mesma keyword, sem volume"). Os títulos estão no histórico (`keyword_subject_history.entryTitle`); os detalhes precisam do texto original.
-- [ ] **WifiConecta · laranja (8 Assuntos no formato antigo, já no Arquiteto):** decidir com o dono a conversão. Recomendação: NÃO mandar a linha-título à lixeira enquanto o ArticleDNA a usar como tronco; a conversão segura exige SDD própria (escolher, por artigo, a keyword que passa a carregar o Assunto entre as sustentações, mover `entry`/`plan` para ela por um núcleo com prévia, decisão humana, nova versão do ArticleDNA pelo Arquiteto e só então tirar a linha-título pela lixeira de sempre).
+- [x] **WifiConecta · laranja (8 Assuntos no formato antigo, já no Arquiteto):** SDD própria escrita e implementada — `docs/compartilhado/sdd-conversao-assunto-legado-2026-10-13.md` (a linha-título NÃO vai para a lixeira: fica arquivada por derivação). Falta o dono executar o runbook (§18).
 - [ ] Sem porta para retirar o Assunto anterior SEM plano (o select do Vínculo saiu): decidir se a conversão acima basta ou se "Tirar do plano" deve aceitar também o Assunto solto.
 - [ ] Limpar código morto: `withdrawKeywordSubject` não tem mais chamador (fica exportado até a decisão acima).
 

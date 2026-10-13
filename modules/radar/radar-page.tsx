@@ -112,7 +112,8 @@ import { useNoticeBridge } from "@/components/global-notice-center";
 import { RadarWorkbench } from "./radar-workbench";
 import type { RadarSpecialistPanelSummary } from "./radar-expert-brief-panel";
 import { RadarR3ProfileMirror, type RadarR3ProfileResearch } from "./radar-r3-profile-mirror";
-import { RadarR4BulkOperationsBar, RadarR5QueueProgress, type RadarR5QueueView } from "./radar-r4-bulk-operations-bar";
+import { RadarR4BulkOperationsBar, RadarR5QueueProgress, RadarResearchBatchAction, RadarResearchBatchProgressStrip, type RadarR5QueueView } from "./radar-r4-bulk-operations-bar";
+import { planRadarResearchBatch, radarResearchBatchConfirmReadback, radarResearchBatchSummary, runRadarResearchBatch, type RadarResearchBatchCandidate, type RadarResearchBatchPlan, type RadarResearchBatchProgress, type RadarResearchBatchRead } from "@/lib/radar/research-batch";
 import { useRadarAnalysisReadback } from "./use-radar-analysis-readback";
 import { useRadarSerpReviewReadback } from "./use-radar-serp-review-readback";
 import { organizeRadarArticleBlueprintsInSeries, postRadarArticleBlueprintOrganize, radarArticleBlueprintSeriesSummary, radarPhase1VisibleLabel, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
@@ -128,6 +129,8 @@ import {
   radarExportMissingArticleBlueprints,
 } from "./radar-article-blueprint-panel";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
+/* 2026-10-13 · F5 (SDD acelerar-fluxo, item 14): "Atualização disponível do Arquiteto" e a adoção da versão nova. */
+import { RadarArchitectUpdatePanel } from "./radar-architect-update-panel";
 
 /**
  * A BIBLIOTECA SEM ARTIGO CONTINUA SENDO UMA CHAVE — RADAR_LIVE_UX_2.2 · §2.
@@ -269,6 +272,23 @@ const avisoComDesfechoAutomatico = (antes: string | null, desfecho: RadarDesfech
  */
 const investigacaoDaLinha = createRadarDeepResearchViewMemo<ReturnType<typeof buildRadarDeepResearchView>>();
 
+/*
+ * 2026-10-13 · O QUE O LOTE "PESQUISAR E FINALIZAR" LÊ DO RENDER MAIS RECENTE.
+ *
+ * Os handlers são os do botão do artigo, do render em que o artigo já é o
+ * ativo; `ler` é a Fase 1 que a tela resolveu para ele. Estado de
+ * apresentação: o lote nunca decide "finalizado" sem a releitura do servidor.
+ */
+type RadarLoteDePesquisaVista = {
+  ativo: string | null;
+  ocupado: boolean;
+  aviso: string;
+  artigosModeloEmCurso: string[];
+  artigoModelo: (articleId: string) => RadarArticleBlueprintJob["state"] | null;
+  ler: (articleId: string) => RadarResearchBatchRead | null;
+  passo: Record<Exclude<RadarOperationalActionId, "RESET">, () => Promise<unknown>>;
+};
+
 export function RadarPage({ brandRef }: { brandRef: string }) {
   const { data: session } = useSession(); const router = useRouter(); const { selectedBrandId } = useBrand(); const { pipeline, state } = useReadyPipeline(); const [picker, setPicker] = useState(false); const [notice, setNotice] = useState(""); const [busyArticleId, setBusyArticleId] = useState<string | null>(null); const [reviewingArticleId, setReviewingArticleId] = useState<string | null>(null); const [serpAction, setSerpAction] = useState<RadarSerpAction | null>(null); const serpActionRef = useRef<RadarSerpAction | null>(null); const reviewingArticleIdRef = useRef<string | null>(null); const [expandedRadarId, setExpandedRadarId] = useState<string | null>(null); const [spreadsheetSelection, setSpreadsheetSelection] = useState(createRadarSpreadsheetSelection); const { activeArticleId, selectedArticleIds } = spreadsheetSelection; const [r4LocalByArticle, setR4LocalByArticle] = useState<Record<string, RadarR4LocalArticleState>>({}); const [r4SerpQueue, setR4SerpQueue] = useState<RadarR4SerpQueue | null>(null); const [topicHistoryByArticle, setTopicHistoryByArticle] = useState<Record<string, RadarR5TopicHistory>>({}); const [expertEvidenceByArticle, setExpertEvidenceByArticle] = useState<Record<string, RadarR6ExpertEvidenceInput[]>>({}); const [canonicalExpertEvidenceByArticle, setCanonicalExpertEvidenceByArticle] = useState<Record<string, RadarExpertEvidence[]>>({}); const [expertContributionSummaryByArticle, setExpertContributionSummaryByArticle] = useState<Record<string, { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; articleDnaVersionId: string; counters: RadarSpecialistCounters }>>({}); const approvingArticleIdRef = useRef<string | null>(null); const collectingArticleIdRef = useRef<string | null>(null); const generatingReportIdRef = useRef<string | null>(null); const [collectionByArticle, setCollectionByArticle] = useState<Record<string, { state: RadarSerpCollectionState; blockedReason: string | null }>>({});
   /*
@@ -282,6 +302,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const gruposDoRadar = useEditorialGroups({ brandId: selectedBrandId || null, enabled: Boolean(selectedBrandId), area: "radar", mainReady: !pipeline.loading });
   const [etiquetarArtigosAberto, setEtiquetarArtigosAberto] = useState(false);
   const filtroDoGrupo = useMemo(() => (gruposDoRadar.filter.kind === "all" ? undefined : (row: RadarItem) => editorialGroupFilterMatches(gruposDoRadar.filter, gruposDoRadar.articleGroupById.get(row.articleId)?.groupId ?? null)), [gruposDoRadar.filter, gruposDoRadar.articleGroupById]);
+  /* F5 · a faixa "Atualização disponível do Arquiteto" vale para os artigos que a planilha mostra (o recorte da cor incluído). */
+  const itensDaAtualizacaoDoArquiteto = useMemo(() => pipeline.radarItems.filter(row => !filtroDoGrupo || filtroDoGrupo(row)).map(row => row.articleId), [pipeline.radarItems, filtroDoGrupo]);
   const grupoDoItem = (row: RadarItem) => { const id = gruposDoRadar.articleGroupById.get(row.articleId)?.groupId; return id ? gruposDoRadar.groupById.get(id) ?? null : null; };
   /*
    * 2026-10-02 · A ORGANIZAÇÃO DO ARTIGO-MODELO DA SERP, por artigo: o que a
@@ -1238,6 +1260,19 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const coletaDepoisDoResetRef = useRef<{ articleId: string; profile: RadarRefreezeProfile } | null>(null);
   const continuarColetaRef = useRef<(() => void) | null>(null);
   useEffect(() => { continuarColetaRef.current?.(); });
+  /*
+   * 2026-10-13 · O LOTE "PESQUISAR E FINALIZAR" ANDA PELO RENDER.
+   *
+   * Os handlers do botão do artigo leem o artigo ATIVO do render (como a
+   * continuação acima). O lote abre o artigo, espera o render dele e chama o
+   * handler do render mais recente — `loteVistaRef`, atribuída a cada render
+   * completo. `loteEsperasRef` acorda quem espera o próximo commit.
+   */
+  const loteVistaRef = useRef<RadarLoteDePesquisaVista | null>(null);
+  const loteEsperasRef = useRef<Array<() => void>>([]);
+  useEffect(() => { const esperas = loteEsperasRef.current.splice(0); for (const acordar of esperas) acordar(); });
+  const [lotePesquisa, setLotePesquisa] = useState<RadarResearchBatchProgress | null>(null);
+  const lotePesquisaEmCursoRef = useRef(false);
 
   if (state || !pipeline.snapshot) return state;
   /*
@@ -5477,6 +5512,128 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     updateLocalState(articleId, state => ({ ...state, topics: { ...state.topics, items: next, reviewedIds: state.topics.reviewedIds.filter(id => next.some(topic => topic.id === id)) } }));
     setTopicHistoryByArticle(history => ({ ...history, [articleId]: { past: [...entry.past, current], future: entry.future.slice(1) } }));
   };
+  /*
+   * ===== 2026-10-13 · "PESQUISAR E FINALIZAR (N ARTIGOS)" NA BARRA DE LOTE =====
+   *
+   * Achado da auditoria do fluxo: investigar era abrir o artigo, "Iniciar
+   * Pesquisa Google" e "Analisar concorrência · e finaliza" — três cliques por
+   * artigo. O lote faz, artigo por artigo e em série, EXATAMENTE o que o botão
+   * faz: abre o artigo, lê a Fase 1 que a tela resolveu e chama o handler do
+   * botão (`startDeepResearch`, `analyzeSerpSelection`, `finalizeInvestigation`)
+   * do render em que o artigo é o ativo. Nenhum caminho paralelo: cache primeiro
+   * e as 4 lentes são as da coleta do botão; o congelamento e a IA do
+   * artigo-modelo são os do automático. Em série porque o guarda de ação do
+   * Radar é um por vez (`radarClaimAction`).
+   *
+   * A prévia (`planRadarResearchBatch`) diz o teto antes; nada roda sem
+   * "Confirmar e pesquisar". O artigo que parar não para os outros. No fim, a
+   * releitura do servidor confirma cada finalizado.
+   */
+  const candidatoDoLote = (row: RadarItem): RadarResearchBatchCandidate => {
+    const data = rowWorkbenchData(row);
+    const investigacao = data.deepResearch;
+    const finalizado = Boolean(radarPrimaryProfileOfAnalysis(analiseCorrenteDe(row)?.payload || null)) || investigacao?.state === "FINALIZED";
+    const reaproveita = investigacao
+      ? radarCanonicalReusePlan({ resumption: investigacao.resumption, hasPersistedRecord: Boolean(investigacao.record), hasCanonicalSnapshot: Boolean(data.latestSerpRecord?.research) }).reuse
+      : false;
+    /* O mesmo critério do START: reaproveitando, só as auxiliares que faltam; recomeçando, as do plano. */
+    const auxiliares = !investigacao ? 0 : reaproveita
+      ? investigacao.resumption.auxiliaryToCollect.filter(query => query.keyword).length
+      : investigacao.plan.executable.filter(query => query.role !== "principal" && query.keyword).length;
+    return {
+      articleId: row.articleId,
+      title: row.title,
+      finalized: finalizado,
+      mode: modoEfetivoDe(row),
+      phase1: investigacao?.phase1 || null,
+      canonicalReusable: reaproveita,
+      auxiliaryToRun: auxiliares,
+      sufficiencyLevel: investigacao?.sufficiency.level ?? null,
+      sufficiencyHeadline: investigacao?.sufficiency.headline ?? null,
+    };
+  };
+  loteVistaRef.current = {
+    ativo: activeRadarItem?.articleId || null,
+    ocupado: Boolean(serpAction || busyArticleId || reviewingArticleId),
+    aviso: notice,
+    artigosModeloEmCurso: Object.values(blueprintJobs).filter(job => job.state === "running").map(job => job.articleId),
+    artigoModelo: articleId => blueprintJobs[articleId]?.state ?? null,
+    ler: articleId => {
+      const row = pipeline.radarItems.find(item => item.articleId === articleId);
+      if (!row) return null;
+      const candidato = candidatoDoLote(row);
+      return { finalized: candidato.finalized, phase1: candidato.phase1, sufficiencyLevel: candidato.sufficiencyLevel, sufficiencyHeadline: candidato.sufficiencyHeadline };
+    },
+    passo: { START: () => startDeepResearch(), ANALYZE: () => analyzeSerpSelection(), FINALIZE: () => finalizeInvestigation() },
+  };
+  const proximoRenderDoLote = () => new Promise<void>(resolve => { loteEsperasRef.current.push(resolve); window.setTimeout(resolve, 400); });
+  const esperarVistaDoLote = async (pronta: (vista: RadarLoteDePesquisaVista) => boolean, limiteMs: number) => {
+    const ate = Date.now() + limiteMs;
+    for (;;) {
+      const vista = loteVistaRef.current;
+      if (vista && pronta(vista)) return true;
+      if (Date.now() > ate) return false;
+      await proximoRenderDoLote();
+    }
+  };
+  /* As portas do handler (refs) também contam: o render pode chegar antes do `finally` dele. */
+  const loteOcupado = (vista: RadarLoteDePesquisaVista) => vista.ocupado || Boolean(serpActionRef.current || pesquisaEmVooRef.current || collectingArticleIdRef.current || reviewingArticleIdRef.current);
+  const assinaturaDoLote = (lido: RadarResearchBatchRead | null) => (lido ? [lido.finalized, lido.phase1?.id, lido.phase1?.label, lido.phase1?.hint].join("|") : "");
+  const pesquisarEFinalizarEmLote = async (plano: RadarResearchBatchPlan) => {
+    if (lotePesquisaEmCursoRef.current || !plano.run.length) return;
+    lotePesquisaEmCursoRef.current = true;
+    history.capture(`Pesquisar e finalizar ${plano.run.length} artigo(s)`);
+    try {
+      const resultado = await runRadarResearchBatch({
+        plan: plano,
+        /* Só chega aqui pelo "Confirmar e pesquisar" da prévia. */
+        confirmed: true,
+        open: async articleId => {
+          selectAndActivate(articleId);
+          return esperarVistaDoLote(vista => vista.ativo === articleId && !loteOcupado(vista), 20_000);
+        },
+        read: articleId => loteVistaRef.current?.ler(articleId) ?? null,
+        run: async (articleId, passo) => {
+          if (passo === "RESET") throw new Error("O lote não zera investigação.");
+          /* A IA do artigo-modelo é um artigo por vez: o passo que pode finalizar espera a do artigo anterior. */
+          if (passo !== "START") await esperarVistaDoLote(vista => vista.artigosModeloEmCurso.length === 0, 5 * 60_000);
+          const vista = loteVistaRef.current;
+          if (!vista || vista.ativo !== articleId) throw new Error("Outro artigo foi aberto durante o lote; este parou sem executar o passo.");
+          const antes = assinaturaDoLote(vista.ler(articleId));
+          await vista.passo[passo]();
+          await proximoRenderDoLote();
+          await esperarVistaDoLote(atual => !loteOcupado(atual) && assinaturaDoLote(atual.ler(articleId)) !== antes, 20_000);
+        },
+        lastMessage: () => loteVistaRef.current?.aviso || null,
+        onProgress: setLotePesquisa,
+      });
+      if (!resultado.started) return;
+      /* A releitura do fim: espera a IA do último artigo-modelo e pergunta ao servidor. */
+      setLotePesquisa(atual => (atual ? { ...atual, active: true, position: 0 } : atual));
+      await esperarVistaDoLote(vista => vista.artigosModeloEmCurso.length === 0, 5 * 60_000);
+      const releitura: Record<string, { confirmed: boolean; finalized: boolean; reason?: string | null }> = {};
+      for (const item of resultado.items) {
+        if (item.status !== "FINALIZED") continue;
+        const row = radarItemForArticleId(item.articleId);
+        if (!row) { releitura[item.articleId] = { confirmed: false, finalized: false, reason: "o artigo saiu da lista do Radar" }; continue; }
+        const lida = await analiseConfirmadaNoServidor(row);
+        releitura[item.articleId] = lida.ok
+          ? { confirmed: true, finalized: Boolean(radarPrimaryProfileOfAnalysis(lida.corrente.payload)) }
+          : { confirmed: false, finalized: false, reason: lida.reason };
+      }
+      const confirmados = radarResearchBatchConfirmReadback(resultado.items, releitura);
+      const estadoDoModelo = loteVistaRef.current?.artigoModelo;
+      const finalizados = confirmados.filter(item => item.status === "FINALIZED").map(item => estadoDoModelo?.(item.articleId) ?? null);
+      setLotePesquisa({ active: false, items: confirmados, position: 0, total: plano.run.length });
+      setNotice(radarResearchBatchSummary(confirmados, { done: finalizados.filter(estado => estado === "done").length, failed: finalizados.filter(estado => estado === "failed").length }));
+    } finally {
+      lotePesquisaEmCursoRef.current = false;
+    }
+  };
+  const barraDoLoteDePesquisa = (rows: RadarItem[]) => {
+    const plano = planRadarResearchBatch(rows.map(candidatoDoLote));
+    return <RadarResearchBatchAction plan={plano} busy={Boolean(lotePesquisa?.active)} onConfirm={() => void pesquisarEFinalizarEmLote(plano)} />;
+  };
   const handleBulkAction = (operation: RadarR4BulkOperation, ids: string[]) => {
     const rows = ids.map(id => radarItemForArticleId(id)).filter((row): row is RadarItem => Boolean(row));
     const eligible = availableBulkActions(selectedSnapshotsFor(rows))[operation].eligible;
@@ -5949,7 +6106,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       lazyProvenance: lazyPesquisa[chaveLazy(activeRadarItem)]?.provenance || { state: "IDLE" as const, data: null, message: null },
       onLoadSample: () => void carregarParteDaPesquisa("sample"),
       onLoadProvenance: () => void carregarParteDaPesquisa("provenance"),
-    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} googleRefreeze={reparoDoCongelamento("GOOGLE")} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{avisoDaLeituraDaLista && <p className="mt-1 text-sm text-warning" role="alert" data-testid="radar-planilha-leitura-falhou">{avisoDaLeituraDaLista} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} rowFilter={filtroDoGrupo} rowStripeClassName={row => editorialGroupStripeClass(grupoDoItem(row))} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions, groupTagMenuFooter: rodapeDaEtiquetaDoRadar, groupTagUngroupedDetail: itensSemGrupo === null ? undefined : `${itensSemGrupo} artigo${itensSemGrupo === 1 ? "" : "s"}` }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <div className="flex min-w-max flex-wrap items-center gap-2"><RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>{barraDoArtigoModelo(rows)}</div>} renderBulkBarAside={rows => gruposDoRadar.available ? <ArticleGroupMoveSelect groups={gruposDoRadar.groups} onMove={color => void moverItensDeGrupo(rows, color)}/> : null} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} research={pesquisaDoPerfil(row)} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div><ArticleGroupTaggingDialog open={etiquetarArtigosAberto} onClose={() => setEtiquetarArtigosAberto(false)} groupById={gruposDoRadar.groupById} labelFor={articleId => pipeline.radarItems.find(row => row.articleId === articleId)?.title || null} loadPreview={() => gruposDoRadar.previewTagging(pipeline.radarItems.map(row => row.articleId))} apply={gruposDoRadar.applyTagging} onDone={message => setNotice(message)}/>{picker && <ImportPanel title="Importar artigos aprovados" rows={importableAgrupado} groupOf={version => rotuloDoGrupoDeImportacao.get(version.id) || null} subjectOf={version => articleSubjectPhraseOf(version.payload)} label={version => `${radarArticleDisplayTitle(version.payload.promise)} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) { const versao = importable.find(version => version.payload.articleId === item.articleId); partes.push(`${radarImportNoticeLabel({ promise: versao?.payload.promise ?? item.label, slug: versao?.suggestedSlug, fallback: item.label })} bloqueado: ${item.reasons.join(" ")}`); } setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
+    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} googleRefreeze={reparoDoCongelamento("GOOGLE")} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><RadarResearchBatchProgressStrip progress={lotePesquisa} onClose={() => setLotePesquisa(null)}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{avisoDaLeituraDaLista && <p className="mt-1 text-sm text-warning" role="alert" data-testid="radar-planilha-leitura-falhou">{avisoDaLeituraDaLista} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}<RadarArchitectUpdatePanel brandId={selectedBrandId || null} articleIds={itensDaAtualizacaoDoArquiteto} onAdopted={async mensagem => { setNotice(mensagem); await pipeline.reloadOperational(); }}/></div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} rowFilter={filtroDoGrupo} rowStripeClassName={row => editorialGroupStripeClass(grupoDoItem(row))} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions, groupTagMenuFooter: rodapeDaEtiquetaDoRadar, groupTagUngroupedDetail: itensSemGrupo === null ? undefined : `${itensSemGrupo} artigo${itensSemGrupo === 1 ? "" : "s"}` }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <div className="flex min-w-max flex-wrap items-center gap-2">{barraDoLoteDePesquisa(rows)}<RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>{barraDoArtigoModelo(rows)}</div>} renderBulkBarAside={rows => gruposDoRadar.available ? <ArticleGroupMoveSelect groups={gruposDoRadar.groups} onMove={color => void moverItensDeGrupo(rows, color)}/> : null} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} research={pesquisaDoPerfil(row)} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div><ArticleGroupTaggingDialog open={etiquetarArtigosAberto} onClose={() => setEtiquetarArtigosAberto(false)} groupById={gruposDoRadar.groupById} labelFor={articleId => pipeline.radarItems.find(row => row.articleId === articleId)?.title || null} loadPreview={() => gruposDoRadar.previewTagging(pipeline.radarItems.map(row => row.articleId))} apply={gruposDoRadar.applyTagging} onDone={message => setNotice(message)}/>{picker && <ImportPanel title="Importar artigos aprovados" rows={importableAgrupado} groupOf={version => rotuloDoGrupoDeImportacao.get(version.id) || null} subjectOf={version => articleSubjectPhraseOf(version.payload)} label={version => `${radarArticleDisplayTitle(version.payload.promise)} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) { const versao = importable.find(version => version.payload.articleId === item.articleId); partes.push(`${radarImportNoticeLabel({ promise: versao?.payload.promise ?? item.label, slug: versao?.suggestedSlug, fallback: item.label })} bloqueado: ${item.reasons.join(" ")}`); } setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
 }
 
 function RadarProfile({ r3, research, articleHref, architectHref }: { r3: RadarR3Model; research: RadarR3ProfileResearch | null; articleHref: string | null; architectHref: string | null }) {

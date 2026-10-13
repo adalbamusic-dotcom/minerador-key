@@ -21,6 +21,7 @@ import {
   type DataForSeoLabsEstimate,
 } from "./dataforseo-labs-keyword-research-core.ts";
 import { compareSubjectDiscoveryByVolume } from "./subject-discovery-volume.ts";
+import { SUBJECT_SEARCH_RECEIPT_TEXTS, buildSubjectSearchReceiptDraft, type SubjectSearchReceiptDraft, type SubjectSearchReceiptOutcome } from "./subject-search-receipt.ts";
 import {
   SUBJECT_DISCOVERY_ACTIVE_SOURCES,
   SUBJECT_DISCOVERY_CAPS,
@@ -51,7 +52,11 @@ import {
  * Regras que este arquivo sustenta:
  *   - candidata só vem de provider (Google Ads). O Minerador não fabrica
  *     termos, e nenhum caminho de IA monta candidata;
- *   - candidatas NÃO vão ao banco: a resposta volta ao navegador;
+ *   - candidatas NÃO viram keyword sozinhas: a lista volta ao navegador, e só
+ *     o envio ao Processador (ato humano) cria keyword. Desde 2026-10-13 (SDD
+ *     acelerar-fluxo, item 8) o servidor guarda, pela porta `recordReceipt`, o
+ *     RECIBO com a média do Google Ads de cada candidata (M-A, só inclusões):
+ *     é ele, nunca o navegador, a fonte do Volume no import;
  *   - a frase só usa o destino ACEITO no domínio ATUAL da marca;
  *   - dedupe e "já existe" pela `normalizeKeyword` do import, a autoridade;
  *   - buscas antigas (com `labs_*`, estimativa e SERP da frase) continuam
@@ -74,6 +79,12 @@ export const SubjectDiscoverySearchRequestSchema = z.object({
   subjectKeywordId: z.string().uuid().nullable().optional(),
   /** Obrigatório no execute. As chaves do ledger nascem dele. */
   operationRequestId: z.string().uuid().optional(),
+  /**
+   * Aditivo (SDD acelerar-fluxo 2026-10-13, item 7): a pesquisa em lote das
+   * linhas do cadastro manda o MESMO `batchId` em cada linha; ele vai só para o
+   * recibo (fora do `planHash`). Ausente, a pesquisa é a de sempre.
+   */
+  batchId: z.string().uuid().nullable().optional(),
   targeting: z.object({
     language: z.string().refine(value => GOOGLE_ADS_LANGUAGE_VALUES.includes(value), "Idioma Google Ads inválido"),
     selectedStates: z.array(z.string()).max(28),
@@ -199,6 +210,15 @@ export type SubjectDiscoveryExecuteResponse = {
   /** "Já existe" não pôde ser conferido: a lista vem sem a marca. */
   existingCheckFailed: boolean;
   notices: string[];
+  /**
+   * Aditivo (SDD acelerar-fluxo 2026-10-13, item 8): o recibo do servidor com a
+   * média do Google Ads de cada candidata. `recorded` = o import grava o Volume
+   * medido; `unavailable`/`failed` = as sustentações entram sem volume, como
+   * antes. Ausente em buscas antigas da lista local.
+   */
+  receipt?: SubjectSearchReceiptOutcome;
+  /** Aditivo (item 7): o lote a que esta pesquisa pertence. */
+  batchId?: string | null;
 };
 
 export type SubjectDiscoveryErrorCode =
@@ -294,7 +314,8 @@ export type SubjectDiscoveryExecutionPorts = {
   collectSerp: (request: SubjectDiscoverySerpRequest, options: { storeBody: boolean; operationRequestId: string; onRequestStarted: () => void }) => Promise<SubjectDiscoverySerpCollection>;
   /** `skipped`: sem capability, o uso não é gravado. Lança em falha de gravação. */
   recordDataForSeoUsage: (event: SubjectDiscoveryUsageEvent) => Promise<"recorded" | "skipped">;
-  googleAdsIdeas: (seed: SubjectDiscoveryAdsSeed, targeting: SubjectDiscoveryAdsTargeting, pageSize: number) => Promise<{ ideas: SubjectDiscoveryAdsIdea[]; requestId: string | null }>;
+  /** `providerVersion` (aditivo, item 8): a versão da API que respondeu, para o recibo. */
+  googleAdsIdeas: (seed: SubjectDiscoveryAdsSeed, targeting: SubjectDiscoveryAdsTargeting, pageSize: number) => Promise<{ ideas: SubjectDiscoveryAdsIdea[]; requestId: string | null; providerVersion?: string | null }>;
   recordGoogleAdsUsage: (event: { suffix: SubjectDiscoveryAdsUsageSuffix; resultStatus: "succeeded" | "failed"; providerReference: string | null; errorCode: string | null; receivedCount: number | null }) => Promise<void>;
 };
 
@@ -319,6 +340,12 @@ export type SubjectDiscoveryPorts = {
   readExistingKeywords: () => Promise<Array<{ id: string; keyword: string }>>;
   /** Abre as credenciais. Só o execute chama; a pesquisa pede `{ dataForSeo: false }`. */
   openExecution: (options?: SubjectDiscoveryOpenExecutionOptions) => Promise<SubjectDiscoveryExecutionPorts>;
+  /**
+   * Aditivo (SDD acelerar-fluxo 2026-10-13, item 8): grava o recibo do servidor
+   * (M-A) com a média do Google Ads de cada candidata. Ausente (a diferenciação
+   * de publicados), nada é gravado. Nunca lança: tabela ausente = `unavailable`.
+   */
+  recordReceipt?: (draft: SubjectSearchReceiptDraft) => Promise<SubjectSearchReceiptOutcome>;
 };
 
 /* -------------------------------- auxiliares ------------------------------- */
@@ -614,7 +641,7 @@ export async function runSubjectDiscoverySearch(input: { brandId: string; reques
   if (inFlight.has(lockKey)) return failure(409, "OPERATION_IN_PROGRESS", "idempotency", "Esta pesquisa já está em execução. Aguarde o resultado; nada foi consultado de novo.");
   inFlight.add(lockKey);
   try {
-    return await execute({ operationRequestId, subject, plan }, ports);
+    return await execute({ operationRequestId, subject, plan, batchId: request.batchId ?? null }, ports);
   } finally {
     inFlight.delete(lockKey);
   }
@@ -633,8 +660,11 @@ async function execute(context: {
   operationRequestId: string;
   subject: SubjectDiscoverySubject;
   plan: SubjectDiscoveryPlan;
+  batchId?: string | null;
 }, ports: SubjectDiscoveryPorts): Promise<SubjectDiscoverySearchOutcome> {
   const { operationRequestId, subject, plan } = context;
+  const adsRequestIds: Array<string | null> = [];
+  let adsProviderVersion: string | null = null;
   let exec: SubjectDiscoveryExecutionPorts;
   try {
     exec = await ports.openExecution({ dataForSeo: false });
@@ -662,6 +692,8 @@ async function execute(context: {
     try {
       const page = await exec.googleAdsIdeas(seed, plan.adsTargeting, SUBJECT_DISCOVERY_CAPS.googleAdsPageSize);
       const ideas = page.ideas.slice(0, SUBJECT_DISCOVERY_CAPS.googleAdsPageSize);
+      adsRequestIds.push(page.requestId);
+      adsProviderVersion ||= page.providerVersion ?? null;
       outcome.calls = 1;
       outcome.received = ideas.length;
       outcome.costUsd = 0;
@@ -702,6 +734,35 @@ async function execute(context: {
   const notices = [...plan.notices];
   if (merged.truncated) notices.push(`${merged.candidates.length} de ${merged.total} candidatas exibidas.`);
   notices.push(SUBJECT_DISCOVERY_NOTICES.sourceRule);
+  const executedAt = ports.now().toISOString();
+
+  /*
+   * Item 8 (SDD acelerar-fluxo 2026-10-13): o recibo do servidor guarda a média
+   * do Google Ads de cada candidata. Sem a porta (diferenciação de publicados),
+   * nada é gravado; sem a tabela (M-A não aplicada) ou com falha, a pesquisa
+   * segue igual e diz que o volume será medido no Processador.
+   */
+  let receipt: SubjectSearchReceiptOutcome | undefined;
+  if (ports.recordReceipt) {
+    const draft = buildSubjectSearchReceiptDraft({
+      operationRequestId,
+      batchId: context.batchId ?? null,
+      subjectKeywordId: subject.subjectKeywordId,
+      phrase: subject.phrase,
+      providerVersion: adsProviderVersion,
+      targeting: plan.adsTargeting,
+      googleAdsRequestIds: adsRequestIds,
+      executedAt,
+      candidates: merged.candidates,
+    });
+    try {
+      receipt = await ports.recordReceipt(draft);
+    } catch (error) {
+      receipt = { status: "failed", reason: safeCode(error, "SUBJECT_SEARCH_RECEIPT_FAILED") };
+    }
+    if (receipt.status === "unavailable") notices.push(SUBJECT_SEARCH_RECEIPT_TEXTS.unavailable);
+    if (receipt.status === "failed") notices.push(SUBJECT_SEARCH_RECEIPT_TEXTS.failed);
+  }
 
   return {
     status: 200,
@@ -709,7 +770,7 @@ async function execute(context: {
       success: true,
       mode: "execute",
       operationRequestId,
-      executedAt: ports.now().toISOString(),
+      executedAt,
       subject: { ...subject, phraseExistingKeywordId: existingByNormalized?.get(subject.normalizedPhrase) ?? null },
       plan,
       sources: SUBJECT_DISCOVERY_ACTIVE_SOURCES.map(source => outcomes.get(source) as SubjectDiscoverySourceOutcome),
@@ -726,6 +787,8 @@ async function execute(context: {
       ledgerWarning: ledgerWarnings.length ? `O uso de ${ledgerWarnings.length} consulta(s) ao Google Ads não foi gravado no controle de gastos; o resultado foi mantido (${ledgerWarnings.slice(0, 3).join("; ")}).` : null,
       existingCheckFailed: existingByNormalized === null,
       notices,
+      ...(receipt ? { receipt } : {}),
+      ...(context.batchId ? { batchId: context.batchId } : {}),
     },
   };
 }

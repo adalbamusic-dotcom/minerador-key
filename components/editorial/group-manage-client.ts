@@ -94,13 +94,19 @@ export type DeclaredPlanWithdrawPreview = {
   approvedToReview: number;
   effects: string[];
   decisionHash: string;
+  /** SDD acelerar 2026-10-13, item 15: os efeitos nos dois módulos (com `chain`). */
+  chain?: { effects: string[]; arquiteto: { articleId: string; label: string; siloId: string; canWithdraw: boolean; reason: string | null } | null };
 };
 
-export async function previewDeclaredPlanWithdraw(brandId: string, groupId: string, subjectKeywordId: string): Promise<{ ok: true; preview: DeclaredPlanWithdrawPreview } | { ok: false; code: string; message: string }> {
+/** "Tirar do plano" numa confirmação (item 15): reaprovar+enviar e retirar do Silo, marcados por padrão. */
+export type DeclaredPlanWithdrawChainOptions = { reapproveAndSend: boolean; withdrawFromSilo: boolean };
+export type DeclaredPlanWithdrawChainStep = { step: "plan" | "approve_and_send" | "silo"; outcome: "done" | "already" | "skipped" | "refused" | "failed"; message: string };
+
+export async function previewDeclaredPlanWithdraw(brandId: string, groupId: string, subjectKeywordId: string, chain?: DeclaredPlanWithdrawChainOptions): Promise<{ ok: true; preview: DeclaredPlanWithdrawPreview } | { ok: false; code: string; message: string }> {
   const { ok, body } = await chamar(`/api/minerador/marcas/${encodeURIComponent(brandId)}/plans/withdraw`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ groupId, subjectKeywordId, mode: "preview" }),
+    body: JSON.stringify({ groupId, subjectKeywordId, mode: "preview", ...(chain ? { chain } : {}) }),
   });
   if (!ok || typeof body.decisionHash !== "string") return { ok: false, code: typeof body.code === "string" ? body.code : "PLAN_PREVIEW_FAILED", message: mensagem(body, "Não foi possível montar a prévia.") };
   return { ok: true, preview: body as unknown as DeclaredPlanWithdrawPreview };
@@ -116,4 +122,17 @@ export async function applyDeclaredPlanWithdraw(brandId: string, groupId: string
   if (!ok || readback?.subjectPlanRemoved !== true || typeof body.planVersion !== "number") return { ok: false, code: typeof body.code === "string" ? body.code : "PLAN_WITHDRAW_FAILED", message: mensagem(body, "A retirada não foi confirmada.") };
   void refreshBrandEditorialGroups(brandId);
   return { ok: true, planVersion: body.planVersion, notices: Array.isArray(body.notices) ? body.notices.filter((item): item is string => typeof item === "string") : [] };
+}
+
+/** Item 15: aplica a sequência inteira (cada passo pelo núcleo do dono, com releitura). */
+export async function applyDeclaredPlanWithdrawChain(brandId: string, groupId: string, subjectKeywordId: string, decisionHash: string, chain: DeclaredPlanWithdrawChainOptions): Promise<{ ok: true; steps: DeclaredPlanWithdrawChainStep[]; complete: boolean } | { ok: false; code: string; message: string }> {
+  const { ok, body } = await chamar(`/api/minerador/marcas/${encodeURIComponent(brandId)}/plans/withdraw`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ groupId, subjectKeywordId, mode: "apply", decisionHash, chain }),
+  });
+  const resultado = body.chain as { steps?: unknown; complete?: unknown } | undefined;
+  if (!ok || !resultado || !Array.isArray(resultado.steps)) return { ok: false, code: typeof body.code === "string" ? body.code : "PLAN_WITHDRAW_FAILED", message: mensagem(body, "A sequência não foi confirmada.") };
+  void refreshBrandEditorialGroups(brandId);
+  return { ok: true, steps: resultado.steps as DeclaredPlanWithdrawChainStep[], complete: resultado.complete === true };
 }

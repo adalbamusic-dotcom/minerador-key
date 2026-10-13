@@ -442,7 +442,8 @@ test("textos fixos da tela", () => {
   assert.equal(SUBJECT_SEARCH_ENTER_HELP, "Enter mostra o plano antes de pesquisar.");
   assert.equal(SUBJECT_SEARCH_FREE_PLAN_TEXT, "Sem custo no DataForSEO; usa a cota do Google Ads");
   assert.doesNotMatch(SUBJECT_SEARCH_LANGUAGE_TEXT + SUBJECT_SEARCH_LOCAL_LIST_TEXT + SUBJECT_SEARCH_PLAN_TEXT, /Labs|paga de novo|Nada é pago/, "nenhum texto promete ou cobra o Labs");
-  assert.equal(SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT, "O volume será medido de novo no Processador, pelo Google Ads, sem custo.");
+  // 2026-10-13 (SDD acelerar-fluxo, item 8 — mudança declarada): o Volume vai pelo recibo do servidor.
+  assert.equal(SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT, "O Volume que a pesquisa mediu no Google Ads vai junto, pelo recibo guardado no servidor (sem medir de novo), e a Lógica roda sozinha. Sem recibo, o Volume é medido no Processador, sem custo.");
   assert.equal(SUBJECT_SEARCH_UNDECLARED_TEXT, "Para ligar estas keywords a um Assunto, declare-o antes, aqui ou no Processador.");
 });
 

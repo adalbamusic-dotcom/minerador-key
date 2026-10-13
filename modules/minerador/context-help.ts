@@ -87,7 +87,7 @@ const DISCOVERY_TOPICS: readonly ContextHelpTopic[] = [
     sections: [
       { heading: "Fontes", body: "Google Ads pela frase, e pela frase com a página de destino quando houver. Pesquisas antigas podem mostrar também fontes do DataForSEO Labs e a estimativa, só para leitura." },
       { heading: "Custo", body: "Antes de pesquisar, o diálogo mostra o plano: sem custo no DataForSEO, usa a cota do Google Ads. Nada é consultado antes de você confirmar." },
-      { heading: "Onde a lista fica", body: "O resultado fica neste navegador. Só vai ao banco quando você envia as selecionadas ao Processador, sem métrica: o volume é medido de novo lá." },
+      { heading: "Onde a lista fica", body: "O resultado fica neste navegador. Só vai ao banco quando você envia as selecionadas ao Processador (o servidor guarda à parte só o recibo com a média do Google Ads de cada candidata): o Volume vai por esse recibo, nunca pelo navegador, e a Lógica roda; sem recibo, o volume é medido lá." },
     ],
     howToUse: [
       "Selecione Por Assunto em Tipo de descoberta.",

@@ -55,7 +55,14 @@ test("lote · o teto de chamadas está no rótulo, 4 por artigo", () => {
   assert.equal(radarSerpBatchButtonLabel("Atualizar SERP selecionada (cache primeiro)", 1), "Atualizar SERP selecionada (cache primeiro) (1 · até 4 chamadas)");
 });
 
-test("lote (DOM) · os dois botões de SERP mostram o teto antes do clique; os outros não", async () => {
+/*
+ * 2026-10-13 · regra do piloto (um caminho só): a barra deixou de oferecer o
+ * lote SERP e as etapas do processo antigo. A coleta em lote passou a ser
+ * "Pesquisar e finalizar (N artigos)", com a prévia de custo antes
+ * (tests/radar-pesquisa-em-lote-2026-10-13.test.mts). O rótulo com teto acima
+ * continua valendo para quem ainda o usa.
+ */
+test("lote (DOM) · a barra não oferece mais o lote SERP nem as etapas do processo antigo", async () => {
   const cliques: Array<{ operation: RadarR4BulkOperation; ids: string[] }> = [];
   const tela = await montarRadar();
   await tela.render(React.createElement(RadarR4BulkOperationsBar, {
@@ -63,10 +70,9 @@ test("lote (DOM) · os dois botões de SERP mostram o teto antes do clique; os o
     onAction: (operation, ids) => { cliques.push({ operation, ids }); },
   }));
   const botoes = [...tela.container.querySelectorAll("button")].map(botao => botao.textContent || "");
-  assert.ok(botoes.includes("Iniciar lote SERP (3 · até 12 chamadas)"), botoes.join(" | "));
-  assert.ok(botoes.includes("Atualizar SERP selecionada (cache primeiro) (1 · até 4 chamadas)"), botoes.join(" | "));
-  const revisar = botoes.find(texto => texto.startsWith("Revisar SERP"));
-  assert.equal(revisar, "Revisar SERP (1)", "operação que não paga não ganha teto");
+  for (const antigo of ["Iniciar lote SERP", "Atualizar SERP selecionada", "Revisar SERP", "Aprovar SERP", "Preparar pautas", "Aprovar selecionadas", "Enviar ao especialista", "Revisar contribuição", "Gerar relatório"]) {
+    assert.equal(botoes.some(texto => texto.startsWith(antigo)), false, `${antigo} voltou à barra: ${botoes.join(" | ")}`);
+  }
   assert.equal(cliques.length, 0, "renderizar não dispara nada");
   tela.destroy();
 });

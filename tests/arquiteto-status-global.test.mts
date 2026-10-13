@@ -117,7 +117,8 @@ test("PRONTO_PARA_RADAR só é oferecido na aba Links internos", () => {
   }
   // E os handlers recusam por conta própria — a cerca não é só de render.
   assert.equal(codigo.includes('if(workspaceMode!=="links") return;'), true);
-  assert.equal(codigo.includes('if(workspaceMode !== "links") return;'), true);
+  // SDD acelerar item 5 (mudança declarada): a marcação devolve o desfecho.
+  assert.equal(codigo.includes('if(workspaceMode !== "links") return "none";'), true);
 });
 
 const canonical = (overrides: Partial<CanonicalApprovalIndex> = {}): CanonicalApprovalIndex => ({

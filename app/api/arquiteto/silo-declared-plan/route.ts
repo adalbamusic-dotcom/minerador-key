@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { handleSiloDeclaredPlan, siloDeclaredPlanRuntime } from "@/lib/server/arquiteto-silo-declared-plan";
+import { handleSiloDeclaredPlanWithWithdrawal } from "@/lib/server/arquiteto-silo-plan-with-withdrawal";
+import { siloArticleWithdrawalRuntime } from "@/lib/server/arquiteto-silo-article-withdrawal";
 import { pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
@@ -22,6 +24,14 @@ const RequestSchema = z.object({
   expectedSiloDnaVersionId: z.string().min(1).optional(),
   /** O hash da prévia aceita; `apply` só grava com o mesmo. */
   decisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  /**
+   * SDD acelerar 2026-10-13, item 10: a prévia lista os artigos fora do plano
+   * com "retirar do Silo" marcado; aplicar retira (núcleo da retirada) e aplica
+   * o plano numa decisão só. Ausente = o comportamento de sempre (recusa).
+   */
+  withdrawNonPlan: z.boolean().optional(),
+  /** Os artigos fora do plano que continuam marcados para retirar (ausente = todos). */
+  withdrawArticleIds: z.array(z.string().min(1)).max(60).optional(),
 }).strict();
 
 export async function POST(request: Request) {
@@ -35,7 +45,12 @@ export async function POST(request: Request) {
     if (parsed.mode === "apply") {
       await resolvePipelineContext({ brandId: parsed.brandId, module: "arquiteto", action: "approve" });
     }
-    const result = await handleSiloDeclaredPlan(siloDeclaredPlanRuntime(context), {
+    const result = parsed.withdrawNonPlan ? await handleSiloDeclaredPlanWithWithdrawal(siloDeclaredPlanRuntime(context), siloArticleWithdrawalRuntime(context), {
+      siloId: parsed.siloId,
+      mode: parsed.mode,
+      withdrawArticleIds: parsed.withdrawArticleIds ?? null,
+      decisionHash: parsed.decisionHash ?? null,
+    }) : await handleSiloDeclaredPlan(siloDeclaredPlanRuntime(context), {
       siloId: parsed.siloId,
       mode: parsed.mode,
       expectedSiloDnaVersionId: parsed.expectedSiloDnaVersionId ?? null,
