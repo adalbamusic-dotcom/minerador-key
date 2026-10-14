@@ -331,14 +331,15 @@ test("2 · cadeia por id: referência, observação, oportunidade, entrega e for
   assert.match(um, /^- Observação: P5 \(Como montar a rotina de skincare facial\? \(12 de 12 páginas\)\) · Vem do esqueleto da SERP: M1 "Como montar a rotina de skincare facial no dia a dia\?"$/m);
   assert.match(um, /^- Oportunidade: G1 \(Como montar a rotina de skincare facial\? \(12 de 12 páginas cobrem\)\)$/m);
   assert.match(um, /^- Entrega: Comece pela limpeza e termine pelo hidratante · demonstração: 3 telas: antes "rosto sem rotina" · ajuste "limpeza, sérum e hidratante" · depois "pele preparada para a noite"$/m);
-  assert.match(um, /^- Formato: capítulo 1 do vídeo longo · corte 1 \(utilidade \d de 4\) · lâmina 2 do carrossel$/m);
+  /* 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes): o formato diz os curtos do capítulo e o carrossel de cada um. */
+  assert.match(um, /^- Formato: capítulo 1 do vídeo longo · corte 1 \(utilidade \d de 4\) · curtos 1\.1(?:, 1\.\d)* \(um carrossel por curto\)$/m);
   /* Só o que a seção cita: a P6 (outra pergunta da amostra) não aparece por semelhança. */
   assert.doesNotMatch(um, /\bP6\b|\bP1\b|\bC1\b/);
   /* A lacuna cujo texto não é igual ao assunto do Google não liga a página parecida. */
   const dois = blocoDoCapitulo(cadeia, 2);
   assert.match(dois, /páginas que tratam G3: não ligadas \(o rótulo não casou com a leitura do Google\)/);
   assert.match(dois, /^- Oportunidade: G3 \(rotina de skincare facial \(3 de 12 páginas cobrem\)\)$/m);
-  assert.match(dois, /^- Formato: capítulo 2 do vídeo longo · sem corte: sem demonstração definida na planta · lâmina 3 do carrossel$/m);
+  assert.match(dois, /^- Formato: capítulo 2 do vídeo longo · sem corte: sem demonstração definida na planta · (?:curtos 2\.1(?:, 2\.\d)* \(um carrossel por curto\)|sem curto \(sem frase publicável\))$/m);
   /* Sem evidência nem origem: proposta editorial, e a disputa é pela execução. */
   const tres = blocoDoCapitulo(cadeia, 3);
   assert.match(tres, /^- Observação: Origem: proposta editorial do artigo \(não vem de uma seção da SERP\)$/m);
@@ -399,15 +400,16 @@ test("8 · storyboard: estilo só com o que se afirma sem ver a imagem, referên
   assert.match(row.cortes_para_redes, /^1\. Do capítulo 1 \(A ordem da noite\):$/m);
   assert.match(row.cortes_para_redes, /^2\. Do capítulo 2 \(O que evitar\):$/m);
   /* O carrossel leva texto na imagem: a regra "sem texto legível" é dita como a que NÃO vale, e nenhuma lâmina a pede. */
-  assert.match(story, /^Storyboard do carrossel \(o carrossel leva texto na imagem: a regra "sem texto legível" do plano visual do artigo não vale aqui; 4 lâminas, o texto de cada uma em cortes_para_redes\):$/m);
+  /* 2026-10-14 · SDD silo interligado · F6 · decisão do dono (o vídeo em 4 partes): um carrossel por curto, com o texto e a cena dele. */
+  assert.match(story, /^Storyboard dos carrosséis \(um por curto; o carrossel leva texto na imagem: a regra "sem texto legível" do plano visual do artigo não vale aqui\): /m);
   for (const lamina of story.split("\n").filter(linha => linha.startsWith("- Lâmina"))) assert.doesNotMatch(lamina, /sem texto/i, lamina);
   /*
    * 2026-10-08 · D4: "(lista, como em N de N páginas concorrentes)" em cada
    * lâmina soava como carrossel observado. A contagem é das páginas lidas, dita
    * uma vez depois das lâminas, e diz que carrossel ninguém contou.
    */
-  assert.match(story, /^- Lâmina 2: texto = o título "A ordem da noite" e o Apoio publicável · visual = os passos em lista: limpeza; sérum; hidratante\.$/m);
-  assert.match(story, /^Por que em lista: é a estrutura das páginas concorrentes lidas \(\d+ de \d+ usam listas\), não uma contagem de carrosséis — o Radar não lê as lâminas dos carrosséis\.$/m);
+  /* 2026-10-14 · F6 · a cena de cada lâmina é a do curto (em cortes_para_redes), e a série tem o storyboard vertical dela. */
+  assert.match(story, /^Storyboard da série de curtos \(vertical 9:16; um por micro-assunto de cortes_para_redes\): /m);
   assert.doesNotMatch(story, /como em \d+ de \d+ páginas concorrentes/);
   /* Nenhum adjetivo de estilo em nenhuma das três colunas novas. */
   for (const coluna of ["storyboard_visual", "concorrencia_curtos_e_carrossel", "cadeia_competitiva"] as const) assert.doesNotMatch(row[coluna], ADJETIVO_DE_ESTILO, coluna);
@@ -519,7 +521,8 @@ test("teto · no caso extremo a cadeia e o storyboard encolhem por igual (e dize
     assert.ok(row[coluna].length <= RADAR_VIDEO_EXPORT_CELL_CHARS, `${coluna}: ${row[coluna].length} caracteres`);
     assert.doesNotMatch(row[coluna], /cortado no limite da célula/, coluna);
   }
-  assert.match(row.storyboard_visual, /^- Lâmina 7: /m, "o carrossel chega à última lâmina de capítulo");
+  /* 2026-10-14 · SDD silo interligado · F6 · decisão do dono (o vídeo em 4 partes): o carrossel sai dos curtos; o storyboard chega a ele inteiro. */
+  assert.match(row.storyboard_visual, /^Storyboard dos carrosséis \(um por curto; /m, "o storyboard chega aos carrosséis dos curtos");
 });
 
 /* ================================ a leitura nova, só no modo vídeo ================================ */

@@ -29,6 +29,8 @@ import {
   buildCarouselSeedPrompt, buildScriptSeedPrompt, carouselPayloadFromSeed, finalArticleText,
   ProviderCarouselSeedSchema, ProviderScriptSeedSchema, scriptPayloadFromSeed, seedPlanRefusal,
   CAROUSEL_SEED_SYSTEM_PROMPT, SCRIPT_SEED_SYSTEM_PROMPT,
+  /* 2026-10-14 · F5 · um carrossel por curto. */
+  buildShortCarouselsSeedPrompt, carouselPayloadFromShortsSeed, CAROUSEL_SHORTS_SEED_SYSTEM_PROMPT, ProviderShortCarouselsSeedSchema, seedShortCarousels,
 } from "@/lib/redator/deliverable-seed";
 import { writerSeedDocument } from "@/lib/server/writer-seed";
 
@@ -88,6 +90,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ payload });
     }
 
+    /*
+     * 2026-10-14 · F5 (SDD silo interligado; pendência da F6) · com a série de
+     * curtos do plano, UM CARROSSEL POR CURTO (as lâminas da régua do vídeo), na
+     * mesma chamada única; sem a série, o carrossel por capítulo de antes.
+     */
+    if (seedShortCarousels(plan.plan)) {
+      const seedPorCurto = await generateStructuredAI({
+        provider, system: CAROUSEL_SHORTS_SEED_SYSTEM_PROMPT, user: buildShortCarouselsSeedPrompt(source),
+        schema: ProviderShortCarouselsSeedSchema, maxTokens: 8000,
+      });
+      const payload = CarouselPayloadSchema.parse(
+        carouselPayloadFromShortsSeed({ base: base as never, seed: seedPorCurto, novoId, plan: plan.plan }));
+      return NextResponse.json({ payload });
+    }
     const seed = await generateStructuredAI({
       provider, system: CAROUSEL_SEED_SYSTEM_PROMPT, user: buildCarouselSeedPrompt(source),
       schema: ProviderCarouselSeedSchema, maxTokens: 5000,

@@ -137,8 +137,12 @@ test("fonte única · a regra nova chega ao pedido, à linha de topo, ao Redator
   assert.match(radarHumanVoiceCatalogNote(), /regras do artigo-modelo '2026-10-14c', leitura do Redator '2026-10-14'; regras de keyword e título 2026-10-14/);
   assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-14");
   assert.equal(RADAR_KEYWORD_RULES_VERSION, "2026-10-14");
-  /* F6 · o vídeo continua com a regra dele até a fase do vídeo (o E0 trava o CSV de vídeo). */
-  assert.match(radarHumanVoiceVideoRule(), /o título começa pela keyword principal/);
+  /*
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"): o vídeo ganha as mesmas
+   * regras de título (K2/K3): a principal natural nas primeiras ~60 letras, nunca prefixo fixo, 3 ângulos.
+   */
+  assert.doesNotMatch(radarHumanVoiceVideoRule(), /o título começa pela keyword principal/);
+  assert.match(radarHumanVoiceVideoRule(), /dentro das primeiras ~60 letras \(nunca como prefixo fixo: ela abre no máximo 1 das 3 opções\)/);
   const titulo = RADAR_HUMAN_VOICE_SERP_RULES.find(regra => regra.id === "titulo")!;
   assert.match(titulo.what, /abre no máximo 1 das 3 opções/);
 });

@@ -23,6 +23,9 @@ import { mcpRuntimeFailure, readMcpRuntimeConfig } from "@/lib/server/mcp-runtim
 import { listWriterDeliverables, listWriterMedia, registerWriterMediaBrief, saveWriterArticleDraft, saveWriterDeliverable, uploadWriterMediaAsset, WriterDeliverableError } from "@/lib/server/writer-deliverables";
 import { readWriterGuardianContext, recordWriterDivergenceFromMcp } from "@/lib/server/writer-evidence-divergences";
 import { readWriterArticleBlueprintPanel, readWriterEvidence, readWriterEvidenceManifest, readWriterFoundations, WriterEvidenceError } from "@/lib/server/writer-evidence-reader";
+/* 2026-10-14 · F6 (SDD silo interligado, "Redator lê o material novo"): o material do CSV "Para escrever", pelo mesmo núcleo. */
+import { readWriterMaterialForMcp } from "@/lib/server/writer-material";
+import { WRITER_MATERIAL_DOCUMENT_POINTER, writerMaterialForFoundations, writerMaterialForMcp } from "@/lib/redator/writer-material";
 import { recordWriterMcpCall, WriterMcpAuthError, type WriterMcpScope } from "@/lib/server/writer-mcp-delegation";
 import { resolveWriterMcpPrincipal, type WriterMcpBrandAccess, type WriterMcpPrincipal } from "@/lib/server/writer-mcp-principal";
 import { platformServerInstructions } from "@/lib/agent/platform-catalog";
@@ -121,6 +124,8 @@ const WRITER_MCP_INSTRUCTIONS = [
    * era estrutura no processo antigo vem marcada como matéria-prima.
    */
   "A estrutura sai só do artigo-modelo concluído. get_writer_brief e get_writer_foundations trazem articleBlueprintState: com status needs_article_blueprint (ou blueprint_unavailable), não escreva pela estrutura antiga do dossiê — mostre ao usuário a ação na tela (organizar o artigo-modelo no Radar, com o custo dito no botão) e releia depois. Fatia com role raw_material (blueprint competitivo antigo, amostras inteiras das corridas) é proveniência e matéria-prima, nunca estrutura, roteiro, formato nem duração; o material de vídeo pelo artigo-modelo é get_video_material.",
+  /* 2026-10-14 · F6 (SDD silo interligado, "Redator lê o material novo"): o material do CSV "Para escrever", pelo mesmo núcleo. */
+  "writerMaterial (get_writer_brief inteiro; get_writer_foundations no que couber; get_writer_document aponta para o brief em evidence.material) é o material novo do Radar pelo mesmo núcleo do CSV 'Para escrever': ângulo e análise competitiva, diferencial da marca, fechamento em 4 tempos com o diagnóstico como CTA único, regras de título e keyword, a malha do Silo (L no corpo, T na trilha 'Continue no Silo') e as fontes de autoridade (X, citadas pelo nome da entidade; afirmação de saúde sem fonte não vira fato). É guia: o texto já escrito não muda sozinho; aplique o que estiver 'a_aplicar', proponha ao usuário ativar o que estiver 'ativar' (destino no ar: ative o link — a âncora que ficou como texto simples vira link; F5, 2026-10-14) e, com siloLinksUpdate ('Links do Silo atualizados disponíveis'), proponha ao usuário os links novos onde eles dizem, sem reescrever o resto.",
   /* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP (pedido do dono, Adendo G): a mesma fonte do CSV, do pedido e dos prompts do Redator. */
   radarHumanVoiceRedatorRule(),
   "Salve apenas rascunhos com lock; não declare aprovação, publicação ou imagem gerada sem readback.",
@@ -312,20 +317,24 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
   }));
 
   server.registerTool("get_writer_document", { title: "Ler documento do Redator",
-    description: "Use para ler blocos, metadados, status, lock, hash e vínculos com os DNAs antes de editar. A evidência do Radar não vem aqui: use get_writer_evidence_manifest, get_writer_foundations e read_writer_evidence.", annotations: readAnnotations,
+    description: "Use para ler blocos, metadados, status, lock, hash e vínculos com os DNAs antes de editar. A evidência do Radar não vem aqui: use get_writer_evidence_manifest, get_writer_foundations e read_writer_evidence. evidence.material aponta para get_writer_brief: o material novo do Radar (o mesmo núcleo do CSV 'Para escrever') e o checklist 'a aplicar' dos links do Silo (L no corpo, T na trilha 'Continue no Silo') e das fontes de autoridade (X) contra o texto de agora, com 'Links do Silo atualizados disponíveis' quando o texto já escrito não aplica a malha de hoje — o texto não é reescrito sozinho.", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
   async ({ documentId }) => call("get_writer_document", "writer.read", "view", { documentId, read: "document" }, async ({ row }) => {
     const current = row as TargetRow;
     const document = writerDocumentViewFromRow(current);
     if (!document) throw new ToolFailure("document_incompatible");
+    /*
+     * 2026-10-14 · F6 (SDD silo interligado) · o documento continua numa leitura só (adendo D4): o
+     * material novo (e o checklist contra o texto) é do get_writer_brief, que monta o CSV; aqui, o ponteiro.
+     */
     return {
       document, contentHash: current.content_hash, lockVersion: current.lock_version, updatedAt: current.updated_at,
-      evidence: { manifest: "get_writer_evidence_manifest", foundations: "get_writer_foundations", read: "read_writer_evidence" },
+      evidence: { manifest: "get_writer_evidence_manifest", foundations: "get_writer_foundations", read: "read_writer_evidence", material: WRITER_MATERIAL_DOCUMENT_POINTER },
     };
   }));
 
   server.registerTool("get_writer_brief", { title: "Ler briefing do Radar",
-    description: "Use antes de redigir para conferir vínculos, instruções e pendências do artigo, sem inventar ausências. O dossiê do Radar não viaja aqui: siga o ponteiro para o manifesto e os fundamentos. articleBlueprintState diz se o artigo-modelo concluído do pacote existe; sem ele (needs_article_blueprint), as sugestões gravadas no envio pelo processo antigo saem e a ação na tela diz onde organizar.", annotations: readAnnotations,
+    description: "Use antes de redigir para conferir vínculos, instruções e pendências do artigo, sem inventar ausências. O dossiê do Radar não viaja aqui: siga o ponteiro para o manifesto e os fundamentos. articleBlueprintState diz se o artigo-modelo concluído do pacote existe; sem ele (needs_article_blueprint), as sugestões gravadas no envio pelo processo antigo saem e a ação na tela diz onde organizar. writerMaterial traz o material novo do Radar pelo MESMO núcleo do CSV 'Para escrever' (get_article_for_writing): o ângulo e a análise competitiva (base, só os melhores, ganho de informação, SEO antigo a não copiar, até 4 perguntas que valem resposta), o diferencial da marca, o fechamento em 4 tempos (dor → mudança → facilidade → diagnóstico, o CTA único), as regras de título e keyword (K1–K9), a malha do Silo (L no corpo, T na trilha 'Continue no Silo') e as fontes de autoridade verificadas (X) com as afirmações de saúde sem fonte; links e fontes vêm como checklist com status 'aplicado' ou 'a_aplicar' contra o texto de agora, e siloLinksUpdate ('Links do Silo atualizados disponíveis') lista os que o texto já escrito ainda não aplica. Leitura aditiva: o que já foi escrito não muda sozinho.", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
   async ({ documentId }) => call("get_writer_brief", "writer.read", "view", { documentId, read: "brief" }, async ({ access, row }) => {
     const current = row as TargetRow;
@@ -351,7 +360,10 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
         .then(painel => (painel.state === "approved" && painel.editorialContext?.length ? painel.editorialContext : brief.editorialContext))
         .catch(() => brief.editorialContext)
       : brief.editorialContext;
-    return fitBrief(mcpWithArticleBlueprintState({
+    /* 2026-10-14 · F6 (SDD silo interligado, "Redator lê o material novo") · o material pelo mesmo núcleo do CSV, com o checklist contra o texto de agora. */
+    const material = await readWriterMaterialForMcp(evidenceContext(access), { documentId, actorUserId: principal.actorId });
+    const comMaterial = (base: Record<string, unknown>) => ({ ...base, writerMaterial: writerMaterialForMcp(material.leitura, material.documento) });
+    return fitBrief(comMaterial(mcpWithArticleBlueprintState({
       documentId, documentHash: current.content_hash,
       articleDnaRef: brief.fields.articleDnaRef, keywordDnaRefs: brief.fields.keywordDnaRefs, siloDnaRef: brief.fields.siloDnaRef,
       instructions: brief.fields.instructions,
@@ -369,7 +381,7 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
       pendingDecisions: brief.pendingDecisions,
       guards: WRITER_EVIDENCE_GUARDS,
       warning: brief.schemaVersion === 2 && !dossier ? "Dossiê ausente nesta versão; não inferir evidências." : null,
-    }, estadoDaPlanta));
+    }, estadoDaPlanta)));
   }));
 
   server.registerTool("get_writer_evidence_manifest", { title: "Mapa das evidências do artigo",
@@ -383,11 +395,14 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
     inputSchema: z.object({ documentId: z.string().min(1) }) },
   async ({ documentId }) => call("get_writer_foundations", "writer.read", "view", { documentId }, async ({ access }) => {
     /* 2026-10-09 · os mesmos fundamentos, com o estado da planta: sem ela, nunca o legado (as linhas do envio saem). */
-    const [fundamentos, estadoDaPlanta] = await Promise.all([
+    /* 2026-10-14 · F6 (SDD silo interligado) · e o material novo do Radar no que sobra dos 24 kB (senão, o ponteiro para get_writer_brief). */
+    const [fundamentos, estadoDaPlanta, material] = await Promise.all([
       readWriterFoundations(evidenceContext(access), documentId),
       readMcpArticleBlueprintState(access, documentId),
+      readWriterMaterialForMcp(evidenceContext(access), { documentId, actorUserId: principal.actorId }),
     ]);
-    return mcpWithArticleBlueprintState(fundamentos as unknown as Record<string, unknown>, estadoDaPlanta);
+    const comEstado = mcpWithArticleBlueprintState(fundamentos as unknown as Record<string, unknown>, estadoDaPlanta);
+    return { ...comEstado, writerMaterial: writerMaterialForFoundations(material.leitura, material.documento, writerEvidenceJsonBytes(comEstado), WRITER_EVIDENCE_LIMITS.foundationsMaxBytes) };
   }));
 
   server.registerTool("read_writer_evidence", { title: "Ler uma fatia de evidência",

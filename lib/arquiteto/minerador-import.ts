@@ -1,5 +1,6 @@
 import type { ApproveAndSendDeps, ApproveAndSendEntry, ApproveAndSendLine, ApproveAndSendResult, ApproveAndSendRow } from "../minerador/approve-and-send-core.ts";
 import { approvalBlockerLabel } from "../minerador/approval-blockers.ts";
+import { approvedPackageDiverged, readApprovalRecord } from "../minerador/approved-package.ts";
 import { EDITORIAL_GROUP_COLORS, isEditorialGroupColor, type EditorialGroupColor } from "../editorial/editorial-groups.ts";
 
 /**
@@ -29,7 +30,13 @@ import { EDITORIAL_GROUP_COLORS, isEditorialGroupColor, type EditorialGroupColor
  * na cor, com as linhas marcadas. Nada de cliente operacional (service role).
  */
 
-export type ArquitetoImportState = "send" | "approve_in_minerador" | "in_arquiteto" | "out";
+/**
+ * `refresh` (2026-10-14, caso WifiConecta, azul): já está no Arquiteto, mas o
+ * Minerador tem um pacote aprovado MAIS NOVO (reaprovada depois do envio, por
+ * exemplo com Assunto e plano). Importar atualiza o item recebido com o pacote
+ * vigente — leitura do que o Minerador decidiu; as decisões do Arquiteto ficam.
+ */
+export type ArquitetoImportState = "send" | "refresh" | "approve_in_minerador" | "in_arquiteto" | "out";
 
 export type ArquitetoImportItem = {
   id: string;
@@ -50,24 +57,54 @@ export const ARQUITETO_IMPORT_ITEM_FIELDS = ["id", "keyword", "groupId", "status
 /** Quantas keywords passam pelo portão numa leitura (o mesmo teto da rota do Minerador). */
 export const ARQUITETO_IMPORT_GATE_LIMIT = 500;
 
-export type ArquitetoImportPoolRow = { id: string; keyword: string; status: string | null; group_id: string | null };
+export type ArquitetoImportPoolRow = {
+  id: string;
+  keyword: string;
+  status: string | null;
+  group_id: string | null;
+  /** `analise_semantica->aprovacao->>contentHash`, lido por caminho JSON (só o texto do hash). */
+  approval_hash?: string | null;
+};
 
 const normalizar = (value: string | null | undefined) => (value || "").trim().toLocaleLowerCase("pt-BR");
+
+/**
+ * Pacote novo no Minerador para quem já está no Arquiteto: aprovada (ou
+ * publicada) com um registro de aprovação cujo hash difere do pacote que o
+ * item recebido carrega. O portão confere o resto (divergência, travas).
+ */
+export function hasNewerMineradorPackage(input: { status: string | null; approvalHash: string | null | undefined; receivedHash: string | null | undefined }): boolean {
+  const status = normalizar(input.status);
+  if (status !== "aprovado" && status !== "publicado") return false;
+  if (!input.approvalHash) return false;
+  return input.approvalHash !== (input.receivedHash ?? null);
+}
 
 /**
  * O estado BARATO de cada keyword viva da marca (sem `analise_semantica`):
  * já no Arquiteto (item recebido ou keyword dentro de um ArticleDNA vigente),
  * item em outro estado, rejeitada — e as demais vão ao portão (`gateIds`).
+ * A recebida com pacote aprovado mais novo no Minerador também vai ao portão
+ * (`refreshCandidateIds`): se ele aceitar, a linha fica "atualiza no Arquiteto".
  */
 export function classifyArquitetoImportPool(input: {
   keywords: readonly ArquitetoImportPoolRow[];
   workflowStateByKeywordId: ReadonlyMap<string, string>;
   incorporatedKeywordIds: ReadonlySet<string>;
-}): { items: ArquitetoImportItem[]; gateIds: string[] } {
+  /** O hash do pacote aprovado que cada item recebido carrega (`payload->approvedDna->>contentHash`). */
+  receivedPackageHashByKeywordId?: ReadonlyMap<string, string | null>;
+}): { items: ArquitetoImportItem[]; gateIds: string[]; refreshCandidateIds: string[] } {
   const gateIds: string[] = [];
+  const refreshCandidateIds: string[] = [];
   const items = input.keywords.map((row): ArquitetoImportItem => {
     const base = { id: row.id, keyword: row.keyword, groupId: row.group_id || null, status: normalizar(row.status) || "desconhecido", reason: null, detail: null };
     const workflow = input.workflowStateByKeywordId.get(row.id) ?? null;
+    if (workflow === "received" && input.receivedPackageHashByKeywordId?.has(row.id) && gateIds.length < ARQUITETO_IMPORT_GATE_LIMIT
+      && hasNewerMineradorPackage({ status: row.status, approvalHash: row.approval_hash, receivedHash: input.receivedPackageHashByKeywordId.get(row.id) })) {
+      gateIds.push(row.id);
+      refreshCandidateIds.push(row.id);
+      return { ...base, state: "in_arquiteto" };
+    }
     if (input.incorporatedKeywordIds.has(row.id) || workflow === "received") return { ...base, state: "in_arquiteto" };
     if (workflow) return { ...base, state: "out", reason: "item do Arquiteto em outro estado", detail: `O Arquiteto já tem um item desta keyword em outro estado (${workflow}); o envio normal não o sobrescreve.` };
     if (base.status === "rejeitado") return { ...base, state: "out", reason: "rejeitada no Minerador" };
@@ -75,7 +112,7 @@ export function classifyArquitetoImportPool(input: {
     gateIds.push(row.id);
     return { ...base, state: "out", reason: "não conferida" };
   });
-  return { items, gateIds };
+  return { items, gateIds, refreshCandidateIds };
 }
 
 /* ----------------------- motivo curto (sem frase repetida) ----------------------- */
@@ -123,13 +160,25 @@ export function arquitetoImportNeedsApprovalInMinerador(line: Pick<ApproveAndSen
 export function applyArquitetoImportGate(
   items: readonly ArquitetoImportItem[],
   gateIds: readonly string[],
-  lines: ReadonlyArray<Pick<ApproveAndSendLine, "id" | "action" | "missing" | "reasons" | "alreadyInArquiteto">>,
+  lines: ReadonlyArray<Pick<ApproveAndSendLine, "id" | "action" | "missing" | "reasons" | "alreadyInArquiteto" | "refreshInArquiteto">>,
+  refreshCandidateIds: readonly string[] = [],
 ): ArquitetoImportItem[] {
   const conferidas = new Set(gateIds);
+  const candidatasAAtualizar = new Set(refreshCandidateIds);
   const linhaPorId = new Map(lines.map(line => [line.id, line] as const));
   return items.map(item => {
     if (!conferidas.has(item.id)) return item;
     const line = linhaPorId.get(item.id);
+    /*
+     * Já no Arquiteto, com pacote novo no Minerador: o portão aceitou → "atualiza
+     * no Arquiteto (pacote novo)"; recusou → continua "já no Arquiteto", com o
+     * motivo no detalhe (o item recebido fica como está).
+     */
+    if (candidatasAAtualizar.has(item.id)) {
+      if (line?.action === "send_only" && line.refreshInArquiteto) return { ...item, state: "refresh" as const, reason: null, detail: ARQUITETO_IMPORT_REFRESH_DETAIL };
+      const motivo = line ? arquitetoImportReason(line) : null;
+      return { ...item, state: "in_arquiteto" as const, reason: null, detail: `Há pacote aprovado mais novo no Minerador, mas ele não pode vir agora${motivo ? `: ${motivo.reason}` : ""}. O Arquiteto continua com o pacote que já tem.` };
+    }
     if (!line) return { ...item, state: "out" as const, reason: "não encontrada", detail: "A keyword não voltou na conferência do servidor." };
     // F4 (D2): a aprovação é do Minerador; a linha que só precisa dela vai ao "Aprovar no Minerador".
     if (arquitetoImportNeedsApprovalInMinerador(line)) {
@@ -169,19 +218,72 @@ export function withoutArquitetoApproval<Row extends ApproveAndSendRow, Entry ex
   };
 }
 
+/* ------------------- pacote novo no Minerador (mesa) ------------------- */
+
+/**
+ * "PACOTE NOVO NO MINERADOR · N KEYWORDS" (2026-10-14, caso WifiConecta, azul).
+ *
+ * As keywords recebidas pelo Arquiteto cujo registro de aprovação no Minerador
+ * (linha viva, que a mesa já lê) é MAIS NOVO que o pacote guardado no item —
+ * reaprovadas depois do envio — e não foram mexidas desde então (assinatura
+ * bate). É só leitura: o aviso abre o "Importar do Minerador" já com elas
+ * marcadas, que atualiza pelo MESMO núcleo do envio. Custo de leitura zero.
+ */
+export function mineradorPackageUpdatesOf(rows: ReadonlyArray<Record<string, unknown>>): Array<{ keywordId: string; keyword: string }> {
+  const vistos = new Set<string>();
+  const saida: Array<{ keywordId: string; keyword: string }> = [];
+  for (const row of rows) {
+    const keywordId = typeof row.id === "string" ? row.id : String(row.id ?? "");
+    if (!keywordId || vistos.has(keywordId)) continue;
+    const workflow = row.canonicalWorkflow && typeof row.canonicalWorkflow === "object" ? row.canonicalWorkflow as Record<string, unknown> : null;
+    if (!workflow || workflow.state !== "received") continue;
+    vistos.add(keywordId);
+    const payload = workflow.payload && typeof workflow.payload === "object" ? workflow.payload as Record<string, unknown> : {};
+    const recebido = payload.approvedDna && typeof payload.approvedDna === "object" ? (payload.approvedDna as Record<string, unknown>).contentHash : null;
+    const semantic = row.analise_semantica && typeof row.analise_semantica === "object" ? row.analise_semantica as Record<string, unknown> : null;
+    const registro = readApprovalRecord(semantic);
+    if (!hasNewerMineradorPackage({ status: typeof row.status === "string" ? row.status : null, approvalHash: registro?.contentHash ?? null, receivedHash: typeof recebido === "string" ? recebido : null })) continue;
+    const divergiu = approvedPackageDiverged({
+      keywordId,
+      brandId: typeof row.brand_id === "string" ? row.brand_id : null,
+      keyword: typeof row.keyword === "string" ? row.keyword : "",
+      intent: row.intent,
+      volumeSearch: row.volume_search,
+      resultsAllintitle: row.results_allintitle,
+      kgrScore: row.kgr_score,
+      listaId: row.lista_id,
+      semantic,
+    });
+    if (divergiu !== false) continue;
+    saida.push({ keywordId, keyword: typeof row.keyword === "string" ? row.keyword : keywordId });
+  }
+  return saida;
+}
+
+/** A frase do aviso na mesa. */
+export function mineradorPackageUpdatesSentence(count: number): string {
+  return `Pacote novo no Minerador · ${count} keyword${count === 1 ? "" : "s"}: reaprovada${count === 1 ? "" : "s"} depois do envio (Assunto, plano ou DNA mudaram). “Atualizar do Minerador” troca o pacote guardado pelo aprovado vigente; Silo, artigo e Assunto ancorado ficam como estão, e artigo já formado não é reescrito (ele passa a avisar que a keyword foi reaprovada).`;
+}
+
 /* -------------------------------- cores -------------------------------- */
 
-export const isArquitetoImportable = (item: Pick<ArquitetoImportItem, "state">) => item.state === "send";
+/** "Atualiza no Arquiteto": o rótulo curto e o detalhe (a mesma frase no modal, na prévia e no aviso da mesa). */
+export const ARQUITETO_IMPORT_REFRESH_LABEL = "atualiza no Arquiteto (pacote novo)";
+export const ARQUITETO_IMPORT_REFRESH_DETAIL = "Reaprovada no Minerador depois do envio: importar troca o pacote que o Arquiteto guarda pelo aprovado vigente (Assunto, plano e DNA). As decisões do Arquiteto (Silo, artigo, Assunto ancorado) ficam; artigo já formado não é reescrito.";
+
+/** Pode ir nesta importação: nova (`send`) ou já no Arquiteto com pacote novo (`refresh`). */
+export const isArquitetoImportable = (item: Pick<ArquitetoImportItem, "state">) => item.state === "send" || item.state === "refresh";
 
 /** O estado curto da linha da lista. */
 export function arquitetoImportLineLabel(item: Pick<ArquitetoImportItem, "state" | "reason">): string {
   if (item.state === "send") return "pode importar";
+  if (item.state === "refresh") return ARQUITETO_IMPORT_REFRESH_LABEL;
   if (item.state === "approve_in_minerador") return "precisa aprovar no Minerador";
   if (item.state === "in_arquiteto") return "já no Arquiteto";
   return `fora: ${item.reason || "sem motivo informado"}`;
 }
 
-export type ArquitetoImportColorSummary = { color: EditorialGroupColor; total: number; importable: number; approveInMinerador: number; inArquiteto: number; out: number };
+export type ArquitetoImportColorSummary = { color: EditorialGroupColor; total: number; importable: number; approveInMinerador: number; inArquiteto: number; out: number; refresh: number };
 
 /** As cinco cores, sempre na ordem das etiquetas, com as contagens (zero quando não há). */
 export function summarizeArquitetoImportColors(
@@ -197,6 +299,7 @@ export function summarizeArquitetoImportColors(
       approveInMinerador: daCor.filter(item => item.state === "approve_in_minerador").length,
       inArquiteto: daCor.filter(item => item.state === "in_arquiteto").length,
       out: daCor.filter(item => item.state === "out").length,
+      refresh: daCor.filter(item => item.state === "refresh").length,
     };
   });
 }
@@ -206,10 +309,11 @@ export function selectArquitetoImportColor(
   items: readonly ArquitetoImportItem[],
   color: EditorialGroupColor,
   colorOfGroup: (groupId: string | null) => EditorialGroupColor | null,
-): { importIds: string[]; approveInMineradorIds: string[]; out: ArquitetoImportItem[]; inArquiteto: number } {
+): { importIds: string[]; approveInMineradorIds: string[]; out: ArquitetoImportItem[]; inArquiteto: number; refresh: number } {
   const daCor = items.filter(item => colorOfGroup(item.groupId) === color);
   return {
     importIds: daCor.filter(isArquitetoImportable).map(item => item.id),
+    refresh: daCor.filter(item => item.state === "refresh").length,
     approveInMineradorIds: daCor.filter(item => item.state === "approve_in_minerador").map(item => item.id),
     out: daCor.filter(item => item.state === "out"),
     inArquiteto: daCor.filter(item => item.state === "in_arquiteto").length,

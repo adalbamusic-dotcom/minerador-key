@@ -20,6 +20,7 @@
  */
 
 import { REWORK_OPERATION_LABELS } from "./rework-guard.ts";
+import { GROUP_DELETE_ALL_ACTION_LABEL, GROUP_DELETE_ALL_RELEASE_VIA } from "../minerador/group-delete-all.ts";
 
 export type GroupHistorySource ="group_event" | "operation_ledger";
 
@@ -104,6 +105,27 @@ export function safeInternalHref(value: unknown): string | null {
 const count = (value: unknown) => (Array.isArray(value) ? value.length : numberOf(value));
 
 function eventDetail(eventType: string, payload: Record<string, unknown>): string | null {
+  // 2026-10-14 · F7 "Excluir tudo da cor": o registro diz quanto saiu e como (as keywords apagadas não existem mais).
+  if (payload.via === GROUP_DELETE_ALL_RELEASE_VIA) {
+    if (eventType === "keywords_unassigned") {
+      const contagens = asRecord(payload.counts);
+      const partes = [
+        `${numberOf(contagens.hardDeleted) ?? 0} apagada(s) de vez`,
+        `${numberOf(contagens.recoverable) ?? 0} na lixeira de 24 h`,
+        numberOf(contagens.out) ? `${numberOf(contagens.out)} ficaram fora` : null,
+        numberOf(contagens.refusedKeywords) ? `${numberOf(contagens.refusedKeywords)} recusada(s) por bloco` : null,
+      ].filter(Boolean);
+      return `${GROUP_DELETE_ALL_ACTION_LABEL} · ${partes.join(" · ")}`;
+    }
+    if (eventType === "plan_changed") {
+      const versao = numberOf(payload.planVersion);
+      const saiu = count(payload.removedSubjects);
+      return payload.cleared === true
+        ? `${GROUP_DELETE_ALL_ACTION_LABEL} · plano limpo${versao ? ` (v${versao})` : ""}`
+        : `${GROUP_DELETE_ALL_ACTION_LABEL} · plano v${versao ?? "?"}${saiu ? ` · ${saiu} Assunto(s) saíram` : ""}`;
+    }
+    if (eventType === "archived") return `${GROUP_DELETE_ALL_ACTION_LABEL}${payload.siloUnlinked === true ? " · Silo não consolidado desligado" : ""}`;
+  }
   if (eventType === "renamed") {
     const de = text(payload.from);
     const para = text(payload.to);

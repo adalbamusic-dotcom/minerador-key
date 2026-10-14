@@ -116,6 +116,30 @@ export const writerSeedPorts: WriterSeedPorts = {
 };
 
 /**
+ * 2026-10-14 · F6 (SDD silo interligado, "Redator lê o material novo") · O
+ * ARTIGO DO DOCUMENTO NA MONTAGEM DO CSV, ou por que ele não vale: a mesma
+ * conferência da semeadura, agora também do material do Redator
+ * (`lib/server/writer-material.ts`). O documento é de UM pacote (invariante 30):
+ * recongelado ou com outro ArticleDNA, o material de hoje é de outro pacote.
+ */
+export type WriterAssembledArticle =
+  | { kind: "ready"; montada: RadarPortableExportAssembly["montadas"][number]; congelamento: NonNullable<ReturnType<RadarPortableExportAssembly["congelamentos"]["get"]>> }
+  | { kind: "refused" | "other_investigation"; reason: string };
+
+export function writerAssembledArticleOf(montagem: RadarPortableExportAssembly, input: { articleId: string; bundleObservedAt: string | null; articleDnaVersionId: string | null }): WriterAssembledArticle {
+  const montada = montagem.montadas.find(item => item.articleId === input.articleId);
+  if (!montada) {
+    const recusa = montagem.recusados.find(item => item.articleId === input.articleId);
+    return { kind: "refused", reason: recusa?.reason ?? "O Radar não montou este artigo agora: a investigação não está finalizada." };
+  }
+  const congelamento = montagem.congelamentos.get(input.articleId) ?? null;
+  if (!congelamento || !mesmoInstante(congelamento.frozenAt, input.bundleObservedAt) || (input.articleDnaVersionId && congelamento.articleDnaVersionId !== input.articleDnaVersionId)) {
+    return { kind: "other_investigation", reason: "A investigação do Radar foi congelada de novo (ou o ArticleDNA mudou) depois do envio: o artigo-modelo e o plano de hoje são de outro pacote e não valem para este documento. O Radar reenvia o pacote atual ao Redator." };
+  }
+  return { kind: "ready", montada, congelamento };
+}
+
+/**
  * 2026-10-09 · A MONTAGEM DO CSV PARA O ARTIGO DO DOCUMENTO: o plano do vídeo,
  * a planta (a mesma versão, pela leitura compartilhada) e a virada pela planta.
  */
@@ -135,18 +159,10 @@ export async function writerSeedPlanOf(input: {
     if (erro instanceof RadarArticleBlueprintUnavailableError) return { plano: { kind: "blueprint_unavailable", reason: erro.message }, articleBlueprint: null, editorialContext: null };
     throw erro;
   }
-  const montada = montagem.montadas.find(item => item.articleId === input.articleId);
-  if (!montada) {
-    const recusa = montagem.recusados.find(item => item.articleId === input.articleId);
-    return { plano: { kind: "refused", reason: recusa?.reason ?? "O Radar não montou este artigo agora: a investigação não está finalizada." }, articleBlueprint: null, editorialContext: null };
-  }
-  const congelamento = montagem.congelamentos.get(input.articleId) ?? null;
-  if (!congelamento || !mesmoInstante(congelamento.frozenAt, input.bundleObservedAt) || (input.articleDnaVersionId && congelamento.articleDnaVersionId !== input.articleDnaVersionId)) {
-    return {
-      plano: { kind: "other_investigation", reason: "A investigação do Radar foi congelada de novo (ou o ArticleDNA mudou) depois do envio: o artigo-modelo e o plano de hoje são de outro pacote e não valem para este documento. O Radar reenvia o pacote atual ao Redator." },
-      articleBlueprint: null, editorialContext: null,
-    };
-  }
+  /* 2026-10-14 · F6 · a mesma conferência do material do Redator (`writerAssembledArticleOf`). */
+  const doDocumento = writerAssembledArticleOf(montagem, { articleId: input.articleId, bundleObservedAt: input.bundleObservedAt, articleDnaVersionId: input.articleDnaVersionId });
+  if (doDocumento.kind !== "ready") return { plano: { kind: doDocumento.kind, reason: doDocumento.reason }, articleBlueprint: null, editorialContext: null };
+  const { montada } = doDocumento;
   const planta = radarVideoApprovedBlueprint(montada.blueprint ?? null);
   if (!planta?.blueprint.sections.length) {
     return {

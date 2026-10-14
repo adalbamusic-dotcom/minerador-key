@@ -1,4 +1,5 @@
 import type { SitePageType } from "../marca/site-contracts.ts";
+import { isLightKeywordSemantic, LIGHT_ROW_WRITE_REFUSAL } from "./keyword-light-list.ts";
 import { readDeclaredArticlePlan, readDeclaredPrincipalMark, readSubjectEntry, sameDeclaredArticlePlan, sameSubjectEntry, type DeclaredArticlePlan, type DeclaredPrincipalMark, type SubjectEntry } from "./declared-plan.ts";
 
 /**
@@ -376,7 +377,9 @@ export const KEYWORD_SUBJECT_RELEASE_REFUSAL =
 
 export type KeywordSemanticWriteGuard =
   | { ok: true; semantic: Record<string, unknown>; carried: boolean }
-  | { ok: false; code: "SUBJECT_RELEASE_REQUIRED"; reason: string; title: string | null };
+  | { ok: false; code: "SUBJECT_RELEASE_REQUIRED"; reason: string; title: string | null }
+  // F6 (lista leve): a linha leve da planilha nunca é gravada de volta.
+  | { ok: false; code: "LIGHT_ROW_WRITE"; reason: string; title: null };
 
 const SUBJECT_KEYS = [KEYWORD_SUBJECT_KEY, KEYWORD_SUBJECT_ACTOR_KEY, KEYWORD_SUBJECT_AT_KEY, KEYWORD_SUBJECT_ORIGIN_KEY] as const;
 
@@ -393,6 +396,8 @@ const SUBJECT_KEYS = [KEYWORD_SUBJECT_KEY, KEYWORD_SUBJECT_ACTOR_KEY, KEYWORD_SU
  * estiver velha (sem o Assunto que o banco já tem), quem garante é o gatilho.
  */
 export function guardKeywordSemanticWrite(previous: Semantic, next: Record<string, unknown>): KeywordSemanticWriteGuard {
+  // F6: a marca da lista leve viaja em qualquer spread; gravar a partir dela apagaria os blocos podados.
+  if (isLightKeywordSemantic(previous) || isLightKeywordSemantic(next)) return { ok: false, code: "LIGHT_ROW_WRITE", reason: LIGHT_ROW_WRITE_REFUSAL, title: null };
   const antes = protectedSubjectOf(previous);
   let semantic = next;
   let carried = false;

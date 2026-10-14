@@ -1,3 +1,25 @@
+## Caso WifiConecta (azul) · pacote novo, Silo do plano e melhoria — Arquiteto — 2026-10-14
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Envio atualiza o item já recebido com pacote aprovado novo, preservando as decisões do Arquiteto (merge + trava); import/Aprovar e enviar mostram "atualiza no Arquiteto (pacote novo)"; aviso "Pacote novo no Minerador · N" + "Atualizar do Minerador".
+- [x] Silo do plano fora do "Desfazer" (tela e servidor); envio não duplica Silo do plano desfeito; "Recriar o Silo do plano" com prévia.
+- [x] "Confirmar propostas novas" e a tabela com a mesma leitura por keyword.
+- [x] Melhoria: análise anterior recolhida; código técnico vira frase.
+- [x] Grupo com plano de fato (plano lido), não `planVersion > 0` (F7).
+- [ ] Dono: no azul, "Atualizar do Minerador" (7) → conferir a planilha "Artigos do plano" com 7 linhas; "Recriar o Silo do plano · Azul" (4 entram, 3 ficam no artigo); conferir "Confirmar propostas novas".
+- [ ] Dono decide: tirar as 3 do artigo `melhor-para-jogos-online` ("Retirar artigo do Silo") para irem ao Silo do plano, ou manter.
+- [ ] Ligar `editorial_groups.silo_id` falha em silêncio no envio (`.catch(() => null)`); hoje o azul está sem ligação — investigar o motivo da recusa.
+
+## Listas leves com view (SDD 2026-10-13, item 4, F6) — Arquiteto — 2026-10-14
+
+Detalhe em `docs/04-arquiteto/estado-atual.md` e no §18.6 da SDD. **Validado manualmente: não.**
+
+- [x] Pareceres de SERP da formação projetados no banco (view `arquiteto_formation_serp_lista_leve`, M-L) no GET e no delta; recuo para a projeção no Node sem a view; corpo igual com e sem (teste); 61/61 iguais nas linhas reais.
+- [ ] Dono: aplicar a M-L e conferir.
+- [ ] Abertura < 1 MB: keywords recebidas, pacote aprovado dos itens e ArticleDNA vigente em projeção exigem mover a criação do ArticleDNA e as operações de marca inteira (Processar arquitetura, canibalização, "mesmo assunto", links entre Silos, ponto de recuperação) para o servidor — SDD própria.
+- [ ] Mesa leve com contrato próprio de ArticleDNA (a view `editorial_article_dna_lista_leve` já existe na M-L) e a linha do Radar calculada no servidor.
+
 ## Malha completa do Silo (SDD silo interligado 2026-10-14, F4) — Arquiteto
 
 Detalhe em `docs/04-arquiteto/estado-atual.md` e no §18.1 da SDD. **Validado manualmente: não.**

@@ -248,6 +248,8 @@ export async function updateEditorialGroup(client: Client, input: {
   name?: unknown;
   color?: unknown;
   status?: unknown;
+  /** 2026-10-14 · aditivo (F7): detalhe a mais nos eventos (ex.: `via: "excluir_cor"` no arquivamento). */
+  eventPayload?: Record<string, unknown>;
 }): Promise<{ ok: true; group: EditorialGroupSummary; eventRecorded: boolean } | EditorialGroupRefusal | GroupsUnavailable> {
   const listing = await listEditorialGroupSummaries(client, input.brandId);
   if (!listing.ok) return listing;
@@ -282,7 +284,7 @@ export async function updateEditorialGroup(client: Client, input: {
   const eventRecorded = await appendEditorialGroupEvents(client, {
     brandId: input.brandId,
     actorUserId: input.actorUserId,
-    events: plano.events.map(event => ({ groupId: atual.id, eventType: event.eventType, payload: event.payload })),
+    events: plano.events.map(event => ({ groupId: atual.id, eventType: event.eventType, payload: { ...(input.eventPayload ?? {}), ...event.payload } })),
   });
   return { ok: true, group: releitura.group, eventRecorded };
 }
@@ -472,5 +474,90 @@ export async function linkEditorialGroupSilo(client: Client, input: {
   }
   if (!Array.isArray(data) || data.length !== 1) return { ok: false, code: "GROUP_SILO_TAKEN", message: "O grupo mudou em outra sessão; recarregue." };
   await appendEditorialGroupEvents(client, { brandId: input.brandId, actorUserId: input.actorUserId, events: [{ groupId: lido.group.id, eventType: "silo_linked", payload: { siloId: input.siloId } }] });
+  return { ok: true, changed: true };
+}
+
+/* ========================================================================== */
+/* F7 — EXCLUIR TUDO DA COR (SDD 2026-10-13 sdd-arquiteto-so-le-e-listas-leves, */
+/* item 6, D7): o plano limpo e o Silo desligado quando nada ficou na cor.     */
+/* ========================================================================== */
+
+/**
+ * Limpa o plano do grupo (`plan = null`, `plan_hash = null`, `plan_version + 1`,
+ * origem de volta a `manual`): um plano sem artigos não existe. Trava otimista,
+ * releitura e evento `plan_changed` com `cleared: true`. Sem plano = nada muda.
+ * A reativação da cor (`ensureEditorialGroupForColor`) começa, então, sem plano.
+ */
+export async function clearEditorialGroupPlan(client: Client, input: {
+  brandId: string;
+  actorUserId: string;
+  groupId: string;
+  eventPayload?: Record<string, unknown>;
+}): Promise<{ ok: true; changed: boolean; planVersion: number; eventRecorded: boolean } | EditorialGroupRefusal | GroupsUnavailable> {
+  const lido = await readEditorialGroupPlan(client, input.brandId, input.groupId);
+  if (!lido.ok) return lido;
+  const atual = lido.group;
+  if (!atual) return { ok: false, code: "GROUP_NOT_FOUND", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_NOT_FOUND };
+  if (!atual.plan) return { ok: true, changed: false, planVersion: atual.planVersion, eventRecorded: true };
+  if (atual.status !== "active") return { ok: false, code: "GROUP_ARCHIVED", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_ARCHIVED };
+  const proximaVersao = atual.planVersion + 1;
+  const { data, error } = await client.from("editorial_groups").update({
+    origin: "manual",
+    plan: null,
+    plan_hash: null,
+    plan_version: proximaVersao,
+    lock_version: atual.lockVersion + 1,
+    updated_by: input.actorUserId,
+    updated_at: new Date().toISOString(),
+  }).eq("marca_id", input.brandId).eq("id", atual.id).eq("lock_version", atual.lockVersion).select("id");
+  if (error) {
+    if (isEditorialGroupsSchemaMissing(error)) return groupsUnavailable();
+    throw new EditorialGroupsPersistenceError(error, "limpar o plano dos");
+  }
+  if (!Array.isArray(data) || data.length !== 1) return { ok: false, code: "GROUP_STALE", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_STALE };
+  const releitura = await readEditorialGroupPlan(client, input.brandId, atual.id);
+  if (!releitura.ok) return releitura;
+  if (!releitura.group || releitura.group.plan !== null || releitura.group.planVersion !== proximaVersao) {
+    throw new EditorialGroupsPersistenceError(null, "reler o plano limpo nos");
+  }
+  const eventRecorded = await appendEditorialGroupEvents(client, {
+    brandId: input.brandId,
+    actorUserId: input.actorUserId,
+    events: [{ groupId: atual.id, eventType: "plan_changed", payload: { ...(input.eventPayload ?? {}), cleared: true, planVersion: proximaVersao, planHash: null, previousPlanHash: atual.planHash } }],
+  });
+  return { ok: true, changed: true, planVersion: proximaVersao, eventRecorded };
+}
+
+/**
+ * Desliga o Silo do grupo (`silo_id = null`), só quando ele é o esperado. Usado
+ * pela F7 quando nada ficou na cor e o Silo NÃO tem SiloDNA (nunca foi
+ * consolidado). Silo consolidado nunca é desligado por aqui. Trava otimista e
+ * releitura; o registro vai no evento de arquivamento (não há tipo de evento próprio).
+ */
+export async function unlinkEditorialGroupSilo(client: Client, input: {
+  brandId: string;
+  actorUserId: string;
+  groupId: string;
+  siloId: string;
+}): Promise<{ ok: true; changed: boolean } | EditorialGroupRefusal | GroupsUnavailable> {
+  const lido = await readEditorialGroupPlan(client, input.brandId, input.groupId);
+  if (!lido.ok) return lido;
+  if (!lido.group) return { ok: false, code: "GROUP_NOT_FOUND", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_NOT_FOUND };
+  if (lido.group.siloId === null) return { ok: true, changed: false };
+  if (lido.group.siloId !== input.siloId) return { ok: false, code: "GROUP_STALE", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_STALE };
+  const { data, error } = await client.from("editorial_groups").update({
+    silo_id: null,
+    lock_version: lido.group.lockVersion + 1,
+    updated_by: input.actorUserId,
+    updated_at: new Date().toISOString(),
+  }).eq("marca_id", input.brandId).eq("id", lido.group.id).eq("lock_version", lido.group.lockVersion).eq("silo_id", input.siloId).select("id");
+  if (error) {
+    if (isEditorialGroupsSchemaMissing(error)) return groupsUnavailable();
+    throw new EditorialGroupsPersistenceError(error, "desligar o Silo dos");
+  }
+  if (!Array.isArray(data) || data.length !== 1) return { ok: false, code: "GROUP_STALE", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_STALE };
+  const releitura = await readEditorialGroupPlan(client, input.brandId, lido.group.id);
+  if (!releitura.ok) return releitura;
+  if (!releitura.group || releitura.group.siloId !== null) throw new EditorialGroupsPersistenceError(null, "reler o Silo desligado nos");
   return { ok: true, changed: true };
 }

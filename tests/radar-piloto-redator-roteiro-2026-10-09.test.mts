@@ -20,6 +20,8 @@ import {
   seedContextLines,
   seedPartsCount,
   seedPlanRefusal,
+  /* 2026-10-14 · SDD silo interligado · F5 · um carrossel por curto. */
+  seedShortCarousels,
 } from "../lib/redator/deliverable-seed.ts";
 import { writerSeedPlanOf, type WriterSeedPorts } from "../lib/server/writer-seed.ts";
 
@@ -123,7 +125,19 @@ test("roteiro · cenas e lâminas pela régua do CSV: a linha do CSV de vídeo d
 
   const linha = buildRadarVideoExportArticle(entrada, { position: 1, youtube: null, blueprint: planta }).row;
   assert.ok(linha.diretrizes_de_roteiro.includes(`Capítulos do vídeo principal (${n}, da planta do artigo-modelo da SERP`), linha.diretrizes_de_roteiro);
-  assert.ok(linha.cortes_para_redes.includes(`Carrossel (Instagram e LinkedIn), ${seedPartsCount(plano, "carousel")} lâminas`), linha.cortes_para_redes);
+  /*
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono (o vídeo em 4 partes): no CSV de vídeo o carrossel sai
+   * de cada curto (um por curto); a semeadura do Redator recebe a mesma série de curtos pelo plano (plano.curtos) e
+   * o carrossel do Redator continua um só, um slide por capítulo (limite registrado no backlog do Redator).
+   */
+  assert.ok(linha.cortes_para_redes.includes("Carrosséis derivados dos curtos"), linha.cortes_para_redes);
+  /*
+   * 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências"): com a série de curtos no
+   * plano, o carrossel do Redator é UM POR CURTO, com as lâminas da régua do vídeo (a soma delas); o carrossel por
+   * capítulo (n + 2) fica para a planta sem a série.
+   */
+  assert.equal(seedPartsCount(plano, "carousel"), plano.curtos?.length ? seedShortCarousels(plano)!.reduce((soma, item) => soma + item.laminas.length, 0) : n + 2);
+  assert.deepEqual(plano.curtos?.map(curto => curto.rotulo), linha.cortes_para_redes.split("\n").map(item => item.match(/^ {3}(\d+\.\d+) · /)?.[1]).filter(Boolean), "a mesma série no plano da semeadura e no CSV");
 
   const fonte = { title: "Skincare facial", foundations: fundamentos(), finalArticle: null, plan: plano };
   const roteiro = buildScriptSeedPrompt(fonte);

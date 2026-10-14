@@ -1,4 +1,9 @@
 # Backlog — Publicações
+## Links a ativar (F5 da SDD silo interligado) — 2026-10-14
+- [x] Destino que vai ao ar → "Links a ativar" nos artigos que ligam para ele (Radar, `-links.csv`, MCP `get_silo_links_update`, Redator), sem editar a página nem URL/slug/canonical. Nada mudou no código de Publicações.
+- [ ] Avaliar: depois de registrar a URL de um artigo, Publicações apontar "N links a ativar no Silo" com o caminho para o Radar (SDD §6.5 cita Publicações; exigiria ler a malha na tela de Publicações — fora da frente "listas leves").
+- [ ] **Dono:** depois de publicar um destino novo do Silo piloto, conferir os links a ativar no Radar.
+
 ## Assunto legível — 2026-10-13
 - [x] Grade e Biblioteca mostram "Assunto · …" quando o artigo tem Assunto.
 - [ ] **Dono:** conferir na tela.

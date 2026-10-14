@@ -40,7 +40,8 @@ export type DeclaredPlanSiloOutcome = {
   groupId: string;
   groupLabel: string;
   territoryRef: string | null;
-  territory: "linked" | "slug" | "created" | "failed";
+  /** `rejected`: o Silo do plano foi desfeito por alguém — nada é escrito; volta por "Recriar o Silo do plano". */
+  territory: "linked" | "slug" | "created" | "failed" | "rejected";
   confirmed: boolean;
   /** Sem `arquiteto:approve`, o território fica candidato e isto diz por quê. */
   pendingConfirmation: string | null;
@@ -51,14 +52,14 @@ export type DeclaredPlanSiloOutcome = {
 
 type Patch = (context: PipelineContext, body: Record<string, unknown>) => Promise<void>;
 
-async function patchViaMesa(context: PipelineContext, body: Record<string, unknown>): Promise<void> {
+export async function patchViaMesa(context: PipelineContext, body: Record<string, unknown>): Promise<void> {
   const { handleArchitectWorkspacePatch } = await import("./arquiteto-workspace-http");
   const response = await handleArchitectWorkspacePatch(new NextRequest("http://localhost/api/arquiteto/workspace", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), context);
   const json = await response.json().catch(() => null) as { success?: boolean; error?: unknown } | null;
   if (!response.ok || json?.success === false) throw new Error(typeof json?.error === "string" ? json.error : `A mesa recusou a decisão de Silo (HTTP ${response.status}).`);
 }
 
-async function canApprove(context: PipelineContext): Promise<boolean> {
+export async function canApprove(context: PipelineContext): Promise<boolean> {
   try {
     await resolvePipelineContext({ brandId: context.brandId, module: "arquiteto", action: "approve" }, { requireActorUserId: async () => context.actorUserId });
     return true;
@@ -98,9 +99,19 @@ export async function materializeDeclaredPlanSilo(context: PipelineContext, keyw
           territoryRef: item.territoryRef,
           lifecycleStatus: item.territory.lifecycleStatus,
           slugs: [item.territory.slugState.publishedSlug, item.territory.slugState.confirmed, ...item.territory.slugState.proposals.map(proposal => proposal.slug)],
+          name: item.territory.name,
         })),
         slugOf: normalizeManualSiloPageSlug,
       });
+      /*
+       * 2026-10-14 (WifiConecta, azul): o Silo do plano DESFEITO não recebe
+       * membros nem nasce duplicado em silêncio. O desfecho diz o caminho.
+       */
+      if (escolha.kind === "rejected_by_human") {
+        saida.push({ ...base, territoryRef: escolha.territoryRef, territory: "rejected", confirmed: false, pendingConfirmation: null,
+          message: `O Silo do plano ${rotulo} (“${plano.siloName}”) foi desfeito no Arquiteto: as keywords chegaram, mas não entraram nele. Para trazê-lo de volta, use “Recriar o Silo do plano · ${EDITORIAL_GROUP_COLOR_LABELS[grupo.color]}” em Arquiteto → Silos.` });
+        continue;
+      }
       let territorio: TerritoryWorkflowItem;
       let como: DeclaredPlanSiloOutcome["territory"];
       if (escolha.kind === "create") {

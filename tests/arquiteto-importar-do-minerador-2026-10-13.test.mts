@@ -91,8 +91,8 @@ test("importar por cor: as cinco cores com contagens; escolher uma marca as que 
   // F4 (D2, ajuste declarado 2026-10-14): "aprovar e enviar" não importa daqui — vira "precisa aprovar no Minerador".
   const resumo = summarizeArquitetoImportColors(itens, corDoGrupo);
   assert.deepEqual(resumo.map(cor => cor.color), ["amarelo", "azul", "verde", "lima", "laranja"]);
-  assert.deepEqual(resumo.find(cor => cor.color === "laranja"), { color: "laranja", total: 56, importable: 0, approveInMinerador: 2, inArquiteto: 51, out: 3 });
-  assert.deepEqual(resumo.find(cor => cor.color === "azul"), { color: "azul", total: 7, importable: 0, approveInMinerador: 0, inArquiteto: 7, out: 0 });
+  assert.deepEqual(resumo.find(cor => cor.color === "laranja"), { color: "laranja", total: 56, importable: 0, approveInMinerador: 2, inArquiteto: 51, out: 3, refresh: 0 });
+  assert.deepEqual(resumo.find(cor => cor.color === "azul"), { color: "azul", total: 7, importable: 0, approveInMinerador: 0, inArquiteto: 7, out: 0, refresh: 0 });
   assert.equal(resumo.find(cor => cor.color === "verde")!.total, 0);
 
   const laranja = selectArquitetoImportColor(itens, "laranja", corDoGrupo);
@@ -235,10 +235,14 @@ test("resposta enxuta: cada linha só com id, keyword, grupo, status e estado; a
   assert.ok(bytes < 15_000, `64 linhas em ${bytes} bytes`);
 
   const servidor = ler("lib/server/arquiteto-minerador-import.ts");
-  assert.match(servidor, /\.select\("id,keyword,status,group_id"\)/);
-  assert.match(servidor, /\.select\("subject_id,state"\)/);
+  // 2026-10-14 (WifiConecta, azul): além do de sempre, só o TEXTO do hash da aprovação e do pacote recebido, por caminho JSON.
+  assert.match(servidor, /POOL_KEYWORD_COLUMNS = "id,keyword,status,group_id,approval_hash:analise_semantica->aprovacao->>contentHash"/);
+  assert.match(servidor, /POOL_WORKFLOW_COLUMNS = "subject_id,state,received_hash:payload->approvedDna->>contentHash"/);
+  assert.match(servidor, /\.select\(POOL_KEYWORD_COLUMNS\)/);
+  assert.match(servidor, /\.select\(POOL_WORKFLOW_COLUMNS\)/);
   assert.match(servidor, /readArticleKeywordIndex\(db, brandId\)/, "o índice do ArticleDNA por caminho JSON, sem o payload");
-  assert.doesNotMatch(servidor, /select\([^)]*analise_semantica/);
+  assert.doesNotMatch(servidor.replace(/analise_semantica->aprovacao->>contentHash/g, ""), /analise_semantica/, "nada do DNA além do hash");
+  assert.doesNotMatch(servidor.replace(/payload->approvedDna->>contentHash/g, ""), /select\([^)]*payload/, "nada do pacote além do hash");
   assert.doesNotMatch(servidor, /loadCanonicalArquitetoWorkspace|listArquitetoArtifacts/, "a lista não lê a mesa nem os artefatos inteiros");
 });
 

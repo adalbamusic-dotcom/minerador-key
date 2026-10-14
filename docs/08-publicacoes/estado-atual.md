@@ -1,5 +1,13 @@
 # Estado atual — Publicações
 
+## Links a ativar quando um destino vai ao ar (F5 da SDD silo interligado) — 2026-10-14
+
+Autorização do dono (2026-10-14): "pode concluir as pendências, vou testar depois". SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §6.5 e D10. **Nada mudou no código de Publicações** (sem arquivo de `modules/publicacoes`, sem rota, sem contrato, sem migration). **Verificado no código.**
+
+- **O que vale para Publicações:** quando um artigo vai ao ar (o ArticleDNA passa a `published_protected` com a URL), os artigos do Silo que deveriam ligar para ele aparecem como **"Links a ativar"** no Radar (painel do artigo → "Links do Silo" → "Conferir links do Silo"; e no `<NN>-<papel>-<slug>-links.csv` da exportação por artigo), no MCP (`get_silo_links_update`) e no Redator (checklist: "destino no ar: ative o link"). A lista diz a âncora natural, a seção ou a trilha e a URL.
+- **Sem edição da página:** a plataforma não altera a página publicada, a URL, o slug nem o canonical (AGENTS §11, invariante 28); quem inclui o link é a pessoa, no site dela. O `PublicationRecord` não muda.
+- **Limite:** a lista fica no Radar; uma entrada própria na tela de Publicações ficou no backlog.
+
 ## Assunto legível nas linhas — 2026-10-13
 
 Pedido do dono (2026-10-13): "coloca sempre o assunto no painel para que seja legível". Só a keyword principal não identificava o artigo.

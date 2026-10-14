@@ -1,6 +1,6 @@
 # SDD — O Arquiteto só lê, o recadastro substitui, as listas ficam leves — 2026-10-13
 
-> **Status: APROVADA — autorização do dono para a SDD e para as sugestões (frase do §1); D1–D8 DECIDIDAS pela recomendação em 2026-10-13 ("pode seguir suas recomendações sim", §17). Andamento no §18: F1, F2, F3, F4 e F5 feitas no código (sem deploy).**
+> **Status: APROVADA — autorização do dono para a SDD e para as sugestões (frase do §1); D1–D8 DECIDIDAS pela recomendação em 2026-10-13 ("pode seguir suas recomendações sim", §17). Andamento no §18: F1, F2, F3, F4, F5, F6 e F7 feitas no código (sem deploy; a F6 com a migration M-L e a F7 com a migration M-E escritas e NÃO aplicadas).**
 > Escrita sem nenhuma linha de código de produção, sem escrita no banco, sem
 > chamada paga. Leitura remota só por `SELECT` agregado
 > (`npx supabase db query --linked -f`), em 2026-10-13. Commit, push, deploy,
@@ -1056,7 +1056,7 @@ SQL de escrita, chamada paga ou exclusão fora do que a própria fase descreve
 
 - [x] SDD e implementação das fases autorizadas pelo dono em 2026-10-13 (frase do §1, incluindo "E pode implementar as suas sugestões sim" e o acréscimo do item 6).
 - [x] Decisões D1–D8 **DECIDIDAS pela recomendação** (§17) — dono, 2026-10-13: "pode seguir suas recomendações sim".
-- [ ] M-L e M-E aplicadas pelo dono, com ensaio, antes da F6 e da F7; `20261015120000` antes da F7 (o dono informou em 2026-10-13 que os gatilhos `minerador_keywords_preserva_assunto` e `minerador_keywords_recusa_exclusao_com_assunto` já estão aplicados no banco; a F1 grava o marcador `tirar_do_plano` que eles exigem).
+- [ ] M-L e M-E aplicadas pelo dono, com ensaio, antes da F6 e da F7; `20261015120000` antes da F7 (o dono informou em 2026-10-13 que os gatilhos `minerador_keywords_preserva_assunto` e `minerador_keywords_recusa_exclusao_com_assunto` já estão aplicados no banco; a F1 grava o marcador `tirar_do_plano` que eles exigem). **Conferido por SELECT em 2026-10-14:** `20261015120000` aplicada e no histórico remoto (os seis gatilhos de `minerador_keywords` ligados); M-L e M-E ainda não.
 
 | Fase | Estado em 2026-10-13 |
 |---|---|
@@ -1066,7 +1066,8 @@ SQL de escrita, chamada paga ou exclusão fora do que a própria fase descreve
 | **F3 · Ler antes de buscar** | **feita no código (2026-10-14), sem deploy, sem migration.** Ver §18.3. **Validado manualmente: não.** A fronteira de escrita do Arquiteto no Minerador não mudou (é a F4). |
 | **F4 · O Arquiteto só lê** | **feita no código (2026-10-14), sem deploy, sem migration.** Ver §18.4. **Validado manualmente: não.** |
 | **F5 · Planilha primeiro** | **feita no código (2026-10-14), sem deploy, sem migration.** Ver §18.5. **Validado manualmente: não.** |
-| F6–F7 | **não iniciadas** — nenhuma linha de produção, nenhuma escrita no banco, nenhuma chamada paga |
+| **F6 · Listas leves com view** | **feita no código (2026-10-14), sem deploy; migration M-L `20261016120000_listas_leves.sql` ESCRITA e NÃO aplicada** (o código funciona sem ela). Ver §18.6. **Validado manualmente: não.** Metas da §8.2 **atingidas em parte** (ver §18.6). |
+| **F7 · Excluir tudo da cor** | **feita no código (2026-10-14), sem deploy; migration M-E `20261016130000_excluir_tudo_da_cor.sql` ESCRITA e NÃO aplicada** (sem ela a prévia aparece e o botão fica desabilitado com a explicação). Autorização: "pode concluir as pendências" (2026-10-14). Ver §18.7. **Validado manualmente: não.** Só o Minerador executa (D8); nenhuma ferramenta MCP. |
 
 ### 18.1 F1 — o que foi feito (2026-10-13)
 
@@ -1563,3 +1564,222 @@ pelo cache no Concluir formação); a linha sem Silo é recusada (o Silo vem de 
 confirmação); o Assunto sem plano (formato anterior) continua no painel de texto; sem ferramentas MCP
 próprias da planilha; a tela não foi validada manualmente (dark mode e 360/768/1024/1440 px são da
 homologação do dono).
+
+### 18.6 F6 — o que foi feito (2026-10-14)
+
+**Verificado no código / confirmado por teste (fixtures). Validado manualmente: não.** Autorização do
+dono (2026-10-14): "pode concluir as pendências, vou testar depois". Migration **escrita e NÃO
+aplicada**; sem SQL de escrita, sem escrita remota, sem chamada paga, sem deploy. Leitura remota só por
+`SELECT` (medição, esquema, grants e o ensaio da projeção do parecer escrita como SQL em linha). Entregáveis
+(§3) intocados: E0 com os mesmos hashes (`tests/fixtures/entregaveis-2026-10-13.sha256.json` não foi
+tocado); nenhum arquivo do §2.1 da SDD acelerar foi editado; o teste estrutural dos entregáveis passou a
+proibir também os leitores leves da F6.
+
+1. **Migration M-L** `supabase/migrations/20261016120000_listas_leves.sql` (rollback em
+   `supabase/rollback/20261016120000_listas_leves.rollback.sql`; conferência só leitura em
+   `supabase/scripts/20261016120000-listas-leves-post-verifier-read-only.sql`). Cria, sem tocar tabela,
+   gatilho nem dado: a função pura `minerador_jsonb_por_formato(jsonb, jsonb)` (recorte por árvore de
+   formato); `minerador_keyword_analise_leve(jsonb)` (a árvore `KEYWORD_LIGHT_SHAPE`, literal igual ao
+   TypeScript — teste); a view **`minerador_keywords_lista_leve`** (colunas da tabela + `analise_leve` +
+   `dna_hash`, só vivas); as funções da projeção do parecer e a view **`arquiteto_formation_serp_lista_leve`**
+   (a projeção da F2 feita NO BANCO; acréscimo desta fase ao §11.1, pedido pelo próprio §18.2: "o corte no
+   banco precisa da view/coluna gerada da F6"); e a view **`editorial_article_dna_lista_leve`** do §11.1 (sem
+   consumidor nesta fase — ver limites). As três views são `security_invoker = true`; grants iguais às
+   tabelas base (SELECT para `authenticated` e `service_role`; nada para `anon`/PUBLIC). Guardas (tabelas,
+   colunas, `group_id`, objetos já existentes), pós-checagem (uma linha por keyword viva; a projeção só tira
+   chaves; identidade, base, veredito, interpretação, decisão humana e nº de consultas do parecer intactos;
+   uma linha por ArticleDNA; `security_invoker`; `anon` sem SELECT) e ensaio por `RAISE EXCEPTION 'ENSAIO'`.
+2. **A árvore da projeção das keywords** (`lib/minerador/keyword-light-list.ts`) não foi escolhida à mão:
+   saiu do registro de leitura (Proxy que anota cada caminho lido) dos resolvers da planilha sobre as 326
+   keywords vivas das 4 marcas e foi provada por paridade (abaixo). Raiz por lista de permissão (as 47
+   chaves que a planilha lê ou sonda); blocos pesados recortados às sub-chaves lidas; fora: séries de
+   medição, `dna_campos_logicos`, `evidencias_logicas`, `site_origins`, `subject_discovery`, `funnel_evidence`,
+   proveniência (targeting, ids de requisição, histórico do vínculo, quem/quando concluiu a revisão).
+3. **A aprovação na lista leve.** A assinatura do pacote aprovado cobre o DNA inteiro e não pode ser
+   calculada sobre a projeção. A view devolve `dna_hash` (md5 de tudo o que a assinatura pode ler) e a tela
+   guarda o VEREDITO (diverge · não diverge) calculado na linha inteira, por `id + dna_hash`, num cache de
+   apresentação (`localStorage`, chave `minerador:lista-leve:v1:<ator>:<marca>:aprovacao`, nunca limpo, só
+   acrescido). `approvedPackageDiverged` usa o veredito da marca; sem veredito, a assinatura da projeção não
+   bate e a keyword aparece divergente (nunca "aprovada" por suposição); `buildApprovedPackage` recusa a
+   linha leve. O veredito só é guardado quando o `dna_hash` lido antes é o mesmo lido depois da linha
+   inteira (sanduíche). **1ª carga da marca no navegador:** a listagem de antes (DNA sem séries) + só
+   `id,dna_hash` da view, e os vereditos são semeados — ler leve + inteira das aprovadas custaria mais
+   (AdalbaPro: 183 de 183 aprovadas). **Da 2ª carga em diante:** a lista leve; a linha inteira só das
+   aprovadas que mudaram.
+4. **Processador** (`modules/minerador/minerador-workspace.tsx`): lê a view leve; sem ela (42P01/PGRST205)
+   a sessão volta à listagem de antes, e qualquer outro erro derruba a carga (a lista não é trocada por uma
+   parcial). **Detalhe por id:** o painel do DNA lê a linha inteira daquela keyword ao abrir; a seleção (que
+   comanda as ações) lê as selecionadas (blocos de 200); cada ação de uma linha (Revisão Humana, KGR da
+   linha, Potencial, posto, vínculo de publicação) lê a linha inteira na entrada; nenhuma linha já inteira
+   (gravada depois) é trocada. **Nenhuma operação sobre a linha leve:** o portão comum dos lotes
+   (`startBulkProgress`) recusa e pede o DNA; a marca `__lista_leve` viaja em qualquer spread e é recusada
+   por `assertFullKeywordSemanticForWrite` e pela guarda de TODO escritor (`guardKeywordSemanticWrite`,
+   código `LIGHT_ROW_WRITE`, que também vale no servidor e no MCP); o **CSV com todas as chaves** lê as
+   selecionadas inteiras e não exporta nada se alguma ficou leve (decisão: inteiro por id na tela, em vez
+   de rota em stream no servidor — o CSV depende das tentativas da sessão, que o servidor não tem). As
+   operações de marca inteira do Minerador já iam ao servidor por id (Lógica em lote, Volume, Resultados,
+   aprovação, envio, plano, trava) ou são só texto (duplicados).
+5. **Arquiteto:** o `GET /api/arquiteto/workspace` e a releitura (`POST …/workspace/delta`) leem os
+   pareceres da formação pela view (`listArticleFormationSerpForList`); sem a view, a projeção no Node de
+   antes; outro erro lança. O corpo é IGUAL com e sem a view (teste). Exportação (`serpDetail=full`),
+   melhoria (um parecer por `candidateRef`), Reforçar publicados, conversão, backup e as escritas continuam
+   lendo o parecer inteiro da tabela. A projeção SQL foi conferida contra a do Node nas linhas reais da
+   WifiConecta (SELECT só leitura com a mesma SQL em linha): **61 de 61 iguais**.
+6. **Catálogo (§17.1):** nota da F6 na leitura por grupo/listas leves (nenhuma ferramenta MCP mudou: elas
+   leem por id, inteiro).
+
+**Medição (SELECT no banco remoto, bytes `length(x::text)`, 2026-10-14):**
+
+| | AdalbaPro antes | AdalbaPro depois | WifiConecta antes | WifiConecta depois |
+|---|---|---|---|---|
+| Processador, banco (listagem `t::text`) | 2.015.724 B / 183 | 1ª carga no navegador: ~2,05 MB (listagem + `id,dna_hash` 2×); depois: ~1,02 MB (ESTIMADO) | 455.695 B / 64 | 1ª: ~0,47 MB; depois: ~0,27 MB (ESTIMADO) |
+| Processador, resposta JSON (medido sobre as linhas reais) | 1.788.431 B (listagem) | **902.321 B** (−49,5%) | 409.819 B | **237.985 B** (−42%) |
+| Pareceres da formação, banco | 9.764.117 B / 200 | **2.430.928 B** (−75%, medido: SQL da view em linha) | 3.059.002 B / 61 | **883.643 B** (−71%) |
+| ArticleDNA (todas as versões / vigente leve) | 7.177.999 B / 102 | view leve sem consumidor (§11.1 estimava ~12,7 kB) | 1.089.092 B / 20 | idem |
+
+O "depois" do Processador em bytes do banco é ESTIMADO (proporção listagem banco/JSON); o número
+exato sai da conferência pós-aplicação (`supabase/scripts/20261016120000-listas-leves-post-verifier-read-only.sql`).
+**Abertura do Arquiteto (AdalbaPro):** banco ~22,1 MB → **~14,8 MB** (−7,3 MB dos pareceres); tela
+**~16,0 MB, igual** (a tela já recebia o parecer projetado no Node). **Meta "abertura < 1 MB": NÃO
+atingida.** Meta do Processador (§8.3, "~50–100 kB"): **não atingida** — os resolvers do Minerador leem o
+`logical_output_contract` inteiro (estado e valor de cada campo, para a completude da Lógica do filtro
+"Com processo") e outros blocos pesados; chegar a ~50 kB exige colunas DERIVADAS no servidor (o veredito
+e os rótulos calculados), não uma view de recorte.
+
+**Testes:** `tests/listas-leves-paridade-2026-10-13.test.mts` (10, `test:arquiteto`: a árvore SQL = TS;
+paridade de cada coluna e de todos os filtros/ordenações em 33 keywords reais das 4 marcas — uma por
+combinação de estado — e em 6 sintéticas de borda; veredito; plano da carga; marca recusada na escrita;
+estrutura da migration e do rollback; nenhum caminho de escrita/entregável lê a lista leve), apoio
+`tests/listas-leves-f6-row-model.mts` e `tests/fixtures/listas-leves-f6-keywords.json`;
+`tests/minerador-lista-leve-f6-2026-10-14.test.mts` (8, glob do Minerador: carga com recuo, 1ª carga,
+veredito, detalhe por id, portão dos lotes, ações de uma linha, guardas de escrita, CSV, cache nunca
+limpo); `tests/arquiteto-listas-leves-f6-servidor-2026-10-14.test.mts` (6, `test:arquiteto:servidor`: corpo
+igual com e sem a view, bytes do banco, o que portão/veredito/canibalização leem sobrevive, recuo só com a
+view ausente, releitura pela view, exportação inteira, operações de marca inteira sem leitor leve).
+Mutantes em memória sobre a árvore (suíte verde): 18; 17 mortos; o vivo (`logicProcessorVersion`) é chave
+sondada mantida por cautela. Ajustes declarados: `tests/arquiteto-listas-leves-f2-2026-10-14.test.mts` (a
+projeção da lista foi para o banco; regex dos entregáveis ampliada), `tests/listas-leves-fake-db.mts`
+(views `*_lista_leve` não registradas respondem PGRST205), os dublês da loja do parecer em
+`arquiteto-quatro-lentes-rota` e `arquiteto-serp-no-artigo-rota`, e `minerador-assunto-nunca-se-perde`
+(deixou de ser a ÚLTIMA migration: só as reservadas por esta SDD — M-L e M-E — vêm depois).
+
+**Suítes (antes → depois):** Minerador por glob 1347 → 1355, as mesmas 25 falhas antigas (TAP, por
+nome); `test:arquiteto` 2980 → 2990; `test:arquiteto:servidor` 142 → 148; `test:arquiteto:lentes` 106 →
+106; `test:arquiteto:dom` 23 → 23; `test:agent` 90 → 90; `test:redator` 361 → 361; `test:redator:mcp`
+150 → 150; `test:radar` 3671 (1 pulado, 0 falha; E0 com os mesmos hashes; o total cresceu com a outra
+frente); `test:editorial` com as mesmas 4 falhas antigas; `test:editorial:dom` 12 (0 falha); `tsc` 0; eslint
+dos arquivos tocados sem erro novo (os de `minerador-workspace.tsx` são antigos); `git diff --check` limpo.
+
+**Limites (o que a F6 NÃO fez):** (a) a mesa (`/api/editorial/workspace`) e as planilhas do Radar,
+Redator e Publicações continuam recebendo ArticleDNA e itens do Radar inteiros — o `ArticleDNASchema` é
+`.strict()` com `superRefine` (projeção não passa no contrato da mesa nem da cópia local), a linha do Radar
+é montada no cliente sobre a investigação inteira, e as planilhas do Radar/Redator estavam com outra frente
+em curso; a view `editorial_article_dna_lista_leve` fica pronta para essa fatia (contrato leve próprio);
+(b) o Arquiteto continua recebendo as keywords recebidas, o pacote aprovado dos itens e o ArticleDNA
+vigente INTEIROS — a tela cria ArticleDNA a partir dessas linhas (cópia do KeywordDNA) e roda Processar
+arquitetura, canibalização, "mesmo assunto", links entre Silos e o ponto de recuperação sobre elas; levá-los
+à lista leve exige mover a criação do ArticleDNA e essas operações para o servidor (SDD própria); por isso
+nenhuma dessas operações ficou parcial — elas leem exatamente o que liam; (c) Processador acima de
+~50–100 kB (ver acima); (d) a 1ª carga de cada marca em cada navegador custa o mesmo de antes (+~2%); (e)
+o painel do DNA mostra a linha leve por ~1 leitura até a linha inteira chegar; (f) a coluna `row_version`
+(migration `20260923140000`, não aplicada) continua fora; (g) nada foi validado na tela (dark mode,
+larguras, abrir painel, selecionar, CSV) — homologação do dono depois de aplicar a M-L.
+
+### 18.7 F7 — o que foi feito (2026-10-14)
+
+**Verificado no código / confirmado por teste (banco de mentira). Validado manualmente: não.** Autorização do
+dono (2026-10-14): "pode concluir as pendências", incluindo o item 6 pedido em 2026-10-13. Migration M-E
+**escrita e NÃO aplicada**; sem SQL de escrita, sem escrita remota, sem chamada paga, sem deploy; leitura
+remota só por `SELECT` (assinaturas e grants das RPCs de ciclo de vida, gatilhos de `minerador_keywords`,
+`CHECK` dos eventos do grupo, histórico de migrations). **Nenhuma exclusão foi chamada contra banco real**
+(os testes usam `tests/excluir-cor-fake-db.mts`). Entregáveis (§3) intocados: E0 com os mesmos hashes
+(`tests/fixtures/entregaveis-2026-10-13.sha256.json` não foi tocado); nenhum arquivo do §2.1 da SDD acelerar
+foi editado. Dono: Minerador (D8: só ele executa nesta SDD).
+
+1. **Migration M-E** `supabase/migrations/20261016130000_excluir_tudo_da_cor.sql` (rollback
+   `supabase/rollback/20261016130000_excluir_tudo_da_cor.rollback.sql`; conferência só leitura
+   `supabase/scripts/20261016130000-excluir-tudo-da-cor-post-verifier-read-only.sql`). O §11.2 com três
+   acréscimos: (a) com JWT, o ator tem de ser quem chama (`auth.uid()`); a rota usa o `service_role` depois
+   de `requireTenantPermission(minerador:manage)`, como as RPCs vizinhas (preview/restore/purge, só
+   `service_role` — conferido); (b) o grupo tem de ser da marca e as linhas do bloco são travadas (`FOR UPDATE`)
+   antes de conferir "todas vivas desta cor"; (c) a liberação acrescenta uma linha ao `keyword_subject_history`
+   (plano e título que saíram, com o marcador). Mais a função só leitura
+   `lifecycle_delete_group_keywords_contract()` (a rota habilita o botão quando ela responde). Guardas
+   (exclusão comum, permissão, gatilhos do Assunto LIGADOS, `group_id`, funções já existentes), pós-checagem
+   (SECURITY DEFINER, `anon`/`authenticated` sem EXECUTE, `service_role` com, a exclusão comum e os seis
+   gatilhos intactos) e ensaio funcional numa keyword real, desfeito: (5.1) sem a liberação, a exclusão
+   comum é recusada pelo gatilho (`KEYWORD_DELETE_SUBJECT_PROTECTED`); (5.2) a função libera e exclui na mesma
+   chamada; grupo de fora recusa; (5.3) publicada com Assunto: recusada sem a declaração (e o Assunto NÃO fica
+   liberado) e na lixeira de 24 h com ela. Conferido por SELECT antes de escrever:
+   `minerador_keywords_trava_identidade_publicada` só repõe slug/endereço e `trg_protect_published_keyword`
+   só recusa campos estruturais — a liberação do Assunto de uma publicada passa (a dúvida do §11.2).
+2. **Domínio** `lib/minerador/group-delete-all.ts` (puro): prévia (`buildGroupDeleteAllPreview`), recusa por
+   item — `blocked_descendant` (documento no Redator), `architect_reference` (ArticleDNA VIGENTE de artigo
+   não retirado: o último evento da versão vigente não é `rejected`/`superseded`; caminho "Retirar artigo do
+   Silo"/"Tirar do plano"), `published_not_included` (D6), `subject_of_other_color`,
+   `principal_of_other_color`, `principal_outside_color`, `same_article` (o artigo do plano — Assunto +
+   principal declarada — sai inteiro ou fica inteiro, para nunca sobrar marca apontando para Assunto
+   apagado), `lifecycle_unread`; blocos de até 100 sem partir artigo; o plano depois (`unchanged`,
+   `reduced`, `cleared`); a cor no fim (D7, com os motivos); as áreas (D8, com os itens); a confirmação forte
+   (`checkGroupDeleteAllConfirmation`, a MESMA normalização do nome digitado da exclusão comum); o registro
+   do histórico (`groupDeleteAllEventPayload`).
+3. **Núcleo** `lib/minerador/group-delete-all-core.ts` e rota `POST /api/minerador/marcas/[brandId]/keywords/delete-group`
+   (`minerador:manage`): prévia só leitura (colunas estreitas; impacto pelo `lifecycle_preview_minerador_keywords`
+   de sempre; metadados do ArticleDNA por caminho JSON; eventos de status só das vigentes que citam a cor);
+   apply só com o MESMO `decisionHash` e a confirmação conferida no servidor; blocos pela RPC; releitura de
+   cada id; **(b) depois de (c)** — diferença declarada do §10.2 item 4: o plano do grupo é recalculado
+   DEPOIS da exclusão, do que ficou vivo no plano (`syncDeclaredPlanAfterColorDeletionWithCore`, aditivo em
+   `declared-plan-withdraw-core.ts`: v+1 com o restante pelo `declareEditorialGroupPlan` de sempre, ou plano
+   limpo por `clearEditorialGroupPlan`), porque assim uma recusa da RPC nunca deixa o plano sem o artigo que
+   ficou; evento `keywords_unassigned` (via, `decisionHash`, ids, textos, Assuntos liberados, contagens por
+   bloco e por área); D7 com releitura da ocupação: Silo SEM SiloDNA desligado (`unlinkEditorialGroupSilo`;
+   o registro vai no `archived`), grupo arquivado pelo `updateEditorialGroup` de sempre (`eventPayload`
+   aditivo). **Retomada:** o que já saiu não volta à prévia; o resto pede prévia nova e confirmação nova
+   (a confirmação é por operação, `AGENTS.md` §15) — não "o mesmo `decisionHash`" do §10.2 item 5.
+4. **Plano limpo** = `plan`/`plan_hash` nulos, `plan_version + 1`, origem de volta a `manual` (o `CHECK`
+   `plan IS NULL OR origin = 'declared_plan'` aceita); `ensureEditorialGroupForColor` reativa o grupo
+   arquivado sem plano (teste). No "Gerenciar a cor", "tem plano" passou a ser só a origem `declared_plan`.
+5. **Tela:** `components/editorial/group-delete-all-dialog.tsx` (novo); "Excluir tudo da cor X…" no menu da
+   etiqueta (só no Minerador, com a cor escolhida) e no "Gerenciar a cor" (seção nova; nas outras áreas, só
+   o link "Abrir no Minerador para excluir" → `?excluir_tudo_da_cor=<cor>`, lido uma vez pela etiqueta do
+   Minerador); moldura comum extraída para `components/editorial/group-dialog-frame.tsx` (as mesmas classes;
+   botão `danger` da exclusão comum); a planilha do Minerador tira as linhas confirmadas pelo servidor
+   (evento `minerador:excluir-tudo-da-cor`). Histórico do grupo: as três linhas da operação têm detalhe
+   próprio (`lib/editorial/group-history.ts`).
+6. **Defeitos achados no caminho (§10.2):** a exclusão comum do Minerador não fatiava seleções acima de 100 — agora prévia e
+   execução vão em blocos de 100 (a declaração da publicada só no bloco que tem publicada da prévia; o
+   primeiro bloco recusado para a sequência e a tela diz quantas saíram); catálogo: a exclusão da não
+   publicada não tem "janela de restauração"; a retirada não é exclusão (`apply_declared_plan_to_silo` com
+   `withdrawNonPlan` retira, com aceite). O do Arquiteto (sem `allowRecoverable`) já tinha saído na F4.
+7. **Catálogo e MCP (§17.1):** operação `minerador.delete_group_keywords` (`access: "ui"`, "A IA nunca exclui");
+   nota em `minerador.keyword_lifecycle`. Nenhuma ferramenta MCP nova (teste estrutural).
+
+**Ordem de aplicação (dono):** a M-E depende só da `20261015120000` (aplicada); a ordem com a M-L não importa
+(uma não usa nada da outra). Ensaio → `npx supabase db query --linked -f supabase/migrations/20261016130000_excluir_tudo_da_cor.sql`
+→ `npx supabase migration repair --status applied 20261016130000 --linked` → conferência pelo script só leitura.
+
+**Testes:** novos `tests/minerador-excluir-tudo-da-cor-2026-10-14.test.mts` (12, glob do Minerador: prévia e
+motivos sem escrever; D6 com o nome digitado; confirmação forte e decisão velha; Assunto liberado e excluído
+na mesma chamada e, sem a liberação, a recusa do gatilho; D7 com plano limpo, Silo desligado, cor liberada e
+reativação sem plano; Silo consolidado prende a cor; blocos de 100 com um recusado; artigo não partido;
+outra cor/marca; sem a M-E; estrutura da migration, do rollback, da conferência, da rota, do MCP e da tela;
+fatiamento da exclusão comum) e `tests/radar-grupos-excluir-tudo-da-cor-dom-2026-10-14.test.mts` (3, DOM no
+runner do Radar: menu só no Minerador; sem a M-E o botão desabilitado com a explicação; confirmação forte e
+o aviso à planilha; o link do Arquiteto e o parâmetro da URL). Ajuste declarado:
+`tests/minerador-assunto-nunca-se-perde.test.mts` (a lista fechada do marcador `excluir_cor` passa a
+incluir a constante do domínio da F7).
+
+**Suítes (antes → depois):** Minerador por glob 1333 → 1345, as mesmas 28 linhas `not ok` (comparadas por
+nome, TAP; a base desta máquina difere das contagens do §18.6 por arquivos de outras frentes);
+`test:arquiteto` 2990 → 2990; `test:arquiteto:servidor` 148 → 148; `test:agent` 90 → 90; `test:radar` 3671 →
+3674 (+3 DOM; 1 pulado, 0 falha; E0 com os mesmos hashes); `test:editorial` com as mesmas 4 falhas antigas;
+`tsc` 0; eslint dos arquivos novos e tocados sem erro (os de `minerador-workspace.tsx` são antigos, nenhum
+nas linhas desta fase); `git diff --check` limpo.
+
+**Limites:** (a) keyword no ArticleDNA vigente de artigo que não pode sair do Silo (sem Silo consolidado,
+Pilar, publicado ou com item no Radar) fica fora até o dono resolver no Arquiteto — a cadeia inteira
+(retirar do Silo, desfazer Silo sugerido, tirar etiquetas) não foi feita: D8 e o pedido desta fase
+limitaram a execução ao Minerador; (b) a mesa do Arquiteto usa `planVersion > 0` como "grupo com plano"
+no recorte: depois de um plano limpo com a cor ainda ocupada, o grupo aparece como com plano, sem artigos
+(backlog do Arquiteto); (c) a publicada na lixeira prende a cor até a purga (D7); (d) a SQL da M-E não foi
+executada aqui (não há Postgres local; o ensaio é do dono); (e) nada validado na tela.

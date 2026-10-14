@@ -1,5 +1,6 @@
 import { canonicalJson, contentHash } from "../arquiteto/versioning.ts";
 import { withoutMeasurementSeries } from "./listing-payload.ts";
+import { isLightKeywordSemantic, readLightListMarker } from "./keyword-light-list.ts";
 import { PUBLICATION_IDENTITY_LOCK_HISTORY_KEY } from "./publication-link.ts";
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 import { hasCompleteLogicalOutputContract } from "./logical-processor.ts";
@@ -582,6 +583,15 @@ export function readApprovalRecord(semantic: Semantic | null | undefined): Appro
 export function approvedPackageDiverged(input: ApprovedPackageInput): boolean | null {
   const record = readApprovalRecord(input.semantic);
   if (!record) return null;
+  /*
+   * F6 (lista leve, 2026-10-14): a linha leve não tem o DNA inteiro que a
+   * assinatura cobre. Vale o veredito calculado na linha INTEIRA e guardado
+   * para o mesmo conteúdo (`dna_hash`). Linha leve sem veredito: a assinatura
+   * da projeção não bate e a keyword aparece divergente — nunca "aprovada"
+   * por suposição.
+   */
+  const light = readLightListMarker(input.semantic);
+  if (light && typeof light.approvalDiverged === "boolean") return light.approvalDiverged;
   return !recordMatches(record, input);
 }
 
@@ -592,6 +602,8 @@ export function approvedPackageDiverged(input: ApprovedPackageInput): boolean | 
 export function buildApprovedPackage(input: ApprovedPackageInput): ApprovedKeywordPackage | null {
   const record = readApprovalRecord(input.semantic);
   if (!record) return null;
+  // F6: o pacote é o DNA inteiro; a linha leve da planilha nunca vira pacote.
+  if (isLightKeywordSemantic(input.semantic)) return null;
   // Linha mexida depois da aprovação não é o pacote aprovado: montar a partir
   // dela devolveria conteúdo novo com o carimbo da versão antiga. Sem
   // snapshot armazenado, a resposta honesta é "não há pacote a entregar".

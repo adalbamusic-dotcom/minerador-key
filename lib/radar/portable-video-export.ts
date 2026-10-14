@@ -63,6 +63,32 @@ import {
   type RadarWritingPublication,
   type RadarWritingUnit,
 } from "./portable-writing-export.ts";
+/*
+ * 2026-10-14 · F6 (SDD silo interligado) · o material do artigo pela MESMA linha do CSV "Para escrever"
+ * (`buildRadarWritingExportArticle` → `radarWritingMaterialOf`) e as réguas do vídeo em 4 partes.
+ */
+import { buildRadarWritingExportArticle } from "./portable-writing-export.ts";
+import { radarWritingMaterialOf, type RadarWritingMaterial } from "./portable-writing-material.ts";
+import { radarBrandVoiceRef } from "./brand-voice.ts";
+import { radarDiagnosisOfferOf } from "./brand-edge.ts";
+import {
+  RADAR_VIDEO_MICRO_PER_CHAPTER,
+  RADAR_VIDEO_SHORT_TITLE_RULE,
+  radarVideoArticleMaterialLines,
+  radarVideoAuthorityLines,
+  radarVideoLongTemplate,
+  radarVideoShortCta,
+  radarVideoShortTarget,
+  radarVideoStorytelling,
+  radarVideoTimeMarkers,
+  radarVideoTitleRule,
+  /* 2026-10-14 · F5 (pendências da F6) · a régua das lâminas (a mesma da semeadura do Redator) e a estrutura e as entidades dos concorrentes no gabarito. */
+  radarVideoCompetitorReferenceLines,
+  radarVideoShortCarouselRuleLines,
+} from "./video-production.ts";
+/* 2026-10-14 · F5 · os temas H2/H3 dos concorrentes pela MESMA régua do CSV "Para escrever" e a régua da F1 do H2 que abre pela keyword. */
+import { radarWritingCompetitorTopicsOf } from "./portable-writing-export.ts";
+import { radarHeadingStartsWithKeyword } from "./human-voice-guideline.ts";
 /* 2026-10-11 · a identidade de publicação (o artigo que o vídeo leva: Silo, slug, URL canônica e situação), a mesma do CSV para escrever. */
 import { radarPublicationIdentityLines, type RadarPublicationIdentity } from "./publication-identity.ts";
 import type { RadarSiloExportWritingContext } from "./portable-silo-export.ts";
@@ -1922,6 +1948,28 @@ function aberturaPublicavel(artigoModelo: RadarArticleBlueprintPayload | null, t
 }
 
 /*
+ * 2026-10-14 · F5 (SDD silo interligado §10; pendência da F6) · A ESTRUTURA E AS
+ * ENTIDADES DOS CONCORRENTES DA SERP NO GABARITO DO VÍDEO LONGO: os temas dos
+ * H2/H3 já lidos pela MESMA régua do CSV "Para escrever"
+ * (`radarWritingCompetitorTopicsOf`: a base única, o "não cobrir", o leitor) e as
+ * entidades do modelo observado. Sem esboço lido nem entidade, nada a mais.
+ */
+function linhasDaEstruturaDosConcorrentes(input: RadarPortableExportInput, p: RadarWritingProjections, nivel: NivelDoRoteiro): string[] {
+  /* Com a célula apertada, a referência encolhe antes dos capítulos; no último nível, sai (os temas estão no CSV para escrever). */
+  if (nivel.soEssencial) return [];
+  const leitura = radarWritingCompetitorTopicsOf(input, p);
+  const entidades = input.googleObserved?.entities ?? null;
+  return radarVideoCompetitorReferenceLines({
+    topics: leitura?.topics ?? [],
+    sampleSize: leitura?.sampleSize ?? 0,
+    keywords: [p.dna.principalKeyword, ...p.dna.secondaryKeywords].filter((valor): valor is string => Boolean(valor)),
+    entities: entidades ? { shared: entidades.shared, marketOnly: entidades.marketOnly } : null,
+    startsWithKeyword: radarHeadingStartsWithKeyword,
+    compact: nivel.compacto,
+  });
+}
+
+/*
  * ===== 2026-10-09 · O ROTEIRO SÓ PELA PLANTA, PELA AMOSTRA PERTINENTE E PELA TRAVA =====
  *
  * Regra do dono: o processo do piloto substitui o antigo. Saíram desta coluna,
@@ -1943,7 +1991,14 @@ function colunaRoteiro(
   publicavel: AberturaPublicavel | null,
   /* 2026-10-07 (revisão) · o nível de encolhimento dos capítulos da planta (NIVEIS_DO_ROTEIRO); o texto inteiro no primeiro. */
   nivel: NivelDoRoteiro,
-  extras: { decisao: RadarVideoFormatDecision; oportunidadesDeTitulo?: readonly string[]; destino?: string },
+  extras: {
+    decisao: RadarVideoFormatDecision;
+    oportunidadesDeTitulo?: readonly string[];
+    destino?: string;
+    /** 2026-10-14 · F6 · Aditivos: o material do artigo (linha do CSV para escrever) e os longos pertinentes já coletados (o gabarito do YouTube). */
+    material?: RadarWritingMaterial | null;
+    longos?: readonly RadarYoutubeUniverseEntry[];
+  },
 ): string {
   const contribuicoes = radarWritingSpecialistContributions(p);
   const cta = contribuicoes.find(item => item.tipo === "CTA") || contribuicoes.find(item => item.tipo === "FECHAMENTO") || null;
@@ -1952,6 +2007,8 @@ function colunaRoteiro(
   const unidade = radarWritingUnitOf(input);
   const { capitulos, curto } = sequencia;
   const premissa = publicavel ? publicavel.premissa : radarVideoPremise(artigoModelo);
+  /* 2026-10-14 · F6 · o gabarito do YouTube (longos pertinentes já coletados); no formato curto, a série é o recorte e não há vídeo longo a gabaritar. */
+  const gabarito = !curto && extras.longos ? radarVideoLongTemplate(extras.longos.map(video => ({ title: radarWritingDecodeEntities(video.title), channelName: video.channelName, bestRank: video.bestRank, durationSeconds: video.durationSeconds ?? null }))) : { lines: [] as string[], targetSeconds: null };
   const linhas = [
     linhaDoGancho(p, abertura, Boolean(premissa && capitulos.length)),
     "Promessa clara no título e na thumbnail, a mesma que o vídeo cumpre; sem caça-clique.",
@@ -1966,12 +2023,33 @@ function colunaRoteiro(
     curto
       ? `Formato do vídeo: formato curto (Shorts) — ${extras.decisao.motivo}. Cada capítulo que funciona sozinho é um vídeo curto da série (os escolhidos estão em cortes_para_redes); o capítulo explicativo fica como contexto da série.`
       : `Formato do vídeo: vídeo longo — ${extras.decisao.motivo}.`,
+    /*
+     * 2026-10-14 · F6 (SDD silo interligado; pedido do dono: "um vídeo maior … de
+     * acordo com as coletas no YouTube como fonte de inspiração e formação do
+     * gabarito assim como faz nos artigos … e deixar as diretrizes para
+     * storytelling"): o gabarito do YouTube, o material do artigo e o arco.
+     */
+    ...gabarito.lines,
+    /*
+     * 2026-10-14 · F5 (SDD §10; pendência da F6) · no gabarito do vídeo longo, a
+     * estrutura de títulos e as entidades dos concorrentes da SERP já lidos, como
+     * referência ("o que cobrem; o que não copiar"). Nada coletado.
+     */
+    ...(curto ? [] : linhasDaEstruturaDosConcorrentes(input, p, nivel)),
+    ...radarVideoArticleMaterialLines(extras.material ?? null),
+    ...radarVideoStorytelling({
+      material: extras.material ?? null,
+      gancho: abertura ? entreAspas(abertura) : null,
+      perguntas: capitulos.map(capitulo => capitulo.pergunta),
+      especialista: cta?.rotulo ?? null,
+    }),
     curto
       ? `Capítulos da planta (${capitulos.length}, do artigo-modelo da SERP; a série de vídeos curtos sai deles, um capítulo por vídeo, sem marcador de tempo):`
       : `Capítulos do vídeo principal (${capitulos.length}, da planta do artigo-modelo da SERP; viram os marcadores de tempo da descrição). Ordem sugerida, a do artigo: reorganize se o vídeo render mais abrindo pela demonstração, mantendo assunto, evidências e premissa.`,
     ...capitulos.map((capitulo, indice) => linhaDoCapituloDaPlanta(capitulo, indice, nivel)),
+    ...(curto ? [] : [radarVideoTimeMarkers(capitulos.map(capitulo => semPontoFinal(capitulo.titulo)), gabarito.targetSeconds)]),
     ...(nivel !== NIVEIS_DO_ROTEIRO[0]
-      ? [`(Roteiro encolhido para caber na célula: ${nivel.soEssencial ? "cada capítulo ficou com título, pergunta, Entregar e Mostrar" : "o Entregar não repete a pergunta e as frases de cada capítulo saíram encurtadas"}; o texto inteiro de cada seção está na planta do artigo-modelo, no CSV para escrever, e as frases sem fonte, na lista "Fica fora" de cortes_para_redes.)`]
+      ? [`(Roteiro encolhido para caber na célula: ${nivel.soEssencial ? `cada capítulo ficou com título, pergunta, Entregar e Mostrar${curto ? "" : " e a estrutura e as entidades dos concorrentes saíram do gabarito (os temas H2/H3 estão no CSV para escrever)"}` : "o Entregar não repete a pergunta e as frases de cada capítulo saíram encurtadas"}; o texto inteiro de cada seção está na planta do artigo-modelo, no CSV para escrever, e as frases sem fonte, na lista "Fica fora" de cortes_para_redes.)`]
       : []),
     "Entregar = o que a pessoa leva do capítulo, dito no começo dele. As frases vêm da planta: adapte para a fala.",
     /* 2026-10-07 · a régua da cena das demonstrações (item 4), dita uma vez para todos os capítulos. */
@@ -1979,13 +2057,19 @@ function colunaRoteiro(
   );
   /* 2026-10-09 · o título parte do H1 da planta (já pela trava); os padrões são os que a amostra PERTINENTE não usa. */
   const oportunidades = (extras.oportunidadesDeTitulo || []).slice(0, 4);
-  linhas.push(`Título do vídeo: parta do título da planta${publicavel?.capa ? ` (${entreAspas(publicavel.capa)})` : ""}, com a principal no começo e o gancho de dor e contraste da diretriz de comunicação humana (nunca "dicas" nem "guia")${oportunidades.length ? `; padrões de título que os vídeos pertinentes não usam (espaço para diferenciar): ${oportunidades.join(" · ")}` : ""}.`);
+  /* 2026-10-14 · F6 · K2/K3 no vídeo (SDD §10): 3 ângulos, a principal natural nas primeiras ~60 letras, nunca prefixo fixo. */
+  linhas.push(radarVideoTitleRule(publicavel?.capa ? entreAspas(publicavel.capa) : null, oportunidades));
   const virada = publicavel?.virada ?? null;
   const ctaDaPlanta = publicavel?.ctaDaPlanta ?? null;
+  /* 2026-10-14 · F6 (D7) · o fechamento em 4 tempos com o diagnóstico como CTA único; a fala do especialista vai à virada e à resolução (arco acima), nunca no lugar do diagnóstico. */
+  const trilha = (extras.material?.links || []).filter(item => item.kind === "trilha").map(item => item.label).filter((rotulo): rotulo is string => Boolean(rotulo));
   linhas.push(
-    `Fechamento: ${cta ? `a fala ${cta.rotulo} do especialista` : virada ? `a virada da planta — ${semPontoFinal(virada)}` : "a premissa do vídeo, retomada em uma frase"}; ${ctaDaPlanta ? `CTA da planta — ${semPontoFinal(ctaDaPlanta)} — ` : "CTA "}para ${destino ? `${aUnidade(unidade)} (${destino})` : `${aUnidade(unidade)} da marca`}, sem prometer resultado.`,
-    /* 2026-10-11 · a descrição abre pela dor e pela keyword (diretriz de comunicação humana). */
-    `Descrição: resumo em duas linhas que abre pela dor e pela keyword principal, ${curto ? "o capítulo de cada vídeo" : `os ${capitulos.length} capítulos com tempo`}, fontes citadas e o link ${daUnidade(unidade)}${destino ? ` (${destino})` : ""}.`,
+    extras.material
+      ? `Fechamento em 4 tempos (o arco acima): dor → mudança para a estrutura própria → facilidade (a marca faz) → diagnóstico, o CTA único${cta ? `; a fala ${cta.rotulo} do especialista entra na mudança e na facilidade, não no lugar do diagnóstico` : ""}; link para ${destino ? `${aUnidade(unidade)} (${destino})` : `${aUnidade(unidade)} da marca`} na descrição, sem prometer resultado.`
+      : `Fechamento: ${cta ? `a fala ${cta.rotulo} do especialista` : virada ? `a virada da planta — ${semPontoFinal(virada)}` : "a premissa do vídeo, retomada em uma frase"}; ${ctaDaPlanta ? `CTA da planta — ${semPontoFinal(ctaDaPlanta)} — ` : "CTA "}para ${destino ? `${aUnidade(unidade)} (${destino})` : `${aUnidade(unidade)} da marca`}, sem prometer resultado.`,
+    ...radarVideoAuthorityLines(extras.material ?? null),
+    /* 2026-10-11 · a descrição abre pela dor e pela keyword (diretriz de comunicação humana). 2026-10-14 · F6 · a principal natural nas primeiras linhas, as fontes pelo nome da entidade e a trilha do Silo. */
+    `Descrição: resumo em duas linhas que abre pela dor, com a keyword principal na forma natural logo nas primeiras linhas (nunca prefixo fixo), ${curto ? "o capítulo de cada vídeo" : `os ${capitulos.length} capítulos com tempo`}, fontes citadas (as de autoridade pelo nome da entidade, com o endereço) e o link ${daUnidade(unidade)}${destino ? ` (${destino})` : ""}${trilha.length ? `; no fim, "Continue no Silo" com ${trilha.slice(0, 5).join(", ")} (a trilha do CSV para escrever)` : ""}.`,
     ...linhasDoVideoNoArtigo(unidade, artigoModelo, destino),
     "Não inventar depoimento, número, estudo, autor nem credencial. Fala de terceiros só citada e atribuída.",
   );
@@ -2276,6 +2360,10 @@ function colunaCortes(
     pertinentes?: RadarVideoPertinentSample | null;
     concorrenciaCurta?: boolean;
     nivel?: NivelDosCortes;
+    /** 2026-10-14 · F6 · Aditivo: o material do artigo (o CTA do diagnóstico, as fontes de autoridade e a lista YMYL); ausente, os cortes de antes. */
+    material?: RadarWritingMaterial | null;
+    /** 2026-10-14 · F6 · Aditivo: a série de curtos por micro-assunto (`serieDeCurtos`); vazia ou ausente, os cortes e o carrossel de antes. */
+    serie?: readonly MicroCurto[];
   } = {},
 ): string {
   /* 2026-10-09 · os Shorts da fotografia só quando ela já é da amostra pertinente; a antiga (amostra inteira) não diz "do tema". */
@@ -2296,6 +2384,16 @@ function colunaCortes(
    */
   /* 2026-10-07 · o fechamento diz o destino com endereço quando há — e UM CTA só por corte. */
   const fechamento = `   Fechamento: CTA: ${aUnidade(unidade)}${destino ? ` (${destino})` : ""} ou o vídeo longo quando publicado — um só por corte.`;
+  /*
+   * 2026-10-14 · F6 (SDD silo interligado; pedido do dono: "versões fatiadas,
+   * vídeos curtos para as redes sociais de ~15 segundos cada, fatiados por
+   * seções/micro-assuntos do mesmo tema; e eles mesmos podem servir para criar os
+   * slides ou carrossel"). A série vem pronta de `serieDeCurtos` (a mesma do
+   * storyboard e do prompt): aqui só o texto, encurtado pelo nível da célula.
+   */
+  const serie = extras.serie ?? [];
+  const alvoDoCurto = radarVideoShortTarget(extras.pertinentes?.curtos?.coorte.durationSeconds.median ?? null);
+  const ctaDoCurto = extras.material ? radarVideoShortCta(extras.material, destino) : "";
   /* 2026-10-09 · só capítulo da planta que passou nos portões vira corte: o corte "a resposta direta à pergunta" (régua de antes) saiu. */
   const cortes = escolhidos.flatMap(({ capitulo, numero: posicao, utilidade }, indice) => {
     if (!utilidade?.elegivel || !capitulo.publicavel || !capitulo.demo) return [];
@@ -2312,6 +2410,24 @@ function colunaCortes(
       fechamento,
     ].join("\n")];
   });
+  const derivados = serie.length > 0;
+  const capitulosDaSerie = [...new Set(serie.map(item => item.capitulo))];
+  const linhasDaSerie = derivados
+    ? [
+      `Série de curtos de ${alvoDoCurto.line} por micro-assunto (o vídeo fatiado: ${serie.length} curto(s) de ${capitulosDaSerie.length} capítulo(s), um vídeo por ideia, cada um funciona sozinho; os cortes escolhidos pela utilidade, quando há, saem primeiro, e o capítulo sem corte escolhido também rende curto quando tem frase publicável):`,
+      ...capitulosDaSerie.flatMap(numero => {
+        const doCapitulo = serie.filter(item => item.capitulo === numero);
+        const primeiro = doCapitulo[0];
+        return [
+          `Capítulo ${numero} (${primeiro.titulo})${primeiro.corte ? ` · corte ${primeiro.corte} acima` : ""}:`,
+          /* 2026-10-14 · F6 · no último nível da célula, cada curto fica com o gancho e o texto na tela (a ideia e a cena estão no capítulo do roteiro). */
+          ...doCapitulo.map(micro => (nivel.enxuto
+            ? `   ${micro.rotulo} · Gancho: ${cortar(micro.gancho, 90)} · Texto na tela: ${micro.tela}.`
+            : `   ${micro.rotulo} · Gancho do 1º segundo: ${micro.gancho} · Ideia: ${fraseCurta(micro.ideia, nivel.ideia)} · Cena: ${nivel.parte ? cortar(micro.cena, nivel.parte + 40) : micro.cena} · Texto na tela: ${micro.tela}.`)),
+        ];
+      }),
+    ]
+    : [];
   /* 2026-10-07 · cada capítulo da planta sem corte diz o motivo: portão que não passou ou utilidade abaixo dos escolhidos. */
   const semCorte = porUtilidade
     ? avaliados.filter(item => !numeroDoCorte.has(item.numero)).map(item => `${item.numero} (${motivoSemCorte(item, escolhidos)})`)
@@ -2384,10 +2500,27 @@ function colunaCortes(
     ...daPlanta.flatMap((capitulo, indice) => {
       if (!capitulo.travadas?.length) return [];
       const corte = numeroDoCorte.get(indice + 1);
-      return [`- Capítulo ${indice + 1} · lâmina ${indice + 2}${corte ? ` · corte ${corte}` : ""}: ${capitulo.travadas.map(item => `${entreAspas(cortar(item.frase, nivel.fora))} — ${motivoNoNivel(item)}`).join("; ")}.`];
+      /* 2026-10-14 · F6 · com os carrosséis derivados dos curtos, a lâmina é a do curto (não há mais a lâmina por capítulo). */
+      return [`- Capítulo ${indice + 1}${derivados ? "" : ` · lâmina ${indice + 2}`}${corte ? ` · corte ${corte}` : ""}: ${capitulo.travadas.map(item => `${entreAspas(cortar(item.frase, nivel.fora))} — ${motivoNoNivel(item)}`).join("; ")}.`];
     }),
   ];
-  const carrossel = daPlanta.length
+  /*
+   * 2026-10-14 · F6 (pedido do dono: os curtos "mesmos podem servir para criar os
+   * slides ou carrossel") · CADA CURTO VIRA UM CARROSSEL, com o texto dele: capa =
+   * o gancho, uma ideia por lâmina (o texto na tela e, quando ela é maior, a ideia
+   * inteira com a fonte), a última com o CTA. Nenhum carrossel separado inventado.
+   */
+  /* 2026-10-14 · F5 · a régua das lâminas mora em video-production.ts (a mesma da semeadura do Redator); o texto é o de antes. */
+  const carrosselDosCurtos = radarVideoShortCarouselRuleLines(serie);
+  const carrossel = derivados
+    ? [
+      `Carrosséis derivados dos curtos (Instagram e LinkedIn; um por curto, com o texto dele: capa = o gancho, uma ideia por lâmina, a última com o CTA):`,
+      /* 2026-10-14 · F6 · do segundo nível em diante, a regra das lâminas uma vez, sem repetir o texto de cada curto. */
+      /* Compacto: as lâminas reaproveitam o texto de cada curto (acima), sem repeti-lo — a lista "Fica fora" não encolhe por causa delas. */
+      ...carrosselDosCurtos,
+      "Fonte na lâmina: a frase com fonte do pacote leva a fonte entre parênteses; a fonte de autoridade é citada pelo nome da entidade; a frase que pede fonte não entra em lâmina.",
+    ]
+    : daPlanta.length
     ? [
       /* 2026-10-07 (passada de revisão) · o cabeçalho acompanhou a lâmina: prometer "cada uma puxando a próxima" sem o elemento no corpo mandava procurar instrução que não existe mais. */
       `Carrossel (Instagram e LinkedIn), ${daPlanta.length + 2} lâminas, uma mensagem por lâmina (o título de cada lâmina já puxa a seguinte):`,
@@ -2457,6 +2590,9 @@ function colunaCortes(
         : "Fora dos capítulos: um fato com fonte, dito em uma frase e com a fonte na legenda, rende um vídeo curto à parte."]
       : []),
     ...(semCorte.length ? [`Capítulos sem corte: ${semCorte.join(" · ")}.`] : []),
+    /* 2026-10-14 · F6 · a série de curtos por micro-assunto, a regra dos títulos (K3) e as fontes de autoridade, que atravessam curtos e lâminas. */
+    ...linhasDaSerie,
+    ...(derivados ? [`CTA de cada curto e de cada carrossel (um só): ${ctaDoCurto}.`, RADAR_VIDEO_SHORT_TITLE_RULE, ...radarVideoAuthorityLines(extras.material ?? null)] : []),
     /* 2026-10-07 · com a planta, as cenas dos cortes e das lâminas seguem a mesma régua das demonstrações do vídeo longo. */
     ...(porUtilidade ? [REGRA_DAS_CENAS] : []),
     `Legenda na tela em todos os cortes, por acessibilidade e compreensão; gancho no primeiro segundo e convite para o vídeo longo ou ${aUnidade(unidade)}.`,
@@ -2466,6 +2602,96 @@ function colunaCortes(
       : []),
     ...(fora.length ? ["Fica fora do texto publicável (sem fonte não entra em lâmina, legenda nem ideia do corte; na fala, só delimitada):", ...fora] : []),
   ].join("\n");
+}
+
+/*
+ * ===== 2026-10-14 · F6 · A SÉRIE DE CURTOS POR MICRO-ASSUNTO (pedido do dono) =====
+ *
+ * "Versões fatiadas, vídeos curtos para as redes sociais de ~15 segundos cada,
+ * fatiados por seções/micro-assuntos do mesmo tema." Cada capítulo da planta com
+ * frase publicável (depois da trava de fonte) rende de 1 a 3 curtos, um por
+ * ideia: a frase que abre o capítulo e as do Explicar que passaram na trava. Os
+ * capítulos dos cortes escolhidos pela utilidade vêm primeiro; o teto da série é
+ * repartido por rodadas (primeiro um curto de cada capítulo, depois o segundo…),
+ * para o vídeo inteiro ficar fatiado. A frase travada nunca vira curto. A cena
+ * é a demonstração da planta (o passo da vez) ou, no capítulo explicativo, o
+ * ponto da vez na tela; sem nenhum, a ideia numa situação ilustrativa.
+ */
+export const RADAR_VIDEO_SHORTS_MAX = 9;
+
+export type MicroCurto = {
+  capitulo: number;
+  titulo: string;
+  /** O corte escolhido pela utilidade de onde o capítulo saiu (prioridade), ou null. */
+  corte: number | null;
+  rotulo: string;
+  gancho: string;
+  ideia: string;
+  /** A ideia inteira é maior que o texto na tela (ou leva fonte): o carrossel ganha a lâmina dela. */
+  ideiaMaior: boolean;
+  cena: string;
+  tela: string;
+};
+
+function serieDeCurtos(sequencia: Sequencia, escolha: EscolhaDosCortes): MicroCurto[] {
+  const semFonteNoFim = (frase: string) => semPontoFinal(frase.replace(/\s*\(fonte: [^)]+\)\s*$/, ""));
+  const capitulos = sequencia.capitulos.filter(capitulo => capitulo.daPlanta).map((capitulo, indice) => ({ capitulo, numero: indice + 1 }));
+  const ordem = [
+    ...escolha.escolhidos.map(item => capitulos.find(entrada => entrada.numero === item.numero)).filter((item): item is (typeof capitulos)[number] => Boolean(item)),
+    ...capitulos.filter(entrada => !escolha.numeroDoCorte.has(entrada.numero)),
+  ];
+  /*
+   * Os micro-assuntos de um capítulo: o 1º é a frase publicável dele (depois da
+   * trava); os outros, os passos da demonstração da planta (ou, no capítulo
+   * explicativo, os pontos dele), que não são afirmação — o Explicar continua só
+   * na fala do vídeo longo. Nada travado vira curto.
+   */
+  type Candidata = { ideia: string; tela: string; cena: string; principal: boolean };
+  const candidatasDe = new Map(ordem.map(({ capitulo, numero }) => {
+    if (!capitulo.publicavel) return [numero, [] as Candidata[]];
+    const demo = capitulo.demo;
+    const frase = comFonte(semPontoFinal(capitulo.publicavel.frase), capitulo.publicavel.fonte);
+    const primeira: Candidata = {
+      ideia: frase,
+      tela: cortar(semFonteNoFim(frase), 60),
+      cena: demo && demo.tipo !== "NENHUMA" ? mostrarNoCorte(demo, capitulo.passosDaIdeia || [], 0, capitulo.cenaDoCorte) : "a ideia escrita na tela, com a fala por cima (exemplo ilustrativo quando houver cena)",
+      principal: true,
+    };
+    const jaNaPrimeira = new Set((capitulo.passosDaIdeia || []).map(radarWritingCompareKey));
+    if (capitulo.cenaDoCorte?.tipo === "PASSO") jaNaPrimeira.add(radarWritingCompareKey(capitulo.cenaDoCorte.passo));
+    const passos = demo?.tipo === "PASSOS" ? demo.passos : [];
+    const extras: Candidata[] = (passos.length ? passos : pontosDa(demo))
+      .filter(item => !jaNaPrimeira.has(radarWritingCompareKey(item)))
+      .map(item => ({
+        ideia: passos.length ? `o passo ${entreAspas(item)}, mostrado e explicado em uma ideia (sem afirmar efeito sem fonte)` : `o ponto ${entreAspas(item)}, explicado em uma ideia (sem afirmar efeito sem fonte)`,
+        tela: cortar(semPontoFinal(item), 60),
+        cena: passos.length ? `o passo ${entreAspas(cortar(item, 80))} numa tela, num exemplo identificado como ilustrativo` : `o ponto ${entreAspas(cortar(item, 80))} escrito na tela, com a fala por cima`,
+        principal: false,
+      }));
+    return [numero, [primeira, ...extras].slice(0, RADAR_VIDEO_MICRO_PER_CHAPTER)];
+  }));
+  /* As rodadas: o 1º curto de cada capítulo, depois o 2º, até o teto. */
+  const escolhidas: Array<{ numero: number; k: number }> = [];
+  for (let k = 0; k < RADAR_VIDEO_MICRO_PER_CHAPTER && escolhidas.length < RADAR_VIDEO_SHORTS_MAX; k += 1) {
+    for (const { numero } of ordem) {
+      if (escolhidas.length >= RADAR_VIDEO_SHORTS_MAX) break;
+      if ((candidatasDe.get(numero) || [])[k]) escolhidas.push({ numero, k });
+    }
+  }
+  return ordem.flatMap(({ capitulo, numero }) => escolhidas.filter(item => item.numero === numero).sort((a, b) => a.k - b.k).map(({ k }) => {
+    const candidata = candidatasDe.get(numero)![k];
+    return {
+      capitulo: numero,
+      titulo: semPontoFinal(capitulo.titulo),
+      corte: escolha.numeroDoCorte.get(numero) ?? null,
+      rotulo: `${numero}.${k + 1}`,
+      gancho: candidata.principal && capitulo.provocacao ? entreAspas(radarVideoHookQuestion(capitulo.provocacao)) : `a ideia em contraste ou pergunta curta, a partir de ${entreAspas(cortar(candidata.tela, 70))}`,
+      ideia: candidata.ideia,
+      ideiaMaior: candidata.principal && (candidata.tela !== semFonteNoFim(candidata.ideia) || /\(fonte: /.test(candidata.ideia)),
+      cena: candidata.cena,
+      tela: entreAspas(candidata.tela),
+    };
+  }));
 }
 
 /*
@@ -2534,7 +2760,26 @@ function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: {
   semPlanta?: boolean;
   /** 2026-10-09 · o formato curto pela decisão única: os cortes são a série. */
   curto?: boolean;
+  /**
+   * 2026-10-14 · F6 (SDD silo interligado; o vídeo em 4 partes, pedido do dono) ·
+   * a linha tem o material do artigo e os curtos por micro-assunto: o prompt pede
+   * o arco de storytelling, os curtos de ~15 s e o carrossel de cada curto.
+   */
+  f6?: boolean;
+  /** 2026-10-14 · F6 · quantos curtos a série por micro-assunto tem (com o material). */
+  curtos?: number;
 }): string {
+  /* 2026-10-14 · F6 · com a série de curtos, a linha tem curtos mesmo sem corte escolhido pela utilidade. */
+  const comSerie = Boolean(opcoes.f6 && opcoes.curtos);
+  const semCorte = opcoes.cortes === 0 && !comSerie;
+  const regrasF6 = opcoes.f6
+    ? [
+      "Fontes de autoridade: cite pelo nome da entidade (na fala, na tela e na lâmina), com o endereço na descrição e na legenda; afirmação de saúde sem fonte verificada não vira fato em nenhuma das saídas.",
+      "Fechamento em 4 tempos em todas as saídas: dor → mudança para a estrutura própria → facilidade (a marca faz) → diagnóstico, o CTA único.",
+    ]
+    : [];
+  const curtosF6 = (antes: string) => `${antes} Um vídeo curto de ~15 s por micro-assunto de cortes_para_redes (1.1, 1.2…), na ordem: gancho no primeiro segundo, a ideia única, a cena, o texto na tela, a duração-alvo dita e UM CTA (o diagnóstico); 3 opções de título para cada um, com ângulos diferentes (a regra está em cortes_para_redes)${opcoes.fatoComFonte && opcoes.cortes === 0 ? "; o fato com fonte de cortes_para_redes pode virar um curto à parte, com a fonte na legenda" : ""}.`;
+  const carrosselF6 = (antes: string) => `${antes} O carrossel de cada curto, como cortes_para_redes o desenha (capa = o gancho, uma ideia por lâmina, a última com o CTA), com o texto do próprio curto e sem instrução interna na lâmina; frase listada em "Fica fora do texto publicável" não entra em lâmina nem legenda, e na fala só entra delimitada.`;
   if (opcoes.bloqueio) {
     return `Não escreva o roteiro deste vídeo antes de resolver o bloqueio da investigação: ${semPontoFinal(opcoes.bloqueio)}. Depois de resolvido no Radar, exporte de novo para receber o prompt do roteiro.`;
   }
@@ -2545,14 +2790,19 @@ function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: {
     return [
       `Escreva a série de vídeos curtos e o carrossel sobre ${entreAspas(principal || "o tema desta linha")}, em português do Brasil, usando SOMENTE os dados desta linha${opcoes.vozAtiva ? " e da linha \"Voz da marca\"" : ""}.`,
       "Entregue:",
-      opcoes.cortes === 0
+      semCorte
         ? `1) Vídeos curtos: esta linha não tem capítulo que funcione sozinho como vídeo curto (o motivo de cada um está em cortes_para_redes) — não escreva vídeo curto de capítulo para ela${opcoes.fatoComFonte ? "; o fato com fonte de cortes_para_redes pode virar um vídeo curto à parte, com a fonte na legenda" : ""}.`
-        : `1) Um vídeo curto (Shorts, Reels e TikTok) por capítulo escolhido em cortes_para_redes, na ordem dele: gancho no primeiro segundo, a ideia única, a cena de storyboard_visual, a duração-alvo de concorrencia_curtos_e_carrossel e UM CTA para ${aUnidade(unidade)}; 3 opções de título para cada um.`,
-      "2) O carrossel desta linha, com o texto publicável de cada lâmina (título e apoio curto) e o visual de storyboard_visual, sem instrução interna no texto da lâmina; frase listada em \"Fica fora do texto publicável\" não entra em lâmina nem legenda, e na fala só entra delimitada.",
+        : comSerie
+          ? curtosF6("1) Vídeos curtos (Shorts, Reels e TikTok):")
+          : `1) Um vídeo curto (Shorts, Reels e TikTok) por capítulo escolhido em cortes_para_redes, na ordem dele: gancho no primeiro segundo, a ideia única, a cena de storyboard_visual, a duração-alvo de concorrencia_curtos_e_carrossel e UM CTA para ${aUnidade(unidade)}; 3 opções de título para cada um.`,
+      comSerie
+        ? carrosselF6("2) Carrosséis:")
+        : "2) O carrossel desta linha, com o texto publicável de cada lâmina (título e apoio curto) e o visual de storyboard_visual, sem instrução interna no texto da lâmina; frase listada em \"Fica fora do texto publicável\" não entra em lâmina nem legenda, e na fala só entra delimitada.",
+      ...regrasF6,
       "Estilo visual: só o que storyboard_visual registra como observado e o que quem abrir as referências anotar; não descreva estilo de imagem que ninguém viu.",
       "Não copie títulos nem falas de concorrentes. Não invente fato, número, estudo, depoimento, autor ou credencial. Fala do especialista só a que está nesta linha, atribuída.",
       /* 2026-10-11 · a voz da diretriz de comunicação humana (regra geral da linha de topo, fonte única). */
-      "Voz: a comunicação humana guiada pela SERP da última regra geral da linha de topo — gancho, títulos (a keyword principal no começo e o contraste com o que os vídeos do topo prometem), descrição, fala e lâminas no mesmo contraste do artigo, com um CTA só.",
+      "Voz: a comunicação humana guiada pela SERP da última regra geral da linha de topo — gancho, títulos (a keyword principal na forma natural, nunca prefixo fixo, abrindo no máximo 1 das 3 opções, e o contraste com o que os vídeos do topo prometem), descrição, fala e lâminas no mesmo contraste do artigo, com um CTA só.",
     ].join("\n");
   }
   /*
@@ -2563,10 +2813,10 @@ function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: {
    * capítulos OU a que o vídeo render melhor.
    */
   return [
-    `Escreva o roteiro de um vídeo para o YouTube${opcoes.cortes === 0 ? "" : ", os cortes"} e o carrossel sobre ${entreAspas(principal || "o tema desta linha")}, em português do Brasil, usando SOMENTE os dados desta linha${opcoes.vozAtiva ? " e da linha \"Voz da marca\"" : ""}.`,
+    `Escreva o roteiro de um vídeo para o YouTube${semCorte ? "" : comSerie ? ", os curtos" : ", os cortes"} e o carrossel sobre ${entreAspas(principal || "o tema desta linha")}, em português do Brasil, usando SOMENTE os dados desta linha${opcoes.vozAtiva ? " e da linha \"Voz da marca\"" : ""}.`,
     "Entregue:",
     /* 2026-10-07 (revisão) · o prompt nomeava storyboard_visual e a coluna de curtos, mas não cadeia_competitiva — a coluna que diz por que cada capítulo existe. */
-    `1) O vídeo longo: 3 opções de título, o gancho dos primeiros 15 segundos (pelo próprio tema, não por uma pergunta ampla), o roteiro falado na ordem dos capítulos desta linha OU na ordem em que o vídeo render melhor (a diretriz permite reorganizar), mantendo assunto, evidências e premissa e usando em cada capítulo a oportunidade que cadeia_competitiva aponta, com marcação de tempo ESTIMADA (os tempos da descrição se conferem na edição final), os capítulos para a descrição e a descrição com as fontes e o link ${daUnidade(unidade)}.`,
+    `1) O vídeo longo: 3 opções de título${opcoes.f6 ? " com ângulos diferentes (a regra do título em diretrizes_de_roteiro)" : ""}, o gancho dos primeiros 15 segundos (pelo próprio tema, não por uma pergunta ampla)${opcoes.f6 ? ", o arco de storytelling, os ganchos de retenção entre capítulos e os marcadores de tempo de diretrizes_de_roteiro" : ""}, o roteiro falado na ordem dos capítulos desta linha OU na ordem em que o vídeo render melhor (a diretriz permite reorganizar), mantendo assunto, evidências e premissa e usando em cada capítulo a oportunidade que cadeia_competitiva aponta, com marcação de tempo ESTIMADA (os tempos da descrição se conferem na edição final), os capítulos para a descrição e a descrição com as fontes e o link ${daUnidade(unidade)}.`,
     /*
      * 2026-10-07 · "Os 3 cortes" mentia quando a escolha por utilidade deixa
      * menos (item 3); e a frase listada em "Fica fora do texto publicável" não
@@ -2578,14 +2828,19 @@ function colunaPrompt(principal: string, unidade: RadarWritingUnit, opcoes: {
      * (concorrencia_curtos_e_carrossel) — a cena e o visual saem de lá, não de
      * um estilo inventado.
      */
-    opcoes.cortes === 0
+    semCorte
       ? `2) Cortes: esta linha não tem corte de capítulo (nenhum capítulo com utilidade para corte; o motivo de cada um está em cortes_para_redes) — não escreva corte de capítulo para ela${opcoes.fatoComFonte ? "; o fato com fonte de cortes_para_redes pode virar um vídeo curto à parte, com a fonte na legenda" : ""}.`
-      : "2) Os cortes desta linha (até 3, escolhidos por utilidade) para Shorts/Reels/TikTok, cada um com fala própria, a cena do storyboard (storyboard_visual), a duração-alvo de concorrencia_curtos_e_carrossel e UM CTA.",
-    "3) O carrossel desta linha, com o texto publicável de cada lâmina (título e apoio curto) e o visual de storyboard_visual, sem instrução interna no texto da lâmina; frase listada em \"Fica fora do texto publicável\" não entra em lâmina nem legenda, e na fala só entra delimitada.",
+      : comSerie
+        ? curtosF6("2) Os curtos desta linha (o vídeo fatiado por micro-assunto):")
+        : "2) Os cortes desta linha (até 3, escolhidos por utilidade) para Shorts/Reels/TikTok, cada um com fala própria, a cena do storyboard (storyboard_visual), a duração-alvo de concorrencia_curtos_e_carrossel e UM CTA.",
+    comSerie
+      ? carrosselF6("3) Carrosséis:")
+      : "3) O carrossel desta linha, com o texto publicável de cada lâmina (título e apoio curto) e o visual de storyboard_visual, sem instrução interna no texto da lâmina; frase listada em \"Fica fora do texto publicável\" não entra em lâmina nem legenda, e na fala só entra delimitada.",
+    ...regrasF6,
     "Estilo visual: só o que storyboard_visual registra como observado e o que quem abrir as referências anotar; não descreva estilo de imagem que ninguém viu.",
     "Não copie títulos nem falas de concorrentes. Não invente fato, número, estudo, depoimento, autor ou credencial. Fala do especialista só a que está nesta linha, atribuída.",
       /* 2026-10-11 · a voz da diretriz de comunicação humana (regra geral da linha de topo, fonte única). */
-      "Voz: a comunicação humana guiada pela SERP da última regra geral da linha de topo — gancho, títulos (a keyword principal no começo e o contraste com o que os vídeos do topo prometem), descrição, fala e lâminas no mesmo contraste do artigo, com um CTA só.",
+      "Voz: a comunicação humana guiada pela SERP da última regra geral da linha de topo — gancho, títulos (a keyword principal na forma natural, nunca prefixo fixo, abrindo no máximo 1 das 3 opções, e o contraste com o que os vídeos do topo prometem), descrição, fala e lâminas no mesmo contraste do artigo, com um CTA só.",
   ].join("\n");
 }
 
@@ -2963,6 +3218,8 @@ type EntradaDoStoryboard = {
   comuns: ReadonlySet<string>;
   unidade: RadarWritingUnit;
   destino: string;
+  /** 2026-10-14 · F6 · Aditivo: os carrosséis saem dos curtos (um por curto, em cortes_para_redes); ausente, o carrossel por capítulo de antes. */
+  carrosselDosCurtos?: boolean;
 };
 
 /*
@@ -3065,7 +3322,11 @@ function storyboardNoNivel(input: EntradaDoStoryboard, nivel: 0 | 1 | 2): string
   }
 
   /* O carrossel leva texto na imagem: a regra do plano visual do artigo não vale aqui. */
-  if (daPlanta.length) {
+  if (input.carrosselDosCurtos) {
+    linhas.push("Storyboard da série de curtos (vertical 9:16; um por micro-assunto de cortes_para_redes): tela 1 = o gancho escrito no primeiro segundo; cena = a da linha do curto; texto na tela o tempo todo (legenda); tela final = o CTA (o diagnóstico).");
+    /* 2026-10-14 · F6 · cada curto vira um carrossel (texto e cena em cortes_para_redes): o storyboard é o do curto, na horizontal ou quadrado. */
+    linhas.push("Storyboard dos carrosséis (um por curto; o carrossel leva texto na imagem: a regra \"sem texto legível\" do plano visual do artigo não vale aqui): capa = o gancho escrito em destaque; lâminas = o texto na tela e a ideia, uma por lâmina; última = o CTA com o endereço legível; visual de cada lâmina = a cena do curto (em cortes_para_redes).");
+  } else if (daPlanta.length) {
     /*
      * 2026-10-07 (revisão) · a capa recomendava "pergunta ou número em destaque,
      * como os títulos pertinentes" ao lado de contagens que mostravam o padrão
@@ -3143,8 +3404,11 @@ function colunaCadeia(input: {
   /* 2026-10-09 · a decisão única de formato e a leitura pertinente da SERP do YouTube (padrões, lacunas e títulos). */
   decisao: RadarVideoFormatDecision;
   leituraDaSerp: LeituraDaSerp | null;
+  /** 2026-10-14 · F6 · Aditivo: a série de curtos por micro-assunto; presente, o formato de cada capítulo diz os curtos dele (e o carrossel de cada um), não a lâmina por capítulo. */
+  serie?: readonly MicroCurto[] | null;
 }): string {
   const { c, youtube, sequencia, escolha, artigoModelo, decisao } = input;
+  const curtosDoCapitulo = (numero: number) => (input.serie || []).filter(micro => micro.capitulo === numero).map(micro => micro.rotulo);
   const linhas = ["Cadeia competitiva de cada peça (referência → observação → oportunidade → entrega → formato; ids da planta do artigo-modelo da SERP; URL só quando o id ou o rótulo exato liga):"];
   /* O vídeo inteiro: os pertinentes do YouTube, o cruzamento com o Google e a premissa. */
   const topo = c.longosPertinentes.slice(0, 3).map(video => `${entreAspas(cortar(radarWritingDecodeEntities(video.title), 70))} — ${enderecoDoVideo(video)}`);
@@ -3222,7 +3486,7 @@ function colunaCadeia(input: {
       `- Observação: ${observacoes.join(" · ") || "nenhuma pergunta, conceito ou tema da SERP citado pela seção"}`,
       `- Oportunidade: ${oportunidades.join(" · ") || "nenhuma lacuna ou diferencial ligado a este capítulo — a disputa é pela execução (demonstração e clareza), não por assunto novo"}`,
       `- Entrega: ${teto.parte ? cortar(entrega, teto.parte + 60) : entrega} · demonstração: ${cenaDa(capitulo.demo, teto.parte)}`,
-      `- Formato: capítulo ${indice + 1} ${sequencia.curto ? "da planta" : "do vídeo longo"} · ${corte ? `${sequencia.curto ? "vídeo curto" : "corte"} ${corte}${avaliado?.utilidade?.elegivel ? ` (utilidade ${avaliado.utilidade.pontos} de 4)` : ""}` : `sem corte: ${semCorte}`} · lâmina ${indice + 2} do carrossel`,
+      `- Formato: capítulo ${indice + 1} ${sequencia.curto ? "da planta" : "do vídeo longo"} · ${corte ? `${sequencia.curto ? "vídeo curto" : "corte"} ${corte}${avaliado?.utilidade?.elegivel ? ` (utilidade ${avaliado.utilidade.pontos} de 4)` : ""}` : `sem corte: ${semCorte}`} · ${input.serie?.length ? (curtosDoCapitulo(indice + 1).length ? `curtos ${curtosDoCapitulo(indice + 1).join(", ")} (um carrossel por curto)` : "sem curto (sem frase publicável)") : `lâmina ${indice + 2} do carrossel`}`,
     ];
   }
 }
@@ -3266,9 +3530,11 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
   publication?: RadarWritingPublication | null;
   silo?: RadarSiloExportWritingContext | null;
   siloPublications?: ReadonlyMap<string, RadarWritingPublication> | null;
+  /** 2026-10-14 · F6 · Aditivo: o id do artigo (o Silo e a malha da linha do CSV para escrever o leem); ausente, o do contexto de pesquisa. */
+  articleId?: string | null;
 }): RadarVideoExportArticle {
   const l = leituraDaLinha(input, contexto);
-  const { p, principal, unidade, foraDoEscopo, perguntas, youtube, artigoModelo, removidasDaPlanta, trava, publicavel, sequencia, decisao, pertinentes, inteira, escolha, destino, publico, leitura, identidade } = l;
+  const { p, principal, unidade, foraDoEscopo, perguntas, youtube, artigoModelo, removidasDaPlanta, trava, publicavel, sequencia, decisao, pertinentes, inteira, escolha, destino, publico, leitura, identidade, material } = l;
   const abertura = publicavel.perguntaDoGancho ?? null;
   const vozAtiva = contexto.brandVoiceActive ?? contexto.brandVoice?.kind === "available";
 
@@ -3304,13 +3570,16 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
    * ficam o CTA, as regras e a lista "Fica fora do texto publicável".
    */
   const linhaDaVoz = vozAtiva ? ['Voz da marca: gancho, fala, CTA e descrição seguem a linha "Voz da marca" deste arquivo (vocabulário, o que a marca não faz e a página comercial que ela permite citar).'] : [];
-  const roteiro = primeiraQueCabe(NIVEIS_DO_ROTEIRO.map(nivel => () => [colunaRoteiro(input, p, abertura, sequencia, artigoModelo, publicavel, nivel, { decisao, oportunidadesDeTitulo: serp?.oportunidadesDeTitulo ?? [], destino }), ...linhaDaVoz].join("\n")));
+  /* 2026-10-14 · F6 · o material do artigo e o gabarito do YouTube (os longos pertinentes da leitura competitiva da linha). */
+  const roteiro = primeiraQueCabe(NIVEIS_DO_ROTEIRO.map(nivel => () => [colunaRoteiro(input, p, abertura, sequencia, artigoModelo, publicavel, nivel, { decisao, oportunidadesDeTitulo: serp?.oportunidadesDeTitulo ?? [], destino, material, ...(youtube ? { longos: competitiva.longosPertinentes } : {}) }), ...linhaDaVoz].join("\n")));
   const concorrenciaCurta = temConcorrenciaCurta(competitiva);
+  /* 2026-10-14 · F6 · a série de curtos por micro-assunto (com o material do artigo), a mesma nos cortes, no storyboard e no prompt. */
+  const serie = material ? serieDeCurtos(sequencia, escolha) : [];
   /* 2026-10-09 (correção) · o que a exclusão do ArticleDNA tirou da planta, dito uma vez e concluído (D10). */
   const notaDasExclusoes = removidasDaPlanta.length
     ? [`Fora do vídeo (exclusão do ArticleDNA, decidida no Arquiteto): ${removidasDaPlanta.map(item => `${item.h3 === null ? `seção "${item.section}"` : `H3 "${item.h3}" (seção "${item.section}")`} — trata de "${item.exclusion.label}"${item.exclusion.owner ? `, assunto do artigo "${item.exclusion.owner}"` : ""}`).join("; ")}. Não vira capítulo, corte, cena nem lâmina.`]
     : [];
-  const cortesDaLinha = primeiraQueCabe(NIVEIS_DOS_CORTES.map(nivel => () => [colunaCortes(youtube, sequencia, p, unidade, artigoModelo, destino, { trava, publicavel, escolha, pertinentes, concorrenciaCurta, nivel }), ...notaDasExclusoes].join("\n")));
+  const cortesDaLinha = primeiraQueCabe(NIVEIS_DOS_CORTES.map(nivel => () => [colunaCortes(youtube, sequencia, p, unidade, artigoModelo, destino, { trava, publicavel, escolha, pertinentes, concorrenciaCurta, nivel, material, serie }), ...notaDasExclusoes].join("\n")));
   const row: RadarVideoExportRow = {
     ordem: String(contexto.position),
     pode_gravar: pode,
@@ -3330,14 +3599,17 @@ export function buildRadarVideoExportArticle(input: RadarPortableExportInput, co
     diretrizes_de_roteiro: roteiro,
     cortes_para_redes: cortesDaLinha,
     concorrencia_curtos_e_carrossel: colunaConcorrenciaCurta(competitiva, youtube),
-    storyboard_visual: colunaStoryboard({ c: competitiva, p, entrada: input, youtube, sequencia, escolha, artigoModelo, publicavel, comuns: trava.comuns, unidade, destino }),
-    cadeia_competitiva: colunaCadeia({ c: competitiva, p, entrada: input, youtube, sequencia, escolha, artigoModelo, publicavel, foraDoEscopo, decisao, leituraDaSerp: serp }),
+    storyboard_visual: colunaStoryboard({ c: competitiva, p, entrada: input, youtube, sequencia, escolha, artigoModelo, publicavel, comuns: trava.comuns, unidade, destino, carrosselDosCurtos: serie.length > 0 }),
+    cadeia_competitiva: colunaCadeia({ c: competitiva, p, entrada: input, youtube, sequencia, escolha, artigoModelo, publicavel, foraDoEscopo, decisao, leituraDaSerp: serp, serie }),
     /* 2026-10-08 · D1: com a planta, o prompt sabe quantos cortes a utilidade deixou. */
     prompt: colunaPrompt(principal, unidade, {
       vozAtiva, bloqueio, semPlanta, curto: sequencia.curto,
       ...(escolha.porUtilidade ? { cortes: escolha.escolhidos.length } : {}),
       /* 2026-10-08 (correção da revisão) · o prompt cita o fato com fonte quando a linha não tem corte de capítulo. */
       fatoComFonte: fatosVerificados(p).length > 0,
+      /* 2026-10-14 · F6 · com o material do artigo: o arco, os curtos por micro-assunto e o carrossel de cada curto. */
+      f6: Boolean(material),
+      curtos: serie.length,
     }),
   };
   for (const coluna of RADAR_VIDEO_EXPORT_COLUMNS) row[coluna] = celula(row[coluna]);
@@ -3456,7 +3728,41 @@ function leituraDaLinha(input: RadarPortableExportInput, contexto: Omit<Contexto
    */
   const identidade = radarWritingPublicationIdentities(input, { silo: contexto.silo ?? null, siloPublications: contexto.siloPublications ?? null, publication: contexto.publication ?? null }).article;
   const destino = identidade.url ?? identidade.address ?? "";
-  return { p, principal, identidade, unidade, foraDoEscopo, perguntas, youtube, artigoModelo, removidasDaPlanta, trava, publicavel, sequencia, decisao, pertinentes, inteira, escolha, destino, publico, leitura };
+  /* 2026-10-14 · F6 · o material do artigo, pela mesma linha do CSV "Para escrever" (sem montagem paralela). */
+  const material = materialDoArtigo(input, contexto);
+  return { p, principal, identidade, unidade, foraDoEscopo, perguntas, youtube, artigoModelo, removidasDaPlanta, trava, publicavel, sequencia, decisao, pertinentes, inteira, escolha, destino, publico, leitura, material };
+}
+
+/*
+ * ===== 2026-10-14 · F6 · O MATERIAL DO ARTIGO NO VÍDEO, PELA MESMA LINHA DO CSV "PARA ESCREVER" =====
+ *
+ * SDD silo interligado §10 e §18.1 (F6; autorização do dono em 2026-10-14: "pode
+ * sim"). O ângulo, o ganho de informação, as perguntas que valem resposta, o SEO
+ * antigo, o fechamento em 4 tempos, as fontes de autoridade e a trilha do Silo
+ * saem da linha que `buildRadarWritingExportArticle` monta para este artigo — o
+ * mesmo Silo da seleção, a mesma publicação, a mesma planta e a mesma oferta de
+ * diagnóstico da Skill. Sem a planta aprovada (ou numa linha só de identidade),
+ * nenhum material: o vídeo segue o que já fazia.
+ */
+function materialDoArtigo(input: RadarPortableExportInput, contexto: Omit<ContextoDaLinha, "position">): RadarWritingMaterial | null {
+  if (!radarVideoApprovedBlueprint(contexto.blueprint)) return null;
+  try {
+    const artigo = buildRadarWritingExportArticle(input, {
+      topRowLabel: "Marca",
+      filePosition: 1,
+      silo: contexto.silo ?? null,
+      articleId: texto(contexto.articleId) || texto(input.researchContext?.article.articleId) || null,
+      publication: contexto.publication ?? null,
+      ...(contexto.siloPublications?.size ? { siloPublications: contexto.siloPublications } : {}),
+      blueprint: contexto.blueprint,
+      ...(contexto.brandVoice?.kind === "available"
+        ? { brandVoice: radarBrandVoiceRef(contexto.brandVoice.voice), brandDiagnosisOffer: radarDiagnosisOfferOf(contexto.brandVoice.voice.sections) }
+        : {}),
+    });
+    return radarWritingMaterialOf(artigo.uncutRow ?? artigo.row);
+  } catch {
+    return null;
+  }
 }
 
 export const RADAR_VIDEO_GENERAL_RULES = [
@@ -3652,6 +3958,8 @@ export function radarPortableVideoExport(input: {
     ...(artigo.articleId && input.publications?.get(artigo.articleId) ? { publication: input.publications.get(artigo.articleId)! } : {}),
     ...(artigo.articleId && siloDoArtigo.has(artigo.articleId) ? { silo: siloDoArtigo.get(artigo.articleId)! } : {}),
     ...(input.publications?.size ? { siloPublications: input.publications } : {}),
+    /* 2026-10-14 · F6 · o id do artigo, para o material da linha do CSV para escrever (Silo e malha). */
+    ...(artigo.articleId ? { articleId: artigo.articleId } : {}),
   }));
   const voz = buildRadarVideoBrandVoiceRow(input.brandVoice);
   return {
@@ -3716,13 +4024,21 @@ export type RadarVideoPlan = {
   semCorte: Array<{ capitulo: number; motivo: string }>;
   foraDoPublicavel: Array<{ onde: string; frase: string; motivo: string }>;
   amostra: RadarVideoPertinentSample | null;
+  /** 2026-10-14 · F6 (SDD silo interligado; o vídeo em 4 partes) · Aditivo: a série de curtos de ~15 s por micro-assunto (a mesma de cortes_para_redes); vazia sem o material do artigo. */
+  curtos?: Array<{
+    rotulo: string; capitulo: number; gancho: string; ideia: string; cena: string; tela: string;
+    /** 2026-10-14 · F5 · Aditivo: a ideia inteira é maior que o texto na tela ou leva fonte (o carrossel do curto ganha a lâmina dela). */
+    ideiaMaior?: boolean;
+  }>;
 };
 
 export function radarVideoPlan(input: RadarPortableExportInput, contexto: Omit<ContextoDaLinha, "position">): RadarVideoPlan | RadarVideoNeedsArticleBlueprint {
   if (!radarVideoApprovedBlueprint(contexto.blueprint)?.blueprint.sections.length) {
     return { status: "needs_article_blueprint", articleIds: [idDoArtigo({ entrada: input })] };
   }
-  const { p, sequencia, decisao, publicavel, escolha, pertinentes } = leituraDaLinha(input, contexto);
+  const { p, sequencia, decisao, publicavel, escolha, pertinentes, material } = leituraDaLinha(input, contexto);
+  /* 2026-10-14 · F6 · a mesma série de curtos do CSV de vídeo. */
+  const serie = material ? serieDeCurtos(sequencia, escolha) : [];
   const capitulos = sequencia.capitulos.filter(capitulo => capitulo.daPlanta);
   return {
     status: "ready",
@@ -3759,5 +4075,6 @@ export function radarVideoPlan(input: RadarPortableExportInput, contexto: Omit<C
       ...capitulos.flatMap((capitulo, indice) => (capitulo.travadas || []).map(item => ({ onde: `Capítulo ${indice + 1}`, frase: item.frase, motivo: item.motivo }))),
     ],
     amostra: pertinentes,
+    ...(serie.length ? { curtos: serie.map(({ rotulo, capitulo, gancho, ideia, cena, tela, ideiaMaior }) => ({ rotulo, capitulo, gancho, ideia, cena, tela, ideiaMaior })) } : {}),
   };
 }

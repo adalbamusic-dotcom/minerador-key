@@ -3017,8 +3017,10 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * esbarram na permissão do navegador). Sem ela, o CSV direto, como antes.
        */
       const serpCrua: Array<{ filename: string; csv: string }> = Array.isArray(corpo.serpRaw?.files) ? corpo.serpRaw.files : [];
+      /* 2026-10-14 · F5 (SDD silo interligado, D10) · e o `<NN>-<papel>-<slug>-links.csv` de cada artigo ("Atualizar links do Silo"), no mesmo .zip. */
+      const linksDoSilo: Array<{ filename: string; csv: string }> = Array.isArray(corpo.siloLinks?.files) ? corpo.siloLinks.files : [];
       if (serpCrua.length) {
-        const pacote = radarStoredZipOfTexts([{ name: corpo.filename, text: corpo.csv }, ...serpCrua.map(arquivo => ({ name: arquivo.filename, text: arquivo.csv }))], {
+        const pacote = radarStoredZipOfTexts([{ name: corpo.filename, text: corpo.csv }, ...serpCrua.map(arquivo => ({ name: arquivo.filename, text: arquivo.csv })), ...linksDoSilo.map(arquivo => ({ name: arquivo.filename, text: arquivo.csv }))], {
           modifiedAt: corpo.exportedAt ? new Date(corpo.exportedAt) : new Date(),
         });
         baixarArquivoDoExport(new Blob([pacote.slice().buffer as ArrayBuffer], { type: RADAR_STORED_ZIP_MIME }), corpo.serpRaw.archiveFilename || String(corpo.filename).replace(/\.csv$/, ".zip"));
@@ -5894,7 +5896,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
                 <span className="block min-w-0">
                   <strong className="block font-semibold">Só os artigos selecionados (recomendado: um artigo por vez)</strong>
                   <span className="mt-0.5 block text-text-muted">Mesmo formato, com o Silo, o papel e os links de cada artigo.</span>
-                  <span className="mt-0.5 block text-text-muted">Vem num .zip com a SERP crua de cada artigo (só o que já foi coletado), para conferir fora da plataforma.</span>
+                  <span className="mt-0.5 block text-text-muted">Vem num .zip com a SERP crua de cada artigo (só o que já foi coletado), para conferir fora da plataforma, e o -links.csv de cada um (links a ativar e o que falta da malha do Silo; a página nunca é alterada).</span>
                   <span className="mt-0.5 block text-text-muted" data-testid="radar-export-resumo-selecao">{semSelecaoNoExport ? "Sem seleção: vão todos os artigos prontos do Radar." : `${selectedArticleIds.length} ${selectedArticleIds.length === 1 ? "artigo selecionado" : "artigos selecionados"}`}</span>
                 </span>
               </label>

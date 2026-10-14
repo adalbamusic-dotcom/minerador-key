@@ -76,6 +76,67 @@ export type ImprovementNextStepInput = {
 export const IMPROVEMENT_NO_PENDING_SENTENCE = "Nada a fazer nos publicados agora. Veja artigos novos em Sobras.";
 export const IMPROVEMENT_NOTHING_ANYWHERE_SENTENCE = "Nada a fazer nos publicados nem nas Sobras agora. Para formar artigos novos, use “Processar artigos” logo abaixo.";
 /** Ids dos blocos da aba Artigos para onde o botão de `none` leva. */
+/* ------------------- análise anterior e mensagem humana ------------------- */
+
+/**
+ * A ANÁLISE ANTERIOR NÃO É O ESTADO ATUAL (2026-10-14, caso WifiConecta).
+ *
+ * Com a etiqueta em "todos", o painel abria mostrando a análise antiga (os
+ * Assuntos do laranja, de antes do recadastro) como se fosse a de agora. A
+ * execução lida do servidor ao abrir fica RECOLHIDA ("Análise anterior de
+ * <data>") quando: é de outro recorte que o da etiqueta, ou a mesa mudou depois
+ * dela. Gravação aceita e em andamento (`applying`) ou com a vez ocupada nunca
+ * é recolhida: é compromisso, e o painel continua dela.
+ */
+export function improvementRunIsPrevious(input: {
+  run: { state: string; createdAt?: string | null; leaseUntil?: string | null; groupScope?: { requested: string } | null };
+  activeGroupRequested: string | null;
+  /** A última mudança da mesa do Arquiteto (itens recebidos), quando conhecida. */
+  mesaChangedAt?: string | null;
+  now?: number;
+}): boolean {
+  const { run } = input;
+  if (run.state === "applying") return false;
+  if (run.leaseUntil && Date.parse(run.leaseUntil) > (input.now ?? Date.now())) return false;
+  const recorteDaExecucao = run.groupScope?.requested ?? "todos";
+  const recorteAtivo = input.activeGroupRequested ?? "todos";
+  if (recorteDaExecucao !== recorteAtivo) return true;
+  const criada = run.createdAt ? Date.parse(run.createdAt) : NaN;
+  const mudou = input.mesaChangedAt ? Date.parse(input.mesaChangedAt) : NaN;
+  return Number.isFinite(criada) && Number.isFinite(mudou) && mudou > criada;
+}
+
+/** "Análise anterior de 14/10 01:33 · marca inteira". */
+export function improvementPreviousRunLabel(run: { createdAt?: string | null; groupScope?: { requested: string } | null }): string {
+  const data = run.createdAt && Number.isFinite(Date.parse(run.createdAt))
+    ? new Date(run.createdAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+    : "data desconhecida";
+  return `Análise anterior de ${data} · ${run.groupScope ? `cor ${run.groupScope.requested}` : "marca inteira"}`;
+}
+
+const MENSAGENS_DOS_CODIGOS: Record<string, string> = {
+  REWORK_SAME_REFUSAL: "Isto já foi tentado com os mesmos insumos e deu a mesma recusa; nada foi pago de novo.",
+  REWORK_SAME_INPUTS: "Isto já foi feito com os mesmos insumos; o resultado anterior foi reaproveitado.",
+  DECLARED_PLAN_CONTRADICTION: "Isto contradiz o plano declarado no Minerador; o plano muda lá.",
+  REWORK_PARALLEL_PATH: "Este caminho é paralelo ao do plano; use a planilha “Artigos do plano”.",
+  TEMPO_ESGOTADO: "O servidor demorou demais nesta etapa. O que foi feito ficou salvo: toque de novo no mesmo botão para continuar.",
+};
+
+/**
+ * O dono nunca vê o código técnico cru ("REWORK_SAME_REFUSAL: …"): o prefixo
+ * em maiúsculas vira a frase humana, e o resto da mensagem (que já é humana,
+ * com a data) continua.
+ */
+export function humanizeOperationMessage(message: string): string {
+  const texto = String(message || "").trim();
+  const casado = /^([A-Z][A-Z0-9_]{3,})(?::\s*|\s+[-–—]\s+|$)/.exec(texto);
+  if (!casado) return texto;
+  const resto = texto.slice(casado[0].length).trim();
+  const frase = MENSAGENS_DOS_CODIGOS[casado[1]];
+  if (frase) return resto ? `${frase} ${resto}` : frase;
+  return resto || "A etapa não pôde ser concluída agora. Tente de novo.";
+}
+
 export const ARTICLES_SOBRAS_ANCHOR = "architect-sobras";
 export const ARTICLES_NEW_ANCHOR = "architect-articles-new";
 

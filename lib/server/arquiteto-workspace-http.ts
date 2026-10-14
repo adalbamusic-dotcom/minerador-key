@@ -14,8 +14,7 @@ import { assertWorkingSubjectAnchorAssignment } from "@/lib/server/arquiteto-sub
 import { createTerritoryWorkflowItem, listTerritoryWorkflowItems, readTerritoryWorkflowItem, updateTerritoryWorkflowItem } from "@/lib/server/arquiteto-territory-store";
 import { planTerritoryUndoForBrand } from "@/lib/server/arquiteto-territory-undo";
 import { listTerritorialSerpAssessments } from "@/lib/server/arquiteto-territorial-serp-store";
-import { listArticleFormationSerpAssessments } from "@/lib/server/arquiteto-article-serp-store";
-import { projectArticleFormationSerpRecord } from "@/lib/arquiteto/article-serp-projection";
+import { listArticleFormationSerpAssessments, listArticleFormationSerpForList } from "@/lib/server/arquiteto-article-serp-store";
 import { listTerritorialAiProposals } from "@/lib/server/arquiteto-territorial-ai-store";
 import { readArticleFormationMarker } from "@/lib/server/arquiteto-article-formation-marker-store";
 import { readArchitectureMarker } from "@/lib/server/arquiteto-architecture-marker-store";
@@ -178,7 +177,8 @@ export async function readArchitectWorkspaceBody(context: PipelineContext, optio
     listTerritorialSerpAssessments(context),
     // A evidência SERP da formação vem do REMOTO: o navegador é cache, não
     // autoridade. Sem isto o F5 dependeria da memória daquela aba.
-    listArticleFormationSerpAssessments(context),
+    // F6 (2026-10-14): a lista vem PROJETADA DO BANCO (view da M-L); sem a view, a projeção no Node de antes.
+    serpCheio ? listArticleFormationSerpAssessments(context) : listArticleFormationSerpForList(context).then(lidos => lidos.records),
     listTerritorialAiProposals(context),
     readArchitectureMarker(context),
     readArticleFormationMarker(context),
@@ -188,7 +188,7 @@ export async function readArchitectWorkspaceBody(context: PipelineContext, optio
    * PROJEÇÃO (o que a mesa lê; `lib/arquiteto/article-serp-projection.ts`).
    * O parecer inteiro só com `serpDetail=full`, que a exportação pede.
    */
-  return { ...workspace, territories, siloWorkingCopies, territorialSerp, articleFormationSerp: serpCheio ? articleFormationSerp : articleFormationSerp.map(projectArticleFormationSerpRecord), territorialAi, architectureMarker: architectureMarker?.payload ?? null, articleFormationMarker: articleFormationMarker?.payload ?? null, ...(sync ? { sync: sync.marks } : {}) };
+  return { ...workspace, territories, siloWorkingCopies, territorialSerp, articleFormationSerp, territorialAi, architectureMarker: architectureMarker?.payload ?? null, articleFormationMarker: articleFormationMarker?.payload ?? null, ...(sync ? { sync: sync.marks } : {}) };
 }
 
 const DeltaBodySchema = z.object({

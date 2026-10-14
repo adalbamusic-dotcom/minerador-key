@@ -104,6 +104,29 @@ export const FASES_DO_E0: readonly Fase[] = [
       "voz-humana/textos",
     ],
   },
+  {
+    fase: "F6",
+    /* 2026-10-14 · SDD silo interligado · F6 · decisão do dono ("pode sim": o Redator e o CSV de vídeo leem o material novo; e o vídeo em 4 partes). */
+    decisao: "vídeo e Redator: o CSV de vídeo e get_video_material (o vídeo em 4 partes: vídeo longo com o gabarito do YouTube, o arco de storytelling e os marcadores de tempo; curtos de ~15 s por micro-assunto; um carrossel por curto; fontes de autoridade e fechamento em 4 tempos nas três saídas; título K2/K3), a regra do vídeo e a nota do catálogo da diretriz de voz (voz-humana/textos: videoRule e catalogNote), o get_writer_brief com writerMaterial (o material da linha do CSV 'Para escrever', com o checklist) e a fonte do handler dele. O CSV 'Para escrever' e get_article_for_writing (o guarda de tamanho), o documento do envio, os fundamentos do painel (radarFoundationsOf), o fitBrief, o artigo-modelo, as âncoras, a identidade de publicação e as réguas e a diretriz da voz ficam iguais.",
+    chaves: [
+      "*/csv-video",
+      "*/mcp.get_video_material",
+      "voz-humana/textos",
+      "*/mcp.get_writer_brief.planta-aprovada",
+      "*/mcp.get_writer_brief.sem-planta",
+      "fonte/mcp-redator.get_writer_brief",
+    ],
+  },
+  {
+    fase: "F5",
+    /* 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências, vou testar depois"). */
+    decisao: "links a ativar e 'Atualizar links do Silo' (D10: só lista, nunca a página) e as pendências da F6: o CSV de vídeo e get_video_material (no gabarito do vídeo longo, a estrutura de títulos e as entidades dos concorrentes da SERP já lidos, como referência; o carrossel por curto pela régua única, mesmo texto) e o get_writer_brief com o checklist do material (status 'ativar' — 'destino no ar: ative o link' —, toActivate e a regra do material). O CSV 'Para escrever' e get_article_for_writing (o -links.csv é arquivo próprio; o guarda de tamanho não muda), o artigo-modelo, o documento do envio, os fundamentos, o fitBrief, o get_writer_brief sem planta, as âncoras, a identidade de publicação, as réguas e a diretriz da voz e a fonte dos handlers ficam iguais.",
+    chaves: [
+      "*/csv-video",
+      "*/mcp.get_video_material",
+      "*/mcp.get_writer_brief.planta-aprovada",
+    ],
+  },
 ];
 
 const casa = (chave: string, padrao: string) => (padrao.startsWith("*/") ? chave.endsWith(padrao.slice(1)) : chave === padrao);

@@ -32,7 +32,9 @@ test("item 1 · o Silo do plano: o ligado ao grupo, senão o de mesmo slug, sen�
   const plano = { siloName: "Planos de internet", siloSlug: "planos-de-internet" };
   assert.deepEqual(choosePlanSiloTerritory({ plan: plano, linkedTerritoryRef: "territory:a", territories: territorios, slugOf: slug }), { kind: "linked", territoryRef: "territory:a", lifecycleStatus: "confirmed" });
   assert.deepEqual(choosePlanSiloTerritory({ plan: plano, linkedTerritoryRef: null, territories: territorios, slugOf: slug }), { kind: "slug", territoryRef: "territory:b", lifecycleStatus: "candidate" });
-  assert.deepEqual(choosePlanSiloTerritory({ plan: { siloName: "Wi-Fi", siloSlug: null }, linkedTerritoryRef: "territory:c", territories: territorios, slugOf: slug }), { kind: "create" }, "rejeitado não recebe membros");
+  // 2026-10-14 (WifiConecta, azul): o desfeito não recebe membros NEM nasce duplicado em silêncio — volta por "Recriar o Silo do plano".
+  assert.deepEqual(choosePlanSiloTerritory({ plan: { siloName: "Wi-Fi", siloSlug: null }, linkedTerritoryRef: "territory:c", territories: territorios, slugOf: slug }), { kind: "rejected_by_human", territoryRef: "territory:c" }, "rejeitado não recebe membros");
+  assert.deepEqual(choosePlanSiloTerritory({ plan: { siloName: "Outro Silo", siloSlug: null }, linkedTerritoryRef: null, territories: territorios, slugOf: slug }), { kind: "create" }, "sem Silo do plano nenhum: candidato novo");
 });
 
 test("item 1 · o candidato novo nasce com nome/slug do plano e a proveniência do cadastro (campos que já existem no território)", () => {

@@ -4,6 +4,8 @@ import { followEditorialGroupColorChange, refreshBrandEditorialGroups } from "@/
 import { EDITORIAL_GROUP_AREAS, type EditorialGroupColor, type EditorialGroupSummary } from "@/lib/editorial/editorial-groups";
 import type { GroupHistoryEntry } from "@/lib/editorial/group-history";
 import type { DeclaredPlanArticleView, DeclaredPlanGroupView } from "@/lib/minerador/declared-plan-withdraw-core";
+import { GROUP_DELETE_ALL_DONE_EVENT, type GroupDeleteAllDoneDetail, type GroupDeleteAllPreview, type GroupDeleteAllTyped } from "@/lib/minerador/group-delete-all";
+import type { GroupDeleteAllApplyResult } from "@/lib/minerador/group-delete-all-core";
 
 /**
  * GERENCIAR A COR, HISTÓRICO DO GRUPO E TIRAR DO PLANO — chamadas da tela
@@ -135,4 +137,52 @@ export async function applyDeclaredPlanWithdrawChain(brandId: string, groupId: s
   if (!ok || !resultado || !Array.isArray(resultado.steps)) return { ok: false, code: typeof body.code === "string" ? body.code : "PLAN_WITHDRAW_FAILED", message: mensagem(body, "A sequência não foi confirmada.") };
   void refreshBrandEditorialGroups(brandId);
   return { ok: true, steps: resultado.steps as DeclaredPlanWithdrawChainStep[], complete: resultado.complete === true };
+}
+
+/* ===================== EXCLUIR TUDO DA COR (F7, SDD 2026-10-13 item 6) ===================== */
+
+export type GroupDeleteAllRefusalResponse = { ok: false; code: string; message: string; preview?: GroupDeleteAllPreview; decisionHash?: string; missing?: string[] };
+
+const rotaExcluirCor = (brandId: string) => `/api/minerador/marcas/${encodeURIComponent(brandId)}/keywords/delete-group`;
+
+function recusaExcluirCor(body: Json, padrao: string): GroupDeleteAllRefusalResponse {
+  return {
+    ok: false,
+    code: typeof body.code === "string" ? body.code : "GROUP_DELETE_FAILED",
+    message: mensagem(body, padrao),
+    ...(body.preview && typeof body.decisionHash === "string" ? { preview: body.preview as GroupDeleteAllPreview, decisionHash: body.decisionHash } : {}),
+    ...(Array.isArray(body.missing) ? { missing: body.missing.filter((item): item is string => typeof item === "string") } : {}),
+  };
+}
+
+/** A prévia (grátis, só leitura): nada é excluído. */
+export async function previewGroupDeleteAll(brandId: string, groupId: string, includePublished: boolean): Promise<{ ok: true; preview: GroupDeleteAllPreview; decisionHash: string } | GroupDeleteAllRefusalResponse> {
+  const { ok, body } = await chamar(rotaExcluirCor(brandId), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ groupId, mode: "preview", includePublished }),
+  });
+  if (!ok || !body.preview || typeof body.decisionHash !== "string") return recusaExcluirCor(body, "A prévia não pôde ser montada agora. Nada foi excluído.");
+  return { ok: true, preview: body.preview as GroupDeleteAllPreview, decisionHash: body.decisionHash };
+}
+
+/**
+ * Executa a decisão tomada sobre a prévia (confirmação forte digitada). Depois
+ * da resposta RELIDA do servidor: relê a lista de grupos da marca e avisa a
+ * planilha do Minerador (evento da janela) para tirar as linhas que saíram.
+ */
+export async function applyGroupDeleteAll(brandId: string, groupId: string, input: { includePublished: boolean; decisionHash: string; typed: GroupDeleteAllTyped }): Promise<{ ok: true; result: GroupDeleteAllApplyResult } | GroupDeleteAllRefusalResponse> {
+  const { ok, body } = await chamar(rotaExcluirCor(brandId), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ groupId, mode: "apply", includePublished: input.includePublished, decisionHash: input.decisionHash, typed: input.typed }),
+  });
+  if (!ok || body.mode !== "apply" || !Array.isArray(body.blocks)) return recusaExcluirCor(body, "A exclusão não foi confirmada. Gere a prévia de novo.");
+  const result = body as unknown as GroupDeleteAllApplyResult;
+  void refreshBrandEditorialGroups(brandId);
+  if (typeof window !== "undefined" && (result.hardDeletedIds.length || result.recoverableIds.length)) {
+    const detail: GroupDeleteAllDoneDetail = { brandId, groupId, hardDeletedIds: result.hardDeletedIds, recoverableIds: result.recoverableIds };
+    window.dispatchEvent(new CustomEvent(GROUP_DELETE_ALL_DONE_EVENT, { detail }));
+  }
+  return { ok: true, result };
 }

@@ -33,7 +33,7 @@ import { ARQUITETO_KEYWORD_INDEX_COLUMNS, listBrandKeywordsByIds, readArticleVer
 import { listTerritoryWorkflowItems } from "./arquiteto-territory-store";
 import { listSiloWorkingCopies } from "./arquiteto-silo-working-copy-store";
 import { listTerritorialSerpAssessments } from "./arquiteto-territorial-serp-store";
-import { listArticleFormationSerpAssessmentsByRefs } from "./arquiteto-article-serp-store";
+import { listArticleFormationSerpForList } from "./arquiteto-article-serp-store";
 import { listTerritorialAiProposals } from "./arquiteto-territorial-ai-store";
 import { readArchitectureMarker } from "./arquiteto-architecture-marker-store";
 import { readArticleFormationMarker } from "./arquiteto-article-formation-marker-store";
@@ -41,7 +41,6 @@ import { MINERADOR_ARQUITETO_RECEIVED_STATE, resolveCanonicalMineradorArquitetoI
 import { releaseRejectedArticles, type RejectedArticleRelease } from "@/lib/arquiteto/rejected-article-release";
 import { readBrandSiloCatalog } from "@/lib/arquiteto/territorial-landscape";
 import { ARTICLE_AI_REVIEW_ARTIFACT_TYPE } from "@/lib/arquiteto/article-ai-review";
-import { projectArticleFormationSerpRecord } from "@/lib/arquiteto/article-serp-projection";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { diffSyncMarks, stableJson, syncHash, syncPatchOf, type ArchitectSyncMarks, type ArchitectSyncPatch, type ArchitectWorkspaceDeltaChanges } from "@/lib/arquiteto/workspace-delta";
 
@@ -299,7 +298,8 @@ export async function loadArchitectWorkspaceDelta(context: PipelineContext, know
   /* 5. Pareceres da formação: só os que mudaram, em projeção. */
   const serp = diffSyncMarks(marks.serp, known.serp);
   if (serp.changed.length || serp.removed.length || mudouHash("orderSerp")) {
-    const upsert = serp.changed.length ? (await listArticleFormationSerpAssessmentsByRefs(context, serp.changed)).map(projectArticleFormationSerpRecord) : [];
+    // F6: projetados no banco (view da M-L); sem a view, a projeção no Node de antes.
+    const upsert = serp.changed.length ? (await listArticleFormationSerpForList(context, serp.changed)).records : [];
     const novas = serp.changed.some(ref => !(ref in (known.serp || {})));
     changes.articleFormationSerp = { upsert: upsert as unknown as Array<Record<string, unknown>>, remove: serp.removed, ...(mudouHash("orderSerp") || novas ? { order: state.serpItems.map(item => item.subjectId) } : {}) };
     stats.articleFormationSerp = upsert.length;

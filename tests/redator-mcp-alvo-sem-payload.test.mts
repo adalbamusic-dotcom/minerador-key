@@ -371,7 +371,16 @@ test("D4 · documento e briefing leem caminhos numa leitura só, sem o dossiê; 
    * explícito — nunca o legado.
    */
   const { WRITER_EVIDENCE_HEAD_SELECT } = await import("../lib/server/writer-evidence-document.ts");
-  assert.deepEqual(documentSelects(), [WRITER_BRIEF_SELECT, WRITER_EVIDENCE_HEAD_SELECT]);
+  /*
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono ("pode sim": o Redator lê o material novo): o briefing
+   * acrescenta o material do CSV "Para escrever" (writerMaterial). Depois das duas leituras de sempre, só as do
+   * material — o cabeçalho estreito do leitor e os dois caminhos do texto (blocos e conteúdo do editor) para o
+   * checklist; nunca o payload inteiro nem o dossiê.
+   */
+  const selecoes = documentSelects();
+  assert.deepEqual(selecoes.slice(0, 2), [WRITER_BRIEF_SELECT, WRITER_EVIDENCE_HEAD_SELECT]);
+  for (const select of selecoes.slice(2)) assert.ok([WRITER_EVIDENCE_HEAD_SELECT, "bl:payload->blocks,ec:payload->editorContent"].includes(select || ""), `leitura do material: ${select}`);
+  assert.ok("writerMaterial" in briefResult, "o briefing leva o material (ou o estado dele)");
   assert.ok(!bareColumns(WRITER_BRIEF_SELECT).includes("payload"));
   assert.ok(!bareColumns(WRITER_EVIDENCE_HEAD_SELECT).includes("payload"));
   const estadoDaPlanta = briefResult.articleBlueprintState as { status: string; action?: { who: string } };

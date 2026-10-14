@@ -11,7 +11,12 @@ import {
   type TerritoryUndoMember,
   type TerritoryUndoSiloArtifact,
 } from "@/lib/arquiteto/territory-undo";
-import type { KeywordTerritoryDecision } from "@/lib/arquiteto/territory";
+import type { KeywordTerritoryDecision, TerritoryCandidate } from "@/lib/arquiteto/territory";
+import { declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, type DeclaredPlanGroupView } from "@/lib/arquiteto/declared-plan-silo";
+import { normalizeManualSiloPageSlug } from "@/lib/arquiteto/manual-silo";
+import { EDITORIAL_GROUP_COLOR_LABELS } from "@/lib/editorial/editorial-groups";
+import { listEditorialGroupPlans } from "@/lib/editorial/editorial-groups-store";
+import { readDeclaredSiloPlan } from "@/lib/minerador/declared-plan";
 
 /**
  * DESFAZER SILO SUGERIDO — a leitura e o plano no SERVIDOR.
@@ -135,6 +140,22 @@ async function readSiloArtifacts(context: PipelineContext, territoryRef: string)
   }
 }
 
+/** Os grupos com plano declarado da marca, na forma da regra do Silo do plano (`null` quando o banco não tem grupos). */
+export async function readDeclaredPlanGroupViews(context: PipelineContext): Promise<DeclaredPlanGroupView[] | null> {
+  const lido = await listEditorialGroupPlans(context.supabase, context.brandId);
+  if (!lido.ok) return null;
+  return lido.groups.flatMap(group => {
+    const plano = group.status === "active" ? readDeclaredSiloPlan(group.plan) : null;
+    return plano ? [{ groupId: group.id, groupLabel: `${EDITORIAL_GROUP_COLOR_LABELS[group.color]}${group.name && group.name !== EDITORIAL_GROUP_COLOR_LABELS[group.color] ? ` (${group.name})` : ""}`, siloName: plano.siloName, siloSlug: plano.siloSlug, linkedTerritoryRef: group.siloId }] : [];
+  });
+}
+
+async function readDeclaredPlanOfTerritory(context: PipelineContext, territory: TerritoryCandidate) {
+  // Leitura que falha: a marca do plano no próprio território basta (fecha para o lado seguro).
+  const planos = await readDeclaredPlanGroupViews(context).catch(() => null);
+  return declaredPlanSiloGroupFor(declaredPlanViewOfTerritory(territory), planos, normalizeManualSiloPageSlug);
+}
+
 /**
  * Lê, confere e planeja. Recusa com 409 e o motivo por extenso; nenhuma
  * escrita acontece aqui.
@@ -171,6 +192,8 @@ export async function planTerritoryUndoForBrand(
     members,
     approvedArticles: await readApprovedArticles(context),
     siloArtifacts: await readSiloArtifacts(context, territoryRef),
+    // 2026-10-14 (WifiConecta, azul): o Silo do plano declarado não se desfaz por aqui.
+    declaredPlan: await readDeclaredPlanOfTerritory(context, item.territory),
     actorUserId: context.actorUserId,
     decidedAt: new Date().toISOString(),
   });

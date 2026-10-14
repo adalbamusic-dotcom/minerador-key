@@ -299,6 +299,25 @@ test("SiloDNA aprovado no envelope legado também recusa; o de outro território
   assert.equal((await patch(outro.context, { territoryUndos: [{ territoryRef: REF, expectedLock: 7 }] })).status, 200);
 });
 
+/*
+ * 2026-10-14 (caso WifiConecta, azul): o lote "Desfazer os Silos sugeridos"
+ * desfez o Silo do plano declarado. O servidor recusa: o plano é decisão do
+ * cadastro. Sem a leitura dos grupos (este banco não tem `editorial_groups`),
+ * a marca do plano no próprio território basta — fecha para o lado seguro.
+ */
+test("Silo do plano declarado não se desfaz por aqui: 409 com o caminho (Minerador), nada escrito", async () => {
+  const { banco, context } = montar({ territorio: {
+    name: "Wi-Fi e fibra óptica",
+    reasons: ["Silo do plano declarado: Wi-Fi e fibra óptica."],
+    provenance: { producedBy: "human", adoptedFromScenarioType: null, humanAdjustmentCount: 1, note: "Plano declarado no cadastro: grupo Azul (Wi-Fi e fibra óptica), plano v1, por u1 em 2026-10-14." },
+  } });
+  const { status, corpo } = await patch(context, { territoryUndos: [{ territoryRef: REF, expectedLock: 7 }] });
+  assert.equal(status, 409);
+  assert.match(String(corpo.error), /Silo do plano declarado/);
+  assert.match(String(corpo.error), /Tirar do plano.*Substituir o plano.*Minerador/);
+  semEscrita(banco);
+});
+
 test("lock vencido recusa antes de tirar qualquer keyword", async () => {
   const { banco, context } = montar();
   const { status, corpo } = await patch(context, { territoryUndos: [{ territoryRef: REF, expectedLock: 6 }] });

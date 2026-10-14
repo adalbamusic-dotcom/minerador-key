@@ -1,5 +1,33 @@
 # Backlog — Radar
 
+## F5 · Links a ativar, "Atualizar links do Silo" e as pendências da F6 — 2026-10-14
+
+Autorização do dono (2026-10-14): "pode concluir as pendências, vou testar depois". SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §6.5, §10, D10 e §18.1. Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Links a ativar: o destino que a planta gravou como novo e hoje está no ar, por artigo de origem, com a âncora natural, a seção (ou a trilha) e a URL — no painel do artigo, no `-links.csv`, no MCP (`get_silo_links_update`) e no Redator ("destino no ar: ative o link").
+- [x] "Atualizar links do Silo" para publicados (D10, só lista): o que falta da malha na página publicada (obrigatórios no corpo e trilha), lida na mesma busca do CSV (links internos da página); `<NN>-<papel>-<slug>-links.csv` no .zip da exportação por artigo. Nunca altera a página, a URL, o slug nem o canonical.
+- [x] Painel "malha X/Y" do Silo no painel do artigo ("Conferir links do Silo", só leitura, no clique).
+- [x] Pendências da F6: estrutura de títulos (H2/H3) e entidades dos concorrentes da SERP no gabarito do vídeo longo; o carrossel do Redator, um por curto, pela régua única das lâminas.
+- [x] E0 só nas chaves autorizadas da F5 (`*/csv-video`, `*/mcp.get_video_material`, `*/mcp.get_writer_brief.planta-aprovada`), com o teste de escopo.
+- [ ] **Dono:** no Radar, abrir o Suporte "captação de pacientes dentista" → "Conferir links do Silo" → conferir a malha X/Y, os links a ativar e baixar o `-links.csv`; exportar o artigo ("Só os artigos selecionados") e conferir o `-links.csv` no .zip.
+- [ ] **Dono:** semear o carrossel de um documento do Silo piloto no Redator e conferir um carrossel por curto (notas: onde cada um começa e a legenda).
+- [ ] Coleta paga, **só com autorização do dono**: ler os capítulos (descrição) dos vídeos concorrentes do YouTube para o gabarito de capítulos do vídeo longo. A coleta de hoje não os traz; nada foi coletado nesta fase.
+- [ ] Avaliar: "Links a ativar" como coluna na planilha do Radar (hoje no painel do artigo, no clique; a planilha fica leve — frente "listas leves").
+- [ ] Avaliar: ler mais de 10 páginas publicadas por leitura do Silo (Silos de 15–30 artigos; hoje as além do teto saem "conferir").
+- [ ] Avaliar: um entregável de carrossel por curto no Redator (hoje um entregável único por documento e tipo, `writer_deliverables_document_kind_unique`; separar exigiria SDD e migration).
+
+## F6 · O vídeo em 4 partes e o material do CSV de escrita no vídeo e no Redator — 2026-10-14
+
+Autorização do dono: "pode sim" e o acréscimo do vídeo em 4 partes. Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Material da linha do CSV "Para escrever" (`radarWritingMaterialOf`) no CSV de vídeo e no Redator, sem montagem paralela; o CSV de escrita intacto.
+- [x] Vídeo longo com o gabarito do YouTube, o storytelling, os ganchos de retenção e os marcadores; título K2/K3.
+- [x] Curtos de ~15 s por micro-assunto (até 9) e um carrossel por curto; fontes e fechamento em 4 tempos nas três saídas.
+- [x] E0 só nas chaves de vídeo e do Redator, com o teste de escopo.
+- [ ] **Dono:** exportar o CSV de vídeo de um artigo do Silo piloto e conferir as 4 partes (e `get_video_material` pelo MCP).
+- [ ] Proposta: ler os capítulos (descrição) dos vídeos concorrentes na coleta do YouTube para o gabarito de capítulos (hoje não coletados; exigiria coleta paga nova, só com autorização do dono — ver a seção F5).
+- [x] Entidades do modelo observado e os temas H2/H3 dos concorrentes no roteiro (SDD §10) — feito na F5 (2026-10-14), no gabarito do vídeo longo.
+
 ## "Atualização disponível do Arquiteto · links" (grafo de links novo) — 2026-10-14
 
 Decisão do dono (2026-10-14): estender a "Atualização disponível do Arquiteto" ao grafo de links; adotar num clique, sem reenviar e sem refazer a pesquisa. Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**

@@ -22,6 +22,8 @@ import {
 import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
 import { radarPortableVideoExport } from "@/lib/radar/portable-video-export";
 import { radarSerpRawArchiveFilename, radarSerpRawExport, radarSerpRawPositionOf } from "@/lib/radar/serp-raw-export";
+/* 2026-10-14 · F5 · o `-links.csv` de cada artigo no .zip, pelo mesmo núcleo do painel e do MCP. */
+import { radarSiloLinksOfAssembly } from "@/lib/server/radar-silo-links";
 
 /**
  * ===== O DOSSIÊ EDITORIAL PORTÁTIL — RADAR_PORTABLE_EXPORT_1.2 =====
@@ -243,11 +245,30 @@ export async function POST(request: Request) {
           archiveFilename: radarSerpRawArchiveFilename({ writingFilename: escrita.filename, articles: montadas.length, today: exportedAt }),
         }
         : null;
+      /*
+       * 2026-10-14 · F5 (SDD silo interligado §6.5, D10) · "ATUALIZAR LINKS DO
+       * SILO" DE CADA ARTIGO, no mesmo .zip: `<NN>-<papel>-<slug>-links.csv` (a
+       * malha do artigo com a situação de cada link — a ativar, falta na página,
+       * aguardar o destino —, a âncora natural e onde entra), pelo mesmo núcleo do
+       * painel e do MCP. Arquivo próprio: o CSV "Para escrever" não muda (guarda de
+       * tamanho). Nunca altera a página, a URL, o slug nem o canonical.
+       */
+      const linksDoSilo = (() => {
+        if (!comSerpCrua || plano) return [];
+        try {
+          return radarSiloLinksOfAssembly({ exportedAt, montadas, recusados, lentes, planoDaSelecao, publicacoes, brandVoice, grupos }).articles
+            .map(artigo => ({ articleId: artigo.articleId, filename: artigo.filename, csv: artigo.csv, toActivate: artigo.counts.ativar }));
+        } catch {
+          /* a lista é complemento: falhando, o .zip sai com o CSV "Para escrever" e a SERP crua, como antes */
+          return [];
+        }
+      })();
       return radarPortableExportStreamResponse({
         success: true,
         mode: "writing",
         ...(plano ? {} : { csv: escrita.csv, filename: escrita.filename }),
         ...(serpCrua ? { serpRaw: serpCrua } : {}),
+        ...(linksDoSilo.length ? { siloLinks: { files: linksDoSilo } } : {}),
         exported: escrita.exported,
         blocked: escrita.blocked,
         refused: recusados,

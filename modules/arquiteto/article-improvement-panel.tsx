@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { InfoHint } from "@/components/info-hint";
 import { OperationProgress } from "./operation-progress";
 import { ARTICLE_IMPROVEMENT_LABEL, IMPROVEMENT_AI_LABEL, IMPROVEMENT_LIST_CORE_LABEL, isListReading } from "@/lib/arquiteto/article-improvement";
-import { ARTICLES_NEW_ANCHOR, ARTICLES_SOBRAS_ANCHOR, improvementRowApplyLabel, improvementValidateLabel, resolveImprovementNextStep } from "@/lib/arquiteto/article-improvement-next-step";
+import { ARTICLES_NEW_ANCHOR, ARTICLES_SOBRAS_ANCHOR, humanizeOperationMessage, improvementPreviousRunLabel, improvementRowApplyLabel, improvementRunIsPrevious, improvementValidateLabel, resolveImprovementNextStep } from "@/lib/arquiteto/article-improvement-next-step";
 import { ReworkNotice } from "@/components/editorial/rework-notice";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
 import { improvementDiscoveryCostSentence } from "@/lib/arquiteto/article-improvement-reuse";
@@ -46,7 +46,13 @@ export function ImprovementProgress({ activity, now, done, total, unit }: { acti
     note="o andamento fica guardado no servidor" testId="architect-improvement-progress" />;
 }
 
-function ArticleImprovementSession({ brandId, brandRef = null, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], activeGroup = null }: {
+function ArticleImprovementSession({ brandId, brandRef = null, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], activeGroup = null, mesaChangedAt = null }: {
+  /**
+   * 2026-10-14 · a última mudança da mesa (itens recebidos). A análise lida do
+   * servidor ao abrir, feita ANTES dela, aparece recolhida como "análise
+   * anterior", não como o estado de agora.
+   */
+  mesaChangedAt?: string | null;
   brandId: string | null; onApplied: () => void; buttonClassName: string; primaryButtonClassName: string;
   /**
    * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13, item 2): a rota da marca, para o
@@ -77,7 +83,19 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
 }) {
   const mounted = useRef(false);
   const [leaseActive, setLeaseActive] = useState(false);
-  const [run, setRun] = useState<ImprovementRun | null>(null);
+  const [runState, setRun] = useState<ImprovementRun | null>(null);
+  /*
+   * 2026-10-14 (caso WifiConecta) · a execução lida ao abrir, de outro recorte
+   * ou anterior à última mudança da mesa, fica recolhida ("Análise anterior de
+   * <data>") até a pessoa pedir "Retomar esta análise". Uma execução nova
+   * (Buscar keywords) é sempre a atual.
+   */
+  const [restoredRunId, setRestoredRunId] = useState<string | null>(null);
+  const [resumedPrevious, setResumedPrevious] = useState(false);
+  const previousRun = runState && runState.runId === restoredRunId && !resumedPrevious
+    && improvementRunIsPrevious({ run: runState, activeGroupRequested: activeGroup?.requested ?? null, mesaChangedAt })
+    ? runState : null;
+  const run = previousRun ? null : runState;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
@@ -100,6 +118,7 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
       // F5 · a execução da planilha "Artigos do plano" é retomada lá, não aqui.
       if (restored.origin === "plan_sheet") return;
       setRun(restored);
+      setRestoredRunId(restored.runId);
       setLeaseActive(Boolean(restored.leaseUntil && Date.parse(restored.leaseUntil) > Date.now()));
       setSelected(new Set(restored.acceptedIds ?? restored.proposals.filter(p => p.status === "ready").map(p => p.targetId)));
     }).catch(() => { if (active) setError("Não foi possível ler a análise anterior. Toque em “Atualizar”."); });
@@ -170,7 +189,8 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
         if (mounted.current) setSelected(new Set(current.proposals.filter(p => p.status === "ready").map(p => p.targetId)));
       } else if (action === "prepare") setSelected(new Set(current.proposals.filter(p => p.status === "ready").map(p => p.targetId)));
     } catch (e) {
-      if (mounted.current) setError(e instanceof Error && e.message === "TEMPO_ESGOTADO" ? "O servidor demorou demais nesta etapa. O que foi feito ficou salvo: toque de novo no mesmo botão para continuar." : e instanceof Error ? e.message : "Falha na execução.");
+      // 2026-10-14 · o código técnico (REWORK_SAME_REFUSAL…) nunca aparece cru: vira a frase humana.
+      if (mounted.current) setError(e instanceof Error ? humanizeOperationMessage(e.message) : "Falha na execução.");
     }
     finally { if (mounted.current) { setBusy(false); setActivity(null); } }
   }
@@ -260,6 +280,11 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
       </div>
       <button className={primaryButtonClassName} disabled={nextDisabled} title={next.kind === "select" ? "Marque ao menos uma linha na tabela abaixo." : undefined} onClick={runNext}>{next.button}</button>
     </div>
+    {previousRun && <details className="mt-3 rounded-md border border-divider bg-surface-subtle p-3 text-text-muted" data-testid="architect-improvement-previous">
+      <summary className="cursor-pointer font-medium text-foreground">{improvementPreviousRunLabel(previousRun)} · recolhida</summary>
+      <p className="mt-1">{previousRun.proposals.length} analisado(s) naquela vez. Ela é {(previousRun.groupScope?.requested ?? "todos") !== (activeGroup?.requested ?? "todos") ? "de outro recorte que o da etiqueta" : "anterior à última mudança da mesa"}: não é o estado de agora. Para analisar o que vale hoje, use “Buscar keywords” (grátis; o que já foi lido e pago é reaproveitado).</p>
+      <button type="button" className={`${buttonClassName} mt-2`} disabled={busy} onClick={() => setResumedPrevious(true)} data-testid="architect-improvement-resume-previous">Retomar esta análise</button>
+    </details>}
     {/* F5 — a guarda de retrabalho, acima dos botões: "já feito com os mesmos insumos em <data>". */}
     {run?.rework && !run.acceptedIds && run.state === "prepared" && <ReworkNotice rework={run.rework} busy={busy || leaseActive} buttonClassName={buttonClassName} testId="architect-improvement-rework"
       onOverride={reason => void execute("prepare", { ...recorteDaExecucao, reworkReason: reason })} />}
@@ -343,7 +368,7 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
                 <ul className="grid gap-0.5 text-text-muted">{p.aiReasons!.map(item => <li key={item.keywordId}><span className="text-keyword">{keyword(item.keywordId)?.keyword ?? item.keywordId}</span>: {item.reason}</li>)}</ul>
               </div>}
             </td>
-            <td className="p-2 text-foreground">{result ? outcomes[result.status] : p.needsMinerador ? <span data-testid="architect-improvement-row-needs-minerador">{IMPROVEMENT_NEEDS_MINERADOR_LABEL}{sugestoesHref ? <> · <a href={sugestoesHref} className="text-module-accent underline underline-offset-2">{ARCHITECT_SUGGESTIONS_LABEL}</a></> : null}</span> : p.needsValidation ? "Precisa validar no Google (passo 2)" : statuses[p.status]}{result && <p className="text-text-muted">{result.message}</p>}
+            <td className="p-2 text-foreground">{result ? outcomes[result.status] : p.needsMinerador ? <span data-testid="architect-improvement-row-needs-minerador">{IMPROVEMENT_NEEDS_MINERADOR_LABEL}{sugestoesHref ? <> · <a href={sugestoesHref} className="text-module-accent underline underline-offset-2">{ARCHITECT_SUGGESTIONS_LABEL}</a></> : null}</span> : p.needsValidation ? "Precisa validar no Google (passo 2)" : statuses[p.status]}{result && <p className="text-text-muted">{humanizeOperationMessage(result.message)}</p>}
               {p.reasons.length > 0 && <details className="text-text-muted"><summary className="cursor-pointer">Por quê</summary><p>{p.angle ? `Enfoque: ${p.angle}. ` : ""}{p.reasons.join(" ")}</p></details>}
             </td>
           </tr>;
@@ -361,7 +386,7 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
       </details>}
       {run.costs.cacheUnavailable && <p className="mt-2 text-warning">Não deu para conferir o cache: a estimativa pode incluir consultas já pagas.</p>}
       {collecting && <p className="mt-2 text-warning">A validação ficou pela metade. O que já foi pago está no cache e não é cobrado de novo: toque em “Continuar” no Próximo passo.</p>}
-      {[...new Set(run.notices)].map((notice, i) => <p className="mt-2 text-text-muted" key={`${i}:${notice}`}>{notice}</p>)}
+      {[...new Set(run.notices)].map((notice, i) => <p className="mt-2 text-text-muted" key={`${i}:${notice}`}>{humanizeOperationMessage(notice)}</p>)}
     </>}
   </section>;
 }

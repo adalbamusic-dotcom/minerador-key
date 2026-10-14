@@ -34,6 +34,8 @@ import type { ContentDocument } from "@/lib/arquiteto/contracts";
 import { radarFoundationsOf, radarFoundationsSubjectOf, type RadarFoundations, type RadarFoundationsSubject } from "@/lib/redator/radar-foundations";
 import { WRITER_BLUEPRINT_CONTINUATION_LABEL, type WriterArticleBlueprintFoundation } from "@/lib/redator/writer-evidence-catalog";
 import { parseBrandRef } from "@/lib/tenant-routing";
+import type { RadarWritingMaterial } from "@/lib/radar/portable-writing-material";
+import { WRITER_MATERIAL_STATUS_LABEL, writerMaterialChecklist, type WriterMaterialCheckItem } from "@/lib/redator/writer-material";
 
 const titulo = "text-[12px] font-bold uppercase text-text-muted";
 const bloco = "mt-3 rounded border border-divider p-2 text-[12px] leading-5 text-foreground/85";
@@ -153,6 +155,83 @@ function ArtigoModelo({ leitura, radarHref }: { leitura: LeituraDaPlanta; radarH
   </section>;
 }
 
+/* ===================== 2026-10-14 · F6 · o material novo do Radar (guia) ===================== */
+
+/*
+ * SDD silo interligado §18.1, F6 ("Redator lê o material novo"; autorização do
+ * dono em 2026-10-14: "pode sim"). O MESMO núcleo do CSV "Para escrever": a
+ * análise competitiva, o diferencial, o fechamento em 4 tempos, as regras de
+ * título, a malha e a trilha do Silo e as fontes de autoridade. Leitura aditiva:
+ * nada é gravado; os links e as fontes são checklist conferido contra o texto de
+ * agora (muda enquanto se escreve), e o documento já escrito ganha o aviso
+ * "Links do Silo atualizados disponíveis" sem ter o texto reescrito.
+ */
+type LeituraDoMaterial =
+  | { estado: "lendo" }
+  | { estado: "ready"; material: RadarWritingMaterial }
+  | { estado: "outro"; motivo: string };
+
+function Bloco({ nome, linhas, testid, aberto = false }: { nome: string; linhas: readonly string[]; testid: string; aberto?: boolean }) {
+  if (!linhas.length) return null;
+  return <details className="mt-1.5" open={aberto} data-writer-material-block={testid}>
+    <summary className="cursor-pointer font-semibold text-foreground">{nome}</summary>
+    <ul className="mt-1 space-y-0.5 pl-1">{linhas.map((linha, indice) => <li key={`${indice}:${linha.slice(0, 24)}`}>{linha}</li>)}</ul>
+  </details>;
+}
+
+function ItemDoChecklist({ item }: { item: WriterMaterialCheckItem }) {
+  return <li className="rounded border border-divider p-1.5" data-writer-material-item={item.id} data-writer-material-status={item.status}>
+    <p>
+      {/* 2026-10-14 · F5 · "destino no ar: ative o link" no lugar de "a aplicar" quando o destino foi ao ar e o texto já existe. */}
+      <span className={chip}>{WRITER_MATERIAL_STATUS_LABEL[item.status]}</span>{" "}
+      <strong className="text-foreground">{item.id}</strong>{item.label ? ` · ${item.label}` : ""}
+      {item.section ? <span className="text-text-muted"> · seção “{item.section}”</span> : null}
+    </p>
+    <p className="text-text-muted">{item.line}</p>
+  </li>;
+}
+
+function MaterialNovo({ leitura, document }: { leitura: LeituraDoMaterial; document: ContentDocument | null | undefined }) {
+  const checklist = useMemo(() => (leitura.estado === "ready" ? writerMaterialChecklist(leitura.material, document) : null), [leitura, document]);
+  if (leitura.estado === "lendo") {
+    return <section className={blocoDeLeitura} data-radar-foundations-section="writer-material" data-writer-material-state="lendo">
+      <h3 className="text-sm font-semibold text-foreground">Material novo do Radar</h3>
+      <p className="text-text-muted">Lendo o material do CSV “Para escrever” deste artigo…</p>
+    </section>;
+  }
+  if (leitura.estado !== "ready" || !checklist) {
+    return <section className={blocoDeLeitura} data-radar-foundations-section="writer-material" data-writer-material-state="outro">
+      <h3 className="text-sm font-semibold text-foreground">Material novo do Radar: não lido agora</h3>
+      <p className="text-warning">{leitura.estado === "outro" ? leitura.motivo : ""}</p>
+    </section>;
+  }
+  const { material } = leitura;
+  const linksDoCorpo = checklist.links.filter(item => item.kind === "corpo");
+  const trilha = checklist.links.filter(item => item.kind === "trilha");
+  return <section className={blocoDeLeitura} data-radar-foundations-section="writer-material" data-writer-material-state="ready">
+    <h3 className="text-sm font-semibold text-foreground">Material novo do Radar (guia)</h3>
+    <p className="text-text-muted">Do mesmo núcleo do CSV “Para escrever”. O que já foi escrito não muda sozinho: aplique os itens “a aplicar” no texto.</p>
+    {material.angle && <p className="mt-1"><span className="font-semibold text-foreground">Ângulo:</span> {material.angle}</p>}
+    {checklist.siloLinksUpdate && <div className="mt-2 rounded border border-warning/40 p-2" data-writer-silo-links-update="">
+      <p className="font-semibold text-warning">{checklist.siloLinksUpdate.label}</p>
+      <p>{checklist.siloLinksUpdate.note}</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-4">
+        {checklist.siloLinksUpdate.items.map(item => <li key={item.id}>{item.id}{item.label ? ` · ${item.label}` : ""}{item.section ? ` · seção "${item.section}"` : item.kind === "trilha" ? " · trilha \"Continue no Silo\"" : ""}{item.published === false ? " · destino ainda não publicado (texto simples até ir ao ar)" : ""}{item.status === "ativar" ? ` · ${WRITER_MATERIAL_STATUS_LABEL.ativar}` : ""}</li>)}
+      </ul>
+    </div>}
+    <p className={`mt-2 ${rotulo}`}>Checklist: {checklist.counts.toApply} a aplicar{checklist.counts.toActivate ? ` (${checklist.counts.toActivate} com o destino no ar: ative o link)` : ""} · {checklist.counts.applied} aplicado(s)</p>
+    {linksDoCorpo.length > 0 && <><p className="mt-1 font-semibold text-foreground">Links do Silo no corpo (L)</p><ul className="mt-1 space-y-1">{linksDoCorpo.map(item => <ItemDoChecklist key={item.id} item={item}/>)}</ul></>}
+    {trilha.length > 0 && <><p className="mt-1 font-semibold text-foreground">Trilha “Continue no Silo” (T, no fim do artigo)</p><ul className="mt-1 space-y-1">{trilha.map(item => <ItemDoChecklist key={item.id} item={item}/>)}</ul></>}
+    {checklist.authority.length > 0 && <><p className="mt-1 font-semibold text-foreground">Fontes de autoridade (X, na frase que sustentam)</p><ul className="mt-1 space-y-1">{checklist.authority.map(item => <ItemDoChecklist key={item.id} item={item}/>)}</ul></>}
+    {material.ymylWithoutSource.length > 0 && <p className="mt-1 text-warning" data-writer-material-ymyl="">{material.ymylWithoutSource.join(" ")}</p>}
+    <Bloco nome="Fechamento em 4 tempos" linhas={material.closing} testid="closing" aberto/>
+    <Bloco nome="Análise competitiva" linhas={material.competitive} testid="competitive"/>
+    <Bloco nome="Diferencial da marca" linhas={material.brandEdge} testid="brand-edge"/>
+    <Bloco nome="Título e keyword" linhas={material.titleAndKeyword} testid="title"/>
+    <Bloco nome="Regras dos links e das fontes" linhas={[...material.linkRules, ...material.authorityRules, ...material.authorityReferences]} testid="rules"/>
+  </section>;
+}
+
 export function WriterRadarFoundationsPanel({ document, compact = false, brandId = null }: { document: ContentDocument | null | undefined; compact?: boolean; /** 2026-10-09 · A Marca do documento, para ler o artigo-modelo; sem ela, a do endereço. */ brandId?: string | null }) {
   const fundamentos: RadarFoundations | null = useMemo(() => radarFoundationsOf(document), [document]);
   const caminho = usePathname();
@@ -185,6 +264,27 @@ export function WriterRadarFoundationsPanel({ document, compact = false, brandId
     return () => { vivo = false; };
   }, [chave, marca, documentId]);
 
+  /* 2026-10-14 · F6 · o material novo, lido depois da planta (a montagem do CSV é mais lenta), pela mesma rota com part=material. */
+  const [materialLido, setMaterialLido] = useState<{ chave: string; leitura: LeituraDoMaterial } | null>(null);
+  const plantaAprovada = lida?.chave === chave && lida.leitura.estado === "approved";
+  useEffect(() => {
+    if (!chave || !marca || !documentId || !plantaAprovada) return;
+    let vivo = true;
+    void (async () => {
+      try {
+        const resposta = await fetch(`/api/redator/article-blueprint?brandId=${encodeURIComponent(marca)}&documentId=${encodeURIComponent(documentId)}&part=material`, { cache: "no-store" });
+        const corpo = await resposta.json().catch(() => null) as { state?: string; material?: RadarWritingMaterial; reason?: string; error?: string } | null;
+        if (!vivo) return;
+        if (resposta.ok && corpo?.state === "ready" && corpo.material) setMaterialLido({ chave, leitura: { estado: "ready", material: corpo.material } });
+        else setMaterialLido({ chave, leitura: { estado: "outro", motivo: corpo?.reason || corpo?.error || "a leitura falhou agora; tente de novo." } });
+      } catch {
+        if (vivo) setMaterialLido({ chave, leitura: { estado: "outro", motivo: "a leitura falhou agora; tente de novo." } });
+      }
+    })();
+    return () => { vivo = false; };
+  }, [chave, marca, documentId, plantaAprovada]);
+  const leituraDoMaterial: LeituraDoMaterial | null = !chave || !plantaAprovada ? null : materialLido?.chave === chave ? materialLido.leitura : { estado: "lendo" };
+
   const leitura: LeituraDaPlanta | null = !chave ? null : lida?.chave === chave ? lida.leitura : { estado: "lendo" };
   /* 2026-10-09 · com a planta lida, a virada do Assunto é a dela (as linhas do envio podem ser da régua antiga). */
   const linhasDoAssunto = leitura?.estado === "approved" && leitura.editorialContext ? leitura.editorialContext : fundamentos?.editorialContext;
@@ -210,6 +310,8 @@ export function WriterRadarFoundationsPanel({ document, compact = false, brandId
     {assunto && <AssuntoDoArtigo assunto={assunto}/>}
 
     {leitura && <ArtigoModelo leitura={leitura} radarHref={radarHref}/>}
+
+    {leituraDoMaterial && <MaterialNovo leitura={leituraDoMaterial} document={document}/>}
 
     {/*
       * ===== A RECOMENDAÇÃO É RECOMENDAÇÃO — NÃO GATE =====

@@ -169,7 +169,9 @@ test("botão por Silo sugerido, botão em lote e uma confirmação que diz o que
   assert.match(linhas, />\s*Desfazer Silo\s*</);
   assert.match(linhas, /`Desfazer os Silos sugeridos \(\$\{undoAll\.count\}\)`/);
   assert.match(workspace, /if \(territoryHasPublishedAddress\(territory\)\) continue;/);
-  assert.match(workspace, /onUndoAll: \(\) => setSiloUndoPrompt\(siloUndoEligibleRefs\)/);
+  // 2026-10-14: o lote marca que é lote (a confirmação diz quantos ficaram de fora — o Silo do plano — e por quê).
+  assert.match(workspace, /onUndoAll: \(\) => \{ setSiloUndoBulk\(true\); setSiloUndoPrompt\(siloUndoEligibleRefs\); \}/);
+  assert.match(workspace, /excludedNote: siloUndoExcludedNote,/);
   assert.match(workspace, /O Silo sai da aba Silos \(fica guardado como rejeitado; nada é apagado\)\. As keywords dele voltam para “sem Silo” e continuam na mesa\./);
   assert.match(workspace, /Não pode ser desfeito: \$\{leitura!\.refusals\.join\(" "\)\}/);
 });

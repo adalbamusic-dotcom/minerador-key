@@ -169,6 +169,8 @@ mock.module("@/lib/server/arquiteto-article-serp-store", { namedExports: {
   listArticleFormationSerpAssessments: async () => [],
   // F2 das listas leves (2026-10-14): leitura de UM parecer pelo candidateRef.
   findArticleFormationSerpAssessment: async () => null,
+  // F6 das listas leves (2026-10-14): a lista do GET/delta vem projetada (view da M-L ou Node).
+  listArticleFormationSerpForList: async () => ({ records: [], source: "node" }),
 } });
 // PATCH /api/arquiteto/workspace: a trava do Assunto e a leitura estreita das keywords são dublês.
 let keywordsDoPatch = new Map<string, Record<string, unknown>>();

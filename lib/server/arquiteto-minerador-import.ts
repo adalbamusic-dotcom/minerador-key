@@ -50,21 +50,31 @@ async function paginate<T>(read: (from: number, to: number) => PromiseLike<{ dat
 }
 
 async function readPoolKeywords(db: Db, brandId: string): Promise<ArquitetoImportPoolRow[]> {
+  // 2026-10-14: só o TEXTO do hash da aprovação, por caminho JSON (nada do DNA viaja).
   const rows = await paginate<Record<string, unknown>>((from, to) => db.from("minerador_keywords")
-    .select("id,keyword,status,group_id").eq("brand_id", brandId).is("deleted_at", null).order("id").range(from, to));
+    .select(POOL_KEYWORD_COLUMNS).eq("brand_id", brandId).is("deleted_at", null).order("id").range(from, to));
   return rows.flatMap(row => typeof row.id === "string" && typeof row.keyword === "string"
-    ? [{ id: row.id, keyword: row.keyword, status: typeof row.status === "string" ? row.status : null, group_id: typeof row.group_id === "string" ? row.group_id : null }]
+    ? [{ id: row.id, keyword: row.keyword, status: typeof row.status === "string" ? row.status : null, group_id: typeof row.group_id === "string" ? row.group_id : null, approval_hash: typeof row.approval_hash === "string" ? row.approval_hash : null }]
     : []);
 }
 
-async function readWorkflowStates(db: Db, brandId: string): Promise<Map<string, string>> {
+/** A lista leve: id, nome, status, grupo e o hash da aprovação (texto). */
+export const POOL_KEYWORD_COLUMNS = "id,keyword,status,group_id,approval_hash:analise_semantica->aprovacao->>contentHash";
+/** O item do Arquiteto: estado e o hash do pacote que ele guarda (texto). */
+export const POOL_WORKFLOW_COLUMNS = "subject_id,state,received_hash:payload->approvedDna->>contentHash";
+
+async function readWorkflowStates(db: Db, brandId: string): Promise<{ states: Map<string, string>; receivedHashes: Map<string, string | null> }> {
   const rows = await paginate<Record<string, unknown>>((from, to) => db.from("editorial_workflow_items")
-    .select("subject_id,state").eq("marca_id", brandId).eq("subject_type", "keyword").eq("stage", "architect").order("subject_id").range(from, to));
+    .select(POOL_WORKFLOW_COLUMNS).eq("marca_id", brandId).eq("subject_type", "keyword").eq("stage", "architect").order("subject_id").range(from, to));
   const states = new Map<string, string>();
+  const receivedHashes = new Map<string, string | null>();
   for (const row of rows) {
-    if (typeof row.subject_id === "string" && typeof row.state === "string" && !states.has(row.subject_id)) states.set(row.subject_id, row.state);
+    if (typeof row.subject_id === "string" && typeof row.state === "string" && !states.has(row.subject_id)) {
+      states.set(row.subject_id, row.state);
+      if (row.state === "received") receivedHashes.set(row.subject_id, typeof row.received_hash === "string" ? row.received_hash : null);
+    }
   }
-  return states;
+  return { states, receivedHashes };
 }
 
 async function readIncorporatedKeywordIds(db: Db, brandId: string): Promise<Set<string>> {
@@ -112,7 +122,7 @@ export function arquitetoImportDeps(context: PipelineContext) {
     approve: async () => { throw new Error("O Arquiteto não aprova keyword: aprove no Minerador."); },
     previewSend: async (ids: readonly string[]) => {
       const preview = await previewMineradorArquitetoHandoff(context, ids);
-      return { eligibleKeywordIds: preview.eligibleKeywordIds, existingKeywordIds: preview.existingKeywordIds, refused: preview.refused };
+      return { eligibleKeywordIds: preview.eligibleKeywordIds, existingKeywordIds: preview.existingKeywordIds, refreshKeywordIds: preview.refreshKeywordIds, refused: preview.refused };
     },
     send: (ids: readonly string[]) => createMineradorArquitetoHandoff(context, ids, { partial: true }),
     hash: (value: unknown) => createHash("sha256").update(JSON.stringify(canonicalJson(value))).digest("hex"),
@@ -130,25 +140,26 @@ export type ArquitetoImportPool = {
 };
 
 export async function loadArquitetoImportPool(context: PipelineContext): Promise<ArquitetoImportPool> {
-  const [keywords, workflowStateByKeywordId, incorporatedKeywordIds, canCreate] = await Promise.all([
+  const [keywords, workflow, incorporatedKeywordIds, canCreate] = await Promise.all([
     readPoolKeywords(context.supabase, context.brandId),
     readWorkflowStates(context.supabase, context.brandId),
     readIncorporatedKeywordIds(context.supabase, context.brandId),
     context.action === "create" ? Promise.resolve(true) : actorCan(context, "arquiteto", "create"),
   ]);
-  const pool = classifyArquitetoImportPool({ keywords, workflowStateByKeywordId, incorporatedKeywordIds });
+  const pool = classifyArquitetoImportPool({ keywords, workflowStateByKeywordId: workflow.states, incorporatedKeywordIds, receivedPackageHashByKeywordId: workflow.receivedHashes });
   let items = pool.items;
   if (pool.gateIds.length && !canCreate) {
-    const fora = new Set(pool.gateIds);
+    // Sem permissão de criar: a nova fica fora; a já recebida continua "já no Arquiteto".
+    const fora = new Set(pool.gateIds.filter(id => !pool.refreshCandidateIds.includes(id)));
     items = items.map(item => fora.has(item.id) ? { ...item, state: "out" as const, reason: ARQUITETO_IMPORT_NO_CREATE_REASON, detail: null } : item);
   } else if (pool.gateIds.length) {
     const preview = await previewApproveAndSend(
       { brandId: context.brandId, actorId: context.actorUserId, keywordIds: pool.gateIds, send: true },
       arquitetoImportDeps(context),
     );
-    items = applyArquitetoImportGate(pool.items, pool.gateIds, preview.lines);
+    items = applyArquitetoImportGate(pool.items, pool.gateIds, preview.lines, pool.refreshCandidateIds);
   }
-  const ordem = { send: 0, approve_in_minerador: 1, out: 2, in_arquiteto: 3 } as const;
+  const ordem = { send: 0, refresh: 1, approve_in_minerador: 2, out: 3, in_arquiteto: 4 } as const;
   items = [...items].sort((a, b) => ordem[a.state] - ordem[b.state] || a.keyword.localeCompare(b.keyword, "pt-BR"));
   return { items, canApprove: false, canCreate, checked: canCreate ? pool.gateIds.length : 0, readAt: new Date().toISOString() };
 }

@@ -1576,6 +1576,31 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
   });
 
   /*
+   * 2026-10-14 · F5 · LINKS A ATIVAR E "ATUALIZAR LINKS DO SILO" (SDD silo
+   * interligado §6.5 e D10). Leitura, pelo MESMO núcleo do painel do Radar e do
+   * `-links.csv` do .zip da exportação por artigo (`radarSiloLinksRead`). Nunca
+   * altera a página publicada, a URL, o slug nem o canonical.
+   */
+  server.registerTool("get_silo_links_update", {
+    title: "Links a ativar e o que falta da malha do Silo (só lista)",
+    description: [
+      "Use quando um destino do Silo foi ao ar, quando o usuário quer atualizar os links de artigos publicados ou conferir a malha do Silo: devolve, para o artigo (scope 'article') ou para todos os artigos do Silo dele (scope 'silo', o padrão), cada link da malha (L no corpo, T na trilha 'Continue no Silo') com a situação — 'ativar' (o destino estava novo na planta e foi ao ar: a âncora que ficou como texto simples vira link), 'falta_na_pagina' (o artigo está no ar e a página não tem o link), 'conferir' (página não lida agora), 'escrever_com_link', 'aguardar_destino' (destino ainda não publicado: texto simples até ir ao ar) ou 'na_pagina' —, a âncora natural, onde entra (seção ou trilha) e a URL; o resumo 'malha X/Y' do Silo; e o CSV de cada artigo ('<NN>-<papel>-<slug>-links.csv', o mesmo do .zip da exportação por artigo).",
+      "Só lista: a plataforma nunca altera a página publicada, a URL, o slug nem o canonical; quem inclui o link é o usuário, no site dele.",
+      "Grátis: só lê o que o Radar já tem e as páginas publicadas (GET, a mesma leitura do CSV 'Para escrever'); nunca chama provider nem IA. Artigo sem artigo-modelo concluído sai em withoutRow, com o motivo.",
+    ].join(" "),
+    inputSchema: z.object({ brandId: brandIdInput, articleId: z.string().trim().min(1).max(256), scope: z.enum(["article", "silo"]).optional(), includeCsv: z.boolean().optional() }),
+    annotations: read,
+  }, async ({ brandId, articleId, scope, includeCsv }) => call("get_silo_links_update", "platform.read", { brandId }, [{ module: "radar", action: "view" }], async ({ access }) => {
+    const { radarSiloLinksRead } = await import("./radar-silo-links");
+    const leitura = await radarSiloLinksRead({ brandId: access.brandId, articleId, scope: scope ?? "silo", actorUserId: principal.actorId, supabase: getOperationalClient() });
+    return {
+      articleId, exportedAt: leitura.exportedAt, siloLabel: leitura.siloLabel, summary: leitura.summary, notice: leitura.notice,
+      articles: leitura.articles.map(({ csv, ...artigo }) => ({ ...artigo, ...(includeCsv ? { csv } : {}) })),
+      withoutRow: leitura.withoutRow,
+    };
+  }));
+
+  /*
    * 2026-10-14 · A SERP CRUA DE UM ARTIGO (SDD silo interligado §16.1, decisão do
    * dono). Ferramenta própria, e não uma mudança em get_article_for_writing: o
    * contrato e o arquivo de escrita ficam iguais (o E0 trava os dois), e a SERP
