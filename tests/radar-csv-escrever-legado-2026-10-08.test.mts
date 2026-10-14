@@ -530,9 +530,15 @@ test("P1 (6) e (7) · a resposta aprovada sai inteira; um CTA só, e o próximo 
   const estrutura = linhas(semLink.row.estrutura);
   const chamadas = estrutura.filter(item => /^CTA/.test(item));
   assert.equal(chamadas.length, 1, "uma chamada só");
-  assert.ok(chamadas[0].includes("Assim, quem chega ao site já sabe o que você faz, onde atende e como agendar"), "a resposta aprovada, inteira");
-  assert.doesNotMatch(chamadas[0], /marcar uma consulta…/);
-  assert.match(chamadas[0], /^CTA \(a única chamada\) — argumento do especialista, inteiro: "/);
+  /*
+   * 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D7, muda o item 6
+   * do Adendo F): a fala aprovada do especialista sai inteira, mas na mudança e na
+   * facilidade, na voz dele; o CTA é o da planta, escrito como diagnóstico.
+   */
+  const fala = estrutura.find(item => item.startsWith("Fala aprovada do especialista (D7:"))!;
+  assert.ok(fala && fala.includes("Assim, quem chega ao site já sabe o que você faz, onde atende e como agendar"), "a resposta aprovada, inteira");
+  assert.doesNotMatch(fala, /marcar uma consulta…/);
+  assert.match(chamadas[0], /^CTA: /);
   assert.equal(estrutura.some(item => /^Próximo passo/.test(item)), false);
   assert.doesNotMatch(semLink.row.promessa_e_leitor, /Continuação|Leitura seguinte|Chamada final|SiloPage/, "a promessa é a da planta, sem segunda saída");
   assert.ok(estrutura.includes(`- Leitura seguinte (opcional, não é uma chamada): se couber, mencione o próximo artigo do Silo, "como captar um cliente", no corpo desta seção ${RADAR_WRITING_NO_APPROVED_LINK}; nunca como uma segunda chamada no fechamento.`), semLink.row.estrutura);

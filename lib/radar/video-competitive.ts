@@ -230,8 +230,12 @@ export function radarGoogleShortVideos(videos: ReadonlyArray<{ title: string; ur
 export type RadarVideoLensOrganic = {
   /** O rótulo técnico da lente: "desktop-macos", "mobile-android", "mobile-ios". */
   lens: string;
-  /** O top 10 orgânico do resumo gravado; `null` quando a lente não tem leitura (o motivo em `missing`). */
-  organic: Array<{ url: string; title: string | null; position: number | null }> | null;
+  /**
+   * O top 10 orgânico do resumo gravado; `null` quando a lente não tem leitura (o motivo em `missing`).
+   * 2026-10-14 · Aditivo (SERP crua por artigo, SDD silo interligado §16.1): o trecho e a data
+   * que o resumo já guarda. O CSV de vídeo lê só `url`, `title` e `position`.
+   */
+  organic: Array<{ url: string; title: string | null; position: number | null; snippet?: string | null; date?: string | null }> | null;
   missing: string | null;
   /**
    * 2026-10-07 (revisão) · Aditivo: quando o cache observou esta lente
@@ -278,7 +282,13 @@ export function radarVideoLensOrganicOf(
       if (!achada.hit.digest) return { lens: rotulo, organic: null, missing: "a coleta gravada não tem o resumo orgânico" };
       return {
         lens: rotulo,
-        organic: achada.hit.digest.organic.flatMap(item => (item.url ? [{ url: item.url, title: item.title ?? null, position: typeof item.rank_group === "number" ? item.rank_group : null }] : [])),
+        organic: achada.hit.digest.organic.flatMap(item => (item.url
+          ? [{
+            url: item.url, title: item.title ?? null, position: typeof item.rank_group === "number" ? item.rank_group : null,
+            /* 2026-10-14 · o trecho e a data do resumo gravado, para a SERP crua (o vídeo não os lê). */
+            snippet: item.description ?? item.snippet ?? null, date: item.date ?? item.timestamp ?? null,
+          }]
+          : [])),
         missing: null,
         collectedAt: achada.hit.meta?.collectedAt ?? null,
       };

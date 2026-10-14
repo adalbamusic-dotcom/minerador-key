@@ -498,6 +498,165 @@ export async function listArquitetoArtifacts(context: PipelineContext) {
   return { articleDnas, siloDnas, siloPages, aiReviews, statuses, source: "CANONICAL_REMOTE" as const };
 }
 
+/*
+ * ===== 2026-10-14 · SÓ AS VIGENTES, PARA A TELA (SDD listas leves, item 4, F2) =====
+ *
+ * A tela do Arquiteto (`GET /api/arquiteto/workspace`) usa de cada artefato só
+ * a versão vigente (`latestByEntity`), mas `listArquitetoArtifacts` baixa todas
+ * (AdalbaPro: 102 versões de ArticleDNA, 7,2 MB, para usar 26, 2,1 MB). Esta
+ * leitura faz o corte no banco: (1) os metadados de TODAS as versões, sem
+ * `payload` — só os ids das keywords do ArticleDNA por caminho JSON; (2) a
+ * linha inteira só da vigente de cada artefato. A ordem devolvida é a mesma
+ * da leitura inteira (a do primeiro aparecimento de cada artefato na listagem
+ * por `version_number`, `version_id`).
+ *
+ * As keywords incorporadas em QUALQUER versão (a elegibilidade de importação
+ * as considera) saem dos caminhos `principalKeywordId`, `secondaryKeywordIds`,
+ * `narrativeReinforcementIds` e `subject.keywordId` — o contrato do ArticleDNA
+ * exige que `keywordReferences` cubra exatamente as três listas.
+ *
+ * Só a tela usa esta leitura. Os núcleos do servidor (melhoria, reforço,
+ * conversão, Silo do plano…) continuam com `listArquitetoArtifacts`.
+ */
+const ARQUITETO_VERSION_META_COLUMNS = "artifact_type,version_id,entity_id,version_number,status,b:payload->>brandId,aid:payload->>articleId,principal:payload->>principalKeywordId,secondary:payload->secondaryKeywordIds,reinforcement:payload->narrativeReinforcementIds,subject:payload->subject->>keywordId";
+const ARQUITETO_VERSION_META_PAGE = 1000;
+
+export type ArquitetoVersionMeta = {
+  artifactType: string;
+  versionId: string;
+  entityId: string;
+  versionNumber: number;
+  status: string;
+  brandId: string | null;
+  /** Só no ArticleDNA: o `articleId` do payload. */
+  articleId: string | null;
+  /** Só no ArticleDNA: principal + secundárias + reforços (os ids de `keywordReferences`). */
+  referenceKeywordIds: string[];
+  /** Só no ArticleDNA: as de `referenceKeywordIds` + o Assunto (`articleDnaIncorporatedKeywordIds`). */
+  keywordIds: string[];
+  /** Só no ArticleDNA: o `subject.keywordId`. */
+  subjectKeywordId: string | null;
+};
+
+function metaText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function metaTexts(value: unknown) {
+  return Array.isArray(value) ? value.map(metaText).filter((item): item is string => Boolean(item)) : [];
+}
+
+/** Metadados de todas as versões dos tipos da mesa, na ordem da leitura inteira. Sem `payload`. */
+export async function listArquitetoVersionMeta(context: PipelineContext): Promise<ArquitetoVersionMeta[]> {
+  const metas: ArquitetoVersionMeta[] = [];
+  const vistas = new Set<string>();
+  for (let page = 0; page < 100; page += 1) {
+    const from = page * ARQUITETO_VERSION_META_PAGE;
+    const result = await context.supabase
+      .from("editorial_artifact_versions")
+      .select(ARQUITETO_VERSION_META_COLUMNS)
+      .eq("marca_id", context.brandId)
+      .in("artifact_type", [...ARQUITETO_LISTED_ARTIFACT_TYPES])
+      .order("version_number", { ascending: true })
+      .order("version_id", { ascending: true })
+      .range(from, from + ARQUITETO_VERSION_META_PAGE - 1);
+    if (result.error) throw pipelineErrorFromSupabase(result.error);
+    const rows = (result.data || []) as Array<Record<string, unknown>>;
+    let novas = 0;
+    for (const row of rows) {
+      const versionId = metaText(row.version_id);
+      const entityId = metaText(row.entity_id);
+      if (!versionId || !entityId || vistas.has(versionId)) continue;
+      vistas.add(versionId);
+      novas += 1;
+      const principal = metaText(row.principal);
+      const subject = metaText(row.subject);
+      const ids = [...(principal ? [principal] : []), ...metaTexts(row.secondary), ...metaTexts(row.reinforcement)];
+      metas.push({
+        artifactType: String(row.artifact_type),
+        versionId,
+        entityId,
+        versionNumber: Number(row.version_number),
+        status: String(row.status ?? ""),
+        brandId: metaText(row.b),
+        articleId: metaText(row.aid),
+        referenceKeywordIds: ids,
+        keywordIds: subject && !ids.includes(subject) ? [...ids, subject] : ids,
+        subjectKeywordId: subject,
+      });
+    }
+    if (rows.length < ARQUITETO_VERSION_META_PAGE || novas === 0) break;
+  }
+  return metas;
+}
+
+/** A vigente de cada artefato (maior `version_number`), na ordem do primeiro aparecimento. */
+export function vigentesFromMeta(metas: readonly ArquitetoVersionMeta[]) {
+  const primeira = new Map<string, number>();
+  const vigente = new Map<string, ArquitetoVersionMeta>();
+  metas.forEach((meta, indice) => {
+    const chave = `${meta.artifactType}\u0000${meta.entityId}`;
+    if (!primeira.has(chave)) primeira.set(chave, indice);
+    const atual = vigente.get(chave);
+    if (!atual || meta.versionNumber > atual.versionNumber) vigente.set(chave, meta);
+  });
+  return [...vigente.entries()]
+    .sort((a, b) => (primeira.get(a[0]) ?? 0) - (primeira.get(b[0]) ?? 0))
+    .map(([, meta]) => meta);
+}
+
+/** Lê a linha inteira das versões pedidas (por `version_id`), da marca. */
+export async function readArquitetoVersionRows(context: PipelineContext, versionIds: readonly string[]) {
+  const linhaPorVersao = new Map<string, Record<string, unknown>>();
+  const ids = [...new Set(versionIds)];
+  for (let inicio = 0; inicio < ids.length; inicio += 100) {
+    const result = await context.supabase
+      .from("editorial_artifact_versions")
+      .select("*")
+      .eq("marca_id", context.brandId)
+      .in("version_id", ids.slice(inicio, inicio + 100));
+    if (result.error) throw pipelineErrorFromSupabase(result.error);
+    for (const row of (result.data || []) as Array<Record<string, unknown>>) linhaPorVersao.set(String(row.version_id), row);
+  }
+  return linhaPorVersao;
+}
+
+/** A versão lida inteira, validada como na leitura de sempre (`canonicalVersionFromRow` + conferência da marca). */
+export function arquitetoVersionFromRow(context: PipelineContext, row: Record<string, unknown>, rowIndex: number | null) {
+  const type = String(row.artifact_type);
+  if (type !== "article_dna" && type !== "silo_dna" && type !== "silo_page" && type !== ARTICLE_AI_REVIEW_ARTIFACT_TYPE) return null;
+  const version = canonicalVersionFromRow(type as ArquitetoArtifactType, row, rowIndex);
+  assertCanonicalReadback(context, type as ArquitetoArtifactType, row, version, rowIndex);
+  return { type, version };
+}
+
+export async function listArquitetoArtifactsVigentes(context: PipelineContext, metasLidos?: readonly ArquitetoVersionMeta[]) {
+  const metas = metasLidos ?? await listArquitetoVersionMeta(context);
+  const vigentes = vigentesFromMeta(metas);
+  /* Keywords de ArticleDNA em qualquer versão, da marca: a mesma pergunta que a elegibilidade fazia sobre todas as versões. */
+  const incorporatedKeywordIdsAllVersions = new Set(metas
+    .filter(meta => meta.artifactType === "article_dna" && meta.brandId === context.brandId)
+    .flatMap(meta => meta.keywordIds));
+  const linhaPorVersao = await readArquitetoVersionRows(context, vigentes.map(meta => meta.versionId));
+  const articleDnas: VersionEnvelope<ArticleDNA>[] = [];
+  const siloDnas: VersionEnvelope<SiloDNA>[] = [];
+  const siloPages: VersionEnvelope<SiloPage>[] = [];
+  const aiReviews: VersionEnvelope<ArticleArchitectureAiReview>[] = [];
+  const statuses: Array<{ versionId: string; status: string }> = [];
+  for (const [rowIndex, meta] of vigentes.entries()) {
+    const row = linhaPorVersao.get(meta.versionId);
+    if (!row) throw new PipelineRuntimeError("QUERY_FAILURE", `A versão vigente ${meta.versionId} não voltou na leitura.`, 503);
+    const lida = arquitetoVersionFromRow(context, row, rowIndex);
+    if (!lida) continue;
+    if (lida.type === "article_dna") articleDnas.push(lida.version as VersionEnvelope<ArticleDNA>);
+    else if (lida.type === "silo_dna") siloDnas.push(lida.version as VersionEnvelope<SiloDNA>);
+    else if (lida.type === "silo_page") siloPages.push(lida.version as VersionEnvelope<SiloPage>);
+    else aiReviews.push(lida.version as VersionEnvelope<ArticleArchitectureAiReview>);
+    statuses.push({ versionId: String(row.version_id), status: String(row.status) });
+  }
+  return { articleDnas, siloDnas, siloPages, aiReviews, statuses, incorporatedKeywordIdsAllVersions, versionsListed: metas.length, source: "CANONICAL_REMOTE" as const };
+}
+
 export function pipelineArtifactErrorResponse(error: unknown) {
   // F5 — a recusa da guarda leva o código próprio e o registro anterior (§10.4).
   if (error instanceof ReworkRefusedError) {

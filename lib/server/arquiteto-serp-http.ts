@@ -59,6 +59,7 @@ import { serpIntentReadingOf,
 import { inspectDataForSeoSerpResponse, type DataForSeoSerpProviderDiagnostic } from "@/lib/server/dataforseo-serp-operation";
 import { normalizeDataForSeoSerpResponse } from "@/lib/server/dataforseo-serp-normalizer";
 import { collectAndCacheSerp, lookupSerpCache, type SerpCacheLookup } from "@/lib/server/serp-cache";
+import { readKnownBeforeSearch } from "@/lib/server/known-before-search";
 import { serpCacheLensLabel, serpCacheSubjectId, type SerpCacheLens, type SerpCacheMeta } from "@/lib/editorial/serp-cache";
 import type { SerpResearchSnapshot, SerpSearchInput } from "@/lib/radar/serp/contracts";
 
@@ -155,6 +156,12 @@ type SerpOperationDiagnostic = {
   extraLensCacheHits: number;
   /** A leitura do targeting do Minerador falhou: todas as chaves usaram os códigos do ambiente. */
   targetingReadFailed: boolean;
+  /**
+   * F3 · LER ANTES DE BUSCAR (regra 6: o servidor decide o volume). Quantas
+   * keywords tiveram o volume conferido no banco, quantas vieram do pedido com
+   * outro número (o do banco vale) e se a leitura falhou (o pedido vale, como antes).
+   */
+  knownBeforeSearch?: { checked: number; corrected: number; readFailed: boolean };
   queries: SerpQueryDiagnostic[];
   extraLensQueries: ExtraLensQueryDiagnostic[];
 };
@@ -415,6 +422,23 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
      */
     const targeting = await readMineradorKeywordTargetCodes(pipelineContext.supabase, pipelineContext.brandId, potentialKeywords.map(keyword => String(keyword.id)), targetCodes);
     diagnostic.targetingReadFailed = targeting.readFailed;
+    /*
+     * F3 · LER ANTES DE BUSCAR — O SERVIDOR DECIDE O VOLUME (SDD 2026-10-13,
+     * item 3, regra 6). O volume que decide quem é consultado (e pago) é o do
+     * BANCO, não o que o navegador mandou: a mesa pode estar velha (keyword
+     * medida, ou remedida, em outra aba). A linha da marca lida vale; keyword
+     * fora do acervo (candidata montada pelo próprio servidor) e leitura que
+     * falha ficam com o pedido, como antes, e o diagnóstico diz.
+     */
+    const conferido = await readKnownBeforeSearch(pipelineContext.supabase as unknown as Parameters<typeof readKnownBeforeSearch>[0], pipelineContext.brandId, potentialKeywords.map(keyword => String(keyword.id)));
+    let corrigidas = 0;
+    if (!conferido.readFailed) for (const keyword of potentialKeywords) {
+      const lida = conferido.keywords.get(String(keyword.id));
+      if (!lida || lida.volumeSearch === undefined) continue;
+      if ((keyword.volume_search ?? null) !== lida.volumeSearch) corrigidas++;
+      keyword.volume_search = lida.volumeSearch;
+    }
+    diagnostic.knownBeforeSearch = { checked: conferido.keywords.size, corrected: corrigidas, readFailed: conferido.readFailed };
     const usesEnvironmentCodes = (keywordId: string) => !targeting.codes.has(keywordId);
     const codesFor = (keywordId: string) => serpTargetCodesFor(targeting.codes, keywordId, targetCodes);
     const cacheRequestFor = (keyword: { id: string; keyword: string }, codes = codesFor(String(keyword.id)), requestLens = lens) => formationSerpCacheRequest({

@@ -2,6 +2,7 @@ import { allocateReinforcementChoices } from "./reinforcement-allocation.ts";
 import { intentComparisonKey, type KeywordDnaSignals } from "./keyword-dna-signals.ts";
 import { classifySlugFit } from "./published-slug-fit.ts";
 import { normalizeKeyword } from "../minerador/keyword-import-core.ts";
+import type { GoogleAdsHistoricalMetric } from "../google/ads/contracts.ts";
 
 export const ARTICLE_IMPROVEMENT_VERSION = 1;
 export const ARTICLE_IMPROVEMENT_LABEL = "Melhorar publicados e formar Assuntos";
@@ -11,14 +12,33 @@ export type ImprovementKeyword = {
   territoryRef: string | null; external: boolean;
   /**
    * Volume antigo (outra era/provider) medido AGORA no Google Ads, no preparo,
-   * só em leitura. "Gravar melhorias" grava a medição no Minerador antes de
-   * comparar a composição; sem isso a keyword nunca contava como volume
-   * validado e a principal publicada sem volume ficava para sempre.
+   * só em leitura. F4 (SDD 2026-10-13, item 2): o Arquiteto não grava a
+   * medição; a proposta que depende dela fica "Precisa do Minerador" e a
+   * medição vai como sugestão ao Minerador, que a grava pelo clique do dono.
    */
   volumePendingWrite?: boolean;
   /** Já medida no Google Ads (mesmo sem média): não é medida de novo no preparo. */
   googleAdsMeasured?: boolean;
+  /**
+   * F3 · LER ANTES DE BUSCAR (D4): "o Google Ads não tem média" registrado há
+   * menos de 30 dias (no Minerador ou nesta preparação) — conta como medida.
+   */
+  noAverageAt?: string;
+  /** F3 — medida no Google Ads NESTA preparação (com a autorização dita na prévia). */
+  measuredNowAt?: string;
+  /**
+   * F3 · MEDIR UMA VEZ: a medição do Google Ads feita na preparação (só para a
+   * keyword com volume, cuja gravação fica pendente). F4: ela vai, guardada no
+   * servidor, na sugestão ao Minerador, que a grava pelo núcleo do "Medir
+   * volume" no clique do dono, sem chamar o Google Ads de novo.
+   * A conta do Google Ads vai mascarada (só os 4 últimos dígitos, como no Minerador).
+   */
+  measurement?: ImprovementStoredMeasurement;
+  /** F3 — a ideia da busca nova já existe no Minerador com volume medido: "já temos", não é medida de novo. */
+  knownInMinerador?: { keywordId: string };
 };
+/** A medição guardada na execução para ser gravada depois sem nova chamada (F3). */
+export type ImprovementStoredMeasurement = { metric: GoogleAdsHistoricalMetric; requestId: string | null };
 export type ImprovementTarget = {
   id: string; kind: "published" | "subject"; theme: string; note: string | null;
   primaryId: string | null; post: "free" | "locked" | "unknown";
@@ -38,6 +58,14 @@ export type ImprovementTarget = {
   planPrincipalId?: string | null;
   /** F4 — o DNA vigente ainda não tem a promessa e o papel do plano (D8: versão nova). */
   declaredPlanPending?: boolean;
+  /**
+   * F5 · PLANILHA PRIMEIRO (SDD 2026-10-13, item 5) — "Trocar principal" do
+   * artigo do plano com trava LIVRE: a keyword que o humano escolheu entre as
+   * candidatas da regra única. Ausente = a melhoria decide como sempre.
+   */
+  chosenPrincipalId?: string | null;
+  /** F5 — a escolha foi recusada para esta linha (travada, fora das candidatas…): a proposta não fica pronta. */
+  principalChoiceRefusal?: string | null;
 };
 /** Evidence is supplied by the canonical cache reader, never inferred from volume. */
 export type ImprovementEvidence = {
@@ -62,6 +90,13 @@ export type ImprovementProposal = {
    * dele decidiu. `recordVersionId` é o parecer (`serpAssessmentRef`) lido.
    */
   serpRefresh?: { recordVersionId: string; intent: string; funnel: string; detail: string };
+  /**
+   * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13, item 2): a proposta precisaria de
+   * keyword nova, de medição gravada ou da Lógica no Minerador. Ela não é
+   * aceitável aqui ("Precisa do Minerador"); a sugestão vai para a caixa
+   * "Sugestões do Arquiteto" do Minerador (`article-improvement-minerador.ts`).
+   */
+  needsMinerador?: { newKeywordIds: string[]; measureKeywordIds: string[]; logicKeywordIds: string[] };
 };
 /**
  * Uma escolha da IA já conferida pelas barreiras do código (a IA tem a menor
@@ -398,7 +433,7 @@ export function planArticleImprovements(input: {
     }
   }
   guardCannibalPairs(input.targets, proposals, byId, () => true);
-  if (input.listReading === false) return enforceDeclaredPrincipals(input.targets, proposals, byId);
+  if (input.listReading === false) return enforceChosenPrincipals(input.targets, enforceDeclaredPrincipals(input.targets, proposals, byId), byId);
   /*
    * 4 · LEITURA DA LISTA PELO CÓDIGO (dono, 2026-09-30: "não está se
    * aproveitando bem das keywords da lista"). Quem ficou sem proposta pronta —
@@ -462,7 +497,63 @@ export function planArticleImprovements(input: {
     if (troca) proposals[index] = troca;
   });
   for (const p of proposals) { p.exclusions = [...new Set(p.exclusions)]; p.reasons = [...new Set(p.reasons)]; }
-  return enforceDeclaredPrincipals(input.targets, proposals, byId);
+  return enforceChosenPrincipals(input.targets, enforceDeclaredPrincipals(input.targets, proposals, byId), byId);
+}
+
+/** F5 — o motivo que a prévia mostra quando o humano escolheu a principal na planilha. */
+export const CHOSEN_PRINCIPAL_REASON = "Troca de principal escolhida por você na planilha “Artigos do plano” (trava Livre, decisão humana).";
+
+/**
+ * F5 · PLANILHA PRIMEIRO — "TROCAR PRINCIPAL" (SDD 2026-10-13, item 5). A
+ * escolha do humano vale depois de qualquer leitura (pares da SERP, IA, lista):
+ * a escolhida vira a principal, a principal anterior fica como secundária (o
+ * Assunto continua no artigo) e o resto da composição atual continua; nada
+ * mais entra por esta troca. Principal declarada TRAVADA nunca é trocada
+ * (`declaredPrincipalId` vence; a escolha chega recusada pelo servidor). A
+ * SERP da composição continua decidindo no `refreshPlan`, pelo cache.
+ */
+function enforceChosenPrincipals(targets: readonly ImprovementTarget[], proposals: ImprovementProposal[], byId: ReadonlyMap<string, ImprovementKeyword>): ImprovementProposal[] {
+  targets.forEach((target, index) => {
+    const p = proposals[index];
+    if (target.principalChoiceRefusal) {
+      p.status = "no_alternative";
+      p.reasons = [...new Set([...p.reasons, target.principalChoiceRefusal])];
+      return;
+    }
+    const escolhida = target.chosenPrincipalId;
+    if (!escolhida || target.declaredPrincipalId) return;
+    const anterior = target.primaryId;
+    /*
+     * A keyword que carrega o Assunto (cadastro único) não pode ser secundária
+     * do próprio artigo: trocada, ela sai das keywords e continua como o
+     * Assunto (fundamento) — a regra de `attachSubjectToArticleDna`.
+     */
+    const doAssunto = (id: string) => target.kind === "subject" && id === target.id && id !== escolhida;
+    const membros = [...new Set([escolhida, ...(anterior ? [anterior] : []), ...target.memberIds])].filter(id => !doAssunto(id));
+    while (membros.length > IMPROVEMENT_ARTICLE_MAX_KEYWORDS) {
+      const sai = [...membros].reverse().find(id => id !== escolhida && id !== anterior);
+      if (!sai) break;
+      membros.splice(membros.indexOf(sai), 1);
+    }
+    p.principalId = escolhida;
+    p.memberIds = membros;
+    p.addIds = membros.filter(id => !target.memberIds.includes(id));
+    p.removeIds = target.memberIds.filter(id => !membros.includes(id));
+    p.transfers = p.addIds.filter(id => byId.has(id) && byId.get(id)?.territoryRef !== target.territoryRef);
+    p.angle = angleOf(byId.get(escolhida)) || p.angle;
+    delete p.aiReasons;
+    p.evidenceBasis = "editorial_and_candidate_serp";
+    const nome = (id: string | null) => (id ? byId.get(id)?.keyword : null) ?? (id === target.id ? target.theme : id) ?? "nenhuma";
+    p.reasons = [
+      ...p.reasons.filter(reason => !/^Principal com volume escolhida na lista|^Nova principal sustentada|^Principal com demanda medida/.test(reason)),
+      escolhida === anterior ? `${CHOSEN_PRINCIPAL_REASON} “${nome(escolhida)}” já é a principal.`
+        : anterior && doAssunto(anterior) ? `${CHOSEN_PRINCIPAL_REASON} “${nome(anterior)}” → “${nome(escolhida)}”; a keyword do Assunto sai das keywords e o Assunto continua no artigo (fundamento).`
+        : `${CHOSEN_PRINCIPAL_REASON} “${nome(anterior)}” → “${nome(escolhida)}”; “${nome(anterior)}” fica como secundária e o Assunto continua no artigo.`,
+    ];
+    p.reasons = [...new Set(p.reasons)];
+    p.status = !target.territoryRef ? "insufficient_evidence" : escolhida === anterior && !p.addIds.length && !p.removeIds.length ? "adequate" : "ready";
+  });
+  return proposals;
 }
 
 /** F4 — o motivo que a prévia mostra quando a principal declarada assume. */

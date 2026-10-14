@@ -184,6 +184,8 @@ export type SubjectDiscoveryPlanResponse = {
   mode: "plan";
   subject: SubjectDiscoverySubject;
   plan: SubjectDiscoveryPlan;
+  /** F3 (aditivo): as pesquisas anteriores do mesmo Assunto, lidas antes de consultar de novo. */
+  previousSearches?: Array<{ operationRequestId: string; executedAt: string; candidateCount: number }>;
 };
 
 export type SubjectDiscoveryExecuteResponse = {
@@ -346,7 +348,24 @@ export type SubjectDiscoveryPorts = {
    * de publicados), nada é gravado. Nunca lança: tabela ausente = `unavailable`.
    */
   recordReceipt?: (draft: SubjectSearchReceiptDraft) => Promise<SubjectSearchReceiptOutcome>;
+  /**
+   * F3 · LER ANTES DE BUSCAR (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+   * item 3, regra 8). Aditivo: as pesquisas anteriores do mesmo Assunto (recibos),
+   * lidas na prévia — antes de consultar o Google Ads de novo. Ausente = nada muda.
+   */
+  readPreviousSearches?: (input: { phrase: string; subjectKeywordId: string | null }) => Promise<Array<{ operationRequestId: string; executedAt: string; candidateCount: number }>>;
 };
+
+/** F3 — a frase da prévia quando o mesmo Assunto já foi pesquisado. */
+export function subjectDiscoveryPreviousSearchNotice(previous: ReadonlyArray<{ executedAt: string; candidateCount: number }>): string | null {
+  if (!previous.length) return null;
+  const [ultima] = previous;
+  const data = new Date(ultima.executedAt);
+  const quando = Number.isFinite(data.getTime())
+    ? `${String(data.getUTCDate()).padStart(2, "0")}/${String(data.getUTCMonth() + 1).padStart(2, "0")}/${data.getUTCFullYear()}`
+    : ultima.executedAt;
+  return `Já temos: este Assunto já foi pesquisado ${previous.length === 1 ? "1 vez" : `${previous.length} vezes`} (a última em ${quando} UTC, ${ultima.candidateCount} candidata(s) no recibo). As candidatas importadas continuam no Minerador; pesquisar de novo consulta o Google Ads outra vez (cota da Descoberta, sem custo em dólar).`;
+}
 
 /* -------------------------------- auxiliares ------------------------------- */
 
@@ -630,7 +649,11 @@ export async function runSubjectDiscoverySearch(input: { brandId: string; reques
   if (request.mode === "plan") {
     const authorization = authorizeSubjectDiscoveryPlan(plan, { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd });
     if (!authorization.ok && authorization.code === "SUBJECT_DISCOVERY_PLAN_ABOVE_CAP") return failure(422, authorization.code, "plan", authorization.message, { plan });
-    return { status: 200, body: { success: true, mode: "plan", subject, plan } };
+    // F3 · ler antes de buscar: as pesquisas anteriores do mesmo Assunto entram nos avisos da prévia (fora do hash do plano).
+    let anteriores: Array<{ operationRequestId: string; executedAt: string; candidateCount: number }> = [];
+    try { anteriores = ports.readPreviousSearches ? await ports.readPreviousSearches({ phrase: subject.phrase, subjectKeywordId: subject.subjectKeywordId }) : []; } catch { anteriores = []; }
+    const aviso = subjectDiscoveryPreviousSearchNotice(anteriores);
+    return { status: 200, body: { success: true, mode: "plan", subject, plan: aviso ? { ...plan, notices: [aviso, ...plan.notices] } : plan, ...(anteriores.length ? { previousSearches: anteriores } : {}) } };
   }
 
   const operationRequestId = request.operationRequestId as string;

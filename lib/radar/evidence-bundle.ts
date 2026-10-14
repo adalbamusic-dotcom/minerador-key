@@ -42,6 +42,7 @@ import type { RadarCompetitiveBlueprint, RadarResearchRef } from "./competitive-
 import type { RadarResearchProfile } from "./research-profile.ts";
 import type { RadarResearchSource } from "./search-mode.ts";
 import type { RadarFrozenSerpLensBlock } from "./serp/frozen-lenses.ts";
+import type { RadarAuthoritySourcesRecord } from "./authority-sources-contract.ts";
 
 /* ============================== o vínculo =============================== */
 
@@ -230,6 +231,18 @@ export type RadarEvidenceBundle = {
    * acréscimo, e o hash de todo dossiê só-Google continua o mesmo.
    */
   formatBlueprints?: RadarFormatBlueprints;
+  /**
+   * ===== 2026-10-14c · AS FONTES EXTERNAS DE AUTORIDADE CONFERIDAS (SDD silo interligado §16.2, Fase B) =====
+   *
+   * O registro que a conferência do ANALYZE gravou na versão da análise
+   * (`payload.authoritySources`, ids X), congelado no pacote como foi gravado:
+   * o artigo-modelo, o CSV "Para escrever" e `get_article_for_writing` leem as
+   * fontes verificadas daqui, sem abrir página nem chamar IA.
+   *
+   * ADITIVO E OPCIONAL, como `serpLenses`: ausente quando a análise não tem o
+   * registro (toda análise anterior à Fase A), e o hash desses dossiês não muda.
+   */
+  authoritySources?: RadarAuthoritySourcesRecord;
 };
 
 export type RadarFormatBlueprints = {

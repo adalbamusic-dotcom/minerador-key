@@ -1,5 +1,17 @@
 # Backlog — Marca
 
+## Fontes de autoridade da marca — 2026-10-14
+
+- [x] Bloco "Fontes de autoridade" na Identidade da marca (campo opcional do BrandDNA; SDD do Silo interligado §16.2).
+- [ ] Dono: conferir a lista, salvar e aprovar a Identidade da marca (sem aprovação, o Radar usa a lista sugerida).
+- [ ] Avaliar se a lista deve poder ser salva sem completar os campos obrigatórios do BrandDNA (posicionamento, público, voz, objetivos).
+
+## Convites fora da mesa (F2 das listas leves) — 2026-10-14
+
+- [x] "Equipe" lê os convites por `GET /api/editorial/invitations`; a mesa não os traz mais.
+- [ ] Decidir a persistência dos convites de marca: `brand_invitations` não existe no banco (SELECT de 2026-10-14) — a leitura da Equipe mostra o aviso de falha. Convite de marca é frente própria (spec de Marca/Conta/Admin; `AGENTS.md` §8), não desta fase.
+- [ ] Dono: abrir Marca → Equipe e conferir o aviso (ou a lista, quando houver persistência).
+
 ## Egress da home da marca — 2026-09-23
 
 - [ ] A home da marca (`modules/marca/brand-page.tsx`, visão) ainda lê a mesa editorial inteira (~2,36 MB na Care Glow, depois da E1) para mostrar 4 contadores e convites. Costuma ser a página de entrada depois de escolher a marca. Trocar por contagens estreitas. Registro na seção 8 da [SDD de egress](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md).

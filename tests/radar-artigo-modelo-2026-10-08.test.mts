@@ -539,7 +539,7 @@ test("B7 · a versão das regras: gravada na planta, preservada na edição e no
   /* 2026-10-11 · a âncora natural (conceitos do grafo e URL canônica de cada candidato K; nunca a keyword inteira do destino). */
   /* 2026-10-11b · a diretriz de comunicação humana guiada pela SERP (regras 27 e 28 do pedido; notas da regra 28 na conferência). */
   /* 2026-10-11c · as keywords proibidas por destino (a lista em cada candidato K; a âncora nunca é uma delas). */
-  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-11c");
+  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-14c"); /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): regras 2026-10-14c */
   const { payload } = organizar(resposta());
   assert.equal(payload.rulesVersion, RADAR_ARTICLE_BLUEPRINT_RULES_VERSION);
   assert.equal(radarArticleBlueprintPayloadToStore({ ...payload, approval: "APPROVED" }).rulesVersion, RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "vai ao banco");

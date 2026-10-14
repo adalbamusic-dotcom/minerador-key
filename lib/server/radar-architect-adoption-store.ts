@@ -7,11 +7,13 @@ import "server-only";
  * nova da análise e o evento. O Arquiteto não é escrito.
  */
 
-import type { ArticleDNA, SiloDNA, SiloPage, VersionEnvelope } from "../arquiteto/contracts";
+import type { ArticleDNA, InternalLinkGraph, SiloDNA, SiloPage, VersionEnvelope } from "../arquiteto/contracts";
 import { VersionedSiloDNASchema, VersionedSiloPageSchema } from "../arquiteto/contracts";
 import { getOperationalClient, mapPersistenceError } from "./editorial-db";
 import { ArtifactRepository } from "./editorial-repositories";
 import { buildCanonicalIndex } from "./global-workflow-canonical";
+import { readInternalLinkGraph } from "./internal-link-graph-persistence";
+import type { PipelineContext } from "./pipeline-runtime";
 import type { RadarAdoptionItemHead, RadarAdoptionItemRow, RadarArchitectAdoptionStore } from "./radar-architect-adoption";
 
 type Db = ReturnType<typeof getOperationalClient>;
@@ -51,7 +53,7 @@ export function supabaseRadarArchitectAdoptionStore(db: Db = getOperationalClien
   return {
     async listRadarItemHeads(brandId, articleIds) {
       const consulta = () => db.from("editorial_workflow_items")
-        .select("id,marca_id,article_id,stage,state,lock_version,source_version_id,transported_version_id:payload->>articleDnaVersionId")
+        .select("id,marca_id,article_id,stage,state,lock_version,source_version_id,transported_version_id:payload->>articleDnaVersionId,carried_graph_version_id:payload->arquitetoInternalLinks->>graphVersionId")
         .eq("marca_id", brandId).eq("subject_type", "article").eq("stage", "radar");
       if (articleIds) return emBlocos<RadarAdoptionItemHead>(articleIds, bloco => consulta().in("article_id", bloco));
       const { data, error } = await consulta();
@@ -109,10 +111,23 @@ export function supabaseRadarArchitectAdoptionStore(db: Db = getOperationalClien
       }, { onConflict: "workflow_item_id,version_id" });
       if (error) mapPersistenceError(error);
     },
+    async readInternalLinkGraphs(brandId, graphVersionIds) {
+      /* 2026-10-14 · o MESMO leitor canônico do grafo (nós e arestas), só SELECT, um por versão pedida. */
+      const contexto = { supabase: db, brandId } as unknown as PipelineContext;
+      const grafos: InternalLinkGraph[] = [];
+      for (const graphVersionId of [...new Set(graphVersionIds)]) {
+        const grafo = await readInternalLinkGraph(contexto, graphVersionId);
+        if (grafo && grafo.brandId === brandId) grafos.push(grafo);
+      }
+      return grafos;
+    },
     async updateRadarItem(input) {
+      /* Sem `source*` (adoção de links, 2026-10-14), as colunas da versão transportada não são escritas. */
+      const colunasDaVersao = input.sourceVersionId
+        ? { source_entity_id: input.sourceEntityId, source_version_id: input.sourceVersionId, source_content_hash: input.sourceContentHash }
+        : {};
       const { data, error } = await db.from("editorial_workflow_items").update({
-        payload: input.payload, source_entity_id: input.sourceEntityId, source_version_id: input.sourceVersionId,
-        source_content_hash: input.sourceContentHash, updated_by: input.actorId,
+        payload: input.payload, ...colunasDaVersao, updated_by: input.actorId,
       }).eq("id", input.itemId).eq("marca_id", input.brandId).eq("stage", "radar").eq("lock_version", input.expectedLock)
         .select("id,lock_version").maybeSingle();
       if (error) mapPersistenceError(error);

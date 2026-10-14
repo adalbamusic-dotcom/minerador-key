@@ -26,7 +26,9 @@ const unidade = (over: Partial<LinkAnchorUnitFacts> = {}): LinkAnchorUnitFacts =
   siloLabel: "Skin care para peles oleosas",
   architecturalRole: "PILAR",
   principal: "skin care para pele oleosa",
-  secondaries: ["rotina para pele oleosa"],
+  // 2026-10-14 · SDD silo interligado · F4 · decisão do dono (§6.4): a keyword do destino deixou de ser âncora aceita;
+  // a secundária do fixture deixou de ser "rotina para pele oleosa", que os casos abaixo usam como variante.
+  secondaries: ["limpeza de pele oleosa"],
   reinforcements: ["oleosidade da pele"],
   entities: ["pele oleosa"],
   intent: "informacional",
@@ -51,7 +53,8 @@ test("variante semântica é aceita sem exigir exact match", () => {
     concepts: [
       conceito("cuidados para pele oleosa", { semanticRelation: "sinonimo" }),
       conceito("rotina para pele oleosa", { semanticRelation: "variante_lexical" }),
-      conceito("cuidados com a oleosidade da pele", { semanticRelation: "expressao_contextual" }),
+      // 2026-10-14 · F4 (§6.4): "…a oleosidade da pele" contém inteiro o reforço "oleosidade da pele" e é recusado; o recorte passa.
+      conceito("cuidados com a oleosidade", { semanticRelation: "expressao_contextual" }),
     ],
     target,
   });
@@ -61,13 +64,15 @@ test("variante semântica é aceita sem exigir exact match", () => {
   assert.ok(accepted.every(item => item.text !== target.principal));
 });
 
-test("exact match continua válido, mas não é obrigatório", () => {
+// 2026-10-14 · SDD silo interligado · F4 · decisão do dono (§6.4): "exact match continua válido" virou recusa.
+test("exact match não é obrigatório e, desde a F4, a keyword do destino é recusada", () => {
   const target = unidade();
   const comExato = reviewAnchorConcepts({
     concepts: [conceito("skin care para pele oleosa", { semanticRelation: "exact" })],
     target,
   });
-  assert.equal(comExato.accepted.length, 1);
+  assert.equal(comExato.accepted.length, 0);
+  assert.equal(comExato.rejected[0].code, "TARGET_KEYWORD");
 
   const semExato = reviewAnchorConcepts({
     concepts: [conceito("cuidados para pele oleosa"), conceito("rotina para pele oleosa")],

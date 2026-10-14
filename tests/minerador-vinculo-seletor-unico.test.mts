@@ -157,7 +157,8 @@ test("2026-10-13: Assunto não pula mais o Posto; ação de Assunto é recusada 
   if (!onlyPost.ok) return;
   assert.deepEqual(onlyPost.updates.map(update => update.id), [uuid(1), uuid(2)], "a keyword com Assunto é tratada como qualquer keyword");
   const details = describeVinculoBatchChoicesConfirmation(onlyPost).steps[0].details;
-  assert.ok(details.some(detail => detail.startsWith("1 não publicada foi pulada")), details.join(" / "));
+  // 2026-10-13 · a não publicada sem plano já é livre: "Livre" não muda nada (o posto dela é a trava do cadastro).
+  assert.ok(details.includes("1 já estava assim."), details.join(" / "));
   assert.doesNotMatch(details.join(" "), /Assunto/);
 
   for (const action of [{ kind: "subject_withdraw" as const }, { kind: "subject_declare" as const }]) {

@@ -30,7 +30,8 @@ export function adaptLegacyBrand(snapshot: EditorialSnapshot) {
 }
 
 export function adaptLegacyKeyword(keyword: EditorialSnapshot["keywords"][number]): LegacyKeywordView {
-  const semantic = keyword.analise_semantica;
+  /* 2026-10-14 · `/api/inteligencia` não traz mais o DNA: ausente vira "não disponível" em cada campo (missingFields). */
+  const semantic = keyword.analise_semantica ?? null;
   const fields = {
     intent: keyword.intent ? { value: keyword.intent, available: true, sourcePath: "minerador_keywords.intent" } : read(semantic, ["intencao_principal", "intencao"]),
     centralEntity: read(semantic, ["entidade_central", "entidade"]),

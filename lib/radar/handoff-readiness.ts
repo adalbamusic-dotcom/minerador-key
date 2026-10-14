@@ -417,7 +417,14 @@ export function radarObservedDivergesFromFrozen(observado: NonNullable<RadarEvid
     divergencias.push("Os conceitos observados no dossiê não são os mesmos que foram congelados.");
   }
 
-  if (observado.internalLinkPlan.totalRecommendedLinks !== frozen.links.totalRecommendedLinks) {
+  /*
+   * 2026-10-14 · LINKS NÃO MUDAM A SERP (decisão do dono). Com o grafo novo
+   * adotado depois do congelamento ("Atualização disponível do Arquiteto ·
+   * links"), o dossiê lê o grafo vigente e o congelado guarda o do momento:
+   * contar links de grafos diferentes não diz nada sobre a rodada congelada.
+   */
+  const mesmoGrafo = (observado.internalLinks?.graphVersionId ?? null) === (frozen.links.graphVersionId ?? null);
+  if (mesmoGrafo && observado.internalLinkPlan.totalRecommendedLinks !== frozen.links.totalRecommendedLinks) {
     divergencias.push(`Links recomendados: ${observado.internalLinkPlan.totalRecommendedLinks} no dossiê, ${frozen.links.totalRecommendedLinks} no congelado.`);
   }
   if (observado.authorityEvidence.claims.length !== frozen.authority.claims.length) {

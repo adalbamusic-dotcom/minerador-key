@@ -182,7 +182,7 @@ export function planSiloDeclaredPlanApplication(input: SiloDeclaredPlanInput): S
   const unidades = [...atuaisIds, ...extras].map(id => unitOf(artigos.get(id)!));
   const presentes = new Set(unidades.map(unit => declaredPlanEntryForUnit(unit, entradasDoGrupo)?.subjectKeywordId).filter(Boolean));
   for (const entrada of [...entradasDoGrupo].sort((a, b) => a.plan.order - b.plan.order)) {
-    if (!presentes.has(entrada.subjectKeywordId)) avisos.push(`O artigo ${entrada.plan.order} do plano ainda não tem ArticleDNA neste Silo: forme-o em Artigos → “Formar os artigos do plano” e aplique o plano de novo para ele entrar.`);
+    if (!presentes.has(entrada.subjectKeywordId)) avisos.push(`O artigo ${entrada.plan.order} do plano ainda não tem ArticleDNA neste Silo: forme-o em Artigos → Artigos novos → planilha “Artigos do plano” → “Concluir formação” e aplique o plano de novo para ele entrar.`);
   }
 
   const resolucao = resolveDeclaredSiloPlan({ units: unidades, entries: entradasDoGrupo });

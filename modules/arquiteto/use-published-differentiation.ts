@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultAcceptPageIds,
   differentiationErrorMessage,
-  differentiationIngestRequest,
   differentiationRunRequest,
   runReadiness,
   sumDifferentiationCost,
@@ -87,8 +86,10 @@ export function usePublishedDifferentiation(input: {
   enabled: boolean;
   onApplied?: () => void;
   onAddToArticle?: DifferentiationAddToArticle;
+  /** F4 · o link para "Sugestões do Arquiteto" no Minerador (o Arquiteto nunca importa lá). */
+  mineradorSuggestionsHref?: string | null;
 }) {
-  const { brandId, enabled, onApplied, onAddToArticle } = input;
+  const { brandId, enabled, onApplied, onAddToArticle, mineradorSuggestionsHref = null } = input;
   const [reload, setReload] = useState(0);
   const [detection, setDetection] = useState<{ brandId: string | null; state: "idle" | "loading" | "ready" | "failed"; data: DifferentiationDetectData | null; error: string | null }>({ brandId: null, state: "idle", data: null, error: null });
   const [entries, setEntries] = useState<Record<string, DifferentiationGroupEntry>>({});
@@ -280,32 +281,11 @@ export function usePublishedDifferentiation(input: {
     }
   }, [brandId, busy, patch]);
 
-  /** Passo seguinte do aceite: as keywords novas vão ao Processador do Minerador. */
-  const sendIngest = useCallback(async (groupId: string) => {
-    const lotes = entries[groupId]?.accepted?.ingestBatches || [];
-    if (!brandId || !lotes.length || busy) return;
-    setBusy(true);
-    patch(groupId, () => ({ ingest: { status: "sending", message: null } }));
-    try {
-      let criadas = 0;
-      let existentes = 0;
-      const falhas: string[] = [];
-      for (const lote of lotes) {
-        const result = await postJson<{ counts?: { created?: number; recorded?: number; alreadyRecorded?: number; failed?: number } }>(
-          `/api/minerador/marcas/${encodeURIComponent(brandId)}/subject-discovery/import`,
-          differentiationIngestRequest(lote, crypto.randomUUID()),
-        );
-        if (!result.ok) { falhas.push(result.message); continue; }
-        criadas += result.data.counts?.created ?? 0;
-        existentes += (result.data.counts?.recorded ?? 0) + (result.data.counts?.alreadyRecorded ?? 0);
-        if (result.data.counts?.failed) falhas.push(`${result.data.counts.failed} não entraram`);
-      }
-      const resumo = `${criadas} nova(s) no Processador, ${existentes} já existia(m). Meça e aprove no Minerador; depois coloque no artigo e aceite de novo.`;
-      patch(groupId, () => ({ ingest: falhas.length ? { status: "failed", message: `${resumo} Falhas: ${falhas.join("; ")}.` } : { status: "done", message: resumo } }));
-    } finally {
-      setBusy(false);
-    }
-  }, [brandId, entries, busy, patch]);
+  /*
+   * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13, item 2): o "Enviar ao Minerador"
+   * (que chamava a rota de import do Minerador daqui) saiu. O aceite grava as
+   * keywords novas como "Sugestões do Arquiteto"; o dono importa no Minerador.
+   */
 
   /** Passo seguinte do aceite: keyword do Minerador que ainda não está no artigo, pela formação. */
   const addToArticle = useCallback(async (groupId: string, pageKeywordId: string, keywordIds: readonly string[]) => {
@@ -342,7 +322,7 @@ export function usePublishedDifferentiation(input: {
     retryRun,
     accept,
     keep,
-    sendIngest,
+    mineradorSuggestionsHref,
     addToArticle,
   };
 }

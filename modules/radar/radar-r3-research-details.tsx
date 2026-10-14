@@ -4,6 +4,7 @@ import { buildRadarResearchDetails, type RadarResearchDetailsView } from "@/lib/
 import type { RadarDeepResearchView } from "@/lib/radar/deep-research-view";
 import type { RadarR3Model } from "@/lib/radar/r3-workbench";
 import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
+import { radarAuthoritySourcesView } from "@/lib/radar/authority-sources";
 import { RadarFrozenLensSummary, RadarSerpLensCoverageView } from "./radar-serp-lens-coverage";
 import { radarFrozenLensView } from "./radar-serp-lens-view";
 
@@ -71,6 +72,8 @@ export function RadarR3ResearchDetails({ model, view }: { model: RadarR3Model; v
       id: item.id, provider: item.provider, status: item.status, origin: item.origin, error: item.error,
     })),
   });
+  /* 2026-10-14 · as fontes externas de autoridade gravadas na análise (Fase A). */
+  const fontesDeAutoridade = radarAuthoritySourcesView(model.serp.analysis?.payload.authoritySources);
 
   /*
    * §14 · HOUVE PIPELINE DO GOOGLE NESTA INVESTIGAÇÃO?
@@ -269,6 +272,35 @@ export function RadarR3ResearchDetails({ model, view }: { model: RadarR3Model; v
             && <p className="mt-1 text-sm text-text-muted">Nada registrado nesta rodada.</p>}
         </div>
       </div>
+    </Consulta>
+
+    {/*
+      * 2026-10-14 · FONTES EXTERNAS DE AUTORIDADE (SDD do Silo interligado §16.2, Fase A).
+      * Leitura do que a análise gravou: quantas foram conferidas, o trecho e a
+      * afirmação de cada uma (id X), as que falharam e por quê, e as afirmações de
+      * saúde que seguem sem fonte. Sem botão: a conferência roda no ANALYZE.
+      */}
+    <Consulta testId="radar-research-details-authority" title="Fontes externas de autoridade" count={fontesDeAutoridade.count}
+      empty={[fontesDeAutoridade.headline, ...(fontesDeAutoridade.ymylPending.length ? [`Afirmações de saúde ainda sem fonte conferida: ${fontesDeAutoridade.ymylPending.join(" · ")}.`] : [])].join(" ")}>
+      <p className="text-sm leading-6 text-foreground" data-testid="radar-authority-headline">{fontesDeAutoridade.headline}</p>
+      {fontesDeAutoridade.verified.length > 0 && <ul className="mt-2 space-y-2">
+        {fontesDeAutoridade.verified.map(item => <li key={item.id} className={bloco}>
+          <a className="break-all text-sm font-medium text-context-accent underline" href={item.url} target="_blank" rel="noreferrer">{item.label}</a>
+          <p className="mt-1 text-sm leading-6 text-foreground">Sustenta: {item.claim}{item.ymyl ? " · afirmação de saúde (YMYL) que exige fonte" : ""}</p>
+          <p className="mt-1 text-sm leading-6 text-text-muted">“{item.excerpt}”</p>
+          <p className="mt-1 text-sm leading-6 text-text-muted">{item.meta}</p>
+        </li>)}
+      </ul>}
+      {fontesDeAutoridade.failures.length > 0 && <details className="mt-2" data-testid="radar-authority-failures">
+        <summary className="cursor-pointer text-sm text-context-accent">Não conferidas ({fontesDeAutoridade.failures.length})</summary>
+        <ul className="mt-1.5 space-y-1 text-sm leading-6 text-text-muted">
+          {fontesDeAutoridade.failures.map(item => <li key={item.id} className="break-all">{item.label} — {item.url} — {item.reason}</li>)}
+        </ul>
+      </details>}
+      {fontesDeAutoridade.ymylPending.length > 0 && <p className="mt-2 text-sm leading-6 text-warning">Afirmações de saúde ainda sem fonte conferida: {fontesDeAutoridade.ymylPending.join(" · ")}</p>}
+      {fontesDeAutoridade.notes.map(item => <p key={item.id} className="mt-1 text-sm leading-6 text-text-muted">{item.text}</p>)}
+      {fontesDeAutoridade.listNote && <p className="mt-2 text-sm leading-6 text-text-muted">{fontesDeAutoridade.listNote}</p>}
+      {fontesDeAutoridade.costNote && <p className="mt-1 text-sm leading-6 text-text-muted">{fontesDeAutoridade.costNote}</p>}
     </Consulta>
 
     {/* §12 — HISTÓRICO READ-ONLY: o que aconteceu, quando, com que resultado. */}

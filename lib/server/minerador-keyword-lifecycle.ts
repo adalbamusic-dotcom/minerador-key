@@ -15,6 +15,8 @@ export const KEYWORD_LIFECYCLE_ERROR_STATUS: Record<string, number> = {
   // transacao -- o humano nao saberia que o motivo foi uma pagina no ar.
   KEYWORD_DELETE_PUBLICATION_PROTECTED: 409,
   KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW: 409,
+  // 2026-10-13 · o banco recusa apagar keyword que carrega Assunto do plano (migration 20261015120000).
+  KEYWORD_DELETE_SUBJECT_PROTECTED: 409,
   KEYWORD_RECOVERABLE_DELETE_FAILED: 422,
   KEYWORD_RESTORE_WINDOW_EXPIRED: 409,
   KEYWORD_RESTORE_FAILED: 422,
@@ -22,6 +24,10 @@ export const KEYWORD_LIFECYCLE_ERROR_STATUS: Record<string, number> = {
   KEYWORD_PURGE_FAILED: 422,
   LIFECYCLE_DRAFT_DESCENDANT_REQUIRES_OWNER: 409,
 };
+
+/** 2026-10-13 · "o Assunto nunca se perde": a recusa diz o caminho (a tela mostra o texto). */
+export const KEYWORD_DELETE_SUBJECT_PROTECTED_MESSAGE =
+  "Nada foi apagado: a seleção tem keyword que carrega um Assunto do plano do Silo. Para apagá-la, tire-a do plano antes (“Tirar do plano” no card Cadastrar Assuntos → Silo existente).";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -67,7 +73,9 @@ export function lifecycleErrorResponse(error: unknown, fallbackCode = "KEYWORD_D
     // A recusa por publicacao diz o que fazer; a generica nao teria como.
     message: code === "KEYWORD_DELETE_PUBLICATION_PROTECTED"
       ? "Página publicada não é apagada. Desvincule a publicação antes, se for mesmo o caso."
-      : "A operação do ciclo de vida da keyword não foi concluída. Nenhuma alteração parcial foi confirmada.",
+      : code === "KEYWORD_DELETE_SUBJECT_PROTECTED"
+        ? KEYWORD_DELETE_SUBJECT_PROTECTED_MESSAGE
+        : "A operação do ciclo de vida da keyword não foi concluída. Nenhuma alteração parcial foi confirmada.",
     // A mensagem acima continua amigável; a causa técnica deixa de ser descartada.
     diagnostic: lifecycleErrorDiagnostic(error, { stage: "repository", httpStatus: status, code }),
   }, { status });

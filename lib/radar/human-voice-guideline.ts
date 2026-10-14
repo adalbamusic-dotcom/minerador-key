@@ -50,8 +50,70 @@ export const RADAR_HUMAN_VOICE_INTENTIONAL_ERRORS = false as const;
 export const RADAR_HUMAN_VOICE_H2 = Object.freeze({ min: 3, max: 6 });
 /** Opções de título que a planta entrega (o H1 e as alternativas). */
 export const RADAR_HUMAN_VOICE_TITLE_OPTIONS = 3;
-/** A keyword principal aparece nos primeiros N caracteres da meta description. */
+/**
+ * Os primeiros N caracteres que o Google mostra do título (truncamento).
+ * 2026-10-14 · K2 (SDD silo interligado): vale para o SEO title (a principal dentro
+ * dos primeiros 60); a meta description deixou de ter essa obrigação (K4).
+ */
 export const RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS = 60;
+
+/*
+ * ===== 2026-10-14 · KEYWORD SEM REPETIÇÃO ANTIGA (SEO SEMÂNTICO) =====
+ *
+ * SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §7,
+ * decisões D4 e D5 (decididas pelo dono em 2026-10-14). A regra "keyword no
+ * começo" de H1, alternativas, SEO title, meta, primeira frase e primeiro H2
+ * produziu 9 opções de título e meta começando por "Captação de pacientes
+ * dentista…". Ela saiu; ficaram K1–K9:
+ *   K1 forma natural da principal (português correto); K2 a principal natural uma
+ *   vez no H1 e no SEO title, em qualquer posição, abrindo no máximo 1 das 3
+ *   opções; K3 três ângulos (dor → saída, contraste com o topo, diagnóstico);
+ *   K4 meta natural; K5 abertura nas primeiras ~100 palavras; K6 nenhum H2 abre
+ *   pela principal nem por complementar; K7 teto de repetição e variações
+ *   semânticas; K8 nenhuma marca de processo em título ou meta; K9 sem isca.
+ * As conferências puras ficam no fim deste módulo (V1–V7 da SDD).
+ */
+/** A versão das regras de keyword e título (K1–K9). Mudou uma, muda a data. */
+export const RADAR_KEYWORD_RULES_VERSION = "2026-10-14";
+/** K2 · quantas das 3 opções de título a principal pode abrir. */
+export const RADAR_HUMAN_VOICE_TITLE_KEYWORD_OPENERS_MAX = 1;
+/** K5 · a abertura traz a principal (ou uma variação próxima) nas primeiras N palavras. */
+export const RADAR_HUMAN_VOICE_OPENING_WORDS = 100;
+/** K7 · o teto da forma natural da principal no corpo: base + palavras / porPalavras. */
+export const RADAR_HUMAN_VOICE_KEYWORD_DENSITY = Object.freeze({ base: 2, wordsPerExtra: 600 });
+/** K7 · as variações semânticas que a planta nova grava (cada uma com o id da evidência). */
+export const RADAR_HUMAN_VOICE_SEMANTIC_VARIANTS = Object.freeze({ min: 6, max: 12 });
+/** K3 · o Jaccard das raízes (tirando as da principal) a partir do qual duas opções são "a mesma frase". */
+export const RADAR_HUMAN_VOICE_TITLE_SIMILARITY_MAX = 0.5;
+/** K3 · os três ângulos das opções de título, ditos iguais ao pedido, ao CSV e ao catálogo. */
+export const RADAR_HUMAN_VOICE_TITLE_ANGLES = Object.freeze([
+  "dor → saída",
+  "contraste com o que o topo da SERP promete (as \"dicas\" e os números)",
+  "diagnóstico ou decisão (fundo de funil)",
+]);
+/** A precedência da keyword sobre a voz (§7.1 da SDD), dita igual onde a regra de keyword vai. */
+export const RADAR_KEYWORD_PRECEDENCE =
+  "Keyword é substância de SEO, não tom: onde a Skill de voz da marca protege a gramática e proíbe densidade artificial de repetição, a Skill vale.";
+/*
+ * ===== 2026-10-14b · F3 · FECHAMENTO EM 4 CAMPOS, DIFERENCIAL DA MARCA E RESSALVAS =====
+ *
+ * SDD silo interligado §9 (D7 e D8, decididas pelo dono em 2026-10-14). O
+ * fechamento tem 4 campos conferidos (dor, mudança para a estrutura própria,
+ * facilidade, diagnóstico), e o diagnóstico é o CTA ÚNICO: a fala aprovada do
+ * especialista alimenta a mudança e a facilidade, na voz dele, e deixa de
+ * substituir o diagnóstico (muda o item 6 do Adendo F). A oferta de diagnóstico
+ * é da Skill de voz da Marca (D8). E as ressalvas deixam de vir em série: o
+ * caso real tinha 52 "não", 45 "pode" e 0 dado próprio.
+ */
+/** A versão das regras de fechamento, diferencial e ressalva (F3). Mudou uma, muda a data. */
+export const RADAR_CLOSING_RULES_VERSION = "2026-10-14b";
+/** D7 · Onde a fala aprovada do especialista entra no fechamento (dito igual ao pedido, ao CSV e ao catálogo). */
+export const RADAR_CLOSING_SPECIALIST_RULE =
+  "A fala aprovada do especialista entra na mudança para a estrutura e na facilidade, na voz dele; o CTA único é o diagnóstico (o que a marca verifica e uma chamada só), pela oferta da Skill de voz.";
+/** F3 · A regra das ressalvas: afirmação delimitada e concreta, ressalva uma vez, onde a afirmação está. */
+export const RADAR_HUMAN_VOICE_RESERVATION_RULE =
+  "Ressalvas: afirme de forma delimitada e concreta (o que a marca verifica, faz ou mede, com número e fonte quando o pacote os traz); a ressalva vai UMA vez, onde a afirmação está, nunca \"pode\" e \"não garante\" em série; sem fonte nem experiência da marca, corte a afirmação.";
+
 /** Os tetos de título e meta que o artigo-modelo já usa (SEO title ~60, meta ~155). */
 export const RADAR_HUMAN_VOICE_SEO_TITLE_MAX = 60;
 export const RADAR_HUMAN_VOICE_META_MAX = 155;
@@ -153,29 +215,31 @@ export const RADAR_HUMAN_VOICE_RULES: readonly RadarHumanVoiceRule[] = Object.fr
  * As observações do Guardião de SEO do dono viram regra onde não contrariam a SERP.
  */
 export const RADAR_HUMAN_VOICE_SERP_RULES: readonly RadarHumanVoiceRule[] = Object.freeze([
+  /* 2026-10-14 · K1–K4 e K8 (SDD silo interligado, D4): a principal natural uma vez, em qualquer posição; 3 ângulos; meta natural; nenhuma marca de processo. */
   {
     id: "titulo",
-    title: "H1 e SEO title: keyword no começo e gancho de contraste",
-    what: `A keyword principal no começo; depois, o gancho de dor e contraste comercial que diferencia dos títulos do topo da SERP. ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções (o H1 e duas alternativas); SEO title até ~${RADAR_HUMAN_VOICE_SEO_TITLE_MAX} caracteres.`,
-    how: "Leia os títulos do topo (resultados orgânicos) e as perguntas da SERP: se o topo promete dicas e guias, o título promete o contraste e a saída. Nunca isca genérica (\"guia prático\", \"guia completo\", \"dicas\", \"o que é\", \"tudo sobre\").",
-    good: "Como atrair um cliente sem depender de post e de anúncio que cai",
-    bad: "Como atrair um cliente: guia prático para clínicas",
+    title: "H1 e SEO title: a principal natural uma vez e três ângulos",
+    what: `A keyword principal, na forma natural (português correto, com a preposição e a flexão que a frase pede), aparece uma vez no H1 e uma vez no SEO title, em qualquer posição: o gancho pode vir primeiro, e a principal abre no máximo ${RADAR_HUMAN_VOICE_TITLE_KEYWORD_OPENERS_MAX} das ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções (o H1 e duas alternativas). Cada opção tem um ângulo: ${RADAR_HUMAN_VOICE_TITLE_ANGLES.join("; ")}. SEO title até ~${RADAR_HUMAN_VOICE_SEO_TITLE_MAX} caracteres, com a principal dentro dos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS}.`,
+    how: "Leia os títulos do topo (resultados orgânicos) e as perguntas da SERP: se o topo promete dicas e guias, o título promete o contraste e a saída. Nunca isca genérica (\"guia prático\", \"guia completo\", \"dicas\", \"o que é\", \"tudo sobre\") nem marca de processo (\"(precisa de fonte…)\", colchetes de instrução, número de link, \"TODO\"): a afirmação que só entra com fonte sai do título e vira promessa delimitada pela marca.",
+    good: "A agenda sobe com o anúncio e cai quando ele para? Captação de pacientes para dentista com estrutura própria",
+    bad: "Três opções que começam igual: \"Captação de pacientes dentista sem anúncios: …\", \"Captação de pacientes dentista sem verba: …\", \"Captação de pacientes dentista no orgânico: …\"",
   },
   {
     id: "meta",
-    title: "Meta description que dá motivo para clicar",
-    what: `Dor, contraste, o que a leitora ganha e por que clicar mesmo com resposta de IA no topo (autoridade, serviço real, experiência de quem assina). Keyword nos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS} caracteres; até ~${RADAR_HUMAN_VOICE_META_MAX} caracteres.`,
-    how: "Sem \"descubra\", \"aprenda\", \"dicas\" e \"guia prático\": a meta diz o que muda para quem lê, com a promessa que a página cumpre.",
-    good: "Como atrair um cliente quando o feed não traz ninguém: o que muda com site, páginas de serviço e busca na sua região.",
-    bad: "Descubra como atrair um cliente com estratégias práticas e dicas.",
+    title: "Meta description natural que dá motivo para clicar",
+    what: `Dor ou contraste, o que a leitora ganha e por que clicar mesmo com resposta de IA no topo (autoridade, serviço real, experiência de quem assina). A principal ou uma variação próxima aparece uma vez, em qualquer posição; até ~${RADAR_HUMAN_VOICE_META_MAX} caracteres. As ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções seguem os ângulos do título.`,
+    how: "Sem \"descubra\", \"aprenda\", \"dicas\" e \"guia prático\" e sem marca de processo: a meta diz o que muda para quem lê, com a promessa que a página cumpre.",
+    good: "Post, anúncio e agência e a agenda ainda oscila? Veja como site, perfil no Google e respostas às perguntas da recepção ajudam a captação de pacientes para dentista.",
+    bad: "Captação de pacientes dentista sem anúncio: o que o orgânico entrega, o que cobra de você e por onde começar a rotina.",
   },
+  /* 2026-10-14 · K5–K7 (D5): a abertura responde à busca; nenhum H2 abre pela keyword; teto de repetição e variações. */
   {
     id: "inicio",
-    title: "Keyword na primeira frase e no primeiro H2",
-    what: "A primeira frase do corpo traz a keyword principal; o primeiro H2 traz a keyword ou um recorte forte dela.",
-    how: "Nada de aquecimento antes da keyword: a primeira frase já responde à busca, na dor que a SERP mostra.",
-    good: "Primeiro H2: \"Como atrair clientes quando o post não traz ninguém\"",
-    bad: "Primeiro H2: \"Contexto do mercado\"",
+    title: "A abertura responde à busca; nenhum H2 abre pela keyword",
+    what: `O primeiro parágrafo responde à busca com a principal (forma natural) ou uma variação próxima nas primeiras ~${RADAR_HUMAN_VOICE_OPENING_WORDS} palavras, sem obrigar a primeira frase. Os H2 seguem os subtemas, as entidades e as perguntas reais da SERP: nenhum H2 começa pela principal nem por uma complementar; a principal entra em no máximo 1 H2; cada complementar entra dentro da seção que trata dela (num H2, só natural, fora do começo e em um H2 só); dois H2 não começam pelas mesmas 2 palavras de conteúdo.`,
+    how: `No corpo, a forma natural da principal aparece no máximo ${RADAR_HUMAN_VOICE_KEYWORD_DENSITY.base} + palavras/${RADAR_HUMAN_VOICE_KEYWORD_DENSITY.wordsPerExtra} vezes (cerca de 7 em 3.000 palavras); o resto é variação semântica: sinônimos, entidades e buscas relacionadas que a SERP mostra.`,
+    good: "H2: \"Por que a agenda sobe com o anúncio e cai quando ele para\"",
+    bad: "H2: \"Captação de pacientes dentista sem anúncios começa pelo orgânico\" e \"Tráfego orgânico como fazer para captar pacientes no dia a dia\"",
   },
   {
     id: "h2",
@@ -193,13 +257,23 @@ export const RADAR_HUMAN_VOICE_SERP_RULES: readonly RadarHumanVoiceRule[] = Obje
     good: "Cada pergunta que chega no WhatsApp vira uma página que responde antes da próxima pessoa perguntar.",
     bad: "\"Trabalhamos SEO local, silos e E-E-A-T\" solto, sem dizer o que isso entrega.",
   },
+  /* 2026-10-14b · F3 (D7 e D8): os 4 tempos viram 4 campos conferidos; o diagnóstico é o CTA único, com a oferta da Skill; a fala do especialista vai para a mudança e a facilidade. */
   {
     id: "fechamento",
     title: "Fechamento em 4 tempos, um CTA só",
-    what: "Dor, mudança para a estrutura própria no Google, facilidade (a marca faz; a profissional só contribui com o que sabe) e diagnóstico, que é o CTA único que já existe.",
-    how: "Nenhuma segunda chamada: a leitura seguinte, quando houver, vai no corpo.",
-    good: "Cansou de postar para ninguém? A saída é ter a clínica achável no Google. Eu organizo site, páginas e artigos; você só conta o que faz. Vamos olhar como sua clínica aparece hoje?",
-    bad: "Fechar com três chamadas (agende, siga no Instagram, baixe o e-book).",
+    what: "Dor, mudança para a estrutura própria no Google, facilidade (a marca faz; a profissional só contribui com o que sabe) e diagnóstico, que é o CTA único: uma verificação concreta da marca (verbo + o que ela olha) e uma chamada só, com a oferta de diagnóstico da Skill de voz da marca.",
+    how: `Nenhuma segunda chamada: a leitura seguinte, quando houver, vai no corpo. ${RADAR_CLOSING_SPECIALIST_RULE}`,
+    good: "Se a agenda depende do mês em que o anúncio roda, você está alugando a atenção do paciente. A saída é o consultório achável no Google: uma página por tratamento, o perfil coerente com o site e as perguntas da recepção respondidas. Eu pesquiso, escrevo e publico; você revisa o que é clínico. Quer saber por onde começar? Eu olho seu site, seu perfil no Google e as perguntas que mais chegam, e te digo o que falta.",
+    bad: "Fechar com três chamadas (agende, siga no Instagram, baixe o e-book), ou pôr a fala inteira do especialista (\"Vamos planejar a presença orgânica da sua clínica?\") no lugar do diagnóstico.",
+  },
+  /* 2026-10-14b · F3: as ressalvas uma vez, onde a afirmação está; afirmação delimitada e concreta. */
+  {
+    id: "ressalvas",
+    title: "Afirmação concreta, ressalva uma vez",
+    what: RADAR_HUMAN_VOICE_RESERVATION_RULE,
+    how: "Troque a série de \"pode\" e \"não garante\" por o que a marca verifica, faz ou mede; quando o pacote traz número ou fonte, use; a trava de fonte continua: o fato sem fonte sai ou vira o que a marca verifica.",
+    good: "Eu olho as perguntas que chegam na recepção e transformo as cinco mais repetidas em páginas. (o que a marca faz, delimitado)",
+    bad: "O orgânico pode ajudar, mas não garante resultado, não significa agenda cheia e pode levar tempo. (ressalvas em série, nenhum dado)",
   },
   {
     id: "imagens",
@@ -236,8 +310,9 @@ export const RADAR_HUMAN_VOICE_PRECEDENCE =
   "Precedência: a SERP manda na substância (SERP > lógica > IA) e a diretriz, na voz. Onde a Skill de voz da marca suaviza o tom, vale esta diretriz; onde a Skill protege fato, oferta, preço, credencial ou a dignidade da leitora, a Skill vale. A trava de fonte e o entregável concluído não mudam.";
 
 /** O que a SERP guia na página (título, meta, começo, H2, autoridade, fechamento, imagens), numa frase. */
+/* 2026-10-14 · K1–K9 (SDD silo interligado, D4 e D5): a principal natural uma vez, sem prefixo fixo, 3 ângulos, meta natural, abertura, H2 sem keyword no começo, teto e variações; a precedência da keyword no fim. */
 export const RADAR_HUMAN_VOICE_SERP_SUMMARY =
-  `Título, meta e CTA pela SERP: H1 e SEO title com a keyword principal no começo e o gancho de dor e contraste que diferencia dos títulos do topo (${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções; nunca "guia prático", "dicas", "o que é" nem "tudo sobre"); meta description com dor, contraste, o ganho e o motivo para clicar mesmo com resposta de IA no topo, keyword nos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS} caracteres e até ~${RADAR_HUMAN_VOICE_META_MAX}; keyword na primeira frase do corpo e no primeiro H2 (inteira ou um recorte forte); de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} H2, com o excedente como H3 sem perder cobertura; 2 ou 3 sinais de autoridade local (site como captação local, perguntas reais e experiência virando autoridade, contraste com feed e posts soltos, diferença para a agência comum); fechamento em 4 tempos (dor, estrutura própria no Google, facilidade, diagnóstico) com um CTA só; capa e ao menos uma imagem útil no corpo.`;
+  `Título, meta e CTA pela SERP (regras de keyword ${RADAR_KEYWORD_RULES_VERSION}): a keyword principal na forma natural (português correto) aparece uma vez no H1 e uma vez no SEO title, em qualquer posição, e abre no máximo ${RADAR_HUMAN_VOICE_TITLE_KEYWORD_OPENERS_MAX} das ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções de título, cada uma com um ângulo (${RADAR_HUMAN_VOICE_TITLE_ANGLES.join("; ")}), sem "guia prático", "dicas", "o que é" nem "tudo sobre" e sem marca de processo ("(precisa de fonte…)", colchetes de instrução); SEO title até ~${RADAR_HUMAN_VOICE_SEO_TITLE_MAX} caracteres, com a principal dentro dos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS}; meta description natural, com dor ou contraste, o ganho e o motivo para clicar mesmo com resposta de IA no topo, a principal ou uma variação próxima uma vez, até ~${RADAR_HUMAN_VOICE_META_MAX}; o primeiro parágrafo responde à busca com a principal ou uma variação próxima nas primeiras ~${RADAR_HUMAN_VOICE_OPENING_WORDS} palavras; nenhum H2 começa pela principal nem por uma complementar (a principal em no máximo 1 H2; a complementar dentro da seção que trata dela); no corpo, a principal no máximo ${RADAR_HUMAN_VOICE_KEYWORD_DENSITY.base} + palavras/${RADAR_HUMAN_VOICE_KEYWORD_DENSITY.wordsPerExtra} vezes, e o resto em variações semânticas da SERP (sinônimos, entidades, buscas relacionadas); de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} H2, com o excedente como H3 sem perder cobertura; 2 ou 3 sinais de autoridade local (site como captação local, perguntas reais e experiência virando autoridade, contraste com feed e posts soltos, diferença para a agência comum); fechamento em 4 tempos (dor, estrutura própria no Google, facilidade, diagnóstico) com um CTA só; capa e ao menos uma imagem útil no corpo. ${RADAR_KEYWORD_PRECEDENCE}`;
 
 /** O fechamento em 4 tempos, como a coluna estrutura e o Redator o dizem. */
 export const RADAR_HUMAN_VOICE_CLOSING_STEPS = Object.freeze([
@@ -266,13 +341,15 @@ const comoLinha = (regra: RadarHumanVoiceRule) => `${regra.title}: ${regra.what}
 export function radarHumanVoicePromptBlock(): string[] {
   return [
     `27. VOZ HUMANA GUIADA PELA SERP. ${RADAR_HUMAN_VOICE_CORE} ${RADAR_HUMAN_VOICE_PRECEDENCE} Nos campos que viram texto (promise, angle, title, opening.direction, answerFirst, closing.turn, closing.cta e os prompts de imagem), escreva nessa voz; a dor e o gancho vêm das evidências P, B e S (perguntas, buscas relacionadas e títulos do topo), nunca inventados; a diretriz não cria seção, H3, pergunta nem tópico. Em eeat, quando há quem assina, diga se a primeira pessoa dele cabe (relato delimitado, sem caso inventado).`,
-    `28. TÍTULO, META, ESTRUTURA E FECHAMENTO PELA SERP. ${RADAR_HUMAN_VOICE_SERP_SUMMARY} Em title, h1 e as 2 alternatives são as ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções, todas com a keyword principal no começo e um gancho diferente, cada uma contra o que os títulos do topo (evidências S e formato F) prometem. O primeiro H2 de sections traz a keyword ou um recorte forte dela; opening.direction diz que a primeira frase traz a keyword. sections tem de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} itens: o que a SERP pede além disso entra como H3 da seção mais próxima pelo sentido. closing.turn leva os 3 primeiros tempos do fechamento (dor, estrutura própria no Google, facilidade) e closing.cta é o diagnóstico, a única chamada. Em eeat, liste os 2 ou 3 sinais de autoridade local que a planta usa e em que seção.`,
+    /* 2026-10-14 · K1–K8 (SDD silo interligado): a forma natural gravada, as 3 opções com ângulos, a meta natural, os H2 sem keyword no começo e as variações com o id da evidência. */
+    `28. TÍTULO, META, ESTRUTURA E FECHAMENTO PELA SERP. ${RADAR_HUMAN_VOICE_SERP_SUMMARY} Em title.principalNatural, grave a keyword principal na forma natural (a mesma ordem de palavras de conteúdo, com a preposição e a flexão que o português pede; igual à principal quando ela já é gramatical). Em title, h1 e as 2 alternatives são as ${RADAR_HUMAN_VOICE_TITLE_OPTIONS} opções: a forma natural aparece uma vez em cada uma (no h1, obrigatória; numa alternativa, pode ser uma variação próxima), abre no máximo ${RADAR_HUMAN_VOICE_TITLE_KEYWORD_OPENERS_MAX} delas, e cada uma tem um ângulo: (a) ${RADAR_HUMAN_VOICE_TITLE_ANGLES[0]}; (b) ${RADAR_HUMAN_VOICE_TITLE_ANGLES[1]}, contra os títulos do topo (evidências S e formato F); (c) ${RADAR_HUMAN_VOICE_TITLE_ANGLES[2]}. As 3 não começam pelas mesmas palavras. seoTitle traz a forma natural uma vez, dentro dos primeiros ${RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS} caracteres; metaDescription é natural, com a principal ou uma variação próxima uma vez. Nenhum h2 de sections começa pela keyword principal nem por uma complementar; a principal entra em no máximo 1 h2; a complementar vai dentro da seção que trata dela (keywordPlan.complementary diz qual seção, não "H2"). opening.direction diz que o primeiro parágrafo responde à busca com a principal ou uma variação próxima nas primeiras ~${RADAR_HUMAN_VOICE_OPENING_WORDS} palavras. Em semanticVariants, de ${RADAR_HUMAN_VOICE_SEMANTIC_VARIANTS.min} a ${RADAR_HUMAN_VOICE_SEMANTIC_VARIANTS.max} variações da keyword (sinônimos, entidades e buscas relacionadas do pacote), cada uma com o id da evidência de onde vem (C, B, P ou S). Título e meta nunca levam marca de processo: a afirmação que só entra com fonte sai do título e vira promessa delimitada pela marca. sections tem de ${RADAR_HUMAN_VOICE_H2.min} a ${RADAR_HUMAN_VOICE_H2.max} itens: o que a SERP pede além disso entra como H3 da seção mais próxima pelo sentido. O fechamento tem 4 campos (regras ${RADAR_CLOSING_RULES_VERSION}): closing.pain (a dor que a leitora já sentiu com a receita pronta), closing.structureShift (a mudança para a estrutura própria no Google), closing.ease (a facilidade: quem faz é a marca, a leitora só contribui com o que sabe) e closing.diagnosis (o diagnóstico, a única chamada: o que a marca verifica, verbo + objeto, e uma chamada só, pela oferta de diagnóstico do pacote); closing.turn e closing.cta podem vir vazios (o servidor os monta dos 4 campos). ${RADAR_CLOSING_SPECIALIST_RULE} Em eeat, liste os 2 ou 3 sinais de autoridade local que a planta usa e em que seção. ${RADAR_HUMAN_VOICE_RESERVATION_RULE}`,
   ];
 }
 
 /** A regra geral da linha "Silo"/"Marca" do CSV "Para escrever" (uma regra numerada). */
 export function radarHumanVoiceWritingRule(): string {
-  return `${RADAR_HUMAN_VOICE_CORE} ${RADAR_HUMAN_VOICE_SERP_SUMMARY} ${RADAR_HUMAN_VOICE_PRECEDENCE} A definição completa, com exemplos bons e ruins, está em docs/compartilhado/diretriz-de-comunicacao-humana.md.`;
+  /* 2026-10-14b · F3 · as ressalvas uma vez, na mesma regra geral 12 (o fechamento D7 vai à estrutura de cada artigo, com a fala do especialista). */
+  return `${RADAR_HUMAN_VOICE_CORE} ${RADAR_HUMAN_VOICE_SERP_SUMMARY} ${RADAR_HUMAN_VOICE_RESERVATION_RULE} ${RADAR_HUMAN_VOICE_PRECEDENCE} A definição completa, com exemplos bons e ruins, está em docs/compartilhado/diretriz-de-comunicacao-humana.md.`;
 }
 
 /** A frase da linha "Voz da marca": a precedência entre a Skill e a diretriz. */
@@ -282,7 +359,8 @@ export function radarHumanVoiceBrandVoiceRowNote(): string {
 
 /** O trecho dos prompts do Redator (escrita de seção e melhoria de trecho). */
 export function radarHumanVoiceRedatorRule(): string {
-  return `${RADAR_HUMAN_VOICE_CORE} ${RADAR_HUMAN_VOICE_PRECEDENCE} Na seção: a primeira frase do artigo traz a keyword principal; a seção que fecha o artigo segue os 4 tempos (dor, estrutura própria no Google, facilidade, diagnóstico no CTA único); os sinais de autoridade local entram quando o trecho pede (site como captação local, perguntas reais e experiência virando autoridade, contraste com feed e posts soltos, diferença para a agência comum). Primeira pessoa só na voz de quem assina e só com o relato que a evidência traz.`;
+  /* 2026-10-14 · K5–K7 (SDD silo interligado): a abertura nas primeiras ~100 palavras, nenhum H2 pela keyword, teto e variações (no lugar de "a primeira frase traz a keyword"). */
+  return `${RADAR_HUMAN_VOICE_CORE} ${RADAR_HUMAN_VOICE_PRECEDENCE} ${RADAR_KEYWORD_PRECEDENCE} Na seção: o primeiro parágrafo do artigo responde à busca com a keyword principal na forma natural (ou uma variação próxima) nas primeiras ~${RADAR_HUMAN_VOICE_OPENING_WORDS} palavras; nenhum H2 começa pela keyword principal nem por uma complementar; no corpo, a forma natural da principal no máximo ${RADAR_HUMAN_VOICE_KEYWORD_DENSITY.base} + palavras/${RADAR_HUMAN_VOICE_KEYWORD_DENSITY.wordsPerExtra} vezes, o resto em variações (sinônimos, entidades e buscas relacionadas); a seção que fecha o artigo segue os 4 tempos (dor, estrutura própria no Google, facilidade, diagnóstico no CTA único); os sinais de autoridade local entram quando o trecho pede (site como captação local, perguntas reais e experiência virando autoridade, contraste com feed e posts soltos, diferença para a agência comum). Primeira pessoa só na voz de quem assina e só com o relato que a evidência traz. ${RADAR_HUMAN_VOICE_RESERVATION_RULE}`;
 }
 
 /** O trecho do roteiro de vídeo e da semente de roteiro e carrossel. */
@@ -293,7 +371,7 @@ export function radarHumanVoiceVideoRule(): string {
 /** A nota do catálogo do MCP (AGENTS §17.1). */
 export function radarHumanVoiceCatalogNote(): string {
   /* As versões ditas aqui são as de `RADAR_ARTICLE_BLUEPRINT_RULES_VERSION` e `WRITER_BLUEPRINT_READING_RULES` (o teste da diretriz confere). */
-  return `Diretriz de comunicação humana guiada pela SERP (${RADAR_HUMAN_VOICE_GUIDELINE_VERSION}; pedido do dono; lib/radar/human-voice-guideline.ts e docs/compartilhado/diretriz-de-comunicacao-humana.md; vale no pedido do artigo-modelo, no CSV 'Para escrever', no CSV de vídeo, no Redator, na semente de roteiro e carrossel, em get_article_for_writing e get_video_material; regras do artigo-modelo '2026-10-11c', leitura do Redator '2026-10-11c').${RADAR_HUMAN_VOICE_CORE} ${RADAR_HUMAN_VOICE_SERP_SUMMARY} ${RADAR_HUMAN_VOICE_PRECEDENCE} Planta gravada com mais de ${RADAR_HUMAN_VOICE_H2.max} H2: a leitura compartilhada não muda o payload nem o hash e diz qual seção entra como H3 de qual (h2Merges no Redator; a linha da seção no CSV).`;
+  return `Diretriz de comunicação humana guiada pela SERP (${RADAR_HUMAN_VOICE_GUIDELINE_VERSION}; pedido do dono; lib/radar/human-voice-guideline.ts e docs/compartilhado/diretriz-de-comunicacao-humana.md; vale no pedido do artigo-modelo, no CSV 'Para escrever', no CSV de vídeo, no Redator, na semente de roteiro e carrossel, em get_article_for_writing e get_video_material; regras do artigo-modelo '2026-10-14c', leitura do Redator '2026-10-14'; regras de keyword e título ${RADAR_KEYWORD_RULES_VERSION}; fechamento em 4 campos, diferencial da marca, análise competitiva e ressalvas ${RADAR_CLOSING_RULES_VERSION}; fontes externas de autoridade no texto 2026-10-14c (§16.2), SDD docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md; no vídeo, as regras de keyword mudam na fase F6).${RADAR_HUMAN_VOICE_CORE} ${RADAR_HUMAN_VOICE_SERP_SUMMARY} ${RADAR_HUMAN_VOICE_PRECEDENCE} Planta gravada com mais de ${RADAR_HUMAN_VOICE_H2.max} H2: a leitura compartilhada não muda o payload nem o hash e diz qual seção entra como H3 de qual (h2Merges no Redator; a linha da seção no CSV). Planta gravada antes de ${RADAR_KEYWORD_RULES_VERSION} (D6, sem IA e sem mudar o payload nem o hash): a leitura tira a marca de processo do H1, das alternativas, do SEO title e da meta (a afirmação que só entra com fonte continua na lista do fim da coluna estrutura) e diz, como instrução concluída, a forma natural da principal, as opções que abrem pela keyword, os H2 que abrem pela keyword ou por uma complementar, o teto de repetição e as variações; H2 reescritos e os 3 ângulos de título só organizando de novo.`;
 }
 
 /*
@@ -386,6 +464,10 @@ export function radarHumanVoiceHeadingHasKeyword(titulo: string | null | undefin
  * A KEYWORD NO COMEÇO DE UMA ALTERNATIVA, SEM IA: o título "A: B" (ou "A — B",
  * "A | B") em que B começa pela keyword vira "B: A". Só troca de lugar as duas
  * metades, sem reescrever palavra; o que não tem essa forma volta igual.
+ *
+ * 2026-10-14 · DESLIGADA (K2, SDD silo interligado): nenhum entregável a aplica
+ * mais — a keyword deixou de ser prefixo obrigatório. Fica exportada até a F1
+ * fechar, para rollback (§7.2 da SDD).
  */
 export function radarHumanVoiceTitleWithKeywordFirst(titulo: string, principal: string | null | undefined): string {
   if (!titulo || radarHumanVoiceStartsWithKeyword(titulo, principal)) return titulo;
@@ -396,4 +478,168 @@ export function radarHumanVoiceTitleWithKeywordFirst(titulo: string, principal: 
   const cabeca = depois.replace(/[.?!\s]+$/, "");
   const primeira = cabeca.charAt(0).toLocaleUpperCase("pt-BR") + cabeca.slice(1);
   return `${primeira}: ${antes.trim()}`;
+}
+
+/*
+ * ===== 2026-10-14 · AS CONFERÊNCIAS DE KEYWORD (V1–V7 da SDD silo interligado) =====
+ *
+ * Leitura de palavras, não de sentido, como as de cima: servem à conferência da
+ * planta nova (nota que a passada de correção resolve) e à leitura da planta
+ * gravada (instrução concluída na coluna, D6 e D10). A forma natural da principal
+ * é aceita pelas MESMAS palavras de conteúdo, na mesma ordem, com só conectivos
+ * entre elas ("captação de pacientes dentista" casa com "captação de pacientes
+ * para dentista"); a forma crua é a sequência inteira, colada.
+ */
+
+/** Os conectivos que a forma natural pode pôr entre duas palavras de conteúdo da keyword. */
+const CONECTIVOS = new Set(["a", "o", "as", "os", "um", "uma", "de", "da", "do", "das", "dos", "em", "na", "no", "nas", "nos", "e", "para", "pra", "ao", "aos"]);
+const MAXIMO_DE_CONECTIVOS = 2;
+
+/** As palavras de conteúdo (sem as funcionais), no singular simples, na ordem. */
+const conteudoDe = (valor: string | null | undefined): string[] => cruas(valor).filter(palavra => !FUNCIONAIS.has(palavra)).map(singular);
+
+/** Os inícios (índice da palavra) de cada vez que a sequência de conteúdo da keyword aparece no texto, sem sobrepor. */
+function inicioDasOcorrencias(texto: string | null | undefined, keyword: string | null | undefined): number[] {
+  const alvo = conteudoDe(keyword);
+  if (!alvo.length) return [];
+  const lidas = cruas(texto);
+  const inicios: number[] = [];
+  let indice = 0;
+  while (indice < lidas.length) {
+    if (singular(lidas[indice]) !== alvo[0]) { indice += 1; continue; }
+    let posicao = indice + 1;
+    let casou = 1;
+    while (casou < alvo.length && posicao < lidas.length) {
+      let pulos = 0;
+      while (posicao < lidas.length && CONECTIVOS.has(lidas[posicao]) && singular(lidas[posicao]) !== alvo[casou] && pulos < MAXIMO_DE_CONECTIVOS) { posicao += 1; pulos += 1; }
+      if (posicao < lidas.length && singular(lidas[posicao]) === alvo[casou]) { casou += 1; posicao += 1; continue; }
+      break;
+    }
+    if (casou === alvo.length) { inicios.push(indice); indice = posicao; } else indice += 1;
+  }
+  return inicios;
+}
+
+/** K1/V3 · Quantas vezes a keyword (crua ou na forma natural) aparece no texto. */
+export function radarKeywordOccurrences(texto: string | null | undefined, keyword: string | null | undefined): number {
+  return inicioDasOcorrencias(texto, keyword).length;
+}
+
+/** K1 · A keyword aparece no texto, crua ou na forma natural (as mesmas palavras de conteúdo, na mesma ordem). */
+export const radarKeywordNaturalPresent = (texto: string | null | undefined, keyword: string | null | undefined): boolean =>
+  radarKeywordOccurrences(texto, keyword) > 0;
+
+/** K2 · A keyword (crua ou natural) aparece dentro dos primeiros N caracteres (truncamento do SEO title), sem cortar palavra ao meio. */
+export function radarKeywordWithinChars(texto: string | null | undefined, keyword: string | null | undefined, caracteres = RADAR_HUMAN_VOICE_KEYWORD_EARLY_CHARS): boolean {
+  if (!conteudoDe(keyword).length) return true;
+  const inteiro = String(texto ?? "");
+  const resto = inteiro.slice(caracteres).search(/\s/);
+  return radarKeywordNaturalPresent(resto < 0 ? inteiro : inteiro.slice(0, caracteres + resto), keyword);
+}
+
+/** V5 · A forma CRUA inteira, colada (com as funcionais dela), aparece no texto. */
+export function radarKeywordCrudeFormPresent(texto: string | null | undefined, crua: string | null | undefined): boolean {
+  const alvo = palavras(crua);
+  if (!alvo.length) return false;
+  const lido = palavras(texto);
+  for (let inicio = 0; inicio + alvo.length <= lido.length; inicio += 1) {
+    if (alvo.every((palavra, indice) => lido[inicio + indice] === palavra)) return true;
+  }
+  return false;
+}
+
+/** V5 · A forma crua difere da natural (a natural acrescenta preposição ou flexão): só então a crua é "não gramatical". */
+export const radarKeywordCrudeDiffersFromNatural = (crua: string | null | undefined, natural: string | null | undefined): boolean =>
+  Boolean(String(natural ?? "").trim()) && palavras(crua).join(" ") !== palavras(natural).join(" ");
+
+/**
+ * V1/K6 · O título (H2 ou opção de título) COMEÇA pela keyword: as primeiras
+ * palavras de conteúdo dele são as da keyword, na ordem ("Como atrair clientes no
+ * dia a dia?" começa por "como atrair um cliente"; "Tráfego orgânico como fazer
+ * para…" começa por "tráfego orgânico como fazer").
+ */
+export function radarHeadingStartsWithKeyword(titulo: string | null | undefined, keyword: string | null | undefined): boolean {
+  const alvo = conteudoDe(keyword);
+  if (!alvo.length) return false;
+  const lido = conteudoDe(titulo);
+  return alvo.length <= lido.length && alvo.every((palavra, indice) => lido[indice] === palavra);
+}
+
+/** K6 · Os pares de H2 que começam pelas mesmas N palavras de conteúdo (índices na ordem dada). */
+export function radarHeadingsSameOpening(titulos: readonly string[], quantas = 2): Array<[number, number]> {
+  const aberturas = titulos.map(titulo => conteudoDe(titulo).slice(0, quantas));
+  const pares: Array<[number, number]> = [];
+  for (let a = 0; a < aberturas.length; a += 1) {
+    for (let b = a + 1; b < aberturas.length; b += 1) {
+      if (aberturas[a].length === quantas && aberturas[a].join(" ") === aberturas[b].join(" ")) pares.push([a, b]);
+    }
+  }
+  return pares;
+}
+
+/** K2/V6 · Quantas opções de título a principal abre. */
+export const radarTitleOptionsOpenedByKeyword = (opcoes: readonly string[], principal: string | null | undefined): number =>
+  opcoes.filter(opcao => radarHeadingStartsWithKeyword(opcao, principal)).length;
+
+/**
+ * K3/V6 · AS 3 OPÇÕES TÊM ÂNGULOS DIFERENTES. Duas opções são "a mesma frase"
+ * quando começam pelas mesmas 3 palavras de conteúdo, ou quando o Jaccard das
+ * raízes delas, tirando as da principal, passa de 0,5. Devolve os pares (índices).
+ */
+export function radarTitleOptionsDistinct(opcoes: readonly string[], principal: string | null | undefined): { distinct: boolean; sameOpening: Array<[number, number]>; similar: Array<[number, number]> } {
+  const daPrincipal = new Set(conteudoDe(principal));
+  const raizes = opcoes.map(opcao => new Set(conteudoDe(opcao).filter(palavra => !daPrincipal.has(palavra))));
+  const sameOpening = radarHeadingsSameOpening(opcoes, 3);
+  const similar: Array<[number, number]> = [];
+  for (let a = 0; a < raizes.length; a += 1) {
+    for (let b = a + 1; b < raizes.length; b += 1) {
+      const uniao = new Set([...raizes[a], ...raizes[b]]);
+      if (!uniao.size) continue;
+      const comuns = [...raizes[a]].filter(raiz => raizes[b].has(raiz)).length;
+      if (comuns / uniao.size >= RADAR_HUMAN_VOICE_TITLE_SIMILARITY_MAX) similar.push([a, b]);
+    }
+  }
+  return { distinct: !sameOpening.length && !similar.length, sameOpening, similar };
+}
+
+/*
+ * K8/V4 · A MARCA DE PROCESSO EM TÍTULO OU META. "(precisa de fonte…)",
+ * "(pendente…)", "(a confirmar…)", colchetes de instrução e "TODO" saem na leitura
+ * (sem IA); "pendente" e "L1" soltos são apontados, não apagados (apagar palavra
+ * solta poderia quebrar a frase).
+ */
+const MARCAS_REMOVIVEIS: readonly RegExp[] = [
+  /\s*\((?:precisa de fonte|pendente|a confirmar|a definir|sem fonte)[^)]*\)/gi,
+  /\s*\[[^\]]*\]/g,
+  /\s*\bTODO\b:?/g,
+];
+const MARCAS_APONTADAS: ReadonlyArray<{ rotulo: string; padrao: RegExp }> = [
+  { rotulo: "(precisa de fonte…)", padrao: /\(precisa de fonte/i },
+  { rotulo: "(pendente…)", padrao: /\((?:pendente|a confirmar|a definir|sem fonte)/i },
+  { rotulo: "colchetes de instrução", padrao: /\[[^\]]*\]/ },
+  { rotulo: "TODO", padrao: /\bTODO\b/ },
+  { rotulo: "pendente", padrao: /\bpendente\b/i },
+  { rotulo: "número de link (L1…)", padrao: /\bL\d+\b/ },
+];
+
+/** V4 · A marca de processo que o título ou a meta traz, ou null. */
+export function radarTitleProcessMark(texto: string | null | undefined): string | null {
+  const lido = String(texto ?? "");
+  return MARCAS_APONTADAS.find(item => item.padrao.test(lido))?.rotulo ?? null;
+}
+
+/** V4 · O título ou a meta sem as marcas removíveis; o que não tem marca volta igual (o mesmo texto). */
+export function radarTitleWithoutProcessMarks(texto: string): string {
+  if (!texto) return texto;
+  let limpo = texto;
+  for (const padrao of MARCAS_REMOVIVEIS) limpo = limpo.replace(padrao, "");
+  if (limpo === texto) return texto;
+  return limpo.replace(/\s{2,}/g, " ").replace(/\s+([.,;:!?])/g, "$1").replace(/[:;,\s]+$/, "").trim();
+}
+
+/** K7 · O teto da forma natural da principal no corpo: 2 + palavras/600 (sem palavras medidas, o piso). */
+export function radarKeywordBodyCap(palavrasDoArtigo: number | null | undefined): number {
+  const total = Number(palavrasDoArtigo);
+  const { base, wordsPerExtra } = RADAR_HUMAN_VOICE_KEYWORD_DENSITY;
+  return Number.isFinite(total) && total > 0 ? base + Math.floor(total / wordsPerExtra) : base;
 }

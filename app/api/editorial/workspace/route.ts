@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireCanonicalSessionProfile, authzErrorResponse } from "@/lib/server/authz";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
-import { ArtifactRepository, ContentDocumentRepository, InvitationRepository, PublicationRepository, SerpSnapshotRepository, ViewPreferenceRepository, WorkflowRepository } from "@/lib/server/editorial-repositories";
+import { ArtifactRepository, ContentDocumentRepository, PublicationRepository, SerpSnapshotRepository, WorkflowRepository } from "@/lib/server/editorial-repositories";
 import { getOperationalClient, PersistenceUnavailableError } from "@/lib/server/editorial-db";
 import { articleIdsInGroupFilter, groupScopeId, parseGroupIdQuery } from "@/lib/editorial/article-groups";
 import { readArticleGroupMemberships, readSiloIdsForArticles } from "@/lib/editorial/article-groups-store";
@@ -11,7 +11,6 @@ import { GROUPS_NOT_AVAILABLE } from "@/lib/editorial/editorial-groups";
 import { PersistedEditorialWorkspaceSchema } from "@/lib/editorial/persistence-contracts";
 import type { RadarItem } from "@/lib/editorial/operational-flow";
 import { radarPortableExportStreamResponse } from "@/lib/radar/portable-export-response";
-import { lightArtifactSelection } from "@/lib/editorial/workspace-read-scope";
 import type { ArticleDNA, SiloDNA, VersionEnvelope, VersionStatusEvent } from "@/lib/arquiteto/contracts";
 
 const QuerySchema = z.string().uuid();
@@ -32,9 +31,10 @@ const QuerySchema = z.string().uuid();
  * torna a mesa do Radar ilegível; as outras viram diagnóstico ao lado dos dados.
  */
 
+/* 2026-10-14 · F2 das listas leves: "invitations" e "views" saíram da mesa (ninguém da mesa os lia). */
 const SECOES = [
   "workflow", "artifacts", "documents", "publications",
-  "invitations", "views", "serpSnapshots", "serpReviews",
+  "serpSnapshots", "serpReviews",
 ] as const;
 type Secao = (typeof SECOES)[number];
 
@@ -83,16 +83,40 @@ export async function GET(request: NextRequest) {
     }
     const doRecorte = recorte ? { articleIds: recorte.articleIds } : {};
 
-    const settled = await Promise.allSettled([
+    /*
+     * 2026-10-14 · SDD listas leves (item 4, F2) — A MESA É LEVE POR PADRÃO, NO BANCO.
+     *
+     * Sem `detail`, a mesa traz de cada ArticleDNA/SiloDNA só a vigente, a
+     * última aprovada e as versões que um item do Radar ou um documento
+     * referenciam — escolhidas pelos METADADOS e lidas inteiras só elas
+     * (`ArtifactRepository.listLight`). A leitura de todas as versões só sai
+     * com `detail=full`, pedida explicitamente; nenhuma tela a pede.
+     * Convites e preferências de visualização SAÍRAM da mesa: as grades leem as
+     * visualizações por `/api/editorial/views`, e a Marca lê os convites por
+     * `GET /api/editorial/invitations` quando abre "Equipe".
+     */
+    const detalheInteiro = request.nextUrl.searchParams.get("detail") === "full";
+    const lerArtefatosInteiros = () => recorte ? new ArtifactRepository().listScoped(marcaId, recorte.entityIds) : new ArtifactRepository().list(marcaId);
+    const [workflowLido, documentosLidosS, publicacoesLidas, serpLido, revisoesLidas, artefatosInteiros] = await Promise.allSettled([
       new WorkflowRepository().list(marcaId, doRecorte),
-      recorte ? new ArtifactRepository().listScoped(marcaId, recorte.entityIds) : new ArtifactRepository().list(marcaId),
       new ContentDocumentRepository().list(marcaId, profile.userId),
       new PublicationRepository().list(marcaId, doRecorte),
-      new InvitationRepository().list(marcaId),
-      new ViewPreferenceRepository().list(marcaId, profile.userId),
       new SerpSnapshotRepository().list(marcaId, undefined, recorte?.articleIds),
       new SerpSnapshotRepository().listReviews(marcaId, undefined, recorte?.articleIds),
+      detalheInteiro ? lerArtefatosInteiros() : Promise.resolve(null),
     ]);
+    /* As versões que a escolha leve não pode perder: as que um item do Radar ou um documento referenciam. */
+    const referenciadas = new Set<string>([
+      ...(workflowLido.status === "fulfilled" ? workflowLido.value.radar.map(item => item.articleDnaVersionId) : []),
+      ...(documentosLidosS.status === "fulfilled" ? documentosLidosS.value as unknown[] : []).flatMap(registro => {
+        const ref = (registro as { document?: { articleDnaRef?: { versionId?: unknown }; siloDnaRef?: { versionId?: unknown } } }).document;
+        return [ref?.articleDnaRef?.versionId, ref?.siloDnaRef?.versionId].filter((id): id is string => typeof id === "string");
+      }),
+    ]);
+    const [artefatosLidos] = detalheInteiro
+      ? [artefatosInteiros]
+      : await Promise.allSettled([new ArtifactRepository().listLight(marcaId, recorte ? recorte.entityIds : null, referenciadas)]);
+    const settled = [workflowLido, artefatosLidos, documentosLidosS, publicacoesLidas, serpLido, revisoesLidas] as const;
 
     const falhas: FalhaDeSecao[] = [];
     const valor = <T,>(indice: number, vazio: T): T => {
@@ -103,34 +127,7 @@ export async function GET(request: NextRequest) {
     };
 
     const workflow = valor(0, { radar: [] as RadarItem[], incompatible: [] as IncompatibleRecord[] });
-    const artifactsLidos = valor(1, { articles: [] as VersionEnvelope<ArticleDNA>[], silos: [] as VersionEnvelope<SiloDNA>[], events: [] as VersionStatusEvent[], incompatible: [] as IncompatibleRecord[] });
-    /*
-     * 2026-10-13 · `detail=light` (SDD acelerar-fluxo, item 6; SDD 2026-10-12 §8).
-     * Sem o parâmetro, nada muda. Com ele, de cada ArticleDNA/SiloDNA só a
-     * vigente e a última aprovada (com os eventos delas), mais as versões que um
-     * item do Radar ou um documento referenciam. O histórico inteiro de um
-     * artefato sai por `GET /api/editorial/workspace/versions`.
-     */
-    const leve = request.nextUrl.searchParams.get("detail") === "light";
-    const documentosParaReferencia = leve ? (settled[2].status === "fulfilled" ? settled[2].value as unknown[] : []) : [];
-    const artifacts = leve ? (() => {
-      const referenciadas = new Set<string>([
-        ...workflow.radar.map(item => item.articleDnaVersionId),
-        ...documentosParaReferencia.flatMap(registro => {
-          const ref = (registro as { document?: { articleDnaRef?: { versionId?: unknown }; siloDnaRef?: { versionId?: unknown } } }).document;
-          return [ref?.articleDnaRef?.versionId, ref?.siloDnaRef?.versionId].filter((id): id is string => typeof id === "string");
-        }),
-      ]);
-      const escolhidos = lightArtifactSelection({
-        articles: artifactsLidos.articles,
-        silos: artifactsLidos.silos,
-        events: artifactsLidos.events,
-        articleOf: version => ({ versionId: version.versionId, versionNumber: version.versionNumber, entityKey: version.payload.articleId }),
-        siloOf: version => ({ versionId: version.versionId, versionNumber: version.versionNumber, entityKey: version.payload.siloId }),
-        keepVersionIds: referenciadas,
-      });
-      return { ...artifactsLidos, articles: escolhidos.articles, silos: escolhidos.silos, events: escolhidos.events };
-    })() : artifactsLidos;
+    const artifacts = valor(1, { articles: [] as VersionEnvelope<ArticleDNA>[], silos: [] as VersionEnvelope<SiloDNA>[], events: [] as VersionStatusEvent[], incompatible: [] as IncompatibleRecord[] } as { articles: VersionEnvelope<ArticleDNA>[]; silos: VersionEnvelope<SiloDNA>[]; events: VersionStatusEvent[]; incompatible: IncompatibleRecord[]; versionsRead?: number; versionsListed?: number });
     /* A listagem dos documentos é a função de banco de sempre (leve); o recorte filtra o que ela devolveu, pelo artigo do documento. */
     const artigosDoRecorte = recorte ? new Set(recorte.articleIds) : null;
     const documentosLidos = valor(2, [] as never[]);
@@ -138,10 +135,8 @@ export async function GET(request: NextRequest) {
       ? documentosLidos.filter(registro => artigosDoRecorte.has(String((registro as { document?: { articleDnaRef?: { entityId?: unknown } } }).document?.articleDnaRef?.entityId ?? "")))
       : documentosLidos;
     const publications = valor(3, [] as never[]);
-    const invitations = valor(4, [] as never[]);
-    const views = valor(5, [] as never[]);
-    const serp = valor(6, { records: [], available: false });
-    const reviews = valor(7, { reviews: [], available: false });
+    const serp = valor(4, { records: [], available: false });
+    const reviews = valor(5, { reviews: [], available: false });
 
     // Só a queda do PRÓPRIO workflow torna a mesa do Radar ilegível. Documento,
     // convite ou preferência que falha é diagnóstico — não some com os artigos.
@@ -159,7 +154,7 @@ export async function GET(request: NextRequest) {
       articleVersions: artifacts.articles, siloVersions: artifacts.silos, versionEvents: artifacts.events,
       serpRecords: serp.records, serpReviews: reviews.reviews,
       serpPersistenceMode: serp.available && reviews.available ? "server" : "local_fallback",
-      documents, publications, invitations, views, loadedAt: new Date().toISOString(),
+      documents, publications, loadedAt: new Date().toISOString(),
       loadDiagnostics: {
         state: estado,
         loadedCount: workflow.radar.length,
@@ -195,6 +190,7 @@ export async function GET(request: NextRequest) {
         radar: workflow.radar.length,
         articles: artifacts.articles.length, silos: artifacts.silos.length,
         events: artifacts.events.length, serpSnapshots: serp.records.length, serpReviews: reviews.reviews.length,
+        artifactVersions: detalheInteiro ? { detail: "full" } : { detail: "light", read: artifacts.versionsRead ?? null, listed: artifacts.versionsListed ?? null },
       },
       incompatible: incompatible.length,
       failedSections: falhas.map(falha => falha.secao),

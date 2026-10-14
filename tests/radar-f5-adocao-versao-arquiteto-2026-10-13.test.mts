@@ -116,6 +116,10 @@ function armazem(banco: Banco): Armazem {
       const corrida = banco.radar_analysis_runs.find(linha => linha.workflow_item_id === itemId && linha.version_id === versionId);
       return corrida ? clonar(corrida.payload as Record<string, unknown>) : null;
     },
+    /* 2026-10-14 · esta bancada não tem grafo aprovado (os links novos são provados em radar-f5-links-novos-2026-10-14). */
+    async readInternalLinkGraphs() {
+      return [];
+    },
     async writeAnalysisRun(input) {
       escritas.push(`run:${input.itemId}:${input.versionId}`);
       banco.radar_analysis_runs.push({ workflow_item_id: input.itemId, version_id: input.versionId, marca_id: input.brandId, article_id: input.articleId, payload: clonar(input.run) });

@@ -147,8 +147,10 @@ test("melhoria: principal declarada igual à atual e plano ainda não aplicado a
 
 test("servidor da melhoria (estrutural): a keyword nova do Assunto nasce ligada a ele, o plano entra no DNA e na impressão digital", () => {
   const fonte = readFileSync(new URL("../lib/server/arquiteto-article-improvement.ts", import.meta.url), "utf8");
-  assert.match(fonte, /subjectKeywordId: target\.kind === "subject" \? target\.id : null/);
-  assert.doesNotMatch(fonte, /subjectKeywordId: null, subjectPhrase/);
+  // F4 (ajuste declarado 2026-10-14): a keyword nova vira sugestão ao Minerador, ligada ao Assunto; o import (que liga ao grupo dele) é do Minerador.
+  const sugestao = readFileSync(new URL("../lib/arquiteto/article-improvement-minerador.ts", import.meta.url), "utf8");
+  assert.match(sugestao, /subjectKeywordId: target\.kind === "subject" \? target\.id : null/);
+  assert.doesNotMatch(sugestao, /subjectKeywordId: null, subjectPhrase/);
   assert.match(fonte, /applyDeclaredPlanToArticleDna\(payload/);
   // 2026-10-13 · só a principal TRAVADA é fixa; a livre é a principal atual e pode ser trocada.
   assert.match(fonte, /declaredPrincipalId: fixa\.keywordId/);

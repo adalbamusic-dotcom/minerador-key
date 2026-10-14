@@ -47,6 +47,8 @@ export const RADAR_RESET_CLEARED = [
   "finalizedBundle",
   "verifiedSources",
   "sourceVerificationFailures",
+  /* 2026-10-14 · as fontes externas de autoridade descrevem a amostra descartada. */
+  "authoritySources",
   "analysisCompletedAt",
   "benchmark",
   "semanticTerms",
@@ -103,6 +105,7 @@ export function buildRadarResetPayload(payload: RadarAnalysisPayload): RadarAnal
     analysisCompletedAt: null,
     verifiedSources: [],
     sourceVerificationFailures: [],
+    authoritySources: null,
     benchmark: null,
     semanticTerms: [],
     structuralDecisions: [],

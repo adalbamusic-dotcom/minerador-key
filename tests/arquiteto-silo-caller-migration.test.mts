@@ -118,7 +118,9 @@ test("9 · o reload lê a working copy remota", () => {
   assert.match(rota, /listSiloWorkingCopies\(context\)/);
   // O snapshot cresceu com o parecer de SERP já gravado; o que importa é que
   // território e working copy remotas continuam saindo do MESMO GET.
-  assert.match(rota, /data: \{ \.\.\.workspace, territories, siloWorkingCopies/);
+  // 2026-10-14 · F2 das listas leves: o corpo do GET saiu para `readArchitectWorkspaceBody` (o GET o devolve em `data`).
+  assert.match(rota, /return \{ \.\.\.workspace, territories, siloWorkingCopies/);
+  assert.match(rota, /const data = await readArchitectWorkspaceBody\(context,[\s\S]*?return NextResponse\.json\(\{ success: true, data \}\)/);
   assert.match(rota, /listTerritorialSerpAssessments\(context\)/);
 });
 

@@ -471,6 +471,8 @@ export async function runReinforcementSearch(input: {
   pageFootprints: readonly KeywordSerpFootprint[];
   publishedNormalized: ReadonlySet<string>;
   existingByNormalized?: ReadonlyMap<string, string> | null;
+  /** F3 — normalizada → volume já medido no Minerador (`null` = "sem média" < 30 dias): não é medida de novo. */
+  knownVolumeByNormalized?: ReadonlyMap<string, number | null> | null;
   operationRequestId: string;
   authorizedPlan: { planHash: string; maxCostUsd: number } | null | undefined;
 }, ports: DifferentiationRunPorts): Promise<ReinforcementSearchOutcome> {
@@ -492,6 +494,7 @@ export async function runReinforcementSearch(input: {
       ledgerMetadata: { operationKind: "published_reinforcement_search", searchId: plan.searchId },
       blockedNormalized: new Set<string>([...input.publishedNormalized, ...plan.pages.map(page => normalizeKeyword(page.keyword))]),
       existingByNormalized: input.existingByNormalized ?? null,
+      knownVolumeByNormalized: input.knownVolumeByNormalized ?? null,
       pageFootprints: input.pageFootprints,
       filter: (page, comVolume, bloqueadas) => filterReinforcementCandidates({ page: porId.get(page.keywordId) ?? page, candidates: comVolume, blockedNormalized: bloqueadas }),
     }, autorizacao.budgetUsd, ports);

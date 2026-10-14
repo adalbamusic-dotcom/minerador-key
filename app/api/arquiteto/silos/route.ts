@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { manualSiloDnaDraftPayload, manualSiloPageDraftPayload } from "@/lib/arquiteto/adapters";
@@ -5,7 +6,7 @@ import type { SiloDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { assertManualSiloPageSlugAvailable, normalizeManualSiloPageSlug } from "@/lib/arquiteto/manual-silo";
 import { createVersionEnvelope } from "@/lib/arquiteto/versioning";
 import { listArquitetoArtifacts, persistSiloPairAtomic, pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
-import { resolvePipelineContext, PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
+import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
 const RequestSchema = z.object({
   brandId: z.string().uuid(),
@@ -53,13 +54,13 @@ export async function POST(request: Request) {
       throw new SiloPairCreationError("SILO_SLUG_CONFLICT", error instanceof Error ? error.message : "Este slug já está registrado para a marca ativa.");
     }
 
-    const listResult = await context.supabase
-      .from("minerador_keyword_lists")
-      .insert({ nome: parsed.name, marca_id: context.brandId })
-      .select("id, nome")
-      .single();
-    if (listResult.error || !listResult.data?.id) throw listResult.error || new PipelineRuntimeError("QUERY_FAILURE", "O silo não foi confirmado pelo banco.", 503);
-    const siloId = String(listResult.data.id);
+    /*
+     * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+     * item 2; W8). Esta rota legada (sem chamador na tela) inseria uma linha em
+     * `minerador_keyword_lists` para usar o id como Silo. Silo é SiloDNA, não
+     * lista do Minerador: o id agora é gerado aqui e nada é gravado no Minerador.
+     */
+    const siloId = randomUUID();
 
     const siloDraft = await createVersionEnvelope({
       entityId: siloId,

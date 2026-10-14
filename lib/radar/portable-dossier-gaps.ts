@@ -21,6 +21,7 @@ import type { RadarAuthorityEvidence, RadarEeatDimension, RadarEeatSignalState, 
 import type { RadarCompetitiveObservedModel, RadarObservedCompetitor } from "./competitive-observed-model.ts";
 import type { RadarBundleCrossSerp, RadarBundleEditorialOutput, RadarEvidenceBundle, RadarFormatBlueprints, RadarResearchLayer } from "./evidence-bundle.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
+import { RADAR_AUTHORITY_KIND_LABEL, RADAR_AUTHORITY_LIMITS, type RadarAuthoritySourcesRecord } from "./authority-sources-contract.ts";
 
 /**
  * ===== AS LACUNAS DO DOSSIÊ PORTÁTIL — "o Redator tem, o CSV não tem" =====
@@ -272,6 +273,8 @@ export type RadarPortableResearchStatusInput = {
     conflicts: readonly RadarEvidenceResolution[];
     /** SDD Radar 2026-09-30 (Parte A): vídeo e review acrescentados ao Google. Ausente sem acréscimo. */
     formatBlueprints?: RadarFormatBlueprints;
+    /** 2026-10-14c · F-B (SDD silo interligado §16.2): as fontes externas de autoridade conferidas. Ausente sem a conferência. */
+    authoritySources?: RadarAuthoritySourcesRecord;
   };
   /** `canonico.dossier.readiness` — a mesma regra que o Redator usa para recusar. */
   readiness: { ready: boolean; blocks: readonly RadarPortableReadinessBlock[] };
@@ -657,7 +660,24 @@ export type RadarPortableAuthorityInput = {
    * colunas.
    */
   observed: Pick<RadarCompetitiveObservedModel, "authorityEvidence" | "aiDiscovery"> | null;
+  /** 2026-10-14c · F-B (SDD silo interligado §16.2) · Aditivo: o registro das fontes externas conferidas (`bundle.authoritySources`). Ausente = como antes. */
+  authoritySources?: RadarAuthoritySourcesRecord | null;
 };
+
+/*
+ * 2026-10-14c · F-B · AS FONTES EXTERNAS DE AUTORIDADE CONFERIDAS, no formato
+ * completo (a conferência chave a chave do dossiê): uma linha por fonte verificada,
+ * com o id X; as que não passaram, contadas. Sem o registro, nada.
+ */
+function blocoDasFontesDeAutoridade(registro: RadarAuthoritySourcesRecord | null | undefined): string[] {
+  if (!registro) return [];
+  if (registro.status !== "CHECKED") return ["", "## Fontes externas de autoridade conferidas", "", `- Não conferidas nesta investigação: ${limpo(registro.unavailableReason || "motivo não registrado")}.`];
+  return [
+    "", "## Fontes externas de autoridade conferidas", "",
+    ...listaComTeto(registro.verified.map(item => `${item.id} · ${item.entity} (${RADAR_AUTHORITY_KIND_LABEL[item.kind]}) · ${item.url} · sustenta "${limpo(item.claim)}"${item.ymyl ? " · afirmação de saúde (YMYL)" : ""}`), RADAR_AUTHORITY_LIMITS.maxSources, item => item, "Nenhuma fonte verificada nesta investigação."),
+    ...(registro.failures.length ? [`- ${registro.failures.length} candidata(s) não passaram na conferência (o motivo está na tela do artigo e na SERP crua).`] : []),
+  ];
+}
 
 const YMYL: Record<string, string> = { NONE: "nenhuma", LOW: "baixa", MATERIAL: "material", HIGH: "alta" };
 const RECORRENCIA: Record<string, string> = { STRONG: "forte", MODERATE: "moderada", WEAK: "fraca" };
@@ -962,6 +982,8 @@ export function radarPortableAuthorityRequirementsMarkdown(input: RadarPortableA
     linhas.push(input.profile === "GOOGLE"
       ? "A investigação de páginas deste artigo não carrega a camada de autoridade nem a de descoberta por IA. Nada nesta célula pode ser usado como exigência de prova."
       : `Este artigo foi investigado pelo perfil ${PERFIL[input.profile] || input.profile}. A camada de autoridade (YMYL, E-E-A-T, afirmações que pedem prova) e a de descoberta por IA são produzidas só pela investigação de páginas do Google, e não existem neste dossiê. Ausência da camada não é ausência de exigência: afirmação sensível continua pedindo fonte.`);
+    /* 2026-10-14c · F-B · as fontes externas conferidas, quando o pacote as traz. */
+    linhas.push(...blocoDasFontesDeAutoridade(input.authoritySources));
     return linhas.join("\n").trim();
   }
 
@@ -979,6 +1001,8 @@ export function radarPortableAuthorityRequirementsMarkdown(input: RadarPortableA
   } else {
     linhas.push("## Descoberta por IA", "", "- A camada de descoberta por IA não foi gravada neste dossiê.");
   }
+  /* 2026-10-14c · F-B (SDD silo interligado §16.2) · as fontes externas conferidas, quando o pacote as traz. */
+  linhas.push(...blocoDasFontesDeAutoridade(input.authoritySources));
 
   const limitacoes = [...new Set([...(autoridade?.limitations || []), ...(descoberta?.limitations || [])].map(limpo).filter(Boolean))];
   linhas.push("", "## Limitações destas camadas", "");
@@ -1368,6 +1392,8 @@ export const RADAR_PORTABLE_DOSSIER_V3_COVERAGE: Readonly<Record<keyof RadarEvid
   keywordContext: "keyword_principal, secondary_keywords e keywords_context_md",
   serpLenses: "serp_lenses_md e serp_lenses_json (pacote congelado, antes do cache) e research_status_md (Situação da SERP: lentes da SERP)",
   formatBlueprints: "research_status_md (Acréscimos de formato: vídeo e review, com a data do congelamento); o blueprint completo do formato fica no pacote do Redator",
+  /* 2026-10-14c · F-B (SDD silo interligado §16.2): o registro da conferência das fontes externas de autoridade, congelado no pacote. */
+  authoritySources: "authority_requirements_md (Fontes externas de autoridade conferidas: id X, entidade, endereço e a afirmação que sustentam); o CSV 'Para escrever' as aplica na coluna das fontes e na estrutura",
 };
 
 /* ============================ as três colunas ============================ */
@@ -1388,7 +1414,7 @@ export function radarPortableDossierGapColumns(input: RadarPortableDossierGapsIn
   const profile = input.status.bundle.primaryResearchProfile;
   return {
     research_status_md: radarPortableResearchStatusMarkdown(input.status),
-    authority_requirements_md: radarPortableAuthorityRequirementsMarkdown({ profile, observed: input.observed }),
+    authority_requirements_md: radarPortableAuthorityRequirementsMarkdown({ profile, observed: input.observed, ...(input.status.bundle.authoritySources ? { authoritySources: input.status.bundle.authoritySources } : {}) }),
     competitors_structure_json: radarPortableCompetitorsStructureJson({ profile, observed: input.observed }),
   };
 }

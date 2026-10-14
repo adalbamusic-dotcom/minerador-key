@@ -2,6 +2,7 @@ import "server-only";
 
 import { createGoogleAdsKeywordAccount } from "@/lib/google/ads/account";
 import { generateGoogleAdsHistoricalMetrics } from "@/lib/google/ads/historical-metrics";
+import type { GoogleAdsHistoricalMetric } from "@/lib/google/ads/contracts";
 import { DifferentiationAiResponseSchema } from "@/lib/arquiteto/published-differentiation";
 import { IMPROVEMENT_AI_MAX_TOKENS, ImprovementAiResponseSchema } from "@/lib/arquiteto/article-improvement-ai";
 import { GOOGLE_ADS_VOLUME_BATCH_SIZE } from "@/lib/minerador/google-ads-volume";
@@ -52,6 +53,41 @@ export async function readGoogleAdsAverageVolumes(input: {
     for (const pedida of resultado.unmatchedRequestedKeywords) if (!volumes.has(normalizeKeyword(pedida))) volumes.set(normalizeKeyword(pedida), null);
   }
   return volumes;
+}
+
+/**
+ * F3 · MEDIR UMA VEZ (SDD 2026-10-13, item 3). A MESMA consulta de métricas
+ * históricas que o "Medir volume" do Minerador faz (com o CPC), mas só LÊ: a
+ * melhoria guarda a métrica de cada keyword na execução e, ao "Gravar
+ * melhorias", grava ESTA medição pelo núcleo do Minerador sem chamar o Google
+ * Ads de novo. A conta vai mascarada (os 4 últimos dígitos, como o Minerador grava).
+ */
+export async function readGoogleAdsHistoricalMetricsOnce(input: {
+  actorUserId: string;
+  agencyId: string | null;
+  brandId: string;
+  keywords: readonly string[];
+}): Promise<{ metrics: Array<{ metric: GoogleAdsHistoricalMetric; requestId: string | null }>; unmatched: string[] }> {
+  const metrics: Array<{ metric: GoogleAdsHistoricalMetric; requestId: string | null }> = [];
+  const unmatched: string[] = [];
+  const unicas = [...new Set(input.keywords.map(keyword => keyword.replace(/\s+/g, " ").trim()).filter(Boolean))];
+  if (!unicas.length) return { metrics, unmatched };
+  const canonical = await resolveGoogleAdsCanonicalContext({ actorUserId: input.actorUserId, agencyId: input.agencyId, brandId: input.brandId, operation: "metrics" });
+  const { client } = await createGoogleAdsCanonicalClient({ context: canonical });
+  const account = createGoogleAdsKeywordAccount({ customerId: canonical.customerId, loginCustomerId: canonical.managerCustomerId });
+  const targeting = targetingToProviderInput(canonical.targeting || defaultGoogleAdsCanonicalTargeting());
+  for (let inicio = 0; inicio < unicas.length; inicio += GOOGLE_ADS_VOLUME_BATCH_SIZE) {
+    const lote = unicas.slice(inicio, inicio + GOOGLE_ADS_VOLUME_BATCH_SIZE);
+    const resultado = await generateGoogleAdsHistoricalMetrics(client, {
+      account: { customerId: account.customerId, loginCustomerId: account.loginCustomerId || undefined },
+      targeting,
+      keywords: lote,
+      includeAverageCpc: true,
+    }, account);
+    for (const metric of resultado.metrics) metrics.push({ metric: { ...metric, customerId: metric.customerId.slice(-4).padStart(metric.customerId.length, "*") }, requestId: resultado.requestId ?? null });
+    unmatched.push(...resultado.unmatchedRequestedKeywords);
+  }
+  return { metrics, unmatched };
 }
 
 /**

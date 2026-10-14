@@ -137,7 +137,7 @@ test("sem aprovadas na seleção, não há aviso de rebaixamento", () => {
   assert.equal(one.ok && one.actionLabel, "Tipo de página: Silo");
 });
 
-test("posto só em publicadas: as demais são puladas e contadas", () => {
+test("posto: a publicada grava o posto de sempre; a não publicada sem plano já é livre (2026-10-13: o posto dela é a trava do cadastro)", () => {
   const published = row(1, { analise_semantica: { ...PUBLISHED_ORIGIN } });
   const plan = planVinculoBatch({ keywords: [published, row(2), row(3)], brandId: BRAND, action: { kind: "post", policy: "reviewable" }, actorId: ACTOR, changedAt: AT });
   assert.ok(plan.ok);
@@ -145,7 +145,8 @@ test("posto só em publicadas: as demais são puladas e contadas", () => {
   assert.deepEqual(plan.updates.map(update => update.id), [published.id]);
   assert.equal(plan.updates[0].semantic.primary_keyword_policy, "reviewable");
   assert.equal(plan.updates[0].semantic.primary_keyword_policy_actor, ACTOR);
-  assert.equal(plan.counts.not_published, 2);
+  assert.equal(plan.counts.not_published, 0, "não publicada não é mais pulada");
+  assert.equal(plan.counts.unchanged, 2, "sem plano, Livre não muda nada");
   assert.equal(plan.actionLabel, "Posto: Livre");
 
   // Publicada já travada (padrão): travar de novo não escreve.

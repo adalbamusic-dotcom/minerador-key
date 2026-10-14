@@ -27,7 +27,10 @@ export async function GET(request: NextRequest) {
     // marca, então o filtro só remove linhas alheias. O .or() e o gate de siloIds ficam como estavam: marca sem listas
     // continua sem carregar keywords aqui, para não aumentar o egress nem mudar o que o snapshot já entregava.
     const [keywordResult, briefingResult] = siloIds.length ? await Promise.all([
-      profile.supabase.from("minerador_keywords").select("id,keyword,intent,volume_search,kgr_score,lista_id,status,analise_semantica,created_at").eq("brand_id", marcaId).is("deleted_at", null).or(`lista_id.is.null,${siloIds.map(id => `lista_id.eq.${id}`).join(",")}`),
+      // 2026-10-14 · F2 das listas leves (SDD sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md, item 4): sem
+      // `analise_semantica`. Os consumidores da mesa (hidratação do Radar, Marca, Publicações) leem id, keyword,
+      // lista, status, volume e KGR; o DNA respondia por ~98% dos bytes (AdalbaPro: 2,1 MB → ~45 kB).
+      profile.supabase.from("minerador_keywords").select("id,keyword,intent,volume_search,kgr_score,lista_id,status,created_at").eq("brand_id", marcaId).is("deleted_at", null).or(`lista_id.is.null,${siloIds.map(id => `lista_id.eq.${id}`).join(",")}`),
       profile.supabase.from("briefings_artigos").select("id,silo_id,keyword_principal,keywords_secundarias,slug_sugerido,hierarquia,status,meta_title,meta_description,diretrizes_estrategicas,created_at").in("silo_id", siloIds),
     ]) : [{ data: [], error: null }, { data: [], error: null }];
     if (keywordResult.error) throw keywordResult.error;
@@ -39,7 +42,7 @@ export async function GET(request: NextRequest) {
       silos: (silos || []).map(silo => ({ ...silo, nicho: silo.nicho ?? null, created_at: silo.created_at ?? null })),
       keywords: (keywordResult.data || []).map(keyword => ({ ...keyword, intent: keyword.intent ?? null,
         volume_search: keyword.volume_search ?? null, kgr_score: keyword.kgr_score ?? null, status: keyword.status ?? null,
-        analise_semantica: keyword.analise_semantica ?? null, created_at: keyword.created_at ?? null })),
+        created_at: keyword.created_at ?? null })),
       briefings: (briefingResult.data || []).filter(briefing => briefing.silo_id).map(briefing => ({ ...briefing,
         titulo: null, canonical: null, updated_at: null, keywords_secundarias: briefing.keywords_secundarias ?? [],
         slug_sugerido: briefing.slug_sugerido ?? null, hierarquia: briefing.hierarquia ?? null, status: briefing.status ?? null,

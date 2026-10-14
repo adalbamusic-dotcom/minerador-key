@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   RADAR_ARCHITECT_ADOPT_BUTTON,
+  RADAR_ARCHITECT_ADOPT_LINKS_BUTTON,
   RADAR_ARCHITECT_UPDATE_LABEL,
   radarArchitectAdoptionDecisionHash,
   radarArchitectUpdatesBySilo,
@@ -22,13 +23,31 @@ import {
  *
  * O rótulo é do eixo de transferência e NÃO é o "Atualização disponível" da
  * publicação. O Arquiteto não é tocado.
+ *
+ * 2026-10-14 · LINKS: quando o grafo de links aprovado vigente do Silo é mais
+ * novo que o transportado, o artigo aparece também como "Atualização
+ * disponível do Arquiteto · links" (o que entra, o que sai, a obrigação e quem
+ * aponta para ele). Adotar troca só os links: sem reenviar e sem refazer a
+ * pesquisa, também em item finalizado ou enviado ao Redator. A marcação é por
+ * atualização (o mesmo artigo pode ter as duas).
  */
 
 const botao = "inline-flex min-h-10 items-center justify-center rounded-md border border-divider px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-context-accent hover:text-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50";
 const botaoPrincipal = "inline-flex min-h-10 items-center justify-center rounded-md border border-context-accent px-3 py-2 text-sm font-medium text-foreground transition-colors hover:text-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50";
 const bloco = "rounded-md border border-divider bg-surface-subtle p-3";
 
-type Desfecho = { articleId: string; status: string; title?: string; reason?: string; from?: number; to?: number; redo?: string[] };
+type Desfecho = { articleId: string; status: string; updateKind?: string; title?: string; reason?: string; from?: number; to?: number; fromGraphVersion?: number | null; toGraphVersion?: number; redo?: string[] };
+
+/** A marcação é por atualização: o mesmo artigo pode ter a versão nova do ArticleDNA e os links novos. */
+const tipoDe = (item: Pick<RadarArchitectUpdatePreviewItem, "updateKind">) => item.updateKind ?? "article_dna";
+const chaveDe = (item: Pick<RadarArchitectUpdatePreviewItem, "updateKind" | "articleId">) => `${tipoDe(item)}:${item.articleId}`;
+
+/** O texto de um desfecho confirmado pelo servidor. */
+function textoDoDesfecho(item: Desfecho): string {
+  if (item.status !== "adopted") return `${item.title || item.articleId}: ${item.reason}`;
+  if (item.updateKind === "links") return `${item.title}: links do grafo v${item.toGraphVersion} (era ${typeof item.fromGraphVersion === "number" ? `v${item.fromGraphVersion}` : "o do envio"}). A pesquisa e o pacote ficam.`;
+  return `${item.title}: agora na v${item.to} (era v${item.from}).${item.redo?.length ? ` Para refazer: ${item.redo.join(" ")}` : ""}`;
+}
 
 /** A prévia da marca (só leitura): os itens do Radar atrás de uma versão aprovada mais nova do ArticleDNA. */
 async function lerAtualizacoesDoArquiteto(brandId: string, sinal: AbortSignal): Promise<RadarArchitectUpdatePreviewItem[]> {
@@ -63,7 +82,7 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
       .then(lidos => {
         const doRecorte = lidos.filter(item => visiveis.has(item.articleId));
         setItens(doRecorte);
-        setMarcados(new Set(doRecorte.filter(item => item.adoptable).map(item => item.articleId)));
+        setMarcados(new Set(doRecorte.filter(item => item.adoptable).map(chaveDe)));
         setErro(null);
       })
       .catch(falha => {
@@ -74,16 +93,21 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
   }, [brandId, chave, rodada]);
 
   const porSilo = useMemo(() => radarArchitectUpdatesBySilo(itens), [itens]);
-  const selecionados = itens.filter(item => item.adoptable && marcados.has(item.articleId));
+  const selecionados = itens.filter(item => item.adoptable && marcados.has(chaveDe(item)));
+  const artigosComAtualizacao = new Set(itens.map(item => item.articleId)).size;
+  const comLinks = new Set(itens.filter(item => tipoDe(item) === "links").map(item => item.articleId)).size;
+  const selecionaVersao = selecionados.some(item => tipoDe(item) === "article_dna");
+  const selecionaLinks = selecionados.some(item => tipoDe(item) === "links");
+  const textoDoBotao = selecionaVersao && selecionaLinks ? `${RADAR_ARCHITECT_ADOPT_BUTTON} e os links` : selecionaLinks ? RADAR_ARCHITECT_ADOPT_LINKS_BUTTON : RADAR_ARCHITECT_ADOPT_BUTTON;
 
-  const alternar = (articleId: string) => setMarcados(atual => {
+  const alternar = (chave: string) => setMarcados(atual => {
     const proximo = new Set(atual);
-    if (proximo.has(articleId)) proximo.delete(articleId); else proximo.add(articleId);
+    if (proximo.has(chave)) proximo.delete(chave); else proximo.add(chave);
     return proximo;
   });
   const alternarSilo = (grupo: RadarArchitectUpdatePreviewItem[], marcar: boolean) => setMarcados(atual => {
     const proximo = new Set(atual);
-    for (const item of grupo) if (item.adoptable) { if (marcar) proximo.add(item.articleId); else proximo.delete(item.articleId); }
+    for (const item of grupo) if (item.adoptable) { if (marcar) proximo.add(chaveDe(item)); else proximo.delete(chaveDe(item)); }
     return proximo;
   });
 
@@ -93,18 +117,28 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
     setErro(null);
     try {
       const decisionHash = await radarArchitectAdoptionDecisionHash(selecionados);
+      const linkArticleIds = selecionados.filter(item => tipoDe(item) === "links").map(item => item.articleId);
       const resposta = await fetch("/api/editorial/radar-architect-update", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ action: "adopt", brandId, articleIds: selecionados.map(item => item.articleId), decisionHash }),
+        body: JSON.stringify({
+          action: "adopt", brandId,
+          articleIds: selecionados.filter(item => tipoDe(item) === "article_dna").map(item => item.articleId),
+          ...(linkArticleIds.length ? { linkArticleIds } : {}),
+          decisionHash,
+        }),
       });
       const corpo = await resposta.json().catch(() => ({}));
       if (!resposta.ok || !corpo?.ok) throw new Error(corpo?.error || "A adoção não foi confirmada pelo servidor.");
       const lista = (corpo.results || []) as Desfecho[];
       setDesfechos(lista);
-      const adotados = lista.filter(item => item.status === "adopted").length;
+      const adotados = lista.filter(item => item.status === "adopted" && item.updateKind !== "links").length;
+      const linksAdotados = lista.filter(item => item.status === "adopted" && item.updateKind === "links").length;
       const recusados = lista.filter(item => item.status === "refused");
-      const partes = [`${adotados} artigo(s) passaram a transportar a versão nova do Arquiteto (confirmado pelo servidor)`];
+      const partes = [
+        ...(adotados || !linksAdotados ? [`${adotados} artigo(s) passaram a transportar a versão nova do Arquiteto (confirmado pelo servidor)`] : []),
+        ...(linksAdotados ? [`${linksAdotados} artigo(s) passaram a transportar os links novos do Arquiteto, sem refazer a pesquisa (confirmado pelo servidor)`] : []),
+      ];
       if (recusados.length) partes.push(`${recusados.length} recusado(s): ${recusados.map(item => item.reason).join(" ")}`);
       await onAdopted(partes.join(" · "));
       setRodada(valor => valor + 1);
@@ -122,21 +156,19 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
   const ocupado = Boolean(estado);
   return <div className="mt-2 space-y-2" data-testid="radar-architect-update">
     {itens.length > 0 && <div className="flex flex-wrap items-center gap-2" role="status">
-      <p className="text-sm text-pending" data-testid="radar-architect-update-count">{RADAR_ARCHITECT_UPDATE_LABEL} · {itens.length} artigo(s)</p>
+      <p className="text-sm text-pending" data-testid="radar-architect-update-count">{RADAR_ARCHITECT_UPDATE_LABEL} · {artigosComAtualizacao} artigo(s){comLinks ? ` · links novos em ${comLinks}` : ""}</p>
       {!aberto && <button type="button" className={botao} disabled={ocupado} onClick={() => { setAberto(true); setDesfechos([]); }} data-testid="radar-architect-update-open"
         title="Mostra o que mudou e o que a adoção reaproveita. Ler não grava nada.">Ver e adotar</button>}
     </div>}
     {desfechos.length > 0 && <ul className="space-y-1 text-sm leading-6 text-foreground" data-testid="radar-architect-update-results">
-      {desfechos.map(item => <li key={item.articleId}>{item.status === "adopted"
-        ? `${item.title}: agora na v${item.to} (era v${item.from}).${item.redo?.length ? ` Para refazer: ${item.redo.join(" ")}` : ""}`
-        : `${item.title || item.articleId}: ${item.reason}`}</li>)}
+      {desfechos.map(item => <li key={`${item.updateKind ?? "article_dna"}:${item.articleId}`}>{textoDoDesfecho(item)}</li>)}
     </ul>}
     {aberto && itens.length > 0 && <div className={`${bloco} space-y-3`} role="region" aria-label={RADAR_ARCHITECT_UPDATE_LABEL} data-testid="radar-architect-update-panel">
-      <p className="text-sm leading-6 text-text-muted">A prévia é leitura e não altera nada. O Radar se adapta ao Arquiteto: não reagrupa, não troca a principal por conta própria e não muda slug, canonical nem URL publicados. Desmarque o que não quer adotar agora.</p>
+      <p className="text-sm leading-6 text-text-muted">A prévia é leitura e não altera nada. O Radar se adapta ao Arquiteto: não reagrupa, não troca a principal por conta própria e não muda slug, canonical nem URL publicados. Links novos não pedem pesquisa nova: links não mudam a SERP. Desmarque o que não quer adotar agora.</p>
       {erro && <p className="text-sm text-warning" role="status" data-testid="radar-architect-update-error">{erro}</p>}
       {porSilo.map(grupo => {
         const adotaveis = grupo.items.filter(item => item.adoptable);
-        const todos = adotaveis.length > 0 && adotaveis.every(item => marcados.has(item.articleId));
+        const todos = adotaveis.length > 0 && adotaveis.every(item => marcados.has(chaveDe(item)));
         return <section key={grupo.siloId ?? "sem-silo"} className="space-y-2" aria-label={`Silo ${grupo.siloName}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-foreground">Silo: {grupo.siloName}</p>
@@ -145,9 +177,9 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
             </button>}
           </div>
           <ul className="space-y-2">
-            {grupo.items.map(item => <li key={item.articleId} className="rounded-md border border-divider p-3" data-testid="radar-architect-update-item" data-classification={item.classification}>
+            {grupo.items.map(item => <li key={chaveDe(item)} className="rounded-md border border-divider p-3" data-testid="radar-architect-update-item" data-classification={item.classification} data-update-kind={tipoDe(item)}>
               <label className="flex items-start gap-2 text-sm text-foreground">
-                <input type="checkbox" className="mt-1 h-4 w-4" checked={item.adoptable && marcados.has(item.articleId)} disabled={!item.adoptable || ocupado} onChange={() => alternar(item.articleId)}/>
+                <input type="checkbox" className="mt-1 h-4 w-4" checked={item.adoptable && marcados.has(chaveDe(item))} disabled={!item.adoptable || ocupado} onChange={() => alternar(chaveDe(item))}/>
                 <span><span className="font-medium">{item.title}</span> <span className="text-text-muted">· /{item.slug}</span><br/><span className="text-pending">{item.label}</span> <span className="text-text-muted">· {item.classificationLabel}</span></span>
               </label>
               {item.changes.length > 0 && <div className="mt-2">
@@ -167,7 +199,7 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
       })}
       <div className="flex flex-wrap gap-2">
         <button type="button" className={botaoPrincipal} disabled={ocupado || !selecionados.length} onClick={() => void adotar()} data-testid="radar-architect-update-confirm">
-          {estado === "gravando" ? "Adotando…" : `${RADAR_ARCHITECT_ADOPT_BUTTON} (${selecionados.length})`}
+          {estado === "gravando" ? "Adotando…" : `${textoDoBotao} (${selecionados.length})`}
         </button>
         <button type="button" className={botao} disabled={estado === "gravando"} onClick={() => { setAberto(false); setErro(null); }} data-testid="radar-architect-update-close">Fechar</button>
       </div>

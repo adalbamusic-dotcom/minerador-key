@@ -3,7 +3,8 @@ import { z } from "zod";
 import { architectPatchKeywordReadInput, loadCanonicalArquitetoWorkspace, readArchitectPatchKeywords } from "@/lib/server/arquiteto-workspace";
 import { pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
 import { parseGroupIdQuery } from "@/lib/editorial/article-groups";
-import { resolvePipelineContext, PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
+import { resolvePipelineContext, PipelineRuntimeError, type PipelineContext } from "@/lib/server/pipeline-runtime";
+import type { EditorialGroupFilter } from "@/lib/editorial/editorial-groups";
 import { WorkflowRepository } from "@/lib/server/pipeline-repositories";
 import { ArticleKgrIdentitySchema, SiloCandidateMarkSchema } from "@/lib/arquiteto/contracts";
 import { KeywordTerritoryDecisionSchema, TerritoryRefSchema } from "@/lib/arquiteto/territory";
@@ -14,6 +15,7 @@ import { createTerritoryWorkflowItem, listTerritoryWorkflowItems, readTerritoryW
 import { planTerritoryUndoForBrand } from "@/lib/server/arquiteto-territory-undo";
 import { listTerritorialSerpAssessments } from "@/lib/server/arquiteto-territorial-serp-store";
 import { listArticleFormationSerpAssessments } from "@/lib/server/arquiteto-article-serp-store";
+import { projectArticleFormationSerpRecord } from "@/lib/arquiteto/article-serp-projection";
 import { listTerritorialAiProposals } from "@/lib/server/arquiteto-territorial-ai-store";
 import { readArticleFormationMarker } from "@/lib/server/arquiteto-article-formation-marker-store";
 import { readArchitectureMarker } from "@/lib/server/arquiteto-architecture-marker-store";
@@ -139,25 +141,85 @@ export async function handleArchitectWorkspaceRead(request: Request) {
     const grupo = parseGroupIdQuery(searchParams.get("groupId"));
     if (!grupo.ok) return NextResponse.json({ success: false, error: "groupId inválido.", code: "INVALID_CONTEXT" }, { status: 400 });
     const context = await resolvePipelineContext({ brandId: query.brandId, module: "arquiteto", action: "view" });
-    // Hidratação é LEITURA: o boot devolve o parecer já gravado e nunca
-    // dispara consulta nova ao provider.
-    const [workspace, territories, siloWorkingCopies, territorialSerp, articleFormationSerp, territorialAi, architectureMarker, articleFormationMarker] = await Promise.all([
-      grupo.filter.kind === "all"
-        ? loadCanonicalArquitetoWorkspace(context, { keywordDetail: keywordDetailOf(searchParams) })
-        : loadCanonicalArquitetoWorkspace(context, { keywordDetail: keywordDetailOf(searchParams), groupFilter: grupo.filter }),
-      listTerritoryWorkflowItems(context),
-      listSiloWorkingCopies(context),
-      listTerritorialSerpAssessments(context),
-      // A evidência SERP da formação vem do REMOTO: o navegador é cache, não
-      // autoridade. Sem isto o F5 dependeria da memória daquela aba.
-      listArticleFormationSerpAssessments(context),
-      listTerritorialAiProposals(context),
-      readArchitectureMarker(context),
-      readArticleFormationMarker(context),
-    ]);
-    return NextResponse.json({ success: true, data: { ...workspace, territories, siloWorkingCopies, territorialSerp, articleFormationSerp, territorialAi, architectureMarker: architectureMarker?.payload ?? null, articleFormationMarker: articleFormationMarker?.payload ?? null } });
+    const data = await readArchitectWorkspaceBody(context, { keywordDetail: keywordDetailOf(searchParams), groupFilter: grupo.filter, serpDetail: searchParams.get("serpDetail") === "full" ? "full" : undefined });
+    return NextResponse.json({ success: true, data });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ success: false, error: "brandId é obrigatório e deve ser válido.", code: "INVALID_CONTEXT" }, { status: 400 });
+    const mapped = pipelineArtifactErrorResponse(error);
+    return NextResponse.json(mapped.body, { status: mapped.status });
+  }
+}
+
+/**
+ * O corpo do GET, depois da autorização (a rota e os testes de servidor usam o MESMO).
+ */
+export async function readArchitectWorkspaceBody(context: PipelineContext, options: { keywordDetail?: "full"; groupFilter: EditorialGroupFilter; serpDetail?: "full" }) {
+  const serpCheio = options.serpDetail === "full";
+  /*
+   * 2026-10-14 · F2 das listas leves: a leitura de sempre (todos os grupos,
+   * índice sem DNA, parecer em projeção) é a BASE da releitura do que mudou
+   * (`POST /api/arquiteto/workspace/delta`). As marcas são lidas ANTES das
+   * linhas, e os metadados das versões e o índice das keywords dessa leitura
+   * são reaproveitados — o banco não os lê duas vezes.
+   */
+  const baseDaReleitura = options.groupFilter.kind === "all" && !options.keywordDetail && !serpCheio;
+  // Import sob demanda: só a leitura-base e a releitura carregam o módulo das marcas.
+  const marcas = baseDaReleitura ? await import("@/lib/server/arquiteto-workspace-sync") : null;
+  const sync = marcas ? await marcas.readArchitectSyncState(context) : null;
+  // Hidratação é LEITURA: o boot devolve o parecer já gravado e nunca
+  // dispara consulta nova ao provider.
+  const [workspace, territories, siloWorkingCopies, territorialSerp, articleFormationSerp, territorialAi, architectureMarker, articleFormationMarker] = await Promise.all([
+    // F2 das listas leves (2026-10-14): a tela lê do banco só a versão vigente de cada artefato.
+    options.groupFilter.kind === "all"
+      ? loadCanonicalArquitetoWorkspace(context, { keywordDetail: options.keywordDetail, artifactRead: "vigente", ...(marcas && sync ? { artifactMetas: sync.versionMetas, keywordIndexRows: marcas.keywordIndexRowsFromSync(sync) } : {}) })
+      : loadCanonicalArquitetoWorkspace(context, { keywordDetail: options.keywordDetail, groupFilter: options.groupFilter, artifactRead: "vigente" }),
+    listTerritoryWorkflowItems(context),
+    listSiloWorkingCopies(context),
+    listTerritorialSerpAssessments(context),
+    // A evidência SERP da formação vem do REMOTO: o navegador é cache, não
+    // autoridade. Sem isto o F5 dependeria da memória daquela aba.
+    listArticleFormationSerpAssessments(context),
+    listTerritorialAiProposals(context),
+    readArchitectureMarker(context),
+    readArticleFormationMarker(context),
+  ]);
+  /*
+   * 2026-10-14 · F2 das listas leves: os pareceres da formação saem em
+   * PROJEÇÃO (o que a mesa lê; `lib/arquiteto/article-serp-projection.ts`).
+   * O parecer inteiro só com `serpDetail=full`, que a exportação pede.
+   */
+  return { ...workspace, territories, siloWorkingCopies, territorialSerp, articleFormationSerp: serpCheio ? articleFormationSerp : articleFormationSerp.map(projectArticleFormationSerpRecord), territorialAi, architectureMarker: architectureMarker?.payload ?? null, articleFormationMarker: articleFormationMarker?.payload ?? null, ...(sync ? { sync: sync.marks } : {}) };
+}
+
+const DeltaBodySchema = z.object({
+  brandId: z.string().uuid(),
+  sync: z.object({
+    v: z.literal(1),
+    items: z.record(z.string(), z.string()),
+    kw: z.record(z.string(), z.string()),
+    art: z.record(z.string(), z.string()),
+    serp: z.record(z.string(), z.string()),
+    hashes: z.record(z.string(), z.string()),
+  }).strict(),
+}).strict();
+
+/**
+ * 2026-10-14 · F2 das listas leves — `POST /api/arquiteto/workspace/delta`.
+ *
+ * Só LEITURA (POST porque as marcas não cabem na URL). A tela manda as marcas
+ * da última leitura; a resposta traz só as linhas que mudaram, na forma da
+ * leitura inteira, e o remendo das marcas. Mesma permissão do GET
+ * (`arquiteto:view`). Nunca grava nada e nunca chama provider.
+ */
+export async function handleArchitectWorkspaceDelta(request: Request) {
+  try {
+    const parsed = DeltaBodySchema.parse(await request.json());
+    const context = await resolvePipelineContext({ brandId: parsed.brandId, module: "arquiteto", action: "view" });
+    const { loadArchitectWorkspaceDelta } = await import("@/lib/server/arquiteto-workspace-sync");
+    const delta = await loadArchitectWorkspaceDelta(context, parsed.sync);
+    return NextResponse.json({ success: true, data: { source: "CANONICAL_REMOTE", mode: "delta", changes: delta.changes, sync: delta.sync, stats: delta.stats } });
+  } catch (error) {
+    if (error instanceof z.ZodError) return NextResponse.json({ success: false, error: "As marcas da releitura são inválidas; a tela relê tudo.", code: "INVALID_CONTEXT" }, { status: 400 });
     const mapped = pipelineArtifactErrorResponse(error);
     return NextResponse.json(mapped.body, { status: mapped.status });
   }

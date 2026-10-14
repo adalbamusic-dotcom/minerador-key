@@ -194,7 +194,13 @@ test("o bloqueio por divergência diz o que divergiu; detalhe com id não entra"
 test("com o artigo-modelo, 'cobrir e superar' remete à abertura dele em vez de dar outra", async () => {
   const fonte = (await readFile(new URL("../lib/radar/portable-writing-export.ts", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   const semComentarios = fonte.replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.match(semComentarios, /if \(planta\) movimentos\.push\("Abertura: a do artigo-modelo \(coluna estrutura\); as perguntas abaixo entram nas seções\."\);/);
+  /*
+   * 2026-10-14b · SDD silo interligado · F3 · decisão do dono (§8.3): a coluna
+   * abre pelo ângulo e pelos quatro blocos da análise competitiva; a remissão à
+   * abertura saiu (a abertura continua só na estrutura da planta).
+   */
+  assert.doesNotMatch(semComentarios, /movimentos\.push\("Abertura: a do artigo-modelo/);
+  assert.match(semComentarios, /`Ângulo deste artigo: \$\{/);
   assert.doesNotMatch(semComentarios, /movimentos\.push\(`Responder \$\{entreAspas\(perguntaDeAbertura\)\} logo no primeiro parágrafo/, "a abertura do export sem planta saiu");
 });
 

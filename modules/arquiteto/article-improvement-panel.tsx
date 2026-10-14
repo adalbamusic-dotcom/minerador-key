@@ -7,6 +7,11 @@ import { ARTICLES_NEW_ANCHOR, ARTICLES_SOBRAS_ANCHOR, improvementRowApplyLabel, 
 import { ReworkNotice } from "@/components/editorial/rework-notice";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
 import { improvementDiscoveryCostSentence } from "@/lib/arquiteto/article-improvement-reuse";
+import { knownBeforeSearchAuthorizeLabel, KNOWN_VOLUME_MISSING_LABELS } from "@/lib/editorial/known-before-search";
+import { IMPROVEMENT_NEEDS_MINERADOR_LABEL } from "@/lib/arquiteto/article-improvement-minerador";
+import { isEditorialGroupColor } from "@/lib/editorial/editorial-groups";
+import { ARCHITECT_SUGGESTIONS_LABEL, mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
+import { PLAN_SHEET_TITLE } from "@/lib/arquiteto/plan-article-sheet";
 
 const statuses = { ready: "Pronto para aplicar", adequate: "Já adequado", insufficient_evidence: "Evidência insuficiente", no_alternative: "Sem alternativa compatível" };
 const outcomes = { improved: "Melhoria gravada", dna_created: "DNA criado", unchanged: "Sem mudança material", insufficient_evidence: "Evidência insuficiente", failed: "Falha recuperável" };
@@ -25,7 +30,7 @@ function originOf(p: Proposal, run: ImprovementRun): string | null {
 
 type Activity = { action: "prepare" | "collect" | "apply" | "status"; startedAt: number };
 const ACTIVITY_LABELS: Record<Activity["action"], string> = {
-  prepare: "Buscando keywords (lista da marca e leitura da IA)",
+  prepare: "Buscando keywords no que já temos (e, só com a sua autorização, a leitura da IA e a medição do que falta)",
   collect: "Validando no Google",
   apply: "Gravando as melhorias",
   status: "Lendo o andamento",
@@ -41,8 +46,19 @@ export function ImprovementProgress({ activity, now, done, total, unit }: { acti
     note="o andamento fica guardado no servidor" testId="architect-improvement-progress" />;
 }
 
-function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], planGroups = [] }: {
+function ArticleImprovementSession({ brandId, brandRef = null, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], activeGroup = null }: {
   brandId: string | null; onApplied: () => void; buttonClassName: string; primaryButtonClassName: string;
+  /**
+   * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13, item 2): a rota da marca, para o
+   * link "Sugestões do Arquiteto" no Minerador (o Arquiteto nunca grava lá).
+   */
+  brandRef?: string | null;
+  /**
+   * 2026-10-13 · caso real (WifiConecta): com a etiqueta azul escolhida, o painel mostrava a
+   * análise antiga da marca inteira (Assuntos do laranja). Com uma cor ativa, "Buscar keywords"
+   * recorta pela cor, e a análise de outro recorte é avisada como tal.
+   */
+  activeGroup?: { requested: string; label: string } | null;
   /** A aba mostra Sobras agora: sem elas, o cartão não manda para um lugar vazio. */
   hasLeftovers?: boolean;
   /**
@@ -51,12 +67,13 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
    * valendo só para as linhas marcadas na tabela desta análise.
    */
   selectedTargetIds?: readonly string[];
-  /**
-   * SDD acelerar 2026-10-13, item 4: os grupos com plano declarado na mesa. Para
-   * eles a porta é uma só, "Formar os artigos do plano · <cor>" (o prepare
-   * recortado pelo grupo).
+  /*
+   * F5 · PLANILHA PRIMEIRO (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+   * item 5): o recorte do plano saiu deste painel. Os artigos do plano são
+   * linhas da planilha "Artigos do plano" (Artigos novos), com Validar SERP,
+   * Trocar principal e Concluir formação na linha e no lote. Este painel fica
+   * para os publicados (e o Assunto sem plano, do formato anterior).
    */
-  planGroups?: ReadonlyArray<{ color: string; label: string }>;
 }) {
   const mounted = useRef(false);
   const [leaseActive, setLeaseActive] = useState(false);
@@ -71,7 +88,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [activity]);
-  const [confirm, setConfirm] = useState<"apply" | "collect" | "discover" | null>(null);
+  const [confirm, setConfirm] = useState<"apply" | "collect" | "discover" | "read" | null>(null);
   const confirmRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { if (confirm) confirmRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [confirm]);
   useEffect(() => {
@@ -79,25 +96,33 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     mounted.current = true;
     if (brandId) void fetch(`/api/arquiteto/article-improvement?brandId=${encodeURIComponent(brandId)}`).then(r => r.json()).then(body => {
       if (!active || !body.success || !body.data) return;
-      const restored = body.data as ImprovementRun; setRun(restored);
+      const restored = body.data as ImprovementRun;
+      // F5 · a execução da planilha "Artigos do plano" é retomada lá, não aqui.
+      if (restored.origin === "plan_sheet") return;
+      setRun(restored);
       setLeaseActive(Boolean(restored.leaseUntil && Date.parse(restored.leaseUntil) > Date.now()));
       setSelected(new Set(restored.acceptedIds ?? restored.proposals.filter(p => p.status === "ready").map(p => p.targetId)));
     }).catch(() => { if (active) setError("Não foi possível ler a análise anterior. Toque em “Atualizar”."); });
     return () => { active = false; mounted.current = false; };
   }, [brandId]);
-  async function send(action: "prepare" | "collect" | "apply" | "status", current = run, options: { discover?: boolean; reworkReason?: string; group?: string } = {}): Promise<ImprovementRun> {
+  async function send(action: "prepare" | "collect" | "apply" | "status", current = run, options: { discover?: boolean; reworkReason?: string; group?: string; authorizeReading?: { ai?: boolean; measure?: boolean } } = {}): Promise<ImprovementRun> {
     const response = await fetch("/api/arquiteto/article-improvement", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ brandId, action,
       ...(action !== "prepare" ? { runId: current?.runId } : {}),
       ...(action === "collect" || action === "apply" ? { decisionHash: current?.decisionHash } : {}),
       ...(action === "collect" ? { authorizedCostUsd: current?.costs.estimatedCostUsd.max } : {}),
-      ...(action === "apply" && !current?.acceptedIds ? { targetIds: [...selected], approveNewKeywords: true } : {}),
+      // F4: o Arquiteto não aprova keyword no Minerador (nada de `approveNewKeywords`); só as linhas prontas, sem keyword nova.
+      ...(action === "apply" && !current?.acceptedIds ? { targetIds: [...selected] } : {}),
       ...(action === "prepare" && selectedTargetIds.length ? { targetIds: [...selectedTargetIds] } : {}),
+      // F5 · planilha primeiro: o Assunto com plano é da planilha "Artigos do plano"; este painel fica para publicados.
+      ...(action === "prepare" ? { excludePlanArticles: true } : {}),
       // Busca nova no Google Ads só quando o dono pede, depois de ver o custo (2026-10-12).
       ...(action === "prepare" && options.discover ? { discover: true } : {}),
       // F5 — "Refazer mesmo assim" (D11): os mesmos insumos de novo, só com o motivo dito.
       ...(action === "prepare" && options.reworkReason ? { reworkOverride: { reason: options.reworkReason } } : {}),
-      // Item 4: "Formar os artigos do plano · <cor>" recorta o prepare ao grupo; "Buscar de novo" mantém o recorte da execução.
+      // A cor ativa da etiqueta recorta o prepare ao grupo; "Buscar de novo" mantém o recorte da execução.
       ...(action === "prepare" && options.group ? { group: options.group } : {}),
+      // F3 · ler antes de buscar: IA e medição só com a autorização dada depois de ver "já temos · falta · custa".
+      ...(action === "prepare" && options.authorizeReading ? { authorizeReading: options.authorizeReading } : {}),
     }) });
     // The platform answers a timeout with an HTML page, not JSON.
     const body = await response.json().catch(() => { throw new Error("TEMPO_ESGOTADO"); });
@@ -105,7 +130,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     if (!mounted.current || body.data.brandId !== brandId) throw new Error("A marca ativa mudou; consulte o andamento na marca de origem.");
     setRun(body.data); setLeaseActive(Boolean(body.data.leaseUntil && Date.parse(body.data.leaseUntil) > Date.now())); return body.data as ImprovementRun;
   }
-  async function execute(action: "prepare" | "collect" | "apply" | "status", options: { discover?: boolean; reworkReason?: string; group?: string } = {}) {
+  async function execute(action: "prepare" | "collect" | "apply" | "status", options: { discover?: boolean; reworkReason?: string; group?: string; authorizeReading?: { ai?: boolean; measure?: boolean } } = {}) {
     setBusy(true); setError(null); setConfirm(null);
     const startedAt = Date.now();
     setActivity({ action, startedAt }); setNow(startedAt);
@@ -156,7 +181,11 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
   const ready = proposals.filter(p => p.status === "ready").length;
   // Only lines that can change (or already have an outcome) stay in the table.
   // A linha que ainda precisa validar fica na tabela (caixa desabilitada), para o dono ver o que o passo 2 vai conferir.
-  const actionable = run ? proposals.filter(p => p.status === "ready" || p.needsValidation || run.outcomes.some(o => o.targetId === p.targetId)) : [];
+  // F4: a linha que precisa do Minerador também fica à vista (caixa desabilitada), com o link para as sugestões lá.
+  const actionable = run ? proposals.filter(p => p.status === "ready" || p.needsValidation || p.needsMinerador || run.outcomes.some(o => o.targetId === p.targetId)) : [];
+  const precisamDoMinerador = run ? proposals.filter(p => p.needsMinerador).length : 0;
+  const corDasSugestoes = run?.groupScope && isEditorialGroupColor(run.groupScope.requested) ? run.groupScope.requested : activeGroup && isEditorialGroupColor(activeGroup.requested) ? activeGroup.requested : null;
+  const sugestoesHref = brandRef ? mineradorHandoffHref(brandRef, { action: "sugestoes", color: corDasSugestoes }) : null;
   const parked = run ? proposals.filter(p => !actionable.includes(p)) : [];
   const done = run?.state === "complete";
   const pendingApply = Boolean(run && !done && (selected.size > 0 || run.acceptedIds?.length));
@@ -164,6 +193,15 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
   const needsCost = Boolean(run && !collecting && run.costs.paidQueries > 0 && !run.acceptedIds);
   // Alvos que seguem sem proposta e ainda não tiveram a busca nova pedida nesta preparação.
   const discoveryGaps = run && !collecting && !run.acceptedIds && run.state === "prepared" && !run.discovery?.requested ? run.discovery?.gapTargetIds.length ?? 0 : 0;
+  /*
+   * F3 · LER ANTES DE BUSCAR: a preparação leu de graça o que já temos e disse o
+   * que falta e quanto custa. A IA e a medição no Google Ads só rodam com a
+   * autorização desta prévia, e só para o que falta.
+   */
+  const leitura = run?.reading ?? null;
+  const rotuloLeitura = leitura ? knownBeforeSearchAuthorizeLabel(leitura) : null;
+  const leituraPaga = leitura && rotuloLeitura && !collecting && !run?.acceptedIds && run?.state === "prepared" ? { button: rotuloLeitura, sentence: `${leitura.sentences.known} ${leitura.sentences.missing} ${leitura.sentences.cost}` } : null;
+  const autorizacaoDaLeitura = leitura ? { ai: leitura.plan.ai.calls > 0, measure: leitura.plan.googleAds.keywords > 0 } : {};
   /*
    * PRÓXIMO PASSO: uma frase e um botão, no topo. O botão do cartão faz o
    * MESMO ato do botão equivalente da fileira, que então sai da fileira para
@@ -183,6 +221,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     busy,
     collectProgress: run?.collect ? { done: run.collect.doneGroupIds.length, total: run.collect.totalGroups ?? null } : null,
     applyProgress: run?.acceptedIds?.length ? { done: run.outcomes.filter(o => run.acceptedIds!.includes(o.targetId)).length, total: run.acceptedIds.length } : null,
+    paidReading: leituraPaga,
   });
   const nextDisabled = next.kind === "working" ? true
     : next.kind === "none" ? false
@@ -190,11 +229,16 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     : next.kind === "prepare" ? !brandId || busy || leaseActive
     : next.kind === "resume_apply" || next.kind === "apply" ? busy || leaseActive
     : busy;
+  // Com uma cor escolhida na etiqueta, a busca nova é só daquela cor (o mesmo recorte por grupo da planilha "Artigos do plano").
+  const recorteAtivo = activeGroup ? { group: activeGroup.requested } : {};
+  const recorteDaExecucao = run?.groupScope ? { group: run.groupScope.requested } : {};
+  const analiseDeOutroRecorte = Boolean(run && activeGroup && run.groupScope?.requested !== activeGroup.requested);
   const runNext = () => {
-    if (next.kind === "prepare") void execute("prepare");
+    if (next.kind === "prepare") void execute("prepare", recorteAtivo);
     else if (next.kind === "resume_collect") void execute("collect");
     else if (next.kind === "resume_apply") void execute("apply");
     else if (next.kind === "refresh") void execute("status");
+    else if (next.kind === "read_paid") setConfirm("read");
     else if (next.kind === "validate") setConfirm("collect");
     else if (next.kind === "apply") setConfirm("apply");
     // `none`: o mesmo destino de `next.anchorId` (Sobras se existem; senão, Artigos novos).
@@ -218,16 +262,18 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     </div>
     {/* F5 — a guarda de retrabalho, acima dos botões: "já feito com os mesmos insumos em <data>". */}
     {run?.rework && !run.acceptedIds && run.state === "prepared" && <ReworkNotice rework={run.rework} busy={busy || leaseActive} buttonClassName={buttonClassName} testId="architect-improvement-rework"
-      onOverride={reason => void execute("prepare", { reworkReason: reason })} />}
+      onOverride={reason => void execute("prepare", { ...recorteDaExecucao, reworkReason: reason })} />}
     {/* Os números (1 · 2 · 3) ficam só no cartão: na fileira, os outros atos
         aparecem sem número para não disputar com o próximo passo. */}
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0">
         <h3 className="flex items-center gap-1.5 font-semibold text-foreground" data-testid="architect-improvement-how">
           {ARTICLE_IMPROVEMENT_LABEL}
-          <InfoHint title="Como funciona" description="1 · Buscar keywords com volume para cada publicado e Assunto (Google Ads grátis; a leitura da IA usa a IA da plataforma (OpenRouter)): primeiro os pares da SERP que já estão no cache, depois a leitura da IA na lista da marca (confira o motivo de cada uma), depois a leitura da lista pelo código (keywords que são o núcleo do slug, com a palavra do próprio slug) e, só para quem ficar sem nada e quando você pedir (o custo é dito antes), busca nova no Google Ads. Buscar de novo com os mesmos alvos e a mesma lista reaproveita a leitura da IA, as medições e a busca, sem chamar de novo. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
+          <InfoHint title="Como funciona" description="1 · Buscar keywords lê, de graça, o que já temos de cada publicado e Assunto — DNA, volume já medido (inclusive “sem média” há menos de 30 dias), SERP em cache, Assunto, plano e trava — e mostra “Já temos · Falta · Custa”. A leitura da IA (IA da plataforma, OpenRouter; ela recebe o resumo do DNA de cada keyword) e a medição no Google Ads (cota, sem custo em dólar) só rodam quando você autoriza, e só para o que falta. O Arquiteto só lê keyword: keyword nova, medição a gravar e Lógica viram “Sugestões do Arquiteto” no Minerador, onde você decide (a medição guardada é gravada lá sem consultar de novo); a linha que depende delas fica “Precisa do Minerador”. A ordem: pares da SERP que já estão no cache, a leitura da IA na lista da marca (confira o motivo de cada uma), a leitura da lista pelo código (keywords que são o núcleo do slug) e, só para quem ficar sem nada e quando você pedir (o custo é dito antes), busca nova no Google Ads. Buscar de novo com os mesmos alvos e a mesma lista reaproveita a leitura da IA, as medições e a busca, sem chamar de novo. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
         </h3>
         <p className="text-text-muted">URL, slug e canonical nunca mudam.</p>
+        <p className="text-text-muted" data-testid="architect-improvement-plan-elsewhere">Artigo do plano (Assunto com plano) não passa por aqui: ele é uma linha da planilha “{PLAN_SHEET_TITLE}”, em Artigos novos, com Validar SERP, Trocar principal e Concluir formação.</p>
+        {analiseDeOutroRecorte && activeGroup && <p className="text-warning" role="status" data-testid="architect-improvement-other-scope">Esta análise é {run?.groupScope ? `do grupo ${run.groupScope.requested}` : "da marca inteira"}, não da cor {activeGroup.label} escolhida na etiqueta. Para analisar só a cor {activeGroup.label}, toque em “Buscar keywords da cor {activeGroup.label}”.</p>}
         {run?.groupScope && <p className="text-text-muted" data-testid="architect-improvement-group-scope">Esta análise leu só o grupo {run.groupScope.requested} (alvos e lista do grupo; os publicados da marca inteira continuam protegidos).</p>}
         <p className="text-text-muted" data-testid="architect-improvement-scope">{selectedTargetIds.length
           ? `A busca analisa só os ${selectedTargetIds.length} publicado(s) marcado(s) na planilha.`
@@ -235,10 +281,10 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
       </div>
       <div className="flex flex-wrap gap-2">
         {collecting && !inCard("resume_collect") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("collect")}>Continuar validação (sem custo novo)</button>}
-        {!pendingApply && !collecting && !inCard("prepare") && <button className={buttonClassName} disabled={!brandId || busy || leaseActive} onClick={() => void execute("prepare")}>Buscar keywords (grátis)</button>}
-        {!pendingApply && !collecting && planGroups.map(grupo => <button key={grupo.color} data-testid="architect-improvement-plan-group" className={buttonClassName} disabled={!brandId || busy || leaseActive} title="A porta única para os artigos deste plano: a melhoria lê só a lista do grupo e obedece ao plano, à trava e à guarda de retrabalho." onClick={() => void execute("prepare", { group: grupo.color })}>Formar os artigos do plano · {grupo.label}</button>)}
+        {!pendingApply && !collecting && !inCard("prepare") && <button className={buttonClassName} disabled={!brandId || busy || leaseActive} onClick={() => void execute("prepare", recorteAtivo)}>{activeGroup ? `Buscar keywords da cor ${activeGroup.label} (grátis)` : "Buscar keywords (grátis)"}</button>}
         {pendingApply && !collecting && !inCard("resume_apply") && !inCard("apply") && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => run?.acceptedIds ? void execute("apply") : setConfirm("apply")}>{improvementRowApplyLabel({ selectedCount: selected.size, paidQueries: needsCost ? run?.costs.paidQueries ?? 0 : 0, optionalPaidQueries: run?.costs.optionalPaidQueries ?? 0, accepted: Boolean(run?.acceptedIds) })}</button>}
         {pendingApply && !run?.acceptedIds && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => void execute("prepare", run?.groupScope ? { group: run.groupScope.requested } : {})}>Buscar de novo</button>}
+        {leituraPaga && !inCard("read_paid") && <button className={buttonClassName} data-testid="architect-improvement-read-paid" disabled={!brandId || busy || leaseActive} onClick={() => setConfirm("read")}>{leituraPaga.button}</button>}
         {discoveryGaps > 0 && <button className={buttonClassName} disabled={!brandId || busy || leaseActive} onClick={() => setConfirm("discover")}>Buscar keywords novas no Google Ads ({discoveryGaps})</button>}
         {needsCost && !inCard("validate") && <button className={buttonClassName} disabled={busy} onClick={() => setConfirm("collect")}>{improvementValidateLabel(run?.costs.paidQueries ?? 0, run?.costs.estimatedCostUsd.max ?? 0, false)}</button>}
         {run && (leaseActive || run.state === "applying") && !inCard("refresh") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("status")}>Atualizar</button>}
@@ -246,18 +292,30 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     </div>
     {/* A confirmação abre logo abaixo dos botões: embaixo da tabela ela ficava fora da tela e o botão parecia não responder. */}
     {confirm && run && <div ref={confirmRef} className="mt-3 rounded-md border border-divider bg-surface-subtle p-3" role="region" aria-label="Confirmar prévia">
-      {confirm === "discover"
+      {confirm === "read" && leitura
+        ? <><h4 className="font-semibold text-foreground">Ler o que falta · com custo</h4><p className="text-foreground">{leitura.sentences.known}</p><p className="text-foreground">{leitura.sentences.missing}</p><p className="text-foreground">{leitura.sentences.cost}</p>{leitura.missing.volumeToMeasureSample.length > 0 && <ul className="my-2 list-disc pl-5 text-text-muted">{leitura.missing.volumeToMeasureSample.map(item => <li key={item.keywordId}><span className="text-keyword">{item.keyword}</span> · {KNOWN_VOLUME_MISSING_LABELS[item.reason]}</li>)}</ul>}<p className="text-text-muted">O que já temos não é pedido de novo. A IA recebe o resumo do DNA de cada keyword (intenção, entidade, funil, público, problema). Nada é gravado neste passo.</p></>
+        : confirm === "discover"
         ? <><h4 className="font-semibold text-foreground">Busca nova no Google Ads</h4><p className="text-foreground">{improvementDiscoveryCostSentence(discoveryGaps)}</p><p className="text-text-muted">A leitura da IA e as medições desta preparação são reaproveitadas: nada disso é chamado de novo.</p></>
         : confirm === "apply"
-        ? <><h4 className="font-semibold text-foreground">Confirmar estas melhorias</h4><p className="text-foreground">Você aceita as trocas de principal Livre, as keywords que entram e saem, as mudanças de Silo e a aprovação das keywords novas nos {selected.size} item(ns) marcado(s). O servidor faz o resto e relê o resultado. Principal travada e identidade publicada ficam como estão. Nada é publicado nem reescrito no site.</p></>
+        ? <><h4 className="font-semibold text-foreground">Confirmar estas melhorias</h4><p className="text-foreground">Você aceita as trocas de principal Livre, as keywords que entram e saem e as mudanças de Silo nos {selected.size} item(ns) marcado(s). O Arquiteto grava só o ArticleDNA, a composição e o parecer — nenhuma keyword do Minerador é importada, medida, aprovada ou enviada daqui. O servidor relê o resultado. Principal travada e identidade publicada ficam como estão. Nada é publicado nem reescrito no site.</p></>
         : <><h4 className="font-semibold text-foreground">Plano de SERP · {run.costs.paidQueries} chamada(s)</h4><p className="text-foreground">Custo estimado: US$ {run.costs.estimatedCostUsd.min.toFixed(4)} a {run.costs.estimatedCostUsd.max.toFixed(4)}. Teto da execução: US$ 1. O que já foi pago é reaproveitado. Cancelar não impede aplicar o que já está pronto.</p><ul className="my-2 list-disc pl-5 text-text-muted">{run.costs.missingDetails.map((raw, i) => { const item = raw as { keyword?: string; lens?: string; reason?: string }; return <li key={i}>{item.keyword} · {item.lens} · {item.reason}</li>; })}</ul></>}
-      <div className="mt-3 flex gap-2"><button className={buttonClassName} onClick={() => setConfirm(null)}>Cancelar</button><button className={primaryButtonClassName} onClick={() => void (confirm === "discover" ? execute("prepare", { discover: true }) : execute(confirm))}>{confirm === "apply" ? "Confirmar e aplicar" : confirm === "discover" ? "Buscar no Google Ads" : "Autorizar este custo"}</button></div>
+      <div className="mt-3 flex gap-2"><button className={buttonClassName} onClick={() => setConfirm(null)}>Cancelar</button><button className={primaryButtonClassName} onClick={() => void (confirm === "read" ? execute("prepare", { ...recorteDaExecucao, authorizeReading: autorizacaoDaLeitura }) : confirm === "discover" ? execute("prepare", { ...recorteDaExecucao, discover: true }) : execute(confirm))}>{confirm === "apply" ? "Confirmar e aplicar" : confirm === "read" ? "Autorizar e ler" : confirm === "discover" ? "Buscar no Google Ads" : "Autorizar este custo"}</button></div>
     </div>}
     {busy && <p role="status" className="sr-only">Processando; o andamento fica guardado no servidor.</p>}
     {error && <p role="alert" className="mt-2 text-warning">{error}</p>}
+    {leitura && <div className="mt-3 rounded-md border border-divider bg-surface-subtle p-3" role="region" aria-label="Já temos · Falta · Custa" data-testid="architect-improvement-known">
+      <p className="text-foreground">{leitura.sentences.known}</p>
+      <p className="text-foreground">{leitura.sentences.missing}</p>
+      <p className="text-text-muted">{leitura.sentences.cost}</p>
+      {leitura.sentences.done && <p className="text-text-muted">{leitura.sentences.done}</p>}
+    </div>}
     {run && <>
       <p className="mt-3 font-medium text-foreground">{proposals.length} analisado(s): {ready} para melhorar · {run.outcomes.filter(o => o.status === "improved").length} melhoria(s) gravada(s){run.outcomes.some(o => o.status === "dna_created") ? ` · ${run.outcomes.filter(o => o.status === "dna_created").length} DNA(s) criado(s)` : ""}</p>
       {actionable.length === 0 && <p className="mt-2 text-text-muted">Nenhum publicado ou Assunto tem melhoria com volume e evidência agora. Veja o motivo de cada um abaixo.</p>}
+      {precisamDoMinerador > 0 && <p className="mt-2 text-foreground" role="status" data-testid="architect-improvement-needs-minerador">
+        {precisamDoMinerador} linha(s) {IMPROVEMENT_NEEDS_MINERADOR_LABEL.toLocaleLowerCase("pt-BR")}: keyword nova, medição ou Lógica são decididas lá, pelo seu clique. O Arquiteto não grava no Minerador.{" "}
+        {sugestoesHref ? <a href={sugestoesHref} className="font-medium text-module-accent underline underline-offset-2" data-testid="architect-improvement-open-suggestions">Abrir “{ARCHITECT_SUGGESTIONS_LABEL}” no Minerador</a> : <span className="text-text-muted">Abra “{ARCHITECT_SUGGESTIONS_LABEL}” no Minerador.</span>}
+      </p>}
       {actionable.length > 0 && <div className="mt-2 overflow-x-auto"><table className="w-full border-collapse text-left text-sm"><thead><tr className="border-b border-divider text-text-muted"><th className="p-2">Aplicar</th><th className="p-2">Publicado ou Assunto</th><th className="p-2">O que muda</th><th className="p-2">Resultado</th></tr></thead><tbody>
         {actionable.map(p => {
           const target = (run.targets ?? []).find(t => t.id === p.targetId);
@@ -285,7 +343,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
                 <ul className="grid gap-0.5 text-text-muted">{p.aiReasons!.map(item => <li key={item.keywordId}><span className="text-keyword">{keyword(item.keywordId)?.keyword ?? item.keywordId}</span>: {item.reason}</li>)}</ul>
               </div>}
             </td>
-            <td className="p-2 text-foreground">{result ? outcomes[result.status] : p.needsValidation ? "Precisa validar no Google (passo 2)" : statuses[p.status]}{result && <p className="text-text-muted">{result.message}</p>}
+            <td className="p-2 text-foreground">{result ? outcomes[result.status] : p.needsMinerador ? <span data-testid="architect-improvement-row-needs-minerador">{IMPROVEMENT_NEEDS_MINERADOR_LABEL}{sugestoesHref ? <> · <a href={sugestoesHref} className="text-module-accent underline underline-offset-2">{ARCHITECT_SUGGESTIONS_LABEL}</a></> : null}</span> : p.needsValidation ? "Precisa validar no Google (passo 2)" : statuses[p.status]}{result && <p className="text-text-muted">{result.message}</p>}
               {p.reasons.length > 0 && <details className="text-text-muted"><summary className="cursor-pointer">Por quê</summary><p>{p.angle ? `Enfoque: ${p.angle}. ` : ""}{p.reasons.join(" ")}</p></details>}
             </td>
           </tr>;

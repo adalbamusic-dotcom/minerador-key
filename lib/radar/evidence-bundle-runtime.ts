@@ -47,6 +47,7 @@ import type { RadarKeywordContext } from "./keyword-context.ts";
 import type { RadarVideoEvidenceLayer } from "./video-evidence.ts";
 import type { RadarSpecialistEvidenceLayer } from "./specialist-evidence.ts";
 import type { RadarEvidenceResolution } from "./evidence-authority.ts";
+import { RadarAuthoritySourcesRecordSchema } from "./authority-sources-contract.ts";
 
 const objeto = (valor: unknown): Record<string, unknown> | null =>
   valor && typeof valor === "object" && !Array.isArray(valor) ? valor as Record<string, unknown> : null;
@@ -468,6 +469,13 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
   const lentesCongeladas = perfil === "GOOGLE" ? radarFrozenSerpLensesOf(analise.finalizedBundle) : null;
   if (lentesCongeladas) limitacoes.push(...lentesCongeladas.limitations);
 
+  /*
+   * 2026-10-14c · F-B (SDD silo interligado §16.2) · AS FONTES EXTERNAS DE
+   * AUTORIDADE QUE O ANALYZE CONFERIU, COMO FORAM GRAVADAS. Registro fora do
+   * contrato (ou ausente) não entra: a chave não aparece e o hash é o de antes.
+   */
+  const fontesDeAutoridade = RadarAuthoritySourcesRecordSchema.safeParse(analise.authoritySources);
+
   const montar = (fotografia: RadarCompetitiveObservedModel | null, extras: readonly string[]) => buildRadarEvidenceBundleV3({
     binding: input.article,
     observedAt: input.observedAt,
@@ -512,6 +520,8 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
     ...(lentesCongeladas ? { serpLenses: lentesCongeladas } : {}),
     /* Ausente sem acréscimo de formato: o hash de todo dossiê só-Google é o mesmo. */
     ...(formatos.video || formatos.review ? { formatBlueprints: formatos } : {}),
+    /* 2026-10-14c · F-B · ausente sem o registro da conferência: o hash de todo dossiê anterior é o mesmo. */
+    ...(fontesDeAutoridade.success ? { authoritySources: fontesDeAutoridade.data } : {}),
   });
 
   return { ok: true, bundle: montar(null, []) };

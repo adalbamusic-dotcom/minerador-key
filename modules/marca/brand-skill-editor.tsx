@@ -6,6 +6,7 @@ import { InfoHint } from "@/components/info-hint";
 import { internalBadge, internalButton, internalButtonPrimary, internalField, internalNoticeError, internalNoticeWarning } from "@/components/editorial/internal-page-visual";
 import { formatByteSize, summarizeStructure, toPreviewBlocks, validateSkillMarkdown, type MarkdownValidationResult } from "@/lib/marca/brand-skill-markdown";
 import { skillVersionLabel } from "@/lib/marca/brand-skill-workspace";
+import { BRAND_DIAGNOSIS_OFFER_HEADING, BRAND_DIAGNOSIS_OFFER_PROPOSAL, brandDiagnosisOfferInMarkdown } from "@/lib/marca/brand-diagnosis-offer";
 import type { BrandSkillRecord, NormalizedSkillContent } from "@/lib/marca/brand-skill-contracts";
 import type { SkillDefinition } from "@/lib/marca/skill-definitions";
 import { brandSkillHints, brandSkillPrototypeNotice, brandSkillStatusLabels, brandSkillStatusTones, consumerModulesLabel } from "./brand-skill-labels";
@@ -48,6 +49,20 @@ export function StructureReport({ normalized }: { normalized: NormalizedSkillCon
     </li>)}
     {normalized.extraSections.length ? <li className="text-sm text-text-muted">Seções próprias preservadas: {normalized.extraSections.join(", ")}.</li> : null}
   </ul>;
+}
+
+/**
+ * 2026-10-14b · D8 (SDD silo interligado §16): a Skill de voz sem a seção "Oferta
+ * de diagnóstico". O fechamento dos artigos usa um texto padrão neutro até o dono
+ * escrever a oferta da marca; aqui fica a PROPOSTA de texto para ele aplicar (nada
+ * é gravado na Skill por código — substituir o arquivo continua sendo do dono).
+ */
+function DiagnosisOfferProposal() {
+  return <section className="mt-5 border-t border-divider pt-5" aria-labelledby="brand-skill-diagnosis-offer">
+    <p id="brand-skill-diagnosis-offer" className="text-sm font-semibold text-foreground">Proposta para a próxima versão: {BRAND_DIAGNOSIS_OFFER_HEADING}</p>
+    <p className="mt-1 text-sm leading-6 text-text-muted">O fechamento dos artigos termina num CTA só, o diagnóstico. Esta Skill ainda não diz o que a marca verifica, e os artigos usam um texto padrão neutro. Revise a proposta abaixo, ajuste às palavras da marca e acrescente a seção ao arquivo .md (substituir arquivo). Nada é aplicado automaticamente.</p>
+    <div className="mt-3"><MarkdownPreview markdown={BRAND_DIAGNOSIS_OFFER_PROPOSAL}/></div>
+  </section>;
 }
 
 export function BrandSkillFormDialog({ mode, definitions, definition, previous, name, file, saving, error, onSelectDefinition, onChangeName, onSelectFile, onSubmit, onClose }: {
@@ -191,7 +206,7 @@ export function BrandSkillDetailDialog({ skill, definition, onReplace, onRename,
       </section>
 
       <section className="mt-5 grid gap-5 border-t border-divider pt-5 lg:grid-cols-2">
-        <div><p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">Estrutura reconhecida<InfoHint description={brandSkillHints.structure}/></p><div className="mt-3"><StructureReport normalized={skill.normalizedContent}/></div></div>
+        <div><p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">Estrutura reconhecida<InfoHint description={brandSkillHints.structure}/></p><div className="mt-3"><StructureReport normalized={skill.normalizedContent}/></div>{skill.definitionKey === "brand_voice" && !brandDiagnosisOfferInMarkdown(skill.originalMarkdown) ? <DiagnosisOfferProposal/> : null}</div>
         <div><p className="text-sm font-semibold text-foreground">Conteúdo Markdown</p><div className="mt-3"><MarkdownPreview markdown={skill.originalMarkdown}/></div></div>
       </section>
 

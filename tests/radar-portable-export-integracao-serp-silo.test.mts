@@ -945,7 +945,7 @@ test("F · a faixa do aviso de export usa a cor e o papel da severidade", async 
   assert.match(faixa, /text-sm/);
 });
 
-test("F · o card: o silo completo é a PRIMEIRA opção e o padrão, em 14px, e o download não vira 'sucesso'", async () => {
+test("F · o card: o silo completo é a PRIMEIRA opção (o padrão é por artigo desde 2026-10-14), em 14px, e o download não vira 'sucesso'", async () => {
   const pagina = (await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   const barra = semComentarios(pagina.slice(pagina.indexOf("const renderTopbarActions"), pagina.indexOf("const openDetail")));
   /*
@@ -959,9 +959,14 @@ test("F · o card: o silo completo é a PRIMEIRA opção e o padrão, em 14px, e
   const primeiraOpcao = card.slice(card.indexOf("<label"), card.indexOf("</label>") + "</label>".length);
 
   assert.match(primeiraOpcao, /data-testid="radar-export-escopo-silo"/, "a primeira opção do card não é o silo completo");
-  assert.match(primeiraOpcao, /Silo completo \(recomendado\)/);
+  /*
+   * 2026-10-14 · SDD silo interligado §16.1 · decisão do dono: a prática é exportar
+   * um artigo por vez (com a SERP crua no .zip). O Silo completo continua a
+   * primeira opção do card, sem "(recomendado)", e o padrão passa a ser por artigo.
+   */
+  assert.match(primeiraOpcao, /Silo completo</);
   assert.match(primeiraOpcao, /Um CSV por Silo, artigos na ordem do Silo\./);
-  assert.match(semComentarios(pagina), /useState<"silo" \| "selecionados">\("silo"\)/, "o silo completo deixou de ser o padrão");
+  assert.match(semComentarios(pagina), /useState<"silo" \| "selecionados">\("selecionados"\)/, "o padrão do card é por artigo (os selecionados)");
   assert.equal(/text-xs|#[0-9a-f]{3,6}\b|rgb\(/i.test(card), false, "texto abaixo de 14px ou cor fixa no card");
   assert.match(primeiraOpcao, /radarSiloExportReadySummary\(\{ scope: escopoDoSilo,/, "o resumo não conta pelo silo do item");
   assert.match(barra, /const escopoDoSilo = menuDeExport \? radarSiloExportScope\(\{ items: pipeline\.radarItems, selectedArticleIds, siloVersions: pipeline\.siloVersions \}\) : null;/);

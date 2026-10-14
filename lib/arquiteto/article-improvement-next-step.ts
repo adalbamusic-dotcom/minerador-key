@@ -17,6 +17,7 @@
 export type ImprovementNextStepKind =
   | "working"
   | "prepare"
+  | "read_paid"
   | "resume_collect"
   | "resume_apply"
   | "refresh"
@@ -64,6 +65,12 @@ export type ImprovementNextStepInput = {
   collectProgress?: { done: number; total: number | null } | null;
   /** Andamento da gravação: artigos gravados e total aceito. */
   applyProgress?: { done: number; total: number } | null;
+  /**
+   * F3 · LER ANTES DE BUSCAR: a leitura que custa (IA e/ou medição no Google
+   * Ads) que ainda falta, com o botão que diz o que chama e a frase "já temos ·
+   * falta · custa". Ausente = nada a pagar para ler.
+   */
+  paidReading?: { button: string; sentence: string } | null;
 };
 
 export const IMPROVEMENT_NO_PENDING_SENTENCE = "Nada a fazer nos publicados agora. Veja artigos novos em Sobras.";
@@ -115,7 +122,11 @@ export function resolveImprovementNextStep(input: ImprovementNextStepInput): Imp
     return { kind: "resume_apply", sentence: "A gravação das melhorias que você aceitou parou no meio. Ela continua de onde parou.", button: "Continuar" };
   }
   if (!input.hasRun) {
-    return { kind: "prepare", sentence: "Comece aqui: busque keywords com volume para cada publicado e Assunto. O Google Ads é grátis; a leitura da IA usa a IA da plataforma (OpenRouter).", button: "1 · Buscar keywords (grátis)" };
+    return { kind: "prepare", sentence: "Comece aqui: leia o que já temos de cada publicado e Assunto — DNA, volume medido, SERP em cache, Assunto, plano e trava. É grátis: a IA e o Google Ads só rodam depois, com o custo dito e a sua autorização.", button: "1 · Buscar keywords (grátis)" };
+  }
+  // F3 · o que custa para ler (IA, medição) vem antes de validar: a proposta muda com o que a leitura traz.
+  if (input.paidReading && !input.accepted && input.state === "prepared") {
+    return { kind: "read_paid", sentence: input.paidReading.sentence, button: input.paidReading.button };
   }
   if (input.paidQueries - Math.max(0, input.optionalPaidQueries ?? 0) > 0 && !input.accepted) {
     return { kind: "validate", sentence: "Confira no Google as keywords com volume antes de gravar. Você vê o custo antes.", button: improvementValidateLabel(input.paidQueries, input.costMaxUsd) };

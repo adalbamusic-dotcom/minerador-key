@@ -33,6 +33,8 @@ const ACTOR = "3f0c9a52-8b1e-4c7d-9f2a-5e6b7c8d9e0f";
 const OTHER_ACTOR = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const AT = "2026-09-24T12:00:00+00:00";
 const LATER = "2026-09-24T13:00:00+00:00";
+/** 2026-10-13 (ajuste declarado, "o Assunto nunca se perde"): retirar exige o marcador de liberação. */
+const RELEASE = { requestId: "teste:1", reason: "teste", actorId: ACTOR, at: LATER, via: "tirar_do_plano" as const };
 const SITE = "https://www.clinicaexemplo.com.br";
 
 function check(overrides: Partial<DestinationCheck> = {}): DestinationCheck {
@@ -98,7 +100,7 @@ test("histórico append-only: trocar nota, retirar e declarar de novo só acresc
   assert.ok(a.ok);
   const b = setKeywordSubject(a.semantic, { note: "v2", actorId: ACTOR, changedAt: LATER, origin: "review" });
   assert.ok(b.ok && b.changed);
-  const c = withdrawKeywordSubject(b.semantic, { actorId: OTHER_ACTOR, changedAt: LATER, origin: "review" });
+  const c = withdrawKeywordSubject(b.semantic, { actorId: OTHER_ACTOR, changedAt: LATER, origin: "review", release: RELEASE });
   assert.ok(c.ok && c.changed);
   const d = setKeywordSubject(c.semantic, { note: null, actorId: ACTOR, changedAt: LATER, origin: "batch" });
   assert.ok(d.ok && d.changed);
@@ -117,7 +119,8 @@ test("histórico append-only: trocar nota, retirar e declarar de novo só acresc
 test("retirar grava keyword_subject: null, não apaga o histórico e sem declaração não muda nada", () => {
   const declared = setKeywordSubject({}, { note: "Para clínicas", actorId: ACTOR, changedAt: AT, origin: "review" });
   assert.ok(declared.ok);
-  const withdrawn = withdrawKeywordSubject(declared.semantic, { actorId: ACTOR, changedAt: LATER, origin: "review" });
+  assert.equal(withdrawKeywordSubject(declared.semantic, { actorId: ACTOR, changedAt: LATER, origin: "review" }).ok, false, "sem marcador de liberação, recusado");
+  const withdrawn = withdrawKeywordSubject(declared.semantic, { actorId: ACTOR, changedAt: LATER, origin: "review", release: RELEASE });
   assert.ok(withdrawn.ok && withdrawn.changed);
   assert.equal(withdrawn.semantic[KEYWORD_SUBJECT_KEY], null);
   assert.equal(KEYWORD_SUBJECT_KEY in withdrawn.semantic, true, "a retirada é registrada, não some");

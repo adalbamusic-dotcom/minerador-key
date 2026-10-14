@@ -3,6 +3,7 @@
 import React, { useId, useRef, useState } from "react";
 import { useSubjectDialogFocus } from "./subject-panels";
 import { SERP_SUBJECT_TONE_CLASSES } from "./serp-subject-model";
+import { ARCHITECT_SUGGESTIONS_LABEL } from "@/lib/arquiteto/minerador-suggestions";
 import {
   DIFFERENTIATION_ACCEPT_ACTION,
   DIFFERENTIATION_AI_OPTION,
@@ -134,14 +135,12 @@ function AppliedBlock({ controller, group, entry, buttonClassName, onReaccept }:
       <p className={view.tone === "success" ? "text-success" : view.tone === "warning" ? "text-warning" : "text-foreground/85"}>{view.headline}</p>
       {view.lines.map(line => <p key={line} className="text-text-muted">{line}</p>)}
       {view.ingestCount > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-foreground/85">{view.ingestCount} keyword(s) nova(s) precisam passar pelo Minerador.</span>
-          <button type="button" disabled={controller.busy || entry.ingest.status === "done"} onClick={() => void controller.sendIngest(group.groupId)} className={buttonClassName} data-testid="architect-differentiation-ingest">
-            {entry.ingest.status === "sending" ? "Enviando…" : "Enviar ao Minerador"}
-          </button>
+        // F4 · O ARQUITETO SÓ LÊ: as novas foram como sugestão ao Minerador no aceite; o import é do dono, lá.
+        <div className="flex flex-wrap items-center gap-2" data-testid="architect-differentiation-ingest">
+          <span className="text-foreground/85">{view.ingestCount} keyword(s) nova(s) foram como sugestão ao Minerador (“{ARCHITECT_SUGGESTIONS_LABEL}”): importar, medir e aprovar é lá, pelo seu clique.</span>
+          {controller.mineradorSuggestionsHref ? <a href={controller.mineradorSuggestionsHref} className={buttonClassName}>Abrir “{ARCHITECT_SUGGESTIONS_LABEL}” no Minerador</a> : null}
         </div>
       )}
-      {entry.ingest.message && <p className={entry.ingest.status === "failed" ? "text-warning" : "text-text-muted"}>{entry.ingest.message}</p>}
       {view.formation.map(step => {
         const estado = entry.formation[step.pageKeywordId];
         return (
@@ -380,12 +379,14 @@ export function PublishedDifferentiationPanel({ controller, buttonClassName, pri
 }
 
 /** O painel com as chamadas: a mesa só passa a marca ativa e os dois atos que ela já sabe fazer. */
-export function PublishedDifferentiationSection({ brandId, enabled, onApplied, onAddToArticle, buttonClassName, primaryButtonClassName }: {
+export function PublishedDifferentiationSection({ brandId, enabled, onApplied, onAddToArticle, mineradorSuggestionsHref = null, buttonClassName, primaryButtonClassName }: {
   brandId: string | null;
   enabled: boolean;
   onApplied?: () => void;
   onAddToArticle?: DifferentiationAddToArticle;
+  /** F4 · o link para "Sugestões do Arquiteto" no Minerador. */
+  mineradorSuggestionsHref?: string | null;
 } & ButtonClasses) {
-  const controller = usePublishedDifferentiation({ brandId, enabled, onApplied, onAddToArticle });
+  const controller = usePublishedDifferentiation({ brandId, enabled, onApplied, onAddToArticle, mineradorSuggestionsHref });
   return <PublishedDifferentiationPanel controller={controller} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} />;
 }

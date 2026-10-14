@@ -62,8 +62,10 @@ import {
   type RadarBrandVoiceRef,
   type RadarBrandVoiceState,
 } from "./brand-voice.ts";
-import { radarClaimCommonStems, radarPendingClaims, type RadarSentenceSourceVerdict } from "./pending-claims.ts";
+import { radarClaimCommonStems, radarPendingClaims, type RadarPendingClaim, type RadarSentenceSourceVerdict } from "./pending-claims.ts";
 import { RADAR_SILO_ROLE_ASKS, radarSiloRoleText } from "./silo-role.ts";
+/* 2026-10-14c · F-B (SDD silo interligado §16.2) · as fontes externas de autoridade no texto (a régua única). */
+import { RADAR_AUTHORITY_WRITING_RULES_VERSION, radarAuthorityBodyLinkRange, radarAuthoritySectionFor, radarAuthoritySourceLine, radarAuthorityWritingOf, type RadarAuthorityWriting } from "./authority-sources-writing.ts";
 /* 2026-10-08 · P0-B e P1 · a régua do ruído de pesquisa (agente B) e a do cabeçalho que não vira seção (artigo-modelo da SERP). */
 import { radarMarketCitationIsNoise, radarReaderQuestionIsNoise, radarRegistrableDomain, type RadarResearchNoiseContext } from "./research-noise.ts";
 import { radarEditorialHeadingNoiseReason, radarEditorialHeadingWithoutTemplate } from "./editorial-article-model.ts";
@@ -74,6 +76,11 @@ import { RADAR_NATURAL_ANCHOR_RULE } from "./natural-anchor-rule.ts";
 /* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP: a regra geral da linha de topo e a precedência na linha "Voz da marca". */
 import { radarHumanVoiceBrandVoiceRowNote, radarHumanVoiceWritingRule } from "./human-voice-guideline.ts";
 import { radarAnchorGraphConcepts, type RadarAnchorLedger } from "./natural-anchor.ts";
+/* 2026-10-14 · F2 da SDD silo interligado: o priority do grafo para a malha do Silo (a mesma régua da planta). */
+import { radarSiloMeshGraphPriorities } from "./silo-link-mesh.ts";
+/* 2026-10-14b · F3 (SDD silo interligado): a leitura competitiva da SERP já coletada (D11–D13) e a oferta de diagnóstico da Skill (D8). */
+import { radarCompetitiveReadingOf, radarCompetitiveSampleLine, type RadarCompetitiveReading } from "./competitive-reading.ts";
+import type { RadarDiagnosisOffer } from "./brand-edge.ts";
 import {
   RADAR_PUBLICATION_PUBLISHED,
   radarPublicationIdentity,
@@ -198,6 +205,19 @@ export const RADAR_WRITING_EXPORT_LIMITS = {
   structureChars: 32_000,
   /** 2026-10-02 · A SERP resumida ganhou os temas dos concorrentes (H2/H3 das páginas lidas): teto próprio. */
   serpChars: 10_000,
+  /**
+   * 2026-10-14 · F2 (SDD silo interligado) · A coluna de links leva a malha do
+   * Silo inteira (corpo e trilha "Continue no Silo"; o Pilar de um Silo de 30
+   * lista 29 Suportes): link é obrigação, e nunca é cortado no meio. Teto
+   * próprio, o mesmo limite seguro de célula da estrutura.
+   */
+  linksChars: 32_000,
+  /**
+   * 2026-10-14b · F3 (SDD silo interligado) · A coluna prompt da linha de topo leva
+   * as regras gerais inteiras (a regra 12 ganhou o fechamento em 4 tempos e as
+   * ressalvas uma vez): regra não é cortada no meio. Teto próprio.
+   */
+  promptChars: 12_000,
   articleChars: 80_000,
   /** O mínimo da célula cortável no primeiro passe: o começo da SERP (índice S/P/C) fica. */
   cutFloorChars: 1_500,
@@ -206,6 +226,10 @@ export const RADAR_WRITING_EXPORT_LIMITS = {
   titleChars: 90,
   organicResults: 8,
   questions: 10,
+  /** 2026-10-14b · F3 (D13) · as perguntas que valem resposta no CSV (as outras ficam no painel do Radar). */
+  valueQuestions: 4,
+  /** 2026-10-14b · F3 · os itens de cada bloco da análise competitiva na coluna cobrir_e_superar (a célula tem teto). */
+  competitivePerBlock: 4,
   terms: 15,
   moves: 6,
   /* 2026-10-08 (correção) · R10 · `specialistAnswerChars` saiu: a resposta aprovada do especialista vai inteira (P1 · fechamento). */
@@ -216,7 +240,11 @@ export const RADAR_WRITING_EXPORT_LIMITS = {
 export const radarWritingCellLimit = (coluna: RadarWritingExportColumn): number =>
   coluna === "estrutura" ? RADAR_WRITING_EXPORT_LIMITS.structureChars
     : coluna === "serp_resumida" ? RADAR_WRITING_EXPORT_LIMITS.serpChars
-      : RADAR_WRITING_EXPORT_LIMITS.cellChars;
+      /* 2026-10-14 · F2 · a malha do Silo inteira (corpo e trilha). */
+      : coluna === "links_internos" ? RADAR_WRITING_EXPORT_LIMITS.linksChars
+        /* 2026-10-14b · F3 · as regras gerais da linha de topo (com o fechamento em 4 tempos e as ressalvas da diretriz) nunca são cortadas. */
+        : coluna === "prompt" ? RADAR_WRITING_EXPORT_LIMITS.promptChars
+          : RADAR_WRITING_EXPORT_LIMITS.cellChars;
 
 /** A estimativa que a tela mostra antes do clique: o alvo típico, não o teto. */
 export const RADAR_WRITING_EXPORT_TYPICAL_CHARS_PER_ARTICLE = 10_000;
@@ -284,6 +312,13 @@ export type RadarWritingArticleContext = {
    * dura em "Como superar", temas, perguntas e "Não cobrir". Sem elas, nada muda.
    */
   brandVoiceExclusions?: readonly RadarBrandVoiceExclusion[] | null;
+  /**
+   * 2026-10-14b · F3 (SDD silo interligado, D8) · Aditivo: a oferta de diagnóstico
+   * da Skill de voz corrente (seção "Oferta de diagnóstico") ou, sem a seção, o
+   * texto padrão neutro. O fechamento da linha sai com ela como CTA único. Ausente
+   * = a Skill não foi lida (o texto padrão neutro, dito como tal).
+   */
+  brandDiagnosisOffer?: RadarDiagnosisOffer | null;
   /**
    * 2026-10-09 (correção · contrato-F2) · Aditivo: as keywords (principal,
    * complementares e reforços do ArticleDNA vigente) de cada membro do Silo que
@@ -859,6 +894,13 @@ export function radarWritingProjections(input: RadarPortableExportInput) {
      * Fora da linha (o pedido do artigo-modelo), `null`: nada muda.
      */
     vetoDeSugestao: null as ((sugestao: string | null | undefined) => RadarSuggestionVeto | null) | null,
+    /*
+     * 2026-10-14c · F-B (SDD silo interligado §16.2) · AS FONTES EXTERNAS DE
+     * AUTORIDADE CONFERIDAS, congeladas no pacote: as que viram link (2 a 5 no
+     * corpo), as que ficam só como referência e as afirmações de saúde sem fonte.
+     * Sem o registro (investigação anterior à conferência), `null`: nada muda.
+     */
+    fontesDeAutoridade: radarAuthorityWritingOf(input.authoritySources ?? null, { competitorDomains: (serpObservada?.organic || []).map(item => item.domain) }),
   };
 }
 
@@ -1014,6 +1056,8 @@ function destinosDosLinks(input: RadarPortableExportInput, contexto: RadarWritin
   const silo = contexto.silo?.kind === "silo" ? contexto.silo : null;
   if (!silo) return undefined;
   const grafo = radarAnchorGraphConcepts(input.researchContext?.internalLinks?.edges);
+  /* 2026-10-14 · F2 (SDD silo interligado, D2) · o priority das arestas de saída do grafo aprovado, para a malha do Silo. */
+  const prioridades = radarSiloMeshGraphPriorities(input.researchContext?.internalLinks?.edges);
   const alvos: RadarArticleBlueprintLinkTarget[] = [];
   for (const membro of silo.members) {
     if (membro.articleId === contexto.articleId) continue;
@@ -1029,10 +1073,15 @@ function destinosDosLinks(input: RadarPortableExportInput, contexto: RadarWritin
       keywords: [texto(membro.principalKeyword), ...(doLote?.length ? doLote : doAcervo?.length ? doAcervo : [])].map(item => texto(item)).filter(Boolean),
       concepts: grafo.byArticleId.get(membro.articleId) ?? [],
       identity: identidade,
+      /* 2026-10-14 · F2 · o papel, a ordem narrativa e o priority do grafo de hoje (a malha do Silo na leitura). */
+      role: membro.role,
+      position: membro.position,
+      priority: prioridades.byArticleId.get(membro.articleId) ?? null,
+      fromGraph: prioridades.byArticleId.has(membro.articleId),
     });
   }
   if (identidades.siloPage) {
-    alvos.push({ kind: "siloPage", slug: identidades.siloPage.slug, labels: [silo.label], keywords: [silo.label, texto(silo.centralEntity)].filter(Boolean), concepts: grafo.siloPage, identity: identidades.siloPage });
+    alvos.push({ kind: "siloPage", slug: identidades.siloPage.slug, labels: [silo.label], keywords: [silo.label, texto(silo.centralEntity)].filter(Boolean), concepts: grafo.siloPage, identity: identidades.siloPage, role: "SiloPage", priority: prioridades.siloPage, fromGraph: Boolean(prioridades.siloPage) });
   }
   return alvos.length ? alvos : undefined;
 }
@@ -1114,6 +1163,33 @@ export function radarWritingUnsupportedClaims(
       });
   }
   return serp.authorityClaims.filter(item => item.ymylRelevant).map(item => ({ afirmacao: item.claim, mercado: null }));
+}
+
+/*
+ * 2026-10-14c · F-B (SDD silo interligado §16.2) · A AFIRMAÇÃO QUE UMA FONTE DE
+ * AUTORIDADE VERIFICADA SUSTENTA deixa de ser "sem fonte" (no pedido, na coluna de
+ * fontes, no veredito e na trava da estrutura). Sem o registro, nada muda.
+ */
+export function radarWritingAuthoritySupported(p: { fontesDeAutoridade: RadarAuthorityWriting | null }): (afirmacao: string | null | undefined) => boolean {
+  const chaves = new Set((p.fontesDeAutoridade?.supportedClaims || []).map(radarWritingCompareKey).filter(Boolean));
+  return afirmacao => chaves.size > 0 && chaves.has(radarWritingCompareKey(afirmacao));
+}
+
+/**
+ * 2026-10-14c · F-B · AS AFIRMAÇÕES QUE TRAVAM A FRASE, COM AS FONTES DE AUTORIDADE:
+ * a do mercado que uma fonte verificada sustenta sai da trava; a de saúde (YMYL)
+ * sem fonte verificada entra (a frase que a afirma ganha "(precisa de fonte: …)" e
+ * vai à lista do fim da estrutura). Sem o registro, a lista é a de antes.
+ */
+export function radarWritingAuthorityPendingClaims(p: { fontesDeAutoridade: RadarAuthorityWriting | null }, pendentes: RadarPendingClaim[]): RadarPendingClaim[] {
+  const fontes = p.fontesDeAutoridade;
+  if (!fontes || (!fontes.supportedClaims.length && !fontes.ymylWithoutSource.length)) return pendentes;
+  const sustentada = radarWritingAuthoritySupported(p);
+  const ficam = pendentes.filter(item => item.origem === "PLANTA" || !sustentada(item.texto));
+  const ja = new Set(ficam.map(item => radarWritingCompareKey(item.texto)));
+  const saude = fontes.ymylWithoutSource.filter(texto => !ja.has(radarWritingCompareKey(texto)))
+    .map(texto => ({ texto, origem: "YMYL_SEM_FONTE" as const, fonte: null, secao: null }));
+  return [...ficam, ...saude];
 }
 
 function temaSensivel(p: Projecoes): boolean {
@@ -1354,8 +1430,9 @@ export function radarWritingBlueprintExclusions(input: RadarPortableExportInput,
 function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: RadarWritingArticleContext, papel: string | null): string {
   const principal = texto(p.dna.principalKeyword);
   const volumes = new Map<string, RadarPortableKeywordDna>(p.keywords.map(item => [radarWritingCompareKey(item.keyword), item]));
+  /* 2026-10-14 · K6 (SDD silo interligado): a complementar vai dentro da seção, nunca abrindo um H2. */
   const comoUsar = (papelDaKeyword: "SECONDARY" | "NARRATIVE") => (papelDaKeyword === "SECONDARY"
-    ? "faceta da mesma intenção: cabeçalho ou dentro da seção que trata do assunto"
+    ? "faceta da mesma intenção: dentro da seção que trata do assunto (num H2, só natural e fora do começo)"
     : "reforço no corpo, sem seção própria");
   const complementares = unicosPorChave([
     ...p.dna.secondaryKeywords.map(keyword => ({ keyword, papel: "SECONDARY" as const })),
@@ -2211,14 +2288,20 @@ function perguntasDaLinha(
     .map(item => ({ ...item, destino: foco.destino(item.pergunta) }))
     .filter(item => item.destino.artigo || !cobertaPelaReferencia?.(item.pergunta));
   return {
+    /*
+     * 2026-10-14b · F3 (SDD silo interligado, D13) · NADA DE "MATERIAL INSUFICIENTE"
+     * EM MASSA: a pergunta com material pronto vem primeiro, e a sem material
+     * perde a marca (a coluna leva só as que valem resposta; o caso real tinha 10
+     * perguntas, todas "material insuficiente: responder de forma qualificada").
+     */
     linhas: elegiveis.filter(item => foco.doArtigo(item.pergunta))
-      .slice(0, RADAR_WRITING_EXPORT_LIMITS.questions)
       .map(item => {
         const chave = radarWritingCompareKey(item.pergunta);
-        const insuficiente = naoProntas.has(chave) || semFonte.has(chave) || semFonte.has(chave.replace(/\s*$/, ""));
-        const marcas = [item.prioridade, insuficiente ? "material insuficiente: responder de forma qualificada ou só com fonte" : null].filter(Boolean);
-        return `- ${item.pergunta}${marcas.length ? ` (${marcas.join("; ")})` : ""}`;
-      }),
+        return { item, insuficiente: naoProntas.has(chave) || semFonte.has(chave) || semFonte.has(chave.replace(/\s*$/, "")) };
+      })
+      .sort((a, b) => Number(a.insuficiente) - Number(b.insuficiente))
+      .slice(0, RADAR_WRITING_EXPORT_LIMITS.questions)
+      .map(({ item }) => `- ${item.pergunta}${item.prioridade ? ` (${item.prioridade})` : ""}`),
     foraDoFoco: deOutroFoco.map(item => item.destino.linha),
     foraDoFocoPerguntas: deOutroFoco.map(item => item.pergunta),
     foraDoFocoItens: deOutroFoco.map(item => ({ pergunta: item.pergunta, linha: item.destino.linha, artigo: item.destino.artigo })),
@@ -2489,6 +2572,8 @@ function colunaCobrir(
   perguntasProntas: PerguntasDaLinha | null = null,
   /* 2026-10-09 · Defeitos 3 e 5 · o "Não cobrir" da linha, montado antes da estrutura (a referência vence o item genérico; a voz exclui). */
   naoCobrirDaLinha: NaoCobrirDaLinha | null = null,
+  /* 2026-10-14b · F3 · a leitura competitiva da SERP coletada (os quatro blocos da planta gravada, sem IA); sem ela, os blocos da planta ou nada. */
+  leitura: RadarCompetitiveReading | null = null,
 ): { celula: string; conflitos: string[] } {
   /* Só conflito que pede DECISÃO HUMANA vai ao veredito por aqui; o que o export resolve vira nota (2026-10-02). */
   const conflitos: string[] = [];
@@ -2548,14 +2633,22 @@ function colunaCobrir(
   conflitos.push(...conflitosComODna.values());
 
   /* ---- como superar a SERP: o que a planta decidiu ---- */
+  /*
+   * 2026-10-14b · F3 (SDD silo interligado §8.3) · OS MOVIMENTOS VÃO AOS BLOCOS
+   * DA ANÁLISE COMPETITIVA: o que só a marca entrega (o diferencial da página, as
+   * lacunas e diferenciais da SERP que a planta assume, a entrega concreta, a
+   * experiência) vai ao bloco 3 (ganho de informação); os sinais de E-E-A-T que
+   * as páginas mostram (autoria, data) vão ao bloco 2 (o que os melhores fazem).
+   * A remissão "Abertura: a do artigo-modelo" saiu (a abertura está na estrutura).
+   */
   const movimentos: string[] = [];
+  const sinaisDosMelhores: string[] = [];
   /*
    * 2026-10-02 · COM O ARTIGO-MODELO, A ABERTURA É A DELE. Duas aberturas no
    * mesmo arquivo (a da planta e a desta coluna) davam ordens contraditórias a
    * quem escreve; aqui fica só a remissão. 2026-10-09 · a pergunta de abertura
    * calculada pelo export (sem planta) não vai mais ao entregável.
    */
-  if (planta) movimentos.push("Abertura: a do artigo-modelo (coluna estrutura); as perguntas abaixo entram nas seções.");
   /*
    * 2026-10-08 · C6 · O DIFERENCIAL, NUNCA A COSTURA DO QUE A MAIORIA JÁ COBRE:
    * o que a página publicada já trata e a amostra não trata; o tema de um site
@@ -2598,13 +2691,13 @@ function colunaCobrir(
   const credencial = sinal("DECLARED_CREDENTIAL");
   if (autoria && autoria.pages > 0) {
     const contagem = naBase(autoria.pages, autoria.sampleSize);
-    movimentos.push(contagem
+    sinaisDosMelhores.push(contagem
       ? `Autoria: ${contagem.pages} de ${contagem.sampleSize} páginas identificam quem escreveu${credencial && credencial.pages ? ` e ${credencial.pages} declaram credencial` : ""}; assine com autor real, sem inventar credencial.`
       : "Autoria: assine com autor real, sem inventar credencial.");
   }
   const datas = sinal("SHOWS_DATES");
   const datasNaBase = datas ? naBase(datas.pages, datas.sampleSize) : null;
-  if (datas && datasNaBase && datasNaBase.pages >= maioria) movimentos.push(`Data de atualização visível: ${datasNaBase.pages} de ${datasNaBase.sampleSize} páginas mostram.`);
+  if (datas && datasNaBase && datasNaBase.pages >= maioria) sinaisDosMelhores.push(`Data de atualização visível: ${datasNaBase.pages} de ${datasNaBase.sampleSize} páginas mostram.`);
   /* 2026-10-09 · os eixos de comparação da review são os da planta (critérios Q da Amazon congelada), não os do blueprint competitivo. */
 
   /* ---- perguntas dentro das seções (2026-10-08 · calculadas antes da estrutura, pela régua única do "não cobrir") ---- */
@@ -2650,10 +2743,58 @@ function colunaCobrir(
       .map(item => `Não afirmar o que depende disto: ${comPontoFinal(semPontoFinal(limitacaoDaCamada(item, amostra)))}`),
   ];
 
+  /*
+   * ===== 2026-10-14b · F3 (SDD silo interligado §8.3; D11–D13) · OS QUATRO BLOCOS =====
+   *
+   * A coluna deixa de ser uma lista de "material insuficiente" e diz o que a SERP
+   * coletada ensina: o ângulo; (1) a base que todos cobrem, para dizer em poucas
+   * linhas; (2) o que só os melhores fazem e como fazer melhor; (3) o que ninguém
+   * entrega e este artigo entrega, e de quem; (4) o SEO antigo que não se copia;
+   * até 4 perguntas que valem resposta (D13: as outras ficam no painel); os termos
+   * e entidades para variar a keyword; o "Não cobrir" (como antes). Com a análise
+   * da planta nova (`competitive`), os blocos são os dela; sem ela (planta gravada,
+   * D6), a leitura da SERP coletada, sem IA.
+   */
+  const competitivo = planta?.blueprint.competitive ?? null;
+  const pode = (valor: string) => !descartar(valor) && !vetar?.(valor);
+  const angulo = texto(competitivo?.angle) || texto(planta?.blueprint.angle?.statement) || texto(leitura?.angle) || null;
+  const deSites = (sites: number | null | undefined, de: number | null = null) => (typeof sites === "number" && sites > 0 ? ` (${sites}${de ? ` de ${de}` : ""} site${sites === 1 ? "" : "s"})` : "");
+  const baseQueTodos = competitivo?.consensus.length
+    ? competitivo.consensus.filter(item => pode(item.topic)).map(item => `${semPontoFinal(item.topic)}${deSites(item.sites)}${texto(item.howWeCover) ? ` — ${semPontoFinal(item.howWeCover)}` : ""}`)
+    : (leitura?.consensus || []).filter(item => pode(item.topic)).map(item => `${item.topic}${deSites(item.sites, item.of)}`);
+  const soOsMelhores = [
+    ...(competitivo?.bestOnly.length
+      ? competitivo.bestOnly.filter(item => pode(item.practice)).map(item => `${semPontoFinal(item.practice)}${texto(item.doBetter) ? ` — como fazer melhor: ${semPontoFinal(item.doBetter)}` : ""}`)
+      : (leitura?.bestOnly || []).filter(item => pode(item.practice)).map(item => `${item.text}: faça igual e melhor, com o exemplo da marca`)),
+    ...sinaisDosMelhores,
+  ];
+  const DE_QUEM: Record<string, string> = { marca: "a marca", especialista: "o especialista", fonte_oficial: "fonte oficial, a verificar" };
+  const TIPO_DE_GANHO: Record<string, string> = { dado: "dado", experiencia: "experiência", exemplo: "exemplo real", ferramenta: "ferramenta", comparacao: "comparação", regra_oficial: "regra oficial" };
+  const ganhosDaAnalise = competitivo?.gains.length
+    ? competitivo.gains.filter(item => pode(item.gap)).map(item => `${semPontoFinal(item.gap)} (${TIPO_DE_GANHO[item.kind] || item.kind}; de quem: ${DE_QUEM[item.giver] || item.giver}${texto(item.section) ? `; seção ${entreAspas(item.section)}` : ""})`)
+    : (leitura?.gains || []).filter(item => pode(item.gap)).map(item => item.text);
+  const ganhos = [...ganhosDaAnalise, ...movimentos];
+  const seoAntigo = competitivo?.oldSeo.length
+    ? competitivo.oldSeo.map(item => `${semPontoFinal(item.pattern)}${item.seenIn.length ? ` (visto em ${item.seenIn.join(", ")})` : ""}${texto(item.instead) ? `: no lugar, ${semPontoFinal(item.instead)}` : ""}`)
+    : (leitura?.oldSeo || []).map(item => `${item.text}: no lugar, ${item.instead}`);
+  /* D13 · até 4 perguntas que valem resposta: as da planta nova (com a resposta de valor e a seção); sem elas, as da linha, as prontas primeiro. */
+  const perguntasDeValor = competitivo?.questionsKept.length
+    ? competitivo.questionsKept.slice(0, RADAR_WRITING_EXPORT_LIMITS.valueQuestions).map(item => `- ${semPontoFinal(item.question.replace(/\?\s*$/, ""))}?${texto(item.valueAnswer) ? ` → ${semPontoFinal(item.valueAnswer)}` : ""}${texto(item.section) ? ` (seção ${entreAspas(item.section)})` : ""}`)
+    : perguntas.slice(0, RADAR_WRITING_EXPORT_LIMITS.valueQuestions);
+  /* K7 · os termos e as entidades para variar a keyword (as variações da planta nova estão na estrutura, "Keyword no corpo"). */
+  const entidades = (input.googleObserved?.entities.shared || []).map(item => texto(item.label)).filter(item => item && pode(item));
+  const termosEEntidades = unicosPorChave([...termos, ...entidades], radarWritingCompareKey).slice(0, RADAR_WRITING_EXPORT_LIMITS.terms);
+  /* A célula tem teto (6 mil): cada bloco leva até 4 itens da análise, cortados por item; os movimentos da planta (lacunas assumidas) vêm inteiros. */
+  const POR_BLOCO = RADAR_WRITING_EXPORT_LIMITS.competitivePerBlock;
+  const lista = (itens: readonly string[], quantos: number = POR_BLOCO) => itens.slice(0, quantos).map(item => `- ${item.length > 260 ? `${item.slice(0, 259).trimEnd()}…` : item}`);
   const blocos = [
-    ...(movimentos.length ? ["Como superar a SERP:", ...movimentos.slice(0, RADAR_WRITING_EXPORT_LIMITS.moves + 2).map(item => `- ${item}`)] : []),
-    ...(perguntas.length ? ["", "Perguntas a responder dentro das seções (sem seção de perguntas frequentes):", ...perguntas] : []),
-    ...(termos.length >= 5 ? ["", `Termos e temas a nomear: ${termos.join(" · ")}`] : []),
+    ...(angulo ? [`Ângulo deste artigo: ${comPontoFinal(semPontoFinal(angulo))}`] : []),
+    ...(baseQueTodos.length ? ["1. Base que todos cobrem (diga em poucas linhas, sem copiar):", ...lista(baseQueTodos)] : []),
+    ...(soOsMelhores.length ? ["2. O que os melhores fazem, e como fazer melhor:", ...lista(soOsMelhores, POR_BLOCO + sinaisDosMelhores.length)] : []),
+    ...(ganhos.length ? ["3. O que ninguém entrega e este artigo entrega (ganho de informação, de quem):", ...lista(ganhosDaAnalise), ...movimentos.slice(0, RADAR_WRITING_EXPORT_LIMITS.moves).map(item => `- ${item}`)] : []),
+    ...(seoAntigo.length ? ["4. SEO antigo que não se copia:", ...lista(seoAntigo)] : []),
+    ...(perguntasDeValor.length ? ["", `Perguntas que valem resposta (até ${RADAR_WRITING_EXPORT_LIMITS.valueQuestions}, dentro das seções; sem seção de perguntas frequentes):`, ...perguntasDeValor] : []),
+    ...(termosEEntidades.length >= 5 ? ["", `Termos e entidades para variar a keyword: ${termosEEntidades.join(" · ")}`] : []),
     ...(naoCobrir.length ? ["", "Não cobrir:", ...unicosPorChave(naoCobrir, radarWritingCompareKey).map(item => `- ${item}`)] : []),
   ];
   if (!blocos.length) return { celula: "", conflitos };
@@ -2909,6 +3050,40 @@ function colunaSerp(input: RadarPortableExportInput, p: Projecoes): string {
 
 /* ------------------------------ fontes e especialista ------------------------------ */
 
+/*
+ * 2026-10-14c · F-B (SDD silo interligado §16.2) · AS FONTES EXTERNAS DE AUTORIDADE
+ * NA COLUNA fontes_e_especialista, em formato curto (o guarda de tamanho do CSV):
+ * a regra (2 a 5 no corpo, na frase que sustentam, âncora no nome da entidade,
+ * nenhuma outra URL), uma linha por fonte com o id X, onde ela está na planta (ou,
+ * na planta anterior às regras 2026-10-14c, a seção sugerida sem IA, D6), as que
+ * ficam só como referência e as afirmações de saúde sem fonte verificada.
+ */
+function linhasDasFontesDeAutoridade(fontes: RadarAuthorityWriting, plano: RadarArticleBlueprintPayload | null): string[] {
+  if (fontes.status === "UNAVAILABLE") {
+    return [`Fontes externas de autoridade: não conferidas nesta investigação (${semPontoFinal(fontes.unavailableReason || "motivo não registrado")}); nenhum link externo novo.`];
+  }
+  const linhas: string[] = [];
+  const faixa = radarAuthorityBodyLinkRange(fontes.linkable.length);
+  if (!fontes.linkable.length) {
+    linhas.push("Fontes externas de autoridade: nenhuma verificada nesta investigação; sem link externo (nunca inventar).");
+  } else {
+    linhas.push(`Links externos de autoridade (verificados pelo Radar; regras ${RADAR_AUTHORITY_WRITING_RULES_VERSION}): ${faixa.min === faixa.max ? `${faixa.max}` : `de ${faixa.min} a ${faixa.max}`} no corpo, cada um na frase que ele sustenta, com âncora no nome da entidade; nenhuma outra URL externa. O trecho de cada fonte está no arquivo -serp.csv.`);
+    const secoes = plano?.blueprint.sections || [];
+    const daPlanta = new Map((plano?.sources || []).map(fonte => [fonte.id, fonte.url]));
+    for (const fonte of fontes.linkable) {
+      const naPlanta = daPlanta.get(fonte.id) === fonte.url ? secoes.find(secao => secao.externalLinks.some(link => link.source === fonte.id)) : undefined;
+      const sugerida = naPlanta ? null : radarAuthoritySectionFor(fonte.claim, secoes);
+      const onde = naPlanta ? `na seção "${naPlanta.h2}"` : sugerida !== null ? `seção sugerida: "${secoes[sugerida].h2}"` : null;
+      linhas.push(`- ${radarAuthoritySourceLine(fonte, { where: onde })}`);
+    }
+  }
+  for (const item of fontes.references) linhas.push(`- ${item.id} · ${item.entity} · ${item.url} — ${item.reason}`);
+  if (fontes.ymylWithoutSource.length) {
+    linhas.push(`Afirmações de saúde sem fonte verificada (YMYL; não afirme como fato: delimite ou omita): ${fontes.ymylWithoutSource.map(entreAspas).join("; ")}.`);
+  }
+  return linhas;
+}
+
 function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], videos: ReadonlyArray<{ rotulo: string; linha: string }>, plano: RadarArticleBlueprintPayload | null = null): string {
   const linhas: string[] = [];
   const ymyl = p.autoridade?.ymylAssessment || null;
@@ -2923,9 +3098,20 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
 
   const verificadas = (p.autoridade?.factualEvidence || []).filter(item => item.supportType === "SUPPORTS");
   const afirmacaoDe = new Map((p.autoridade?.claims || []).map(claim => [claim.claimId, claim.canonicalClaim]));
-  linhas.push(verificadas.length
-    ? "Fontes verificadas:"
-    : "Fontes verificadas: nenhuma nesta investigação.");
+  /*
+   * 2026-10-14c · F-B (SDD silo interligado §16.2) · COM A CONFERÊNCIA DAS FONTES
+   * EXTERNAS DE AUTORIDADE NO PACOTE, o bloco é o dela (formato curto: o trecho de
+   * cada fonte está na SERP crua e no painel); as outras verificadas vêm depois.
+   * Sem o registro, a linha de antes.
+   */
+  if (p.fontesDeAutoridade) {
+    linhas.push(...linhasDasFontesDeAutoridade(p.fontesDeAutoridade, plano));
+    if (verificadas.length) linhas.push("Outras fontes verificadas:");
+  } else {
+    linhas.push(verificadas.length
+      ? "Fontes verificadas:"
+      : "Fontes verificadas: nenhuma nesta investigação.");
+  }
   for (const fonte of unicosPorChave(verificadas, item => `${item.sourceUrl}|${item.claimId}`).slice(0, 6)) {
     linhas.push(`- ${cortar(fonte.sourceTitle || fonte.sourceDomain, 90)} — ${fonte.sourceUrl} — sustenta ${entreAspas(afirmacaoDe.get(fonte.claimId) || "afirmação registrada no pacote")}`);
   }
@@ -2973,7 +3159,9 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
   }
 
   /* 2026-10-09 · Defeito 2 · o "N de M páginas tratam" do mercado sobre a base única. */
-  const semFonte = radarWritingUnsupportedClaims(p.autoridade, p.serp, p.base);
+  /* 2026-10-14c · F-B · a afirmação que uma fonte de autoridade verificada sustenta não é "sem fonte". */
+  const sustentadaPorAutoridade = radarWritingAuthoritySupported(p);
+  const semFonte = radarWritingUnsupportedClaims(p.autoridade, p.serp, p.base).filter(item => !sustentadaPorAutoridade(item.afirmacao));
   if (semFonte.length) {
     linhas.push("Não afirmar como fato sem fonte:");
     for (const item of unicosPorChave(semFonte, entrada => radarWritingCompareKey(entrada.afirmacao)).slice(0, 6)) {
@@ -3096,7 +3284,7 @@ function colunaPrompt(contexto: RadarWritingArticleContext, especificas: readonl
   }
   const topo = contexto.topRowLabel;
   return [
-    `Escreva em português do Brasil ${formas.o} ${unidade.noun} descrit${formas.terminacao} nesta linha, com as regras gerais da linha "${topo}" deste arquivo (${contexto.brandVoice ? `leve as três linhas juntas para a IA: "${topo}", "Voz da marca" e esta` : "leve as duas linhas juntas para a IA"}). Em resumo: siga o artigo-modelo da coluna estrutura (seções, medidas, links e imagens da planta), e a redação é de quem escreve, na voz humana das regras gerais; keyword principal no começo do H1, na primeira frase, no primeiro H2 e com naturalidade no corpo; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown${unidade.editorial ? ", com a data de atualização visível" : ""}.`,
+    `Escreva em português do Brasil ${formas.o} ${unidade.noun} descrit${formas.terminacao} nesta linha, com as regras gerais da linha "${topo}" deste arquivo (${contexto.brandVoice ? `leve as três linhas juntas para a IA: "${topo}", "Voz da marca" e esta` : "leve as duas linhas juntas para a IA"}). Em resumo: siga o artigo-modelo da coluna estrutura (seções, medidas, links e imagens da planta), e a redação é de quem escreve, na voz humana das regras gerais; keyword principal natural, 1× no H1 e no SEO title, sem repetir; nenhum H2 abre por ela; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown${unidade.editorial ? ", com a data de atualização visível" : ""}.`,
     ...(especificas.length ? [`${formas.neste} ${unidade.noun}:`, ...especificas.map(item => `- ${comPontoFinal(item)}`)] : []),
     /* 2026-10-02 · D10 (decisão do dono): o prompt sai fechado — sem "proposta" nem "aguardando aprovação". */
   ].join("\n");
@@ -3448,7 +3636,14 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   const notaDeOutroArtigo = (pergunta: string, artigo: string, rotuloDoLink: string | null) =>
     `- Outro artigo do Silo: ${entreAspas(pergunta)} é assunto do artigo ${entreAspas(artigo)}; aqui só mencione ${rotuloDoLink ? `e linke para ${entreAspas(artigo)} (link ${rotuloDoLink})` : `${entreAspas(artigo)} ${RADAR_WRITING_NO_APPROVED_LINK}`}, sem responder a pergunta.`;
   /* 2026-10-09 · "cobrir e superar" pela planta: o blueprint competitivo é só entrada do gerador do artigo-modelo. */
-  const cobrir = colunaCobrir(input, p, contexto, tocaForaDoEscopo, perguntas, { foraDoEscopo: foraMantidos, voz, dna: exclusoesDoDna });
+  /*
+   * 2026-10-14b · F3 (SDD silo interligado, D11–D13) · A LEITURA COMPETITIVA DA
+   * SERP JÁ COLETADA (a mesma do pedido do artigo-modelo, `radarCompetitiveReadingOf`):
+   * os quatro blocos da coluna cobrir_e_superar na planta gravada, a amostra
+   * relevante da serp_resumida e a faixa de referência da estrutura. Sem IA.
+   */
+  const leituraCompetitiva = soIdentidade ? null : radarCompetitiveReadingOf(input, { serpObserved: p.serpObservada, base: p.base, subject: p.assunto?.phrase ?? null });
+  const cobrir = colunaCobrir(input, p, contexto, tocaForaDoEscopo, perguntas, { foraDoEscopo: foraMantidos, voz, dna: exclusoesDoDna }, leituraCompetitiva);
 
   /* ---- o veredito ---- */
   const bloqueios: string[] = [];
@@ -3480,8 +3675,10 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   if (conflitoYmyl) ressalvas.push(conflitoYmyl.texto);
   /* A afirmação que o conflito já nomeia não vira um segundo motivo com a mesma frase. */
   const jaNoConflito = new Set(conflitoYmyl?.nomeadas || []);
+  /* 2026-10-14c · F-B · a afirmação que uma fonte de autoridade verificada sustenta não vira ressalva "sem fonte". */
+  const sustentadaPorAutoridade = radarWritingAuthoritySupported(p);
   const semFonte = unicosPorChave(radarWritingUnsupportedClaims(p.autoridade, p.serp), item => radarWritingCompareKey(item.afirmacao))
-    .filter(item => !jaNoConflito.has(radarWritingCompareKey(item.afirmacao)));
+    .filter(item => !jaNoConflito.has(radarWritingCompareKey(item.afirmacao)) && !sustentadaPorAutoridade(item.afirmacao));
   const sensivel = temaSensivel(p);
   if (semFonte.length) {
     const varias = semFonte.length > 1;
@@ -3504,7 +3701,14 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   ressalvas.push(...cobrir.conflitos);
   /* 2026-10-08 · a planta que já posiciona links internos (coluna links_internos dela) não deixa o artigo isolado do Silo. */
   const plantaComLinks = Boolean(contexto.blueprint?.blueprint.sections.some(secao => secao.internalLinks.length));
-  if (artigoDeSilo(contexto) && !haPlanoDeLinks(p) && !plantaComLinks && input.profile !== "YOUTUBE") {
+  /*
+   * 2026-10-14 · F2 (SDD silo interligado, D6) · com a planta e outro destino no
+   * Silo (um irmão ou a SiloPage), a malha do Silo da leitura garante o link
+   * obrigatório no corpo e a trilha: o artigo não sai isolado.
+   */
+  const malhaDoSilo = Boolean(contexto.blueprint && contexto.silo?.kind === "silo"
+    && (contexto.silo.members.some(membro => membro.articleId !== contexto.articleId) || contexto.silo.siloPage));
+  if (artigoDeSilo(contexto) && !haPlanoDeLinks(p) && !plantaComLinks && !malhaDoSilo && input.profile !== "YOUTUBE") {
     ressalvas.push(`sem links internos no pacote: ${formas.o} ${unidade.noun} sai isolad${formas.terminacao} do Silo (sem link para o Pilar nem para a SiloPage) até o Arquiteto definir o plano de links`);
   }
   const decisao = veredito(bloqueios, ressalvas);
@@ -3548,7 +3752,8 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     titulo_e_seo: "",
     estrutura: "",
     cobrir_e_superar: conteudo(() => cobrir.celula),
-    serp_resumida: conteudo(() => colunaSerp(input, p)),
+    /* 2026-10-14b · F3 (D11) · a amostra relevante: quem saiu da conta e por quê, marcado (nunca escondido). */
+    serp_resumida: conteudo(() => [colunaSerp(input, p), radarCompetitiveSampleLine(leituraCompetitiva)].filter(Boolean).join("\n")),
     fontes_e_especialista: conteudo(() => colunaFontes(p, especialista, videos, contexto.blueprint ?? null)),
     links_internos: "",
     plano_visual: "",
@@ -3566,11 +3771,14 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     Object.assign(linha, radarArticleBlueprintColumns(contexto.blueprint, videosAoVivo, { slug: texto(publicacao?.slug) || texto(input.article.slug), publishedUrl: texto(publicacao?.publishedUrl) }, radarWritingDomainLenses(p.lentes), {
       /* 2026-10-09b · as exclusões dos reajustes no ArticleDNA: a seção da planta que as cobre sai, com a nota concluída. */
       ...(exclusoesDoDna.length ? { exclusions: { items: exclusoesDoDna, core: keywordsDoArtigo(p) } } : {}),
-      pendentes: radarPendingClaims(p, contexto.blueprint),
+      /* 2026-10-14c · F-B · com as fontes de autoridade: a sustentada sai da trava; a de saúde sem fonte verificada entra. */
+      pendentes: radarWritingAuthorityPendingClaims(p, radarPendingClaims(p, contexto.blueprint)),
       comuns: radarClaimCommonStems(p, contexto.blueprint),
       /* 2026-10-08 (correção da revisão) · a principal, para a ordem de leitura da busca "como …" também na planta antiga. */
       principal: texto(p.dna.principalKeyword),
       ...(publicado ? { currentH2: publicacao?.currentStructure?.h2 ?? null, keywords: keywordsDoArtigo(p) } : {}),
+      /* 2026-10-14 · K6 (SDD silo interligado): as keywords do artigo, para dizer o H2 que abre por uma complementar também no artigo novo. */
+      articleKeywords: keywordsDoArtigo(p),
       /* 2026-10-08 (correção) · F1 · os irmãos no ar (do mapa de publicações do lote): o destino planejado da planta sai publicado. */
       publishedMembers: irmaosNoAr(contexto),
       /*
@@ -3580,6 +3788,12 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
        */
       ...(alvosDosLinks ? { linkTargets: alvosDosLinks } : {}),
       ...(contexto.anchorLedger ? { anchorLedger: contexto.anchorLedger } : {}),
+      /*
+       * 2026-10-14 · F2 (SDD silo interligado, D1–D3 e D6) · o papel deste artigo:
+       * a leitura aplica a malha do Silo (o obrigatório do grafo no corpo e a
+       * trilha "Continue no Silo"), sem IA e sem mudar a planta gravada.
+       */
+      articleRole: papel || null,
       /*
        * 2026-10-08 (correção) · F2 · UM CTA SÓ TAMBÉM NA PLANTA: a chamada do
        * especialista (quando ele é CTA) ou a da planta; o "Próximo passo" vira a
@@ -3594,7 +3808,13 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
        * muda) e a linha "Concorrentes comparáveis" com as medidas da base.
        */
       evidenceText: evidencia => radarSampleBasisRewriteCount(evidencia.text, p.base, p.fontesDaBase, evidencia.id),
+      /* 2026-10-14b · F3 (D11 e D12) · a linha da base continua a da base inteira (o nome dela diz); a faixa da amostra relevante vem logo abaixo, pela leitura competitiva. */
       ...(p.base ? { sampleMeasures: { ...radarArticleBlueprintMeasures(p.base.pages.map(pagina => pagina.structure)), label: radarSampleBasisLabel(p.base) } } : {}),
+      /* 2026-10-14b · F3 · a leitura competitiva (faixa de referência, SEO antigo do topo) e a oferta de diagnóstico da Skill (D7, D8). */
+      competitiveReading: leituraCompetitiva,
+      diagnosisOffer: contexto.brandDiagnosisOffer ?? null,
+      /* 2026-10-14c · F-B (§16.2) · as fontes de autoridade conferidas: a planta anterior às regras 2026-10-14c ganha a instrução concluída (D6). */
+      ...(p.fontesDeAutoridade ? { authoritySources: p.fontesDeAutoridade } : {}),
       /* 2026-10-09 · Defeito 3(b) · a seção da planta que toca o assunto de outro artigo do Silo: só menciona e linka. */
       ...(deOutroArtigo.length ? { sectionNotes: notasDaPlanta(contexto.blueprint, deOutroArtigo, nucleo, notaDeOutroArtigo) } : {}),
     }));

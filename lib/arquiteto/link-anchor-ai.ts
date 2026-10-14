@@ -194,7 +194,8 @@ export const LINK_ANCHOR_SYSTEM_PROMPT = [
   "",
   "REGRAS:",
   "1. Proponha de 2 a 5 conceitos distintos por conexao.",
-  "2. Exact match NAO e obrigatorio e nao deve dominar a lista.",
+  // 2026-10-14 · F4 (SDD silo interligado §6.4): a keyword do destino deixou de ser aceita como conceito.
+  "2. Exact match NAO e obrigatorio e NAO e aceito: o conceito nunca e uma busca do destino (principal, secundarias, reforcos; da SiloPage, o nome do Silo) nem frase que contenha uma delas inteira. Diga a ideia do destino; um recorte curto de uma busca cabe.",
   "3. Use variantes: recorte da busca, variante lexical, sinonimo, expressao contextual.",
   "4. Todo conceito precisa preservar a ENTIDADE e a INTENCAO do destino.",
   "5. NUNCA use o slug, a URL ou qualquer fragmento de endereco como ancora.",
@@ -203,6 +204,7 @@ export const LINK_ANCHOR_SYSTEM_PROMPT = [
   "8. Escreva em portugues do Brasil, em minusculas, sem pontuacao final.",
   "9. Cada conceito vem com o motivo pelo qual ele descreve o destino.",
   "10. A razao da conexao explica por que a ORIGEM mencionaria o DESTINO.",
+  "11. Varie: os conceitos de uma conexao sao formulacoes diferentes entre si, nunca o mesmo conceito com uma palavra trocada; o mesmo destino e citado por varios artigos do Silo, e cada um precisa de opcoes proprias.",
   "",
   "Voce propoe. Um humano confirma. Voce nao decide quantos links, nem onde, nem a frase final.",
   "",
@@ -230,6 +232,7 @@ export const ANCHOR_REJECTION_CODES = [
   "PROMOTIONAL",
   "DUPLICATE",
   "TOO_LONG",
+  "TARGET_KEYWORD",
 ] as const;
 export type AnchorRejectionCode = (typeof ANCHOR_REJECTION_CODES)[number];
 
@@ -239,7 +242,64 @@ export const ANCHOR_REJECTION_LABELS: Record<AnchorRejectionCode, string> = {
   PROMOTIONAL: "é chamada para ação, não descrição do destino",
   DUPLICATE: "repete um conceito já proposto",
   TOO_LONG: "é longa demais para caber numa frase natural",
+  TARGET_KEYWORD: "é uma keyword do destino (ou a contém inteira): a âncora diz a ideia, não repete a busca",
 };
+
+/*
+ * ===== 2026-10-14 · F4 · A ÂNCORA NATURAL NA PARTIDA DO ARQUITETO =====
+ *
+ * SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md`
+ * §6.4 (D1–D3 decididas pelo dono). A régua é a do Radar
+ * (`lib/radar/natural-anchor.ts`, `radarAnchorRepeatsKeyword`): a âncora não é
+ * uma keyword do destino nem CONTÉM inteira uma keyword de 2 palavras ou mais;
+ * o recorte curto passa. Ela é repetida aqui, pura e sem dependência, porque o
+ * módulo do Radar carrega o export inteiro e esta régua roda também na tela do
+ * Arquiteto. O teste da F4 confere que as duas dizem o mesmo nos mesmos casos.
+ */
+
+/* O plural não distingue: "promoções" e "promoção", "leads" e "lead", "clientes" e "cliente". */
+function anchorSingular(palavra: string): string {
+  if (palavra.length <= 3) return palavra;
+  if (/(?:oes|aes)$/.test(palavra)) return `${palavra.slice(0, -3)}ao`;
+  if (/ns$/.test(palavra)) return `${palavra.slice(0, -2)}m`;
+  if (/[rz]es$/.test(palavra)) return palavra.slice(0, -2);
+  if (/[aeou]is$/.test(palavra) && palavra.length > 4) return `${palavra.slice(0, -2)}l`;
+  if (/s$/.test(palavra) && !/ss$/.test(palavra)) return palavra.slice(0, -1);
+  return palavra;
+}
+
+/** A chave de comparação da âncora: sem acento, sem pontuação, caixa baixa, palavra a palavra no singular. */
+export function anchorCompareKey(valor: string | null | undefined): string {
+  return (valor || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .map(anchorSingular)
+    .join(" ");
+}
+
+/** A âncora É uma keyword do destino, ou CONTÉM inteira uma keyword do destino de 2 palavras ou mais. */
+export function anchorRepeatsTargetKeyword(anchor: string, keywords: readonly (string | null | undefined)[]): boolean {
+  const chave = anchorCompareKey(anchor);
+  if (!chave) return false;
+  return keywords.some(keyword => {
+    const alvo = anchorCompareKey(keyword);
+    if (!alvo) return false;
+    return chave === alvo || (alvo.includes(" ") && ` ${chave} `.includes(` ${alvo} `));
+  });
+}
+
+/** As keywords que a âncora do destino nunca repete: do artigo, a principal, as secundárias e os reforços (e o rótulo); da SiloPage, o nome do Silo e o H1. */
+export function linkAnchorTargetKeywords(target: Pick<LinkAnchorUnitFacts, "unitType" | "label" | "siloLabel" | "principal" | "secondaries" | "reinforcements">): string[] {
+  const lista = target.unitType === "SILO_PAGE"
+    ? [target.siloLabel, target.label]
+    : [target.principal, target.label, ...target.secondaries, ...target.reinforcements];
+  return [...new Set(lista.map(item => (typeof item === "string" ? item.trim() : "")).filter(Boolean))];
+}
 
 const STOPWORDS = new Set([
   "para", "com", "sem", "por", "que", "dos", "das", "uma", "seu", "sua", "mais",
@@ -326,6 +386,7 @@ export function reviewAnchorConcepts(input: {
   const accepted: AnchorConceptProposal[] = [];
   const rejected: AnchorReview["rejected"] = [];
   const vistos = new Set<string>();
+  const keywordsDoDestino = linkAnchorTargetKeywords(input.target);
 
   for (const concept of input.concepts) {
     const normalizado = normalizeAnchor(concept.text);
@@ -336,6 +397,7 @@ export function reviewAnchorConcepts(input: {
     if (normalizado.split(" ").length > 8) { recusa("TOO_LONG"); continue; }
     if (anchorRepeatsSlug(concept.text, input.target)) { recusa("SLUG_AS_ANCHOR"); continue; }
     if (PROMOCIONAL.some(termo => normalizado.includes(termo))) { recusa("PROMOTIONAL"); continue; }
+    if (anchorRepeatsTargetKeyword(concept.text, keywordsDoDestino)) { recusa("TARGET_KEYWORD"); continue; }
     if (!anchorRelatesToTarget(concept.text, input.target)) { recusa("UNRELATED_TO_TARGET"); continue; }
 
     vistos.add(normalizado);

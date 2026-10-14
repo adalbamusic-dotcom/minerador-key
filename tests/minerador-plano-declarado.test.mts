@@ -199,7 +199,8 @@ test("Assunto: o plano grava aditivo, preserva o plano quando outro writer não 
   assert.equal(resolveKeywordSubject(torto).declared, true);
   assert.equal(resolveKeywordSubject(torto).plan, null);
   // Retirar o Assunto retira o plano junto (o histórico fica).
-  const retirado = withdrawKeywordSubject(comPlano.semantic, { actorId: ACTOR, changedAt: AT, origin: "review" });
+  // 2026-10-13 (ajuste declarado, "o Assunto nunca se perde"): retirar exige o marcador de liberação.
+  const retirado = withdrawKeywordSubject(comPlano.semantic, { actorId: ACTOR, changedAt: AT, origin: "review", release: { requestId: "teste:1", reason: "teste", actorId: ACTOR, at: AT, via: "tirar_do_plano" } });
   assert.ok(retirado.ok && retirado.changed);
   assert.equal(resolveKeywordSubject(retirado.semantic).plan, null);
 });

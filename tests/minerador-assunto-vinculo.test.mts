@@ -65,7 +65,8 @@ test("Assunto retirado volta ao objeto de antes (keyword_subject: null)", () => 
   FIXTURES.forEach((input, index) => {
     const declared = setKeywordSubject(input.semantic, { note: "x", actorId: ACTOR, changedAt: AT, origin: "review" });
     assert.ok(declared.ok);
-    const withdrawn = withdrawKeywordSubject(declared.semantic, { actorId: ACTOR, changedAt: AT, origin: "review" });
+    // 2026-10-13 (ajuste declarado, "o Assunto nunca se perde"): retirar exige o marcador de liberação.
+    const withdrawn = withdrawKeywordSubject(declared.semantic, { actorId: ACTOR, changedAt: AT, origin: "review", release: { requestId: "teste:1", reason: "teste", actorId: ACTOR, at: AT, via: "tirar_do_plano" } });
     assert.ok(withdrawn.ok);
     const vinculo = resolveKeywordVinculo({ status: input.status, semantic: withdrawn.semantic });
     assert.equal(JSON.stringify(vinculo), SNAPSHOT[index][0]);

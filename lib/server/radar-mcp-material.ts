@@ -8,6 +8,7 @@ import {
 } from "@/lib/radar/portable-export-batch";
 import { radarPortableVideoExport } from "@/lib/radar/portable-video-export";
 import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
+import { radarSerpRawExport, radarSerpRawPositionOf } from "@/lib/radar/serp-raw-export";
 import { assembleRadarPortableExport, radarReadPublishedStructure, type RadarPortableExportAssembly } from "./radar-portable-export-core";
 import type { EditorialGroupLabel } from "@/lib/editorial/editorial-group-scope";
 
@@ -131,6 +132,48 @@ export function radarMcpMaterialOf(
   if (radarExportNeedsArticleBlueprint(escrita)) return precisaDaPlanta(mode, montagem, radarExportNeedsArticleBlueprintIds(escrita));
   const grupo = montagem.montadas.length === 1 ? montagem.grupos?.get(montagem.montadas[0].articleId) ?? null : null;
   return { status: "ready", mode, csv: escrita.csv ?? "", filename: escrita.filename, exportedAt: montagem.exportedAt, blocked: escrita.blocked, withoutYoutube: 0, group: grupo };
+}
+
+/*
+ * ===== 2026-10-14 · A SERP CRUA DE UM ARTIGO, PELO MESMO NÚCLEO DA TELA =====
+ *
+ * SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §16.1.
+ * `get_article_serp_raw` entrega o MESMO `<NN>-<papel>-<slug>-serp.csv` que a
+ * exportação "para escrever" da tela põe no .zip: a mesma montagem (com o Silo da
+ * seleção, o resumo orgânico das lentes extras e as páginas lidas) e a mesma
+ * função pura (`radarSerpRawExport`). Não pede o artigo-modelo: é a SERP já
+ * coletada, não a planta. PROVIDER_CALLS = 0: só leituras do que o Radar congelou
+ * e do cache.
+ */
+export type RadarMcpSerpRaw =
+  | { status: "ready"; csv: string; filename: string; exportedAt: string; rows: number }
+  | { status: "refused"; code: string; reason: string };
+
+export function radarMcpSerpRawOf(montagem: Pick<RadarPortableExportAssembly, "exportedAt" | "montadas" | "recusados" | "lentes" | "planoDaSelecao">): RadarMcpSerpRaw {
+  if (!montagem.montadas.length) {
+    const recusa = montagem.recusados[0];
+    return { status: "refused", code: recusa?.code ?? "radar_export_empty", reason: recusa?.reason ?? "O artigo não tem investigação finalizada para exportar." };
+  }
+  const [arquivo] = radarSerpRawExport({ articles: montagem.montadas, lookups: montagem.lentes.lookups, today: montagem.exportedAt, positionOf: radarSerpRawPositionOf(montagem.planoDaSelecao) });
+  return { status: "ready", csv: arquivo.csv, filename: arquivo.filename, exportedAt: montagem.exportedAt, rows: arquivo.rows };
+}
+
+export async function radarMcpSerpRawForArticle(input: {
+  brandId: string;
+  articleId: string;
+  supabase: Parameters<typeof assembleRadarPortableExport>[0]["supabase"];
+  actorUserId: string;
+}): Promise<RadarMcpSerpRaw> {
+  const montagem = await assembleRadarPortableExport({
+    brandId: input.brandId,
+    articleIds: [input.articleId],
+    supabase: input.supabase,
+    actorUserId: input.actorUserId,
+    selectionSiloContext: true,
+    videoLensDigests: true,
+    serpRawPages: true,
+  });
+  return radarMcpSerpRawOf(montagem);
 }
 
 /**

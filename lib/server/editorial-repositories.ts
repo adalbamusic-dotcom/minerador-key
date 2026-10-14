@@ -10,6 +10,7 @@ import { BrandInvitationSchema, CollaboratorRoleSchema, OperationalPublicationSc
 import type { SavedGridView } from "../editorial/data-grid";
 import { SavedGridViewSchema } from "../editorial/data-grid";
 import { firstIssueMessage, rejectedPaths, type IncompatibleRecord } from "../editorial/partial-read.ts";
+import { lightArtifactSelection } from "../editorial/workspace-read-scope.ts";
 import { completeWithStoredBundle, CONTENT_DOCUMENT_LISTING_SELECT, listedContentDocumentFromListingPayload, listedContentDocumentFromRow, type PartialContentDocument } from "../editorial/content-document-listing.ts";
 import { getOperationalClient, mapPersistenceError, OptimisticLockError } from "./editorial-db";
 import { contentHash } from "../arquiteto/versioning";
@@ -112,55 +113,159 @@ export class ArtifactRepository {
     const consulta = () => client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId).in("artifact_type", ["article_dna", "silo_dna"]);
     const { data, error } = entityIds ? await lerEmBlocos(entityIds, ids => consulta().in("entity_id", ids)) : await consulta();
     unwrap(data, error);
-    const articles: VersionEnvelope<ArticleDNA>[] = []; const silos: VersionEnvelope<SiloDNA>[] = [];
-    const incompatible: IncompatibleRecord[] = [];
-    for (const row of (data || []) as RemoteArtifactRow[]) {
-      /*
-       * Mesmo isolamento. A reconstrução do envelope (`versionPayload`) entra
-       * na proteção: ela já tolera payload legado, mas o schema final ainda
-       * podia lançar e derrubar todos os artefatos da marca.
-       */
-      const artefato = row.artifact_type === "article_dna" ? { schema: VersionedArticleDNASchema, destino: articles }
-        : row.artifact_type === "silo_dna" ? { schema: VersionedSiloDNASchema, destino: silos }
-        : null;
-      if (!artefato) continue;
-      const parsedArtifact = artefato.schema.safeParse(versionPayload(row, artefato.schema as never));
-      if (!parsedArtifact.success) {
-        incompatible.push({
-          kind: "artifact_version",
-          id: String(row.version_id),
-          articleId: row.entity_id ? String(row.entity_id) : null,
-          stage: String(row.artifact_type),
-          paths: rejectedPaths(parsedArtifact.error.issues),
-          message: firstIssueMessage(parsedArtifact.error.issues, "O artefato não corresponde ao contrato vigente."),
-        });
-        continue;
-      }
-      (artefato.destino as unknown[]).push(parsedArtifact.data);
-    }
+    const { articles, silos, incompatible } = parseArtifactRows((data || []) as RemoteArtifactRow[]);
     const versionIds = [...articles, ...silos].map(version => version.versionId);
     if (!versionIds.length) return { articles, silos, events: [] as VersionStatusEvent[], incompatible };
-    const { data: eventRows, error: eventError } = await client().from("editorial_version_status_events").select("id,version_id,status,reason,actor_id,occurred_at").in("version_id", versionIds).order("occurred_at");
-    unwrap(eventRows, eventError);
-    // Evento inválido não pode derrubar os artefatos que já foram lidos.
-    const events: VersionStatusEvent[] = [];
-    for (const row of eventRows || []) {
-      const parsedEvent = VersionStatusEventSchema.safeParse({ eventId: row.id, versionId: row.version_id, status: row.status, reason: row.reason, actorId: row.actor_id, occurredAt: isoDate(row.occurred_at) });
-      if (!parsedEvent.success) {
-        incompatible.push({
-          kind: "version_status_event",
-          id: String(row.id),
-          articleId: row.version_id ? String(row.version_id) : null,
-          stage: null,
-          paths: rejectedPaths(parsedEvent.error.issues),
-          message: firstIssueMessage(parsedEvent.error.issues, "O evento de status não corresponde ao contrato vigente."),
-        });
-        continue;
-      }
-      events.push(parsedEvent.data);
-    }
-    return { articles, silos, events, incompatible };
+    const lidos = await readVersionEvents(versionIds);
+    return { articles, silos, events: lidos.events, incompatible: [...incompatible, ...lidos.incompatible] };
   }
+
+  /**
+   * 2026-10-14 · SDD listas leves (item 4, F2) — A MESA LEVE, RECORTADA NO BANCO.
+   *
+   * `detail=light` podava no Node DEPOIS de ler todas as versões (7,2 MB de
+   * ArticleDNA da AdalbaPro saíam da Supabase para ficar 2,1 MB). Aqui o corte
+   * acontece antes do download: (1) só os metadados de todas as versões (sem
+   * `payload`, mais a chave do artefato por caminho JSON) e os eventos delas;
+   * (2) a MESMA escolha de sempre (`lightArtifactSelection`: vigente, última
+   * aprovada e as referenciadas); (3) o `payload` só das escolhidas, pelo
+   * `version_id`. O resultado é o mesmo da poda no Node: se uma escolhida não
+   * passar no contrato, o artefato dela é relido inteiro e escolhido do jeito
+   * antigo (nunca some um artefato que a leitura inteira mostraria).
+   */
+  async listLight(marcaId: string, entityIds: readonly string[] | null, keepVersionIds: ReadonlySet<string>) {
+    const metaSelect = "artifact_type,version_id,entity_id,version_number,a1:payload->>articleId,a2:payload->payload->>articleId,s1:payload->>siloId,s2:payload->payload->>siloId";
+    const consultaMeta = () => client().from("editorial_artifact_versions").select(metaSelect).eq("marca_id", marcaId).in("artifact_type", ["article_dna", "silo_dna"]);
+    const { data: metaData, error: metaError } = entityIds ? await lerEmBlocos(entityIds, ids => consultaMeta().in("entity_id", ids)) : await consultaMeta();
+    unwrap(metaData, metaError);
+    const metas = ((metaData || []) as LightArtifactMetaRow[]).map(lightMetaOf).filter((meta): meta is LightArtifactMeta => Boolean(meta));
+    if (!metas.length) return { articles: [] as VersionEnvelope<ArticleDNA>[], silos: [] as VersionEnvelope<SiloDNA>[], events: [] as VersionStatusEvent[], incompatible: [] as IncompatibleRecord[], versionsRead: 0, versionsListed: 0 };
+    const eventosLidos = await readVersionEvents(metas.map(meta => meta.versionId));
+    const escolha = lightArtifactSelection({
+      articles: metas.filter(meta => meta.type === "article_dna"),
+      silos: metas.filter(meta => meta.type === "silo_dna"),
+      events: eventosLidos.events,
+      articleOf: meta => ({ versionId: meta.versionId, versionNumber: meta.versionNumber, entityKey: meta.entityKey }),
+      siloOf: meta => ({ versionId: meta.versionId, versionNumber: meta.versionNumber, entityKey: meta.entityKey }),
+      keepVersionIds,
+    });
+    const escolhidas = [...escolha.articles, ...escolha.silos];
+    const consultaCheia = () => client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId).in("artifact_type", ["article_dna", "silo_dna"]);
+    const { data, error } = await lerEmBlocos(escolhidas.map(meta => meta.versionId), ids => consultaCheia().in("version_id", ids));
+    unwrap(data, error);
+    const lidas = parseArtifactRows((data || []) as RemoteArtifactRow[]);
+    let articles = lidas.articles; let silos = lidas.silos;
+    const incompatible = [...lidas.incompatible];
+    let versionsRead = escolhidas.length;
+    /*
+     * Uma escolhida que não passou no contrato: a leitura inteira teria
+     * escolhido a próxima versão válida daquele artefato. O artefato é relido
+     * inteiro (só ele) e escolhido pela regra antiga.
+     */
+    const recusadas = new Set(lidas.incompatible.map(registro => registro.id));
+    const entidadesComFalha = [...new Set(escolhidas.filter(meta => recusadas.has(meta.versionId)).map(meta => meta.entityId))];
+    if (entidadesComFalha.length) {
+      const inteiro = await this.listScoped(marcaId, entidadesComFalha);
+      versionsRead += metas.filter(meta => entidadesComFalha.includes(meta.entityId)).length;
+      const chavesComFalha = new Set(escolhidas.filter(meta => entidadesComFalha.includes(meta.entityId)).map(meta => meta.entityKey));
+      const refeita = lightArtifactSelection({
+        articles: inteiro.articles,
+        silos: inteiro.silos,
+        events: inteiro.events,
+        articleOf: version => ({ versionId: version.versionId, versionNumber: version.versionNumber, entityKey: version.payload.articleId }),
+        siloOf: version => ({ versionId: version.versionId, versionNumber: version.versionNumber, entityKey: version.payload.siloId }),
+        keepVersionIds,
+      });
+      articles = [...articles.filter(version => !chavesComFalha.has(version.payload.articleId)), ...refeita.articles];
+      silos = [...silos.filter(version => !chavesComFalha.has(version.payload.siloId)), ...refeita.silos];
+      for (const registro of inteiro.incompatible) if (!incompatible.some(atual => atual.id === registro.id && atual.kind === registro.kind)) incompatible.push(registro);
+    }
+    const mantidas = new Set([...articles, ...silos].map(version => version.versionId));
+    return {
+      articles,
+      silos,
+      events: eventosLidos.events.filter(event => mantidas.has(event.versionId)),
+      incompatible: [...incompatible, ...eventosLidos.incompatible],
+      versionsRead,
+      versionsListed: metas.length,
+    };
+  }
+}
+
+type LightArtifactMetaRow = { artifact_type?: unknown; version_id?: unknown; entity_id?: unknown; version_number?: unknown; a1?: unknown; a2?: unknown; s1?: unknown; s2?: unknown };
+type LightArtifactMeta = { type: "article_dna" | "silo_dna"; versionId: string; entityId: string; versionNumber: number; entityKey: string };
+
+/**
+ * A chave do artefato como a leitura inteira a calcula (`payload.articleId`
+ * depois de `versionPayload`): o payload gravado é o ArticleDNA cru (chave em
+ * `payload.articleId`) ou o envelope antigo (chave em `payload.payload.articleId`).
+ */
+function lightMetaOf(row: LightArtifactMetaRow): LightArtifactMeta | null {
+  const type = row.artifact_type === "article_dna" || row.artifact_type === "silo_dna" ? row.artifact_type : null;
+  if (!type) return null;
+  const texto = (valor: unknown) => (typeof valor === "string" && valor ? valor : null);
+  const versionId = texto(row.version_id);
+  const entityId = texto(row.entity_id);
+  if (!versionId || !entityId) return null;
+  const entityKey = type === "article_dna" ? texto(row.a2) ?? texto(row.a1) : texto(row.s2) ?? texto(row.s1);
+  return { type, versionId, entityId, versionNumber: Number(row.version_number), entityKey: entityKey ?? entityId };
+}
+
+/** O laço de sempre: cada linha vira envelope ou fica registrada como incompatível. */
+function parseArtifactRows(rows: readonly RemoteArtifactRow[]) {
+  const articles: VersionEnvelope<ArticleDNA>[] = []; const silos: VersionEnvelope<SiloDNA>[] = [];
+  const incompatible: IncompatibleRecord[] = [];
+  for (const row of rows) {
+    /*
+     * Mesmo isolamento. A reconstrução do envelope (`versionPayload`) entra
+     * na proteção: ela já tolera payload legado, mas o schema final ainda
+     * podia lançar e derrubar todos os artefatos da marca.
+     */
+    const artefato = row.artifact_type === "article_dna" ? { schema: VersionedArticleDNASchema, destino: articles }
+      : row.artifact_type === "silo_dna" ? { schema: VersionedSiloDNASchema, destino: silos }
+      : null;
+    if (!artefato) continue;
+    const parsedArtifact = artefato.schema.safeParse(versionPayload(row, artefato.schema as never));
+    if (!parsedArtifact.success) {
+      incompatible.push({
+        kind: "artifact_version",
+        id: String(row.version_id),
+        articleId: row.entity_id ? String(row.entity_id) : null,
+        stage: String(row.artifact_type),
+        paths: rejectedPaths(parsedArtifact.error.issues),
+        message: firstIssueMessage(parsedArtifact.error.issues, "O artefato não corresponde ao contrato vigente."),
+      });
+      continue;
+    }
+    (artefato.destino as unknown[]).push(parsedArtifact.data);
+  }
+  return { articles, silos, incompatible };
+}
+
+/** Os eventos de status das versões pedidas, na ordem de `occurred_at` (a mesma consulta de sempre). */
+async function readVersionEvents(versionIds: readonly string[]) {
+  const incompatible: IncompatibleRecord[] = [];
+  const events: VersionStatusEvent[] = [];
+  if (!versionIds.length) return { events, incompatible };
+  const { data: eventRows, error: eventError } = await client().from("editorial_version_status_events").select("id,version_id,status,reason,actor_id,occurred_at").in("version_id", [...versionIds]).order("occurred_at");
+  unwrap(eventRows, eventError);
+  // Evento inválido não pode derrubar os artefatos que já foram lidos.
+  for (const row of eventRows || []) {
+    const parsedEvent = VersionStatusEventSchema.safeParse({ eventId: row.id, versionId: row.version_id, status: row.status, reason: row.reason, actorId: row.actor_id, occurredAt: isoDate(row.occurred_at) });
+    if (!parsedEvent.success) {
+      incompatible.push({
+        kind: "version_status_event",
+        id: String(row.id),
+        articleId: row.version_id ? String(row.version_id) : null,
+        stage: null,
+        paths: rejectedPaths(parsedEvent.error.issues),
+        message: firstIssueMessage(parsedEvent.error.issues, "O evento de status não corresponde ao contrato vigente."),
+      });
+      continue;
+    }
+    events.push(parsedEvent.data);
+  }
+  return { events, incompatible };
 }
 
 /* O estágio `planner` saiu com o Planejador (M1 em 2026-09-18; aposentadoria em 2026-10-01). */

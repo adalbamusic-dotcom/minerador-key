@@ -106,8 +106,13 @@ import {
  * do destino (a gravada no candidato K ou, na planta antiga, o rótulo) ou a
  * contém vira a formulação válida ou a instrução, e cada link diz
  * `avoidAsAnchor` — a fatia muda de novo.
+ *
+ * 2026-10-14 · e as regras de keyword K1–K9 (SDD silo interligado, F1): a troca
+ * de metades (keyword no começo do SEO title) saiu, e o título, as alternativas,
+ * o SEO title e a meta perdem a marca de processo na leitura — a fatia muda de
+ * novo.
  */
-export const WRITER_BLUEPRINT_READING_RULES = "2026-10-11c";
+export const WRITER_BLUEPRINT_READING_RULES = "2026-10-14";
 
 export const WRITER_BLUEPRINT_FOR_WRITING_LIMITS = Object.freeze({
   /** Frases marcadas fora das seções (promessa, ângulo, título, abertura, fechamento). */

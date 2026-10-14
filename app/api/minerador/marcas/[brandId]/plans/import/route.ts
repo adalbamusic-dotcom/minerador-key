@@ -60,6 +60,10 @@ const RequestSchema = z.object({
   ]),
   destination: DestinationSchema.optional(),
   importRequestId: z.string().uuid().optional(),
+  /** 2026-10-13 · Silo existente: "append" (padrão) ou "replace" (SDD sdd-arquiteto-so-le-e-listas-leves §5.2). */
+  planMode: z.enum(["append", "replace"]).optional(),
+  /** 2026-10-13 · "replace": o decisionHash da prévia das quatro listas (obrigatório no apply). */
+  decisionHash: z.string().trim().min(1).max(200).optional(),
 }).strict().refine(value => Boolean(value.text?.trim()) !== Boolean(value.plan), "Envie o texto colado ou o plano estruturado (um dos dois).");
 
 const REFUSAL_STATUS: Record<DeclaredPlanImportRefusalCode, number> = {
@@ -71,6 +75,9 @@ const REFUSAL_STATUS: Record<DeclaredPlanImportRefusalCode, number> = {
   PLAN_BLOCKED: 422,
   GROUP_REFUSED: 409,
   GROUPS_NOT_AVAILABLE: EDITORIAL_GROUP_REFUSAL_STATUS.GROUPS_NOT_AVAILABLE,
+  DECISION_REQUIRED: 400,
+  DECISION_STALE: 409,
+  WITHDRAWAL_FAILED: 409,
 };
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ brandId: string }> }) {
@@ -98,6 +105,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       destination: input.destination ?? null,
       importRequestId: input.importRequestId ?? null,
       brandSiteUrl,
+      planMode: input.planMode ?? null,
+      decisionHash: input.decisionHash ?? null,
     });
     if (!result.ok) return editorialGroupsFailure(result.code, REFUSAL_STATUS[result.code], result.reason, { requestId, ...(result.blockers ? { blockers: result.blockers } : {}) });
     return NextResponse.json({ success: true, requestId, ...result });

@@ -69,11 +69,15 @@ test("item 6 · ler um grupo não remove o que a memória tem de outro grupo", (
   assert.deepEqual(mergeScopedById(atual, [], item => doGrupo.has(item.articleId)).map(item => item.id), ["p2"], "o grupo lido vazio só esvazia o próprio grupo");
 });
 
-test("item 6 · a rota: sem detail, o corpo de sempre; com light, a seleção leve; histórico sob demanda", () => {
+test("item 6 · a rota: leve por padrão, recortada no banco (F2 das listas leves, 2026-10-14); inteira só com detail=full; histórico sob demanda", () => {
   const rota = semComentarios(readFileSync("app/api/editorial/workspace/route.ts", "utf8"));
-  assert.match(rota, /const leve = request\.nextUrl\.searchParams\.get\("detail"\) === "light";/);
-  assert.match(rota, /const artifacts = leve \? \(\(\) => \{[\s\S]*?lightArtifactSelection\(\{[\s\S]*?\}\)\(\) : artifactsLidos;/);
-  assert.match(rota, /\.\.\.workflow\.radar\.map\(item => item\.articleDnaVersionId\)/, "a versão transportada pelo item do Radar nunca sai");
+  assert.match(rota, /const detalheInteiro = request\.nextUrl\.searchParams\.get\("detail"\) === "full";/);
+  assert.match(rota, /new ArtifactRepository\(\)\.listLight\(marcaId, recorte \? recorte\.entityIds : null, referenciadas\)/);
+  assert.match(rota, /workflowLido\.value\.radar\.map\(item => item\.articleDnaVersionId\)/, "a versão transportada pelo item do Radar nunca sai");
+  const repositorio = semComentarios(readFileSync("lib/server/editorial-repositories.ts", "utf8"));
+  const leve = repositorio.slice(repositorio.indexOf("async listLight("), repositorio.indexOf("type LightArtifactMetaRow"));
+  assert.match(leve, /lightArtifactSelection\(\{/, "a MESMA escolha de sempre");
+  assert.doesNotMatch(leve.slice(0, leve.indexOf("lightArtifactSelection(")), /select\("artifact_type,payload/, "os metadados vêm antes, sem payload");
   const historico = semComentarios(readFileSync("app/api/editorial/workspace/versions/route.ts", "utf8"));
   assert.match(historico, /assertEditorialPermission\(profile, parsed\.data\.marcaId, "marca", "view"\)/);
   assert.match(historico, /listScoped\(parsed\.data\.marcaId, \[parsed\.data\.entityId\]\)/);
@@ -87,6 +91,7 @@ test("item 6 · o pipeline: só a rota do Radar recorta; a cor pendente espera; 
   assert.match(pipeline, /if \(!escopo\.ready\) \{ leituraEsperandoEscopo\.current = \{ pending: true, snapshot: sourceSnapshot \}; return; \}/);
   assert.match(pipeline, /fetch\(workspaceReadUrl\(selectedBrandId, recorte\), \{ cache: "no-store" \}\)/);
   assert.match(pipeline, /mergeScopedById\(current\.operationalPublications, persisted\.publications, publication => artigosDoRecorte\.has\(publication\.articleId\)\)/);
-  assert.match(pipeline, /escopoDaMesa\.scope \? ultima === "grupo" : ultima !== "inteira"/);
+  // F2 das listas leves (2026-10-14): leve e inteira são o mesmo estado; só sair de um recorte por grupo relê.
+  assert.match(pipeline, /const precisa = escopoDaMesa\.scope\?\.groupId\s*\?\s*true\s*:\s*ultima === "grupo";/);
   assert.match(pipeline, /scopedRecoveryKey\(base, escopoDaMesaRef\.current\.scope\?\.groupId\)/);
 });

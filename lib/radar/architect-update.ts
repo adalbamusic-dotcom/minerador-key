@@ -33,6 +33,7 @@ import type { RadarItem } from "../editorial/operational-flow.ts";
 import type { RadarAnalysisPayload } from "./analysis-contracts.ts";
 import { buildRadarResetPayload } from "./radar-reset.ts";
 import { radarDeclaredArticleIntent } from "./editorial-identity.ts";
+import { radarSiloMeshPriority, radarSiloMeshStrongest, type RadarSiloMeshPriority } from "./silo-link-mesh.ts";
 
 /* ================================ o rótulo ================================ */
 
@@ -46,17 +47,30 @@ export const RADAR_ARCHITECT_ADOPT_BUTTON = "Adotar a versão nova";
 
 /* ============================== a classificação ============================ */
 
-export type RadarArchitectUpdateClass = "same_research_basis" | "composition_changed" | "principal_changed";
+/** As três classes da versão nova do ArticleDNA (F5). */
+export type RadarArchitectDnaUpdateClass = "same_research_basis" | "composition_changed" | "principal_changed";
+
+/**
+ * 2026-10-14 · `links_changed`: o InternalLinkGraph aprovado vigente do Silo é
+ * mais novo que o grafo transportado pelo item (decisão do dono: "links não
+ * mudam a SERP"). É uma atualização própria, ao lado da do ArticleDNA.
+ */
+export type RadarArchitectUpdateClass = RadarArchitectDnaUpdateClass | "links_changed";
 
 export const RADAR_ARCHITECT_UPDATE_CLASS_LABEL: Record<RadarArchitectUpdateClass, string> = {
   same_research_basis: "Mesma base de pesquisa: a SERP e as evidências continuam valendo",
   composition_changed: "Composição mudou (principal igual): vale o que foi coletado das keywords que ficaram",
   principal_changed: "A principal ou o slug mudou: a pesquisa do Google da principal precisa ser refeita",
+  links_changed: "Só os links internos mudaram: a SERP, a investigação e as evidências continuam valendo",
 };
+
+/** Qual atualização: a versão nova do ArticleDNA (F5) ou o grafo de links novo (2026-10-14). Ausente = ArticleDNA. */
+export type RadarArchitectUpdateKind = "article_dna" | "links";
 
 export type RadarArchitectUpdateChangeField =
   | "principal" | "slug" | "keywords_added" | "keywords_removed" | "keyword_roles" | "keyword_qualification"
-  | "promise" | "scope" | "subject" | "silo_role" | "intent";
+  | "promise" | "scope" | "subject" | "silo_role" | "intent"
+  | "links_added" | "links_removed" | "links_obligation" | "links_summary" | "links_inbound";
 
 export type RadarArchitectUpdateChange = {
   field: RadarArchitectUpdateChangeField;
@@ -98,7 +112,7 @@ const igual = (a: unknown, b: unknown) => canonicalJson(a ?? null) === canonical
  *     SERP e as evidências continuam válidas.
  */
 export function classifyArchitectUpdate(from: ArticleDNA, to: ArticleDNA): {
-  classification: RadarArchitectUpdateClass;
+  classification: RadarArchitectDnaUpdateClass;
   changes: RadarArchitectUpdateChange[];
 } {
   const changes: RadarArchitectUpdateChange[] = [];
@@ -158,7 +172,7 @@ export function classifyArchitectUpdate(from: ArticleDNA, to: ArticleDNA): {
   const intencaoDepois = radarDeclaredArticleIntent(to);
   if (intencaoAntes !== intencaoDepois) changes.push({ field: "intent", label: "Intenção", before: intencaoAntes, after: intencaoDepois });
 
-  const classification: RadarArchitectUpdateClass = principalMudou || slugMudou
+  const classification: RadarArchitectDnaUpdateClass = principalMudou || slugMudou
     ? "principal_changed"
     : entraram.length || sairam.length || papeis.length || qualificacao.length
       ? "composition_changed"
@@ -203,7 +217,9 @@ export type RadarArchitectAdoptionRefusalCode =
   | "sent_to_writer"
   | "published_slug_change"
   | "silo_unresolved"
-  | "version_integrity";
+  | "version_integrity"
+  /* 2026-10-14 · o grafo novo só cobre a versão nova do ArticleDNA: os links chegam com a adoção dela. */
+  | "links_follow_article_version";
 
 export type RadarArchitectAdoptionRefusal = { code: RadarArchitectAdoptionRefusalCode; reason: string };
 
@@ -258,7 +274,7 @@ export type RadarArchitectAdoptionPlan = {
 };
 
 export function radarArchitectAdoptionPlan(input: {
-  classification: RadarArchitectUpdateClass;
+  classification: RadarArchitectDnaUpdateClass;
   hasAnalysis: boolean;
   hasGoogleResearch: boolean;
   hasYoutubeRun: boolean;
@@ -287,7 +303,7 @@ export function radarArchitectAdoptionPlan(input: {
   }
   if (input.hasAnalysis && input.hasYoutubeRun) redo.push("A coleta do YouTube em andamento foi feita sobre a versão anterior: confira antes de finalizar (refazer é decisão sua, com custo no botão).");
   if (input.hasAnalysis && input.hasAmazonRun) redo.push("A coleta da Amazon em andamento foi feita sobre a versão anterior: confira antes de finalizar (refazer é decisão sua, com custo no botão).");
-  if (input.linksCoverNewVersion === true) keeps.push("Links internos: o grafo aprovado já cobre a versão nova.");
+  if (input.linksCoverNewVersion === true) keeps.push("Links internos: o grafo aprovado vigente já cobre a versão nova e vem junto na adoção (links não mudam a SERP).");
   if (input.linksCoverNewVersion === false) keeps.push("Links internos: seguem as relações aprovadas no envio; o grafo aprovado ainda não cobre a versão nova (lacuna declarada, não bloqueia).");
   keeps.push("O artigo-modelo e o CSV saem da versão nova pelo caminho de sempre, depois de finalizar a investigação.");
   return { keeps, redo, costs };
@@ -369,7 +385,7 @@ export function radarRebindResearchFingerprint<F extends { articleDnaVersionId: 
 export function radarAnalysisAdoptionPatch(input: {
   current: RadarAnalysisPayload;
   to: VersionEnvelope<ArticleDNA>;
-  classification: RadarArchitectUpdateClass;
+  classification: RadarArchitectDnaUpdateClass;
 }): Partial<RadarAnalysisPayload> {
   const decisoes = new Map(input.current.keywordDecisions.map(decision => [decision.keywordId, decision]));
   const keywordDecisions = input.to.payload.keywordReferences.map(reference =>
@@ -397,9 +413,14 @@ export type RadarArchitectUpdatePreviewItem = {
   siloId: string | null;
   siloName: string | null;
   state: string;
+  /** 2026-10-14 · ausente = "article_dna" (o leitor de antes segue igual). */
+  updateKind?: RadarArchitectUpdateKind;
   label: string;
+  /** Na atualização de links, `from` e `to` são a versão transportada do ArticleDNA (ela não muda). */
   from: RadarArchitectVersionRef;
   to: RadarArchitectVersionRef;
+  /** 2026-10-14 · só na atualização de links: o grafo transportado e o vigente. */
+  graph?: RadarArchitectGraphChange | null;
   classification: RadarArchitectUpdateClass;
   classificationLabel: string;
   changes: RadarArchitectUpdateChange[];
@@ -414,8 +435,11 @@ export async function radarArchitectUpdateItemHash(input: {
   articleId: string; itemId: string; lockVersion: number;
   from: RadarArchitectVersionRef; to: RadarArchitectVersionRef & { contentHash: string };
   classification: RadarArchitectUpdateClass; adoptable: boolean;
+  /** 2026-10-14 · o grafo vigente que vem junto na adoção (só quando há; sem ele, o hash é o de antes). */
+  linksGraphVersionId?: string | null;
 }): Promise<string> {
-  return (await contentHash({ kind: "radar_architect_update_item", ...input })).replace(/^sha256:/, "");
+  const { linksGraphVersionId, ...resto } = input;
+  return (await contentHash({ kind: "radar_architect_update_item", ...resto, ...(linksGraphVersionId ? { linksGraphVersionId } : {}) })).replace(/^sha256:/, "");
 }
 
 /**
@@ -424,8 +448,9 @@ export async function radarArchitectUpdateItemHash(input: {
  * hash na tela, na rota e no MCP.
  */
 export async function radarArchitectAdoptionDecisionHash(items: ReadonlyArray<Pick<RadarArchitectUpdatePreviewItem, "articleId" | "itemHash">>): Promise<string> {
+  /* 2026-10-14 · o mesmo artigo pode vir duas vezes (ArticleDNA e links): o hash do item desempata. */
   const entradas = [...items].map(item => ({ articleId: item.articleId, itemHash: item.itemHash }))
-    .sort((a, b) => a.articleId.localeCompare(b.articleId));
+    .sort((a, b) => a.articleId.localeCompare(b.articleId) || a.itemHash.localeCompare(b.itemHash));
   return (await contentHash({ kind: "radar_architect_adoption", items: entradas })).replace(/^sha256:/, "");
 }
 
@@ -439,4 +464,153 @@ export function radarArchitectUpdatesBySilo<T extends Pick<RadarArchitectUpdateP
     grupos.set(chave, grupo);
   }
   return [...grupos.values()].sort((a, b) => a.siloName.localeCompare(b.siloName, "pt-BR"));
+}
+
+/* ====================== 2026-10-14 · O GRAFO DE LINKS NOVO ====================== */
+
+/*
+ * "ATUALIZAÇÃO DISPONÍVEL DO ARQUITETO · LINKS" — decisão do dono, 2026-10-14:
+ * "estender a 'Atualização disponível do Arquiteto' do Radar para avisar também
+ * quando o grafo de links muda. Você adota com um clique, sem reenviar nada e
+ * sem refazer a pesquisa, porque links não mudam a SERP. Isso segue a regra de
+ * que o Radar se adapta ao Arquiteto."
+ *
+ * O item transporta o grafo do envio (`arquitetoInternalLinks`). Quando o
+ * InternalLinkGraph aprovado vigente do Silo do artigo é outro (a malha da F4
+ * aprovada, um rebase) e cobre a versão transportada do ArticleDNA, o item
+ * mostra a atualização de links. Adotar troca SÓ o grafo transportado: a
+ * investigação, a SERP, as evidências, o pacote congelado e a planta ficam; o
+ * artigo-modelo e o CSV leem a malha nova na leitura (D6, `silo-link-mesh.ts`).
+ * Diferente da versão nova do ArticleDNA, vale também para item finalizado,
+ * aprovado ou enviado ao Redator.
+ */
+
+export const radarArchitectLinksUpdateLabel = (fromGraphVersionNumber: number | null, toGraphVersionNumber: number) =>
+  `${RADAR_ARCHITECT_UPDATE_LABEL} · links · grafo ${fromGraphVersionNumber === null ? "do envio" : `v${fromGraphVersionNumber}`} → v${toGraphVersionNumber}`;
+
+export const RADAR_ARCHITECT_ADOPT_LINKS_BUTTON = "Adotar os links novos";
+
+/** O campo do item que vem do grafo. O que deriva dele (obrigação, trilha, âncoras) é lido na hora, não gravado. */
+export const RADAR_ARCHITECT_LINK_FIELDS = ["arquitetoInternalLinks"] as const satisfies ReadonlyArray<keyof RadarItem>;
+
+export type RadarArchitectGraphChange = {
+  graphId: string;
+  fromGraphVersionId: string | null;
+  fromGraphVersionNumber: number | null;
+  toGraphVersionId: string;
+  toGraphVersionNumber: number;
+  toGraphContentHash: string;
+};
+
+type LinksDoItem = NonNullable<RadarItem["arquitetoInternalLinks"]>;
+
+/** O que a prévia sabe de cada nó do grafo: o nome e o papel. */
+export type RadarArchitectGraphNodeInfo = { label: string; role: string | null };
+
+const nomeDoNo = (nodeId: string, nos: ReadonlyMap<string, RadarArchitectGraphNodeInfo>) =>
+  nos.get(nodeId)?.label || (nodeId.startsWith("silo-page:") ? "SiloPage do Silo" : nodeId.replace(/^article:/, ""));
+
+const papelPeloNo = (nodeId: string, nos: ReadonlyMap<string, RadarArchitectGraphNodeInfo>) =>
+  nos.get(nodeId)?.role ?? (nodeId.startsWith("silo-page:") ? "SiloPage" : null);
+
+const OBRIGACAO_CURTA: Readonly<Record<RadarSiloMeshPriority, string>> = {
+  HIGH: "obrigatório no corpo",
+  MEDIUM: "no corpo se a seção tratar; senão trilha",
+  LOW: "trilha",
+};
+
+/** Os destinos de saída e a obrigação de cada um pela régua do Radar (D2: o mínimo estrutural e o `priority` do grafo). */
+function saidasComObrigacao(links: LinksDoItem | null | undefined, articleRole: string | null | undefined, nos: ReadonlyMap<string, RadarArchitectGraphNodeInfo>) {
+  const saidas = new Map<string, RadarSiloMeshPriority>();
+  for (const aresta of links?.edges || []) {
+    if (aresta.direction !== "outbound") continue;
+    const obrigacao = radarSiloMeshPriority({ articleRole, targetRole: papelPeloNo(aresta.targetNodeId, nos), graphPriority: aresta.priority });
+    saidas.set(aresta.targetNodeId, radarSiloMeshStrongest(saidas.get(aresta.targetNodeId) ?? null, obrigacao)!);
+  }
+  return saidas;
+}
+
+const entradasDe = (links: LinksDoItem | null | undefined) =>
+  new Set((links?.edges || []).filter(aresta => aresta.direction === "inbound").map(aresta => aresta.sourceNodeId));
+
+const contagem = (saidas: ReadonlyMap<string, RadarSiloMeshPriority>) => {
+  const valores = [...saidas.values()];
+  const de = (prioridade: RadarSiloMeshPriority) => valores.filter(valor => valor === prioridade).length;
+  return `${saidas.size} destino(s): ${de("HIGH")} obrigatório(s) no corpo, ${de("MEDIUM")} no corpo se a seção tratar, ${de("LOW")} na trilha "Continue no Silo"`;
+};
+
+/**
+ * O QUE MUDA NOS LINKS deste artigo, por destino: os que entram, os que saem,
+ * a obrigação que mudou (obrigatório no corpo, no corpo se a seção tratar,
+ * trilha) e quem passa a apontar para ele. A obrigação é a MESMA régua que o
+ * artigo-modelo e o CSV aplicam na leitura (`radarSiloMeshPriority`).
+ */
+export function diffArchitectLinks(input: {
+  articleRole: string | null | undefined;
+  from: LinksDoItem | null | undefined;
+  to: LinksDoItem;
+  nodes: ReadonlyMap<string, RadarArchitectGraphNodeInfo>;
+}): RadarArchitectUpdateChange[] {
+  const antes = saidasComObrigacao(input.from, input.articleRole, input.nodes);
+  const depois = saidasComObrigacao(input.to, input.articleRole, input.nodes);
+  const nome = (nodeId: string) => nomeDoNo(nodeId, input.nodes);
+  const changes: RadarArchitectUpdateChange[] = [];
+  const resumo: RadarArchitectUpdateChange = { field: "links_summary", label: "Links deste artigo", before: input.from ? contagem(antes) : "sem grafo no envio", after: contagem(depois) };
+  changes.push(resumo);
+  const entram = [...depois.keys()].filter(destino => !antes.has(destino));
+  const saem = [...antes.keys()].filter(destino => !depois.has(destino));
+  if (entram.length) changes.push({ field: "links_added", label: "Links que entram (destino e obrigação)", before: null, after: lista(entram.map(destino => `${nome(destino)} (${OBRIGACAO_CURTA[depois.get(destino)!]})`)) });
+  if (saem.length) changes.push({ field: "links_removed", label: "Links que saem", before: lista(saem.map(destino => `${nome(destino)} (${OBRIGACAO_CURTA[antes.get(destino)!]})`)), after: null });
+  const mudaram = [...depois.keys()].filter(destino => antes.has(destino) && antes.get(destino) !== depois.get(destino));
+  if (mudaram.length) {
+    changes.push({
+      field: "links_obligation", label: "Obrigação que mudou",
+      before: lista(mudaram.map(destino => `${nome(destino)}: ${OBRIGACAO_CURTA[antes.get(destino)!]}`)),
+      after: lista(mudaram.map(destino => `${nome(destino)}: ${OBRIGACAO_CURTA[depois.get(destino)!]}`)),
+    });
+  }
+  const recebiaDe = entradasDe(input.from);
+  const recebeDe = entradasDe(input.to);
+  const passam = [...recebeDe].filter(origem => !recebiaDe.has(origem));
+  const deixam = [...recebiaDe].filter(origem => !recebeDe.has(origem));
+  if (passam.length || deixam.length) {
+    changes.push({
+      field: "links_inbound", label: "Páginas que apontam para este artigo",
+      before: `${recebiaDe.size}${deixam.length ? ` (deixam de apontar: ${deixam.map(nome).join(", ")})` : ""}`,
+      after: `${recebeDe.size}${passam.length ? ` (passam a apontar: ${passam.map(nome).join(", ")})` : ""}`,
+    });
+  }
+  /* Nenhuma relação deste artigo muda (o grafo novo mexeu em outros): dizer, e não deixar parecer que nada aconteceu. */
+  if (changes.length === 1 && resumo.before === resumo.after) resumo.after = `${resumo.after} — as mesmas relações deste artigo; muda só a versão do grafo`;
+  return changes;
+}
+
+/** O que a adoção dos links mantém, refaz e custa. Nada a refazer: links não mudam a SERP. */
+export function radarArchitectLinksAdoptionPlan(input: { frozen: boolean; sentToWriter: boolean }): RadarArchitectAdoptionPlan {
+  const keeps = [
+    "A SERP, a investigação, as evidências e as coletas ficam como estão: links não mudam a SERP (a análise não ganha versão nova).",
+    input.frozen
+      ? "O pacote congelado e a planta do artigo-modelo não são regravados: o artigo-modelo e o CSV 'Para escrever' leem a malha nova na leitura (obrigatório no corpo, o resto na trilha 'Continue no Silo')."
+      : "O artigo-modelo e o CSV 'Para escrever' passam a ler a malha nova (obrigatório no corpo, o resto na trilha 'Continue no Silo').",
+  ];
+  if (input.sentToWriter) keeps.push("O documento já criado no Redator fica com os links do envio; reenviar ao Redator é pelo caminho de sempre.");
+  return { keeps, redo: [], costs: ["Nada pago e nenhuma IA: grava só o grafo transportado pelo item (o campo de links)."] };
+}
+
+/** O grafo novo só cobre a versão nova do ArticleDNA: os links chegam com a adoção dela (a regra do ArticleDNA continua valendo). */
+export const radarArchitectLinksFollowArticleRefusal = (toArticleVersionNumber: number, toGraphVersionNumber: number): RadarArchitectAdoptionRefusal => ({
+  code: "links_follow_article_version",
+  reason: `O grafo aprovado vigente (v${toGraphVersionNumber}) foi montado sobre a versão nova do ArticleDNA (v${toArticleVersionNumber}): os links chegam junto com a adoção dessa versão.`,
+});
+
+export async function radarArchitectLinksUpdateItemHash(input: {
+  articleId: string; itemId: string; lockVersion: number; transportedVersionId: string;
+  graph: RadarArchitectGraphChange; adoptable: boolean;
+}): Promise<string> {
+  return (await contentHash({ kind: "radar_architect_links_update_item", ...input })).replace(/^sha256:/, "");
+}
+
+/** O payload gravado do item com SÓ o grafo transportado trocado. Investigação, análise e o resto do item ficam. */
+export function radarItemPayloadAdoptingLinks(input: { currentPayload: Record<string, unknown>; links: LinksDoItem }): Record<string, unknown> {
+  return { ...input.currentPayload, arquitetoInternalLinks: input.links };
 }

@@ -21,6 +21,7 @@ import {
 } from "@/lib/radar/portable-export-batch";
 import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
 import { radarPortableVideoExport } from "@/lib/radar/portable-video-export";
+import { radarSerpRawArchiveFilename, radarSerpRawExport, radarSerpRawPositionOf } from "@/lib/radar/serp-raw-export";
 
 /**
  * ===== O DOSSIÊ EDITORIAL PORTÁTIL — RADAR_PORTABLE_EXPORT_1.2 =====
@@ -107,6 +108,13 @@ const CorpoSchema = z.object({
    * Sempre um arquivo só, mesmo com `groupBy`.
    */
   mode: z.enum(["writing", "full", "video"]).optional(),
+  /*
+   * 2026-10-14 · Aditivo (SERP crua por artigo, SDD silo interligado §16.1): no
+   * formato "para escrever" sem `groupBy`, a resposta traz também a SERP crua de
+   * cada artigo (`<NN>-<papel>-<slug>-serp.csv`), só com dados já coletados. Sem
+   * ele, a resposta é a de antes.
+   */
+  serpRaw: z.boolean().optional(),
 }).strict();
 
 const noStoreHeaders = { "Cache-Control": "no-store" };
@@ -117,6 +125,8 @@ export async function POST(request: Request) {
     const corpo = CorpoSchema.parse(await request.json());
     /* 2026-10-09 · sem `mode`, o formato para escrever (pelo artigo-modelo). */
     const input = { ...corpo, mode: corpo.mode ?? "writing" };
+    /* 2026-10-14 · a SERP crua vai junto do "para escrever" avulso (por artigo), quando a tela pede. */
+    const comSerpCrua = input.mode === "writing" && !input.groupBy && input.serpRaw === true;
     await assertEditorialPermission(profile, input.brandId, "radar", "view");
 
     const { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice, grupos } = await assembleRadarPortableExport({
@@ -132,6 +142,12 @@ export async function POST(request: Request) {
       selectionSiloContext: input.mode === "video" || (input.mode === "writing" && !input.groupBy),
       /* 2026-10-07 · o resumo orgânico das lentes extras (grátis, do cache) só serve ao CSV de vídeo: os outros formatos não o leem. */
       videoLensDigests: input.mode === "video",
+      /*
+       * 2026-10-14 · só para a SERP crua (o "para escrever" avulso que a pede): o
+       * resumo orgânico das lentes extras (o mesmo do vídeo, grátis, do cache) e as
+       * páginas lidas (H1/H2, data, autor; sem texto). Sem ela, a montagem de antes.
+       */
+      ...(comSerpCrua ? { videoLensDigests: true, serpRawPages: true } : {}),
     });
 
     /*
@@ -215,10 +231,23 @@ export async function POST(request: Request) {
         return NextResponse.json(radarPortableExportNeedsBlueprintBody({ missing: radarPortableExportMissingBlueprints(montadas, radarExportNeedsArticleBlueprintIds(escrita)), refused: recusados }), { status: 409, headers: noStoreHeaders });
       }
       const bloqueados = escrita.blocked ? ` ${escrita.blocked} com bloqueio para escrever: veja a coluna pode_escrever.` : "";
+      /*
+       * 2026-10-14 · A SERP CRUA DE CADA ARTIGO (SDD silo interligado §16.1), pela
+       * mesma função do MCP `get_article_serp_raw`. A tela baixa um .zip com o CSV
+       * "Para escrever" (o mesmo de antes) e os `-serp.csv`.
+       */
+      const serpCrua = comSerpCrua && !plano
+        ? {
+          files: radarSerpRawExport({ articles: montadas, lookups: lentes.lookups, today: exportedAt, positionOf: radarSerpRawPositionOf(planoDaSelecao) })
+            .map(arquivo => ({ articleId: arquivo.articleId, filename: arquivo.filename, csv: arquivo.csv })),
+          archiveFilename: radarSerpRawArchiveFilename({ writingFilename: escrita.filename, articles: montadas.length, today: exportedAt }),
+        }
+        : null;
       return radarPortableExportStreamResponse({
         success: true,
         mode: "writing",
         ...(plano ? {} : { csv: escrita.csv, filename: escrita.filename }),
+        ...(serpCrua ? { serpRaw: serpCrua } : {}),
         exported: escrita.exported,
         blocked: escrita.blocked,
         refused: recusados,

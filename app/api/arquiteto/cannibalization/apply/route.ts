@@ -3,6 +3,7 @@ import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { DifferentiationApplyRequestSchema, handleDifferentiationApply } from "@/lib/server/arquiteto-differentiation";
 import { differentiationErrorResponse } from "@/lib/server/arquiteto-differentiation-http";
 import { appendArquitetoArtifact } from "@/lib/server/arquiteto-persistence";
+import { recordArquitetoMineradorSuggestionsSafely } from "@/lib/server/arquiteto-minerador-suggestions";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
 /**
@@ -29,6 +30,8 @@ export async function POST(request: Request) {
         const gravada = await appendArquitetoArtifact(context, "article_dna", version, "proposed");
         return { status: gravada.status, versionId: gravada.version.versionId };
       },
+      // F4 · O ARQUITETO SÓ LÊ: keyword nova do aceite vira "Sugestões do Arquiteto" (nada no Minerador).
+      recordMineradorSuggestions: input => recordArquitetoMineradorSuggestionsSafely(context, input),
     }, parsed.data);
     return NextResponse.json(outcome.body, { status: outcome.status });
   } catch (error) {

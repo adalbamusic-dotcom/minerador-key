@@ -66,8 +66,13 @@ export const PersistedEditorialWorkspaceSchema = z.object({
   serpPersistenceMode: z.enum(["server", "local_fallback"]).default("local_fallback"),
   documents: z.array(PersistedDocumentSchema),
   publications: z.array(OperationalPublicationSchema),
-  invitations: toleratedArray(BrandInvitationSchema),
-  views: z.array(SavedGridViewSchema),
+  /**
+   * 2026-10-14 · F2 das listas leves: a mesa NÃO traz mais convites nem
+   * visualizações salvas (opcionais). Ausente quer dizer "não lido aqui", nunca
+   * "não há": o cliente não troca a lista que já tem por vazio.
+   */
+  invitations: toleratedArray(BrandInvitationSchema).optional(),
+  views: z.array(SavedGridViewSchema).optional(),
   /**
    * ADITIVO. Cliente antigo ignora e continua funcionando.
    *

@@ -17,6 +17,7 @@ import { SiloWorkingCopyStateSchema, type SiloWorkingCopyState } from "./silo-wo
 import type { SiloConsolidationRequestBody } from "./silo-consolidation-operation.ts";
 import type { CanonicalImportability } from "./minerador-handoff.ts";
 import type { SerpPrimaryAcceptance } from "./silo-primary-acceptance.ts";
+import { applySyncPatch, isArchitectSyncMarks, mergeArchitectWorkspaceDelta, type ArchitectSyncMarks, type ArchitectSyncPatch, type ArchitectWorkspaceData, type ArchitectWorkspaceDeltaChanges } from "./workspace-delta.ts";
 
 export type CanonicalWorkflowItem = {
   id: string;
@@ -163,6 +164,12 @@ const RemoteArticleFormationSerpSchema = z.object({
   payload: ArticleFormationSerpPayloadSchema,
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
+  /**
+   * 2026-10-14 · F2 das listas leves: "list" = o parecer veio em PROJEÇÃO
+   * (`lib/arquiteto/article-serp-projection.ts`): sem a SERP bruta e sem as
+   * cópias do KeywordDNA. Ausente = o parecer inteiro (`serpDetail=full`).
+   */
+  detail: z.literal("list").optional(),
 });
 export type RemoteArticleFormationSerp = z.infer<typeof RemoteArticleFormationSerpSchema>;
 
@@ -281,32 +288,145 @@ async function readResponse(response: Response) {
  * continua com a linha inteira. `keywordDetail: "full"` pede a linha inteira
  * de todas, e fica reservado ao ponto de recuperação.
  */
-export async function loadCanonicalArquitetoWorkspace(brandId: string, options: { keywordDetail?: "full" } = {}): Promise<CanonicalWorkspaceSnapshot> {
-  const detail = options.keywordDetail === "full" ? "&keywordDetail=full" : "";
+/*
+ * ===== 2026-10-14 · A MESA RELÊ SÓ O QUE MUDOU (SDD listas leves, item 4, F2) =====
+ *
+ * A primeira leitura de cada marca (e toda leitura com `fresh`) é a inteira, e
+ * vira a BASE em memória, com as marcas que o servidor calculou. Depois, cada
+ * releitura — a recarga da mesa depois de uma ação e as releituras diretas que
+ * conferem uma gravação — manda as marcas (`POST …/workspace/delta`), recebe só
+ * as linhas que mudaram e monta o MESMO snapshot. Fusão que não fecha, resposta
+ * sem marcas ou erro: relê tudo (nunca uma mesa pela metade). As releituras da
+ * mesma marca andam em fila (uma de cada vez), para uma resposta mais velha
+ * nunca cobrir uma mais nova.
+ *
+ * A base é só memória desta aba (apresentação/recuperação): não vai para o
+ * localStorage nem para o IndexedDB, e some ao recarregar a página.
+ */
+type SnapshotData = z.infer<typeof SnapshotResponseSchema>["data"];
+type BaseDaMesa = { data: SnapshotData; sync: ArchitectSyncMarks };
+const baseDaMesa = new Map<string, BaseDaMesa>();
+const filaDaMesa = new Map<string, Promise<unknown>>();
+
+function emFila<T>(brandId: string, tarefa: () => Promise<T>): Promise<T> {
+  const anterior = filaDaMesa.get(brandId) ?? Promise.resolve();
+  const atual = anterior.catch(() => undefined).then(tarefa);
+  filaDaMesa.set(brandId, atual.catch(() => undefined));
+  return atual;
+}
+
+const KeyedChangesSchema = <T extends z.ZodTypeAny>(item: T) => z.object({ upsert: z.array(item), remove: z.array(z.string()), order: z.array(z.string()).optional() });
+const DeltaResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    mode: z.literal("delta"),
+    changes: z.object({
+      workflowItems: KeyedChangesSchema(WorkflowItemSchema).optional(),
+      keywords: z.object({ upsert: z.array(KeywordSchema) }).optional(),
+      availableKeywords: z.object({ upsert: z.array(KeywordSchema), remove: z.array(z.string()) }).optional(),
+      importEligibility: SnapshotResponseSchema.shape.data.shape.importEligibility.optional(),
+      articleDnas: KeyedChangesSchema(z.unknown()).optional(),
+      siloDnas: KeyedChangesSchema(z.unknown()).optional(),
+      siloPages: KeyedChangesSchema(z.unknown()).optional(),
+      aiReviews: KeyedChangesSchema(z.unknown()).optional(),
+      statuses: SnapshotResponseSchema.shape.data.shape.statuses.optional(),
+      brandSiloCatalog: z.array(BrandSiloCatalogEntrySchema).optional(),
+      territories: z.array(RemoteTerritorySchema).optional(),
+      siloWorkingCopies: z.array(RemoteSiloWorkingCopySchema).optional(),
+      territorialSerp: z.array(RemoteTerritorialSerpSchema).optional(),
+      territorialAi: z.array(RemoteTerritorialAiSchema).optional(),
+      articleFormationSerp: KeyedChangesSchema(RemoteArticleFormationSerpSchema).optional(),
+      architectureMarker: ArchitectureMarkerPayloadSchema.nullable().optional(),
+      articleFormationMarker: ArticleFormationMarkerPayloadSchema.nullable().optional(),
+    }),
+    sync: z.unknown(),
+  }),
+});
+
+async function leituraInteira(brandId: string, options: { keywordDetail?: "full"; serpDetail?: "full" }) {
+  const detail = `${options.keywordDetail === "full" ? "&keywordDetail=full" : ""}${options.serpDetail === "full" ? "&serpDetail=full" : ""}`;
   const response = await fetch(`/api/arquiteto/workspace?brandId=${encodeURIComponent(brandId)}${detail}`, { cache: "no-store" });
-  const body = SnapshotResponseSchema.parse(await readResponse(response));
+  const raw = await readResponse(response) as { data?: { sync?: unknown } };
+  const body = SnapshotResponseSchema.parse(raw);
+  return { data: body.data, sync: isArchitectSyncMarks(raw?.data?.sync) ? raw.data!.sync as ArchitectSyncMarks : null };
+}
+
+/** A releitura do que mudou desde a base, ou `null` quando não fecha (quem chama relê tudo). */
+async function releituraDoQueMudou(brandId: string, base: BaseDaMesa): Promise<BaseDaMesa | null> {
+  const response = await fetch("/api/arquiteto/workspace/delta", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ brandId, sync: base.sync }),
+  });
+  const body = DeltaResponseSchema.parse(await readResponse(response));
+  const patch = body.data.sync as ArchitectSyncPatch;
+  if (!patch || patch.v !== 1 || !patch.hashes || typeof patch.hashes !== "object") return null;
+  const fundida = mergeArchitectWorkspaceDelta(base.data as unknown as ArchitectWorkspaceData, body.data.changes as unknown as ArchitectWorkspaceDeltaChanges);
+  if (!fundida.ok) return null;
+  return { data: fundida.data as unknown as SnapshotData, sync: applySyncPatch(base.sync, patch) };
+}
+
+/**
+ * `availableKeywords` chega sem `analise_semantica` por padrão: a mesa só lê
+ * dela id, keyword, status, intent, volume e lista. `keywords` (as recebidas)
+ * continua com a linha inteira. `keywordDetail: "full"` pede a linha inteira
+ * de todas, e fica reservado ao ponto de recuperação. `serpDetail: "full"`
+ * pede os pareceres da formação inteiros (a exportação). Os dois são leituras
+ * inteiras e não mexem na base da releitura. `fresh` força a leitura inteira
+ * (a primeira de cada abertura do Arquiteto).
+ */
+export async function loadCanonicalArquitetoWorkspace(brandId: string, options: { keywordDetail?: "full"; serpDetail?: "full"; fresh?: boolean } = {}): Promise<CanonicalWorkspaceSnapshot> {
+  if (options.keywordDetail === "full" || options.serpDetail === "full") {
+    const { data } = await leituraInteira(brandId, options);
+    return snapshotFromData(data, brandId);
+  }
+  return emFila(brandId, async () => {
+    const base = options.fresh ? undefined : baseDaMesa.get(brandId);
+    if (base) {
+      const relida = await releituraDoQueMudou(brandId, base).catch(() => null);
+      if (relida) {
+        baseDaMesa.set(brandId, relida);
+        return snapshotFromData(relida.data, brandId);
+      }
+    }
+    try {
+      const { data, sync } = await leituraInteira(brandId, {});
+      if (sync) baseDaMesa.set(brandId, { data, sync });
+      else baseDaMesa.delete(brandId);
+      return snapshotFromData(data, brandId);
+    } catch (error) {
+      baseDaMesa.delete(brandId);
+      throw error;
+    }
+  });
+}
+
+function snapshotFromData(data: SnapshotData, brandId: string): CanonicalWorkspaceSnapshot {
+  const body = { data };
+  /* Cópias rasas das listas: a base da releitura nunca é a mesma lista que a tela recebe. */
   return {
     source: body.data.source,
-    workflowItems: body.data.workflowItems,
-    importEligibility: body.data.importEligibility,
-    keywords: body.data.keywords,
-    availableKeywords: body.data.availableKeywords,
+    workflowItems: [...body.data.workflowItems],
+    importEligibility: [...body.data.importEligibility],
+    keywords: [...body.data.keywords],
+    availableKeywords: [...body.data.availableKeywords],
     articleDnas: body.data.articleDnas.map(item => VersionedArticleDNASchema.parse(item)) as VersionEnvelope<ArticleDNA>[],
     siloDnas: body.data.siloDnas.map(item => VersionedSiloDNASchema.parse(item)) as VersionEnvelope<SiloDNA>[],
     siloPages: body.data.siloPages.map(item => VersionedSiloPageSchema.parse(item)) as VersionEnvelope<SiloPage>[],
     aiReviews: body.data.aiReviews.map(item => VersionedArticleArchitectureAiReviewSchema.parse(item)) as VersionedArticleArchitectureAiReview[],
-    statuses: body.data.statuses,
-    brandSiloCatalog: body.data.brandSiloCatalog,
-    territories: body.data.territories,
-    siloWorkingCopies: body.data.siloWorkingCopies,
-    territorialSerp: body.data.territorialSerp,
+    statuses: [...body.data.statuses],
+    brandSiloCatalog: [...body.data.brandSiloCatalog],
+    territories: [...body.data.territories],
+    siloWorkingCopies: [...body.data.siloWorkingCopies],
+    territorialSerp: [...body.data.territorialSerp],
     // O parecer da página publicada também responde pela formação humana dela
     // (Reforçar publicados); o hash da base decide se ainda descreve o artigo.
     articleFormationSerp: aliasPublishedFormationSerp(
       body.data.articleFormationSerp,
       buildCanonicalWorkflowWorkspaceItems(body.data.workflowItems, body.data.keywords, brandId) as unknown as Array<Record<string, unknown>>,
     ),
-    territorialAi: body.data.territorialAi,
+    territorialAi: [...body.data.territorialAi],
     architectureMarker: body.data.architectureMarker,
     articleFormationMarker: body.data.articleFormationMarker,
   };

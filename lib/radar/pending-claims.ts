@@ -49,7 +49,13 @@ export type RadarPendingClaimOrigin =
   /** Afirmação que o mercado repete e o pacote não sustenta. */
   | "MERCADO_SEM_FONTE"
   /** Afirmação que o mercado repete e a fonte contradiz ou condiciona. */
-  | "MERCADO_X_FONTE";
+  | "MERCADO_X_FONTE"
+  /**
+   * 2026-10-14c · Aditivo (SDD silo interligado §16.2, Fase B): afirmação de saúde
+   * (YMYL) que a conferência das fontes externas não achou sustentada por fonte
+   * verificada: não é afirmada; o texto delimita ou omite.
+   */
+  | "YMYL_SEM_FONTE";
 
 export type RadarPendingClaim = {
   texto: string;
@@ -587,6 +593,8 @@ function motivoDe(afirmacao: RadarPendingClaim, limite = 100): string {
   const dita = `"${cortar(semPontoFinal(afirmacao.texto), limite)}"`;
   if (afirmacao.origem === "PLANTA") return `a planta pede fonte oficial ou verificada: ${dita}`;
   if (afirmacao.origem === "MERCADO_SEM_FONTE") return `o mercado repete sem fonte: ${dita}`;
+  /* 2026-10-14c · F-B · a afirmação de saúde sem fonte verificada. */
+  if (afirmacao.origem === "YMYL_SEM_FONTE") return `afirmação de saúde sem fonte verificada: ${dita}`;
   return `a fonte contradiz ou condiciona o que o mercado repete: ${dita}`;
 }
 
@@ -734,6 +742,7 @@ const ROTULO_DA_ORIGEM: Readonly<Record<RadarPendingClaimOrigin, string>> = {
   PLANTA: "afirmação que a planta liga a fonte oficial ou verificada",
   MERCADO_SEM_FONTE: "o mercado repete sem fonte",
   MERCADO_X_FONTE: "a fonte contradiz ou condiciona o que o mercado repete",
+  YMYL_SEM_FONTE: "afirmação de saúde sem fonte verificada",
 };
 const ROTULO_DO_SENTIDO: Readonly<Record<RadarPlatformClaimKind, string>> = {
   PLATAFORMA: "afirmação sobre plataforma",

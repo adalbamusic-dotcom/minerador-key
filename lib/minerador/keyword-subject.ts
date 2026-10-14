@@ -35,6 +35,33 @@ export const KEYWORD_SUBJECT_ACTOR_KEY = "keyword_subject_actor" as const;
 export const KEYWORD_SUBJECT_AT_KEY = "keyword_subject_at" as const;
 export const KEYWORD_SUBJECT_ORIGIN_KEY = "keyword_subject_origin" as const;
 export const KEYWORD_SUBJECT_HISTORY_KEY = "keyword_subject_history" as const;
+/**
+ * 2026-10-13 · "O ASSUNTO NUNCA SE PERDE" (ordem do dono: "não podem perder o
+ * assunto de jeito nenhum"). O marcador de LIBERAÇÃO que a MESMA escrita traz
+ * quando tira o Assunto (ou o plano, ou o título) de propósito. Sem ele, o
+ * banco repõe o Assunto (gatilho `minerador_keywords_preserva_assunto`,
+ * migration 20261015120000) e esta guarda recusa antes, com o motivo.
+ */
+export const KEYWORD_SUBJECT_RELEASE_KEY = "keyword_subject_release" as const;
+
+/**
+ * Os únicos caminhos que liberam: "Tirar do plano" e a conversão do formato
+ * anterior. `excluir_cor` fica RESERVADO para "Excluir tudo da cor X" (outra
+ * SDD, ainda não feita; nenhum código o grava hoje — lista fechada em
+ * `tests/minerador-assunto-nunca-se-perde.test.mts`): ela grava o marcador ao
+ * tirar o plano e só então exclui, na mesma operação confirmada.
+ */
+export const KEYWORD_SUBJECT_RELEASE_VIAS = ["tirar_do_plano", "conversao", "excluir_cor"] as const;
+export type KeywordSubjectReleaseVia = typeof KEYWORD_SUBJECT_RELEASE_VIAS[number];
+
+export type KeywordSubjectRelease = {
+  /** Único por operação: o banco só aceita um marcador NOVO (diferente do gravado). */
+  requestId: string;
+  reason: string;
+  actorId: string;
+  at: string;
+  via: KeywordSubjectReleaseVia;
+};
 
 /** Nota curta: o que é, para quem. Uma linha só. */
 export const KEYWORD_SUBJECT_NOTE_MAX = 280;
@@ -99,10 +126,19 @@ export type KeywordSubjectHistoryEntry = {
   actorId: string;
   changedAt: string;
   origin: KeywordSubjectOrigin;
-  /** Só quando a mudança envolveu o plano declarado (F4): o resumo, sem o escopo. */
-  plan?: { groupId: string; planVersion: number; order: number; role: string; declaredPrincipalKeywordId: string | null; lock?: string | null } | null;
+  /**
+   * Só quando a mudança envolveu o plano declarado (F4): o resumo. Desde
+   * 2026-10-13 leva também o escopo (os detalhes): sem ele, o Assunto
+   * recuperado do histórico voltava sem detalhes.
+   */
+  plan?: { groupId: string; planVersion: number; order: number; role: string; declaredPrincipalKeywordId: string | null; lock?: string | null; scope?: string } | null;
   /** 2026-10-13 · só quando a mudança envolveu o Assunto cadastrado na keyword: o título. */
   entryTitle?: string | null;
+  /** 2026-10-13 · a retirada liberada ("Tirar do plano" ou conversão): o marcador da mesma escrita. */
+  release?: KeywordSubjectRelease;
+  /** 2026-10-13 · linha escrita pelo BANCO quando repôs o Assunto que uma escrita tentou apagar sem liberação. */
+  preservedBy?: "database";
+  attempted?: unknown;
 };
 
 export type KeywordSubjectRefusalCode =
@@ -111,7 +147,9 @@ export type KeywordSubjectRefusalCode =
   | "NOTE_MULTILINE"
   | "DESTINATION_UNCHECKED"
   | "ORIGIN_INVALID"
-  | "PLAN_INVALID";
+  | "PLAN_INVALID"
+  /** 2026-10-13 · tirar o Assunto, o plano ou o título sem o marcador de liberação ("Tirar do plano"/conversão). */
+  | "SUBJECT_RELEASE_REQUIRED";
 
 export type KeywordSubjectWriteResult =
   | { ok: true; semantic: Record<string, unknown>; changed: boolean }
@@ -264,10 +302,147 @@ export type SetKeywordSubjectInput = {
    * Só o núcleo do cadastro (`declared-plan-import-core.ts`) passa este campo.
    */
   entry?: SubjectEntry | null;
+  /**
+   * 2026-10-13 · obrigatório quando esta escrita TIRA o plano (`plan: null`) ou o
+   * título (`entry: null`) de um Assunto que os tinha. Só "Tirar do plano" e a
+   * conversão passam; sem ele, `SUBJECT_RELEASE_REQUIRED` (e o banco repõe).
+   */
+  release?: KeywordSubjectRelease | null;
 };
 
 function planSummary(plan: DeclaredArticlePlan | null): KeywordSubjectHistoryEntry["plan"] {
-  return plan ? { groupId: plan.groupId, planVersion: plan.planVersion, order: plan.order, role: plan.role, declaredPrincipalKeywordId: plan.declaredPrincipal?.keywordId ?? null, ...(plan.lock ? { lock: plan.lock } : {}) } : null;
+  return plan ? { groupId: plan.groupId, planVersion: plan.planVersion, order: plan.order, role: plan.role, declaredPrincipalKeywordId: plan.declaredPrincipal?.keywordId ?? null, ...(plan.lock ? { lock: plan.lock } : {}), scope: plan.scope } : null;
+}
+
+/* ========================================================================== */
+/* O ASSUNTO NUNCA SE PERDE (2026-10-13)                                       */
+/* ========================================================================== */
+
+/** O marcador de liberação, ou `null` se ausente/malformado. */
+export function readKeywordSubjectRelease(value: unknown): KeywordSubjectRelease | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const via = String(record.via);
+  if (!(KEYWORD_SUBJECT_RELEASE_VIAS as readonly string[]).includes(via)) return null;
+  const requestId = text(record.requestId);
+  const reason = text(record.reason);
+  const actorId = text(record.actorId);
+  const at = text(record.at);
+  if (!requestId || !reason || !actorId || !at || !isKeywordSubjectActorId(actorId)) return null;
+  return { requestId, reason, actorId, at, via: via as KeywordSubjectReleaseVia };
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+const sameRelease = (left: KeywordSubjectRelease | null, right: KeywordSubjectRelease | null) =>
+  (!left && !right) || Boolean(left && right && left.requestId === right.requestId && left.via === right.via && left.at === right.at && left.actorId === right.actorId);
+
+/**
+ * O Assunto que a escrita não pode perder: declarado (com ou sem plano/título).
+ * Espelho exato do gatilho `minerador_keywords_preserva_assunto`.
+ */
+function protectedSubjectOf(semantic: Semantic): Record<string, unknown> | null {
+  const record = asRecord(semantic?.[KEYWORD_SUBJECT_KEY]);
+  return record && record.declared === true ? record : null;
+}
+
+/** A escrita tira o Assunto, desdeclara, ou perde o plano/título que ele tinha? */
+export function keywordSubjectRemovedBy(previous: Semantic, next: Semantic): boolean {
+  const antes = protectedSubjectOf(previous);
+  if (!antes) return false;
+  const depois = asRecord(next?.[KEYWORD_SUBJECT_KEY]);
+  if (!depois || depois.declared !== true) return true;
+  if (asRecord(antes.plan) && !asRecord(depois.plan)) return true;
+  if (asRecord(antes.entry) && !asRecord(depois.entry)) return true;
+  return false;
+}
+
+/** A escrita traz um marcador de liberação NOVO (diferente do gravado)? */
+export function keywordSubjectReleasedBy(previous: Semantic, next: Semantic): boolean {
+  const nova = readKeywordSubjectRelease(next?.[KEYWORD_SUBJECT_RELEASE_KEY]);
+  if (!nova) return false;
+  return !sameRelease(readKeywordSubjectRelease(previous?.[KEYWORD_SUBJECT_RELEASE_KEY]), nova);
+}
+
+export const KEYWORD_SUBJECT_RELEASE_REFUSAL =
+  "O Assunto desta keyword não sai por esta tela: só “Tirar do plano” (card Cadastrar Assuntos → Silo existente) o libera. Nada foi gravado." as const;
+
+export type KeywordSemanticWriteGuard =
+  | { ok: true; semantic: Record<string, unknown>; carried: boolean }
+  | { ok: false; code: "SUBJECT_RELEASE_REQUIRED"; reason: string; title: string | null };
+
+const SUBJECT_KEYS = [KEYWORD_SUBJECT_KEY, KEYWORD_SUBJECT_ACTOR_KEY, KEYWORD_SUBJECT_AT_KEY, KEYWORD_SUBJECT_ORIGIN_KEY] as const;
+
+/**
+ * A GUARDA NO CÓDIGO, antes do banco, para TODO escritor de `analise_semantica`.
+ *
+ * - Escrita que nem traz a chave `keyword_subject` (cópia montada sem ela) não
+ *   apaga nada: o Assunto gravado é LEVADO para a escrita (merge, não replace).
+ * - Escrita que o traz nulo, desdeclarado, ou sem o plano/título que tinha, sem
+ *   um marcador de liberação NOVO, é RECUSADA com o motivo (a tela mostra).
+ * - O histórico do Assunto é append-only: as linhas gravadas nunca saem.
+ *
+ * `previous` é o que o escritor leu (do banco ou da tela). Se a cópia da tela
+ * estiver velha (sem o Assunto que o banco já tem), quem garante é o gatilho.
+ */
+export function guardKeywordSemanticWrite(previous: Semantic, next: Record<string, unknown>): KeywordSemanticWriteGuard {
+  const antes = protectedSubjectOf(previous);
+  let semantic = next;
+  let carried = false;
+  if (antes) {
+    if (!(KEYWORD_SUBJECT_KEY in next)) {
+      semantic = { ...next };
+      for (const key of SUBJECT_KEYS) if (previous && key in previous) semantic[key] = previous[key];
+      carried = true;
+    } else if (keywordSubjectRemovedBy(previous, next) && !keywordSubjectReleasedBy(previous, next)) {
+      const entry = asRecord(antes.entry);
+      return { ok: false, code: "SUBJECT_RELEASE_REQUIRED", reason: KEYWORD_SUBJECT_RELEASE_REFUSAL, title: text(entry?.title) };
+    }
+  }
+  const historicoAntes = readHistory(previous?.[KEYWORD_SUBJECT_HISTORY_KEY]);
+  if (historicoAntes.length) {
+    const historicoDepois = readHistory(semantic[KEYWORD_SUBJECT_HISTORY_KEY]);
+    // O JSONB reordena as chaves: compara pelo texto canônico (chaves ordenadas).
+    const chave = (entry: unknown) => stableJson(entry);
+    const depois = new Set(historicoDepois.map(chave));
+    if (historicoAntes.some(entry => !depois.has(chave(entry)))) {
+      const antesChaves = new Set(historicoAntes.map(chave));
+      semantic = { ...semantic, [KEYWORD_SUBJECT_HISTORY_KEY]: [...historicoAntes, ...historicoDepois.filter(entry => !antesChaves.has(chave(entry)))] };
+      carried = true;
+    }
+  }
+  return { ok: true, semantic, carried };
+}
+
+/**
+ * Para os escritores que gravam em lote pela tela: devolve o objeto a gravar ou
+ * LANÇA o motivo (o lote marca só aquela keyword como falha, com o texto).
+ */
+export function semanticForKeywordWrite(previous: Semantic, next: Record<string, unknown>): Record<string, unknown> {
+  const guard = guardKeywordSemanticWrite(previous, next);
+  if (!guard.ok) throw new Error(guard.title ? `${guard.reason} (Assunto “${guard.title}”)` : guard.reason);
+  return guard.semantic;
+}
+
+/**
+ * A exclusão que o banco recusa (gatilho `minerador_keywords_recusa_exclusao_com_assunto`):
+ * Assunto declarado com plano, ou com título cadastrado ainda não liberado por "Tirar do plano".
+ */
+export function keywordSubjectBlocksDeletion(semantic: Semantic): boolean {
+  const assunto = protectedSubjectOf(semantic);
+  if (!assunto) return false;
+  if (asRecord(assunto.plan)) return true;
+  if (!asRecord(assunto.entry)) return false;
+  // Espelho do gatilho: na exclusão o banco confere só a `via` do marcador já gravado.
+  const via = asRecord(semantic?.[KEYWORD_SUBJECT_RELEASE_KEY])?.via;
+  return via !== "tirar_do_plano" && via !== "excluir_cor";
 }
 
 /**
@@ -305,6 +480,10 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
   if (previous.declared && previous.note === note.note && previous.destinationUrl === destinationUrl && sameDeclaredArticlePlan(previous.plan, plan) && sameSubjectEntry(previous.entry, entry)) {
     return { ok: true, semantic: current, changed: false };
   }
+  // 2026-10-13 · tirar o plano ou o título só com o marcador de liberação ("Tirar do plano"/conversão).
+  const tira = previous.declared && ((previous.plan && !plan) || (previous.entry && !entry));
+  const release = tira ? readKeywordSubjectRelease(input.release) : null;
+  if (tira && !release) return refuse(current, "SUBJECT_RELEASE_REQUIRED", KEYWORD_SUBJECT_RELEASE_REFUSAL);
 
   const history = readHistory(current[KEYWORD_SUBJECT_HISTORY_KEY]);
   history.push({
@@ -317,6 +496,7 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
     origin: input.origin,
     ...(input.plan !== undefined || !sameDeclaredArticlePlan(previous.plan, plan) ? { plan: planSummary(plan) } : {}),
     ...(!sameSubjectEntry(previous.entry, entry) ? { entryTitle: entry?.title ?? null } : {}),
+    ...(release ? { release } : {}),
   });
   const declaration: KeywordSubjectDeclaration = {
     declared: true,
@@ -336,6 +516,7 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
       [KEYWORD_SUBJECT_AT_KEY]: input.changedAt,
       [KEYWORD_SUBJECT_ORIGIN_KEY]: input.origin,
       [KEYWORD_SUBJECT_HISTORY_KEY]: history,
+      ...(release ? { [KEYWORD_SUBJECT_RELEASE_KEY]: release } : {}),
     },
   };
 }
@@ -343,15 +524,23 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
 /**
  * Retira a declaração (F1.5): grava `keyword_subject: null` e acrescenta ao
  * histórico. O histórico nunca é apagado. Sem declaração, `changed: false`.
+ *
+ * 2026-10-13 · sem chamador (lista fechada vazia). Exige o marcador de
+ * liberação: a retirada sem ele é exatamente o que apagou o Assunto das 7
+ * keywords do Silo azul da WifiConecta. A linha do histórico guarda o que saiu
+ * (título, plano com o escopo) para a recuperação.
  */
 export function withdrawKeywordSubject(
   semantic: Semantic,
-  input: { actorId: string; changedAt: string; origin: KeywordSubjectOrigin },
+  input: { actorId: string; changedAt: string; origin: KeywordSubjectOrigin; release?: KeywordSubjectRelease | null },
 ): KeywordSubjectWriteResult {
   const current = { ...(semantic || {}) };
   const guard = checkActorAndOrigin(current, input.actorId, input.origin);
   if (guard) return guard;
-  if (!resolveKeywordSubject(current).declared) return { ok: true, semantic: current, changed: false };
+  const previous = resolveKeywordSubject(current);
+  if (!previous.declared) return { ok: true, semantic: current, changed: false };
+  const release = readKeywordSubjectRelease(input.release);
+  if (!release) return refuse(current, "SUBJECT_RELEASE_REQUIRED", KEYWORD_SUBJECT_RELEASE_REFUSAL);
 
   const history = readHistory(current[KEYWORD_SUBJECT_HISTORY_KEY]);
   history.push({
@@ -362,12 +551,16 @@ export function withdrawKeywordSubject(
     actorId: input.actorId.trim(),
     changedAt: input.changedAt,
     origin: input.origin,
+    ...(previous.plan ? { plan: planSummary(previous.plan) } : {}),
+    ...(previous.entry ? { entryTitle: previous.entry.title } : {}),
+    release,
   });
   return {
     ok: true,
     changed: true,
     semantic: {
       ...current,
+      [KEYWORD_SUBJECT_RELEASE_KEY]: release,
       [KEYWORD_SUBJECT_KEY]: null,
       [KEYWORD_SUBJECT_ACTOR_KEY]: input.actorId.trim(),
       [KEYWORD_SUBJECT_AT_KEY]: input.changedAt,
@@ -375,6 +568,40 @@ export function withdrawKeywordSubject(
       [KEYWORD_SUBJECT_HISTORY_KEY]: history,
     },
   };
+}
+
+/**
+ * 2026-10-13 · SUBSTITUIR O PLANO (SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`
+ * §5.2, F1). A keyword que PERDEU o Assunto antes (sem liberação — o caso do
+ * Silo azul) e que o dono deixou FORA do plano novo: nada é declarado nem
+ * apagado; só o histórico append-only ganha a linha da liberação (o mesmo
+ * marcador de "Tirar do plano"), para a recuperação do histórico não a oferecer
+ * de novo como "Recuperado do histórico". Assunto declarado não passa por aqui
+ * (é `setKeywordSubject` com `plan: null` e o marcador).
+ */
+export function recordKeywordSubjectRelease(
+  semantic: Semantic,
+  input: { actorId: string; changedAt: string; release: KeywordSubjectRelease },
+): KeywordSubjectWriteResult {
+  const current = { ...(semantic || {}) };
+  const guard = checkActorAndOrigin(current, input.actorId, "review");
+  if (guard) return guard;
+  if (resolveKeywordSubject(current).declared) return refuse(current, "SUBJECT_RELEASE_REQUIRED", "O Assunto desta keyword está declarado: a liberação é pelo “Tirar do plano”.");
+  const release = readKeywordSubjectRelease(input.release);
+  if (!release) return refuse(current, "SUBJECT_RELEASE_REQUIRED", KEYWORD_SUBJECT_RELEASE_REFUSAL);
+  const history = readHistory(current[KEYWORD_SUBJECT_HISTORY_KEY]);
+  history.push({
+    previous: "none",
+    next: "none",
+    note: null,
+    destinationUrl: null,
+    actorId: input.actorId.trim(),
+    changedAt: input.changedAt,
+    origin: "review",
+    plan: null,
+    release,
+  });
+  return { ok: true, changed: true, semantic: { ...current, [KEYWORD_SUBJECT_RELEASE_KEY]: release, [KEYWORD_SUBJECT_HISTORY_KEY]: history } };
 }
 
 /* ========================================================================== */

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { resolveMineradorProcessState } from "@/lib/minerador/process-state";
 import { classifyVolumeReadback, type VolumeReadbackOutcome } from "@/lib/minerador/volume-eligibility";
+import { readKnownVolume } from "@/lib/editorial/known-before-search";
 import { handleGoogleAdsKeywordMetrics } from "./minerador-google-ads-metrics-http";
 import type { PipelineContext } from "./pipeline-runtime";
 
@@ -33,6 +34,15 @@ export type VolumeMeasurePlan = {
   chunks: number;
   planHash: string;
   cost: { moneyUsd: 0; googleAdsQuota: true; note: string };
+  /**
+   * F3 · LER ANTES DE BUSCAR (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`, item 3; D4).
+   * Aditivo e só informativo: as keywords pedidas que JÁ têm volume medido no
+   * Google Ads (qualquer idade) ou "sem média" há menos de 30 dias. Medir de
+   * novo continua sendo o pedido explícito (o plano não as tira); quem chama
+   * pode mandar só as que faltam.
+   */
+  alreadyKnown: Array<{ id: string; state: "measured" | "no_average"; measuredAt: string | null }>;
+  toMeasureFirstTime: number;
 };
 
 export type VolumeMeasureOutcome = {
@@ -65,7 +75,7 @@ async function readRows(context: PipelineContext, keywordIds: readonly string[])
   for (let start = 0; start < keywordIds.length; start += VOLUME_MEASURE_CHUNK) {
     const chunk = keywordIds.slice(start, start + VOLUME_MEASURE_CHUNK);
     const { data, error } = await context.supabase.from("minerador_keywords")
-      .select("id,keyword,status,intent,volume_search,results_allintitle,analise_semantica")
+      .select("id,keyword,status,intent,volume_search,volume_source,results_allintitle,analise_semantica")
       .eq("brand_id", context.brandId).is("deleted_at", null).in("id", chunk);
     if (error) throw error;
     for (const row of (data ?? []) as Row[]) rows.set(String(row.id), row);
@@ -86,6 +96,15 @@ export async function planKeywordVolume(context: PipelineContext, keywordIds: re
     missingIds: pedidos.filter(id => !rows.has(id)),
     chunks: Math.ceil(existentes.length / VOLUME_MEASURE_CHUNK),
     planHash: volumePlanHash(context.brandId, existentes),
+    ...(() => {
+      const agora = new Date();
+      const alreadyKnown = existentes.flatMap(id => {
+        const row = rows.get(id)!;
+        const known = readKnownVolume({ volume_search: row.volume_search, volume_source: (row as Record<string, unknown>).volume_source, analise_semantica: row.analise_semantica ?? null }, agora);
+        return known.state === "missing" ? [] : [{ id, state: known.state, measuredAt: known.measuredAt }];
+      });
+      return { alreadyKnown, toMeasureFirstTime: existentes.length - alreadyKnown.length };
+    })(),
     cost: { moneyUsd: 0, googleAdsQuota: true, note: "Sem custo em dinheiro: o Google Ads não cobra a consulta. Usa a cota do Google Ads da marca." },
   };
 }

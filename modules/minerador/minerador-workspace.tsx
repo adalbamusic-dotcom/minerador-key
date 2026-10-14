@@ -61,8 +61,12 @@ import { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";
 import { mineradorLastOrganizationKey, mineradorOrganizationButtonSummary, mineradorOrganizationLabels, type MineradorOrganizationValues } from "@/lib/minerador/last-organization";
 import { primaryKeywordPolicyLabel, readPrimaryKeywordPolicy, setPrimaryKeywordPolicy, type PrimaryKeywordPolicy } from "@/lib/minerador/primary-keyword-policy";
 import { keywordPageTypeLabel, keywordPageTypeStanding, setKeywordPageType } from "@/lib/minerador/keyword-page-type";
-import { keywordVinculoChoicesSummary, resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
-import { isKeywordSubjectActorId } from "@/lib/minerador/keyword-subject";
+import { keywordVinculoChoicesSummary, resolveKeywordVinculo, type KeywordVinculoInput } from "@/lib/minerador/keyword-vinculo";
+import { keywordLockVolume, keywordPlanLockHint, planLockChange, PLAN_LOCK_ARCHITECT_HINT, PLAN_LOCK_CHOICE_LABELS, resolveKeywordPlanLock } from "@/lib/minerador/keyword-plan-lock";
+import type { KeywordPlanLockItem, KeywordPlanLockResult } from "@/lib/minerador/declared-plan-import-core";
+import type { DeclaredPlanLockChoice } from "@/lib/minerador/declared-plan";
+import { resolveSubjectArticleView, subjectHeadline } from "@/lib/minerador/subject-article-view";
+import { isKeywordSubjectActorId, semanticForKeywordWrite } from "@/lib/minerador/keyword-subject";
 import { convertedTitleIndex } from "@/lib/minerador/subject-conversion";
 import { planVinculoBatchChoices, VINCULO_BATCH_READBACK_COLUMNS, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";
 import {
@@ -102,6 +106,8 @@ import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS, MINERADOR_
 import { resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE, type ApprovalRequirement } from "@/lib/minerador/approved-package";
 import { approvalBlockerLabel } from "@/lib/minerador/approval-blockers";
 import { ApproveAndSendDialog, callApproveAndSend } from "./approve-and-send-dialog";
+import { ArchitectSuggestionsButton, ArchitectSuggestionsDialog } from "./architect-suggestions-dialog";
+import { readMineradorHandoff } from "@/lib/arquiteto/minerador-suggestions";
 
 /** Teto de "Aprovar e enviar ao Arquiteto" por pedido (o mesmo da rota). */
 const APPROVE_AND_SEND_MAX = 500;
@@ -110,7 +116,7 @@ import { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legac
 import { KeywordTableBulkBarShell } from "./keyword-table/keyword-table-bulk-bar-shell";
 import { useMineradorGroups } from "./use-minerador-groups";
 import { EditorialGroupTag } from "@/components/editorial/group-tag";
-import { EDITORIAL_GROUP_COLOR_CLASSES, EDITORIAL_GROUP_COLOR_LABELS, EDITORIAL_GROUP_COLORS, editorialGroupCustomName, isEditorialGroupColor, isEditorialGroupsSchemaMissing } from "@/lib/editorial/editorial-groups";
+import { EDITORIAL_GROUP_CHOICE_ALL, EDITORIAL_GROUP_COLOR_CLASSES, EDITORIAL_GROUP_COLOR_LABELS, EDITORIAL_GROUP_COLORS, editorialGroupCustomName, isEditorialGroupColor, isEditorialGroupsSchemaMissing } from "@/lib/editorial/editorial-groups";
 import { KeywordTableEmptyState } from "./keyword-table/keyword-table-empty-state";
 import { KeywordTableHeader } from "./keyword-table/keyword-table-header";
 import { KeywordTableOrganizeButton } from "./keyword-table/keyword-table-organize-button";
@@ -522,6 +528,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const [updating, setUpdating] = useState(false);
   // "Aprovar e enviar ao Arquiteto" (SDD acelerar 2026-10-13, item 2): o pedido aberto no diálogo.
   const [approveAndSendRequest, setApproveAndSendRequest] = useState<{ keywordIds: string[]; scopeLabel: string; send: boolean } | null>(null);
+  // F4 (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`, item 2): a caixa "Sugestões do Arquiteto · cor X", aberta pela barra ou pelo link do Arquiteto.
+  const [architectSuggestionsOpen, setArchitectSuggestionsOpen] = useState<{ color: (typeof EDITORIAL_GROUP_COLORS)[number] | null } | null>(null);
   const [, setImporting] = useState(false);
   const [queueProcessing, setQueueProcessing] = useState(false);
   const [, setQueueProgress] = useState(0);
@@ -778,9 +786,27 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const vinculoBatchDialogOpen = vinculoBatchDialog !== null;
   // O valor comum das selecionadas em cada select (ou "Valores diferentes"),
   // pelo mesmo resolvedor da coluna, sobre as linhas que o plano grava.
+  /*
+   * 2026-10-13 · A TRAVA DO CADASTRO NO POSTO DE PRINCIPAL (pedido do dono: "no
+   * minerador eu coloco como [Travado ao slug] e ele não aceita"). As linhas da
+   * marca pelo id: a principal do formato anterior lê a trava na linha do
+   * Assunto. A coluna, a Revisão Humana e o painel em grupo leem o mesmo contexto.
+   */
+  const keywordById = useMemo(() => new Map(keywords.map(item => [item.id, item])), [keywords]);
+  const keywordSemanticOf = useCallback((keywordId: string) => (keywordById.get(keywordId)?.analise_semantica ?? null) as Record<string, unknown> | null, [keywordById]);
+  const vinculoPlanContextOf = useCallback((item: { id?: string }): NonNullable<KeywordVinculoInput["plan"]> => {
+    const row = item.id ? keywordById.get(item.id) : undefined;
+    return {
+      keywordId: item.id ?? "",
+      keyword: row?.keyword ?? null,
+      volume: keywordLockVolume({ semantic: row?.analise_semantica ?? null, volumeSearch: row?.volume_search ?? null, resultsAllintitle: row?.results_allintitle ?? null }),
+      subjectSemanticOf: keywordSemanticOf,
+      keywordTextOf: id => keywordById.get(id)?.keyword ?? null,
+    };
+  }, [keywordById, keywordSemanticOf]);
   const vinculoBatchCommon = useMemo(
-    () => vinculoBatchDialogOpen ? commonVinculoSelectValues(keywords.filter(item => selectedIds.has(item.id))) : null,
-    [vinculoBatchDialogOpen, keywords, selectedIds],
+    () => vinculoBatchDialogOpen ? commonVinculoSelectValues(keywords.filter(item => selectedIds.has(item.id)), vinculoPlanContextOf) : null,
+    [vinculoBatchDialogOpen, keywords, selectedIds, vinculoPlanContextOf],
   );
   // Bloco "Assunto deste artigo" do painel (2026-10-13): o grupo (cor e nome)
   // e o texto de uma keyword pelo id, lidos do que a tela já carregou.
@@ -1090,7 +1116,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   // Importar CSV levam à Descoberta e moram só no Descobrir (lá recusam texto de plano).
   const discoverySourceActions = useMemo(() => <>
     {keywordGroups.available ? <SubjectCadastroButton onClick={() => abrirCadastroDeAssuntos()} /> : null}
-  </>, [keywordGroups.available, abrirCadastroDeAssuntos]);
+    {keywordGroups.available ? <ArchitectSuggestionsButton onClick={() => setArchitectSuggestionsOpen({ color: isEditorialGroupColor(keywordGroups.choice) ? keywordGroups.choice : null })} /> : null}
+  </>, [keywordGroups.available, keywordGroups.choice, abrirCadastroDeAssuntos]);
   // Chegou do Descobrir com `?cadastrar=1`: abre o card (com o texto deixado lá, se houver) e limpa o parâmetro da URL.
   useEffect(() => {
     if (!keywordGroups.available || !selectedBrandId || typeof window === "undefined") return;
@@ -1178,7 +1205,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           try {
             const { error } = await supabase
               .from("minerador_keywords")
-              .update({ intent: update.intent, analise_semantica: update.analise_semantica })
+              .update({ intent: update.intent, analise_semantica: semanticForKeywordWrite(keywords.find(keyword => keyword.id === update.id)?.analise_semantica, update.analise_semantica) })
               .eq("id", update.id)
               .eq("brand_id", selectedBrandId)
               .is("deleted_at", null);
@@ -1388,6 +1415,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       actions,
       actorId,
       changedAt,
+      keywordOf: id => keywordById.get(id),
     });
     if (!plan.ok) {
       showNotification("error", plan.reason, { code: plan.code });
@@ -1395,6 +1423,11 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
     setVinculoBatchDialog(null);
     if (plan.updates.length === 0) {
+      // 2026-10-13 · só trava do cadastro (não publicadas do plano): grava pelo núcleo do cadastro.
+      if (plan.planLocks.length > 0) {
+        await applyKeywordPlanLocks(plan.planLocks.map(entry => entry.id), plan.planLocks[0].lock, `${plan.actionLabel} em ${plan.planLocks.length} keyword(s)`);
+        return;
+      }
       showNotification("info", describeVinculoBatchChoicesConfirmation(plan).summary);
       return;
     }
@@ -1419,7 +1452,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         runChunk: async chunk => Promise.all(chunk.map(async (update): Promise<BatchItemOutcome> => {
           const { error } = await supabase
             .from("minerador_keywords")
-            .update({ analise_semantica: update.semantic })
+            .update({ analise_semantica: semanticForKeywordWrite(keywords.find(keyword => keyword.id === update.id)?.analise_semantica, update.semantic) })
             .eq("id", update.id)
             .eq("brand_id", update.brandId)
             .is("deleted_at", null);
@@ -1478,6 +1511,73 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       setUpdating(false);
       finishBulkProgress(outcome, batch ? formatBatchProgress(batch) : undefined, batch ? batchFailureViews(batch) : undefined);
     }
+    // 2026-10-13 · as não publicadas do plano: a trava vai pelo núcleo do cadastro, depois das gravações diretas.
+    if (plan.planLocks.length > 0) {
+      await applyKeywordPlanLocks(plan.planLocks.map(entry => entry.id), plan.planLocks[0].lock, `${plan.actionLabel} em ${plan.planLocks.length} keyword(s)`);
+    }
+  };
+
+  /**
+   * A TRAVA DO CADASTRO PELO POSTO DE PRINCIPAL (pedido do dono, 2026-10-13).
+   * Um caminho só: a rota `…/plans/lock` grava pelo núcleo do cadastro
+   * (`setKeywordPlanLockWithCore` → `importDeclaredPlanWithCore`), com nova
+   * versão do plano e releitura. A tela relê as linhas tocadas (a keyword e a
+   * linha do Assunto) e diz, por item, o que gravou, o que recusou e por quê.
+   * Sucesso só depois da releitura do servidor.
+   */
+  const applyKeywordPlanLocks = async (keywordIds: string[], lock: DeclaredPlanLockChoice, historyLabel: string) => {
+    if (!selectedBrandId || keywordIds.length === 0) return;
+    setUpdating(true);
+    try {
+      const response = await fetch(`/api/minerador/marcas/${selectedBrandId}/plans/lock`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ mode: "apply", keywordIds, lock, importRequestId: crypto.randomUUID() }),
+      }).catch(() => null);
+      const data = response ? await response.json().catch(() => ({})) as Partial<Extract<KeywordPlanLockResult, { ok: true }>> & { success?: boolean; message?: string; code?: string } : {};
+      if (!response || !response.ok || data.success !== true || !Array.isArray(data.items)) {
+        showNotification("error", data.message || "A trava não pôde ser gravada agora.", { code: data.code || "PLAN_LOCK_FAILED" });
+        return;
+      }
+      const items = data.items as KeywordPlanLockItem[];
+      // Releitura das linhas tocadas (a keyword e a linha do Assunto): a tela mostra o que o banco tem.
+      const touched = [...new Set(items.filter(item => item.outcome === "changed" || item.outcome === "failed").flatMap(item => [item.keywordId, item.subjectKeywordId]).filter((id): id is string => Boolean(id)))];
+      if (touched.length) {
+        const { data: rows, error } = await supabase.from("minerador_keywords").select("id,status,analise_semantica").eq("brand_id", selectedBrandId).is("deleted_at", null).in("id", touched);
+        if (error) throw error;
+        const byId = new Map(((rows || []) as Array<{ id: string; status: string | null; analise_semantica: KeywordSemantic | null }>).map(row => [String(row.id), row]));
+        pushKeywordsHistory(keywords, historyLabel);
+        setKeywords(current => current.map(keyword => byId.has(keyword.id) ? { ...keyword, status: byId.get(keyword.id)!.status ?? keyword.status, analise_semantica: byId.get(keyword.id)!.analise_semantica ?? keyword.analise_semantica } : keyword));
+      }
+      const changed = items.filter(item => item.outcome === "changed");
+      const problems = items.filter(item => item.outcome === "refused" || item.outcome === "failed");
+      const details = problems.map(item => `"${item.keyword}": ${item.reason ?? "não gravada"}`).join("\n");
+      const versions = (data.planVersions || []).map(entry => `v${entry.planVersion}`).join(", ");
+      const head = changed.length
+        ? `Trava gravada e conferida em ${changed.length} keyword(s)${versions ? ` (plano ${versions})` : ""}: ${changed.map(item => `"${item.keyword}" → ${item.after?.label ?? PLAN_LOCK_CHOICE_LABELS[lock]}`).join("; ")}. ${PLAN_LOCK_ARCHITECT_HINT}`
+        : "Nenhuma trava mudou.";
+      showNotification(problems.length ? (changed.length ? "warning" : "error") : "success", problems.length ? `${head} ${problems.length} recusada(s) ou com falha.` : head, problems.length ? { details } : {});
+    } catch (error) {
+      console.error("Erro ao gravar a trava do cadastro:", error);
+      showNotification("error", error instanceof Error ? error.message : "Não foi possível gravar a trava.");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  /** O select "Posto de principal" da keyword NÃO publicada (Revisão Humana): a trava do cadastro, com confirmação. */
+  const handleKeywordPlanLockChange = async (item: KeywordItem, lock: DeclaredPlanLockChoice) => {
+    const current = resolveKeywordPlanLock({ ...vinculoPlanContextOf(item), status: item.status, semantic: item.analise_semantica });
+    if (!current) return;
+    const change = planLockChange(current, lock);
+    if (!change.ok) {
+      showNotification("error", change.reason, { code: "PLAN_LOCK_NOT_IN_PLAN" });
+      return;
+    }
+    if (!change.changed) return;
+    if (!window.confirm(`Trava de "${item.keyword}": ${PLAN_LOCK_CHOICE_LABELS[change.from]} → ${PLAN_LOCK_CHOICE_LABELS[change.to]}. ${keywordPlanLockHint(current)} Grava pelo cadastro (nova versão do plano). ${PLAN_LOCK_ARCHITECT_HINT} Confirmar?`)) return;
+    await applyKeywordPlanLocks([item.id], lock, `Trava de ${item.keyword}`);
   };
 
   /**
@@ -2327,7 +2427,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         const diagnostic = failure.diagnostic && typeof failure.diagnostic === "object" && !Array.isArray(failure.diagnostic)
           ? failure.diagnostic as Record<string, unknown>
           : undefined;
-      if (code === "KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW") {
+      if (code === "KEYWORD_DELETE_SUBJECT_PROTECTED") {
+        showNotification("error", "Nada foi apagado: a seleção tem keyword que carrega um Assunto do plano do Silo. Tire-a do plano antes (“Tirar do plano” no card Cadastrar Assuntos → Silo existente).", { code, stage: "subject_protected", persistent: true });
+      } else if (code === "KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW") {
         showNotification("error", "A seleção contém uma keyword publicada. Reabra a confirmação reforçada para usar a recuperação de 24 horas.", { code, stage: "publication_recheck", persistent: true });
       } else {
         showNotification("error", "Nada foi apagado: a transação não foi confirmada e nenhuma alteração parcial foi mantida.", { code, stage: "delete_transaction", persistent: true });
@@ -2751,6 +2853,48 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   // A topbar registra os controles num efeito: o clique lê a versão de agora pelo ref, sem re-registrar a cada render.
   const openApproveAndSendForScopeRef = useRef(openApproveAndSendForScope);
   openApproveAndSendForScopeRef.current = openApproveAndSendForScope;
+  /*
+   * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+   * item 2; D2/D3). O Arquiteto nunca grava aqui: ele LEVA ao Minerador com
+   * `?arquiteto=aprovar|selecionar|sugestoes&ids=…&cor=…`. "aprovar" abre o
+   * "Aprovar e enviar" de sempre com as keywords (filtrado na cor); "selecionar"
+   * filtra e marca as linhas para a ação de sempre (Excluir, Volume, Lógica,
+   * com a prévia e a confirmação de sempre); "sugestoes" abre a caixa. O
+   * parâmetro sai da URL depois de lido.
+   */
+  const architectHandoffReadRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedBrandId || !keywordGroups.available || typeof window === "undefined") return;
+    let url: URL;
+    try { url = new URL(window.location.href); } catch { return; }
+    const pedido = readMineradorHandoff(url.searchParams);
+    if (!pedido || architectHandoffReadRef.current === url.search) return;
+    architectHandoffReadRef.current = url.search;
+    for (const chave of ["arquiteto", "ids", "cor"]) url.searchParams.delete(chave);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    const cor = isEditorialGroupColor(pedido.color) ? pedido.color : null;
+    if (pedido.action === "sugestoes") {
+      // Leitura única da URL na abertura: abrir a caixa pedida pelo Arquiteto é o efeito esperado.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setArchitectSuggestionsOpen({ color: cor });
+      return;
+    }
+    if (cor && keywordGroups.choice !== cor) keywordGroups.setChoice(cor);
+    if (pedido.action === "aprovar") {
+      openApproveAndSend(pedido.ids, `Pedido do Arquiteto${cor ? ` · cor ${EDITORIAL_GROUP_COLOR_LABELS[cor]}` : ""} · ${pedido.ids.length} keyword(s)`);
+      return;
+    }
+    if (!pedido.ids.length) return;
+    const alvo = cor ?? EDITORIAL_GROUP_CHOICE_ALL;
+    pendingSheetSelectionRef.current = pedido.ids;
+    if (keywordGroups.choice !== alvo) keywordGroups.setChoice(alvo);
+    else if (!loading) {
+      const presentes = pedido.ids.filter(id => keywords.some(item => item.id === id));
+      if (presentes.length) { setSelectedIds(new Set(presentes)); pendingSheetSelectionRef.current = null; }
+    }
+    showNotification("info", `${pedido.ids.length} keyword(s) marcadas a pedido do Arquiteto. Use a ação de sempre na barra de seleção (Excluir, Volume, Lógica): ela mostra a prévia e pede a confirmação.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBrandId, keywordGroups.available]);
   const rereadAfterApproval = async (ids: readonly string[]) => {
     if (!ids.length) return true;
     const relidas = await readCanonicalKeywordRows(ids);
@@ -2896,7 +3040,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         runChunk: async chunk => Promise.all(chunk.map(async (update): Promise<BatchItemOutcome> => {
           const { error } = await supabase
             .from("minerador_keywords")
-            .update({ analise_semantica: update.semantic })
+            .update({ analise_semantica: semanticForKeywordWrite(keywords.find(keyword => keyword.id === update.id)?.analise_semantica, update.semantic) })
             .eq("id", update.id)
             .eq("brand_id", selectedBrandId)
             .is("deleted_at", null);
@@ -2967,7 +3111,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         runChunk: async chunk => Promise.all(chunk.map(async (update): Promise<BatchItemOutcome> => {
           const { error } = await supabase
             .from("minerador_keywords")
-            .update({ analise_semantica: update.semantic })
+            .update({ analise_semantica: semanticForKeywordWrite(keywords.find(keyword => keyword.id === update.id)?.analise_semantica, update.semantic) })
             .eq("id", update.id)
             .eq("brand_id", selectedBrandId)
             .is("deleted_at", null);
@@ -3061,7 +3205,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     const semantic = setPrimaryKeywordPolicy(item.analise_semantica, { status: item.status, publicationConfirmed: formalPublication, keyword: item.keyword, policy, actorId, changedAt });
     setUpdating(true);
     try {
-      const { error } = await supabase.from("minerador_keywords").update({ analise_semantica: semantic }).eq("id", item.id).eq("brand_id", selectedBrandId).is("deleted_at", null);
+      const { error } = await supabase.from("minerador_keywords").update({ analise_semantica: semanticForKeywordWrite(item.analise_semantica, semantic) }).eq("id", item.id).eq("brand_id", selectedBrandId).is("deleted_at", null);
       if (error) throw error;
       pushKeywordsHistory(keywords, `Alterar política da principal de ${item.keyword}`);
       setKeywords(current => current.map(keyword => keyword.id === item.id ? { ...keyword, analise_semantica: semantic } : keyword));
@@ -3133,7 +3277,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       }
       setUpdating(true);
       try {
-        const { error } = await supabase.from("minerador_keywords").update({ analise_semantica: applied.semantic }).eq("id", item.id).eq("brand_id", selectedBrandId).is("deleted_at", null);
+        const { error } = await supabase.from("minerador_keywords").update({ analise_semantica: semanticForKeywordWrite(item.analise_semantica, applied.semantic) }).eq("id", item.id).eq("brand_id", selectedBrandId).is("deleted_at", null);
         if (error) throw error;
         // Readback estreito: só as declarações do Vínculo, nunca a linha inteira.
         const { data: readback, error: readbackError } = await supabase
@@ -3169,6 +3313,12 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       // O posto é declaração sobre a publicação, não campo do DNA: vai pelo
       // mesmo caminho da ação de vínculo, com histórico e readback próprios.
       await handlePrimaryKeywordPolicyChange(item, action.policy);
+      return;
+    }
+
+    if (action.type === "plan_lock") {
+      // 2026-10-13 · na não publicada, o posto é a trava do cadastro: grava pelo núcleo do cadastro.
+      await handleKeywordPlanLockChange(item, action.lock);
       return;
     }
 
@@ -3866,6 +4016,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       actions: vinculoBatchDialogActions,
       actorId: actorUserId,
       changedAt: VINCULO_BATCH_PREVIEW_AT,
+      keywordOf: id => keywordById.get(id),
     })
     : null;
   const vinculoBatchPreviewText = vinculoBatchPreview?.ok ? describeVinculoBatchChoicesConfirmation(vinculoBatchPreview) : null;
@@ -4324,7 +4475,18 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                 const editorialStatus = canonicalSnapshot.status;
                 const recoveryStatus = legacyEditorialRecovery?.keywordId === item.id ? legacyEditorialRecovery.status : "";
                 // A coluna REFLETE o que a Revisão Humana decidiu.
-                const vinculo = resolveKeywordVinculo({ status: item.status, semantic: item.analise_semantica });
+                // 2026-10-13 · com o contexto do plano: na não publicada, o posto é a trava do cadastro ("Travada · Artigo · declarado").
+                const vinculo = resolveKeywordVinculo({ status: item.status, semantic: item.analise_semantica, plan: vinculoPlanContextOf(item) });
+                // 2026-10-13 · o Assunto que a keyword carrega, numa linha abaixo dela (pedido do dono).
+                const rowSubjectHeadline = subjectHeadline(resolveSubjectArticleView({
+                  keywordId: item.id,
+                  keyword: item.keyword,
+                  semantic: item.analise_semantica,
+                  groupOf: subjectGroupOf,
+                  keywordTextOf: subjectKeywordTextOf,
+                  convertedTo: subjectConvertedTitleOf(item.id),
+                  subjectSemanticOf: keywordSemanticOf,
+                }));
                 const primaryKeywordPolicy = readPrimaryKeywordPolicy({ publicationDeclared: publicationLink.state === "published", status: item.status, semantic: item.analise_semantica });
                 const selectedListName = lists.find(list => list.id === item.lista_id)?.nome || "Sem Silo/Categoria";
                 const keywordReadModel = canonicalSnapshot.semantic;
@@ -4421,6 +4583,17 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                               {item.keyword}
                             </div>
                             {rowGroup ? <EditorialGroupTag name={rowGroup.name} color={rowGroup.color} className="mt-0.5" /> : null}
+                            {/* 2026-10-13 · o título do Assunto em uma linha, para identificar o artigo sem abrir o painel. */}
+                            {rowSubjectHeadline ? (
+                              <p
+                                data-processor-subject-title={rowSubjectHeadline.kind}
+                                title={rowSubjectHeadline.position ? `${rowSubjectHeadline.position} · ${rowSubjectHeadline.text}` : rowSubjectHeadline.text}
+                                className={`mt-0.5 truncate text-sm ${rowSubjectHeadline.tone === "warning" ? "text-warning" : rowSubjectHeadline.tone === "muted" ? "text-text-muted" : "text-foreground"}`}
+                              >
+                                {rowSubjectHeadline.position ? <span className="font-semibold text-text-muted">{rowSubjectHeadline.position} · </span> : null}
+                                {rowSubjectHeadline.text}
+                              </p>
+                            ) : null}
                             {/* O endereço mora ao lado da palavra-chave, inteiro e
                                 com cor própria: é a identidade da página, não um
                                 detalhe do vínculo. Aparece assim que há URL
@@ -4453,13 +4626,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                         <div data-keyword-vinculo-choices title={keywordVinculoChoicesSummary(vinculo)} className="flex min-w-0 flex-col items-center gap-0.5">
                           <span
                             className={"inline-flex max-w-full items-center whitespace-normal rounded border px-1 text-sm font-semibold leading-tight " + (
-                              vinculo.postLockedToSlug
+                              (vinculo.postLocked ?? vinculo.postLockedToSlug)
                                 ? "border-context-accent/50 bg-context-accent/10 text-context-accent"
                                 : "border-divider bg-surface-subtle text-text-muted"
                             )}
-                            title={vinculo.postLockedToSlug
-                              ? "Travado ao slug: esta keyword é a primária desta URL e não se solta dela."
-                              : "Livre: pode ser primária ou secundária de qualquer página, e pode perder a vaga."}
+                            data-keyword-vinculo-post={vinculo.planLock ? "plan_lock" : "slug"}
+                            title={vinculo.planLock
+                              ? keywordPlanLockHint(vinculo.planLock)
+                              : vinculo.postLockedToSlug
+                                ? "Travado ao slug: esta keyword é a primária desta URL e não se solta dela."
+                                : "Livre: pode ser primária ou secundária de qualquer página, e pode perder a vaga."}
                           >
                             {vinculo.postLabel}
                           </span>
@@ -4693,6 +4869,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             subjectGroupOf={subjectGroupOf}
                             subjectKeywordTextOf={subjectKeywordTextOf}
                             subjectConvertedTitleOf={subjectConvertedTitleOf}
+                            subjectSemanticOf={keywordSemanticOf}
                             onPublicationAction={(action) => handlePublicationLinkAction(item, action)}
                             allowPublishedWorkflowStatus={false}
                             statusUpdating={updating}
@@ -4729,6 +4906,22 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           send={approveAndSendRequest.send}
           onClose={() => setApproveAndSendRequest(null)}
           onApplied={touched => rereadAfterApproval(touched)}
+        />
+      ) : null}
+      {architectSuggestionsOpen && selectedBrandId ? (
+        <ArchitectSuggestionsDialog
+          brandId={selectedBrandId}
+          initialColor={architectSuggestionsOpen.color}
+          onClose={() => setArchitectSuggestionsOpen(null)}
+          onOpenApproveAndSend={(ids, scopeLabel) => { setArchitectSuggestionsOpen(null); openApproveAndSend(ids, scopeLabel); }}
+          onSelectInSheet={({ color, keywordIds }) => {
+            setArchitectSuggestionsOpen(null);
+            pendingSheetSelectionRef.current = keywordIds;
+            const alvo = color ?? EDITORIAL_GROUP_CHOICE_ALL;
+            if (keywordGroups.choice !== alvo) keywordGroups.setChoice(alvo);
+            else setSelectedIds(new Set(keywordIds.filter(id => keywords.some(item => item.id === id))));
+          }}
+          onApplied={async ids => { await handleCadastroKeywordsChanged(ids); }}
         />
       ) : null}
       {/* FOOTER BATCH ACTIONS BAR */}
@@ -5123,6 +5316,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                 <VinculoPostSelect
                   id="minerador-vinculo-batch-post"
                   value={vinculoBatchSelectValue("post", vinculoBatchDialog, vinculoBatchCommon)}
+                  mode={vinculoBatchCommon.postMode ?? "slug"}
+                  hint={vinculoBatchCommon.postMode === "plan" ? "Não publicadas: o posto é a trava do cadastro. Sem plano, travar é recusado por item." : vinculoBatchCommon.postMode === "mixed" ? "Publicadas: Travado ao slug ou Livre. Não publicadas: a trava do cadastro; sem plano, travar é recusado por item." : null}
                   disabled={updating}
                   onChange={value => chooseVinculoBatch("post", value)}
                 />
@@ -5164,7 +5359,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               type="button"
               data-vinculo-batch-apply
               onClick={() => void handleBatchVinculo(vinculoBatchDialog)}
-              disabled={updating || bulkActionProcessing || !vinculoBatchPreview?.ok || vinculoBatchPreview.counts.updates === 0}
+              disabled={updating || bulkActionProcessing || !vinculoBatchPreview?.ok || vinculoBatchPreview.counts.updates + vinculoBatchPreview.counts.planLocks === 0}
               className="inline-flex h-9 items-center justify-center rounded border border-action-accent bg-action-accent px-3 text-sm font-semibold text-foreground transition-colors hover:bg-action-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Aplicar

@@ -15,7 +15,7 @@ import {
 } from "@/lib/editorial/editorial-groups";
 import { DECLARED_PLAN_SCOPE_MAX, SUBJECT_ENTRY_TITLE_MAX, parseDeclaredPlanText, type DeclaredPlanLockChoice, type DeclaredPlanRole } from "@/lib/minerador/declared-plan";
 import { looksLikeSiloPlanText } from "@/lib/minerador/plan-text-detector";
-import type { DeclaredPlanApplyArticle, DeclaredPlanCardRow, DeclaredPlanPreview } from "@/lib/minerador/declared-plan-import-core";
+import type { DeclaredPlanApplyArticle, DeclaredPlanCardRow, DeclaredPlanMode, DeclaredPlanPreview, DeclaredPlanReplaceApplied, DeclaredPlanReplaceItem, DeclaredPlanReplacePreview } from "@/lib/minerador/declared-plan-import-core";
 import { SubjectConversionDialog } from "./subject-conversion-dialog";
 import { SubjectSearchBatchPanel } from "./discovery/subject-search-batch-panel";
 import { subjectSearchBatchLines } from "./discovery/subject-search-batch-model";
@@ -37,6 +37,13 @@ import { CADASTRO_FOLLOW_UP_TEXTS, cadastroLeftoversToDelete, cadastroReapproval
  * pedido da prévia com o `importRequestId` dela e só fica habilitado com
  * `canApply`; qualquer mudança descarta a prévia; o resultado só aparece depois
  * da resposta relida. `409 GROUPS_NOT_AVAILABLE` esconde o recurso.
+ *
+ * 2026-10-13 · "Silo existente" ganha a escolha Acrescentar | Substituir o plano
+ * (SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md` §5.2, F1). Na
+ * substituição as linhas SÃO o plano novo inteiro (a gravada pode sair, mudar
+ * de ordem e de keyword), a prévia mostra as quatro listas com o motivo, e
+ * "Substituir o plano" manda o `decisionHash` dela — com algo saindo, só depois
+ * do nome da cor digitado. O MESMO núcleo e a MESMA rota do cadastro.
  */
 
 const CADASTRO_ROUTE = (brandId: string) => `/api/minerador/marcas/${encodeURIComponent(brandId)}/plans/import`;
@@ -53,14 +60,19 @@ type Linha = {
   /** Já gravada no plano do Silo existente: não sai pelo card ("Tirar do plano" é o caminho). */
   stored: boolean;
   storedLockLabel: string | null;
+  /** 2026-10-13 · linha recuperada do histórico (o Assunto saiu da keyword sem liberação): o selo a mostrar. */
+  recovered?: string | null;
 };
 type GroupChoice = { mode: "existing"; groupId: string } | { mode: "new"; name: null; color: EditorialGroupColor };
+type SiloDoPlano = { name: string; slug: string | null; objective: string | null };
 type CadastroRequest = {
-  plan: { silo: { name: string; slug: string | null; objective: string | null } | null; articles: Array<{ order: number; subject: string; principal: string | null; role: DeclaredPlanRole; scope: string; lock: DeclaredPlanLockChoice }> };
+  plan: { silo: SiloDoPlano | null; articles: Array<{ order: number; subject: string; principal: string | null; role: DeclaredPlanRole; scope: string; lock: DeclaredPlanLockChoice }> };
   group: GroupChoice;
   destination: { kind: "new_silo" } | { kind: "existing_silo"; groupId: string } | { kind: "published"; url: string };
+  /** 2026-10-13 · só no Silo existente com "Substituir o plano" (ausente = acréscimo, o pedido de sempre). */
+  planMode?: "replace";
 };
-type ApplyResult = { groupId: string; planVersion: number; articles: DeclaredPlanApplyArticle[]; createdSubjectIds: string[]; createdPrincipalIds: string[]; reciprocityConfirmed: number; failed: number; notices: string[] };
+type ApplyResult = { groupId: string; planVersion: number; articles: DeclaredPlanApplyArticle[]; createdSubjectIds: string[]; createdPrincipalIds: string[]; reciprocityConfirmed: number; failed: number; notices: string[]; replaced: DeclaredPlanReplaceApplied | null };
 type Refusal = { code: string; message: string; blockers: string[] };
 
 /** Os ids que a tela relê depois do `apply`. */
@@ -72,6 +84,12 @@ export type DeclaredPlanAppliedIds = {
 
 const LOCK_LABELS: Record<DeclaredPlanLockChoice, string> = { auto: "Automática (pelo volume)", locked: "Travada", free: "Livre" };
 const DESTINO_LABELS: Record<Destino, string> = { new_silo: "Silo novo", existing_silo: "Silo existente", published: "Artigo publicado" };
+/** 2026-10-13 · Silo existente (SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md` §5.2, F1): o mesmo texto do núcleo (`DECLARED_PLAN_MODE_LABELS`). */
+const MODO_PLANO_LABELS: Record<DeclaredPlanMode, string> = { append: "Acrescentar", replace: "Substituir o plano" };
+const MODO_PLANO_AJUDA: Record<DeclaredPlanMode, string> = {
+  append: "As linhas já gravadas aparecem abaixo e não saem por aqui (para tirar um artigo do plano, use “Tirar do plano”). Acrescente as novas; as que não mudarem ficam como estão.",
+  replace: "As linhas abaixo SÃO o plano novo inteiro: a linha que você tirar sai do plano pelo “Tirar do plano” (inclusive o Pilar, se o plano novo trouxer outro), e o Assunto pode mudar de keyword. Nada é apagado; a prévia mostra o que fica igual, muda, entra e sai.",
+};
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
 const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
@@ -148,6 +166,12 @@ export function SubjectCadastroCard({
   const [siloSlug, setSiloSlug] = useState("");
   const [siloObjective, setSiloObjective] = useState("");
   const [existingGroupId, setExistingGroupId] = useState("");
+  /** 2026-10-13 · Silo existente: "Acrescentar" (padrão) ou "Substituir o plano". */
+  const [modoPlano, setModoPlano] = useState<DeclaredPlanMode>("append");
+  /** Na substituição, o Silo (nome, slug, objetivo) que veio do texto colado; sem ele, fica o gravado. */
+  const [siloDoTexto, setSiloDoTexto] = useState<SiloDoPlano | null>(null);
+  /** A confirmação da substituição quando algo sai: o nome da cor digitado. */
+  const [corDigitada, setCorDigitada] = useState("");
   const [publishedUrl, setPublishedUrl] = useState("");
   const [linhas, setLinhas] = useState<Linha[]>(() => [linhaVazia(1, "Pilar")]);
   const [colado, setColado] = useState(initialText);
@@ -167,7 +191,7 @@ export function SubjectCadastroCard({
   useEffect(() => { conversaoAbertaRef.current = conversaoAberta; }, [conversaoAberta]);
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
-  const ids = { title: useId(), paste: useId(), name: useId(), slug: useId(), objective: useId(), url: useId(), existing: useId() };
+  const ids = { title: useId(), paste: useId(), name: useId(), slug: useId(), objective: useId(), url: useId(), existing: useId(), confirm: useId() };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -191,7 +215,9 @@ export function SubjectCadastroCard({
     setReaprovar(false);
     setReaprovacao(null);
     setExclusaoPedida(0);
+    setCorDigitada("");
   };
+  const substituir = destino === "existing_silo" && modoPlano === "replace";
   const mudarLinha = (key: string, patch: Partial<Linha>) => {
     setLinhas(current => current.map(linha => linha.key === key ? { ...linha, ...patch } : linha));
     invalidate();
@@ -201,7 +227,8 @@ export function SubjectCadastroCard({
     invalidate();
   };
   const tirarLinha = (key: string) => {
-    setLinhas(current => current.filter(linha => linha.key !== key || linha.stored));
+    // Na substituição, a linha gravada também sai (ela vai para a lista "Sai" da prévia).
+    setLinhas(current => current.filter(linha => linha.key !== key || (linha.stored && !substituir)));
     invalidate();
   };
 
@@ -218,11 +245,45 @@ export function SubjectCadastroCard({
     // No Silo existente, o artigo colado que já está gravado (mesma keyword ou mesmo título) fica como está.
     const chave = (value: string) => value.trim().toLocaleLowerCase("pt-BR");
     const gravadas = linhas.filter(linha => linha.stored);
-    const jaGravada = (linha: Linha) => gravadas.some(gravada => (gravada.keyword && linha.keyword && chave(gravada.keyword) === chave(linha.keyword)) || (gravada.title && chave(gravada.title) === chave(linha.title)));
-    const novas = lidas.filter(linha => !jaGravada(linha));
-    setLinhas([...gravadas, ...novas]);
-    const repetidas = lidas.length - novas.length;
-    setColagemAviso(`${novas.length} artigo(s) lido(s) do texto${repetidas ? `; ${repetidas} já gravado(s) no Silo ficam como estão` : ""}${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
+    const casa = (alvo: Linha, linha: Linha) => Boolean((alvo.keyword && linha.keyword && chave(alvo.keyword) === chave(linha.keyword)) || (alvo.title && chave(alvo.title) === chave(linha.title)));
+    const jaGravada = (linha: Linha) => gravadas.some(gravada => casa(gravada, linha));
+    /*
+     * 2026-10-13 · "Substituir o plano": o texto colado vira o plano novo INTEIRO.
+     * A linha gravada (ou recuperada do histórico) que o texto traz de novo, pela
+     * keyword ou pelo título, guarda a trava manual quando o texto não diz
+     * "Trava:" e completa só o título/detalhes vazios; a que o texto não traz vai
+     * para "Sai" na prévia.
+     */
+    if (substituir) {
+      const atuais = linhas.filter(linha => linha.stored || linha.recovered);
+      const plano = lido.articles.map((article, index) => {
+        const lida = lidas[index];
+        const atual = atuais.find(linha => casa(linha, lida)) ?? null;
+        if (!atual) return lida;
+        return { ...lida, key: atual.key, stored: atual.stored, storedLockLabel: atual.storedLockLabel, recovered: atual.recovered ?? null, lock: article.lock ?? atual.lock, title: lida.title.trim() ? lida.title : atual.title, details: lida.details.trim() ? lida.details : atual.details };
+      });
+      setLinhas(plano);
+      setSiloDoTexto(lido.silo.name ? { name: lido.silo.name, slug: lido.silo.rawSlug ?? null, objective: lido.silo.objective ?? null } : null);
+      const casadas = plano.filter(linha => linha.stored || linha.recovered).length;
+      const foraDoTexto = atuais.length - casadas;
+      setColagemAviso(`O texto vira o plano novo inteiro: ${plano.length} artigo(s)${casadas ? `, ${casadas} casado(s) com as linhas gravadas ou recuperadas` : ""}${foraDoTexto > 0 ? `; ${foraDoTexto} linha(s) gravada(s) fora do texto vão para “Sai” na prévia` : ""}${lido.silo.name ? `; Silo do texto: ${lido.silo.name}` : ""}${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
+      invalidate();
+      return;
+    }
+    // 2026-10-13 · a linha recuperada do histórico casa pela keyword (ou pelo título) e só ganha o que FALTA.
+    const recuperadas = linhas.filter(linha => !linha.stored && linha.recovered);
+    let completadas = 0;
+    const recuperadasAgora = recuperadas.map(recuperada => {
+      const lida = lidas.find(linha => casa(recuperada, linha));
+      if (!lida) return recuperada;
+      const proxima = { ...recuperada, details: recuperada.details.trim() ? recuperada.details : lida.details, title: recuperada.title.trim() ? recuperada.title : lida.title };
+      if (proxima.details !== recuperada.details || proxima.title !== recuperada.title) completadas += 1;
+      return proxima;
+    });
+    const novas = lidas.filter(linha => !jaGravada(linha) && !recuperadas.some(recuperada => casa(recuperada, linha)));
+    setLinhas([...gravadas, ...recuperadasAgora, ...novas]);
+    const repetidas = lidas.length - novas.length - recuperadas.filter(recuperada => lidas.some(linha => casa(recuperada, linha))).length;
+    setColagemAviso(`${novas.length} artigo(s) lido(s) do texto${repetidas ? `; ${repetidas} já gravado(s) no Silo ficam como estão` : ""}${recuperadas.length ? `; ${completadas} linha(s) recuperada(s) do histórico completada(s) só no que faltava` : ""}${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
     invalidate();
   };
 
@@ -253,6 +314,7 @@ export function SubjectCadastroCard({
     setExistingGroupId(groupId);
     invalidate();
     setLinhas([]);
+    setSiloDoTexto(null);
     if (!groupId || busyRef.current) return;
     busyRef.current = true;
     setPhase("loading");
@@ -265,15 +327,32 @@ export function SubjectCadastroCard({
         return;
       }
       const rows = (Array.isArray(answer.body.rows) ? answer.body.rows : []) as DeclaredPlanCardRow[];
-      setLinhas(rows.map(row => ({ key: novaChave(), order: row.order, role: row.role, title: row.title, keyword: row.keyword ?? "", details: row.details, lock: row.lock, stored: true, storedLockLabel: row.lockLabel })));
+      // 2026-10-13 · a linha recuperada do histórico NÃO está no plano gravado: entra como nova, com o selo (o dono confere e cadastra).
+      setLinhas(rows.map(row => ({ key: novaChave(), order: row.order, role: row.role, title: row.title, keyword: row.keyword ?? "", details: row.details, lock: row.lock, stored: !row.recovered, storedLockLabel: row.lockLabel, recovered: row.recovered?.label ?? null })));
     } finally {
       busyRef.current = false;
       if (mountedRef.current) setPhase("idle");
     }
   };
 
+  /**
+   * 2026-10-13 · trocar entre "Acrescentar" e "Substituir o plano". Voltar a
+   * acrescentar relê o plano gravado (as linhas tiradas na substituição voltam).
+   */
+  const escolherModoPlano = (modo: DeclaredPlanMode) => {
+    if (modo === modoPlano || busyRef.current) return;
+    setModoPlano(modo);
+    setSiloDoTexto(null);
+    invalidate();
+    if (modo === "append" && existingGroupId) void escolherSiloExistente(existingGroupId);
+  };
+
   const grupoExistente = silosExistentes.find(group => group.id === existingGroupId) ?? null;
   const corEfetiva: EditorialGroupColor = destino === "existing_silo" && grupoExistente ? grupoExistente.color : color;
+  /** 2026-10-13 · substituir com algo saindo pede o nome da cor digitado (SDD §5.3, riscos); sem saída, a confirmação é o clique. */
+  const saidasDaPrevia = preview?.result.replace?.leaving.length ?? 0;
+  const nomeDaCorDoPlano = EDITORIAL_GROUP_COLOR_LABELS[preview?.result.group.color ?? corEfetiva];
+  const confirmacaoSubstituicaoOk = !preview?.result.replace || saidasDaPrevia === 0 || corDigitada.trim().toLocaleLowerCase("pt-BR") === nomeDaCorDoPlano.toLocaleLowerCase("pt-BR");
 
   const currentRequest = (): CadastroRequest | null => {
     const preenchidas = linhas.filter(linha => linha.title.trim() || linha.keyword.trim() || linha.details.trim());
@@ -281,6 +360,7 @@ export function SubjectCadastroCard({
     const articles = preenchidas.map(linha => ({ order: linha.order, subject: linha.title.trim(), principal: linha.keyword.trim() || null, role: destino === "published" ? "Suporte" as const : linha.role, scope: linha.details.trim(), lock: linha.lock }));
     if (destino === "existing_silo") {
       if (!existingGroupId) return null;
+      if (substituir) return { plan: { silo: siloDoTexto, articles }, group: { mode: "existing", groupId: existingGroupId }, destination: { kind: "existing_silo", groupId: existingGroupId }, planMode: "replace" };
       return { plan: { silo: null, articles }, group: { mode: "existing", groupId: existingGroupId }, destination: { kind: "existing_silo", groupId: existingGroupId } };
     }
     const existente = groupOfColor(groups, color);
@@ -307,7 +387,7 @@ export function SubjectCadastroCard({
     setReaprovacao(null);
     setExclusaoPedida(0);
     try {
-      const answer = await callCadastro(brandId, { method: "POST", body: { mode: "preview", plan: request.plan, group: request.group, destination: request.destination } });
+      const answer = await callCadastro(brandId, { method: "POST", body: { mode: "preview", plan: request.plan, group: request.group, destination: request.destination, ...(request.planMode ? { planMode: request.planMode } : {}) } });
       if (!mountedRef.current) return;
       if (!answer.ok) {
         if (answer.refusal.code === "GROUPS_NOT_AVAILABLE") { onUnavailable(); onClose(); return; }
@@ -328,6 +408,7 @@ export function SubjectCadastroCard({
 
   const handleApply = async () => {
     if (!preview || !preview.result.canApply || applied || busyRef.current) return;
+    if (preview.request.planMode === "replace" && !confirmacaoSubstituicaoOk) return;
     busyRef.current = true;
     setPhase("applying");
     setRefusal(null);
@@ -338,6 +419,8 @@ export function SubjectCadastroCard({
         group: preview.request.group,
         destination: preview.request.destination,
         importRequestId: preview.importRequestId,
+        // 2026-10-13 · "Substituir o plano": a decisão é sobre a prévia das quatro listas.
+        ...(preview.request.planMode ? { planMode: preview.request.planMode, decisionHash: preview.result.replace?.decisionHash } : {}),
       } });
       if (!mountedRef.current) return;
       if (!answer.ok) {
@@ -359,6 +442,7 @@ export function SubjectCadastroCard({
         reciprocityConfirmed: count(body.reciprocityConfirmed),
         failed: count(body.failed),
         notices: strings(body.notices),
+        replaced: body.replaced && typeof body.replaced === "object" ? body.replaced as DeclaredPlanReplaceApplied : null,
       };
       setApplied(result);
       const subjectIds = [...new Set(result.articles.map(article => article.subjectKeywordId).filter((id): id is string => Boolean(id)))];
@@ -425,7 +509,7 @@ export function SubjectCadastroCard({
               <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Destino do cadastro">
                 {(Object.keys(DESTINO_LABELS) as Destino[]).map(option => (
                   <label key={option} data-subject-cadastro-destino={option} className={`flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-module-accent/30 ${destino === option ? "border-module-accent/50 bg-surface" : "border-divider hover:bg-surface-subtle"}`}>
-                    <input type="radio" name="subject-cadastro-destino" value={option} checked={destino === option} disabled={busy || (option === "existing_silo" && !silosExistentes.length)} onChange={() => { setDestino(option); setLinhas(option === "existing_silo" ? [] : [linhaVazia(option === "new_silo" ? 1 : 1, option === "new_silo" ? "Pilar" : "Suporte")]); setExistingGroupId(""); invalidate(); }} className="sr-only" />
+                    <input type="radio" name="subject-cadastro-destino" value={option} checked={destino === option} disabled={busy || (option === "existing_silo" && !silosExistentes.length)} onChange={() => { setDestino(option); setLinhas(option === "existing_silo" ? [] : [linhaVazia(option === "new_silo" ? 1 : 1, option === "new_silo" ? "Pilar" : "Suporte")]); setExistingGroupId(""); setModoPlano("append"); setSiloDoTexto(null); invalidate(); }} className="sr-only" />
                     {DESTINO_LABELS[option]}
                   </label>
                 ))}
@@ -440,7 +524,19 @@ export function SubjectCadastroCard({
                   <option value="">Escolha o Silo…</option>
                   {silosExistentes.map(group => <option key={group.id} value={group.id}>{EDITORIAL_GROUP_COLOR_LABELS[group.color]} · {group.name} · plano v{group.planVersion}</option>)}
                 </select>
-                <p className="text-sm text-text-muted">As linhas já gravadas aparecem abaixo e não saem por aqui (para tirar um artigo do plano, use “Tirar do plano”). Acrescente as novas; as que não mudarem ficam como estão.</p>
+                <fieldset className="mt-2 flex flex-col gap-2" data-subject-cadastro-modo-plano>
+                  <legend className="mb-1 text-sm font-medium text-foreground">O que fazer com o plano gravado</legend>
+                  <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Acrescentar ou substituir o plano">
+                    {(Object.keys(MODO_PLANO_LABELS) as DeclaredPlanMode[]).map(option => (
+                      <label key={option} data-subject-cadastro-modo={option} className={`flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-module-accent/30 ${modoPlano === option ? "border-module-accent/50 bg-surface" : "border-divider hover:bg-surface-subtle"}`}>
+                        <input type="radio" name="subject-cadastro-modo-plano" value={option} checked={modoPlano === option} disabled={busy} onChange={() => escolherModoPlano(option)} className="sr-only" />
+                        {MODO_PLANO_LABELS[option]}
+                      </label>
+                    ))}
+                  </div>
+                  <p className={`text-sm ${substituir ? "text-warning" : "text-text-muted"}`}>{MODO_PLANO_AJUDA[modoPlano]}</p>
+                  {substituir && siloDoTexto ? <p className="text-sm text-text-muted" data-subject-cadastro-silo-do-texto>Silo do texto colado: <span className="font-semibold text-foreground">{siloDoTexto.name}</span>{siloDoTexto.slug ? <span className="text-identity-slug"> · {siloDoTexto.slug}</span> : null} (o slug só muda se o Silo ainda não estiver confirmado no Arquiteto).</p> : null}
+                </fieldset>
               </div>
             ) : (
               <fieldset className="flex flex-col gap-2">
@@ -492,6 +588,7 @@ export function SubjectCadastroCard({
               <details className="rounded-md border border-divider px-3 py-2" open={destino !== "existing_silo"}>
                 <summary className="cursor-pointer text-sm font-medium text-foreground">Colar plano em texto</summary>
                 <div className="mt-2 flex flex-col gap-2">
+                  {substituir ? <p className="text-sm text-warning" data-subject-cadastro-colar-substitui>Substituir o plano: o texto colado vira o plano novo INTEIRO (as linhas gravadas que ele não trouxer vão para “Sai” na prévia).</p> : null}
                   <label htmlFor={ids.paste} className="text-sm text-text-muted">Formato: “Silo 2 — …”, “Nome:”, “Slug:”, “Objetivo:” e, por artigo, “9. Título”, “Palavra-chave: …” (com “Artigo pilar •” no Pilar), a descrição e, se quiser, “Trava: travada” ou “Trava: livre”.</label>
                   <textarea id={ids.paste} value={colado} onPaste={colarPlano} onChange={event => setColado(event.target.value)} rows={6} maxLength={60000} spellCheck={false} className={`${internalField} min-h-32 resize-y leading-6`} />
                   <div className="flex flex-wrap items-center gap-2">
@@ -517,8 +614,8 @@ export function SubjectCadastroCard({
                 </thead>
                 <tbody className="divide-y divide-divider">
                   {linhas.map((linha, index) => (
-                    <tr key={linha.key} className="align-top" data-subject-cadastro-linha={linha.stored ? "gravada" : "nova"}>
-                      <td className="px-2 py-2"><input aria-label={`Ordem da linha ${index + 1}`} type="number" min={1} max={30} value={linha.order} disabled={busy || linha.stored} onChange={event => mudarLinha(linha.key, { order: Number(event.target.value) || 0 })} className={`${internalField} w-14`} /></td>
+                    <tr key={linha.key} className="align-top" data-subject-cadastro-linha={linha.stored ? "gravada" : linha.recovered ? "recuperada" : "nova"}>
+                      <td className="px-2 py-2"><input aria-label={`Ordem da linha ${index + 1}`} type="number" min={1} max={30} value={linha.order} disabled={busy || (linha.stored && !substituir)} onChange={event => mudarLinha(linha.key, { order: Number(event.target.value) || 0 })} className={`${internalField} w-14`} /></td>
                       {!publicado ? (
                         <td className="px-2 py-2">
                           <select aria-label={`Papel da linha ${index + 1}`} value={linha.role} disabled={busy} onChange={event => mudarLinha(linha.key, { role: event.target.value === "Pilar" ? "Pilar" : "Suporte" })} className={internalField}>
@@ -527,8 +624,16 @@ export function SubjectCadastroCard({
                           </select>
                         </td>
                       ) : null}
-                      <td className="px-2 py-2"><input aria-label={`Assunto da linha ${index + 1}`} onPaste={colarPlano} value={linha.title} maxLength={SUBJECT_ENTRY_TITLE_MAX} disabled={busy} onChange={event => mudarLinha(linha.key, { title: event.target.value })} className={internalField} placeholder={publicado && index > 0 ? "(o da primeira linha)" : "Título do artigo"} /></td>
-                      <td className="px-2 py-2"><input aria-label={`Keyword da linha ${index + 1}`} onPaste={colarPlano} value={linha.keyword} maxLength={400} disabled={busy || (linha.stored && Boolean(linha.keyword))} onChange={event => mudarLinha(linha.key, { keyword: event.target.value })} className={`${internalField} text-keyword`} placeholder="keyword" /></td>
+                      <td className="px-2 py-2">
+                        <input aria-label={`Assunto da linha ${index + 1}`} onPaste={colarPlano} value={linha.title} maxLength={SUBJECT_ENTRY_TITLE_MAX} disabled={busy} onChange={event => mudarLinha(linha.key, { title: event.target.value })} className={internalField} placeholder={publicado && index > 0 ? "(o da primeira linha)" : "Título do artigo"} />
+                        {linha.recovered ? (
+                          <span className="mt-1 flex items-center gap-1 text-sm text-warning" data-subject-cadastro-recuperada>
+                            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            {linha.recovered}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-2 py-2"><input aria-label={`Keyword da linha ${index + 1}`} onPaste={colarPlano} value={linha.keyword} maxLength={400} disabled={busy || (!substituir && (linha.stored || Boolean(linha.recovered)) && Boolean(linha.keyword))} onChange={event => mudarLinha(linha.key, { keyword: event.target.value })} className={`${internalField} text-keyword`} placeholder="keyword" /></td>
                       <td className="px-2 py-2"><textarea aria-label={`Detalhes da linha ${index + 1}`} onPaste={colarPlano} value={linha.details} maxLength={DECLARED_PLAN_SCOPE_MAX} rows={2} disabled={busy} onChange={event => mudarLinha(linha.key, { details: event.target.value.replace(/[\r\n]+/g, " ") })} className={`${internalField} resize-y leading-6`} placeholder={publicado && index > 0 ? "(os da primeira linha)" : "O que o artigo cobre (até 1.200)"} /></td>
                       {!publicado ? (
                         <td className="px-2 py-2">
@@ -539,8 +644,8 @@ export function SubjectCadastroCard({
                         </td>
                       ) : null}
                       <td className="px-2 py-2">
-                        {!linha.stored ? (
-                          <button type="button" onClick={() => tirarLinha(linha.key)} disabled={busy} className="inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 disabled:cursor-not-allowed disabled:opacity-50" aria-label={`Tirar a linha ${index + 1}`} title="Tirar a linha">
+                        {!linha.stored || substituir ? (
+                          <button type="button" onClick={() => tirarLinha(linha.key)} disabled={busy} className="inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 disabled:cursor-not-allowed disabled:opacity-50" aria-label={linha.stored ? `Tirar a linha ${index + 1} do plano novo` : `Tirar a linha ${index + 1}`} title={linha.stored ? "Tirar do plano novo (vai para “Sai” na prévia; nada é apagado)" : "Tirar a linha"}>
                             <Trash2 className="h-4 w-4" aria-hidden="true" />
                           </button>
                         ) : null}
@@ -576,6 +681,14 @@ export function SubjectCadastroCard({
           ) : null}
 
           {result ? <CadastroPreview result={result} /> : null}
+
+          {result?.replace && result.canApply && !applied && saidasDaPrevia > 0 ? (
+            <div className="mt-4 flex flex-col gap-1 rounded-md border border-warning/40 px-3 py-3 text-sm leading-6" data-subject-cadastro-confirmar-substituicao>
+              <label htmlFor={ids.confirm} className="font-semibold text-foreground">Para substituir, digite o nome da cor: {nomeDaCorDoPlano}</label>
+              <p className="text-text-muted">{saidasDaPrevia} item(ns) saem do plano pelo “Tirar do plano”. Nada é apagado; a decisão vale para esta prévia (qualquer mudança pede outra).</p>
+              <input id={ids.confirm} value={corDigitada} onChange={event => setCorDigitada(event.target.value)} disabled={busy} autoComplete="off" spellCheck={false} className={`${internalField} max-w-xs`} placeholder={nomeDaCorDoPlano} />
+            </div>
+          ) : null}
 
           {result && result.canApply && !applied && (sobrasOferecidas.deletable.length > 0 || sobrasOferecidas.blocked.length > 0 || reaprovaveisPrevia.length > 0) ? (
             <fieldset className="mt-4 flex flex-col gap-3 rounded-md border border-divider px-3 py-3 text-sm leading-6" data-subject-cadastro-follow-up>
@@ -617,6 +730,11 @@ export function SubjectCadastroCard({
                 {declaredCount} linha(s) cadastrada(s){unchangedCount > 0 ? `, ${unchangedCount} sem mudança` : ""}, conferidas na releitura: {applied.reciprocityConfirmed}; falhas: {applied.failed}.
               </p>
               <p className="text-foreground">{applied.planVersion > 0 ? `Plano do Silo gravado (v${applied.planVersion}). ` : ""}{applied.createdSubjectIds.length + applied.createdPrincipalIds.length} keyword(s) nova(s) criada(s) como Bruto. A Lógica roda sozinha (grátis); depois, aprove e envie ao Arquiteto como sempre.</p>
+              {applied.replaced ? (
+                <p className="text-foreground" data-subject-cadastro-substituido>
+                  Substituição: {applied.replaced.withdrawn.length} artigo(s) saíram do plano pelo “Tirar do plano”{applied.replaced.withdrawalPlanVersion ? ` (v${applied.replaced.withdrawalPlanVersion})` : ""}{applied.replaced.orphanMarksCleared.length ? `; ${applied.replaced.orphanMarksCleared.length} marca(s) de principal sem Assunto liberada(s)` : ""}. Nada foi apagado: as keywords continuam no Minerador e no grupo. No Arquiteto, o artigo de um Assunto que saiu fica “Fora do plano” até você decidir lá.
+                </p>
+              ) : null}
               {failures.length ? (
                 <ul className="mt-1 list-disc space-y-1 pl-5 text-foreground">
                   {failures.map(article => <li key={`${article.order}:${article.principalKeywordId}`}>Linha {article.order}: {article.reason || "falhou sem motivo informado."}</li>)}
@@ -658,9 +776,9 @@ export function SubjectCadastroCard({
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-divider px-4 py-3">
           {result && !result.canApply && !applied ? <span className="mr-auto text-sm text-danger">Corrija os impedimentos e gere a prévia de novo.</span> : null}
           <button type="button" onClick={onClose} disabled={busy} className={internalButton}>{applied ? "Fechar" : "Cancelar"}</button>
-          <button type="button" onClick={() => void handleApply()} disabled={busy || !result?.canApply || Boolean(applied)} className={internalButtonPrimary} data-subject-cadastro-apply>
+          <button type="button" onClick={() => void handleApply()} disabled={busy || !result?.canApply || Boolean(applied) || !confirmacaoSubstituicaoOk} className={internalButtonPrimary} data-subject-cadastro-apply>
             {phase === "applying" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            Cadastrar
+            {result?.replace ? MODO_PLANO_LABELS.replace : "Cadastrar"}
           </button>
         </div>
       </div>
@@ -682,6 +800,8 @@ export function CadastroPreview({ result }: { result: DeclaredPlanPreview }) {
           </ul>
         </div>
       ) : null}
+
+      {result.replace ? <ReplaceLists replace={result.replace} /> : null}
 
       <dl className="grid gap-2 text-sm sm:grid-cols-2">
         {result.destination.kind === "published" ? (
@@ -763,6 +883,57 @@ export function CadastroPreview({ result }: { result: DeclaredPlanPreview }) {
           </ul>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+const LISTAS_DA_SUBSTITUICAO: Array<{ key: "same" | "changed" | "entering" | "leaving"; label: string; tone: string }> = [
+  { key: "same", label: "Fica igual", tone: "text-foreground" },
+  { key: "changed", label: "Muda", tone: "text-pending" },
+  { key: "entering", label: "Entra", tone: "text-foreground" },
+  { key: "leaving", label: "Sai (pelo “Tirar do plano”)", tone: "text-warning" },
+];
+
+/** 2026-10-13 · "Substituir o plano": as quatro listas da prévia, com o motivo de cada linha (SDD §5.2). */
+function ReplaceLists({ replace }: { replace: DeclaredPlanReplacePreview }) {
+  const contagem = (key: (typeof LISTAS_DA_SUBSTITUICAO)[number]["key"]) => (replace[key] as DeclaredPlanReplaceItem[]).length;
+  return (
+    <section aria-label="Substituir o plano: as quatro listas" className="flex flex-col gap-3 rounded-md border border-divider px-3 py-3 text-sm leading-6" data-subject-cadastro-quatro-listas>
+      <p className="font-semibold text-foreground">
+        Substituir o plano: Fica igual {contagem("same")} · Muda {contagem("changed")} · Entra {contagem("entering")} · <span className={contagem("leaving") ? "text-warning" : "text-foreground"}>Sai {contagem("leaving")}</span>
+      </p>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {LISTAS_DA_SUBSTITUICAO.map(lista => {
+          const itens = replace[lista.key] as DeclaredPlanReplaceItem[];
+          return (
+            <div key={lista.key} className="min-w-0" data-subject-cadastro-lista={lista.key}>
+              <p className={`font-semibold ${lista.tone}`}>{lista.label} ({itens.length})</p>
+              {itens.length ? (
+                <ul className="mt-1 space-y-1">
+                  {itens.map(item => (
+                    <li key={`${lista.key}:${item.keywordId ?? ""}:${item.order}:${item.title}`} className="break-words">
+                      <span className="text-foreground">{item.order ? `${item.order}. ` : ""}{item.title || "sem título"}</span>
+                      {item.keyword ? <span className="text-keyword"> · {item.keyword}</span> : null}
+                      <span className="text-text-muted"> ({item.role})</span>
+                      <span className="block text-text-muted">{item.reasons.join(" · ")}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="text-text-muted">nenhum</p>}
+            </div>
+          );
+        })}
+      </div>
+      {replace.legacyOutside.length ? (
+        <div>
+          <p className="font-semibold text-foreground">Assunto do formato anterior fora do plano novo ({replace.legacyOutside.length}) — fica como está</p>
+          <p className="text-text-muted">Nada é excluído aqui. Para levar o Assunto para uma keyword, use “Converter formato anterior”.</p>
+          <p className="text-keyword">{replace.legacyOutside.map(item => item.keyword).join(" · ")}</p>
+        </div>
+      ) : null}
+      <ul className="list-disc space-y-1 pl-5 text-text-muted">
+        {replace.effects.map(efeito => <li key={efeito}>{efeito}</li>)}
+      </ul>
     </section>
   );
 }

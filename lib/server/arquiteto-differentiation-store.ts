@@ -19,6 +19,8 @@ import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
 import { DATAFORSEO_LABS_LANGUAGE_CODE, DATAFORSEO_LABS_LOCATION_CODE } from "@/lib/minerador/dataforseo-labs-keyword-research-core";
 import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
 import { readSerpSubjectFootprints, type SerpSubjectReadEgress } from "@/lib/server/arquiteto-serp-subject-store";
+import { knownKeywordFromRow } from "@/lib/server/known-before-search";
+import type { KnownVolume } from "@/lib/editorial/known-before-search";
 
 /**
  * DIFERENCIAR PUBLICADOS — LEITURAS E GRAVAÇÕES DO SERVIDOR.
@@ -61,6 +63,11 @@ export const DIFFERENTIATION_KEYWORD_COLUMNS = [
   "primary_keyword_policy:analise_semantica->>primary_keyword_policy",
   "entidade_central:analise_semantica->>entidade_central",
   "problema_percebido:analise_semantica->>problema_percebido",
+  // F3 · LER ANTES DE BUSCAR: o que decide se a keyword já tem volume medido ("sem média" incluso) — só data, média e provider.
+  "volume_eligibility:analise_semantica->volume_eligibility",
+  "volume_measured_at:analise_semantica->volume_measurement->>measuredAt",
+  "volume_measured_average:analise_semantica->volume_measurement->averageMonthlySearches",
+  "volume_measured_provider:analise_semantica->volume_measurement->>provider",
 ].join(",");
 
 type LinhaKeyword = {
@@ -86,6 +93,12 @@ export type DifferentiationBrandKeywords = {
   existingByNormalized: Map<string, string>;
   /** As publicadas, normalizadas: nunca viram candidata. */
   publishedNormalized: Set<string>;
+  /**
+   * F3 · LER ANTES DE BUSCAR: normalizada → o que já sabemos do volume dela
+   * (medido, "sem média" < 30 dias ou falta). A busca nova não mede de novo o
+   * que já está aqui.
+   */
+  knownVolumeByNormalized: Map<string, { keywordId: string; known: KnownVolume }>;
   rowsRead: number;
 };
 
@@ -94,6 +107,8 @@ export async function readDifferentiationBrandKeywords(context: DifferentiationS
   const pages: DifferentiationPage[] = [];
   const existingByNormalized = new Map<string, string>();
   const publishedNormalized = new Set<string>();
+  const knownVolumeByNormalized = new Map<string, { keywordId: string; known: KnownVolume }>();
+  const agora = new Date();
   let rowsRead = 0;
   for (let inicio = 0; ; inicio += PAGINA) {
     const resultado = await context.supabase
@@ -112,6 +127,10 @@ export async function readDifferentiationBrandKeywords(context: DifferentiationS
       if (!id || !keyword) continue;
       const normal = normalizeKeyword(keyword);
       if (normal && !existingByNormalized.has(normal)) existingByNormalized.set(normal, id);
+      if (normal && !knownVolumeByNormalized.has(normal)) {
+        const lida = knownKeywordFromRow(linha as unknown as Record<string, unknown>, agora);
+        if (lida) knownVolumeByNormalized.set(normal, { keywordId: id, known: lida.volume });
+      }
       const identidade = readPublishedIdentity({ status: linha.status, analise_semantica: { site_origin: linha.site_origin } });
       if (!identidade) continue;
       publishedNormalized.add(normal);
@@ -138,7 +157,7 @@ export async function readDifferentiationBrandKeywords(context: DifferentiationS
     }
     if (linhas.length < PAGINA) break;
   }
-  return { pages, existingByNormalized, publishedNormalized, rowsRead };
+  return { pages, existingByNormalized, publishedNormalized, knownVolumeByNormalized, rowsRead };
 }
 
 /** O Posto relido agora, só da coluna da política (a mesma regra da troca na mesa). */

@@ -94,6 +94,12 @@ export type PlatformStateSnapshot = {
        * antigo segue igual.
        */
       architectUpdate?: { label: string; fromVersionNumber: number; toVersionNumber: number; howToAdopt: string } | null;
+      /**
+       * 2026-10-14 · "Atualização disponível do Arquiteto · links": o grafo de
+       * links aprovado vigente é mais novo que o transportado pelo item e cobre
+       * a versão transportada. Adotar não refaz a pesquisa. Opcional.
+       */
+      linksUpdate?: { label: string; fromGraphVersionNumber: number; toGraphVersionNumber: number; howToAdopt: string } | null;
     }>;
   };
   redator: {

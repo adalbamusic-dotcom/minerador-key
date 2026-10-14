@@ -1,3 +1,75 @@
+## Malha completa do Silo (SDD silo interligado 2026-10-14, F4) — Arquiteto
+
+Detalhe em `docs/04-arquiteto/estado-atual.md` e no §18.1 da SDD. **Validado manualmente: não.**
+
+- [x] F4 · gerador grava a malha: S→P e P→S (HIGH), S↔S em todos os pares (MEDIUM por afinidade, LOW no resto), artigo → SiloPage; `{ mesh: false }` para o esqueleto.
+- [x] F4 · afinidade determinística (termos do ArticleDNA e Assunto, sem cenário do Silo; faceta do plano quando há mais de uma).
+- [x] F4 · âncora natural na partida e na IA de âncoras (nunca keyword do destino; variar).
+- [x] F4 · ler antes de buscar: âncoras aprovadas mantidas, a malha reaproveita a âncora do destino; só o esqueleto sem âncora vai à IA; custo na prévia.
+- [x] F4 · aba Links internos: prévia antes de processar, quadro "Malha do Silo" (X/Y por artigo, órfão no corpo), "Completar a malha do Silo" só acrescentando, com conferência.
+- [x] F4 · Radar: teto de 12 irmãos na trilha também para o irmão do grafo; T "pedido pelo grafo aprovado" com a aresta no grafo; catálogo.
+- [ ] Dono: homologar na AdalbaPro, Silo "Leads sem Tráfego Pago" — "Completar a malha do Silo" (prévia: +49, 23 mantidas, 0 chamada de IA), conferir a malha 64/64, "Confirmar links internos".
+- [x] Levar o grafo aprovado novo aos artigos que já estão no Radar sem reenvio — feito pela frente do Radar em 2026-10-14: "Atualização disponível do Arquiteto · links" (adoção no Radar, sem reenviar e sem refazer a pesquisa; detalhe em `docs/05-radar/estado-atual.md`). O Arquiteto não mudou.
+- [ ] Afinidade com os conceitos C e as perguntas P das plantas do Radar (§6.2), se o dono quiser — exige leitura de artefato do Radar pelo Arquiteto.
+- [ ] Leitura das arestas em páginas (`readGraphRows`) antes de Silos acima de 31 artigos (teto de 1000 linhas do PostgREST).
+
+## Planilha primeiro (SDD 2026-10-13, item 5, F5) — Arquiteto
+
+Detalhe em `docs/04-arquiteto/estado-atual.md` e no §18.5 da SDD. **Validado manualmente: não.**
+
+- [x] F5 · planilha "Artigos do plano" em Artigos novos: uma linha por keyword recebida com Assunto e plano (cor, ordem, papel, Assunto, keyword, trava, volume, SERP, estado), no recorte da cor ativa.
+- [x] F5 · Validar SERP (linha e lote): `keyword-serp` com `onlyMeasuredVolume`, cache primeiro, custo antes, uma confirmação, recusa por item, releitura da coluna SERP.
+- [x] F5 · Trocar principal (só Livre): candidatas pela regra única (tela e servidor), prévia, uma confirmação, nova versão; travada mostra o selo.
+- [x] F5 · Concluir formação (linha e lote): a melhoria recortada pelo grupo (`origin: "plan_sheet"`, recusa por item em `refusedTargets`), só das prontas, nada no Minerador.
+- [x] F5 · painel de texto só para publicados (`excludePlanArticles`); "Formar os artigos do plano · cor" saiu; as outras portas apontam para a planilha; catálogo/MCP.
+- [ ] Dono: homologar na WifiConecta, cor azul — 7 linhas (9–15), "Validar SERP (7)" com o custo antes (cancelar não paga), "Trocar principal" só em "diferença entre internet e Wi-Fi", "Concluir formação" e a linha passando a "Formado · v1"; dark mode e 360/768/1024/1440 px.
+- [ ] "Abrir DNA" na linha (lê o detalhe só daquela linha, item 4) e "Ver no Silo" (leva ao cartão do Silo do plano).
+- [ ] "Fora do plano" como estado na planilha (hoje é selo da mesa).
+- [ ] Ferramentas MCP próprias da planilha (`form_plan_articles`, `validate_plan_serp`, §9.2 da SDD) — hoje o chat usa `improve_articles` com `group`/`targetIds`/`principalChoice`.
+
+## O Arquiteto só lê keyword (SDD 2026-10-13, item 2, F4) — Arquiteto
+
+Detalhe em `docs/04-arquiteto/estado-atual.md` e no §18.4 da SDD. **Validado manualmente: não.**
+
+- [x] F4 · "Gravar melhorias" sem nenhuma escrita no Minerador (medição, Lógica, import, métricas, aprovação e envio saíram); linha "Precisa do Minerador" (`needsMinerador`), sem SERP paga; `approveNewKeywords` recusado.
+- [x] F4 · "Sugestões do Arquiteto": registro do Arquiteto por execução (melhoria, reforço, diferenciação), com a medição guardada só no servidor; caixa no Minerador.
+- [x] F4 · Reforçar publicados e Diferenciar publicados sem portas do Minerador; keyword nova vira sugestão.
+- [x] F4 · "Importar do Minerador" não aprova (D2), sem service role; "Aprovar no Minerador (N)" abre o Minerador filtrado.
+- [x] F4 · "Excluir" do rodapé virou "Excluir no Minerador" (leva ao Minerador com as linhas marcadas); rota legada de Silo sem lista do Minerador.
+- [x] F4 · MCP `improve_articles` sem escopo/permissão do Minerador; catálogo atualizado.
+- [ ] Dono: homologar na WifiConecta — "Buscar keywords" que traga ideia nova (linha "Precisa do Minerador" e o link), "Sugestões do Arquiteto · cor X" no Minerador (Trazer → prévia → Confirmar; depois "Aprovar e enviar"), "Buscar de novo" aqui e "Gravar melhorias" só com recebidas; "Importar do Minerador" com uma bruta pronta ("Aprovar no Minerador (N)" abre o diálogo de lá); "Excluir no Minerador"; dark mode e 360/768/1024/1440 px.
+- [ ] Keyword nova sugerida para PUBLICADO: importar já na cor do artigo (hoje o import do Minerador só liga ao grupo quando o destino é Assunto).
+- [ ] "Tirar do artigo" (keyword vai para "Não agrupadas", nova versão do ArticleDNA) como ato do Arquiteto ao lado de "Excluir no Minerador" (SDD §6.2, W7).
+- [ ] Na caixa, "Medir no Minerador (N)" já com o diálogo do Volume aberto (hoje marca as linhas para o botão Volume).
+
+## Ler antes de buscar (SDD 2026-10-13, item 3, F3) — Arquiteto
+
+Detalhe em `docs/04-arquiteto/estado-atual.md` e no §18.3 da SDD. **Validado manualmente: não.**
+
+- [x] F3 · leitor único "já temos · falta · custa" (`lib/editorial/known-before-search.ts` + `lib/server/known-before-search.ts`), D4: medido vale até "Medir de novo"; "sem média" por 30 dias.
+- [x] F3 · "Buscar keywords (grátis)" só lê; IA e medição no Google Ads só com `authorizeReading`, só do que falta; a IA recebe o resumo do DNA.
+- [x] F3 · medir uma vez na melhoria (medição guardada e gravada por replay; keyword nova idem); busca nova, "Reforçar publicados" e diferenciação não remedem o que o Minerador já mediu.
+- [x] F3 · o servidor decide o volume no parecer (`/api/arquiteto/serp`) e na SERP do lote/Silo (`keyword-serp` com `onlyMeasuredVolume`).
+- [ ] Dono: homologar na WifiConecta — "Buscar keywords (grátis)" sem nenhuma chamada (registro de uso sem linha nova), o quadro "Já temos · Falta · Custa", "Ler com IA e medir" (uma linha de uso da IA e uma consulta de métricas), "Gravar melhorias" sem consulta nova ao Google Ads (a medição gravada com a data da preparação); dark mode e 360/768/1024/1440 px.
+- [ ] "Usar o resultado anterior" na Pesquisa por Assunto (reabrir as candidatas do recibo pelo `searchId`, sem consultar de novo).
+- [ ] Custo antes também em "Revisar Silos com IA" e "Revisar com IA" (Artigos), com reaproveitamento pelos mesmos insumos; KeywordDNA no prompt da revisão territorial.
+- [ ] SERP territorial (regra 7): consulta de texto de território como "consulta sem volume medido", paga só marcada uma a uma.
+- [ ] IA da diferenciação de publicados com o resumo do DNA completo (hoje parcial).
+- [ ] Teste DOM do quadro "Já temos · Falta · Custa" e da confirmação "Ler o que falta · com custo".
+
+## Listas leves (SDD 2026-10-13, item 4) — Arquiteto
+
+Detalhe em `docs/04-arquiteto/estado-atual.md` e no §18.2 da SDD. **Validado manualmente: não.**
+
+- [x] F2 · leitura só das versões vigentes no `GET /api/arquiteto/workspace` (resposta igual).
+- [x] F2 · pareceres de SERP da formação em projeção (inteiro só na exportação); melhoria lê um parecer por `candidateRef`.
+- [x] F2 · releitura do que mudou (`POST /api/arquiteto/workspace/delta`) em todas as recargas e releituras diretas; 1ª leitura de cada abertura inteira.
+- [ ] Dono: homologar a mesa do Arquiteto (abrir, formar, aprovar, mover de Silo, desfazer Silo, melhoria aplicada, exportar backup) conferindo no Network que as ações chamam `workspace/delta` e que nada some; dark mode e 360/768/1024/1440 px (a tela não mudou de aparência).
+- [ ] F6 · cortar no banco o parecer de SERP (hoje 9,8 MB lidos para 2,4 MB enviados na AdalbaPro) — view/coluna gerada.
+- [ ] F6 · projetar o ArticleDNA (keywordReferences = 2,35 MB dos 2,85 MB) e o DNA das keywords recebidas, com o detalhe por id ao abrir o painel; mover para o servidor Processar arquitetura, canibalização, links entre Silos e o ponto de recuperação.
+- [ ] Aplicar a coluna `row_version` (migration `20260923140000`, escrita) para a releitura ver também mudança do DNA da keyword feita em outra aba.
+- [ ] Teste DOM da mesa com a releitura (hoje: equivalência no servidor e no cliente com fetch simulado).
+
 ## Acelerar o fluxo do plano (SDD 2026-10-13) — Arquiteto
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
@@ -16,6 +88,10 @@ Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
 - [ ] Sobras escondidas para grupo com plano (D6 da SDD 2026-10-12) — conferir na tela; não mexido nesta frente.
 - [ ] Dono: homologar o item 5 num Silo com um artigo bloqueado (os outros seguem) e um com a SERP velha (relê e continua).
 - [ ] F2 · item 6 na mesa do Arquiteto: ler só a cor exige levar ao servidor (ou exigir leitura inteira antes de) Processar arquitetura, canibalização, Reforçar publicados e links entre Silos — não feito.
+- [x] "Importar do Minerador" (pedido do dono, 2026-10-13): lista leve própria (`GET /api/arquiteto/import`), importar por cor com quem fica fora e o motivo, e o MESMO encadeamento do "Aprovar e enviar" (prévia → confirmação → resultado por keyword relido; Silo do plano no envio). Abrir não relê mais a mesa inteira.
+- [ ] Dono: homologar "Importar do Minerador" na WifiConecta — abrir com a etiqueta laranja ativa (as 5 brutas aparecem "fora: falta a Lógica"), rodar a Lógica no Minerador e importar a cor pelo Arquiteto (aprova e importa), conferir o resultado por keyword e a mesa; dark mode e 360/768/1024/1440 px.
+- [ ] Teste DOM do modal "Importar do Minerador" (cor → prévia → confirmar → releitura) e teste de servidor de `loadArquitetoImportPool` com banco simulado (hoje: núcleo puro + estrutura).
+- [ ] Lista com mais de 500 keywords fora do Arquiteto: as que passam do teto aparecem "não conferida agora"; importar por cor resolve, mas não há paginação do portão.
 
 ## Atualizar o Assunto dos artigos (conversão do formato anterior) — 2026-10-13
 

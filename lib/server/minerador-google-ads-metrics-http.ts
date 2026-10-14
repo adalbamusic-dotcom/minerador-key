@@ -23,7 +23,17 @@ function failure(code: string, stage: string, message: string, status: number, d
   return { code, stage, message, status, diagnostic };
 }
 
-export async function handleGoogleAdsKeywordMetrics(request: NextRequest, { params }: { params: Promise<{ brandId: string }> }, authorizedContext?: import("./pipeline-runtime").PipelineContext) {
+/**
+ * F3 · MEDIR UMA VEZ (SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`,
+ * item 3). Aditivo e opcional: quem JÁ mediu (a preparação da melhoria do
+ * Arquiteto, com a autorização dita na prévia) passa as métricas que recebeu do
+ * Google Ads, e esta rota grava ESSA medição pelo caminho de sempre — registro,
+ * projeção, "sem média", aprovação carregada, releitura — sem chamar o Google
+ * Ads de novo. Ausente = a consulta de sempre (a tela e o MCP do Minerador).
+ */
+export type GoogleAdsMetricsReplay = (input: { keywords: string[] }) => Promise<{ metrics: GoogleAdsHistoricalMetric[]; requestId: string | null }>;
+
+export async function handleGoogleAdsKeywordMetrics(request: NextRequest, { params }: { params: Promise<{ brandId: string }> }, authorizedContext?: import("./pipeline-runtime").PipelineContext, options: { replay?: GoogleAdsMetricsReplay } = {}) {
   let operationRequestId: string | null = null;
   let requestedCount = 0;
   let returnedCount = 0;
@@ -80,8 +90,9 @@ export async function handleGoogleAdsKeywordMetrics(request: NextRequest, { para
       return NextResponse.json({ success: false, operationRequestId, requestedCount, returnedCount, persistedCount, ...result }, { status: result.status });
     }
 
-    const { client } = await createGoogleAdsCanonicalClient({ context: canonicalContext });
-    apiRequestStarted = true;
+    // Com a medição já recebida (replay), nenhum cliente do Google Ads é aberto.
+    const client = options.replay ? null : (await createGoogleAdsCanonicalClient({ context: canonicalContext })).client;
+    apiRequestStarted = !options.replay;
     internalStage = "provider_request";
     const account = createGoogleAdsKeywordAccount({ customerId: canonicalContext.customerId, loginCustomerId: canonicalContext.managerCustomerId });
     const targeting = targetingToProviderInput(canonicalContext.targeting || defaultGoogleAdsCanonicalTargeting());
@@ -90,7 +101,7 @@ export async function handleGoogleAdsKeywordMetrics(request: NextRequest, { para
     for (const batchIds of splitGoogleAdsVolumeKeywordIds(requestedKeywords.map(keyword => keyword.id))) {
       const batch = requestedKeywords.filter(keyword => batchIds.includes(keyword.id));
       internalStage = "provider_request";
-      const result = await generateGoogleAdsHistoricalMetrics(client, {
+      const result = options.replay ? await options.replay({ keywords: batch.map(keyword => keyword.keyword) }) : await generateGoogleAdsHistoricalMetrics(client!, {
         account: { customerId: account.customerId, loginCustomerId: account.loginCustomerId || undefined },
         targeting,
         keywords: batch.map(keyword => keyword.keyword),

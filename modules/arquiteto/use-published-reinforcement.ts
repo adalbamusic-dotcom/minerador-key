@@ -243,8 +243,8 @@ export function usePublishedReinforcement(input: {
     setDialog(dialogoFechado());
   }, [dialog.status]);
 
-  /** Só pela confirmação: o hash da prévia vista e, com keyword nova, o aceite do dono. */
-  const applyReinforcement = useCallback(async (approveNewKeywords: boolean) => {
+  /** Só pela confirmação: o hash da prévia vista. F4: keyword nova vai como sugestão ao Minerador (sem aceite de aprovar aqui). */
+  const applyReinforcement = useCallback(async () => {
     const data = dialog.data;
     if (!brandId || !data || busy) return;
     const pages = dialog.requested.filter(page => !dialog.excluded.includes(page.publishedKeywordId));
@@ -256,7 +256,6 @@ export function usePublishedReinforcement(input: {
         pages,
         decisionHash: data.decisionHash,
         operationRequestId: crypto.randomUUID(),
-        approveNewKeywords,
       }));
       if (!result.ok) {
         const nova = result.code === "PREVIEW_CHANGED" && result.body?.preview && typeof result.body.preview === "object" ? result.body.preview as ReinforcementPreviewData : null;

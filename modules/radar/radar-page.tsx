@@ -79,6 +79,7 @@ import { buildRadarAnalysisMembership } from "@/lib/radar/analysis-membership";
 import { buildRadarSourceVerificationPlan } from "@/lib/radar/source-authority";
 import { buildRadarEvidenceClaims } from "@/lib/radar/claim-evidence";
 import { radarSourceVerificationBatches, radarSourceVerificationErrorMessage, radarSourceVerificationFailureRecords } from "@/lib/radar/source-verification-request";
+import { RadarAuthoritySourcesRecordSchema, radarAuthoritySourcesUnavailable } from "@/lib/radar/authority-sources-contract";
 import { buildRadarExternalSourceResearch } from "@/lib/radar/link-and-source-research";
 import { buildRadarSemanticConceptModel } from "@/lib/radar/semantic-concept-model";
 import { buildRadarWorkbenchStages, resolveRadarWorkbenchArticleId, summarizeRadarReferenceCounts, type RadarAdditionalEvidenceState } from "@/lib/radar/workbench";
@@ -639,8 +640,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * O escopo é estado da tela e não é lembrado. A escolha de FORMATO que o
    * card antigo gravava no navegador deixou de ser lida e gravada; o valor que
    * já estiver lá fica onde está (AGENTS §10).
+   *
+   * 2026-10-14 · a prática do dono é exportar UM artigo por vez (SDD silo
+   * interligado §16.1): o padrão do card passa a ser "Só os artigos selecionados",
+   * que baixa o CSV "Para escrever" e a SERP crua de cada artigo num .zip. O Silo
+   * completo continua a um clique.
    */
-  const [escopoDoExport, setEscopoDoExport] = useState<"silo" | "selecionados">("silo");
+  const [escopoDoExport, setEscopoDoExport] = useState<"silo" | "selecionados">("selecionados");
   const [avancadoDoExport, setAvancadoDoExport] = useState(false);
   const botaoDoExportRef = useRef<HTMLButtonElement | null>(null);
   /*
@@ -2990,7 +2996,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const resposta = await fetch("/api/editorial/radar-export", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ brandId: selectedBrandId, articleIds: alvo, mode: modo }),
+        /* 2026-10-14 · "para escrever" leva também a SERP crua de cada artigo (SDD silo interligado §16.1). */
+        body: JSON.stringify({ brandId: selectedBrandId, articleIds: alvo, ...(modo === "writing" ? { serpRaw: true } : {}), mode: modo }),
       });
       const corpo = await resposta.json().catch(() => ({}));
       /* 2026-10-09 · sem o artigo-modelo de algum artigo, nada sai: o botão do pedido passa a organizar (custo dito) e exportar. */
@@ -3003,7 +3010,21 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       marcarFaltaArtigoModelo(null);
       if (!resposta.ok || !corpo?.success) throw new RadarExportRefusedError(corpo?.error || "Não foi possível exportar os dossiês.", corpo?.refused);
 
-      baixarArquivoDoExport(new Blob([corpo.csv], { type: "text/csv;charset=utf-8" }), corpo.filename);
+      /*
+       * 2026-10-14 · COM A SERP CRUA, UM .ZIP: o CSV "Para escrever" (o mesmo de
+       * antes) e o `<NN>-<papel>-<slug>-serp.csv` de cada artigo, no .zip sem
+       * compressão que a tela já usa para os Silos (dois downloads seguidos
+       * esbarram na permissão do navegador). Sem ela, o CSV direto, como antes.
+       */
+      const serpCrua: Array<{ filename: string; csv: string }> = Array.isArray(corpo.serpRaw?.files) ? corpo.serpRaw.files : [];
+      if (serpCrua.length) {
+        const pacote = radarStoredZipOfTexts([{ name: corpo.filename, text: corpo.csv }, ...serpCrua.map(arquivo => ({ name: arquivo.filename, text: arquivo.csv }))], {
+          modifiedAt: corpo.exportedAt ? new Date(corpo.exportedAt) : new Date(),
+        });
+        baixarArquivoDoExport(new Blob([pacote.slice().buffer as ArrayBuffer], { type: RADAR_STORED_ZIP_MIME }), corpo.serpRaw.archiveFilename || String(corpo.filename).replace(/\.csv$/, ".zip"));
+      } else {
+        baixarArquivoDoExport(new Blob([corpo.csv], { type: "text/csv;charset=utf-8" }), corpo.filename);
+      }
 
       /*
        * 2026-09-23 · A RECUSA DEIXOU DE SER IGNORADA.
@@ -5029,6 +5050,40 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         setNotice("Consolidando evidências…");
       }
 
+      /*
+       * 2026-10-14 · FONTES EXTERNAS DE AUTORIDADE (SDD do Silo interligado §16.2, Fase A).
+       *
+       * Na MESMA operação, depois das fontes citadas: o servidor abre e confere as
+       * candidatas (as citadas pelos concorrentes e as da SERP já coletada nos
+       * domínios da lista da Marca), até 8, sem custo pago e sem IA. A tela só manda
+       * a identidade da versão; falhar aqui não derruba a análise — vira registro
+       * "não conferidas" com o motivo.
+       */
+      let fontesDeAutoridade: RadarAnalysisPayload["authoritySources"] = null;
+      try {
+        setNotice("Conferindo fontes externas de autoridade (governo, conselhos, ciência, Wikipédia)…");
+        const resposta = await fetch("/api/editorial/radar-analysis/authority-sources", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            brandId: target.brandId, articleId: target.articleId,
+            analysisVersionId: versaoDaAmostra.versionId,
+            articleDnaVersionId: versaoDaAmostra.payload.articleDnaVersionId,
+            keywordTexts: (data.researchContext?.resolvedKeywordTexts || []).slice(0, 20),
+            centralEntities: (data.researchContext?.keywords || [])
+              .map(keyword => (keyword.strategy.keywordDnaSnapshot as { payload?: Record<string, unknown> } | null)?.payload?.centralEntity)
+              .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+              .slice(0, 20),
+          }),
+        });
+        const corpo = await resposta.json().catch(() => ({}));
+        const lido = RadarAuthoritySourcesRecordSchema.safeParse(corpo?.authoritySources);
+        fontesDeAutoridade = resposta.ok && lido.success
+          ? lido.data
+          : radarAuthoritySourcesUnavailable(typeof corpo?.error === "string" ? corpo.error : `o servidor respondeu ${resposta.status}`, new Date().toISOString());
+      } catch (error) {
+        fontesDeAutoridade = radarAuthoritySourcesUnavailable(error instanceof Error ? error.message : "sem resposta do servidor", new Date().toISOString());
+      }
+
       /* 2026-10-08 · por URL normalizada: a página relida em variante (www, "/", protocolo) continua no benchmark. */
       const primaryUrls = new Set([
         ...buildRadarSerpSelectionProjection(data.view, data.analysis, selectionScope).rows.filter(selection => selection.role === "primary").map(selection => selection.result.url),
@@ -5060,7 +5115,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const nextVersionId = crypto.randomUUID();
       /* A camada de evidência sobe sobre a amostra já gravada, não sobre a anterior. */
       /* O carimbo entra na versão FINAL: é ela que completa o pipeline. */
-      const candidatePayload = { ...versaoDaAmostra.payload, analysisCompletedAt: new Date().toISOString(), verifiedSources: fontesVerificadas, sourceVerificationFailures: falhasDeFonte, benchmark, semanticTerms, structuralDecisions, competitiveness };
+      const candidatePayload = { ...versaoDaAmostra.payload, analysisCompletedAt: new Date().toISOString(), verifiedSources: fontesVerificadas, sourceVerificationFailures: falhasDeFonte, authoritySources: fontesDeAutoridade, benchmark, semanticTerms, structuralDecisions, competitiveness };
       const report = await buildRadarCompetitiveReport({ payload: candidatePayload, article: data.article!.payload, research, researchContext: data.researchContext, references: data.deepResearch?.references, radarItemId: target.id, analysisVersionId: nextVersionId, analysisVersionNumber: versaoDaAmostra.versionNumber + 1, generatedBy: sessionId(session), siloDnaVersionId: target.siloId ? pipeline.siloVersions[target.siloId]?.versionId || null : null, status: "draft" });
       const next = await createRadarAnalysisSuccessor(versaoDaAmostra, { ...candidatePayload, competitiveReport: report }, sessionId(session), undefined, nextVersionId);
       /*
@@ -5828,7 +5883,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
               <label className={`flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm ${escopoDoExport === "silo" ? "bg-context-accent/10 text-foreground" : "text-foreground/85 hover:bg-surface-subtle"}`}>
                 <input type="radio" name="radar-escopo-do-export" value="silo" checked={escopoDoExport === "silo"} onChange={() => setEscopoDoExport("silo")} className="mt-1 shrink-0 accent-context-accent focus-visible:ring-2 focus-visible:ring-context-accent/40" data-testid="radar-export-escopo-silo" />
                 <span className="block min-w-0">
-                  <strong className="block font-semibold">Silo completo (recomendado)</strong>
+                  <strong className="block font-semibold">Silo completo</strong>
                   <span className="mt-0.5 block text-text-muted">Um CSV por Silo, artigos na ordem do Silo.</span>
                   <span className="mt-0.5 block text-text-muted" data-testid="radar-export-resumo-silo">{radarSiloExportReadySummary({ scope: escopoDoSilo, finalizedArticleIds: prontosDoExport })}</span>
                   {avisoDeTamanhoDoExport ? <span className="mt-1 block" data-testid="radar-silos-size-estimate"><strong className="font-semibold text-warning">{avisoDeTamanhoDoExport.title}:</strong> {avisoDeTamanhoDoExport.message}</span> : null}
@@ -5837,8 +5892,9 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
               <label className={`flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm ${escopoDoExport === "selecionados" ? "bg-context-accent/10 text-foreground" : "text-foreground/85 hover:bg-surface-subtle"}`}>
                 <input type="radio" name="radar-escopo-do-export" value="selecionados" checked={escopoDoExport === "selecionados"} onChange={() => setEscopoDoExport("selecionados")} className="mt-1 shrink-0 accent-context-accent focus-visible:ring-2 focus-visible:ring-context-accent/40" data-testid="radar-export-escopo-selecionados" />
                 <span className="block min-w-0">
-                  <strong className="block font-semibold">Só os artigos selecionados</strong>
+                  <strong className="block font-semibold">Só os artigos selecionados (recomendado: um artigo por vez)</strong>
                   <span className="mt-0.5 block text-text-muted">Mesmo formato, com o Silo, o papel e os links de cada artigo.</span>
+                  <span className="mt-0.5 block text-text-muted">Vem num .zip com a SERP crua de cada artigo (só o que já foi coletado), para conferir fora da plataforma.</span>
                   <span className="mt-0.5 block text-text-muted" data-testid="radar-export-resumo-selecao">{semSelecaoNoExport ? "Sem seleção: vão todos os artigos prontos do Radar." : `${selectedArticleIds.length} ${selectedArticleIds.length === 1 ? "artigo selecionado" : "artigos selecionados"}`}</span>
                 </span>
               </label>

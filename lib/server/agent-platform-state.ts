@@ -5,7 +5,7 @@ import type { TopicCandidate } from "@/lib/agent/topic-match";
 import { resolveEditorialKeywordStatus } from "@/lib/minerador/editorial-status";
 import { convertedTitleIndex } from "@/lib/minerador/subject-conversion";
 import { radarFrozenObservedAtOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
-import { radarArchitectUpdateLabel } from "@/lib/radar/architect-update";
+import { radarArchitectLinksUpdateLabel, radarArchitectUpdateLabel } from "@/lib/radar/architect-update";
 import { buildTenantPath } from "@/lib/tenant-routing";
 import { editorialGroupFilterMatches } from "@/lib/editorial/editorial-groups";
 import type { EditorialGroupMcpScope } from "@/lib/editorial/editorial-group-scope";
@@ -207,9 +207,39 @@ export async function readPlatformState(brandId: string, options: { group?: Plat
    * no fim, e a poda preserva a corrente.
    */
   const radar = await db.from("editorial_workflow_items")
-    .select("subject_id,state,transported:payload->>articleDnaVersionId,amz:payload->analysisVersions->-1->payload->amazonFrozenInvestigation->>finalizedAt,yt:payload->analysisVersions->-1->payload->youtubeFrozenInvestigation->>finalizedAt,gg:payload->analysisVersions->-1->payload->finalizedBundle->>frozenAt")
+    .select("subject_id,state,transported:payload->>articleDnaVersionId,carriedGraph:payload->arquitetoInternalLinks->>graphVersionId,amz:payload->analysisVersions->-1->payload->amazonFrozenInvestigation->>finalizedAt,yt:payload->analysisVersions->-1->payload->youtubeFrozenInvestigation->>finalizedAt,gg:payload->analysisVersions->-1->payload->finalizedBundle->>frozenAt")
     .eq("marca_id", brandId).eq("stage", "radar").eq("subject_type", "article").limit(TETO.artigos);
   if (radar.error) mapPersistenceError(radar.error);
+  /*
+   * 2026-10-14 · LINKS NOVOS: o grafo aprovado vigente de cada grafo (a maior
+   * versão aprovada, sem conflito — a régua do índice canônico), sem nós nem
+   * arestas. A prévia de adopt_architect_version confere pelo Silo resolvido.
+   */
+  const grafosLidos = await db.from("internal_link_graphs")
+    .select("graph_version_id,graph_id,version_number,workflow_status,conflicts,participating_article_dna_version_refs")
+    .eq("marca_id", brandId);
+  if (grafosLidos.error) mapPersistenceError(grafosLidos.error);
+  const grafoPorVersao = new Map(((grafosLidos.data || []) as Row[]).map(row => [String(row.graph_version_id), row]));
+  const grafoVigentePorId = new Map<string, Row>();
+  for (const row of (grafosLidos.data || []) as Row[]) {
+    if (texto(row.workflow_status) !== "approved") continue;
+    const atual = grafoVigentePorId.get(String(row.graph_id));
+    if (!atual || Number(row.version_number) > Number(atual.version_number)) grafoVigentePorId.set(String(row.graph_id), row);
+  }
+  const linksUpdateDe = (row: Row) => {
+    const carregado = grafoPorVersao.get(texto(row.carriedGraph) || "");
+    const vigente = carregado ? grafoVigentePorId.get(String(carregado.graph_id)) : undefined;
+    if (!carregado || !vigente || vigente.graph_version_id === carregado.graph_version_id) return null;
+    if (Array.isArray(vigente.conflicts) && vigente.conflicts.length) return null;
+    const cobre = Array.isArray(vigente.participating_article_dna_version_refs)
+      && (vigente.participating_article_dna_version_refs as Row[]).some(ref => texto(ref?.versionId) === texto(row.transported));
+    if (!cobre) return null;
+    return {
+      label: radarArchitectLinksUpdateLabel(Number(carregado.version_number), Number(vigente.version_number)),
+      fromGraphVersionNumber: Number(carregado.version_number), toGraphVersionNumber: Number(vigente.version_number),
+      howToAdopt: "adopt_architect_version (mode=preview; kinds=['links'] aplica só os links) ou, na tela, Radar → 'Ver e adotar'",
+    };
+  };
 
   const documentosLidos = await db.from("content_documents")
     .select("id,article_id,title,status:payload->>status").eq("marca_id", brandId).order("updated_at", { ascending: false }).limit(TETO.documentos);
@@ -319,7 +349,7 @@ export async function readPlatformState(brandId: string, options: { group?: Plat
         const architectUpdate = transportada && aprovada && aprovada.version_id !== transportada.version_id && Number(aprovada.version_number) > Number(transportada.version_number)
           ? { label: radarArchitectUpdateLabel(Number(transportada.version_number), Number(aprovada.version_number)), fromVersionNumber: Number(transportada.version_number), toVersionNumber: Number(aprovada.version_number), howToAdopt: "adopt_architect_version (mode=preview) ou, na tela, Radar → 'Ver e adotar'" }
           : null;
-        return { articleId, state: String(row.state), finalizedAt, hasDocument, architectUpdate };
+        return { articleId, state: String(row.state), finalizedAt, hasDocument, architectUpdate, linksUpdate: linksUpdateDe(row) };
       }),
     },
     redator: {

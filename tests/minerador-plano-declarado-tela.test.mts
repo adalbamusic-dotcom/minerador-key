@@ -54,8 +54,9 @@ test("a prévia vem antes do envio, e o envio repete o pedido da prévia", () =>
   assert.match(ENVIO, /plan:\s*preview\.request\.plan/);
   assert.match(ENVIO, /group:\s*preview\.request\.group/);
   assert.match(ENVIO, /destination:\s*preview\.request\.destination/);
-  assert.match(CARD, /disabled=\{busy \|\| !result\?\.canApply \|\| Boolean\(applied\)\}/);
-  assert.match(CARD, /\bCadastrar\s*<\/button>/);
+  /* 2026-10-13 · F1 (SDD arquiteto-só-lê/listas-leves): na substituição com algo saindo, o envio também espera o nome da cor; o botão diz "Substituir o plano" (ajuste declarado). */
+  assert.match(CARD, /disabled=\{busy \|\| !result\?\.canApply \|\| Boolean\(applied\) \|\| !confirmacaoSubstituicaoOk\}/);
+  assert.match(CARD, /\{result\?\.replace \? MODO_PLANO_LABELS\.replace : "Cadastrar"\}\s*<\/button>/);
   assert.match(CARD, /\bGerar prévia\s*<\/button>/);
   const invalida = trecho(CARD, "const invalidate = () =>", "const mudarLinha");
   assert.match(invalida, /setPreview\(null\)/, "mudar qualquer campo descarta a prévia");

@@ -405,8 +405,10 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
    * (`detail=light`). "Todos os grupos" é a leitura de sempre (com `light`).
    * A cor ainda resolvendo ESPERA (nunca lê tudo por engano); a leitura de um
    * recorte só troca o que é dele (os merges abaixo preservam os outros
-   * grupos). Fora do Radar — Arquiteto, Redator, Publicações — nada muda: o
-   * Arquiteto ainda roda operações que precisam da marca inteira na tela.
+   * grupos). Fora do Radar — Arquiteto, Redator, Publicações — a mesa é a da
+   * marca inteira (todos os grupos). Desde 2026-10-14 (F2 das listas leves) ela
+   * vem LEVE em toda tela: o servidor escolhe as versões pelos metadados e não
+   * baixa o histórico; convites e visualizações salvas não vêm mais nela.
    */
   const pathname = usePathname();
   const rotaDoRadar = /(^|\/)radar(\/|$)/.test(pathname || "");
@@ -584,8 +586,15 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       const artigosDoRecorte = body?.groupScope?.partial === true && Array.isArray(body.groupScope.articleIds)
         ? new Set<string>(body.groupScope.articleIds.filter((id: unknown): id is string => typeof id === "string"))
         : null;
-      if (!artigosDoRecorte && recorte?.detail !== "light") leituraInteiraFeita.current.add(chaveDaLeitura);
-      ultimaLeituraRecortada.current = artigosDoRecorte ? "grupo" : recorte?.detail === "light" ? "leve" : "inteira";
+      /*
+       * 2026-10-14 · F2 das listas leves: o servidor devolve a mesa LEVE por
+       * padrão (vigente + última aprovada + referenciadas), com ou sem
+       * `detail=light`. A memória guarda só a versão mais nova de cada artigo
+       * (`latestVersionByKey`), então leve e "inteira" chegam ao MESMO estado:
+       * só o recorte por grupo é parcial.
+       */
+      if (!artigosDoRecorte) leituraInteiraFeita.current.add(chaveDaLeitura);
+      ultimaLeituraRecortada.current = artigosDoRecorte ? "grupo" : "inteira";
       {
         const base = workflowRecoveryStorageKey(actorUserId, selectedBrandId);
         chaveDaCopiaPorMarca.set(chaveDaLeitura, artigosDoRecorte && !leituraInteiraFeita.current.has(chaveDaLeitura) ? scopedRecoveryKey(base, recorte?.groupId) : base);
@@ -642,7 +651,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
          operationalPublications: artigosDoRecorte
            ? mergeScopedById(current.operationalPublications, persisted.publications, publication => artigosDoRecorte.has(publication.articleId))
            : persisted.publications,
-         invitations: persisted.invitations,
+         /* F2 das listas leves: a mesa não traz convites; ausente não apaga o que a memória tem (a Marca lê os dela). */
+         invitations: persisted.invitations ?? current.invitations,
        }; });
     } catch (error) {
       /* 2026-10-09 · a falha que deixava a planilha na cópia local não deixava rastro: agora fica no console. */
@@ -671,9 +681,10 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     if (esperando.pending) { void reloadOperational(esperando.snapshot); return; }
     if (!snapshots[workspaceKey]) return;
     const ultima = ultimaLeituraRecortada.current;
+    /* F2 das listas leves: leve e inteira são o mesmo estado; só sair de um recorte por grupo pede releitura. */
     const precisa = escopoDaMesa.scope?.groupId
       ? true
-      : escopoDaMesa.scope ? ultima === "grupo" : ultima !== "inteira";
+      : ultima === "grupo";
     if (precisa) void reloadOperational();
   }, [chaveDoEscopo, escopoDaMesa, actorUserId, selectedBrandId, snapshots, workspaceKey, reloadOperational]);
 
