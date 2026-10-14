@@ -232,9 +232,12 @@ test("estrutural · o painel de texto fica para publicados; as outras portas apo
   assert.match(painel, /restored\.origin === "plan_sheet"/, "o painel não retoma a execução da planilha");
   const tela = semComentarios(ler("../modules/arquiteto/arquiteto-workspace.tsx"));
   assert.doesNotMatch(tela, /planGroups=/);
-  assert.match(tela, /<PlanArticleSheet brandId=\{selectedBrandId \|\| null\}/);
-  assert.match(tela, /filter=\{arquitetoGroups\.filter\}/, "a cor ativa da etiqueta recorta a planilha");
-  assert.match(tela, /use a planilha "Artigos do plano" \(Artigos novos, acima\)/, "Processar artigos aponta para a planilha");
+  // 2026-10-14 (tarde) · pedido do dono ("uma lista só, sem planilhas duplicadas"): a planilha separada saiu da aba;
+  // o MESMO núcleo roda pelo hook, e as linhas do plano estão na tabela de artigos.
+  assert.doesNotMatch(tela, /<PlanArticleSheet /);
+  assert.match(tela, /const planSheet = usePlanArticleSheet\(\{\s*brandId: selectedBrandId \|\| null/);
+  assert.match(tela, /filter: arquitetoGroups\.filter, articles: planSheetArticles/, "a cor ativa da etiqueta recorta as linhas do plano");
+  assert.match(tela, /o caminho do plano é o das linhas do plano nesta mesma tabela/, "Processar artigos aponta para as linhas do plano");
   const servidor = semComentarios(ler("../lib/server/arquiteto-article-improvement.ts"));
   assert.match(servidor, /if \(options\.excludePlanArticles && standing\.plan\) continue;/);
   assert.match(servidor, /planPrincipalSwapCandidates\(/, "a mesma regra das candidatas na tela e no servidor");

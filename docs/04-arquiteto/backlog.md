@@ -1,3 +1,15 @@
+## Aba Artigos · uma tabela só, os botões de sempre, sem painel de texto no topo, cor entre marcas — Arquiteto — 2026-10-14 (tarde)
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Uma tabela só: as linhas do plano dentro da tabela de artigos, sob a SiloPage do Silo do plano, na ordem do plano; candidato do plano volta à mesa com os selos do plano; linha própria para a keyword do plano sem artigo; planilha separada fora da aba.
+- [x] "Processar artigos" e "Concluir formação" da barra valem para todas as linhas (as do plano pelo núcleo do plano: Validar SERP com custo antes; Concluir formação com prévia); ações por linha do plano (Validar SERP, Trocar principal se Livre, Concluir formação, Retirar artigo do Silo se presa).
+- [x] Sem cartão "Próximo passo" nem painel de texto no topo; "Melhorar publicados…" é botão da barra; aviso "Pacote novo no Minerador · N keywords" em uma linha.
+- [x] Linhas e detalhes que sumiram (candidatos do plano) de volta; "Detalhes técnicos" igual a `4d546ce`.
+- [x] Cor herdada inexistente na marca volta para "Todos os grupos" (sem `?grupo`, aviso curto), em todas as áreas.
+- [ ] Dono: homologar no azul (WifiConecta) e na AdalbaPro: a tabela única, os selos, a barra com linhas do plano marcadas e o aviso da cor.
+- [ ] Detalhe expandido para a linha do plano sem artigo (hoje só selos e ações; ela ainda não é Article).
+
 ## Caso WifiConecta (azul) · uma lista só, artigo intruso, Concluir formação por linha, painel recolhido — Arquiteto — 2026-10-14
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**

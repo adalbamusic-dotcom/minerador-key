@@ -172,16 +172,29 @@ test("guarda de retrabalho: leitura GRÁTIS repetida nunca pede motivo; o motivo
 const ler = (caminho: string) => readFileSync(new URL(caminho, import.meta.url), "utf8");
 const semComentarios = (codigo: string) => codigo.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 
-test("estrutural · a mesa não repete o candidato do plano e lê o Assunto da keyword do plano; nada é apagado", () => {
+/*
+ * 2026-10-14 (tarde) · pedido do dono: "coloca só numa lista, não cria várias
+ * listas, sem planilhas duplicadas". A planilha separada saiu da aba; a tabela
+ * de artigos de sempre é a lista: o candidato do plano volta a ser linha da
+ * mesa (com o detalhe de sempre) e ganha os selos do plano; a linha do plano
+ * sem artigo é linha própria da MESMA tabela. Os testes antigos que fixavam a
+ * planilha separada ("a mesa não repete o candidato", a frase com o atalho e
+ * o painel recolhido) foram trocados por estes.
+ */
+test("estrutural · uma tabela só: o candidato do plano é linha da mesa com os selos; a linha do plano sem artigo entra na MESMA tabela; nada é apagado", () => {
   const tela = semComentarios(ler("../modules/arquiteto/arquiteto-workspace.tsx"));
-  assert.match(tela, /if \(planSheetCandidateIds\.has\(art\.id\)\) return false;/, "o filtro da mesa tira o candidato do plano");
-  assert.match(tela, /planCandidateShownInSheet\(\{/);
+  assert.doesNotMatch(tela, /planSheetCandidateIds|planCandidateShownInSheet|architect-plan-candidates-in-sheet|<PlanArticleSheet /, "a mesa não esconde mais o candidato do plano nem manda para outra planilha");
   assert.match(tela, /const doPlano = planSubjectOfKeyword\(\{/, "o Assunto do candidato vem do plano");
-  assert.match(tela, /data-testid="architect-plan-candidates-in-sheet"/, "no lugar das linhas, a frase com o atalho");
-  assert.match(tela, /activeColorHasPlan=\{/, "o painel sabe que a cor tem plano");
-  // O filtro só esconde: nenhuma escrita nova nasce desta mudança.
-  const filtro = tela.slice(tela.indexOf("const planSheetCandidateIds = useMemo"), tela.indexOf("const filteredArticles = useMemo"));
-  assert.doesNotMatch(filtro, /fetch\(|persist|delete|remove|setMasterList|setArticlesList/);
+  assert.doesNotMatch(tela, /activeColorHasPlan=/);
+  assert.match(tela, /<PlanArticleTableRow\s/, "a linha do plano sem artigo é linha da tabela de artigos");
+  assert.match(tela, /<PlanRowSeals row=\{linhaDoPlano\}/, "a linha do artigo do plano ganha os selos do plano");
+  assert.match(tela, /<PlanRowActions sheet=\{planSheet\} row=\{linhaDoPlano\}/, "e as ações por linha do plano");
+  assert.match(tela, /group\.items\.map\(item => item\.kind === "plan" \?/);
+  const principal = tela.slice(tela.indexOf("<main className=\"min-w-0 flex-1 overflow-y-auto bg-background\">"), tela.indexOf("</main>"));
+  assert.equal((principal.match(/<table\b/g) || []).length, 1, "uma tabela só na aba (o diálogo de restauração de backup tem a dele, fora da aba)");
+  // A montagem das linhas do plano só lê: nenhuma escrita nasce desta mudança.
+  const montagem = tela.slice(tela.indexOf("const planBaseRows = useMemo"), tela.indexOf("const filteredArticles = useMemo"));
+  assert.doesNotMatch(montagem, /fetch\(|persist|delete|remove|setMasterList|setArticlesList/);
 });
 
 test("estrutural · a planilha abre 'Retirar artigo do Silo' (o núcleo de sempre) com prévia; não retira sozinha", () => {

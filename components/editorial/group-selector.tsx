@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Check, History, Settings2, Tag, Trash2 } from "lucide-react";
+import { Check, History, Settings2, Tag, Trash2, X } from "lucide-react";
 import { AnchoredPopover } from "@/components/editorial/anchored-popover";
 import { EditorialGroupDot } from "@/components/editorial/group-tag";
 import { useAreaGroupFilter } from "@/components/editorial/editorial-group-area-store";
@@ -298,6 +298,15 @@ export function TopbarGroupTag({ brandId, area, menuFooter, ungroupedDetail }: {
         onOpenHistory={corEscolhida ? () => setHistorico({ color: corEscolhida, groupIds: activeEditorialGroupsOfColor(recorte.groups.groups, corEscolhida).map(group => group.id) }) : undefined}
         onDeleteAll={area === "minerador" && servidor && corEscolhida ? () => setExcluirGrupo(activeEditorialGroupsOfColor(recorte.groups.groups, corEscolhida)[0]?.id ?? null) : undefined}
       />
+      {/* 2026-10-14 · a cor escolhida não existe nesta marca: a área voltou para "Todos os grupos" (aviso curto). */}
+      {recorte.colorFallback ? (
+        <span role="status" data-testid="editorial-group-color-fallback" data-missing-color={recorte.colorFallback} className="ml-1 inline-flex max-w-[24rem] items-center gap-1 text-sm text-warning">
+          <span className="truncate" title={`A cor ${EDITORIAL_GROUP_COLOR_LABELS[recorte.colorFallback]} não existe nesta marca: mostrando todos os grupos.`}>{`Sem a cor ${EDITORIAL_GROUP_COLOR_LABELS[recorte.colorFallback]} nesta marca · mostrando todos os grupos`}</span>
+          <button type="button" onClick={recorte.dismissColorFallback} aria-label="Fechar o aviso da cor" className="inline-flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent">
+            <X aria-hidden="true" className="h-4 w-4" />
+          </button>
+        </span>
+      ) : null}
       {gerenciar ? <EditorialGroupManageDialog brandId={brandId} groupId={gerenciar} groups={recorte.groups.groups} area={area} onClose={() => setGerenciar(null)} /> : null}
       {excluirGrupo && recorte.groups.groups.some(group => group.id === excluirGrupo) ? <EditorialGroupDeleteAllDialog brandId={brandId} group={recorte.groups.groups.find(group => group.id === excluirGrupo)!} onClose={() => setExcluirGrupo(null)} /> : null}
       {historico ? <EditorialGroupHistoryDialog brandId={brandId} color={historico.color} groupIds={historico.groupIds} groups={recorte.groups.groups} onClose={() => setHistorico(null)} /> : null}

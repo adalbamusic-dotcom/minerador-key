@@ -581,6 +581,130 @@ export function planCandidatesInSheetSentence(count: number): string {
   return `${count} artigo(s) do plano deste Silo ${count === 1 ? "está" : "estão"} na planilha “${PLAN_SHEET_TITLE}”, acima — uma linha por artigo, com Validar SERP e Concluir formação. Depois de formado, o artigo volta a aparecer aqui.`;
 }
 
+/* ----------------------------- uma tabela só, de novo (2026-10-14, tarde) */
+
+/*
+ * PEDIDO DO DONO (2026-10-14): "coloca só numa lista, não cria várias listas,
+ * sem planilhas duplicadas (…) sumiram os botões de processo normal". A tabela
+ * de artigos de sempre é a lista: o artigo do plano é uma LINHA dela, sob a
+ * SiloPage do Silo do plano, na ordem do plano. Quando a mesa já tem o artigo
+ * (candidato ou formado, cujo Assunto é a keyword do plano), é a linha dele que
+ * ganha os selos do plano; sem artigo na mesa, a linha é a do plano. Os botões
+ * da barra ("Processar artigos", "Concluir formação") valem para as duas: para
+ * a linha do plano, o núcleo é o do plano (Validar SERP com custo antes;
+ * Concluir formação pela melhoria recortada por grupo). Nenhuma regra nova.
+ */
+
+/** Um selo curto da linha do plano (trava, volume, SERP, formação, conflito). */
+export type PlanRowSeal = {
+  kind: "lock" | "volume" | "serp" | "formation" | "conflict";
+  label: string;
+  /** A frase inteira (o "por quê"), no `title` do selo. */
+  title: string;
+  tone: "neutral" | "muted" | "warning" | "positive";
+};
+
+/** Os selos curtos da linha do plano, na ordem da leitura. Só lê a linha. */
+export function planRowSeals(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" | "formation" | "conflict" | "supports">): PlanRowSeal[] {
+  const selos: PlanRowSeal[] = [];
+  selos.push(row.lock.state === "locked"
+    ? { kind: "lock", label: "Travada", title: `${row.lock.label}. ${row.lock.why}`, tone: "muted" }
+    : row.lock.state === "free"
+      ? { kind: "lock", label: "Livre", title: `${row.lock.label}. ${row.lock.why}`, tone: "neutral" }
+      : { kind: "lock", label: "Sem principal declarada", title: row.lock.why, tone: "muted" });
+  const sustentacoes = row.supports.count > 0 ? ` ${row.supports.count} sustentação(ões) na lista do Assunto · ${row.supports.withVolume} com volume.` : "";
+  selos.push(row.volume.state === "measured"
+    ? { kind: "volume", label: `Vol. ${(row.volume.value ?? 0).toLocaleString("pt-BR")}`, title: `${row.volume.label}.${sustentacoes}`, tone: "neutral" }
+    : row.volume.state === "no_average"
+      ? { kind: "volume", label: "Sem média", title: `${row.volume.label}.${sustentacoes}`, tone: "muted" }
+      : { kind: "volume", label: "Sem volume", title: `${row.volume.label}.${sustentacoes}`, tone: "muted" });
+  const serp = row.serp.state === "complete" ? { label: "SERP 4/4", tone: "positive" as const }
+    : row.serp.state === "partial" ? { label: `SERP ${row.serp.lenses}/4`, tone: "warning" as const }
+    : row.serp.state === "none" ? { label: "Sem SERP", tone: "muted" as const }
+    : row.serp.state === "loading" ? { label: "SERP…", tone: "muted" as const }
+    : { label: "SERP não lida", tone: "muted" as const };
+  selos.push({ kind: "serp", label: serp.label, title: row.serp.label, tone: serp.tone });
+  if (row.conflict) selos.push({ kind: "conflict", label: PLAN_SHEET_CONFLICT_LABEL, title: row.conflict.sentence, tone: "warning" });
+  else selos.push({ kind: "formation", label: row.formation.label, title: row.formation.label, tone: row.formation.state === "awaiting_principal" ? "warning" : row.formation.state === "formed" || row.formation.state === "in_radar" ? "positive" : "neutral" });
+  return selos;
+}
+
+/** O rótulo curto do papel e da ordem: "Pilar · 9º", "Suporte · 11º". */
+export function planRowRoleLabel(row: Pick<PlanSheetRow, "role" | "order">): string {
+  return `${row.role} · ${row.order}º`;
+}
+
+/**
+ * AS LINHAS DE UM GRUPO DA TABELA, NA ORDEM DO PLANO. Os artigos da mesa que
+ * são do plano (o Assunto deles é a keyword de uma linha do plano) e as linhas
+ * do plano sem artigo na mesa vêm primeiro, pela ordem do plano; os demais
+ * artigos seguem depois, na ordem de sempre. Nada some: cada artigo e cada
+ * linha do plano aparece uma vez.
+ */
+export type PlanGroupItem<A> =
+  | { kind: "article"; key: string; article: A; planRow: PlanSheetRow | null }
+  | { kind: "plan"; key: string; row: PlanSheetRow };
+
+export function planOrderedGroupItems<A>(input: {
+  articles: readonly A[];
+  planRows: readonly PlanSheetRow[];
+  idOf: (article: A) => string;
+  planRowOf: (article: A) => PlanSheetRow | null;
+}): PlanGroupItem<A>[] {
+  const doPlano: { order: number; seq: number; item: PlanGroupItem<A> }[] = [];
+  const demais: PlanGroupItem<A>[] = [];
+  let seq = 0;
+  for (const article of input.articles) {
+    const planRow = input.planRowOf(article);
+    const item: PlanGroupItem<A> = { kind: "article", key: input.idOf(article), article, planRow };
+    if (planRow) doPlano.push({ order: planRow.order, seq: seq++, item });
+    else demais.push(item);
+  }
+  for (const row of input.planRows) doPlano.push({ order: row.order, seq: seq++, item: { kind: "plan", key: `plan:${row.keywordId}`, row } });
+  doPlano.sort((a, b) => a.order - b.order || a.seq - b.seq);
+  return [...doPlano.map(entry => entry.item), ...demais];
+}
+
+/**
+ * AS LINHAS DO PLANO QUE PRECISAM DE LINHA PRÓPRIA: as que nenhum artigo da
+ * mesa representa (o Assunto de nenhum artigo é a keyword delas). As demais
+ * aparecem como selos na linha do artigo — uma linha por artigo.
+ */
+export function planRowsWithoutArticle(rows: readonly PlanSheetRow[], representedKeywordIds: ReadonlySet<string>): PlanSheetRow[] {
+  return rows.filter(row => !representedKeywordIds.has(row.keywordId));
+}
+
+/**
+ * OS BOTÕES DA BARRA, PARA TODAS AS LINHAS. A seleção da tabela se divide em
+ * duas: os artigos de sempre (o núcleo de sempre) e as linhas do plano — as
+ * marcadas como linha própria e os artigos da mesa que são do plano (o núcleo
+ * do plano). O dono vê um botão só.
+ */
+export function splitTableSelectionForPlan<A>(input: {
+  articles: readonly A[];
+  selectedArticleIds: ReadonlySet<string>;
+  idOf: (article: A) => string;
+  planRowOf: (article: A) => PlanSheetRow | null;
+  planOnlyRows: readonly PlanSheetRow[];
+  selectedPlanKeywordIds: ReadonlySet<string>;
+}): { regularArticleIds: Set<string>; planTargets: PlanSheetRow[] } {
+  const regularArticleIds = new Set<string>();
+  const alvos = new Map<string, PlanSheetRow>();
+  const naMesa = new Set<string>();
+  for (const article of input.articles) {
+    const id = input.idOf(article);
+    naMesa.add(id);
+    if (!input.selectedArticleIds.has(id)) continue;
+    const planRow = input.planRowOf(article);
+    if (planRow) alvos.set(planRow.keywordId, planRow);
+    else regularArticleIds.add(id);
+  }
+  // Seleção de artigo que não está mais na mesa continua no escopo de sempre (quem recusa é o núcleo).
+  for (const id of input.selectedArticleIds) if (!naMesa.has(id)) regularArticleIds.add(id);
+  for (const row of input.planOnlyRows) if (input.selectedPlanKeywordIds.has(row.keywordId)) alvos.set(row.keywordId, row);
+  return { regularArticleIds, planTargets: [...alvos.values()].sort((a, b) => a.order - b.order || a.keyword.localeCompare(b.keyword, "pt-BR")) };
+}
+
 /* -------------------------------------------------------- próximo passo */
 
 export type PlanSheetNextStep = {

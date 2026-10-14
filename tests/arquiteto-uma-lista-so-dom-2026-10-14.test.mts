@@ -12,7 +12,8 @@ import { ARTIGO_INTRUSO, AZUL, INTRUSO_ID, MARCA_WIFI, SILO_PLANOS, grupoDaKeywo
  * linha termina com um resultado claro (forma, recusa com motivo e caminho, ou
  * falta SERP com custo), nada fica girando; erro do servidor vira frase humana;
  * a linha presa abre "Retirar artigo do Silo" com prévia e só o dono confirma;
- * com a cor que tem plano, o painel dos publicados fica recolhido.
+ * (2026-10-14, tarde: o painel dos publicados abre só pelo botão da barra; a
+ * planilha separada fica para estes testes do núcleo — a aba não a mostra.)
  */
 
 type Chamada = { url: string; method: string; body: any };
@@ -169,27 +170,22 @@ test("linha presa → 'Retirar artigo do Silo': abre a PRÉVIA (grátis) do arti
 
 /* --------------------------------------------- o painel dos publicados */
 
-const painel = (activeColorHasPlan: boolean) => comProductShell(React.createElement(ArticleImprovementPanel, { brandId: MARCA_WIFI, onApplied: () => undefined, buttonClassName: "button", primaryButtonClassName: "button", activeGroup: { requested: "azul", label: "Azul" }, activeColorHasPlan }));
+/*
+ * 2026-10-14 (tarde) · pedido do dono ("é tudo por esse painel cheio de textos"):
+ * o painel dos publicados saiu do topo da aba e abre só pelo botão
+ * "Melhorar publicados…" da barra. O modo "recolhido com Próximo passo para a
+ * planilha" saiu junto com a planilha separada; estes testes substituem os
+ * dois que fixavam aquele modo.
+ */
+const painel = () => comProductShell(React.createElement(ArticleImprovementPanel, { brandId: MARCA_WIFI, onApplied: () => undefined, buttonClassName: "button", primaryButtonClassName: "button", activeGroup: { requested: "azul", label: "Azul" } }));
 
-test("cor com plano: o painel 'Melhorar publicados' abre recolhido e o próximo passo aponta para a planilha", async () => {
+test("o painel dos publicados (aberto pelo botão da barra) é o de sempre: sem modo recolhido nem 'Ir para a planilha'; o artigo do plano é linha da tabela", async () => {
   rede();
-  await screen.render(painel(true)); await assentar();
-  const secao = screen.get("architect-article-improvement");
-  assert.equal(secao.dataset.collapsed, "true");
-  assert.match(screen.get("architect-improvement-collapsed").textContent!, /^Melhorar publicados · recolhido — os artigos do plano da cor Azul estão na planilha abaixo/);
-  assert.equal(screen.get("architect-improvement-next-step").dataset.nextStep, "plan_sheet");
-  assert.match(screen.get("architect-improvement-next-step").textContent!, /Validar SERP e depois Concluir formação/);
-  assert.equal([...screen.container.querySelectorAll("button")].some(item => /Buscar keywords/.test(item.textContent ?? "")), false, "nada de 'Buscar keywords' em cima");
-  assert.equal(chamadas.filter(chamada => chamada.method === "POST").length, 0, "recolhido não prepara nada");
-  await screen.click("architect-improvement-expand"); await assentar();
-  assert.equal(screen.get("architect-article-improvement").dataset.collapsed, undefined);
-  assert.equal(screen.get("architect-improvement-next-step").dataset.nextStep, "prepare", "aberto, o painel de sempre");
-  assert.ok([...screen.container.querySelectorAll("button")].some(item => /Buscar keywords/.test(item.textContent ?? "")));
-});
-
-test("cor sem plano: o painel de sempre, aberto", async () => {
-  rede();
-  await screen.render(painel(false)); await assentar();
+  await screen.render(painel()); await assentar();
   assert.equal(screen.get("architect-article-improvement").dataset.collapsed, undefined);
   assert.equal(screen.query("architect-improvement-collapsed"), null);
+  assert.equal(screen.get("architect-improvement-next-step").dataset.nextStep, "prepare");
+  assert.doesNotMatch(screen.text(), /Artigos do plano|planilha abaixo|Ir para “Artigos do plano”/);
+  assert.match(screen.get("architect-improvement-plan-elsewhere").textContent!, /linha da tabela de artigos, com “Processar artigos” e “Concluir formação” da barra/);
+  assert.equal(chamadas.filter(chamada => chamada.method === "POST").length, 0, "abrir não prepara nada");
 });
