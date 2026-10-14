@@ -17,6 +17,7 @@ import { RadarResearchPackageRecordSchema } from "./research-package.ts";
 import { RadarYoutubeFrozenInvestigationSchema } from "./youtube-evidence.ts";
 import { RadarPrimarySearchModeSchema } from "./search-mode.ts";
 import { RadarSupportResearchRecordSchema } from "./research-profile.ts";
+import { RadarAuthoritySourcesRecordSchema } from "./authority-sources-contract.ts";
 
 export const RadarAnalysisModeSchema = z.enum(["kgr_light", "competitive_full"]);
 export type RadarAnalysisMode = z.infer<typeof RadarAnalysisModeSchema>;
@@ -452,6 +453,16 @@ export const RadarAnalysisPayloadSchema = z.object({
     status: z.number().int().nonnegative().nullable().default(null),
     observedAt: z.string().min(1),
   }).strict()).default([]),
+  /*
+   * 2026-10-14 · FONTES EXTERNAS DE AUTORIDADE CONFERIDAS (SDD do Silo interligado §16.2, Fase A).
+   *
+   * Governo, conselhos, ciência, Wikipédia e documentação do Google — as citadas
+   * pelos concorrentes e as da SERP já coletada nos domínios da lista da Marca —
+   * abertas no ANALYZE, cada uma com o trecho que sustenta uma afirmação do artigo
+   * (id X). Aditivo e opcional: análise gravada antes não tem e continua válida
+   * (ausente = "não conferida nesta investigação"). Quem aplica no artigo é a Fase B.
+   */
+  authoritySources: RadarAuthoritySourcesRecordSchema.nullable().optional(),
   /*
    * QUANDO O ANALYZE TERMINOU DE VERDADE — §7 do Gate 18.4.
    *

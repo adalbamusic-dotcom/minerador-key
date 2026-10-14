@@ -45,7 +45,9 @@ test("sem Pilar não há verticalização a derivar", () => {
 
 /* --------------------- Silo com profundidade: o mesmo -------------------- */
 
-test("o esqueleto do Silo profundo cobre raiz, Pilar e suportes sem cartesiano", () => {
+// 2026-10-14 · SDD silo interligado · F4 · decisão do dono (D1: "tem que estar interconectado todos dentro do silo"):
+// o gerador grava a malha — Suporte ↔ Suporte e Suporte → SiloPage. O esqueleto de antes continua em `{ mesh: false }`.
+test("o Silo profundo ganha a malha inteira: raiz, Pilar, suportes, Suporte ↔ Suporte e Suporte → raiz (D1)", () => {
   const unidades = [raiz, pilar, suporte("s1", "um suporte"), suporte("s2", "outro suporte")];
   const conexoes = buildStructuralLinkConnections(unidades);
 
@@ -54,11 +56,13 @@ test("o esqueleto do Silo profundo cobre raiz, Pilar e suportes sem cartesiano",
     return acc;
   }, {});
   assert.equal(contagem.SILO_PAGE_TO_ARTICLE, 3, "raiz abre pelo Pilar e lista os dois suportes");
-  assert.equal(contagem.ARTICLE_TO_SILO_PAGE, 1, "só o Pilar volta para a raiz");
+  assert.equal(contagem.ARTICLE_TO_SILO_PAGE, 3, "o Pilar e os dois suportes voltam para a raiz");
   assert.equal(contagem.PILLAR_TO_SUPPORT, 2);
   assert.equal(contagem.SUPPORT_TO_PILLAR, 2);
-  // Suporte↔Suporte é julgamento editorial sobre o conteúdo, não organograma.
-  assert.equal(contagem.SUPPORT_TO_SUPPORT, undefined);
+  assert.equal(contagem.SUPPORT_TO_SUPPORT, 2, "s1 → s2 e s2 → s1");
+  const esqueleto = buildStructuralLinkConnections(unidades, { mesh: false });
+  assert.equal(esqueleto.some(item => item.relationType === "SUPPORT_TO_SUPPORT"), false, "o esqueleto de antes continua disponível");
+  assert.equal(esqueleto.filter(item => item.relationType === "ARTICLE_TO_SILO_PAGE").length, 1);
 });
 
 test("toda conexão explica a si mesma em linguagem de arquitetura", () => {

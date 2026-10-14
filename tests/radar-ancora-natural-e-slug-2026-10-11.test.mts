@@ -502,9 +502,10 @@ test("pedido · a regra da âncora natural vai à regra 6; cada candidato K leva
   assert.ok(system.includes(RADAR_NATURAL_ANCHOR_PROMPT_RULE), "a regra 6 manda a ideia do destino nas palavras da frase");
   assert.match(system, /^6\. Links internos: só para os candidatos K dados, com âncora natural e o motivo\. A ÂNCORA diz a ideia do destino com as palavras da frase da seção/m);
   assert.match(system, /nunca escreva como âncora uma keyword do destino/);
-  assert.match(user, new RegExp(`· Pilar · leads qualificados · ${PREFIXO.replace(/[./]/g, "\\$&")}\\/qualificados · planejado · keywords do destino, nunca âncora: "leads qualificados" · conceitos de âncora do grafo: "como gerar leads qualificados", "leads qualificados"`));
+  /* 2026-10-14 · SDD silo interligado · F2 · decisão do dono (D2): cada K diz a obrigação; o Pilar, para o Suporte, é "obrigatório no corpo". */
+  assert.match(user, new RegExp(`· Pilar · leads qualificados · ${PREFIXO.replace(/[./]/g, "\\$&")}\\/qualificados · planejado · obrigatório no corpo · keywords do destino, nunca âncora: "leads qualificados" · conceitos de âncora do grafo: "como gerar leads qualificados", "leads qualificados"`));
   /* 2026-10-11c · as regras avançaram de novo (keywords proibidas por destino); a de 11/10b ganha o aviso, e a planta aprovada não é desligada. */
-  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-11c");
+  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-14c"); /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): regras 2026-10-14c */
   const aviso = radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-09b" })!;
   assert.match(aviso, /âncora natural/);
   assert.match(aviso, /já trocam, ao ler esta versão, a âncora que é a keyword inteira do destino/);
@@ -514,7 +515,9 @@ test("pedido · a regra da âncora natural vai à regra 6; cada candidato K leva
   assert.match(aviso11b, /^Esta versão foi montada com as regras de 2026-10-11b\. As de 2026-10-11c acrescentam as keywords proibidas por destino nos links internos/);
   assert.match(aviso11b, /já dizem, ao ler esta versão, as keywords de cada destino que não podem ser âncora/);
   semD10(aviso11b, "aviso 2026-10-11b");
-  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" }), null);
+  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-14c" }), null); /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): regras 2026-10-14c (a de 2026-10-14b ganha o aviso) */
+  assert.match(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-14" })!, /^Esta versão foi montada com as regras de 2026-10-14. As de 2026-10-14b acrescentam a análise competitiva/);
+  assert.match(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" })!, /^Esta versão foi montada com as regras de 2026-10-11c\. As de 2026-10-14 acrescentam /);
 });
 
 test("pedido (11c) · cada candidato K leva as keywords do destino (as da publicação do membro ou as do campo opcional), e o pedido as diz", () => {
@@ -547,7 +550,7 @@ test("conferência · a planta nova com a keyword inteira como âncora sai com o
   const ajustes = notes.filter(item => /âncora ".*" ajustada para/.test(item));
   assert.ok(ajustes.length >= 2, notes.join("\n"));
   assert.equal(radarArticleBlueprintPendingNotes(ajustes).pending.length, 0, "a troca é correção aplicada, não pede ação");
-  assert.equal(payload.rulesVersion, "2026-10-11c");
+  assert.equal(payload.rulesVersion, "2026-10-14c"); /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): regras 2026-10-14c */
   assert.ok(payload.linkCandidates.find(item => item.role === "Pilar")?.anchorConcepts?.length, "a planta nova grava os conceitos do candidato");
   assert.deepEqual(payload.linkCandidates.find(item => item.role === "Pilar")?.keywords, ["leads qualificados"], "e as keywords do destino (aditivo)");
 });
@@ -737,7 +740,7 @@ test("paridade · o Redator lê as mesmas âncoras do CSV (a mesma leitura compa
   /* 2026-10-11c · e cada link diz as keywords do destino que nunca são âncora (a mesma lista do CSV; a página da marca não tem). */
   const proibidasNoCsv = linksDe(linhaDoArtigo().row.links_internos).map(item => item.proibidas);
   assert.deepEqual(redator.sections.flatMap(item => item.internalLinks.map(link => link.avoidAsAnchor ?? [])), proibidasNoCsv);
-  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-11c", "a fatia radar.blueprint/<id> muda com a leitura");
+  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-14", "a fatia radar.blueprint/<id> muda com a leitura"); /* 2026-10-14 · SDD silo interligado · F1 · decisão do dono: regras 2026-10-14 */
   const semComentario = (texto: string) => texto.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   const prompts = semComentario(await readFile(new URL("../lib/redator/prompts.ts", import.meta.url), "utf8"));
   assert.match(prompts, /os links internos dela com a âncora sugerida, sem criar link fora dela\. \$\{RADAR_NATURAL_ANCHOR_RULE\} \$\{RADAR_NATURAL_ANCHOR_WRITER_NOTE\}/);

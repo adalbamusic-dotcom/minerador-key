@@ -120,7 +120,9 @@ test("marca de principal órfã (Assunto retirado pelo Vínculo antigo): o paine
   const view = resolveSubjectArticleView({ keywordId: KW, keyword: "internet fibra óptica", semantic: withdrawnLike, groupOf });
   assert.ok(view && view.kind === "orphan_mark");
   assert.equal(view?.kind === "orphan_mark" && view.lastTitle, "Internet fibra óptica ou internet comum: qual a diferença?");
-  assert.equal(view?.kind === "orphan_mark" && view.hint, SUBJECT_ARTICLE_ORPHAN_HINT);
+  // 2026-10-13 (ajuste declarado, "o Assunto nunca se perde"): o aviso diz quando/por onde (se registrado) e o caminho, com a cor.
+  assert.notEqual(view?.kind === "orphan_mark" && view.hint, SUBJECT_ARTICLE_ORPHAN_HINT);
+  assert.equal(view?.kind === "orphan_mark" && view.hint, "Assunto retirado desta keyword. Restaurar: Cadastrar Assuntos → Silo existente → Azul (as linhas já vêm do histórico).");
   assert.deepEqual(view?.group, { color: "azul", name: "Wi-Fi e fibra óptica" });
   assert.equal(resolveSubjectArticleView({ keywordId: KW, keyword: "x", semantic: { nicho: "y" } }), null, "keyword comum: nada a mostrar");
 });

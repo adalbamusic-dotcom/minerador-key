@@ -84,6 +84,31 @@ export async function readSubjectSearchReceipt(input: { brandId: string; operati
   }
 }
 
+/**
+ * F3 · LER ANTES DE BUSCAR (SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`,
+ * item 3, regra 8): as pesquisas anteriores do MESMO Assunto (pela keyword do
+ * Assunto, ou pela frase quando não há keyword), mais novas primeiro, em
+ * colunas estreitas (nunca as candidatas). Só leitura; tabela ausente ou falha
+ * = lista vazia (a prévia segue como antes).
+ */
+export async function listPreviousSubjectSearches(input: { brandId: string; subjectKeywordId: string | null; phrase: string; limit?: number; client?: Client }): Promise<Array<{ operationRequestId: string; executedAt: string; candidateCount: number; phrase: string }>> {
+  try {
+    const client = input.client ?? createCanonicalServiceClient();
+    const base = client
+      .from(SUBJECT_SEARCH_RECEIPT_TABLE)
+      .select("operation_request_id,executed_at,candidate_count,phrase")
+      .eq("marca_id", input.brandId);
+    const filtrada = input.subjectKeywordId ? base.eq("subject_keyword_id", input.subjectKeywordId) : base.eq("phrase", input.phrase);
+    const { data, error } = await filtrada.order("executed_at", { ascending: false }).limit(Math.max(1, Math.min(10, input.limit ?? 5)));
+    if (error || !Array.isArray(data)) return [];
+    return (data as Array<Record<string, unknown>>).flatMap(row => typeof row.operation_request_id === "string" && typeof row.executed_at === "string"
+      ? [{ operationRequestId: row.operation_request_id, executedAt: row.executed_at, candidateCount: typeof row.candidate_count === "number" ? row.candidate_count : 0, phrase: typeof row.phrase === "string" ? row.phrase : input.phrase }]
+      : []);
+  } catch {
+    return [];
+  }
+}
+
 /** A porta do Volume a partir da leitura do recibo. Sem recibo, `decide` nunca é chamado pelo núcleo. */
 export function subjectSearchVolumePort(read: SubjectSearchReceiptRead): SubjectDiscoveryImportVolumePort {
   const receipt = read.status === "found" ? read.receipt : null;

@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveEffectiveKeywordStatus } from "@/lib/minerador/editorial-status";
 import { applyApproval, approvedPackageDiverged, readApprovalRecord, resolveApprovalReadiness } from "@/lib/minerador/approved-package";
 import { isKeywordPublished } from "@/lib/minerador/keyword-lifecycle";
+import { guardKeywordSemanticWrite } from "@/lib/minerador/keyword-subject";
 import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";
 import { hasCompleteLogicalOutputContract, hasCurrentLogicalProcessorMetadata } from "@/lib/minerador/logical-processor";
 import { getOperationalClient, mapPersistenceError } from "./editorial-db";
@@ -144,8 +145,11 @@ export async function runKeywordLogicWithCore(input: { brandId: string; keywordI
   const results: KeywordLogicResult["results"] = [];
   for (const { row, derived } of planned) {
     if (!derived.needsWrite) { results.push({ id: row.id, keyword: row.keyword, outcome: "unchanged" }); continue; }
+    // 2026-10-13 · o Assunto nunca se perde: a Lógica não grava cópia sem ele (merge, não replace).
+    const guarded = guardKeywordSemanticWrite(row.analise_semantica, derived.update.analise_semantica);
+    if (!guarded.ok) { results.push({ id: row.id, keyword: row.keyword, outcome: "stale", reason: guarded.reason }); continue; }
     const saved = await constrainKeywordSnapshot(
-      db.from("minerador_keywords").update({ intent: derived.update.intent, analise_semantica: derived.update.analise_semantica })
+      db.from("minerador_keywords").update({ intent: derived.update.intent, analise_semantica: guarded.semantic })
         .eq("id", row.id).eq("brand_id", input.brandId).is("deleted_at", null),
       row,
     ).select("id,intent,analise_semantica").maybeSingle();
@@ -224,6 +228,12 @@ export async function applyKeywordDecisionEntries(input: {
     if (entry.outcome === "blocked") { results.push({ id: row.id, outcome: "blocked", reason: entry.blockers[0] }); continue; }
     let semantic = row.analise_semantica || {};
     if (input.action === "approve") semantic = await applyApproval({ ...approvalInput(row), approvedAt: (input.now ? input.now() : new Date()).toISOString(), approvedBy: input.actorId });
+    // 2026-10-13 · o Assunto nunca se perde: a aprovação não grava cópia sem ele (merge, não replace).
+    if (input.action === "approve") {
+      const guarded = guardKeywordSemanticWrite(row.analise_semantica, semantic);
+      if (!guarded.ok) { results.push({ id: row.id, outcome: "blocked", reason: guarded.reason }); continue; }
+      semantic = guarded.semantic;
+    }
     const saved = await constrainKeywordSnapshot(
       db.from("minerador_keywords")
         .update({ status: entry.proposedStatus, ...(input.action === "approve" ? { analise_semantica: semantic } : {}) })

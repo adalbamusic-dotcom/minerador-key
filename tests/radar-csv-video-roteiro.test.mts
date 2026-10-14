@@ -689,7 +689,13 @@ test("13b · o \"não cobrir\" do Silo vale no CSV de vídeo como no CSV para es
     const escritaSemSilo = radarPortableWritingExport({ articles: [montada], lenses, plan: null, today: EXPORTADO_EM }).csv || "";
     const escrita = radarPortableWritingExport({ articles: [montada], lenses, plan: null, selectionPlan: plano, today: EXPORTADO_EM }).csv || "";
     assert.ok(videoSemSilo.includes(pergunta), `sem o Silo, a pergunta é do público no vídeo: ${pergunta}`);
-    assert.ok(escritaSemSilo.includes(pergunta), `sem o Silo, a pergunta é do público no CSV para escrever: ${pergunta}`);
+    /*
+     * 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D13): o CSV para
+     * escrever leva até 4 perguntas que valem resposta; sem o Silo, a pergunta é do
+     * público — entre as 4 ou além delas (no painel do Radar), nunca no "Não cobrir".
+     */
+    const naoCobrirSemSilo = escritaSemSilo.slice(escritaSemSilo.indexOf("Não cobrir:"));
+    assert.ok(escritaSemSilo.includes(pergunta) || (/Perguntas que valem resposta \(até 4/.test(escritaSemSilo) && !naoCobrirSemSilo.includes(pergunta)), `sem o Silo, a pergunta é do público no CSV para escrever: ${pergunta}`);
     assert.equal(escrita.includes(pergunta), false, `o CSV para escrever tira a pergunta fora do Silo: ${pergunta}`);
     assert.equal(video.includes(pergunta), false, `o CSV de vídeo também: ${pergunta}`);
   }

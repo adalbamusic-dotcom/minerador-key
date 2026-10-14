@@ -2,7 +2,7 @@ import "server-only";
 
 import type { PipelineContext } from "./pipeline-runtime";
 import { PipelineRuntimeError, pipelineErrorFromSupabase } from "./pipeline-runtime";
-import { listArquitetoArtifacts } from "./arquiteto-persistence";
+import { listArquitetoArtifacts, listArquitetoArtifactsVigentes } from "./arquiteto-persistence";
 import { readBrandSiloCatalog } from "@/lib/arquiteto/territorial-landscape";
 import { isFullyConsolidatedQualification, qualificationConsolidatedAxes, qualificationLensSummary, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
 import { readCurrentKeywordSemanticQualifications } from "./keyword-semantic-qualification-store";
@@ -22,7 +22,7 @@ import type { EditorialGroupFilter } from "@/lib/editorial/editorial-groups";
 import { articleIdsInGroupFilter, closeKeywordSetOverArticles, groupScopeId } from "@/lib/editorial/article-groups";
 import { readArticleGroupMemberships, readKeywordIdsInGroupFilter } from "@/lib/editorial/article-groups-store";
 
-type WorkflowRow = {
+export type WorkflowRow = {
   id: string;
   marca_id: string;
   subject_type: string;
@@ -57,7 +57,7 @@ function latestByEntity<T extends { entityId: string; versionNumber: number }>(v
  * `occurred_at` (o último vence). A tabela de eventos não tem `marca_id`: o
  * recorte é pelos `version_id` já lidos da marca. Lido em blocos.
  */
-async function readArticleVersionEvents(context: PipelineContext, versionIds: readonly string[]) {
+export async function readArticleVersionEvents(context: PipelineContext, versionIds: readonly string[]) {
   const ids = [...new Set(versionIds)];
   const eventos: Array<{ versionId: string; status: string; occurredAt: string | null; reason: string | null }> = [];
   for (let inicio = 0; inicio < ids.length; inicio += 100) {
@@ -74,7 +74,7 @@ async function readArticleVersionEvents(context: PipelineContext, versionIds: re
   return eventos.sort((left, right) => (left.occurredAt ? Date.parse(left.occurredAt) : 0) - (right.occurredAt ? Date.parse(right.occurredAt) : 0));
 }
 
-function workflowSnapshot(row: WorkflowRow) {
+export function workflowSnapshot(row: WorkflowRow) {
   return {
     id: row.id,
     marcaId: row.marca_id,
@@ -148,7 +148,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * consulta inteira. Fora do formato, o id simplesmente não é encontrado — a
  * mesma consequência de antes, quando o filtro era feito em memória.
  */
-function uuidBatches(ids: readonly string[]) {
+export function uuidBatches(ids: readonly string[]) {
   const valid = [...new Set(ids.map(String))].filter(id => UUID_PATTERN.test(id));
   const batches: string[][] = [];
   for (let index = 0; index < valid.length; index += ARQUITETO_KEYWORD_ID_BATCH) {
@@ -172,7 +172,7 @@ async function listBrandKeywordIndex(context: PipelineContext) {
 }
 
 /** Linha inteira só das keywords pedidas, vivas e da marca. */
-async function listBrandKeywordsByIds(context: PipelineContext, ids: readonly string[], columns: string = ARQUITETO_KEYWORD_ROW_COLUMNS) {
+export async function listBrandKeywordsByIds(context: PipelineContext, ids: readonly string[], columns: string = ARQUITETO_KEYWORD_ROW_COLUMNS) {
   const rows: BrandKeywordRow[] = [];
   for (const batch of uuidBatches(ids)) {
     const result = await context.supabase.from("minerador_keywords").select(columns).eq("brand_id", context.brandId).is("deleted_at", null).in("id", batch);
@@ -555,6 +555,17 @@ export type CanonicalArquitetoWorkspaceOptions = {
    * por artigo: um artigo nunca chega com parte das keywords.
    */
   groupFilter?: EditorialGroupFilter;
+  /**
+   * 2026-10-14 · F2 das listas leves: "vigente" lê do banco só a versão
+   * vigente de cada artefato (`listArquitetoArtifactsVigentes`) — o que esta
+   * função já devolvia — em vez de todas as versões. Só a TELA pede (o GET
+   * da rota); os núcleos do servidor continuam com a leitura inteira.
+   */
+  artifactRead?: "vigente";
+  /** Já lidos pela leitura das marcas (`readArchitectSyncState`): não relê os metadados das versões. */
+  artifactMetas?: readonly import("./arquiteto-persistence").ArquitetoVersionMeta[];
+  /** Já lidas pela leitura das marcas: o índice das keywords (sem `analise_semantica`) não é lido de novo. */
+  keywordIndexRows?: ReadonlyArray<Record<string, unknown>>;
 };
 
 /** As keywords do recorte: as do grupo + as dos artigos do grupo, fechadas por artigo. */
@@ -584,8 +595,8 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
     workflowRowsRead,
     recorte
       ? listBrandKeywordsByIds(context, recorte.keywordIds, fullKeywordDetail ? ARQUITETO_KEYWORD_ROW_COLUMNS : ARQUITETO_KEYWORD_INDEX_COLUMNS)
-      : fullKeywordDetail ? listBrandKeywords(context) : listBrandKeywordIndex(context),
-    listArquitetoArtifacts(context),
+      : fullKeywordDetail ? listBrandKeywords(context) : options.keywordIndexRows ? Promise.resolve(options.keywordIndexRows as unknown as BrandKeywordRow[]) : listBrandKeywordIndex(context),
+    options.artifactRead === "vigente" ? listArquitetoArtifactsVigentes(context, options.artifactMetas) : listArquitetoArtifacts(context),
     // Catálogo `marcas.silos_existentes`: estado remoto da MESMA Brand, escrito
     // pela criação manual de Silo. Chega pelo read-model canônico em vez de ser
     // lido do contexto de Marca no browser.
@@ -638,9 +649,12 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
       stage: row.stage,
       state: row.state,
     })),
-    articleDnaKeywordIds: new Set(artifacts.articleDnas
-      .filter(version => version.payload.brandId === context.brandId)
-      .flatMap(version => articleDnaIncorporatedKeywordIds(version.payload))),
+    /* Leitura só das vigentes: as keywords de todas as versões vêm dos metadados (mesma pergunta, sem o payload). */
+    articleDnaKeywordIds: "incorporatedKeywordIdsAllVersions" in artifacts
+      ? artifacts.incorporatedKeywordIdsAllVersions as ReadonlySet<string>
+      : new Set(artifacts.articleDnas
+        .filter(version => version.payload.brandId === context.brandId)
+        .flatMap(version => articleDnaIncorporatedKeywordIds(version.payload))),
   });
   // O criador manual grava o par canônico antes de existir ArticleDNA. Se o
   // readback dependesse apenas de artigos associados, um F5 esconderia o

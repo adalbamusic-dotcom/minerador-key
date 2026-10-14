@@ -365,7 +365,9 @@ test("5 · com a planta, nenhuma coluna traz a estrutura, o título, a promessa,
   assert.match(linha.estrutura, /^ARTIGO-MODELO DA SERP \(planta concluída do artigo/);
   assert.match(linha.titulo_e_seo, /^H1: Skincare facial: o guia prático$/m);
   assert.match(linha.plano_visual, /^Plano visual: 3 imagem\(ns\)\./);
-  assert.match(linha.cobrir_e_superar, /^- Abertura: a do artigo-modelo \(coluna estrutura\); as perguntas abaixo entram nas seções\.$/m);
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono (§8.3): a coluna abre pelo ângulo e pelos blocos da análise competitiva; a abertura fica só na estrutura. */
+  assert.match(linha.cobrir_e_superar, /^Ângulo deste artigo: /m);
+  assert.doesNotMatch(linha.cobrir_e_superar, /Abertura: a do artigo-modelo/);
   semD10(tudo, "linha com a planta");
 });
 
@@ -581,9 +583,11 @@ test("8 · as regras 2026-10-09b: a planta nova sai com elas; o aviso da de 09/1
   /* 2026-10-11 · as regras avançaram (a âncora natural): a planta nova sai com 2026-10-11, e a de 09b ganha o aviso dela. */
   /* 2026-10-11b · e a diretriz de comunicação humana guiada pela SERP: a planta nova sai com 2026-10-11b, e a de 11/10 ganha o aviso. */
   /* 2026-10-11c · e as keywords proibidas por destino: a planta nova sai com 2026-10-11c, e a de 11/10b ganha o aviso. */
-  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-11c");
-  assert.equal(plantaDe(entradaGoogle(), { articleId: ARTIGO }).rulesVersion, "2026-10-11c");
-  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" }), null);
+  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-14c"); /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): regras 2026-10-14c */
+  assert.equal(plantaDe(entradaGoogle(), { articleId: ARTIGO }).rulesVersion, "2026-10-14c"); /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): regras 2026-10-14c */
+  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-14c" }), null); /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): regras 2026-10-14c (a de 2026-10-14b ganha o aviso) */
+  assert.match(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-14" })!, /^Esta versão foi montada com as regras de 2026-10-14. As de 2026-10-14b acrescentam a análise competitiva/);
+  assert.match(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" })!, /^Esta versão foi montada com as regras de 2026-10-11c\. As de 2026-10-14 acrescentam /);
   semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11b" }) || "", "aviso 2026-10-11b");
   semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11" }) || "", "aviso 2026-10-11");
   semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-09b" }) || "", "aviso 2026-10-09b");

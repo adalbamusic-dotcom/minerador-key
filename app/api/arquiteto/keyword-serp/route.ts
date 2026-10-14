@@ -17,6 +17,7 @@ import { requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { integrationRuntimeErrorResponse, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { collectAndCacheSerp, lookupSerpCache, type SerpCacheRequest } from "@/lib/server/serp-cache";
+import { readKnownBeforeSearch } from "@/lib/server/known-before-search";
 
 /**
  * SERP POR KEYWORD, NAS QUATRO LENTES.
@@ -63,6 +64,12 @@ const RequestSchema = z.object({
    */
   mode: z.enum(["plan", "execute"]).default("execute"),
   authorizedPaidQueries: z.number().int().nonnegative().max(200).default(0),
+  /**
+   * F3 · LER ANTES DE BUSCAR (SDD 2026-10-13, item 3, regra 6): o servidor
+   * confere no BANCO o volume de cada keyword pedida; a que não tem volume (ou
+   * não é da marca) sai do plano e da coleta, com o motivo. Ausente = como antes.
+   */
+  onlyMeasuredVolume: z.boolean().optional(),
 });
 
 /** Concorrência limitada: o provider é compartilhado com os outros módulos. */
@@ -111,6 +118,25 @@ export async function POST(request: Request) {
 
     // Um relógio só por requisição: validade do cache e data gravada batem.
     const now = new Date();
+
+    /*
+     * F3 · O SERVIDOR DECIDE O VOLUME. A tela manda só as keywords com volume
+     * na visão dela, que pode estar velha; aqui o volume é relido do banco
+     * (projeção estreita, por id) e a keyword sem volume não é planejada nem
+     * paga. Leitura que falha: nada é pago às cegas.
+     */
+    const foraPorVolume: { keywordId: string; keyword: string; reason: string }[] = [];
+    if (parsed.data.onlyMeasuredVolume) {
+      const conferido = await readKnownBeforeSearch(pipelineContext.supabase as unknown as Parameters<typeof readKnownBeforeSearch>[0], pipelineContext.brandId, parsed.data.keywords.map(keyword => keyword.keywordId), now);
+      if (conferido.readFailed) return NextResponse.json({ success: false, error: "Não foi possível conferir no banco o volume das keywords; nada foi planejado nem pago.", code: "KEYWORD_SERP_VOLUME_UNVERIFIED" }, { status: 503 });
+      parsed.data.keywords = parsed.data.keywords.filter(keyword => {
+        const lida = conferido.keywords.get(keyword.keywordId);
+        if (lida && typeof lida.volumeSearch === "number" && lida.volumeSearch > 0) return true;
+        foraPorVolume.push({ keywordId: keyword.keywordId, keyword: keyword.keyword, reason: lida ? "Sem volume no Minerador (o servidor conferiu): a SERP não é coletada para keyword sem volume." : "Fora do acervo da marca ativa: nada é coletado." });
+        return false;
+      });
+      if (!parsed.data.keywords.length) return NextResponse.json({ success: false, error: "Nenhuma keyword pedida tem volume no banco (o servidor conferiu): nada foi planejado nem pago.", code: "KEYWORD_SERP_NO_VOLUME", data: { operationRequestId, excludedByVolume: foraPorVolume } }, { status: 409 });
+    }
 
     /*
      * Uma consulta por keyword POR LENTE. É o produto cartesiano mesmo: sem
@@ -203,7 +229,7 @@ export async function POST(request: Request) {
      */
     const plan = buildSerpPaidPlan({ lenses: parsed.data.lenses, slots, payMissingExtraLenses: true, recollectStaleLenses: false, recollectAvailable: false });
     if (parsed.data.mode === "plan") {
-      return NextResponse.json({ success: true, data: { mode: "plan", operationRequestId, scopeId: parsed.data.scopeId, plan, lenses: parsed.data.lenses.map(serpCacheLensLabel), requested: alvos.length } });
+      return NextResponse.json({ success: true, data: { mode: "plan", operationRequestId, scopeId: parsed.data.scopeId, plan, lenses: parsed.data.lenses.map(serpCacheLensLabel), requested: alvos.length, ...(foraPorVolume.length ? { excludedByVolume: foraPorVolume } : {}) } });
     }
     const autorizacao = authorizeSerpPaidPlan(plan, parsed.data.authorizedPaidQueries);
     if (!autorizacao.ok) {
@@ -213,7 +239,7 @@ export async function POST(request: Request) {
     // Cada lente paga consome o autorizado; esgotado, a lente vira lacuna declarada.
     const orcamento = createPaidQueryBudget(parsed.data.authorizedPaidQueries);
 
-    const gaps: { keywordId: string; lens: string; reason: string }[] = [];
+    const gaps: { keywordId: string; lens: string; reason: string }[] = foraPorVolume.map(item => ({ keywordId: item.keywordId, lens: "todas", reason: item.reason }));
     let coletadas = 0;
     let pagasAgora = 0;
 
@@ -366,6 +392,7 @@ export async function POST(request: Request) {
         requested: alvos.length,
         reused,
         collected: coletadas,
+        ...(foraPorVolume.length ? { excludedByVolume: foraPorVolume } : {}),
       },
     });
   } catch (error) {

@@ -333,6 +333,63 @@ Suítes da C7 (antes → depois, mesma árvore): Minerador por glob 1249 → 125
 182 com as 4 falhas antigas; `tsc` 0; eslint dos arquivos tocados sem erro novo; `git diff --check` limpo.
 Leitura remota só por SELECT. **Validado manualmente: não.**
 
+### 11.2 C8 · O Posto de principal da não publicada é a trava; o Assunto no cabeçalho e na linha (pedido do dono, 2026-10-13, mesma autorização)
+
+Palavras do dono: "no minerador eu coloco como [Travado ao slug] e ele não aceita"; "assuntos não estão no cabeçalho
+no painel, lá no minerador". Dois conceitos com o mesmo papel (o posto da publicada e a trava do plano) viram um select
+só, com o modo da keyword. Sem mudança de contrato do Arquiteto, sem migration.
+
+| Item | Estado em 2026-10-13 |
+|---|---|
+| Não publicada que carrega o plano (Assunto na keyword, ou principal do formato anterior pela marca recíproca): "Posto de principal" = Travada · Livre · Automática, com o valor efetivo e o porquê (`keyword-plan-lock.ts` sobre `declaredPrincipalLock`) | feito |
+| Gravar pelo MESMO núcleo: `POST …/plans/lock` → `setKeywordPlanLockWithCore` → `importDeclaredPlanWithCore` (Silo existente, linha igual, só a trava): nova versão do plano, marca recíproca, releitura | feito |
+| Recusa por item: sem plano ("Para travar, cadastre o artigo em Cadastrar Assuntos."), marca órfã, publicada, impedimento do plano, outra marca | feito |
+| Lote: mesma regra por item, recusa nomeada, uma trava por artigo; coluna "Travada · Artigo · declarado" | feito |
+| Publicada: Travado ao slug · Livre como antes (tela); fora do MCP | inalterado |
+| Cabeçalho do Perfil e linha da planilha com o Assunto (título, papel/posição, cor); marca órfã numa linha de aviso | feito |
+| MCP `set_keyword_vinculo` `kind: 'plan_lock'` (prévia, aceite, hash, `platform.decide`); catálogo | feito |
+| Efeito no Arquiteto: a trava está no pacote aprovado → reaprovar (só a Lógica) e reenviar para ele ler; a tela diz isso | documentado na tela e no catálogo |
+
+Leitura remota (SELECT, 2026-10-13): o Silo azul da WifiConecta tem o plano v1 (7 artigos) e as 7 keywords com a marca
+de principal **órfã** (sem Assunto) — a trava é recusada com o caminho "Cadastrar Assuntos → Silo existente". Suítes:
+ver `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+### 11.3 Adendo C9 · O Assunto nunca se perde (ordem do dono, 2026-10-13)
+
+Palavras do dono, literais: "não podem perder o assunto de jeito nenhum". Caso real (SELECT, 2026-10-13): as 7
+keywords do grupo azul (`07fec332-…`, plano v1) ficaram com `keyword_subject = null` — 6 pelo antigo "Vínculo das
+selecionadas → Assunto: Não" (origem `batch`, 13/10 05:35 UTC) e 1 pela Revisão Humana (origem `review`, 05:33). O
+histórico guardou `entryTitle` e o resumo do plano (grupo, ordem, papel, keyword), **sem o escopo**; a marca
+`keyword_declared_principal` ficou. Nenhuma outra cópia do escopo existe no banco (conferido: grupo, eventos, artefatos,
+itens de workflow). Esta seção é estrutural (workflow e banco) e foi pedida pelo dono com a migration.
+
+| # | Garantia | Onde |
+|---|---|---|
+| G1 | **Marcador de liberação** `analise_semantica.keyword_subject_release = { requestId, reason, actorId, at, via }`, com `via` ∈ `tirar_do_plano` · `conversao` · `excluir_cor` (este último **reservado**, sem código hoje). Só uma escrita que traz um marcador **novo** (diferente do gravado) pode tirar o Assunto, desdeclará-lo ou tirar o `plan`/`entry` que ele tinha. | `lib/minerador/keyword-subject.ts` |
+| G2 | **Guarda no código** (antes do banco): `setKeywordSubject` com `plan: null`/`entry: null` e `withdrawKeywordSubject` exigem o marcador (`SUBJECT_RELEASE_REQUIRED`); `guardKeywordSemanticWrite` em todo escritor que grava o objeto inteiro: cópia sem a chave **leva** o Assunto (merge, não replace); remoção explícita sem marcador é **recusada com o motivo** ("só Tirar do plano o libera"); o histórico do Assunto é append-only. | tela (`minerador-workspace.tsx`: Lógica, Vínculo, KGR, Revisão, Posto, Potencial), servidor (Lógica e aprovação em `minerador-keyword-decision-core.ts`), MCP (`persistSemanticDecision`) |
+| G3 | **Garantia no banco** (migration `20261015120000_assunto_nunca_se_perde.sql`, aplicada pelo dono): gatilho BEFORE UPDATE `minerador_keywords_preserva_assunto` repõe o Assunto que uma escrita apaga sem marcador novo e anota a tentativa no histórico (`preservedBy: "database"`, com o que foi tentado e o plano com o escopo); mantém o histórico append-only; nunca derruba a escrita. Gatilho BEFORE DELETE / UPDATE OF `deleted_at` `minerador_keywords_recusa_exclusao_com_assunto` recusa apagar keyword com Assunto do plano (ou título não liberado) com `KEYWORD_DELETE_SUBJECT_PROTECTED`. | migration + rollback; `lib/server/minerador-keyword-lifecycle.ts` (mensagem) |
+| G4 | **Quem libera (lista fechada):** "Tirar do plano" (`declared-plan-withdraw-core.ts`, as duas escritas com `plan: null` levam o marcador; a cadeia `declared-plan-withdraw-chain*.ts` passa por ele). A conversão do formato anterior **não retira** o Assunto da linha-título hoje ("a linha-título não é tocada"), então não grava marcador; a `via: "conversao"` fica disponível para quando retirar. `withdrawKeywordSubject` continua sem chamador. | `tests/minerador-assunto-nunca-se-perde.test.mts` |
+| G5 | **Restaurar sem redigitar:** card "Cadastrar Assuntos → Silo existente → <cor>": `readDeclaredPlanCardRows` acrescenta as linhas recuperadas do histórico (última linha do histórico que mexeu no plano, com `plan.groupId` do grupo e a própria keyword como principal; não recupera o que saiu por "Tirar do plano"), com o selo "Recuperado do histórico — confira os detalhes"; detalhes vazios quando o histórico é antigo (sem escopo). "Colar plano em texto" casa pela keyword (ou título) e **só preenche o que falta**. "Cadastrar" grava pelo MESMO núcleo (`importDeclaredPlanWithCore`). Daqui em diante o histórico guarda o escopo (`plan.scope`), e a recuperação traz os detalhes também. | `lib/minerador/subject-recovery.ts`, `declared-plan-import-core.ts`, `subject-cadastro-card.tsx` |
+| G6 | **Painel:** "Assunto deste artigo" da marca órfã diz "Assunto retirado em <data> (UTC) por <origem>. Restaurar: Cadastrar Assuntos → Silo existente → <cor> (as linhas já vêm do histórico)". | `subject-article-view.ts` |
+
+**Exclusão futura "Excluir tudo da cor X" (outra SDD, não feita):** encaixa sem mudar a trava — dentro da mesma operação
+confirmada (uma transação/RPC do ciclo de vida), primeiro o UPDATE que tira o `plan` com o marcador `via: "excluir_cor"`
+(o gatilho G3 aceita e o histórico guarda o que saiu), depois o DELETE (o gatilho de exclusão vê o plano fora e o
+marcador `excluir_cor` e deixa passar). Os contratos globais de exclusão (publicada só pela janela de 24 h,
+descendentes, confirmação com nome digitado) continuam nas funções de ciclo de vida. Até lá, nenhum código grava
+`excluir_cor` (teste de lista fechada).
+
+**Ordem de deploy:** o código desta seção não depende da migration (sem ela, a guarda do código e o marcador já valem);
+a migration pode ser aplicada antes ou depois do deploy. Aplicar a migration **antes** do deploy só tem um efeito: o
+"Tirar do plano" do código antigo (sem marcador) passa a ter o plano reposto pelo banco e a releitura acusa
+"WRITE_NOT_CONFIRMED" — por isso a recomendação é **deploy primeiro, migration depois** (ou ambos sem uso de "Tirar do
+plano" no intervalo). **Rollback:** código anterior (o marcador gravado fica inerte; leitores antigos ignoram a chave);
+`supabase/rollback/20261015120000_assunto_nunca_se_perde.rollback.sql` tira só os gatilhos.
+
+**Limites:** a marca de principal (`keyword_declared_principal`) não é protegida pelo banco (só o Assunto); o formato
+anterior (Assunto numa linha, principal noutra) não é recuperado pelo card; os detalhes das 7 keywords do azul precisam do
+plano colado (não estão em nenhum lugar do banco). **Validado manualmente: não.**
+
 ## 12. Decisões pendentes do dono
 
 - Volume medido **= 0** conta como "sem volume" (livre). Recomendação: sim

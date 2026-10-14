@@ -81,7 +81,8 @@ test("2026-10-13: o select Vínculo tem SÓ Posto e Potencial — nada de Assunt
   assert.deepEqual(VINCULO_BATCH_CHOICE_GROUPS.map(group => group.label), ["Posto de principal", "Potencial de página"]);
   const [post, pageType] = VINCULO_BATCH_CHOICE_GROUPS;
   assert.equal(pageType.options.length, 8, "os 4 tipos × potencial/declarado, enum intacto");
-  assert.deepEqual(post.options.map(option => option.label), ["Travado ao slug", "Livre"]);
+  // 2026-10-13 · "Automática" é a trava do cadastro voltando ao volume (só keyword do plano não publicada).
+  assert.deepEqual(post.options.map(option => option.label), ["Travado ao slug", "Livre", "Automática (pelo volume)"]);
 
   const everything = VINCULO_BATCH_CHOICE_GROUPS.flatMap(group => [group.title, ...group.options.map(option => `${option.value} ${option.label}`)]).join(" | ");
   assert.doesNotMatch(everything, /Assunto|subject/i, "o Assunto saiu do Vínculo");
@@ -129,14 +130,16 @@ test("a confirmação diz quantas aprovadas vão para Em revisão, e o que é pu
   assert.equal(describeVinculoBatchConfirmation(fresh).summary, "Tipo de página: Landing page: 1 keyword será gravada.");
 });
 
-test("posto em não publicadas: a confirmação conta as puladas e não grava nada", () => {
+test("posto em não publicadas SEM plano (2026-10-13): travar é recusado por item, com o nome e a frase do cadastro; nada é gravado", () => {
   const plan = planVinculoBatch({ keywords: [row(1), row(2)], brandId: BRAND, action: { kind: "post", policy: "locked" }, actorId: ACTOR, changedAt: AT });
   assert.ok(plan.ok);
   if (!plan.ok) return;
   const text = describeVinculoBatchConfirmation(plan);
   assert.equal(plan.counts.updates, 0);
-  assert.equal(text.summary, "Posto: Travado ao slug: nenhuma keyword da seleção muda.");
-  assert.deepEqual(text.details, ["2 não publicadas foram puladas: o posto só vale para publicadas."]);
+  assert.equal(plan.counts.planLocks, 0);
+  assert.equal(plan.counts.no_plan, 2);
+  assert.equal(text.summary, "Posto: Travada: nenhuma keyword da seleção muda.");
+  assert.deepEqual(text.details, ['2 recusadas ("keyword 1", "keyword 2"): Para travar, cadastre o artigo em Cadastrar Assuntos.']);
 });
 
 test("readback estreito: confere a gravação mesmo com as chaves do Assunto na ordem do JSONB", () => {

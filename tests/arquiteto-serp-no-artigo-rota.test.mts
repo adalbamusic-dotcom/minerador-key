@@ -167,6 +167,8 @@ mock.module("@/lib/server/arquiteto-article-serp-store", { namedExports: {
   },
   readbackArticleFormationSerpAssessment: async (_contexto: unknown, candidateRef: string) => ({ payload: { formationBaseHash: "base-1", verdict: gravados.find(item => item.candidateRef === candidateRef)?.verdict } }),
   listArticleFormationSerpAssessments: async () => [],
+  // F2 das listas leves (2026-10-14): leitura de UM parecer pelo candidateRef.
+  findArticleFormationSerpAssessment: async () => null,
 } });
 // PATCH /api/arquiteto/workspace: a trava do Assunto e a leitura estreita das keywords são dublês.
 let keywordsDoPatch = new Map<string, Record<string, unknown>>();

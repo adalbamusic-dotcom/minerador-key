@@ -213,6 +213,42 @@ export async function resolveArticleFormationSerpAssessment(
  * É isto que transforma "o provider respondeu" em "a evidência existe": sem
  * readback a rota estaria declarando sucesso por conta própria.
  */
+/**
+ * 2026-10-14 · F2 das listas leves: só os pareceres pedidos (releitura do que
+ * mudou na mesa), em blocos de 100 `candidateRef`. Mesma validação da lista.
+ */
+export async function listArticleFormationSerpAssessmentsByRefs(
+  context: PipelineContext,
+  candidateRefs: readonly string[],
+): Promise<ArticleFormationSerpWorkflowItem[]> {
+  const refs = [...new Set(candidateRefs)];
+  const lidos: ArticleFormationSerpWorkflowItem[] = [];
+  for (let inicio = 0; inicio < refs.length; inicio += 100) {
+    const result = await context.supabase
+      .from("editorial_workflow_items")
+      .select(SERP_COLUMNS)
+      .eq("marca_id", context.brandId)
+      .eq("subject_type", ARTICLE_FORMATION_SERP_SUBJECT_TYPE)
+      .eq("stage", ARTICLE_FORMATION_SERP_WORKFLOW_STAGE)
+      .in("subject_id", refs.slice(inicio, inicio + 100));
+    if (result.error) throw pipelineErrorFromSupabase(result.error);
+    lidos.push(...((result.data || []) as SerpRow[]).map(readRow));
+  }
+  return lidos;
+}
+
+/**
+ * 2026-10-14 · F2 das listas leves: UM parecer, pelo `candidateRef`, ou `null`
+ * quando não existe. Falha de banco continua lançando (não vira "sem parecer").
+ */
+export async function findArticleFormationSerpAssessment(
+  context: PipelineContext,
+  candidateRef: string,
+): Promise<ArticleFormationSerpWorkflowItem | null> {
+  const row = await findRow(context, candidateRef);
+  return row ? readRow(row) : null;
+}
+
 export async function readbackArticleFormationSerpAssessment(
   context: PipelineContext,
   candidateRef: string,

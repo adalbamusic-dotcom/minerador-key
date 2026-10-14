@@ -305,8 +305,11 @@ test("1 · acima do limite seguro, a estrutura encolhe por níveis que dizem o q
    * plano_visual — o teste só olhava estrutura e fontes.
    */
   for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) assert.doesNotMatch(artigo.row[coluna], /Célula cortada|Cortado para o artigo caber/, coluna);
-  assert.ok(artigo.row.cobrir_e_superar.startsWith("Como superar a SERP:\n"), "a cobrir_e_superar chega inteira");
-  assert.ok(artigo.row.cobrir_e_superar.endsWith("\n- Data de atualização visível: 12 de 12 páginas mostram."), artigo.row.cobrir_e_superar);
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono (§8.3): a coluna abre pelo ângulo e pelos quatro blocos da análise competitiva. */
+  assert.ok(artigo.row.cobrir_e_superar.startsWith("Ângulo deste artigo: "), "a cobrir_e_superar chega inteira");
+  /* 2026-10-14b · F3 · a data visível é sinal do que os melhores fazem (bloco 2); a coluna termina no bloco 4 (SEO antigo), inteira. */
+  assert.ok(artigo.row.cobrir_e_superar.includes("\n- Data de atualização visível: 12 de 12 páginas mostram.\n"), artigo.row.cobrir_e_superar);
+  assert.match(artigo.row.cobrir_e_superar, /\n4\. SEO antigo que não se copia:\n- [^\n]+\n- [^\n]+$/, artigo.row.cobrir_e_superar);
 });
 
 test("1 (correção · contrato-F1) · quando o artigo passa do teto, 'Como superar' e 'Não cobrir' nunca são cortados; cede primeiro a SERP resumida", () => {

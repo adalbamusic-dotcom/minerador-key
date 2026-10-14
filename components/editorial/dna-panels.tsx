@@ -25,9 +25,10 @@ import { volumeEligibilityLabel, type VolumeEligibilityStatus } from "@/lib/mine
 import { readSiteOrigin } from "@/lib/minerador/publication-link";
 import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS } from "@/lib/minerador/editorial-status";
 import { keywordPageTypeStance, parseKeywordPageTypeChoice } from "@/lib/minerador/keyword-page-type";
-import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
-import { resolveSubjectArticleView, subjectArticlePositionLabel, type SubjectArticleGroup, type SubjectArticleView } from "@/lib/minerador/subject-article-view";
-import { vinculoSelectValues } from "@/lib/minerador/vinculo-screen";
+import { resolveKeywordVinculo, type KeywordVinculoInput } from "@/lib/minerador/keyword-vinculo";
+import { keywordPlanLockHint, PLAN_LOCK_ARCHITECT_HINT } from "@/lib/minerador/keyword-plan-lock";
+import { resolveSubjectArticleView, subjectArticlePositionLabel, subjectHeadline, type SubjectArticleGroup, type SubjectArticleView } from "@/lib/minerador/subject-article-view";
+import { planLockChoiceOfPostValue, vinculoSelectValues } from "@/lib/minerador/vinculo-screen";
 import { isEditorialGroupColor } from "@/lib/editorial/editorial-groups";
 import { EditorialGroupTag } from "./group-tag";
 import { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";
@@ -444,8 +445,11 @@ function HumanReviewPanel({
   open,
   onOpenChange,
   reviewDraftActive = false,
+  planContext,
 }: {
   semantic: ProfileRecord;
+  /** 2026-10-13 · o contexto da trava do cadastro (o Minerador passa): na não publicada, o posto é a trava. */
+  planContext?: KeywordVinculoInput["plan"];
   intent?: string | null;
   volume: unknown;
   allintitle: unknown;
@@ -480,8 +484,10 @@ function HumanReviewPanel({
     : "Não calculável";
   const completion = canCompleteHumanReview(semantic, { intent, status });
   // Aqui se decide. Coluna e cabeçalho leem exatamente este mesmo resultado.
-  const vinculo = resolveKeywordVinculo({ status, semantic });
+  const vinculo = resolveKeywordVinculo({ status, semantic, ...(planContext ? { plan: planContext } : {}) });
   const vinculoSelects = vinculoSelectValues(vinculo);
+  // 2026-10-13 · na não publicada, o posto é a TRAVA do cadastro (pedido do dono): o mesmo select, outro modo.
+  const planLock = vinculo.planLock ?? null;
   // Decisão humana disponível é decisão concreta esperando escolha — nunca a
   // ausência de clique. Sem nada a decidir, o painel se declara de leitura.
   const pendingHumanDecisions = completion.pendingFields.length + (completion.pendingKgrDecision ? 1 : 0);
@@ -535,20 +541,32 @@ function HumanReviewPanel({
       <p className="text-sm font-semibold text-foreground">Vínculo</p>
       <p className="text-sm text-text-muted">{vinculo.publicationDeclared
         ? "Esta keyword pertence a uma publicação. Diga se ela está travada ao slug e o que a página é."
-        : "Nenhuma publicação declarada: a keyword está livre e o tipo é potencial. Nada aqui é obrigatório, e nada trava a escolha."}</p>
+        : planLock?.kind === "plan"
+          ? "Keyword do plano, ainda não publicada: o Posto de principal é a trava do cadastro (o Arquiteto a usa como principal fixa, ou pode propor outra quando livre)."
+          : "Nenhuma publicação declarada: a keyword está livre e o tipo é potencial. Nada aqui é obrigatório, e nada trava a escolha."}</p>
 
       {/* Os mesmos selects do painel "Vínculo das selecionadas" do rodapé
           (vinculo-selects.tsx): aqui cada escolha vira a ação da keyword. O
           Assunto saiu do Vínculo (2026-10-13): aparece só leitura no bloco
           "Assunto deste artigo" do painel. */}
-      <VinculoPostSelect
+      {!planLock ? <VinculoPostSelect
         id={`review-primary-post-${keywordId}`}
         className="mt-2"
         aria-label="Posto de principal na revisão humana"
         value={vinculoSelects.post}
         disabled={statusUpdating || reviewLocked || !onAction}
         onChange={value => { if (value === "locked" || value === "reviewable") void onAction?.({ type: "primary_policy", policy: value }); }}
-      />
+      /> : <VinculoPostSelect
+        id={`review-plan-lock-${keywordId}`}
+        className="mt-2"
+        mode="plan"
+        aria-label="Posto de principal (trava do cadastro) na revisão humana"
+        value={vinculoSelects.post}
+        hint={keywordPlanLockHint(planLock)}
+        disabled={statusUpdating || reviewLocked || !onAction}
+        onChange={value => { const lock = planLockChoiceOfPostValue(value); if (lock) void onAction?.({ type: "plan_lock", lock }); }}
+      />}
+      {planLock?.kind === "plan" ? <p data-review-plan-lock-architect className="mt-1 text-sm text-text-muted">{PLAN_LOCK_ARCHITECT_HINT}</p> : null}
 
       <VinculoPageTypeSelect
         id={`review-page-type-${keywordId}`}
@@ -797,6 +815,7 @@ export function KeywordDnaPanel({
   subjectGroupOf,
   subjectKeywordTextOf,
   subjectConvertedTitleOf,
+  subjectSemanticOf,
 }: {
   keyword: { id: string; keyword: string; intent?: string | null; status?: string | null; volume_search?: number | null; results_allintitle?: number | null; kgr_score?: number | null; volume_source?: string | null; analise_semantica?: ProfileRecord | null };
   onWorkflowStatusChange?: (status: string) => void | Promise<void>;
@@ -811,6 +830,12 @@ export function KeywordDnaPanel({
   subjectKeywordTextOf?: (keywordId: string) => string | null;
   /** 2026-10-13 · a linha-título convertida: para qual keyword o Assunto foi (conversão do formato anterior). */
   subjectConvertedTitleOf?: (keywordId: string) => { keywordId: string; keyword: string | null } | null;
+  /**
+   * 2026-10-13 · o `analise_semantica` de outra keyword da marca pelo id (o
+   * Minerador passa). Liga a trava do cadastro no Posto de principal da não
+   * publicada e lê a trava/posição reais da principal do formato anterior.
+   */
+  subjectSemanticOf?: (keywordId: string) => Record<string, unknown> | null | undefined;
   reviewDraftActive?: boolean;
   statusUpdating?: boolean;
   visualPosition?: number;
@@ -864,15 +889,23 @@ export function KeywordDnaPanel({
   const processorRevalidation = canonicalSnapshot.processor;
   // O Assunto que a keyword carrega (2026-10-13): só leitura, pela mesma
   // leitura da trava do cadastro (o volume validado desta keyword decide a trava automática).
+  const keywordLockVolumeView = { validated: processorRevalidation.volume.validated, value: typeof processorRevalidation.volume.value === "number" ? processorRevalidation.volume.value : null };
   const subjectArticle = resolveSubjectArticleView({
     keywordId: keyword.id,
     keyword: keyword.keyword,
     semantic,
-    volume: { validated: processorRevalidation.volume.validated, value: typeof processorRevalidation.volume.value === "number" ? processorRevalidation.volume.value : null },
+    volume: keywordLockVolumeView,
     groupOf: subjectGroupOf,
     keywordTextOf: subjectKeywordTextOf,
     convertedTo: subjectConvertedTitleOf?.(keyword.id) ?? null,
+    ...(subjectSemanticOf ? { subjectSemanticOf } : {}),
   });
+  // 2026-10-13 · o Assunto no cabeçalho (pedido do dono): título, papel/posição e cor, numa linha.
+  const subjectHeader = subjectHeadline(subjectArticle);
+  // 2026-10-13 · a trava do cadastro no Posto de principal da não publicada (só com as linhas da marca em mãos).
+  const reviewPlanContext: KeywordVinculoInput["plan"] | undefined = subjectSemanticOf
+    ? { keywordId: keyword.id, keyword: keyword.keyword, volume: keywordLockVolumeView, subjectSemanticOf, keywordTextOf: subjectKeywordTextOf }
+    : undefined;
   const processStates = canonicalSnapshot.process;
   const logicalProcessComplete = processStates.logic.complete;
   const googleAdsStageComplete = processStates.volume.complete;
@@ -1054,6 +1087,19 @@ export function KeywordDnaPanel({
           label={<span className="text-xs font-bold uppercase tracking-[0.16em] text-context-accent">Perfil da keyword</span>}
           info={<InfoHint title="Perfil da keyword" description="Reúne os dados estratégicos consolidados desta keyword para apoiar a decisão editorial." />}
         />
+        {/* 2026-10-13 · o Assunto que a keyword carrega, no cabeçalho (pedido do dono): a cor do grupo,
+            o papel/posição e o título, acima do nome da keyword. Marca órfã: uma linha curta de aviso. */}
+        {subjectHeader ? (
+          <p
+            data-profile-subject-headline={subjectHeader.kind}
+            title={subjectHeader.text}
+            className={`mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-base ${subjectHeader.tone === "warning" ? "text-warning" : subjectHeader.tone === "muted" ? "text-text-muted" : "text-foreground"}`}
+          >
+            {subjectHeader.group && isEditorialGroupColor(subjectHeader.group.color) ? <EditorialGroupTag name={subjectHeader.group.name} color={subjectHeader.group.color} /> : null}
+            {subjectHeader.position ? <span className="text-sm font-semibold text-text-muted">{subjectHeader.position}</span> : null}
+            <span className="min-w-0 break-words font-semibold [overflow-wrap:anywhere]">{subjectHeader.text}</span>
+          </p>
+        ) : null}
         <h2 className="mt-0.5 min-w-0 break-words text-xl font-semibold tracking-tight text-keyword [overflow-wrap:anywhere]">{keyword.keyword}</h2>
         </div>
         {/* O Assunto é declaração, não fato da publicação: aparece com ou
@@ -1143,6 +1189,7 @@ export function KeywordDnaPanel({
           reviewDraftActive={reviewDraftActive}
           status={keyword.status}
           keywordId={keyword.id}
+          planContext={reviewPlanContext}
         />
       </div>
 

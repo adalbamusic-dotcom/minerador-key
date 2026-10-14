@@ -144,8 +144,11 @@ test("com groupId · só os artigos do grupo efetivo: herança das keywords + et
   // O servidor pediu ao banco só os artigos do recorte (a consulta leva o `.in`).
   const leituraDoRadar = feitos.find(pedido => pedido.tabela === "editorial_workflow_items");
   assert.ok(leituraDoRadar && String(leituraDoRadar.params.get("article_id") || "").startsWith("in."), "itens do Radar filtrados no banco");
-  const leituraDosArtefatos = feitos.find(pedido => pedido.tabela === "editorial_artifact_versions" && String(pedido.params.get("select") || "").startsWith("artifact_type,payload"));
+  // 2026-10-14 · F2 das listas leves: a mesa é leve por padrão — metadados do recorte (por entity_id) e o payload só das escolhidas (por version_id).
+  const leituraDosArtefatos = feitos.find(pedido => pedido.tabela === "editorial_artifact_versions" && String(pedido.params.get("select") || "").includes("a1:payload->>articleId"));
   assert.ok(leituraDosArtefatos && String(leituraDosArtefatos.params.get("entity_id") || "").startsWith("in."), "artefatos filtrados no banco");
+  const payloadDosArtefatos = feitos.filter(pedido => pedido.tabela === "editorial_artifact_versions" && String(pedido.params.get("select") || "").startsWith("artifact_type,payload"));
+  assert.ok(payloadDosArtefatos.length > 0 && payloadDosArtefatos.every(pedido => String(pedido.params.get("version_id") || pedido.params.get("entity_id") || "").startsWith("in.")), "o payload só das escolhidas");
 });
 
 test("sem-grupo e o outro grupo · cada artigo aparece num recorte só", async () => {

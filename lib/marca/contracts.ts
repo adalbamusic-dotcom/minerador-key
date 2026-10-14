@@ -29,6 +29,8 @@ export const BrandDnaDraftSchema = z.object({
   differentiators: z.array(z.string()),
   prohibitedClaims: z.array(z.string()),
   editorialPrinciples: z.array(z.string()),
+  /** 2026-10-14 · As fontes de autoridade que o Radar confere (opcional; vazio = lista sugerida). */
+  authoritySources: z.array(z.string()).optional(),
 });
 
 export const BrandDnaSaveRequestSchema = z.object({

@@ -353,7 +353,15 @@ test("F1 · o irmão do Silo no ar sai PUBLICADO na planta (URL e '(publicado)')
     [ARTIGO_AMAZON, publicacao(NIVEA_NO_AR)],
     [ARTIGO_NAO_ENVIADO, publicacao("https://careglow.com.br/cuidados-com-a-pele/mascara-facial")],
   ]), planta)).row.links_internos;
-  assert.doesNotMatch(todosNoAr, /Destino novo|Destino planejado|ainda não publicado|planejado:/, todosNoAr);
+  /*
+   * 2026-10-14 · SDD silo interligado · F2 · decisão do dono (D1, D6): a trilha
+   * "Continue no Silo" leva o resto do Silo (skin care noturno e a SiloPage,
+   * ainda não publicados) e a regra do destino novo vale por eles; os L, todos
+   * no ar, não dizem "ainda não publicado".
+   */
+  const doCorpo = todosNoAr.split("\n").filter(item => /^L\d+ · /.test(item)).join("\n");
+  assert.doesNotMatch(doCorpo, /Destino novo|Destino planejado|ainda não publicado|planejado:/, todosNoAr);
+  assert.ok(todosNoAr.split("\n").filter(item => /^T\d+ · /.test(item)).every(item => /ainda não publicado/.test(item)), todosNoAr);
   assert.match(todosNoAr, /mascara-facial \(publicado\)/);
 
   /* Na geração, o irmão no ar já entra na planta como destino publicado. */
@@ -378,7 +386,8 @@ test("F2 e F14 · a planta no CSV traz UMA chamada: o 'Próximo passo' vira a co
   /* F14 · "skin care nivea" → K1 aparecia duas vezes: sai uma (na primeira seção), e a medida concorda. */
   /* 2026-10-11 · a mesma âncora para o mesmo destino recebe a mesma troca: o repetido continua saindo uma vez só. */
   assert.equal((estrutura.match(/- Link interno L\d+ → [^:]+: âncora com as palavras da sua frase, dizendo a ideia do destino \(por exemplo "skin care"\)/g) || []).length, 1);
-  assert.match(estrutura, / · 2 links internos · /);
+  /* 2026-10-14 · SDD silo interligado · F2 · decisão do dono (D1, D3): a medida diz também os destinos da trilha "Continue no Silo". */
+  assert.match(estrutura, / · 2 links internos \(\+ 2 destinos na trilha "Continue no Silo"\) · /);
   const links = linhaDe(entradaGoogle(), contextoDoSilo(new Map(), plantaAntiga())).row.links_internos;
   assert.match(links, /^Aplique somente estes 2 link\(s\)/m, links);
   assert.doesNotMatch(links, /^L3 /m);
@@ -392,8 +401,15 @@ test("F2 e F14 · a planta no CSV traz UMA chamada: o 'Próximo passo' vira a co
   /* 2026-10-09 · 10 · sem link aprovado e sem seção que trate do destino: menção opcional na última seção, citada sem link. */
   assert.match(colunas.estrutura, /^## Quando procurar quem atende\n(?:- .*\n|  ### .*\n)*- Leitura seguinte \(opcional, não é uma chamada\): se couber, mencione o próximo artigo do Silo, "skin care nivea", no corpo desta seção \(cite sem link: o grafo aprovado não traz esse link; não crie o link\); nunca como uma segunda chamada no fechamento\.$/m);
   assert.doesNotMatch(colunas.estrutura, /^Continuação/m);
-  assert.match(colunas.estrutura, /^CTA \(a única chamada\) — argumento do especialista, inteiro: "Comece pela rotina simples e marque uma avaliação\." \(E1;/m);
-  assert.doesNotMatch(colunas.estrutura, /Conheça os protocolos da clínica|^Próximo passo:/m);
+  /*
+   * 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D7): a fala do
+   * especialista vai à mudança e à facilidade, inteira, e não substitui mais o
+   * CTA; na planta gravada, o CTA é o aprovado dela (escrito como diagnóstico).
+   */
+  assert.match(colunas.estrutura, /^Fala aprovada do especialista \(D7: entra na mudança para a estrutura e na facilidade, na voz dele; não substitui o diagnóstico\): "Comece pela rotina simples e marque uma avaliação\." \(E1;/m);
+  assert.match(colunas.estrutura, /^CTA: Conheça os protocolos da clínica\.$/m);
+  assert.equal(colunas.estrutura.match(/^CTA[ :]/gm)?.length, 1, "um CTA só");
+  assert.doesNotMatch(colunas.estrutura, /^Próximo passo:/m);
   /* Sem as opções novas (outros consumidores), a planta sai como antes. */
   assert.match(radarArticleBlueprintColumns(semLink).estrutura, /^Próximo passo: Agende uma avaliação na página de serviços\.$/m);
 });
@@ -602,7 +618,8 @@ test("F8 · cabeçalho de FAQ não entra em 'Termos e temas a nomear'", () => {
   const conceito = (label: string) => ({ ...(observado.concepts.all[0] || {}), id: `c-${label}`, canonicalLabel: label, variants: [label], status: "RECURRENT", sourceCount: 4 });
   observado.concepts.all = ["Perguntas frequentes sobre tráfego orgânico", "Tráfego orgânico pago", "Tipos de tráfego orgânico", "Conteúdo de blog otimizado", "Busca orgânica local", "Palavras-chave de cauda longa"].map(conceito);
   const cobrir = linhaDe({ ...entrada, googleObserved: observado as never }).row.cobrir_e_superar;
-  const termos = linhas(cobrir).find(item => item.startsWith("Termos e temas a nomear")) || "";
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono: a linha virou "Termos e entidades para variar a keyword" (K7). */
+  const termos = linhas(cobrir).find(item => item.startsWith("Termos e entidades para variar a keyword")) || "";
   assert.match(termos, /Palavras-chave de cauda longa/, cobrir);
   assert.doesNotMatch(termos, /Perguntas frequentes/, cobrir);
 });

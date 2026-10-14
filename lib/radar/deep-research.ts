@@ -85,11 +85,26 @@ export function buildRadarResearchFingerprint(context: RadarArticleResearchConte
   };
 }
 
-/** Mudou algum fundamento desde a investigação? Então ela não descreve o agora. */
+/**
+ * 2026-10-14 · LINKS NÃO MUDAM A SERP (decisão do dono). O grafo de links é a
+ * última parte da impressão; quando as DUAS impressões declaram o grafo, a
+ * comparação deixa ele de fora: adotar o grafo novo no Radar ("Atualização
+ * disponível do Arquiteto · links") não deixa a investigação desatualizada.
+ * Impressão sem o campo compara inteira, como antes.
+ */
+type RadarFingerprintLike = { value: string; internalLinkGraphVersionId?: string | null };
+
+export function radarResearchFingerprintBasis(impressao: RadarFingerprintLike, comparada: RadarFingerprintLike): string {
+  if (impressao.internalLinkGraphVersionId === undefined || comparada.internalLinkGraphVersionId === undefined) return impressao.value;
+  const sufixo = `|${impressao.internalLinkGraphVersionId || ""}`;
+  return impressao.value.endsWith(sufixo) ? impressao.value.slice(0, impressao.value.length - sufixo.length) : impressao.value;
+}
+
+/** Mudou algum fundamento desde a investigação? Então ela não descreve o agora. O grafo de links não conta (2026-10-14). */
 export const radarResearchIsStale = (
-  saved: { value: string } | null | undefined,
-  current: { value: string },
-) => Boolean(saved && saved.value !== current.value);
+  saved: RadarFingerprintLike | null | undefined,
+  current: RadarFingerprintLike,
+) => Boolean(saved && radarResearchFingerprintBasis(saved, current) !== radarResearchFingerprintBasis(current, saved));
 
 /* ------------------------------- o registro ------------------------------ */
 

@@ -265,7 +265,8 @@ test("(c) o custo da busca nova é dito antes do clique, na tela", () => {
   const painel = semComentarios(readFileSync("modules/arquiteto/article-improvement-panel.tsx", "utf8"));
   assert.match(painel, /onClick=\{\(\) => setConfirm\("discover"\)\}>Buscar keywords novas no Google Ads \(\{discoveryGaps\}\)<\/button>/);
   assert.match(painel, /\{improvementDiscoveryCostSentence\(discoveryGaps\)\}/);
-  assert.match(painel, /confirm === "discover" \? execute\("prepare", \{ discover: true \}\)/);
+  // 2026-10-13 · a busca nova mantém o recorte (cor) da execução que ela completa.
+  assert.match(painel, /confirm === "discover" \? execute\("prepare", \{ \.\.\.recorteDaExecucao, discover: true \}\)/);
   assert.match(painel, /\.\.\.\(action === "prepare" && options\.discover \? \{ discover: true \} : \{\}\)/);
 });
 

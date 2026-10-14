@@ -50,7 +50,9 @@ test("A — 6 unidades passam pela portaria e derivam relações", () => {
   const conexoes = buildStructuralLinkConnections(SEIS);
   assert.ok(conexoes.length > 0, "o motor de arquitetura sempre derivou; o problema era adiante");
   // raiz→Pilar, raiz→4 suportes, Pilar→raiz, Pilar→4 suportes, 4 suportes→Pilar.
-  assert.equal(conexoes.length, 14);
+  // 2026-10-14 · SDD silo interligado · F4 · decisão do dono (D1): + 4 suportes→raiz e 12 Suporte ↔ Suporte (a malha).
+  assert.equal(buildStructuralLinkConnections(SEIS, { mesh: false }).length, 14);
+  assert.equal(conexoes.length, 30);
 
   const leitura = describeStructuralLinkDerivation({
     units: SEIS, connections: conexoes, edges: conexoes, blockers: [],
@@ -90,7 +92,9 @@ const artigo = (overrides: Partial<ArticleDNA> = {}) => ({
 test("B — ArticleDNA planejado e não publicado continua linkável", () => {
   const conceitos = suggestInternalLinkAnchorConcepts({ article: artigo(), fallbackLabel: "para pele oleosa" });
   assert.ok(conceitos.length > 0, "sem conceito o destino é descartado — e ele não pode ser");
-  assert.equal(conceitos[0], "skincare para pele oleosa", "o conceito vem da Principal do destino");
+  // 2026-10-14 · SDD silo interligado · F4 · decisão do dono (§6.4): a partida é a ideia do destino, nunca a keyword dele.
+  assert.equal(conceitos[0], "skincare", "o conceito vem de um recorte da Principal do destino");
+  assert.equal(conceitos.includes("skincare para pele oleosa"), false, "a Principal do destino não é mais o primeiro conceito");
   // Nada aqui olhou para publicação.
   const estrutura = readFileSync("lib/arquiteto/internal-link-structure.ts", "utf8");
   for (const exigencia of ["publishedUrl", "publicationStatus", "publishedIdentityRef", "canonical", "siloId"]) {
@@ -128,13 +132,16 @@ test("D — Pilar e suportes derivam relações estruturais nos dois sentidos", 
   }
 });
 
-test("E — não cria all-to-all: suporte↔suporte não é consequência do organograma", () => {
+// 2026-10-14 · SDD silo interligado · F4 · decisão do dono (D1 reverte a decisão anterior): todo par do Silo vira relação;
+// o lugar do link (corpo ou trilha) é o priority (D2). O esqueleto sem a malha continua em `{ mesh: false }`.
+test("E — a malha liga todos os suportes entre si, com o priority pela afinidade (D1, D2)", () => {
   const conexoes = buildStructuralLinkConnections(SEIS);
   const idsSuporte = new Set(SUPORTES.map(item => item.nodeId));
   const entreSuportes = conexoes.filter(item => idsSuporte.has(item.sourceNodeId) && idsSuporte.has(item.targetNodeId));
-  assert.deepEqual(entreSuportes, [], "estar no mesmo Silo não é evidência de relação");
-  // O cartesiano de 6 nós seria 30; o esqueleto é bem menor e declarado.
-  assert.ok(conexoes.length < 6 * 5, `esperava menos que o cartesiano, achei ${conexoes.length}`);
+  assert.equal(entreSuportes.length, 4 * 3, "todos os pares dirigidos entre os 4 suportes");
+  assert.ok(entreSuportes.every(item => item.relationType === "SUPPORT_TO_SUPPORT" && (item.priority === "MEDIUM" || item.priority === "LOW")));
+  const esqueleto = buildStructuralLinkConnections(SEIS, { mesh: false });
+  assert.deepEqual(esqueleto.filter(item => idsSuporte.has(item.sourceNodeId) && idsSuporte.has(item.targetNodeId)), []);
 });
 
 /* ============ F · toda aresta carrega conceito de âncora ================ */
@@ -182,9 +189,10 @@ test("§8 — o readout não omite zero e diz a frase humana", () => {
   const leitura = describeStructuralLinkDerivation({ units: SEIS, connections: conexoes, edges: conexoes, blockers: [] });
   assert.equal(
     leitura.readout,
-    "LINK_NODES = 6 · LINKABLE_PAGES = 6 · EDGES_PROPOSED = 14 · ORPHANS = 0 · BLOCKED_PAGES = 0 · GRAPH_READY_TO_CONFIRM = YES",
+    // 2026-10-14 · SDD silo interligado · F4 · decisão do dono (D1): a malha de 5 artigos tem 30 relações (eram 14 no esqueleto).
+    "LINK_NODES = 6 · LINKABLE_PAGES = 6 · EDGES_PROPOSED = 30 · ORPHANS = 0 · BLOCKED_PAGES = 0 · GRAPH_READY_TO_CONFIRM = YES",
   );
-  assert.equal(leitura.summary, "14 relação(ões) estrutural(is) proposta(s) entre 6 páginas.");
+  assert.equal(leitura.summary, "30 relação(ões) estrutural(is) proposta(s) entre 6 páginas.");
 });
 
 test("§8 — órfã é contada, não escondida", () => {

@@ -1,5 +1,59 @@
 # Backlog — Radar
 
+## "Atualização disponível do Arquiteto · links" (grafo de links novo) — 2026-10-14
+
+Decisão do dono (2026-10-14): estender a "Atualização disponível do Arquiteto" ao grafo de links; adotar num clique, sem reenviar e sem refazer a pesquisa. Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Detecção (grafo aprovado vigente do Silo × grafo transportado, pelo `findApprovedGraphForSilo` + `relevantEdgesForArticle` do envio), classe `links_changed`, rótulo "Atualização disponível do Arquiteto · links · grafo vA → vB", o que muda por destino na régua do Radar (`radarSiloMeshPriority`).
+- [x] Adoção pelo mesmo núcleo (prévia, hash, trava, releitura, evento `adopt_architect_version` com `updateKind: "links"`), em lote por Silo/cor com recusa por item; troca só `arquitetoInternalLinks`; vale para finalizado, aprovado e enviado ao Redator; nada pago, nenhuma IA, nenhuma versão nova da análise.
+- [x] A impressão da investigação não desatualiza pelo grafo (`radarResearchIsStale`); o envio ao Redator não acusa divergência de contagem de links com grafo diferente (`radarObservedDivergesFromFrozen`); pacote congelado e planta não regravados.
+- [x] ArticleDNA + links: as duas aparecem; a adoção da versão nova leva o grafo vigente que a cobre; o grafo só da versão nova aparece recusado no item de links.
+- [x] MCP `adopt_architect_version` com `kinds` e `decisionHashByKind`; `get_platform_state` com `radar.items[].linksUpdate`; catálogo.
+- [ ] **Dono (caso real):** no Arquiteto, "Completar a malha do Silo" do Silo "Leads sem Tráfego Pago" e "Confirmar links internos" (aprova o grafo v2) → Radar → faixa "Atualização disponível do Arquiteto · 8 artigo(s) · links novos em 8" → "Ver e adotar" → "Marcar o Silo inteiro (8)" → "Adotar os links novos (8)". Readback por SELECT: `payload->arquitetoInternalLinks->>graphVersionId` = v2 nos 8, `lock_version` +1, `analysisVersions` com o mesmo tamanho, 8 eventos `adopt_architect_version` com `updateKind = links`. Depois, exportar o CSV de um Suporte e conferir a trilha "pedido pelo grafo aprovado".
+- [ ] Avaliar levar os links novos ao documento já criado no Redator (hoje fica com os do envio; reenviar é o caminho de sempre).
+- [ ] Avaliar `get_platform_state` para item que não levou grafo no envio (hoje só sinaliza quem levou; a prévia é a autoridade).
+
+## Silo interligado · F-A (fontes externas de autoridade) — 2026-10-14
+
+SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §16.2. Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] F-A · candidatas (citadas pelos concorrentes, SERP já coletada nos domínios da lista, verbete da Wikipédia da entidade), conferência automática no ANALYZE sem custo pago e sem IA, gravação em `payload.authoritySources`, tela e SERP crua; lista editável na Marca.
+- [ ] Dono: na Marca → Identidade da marca → "Fontes de autoridade", conferir a lista (ou "Usar a lista sugerida"), salvar e aprovar.
+- [ ] Dono: rodar "Analisar concorrência · e finaliza" num artigo de saúde e conferir Pesquisa → Detalhes → "Fontes externas de autoridade" e o `-serp.csv`.
+- [x] F-B (2026-10-14, regras `2026-10-14c`) · as fontes verificadas (id X) no pacote congelado (`bundle.authoritySources`), no artigo-modelo (regra 7: de 2 a 5 no corpo, na frase que sustentam, âncora no nome da entidade, nunca URL fora das X; a afirmação de saúde sem fonte não é afirmada — conferido), no CSV de escrita (`fontes_e_especialista` curta e `estrutura`) e em `get_article_for_writing` pelo mesmo núcleo; planta gravada lida sem IA (D6); E0 só em `pedido.system`, `planta-congelada` e `voz-humana/textos`.
+- [ ] Dono: "Organizar de novo" de um artigo de saúde com fontes conferidas e conferir a coluna `fontes_e_especialista` e os "Link externo Xn" da estrutura no CSV exportado.
+- [ ] Avaliar: levar as fontes X ao Redator (fundamentos e `get_writer_brief`) e ao CSV de vídeo (F6), e dizer as fontes na descrição de `get_article_for_writing` (mudança na fonte do handler, travada no E0).
+- [ ] Avaliar: casamento com sinônimos (hoje raízes), leitura de PDF oficial, lentes extras da SERP como candidatas.
+
+## Silo interligado · F0, F1 e F-S (SERP crua) — 2026-10-14
+
+SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` (D1–D14 decididas pela recomendação; item novo §16.1). Detalhe em `docs/05-radar/estado-atual.md` e no §18.1 da SDD. **Validado manualmente: não.**
+
+- [x] F0 · fixture do caso real, cópia congelada do E0 e teste de escopo do E0 por fase (D14).
+- [x] F1 · título e keyword (K1–K9, V1–V7, regras `2026-10-14`); leitura da planta gravada sem a marca de processo e com a instrução concluída (D6).
+- [x] F-S · SERP crua por artigo: `-serp.csv` no .zip da exportação por artigo e `get_article_serp_raw` no MCP, pelo mesmo núcleo; catálogo.
+- [ ] Dono: "Organizar de novo" dos 8 artigos do Silo "Leads sem Tráfego Pago" (até 16 chamadas de IA, sem SERP) e exportar um por vez; conferir H1, title, meta e H2 e abrir o `-serp.csv`.
+- [ ] Dono: conferir no ar o .zip da exportação por artigo (nome `<NN>-<papel>-<slug>.zip`, os dois CSVs dentro) e `get_article_serp_raw` numa conversa com o MCP.
+- [x] F2 · links obrigatórios do grafo (Suporte → Pilar, Pilar → cada Suporte) garantidos na planta nova e na leitura, e trilha "Continue no Silo" (D1, D2, D3, D6; `lib/radar/silo-link-mesh.ts`); E0 só nas chaves da F2.
+- [ ] Dono: exportar o CSV do Suporte "captação de pacientes dentista" e do Pilar "leads qualificados" e conferir a coluna links_internos (L, "Malha do Silo" e T).
+- [ ] Levar a trilha e o obrigatório da leitura ao Redator (`get_writer_*`) e ao CSV de vídeo (descrição pela trilha, F6).
+- [x] F3 · análise competitiva (amostra relevante D11, faixa de referência D12, T/M+/N/U, até 4 perguntas D13), `brandEdge` e fechamento em 4 campos (D7, D8) na mesma chamada do artigo-modelo; regras `2026-10-14b`; `cobrir_e_superar` nos quatro blocos; E0 só nas chaves da F3.
+- [ ] Dono (D8): na Marca → Skills → Voz da Marca, acrescentar a seção "Oferta de diagnóstico" à Skill (a proposta de texto aparece no detalhe da Skill; nada é aplicado pelo agente) e substituir o arquivo.
+- [ ] Dono: "Organizar de novo" do Suporte "captação de pacientes dentista" (e depois os 8 do Silo piloto) e conferir no CSV a coluna cobrir_e_superar, as perguntas (até 4), o "Diferencial da marca" e o fechamento em 4 tempos.
+- [ ] Levar `competitive`, `brandEdge` e o fechamento em 4 campos ao Redator (fundamentos, `get_writer_*`) e ao CSV de vídeo (F6).
+- [ ] Avaliar: a resposta do PAA nas lentes extras (hoje só a canônica a guarda); entidades com sinônimo na base (hoje raízes); a medida de "rasa" (hoje < 140 caracteres).
+- [ ] F4–F7 conforme o §14 da SDD (F4 só depois da F2 "listas leves" fechar).
+- [ ] Avaliar levar a SERP crua também na exportação do Silo completo (hoje só por artigo).
+
+## F2 das listas leves · mesa leve no banco (compartilhado) — 2026-10-14
+
+SDD `docs/compartilhado/sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`, §18.2. Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Mesa leve por padrão com o corte no banco (metadados + payload só das escolhidas); `detail=full` só explícito.
+- [x] `invitations`/`views` fora da mesa; `/api/inteligencia` sem `analise_semantica`.
+- [ ] Dono: abrir Radar, Redator e Publicações da AdalbaPro e conferir no Network o tamanho de `/api/editorial/workspace` e `/api/inteligencia` (esperado ~6,5 MB e ~45 kB) e que nada some da grade.
+- [ ] F6 · itens do Radar em projeção no banco (4,58 MB na AdalbaPro, poda ainda no Node) — view da M-L.
+
 ## F5 · O Radar acompanha o Arquiteto ("Atualização disponível do Arquiteto") — 2026-10-13
 
 SDD `docs/compartilhado/sdd-acelerar-fluxo-do-plano-2026-10-13.md`, item 14 / fase F5. Detalhe em
@@ -22,8 +76,11 @@ SDD `docs/compartilhado/sdd-acelerar-fluxo-do-plano-2026-10-13.md`, item 14 / fa
   item 11) e finalizar.
 - [ ] Coletas do YouTube/Amazon em andamento (não congeladas) seguem com a impressão da vN: a prévia avisa "confira antes
   de finalizar"; reapontar a impressão da corrida (como a do Google) fica para a F5.b.
-- [ ] Links internos: a adoção carrega as relações aprovadas no envio; quando o grafo aprovado ainda não cobre a vM, a
-  prévia declara a lacuna (não bloqueia). Ler o grafo novo no servidor fica para a F5.b.
+- [x] ~~Links internos: a adoção carrega as relações aprovadas no envio; quando o grafo aprovado ainda não cobre a vM, a
+  prévia declara a lacuna (não bloqueia). Ler o grafo novo no servidor fica para a F5.b.~~ Feito em 2026-10-14 (ver
+  "Atualização disponível do Arquiteto · links" no topo): o servidor lê o grafo vigente; a adoção da vM leva o grafo
+  que a cobre, e o grafo novo da versão transportada é adotável sozinho. A lacuna declarada continua só quando nenhum
+  grafo aprovado cobre a vM.
 - [ ] **Dono:** homologar com um artigo em pesquisa (não finalizado): "Gravar melhorias" no Arquiteto → Radar → faixa
   → "Ver e adotar" → conferir a prévia → adotar → readback por SELECT (`source_version_id`, `payload->>articleDnaVersionId`,
   última `analysisVersions` com a versão nova, evento `adopt_architect_version`).

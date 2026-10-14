@@ -119,10 +119,11 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "buscar-keywords",
     title: "1 · Buscar keywords (grátis)",
-    summary: "Procura, para cada publicado e Assunto, keywords com volume: primeiro na sua lista, depois no Google Ads.",
-    description: "A busca segue esta ordem: (1) keywords da lista que o Google já junta com o artigo, pela SERP guardada; (2) leitura da IA na sua lista, que escolhe de 1 a 3 keywords por artigo, com o papel e um motivo; (3) leitura da lista pelo código, para quem a IA não resolveu: keywords com volume que são o núcleo do slug e levam a palavra do próprio slug (“como atrair clientes” vai para a página de atrair, “como captar clientes” para a de captar); (4) só para quem ficou sem nada, uma busca nova no Google Ads. Nada é gravado neste passo.",
+    summary: "Lê de graça o que já temos e mostra “Já temos · Falta · Custa”; a IA e o Google Ads só rodam com a sua autorização.",
+    description: "Primeiro a leitura grátis: DNA de cada keyword, volume já medido (inclusive “sem média” do Google Ads há menos de 30 dias, que não é medido de novo), SERP em cache, Assunto, plano e trava. O cartão diz o que já temos, o que falta e quanto custa; a leitura da IA (OpenRouter, que recebe o resumo do DNA) e a medição no Google Ads (cota, sem custo em dólar) só rodam quando você toca no botão que diz o custo, e só para o que falta. A medição feita aqui é gravada no “Gravar melhorias” sem consultar o Google Ads de novo. A busca segue esta ordem: (1) keywords da lista que o Google já junta com o artigo, pela SERP guardada; (2) leitura da IA na sua lista, que escolhe de 1 a 3 keywords por artigo, com o papel e um motivo; (3) leitura da lista pelo código, para quem a IA não resolveu: keywords com volume que são o núcleo do slug e levam a palavra do próprio slug (“como atrair clientes” vai para a página de atrair, “como captar clientes” para a de captar); (4) só para quem ficou sem nada, uma busca nova no Google Ads. Nada é gravado neste passo.",
     sections: [
       { heading: "Buscar de novo", body: "Refaz a busca com a lista atual. Use depois de aprovar keywords novas no Minerador." },
+      { heading: "Ler com IA e medir", body: "Aparece quando falta algo que custa: diz quantas keywords serão medidas no Google Ads (cota) e se há uma chamada de IA. O que já temos não é pedido de novo." },
       { heading: "Origem de cada linha", body: "A tabela diz de onde veio cada sugestão: Pares da SERP, Leitura da IA — confira, Lista · núcleo do slug ou Busca nova no Google Ads." },
       { heading: "Quando o Google separa parte do grupo", body: "Se o parecer da SERP mostra que algumas keywords não dividem páginas com a principal, elas saem e o grupo menor é conferido de novo pelo cache, sem custo. A linha diz quem saiu." },
       { heading: "Regras que a IA não pode furar", body: "Sem volume, publicada, de outro artigo aprovado, que troca a entidade do slug, de outro público ou cabeça genérica muito ampla (acima de 5.000 buscas com até duas palavras) ficam de fora. As recusas aparecem em “Sugestões da IA recusadas pelas regras”." },
@@ -155,7 +156,7 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
     id: "leitura-da-ia",
     title: "Leitura da IA — confira",
     summary: "Sugestão da IA na sua lista de keywords. Ela tem a menor autoridade: o código confere cada escolha e você decide.",
-    description: "A IA lê o artigo e a sua lista e aponta as keywords que melhor combinam, com o papel (principal ou secundária) e um motivo curto. Ela não inventa keyword: só escolhe entre as que você já tem com volume. Nada é gravado sem o seu clique.",
+    description: "A IA lê o artigo e a sua lista e aponta as keywords que melhor combinam, com o papel (principal ou secundária) e um motivo curto. Ela recebe o resumo do DNA de cada keyword (intenção, entidade, funil, público e problema) e não decide no escuro. Ela não inventa keyword: só escolhe entre as que você já tem com volume. Só roda com a sua autorização, e nada é gravado sem o seu clique.",
     keywords: ["ia", "inteligência artificial", "leitura da ia", "confira", "sugestão", "motivo", "autoridade"],
   },
   {

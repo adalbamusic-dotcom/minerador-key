@@ -191,7 +191,8 @@ test("troca: só Posto Livre, sem ranquear, substituta no artigo e pela régua d
   assert.deepEqual(travado.add.map(item => item.keywordId), ["kw-10"]);
 });
 
-test("keyword nova: só com volume do Google Ads, e a confirmação diz que o dono aprova no Minerador", () => {
+// F4 (ajuste declarado 2026-10-14): a keyword nova vai como sugestão ao Minerador; não entra no artigo nem é aprovada daqui.
+test("keyword nova: só com volume do Google Ads, e a confirmação diz que ela vai como sugestão ao Minerador (F4)", () => {
   const plano = planPublishedReinforcementPage(fatos({
     newKeywords: [
       { keyword: "captar pacientes clínica", normalizedKeyword: "captar pacientes clinica", adsVolume: 50, level: "strong", sharedPageCount: 4, origins: ["ads_url_seed"], evidence: [], searchId: "11111111-1111-4111-8111-111111111111", existingKeywordId: null },
@@ -202,12 +203,17 @@ test("keyword nova: só com volume do Google Ads, e a confirmação diz que o do
   assert.deepEqual(plano.create.map(item => item.keyword), ["captar pacientes clínica"]);
   assert.match(plano.refused.find(item => item.keyword === "sem volume")!.reason, /Sem volume do Google Ads/);
   assert.match(plano.refused.find(item => item.keyword === "inventada")!.reason, /Não está no resultado gravado da busca/);
-  assert.ok(plano.lines.some(linha => /importadas no Minerador e aprovadas por você/.test(linha)));
-  // A que já existe no Minerador não é "importada": a frase diz que ela já está lá.
+  assert.ok(plano.lines.some(linha => /Vão como sugestão ao Minerador \(“Sugestões do Arquiteto”\) 1 keyword nova: "captar pacientes clínica"\. Não entram no artigo agora/.test(linha)), plano.lines.join(" | "));
+  assert.ok(!plano.lines.some(linha => /aprovadas por você/.test(linha)), "o Arquiteto não aprova");
+  // Só sugestão também é "pronta" (gravar = gravar a sugestão, nada no Minerador nem no artigo).
+  assert.equal(plano.status, "ready");
+  // A que já existe no Minerador e não chegou ao Arquiteto: a frase diz para aprovar e enviar lá.
   const existente = planPublishedReinforcementPage(fatos({ newKeywords: [{ keyword: "gestão de clínica", normalizedKeyword: "gestao de clinica", adsVolume: 50, level: "probable", sharedPageCount: 2, origins: ["ads_keyword_seed"], evidence: [], searchId: "11111111-1111-4111-8111-111111111111", existingKeywordId: "kw-77" }] }));
-  assert.ok(existente.lines.some(linha => /1 keyword que já está no Minerador \(aprovadas por você e enviadas ao Arquiteto\): "gestão de clínica"/.test(linha)), existente.lines.join(" | "));
+  assert.ok(existente.lines.some(linha => /1 keyword que já está no Minerador e ainda não chegou ao Arquiteto: "gestão de clínica"\. Aprove e envie no Minerador/.test(linha)), existente.lines.join(" | "));
   assert.ok(!existente.lines.some(linha => /importadas/.test(linha)));
-  assert.match(PUBLISHED_REINFORCEMENT_APPROVAL_TEXT, /você aprova estas keywords no Minerador/);
+  assert.match(PUBLISHED_REINFORCEMENT_APPROVAL_TEXT, /o Arquiteto só lê keyword/);
+  assert.match(PUBLISHED_REINFORCEMENT_APPROVAL_TEXT, /Sugestões do Arquiteto/);
+  assert.doesNotMatch(PUBLISHED_REINFORCEMENT_APPROVAL_TEXT, /você aprova estas keywords/);
 });
 
 /* ============================== 2. o ArticleDNA ============================== */
@@ -807,4 +813,41 @@ test("Corretor D3: o DNA aprovado com parecer de outros papéis (o caso real de 
   const plano = planPublishedReinforcementPage(fatos({ item: fato("kw-01", { formationRef: F, formationRole: "principal" }), members: [fato("kw-09", { formationRef: F, formationRole: "secundaria" })], article: artigo, serpCandidates: [parecerDoCalculado] }));
   assert.equal(plano.status, "refused");
   assert.match(String(plano.refusal), /foi aprovado com o parecer da SERP de outra composição \(2 keywords no artigo\) — o parecer da SERP foi feito com outros papéis \(secundária × reforço\)\. Rode "Processar artigos"/);
+});
+
+/* ====== F3 · ler antes de buscar (SDD 2026-10-13, item 3, regra 5): o que o Minerador já mediu não é medido de novo ====== */
+
+test("F3 · rodada: a candidata que o Minerador já mediu usa o volume dele e não vai às métricas do Google Ads", async () => {
+  const pages = [pagina("kw-02")];
+  const plano = await buildReinforcementSearchPlan({ brandId: MARCA, searchId: reinforcementSearchId(["kw-02"]), pages });
+  const pedidasAoAds: string[][] = [];
+  const ports: DifferentiationRunPorts = {
+    now: () => new Date("2026-09-28T12:00:00Z"),
+    async openExecution() {
+      return {
+        ledgerCapability: false,
+        findUsage: async () => false,
+        googleAdsIdeas: async () => ({ requestId: "r", ideas: ["marketing para dentistas", "marketing para clinica"].map(keyword => ({ keyword, averageMonthlySearches: 100, competition: null, competitionIndex: null, averageCpcMicros: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: null })) }),
+        recordGoogleAdsUsage: async () => undefined,
+        async collectSerp(request, opcoes) {
+          opcoes.onRequestStarted();
+          const linha = [...LINHA.values()].find(item => item.keyword === request.query.keyword)!;
+          const urls = linha.lenses.flatMap(leitura => leitura.urls || []).slice(0, 10);
+          return { providerRequestId: "s", costUsd: 0.002, digest: { version: "organic-digest-v1", depth: 10, organic: urls.map((url, i) => ({ rank_group: i + 1, url, domain: "d", title: "t", description: "d" })) } as never, organicCount: urls.length, stored: true, error: null };
+        },
+        recordDataForSeoUsage: async () => "skipped" as const,
+      };
+    },
+    googleAdsVolumes: async lista => { pedidasAoAds.push([...lista]); return new Map(lista.map(item => [normalizeKeyword(item), 140])); },
+    readFootprints: async alvos => ({
+      footprints: alvos.filter(alvo => alvo.keyword === "marketing para clinica").map(alvo => pegada("kw-20", alvo.keywordId)),
+      missingLenses: alvos.filter(alvo => alvo.keyword !== "marketing para clinica").flatMap(alvo => ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"].map(lens => ({ keywordId: alvo.keywordId, lens, reason: "sem cache" }))),
+    }),
+  };
+  const rodada = await runReinforcementSearch({ brandId: MARCA, plan: plano, pages, pageFootprints: [pegada("kw-02")], publishedNormalized: new Set(), knownVolumeByNormalized: new Map([[normalizeKeyword("marketing para dentistas"), 210]]), operationRequestId: "22222222-2222-4222-8222-222222222299", authorizedPlan: { planHash: plano.planHash, maxCostUsd: plano.costRange.maxUsd } }, ports);
+  assert.ok(rodada.ok, rodada.ok ? "" : rodada.message);
+  if (!rodada.ok) return;
+  assert.ok(pedidasAoAds.every(lista => !lista.includes("marketing para dentistas")), "a que o Minerador já mediu não vai ao Google Ads");
+  assert.deepEqual(rodada.result.pages[0].suggestions.map(item => [item.keyword, item.adsVolume]), [["marketing para dentistas", 210]], "o volume é o do Minerador");
+  assert.equal(chamadasDeRede, 0);
 });

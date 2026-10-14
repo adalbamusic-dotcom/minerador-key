@@ -170,6 +170,8 @@ mock.module("@/lib/server/arquiteto-article-serp-store", { namedExports: {
   },
   readbackArticleFormationSerpAssessment: async (_contexto: unknown, candidateRef: string) => ({ payload: { formationBaseHash: "base-1", verdict: gravados.find(item => item.candidateRef === candidateRef)?.verdict } }),
   listArticleFormationSerpAssessments: async () => [],
+  // F2 das listas leves (2026-10-14): leitura de UM parecer pelo candidateRef.
+  findArticleFormationSerpAssessment: async () => null,
 } });
 
 const gravadosTerritoriais: Array<Record<string, any>> = [];
@@ -1084,4 +1086,57 @@ test("D2(b) continua opcional: o plano pago ainda conta as 4 lentes da principal
   assert.equal(corpo.data.plan.paidQueries, 4, "só as 4 lentes da principal declarada; as sustentações estão no cache");
   assert.ok(corpo.data.plan.missingDetails.every((item: { keyword: string }) => item.keyword === "claro vivo ou tim internet"));
   assert.deepEqual(pedidosAoProvider, []);
+});
+
+/* ============ F3 · ler antes de buscar: o SERVIDOR decide o volume (SDD 2026-10-13, item 3, regra 6) ============ */
+
+test("F3 · parecer: a keyword que o banco diz sem volume sai do plano pago, mesmo com a tela dizendo 100", async () => {
+  recomecar();
+  banco.linhas("minerador_keywords").push(
+    { id: KW_1, lock_version: 1, brand_id: MARCA, deleted_at: null, keyword: "skincare facial", volume_search: 880, volume_source: "google_ads", analise_semantica: {} },
+    { id: KW_2, lock_version: 1, brand_id: MARCA, deleted_at: null, keyword: "rotina skincare facial", volume_search: 0, volume_source: "google_ads", analise_semantica: {} },
+  );
+  const { status, corpo } = await chamar({ mode: "plan" });
+  assert.equal(status, 200, JSON.stringify(corpo).slice(0, 400));
+  assert.equal(corpo.data.plan.paidQueries, 4, "só as 4 lentes da principal: a secundária não tem volume no banco");
+  assert.deepEqual(pedidosAoProvider, []);
+  const leitura = banco.consultas.find(consulta => consulta.tabela === "minerador_keywords" && consulta.colunas.includes("volume_eligibility"))!;
+  assert.ok(leitura, "o volume foi relido no banco");
+  assert.doesNotMatch(leitura.colunas, /(^|,)analise_semantica(,|$)/, "nunca o analise_semantica inteiro");
+  assert.ok(leitura.filtros.some(filtro => filtro.coluna === "brand_id" && filtro.valor === MARCA));
+});
+
+test("F3 · parecer: keyword fora do acervo da marca fica com o pedido (como antes) e o plano não muda", async () => {
+  recomecar();
+  const { corpo } = await chamar({ mode: "plan" });
+  assert.equal(corpo.data.plan.paidQueries, 8);
+});
+
+const chamarLote = async (keywords: Array<{ keywordId: string; keyword: string }>, extra: Record<string, unknown>) => {
+  const resposta = await POST_KEYWORD(new Request("http://teste/api/arquiteto/keyword-serp", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ brandId: MARCA, scopeId: "article-batch:1:abc", territoryRef: null, keywords, ...extra }),
+  }));
+  return { status: resposta.status, corpo: await resposta.json() as Record<string, any> };
+};
+
+test("F3 · coleta do lote: com onlyMeasuredVolume, a keyword sem volume no banco não é planejada nem paga", async () => {
+  recomecar();
+  banco.linhas("minerador_keywords").push(
+    { id: KW_1, lock_version: 1, brand_id: MARCA, deleted_at: null, keyword: "skincare facial", volume_search: 880, volume_source: "google_ads", analise_semantica: {} },
+    { id: KW_2, lock_version: 1, brand_id: MARCA, deleted_at: null, keyword: "rotina skincare facial", volume_search: null, volume_source: null, analise_semantica: {} },
+  );
+  const duas = [{ keywordId: KW_1, keyword: "skincare facial" }, { keywordId: KW_2, keyword: "rotina skincare facial" }];
+  const conferido = await chamarLote(duas, { mode: "plan", onlyMeasuredVolume: true });
+  assert.equal(conferido.status, 200, JSON.stringify(conferido.corpo).slice(0, 400));
+  assert.equal(conferido.corpo.data.plan.paidQueries, 4, "1 keyword × 4 lentes");
+  assert.deepEqual(conferido.corpo.data.excludedByVolume.map((item: { keywordId: string }) => item.keywordId), [KW_2]);
+  // Sem a conferência (outros chamadores), a rota continua como antes.
+  const comoAntes = await chamarLote(duas, { mode: "plan" });
+  assert.equal(comoAntes.corpo.data.plan.paidQueries, 8);
+  // Nenhuma com volume: nada é planejado nem pago.
+  const nenhuma = await chamarLote([{ keywordId: KW_2, keyword: "rotina skincare facial" }], { mode: "execute", authorizedPaidQueries: 4, onlyMeasuredVolume: true });
+  assert.equal(nenhuma.status, 409);
+  assert.equal(nenhuma.corpo.code, "KEYWORD_SERP_NO_VOLUME");
+  assert.deepEqual(pedidosAoProvider, [], "nada pago");
 });

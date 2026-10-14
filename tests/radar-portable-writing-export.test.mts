@@ -319,7 +319,8 @@ test("C · sem FAQ: a seção de perguntas frequentes do modelo fica de fora, e 
   /* 2026-10-09 · a estrutura é a da planta: a seção de FAQ do modelo da SERP nem chega à IA (o esqueleto a tira), e a planta não tem FAQ. */
   assert.match(dados[1].estrutura, /^ARTIGO-MODELO DA SERP \(planta concluída do artigo/);
   assert.doesNotMatch(dados[1].estrutura, /perguntas frequentes|\bFAQ\b/i);
-  assert.match(dados[1].cobrir_e_superar, /Perguntas a responder dentro das seções \(sem seção de perguntas frequentes\):/);
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D13): até 4 perguntas que valem resposta, dentro das seções. */
+  assert.match(dados[1].cobrir_e_superar, /Perguntas que valem resposta \(até 4, dentro das seções; sem seção de perguntas frequentes\):/);
 });
 
 /* ================================ D ================================ */
@@ -444,7 +445,8 @@ test("G · limpeza: pergunta duplicada por caixa e entidade vira uma, isolada e 
 test("G · termos: nunca unigrama cru nem palavra de menu; com menos de cinco válidos, a linha some", () => {
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
   assert.equal(/\bvoce\b|\bnossos\b|\baqui\b/.test(pilar.cobrir_e_superar), false, "palavra de menu virou termo");
-  assert.equal(/Termos e temas a nomear/.test(pilar.cobrir_e_superar), false, "a linha de termos saiu com menos de cinco válidos");
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono: a linha virou "Termos e entidades para variar a keyword" (K7). */
+  assert.equal(/Termos e entidades para variar a keyword/.test(pilar.cobrir_e_superar), false, "a linha de termos saiu com menos de cinco válidos");
 });
 
 test("G · fontes: a de menu não classificada fica fora, a científica sai limpa e rotulada como não verificada", () => {
@@ -724,8 +726,10 @@ test("K · a tela: o card 'Exportar para escrever' — escopo em rádio de 14px,
   const grupo = card.slice(inicioDoGrupo, card.lastIndexOf("<button", card.indexOf('data-testid="radar-export-csv"')));
   assert.match(grupo, /role="radiogroup" aria-label="O que exportar"/);
   assert.deepEqual([...grupo.matchAll(/type="radio" name="radar-escopo-do-export" value="([a-z]+)"/g)].map(item => item[1]), ["silo", "selecionados"]);
-  assert.match(grupo, /Silo completo \(recomendado\)/);
-  assert.match(grupo, /Só os artigos selecionados/);
+  /* 2026-10-14 · SDD silo interligado §16.1 · decisão do dono: um artigo por vez é o recomendado, com a SERP crua no .zip. */
+  assert.match(grupo, /Silo completo</);
+  assert.match(grupo, /Só os artigos selecionados \(recomendado: um artigo por vez\)/);
+  assert.match(grupo, /Vem num \.zip com a SERP crua de cada artigo \(só o que já foi coletado\)/);
   assert.match(grupo, /Mesmo formato, com o Silo, o papel e os links de cada artigo\./);
   assert.match(grupo, /Sem seleção: vão todos os artigos prontos do Radar\./, "a regra de quando não há seleção deixou de ser dita");
   assert.equal(/<button/.test(grupo), false);
@@ -776,7 +780,8 @@ test("K · a tela: o card 'Exportar para escrever' — escopo em rádio de 14px,
     assert.match(codigo.slice(inicio, inicio + 80), /= async \(modo: RadarExportMode(?: \| "video")?\) =>/, `${funcao} não recebe o formato de quem clicou`);
     assert.match(corpo, /mode: modo \}/, `${funcao} não manda o formato de quem clicou`);
   }
-  assert.match(codigo, /useState<"silo" \| "selecionados">\("silo"\)/, "o padrão do card é o silo completo");
+  /* 2026-10-14 · SDD silo interligado §16.1 · decisão do dono: o padrão do card é por artigo (os selecionados). */
+  assert.match(codigo, /useState<"silo" \| "selecionados">\("selecionados"\)/, "o padrão do card é por artigo");
   /* A preferência de formato gravada pelo card antigo: não se lê, não se grava e não se limpa (AGENTS §10). */
   assert.equal(/RADAR_EXPORT_MODE_STORAGE_KEY|modoDoExport|escolherModoDoExport/.test(codigo), false, "a tela voltou a usar a preferência de formato do navegador");
   assert.equal(/removeItem\(|localStorage\.clear/.test(codigo.slice(codigo.indexOf("const [menuDeExport"), codigo.indexOf("const [menuDeExport") + 3000)), false);
@@ -823,8 +828,16 @@ test("L · artigo do Silo sem link na planta nem plano de links no pacote: a fal
   const saude = linhasDe(radarPortableWritingExport({ articles: montadas, lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM }).files![0].csv).dados;
   const suporte = saude[2];
   assert.equal(suporte.ordem, "2 · Suporte");
-  assert.equal(suporte.links_internos, "Nenhum link interno no artigo-modelo.");
-  assert.match(suporte.pode_escrever, /sem links internos no pacote: o artigo sai isolado do Silo \(sem link para o Pilar nem para a SiloPage\) até o Arquiteto definir o plano de links/);
+  /*
+   * 2026-10-14 · SDD silo interligado · F2 · decisão do dono (D1, D6): a malha do
+   * Silo na leitura põe no corpo o link obrigatório (Suporte → Pilar, um
+   * candidato do Silo, não um link inventado) e leva o resto à trilha "Continue
+   * no Silo"; o artigo não sai mais isolado, e a ressalva do isolamento saiu.
+   */
+  assert.match(suporte.links_internos, /^Aplique somente estes 1 link\(s\)/);
+  assert.match(suporte.links_internos, /^L1 · .* → Pilar "skincare facial" → /m);
+  assert.match(suporte.links_internos, /^T1 · /m);
+  assert.doesNotMatch(suporte.pode_escrever, /sem links internos no pacote/);
   assert.match(saude[1].links_internos, /^Aplique somente estes \d link\(s\)/, "o Pilar leva os links que a planta posicionou");
 
   /* Sem Silo, a planta não tem candidato a link e não há plano a cobrar. */
@@ -913,8 +926,16 @@ test("L · o veredito não repete a mesma afirmação e diz o excedente pelo nom
   };
   const montadas = comPlantas(montadasDoSiloSaude(), silo)
     .map(item => (item.articleId === ARTIGO ? { ...item, entrada: semPlano(item.entrada), blueprint: plantaDe(item.entrada, { silo, articleId: item.articleId, semLinks: true }) } : item));
+  /*
+   * 2026-10-14 · SDD silo interligado · F2 · decisão do dono (D6): com outro
+   * destino no Silo, a malha da leitura liga o artigo e a ressalva do isolamento
+   * não sai. Para o excedente continuar dito pelo nome, o Silo deste arquivo fica
+   * só com o Pilar (sem irmão nem SiloPage): aí o artigo continua isolado.
+   */
+  const plano = planoDoSilo();
+  const soOPilar = { ...plano.files[0].writing!, members: plano.files[0].writing!.members.filter(membro => membro.articleId === ARTIGO), siloPage: null };
   const pilar = linhasDe(radarPortableWritingExport({
-    articles: montadas, lenses: LEITURA_DAS_LENTES, plan: planoDoSilo(), today: EXPORTADO_EM, publications: new Map([[ARTIGO, PUBLICACAO_SEM_POLITICA]]),
+    articles: montadas, lenses: LEITURA_DAS_LENTES, plan: { ...plano, files: [{ ...plano.files[0], writing: soOPilar }, ...plano.files.slice(1)] }, today: EXPORTADO_EM, publications: new Map([[ARTIGO, PUBLICACAO_SEM_POLITICA]]),
   }).files![0].csv).dados[1];
   /* A afirmação sem fonte que o conflito de YMYL nomeia não volta como motivo próprio ("é afirmação … sem fonte verificada"). */
   assert.match(pilar.pode_escrever, /^Com ressalva: o pacote registra YMYL baixa e também uma afirmação sensível que pede fonte \("O que causa acne"\)/);

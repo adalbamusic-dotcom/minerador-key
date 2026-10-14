@@ -5,7 +5,6 @@ import { useSubjectDialogFocus } from "./subject-panels";
 import { SERP_SUBJECT_TONE_CLASSES, type SerpSubjectCardView } from "./serp-subject-model";
 import {
   PUBLISHED_REINFORCEMENT_ACTION_LABEL,
-  PUBLISHED_REINFORCEMENT_APPROVAL_CHECKBOX,
   PUBLISHED_REINFORCEMENT_COST_LINE,
   PUBLISHED_REINFORCEMENT_SAVE_LABEL,
   PUBLISHED_REINFORCEMENT_TABLE_LINE,
@@ -77,7 +76,7 @@ export function SearchSuggestionList({ controller, pageId, result }: { controlle
           );
         })}
       </ul>
-      <p className="text-sm leading-6 text-text-muted">{`As marcadas entram em "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}". As novas são importadas e aprovadas por você no Minerador na mesma confirmação.`}</p>
+      <p className="text-sm leading-6 text-text-muted">{`As marcadas entram em "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}". As novas vão como sugestão ao Minerador (“Sugestões do Arquiteto”): o Arquiteto só lê keyword; importar, medir e aprovar é lá, pelo seu clique.`}</p>
     </div>
   );
 }
@@ -100,8 +99,6 @@ function OutcomeBlock({ controller, buttonClassName }: { controller: PublishedRe
 /** A confirmação única do "Reforçar publicados", montada da prévia do servidor. */
 function ReinforcementDialog({ controller, cards, rows = [], buttonClassName, primaryButtonClassName }: { controller: PublishedReinforcementController; cards: readonly SerpSubjectCardView[]; rows?: readonly ReinforcementTableRow[] } & ButtonClasses) {
   const dialogRef = useRef<HTMLElement | null>(null);
-  const [aprovadoPara, setAprovadoPara] = useState<string | null>(null);
-  const aprovoId = useId();
   const { dialog } = controller;
   const busy = controller.busy || dialog.status === "loading" || dialog.status === "applying";
   useSubjectDialogFocus(dialog.open, dialogRef, controller.closeReinforcement, !busy);
@@ -111,12 +108,10 @@ function ReinforcementDialog({ controller, cards, rows = [], buttonClassName, pr
   // A tabela acrescenta, por artigo, a mudança de Silo e o total depois de gravar.
   const daTabela = new Map(rows.map(row => [row.anchorKeywordId, row.confirmLines]));
   const depoisPelaTabela = new Map(rows.map(row => [row.anchorKeywordId, row.after.keywords]));
-  // O total que o servidor vai gravar: a página, quem fica, as marcadas aceitas e as novas.
-  const doServidor = new Map((dialog.data?.pages || []).map(plano => [plano.publishedKeywordId, { total: 1 + plano.keep.length + plano.add.length + plano.create.length, recusadas: plano.refused.length }]));
-  const precisaAceite = Boolean(view?.approvalText);
-  // O aceite vale para a prévia vista: prévia nova (outro hash) pede o aceite de novo.
-  const aprovo = Boolean(dialog.data && aprovadoPara === dialog.data.decisionHash);
-  const podeGravar = Boolean(view && view.ready > 0 && !busy && (!precisaAceite || aprovo));
+  // O total que o servidor vai gravar: a página, quem fica e as marcadas aceitas (F4: as novas vão como sugestão ao Minerador, fora do artigo).
+  const doServidor = new Map((dialog.data?.pages || []).map(plano => [plano.publishedKeywordId, { total: 1 + plano.keep.length + plano.add.length, recusadas: plano.refused.length }]));
+  // F4 · O ARQUITETO SÓ LÊ: não há mais aceite de "aprovar no Minerador" aqui.
+  const podeGravar = Boolean(view && view.ready > 0 && !busy);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="presentation">
       <section
@@ -185,19 +180,15 @@ function ReinforcementDialog({ controller, cards, rows = [], buttonClassName, pr
           )}
           {dialog.left.length > 0 && <p className="text-text-muted">{`Mais ${dialog.left.length} publicado(s) ficam para a próxima confirmação (até 30 por vez).`}</p>}
           {view?.approvalText && (
-            <div className="rounded-md border border-warning/40 bg-warning/10 p-2">
+            <div className="rounded-md border border-divider bg-surface-subtle p-2" data-testid="architect-reinforcement-suggestions-note">
               <p className="text-foreground">{view.approvalText}</p>
-              <span className="mt-1 inline-flex items-center gap-2">
-                <input id={aprovoId} type="checkbox" className="h-4 w-4 shrink-0" checked={aprovo} disabled={busy} onChange={event => setAprovadoPara(event.target.checked && dialog.data ? dialog.data.decisionHash : null)} data-testid="architect-reinforcement-approve" />
-                <label htmlFor={aprovoId} className="cursor-pointer font-medium text-foreground">{PUBLISHED_REINFORCEMENT_APPROVAL_CHECKBOX}</label>
-              </span>
             </div>
           )}
           <p className="text-text-muted">{`${PUBLISHED_REINFORCEMENT_COST_LINE} Nada é gravado sem esta confirmação, e o resultado só é anunciado depois da releitura.`}</p>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" disabled={dialog.status === "applying"} onClick={controller.closeReinforcement} className={buttonClassName}>Cancelar</button>
-          <button type="button" disabled={!podeGravar} onClick={() => void controller.applyReinforcement(precisaAceite && aprovo)} className={primaryButtonClassName} data-testid="architect-reinforcement-confirm">
+          <button type="button" disabled={!podeGravar} onClick={() => void controller.applyReinforcement()} className={primaryButtonClassName} data-testid="architect-reinforcement-confirm">
             {dialog.status === "applying" ? "Gravando e relendo…" : view?.confirmLabel ?? "Gravar e reler"}
           </button>
         </div>

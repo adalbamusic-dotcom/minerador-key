@@ -8,7 +8,9 @@ import {
   parseKeywordPageTypeChoice,
   type KeywordPageType,
 } from "./keyword-page-type.ts";
-import { resolveKeywordVinculo, type KeywordVinculo } from "./keyword-vinculo.ts";
+import { resolveKeywordVinculo, type KeywordVinculo, type KeywordVinculoInput } from "./keyword-vinculo.ts";
+import type { DeclaredPlanLockChoice } from "./declared-plan.ts";
+import { PLAN_LOCK_ARCHITECT_HINT, PLAN_LOCK_CADASTRO_REFUSAL, PLAN_LOCK_CHOICE_LABELS, PLAN_LOCK_CHOICE_ORDER } from "./keyword-plan-lock.ts";
 import {
   KEYWORD_SUBJECT_ACTOR_KEY,
   KEYWORD_SUBJECT_AT_KEY,
@@ -63,6 +65,8 @@ export type VinculoBatchChoiceGroup = {
 const PAGE_TYPE_CHOICE_PREFIX = "page_type:";
 const POST_LOCKED_CHOICE = "post:locked";
 const POST_FREE_CHOICE = "post:reviewable";
+/** 2026-10-13 · "Automática (pelo volume)": a trava do cadastro volta a seguir o volume (só keyword do plano). */
+const POST_AUTO_CHOICE = "post:auto";
 
 /**
  * Os dois grupos do seletor "Vínculo" do rodapé. Cada grupo tem valores
@@ -78,10 +82,11 @@ export const VINCULO_BATCH_CHOICE_GROUPS: readonly VinculoBatchChoiceGroup[] = [
     label: "Posto de principal",
     shortLabel: "Posto",
     ariaLabel: "Posto de principal das selecionadas",
-    title: "Posto de principal das selecionadas: Travado ao slug ou Livre. Só vale para publicadas.",
+    title: "Posto de principal das selecionadas: na publicada, Travado ao slug ou Livre; na não publicada do plano, a trava do cadastro (Travada, Livre ou Automática). Sem plano, travar é recusado por item.",
     options: [
       { value: POST_LOCKED_CHOICE, label: primaryPostLabel("locked") },
       { value: POST_FREE_CHOICE, label: primaryPostLabel("free") },
+      { value: POST_AUTO_CHOICE, label: PLAN_LOCK_CHOICE_LABELS.auto },
     ],
   },
   {
@@ -145,10 +150,43 @@ export const VINCULO_POST_SELECT_OPTIONS: readonly { value: "reviewable" | "lock
   { value: "locked", label: primaryPostLabel("locked") },
 ];
 
+/**
+ * 2026-10-13 · O POSTO DA NÃO PUBLICADA É A TRAVA DO CADASTRO (pedido do dono).
+ * Os mesmos valores do select do posto (`locked`, `reviewable` = Livre) e mais
+ * `auto`; os rótulos dizem o que a trava faz no artigo.
+ */
+export const VINCULO_PLAN_LOCK_SELECT_OPTIONS: readonly { value: "locked" | "reviewable" | "auto"; label: string }[] = PLAN_LOCK_CHOICE_ORDER.map(choice => ({
+  value: postValueOfPlanLockChoice(choice),
+  label: PLAN_LOCK_CHOICE_LABELS[choice],
+}));
+
+/** Em grupo, publicadas e não publicadas juntas: o mesmo valor serve aos dois postos. */
+export const VINCULO_MIXED_POST_SELECT_OPTIONS: readonly { value: "locked" | "reviewable" | "auto"; label: string }[] = [
+  { value: "locked", label: "Travada (ao slug na publicada; no artigo na do plano)" },
+  { value: "reviewable", label: "Livre" },
+  { value: "auto", label: `${PLAN_LOCK_CHOICE_LABELS.auto} · só keyword do plano` },
+];
+
+/** A escolha da trava vira o valor do select do posto. */
+export function postValueOfPlanLockChoice(choice: DeclaredPlanLockChoice): "locked" | "reviewable" | "auto" {
+  return choice === "free" ? "reviewable" : choice;
+}
+
+/** O valor do select do posto vira a escolha da trava (só na não publicada). */
+export function planLockChoiceOfPostValue(value: string): DeclaredPlanLockChoice | null {
+  return value === "locked" ? "locked" : value === "reviewable" ? "free" : value === "auto" ? "auto" : null;
+}
+
+/** Que select do posto a keyword (ou o grupo) mostra: o da publicação, a trava do plano, ou os dois juntos. */
+export type VinculoPostMode = "slug" | "plan" | "mixed";
+
 /** Os valores que os selects mostram para uma keyword, lidos do resolvedor. */
 export function vinculoSelectValues(vinculo: KeywordVinculo): VinculoSelectValues {
   return {
-    post: vinculo.postSelectValue,
+    // Na não publicada (com contexto do plano), o posto é a trava: sem plano, Livre.
+    post: vinculo.planLock
+      ? vinculo.planLock.kind === "plan" ? postValueOfPlanLockChoice(vinculo.planLock.choice) : "reviewable"
+      : vinculo.postSelectValue,
     page_type: keywordPageTypeChoiceValue(vinculo.pageType.type, keywordPageTypeStance(vinculo.pageType)),
   };
 }
@@ -173,34 +211,42 @@ export function vinculoPublishedCurrentPageTypeOption(currentValue: string | nul
 export type VinculoBatchCommonValues = Record<VinculoBatchChoiceGroupKey, string | null> & {
   /** Todas publicadas: o Potencial mostra só os 4 declarados, como na Revisão. */
   publishedOnly: boolean;
+  /** 2026-10-13 · com o contexto do plano: que select do posto o painel mostra. */
+  postMode?: VinculoPostMode;
 };
 
 export function commonVinculoSelectValues(
-  items: readonly { status?: string | null; analise_semantica?: Semantic | null }[],
+  items: readonly { id?: string; status?: string | null; analise_semantica?: Semantic | null }[],
+  /** 2026-10-13 · o contexto da trava do cadastro de cada linha (a tela do Minerador). Sem ele, o de antes. */
+  planOf?: (item: { id?: string; status?: string | null; analise_semantica?: Semantic | null }) => KeywordVinculoInput["plan"],
 ): VinculoBatchCommonValues {
   const common: VinculoBatchCommonValues = { post: null, page_type: null, publishedOnly: items.length > 0 };
+  let slug = 0;
+  let plan = 0;
   items.forEach((item, index) => {
-    const vinculo = resolveKeywordVinculo({ status: item.status, semantic: item.analise_semantica });
+    const vinculo = resolveKeywordVinculo({ status: item.status, semantic: item.analise_semantica, ...(planOf ? { plan: planOf(item) } : {}) });
     if (!vinculo.publicationDeclared) common.publishedOnly = false;
+    if (vinculo.planLock) plan += 1; else slug += 1;
     const values = vinculoSelectValues(vinculo);
     for (const group of VINCULO_BATCH_CHOICE_GROUPS) {
       if (index === 0) common[group.key] = values[group.key];
       else if (common[group.key] !== values[group.key]) common[group.key] = null;
     }
   });
+  if (planOf) common.postMode = plan && slug ? "mixed" : plan ? "plan" : "slug";
   return common;
 }
 
 /** O valor do select vira a escolha do plano; o marcador e valor desconhecido viram `""`. */
 export function vinculoSelectToBatchChoice(key: VinculoBatchChoiceGroupKey, value: string): string {
-  if (key === "post") return value === "locked" ? POST_LOCKED_CHOICE : value === "reviewable" ? POST_FREE_CHOICE : "";
+  if (key === "post") return value === "locked" ? POST_LOCKED_CHOICE : value === "reviewable" ? POST_FREE_CHOICE : value === "auto" ? POST_AUTO_CHOICE : "";
   return parseKeywordPageTypeChoice(value) ? `${PAGE_TYPE_CHOICE_PREFIX}${value}` : "";
 }
 
 /** A escolha do plano vira o valor do select; sem escolha, `null`. */
 export function vinculoBatchChoiceToSelect(key: VinculoBatchChoiceGroupKey, choice: string): string | null {
   if (!choice) return null;
-  if (key === "post") return choice === POST_LOCKED_CHOICE ? "locked" : choice === POST_FREE_CHOICE ? "reviewable" : null;
+  if (key === "post") return choice === POST_LOCKED_CHOICE ? "locked" : choice === POST_FREE_CHOICE ? "reviewable" : choice === POST_AUTO_CHOICE ? "auto" : null;
   return choice.startsWith(PAGE_TYPE_CHOICE_PREFIX) ? choice.slice(PAGE_TYPE_CHOICE_PREFIX.length) : null;
 }
 
@@ -247,6 +293,7 @@ export function vinculoBatchActionsFromChoices(choices: Partial<VinculoBatchChoi
 export function vinculoBatchActionFromChoice(choice: string | null | undefined): VinculoBatchAction | null {
   if (choice === POST_LOCKED_CHOICE) return { kind: "post", policy: "locked" };
   if (choice === POST_FREE_CHOICE) return { kind: "post", policy: "reviewable" };
+  if (choice === POST_AUTO_CHOICE) return { kind: "post", policy: "auto" };
   if (typeof choice === "string" && choice.startsWith(PAGE_TYPE_CHOICE_PREFIX)) {
     const rest = choice.slice(PAGE_TYPE_CHOICE_PREFIX.length);
     // `page_type:silo` (contrato anterior) continua sendo o tipo sem peso.
@@ -268,10 +315,31 @@ function plural(count: number, singular: string, pluralForm: string): string {
  * quantas aprovadas vão para Em revisão. `warning` é `null` sem aprovadas.
  */
 export function describeVinculoBatchConfirmation(plan: OkPlan): { summary: string; details: string[]; warning: string | null } {
-  const summary = plan.counts.updates === 0
+  const writes = plan.counts.updates + (plan.counts.planLocks ?? 0);
+  const summary = writes === 0
     ? `${plan.actionLabel}: nenhuma keyword da seleção muda.`
-    : `${plan.actionLabel}: ${plural(plan.counts.updates, "keyword será gravada", "keywords serão gravadas")}.`;
+    : `${plan.actionLabel}: ${plural(writes, "keyword será gravada", "keywords serão gravadas")}.`;
   const details: string[] = [];
+  // 2026-10-13 · na não publicada do plano, o posto é a trava do cadastro: grava pelo núcleo do cadastro.
+  if ((plan.planLocks ?? []).length > 0) {
+    const names = plan.planLocks.map(entry => `"${entry.keyword}" (${entry.fromLabel})`).join(", ");
+    details.push(`${plural(plan.planLocks.length, "keyword do plano muda de trava", "keywords do plano mudam de trava")} pelo cadastro (nova versão do plano): ${names}. ${PLAN_LOCK_ARCHITECT_HINT}`);
+  }
+  // Recusa por item, com o nome e o motivo — nunca pulada em silêncio.
+  const refused = plan.skipped.filter(entry => entry.reason === "no_plan");
+  if (refused.length > 0) {
+    const byReason = new Map<string, string[]>();
+    for (const entry of refused) byReason.set(entry.detail ?? PLAN_LOCK_CADASTRO_REFUSAL, [...(byReason.get(entry.detail ?? PLAN_LOCK_CADASTRO_REFUSAL) ?? []), `"${entry.keyword}"`]);
+    for (const [reason, names] of byReason) {
+      details.push(`${plural(names.length, "recusada", "recusadas")} (${names.join(", ")}): ${reason}`);
+    }
+  }
+  if (plan.counts.published_auto > 0) {
+    details.push(`${plural(plan.counts.published_auto, "publicada foi pulada", "publicadas foram puladas")}: "Automática" vale só para a keyword do plano; na publicada escolha Travado ao slug ou Livre.`);
+  }
+  if (plan.counts.same_article > 0) {
+    details.push(`${plural(plan.counts.same_article, "keyword é do mesmo artigo", "keywords são do mesmo artigo")} de outra selecionada: a trava é gravada uma vez.`);
+  }
   if (plan.counts.not_published > 0) {
     details.push(`${plural(plan.counts.not_published, "não publicada foi pulada", "não publicadas foram puladas")}: o posto só vale para publicadas.`);
   }
@@ -295,9 +363,10 @@ export function describeVinculoBatchConfirmation(plan: OkPlan): { summary: strin
 export function describeVinculoBatchChoicesConfirmation(
   plan: Extract<VinculoBatchChoicesPlan, { ok: true }>,
 ): { summary: string; steps: { summary: string; details: string[] }[]; warning: string | null } {
-  const summary = plan.counts.updates === 0
+  const writes = plan.counts.updates + (plan.counts.planLocks ?? 0);
+  const summary = writes === 0
     ? "Nenhuma keyword da seleção muda."
-    : `${plural(plan.counts.updates, "keyword será gravada", "keywords serão gravadas")}.`;
+    : `${plural(writes, "keyword será gravada", "keywords serão gravadas")}.`;
   const steps = plan.steps.map(step => {
     const text = describeVinculoBatchConfirmation(step);
     return { summary: text.summary, details: text.details };

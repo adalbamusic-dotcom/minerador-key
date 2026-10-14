@@ -18,6 +18,7 @@ import { REINFORCEMENT_SEARCH_SUBJECT_TYPE } from "@/lib/arquiteto/published-rei
 import { calculatedCandidateRefOf, PUBLISHED_REINFORCEMENT_SWAP_REASON, publishedSwapDecisionRole, type SerpAssessmentComposition } from "@/lib/arquiteto/published-formation-serp";
 import {
   PUBLISHED_REINFORCEMENT_APPROVAL_TEXT,
+  PUBLISHED_REINFORCEMENT_APPROVE_RETIRED,
   PUBLISHED_REINFORCEMENT_MAX_PAGES,
   applyReinforcementSwap,
   buildFirstPublishedArticleDna,
@@ -36,7 +37,8 @@ import {
 import { readSerpEvidenceRecord, serpEvidenceAxisValue } from "@/lib/minerador/serp-evidence-record";
 import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
 import type { SubjectDiscoverySource } from "@/lib/minerador/subject-discovery-plan";
-import { SUBJECT_DISCOVERY_ORIGINS, type SubjectDiscoveryImportRequest } from "@/lib/minerador/subject-discovery-import";
+import { SUBJECT_DISCOVERY_ORIGINS } from "@/lib/minerador/subject-discovery-import";
+import type { ArchitectSuggestionDraft } from "@/lib/arquiteto/minerador-suggestions";
 import {
   readDifferentiationArticleIndex,
   readDifferentiationBrandKeywords,
@@ -55,9 +57,10 @@ import {
  *            gravado da busca em lote; devolve, por página, o que será gravado
  *            e o `decisionHash` (SHA-256 do que foi lido e planejado).
  *   apply    humano, com o MESMO `decisionHash` (estado mudou → nada é
- *            gravado). Na ordem, por página, parando no primeiro erro com o
- *            motivo: keywords novas (import da Pesquisa por Assunto → Lógica →
- *            Volume do Google Ads → aprovação humana → envio ao Arquiteto),
+ *            gravado). Primeiro as keywords novas viram "Sugestões do
+ *            Arquiteto" (F4, SDD 2026-10-13 item 2: nenhuma escrita no
+ *            Minerador — importar, medir, aprovar e enviar são do dono, lá).
+ *            Depois, por página, parando no primeiro erro com o motivo:
  *            composição do artigo (item de workflow, pela mesma rota da mesa,
  *            com a mudança de Silo quando preciso) e o ArticleDNA (primeiro ou
  *            sucessora, com a troca aceita), cada passo com releitura.
@@ -112,14 +115,13 @@ export type WorkingCopyPatch = { workflowItemId: string; expectedLock: number; a
  */
 export type ArticleSerpReferenceRow = { candidateRef: string; territoryRef: string; reference: VersionReference; composition?: SerpAssessmentComposition | null };
 
-export type PublishedReinforcementMineradorPorts = {
-  importKeywords: (request: SubjectDiscoveryImportRequest) => Promise<{ ok: true } | { ok: false; reason: string }>;
-  runLogic: (keywordIds: string[]) => Promise<{ ok: boolean; reason: string | null }>;
-  measureVolume: (keywordIds: string[], operationRequestId: string) => Promise<{ ok: boolean; reason: string | null }>;
-  readVolumes: (keywordIds: string[]) => Promise<Map<string, { volume: number | null; validated: boolean }>>;
-  approve: (keywordIds: string[]) => Promise<{ ok: boolean; reason: string | null }>;
-  handoff: (keywordIds: string[]) => Promise<void>;
-};
+/**
+ * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+ * item 2): as portas do Minerador (import, Lógica, Volume, aprovação, envio)
+ * saíram daqui. A keyword nova vira sugestão — o único escritor é
+ * `recordArquitetoMineradorSuggestions` (um item de workflow do Arquiteto).
+ */
+export type PublishedReinforcementSuggestionPort = (input: { source: "reinforcement"; sourceId: string; drafts: ArchitectSuggestionDraft[] }) => Promise<{ recorded: number; recordKey: string } | { recorded: 0; error: string } | null>;
 
 /**
  * Os cabeçalhos de uma chamada em processo a outra rota (PATCH da mesa, Volume
@@ -165,14 +167,8 @@ export type PublishedReinforcementDeps = {
   patchWorkingCopy?: (updates: WorkingCopyPatch[]) => Promise<void>;
   /** O writer canônico do ArticleDNA (`appendArquitetoArtifact`, status aprovado). */
   persistArticleVersion?: (version: VersionEnvelope<ArticleDNA>) => Promise<{ status: "PERSISTED" | "UNCHANGED"; versionId: string }>;
-  /** Os núcleos do Minerador, só quando há keyword nova. */
-  minerador?: PublishedReinforcementMineradorPorts;
-  /**
-   * Os mesmos núcleos, montados só quando a prévia confirmada tem keyword nova
-   * (a rota confere ali as permissões do Minerador; pedido sem keyword nova
-   * não exige permissão no Minerador).
-   */
-  loadMinerador?: () => Promise<PublishedReinforcementMineradorPorts>;
+  /** F4: grava as keywords novas como "Sugestões do Arquiteto" (nada no Minerador). Só no apply. */
+  recordMineradorSuggestions?: PublishedReinforcementSuggestionPort;
   /** Liga o parecer da SERP e o marcador à formação gravada (só no apply). */
   bindSerpToFormation?: (input: PublishedSerpBinding) => Promise<void>;
 };
@@ -466,7 +462,7 @@ function previewData(leitura: Reading) {
     approvalText: novas ? PUBLISHED_REINFORCEMENT_APPROVAL_TEXT : null,
     written: false,
     message: prontas.length
-      ? `${prontas.length} artigo(s) publicado(s) prontos para gravar${novas ? `, com ${novas} keyword(s) nova(s) que você aprova no Minerador` : ""}. Nada foi gravado ainda. Para gravar: confirme "Reforçar publicados".`
+      ? `${prontas.length} artigo(s) publicado(s) prontos para gravar${novas ? `; ${novas} keyword(s) nova(s) vão como sugestão ao Minerador (não entram no artigo agora)` : ""}. Nada foi gravado ainda. Para gravar: confirme "Reforçar publicados".`
       : "Nada a gravar: os publicados escolhidos já têm tudo o que foi marcado, ou foram recusados com o motivo. Nada foi gravado.",
   };
 }
@@ -515,19 +511,43 @@ export async function handlePublishedReinforcement(deps: PublishedReinforcementD
   if (body.decisionHash !== leitura.decisionHash) {
     return falhou(409, "PREVIEW_CHANGED", "O estado mudou desde a prévia que você viu. Recarregue a prévia antes de confirmar; nada foi gravado.", { preview: previewData(leitura) });
   }
+  // F4 · O ARQUITETO SÓ LÊ: o pedido antigo de aprovar as novas no Minerador é recusado com o caminho.
+  if (body.approveNewKeywords === true) return falhou(422, "MINERADOR_DECIDES_NEW_KEYWORDS", PUBLISHED_REINFORCEMENT_APPROVE_RETIRED);
   const prontas = leitura.plans.filter(plan => plan.status === "ready");
   if (!prontas.length) return { status: 200, body: { success: true, data: { mode: "apply", pages: [], notAttempted: [], written: false, readbackConfirmed: true, tone: "info", message: "Nada foi gravado: os artigos já tinham tudo o que foi marcado." } } };
   const comNovas = prontas.some(plan => plan.create.length);
-  if (comNovas && body.approveNewKeywords !== true) {
-    return falhou(422, "HUMAN_APPROVAL_REQUIRED", `Há keywords novas: a confirmação precisa dizer que você as aprova no Minerador. ${PUBLISHED_REINFORCEMENT_APPROVAL_TEXT} Nada foi gravado.`);
-  }
   if (!deps.patchWorkingCopy || !deps.persistArticleVersion) return falhou(503, "ARTICLE_WRITER_UNAVAILABLE", "O gravador do Arquiteto não está disponível. Nada foi gravado.");
-  // As permissões do Minerador só são conferidas quando a prévia confirmada tem keyword nova.
-  const mineradorPortas = comNovas ? deps.minerador ?? (deps.loadMinerador ? await deps.loadMinerador() : undefined) : undefined;
-  if (comNovas && !mineradorPortas) return falhou(503, "MINERADOR_UNAVAILABLE", "Os núcleos do Minerador não estão disponíveis para as keywords novas. Nada foi gravado.");
+  if (comNovas && !deps.recordMineradorSuggestions) return falhou(503, "SUGGESTIONS_UNAVAILABLE", "O registro das sugestões ao Minerador não está disponível. Nada foi gravado.");
 
   const agora = deps.now().toISOString();
   const operationRequestId = body.operationRequestId!;
+  /*
+   * F4 · AS KEYWORDS NOVAS VIRAM SUGESTÃO, ANTES DE QUALQUER ARTIGO. Nenhuma
+   * escrita no Minerador: o registro é do Arquiteto e a caixa do Minerador o
+   * lê. Falha aqui para tudo (nada foi gravado ainda).
+   */
+  let sugestoes: { recorded: number; recordKey: string } | null = null;
+  if (comNovas) {
+    const drafts: ArchitectSuggestionDraft[] = prontas.flatMap(plan => plan.create.map(item => ({
+      kind: "new_keyword" as const,
+      keyword: item.keyword,
+      keywordId: item.existingKeywordId,
+      targetKeywordId: plan.publishedKeywordId,
+      targetTheme: plan.keyword,
+      targetKind: "published" as const,
+      subjectKeywordId: null,
+      volume: item.adsVolume > 0 ? item.adsVolume : null,
+      volumeSource: "google_ads_ideas" as const,
+      measuredAt: null,
+      reason: `Reforçaria o publicado “${plan.keyword}” (${item.level === "strong" ? "forte" : "provável"} na SERP, ${item.sharedPageCount} página(s) em comum).`,
+      origins: item.origins,
+      evidence: item.evidence,
+      searchId: item.searchId,
+    })));
+    const gravado = await deps.recordMineradorSuggestions!({ source: "reinforcement", sourceId: operationRequestId, drafts });
+    if (gravado && "error" in gravado) return falhou(503, "SUGGESTIONS_NOT_RECORDED", `As sugestões ao Minerador não foram gravadas (${gravado.error}). Nada foi gravado.`);
+    sugestoes = gravado;
+  }
   const outcomes: PublishedReinforcementPageOutcome[] = [];
   let parou: string | null = null;
   const factsPorPagina = new Map(leitura.facts.map(item => [item.page.keywordId, item]));
@@ -536,63 +556,19 @@ export async function handlePublishedReinforcement(deps: PublishedReinforcementD
     const facts = factsPorPagina.get(plan.publishedKeywordId)!;
     const resultado: PublishedReinforcementPageOutcome = { publishedKeywordId: plan.publishedKeywordId, keyword: plan.keyword, written: false, versionNumber: null, added: plan.add.length, created: 0, swapApplied: false, error: null, partial: [], leftOut: [] };
     const parar = (motivo: string) => { resultado.error = motivo; parou = `"${plan.keyword}": ${motivo}`; outcomes.push(resultado); };
-    const gravouNoMinerador = (frase: string) => { resultado.partial!.push(frase); };
-
-    /* 1. Keywords novas: os núcleos do Minerador, na ordem das telas. */
-    let criadas: string[] = [];
+    /*
+     * 1. F4 · keywords novas: NENHUMA escrita no Minerador. Elas foram como
+     * sugestão (acima) e ficam fora deste artigo até o dono decidir lá.
+     */
+    const criadas: string[] = [];
     if (plan.create.length) {
-      const minerador = mineradorPortas!;
-      const paraImportar = plan.create.filter(item => !item.existingKeywordId);
-      const porBusca = new Map<string, ReinforcementNewKeyword[]>();
-      for (const item of paraImportar) porBusca.set(item.searchId, [...(porBusca.get(item.searchId) || []), item]);
-      let erroImport: string | null = null;
-      for (const [searchId, itens] of porBusca) {
-        const importado = await minerador.importKeywords({
-          importRequestId: stableUuid(deps.store.brandId, operationRequestId, plan.publishedKeywordId, searchId, "import"),
-          searchId,
-          subjectKeywordId: null,
-          subjectPhrase: plan.keyword,
-          items: itens.map(item => ({ keyword: item.keyword, origins: item.origins, evidence: item.evidence })),
-        });
-        if (!importado.ok) { erroImport = importado.reason; break; }
-      }
-      if (erroImport) { parar(`o import no Minerador falhou: ${erroImport}`); break; }
-      const marcaAgora = await readDifferentiationBrandKeywords(deps.store);
-      const ids = plan.create.map(item => marcaAgora.existingByNormalized.get(item.normalizedKeyword) ?? null);
-      if (ids.some(id => !id)) { parar("o import não confirmou todas as keywords novas na releitura."); break; }
-      const novasIds = ids as string[];
-      const nomeDe = (id: string) => plan.create[novasIds.indexOf(id)]?.keyword ?? id;
-      if (paraImportar.length) gravouNoMinerador(`${paraImportar.length} keyword(s) importada(s) no Minerador (${paraImportar.map(item => `"${item.keyword}"`).join(", ")})`);
-      const logica = await minerador.runLogic(novasIds);
-      if (!logica.ok) { parar(`a Lógica não foi confirmada: ${logica.reason ?? "releitura falhou"}`); break; }
-      gravouNoMinerador("a Lógica delas");
-      const volume = await minerador.measureVolume(novasIds, stableUuid(deps.store.brandId, operationRequestId, plan.publishedKeywordId, "volume"));
-      if (!volume.ok) { parar(`o Volume do Google Ads não foi medido: ${volume.reason ?? "falha no Google Ads"}`); break; }
-      gravouNoMinerador("o Volume do Google Ads delas");
-      const volumes = await minerador.readVolumes(novasIds);
-      criadas = novasIds.filter(id => volumes.get(id)?.validated);
-      const semVolume = novasIds.filter(id => !volumes.get(id)?.validated);
-      if (semVolume.length) resultado.leftOut!.push(...semVolume.map(id => ({ keyword: nomeDe(id), reason: "o Google Ads não confirmou volume: ficou no Minerador, fora do artigo" })));
-      if (criadas.length) {
-        const aprovacao = await minerador.approve(criadas);
-        if (!aprovacao.ok) { parar(`a aprovação no Minerador não foi confirmada: ${aprovacao.reason ?? "releitura falhou"}`); break; }
-        gravouNoMinerador(`aprovação de ${criadas.length} no Minerador`);
-        try {
-          await minerador.handoff(criadas);
-        } catch (error) {
-          parar(`o envio ao Arquiteto falhou: ${error instanceof Error ? error.message.slice(0, 160) : "erro"}`);
-          break;
-        }
-        gravouNoMinerador(`envio de ${criadas.length} ao Arquiteto`);
-      }
-      resultado.created = criadas.length;
+      resultado.leftOut!.push(...plan.create.map(item => ({ keyword: item.keyword, reason: "foi como sugestão ao Minerador (“Sugestões do Arquiteto”): importar, medir e aprovar é lá; depois, “Reforçar publicados” a coloca no artigo" })));
+      if (sugestoes) resultado.partial!.push(`${plan.create.length} sugestão(ões) ao Minerador`);
     }
 
     /* 2. A composição do artigo no item de workflow (mesmo writer da mesa). */
     let workspace = await deps.readWorkspace();
     let rows = projectWorkspace(workspace, deps.store.brandId);
-    const naoRecebidas = criadas.filter(id => (rows.get(id)?.canonicalWorkflow as CanonicalWorkflowItem | undefined)?.state !== "received");
-    if (naoRecebidas.length) { parar("as keywords novas não chegaram ao Arquiteto na releitura."); break; }
     const composicao = compositionOf(plan, facts.article?.payload ?? null, criadas, rows);
     const formationRef = plan.formationRef ?? `${ARTICLE_FORMATION_REF_PREFIX}${stableUuid(deps.store.brandId, plan.publishedKeywordId, "reforco")}`;
     const territorio = plan.territoryRef!;
@@ -779,6 +755,8 @@ export async function handlePublishedReinforcement(deps: PublishedReinforcementD
         tone: desfecho.tone,
         message: desfecho.message,
         publishedSlugs: prontas.map(plan => ({ keywordId: plan.publishedKeywordId, slug: publishedSlugOf(plan.url) })),
+        // F4: as keywords novas viraram "Sugestões do Arquiteto" (nada foi gravado no Minerador).
+        ...(sugestoes ? { mineradorSuggestions: { recorded: sugestoes.recorded, recordKey: sugestoes.recordKey } } : {}),
       },
     },
   };

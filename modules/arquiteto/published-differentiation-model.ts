@@ -531,16 +531,12 @@ export function differentiationApplyView(data: DifferentiationAcceptData): Diffe
   };
 }
 
-/** O envio ao Processador do Minerador: o mesmo import da Pesquisa por Assunto. */
-export function differentiationIngestRequest(batch: DifferentiationIngestBatch, importRequestId: string) {
-  return {
-    importRequestId,
-    searchId: batch.searchId,
-    subjectKeywordId: null,
-    subjectPhrase: batch.subjectPhrase,
-    items: batch.items.map(item => ({ keyword: item.keyword, origins: item.origins, evidence: item.evidence })),
-  };
-}
+/*
+ * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13, item 2): o pedido de import ao
+ * Processador do Minerador montado aqui (`differentiationIngestRequest`) saiu.
+ * O aceite grava as keywords novas como "Sugestões do Arquiteto" no servidor;
+ * o import acontece no Minerador, pelo clique do dono.
+ */
 
 /* ---------------------------------- erros ---------------------------------- */
 

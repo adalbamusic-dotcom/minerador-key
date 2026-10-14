@@ -302,33 +302,66 @@ function keywordPlacement(keyword: string | undefined, parts: { title: string; h
   };
 }
 
-export async function extractCompetitorPage(rawUrl: string, options: { fetchImpl?: typeof fetch; lookupImpl?: typeof lookup; timeoutMs?: number; now?: string; keyword?: string } = {}): Promise<RadarExtractionPage> {
+/**
+ * 2026-10-14 · A BUSCA GUARDADA, EXPORTADA PARA QUEM MAIS PRECISA NAVEGAR.
+ *
+ * A conferência das fontes externas de autoridade (`authority-source-verification.ts`)
+ * abre páginas de fora com as MESMAS guardas da extração: URL validada, destino
+ * DNS conferido a cada salto, redirect manual com teto, timeout. Duplicar a guarda
+ * seria criar a versão que se esquece na próxima correção; por isso o laço mora
+ * aqui uma vez só, e a extração de concorrentes o usa sem mudar de comportamento.
+ *
+ * `userAgent` e `accept` são opcionais: sem eles, os cabeçalhos são os de sempre.
+ * Devolve a resposta FINAL (fora da faixa 3xx) e o endereço onde ela foi obtida;
+ * o status e o corpo são de quem chama.
+ */
+export async function fetchGuardedExternalResponse(rawUrl: string, options: { fetchImpl?: typeof fetch; lookupImpl?: typeof lookup; timeoutMs?: number; userAgent?: string; accept?: string; stopRedirectWhen?: (next: URL) => boolean } = {}): Promise<{ url: URL; response: Response }> {
   const fetchImpl = options.fetchImpl || fetch;
   const lookupImpl = options.lookupImpl || lookup;
   let current = validateExternalUrl(rawUrl);
   let response: Response | null = null;
-  try {
-    for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-      await assertResolvedDestination(current, lookupImpl);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), options.timeoutMs || DEFAULT_TIMEOUT_MS);
-      try {
-        response = await fetchImpl(current, { method: "GET", redirect: "manual", headers: { Accept: "text/html,application/xhtml+xml" }, signal: controller.signal, cache: "no-store" });
-      } catch {
-        if (controller.signal.aborted) throw new CompetitorExtractionError("timeout", "A pagina concorrente excedeu o timeout.", 504);
-        throw new CompetitorExtractionError("fetch_failed", "Nao foi possivel buscar a pagina concorrente.", 502);
-      } finally {
-        clearTimeout(timer);
-      }
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get("location");
-        if (!location || redirects === MAX_REDIRECTS) throw new CompetitorExtractionError("redirect_limit", "A pagina excedeu o limite de redirects permitido.");
-        current = validateExternalUrl(new URL(location, current).toString());
-        continue;
-      }
-      break;
+  const headers: Record<string, string> = { Accept: options.accept || "text/html,application/xhtml+xml" };
+  if (options.userAgent) headers["User-Agent"] = options.userAgent;
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+    await assertResolvedDestination(current, lookupImpl);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs || DEFAULT_TIMEOUT_MS);
+    try {
+      response = await fetchImpl(current, { method: "GET", redirect: "manual", headers, signal: controller.signal, cache: "no-store" });
+    } catch {
+      if (controller.signal.aborted) throw new CompetitorExtractionError("timeout", "A pagina concorrente excedeu o timeout.", 504);
+      throw new CompetitorExtractionError("fetch_failed", "Nao foi possivel buscar a pagina concorrente.", 502);
+    } finally {
+      clearTimeout(timer);
     }
-    if (!response) throw new CompetitorExtractionError("fetch_failed", "Nenhuma resposta foi recebida.", 502);
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location || redirects === MAX_REDIRECTS) throw new CompetitorExtractionError("redirect_limit", "A pagina excedeu o limite de redirects permitido.");
+      current = validateExternalUrl(new URL(location, current).toString());
+      /* Quem chama pode recusar seguir (ex.: a fonte que sai do domínio declarado): o destino volta sem ser buscado. */
+      if (options.stopRedirectWhen?.(current)) return { url: current, response };
+      continue;
+    }
+    break;
+  }
+  if (!response) throw new CompetitorExtractionError("fetch_failed", "Nenhuma resposta foi recebida.", 502);
+  return { url: current, response };
+}
+
+/** 2026-10-14 · O corpo com o teto de bytes da extração (exportado para a conferência de fontes). */
+export async function readGuardedBody(response: Response): Promise<string> {
+  return readBody(response);
+}
+
+/** 2026-10-14 · O texto sem marcação, pela mesma régua da extração (exportado para a conferência de fontes). */
+export function stripHtmlMarkup(html: string): string {
+  return stripMarkup(html);
+}
+
+export async function extractCompetitorPage(rawUrl: string, options: { fetchImpl?: typeof fetch; lookupImpl?: typeof lookup; timeoutMs?: number; now?: string; keyword?: string } = {}): Promise<RadarExtractionPage> {
+  validateExternalUrl(rawUrl);
+  try {
+    const { url: current, response } = await fetchGuardedExternalResponse(rawUrl, { fetchImpl: options.fetchImpl, lookupImpl: options.lookupImpl, timeoutMs: options.timeoutMs });
     /*
      * O STATUS DA ORIGEM VEM ANTES DO CONTEÚDO.
      *

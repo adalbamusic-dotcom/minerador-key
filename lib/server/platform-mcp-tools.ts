@@ -23,9 +23,9 @@ import { EDITORIAL_GROUP_COLORS } from "@/lib/editorial/editorial-groups";
 import { listEditorialGroupSummaries } from "@/lib/editorial/editorial-groups-store";
 import { EDITORIAL_GROUP_MCP_INPUT_HINT, resolveEditorialGroupMcpScope } from "@/lib/editorial/editorial-group-scope";
 import { DECLARED_PLAN_ARTICLES_MAX, DECLARED_PLAN_LOCK_CHOICES, DECLARED_PLAN_ROLES, DECLARED_PLAN_SCOPE_MAX } from "@/lib/minerador/declared-plan";
-import { importDeclaredPlanWithCore } from "@/lib/minerador/declared-plan-import-core";
+import { importDeclaredPlanWithCore, setKeywordPlanLockWithCore } from "@/lib/minerador/declared-plan-import-core";
 import { KEYWORD_PAGE_TYPE_KEY, KEYWORD_PAGE_TYPE_STANCE_KEY, keywordPageTypeStance } from "@/lib/minerador/keyword-page-type";
-import { KEYWORD_SUBJECT_AT_KEY, KEYWORD_SUBJECT_KEY, KEYWORD_SUBJECT_ORIGIN_KEY } from "@/lib/minerador/keyword-subject";
+import { KEYWORD_SUBJECT_AT_KEY, KEYWORD_SUBJECT_KEY, KEYWORD_SUBJECT_ORIGIN_KEY, guardKeywordSemanticWrite } from "@/lib/minerador/keyword-subject";
 import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
 import { LOGICAL_OUTPUT_CONTRACT_KEY } from "@/lib/minerador/logical-processor";
 import { readCanonicalKeywordDna } from "@/lib/minerador/logical-read-model";
@@ -133,8 +133,14 @@ async function persistSemanticDecision(input: {
       results.push({ id: update.id, outcome: "stale", reason: "current_version_unavailable" });
       continue;
     }
+    // 2026-10-13 · o Assunto nunca se perde: nenhuma decisão do MCP grava cópia sem ele.
+    const guarded = guardKeywordSemanticWrite(current.analise_semantica, update.semantic);
+    if (!guarded.ok) {
+      results.push({ id: update.id, outcome: "stale", reason: "subject_release_required" });
+      continue;
+    }
     const saved = await constrainKeywordSnapshot(
-      db.from("minerador_keywords").update({ analise_semantica: update.semantic })
+      db.from("minerador_keywords").update({ analise_semantica: guarded.semantic })
         .eq("id", update.id).eq("brand_id", input.brandId).is("deleted_at", null),
       current,
     )
@@ -151,7 +157,7 @@ async function persistSemanticDecision(input: {
       ? Boolean(persistedSemantic
         && readKgrApplicability(persistedSemantic) === readKgrApplicability(update.semantic)
         && persistedSemantic.kgr_decidido_por === input.actorId)
-      : vinculoReadbackConfirmed({ id: update.id, brandId: input.brandId, keyword: current.keyword, semantic: update.semantic, demotesApproval: false },
+      : vinculoReadbackConfirmed({ id: update.id, brandId: input.brandId, keyword: current.keyword, semantic: guarded.semantic, demotesApproval: false },
         persistedSemantic ? { id: update.id, brand_id: input.brandId, ...Object.fromEntries(
           ["keyword_subject", "keyword_page_type", "keyword_page_type_stance", "primary_keyword_policy"]
             .filter(key => key in persistedSemantic).map(key => [key, persistedSemantic[key]]),
@@ -828,7 +834,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       "É o card 'Cadastrar Assuntos' do Minerador, pelo mesmo núcleo (importDeclaredPlanWithCore) — a única porta para o Assunto desde 2026-10-13. O Assunto mora DENTRO da keyword: por artigo, o título (subject), a keyword que o carrega (principal, obrigatória), os detalhes (scope), o papel Pilar/Suporte, a ordem e a trava (lock). Nenhuma linha de título vira keyword.",
       "Use quando o usuário trouxer o plano de um Silo novo, artigos para um Silo existente ou keywords para reforçar um artigo publicado, e ACEITAR cadastrar no chat. Envie o texto colado (text) OU o plano estruturado (plan), nunca os dois; o grupo pela COR (group { mode: 'color', color: amarelo, azul, verde, lima ou laranja, name opcional }) e o destino (destination: new_silo, existing_silo com groupId, ou published com url).",
       "Trava: keyword com volume medido entra TRAVADA (o Arquiteto a usa como principal e só busca sustentações); sem volume, LIVRE (o Arquiteto pode propor outra principal pela SERP/volume, mantendo o Assunto, o papel e a ordem no artigo). lock: 'locked' ou 'free' fixa à mão; 'auto' volta ao volume. Planos anteriores ao cadastro único ficam travados até o usuário mudar.",
-      "Silo existente é acréscimo: os artigos já gravados ficam como estão; tirar artigo do plano é pela tela ('Tirar do plano'). Artigo publicado: o Assunto vai para a keyword da página (URL, slug, canonical e principal intocados) e as keywords entram como reforço dela.",
+      "Silo existente, planMode 'append' (padrão): acréscimo — os artigos já gravados ficam como estão; tirar UM artigo do plano é pela tela ('Tirar do plano'). planMode 'replace' (Substituir o plano, só com destination existing_silo): as linhas enviadas SÃO o plano novo inteiro; a prévia devolve replace { same, changed, entering, leaving (com o motivo de cada uma), decisionHash } — o que sai passa pelo 'Tirar do plano' (inclusive o Pilar quando o plano novo traz outro; o Assunto pode mudar de keyword), nada é apagado, o artigo já no Arquiteto fica 'Fora do plano' até o dono decidir lá; Radar, Redator e publicados não mudam. Aplicar a substituição exige o aceite no chat, o MESMO decisionHash da prévia e o escopo platform.decide. Artigo publicado: o Assunto vai para a keyword da página (URL, slug, canonical e principal intocados) e as keywords entram como reforço dela.",
       "mode 'preview' não grava: devolve cada artigo com o título, a keyword, a trava efetiva, o que muda, as sobras e os impedimentos (blockers; com algum, canApply é false). Mostre a prévia ao usuário. mode 'apply' exige userConfirmation (as palavras do aceite) e importRequestId (uuid; repita o mesmo ao tentar de novo): cria as keywords que faltam como Bruto, grava o Assunto e o plano nelas, etiqueta com a cor e devolve o resultado relido. Sem custo.",
     ].join(" "),
     inputSchema: z.object({
@@ -839,10 +845,12 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       group: DeclaredPlanGroupInput,
       destination: SubjectCadastroDestinationInput.optional(),
       importRequestId: z.string().uuid().optional().describe("Obrigatório no apply. Repita o mesmo id ao tentar de novo o mesmo envio."),
+      planMode: z.enum(["append", "replace"]).optional().describe("Só com destination existing_silo. 'append' (padrão): acrescenta. 'replace': Substituir o plano — as linhas são o plano novo inteiro; prévia com as quatro listas e o decisionHash."),
+      decisionHash: z.string().trim().min(1).max(200).optional().describe("planMode 'replace': o decisionHash da prévia (obrigatório no apply)."),
       userConfirmation: confirmationInput.optional(),
     }),
     annotations: write,
-  }, async ({ brandId, mode, text, plan, group, destination, importRequestId, userConfirmation }) => {
+  }, async ({ brandId, mode, text, plan, group, destination, importRequestId, planMode, decisionHash, userConfirmation }) => {
     if (mode === "apply" && !userConfirmation) {
       return asText({ ok: false, code: "human_confirmation_required", message: "Declarar o plano do Silo é decisão humana (ADR-022). Mostre a prévia, peça o aceite e envie as palavras dele em userConfirmation." });
     }
@@ -852,7 +860,13 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     if (Boolean(text?.trim()) === Boolean(plan)) {
       return asText({ ok: false, code: "plan_required", message: "Envie o texto colado (text) ou o plano estruturado (plan) — um dos dois." });
     }
-    return call("declare_silo_plan", "minerador.write", { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, [{ module: "minerador", action: "edit" }], async ({ access, requestId }) => {
+    // 2026-10-13 · "Substituir o plano": aplicar é decisão humana sobre a prévia das quatro listas (decisionHash) e pede platform.decide.
+    const substituir = planMode === "replace";
+    if (substituir && mode === "apply" && !decisionHash) {
+      return asText({ ok: false, code: "decision_hash_required", message: "Substituir o plano exige a prévia (mode 'preview', planMode 'replace'): mostre ao usuário as quatro listas (fica igual, muda, entra, sai), peça o aceite e envie o decisionHash dela." });
+    }
+    const escopos = substituir && mode === "apply" ? ["minerador.write", "platform.decide"] as const : "minerador.write";
+    return call("declare_silo_plan", escopos, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, [{ module: "minerador", action: "edit" }], async ({ access, requestId }) => {
       /*
        * Os clientes, como nas outras escritas do MCP: o
        * operacional, depois de o invólucro conferir grant, escopo, Agência e
@@ -878,6 +892,8 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
         importRequestId: mode === "apply" ? importRequestId ?? null : null,
         channel: mcpChannel(access, requestId),
         brandSiteUrl: typeof siteUrl === "string" ? siteUrl : null,
+        planMode: planMode ?? null,
+        decisionHash: decisionHash ?? null,
       });
       if (!result.ok) throw new PlatformToolFailure(result.code, { message: result.reason, ...(result.blockers ? { blockers: result.blockers } : {}) });
       return result;
@@ -1042,7 +1058,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("set_keyword_vinculo", {
     title: "Decidir Vínculo das keywords",
-    description: "Altera o tipo/potencial de página (inclui 'silo', a cabeça do silo), somente após o aceite específico no chat. Use mode=preview e depois mode=apply com o mesmo decisionHash. Usa planVinculoBatchChoices e o readback do Minerador. O posto (travado/revisável) da principal publicada NÃO é alterável pelo MCP: é decisão na tela do Minerador. Publicação, slug, canonical e marca permanecem protegidos. O Assunto NÃO é do Vínculo (2026-10-13): kind subject_declare/subject_withdraw é recusado com subject_entry_moved — o Assunto entra só por declare_silo_plan (o card 'Cadastrar Assuntos') e sai do plano por 'Tirar do plano' na tela.",
+    description: "Altera o tipo/potencial de página (inclui 'silo', a cabeça do silo) ou a TRAVA da keyword NÃO publicada do plano (kind 'plan_lock', lock locked|free|auto — o 'Posto de principal' da tela na não publicada, gravado pelo núcleo do cadastro com nova versão do plano e releitura; sem plano, recusa por item 'Para travar, cadastre o artigo em Cadastrar Assuntos.'; a trava entra no pacote aprovado: a aprovada volta a Em revisão e o Arquiteto só vê a trava nova depois de reaprovar e reenviar), somente após o aceite específico no chat. Use mode=preview e depois mode=apply com o mesmo decisionHash. Usa planVinculoBatchChoices e o readback do Minerador. O posto (travado/revisável) da principal publicada NÃO é alterável pelo MCP: é decisão na tela do Minerador. Publicação, slug, canonical e marca permanecem protegidos. O Assunto NÃO é do Vínculo (2026-10-13): kind subject_declare/subject_withdraw é recusado com subject_entry_moved — o Assunto entra só por declare_silo_plan (o card 'Cadastrar Assuntos') e sai do plano por 'Tirar do plano' na tela.",
     inputSchema: z.object({
       brandId: brandIdInput,
       mode: z.enum(["preview", "apply"]),
@@ -1061,6 +1077,13 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
          */
         z.object({ kind: z.literal("subject_declare") }).passthrough(),
         z.object({ kind: z.literal("subject_withdraw") }).passthrough(),
+        /*
+         * 2026-10-13 · A TRAVA DA KEYWORD DO PLANO (pedido do dono): na keyword
+         * NÃO publicada, o "Posto de principal" da tela é a trava do cadastro.
+         * Mesmo núcleo da tela (`setKeywordPlanLockWithCore` → núcleo do
+         * cadastro): nova versão do plano, releitura, recusa por item.
+         */
+        z.object({ kind: z.literal("plan_lock"), lock: z.enum(DECLARED_PLAN_LOCK_CHOICES) }),
       ]),
       decisionHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
       userConfirmation: confirmationInput.optional(),
@@ -1075,6 +1098,27 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     }
     const scope = mode === "apply" ? "platform.decide" as const : "platform.read" as const;
     const permission = mode === "apply" ? "edit" as const : "view" as const;
+    if (action.kind === "plan_lock") {
+      return call("set_keyword_vinculo", scope, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, [{ module: "minerador", action: permission }], async ({ access, requestId }) => {
+        // Os clientes, como em declare_silo_plan: o operacional, depois de o invólucro conferir grant, escopo e permissão.
+        const db = getOperationalClient();
+        const previa = await setKeywordPlanLockWithCore({ brandId: access.brandId, actorUserId: principal.actorId, keywordsClient: db, groupsClient: db, mode: "preview", keywordIds, lock: action.lock });
+        if (!previa.ok) throw new PlatformToolFailure(previa.code, { message: previa.reason });
+        const entries = previa.items.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, outcome: item.outcome, reason: item.reason, before: item.before, after: item.after, approvedToReview: item.approvedToReview }));
+        const currentDecisionHash = hashDecision({ tool: "set_keyword_vinculo", brandId: access.brandId, actorId: principal.actorId, action, keywordIds: [...new Set(keywordIds)], entries });
+        if (mode === "preview") return { mode, action, entries, counts: previa.counts, architectHint: previa.architectHint, decisionHash: currentDecisionHash, readOnly: true };
+        if (decisionHash !== currentDecisionHash) throw new PlatformToolFailure("decision_stale", { message: "O estado das keywords mudou desde a prévia. Gere uma nova prévia antes de aplicar." });
+        const brand = await db.from("marcas").select("id,site_url").eq("id", access.brandId).maybeSingle();
+        if (brand.error) mapPersistenceError(brand.error);
+        const siteUrl = (brand.data as { site_url?: unknown } | null)?.site_url;
+        const gravado = await setKeywordPlanLockWithCore({
+          brandId: access.brandId, actorUserId: principal.actorId, keywordsClient: db, groupsClient: db, mode: "apply", keywordIds, lock: action.lock,
+          importRequestId: crypto.randomUUID(), channel: mcpChannel(access, requestId), brandSiteUrl: typeof siteUrl === "string" ? siteUrl : null,
+        });
+        if (!gravado.ok) throw new PlatformToolFailure(gravado.code, { message: gravado.reason });
+        return { mode, action, results: gravado.items, counts: gravado.counts, planVersions: gravado.planVersions, architectHint: gravado.architectHint, decisionHash: currentDecisionHash, readbackConfirmed: gravado.items.every(item => item.outcome !== "failed") };
+      });
+    }
     return call("set_keyword_vinculo", scope, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, [{ module: "minerador", action: permission }], async ({ access }) => {
       const { rows, missingCount } = await readDecisionKeywords(access.brandId, keywordIds);
       const planForPreview = planVinculoBatchChoices({ keywords: rows, brandId: access.brandId, actions: [action as VinculoBatchAction], actorId: principal.actorId, changedAt: "decision-preview" });
@@ -1255,6 +1299,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     description: [
       "Mede o Volume das keywords no Google Ads, como o botão 'Volume' do Processador (SDD MCP ponta a ponta, F1). Aprovar keyword exige Lógica e Volume: use depois de import_subject_keywords e run_keyword_logic.",
       "Sempre primeiro mode 'plan' (grátis, só lê): devolve as keywords que existem na marca, o número de blocos de 200 e o planHash. Mostre ao usuário.",
+      "Ler antes de buscar (F3, D4): o plano traz alreadyKnown — as que já têm volume medido no Google Ads (vale até 'medir de novo' explícito) ou 'sem média' há menos de 30 dias — e toMeasureFirstTime. Diga 'já temos X, falta Y' e, salvo pedido explícito de medir de novo, gere o plano só com as que faltam.",
       "Custo em dinheiro: zero (o Google Ads não cobra a consulta), mas gasta a cota do Google Ads da marca: por isso o aceite e o escopo provider.spend. Não apresente como gasto em dinheiro.",
       `Só com o aceite dele chame mode 'execute' com o mesmo keywordIds, o planHash do plano e userConfirmation. Até ${VOLUME_MEASURE_MAX_KEYWORDS} keywords por chamada.`,
       "O execute relê cada keyword: 'medida' tem volume confirmado; 'sem_media' é processada, sem dado (não é falha); 'falhou' traz o motivo. Cota atingida para o lote; o que já voltou fica gravado.",
@@ -1333,7 +1378,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
   server.registerTool("preview_published_reinforcement", {
     title: "Reforçar publicados: prévia (grátis)",
     description: [
-      "Use para mostrar ao usuário o que o botão 'Reforçar publicados' do Arquiteto gravaria (SDD 2026-09-28): por página publicada, se nasce o primeiro ArticleDNA ou uma versão nova, quais keywords do Minerador entram (as que o cartão mostra e as marcadas), quais keywords novas da busca em lote entram (passam pelo Minerador: import, Lógica, Volume do Google Ads e aprovação do usuário), a troca da principal aceita e o que fica de fora, com o motivo.",
+      "Use para mostrar ao usuário o que o botão 'Reforçar publicados' do Arquiteto gravaria (SDD 2026-09-28): por página publicada, se nasce o primeiro ArticleDNA ou uma versão nova, quais keywords do Minerador entram (as que o cartão mostra e as marcadas), quais keywords novas da busca em lote vão como sugestão ao Minerador (F4: o Arquiteto só lê keyword — elas não entram no artigo agora; o usuário importa, mede e aprova no Minerador, em 'Sugestões do Arquiteto'), a troca da principal aceita e o que fica de fora, com o motivo.",
       "Grátis e sem gravar: relê publicados, Posto, cache de SERP e o resultado gravado da busca. Devolve decisionHash e as frases da confirmação.",
       "Confirmar (gravar) e a busca paga em lote são atos humanos na tela do Arquiteto; não há ferramenta para isso. URL, slug e canonical nunca mudam.",
     ].join(" "),
@@ -1364,13 +1409,16 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("improve_articles", {
     title: "Melhorar publicados e formar Assuntos",
-    description: "Uma jornada para todos os publicados e Assuntos da marca. prepare: acervo, DNAs, cache e uma leitura editorial da IA na lista da marca (consome a IA da plataforma pela OpenRouter); exige aceite que cite a IA. Mesmos insumos reaproveitam a execução anterior sem chamar a IA de novo. Busca nova no Google Ads só com discover: true, depois de aceite que cite o custo (até 2 chamadas por alvo sem proposta, teto 40, cota de Descoberta, sem custo em dólar); nunca automática. status: retomar. Linha com evidenceBasis editorial_ai é sugestão da IA: mostre o motivo de cada keyword e peça conferência. Mostre principal, entradas/saídas, transferências, enfoques, evidência e custos. collect: só com aceite específico do plano vigente e teto total US$ 1. apply: só após aceite editorial da prévia vigente, incluindo novas keywords; cada chamada avança um artigo, até state complete. Não reescreve nem publica no site. Principal Livre pode trocar; Travada, URLs, slugs, canonical e Silo publicados preservados. Nenhuma troca de sinônimos é apresentada como solução de canibalização. group (opcional: a cor, o id do grupo ou sem-grupo) recorta o prepare ao grupo — alvos e lista só do grupo, proteção da marca inteira; é a porta única para formar os artigos de um grupo com plano declarado ('Formar os artigos do plano · cor').",
+    description: "Uma jornada para todos os publicados e Assuntos da marca. prepare (F3 · ler antes de buscar): sem authorizeReading só LÊ, de graça — acervo, DNAs, volume já medido (inclusive 'sem média' há menos de 30 dias), SERP em cache, Assunto, plano e trava — e devolve reading { known, missing, plan, sentences } ('Já temos · Falta · Custa'); mostre as frases ao usuário. Só com o aceite desse plano chame prepare de novo com authorizeReading { ai: true } (leitura editorial da IA, OpenRouter, recebe o resumo do DNA) e/ou { measure: true } (mede no Google Ads só o que falta: cota, sem custo em dólar; o Arquiteto NÃO grava a medição — ela vai guardada como sugestão ao Minerador). Mesmos insumos reaproveitam a execução anterior sem chamar a IA de novo. Busca nova no Google Ads só com discover: true, depois de aceite que cite o custo (até 2 chamadas por alvo sem proposta, teto 40, cota de Descoberta, sem custo em dólar); nunca automática. status: retomar. Linha com evidenceBasis editorial_ai é sugestão da IA: mostre o motivo de cada keyword e peça conferência. Mostre principal, entradas/saídas, transferências, enfoques, evidência e custos. collect: só com aceite específico do plano vigente e teto total US$ 1. apply: só após aceite editorial da prévia vigente; cada chamada avança um artigo, até state complete. O Arquiteto só LÊ keyword (F4): apply grava só ArticleDNA, composição e parecer, nunca importa, mede, roda a Lógica, aprova ou envia no Minerador; approveNewKeywords é recusado. Linha com needsMinerador (newKeywordIds, measureKeywordIds, logicKeywordIds) não é aceitável: as ideias viram 'Sugestões do Arquiteto' no Minerador; o usuário decide lá (ou, no chat, pelas ferramentas do Minerador: import_subject_keywords, measure_keywords, run_keyword_logic, decide_keywords, send_keywords_to_arquiteto, cada uma com o aceite dela) e depois prepare de novo aqui. Não reescreve nem publica no site. Principal Livre pode trocar; Travada, URLs, slugs, canonical e Silo publicados preservados. Nenhuma troca de sinônimos é apresentada como solução de canibalização. group (opcional: a cor, o id do grupo ou sem-grupo) recorta o prepare ao grupo — alvos e lista só do grupo, proteção da marca inteira; é a porta única para formar os artigos de um grupo com plano declarado (na tela, desde 2026-10-14: a planilha 'Artigos do plano' em Artigos novos). Com targetIds, só as linhas pedidas; principalChoice { alvo: keyword } troca a principal de um artigo do plano com a trava LIVRE por uma candidata da lista do Assunto (travada ou candidata fora da regra: a linha volta recusada com o motivo); origin: 'plan_sheet' devolve em refusedTargets, por item, o alvo que não é Assunto do plano recebido; excludePlanArticles: true deixa o Assunto com plano fora (só publicados).",
     inputSchema: ArticleImprovementRequestSchema.safeExtend({ userConfirmation: confirmationInput.optional() }),
     annotations: write,
   }, async ({ userConfirmation, ...request }) => {
-    if (request.action !== "status" && !userConfirmation) return asText({ ok: false, code: "human_confirmation_required", message: "Exiba a prévia pertinente e envie o aceite específico do usuário. Preparar faz uma leitura da IA na lista da marca (consome a IA da plataforma pela OpenRouter); com discover: true, também a busca nova no Google Ads (cota de Descoberta)." });
-    const scopes = request.action === "status" ? ["platform.read"] as const : request.action === "prepare" ? ["arquiteto.write", "provider.spend"] as const : request.action === "collect" ? ["arquiteto.write", "provider.spend"] as const : ["arquiteto.write", "platform.decide", "minerador.write"] as const;
-    return call("improve_articles", scopes, { brandId: request.brandId, humanConfirmation: userConfirmation ?? null }, [{ module: "arquiteto", action: request.action === "status" ? "view" : "edit" }, ...(request.action === "apply" ? [{ module: "arquiteto", action: "approve" } as const, { module: "minerador", action: "approve" } as const] : [])], async ({ access }) => {
+    if (request.action !== "status" && !userConfirmation) return asText({ ok: false, code: "human_confirmation_required", message: "Exiba a prévia pertinente e envie o aceite específico do usuário. Preparar sem authorizeReading só lê o que já temos (grátis) e devolve 'Já temos · Falta · Custa'; com authorizeReading, chama a IA da plataforma (OpenRouter) e/ou mede no Google Ads (cota) só o que falta; com discover: true, também a busca nova no Google Ads (cota de Descoberta)." });
+    // F3 · a leitura grátis não gasta provider; IA, medição e busca nova exigem provider.spend.
+    const paga = request.action === "prepare" && (request.authorizeReading?.ai === true || request.authorizeReading?.measure === true || request.discover === true);
+    // F4 · O ARQUITETO SÓ LÊ: aplicar não escreve no Minerador — nem escopo minerador.write nem permissão minerador:approve.
+    const scopes = request.action === "status" ? ["platform.read"] as const : request.action === "prepare" ? (paga ? ["arquiteto.write", "provider.spend"] as const : ["arquiteto.write"] as const) : request.action === "collect" ? ["arquiteto.write", "provider.spend"] as const : ["arquiteto.write", "platform.decide"] as const;
+    return call("improve_articles", scopes, { brandId: request.brandId, humanConfirmation: userConfirmation ?? null }, [{ module: "arquiteto", action: request.action === "status" ? "view" : "edit" }, ...(request.action === "apply" ? [{ module: "arquiteto", action: "approve" } as const] : [])], async ({ access }) => {
       const context = await resolvePipelineContext({ brandId: access.brandId, module: "arquiteto", action: request.action === "status" ? "view" : "edit" }, { requireActorUserId: async () => principal.actorId });
       const { handleArticleImprovement, improvementRuntime, projectImprovementRun } = await import("./arquiteto-article-improvement");
       const outcome = await handleArticleImprovement(improvementRuntime(context), ArticleImprovementRequestSchema.parse({ ...request, brandId: access.brandId }));
@@ -1475,26 +1523,29 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
    * ARQUITETO. O MESMO núcleo da rota /api/editorial/radar-architect-update:
    * prévia com platform.read; adoção com radar.write + platform.decide, aceite
    * do usuário no chat e o decisionHash da prévia. Nada pago, nada de IA; o
-   * Arquiteto não é tocado.
+   * Arquiteto não é tocado. 2026-10-14 · cobre também o grafo de links novo
+   * (`links_changed`, `kinds`), pelo mesmo núcleo.
    */
   server.registerTool("adopt_architect_version", {
-    title: "Adotar no Radar a versão nova do ArticleDNA",
+    title: "Adotar no Radar a versão nova do ArticleDNA ou os links novos do grafo",
     description: [
       "Quando o Arquiteto aprova uma versão nova de um artigo que já está no Radar, o item mostra 'Atualização disponível do Arquiteto · vN → vM' (rótulo do Radar, diferente do 'Atualização disponível' da publicação). mode=preview lista os itens atrás, o que mudou (principal, slug, keywords, papel, promessa/escopo, Assunto), a classe (mesma base de pesquisa, composição mudou, principal mudou), o que continua valendo, o que fica para refazer, o custo e quem é recusado e por quê.",
       "Mostre a prévia ao usuário; só depois do aceite explícito chame mode=apply com os mesmos articleIds (ou o mesmo siloId) e o decisionHash da prévia, e userConfirmation com as palavras do usuário. Desmarcar um artigo é a recusa por item: tire-o de articleIds e gere a prévia de novo para ter o hash daquele conjunto.",
       "A adoção troca o item para a versão nova pelo mesmo caminho do envio, reaproveita a investigação que continua válida numa versão nova da análise e marca o que precisa ser refeito; a releitura do servidor confirma. Nada pago e nada de IA na adoção; refazer uma pesquisa (quando a prévia diz) é na tela, com o custo no botão.",
       "Recusas: investigação congelada, pacote aprovado ou enviado ao Redator (a troca só depois de um congelamento novo, que esta fase ainda não faz: o item e os entregáveis seguem na versão enviada), slug publicado que mudaria, Silo não resolvido. O Radar não reagrupa, não troca a principal por conta própria nem muda slug, canonical ou URL publicada.",
+      "Links (2026-10-14): quando o grafo de links aprovado vigente do Silo é mais novo que o transportado pelo item, a prévia traz também 'Atualização disponível do Arquiteto · links · grafo vA → vB' (updateKind=links, classe links_changed), com os links que entram e saem por destino, a obrigação (obrigatório no corpo, no corpo se a seção tratar, trilha 'Continue no Silo') e quem aponta para o artigo. Adotar troca só os links do item, sem refazer a pesquisa e sem nada pago (links não mudam a SERP), também em item finalizado, aprovado ou enviado ao Redator; o artigo-modelo e o CSV leem a malha nova na leitura. kinds escolhe o que aplicar (padrão: as duas); com uma só, use o hash dela em decisionHashByKind.",
     ].join(" "),
     inputSchema: z.object({
       brandId: brandIdInput,
       mode: z.enum(["preview", "apply"]),
       articleIds: z.array(z.string().trim().min(1).max(400)).max(60).optional(),
       siloId: z.string().trim().min(1).max(400).optional().describe("Recorte pelo Silo (o lote do Silo)."),
+      kinds: z.array(z.enum(["article_dna", "links"])).min(1).max(2).optional().describe("O que aplicar: 'article_dna' (versão nova do ArticleDNA) e/ou 'links' (grafo de links novo). Padrão: as duas."),
       decisionHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
       userConfirmation: confirmationInput.optional(),
     }),
     annotations: write,
-  }, async ({ brandId, mode, articleIds, siloId, decisionHash, userConfirmation }) => {
+  }, async ({ brandId, mode, articleIds, siloId, kinds, decisionHash, userConfirmation }) => {
     if (mode === "apply" && (!userConfirmation || !decisionHash)) {
       return asText({ ok: false, code: !userConfirmation ? "human_confirmation_required" : "decision_hash_required", message: "Mostre a prévia, aguarde o aceite específico do usuário e aplique com o mesmo decisionHash." });
     }
@@ -1506,12 +1557,49 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       const store = supabaseRadarArchitectAdoptionStore(getOperationalClient());
       const previa = await previewArchitectUpdatesWithCore(store, { brandId: access.brandId, articleIds: articleIds ?? null, siloId: siloId ?? null });
       if (mode === "preview") return { ...previa, screen: "Radar → faixa 'Atualização disponível do Arquiteto' → 'Ver e adotar'" };
-      const escolhidos = previa.items.filter(item => item.adoptable).map(item => item.articleId);
-      const resultado = await adoptArchitectVersionWithCore(store, { brandId: access.brandId, actorId: principal.actorId, articleIds: articleIds?.length ? articleIds : escolhidos, decisionHash: decisionHash!.toLowerCase() });
+      /* 2026-10-14 · as duas atualizações (versão nova e links), ou só a de `kinds`. */
+      const tipos = new Set(kinds?.length ? kinds : ["article_dna", "links"]);
+      const doTipo = (tipo: string) => previa.items.filter(item => (item.updateKind ?? "article_dna") === tipo);
+      const comLinks = new Set(doTipo("links").map(item => item.articleId));
+      const comVersao = new Set(doTipo("article_dna").map(item => item.articleId));
+      const escolhidos = doTipo("article_dna").filter(item => item.adoptable).map(item => item.articleId);
+      const escolhidosLinks = doTipo("links").filter(item => item.adoptable).map(item => item.articleId);
+      const resultado = await adoptArchitectVersionWithCore(store, {
+        brandId: access.brandId, actorId: principal.actorId,
+        articleIds: !tipos.has("article_dna") ? [] : articleIds?.length ? articleIds.filter(id => comVersao.has(id) || !comLinks.has(id)) : escolhidos,
+        linkArticleIds: !tipos.has("links") ? [] : articleIds?.length ? articleIds.filter(id => comLinks.has(id)) : escolhidosLinks,
+        decisionHash: decisionHash!.toLowerCase(),
+      });
       if (resultado.state === "REFUSED") throw new PlatformToolFailure(resultado.code === "STALE_DECISION" ? "decision_stale" : "nothing_to_adopt", { message: resultado.message });
       return resultado;
     });
   });
+
+  /*
+   * 2026-10-14 · A SERP CRUA DE UM ARTIGO (SDD silo interligado §16.1, decisão do
+   * dono). Ferramenta própria, e não uma mudança em get_article_for_writing: o
+   * contrato e o arquivo de escrita ficam iguais (o E0 trava os dois), e a SERP
+   * crua é leitura opcional, pedida só para conferir a SERP. O MESMO arquivo que a
+   * tela põe no .zip da exportação por artigo (`radarMcpSerpRawForArticle`, pela
+   * montagem do export e por `radarSerpRawExport`), em partes como o CSV de escrita.
+   */
+  server.registerTool("get_article_serp_raw", {
+    title: "SERP crua do artigo, para conferir fora da plataforma",
+    description: [
+      "Use quando o usuário (ou você) quer conferir a SERP de um artigo fora da plataforma: devolve o MESMO arquivo '<NN>-<papel>-<slug>-serp.csv' que a exportação por artigo da tela põe no .zip, ao lado do CSV 'Para escrever'.",
+      "Uma linha por resultado orgânico por lente (as 4 lentes): lente, posição, URL, domínio, data da coleta, título, trecho, estrutura de títulos da página (H1/H2) e sinais (data visível, autor, resumo de IA no topo); linhas de 'Pessoas também perguntam' (com a resposta exibida e a fonte), buscas relacionadas e as fontes citadas pelo resumo de IA. A coluna relevancia_d11 marca, sem esconder, o concorrente fora do leitor, fora do território ou com medida fora da curva.",
+      "No fim (2026-10-14), as fontes citadas pelos concorrentes (todo link externo de conteúdo das páginas lidas, sem verificação) e as fontes verificadas no Radar (id X, URL, entidade, trecho e a afirmação que sustentam, com YMYL marcado) ou não conferidas (com o motivo). Elas ainda não estão no artigo-modelo nem no CSV de escrita.",
+      "Nunca traz o texto integral das páginas (só título, trecho, estrutura de títulos e URL): é referência para conferir, não para copiar.",
+      `Grátis: só lê o que o Radar já coletou e o resumo do cache das lentes extras; nunca chama provider nem IA e não precisa do artigo-modelo. O CSV vem em partes de até ${Math.round(SERP_RAW_PART_CHARS / 1000)} mil caracteres: peça part 1, 2, … até parts e junte na ordem. Artigo sem investigação finalizada volta recusado com o motivo.`,
+    ].join(" "),
+    inputSchema: z.object({ brandId: brandIdInput, articleId: z.string().trim().min(1).max(256), part: z.number().int().min(1).max(200).optional() }),
+    annotations: read,
+  }, async ({ brandId, articleId, part }) => call("get_article_serp_raw", "platform.read", { brandId }, [{ module: "radar", action: "view" }], async ({ access }) => {
+    const { radarMcpSerpRawForArticle } = await import("./radar-mcp-material");
+    const serp = await radarMcpSerpRawForArticle({ brandId: access.brandId, articleId, supabase: getOperationalClient(), actorUserId: principal.actorId });
+    if (serp.status === "refused") throw new PlatformToolFailure(serp.code, { message: serp.reason });
+    return { articleId, filename: serp.filename, exportedAt: serp.exportedAt, rows: serp.rows, ...sliceWritingCsv(serp.csv, part ?? 1, SERP_RAW_PART_CHARS) };
+  }));
 
   server.registerTool("get_article_for_writing", {
     title: "Material do artigo para escrever fora da plataforma",
@@ -1569,3 +1657,6 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
 /** Folga para o escape do JSON (aspas e quebras de linha do CSV) dentro do teto de bytes. */
 const WRITING_CSV_PART_CHARS = 12_000;
+
+/** 2026-10-14 · As partes da SERP crua (`get_article_serp_raw`): o mesmo teto do CSV de escrita. */
+const SERP_RAW_PART_CHARS = 12_000;

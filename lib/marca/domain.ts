@@ -21,6 +21,8 @@ export function createBrandDnaDraft(input: Partial<BrandDnaDraft> & Pick<BrandDn
     differentiators: input.differentiators || [],
     prohibitedClaims: input.prohibitedClaims || [],
     editorialPrinciples: input.editorialPrinciples || [],
+    /* 2026-10-14 · só quando existe: o rascunho sem lista continua byte a byte o de antes. */
+    ...(input.authoritySources ? { authoritySources: input.authoritySources } : {}),
   });
 }
 

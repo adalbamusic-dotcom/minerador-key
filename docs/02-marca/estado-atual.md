@@ -1,5 +1,20 @@
 # Estado atual — Marca
 
+## Fontes de autoridade da marca (para o Radar) — 2026-10-14
+
+SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §16.2, Fase A (módulo proprietário: Radar; aqui, mudança aditiva). **Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- Identidade da marca (`modules/marca/brand-dna-panel.tsx`) ganhou o bloco "Fontes de autoridade": os domínios que o Radar abre e confere como fonte externa (um por linha, `domínio[/caminho] | Nome` opcional; "Usar a lista sugerida" e "Limpar (volta à sugerida)"; linha que não é domínio é apontada). Vale para o Radar depois de **aprovar** a versão; vazio = a lista sugerida do Radar.
+- Contrato: `authoritySources` opcional em `BrandDNASchema` (`lib/arquiteto/contracts.ts`) e em `BrandDnaDraftSchema` (`lib/marca/contracts.ts`); `createBrandDnaDraft` só põe a chave quando existe. Versão gravada antes continua válida, com o mesmo hash. Nenhuma migration (o BrandDNA já é `jsonb` em `editorial_artifact_versions`).
+- Consumidor: `lib/server/radar-authority-sources.ts` (Radar) lê só o BrandDNA aprovado (SELECT).
+
+## Convites lidos pela própria Marca (F2 das listas leves) — 2026-10-14
+
+SDD `docs/compartilhado/sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`, item 4 (F2), §18.2. **Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- Os convites saíram da mesa editorial (`GET /api/editorial/workspace`), que toda área lia sem usar. A seção "Equipe" (`modules/marca/brand-page.tsx`) lê `GET /api/editorial/invitations?brandId=` (novo; permissão `marca:view`, a mesma da mesa) quando abre. Falha de leitura mostra "Os convites desta marca não puderam ser lidos agora (…). Isto não quer dizer que não há convites." — nunca lista vazia; a lista em memória não é apagada.
+- **Achado (SELECT, 2026-10-14):** a tabela `brand_invitations` **não existe** no banco. A leitura dos convites falha (a mesa mostrava isso como diagnóstico em toda carga); agora a falha aparece só na Equipe, com o aviso acima. O fluxo de convite continua como estava (POST com recuo local quando a persistência não está disponível).
+
 ## Fundação remota fechada e convergência local — Skills — 2026-08-28
 
 - **Primeira BrandSkill real persistida:** Care Glow / `brand_voice` / v1 /

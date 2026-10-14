@@ -41,6 +41,7 @@ import type { RadarWritingPublication } from "@/lib/radar/portable-writing-expor
 import type { RadarCanonicalItemIdentity } from "@/lib/server/radar-canonical-authorities";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { radarCompetitorOutlinesOf, radarIsNavigationHeading, radarIsSiteIdentityHeading } from "@/lib/radar/competitor-topics";
+import { radarSerpRawPagesOf, radarSerpRawSourcesOf } from "@/lib/radar/serp-raw-export";
 import { extractCompetitorPage } from "@/lib/radar/competitor-extractor";
 import { readArticleGroupLabels } from "@/lib/editorial/article-group-labels";
 import type { EditorialGroupLabel } from "@/lib/editorial/editorial-group-scope";
@@ -124,6 +125,13 @@ export async function assembleRadarPortableExport(input: {
    * nada a mais é lido.
    */
   videoLensDigests?: boolean;
+  /**
+   * 2026-10-14 · Aditivo (SERP crua por artigo, SDD silo interligado §16.1): leva
+   * em cada entrada as páginas que a investigação leu (H1/H2, data visível,
+   * autor, palavras; sem texto), das extrações já gravadas na análise — nenhuma
+   * leitura a mais. Só a SERP crua liga; sem ele, a entrada é a de antes.
+   */
+  serpRawPages?: boolean;
 }): Promise<RadarPortableExportAssembly> {
   const exportedAt = input.exportedAt ?? new Date().toISOString();
   const artefatos = await new ArtifactRepository().list(input.brandId);
@@ -421,6 +429,12 @@ export async function assembleRadarPortableExport(input: {
       googleObserved: autoridades.google?.observed ?? null,
       /* 2026-10-02 · os H2/H3 das páginas comparáveis lidas, para a leitura dos temas dos concorrentes (fora do hash). */
       competitorOutlines: perfil === "GOOGLE" ? radarCompetitorOutlinesOf(payload.extractions, autoridades.google?.observed?.competitors) : null,
+      /* 2026-10-14 · as páginas lidas (sem texto), só para a SERP crua; a chave só existe quando pedida. */
+      ...(input.serpRawPages ? { serpRawPages: radarSerpRawPagesOf(payload.extractions) } : {}),
+      /* 2026-10-14 · as fontes citadas pelos concorrentes e as de autoridade conferidas (§16.2), só para a SERP crua. */
+      ...(input.serpRawPages ? { serpRawSources: radarSerpRawSourcesOf(payload) } : {}),
+      /* 2026-10-14c · F-B (§16.2) · as fontes de autoridade conferidas, como o pacote as congelou (sem o registro, a chave não existe). */
+      ...(bundle.authoritySources ? { authoritySources: bundle.authoritySources } : {}),
       researchContext: contexto,
       youtubeUniverse: perfil === "YOUTUBE" ? payload.youtubeSearch?.universe || [] : [],
       youtubeQueries: perfil === "YOUTUBE"

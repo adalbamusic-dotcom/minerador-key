@@ -332,7 +332,14 @@ test("título · as conferências puras: keyword no começo, isca genérica (for
   assert.equal(radarHumanVoiceTitleWithKeywordFirst("Atrair um cliente começa pelo Google", PRINCIPAL), "Atrair um cliente começa pelo Google", "sem a forma 'A: keyword', nada muda");
 });
 
-test("título · a conferência da planta nova aponta keyword fora do começo, isca, meta sem a keyword cedo, menos de 3 opções e o 1º H2 sem a keyword; troca as metades sem IA", () => {
+/*
+ * 2026-10-14 · SDD silo interligado · F1 · decisão do dono (D4 e D5, frase do §1):
+ * a keyword deixou de ser prefixo. Os quatro testes abaixo trocaram "keyword no
+ * começo", "keyword cedo na meta", "primeira frase com a keyword", "primeiro H2
+ * com a keyword" e a troca de metades pelas regras K1–K9 (as réguas V1–V7 estão em
+ * tests/radar-keyword-sem-repeticao-2026-10-14.test.mts).
+ */
+test("título · a conferência da planta nova aponta isca, menos de 3 opções e a keyword repetida; não troca metades nem pede a keyword no começo (K2)", () => {
   const brief = briefReal();
   const ai = RadarArticleBlueprintAiSchema.parse(respostaDaPlanta(brief, {
     title: {
@@ -346,72 +353,78 @@ test("título · a conferência da planta nova aponta keyword fora do começo, i
   const { payload, notes } = radarSanitizeArticleBlueprint(ai, brief);
   const pendentes = radarArticleBlueprintPendingNotes(notes).pending;
   const tem = (padrao: RegExp) => assert.ok(pendentes.some(item => padrao.test(item)), `${padrao}\n${pendentes.join("\n")}`);
-  tem(/^O H1 não começa pela keyword principal \("como atrair um cliente"\): reescreva antes de aprovar \(regra 28\)\.$/);
   tem(/^O H1 usa isca genérica \("guia prático"\): troque pela dor e pelo contraste comercial que a SERP mostra antes de aprovar \(regra 28\)\.$/);
   tem(/^O SEO title usa isca genérica \("dicas"\)/);
-  tem(/^A meta description não traz a keyword principal nos primeiros 60 caracteres/);
   tem(/^O título tem 2 opção\(ões\): a regra pede 3 \(o H1 e 2 alternativas, regra 28\)\.$/);
-  tem(/^O primeiro H2 \("Contexto do mercado de estética"\) não traz a keyword principal nem um recorte forte dela/);
-  /* "A: keyword…" vira "Keyword…: A" (só as metades trocam), dito como correção feita. */
-  assert.equal(payload.blueprint.title.seoTitle, "Como atrair um cliente: Dicas");
-  assert.deepEqual(payload.blueprint.title.alternatives, ["Como atrair um cliente sem anúncio: Para clínicas"]);
-  assert.ok(notes.includes("Regra 28: a keyword principal foi para o começo do SEO title ou das alternativas (as duas metades do título trocaram de lugar, sem reescrever palavra)."));
-  assert.equal(radarArticleBlueprintPendingNotes(["Regra 28: a keyword principal foi para o começo do SEO title ou das alternativas (as duas metades do título trocaram de lugar, sem reescrever palavra)."]).pending.length, 0, "a troca é correção, não pendência");
+  assert.equal(pendentes.some(item => /não começa pela keyword principal|nos primeiros 60 caracteres: reescreva|O primeiro H2 .* não traz a keyword/.test(item)), false, "as notas da regra antiga saíram");
+  /* A keyword fora do começo é aceita: nada troca de lugar. */
+  assert.equal(payload.blueprint.title.seoTitle, "Dicas: como atrair um cliente");
+  assert.deepEqual(payload.blueprint.title.alternatives, ["Para clínicas: como atrair um cliente sem anúncio"]);
+  assert.equal(notes.some(item => item.startsWith("Regra 28: a keyword principal foi para o começo")), false);
+  /* A keyword repetida no H1 é apontada (V3). */
+  const repetida = RadarArticleBlueprintAiSchema.parse(respostaDaPlanta(brief, { title: { h1: "Como atrair um cliente: como atrair um cliente sem anúncio", alternatives: ["", ""], seoTitle: "Como atrair um cliente sem anúncio", metaDescription: "O que muda quando o feed não traz ninguém." } }));
+  assert.ok(radarArticleBlueprintPendingNotes(radarSanitizeArticleBlueprint(repetida, brief).notes).pending.some(item => /^O H1 traz a keyword principal 2 vezes: deixe uma, na forma natural, e reescreva antes de aprovar \(regra 28, K2\)\.$/.test(item)));
   assert.equal(payload.rulesVersion, RADAR_ARTICLE_BLUEPRINT_RULES_VERSION);
-  /* 2026-10-11c · as regras avançaram no mesmo dia (keywords proibidas por destino); a diretriz continua nelas. */
-  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-11c");
-  /* O pedido manda as 3 opções e a passada de correção as cobra. */
+  assert.equal(RADAR_ARTICLE_BLUEPRINT_RULES_VERSION, "2026-10-14c"); /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): regras 2026-10-14c */
+  /* O pedido manda as 3 opções e a passada de correção as cobra pela regra nova. */
   const pedido = radarArticleBlueprintPrompt(brief);
-  assert.match(pedido.user, /"alternatives":\["",""\]/);
-  assert.match(radarArticleBlueprintPrompt(brief, { fix: { previous: ai, pending: pendentes } }).user, /Pela regra 28: H1, as 2 alternativas e o SEO title começam pela keyword principal/);
+  assert.match(pedido.user, /"alternatives":\["ângulo \(b\): contraste com o topo","ângulo \(c\): diagnóstico ou decisão"\]/);
+  assert.match(radarArticleBlueprintPrompt(brief, { fix: { previous: ai, pending: pendentes } }).user, /Pela regra 28: title\.principalNatural é a principal em português correto; ela aparece uma vez no H1 e uma vez no SEO title/);
 });
 
-test("título · CSV do caso real: as 3 opções, o ajuste do SEO title e da alternativa com 'guia prático', a meta e o gancho pela SERP", () => {
+test("título · CSV do caso real: a regra nova, a forma natural, as 3 opções que abrem pela keyword, as iscas, a meta natural e o gancho pela SERP", () => {
   const titulo = linhasDe(linhaDoArtigo().row.titulo_e_seo);
   /* As linhas da planta continuam como eram. */
-  assert.deepEqual(titulo.slice(0, 5), [
+  assert.deepEqual(titulo.slice(0, 4), [
     "H1: Como atrair um cliente: o caminho prático para conquistar e fidelizar",
     "Alternativas: Como atrair um cliente: guia prático para clínicas e consultórios · Como atrair um cliente: estratégias para conquistar novos clientes",
     "SEO title: Como atrair um cliente: guia prático para clínicas",
     "Meta description: Descubra como atrair um cliente com estratégias práticas de abordagem, canais e experiência. Aprenda a conquistar e fidelizar clientes sem depender de anúncios.",
-    "Keyword principal em: H1, primeiro parágrafo",
   ]);
-  assert.match(titulo[5], /^Título pela SERP \(diretriz de comunicação humana 2026-10-11\): 3 opções \(o H1 e as alternativas acima\), cada uma com a keyword principal no começo/);
+  assert.match(titulo[4], /^Keyword principal \(K2, K5–K7\): uma vez no H1 e uma vez no SEO title, na forma natural, em qualquer posição; .* no corpo, até 7 vezes;/);
+  assert.match(titulo[5], /^Título pela SERP \(regras de keyword 2026-10-14, diretriz de comunicação humana 2026-10-11\): 3 opções \(o H1 e as alternativas acima\); a keyword principal, na forma natural, aparece uma vez em cada uma, em qualquer posição, e abre no máximo 1 delas/);
+  assert.equal(titulo[6], "Forma natural da principal (K1): escreva \"como atrair um cliente\" em português correto (com a preposição e a flexão que a frase pede), uma vez no H1 e uma vez no SEO title; em título e H2, nunca a forma truncada.");
+  assert.ok(titulo.includes("- Ajuste das opções: a keyword principal abre 3 das 3 opções; só 1 pode abrir por ela: nas outras, o gancho vem primeiro e a principal entra depois, natural."));
   assert.ok(titulo.includes("- Ajuste da alternativa 1: troque \"guia prático\" pela dor e pelo contraste comercial que a SERP mostra (gancho abaixo)."));
   assert.ok(titulo.includes("- Ajuste do SEO title: troque \"guia prático\" pela dor e pelo contraste comercial que a SERP mostra (gancho abaixo)."));
   assert.ok(titulo.includes("- Ajuste da meta description: troque \"descubra\" pela dor e pelo contraste comercial que a SERP mostra (gancho abaixo)."));
-  assert.equal(titulo.some(item => /^- Ajuste do H1: comece/.test(item)), false, "o H1 já começa pela keyword");
+  assert.equal(titulo.some(item => /^- Ajuste do H1: comece|nos primeiros 60 caracteres\.$/.test(item)), false, "a regra antiga saiu");
   assert.ok(titulo.includes("Gancho pela SERP: a dor vem das perguntas reais (P1 \"Qual o segredo para atrair clientes?\"; B1 \"como atrair clientes sem gastar dinheiro\"); o contraste, dos títulos do topo (S1 \"10 dicas eficazes de como conquistar novos clientes\"; S2 \"Como atrair clientes: 10 dicas infalíveis\"; S3 \"Como Atrair Clientes para Pequeno Negócio | Guia Prático\"), que prometem \"dicas\", \"guia prático\": o título promete a saída que eles não dão."), titulo.join("\n"));
-  assert.match(titulo[titulo.length - 1], /^Meta description pela SERP: dor, contraste, o que a leitora ganha e por que clicar mesmo com resposta de IA no topo/);
-  /* Planta sem alternativas: a coluna manda escrever as que faltam, no mesmo molde. */
+  assert.match(titulo[titulo.length - 1], /^Meta description pela SERP \(K4\): natural, com dor ou contraste, o que a leitora ganha e por que clicar mesmo com resposta de IA no topo/);
+  /* Planta sem alternativas: a coluna manda escrever as que faltam, cada uma num ângulo. */
   const semAlternativas = plantaReal({ title: { ...plantaReal().blueprint.title, alternatives: [] } });
-  assert.ok(linhasDe(linhaDoArtigo({ blueprint: semAlternativas }).row.titulo_e_seo).includes("- Escreva mais 2 opções no mesmo molde: a keyword principal no começo e outro gancho de contraste."));
+  assert.ok(linhasDe(linhaDoArtigo({ blueprint: semAlternativas }).row.titulo_e_seo).includes("- Escreva mais 2 opções, cada uma num ângulo diferente (dor → saída; contraste com o que o topo da SERP promete (as \"dicas\" e os números); diagnóstico ou decisão (fundo de funil)), com a principal natural uma vez, em qualquer posição."));
 });
 
-test("título · a planta gravada 'Para clínicas: como atrair um cliente' sai com a keyword no começo no CSV, no vídeo e no Redator, sem mudar o payload", () => {
+test("título · a planta gravada 'Para clínicas: como atrair um cliente' sai como está no CSV e no Redator (a troca de metades saiu), sem mudar o payload", () => {
   const gravada = plantaReal({ title: { h1: "Como atrair um cliente: o caminho", alternatives: ["Para clínicas: como atrair um cliente sem anúncio"], seoTitle: "Sem anúncio: como atrair um cliente", metaDescription: "Como atrair um cliente quando o feed não traz ninguém." } });
   const antes = JSON.stringify(gravada);
   const csv = linhasDe(linhaDoArtigo({ blueprint: gravada }).row.titulo_e_seo);
-  assert.ok(csv.includes("Alternativas: Como atrair um cliente sem anúncio: Para clínicas"));
-  assert.ok(csv.includes("SEO title: Como atrair um cliente: Sem anúncio"));
+  assert.ok(csv.includes("Alternativas: Para clínicas: como atrair um cliente sem anúncio"));
+  assert.ok(csv.includes("SEO title: Sem anúncio: como atrair um cliente"));
+  assert.equal(csv.some(item => item.startsWith("- Ajuste das opções: a keyword principal abre")), false, "a principal abre só o H1");
   assert.equal(JSON.stringify(gravada), antes, "o payload gravado não muda (nem o hash)");
   const redator = writerArticleBlueprintForWriting({
     id: "bp-1", versionNumber: 1, approvedAt: "2026-10-11T12:00:00.000Z", blueprint: gravada.blueprint, plan: gravada.measures.plan,
     linkCandidates: gravada.linkCandidates, brandVoice: null, sources: gravada.sources, keywords: { principal: PRINCIPAL, secondary: COMPLEMENTARES },
   })!;
-  assert.equal(redator.seoTitle, "Como atrair um cliente: Sem anúncio");
-  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-11c");
+  assert.equal(redator.seoTitle, "Sem anúncio: como atrair um cliente");
+  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-14");
 });
 
-/* ============================== 5 · o primeiro H2 e a primeira frase ============================== */
+/* ============================== 5 · a abertura e os H2 (K5 e K6) ============================== */
 
-test("começo · o primeiro H2 do caso real já traz a keyword; o que não traz ganha a instrução concluída; a primeira frase traz a keyword", () => {
+test("começo · a abertura nas primeiras ~100 palavras (K5); os 4 H2 do caso real que abrem pela keyword ou por uma complementar ganham a instrução concluída (K6)", () => {
   const estrutura = linhasDe(linhaDoArtigo().row.estrutura);
-  assert.ok(estrutura.includes("- Primeiro H2: \"Como atrair clientes no dia a dia?\" já traz a keyword principal (ou um recorte forte dela)."));
-  assert.ok(estrutura.includes("- Primeira frase do corpo: traz \"como atrair um cliente\" e entra na dor da SERP, para quem já tentou posts, feed, anúncio e agência (nível 3)."));
+  assert.ok(estrutura.includes("- Abertura (K5): o primeiro parágrafo responde à busca com \"como atrair um cliente\" (na forma natural) ou uma variação próxima nas primeiras ~100 palavras, e entra na dor da SERP, para quem já tentou posts, feed, anúncio e agência (nível 3)."));
+  assert.equal(estrutura.filter(item => item.startsWith("- H2 (K6): abre pela keyword ")).length, 4, estrutura.filter(item => item.startsWith("- H2 (K6)")).join("\n"));
+  assert.ok(estrutura.includes("- H2 (K6): abre pela keyword \"como atrair um cliente\"; escreva este H2 pelo subtema ou pela pergunta da seção (\"Como atrair clientes no dia a dia\"), com a keyword dentro da seção, não no começo do título."));
+  assert.ok(estrutura.some(item => item.startsWith("- H2 sem keyword no começo (K6): 4 H2 abrem pela keyword (")));
+  assert.equal(estrutura.some(item => /^- Primeira frase do corpo|^- Primeiro H2:/.test(item)), false, "as linhas da regra antiga saíram");
   const semKeyword = plantaReal();
-  semKeyword.blueprint.sections[0] = { ...semKeyword.blueprint.sections[0], h2: "Contexto do mercado de estética" };
-  assert.ok(linhasDe(linhaDoArtigo({ blueprint: semKeyword }).row.estrutura).includes("- Primeiro H2: escreva \"Contexto do mercado de estética\" com a keyword principal ou um recorte forte dela, sem mudar a pergunta da seção."));
+  const NOVOS = ["Contexto do mercado de estética", "Abordagem e relacionamento", "Canais e presença", "Experiência e fidelização", "Antes de atrair: perfil e capacidade", "Presença orgânica e busca local", "O plano da semana"];
+  semKeyword.blueprint.sections = semKeyword.blueprint.sections.map((secao, indice) => ({ ...secao, h2: NOVOS[indice] }));
+  assert.ok(linhasDe(linhaDoArtigo({ blueprint: semKeyword }).row.estrutura).includes("- H2 sem keyword no começo (K6): nenhum H2 abre pela principal nem por uma complementar."));
 });
 
 /* ============================== 6 · de 3 a 6 H2 ============================== */
@@ -481,7 +494,8 @@ test("H2 · a régua: nunca a primeira nem a última, sem cadeia, e a planta gra
 /* ============================== 7 · fechamento, CTA, capa e imagem ============================== */
 
 test("fechamento · 4 tempos com um CTA só, no pedido e no CSV", () => {
-  assert.match(radarHumanVoicePromptBlock()[1], /closing\.turn leva os 3 primeiros tempos do fechamento \(dor, estrutura própria no Google, facilidade\) e closing\.cta é o diagnóstico, a única chamada/);
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D7): os 4 tempos viram 4 campos; o diagnóstico é o CTA único. */
+  assert.match(radarHumanVoicePromptBlock()[1], /O fechamento tem 4 campos \(regras 2026-10-14b\): closing\.pain .*closing\.diagnosis \(o diagnóstico, a única chamada/);
   const row = linhaDoArtigo().row;
   assert.ok(linhasDe(row.estrutura).includes("- Fechamento em 4 tempos: dor (o que a leitora já sentiu com a receita pronta) → mudança para a estrutura própria no Google → facilidade (a marca faz; a profissional só contribui com o que sabe) → diagnóstico (o CTA abaixo, a única chamada); a virada e o fim explicam a busca orgânica sem sigla (nível 2)."));
   assert.equal(linhasDe(row.estrutura).filter(item => /^CTA[ :(]/.test(item)).length, 1, "um CTA só");
@@ -517,7 +531,12 @@ test("D10 · o CSV do caso real, a linha 'Silo', a linha 'Voz da marca', o víde
   semD10(aviso, "aviso das regras");
   /* 2026-10-11c · a de 11/10b ganha o aviso das keywords proibidas por destino, também concluído. */
   semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11b" })!, "aviso 2026-10-11b");
-  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" }), null);
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono: a planta de 2026-10-14 ganha o aviso das regras 2026-10-14b, também sem palavra do D10; a vigente, nenhum. */
+  semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-14" })!, "aviso 2026-10-14");
+  /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): a de 2026-10-14b ganha o aviso das regras 2026-10-14c, também sem palavra do D10; a vigente, nenhum. */
+  semD10(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-14b" })!, "aviso 2026-10-14b");
+  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-14c" }), null);
+  assert.match(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" })!, /^Esta versão foi montada com as regras de 2026-10-11c\. As de 2026-10-14 acrescentam /);
   assert.doesNotMatch(tudoDaLinha(artigo.row), /dependência/i, "a palavra que casa com a régua do D10 não entra");
 });
 

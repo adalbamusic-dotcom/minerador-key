@@ -23,8 +23,9 @@ import { initialSuggestionSelection, type SerpSubjectCardView, type SerpSubjectT
  *
  *   "Reforçar publicados"   uma confirmação só grava, por página, o ArticleDNA
  *                           (o primeiro, quando não existe), a troca aceita e
- *                           os reforços marcados — e as keywords novas passam
- *                           pelo Minerador, aprovadas pelo dono no mesmo clique.
+ *                           os reforços marcados. As keywords novas vão como
+ *                           sugestão ao Minerador (F4, SDD 2026-10-13 item 2:
+ *                           o Arquiteto só lê keyword; o dono decide lá).
  *                           Custo para gravar: zero.
  *   "Buscar keywords para   em lote, para os "Sem par no lote": Google Ads
  *    os publicados sem par" (grátis) e SERP das melhores (paga, até US$ 1,00
@@ -40,8 +41,6 @@ export const PUBLISHED_REINFORCEMENT_SAVE_LABEL = "Gravar reforços";
 export const PUBLISHED_REINFORCEMENT_COST_LINE = "Custo para gravar: zero (nenhuma chamada paga).";
 export const PUBLISHED_SEARCH_ACTION_LABEL = REINFORCEMENT_SEARCH_ACTION_LABEL;
 export { PUBLISHED_REINFORCEMENT_ACTION_LABEL };
-/** O aceite que acompanha keyword nova: o dono aprova no Minerador. */
-export const PUBLISHED_REINFORCEMENT_APPROVAL_CHECKBOX = "Eu aprovo estas keywords novas no Minerador.";
 
 /* ------------------------------ o pedido ------------------------------ */
 
@@ -183,15 +182,14 @@ export function reinforcementApplyRequest(input: {
   pages: readonly ReinforcementRequestPage[];
   decisionHash: string;
   operationRequestId: string;
-  approveNewKeywords: boolean;
 }) {
+  // F4 · O ARQUITETO SÓ LÊ: o pedido nunca leva `approveNewKeywords` (o servidor o recusa).
   return {
     brandId: input.brandId,
     mode: "apply" as const,
     pages: input.pages.map(page => ({ ...page })),
     decisionHash: input.decisionHash,
     operationRequestId: input.operationRequestId,
-    ...(input.approveNewKeywords ? { approveNewKeywords: true } : {}),
   };
 }
 
@@ -251,7 +249,7 @@ export function reinforcementPreviewView(preview: ReinforcementPreviewData): Rei
     firstDna ? plural(firstDna, "ArticleDNA novo", "ArticleDNAs novos") : "",
     successors ? plural(successors, "versão nova", "versões novas") : "",
     adicionadas ? plural(adicionadas, "keyword do Minerador entra", "keywords do Minerador entram") : "",
-    newKeywords ? plural(newKeywords, "keyword nova passa pelo Minerador", "keywords novas passam pelo Minerador") : "",
+    newKeywords ? plural(newKeywords, "keyword nova vai como sugestão ao Minerador", "keywords novas vão como sugestão ao Minerador") : "",
     swaps ? plural(swaps, "troca de principal", "trocas de principal") : "",
   ].filter(Boolean);
   return {
@@ -842,9 +840,10 @@ export function reinforcementTableSummary(rows: readonly ReinforcementTableRow[]
 
 const MENSAGENS: Record<string, string> = {
   PREVIEW_CHANGED: "O estado mudou desde a prévia: confira a prévia nova antes de gravar. Nada foi gravado.",
-  HUMAN_APPROVAL_REQUIRED: "Há keywords novas: marque que você as aprova no Minerador antes de gravar. Nada foi gravado.",
+  MINERADOR_DECIDES_NEW_KEYWORDS: "O Arquiteto não aprova keyword no Minerador: as keywords novas vão como sugestão (“Sugestões do Arquiteto”). Nada foi gravado.",
   ARTICLE_WRITER_UNAVAILABLE: "O gravador do Arquiteto não está disponível agora. Nada foi gravado.",
-  MINERADOR_UNAVAILABLE: "O Minerador não está disponível para as keywords novas. Nada foi gravado.",
+  SUGGESTIONS_UNAVAILABLE: "O registro das sugestões ao Minerador não está disponível agora. Nada foi gravado.",
+  SUGGESTIONS_NOT_RECORDED: "As sugestões ao Minerador não foram gravadas. Nada foi gravado.",
   REINFORCEMENT_RESULT_PENDING: "Esta busca já tem uma rodada paga gravada: o resultado foi reaberto, sem custo.",
   REINFORCEMENT_ALREADY_RUN: "Esta prévia já foi usada numa rodada paga. Nada foi pago de novo; peça uma nova busca se quiser outra rodada.",
   REINFORCEMENT_PLAN_ABOVE_CAP: `O plano passa do teto de US$ ${formatUsd(REINFORCEMENT_MAX_COST_USD)}. Nada foi pago.`,

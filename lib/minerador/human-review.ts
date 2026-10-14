@@ -16,6 +16,7 @@ import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 export type HumanReviewFieldDecisionType = "keep_logic" | "edit" | "confirm_unknown";
 
 import type { KeywordPageType, KeywordPageTypeStance } from "./keyword-page-type.ts";
+import type { DeclaredPlanLockChoice } from "./declared-plan.ts";
 
 export type HumanReviewAction =
   | { type: "field"; field: string; logicalValue: unknown; decision: HumanReviewFieldDecisionType; editedValue?: unknown }
@@ -26,6 +27,12 @@ export type HumanReviewAction =
    * concreta, como a aplicabilidade do KGR — e por isso mora na Revisão.
    */
   | { type: "primary_policy"; policy: "locked" | "reviewable" }
+  /**
+   * 2026-10-13 · na keyword NÃO publicada, o mesmo select "Posto de principal"
+   * é a TRAVA do cadastro (Travada · Livre · Automática). Grava pelo núcleo do
+   * cadastro (rota `…/plans/lock`); sem plano, a recusa diz para cadastrar.
+   */
+  | { type: "plan_lock"; lock: DeclaredPlanLockChoice }
   /**
    * Tipo de página: Silo, Artigo, Landing page ou Página de serviço. Sem
    * publicação é potencial; com publicação é o que está no ar. Nunca

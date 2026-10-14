@@ -37,6 +37,9 @@ O mesmo texto, montado pelas mesmas funções, chega a:
 2. **A Skill de voz da marca** (dado da Marca): onde ela suaviza o tom, vale esta diretriz (decisão mais
    recente do dono); onde protege fato, oferta, preço, credencial ou a dignidade da leitora, a Skill vale.
 3. **A trava de fonte e o entregável concluído (D10) não mudam.**
+4. **Keyword é substância de SEO, não tom** (2026-10-14, SDD silo interligado §7.1): onde a Skill protege a
+   gramática e proíbe densidade artificial de repetição, a Skill vale. Fica corrigida a leitura que fazia a
+   diretriz vencer a Skill nesse ponto.
 
 ## A voz
 
@@ -138,30 +141,58 @@ O mesmo texto, montado pelas mesmas funções, chega a:
 
 ## O que a SERP guia na página
 
-### H1 e SEO title: keyword no começo e gancho de contraste
+> **2026-10-14 · regras de keyword e título `2026-10-14` (K1–K9).** SDD
+> `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §7, decisões D4, D5 e D6
+> (decididas pelo dono em 2026-10-14). A keyword deixou de ser prefixo: as três seções abaixo
+> trocaram "keyword no começo", "keyword nos primeiros 60 da meta" e "keyword na primeira frase e no
+> primeiro H2". Fonte em código: `RADAR_KEYWORD_RULES_VERSION` e as conferências V1–V7 de
+> `lib/radar/human-voice-guideline.ts`. **Precedência:** keyword é substância de SEO, não tom; onde a
+> Skill de voz da marca protege a gramática e proíbe densidade artificial de repetição, a Skill vale.
+> No vídeo, as regras de keyword mudam na fase F6 da mesma SDD.
 
-- **O que é:** a keyword principal no começo; depois, o gancho de dor e contraste comercial que diferencia dos
-  títulos do topo da SERP. Três opções (o H1 e duas alternativas); SEO title até ~60 caracteres.
+### H1 e SEO title: a principal natural uma vez e três ângulos
+
+- **O que é:** a keyword principal, na forma natural (português correto, com a preposição e a flexão que a
+  frase pede), aparece uma vez no H1 e uma vez no SEO title, em qualquer posição. O gancho pode vir
+  primeiro, e a principal abre no máximo 1 das 3 opções (o H1 e duas alternativas). Cada opção tem um
+  ângulo: dor → saída; contraste com o que o topo da SERP promete (as "dicas" e os números); diagnóstico ou
+  decisão (fundo de funil). SEO title até ~60 caracteres, com a principal dentro dos primeiros 60.
 - **Como aplicar:** leia os títulos do topo e as perguntas da SERP; se o topo promete dicas e guias, o título
   promete o contraste e a saída. Nunca isca genérica ("guia prático", "guia completo", "dicas", "o que é",
-  "tudo sobre").
-- **Bom:** "Como atrair um cliente sem depender de post e de anúncio que cai"
-- **Ruim:** "Como atrair um cliente: guia prático para clínicas"
+  "tudo sobre") nem marca de processo ("(precisa de fonte…)", colchetes de instrução, número de link,
+  "TODO"): a afirmação que só entra com fonte sai do título e vira promessa delimitada pela marca.
+- **Bom:** "A agenda sobe com o anúncio e cai quando ele para? Captação de pacientes para dentista com
+  estrutura própria"
+- **Ruim:** três opções que começam igual: "Captação de pacientes dentista sem anúncios: …", "Captação de
+  pacientes dentista sem verba: …", "Captação de pacientes dentista no orgânico: …"
 
-### Meta description que dá motivo para clicar
+### Meta description natural que dá motivo para clicar
 
-- **O que é:** dor, contraste, o que a leitora ganha e por que clicar mesmo com resposta de IA no topo
-  (autoridade, serviço real, experiência de quem assina). Keyword nos primeiros 60 caracteres; até ~155.
-- **Como aplicar:** sem "descubra", "aprenda", "dicas" e "guia prático".
-- **Bom:** "Como atrair um cliente quando o feed não traz ninguém: o que muda com site, páginas de serviço e busca
-  na sua região."
-- **Ruim:** "Descubra como atrair um cliente com estratégias práticas e dicas."
+- **O que é:** dor ou contraste, o que a leitora ganha e por que clicar mesmo com resposta de IA no topo
+  (autoridade, serviço real, experiência de quem assina). A principal ou uma variação próxima aparece uma
+  vez, em qualquer posição; até ~155. As 3 opções seguem os ângulos do título.
+- **Como aplicar:** sem "descubra", "aprenda", "dicas" e "guia prático" e sem marca de processo.
+- **Bom:** "Post, anúncio e agência e a agenda ainda oscila? Veja como site, perfil no Google e respostas às
+  perguntas da recepção ajudam a captação de pacientes para dentista."
+- **Ruim:** "Captação de pacientes dentista sem anúncio: o que o orgânico entrega, o que cobra de você e por
+  onde começar a rotina."
 
-### Keyword na primeira frase e no primeiro H2
+### A abertura responde à busca; nenhum H2 abre pela keyword
 
-- **O que é:** a primeira frase do corpo traz a keyword principal; o primeiro H2 traz a keyword ou um recorte
-  forte dela (todas as palavras de conteúdo da principal).
-- **Bom:** primeiro H2 "Como atrair clientes quando o post não traz ninguém". **Ruim:** "Contexto do mercado".
+- **O que é:** o primeiro parágrafo responde à busca com a principal (forma natural) ou uma variação próxima
+  nas primeiras ~100 palavras, sem obrigar a primeira frase. Os H2 seguem os subtemas, as entidades e as
+  perguntas reais da SERP: nenhum H2 começa pela principal nem por uma complementar; a principal entra em
+  no máximo 1 H2; cada complementar entra dentro da seção que trata dela (num H2, só natural, fora do começo
+  e em um H2 só); dois H2 não começam pelas mesmas 2 palavras de conteúdo.
+- **Como aplicar:** no corpo, a forma natural da principal aparece no máximo 2 + palavras/600 vezes (cerca de
+  7 em 3.000 palavras); o resto é variação semântica (sinônimos, entidades e buscas relacionadas que a SERP
+  mostra).
+- **Bom:** H2 "Por que a agenda sobe com o anúncio e cai quando ele para". **Ruim:** "Captação de pacientes
+  dentista sem anúncios começa pelo orgânico" e "Tráfego orgânico como fazer para captar pacientes no dia a
+  dia".
+- **Planta gravada antes de 2026-10-14 (D6):** a leitura tira a marca de processo do título e da meta (sem
+  IA, sem mudar o payload nem o hash) e o CSV diz, como instrução concluída, a forma natural, as opções e os
+  H2 que abrem pela keyword, o teto e as variações. H2 reescritos e os 3 ângulos só com "Organizar de novo".
 
 ### De 3 a 6 H2 (Regra 8 do Guia)
 
@@ -180,7 +211,37 @@ própria) aparece como entrega concreta, sem sigla na frente de quem é leigo.
 ### Fechamento em 4 tempos, um CTA só
 
 Dor → mudança para a estrutura própria no Google → facilidade (a marca faz; a profissional só contribui com o
-que sabe) → diagnóstico (o CTA único que já existe). A leitura seguinte, quando houver, vai no corpo.
+que sabe) → diagnóstico (o CTA único). A leitura seguinte, quando houver, vai no corpo.
+
+> **2026-10-14b · regras `2026-10-14b` (SDD silo interligado, F3; D7 e D8, decididas pelo dono).** Os 4 tempos
+> viram **4 campos conferidos** no artigo-modelo novo (`closing.pain`, `closing.structureShift`, `closing.ease`,
+> `closing.diagnosis`). O **diagnóstico é o CTA único**: uma verificação concreta da marca (verbo + o que ela
+> olha) e uma chamada só. A **fala aprovada do especialista** alimenta a mudança e a facilidade, na voz dele, e
+> **não substitui mais o diagnóstico** (muda o item 6 do Adendo F). A **oferta de diagnóstico** é dado da Marca:
+> a seção "Oferta de diagnóstico" da Skill de voz (v2), escrita pelo dono; sem ela, o texto padrão neutro, e o
+> painel da Marca mostra a proposta de texto para o dono aplicar (o agente não aplica). Fonte em código:
+> `RADAR_CLOSING_RULES_VERSION`, `RADAR_CLOSING_SPECIALIST_RULE` (`lib/radar/human-voice-guideline.ts`),
+> `lib/radar/brand-edge.ts` e `lib/marca/brand-diagnosis-offer.ts`.
+
+- **Bom:** "Se a agenda depende do mês em que o anúncio roda, você está alugando a atenção do paciente. A saída é
+  o consultório achável no Google: uma página por tratamento, o perfil coerente com o site e as perguntas da
+  recepção respondidas. Eu pesquiso, escrevo e publico; você revisa o que é clínico. Quer saber por onde
+  começar? Eu olho seu site, seu perfil no Google e as perguntas que mais chegam, e te digo o que falta."
+- **Ruim:** fechar com três chamadas (agende, siga no Instagram, baixe o e-book), ou pôr a fala inteira do
+  especialista ("Vamos planejar a presença orgânica da sua clínica?") no lugar do diagnóstico.
+
+### Afirmação concreta, ressalva uma vez
+
+- **O que é (regras `2026-10-14b`):** afirme de forma delimitada e concreta — o que a marca verifica, faz ou
+  mede, com número e fonte quando o pacote os traz; a afirmação que precisa de cuidado leva a ressalva **uma
+  vez**, onde ela está; nunca "pode", "não garante", "não significa" em série, seção após seção. Sem fonte nem
+  experiência da marca, corte a afirmação em vez de empilhar ressalva.
+- **Por quê:** o artigo do caso real (Suporte "captação de pacientes dentista") saiu com 52 "não", 45 "pode" e
+  0 dado próprio: correto, mas genérico e cheio de ressalvas, sem informação nova.
+- **Como aplicar:** troque a série de "pode" e "não garante" pelo que a marca verifica, faz ou mede. A trava de
+  fonte continua (regra geral 5): o fato sem fonte sai ou vira o que a marca verifica.
+- **Bom:** "Eu olho as perguntas que chegam na recepção e transformo as cinco mais repetidas em páginas."
+- **Ruim:** "O orgânico pode ajudar, mas não garante resultado, não significa agenda cheia e pode levar tempo."
 
 ### Capa obrigatória e imagem útil no corpo
 
@@ -191,6 +252,16 @@ seção). A imagem explica a ideia da seção; não prova resultado.
 
 Só os links do plano, cada um para a URL canônica do destino, com a âncora natural (regra de 2026-10-11 em
 `lib/radar/natural-anchor-rule.ts`; esta diretriz não a duplica).
+
+### Links externos de autoridade (regras `2026-10-14c`)
+
+Autorização do dono (2026-10-14, SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md`
+§16.2, Fase B): com fontes verificadas pelo Radar (id X: governo, conselho, ciência, Wikipédia, documentação do
+Google), o corpo leva de 2 a 5 links externos, cada um na frase que ele sustenta, com âncora natural no nome
+da entidade ("segundo o Ministério da Saúde", "a Wikipédia define…"); nunca uma URL fora das verificadas nem
+link para concorrente comercial. Afirmação de saúde sem fonte verificada não é afirmada (o texto delimita ou
+omite). A régua é a de `lib/radar/authority-sources-writing.ts` e a regra 7 do artigo-modelo; esta diretriz
+não a duplica, e a voz continua a mesma: a fonte reforça a afirmação concreta, não vira ressalva em série.
 
 ## Decisão a confirmar com o dono: erro proposital
 

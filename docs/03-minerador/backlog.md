@@ -1,5 +1,29 @@
 # Backlog — Minerador
 
+## "Sugestões do Arquiteto · cor X" (SDD 2026-10-13, item 2, F4) — 2026-10-14
+
+Detalhe em `docs/03-minerador/estado-atual.md` e no §18.4 da SDD. **Validado manualmente: não.**
+
+- [x] Caixa "Sugestões do Arquiteto" na barra do Processador e pelo link do Arquiteto; lista leve por cor com o estado de agora.
+- [x] "Trazer para o Minerador": import (com a Lógica), medição guardada gravada sem nova consulta e Lógica, pelos núcleos do Minerador, com prévia e releitura; "Aprovar e enviar (N)" abre o diálogo de sempre.
+- [x] Pedidos do Arquiteto pela URL (`?arquiteto=aprovar|selecionar|sugestoes`).
+- [ ] Dono: homologar — abrir a caixa pela barra e pelo link do Arquiteto; trazer uma keyword nova (conferir por SELECT `analise_semantica.subject_discovery` e a medição gravada com a data da preparação, sem linha nova de uso do Google Ads), rodar a Lógica numa sugerida, depois "Aprovar e enviar"; "Aprovar no Minerador (N)" vindo do Arquiteto; dark mode e 360/768/1024/1440 px.
+- [ ] Importar a keyword nova sugerida para PUBLICADO já na cor do artigo de destino.
+- [ ] `run_keyword_logic` e `import_subject_keywords` (MCP) pedirem `userConfirmation` (achado da SDD §6.2).
+- [ ] Teste DOM da caixa (hoje: orquestração e estrutura por teste; a tela não foi montada em teste).
+
+## Posto de principal = trava do cadastro; Assunto no cabeçalho e na linha — 2026-10-13
+
+Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Não publicada do plano: o select "Posto de principal" é a trava do cadastro (Travada · Livre · Automática), com o valor efetivo e o porquê; grava `plan.lock` pelo núcleo do cadastro (rota `plans/lock`), nova versão do plano, releitura; recusa clara sem plano.
+- [x] Lote "Vínculo das selecionadas": a mesma regra por item, recusa nomeada (nunca pulada calada); coluna "Travada · Artigo · declarado".
+- [x] Cabeçalho do Perfil e linha da planilha com o Assunto (título, papel/posição, cor); marca órfã avisada numa linha.
+- [x] MCP `set_keyword_vinculo` `kind: 'plan_lock'` e catálogo.
+- [ ] Dono: homologar na WifiConecta — Revisão Humana de uma keyword do plano (Travada → Livre → Automática), o lote misto (publicada + do plano + sem plano) e as 7 do azul (marca órfã: a recusa aponta "Cadastrar Assuntos → Silo existente"); dark mode e 360/768/1024/1440 px.
+- [ ] Dono: depois de mudar uma trava, reaprovar (só a Lógica) e reenviar ao Arquiteto; conferir por SELECT `keyword_subject.plan.lock` e `editorial_groups.plan_version`.
+- [ ] Teste DOM do select no modo trava (Revisão e painel em grupo).
+
 ## Acelerar o fluxo do plano (SDD 2026-10-13) — Minerador
 
 Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
@@ -2151,3 +2175,20 @@ Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-
 
 - [ ] Dono: excluir pela tela as 36 linhas soltas do plano do Silo 2 que entraram na Descoberta da WifiConecta antes da portaria.
 - [ ] Teste DOM de ponta a ponta do card "Cadastrar Assuntos" (colar no nome → linhas preenchidas → prévia).
+
+## 2026-10-13 · O Assunto nunca se perde
+
+- [ ] Dono: deploy do código; depois aplicar `20261015120000_assunto_nunca_se_perde.sql` (ensaio → `db query -f` → `migration repair --status applied 20261015120000 --linked` → SELECT dos gatilhos).
+- [ ] Dono: restaurar o azul — Cadastrar Assuntos → Silo existente → Azul → colar o plano do Silo 2 (preenche os detalhes) → Prévia → Cadastrar; reaprovar (só a Lógica) e enviar ao Arquiteto.
+- [ ] SDD futura "Excluir tudo da cor X": usar `via: "excluir_cor"` (tirar o plano com o marcador e excluir na mesma operação confirmada).
+- [ ] Avaliar proteger também a marca `keyword_declared_principal` no banco (hoje só o Assunto).
+- [ ] Recuperação do formato anterior (Assunto numa linha, principal noutra) — hoje não recuperada pelo card.
+
+## 2026-10-13 · Recadastro que substitui (F1)
+
+- [x] Card "Cadastrar Assuntos" → Silo existente → Acrescentar | Substituir o plano (quatro listas, Pilar e Assunto podem sair/mudar de keyword, "Sai" pelo núcleo de "Tirar do plano", nada apagado) — feito no código, sem deploy (SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md` §18.1).
+- [ ] Dono: deploy; depois recadastrar cada Silo em Cadastrar Assuntos → Silo existente → a cor → "Substituir o plano" → "Colar plano em texto" com o plano inteiro → "Preencher as linhas" → "Gerar prévia" (conferir Fica igual/Muda/Entra/Sai) → digitar o nome da cor (se algo sai) → "Substituir o plano"; reaprovar (só a Lógica) e enviar ao Arquiteto.
+- [ ] Dono: homologar na tela (360/768/1024/1440 px, dark mode) as quatro listas e a confirmação pelo nome da cor.
+- [ ] Teste DOM do card no modo "Substituir o plano" (hoje: núcleo por fixtures e estrutural do card).
+- [ ] Linha-título do formato anterior fora do plano novo: hoje só listada ("fica como está"); a ação "Converter para a keyword X" na própria prévia da substituição não foi feita (o caminho é "Converter formato anterior").
+- [ ] `nextPlanVersions` é previsão: o hash do plano restante da retirada usa a frase da keyword e o do cadastro o título, então "só remover" gera as duas versões; avaliar unificar o hash (mudança no núcleo de "Tirar do plano").

@@ -122,7 +122,8 @@ test("painel do Vínculo: os selects da Revisão (Posto e Potencial), sem Não m
   }
   assert.doesNotMatch(panel, /VinculoSubject|Assunto|vinculoBatchPostLocked|vinculoBatchDeclareOpen/, "o Assunto saiu do painel em grupo");
   assert.match(panel, /published=\{vinculoBatchCommon\.publishedOnly\}/, "todas publicadas: só os declarados, como na Revisão");
-  assert.match(workspace, /commonVinculoSelectValues\(keywords\.filter\(item => selectedIds\.has\(item\.id\)\)\)/, "o valor comum sai das linhas que o plano grava");
+  // 2026-10-13 · com o contexto da trava do cadastro (o posto da não publicada é a trava).
+  assert.match(workspace, /commonVinculoSelectValues\(keywords\.filter\(item => selectedIds\.has\(item\.id\)\), vinculoPlanContextOf\)/, "o valor comum sai das linhas que o plano grava");
   assert.match(workspace, /chooseVinculoBatchSelect\(current, key, value, vinculoBatchCommon\)/);
   assert.match(vinculoSelects, /<option value=\{VINCULO_MIXED_VALUE\} disabled>\{VINCULO_MIXED_LABEL\}<\/option>/, "Valores diferentes nunca é escolha");
   assert.doesNotMatch(panel, /bg-\[#|slate-|text-\[1[01]px\]/);
@@ -135,7 +136,8 @@ test("confirmação do lote diz quantas aprovadas vão para Em revisão, antes d
   assert.match(dialog, /data-vinculo-demotion-warning[^>]*>\{vinculoBatchPreviewText\.warning\}/);
   assert.match(dialog, /vinculoBatchPreviewText\.steps\.map\(step =>/, "o que cada escolha grava e pula");
   assert.match(dialog, /onClick=\{\(\) => void handleBatchVinculo\(vinculoBatchDialog\)\}/);
-  assert.match(dialog, /disabled=\{updating \|\| bulkActionProcessing \|\| !vinculoBatchPreview\?\.ok \|\| vinculoBatchPreview\.counts\.updates === 0\}\s*className="[^"]*"\s*>\s*Aplicar/);
+  // 2026-10-13 · a trava do cadastro (não publicadas do plano) também conta como gravação.
+  assert.match(dialog, /disabled=\{updating \|\| bulkActionProcessing \|\| !vinculoBatchPreview\?\.ok \|\| vinculoBatchPreview\.counts\.updates \+ vinculoBatchPreview\.counts\.planLocks === 0\}\s*className="[^"]*"\s*>\s*Aplicar/);
   assert.doesNotMatch(dialog, /autoFocus/);
 
   // Foco: o painel recebe o foco, Escape e clique fora fecham pelo document e o foco volta a quem abriu.
@@ -161,7 +163,8 @@ test("ator = auth.users.id: nunca e-mail, nunca local-user; sem ele nada é grav
 test("escrita isolada por marca e readback estreito das chaves", () => {
   const batch = handlerBody(workspace, "handleBatchVinculo");
   assert.match(batch, /planVinculoBatchChoices\(\{[\s\S]{0,300}brandId: selectedBrandId,[\s\S]{0,200}actorId,/);
-  assert.match(batch, /\.update\(\{ analise_semantica: update\.semantic \}\)\s*\.eq\("id", update\.id\)\s*\.eq\("brand_id", update\.brandId\)\s*\.is\("deleted_at", null\)/);
+  // 2026-10-13 (ajuste declarado, "o Assunto nunca se perde"): a escrita passa pela guarda do Assunto.
+  assert.match(batch, /\.update\(\{ analise_semantica: semanticForKeywordWrite\(keywords\.find\(keyword => keyword\.id === update\.id\)\?\.analise_semantica, update\.semantic\) \}\)\s*\.eq\("id", update\.id\)\s*\.eq\("brand_id", update\.brandId\)\s*\.is\("deleted_at", null\)/);
   assert.match(batch, /\.select\(VINCULO_BATCH_READBACK_COLUMNS\)\s*\.eq\("brand_id", selectedBrandId\)\s*\.is\("deleted_at", null\)\s*\.in\("id", readbackChunk\)/);
   assert.match(batch, /for \(let start = 0; start < persistedIds\.length; start \+= KEYWORD_READBACK_ID_CHUNK\)/, "readback em blocos de ids");
   assert.match(batch, /vinculoReadbackConfirmed\(update, rowById\.get\(update\.id\)\)/);

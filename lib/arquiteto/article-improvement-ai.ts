@@ -8,6 +8,7 @@ import {
   type ImprovementProposal,
   type ImprovementTarget,
 } from "./article-improvement.ts";
+import { keywordDnaSummary } from "../editorial/known-before-search.ts";
 
 /**
  * LEITURA EDITORIAL DA IA NA LISTA EXISTENTE — "Melhorar publicados e formar
@@ -124,6 +125,7 @@ export const IMPROVEMENT_AI_SYSTEM = [
   "4. Recuse: intenção oposta (o artigo promete \"sem tráfego pago\" e a keyword é \"tráfego pago como funciona\"); público diferente (\"como atrair pacientes para clínica de estética\" ← \"clínica de estética facial\": quem busca quer uma clínica, não marketing); outro nicho (\"checklist de plano de marketing para clínica de estética\" ← \"marketing para veterinários\"); cabeça genérica de volume enorme (\"agência de marketing para cosméticos\" ← \"agência de marketing\", 18.100).",
   "5. Bons exemplos: \"como atrair clientes para consultório\" ← \"como atrair clientes\" (720) e \"como atrair os clientes\" (720); \"como captar clientes para clínica de estética\" ← \"como captar clientes\" (390).",
   "6. reason: UMA frase curta (até 12 palavras) em português do Brasil dizendo por que quem busca a keyword leria o artigo.",
+  "7. Cada alvo e cada keyword podem trazer `dna` (o resumo do KeywordDNA: intencao, entidade, funil, publico, problema). Use-o antes de escolher: keyword cujo dna diz outra intenção, outro público ou outro problema que o do alvo fica de fora. principalTravada=true: a principal do alvo não muda.",
   "Responda só com JSON: {\"picks\":[{\"targetId\":\"...\",\"keywordId\":\"...\",\"role\":\"principal\"|\"secundaria\",\"reason\":\"...\"}]}. Sem nada escolhido: {\"picks\":[]}.",
 ].join("\n");
 
@@ -149,13 +151,17 @@ export function buildImprovementAiPrompt(input: {
       slug: target.slug,
       principalAtual: current ? { keyword: current.keyword, volume: current.volumeValidated ? current.volume : null } : null,
       podeTrocarPrincipal,
+      // F3 · a IA não decide no escuro: o resumo do DNA do alvo e a trava do plano (sem id).
+      ...(target.declaredPrincipalId ? { principalTravada: true } : {}),
+      ...(keywordDnaSummary(target.signals) ? { dna: keywordDnaSummary(target.signals) } : {}),
       keywordsNoArtigo: target.memberIds.map(id => byId.get(id)?.keyword).filter((k): k is string => Boolean(k)),
       vagas: Math.max(0, Math.min(IMPROVEMENT_AI_MAX_PER_TARGET, IMPROVEMENT_ARTICLE_MAX_KEYWORDS - target.memberIds.length)),
     };
   });
   const lista = input.list.map((k, index) => {
     aliases.keywords[`K${index + 1}`] = k.id;
-    return { keywordId: `K${index + 1}`, keyword: k.keyword, volume: k.volume };
+    const dna = keywordDnaSummary(k.signals);
+    return { keywordId: `K${index + 1}`, keyword: k.keyword, volume: k.volume, ...(dna ? { dna } : {}) };
   });
   return { system: IMPROVEMENT_AI_SYSTEM, user: JSON.stringify({ alvos, lista }), aliases };
 }

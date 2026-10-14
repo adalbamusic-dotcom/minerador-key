@@ -535,7 +535,7 @@ test("10 · um CTA só: a continuação deixa o fechamento e vira menção opcio
   assert.equal((colunas.estrutura.match(/^- Leitura seguinte/gm) || []).length, 1);
   assert.equal((colunas.estrutura.match(/^CTA/gm) || []).length, 1);
   const { system } = radarArticleBlueprintPrompt(pacote());
-  assert.match(system, /UM CTA SÓ: closing\.cta é a única chamada do artigo/);
+  assert.match(system, /UM CTA SÓ: o diagnóstico \(closing\.diagnosis\) é a única chamada do artigo/); /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D7): o diagnóstico é o CTA único */
   assert.match(radarArticleBlueprintPrompt(pacote()).user, /"nextStep":null/);
 });
 

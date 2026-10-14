@@ -299,79 +299,62 @@ test("aplicar: hash exigido; com o hash, composição e ArticleDNA aprovados com
   assert.equal(chamadasDeRede, 0);
 });
 
-test("keyword nova: sem o aceite de aprovar no Minerador é recusada; com ele, a ordem dos núcleos e a releitura", async () => {
-  const { banco, mesa, versoes, deps, pareceres } = montar();
-  // O resultado gravado da busca em lote desta página.
-  banco.linhas("editorial_workflow_items").push({ id: "busca-1", lock_version: 1, marca_id: MARCA, subject_type: REINFORCEMENT_SEARCH_SUBJECT_TYPE, stage: "architect", subject_id: "rs-0000000000000001", state: "proposed", payload: { run: { operationRequestId: "55555555-5555-4555-8555-555555555555", executedAt: "2026-09-28T11:00:00Z", pages: [{ keywordId: K_PUB, suggestions: [{ candidateId: "cand:captar pacientes clinica", keyword: "captar pacientes clínica", normalizedKeyword: "captar pacientes clinica", adsVolume: 50, level: "strong", sharedPageCount: 4, origins: ["ads_url_seed"], evidence: [] }] }] } } });
-  const passos: string[] = [];
-  const NOVA = "aaaaaaaa-0000-4000-8000-000000000009";
-  const minerador: NonNullable<PublishedReinforcementDeps["minerador"]> = {
-    importKeywords: async request => {
-      passos.push(`import:${request.subjectPhrase}:${request.items.map(item => item.keyword).join("|")}`);
-      assert.equal(request.subjectKeywordId, null);
-      banco.linhas("minerador_keywords").push(keyword(NOVA, "captar pacientes clínica", { status: "bruto", volume_search: null, volume_source: null }));
-      return { ok: true };
-    },
-    runLogic: async ids => { passos.push(`logica:${ids.join(",")}`); return { ok: true, reason: null }; },
-    measureVolume: async ids => { passos.push(`volume:${ids.join(",")}`); Object.assign(banco.linhas("minerador_keywords").find(linha => linha.id === NOVA)!, { volume_search: 50, volume_source: "google_ads" }); return { ok: true, reason: null }; },
-    readVolumes: async ids => new Map(ids.map(id => [id, { volume: 50, validated: true }])),
-    approve: async ids => { passos.push(`aprovar:${ids.join(",")}`); return { ok: true, reason: null }; },
-    handoff: async ids => { passos.push(`enviar:${ids.join(",")}`); mesa.itens.push(item(NOVA, {})); },
-  };
-  const base = { pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A], newKeywords: ["captar pacientes clínica"] }] };
-  const previa = dados(await handlePublishedReinforcement(deps({ minerador }), pedido(base)));
-  assert.match(String(previa.approvalText), /você aprova estas keywords no Minerador/);
-  const semAceite = await handlePublishedReinforcement(deps({ minerador }), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "66666666-6666-4666-8666-666666666666" }));
-  assert.equal(semAceite.status, 422);
-  assert.equal(semAceite.body.code, "HUMAN_APPROVAL_REQUIRED");
-  assert.deepEqual(passos, []);
+/*
+ * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+ * item 2; ajustes declarados 2026-10-14). Antes: a keyword nova passava, daqui,
+ * por import → Lógica → Volume → aprovação → envio NO MINERADOR (portas
+ * `minerador`/`loadMinerador`, que saíram). Agora ela vira sugestão ao Minerador
+ * (`recordMineradorSuggestions`, um item de workflow do Arquiteto), não entra
+ * no artigo nesta confirmação e o pedido de "aprovar no Minerador" é recusado.
+ */
+const buscaComNova = (banco: ReturnType<typeof montar>["banco"], sufixo: string) => banco.linhas("editorial_workflow_items").push({ id: `busca-${sufixo}`, lock_version: 1, marca_id: MARCA, subject_type: REINFORCEMENT_SEARCH_SUBJECT_TYPE, stage: "architect", subject_id: `rs-000000000000000${sufixo}`, state: "proposed", payload: { run: { operationRequestId: `55555555-5555-4555-8555-55555555555${sufixo}`, executedAt: "2026-09-28T11:00:00Z", pages: [{ keywordId: K_PUB, suggestions: [{ candidateId: "cand:captar pacientes clinica", keyword: "captar pacientes clínica", normalizedKeyword: normalizeKeyword("captar pacientes clínica"), adsVolume: 50, level: "strong", sharedPageCount: 4, origins: ["ads_url_seed"], evidence: ["4 páginas em comum"] }] }] } } });
 
-  const comAceite = await handlePublishedReinforcement(deps({ minerador }), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "66666666-6666-4666-8666-666666666666", approveNewKeywords: true }));
-  assert.equal(comAceite.status, 200, JSON.stringify(comAceite.body));
-  assert.deepEqual(passos, [`import:${PUB}:captar pacientes clínica`, `logica:${NOVA}`, `volume:${NOVA}`, `aprovar:${NOVA}`, `enviar:${NOVA}`]);
-  assert.equal(dados(comAceite).readbackConfirmed, true, JSON.stringify(dados(comAceite)));
-  // 2026-09-28: a keyword nova nunca foi confrontada pelo parecer gravado. A mesa
-  // (Minerador e composição) fica gravada; o ArticleDNA espera o parecer desta composição.
-  assert.equal(versoes.length, 0, "nenhum ArticleDNA com o parecer de outra composição");
-  assert.match(String(dados(comAceite).message), /O ArticleDNA ainda não foi gravado: Entram keywords novas: o parecer da SERP gravado não as confrontou. Próximo passo: "Processar artigos"/);
-  const formacao = String(mesa.itens.find(entrada => entrada.subjectId === K_PUB)!.payload.articleFormationRef);
-  assert.equal(mesa.itens.find(entrada => entrada.subjectId === NOVA)!.payload.articleFormationRef, formacao);
-  // O "Processar artigos" (cache) grava o parecer da formação com a composição nova.
-  pareceres.push({ candidateRef: formacao, territoryRef: TERRITORIO, reference: { entityId: "assessment-formacao", versionId: "assessment-formacao:base-2", contentHash: `sha256:${"e".repeat(64)}` }, composition: { keywordIds: [K_PUB, K_A, NOVA], principalKeywordId: K_PUB } });
-  const segunda = dados(await handlePublishedReinforcement(deps({ minerador }), pedido({ pages: [{ publishedKeywordId: K_PUB }] })));
-  const [planoSegundo] = segunda.pages as Array<{ status: string; dna: { mode: string }; lines: string[] }>;
-  assert.equal(planoSegundo.status, "ready");
-  assert.equal(planoSegundo.dna.mode, "first");
-  const gravada = dados(await handlePublishedReinforcement(deps({ minerador }), pedido({ pages: [{ publishedKeywordId: K_PUB }], mode: "apply", decisionHash: segunda.decisionHash, operationRequestId: "67676767-6767-4676-8676-676767676767" })));
-  assert.equal(gravada.readbackConfirmed, true, JSON.stringify(gravada));
-  assert.equal(passos.length, 5, "a segunda confirmação não passa de novo pelo Minerador");
-  const dna = ArticleDNASchema.parse(versoes.at(-1)!.payload);
-  assert.equal(dna.serpAssessmentRef?.versionId, "assessment-formacao:base-2", "o DNA leva o parecer DESTA composição");
-  assert.deepEqual(dna.keywordReferences.map(reference => reference.keywordId), [K_PUB, K_A, NOVA]);
-  // A keyword nova entrou no Silo do publicado.
-  assert.equal(mesa.itens.find(entrada => entrada.subjectId === NOVA)!.payload.territoryRef, TERRITORIO);
+test("F4 · keyword nova: vira sugestão ao Minerador (nenhum núcleo dele); o pedido de aprovar é recusado; o artigo grava só as recebidas", async () => {
+  const { banco, versoes, patches, deps, pareceres } = montar();
+  pareceres[0].composition = { keywordIds: [K_PUB, K_A], principalKeywordId: K_PUB };
+  buscaComNova(banco, "1");
+  const sugestoes: Array<Parameters<NonNullable<PublishedReinforcementDeps["recordMineradorSuggestions"]>>[0]> = [];
+  const recordMineradorSuggestions: NonNullable<PublishedReinforcementDeps["recordMineradorSuggestions"]> = async input => { sugestoes.push(input); return { recorded: input.drafts.length, recordKey: `reinforcement:${input.sourceId}` }; };
+  const base = { pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A], newKeywords: ["captar pacientes clínica"] }] };
+  const previa = dados(await handlePublishedReinforcement(deps({ recordMineradorSuggestions }), pedido(base)));
+  assert.match(String(previa.approvalText), /Sugestões do Arquiteto/);
+  assert.doesNotMatch(String(previa.approvalText), /você aprova/);
+  const [plano] = previa.pages as Array<{ create: Array<{ keyword: string }>; lines: string[] }>;
+  assert.deepEqual(plano.create.map(item => item.keyword), ["captar pacientes clínica"]);
+  assert.ok(plano.lines.some(linha => /Vão como sugestão ao Minerador/.test(linha)), plano.lines.join(" | "));
+
+  const recusado = await handlePublishedReinforcement(deps({ recordMineradorSuggestions }), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "66666666-6666-4666-8666-666666666666", approveNewKeywords: true }));
+  assert.equal(recusado.status, 422);
+  assert.equal(recusado.body.code, "MINERADOR_DECIDES_NEW_KEYWORDS");
+  assert.equal(sugestoes.length, 0); assert.equal(patches.length + versoes.length, 0, "nada gravado");
+
+  const gravado = await handlePublishedReinforcement(deps({ recordMineradorSuggestions }), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "66666666-6666-4666-8666-666666666666" }));
+  assert.equal(gravado.status, 200, JSON.stringify(gravado.body));
+  const data = dados(gravado);
+  assert.deepEqual(data.mineradorSuggestions, { recorded: 1, recordKey: "reinforcement:66666666-6666-4666-8666-666666666666" });
+  assert.equal(sugestoes.length, 1);
+  assert.equal(sugestoes[0].source, "reinforcement");
+  assert.deepEqual(sugestoes[0].drafts.map(draft => [draft.kind, draft.keyword, draft.keywordId, draft.targetKeywordId, draft.targetKind, draft.volume, draft.volumeSource, draft.searchId]),
+    [["new_keyword", "captar pacientes clínica", null, K_PUB, "published", 50, "google_ads_ideas", "55555555-5555-4555-8555-555555555551"]]);
+  // O artigo: só as recebidas (a nova não entra nem ocupa vaga).
+  assert.equal(versoes.length, 1);
+  assert.deepEqual(ArticleDNASchema.parse(versoes[0].payload).keywordReferences.map(reference => reference.keywordId), [K_PUB, K_A]);
+  assert.match(String(data.message), /Ficaram de fora: "captar pacientes clínica" \(foi como sugestão ao Minerador/);
+  // Nenhuma escrita em tabela do Minerador.
+  assert.deepEqual(banco.log.filter(consulta => consulta.tabela.startsWith("minerador_") && consulta.op !== "select"), []);
+  assert.equal(banco.linhas("minerador_keywords").some(linha => linha.keyword === "captar pacientes clínica"), false);
 });
 
-test("um passo falha: para com o motivo, nada depois dele é gravado", async () => {
+test("F4 · sem o registro das sugestões, ou com ele falhando: para antes de qualquer escrita, com o motivo", async () => {
   const { banco, patches, versoes, deps } = montar();
-  banco.linhas("editorial_workflow_items").push({ id: "busca-2", lock_version: 1, marca_id: MARCA, subject_type: REINFORCEMENT_SEARCH_SUBJECT_TYPE, stage: "architect", subject_id: "rs-0000000000000002", state: "proposed", payload: { run: { operationRequestId: "55555555-5555-4555-8555-555555555556", executedAt: "2026-09-28T11:00:00Z", pages: [{ keywordId: K_PUB, suggestions: [{ keyword: "captar pacientes clínica", normalizedKeyword: normalizeKeyword("captar pacientes clínica"), adsVolume: 50, level: "strong", sharedPageCount: 4, origins: ["ads_url_seed"], evidence: [] }] }] } } });
-  const minerador: NonNullable<PublishedReinforcementDeps["minerador"]> = {
-    importKeywords: async () => { banco.linhas("minerador_keywords").push(keyword("aaaaaaaa-0000-4000-8000-00000000000a", "captar pacientes clínica")); return { ok: true }; },
-    runLogic: async () => ({ ok: false, reason: "a releitura não confirmou a Lógica" }),
-    measureVolume: async () => { throw new Error("não devia chegar aqui"); },
-    readVolumes: async () => new Map(),
-    approve: async () => { throw new Error("não devia chegar aqui"); },
-    handoff: async () => { throw new Error("não devia chegar aqui"); },
-  };
+  buscaComNova(banco, "2");
   const base = { pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A], newKeywords: ["captar pacientes clínica"] }] };
-  const previa = dados(await handlePublishedReinforcement(deps({ minerador }), pedido(base)));
-  const saida = await handlePublishedReinforcement(deps({ minerador }), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "77777777-7777-4777-8777-777777777777", approveNewKeywords: true }));
-  const data = dados(saida);
-  assert.equal(data.written, false);
-  assert.equal(data.readbackConfirmed, false);
-  assert.equal(data.tone, "warning");
-  assert.match(String(data.message), /Parou antes do fim: "como atrair pacientes para clínica": a Lógica não foi confirmada/);
-  assert.match(String(data.message), /já ficou gravado: 1 keyword\(s\) importada\(s\) no Minerador \("captar pacientes clínica"\)/, "o import já gravou: é dito");
+  const previa = dados(await handlePublishedReinforcement(deps(), pedido(base)));
+  const semPorta = await handlePublishedReinforcement(deps(), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "77777777-7777-4777-8777-777777777777" }));
+  assert.equal(semPorta.status, 503); assert.equal(semPorta.body.code, "SUGGESTIONS_UNAVAILABLE");
+  const falhou = await handlePublishedReinforcement(deps({ recordMineradorSuggestions: async () => ({ recorded: 0, error: "banco fora do ar" }) }), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "77777777-7777-4777-8777-777777777777" }));
+  assert.equal(falhou.status, 503); assert.equal(falhou.body.code, "SUGGESTIONS_NOT_RECORDED");
+  assert.match(String(falhou.body.error), /banco fora do ar\)\. Nada foi gravado\./);
   assert.equal(patches.length + versoes.length, 0, "nem composição nem ArticleDNA");
 });
 
@@ -451,42 +434,33 @@ test("formação do publicado com outra principal decidida, ou keyword já no Ar
   assert.equal(versoes.length, 0);
 });
 
-test("keywords novas sem volume do Google Ads: sucessora igual não grava versão, e a mensagem diz o que ficou no Minerador", async () => {
+// F4 (ajuste declarado 2026-10-14): só a sugestão — o ArticleDNA não muda e a mensagem diz que ela foi ao Minerador.
+test("F4 · só keyword nova: sucessora igual não grava versão; a sugestão vai ao Minerador e a mensagem diz isso", async () => {
   const { banco, versoes, deps } = montar();
   // O publicado já tem o ArticleDNA v1 (gravado pelo Reforçar).
   const primeira = dados(await handlePublishedReinforcement(deps(), pedido({ pages: [{ publishedKeywordId: K_PUB }] })));
   await handlePublishedReinforcement(deps(), pedido({ pages: [{ publishedKeywordId: K_PUB }], mode: "apply", decisionHash: primeira.decisionHash, operationRequestId: "14141414-1414-4141-8141-141414141414" }));
   assert.equal(versoes.length, 1);
-  banco.linhas("editorial_workflow_items").push({ id: "busca-9", lock_version: 1, marca_id: MARCA, subject_type: REINFORCEMENT_SEARCH_SUBJECT_TYPE, stage: "architect", subject_id: "rs-0000000000000009", state: "proposed", payload: { run: { operationRequestId: "55555555-5555-4555-8555-555555555559", executedAt: "2026-09-28T11:00:00Z", pages: [{ keywordId: K_PUB, suggestions: [{ keyword: "captar pacientes clínica", normalizedKeyword: normalizeKeyword("captar pacientes clínica"), adsVolume: 50, level: "strong", sharedPageCount: 4, origins: ["ads_url_seed"], evidence: [] }] }] } } });
-  const NOVA = "aaaaaaaa-0000-4000-8000-00000000000e";
-  let carregou = 0;
-  const loadMinerador = async (): Promise<NonNullable<PublishedReinforcementDeps["minerador"]>> => {
-    carregou += 1;
-    return {
-      importKeywords: async () => { banco.linhas("minerador_keywords").push(keyword(NOVA, "captar pacientes clínica", { status: "bruto", volume_search: null, volume_source: null })); return { ok: true }; },
-      runLogic: async () => ({ ok: true, reason: null }),
-      measureVolume: async () => ({ ok: true, reason: null }),
-      readVolumes: async ids => new Map(ids.map(id => [id, { volume: 0, validated: false }])),
-      approve: async () => { throw new Error("sem volume não é aprovada"); },
-      handoff: async () => { throw new Error("sem volume não é enviada"); },
-    };
-  };
+  buscaComNova(banco, "9");
+  let gravou = 0;
+  const recordMineradorSuggestions: NonNullable<PublishedReinforcementDeps["recordMineradorSuggestions"]> = async input => { gravou += input.drafts.length; return { recorded: input.drafts.length, recordKey: `reinforcement:${input.sourceId}` }; };
   const base = { pages: [{ publishedKeywordId: K_PUB, newKeywords: ["captar pacientes clínica"] }] };
-  const previa = dados(await handlePublishedReinforcement(deps({ loadMinerador }), pedido(base)));
-  assert.equal(carregou, 0, "a prévia não confere permissão do Minerador");
-  const saida = dados(await handlePublishedReinforcement(deps({ loadMinerador }), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "15151515-1515-4151-8151-151515151515", approveNewKeywords: true })));
-  assert.equal(carregou, 1, "o Minerador só é montado quando a prévia confirmada tem keyword nova");
+  const previa = dados(await handlePublishedReinforcement(deps({ recordMineradorSuggestions }), pedido(base)));
+  assert.equal(gravou, 0, "a prévia não grava a sugestão");
+  assert.equal((previa.pages as Array<{ status: string }>)[0].status, "ready", "só a sugestão também é gravável");
+  const saida = dados(await handlePublishedReinforcement(deps({ recordMineradorSuggestions }), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "15151515-1515-4151-8151-151515151515" })));
+  assert.equal(gravou, 1);
   assert.equal(versoes.length, 1, "sucessora igual à vigente: nenhuma versão nova");
   assert.equal(saida.written, false);
   assert.equal(saida.tone, "info");
-  assert.match(String(saida.message), /o ArticleDNA não mudou\. Gravado só: 1 keyword\(s\) importada\(s\) no Minerador \("captar pacientes clínica"\); a Lógica delas; o Volume do Google Ads delas\./);
-  assert.match(String(saida.message), /Ficaram de fora: "captar pacientes clínica" \(o Google Ads não confirmou volume: ficou no Minerador, fora do artigo\)/);
+  assert.match(String(saida.message), /o ArticleDNA não mudou\. Gravado só: 1 sugestão\(ões\) ao Minerador\./);
+  assert.match(String(saida.message), /Ficaram de fora: "captar pacientes clínica" \(foi como sugestão ao Minerador/);
   assert.doesNotMatch(String(saida.message), /já tinham tudo/);
 
-  // Sem keyword nova confirmada, o Minerador nem é montado (sem 403 desnecessário).
+  // Sem keyword nova, a porta das sugestões nem é chamada.
   let semNova = 0;
-  const outra = dados(await handlePublishedReinforcement(deps({ loadMinerador: async () => { semNova += 1; throw new Error("403"); } }), pedido({ pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A] }] })));
-  await handlePublishedReinforcement(deps({ loadMinerador: async () => { semNova += 1; throw new Error("403"); } }), pedido({ pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A] }], mode: "apply", decisionHash: outra.decisionHash, operationRequestId: "16161616-1616-4161-8161-161616161616" }));
+  const outra = dados(await handlePublishedReinforcement(deps({ recordMineradorSuggestions: async () => { semNova += 1; return null; } }), pedido({ pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A] }] })));
+  await handlePublishedReinforcement(deps({ recordMineradorSuggestions: async () => { semNova += 1; return null; } }), pedido({ pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A] }], mode: "apply", decisionHash: outra.decisionHash, operationRequestId: "16161616-1616-4161-8161-161616161616" }));
   assert.equal(semNova, 0);
 });
 
@@ -508,7 +482,9 @@ test("keyword que já existe no Minerador em outro estado do Arquiteto não é r
   assert.equal(cabecalhos.get("x-outro"), null);
   const rota = readFileSync("app/api/arquiteto/published-reinforcement/route.ts", "utf8");
   assert.doesNotMatch(rota, /headers: request\.headers/);
-  assert.equal((rota.match(/headers: cabecalhos/g) || []).length, 2);
+  // F4 (ajuste declarado 2026-10-14): a chamada em processo ao Volume do Minerador saiu; fica só o PATCH da mesa.
+  assert.equal((rota.match(/headers: cabecalhos/g) || []).length, 1);
+  assert.doesNotMatch(rota, /metricas-keywords|importSubjectDiscoveryWithCore|runKeywordLogicWithCore|applyKeywordDecisionEntries|createMineradorArquitetoHandoff|module: "minerador"/, "a rota não monta núcleo nem permissão do Minerador");
 });
 
 test("busca em lote: publicados que disputam o mesmo assunto vão à diferenciação; prévia, rodada paga e a mesma rodada sem pagar", async () => {

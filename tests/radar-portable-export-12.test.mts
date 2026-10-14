@@ -968,7 +968,8 @@ test("§29 · continua um único botão Exportar, com os produtos dentro", async
   const foraDoMenu = barra.slice(0, barra.indexOf('role="dialog"'));
   assert.deepEqual([...foraDoMenu.matchAll(/data-testid="radar-export-[a-z-]+"/g)].map(item => item[0]), ['data-testid="radar-export-menu"'],
     "§29 · um item de export saiu do card para a barra");
-  assert.match(barra, /Silo completo \(recomendado\)/);
+  /* 2026-10-14 · SDD silo interligado §16.1 · decisão do dono: o recomendado é um artigo por vez. */
+  assert.match(barra, /Silo completo</);
   assert.match(barra, /Só os artigos selecionados/);
   assert.match(barra, /Planilha atual/);
 });

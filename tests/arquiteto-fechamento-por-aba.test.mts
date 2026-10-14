@@ -46,8 +46,8 @@ test("o rodapé de Artigos não faz manutenção estrutural manual", () => {
   // Limpar seleção e o envio ao Radar (na aba Links) continuam.
   assert.match(workspace, /markSelectionInteraction\("clear-selection"\)/);
   assert.match(workspace, /Controle que vem do global não se mexe/);
-  // E o Excluir global continua no rodapé.
-  assert.match(workspace, /void requestSelectedKeywordDeletion\(\)/);
+  // E o Excluir global continua no rodapé — desde a F4 (2026-10-14) como "Excluir no Minerador": o Arquiteto leva ao Minerador, não exclui.
+  assert.match(workspace, /onClick=\{openSelectedKeywordsInMineradorForDeletion\}/);
 });
 
 test("enviar ao Radar não aparece na aba Artigos", () => {

@@ -40,11 +40,13 @@ test("02 · falha de documentos, convites ou preferências NÃO vira marca vazia
   assert.match(rota, /falha\.secao/);
 });
 
-test("03 · as oito seções têm nome próprio", () => {
+test("03 · as seis seções têm nome próprio (convites e preferências saíram da mesa em 2026-10-14)", () => {
   const rota = executable(read(ROUTE));
-  for (const secao of ["workflow", "artifacts", "documents", "publications", "invitations", "views", "serpSnapshots", "serpReviews"]) {
+  for (const secao of ["workflow", "artifacts", "documents", "publications", "serpSnapshots", "serpReviews"]) {
     assert.ok(rota.includes(`"${secao}"`), `a seção ${secao} precisa ser nomeável no diagnóstico`);
   }
+  // F2 das listas leves: a mesa não lê mais convites nem visualizações salvas.
+  assert.doesNotMatch(rota, /InvitationRepository|ViewPreferenceRepository|"invitations"|"views"/);
 });
 
 test("04 · dado persistido inválido NÃO é reportado como marca inválida", () => {

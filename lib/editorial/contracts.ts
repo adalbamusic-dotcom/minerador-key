@@ -25,7 +25,9 @@ export const EditorialBrandDtoSchema = z.object({
 export const EditorialSiloDtoSchema = z.object({ id: z.string(), nome: z.string(), nicho: z.string().nullable(), marca_id: z.string(), created_at: z.string().nullable() });
 export const EditorialKeywordDtoSchema = z.object({
   id: z.string(), keyword: z.string(), intent: z.string().nullable(), volume_search: z.number().nullable(), kgr_score: z.number().nullable(),
-  lista_id: z.string().nullable(), status: z.string().nullable(), analise_semantica: z.record(z.string(), z.unknown()).nullable(), created_at: z.string().nullable(),
+  lista_id: z.string().nullable(), status: z.string().nullable(),
+  /* 2026-10-14 · F2 das listas leves: `/api/inteligencia` não traz mais o DNA (ninguém da mesa o lia); opcional. */
+  analise_semantica: z.record(z.string(), z.unknown()).nullable().optional(), created_at: z.string().nullable(),
   publishedUrl: z.string().url().nullable().optional(), published_url: z.string().url().nullable().optional(),
   canonical: z.string().url().nullable().optional(), canonical_url: z.string().url().nullable().optional(),
   url: z.string().url().nullable().optional(), slug_sugerido: z.string().nullable().optional(), isPublished: z.boolean().optional(),

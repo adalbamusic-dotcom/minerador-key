@@ -74,15 +74,24 @@ test("o readback só aceita a remoção quando nenhuma KeywordDNA selecionada co
   assert.throws(() => assertArchitectKeywordDeleteReadback(review, ["keyword-a", "keyword-c"]), /readback canônico/);
 });
 
-test("o entrypoint real reutiliza modal e endpoints canônicos sem delete client-side", () => {
+/*
+ * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+ * item 2, W7; ajuste declarado 2026-10-14): excluir keyword é do Minerador. O
+ * Arquiteto não chama mais a prévia nem a exclusão do ciclo de vida (que ele
+ * chamava sem `allowRecoverable`); o botão leva ao Minerador com as keywords
+ * dos artigos marcadas, e o "Excluir" de lá faz a prévia e a confirmação.
+ */
+test("F4 · o entrypoint do Arquiteto leva ao Minerador com as keywords marcadas, sem chamar a exclusão", () => {
   const workspace = read("../modules/arquiteto/arquiteto-workspace.tsx");
   assert.match(workspace, /selectedArticleKeywordIds\(selectedArticleIdsRef\.current, articlesList\)/);
-  assert.match(workspace, /\/keywords\/delete\/preview/);
-  assert.match(workspace, /\/keywords\/delete/);
-  assert.match(workspace, /<DeleteConfirmation open=\{keywordDeleteSimpleOpen\}/);
-  assert.match(workspace, /<PublishedDeleteConfirmation open=\{keywordDeletePublishedOpen\}/);
-  assert.match(workspace, /assertArchitectKeywordDeleteReadback\(keywordDeleteReview/);
-  assert.match(workspace, /setCanonicalWorkspaceReload\(current => current \+ 1\)/);
+  assert.match(workspace, /window\.location\.assign\(mineradorHandoffHref\(serpSubjectBrandRef, \{ action: "selecionar", ids: keywordIds \}\)\)/);
+  assert.match(workspace, />Excluir no Minerador</);
+  assert.doesNotMatch(workspace, /\/keywords\/delete/);
+  assert.doesNotMatch(workspace, /<DeleteConfirmation open=\{keywordDeleteSimpleOpen\}|<PublishedDeleteConfirmation open=\{keywordDeletePublishedOpen\}/);
   assert.doesNotMatch(workspace, /handleDeleteSelectedNonPublished/);
   assert.doesNotMatch(workspace, /\.from\(["']minerador_keywords["']\)[\s\S]{0,180}\.delete\(\)/);
+  // No Minerador, o pedido do Arquiteto marca as linhas para a ação de sempre (com a prévia e a confirmação de sempre).
+  const minerador = read("../modules/minerador/minerador-workspace.tsx");
+  assert.match(minerador, /const pedido = readMineradorHandoff\(url\.searchParams\);/);
+  assert.match(minerador, /pendingSheetSelectionRef\.current = pedido\.ids;/);
 });

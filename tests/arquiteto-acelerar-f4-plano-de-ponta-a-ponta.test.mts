@@ -74,9 +74,12 @@ test("item 4 · 'Formar os artigos do plano · cor': o prepare aceita o grupo e 
   assert.match(melhoria, /loadCanonicalArquitetoWorkspace\(context, \{ keywordDetail: "full", \.\.\.\(groupFilter \? \{ groupFilter \} : \{\}\) \}\)/);
   assert.match(melhoria, /readDifferentiationBrandKeywords\(context\)/, "a proteção continua lendo a marca inteira");
   assert.match(melhoria, /run\.inputsHash = stableHash\(recorte \? \{ \.\.\.\(digital as Record<string, unknown>\), groupScope: recorte\.scope\.groupId \?\? recorte\.scope\.filter \} : digital\);/);
+  // F5 · planilha primeiro (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`, item 5; ajuste declarado 2026-10-14):
+  // a porta do plano saiu do painel de texto e virou a planilha "Artigos do plano", que prepara pela MESMA melhoria com o grupo.
   const painel = ler("modules/arquiteto/article-improvement-panel.tsx");
-  assert.match(painel, /Formar os artigos do plano · \{grupo\.label\}/);
-  assert.match(painel, /execute\("prepare", \{ group: grupo\.color \}\)/);
+  assert.doesNotMatch(painel, /Formar os artigos do plano · \{grupo\.label\}/);
+  const planilha = ler("modules/arquiteto/plan-article-sheet.tsx");
+  assert.match(planilha, /improvement\(\{ brandId, action: "prepare", group: groupId, targetIds: linhasDoGrupo\.map\(row => row\.keywordId\), origin: "plan_sheet"/);
 });
 
 test("item 4 · as outras portas apontam para a do plano: Processar artigos (e a formação automática) não roda artigo do plano", () => {
@@ -84,8 +87,10 @@ test("item 4 · as outras portas apontam para a do plano: Processar artigos (e a
   const processar = tela.slice(tela.indexOf("const processArticleFormation = useCallback("), tela.indexOf("const processArticleFormationRef = useRef("));
   const portaria = processar.indexOf("planoPorKeywordRef.current.get(id)");
   assert.ok(portaria > 0 && portaria < processar.indexOf("setFormationBusy(true);"), "recusa antes de qualquer processamento");
-  assert.match(processar, /use "Formar os artigos do plano · \$\{planos\[0\]\}" no painel da melhoria/);
-  assert.match(tela, /planGroups=\{gruposDoPlanoNaMesa\.map\(grupo => \(\{ color: grupo\.color, label: grupo\.label \}\)\)\}/);
+  // F5 (ajuste declarado 2026-10-14): a porta do plano é a planilha "Artigos do plano"; o painel não recebe mais os grupos.
+  assert.match(processar, /use a planilha "Artigos do plano" \(Artigos novos, acima\)/);
+  assert.doesNotMatch(tela, /planGroups=/);
+  assert.match(tela, /<PlanArticleSheet /);
 });
 
 /* ------------------------------ item 10 ----------------------------- */

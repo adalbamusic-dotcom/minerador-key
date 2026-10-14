@@ -520,7 +520,8 @@ test("C6 · o diferencial vem da página publicada (o que a amostra não trata),
 test("C7 · só a pergunta DESTE artigo fica para responder; a de outro ARTIGO do Silo e a de outro foco vão ao \"Não cobrir\"", () => {
   const { linha } = csvDoCaso(plantaAntiga());
   const cobrir = linha.cobrir_e_superar;
-  const aResponder = cobrir.slice(cobrir.indexOf("Perguntas a responder"), cobrir.indexOf("Não cobrir:"));
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D13): o bloco virou "Perguntas que valem resposta" (até 4). */
+  const aResponder = cobrir.slice(cobrir.indexOf("Perguntas que valem resposta"), cobrir.indexOf("Não cobrir:"));
   for (const deste of ["Como prospectar clientes pelo Instagram com tráfego orgânico?", "Como prospectar mais clientes pelo Instagram?", "Como transformar seguidores em clientes no Instagram?", "Devo seguir meus clientes no Instagram?"]) {
     assert.ok(aResponder.includes(`- ${deste}`), deste);
   }
@@ -554,11 +555,13 @@ test("C7 (correção da revisão) · a pergunta que é só keyword de tópico (s
   const observado = entrada.googleObserved as unknown as { questions: unknown[] };
   observado.questions = [...observado.questions, pergunta("Como atrair clientes pelo WhatsApp?", 2), pergunta("Como captar clientes pelo Instagram?", 2)];
   const cobrir = csvDoCaso(plantaAntiga(), { entrada }).linha.cobrir_e_superar;
-  const aResponder = cobrir.slice(cobrir.indexOf("Perguntas a responder"), cobrir.indexOf("Não cobrir:"));
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D13): o bloco virou "Perguntas que valem resposta" (até 4). */
+  const aResponder = cobrir.slice(cobrir.indexOf("Perguntas que valem resposta"), cobrir.indexOf("Não cobrir:"));
   assert.ok(aResponder.includes("- Como atrair clientes pelo WhatsApp?"), aResponder);
   assert.doesNotMatch(cobrir, /outro tópico do Silo/, "tópico sem artigo não é dono");
   /* A pergunta com uma palavra do artigo fora do destino ("instagram" não está em "como captar um cliente") continua deste artigo. */
-  assert.ok(aResponder.includes("- Como captar clientes pelo Instagram?"), aResponder);
+  /* 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D13): com até 4 no CSV, a quinta fica no painel; ela nunca vai ao "Não cobrir". */
+  assert.doesNotMatch(cobrir.slice(cobrir.indexOf("Não cobrir:")), /Como captar clientes pelo Instagram/, aResponder);
 
   /* completude · a seção 5 da planta real se apoia na lacuna G1 "Como captar clientes pela internet?": ela não pode ir ao "Não cobrir". */
   const planta = plantaAntiga();
@@ -569,7 +572,7 @@ test("C7 (correção da revisão) · a pergunta que é só keyword de tópico (s
   assert.match(linha.estrutura, /^- Evidências: G1 \(Como captar clientes pela internet\?\)/m);
   /* 2026-10-09 · nem a responder de novo, nem proibida: o "Como superar" diz onde a planta a responde (a lacuna que o artigo-modelo assume). */
   const cobrirDaPlanta = linha.cobrir_e_superar;
-  const naLista = cobrirDaPlanta.includes("Perguntas a responder") ? cobrirDaPlanta.slice(cobrirDaPlanta.indexOf("Perguntas a responder"), cobrirDaPlanta.indexOf("Não cobrir:")) : "";
+  const naLista = cobrirDaPlanta.includes("Perguntas que valem resposta") ? cobrirDaPlanta.slice(cobrirDaPlanta.indexOf("Perguntas que valem resposta"), cobrirDaPlanta.indexOf("Não cobrir:")) : "";
   assert.doesNotMatch(naLista, /Como captar clientes pela internet/, "nem a responder de novo");
   assert.doesNotMatch(cobrirDaPlanta.slice(cobrirDaPlanta.indexOf("Não cobrir:")), /Como captar clientes pela internet/, "nem proibida");
   assert.match(cobrirDaPlanta, /^- Cobrir "Como captar clientes pela internet\?" na seção "[^"]+": lacuna da SERP que o artigo-modelo assume\.$/m, cobrirDaPlanta);
@@ -642,7 +645,13 @@ test("o artigo-modelo com links internos não deixa o artigo \"isolado do Silo\"
   const semLinks = plantaAntiga();
   semLinks.blueprint.sections = semLinks.blueprint.sections.map(item => ({ ...item, internalLinks: [] }));
   const semLinkNenhum = csvDoCaso(semLinks);
-  assert.match(semLinkNenhum.artigo.row.pode_escrever, /sem links internos no pacote/, "sem link na planta e sem plano, a falta continua dita");
+  /*
+   * 2026-10-14 · SDD silo interligado · F2 · decisão do dono (D1, D6): com outro
+   * destino no Silo, a malha da leitura liga o artigo (o obrigatório no corpo e a
+   * trilha "Continue no Silo"): ele não sai mais isolado, e a ressalva saiu.
+   */
+  assert.doesNotMatch(semLinkNenhum.artigo.row.pode_escrever, /sem links internos no pacote/, "a malha do Silo liga o artigo");
+  assert.match(semLinkNenhum.artigo.row.links_internos, /^Malha do Silo \(regras 2026-10-14\): /m);
 });
 
 /* ============================== o artigo-modelo NOVO, com o mapa ============================== */
@@ -715,10 +724,17 @@ test("a trava vale para o texto mais visível: H1, alternativas, SEO title, meta
     : item.slot === "R1" ? { ...item, alt: "Stories geram agendamentos para a clínica" } : item);
   const colunas = radarArticleBlueprintColumns(planta);
   const titulo = linhas(colunas.titulo_e_seo);
-  assert.ok(titulo.includes("H1: O Instagram enche a agenda da clínica (precisa de fonte: afirmação sobre conversão do público)"), colunas.titulo_e_seo);
-  assert.ok(titulo.includes("Alternativas: Stories geram agendamentos todos os dias (precisa de fonte: afirmação sobre conversão do público) · Instagram não traz pacientes? Entenda o que fazer"));
-  assert.ok(titulo.includes("SEO title: Um bom perfil transforma seguidores em pacientes (precisa de fonte: afirmação sobre conversão do público)"));
-  assert.ok(titulo.includes("Meta description: Um site otimizado converte visitantes em agendamentos (precisa de fonte: afirmação sobre conversão do público)."));
+  /*
+   * 2026-10-14 · SDD silo interligado · F1 · decisão do dono (K8): título e meta
+   * nunca levam marca de processo. A afirmação travada continua na lista do fim da
+   * estrutura (abaixo), e a coluna de título diz como escrevê-la.
+   */
+  assert.ok(titulo.includes("H1: O Instagram enche a agenda da clínica"), colunas.titulo_e_seo);
+  assert.ok(titulo.includes("Alternativas: Stories geram agendamentos todos os dias · Instagram não traz pacientes? Entenda o que fazer"));
+  assert.ok(titulo.includes("SEO title: Um bom perfil transforma seguidores em pacientes"));
+  assert.ok(titulo.includes("Meta description: Um site otimizado converte visitantes em agendamentos."));
+  assert.doesNotMatch(colunas.titulo_e_seo, /\(precisa de fonte/);
+  assert.ok(titulo.some(item => item.startsWith("- Afirmação do título que só entra com fonte (está na lista do fim da coluna estrutura)")));
   assert.match(colunas.estrutura, /^Próximo passo: Um site otimizado converte visitantes em agendamentos \(precisa de fonte: afirmação sobre conversão do público\)\.$/m);
   assert.match(colunas.plano_visual, /^ {2}Legenda: A presença no Google capta pacientes com intenção de busca \(precisa de fonte: afirmação sobre conversão do público\)\.$/m);
   assert.match(colunas.plano_visual, /^ {2}ALT: Clínica no mapa$/m);

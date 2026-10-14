@@ -18,6 +18,7 @@ import {
   type RadarWritingPublication,
 } from "./portable-writing-export.ts";
 import { radarBrandVoiceExclusions, radarBrandVoiceRef, type RadarBrandVoiceState } from "./brand-voice.ts";
+import { radarDiagnosisOfferOf } from "./brand-edge.ts";
 import type { RadarAnchorLedger } from "./natural-anchor.ts";
 import type { EditorialGroupLabel } from "../editorial/editorial-group-scope.ts";
 
@@ -110,6 +111,8 @@ export function radarPortableWritingExport(input: {
     ...(input.publications?.size ? { siloPublications: input.publications } : {}),
     ...(artigo.blueprint ? { blueprint: artigo.blueprint } : {}),
     ...(input.brandVoice?.kind === "available" ? { brandVoice: radarBrandVoiceRef(input.brandVoice.voice) } : {}),
+    /* 2026-10-14b · F3 (D8) · a oferta de diagnóstico da Skill corrente (ou o texto padrão neutro, quando a seção falta). */
+    ...(input.brandVoice?.kind === "available" ? { brandDiagnosisOffer: radarDiagnosisOfferOf(input.brandVoice.voice.sections) } : {}),
     ...(exclusoesDaVoz.length ? { brandVoiceExclusions: exclusoesDaVoz } : {}),
     ...(palavrasDosMembros.size > 1 ? { siloMemberKeywords: palavrasDosMembros } : {}),
     ...(siloInline ? { siloInline: true } : {}),

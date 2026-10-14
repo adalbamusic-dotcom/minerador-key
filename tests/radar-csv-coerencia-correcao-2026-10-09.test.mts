@@ -429,7 +429,7 @@ test("casos-reais-F12, contrato-F4, suites-R7 · o Redator recebe a mesma planta
   /* 2026-10-11 · e a âncora natural pelos candidatos da planta: o etag muda de novo. */
   /* 2026-10-11b · a leitura passou a ter a principal (keyword no começo do SEO title) e a Regra 8 (h2Merges): a fatia muda. */
   /* 2026-10-11c · e as keywords proibidas por destino (avoidAsAnchor em cada link): a fatia muda de novo. */
-  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-11c");
+  assert.equal(WRITER_BLUEPRINT_READING_RULES, "2026-10-14"); /* 2026-10-14 · SDD silo interligado · F1 · decisão do dono: regras 2026-10-14 */
   const fatia = writerBlueprintWithCurrentNames(promocoes.blueprint) as RadarArticleBlueprintPayload["blueprint"];
   assert.equal(fatia.promise, doRedatorP.promise);
   /* A planta que já segue as regras volta como o MESMO objeto. */
@@ -577,7 +577,9 @@ test("casos-reais-F13, contrato-F5, suites-R6 · o aviso do painel diz o que fal
   /* 2026-10-11 · as regras avançaram de novo (a âncora natural): a lista diz o que cada data acrescentou. */
   /* 2026-10-11b · e de novo (a diretriz de comunicação humana guiada pela SERP). */
   /* 2026-10-11c · e de novo (as keywords proibidas por destino). */
-  assert.match(semVersao, /^Esta versão foi montada com regras anteriores às atuais \(2026-10-11c\): a planta não leu a página publicada/);
+  /* 2026-10-14 · SDD silo interligado · F1 · decisão do dono: as regras atuais são as de 2026-10-14. */
+  /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): as regras atuais são as de 2026-10-14c. */
+  assert.match(semVersao, /^Esta versão foi montada com regras anteriores às atuais \(2026-10-14c\): a planta não leu a página publicada/);
   assert.match(semVersao, /as de 2026-10-11b, a diretriz de comunicação humana/);
   assert.match(semVersao, /as de 2026-10-11, a âncora natural nos links internos/);
   const de0910 = radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-09" })!;
@@ -595,7 +597,8 @@ test("casos-reais-F13, contrato-F5, suites-R6 · o aviso do painel diz o que fal
   const de1110b = radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11b" })!;
   assert.match(de1110b, /^Esta versão foi montada com as regras de 2026-10-11b\. As de 2026-10-11c acrescentam as keywords proibidas por destino/);
   assert.doesNotMatch(de1110b, D10);
-  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" }), null);
+  assert.equal(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-14c" }), null); /* 2026-10-14c · SDD silo interligado · F-B · decisão do dono (§16.2): regras 2026-10-14c (a de 2026-10-14b ganha o aviso) */
+  assert.match(radarArticleBlueprintRulesNoticeText({ rulesVersion: "2026-10-11c" })!, /^Esta versão foi montada com as regras de 2026-10-11c\. As de 2026-10-14 acrescentam /);
   assert.doesNotMatch(de0910b, D10);
   const tela = renderToStaticMarkup(createElement(RadarArticleBlueprintRulesNotice, { payload: { rulesVersion: "2026-10-08" } }));
   assert.match(tela, /data-testid="radar-article-blueprint-rules-outdated"/);

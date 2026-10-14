@@ -1,6 +1,7 @@
 "use client";
 
 import { ArticleImprovementPanel } from "./article-improvement-panel";
+import { PlanArticleSheet } from "./plan-article-sheet";
 
 import { GLOBAL_WORKFLOW_STATUSES, GLOBAL_WORKFLOW_LABELS, globalWorkflowStatus, type GlobalWorkflowStatus } from "@/lib/editorial/global-workflow-status";
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
@@ -45,7 +46,7 @@ import { createStatusEvent, createVersionEnvelope, toVersionReference } from "@/
 import { loadCanonicalArquitetoArtifacts, persistArquitetoArtifact, persistArquitetoSiloPair } from "@/lib/arquiteto/canonical-persistence";
 import { buildCanonicalArticleWorkspaceItems, mergeCanonicalArticleWorkspaceItems } from "@/lib/arquiteto/canonical-bootstrap";
 import { persistArticleFormationMarker } from "@/lib/arquiteto/canonical-workspace";
-import { anchorRemoteTerritoryForSilo, buildCanonicalWorkflowWorkspaceItems, confirmRemoteSiloCandidate, undoRemoteSiloCandidate, createRemoteSiloCandidate, persistArchitectureMarker, updateRemoteTerritoryContext, consolidateRemoteSiloFromWorkingCopy, createRemoteSiloWorkingCopy, loadCanonicalArquitetoWorkspace, persistArchitectWorkingCopy, updateRemoteSiloWorkingCopy, type CanonicalSiloWorkingCopy, type CanonicalTerritory, type CanonicalWorkspaceSnapshot, type RemoteArticleFormationSerp, persistMineradorArquitetoHandoff } from "@/lib/arquiteto/canonical-workspace";
+import { anchorRemoteTerritoryForSilo, buildCanonicalWorkflowWorkspaceItems, confirmRemoteSiloCandidate, undoRemoteSiloCandidate, createRemoteSiloCandidate, persistArchitectureMarker, updateRemoteTerritoryContext, consolidateRemoteSiloFromWorkingCopy, createRemoteSiloWorkingCopy, loadCanonicalArquitetoWorkspace, persistArchitectWorkingCopy, updateRemoteSiloWorkingCopy, type CanonicalSiloWorkingCopy, type CanonicalTerritory, type CanonicalWorkspaceSnapshot, type RemoteArticleFormationSerp } from "@/lib/arquiteto/canonical-workspace";
 import { absolutePublishedUrl, applySiloIdentityToProposal, classifySiloWorkingCopyFailure, consolidatedTerritoryRefsOf, deriveSupportArticleIds, draftSiloWorkingCopyFromProposal, humanExclusion, humanPillarSelection, proposalFromRemoteWorkingCopy, resolveAuthoritativeSiloWorkingCopies, resolveProposalTerritoryRef, resolveSiloWorkingCopyIdentity, siloWorkingCopyIsReadOnly } from "@/lib/arquiteto/silo-working-copy-bridge";
 import type { SiloWorkingCopyState } from "@/lib/arquiteto/silo-working-copy-record";
 import { markSiloConsolidationIndeterminate, openSiloConsolidationOperation, registerSiloConsolidationAttempt, siloConsolidationFailureDisposition, siloConsolidationOperationForRetry, siloConsolidationRequestBody, siloPageCanonicalRefusal, type SiloConsolidationOperation } from "@/lib/arquiteto/silo-consolidation-operation";
@@ -140,7 +141,8 @@ import {
 } from "@/lib/arquiteto/operational-status";
 import { buildArchitectSerpProvenance } from "@/lib/arquiteto/radar-handoff-gate";
 import type { RadarArticleHandoffContext } from "@/lib/editorial/operational-flow";
-import { buildStructuralLinkConnections, describeStructuralLinkDerivation, structuralLinkBlockers, type StructuralLinkDerivationReadout } from "@/lib/arquiteto/internal-link-structure";
+import { buildStructuralLinkConnections, describeStructuralLinkDerivation, structuralLinkBlockers, type StructuralLinkDerivationReadout, type StructuralLinkUnit } from "@/lib/arquiteto/internal-link-structure";
+import { applySiloMeshAnchorReuse, planLinkAnchorWork, previewSiloLinkMesh, siloMeshCallsLabel, siloMeshCompletionOnlyAdds, summarizeSiloLinkMesh, type SiloLinkMeshPreview } from "@/lib/arquiteto/silo-link-mesh";
 import { buildLinkRelationRows, resolveArticleLinkProjection, resolveSiloHierarchyView, tallyLinkRelations } from "@/lib/arquiteto/internal-link-projection";
 import { newFormationRef, planAddKeywordsToCandidate, planKeywordRole, planMergeCandidates, planMoveKeyword, planNewArticleFromKeywords, planPrincipalChange, planSplitKeyword, type FormationKeywordLike, type FormationPatch, type FormationPlan } from "@/lib/arquiteto/article-formation-editing";
 import { groupLeftoverOpportunities } from "@/lib/arquiteto/serp-subject-suggestions";
@@ -303,13 +305,13 @@ import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import { aggregateArticleProcessReadModels, articleAiStateLabel, articleReviewStateLabel, deriveArticleProcessReadModel, type ArticleProcessReadModel } from "@/lib/arquiteto/article-process-read-model";
 import { selectArticlePanelProcessTab } from "@/lib/arquiteto/article-panel-tab-navigation";
 import { suggestInternalLinkAnchorConcepts } from "@/lib/arquiteto/link-anchor-concepts";
-import { batchLinkAnchorRequests } from "@/lib/arquiteto/link-anchor-ai";
+import { batchLinkAnchorRequests, linkAnchorTargetKeywords } from "@/lib/arquiteto/link-anchor-ai";
 import { applyHumanEditorialUnitDecision, suggestEditorialUnitClassification } from "@/lib/arquiteto/unit-strategy";
 import { mergeScopedArticleProcessOutput, resolveArticleProcessScope, scopedArticleProcessNotification } from "@/lib/arquiteto/article-process-scope";
 import { architectFunctionalErrorMessage, type ArchitectFunctionalOperation } from "@/lib/arquiteto/functional-messages";
 import { aiReviewErrorMessage } from "@/lib/arquiteto/ai-review-error";
 import { applyArticleSelectionClick, applySelectionPaint, articleSelectionIdForCandidate, articleSelectionIdForWorkingArticle, resolveWorkingArticleId, sameSelectionSet, toggleVisibleArticleSelection } from "@/lib/arquiteto/article-selection";
-import { assertArchitectKeywordDeleteReadback, parseArchitectKeywordDeletePreview, parseArchitectKeywordDeleteResult, selectedArticleKeywordIds, type ArchitectKeywordDeleteReview } from "@/lib/arquiteto/selected-keyword-delete-lifecycle";
+import { selectedArticleKeywordIds } from "@/lib/arquiteto/selected-keyword-delete-lifecycle";
 import { applyCanonicalSiloNames, assignSiloToArticleMembers, canonicalSiloOptions, type CanonicalSiloOption } from "@/lib/arquiteto/silo-workspace";
 import { chooseSiloWorkingCopyPillar, formSiloWorkingCopies, orderSiloWorkingCopyByDeclaredPlan, type SiloWorkingCopy, type SiloWorkingCopyArticleReference } from "@/lib/arquiteto/silo-formation";
 import { applyDeclaredSiloIdentity, declaredPillarForFormations, declaredSubjectAuthorship, resolveDeclaredSiloPlan, type DeclaredSiloPlanEntry } from "@/lib/arquiteto/silo-declared-plan";
@@ -354,9 +356,11 @@ import { ArticleDnaReadonlyPanel } from "@/components/editorial/article-dna-read
 import { KeywordDnaReadonlyPanel } from "@/components/editorial/keyword-dna-readonly-panel";
 import { InfoHint } from "@/components/info-hint";
 import { CompactSavedViews } from "@/components/editorial/compact-saved-views";
-import { WorkflowImportDialog, WorkflowStatusBadge } from "@/components/editorial/workflow-status";
+import { WorkflowStatusBadge } from "@/components/editorial/workflow-status";
+import { MineradorImportDialog } from "./minerador-import-dialog";
+import { mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
+import { initialArquitetoImportColor } from "@/lib/arquiteto/minerador-import";
 import { ArticleSubjectLine, articleSubjectPhraseOf } from "@/components/editorial/article-subject-line";
-import { DeleteConfirmation, PublishedDeleteConfirmation } from "@/components/lifecycle/delete-confirmation";
 import { DangerApprovalDialog } from "@/components/editorial/danger-approval-dialog";
 import { BackgroundTaskNotice } from "@/components/editorial/background-task-notice";
 import { HistoryControls } from "@/components/editorial/history-controls";
@@ -435,33 +439,6 @@ interface KeywordImportCandidate {
   workflowState: string | null;
   /** "Assunto · declarado" pelo resolver do Minerador, quando a linha traz a declaração. */
   subjectLabel?: string | null;
-}
-
-function importabilityReason(candidate: KeywordImportCandidate) {
-  switch (candidate.importability) {
-    case CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED:
-      return "Publicado protegido — disponível para reconstrução arquitetural.";
-    case CANONICAL_IMPORTABILITY.WORKFLOW_RECEIVED:
-      return "Já recebido pelo Arquiteto no workflow canônico remoto.";
-    case CANONICAL_IMPORTABILITY.ARTICLE_DNA_INCORPORATED:
-      return "Já incorporada na definição canônica remota do artigo.";
-    case CANONICAL_IMPORTABILITY.REMOTE_WORKFLOW_BLOCKED:
-      return `Workflow remoto incompatível${candidate.workflowState ? ` (${candidate.workflowState})` : ""}.`;
-    default:
-      return "A keyword não está aprovada para importação.";
-  }
-}
-
-function canEnterCanonicalArchitectWorkflow(candidate: KeywordImportCandidate) {
-  return candidate.importability === CANONICAL_IMPORTABILITY.IMPORTABLE
-    || candidate.importability === CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED;
-}
-
-function importabilityStatus(candidate: KeywordImportCandidate) {
-  if (candidate.importability === CANONICAL_IMPORTABILITY.IMPORTABLE) return "approved";
-  if (candidate.importability === CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED) return "published";
-  if (candidate.importability === CANONICAL_IMPORTABILITY.WORKFLOW_RECEIVED || candidate.importability === CANONICAL_IMPORTABILITY.ARTICLE_DNA_INCORPORATED) return "sent_architect";
-  return "blocked";
 }
 
 type ArchitectDatabaseSources = {
@@ -780,6 +757,8 @@ export default function ArquitetoPage() {
   const { loading: mesaDoArquitetoCarregando } = useEditorialPipeline();
   const arquitetoGroups = useEditorialGroups({ brandId: selectedBrandId || null, enabled: sessionStatus === "authenticated", includeKeywords: true, area: "arquiteto", mainReady: !mesaDoArquitetoCarregando });
   const [arquitetoGroupTaggingOpen, setArquitetoGroupTaggingOpen] = useState(false);
+  // "Importar do Minerador" (2026-10-13): a cor de cada keyword da lista leve vem dos grupos já lidos.
+  const importColorOfGroup = useCallback((groupId: string | null) => (groupId ? arquitetoGroups.groupById.get(groupId)?.color ?? null : null), [arquitetoGroups.groupById]);
 
   /*
    * OS SINAIS DO KEYWORDDNA NASCEM AQUI, ANTES DE QUEM OS USA.
@@ -868,7 +847,8 @@ export default function ArquitetoPage() {
   const [canonicalBootstrapStatus, setCanonicalBootstrapStatus] = useState<"LOADING" | "LOADED" | "EMPTY" | "ERROR">("LOADING");
   const [canonicalWorkspaceReload, setCanonicalWorkspaceReload] = useState(0);
   const [keywordImportPool, setKeywordImportPool] = useState<KeywordImportCandidate[]>([]);
-  const [keywordImportError, setKeywordImportError] = useState<string | null>(null);
+  // O modal "Importar do Minerador" tem a própria leitura e mostra o próprio erro (2026-10-13).
+  const [, setKeywordImportError] = useState<string | null>(null);
   const [canonicalReceivedKeywordIds, setCanonicalReceivedKeywordIds] = useState<string[]>([]);
   // Apresentação Contextual recebida do Minerador: leitura para o perfil da keyword.
   const [databaseSources, setDatabaseSources] = useState<ArchitectDatabaseSources>({ silos: [], keywords: [], briefings: [], capturedAt: "" });
@@ -1248,6 +1228,19 @@ export default function ArquitetoPage() {
    * sumia — e, quando dava zero, uma frase que descrevia a causa errada.
    */
   const [linksDerivationReadout, setLinksDerivationReadout] = useState<StructuralLinkDerivationReadout | null>(null);
+  /*
+   * 2026-10-14 · F4 (SDD silo interligado) · A PRÉVIA ANTES DE PROCESSAR: o que a
+   * malha acrescenta, o que fica, o que reaproveita âncora e quantas chamadas de
+   * IA custa — dita antes de qualquer gravação ou chamada, como as outras
+   * operações pagas. "process" = Processar links; "complete" = Completar a malha
+   * do Silo (grafo aprovado: só acrescenta).
+   */
+  const [linksMeshPreview, setLinksMeshPreview] = useState<null | {
+    mode: "process" | "complete";
+    silos: Array<{ siloId: string; name: string; preview: SiloLinkMeshPreview | null; estimate: boolean; blocker: string | null }>;
+    calls: number;
+    connections: number;
+  }>(null);
   const [linksPersistedLockVersion, setLinksPersistedLockVersion] = useState<number | null>(null);
   const [linksLoadedGraphId, setLinksLoadedGraphId] = useState<string | null>(null);
   useEffect(() => { setSiloWorkingCopies([]); pendingConsolidationRef.current = null; }, [selectedBrandId]);
@@ -1311,6 +1304,8 @@ export default function ArquitetoPage() {
   const persistWorkingCopyAssignmentsRef = useRef<((items: any[]) => Promise<boolean>) | null>(null);
   const recoveredArchitectArtifacts = useRef(new Set<string>());
   const canonicalArtifactsLoaded = useRef(new Set<string>());
+  /** F2 das listas leves: a marca que já teve a leitura inteira nesta abertura (trocar de marca relê inteiro). */
+  const leituraInteiraDaAbertura = useRef<string | null>(null);
   const reviewRecoveryReady = useRef(new Set<string>());
   const serpRecoveryReady = useRef(new Set<string>());
   const consumedExternalNavigation = useRef<string | null>(null);
@@ -1398,9 +1393,6 @@ export default function ArquitetoPage() {
     lastSelectionAnchorId.current = null;
   }, 30, selectedBrandId || "sem-marca");
   const [pendingDangerAction, setPendingDangerAction] = useState<PendingDangerAction | null>(null);
-  const [keywordDeleteReview, setKeywordDeleteReview] = useState<ArchitectKeywordDeleteReview | null>(null);
-  const [keywordDeleteSimpleOpen, setKeywordDeleteSimpleOpen] = useState(false);
-  const [keywordDeletePublishedOpen, setKeywordDeletePublishedOpen] = useState(false);
   useEffect(() => {
     lastSelectionAnchorId.current = null;
     selectionDragRef.current = null;
@@ -1466,9 +1458,17 @@ export default function ArquitetoPage() {
     setCanonicalReceivedKeywordIds([]);
     setCanonicalBootstrapError(null);
     setCanonicalBootstrapStatus("LOADING");
-    void loadCanonicalArquitetoWorkspace(brandId).then(canonical => {
+    /*
+     * 2026-10-14 · F2 das listas leves: a PRIMEIRA leitura de cada abertura
+     * (e de cada marca) é a inteira — o que mudou em outra área (Minerador)
+     * enquanto o Arquiteto estava fechado entra todo. As recargas depois de
+     * uma ação relêem só o que mudou (`loadCanonicalArquitetoWorkspace`).
+     */
+    const leituraFresca = leituraInteiraDaAbertura.current !== brandId;
+    void loadCanonicalArquitetoWorkspace(brandId, leituraFresca ? { fresh: true } : {}).then(canonical => {
       if (cancelled) return;
       bootstrapFinalized = true;
+      leituraInteiraDaAbertura.current = brandId;
       canonicalArtifactsLoaded.current.add(brandId);
       // A working copy remota é adotada como autoridade já no bootstrap: se
       // ela existe, nenhuma proposta local pode se apresentar como o estado.
@@ -8052,71 +8052,27 @@ export default function ArquitetoPage() {
     setSelectionMenuOpen(false);
   };
 
-  const requestSelectedKeywordDeletion = async () => {
-    if (!selectedBrandId) {
-      showNotification("error", "Marca ativa ausente para a exclusão.");
+  /*
+   * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+   * item 2; W7). Excluir keyword é do Minerador. Antes, o Arquiteto chamava a
+   * prévia e a exclusão do ciclo de vida do Minerador daqui — sem declarar
+   * `allowRecoverable`, então lote com publicada era recusado inteiro, mas a
+   * tela falava em "24 horas". Agora o botão leva ao Minerador com as keywords
+   * dos artigos marcadas na planilha; lá, "Excluir" mostra a prévia de sempre
+   * (publicada: lixeira de 24 h com a declaração; não publicada: definitiva,
+   * com o nome digitado). O Arquiteto não exclui nada.
+   */
+  const openSelectedKeywordsInMineradorForDeletion = () => {
+    if (!selectedBrandId || !serpSubjectBrandRef) {
+      showNotification("error", "Marca ativa sem rota: recarregue a página.");
       return;
     }
     const keywordIds = selectedArticleKeywordIds(selectedArticleIdsRef.current, articlesList);
     if (!keywordIds.length) {
-      showNotification("error", "Selecione um ou mais artigos com KeywordDNAs para excluir.");
+      showNotification("error", "Selecione um ou mais artigos com KeywordDNAs.");
       return;
     }
-    setUpdating(true);
-    try {
-      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywordIds }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      const review = parseArchitectKeywordDeletePreview(keywordIds, response.ok ? payload : { success: false });
-      setKeywordDeleteReview(review);
-      if (review.publishedIds.length) setKeywordDeletePublishedOpen(true);
-      else setKeywordDeleteSimpleOpen(true);
-    } catch (error) {
-      showNotification("error", error instanceof Error ? error.message : "Nada foi excluído: a prévia do ciclo de vida não foi confirmada.");
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const confirmSelectedKeywordDeletion = async () => {
-    if (!selectedBrandId || !keywordDeleteReview) return false;
-    setUpdating(true);
-    try {
-      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywordIds: keywordDeleteReview.ids }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      const result = parseArchitectKeywordDeleteResult(keywordDeleteReview, response.ok ? payload : { success: false });
-      const readback = await loadCanonicalArquitetoWorkspace(selectedBrandId);
-      assertArchitectKeywordDeleteReadback(keywordDeleteReview, readback.keywords.map(keyword => keyword.id));
-      const deletedIds = new Set(keywordDeleteReview.ids);
-      setMasterList(previous => previous.filter(keyword => !deletedIds.has(String(keyword.id))));
-      setProvisionalGroups(previous => previous.filter(group => !group.keywordIds.some(keywordId => deletedIds.has(String(keywordId)))));
-      setSelectedArticleIds(new Set());
-      lastSelectionAnchorId.current = null;
-      setKeywordDeleteSimpleOpen(false);
-      setKeywordDeletePublishedOpen(false);
-      setKeywordDeleteReview(null);
-      setCanonicalWorkspaceReload(current => current + 1);
-      if (result.hardDeletedIds.length && result.recoverableIds.length) {
-        showNotification("success", `${result.hardDeletedIds.length} KeywordDNA(s) excluída(s) definitivamente; ${result.recoverableIds.length} publicada(s) removida(s) da operação por 24 horas. Readback confirmado.`);
-      } else if (result.recoverableIds.length) {
-        showNotification("success", `${result.recoverableIds.length} KeywordDNA(s) publicada(s) removida(s) da operação por 24 horas. Readback confirmado.`);
-      } else {
-        showNotification("success", `${result.hardDeletedIds.length} KeywordDNA(s) excluída(s) definitivamente. Readback confirmado.`);
-      }
-      return true;
-    } catch (error) {
-      showNotification("error", error instanceof Error ? error.message : "Nada foi excluído: a transação ou o readback não foi confirmado.");
-      return false;
-    } finally {
-      setUpdating(false);
-    }
+    window.location.assign(mineradorHandoffHref(serpSubjectBrandRef, { action: "selecionar", ids: keywordIds }));
   };
 
   const confirmDangerAction = () => {
@@ -8133,24 +8089,6 @@ export default function ArquitetoPage() {
       showNotification("success", "Silo removido da estrutura local; artigos voltaram para Sem Grupo.");
     }
     setPendingDangerAction(null);
-  };
-
-  const importApprovedKeywords = async (ids: string[]) => {
-    if (!selectedBrandId || !ids.length) return;
-    try {
-      const result = await persistMineradorArquitetoHandoff({ brandId: selectedBrandId, keywordIds: ids });
-      pushMasterHistory(masterList, `Importar ${result.importedKeywordIds.length} keyword(s) do Minerador`);
-      setKeywordImportOpen(false);
-      setCanonicalWorkspaceReload(current => current + 1);
-      showNotification(
-        "success",
-        result.persistence === "UNCHANGED"
-          ? "As keywords selecionadas já estavam no workspace canônico do Arquiteto."
-          : `${result.createdKeywordIds.length} keyword(s) importada(s) para o Arquiteto.`,
-      );
-    } catch (error) {
-      showNotification("error", error instanceof Error ? error.message : "Não foi possível confirmar o handoff remoto.");
-    }
   };
 
   const { registerControls, updateControls, unregisterControls } = useGlobalTopbarControlsRegistration();
@@ -8806,6 +8744,11 @@ export default function ArquitetoPage() {
     () => tallyLinkRelations(linksTopologyAuthority?.edges || []),
     [linksTopologyAuthority],
   );
+  /* 2026-10-14 · F4 · a malha do Silo (X de Y por artigo), da mesma autoridade da lista e do mapa. */
+  const linksMeshCoverage = useMemo(
+    () => (linksTopologyAuthority ? summarizeSiloLinkMesh({ nodes: linksTopologyAuthority.nodes, edges: linksTopologyAuthority.edges }) : null),
+    [linksTopologyAuthority],
+  );
   const linksReviewSummary = useMemo(() => {
     if (!linksWorkingCopy) return { added: 0, removed: 0, changed: 0 };
     const approvedEdges = new Map((linksApprovedGraph?.edges || []).map(edge => [edge.edgeId, edge]));
@@ -8956,7 +8899,8 @@ export default function ArquitetoPage() {
    */
   const [linksProcessPending, setLinksProcessPending] = useState<string | null>(null);
   const processarLinksRef = useRef<(() => Promise<void>) | null>(null);
-  processarLinksRef.current = processarLinks;
+  /* 2026-10-14 · F4 · o "Processar links de novo" abre a mesma prévia do botão (custo antes de rodar); confirmar é o clique de sempre. */
+  processarLinksRef.current = async () => { abrirPreviaDosLinks("process"); };
   useEffect(() => {
     if (!linksProcessPending || workspaceMode !== "links") return;
     if (!linksSelectedContext || String(linksSelectedContext.siloId) !== linksProcessPending) return;
@@ -9037,6 +8981,40 @@ export default function ArquitetoPage() {
   };
 
   /**
+   * 2026-10-14 · F4 (SDD silo interligado, D2) · AS UNIDADES DA MALHA, com o
+   * que a afinidade entre irmãos lê: a principal, as complementares, os reforços
+   * e o Assunto do ArticleDNA aprovado (artefato do Arquiteto; nenhuma keyword
+   * do Minerador é lida aqui) e a faceta (o grupo do plano) da linha do artigo.
+   */
+  const linksStructuralUnitsOf = (nodes: readonly InternalLinkGraphNode[]): StructuralLinkUnit[] => nodes.map(node => {
+    const article = node.articleDnaVersionRef
+      ? Object.values(acceptedArticleDnas).find(version => version.versionId === node.articleDnaVersionRef?.versionId)?.payload
+      : undefined;
+    const palavra = (keywordId: string | null | undefined) => {
+      const valor = keywordId && article ? article.keywordReferences.find(reference => reference.keywordId === keywordId)?.keywordDnaSnapshot?.sourceKeywordSnapshot.keyword : null;
+      return typeof valor === "string" && valor.trim() ? valor : null;
+    };
+    const linha = article ? articlesList.find(item => articleEntityIdFor(item) === article.articleId) : undefined;
+    return {
+      nodeId: node.nodeId,
+      nodeType: node.nodeType as "SILO_PAGE" | "ARTICLE_DNA",
+      architecturalRole: node.architecturalRole,
+      label: node.snapshot.label || node.nodeId,
+      terms: article
+        ? [palavra(article.principalKeywordId), ...article.secondaryKeywordIds.map(palavra), ...article.narrativeReinforcementIds.map(palavra), articleSubjectPhraseOf(article)]
+        : null,
+      facet: linha ? articleGroupInfoFor(linha).groupId : null,
+    };
+  });
+
+  /** Os pares do grafo aprovado de onde a cópia nasceu: as âncoras aprovadas valem como estão (ler antes de buscar). */
+  const linksApprovedPairsFor = (copia: InternalLinkGraphWorkingCopy): Set<string> => {
+    const aprovado = approvedLinkGraphs.find(graph => graph.graphVersionId === copia.baseGraphVersionId)
+      || (linksApprovedGraph && linksApprovedGraph.graphVersionId === copia.baseGraphVersionId ? linksApprovedGraph : null);
+    return new Set((aprovado?.edges || []).map(edge => `${edge.sourceNodeId}->${edge.targetNodeId}`));
+  };
+
+  /**
    * O esqueleto do Silo vira arestas.
    *
    * Nada aqui é sugestão: a SiloPage é a raiz, o Pilar foi escolhido por um
@@ -9053,12 +9031,8 @@ export default function ArquitetoPage() {
       showNotification("error", "Abra a working copy antes de gerar as conexões.");
       return null;
     }
-    const unidades = copia.nodes.map(node => ({
-      nodeId: node.nodeId,
-      nodeType: node.nodeType as "SILO_PAGE" | "ARTICLE_DNA",
-      architecturalRole: node.architecturalRole,
-      label: node.snapshot.label || node.nodeId,
-    }));
+    /* 2026-10-14 · F4 · a malha inteira do Silo (D1): o esqueleto, Suporte ↔ Suporte e Suporte → SiloPage, com o priority pela afinidade (D2). */
+    const unidades = linksStructuralUnitsOf(copia.nodes);
     const impedimentos = structuralLinkBlockers(unidades);
     if (impedimentos.length) {
       showNotification("error", impedimentos.join(" "));
@@ -9201,7 +9175,17 @@ export default function ArquitetoPage() {
           published: Boolean(article?.publishedIdentityRef) || siloPage?.publicationStatus === "published",
         };
       });
-      const candidates = copia.edges.map(edge => ({
+      /*
+       * 2026-10-14 · F4 · LER ANTES DE BUSCAR. A aresta que já tem âncora
+       * (aprovada, da IA ou humana) fica como está; a aresta nova da malha
+       * reaproveita a âncora do mesmo destino (variada por origem, sem custo);
+       * só vai à IA o esqueleto sem âncora e um representante por destino que
+       * não tem de onde reaproveitar. O custo foi dito na prévia.
+       */
+      const aprovadas = linksApprovedPairsFor(copia);
+      const plano = planLinkAnchorWork({ edges: copia.edges, approvedPairs: aprovadas });
+      const pedidas = new Set(plano.ask);
+      const candidates = copia.edges.filter(edge => pedidas.has(edge.edgeId)).map(edge => ({
         sourceRef: edge.sourceNodeId,
         targetRef: edge.targetNodeId,
         relationType: edge.relationType,
@@ -9248,12 +9232,20 @@ export default function ArquitetoPage() {
         `${item.sourceRef}->${item.targetRef}`,
         item.anchorConcepts.map(conceito => conceito.text).filter(Boolean),
       ]));
-      const atualizadas = copia.edges.map(edge => {
-        const conceitos = porPar.get(`${edge.sourceNodeId}->${edge.targetNodeId}`);
+      const daIa = copia.edges.map(edge => {
+        const conceitos = pedidas.has(edge.edgeId) ? porPar.get(`${edge.sourceNodeId}->${edge.targetNodeId}`) : undefined;
         return conceitos?.length
           ? { ...edge, anchorConcepts: conceitos, origin: "ai" as const, provenance: { source: "link-anchor-ai", references: [copia.graphId] } }
           : edge;
       });
+      /* 2026-10-14 · F4 · a malha reaproveita, por destino, a âncora que ele já tem (sem a keyword dele, variada por origem). */
+      const reuso = applySiloMeshAnchorReuse({
+        edges: daIa,
+        approvedPairs: aprovadas,
+        targetKeywords: new Map(units.map(unit => [unit.ref, linkAnchorTargetKeywords(unit)])),
+        graphId: copia.graphId,
+      });
+      const atualizadas = reuso.edges;
       /*
        * A proposta é PERSISTIDA na working copy, e a partir do valor que
        * acabou de ser calculado — não do estado da aba.
@@ -9273,11 +9265,13 @@ export default function ArquitetoPage() {
       await persistLinksWorkingCopy(persistida, "edit");
       const aceitas = resposta.proposals.length;
       const recusadas = resposta.rejected.length;
+      /* 2026-10-14 · F4 · o que não custou nada também é dito: as âncoras mantidas e as reaproveitadas. */
+      const semCusto = `${plano.kept.length} mantida(s) como estavam · ${reuso.reused} reaproveitaram a âncora do mesmo destino (sem custo)${reuso.pending.length ? ` · ${reuso.pending.length} seguem com os conceitos de partida` : ""}`;
       if (falhaDoLote) {
-        showNotification("warning", `${aceitas} conexão(ões) com âncoras da IA · ${recusadas} devolvida(s) para revisão humana. ${falhaDoLote}. As conexões desse lote em diante seguem com os conceitos de partida; gere de novo para completar. Nada foi aprovado.`);
+        showNotification("warning", `${aceitas} conexão(ões) com âncoras da IA · ${semCusto} · ${recusadas} devolvida(s) para revisão humana. ${falhaDoLote}. As conexões desse lote em diante seguem com os conceitos de partida; gere de novo para completar. Nada foi aprovado.`);
         return persistida;
       }
-      showNotification("success", `${aceitas} conexão(ões) com âncoras da IA · ${recusadas} devolvida(s) para revisão humana${lotes.length > 1 ? ` (${lotes.length} lotes)` : ""}. A proposta é revisável: nada foi aprovado.`);
+      showNotification("success", `${aceitas} conexão(ões) com âncoras da IA${lotes.length ? ` (${siloMeshCallsLabel(lotes.length)})` : " (nenhuma chamada de IA)"} · ${semCusto} · ${recusadas} devolvida(s) para revisão humana. A proposta é revisável: nada foi aprovado.`);
       return persistida;
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "Não foi possível gerar o mapa de âncoras.");
@@ -9285,6 +9279,105 @@ export default function ArquitetoPage() {
     } finally {
       setLinksLoading(false);
     }
+  };
+
+  /**
+   * 2026-10-14 · F4 (SDD silo interligado, D1–D3) · A PRÉVIA DA MALHA, ANTES DE
+   * GRAVAR OU PAGAR. Para cada Silo do clique: o que a malha acrescenta, o que
+   * já existe e fica, como a malha de cada artigo fica (X de Y), as âncoras que
+   * se reaproveitam e as chamadas de IA. Só lê: a cópia do Silo da tela, ou o
+   * grafo aprovado levado à composição atual (os outros Silos, por estimativa).
+   */
+  const abrirPreviaDosLinks = (mode: "process" | "complete") => {
+    const marcados = mode === "complete" ? [] : articlesList.filter(article => selectedArticleIds.has(article.id));
+    const silosMarcados = [...new Set(marcados.map(article => linksSiloOfArticle(article) || "").filter(Boolean))];
+    const alvos = marcados.length
+      ? linkSiloContexts.filter(context => silosMarcados.includes(context.siloId))
+      : linksSelectedContext ? [linksSelectedContext] : [];
+    if (!alvos.length) {
+      showNotification("error", "Selecione o Silo do grafo antes de processar os links.");
+      return;
+    }
+    const silos = alvos.map(contexto => {
+      const name = contexto.siloDna.payload.name || contexto.siloDna.payload.centralEntity || contexto.siloId;
+      try {
+        const base = linksBasisFor(contexto);
+        const daTela = contexto.siloId === resolvedLinksSiloId;
+        const aprovado = (daTela ? linksApprovedGraph : null)
+          || [...approvedLinkGraphs].filter(graph => graph.siloId === contexto.siloId && graph.workflowStatus === "approved").sort((a, b) => b.versionNumber - a.versionNumber)[0]
+          || null;
+        const copia = daTela ? linksWorkingCopy : null;
+        if (mode === "complete") {
+          if (!aprovado) return { siloId: contexto.siloId, name, preview: null, estimate: false, blocker: "Este Silo ainda não tem grafo aprovado: use Processar links." };
+          if (copia) return { siloId: contexto.siloId, name, preview: null, estimate: false, blocker: "Há uma cópia de trabalho aberta: revise e confirme (ou processe) a cópia; Completar a malha parte do grafo aprovado." };
+          if (!internalLinkGraphBasisIsCurrent(aprovado, base)) {
+            return { siloId: contexto.siloId, name, preview: null, estimate: false, blocker: "O grafo aprovado descreve uma composição anterior do Silo (artigo novo, versão nova ou papel trocado): completar só acrescentando não é possível. Use Processar links: a sucessora leva o que ainda cabe." };
+          }
+        }
+        const existentes = copia ? copia.edges : aprovado ? rebaseInternalLinkGraph({ previousEdges: aprovado.edges, currentNodes: base.nodes }).edges : [];
+        const aprovadas = new Set((aprovado?.edges || []).map(edge => `${edge.sourceNodeId}->${edge.targetNodeId}`));
+        const preview = previewSiloLinkMesh({ units: linksStructuralUnitsOf(base.nodes), nodes: base.nodes, existingEdges: existentes, approvedPairs: aprovadas });
+        return { siloId: contexto.siloId, name, preview, estimate: !daTela, blocker: null };
+      } catch (error) {
+        return { siloId: contexto.siloId, name, preview: null, estimate: false, blocker: error instanceof Error ? error.message : "Não foi possível montar a prévia deste Silo." };
+      }
+    });
+    setLinksMeshPreview({
+      mode,
+      silos,
+      calls: silos.reduce((total, item) => total + (item.preview?.cost.calls || 0), 0),
+      connections: silos.reduce((total, item) => total + (item.preview?.cost.connections || 0), 0),
+    });
+  };
+
+  /**
+   * 2026-10-14 · F4 · COMPLETAR A MALHA DO SILO (grafo aprovado, sem cópia
+   * aberta). O grafo aprovado não é regerado sozinho: a pessoa vê a prévia e
+   * confirma. A sucessora nasce do aprovado, ganha só as relações que faltam e
+   * as âncoras reaproveitadas; antes de gravar as âncoras e no fim, a conferência
+   * diz que nenhuma aresta aprovada saiu nem mudou. Nada é aprovado aqui.
+   */
+  const completarMalhaDoSilo = async () => {
+    const contexto = linksSelectedContext;
+    const aprovado = linksApprovedGraph;
+    if (!contexto || !aprovado || linksWorkingCopy) {
+      showNotification("error", "Completar a malha parte do grafo aprovado do Silo da tela, sem cópia de trabalho aberta.");
+      return;
+    }
+    setLinksLoading(true);
+    try {
+      const aberta = await abrirCopiaVigente(contexto).catch(error => {
+        showNotification("error", `${contexto.siloDna.payload.name || contexto.siloId}: ${error instanceof Error ? error.message : "não foi possível abrir a working copy."}`);
+        return null;
+      });
+      if (!aberta) return;
+      setLinksScenario("working");
+      const comEstrutura = await generateStructuralLinks(aberta);
+      if (!comEstrutura) return;
+      const antes = siloMeshCompletionOnlyAdds({ approvedEdges: aprovado.edges, workingEdges: comEstrutura.edges });
+      if (!antes.ok) {
+        showNotification("error", `Completar a malha parou: ${antes.removed.length} relação(ões) aprovada(s) sairiam e ${antes.changed.length} mudariam. Nada além da cópia aberta foi gravado; use Processar links.`);
+        return;
+      }
+      const comAncoras = await generateLinkAnchors(comEstrutura);
+      if (!comAncoras) return;
+      const depois = siloMeshCompletionOnlyAdds({ approvedEdges: aprovado.edges, workingEdges: comAncoras.edges });
+      showNotification(depois.ok ? "success" : "error", depois.ok
+        ? `Malha completada na cópia: ${depois.added} relação(ões) acrescentada(s); as ${aprovado.edges.length} aprovadas ficaram como estavam. Revise e clique em "Confirmar links internos": nada foi aprovado.`
+        : `A cópia mudou ${depois.removed.length + depois.changed.length} relação(ões) aprovada(s): não confirme; recarregue e use Processar links.`);
+    } finally {
+      setLinksLoading(false);
+      setLinksSaveState(atual => (atual === "saving" ? "idle" : atual));
+    }
+  };
+
+  /** Confirmar a prévia: o mesmo Processar links de sempre, ou o Completar a malha (só acrescenta). */
+  const confirmarPreviaDosLinks = () => {
+    const previa = linksMeshPreview;
+    setLinksMeshPreview(null);
+    if (!previa) return;
+    if (previa.mode === "complete") void completarMalhaDoSilo();
+    else void processarLinks();
   };
 
   const handleDeleteLinkEdge = async () => {
@@ -10585,7 +10678,8 @@ export default function ArquitetoPage() {
         const response = await fetch("/api/arquiteto/keyword-serp", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ brandId: selectedBrandId, scopeId: territoryRef, territoryRef, keywords, ...extra }),
+          // F3 · o servidor confere o volume no banco: keyword sem volume não é planejada nem paga.
+          body: JSON.stringify({ brandId: selectedBrandId, scopeId: territoryRef, territoryRef, keywords, onlyMeasuredVolume: true, ...extra }),
         });
         const body = await response.json();
         if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível coletar a SERP das keywords.");
@@ -10680,7 +10774,8 @@ export default function ArquitetoPage() {
       const response = await fetch("/api/arquiteto/keyword-serp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandId: selectedBrandId, scopeId, territoryRef: null, keywords, ...extra }),
+        // F3 · o servidor confere o volume no banco: keyword sem volume não é planejada nem paga.
+        body: JSON.stringify({ brandId: selectedBrandId, scopeId, territoryRef: null, keywords, onlyMeasuredVolume: true, ...extra }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível coletar a SERP do lote.");
@@ -11094,9 +11189,17 @@ export default function ArquitetoPage() {
    * ligado) é lido uma vez por marca; as keywords de cada grupo vêm do grupo
    * efetivo da mesa. Elas seguem o plano: a análise automática não as espalha.
    */
-  const gruposComPlanoChave = useMemo(() => [...new Set([...subjectStandings.values()]
-    .filter(standing => standing.declared && standing.received && standing.approvedPackageRef && standing.plan && standing.brandId === selectedBrandId)
-    .map(standing => standing.plan!.groupId))].sort().join(","), [subjectStandings, selectedBrandId]);
+  // 2026-10-13 · caso real (WifiConecta, azul): as keywords perderam o Assunto e o plano do
+  // GRUPO ficou invisível — "Processar arquitetura" espalhou as keywords. O plano gravado no
+  // grupo é a autoridade; o Assunto nas keywords só acrescenta grupos (formato da conversão).
+  const gruposComPlanoChave = useMemo(() => [...new Set([
+    ...[...subjectStandings.values()]
+      .filter(standing => standing.declared && standing.received && standing.approvedPackageRef && standing.plan && standing.brandId === selectedBrandId)
+      .map(standing => standing.plan!.groupId),
+    ...arquitetoGroups.groups
+      .filter(group => group.status === "active" && group.planVersion > 0)
+      .map(group => group.id),
+  ])].sort().join(","), [subjectStandings, selectedBrandId, arquitetoGroups.groups]);
   const [silosDosPlanos, setSilosDosPlanos] = useState<{ brandId: string; groups: Array<{ groupId: string; label: string; siloName: string; siloSlug: string | null; territoryRef: string | null }> } | null>(null);
   useEffect(() => {
     if (!selectedBrandId || !gruposComPlanoChave) return;
@@ -11119,10 +11222,11 @@ export default function ArquitetoPage() {
       .filter(group => group.keywordIds.length > 0);
   }, [silosDosPlanos, selectedBrandId, arquitetoGroups.keywordGroupById, masterList]);
   /*
-   * SDD acelerar 2026-10-13, item 4 — UMA PORTA PARA O PLANO. Os grupos com
-   * plano declarado na mesa viram os botões "Formar os artigos do plano · cor"
-   * do painel da melhoria; e a keyword de cada um é reconhecida pelas outras
-   * portas (Processar artigos e a formação automática), que apontam para lá.
+   * SDD acelerar 2026-10-13, item 4 — UMA PORTA PARA O PLANO. Desde a F5 da
+   * SDD `sdd-arquiteto-so-le-e-listas-leves` (2026-10-14), a porta é a planilha
+   * "Artigos do plano" (Artigos novos); a keyword de cada grupo com plano é
+   * reconhecida pelas outras portas (Processar artigos e a formação
+   * automática), que apontam para lá.
    */
   const gruposDoPlanoNaMesa = useMemo(() => declaredPlanGroupsForArchitecture.flatMap(group => {
     const cor = arquitetoGroups.groupById.get(group.groupId)?.color;
@@ -11135,6 +11239,25 @@ export default function ArquitetoPage() {
   }, [gruposDoPlanoNaMesa]);
   const planoPorKeywordRef = useRef(planoPorKeyword);
   planoPorKeywordRef.current = planoPorKeyword;
+  /*
+   * F5 · PLANILHA PRIMEIRO (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+   * item 5): o que a planilha "Artigos do plano" lê da mesa — os artigos
+   * formados (versão vigente), os que já estão no Radar e o grupo de cada
+   * keyword. Só leitura; a planilha grava pelos núcleos de sempre.
+   */
+  const planSheetArticles = useMemo(() => Object.values(acceptedArticleDnas).map(version => ({
+    articleId: String(version.payload.articleId),
+    versionNumber: Number(version.versionNumber) || 0,
+    subjectKeywordId: version.payload.subject?.keywordId ? String(version.payload.subject.keywordId) : null,
+    principalKeywordId: version.payload.principalKeywordId ? String(version.payload.principalKeywordId) : null,
+    keywordIds: (version.payload.keywordReferences ?? []).map(reference => String(reference.keywordId)),
+  })), [acceptedArticleDnas]);
+  const planSheetRadarIds = useMemo(() => new Set(radarItems.map(item => String(item.articleId))), [radarItems]);
+  const planSheetGroupOf = useCallback((groupId: string) => {
+    const grupo = arquitetoGroups.groupById.get(groupId);
+    return grupo ? { color: String(grupo.color), name: grupo.name } : null;
+  }, [arquitetoGroups.groupById]);
+  const planSheetKeywordGroupOf = useCallback((keywordId: string) => arquitetoGroups.keywordGroupById.get(keywordId) ?? null, [arquitetoGroups.keywordGroupById]);
 
   const architectureProposal = useMemo(() => buildArchitectureWorkingProposal({
     analysis: architectureAnalysis,
@@ -14501,7 +14624,7 @@ export default function ArquitetoPage() {
     /*
      * SDD acelerar 2026-10-13, item 4 — UMA PORTA PARA O PLANO. Artigo de grupo
      * com plano declarado não roda aqui (nem pela formação automática): a porta
-     * é "Formar os artigos do plano · cor", a melhoria recortada pelo grupo, que
+     * é a planilha "Artigos do plano" (F5), a melhoria recortada pelo grupo, que
      * obedece ao plano, à trava e à guarda de retrabalho. Nada é gravado.
      */
     const doPlano = selecionados
@@ -14513,7 +14636,7 @@ export default function ArquitetoPage() {
       });
     if (doPlano.length) {
       const planos = [...new Set(doPlano.map(item => item.plano))];
-      showNotification("warning", `${doPlano.length === 1 ? `"${doPlano[0].nome}" é` : `${doPlano.length} artigos selecionados são`} do plano ${planos.join(", ")}: use "Formar os artigos do plano · ${planos[0]}" no painel da melhoria (acima). Os artigos sem plano seguem por aqui — desmarque os do plano. Nada foi processado.`);
+      showNotification("warning", `${doPlano.length === 1 ? `"${doPlano[0].nome}" é` : `${doPlano.length} artigos selecionados são`} do plano ${planos.join(", ")}: use a planilha "Artigos do plano" (Artigos novos, acima) — Validar SERP, Trocar principal e Concluir formação na linha ou no lote. Os artigos sem plano seguem por aqui — desmarque os do plano. Nada foi processado.`);
       return;
     }
     setFormationBusy(true);
@@ -17720,7 +17843,8 @@ export default function ArquitetoPage() {
        * carregar menos do que o banco tem — e a restauração devolveria uma
        * mesa vazia com os artefatos certos. Esta é uma leitura GET.
        */
-      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId).catch(() => null);
+      // F2 das listas leves: a exportação pede os pareceres de SERP INTEIROS (a mesa os tem em projeção).
+      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId, { serpDetail: "full" }).catch(() => null);
 
       return {
         brandId: selectedBrandId,
@@ -17949,7 +18073,7 @@ export default function ArquitetoPage() {
         </select>}
       <button
         type="button"
-        onClick={() => { setKeywordImportOpen(true); void topbarHandlersRef.current.fetchMasterList(); }}
+        onClick={() => { setKeywordImportOpen(true); }}
         className={`${GLOBAL_TOPBAR_ACTION_CONTROL} text-positive-soft/85`}
         title="Selecionar keywords aprovadas no Minerador"
       >
@@ -18249,13 +18373,26 @@ export default function ArquitetoPage() {
                       <button
                         type="button"
                         data-testid="architect-links-process"
-                        onClick={() => { void processarLinks(); }}
-                        disabled={!linksPhaseReading.canProcess}
-                        title={linksPhaseReading.processBlocker || "Deriva o esqueleto do Silo e pede as âncoras semânticas. Nada é aprovado."}
+                        onClick={() => abrirPreviaDosLinks("process")}
+                        disabled={!linksPhaseReading.canProcess || Boolean(linksMeshPreview)}
+                        title={linksPhaseReading.processBlocker || "Mostra antes o que a malha do Silo acrescenta e quantas chamadas de IA custa; confirmar deriva a malha e as âncoras. Nada é aprovado."}
                         className={ARCHITECT_UI.primaryButton}
                       >
                         Processar links
                       </button>
+                      {/* 2026-10-14 · F4 · grafo aprovado sem a malha inteira: completar só acrescenta, com prévia; o aprovado nunca é regerado sozinho. */}
+                      {linksApprovedGraph && !linksWorkingCopy && linksMeshCoverage && !linksMeshCoverage.complete && (
+                        <button
+                          type="button"
+                          data-testid="architect-links-complete-mesh"
+                          onClick={() => abrirPreviaDosLinks("complete")}
+                          disabled={!linksPhaseReading.canProcess || Boolean(linksMeshPreview)}
+                          title={linksPhaseReading.processBlocker || "Acrescenta ao grafo aprovado só as relações que faltam na malha do Silo (entre Suportes e de cada artigo para a SiloPage), com prévia e custo antes; nenhuma relação aprovada sai."}
+                          className={ARCHITECT_UI.importButton}
+                        >
+                          Completar a malha do Silo
+                        </button>
+                      )}
                       <button
                         type="button"
                         data-testid="architect-links-confirm"
@@ -18280,6 +18417,53 @@ export default function ArquitetoPage() {
                         </button>
                       )}
                     </div>
+                    {linksMeshPreview && (() => {
+                      const tipos: Array<[string, string]> = [["SUPPORT_TO_SUPPORT", "entre Suportes"], ["ARTICLE_TO_SILO_PAGE", "de artigo para a SiloPage"], ["SUPPORT_TO_PILLAR", "Suporte → Pilar"], ["PILLAR_TO_SUPPORT", "Pilar → Suporte"], ["SILO_PAGE_TO_ARTICLE", "SiloPage → artigo"]];
+                      const prontos = linksMeshPreview.silos.filter(item => item.preview);
+                      const estimativa = linksMeshPreview.silos.some(item => item.estimate);
+                      return (
+                        <section className="mt-3 rounded-md border border-divider p-3" data-testid="architect-links-mesh-preview">
+                          <p className="text-sm font-semibold text-foreground">
+                            {linksMeshPreview.mode === "complete" ? "Prévia · Completar a malha do Silo" : `Prévia · Processar links · ${linksMeshPreview.silos.length} Silo(s)`}
+                          </p>
+                          <p className="mt-1 text-sm leading-6 text-text-muted">
+                            {linksMeshPreview.mode === "complete"
+                              ? "Só acrescenta: as relações aprovadas ficam como estão (tipo, prioridade, âncoras e motivo). Todo artigo passa a ligar a todas as outras páginas do Silo; o Radar põe no corpo o obrigatório e o irmão de assunto próximo quando a seção trata dele, e o resto na trilha \"Continue no Silo\"."
+                              : "Deriva a malha inteira do Silo (Suporte → Pilar e Pilar → cada Suporte obrigatórios; Suporte ↔ Suporte por afinidade; cada artigo → SiloPage) e as âncoras. Relação que já existe fica como está."}
+                          </p>
+                          <ul className="mt-2 divide-y divide-divider">
+                            {linksMeshPreview.silos.map(item => {
+                              const previa = item.preview;
+                              return (
+                                <li key={item.siloId} className="py-2 text-sm leading-6" data-testid="architect-links-mesh-preview-silo">
+                                  <p className="font-medium text-foreground">{item.name}{item.estimate ? <span className="ml-2 text-text-muted">· estimativa pelo grafo aprovado</span> : null}</p>
+                                  {item.blocker && <p className="text-warning">· {item.blocker}</p>}
+                                  {previa && <>
+                                    <p className="text-text-muted">
+                                      {previa.additions.length
+                                        ? `Acrescenta ${previa.additions.length} relação(ões): ${tipos.filter(([tipo]) => previa.additionsByRelation[tipo as keyof typeof previa.additionsByRelation]).map(([tipo, rotulo]) => `${previa.additionsByRelation[tipo as keyof typeof previa.additionsByRelation]} ${rotulo}`).join(", ")}. ${previa.existing} já existem e ficam; nenhuma é removida.`
+                                        : `Nada a acrescentar: as ${previa.existing} relações já cobrem a malha.`}
+                                    </p>
+                                    <p className="text-text-muted">Malha: {previa.coverageBefore.covered} → {previa.coverageAfter.covered} de {previa.coverageAfter.required} ligações; obrigatórias no corpo: {previa.coverageAfter.bodyCovered} de {previa.coverageAfter.bodyRequired}.</p>
+                                    <p className="text-text-muted">Âncoras: {previa.anchors.kept} mantidas (aprovadas ou já propostas) · {previa.anchors.reuse + previa.anchors.reuseAfterAi} reaproveitam a âncora do mesmo destino, variada por origem, sem custo · {previa.anchors.ask} vão à IA.</p>
+                                  </>}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <p className="mt-2 text-sm font-semibold text-foreground" data-testid="architect-links-mesh-preview-cost">
+                            {`Custo: ${estimativa && linksMeshPreview.calls ? "até " : ""}${siloMeshCallsLabel(linksMeshPreview.calls)}`}
+                            {linksMeshPreview.calls ? ` (IA da plataforma, OpenRouter, cota da marca: ${linksMeshPreview.connections} conexões, em lotes de até 40)` : " — tudo já tem âncora ou reaproveita a do mesmo destino"}. Zero SERP. Nada é aprovado: depois, revise e clique em &quot;Confirmar links internos&quot;.
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button type="button" data-testid="architect-links-mesh-preview-confirm" onClick={confirmarPreviaDosLinks} disabled={!prontos.length || !linksPhaseReading.canProcess} className={ARCHITECT_UI.primaryButton}>
+                              {linksMeshPreview.mode === "complete" ? `Completar a malha (${siloMeshCallsLabel(linksMeshPreview.calls)})` : `Confirmar e processar (${siloMeshCallsLabel(linksMeshPreview.calls)})`}
+                            </button>
+                            <button type="button" onClick={() => setLinksMeshPreview(null)} className={ARCHITECT_UI.toolbarButton}>Cancelar</button>
+                          </div>
+                        </section>
+                      );
+                    })()}
                     {readySendPreviewOpen && (() => {
                       const plano = planReadyForRadarBatch(selectedArticleOperational.map(item => item.input));
                       const recusa = new Map(plano.refused.map(item => [item.articleId, item.blockers.join(" ")] as const));
@@ -18609,6 +18793,23 @@ export default function ArquitetoPage() {
                   {linkRelationTally.byType.map(item => <li key={item.relationType} className="flex justify-between gap-3"><span className="text-text-muted">{item.label}</span><span className="font-mono text-foreground">{item.count}</span></li>)}
                   <li className="flex justify-between gap-3 border-t border-divider pt-1"><span className="font-semibold text-foreground">Total</span><span className="font-mono font-semibold text-foreground">{linkRelationTally.total}</span></li>
                 </ul>
+              </div>}
+              {/*
+                * 2026-10-14 · F4 (SDD silo interligado) · A MALHA DO SILO, POR
+                * ARTIGO: X de Y = quantas das outras páginas do Silo o artigo já
+                * liga no grafo (no corpo ou na trilha, quem decide é o Radar pelo
+                * priority). As obrigatórias no corpo vêm à parte.
+                */}
+              {linksMeshCoverage && linksMeshCoverage.articles.length > 0 && <div className="mt-3 rounded border border-divider bg-surface px-2.5 py-2" data-testid="architect-link-mesh-coverage">
+                <p className="text-sm font-semibold text-foreground">Malha do Silo <span className="font-normal text-text-muted">· {linksMeshCoverage.covered} de {linksMeshCoverage.required} ligações · obrigatórias no corpo {linksMeshCoverage.bodyCovered} de {linksMeshCoverage.bodyRequired}</span></p>
+                <p className="mt-1 text-sm leading-6 text-text-muted">Cada artigo liga a todas as outras páginas do Silo. Prioridade alta = obrigatório no corpo; média = no corpo quando a seção trata do destino, senão trilha &quot;Continue no Silo&quot;; baixa = trilha. Hoje: {linksMeshCoverage.byPriority.HIGH} alta · {linksMeshCoverage.byPriority.MEDIUM} média · {linksMeshCoverage.byPriority.LOW} baixa.</p>
+                <ul className="mt-1.5 space-y-0.5 text-sm leading-6">
+                  {linksMeshCoverage.articles.map(item => <li key={item.nodeId} className="flex flex-wrap justify-between gap-x-3">
+                    <span className="min-w-0"><span className="mr-1.5 rounded border border-divider px-1 py-0.5 text-xs font-semibold text-text-muted">{item.role === "PILAR" ? "PILAR" : "SUPORTE"}</span><span className="text-foreground">{item.label}</span>{item.missing.length > 0 && <span className="ml-1 text-text-muted">· faltam {item.missing.length}: {item.missing.slice(0, 4).map(destino => destino.label).join(", ")}{item.missing.length > 4 ? "…" : ""}</span>}</span>
+                    <span className={`font-mono ${item.covered === item.required ? "text-positive-soft" : "text-warning"}`}>{item.covered}/{item.required}</span>
+                  </li>)}
+                </ul>
+                {linksMeshCoverage.bodyOrphans.length > 0 && <p className="mt-1.5 text-sm leading-6 text-warning">Órfão no corpo (recebe menos de 3 links de corpo): {linksMeshCoverage.bodyOrphans.map(item => `${item.label} (${item.inboundBody})`).join(" · ")}.</p>}
               </div>}
               {/*
                 * §4 — A LISTA AUDITÁVEL. A working copy REMOTA é a autoridade;
@@ -19003,6 +19204,7 @@ export default function ArquitetoPage() {
             enabled={workspaceMode === "articles"}
             onApplied={() => setCanonicalWorkspaceReload(current => current + 1)}
             onAddToArticle={addDifferentiationKeywordsToArticle}
+            mineradorSuggestionsHref={serpSubjectBrandRef ? mineradorHandoffHref(serpSubjectBrandRef, { action: "sugestoes" }) : null}
             buttonClassName={ARCHITECT_UI.toolbarButton}
             primaryButtonClassName={ARCHITECT_UI.primaryButton}
           />
@@ -19227,9 +19429,9 @@ export default function ArquitetoPage() {
           * "Detalhes técnicos", fechado, no fim.
           */}
         {/* Publicados marcados na planilha: "Buscar keywords" analisa só eles (sem marcação, todos). */}
-        {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
+        {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
           selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))}
-          planGroups={gruposDoPlanoNaMesa.map(grupo => ({ color: grupo.color, label: grupo.label }))} />}
+          activeGroup={(() => { const filtro = arquitetoGroups.filter; if (filtro.kind !== "group") return null; const cor = arquitetoGroups.groupById.get(filtro.groupId)?.color; return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null; })()} />}
         {/* Artigos novos: os dois atos da formação continuam à mão sem abrir
             os detalhes. Mesmos handlers e mesmas travas do painel de formação. */}
         {articleMode && (
@@ -19261,6 +19463,11 @@ export default function ArquitetoPage() {
             </span>
           </section>
         )}
+        {/* F5 · Planilha primeiro: cada artigo do plano é uma linha, com Validar SERP, Trocar principal e Concluir formação (linha e lote). */}
+        {articleMode && <PlanArticleSheet brandId={selectedBrandId || null} brandRef={serpSubjectBrandRef} keywords={masterList} standings={subjectStandings}
+          groupOf={planSheetGroupOf} keywordGroupOf={planSheetKeywordGroupOf} filter={arquitetoGroups.filter} articles={planSheetArticles} radarArticleIds={planSheetRadarIds}
+          onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }}
+          buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} controlClassName={ARCHITECT_UI.control} />}
         {canonicalBootstrapError ? (
           <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 px-6 text-center text-danger">
             <span className="text-base">Não foi possível carregar os dados do Arquiteto.</span>
@@ -20850,7 +21057,7 @@ export default function ArquitetoPage() {
                * Reabrir revisão e mover entre Silos seguem fora do caminho
                * básico; os handlers continuam no código.
                */}
-             {articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button type="button" onClick={() => void requestSelectedKeywordDeletion()} disabled={updating} className={`${ARCHITECT_UI.footerButton} border-danger/45 text-danger hover:border-danger disabled:cursor-not-allowed disabled:opacity-40`} title="Excluir as KeywordDNAs dos artigos selecionados pelo ciclo de vida canônico"><Trash2 className="h-3 w-3" aria-hidden="true"/>Excluir</button>}
+             {articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button type="button" onClick={openSelectedKeywordsInMineradorForDeletion} disabled={updating || !serpSubjectBrandRef} className={`${ARCHITECT_UI.footerButton} border-danger/45 text-danger hover:border-danger disabled:cursor-not-allowed disabled:opacity-40`} title="Excluir keyword é do Minerador: abre o Minerador com as KeywordDNAs dos artigos selecionados marcadas; lá, “Excluir” mostra a prévia e pede a confirmação de sempre. O Arquiteto não exclui." data-testid="architect-delete-in-minerador"><Trash2 className="h-3 w-3" aria-hidden="true"/>Excluir no Minerador</button>}
              {/* Transferência não é status editorial: ela fecha a passada em
                  Links internos, depois do grafo, não no meio da formação. */}
              {/*
@@ -20897,22 +21104,22 @@ export default function ArquitetoPage() {
 
       <BackgroundTaskNotice tasks={architectTasks.slice(-4)} onDismiss={dismissBackgroundTask}/>
 
-      <WorkflowImportDialog
-        open={keywordImportOpen}
-        title="Importar keywords do Minerador"
-        description="A elegibilidade é verificada no estado canônico da Brand. Keywords aprovadas e publicadas protegidas podem entrar uma única vez no novo fluxo."
-        rows={keywordImportPool}
-        label={keyword => keyword.keyword}
-        details={keyword => { const assunto = keyword.subjectLabel || architectureKeywordVinculos.get(String(keyword.id))?.subjectLabel || null; return <span className="mt-1 block text-text-muted">{keyword.intent || "Intenção não informada"} · volume {keyword.volume_search == null ? "—" : keyword.volume_search.toLocaleString("pt-BR")} · {keyword.siloName || "Sem silo/categoria"}{assunto && <span className="mt-1 block text-sm font-medium text-context-accent" data-testid="architect-import-subject">{assunto}</span>}{(keyword.importability === CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED || !canEnterCanonicalArchitectWorkflow(keyword)) && <span className="mt-1 block text-warning">{importabilityReason(keyword)}</span>}</span>; }}
-        disabled={keyword => !canEnterCanonicalArchitectWorkflow(keyword)}
-        disabledReason={keyword => importabilityReason(keyword)}
-        status={keyword => importabilityStatus(keyword)}
-        loading={loadingKeywords}
-        error={keywordImportError}
-        onRetry={() => fetchMasterList()}
+      {/*
+        * IMPORTAR DO MINERADOR (2026-10-13): lista leve própria
+        * (`GET /api/arquiteto/import`), por cor, e o MESMO encadeamento do
+        * "Aprovar e enviar" (prévia → confirmação → resultado por keyword
+        * relido do servidor). Abrir não relê mais a mesa inteira.
+        */}
+      {keywordImportOpen && <MineradorImportDialog
+        brandId={selectedBrandId || null}
+        brandRef={serpSubjectBrandRef}
+        initialColor={initialArquitetoImportColor(arquitetoGroups.choice)}
+        colorOfGroup={importColorOfGroup}
+        detailsOf={keyword => { const assunto = architectureKeywordVinculos.get(String(keyword.id))?.subjectLabel || keywordImportPool.find(item => item.id === keyword.id)?.subjectLabel || null; return assunto ? <span className="block font-medium text-context-accent" data-testid="architect-import-subject">Assunto: {assunto}</span> : null; }}
+        mesaRefreshing={loadingKeywords}
         onClose={() => setKeywordImportOpen(false)}
-        onImport={importApprovedKeywords}
-      />
+        onApplied={() => setCanonicalWorkspaceReload(current => current + 1)}
+      />}
       {subjectAttachOpen && selectedSubjectEntry && (
         <SubjectAttachDialog
           open
@@ -20939,16 +21146,6 @@ export default function ArquitetoPage() {
           onClose={() => setSubjectSupportOpen(false)}
         />
       )}
-      <DeleteConfirmation open={keywordDeleteSimpleOpen} title="Excluir keywords não publicadas?"
-        description="Esta ação excluirá definitivamente as KeywordDNAs selecionadas e os dados operacionais não publicados que pertencem a elas. Versões e eventos canônicos permanecem preservados."
-        confirmationName={keywordDeleteReview?.confirmationName || ""} impact={keywordDeleteReview?.impact || []} confirmLabel="Excluir definitivamente"
-        onCancel={() => { setKeywordDeleteSimpleOpen(false); setKeywordDeleteReview(null); }} onConfirm={confirmSelectedKeywordDeletion}/>
-
-      <PublishedDeleteConfirmation open={keywordDeletePublishedOpen} title="Remover keywords publicadas por 24 horas"
-        description={`Esta ação removerá ${keywordDeleteReview?.publishedIds.length || 0} KeywordDNA(s) publicada(s) da operação e permitirá restauração durante 24 horas.`}
-        confirmationName={keywordDeleteReview?.confirmationName || ""} impact={keywordDeleteReview?.impact || []}
-        onCancel={() => { setKeywordDeletePublishedOpen(false); setKeywordDeleteReview(null); }} onConfirm={confirmSelectedKeywordDeletion}/>
-
       {/* DESFAZER SILO SUGERIDO — confirmação. Diz o que acontece antes de
           qualquer escrita; Silo com motivo de recusa aparece com o motivo e
           fica fora do botão. */}

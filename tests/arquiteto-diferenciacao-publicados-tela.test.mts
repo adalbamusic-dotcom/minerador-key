@@ -22,7 +22,6 @@ import {
   type DifferentiationPage,
 } from "../lib/arquiteto/published-differentiation.ts";
 import { DIFFERENTIATION_MAX_COST_USD, buildDifferentiationPlan, type DifferentiationChoice } from "../lib/arquiteto/published-differentiation-run.ts";
-import { SubjectDiscoveryImportRequestSchema } from "../lib/minerador/subject-discovery-import.ts";
 import { PLATFORM_OPERATIONS } from "../lib/agent/platform-catalog.ts";
 import {
   DIFFERENTIATION_ACCEPT_ACTION,
@@ -41,7 +40,6 @@ import {
   differentiationEvaluationView,
   differentiationGroupRowView,
   differentiationHeadline,
-  differentiationIngestRequest,
   differentiationPlanView,
   differentiationRunRequest,
   formatUsd,
@@ -282,9 +280,8 @@ test("aceite: sucesso só com a releitura; passos seguintes com o contrato do im
   assert.match(semReleitura.headline, /^1 página\(s\) não confirmada\(s\) na releitura/);
   assert.doesNotMatch(semReleitura.headline, /gravada\(s\) e confirmada/);
 
-  const corpo = differentiationIngestRequest(aceite().ingestBatches[0], "22222222-3333-4444-8555-666666666666");
-  assert.ok(SubjectDiscoveryImportRequestSchema.safeParse(corpo).success, "o mesmo contrato .strict() da Pesquisa por Assunto");
-  assert.equal("volume" in corpo.items[0], false, "nenhuma métrica vai no corpo");
+  // F4 (ajuste declarado 2026-10-14): a tela do Arquiteto não monta mais o pedido de import do Minerador; o aceite grava a sugestão no servidor.
+  assert.equal(vista.ingestCount, 1, "a tela só conta as novas que foram como sugestão");
 });
 
 test("erros: código conhecido vira frase curta; sem código, a do servidor; nada pago é dito", () => {
@@ -372,8 +369,9 @@ test("hook: as três rotas do núcleo, id novo por rodada, hash no aceite, nada 
   assert.match(gancho, /decision: "accept", evaluationHash: run\.evaluationHash, pageKeywordIds: paginas/);
   assert.match(gancho, /temAvaliacao\(groupId\) \? "resume" : "plan"/, "grupo já buscado é relido, nunca replanejado em silêncio");
   assert.match(gancho, /\.\.\.\(mode === "replace" \? \{ replaceEvaluation: true \} : \{\}\)/);
-  assert.match(gancho, /subject-discovery\/import`/);
-  assert.match(gancho, /differentiationIngestRequest\(lote, crypto\.randomUUID\(\)\)/);
+  // F4 (ajuste declarado 2026-10-14): o gancho não chama a rota de import do Minerador ("Enviar ao Minerador" saiu).
+  assert.doesNotMatch(gancho, /subject-discovery\/import|\/api\/minerador\//);
+  assert.doesNotMatch(gancho, /differentiationIngestRequest|sendIngest/);
   assert.doesNotMatch(gancho, /localStorage|indexedDB|sessionStorage/, "nada de estado canônico no navegador");
   assert.doesNotMatch(gancho, /mode: "execute"|authorizedPlan: \{/, "o corpo pago só sai do modelo, com o plano confirmado");
 });
@@ -392,7 +390,7 @@ test("catálogo das IAs fala os rótulos da tela (AGENTS §17.1)", () => {
   const operacao = PLATFORM_OPERATIONS.find(item => item.id === "arquiteto.published_differentiation")!;
   const deteccao = PLATFORM_OPERATIONS.find(item => item.id === "arquiteto.published_differentiation_detect")!;
   assert.ok(deteccao.howOnScreen.includes(`'${DIFFERENTIATION_PLAN_ACTION} (grátis)'`));
-  for (const rotulo of [`'${DIFFERENTIATION_RUN_ACTION} (US$ x a y)'`, `'${DIFFERENTIATION_ACCEPT_ACTION}'`, `'${DIFFERENTIATION_KEEP_ACTION}'`, "'Enviar ao Minerador'", "'Colocar no artigo'", `'${DIFFERENTIATION_REACCEPT_ACTION}'`, `'${DIFFERENTIATION_REPLAN_ACTION}'`, `'${DIFFERENTIATION_INCLUDE_OPTION}'`]) {
+  for (const rotulo of [`'${DIFFERENTIATION_RUN_ACTION} (US$ x a y)'`, `'${DIFFERENTIATION_ACCEPT_ACTION}'`, `'${DIFFERENTIATION_KEEP_ACTION}'`, "'Sugestões do Arquiteto'", "'Colocar no artigo'", `'${DIFFERENTIATION_REACCEPT_ACTION}'`, `'${DIFFERENTIATION_REPLAN_ACTION}'`, `'${DIFFERENTIATION_INCLUDE_OPTION}'`]) {
     assert.ok(operacao.howOnScreen.includes(rotulo), rotulo);
   }
   assert.doesNotMatch(`${operacao.howOnScreen} ${deteccao.howOnScreen}`, /Montar prévia|Buscar keywords \(pago\)/);

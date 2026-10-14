@@ -100,11 +100,13 @@ function unidades(total: number): StructuralLinkUnit[] {
   ];
 }
 
+// 2026-10-14 · SDD silo interligado · F4 · decisão do dono (D1): a malha (Suporte ↔ Suporte, Suporte → SiloPage) é do
+// gerador; o esqueleto de antes é `{ mesh: false }` e é ele que vai à IA de âncoras — a malha reaproveita a âncora do destino.
 for (const total of [15, 30]) {
   test(`D3-05 · o esqueleto de links de um Silo de ${total} artigos tem 2 + 3 × ${total - 1} conexões, sem Suporte ↔ Suporte`, () => {
     const units = unidades(total);
     assert.deepEqual(structuralLinkBlockers(units), []);
-    const conexoes = buildStructuralLinkConnections(units);
+    const conexoes = buildStructuralLinkConnections(units, { mesh: false });
     assert.equal(conexoes.length, 2 + 3 * (total - 1));
     const pares = new Set(conexoes.map(conexao => `${conexao.sourceNodeId}->${conexao.targetNodeId}`));
     assert.equal(pares.size, conexoes.length, "nenhuma conexão repetida");
@@ -120,7 +122,7 @@ for (const total of [15, 30]) {
 
 function pedidoDeAncoras(total: number) {
   const units = unidades(total).map(unit => ({ ref: unit.nodeId, label: unit.label }));
-  const candidates = buildStructuralLinkConnections(unidades(total)).map(conexao => ({
+  const candidates = buildStructuralLinkConnections(unidades(total), { mesh: false }).map(conexao => ({
     sourceRef: conexao.sourceNodeId,
     targetRef: conexao.targetNodeId,
     relationType: conexao.relationType,

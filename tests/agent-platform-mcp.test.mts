@@ -288,7 +288,8 @@ test("melhoria unificada não usa Google Ads sem aceite específico nem provider
   const argumentsBase = { brandId: brand([]).brandId, action: "prepare" };
   const send = harness(createWriterServer(principal([brand(["platform.read", "arquiteto.write"])])));
   assert.equal(toolText(await send(80, "tools/call", { name: "improve_articles", arguments: argumentsBase })).code, "human_confirmation_required");
-  const refused = toolText(await send(81, "tools/call", { name: "improve_articles", arguments: { ...argumentsBase, userConfirmation: "Aceito usar a quota gratuita para preparar" } }));
+  // F3 (2026-10-14): a leitura grátis não pede provider.spend; a leitura com IA e medição (authorizeReading) pede.
+  const refused = toolText(await send(81, "tools/call", { name: "improve_articles", arguments: { ...argumentsBase, authorizeReading: { ai: true, measure: true }, userConfirmation: "Aceito usar a quota gratuita para preparar" } }));
   assert.equal(refused.code, "scope_denied"); assert.equal(refused.scope, "provider.spend");
 });
 
@@ -680,7 +681,9 @@ test("F4 · preview e apply passam pelo MESMO núcleo da rota da tela; a ferrame
   const inicio = fonte.indexOf('server.registerTool("declare_silo_plan"');
   assert.ok(inicio > 0);
   const ferramenta = fonte.slice(inicio, fonte.indexOf("server.registerTool(", inicio + 30));
-  assert.match(ferramenta, /call\("declare_silo_plan", "minerador\.write", \{ brandId, humanConfirmation: mode === "apply" \? userConfirmation : null \}, \[\{ module: "minerador", action: "edit" \}\]/);
+  /* 2026-10-13 · F1 da SDD "arquiteto só lê / listas leves": aplicar a substituição do plano pede também platform.decide (ajuste declarado). */
+  assert.match(ferramenta, /const escopos = substituir && mode === "apply" \? \["minerador\.write", "platform\.decide"\] as const : "minerador\.write";/);
+  assert.match(ferramenta, /call\("declare_silo_plan", escopos, \{ brandId, humanConfirmation: mode === "apply" \? userConfirmation : null \}, \[\{ module: "minerador", action: "edit" \}\]/);
   assert.equal((ferramenta.match(/importDeclaredPlanWithCore\(/g) || []).length, 1, "uma chamada só, para preview e apply");
   assert.match(ferramenta, /importDeclaredPlanWithCore\(\{\s*brandId: access\.brandId,\s*actorUserId: principal\.actorId,/, "a Marca vem do grant autorizado e o ator da conexão");
   /* O cliente das tabelas de grupo é o operacional, o mesmo que a rota usa (editorialGroupsClient É getOperationalClient). */

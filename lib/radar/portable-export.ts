@@ -1,5 +1,7 @@
 import type { RadarCompetitiveBlueprint } from "./competitive-blueprint.ts";
 import type { RadarCompetitorOutlinePage } from "./competitor-topics.ts";
+import type { RadarSerpRawPage, RadarSerpRawSources } from "./serp-raw-export.ts";
+import type { RadarAuthoritySourcesRecord } from "./authority-sources-contract.ts";
 import type { RadarCompetitiveBlueprintView } from "./competitive-blueprint-view.ts";
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
 import type { RadarEditorialArticleModel } from "./editorial-article-model.ts";
@@ -731,6 +733,26 @@ export type RadarPortableExportInput = {
    * Fora do congelamento e do hash. Ausente = a linha de antes.
    */
   competitorOutlines?: RadarCompetitorOutlinePage[] | null;
+  /**
+   * 2026-10-14 · Aditivo (SERP crua por artigo, SDD silo interligado §16.1): as
+   * páginas lidas pela investigação (H1/H2, data visível, autor, palavras), sem
+   * texto de página. Só a SERP crua lê; fora do congelamento e do hash. Ausente =
+   * a montagem não pediu (os outros formatos não a leem).
+   */
+  serpRawPages?: RadarSerpRawPage[] | null;
+  /**
+   * 2026-10-14 · Aditivo (fontes externas de autoridade, SDD silo interligado §16.2,
+   * Fase A): as fontes citadas pelos concorrentes e o registro da conferência, só
+   * para a SERP crua; fora do congelamento e do hash.
+   */
+  serpRawSources?: RadarSerpRawSources | null;
+  /**
+   * 2026-10-14c · Aditivo (fontes externas de autoridade, SDD silo interligado §16.2,
+   * Fase B): o registro da conferência CONGELADO no pacote (`bundle.authoritySources`,
+   * ids X). O artigo-modelo, o CSV "Para escrever" e `get_article_for_writing` leem
+   * daqui as fontes verificadas. Ausente = investigação anterior à conferência (como antes).
+   */
+  authoritySources?: RadarAuthoritySourcesRecord | null;
   /** §3 · o contexto resolvido, de onde sai o DNA das keywords. */
   researchContext?: RadarArticleResearchContext | null;
   /** §8 · o universo da corrida de YouTube, quando existe. */

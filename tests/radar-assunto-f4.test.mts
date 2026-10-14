@@ -247,15 +247,44 @@ function dentroDosLimites(row: RadarWritingExportRow) {
  * segundo artigo do lote, "máscara" e "cuidados" já usados para o mesmo destino
  * viram a instrução (a variedade do livro de âncoras). Os quatro artigos avulsos
  * ficaram idênticos.
+ *
+ * 2026-10-14 · SDD silo interligado · F1 · decisão do dono (D4, D5 e D6, frase do
+ * §1 da SDD): keyword sem repetição antiga (snapshot refeito de propósito). Mudam
+ * só as colunas titulo_e_seo, estrutura e prompt (K1–K9 como instrução concluída,
+ * título sem marca de processo) e a regra geral 12 da linha de topo; o artigo
+ * YouTube (sem planta) fica idêntico. O silo e o de saúde batem com as chaves
+ * "silo-pilar-e-suportes" e "silo-saude-pilar-publicado" do E0, atualizadas na
+ * mesma fase (D14).
+ *
+ * 2026-10-14 · SDD silo interligado · F2 · decisão do dono (D1, D2, D3 e D6, frase
+ * do §1 da SDD): links obrigatórios do grafo e trilha "Continue no Silo"
+ * (snapshot refeito de propósito). No silo e no de saúde muda a coluna
+ * links_internos (a linha "Malha do Silo" e, quando sobra destino, a trilha), na
+ * estrutura a linha da trilha e a medida de links, e a ressalva do artigo
+ * isolado não sai mais quando o Silo tem outro destino; os quatro artigos avulsos
+ * (sem Silo) ficaram idênticos. Batem com as chaves "silo-pilar-e-suportes" e
+ * "silo-saude-pilar-publicado" do E0, atualizadas na mesma fase (D14).
+ */
+/*
+ * 2026-10-14b · SDD silo interligado · F3 · decisão do dono (D7, D8, D11, D12 e D13,
+ * frase do §1 da SDD): análise competitiva, diferencial da marca e fechamento
+ * (snapshot refeito de propósito). Mudam a coluna cobrir_e_superar (os quatro
+ * blocos da SERP coletada, até 4 perguntas que valem resposta, termos e
+ * entidades), a serp_resumida (a amostra relevante), a estrutura (a faixa de
+ * referência), o título (o SEO antigo do topo), a promessa (nada na planta da
+ * bancada) e a regra geral 12 da linha de topo (as ressalvas); o artigo YouTube
+ * (sem planta) fica idêntico. O silo e o de saúde batem com as chaves
+ * "silo-pilar-e-suportes" e "silo-saude-pilar-publicado" do E0, atualizadas na
+ * mesma fase (D14).
  */
 const SNAPSHOT = {
-  silo: { sha: "4be7e971c7c13357c3c65bbf62290bdd6d6cfbbf9ab09aa2aa98a868e0066f1d", len: 33929 },
-  saude: { sha: "ba83b7807aac70c1b83a42d1bb909e3f5f1c95e89124d9dd77978b654c59d472", len: 37655 },
+  silo: { sha: "d243818a0d98133672e48a0b5c20944d487b8d15fdcf0aac23d0ab4b08811b5f", len: 39648 },
+  saude: { sha: "15355566177f05ed6b037c64555be5043fc6e696c166464ef4edafb55a0a1c47", len: 43421 },
   artigos: {
-    google: "f16940c66d6dcb73ab9581de7cefead87bc708f48d7421eceb133c09cec1a42e",
-    amazon: "17b62d1bf5c9381dc3cbcef4175b8d83b4e2601ff4910439bed4bf75f8828dca",
+    google: "3cdd9498acf6e403bc1ad121d2ac376d910c84d779e0007d7a8b82602dbfeda6",
+    amazon: "d026826bbdfc5d016e9c30565c52146646cb888a2916d5c093acf50673bd5e77",
     youtube: "b96c0ca13361591af1c900db882e7afdd12e0ac3dd5e90f9b97b0288e935cf3e",
-    saude: "ee46f22cbfde9f472d837075431fa437dc00e3826066c63d73ff7ebc75050572",
+    saude: "123a7fa1ad6fe6672fa38e2cd2cb309a53344e291ac6500dcda129a3649e80e4",
   },
 };
 

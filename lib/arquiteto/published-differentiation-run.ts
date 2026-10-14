@@ -865,6 +865,8 @@ export async function runPublishedDifferentiation(input: {
   publishedNormalized: ReadonlySet<string>;
   /** Keywords vivas da marca: normalizada → id (indicativo "já existe"). */
   existingByNormalized?: ReadonlyMap<string, string> | null;
+  /** F3 — normalizada → volume já medido no Minerador (`null` = "sem média" < 30 dias): não é medida de novo. */
+  knownVolumeByNormalized?: ReadonlyMap<string, number | null> | null;
   operationRequestId: string;
   authorizedPlan: { planHash: string; maxCostUsd: number } | null | undefined;
 }, ports: DifferentiationRunPorts): Promise<DifferentiationRunOutcome> {
@@ -899,6 +901,7 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
     ledgerMetadata: { operationKind: "published_differentiation", groupId: plan.groupId },
     blockedNormalized: new Set<string>([...input.publishedNormalized, ...group.members.map(member => normalizeKeyword(member.page.keyword))]),
     existingByNormalized: input.existingByNormalized ?? null,
+    knownVolumeByNormalized: input.knownVolumeByNormalized ?? null,
     pageFootprints: input.pageFootprints,
     filter: (page, comVolume, bloqueadas) => {
       const angulo = angulos.get(page.keywordId);
@@ -1017,6 +1020,8 @@ export async function executePublishedSearchRound(input: {
   /** Normalizadas que nunca viram candidata (publicadas da marca e as páginas da rodada). */
   blockedNormalized: ReadonlySet<string>;
   existingByNormalized?: ReadonlyMap<string, string> | null;
+  /** F3 — normalizada → volume já medido no Minerador (`null` = "sem média" há menos de 30 dias): não é medida de novo. */
+  knownVolumeByNormalized?: ReadonlyMap<string, number | null> | null;
   pageFootprints: readonly KeywordSerpFootprint[];
   /** O filtro antes da SERP: devolve as que seguem, na ordem de ida à SERP. */
   filter: (page: DifferentiationPlanPage, withVolume: DifferentiationCandidate[], blockedNormalized: ReadonlySet<string>) => { kept: DifferentiationCandidate[]; refused: DifferentiationCandidateRefusal[] };
@@ -1165,9 +1170,18 @@ export async function executePublishedSearchRound(input: {
   // ficou sem a métrica histórica (fora das 60 ou com a consulta falhando).
   const paraOAds = new Set<string>();
   const ordemDaIdeia = (candidata: DifferentiationCandidate) => mediaDaIdeia.get(candidata.normalizedKeyword) ?? candidata.estimate ?? -1;
+  /*
+   * F3 · LER ANTES DE BUSCAR (SDD 2026-10-13, item 3, regra 5): a candidata que
+   * já existe no Minerador com volume medido (ou "sem média" há menos de 30
+   * dias) é "já temos" — o volume dela vem do Minerador e ela não vai às
+   * métricas do Google Ads de novo.
+   */
+  const jaTemos = new Map<string, number | null>();
   for (const lista of unidas.values()) {
     for (const candidata of [...lista].sort((a, b) => ordemDaIdeia(b) - ordemDaIdeia(a)).slice(0, DIFFERENTIATION_ADS_CANDIDATES_PER_PAGE)) {
-      if (!bloqueadas.has(candidata.normalizedKeyword)) paraOAds.add(candidata.keyword);
+      if (bloqueadas.has(candidata.normalizedKeyword)) continue;
+      if (input.knownVolumeByNormalized?.has(candidata.normalizedKeyword)) jaTemos.set(candidata.normalizedKeyword, input.knownVolumeByNormalized.get(candidata.normalizedKeyword) ?? null);
+      else paraOAds.add(candidata.keyword);
     }
   }
   let volumes: ReadonlyMap<string, number | null> = new Map();
@@ -1179,6 +1193,7 @@ export async function executePublishedSearchRound(input: {
       adsVolumeFailed = true;
     }
   }
+  if (jaTemos.size) volumes = new Map([...volumes, ...jaTemos]);
   const candidates: Record<string, DifferentiationCandidate[]> = {};
   const refused: Record<string, DifferentiationCandidateRefusal[]> = {};
   for (const page of pages) {

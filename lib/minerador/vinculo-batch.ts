@@ -10,6 +10,8 @@ import {
   type KeywordPageType,
   type KeywordPageTypeStance,
 } from "./keyword-page-type.ts";
+import type { DeclaredPlanLockChoice } from "./declared-plan.ts";
+import { keywordLockVolume, planLockChange, resolveKeywordPlanLock } from "./keyword-plan-lock.ts";
 import { isKeywordSubjectActorId } from "./keyword-subject.ts";
 import { resolveKeywordVinculo } from "./keyword-vinculo.ts";
 import { readPublicationLink, readSiteOrigin } from "./publication-link.ts";
@@ -21,7 +23,10 @@ import { primaryPostLabel, setPrimaryKeywordPolicy } from "./primary-keyword-pol
  *
  * Dois grupos de escolha única, todos humanos (o KGR fica ao lado, com plano próprio):
  *
- *   Posto de principal    Travado ao slug · Livre — só em publicadas
+ *   Posto de principal    publicada: Travado ao slug · Livre
+ *                         não publicada: a TRAVA do cadastro (2026-10-13) —
+ *                         Travada · Livre · Automática, gravada pelo núcleo do
+ *                         cadastro; sem plano, travar é recusado por item
  *   Potencial de página   os 4 tipos × potencial/declarado (enum intacto)
  *
  * O ASSUNTO NÃO É MAIS DO VÍNCULO (pedido do dono, 2026-10-13: "na planilha já
@@ -46,7 +51,9 @@ import { primaryPostLabel, setPrimaryKeywordPolicy } from "./primary-keyword-pol
  *  - ator = `auth.users.id`; sem ele, nada é planejado (nunca e-mail, nunca
  *    "local-user");
  *  - keyword de outra marca é pulada, nunca escrita;
- *  - o posto só vale para publicadas; as demais são puladas e contadas;
+ *  - o posto da publicada grava `primary_keyword_policy` aqui; o da não
+ *    publicada do plano vira pedido de trava (`planLocks`) ao núcleo do
+ *    cadastro; o da não publicada sem plano é recusado por item, com o motivo;
  *  - o Potencial "potencial" não vale para publicadas (o tipo delas já é
  *    declaração pela publicação): são puladas e contadas.
  *
@@ -59,7 +66,13 @@ export type VinculoBatchAction =
   /** Recusada desde 2026-10-13 (`SUBJECT_ENTRY_MOVED`): tirar do plano é "Tirar do plano". */
   | { kind: "subject_withdraw" }
   | { kind: "page_type"; pageType: KeywordPageType; stance?: KeywordPageTypeStance }
-  | { kind: "post"; policy: "locked" | "reviewable" };
+  /**
+   * O Posto de principal. Na PUBLICADA: `locked` = Travado ao slug,
+   * `reviewable` = Livre. Na NÃO PUBLICADA (2026-10-13): é a trava do cadastro —
+   * `locked` = Travada, `reviewable` = Livre, `auto` = Automática (pelo volume);
+   * a gravação vai pelo núcleo do cadastro (`planLocks`), não por aqui.
+   */
+  | { kind: "post"; policy: "locked" | "reviewable" | "auto" };
 
 /** A linha como a tabela a tem. Colunas do pacote aprovado entram para contar o rebaixamento. */
 export type VinculoBatchKeyword = {
@@ -75,7 +88,31 @@ export type VinculoBatchKeyword = {
   analise_semantica?: Record<string, unknown> | null;
 };
 
-export type VinculoBatchSkipReason = "other_brand" | "unchanged" | "not_published" | "published_potential";
+/**
+ * `not_published` não é mais produzido (2026-10-13: na não publicada o posto é a
+ * trava do cadastro); fica no tipo para leitores antigos. `no_plan`: travar uma
+ * keyword sem plano é recusado com a frase do cadastro. `published_auto`:
+ * "Automática" só vale para a keyword do plano. `same_article`: duas keywords
+ * do mesmo artigo do plano (formato anterior) — a trava é gravada uma vez.
+ */
+export type VinculoBatchSkipReason = "other_brand" | "unchanged" | "not_published" | "published_potential" | "no_plan" | "published_auto" | "same_article";
+
+/**
+ * A trava do cadastro a gravar, por keyword NÃO publicada do plano. Quem grava é
+ * o núcleo do cadastro (rota `POST …/plans/lock`, `setKeywordPlanLockWithCore`):
+ * nova versão do plano, releitura. O plano do lote só diz o que pedir.
+ */
+export type VinculoBatchPlanLock = {
+  id: string;
+  keyword: string;
+  lock: DeclaredPlanLockChoice;
+  subjectKeywordId: string;
+  groupId: string;
+  /** "Travada · pelo volume medido" hoje. */
+  fromLabel: string;
+  /** A keyword está aprovada hoje e volta a "Em revisão" (a trava entra no pacote). */
+  demotesApproval: boolean;
+};
 
 export type VinculoBatchUpdate = {
   id: string;
@@ -98,8 +135,10 @@ export type VinculoBatchPlan =
     ok: true;
     action: VinculoBatchAction;
     updates: VinculoBatchUpdate[];
+    /** 2026-10-13 · a trava do cadastro das não publicadas do plano (gravada pelo núcleo do cadastro). */
+    planLocks: VinculoBatchPlanLock[];
     skipped: VinculoBatchSkip[];
-    counts: Record<VinculoBatchSkipReason, number> & { updates: number; approvedToReview: number };
+    counts: Record<VinculoBatchSkipReason, number> & { updates: number; approvedToReview: number; planLocks: number };
     /** "12 aprovadas desta seleção vão para Em revisão" — `null` sem aprovadas. */
     demotionWarning: string | null;
     /** Rótulo da ação para a confirmação e o progresso. */
@@ -115,6 +154,12 @@ export type PlanVinculoBatchInput = {
   /** `auth.users.id` da sessão. */
   actorId: string | null | undefined;
   changedAt: string;
+  /**
+   * 2026-10-13 · as outras linhas da marca pelo id (a tela já as tem): a
+   * principal do formato anterior lê a trava na linha do Assunto. Sem ela, a
+   * principal do formato anterior é recusada com o motivo, nunca pulada calada.
+   */
+  keywordOf?: (id: string) => VinculoBatchKeyword | null | undefined;
 };
 
 function packageInput(keyword: VinculoBatchKeyword, semantic: Record<string, unknown> | null): ApprovedPackageInput {
@@ -142,7 +187,13 @@ export function vinculoBatchActionLabel(action: VinculoBatchAction): string {
       ? `Potencial de página: ${keywordPageTypeStanding(action.pageType, { declared: action.stance === "declared" })}`
       : `Tipo de página: ${keywordPageTypeLabel(action.pageType)}`;
   }
-  return `Posto: ${primaryPostLabel(action.policy)}`;
+  // 2026-10-13 · um rótulo para os dois mundos: travado (ao slug na publicada; no artigo na do plano), livre, automática.
+  return `Posto: ${action.policy === "auto" ? "Automática (pelo volume)" : action.policy === "locked" ? "Travada" : primaryPostLabel(action.policy)}`;
+}
+
+/** O posto do lote vira a escolha da trava do cadastro na não publicada. */
+export function planLockChoiceOfPost(policy: "locked" | "reviewable" | "auto"): DeclaredPlanLockChoice {
+  return policy === "reviewable" ? "free" : policy;
 }
 
 function demotionWarning(count: number): string | null {
@@ -161,7 +212,7 @@ function validAction(action: VinculoBatchAction): boolean {
     return (KEYWORD_PAGE_TYPES as readonly string[]).includes(action.pageType)
       && (action.stance === undefined || (KEYWORD_PAGE_TYPE_STANCES as readonly string[]).includes(action.stance));
   }
-  if (action.kind === "post") return action.policy === "locked" || action.policy === "reviewable";
+  if (action.kind === "post") return action.policy === "locked" || action.policy === "reviewable" || action.policy === "auto";
   return false;
 }
 
@@ -177,9 +228,15 @@ export function planVinculoBatch(input: PlanVinculoBatchInput): VinculoBatchPlan
   if (!action || !validAction(action)) return { ok: false, code: "INVALID_ACTION", reason: "Escolha uma ação do Vínculo." };
 
   const updates: VinculoBatchUpdate[] = [];
+  const planLocks: VinculoBatchPlanLock[] = [];
+  const lockedSubjects = new Map<string, string>();
   const skipped: VinculoBatchSkip[] = [];
   const skip = (keyword: VinculoBatchKeyword, reason: VinculoBatchSkipReason, detail?: string) => {
     skipped.push({ id: keyword.id, keyword: keyword.keyword, reason, ...(detail ? { detail } : {}) });
+  };
+  const semanticOf = (id: string) => {
+    const own = input.keywords.find(keyword => keyword.id === id) ?? input.keywordOf?.(id) ?? null;
+    return own && own.brand_id === brandId ? own.analise_semantica ?? null : null;
   };
 
   for (const keyword of input.keywords) {
@@ -209,10 +266,39 @@ export function planVinculoBatch(input: PlanVinculoBatchInput): VinculoBatchPlan
       });
       next = result.changed ? result.semantic : null;
     } else if (action.kind === "post") {
-      // Posto: só publicadas, como o handler individual. A keyword que carrega
-      // Assunto é tratada como qualquer keyword (2026-10-13).
+      // 2026-10-13 · NÃO PUBLICADA: o posto é a TRAVA do cadastro (por item,
+      // nunca pulada em silêncio). Com plano, vira pedido ao núcleo do
+      // cadastro; sem plano, travar é recusado com a frase do cadastro.
       if (!isKeywordPublished({ status: keyword.status, semantic: current })) {
-        skip(keyword, "not_published");
+        const trava = resolveKeywordPlanLock({
+          keywordId: keyword.id,
+          keyword: keyword.keyword,
+          status: keyword.status,
+          semantic: current,
+          volume: keywordLockVolume({ semantic: current, volumeSearch: keyword.volume_search, resultsAllintitle: keyword.results_allintitle }),
+          subjectSemanticOf: semanticOf,
+          keywordTextOf: id => input.keywordOf?.(id)?.keyword ?? null,
+        });
+        if (!trava) { skip(keyword, "unchanged"); continue; }
+        const pedido = planLockChange(trava, planLockChoiceOfPost(action.policy));
+        if (!pedido.ok) { skip(keyword, "no_plan", pedido.reason); continue; }
+        if (!pedido.changed || trava.kind !== "plan") { skip(keyword, "unchanged"); continue; }
+        const mesmo = lockedSubjects.get(trava.subjectKeywordId);
+        if (mesmo) { skip(keyword, "same_article", `mesmo artigo de "${mesmo}"`); continue; }
+        lockedSubjects.set(trava.subjectKeywordId, keyword.keyword);
+        planLocks.push({
+          id: keyword.id,
+          keyword: keyword.keyword,
+          lock: pedido.to,
+          subjectKeywordId: trava.subjectKeywordId,
+          groupId: trava.groupId,
+          fromLabel: trava.label,
+          demotesApproval: effectivelyApproved(keyword, current),
+        });
+        continue;
+      }
+      if (action.policy === "auto") {
+        skip(keyword, "published_auto");
         continue;
       }
       const vinculo = resolveKeywordVinculo({ status: keyword.status, semantic: current });
@@ -241,11 +327,15 @@ export function planVinculoBatch(input: PlanVinculoBatchInput): VinculoBatchPlan
 
   const counts = {
     updates: updates.length,
-    approvedToReview: updates.filter(update => update.demotesApproval).length,
+    planLocks: planLocks.length,
+    approvedToReview: updates.filter(update => update.demotesApproval).length + planLocks.filter(entry => entry.demotesApproval).length,
     other_brand: 0,
     unchanged: 0,
     not_published: 0,
     published_potential: 0,
+    no_plan: 0,
+    published_auto: 0,
+    same_article: 0,
   };
   for (const entry of skipped) counts[entry.reason] += 1;
 
@@ -253,6 +343,7 @@ export function planVinculoBatch(input: PlanVinculoBatchInput): VinculoBatchPlan
     ok: true,
     action,
     updates,
+    planLocks,
     skipped,
     counts,
     demotionWarning: demotionWarning(counts.approvedToReview),
@@ -278,7 +369,9 @@ export type VinculoBatchChoicesPlan =
     ok: true;
     steps: Extract<VinculoBatchPlan, { ok: true }>[];
     updates: VinculoBatchUpdate[];
-    counts: { updates: number; approvedToReview: number };
+    /** 2026-10-13 · a trava do cadastro das não publicadas do plano (do passo do Posto). */
+    planLocks: VinculoBatchPlanLock[];
+    counts: { updates: number; approvedToReview: number; planLocks: number };
     demotionWarning: string | null;
     actionLabel: string;
   }
@@ -326,12 +419,15 @@ export function planVinculoBatchChoices(input: PlanVinculoBatchChoicesInput): Vi
     const demotesApproval = effectivelyApproved(before, current) && !effectivelyApproved(before, semantic);
     updates.push({ id: keyword.id, brandId, keyword: keyword.keyword, semantic, demotesApproval });
   }
-  const approvedToReview = updates.filter(update => update.demotesApproval).length;
+  const planLocks = steps.flatMap(step => step.planLocks);
+  const updatedIds = new Set(updates.filter(update => update.demotesApproval).map(update => update.id));
+  const approvedToReview = updatedIds.size + planLocks.filter(entry => entry.demotesApproval && !updatedIds.has(entry.id)).length;
   return {
     ok: true,
     steps,
     updates,
-    counts: { updates: updates.length, approvedToReview },
+    planLocks,
+    counts: { updates: updates.length, approvedToReview, planLocks: planLocks.length },
     demotionWarning: demotionWarning(approvedToReview),
     actionLabel: steps.map(step => step.actionLabel).join(" · "),
   };

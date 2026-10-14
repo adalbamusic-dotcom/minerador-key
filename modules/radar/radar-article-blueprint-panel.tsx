@@ -840,12 +840,44 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
         <p className="text-sm font-semibold text-foreground">Descartado do esqueleto da SERP</p>
         <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-text-muted">{descartados.map(item => <li key={item.id}>{origemDaSecao(atual.payload, [item.id])[0] || item.id}{item.reason ? ` — ${item.reason}` : ""}</li>)}</ul>
       </div>}
+      {/* 2026-10-14b · F3 (SDD silo interligado; D13): a análise competitiva da planta nova; as perguntas além das 4 do CSV e os pedidos preparados ficam só aqui. */}
+      {b.competitive && <div className={bloco} data-testid="radar-article-blueprint-competitive">
+        <p className="text-sm font-semibold text-foreground">Análise competitiva (SERP já coletada)</p>
+        {b.competitive.angle && <p className="mt-1 text-sm text-foreground">Ângulo de diferenciação: {b.competitive.angle}</p>}
+        <p className="mt-1 text-sm text-text-muted">Base que todos cobrem: {b.competitive.consensus.length} · o que só os melhores fazem: {b.competitive.bestOnly.length} · o que ninguém entrega: {b.competitive.gains.length} · SEO antigo a não copiar: {b.competitive.oldSeo.length} (no CSV, coluna cobrir_e_superar)</p>
+        {b.competitive.questionsKept.length > 0 && <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-foreground">{b.competitive.questionsKept.map((item, indice) => <li key={`mantida-${indice}`}>{item.question}{item.valueAnswer ? ` → ${item.valueAnswer}` : ""}</li>)}</ul>}
+        {b.competitive.questionsDropped.length > 0 && <>
+          <p className="mt-2 text-sm text-text-muted">Perguntas fora do CSV (só neste painel, D13):</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-text-muted">{b.competitive.questionsDropped.map((item, indice) => <li key={`descartada-${indice}`}>{item.question}{item.reason ? ` — ${item.reason}` : ""}</li>)}</ul>
+        </>}
+        {b.competitive.contributionRequests.length > 0 && <>
+          <p className="mt-2 text-sm text-text-muted">Pedidos de contribuição preparados (não enviados): o ganho que a Skill de voz ou o parecer do especialista ainda não sustentam.</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-text-muted">{b.competitive.contributionRequests.map((item, indice) => <li key={`pedido-${indice}`}>{item.ask}</li>)}</ul>
+        </>}
+      </div>}
       <div className={bloco}>
-        <p className="text-sm text-foreground">Fechamento: {b.closing.turn}{b.closing.specialist ? ` (voz do especialista ${b.closing.specialist})` : ""}</p>
-        <p className="text-sm text-foreground">CTA: {b.closing.cta}</p>
+        {/* 2026-10-14b · F3 (D7): com os 4 campos, o fechamento sai em 4 tempos e o CTA é o diagnóstico. */}
+        {b.closing.diagnosis
+          ? <>
+            <p className="text-sm text-foreground">Dor: {b.closing.pain}</p>
+            <p className="text-sm text-foreground">Mudança para a estrutura própria: {b.closing.structureShift}{b.closing.specialist ? ` (voz do especialista ${b.closing.specialist})` : ""}</p>
+            <p className="text-sm text-foreground">Facilidade: {b.closing.ease}</p>
+          </>
+          : <p className="text-sm text-foreground">Fechamento: {b.closing.turn}{b.closing.specialist ? ` (voz do especialista ${b.closing.specialist})` : ""}</p>}
+        <p className="text-sm text-foreground">{b.closing.diagnosis ? "Diagnóstico (CTA único)" : "CTA"}: {b.closing.diagnosis || b.closing.cta}</p>
         {/* 2026-10-09 (correção) · a leitura do piloto: o próximo passo que chama não aparece; o que só aponta a leitura seguinte é opcional. */}
         {radarArticleBlueprintContinuationOf(b.closing.nextStep) && <p className="text-sm text-text-muted">{RADAR_ARTICLE_BLUEPRINT_CONTINUATION_LABEL}: {radarArticleBlueprintContinuationOf(b.closing.nextStep)}</p>}
         {b.eeat.length > 0 && <p className="mt-1 text-sm text-text-muted">E-E-A-T: {b.eeat.join(" · ")}</p>}
+        {/* 2026-10-14b · F3 (§9.2): o diferencial da marca da planta nova. */}
+        {b.brandEdge && <div className="mt-2" data-testid="radar-article-blueprint-brand-edge">
+          <p className="text-sm font-semibold text-foreground">Diferencial da marca</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-6 text-text-muted">
+            {b.brandEdge.method.map((item, indice) => <li key={`metodo-${indice}`}>Método: {item.deliverable}{item.methodName ? ` — ${item.methodName}` : ""}{item.section ? ` · ${item.section}` : ""}</li>)}
+            {b.brandEdge.vsGeneric && <li>Contra o genérico: {b.brandEdge.vsGeneric}</li>}
+            {b.brandEdge.localSignals.map((item, indice) => <li key={`sinal-${indice}`}>Autoridade local: {item.signal}{item.section ? ` · ${item.section}` : ""}</li>)}
+            {b.brandEdge.bottomFunnel && <li>Fundo de funil: {b.brandEdge.bottomFunnel}</li>}
+          </ul>
+        </div>}
       </div>
       <div className={bloco}>
         <p className="text-sm font-semibold text-foreground">Plano visual</p>

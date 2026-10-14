@@ -826,6 +826,14 @@ export const BrandDNASchema = z.object({
   differentiators: z.array(z.string()),
   prohibitedClaims: z.array(z.string()),
   editorialPrinciples: z.array(z.string()),
+  /*
+   * 2026-10-14 · FONTES DE AUTORIDADE DA MARCA (aditivo, opcional — SDD do Silo
+   * interligado §16.2). Os domínios que o Radar confere como fonte externa de
+   * autoridade, um por linha (`domínio[/caminho] | Nome`). Ausente ou vazio = a
+   * lista sugerida (`RADAR_DEFAULT_AUTHORITY_DOMAINS`). Versão gravada antes não tem
+   * o campo e continua válida, com o mesmo hash.
+   */
+  authoritySources: z.array(z.string()).optional(),
 });
 export type BrandDNA = z.infer<typeof BrandDNASchema>;
 

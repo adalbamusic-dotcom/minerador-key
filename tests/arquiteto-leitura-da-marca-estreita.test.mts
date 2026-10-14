@@ -241,7 +241,8 @@ test("o servidor do Arquiteto não lê minerador_keywords com select('*') e semp
 
 test("a montagem usa o índice por padrão e a linha inteira só das recebidas", () => {
   const load = block(serverSource, "export async function loadCanonicalArquitetoWorkspace", "export async function createMineradorArquitetoHandoff");
-  assert.match(load, /fullKeywordDetail \? listBrandKeywords\(context\) : listBrandKeywordIndex\(context\)/);
+  // F2 das listas leves (2026-10-14): o índice pode vir da leitura das marcas (mesmas colunas), sem nova consulta.
+  assert.match(load, /fullKeywordDetail \? listBrandKeywords\(context\) : options\.keywordIndexRows \? Promise\.resolve\(options\.keywordIndexRows as unknown as BrandKeywordRow\[\]\) : listBrandKeywordIndex\(context\)/);
   assert.match(load, /listBrandKeywordsByIds\(context, receivedKeywordIdsOf\(rows\)\)/);
 });
 
@@ -266,7 +267,9 @@ test("o GET só reconhece keywordDetail=full e ignora outro valor em vez de resp
   assert.doesNotMatch(schema, /keywordDetail/);
   assert.match(routeSource, /searchParams\.get\("keywordDetail"\) === "full" \? "full" as const : undefined/);
   const get = block(routeSource, "export async function handleArchitectWorkspaceRead", "export async function handleArchitectWorkspacePatch");
-  assert.match(get, /loadCanonicalArquitetoWorkspace\(context, \{ keywordDetail: keywordDetailOf\(searchParams\) \}\)/);
+  // F2 das listas leves (2026-10-14): a tela lê só as versões vigentes (e reaproveita metadados e índice da leitura das marcas).
+  assert.match(get, /readArchitectWorkspaceBody\(context, \{ keywordDetail: keywordDetailOf\(searchParams\),/);
+  assert.match(get, /loadCanonicalArquitetoWorkspace\(context, \{ keywordDetail: options\.keywordDetail, artifactRead: "vigente"/);
 });
 
 test("o bootstrap do cliente não grava o índice estreito nas fontes de recuperação", () => {

@@ -2,6 +2,7 @@ import { readPublicationLink, readSiteOrigin } from "./publication-link.ts";
 import { isPostLockedToSlug, primaryPostLabel, readPrimaryKeywordPolicy, type PrimaryKeywordPolicy } from "./primary-keyword-policy.ts";
 import { keywordPageTypeStance, keywordPageTypeStanding, resolveKeywordPageType, type KeywordPageTypeResolution } from "./keyword-page-type.ts";
 import { keywordSubjectLabel, resolveKeywordSubject, type KeywordSubjectResolution } from "./keyword-subject.ts";
+import { resolveKeywordPlanLock, type KeywordPlanLock, type KeywordPlanLockInput } from "./keyword-plan-lock.ts";
 
 /**
  * O VÍNCULO, RESOLVIDO UMA VEZ SÓ.
@@ -50,11 +51,25 @@ export type KeywordVinculo = {
   subject?: KeywordSubjectResolution;
   /** `Assunto · declarado` ou `Assunto sem nota`; ausente sem declaração. */
   subjectLabel?: string;
+
+  /**
+   * 2026-10-13 · A TRAVA DO CADASTRO no lugar do posto (pedido do dono: "no
+   * minerador eu coloco como [Travado ao slug] e ele não aceita"). Presente só
+   * quando quem chama passa `plan` (a tela do Minerador) e a keyword NÃO é
+   * publicada: aí o select "Posto de principal" é a trava (Travada · Livre ·
+   * Automática) e `postLabel` diz "Travada"/"Livre". Sem `plan`, o objeto é o
+   * de antes (o Arquiteto e os demais leitores não mudam).
+   */
+  planLock?: KeywordPlanLock;
+  /** Travada ao slug (publicada) ou travada no artigo (keyword do plano). Presente junto de `planLock`. */
+  postLocked?: boolean;
 };
 
 export type KeywordVinculoInput = {
   status?: string | null;
   semantic?: Record<string, unknown> | null;
+  /** 2026-10-13 · o contexto da trava do cadastro (id, volume e as outras linhas da marca). */
+  plan?: Omit<KeywordPlanLockInput, "status" | "semantic">;
 };
 
 export function resolveKeywordVinculo(input: KeywordVinculoInput): KeywordVinculo {
@@ -64,6 +79,9 @@ export function resolveKeywordVinculo(input: KeywordVinculoInput): KeywordVincul
 
   const post = readPrimaryKeywordPolicy({ status: input.status, semantic: input.semantic, publicationDeclared });
   const pageType = resolveKeywordPageType({ semantic: input.semantic, siteRole: link.siteRole, published: publicationDeclared });
+  // A trava só existe na keyword não publicada (`resolveKeywordPlanLock` devolve `null` na publicada).
+  const planLock = input.plan ? resolveKeywordPlanLock({ ...input.plan, status: input.status, semantic: input.semantic }) : null;
+  const postLabel = planLock ? (planLock.kind === "plan" ? planLock.shortLabel : "Livre") : primaryPostLabel(post);
 
   return {
     publicationDeclared,
@@ -72,7 +90,7 @@ export function resolveKeywordVinculo(input: KeywordVinculoInput): KeywordVincul
     canonicalUrl: link.canonicalUrl,
 
     post,
-    postLabel: primaryPostLabel(post),
+    postLabel,
     postLockedToSlug: isPostLockedToSlug(post),
     // `free` e `reviewable` são a mesma resposta na tela; o `<select>` só
     // precisa saber se está travado — soltar grava `reviewable`.
@@ -82,6 +100,8 @@ export function resolveKeywordVinculo(input: KeywordVinculoInput): KeywordVincul
     // O peso vem da publicação OU da declaração humana (potencial/declarado).
     pageTypeLabel: keywordPageTypeStanding(pageType.type, { declared: keywordPageTypeStance(pageType) === "declared" }),
     ...subjectFields(input.semantic),
+    ...(input.plan ? { postLocked: planLock ? planLock.kind === "plan" && planLock.state === "locked" : isPostLockedToSlug(post) } : {}),
+    ...(planLock ? { planLock } : {}),
   };
 }
 

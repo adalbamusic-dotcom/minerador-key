@@ -1,7 +1,9 @@
 import "server-only";
 
 import { z } from "zod";
+import { knownVolumesByNormalized } from "@/lib/server/known-before-search";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
+import type { ArchitectSuggestionDraft } from "@/lib/arquiteto/minerador-suggestions";
 import { contentHash, createVersionEnvelope } from "@/lib/arquiteto/versioning";
 import { buildSerpSubjectIndex, type KeywordSerpFootprint } from "@/lib/arquiteto/serp-subject-overlap";
 import {
@@ -127,6 +129,13 @@ export type DifferentiationHandlerDeps = {
   openRunPorts?: (operationRequestId: string) => Promise<Omit<DifferentiationRunPorts, "now">>;
   /** Grava uma versão nova do ArticleDNA pelo writer canônico do Arquiteto. */
   persistArticleVersion?: (version: VersionEnvelope<ArticleDNA>) => Promise<{ status: "PERSISTED" | "UNCHANGED"; versionId: string }>;
+  /**
+   * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13, item 2): as keywords novas do
+   * aceite viram "Sugestões do Arquiteto" (item de workflow do Arquiteto). O
+   * import é do Minerador, pelo clique do dono — antes a tela chamava a rota
+   * de import do Minerador direto daqui ("Enviar ao Minerador").
+   */
+  recordMineradorSuggestions?: (input: { source: "differentiation"; sourceId: string; drafts: ArchitectSuggestionDraft[] }) => Promise<{ recorded: number; recordKey: string } | { recorded: 0; error: string } | null>;
 };
 
 export type DifferentiationHandlerOutcome = { status: number; body: Record<string, unknown> };
@@ -436,6 +445,8 @@ export async function handleDifferentiationRun(deps: DifferentiationHandlerDeps,
       pageFootprints: pegadas.footprints,
       publishedNormalized: marca.publishedNormalized,
       existingByNormalized: marca.existingByNormalized,
+      // F3 · ler antes de buscar: a candidata com volume já medido no Minerador não vai às métricas de novo.
+      knownVolumeByNormalized: knownVolumesByNormalized(marca.knownVolumeByNormalized),
       operationRequestId: body.operationRequestId,
       authorizedPlan: body.authorizedPlan,
     }, { ...portas, now: deps.now });
@@ -620,6 +631,28 @@ export async function handleDifferentiationApply(deps: DifferentiationHandlerDep
     persistWarning = error instanceof Error ? error.message : "A decisão não pôde ser registrada na proposta.";
   }
   const readbackConfirmed = paginas.every(pagina => pagina.readbackConfirmed !== false) && Boolean(proposta);
+  /*
+   * F4 · AS KEYWORDS NOVAS VIRAM SUGESTÃO AO MINERADOR (nenhuma escrita lá).
+   * A caixa "Sugestões do Arquiteto" do Minerador as lê; o import é do dono.
+   */
+  let mineradorSuggestions: { recorded: number; recordKey: string } | { recorded: 0; error: string } | null = null;
+  const drafts: ArchitectSuggestionDraft[] = plano.ingestBatches.flatMap(lote => lote.items.map(item => ({
+    kind: "new_keyword" as const,
+    keyword: item.keyword,
+    keywordId: null,
+    targetKeywordId: lote.pageKeywordId,
+    targetTheme: lote.subjectPhrase,
+    targetKind: "published" as const,
+    subjectKeywordId: null,
+    volume: null,
+    volumeSource: null,
+    measuredAt: null,
+    reason: `Diferenciaria o publicado “${lote.subjectPhrase}” do resto do grupo (aceite da diferenciação).`,
+    origins: item.origins,
+    evidence: item.evidence,
+    searchId: run.operationRequestId,
+  })));
+  if (drafts.length && deps.recordMineradorSuggestions) mineradorSuggestions = await deps.recordMineradorSuggestions({ source: "differentiation", sourceId: `${group.groupId}:${run.operationRequestId}`, drafts });
   return {
     status: 200,
     body: {
@@ -629,6 +662,7 @@ export async function handleDifferentiationApply(deps: DifferentiationHandlerDep
         decision: "accept",
         groupId: group.groupId,
         pages: paginas,
+        ...(mineradorSuggestions ? { mineradorSuggestions } : {}),
         ingestBatches: plano.ingestBatches.map(lote => ({ ...lote, searchId: run.operationRequestId, subjectKeywordId: null })),
         proposal: proposta,
         persistWarning,

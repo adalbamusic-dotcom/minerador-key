@@ -27,7 +27,9 @@ test("one acceptance completes the batch; cancelling costs does not block ready 
   assert.match(screen.text(),/volume 50/);await screen.click(button("2 · Validar no Google (2 consultas, até US$ 0.01)"));assert.match(screen.text(),/mobile-ios/);await screen.click(button("Cancelar"));assert.equal(calls.filter(c=>c.action==="collect").length,0);
   // Com a validação pendente (passo 2 no cartão), gravar direto fica na fileira, sem número.
   await screen.click(button("Gravar sem validar (2)"));assert.equal(calls.length,1);await screen.click(button("Confirmar e aplicar"));
-  const applies=calls.filter(c=>c.action==="apply");assert.equal(applies.length,2);assert.deepEqual(applies[0].targetIds,["a","b"]);assert.equal(applies[0].approveNewKeywords,true);assert.equal(applies[1].targetIds,undefined);
+  const applies=calls.filter(c=>c.action==="apply");assert.equal(applies.length,2);assert.deepEqual(applies[0].targetIds,["a","b"]);
+  // F4 (ajuste declarado 2026-10-14): o Arquiteto não aprova keyword no Minerador — o pedido nunca leva approveNewKeywords.
+  assert.equal("approveNewKeywords" in applies[0],false);assert.equal(applies[1].targetIds,undefined);
   assert.match(screen.text(),/Melhoria gravada/);assert.match(screen.text(),/Falha recuperável/);assert.equal(applied,1);
 });
 test("F5 restores server acceptance and offers continuation without another confirmation",async()=>{
@@ -145,4 +147,25 @@ test("barra de progresso: contador e porcentagem quando o total é conhecido; pu
   assert.match(screen.text(), /Buscando keywords/);
   assert.match(screen.text(), /Em andamento · 12 s/);
   assert.equal(screen.container.querySelector('[role="progressbar"]')!.getAttribute("aria-valuenow"), null);
+});
+
+/*
+ * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`, item 2).
+ * O que o dono vê: a linha que precisaria de keyword nova fica "Precisa do
+ * Minerador", sem caixa marcável, com o link para "Sugestões do Arquiteto" no
+ * Minerador (filtrado na cor da análise); nada é gravado daqui.
+ */
+test("F4 · linha 'Precisa do Minerador': à vista, não marcável, com o link para as Sugestões do Arquiteto no Minerador", async () => {
+  const base = fixture();
+  restored = { ...base, groupScope: { requested: "azul", filter: "group", groupId: "g-azul" }, keywords: [...base.keywords, { id: "ext", keyword: "ideia nova", volume: 90, volumeValidated: true, external: true }],
+    proposals: [{ ...base.proposals[0], addIds: ["ext"], memberIds: ["old", "ext"], principalId: "old", status: "insufficient_evidence", needsMinerador: { newKeywordIds: ["ext"], measureKeywordIds: [], logicKeywordIds: [] }, reasons: ["Precisa do Minerador: 1 keyword(s) nova(s) para importar e aprovar no Minerador (“ideia nova”)."] }] };
+  await screen.render(comProductShell(React.createElement(ArticleImprovementPanel, { brandId: "brand-a", brandRef: "adalbapro--brand-a", onApplied: () => { applied++; }, buttonClassName: "button", primaryButtonClassName: "button" })));
+  assert.match(screen.text(), /1 linha\(s\) precisa do minerador: keyword nova, medição ou Lógica são decididas lá/);
+  const celula = screen.container.querySelector("[data-testid='architect-improvement-row-needs-minerador']")!;
+  assert.match(celula.textContent ?? "", /Precisa do Minerador · Sugestões do Arquiteto/);
+  const link = screen.container.querySelector<HTMLAnchorElement>("[data-testid='architect-improvement-open-suggestions']")!;
+  assert.equal(link.getAttribute("href"), "/adalbapro--brand-a/minerador?arquiteto=sugestoes&cor=azul");
+  const caixa = screen.container.querySelector<HTMLInputElement>("input[aria-label='Aplicar melhoria em Publicado a']")!;
+  assert.equal(caixa.disabled, true, "a linha que precisa do Minerador não é aceitável aqui");
+  assert.equal(calls.length, 0, "nada foi pedido ao servidor");
 });

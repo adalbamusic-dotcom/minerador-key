@@ -668,3 +668,24 @@ dado da Marca):
   por frase não mudou nesta rodada (o pedido a manteve); o CSV de vídeo não aplica a Regra 8 aos capítulos.
 - **Rollback:** reverter o código. Nada gravado mudou: as plantas novas ganham `rulesVersion = "2026-10-11b"` e
   continuam legíveis pelo código anterior (ele só não diz o aviso certo).
+
+## Adendo H — Keyword sem repetição antiga (2026-10-14) — DECIDIDO PELO DONO, IMPLEMENTADO EM CÓDIGO (F1)
+
+- **Fonte:** SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §7 (K1–K9, V1–V7),
+  decisões D4, D5 e D6 (decididas pela recomendação em 2026-10-14). Este adendo só remete a ela.
+- **O que muda no Adendo G:** saem "keyword no começo" (H1, alternativas, SEO title), "keyword nos primeiros 60 da
+  meta", "keyword na primeira frase e no primeiro H2" e a troca de metades. Entram a forma natural da principal uma
+  vez no H1 e no SEO title, em qualquer posição (abre no máximo 1 das 3 opções), os 3 ângulos, a meta natural, a
+  abertura nas primeiras ~100 palavras, nenhum H2 pela principal nem por complementar, o teto `2 + palavras/600` com
+  variações semânticas e nenhuma marca de processo em título ou meta.
+- **Precedência corrigida:** keyword é substância de SEO, não tom; onde a Skill protege a gramática e proíbe
+  densidade artificial, a Skill vale.
+- **Versões:** regras do artigo-modelo `2026-10-14`; leitura do Redator `2026-10-14`;
+  `RADAR_KEYWORD_RULES_VERSION = "2026-10-14"`. O vídeo muda na F6.
+- **Rollback:** reverter o código. `title.principalNatural` e `semanticVariants` são aditivos e opcionais; as plantas
+  gravadas não mudam (a leitura só tira a marca de processo do título).
+- **2026-10-14b · F3 da mesma SDD (D7, D8, D11–D13):** análise competitiva sobre a SERP já coletada, `brandEdge` e o
+  fechamento em 4 campos (regras do artigo-modelo `2026-10-14b`). **Muda o item 6 do Adendo F (D7):** a fala aprovada
+  do especialista alimenta a mudança para a estrutura e a facilidade, na voz dele, e deixa de ser o CTA; o CTA único é
+  o diagnóstico, com a oferta da Skill de voz da Marca (seção "Oferta de diagnóstico", D8; sem ela, o texto padrão
+  neutro). Detalhe no §18.1 da SDD e em `docs/05-radar/estado-atual.md`.

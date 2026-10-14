@@ -153,7 +153,11 @@ test("a elegibilidade ignora marcador local legado e permite keyword nova aprova
 
   const workspace = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(workspace, /transientHistoricalMarkerIdsForUi/);
-  assert.match(workspace, /disabled=\{keyword => !canEnterCanonicalArchitectWorkflow\(keyword\)\}/);
+  // 2026-10-13 · ajuste declarado: o modal "Importar do Minerador" não decide
+  // mais a elegibilidade no navegador; a lista leve vem do servidor
+  // (`GET /api/arquiteto/import`), conferida pelo portão do "Aprovar e enviar".
+  assert.match(workspace, /<MineradorImportDialog/);
+  assert.doesNotMatch(workspace, /canEnterCanonicalArchitectWorkflow/);
 });
 
 test("workflow remoto e ArticleDNA remoto bloqueiam a keyword canonicamente", () => {

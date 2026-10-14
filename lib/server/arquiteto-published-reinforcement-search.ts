@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import { knownVolumesByNormalized } from "@/lib/server/known-before-search";
 import { contentHash } from "@/lib/arquiteto/versioning";
 import { buildSerpSubjectIndex } from "@/lib/arquiteto/serp-subject-overlap";
 import { DIFFERENTIATION_RUNNING_STALE_MS, detectPublishedCannibalization, type DifferentiationPage, type DifferentiationRowState } from "@/lib/arquiteto/published-differentiation";
@@ -264,6 +265,8 @@ export async function handleReinforcementSearchRun(deps: ReinforcementSearchDeps
       pageFootprints,
       publishedNormalized: leitura.marca.publishedNormalized,
       existingByNormalized: leitura.marca.existingByNormalized,
+      // F3 · ler antes de buscar: a candidata com volume já medido no Minerador não vai às métricas de novo.
+      knownVolumeByNormalized: knownVolumesByNormalized(leitura.marca.knownVolumeByNormalized),
       operationRequestId: body.operationRequestId,
       authorizedPlan: body.authorizedPlan,
     }, { ...portas, now: deps.now });
