@@ -130,6 +130,10 @@ const { radarFoundationsOf } = await import("../lib/redator/radar-foundations.ts
 const { WRITER_BRIEF_SELECT, writerBriefFromRow } = await import("../lib/redator/writer-document-reads.ts");
 const { WRITER_EVIDENCE_GUARDS } = await import("../lib/redator/writer-evidence-catalog.ts");
 const { editorialGroupLabelOf } = await import("../lib/editorial/editorial-group-scope.ts");
+/* 2026-10-14 · SDD silo interligado · F6 · o material novo no get_writer_brief, pelo mesmo núcleo do CSV "Para escrever". */
+const { radarPortableWritingArticles } = await import("../lib/radar/portable-writing-batch.ts");
+const { radarWritingMaterialOf } = await import("../lib/radar/portable-writing-material.ts");
+const { WRITER_MATERIAL_NEEDS_BLUEPRINT_REASON, writerMaterialForMcp } = await import("../lib/redator/writer-material.ts");
 
 type Entrada = ReturnType<typeof F.entradaGoogle>;
 type Planta = ReturnType<typeof plantaDe>;
@@ -288,14 +292,20 @@ function linhaDoBriefing(documento: ReturnType<typeof buildRadarDocument>): Reco
   return saida;
 }
 
-/* O núcleo de `get_writer_brief` (app/api/mcp/redator/route.ts), com o estado da planta dado. */
-function respostaDoBriefing(documento: ReturnType<typeof buildRadarDocument>, estado: ReturnType<typeof mcpArticleBlueprintStateOf>) {
+/*
+ * O núcleo de `get_writer_brief` (app/api/mcp/redator/route.ts), com o estado da planta dado.
+ * 2026-10-14 · SDD silo interligado · F6 · decisão do dono ("pode sim": o Redator lê o material novo): o handler
+ * acrescenta `writerMaterial` — o material da linha do CSV "Para escrever" (`radarPortableWritingArticles` →
+ * `radarWritingMaterialOf`), com o checklist contra o documento (`writerMaterialForMcp`). Aqui, a mesma montagem pura.
+ */
+function respostaDoBriefing(documento: ReturnType<typeof buildRadarDocument>, estado: ReturnType<typeof mcpArticleBlueprintStateOf>, material: Parameters<typeof writerMaterialForMcp>[0]) {
   const linha = linhaDoBriefing(documento);
   const brief = writerBriefFromRow(linha as never);
   assert.ok(brief, "o documento do envio abre no briefing");
   const dossier = brief.dossier;
   const linhasDoAssunto = brief.editorialContext;
-  return mcpWithArticleBlueprintState({
+  const comMaterial = (base: Record<string, unknown>) => ({ ...base, writerMaterial: writerMaterialForMcp(material, { blocks: documento.blocks, editorContent: documento.editorContent }) });
+  return comMaterial(mcpWithArticleBlueprintState({
     documentId: documento.id, documentHash: linha.content_hash,
     articleDnaRef: brief.fields.articleDnaRef, keywordDnaRefs: brief.fields.keywordDnaRefs, siloDnaRef: brief.fields.siloDnaRef,
     instructions: brief.fields.instructions,
@@ -312,7 +322,7 @@ function respostaDoBriefing(documento: ReturnType<typeof buildRadarDocument>, es
     pendingDecisions: brief.pendingDecisions,
     guards: WRITER_EVIDENCE_GUARDS,
     warning: brief.schemaVersion === 2 && !dossier ? "Dossiê ausente nesta versão; não inferir evidências." : null,
-  }, estado);
+  }, estado));
 }
 
 /* ============================ a tirada ============================ */
@@ -331,6 +341,8 @@ async function tirarRetrato(): Promise<{ retrato: Retrato; cobertura: Cobertura 
 
   /* ---------------- por cenário: artigo-modelo, CSVs e MCP ---------------- */
   const plantas = new Map<string, Planta | null>();
+  /* 2026-10-14 · F6 · a montada de cada cenário: o material do get_writer_brief sai da mesma linha do CSV. */
+  const montadasDoCenario = new Map<string, Record<string, unknown>>();
   for (const cenario of cenarios()) {
     const silo = cenario.noSilo ? escritaDoSilo ?? null : null;
     const publicacao = cenario.publicacao ?? null;
@@ -351,6 +363,7 @@ async function tirarRetrato(): Promise<{ retrato: Retrato; cobertura: Cobertura 
       lentes: cenario.articleId === F.ARTIGO ? F.KEYWORDS_DAS_LENTES : [],
       ...(planta ? { blueprint: planta } : {}),
     };
+    montadasDoCenario.set(cenario.nome, montada);
     const publicacoes = new Map(publicacao ? [[cenario.articleId, publicacao]] : []);
     const grupos = new Map(cenario.grupo ? [[cenario.articleId, cenario.grupo]] : []);
     const planoDaSelecao = cenario.noSilo ? plano : null;
@@ -414,17 +427,24 @@ async function tirarRetrato(): Promise<{ retrato: Retrato; cobertura: Cobertura 
   /* ---------------- o que o Redator recebe ---------------- */
   const aprovado = mcpArticleBlueprintStateOf({ kind: "approved", meta: { id: "planta-do-retrato", versionNumber: 1, approvedAt: "2026-09-23T10:00:00+00:00" } });
   const semPlanta = mcpArticleBlueprintStateOf({ kind: "none", reason: "Nenhum artigo-modelo concluído para o pacote entregue." });
-  const envios: Array<[string, Contexto, Planta | null, Assunto | null]> = [
-    ["redator-sem-assunto", F.contextoDePesquisa(), plantas.get("pilar-avulso-sem-grupo-sem-assunto-sem-links") ?? null, null],
-    ["redator-com-assunto-formato-antigo", contextoCom(CONSULTA), plantas.get("pilar-com-assunto-formato-antigo") ?? null, CONSULTA],
+  const envios: Array<[string, Contexto, Planta | null, Assunto | null, string]> = [
+    ["redator-sem-assunto", F.contextoDePesquisa(), plantas.get("pilar-avulso-sem-grupo-sem-assunto-sem-links") ?? null, null, "pilar-avulso-sem-grupo-sem-assunto-sem-links"],
+    ["redator-com-assunto-formato-antigo", contextoCom(CONSULTA), plantas.get("pilar-com-assunto-formato-antigo") ?? null, CONSULTA, "pilar-com-assunto-formato-antigo"],
   ];
-  for (const [nome, contexto, planta, assunto] of envios) {
+  for (const [nome, contexto, planta, assunto, doCenario] of envios) {
     assert.ok(planta, `${nome}: a planta do cenário existe`);
     const documento = documentoDoEnvio(contexto, planta, assunto);
     fixar(`${nome}/documento-do-envio`, canonico(documento));
     fixar(`${nome}/fundamentos`, canonico(radarFoundationsOf(documento as never)));
-    fixar(`${nome}/mcp.get_writer_brief.planta-aprovada`, canonico(respostaDoBriefing(documento, aprovado)));
-    fixar(`${nome}/mcp.get_writer_brief.sem-planta`, canonico(respostaDoBriefing(documento, semPlanta)));
+    /* 2026-10-14 · F6 · o material da linha do CSV "Para escrever" do cenário (a mesma seleção avulsa que get_article_for_writing monta). */
+    const [linhaDoCsv] = radarPortableWritingArticles({
+      articles: [montadasDoCenario.get(doCenario) as never], lenses: F.LEITURA_DAS_LENTES, plan: null, selectionPlan: null,
+      publications: new Map(), today: F.EXPORTADO_EM, brandVoice: { kind: "none" },
+    });
+    const material = radarWritingMaterialOf(linhaDoCsv.article.uncutRow ?? linhaDoCsv.article.row);
+    assert.ok(material, `${nome}: o material sai da linha do CSV`);
+    fixar(`${nome}/mcp.get_writer_brief.planta-aprovada`, canonico(respostaDoBriefing(documento, aprovado, { state: "ready", articleId: F.ARTIGO, material: material! })));
+    fixar(`${nome}/mcp.get_writer_brief.sem-planta`, canonico(respostaDoBriefing(documento, semPlanta, { state: "needs_article_blueprint", articleId: F.ARTIGO, reason: WRITER_MATERIAL_NEEDS_BLUEPRINT_REASON })));
   }
 
   /* ---------------- diretriz de voz humana ---------------- */
@@ -563,72 +583,72 @@ const RETRATO: Retrato = {
   "pilar-avulso-sem-grupo-sem-assunto-sem-links/artigo-modelo.planta-congelada": { sha256: "75dc0966177fdc9545b9ae072971f3f0deb5dced60a09f2f2598b8c581740de4", bytes: 10292 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-avulso-sem-grupo-sem-assunto-sem-links/csv-para-escrever": { sha256: "56c5fed3e71cba29b27baf9aaddf59d5c159b922502da0ce30c1d30d0013e9d0", bytes: 22180 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-avulso-sem-grupo-sem-assunto-sem-links/csv-para-escrever.meta": { sha256: "351eadf4a711ca32f75ab9f6a63d47a5b850567270561ff7d21369dbd8a2b04c", bytes: 67 },
-  "pilar-avulso-sem-grupo-sem-assunto-sem-links/csv-video": { sha256: "380cbb663bea7f95138bcd0864ad598cecfd1cf86d85609841f3ab6aec1d85df", bytes: 22345 },
+  "pilar-avulso-sem-grupo-sem-assunto-sem-links/csv-video": { sha256: "6643ffc1cb770201bf09523063e3002fe51f83fab69b0cb7ca8d774664487fd4", bytes: 27848 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-avulso-sem-grupo-sem-assunto-sem-links/mcp.get_article_for_writing": { sha256: "751de46fe254b9cb399cf7ce354bce3c1e8d9363f31e1435af2740db6ccfcab9", bytes: 23007 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "pilar-avulso-sem-grupo-sem-assunto-sem-links/mcp.get_video_material": { sha256: "8d372b2f15544d13be0babb7c4a07c8a465b7cf0698b14fc783b8907bf0100e6", bytes: 22662 },
+  "pilar-avulso-sem-grupo-sem-assunto-sem-links/mcp.get_video_material": { sha256: "dae6dd16758540e13acf4859bebba33f901f941c72e4c4b6d2d966dd80cc2442", bytes: 28381 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-no-silo-com-links/artigo-modelo.brief": { sha256: "19dc29c988797075bf4d3e7b5b02b8198dc64303b777c8ead6c1df6d9c1743fa", bytes: 10579 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-no-silo-com-links/artigo-modelo.pedido.system": { sha256: "3d971202d4e32959147f584703a723b16832587ff9df41f689d5633fb2d4abb0", bytes: 21528 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-no-silo-com-links/artigo-modelo.pedido.user": { sha256: "d46dc60f1c95f0cc3834274b0028eb68084597c851560e09594bcfd74e78a172", bytes: 11162 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-no-silo-com-links/artigo-modelo.planta-congelada": { sha256: "55a53308906b4e420332990568b861b48b56624f01b9cf991c6e81541e8576cf", bytes: 11561 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-no-silo-com-links/csv-para-escrever": { sha256: "1cfc2bf37a3824f9004e0e74965432de1b1826e522fc40cf737de4cbacd15740", bytes: 27626 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-no-silo-com-links/csv-para-escrever.meta": { sha256: "8737af384d81f4f6a62f75e97436062be87564e96b151c13c1bc103b8fc14aa5", bytes: 69 },
-  "pilar-no-silo-com-links/csv-video": { sha256: "380cbb663bea7f95138bcd0864ad598cecfd1cf86d85609841f3ab6aec1d85df", bytes: 22345 },
+  "pilar-no-silo-com-links/csv-video": { sha256: "6643ffc1cb770201bf09523063e3002fe51f83fab69b0cb7ca8d774664487fd4", bytes: 27848 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-no-silo-com-links/mcp.get_article_for_writing": { sha256: "b52f7d87bf393e204ac7b500b67f44b98a804cd9fd28f7ea2c936f6106aff97b", bytes: 28823 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "pilar-no-silo-com-links/mcp.get_video_material": { sha256: "8d372b2f15544d13be0babb7c4a07c8a465b7cf0698b14fc783b8907bf0100e6", bytes: 22662 },
+  "pilar-no-silo-com-links/mcp.get_video_material": { sha256: "dae6dd16758540e13acf4859bebba33f901f941c72e4c4b6d2d966dd80cc2442", bytes: 28381 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-grupo-do-plano-com-promessa-declarada/artigo-modelo.brief": { sha256: "1896964d2d6f115de25198ed383c6eb55ef4c0ec4594abb62445fdd391686abc", bytes: 10643 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-grupo-do-plano-com-promessa-declarada/artigo-modelo.pedido.system": { sha256: "3d971202d4e32959147f584703a723b16832587ff9df41f689d5633fb2d4abb0", bytes: 21528 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-grupo-do-plano-com-promessa-declarada/artigo-modelo.pedido.user": { sha256: "7e77d51cc6e7d605c43ac32c8b18835d97aedefddafda5ac9e9bd4855493052c", bytes: 11226 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-grupo-do-plano-com-promessa-declarada/artigo-modelo.planta-congelada": { sha256: "55a53308906b4e420332990568b861b48b56624f01b9cf991c6e81541e8576cf", bytes: 11561 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-grupo-do-plano-com-promessa-declarada/csv-para-escrever": { sha256: "bb886e84f125a89e5fcde90396700d26720408399e22597147c6d2d2feeaf45c", bytes: 27793 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-grupo-do-plano-com-promessa-declarada/csv-para-escrever.meta": { sha256: "8737af384d81f4f6a62f75e97436062be87564e96b151c13c1bc103b8fc14aa5", bytes: 69 },
-  "pilar-grupo-do-plano-com-promessa-declarada/csv-video": { sha256: "33a2f991e0cc6b5fbf1bd86e4a4206263fb8618578ce4726eaff24d24625fd33", bytes: 22409 },
+  "pilar-grupo-do-plano-com-promessa-declarada/csv-video": { sha256: "383df81104d69845ee57d27e9a31f0bf4725a03189033af7d3932af329285018", bytes: 27912 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-grupo-do-plano-com-promessa-declarada/mcp.get_article_for_writing": { sha256: "337b3d9f8b0f95cb623489d94ed75d0d773a7b5d44ff11a4ff0d3e868f3ba1e7", bytes: 29301 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "pilar-grupo-do-plano-com-promessa-declarada/mcp.get_video_material": { sha256: "2e9c5e8b51d8663e5d21f320e8fbd3b1d4fc7be72dc8b511edceda0f507092d3", bytes: 22726 },
+  "pilar-grupo-do-plano-com-promessa-declarada/mcp.get_video_material": { sha256: "aa1815a8fa1f4a91819eeae35a7d45ea463fb0ab4ed86114cb8e2cbb3c599820", bytes: 28445 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-grupo-manual-com-promessa-declarada/artigo-modelo.brief": { sha256: "ecdf547f93e69d03272549d8ac7292f02a2b010e0c69c829f8657068e1efcbb8", bytes: 9444 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-grupo-manual-com-promessa-declarada/artigo-modelo.pedido.system": { sha256: "3d971202d4e32959147f584703a723b16832587ff9df41f689d5633fb2d4abb0", bytes: 21528 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-grupo-manual-com-promessa-declarada/artigo-modelo.pedido.user": { sha256: "8a25d243cf0f2160c573f1cfc43067fbd660466c0231beb366d73af7dc58c46e", bytes: 10170 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-grupo-manual-com-promessa-declarada/artigo-modelo.planta-congelada": { sha256: "75dc0966177fdc9545b9ae072971f3f0deb5dced60a09f2f2598b8c581740de4", bytes: 10292 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-grupo-manual-com-promessa-declarada/csv-para-escrever": { sha256: "b2f53a19c33a29cc36e7be169c5019b68eaf8dc4ab1a2f06ec805a2f0f3ee2b5", bytes: 22272 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-grupo-manual-com-promessa-declarada/csv-para-escrever.meta": { sha256: "351eadf4a711ca32f75ab9f6a63d47a5b850567270561ff7d21369dbd8a2b04c", bytes: 67 },
-  "pilar-grupo-manual-com-promessa-declarada/csv-video": { sha256: "514707e885b515d31c52d54fcd22734104879f085878ada791397c4533f30fe0", bytes: 22375 },
+  "pilar-grupo-manual-com-promessa-declarada/csv-video": { sha256: "cbdd8c85d37c2f536d2391f1aa256ac3e672dbf89090a315d41868195859e043", bytes: 27878 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-grupo-manual-com-promessa-declarada/mcp.get_article_for_writing": { sha256: "9b95a06a1233060b72c024d6fc1f7b67a4d27284ae7424ca9a2ef5044806fa3e", bytes: 23221 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "pilar-grupo-manual-com-promessa-declarada/mcp.get_video_material": { sha256: "ecaed436a3427a0a4151ff1e06d886ae5ff06e7deb08382c29107bbd81fb0a14", bytes: 22692 },
+  "pilar-grupo-manual-com-promessa-declarada/mcp.get_video_material": { sha256: "d555c1ba094b356dfe85f271702c9691c494a258c51477647a9721aacd8616d0", bytes: 28411 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-com-assunto-formato-antigo/artigo-modelo.brief": { sha256: "ca87b533a6ab8a5cee179a16bd3c5d843de0d71e7d51df8a7f5bf5872a96e834", bytes: 9884 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-com-assunto-formato-antigo/artigo-modelo.pedido.system": { sha256: "3d971202d4e32959147f584703a723b16832587ff9df41f689d5633fb2d4abb0", bytes: 21528 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-com-assunto-formato-antigo/artigo-modelo.pedido.user": { sha256: "0e3c5bd88cb7f72c57b90e26e9427c9c740e2138bd621c505d238ff4a1045cd6", bytes: 10719 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-com-assunto-formato-antigo/artigo-modelo.planta-congelada": { sha256: "ad87a58cedb72844b0537ee0231ecbe8441869e251b06b27c703aec571860421", bytes: 10402 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-com-assunto-formato-antigo/csv-para-escrever": { sha256: "a1325dfef25578a301c70b1ed29ce7535a22ed85f51d4082ae23d0b15ab76a02", bytes: 22338 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-com-assunto-formato-antigo/csv-para-escrever.meta": { sha256: "351eadf4a711ca32f75ab9f6a63d47a5b850567270561ff7d21369dbd8a2b04c", bytes: 67 },
-  "pilar-com-assunto-formato-antigo/csv-video": { sha256: "0a17aba9240b1bf202064d1ef68622c41abc8cf2820db30783902189926b312d", bytes: 22399 },
+  "pilar-com-assunto-formato-antigo/csv-video": { sha256: "9a502f7dc3ab7c5b3223ce6712b7426aa9cdde6bb9a39994592dce79769dfc20", bytes: 27902 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-com-assunto-formato-antigo/mcp.get_article_for_writing": { sha256: "c1295276ca02d9d6952e2f37798d81e78545825785889c48d7ef5ecd0895ce46", bytes: 23166 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "pilar-com-assunto-formato-antigo/mcp.get_video_material": { sha256: "a4f98a31ce332c757eef74a94782a38811cf3586b34b20bd9705b8c5c4fcc2ff", bytes: 22716 },
+  "pilar-com-assunto-formato-antigo/mcp.get_video_material": { sha256: "f644729fd4e29bebfb31adfeec3c638ace19a5184ab3744503577356d52961cf", bytes: 28435 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-publicado-sem-politica/artigo-modelo.brief": { sha256: "717418212871f49f1b48fd5989c7df7746dedb40041565ba855deca33a05bea5", bytes: 10693 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-publicado-sem-politica/artigo-modelo.pedido.system": { sha256: "3d971202d4e32959147f584703a723b16832587ff9df41f689d5633fb2d4abb0", bytes: 21528 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-publicado-sem-politica/artigo-modelo.pedido.user": { sha256: "bd9b9b74ba64b216933cda846e5d4253d1f82541fe884bd702ac5872a06c3223", bytes: 11524 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-publicado-sem-politica/artigo-modelo.planta-congelada": { sha256: "aa4ebde3e00972246c3ee4dedbdf0ca45e3dde22b4f547872a9f8b953bbf5a7a", bytes: 10978 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "pilar-publicado-sem-politica/csv-para-escrever": { sha256: "5dec39fb214f9f993686c52c03040c3aef725601eb5307ebfb55a5adc274fde2", bytes: 25394 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "pilar-publicado-sem-politica/csv-para-escrever.meta": { sha256: "351eadf4a711ca32f75ab9f6a63d47a5b850567270561ff7d21369dbd8a2b04c", bytes: 67 },
-  "pilar-publicado-sem-politica/csv-video": { sha256: "08afa7ccd2918583eccd97a8d8f4cd2d853e8cdd48584fd28d1721dbb4702a85", bytes: 22940 },
+  "pilar-publicado-sem-politica/csv-video": { sha256: "959e4c00c786a26c84bdfc0e3ad1234111bfef7583f6f9aa60a8fdd60b5498aa", bytes: 28702 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "pilar-publicado-sem-politica/mcp.get_article_for_writing": { sha256: "c69e039c97c0440b88fa885ba929b8d19a17ceb5bf0f5aa82ebee348769c217c", bytes: 26503 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "pilar-publicado-sem-politica/mcp.get_video_material": { sha256: "781a7cfab73bc1ad1d9589b6a73504e70f8ca4b89144fb756b81e96886357b2d", bytes: 23257 },
+  "pilar-publicado-sem-politica/mcp.get_video_material": { sha256: "8424a1bf79d08aa82e71f20b20b34a7c9d6a7be357b4e0c3ad3725834629ce5d", bytes: 29235 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": a estrutura e as entidades dos concorrentes no gabarito do vídeo longo)
   "suporte-amazon-no-silo-com-links/artigo-modelo.brief": { sha256: "4cd4e16cf984aff8db8015756eb4c10c87980e8f629be3fae96b3c1ee99d5ba4", bytes: 2242 }, // 2026-10-14 · SDD silo interligado · F2 · decisão do dono (frase do §1)
   "suporte-amazon-no-silo-com-links/artigo-modelo.pedido.system": { sha256: "1b0448d61c01af2c288e17502bd927b5abd8a5658b00abd527fe73d27b850d09", bytes: 20008 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "suporte-amazon-no-silo-com-links/artigo-modelo.pedido.user": { sha256: "2132e66449e438ee33aaca8aac9906035779f9494cd47f1d89fe3a874533b3f0", bytes: 3964 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "suporte-amazon-no-silo-com-links/artigo-modelo.planta-congelada": { sha256: "c3c3c9cc7a7d5e22c443feb78afdb5489bdbe4813c016e4f6a0e246f0099544f", bytes: 4966 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "suporte-amazon-no-silo-com-links/csv-para-escrever": { sha256: "d61a5a480d91738557aaf6fc57e7cd315f1621bf381d62bcddfb78d76bd5bda8", bytes: 21210 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "suporte-amazon-no-silo-com-links/csv-para-escrever.meta": { sha256: "dfab37a4e61bc5f372f32f3144304c558183fbdbf775c140943f8ae6855f20fb", bytes: 71 },
-  "suporte-amazon-no-silo-com-links/csv-video": { sha256: "9b4c8a7707e9c44b4ffdaf560a6935661004cf2389cf4c370d80f10b6a4c66ce", bytes: 19787 },
+  "suporte-amazon-no-silo-com-links/csv-video": { sha256: "febff8385402b3dc2022ad252381048ca22fd2ae7df3fd098023bd14cedf526c", bytes: 24401 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
   "suporte-amazon-no-silo-com-links/mcp.get_article_for_writing": { sha256: "be4a13f051bfcac530e74f67433f57af215c83e6cc8c4e6beb78bff6bc89932d", bytes: 22096 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "suporte-amazon-no-silo-com-links/mcp.get_video_material": { sha256: "6f91c8007406ff657aa4077dc914e05c7b079448544f1b497b143240c27ed57c", bytes: 20104 },
+  "suporte-amazon-no-silo-com-links/mcp.get_video_material": { sha256: "6f75c2838ae628cf4f4c210564b43644f63c39446d6251ba4569a27837056b4d", bytes: 24718 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
   "suporte-amazon-avulso-sem-links/artigo-modelo.brief": { sha256: "a7b615780c2d30aaf2dfd7770c3b3428a5323508ec15258b153c334f9ace86ad", bytes: 1078 },
   "suporte-amazon-avulso-sem-links/artigo-modelo.pedido.system": { sha256: "1b0448d61c01af2c288e17502bd927b5abd8a5658b00abd527fe73d27b850d09", bytes: 20008 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "suporte-amazon-avulso-sem-links/artigo-modelo.pedido.user": { sha256: "082dff0ce2a9a2a2ca8bf1806b413b7704c92b58563f44190664fea289a9da39", bytes: 2877 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "suporte-amazon-avulso-sem-links/artigo-modelo.planta-congelada": { sha256: "4d1a0c1c1d33d4d6774069d181cf4f9b586eb84d01c43447da56dec871ccf167", bytes: 3699 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
   "suporte-amazon-avulso-sem-links/csv-para-escrever": { sha256: "dbdd09ef0539a6e20cb84ccbe7009ba9aaa73124fff73c4fbfaeb69666abce88", bytes: 15709 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "suporte-amazon-avulso-sem-links/csv-para-escrever.meta": { sha256: "59e10c09aef0eb0c3af019c1a487539a7fa7d5e33b0f491ac362d671ef45b6d2", bytes: 67 },
-  "suporte-amazon-avulso-sem-links/csv-video": { sha256: "682dfff03946cb61489106d1b1bca094cf8cb4dec2a0e8c0ae495d9ab2b76ddb", bytes: 19411 },
+  "suporte-amazon-avulso-sem-links/csv-video": { sha256: "342193d3d90b42936c266c6db7e0af7cdec0e6ae924afdcd40007660f4c37a18", bytes: 24068 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
   "suporte-amazon-avulso-sem-links/mcp.get_article_for_writing": { sha256: "f2efd2ea4babdbea9aa1c96caea45127439d5aeddce9855a16d6b06465dcd84d", bytes: 16446 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "suporte-amazon-avulso-sem-links/mcp.get_video_material": { sha256: "1753af21790c4c672b263253d58b4a5ace2258905aa440c7e1c34d8ba1f8e49f", bytes: 19728 },
+  "suporte-amazon-avulso-sem-links/mcp.get_video_material": { sha256: "95a71f8a51b37d79848b0198294a25a2137d3f682708a0b7d51e413a90742cc7", bytes: 24385 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
   "suporte-youtube-no-silo/csv-para-escrever": { sha256: "5830eb367f4bc10930d40f641f241c365b6ca060522a9238fdeb5a7b4d688abb", bytes: 9560 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "suporte-youtube-no-silo/csv-para-escrever.meta": { sha256: "ce9d453e9edf9681d29679c1608e57a662d65624b07e25d29dd47a86d946e498", bytes: 73 },
   "suporte-youtube-no-silo/csv-video": { sha256: "755f9d477fb9d90e773590b47196881cadd4e125466485cd2ff5f2fbcbe42fed", bytes: 90 },
@@ -638,19 +658,19 @@ const RETRATO: Retrato = {
   "silo-pilar-e-suportes/csv-para-escrever.meta": { sha256: "cb88c03d73ed6eff3e5a098e621ec6fed76a0a4e23e30fa32f8a431f9069241f", bytes: 124 },
   "silo-saude-pilar-publicado/csv-para-escrever": { sha256: "15355566177f05ed6b037c64555be5043fc6e696c166464ef4edafb55a0a1c47", bytes: 44857 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
   "bancada-pilar/mcp.get_article_for_writing": { sha256: "02d9c18fad87b46046014f9d8b5fc875754bb4b7baf8c45b70de5511c919ab5b", bytes: 28145 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "bancada-pilar/mcp.get_video_material": { sha256: "c45318b3e046bfbce6dd887f87b40b05c10adad6ba1f8ef065ddec382b45443b", bytes: 17684 },
+  "bancada-pilar/mcp.get_video_material": { sha256: "228d2058a5b9009302b7f4a2ca9e4cf4edf4b422a2a2800ef0e19252f4a530f5", bytes: 22241 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
   "bancada-suporte/mcp.get_article_for_writing": { sha256: "6a7ef44149ade83bbe831b94b02ccf6bce7a2bb06f841e0175dd4e39e6da9faf", bytes: 27881 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "bancada-suporte/mcp.get_video_material": { sha256: "1b4d36de809b161073376420a043dae05bc557b1ebf99037278953f8a6c6eff9", bytes: 17795 },
+  "bancada-suporte/mcp.get_video_material": { sha256: "cd5798a2b8a6d71e18a5cda5706c6232cd02496ffa2a9e32abedfa9f300f85a0", bytes: 22401 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
   "redator-sem-assunto/documento-do-envio": { sha256: "19f2ba3c73dd4815cb479c12902f2d51c079d12195a926bb60c94a322b336258", bytes: 206550 },
   "redator-sem-assunto/fundamentos": { sha256: "f43d4eb201d63e9bf574ed132c0bd740d671fe613c3351e999a898915ff0a46a", bytes: 3537 },
-  "redator-sem-assunto/mcp.get_writer_brief.planta-aprovada": { sha256: "aa371d091aed8da5a1f052c52725c38cc4a07ede3d755fc3c66b9706a537b277", bytes: 2902 },
-  "redator-sem-assunto/mcp.get_writer_brief.sem-planta": { sha256: "250f9d29da679d16338ba9c38f6eabdb620eac4f94498909c20f2c926a4b865d", bytes: 3915 },
+  "redator-sem-assunto/mcp.get_writer_brief.planta-aprovada": { sha256: "b18cbf8b483bf0ffb856978aa7476cc9615c4074e30036d2c5361f452e90059d", bytes: 9521 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": o status 'ativar' do checklist e a regra do material)
+  "redator-sem-assunto/mcp.get_writer_brief.sem-planta": { sha256: "b7a16bf32bb0500300be45447aefa654e881205ee4e5560d2a1e3e45c084e8bf", bytes: 4151 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
   "redator-com-assunto-formato-antigo/documento-do-envio": { sha256: "f9b9df2e1d8d5ab38a417823c42a997f69d2bfdd11ae10ca473af28378242d10", bytes: 207082 },
   "redator-com-assunto-formato-antigo/fundamentos": { sha256: "332291514fe9b2baedd525b82504ac49b4dddc61f4bd8840abc63c984504faa8", bytes: 4091 },
-  "redator-com-assunto-formato-antigo/mcp.get_writer_brief.planta-aprovada": { sha256: "8843a94c99af9e3bee570ae030dc8ac1c6351803a96afd13703ed643e52733db", bytes: 3456 },
-  "redator-com-assunto-formato-antigo/mcp.get_writer_brief.sem-planta": { sha256: "f3e60787b139e725d343ad79e9facb007468089c0ab76b0613b0470035c874d6", bytes: 4280 },
+  "redator-com-assunto-formato-antigo/mcp.get_writer_brief.planta-aprovada": { sha256: "7e02f2217bc8b5aad84649d282dd950d0da072a81afbfca80a1a7d2d931862be", bytes: 10075 }, // 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências": o status 'ativar' do checklist e a regra do material)
+  "redator-com-assunto-formato-antigo/mcp.get_writer_brief.sem-planta": { sha256: "af113183dd42e4ea48ce00a57c8120d254951355e24ebf7a36e35ce1ce832b47", bytes: 4516 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
   "voz-humana/diretriz": { sha256: "6937d578dbbe71e6a82bb741e83b6660f5e5d96fbd268643b26d4428acb37795", bytes: 17893 }, // 2026-10-14b · SDD silo interligado · F3 · decisão do dono (frase do §1)
-  "voz-humana/textos": { sha256: "7a7e5206a18e118fd976ec7e9c919df0215431ff47440d6688be52b7f8f2990a", bytes: 18332 }, // 2026-10-14c · SDD silo interligado · F-B · decisão do dono (frase do §1 e autorização do §16.2)
+  "voz-humana/textos": { sha256: "20d75838cab88668801f21dd0b52633d4f5595ee619d352b0ed1c7ec96fd51ca", bytes: 18949 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
   "voz-humana/reguas": { sha256: "dff73a140048722c8dbc55e859c008d3f20454b8cb4ff2cf2e424138c477f8cf", bytes: 1058 },
   "ancoras-naturais/regras": { sha256: "47fdd76f4807be21da34b299f5e817d8070c93f2cc2ac8a0e00ca0bceeee7a87", bytes: 1674 },
   "ancoras-naturais/regua": { sha256: "5992c214c50fae4aae88866ee71be44f175271f33c93e3e93cceb5798bfa2113", bytes: 2533 },
@@ -661,7 +681,7 @@ const RETRATO: Retrato = {
   "identidade-de-publicacao/rotulos": { sha256: "7431881533267e6a176c75a869e22c8b8bc9540c8c313c85735b2bd3e13a9d2a", bytes: 107 },
   "fonte/platform-mcp-tools.get_article_for_writing+get_video_material": { sha256: "1c3fd9aa42f008fcb4e9de0b9b0ad1043fbe8fdb995aeb5950dd1ff06f8caaa2", bytes: 4732 },
   "fonte/mcp-redator.fitBrief": { sha256: "f6cbf41a19c08ce4ec43549f7cf7c6dbb7454f49f2a9fee1b4053b1862d4e6f6", bytes: 2130 },
-  "fonte/mcp-redator.get_writer_brief": { sha256: "cbb877fb300e1b96b51abed144d8aea4980a28d540dc54b49343db856418cd08", bytes: 2628 },
+  "fonte/mcp-redator.get_writer_brief": { sha256: "4057d2c35eceb6711320ac13a748a8e6baffe1564b2495403dc54c5b03384293", bytes: 3738 }, // 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes e o Redator lê o material novo)
 };
 
 /* ============================ os testes ============================ */

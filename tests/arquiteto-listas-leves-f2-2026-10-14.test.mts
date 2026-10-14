@@ -236,7 +236,9 @@ test("estrutura · a tela relê pelo delta; a 1ª leitura de cada abertura é a 
   assert.match(tela, /loadCanonicalArquitetoWorkspace\(brandId, leituraFresca \? \{ fresh: true \} : \{\}\)/);
   assert.match(tela, /loadCanonicalArquitetoWorkspace\(selectedBrandId, \{ serpDetail: "full" \}\)\.catch\(\(\) => null\)/, "a exportação (backup) leva o parecer inteiro");
   const http = semComentarios(ler("lib/server/arquiteto-workspace-http.ts"));
-  assert.match(http, /articleFormationSerp: serpCheio \? articleFormationSerp : articleFormationSerp\.map\(projectArticleFormationSerpRecord\)/);
+  // F6 (2026-10-14, ajuste declarado): a projeção da lista passou para o banco (view da M-L), com o Node como recuo.
+  assert.match(http, /serpCheio \? listArticleFormationSerpAssessments\(context\) : listArticleFormationSerpForList\(context\)\.then\(lidos => lidos\.records\)/);
+  assert.match(http, /articleFormationSerp, territorialAi,/);
   assert.match(http, /const baseDaReleitura = options\.groupFilter\.kind === "all" && !options\.keywordDetail && !serpCheio;/);
   const rota = semComentarios(ler("app/api/arquiteto/workspace/delta/route.ts"));
   assert.match(rota, /export async function POST/);
@@ -248,7 +250,12 @@ test("estrutura · a releitura e a projeção NUNCA escrevem; as escritas do par
   assert.doesNotMatch(sync, /\.(insert|update|upsert|delete)\(/);
   assert.doesNotMatch(sync, /fetch\(/, "nenhum provider");
   const loja = semComentarios(ler("lib/server/arquiteto-article-serp-store.ts"));
-  assert.doesNotMatch(loja, /projectArticleFormationSerp/, "o que é gravado nasce do registro inteiro, nunca da projeção");
+  // F6 (ajuste declarado): a projeção só aparece no leitor da LISTA (recuo sem a view); as escritas nunca a leem.
+  const inicioDaLista = loja.indexOf("export async function listArticleFormationSerpForList");
+  const fimDaLista = loja.indexOf("export async function", inicioDaLista + 10);
+  assert.ok(inicioDaLista > 0 && fimDaLista > inicioDaLista, "o leitor da lista existe");
+  const forDaLista = loja.slice(0, inicioDaLista) + loja.slice(fimDaLista);
+  assert.doesNotMatch(forDaLista.replace(/^import .*$/gm, ""), /projectArticleFormationSerp|from\(ARTICLE_FORMATION_SERP_LIGHT_VIEW\)/, "o que é gravado nasce do registro inteiro, nunca da projeção");
   const projecao = semComentarios(ler("lib/arquiteto/article-serp-projection.ts"));
   assert.doesNotMatch(projecao, /fetch\(|supabase|localStorage/);
 });
@@ -270,7 +277,8 @@ test("estrutura · nenhum caminho de entregável usa o leitor leve (CSV Para esc
   const existentes = arquivos.filter(arquivo => existsSync(new URL(`../${arquivo}`, import.meta.url)));
   assert.ok(existentes.length >= 15, `a lista do §2.1 foi encontrada (${existentes.length})`);
   for (const arquivo of existentes) {
-    assert.doesNotMatch(semComentarios(ler(arquivo)), /listLight\(|projectArticleFormationSerp|artifactRead|workspace\/delta|readArchitectSyncState|mergeArchitectWorkspaceDelta/, `${arquivo} não usa o leitor leve`);
+    // F6: os leitores leves novos (views da M-L, lista leve do Minerador) entram na mesma lista proibida.
+    assert.doesNotMatch(semComentarios(ler(arquivo)), /listLight\(|projectArticleFormationSerp|artifactRead|workspace\/delta|readArchitectSyncState|mergeArchitectWorkspaceDelta|listArticleFormationSerpForList|_lista_leve|keyword-light-list|lightKeywordRowFromView|projectKeywordSemanticForList/, `${arquivo} não usa o leitor leve`);
   }
 });
 

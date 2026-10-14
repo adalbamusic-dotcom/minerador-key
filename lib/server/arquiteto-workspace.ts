@@ -491,6 +491,11 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
     keywords: sources,
     existingKeywordIds,
     receivedApprovedHashById,
+    // 2026-10-14 (WifiConecta, azul): a atualização do pacote preserva as decisões do Arquiteto já gravadas no item.
+    receivedItemById: new Map([...workflowByKeywordId.entries()]
+      .filter(([, row]) => row.state === MINERADOR_ARQUITETO_RECEIVED_STATE)
+      .map(([keywordId, row]) => [keywordId, { payload: (row.payload || {}) as Record<string, unknown>, lockVersion: Number.isInteger(row.lock_version) ? row.lock_version : null }])),
+    refreshedAt: new Date().toISOString(),
   });
   return {
     plan,
@@ -524,8 +529,14 @@ async function persistCanonicalHandoff(context: PipelineContext, prepared: Await
   // Reaprovação de keyword já recebida reescreve o pacote no lugar. O trigger
   // `pipeline_editorial_touch_lock_version` incrementa a versão sozinho, então
   // a cadeia fica auditável sem tabela nova.
+  /*
+   * 2026-10-14 (WifiConecta, azul): o payload gravado é o do item lido com só o
+   * transporte trocado (`mergeRefreshedHandoffPayload`) — Silo, formação,
+   * Assunto ancorado e edições do Arquiteto ficam. A trava do item lido vale:
+   * se outra sessão mexeu nele no meio, nada é sobrescrito (409, tente de novo).
+   */
   for (const update of prepared.plan.updates) {
-    const result = await context.supabase.from("editorial_workflow_items")
+    let query = context.supabase.from("editorial_workflow_items")
       .update({
         payload: update.payload,
         source_version_id: update.sourceVersionId,
@@ -535,8 +546,15 @@ async function persistCanonicalHandoff(context: PipelineContext, prepared: Await
       .eq("marca_id", context.brandId)
       .eq("subject_type", "keyword")
       .eq("subject_id", update.keywordId)
-      .eq("stage", "architect");
+      .eq("stage", "architect")
+      .eq("state", MINERADOR_ARQUITETO_RECEIVED_STATE);
+    if (update.expectedLock !== null) query = query.eq("lock_version", update.expectedLock);
+    const result = await query.select("id");
     if (result.error) readFailure(result.error);
+    // PostgREST devolve as linhas gravadas (`select`): zero linhas = a trava não bateu.
+    if (update.expectedLock !== null && Array.isArray(result.data) && result.data.length === 0) {
+      throw new PipelineRuntimeError("CONFLICT", "Um item do Arquiteto mudou enquanto o pacote novo era gravado; nada foi sobrescrito nele. Tente de novo.", 409);
+    }
   }
 }
 
@@ -725,11 +743,13 @@ export async function createMineradorArquitetoHandoff(context: PipelineContext, 
 
   return {
     ...(declaredPlanSilos.length ? { declaredPlanSilos } : {}),
-    persistence: prepared.plan.createdKeywordIds.length ? "PERSISTED" as const : "UNCHANGED" as const,
+    persistence: prepared.plan.createdKeywordIds.length || prepared.plan.refreshedKeywordIds.length ? "PERSISTED" as const : "UNCHANGED" as const,
     source: "CANONICAL_REMOTE" as const,
     importedKeywordIds: prepared.plan.importedKeywordIds,
     createdKeywordIds: prepared.plan.createdKeywordIds,
     existingKeywordIds: prepared.plan.existingKeywordIds,
+    // 2026-10-14: as já recebidas que ganharam o pacote aprovado novo (decisões do Arquiteto preservadas).
+    refreshedKeywordIds: prepared.plan.refreshedKeywordIds,
     // Aditivo: só aparece quando a trava de aprovação tem alerta.
     ...(prepared.approvalAlerts.length ? { approvalAlerts: prepared.approvalAlerts } : {}),
     // Aditivo: só no modo parcial e só quando alguma ficou fora.
@@ -743,7 +763,7 @@ export async function createMineradorArquitetoHandoff(context: PipelineContext, 
  */
 export async function previewMineradorArquitetoHandoff(context: PipelineContext, keywordIds: readonly string[]) {
   const uniqueIds = [...new Set(keywordIds)];
-  if (!uniqueIds.length) return { eligibleKeywordIds: [] as string[], existingKeywordIds: [] as string[], refused: [] as HandoffRefusal[] };
+  if (!uniqueIds.length) return { eligibleKeywordIds: [] as string[], existingKeywordIds: [] as string[], refreshKeywordIds: [] as string[], refused: [] as HandoffRefusal[] };
   const prepared = await prepareCanonicalHandoff(context, uniqueIds, { partial: true });
-  return { eligibleKeywordIds: prepared.eligibleKeywordIds, existingKeywordIds: prepared.plan.existingKeywordIds, refused: prepared.refused };
+  return { eligibleKeywordIds: prepared.eligibleKeywordIds, existingKeywordIds: prepared.plan.existingKeywordIds, refreshKeywordIds: prepared.plan.refreshedKeywordIds, refused: prepared.refused };
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+/* 2026-10-14 · F5 (SDD silo interligado) · o painel "malha X/Y" do Silo e os links a ativar. */
+import { RadarSiloLinksPanel } from "./radar-silo-links-panel";
 import {
   RADAR_ARTICLE_BLUEPRINT_CONTINUATION_LABEL,
   radarArticleBlueprintContinuationOf,
@@ -884,5 +886,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
         <ul className="mt-1 space-y-2 text-sm leading-6 text-text-muted">{b.visual.map(item => <li key={item.slot}><strong className="text-foreground">{item.slot === "CAPA" ? "Capa" : `Respiro ${item.slot.slice(1)}`}</strong>{item.section ? ` · ${item.section}` : ""}{item.concept ? ` — ${item.concept}` : ""}<br />Prompt: {item.prompt}{item.alt || item.caption ? <><br />{[item.alt ? `ALT: ${item.alt}` : "", item.caption ? `Legenda: ${item.caption}` : ""].filter(Boolean).join(" · ")}</> : null}</li>)}</ul>
       </div>
     </div>}
+    {/* 2026-10-14 · F5 (SDD silo interligado, D10): a malha X/Y do Silo, os links a ativar e o -links.csv de cada artigo — só leitura, no clique. */}
+    {atual && <RadarSiloLinksPanel brandId={brandId} articleId={articleId} />}
   </section>;
 }

@@ -61,7 +61,7 @@ export function approveAndSendDeps(brandId: string, actorId: string): ApproveAnd
     approve: (rows, entries) => applyKeywordDecisionEntries({ brandId, actorId, action: "approve", rows, entries }),
     previewSend: async ids => {
       const preview = await previewMineradorArquitetoHandoff(await arquitetoContext(brandId, actorId), ids);
-      return { eligibleKeywordIds: preview.eligibleKeywordIds, existingKeywordIds: preview.existingKeywordIds, refused: preview.refused };
+      return { eligibleKeywordIds: preview.eligibleKeywordIds, existingKeywordIds: preview.existingKeywordIds, refreshKeywordIds: preview.refreshKeywordIds, refused: preview.refused };
     },
     send: ids => sendKeywordsToArquitetoOnServer(brandId, actorId, ids),
     hash: value => createHash("sha256").update(canonicalJson(value)).digest("hex"),

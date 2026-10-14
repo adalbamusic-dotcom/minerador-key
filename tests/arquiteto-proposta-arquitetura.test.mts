@@ -457,7 +457,7 @@ test("§5 — cada row mostra atual e proposto, sem fingir aprovação", async (
 
   const source = await workspaceSource();
   assert.ok(source.includes("const architectureProposedByKeyword = useMemo"));
-  assert.ok(source.includes('status: pendente ? "Aguardando confirmação" : "Confirmada"'));
+  assert.ok(source.includes("status: proposalAssignmentStatusLabel(estado?.state ?? \"confirmable\", { declaredPlanSilo: estado?.declaredPlanSilo })"), "2026-10-14: o rótulo sai da leitura única (classifyProposalAssignment)");
   assert.ok(source.includes("proposedByKeywordId={architectureProposedByKeyword}"));
 });
 
@@ -885,7 +885,7 @@ test("§2/§3/§4 — proposta materializada deixa de ser pendência", async () 
    */
   assert.ok(source.includes("const architectureProposalPending = useMemo"));
   assert.ok(source.includes("pendentePorKeyword"));
-  assert.ok(source.includes('status: pendente ? "Aguardando confirmação" : "Confirmada"'));
+  assert.ok(source.includes("status: proposalAssignmentStatusLabel(estado?.state ?? \"confirmable\", { declaredPlanSilo: estado?.declaredPlanSilo })"), "2026-10-14: o rótulo sai da leitura única (classifyProposalAssignment)");
   assert.equal(source.includes('status: jaEsta ? "Sem mudança"'), false);
 
   const painel = await readFile(new URL("../modules/arquiteto/architecture-panel.tsx", import.meta.url), "utf8");

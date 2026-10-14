@@ -56,36 +56,60 @@ const enderecoDoSite = (artigos: readonly RadarPortableExportAssembledArticle[],
   || artigos.map(item => item.entrada.researchContext?.silo?.siloPageCanonical || item.entrada.article.canonical || null).find(Boolean)
   || null;
 
-export function radarPortableWritingExport(input: {
-  articles: readonly RadarPortableExportAssembledArticle[];
-  lenses: RadarPortableExportLensReading;
-  plan: Pick<RadarSiloExportPlan, "files" | "delivery"> | null;
-  /**
-   * 2026-10-02 · Aditivo: o plano por silo dos SELECIONADOS (`selectionOnly`).
-   * Só vale sem `plan`: o arquivo continua um só, e cada linha ganha o Silo
-   * dela. Seleção de um Silo só leva o Silo para a linha de topo; seleção que
-   * cruza Silos leva o contexto para a linha de cada artigo.
-   */
-  selectionPlan?: Pick<RadarSiloExportPlan, "files"> | null;
-  /** 2026-10-02 · Aditivo: a voz da marca (Adendo C). Ativa: linha própria e referência em cada artigo. */
-  brandVoice?: RadarBrandVoiceState;
-  publications?: ReadonlyMap<string, RadarWritingPublication>;
-  /** 2026-10-12 · F6 · Aditivo: o grupo (cor e nome) de cada artigo, por `articleId`. Sem o mapa, nada muda. */
-  groups?: ReadonlyMap<string, EditorialGroupLabel>;
-  today: string;
-}): RadarPortableWritingExportResult {
+/** A entrada do lote "para escrever" (a mesma da rota, do MCP e do material do Redator). */
+export type RadarPortableWritingExportInput = Parameters<typeof radarPortableWritingExport>[0];
+
+/**
+ * ===== 2026-10-14 · F6 · AS LINHAS DOS SELECIONADOS, PELO MESMO NÚCLEO DO CSV =====
+ *
+ * SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §18.1
+ * (F6, "Redator lê o material novo", autorização do dono em 2026-10-14: "pode
+ * sim"). O Redator (painel e MCP) lê a análise competitiva, o diferencial, o
+ * fechamento em 4 tempos, a malha e a trilha do Silo, as fontes de autoridade e
+ * as regras de título da MESMA linha que o CSV "Para escrever" monta para a
+ * seleção (sem `plan`): o mesmo Silo da seleção, o mesmo livro de âncoras, a
+ * mesma voz, o mesmo `buildRadarWritingExportArticle`. Nenhuma montagem
+ * paralela: o CSV sai desta mesma função (abaixo).
+ */
+export function radarPortableWritingArticles(input: RadarPortableWritingExportInput): Array<{ articleId: string; article: RadarWritingExportArticle }> {
+  return linhasDaSelecao(input).artigos.map((article, indice) => ({ articleId: input.articles[indice].articleId, article }));
+}
+
+/* O Silo de cada selecionado e as linhas deles: o caminho sem `plan` do CSV (e do material do Redator). */
+function linhasDaSelecao(input: RadarPortableWritingExportInput) {
+  const montar = montadorDoLote(input);
+  /* O Silo de cada selecionado, pelo plano da seleção. Sem plano, como antes: nenhum. */
+  const siloDe = new Map<string, RadarSiloExportWritingContext>();
+  for (const arquivo of input.selectionPlan?.files || []) {
+    if (!arquivo.writing) continue;
+    for (const articleId of arquivo.articleIds) siloDe.set(articleId, arquivo.writing);
+  }
+  const silos = [...new Set(input.articles.map(artigo => siloDe.get(artigo.articleId) ?? null))];
+  const umSilo = silos.length === 1 && silos[0]?.kind === "silo" ? silos[0] : null;
+  const porLinha = !umSilo && siloDe.size > 0;
+  const rotulo: "Silo" | "Marca" = umSilo ? "Silo" : "Marca";
+  /* 2026-10-11 · um livro de âncoras por Silo do arquivo (a variedade vale entre os artigos do mesmo Silo). */
+  const livros = new Map<RadarSiloExportWritingContext | null, RadarAnchorLedger>();
+  const livroDe = (silo: RadarSiloExportWritingContext | null) => {
+    const atual = livros.get(silo) ?? new Map();
+    livros.set(silo, atual);
+    return atual;
+  };
+  const artigos = input.articles.map((artigo, indice) => montar(artigo, rotulo, indice + 1, siloDe.get(artigo.articleId) ?? null, porLinha, livroDe(siloDe.get(artigo.articleId) ?? null)));
+  return { artigos, siloDe, umSilo, porLinha, rotulo };
+}
+
+/* A montagem de UMA linha do lote (a mesma para o CSV por seleção, por Silo e para o material do Redator). */
+function montadorDoLote(input: RadarPortableWritingExportInput) {
   const lentesDe = radarPortableExportLensLookupsFor(input.lenses.lookups);
   /* 2026-10-09 · Defeito 5 · as exclusões da Skill de voz (régua única da voz), uma vez para o lote: valem em toda linha. */
   const exclusoesDaVoz = input.brandVoice?.kind === "available" ? radarBrandVoiceExclusions(input.brandVoice.voice) : [];
-  /* 2026-10-02 · a autoria foi lida no núcleo: o topo manda ler quem assina na linha de cada artigo. */
-  const autoriaLida = input.articles.some(artigo => artigo.entrada.authors !== undefined && artigo.entrada.authors !== null);
-  const porId = new Map(input.articles.map(artigo => [artigo.articleId, artigo]));
   /* 2026-10-09 (correção · contrato-F2) · as keywords do ArticleDNA de cada artigo do lote: o tópico do Silo que é keyword de um artigo tem nele o dono. */
   const palavrasDosMembros = new Map(input.articles.map(artigo => [artigo.articleId, [
     artigo.entrada.article.principalKeyword, ...(artigo.entrada.article.secondaryKeywords || []), ...(artigo.entrada.article.narrativeReinforcements || []),
   ].filter((palavra): palavra is string => typeof palavra === "string" && Boolean(palavra.trim()))]));
 
-  const montar = (
+  return (
     artigo: RadarPortableExportAssembledArticle,
     topo: "Silo" | "Marca",
     posicao: number,
@@ -119,26 +143,35 @@ export function radarPortableWritingExport(input: {
     ...(anchorLedger ? { anchorLedger } : {}),
     ...(input.groups?.get(artigo.articleId) ? { group: input.groups.get(artigo.articleId) } : {}),
   });
+}
+
+export function radarPortableWritingExport(input: {
+  articles: readonly RadarPortableExportAssembledArticle[];
+  lenses: RadarPortableExportLensReading;
+  plan: Pick<RadarSiloExportPlan, "files" | "delivery"> | null;
+  /**
+   * 2026-10-02 · Aditivo: o plano por silo dos SELECIONADOS (`selectionOnly`).
+   * Só vale sem `plan`: o arquivo continua um só, e cada linha ganha o Silo
+   * dela. Seleção de um Silo só leva o Silo para a linha de topo; seleção que
+   * cruza Silos leva o contexto para a linha de cada artigo.
+   */
+  selectionPlan?: Pick<RadarSiloExportPlan, "files"> | null;
+  /** 2026-10-02 · Aditivo: a voz da marca (Adendo C). Ativa: linha própria e referência em cada artigo. */
+  brandVoice?: RadarBrandVoiceState;
+  publications?: ReadonlyMap<string, RadarWritingPublication>;
+  /** 2026-10-12 · F6 · Aditivo: o grupo (cor e nome) de cada artigo, por `articleId`. Sem o mapa, nada muda. */
+  groups?: ReadonlyMap<string, EditorialGroupLabel>;
+  today: string;
+}): RadarPortableWritingExportResult {
+  /* 2026-10-02 · a autoria foi lida no núcleo: o topo manda ler quem assina na linha de cada artigo. */
+  const autoriaLida = input.articles.some(artigo => artigo.entrada.authors !== undefined && artigo.entrada.authors !== null);
+  const porId = new Map(input.articles.map(artigo => [artigo.articleId, artigo]));
+  /* 2026-10-14 · F6 · a montagem de cada linha mora em `montadorDoLote` (a mesma do material do Redator). */
+  const montar = montadorDoLote(input);
 
   if (!input.plan) {
-    /* O Silo de cada selecionado, pelo plano da seleção. Sem plano, como antes: nenhum. */
-    const siloDe = new Map<string, RadarSiloExportWritingContext>();
-    for (const arquivo of input.selectionPlan?.files || []) {
-      if (!arquivo.writing) continue;
-      for (const articleId of arquivo.articleIds) siloDe.set(articleId, arquivo.writing);
-    }
-    const silos = [...new Set(input.articles.map(artigo => siloDe.get(artigo.articleId) ?? null))];
-    const umSilo = silos.length === 1 && silos[0]?.kind === "silo" ? silos[0] : null;
-    const porLinha = !umSilo && siloDe.size > 0;
-    const rotulo = umSilo ? "Silo" : "Marca";
-    /* 2026-10-11 · um livro de âncoras por Silo do arquivo (a variedade vale entre os artigos do mesmo Silo). */
-    const livros = new Map<RadarSiloExportWritingContext | null, RadarAnchorLedger>();
-    const livroDe = (silo: RadarSiloExportWritingContext | null) => {
-      const atual = livros.get(silo) ?? new Map();
-      livros.set(silo, atual);
-      return atual;
-    };
-    const artigos = input.articles.map((artigo, indice) => montar(artigo, rotulo, indice + 1, siloDe.get(artigo.articleId) ?? null, porLinha, livroDe(siloDe.get(artigo.articleId) ?? null)));
+    /* 2026-10-14 · F6 · o Silo da seleção e as linhas: `linhasDaSelecao`, a mesma de `radarPortableWritingArticles`. */
+    const { artigos, siloDe, umSilo, porLinha, rotulo } = linhasDaSelecao(input);
     const compartilhado = radarWritingShareVisualAvoid(artigos.map(item => item.row));
     const topo = buildRadarWritingTopRow({
       label: rotulo,

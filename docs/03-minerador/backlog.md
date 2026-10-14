@@ -1,5 +1,36 @@
 # Backlog — Minerador
 
+## "Aprovar e enviar" atualiza quem já está no Arquiteto — 2026-10-14
+
+- [x] Linha "atualiza no Arquiteto (pacote novo)" e aviso no resultado (núcleo compartilhado, aditivo).
+- [ ] Dono: reaprovar uma keyword já no Arquiteto e conferir o rótulo e o aviso.
+- [ ] `modules/minerador/subject-cadastro-card.tsx` ainda usa `origin === "declared_plan" && planVersion > 0` para "Silos existentes": depois da F7 (plano limpo) a cor aparece como Silo com plano — ler o plano de fato (`listEditorialGroupPlans`).
+
+## Excluir tudo da cor X (SDD 2026-10-13, item 6, F7) — 2026-10-14
+
+Detalhe em `docs/03-minerador/estado-atual.md` e no §18.7 da SDD. **Validado manualmente: não.**
+
+- [x] Diálogo "Excluir tudo da cor X" (etiqueta de cor do Minerador e "Gerenciar a cor"): área (só o Minerador executa; D8), marcação das publicadas (D6), prévia grátis com recusa por item, confirmação forte (nome da cor + "apaga de vez"; nome de cada publicada), relatório.
+- [x] Rota `…/keywords/delete-group` + núcleo `group-delete-all-core.ts`: mesmo `decisionHash`, blocos de 100 pela RPC da M-E, releitura, plano acompanhando, histórico do grupo, D7 (cor liberada só sem sobra; reativação sem plano).
+- [x] Migration M-E escrita (com rollback e conferência só leitura); botão desabilitado com a explicação sem ela.
+- [x] Defeitos achados: exclusão comum fatia acima de 100; textos do catálogo (exclusão da não publicada; retirada não é exclusão).
+- [ ] Dono: aplicar a M-E — ensaio (`COMMIT` → `RAISE EXCEPTION 'ENSAIO'`) → `db query -f` → `migration repair --status applied 20261016130000 --linked` → conferência (`supabase/scripts/20261016130000-excluir-tudo-da-cor-post-verifier-read-only.sql`).
+- [ ] Dono: homologar numa cor de teste (prévia, recusas, confirmação, relatório, histórico do grupo, cor liberada e reativada sem plano; dark mode e 360/768/1024/1440 px).
+- [x] (2026-10-14, feito no Arquiteto: selos e Silo do plano leem o plano de fato) Arquiteto (backlog de lá): a mesa usa `planVersion > 0` como "grupo com plano" no recorte; depois de um plano limpo pela F7 com a cor ainda ocupada, o grupo aparece como "com plano" sem artigos.
+- [ ] Cadeia inteira (Arquiteto: retirar do Silo / desfazer Silo sugerido / tirar etiquetas, pelos núcleos de lá) — fora desta SDD; hoje a keyword no ArticleDNA vigente fica fora com o caminho.
+- [ ] Radar, Redator e Publicações com exclusão — exigiria SDD própria (D8).
+
+## Processador com lista leve (SDD 2026-10-13, item 4, F6) — 2026-10-14
+
+Detalhe em `docs/03-minerador/estado-atual.md` e no §18.6 da SDD. **Validado manualmente: não.**
+
+- [x] View `minerador_keywords_lista_leve` (M-L) com a árvore provada por paridade; recuo para a listagem sem ela.
+- [x] Veredito da aprovação por `id + dna_hash`; 1ª carga semeia; linha leve nunca vira pacote.
+- [x] Detalhe por id (painel, seleção, ações de uma linha); portão dos lotes; marca recusa gravação; CSV inteiro.
+- [ ] Dono: aplicar a M-L (ensaio → aplicar → `migration repair` → conferência) e homologar (abrir painel, selecionar, CSV, Revisão Humana, KGR na linha).
+- [ ] Colunas derivadas no servidor (veredito, rótulos, completude da Lógica) para chegar a ~50–100 kB (SDD própria).
+- [ ] `row_version` (migration `20260923140000`) para conferir o cache do detalhe.
+
 ## "Sugestões do Arquiteto · cor X" (SDD 2026-10-13, item 2, F4) — 2026-10-14
 
 Detalhe em `docs/03-minerador/estado-atual.md` e no §18.4 da SDD. **Validado manualmente: não.**

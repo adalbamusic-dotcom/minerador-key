@@ -359,7 +359,9 @@ import { CompactSavedViews } from "@/components/editorial/compact-saved-views";
 import { WorkflowStatusBadge } from "@/components/editorial/workflow-status";
 import { MineradorImportDialog } from "./minerador-import-dialog";
 import { mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
-import { initialArquitetoImportColor } from "@/lib/arquiteto/minerador-import";
+import { initialArquitetoImportColor, mineradorPackageUpdatesOf, mineradorPackageUpdatesSentence } from "@/lib/arquiteto/minerador-import";
+import { declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, type DeclaredPlanGroupView, type RecreatePlanSiloLine } from "@/lib/arquiteto/declared-plan-silo";
+import { classifyProposalAssignment, nothingToConfirmMessage, proposalAssignmentStatusLabel, type ProposalAssignmentState } from "@/lib/arquiteto/proposal-confirmability";
 import { ArticleSubjectLine, articleSubjectPhraseOf } from "@/components/editorial/article-subject-line";
 import { DangerApprovalDialog } from "@/components/editorial/danger-approval-dialog";
 import { BackgroundTaskNotice } from "@/components/editorial/background-task-notice";
@@ -406,7 +408,7 @@ import {
   withSupabaseSelectRetry,
 } from "@/lib/supabase/browser-authenticated-client";
 import { useEditorialGroups } from "@/components/editorial/use-editorial-groups";
-import { EDITORIAL_GROUP_COLOR_LABELS, type EditorialGroupColor } from "@/lib/editorial/editorial-groups";
+import { EDITORIAL_GROUP_COLOR_LABELS, isEditorialGroupColor, type EditorialGroupColor } from "@/lib/editorial/editorial-groups";
 import { ArticleGroupMoveSelect, ArticleGroupRowTag, ArticleGroupTagMenuItem, ArticleGroupTaggingDialog, articleGroupMoveNotice, editorialGroupStripeClass } from "@/components/editorial/article-group-controls";
 import { articleDeclaredPlanSeals, declaredPlanPillarLabel, siloDeclaredPlanSeal } from "@/lib/arquiteto/declared-plan-seals";
 import { DeclaredPlanSeals } from "./declared-plan-seals";
@@ -859,6 +861,36 @@ export default function ArquitetoPage() {
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const canonicalReceivedKeywordSignature = useMemo(() => [...canonicalReceivedKeywordIds].sort().join("|"), [canonicalReceivedKeywordIds]);
   const [keywordImportOpen, setKeywordImportOpen] = useState(false);
+  /** 2026-10-14 · "Atualizar do Minerador": o modal abre na prévia com as que atualizam no Arquiteto. */
+  const [keywordImportPreselect, setKeywordImportPreselect] = useState<"refresh" | null>(null);
+  /*
+   * PACOTE NOVO NO MINERADOR (2026-10-14, caso WifiConecta, azul): recebidas
+   * que foram reaprovadas no Minerador depois do envio. Leitura da mesa já
+   * carregada (custo zero); "Atualizar do Minerador" usa o mesmo núcleo do
+   * importar. O Arquiteto continua só lendo o que o Minerador decidiu.
+   */
+  const mineradorPackageUpdates = useMemo(() => mineradorPackageUpdatesOf(masterList as Array<Record<string, unknown>>), [masterList]);
+  /** A última mudança dos itens recebidos (a análise da melhoria feita antes dela é "anterior"). */
+  const mesaChangedAt = useMemo(() => {
+    let ultima: string | null = null;
+    for (const item of masterList as Array<Record<string, unknown>>) {
+      const workflow = item.canonicalWorkflow as { updatedAt?: unknown } | undefined;
+      const quando = typeof workflow?.updatedAt === "string" ? workflow.updatedAt : null;
+      if (quando && (!ultima || Date.parse(quando) > Date.parse(ultima))) ultima = quando;
+    }
+    return ultima;
+  }, [masterList]);
+  /*
+   * OS GRUPOS COM PLANO DECLARADO DE FATO (2026-10-14). `plan_version > 0` não
+   * basta: "Excluir tudo da cor" (F7) limpa o plano (`plan = null`) e deixa a
+   * versão. A verdade é o plano lido (`listEditorialGroupPlans`, só `plan` não
+   * nulo, + `readDeclaredSiloPlan`). `null` = ainda não lido nesta marca.
+   * Declarado aqui em cima porque os selos do plano e o "Desfazer Silo" o leem.
+   */
+  const [planosDaMarca, setPlanosDaMarca] = useState<{ brandId: string; groups: DeclaredPlanGroupView[] } | null>(null);
+  const planosLidos = useMemo(() => planosDaMarca && planosDaMarca.brandId === selectedBrandId ? planosDaMarca.groups : null, [planosDaMarca, selectedBrandId]);
+  /** O grupo tem plano declarado DE FATO (plano lido, não só a versão). Antes da leitura: não. */
+  const grupoTemPlano = useCallback((groupId: string | null | undefined) => Boolean(groupId && planosLidos?.some(plano => plano.groupId === groupId)), [planosLidos]);
   /*
    * ASSUNTO (SDD 2026-09-24, F2.2 a F2.4). O vínculo da formação ainda sem
    * Definição do artigo é GRAVADO na cópia de trabalho (`articleSubjectAnchor`
@@ -8726,9 +8758,10 @@ export default function ArquitetoPage() {
       subjectKeywordId: articleSubjectFor(article)?.keywordId ?? null,
       principalKeywordId: article.mainKeywordObj?.id != null ? String(article.mainKeywordObj.id) : null,
       standingOf: keywordId => subjectStandings.get(keywordId),
-      groupHasPlan: Boolean(resumo && (resumo.origin === "declared_plan" || resumo.planVersion > 0)),
+      // 2026-10-14 · plano declarado de fato (o plano limpo pela F7 deixa a versão, não o plano).
+      groupHasPlan: Boolean(resumo && grupoTemPlano(resumo.id)),
     });
-  }, [articleGroupInfoFor, articleSubjectFor, arquitetoGroups.groupById, subjectStandings]);
+  }, [articleGroupInfoFor, articleSubjectFor, arquitetoGroups.groupById, subjectStandings, grupoTemPlano]);
   const articleRowRevision = useMemo(
     () => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor }),
     [articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor],
@@ -10168,7 +10201,7 @@ export default function ArquitetoPage() {
   const siloUndoCancelRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => { if (siloUndoPrompt) siloUndoCancelRef.current?.focus(); }, [siloUndoPrompt]);
   const siloUndoReadings = useMemo(() => {
-    const leituras = new Map<string, { label: string; keywordCount: number; refusals: string[] }>();
+    const leituras = new Map<string, { label: string; keywordCount: number; refusals: string[]; declaredPlan: { groupLabel: string; siloName: string } | null }>();
     const aprovados = Object.values(acceptedArticleDnas)
       .filter(version => version.payload.brandId === selectedBrandId && effectiveVersionStatus(version.versionId, versionEvents) === "approved")
       .map(version => ({
@@ -10188,17 +10221,73 @@ export default function ArquitetoPage() {
       const membros = masterList
         .filter(item => item.territoryRef === remote.territoryRef)
         .map(item => ({ keywordId: String(item.id), label: String(item.keyword || ""), isPublished: Boolean(item.isPublished) }));
+      // 2026-10-14 (WifiConecta, azul): o Silo do plano declarado não é sugestão; não entra no "Desfazer" (o servidor confere de novo).
+      const doPlano = declaredPlanSiloGroupFor(declaredPlanViewOfTerritory(territory), planosLidos, normalizeManualSiloPageSlug);
       leituras.set(remote.territoryRef, {
         label: territoryUndoLabel(territory),
         keywordCount: membros.length,
-        refusals: territoryUndoRefusals({ territory, members: membros, approvedArticles: aprovados, siloArtifacts: artefatos }).map(refusal => refusal.message),
+        refusals: territoryUndoRefusals({ territory, members: membros, approvedArticles: aprovados, siloArtifacts: artefatos, declaredPlan: doPlano }).map(refusal => refusal.message),
+        declaredPlan: doPlano,
       });
     }
     return leituras;
-  }, [acceptedArticleDnas, acceptedSiloDnas, acceptedSiloPages, masterList, remoteTerritories, selectedBrandId, versionEvents]);
+  }, [acceptedArticleDnas, acceptedSiloDnas, acceptedSiloPages, masterList, remoteTerritories, selectedBrandId, versionEvents, planosLidos]);
   const siloUndoEligibleRefs = useMemo(() => [...siloUndoReadings.entries()]
     .filter(([, leitura]) => leitura.refusals.length === 0)
     .map(([ref]) => ref), [siloUndoReadings]);
+  /** O lote diz quantos ficaram de fora por serem o Silo do plano, e por quê. */
+  const siloUndoPlanExcluded = useMemo(() => [...siloUndoReadings.values()].filter(leitura => leitura.declaredPlan), [siloUndoReadings]);
+  const siloUndoExcludedNote = siloUndoPlanExcluded.length
+    ? `${siloUndoPlanExcluded.length} fica${siloUndoPlanExcluded.length === 1 ? "" : "m"} de fora: ${siloUndoPlanExcluded.map(leitura => `Silo do plano ${leitura.declaredPlan!.groupLabel} (“${leitura.label}”)`).join(", ")} — o plano é decisão do cadastro; muda no Minerador (“Tirar do plano” ou “Substituir o plano”).`
+    : null;
+  const [siloUndoBulk, setSiloUndoBulk] = useState(false);
+  /*
+   * RECRIAR O SILO DO PLANO (2026-10-14, WifiConecta, azul): o Silo do plano
+   * desfeito antes desta correção volta só por decisão humana, com prévia do
+   * servidor (`/api/arquiteto/plan-silo/recreate`).
+   */
+  const rejectedPlanSilos = useMemo(() => {
+    if (!planosLidos) return [];
+    const saida: Array<{ groupId: string; groupLabel: string; color: string | null; siloName: string; territoryRef: string }> = [];
+    for (const plano of planosLidos) {
+      const vivo = remoteTerritories.some(remote => remote.territory.lifecycleStatus !== "rejected" && remote.territory.lifecycleStatus !== "archived"
+        && declaredPlanSiloGroupFor(declaredPlanViewOfTerritory(remote.territory), [plano], normalizeManualSiloPageSlug));
+      if (vivo) continue;
+      const desfeito = remoteTerritories.find(remote => remote.territory.lifecycleStatus === "rejected"
+        && declaredPlanSiloGroupFor(declaredPlanViewOfTerritory(remote.territory), [plano], normalizeManualSiloPageSlug));
+      if (desfeito) saida.push({ groupId: plano.groupId, groupLabel: plano.groupLabel, color: arquitetoGroups.groupById.get(plano.groupId)?.color ?? null, siloName: plano.siloName, territoryRef: desfeito.territoryRef });
+    }
+    return saida;
+  }, [planosLidos, remoteTerritories, arquitetoGroups.groupById]);
+  const [planSiloRecreate, setPlanSiloRecreate] = useState<{ groupId: string; label: string; busy: boolean; preview: { decisionHash: string; territoryState: string; lines: RecreatePlanSiloLine[]; counts: { enters: number; already: number; stays: number; notReceived: number } } | null; error: string | null } | null>(null);
+  const openPlanSiloRecreate = async (groupId: string, label: string) => {
+    if (!selectedBrandId) return;
+    setPlanSiloRecreate({ groupId, label, busy: true, preview: null, error: null });
+    try {
+      const response = await fetch("/api/arquiteto/plan-silo/recreate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ brandId: selectedBrandId, groupId, mode: "preview" }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.success) throw new Error(typeof body.error === "string" ? body.error : "A prévia não pôde ser lida agora.");
+      setPlanSiloRecreate({ groupId, label, busy: false, preview: body.data, error: null });
+    } catch (error) {
+      setPlanSiloRecreate({ groupId, label, busy: false, preview: null, error: error instanceof Error ? error.message : "A prévia não pôde ser lida agora." });
+    }
+  };
+  const applyPlanSiloRecreate = async () => {
+    if (!selectedBrandId || !planSiloRecreate?.preview || planSiloRecreate.busy) return;
+    const atual = planSiloRecreate;
+    setPlanSiloRecreate({ ...atual, busy: true, error: null });
+    try {
+      const response = await fetch("/api/arquiteto/plan-silo/recreate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ brandId: selectedBrandId, groupId: atual.groupId, mode: "apply", decisionHash: atual.preview!.decisionHash }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.success) throw new Error(typeof body.error === "string" ? body.error : "O Silo do plano não pôde ser recriado agora; nada foi apagado.");
+      const resultado = body.data as { message: string; readbackConfirmed: boolean; notEntered: Array<{ keyword: string; reason: string }> };
+      setPlanSiloRecreate(null);
+      setCanonicalWorkspaceReload(current => current + 1);
+      showNotification(resultado.readbackConfirmed ? "success" : "warning", [resultado.message, ...resultado.notEntered.map(item => `${item.keyword}: ${item.reason}`)].join(" "));
+    } catch (error) {
+      setPlanSiloRecreate({ ...atual, busy: false, error: error instanceof Error ? error.message : "Falha ao recriar o Silo do plano." });
+    }
+  };
 
   /**
    * Um Silo por requisição, cada um com o seu lock; UMA releitura no fim diz
@@ -11192,25 +11281,47 @@ export default function ArquitetoPage() {
   // 2026-10-13 · caso real (WifiConecta, azul): as keywords perderam o Assunto e o plano do
   // GRUPO ficou invisível — "Processar arquitetura" espalhou as keywords. O plano gravado no
   // grupo é a autoridade; o Assunto nas keywords só acrescenta grupos (formato da conversão).
+  /*
+   * A CHAVE QUE RELÊ OS PLANOS (2026-10-14, F7 "Excluir tudo da cor"): os
+   * grupos que PODEM ter plano (origem do plano ou versão > 0) e a versão de
+   * cada um — limpar o plano sobe a versão, então a leitura é refeita. Quem
+   * diz se o plano existe DE FATO é a leitura (`plan` não nulo), não a versão.
+   */
   const gruposComPlanoChave = useMemo(() => [...new Set([
     ...[...subjectStandings.values()]
       .filter(standing => standing.declared && standing.received && standing.approvedPackageRef && standing.plan && standing.brandId === selectedBrandId)
       .map(standing => standing.plan!.groupId),
     ...arquitetoGroups.groups
-      .filter(group => group.status === "active" && group.planVersion > 0)
-      .map(group => group.id),
+      .filter(group => group.status === "active" && (group.origin === "declared_plan" || group.planVersion > 0))
+      .map(group => `${group.id}:${group.planVersion}`),
   ])].sort().join(","), [subjectStandings, selectedBrandId, arquitetoGroups.groups]);
   const [silosDosPlanos, setSilosDosPlanos] = useState<{ brandId: string; groups: Array<{ groupId: string; label: string; siloName: string; siloSlug: string | null; territoryRef: string | null }> } | null>(null);
   useEffect(() => {
-    if (!selectedBrandId || !gruposComPlanoChave) return;
+    if (!selectedBrandId) return;
+    if (!gruposComPlanoChave) {
+      // Nenhum grupo pode ter plano: a marca não tem plano declarado (lido, não suposto).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPlanosDaMarca({ brandId: selectedBrandId, groups: [] });
+      return;
+    }
     let vigente = true;
-    const ids = new Set(gruposComPlanoChave.split(","));
+    const ids = new Set(gruposComPlanoChave.split(",").map(item => item.split(":")[0]));
     void listEditorialGroupPlans(supabase, selectedBrandId).then(lido => {
       if (!vigente || !lido.ok) return;
-      setSilosDosPlanos({ brandId: selectedBrandId, groups: lido.groups.flatMap(group => {
-        const plano = readDeclaredSiloPlan(group.plan);
-        return plano && ids.has(group.id) ? [{ groupId: group.id, label: group.name, siloName: plano.siloName, siloSlug: plano.siloSlug, territoryRef: group.siloId }] : [];
-      }) });
+      const comPlano = lido.groups.flatMap(group => {
+        const plano = group.status === "active" ? readDeclaredSiloPlan(group.plan) : null;
+        return plano ? [{ group, plano }] : [];
+      });
+      setPlanosDaMarca({ brandId: selectedBrandId, groups: comPlano.map(({ group, plano }) => ({
+        groupId: group.id,
+        groupLabel: `${EDITORIAL_GROUP_COLOR_LABELS[group.color]}${group.name && group.name !== EDITORIAL_GROUP_COLOR_LABELS[group.color] ? ` (${group.name})` : ""}`,
+        siloName: plano.siloName,
+        siloSlug: plano.siloSlug,
+        linkedTerritoryRef: group.siloId,
+      })) });
+      setSilosDosPlanos({ brandId: selectedBrandId, groups: comPlano
+        .filter(({ group }) => ids.has(group.id))
+        .map(({ group, plano }) => ({ groupId: group.id, label: group.name, siloName: plano.siloName, siloSlug: plano.siloSlug, territoryRef: group.siloId })) });
     }).catch(() => undefined);
     return () => { vigente = false; };
   }, [selectedBrandId, gruposComPlanoChave]);
@@ -13985,16 +14096,54 @@ export default function ArquitetoPage() {
    * Pendente é o que DIFERE do gravado. Quando nada difere, a proposta virou
    * histórico.
    */
-  const architectureProposalPending = useMemo(() => {
-    const pendentes = architectureProposal.assignments.filter(item => {
+  /*
+   * KEYWORD QUE NÃO SAI DO SILO PELA PROPOSTA (pedido do dono, 2026-09-30): a
+   * de ArticleDNA, de formação concluída ou decidida, ou de Silo fechado. A
+   * MESMA leitura vale para a tabela, a contagem e o "Confirmar propostas
+   * novas" (2026-10-14: antes o clique tinha a sua própria e a tela outra).
+   */
+  const buscasFixasDaProposta = useMemo(() => {
+    const territoriosFechados = new Set(remoteTerritories
+      .filter(item => item.territory.lifecycleStatus === "consolidated")
+      .map(item => item.territoryRef));
+    return new Set<string>([
+      ...Object.values(acceptedArticleDnas).flatMap(version => version.payload.keywordReferences.map(reference => String(reference.keywordId))),
+      ...(articleFormationMarker?.concludedFormations || []).flatMap(item => item.members.map(member => member.keywordId)),
+      ...masterList.filter(item => typeof item.articleFormationRef === "string" && item.articleFormationRef).map(item => String(item.id)),
+      ...masterList.filter(item => typeof item.territoryRef === "string" && territoriosFechados.has(item.territoryRef)).map(item => String(item.id)),
+    ]);
+  }, [acceptedArticleDnas, articleFormationMarker, masterList, remoteTerritories]);
+  /** O estado de cada atribuição da proposta — a leitura única (`classifyProposalAssignment`). */
+  const proposalAssignmentStates = useMemo(() => {
+    const mapa = new Map<string, { state: ProposalAssignmentState; declaredPlanSilo: boolean }>();
+    for (const item of architectureProposal.assignments) {
       const destino = resolveProposalSiloRef(item.siloKey);
-      if (!destino) return true;
+      const silo = architectureProposal.silos.find(entry => entry.key === item.siloKey);
+      const desfeito = !destino && Boolean(silo) && existingTerritoryForProposedSilo({
+        name: silo!.name,
+        slug: silo!.slug ?? null,
+        publishedSlug: silo!.publishedIdentity?.slug ?? null,
+        territories: remoteTerritories,
+      })?.kind === "rejected_by_human";
       const atual = masterList.find(keyword => String(keyword.id) === item.keywordId);
-      return (typeof atual?.territoryRef === "string" ? atual.territoryRef : null) !== destino;
-    });
+      mapa.set(item.keywordId, {
+        state: classifyProposalAssignment({
+          destination: destino,
+          destinationRejected: desfeito,
+          currentTerritoryRef: typeof atual?.territoryRef === "string" && atual.territoryRef ? atual.territoryRef : null,
+          fixed: buscasFixasDaProposta.has(item.keywordId),
+        }),
+        declaredPlanSilo: desfeito && Boolean(silo) && rejectedPlanSilos.some(plano => plano.siloName.trim().toLowerCase() === silo!.name.trim().toLowerCase()),
+      });
+    }
+    return mapa;
+  }, [architectureProposal, masterList, remoteTerritories, resolveProposalSiloRef, buscasFixasDaProposta, rejectedPlanSilos]);
+  const architectureProposalPending = useMemo(() => {
+    // Pendente = o que "Confirmar propostas novas" grava (o resto diz por que não, na própria linha).
+    const pendentes = architectureProposal.assignments.filter(item => proposalAssignmentStates.get(item.keywordId)?.state === "confirmable");
     const semSiloPendentes = architectureProposal.unassigned.filter(item => {
       const atual = masterList.find(keyword => String(keyword.id) === item.keywordId);
-      return typeof atual?.territoryRef === "string" && Boolean(atual.territoryRef);
+      return typeof atual?.territoryRef === "string" && Boolean(atual.territoryRef) && !buscasFixasDaProposta.has(item.keywordId);
     });
     return {
       total: architectureProposal.assignments.length + architectureProposal.unassigned.length,
@@ -14004,7 +14153,7 @@ export default function ArquitetoPage() {
         ...semSiloPendentes.map(item => item.keywordId),
       ]),
     };
-  }, [architectureProposal, masterList, resolveProposalSiloRef]);
+  }, [architectureProposal, masterList, proposalAssignmentStates, buscasFixasDaProposta]);
 
   /**
    * §5 — o destino que a proposta dá a cada keyword, por keywordId.
@@ -14017,11 +14166,12 @@ export default function ArquitetoPage() {
     const nomeDoSilo = new Map(architectureProposal.silos.map(silo => [silo.key, silo.name]));
     const mapa = new Map<string, { silo: string; status: string; basis: string }>();
     for (const item of architectureProposal.assignments) {
-      const pendente = architectureProposalPending.pendentePorKeyword.has(item.keywordId);
+      const estado = proposalAssignmentStates.get(item.keywordId);
       mapa.set(item.keywordId, {
         silo: nomeDoSilo.get(item.siloKey) || item.siloKey,
         // §4 — depois de materializada, a proposta não é mais uma ação a fazer.
-        status: pendente ? "Aguardando confirmação" : "Confirmada",
+        // 2026-10-14 — "Aguardando confirmação" só para o que o clique grava; o resto diz por que não.
+        status: proposalAssignmentStatusLabel(estado?.state ?? "confirmable", { declaredPlanSilo: estado?.declaredPlanSilo }),
         // §11 — a base é a que o motor USOU, não uma frase genérica.
         basis: item.basis.length ? item.basis.join(" + ") : "Coerência do lote",
       });
@@ -14030,7 +14180,7 @@ export default function ArquitetoPage() {
       mapa.set(item.keywordId, { silo: "sem Silo", status: "Sem destino", basis: item.reason });
     }
     return mapa;
-  }, [architectureProposal, architectureProposalPending, masterList]);
+  }, [architectureProposal, proposalAssignmentStates]);
 
   /**
    * §9 — O KEYWORDDNA DE CADA KEYWORD, PARA O PAINEL EXPANDIDO.
@@ -16632,7 +16782,10 @@ export default function ArquitetoPage() {
         ]);
       }
       if (naoRecriados.length) {
-        showNotification("info", `${naoRecriados.length} Silo(s) que você desfez não foram recriados: ${naoRecriados.join(", ")}. As keywords deles continuam sem Silo.`);
+        // 2026-10-14: o Silo do plano desfeito não volta pelo Processar — volta por "Recriar o Silo do plano" (decisão humana, com prévia).
+        const doPlano = naoRecriados.filter(nome => rejectedPlanSilos.some(item => item.siloName.trim().toLowerCase() === nome.trim().toLowerCase()));
+        showNotification("info", `${naoRecriados.length} Silo(s) que você desfez não foram recriados: ${naoRecriados.join(", ")}. As keywords deles continuam sem Silo.`
+          + (doPlano.length ? ` ${doPlano.join(", ")} é Silo do plano declarado: para trazê-lo de volta use “Recriar o Silo do plano” no aviso acima.` : ""));
       }
       const territoriosDoProcessamento = new Map([...remoteTerritories, ...criados].map(item => [item.territoryRef, item]));
 
@@ -16907,10 +17060,21 @@ export default function ArquitetoPage() {
      * formação dos Articles ter concluído e nenhuma reconsideração de Silo
      * estar aberta.
      */
-    if (!plan.confirmTerritoryRefs.length && !plan.assignments.length) {
+    /*
+     * 2026-10-14 (WifiConecta, azul) — "Nada a confirmar" só quando a TELA
+     * também não mostra nada confirmável. O clique grava a proposta da tela
+     * (`architectureProposal`, §8 abaixo); o plano do analisador só olhava os
+     * grupos que "fortalecem Silo existente" e dizia "nada" com três
+     * "Aguardando confirmação" na tabela.
+     */
+    const estadosDaProposta = [...proposalAssignmentStates.values()];
+    const confirmaveis = architectureProposalPending.pendentes;
+    if (!plan.confirmTerritoryRefs.length && !plan.assignments.length && confirmaveis === 0) {
+      const contagem: Partial<Record<ProposalAssignmentState, number>> = {};
+      for (const item of estadosDaProposta) contagem[item.state] = (contagem[item.state] || 0) + 1;
       showNotification("error", plan.skipped.length
         ? `Nenhum silo está pronto. ${plan.skipped[0].label}: ${plan.skipped[0].blockers.join(" ")}`
-        : "Nada a confirmar no cenário atual.");
+        : nothingToConfirmMessage(contagem, { declaredPlanSilo: estadosDaProposta.some(item => item.state === "rejected_silo" && item.declaredPlanSilo) }));
       return;
     }
 
@@ -16958,15 +17122,8 @@ export default function ArquitetoPage() {
      * fechado, fica onde está; a proposta vale para o resto. Mudar isso é
      * revisão do artigo, não decisão de Silo.
      */
-    const territoriosFechados = new Set(remoteTerritories
-      .filter(item => item.territory.lifecycleStatus === "consolidated")
-      .map(item => item.territoryRef));
-    const buscasFixas = new Set<string>([
-      ...Object.values(acceptedArticleDnas).flatMap(version => version.payload.keywordReferences.map(reference => String(reference.keywordId))),
-      ...(articleFormationMarker?.concludedFormations || []).flatMap(item => item.members.map(member => member.keywordId)),
-      ...masterList.filter(item => typeof item.articleFormationRef === "string" && item.articleFormationRef).map(item => String(item.id)),
-      ...masterList.filter(item => typeof item.territoryRef === "string" && territoriosFechados.has(item.territoryRef)).map(item => String(item.id)),
-    ]);
+    // A MESMA leitura da tabela (`buscasFixasDaProposta`).
+    const buscasFixas = buscasFixasDaProposta;
     const sairiaDoSilo = (keywordId: string, destino: string | null) => {
       const atual = territorioAtual.get(keywordId);
       return Boolean(atual) && atual !== destino && buscasFixas.has(keywordId);
@@ -19281,7 +19438,7 @@ export default function ArquitetoPage() {
                         // 2026-10-12 · selo "Plano declarado" com o Pilar declarado (SDD §9 item 6): só leitura.
                         const grupoDoSilo = sharedGroupOf(articleIds.map(articleId => arquitetoGroups.articleGroupById.get(articleId)?.groupId ?? null));
                         const resumo = grupoDoSilo ? arquitetoGroups.groupById.get(grupoDoSilo) : undefined;
-                        const selo = resumo ? siloDeclaredPlanSeal({ groupHasPlan: resumo.origin === "declared_plan" || resumo.planVersion > 0, planVersion: resumo.planVersion, pillarLabel: declaredPlanPillarLabel(subjectStandings.values(), resumo.id) }) : null;
+                        const selo = resumo ? siloDeclaredPlanSeal({ groupHasPlan: grupoTemPlano(resumo.id), planVersion: resumo.planVersion, pillarLabel: declaredPlanPillarLabel(subjectStandings.values(), resumo.id) }) : null;
                         return selo ? <DeclaredPlanSeals seals={[selo]} className="mt-1"/> : null;
                       })()}
                     </div>
@@ -19419,6 +19576,24 @@ export default function ArquitetoPage() {
 
       {/* ── PLANILHA PRINCIPAL DE ARTIGOS ── */}
       <main className="min-w-0 flex-1 overflow-y-auto bg-background">
+        {/* 2026-10-14 · o Arquiteto se mantém em dia com o Minerador: reaprovadas depois do envio, sem precisar reenviar. */}
+        {mineradorPackageUpdates.length > 0 && (
+          <section role="status" className="flex flex-wrap items-center justify-between gap-3 border-b border-divider bg-surface-subtle px-4 py-3 text-sm leading-6" data-testid="architect-minerador-package-updates">
+            <p className="min-w-0 flex-1 text-foreground" title={mineradorPackageUpdates.map(item => item.keyword).join(", ")}>{mineradorPackageUpdatesSentence(mineradorPackageUpdates.length)}</p>
+            <button type="button" onClick={() => { setKeywordImportPreselect("refresh"); setKeywordImportOpen(true); }} className={ARCHITECT_UI.primaryButton} data-testid="architect-minerador-package-refresh">
+              Atualizar do Minerador
+            </button>
+          </section>
+        )}
+        {/* 2026-10-14 · o Silo do plano desfeito volta só por decisão humana, com prévia. */}
+        {rejectedPlanSilos.map(item => (
+          <section key={item.groupId} role="status" className="flex flex-wrap items-center justify-between gap-3 border-b border-divider bg-surface-subtle px-4 py-3 text-sm leading-6" data-testid="architect-plan-silo-rejected">
+            <p className="min-w-0 flex-1 text-foreground">O Silo do plano {item.groupLabel} (“{item.siloName}”) está desfeito: as keywords do plano ficaram sem ele e “Processar arquitetura” não o recria. Recriar limpa o “desfeito” só deste Silo, confirma e põe nele as keywords do grupo que não estão em artigo (prévia antes; nada é apagado).</p>
+            <button type="button" disabled={Boolean(planSiloRecreate?.busy)} onClick={() => { void openPlanSiloRecreate(item.groupId, item.groupLabel); }} className={ARCHITECT_UI.primaryButton} data-testid="architect-plan-silo-recreate">
+              {`Recriar o Silo do plano · ${item.color && isEditorialGroupColor(item.color) ? EDITORIAL_GROUP_COLOR_LABELS[item.color] : item.groupLabel}`}
+            </button>
+          </section>
+        ))}
         {/* Recolhido ocupa um terço do topo (prioridade é a planilha); a seta abre para 72vh. */}
         {/* Aba Artigos: a grade do Workbench vai para "Detalhes técnicos", no fim. */}
         {!articleMode && workbenchGrid}
@@ -19431,7 +19606,8 @@ export default function ArquitetoPage() {
         {/* Publicados marcados na planilha: "Buscar keywords" analisa só eles (sem marcação, todos). */}
         {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
           selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))}
-          activeGroup={(() => { const filtro = arquitetoGroups.filter; if (filtro.kind !== "group") return null; const cor = arquitetoGroups.groupById.get(filtro.groupId)?.color; return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null; })()} />}
+          activeGroup={(() => { const filtro = arquitetoGroups.filter; if (filtro.kind !== "group") return null; const cor = arquitetoGroups.groupById.get(filtro.groupId)?.color; return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null; })()}
+          mesaChangedAt={mesaChangedAt} />}
         {/* Artigos novos: os dois atos da formação continuam à mão sem abrir
             os detalhes. Mesmos handlers e mesmas travas do painel de formação. */}
         {articleMode && (
@@ -19622,8 +19798,9 @@ export default function ArquitetoPage() {
                       byRef: siloUndoReadings,
                       eligibleCount: siloUndoEligibleRefs.length,
                       busy: siloUndoBusy,
-                      onUndo: territoryRef => setSiloUndoPrompt([territoryRef]),
-                      onUndoAll: () => setSiloUndoPrompt(siloUndoEligibleRefs),
+                      excludedNote: siloUndoExcludedNote,
+                      onUndo: territoryRef => { setSiloUndoBulk(false); setSiloUndoPrompt([territoryRef]); },
+                      onUndoAll: () => { setSiloUndoBulk(true); setSiloUndoPrompt(siloUndoEligibleRefs); },
                     }}
                     siteControls={{
                       busyUrl: siteStructureBusyUrl,
@@ -19862,7 +20039,7 @@ export default function ArquitetoPage() {
                             expanded={expandedArticleRefs.has(view.siloRef)}
                             onToggleSelected={() => toggleSiloPageSelection(pageId)}
                             onToggleExpanded={() => toggleArticleUnitExpansion(view.siloRef)}
-                            groupTag={(() => { const groupId = sharedGroupOf(group.articles.map(art => articleGroupInfoFor(art).groupId)); const resumo = groupId ? arquitetoGroups.groupById.get(groupId) : null; if (!resumo) return null; const seloDoPlano = siloDeclaredPlanSeal({ groupHasPlan: resumo.origin === "declared_plan" || resumo.planVersion > 0, planVersion: resumo.planVersion, pillarLabel: declaredPlanPillarLabel(subjectStandings.values(), resumo.id) }); return <><ArticleGroupRowTag group={resumo}/>{seloDoPlano ? <DeclaredPlanSeals seals={[seloDoPlano]} className="ml-1"/> : null}</>; })()}
+                            groupTag={(() => { const groupId = sharedGroupOf(group.articles.map(art => articleGroupInfoFor(art).groupId)); const resumo = groupId ? arquitetoGroups.groupById.get(groupId) : null; if (!resumo) return null; const seloDoPlano = siloDeclaredPlanSeal({ groupHasPlan: grupoTemPlano(resumo.id), planVersion: resumo.planVersion, pillarLabel: declaredPlanPillarLabel(subjectStandings.values(), resumo.id) }); return <><ArticleGroupRowTag group={resumo}/>{seloDoPlano ? <DeclaredPlanSeals seals={[seloDoPlano]} className="ml-1"/> : null}</>; })()}
                           />
                         );
                       })()}
@@ -21117,8 +21294,9 @@ export default function ArquitetoPage() {
         colorOfGroup={importColorOfGroup}
         detailsOf={keyword => { const assunto = architectureKeywordVinculos.get(String(keyword.id))?.subjectLabel || keywordImportPool.find(item => item.id === keyword.id)?.subjectLabel || null; return assunto ? <span className="block font-medium text-context-accent" data-testid="architect-import-subject">Assunto: {assunto}</span> : null; }}
         mesaRefreshing={loadingKeywords}
-        onClose={() => setKeywordImportOpen(false)}
+        onClose={() => { setKeywordImportOpen(false); setKeywordImportPreselect(null); }}
         onApplied={() => setCanonicalWorkspaceReload(current => current + 1)}
+        preselect={keywordImportPreselect}
       />}
       {subjectAttachOpen && selectedSubjectEntry && (
         <SubjectAttachDialog
@@ -21180,8 +21358,9 @@ export default function ArquitetoPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="dialog" aria-modal="true" aria-label="Confirmar desfazer Silo" data-testid="architect-undo-silo-dialog"
             onKeyDown={event => { if (event.key === "Escape" && !siloUndoBusy) setSiloUndoPrompt(null); }}>
             <div className="flex max-h-[86vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl">
-              <p className="text-base font-semibold text-foreground">{itens.length > 1 ? `Desfazer os Silos sugeridos (${podem.length})` : "Desfazer Silo"}</p>
+              <p className="text-base font-semibold text-foreground">{itens.length > 1 || siloUndoBulk ? `Desfazer os Silos sugeridos (${podem.length})` : "Desfazer Silo"}</p>
               <p className="text-sm leading-6 text-text-muted">O Silo sai da aba Silos (fica guardado como rejeitado; nada é apagado). As keywords dele voltam para “sem Silo” e continuam na mesa.</p>
+              {siloUndoBulk && siloUndoExcludedNote && <p className="text-sm leading-6 text-warning" data-testid="architect-undo-silo-plan-excluded">{siloUndoExcludedNote}</p>}
               <ul className="grid gap-2 text-sm leading-6">
                 {itens.map(({ ref, leitura }) => (
                   <li key={ref} className="rounded border border-divider bg-surface px-3 py-2">
@@ -21209,6 +21388,39 @@ export default function ArquitetoPage() {
           </div>
         );
       })()}
+
+      {planSiloRecreate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="dialog" aria-modal="true" aria-label="Recriar o Silo do plano" data-testid="architect-plan-silo-recreate-dialog"
+          onKeyDown={event => { if (event.key === "Escape" && !planSiloRecreate.busy) setPlanSiloRecreate(null); }}>
+          <div className="flex max-h-[86vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl">
+            <p className="text-base font-semibold text-foreground">Recriar o Silo do plano · {planSiloRecreate.label}</p>
+            <p className="text-sm leading-6 text-text-muted">Decisão sua: o “desfeito” é limpo só deste Silo, ele é confirmado e o grupo fica ligado a ele. Keyword em artigo fica onde está (mexer nela é revisão do artigo); publicada fica no Silo do site. Nada é apagado e nada é pago.</p>
+            {planSiloRecreate.busy && !planSiloRecreate.preview && <p role="status" className="flex items-center gap-2 text-sm text-text-muted"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Lendo a prévia no servidor…</p>}
+            {planSiloRecreate.error && <p role="alert" className="text-sm leading-6 text-danger">Nada foi gravado: {planSiloRecreate.error}</p>}
+            {planSiloRecreate.preview && (
+              <>
+                <p className="text-sm leading-6 text-foreground">{`${planSiloRecreate.preview.counts.enters} entram · ${planSiloRecreate.preview.counts.already} já estão nele · ${planSiloRecreate.preview.counts.stays} ficam onde estão · ${planSiloRecreate.preview.counts.notReceived} ainda não chegaram ao Arquiteto`}</p>
+                <ul className="grid gap-2 text-sm leading-6">
+                  {planSiloRecreate.preview.lines.map(line => (
+                    <li key={line.keywordId} className="rounded border border-divider bg-surface px-3 py-2" data-recreate-outcome={line.outcome}>
+                      <span className="text-keyword">{line.keyword}</span>
+                      <span className={`block ${line.outcome === "enters" ? "text-foreground" : "text-text-muted"}`}>{line.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" disabled={planSiloRecreate.busy} onClick={() => setPlanSiloRecreate(null)} className={ARCHITECT_UI.toolbarButton}>Cancelar</button>
+              {planSiloRecreate.preview && (
+                <button type="button" disabled={planSiloRecreate.busy} onClick={() => { void applyPlanSiloRecreate(); }} className={ARCHITECT_UI.primaryButton} data-testid="architect-plan-silo-recreate-confirm">
+                  {planSiloRecreate.busy ? "Recriando…" : `Recriar e pôr ${planSiloRecreate.preview.counts.enters} keyword(s) nele`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {dangerApproval && <DangerApprovalDialog open title={dangerApproval.title} description={dangerApproval.description}
         impact={dangerApproval.impact} verificationPhrase={dangerApproval.phrase} confirmLabel={dangerApproval.label}

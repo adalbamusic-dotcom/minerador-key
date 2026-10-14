@@ -35,6 +35,7 @@ export const TERRITORY_UNDO_REFUSAL_CODES = [
   "KEYWORD_NOT_EDITABLE",
   "APPROVED_ARTICLE_DNA",
   "APPROVED_SILO_ARTIFACT",
+  "DECLARED_PLAN_SILO",
 ] as const;
 export type TerritoryUndoRefusalCode = (typeof TERRITORY_UNDO_REFUSAL_CODES)[number];
 export type TerritoryUndoRefusal = { code: TerritoryUndoRefusalCode; message: string };
@@ -103,15 +104,28 @@ const lista = (itens: readonly string[], max = 5) =>
  * Todos os motivos pelos quais este Silo NÃO pode ser desfeito agora. Lista
  * vazia = pode. Cada motivo é uma frase curta, pronta para a tela.
  */
+/**
+ * 2026-10-14 (caso WifiConecta, azul): o Silo do plano declarado não é
+ * "sugerido" — o plano é decisão humana do cadastro. Desfazê-lo é "Tirar do
+ * plano" / "Substituir o plano" no Minerador.
+ */
+export function declaredPlanSiloUndoMessage(plan: { groupLabel: string; siloName: string }): string {
+  return `Este é o Silo do plano declarado do grupo ${plan.groupLabel} (“${plan.siloName}”): o plano é decisão do cadastro, não sugestão do Arquiteto. Para mudá-lo, use “Tirar do plano” ou “Substituir o plano” no Minerador (Cadastrar Assuntos).`;
+}
+
 export function territoryUndoRefusals(input: {
   territory: TerritoryUndoTerritory;
   members: readonly TerritoryUndoMember[];
   approvedArticles: readonly TerritoryUndoApprovedArticle[];
   siloArtifacts: readonly TerritoryUndoSiloArtifact[];
+  /** O grupo com plano declarado de quem este é o Silo (`declaredPlanSiloGroupFor`), quando é. */
+  declaredPlan?: { groupLabel: string; siloName: string } | null;
 }): TerritoryUndoRefusal[] {
   const { territory } = input;
   const refusals: TerritoryUndoRefusal[] = [];
   const ref = territory.territoryRef;
+
+  if (input.declaredPlan) refusals.push({ code: "DECLARED_PLAN_SILO", message: declaredPlanSiloUndoMessage(input.declaredPlan) });
 
   if (territory.lifecycleStatus === "consolidated" || territory.consolidation) {
     refusals.push({ code: "CONSOLIDATED", message: "Este Silo já foi consolidado (tem SiloDNA e SiloPage). Silo consolidado não se desfaz por aqui." });
@@ -177,6 +191,7 @@ export function planTerritoryUndo(input: {
   members: readonly TerritoryUndoMember[];
   approvedArticles: readonly TerritoryUndoApprovedArticle[];
   siloArtifacts: readonly TerritoryUndoSiloArtifact[];
+  declaredPlan?: { groupLabel: string; siloName: string } | null;
   actorUserId: string;
   decidedAt: string;
 }): TerritoryUndoPlan {

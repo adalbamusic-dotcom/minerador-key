@@ -13,6 +13,7 @@ import {
   type ArticleSerpVerdict,
 } from "@/lib/arquiteto/article-serp-record";
 import type { SerpFormationAssessment } from "@/lib/arquiteto/serp-formation";
+import { ARTICLE_FORMATION_SERP_LIST_DETAIL, projectArticleFormationSerpRecord } from "@/lib/arquiteto/article-serp-projection";
 
 /**
  * Persistência do parecer de SERP da FORMAÇÃO de Article.
@@ -235,6 +236,67 @@ export async function listArticleFormationSerpAssessmentsByRefs(
     lidos.push(...((result.data || []) as SerpRow[]).map(readRow));
   }
   return lidos;
+}
+
+/** A view da M-L (`20261016120000_listas_leves.sql`) com o parecer já em projeção. */
+export const ARTICLE_FORMATION_SERP_LIGHT_VIEW = "arquiteto_formation_serp_lista_leve" as const;
+
+/** A view ainda não existe (migration não aplicada): 42P01 / PGRST205. */
+export function articleFormationSerpLightViewMissing(error: { code?: string | null; message?: string | null } | null | undefined): boolean {
+  if (!error) return false;
+  const code = String(error.code || "");
+  return code === "42P01" || code === "PGRST205" || String(error.message || "").includes(ARTICLE_FORMATION_SERP_LIGHT_VIEW);
+}
+
+type SerpLightRow = SerpRow & { projetado?: boolean | null };
+
+/**
+ * 2026-10-14 · F6 das listas leves: os pareceres da LISTA do Arquiteto já
+ * projetados NO BANCO (view `arquiteto_formation_serp_lista_leve`; a mesma
+ * projeção de `lib/arquiteto/article-serp-projection.ts`, conferida contra as
+ * linhas reais da WifiConecta: 61 de 61 iguais). Todos da marca, ou só os
+ * `candidateRefs` pedidos (releitura do que mudou), em blocos de 100.
+ *
+ * Sem a view (migration ainda não aplicada) — e SÓ nesse caso —, a leitura de
+ * antes: o parecer inteiro do banco projetado no Node. Qualquer outro erro
+ * lança (nunca vira lista vazia). Mesma validação de sempre (`readRow`).
+ * Nenhum caminho de escrita lê daqui: a escrita relê a linha inteira.
+ */
+export async function listArticleFormationSerpForList(
+  context: PipelineContext,
+  candidateRefs?: readonly string[],
+): Promise<{ records: Array<ArticleFormationSerpWorkflowItem & { detail?: typeof ARTICLE_FORMATION_SERP_LIST_DETAIL }>; source: "view" | "node" }> {
+  const refs = candidateRefs ? [...new Set(candidateRefs)] : null;
+  const lerDaView = async (bloco: readonly string[] | null) => {
+    let query = context.supabase
+      .from(ARTICLE_FORMATION_SERP_LIGHT_VIEW)
+      .select(`${SERP_COLUMNS},projetado`)
+      .eq("marca_id", context.brandId)
+      .eq("subject_type", ARTICLE_FORMATION_SERP_SUBJECT_TYPE)
+      .eq("stage", ARTICLE_FORMATION_SERP_WORKFLOW_STAGE);
+    query = bloco ? query.in("subject_id", [...bloco]) : query.order("updated_at", { ascending: false });
+    return query;
+  };
+  const linhas: SerpLightRow[] = [];
+  const blocos: Array<readonly string[] | null> = refs ? Array.from({ length: Math.ceil(refs.length / 100) }, (_, i) => refs.slice(i * 100, i * 100 + 100)) : [null];
+  for (const bloco of blocos) {
+    const result = await lerDaView(bloco);
+    if (result.error) {
+      if (articleFormationSerpLightViewMissing(result.error)) {
+        const inteiros = refs ? await listArticleFormationSerpAssessmentsByRefs(context, refs) : await listArticleFormationSerpAssessments(context);
+        return { records: inteiros.map(projectArticleFormationSerpRecord), source: "node" };
+      }
+      throw pipelineErrorFromSupabase(result.error);
+    }
+    linhas.push(...((result.data || []) as unknown as SerpLightRow[]));
+  }
+  return {
+    records: linhas.map(row => {
+      const record = readRow(row);
+      return row.projetado ? { ...record, detail: ARTICLE_FORMATION_SERP_LIST_DETAIL } : record;
+    }),
+    source: "view",
+  };
 }
 
 /**

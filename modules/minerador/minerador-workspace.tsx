@@ -65,6 +65,7 @@ import { keywordVinculoChoicesSummary, resolveKeywordVinculo, type KeywordVincul
 import { keywordLockVolume, keywordPlanLockHint, planLockChange, PLAN_LOCK_ARCHITECT_HINT, PLAN_LOCK_CHOICE_LABELS, resolveKeywordPlanLock } from "@/lib/minerador/keyword-plan-lock";
 import type { KeywordPlanLockItem, KeywordPlanLockResult } from "@/lib/minerador/declared-plan-import-core";
 import type { DeclaredPlanLockChoice } from "@/lib/minerador/declared-plan";
+import { GROUP_DELETE_ALL_DONE_EVENT, type GroupDeleteAllDoneDetail } from "@/lib/minerador/group-delete-all";
 import { resolveSubjectArticleView, subjectHeadline } from "@/lib/minerador/subject-article-view";
 import { isKeywordSubjectActorId, semanticForKeywordWrite } from "@/lib/minerador/keyword-subject";
 import { convertedTitleIndex } from "@/lib/minerador/subject-conversion";
@@ -89,7 +90,7 @@ import { formatGoogleAdsCpcTableValue } from "@/lib/minerador/google-ads-demand"
 import { buildLogicalOutputContract, buildLogicalProcessorMetadata, hasCompleteLogicalOutputContract, hasCurrentLogicalProcessorMetadata, logicalSemanticRecordsEqual, validateLogicalKeywordOutput } from "@/lib/minerador/logical-processor";
 import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";
 import { MINERADOR_KEYWORDS_TABLE, MINERADOR_LISTING_VIEW, withMeasurementSeries } from "@/lib/minerador/listing-payload";
-import { readCanonicalKeywordDna, readLogicalIntentLabel, readLogicalNiche } from "@/lib/minerador/logical-read-model";
+import { approvalVerdictCacheKey, approvalVerdictCacheStarted, assertFullKeywordSemanticForWrite, isLightKeywordSemantic, lightKeywordRowFromView, lightRowHasApprovalRecord, markApprovalVerdictCacheStarted, MINERADOR_LIGHT_LIST_COLUMNS, MINERADOR_LIGHT_LIST_VIEW, parseApprovalVerdictCache, planLightListVerdicts, type ApprovalVerdictCache, type LightListViewRow } from "@/lib/minerador/keyword-light-list";import { readCanonicalKeywordDna, readLogicalIntentLabel, readLogicalNiche } from "@/lib/minerador/logical-read-model";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { resolveMineradorProcessState, type MineradorAttemptState, type MineradorProcessAttempt, type MineradorProcessName } from "@/lib/minerador/process-state";
 import { type SemanticConsolidationDraft } from "@/lib/minerador/semantic-consolidation-draft";
@@ -103,7 +104,7 @@ import {
   resolveKeywordPublication,
 } from "@/lib/minerador/keyword-lifecycle";
 import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS, MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus, type EditorialKeywordStatus } from "@/lib/minerador/editorial-status";
-import { resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE, type ApprovalRequirement } from "@/lib/minerador/approved-package";
+import { approvedPackageDiverged, resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE, type ApprovalRequirement } from "@/lib/minerador/approved-package";
 import { approvalBlockerLabel } from "@/lib/minerador/approval-blockers";
 import { ApproveAndSendDialog, callApproveAndSend } from "./approve-and-send-dialog";
 import { ArchitectSuggestionsButton, ArchitectSuggestionsDialog } from "./architect-suggestions-dialog";
@@ -468,6 +469,31 @@ const VINCULO_BATCH_PREVIEW_AT = "1970-01-01T00:00:00+00:00";
 const PAGE_TYPE_DRAFT_KEYS = ["keyword_page_type", "keyword_page_type_stance", "keyword_page_type_actor", "keyword_page_type_at", "keyword_page_type_history"] as const;
 // "Pendente" saiu das escolhas em 2026-09-28 (padrão "não aplicável"): o lote só grava decisão.
 const isBatchKgrChoice = (value: string): value is KgrApplicability => value === "applicable" || value === "not_applicable";
+
+/**
+ * F6 das listas leves (SDD 2026-10-13, item 4; migration M-L
+ * `20261016120000_listas_leves.sql`): a planilha lê da view leve, só com o que
+ * as colunas, filtros e ordenações leem. Sem a view (migration ainda não
+ * aplicada), a sessão volta à listagem de antes — o deploy não quebra.
+ */
+let fonteLeveDisponivel = true;
+
+/** A view leve ainda não existe no banco? (Mesmo critério do recuo da listagem.) */
+function viewLeveAusente(error: { code?: string | null; message?: string | null } | null): boolean {
+  if (!error) return false;
+  const code = String(error.code || "");
+  return code === "42P01" || code === "PGRST205" || String(error.message || "").includes(MINERADOR_LIGHT_LIST_VIEW);
+}
+
+/** Cache de apresentação do veredito da aprovação (por ator + marca); nunca limpo, só acrescido. */
+function readApprovalVerdictCache(key: string | null): ApprovalVerdictCache {
+  if (!key) return {};
+  try { return parseApprovalVerdictCache(window.localStorage.getItem(key)); } catch { return {}; }
+}
+function writeApprovalVerdictCache(key: string | null, cache: ApprovalVerdictCache): void {
+  if (!key) return;
+  try { window.localStorage.setItem(key, JSON.stringify(cache)); } catch { /* cota ou modo privado: a próxima carga lê inteiro de novo */ }
+}
 
 /** A view ainda não existe no banco? (PostgREST não a acha no cache do schema.) */
 function viewDeListagemAusente(error: { code?: string | null; message?: string | null } | null): boolean {
@@ -934,6 +960,60 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     });
   }, [publishNotice]);
 
+  /*
+   * F6 · DETALHE POR ID (SDD 2026-10-13, item 4). A linha leve (view
+   * `minerador_keywords_lista_leve`) mostra as colunas; o DNA inteiro é lido do
+   * banco, por id, só quando é preciso: ao abrir o painel, ao selecionar (a
+   * seleção comanda as ações) e na entrada de cada ação de uma linha. Linha
+   * que já é inteira (lida depois de uma gravação) nunca é trocada pela leitura.
+   * Falha de leitura não apaga nada: a linha continua leve, e a escrita a partir
+   * dela é recusada pela marca da lista leve.
+   */
+  const keywordsRef = useRef<KeywordItem[]>(keywords);
+  useEffect(() => { keywordsRef.current = keywords; }, [keywords]);
+  const hydratingKeywordIdsRef = useRef<Set<string>>(new Set());
+  const [hydratingKeywordCount, setHydratingKeywordCount] = useState(0);
+  const ensureFullKeywords = useCallback(async (ids: readonly string[]): Promise<Map<string, KeywordItem>> => {
+    const byId = new Map(keywordsRef.current.map(item => [item.id, item]));
+    const unique = [...new Set(ids.filter(Boolean))];
+    const light = unique.filter(id => isLightKeywordSemantic(byId.get(id)?.analise_semantica));
+    const result = new Map<string, KeywordItem>();
+    for (const id of unique) { const row = byId.get(id); if (row && !isLightKeywordSemantic(row.analise_semantica)) result.set(id, row); }
+    if (light.length === 0) return result;
+    for (const id of light) hydratingKeywordIdsRef.current.add(id);
+    setHydratingKeywordCount(hydratingKeywordIdsRef.current.size);
+    try {
+      const full = await readCanonicalKeywordRows(light);
+      setKeywords(current => current.map(item => full.has(item.id) && isLightKeywordSemantic(item.analise_semantica) ? full.get(item.id)! : item));
+      keywordsRef.current = keywordsRef.current.map(item => full.has(item.id) && isLightKeywordSemantic(item.analise_semantica) ? full.get(item.id)! : item);
+      for (const [id, row] of full) result.set(id, row);
+      return result;
+    } finally {
+      for (const id of light) hydratingKeywordIdsRef.current.delete(id);
+      setHydratingKeywordCount(hydratingKeywordIdsRef.current.size);
+    }
+  }, [readCanonicalKeywordRows]);
+  /** A linha inteira de uma keyword para uma ação (lida por id se a planilha só tem a leve). */
+  const fullKeywordFor = useCallback(async (keywordId: string): Promise<KeywordItem | null> => {
+    try {
+      return (await ensureFullKeywords([keywordId])).get(keywordId) ?? null;
+    } catch (error) {
+      showNotification("error", `Não foi possível ler o DNA desta keyword: ${error instanceof Error ? error.message : "erro desconhecido"}. Nada foi gravado.`, { code: "KEYWORD_DETAIL_READ_FAILED" });
+      return null;
+    }
+  }, [ensureFullKeywords, showNotification]);
+  // A seleção comanda as ações: as selecionadas passam a ter o DNA inteiro (uma leitura por id, em blocos).
+  const hydrationFailedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const rowById = new Map(keywords.map(item => [item.id, item]));
+    const leves = [...selectedIds].filter(id => isLightKeywordSemantic(rowById.get(id)?.analise_semantica) && !hydratingKeywordIdsRef.current.has(id) && !hydrationFailedRef.current.has(id));
+    if (leves.length === 0) return;
+    void ensureFullKeywords(leves).catch((error: unknown) => {
+      for (const id of leves) hydrationFailedRef.current.add(id);
+      showNotification("error", `Não foi possível ler o DNA das ${leves.length} keyword(s) selecionada(s): ${error instanceof Error ? error.message : "erro desconhecido"}. As ações ficam bloqueadas até a leitura dar certo (recarregue).`, { code: "KEYWORD_DETAIL_READ_FAILED" });
+    });
+  }, [selectedIds, keywords, ensureFullKeywords, showNotification]);
+
   const setProcessAttempt = useCallback((keywordIds: readonly string[], step: MineradorProcessName, state: Exclude<MineradorAttemptState, "not_run">, operationId?: string) => {
     const finishedAt = state === "running" ? undefined : new Date().toISOString();
     setProcessAttemptsByKeywordId(previous => {
@@ -974,6 +1054,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
   const startBulkProgress = useCallback((step: BulkProgressStep, total: number | null = null, keywordIds?: readonly string[], operationId?: string) => {
     if (bulkProgressLockRef.current) return false;
+    // F6: ação nunca roda sobre a linha leve. A seleção já pede o DNA inteiro;
+    // se ele ainda não chegou, a ação espera (nada é gravado pela metade).
+    const alvo = keywordIds || [...selectedIds];
+    const rowById = new Map(keywordsRef.current.map(item => [item.id, item]));
+    const leves = alvo.filter(id => isLightKeywordSemantic(rowById.get(id)?.analise_semantica));
+    if (leves.length > 0) {
+      void ensureFullKeywords(leves).catch(() => undefined);
+      showNotification("info", `Carregando o DNA de ${leves.length} keyword(s) (a planilha mostra só as colunas). Repita a ação em seguida.`, { code: "KEYWORD_DETAIL_LOADING" });
+      return false;
+    }
     if (bulkProgressResetTimerRef.current !== null) {
       window.clearTimeout(bulkProgressResetTimerRef.current);
       bulkProgressResetTimerRef.current = null;
@@ -995,7 +1085,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     });
     setProcessAttempt(keywordIds || [...selectedIds], step, "running", operationId);
     return true;
-  }, [selectedIds, setProcessAttempt]);
+  }, [selectedIds, setProcessAttempt, ensureFullKeywords, showNotification]);
 
   const updateBulkProgress = useCallback((current: number, total?: number | null, message?: string, detail?: string) => {
     setBulkProgress(previous => {
@@ -1682,6 +1772,80 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     return Array.isArray(body.items) ? body.items as KeywordItem[] : [];
   }, []);
 
+  /** F6 · o `dna_hash` atual de algumas keywords (a segunda fatia do sanduíche do veredito). */
+  const readLightListHashes = async (ids: readonly string[]): Promise<Map<string, string>> => {
+    const hashes = new Map<string, string>();
+    if (!selectedBrandId) return hashes;
+    for (let start = 0; start < ids.length; start += KEYWORD_READBACK_ID_CHUNK) {
+      const { data, error } = await supabase
+        .from(MINERADOR_LIGHT_LIST_VIEW)
+        .select("id,dna_hash")
+        .eq("brand_id", selectedBrandId)
+        .in("id", ids.slice(start, start + KEYWORD_READBACK_ID_CHUNK));
+      if (error) throw error;
+      for (const row of (data || []) as Array<{ id: string; dna_hash: string | null }>) if (row.dna_hash) hashes.set(String(row.id), row.dna_hash);
+    }
+    return hashes;
+  };
+
+  /**
+   * F6 · completa a lista leve com o VEREDITO da aprovação.
+   *
+   * A assinatura do pacote aprovado cobre o DNA inteiro, e a linha leve não o
+   * tem. Para cada keyword com registro de aprovação: veredito guardado para o
+   * MESMO `dna_hash` → a linha fica leve com ele; sem veredito → a linha
+   * INTEIRA é lida por id (blocos de 200), o veredito é calculado pelo mesmo
+   * `approvedPackageDiverged` e guardado (só se o `dna_hash` não mudou entre a
+   * lista e a leitura inteira). Leitura que falha derruba a carga inteira — a
+   * tela não troca a lista por uma parcial.
+   */
+  const completeLightListRows = async (rows: LightListViewRow[]): Promise<KeywordItem[]> => {
+    const cacheKey = actorUserId && selectedBrandId ? approvalVerdictCacheKey(actorUserId, selectedBrandId) : null;
+    const cache = readApprovalVerdictCache(cacheKey);
+    const plan = planLightListVerdicts(rows, cache);
+    const fullById = plan.needFull.length ? await readCanonicalKeywordRows(plan.needFull) : new Map<string, KeywordItem>();
+    if (plan.needFull.length) {
+      const hashBefore = new Map(rows.map(row => [String(row.id), String(row.dna_hash || "")]));
+      const hashAfter = await readLightListHashes(plan.needFull).catch(() => new Map<string, string>());
+      let changed = false;
+      for (const id of plan.needFull) {
+        const full = fullById.get(id);
+        const hash = hashBefore.get(id);
+        if (!full || !hash || hashAfter.get(id) !== hash) continue;
+        const diverged = approvedPackageDiverged({ keywordId: full.id, keyword: full.keyword, intent: full.intent, volumeSearch: full.volume_search, resultsAllintitle: full.results_allintitle, kgrScore: full.kgr_score, semantic: full.analise_semantica });
+        if (typeof diverged !== "boolean") continue;
+        cache[id] = { h: hash, d: diverged };
+        changed = true;
+      }
+      if (changed) writeApprovalVerdictCache(cacheKey, cache);
+    }
+    const verdictById = new Map(plan.light.map(entry => [String(entry.row.id), entry.approvalDiverged]));
+    return rows.map(row => fullById.get(String(row.id)) ?? lightKeywordRowFromView<KeywordItem>(row, verdictById.get(String(row.id))));
+  };
+
+  /**
+   * F6 · 1ª carga da marca neste navegador: os vereditos da aprovação saem das
+   * linhas da listagem de antes (o DNA sem séries — a assinatura v3 também não
+   * as cobre) e vão para o cache com o `dna_hash` lido ANTES e conferido DEPOIS
+   * (só o que não mudou entre as leituras). Falha aqui não derruba a carga: só
+   * não guarda (a próxima carga tenta de novo).
+   */
+  const seedApprovalVerdicts = async (rows: KeywordItem[], hashBefore: Map<string, string>): Promise<void> => {
+    const cacheKey = actorUserId && selectedBrandId ? approvalVerdictCacheKey(actorUserId, selectedBrandId) : null;
+    if (!cacheKey) return;
+    const aprovadas = rows.filter(row => lightRowHasApprovalRecord(row.analise_semantica));
+    const hashAfter = aprovadas.length ? await readLightListHashes(aprovadas.map(row => row.id)).catch(() => null) : new Map<string, string>();
+    if (!hashAfter) return;
+    const cache = readApprovalVerdictCache(cacheKey);
+    for (const row of aprovadas) {
+      const hash = hashBefore.get(row.id);
+      if (!hash || hashAfter.get(row.id) !== hash) continue;
+      const diverged = approvedPackageDiverged({ keywordId: row.id, keyword: row.keyword, intent: row.intent, volumeSearch: row.volume_search, resultsAllintitle: row.results_allintitle, kgrScore: row.kgr_score, semantic: row.analise_semantica });
+      if (typeof diverged === "boolean") cache[row.id] = { h: hash, d: diverged };
+    }
+    writeApprovalVerdictCache(cacheKey, markApprovalVerdictCacheStarted(cache));
+  };
+
   // Carrega listas e keywords iniciais do Supabase
   const fetchData = async () => {
     if (sessionStatus !== "authenticated") return;
@@ -1743,10 +1907,11 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       const loadedKeywords = await withSupabaseSelectRetry(async () => {
         const allowedListIds = loadedLists.map(l => l.id);
         const filtroDeGrupo = keywordGroups.filter;
-        const lerDe = async (fonte: string, comGrupo = true) => {
+        const lerDe = async (fonte: string, comGrupo = true, colunas = "*") => {
           let query = supabase
             .from(fonte)
-             .select("*")
+             // A lista leve pede colunas próprias (o resultado é tratado como LightListViewRow).
+             .select(colunas as "*")
              .eq("brand_id", selectedBrandId)
              .is("deleted_at", null)
              .order("created_at", { ascending: false });
@@ -1768,6 +1933,18 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         // agora) = planilha vazia com o aviso, sem consulta inútil.
         if (filtroDeGrupo.kind === "groups" && filtroDeGrupo.groupIds.length === 0) return [];
 
+        // F6 · a lista leve (view M-L). Ausente: a sessão volta à listagem de antes.
+        // Na 1ª carga da marca neste navegador, a listagem de antes + só `id,dna_hash`, para guardar os vereditos.
+        let primeiraCarga: Map<string, string> | null = null;
+        if (fonteLeveDisponivel) {
+          const iniciado = approvalVerdictCacheStarted(readApprovalVerdictCache(actorUserId && selectedBrandId ? approvalVerdictCacheKey(actorUserId, selectedBrandId) : null));
+          const leve = await lerDe(MINERADOR_LIGHT_LIST_VIEW, true, iniciado ? MINERADOR_LIGHT_LIST_COLUMNS : "id,dna_hash");
+          if (leve.error && viewLeveAusente(leve.error)) fonteLeveDisponivel = false;
+          else if (leve.error) throw leve.error;
+          else if (iniciado) return await completeLightListRows((leve.data || []) as unknown as LightListViewRow[]);
+          else primeiraCarga = new Map(((leve.data || []) as unknown as LightListViewRow[]).map(row => [String(row.id), String(row.dna_hash || "")]));
+        }
+
         let { data: keywordsData, error: keywordsError } = await lerDe(fonteDaListagem);
         if (keywordsError && fonteDaListagem !== MINERADOR_KEYWORDS_TABLE && viewDeListagemAusente(keywordsError)) {
           // Migration ainda não aplicada: a tela funciona, só sem a economia.
@@ -1781,6 +1958,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           ({ data: keywordsData, error: keywordsError } = await lerDe(fonteDaListagem, false));
         }
         if (keywordsError) throw keywordsError;
+        if (primeiraCarga) await seedApprovalVerdicts((keywordsData || []) as KeywordItem[], primeiraCarga);
         return keywordsData || [];
       });
 
@@ -1808,6 +1986,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       setKeywords(loadedKeywords);
       // As linhas voltaram podadas: o que já fora hidratado não vale mais.
       hydratedKeywordIdsRef.current = new Set();
+      hydrationFailedRef.current = new Set();
       setProcessAttemptsByKeywordId({});
       setHumanReviewDrafts({});
       // Reidratação server-side: a Qualificação Semântica sobrevive a F5, nova
@@ -2112,7 +2291,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   };
 
   const handlePublicationLinkAction = async (
-    item: KeywordItem,
+    itemDaLinha: KeywordItem,
     action: "confirm" | "correct_legacy" | "unlink",
     requestedEditorialStatus: EditorialKeywordStatus | "" = "",
     // Quem colou a URL e mandou declarar já respondeu à pergunta; repetir o
@@ -2120,6 +2299,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     options: { skipPrompt?: boolean } = {},
   ) => {
     if (!selectedBrandId || !session?.user?.id) return;
+    // F6 · a gravação parte do DNA inteiro desta keyword (lido por id se a linha é a leve).
+    const item = await fullKeywordFor(itemDaLinha.id);
+    if (!item) return;
     const currentView = readPublicationLink({ status: item.status, evidence: readSiteOrigin(item.analise_semantica) });
     if (action === "correct_legacy" && (!requestedEditorialStatus || !mineradorWorkflowStatuses.includes(requestedEditorialStatus))) {
       showNotification("info", "Escolha o estado editorial que deve permanecer depois da correção da marcação.");
@@ -2140,6 +2322,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     if (!result.changed) { showNotification("error", result.reason || "O vínculo não pôde ser atualizado."); return; }
     setUpdating(true);
     try {
+      assertFullKeywordSemanticForWrite(item.analise_semantica, result.semantic);
       const payload: Record<string, unknown> = { analise_semantica: result.semantic };
       if (action === "correct_legacy" && requestedEditorialStatus) payload.status = requestedEditorialStatus;
       const { error } = await supabase.from("minerador_keywords").update(payload).eq("id", item.id).eq("brand_id", selectedBrandId).is("deleted_at", null);
@@ -2186,6 +2369,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   useEffect(() => {
     const keywordId = expandedRowId;
     if (!keywordId || !selectedBrandId) return;
+    // F6 · linha leve: quem lê o DNA inteiro é o efeito abaixo.
+    if (isLightKeywordSemantic(keywordsRef.current.find(item => item.id === keywordId)?.analise_semantica)) return;
     // Sem poda não há o que hidratar.
     if (fonteDaListagem === MINERADOR_KEYWORDS_TABLE) return;
     if (hydratedKeywordIdsRef.current.has(keywordId)) return;
@@ -2209,6 +2394,23 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     return () => { cancelado = true; };
   }, [expandedRowId, selectedBrandId, supabase]);
 
+  /*
+   * F6 · ABRIR O PAINEL LÊ O DNA DAQUELA KEYWORD, por id e só dela. A linha
+   * leve da planilha não tem o DNA inteiro; a leitura troca só esta linha (e
+   * nunca uma que já seja inteira). Falha: o painel fica com o que tem, e a
+   * gravação a partir dele é recusada pela marca da lista leve.
+   */
+  useEffect(() => {
+    const keywordId = expandedRowId;
+    if (!keywordId) return;
+    const row = keywords.find(item => item.id === keywordId);
+    if (!isLightKeywordSemantic(row?.analise_semantica) || hydratingKeywordIdsRef.current.has(keywordId) || hydrationFailedRef.current.has(keywordId)) return;
+    void ensureFullKeywords([keywordId]).catch((error: unknown) => {
+      hydrationFailedRef.current.add(keywordId);
+      showNotification("error", `Não foi possível ler o DNA desta keyword: ${error instanceof Error ? error.message : "erro desconhecido"}. O painel mostra só as colunas da planilha.`, { code: "KEYWORD_DETAIL_READ_FAILED" });
+    });
+  }, [expandedRowId, keywords, ensureFullKeywords, showNotification]);
+
   // Redireciona o Admin para /marcas apenas se NENHUMA marca estiver selecionada
   useEffect(() => {
     if (sessionStatus === "authenticated" && userRole === "admin" && !selectedBrandId) {
@@ -2217,13 +2419,29 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   }, [sessionStatus, userRole, selectedBrandId, router]);
 
   // AÃ§Ã£o: Exportar selecionadas para CSV Local
-  const exportSelectedToCSV = (fileName: string) => {
+  const exportSelectedToCSV = async (fileName: string) => {
     if (selectedIds.size === 0) {
       showNotification("error", "Selecione pelo menos uma palavra-chave para exportar.");
       return;
     }
 
-    const selectedKeywords = keywords.filter(k => selectedIds.has(k.id));
+    /*
+     * F6 · o CSV leva TODAS as chaves do DNA: ele nunca sai da linha leve. As
+     * selecionadas são lidas inteiras por id antes (a seleção já as pede); se a
+     * leitura falhar, nada é exportado — nunca um CSV parcial em silêncio.
+     */
+    let fullById: Map<string, KeywordItem>;
+    try {
+      fullById = await ensureFullKeywords([...selectedIds]);
+    } catch (error) {
+      showNotification("error", `Não foi possível ler o DNA das selecionadas para o CSV: ${error instanceof Error ? error.message : "erro desconhecido"}. Nada foi exportado.`, { code: "CSV_DETAIL_READ_FAILED" });
+      return;
+    }
+    const selectedKeywords = keywords.filter(k => selectedIds.has(k.id)).map(k => fullById.get(k.id) ?? k);
+    if (selectedKeywords.some(k => isLightKeywordSemantic(k.analise_semantica))) {
+      showNotification("error", "O DNA de alguma selecionada não foi lido inteiro. Nada foi exportado; tente de novo.", { code: "CSV_DETAIL_INCOMPLETE" });
+      return;
+    }
 
     // Passo 2: Varre todas as chaves Ãºnicas presentes dentro dos objetos analise_semantica
     const uniqueKeysSet = new Set<string>();
@@ -2335,20 +2553,28 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
   const requestKeywordDeletePreview = useCallback(async (ids: readonly string[]): Promise<KeywordDeleteReview> => {
     if (!selectedBrandId) throw new Error("Marca ativa ausente para a exclusão.");
-    const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete/preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keywordIds: [...new Set(ids)] }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || body?.success !== true) {
-      const error = new Error(body?.message || "Não foi possível resolver a publicação das keywords.") as Error & { code?: string; diagnostic?: Record<string, unknown> };
-      error.code = typeof body?.code === "string" ? body.code : "KEYWORD_DELETE_TRANSACTION_FAILED";
-      throw error;
-      // O servidor envia a causa tecnica; descarta-la aqui tornava a falha ininvestigavel.
-      if (body?.diagnostic && typeof body.diagnostic === "object") error.diagnostic = body.diagnostic as Record<string, unknown>;
-      throw error;
+    // F7 (SDD 2026-10-13 item 6, defeito achado): a rota aceita até 100 ids; a prévia vai em blocos e é somada.
+    const unicos = [...new Set(ids)];
+    const somado: { items: Array<{ impact?: Record<string, unknown>; id?: unknown; keyword?: unknown }>; publishedIds: unknown[]; hardDeleteIds: unknown[] } = { items: [], publishedIds: [], hardDeleteIds: [] };
+    for (let inicio = 0; inicio < unicos.length; inicio += 100) {
+      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keywordIds: unicos.slice(inicio, inicio + 100) }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body?.success !== true) {
+        const error = new Error(body?.message || "Não foi possível resolver a publicação das keywords.") as Error & { code?: string; diagnostic?: Record<string, unknown> };
+        error.code = typeof body?.code === "string" ? body.code : "KEYWORD_DELETE_TRANSACTION_FAILED";
+        // O servidor envia a causa tecnica; descarta-la aqui tornava a falha ininvestigavel.
+        if (body?.diagnostic && typeof body.diagnostic === "object") error.diagnostic = body.diagnostic as Record<string, unknown>;
+        throw error;
+      }
+      if (Array.isArray(body.items)) somado.items.push(...body.items);
+      if (Array.isArray(body.publishedIds)) somado.publishedIds.push(...body.publishedIds);
+      if (Array.isArray(body.hardDeleteIds)) somado.hardDeleteIds.push(...body.hardDeleteIds);
     }
+    const body = somado;
     const impact = Array.isArray(body.items) ? body.items.flatMap((item: { impact?: Record<string, unknown> }) => {
       const nested = item?.impact || {};
       return ["ownedChildren", "downstreamDrafts", "sharedReferences", "publishedReferences"].flatMap(key => Array.isArray(nested[key]) ? nested[key] : []);
@@ -2376,23 +2602,45 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     if (!selectedBrandId) throw new Error("Marca ativa ausente para a exclusão.");
     setUpdating(true);
     try {
-      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // A declaracao do fluxo recuperavel: o humano viu o dialogo "Remover
-        // keywords publicadas por 24 horas" e digitou o nome. Sem ela o banco
-        // recusa o lote — que e o que impede uma publicada sumir sozinha.
-        body: JSON.stringify({ keywordIds: review.ids, allowRecoverable: review.publishedIds.length > 0 }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok || body?.success !== true) {
-        const error = new Error(body?.message || "A exclusão não foi concluída.") as Error & { code?: string };
-        error.code = typeof body?.code === "string" ? body.code : "KEYWORD_DELETE_TRANSACTION_FAILED";
-        throw error;
+      /*
+       * F7 (SDD 2026-10-13 item 6, defeito achado): a rota aceita até 100 ids.
+       * A seleção maior vai em blocos de 100, cada um tudo-ou-nada; o primeiro
+       * bloco recusado para a sequência (os anteriores já foram confirmados) e
+       * a tela diz quantas saíram e por que o resto ficou.
+       */
+      const publicadasDaPrevia = new Set(review.publishedIds);
+      const hardDeletedIds: string[] = [];
+      const recoverableIds: string[] = [];
+      let blocoRecusado: (Error & { code?: string }) | null = null;
+      for (let inicio = 0; inicio < review.ids.length; inicio += 100) {
+        const bloco = review.ids.slice(inicio, inicio + 100);
+        const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // A declaracao do fluxo recuperavel: o humano viu o dialogo "Remover
+          // keywords publicadas por 24 horas" e digitou o nome. Sem ela o banco
+          // recusa o lote — que e o que impede uma publicada sumir sozinha.
+          body: JSON.stringify({ keywordIds: bloco, allowRecoverable: review.publishedIds.length > 0 && bloco.some(id => publicadasDaPrevia.has(id)) }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body?.success !== true) {
+          const error = new Error(body?.message || "A exclusão não foi concluída.") as Error & { code?: string };
+          error.code = typeof body?.code === "string" ? body.code : "KEYWORD_DELETE_TRANSACTION_FAILED";
+          if (!hardDeletedIds.length && !recoverableIds.length) throw error;
+          blocoRecusado = error;
+          break;
+        }
+        if (Array.isArray(body.hardDeletedIds)) hardDeletedIds.push(...(body.hardDeletedIds as string[]));
+        if (Array.isArray(body.recoverableIds)) recoverableIds.push(...(body.recoverableIds as string[]));
       }
-
-      const hardDeletedIds = Array.isArray(body.hardDeletedIds) ? body.hardDeletedIds as string[] : [];
-      const recoverableIds = Array.isArray(body.recoverableIds) ? body.recoverableIds as string[] : [];
+      const confirmadas = new Set([...hardDeletedIds, ...recoverableIds]);
+      if (blocoRecusado) {
+        setKeywords(previous => previous.filter(item => !confirmadas.has(item.id)));
+        setSelectedIds(current => new Set([...current].filter(id => !confirmadas.has(id))));
+        if (recoverableIds.length) void loadRecoverableKeywords(selectedBrandId).then(linhas => setRecoverableKeywords(linhas)).catch(() => undefined);
+        showNotification("error", `${confirmadas.size} de ${review.ids.length} keyword(s) saíram (blocos de 100). O bloco seguinte foi recusado e nada dele saiu: ${blocoRecusado.message}`, { code: blocoRecusado.code || "KEYWORD_DELETE_TRANSACTION_FAILED", stage: "delete_transaction", persistent: true });
+        return false;
+      }
       // The server/RPC is the timestamp authority. Re-read the tombstones
       // instead of projecting deleted_at/purge_after from the browser clock.
       const recoverableReadback = recoverableIds.length > 0
@@ -2439,6 +2687,29 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       setUpdating(false);
     }
   }, [loadRecoverableKeywords, keywords, selectedBrandId, setSelectedIds, showNotification]);
+
+  /*
+   * F7 · EXCLUIR TUDO DA COR (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`, item 6).
+   * O diálogo da etiqueta de cor executa pelo servidor e RELÊ; depois avisa por
+   * um evento da janela. A planilha só tira as linhas que o servidor confirmou
+   * (apagadas de vez e publicadas na lixeira) e relê a lista de recuperáveis.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const aoExcluirCor = (event: Event) => {
+      const detalhe = (event as CustomEvent<GroupDeleteAllDoneDetail>).detail;
+      if (!detalhe || detalhe.brandId !== selectedBrandId) return;
+      const saiu = new Set([...(detalhe.hardDeletedIds || []), ...(detalhe.recoverableIds || [])]);
+      if (!saiu.size) return;
+      setKeywords(previous => previous.filter(item => !saiu.has(item.id)));
+      setSelectedIds(current => new Set([...current].filter(id => !saiu.has(id))));
+      if ((detalhe.recoverableIds || []).length && selectedBrandId) {
+        void loadRecoverableKeywords(selectedBrandId).then(linhas => setRecoverableKeywords(linhas)).catch(() => undefined);
+      }
+    };
+    window.addEventListener(GROUP_DELETE_ALL_DONE_EVENT, aoExcluirCor);
+    return () => window.removeEventListener(GROUP_DELETE_ALL_DONE_EVENT, aoExcluirCor);
+  }, [loadRecoverableKeywords, selectedBrandId, setSelectedIds]);
 
   const handleRestoreKeyword = useCallback(async (keywordId: string) => {
     if (!selectedBrandId) return;
@@ -3219,7 +3490,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   };
 
   const handleHumanReviewAction = async (keywordId: string, action: HumanReviewAction) => {
-    const item = keywords.find(keyword => keyword.id === keywordId);
+    // F6 · a ação lê o DNA inteiro desta keyword (por id, se a planilha só tem a linha leve).
+    const item = selectedBrandId ? await fullKeywordFor(keywordId) : null;
     if (!item || !selectedBrandId) return;
 
     const cloneSemantic =(source: KeywordSemantic): KeywordSemantic => JSON.parse(JSON.stringify(source)) as KeywordSemantic;
@@ -3410,6 +3682,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     let outcome: "success" | "error" = "success";
     setUpdating(true);
     try {
+      assertFullKeywordSemanticForWrite(item.analise_semantica, nextSemantic);
       const payload: Record<string, unknown> = { analise_semantica: nextSemantic };
       if ((action.type === "field" || draft) && nextIntent !== item.intent) payload.intent = nextIntent;
       const { error } = await supabase.from("minerador_keywords").update(payload).eq("id", keywordId).eq("brand_id", selectedBrandId).is("deleted_at", null);
@@ -4932,6 +5205,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
             <span className="font-semibold text-foreground">{selectedIds.size}</span>
             <span>selecionada{selectedIds.size === 1 ? "" : "s"}</span>
             {hiddenSelectedCount > 0 && <span className="hidden text-xs text-text-muted lg:inline">· {visibleSelectedCount} visíveis</span>}
+            {/* F6 · a seleção lê o DNA inteiro das linhas leves antes de qualquer ação. */}
+            {hydratingKeywordCount > 0 && <span role="status" className="text-sm text-text-muted">· carregando o DNA de {hydratingKeywordCount}</span>}
           </div>
 
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:thin] sm:gap-2">
@@ -5632,7 +5907,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
             <form 
               onSubmit={(e) => {
                 e.preventDefault();
-                exportSelectedToCSV(exportFileName);
+                void exportSelectedToCSV(exportFileName);
                 setIsExportModalOpen(false);
               }} 
               className="p-4 flex flex-col gap-3.5"

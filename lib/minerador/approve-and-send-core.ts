@@ -27,6 +27,12 @@ export type ApproveAndSendLine = {
   action: ApproveAndSendAction;
   /** Já recebida pelo Arquiteto: reenviar só atualiza o pacote se ele mudou. */
   alreadyInArquiteto: boolean;
+  /**
+   * 2026-10-14 (WifiConecta, azul): já no Arquiteto COM pacote aprovado mais
+   * novo no Minerador — o envio atualiza o item recebido (as decisões do
+   * Arquiteto ficam). Opcional: ausente = falso.
+   */
+  refreshInArquiteto?: boolean;
   missing: ApprovalRequirement[];
   reasons: string[];
 };
@@ -74,8 +80,12 @@ export type ApproveAndSendDeps<Row extends ApproveAndSendRow, Entry extends Appr
   entries: (rows: readonly Row[]) => Entry[];
   approve: (rows: readonly Row[], entries: readonly Entry[]) => Promise<Array<{ id: string; outcome: "applied" | "unchanged" | "blocked" | "stale"; reason?: string }>>;
   /** Só leitura: quais o envio parcial aceitaria, quais já estão lá e quais ficam fora. */
-  previewSend: (ids: readonly string[]) => Promise<{ eligibleKeywordIds: string[]; existingKeywordIds: string[]; refused: Array<{ keywordId: string; reason: string }> }>;
+  previewSend: (ids: readonly string[]) => Promise<{ eligibleKeywordIds: string[]; existingKeywordIds: string[]; refused: Array<{ keywordId: string; reason: string }>;
+    /** Já no Arquiteto com pacote aprovado novo: o envio atualiza o item recebido. */
+    refreshKeywordIds?: string[] }>;
   send: (ids: readonly string[]) => Promise<{ importedKeywordIds: readonly string[]; refused?: ReadonlyArray<{ keywordId: string; reason: string }>;
+    /** As já recebidas que ganharam o pacote novo (decisões do Arquiteto preservadas). */
+    refreshedKeywordIds?: readonly string[];
     /** Item 1: o Silo do plano preparado no envio (aditivo). */
     declaredPlanSilos?: ReadonlyArray<{ message: string; pendingConfirmation?: string | null }> }>;
   hash: (value: unknown) => string;
@@ -87,7 +97,12 @@ const missingOf = (entry: ApproveAndSendEntry): ApprovalRequirement[] =>
   Array.isArray(entry.readiness?.missing) ? (entry.readiness!.missing as unknown[]).filter((item): item is ApprovalRequirement => typeof item === "string") : [];
 
 export const APPROVE_AND_SEND_MISSING_REASON = "A keyword não existe mais nesta marca (excluída ou de outra marca).";
-export const APPROVE_AND_SEND_STALE_REASON = "A keyword mudou entre a prévia e a gravação; nada foi gravado nela. Gere a prévia de novo.";
+/** O aviso do resultado quando o envio atualizou itens já recebidos (2026-10-14). */
+export function approveAndSendRefreshNotice(count: number): string {
+  return `${count} keyword(s) que já estavam no Arquiteto receberam o pacote aprovado novo do Minerador (Assunto, plano e DNA). As decisões do Arquiteto (Silo, artigo, Assunto ancorado) ficaram como estavam; artigo já formado não foi reescrito.`;
+}
+
+export const APPROVE_AND_SEND_STALE_REASON ="A keyword mudou entre a prévia e a gravação; nada foi gravado nela. Gere a prévia de novo.";
 
 export async function previewApproveAndSend<Row extends ApproveAndSendRow, Entry extends ApproveAndSendEntry>(
   input: { brandId: string; actorId: string; keywordIds: readonly string[]; send: boolean },
@@ -105,11 +120,12 @@ export async function previewApproveAndSend<Row extends ApproveAndSendRow, Entry
   const envio = candidatasAoEnvio.length ? await deps.previewSend(candidatasAoEnvio) : { eligibleKeywordIds: [], existingKeywordIds: [], refused: [] };
   const elegiveis = new Set(envio.eligibleKeywordIds);
   const existentes = new Set(envio.existingKeywordIds);
+  const atualizam = new Set("refreshKeywordIds" in envio ? envio.refreshKeywordIds ?? [] : []);
   const recusaDoEnvio = new Map(envio.refused.map(item => [item.keywordId, item.reason] as const));
 
   const lines: ApproveAndSendLine[] = rows.map(row => {
     const entry = entryById.get(row.id)!;
-    const base = { id: row.id, keyword: row.keyword, currentStatus: entry.currentStatus, alreadyInArquiteto: existentes.has(row.id), missing: [] as ApprovalRequirement[], reasons: [] as string[] };
+    const base = { id: row.id, keyword: row.keyword, currentStatus: entry.currentStatus, alreadyInArquiteto: existentes.has(row.id), ...(existentes.has(row.id) && atualizam.has(row.id) ? { refreshInArquiteto: true } : {}), missing: [] as ApprovalRequirement[], reasons: [] as string[] };
     if (entry.outcome === "ready") return { ...base, action: input.send ? "approve_and_send" as const : "approve_only" as const };
     if (entry.outcome === "unchanged") {
       if (!input.send) return { ...base, action: "unchanged" as const };
@@ -131,7 +147,7 @@ export async function previewApproveAndSend<Row extends ApproveAndSendRow, Entry
   const decisionHash = deps.hash({
     contract: "approve-and-send@1", brandId: input.brandId, actorId: input.actorId, send: input.send,
     rows: rows.map(row => ({ id: row.id, keyword: row.keyword, status: row.status, semantic: row.analise_semantica })),
-    lines: todas.map(line => ({ id: line.id, action: line.action, reasons: line.reasons, missing: line.missing, alreadyInArquiteto: line.alreadyInArquiteto })),
+    lines: todas.map(line => ({ id: line.id, action: line.action, reasons: line.reasons, missing: line.missing, alreadyInArquiteto: line.alreadyInArquiteto, ...(line.refreshInArquiteto ? { refreshInArquiteto: true } : {}) })),
   });
   return {
     send: input.send,
@@ -191,6 +207,7 @@ export async function applyApproveAndSend<Row extends ApproveAndSendRow, Entry e
     const aEnviar = [...aprovadas, ...soEnviar];
     if (aEnviar.length) {
       const envio = await deps.send(aEnviar);
+      if (envio.refreshedKeywordIds?.length) notices.push(approveAndSendRefreshNotice(envio.refreshedKeywordIds.length));
       for (const silo of envio.declaredPlanSilos ?? []) notices.push([silo.message, silo.pendingConfirmation].filter(Boolean).join(" "));
       const enviadas = new Set(envio.importedKeywordIds);
       const recusas = new Map((envio.refused ?? []).map(item => [item.keywordId, item.reason] as const));

@@ -7,6 +7,7 @@ import { EditorialGroupDot } from "@/components/editorial/group-tag";
 import { EDITORIAL_GROUP_COLOR_LABELS, type EditorialGroupColor } from "@/lib/editorial/editorial-groups";
 import { describeApproveAndSendResult, type ApproveAndSendLine, type ApproveAndSendPreview, type ApproveAndSendResult } from "@/lib/minerador/approve-and-send-core";
 import {
+  ARQUITETO_IMPORT_REFRESH_DETAIL,
   arquitetoImportLineLabel,
   arquitetoImportNeedsApprovalInMinerador,
   arquitetoImportProgress,
@@ -44,7 +45,7 @@ const ROUTE = "/api/arquiteto/import";
 type Pool = { items: ArquitetoImportItem[]; canApprove: false; canCreate: boolean; checked: number; readAt: string };
 type Preview = ApproveAndSendPreview & { canApprove: false };
 type Confirming = { scope: { kind: "color"; color: EditorialGroupColor } | { kind: "selection" }; keywordIds: string[]; preview: Preview | null; excluded: Set<string> };
-type Finished = { result: ApproveAndSendResult; lines: ArquitetoImportResultLine[]; allConfirmed: boolean; mesaUpdated: boolean };
+type Finished = { result: ApproveAndSendResult; lines: ArquitetoImportResultLine[]; allConfirmed: boolean; mesaUpdated: boolean; refreshIds?: ReadonlySet<string> };
 
 const OUTCOME_LABEL: Record<ArquitetoImportResultLine["outcome"], string> = {
   approved_and_sent: "aprovada no Minerador e importada",
@@ -60,6 +61,7 @@ const OUTCOME_LABEL: Record<ArquitetoImportResultLine["outcome"], string> = {
 
 const STATE_TONE: Record<ArquitetoImportItem["state"], string> = {
   send: "text-context-accent",
+  refresh: "text-context-accent",
   approve_in_minerador: "text-pending",
   in_arquiteto: "text-text-muted",
   out: "text-warning",
@@ -81,7 +83,7 @@ async function call<T>(input: { method: "GET"; brandId: string } | { method: "PO
   return { ok: true, data: body.data as T };
 }
 
-export function MineradorImportDialog({ brandId, brandRef = null, initialColor, colorOfGroup, detailsOf, mesaRefreshing, onClose, onApplied }: {
+export function MineradorImportDialog({ brandId, brandRef = null, initialColor, colorOfGroup, detailsOf, mesaRefreshing, onClose, onApplied, preselect = null }: {
   brandId: string | null;
   /** F4 (D2): a rota da marca, para o "Aprovar no Minerador (N)" (o Arquiteto não aprova). */
   brandRef?: string | null;
@@ -95,6 +97,12 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
   onClose: () => void;
   /** Pede à mesa para reler; o diálogo espera a releitura terminar. */
   onApplied: () => void;
+  /**
+   * 2026-10-14 · "Atualizar do Minerador" (aviso "Pacote novo no Minerador" da
+   * mesa): abre já na prévia do servidor com as keywords que atualizam no
+   * Arquiteto marcadas — o MESMO núcleo do importar, com a mesma confirmação.
+   */
+  preselect?: "refresh" | null;
 }) {
   const ids = { title: useId() };
   const [pool, setPool] = useState<Pool | null>(null);
@@ -115,6 +123,7 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
   // Aberto pela cor ativa da barra: a primeira leitura já marca as que podem ir.
   const colorToSelect = useRef<EditorialGroupColor | null>(initialColor);
   const busy = phase !== null;
+  const autoRefreshPending = useRef(preselect === "refresh");
 
   const startPhase = (next: ArquitetoImportPhase | null) => { setPhase(next); setPhaseStartedAt(Date.now()); };
 
@@ -207,9 +216,20 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
     }
   };
 
+  // "Atualizar do Minerador": na primeira leitura, a prévia abre com as que atualizam no Arquiteto.
+  useEffect(() => {
+    if (!pool || !autoRefreshPending.current) return;
+    autoRefreshPending.current = false;
+    const atualizam = pool.items.filter(item => item.state === "refresh").map(item => item.id);
+    // A prévia só começa depois da leitura: o estado muda quando o servidor responde.
+    if (atualizam.length) void openConfirmation({ kind: "selection" }, atualizam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pool]);
+
   const confirmImport = async () => {
     if (!brandId || !confirming?.preview || busyRef.current) return;
     const { preview, keywordIds, excluded } = confirming;
+    const refreshIds = new Set(preview.lines.filter(line => line.action === "send_only" && line.refreshInArquiteto).map(line => line.id));
     busyRef.current = true;
     setRefusal(null);
     startPhase("applying");
@@ -224,7 +244,7 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
     const relida = await rereadPool();
     const conferido = confirmArquitetoImportResult(answer.data, relida?.items ?? []);
     if (!relida) {
-      setFinished({ result: answer.data, lines: conferido.lines.map(line => ({ ...line, confirmed: false })), allConfirmed: false, mesaUpdated: false });
+      setFinished({ result: answer.data, lines: conferido.lines.map(line => ({ ...line, confirmed: false })), allConfirmed: false, mesaUpdated: false, refreshIds });
       busyRef.current = false;
       startPhase(null);
       setConfirming(null);
@@ -234,12 +254,12 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
     setSelected(new Set());
     const enviou = conferido.lines.some(line => line.outcome === "approved_and_sent" || line.outcome === "sent");
     if (!enviou) {
-      setFinished({ result: answer.data, ...conferido, mesaUpdated: true });
+      setFinished({ result: answer.data, ...conferido, mesaUpdated: true, refreshIds });
       busyRef.current = false;
       startPhase(null);
       return;
     }
-    pendingFinish.current = { result: answer.data, ...conferido };
+    pendingFinish.current = { result: answer.data, ...conferido, refreshIds };
     sawMesaRefreshing.current = false;
     startPhase("refreshing_mesa");
     onApplied();
@@ -249,6 +269,8 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
   // F4 (D2): o modal não aprova; "approve_and_send" nunca vem do servidor (a aprovação fica fechada).
   const aprovarEEnviar = previewLines.filter(line => line.action === "approve_and_send");
   const soEnviar = previewLines.filter(line => line.action === "send_only");
+  const novasAImportar = soEnviar.filter(line => !line.refreshInArquiteto);
+  const atualizamNoArquiteto = soEnviar.filter(line => line.refreshInArquiteto);
   const precisamAprovar = new Set(previewLines.filter(arquitetoImportNeedsApprovalInMinerador).map(line => line.id));
   const bloqueadas = previewLines.filter(line => line.action === "blocked" && !precisamAprovar.has(line.id));
   const aprovarNoMinerador = previewLines.filter(line => precisamAprovar.has(line.id));
@@ -358,7 +380,7 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
                 <ul className="mt-2 divide-y divide-divider">
                   {finished.lines.map(line => (
                     <li key={line.id} className="py-1" data-arquiteto-import-outcome={line.outcome}>
-                      <span className="text-keyword">{line.keyword}</span> — {OUTCOME_LABEL[line.outcome]}
+                      <span className="text-keyword">{line.keyword}</span> — {line.outcome === "sent" && finished.refreshIds?.has(line.id) ? "pacote atualizado no Arquiteto" : OUTCOME_LABEL[line.outcome]}
                       {line.reason ? <span className="text-text-muted"> · {line.reason}</span> : null}
                       {line.confirmed ? null : <span className="text-warning"> · não apareceu no Arquiteto na releitura</span>}
                     </li>
@@ -371,7 +393,8 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
               <>
                 {confirming.preview ? (
                   <>
-                    {secao("Já aprovadas, importar", soEnviar.map(line => linhaDaPrevia(line, true)), "enviar")}
+                    {secao("Já aprovadas, importar", novasAImportar.map(line => linhaDaPrevia(line, true)), "enviar")}
+                    {secao("Atualizam no Arquiteto (pacote novo)", atualizamNoArquiteto.map(line => linhaDaPrevia(line, true)), "atualizar", ARQUITETO_IMPORT_REFRESH_DETAIL)}
                     {secao("Precisam aprovar no Minerador", aprovarNoMinerador.map(line => <li key={line.id} className="px-3 py-2 text-sm leading-6"><span className="text-keyword">{line.keyword}</span><span className="block text-pending">precisa aprovar no Minerador</span></li>), "aprovar-no-minerador",
                       "O Arquiteto não aprova keyword. Elas não entram nesta importação: aprove no Minerador (“Aprovar e enviar”) e elas chegam aqui.")}
                     {aprovarNoMinerador.length && aprovarNoMineradorHref(aprovarNoMinerador.map(line => line.id), confirming.scope.kind === "color" ? confirming.scope.color : null)
@@ -396,7 +419,7 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
                   </button>
                   {summaries.map(summary => (
                     <button key={summary.color} type="button" onClick={() => chooseColor(summary.color)} disabled={busy || summary.total === 0} aria-pressed={color === summary.color}
-                      title={`${EDITORIAL_GROUP_COLOR_LABELS[summary.color]}: ${summary.importable} podem ir · ${summary.approveInMinerador} precisam aprovar no Minerador · ${summary.out} ficam fora · ${summary.inArquiteto} já no Arquiteto`}
+                      title={`${EDITORIAL_GROUP_COLOR_LABELS[summary.color]}: ${summary.importable} podem ir${summary.refresh ? ` (${summary.refresh} atualizam no Arquiteto)` : ""} · ${summary.approveInMinerador} precisam aprovar no Minerador · ${summary.out} ficam fora · ${summary.inArquiteto} já no Arquiteto`}
                       data-arquiteto-import-color={summary.color}
                       className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 disabled:cursor-not-allowed disabled:opacity-50 ${color === summary.color ? "border-module-accent bg-surface-subtle" : "border-divider hover:border-module-accent/40"}`}>
                       <EditorialGroupDot color={summary.color} />
@@ -407,7 +430,7 @@ export function MineradorImportDialog({ brandId, brandRef = null, initialColor, 
                 </div>
                 {colorChoice && corDaEscolha ? (
                   <p className="text-sm leading-6 text-foreground" data-testid="architect-import-color-summary">
-                    Cor {corDaEscolha}: <span className="font-semibold">{colorChoice.importIds.length} podem ir</span>{colorChoice.approveInMineradorIds.length ? ` · ${colorChoice.approveInMineradorIds.length} precisam aprovar no Minerador` : ""} · {colorChoice.out.length} ficam fora{colorChoice.out.length ? " (o motivo está na linha)" : ""} · {colorChoice.inArquiteto} já no Arquiteto.
+                    Cor {corDaEscolha}: <span className="font-semibold">{colorChoice.importIds.length} podem ir</span>{colorChoice.refresh ? ` (${colorChoice.refresh} atualizam no Arquiteto: pacote novo)` : ""}{colorChoice.approveInMineradorIds.length ? ` · ${colorChoice.approveInMineradorIds.length} precisam aprovar no Minerador` : ""} · {colorChoice.out.length} ficam fora{colorChoice.out.length ? " (o motivo está na linha)" : ""} · {colorChoice.inArquiteto} já no Arquiteto.
                   </p>
                 ) : null}
 

@@ -1,5 +1,27 @@
 # Backlog — Redator
 
+## "Destino no ar: ative o link" e o carrossel por curto (F5) — 2026-10-14
+
+Autorização do dono: "pode concluir as pendências, vou testar depois". Detalhe em `docs/07-redator/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Checklist do material novo com o status `ativar` ("destino no ar: ative o link") no painel, no aviso dos links novos e no MCP.
+- [x] Semeadura do carrossel: um carrossel por curto, pelas lâminas da régua do vídeo; o carrossel por capítulo fica para a planta sem a série.
+- [ ] **Dono:** num documento já escrito do Silo piloto, depois que um destino for ao ar, conferir "destino no ar: ative o link" no checklist.
+- [ ] **Dono:** "Criar carrossel" num documento do piloto e conferir um carrossel por curto (as notas dizem onde cada um começa).
+- [ ] Avaliar: entregáveis de carrossel separados por curto (hoje sequência num entregável; exigiria SDD e migration).
+
+## Material novo do Radar no Redator (F6) — 2026-10-14
+
+Autorização do dono: "pode sim". Detalhe em `docs/07-redator/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Painel "Material novo do Radar (guia)" com o checklist "a aplicar" (L, T, X) contra o texto e o aviso "Links do Silo atualizados disponíveis".
+- [x] MCP: `writerMaterial` em `get_writer_brief` (inteiro) e `get_writer_foundations` (no que couber); `get_writer_document` aponta para o briefing.
+- [x] Semeadura do roteiro com a série de curtos por micro-assunto do CSV de vídeo.
+- [ ] **Dono:** abrir um documento do Silo piloto no Redator e conferir o bloco, o checklist e o aviso (documento antigo com 5 links: devem aparecer os 3 da trilha e os irmãos que faltam).
+- [ ] **Dono:** pelo MCP, `get_writer_brief` de um documento do piloto e conferir `writerMaterial` (grátis, sem IA).
+- [x] Carrossel do Redator derivado dos curtos (um por curto), como no CSV de vídeo — feito na F5 (2026-10-14), ver a seção abaixo.
+- [ ] Proposta: a IA interna da seção (`/api/redator/section`) receber os itens do checklist daquela seção (L e X da seção).
+
 ## Assunto legível — 2026-10-13
 
 Detalhe em `docs/07-redator/estado-atual.md`. **Validado manualmente: não.**

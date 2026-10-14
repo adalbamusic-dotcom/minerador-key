@@ -1,8 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
-import { Loader2, X } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { EditorialGroupDot, EditorialGroupTag } from "@/components/editorial/group-tag";
+import {
+  GROUP_DIALOG_BUTTON,
+  GROUP_DIALOG_BUTTON_DANGER,
+  GROUP_DIALOG_BUTTON_PRIMARY,
+  GROUP_DIALOG_FIELD,
+  GROUP_DIALOG_TONE,
+  GroupDialogFrame,
+  GroupDialogNoticeLine,
+  type GroupDialogNotice,
+} from "@/components/editorial/group-dialog-frame";
+import { EditorialGroupDeleteAllDialog, groupDeleteAllMineradorHref } from "@/components/editorial/group-delete-all-dialog";
 import {
   applyDeclaredPlanWithdrawChain,
   type DeclaredPlanWithdrawChainOptions,
@@ -18,6 +29,7 @@ import {
   EDITORIAL_GROUP_COLOR_LABELS,
   EDITORIAL_GROUP_COLORS,
   editorialGroupCountLabel,
+  type EditorialGroupArea,
   type EditorialGroupColor,
   type EditorialGroupSummary,
 } from "@/lib/editorial/editorial-groups";
@@ -34,64 +46,29 @@ import type { DeclaredPlanArticleView, DeclaredPlanGroupView } from "@/lib/miner
  * escreve sem um clique; sucesso só depois da releitura.
  */
 
-const BOTAO = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-divider px-3 text-sm font-medium text-foreground transition-colors hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent disabled:cursor-not-allowed disabled:opacity-50";
-const BOTAO_PRIMARIO = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md bg-action-accent px-3 text-sm font-semibold text-foreground transition-colors hover:bg-action-accent/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent disabled:cursor-not-allowed disabled:opacity-50";
-const CAMPO = "min-h-10 w-full rounded-md border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors placeholder:text-text-muted hover:border-module-accent/45 focus-visible:border-module-accent focus-visible:ring-2 focus-visible:ring-module-accent/30";
-
-type Aviso = { tone: "success" | "warning" | "danger"; text: string } | null;
-
-const TOM: Record<"success" | "warning" | "danger" | "neutral", string> = {
-  success: "text-success",
-  warning: "text-warning",
-  danger: "text-danger",
-  neutral: "text-text-muted",
-};
-
-function Dialogo({ titleId, title, subtitle, onClose, busy, children, footer }: {
-  titleId: string;
-  title: ReactNode;
-  subtitle?: ReactNode;
-  onClose: () => void;
-  busy: boolean;
-  children: ReactNode;
-  footer?: ReactNode;
-}) {
-  const fechar = useCallback(() => { if (!busy) onClose(); }, [busy, onClose]);
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") fechar(); };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [fechar]);
-  return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-background/85 p-4 backdrop-blur-sm" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) fechar(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby={titleId} className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-lg border border-divider bg-surface-elevated text-foreground shadow-lg">
-        <header className="flex items-start justify-between gap-3 border-b border-divider p-4">
-          <div className="min-w-0">
-            <h2 id={titleId} className="flex flex-wrap items-center gap-2 text-base font-semibold">{title}</h2>
-            {subtitle ? <div className="mt-1 text-sm leading-5 text-text-muted">{subtitle}</div> : null}
-          </div>
-          <button type="button" onClick={fechar} disabled={busy} className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-md text-text-muted hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent disabled:opacity-50" aria-label="Fechar"><X className="h-4 w-4" aria-hidden="true" /></button>
-        </header>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
-        {footer ? <footer className="flex flex-wrap justify-end gap-2 border-t border-divider p-4">{footer}</footer> : null}
-      </section>
-    </div>
-  );
-}
-
-function AvisoLinha({ aviso, testId }: { aviso: Aviso; testId: string }) {
-  if (!aviso) return null;
-  return <p role={aviso.tone === "danger" ? "alert" : "status"} data-testid={testId} className={`text-sm leading-5 ${TOM[aviso.tone]}`}>{aviso.text}</p>;
-}
+// 2026-10-14 (F7): a moldura e os botões passaram para `group-dialog-frame.tsx` (os mesmos, agora também do "Excluir tudo da cor").
+const BOTAO = GROUP_DIALOG_BUTTON;
+const BOTAO_PRIMARIO = GROUP_DIALOG_BUTTON_PRIMARY;
+const CAMPO = GROUP_DIALOG_FIELD;
+type Aviso = GroupDialogNotice;
+const TOM = GROUP_DIALOG_TONE;
+const Dialogo = GroupDialogFrame;
+const AvisoLinha = GroupDialogNoticeLine;
 
 /* ============================== GERENCIAR A COR ============================== */
 
-export function EditorialGroupManageDialog({ brandId, groupId, groups, onClose }: {
+export function EditorialGroupManageDialog({ brandId, groupId, groups, onClose, area }: {
   brandId: string;
   groupId: string;
   /** A lista viva de grupos da marca (relida depois de cada gravação). */
   groups: readonly EditorialGroupSummary[];
   onClose: () => void;
+  /**
+   * 2026-10-14 · F7 · a área que abriu o menu. "Excluir tudo da cor" executa
+   * só no Minerador (D8); nas outras áreas a seção leva ao Minerador (o
+   * Arquiteto não exclui keyword, F4). Ausente = como nas outras áreas.
+   */
+  area?: EditorialGroupArea;
 }) {
   const titleId = useId();
   const nomeId = useId();
@@ -103,12 +80,26 @@ export function EditorialGroupManageDialog({ brandId, groupId, groups, onClose }
   const [busy, setBusy] = useState(false);
   const [aviso, setAviso] = useState<Aviso>(null);
   const [liberado, setLiberado] = useState(false);
+  const [excluirTudo, setExcluirTudo] = useState(false);
+  // O link para o Minerador sai da rota atual (`/{brandRef}/…`), lido depois da montagem (sem `window` no render do servidor).
+  const [linkMinerador, setLinkMinerador] = useState<string | null>(null);
+  const corDoLink = atual?.color ?? null;
+  useEffect(() => {
+    if (area === "minerador" || !corDoLink || typeof window === "undefined") return;
+    // Leitura única da rota na abertura do diálogo: o link depende só da URL atual.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLinkMinerador(groupDeleteAllMineradorHref(window.location.pathname, corDoLink));
+  }, [area, corDoLink]);
 
   if (!atual) return null;
   const rotuloCor = EDITORIAL_GROUP_COLOR_LABELS[atual.color];
   const ocupante = (color: EditorialGroupColor) => activeEditorialGroupsOfColor(groups, color).find(item => item.id !== atual.id) ?? null;
-  const temPlano = atual.origin === "declared_plan" || atual.planVersion > 0;
+  // 2026-10-14 (F7): o plano limpo pela exclusão da cor volta a origem a "manual" (com plan_version > 0); só "declared_plan" tem plano.
+  const temPlano = atual.origin === "declared_plan";
   const bloqueiosLiberar = editorialGroupReleaseBlockers({ keywordCount: atual.keywordCount, trashedKeywordCount: 0, articleCount: atual.articleCount, hasPlan: temPlano, planVersion: atual.planVersion, siloId: atual.siloId });
+
+  // F7: o diálogo da exclusão toma o lugar deste (um diálogo por vez; Esc fecha só ele e volta para cá).
+  if (excluirTudo) return <EditorialGroupDeleteAllDialog brandId={brandId} group={atual} onClose={saida => (saida?.colorFreed ? onClose() : setExcluirTudo(false))} />;
 
   const gravar = async (pedido: { name?: string | null; color?: EditorialGroupColor; release?: boolean }) => {
     if (busy) return;
@@ -203,6 +194,20 @@ export function EditorialGroupManageDialog({ brandId, groupId, groups, onClose }
           </section>
 
           {temPlano ? <DeclaredPlanSection brandId={brandId} groupId={atual.id} /> : null}
+
+          <section className="space-y-2 rounded-md border border-danger/30 p-3" data-group-delete-all-section={area === "minerador" ? "minerador" : "link"}>
+            <h3 className="text-sm font-semibold">Excluir tudo da cor {rotuloCor}</h3>
+            <p className="text-sm text-text-muted">
+              Exclui as keywords desta cor no Minerador pelo ciclo de vida de sempre (não publicada sai de vez; publicada só pela lixeira de 24 h, se você marcar), com prévia grátis, recusa por item e confirmação forte. Radar, Redator e Publicações não têm exclusão (ficam como estão); o Arquiteto não exclui keyword.
+            </p>
+            {area === "minerador" ? (
+              <button type="button" disabled={busy} onClick={() => setExcluirTudo(true)} className={GROUP_DIALOG_BUTTON_DANGER} data-group-delete-all-open>Excluir tudo da cor {rotuloCor}…</button>
+            ) : linkMinerador ? (
+              <a href={linkMinerador} className={BOTAO} data-group-delete-all-link>Abrir no Minerador para excluir</a>
+            ) : (
+              <p className="text-sm text-text-muted">A exclusão é feita no Minerador (Gerenciar a cor → Excluir tudo da cor).</p>
+            )}
+          </section>
         </>}
       </div>
     </Dialogo>

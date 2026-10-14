@@ -116,7 +116,8 @@ export async function assembleRadarPortableExport(input: {
    * exportação e o MCP passam o leitor real (o mesmo extrator das páginas
    * concorrentes, só GET, com tempo limite); sem ele, nada é lido.
    */
-  readPublishedStructure?: (url: string) => Promise<{ h1: string | null; h2: string[] } | null>;
+  /* 2026-10-14 · F5 (SDD silo interligado) · aditivo: `links`, os links internos da página (para "Atualizar links do Silo"). */
+  readPublishedStructure?: (url: string) => Promise<{ h1: string | null; h2: string[]; links?: string[] } | null>;
   /**
    * 2026-10-07 · Aditivo: lê o resumo orgânico das três lentes extras da
    * keyword principal (modo `digest` do cache, grátis), para o CSV de vídeo
@@ -709,7 +710,8 @@ export async function assembleRadarPortableExport(input: {
     await Promise.all(lidas.map(async ([articleId, item]) => {
       try {
         const estrutura = await input.readPublishedStructure!(item.publishedUrl!);
-        if (estrutura && (estrutura.h1 || estrutura.h2.length)) publicacoes.set(articleId, { ...item, currentStructure: { h1: estrutura.h1, h2: estrutura.h2, updatedAt: null } });
+        /* 2026-10-14 · F5 · e os links internos da página, quando o leitor os traz (a mesma busca, sem leitura a mais). */
+        if (estrutura && (estrutura.h1 || estrutura.h2.length)) publicacoes.set(articleId, { ...item, currentStructure: { h1: estrutura.h1, h2: estrutura.h2, updatedAt: null, ...(estrutura.links ? { links: estrutura.links } : {}) } });
       } catch {
         /* página fora do ar, bloqueada ou lenta: a ressalva de antes continua */
       }
@@ -744,7 +746,7 @@ const hostDaUrl = (url: string) => {
   }
 };
 
-export async function radarReadPublishedStructure(url: string): Promise<{ h1: string | null; h2: string[] } | null> {
+export async function radarReadPublishedStructure(url: string): Promise<{ h1: string | null; h2: string[]; links: string[] } | null> {
   const pagina = await extractCompetitorPage(url, { timeoutMs: 8000 });
   const esboco = pagina.headingOutline || [];
   if (!esboco.length) return null;
@@ -753,6 +755,12 @@ export async function radarReadPublishedStructure(url: string): Promise<{ h1: st
     /* sem rodapé, caixa de autor e navegação ("Adalba", "Leia também") */
     h2: esboco.filter(item => item.level === 2).map(item => item.text.replace(/\s+/g, " ").trim())
       .filter(item => item && !radarIsNavigationHeading(item) && !radarIsSiteIdentityHeading(item, hostDaUrl(url))).slice(0, 25),
+    /*
+     * 2026-10-14 · F5 (SDD silo interligado §6.5, D10) · os links internos da
+     * página (`<a href>` do próprio site, da mesma busca): a lista "Atualizar links
+     * do Silo" diz o que já está na página. Só leitura; nada é gravado.
+     */
+    links: [...new Set((pagina.observedLinks || []).filter(link => link.kind === "INTERNAL").map(link => link.destinationUrl).filter(Boolean))],
   };
 }
 

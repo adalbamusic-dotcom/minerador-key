@@ -97,8 +97,48 @@ export type MineradorArquitetoHandoffUpdate = {
   keywordId: string;
   sourceVersionId: string | null;
   sourceContentHash: string | null;
-  payload: MineradorArquitetoHandoffRow["payload"];
+  /**
+   * 2026-10-14 (caso WifiConecta, azul): o payload do item JÁ RECEBIDO com o
+   * pacote novo do Minerador. É o payload anterior inteiro (as decisões do
+   * Arquiteto — `territoryRef`, `territoryAssignment`, `articleFormationRef`,
+   * `articleFormationDecision`, `articleSubjectAnchor`, `manualEdit`… — ficam
+   * como estão) com só os campos do transporte trocados. Sem o payload anterior
+   * (item não lido), é o do transporte, como antes.
+   */
+  payload: MineradorArquitetoHandoffRow["payload"] & Record<string, unknown>;
+  /** A trava do item lido: a gravação só vale se ninguém mexeu nele no meio. */
+  expectedLock: number | null;
 };
+
+/** Os campos que o envio do Minerador escreve no item. Todo o resto é decisão do Arquiteto e é preservado. */
+export const MINERADOR_HANDOFF_TRANSPORT_KEYS = ["brandId", "keywordId", "source", "decision", "state", "semanticQualification", "approvedDna"] as const;
+
+/**
+ * O payload do item recebido com o pacote aprovado vigente: o anterior
+ * preservado, o transporte trocado e o pacote anterior guardado como
+ * referência (`previousApprovedDna`: identidade, data e versão — para o
+ * Arquiteto sinalizar o artigo formado com o pacote antigo, sem reescrevê-lo).
+ */
+export function mergeRefreshedHandoffPayload(
+  previous: Record<string, unknown> | null | undefined,
+  next: MineradorArquitetoHandoffRow["payload"],
+  refreshedAt: string | null = null,
+): MineradorArquitetoHandoffRow["payload"] & Record<string, unknown> {
+  const anterior = previous && typeof previous === "object" && !Array.isArray(previous) ? previous : {};
+  const pacoteAnterior = anterior.approvedDna && typeof anterior.approvedDna === "object" ? anterior.approvedDna as Record<string, unknown> : null;
+  return {
+    ...anterior,
+    ...next,
+    ...(pacoteAnterior && typeof pacoteAnterior.contentHash === "string" ? {
+      previousApprovedDna: {
+        contentHash: pacoteAnterior.contentHash,
+        approvedAt: typeof pacoteAnterior.approvedAt === "string" ? pacoteAnterior.approvedAt : null,
+        version: typeof pacoteAnterior.version === "number" ? pacoteAnterior.version : null,
+      },
+    } : {}),
+    ...(refreshedAt ? { approvedDnaRefreshedAt: refreshedAt } : {}),
+  };
+}
 
 export type MineradorArquitetoHandoffPlan = {
   rows: MineradorArquitetoHandoffRow[];
@@ -162,6 +202,10 @@ export function buildMineradorArquitetoHandoffPlan(input: {
    * informado, keyword reaprovada com hash diferente entra em `updates`.
    */
   receivedApprovedHashById?: ReadonlyMap<string, string | null>;
+  /** O item recebido como está (payload e trava): a atualização preserva as decisões do Arquiteto. */
+  receivedItemById?: ReadonlyMap<string, { payload: Record<string, unknown> | null; lockVersion: number | null }>;
+  /** Instante da atualização (do servidor). */
+  refreshedAt?: string | null;
 }): MineradorArquitetoHandoffPlan {
   const keywords = [...new Map(
     input.keywords
@@ -195,7 +239,8 @@ export function buildMineradorArquitetoHandoffPlan(input: {
         keywordId: keyword.id,
         sourceVersionId: keyword.semanticQualification?.versionId ?? keyword.sourceVersionId ?? null,
         sourceContentHash: keyword.semanticQualification?.contentHash ?? keyword.contentHash ?? null,
-        payload: payloadOf(keyword),
+        payload: mergeRefreshedHandoffPayload(input.receivedItemById?.get(keyword.id)?.payload, payloadOf(keyword), input.refreshedAt ?? null),
+        expectedLock: input.receivedItemById?.get(keyword.id)?.lockVersion ?? null,
       }))
     : [];
 

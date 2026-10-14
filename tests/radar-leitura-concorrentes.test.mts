@@ -146,7 +146,8 @@ test("rótulo neutro do tema, títulos genéricos iguais, lentes por domínio e 
   assert.match(fonte, /cada H2 publicado tem destino na planta do artigo-modelo/);
   assert.doesNotMatch(fonte.replace(/\/\*[\s\S]*?\*\//g, ""), /leve-a como pendência/);
   const nucleo = await ler("lib/server/radar-portable-export-core.ts");
-  assert.match(nucleo, /readPublishedStructure\?: \(url: string\) => Promise<\{ h1: string \| null; h2: string\[\] \} \| null>;/, "opcional e injetado: sem ele, nada é lido");
+  /* 2026-10-14 · SDD silo interligado · F5 · decisão do dono ("pode concluir as pendências"): o leitor pode trazer também os links internos da página (aditivo, opcional). */
+  assert.match(nucleo, /readPublishedStructure\?: \(url: string\) => Promise<\{ h1: string \| null; h2: string\[\]; links\?: string\[\] \} \| null>;/, "opcional e injetado: sem ele, nada é lido");
   assert.match(nucleo, /const pagina = await extractCompetitorPage\(url, \{ timeoutMs: 8000 \}\);/);
   const rota = await ler("app/api/editorial/radar-export/route.ts");
   assert.match(rota, /readPublishedStructure: radarReadPublishedStructure,/);

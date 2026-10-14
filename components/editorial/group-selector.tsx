@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Check, History, Settings2, Tag } from "lucide-react";
+import { Check, History, Settings2, Tag, Trash2 } from "lucide-react";
 import { AnchoredPopover } from "@/components/editorial/anchored-popover";
 import { EditorialGroupDot } from "@/components/editorial/group-tag";
 import { useAreaGroupFilter } from "@/components/editorial/editorial-group-area-store";
 import { EditorialGroupHistoryDialog, EditorialGroupManageDialog } from "@/components/editorial/group-manage-dialogs";
+import { EditorialGroupDeleteAllDialog } from "@/components/editorial/group-delete-all-dialog";
+import { GROUP_DELETE_ALL_URL_PARAM } from "@/lib/minerador/group-delete-all";
 import {
   activeEditorialGroupsOfColor,
+  isEditorialGroupColor,
   EDITORIAL_GROUP_CHOICE_ALL,
   EDITORIAL_GROUP_COLOR_LABELS,
   EDITORIAL_GROUP_COLORS,
@@ -80,6 +83,7 @@ export function EditorialGroupSelector({
   menuFooter,
   onManageColor,
   onOpenHistory,
+  onDeleteAll,
 }: {
   choice: EditorialGroupChoice;
   onChoose: (choice: EditorialGroupChoice) => void;
@@ -99,6 +103,8 @@ export function EditorialGroupSelector({
   onManageColor?: (color: EditorialGroupColor) => void;
   /** 2026-10-12 · "Histórico do grupo" (§10.4), quando há uma cor escolhida. Sem a função, o item não aparece. */
   onOpenHistory?: () => void;
+  /** 2026-10-14 · F7 · "Excluir tudo da cor X…" (só no Minerador), junto do histórico. Sem a função, o item não aparece. */
+  onDeleteAll?: () => void;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -218,6 +224,12 @@ export function EditorialGroupSelector({
                   <History aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
                   <span className="min-w-0 flex-1">Histórico do grupo</span>
                 </button>
+                {onDeleteAll ? (
+                  <button type="button" role="menuitem" data-group-delete-all-menu={choice} onClick={() => { fechar(); onDeleteAll(); }} className={OPTION_CLASS}>
+                    <Trash2 aria-hidden="true" className="h-4 w-4 shrink-0 text-danger" />
+                    <span className="min-w-0 flex-1">Excluir tudo da cor {EDITORIAL_GROUP_COLOR_LABELS[choice]}…</span>
+                  </button>
+                ) : null}
               </>
             ) : null}
           </div>
@@ -245,6 +257,26 @@ export function TopbarGroupTag({ brandId, area, menuFooter, ungroupedDetail }: {
   // 2026-10-12 · "Gerenciar" e "Histórico do grupo": nada é lido até o clique.
   const [gerenciar, setGerenciar] = useState<string | null>(null);
   const [historico, setHistorico] = useState<{ color: EditorialGroupColor; groupIds: string[] } | null>(null);
+  // 2026-10-14 · F7 · "Excluir tudo da cor": só o Minerador executa (D8); o diálogo lê a prévia ao abrir.
+  const [excluirGrupo, setExcluirGrupo] = useState<string | null>(null);
+  const servidorPronto = recorte.available && recorte.groups.source === "server";
+  const gruposDoServidor = recorte.groups.groups;
+  // `?excluir_tudo_da_cor=<cor>` (o link do "Gerenciar a cor" das outras áreas): abre o diálogo uma vez e sai da URL.
+  const pedidoDaUrl = useRef(false);
+  useEffect(() => {
+    if (area !== "minerador" || !servidorPronto || pedidoDaUrl.current || typeof window === "undefined") return;
+    let url: URL;
+    try { url = new URL(window.location.href); } catch { return; }
+    const cor = url.searchParams.get(GROUP_DELETE_ALL_URL_PARAM);
+    if (!cor) return;
+    pedidoDaUrl.current = true;
+    url.searchParams.delete(GROUP_DELETE_ALL_URL_PARAM);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    const grupo = isEditorialGroupColor(cor) ? activeEditorialGroupsOfColor(gruposDoServidor, cor)[0] ?? null : null;
+    // Leitura única da URL quando a lista do servidor chega: abrir o diálogo pedido é o efeito esperado.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (grupo) setExcluirGrupo(grupo.id);
+  }, [area, servidorPronto, gruposDoServidor]);
   if (!recorte.available) return null;
   const servidor = recorte.groups.source === "server";
   const semGrupo = ungroupedDetail
@@ -264,8 +296,10 @@ export function TopbarGroupTag({ brandId, area, menuFooter, ungroupedDetail }: {
         // Gerenciar só com a lista do SERVIDOR (o cache local não tem contagens nem a trava otimista).
         onManageColor={servidor ? color => setGerenciar(activeEditorialGroupsOfColor(recorte.groups.groups, color)[0]?.id ?? null) : undefined}
         onOpenHistory={corEscolhida ? () => setHistorico({ color: corEscolhida, groupIds: activeEditorialGroupsOfColor(recorte.groups.groups, corEscolhida).map(group => group.id) }) : undefined}
+        onDeleteAll={area === "minerador" && servidor && corEscolhida ? () => setExcluirGrupo(activeEditorialGroupsOfColor(recorte.groups.groups, corEscolhida)[0]?.id ?? null) : undefined}
       />
-      {gerenciar ? <EditorialGroupManageDialog brandId={brandId} groupId={gerenciar} groups={recorte.groups.groups} onClose={() => setGerenciar(null)} /> : null}
+      {gerenciar ? <EditorialGroupManageDialog brandId={brandId} groupId={gerenciar} groups={recorte.groups.groups} area={area} onClose={() => setGerenciar(null)} /> : null}
+      {excluirGrupo && recorte.groups.groups.some(group => group.id === excluirGrupo) ? <EditorialGroupDeleteAllDialog brandId={brandId} group={recorte.groups.groups.find(group => group.id === excluirGrupo)!} onClose={() => setExcluirGrupo(null)} /> : null}
       {historico ? <EditorialGroupHistoryDialog brandId={brandId} color={historico.color} groupIds={historico.groupIds} groups={recorte.groups.groups} onClose={() => setHistorico(null)} /> : null}
     </>
   );

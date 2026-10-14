@@ -292,7 +292,11 @@ test("J · a projeção e o painel não gravam nada no rascunho", async () => {
    * escrever no rascunho e sem nenhum outro pedido de rede.
    */
   assert.equal(/setDraft|onChange=|method:\s*"(POST|PUT|PATCH|DELETE)"/.test(painel), false, "o painel é somente leitura");
-  assert.deepEqual(painel.match(/fetch\(`[^`]*`/g), ["fetch(`/api/redator/article-blueprint?brandId=${encodeURIComponent(marca)}&documentId=${encodeURIComponent(documentId)}`"], "a única chamada é a leitura do artigo-modelo");
+  /* 2026-10-14 · SDD silo interligado · F6 · decisão do dono ("pode sim"): e a leitura do material novo, na mesma rota (part=material), também só GET. */
+  assert.deepEqual(painel.match(/fetch\(`[^`]*`/g), [
+    "fetch(`/api/redator/article-blueprint?brandId=${encodeURIComponent(marca)}&documentId=${encodeURIComponent(documentId)}`",
+    "fetch(`/api/redator/article-blueprint?brandId=${encodeURIComponent(marca)}&documentId=${encodeURIComponent(documentId)}&part=material`",
+  ], "as únicas chamadas são as leituras do artigo-modelo e do material");
 });
 
 test("K · PROVIDER_CALL_REQUIRED = NO · MIGRATION_REQUIRED = NO · AI = 0", async () => {

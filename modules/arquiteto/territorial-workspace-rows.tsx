@@ -233,6 +233,8 @@ export type SiloUndoControls = {
   /** Quantos podem ser desfeitos agora, para o botão em lote. */
   eligibleCount: number;
   busy: boolean;
+  /** 2026-10-14: quantos ficaram de fora do lote (o Silo do plano declarado) e por quê. */
+  excludedNote?: string | null;
   onUndo: (territoryRef: string) => void;
   onUndoAll: () => void;
 };
@@ -727,7 +729,7 @@ function SectionRow({
   collapsed: boolean;
   onToggle: (() => void) | null;
   /** Só na seção de Silos: desfaz de uma vez os sugeridos que podem sair. */
-  undoAll?: { count: number; busy: boolean; onClick: () => void } | null;
+  undoAll?: { count: number; busy: boolean; onClick: () => void; excludedNote?: string | null } | null;
 }) {
   return (
     <tr data-testid="architect-territorial-section" className="bg-surface-subtle">
@@ -757,6 +759,9 @@ function SectionRow({
             >
               {`Desfazer os Silos sugeridos (${undoAll.count})`}
             </button>
+          )}
+          {undoAll?.excludedNote && (
+            <span className="text-sm text-text-muted" data-testid="architect-undo-all-excluded">{undoAll.excludedNote}</span>
           )}
         </div>
       </td>
@@ -867,7 +872,7 @@ export function TerritorialWorkspaceRows({
                 })
                 : null}
               undoAll={section.kind === "territories" && undoControls
-                ? { count: undoControls.eligibleCount, busy: undoControls.busy, onClick: undoControls.onUndoAll }
+                ? { count: undoControls.eligibleCount, busy: undoControls.busy, onClick: undoControls.onUndoAll, excludedNote: undoControls.excludedNote ?? null }
                 : null}
             />
             {!isCollapsed && section.groups.map((group, index) => {

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { contentHash } from "../arquiteto/versioning.ts";
 import { isEditorialGroupsSchemaMissing, type EditorialGroupColor } from "../editorial/editorial-groups.ts";
-import { declareEditorialGroupPlan, readEditorialGroupPlan, type EditorialGroupPlanRow } from "../editorial/editorial-groups-store.ts";
+import { clearEditorialGroupPlan, declareEditorialGroupPlan, readEditorialGroupPlan, type EditorialGroupPlanRow } from "../editorial/editorial-groups-store.ts";
 import { readDeclaredArticlePlan, readDeclaredPrincipalMark, readDeclaredSiloPlan, type DeclaredArticlePlan, type DeclaredPlanRole, type DeclaredSiloPlan } from "./declared-plan.ts";
 import { declaredPlanHash } from "./declared-plan-import-core.ts";
 import { isKeywordSubjectActorId, recordKeywordSubjectRelease, resolveDeclaredPrincipal, resolveKeywordSubject, setDeclaredPrincipal, setKeywordSubject, type KeywordSubjectRelease } from "./keyword-subject.ts";
@@ -570,5 +570,81 @@ export async function withdrawFromDeclaredPlanWithCore(input: {
     throw error;
   } finally {
     if (lockKey) inFlight.delete(lockKey);
+  }
+}
+
+/* ============================================= excluir tudo da cor (F7) */
+
+export type PlanAfterColorDeletionResult =
+  | { ok: true; outcome: "none" | "unchanged" | "reduced" | "cleared"; planVersion: number | null; remaining: number; eventRecorded: boolean }
+  | Refused;
+
+/**
+ * 2026-10-14 · F7 "EXCLUIR TUDO DA COR" (SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`
+ * §10.2 item 4b e D7). Chamado DEPOIS da exclusão e da releitura das keywords:
+ * a RPC `lifecycle_delete_group_keywords` já liberou o Assunto (com o marcador
+ * da exclusão da cor) e excluiu na mesma transação. Aqui o plano do grupo
+ * acompanha o que ficou VIVO no plano (a mesma leitura de "Tirar do plano"):
+ *
+ *   - nenhum Assunto do plano saiu → nada muda (`none`/`unchanged`);
+ *   - saiu algum e sobra artigo → plano restante (`v+1`) pelo
+ *     `declareEditorialGroupPlan` de sempre (idempotente pelo hash);
+ *   - não sobra artigo → plano limpo (`clearEditorialGroupPlan`: um plano sem
+ *     artigos não existe; a reativação da cor começa sem plano).
+ *
+ * Reaplicar é seguro: o plano é recalculado do que está no banco. Não escreve
+ * em keyword (a liberação já foi feita pela RPC, na transação da exclusão).
+ */
+export async function syncDeclaredPlanAfterColorDeletionWithCore(input: {
+  brandId: string;
+  actorUserId: string;
+  keywordsClient: Client;
+  groupsClient: Client;
+  groupId: string;
+  /** Os Assuntos do plano desta cor que a exclusão tirou (o que a releitura confirmou). */
+  removedSubjects: ReadonlyArray<{ keywordId: string; title: string; order: number | null; role: string | null }>;
+  /** Detalhe a mais no evento `plan_changed` (ex.: `via`, `decisionHash`). */
+  eventPayload: Record<string, unknown>;
+}): Promise<PlanAfterColorDeletionResult> {
+  const brandId = typeof input.brandId === "string" ? input.brandId.trim() : "";
+  if (!brandId) return { ok: false, code: "BRAND_REQUIRED", reason: "A marca ativa é necessária para mexer no plano." };
+  if (!isKeywordSubjectActorId(input.actorUserId)) return { ok: false, code: "ACTOR_REQUIRED", reason: "Mexer no plano exige o usuário autenticado (auth.users.id)." };
+  if (!input.removedSubjects.length) return { ok: true, outcome: "none", planVersion: null, remaining: 0, eventRecorded: true };
+  const actorUserId = input.actorUserId.trim();
+  const lockKey = `${brandId}:${input.groupId}`;
+  if (inFlight.has(lockKey)) return { ok: false, code: "WITHDRAW_IN_PROGRESS", reason: "Este plano já está sendo alterado. Aguarde o resultado." };
+  inFlight.add(lockKey);
+  try {
+    const loaded = await load({ brandId, keywordsClient: input.keywordsClient, groupsClient: input.groupsClient, groupId: input.groupId });
+    if ("ok" in loaded) {
+      const recusa = loaded as Refused;
+      return recusa.code === "GROUP_WITHOUT_PLAN" ? { ok: true, outcome: "none", planVersion: null, remaining: 0, eventRecorded: true } : recusa;
+    }
+    const payload = { ...input.eventPayload, removedSubjects: input.removedSubjects.map(item => ({ subjectKeywordId: item.keywordId, subjectPhrase: item.title, order: item.order, role: item.role })) };
+    if (!loaded.articles.length) {
+      const limpo = await clearEditorialGroupPlan(input.groupsClient, { brandId, actorUserId, groupId: loaded.groupRow.id, eventPayload: payload });
+      if (!limpo.ok) return { ok: false, code: limpo.code === "GROUPS_NOT_AVAILABLE" ? "GROUPS_NOT_AVAILABLE" : "GROUP_REFUSED", reason: limpo.message };
+      return { ok: true, outcome: "cleared", planVersion: limpo.planVersion, remaining: 0, eventRecorded: limpo.eventRecorded };
+    }
+    const restante = await remainingPlanWithout(loaded, new Set());
+    if (restante.planHash === loaded.groupRow.planHash) return { ok: true, outcome: "unchanged", planVersion: loaded.groupRow.planVersion, remaining: restante.remaining, eventRecorded: true };
+    const gravado = await declareEditorialGroupPlan(input.groupsClient, {
+      brandId,
+      actorUserId,
+      groupId: loaded.groupRow.id,
+      plan: restante.siloPlan as unknown as Record<string, unknown>,
+      planHash: restante.planHash,
+      eventPayload: payload,
+    });
+    if (!gravado.ok) return { ok: false, code: gravado.code === "GROUPS_NOT_AVAILABLE" ? "GROUPS_NOT_AVAILABLE" : "GROUP_REFUSED", reason: gravado.message };
+    const relido = await readEditorialGroupPlan(input.groupsClient, brandId, loaded.groupRow.id);
+    if (!relido.ok) return { ok: false, code: "GROUPS_NOT_AVAILABLE", reason: relido.message };
+    if (!relido.group || relido.group.planHash !== restante.planHash) return { ok: false, code: "WRITE_NOT_CONFIRMED", reason: "A releitura do grupo não encontrou o plano restante." };
+    return { ok: true, outcome: "reduced", planVersion: relido.group.planVersion, remaining: restante.remaining, eventRecorded: gravado.eventRecorded };
+  } catch (error) {
+    if (isEditorialGroupsSchemaMissing(error)) return { ok: false, code: "GROUPS_NOT_AVAILABLE", reason: "Os grupos ainda não estão disponíveis neste banco (migration 20261013120000 não aplicada)." };
+    throw error;
+  } finally {
+    inFlight.delete(lockKey);
   }
 }

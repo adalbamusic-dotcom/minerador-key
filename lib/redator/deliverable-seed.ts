@@ -38,6 +38,9 @@
  *     por corte escolhido pela utilidade);
  *   - carrossel: a capa, uma lâmina por capítulo e a lâmina do CTA
  *     (capítulos + 2 lâminas), como "Carrossel … N lâminas" do CSV.
+ *     2026-10-14 · F5: com a série de curtos do plano, UM CARROSSEL POR CURTO
+ *     (as lâminas da régua do vídeo, `radarVideoShortCarousels`); o carrossel
+ *     por capítulo fica para a planta sem a série.
  *
  * Sem o artigo-modelo concluído não há plano, e a semeadura não roda: a rota
  * responde o estado explícito (`needs_article_blueprint`) e a tela aponta o
@@ -64,6 +67,8 @@ import { radarBrandVoiceDeliverableLabel } from "../radar/brand-voice.ts";
 /* 2026-10-11 · a diretriz de comunicação humana guiada pela SERP (fonte única do Radar). */
 import { radarHumanVoiceVideoRule } from "../radar/human-voice-guideline.ts";
 import type { RadarVideoPlan } from "../radar/portable-video-export.ts";
+/* 2026-10-14 · F5 (pendência da F6) · um carrossel por curto, pela MESMA régua das lâminas do CSV de vídeo. */
+import { RADAR_VIDEO_CAROUSEL_SLIDE_LABELS, radarVideoShortCarousels, type RadarVideoShortCarousel } from "../radar/video-production.ts";
 import { WRITER_BLUEPRINT_CONTINUATION_LABEL } from "./writer-evidence-catalog.ts";
 import type { WriterDeliverablePayload } from "./multiformat-contracts.ts";
 
@@ -158,6 +163,38 @@ const duracao = (segundos: number) => {
 };
 const faixaDe = (faixa: { min: number; max: number } | null) => (faixa ? `${duracao(faixa.min)} a ${duracao(faixa.max)}` : null);
 
+/*
+ * ===== 2026-10-14 · F5 (SDD silo interligado; pendência da F6) · O CARROSSEL DO REDATOR, UM POR CURTO =====
+ *
+ * Autorização do dono (2026-10-14): "pode concluir as pendências". A semeadura
+ * gerava um carrossel só, uma lâmina por capítulo; com a série de curtos do plano
+ * (`plan.curtos`, a mesma de cortes_para_redes), ela gera UM CARROSSEL POR CURTO,
+ * com as lâminas da régua do vídeo (`radarVideoShortCarousels`): capa = o gancho,
+ * o texto na tela, a ideia inteira quando ela é maior, e a última com o CTA. O
+ * entregável continua um só (`writer_deliverables` é único por documento e tipo):
+ * os carrosséis vão em sequência nas lâminas, e as notas dizem onde cada um
+ * começa e a legenda de cada um. Sem a série (planta sem o material novo), o
+ * carrossel de antes: capa, uma lâmina por capítulo e o CTA.
+ */
+export const SEED_SHORT_CAROUSELS_SECTION_TITLE = "Carrosséis, um por curto (as mesmas lâminas do CSV de vídeo: capa = o gancho, uma ideia por lâmina, a última com o CTA)";
+
+/** O CTA de cada carrossel na semeadura: o do artigo-modelo, a única chamada (a IA o escreve na voz da marca). */
+const CTA_DO_CARROSSEL = "o CTA do artigo-modelo (o diagnóstico), a única chamada";
+
+/** Os carrosséis da série de curtos do plano; null sem a série (o carrossel por capítulo de antes). */
+export function seedShortCarousels(plan: SeedVideoPlan): RadarVideoShortCarousel[] | null {
+  return plan.curtos?.length ? radarVideoShortCarousels(plan.curtos, CTA_DO_CARROSSEL) : null;
+}
+
+function linhasDosCarrosseisPorCurto(plano: SeedVideoPlan): string[] {
+  const carrosseis = seedShortCarousels(plano);
+  if (!carrosseis) return [];
+  return [
+    `- ${SEED_SHORT_CAROUSELS_SECTION_TITLE}: ${carrosseis.length}`,
+    ...carrosseis.map((carrossel, indice) => `  Carrossel ${indice + 1} (curto ${carrossel.rotulo}), ${carrossel.laminas.length} lâminas: ${carrossel.laminas.map((lamina, posicao) => `${posicao + 1}) ${RADAR_VIDEO_CAROUSEL_SLIDE_LABELS[lamina.papel]}${lamina.papel === "cta" ? "" : ` — ${lamina.texto}`}`).join("; ")}`),
+  ];
+}
+
 /**
  * A voz da marca e o artigo-modelo. A voz entra só nos trechos que servem à
  * copy: CTA e transição comercial; voz e vocabulário.
@@ -238,6 +275,19 @@ function linhasDoPlano(plano: SeedVideoPlan): string[] {
       ]
       : ["- Cortes: nenhum capítulo funciona sozinho como vídeo curto nesta planta."]),
     ...(plano.semCorte.length ? [`- Sem corte: ${plano.semCorte.map(item => `capítulo ${item.capitulo} (${item.motivo})`).join("; ")}`] : []),
+    /* 2026-10-14 · F6 (SDD silo interligado; o vídeo em 4 partes) · a série de curtos de ~15 s por micro-assunto, a mesma do CSV de vídeo. */
+    ...(plano.curtos?.length
+      ? [
+        `- Curtos de ~15 s por micro-assunto (o vídeo fatiado; os mesmos do CSV de vídeo): ${plano.curtos.length}`,
+        ...plano.curtos.map(curto => `  ${curto.rotulo}: gancho ${curto.gancho}; texto na tela ${curto.tela}`),
+      ]
+      : []),
+    /*
+     * 2026-10-14 · F5 (SDD silo interligado; pendência da F6) · UM CARROSSEL POR
+     * CURTO, as mesmas lâminas do CSV de vídeo (`radarVideoShortCarousels`): capa =
+     * o gancho, uma ideia por lâmina, a última com o CTA.
+     */
+    ...linhasDosCarrosseisPorCurto(plano),
     ...secao(SEED_OUT_OF_PUBLISHABLE_TITLE, plano.foraDoPublicavel.map(item => `${item.onde}: "${item.frase}" — ${item.motivo}`)),
   ];
   return linhas;
@@ -400,7 +450,8 @@ const comContexto = (pedido: string, source: SeedSource) =>
  * uma lâmina por capítulo e a do CTA.
  */
 export function seedPartsCount(plan: SeedVideoPlan, kind: "video_script" | "carousel"): number {
-  if (kind === "carousel") return plan.capitulos.length + 2;
+  /* 2026-10-14 · F5 · com a série de curtos, as lâminas são as dos carrosséis (um por curto), somadas. */
+  if (kind === "carousel") return seedShortCarousels(plan)?.reduce((soma, carrossel) => soma + carrossel.laminas.length, 0) ?? plan.capitulos.length + 2;
   return plan.formato.curto ? plan.cortes.length : plan.capitulos.length + 2;
 }
 
@@ -414,8 +465,58 @@ export const buildScriptSeedPrompt = (source: SeedSource) => {
 
 export const buildCarouselSeedPrompt = (source: SeedSource) => {
   const plano = source.plan;
-  return comContexto(`Monte o carrossel com ${seedPartsCount(plano, "carousel")} slides: a capa (o H1 do artigo-modelo, como chamada para o público), um slide por capítulo do plano do vídeo (${plano.capitulos.length}), na ordem, e o slide final com o CTA para o artigo, sem prometer resultado.`, source);
+  /* 2026-10-14 · F5 · o pedido por capítulo (planta sem a série de curtos): capa, um slide por capítulo e o CTA. */
+  return comContexto(`Monte o carrossel com ${plano.capitulos.length + 2} slides: a capa (o H1 do artigo-modelo, como chamada para o público), um slide por capítulo do plano do vídeo (${plano.capitulos.length}), na ordem, e o slide final com o CTA para o artigo, sem prometer resultado.`, source);
 };
+
+/*
+ * 2026-10-14 · F5 · O PEDIDO DOS CARROSSÉIS POR CURTO: um por curto da série, na
+ * ordem, cada um com as lâminas da régua do vídeo (o número de cada um dito).
+ */
+const ENVELOPE_CARROSSEIS_POR_CURTO = [
+  "Devolva JSON com as chaves:",
+  "objective, audience, channel, closingCta (strings),",
+  "notes (lista de strings),",
+  "carousels (lista de objetos, um por curto, na ordem pedida, com: short (o rótulo do curto, ex.: 1.1), caption (a legenda deste carrossel) e slides (lista de objetos com: heading, body)).",
+  "Não inclua nenhuma outra chave.",
+].join(" ");
+
+export const CAROUSEL_SHORTS_SEED_SYSTEM_PROMPT = [
+  "Você monta a PRIMEIRA VERSÃO de uma série de carrosséis, um por vídeo curto da série, a partir de uma investigação de conteúdo e do artigo-modelo da SERP.",
+  "O resultado é uma primeira versão para uma pessoa editar, não carrosséis finais.",
+  REGRAS_COMUNS,
+  "Cada carrossel é o texto de UM curto: a capa é o gancho dele, cada lâmina leva uma ideia só e se sustenta sozinha na rolagem, a última lâmina é o CTA (a única chamada). Carrossel não é roteiro fatiado.",
+  "`heading` é curto e carrega a ideia. `body` cabe em poucas linhas lidas no celular. `caption` é a legenda daquele carrossel, com o link do artigo.",
+  ENVELOPE_CARROSSEIS_POR_CURTO,
+].join("\n\n");
+
+export function buildShortCarouselsSeedPrompt(source: SeedSource): string {
+  const carrosseis = seedShortCarousels(source.plan) ?? [];
+  return comContexto(`Monte ${carrosseis.length} carrossel(éis), um por curto da série, na ordem (${carrosseis.map((carrossel, indice) => `${indice + 1}: curto ${carrossel.rotulo} com ${carrossel.laminas.length} lâminas`).join("; ")}), cada um com as lâminas ditas em "${SEED_SHORT_CAROUSELS_SECTION_TITLE}": capa = o gancho do curto, uma ideia por lâmina e a última com o CTA do artigo-modelo, sem prometer resultado.`, source);
+}
+
+const ProviderShortCarouselSchema = z.object({
+  short: z.string().trim().max(20).default(""),
+  caption: z.string().trim().max(3000).default(""),
+  slides: z.array(z.object({
+    heading: z.string().trim().max(500).default(""),
+    body: z.string().trim().max(3000).default(""),
+  }).strict()).min(1).max(6),
+}).strict();
+
+/* Até 12 carrosséis: a série tem no máximo 9 curtos (RADAR_VIDEO_SHORTS_MAX); a folga não vira lâmina a mais (o teto do contrato é 40). */
+export const ProviderShortCarouselsSeedSchema = z.object({
+  objective: z.string().trim().max(4000).default(""),
+  audience: z.string().trim().max(2000).default(""),
+  channel: z.string().trim().max(300).default(""),
+  closingCta: z.string().trim().max(3000).default(""),
+  notes: z.array(z.string().trim().max(2000)).max(30).default([]),
+  carousels: z.array(ProviderShortCarouselSchema).min(1).max(12),
+}).strict();
+export type ProviderShortCarouselsSeed = z.infer<typeof ProviderShortCarouselsSeedSchema>;
+
+/** O teto de lâminas do entregável (`CarouselPayloadSchema.slides`). */
+const LAMINAS_NO_ENTREGAVEL = 40;
 
 /* ====================== o que o modelo pode devolver ====================== */
 
@@ -518,6 +619,42 @@ export function carouselPayloadFromSeed(input: {
       heading: slide.heading, body: slide.body,
       visual: null, sourceRefs: [],
     })),
+  };
+}
+
+/**
+ * 2026-10-14 · F5 · OS CARROSSÉIS POR CURTO NO ENTREGÁVEL ÚNICO: as lâminas em
+ * sequência (carrossel 1, depois o 2…), a legenda do primeiro no campo da legenda
+ * e, nas notas, onde cada carrossel começa e a legenda de cada um. Cabe no teto do
+ * contrato (40 lâminas); o que passasse sai dito nas notas, nunca em silêncio.
+ */
+export function carouselPayloadFromShortsSeed(input: {
+  base: BaseCarousel; seed: ProviderShortCarouselsSeed; novoId: GeradorDeId; plan?: SeedVideoPlan | null;
+}): BaseCarousel {
+  const layout = input.plan ? seedShortCarousels(input.plan) ?? [] : [];
+  const slides: BaseCarousel["slides"] = [];
+  const notas: string[] = [];
+  let cortadas = 0;
+  input.seed.carousels.forEach((carrossel, indice) => {
+    const rotulo = carrossel.short || layout[indice]?.rotulo || String(indice + 1);
+    const inicio = slides.length + 1;
+    for (const slide of carrossel.slides) {
+      if (slides.length >= LAMINAS_NO_ENTREGAVEL) { cortadas += 1; continue; }
+      slides.push({ id: input.novoId(), order: slides.length, heading: slide.heading, body: slide.body, visual: null, sourceRefs: [] });
+    }
+    const fim = slides.length;
+    if (fim >= inicio) notas.push(`Carrossel ${indice + 1} (curto ${rotulo}): lâminas ${inicio}–${fim}${carrossel.caption ? ` · legenda: ${carrossel.caption}` : ""}`.slice(0, 2000));
+  });
+  const cabecalho = `Um carrossel por curto da série (${input.seed.carousels.length}), em sequência nas lâminas; cada um abre pela capa (o gancho do curto) e fecha com o CTA. A legenda acima é a do carrossel 1; a de cada um está na nota dele.`;
+  return {
+    ...input.base,
+    objective: input.seed.objective || input.base.objective,
+    audience: input.seed.audience || input.base.audience,
+    channel: input.seed.channel || input.base.channel,
+    caption: input.seed.carousels.find(carrossel => carrossel.caption)?.caption ?? "",
+    closingCta: input.seed.closingCta,
+    notes: [cabecalho, ...notas, ...(cortadas ? [`${cortadas} lâmina(s) ficaram fora: o entregável cabe ${LAMINAS_NO_ENTREGAVEL} lâminas.`] : []), ...input.seed.notes].slice(0, 50),
+    slides,
   };
 }
 

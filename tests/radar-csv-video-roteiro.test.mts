@@ -336,7 +336,8 @@ test("4 · cortes: só capítulos da planta que funcionam sozinhos, pela utilida
     /* 2026-10-07 · a origem vem RECOMENDADA, com o motivo, e a outra opção fica como alternativa. */
     assert.doesNotMatch(cortes, /decida na produção/, "a origem vem recomendada, não deixada em aberto");
     assert.match(cortes, /^ {3}Origem recomendada: extrair da gravação do capítulo 2 e reenquadrar na vertical — motivo: o capítulo abre respondendo a mesma pergunta e mostra uma ação só\. Alternativa: gravar à parte com fala própria\.$/m);
-    assert.match(cortes, /uma mensagem por lâmina/);
+    /* 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes): o carrossel sai dos curtos, uma ideia por lâmina. */
+    assert.match(cortes, /^Carrosséis derivados dos curtos \(Instagram e LinkedIn; um por curto, com o texto dele: capa = o gancho, uma ideia por lâmina, a última com o CTA\):$/m);
   }
   assert.match(linhaDe(entradaDoAssunto(INSTAGRAM), { youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") }).cortes_para_redes, /^Shorts: nenhum Short do tema nesta amostra/);
   assert.match(linhaDe(entradaDoAssunto(IMPLANTE)).cortes_para_redes, /^Shorts: sem pesquisa do YouTube, não há amostra de Shorts do tema/);
@@ -812,19 +813,18 @@ test("16 · com a planta do artigo-modelo, cada capítulo diz o que entregar, o 
   assert.match(cortes, /^Capítulos sem corte: 1 \(sem demonstração definida na planta\) · 3 \(sem demonstração definida na planta\)\.$/m);
   assert.doesNotMatch(cortes, /^\d+\. Do capítulo [13] \(/m, "capítulo explicativo não completa a conta");
   /* 2026-10-07 (passada de revisão) · o cabeçalho acompanhou a lâmina: sem o "Puxa a próxima" no corpo, prometer "cada uma puxando a próxima" mandava procurar instrução que não existe mais. */
-  assert.match(cortes, /^Carrossel \(Instagram e LinkedIn\), 5 lâminas, uma mensagem por lâmina \(o título de cada lâmina já puxa a seguinte\):$/m);
-  /* 2026-10-02 · a capa é chamada para o público: o H1 da planta, não a promessa (instrução ao redator). */
-  assert.match(cortes, /^- Lâmina 1 \(capa\): Como atrair clientes pelo Instagram: o guia da clínica\.$/m);
   /*
-   * 2026-10-07 · a lâmina ficou publicável: Título, Apoio (texto publicável) e
-   * sugestão Visual; o "Puxa a próxima" saiu (o Título da lâmina seguinte já
-   * diz o que vem). A entrega prática vira a sugestão Visual ("demonstração
-   * de…"); sem nada, "destaque do título".
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode
+   * sim"; o vídeo em 4 partes): a série de curtos por micro-assunto (o corte
+   * escolhido primeiro) e um carrossel por curto, com o texto dele; o H1 da planta
+   * é o ponto de partida do título do vídeo; o CTA é o diagnóstico, um só.
    */
-  assert.match(cortes, /^- Lâmina 2: Título: Por que o perfil não traz pacientes · Apoio \(texto publicável\): Resposta direta\. · Visual: destaque do título\.$/m);
-  assert.match(cortes, /^- Lâmina 3: Título: Roteiro de três stories · Apoio \(texto publicável\): Resposta direta\. · Visual: demonstração de um roteiro de três stories para a semana\.$/m);
+  assert.match(cortes, /^ {3}2\.1 · Gancho do 1º segundo: "Roteiro de três stories\?" · Ideia: Resposta direta · Cena: a ação — um roteiro de três stories para a semana — num exemplo fictício identificado como ilustrativo · Texto na tela: "Resposta direta"\.$/m);
+  assert.match(cortes, /^Carrosséis derivados dos curtos \(Instagram e LinkedIn; um por curto, com o texto dele: capa = o gancho, uma ideia por lâmina, a última com o CTA\):$/m);
+  assert.match(cortes, /^- Carrosséis: 2\.1, 1\.1, 3\.1/m);
+  assert.match(cortes, /^CTA de cada curto e de cada carrossel \(um só\): o diagnóstico — [^\n]*; link do artigo na legenda \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\)\.$/m);
+  assert.match(linha.diretrizes_de_roteiro, /parta do título da planta \("Como atrair clientes pelo Instagram: o guia da clínica"\)/);
   assert.doesNotMatch(cortes, /Puxa a próxima/, "a lâmina só leva o publicável e a sugestão visual");
-  assert.match(cortes, /^- Lâmina 5: CTA para o artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\), sem prometer resultado\.$/m);
 
   /* 2026-10-02 · D10: o rascunho antigo também sai sem aviso de aprovação. */
   /* 2026-10-09 · a proposta (DRAFT) não é o artigo-modelo: sem a APPROVED, nenhum roteiro (nem a sequência de antes). */
@@ -983,11 +983,17 @@ test("20 · Entregar nunca fica sem resposta; corte com ideia única e Origem; l
    * viram lista no carrossel (antes, só o primeiro passo, que dizia menos que o capítulo).
    */
   /* 2026-10-08 · D3: os tópicos vão em lista como PONTOS do capítulo, nunca como "os passos". */
-  assert.match(cortes, /^- Lâmina 2: Título: Por que o perfil não traz pacientes · Apoio \(texto publicável\): A atenção no feed é passageira\. · Visual: os pontos do capítulo em lista: O papel do algoritmo; Seguidores não são pacientes\.$/m);
-  assert.match(cortes, /^- Lâmina 4: Título: Prova social · Apoio \(texto publicável\): Prova social\? · Visual: destaque do título\.$/m, "sem frase publicável, a pergunta do público vira a provocação da lâmina");
-  const laminas = cortes.split("\n").filter(linha => linha.startsWith("- Lâmina"));
-  assert.ok(laminas.length >= 5, cortes);
-  for (const lamina of laminas) assert.doesNotMatch(lamina, /PENDÊNCIA|pelo que a pesquisa sustenta|o que a pesquisa sustenta|a resposta a /, "lâmina sem instrução interna");
+  /*
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono (o vídeo em 4 partes): o carrossel sai dos curtos.
+   * O capítulo explicativo rende o curto da frase publicável e o dos PONTOS (ditos como ponto, nunca como passo);
+   * o capítulo sem frase publicável não vira curto nem lâmina.
+   */
+  assert.match(cortes, /^ {3}1\.1 · [^\n]*Ideia: A atenção no feed é passageira · /m);
+  assert.match(cortes, /^ {3}1\.2 · [^\n]*Cena: o ponto "O papel do algoritmo" escrito na tela, com a fala por cima · /m);
+  assert.doesNotMatch(cortes, /^ {3}3\.\d · /m, "sem frase publicável, nenhum curto");
+  const curtos = cortes.split("\n").filter(linha => /^ {3}\d+\.\d+ · /.test(linha) || linha.startsWith("- Carross"));
+  assert.ok(curtos.length >= 3, cortes);
+  for (const curto of curtos) assert.doesNotMatch(curto, /PENDÊNCIA|pelo que a pesquisa sustenta|o que a pesquisa sustenta|a resposta a /, "curto e lâmina sem instrução interna");
 
   /* O prompt pede os três produtos e libera a ordem (a diretriz já permitia reorganizar). */
   assert.match(row.prompt, /na ordem dos capítulos desta linha OU na ordem em que o vídeo render melhor \(a diretriz permite reorganizar\), mantendo assunto, evidências e premissa/);
@@ -1003,9 +1009,13 @@ test("20 · Entregar nunca fica sem resposta; corte com ideia única e Origem; l
    * que ninguém viu. "Até 3, escolhidos por utilidade" e a regra do "Fica fora"
    * continuam, e a guarda contra "Os 3 cortes" também.
    */
-  assert.match(row.prompt, /^2\) Os cortes desta linha \(até 3, escolhidos por utilidade\) para Shorts\/Reels\/TikTok, cada um com fala própria, a cena do storyboard \(storyboard_visual\), a duração-alvo de concorrencia_curtos_e_carrossel e UM CTA\.$/m);
+  /*
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes): o prompt
+   * pede os curtos de ~15 s por micro-assunto e o carrossel de cada curto; a regra do "Fica fora" continua.
+   */
+  assert.match(row.prompt, /^2\) Os curtos desta linha \(o vídeo fatiado por micro-assunto\): Um vídeo curto de ~15 s por micro-assunto de cortes_para_redes \(1\.1, 1\.2…\), na ordem: gancho no primeiro segundo, a ideia única, a cena, o texto na tela, a duração-alvo dita e UM CTA \(o diagnóstico\); 3 opções de título para cada um, com ângulos diferentes \(a regra está em cortes_para_redes\)\.$/m);
   assert.doesNotMatch(row.prompt, /Os 3 cortes/);
-  assert.match(row.prompt, /^3\) O carrossel desta linha, com o texto publicável de cada lâmina \(título e apoio curto\) e o visual de storyboard_visual, sem instrução interna no texto da lâmina; frase listada em "Fica fora do texto publicável" não entra em lâmina nem legenda, e na fala só entra delimitada\.$/m);
+  assert.match(row.prompt, /^3\) Carrosséis: O carrossel de cada curto, como cortes_para_redes o desenha \(capa = o gancho, uma ideia por lâmina, a última com o CTA\), com o texto do próprio curto e sem instrução interna na lâmina; frase listada em "Fica fora do texto publicável" não entra em lâmina nem legenda, e na fala só entra delimitada\.$/m);
   assert.match(row.prompt, /^Estilo visual: só o que storyboard_visual registra como observado e o que quem abrir as referências anotar; não descreva estilo de imagem que ninguém viu\.$/m);
 });
 
@@ -1227,13 +1237,17 @@ test("25 · trava de fonte (caso real): a frase que pede fonte sai da lâmina e 
   const entrada = entradaDoAssunto(INSTAGRAM);
   const row = linhaDe(entrada, { blueprint: plantaDoCasoReal(entrada) });
   const cortes = row.cortes_para_redes;
-  const laminas = cortes.split("\n").filter(linha => linha.startsWith("- Lâmina"));
+  /*
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes): o texto
+   * publicável é o dos curtos por micro-assunto (e das lâminas deles) e a ideia do corte; a trava vale igual.
+   */
+  const curtos = cortes.split("\n").filter(linha => /^ {3}\d+\.\d+ · /.test(linha) || linha.startsWith("- Carross"));
   const ideias = cortes.split("\n").filter(linha => /^ {3}Ideia única: /.test(linha));
-  assert.ok(laminas.length === 5 && ideias.length > 0, cortes);
+  assert.ok(curtos.length >= 3 && ideias.length > 0, cortes);
   /* O problema do CSV real: a Lâmina 2 publicava a afirmação que o capítulo 1 marcava como "fonte a obter". */
   /* 2026-10-08 (correção da revisão) · "Influenciadores locais PODEM ampliar seu alcance" é efeito delimitado por modal: passa, como o desenho pedia. */
-  for (const texto of [...laminas, ...ideias]) assert.doesNotMatch(texto, /algoritmo prioriza|geolocalização ajudam/i, `texto publicável sem a afirmação travada: ${texto}`);
-  assert.match(cortes, /^- Lâmina 2: Título: O que o Instagram faz bem \(e o que ele não faz\) · Apoio \(texto publicável\): A atenção no feed é passageira\. · /m, "o próximo candidato livre vira o Apoio");
+  for (const texto of [...curtos, ...ideias]) assert.doesNotMatch(texto, /algoritmo prioriza|geolocalização ajudam/i, `texto publicável sem a afirmação travada: ${texto}`);
+  assert.match(cortes, /^ {3}1\.1 · [^\n]*Ideia: A atenção no feed é passageira; a decisão de marcar consulta envolve confiança e necessidade · /m, "o próximo candidato livre vira a ideia do curto");
   /* Na produção, a frase fica delimitada e perde o rótulo "o que a pesquisa sustenta". */
   assert.match(row.diretrizes_de_roteiro, /^ {3}Entregar: o que a pesquisa sustenta: A atenção no feed é passageira; a decisão de marcar consulta envolve confiança e necessidade; a resposta completa a "O Instagram realmente serve para atrair clientes\?" se delimita na fala\n {3}Fala delimitada, sem fonte: O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos\.$/m);
   assert.doesNotMatch(row.diretrizes_de_roteiro, /o que a pesquisa sustenta: O algoritmo/);
@@ -1247,17 +1261,18 @@ test("25 · trava de fonte (caso real): a frase que pede fonte sai da lâmina e 
    * do capítulo na lista, com o motivo dela — fora do vídeo, também da fala — e
    * entra na contagem do pode_gravar.
    */
-  assert.match(cortes, /^- Capítulo 1 · lâmina 2[^:]*: "O Instagram foi feito para entretenimento, não para agendar consultas" — regra universal sem fonte: fica fora do vídeo, também da fala; "O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos" — a planta pede fonte oficial ou verificada: "O algoritmo do Instagram prioriza conteúdo com alto engajamento"\.$/m);
+  assert.match(cortes, /^- Capítulo 1[^:]*: "O Instagram foi feito para entretenimento, não para agendar consultas" — regra universal sem fonte: fica fora do vídeo, também da fala; "O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos" — a planta pede fonte oficial ou verificada: "O algoritmo do Instagram prioriza conteúdo com alto engajamento"\.$/m);
   assert.doesNotMatch(row.diretrizes_de_roteiro, /foi feito para entretenimento/, "a absoluta não volta à fala");
   assert.doesNotMatch(cortes, /fonte a obter/, "D10: a lista \"Fica fora\" não diz \"fonte a obter\"");
   /* Uma linha por capítulo (com a lâmina e o corte dele), cada frase com o seu motivo. */
-  assert.match(cortes, /^- Capítulo 3 · lâmina 4[^:]*: "Hashtags e geolocalização ajudam a ser encontrado por quem está perto" — afirmação sobre plataforma sem fonte \(regra 17 da planta\)\.$/m);
+  assert.match(cortes, /^- Capítulo 3[^:]*: "Hashtags e geolocalização ajudam a ser encontrado por quem está perto" — afirmação sobre plataforma sem fonte \(regra 17 da planta\)\.$/m);
   assert.match(row.pode_gravar, /^- 3 frase\(s\) que pedem fonte saíram do texto publicável \(lista em cortes_para_redes\)\.$/m);
   /* Controle negativo: a tese do dono (premissa e capa) e a frase sem afirmação de plataforma ficam. */
   assert.match(row.diretrizes_de_roteiro, /^Premissa do vídeo: O vídeo mostra por que o Instagram, sozinho, não enche a agenda e como usar a plataforma de forma estratégica\.$/m);
-  assert.match(cortes, /^- Lâmina 1 \(capa\): Como atrair clientes pelo Instagram \(sem cair na ilusão de que ele enche a agenda\)\.$/m);
-  assert.match(cortes, /Apoio \(texto publicável\): A bio diz serviço, cidade e contato\./);
-  assert.match(cortes, /Apoio \(texto publicável\): Aplique táticas como parcerias com influenciadores locais, uso de hashtags relevantes e interação ativa com a audiência\./, "recomendação que só nomeia o recurso não afirma efeito");
+  /* 2026-10-14 · F6 · a tese do dono é o ponto de partida do título do vídeo; as frases livres viram a ideia de um curto. */
+  assert.match(row.diretrizes_de_roteiro, /parta do título da planta \("Como atrair clientes pelo Instagram \(sem cair na ilusão de que ele enche a agenda\)"\)/);
+  assert.match(cortes, /^ {3}\d+\.1 · [^\n]*Ideia: A bio diz serviço, cidade e contato · /m);
+  assert.match(cortes, /^ {3}\d+\.1 · [^\n]*Ideia: Aplique táticas como parcerias com influenciadores locais, uso de hashtags relevantes e interação ativa com a audiência · /m, "recomendação que só nomeia o recurso não afirma efeito");
   /* 2026-10-07 (revisão) · o alinhamento mandava mostrar "serve" e "usar" na cena: verbo de uso comum não é assunto do gancho. */
   assert.doesNotMatch(cortes, /Alinhamento: [^\n]*"(?:serve|usar|traz)"/, "verbo comum não é assunto");
 
@@ -1265,9 +1280,10 @@ test("25 · trava de fonte (caso real): a frase que pede fonte sai da lâmina e 
   const comFonte = linhaDe(entrada, { blueprint: plantaDoCasoReal(entrada, { fonte: { id: "X1", url: "https://fonte-oficial.exemplo/algoritmo" } }) });
   assert.match(comFonte.diretrizes_de_roteiro, /^ {3}Entregar: o que a pesquisa sustenta: O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos \(fonte: https:\/\/fonte-oficial\.exemplo\/algoritmo\); a resposta completa/m);
   assert.match(comFonte.diretrizes_de_roteiro, /^ {3}Antes de afirmar: O algoritmo do Instagram prioriza conteúdo com alto engajamento \(fonte: https:\/\/fonte-oficial\.exemplo\/algoritmo\); /m);
-  assert.match(comFonte.cortes_para_redes, /^- Lâmina 2: [^\n]*Apoio \(texto publicável\): O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos \(fonte: https:\/\/fonte-oficial\.exemplo\/algoritmo\)\. · /m);
+  /* 2026-10-14 · F6 · com fonte, a frase é a ideia do curto e leva a fonte. */
+  assert.match(comFonte.cortes_para_redes, /^ {3}1\.1 · [^\n]*Ideia: O algoritmo prioriza conteúdo que gera interação, não necessariamente o que leva a agendamentos \(fonte: https:\/\/fonte-oficial\.exemplo\/algoritmo\) · /m);
   /* 2026-10-08 (correção da revisão) · com fonte, do capítulo 1 só a absoluta fica fora (a regra universal não ganha fonte pelo link do algoritmo). */
-  assert.match(comFonte.cortes_para_redes, /^- Capítulo 1 · lâmina 2[^:]*: "O Instagram foi feito para entretenimento, não para agendar consultas" — regra universal sem fonte: fica fora do vídeo, também da fala\.$/m, "com fonte, a frase do algoritmo não fica fora");
+  assert.match(comFonte.cortes_para_redes, /^- Capítulo 1[^:]*: "O Instagram foi feito para entretenimento, não para agendar consultas" — regra universal sem fonte: fica fora do vídeo, também da fala\.$/m, "com fonte, a frase do algoritmo não fica fora");
 });
 
 test("25b · a mesma porta na premissa, na capa e na promessa do gancho: afirmação de plataforma sem fonte cai para a abertura e é listada", () => {
@@ -1288,9 +1304,13 @@ test("25b · a mesma porta na premissa, na capa e na promessa do gancho: afirma�
    * responde … com o que a pesquisa sustenta") — texto interno publicado na
    * Lâmina 1. A reserva é a pergunta da abertura da planta, que é do público.
    */
-  assert.match(row.cortes_para_redes, /^- Lâmina 1 \(capa\): Como atrair clientes pelo Instagram\?$/m, "a capa cai para a pergunta da abertura");
-  assert.doesNotMatch(row.cortes_para_redes, /^- Lâmina 1 \(capa\): O vídeo /m, "a premissa de produção não vira capa");
-  assert.match(row.storyboard_visual, /^- Lâmina 1 \(capa\): texto = "Como atrair clientes pelo Instagram\?"/m, "o storyboard usa a mesma capa");
+  /*
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono (o vídeo em 4 partes): a capa de cada carrossel é o gancho
+   * do curto; a capa da planta (pela mesma porta) é o ponto de partida do título do vídeo — e cai para a pergunta da abertura.
+   */
+  assert.match(row.diretrizes_de_roteiro, /parta do título da planta \("Como atrair clientes pelo Instagram\?"\)/, "a capa cai para a pergunta da abertura");
+  assert.doesNotMatch(row.diretrizes_de_roteiro, /parta do título da planta \("O vídeo /, "a premissa de produção não vira título");
+  assert.match(row.storyboard_visual, /^Storyboard dos carrosséis \(um por curto; /m, "o storyboard é o dos carrosséis dos curtos");
   assert.doesNotMatch(row.diretrizes_de_roteiro.split("\n")[0], /Hashtags certas/, "a promessa do artigo não abre o gancho");
   assert.match(row.cortes_para_redes, /^- Premissa do vídeo: "Mostrar que o algoritmo do Instagram favorece quem publica todo dia" — afirmação sobre plataforma sem fonte \(regra 17 da planta\)\.$/m);
   assert.match(row.cortes_para_redes, /^- Capa do carrossel \(lâmina 1\): "O algoritmo do Instagram prioriza quem posta todo dia" — /m);
@@ -1393,7 +1413,8 @@ test("25d · a trava por sentido de ponta a ponta (CSV real de 08/10): \"canais 
     },
   };
   const row = linhaDe(entrada, { blueprint: planta });
-  const publicaveis = row.cortes_para_redes.split("\n").filter(linha => linha.startsWith("- Lâmina") || /^ {3}Ideia única: /.test(linha));
+  /* 2026-10-14 · SDD silo interligado · F6 · decisão do dono (o vídeo em 4 partes): os curtos por micro-assunto e os carrosséis deles também são texto publicável. */
+  const publicaveis = row.cortes_para_redes.split("\n").filter(linha => linha.startsWith("- Lâmina") || /^ {3}Ideia única: /.test(linha) || /^ {3}\d+\.\d+ · /.test(linha) || linha.startsWith("- Carross"));
   assert.ok(publicaveis.length > 0, row.cortes_para_redes);
   for (const linha of publicaveis) assert.doesNotMatch(linha, /canais que convertem|procuram atendimento/, `texto publicável sem a afirmação travada: ${linha}`);
   /* A frase longa é citada encurtada na lista (teto da célula); o motivo vem inteiro. */
@@ -1401,9 +1422,9 @@ test("25d · a trava por sentido de ponta a ponta (CSV real de 08/10): \"canais 
   assert.match(row.cortes_para_redes, /"Pacientes com dor ou necessidade procuram atendimento pelo Google e chegam pelo site" — afirmação sobre comportamento do público sem fonte \(regra 17 da planta\)/);
   assert.match(row.diretrizes_de_roteiro, /Entregar: o que a pesquisa sustenta: Conteúdo educativo gera confiança e posiciona você como autoridade/);
   assert.match(row.diretrizes_de_roteiro, /Fala delimitada, sem fonte: Use o Instagram como vitrine[^\n]*canais que convertem/, "na produção, a frase fica delimitada");
-  /* A tese do dono continua: premissa e capa, como antes. */
+  /* A tese do dono continua: premissa e capa (2026-10-14 · F6: a capa da planta é o ponto de partida do título do vídeo). */
   assert.match(row.diretrizes_de_roteiro, /^Premissa do vídeo: O vídeo mostra por que o Instagram, sozinho, não enche a agenda e como usar a plataforma de forma estratégica\.$/m);
-  assert.match(row.cortes_para_redes, /^- Lâmina 1 \(capa\): Como atrair clientes pelo Instagram \(sem cair na ilusão de que ele enche a agenda\)\.$/m);
+  assert.match(row.diretrizes_de_roteiro, /parta do título da planta \("Como atrair clientes pelo Instagram \(sem cair na ilusão de que ele enche a agenda\)"\)/);
 });
 
 test("31 · a frase que DESMENTE o mercado passa (a tese do dono); o mercado sem fonte e o mercado × fonte travam de ponta a ponta; pergunta travada não abre corte", () => {
@@ -1453,18 +1474,19 @@ test("31 · a frase que DESMENTE o mercado passa (a tese do dono); o mercado sem
   const cortes = row.cortes_para_redes;
   /* A tese do dono passa: premissa e capa como estão, e nada delas na lista "Fica fora". */
   assert.match(row.diretrizes_de_roteiro, /^Premissa do vídeo: O vídeo mostra por que o Instagram, sozinho, não enche a agenda e como usar a plataforma de forma estratégica\.$/m);
-  assert.match(cortes, /^- Lâmina 1 \(capa\): Como atrair clientes pelo Instagram \(sem cair na ilusão de que ele enche a agenda\)\.$/m);
+  /* 2026-10-14 · SDD silo interligado · F6 · decisão do dono (o vídeo em 4 partes): a capa da planta é o ponto de partida do título; a frase livre vira a ideia de um curto. */
+  assert.match(row.diretrizes_de_roteiro, /parta do título da planta \("Como atrair clientes pelo Instagram \(sem cair na ilusão de que ele enche a agenda\)"\)/);
   assert.doesNotMatch(cortes, /^- (?:Premissa do vídeo|Capa do carrossel)/m, "a tese não é censurada");
   /* A frase que desmente o mercado (o lado da fonte) é publicável e não vira "fala delimitada, sem fonte". */
-  assert.match(cortes, /^- Lâmina 3: Título: Como usar o Instagram de forma estratégica · Apoio \(texto publicável\): Postar com frequência não garante relevância nem conversão\. · /m);
+  assert.match(cortes, /^ {3}2\.1 · [^\n]*Ideia: Postar com frequência não garante relevância nem conversão · /m);
   assert.doesNotMatch(row.diretrizes_de_roteiro, /Fala delimitada, sem fonte: Postar com frequência não garante/);
   /* A que REPETE o mercado trava — por (c), com o motivo da fonte que contradiz — e a afirmação que o mercado repete sem fonte trava por (b). */
-  assert.match(cortes, /^- Capítulo 2 · lâmina 3[^:]*: "Postar com frequência garante relevância" — a fonte contradiz ou condiciona o que o mercado repete: "Postar com frequência garante relevância e conversão"; "Stories diários aumentam a confiança do paciente" — o mercado repete sem fonte: "Stories diários aumentam a confiança do paciente"\.$/m);
-  for (const lamina of cortes.split("\n").filter(linha => linha.startsWith("- Lâmina"))) assert.doesNotMatch(lamina, /garante relevância\.|Stories diários/, lamina);
+  assert.match(cortes, /^- Capítulo 2[^:]*: "Postar com frequência garante relevância" — a fonte contradiz ou condiciona o que o mercado repete: "Postar com frequência garante relevância e conversão"; "Stories diários aumentam a confiança do paciente" — o mercado repete sem fonte: "Stories diários aumentam a confiança do paciente"\.$/m);
+  for (const lamina of cortes.split("\n").filter(linha => linha.startsWith("- Lâmina") || /^ {3}\d+\.\d+ · /.test(linha) || linha.startsWith("- Carross"))) assert.doesNotMatch(lamina, /garante relevância\.|Stories diários/, lamina);
   /* A pergunta que repete o mercado não abre corte (o gancho é a pergunta) e entra na lista com o motivo. */
   assert.match(cortes, /^Capítulos sem corte: [^\n]*4 \(a pergunta do capítulo pede fonte\)/m);
   assert.doesNotMatch(cortes, /^\d+\. Do capítulo 4 \(/m);
-  assert.match(cortes, /^- Capítulo 4 · lâmina 5: "O Instagram enche a agenda da clínica\?" — a fonte contradiz ou condiciona o que o mercado repete: "O Instagram enche a agenda da clínica"\.$/m);
+  assert.match(cortes, /^- Capítulo 4: "O Instagram enche a agenda da clínica\?" — a fonte contradiz ou condiciona o que o mercado repete: "O Instagram enche a agenda da clínica"\.$/m);
 });
 
 /* 2026-10-07 · as palavras de espera aberta que o D10 proíbe no CSV de vídeo (revisão: "rascunho" e "falta conferir" entraram). */
@@ -1655,9 +1677,12 @@ test("28 · a demonstração definida pela planta: ajuste sem depois, passos por
   assert.doesNotMatch(cortes, /só o primeiro passo — grave os stories/);
   assert.doesNotMatch(cortes, /^\d+\. Do capítulo 3 \(/m, "capítulo explicativo não vira corte");
   assert.match(cortes, /^Capítulos sem corte: 3 \(sem demonstração definida na planta\)\.$/m);
-  /* O Visual da lâmina sai da mesma demonstração. */
-  assert.match(cortes, /^- Lâmina 2: [^\n]* · Visual: demonstração: bio genérica → serviço, cidade e link de agendamento\.$/m);
-  assert.match(cortes, /^- Lâmina 3: [^\n]* · Visual: os passos em lista: grave os stories na segunda; publique o carrossel na quarta; responda o direct na sexta\.$/m);
+  /*
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono (o vídeo em 4 partes): a cena de cada curto (e do
+   * carrossel dele) sai da mesma demonstração; os passos viram micro-assuntos, um curto por passo.
+   */
+  assert.match(cortes, /^ {3}1\.1 · [^\n]*Cena: o ajuste — serviço, cidade e link de agendamento — a partir do antes \(bio genérica\)/m);
+  assert.match(cortes, /^ {3}2\.2 · [^\n]*Cena: o passo "grave os stories na segunda" numa tela, num exemplo identificado como ilustrativo · /m);
 });
 
 test("29 · cortes pela utilidade isolada: a pergunta de 6 páginas vence a de 1; lacuna pontua; frase só travada não vira corte; ideia com vários passos ganha o alinhamento; sem elegível, nenhum corte inventado", () => {
@@ -1766,7 +1791,7 @@ test("30 · a célula aguenta a linha maior: seis capítulos com dois links, tra
     assert.doesNotMatch(valor, /cortado no limite da célula/, `${coluna} não pode ser cortada`);
   }
   assert.match(row.cortes_para_redes, /^Fica fora do texto publicável/m);
-  assert.match(row.cortes_para_redes, /^- Capítulo 6 · lâmina 7/m, "a lista chega ao último capítulo");
+  assert.match(row.cortes_para_redes, /^- Capítulo 6: /m, "a lista chega ao último capítulo");
 });
 
 test("32 · roteiro e cortes encolhem em vez de serem cortados: com frases ~35% maiores e o pior caso da planta, o fim de cada coluna e a lista \"Fica fora\" inteira continuam", () => {
@@ -1827,14 +1852,16 @@ test("32 · roteiro e cortes encolhem em vez de serem cortados: com frases ~35% 
     /* O fim do roteiro continua: o CTA, as regras e a linha da voz. */
     const roteiro = row.diretrizes_de_roteiro;
     assert.match(roteiro, /^6\. Como ajustar o link da bio/m, `${nome}: o capítulo 6`);
-    assert.match(roteiro, /^Fechamento: /m, `${nome}: o Fechamento com o CTA`);
+    /* 2026-10-14 · SDD silo interligado · F6 · decisão do dono (o vídeo em 4 partes): o fechamento em 4 tempos, com o diagnóstico como CTA único. */
+    assert.match(roteiro, /^Fechamento em 4 tempos \(o arco acima\): /m, `${nome}: o Fechamento com o CTA`);
     assert.match(roteiro, /^Não inventar depoimento, número, estudo, autor nem credencial\./m, `${nome}: a regra de não inventar`);
     assert.match(roteiro, /^Voz da marca: gancho, fala, CTA e descrição seguem a linha "Voz da marca"/m, `${nome}: a linha da voz`);
     assert.match(roteiro, /^\(Roteiro encolhido para caber na célula: /m, `${nome}: a coluna diz que encolheu`);
     /* A lista "Fica fora" inteira: um item por capítulo, até o 6, e o número do pode_gravar bate com as frases listadas. */
     const cortes = row.cortes_para_redes;
     assert.match(cortes, /^Fica fora do texto publicável/m);
-    for (let numero = 1; numero <= 6; numero += 1) assert.match(cortes, new RegExp(`^- Capítulo ${numero} · lâmina ${numero + 1}[^\\n]*\\.$`, "m"), `${nome}: capítulo ${numero} na lista`);
+    /* 2026-10-14 · F6 · com os carrosséis derivados dos curtos, a linha diz o capítulo (não há mais a lâmina por capítulo). */
+    for (let numero = 1; numero <= 6; numero += 1) assert.match(cortes, new RegExp(`^- Capítulo ${numero}(?: · lâmina ${numero + 1})?(?: · corte \\d+)?: [^\\n]*\\.$`, "m"), `${nome}: capítulo ${numero} na lista`);
     const listadas = (cortes.slice(cortes.indexOf("Fica fora do texto publicável")).match(/" — /g) || []).length;
     assert.match(row.pode_gravar, new RegExp(`^- ${listadas} frase\\(s\\) que pedem fonte saíram do texto publicável`, "m"), `${nome}: ${listadas} frases listadas`);
   }

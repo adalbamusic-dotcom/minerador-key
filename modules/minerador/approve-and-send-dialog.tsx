@@ -152,7 +152,9 @@ export function ApproveAndSendDialog({ brandId, keywordIds, scopeLabel, send = t
             ) : null}
             <span className="min-w-0 flex-1">
               <span className="text-keyword">{line.keyword}</span>
-              {line.alreadyInArquiteto ? <span className="ml-2 text-text-muted">· já no Arquiteto (o reenvio só atualiza o pacote se ele mudou)</span> : null}
+              {line.refreshInArquiteto
+                ? <span className="ml-2 text-context-accent" data-approve-and-send-refresh>· atualiza no Arquiteto (pacote novo; as decisões do Arquiteto ficam)</span>
+                : line.alreadyInArquiteto ? <span className="ml-2 text-text-muted">· já no Arquiteto (pacote igual: nada muda lá)</span> : null}
               {line.action === "blocked" ? <span className="block text-text-muted">{reasonOf(line)}</span> : null}
             </span>
           </li>

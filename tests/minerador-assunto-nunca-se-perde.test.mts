@@ -82,9 +82,20 @@ function corpoDaFuncao(sql: string, nome: string): string {
   return sql.slice(inicio, sql.indexOf("$function$;", inicio) + 11);
 }
 
-test("migration: é a última, numa transação, com guardas, ensaio funcional desfeito e pós-checagem", () => {
+test("migration: ordena depois de todas as de antes, numa transação, com guardas, ensaio funcional desfeito e pós-checagem", () => {
   const nomes = readdirSync(new URL("../supabase/migrations/", import.meta.url)).filter(nome => nome.endsWith(".sql")).sort();
-  assert.equal(nomes.at(-1), "20261015120000_assunto_nunca_se_perde.sql", "ordena depois de todas as migrations");
+  const posicao = nomes.indexOf("20261015120000_assunto_nunca_se_perde.sql");
+  assert.ok(posicao >= 0, "a migration existe");
+  /*
+   * 2026-10-14 (ajuste declarado, F6 das listas leves): ela deixou de ser a ÚLTIMA
+   * porque a SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md` §11 reserva
+   * duas migrations para DEPOIS dela — M-L `20261016120000_listas_leves` (só views)
+   * e M-E `20261016130000_excluir_tudo_da_cor` (que EXIGE esta antes). O que este
+   * teste protege continua: ela ordena depois de todas as que já existiam, e só as
+   * reservadas pela SDD vêm depois.
+   */
+  const depois = nomes.slice(posicao + 1);
+  assert.ok(depois.every(nome => /^20261016120000_listas_leves\.sql$|^20261016130000_excluir_tudo_da_cor\.sql$/.test(nome)), `só as migrations reservadas pela SDD vêm depois: ${depois.join(", ")}`);
   const sql = limpaSql(MIGRATION);
   assert.match(sql, /^\s*BEGIN;/m);
   assert.match(sql, /COMMIT;\s*$/);
@@ -273,7 +284,9 @@ test("lista fechada: só \"Tirar do plano\" grava o marcador; \"excluir_cor\" e 
   const todos = ["lib", "app", "modules", "components"].flatMap(arquivos).map(path => ({ path, source: limpa(`../${path}`) }));
   const usam = (padrao: RegExp) => todos.filter(file => padrao.test(file.source)).map(file => file.path).sort();
   assert.deepEqual(usam(/tirar_do_plano/), ["lib/minerador/declared-plan-withdraw-core.ts", "lib/minerador/keyword-subject.ts"]);
-  assert.deepEqual(usam(/excluir_cor/), ["lib/minerador/keyword-subject.ts"], "a exclusão por cor ainda não existe");
+  // 2026-10-14 (ajuste declarado, F7 "Excluir tudo da cor"): o marcador "excluir_cor" é gravado SÓ pela RPC da
+  // migration M-E (no banco, na mesma transação da exclusão); no código ele aparece só como a constante do domínio.
+  assert.deepEqual(usam(/excluir_cor/), ["lib/minerador/group-delete-all.ts", "lib/minerador/keyword-subject.ts"], "a exclusão por cor só pela M-E");
   assert.deepEqual(usam(/["']conversao["']/), ["lib/minerador/keyword-subject.ts"], "a conversão não retira o Assunto da linha-título hoje");
   assert.deepEqual(usam(/keyword_subject_release|KEYWORD_SUBJECT_RELEASE_KEY/), ["lib/minerador/keyword-subject.ts"]);
   assert.deepEqual(usam(/withdrawKeywordSubject\(/), ["lib/minerador/keyword-subject.ts"], "ninguém chama a retirada do Assunto inteiro");

@@ -625,7 +625,11 @@ test("9 · o tipo da unidade: landing page, página de serviço e review falam d
   assert.equal(saidaDoVideo.status, "ready");
   const video = saidaDoVideo.status === "ready" ? saidaDoVideo.csv : "";
   /* 2026-10-11 · o endereço é a URL canônica da identidade de publicação (o slug no caminho do Silo), não só "/<slug>". */
-  assert.match(video, /CTA para a landing page \(https:\/\/[^\s)]*\/skincare-facial\)/);
+  /*
+   * 2026-10-14 · SDD silo interligado · F6 · decisão do dono (frase do §1 e "pode sim"; o vídeo em 4 partes): o
+   * carrossel sai dos curtos (a lâmina "CTA para …" por capítulo saiu) e o fechamento em 4 tempos leva o link da página.
+   */
+  assert.match(video, /link para a landing page \(https:\/\/[^\s)]*\/skincare-facial\) na descrição/);
   assert.match(video, /o link da landing page/);
   assert.match(video, /Cada vídeo leva o público para o artigo ou a página da marca/);
 });

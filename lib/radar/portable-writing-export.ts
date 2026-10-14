@@ -261,7 +261,8 @@ export type RadarWritingPublication = {
    * Nenhum pacote a traz hoje: sem ela, o veredito diz que a atualização
    * precisa preservar o que existe, em vez de reescrever às cegas.
    */
-  currentStructure?: { h1: string | null; h2: string[]; updatedAt: string | null } | null;
+  /* 2026-10-14 · F5 (SDD silo interligado) · aditivo: `links`, os links internos da página lida agora (só a lista "Atualizar links do Silo" os lê). */
+  currentStructure?: { h1: string | null; h2: string[]; updatedAt: string | null; links?: readonly string[] | null } | null;
   /**
    * 2026-10-11c · Aditivo: as keywords do ArticleDNA do artigo (principal,
    * complementares e reforços, pelo texto que cada referência guarda). Quem é
@@ -374,6 +375,15 @@ export type RadarWritingExportArticle = {
    * páginas". Ausente no artigo: o objeto sai byte a byte como antes.
    */
   unitNoun?: string;
+  /**
+   * 2026-10-14 · F6 (SDD silo interligado, "Redator lê o material novo") ·
+   * Aditivo: a MESMA linha antes do teto das células e do artigo (higiene e
+   * proteção de planilha aplicadas, nada cortado nem movido de coluna). Não vai
+   * ao CSV: é o que o Redator e o CSV de vídeo leem como material
+   * (`radarWritingMaterialOf`), pelo mesmo núcleo, sem o corte que só existe
+   * por causa da planilha.
+   */
+  uncutRow?: RadarWritingExportRow;
 };
 
 /*
@@ -3451,11 +3461,14 @@ function dentroDosLimites(linha: RadarWritingExportRow): RadarWritingExportRow {
   return saida;
 }
 
-const finalizarLinha = (linha: RadarWritingExportRow): RadarWritingExportRow => {
+/* 2026-10-14 · F6 · a higiene e a proteção de planilha, separadas do teto: o material do Redator e do vídeo lê a linha limpa e inteira. */
+const limparLinha = (linha: RadarWritingExportRow): RadarWritingExportRow => {
   const limpa = {} as RadarWritingExportRow;
   for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) limpa[coluna] = radarWritingSpreadsheetSafe(higiene(linha[coluna] || ""));
-  return dentroDosLimites(limpa);
+  return limpa;
 };
+
+const finalizarLinha = (linha: RadarWritingExportRow): RadarWritingExportRow => dentroDosLimites(limparLinha(linha));
 
 /* ============================== o artigo ============================== */
 
@@ -3826,8 +3839,10 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     ].filter(Boolean).join("\n");
   }
 
-  return {
-    row: finalizarLinha(linha),
+  /* 2026-10-14 · F6 · a linha limpa uma vez: o CSV leva a do teto; o material (Redator e vídeo), a inteira. */
+  const limpa = limparLinha(linha);
+  const artigo: RadarWritingExportArticle = {
+    row: dentroDosLimites(limpa),
     verdict: decisao.verdict,
     label: rotulo,
     firstReason: decisao.primeira,
@@ -3835,6 +3850,9 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     published: publicado,
     ...(unidade.kind !== "article" ? { unitNoun: unidade.noun } : {}),
   };
+  /* Não enumerável: quem serializa o artigo (snapshots, auditoria) continua vendo o objeto de antes, byte a byte. */
+  Object.defineProperty(artigo, "uncutRow", { value: limpa, enumerable: false });
+  return artigo;
 }
 
 export function buildRadarWritingExportRow(input: RadarPortableExportInput, contexto: RadarWritingArticleContext): RadarWritingExportRow {

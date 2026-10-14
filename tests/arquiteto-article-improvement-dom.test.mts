@@ -159,7 +159,8 @@ test("F4 · linha 'Precisa do Minerador': à vista, não marcável, com o link p
   const base = fixture();
   restored = { ...base, groupScope: { requested: "azul", filter: "group", groupId: "g-azul" }, keywords: [...base.keywords, { id: "ext", keyword: "ideia nova", volume: 90, volumeValidated: true, external: true }],
     proposals: [{ ...base.proposals[0], addIds: ["ext"], memberIds: ["old", "ext"], principalId: "old", status: "insufficient_evidence", needsMinerador: { newKeywordIds: ["ext"], measureKeywordIds: [], logicKeywordIds: [] }, reasons: ["Precisa do Minerador: 1 keyword(s) nova(s) para importar e aprovar no Minerador (“ideia nova”)."] }] };
-  await screen.render(comProductShell(React.createElement(ArticleImprovementPanel, { brandId: "brand-a", brandRef: "adalbapro--brand-a", onApplied: () => { applied++; }, buttonClassName: "button", primaryButtonClassName: "button" })));
+  // 2026-10-14: a análise do azul é a atual quando a etiqueta está no azul (com outra etiqueta ela fica recolhida como "análise anterior").
+  await screen.render(comProductShell(React.createElement(ArticleImprovementPanel, { brandId: "brand-a", brandRef: "adalbapro--brand-a", onApplied: () => { applied++; }, buttonClassName: "button", primaryButtonClassName: "button", activeGroup: { requested: "azul", label: "Azul" } })));
   assert.match(screen.text(), /1 linha\(s\) precisa do minerador: keyword nova, medição ou Lógica são decididas lá/);
   const celula = screen.container.querySelector("[data-testid='architect-improvement-row-needs-minerador']")!;
   assert.match(celula.textContent ?? "", /Precisa do Minerador · Sugestões do Arquiteto/);
@@ -167,5 +168,23 @@ test("F4 · linha 'Precisa do Minerador': à vista, não marcável, com o link p
   assert.equal(link.getAttribute("href"), "/adalbapro--brand-a/minerador?arquiteto=sugestoes&cor=azul");
   const caixa = screen.container.querySelector<HTMLInputElement>("input[aria-label='Aplicar melhoria em Publicado a']")!;
   assert.equal(caixa.disabled, true, "a linha que precisa do Minerador não é aceitável aqui");
+  assert.equal(calls.length, 0, "nada foi pedido ao servidor");
+});
+
+/*
+ * 2026-10-14 · caso WifiConecta: com a etiqueta em "todos", o painel abria a
+ * análise antiga (Assuntos do laranja, de antes do recadastro) como estado
+ * atual. A execução lida ao abrir, anterior à última mudança da mesa, fica
+ * recolhida; "Retomar esta análise" a traz de volta.
+ */
+test("análise anterior à última mudança da mesa: recolhida, sem linhas à vista; 'Retomar esta análise' a traz", async () => {
+  restored = { ...fixture(), state: "collecting", createdAt: "2026-10-14T01:33:53.827Z" };
+  await screen.render(comProductShell(React.createElement(ArticleImprovementPanel, { brandId: "brand-a", onApplied: () => { applied++; }, buttonClassName: "button", primaryButtonClassName: "button", mesaChangedAt: "2026-10-14T03:09:13.520Z" })));
+  const recolhida = screen.container.querySelector("[data-testid='architect-improvement-previous']");
+  assert.ok(recolhida, "a análise anterior aparece recolhida");
+  assert.match(recolhida!.textContent ?? "", /Análise anterior de .* · marca inteira · recolhida/);
+  assert.equal(screen.container.querySelector("input[aria-label='Aplicar melhoria em Publicado a']"), null, "as linhas antigas não aparecem como estado atual");
+  await screen.click(button("Retomar esta análise"));
+  assert.ok(screen.container.querySelector("input[aria-label='Aplicar melhoria em Publicado a']"), "retomada, ela volta a ser a atual");
   assert.equal(calls.length, 0, "nada foi pedido ao servidor");
 });

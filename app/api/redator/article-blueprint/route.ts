@@ -4,6 +4,7 @@ import { authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { PersistenceUnavailableError } from "@/lib/server/editorial-db";
 import { WriterEvidenceError, readWriterArticleBlueprintPanel } from "@/lib/server/writer-evidence-reader";
+import { readWriterMaterial } from "@/lib/server/writer-material";
 
 /*
  * ===== 2026-10-09 · O ARTIGO-MODELO NO PAINEL DO REDATOR (regra do piloto) =====
@@ -23,6 +24,15 @@ export async function GET(request: NextRequest) {
     const brandId = z.string().uuid().parse(request.nextUrl.searchParams.get("brandId"));
     const documentId = z.string().min(1).max(300).parse(request.nextUrl.searchParams.get("documentId"));
     await assertEditorialPermission(profile, brandId, "redator", "view");
+    /*
+     * 2026-10-14 · F6 (SDD silo interligado, "Redator lê o material novo") ·
+     * `part=material`: o material do CSV "Para escrever" pelo mesmo núcleo
+     * (`readWriterMaterial`), lido depois da planta para o painel não esperar a
+     * montagem. Só leitura; o checklist é conferido na tela contra o texto de agora.
+     */
+    if (request.nextUrl.searchParams.get("part") === "material") {
+      return NextResponse.json(await readWriterMaterial({ brandId }, { documentId, actorUserId: profile.userId }));
+    }
     const leitura = await readWriterArticleBlueprintPanel({ brandId }, documentId);
     return NextResponse.json(leitura);
   } catch (error) {

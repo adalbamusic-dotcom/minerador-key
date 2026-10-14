@@ -76,6 +76,15 @@ class Consulta implements PromiseLike<{ data: unknown; error: unknown }> {
     return Promise.resolve().then(() => this.exec()).then(onfulfilled, onrejected);
   }
   private exec() {
+    /*
+     * F6 (2026-10-14): as views da M-L (`*_lista_leve`) só existem no banco de
+     * mentira quando o teste as registra; sem isso respondem como o PostgREST
+     * sem a migration aplicada (PGRST205), e o leitor cai para a leitura de antes.
+     */
+    if (this.table.endsWith("_lista_leve") && !(this.table in this.db.tables)) {
+      this.db.log.push({ table: this.table, select: this.columns, rows: 0, bytes: 0, filters: this.descricao });
+      return { data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${this.table}' in the schema cache` } };
+    }
     let linhas = (this.db.tables[this.table] || []).filter(row => this.filters.every(filter => filter(row)));
     if (this.ordens.length) {
       linhas = linhas.map((row, indice) => ({ row, indice })).sort((a, b) => {
