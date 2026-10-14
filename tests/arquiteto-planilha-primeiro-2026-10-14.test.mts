@@ -240,3 +240,11 @@ test("estrutural · o painel de texto fica para publicados; as outras portas apo
   assert.match(servidor, /planPrincipalSwapCandidates\(/, "a mesma regra das candidatas na tela e no servidor");
   assert.match(servidor, /if \(foraDosAlvos\.length && !options\.lenient\) throw refusal/);
 });
+
+/*
+ * 2026-10-14 · "uma lista só", o artigo intruso, Concluir formação por linha,
+ * painel recolhido e leitura grátis (caso real WifiConecta). Os testes moram em
+ * arquivo próprio e entram em `test:arquiteto` por aqui: o script já está no
+ * limite da linha de comando do Windows (8.191 caracteres).
+ */
+await import("./arquiteto-uma-lista-so-2026-10-14.test.mts");

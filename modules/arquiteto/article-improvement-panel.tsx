@@ -11,7 +11,7 @@ import { knownBeforeSearchAuthorizeLabel, KNOWN_VOLUME_MISSING_LABELS } from "@/
 import { IMPROVEMENT_NEEDS_MINERADOR_LABEL } from "@/lib/arquiteto/article-improvement-minerador";
 import { isEditorialGroupColor } from "@/lib/editorial/editorial-groups";
 import { ARCHITECT_SUGGESTIONS_LABEL, mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
-import { PLAN_SHEET_TITLE } from "@/lib/arquiteto/plan-article-sheet";
+import { PLAN_SHEET_ANCHOR, PLAN_SHEET_TITLE, improvementPanelCollapsedLabel } from "@/lib/arquiteto/plan-article-sheet";
 
 const statuses = { ready: "Pronto para aplicar", adequate: "Já adequado", insufficient_evidence: "Evidência insuficiente", no_alternative: "Sem alternativa compatível" };
 const outcomes = { improved: "Melhoria gravada", dna_created: "DNA criado", unchanged: "Sem mudança material", insufficient_evidence: "Evidência insuficiente", failed: "Falha recuperável" };
@@ -46,7 +46,13 @@ export function ImprovementProgress({ activity, now, done, total, unit }: { acti
     note="o andamento fica guardado no servidor" testId="architect-improvement-progress" />;
 }
 
-function ArticleImprovementSession({ brandId, brandRef = null, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], activeGroup = null, mesaChangedAt = null }: {
+function ArticleImprovementSession({ brandId, brandRef = null, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], activeGroup = null, mesaChangedAt = null, activeColorHasPlan = false }: {
+  /**
+   * 2026-10-14 (caso WifiConecta) · a cor ativa da etiqueta tem plano declarado:
+   * o trabalho dela está na planilha "Artigos do plano". O painel abre RECOLHIDO
+   * ("Melhorar publicados · recolhido") e o próximo passo aponta para a planilha.
+   */
+  activeColorHasPlan?: boolean;
   /**
    * 2026-10-14 · a última mudança da mesa (itens recebidos). A análise lida do
    * servidor ao abrir, feita ANTES dela, aparece recolhida como "análise
@@ -92,6 +98,8 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
    */
   const [restoredRunId, setRestoredRunId] = useState<string | null>(null);
   const [resumedPrevious, setResumedPrevious] = useState(false);
+  /* 2026-10-14 · com a cor do plano ativa, o painel fica recolhido até o dono abrir (por cor: trocar a cor recolhe de novo). */
+  const [abertoNaCor, setAbertoNaCor] = useState<string | null>(null);
   const previousRun = runState && runState.runId === restoredRunId && !resumedPrevious
     && improvementRunIsPrevious({ run: runState, activeGroupRequested: activeGroup?.requested ?? null, mesaChangedAt })
     ? runState : null;
@@ -271,6 +279,30 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
     if (current.action === "apply" && run?.acceptedIds?.length) return { done: run.outcomes.filter(o => run.acceptedIds!.includes(o.targetId)).length, total: run.acceptedIds.length, unit: "artigos gravados" };
     return { done: null, total: null, unit: "" };
   };
+  /*
+   * 2026-10-14 (caso WifiConecta) · COR COM PLANO = PAINEL RECOLHIDO. O trabalho
+   * da cor está na planilha "Artigos do plano"; o painel dos publicados não
+   * fica em cima pedindo "Buscar keywords". O próximo passo do topo aponta para
+   * a planilha; abrir o painel continua a um clique (vale até trocar de cor).
+   */
+  const corAtiva = activeGroup?.requested ?? "";
+  if (activeColorHasPlan && abertoNaCor !== corAtiva) {
+    const recolhido = improvementPanelCollapsedLabel(activeGroup?.label ?? null);
+    const emAndamento = run && (run.state === "applying" || run.state === "collecting");
+    return <section className="border-b border-divider bg-surface px-4 py-3 text-sm leading-6" aria-label={ARTICLE_IMPROVEMENT_LABEL} data-testid="architect-article-improvement" data-collapsed="true">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-module-accent/40 bg-module-accent/5 p-3" role="region" aria-label="Próximo passo" data-testid="architect-improvement-next-step" data-next-step="plan_sheet">
+        <div className="min-w-0">
+          <p className="font-semibold text-foreground">Próximo passo</p>
+          <p className="text-foreground">{recolhido.nextStep}</p>
+        </div>
+        <button type="button" className={primaryButtonClassName} onClick={() => document.getElementById(PLAN_SHEET_ANCHOR)?.scrollIntoView({ block: "start", behavior: "smooth" })}>{recolhido.button}</button>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-text-muted" data-testid="architect-improvement-collapsed">{recolhido.title}.{emAndamento ? " Há uma execução dos publicados em andamento aqui: abra para acompanhar." : ""}</p>
+        <button type="button" className={buttonClassName} onClick={() => setAbertoNaCor(corAtiva)} data-testid="architect-improvement-expand">Abrir “Melhorar publicados”</button>
+      </div>
+    </section>;
+  }
   return <section className="border-b border-divider bg-surface px-4 py-4 text-sm leading-6" aria-label={ARTICLE_IMPROVEMENT_LABEL} data-testid="architect-article-improvement">
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-module-accent/40 bg-module-accent/5 p-3" role="region" aria-label="Próximo passo" data-testid="architect-improvement-next-step" data-next-step={next.kind}>
       <div className="min-w-0">

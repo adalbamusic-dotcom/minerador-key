@@ -130,7 +130,17 @@ export type ReworkDeclaredCheck = {
  *   `block` recusa 409 sem motivo; `ignore` não olha (repetir é legítimo).
  * - `sameRefusal`: `block` recusa 409 sem motivo; `inform` só avisa.
  */
-export type ReworkPolicy = { sameInputs: "reuse" | "block" | "ignore"; sameRefusal: "block" | "inform" };
+export type ReworkPolicy = {
+  sameInputs: "reuse" | "block" | "ignore";
+  sameRefusal: "block" | "inform";
+  /**
+   * 2026-10-14 (caso WifiConecta: "Já feito com os mesmos insumos · Motivo para
+   * refazer (obrigatório)" numa leitura grátis) · a repetição GRÁTIS nunca pede
+   * motivo: ela roda de novo e reaproveita o que foi pago. O motivo (D11) só
+   * vale para repetir o que CUSTA. Ausente = como antes.
+   */
+  freeRepeat?: boolean;
+};
 export const DEFAULT_REWORK_POLICY: ReworkPolicy = { sameInputs: "reuse", sameRefusal: "block" };
 
 export type ReworkAssessment = {
@@ -148,6 +158,8 @@ export type ReworkAssessment = {
   code: ReworkRefusalCode | null;
   /** A frase do aviso, a mesma na tela, na rota e no MCP. */
   message: string;
+  /** 2026-10-14 · aditivo: repetir de graça não pede motivo; o override (com motivo) é só para repetir o que custa. */
+  paidOnlyOverride?: true;
 };
 
 export type ReworkOverride = { reason?: string | null } | null | undefined;
@@ -253,7 +265,7 @@ export function formatReworkWhen(iso: string): string {
 }
 
 /** A frase do aviso: a mesma para a tela, a rota (409) e o MCP. */
-export function reworkNoticeMessage(input: { verdict: ReworkVerdict; previous: ReworkPrevious | null; reasons?: readonly string[]; canOverride?: boolean }): string {
+export function reworkNoticeMessage(input: { verdict: ReworkVerdict; previous: ReworkPrevious | null; reasons?: readonly string[]; canOverride?: boolean; freeRepeat?: boolean }): string {
   const quando = input.previous ? formatReworkWhen(input.previous.at) : null;
   const motivos = (input.reasons || []).filter(Boolean);
   switch (input.verdict) {
@@ -267,6 +279,7 @@ export function reworkNoticeMessage(input: { verdict: ReworkVerdict; previous: R
     }
     case "same_inputs_reuse": {
       const resumo = input.previous?.summary ? ` — ${input.previous.summary}` : "";
+      if (input.freeRepeat) return `Já feito com os mesmos insumos em ${quando}${resumo}. A leitura grátis roda de novo sem pedir motivo, e o que já foi pago (IA, medições, busca) é reaproveitado sem custo.${input.canOverride === false ? "" : " Motivo só para pagar de novo o que custa, em “Refazer o que custa”."}`;
       return `Já feito com os mesmos insumos em ${quando}${resumo}.${input.canOverride === false ? "" : " Para refazer com os mesmos insumos, diga o motivo em “Refazer mesmo assim”."}`;
     }
     default:
@@ -290,16 +303,19 @@ export function assessRework(input: {
   const contradicoes = [...(input.declared?.contradictions || [])].filter(Boolean);
   const paralelos = [...(input.declared?.parallelPaths || [])].filter(Boolean);
   const previous = input.previous && input.previous.fingerprint === input.fingerprint && input.previous.kind === input.kind ? input.previous : null;
+  // 2026-10-14 · repetição grátis: nunca bloqueia e nunca pede motivo (o motivo é só para o que custa).
+  const gratis = policy.freeRepeat === true;
   const monta = (verdict: ReworkVerdict, reasons: string[], blocks: boolean, canOverride: boolean): ReworkAssessment => ({
     kind: input.kind,
     fingerprint: input.fingerprint,
     verdict,
     previous: verdict === "fresh" ? null : previous,
     reasons,
-    blocks,
+    blocks: gratis && verdict === "same_inputs_reuse" ? false : blocks,
     canOverride,
-    code: blocks ? REWORK_REFUSAL_CODES[verdict as Exclude<ReworkVerdict, "fresh">] : null,
-    message: reworkNoticeMessage({ verdict, previous, reasons, canOverride }),
+    code: (gratis && verdict === "same_inputs_reuse" ? false : blocks) ? REWORK_REFUSAL_CODES[verdict as Exclude<ReworkVerdict, "fresh">] : null,
+    message: reworkNoticeMessage({ verdict, previous, reasons, canOverride, freeRepeat: gratis && verdict === "same_inputs_reuse" }),
+    ...(gratis && verdict === "same_inputs_reuse" ? { paidOnlyOverride: true as const } : {}),
   });
   if (contradicoes.length) return monta("contradicts_declared", contradicoes, true, false);
   if (paralelos.length) return monta("parallel_path", paralelos, true, false);
@@ -344,9 +360,10 @@ export function reworkView(assessment: ReworkAssessment | null | undefined) {
     canOverride: assessment.canOverride,
     code: assessment.code,
     message: assessment.message,
+    ...(assessment.paidOnlyOverride ? { paidOnlyOverride: true as const } : {}),
   };
 }
-export type ReworkView = NonNullable<ReturnType<typeof reworkView>>;
+export type ReworkView = NonNullable<ReturnType<typeof reworkView>> & { paidOnlyOverride?: true };
 
 /** Lê o `rework` de uma resposta (tela): formato estranho = `null`. */
 export function readReworkView(raw: unknown): ReworkView | null {
@@ -361,6 +378,7 @@ export function readReworkView(raw: unknown): ReworkView | null {
     canOverride: record.canOverride === true,
     code: typeof record.code === "string" && (REWORK_REFUSAL_CODE_LIST as readonly string[]).includes(record.code) ? record.code as ReworkRefusalCode : null,
     message: typeof record.message === "string" ? record.message : "",
+    ...(record.paidOnlyOverride === true ? { paidOnlyOverride: true as const } : {}),
   };
 }
 

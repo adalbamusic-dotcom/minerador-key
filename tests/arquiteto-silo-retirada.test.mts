@@ -201,6 +201,38 @@ test("Silo com 4 artigos: o terceiro suporte sai e os outros ficam na ordem", as
   assert.deepEqual(plano.remainingArticleIds, [base.ids[0], base.ids[1], base.ids[3]]);
 });
 
+/*
+ * 2026-10-14 · CASO REAL WifiConecta: o ArticleDNA `melhor-para-jogos-online`
+ * aponta para o Silo "planos de internet" (`siloId`/`territoryRef` no DNA), mas o
+ * SiloDNA consolidado (anterior) não o lista. Antes: "Este artigo não está no
+ * Silo." e as 3 keywords do plano azul ficavam presas sem caminho.
+ */
+test("artigo que só aponta para o Silo: a retirada vale só com o evento rejected; o par não muda", async () => {
+  const base = await siloConsolidado();
+  const solto = await article("a9", "melhor internet para jogos online", 40);
+  const apontando = await createVersionEnvelope({ entityId: solto.entityId, versionNumber: 1, origin: "human", changeReason: "fixture", createdBy: ATOR, payload: { ...solto.payload, siloId: base.dna.payload.siloId } });
+  const plano = planSiloArticleWithdrawal(entrada(base, { articleId: apontando.payload.articleId, articleDnaVersions: [...base.artigos, apontando] }));
+  assert.equal(plano.ok, true, plano.ok ? "" : plano.message);
+  if (!plano.ok) return;
+  assert.equal(plano.pairUnchanged, true);
+  assert.deepEqual(plano.nextSiloDna, base.dna.payload, "SiloDNA igual: não há o que tirar");
+  assert.deepEqual(plano.nextSiloPage, base.page.payload);
+  assert.equal(plano.article.versionId, apontando.versionId);
+  assert.match(plano.changes.join(" "), /rejeitado/);
+  assert.match(plano.changes.join(" "), /não mudam: este artigo aponta para o Silo, mas não entrou na composição consolidada/);
+  assert.match(plano.changes.join(" "), /ficam livres/);
+  const versoes = await buildSiloArticleWithdrawalVersions(plano, ATOR, "2026-10-14T18:00:00.000Z");
+  assert.equal(versoes.rejection.status, "rejected");
+  assert.equal(versoes.rejection.versionId, apontando.versionId);
+  // Ainda sem motivo, a aplicação recusa (decisão humana com motivo).
+  const semMotivo = planSiloArticleWithdrawal(entrada(base, { articleId: apontando.payload.articleId, articleDnaVersions: [...base.artigos, apontando], reason: "" }));
+  assert.equal(semMotivo.ok ? null : semMotivo.code, "REASON_REQUIRED");
+  // O que não aponta para este Silo continua recusado como antes.
+  const outroSilo = await createVersionEnvelope({ entityId: solto.entityId, versionNumber: 2, previousVersionId: apontando.versionId, origin: "human", changeReason: "fixture", createdBy: ATOR, payload: { ...solto.payload, siloId: "territory:outro" } });
+  const fora = planSiloArticleWithdrawal(entrada(base, { articleId: apontando.payload.articleId, articleDnaVersions: [...base.artigos, apontando, outroSilo] }));
+  assert.equal(fora.ok ? null : fora.code, "ARTICLE_NOT_IN_SILO");
+});
+
 /* -------------------------------------------------------------- estruturais */
 
 function semComentarios(fonte: string) {

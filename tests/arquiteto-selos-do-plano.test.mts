@@ -71,7 +71,8 @@ test("tela: os selos entram na linha do artigo, na SiloPage e no cartão do Silo
 test("a linha do artigo mostra o Assunto/tema na cabeceira (ou \"Sem Assunto\"), pela mesma fonte do selo", () => {
   const tela = readFileSync(join(process.cwd(), "modules", "arquiteto", "arquiteto-workspace.tsx"), "utf8");
   assert.match(tela, /const assuntoDaLinhaRef = articleSubjectFor\(art\);/);
-  assert.match(tela, /assuntoDaLinhaRef\.subject\?\.phrase \|\| keywordLabelById\.get\(assuntoDaLinhaRef\.keywordId\)/, "frase gravada no ArticleDNA ou o texto da keyword do Assunto em formação; nunca id cru");
+  // 2026-10-14 · entre as duas, a frase do Assunto do plano lida do pacote aprovado (candidato do plano sem ArticleDNA).
+  assert.match(tela, /assuntoDaLinhaRef\.subject\?\.phrase \|\| assuntoDaLinhaRef\.phrase \|\| keywordLabelById\.get\(assuntoDaLinhaRef\.keywordId\)/, "frase gravada no ArticleDNA, a do Assunto do plano ou o texto da keyword do Assunto em formação; nunca id cru");
   const celula = tela.slice(tela.indexOf("data-article-row-subject"), tela.indexOf("data-article-row-subject") + 400);
   /* 2026-10-13 · a cabeceira passou a usar o componente compartilhado (mesmo texto em todas as áreas). */
   assert.match(celula, /<ArticleSubjectLine phrase=\{assuntoDaLinha\}\/>/);

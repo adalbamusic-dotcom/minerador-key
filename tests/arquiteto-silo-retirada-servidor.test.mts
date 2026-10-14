@@ -128,6 +128,34 @@ test("releitura divergente: não declara sucesso (503)", async () => {
   );
 });
 
+/*
+ * 2026-10-14 · CASO REAL WifiConecta: o artigo que só aponta para o Silo (no
+ * próprio DNA) e não está no SiloDNA sai pelo evento `rejected`; o par não é
+ * regravado; prévia antes, motivo obrigatório, sucesso só com o evento relido.
+ */
+test("artigo que só aponta para o Silo: prévia sem escrita, aplicação grava SÓ o evento rejected e relê", async () => {
+  const base = await acervo();
+  const solto = await article("a9", "melhor internet para jogos online", 40);
+  const intruso = await createVersionEnvelope({ entityId: solto.entityId, versionNumber: 1, origin: "human", changeReason: "fixture", createdBy: ATOR, payload: { ...solto.payload, siloId: base.dna.payload.siloId } });
+  base.artigos.push(intruso);
+  const previa = dependencias(base);
+  const lida = await handleSiloArticleWithdrawal(previa.deps, { siloId: base.dna.payload.siloId, articleId: intruso.payload.articleId, reason: "", mode: "preview" });
+  assert.equal(lida.state, "READY");
+  if (lida.state === "READY") assert.match(lida.changes.join(" "), /não mudam/);
+  assert.deepEqual(previa.ordem, [], "a prévia não grava");
+  const { deps, ordem, eventos, siloDnas } = dependencias(base);
+  const resultado = await handleSiloArticleWithdrawal(deps, { siloId: base.dna.payload.siloId, articleId: intruso.payload.articleId, reason: "Assunto de outra cor; libera as keywords do plano azul", mode: "apply", expectedSiloDnaVersionId: base.dna.versionId });
+  assert.equal(resultado.state, "APPLIED");
+  assert.deepEqual(ordem, ["evento"], "o par não é regravado");
+  assert.equal(siloDnas.length, 1);
+  assert.equal(eventos[0].status, "rejected");
+  assert.equal(eventos[0].versionId, intruso.versionId);
+  if (resultado.state === "APPLIED") {
+    assert.equal(resultado.pairUnchanged, true);
+    assert.equal(resultado.siloDna.versionId, base.dna.versionId);
+  }
+});
+
 /* ------------------------------------------------------- vínculo do grupo */
 
 type Reply = { data: unknown; error: { code?: string; message?: string } | null; count?: number };

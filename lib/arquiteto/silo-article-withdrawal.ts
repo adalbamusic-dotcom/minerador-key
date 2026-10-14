@@ -90,6 +90,8 @@ export type SiloArticleWithdrawalPlan = {
   article: { articleId: string; versionId: string; label: string; keywordIds: string[] };
   reason: string;
   remainingArticleIds: string[];
+  /** 2026-10-14 · aditivo: o artigo só apontava para o Silo; sai só com o evento `rejected`, o par não muda. Ausente = o par muda (como antes). */
+  pairUnchanged?: true;
   /** O que muda, em frases para a prévia. */
   changes: string[];
   warnings: string[];
@@ -129,13 +131,47 @@ export function planSiloArticleWithdrawal(input: SiloArticleWithdrawalInput): Si
   const silo = dna.payload;
   const sai = input.articleId;
   const noSilo = silo.pillarArticleId === sai || silo.supportArticleIds.includes(sai) || silo.articleReferences.some(reference => reference.articleId === sai);
-  if (!noSilo) return refuse("ARTICLE_NOT_IN_SILO");
+  /*
+   * 2026-10-14 (caso WifiConecta, ArticleDNA `melhor-para-jogos-online`) · O
+   * ARTIGO QUE SÓ APONTA PARA O SILO. A melhoria formou o artigo com o Silo no
+   * próprio DNA (`siloId`/`territoryRef`), mas o SiloDNA consolidado é anterior
+   * e não o lista. Antes: "Este artigo não está no Silo." — e as keywords dele
+   * ficavam presas sem caminho. Agora a retirada vale para ele também, só com
+   * o evento `rejected` (o par SiloDNA + SiloPage não muda: não há o que tirar).
+   */
+  const artigoVigente = noSilo ? null : latestBy(input.articleDnaVersions, version => version.payload.articleId === sai && version.payload.brandId === input.brandId);
+  const soApontaParaOSilo = Boolean(artigoVigente && (artigoVigente.payload.siloId === input.siloId || artigoVigente.payload.territoryRef === input.siloId));
+  if (!noSilo && !soApontaParaOSilo) return refuse("ARTICLE_NOT_IN_SILO");
   if (silo.pillarArticleId === sai) return refuse("ARTICLE_IS_PILLAR");
 
-  const artigo = latestBy(input.articleDnaVersions, version => version.payload.articleId === sai && version.payload.brandId === input.brandId);
+  const artigo = artigoVigente ?? latestBy(input.articleDnaVersions, version => version.payload.articleId === sai && version.payload.brandId === input.brandId);
   if (!artigo) return refuse("ARTICLE_NOT_FOUND");
   if (artigo.payload.publishedIdentityRef) return refuse("ARTICLE_PUBLISHED");
   if (input.downstreamStages?.length) return refuse("ARTICLE_IN_DOWNSTREAM");
+
+  if (soApontaParaOSilo) {
+    const label = articleWithdrawalLabel(artigo.payload);
+    const restantes = [silo.pillarArticleId, ...silo.supportArticleIds].filter((id): id is string => Boolean(id));
+    return {
+      ok: true,
+      siloId: input.siloId,
+      siloName: silo.name || silo.centralEntity,
+      current: { siloDna: dna, siloPage: page },
+      nextSiloDna: silo,
+      nextSiloPage: page.payload,
+      statuses: { siloDna: "approved", siloPage: statusDe.get(page.versionId) || "proposed" },
+      article: { articleId: sai, versionId: artigo.versionId, label, keywordIds: artigo.payload.keywordReferences.map(reference => reference.keywordId) },
+      reason: motivo,
+      remainingArticleIds: restantes,
+      pairUnchanged: true,
+      changes: [
+        `ArticleDNA de “${label}”: a versão vigente (v${artigo.versionNumber}) recebe o status “rejeitado” com o motivo. Nada é apagado.`,
+        `SiloDNA v${dna.versionNumber} e SiloPage v${page.versionNumber} não mudam: este artigo aponta para o Silo, mas não entrou na composição consolidada.`,
+        `As ${artigo.payload.keywordReferences.length} keyword(s) dele ficam livres (voltam para “Keywords não agrupadas” do grupo delas) e podem formar o artigo do plano a que pertencem.`,
+      ],
+      warnings: [],
+    };
+  }
 
   const fica = (id: string) => id !== sai;
   const suportes = silo.supportArticleIds.filter(fica);

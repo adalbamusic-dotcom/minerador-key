@@ -1,3 +1,18 @@
+## Caso WifiConecta (azul) · uma lista só, artigo intruso, Concluir formação por linha, painel recolhido — Arquiteto — 2026-10-14
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Artigo do plano com UMA linha (a da planilha); candidato do plano sai da tabela antiga com a frase no Silo; SiloPage fica na mesa.
+- [x] Selos e cabeceira leem o Assunto da keyword do plano (sem "Sem Assunto"/"Fora do plano" para keyword do plano).
+- [x] Linha presa no artigo de outro Assunto: "Presa em outro artigo" + caminho "Retirar artigo do Silo" (prévia; motivo e confirmação do dono); Concluir formação recusa só ela (tela e servidor).
+- [x] "Retirar artigo do Silo" vale para o artigo que só aponta para o Silo (só o evento `rejected`, par intacto).
+- [x] Planilha nunca gira sem fim: teto por pedido, erro humano, gravação parada oferece "Continuar a gravação"; "Próximo passo" da planilha.
+- [x] Painel "Melhorar publicados" recolhido com cor que tem plano; leitura grátis repetida não pede motivo (`freeRepeat`).
+- [ ] Dono: no azul, conferir a planilha (7 linhas, 12–14 "Presa em outro artigo") e a tabela antiga sem os 4 candidatos soltos; decidir "Retirar artigo do Silo" em `melhor-para-jogos-online` (prévia → motivo → Confirmar); depois, Validar SERP e Concluir formação das 7.
+- [ ] O Assunto Mega/Giga do laranja fica sem artigo depois da retirada: formar pelo plano do laranja quando ele existir.
+- [ ] "Abrir DNA"/"Ver no Silo" na linha da planilha; ferramentas MCP próprias da planilha (hoje `improve_articles` com grupo).
+- [ ] Retirada de artigo cujo Silo não tem SiloDNA (hoje recusa `SILO_NOT_FOUND`): avaliar se a mesma retirada só com o evento vale (precisa de decisão; não feito).
+
 ## Caso WifiConecta (azul) · pacote novo, Silo do plano e melhoria — Arquiteto — 2026-10-14
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**

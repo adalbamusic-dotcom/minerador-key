@@ -2,6 +2,7 @@
 
 import { ArticleImprovementPanel } from "./article-improvement-panel";
 import { PlanArticleSheet } from "./plan-article-sheet";
+import { PLAN_SHEET_ANCHOR, planCandidateShownInSheet, planCandidatesInSheetSentence, planSubjectOfKeyword } from "@/lib/arquiteto/plan-article-sheet";
 
 import { GLOBAL_WORKFLOW_STATUSES, GLOBAL_WORKFLOW_LABELS, globalWorkflowStatus, type GlobalWorkflowStatus } from "@/lib/editorial/global-workflow-status";
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
@@ -6621,16 +6622,24 @@ export default function ArquitetoPage() {
    * O Assunto preso a uma linha da mesa (F2.3). A Definição gravada responde
    * por ela; sem Definição, responde a formação desta sessão.
    */
-  const articleSubjectFor = useCallback((article: (typeof articlesList)[number]): { keywordId: string; subject: DeclaredSubject | null; persisted: boolean } | null => {
+  const articleSubjectFor = useCallback((article: (typeof articlesList)[number]): { keywordId: string; subject: DeclaredSubject | null; persisted: boolean; phrase?: string | null } | null => {
     const { version } = articleDnaEntryFor({ articleId: articleEntityIdFor(article), candidateRef: article.candidateRef });
     if (version) {
       const subject = version.payload.subject ?? null;
       return subject ? { keywordId: subject.keywordId, subject, persisted: true } : null;
     }
     const working = article.candidateRef ? liveSubjectAnchors.get(article.candidateRef) : undefined;
-    return working ? { keywordId: working, subject: null, persisted: false } : null;
+    if (working) return { keywordId: working, subject: null, persisted: false };
+    /*
+     * 2026-10-14 (caso WifiConecta) · candidato da cópia de trabalho cuja
+     * principal é keyword do PLANO (a do Assunto ou a principal declarada): o
+     * Assunto dele é o do plano, lido do pacote aprovado. Sem isto a linha dizia
+     * "Sem Assunto" e "Fora do plano" sobre um artigo do plano.
+     */
+    const doPlano = planSubjectOfKeyword({ keywordId: article.mainKeywordObj?.id != null ? String(article.mainKeywordObj.id) : null, brandId: selectedBrandId || null, standings: subjectStandings });
+    return doPlano ? { keywordId: doPlano.keywordId, subject: null, persisted: false, phrase: doPlano.phrase } : null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [articleDnaEntryFor, liveSubjectAnchors]);
+  }, [articleDnaEntryFor, liveSubjectAnchors, subjectStandings, selectedBrandId]);
 
   /**
    * F2 · O GRUPO DA LINHA DO ARTIGO. Com Definição gravada: o grupo efetivo do
@@ -7223,9 +7232,30 @@ export default function ArquitetoPage() {
    * a formação, não decisão sobre o artefato, e já é dita pelo gate de SERP.
    */
 
+  /*
+   * 2026-10-14 (caso WifiConecta) · UMA LISTA SÓ. Em Artigos, o candidato da
+   * cópia de trabalho (sem ArticleDNA, não publicado) cuja principal é keyword
+   * do plano já é a linha da planilha "Artigos do plano": a mesa não o repete
+   * como linha solta "CANDIDATO · Sem Assunto · Fora do plano". Nada é apagado
+   * — o candidato continua na cópia de trabalho; formado, a linha volta à mesa.
+   */
+  const planSheetCandidateIds = useMemo(() => {
+    if (workspaceMode !== "articles" || !selectedBrandId) return new Set<string>();
+    return new Set(articlesList.filter(art => planCandidateShownInSheet({
+      hasArticleDna: Boolean(articleDnaEntryFor({ articleId: articleEntityIdFor(art), candidateRef: art.candidateRef }).version),
+      published: Boolean(art.isPublished),
+      principalKeywordId: art.mainKeywordObj?.id != null ? String(art.mainKeywordObj.id) : null,
+      brandId: selectedBrandId,
+      standings: subjectStandings,
+    })).map(art => art.id));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceMode, selectedBrandId, articlesList, articleDnaEntryFor, subjectStandings]);
+
   // ── Filtros aplicados sobre a lista de artigos
   const filteredArticles = useMemo(() => {
     const porCampos = articlesList.filter(art => {
+      // 2026-10-14 · o artigo do plano tem UMA linha só: a da planilha "Artigos do plano".
+      if (planSheetCandidateIds.has(art.id)) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesMain = art.keywordPrincipal.toLowerCase().includes(q) || art.slug.toLowerCase().includes(q);
@@ -7248,7 +7278,12 @@ export default function ArquitetoPage() {
     const porAssunto = filterBySubject(porCampos, workspaceMode === "articles" ? activeSubjectFilter : null, art => articleSubjectFor(art)?.keywordId ?? null);
     // F2 · o grupo ativo no topo recorta o que aparece; a lista de artigos continua inteira.
     return filterRowsByEditorialGroup(porAssunto, arquitetoGroups.filter, art => articleGroupInfoFor(art).groupId) as typeof porAssunto;
-  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode, activeSubjectFilter, articleSubjectFor, arquitetoGroups.filter, articleGroupInfoFor]);
+  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode, activeSubjectFilter, articleSubjectFor, arquitetoGroups.filter, articleGroupInfoFor, planSheetCandidateIds]);
+  /** Os candidatos do plano que a planilha mostra, no recorte da cor ativa (a mesa diz quantos, no Silo deles). */
+  const planSheetCandidatesInScope = useMemo(
+    () => planSheetCandidateIds.size ? filterRowsByEditorialGroup(articlesList.filter(art => planSheetCandidateIds.has(art.id)), arquitetoGroups.filter, art => articleGroupInfoFor(art).groupId) as typeof articlesList : [],
+    [planSheetCandidateIds, articlesList, arquitetoGroups.filter, articleGroupInfoFor],
+  );
 
   const ungroupedKeywords = useMemo(
     () => masterList.filter(keyword => keyword.clusterId === null || keyword.clusterId === undefined || keyword.clusterId === "" || keyword.clusterId === 0),
@@ -7684,6 +7719,8 @@ export default function ArquitetoPage() {
         siloSlug: string | null;
         articles: typeof filteredArticles;
         published: typeof articleSiloViews[number]["nodes"];
+        /** 2026-10-14 · artigos do plano deste Silo que estão na planilha "Artigos do plano" (a mesa não os repete). */
+        planHidden: number;
       }>();
 
       // A ordem é a das SiloPages; o patrimônio publicado abre cada grupo.
@@ -7696,7 +7733,13 @@ export default function ArquitetoPage() {
           siloSlug: view.siloSlug,
           articles: [],
           published: view.nodes.filter(node => node.kind === "published"),
+          planHidden: 0,
         });
+      }
+      for (const art of planSheetCandidatesInScope) {
+        const ref = typeof art.mainKeywordObj?.territoryRef === "string" ? art.mainKeywordObj.territoryRef : null;
+        const grupo = ref ? grupos.get(ref) : null;
+        if (grupo) grupo.planHidden += 1;
       }
 
       for (const art of filteredArticles) {
@@ -7712,12 +7755,13 @@ export default function ArquitetoPage() {
           siloSlug: null,
           articles: [] as typeof filteredArticles,
           published: [] as typeof articleSiloViews[number]["nodes"],
+          planHidden: 0,
         };
         semSilo.articles.push(art);
         grupos.set("sem-silo", semSilo);
       }
 
-      return [...grupos.values()].filter(grupo => grupo.articles.length > 0 || grupo.published.length > 0);
+      return [...grupos.values()].filter(grupo => grupo.articles.length > 0 || grupo.published.length > 0 || grupo.planHidden > 0);
     }
     const groups = new Map<string, {
       key: string;
@@ -7728,6 +7772,7 @@ export default function ArquitetoPage() {
       siloSlug: string | null;
       articles: typeof filteredArticles;
       published: typeof articleSiloViews[number]["nodes"];
+      planHidden: number;
     }>();
 
     filteredArticles.forEach(art => {
@@ -7754,6 +7799,7 @@ export default function ArquitetoPage() {
           siloSlug,
           articles: [],
           published: [],
+          planHidden: 0,
         });
       }
 
@@ -7765,7 +7811,7 @@ export default function ArquitetoPage() {
     // sem elas o agrupamento congelava no primeiro render, quando os Silos
     // confirmados ainda não tinham chegado — e todo artigo caía em
     // "ARTIGOS SEM SILO" para sempre.
-  }, [filteredArticles, articleSiloViews, workspaceMode, remoteTerritories, materializationPartition, acceptedArticleDnas]);
+  }, [filteredArticles, articleSiloViews, workspaceMode, remoteTerritories, materializationPartition, acceptedArticleDnas, planSheetCandidatesInScope]);
 
   const visibleArticleIds = useMemo(
     () => groupedArticles.flatMap(group => group.articles.map(article => article.id)),
@@ -11356,13 +11402,26 @@ export default function ArquitetoPage() {
    * formados (versão vigente), os que já estão no Radar e o grupo de cada
    * keyword. Só leitura; a planilha grava pelos núcleos de sempre.
    */
-  const planSheetArticles = useMemo(() => Object.values(acceptedArticleDnas).map(version => ({
-    articleId: String(version.payload.articleId),
-    versionNumber: Number(version.versionNumber) || 0,
-    subjectKeywordId: version.payload.subject?.keywordId ? String(version.payload.subject.keywordId) : null,
-    principalKeywordId: version.payload.principalKeywordId ? String(version.payload.principalKeywordId) : null,
-    keywordIds: (version.payload.keywordReferences ?? []).map(reference => String(reference.keywordId)),
-  })), [acceptedArticleDnas]);
+  const planSheetArticles = useMemo(() => Object.values(acceptedArticleDnas).map(version => {
+    const articleId = String(version.payload.articleId);
+    // 2026-10-14 · o conflito da linha diz de qual artigo, Silo, Assunto e cor se trata (só leitura).
+    const siloRef = version.payload.siloId ?? version.payload.territoryRef ?? null;
+    const grupo = arquitetoGroups.articleGroupById.get(articleId)?.groupId;
+    const cor = grupo ? arquitetoGroups.groupById.get(grupo)?.color : undefined;
+    return {
+      articleId,
+      versionNumber: Number(version.versionNumber) || 0,
+      subjectKeywordId: version.payload.subject?.keywordId ? String(version.payload.subject.keywordId) : null,
+      principalKeywordId: version.payload.principalKeywordId ? String(version.payload.principalKeywordId) : null,
+      keywordIds: (version.payload.keywordReferences ?? []).map(reference => String(reference.keywordId)),
+      slug: version.payload.suggestedSlug ?? null,
+      siloRef,
+      siloLabel: siloRef ? acceptedSiloDnas[siloRef]?.payload.name || articleSiloViews.find(view => view.siloRef === siloRef || view.siloRef === version.payload.territoryRef)?.siloLabel || null : null,
+      subjectPhrase: version.payload.subject?.phrase ?? null,
+      subjectColorLabel: cor ? EDITORIAL_GROUP_COLOR_LABELS[cor] : null,
+      label: version.payload.principalKeywordId ? keywordLabelById.get(String(version.payload.principalKeywordId)) ?? null : null,
+    };
+  }), [acceptedArticleDnas, acceptedSiloDnas, articleSiloViews, arquitetoGroups.articleGroupById, arquitetoGroups.groupById, keywordLabelById]);
   const planSheetRadarIds = useMemo(() => new Set(radarItems.map(item => String(item.articleId))), [radarItems]);
   const planSheetGroupOf = useCallback((groupId: string) => {
     const grupo = arquitetoGroups.groupById.get(groupId);
@@ -19606,7 +19665,18 @@ export default function ArquitetoPage() {
         {/* Publicados marcados na planilha: "Buscar keywords" analisa só eles (sem marcação, todos). */}
         {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
           selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))}
-          activeGroup={(() => { const filtro = arquitetoGroups.filter; if (filtro.kind !== "group") return null; const cor = arquitetoGroups.groupById.get(filtro.groupId)?.color; return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null; })()}
+          activeGroup={(() => {
+            // 2026-10-14 · a etiqueta escolhe por COR (`kind: "groups"`); o formato antigo por id continua aceito.
+            const filtro = arquitetoGroups.filter;
+            const cor = filtro.kind === "groups" ? filtro.color : filtro.kind === "group" ? arquitetoGroups.groupById.get(filtro.groupId)?.color ?? null : null;
+            return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null;
+          })()}
+          activeColorHasPlan={(() => {
+            // 2026-10-14 · cor com plano: o painel abre recolhido e o próximo passo aponta para a planilha "Artigos do plano".
+            const filtro = arquitetoGroups.filter;
+            const ids = filtro.kind === "groups" ? filtro.groupIds : filtro.kind === "group" ? [filtro.groupId] : [];
+            return ids.some(groupId => grupoTemPlano(groupId)) || [...subjectStandings.values()].some(standing => Boolean(standing.plan && standing.received && ids.includes(standing.plan.groupId)));
+          })()}
           mesaChangedAt={mesaChangedAt} />}
         {/* Artigos novos: os dois atos da formação continuam à mão sem abrir
             os detalhes. Mesmos handlers e mesmas travas do painel de formação. */}
@@ -19643,7 +19713,7 @@ export default function ArquitetoPage() {
         {articleMode && <PlanArticleSheet brandId={selectedBrandId || null} brandRef={serpSubjectBrandRef} keywords={masterList} standings={subjectStandings}
           groupOf={planSheetGroupOf} keywordGroupOf={planSheetKeywordGroupOf} filter={arquitetoGroups.filter} articles={planSheetArticles} radarArticleIds={planSheetRadarIds}
           onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }}
-          buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} controlClassName={ARCHITECT_UI.control} />}
+          buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} controlClassName={ARCHITECT_UI.control} dangerButtonClassName={ARCHITECT_UI.dangerButton} />}
         {canonicalBootstrapError ? (
           <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 px-6 text-center text-danger">
             <span className="text-base">Não foi possível carregar os dados do Arquiteto.</span>
@@ -19655,7 +19725,7 @@ export default function ArquitetoPage() {
           <div className="flex min-h-[50vh] items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-module-accent" />
           </div>
-        ) : workspaceMode !== "silos" && filteredArticles.length === 0 && !visiblePipelineRows.length ? (
+        ) : workspaceMode !== "silos" && filteredArticles.length === 0 && !visiblePipelineRows.length && !groupedArticles.some(group => group.planHidden > 0) ? (
           // O vazio de Article não pode apagar a mesa territorial: no modo Silos
           // quem responde pelo estado vazio é a própria superfície territorial.
           // Nem pode apagar as keywords que aguardam decisão de Silo: enquanto
@@ -20043,6 +20113,15 @@ export default function ArquitetoPage() {
                           />
                         );
                       })()}
+                      {/* 2026-10-14 · uma lista só: os artigos do plano deste Silo são linhas da planilha "Artigos do plano"; aqui fica só a frase com o atalho. */}
+                      {articleMode && group.planHidden > 0 && (
+                        <tr className="border-b border-divider bg-surface-subtle" data-testid="architect-plan-candidates-in-sheet" data-count={group.planHidden}>
+                          <td colSpan={architectColumnIds.length} className="px-4 py-2 text-sm text-text-muted">
+                            {planCandidatesInSheetSentence(group.planHidden)}{" "}
+                            <button type="button" className="font-medium text-module-accent underline underline-offset-2" onClick={() => document.getElementById(PLAN_SHEET_ANCHOR)?.scrollIntoView({ block: "start", behavior: "smooth" })}>Ir para a planilha</button>
+                          </td>
+                        </tr>
+                      )}
                       {/* A folha do sitemap não entra como Article: o Site
                           conhece a URL, não o DNA editorial dela. A evidência
                           continua no catálogo e serve para reconciliar. */}
@@ -20186,7 +20265,7 @@ export default function ArquitetoPage() {
                     const grupoDaLinhaResumo = grupoDaLinha.groupId ? arquitetoGroups.groupById.get(grupoDaLinha.groupId) ?? null : null;
                     // 2026-10-13 · pedido do dono: o Assunto/tema na cabeceira da linha, para identificar o artigo.
                     const assuntoDaLinhaRef = articleSubjectFor(art);
-                    const assuntoDaLinha = assuntoDaLinhaRef ? (assuntoDaLinhaRef.subject?.phrase || keywordLabelById.get(assuntoDaLinhaRef.keywordId) || null) : null;
+                    const assuntoDaLinha = assuntoDaLinhaRef ? (assuntoDaLinhaRef.subject?.phrase || assuntoDaLinhaRef.phrase || keywordLabelById.get(assuntoDaLinhaRef.keywordId) || null) : null;
 
                   return (
                     <React.Fragment key={art.id}>
