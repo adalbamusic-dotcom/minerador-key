@@ -10,11 +10,13 @@ import { describeSerpPaidPlan, type SerpPaidPlan, type SerpPaidPlanChoice } from
 import { runPaidSerpBlocks } from "@/lib/arquiteto/serp-blocks";
 import { ARCHITECT_SUGGESTIONS_LABEL, mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
 import {
-  PLAN_SHEET_ACTION_LABELS, PLAN_SHEET_LOCKED_SEAL, PLAN_SHEET_TITLE,
+  PLAN_SHEET_ACTION_LABELS, PLAN_SHEET_ANCHOR, PLAN_SHEET_LOCKED_SEAL, PLAN_SHEET_TITLE,
   applyPlanSheetSerp, buildPlanSheetRows, planPrincipalSwapCandidates, planSheetColorLabel, planSheetFormationSelection,
-  planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpSelection, planSwapCandidateLabel,
-  type PlanSheetAction, type PlanSheetArticle, type PlanSheetRow, type PlanSheetSerpRead, type PlanSwapCandidate,
+  planSheetNextStep, planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpSelection, planSheetServerErrorSentence, planSwapCandidateLabel,
+  type PlanSheetAction, type PlanSheetArticle, type PlanSheetConflict, type PlanSheetRow, type PlanSheetSerpRead, type PlanSwapCandidate,
 } from "@/lib/arquiteto/plan-article-sheet";
+import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "@/lib/arquiteto/silo-article-withdrawal";
+import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
 
 /**
  * F5 · PLANILHA PRIMEIRO (SDD `docs/compartilhado/sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`,
@@ -51,18 +53,40 @@ const LINE_TONE: Record<LineKind, string> = {
 const TONE_CLASS: Record<Tone, string> = { success: "text-success", neutral: "text-text-muted", warning: "text-warning" };
 const SERP_BLOCK = 6;
 
+/**
+ * 2026-10-14 ("travou, sem poder avançar") · nenhum pedido fica girando sem
+ * fim: passou do teto, vira "tempo esgotado" com a frase do que fazer (o que
+ * já foi gravado continua gravado; repetir não paga duas vezes).
+ */
+const REQUEST_TIMEOUT_MS = 150_000;
+
 async function postJson(url: string, body: unknown): Promise<{ ok: boolean; status: number; body: { success?: boolean; error?: string; code?: string; data?: unknown } }> {
-  const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  // A plataforma responde tempo esgotado com uma página HTML, não JSON.
-  const parsed = await response.json().catch(() => ({ success: false, error: "TEMPO_ESGOTADO" }));
-  return { ok: response.ok, status: response.status, body: parsed };
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
+  try {
+    const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), ...(controller ? { signal: controller.signal } : {}) });
+    // A plataforma responde tempo esgotado com uma página HTML, não JSON.
+    const parsed = await response.json().catch(() => ({ success: false, error: "TEMPO_ESGOTADO" }));
+    return { ok: response.ok, status: response.status, body: parsed };
+  } catch {
+    // Rede caída ou o teto acima: a mesma resposta de tempo esgotado (a tela diz o que fazer).
+    return { ok: false, status: 0, body: { success: false, error: "TEMPO_ESGOTADO" } };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
+
+/** O erro do servidor como frase humana, com o que fazer (nunca o código cru). */
+const humanError = (answer: { status: number; body: { error?: string; code?: string } }) => planSheetServerErrorSentence({ status: answer.status, error: answer.body.error ?? null, code: answer.body.code ?? null });
 
 async function improvement(body: Record<string, unknown>): Promise<ImprovementRun> {
   const answer = await postJson("/api/arquiteto/article-improvement", body);
-  if (!answer.ok || !answer.body.success) throw new Error(answer.body.error === "TEMPO_ESGOTADO" ? "O servidor demorou demais. O que foi feito ficou salvo: toque de novo para continuar." : answer.body.error ?? "Etapa não confirmada.");
+  if (!answer.ok || !answer.body.success) throw new Error(humanError(answer));
   return answer.body.data as ImprovementRun;
 }
+
+/** Quantas leituras seguidas sem avanço a gravação aceita antes de parar com a frase (≈ 2 minutos). */
+const APPLY_STALL_LIMIT = 40;
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /** O relógio das ações (fora do render: só os handlers e os efeitos o chamam). */
@@ -84,8 +108,11 @@ function PlanArticleSheetSession(props: {
   buttonClassName: string;
   primaryButtonClassName: string;
   controlClassName: string;
+  /** 2026-10-14 · aditivo: o botão de "Confirmar retirada" (perigo); ausente = o botão comum. */
+  dangerButtonClassName?: string;
 }) {
   const { brandId, brandRef, keywords, standings, groupOf, keywordGroupOf, filter, articles, radarArticleIds, onApplied, buttonClassName, primaryButtonClassName, controlClassName } = props;
+  const dangerButtonClassName = props.dangerButtonClassName ?? buttonClassName;
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
@@ -151,6 +178,10 @@ function PlanArticleSheetSession(props: {
   const [summary, setSummary] = useState<{ tone: Tone; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resumable, setResumable] = useState<ImprovementRun | null>(null);
+  /* 2026-10-14 · "Retirar artigo do Silo" aberto a partir da linha presa (prévia grátis; motivo e confirmação do dono). */
+  const [withdrawing, setWithdrawing] = useState<PlanSheetConflict | null>(null);
+  const withdrawRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { if (withdrawing) withdrawRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" }); }, [withdrawing]);
   const previewRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { if (preview) previewRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" }); }, [preview]);
 
@@ -209,7 +240,7 @@ function PlanArticleSheetSession(props: {
           for (const item of data?.excludedByVolume ?? []) foraPorVolume.set(item.keywordId, item.reason);
           // O servidor conferiu o volume no banco e nenhuma tem: o bloco fica fora, nada a pagar.
           if (answer.body.code === "KEYWORD_SERP_NO_VOLUME") { semPlano.add(indice); return ZERO_PLAN; }
-          if (!answer.ok || !answer.body.success || !data?.plan) throw new Error(answer.body.error ?? "Não foi possível ler o custo da SERP.");
+          if (!answer.ok || !answer.body.success || !data?.plan) throw new Error(answer.ok && answer.body.success ? "O servidor não devolveu o custo da SERP. Nada foi pago; tente de novo." : humanError(answer));
           if (mounted.current) setBusy(atual => atual ? { ...atual, done: (atual.done ?? 0) + 1 } : atual);
           return data.plan;
         },
@@ -230,7 +261,7 @@ function PlanArticleSheetSession(props: {
           if (semPlano.has(contexto.blockIndex)) return { result: { collected: 0, reused: 0, gaps: 0 }, outcomes: bloco.map(item => ({ id: item.keywordId, status: "failed" as const, reason: foraPorVolume.get(item.keywordId) ?? "Sem volume no banco." })) };
           const answer = await pedir(bloco, { mode: "execute", authorizedPaidQueries: choice.authorizedPaidQueries });
           const data = answer.body.data as { gaps?: { keywordId: string; lens: string; reason: string }[]; collected?: number; reused?: number } | undefined;
-          if (!answer.ok || !answer.body.success) throw new Error(answer.body.error ?? "A coleta da SERP não foi confirmada.");
+          if (!answer.ok || !answer.body.success) throw new Error(humanError(answer));
           const lacunas = new Map<string, string>();
           for (const gap of data?.gaps ?? []) lacunas.set(gap.keywordId, `${lacunas.has(gap.keywordId) ? `${lacunas.get(gap.keywordId)}; ` : ""}${gap.lens}: ${gap.reason}`);
           return {
@@ -286,9 +317,16 @@ function PlanArticleSheetSession(props: {
     let current = run.state === "applying" && run.acceptedIds ? await improvement({ brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash })
       : await improvement({ brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash, ...(readyIds ? { targetIds: readyIds } : {}) });
     let tentativas = 0;
+    // 2026-10-14 · sem avanço por ≈ 2 minutos (vez ocupada por outra gravação da marca), para com a frase e deixa retomar.
+    let semAvanco = 0, feitosAntes = current.outcomes.length;
     // Um artigo por chamada; tempo esgotado ou vez ocupada não param a gravação: o andamento está salvo no servidor.
     while (mounted.current && current.state === "applying") {
       contar(current.outcomes.length);
+      if (current.outcomes.length > feitosAntes) { feitosAntes = current.outcomes.length; semAvanco = 0; }
+      else if (++semAvanco > APPLY_STALL_LIMIT) {
+        if (mounted.current) setResumable(current);
+        throw new Error(`A gravação parou de avançar (${current.outcomes.length} de ${current.acceptedIds?.length ?? "?"} gravado(s)): o servidor respondeu várias vezes sem gravar nada novo — em geral, outra gravação desta marca está com a vez. O que já foi gravado ficou salvo; use “Continuar a gravação” em instantes (sem novo aceite). Se parar de novo, recarregue a página.`);
+      }
       try {
         if (current.leaseUntil && Date.parse(current.leaseUntil) > agoraMs()) { await wait(3000); current = await improvement({ brandId, action: "status", runId: current.runId }); }
         else current = await improvement({ brandId, action: "apply", runId: current.runId, decisionHash: current.decisionHash });
@@ -386,7 +424,16 @@ function PlanArticleSheetSession(props: {
     : preview?.action === "swapPrincipal" ? `${PLAN_SHEET_ACTION_LABELS.swapPrincipal} · prévia`
     : preview ? `${PLAN_SHEET_ACTION_LABELS.concludeFormation} · prévia` : "";
 
-  return <section className="border-b border-divider bg-surface px-4 py-3 text-sm" aria-label={PLAN_SHEET_TITLE} data-testid="architect-plan-sheet" data-rows={rows.length}>
+  const proximo = planSheetNextStep(rows);
+  const marcarERodar = (passo: NonNullable<typeof proximo>) => {
+    const alvo = rows.filter(row => passo.keywordIds.includes(row.keywordId));
+    setSelected(new Set(alvo.map(row => row.keywordId)));
+    if (passo.action === "validateSerp") start("validateSerp", alvo);
+    else if (passo.action === "concludeFormation") start("concludeFormation", alvo);
+    else if (passo.action === "withdraw" && alvo[0]?.conflict) setWithdrawing(alvo[0].conflict);
+  };
+
+  return <section id={PLAN_SHEET_ANCHOR} className="border-b border-divider bg-surface px-4 py-3 text-sm" aria-label={PLAN_SHEET_TITLE} data-testid="architect-plan-sheet" data-rows={rows.length}>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0">
         <h3 className="flex items-center gap-1.5 font-semibold text-foreground">
@@ -403,6 +450,29 @@ function PlanArticleSheetSession(props: {
         <button type="button" className={primaryButtonClassName} disabled={ocupado || !lote.length} data-testid="architect-plan-sheet-batch-form" onClick={() => start("concludeFormation", lote)}>{PLAN_SHEET_ACTION_LABELS.concludeFormation} ({lote.length})</button>
       </div>
     </div>
+
+    {proximo && proximo.action !== "none" && !busy && !preview && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-module-accent/40 bg-module-accent/5 p-3" role="region" aria-label="Próximo passo da planilha" data-testid="architect-plan-sheet-next-step" data-next-step={proximo.action}>
+      <p className="min-w-0 text-foreground"><span className="font-semibold">Próximo passo · </span>{proximo.sentence}</p>
+      <button type="button" className={primaryButtonClassName} disabled={ocupado} onClick={() => marcarERodar(proximo)}>
+        {proximo.action === "validateSerp" ? `${PLAN_SHEET_ACTION_LABELS.validateSerp} (${proximo.keywordIds.length})` : proximo.action === "concludeFormation" ? `${PLAN_SHEET_ACTION_LABELS.concludeFormation} (${proximo.keywordIds.length})` : SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}
+      </button>
+    </div>}
+
+    {withdrawing && withdrawing.siloRef && <div ref={withdrawRef} className="mt-3 rounded-md border border-warning/40 bg-surface-subtle p-3" role="region" aria-label={SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL} data-testid="architect-plan-sheet-withdraw" data-article-id={withdrawing.articleId}>
+      <p className="font-semibold text-foreground">{SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL} · {withdrawing.slug ?? withdrawing.label}{withdrawing.siloLabel ? ` (Silo “${withdrawing.siloLabel}”)` : ""}</p>
+      <p className="mt-1 text-text-muted">Retirar é decisão sua: a prévia (grátis) mostra o que muda; depois, o motivo e “Confirmar retirada”. O ArticleDNA fica como histórico (rejeitado), nada é apagado, e as keywords dele ficam livres para o artigo do plano.</p>
+      <SiloArticleWithdrawalPanel
+        brandId={brandId}
+        siloId={withdrawing.siloRef}
+        articles={[{ articleId: withdrawing.articleId, label: withdrawing.label, subjectPhrase: withdrawing.subjectPhrase }]}
+        classNames={{ button: buttonClassName, dangerButton: dangerButtonClassName, control: controlClassName }}
+        notify={(tipo, mensagem) => { if (!mounted.current) return; if (tipo === "error") setError(mensagem); else setSummary({ tone: tipo === "success" ? "success" : "warning", text: mensagem }); }}
+        onApplied={() => { if (mounted.current) setWithdrawing(null); onApplied(); }}
+        autoOpenArticleId={withdrawing.articleId}
+        itemPrefix="Artigo"
+      />
+      <button type="button" className={`${buttonClassName} mt-2`} onClick={() => setWithdrawing(null)}>Fechar</button>
+    </div>}
 
     {resumable && !busy && <div className="mt-2 flex flex-wrap items-center gap-2 text-foreground" role="status" data-testid="architect-plan-sheet-resume">
       <span>Há uma gravação da planilha interrompida ({resumable.outcomes.length} de {resumable.acceptedIds?.length ?? 0}). O aceite já foi dado; continuar não pede outro.</span>
@@ -490,7 +560,13 @@ function PlanArticleSheetSession(props: {
               <td className="p-2"><span className={row.lock.state === "free" ? "text-foreground" : "text-text-muted"} title={row.lock.why}>{row.lock.label}</span><p className="text-text-muted">{row.lock.why}</p></td>
               <td className="p-2 tabular-nums"><span className={row.volume.state === "measured" ? "text-foreground" : "text-text-muted"}>{row.volume.label}</span>{row.supports.count > 0 && <p className="text-text-muted">{row.supports.count} sustentação(ões) na lista · {row.supports.withVolume} com volume</p>}</td>
               <td className="p-2"><span className={row.serp.state === "complete" ? "text-foreground" : "text-text-muted"} data-testid="architect-plan-sheet-serp">{row.serp.label}</span></td>
-              <td className="p-2"><span className={row.formation.state === "awaiting_principal" ? "text-warning" : "text-foreground"}>{row.formation.label}</span>
+              <td className="p-2"><span className={row.formation.state === "awaiting_principal" || row.formation.state === "conflict" ? "text-warning" : "text-foreground"}>{row.formation.label}</span>
+                {row.conflict && <div className="mt-1" data-testid="architect-plan-sheet-conflict" data-article-id={row.conflict.articleId}>
+                  <p className="text-warning">{row.conflict.sentence}</p>
+                  {row.conflict.siloRef
+                    ? <button type="button" className={`${buttonClassName} mt-1`} data-testid="architect-plan-sheet-row-withdraw" onClick={() => setWithdrawing(row.conflict)}>{SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}</button>
+                    : <p className="text-text-muted">O artigo não diz a que Silo pertence: retire-o em Silos (aba Silos → {SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}).</p>}
+                </div>}
                 {resultado && <p className={TONE_CLASS[resultado.tone]} data-testid="architect-plan-sheet-result">{resultado.text}</p>}
               </td>
               <td className="p-2">

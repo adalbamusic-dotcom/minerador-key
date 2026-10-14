@@ -57,7 +57,7 @@ import type { GoogleAdsDiscoveryUsageKeySuffix } from "@/lib/minerador/google-ad
 import type { GoogleAdsHistoricalMetric } from "@/lib/google/ads/contracts";
 import { buildKnownBeforeSearchPlan, knownBeforeSearchSentences, readKnownVolume, type KnownBeforeSearchPlan, type KnownVolume } from "@/lib/editorial/known-before-search";
 import type { ImprovementStoredMeasurement } from "@/lib/arquiteto/article-improvement";
-import { planPrincipalSwapCandidates } from "@/lib/arquiteto/plan-article-sheet";
+import { planPrincipalSwapCandidates, planSheetArticleConflict } from "@/lib/arquiteto/plan-article-sheet";
 
 const refusal = (message: string) => new PipelineRuntimeError("CONFLICT", message, 409);
 const SUBJECT_TYPE = "article_improvement_run";
@@ -224,6 +224,30 @@ async function readInputs(context: PipelineContext, requested?: string[], groupF
       continue;
     }
     const article = workspace.articleDnas.find(a => a.payload.subject?.keywordId === row.id);
+    /*
+     * 2026-10-14 (caso WifiConecta) · PLANILHA: a keyword do Assunto (ou a
+     * principal declarada) presa no ArticleDNA vigente de OUTRO artigo recusa só
+     * esta linha, dizendo onde está presa e o caminho ("Retirar artigo do Silo",
+     * decisão do dono). Antes ela virava alvo sem artigo e a prévia não dizia por quê.
+     */
+    if (!article && options.lenient && standing.plan) {
+      const conflito = planSheetArticleConflict({
+        keywordId: row.id,
+        declaredPrincipalId: standing.plan.declaredPrincipal?.keywordId ?? null,
+        articles: workspace.articleDnas.map(a => ({
+          articleId: a.payload.articleId,
+          versionNumber: a.versionNumber,
+          subjectKeywordId: a.payload.subject?.keywordId ?? null,
+          principalKeywordId: a.payload.principalKeywordId ?? null,
+          keywordIds: a.payload.keywordReferences.map(reference => reference.keywordId),
+          slug: a.payload.suggestedSlug ?? null,
+          siloRef: a.payload.siloId ?? a.payload.territoryRef ?? null,
+          siloLabel: territories.find(t => t.territoryRef === (a.payload.territoryRef ?? a.payload.siloId))?.territory.name ?? null,
+          subjectPhrase: a.payload.subject?.phrase ?? null,
+        })),
+      });
+      if (conflito) { esperaPorId.set(row.id, conflito.sentence); continue; }
+    }
     // F4 — a principal declarada ainda não chegou ao Arquiteto: o Assunto espera (nunca ganha principal sugerida).
     if (standing.plan?.declaredPrincipal && !rows.has(standing.plan.declaredPrincipal.keywordId)) {
       waitingDeclaredPrincipal.push(`“${standing.phrase}” aguarda a principal declarada “${standing.plan.declaredPrincipal.phrase}” chegar ao Arquiteto (aprove-a no Minerador e envie).`);
@@ -718,7 +742,9 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
      * novo a IA, as medições e — se pedida — a busca.
      */
     const anterior = await findReusableRun(context, run.inputsHash);
-    const rework = assessRework({ kind: "article_improvement_prepare", fingerprint: run.inputsHash, previous: improvementReworkPrevious(anterior), policy: { sameInputs: "reuse", sameRefusal: "inform" } });
+    // 2026-10-14 · sem IA, medição nem busca pedidas, a preparação é LEITURA GRÁTIS: repetir não pede motivo (só o que custa pede).
+    const leituraGratis = !(request.authorizeReading?.ai === true || request.authorizeReading?.measure === true || request.discover === true);
+    const rework = assessRework({ kind: "article_improvement_prepare", fingerprint: run.inputsHash, previous: improvementReworkPrevious(anterior), policy: { sameInputs: "reuse", sameRefusal: "inform", freeRepeat: leituraGratis } });
     const decisao = decideRework(rework, request.reworkOverride);
     const refazer = decisao.proceed && decisao.overridden && Boolean(decisao.overrideReason);
     // F3 · LER ANTES DE BUSCAR: sem a autorização dita na prévia ("já temos · falta · custa"), nada de IA nem de Google Ads.

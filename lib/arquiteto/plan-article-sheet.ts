@@ -22,12 +22,23 @@ import { declaredPlanSubjectList } from "./declared-plan-formation.ts";
 import { readKnownVolume, type KnownVolume } from "../editorial/known-before-search.ts";
 import { EDITORIAL_GROUP_COLORS, EDITORIAL_GROUP_COLOR_LABELS, editorialGroupFilterMatches, isEditorialGroupColor, type EditorialGroupColor, type EditorialGroupScreenFilter } from "../editorial/editorial-groups.ts";
 import type { ImprovementProposal } from "./article-improvement.ts";
+import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "./silo-article-withdrawal.ts";
 
 type RecordLike = Record<string, unknown>;
 
 /* --------------------------------------------------------------- rótulos */
 
 export const PLAN_SHEET_TITLE = "Artigos do plano";
+/** A âncora da planilha (o próximo passo do painel recolhido leva até ela). */
+export const PLAN_SHEET_ANCHOR = "architect-plan-sheet";
+/** 2026-10-14 · o painel "Melhorar publicados" recolhido quando a cor ativa tem plano. */
+export function improvementPanelCollapsedLabel(colorLabel: string | null): { title: string; nextStep: string; button: string } {
+  return {
+    title: `Melhorar publicados · recolhido — os artigos do plano${colorLabel ? ` da cor ${colorLabel}` : ""} estão na planilha abaixo`,
+    nextStep: `Na planilha “${PLAN_SHEET_TITLE}”: Validar SERP e depois Concluir formação. Cada linha diz o que falta; nada é pago sem o custo antes.`,
+    button: `Ir para “${PLAN_SHEET_TITLE}”`,
+  };
+}
 export const PLAN_SHEET_ACTION_LABELS = {
   validateSerp: "Validar SERP",
   swapPrincipal: "Trocar principal",
@@ -65,7 +76,8 @@ export type PlanSheetSerpView = {
 };
 
 export type PlanSheetFormationView = {
-  state: "awaiting" | "awaiting_principal" | "formed" | "in_radar";
+  /** 2026-10-14 · `conflict`: a keyword da linha está dentro do ArticleDNA vigente de OUTRO artigo (ver `conflict` da linha). */
+  state: "awaiting" | "awaiting_principal" | "formed" | "in_radar" | "conflict";
   version: number | null;
   articleId: string | null;
   principalKeywordId: string | null;
@@ -92,6 +104,13 @@ export type PlanSheetRow = {
   currentPrincipalId: string | null;
   /** Sustentações da lista do Assunto (Pesquisa por Assunto), quantas têm volume medido e quais (candidatas da troca). */
   supports: { count: number; withVolume: number; withVolumeIds: string[] };
+  /**
+   * 2026-10-14 (caso WifiConecta) · a keyword da linha (ou a principal declarada
+   * dela) está presa no ArticleDNA vigente de OUTRO artigo — de outro Assunto,
+   * de outro Silo. Concluir formação recusa só esta linha com este motivo; sair
+   * dali é "Retirar artigo do Silo" nesse artigo, decisão do dono. Sem conflito, `null`.
+   */
+  conflict: PlanSheetConflict | null;
 };
 
 /** O artigo já formado, na forma mínima que a planilha precisa (da mesa, versão vigente). */
@@ -101,6 +120,32 @@ export type PlanSheetArticle = {
   subjectKeywordId: string | null;
   principalKeywordId: string | null;
   keywordIds: readonly string[];
+  /* 2026-10-14 · aditivos (o conflito da linha diz de qual artigo e Silo se trata); ausentes = sem nome. */
+  slug?: string | null;
+  /** O Silo do artigo (`ArticleDNA.siloId`, o mesmo id do SiloDNA; senão o `territoryRef`). */
+  siloRef?: string | null;
+  siloLabel?: string | null;
+  subjectPhrase?: string | null;
+  /** A cor do Assunto do artigo ("Laranja"), quando a mesa sabe. */
+  subjectColorLabel?: string | null;
+  /** A principal do artigo, legível. */
+  label?: string | null;
+};
+
+/** O artigo que prende a keyword de uma linha do plano. */
+export type PlanSheetConflict = {
+  articleId: string;
+  slug: string | null;
+  label: string;
+  siloRef: string | null;
+  siloLabel: string | null;
+  subjectKeywordId: string | null;
+  subjectPhrase: string | null;
+  subjectColorLabel: string | null;
+  /** As keywords desta linha que estão lá dentro. */
+  keywordIds: string[];
+  /** A frase da linha e da recusa: onde está presa e o caminho. */
+  sentence: string;
 };
 
 /** A leitura da SERP em cache (grátis, `POST /api/arquiteto/serp-subject`). */
@@ -158,12 +203,58 @@ function serpView(keywordId: string, read: PlanSheetSerpRead | null): PlanSheetS
   return { state: "none", lenses: 0, collectedAt: null, label: "Sem SERP no cache" };
 }
 
-function formationView(input: { keywordId: string; standing: ArchitectSubjectStanding; articles: readonly PlanSheetArticle[]; radarArticleIds: ReadonlySet<string>; receivedIds: ReadonlySet<string> }): PlanSheetFormationView {
+/** O rótulo da coluna Formação quando a keyword da linha está presa em outro artigo. */
+export const PLAN_SHEET_CONFLICT_LABEL = "Presa em outro artigo";
+
+/**
+ * 2026-10-14 (caso WifiConecta) · O ARTIGO INTRUSO. A keyword de uma linha do
+ * plano (a do Assunto ou a principal declarada dele) está dentro do ArticleDNA
+ * vigente de outro artigo — formado antes, por outro Assunto, às vezes em outro
+ * Silo. Enquanto ele existir, esta linha não forma no Silo do plano: duas
+ * definições para a mesma keyword. A planilha diz onde está presa e o caminho
+ * ("Retirar artigo do Silo" nesse artigo, decisão do dono); nada sai sozinho.
+ * Linha que já tem o próprio artigo não entra aqui (a formação dela responde).
+ */
+export function planSheetArticleConflict(input: {
+  keywordId: string;
+  declaredPrincipalId?: string | null;
+  articles: readonly PlanSheetArticle[];
+}): PlanSheetConflict | null {
+  const minhas = [...new Set([input.keywordId, input.declaredPrincipalId].filter((id): id is string => Boolean(id)))];
+  const presa = input.articles
+    .filter(article => article.subjectKeywordId !== input.keywordId)
+    .map(article => ({ article, ids: minhas.filter(id => article.keywordIds.includes(id) || article.principalKeywordId === id) }))
+    .filter(item => item.ids.length > 0)
+    .sort((a, b) => b.ids.length - a.ids.length || b.article.versionNumber - a.article.versionNumber || a.article.articleId.localeCompare(b.article.articleId))[0];
+  if (!presa) return null;
+  const { article } = presa;
+  const nome = text(article.slug) ?? text(article.label) ?? article.articleId;
+  const silo = text(article.siloLabel);
+  const assunto = text(article.subjectPhrase);
+  const cor = text(article.subjectColorLabel);
+  const deQuem = assunto ? ` (Assunto “${assunto}”${cor ? ` · cor ${cor}` : ""})` : cor ? ` (cor ${cor})` : "";
+  const sentence = `Presa no artigo “${nome}”${silo ? ` do Silo “${silo}”` : ""}${deQuem}. Esta linha só forma no Silo do plano depois de “${SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}” nesse artigo (prévia e decisão sua; nada é apagado, as keywords voltam a ficar livres).`;
+  return {
+    articleId: article.articleId,
+    slug: text(article.slug),
+    label: text(article.label) ?? nome,
+    siloRef: text(article.siloRef),
+    siloLabel: silo,
+    subjectKeywordId: article.subjectKeywordId,
+    subjectPhrase: assunto,
+    subjectColorLabel: cor,
+    keywordIds: presa.ids,
+    sentence,
+  };
+}
+
+function formationView(input: { keywordId: string; standing: ArchitectSubjectStanding; articles: readonly PlanSheetArticle[]; radarArticleIds: ReadonlySet<string>; receivedIds: ReadonlySet<string>; conflict?: PlanSheetConflict | null }): PlanSheetFormationView {
   const article = input.articles.filter(item => item.subjectKeywordId === input.keywordId).sort((a, b) => b.versionNumber - a.versionNumber)[0];
   if (article) {
     if (input.radarArticleIds.has(article.articleId)) return { state: "in_radar", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `No Radar · v${article.versionNumber}` };
     return { state: "formed", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `Formado · v${article.versionNumber}` };
   }
+  if (input.conflict) return { state: "conflict", version: null, articleId: null, principalKeywordId: null, label: PLAN_SHEET_CONFLICT_LABEL };
   const declarada = input.standing.plan?.declaredPrincipal;
   if (declarada && declarada.keywordId !== input.keywordId && !input.receivedIds.has(declarada.keywordId)) {
     return { state: "awaiting_principal", version: null, articleId: null, principalKeywordId: null, label: `Aguarda a principal “${declarada.phrase}” chegar ao Arquiteto` };
@@ -222,7 +313,9 @@ export function buildPlanSheetRows(input: {
     const color = group && isEditorialGroupColor(group.color) ? group.color : null;
     const lista = subjectList({ brandId, row: keyword, keywords: input.keywords });
     const comVolume = lista.filter(item => temVolume(item.keywordId)).map(item => item.keywordId);
-    const formation = formationView({ keywordId, standing, articles: input.articles, radarArticleIds: input.radarArticleIds, receivedIds });
+    const temProprio = input.articles.some(article => article.subjectKeywordId === keywordId);
+    const conflict = temProprio ? null : planSheetArticleConflict({ keywordId, declaredPrincipalId: plan.declaredPrincipal?.keywordId ?? null, articles: input.articles });
+    const formation = formationView({ keywordId, standing, articles: input.articles, radarArticleIds: input.radarArticleIds, receivedIds, conflict });
     rows.push({
       keywordId,
       keyword: String(keyword.keyword ?? "").trim(),
@@ -240,6 +333,7 @@ export function buildPlanSheetRows(input: {
       formation,
       currentPrincipalId: formation.principalKeywordId ?? plan.declaredPrincipal?.keywordId ?? null,
       supports: { count: lista.length, withVolume: comVolume.length, withVolumeIds: comVolume },
+      conflict,
     });
   }
   return rows.sort((a, b) => colorRank(a.color) - colorRank(b.color)
@@ -366,7 +460,9 @@ export function planSheetFormationSelection(rows: readonly PlanSheetRow[], actio
   const byGroup = new Map<string, PlanSheetRow[]>();
   const refused: PlanSheetRefusal[] = [];
   for (const row of rows) {
-    const recusa = action === "swapPrincipal" && row.lock.state !== "free"
+    // 2026-10-14 · a keyword presa no artigo de outro Assunto: só esta linha é recusada, com o caminho; as outras seguem.
+    const recusa = row.conflict ? row.conflict.sentence
+      : action === "swapPrincipal" && row.lock.state !== "free"
       ? row.lock.state === "locked" ? `${PLAN_SHEET_LOCKED_SEAL} (${row.lock.label}).` : "Sem principal declarada no plano: não há trava livre para trocar."
       : row.formation.state === "awaiting_principal" ? `${row.formation.label}: aprove-a no Minerador e envie.`
       : !row.territoryRef ? "Sem Silo: em Silos, “Processar arquitetura” leva as keywords do plano para o Silo do plano; confirme o Silo e volte aqui."
@@ -436,4 +532,93 @@ export function planSheetOutcomeSentence(outcome: { status: "improved" | "dna_cr
   if (outcome.status === "improved" || outcome.status === "dna_created") return { tone: "success", text: outcome.message };
   if (outcome.status === "unchanged") return { tone: "neutral", text: outcome.message };
   return { tone: "warning", text: outcome.message };
+}
+
+/* ------------------------------------------- uma lista só (2026-10-14) */
+
+/**
+ * O ASSUNTO DO PLANO DE UMA KEYWORD (caso WifiConecta, 2026-10-14). A linha da
+ * cópia de trabalho cuja principal é keyword do plano — a própria keyword do
+ * Assunto ou a principal declarada dele — é ARTIGO DO PLANO: o Assunto dela é
+ * o do plano, mesmo antes do ArticleDNA. Só o pacote aprovado desta marca vale
+ * (o mesmo critério da linha da planilha). Sem plano, `null`.
+ */
+export function planSubjectOfKeyword(input: {
+  keywordId: string | null | undefined;
+  brandId: string | null | undefined;
+  standings: ReadonlyMap<string, ArchitectSubjectStanding>;
+}): ArchitectSubjectStanding | null {
+  if (!input.keywordId || !input.brandId) return null;
+  const valida = (standing: ArchitectSubjectStanding | undefined): standing is ArchitectSubjectStanding => Boolean(standing && standing.plan && standing.declared && standing.received && standing.approvedPackageRef && standing.brandId === input.brandId);
+  const propria = input.standings.get(input.keywordId);
+  if (valida(propria)) return propria;
+  for (const standing of input.standings.values()) {
+    if (valida(standing) && standing.plan!.declaredPrincipal?.keywordId === input.keywordId) return standing;
+  }
+  return null;
+}
+
+/**
+ * A LINHA DA MESA QUE A PLANILHA JÁ MOSTRA. Candidato da cópia de trabalho
+ * (sem ArticleDNA, não publicado) cuja principal é keyword do plano: o artigo
+ * do plano tem UMA linha só, a da planilha "Artigos do plano". A mesa não o
+ * repete como linha solta — nada é apagado, o candidato continua na cópia de
+ * trabalho. Com ArticleDNA, a linha da mesa volta (é lá que o artigo segue).
+ */
+export function planCandidateShownInSheet(input: {
+  hasArticleDna: boolean;
+  published: boolean;
+  principalKeywordId: string | null | undefined;
+  brandId: string | null | undefined;
+  standings: ReadonlyMap<string, ArchitectSubjectStanding>;
+}): boolean {
+  if (input.hasArticleDna || input.published) return false;
+  return planSubjectOfKeyword({ keywordId: input.principalKeywordId, brandId: input.brandId, standings: input.standings }) !== null;
+}
+
+/** A frase da mesa no lugar das linhas que a planilha já mostra. */
+export function planCandidatesInSheetSentence(count: number): string {
+  return `${count} artigo(s) do plano deste Silo ${count === 1 ? "está" : "estão"} na planilha “${PLAN_SHEET_TITLE}”, acima — uma linha por artigo, com Validar SERP e Concluir formação. Depois de formado, o artigo volta a aparecer aqui.`;
+}
+
+/* -------------------------------------------------------- próximo passo */
+
+export type PlanSheetNextStep = {
+  action: "validateSerp" | "concludeFormation" | "withdraw" | "none";
+  sentence: string;
+  keywordIds: string[];
+};
+
+/**
+ * O PRÓXIMO PASSO DA PLANILHA: uma frase e as linhas a que ele se aplica. A
+ * ordem é a do trabalho: o que está preso em outro artigo é dito primeiro (só
+ * o dono retira); depois a SERP das linhas com volume que ainda não têm as 4
+ * lentes (custo antes); depois Concluir formação das que podem formar.
+ */
+export function planSheetNextStep(rows: readonly PlanSheetRow[]): PlanSheetNextStep | null {
+  if (!rows.length) return null;
+  const presas = rows.filter(row => row.conflict && row.formation.state === "conflict");
+  const formaveis = rows.filter(row => !row.conflict && (row.formation.state === "awaiting"));
+  const semSerp = formaveis.filter(row => row.volume.state === "measured" && (row.volume.value ?? 0) > 0 && (row.serp.state === "none" || row.serp.state === "partial"));
+  const aviso = presas.length ? ` ${presas.length} linha(s) presa(s) em outro artigo: “${SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}” na linha, decisão sua.` : "";
+  if (semSerp.length) return { action: "validateSerp", sentence: `${PLAN_SHEET_ACTION_LABELS.validateSerp} de ${semSerp.length} linha(s) com volume sem as 4 lentes (o custo aparece antes de pagar).${aviso}`, keywordIds: semSerp.map(row => row.keywordId) };
+  if (formaveis.length) return { action: "concludeFormation", sentence: `${PLAN_SHEET_ACTION_LABELS.concludeFormation} de ${formaveis.length} linha(s) (prévia grátis antes de gravar).${aviso}`, keywordIds: formaveis.map(row => row.keywordId) };
+  if (presas.length) return { action: "withdraw", sentence: `${presas.length} linha(s) presa(s) em outro artigo: use “${SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}” na linha (prévia e decisão sua); depois, Concluir formação.`, keywordIds: presas.map(row => row.keywordId) };
+  return { action: "none", sentence: "Os artigos do plano desta cor estão formados (ou aguardam a principal declarada). Sigam pela mesa, abaixo.", keywordIds: [] };
+}
+
+/* ---------------------------------------------- erro do servidor, humano */
+
+/**
+ * O ERRO DO SERVIDOR EM FRASE HUMANA, com o que fazer (2026-10-14: "travou,
+ * sem poder avançar"). Recusa de negócio (409/422) já vem humana e passa como
+ * está; tempo esgotado, sessão e falha do servidor ganham a frase e o caminho.
+ */
+export function planSheetServerErrorSentence(input: { status: number; error?: string | null; code?: string | null }): string {
+  const erro = text(input.error);
+  const humana = erro && /\s/.test(erro) && /[a-zà-ú]/.test(erro) ? erro.replace(/^[A-Z][A-Z0-9_]{3,}:\s*/, "") : null;
+  if (erro === "TEMPO_ESGOTADO" || input.status === 504 || input.status === 0) return "O servidor demorou demais para responder. O que já foi feito ficou salvo e nada é pago duas vezes: toque de novo no mesmo botão para continuar.";
+  if (input.status === 401 || input.status === 403) return "A sessão expirou ou não tem permissão no Arquiteto desta marca. Entre de novo e repita; nada foi gravado por esta etapa.";
+  if (input.status >= 500) return `O servidor falhou nesta etapa (erro ${input.status})${humana ? `: ${humana}` : ""}. Nada foi gravado por ela; tente de novo em instantes. Se repetir, recarregue a página — as linhas já gravadas continuam gravadas.`;
+  return humana ?? "A etapa não foi confirmada pelo servidor. Nada foi gravado por ela; tente de novo.";
 }

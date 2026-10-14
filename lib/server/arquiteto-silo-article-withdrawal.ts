@@ -92,6 +92,8 @@ export type SiloArticleWithdrawalApplied = {
   rejection: { eventId: string; articleVersionId: string };
   article: { articleId: string; label: string };
   warnings: string[];
+  /** 2026-10-14 · aditivo: o artigo só apontava para o Silo; o par ficou como estava (só o evento `rejected`). */
+  pairUnchanged?: true;
 };
 
 export type SiloArticleWithdrawalRefused = { state: "REFUSED"; code: SiloArticleWithdrawalRefusalCode; message: string; rework?: ReworkView };
@@ -169,8 +171,11 @@ export async function handleSiloArticleWithdrawal(
 
   // 1. O evento `rejected` (idempotente pelo id determinístico).
   await deps.appendRejection(versions.rejection);
-  // 2. O par, pelo caminho transacional do par canônico.
-  const gravado = await deps.persistPair(versions.siloDna, versions.siloPage, plan.statuses);
+  // 2. O par, pelo caminho transacional do par canônico. 2026-10-14 · o artigo que só
+  //    apontava para o Silo (não estava na composição) sai só pelo evento: o par fica como está.
+  const gravado = plan.pairUnchanged
+    ? { siloDna: plan.current.siloDna, siloPage: plan.current.siloPage }
+    : await deps.persistPair(versions.siloDna, versions.siloPage, plan.statuses);
 
   // 3. Releitura: sem ela não há sucesso.
   const relido = await deps.listArtifacts();
@@ -178,12 +183,12 @@ export async function handleSiloArticleWithdrawal(
   const page = latestOf(relido.siloPages, version => version.payload.siloId === plan.siloId);
   const evento = await deps.readRejection(versions.rejection.eventId);
   const divergencias: string[] = [];
-  if (!dna || dna.versionId !== gravado.siloDna.versionId) divergencias.push("o SiloDNA vigente não é o gravado");
+  if (!dna || dna.versionId !== gravado.siloDna.versionId) divergencias.push(plan.pairUnchanged ? "o SiloDNA mudou durante a retirada" : "o SiloDNA vigente não é o gravado");
   if (dna && (dna.payload.supportArticleIds.includes(plan.article.articleId) || dna.payload.articleReferences.some(reference => reference.articleId === plan.article.articleId))) {
     divergencias.push("o SiloDNA vigente ainda referencia o artigo");
   }
   if (!page || page.versionId !== gravado.siloPage.versionId || page.payload.siloDnaRef.versionId !== gravado.siloDna.versionId) {
-    divergencias.push("a SiloPage vigente não aponta para o SiloDNA novo");
+    divergencias.push(plan.pairUnchanged ? "a SiloPage mudou durante a retirada" : "a SiloPage vigente não aponta para o SiloDNA novo");
   }
   if (!evento || evento.status !== "rejected" || evento.versionId !== plan.article.versionId) divergencias.push("o evento de rejeição do ArticleDNA não voltou na releitura");
   if (divergencias.length) {
@@ -204,6 +209,7 @@ export async function handleSiloArticleWithdrawal(
     rejection: { eventId: versions.rejection.eventId, articleVersionId: plan.article.versionId },
     article: { articleId: plan.article.articleId, label: plan.article.label },
     warnings: plan.warnings,
+    ...(plan.pairUnchanged ? { pairUnchanged: true as const } : {}),
   };
 }
 

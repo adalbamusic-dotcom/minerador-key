@@ -47,7 +47,11 @@ export function ReworkNotice({ rework, onOverride, onOpenResult, changeHint, bus
   if (!rework || rework.verdict === "fresh") return null;
   const motivo = reason.trim();
   const podeRefazer = Boolean(onOverride) && rework.canOverride && (rework.verdict === "same_inputs_reuse" || rework.verdict === "same_refusal");
-  const dica = changeHint ?? (rework.verdict === "same_refusal"
+  // 2026-10-14 · repetição grátis: aviso informativo (não é trava); o motivo é só para pagar de novo o que custa.
+  const gratis = rework.paidOnlyOverride === true && rework.verdict === "same_inputs_reuse";
+  const dica = changeHint ?? (gratis
+    ? "Repetir a leitura grátis não pede motivo: ela roda de novo e reaproveita o que já foi pago. O motivo só é pedido para pagar de novo a IA, as medições ou a busca no Google Ads."
+    : rework.verdict === "same_refusal"
     ? "Mude um insumo (o que a recusa pede) e a operação roda de novo sozinha. Repetir sem mudar nada repetiria a mesma recusa."
     : rework.verdict === "contradicts_declared"
       ? "A principal, o papel e a lista do Assunto vêm do plano declarado no Minerador. Para mudar, mude o plano lá: aqui não há “refazer mesmo assim”."
@@ -55,23 +59,23 @@ export function ReworkNotice({ rework, onOverride, onOpenResult, changeHint, bus
         ? "Dentro de um grupo com plano declarado, artigo novo nasce do Assunto do plano (o caminho de sempre)."
         : "Repetir com os mesmos insumos só com um motivo: o servidor recusa sem ele.");
   return (
-    <div role="status" className="mt-3 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm leading-6" data-testid={testId} data-rework-verdict={rework.verdict}>
-      <p className="flex items-center gap-1.5 font-semibold text-warning">
-        <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
-        {TITLES[rework.verdict]}
+    <div role="status" className={`mt-3 rounded-md border p-3 text-sm leading-6 ${gratis ? "border-divider bg-surface-subtle" : "border-warning/40 bg-warning/10"}`} data-testid={testId} data-rework-verdict={rework.verdict} data-rework-free={gratis ? "true" : undefined}>
+      <p className={`flex items-center gap-1.5 font-semibold ${gratis ? "text-foreground" : "text-warning"}`}>
+        {!gratis && <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />}
+        {gratis ? "Leitura já feita com os mesmos insumos · repetir é grátis" : TITLES[rework.verdict]}
         <InfoHint title="O que fazer" description={dica} />
       </p>
       <p className="mt-1 text-foreground">{rework.message}</p>
       {(onOpenResult || podeRefazer) && !asking && (
         <div className="mt-2 flex flex-wrap gap-2">
           {onOpenResult && <button type="button" className={buttonClassName} disabled={busy} onClick={onOpenResult}>Abrir resultado</button>}
-          {podeRefazer && <button type="button" className={buttonClassName} disabled={busy} onClick={() => setAsking(true)}>Refazer mesmo assim</button>}
+          {podeRefazer && <button type="button" className={buttonClassName} disabled={busy} onClick={() => setAsking(true)}>{gratis ? "Refazer o que custa" : "Refazer mesmo assim"}</button>}
         </div>
       )}
       {podeRefazer && asking && (
         <div className="mt-2 grid gap-2">
           <label className="grid gap-1 text-sm text-foreground">
-            Motivo para refazer com os mesmos insumos (obrigatório)
+            {gratis ? "Motivo para pagar de novo a IA, as medições ou a busca (obrigatório)" : "Motivo para refazer com os mesmos insumos (obrigatório)"}
             <input
               type="text"
               value={reason}

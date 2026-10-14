@@ -49,5 +49,6 @@ test("com uma cor na etiqueta, o painel da melhoria busca só aquela cor e avisa
   assert.match(painel, /run\.groupScope\?\.requested !== activeGroup\.requested/);
 
   const tela = semComentarios(ler("../modules/arquiteto/arquiteto-workspace.tsx"));
-  assert.match(tela, /activeGroup=\{\(\(\) => \{ const filtro = arquitetoGroups\.filter; if \(filtro\.kind !== "group"\) return null;/);
+  // 2026-10-14 · a etiqueta escolhe por COR (`kind: "groups"`): sem isso o painel analisava a marca inteira com o azul escolhido.
+  assert.match(tela, /const cor = filtro\.kind === "groups" \? filtro\.color : filtro\.kind === "group" \? arquitetoGroups\.groupById\.get\(filtro\.groupId\)\?\.color \?\? null : null;/);
 });

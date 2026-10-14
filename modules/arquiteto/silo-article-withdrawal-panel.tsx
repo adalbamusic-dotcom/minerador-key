@@ -12,7 +12,7 @@
  * de responder. A mesa é recarregada pelo chamador (`onApplied`).
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ReworkNotice } from "@/components/editorial/rework-notice";
 import { ArticleSubjectLine } from "@/components/editorial/article-subject-line";
 import type { ReworkView } from "@/lib/editorial/rework-guard";
@@ -42,6 +42,14 @@ type Props = {
   classNames: { button: string; dangerButton: string; control: string };
   notify: (type: "success" | "error" | "warning", message: string) => void;
   onApplied: () => void;
+  /*
+   * 2026-10-14 · aditivos (planilha "Artigos do plano", caso WifiConecta): abrir
+   * a prévia (grátis) deste artigo assim que o painel aparece — o motivo e a
+   * confirmação continuam sendo do dono — e o rótulo do item ("Suporte" por
+   * padrão; o artigo que só aponta para o Silo não é suporte). Ausentes = como antes.
+   */
+  autoOpenArticleId?: string | null;
+  itemPrefix?: string;
 };
 
 async function post(body: Record<string, unknown>) {
@@ -55,17 +63,25 @@ async function post(body: Record<string, unknown>) {
   return json.data as Record<string, unknown>;
 }
 
-export function SiloArticleWithdrawalPanel({ brandId, siloId, articles, classNames, notify, onApplied }: Props) {
+export function SiloArticleWithdrawalPanel({ brandId, siloId, articles, classNames, notify, onApplied, autoOpenArticleId = null, itemPrefix = "Suporte" }: Props) {
   const [aberto, setAberto] = useState<string | null>(null);
   const [previa, setPrevia] = useState<Preview | null>(null);
   const [motivo, setMotivo] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  const autoAberto = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoOpenArticleId || autoAberto.current === autoOpenArticleId) return;
+    autoAberto.current = autoOpenArticleId;
+    // A prévia só LÊ (grátis); a retirada continua pedindo motivo e "Confirmar retirada".
+    void Promise.resolve().then(() => abrirPrevia(autoOpenArticleId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- abre uma vez por artigo pedido.
+  }, [autoOpenArticleId]);
 
   if (!articles.length) return null;
 
   const fechar = () => { setAberto(null); setPrevia(null); setMotivo(""); };
 
-  const abrirPrevia = async (articleId: string) => {
+  async function abrirPrevia(articleId: string) {
     setAberto(articleId);
     setPrevia(null);
     setMotivo("");
@@ -104,7 +120,7 @@ export function SiloArticleWithdrawalPanel({ brandId, siloId, articles, classNam
       <ul className="space-y-1">
         {articles.map(article => (
           <li key={article.articleId} className="flex flex-wrap items-center justify-between gap-2 text-sm text-text-muted">
-            <span className="min-w-0 flex-1"><span className="block truncate" title={article.label}>Suporte · <span className="text-foreground">{article.label}</span></span>{"subjectPhrase" in article ? <ArticleSubjectLine as="span" phrase={article.subjectPhrase} testId="silo-withdrawal-subject"/> : null}</span>
+            <span className="min-w-0 flex-1"><span className="block truncate" title={article.label}>{itemPrefix} · <span className="text-foreground">{article.label}</span></span>{"subjectPhrase" in article ? <ArticleSubjectLine as="span" phrase={article.subjectPhrase} testId="silo-withdrawal-subject"/> : null}</span>
             <button type="button" className={classNames.button} disabled={ocupado} onClick={() => void abrirPrevia(article.articleId)} aria-expanded={aberto === article.articleId}>
               {SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}
             </button>

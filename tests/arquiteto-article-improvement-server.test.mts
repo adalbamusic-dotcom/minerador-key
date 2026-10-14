@@ -1014,3 +1014,22 @@ test("F5 · o painel de texto fica para publicados: excludePlanArticles tira o A
   const sem = await handleArticleImprovement(runtime, { brandId, action: "prepare" });
   assert.equal(sem.targets.some(target => target.id === oldId), true, "sem a opção, o contrato de sempre");
 });
+
+/*
+ * 2026-10-14 · CASO REAL WifiConecta: a keyword do plano está dentro do
+ * ArticleDNA vigente de OUTRO artigo (`melhor-para-jogos-online`, Assunto
+ * Mega/Giga do laranja, Silo "planos de internet"). Pela planilha, só esta
+ * linha é recusada, dizendo onde está presa e o caminho; nada é gravado.
+ */
+test("2026-10-14 · Concluir formação pela planilha: keyword presa no artigo de outro Assunto recusa POR ITEM com o caminho; sem a origem, o contrato de sempre", async () => {
+  planSheetScenario();
+  const intrusoId = "9df07c7b-16ae-414e-aadc-9f460c5f537b";
+  articles.push({ entityId: intrusoId, versionId: `${intrusoId}:v1`, versionNumber: 1, payload: { articleId: intrusoId, brandId, subject: { keywordId: intrusoId, phrase: "Internet de 300, 500, 600 Mega ou 1 Giga: qual velocidade contratar?" }, principalKeywordId: oldId, keywordReferences: [{ keywordId: oldId, role: "principal" }], suggestedSlug: "melhor-para-jogos-online", siloId: "territory:planos-de-internet", territoryRef: "territory:planos-de-internet" } });
+  const run = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
+  assert.deepEqual(run.refusedTargets?.map(item => item.id), [oldId]);
+  assert.match(run.refusedTargets![0].reason, /^Presa no artigo “melhor-para-jogos-online”.*Assunto “Internet de 300, 500, 600 Mega ou 1 Giga.*“Retirar artigo do Silo” nesse artigo/);
+  assert.equal(run.proposals.some(p => p.targetId === oldId), false, "a linha presa não vira proposta");
+  assert.equal(articles.length, 1, "nada gravado");
+  assert.deepEqual(minerador(), { measured: 0, logic: 0, qualification: 0, replays: 0, medicoes: 0 });
+  assert.equal(paid, 0);
+});
