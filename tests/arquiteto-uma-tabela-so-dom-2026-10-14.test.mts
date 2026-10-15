@@ -97,7 +97,9 @@ test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mes
   // A barra: um plano no recorte → o botão da etapa atual, sem contador; sem publicados, nada mais.
   const barra = screen.get("architect-articles-formation-actions");
   assert.equal(barra.dataset.planMode, "true");
-  assert.deepEqual([...barra.querySelectorAll("button")].map(botao => botao.textContent), ["Consolidar o Silo do plano"]);
+  // 2026-10-15 · as etapas só de artigo: a atual em destaque, as seguintes desabilitadas (no máximo 3 botões).
+  assert.deepEqual([...barra.querySelectorAll("button")].map(botao => botao.textContent), ["1 · Formar artigos do plano", "2 · Reforçar keywords e SERP", "3 · Linha editorial"]);
+  assert.deepEqual([...barra.querySelectorAll<HTMLButtonElement>("button")].map(botao => botao.disabled), [false, true, true]);
   // A linha do artigo do plano ganha os selos curtos: trava, volume, SERP e formação.
   const selosK9 = [...linhaDaMesa("cand-k9").querySelectorAll<HTMLElement>("[data-plan-seal]")].map(selo => `${selo.dataset.planSeal}:${selo.textContent}`);
   assert.deepEqual(selosK9, ["lock:Travada", "volume:Vol. 5.400", "serp:SERP 4/4", "formation:Aguardando formação"]);
@@ -127,7 +129,7 @@ test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mes
 test("'Todos' (azul e laranja com plano): a barra de sempre — Processar artigos com linhas do plano marcadas: o comum vai ao handler de sempre; as do plano, ao Validar SERP com custo antes", async () => {
   rede();
   await screen.render(mesaWifi(TODOS)); await assentar();
-  assert.match(screen.get("architect-articles-selection-count").textContent!, /Escolha a cor do plano na etiqueta para consolidar o Silo do plano/);
+  assert.match(screen.get("architect-articles-selection-count").textContent!, /Escolha a cor do plano na etiqueta para as etapas dos artigos do plano \(o Silo do plano é consolidado na aba Silos\)/);
   await marcar(linhaDaMesa("cand-k9"));
   await marcar(linhaDoPlano("k13")!);
   await marcar(linhaDaMesa("comum-1"));

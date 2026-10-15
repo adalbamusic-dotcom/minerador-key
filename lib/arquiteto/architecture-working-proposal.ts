@@ -303,10 +303,26 @@ export function buildArchitectureWorkingProposal(input: {
      * "Silo proposto" de novo. Não atrai keyword de fora pelo léxico.
      */
     territory?: { name: string | null; slug: string | null } | null;
+    /**
+     * 2026-10-15 (pedido do dono) · aditivo: a KEYWORD DO SILO do plano (o texto
+     * é o nome ou o slug do Silo; `planSiloHeadKeywordIds`). Opcional — 0
+     * volume ou não cadastrada é normal. Presente, é a cabeça da SiloPage do
+     * Silo do plano: entra nele, nunca vira semente de outro Silo nem artigo.
+     */
+    headKeywordIds?: readonly string[];
   }[];
 }): ArchitectureWorkingProposal {
   const dnaPorKeyword = new Map(input.keywords.map(item => [item.keywordId, item]));
-  const emGrupoComPlano = new Set((input.declaredPlanGroups || []).flatMap(grupo => grupo.keywordIds));
+  const emGrupoComPlano = new Set((input.declaredPlanGroups || []).flatMap(grupo => [...grupo.keywordIds, ...(grupo.headKeywordIds ?? [])]));
+  /* 2026-10-15 · a cabeça do Silo do plano (keyword do Silo, por texto): fica para o Silo do plano, nunca para a declaração solta. */
+  const cabecaDoPlano = new Set((input.declaredPlanGroups || []).flatMap(grupo => grupo.headKeywordIds ?? []));
+  /* 2026-10-15 · o nome/slug de cada Silo do plano: um Silo léxico com a mesma identidade é o do plano, nunca um segundo. */
+  const chaveDoPlano = (valor: string | null | undefined) => String(valor ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "");
+  const planoPorIdentidade = new Map<string, number>();
+  (input.declaredPlanGroups || []).forEach((grupo, indice) => {
+    for (const chave of [chaveDoPlano(grupo.siloName), chaveDoPlano(grupo.siloSlug)]) if (chave && !planoPorIdentidade.has(chave)) planoPorIdentidade.set(chave, indice);
+  });
+  const chaveDoSiloDoPlano: Array<string | null> = (input.declaredPlanGroups || []).map(() => null);
   const keywordTexts = new Map(input.keywords.map(item => [item.keywordId, item.text]));
 
   const silos = new Map<string, ProposalSilo>();
@@ -373,6 +389,9 @@ export function buildArchitectureWorkingProposal(input: {
     // não pode levar o nome de uma keyword que o humano disse ser artigo.
     const nome = semente === cluster.headKeywordId ? rotuloDoCluster(cluster) : (keywordTexts.get(semente) || rotuloDoCluster(cluster));
     const slug = input.slugOf(nome);
+    // 2026-10-15 · a mesma identidade de um Silo do plano: é ele (nunca um segundo Silo do mesmo plano); sem ele no lote, nada é proposto.
+    const doPlano = planoPorIdentidade.get(chaveDoPlano(nome)) ?? planoPorIdentidade.get(chaveDoPlano(slug));
+    if (doPlano !== undefined) return chaveDoSiloDoPlano[doPlano];
     const key = `proposed:${slug}`;
     if (!silos.has(key)) {
       silos.set(key, {
@@ -446,6 +465,8 @@ export function buildArchitectureWorkingProposal(input: {
   for (const keywordId of keywordTexts.keys()) {
     const declaracao = declaracaoDe(keywordId);
     if (!headsSilo(declaracao)) continue;
+    // 2026-10-15 · a keyword do Silo do plano é a cabeça DELE: entra no Silo do plano, abaixo.
+    if (cabecaDoPlano.has(keywordId)) continue;
 
     const nome = keywordTexts.get(keywordId) || keywordId;
     const publicada = declaracao!.source === "published";
@@ -567,9 +588,11 @@ export function buildArchitectureWorkingProposal(input: {
    * semente de outro Silo. O publicado continua com o Silo que o site declara.
    */
   const pelaPlano = new Map<string, string>();
-  for (const grupo of input.declaredPlanGroups || []) {
+  for (const [indiceDoPlano, grupo] of (input.declaredPlanGroups || []).entries()) {
     const membros = grupo.keywordIds.filter(keywordId => keywordTexts.has(keywordId) && !resolvidasPorDeclaracao.has(keywordId));
-    if (!membros.length) continue;
+    // 2026-10-15 · a keyword do Silo (opcional) entra no Silo do plano como cabeça da SiloPage.
+    const cabecas = (grupo.headKeywordIds ?? []).filter(keywordId => keywordTexts.has(keywordId) && !resolvidasPorDeclaracao.has(keywordId) && !membros.includes(keywordId));
+    if (!membros.length && !cabecas.length) continue;
     const slug = grupo.siloSlug || input.slugOf(grupo.siloName);
     let key = (grupo.territoryRef && silos.has(grupo.territoryRef) ? grupo.territoryRef : null) ?? slugsExistentes.get(slug) ?? null;
     if (!key && grupo.territoryRef && grupo.territory) {
@@ -603,6 +626,21 @@ export function buildArchitectureWorkingProposal(input: {
         nucleoDoSilo.set(key, identityCore(grupo.siloName));
         intencaoDoSilo.set(key, null);
       }
+    }
+    chaveDoSiloDoPlano[indiceDoPlano] = key;
+    for (const keywordId of cabecas) {
+      const dna = dnaPorKeyword.get(keywordId) ?? null;
+      resolvidasPorDeclaracao.add(keywordId);
+      pelaPlano.set(keywordId, key);
+      assignments.push({
+        keywordId,
+        siloKey: key,
+        reason: `Keyword do Silo do plano (grupo ${grupo.label}): é a cabeça da SiloPage “${grupo.siloName}” — nunca artigo nem semente de outro Silo. Opcional: sem ela, o Silo segue pelo plano.`,
+        membershipState: silos.get(key)?.source === "proposed" ? "new_silo_candidate" : "existing_silo_match",
+        basis: ["Nome/slug do Silo no plano declarado (grupo)"],
+        dnaVersionId: dna?.dnaVersionId ?? null,
+        dnaContentHash: dna?.dnaContentHash ?? null,
+      });
     }
     for (const keywordId of membros) {
       const dna = dnaPorKeyword.get(keywordId) ?? null;

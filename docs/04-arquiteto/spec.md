@@ -646,3 +646,19 @@ Decisão do usuário: as 4 lentes (desktop-windows, desktop-macos, mobile-androi
 - A primária do Silo pela SERP é sempre proposta e só é gravada com aceite humano, na origem "lista nova".
 
 Regras e itens no [adendo](propostas/adendo-quatro-lentes-arquiteto-2026-09-23.md).
+
+## 32. Silo do plano: a identidade é o DNA do plano — 2026-10-15
+
+Decisão do dono (literal): "Muitas vezes eu já tenho a keyword e o slug do silo… só que aí o Google provider barra ele porque tem 0 volume e não cadastra ele como keyword (…) o silo é um cluster só pra unir grupos, não precisa ter volume… na maioria dos sites tem silos não indexados (…) se ele não detectou uma keyword destinada para o silo, mas no DNA já está definido, ele tem que fazer só isso, recriar e ir pra frente, os dados são claros, não tem que tentar converter ninguém (…) a definição do silo já tem que estar na aba do Silo e não nos artigos. Artigo só mexe com artigos: só reforçar as keywords, fazer do assunto/tema uma linha editorial de copy, e finalizar com os links internos."
+
+Regra permanente:
+
+1. **Silo do plano: identidade = DNA do plano** — nome, slug, objetivo (`editorial_groups.plan`), Pilar e ordem (`keyword_subject.plan` de cada artigo). Nenhuma keyword define o Silo do plano.
+2. **Keyword do Silo opcional.** 0 volume, barrada pelo provider, não cadastrada ou não enviada é o estado normal — nunca erro, nunca pendência. O Silo pode não ser indexado. Quando existe no Arquiteto uma keyword cujo texto é o nome ou o slug do Silo do plano (comparação sem acento, sem caixa, só letras e números), ela é a cabeça da SiloPage: nunca vira artigo nem "Keywords não agrupadas"; texto que casa com mais de um plano não é reconhecido (decisão humana).
+3. **O Arquiteto recria e segue.** "Consolidar o Silo do plano" reusa o Silo do plano que existe (onde as keywords do plano estão; o ligado ao grupo; o de mesmo slug, consolidado incluído), confirma o candidato ou recria com nome/slug/objetivo do plano, põe nele as keywords do plano sem Silo (e a keyword do Silo, quando existe), religa o grupo e grava a página do Silo (SiloDNA + SiloPage com o Pilar e a ordem do plano, ou a versão seguinte corrigida). Prévia grátis e uma confirmação; decisão humana.
+4. **Proibido converter artigo em Silo ou criar Silo paralelo.** Keyword que o plano declara como artigo (Pilar ou Suporte) nunca é cabeça de Silo, semente léxica, candidata a Silo nem primária do Silo pela SERP. "Processar arquitetura", a criação manual, "Usar como Silo" (sitemap) e as sugestões consultam o plano primeiro: a identidade de um Silo do plano é sempre a do Silo do plano, nunca um segundo.
+5. **Silo na aba Silos, artigos na aba Artigos.** A aba Silos tem a linha do Silo do plano ("Consolidar o Silo do plano" / "Recriar o Silo do plano"). A aba Artigos tem só etapas de artigo — 1 · Formar artigos do plano (só quando falta ArticleDNA) · 2 · Reforçar keywords e SERP · 3 · Linha editorial · 4 · Links internos — e nunca cria, confirma ou consolida Silo: sem o Silo do plano decidido, diz "O Silo do plano é consolidado na aba Silos" e espera.
+6. **Reforço (etapa 2)** é o motor de sempre da melhoria, recortado pelo grupo: a lista da marca inclui as keywords soltas (sem Assunto, sem grupo, sem outro artigo) como secundárias e, só para artigo com a principal Livre e sem volume, como principal; volume definido no DNA fixa a principal (§ regra R2 do adendo C10).
+7. **Linha editorial (etapa 3)** preenche só o que está pendente no ArticleDNA, de fonte declarada (Assunto, escopo do plano, BrandDNA aprovado, Pilar/objetivo do Silo do plano, parecer de SERP), sem IA e sem inventar fato; versão nova com decisão humana.
+
+Marca sem plano segue como antes. Contrato detalhado: adendo de 2026-10-15 em `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md`.

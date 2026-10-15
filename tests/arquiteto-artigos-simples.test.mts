@@ -115,11 +115,12 @@ const tela = fonte.slice(fonte.indexOf("<main className=\"min-w-0 flex-1 overflo
  * Artigos é: a barra (um lugar só), a prévia das linhas do plano (só quando há
  * ação), o painel "Melhorar publicados" SÓ quando aberto, a tabela e Sobras.
  */
+/* 2026-10-15 · a aba Silos também mostra a prévia do Silo do plano (`workspaceMode === "silos"`): o marcador é o da aba Artigos. */
 test("na aba Artigos: a barra de sempre, a mesa e Sobras; sem Detalhes técnicos, sem cartão no topo e UMA tabela só", () => {
   assert.ok(inicioGrade > 0 && fimGrade > inicioGrade, "a grade do Workbench é uma const só");
   const posicoes = [
     tela.indexOf("{articleMode && <ArticlesFormationBar"),
-    tela.indexOf("<PlanSheetOperations sheet={planSheet}"),
+    tela.indexOf("{articleMode && <PlanSheetOperations sheet={planSheet}"),
     tela.indexOf("<ArticleImprovementPanel"),
     tela.indexOf("data-architect-table=\"articles\""),
     tela.indexOf("data-testid=\"architect-articles-sobras\""),
@@ -170,7 +171,7 @@ test("os blocos técnicos continuam na grade (abas Silos e Links), e melhoria e 
 
 test("Processar e Concluir formação ficam à mão, com os mesmos handlers e as mesmas travas — e valem para as linhas do plano", () => {
   // 2026-10-14 (tarde) · os botões de sempre: os artigos de sempre pelo handler de sempre; os do plano pelo núcleo do plano.
-  const uso = tela.slice(tela.indexOf("{articleMode && <ArticlesFormationBar"), tela.indexOf("<PlanSheetOperations sheet={planSheet}"));
+  const uso = tela.slice(tela.indexOf("{articleMode && <ArticlesFormationBar"), tela.indexOf("{articleMode && <PlanSheetOperations sheet={planSheet}"));
   assert.match(uso, /onProcess=\{\(\) => processArticleFormation\(\)\}/);
   assert.match(uso, /onConfirm=\{\(\) => confirmArticleFormation\(\)\}/);
   assert.match(uso, /selectionScope=\{formationSelectionScope\}/);
@@ -184,8 +185,10 @@ test("Processar e Concluir formação ficam à mão, com os mesmos handlers e as
   assert.match(barra, /Concluir formação/);
   assert.match(barra, /PLAN_FLOW_LABELS\.improvePublished/);
   // 2026-10-14 (noite) · com UM plano no recorte, a barra é a das etapas: o botão da etapa atual e, só com publicados, "Melhorar publicados…".
-  assert.match(barra, /if \(planSheet\.rows\?\.length && planSheet\.planGroupId && planSheet\.flow && etapaAtual\)/);
-  assert.match(barra, /data-testid="architect-plan-stage"/);
+  // 2026-10-15 · as etapas só de artigo: a atual em destaque e as seguintes desabilitadas, no máximo 3 botões.
+  assert.match(barra, /if \(planSheet\.rows\?\.length && planSheet\.planGroupId && planSheet\.flow\?\.length\)/);
+  assert.match(barra, /const visiveis = planArticleVisibleSteps\(fluxo, 3 - reservados\);/);
+  assert.match(barra, /"architect-plan-stage"/);
   assert.match(barra, /\{hasPublished && melhorar\}/);
   assert.match(uso, /hasPublished=\{articlesList\.some\(art => art\.isPublished\)\}/);
 });

@@ -1,9 +1,11 @@
 import "server-only";
 
-import { choosePlanSiloTerritory, confirmedTerritoryDraft, declaredPlanSiloDraft, declaredPlanSiloNote } from "@/lib/arquiteto/declared-plan-silo";
+import { choosePlanSiloTerritory, confirmedTerritoryDraft, declaredPlanSiloDraft, declaredPlanSiloNote, planSiloHeadKeywordIds, planSiloHeadSentence } from "@/lib/arquiteto/declared-plan-silo";
 import { normalizeManualSiloPageSlug } from "@/lib/arquiteto/manual-silo";
+import { planArticleKeywordIds } from "@/lib/arquiteto/plan-article-sheet";
 import {
-  choosePlanConsolidationTerritory, planConsolidationDecisionHash, planConsolidationLines, planConsolidationSummary, planSiloPairStep, planTerritoryChoiceSentence,
+  choosePlanConsolidationTerritory, planConsolidationDecisionHash, planConsolidationLines, planConsolidationSummary, planSiloDecisionHash, planSiloPairStep, planTerritoryChoiceSentence,
+  PLAN_SILO_CONSOLIDATE_LABEL, PLAN_SILO_TAB_SENTENCE,
   type PlanConsolidationLine, type PlanSiloPairStep, type PlanTerritoryChoice,
 } from "@/lib/arquiteto/plan-consolidation";
 import type { SiloDeclaredPlanResult } from "./arquiteto-silo-declared-plan";
@@ -68,6 +70,29 @@ export type PlanConsolidationPreview = {
    * a prévia lê isto; aplicar uma linha não depende dele.
    */
   siloPair?: PlanSiloPairStep;
+  /*
+   * 2026-10-15 · aditivos (pedido do dono: "Silo na aba Silos, artigos na aba
+   * Artigos"; "keyword do Silo é opcional").
+   */
+  /** A confirmação do escopo `silo` (aba Silos): o Silo do plano, as keywords que entram nele e o vínculo do grupo. */
+  siloDecisionHash?: string;
+  /** O Silo do plano existe e está decidido (confirmado/consolidado): a aba Artigos pode formar. */
+  siloReady?: boolean;
+  /** A keyword do Silo (texto = nome/slug do plano), quando está no Arquiteto. Ausente = normal. */
+  headKeyword?: { keywordId: string; keyword: string } | null;
+  headSentence?: string;
+  /** Keywords do plano (e a do Silo) recebidas sem Silo: entram no Silo do plano na consolidação do Silo. */
+  keywordsWithoutSilo?: string[];
+  /** O Pilar do plano já tem ArticleDNA: o par SiloDNA + SiloPage pode ser gravado. */
+  pillarFormed?: boolean;
+  /** O vínculo atual do grupo (`editorial_groups.silo_id`). */
+  linkedSiloId?: string | null;
+};
+
+export type PlanSiloApplyResult = {
+  territoryRef: string;
+  message: string;
+  preview: PlanConsolidationPreview;
 };
 
 export type PlanConsolidationApplyResult = {
@@ -104,7 +129,12 @@ async function readGroup(context: PipelineContext, groupId: string, deps: Deps) 
   const plano = grupo ? readDeclaredSiloPlan(grupo.plan) : null;
   if (!grupo || !plano) throw refusal("Este grupo não tem plano declarado: não há Silo do plano para consolidar.");
   const cor = EDITORIAL_GROUP_COLOR_LABELS[grupo.color];
-  return { grupo, plano, rotulo: `${cor}${grupo.name && grupo.name !== cor ? ` (${grupo.name})` : ""}` };
+  // 2026-10-15 · todos os planos ativos: a keyword do Silo que casa com mais de um plano não é reconhecida (ambígua).
+  const planos = grupos.flatMap(item => {
+    const lido = item.status === "active" ? readDeclaredSiloPlan(item.plan) : null;
+    return lido ? [{ groupId: item.id, siloName: lido.siloName, siloSlug: lido.siloSlug ?? null }] : [];
+  });
+  return { grupo, plano, planos, rotulo: `${cor}${grupo.name && grupo.name !== cor ? ` (${grupo.name})` : ""}` };
 }
 
 function territoryViews(territorios: readonly TerritoryWorkflowItem[]) {
@@ -117,7 +147,7 @@ function territoryViews(territorios: readonly TerritoryWorkflowItem[]) {
 }
 
 async function buildPreview(context: PipelineContext, groupId: string, deps: Deps, accepted?: readonly string[]): Promise<{ preview: PlanConsolidationPreview; inputs: PlanConsolidationInputs; territories: TerritoryWorkflowItem[]; plano: NonNullable<ReturnType<typeof readDeclaredSiloPlan>>; rotulo: string; linkedSiloId: string | null }> {
-  const { grupo, plano, rotulo } = await readGroup(context, groupId, deps);
+  const { grupo, plano, planos, rotulo } = await readGroup(context, groupId, deps);
   const [inputs, territorios] = await Promise.all([(deps.inputs ?? readPlanConsolidationInputs)(context), listTerritoryWorkflowItems(context)]);
   const vistas = territoryViews(territorios);
   const doPlano = [...inputs.standings.values()].filter(standing => standing.plan?.groupId === groupId && standing.declared && standing.received);
@@ -157,6 +187,21 @@ async function buildPreview(context: PipelineContext, groupId: string, deps: Dep
     now: new Date(deps.now?.() ?? Date.now()),
   });
   const aceitas = accepted ? [...accepted] : lines.filter(line => line.action === "write").map(line => line.keywordId);
+  // 2026-10-15 · a keyword do Silo (opcional): o texto é o nome/slug do Silo do plano; artigo do plano nunca é cabeça.
+  const linhas = [...inputs.rows.values()] as unknown as Array<Record<string, unknown>>;
+  const cabecas = planSiloHeadKeywordIds({
+    plans: planos,
+    keywords: linhas.map(row => ({ keywordId: String(row.id ?? ""), text: String(row.keyword ?? "") })).filter(item => item.keywordId),
+    planArticleKeywordIds: planArticleKeywordIds({ brandId: context.brandId, standings: inputs.standings }),
+  });
+  const cabecaIds = [...cabecas].filter(([, grupoDela]) => grupoDela === groupId).map(([keywordId]) => keywordId).sort();
+  const cabeca = cabecaIds.length ? { keywordId: cabecaIds[0], keyword: String(inputs.rows.get(cabecaIds[0])?.keyword ?? cabecaIds[0]) } : null;
+  const semSilo = [...doPlano.map(standing => standing.keywordId), ...cabecaIds].filter(keywordId => {
+    const row = inputs.rows.get(keywordId) as unknown as Record<string, unknown> | undefined;
+    return row && !row.isPublished && !(typeof row.territoryRef === "string" && row.territoryRef);
+  });
+  const ciclo = "lifecycleStatus" in escolha ? escolha.lifecycleStatus : null;
+  const pilar = lines.find(line => line.role === "Pilar") ?? null;
   const preview: PlanConsolidationPreview = {
     groupId,
     groupLabel: rotulo,
@@ -170,6 +215,13 @@ async function buildPreview(context: PipelineContext, groupId: string, deps: Dep
     summary: planConsolidationSummary(lines),
     acceptedKeywordIds: aceitas,
     decisionHash: planConsolidationDecisionHash({ groupId, planVersion: grupo.planVersion, lines, acceptedKeywordIds: aceitas }),
+    siloDecisionHash: planSiloDecisionHash({ groupId, planVersion: grupo.planVersion, territory: { kind: escolha.kind, territoryRef, lifecycleStatus: ciclo }, linkedSiloId: grupo.siloId, keywordsWithoutSilo: semSilo, headKeywordIds: cabecaIds }),
+    siloReady: Boolean(territoryRef && (ciclo === "confirmed" || ciclo === "consolidated") && escolha.kind !== "rejected"),
+    headKeyword: cabeca,
+    headSentence: planSiloHeadSentence({ siloName: plano.siloName, siloSlug: plano.siloSlug ?? null, head: cabeca }),
+    keywordsWithoutSilo: semSilo,
+    pillarFormed: Boolean(pilar && pilar.action === "keep"),
+    linkedSiloId: grupo.siloId,
   };
   return { preview, inputs, territories: territorios, plano, rotulo, linkedSiloId: grupo.siloId };
 }
@@ -227,7 +279,8 @@ async function ensurePlanTerritory(context: PipelineContext, input: Awaited<Retu
     territorio = await updateTerritoryWorkflowItem(context, territorio.territoryRef, territorio.lockVersion, confirmedTerritoryDraft(territorio.territory as unknown as Record<string, unknown>));
     territorios = territorios.map(item => item.territoryRef === territorio.territoryRef ? territorio : item);
   }
-  await assignPlanGroupKeywordsToTerritory(context, { groupId: input.preview.groupId, territoryRef: territorio.territoryRef, territories: territorios, decidedAt: agora });
+  // 2026-10-15 · a keyword do Silo (quando existe) entra junto, como cabeça da SiloPage; sem ela, o Silo segue pelo plano.
+  await assignPlanGroupKeywordsToTerritory(context, { groupId: input.preview.groupId, territoryRef: territorio.territoryRef, territories: territorios, decidedAt: agora, ...(input.preview.headKeyword ? { extraKeywordIds: [input.preview.headKeyword.keywordId] } : {}) });
   // O grupo passa a apontar para o Silo do plano (aditivo; nunca derruba). 2026-10-15: também quando o
   // vínculo aponta para um Silo que não existe mais — a store religa só nesse caso e recusa trocar Silo vivo.
   if (input.linkedSiloId !== territorio.territoryRef) {
@@ -238,19 +291,44 @@ async function ensurePlanTerritory(context: PipelineContext, input: Awaited<Retu
 }
 
 /**
- * Aplica a consolidação para UMA linha aceita (a tela chama uma vez por linha,
- * com o mesmo hash da prévia). A primeira chamada também confirma/cria o Silo.
+ * 2026-10-15 · ESCOPO `silo` (aba Silos): o Silo do plano a partir do DNA do
+ * plano — reusa o que existe (onde as keywords estão, o ligado, o de mesmo
+ * slug), confirma o candidato ou recria com nome/slug/objetivo do plano; põe
+ * nele as keywords do plano sem Silo e a keyword do Silo quando existe; religa
+ * o grupo. Nunca converte artigo em Silo, nunca cria um segundo Silo do plano.
+ * O par SiloDNA + SiloPage é gravado em seguida pela tela (o fechamento
+ * canônico de sempre, ou "Corrigir a página do Silo" pelo núcleo do plano).
+ */
+export async function applyPlanSiloConsolidation(context: PipelineContext, input: { groupId: string; decisionHash: string }, deps: Deps = {}): Promise<PlanSiloApplyResult> {
+  const lido = await buildPreview(context, input.groupId, deps);
+  if (lido.preview.siloDecisionHash !== input.decisionHash) throw new PlanConsolidationStaleError();
+  const agora = deps.now?.() ?? new Date().toISOString();
+  const territoryRef = await ensurePlanTerritory(context, lido, agora, deps);
+  const preview = await previewPlanConsolidation(context, input.groupId, deps);
+  const entraram = lido.preview.keywordsWithoutSilo?.length ?? 0;
+  const escolha = lido.preview.territory;
+  const nome = ("name" in escolha && escolha.name) || lido.plano.siloName;
+  return {
+    territoryRef,
+    message: `${escolha.kind === "create" ? `Silo do plano “${lido.plano.siloName}” criado e confirmado com o nome, o slug e o objetivo do plano` : `Silo do plano “${nome}” confirmado`}${entraram ? `; ${entraram} keyword(s) do plano entraram nele` : ""}${lido.preview.headKeyword ? `; keyword do Silo “${lido.preview.headKeyword.keyword}” como cabeça da SiloPage` : ""}. Relido.`,
+    preview,
+  };
+}
+
+/**
+ * ESCOPO `articles` (aba Artigos) · grava o ArticleDNA v1 de UMA linha aceita
+ * (a tela chama uma vez por linha, com o mesmo hash da prévia). 2026-10-15
+ * (pedido do dono: "artigo só mexe com artigos"): esta chamada NUNCA cria,
+ * confirma ou mexe no Silo — sem o Silo do plano decidido, recusa com o
+ * caminho (aba Silos, "Consolidar o Silo do plano").
  */
 export async function applyPlanConsolidationLine(runtime: ImprovementRuntime, input: { groupId: string; decisionHash: string; acceptedKeywordIds: readonly string[]; keywordId: string }, deps: Deps = {}): Promise<PlanConsolidationApplyResult> {
   const context = runtime.context;
   if (!input.acceptedKeywordIds.includes(input.keywordId)) throw refusal("Esta linha não foi aceita na prévia.");
-  const lido = await buildPreview(context, input.groupId, deps, input.acceptedKeywordIds);
-  if (lido.preview.decisionHash !== input.decisionHash) throw new PlanConsolidationStaleError();
-  const agora = deps.now?.() ?? new Date().toISOString();
-  const territoryRef = await ensurePlanTerritory(context, lido, agora, deps);
-  // Relido depois do Silo: a linha agora tem o território do plano.
   const relido = await buildPreview(context, input.groupId, deps, input.acceptedKeywordIds);
   if (relido.preview.decisionHash !== input.decisionHash) throw new PlanConsolidationStaleError();
+  if (!relido.preview.siloReady || !("territoryRef" in relido.preview.territory)) throw refusal(`${PLAN_SILO_TAB_SENTENCE} (“${PLAN_SILO_CONSOLIDATE_LABEL}”): ${relido.preview.territory.sentence} Nada foi gravado por esta linha.`);
+  const territoryRef = relido.preview.territory.territoryRef;
   const line = relido.preview.lines.find(item => item.keywordId === input.keywordId);
   if (!line) throw new PlanConsolidationStaleError();
   if (line.action === "keep") return { keywordId: line.keywordId, status: "kept", message: line.sentence, articleId: line.articleId, versionId: null, territoryRef, preview: relido.preview };

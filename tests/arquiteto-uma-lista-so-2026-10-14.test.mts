@@ -205,8 +205,10 @@ test("estrutural · a planilha abre 'Retirar artigo do Silo' (o núcleo de sempr
   // A aplicação da retirada é do painel, com motivo e confirmação; o único "apply" da planilha é o de "Consolidar o Silo do plano".
   assert.equal(tela.includes("/api/arquiteto/silo-article-withdrawal"), false, "a planilha não chama a rota da retirada");
   // 2026-10-15 · + o "apply" de "Corrigir a página do Silo (vN+1)", com o hash da prévia (mesma confirmação).
-  assert.equal(tela.split('mode: "apply"').length - 1, 2);
-  assert.match(tela, /"\/api\/arquiteto\/plan-silo\/consolidate", \{ brandId, groupId: data\.groupId, mode: "apply"/);
+  // 2026-10-15 (tarde) · o núcleo único ganhou dois escopos (aba Silos: `scope: "silo"`; aba Artigos: `scope: "articles"`) e a etapa 3 "Linha editorial".
+  assert.equal(tela.split('mode: "apply"').length - 1, 4);
+  assert.match(tela, /"\/api\/arquiteto\/plan-silo\/consolidate", \{ brandId, groupId: data\.groupId, mode: "apply", scope: "silo"/);
+  assert.match(tela, /"\/api\/arquiteto\/plan-silo\/consolidate", \{ brandId, groupId: data\.groupId, mode: "apply", scope: "articles"/);
   assert.match(tela, /"\/api\/arquiteto\/silo-declared-plan", \{ brandId, siloId: par\.siloId, mode: "apply", expectedSiloDnaVersionId: par\.siloDnaVersionId, decisionHash: par\.decisionHash \}/);
   const painel = semComentarios(ler("../modules/arquiteto/silo-article-withdrawal-panel.tsx"));
   assert.match(painel, /abrirPrevia\(autoOpenArticleId\)/);

@@ -90,10 +90,14 @@ export function reservedSiloHeadKeywordIds(input: {
   territories: readonly { territoryRef: string; humanDecided: boolean; siloPage: SiloPageIdentity }[];
   keywords: readonly { keywordId: string; text: string; territoryRef: string | null }[];
   planArticleKeywordIds?: ReadonlySet<string>;
+  /** 2026-10-15 · aditivo: as keywords do Silo do plano (`planSiloHeadKeywordIds`), em qualquer Silo ou sem Silo. */
+  planSiloHeadIds?: Iterable<string>;
 }): Set<string> {
   const doPlano = input.planArticleKeywordIds ?? new Set<string>();
   const reservadas = new Set([...input.lexicalHeadIds].filter(id => !doPlano.has(id)));
   for (const id of input.declaredSiloHeadIds) reservadas.add(id);
+  // 2026-10-15 · a keyword do Silo do plano (nome/slug do plano; opcional) é a SiloPage, nunca artigo nem "não agrupada".
+  for (const id of input.planSiloHeadIds ?? []) if (!doPlano.has(id)) reservadas.add(id);
   for (const territorio of input.territories) {
     if (!territorio.humanDecided) continue;
     const doSilo = reservedForSiloPage({

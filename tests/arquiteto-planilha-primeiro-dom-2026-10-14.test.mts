@@ -94,7 +94,8 @@ test("etapa 2 · 'Completar sustentações e SERP' começa pela SERP das princip
   await screen.render(mesa({ articles: formados(), siloConsolidado: true })); await assentar();
   const etapa = screen.get("architect-plan-stage");
   assert.equal(etapa.dataset.stage, "2");
-  assert.equal(etapa.textContent, "Completar sustentações e SERP");
+  // 2026-10-15 · as etapas da aba Artigos são só de artigo (1 formar · 2 reforçar · 3 linha editorial · 4 links).
+  assert.equal(etapa.textContent, "2 · Reforçar keywords e SERP");
   await screen.click(etapa); await assentar();
   const previa = screen.get("architect-plan-sheet-preview");
   assert.equal(previa.dataset.action, "validateSerp");
@@ -138,8 +139,8 @@ test("etapa 3 · tudo consolidado e com SERP: a barra leva a 'Links internos'", 
   const semLista = mesaWifi().filter(linha => !String(linha.id).startsWith("s"));
   await screen.render(mesa({ articles: formados(), siloConsolidado: true, keywords: semLista })); await assentar();
   const etapa = screen.get("architect-plan-stage");
-  assert.equal(etapa.dataset.stage, "3");
-  assert.equal(etapa.textContent, "Links internos");
+  assert.equal(etapa.dataset.stage, "4", "2026-10-15: links é a etapa 4 (a 3 é a linha editorial, em dia aqui)");
+  assert.equal(etapa.textContent, "4 · Links internos");
   await screen.click(etapa);
   assert.equal(registro.links, 1);
   assert.equal(chamadas.filter(chamada => chamada.method === "POST" && chamada.url !== "/api/arquiteto/serp-subject").length, 0);

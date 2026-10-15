@@ -1370,3 +1370,42 @@ Correção de texto, sem reescrever o histórico acima:
 - **§11, passo 3 ("vão para a lixeira, recuperáveis por Restaurar"):** errado para keyword **não publicada**: a
   "lixeira" do Minerador é `DELETE` definitivo (a própria tela diz "Excluir definitivamente", com nome digitado). Só a
   publicada tem restauração. Excluir sobra continua decisão humana, com a confirmação de exclusão definitiva.
+
+## Adendo — 2026-10-15 · O Silo do plano é o DNA do plano; Silo na aba Silos, artigos na aba Artigos
+
+**Pedido do dono, literal (15/10):** "Muitas vezes eu já tenho a keyword e o slug do silo… ele fica pronto com todo o
+grupo que introduzo na entrada do Minerador, só que aí o Google provider barra ele porque tem 0 volume e não cadastra ele
+como keyword, só cadastra as outras keywords dos artigos, mas os artigos já ficaram marcados com essa determinação de que
+eles já pertencem ao tal silo, mesmo que ele não esteja na lista. Até aí tudo bem, o silo é um cluster só pra unir grupos,
+não precisa ter volume… na maioria dos sites tem silos não indexados, o Google só indexa os artigos e a home… Mas quando é
+importado no Arquiteto, na aba de Silo fica louco: cadê a keyword do silo? E aí ele cadastra manualmente aquele mesmo silo
+que já está referenciado nas keywords, mas também comete esses erros: tentou converter um artigo num silo, e também criou
+outro de acordo ao que já estava predefinido nas keywords. Agora precisa de mais lógica e inteligência nesse primeiro
+processo: se ele não detectou uma keyword destinada para o silo, mas no DNA já está definido, ele tem que fazer só isso,
+recriar e ir pra frente, os dados são claros, não tem que tentar converter ninguém. Tem que caprichar em documentar isso
+no contrato. … a definição do silo já tem que estar na aba do Silo e não nos artigos. Artigo só mexe com artigos: só
+reforçar as keywords, fazer do assunto/tema uma linha editorial de copy, e finalizar com os links internos."
+
+**Contrato (regra permanente; também em `docs/04-arquiteto/spec.md` §32):**
+
+> **Silo do plano: identidade = DNA do plano (nome, slug, objetivo, Pilar, ordem); keyword do Silo opcional, 0 volume
+> normal, Silo pode não ser indexado; o Arquiteto recria e segue; proibido converter artigo em Silo ou criar Silo
+> paralelo; Silo na aba Silos, artigos na aba Artigos.**
+
+| # | Regra | Onde (código) |
+|---|---|---|
+| S1 | A identidade do Silo do plano é `editorial_groups.plan` (nome, slug, objetivo) + `keyword_subject.plan` dos artigos (Pilar, ordem). O Silo do plano que existe é achado por `planGroupTerritory` (onde as keywords estão → ligado ao grupo → mesmo slug; consolidado incluído; desfeito nunca). | `lib/arquiteto/declared-plan-silo.ts` |
+| S2 | A keyword do Silo é OPCIONAL (`planSiloHeadKeywordIds`): texto = nome ou slug do plano (`planSiloTextKey`, sem acento/caixa/pontuação); nunca keyword que o plano declara artigo; ambígua (dois planos) não é reconhecida. Ausente = normal ("Keyword do Silo: nenhuma no Arquiteto — normal"), nunca erro nem pendência. Presente = cabeça da SiloPage: reservada (`reservedSiloHeadKeywordIds`, `planSiloHeadIds`), fora de artigo e de "Keywords não agrupadas", entra no Silo do plano na consolidação e em "Processar arquitetura". | `declared-plan-silo.ts`, `article-candidate-guards.ts`, `architecture-working-proposal.ts` (`headKeywordIds`), `lib/server/arquiteto-declared-plan-silo.ts` (`extraKeywordIds`) |
+| S3 | Nunca converter artigo em Silo, nunca Silo paralelo: a proposta léxica com a identidade de um Silo do plano é o Silo do plano (sem ele no lote, nada é proposto); a keyword do Silo não vira Silo próprio por declaração solta; "+ Silo" e "Usar como Silo" (sitemap) recusam o nome/slug de um Silo do plano (`planSiloCreationRefusal`); a sugestão de Silo e a primária do Silo pela SERP nunca listam artigo do plano. | `architecture-working-proposal.ts`, `modules/arquiteto/arquiteto-workspace.tsx` |
+| S4 | "Consolidar o Silo do plano" é da **aba Silos** (`PlanSiloBar`, uma linha por grupo com plano no recorte; `planSiloStatus`: create · confirm · link · pair · fix · wait_articles · done · rejected · split). Núcleo único com escopo: `POST /api/arquiteto/plan-silo/consolidate` `scope: "silo"` (`applyPlanSiloConsolidation`, hash `siloDecisionHash`) reusa/confirma/recria o Silo com a identidade do plano, põe nele as keywords do plano sem Silo e a do Silo, religa o grupo; a tela grava na MESMA confirmação a página do Silo (v1 pelo fechamento canônico quando o Pilar tem ArticleDNA, ou "Corrigir a página do Silo (vN+1)"). | `lib/server/arquiteto-plan-consolidation.ts`, `modules/arquiteto/plan-silo-bar.tsx`, `modules/arquiteto/plan-article-sheet.tsx` |
+| S5 | A **aba Artigos** só mexe com artigos: `scope: "articles"` (`applyPlanConsolidationLine`) grava o ArticleDNA v1 das linhas que faltam e NUNCA cria, confirma, religa ou mexe no Silo (sem Silo decidido: recusa com o caminho). A barra tem 1 · Formar artigos do plano (só se faltar) · 2 · Reforçar keywords e SERP · 3 · Linha editorial · 4 · Links internos (`planArticleFlowSteps`); a atual em destaque, as seguintes desabilitadas com o motivo, no máximo 3 botões; sem o Silo decidido, "O Silo do plano é consolidado na aba Silos" com o link; links esperam a página do Silo em dia. | `lib/arquiteto/plan-article-sheet.ts`, `modules/arquiteto/articles-formation-bar.tsx` |
+| S6 | Etapa 2 = o motor de sempre (`planArticleImprovements`), recortado pelo grupo; a lista da marca inclui as keywords soltas (sem grupo; antes o recorte as perdia); a principal Livre com volume definido fica fixa (R2); a prévia diz o membro mais fraco e por quê, o que entra (fonte) e o que sai (`planReinforcementDetail`). | `lib/server/arquiteto-article-improvement.ts` (`readInputs`), `plan-article-sheet.ts` |
+| S7 | Etapa 3 "Linha editorial": `POST /api/arquiteto/plan-silo/editorial-line` (prévia grátis; aplicar um artigo por chamada com `lineHash`; `arquiteto:approve`). Só campo pendente ganha valor, de fonte declarada, sem IA; ArticleDNA v+1 aprovado (decisão humana). | `lib/arquiteto/plan-editorial-line.ts`, `lib/server/arquiteto-plan-editorial-line.ts` |
+
+**Compatibilidade:** aditivo. Sem migration, sem schema, sem SQL de escrita, sem chamada paga. A prévia do núcleo ganhou
+campos opcionais (`siloDecisionHash`, `siloReady`, `headKeyword`, `headSentence`, `keywordsWithoutSilo`, `pillarFormed`,
+`linkedSiloId`); o `scope` ausente no aplicar = "articles". Marca sem plano: nada muda (sem linha do Silo do plano, barra
+de sempre). Consumidores: catálogo MCP (`arquiteto.plan_silo`, `arquiteto.plan_articles_sheet`), envio ao Arquiteto
+(`materializeDeclaredPlanSilo` sem mudança de comportamento; `assignPlanGroupKeywordsToTerritory` só ganhou
+`extraKeywordIds` opcional), Radar/Redator (sem mudança). **Rollback:** código anterior; as versões gravadas continuam
+válidas. **Validado manualmente: não** (homologação do dono).
