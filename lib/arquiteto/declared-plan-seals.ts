@@ -63,8 +63,8 @@ export function articleDeclaredPlanSeals(input: {
   const selos: DeclaredPlanSeal[] = [];
   if (plan) {
     selos.push(plan.role === "Pilar"
-      ? { kind: "plan_pillar", label: `Pilar do plano · ${plan.order}º`, title: `Pilar declarado no plano do Silo (posição ${plan.order} do plano v${plan.planVersion}).`, tone: "neutral" }
-      : { kind: "plan_support", label: `Suporte do plano · ${plan.order}º`, title: `Suporte declarado no plano do Silo (posição ${plan.order} do plano v${plan.planVersion}).`, tone: "neutral" });
+      ? { kind: "plan_pillar", label: `Pilar do plano · ${plan.order}º`, title: `Pilar declarado no plano do Silo (posição ${plan.order} do plano).`, tone: "neutral" }
+      : { kind: "plan_support", label: `Suporte do plano · ${plan.order}º`, title: `Suporte declarado no plano do Silo (posição ${plan.order} do plano).`, tone: "neutral" });
     const declarada = plan.declaredPrincipal;
     // 2026-10-13 · TRAVA (SDD do cadastro único): livre não é divergência — é a troca permitida.
     const trava = planLockOfStanding({ plan, keywordId: input.subjectKeywordId!, ...(standing && "planLock" in standing ? { planLock: standing.planLock } : {}) });

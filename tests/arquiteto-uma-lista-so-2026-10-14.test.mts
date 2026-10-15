@@ -201,8 +201,11 @@ test("estrutural · a planilha abre 'Retirar artigo do Silo' (o núcleo de sempr
   const tela = semComentarios(ler("../modules/arquiteto/plan-article-sheet.tsx"));
   assert.match(tela, /<SiloArticleWithdrawalPanel/);
   assert.match(tela, /autoOpenArticleId=\{withdrawing\.articleId\}/, "abre a PRÉVIA (grátis)");
-  assert.match(tela, /onClick=\{\(\) => setWithdrawing\(row\.conflict\)\}/, "só pelo clique do dono");
-  assert.doesNotMatch(tela, /mode: "apply"/, "a aplicação da retirada é do painel, com motivo e confirmação");
+  assert.ok(tela.includes("onClick={() => sheet.setWithdrawing(row.conflict)}"), "só pelo clique do dono (o botão da linha)");
+  // A aplicação da retirada é do painel, com motivo e confirmação; o único "apply" da planilha é o de "Consolidar o Silo do plano".
+  assert.equal(tela.includes("/api/arquiteto/silo-article-withdrawal"), false, "a planilha não chama a rota da retirada");
+  assert.equal(tela.split('mode: "apply"').length - 1, 1);
+  assert.match(tela, /"\/api\/arquiteto\/plan-silo\/consolidate", \{ brandId, groupId: data\.groupId, mode: "apply"/);
   const painel = semComentarios(ler("../modules/arquiteto/silo-article-withdrawal-panel.tsx"));
   assert.match(painel, /abrirPrevia\(autoOpenArticleId\)/);
   assert.match(painel, /disabled=\{ocupado \|\| !motivoValido\}/, "confirmar continua exigindo o motivo");

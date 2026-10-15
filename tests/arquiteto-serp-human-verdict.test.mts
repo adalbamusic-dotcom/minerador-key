@@ -141,7 +141,8 @@ test("a Revisão só recebe pendência da SERP em divergência", () => {
 test("a aba SERP separa observação humana de sinal técnico", () => {
   assert.match(workspace, /data-testid="architect-serp-observations"/);
   assert.match(workspace, /data-testid="architect-serp-technical"/);
-  assert.match(workspace, /Detalhes técnicos da SERP/);
+  // 2026-10-14 (noite) · "Detalhes técnicos" saiu da aba Artigos (pedido do dono); no painel do artigo, o bloco é "Sinais técnicos da SERP".
+  assert.match(workspace, /Sinais técnicos da SERP/);
   assert.match(workspace, /Sem evidência suficiente, nada aqui é conflito nem exige decisão\./);
   // Ações de recomendação só aparecem no caminho de divergência.
   assert.match(workspace, /articleSerpVerdict\.kind === "DIVERGENCE"\r?\n\s*\? <>/);

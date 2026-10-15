@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { comProductShell, montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
-import { PlanArticleTableRow, PlanRowActions, PlanRowSeals, PlanSheetOperations, usePlanArticleSheet } from "../modules/arquiteto/plan-article-sheet.tsx";
-import { ArticlesFormationBar } from "../modules/arquiteto/articles-formation-bar.tsx";
 import { TopbarGroupTag } from "../components/editorial/group-selector.tsx";
 import { editorialGroupChoiceMissingInBrand, resetEditorialGroupAreaStoreForTests, setEditorialGroupAreaChoice, useAreaGroupFilter } from "../components/editorial/editorial-group-area-store.ts";
-import { buildPlanSheetRows, planOrderedGroupItems, planRowsWithoutArticle, splitTableSelectionForPlan, type PlanSheetArticle, type PlanSheetRow } from "../lib/arquiteto/plan-article-sheet.ts";
+import { buildPlanSheetRows } from "../lib/arquiteto/plan-article-sheet.ts";
 import type { EditorialGroupScreenFilter } from "../lib/editorial/editorial-groups.ts";
 import { GRUPOS } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import { ARTIGO_INTRUSO, AZUL, MARCA_WIFI, grupoDaKeywordReal, mesaWifiReal } from "./arquiteto-uma-lista-so-fixtures.mts";
+import { COLUNAS, MesaDoPlano, ROTULOS_REMOVIDOS, novoRegistro, type ArtigoDaMesa, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
 
 /*
  * 2026-10-14 (tarde) · PEDIDO DO DONO, na tela de verdade: "coloca só numa
@@ -16,16 +15,16 @@ import { ARTIGO_INTRUSO, AZUL, MARCA_WIFI, grupoDaKeywordReal, mesaWifiReal } fr
  * ainda estão em paralelo, não está nos botões principais, sumiram os botões
  * de processo normal (…) é tudo por esse painel cheio de textos".
  *
- * A mesa abaixo é montada com as MESMAS peças que a aba Artigos usa
- * (`usePlanArticleSheet`, `ArticlesFormationBar`, `PlanSheetOperations`,
- * `PlanArticleTableRow`, `PlanRowSeals`, `PlanRowActions` e a ordem/seleção
- * do domínio). Caso real WifiConecta (cor azul, 7 artigos do plano: 4 com
- * candidato na mesa e 3 presos no artigo do laranja) e uma marca grande sem
- * plano (AdalbaPro). Sem rede real, sem provider, sem custo.
+ * 2026-10-14 (noite) · ajustado ao pedido seguinte: "tem 9 botões no painel do
+ * topo, e em distintas posições, tudo confuso". Com UM plano no recorte (azul)
+ * a barra tem só o botão da etapa atual (e "Melhorar publicados…" quando há
+ * publicados); com mais de um plano ("Todos") ou sem plano, a barra de sempre.
+ * Na linha ficam só "Procurar outra principal" (sem volume e Livre) e
+ * "Retirar artigo do Silo". A mesa vem do harness comum (as MESMAS peças da aba).
  */
 
 type Chamada = { url: string; method: string; body: any };
-let screen: RadarDomScreen, chamadas: Chamada[], aplicados: number;
+let screen: RadarDomScreen, chamadas: Chamada[];
 const lentes = ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"];
 const planoSerp = (paid: number) => ({ lenses: lentes, perLens: [], paidQueries: paid, primaryPaidQueries: paid / 4, extraPaidQueries: (paid * 3) / 4, conditionalPaidQueries: 0, recollectableQueries: 0, estimatedCostUsd: { min: paid * 0.0006, max: paid * 0.002 }, collectedAtSpreadDays: 0, datesDiverge: false, payMissingExtraLenses: true, recollectStaleLenses: false, digestChecked: false });
 const execucao = (extra: Record<string, unknown>) => ({ version: 1, runId: "22222222-2222-4222-8222-222222222222", brandId: MARCA_WIFI, actorId: "ator", createdAt: "2026-10-14T12:00:00Z", state: "prepared", decisionHash: "b".repeat(64), leaseUntil: null, sourceHashes: {}, targets: [], keywords: [], beforeAssignments: {}, proposals: [], costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] }, reservedCostUsd: 0, notices: [], outcomes: [], acceptedIds: null, origin: "plan_sheet", ...extra });
@@ -64,39 +63,6 @@ function rede() {
 }
 const assentar = async (vezes = 25) => { for (let i = 0; i < vezes; i += 1) await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
 const h = React.createElement;
-const COLUNAS = ["index", "selection", "expand", "article", "keyword", "keywordCount", "siloRole", "articleDefinition", "silo", "actions", "approval", "status"];
-const VAZIO = new Set<string>();
-
-/** O artigo da mesa, na forma mínima: o Assunto dele diz se é do plano (o mesmo critério da aba). */
-type ArtigoDaMesa = { id: string; keyword: string; subjectKeywordId: string | null };
-type Registro = { processar: string[][]; concluir: string[][] };
-
-function MesaUmaTabela({ marca, keywords, articles, mesa, filtro, registro }: { marca: string; keywords: readonly Record<string, unknown>[]; articles: readonly PlanSheetArticle[]; mesa: readonly ArtigoDaMesa[]; filtro: EditorialGroupScreenFilter; registro: Registro }) {
-  const sheet = usePlanArticleSheet({ brandId: marca, brandRef: "wificonecta--d4fa133a", keywords, groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal, filter: filtro, articles, radarArticleIds: VAZIO, onApplied: () => { aplicados += 1; } });
-  const [selecionados, setSelecionados] = React.useState<Set<string>>(new Set());
-  const planRowOf = (art: ArtigoDaMesa): PlanSheetRow | null => art.subjectKeywordId ? sheet.rowByKeywordId.get(art.subjectKeywordId) ?? null : null;
-  const representadas = new Set(mesa.map(planRowOf).filter((row): row is PlanSheetRow => Boolean(row)).map(row => row.keywordId));
-  const soDoPlano = planRowsWithoutArticle(sheet.rows, representadas);
-  const divisao = splitTableSelectionForPlan({ articles: mesa, selectedArticleIds: selecionados, idOf: art => art.id, planRowOf, planOnlyRows: soDoPlano, selectedPlanKeywordIds: sheet.selected });
-  const escopo = { selectedCount: divisao.regularArticleIds.size, reason: divisao.regularArticleIds.size ? null : "Selecione pelo menos um artigo." };
-  const itens = planOrderedGroupItems({ articles: mesa, planRows: soDoPlano, idOf: art => art.id, planRowOf });
-  const alternar = (id: string) => setSelecionados(atual => { const proximo = new Set(atual); if (proximo.has(id)) proximo.delete(id); else proximo.add(id); return proximo; });
-  return h(React.Fragment, null,
-    h(ArticlesFormationBar, {
-      formationBusy: false, processed: false, selectionScope: escopo, planTargets: divisao.planTargets, planSheet: sheet,
-      onProcess: async () => { registro.processar.push([...divisao.regularArticleIds]); },
-      onConfirm: async () => { registro.concluir.push([...divisao.regularArticleIds]); },
-      improvementOpen: false, onToggleImprovement: () => undefined, buttonClassName: "button",
-    }),
-    h(PlanSheetOperations, { sheet, buttonClassName: "button", primaryButtonClassName: "button", controlClassName: "control", dangerButtonClassName: "danger" }),
-    h("table", { "data-architect-table": "articles" }, h("tbody", null, itens.map(item => item.kind === "plan"
-      ? h(PlanArticleTableRow, { key: item.key, sheet, row: item.row, columns: COLUNAS, buttonClassName: "button" })
-      : h("tr", { key: item.key, "data-testid": "mesa-article-row", "data-article-id": item.article.id },
-        h("td", null, h("input", { type: "checkbox", "aria-label": `Selecionar ${item.article.keyword}`, checked: selecionados.has(item.article.id), onChange: () => alternar(item.article.id), "data-article-selection": item.article.id })),
-        h("td", null, item.article.keyword, item.planRow ? h(PlanRowSeals, { row: item.planRow, result: sheet.results.get(item.planRow.keywordId) ?? null }) : null),
-        h("td", null, item.planRow ? h(PlanRowActions, { sheet, row: item.planRow, buttonClassName: "button" }) : null))))),
-  );
-}
 
 /* Caso real WifiConecta: os 4 candidatos do plano (9, 10, 11 e 15) estão na mesa; 12, 13 e 14 estão presos no artigo do laranja. */
 const MESA_WIFI: ArtigoDaMesa[] = [
@@ -107,32 +73,41 @@ const MESA_WIFI: ArtigoDaMesa[] = [
   { id: "comum-1", keyword: "internet residencial", subjectKeywordId: null },
 ];
 const AZUL_FILTRO: EditorialGroupScreenFilter = { kind: "groups", color: "azul", groupIds: [AZUL] };
+/** "Todos": o azul e o laranja têm plano — mais de um plano no recorte, a barra é a de sempre. */
+const TODOS: EditorialGroupScreenFilter = { kind: "all" };
 let registro: Registro;
-const mesaWifi = () => comProductShell(h(MesaUmaTabela, { marca: MARCA_WIFI, keywords: mesaWifiReal(), articles: [ARTIGO_INTRUSO], mesa: MESA_WIFI, filtro: AZUL_FILTRO, registro }));
+const mesaWifi = (filtro: EditorialGroupScreenFilter = AZUL_FILTRO) => comProductShell(h(MesaDoPlano, { marca: MARCA_WIFI, keywords: mesaWifiReal(), articles: [ARTIGO_INTRUSO], mesa: MESA_WIFI, filtro, registro, groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal }));
 const linhaDoPlano = (keywordId: string) => screen.container.querySelector<HTMLElement>(`[data-testid="architect-plan-table-row"][data-keyword-id="${keywordId}"]`);
 const linhaDaMesa = (id: string) => screen.container.querySelector<HTMLElement>(`[data-testid="mesa-article-row"][data-article-id="${id}"]`)!;
 const marcar = async (alvo: HTMLElement) => screen.click(alvo.querySelector<HTMLInputElement>("input[type='checkbox']")!);
 const semMinerador = () => assert.equal(chamadas.some(chamada => chamada.url.includes("/api/minerador")), false, "nenhum pedido ao Minerador");
 
-test.beforeEach(async () => { chamadas = []; aplicados = 0; registro = { processar: [], concluir: [] }; resetEditorialGroupAreaStoreForTests(); screen = await montarRadar(); });
+test.beforeEach(async () => { chamadas = []; registro = novoRegistro(); resetEditorialGroupAreaStoreForTests(); screen = await montarRadar(); });
 test.afterEach(() => screen.destroy());
 
-test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mesa com os selos + 3 linhas do plano presas), depois o comum; nada de planilha nem cartão", async () => {
+test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mesa com os selos + 3 linhas do plano presas), depois o comum; uma barra com a etapa atual", async () => {
   rede();
   await screen.render(mesaWifi()); await assentar();
   assert.equal(screen.container.querySelectorAll("table").length, 1, "uma tabela só");
-  assert.equal(screen.query("architect-plan-sheet"), null, "a planilha separada não aparece");
+  assert.equal(screen.query("architect-plan-sheet"), null, "a planilha separada não existe");
   assert.equal(screen.query("architect-improvement-next-step"), null, "nenhum cartão 'Próximo passo'");
   assert.equal(screen.query("architect-plan-operations"), null, "a prévia só aparece quando há ação");
   const ordem = [...screen.container.querySelectorAll<HTMLElement>("tbody > tr")].map(tr => tr.dataset.keywordId ?? tr.dataset.articleId);
   assert.deepEqual(ordem, ["cand-k9", "cand-k10", "cand-k11", "k12", "k13", "k14", "cand-k15", "comum-1"], "a ordem do plano (9–15), e os demais depois");
+  // A barra: um plano no recorte → o botão da etapa atual, sem contador; sem publicados, nada mais.
+  const barra = screen.get("architect-articles-formation-actions");
+  assert.equal(barra.dataset.planMode, "true");
+  assert.deepEqual([...barra.querySelectorAll("button")].map(botao => botao.textContent), ["Consolidar o Silo do plano"]);
   // A linha do artigo do plano ganha os selos curtos: trava, volume, SERP e formação.
   const selosK9 = [...linhaDaMesa("cand-k9").querySelectorAll<HTMLElement>("[data-plan-seal]")].map(selo => `${selo.dataset.planSeal}:${selo.textContent}`);
   assert.deepEqual(selosK9, ["lock:Travada", "volume:Vol. 5.400", "serp:SERP 4/4", "formation:Aguardando formação"]);
+  assert.match(linhaDaMesa("cand-k9").querySelector<HTMLElement>("[data-plan-seal='lock']")!.title, /Volume definido não se troca/, "o porquê no title, não repetido na linha");
   const selosK10 = [...linhaDaMesa("cand-k10").querySelectorAll<HTMLElement>("[data-plan-seal]")].map(selo => selo.textContent);
   assert.deepEqual(selosK10, ["Livre", "Sem volume", "Sem SERP", "Aguardando formação"]);
-  assert.ok(linhaDaMesa("cand-k10").querySelector("[data-plan-action='swapPrincipal']"), "trava Livre: Trocar principal na linha");
-  assert.equal(linhaDaMesa("cand-k9").querySelector("[data-plan-action='swapPrincipal']"), null, "travada: sem Trocar principal");
+  assert.match(linhaDaMesa("cand-k10").querySelector("[data-testid='architect-plan-row-alerts']")!.textContent!, /sem volume — livre, pode trocar/);
+  assert.equal(linhaDaMesa("cand-k10").querySelector("[data-plan-action='swapPrincipal']")?.textContent, "Procurar outra principal", "sem volume e Livre: procurar outra na linha");
+  assert.equal(linhaDaMesa("cand-k9").querySelector("[data-plan-action='swapPrincipal']"), null, "volume definido: nunca troca");
+  assert.equal(linhaDaMesa("cand-k9").querySelector("[data-testid='architect-plan-row-actions']"), null, "linha travada sem nada a fazer: sem botões");
   // A linha do plano presa no artigo do laranja: selo do conflito + a ação.
   const presa = linhaDoPlano("k13")!;
   assert.equal(presa.dataset.formation, "conflict");
@@ -141,20 +116,23 @@ test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mes
   assert.equal(presa.querySelector("[data-testid='architect-plan-row-withdraw']")?.textContent, "Retirar artigo do Silo");
   assert.equal(presa.querySelector("[data-testid='architect-plan-row-role']")?.textContent, "Suporte · 13º");
   assert.equal(presa.querySelectorAll("td").length, COLUNAS.length, "as colunas da tabela de sempre");
+  assert.equal([...presa.querySelectorAll("td")].at(-1)!.textContent, "Do plano", "uma versão do plano só: a do grupo, sem 'v1/v2/v3' por linha");
   // A linha comum não tem nada do plano.
   assert.equal(linhaDaMesa("comum-1").querySelector("[data-plan-seal]"), null);
+  // Nenhum dos botões/textos que o dono mandou tirar.
+  for (const rotulo of ROTULOS_REMOVIDOS) assert.doesNotMatch(screen.text(), rotulo, String(rotulo));
   semMinerador();
 });
 
-test("Processar artigos (barra) com linhas do plano marcadas: o comum vai ao handler de sempre; as do plano, ao Validar SERP com custo antes", async () => {
+test("'Todos' (azul e laranja com plano): a barra de sempre — Processar artigos com linhas do plano marcadas: o comum vai ao handler de sempre; as do plano, ao Validar SERP com custo antes", async () => {
   rede();
-  await screen.render(mesaWifi()); await assentar();
+  await screen.render(mesaWifi(TODOS)); await assentar();
+  assert.match(screen.get("architect-articles-selection-count").textContent!, /Escolha a cor do plano na etiqueta para consolidar o Silo do plano/);
   await marcar(linhaDaMesa("cand-k9"));
   await marcar(linhaDoPlano("k13")!);
   await marcar(linhaDaMesa("comum-1"));
   const barra = screen.get("architect-articles-formation-actions");
   assert.equal(barra.dataset.planSelected, "2");
-  assert.match(screen.get("architect-articles-selection-count").textContent!, /3 artigo\(s\) selecionado\(s\) na mesa · 2 do plano/);
   await screen.click("architect-articles-top-process"); await assentar();
   assert.deepEqual(registro.processar, [["comum-1"]], "o artigo de sempre pelo handler de sempre");
   const planos = chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "plan");
@@ -171,9 +149,9 @@ test("Processar artigos (barra) com linhas do plano marcadas: o comum vai ao han
   semMinerador();
 });
 
-test("Concluir formação (barra) com o plano inteiro marcado: as 3 presas recusadas antes do servidor; as 4 formam pela melhoria do plano; o handler de sempre não é chamado", async () => {
+test("'Todos' · Concluir formação (barra) com o plano azul marcado: as 3 presas recusadas antes do servidor; as 4 formam pela melhoria do plano; o handler de sempre não é chamado", async () => {
   rede();
-  await screen.render(mesaWifi()); await assentar();
+  await screen.render(mesaWifi(TODOS)); await assentar();
   for (const id of ["cand-k9", "cand-k10", "cand-k11", "cand-k15"]) await marcar(linhaDaMesa(id));
   for (const id of ["k12", "k13", "k14"]) await marcar(linhaDoPlano(id)!);
   assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false, "o botão de sempre vale para as linhas do plano (sem processar antes)");
@@ -184,25 +162,20 @@ test("Concluir formação (barra) com o plano inteiro marcado: as 3 presas recus
   assert.deepEqual(preparos[0].body.targetIds, ["k9", "k10", "k11", "k15"], "a presa não vai ao servidor");
   assert.equal(preparos[0].body.origin, "plan_sheet");
   assert.equal(preparos[0].body.group, AZUL);
+  assert.equal(screen.get("architect-plan-sheet-confirm").textContent, "Confirmar e gravar", "sem contador no botão");
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k9", "k10", "k11", "k15"]]);
   assert.match(linhaDaMesa("cand-k15").querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /ArticleDNA de k15 criado e relido/);
   assert.match(linhaDoPlano("k14")!.querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /^Não gravado: Presa no artigo/);
   assert.match(screen.get("architect-plan-sheet-summary").textContent!, /4 gravado\(s\) e relido\(s\); 3 fora desta confirmação/);
-  assert.equal(aplicados, 1, "a mesa é relida");
+  assert.equal(registro.aplicados, 1, "a mesa é relida");
   semMinerador();
 });
 
-test("ações por linha: 'Concluir formação' na linha do artigo do plano chama o núcleo do plano só para ela; 'Retirar artigo do Silo' abre a prévia", async () => {
+test("na linha: nada de 'Validar SERP' nem 'Concluir formação'; 'Retirar artigo do Silo' abre a prévia (só o dono confirma)", async () => {
   rede();
   await screen.render(mesaWifi()); await assentar();
-  await screen.click(linhaDaMesa("cand-k15").querySelector<HTMLElement>("[data-plan-action='concludeFormation']")!); await assentar();
-  const preparos = chamadas.filter(chamada => chamada.body?.action === "prepare");
-  assert.deepEqual(preparos.map(chamada => chamada.body.targetIds), [["k15"]]);
-  await screen.click([...screen.get("architect-plan-sheet-preview").querySelectorAll<HTMLButtonElement>("button")].find(botao => botao.textContent === "Cancelar")!);
-  assert.equal(screen.query("architect-plan-sheet-preview"), null);
-  assert.equal(chamadas.some(chamada => chamada.body?.action === "apply"), false, "cancelar não grava");
-  // A ação da linha presa abre "Retirar artigo do Silo" (o núcleo de sempre), com prévia.
+  assert.equal(screen.container.querySelector("[data-plan-action='validateSerp'], [data-plan-action='concludeFormation']"), null, "os processos são da barra, um por vez");
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); const body = init?.body ? JSON.parse(String(init.body)) : null;
     chamadas.push({ url, method: init?.method ?? "GET", body });
@@ -214,19 +187,23 @@ test("ações por linha: 'Concluir formação' na linha do artigo do plano chama
   assert.deepEqual(chamadas.filter(chamada => chamada.url === "/api/arquiteto/silo-article-withdrawal").map(chamada => chamada.body.mode), ["preview"], "só a prévia; nada aplicado sem o dono");
 });
 
-test("marca grande (AdalbaPro) sem plano na cor: só a tabela de sempre; a barra chama o handler de sempre; nenhuma leitura do plano", async () => {
+test("marca grande (AdalbaPro) sem plano na cor: só a tabela de sempre; a barra de sempre chama o handler de sempre; nenhuma leitura do plano", async () => {
   rede();
   const keywords = Array.from({ length: 1200 }, (_, i) => ({ id: `ad-${i}`, keyword: `keyword adalba ${i}`, brand_id: ADALBAPRO, analise_semantica: {}, volume_search: 100 + i, volume_source: "google_ads" }));
   const mesa: ArtigoDaMesa[] = Array.from({ length: 300 }, (_, i) => ({ id: `art-${i}`, keyword: `artigo ${i}`, subjectKeywordId: null }));
   const inicio = Date.now();
-  const linhas = buildPlanSheetRows({ brandId: ADALBAPRO, keywords, groupOf: () => null, keywordGroupOf: () => null, articles: [], radarArticleIds: VAZIO, serp: null, filter: { kind: "all" }, now: new Date("2026-10-14T12:00:00Z") });
+  const linhas = buildPlanSheetRows({ brandId: ADALBAPRO, keywords, groupOf: () => null, keywordGroupOf: () => null, articles: [], radarArticleIds: new Set<string>(), serp: null, filter: { kind: "all" }, now: new Date("2026-10-14T12:00:00Z") });
   assert.equal(linhas.length, 0);
   assert.ok(Date.now() - inicio < 2000, "montar as linhas do plano de uma marca grande é barato");
-  await screen.render(comProductShell(h(MesaUmaTabela, { marca: ADALBAPRO, keywords, articles: [], mesa, filtro: { kind: "all" }, registro }))); await assentar();
+  await screen.render(comProductShell(h(MesaDoPlano, { marca: ADALBAPRO, keywords, articles: [], mesa, filtro: { kind: "all" }, registro, groupOf: () => null, keywordGroupOf: () => null }))); await assentar();
   assert.equal(screen.container.querySelectorAll("table").length, 1);
   assert.equal(screen.all("mesa-article-row").length, 300);
   assert.equal(screen.all("architect-plan-table-row").length, 0);
   assert.equal(screen.container.querySelector("[data-plan-seal]"), null);
+  // A barra de sempre (a de 4d546ce): Processar artigos · Concluir formação · Melhorar publicados…, no mesmo lugar.
+  const barra = screen.get("architect-articles-formation-actions");
+  assert.equal(barra.dataset.planMode, undefined);
+  assert.deepEqual([...barra.querySelectorAll("button")].map(botao => botao.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
   await marcar(linhaDaMesa("art-7"));
   await screen.click("architect-articles-top-process"); await assentar();
   assert.deepEqual(registro.processar, [["art-7"]]);

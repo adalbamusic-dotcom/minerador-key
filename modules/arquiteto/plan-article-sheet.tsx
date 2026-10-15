@@ -1,22 +1,22 @@
 "use client";
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { InfoHint } from "@/components/info-hint";
 import { EditorialGroupTag } from "@/components/editorial/group-tag";
 import { ArticleSubjectLine } from "@/components/editorial/article-subject-line";
 import { OperationProgress } from "./operation-progress";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
 import type { ArchitectSubjectStanding } from "@/lib/arquiteto/declared-subject";
-import { EDITORIAL_GROUP_COLOR_CLASSES, EDITORIAL_GROUP_COLOR_LABELS, type EditorialGroupScreenFilter } from "@/lib/editorial/editorial-groups";
+import type { EditorialGroupScreenFilter } from "@/lib/editorial/editorial-groups";
 import { describeSerpPaidPlan, type SerpPaidPlan, type SerpPaidPlanChoice } from "@/lib/arquiteto/serp-lens-plan";
 import { runPaidSerpBlocks } from "@/lib/arquiteto/serp-blocks";
 import { ARCHITECT_SUGGESTIONS_LABEL, mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
 import {
-  PLAN_SHEET_ACTION_LABELS, PLAN_SHEET_ANCHOR, PLAN_SHEET_LOCKED_SEAL, PLAN_SHEET_TITLE,
-  applyPlanSheetSerp, buildPlanSheetRows, planPrincipalSwapCandidates, planRowRoleLabel, planRowSeals, planSheetColorLabel, planSheetFormationSelection,
-  planSheetNextStep, planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpSelection, planSheetServerErrorSentence, planSwapCandidateLabel,
+  PLAN_SHEET_ACTION_LABELS,
+  applyPlanSheetSerp, planFlowSteps, planRowAlerts, planStepTwoAction, PLAN_FLOW_LABELS, type PlanFlowStep, buildPlanSheetRows, planPrincipalSwapCandidates, planRowRoleLabel, planRowSeals, planSheetColorLabel, planSheetFormationSelection,
+  planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpSelection, planSheetServerErrorSentence, planSwapCandidateLabel,
   type PlanRowSeal, type PlanSheetAction, type PlanSheetArticle, type PlanSheetConflict, type PlanSheetRow, type PlanSheetSerpRead, type PlanSwapCandidate,
 } from "@/lib/arquiteto/plan-article-sheet";
 import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "@/lib/arquiteto/silo-article-withdrawal";
+import type { PlanConsolidationLine } from "@/lib/arquiteto/plan-consolidation";
 import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
 
 /**
@@ -36,8 +36,14 @@ import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
  * listas". A lógica saiu para `usePlanArticleSheet`, e a aba Artigos mostra as
  * linhas do plano DENTRO da tabela de artigos de sempre (`PlanArticleTableRow`,
  * `PlanRowSeals`, `PlanRowActions`), com a prévia/andamento logo abaixo da
- * barra (`PlanSheetOperations`). `PlanArticleSheet` (a planilha separada)
- * continua existindo só para os testes do núcleo; a aba não a mostra.
+ * barra (`PlanSheetOperations`).
+ *
+ * 2026-10-14 (noite) · PEDIDO DO DONO ("tem 9 botões no painel do topo (…) tudo
+ * confuso"; "era só olhar e consolidar"): a planilha separada saiu de vez (nem
+ * para os testes); as etapas do plano são da barra (`flow`/`runStage`:
+ * "Consolidar o Silo do plano" → "Completar sustentações e SERP" → "Links
+ * internos"); na linha ficam só "Procurar outra principal" (sem volume e
+ * Livre) e "Retirar artigo do Silo" (presa em outro artigo).
  */
 
 type Tone = "success" | "neutral" | "warning";
@@ -47,7 +53,22 @@ type FormationRun = { groupId: string; run: ImprovementRun; readyIds: string[] }
 type Preview =
   | { action: "validateSerp"; lines: PreviewLine[]; plan: SerpPaidPlan; resolve: (choice: SerpPaidPlanChoice | null) => void }
   | { action: "concludeFormation" | "swapPrincipal"; lines: PreviewLine[]; runs: FormationRun[] }
-  | { action: "chooseSwap"; rows: PlanSheetRow[]; candidates: Record<string, PlanSwapCandidate[]>; picks: Record<string, string>; refused: PreviewLine[] };
+  | { action: "chooseSwap"; rows: PlanSheetRow[]; candidates: Record<string, PlanSwapCandidate[]>; picks: Record<string, string>; refused: PreviewLine[] }
+  | { action: "consolidate"; lines: PreviewLine[]; data: PlanConsolidationPreviewData };
+
+/** A prévia de "Consolidar o Silo do plano" como o servidor a devolve (`/api/arquiteto/plan-silo/consolidate`). */
+export type PlanConsolidationPreviewData = {
+  groupId: string;
+  groupLabel: string;
+  planVersion: number;
+  siloName: string;
+  territory: { kind: string; territoryRef?: string; sentence: string };
+  lines: PlanConsolidationLine[];
+  pillarKeywordId: string | null;
+  summary: string;
+  acceptedKeywordIds: string[];
+  decisionHash: string;
+};
 type Busy = { label: string; startedAt: number; done: number | null; total: number | null; unit: string };
 
 const LINE_TONE: Record<LineKind, string> = {
@@ -125,6 +146,15 @@ export type PlanArticleSheetProps = {
   baseRows?: readonly PlanSheetRow[];
   /** Releitura da mesa depois de gravar (a linha passa a "Formado · vN"). */
   onApplied: () => void;
+  /** 2026-10-14 (noite) · aditivos: o Silo do território já tem o par canônico (SiloDNA + SiloPage)? */
+  siloConsolidatedOf?: (territoryRef: string) => boolean;
+  /**
+   * Depois das linhas, o par canônico do Silo do plano (SiloDNA + SiloPage com
+   * o Pilar e a ordem do plano) pela consolidação de sempre da mesa.
+   */
+  consolidateSiloPair?: (input: { groupId: string; territoryRef: string; pillarKeywordId: string | null }) => Promise<{ ok: boolean; message: string }>;
+  /** Etapa 3: leva à aba Links internos. */
+  onGoToLinks?: () => void;
 };
 
 export type PlanSheetResult = { tone: Tone; text: string };
@@ -155,6 +185,11 @@ export type PlanArticleSheetController = {
   /** Muda quando a linha do plano muda (SERP lida, resultado, ocupado): a linha memoizada da mesa redesenha. */
   revision: object;
   start: (action: PlanSheetAction, alvo: PlanSheetRow[]) => void;
+  /** 2026-10-14 (noite) · as três etapas do plano (uma só em destaque) e o grupo do recorte (null = mais de um plano). */
+  flow: PlanFlowStep[];
+  planGroupId: string | null;
+  /** O botão da etapa atual. */
+  runStage: (step: PlanFlowStep["id"]) => void;
   cancelPreview: () => void;
   prepareSwapPreview: (rows: PlanSheetRow[], picks: Record<string, string>, refused: PreviewLine[]) => void;
   confirmPreview: () => void;
@@ -173,7 +208,7 @@ function corDoFiltro(filter: EditorialGroupScreenFilter, rows: readonly PlanShee
  * que estava em curso deixa de escrever na tela.
  */
 export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSheetController {
-  const { brandId, brandRef, keywords, standings, groupOf, keywordGroupOf, filter, articles, radarArticleIds, onApplied } = props;
+  const { brandId, brandRef, keywords, standings, groupOf, keywordGroupOf, filter, articles, radarArticleIds, onApplied, siloConsolidatedOf, consolidateSiloPair, onGoToLinks } = props;
 
   /* ------------- a sessão: troca de marca ou desmontagem encerram ------------- */
   const sessao = useRef(0);
@@ -484,6 +519,79 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     setPreview({ action: "chooseSwap", rows: livres, candidates, picks, refused: recusadas });
   }
 
+  /* ======================= CONSOLIDAR O SILO DO PLANO (2026-10-14, noite) ======================= */
+  async function consolidate() {
+    if (!brandId || !planGroupId) return;
+    const vivo = vivoAgora();
+    setError(null); setSummary(null); setPreview(null);
+    startBusy("Preparando a prévia da consolidação (grátis, só leitura)");
+    const answer = await postJson("/api/arquiteto/plan-silo/consolidate", { brandId, groupId: planGroupId, mode: "preview" });
+    if (!vivo()) return;
+    setBusy(null);
+    if (!answer.ok || !answer.body.success) { setError(humanError(answer)); return; }
+    const data = answer.body.data as PlanConsolidationPreviewData;
+    const lines: PreviewLine[] = data.lines.map(line => ({
+      keywordId: line.keywordId,
+      keyword: line.keyword,
+      kind: line.action === "write" ? "go" : line.action === "keep" ? "known" : "refused",
+      text: `${line.role} · ${line.order}º · ${line.sentence}${line.alerts.length ? ` Alertas: ${line.alerts.join("; ")}.` : ""}`,
+    }));
+    setPreview({ action: "consolidate", lines, data });
+  }
+
+  async function confirmConsolidation(data: PlanConsolidationPreviewData) {
+    if (!brandId) return;
+    const vivo = vivoAgora();
+    setPreview(null); setError(null);
+    const linhas = new Map<string, PlanSheetResult>();
+    for (const line of data.lines) if (line.action === "refused") linhas.set(line.keywordId, { tone: "warning", text: `Fora desta consolidação: ${line.sentence}` });
+    const aceitas = data.acceptedKeywordIds;
+    let territoryRef: string | null = data.territory.territoryRef ?? null;
+    let gravados = 0, falhas = 0;
+    if (aceitas.length) startBusy("Consolidando o Silo do plano (artigos do plano, sem SERP)", aceitas.length, "artigo(s)");
+    // Uma linha por chamada (o tempo do servidor), com o MESMO hash da prévia: a confirmação é uma só.
+    for (const [indice, keywordId] of aceitas.entries()) {
+      const answer = await postJson("/api/arquiteto/plan-silo/consolidate", { brandId, groupId: data.groupId, mode: "apply", decisionHash: data.decisionHash, acceptedKeywordIds: aceitas, keywordId });
+      if (!vivo()) return;
+      if (answer.ok && answer.body.success) {
+        const resultado = answer.body.data as { status: string; message: string; territoryRef: string | null };
+        territoryRef = resultado.territoryRef ?? territoryRef;
+        if (resultado.status === "written") gravados += 1;
+        linhas.set(keywordId, { tone: resultado.status === "refused" ? "warning" : "success", text: resultado.message });
+      } else {
+        falhas += 1;
+        linhas.set(keywordId, { tone: "warning", text: humanError(answer) });
+      }
+      setBusy(atual => atual ? { ...atual, done: indice + 1 } : atual);
+    }
+    // Depois das linhas, o par canônico do Silo (SiloDNA + SiloPage com o Pilar e a ordem do plano).
+    let silo: { ok: boolean; message: string } | null = null;
+    if (territoryRef && consolidateSiloPair && !falhas) {
+      setBusy({ label: "Gravando o SiloDNA e a SiloPage do plano (Pilar e ordem do plano)", startedAt: agoraMs(), done: null, total: null, unit: "" });
+      try { silo = await consolidateSiloPair({ groupId: data.groupId, territoryRef, pillarKeywordId: data.pillarKeywordId }); }
+      catch (e) { silo = { ok: false, message: e instanceof Error ? e.message : "A consolidação do Silo não foi confirmada." }; }
+      if (!vivo()) return;
+    }
+    const fora = data.lines.filter(line => line.action === "refused").length;
+    const textoSilo = silo ? ` Silo: ${silo.message}` : falhas ? " O Silo não foi consolidado: resolva as linhas com falha e consolide de novo." : "";
+    finish(vivo, linhas, { tone: falhas || (silo && !silo.ok) ? "warning" : "success", text: `${PLAN_FLOW_LABELS.consolidate}: ${gravados} artigo(s) gravado(s) e relido(s)${falhas ? `, ${falhas} com falha` : ""}${fora ? `; ${fora} fora (motivo na linha)` : ""}.${textoSilo} Nada foi gravado no Minerador; nada foi pago.` });
+    if (vivo()) onApplied();
+  }
+
+  /** O botão da etapa atual: 1 consolidar; 2 SERP das principais e depois a formação com parecer e sustentações; 3 Links internos. */
+  function runStage(step: PlanFlowStep["id"]) {
+    if (ocupado) return;
+    if (step === 1) { void consolidate(); return; }
+    if (step === 2) {
+      const passo = planStepTwoAction(rows);
+      if (!passo) return;
+      if (passo.action === "validateSerp") void validateSerp(passo.rows);
+      else void prepareFormation(passo.rows, "concludeFormation");
+      return;
+    }
+    onGoToLinks?.();
+  }
+
   function start(action: PlanSheetAction, alvo: PlanSheetRow[]) {
     if (!alvo.length || ocupado) return;
     if (action === "validateSerp") void validateSerp(alvo);
@@ -505,8 +613,16 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       resolver({ authorizedPaidQueries: preview.plan.paidQueries, payMissingExtraLenses: true, recollectStaleLenses: false });
     } else if (preview.action === "concludeFormation" || preview.action === "swapPrincipal") {
       void confirmFormation(preview.action, preview.runs, preview.lines);
+    } else if (preview.action === "consolidate") {
+      void confirmConsolidation(preview.data);
     }
   }
+
+  const gruposDoRecorte = [...new Set(rows.map(row => row.groupId).filter((id): id is string => Boolean(id)))];
+  const planGroupId = gruposDoRecorte.length === 1 ? gruposDoRecorte[0] : null;
+  const territoriosDoPlano = [...new Set(rows.map(row => row.territoryRef).filter((ref): ref is string => Boolean(ref)))];
+  const siloConsolidado = territoriosDoPlano.length > 0 && territoriosDoPlano.every(ref => siloConsolidatedOf?.(ref) ?? false);
+  const flow = useMemo(() => planFlowSteps({ rows, siloConsolidated: siloConsolidado }), [rows, siloConsolidado]);
 
   const toggleSelected = (keywordId: string, marcar?: boolean) => setSelected(atual => {
     const proximo = new Set(atual);
@@ -519,7 +635,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   return {
     brandId, rows, rowByKeywordId, selected, setSelected, toggleSelected, results, ocupado, busy, now, preview, setPreview,
     error, setError, summary, setSummary, resumable, withdrawing, setWithdrawing, sugestoesHref, corDoRecorte, revision,
-    start, cancelPreview, prepareSwapPreview: (alvo, picks, refused) => { void prepareFormation(alvo, "swapPrincipal", picks, refused); },
+    start, flow, planGroupId, runStage, cancelPreview, prepareSwapPreview: (alvo, picks, refused) => { void prepareFormation(alvo, "swapPrincipal", picks, refused); },
     confirmPreview, resume: run => { void resume(run); }, onApplied,
   };
 }
@@ -547,7 +663,8 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
   if (!brandId) return null;
   if (!preview && !busy && !error && !summary && !resumable && !(withdrawing && withdrawing.siloRef)) return null;
   const perigo = dangerButtonClassName ?? buttonClassName;
-  const tituloDaPrevia = preview?.action === "validateSerp" ? `${PLAN_SHEET_ACTION_LABELS.validateSerp} · custo antes`
+  const tituloDaPrevia = preview?.action === "consolidate" ? `${PLAN_FLOW_LABELS.consolidate} · prévia`
+    : preview?.action === "validateSerp" ? `${PLAN_SHEET_ACTION_LABELS.validateSerp} · custo antes`
     : preview?.action === "chooseSwap" ? `${PLAN_SHEET_ACTION_LABELS.swapPrincipal} · escolha a nova principal`
     : preview?.action === "swapPrincipal" ? `${PLAN_SHEET_ACTION_LABELS.swapPrincipal} · prévia`
     : preview ? `${PLAN_SHEET_ACTION_LABELS.concludeFormation} · prévia` : "";
@@ -592,6 +709,10 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
           <p className="text-text-muted">O que já está no cache não é pago de novo. O servidor confere no banco o volume de cada keyword: sem volume, nada é coletado.</p>
         </div>;
       })()}
+      {preview.action === "consolidate" && <div className="mt-1 grid gap-0.5" data-testid="architect-plan-consolidation-preview">
+        <p className="text-foreground">{preview.data.territory.sentence}</p>
+        <p className="text-text-muted">{preview.data.summary} Cada artigo grava o ArticleDNA v1 com o que veio do Minerador (Assunto = título; principal = a keyword do plano; papel e ordem do plano; escopo como promessa); depois o SiloDNA e a SiloPage com o Pilar e a ordem do plano. Decisão sua, registrada como “consolidado do plano do Minerador”.</p>
+      </div>}
       {preview.action === "chooseSwap" && <p className="mt-1 text-text-muted">Só artigo do plano com a trava Livre. As candidatas são a keyword do Assunto e as sustentações com volume medido da lista dele, das que têm mais lentes de SERP e mais volume. A prévia (grátis) mostra o que muda; gravar é a sua confirmação e gera uma nova versão.</p>}
       {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && <p className="mt-1 text-text-muted">Grava só o ArticleDNA, a composição e o parecer, pelo mesmo núcleo da formação; nada é gravado no Minerador. Uma confirmação vale para as linhas “vai gravar”; as outras ficam como estão, com o motivo.</p>}
 
@@ -618,10 +739,11 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={buttonClassName} onClick={sheet.cancelPreview}>Cancelar</button>
         {preview.action === "validateSerp" && <button type="button" className={primaryButtonClassName} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{preview.plan.paidQueries > 0 ? `Autorizar ${preview.plan.paidQueries} consulta(s) e validar` : "Ler do cache (sem custo)"}</button>}
+        {preview.action === "consolidate" && <button type="button" className={primaryButtonClassName} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>Confirmar e consolidar</button>}
         {preview.action === "chooseSwap" && <button type="button" className={primaryButtonClassName} disabled={!preview.rows.length} data-testid="architect-plan-sheet-swap-preview" onClick={() => sheet.prepareSwapPreview(preview.rows, preview.picks, preview.refused)}>Ver prévia da troca (grátis)</button>}
         {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && (() => {
           const prontas = preview.runs.reduce((soma, item) => soma + item.readyIds.length, 0);
-          return <button type="button" className={primaryButtonClassName} disabled={!prontas} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{preview.action === "swapPrincipal" ? `Confirmar a troca (${prontas})` : `Concluir formação (${prontas})`}</button>;
+          return <button type="button" className={primaryButtonClassName} disabled={!prontas} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{preview.action === "swapPrincipal" ? "Confirmar a troca" : "Confirmar e gravar"}</button>;
         })()}
       </div>
     </div>}
@@ -636,24 +758,31 @@ export function PlanRowSeals({ row, result = null, className = "" }: { row: Plan
     <div className="flex flex-wrap items-center gap-1">
       {planRowSeals(row).map(selo => <span key={selo.kind} data-plan-seal={selo.kind} title={selo.title} className={`inline-flex min-h-6 items-center rounded border px-1.5 text-sm leading-tight ${SEAL_TONE[selo.tone]}`}>{selo.label}</span>)}
     </div>
+    {(() => {
+      // 2026-10-14 (noite) · o que falta é ALERTA curto (o porquê no title), nunca bloqueio.
+      const alertas = planRowAlerts(row).filter(alerta => alerta.kind !== "conflict");
+      return alertas.length ? <p className="mt-1 text-sm leading-6 text-warning" data-testid="architect-plan-row-alerts">{alertas.map((alerta, indice) => <span key={alerta.kind} title={alerta.title}>{indice ? " · " : ""}{alerta.label}</span>)}</p> : null;
+    })()}
     {result && <p className={`mt-1 text-sm leading-6 ${TONE_CLASS[result.tone]}`} data-testid="architect-plan-row-result">{result.text}</p>}
   </div>;
 }
 
 /**
- * As ações por linha do artigo do plano — os botões de sempre ("Validar SERP",
- * "Concluir formação"; "Trocar principal" só com a trava Livre), pelo núcleo
- * do plano. A linha presa em outro artigo ganha "Retirar artigo do Silo"
- * (prévia grátis; decisão do dono).
+ * As ações por linha do artigo do plano. 2026-10-14 (noite) · pedido do dono:
+ * "para que (…) uma quantidade de botões que são para fazer e desfazer". Os
+ * processos estão na barra (uma etapa por vez); na linha fica só o que é DELA:
+ * "Procurar outra principal…" quando a principal pode trocar (sem volume e
+ * livre — volume definido nunca troca; travada nunca muda) e "Retirar artigo
+ * do Silo" quando a keyword está presa em outro artigo (prévia; decisão do dono).
  */
 export function PlanRowActions({ sheet, row, buttonClassName }: { sheet: PlanArticleSheetController; row: PlanSheetRow; buttonClassName: string }) {
+  const podeTrocar = row.lock.state === "free" && !(row.volume.state === "measured" && (row.volume.value ?? 0) > 0);
+  if (!row.conflict && !podeTrocar) return null;
   return <div className="flex flex-wrap items-center justify-end gap-1" data-testid="architect-plan-row-actions" data-keyword-id={row.keywordId}>
     {row.conflict && (row.conflict.siloRef
       ? <button type="button" className={buttonClassName} disabled={sheet.ocupado} data-testid="architect-plan-row-withdraw" title={row.conflict.sentence} onClick={() => sheet.setWithdrawing(row.conflict)}>{SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}</button>
       : <span className="text-sm text-text-muted" title={row.conflict.sentence}>Retire em Silos</span>)}
-    <button type="button" className={buttonClassName} disabled={sheet.ocupado} data-plan-action="validateSerp" onClick={() => sheet.start("validateSerp", [row])}>{PLAN_SHEET_ACTION_LABELS.validateSerp}</button>
-    {row.lock.state === "free" && <button type="button" className={buttonClassName} disabled={sheet.ocupado} data-plan-action="swapPrincipal" onClick={() => sheet.start("swapPrincipal", [row])}>{PLAN_SHEET_ACTION_LABELS.swapPrincipal}</button>}
-    <button type="button" className={buttonClassName} disabled={sheet.ocupado} data-plan-action="concludeFormation" onClick={() => sheet.start("concludeFormation", [row])}>{PLAN_SHEET_ACTION_LABELS.concludeFormation}</button>
+    {podeTrocar && <button type="button" className={buttonClassName} disabled={sheet.ocupado} data-plan-action="swapPrincipal" title={`${row.lock.label}. ${row.lock.why}`} onClick={() => sheet.start("swapPrincipal", [row])}>{PLAN_SHEET_ACTION_LABELS.swapPrincipal}</button>}
   </div>;
 }
 
@@ -709,7 +838,7 @@ export function PlanArticleTableRow({ sheet, row, columns, buttonClassName, stri
       case "approval":
         return <td key={columnId} className="border-r border-divider px-2 py-2 text-sm text-text-muted" title="Sem ArticleDNA ainda: a decisão vem com Concluir formação.">—</td>;
       case "status":
-        return <td key={columnId} className="px-2 py-2 text-sm text-text-muted">Do plano · v{row.planVersion}</td>;
+        return <td key={columnId} className="px-2 py-2 text-sm text-text-muted" title="Artigo do plano do Minerador; a versão vigente do plano é a do grupo.">Do plano</td>;
       default:
         return <td key={columnId} className="border-r border-divider px-2 py-2" />;
     }
@@ -717,123 +846,4 @@ export function PlanArticleTableRow({ sheet, row, columns, buttonClassName, stri
   return <tr className={`border-b border-divider align-top ${marcada ? "bg-selected" : "hover:bg-surface-elevated"}`} data-testid="architect-plan-table-row" data-keyword-id={row.keywordId} data-order={row.order} data-lock={row.lock.state} data-formation={row.formation.state}>
     {columns.map(celula)}
   </tr>;
-}
-
-/* ====================== a planilha separada (só para os testes) ====================== */
-
-function PlanArticleSheetSession(props: PlanArticleSheetProps & SheetClassNames) {
-  const { buttonClassName, primaryButtonClassName, controlClassName, dangerButtonClassName } = props;
-  const sheet = usePlanArticleSheet(props);
-  const { brandId, rows, selected, setSelected, ocupado, busy, preview, results, corDoRecorte } = sheet;
-
-  // Sem artigo do plano neste recorte, a planilha não ocupa a tela (a mesa de sempre continua).
-  if (!brandId || !rows.length) return null;
-
-  const todasMarcadas = rows.length > 0 && rows.every(row => selected.has(row.keywordId));
-  const rotuloDaCor = corDoRecorte ? EDITORIAL_GROUP_COLOR_LABELS[corDoRecorte] : null;
-  const lote = rows.filter(row => selected.has(row.keywordId));
-
-  const proximo = planSheetNextStep(rows);
-  const marcarERodar = (passo: NonNullable<typeof proximo>) => {
-    const alvo = rows.filter(row => passo.keywordIds.includes(row.keywordId));
-    setSelected(new Set(alvo.map(row => row.keywordId)));
-    if (passo.action === "validateSerp") sheet.start("validateSerp", alvo);
-    else if (passo.action === "concludeFormation") sheet.start("concludeFormation", alvo);
-    else if (passo.action === "withdraw" && alvo[0]?.conflict) sheet.setWithdrawing(alvo[0].conflict);
-  };
-  const setWithdrawing = sheet.setWithdrawing;
-
-  return <section id={PLAN_SHEET_ANCHOR} className="border-b border-divider bg-surface px-4 py-3 text-sm" aria-label={PLAN_SHEET_TITLE} data-testid="architect-plan-sheet" data-rows={rows.length}>
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <div className="min-w-0">
-        <h3 className="flex items-center gap-1.5 font-semibold text-foreground">
-          {PLAN_SHEET_TITLE} · {rows.length}
-          <InfoHint title="Como funciona" description="Cada keyword recebida que carrega um Assunto do plano é uma linha, assim que chega: cor, ordem, papel, Assunto, keyword, trava, volume, SERP e o estado da formação. As ações valem na linha ou no lote marcado: Validar SERP (mostra o que já temos no cache e o custo do que falta antes de pagar), Trocar principal (só com a trava Livre; você escolhe entre as sustentações com volume da lista do Assunto; nova versão) e Concluir formação (grava o ArticleDNA pelo mesmo núcleo de sempre). Toda ação tem prévia, uma confirmação e recusa por linha com o motivo. Nada daqui grava no Minerador: o que faltar vira “Sugestões do Arquiteto”." />
-        </h3>
-        <p className="text-text-muted" data-testid="architect-plan-sheet-scope">{rotuloDaCor ? `Recorte da etiqueta: cor ${rotuloDaCor}. Troque a cor na etiqueta da barra para ver outro plano.` : "Todas as cores com plano. Escolha uma cor na etiqueta da barra para recortar."}</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Ações em lote da planilha do plano">
-        <button type="button" className={buttonClassName} disabled={ocupado} data-testid="architect-plan-sheet-select-all" onClick={() => setSelected(todasMarcadas ? new Set() : new Set(rows.map(row => row.keywordId)))}>{todasMarcadas ? "Desmarcar todas" : rotuloDaCor ? `Marcar toda a cor ${rotuloDaCor}` : "Marcar todas as linhas"}</button>
-        <span className="text-text-muted" aria-live="polite">{lote.length} marcada(s)</span>
-        <button type="button" className={buttonClassName} disabled={ocupado || !lote.length} data-testid="architect-plan-sheet-batch-serp" onClick={() => sheet.start("validateSerp", lote)}>{PLAN_SHEET_ACTION_LABELS.validateSerp} ({lote.length})</button>
-        <button type="button" className={buttonClassName} disabled={ocupado || !lote.length} data-testid="architect-plan-sheet-batch-swap" onClick={() => sheet.start("swapPrincipal", lote)}>{PLAN_SHEET_ACTION_LABELS.swapPrincipal} ({lote.length})</button>
-        <button type="button" className={primaryButtonClassName} disabled={ocupado || !lote.length} data-testid="architect-plan-sheet-batch-form" onClick={() => sheet.start("concludeFormation", lote)}>{PLAN_SHEET_ACTION_LABELS.concludeFormation} ({lote.length})</button>
-      </div>
-    </div>
-
-    {proximo && proximo.action !== "none" && !busy && !preview && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-module-accent/40 bg-module-accent/5 p-3" role="region" aria-label="Próximo passo da planilha" data-testid="architect-plan-sheet-next-step" data-next-step={proximo.action}>
-      <p className="min-w-0 text-foreground"><span className="font-semibold">Próximo passo · </span>{proximo.sentence}</p>
-      <button type="button" className={primaryButtonClassName} disabled={ocupado} onClick={() => marcarERodar(proximo)}>
-        {proximo.action === "validateSerp" ? `${PLAN_SHEET_ACTION_LABELS.validateSerp} (${proximo.keywordIds.length})` : proximo.action === "concludeFormation" ? `${PLAN_SHEET_ACTION_LABELS.concludeFormation} (${proximo.keywordIds.length})` : SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}
-      </button>
-    </div>}
-
-    <PlanSheetOperations sheet={sheet} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} controlClassName={controlClassName} dangerButtonClassName={dangerButtonClassName} />
-
-    <div className="mt-3 w-full overflow-x-auto">
-      <table className="w-full min-w-[72rem] border-collapse text-left text-sm" data-testid="architect-plan-sheet-table">
-        <thead>
-          <tr className="border-b border-divider text-sm text-text-muted">
-            <th className="w-10 p-2"><input type="checkbox" aria-label="Marcar todas as linhas do plano" checked={todasMarcadas} disabled={ocupado} onChange={() => setSelected(todasMarcadas ? new Set() : new Set(rows.map(row => row.keywordId)))} className="h-4 w-4 cursor-pointer" /></th>
-            <th className="p-2 font-semibold">Cor</th>
-            <th className="p-2 font-semibold">Ordem</th>
-            <th className="p-2 font-semibold">Papel</th>
-            <th className="p-2 font-semibold">Assunto</th>
-            <th className="p-2 font-semibold">Keyword</th>
-            <th className="p-2 font-semibold">Trava</th>
-            <th className="p-2 font-semibold">Volume</th>
-            <th className="p-2 font-semibold">SERP</th>
-            <th className="p-2 font-semibold">Formação</th>
-            <th className="p-2 font-semibold">Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(row => {
-            const resultado = results.get(row.keywordId);
-            return <tr key={row.keywordId} className={`border-b border-divider align-top ${selected.has(row.keywordId) ? "bg-module-accent/5" : ""}`} data-testid="architect-plan-sheet-row" data-keyword-id={row.keywordId} data-lock={row.lock.state} data-order={row.order}>
-              <td className={`p-2 ${row.color ? EDITORIAL_GROUP_COLOR_CLASSES[row.color].stripe : ""}`}>
-                <input type="checkbox" aria-label={`Marcar ${row.title}`} checked={selected.has(row.keywordId)} disabled={ocupado} className="h-4 w-4 cursor-pointer" onChange={event => sheet.toggleSelected(row.keywordId, event.target.checked)} />
-              </td>
-              <td className="p-2">{row.color ? <EditorialGroupTag name={planSheetColorLabel(row)} color={row.color} /> : <span className="text-text-muted">{planSheetColorLabel(row)}</span>}</td>
-              <td className="p-2 tabular-nums text-foreground">{row.order}</td>
-              <td className="p-2 text-foreground">{row.role}</td>
-              <td className="p-2 font-medium text-foreground">{row.title}</td>
-              <td className="p-2 text-keyword">{row.keyword}</td>
-              <td className="p-2"><span className={row.lock.state === "free" ? "text-foreground" : "text-text-muted"} title={row.lock.why}>{row.lock.label}</span><p className="text-text-muted">{row.lock.why}</p></td>
-              <td className="p-2 tabular-nums"><span className={row.volume.state === "measured" ? "text-foreground" : "text-text-muted"}>{row.volume.label}</span>{row.supports.count > 0 && <p className="text-text-muted">{row.supports.count} sustentação(ões) na lista · {row.supports.withVolume} com volume</p>}</td>
-              <td className="p-2"><span className={row.serp.state === "complete" ? "text-foreground" : "text-text-muted"} data-testid="architect-plan-sheet-serp">{row.serp.label}</span></td>
-              <td className="p-2"><span className={row.formation.state === "awaiting_principal" || row.formation.state === "conflict" ? "text-warning" : "text-foreground"}>{row.formation.label}</span>
-                {row.conflict && <div className="mt-1" data-testid="architect-plan-sheet-conflict" data-article-id={row.conflict.articleId}>
-                  <p className="text-warning">{row.conflict.sentence}</p>
-                  {row.conflict.siloRef
-                    ? <button type="button" className={`${buttonClassName} mt-1`} data-testid="architect-plan-sheet-row-withdraw" onClick={() => setWithdrawing(row.conflict)}>{SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}</button>
-                    : <p className="text-text-muted">O artigo não diz a que Silo pertence: retire-o em Silos (aba Silos → {SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}).</p>}
-                </div>}
-                {resultado && <p className={TONE_CLASS[resultado.tone]} data-testid="architect-plan-sheet-result">{resultado.text}</p>}
-              </td>
-              <td className="p-2">
-                <div className="flex flex-wrap gap-1">
-                  <button type="button" className={buttonClassName} disabled={ocupado} onClick={() => sheet.start("validateSerp", [row])}>{PLAN_SHEET_ACTION_LABELS.validateSerp}</button>
-                  {row.lock.state === "free"
-                    ? <button type="button" className={buttonClassName} disabled={ocupado} data-testid="architect-plan-sheet-row-swap" onClick={() => sheet.start("swapPrincipal", [row])}>{PLAN_SHEET_ACTION_LABELS.swapPrincipal}</button>
-                    : row.lock.state === "locked" ? <span className="self-center text-text-muted" data-testid="architect-plan-sheet-locked-seal">{PLAN_SHEET_LOCKED_SEAL}</span> : null}
-                  <button type="button" className={buttonClassName} disabled={ocupado} onClick={() => sheet.start("concludeFormation", [row])}>{PLAN_SHEET_ACTION_LABELS.concludeFormation}</button>
-                </div>
-              </td>
-            </tr>;
-          })}
-        </tbody>
-      </table>
-    </div>
-  </section>;
-}
-
-/**
- * A planilha separada "Artigos do plano". 2026-10-14 (pedido do dono): a aba
- * Artigos NÃO a mostra mais — as linhas do plano estão na tabela de artigos de
- * sempre. Fica para os testes do núcleo (as mesmas ações, o mesmo hook).
- * Troca de marca remonta o estado (nada da marca anterior passa adiante).
- */
-export function PlanArticleSheet(props: Parameters<typeof PlanArticleSheetSession>[0]) {
-  return <PlanArticleSheetSession key={props.brandId ?? "sem-marca"} {...props} />;
 }
