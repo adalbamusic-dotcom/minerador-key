@@ -48,8 +48,9 @@ test("caso real WifiConecta · azul: 7 keywords com Assunto viram 7 linhas, por 
   assert.deepEqual(livres.map(row => row.keyword), ["diferença entre internet e wi-fi"]);
   assert.match(livres[0].lock.label, /^Livre/);
   assert.match(livres[0].lock.why, /Sem volume medido/);
-  assert.match(rows[0].lock.label, /^Travada · pelo volume medido/);
-  assert.match(rows[0].lock.why, /mude a trava no Minerador/);
+  // 2026-10-14 (noite) · regra do dono: volume definido fixa a principal (mesmo com volume baixo), antes de qualquer trava.
+  assert.match(rows[0].lock.label, /^Travada · volume definido/);
+  assert.match(rows[0].lock.why, /Volume definido não se troca/);
   // A linha mostra o Assunto (título cadastrado), a cor e o estado.
   assert.equal(rows[1].title, "Diferença entre internet e Wi-Fi: o que muda na sua casa");
   assert.equal(rows.every(row => row.color === "azul"), true);
@@ -169,7 +170,7 @@ test("prévia por linha (da execução preparada): vai gravar, já adequado, Pre
   // O motivo genérico do núcleo ("Assunto declarado mantido…") não explica nada: a linha livre sem volume aponta a saída.
   const generica = planSheetPreviewLines({ proposals: [proposta("k10", { status: "insufficient_evidence", reasons: ["Assunto declarado mantido como fundamento, fora das seis keywords."] })] }, [rows[1]]);
   assert.equal(generica[0].kind, "refused");
-  assert.match(generica[0].sentence, /use “Trocar principal” para uma sustentação com volume/);
+  assert.match(generica[0].sentence, /use “Procurar outra principal” para uma sustentação com volume/);
   const formado = planSheetPreviewLines({ proposals: [proposta("k9")] }, [{ ...rows[0], formation: { ...rows[0].formation, state: "formed", version: 3 } }]);
   assert.match(formado[0].sentence, /nova versão \(v4\)/);
   assert.deepEqual(planSheetOutcomeSentence({ status: "dna_created", message: "Primeiro ArticleDNA criado." }), { tone: "success", text: "Primeiro ArticleDNA criado." });
@@ -211,14 +212,16 @@ const semComentarios = (codigo: string) => codigo.replace(/\/\*[\s\S]*?\*\//g, "
 test("estrutural · a planilha só chama a melhoria, a SERP por keyword e a leitura do cache: nada no Minerador", () => {
   const tela = semComentarios(ler("../modules/arquiteto/plan-article-sheet.tsx"));
   const rotas = [...tela.matchAll(/["'`](\/api\/[^"'`?$]+)/g)].map(match => match[1]).sort();
-  assert.deepEqual([...new Set(rotas)], ["/api/arquiteto/article-improvement", "/api/arquiteto/keyword-serp", "/api/arquiteto/serp-subject"]);
+  // 2026-10-14 (noite) · + "Consolidar o Silo do plano" (rota do Arquiteto; nada no Minerador).
+  assert.deepEqual([...new Set(rotas)], ["/api/arquiteto/article-improvement", "/api/arquiteto/keyword-serp", "/api/arquiteto/plan-silo/consolidate", "/api/arquiteto/serp-subject"]);
   assert.doesNotMatch(tela, /\/api\/minerador/);
   assert.doesNotMatch(tela, /measureKeywordVolume|runKeywordLogicWithCore|importSubjectDiscoveryWithCore|applyKeywordDecisionEntries|approveNewKeywords|keywords\/delete/);
   assert.match(tela, /onlyMeasuredVolume: true/, "o servidor confere o volume no banco antes de pagar");
   assert.match(tela, /origin: "plan_sheet"/);
   assert.match(tela, /runPaidSerpBlocks/, "o mesmo executor de blocos pagos da mesa (plano somado, uma confirmação)");
   assert.match(tela, /<OperationProgress /, "o andamento de cada ação");
-  assert.match(tela, /data-testid="architect-plan-sheet-result"/, "o resultado por linha");
+  // 2026-10-14 (noite) · sem a planilha separada, o resultado de cada linha fica na própria linha da tabela.
+  assert.match(tela, /data-testid="architect-plan-row-result"/, "o resultado por linha");
   assert.match(tela, /setSerpReload\(valor => valor \+ 1\)/, "releitura da SERP depois da coleta");
   assert.match(tela, /onApplied\(\);/, "releitura da mesa depois de gravar");
   const dominio = semComentarios(ler("../lib/arquiteto/plan-article-sheet.ts"));
@@ -232,9 +235,12 @@ test("estrutural · o painel de texto fica para publicados; as outras portas apo
   assert.match(painel, /restored\.origin === "plan_sheet"/, "o painel não retoma a execução da planilha");
   const tela = semComentarios(ler("../modules/arquiteto/arquiteto-workspace.tsx"));
   assert.doesNotMatch(tela, /planGroups=/);
-  assert.match(tela, /<PlanArticleSheet brandId=\{selectedBrandId \|\| null\}/);
-  assert.match(tela, /filter=\{arquitetoGroups\.filter\}/, "a cor ativa da etiqueta recorta a planilha");
-  assert.match(tela, /use a planilha "Artigos do plano" \(Artigos novos, acima\)/, "Processar artigos aponta para a planilha");
+  // 2026-10-14 (tarde) · pedido do dono ("uma lista só, sem planilhas duplicadas"): a planilha separada saiu da aba;
+  // o MESMO núcleo roda pelo hook, e as linhas do plano estão na tabela de artigos.
+  assert.doesNotMatch(tela, /<PlanArticleSheet /);
+  assert.match(tela, /const planSheet = usePlanArticleSheet\(\{\s*brandId: selectedBrandId \|\| null/);
+  assert.match(tela, /filter: arquitetoGroups\.filter, articles: planSheetArticles/, "a cor ativa da etiqueta recorta as linhas do plano");
+  assert.match(tela, /o caminho do plano é o das linhas do plano nesta mesma tabela/, "Processar artigos aponta para as linhas do plano");
   const servidor = semComentarios(ler("../lib/server/arquiteto-article-improvement.ts"));
   assert.match(servidor, /if \(options\.excludePlanArticles && standing\.plan\) continue;/);
   assert.match(servidor, /planPrincipalSwapCandidates\(/, "a mesma regra das candidatas na tela e no servidor");

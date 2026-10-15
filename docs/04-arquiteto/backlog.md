@@ -1,3 +1,31 @@
+## Aba Artigos · consolidar, não reformar (volume do DNA, regra da principal, Consolidar o Silo do plano, etapas, uma tabela) — Arquiteto — 2026-10-14 (noite)
+
+Detalhe em `docs/04-arquiteto/estado-atual.md` e no adendo C10 da SDD do cadastro (§11.4). **Validado manualmente: não.**
+
+- [x] Volume do DNA é volume (Minerador, Pesquisa por Assunto com recibo, linha remontada do ArticleDNA); sem "Volume de outra fonte".
+- [x] Regra da principal: volume definido fixa (mesmo 10); sem volume, travada nunca muda e livre procura outra só na linha.
+- [x] "Consolidar o Silo do plano": prévia grátis + uma confirmação; Silo do plano confirmado/criado; ArticleDNA v1 do plano sem SERP e sem IA, com alertas e a decisão humana no DNA; SiloDNA + SiloPage com o Pilar e a ordem do plano pelo caminho canônico.
+- [x] Etapas na barra (Consolidar → Completar sustentações e SERP → Links internos), uma por vez, sem contador; "Melhorar publicados…" só com publicados.
+- [x] Uma tabela; sem "Detalhes técnicos", cartão "Próximo passo", planilha separada, botões em lote e por linha de processo; "jogos online" volta à tabela; versão do plano única.
+- [ ] Dono: no azul, "Consolidar o Silo do plano" (esperado: 5 mantidos, 2 gravados com alertas, SiloDNA/SiloPage com Pilar "internet fibra óptica"); depois "Completar sustentações e SERP" (custo antes) e "Links internos".
+- [ ] "diferença entre internet e Wi-Fi" sem volume e sem sustentação com volume: decidir (medir no Minerador, trazer sustentações pela Pesquisa por Assunto ou trocar a principal livre) — sem isso o Radar pede a SERP.
+- [ ] Consolidar artigo novo em Silo que já tem o par canônico (hoje pelo caminho de edição/"Aplicar o plano declarado ao Silo").
+- [ ] Decidir o destino dos painéis avançados que viviam em "Detalhes técnicos" (Mesmo assunto no Google, Diferenciar/Reforçar publicados): hoje sem porta na tela.
+- [ ] Religar `editorial_groups.silo_id` do grupo azul ao Silo vivo (a store recusa trocar Silo ligado; operação estrutural à parte).
+- [ ] Ferramenta MCP para "Consolidar o Silo do plano" (hoje só na tela).
+
+## Aba Artigos · uma tabela só, os botões de sempre, sem painel de texto no topo, cor entre marcas — Arquiteto — 2026-10-14 (tarde)
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Uma tabela só: as linhas do plano dentro da tabela de artigos, sob a SiloPage do Silo do plano, na ordem do plano; candidato do plano volta à mesa com os selos do plano; linha própria para a keyword do plano sem artigo; planilha separada fora da aba.
+- [x] "Processar artigos" e "Concluir formação" da barra valem para todas as linhas (as do plano pelo núcleo do plano: Validar SERP com custo antes; Concluir formação com prévia); ações por linha do plano (Validar SERP, Trocar principal se Livre, Concluir formação, Retirar artigo do Silo se presa).
+- [x] Sem cartão "Próximo passo" nem painel de texto no topo; "Melhorar publicados…" é botão da barra; aviso "Pacote novo no Minerador · N keywords" em uma linha.
+- [x] Linhas e detalhes que sumiram (candidatos do plano) de volta; "Detalhes técnicos" igual a `4d546ce`.
+- [x] Cor herdada inexistente na marca volta para "Todos os grupos" (sem `?grupo`, aviso curto), em todas as áreas.
+- [ ] Dono: homologar no azul (WifiConecta) e na AdalbaPro: a tabela única, os selos, a barra com linhas do plano marcadas e o aviso da cor.
+- [ ] Detalhe expandido para a linha do plano sem artigo (hoje só selos e ações; ela ainda não é Article).
+
 ## Caso WifiConecta (azul) · uma lista só, artigo intruso, Concluir formação por linha, painel recolhido — Arquiteto — 2026-10-14
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**

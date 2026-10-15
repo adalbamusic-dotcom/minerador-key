@@ -41,12 +41,16 @@ export function improvementPanelCollapsedLabel(colorLabel: string | null): { tit
 }
 export const PLAN_SHEET_ACTION_LABELS = {
   validateSerp: "Validar SERP",
-  swapPrincipal: "Trocar principal",
+  swapPrincipal: "Procurar outra principal",
   concludeFormation: "Concluir formação",
 } as const;
 export type PlanSheetAction = keyof typeof PLAN_SHEET_ACTION_LABELS;
-/** O selo da linha travada (o botão "Trocar principal" não aparece). */
-export const PLAN_SHEET_LOCKED_SEAL = "Principal travada · mude a trava no Minerador";
+/**
+ * O selo da linha travada (o botão "Trocar principal" não aparece). 2026-10-14
+ * (noite) · pedido do dono: um selo curto — o porquê fica no `title`, não
+ * repetido em cada linha.
+ */
+export const PLAN_SHEET_LOCKED_SEAL = "Travada";
 export const PLAN_SHEET_LENSES = 4;
 
 /* ----------------------------------------------------------------- tipos */
@@ -63,6 +67,8 @@ export type PlanSheetVolumeView = {
   state: KnownVolume["state"];
   value: number | null;
   measuredAt: string | null;
+  /** 2026-10-14 · de onde veio o volume validado (aditivo; ausente nas leituras antigas). */
+  origin?: "google_ads" | "subject_search" | null;
   label: string;
 };
 
@@ -78,6 +84,8 @@ export type PlanSheetSerpView = {
 export type PlanSheetFormationView = {
   /** 2026-10-14 · `conflict`: a keyword da linha está dentro do ArticleDNA vigente de OUTRO artigo (ver `conflict` da linha). */
   state: "awaiting" | "awaiting_principal" | "formed" | "in_radar" | "conflict";
+  /** 2026-10-14 · formado (consolidado do plano) ainda sem parecer de SERP: a etapa 2 grava o parecer. */
+  serpPending?: boolean;
   version: number | null;
   articleId: string | null;
   principalKeywordId: string | null;
@@ -103,7 +111,9 @@ export type PlanSheetRow = {
   /** A principal de agora: a do ArticleDNA formado ou, antes dele, a principal declarada no plano. */
   currentPrincipalId: string | null;
   /** Sustentações da lista do Assunto (Pesquisa por Assunto), quantas têm volume medido e quais (candidatas da troca). */
-  supports: { count: number; withVolume: number; withVolumeIds: string[] };
+  supports: { count: number; withVolume: number; withVolumeIds: string[];
+    /** 2026-10-14 · formado: as sustentações com volume da lista do Assunto que ainda não estão no artigo (etapa 2). */
+    missingInArticle?: string[] };
   /**
    * 2026-10-14 (caso WifiConecta) · a keyword da linha (ou a principal declarada
    * dela) está presa no ArticleDNA vigente de OUTRO artigo — de outro Assunto,
@@ -130,6 +140,8 @@ export type PlanSheetArticle = {
   subjectColorLabel?: string | null;
   /** A principal do artigo, legível. */
   label?: string | null;
+  /** 2026-10-14 · o artigo tem parecer de SERP (`serpAssessmentRef`)? `false` = consolidado do plano sem SERP (etapa 2). */
+  serpAssessed?: boolean;
 };
 
 /** O artigo que prende a keyword de uma linha do plano. */
@@ -164,9 +176,22 @@ const dateLabel = (iso: string | null) => {
   return Number.isFinite(time) ? new Date(time).toISOString().slice(0, 10).split("-").reverse().join("/") : null;
 };
 
-function lockView(standing: ArchitectSubjectStanding): PlanSheetLockView {
+/**
+ * 2026-10-14 (noite) · A REGRA DA PRINCIPAL, NAS PALAVRAS DO DONO: "primeira
+ * coisa que tem que olhar é o volume: se já está definido, não pode trocar
+ * mesmo que só tenha 10 de volume; e depois tem que olhar se essa keyword é
+ * livre ou já está travada: travado não muda, livre pode procurar por outra
+ * similar e trocar". Volume definido NO DNA (qualquer volume validado: botão
+ * Volume do Minerador ou a média do Google Ads gravada pela Pesquisa por
+ * Assunto com recibo) fixa a principal antes de qualquer trava; só sem volume
+ * a trava decide. A trava gravada não muda (o Arquiteto só lê).
+ */
+function lockView(standing: ArchitectSubjectStanding, volume?: PlanSheetVolumeView): PlanSheetLockView {
   const lock = planLockOfStanding(standing);
   if (!lock) return { state: "none", label: "Sem principal declarada", why: "O plano não declara a principal deste artigo: a formação escolhe pela SERP e pelo volume, com decisão humana." };
+  if (volume && volume.state === "measured" && (volume.value ?? 0) > 0) {
+    return { state: "locked", label: "Travada · volume definido", why: `Volume definido no DNA (${volume.label}): a principal fica, mesmo com volume baixo. Volume definido não se troca.` };
+  }
   if (lock.state === "locked") {
     const why = lock.origin === "manual"
       ? "Travada à mão no Minerador (Cadastrar Assuntos): o Arquiteto não troca."
@@ -181,14 +206,46 @@ function lockView(standing: ArchitectSubjectStanding): PlanSheetLockView {
   return { state: "free", label: lock.label, why };
 }
 
+const objeto = (value: unknown): RecordLike | null => value && typeof value === "object" && !Array.isArray(value) ? value as RecordLike : null;
+
+/** A origem curta do volume validado: o botão Volume do Minerador ou a Pesquisa por Assunto (recibo). */
+export const PLAN_VOLUME_ORIGIN_LABELS = { google_ads: "Google Ads", subject_search: "Pesquisa por Assunto" } as const;
+
+/**
+ * 2026-10-14 (noite) · VOLUME DO DNA É VOLUME (pedido do dono: "ele não
+ * reconhece o volume"). A leitura de sempre (`readKnownVolume`: coluna +
+ * medição gravada) e, quando a linha da mesa veio do ArticleDNA (sem
+ * `volume_source` nem `analise_semantica`), a evidência de demanda do Google
+ * Ads que a referência do DNA carrega (`demandEvidence.googleAds`). A média
+ * gravada pela Pesquisa por Assunto (origem `subject_search`, recibo) é
+ * medição do Google Ads como qualquer outra. Volume de outro provider (outra
+ * era) continua "Sem volume medido" — nunca "outra fonte".
+ */
+export function readPlanRowVolume(row: RecordLike, now: Date): PlanSheetVolumeView {
+  const semantic = objeto(row.analise_semantica);
+  const origemDaMedicao = objeto(semantic?.volume_measurement)?.origin === "subject_search" ? "subject_search" as const : "google_ads" as const;
+  const known = readKnownVolume({ volume_search: row.volume_search, volume_source: row.volume_source, analise_semantica: semantic }, now);
+  const medido = (value: number, measuredAt: string | null, origin: "google_ads" | "subject_search"): PlanSheetVolumeView => {
+    const data = dateLabel(measuredAt);
+    return { state: "measured", value, measuredAt, origin, label: `${number(value)}${data ? ` · medido em ${data}` : ""} · ${PLAN_VOLUME_ORIGIN_LABELS[origin]}` };
+  };
+  if (known.state === "measured") return medido(known.volume, known.measuredAt, origemDaMedicao);
+  if (known.state === "no_average") return { state: "no_average", value: null, measuredAt: known.measuredAt, origin: null, label: `Sem média no Google Ads (${dateLabel(known.measuredAt) ?? "recente"})` };
+  // A linha que veio do ArticleDNA: a evidência do Google Ads da referência (a mesma medição do Minerador).
+  const ads = objeto(objeto(row.demandEvidence)?.googleAds);
+  const media = typeof ads?.averageMonthlySearches === "number" && Number.isFinite(ads.averageMonthlySearches) && ads.averageMonthlySearches >= 0 ? ads.averageMonthlySearches : null;
+  const quando = typeof ads?.measuredAt === "string" && Number.isFinite(Date.parse(ads.measuredAt)) ? ads.measuredAt : null;
+  if (ads && (ads.source === undefined || ads.source === "google_ads") && media !== null && quando) return medido(media, quando, "google_ads");
+  return { state: "missing", value: null, measuredAt: known.measuredAt, origin: null, label: "Sem volume medido" };
+}
+
 function volumeView(row: RecordLike, now: Date): PlanSheetVolumeView {
-  const known = readKnownVolume({ volume_search: row.volume_search, volume_source: row.volume_source, analise_semantica: row.analise_semantica as Record<string, unknown> | null }, now);
-  if (known.state === "measured") {
-    const data = dateLabel(known.measuredAt);
-    return { state: "measured", value: known.volume, measuredAt: known.measuredAt, label: `${number(known.volume)}${data ? ` · medido em ${data}` : " · Google Ads"}` };
-  }
-  if (known.state === "no_average") return { state: "no_average", value: null, measuredAt: known.measuredAt, label: `Sem média no Google Ads (${dateLabel(known.measuredAt) ?? "recente"})` };
-  return { state: "missing", value: null, measuredAt: known.measuredAt, label: known.reason === "other_provider" ? "Volume de outra fonte · medir no Minerador" : "Sem volume medido" };
+  return readPlanRowVolume(row, now);
+}
+
+/** A trava efetiva da linha do plano pela regra do dono (volume definido primeiro, depois a trava). */
+export function planSheetLockOf(standing: ArchitectSubjectStanding, volume: PlanSheetVolumeView): PlanSheetLockView {
+  return lockView(standing, volume);
 }
 
 function serpView(keywordId: string, read: PlanSheetSerpRead | null): PlanSheetSerpView {
@@ -252,7 +309,7 @@ function formationView(input: { keywordId: string; standing: ArchitectSubjectSta
   const article = input.articles.filter(item => item.subjectKeywordId === input.keywordId).sort((a, b) => b.versionNumber - a.versionNumber)[0];
   if (article) {
     if (input.radarArticleIds.has(article.articleId)) return { state: "in_radar", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `No Radar · v${article.versionNumber}` };
-    return { state: "formed", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `Formado · v${article.versionNumber}` };
+    return { state: "formed", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `Formado · v${article.versionNumber}`, ...(article.serpAssessed === false ? { serpPending: true } : {}) };
   }
   if (input.conflict) return { state: "conflict", version: null, articleId: null, principalKeywordId: null, label: PLAN_SHEET_CONFLICT_LABEL };
   const declarada = input.standing.plan?.declaredPrincipal;
@@ -316,6 +373,7 @@ export function buildPlanSheetRows(input: {
     const temProprio = input.articles.some(article => article.subjectKeywordId === keywordId);
     const conflict = temProprio ? null : planSheetArticleConflict({ keywordId, declaredPrincipalId: plan.declaredPrincipal?.keywordId ?? null, articles: input.articles });
     const formation = formationView({ keywordId, standing, articles: input.articles, radarArticleIds: input.radarArticleIds, receivedIds, conflict });
+    const volume = volumeView(keyword, input.now);
     rows.push({
       keywordId,
       keyword: String(keyword.keyword ?? "").trim(),
@@ -327,12 +385,12 @@ export function buildPlanSheetRows(input: {
       role: plan.role,
       planVersion: plan.planVersion,
       territoryRef: text(keyword.territoryRef),
-      lock: lockView(standing),
-      volume: volumeView(keyword, input.now),
+      lock: lockView(standing, volume),
+      volume,
       serp: serpView(keywordId, input.serp),
       formation,
       currentPrincipalId: formation.principalKeywordId ?? plan.declaredPrincipal?.keywordId ?? null,
-      supports: { count: lista.length, withVolume: comVolume.length, withVolumeIds: comVolume },
+      supports: { count: lista.length, withVolume: comVolume.length, withVolumeIds: comVolume, missingInArticle: formation.articleId ? comVolume.filter(id => id !== keywordId && !porId.get(id)?.isPublished && !(input.articles.find(article => article.articleId === formation.articleId)?.keywordIds ?? []).includes(id) && !input.articles.some(article => article.articleId !== formation.articleId && article.keywordIds.includes(id))) : [] },
       conflict,
     });
   }
@@ -405,8 +463,10 @@ export function planPrincipalSwapCandidates(input: {
 }): { ok: true; candidates: PlanSwapCandidate[] } | { ok: false; reason: string } {
   const standing = readArchitectSubjectStanding(input.subjectRow);
   if (!standing.plan || !standing.declared || standing.brandId !== input.brandId) return { ok: false, reason: "Trocar principal vale só para artigo do plano (Assunto com plano, desta marca)." };
-  const lock = planLockOfStanding(standing);
-  if (lock?.state === "locked") return { ok: false, reason: `${PLAN_SHEET_LOCKED_SEAL} (${lock.label}).` };
+  // A regra do dono: volume definido no DNA fixa a principal antes da trava; travada nunca muda.
+  const lock = lockView(standing, volumeView(input.subjectRow, input.now));
+  if (lock.state === "locked") return { ok: false, reason: `${PLAN_SHEET_LOCKED_SEAL} (${lock.label}). ${lock.why}` };
+  if (lock.state !== "free") return { ok: false, reason: "Sem principal declarada no plano: não há trava livre para trocar." };
   const subjectId = standing.keywordId;
   const porId = new Map(input.rows.map(row => [String(row.id ?? ""), row]));
   const candidates: PlanSwapCandidate[] = [];
@@ -581,6 +641,130 @@ export function planCandidatesInSheetSentence(count: number): string {
   return `${count} artigo(s) do plano deste Silo ${count === 1 ? "está" : "estão"} na planilha “${PLAN_SHEET_TITLE}”, acima — uma linha por artigo, com Validar SERP e Concluir formação. Depois de formado, o artigo volta a aparecer aqui.`;
 }
 
+/* ----------------------------- uma tabela só, de novo (2026-10-14, tarde) */
+
+/*
+ * PEDIDO DO DONO (2026-10-14): "coloca só numa lista, não cria várias listas,
+ * sem planilhas duplicadas (…) sumiram os botões de processo normal". A tabela
+ * de artigos de sempre é a lista: o artigo do plano é uma LINHA dela, sob a
+ * SiloPage do Silo do plano, na ordem do plano. Quando a mesa já tem o artigo
+ * (candidato ou formado, cujo Assunto é a keyword do plano), é a linha dele que
+ * ganha os selos do plano; sem artigo na mesa, a linha é a do plano. Os botões
+ * da barra ("Processar artigos", "Concluir formação") valem para as duas: para
+ * a linha do plano, o núcleo é o do plano (Validar SERP com custo antes;
+ * Concluir formação pela melhoria recortada por grupo). Nenhuma regra nova.
+ */
+
+/** Um selo curto da linha do plano (trava, volume, SERP, formação, conflito). */
+export type PlanRowSeal = {
+  kind: "lock" | "volume" | "serp" | "formation" | "conflict";
+  label: string;
+  /** A frase inteira (o "por quê"), no `title` do selo. */
+  title: string;
+  tone: "neutral" | "muted" | "warning" | "positive";
+};
+
+/** Os selos curtos da linha do plano, na ordem da leitura. Só lê a linha. */
+export function planRowSeals(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" | "formation" | "conflict" | "supports">): PlanRowSeal[] {
+  const selos: PlanRowSeal[] = [];
+  selos.push(row.lock.state === "locked"
+    ? { kind: "lock", label: "Travada", title: `${row.lock.label}. ${row.lock.why}`, tone: "muted" }
+    : row.lock.state === "free"
+      ? { kind: "lock", label: "Livre", title: `${row.lock.label}. ${row.lock.why}`, tone: "neutral" }
+      : { kind: "lock", label: "Sem principal declarada", title: row.lock.why, tone: "muted" });
+  const sustentacoes = row.supports.count > 0 ? ` ${row.supports.count} sustentação(ões) na lista do Assunto · ${row.supports.withVolume} com volume.` : "";
+  selos.push(row.volume.state === "measured"
+    ? { kind: "volume", label: `Vol. ${(row.volume.value ?? 0).toLocaleString("pt-BR")}`, title: `${row.volume.label}.${sustentacoes}`, tone: "neutral" }
+    : row.volume.state === "no_average"
+      ? { kind: "volume", label: "Sem média", title: `${row.volume.label}.${sustentacoes}`, tone: "muted" }
+      : { kind: "volume", label: "Sem volume", title: `${row.volume.label}.${sustentacoes}`, tone: "muted" });
+  const serp = row.serp.state === "complete" ? { label: "SERP 4/4", tone: "positive" as const }
+    : row.serp.state === "partial" ? { label: `SERP ${row.serp.lenses}/4`, tone: "warning" as const }
+    : row.serp.state === "none" ? { label: "Sem SERP", tone: "muted" as const }
+    : row.serp.state === "loading" ? { label: "SERP…", tone: "muted" as const }
+    : { label: "SERP não lida", tone: "muted" as const };
+  selos.push({ kind: "serp", label: serp.label, title: row.serp.label, tone: serp.tone });
+  if (row.conflict) selos.push({ kind: "conflict", label: PLAN_SHEET_CONFLICT_LABEL, title: row.conflict.sentence, tone: "warning" });
+  else selos.push({ kind: "formation", label: row.formation.label, title: row.formation.label, tone: row.formation.state === "awaiting_principal" ? "warning" : row.formation.state === "formed" || row.formation.state === "in_radar" ? "positive" : "neutral" });
+  return selos;
+}
+
+/** O rótulo curto do papel e da ordem: "Pilar · 9º", "Suporte · 11º". */
+export function planRowRoleLabel(row: Pick<PlanSheetRow, "role" | "order">): string {
+  return `${row.role} · ${row.order}º`;
+}
+
+/**
+ * AS LINHAS DE UM GRUPO DA TABELA, NA ORDEM DO PLANO. Os artigos da mesa que
+ * são do plano (o Assunto deles é a keyword de uma linha do plano) e as linhas
+ * do plano sem artigo na mesa vêm primeiro, pela ordem do plano; os demais
+ * artigos seguem depois, na ordem de sempre. Nada some: cada artigo e cada
+ * linha do plano aparece uma vez.
+ */
+export type PlanGroupItem<A> =
+  | { kind: "article"; key: string; article: A; planRow: PlanSheetRow | null }
+  | { kind: "plan"; key: string; row: PlanSheetRow };
+
+export function planOrderedGroupItems<A>(input: {
+  articles: readonly A[];
+  planRows: readonly PlanSheetRow[];
+  idOf: (article: A) => string;
+  planRowOf: (article: A) => PlanSheetRow | null;
+}): PlanGroupItem<A>[] {
+  const doPlano: { order: number; seq: number; item: PlanGroupItem<A> }[] = [];
+  const demais: PlanGroupItem<A>[] = [];
+  let seq = 0;
+  for (const article of input.articles) {
+    const planRow = input.planRowOf(article);
+    const item: PlanGroupItem<A> = { kind: "article", key: input.idOf(article), article, planRow };
+    if (planRow) doPlano.push({ order: planRow.order, seq: seq++, item });
+    else demais.push(item);
+  }
+  for (const row of input.planRows) doPlano.push({ order: row.order, seq: seq++, item: { kind: "plan", key: `plan:${row.keywordId}`, row } });
+  doPlano.sort((a, b) => a.order - b.order || a.seq - b.seq);
+  return [...doPlano.map(entry => entry.item), ...demais];
+}
+
+/**
+ * AS LINHAS DO PLANO QUE PRECISAM DE LINHA PRÓPRIA: as que nenhum artigo da
+ * mesa representa (o Assunto de nenhum artigo é a keyword delas). As demais
+ * aparecem como selos na linha do artigo — uma linha por artigo.
+ */
+export function planRowsWithoutArticle(rows: readonly PlanSheetRow[], representedKeywordIds: ReadonlySet<string>): PlanSheetRow[] {
+  return rows.filter(row => !representedKeywordIds.has(row.keywordId));
+}
+
+/**
+ * OS BOTÕES DA BARRA, PARA TODAS AS LINHAS. A seleção da tabela se divide em
+ * duas: os artigos de sempre (o núcleo de sempre) e as linhas do plano — as
+ * marcadas como linha própria e os artigos da mesa que são do plano (o núcleo
+ * do plano). O dono vê um botão só.
+ */
+export function splitTableSelectionForPlan<A>(input: {
+  articles: readonly A[];
+  selectedArticleIds: ReadonlySet<string>;
+  idOf: (article: A) => string;
+  planRowOf: (article: A) => PlanSheetRow | null;
+  planOnlyRows: readonly PlanSheetRow[];
+  selectedPlanKeywordIds: ReadonlySet<string>;
+}): { regularArticleIds: Set<string>; planTargets: PlanSheetRow[] } {
+  const regularArticleIds = new Set<string>();
+  const alvos = new Map<string, PlanSheetRow>();
+  const naMesa = new Set<string>();
+  for (const article of input.articles) {
+    const id = input.idOf(article);
+    naMesa.add(id);
+    if (!input.selectedArticleIds.has(id)) continue;
+    const planRow = input.planRowOf(article);
+    if (planRow) alvos.set(planRow.keywordId, planRow);
+    else regularArticleIds.add(id);
+  }
+  // Seleção de artigo que não está mais na mesa continua no escopo de sempre (quem recusa é o núcleo).
+  for (const id of input.selectedArticleIds) if (!naMesa.has(id)) regularArticleIds.add(id);
+  for (const row of input.planOnlyRows) if (input.selectedPlanKeywordIds.has(row.keywordId)) alvos.set(row.keywordId, row);
+  return { regularArticleIds, planTargets: [...alvos.values()].sort((a, b) => a.order - b.order || a.keyword.localeCompare(b.keyword, "pt-BR")) };
+}
+
 /* -------------------------------------------------------- próximo passo */
 
 export type PlanSheetNextStep = {
@@ -605,6 +789,110 @@ export function planSheetNextStep(rows: readonly PlanSheetRow[]): PlanSheetNextS
   if (formaveis.length) return { action: "concludeFormation", sentence: `${PLAN_SHEET_ACTION_LABELS.concludeFormation} de ${formaveis.length} linha(s) (prévia grátis antes de gravar).${aviso}`, keywordIds: formaveis.map(row => row.keywordId) };
   if (presas.length) return { action: "withdraw", sentence: `${presas.length} linha(s) presa(s) em outro artigo: use “${SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}” na linha (prévia e decisão sua); depois, Concluir formação.`, keywordIds: presas.map(row => row.keywordId) };
   return { action: "none", sentence: "Os artigos do plano desta cor estão formados (ou aguardam a principal declarada). Sigam pela mesa, abaixo.", keywordIds: [] };
+}
+
+/* ------------------------- consolidar, não reformar (2026-10-14, noite) */
+
+/*
+ * PEDIDO DO DONO (2026-10-14, noite, depois de testar com a WifiConecta azul):
+ * "o grupo entrou no Arquiteto bem mastigado, com tudo pronto era só olhar e
+ * consolidar, alertar né, vai ser isso mesmo, e consolida, depois vê o que
+ * está faltando as keywords de suporte, depois fazer as coletas de acordo as
+ * principais (…) Aí ele só vê se já tem o silo, cria ele, consolida/valida
+ * tudo e vai em frente para os links internos." Três etapas na mesma barra; o
+ * que falta numa linha é ALERTA, não bloqueio.
+ */
+
+export const PLAN_FLOW_LABELS = {
+  consolidate: "Consolidar o Silo do plano",
+  complete: "Completar sustentações e SERP",
+  links: "Links internos",
+  improvePublished: "Melhorar publicados…",
+} as const;
+
+/** Um alerta curto da linha do plano (o que falta), mostrado na prévia e na linha. */
+export type PlanRowAlert = { kind: "no_volume" | "no_serp" | "conflict" | "awaiting_principal"; label: string; title: string };
+
+/** Os alertas da linha: nada aqui bloqueia a consolidação, exceto a keyword presa em outro artigo e a principal que não chegou. */
+export function planRowAlerts(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" | "conflict" | "formation">): PlanRowAlert[] {
+  const alertas: PlanRowAlert[] = [];
+  const semVolume = !(row.volume.state === "measured" && (row.volume.value ?? 0) > 0);
+  if (row.conflict) alertas.push({ kind: "conflict", label: "presa em outro artigo", title: row.conflict.sentence });
+  if (row.formation.state === "awaiting_principal") alertas.push({ kind: "awaiting_principal", label: "aguarda a principal", title: row.formation.label });
+  if (semVolume) {
+    alertas.push(row.lock.state === "free"
+      ? { kind: "no_volume", label: "sem volume — livre, pode trocar", title: `${row.volume.label}. ${row.lock.why}` }
+      : { kind: "no_volume", label: "sem volume — travada", title: `${row.volume.label}. ${row.lock.why}` });
+  } else if (row.serp.state === "none" || row.serp.state === "partial") {
+    alertas.push({ kind: "no_serp", label: row.serp.state === "partial" ? `SERP ${row.serp.lenses}/4 — completar na etapa 2` : "sem SERP no cache — coletar na etapa 2", title: `${row.serp.label}. A coleta das principais é a etapa 2 (custo antes, cache primeiro).` });
+  }
+  return alertas;
+}
+
+/** A linha consolida (grava/confirma o ArticleDNA do plano) ou fica fora com o motivo. */
+export function planRowConsolidationRefusal(row: Pick<PlanSheetRow, "conflict" | "formation" | "territoryRef" | "groupId">): string | null {
+  if (row.conflict) return row.conflict.sentence;
+  if (row.formation.state === "awaiting_principal") return `${row.formation.label}: aprove-a no Minerador e envie.`;
+  if (!row.groupId) return "Sem grupo (cor): o Silo do plano é o do grupo.";
+  return null;
+}
+
+export type PlanFlowStep = {
+  id: 1 | 2 | 3;
+  label: string;
+  /** Etapa atual (destaque) ou concluída/futura (desabilitada com o motivo no `title`). */
+  state: "current" | "done" | "blocked";
+  reason: string;
+  /** As linhas a que a etapa se aplica agora. */
+  keywordIds: string[];
+};
+
+/**
+ * AS TRÊS ETAPAS DA BARRA. 1 · Consolidar o Silo do plano (enquanto houver
+ * linha sem ArticleDNA ou o Silo sem a consolidação canônica); 2 · Completar
+ * sustentações e SERP (linhas com volume sem as 4 lentes, ou com sustentações
+ * da lista do Assunto com volume fora do artigo); 3 · Links internos. Só a
+ * etapa atual fica em destaque; as outras dizem por que estão paradas.
+ */
+export function planFlowSteps(input: { rows: readonly PlanSheetRow[]; siloConsolidated: boolean }): PlanFlowStep[] {
+  const rows = input.rows;
+  const formada = (row: PlanSheetRow) => row.formation.state === "formed" || row.formation.state === "in_radar";
+  const consolidaveis = rows.filter(row => !formada(row) && !planRowConsolidationRefusal(row));
+  const faltaConsolidar = rows.some(row => !formada(row)) || !input.siloConsolidated;
+  const semSerp = rows.filter(row => row.volume.state === "measured" && (row.volume.value ?? 0) > 0 && (row.serp.state === "none" || row.serp.state === "partial"));
+  // Formado (consolidado do plano) sem parecer, com as 4 lentes no cache, ou com sustentações para acrescentar: a melhoria grava a versão nova.
+  const semSustentacao = rows.filter(row => formada(row) && ((row.supports.missingInArticle?.length ?? 0) > 0 || (row.formation.serpPending === true && row.serp.state === "complete")));
+  const etapa2 = [...new Set([...semSerp, ...semSustentacao].map(row => row.keywordId))];
+  const passo1: PlanFlowStep = faltaConsolidar
+    ? { id: 1, label: PLAN_FLOW_LABELS.consolidate, state: "current", reason: consolidaveis.length || !input.siloConsolidated ? `Prévia grátis: ${consolidaveis.length} artigo(s) do plano para gravar${!input.siloConsolidated ? " e o Silo do plano para consolidar (SiloDNA e SiloPage com o Pilar e a ordem do plano)" : ""}; uma confirmação.` : "As linhas que faltam estão presas ou aguardam a principal: veja o alerta de cada uma.", keywordIds: consolidaveis.map(row => row.keywordId) }
+    : { id: 1, label: PLAN_FLOW_LABELS.consolidate, state: "done", reason: "Silo do plano consolidado: todos os artigos do plano têm ArticleDNA.", keywordIds: [] };
+  const passo2: PlanFlowStep = faltaConsolidar
+    ? { id: 2, label: PLAN_FLOW_LABELS.complete, state: "blocked", reason: "Depois de consolidar o Silo do plano (etapa 1).", keywordIds: etapa2 }
+    : etapa2.length
+      ? { id: 2, label: PLAN_FLOW_LABELS.complete, state: "current", reason: `${semSerp.length} principal(is) sem as 4 lentes de SERP (custo antes, cache primeiro) · ${semSustentacao.length} artigo(s) com sustentações da lista do Assunto para acrescentar (prévia grátis).`, keywordIds: etapa2 }
+      : { id: 2, label: PLAN_FLOW_LABELS.complete, state: "done", reason: "Sustentações e SERP das principais em dia.", keywordIds: [] };
+  const passo3: PlanFlowStep = faltaConsolidar || etapa2.length
+    ? { id: 3, label: PLAN_FLOW_LABELS.links, state: "blocked", reason: faltaConsolidar ? "Depois de consolidar o Silo do plano (etapa 1)." : "Depois de completar sustentações e SERP (etapa 2).", keywordIds: [] }
+    : { id: 3, label: PLAN_FLOW_LABELS.links, state: "current", reason: (() => {
+      // Consolidado sem parecer e sem volume (não há SERP a coletar): segue, mas o Radar pede a SERP antes de receber.
+      const semParecer = rows.filter(row => row.formation.serpPending === true).length;
+      return `Silo consolidado e artigos completos: siga para a aba Links internos.${semParecer ? ` ${semParecer} artigo(s) sem parecer de SERP (sem volume): o Radar pede a SERP antes de receber — troque a principal livre ou meça o volume no Minerador.` : ""}`;
+    })(), keywordIds: [] };
+  return [passo1, passo2, passo3];
+}
+
+/**
+ * O QUE "2 · COMPLETAR SUSTENTAÇÕES E SERP" FAZ AGORA. Primeiro a SERP das
+ * principais com volume que não têm as 4 lentes ("Validar SERP": cache
+ * primeiro, custo antes); com a SERP no cache, a formação pela melhoria
+ * (prévia grátis) grava a versão nova com o parecer e as sustentações da lista.
+ */
+export function planStepTwoAction(rows: readonly PlanSheetRow[]): { action: "validateSerp" | "concludeFormation"; rows: PlanSheetRow[] } | null {
+  const semSerp = rows.filter(row => row.volume.state === "measured" && (row.volume.value ?? 0) > 0 && (row.serp.state === "none" || row.serp.state === "partial"));
+  if (semSerp.length) return { action: "validateSerp", rows: semSerp };
+  const formada = (row: PlanSheetRow) => row.formation.state === "formed" || row.formation.state === "in_radar";
+  const completar = rows.filter(row => formada(row) && ((row.supports.missingInArticle?.length ?? 0) > 0 || (row.formation.serpPending === true && row.serp.state === "complete")));
+  return completar.length ? { action: "concludeFormation", rows: completar } : null;
 }
 
 /* ---------------------------------------------- erro do servidor, humano */

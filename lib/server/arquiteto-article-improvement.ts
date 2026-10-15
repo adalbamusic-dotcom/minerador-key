@@ -10,7 +10,7 @@ import { articleSerpBaseHash, articleSerpIntentOf } from "@/lib/arquiteto/articl
 import type { SerpFormationAssessment } from "@/lib/arquiteto/serp-formation";
 import { siloIsHumanDecided } from "@/lib/arquiteto/territory";
 import { bindArticleParentForMaterialization } from "@/lib/arquiteto/article-silo-materialization";
-import { articleApprovalRevalidationIssues } from "@/lib/arquiteto/article-approval-revalidation";
+import { articleApprovalRevalidationIssues, DECLARED_PLAN_CONSOLIDATION_ALERT_PREFIX, isDeclaredPlanConsolidation } from "@/lib/arquiteto/article-approval-revalidation";
 import { publishedPrimaryPostOf } from "@/lib/arquiteto/published-primary-swap";
 import { buildFirstPublishedArticleDna, withHumanArticleApproval } from "@/lib/arquiteto/published-reinforcement";
 import { resolveKeywordDnaSignals } from "@/lib/arquiteto/keyword-dna-signals";
@@ -266,7 +266,8 @@ async function readInputs(context: PipelineContext, requested?: string[], groupF
       // F4 — principal declarada no plano (pacote aprovado do Assunto): fixa SÓ quando travada; e o plano ainda não aplicado ao DNA (D8).
       ...(fixa ? { declaredPrincipalId: fixa.keywordId } : {}),
       ...(standing.plan?.declaredPrincipal ? { planPrincipalId: standing.plan.declaredPrincipal.keywordId } : {}),
-      ...(standing.plan && article && !declaredPlanAppliedTo(article.payload, standing) ? { declaredPlanPending: true } : {}) });
+      // 2026-10-14 (noite) · o artigo consolidado do plano sem SERP volta a ficar "pronto" para receber o parecer (etapa 2).
+      ...(standing.plan && article && (!declaredPlanAppliedTo(article.payload, standing) || (!article.payload.serpAssessmentRef && isDeclaredPlanConsolidation(article.payload))) ? { declaredPlanPending: true } : {}) });
   }
   for (const target of targets) {
     const territory = territories.find(t => t.territoryRef === target.territoryRef)?.territory;
@@ -1404,6 +1405,8 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   // D2(a) — de onde veio o parecer fica escrito no DNA (serpStrategy.rationale), trocado a cada versão; não é pendência.
   payload = ArticleDNASchema.parse(applySerpSupportBasisProvenance(payload, apoioDoParecer?.reason ?? null, recalculated.serpStrategy));
   payload = withHumanArticleApproval(payload, { entityId: assessment.payload.assessment.id, versionId: `${assessment.payload.assessment.id}:${assessment.payload.formationBaseHash}`, contentHash: assessment.payload.assessment.contentHash });
+  // 2026-10-14 · consolidado do plano sem SERP: com o parecer gravado agora, a marca "sem parecer de SERP" sai desta versão.
+  if (payload.alerts.some(alert => alert.startsWith(DECLARED_PLAN_CONSOLIDATION_ALERT_PREFIX))) payload = ArticleDNASchema.parse({ ...payload, alerts: payload.alerts.filter(alert => !alert.startsWith(DECLARED_PLAN_CONSOLIDATION_ALERT_PREFIX)) });
   const formationRef = text(input.rows.get(target.memberIds[0] ?? target.id)?.articleFormationRef) ?? `article-formation:${stableUuid(context.brandId, target.id, "improvement")}`;
   // The provider uses the published identity; the workbench uses the working
   // formation. Bind the SAME observed composition to that stable reference.
@@ -1436,6 +1439,109 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   if (!dna || dna.contentHash !== written.version.contentHash || !markerReadback.payload.concludedFormations.some(f => f.materializedArticleId === payload.articleId && f.formationBaseHash === baseHash(group)) || members.some(id => text(rows.get(id)?.articleFormationRef) !== formationRef || object(rows.get(id)?.articleFormationDecision).role !== (id === principalId ? "principal" : "secundaria") || (transfers.includes(id) && text(rows.get(id)?.territoryRef) !== target.territoryRef)) || proposal.removeIds.some(id => text(rows.get(id)?.articleFormationRef))) throw refusal("A releitura não confirmou DNA, composição e marcador. Revise o progresso antes de retomar.");
   const material = proposal.addIds.length > 0 || proposal.removeIds.length > 0 || proposal.principalId !== proposal.currentPrimaryId || proposal.exclusions.length > 0 || Boolean(target.declaredPlanPending);
   return { targetId: target.id, status: material ? "improved" : currentArticle ? "unchanged" : "dna_created", message: `${material ? "Melhoria material gravada e relida." : currentArticle ? "Composição já adequada." : "Primeiro ArticleDNA criado; composição não foi ampliada."}${liberadas.length ? ` A tabela voltou a bater com o artigo: ${liberadas.map(id => `“${input.rows.get(id)?.keyword ?? id}”`).join(", ")} ${liberadas.length === 1 ? "foi liberada" : "foram liberadas"} para “Keywords não agrupadas” (nenhuma foi apagada).` : ""}`, versionId: dna.versionId };
+}
+
+/* ===================== consolidar o Silo do plano (2026-10-14, noite) ===================== */
+
+/*
+ * PEDIDO DO DONO (2026-10-14, noite): "o grupo entrou no Arquiteto bem
+ * mastigado, com tudo pronto era só olhar e consolidar". O artigo do plano que
+ * ainda não tem ArticleDNA é gravado v1 a partir do que veio do Minerador — a
+ * principal é a keyword do plano (travada ou livre; consolidar nunca troca),
+ * as secundárias são as sustentações já ligadas à keyword no Minerador (lista
+ * do Assunto, com volume, no mesmo Silo e sem outro artigo), papel e escopo do
+ * plano (D8) — pela MESMA montagem e gravação da melhoria (`makeGroup`,
+ * `deterministicArticleDnaPayload`, Assunto, plano, classificação, PATCH da
+ * mesa, `appendArquitetoArtifact`, marcador, releitura), SEM parecer de SERP e
+ * sem IA. A decisão humana (ator, data, "consolidado do plano do Minerador")
+ * fica no DNA; a SERP das principais é a etapa 2 e o Radar a exige antes.
+ */
+
+/** As entradas que a consolidação lê: as MESMAS da melhoria (marca inteira, para o conflito com artigo de outra cor). */
+export async function readPlanConsolidationInputs(context: PipelineContext) {
+  const input = await readInputs(context, undefined, undefined, { lenient: true });
+  const standings = readArchitectSubjectStandings(input.rows.values());
+  const now = new Date();
+  return {
+    ...input,
+    standings,
+    /** O volume conhecido da linha, pela regra D4 (o mesmo leitor da melhoria). */
+    volumeOf: (keywordId: string) => { const row = input.rows.get(keywordId); return row ? knownVolumeOfRow(row, now) : null; },
+    /** A keyword tem intenção no KeywordDNA? (a gravação recusa membro sem intenção, F4). */
+    hasIntent: (keywordId: string) => { const row = input.rows.get(keywordId); return row ? Boolean(signals(row).intent) : false; },
+  };
+}
+export type PlanConsolidationInputs = Awaited<ReturnType<typeof readPlanConsolidationInputs>>;
+
+/** Grava o ArticleDNA v1 de UM artigo do plano a partir do plano (sem SERP, sem IA). Devolve o DNA relido. */
+export async function writePlanArticleFromPlan(runtime: ImprovementRuntime, input: PlanConsolidationInputs, line: {
+  subjectKeywordId: string;
+  principalId: string;
+  memberIds: readonly string[];
+  decisionRef: string;
+  reason: string;
+}): Promise<{ articleId: string; versionId: string; versionNumber: number }> {
+  const context = runtime.context;
+  const target = input.targets.find(item => item.kind === "subject" && item.id === line.subjectKeywordId);
+  if (!target) throw refusal("Não é um artigo do plano recebido no Arquiteto (ou já é membro de outro artigo).");
+  if (!target.territoryRef) throw refusal("Sem Silo: a keyword do plano ainda não está no Silo do plano.");
+  if (input.workspace.articleDnas.some(a => a.payload.subject?.keywordId === line.subjectKeywordId)) throw refusal("Este artigo do plano já tem ArticleDNA: consolidar não grava outra versão.");
+  const members = [...new Set([line.principalId, ...line.memberIds])];
+  const sem = members.filter(id => !input.rows.has(id));
+  if (sem.length) throw refusal("Uma keyword do artigo saiu do Arquiteto. Gere a prévia de novo.");
+  const semIntencao = members.filter(id => id !== line.principalId && !input.hasIntent(id));
+  if (semIntencao.length) throw refusal(`Sem intenção no KeywordDNA: ${semIntencao.map(id => `“${input.rows.get(id)?.keyword ?? id}”`).join(", ")} (rode a Lógica no Minerador).`);
+  const proposal = { targetId: target.id, kind: "subject", theme: target.theme, currentPrimaryId: target.primaryId, principalId: line.principalId, memberIds: members, addIds: members, removeIds: [], transfers: [], angle: "", exclusions: [], reasons: [line.reason], status: "ready", evidenceBasis: null } as unknown as ImprovementProposal;
+  const group = makeGroup(target, proposal, input.rows);
+  const now = new Date().toISOString();
+  const draft = deterministicArticleDnaPayload(group, context.brandId);
+  const bound = bindArticleParentForMaterialization({ article: draft, siloVersions: input.workspace.siloDnas, stage: "INITIAL" });
+  if (!bound.ok) throw refusal(bound.reason);
+  const primaryRow = input.rows.get(line.principalId)!;
+  let payload: ArticleDNA = ArticleDNASchema.parse({ ...bound.payload, principalKeywordId: line.principalId, keywordReferences: draft.keywordReferences, secondaryKeywordIds: members.filter(id => id !== line.principalId), narrativeReinforcementIds: [], coverage: [...new Set([...bound.payload.coverage, ...group.keywords.map(k => k.keyword)])], requiredTopics: [...new Set([...bound.payload.requiredTopics, target.theme])], suggestedSlug: suggestArticleSlug({ principal: primaryRow, siloSlug: target.siloContext?.slug ?? null }) });
+  const subjectRow = input.rows.get(target.id)!;
+  const attachment = planSubjectAttachment({ brandId: context.brandId, keyword: subjectRow, actorUserId: context.actorUserId, attachedAt: now, target: { principalKeywordId: line.principalId, excludedSubjects: payload.excludedSubjects } });
+  if (!attachment.ok) throw refusal(attachment.reason);
+  const attached = attachSubjectToArticleDna(payload, attachment.subject, { principalVolumeValidated: subjectMayBePrincipal(readArchitectSubjectStanding(subjectRow)) });
+  if (!attached.ok) throw refusal(attached.reason);
+  const comPlano = applyDeclaredPlanToArticleDna(attached.value, readArchitectSubjectStanding(subjectRow));
+  if (!comPlano.ok) throw refusal(comPlano.reason);
+  payload = ArticleDNASchema.parse(comPlano.value);
+  {
+    // A classificação pela evidência de hoje, sem SERP: o que a regra não resolve fica para a leitura ao vivo (nada inventado).
+    const semanticaDe = (keywordId: string) => {
+      const row = input.rows.get(keywordId);
+      const semantic = object(row?.analise_semantica);
+      return { intent: row ? signals(row).intent : null, funnel: text(semantic.funil) || text(semantic.funnel) };
+    };
+    const kgr = readArticleKgrDecision({ kgrIdentity: payload.kgrIdentity, principal: primaryRow as unknown as ArchitectKeyword, principalKeywordId: line.principalId, supports: members.filter(id => id !== line.principalId).map(id => input.rows.get(id)).filter(Boolean) as unknown as ArchitectKeyword[] });
+    const evidencia = buildClassificationEvidence({ principal: semanticaDe(line.principalId), secondaries: members.filter(id => id !== line.principalId).map(semanticaDe), keywordCount: members.length, serpInterpretation: null, serpResolved: false, kgr, principalIsSubject: true, isPublished: false, principalProtected: primaryRow.primaryKeywordPolicy === "locked" });
+    const classificacao = unresolvedClassifications(evidencia).length ? undefined : resolveArticleClassification(evidencia);
+    payload = ArticleDNASchema.parse({ ...payload, auxiliaryIntents: draft.auxiliaryIntents, classification: classificacao });
+  }
+  const decisao = `${DECLARED_PLAN_CONSOLIDATION_ALERT_PREFIX} (decisão humana de ${context.actorUserId} em ${now.slice(0, 10)}): papel, ordem, principal e escopo do plano; sem parecer de SERP — a SERP das principais é a etapa 2 e o Radar a exige antes de receber.`;
+  const aprovado = withHumanArticleApproval(payload, null);
+  payload = ArticleDNASchema.parse({ ...aprovado, alerts: [...aprovado.alerts.filter(alert => !alert.startsWith(DECLARED_PLAN_CONSOLIDATION_ALERT_PREFIX)), decisao] });
+  const formationRef = text(subjectRow.articleFormationRef) ?? `article-formation:${stableUuid(context.brandId, target.id, "plan-consolidation")}`;
+  const updates = members.map(id => {
+    const row = input.rows.get(id)!; const workflow = object(row.canonicalWorkflow);
+    if (!workflow.id) throw refusal("Membro não recebido no Arquiteto.");
+    return { workflowItemId: String(workflow.id), expectedLock: Number(workflow.lockVersion), assignment: { articleFormationRef: formationRef, articleFormationDecision: { operation: "move", role: id === line.principalId ? "principal" : "secundaria", reason: `${DECLARED_PLAN_CONSOLIDATION_ALERT_PREFIX}: composição do plano aceita pelo humano na prévia.`, source: "human", decidedAt: now }, articleSubjectAnchor: id === line.principalId ? { candidateRef: formationRef, subjectKeywordId: target.id, attachedBy: context.actorUserId, attachedAt: now } : null } };
+  });
+  const version = await createVersionEnvelope({ entityId: payload.articleId, versionNumber: 1, previousVersionId: null, origin: "human", changeReason: `${decisao} [plan-consolidation:${line.decisionRef}]`, createdBy: context.actorUserId, payload });
+  const issues = articleApprovalRevalidationIssues({ version, authorizedBrandId: context.brandId, declaredPlanConsolidation: true });
+  if (issues.length) throw refusal(`A aprovação não passou na revalidação: ${issues.map(i => i.detail).join(" ")}`);
+  await responseData(await handleArchitectWorkspacePatch(internalRequest("/api/arquiteto/workspace", { brandId: context.brandId, updates }, "PATCH"), context));
+  const written = await appendArquitetoArtifact(await runtime.authorize("arquiteto", "approve"), "article_dna", version, "approved");
+  const marker = await readArticleFormationMarker(context);
+  const concluded = { candidateRef: formationRef, territoryRef: target.territoryRef, principalKeywordId: line.principalId, members: members.map(keywordId => ({ keywordId, role: keywordId === line.principalId ? "principal" as const : "secundaria" as const })), formationBaseHash: baseHash(group), slug: payload.suggestedSlug, fullPath: null, concludedAt: now, concludedBy: context.actorUserId, materializedArticleId: payload.articleId };
+  const formations = [...(marker?.payload.concludedFormations ?? []).filter(f => f.materializedArticleId !== payload.articleId && f.candidateRef !== formationRef), concluded];
+  await saveArticleFormationMarker(context, { contractVersion: "article-formation-marker-v1", baseHash: marker?.payload.baseHash ?? baseHash(group), processedAt: now, confirmation: { status: "partial", confirmedAt: now, confirmedArticleCount: formations.length, coveredKeywordCount: new Set(formations.flatMap(f => f.members.map(m => m.keywordId))).size, pendingSiloCount: marker?.payload.confirmation.pendingSiloCount ?? 0, failedCount: marker?.payload.confirmation.failedCount ?? 0 }, concludedFormations: formations });
+  const readback = await loadCanonicalArquitetoWorkspace(context);
+  const dna = readback.articleDnas.find(a => a.versionId === written.version.versionId);
+  const rows = projected(readback, context.brandId);
+  if (!dna || dna.contentHash !== written.version.contentHash || members.some(id => text(rows.get(id)?.articleFormationRef) !== formationRef)) throw refusal("A releitura não confirmou o ArticleDNA e a composição. Gere a prévia de novo antes de repetir.");
+  return { articleId: dna.payload.articleId, versionId: dna.versionId, versionNumber: dna.versionNumber };
 }
 
 export function improvementRuntime(context: PipelineContext): ImprovementRuntime {

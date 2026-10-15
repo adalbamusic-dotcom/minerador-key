@@ -261,9 +261,15 @@ export function mineradorPackageUpdatesOf(rows: ReadonlyArray<Record<string, unk
 }
 
 /** A frase do aviso na mesa. */
+/**
+ * 2026-10-14 (pedido do dono) · o aviso da mesa é UMA linha curta com o botão
+ * "Atualizar do Minerador": "Pacote novo no Minerador · N keywords". O detalhe
+ * (o que a atualização faz e o que preserva) fica em `MINERADOR_PACKAGE_UPDATES_DETAIL`.
+ */
 export function mineradorPackageUpdatesSentence(count: number): string {
-  return `Pacote novo no Minerador · ${count} keyword${count === 1 ? "" : "s"}: reaprovada${count === 1 ? "" : "s"} depois do envio (Assunto, plano ou DNA mudaram). “Atualizar do Minerador” troca o pacote guardado pelo aprovado vigente; Silo, artigo e Assunto ancorado ficam como estão, e artigo já formado não é reescrito (ele passa a avisar que a keyword foi reaprovada).`;
+  return `Pacote novo no Minerador · ${count} keyword${count === 1 ? "" : "s"}`;
 }
+export const MINERADOR_PACKAGE_UPDATES_DETAIL = "Reaprovadas depois do envio (Assunto, plano ou DNA mudaram). “Atualizar do Minerador” troca o pacote guardado pelo aprovado vigente; Silo, artigo e Assunto ancorado ficam como estão, e artigo já formado não é reescrito (ele passa a avisar que a keyword foi reaprovada).";
 
 /* -------------------------------- cores -------------------------------- */
 

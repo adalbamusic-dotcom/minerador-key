@@ -1,22 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { comProductShell, montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
-import { PlanArticleSheet } from "../modules/arquiteto/plan-article-sheet.tsx";
 import { ArticleImprovementPanel } from "../modules/arquiteto/article-improvement-panel.tsx";
 import { GRUPOS } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import { ARTIGO_INTRUSO, AZUL, INTRUSO_ID, MARCA_WIFI, SILO_PLANOS, grupoDaKeywordReal, mesaWifiReal } from "./arquiteto-uma-lista-so-fixtures.mts";
+import { MesaDoPlano, novoRegistro, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
+import type { EditorialGroupScreenFilter } from "../lib/editorial/editorial-groups.ts";
 
 /*
  * 2026-10-14 · O CAMINHO DO DONO (WifiConecta, cor azul), na tela de verdade:
- * planilha marcada (7) → "Validar SERP (7)" e "Concluir formação (7)" — cada
- * linha termina com um resultado claro (forma, recusa com motivo e caminho, ou
- * falta SERP com custo), nada fica girando; erro do servidor vira frase humana;
- * a linha presa abre "Retirar artigo do Silo" com prévia e só o dono confirma;
- * com a cor que tem plano, o painel dos publicados fica recolhido.
+ * linhas do plano marcadas (7) → os botões de sempre — cada linha termina com
+ * um resultado claro (forma, recusa com motivo e caminho, ou falta SERP com
+ * custo), nada fica girando; erro do servidor vira frase humana; a linha presa
+ * abre "Retirar artigo do Silo" com prévia e só o dono confirma.
+ *
+ * 2026-10-14 (noite) · sem planilha separada (pedido do dono: "por que no
+ * arquiteto tem duas planilhas?"). A mesa é a da aba (harness comum). Com UM
+ * plano no recorte, a barra é a das etapas ("Consolidar o Silo do plano");
+ * com "Todos" (azul e laranja com plano), a barra de sempre — é por ela que
+ * estes testes marcam as 7 linhas e usam "Processar artigos"/"Concluir formação".
  */
 
 type Chamada = { url: string; method: string; body: any };
-let screen: RadarDomScreen, chamadas: Chamada[], aplicados: number;
+let screen: RadarDomScreen, chamadas: Chamada[], registro: Registro;
 const lentes = ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"];
 const planoSerp = (paid: number) => ({ lenses: lentes, perLens: [], paidQueries: paid, primaryPaidQueries: paid / 4, extraPaidQueries: (paid * 3) / 4, conditionalPaidQueries: 0, recollectableQueries: 0, estimatedCostUsd: { min: paid * 0.0006, max: paid * 0.002 }, collectedAtSpreadDays: 0, datesDiverge: false, payMissingExtraLenses: true, recollectStaleLenses: false, digestChecked: false });
 const execucao = (extra: Record<string, unknown>) => ({ version: 1, runId: "22222222-2222-4222-8222-222222222222", brandId: MARCA_WIFI, actorId: "ator", createdAt: "2026-10-14T12:00:00Z", state: "prepared", decisionHash: "b".repeat(64), leaseUntil: null, sourceHashes: {}, targets: [], keywords: [], beforeAssignments: {}, proposals: [], costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] }, reservedCostUsd: 0, notices: [], outcomes: [], acceptedIds: null, origin: "plan_sheet", ...extra });
@@ -53,90 +59,90 @@ function rede(opcoes: { prepareStatus?: number; applyPreso?: boolean } = {}) {
   };
 }
 const assentar = async (vezes = 25) => { for (let i = 0; i < vezes; i += 1) await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
-const sheet = () => comProductShell(React.createElement(PlanArticleSheet, {
-  brandId: MARCA_WIFI, brandRef: "wificonecta--d4fa133a", keywords: mesaWifiReal(),
+const AZUL_FILTRO: EditorialGroupScreenFilter = { kind: "groups", color: "azul", groupIds: [AZUL] };
+const TODOS: EditorialGroupScreenFilter = { kind: "all" };
+const mesa = (filtro: EditorialGroupScreenFilter = AZUL_FILTRO) => comProductShell(React.createElement(MesaDoPlano, {
+  marca: MARCA_WIFI, keywords: mesaWifiReal(), articles: [ARTIGO_INTRUSO], mesa: [], filtro, registro,
   groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal,
-  filter: { kind: "groups", color: "azul", groupIds: [AZUL] }, articles: [ARTIGO_INTRUSO], radarArticleIds: new Set<string>(),
-  onApplied: () => { aplicados += 1; }, buttonClassName: "button", primaryButtonClassName: "button", controlClassName: "control", dangerButtonClassName: "danger",
 }));
-const linhaDa = (keywordId: string) => screen.container.querySelector<HTMLElement>(`[data-testid="architect-plan-sheet-row"][data-keyword-id="${keywordId}"]`)!;
+const AZUIS = ["k9", "k10", "k11", "k12", "k13", "k14", "k15"];
+const linhaDa = (keywordId: string) => screen.container.querySelector<HTMLElement>(`[data-testid="architect-plan-table-row"][data-keyword-id="${keywordId}"]`)!;
+const marcarAzuis = async () => { for (const id of AZUIS) await screen.click(linhaDa(id).querySelector<HTMLInputElement>("input[type='checkbox']")!); };
+const resultado = (keywordId: string) => linhaDa(keywordId).querySelector("[data-testid='architect-plan-row-result']")?.textContent ?? "";
 const botao = (texto: string, dentro?: HTMLElement) => [...(dentro ?? screen.container).querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === texto);
 const semGirar = () => assert.equal(screen.query("architect-plan-sheet-progress"), null, "nada fica girando");
 const semMinerador = () => assert.equal(chamadas.some(chamada => chamada.url.includes("/api/minerador")), false, "nenhum pedido ao Minerador");
 
-test.beforeEach(async () => { chamadas = []; aplicados = 0; screen = await montarRadar(); });
+test.beforeEach(async () => { chamadas = []; registro = novoRegistro(); screen = await montarRadar(); });
 test.afterEach(() => screen.destroy());
 
-test("azul real: 7 linhas; 12, 13 e 14 presas no artigo do laranja com o caminho; próximo passo no topo", async () => {
+test("azul real: 7 linhas; 12, 13 e 14 presas no artigo do laranja com o caminho; no topo, só a etapa atual (sem cartão 'Próximo passo')", async () => {
   rede();
-  await screen.render(sheet()); await assentar();
-  assert.equal(screen.all("architect-plan-sheet-row").length, 7);
-  const presas = screen.all("architect-plan-sheet-conflict");
-  assert.deepEqual(presas.map(item => item.closest<HTMLElement>("[data-testid='architect-plan-sheet-row']")!.dataset.order), ["12", "13", "14"]);
-  assert.match(linhaDa("k13").textContent!, /Presa no artigo “melhor-para-jogos-online” do Silo “planos de internet” \(Assunto “Internet de 300, 500, 600 Mega ou 1 Giga: qual velocidade contratar\?” · cor Laranja\)/);
-  assert.equal(linhaDa("k13").querySelector("[data-testid='architect-plan-sheet-row-withdraw']")?.textContent, "Retirar artigo do Silo");
-  const proximo = screen.get("architect-plan-sheet-next-step");
-  assert.equal(proximo.dataset.nextStep, "validateSerp");
-  assert.match(proximo.textContent!, /Validar SERP de 2 linha\(s\).*3 linha\(s\) presa\(s\) em outro artigo/);
+  await screen.render(mesa()); await assentar();
+  assert.equal(screen.all("architect-plan-table-row").length, 7);
+  const presas = screen.container.querySelectorAll<HTMLElement>("[data-testid='architect-plan-table-row'][data-formation='conflict']");
+  assert.deepEqual([...presas].map(item => item.dataset.order), ["12", "13", "14"]);
+  assert.match(linhaDa("k13").querySelector<HTMLElement>("[data-plan-seal='conflict']")!.title, /Presa no artigo “melhor-para-jogos-online” do Silo “planos de internet” \(Assunto “Internet de 300, 500, 600 Mega ou 1 Giga: qual velocidade contratar\?” · cor Laranja\)/);
+  assert.equal(linhaDa("k13").querySelector("[data-testid='architect-plan-row-withdraw']")?.textContent, "Retirar artigo do Silo");
+  assert.equal(screen.query("architect-plan-sheet-next-step"), null);
+  assert.equal(screen.get("architect-plan-stage").textContent, "Consolidar o Silo do plano");
   semMinerador();
 });
 
-test("Concluir formação (7): as 3 presas recusadas com o motivo antes do servidor; as 4 formam; resultado por linha; nada gira", async () => {
+test("Concluir formação (7, barra de sempre em 'Todos'): as 3 presas recusadas com o motivo antes do servidor; as 4 formam; resultado por linha; nada gira", async () => {
   rede();
-  await screen.render(sheet()); await assentar();
-  await screen.click("architect-plan-sheet-select-all");
-  assert.equal(screen.get("architect-plan-sheet-batch-form").textContent, "Concluir formação (7)");
-  await screen.click("architect-plan-sheet-batch-form"); await assentar();
+  await screen.render(mesa(TODOS)); await assentar();
+  await marcarAzuis();
+  await screen.click("architect-articles-top-confirm"); await assentar();
   const preparos = chamadas.filter(chamada => chamada.body?.action === "prepare");
   assert.equal(preparos.length, 1);
   assert.deepEqual(preparos[0].body.targetIds, ["k9", "k10", "k11", "k15"], "a presa não vai ao servidor");
   const kinds = screen.all("architect-plan-sheet-preview-line").map(item => [item.textContent!.split(" · ")[0], item.dataset.kind]);
   assert.deepEqual(kinds.filter(([, kind]) => kind === "refused").map(([keyword]) => keyword), ["internet para streaming", "melhor internet para jogos online", "internet para home office"]);
   assert.equal(kinds.filter(([, kind]) => kind === "go").length, 4);
-  assert.equal(screen.get("architect-plan-sheet-confirm").textContent, "Concluir formação (4)");
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k9", "k10", "k11", "k15"]]);
-  assert.match(linhaDa("k9").querySelector("[data-testid='architect-plan-sheet-result']")!.textContent!, /ArticleDNA de k9 criado e relido/);
-  assert.match(linhaDa("k13").querySelector("[data-testid='architect-plan-sheet-result']")!.textContent!, /^Não gravado: Presa no artigo/);
+  assert.match(resultado("k9"), /ArticleDNA de k9 criado e relido/);
+  assert.match(resultado("k13"), /^Não gravado: Presa no artigo/);
   assert.match(screen.get("architect-plan-sheet-summary").textContent!, /4 gravado\(s\) e relido\(s\); 3 fora desta confirmação/);
-  assert.equal(aplicados, 1);
+  assert.equal(registro.aplicados, 1);
   semGirar(); semMinerador();
 });
 
-test("Validar SERP (7): custo antes, uma confirmação, resultado por linha (sem volume, já no cache, coletada) e nada gira", async () => {
+test("Processar artigos (7, barra de sempre em 'Todos') = Validar SERP: custo antes, uma confirmação, resultado por linha (sem volume, já no cache, coletada) e nada gira", async () => {
   rede();
-  await screen.render(sheet()); await assentar();
-  await screen.click("architect-plan-sheet-select-all");
-  await screen.click("architect-plan-sheet-batch-serp"); await assentar();
+  await screen.render(mesa(TODOS)); await assentar();
+  await marcarAzuis();
+  await screen.click("architect-articles-top-process"); await assentar();
   assert.equal(screen.get("architect-plan-sheet-preview").dataset.action, "validateSerp");
   assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /chamada\(s\) paga\(s\)/);
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   const pagos = chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute");
   assert.deepEqual(pagos.flatMap(chamada => chamada.body.keywords.map((item: any) => item.keywordId)), ["k11", "k12", "k13", "k14", "k15"]);
-  for (const id of ["k9", "k10", "k11", "k12", "k13", "k14", "k15"]) assert.ok(linhaDa(id).querySelector("[data-testid='architect-plan-sheet-result']"), `a linha ${id} tem resultado`);
-  assert.match(linhaDa("k10").querySelector("[data-testid='architect-plan-sheet-result']")!.textContent!, /Sem volume medido/);
-  assert.match(linhaDa("k9").querySelector("[data-testid='architect-plan-sheet-result']")!.textContent!, /Já temos as 4 lentes/);
+  for (const id of AZUIS) assert.ok(resultado(id), `a linha ${id} tem resultado`);
+  assert.match(resultado("k10"), /Sem volume medido/);
+  assert.match(resultado("k9"), /Já temos as 4 lentes/);
   semGirar(); semMinerador();
 });
 
 test("erro do servidor na prévia: frase humana com o que fazer, por linha; nada gira e os botões voltam", async () => {
   rede({ prepareStatus: 500 });
-  await screen.render(sheet()); await assentar();
-  await screen.click("architect-plan-sheet-select-all");
-  await screen.click("architect-plan-sheet-batch-form"); await assentar();
+  await screen.render(mesa(TODOS)); await assentar();
+  await marcarAzuis();
+  await screen.click("architect-articles-top-confirm"); await assentar();
   const recusadas = screen.all("architect-plan-sheet-preview-line").filter(item => /O servidor falhou nesta etapa \(erro 500\)\. Nada foi gravado por ela; tente de novo/.test(item.textContent!));
   assert.equal(recusadas.length, 4);
   assert.doesNotMatch(screen.text(), /QUERY_FAILURE/);
   semGirar();
   await screen.click(botao("Cancelar", screen.get("architect-plan-sheet-preview"))!);
-  assert.equal((screen.get("architect-plan-sheet-batch-form") as HTMLButtonElement).disabled, false);
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false);
 });
 
 test("gravação que não avança: para com a frase e oferece 'Continuar a gravação'; nunca gira sem fim", async () => {
   rede({ applyPreso: true });
-  await screen.render(sheet()); await assentar();
-  await screen.click("architect-plan-sheet-select-all");
-  await screen.click("architect-plan-sheet-batch-form"); await assentar();
+  await screen.render(mesa(TODOS)); await assentar();
+  await marcarAzuis();
+  await screen.click("architect-articles-top-confirm"); await assentar();
   await screen.click("architect-plan-sheet-confirm"); await assentar(200);
   const aplicacoes = chamadas.filter(chamada => chamada.body?.action === "apply").length;
   assert.ok(aplicacoes > 1 && aplicacoes < 60, `chamadas limitadas (${aplicacoes})`);
@@ -147,8 +153,8 @@ test("gravação que não avança: para com a frase e oferece 'Continuar a grava
 
 test("linha presa → 'Retirar artigo do Silo': abre a PRÉVIA (grátis) do artigo intruso; só o dono, com motivo, confirma", async () => {
   rede();
-  await screen.render(sheet()); await assentar();
-  await screen.click(linhaDa("k13").querySelector<HTMLElement>("[data-testid='architect-plan-sheet-row-withdraw']")!); await assentar();
+  await screen.render(mesa()); await assentar();
+  await screen.click(linhaDa("k13").querySelector<HTMLElement>("[data-testid='architect-plan-row-withdraw']")!); await assentar();
   const regiao = screen.get("architect-plan-sheet-withdraw");
   assert.equal(regiao.dataset.articleId, INTRUSO_ID);
   const retiradas = chamadas.filter(chamada => chamada.url === "/api/arquiteto/silo-article-withdrawal");
@@ -162,34 +168,22 @@ test("linha presa → 'Retirar artigo do Silo': abre a PRÉVIA (grátis) do arti
   assert.equal(aplicou.length, 1);
   assert.equal(aplicou[0].body.reason, "Assunto do laranja; libera as keywords do plano azul");
   assert.equal(aplicou[0].body.expectedSiloDnaVersionId, "silo-v1");
-  assert.equal(aplicados, 1, "a mesa é relida");
+  assert.equal(registro.aplicados, 1, "a mesa é relida");
   assert.equal(screen.query("architect-plan-sheet-withdraw"), null);
   semMinerador();
 });
 
 /* --------------------------------------------- o painel dos publicados */
 
-const painel = (activeColorHasPlan: boolean) => comProductShell(React.createElement(ArticleImprovementPanel, { brandId: MARCA_WIFI, onApplied: () => undefined, buttonClassName: "button", primaryButtonClassName: "button", activeGroup: { requested: "azul", label: "Azul" }, activeColorHasPlan }));
+const painel = () => comProductShell(React.createElement(ArticleImprovementPanel, { brandId: MARCA_WIFI, onApplied: () => undefined, buttonClassName: "button", primaryButtonClassName: "button", activeGroup: { requested: "azul", label: "Azul" } }));
 
-test("cor com plano: o painel 'Melhorar publicados' abre recolhido e o próximo passo aponta para a planilha", async () => {
+test("o painel dos publicados (aberto pelo botão da barra) é o de sempre: sem modo recolhido nem 'Ir para a planilha'; o artigo do plano segue a etapa da barra", async () => {
   rede();
-  await screen.render(painel(true)); await assentar();
-  const secao = screen.get("architect-article-improvement");
-  assert.equal(secao.dataset.collapsed, "true");
-  assert.match(screen.get("architect-improvement-collapsed").textContent!, /^Melhorar publicados · recolhido — os artigos do plano da cor Azul estão na planilha abaixo/);
-  assert.equal(screen.get("architect-improvement-next-step").dataset.nextStep, "plan_sheet");
-  assert.match(screen.get("architect-improvement-next-step").textContent!, /Validar SERP e depois Concluir formação/);
-  assert.equal([...screen.container.querySelectorAll("button")].some(item => /Buscar keywords/.test(item.textContent ?? "")), false, "nada de 'Buscar keywords' em cima");
-  assert.equal(chamadas.filter(chamada => chamada.method === "POST").length, 0, "recolhido não prepara nada");
-  await screen.click("architect-improvement-expand"); await assentar();
-  assert.equal(screen.get("architect-article-improvement").dataset.collapsed, undefined);
-  assert.equal(screen.get("architect-improvement-next-step").dataset.nextStep, "prepare", "aberto, o painel de sempre");
-  assert.ok([...screen.container.querySelectorAll("button")].some(item => /Buscar keywords/.test(item.textContent ?? "")));
-});
-
-test("cor sem plano: o painel de sempre, aberto", async () => {
-  rede();
-  await screen.render(painel(false)); await assentar();
+  await screen.render(painel()); await assentar();
   assert.equal(screen.get("architect-article-improvement").dataset.collapsed, undefined);
   assert.equal(screen.query("architect-improvement-collapsed"), null);
+  assert.equal(screen.get("architect-improvement-next-step").dataset.nextStep, "prepare");
+  assert.doesNotMatch(screen.text(), /Artigos do plano|planilha abaixo|Ir para “Artigos do plano”/);
+  assert.match(screen.get("architect-improvement-plan-elsewhere").textContent!, /linha da tabela de artigos, e a barra mostra a etapa dele \(“Consolidar o Silo do plano” → “Completar sustentações e SERP” → “Links internos”\)/);
+  assert.equal(chamadas.filter(chamada => chamada.method === "POST").length, 0, "abrir não prepara nada");
 });

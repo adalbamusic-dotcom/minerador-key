@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import {
+  activeEditorialGroupsOfColor,
   EDITORIAL_GROUP_CHOICE_ALL,
   EDITORIAL_GROUP_URL_NONE,
   EDITORIAL_GROUP_URL_PARAM,
@@ -65,6 +66,21 @@ const listeners = new Set<() => void>();
 const brands = new Map<string, BrandGroupsState>();
 const choices = new Map<string, StoredChoice>();
 const inflight = new Map<string, Promise<BrandGroupsState>>();
+/**
+ * 2026-10-14 · defeito do dono: a cor escolhida numa marca (`?grupo=azul`)
+ * passou para outra marca que não tem essa cor, e a lista ficou "0 artigos".
+ * Quando a lista DO SERVIDOR desta marca chega sem a cor escolhida, a área
+ * volta para "Todos os grupos" (memória e URL; a lembrança local não é tocada)
+ * e guarda aqui qual cor faltou, para o aviso curto. Escolher de novo apaga.
+ */
+const fallbacks = new Map<string, EditorialGroupColor>();
+/**
+ * As escolhas HERDADAS (vindas da URL ou da lembrança local ao abrir a área),
+ * as únicas que a regra acima derruba. A escolha feita nesta sessão — clicar
+ * numa cor, acompanhar a troca de cor do grupo, a cor de um uuid antigo — vale
+ * mesmo sem grupo ainda (mover para a cor cria o grupo dela).
+ */
+const herdadas = new Set<string>();
 
 const emit = () => { for (const listener of [...listeners]) listener(); };
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
@@ -231,6 +247,7 @@ function escolhaGuardada(brandId: string, area: EditorialGroupArea): StoredChoic
     ?? parseEditorialGroupChoice(lerLocal(editorialGroupAreaStorageKey(brandId, area)))
     ?? EDITORIAL_GROUP_CHOICE_ALL;
   choices.set(chave, inicial);
+  herdadas.add(chave);
   return inicial;
 }
 
@@ -246,6 +263,7 @@ function adotarUrl(brandId: string, area: EditorialGroupArea) {
     const igual = typeof daUrl === "string" ? daUrl === atual : typeof atual !== "string" && atual.legacyGroupId === daUrl.legacyGroupId;
     if (!igual) {
       choices.set(chave, daUrl);
+      herdadas.add(chave);
       emit();
     }
     return;
@@ -257,11 +275,44 @@ function adotarUrl(brandId: string, area: EditorialGroupArea) {
 export function setEditorialGroupAreaChoice(brandId: string, area: EditorialGroupArea, choice: EditorialGroupChoice) {
   const chave = choiceKey(brandId, area);
   const atual = choices.get(chave);
+  const tinhaAviso = fallbacks.delete(chave);
+  herdadas.delete(chave);
   gravarLocal(editorialGroupAreaStorageKey(brandId, area), choice);
   gravarUrl(area, choice);
-  if (atual === choice) return;
+  if (atual === choice) { if (tinhaAviso) emit(); return; }
   choices.set(chave, choice);
   emit();
+}
+
+/**
+ * A cor escolhida não existe nesta marca (lista do servidor, grupos ativos):
+ * a área volta para "Todos os grupos" e o `?grupo=` sai da URL. A lembrança
+ * local não é escrita nem limpa. O aviso fica até a próxima escolha.
+ */
+function voltarParaTodasAsCores(brandId: string, area: EditorialGroupArea, missing: EditorialGroupColor) {
+  const chave = choiceKey(brandId, area);
+  if (choices.get(chave) !== missing || !herdadas.has(chave)) return;
+  herdadas.delete(chave);
+  fallbacks.set(chave, missing);
+  choices.set(chave, EDITORIAL_GROUP_CHOICE_ALL);
+  gravarUrl(area, EDITORIAL_GROUP_CHOICE_ALL);
+  emit();
+}
+
+/** Fecha o aviso "a cor X não existe nesta marca" sem mudar a escolha. */
+export function dismissEditorialGroupColorFallback(brandId: string, area: EditorialGroupArea) {
+  if (fallbacks.delete(choiceKey(brandId, area))) emit();
+}
+
+/**
+ * A cor escolhida que não existe na lista do SERVIDOR desta marca (nenhum
+ * grupo ativo dela). Só com a lista do servidor: o cache local pode estar
+ * atrasado. "todos", "sem-grupo" e o uuid antigo nunca caem aqui.
+ */
+export function editorialGroupChoiceMissingInBrand(choice: StoredChoice, groups: Pick<BrandGroupsState, "status" | "source" | "groups">): EditorialGroupColor | null {
+  if (typeof choice !== "string" || choice === EDITORIAL_GROUP_CHOICE_ALL || choice === EDITORIAL_GROUP_URL_NONE) return null;
+  if (groups.status !== "ready" || groups.source !== "server") return null;
+  return activeEditorialGroupsOfColor(groups.groups, choice).length === 0 ? choice : null;
 }
 
 /**
@@ -274,7 +325,9 @@ export function followEditorialGroupColorChange(brandId: string, from: Editorial
   for (const area of areas) {
     const naMemoria = choices.get(choiceKey(brandId, area));
     const lembrada = lerLocal(editorialGroupAreaStorageKey(brandId, area));
-    if (naMemoria === from || (naMemoria === undefined && lembrada === from)) setEditorialGroupAreaChoice(brandId, area, to);
+    // 2026-10-14 · a lista relida já não tinha a cor antiga e a área voltou para "todos" com o aviso: ela acompanha o grupo do mesmo jeito.
+    const caiuDaCorAntiga = fallbacks.get(choiceKey(brandId, area)) === from;
+    if (naMemoria === from || caiuDaCorAntiga || (naMemoria === undefined && lembrada === from)) setEditorialGroupAreaChoice(brandId, area, to);
     else if (lembrada === from && naMemoria !== undefined && naMemoria !== from) gravarLocal(editorialGroupAreaStorageKey(brandId, area), to);
   }
 }
@@ -284,6 +337,8 @@ export function resetEditorialGroupAreaStoreForTests() {
   brands.clear();
   choices.clear();
   inflight.clear();
+  fallbacks.clear();
+  herdadas.clear();
   emit();
 }
 
@@ -341,6 +396,12 @@ export type AreaGroupFilter = {
   /** Recorte de TELA da escolha. */
   filter: EditorialGroupScreenFilter;
   filterKey: string;
+  /**
+   * 2026-10-14 · a cor escolhida não existia nesta marca e a área voltou para
+   * "Todos os grupos" (aviso curto até a próxima escolha). Nulo = nada a avisar.
+   */
+  colorFallback: EditorialGroupColor | null;
+  dismissColorFallback: () => void;
 };
 
 /**
@@ -354,15 +415,27 @@ export function useAreaGroupFilter(brandId: string | null, area: EditorialGroupA
   const available = Boolean(brandId) && groups.status !== "unavailable";
   const conhecida = groups.source !== "none" || groups.status === "ready" || groups.status === "error";
   const falhou = groups.status === "error" && groups.source === "none";
+  // 2026-10-14 · a cor escolhida não existe nesta marca: volta para "Todos os grupos" (sem passar pelo "0 artigos").
+  const corInexistente = available && brandId && groups.brandId === brandId && herdadas.has(choiceKey(brandId, area)) ? editorialGroupChoiceMissingInBrand(stored, groups) : null;
+  useEffect(() => {
+    if (brandId && corInexistente) voltarParaTodasAsCores(brandId, area, corInexistente);
+  }, [brandId, area, corInexistente]);
+  const colorFallback = useSyncExternalStore(
+    subscribe,
+    () => (brandId ? fallbacks.get(choiceKey(brandId, area)) ?? null : null),
+    () => null,
+  );
+  const dismissColorFallback = useCallback(() => { if (brandId) dismissEditorialGroupColorFallback(brandId, area); }, [brandId, area]);
   let choice: EditorialGroupChoice = EDITORIAL_GROUP_CHOICE_ALL;
   let pending = false;
   let readFailed = false;
   let filter: EditorialGroupScreenFilter = { kind: "all" };
-  if (available && typeof stored !== "string") {
+  // Cor inexistente: já no primeiro render o recorte é "todos" enquanto a escolha volta (o efeito acima).
+  if (!corInexistente && available && typeof stored !== "string") {
     // uuid antigo ainda sem a lista: não mostra nada até virar cor (ou "todos").
     pending = !falhou;
     filter = { kind: "groups", color: null, groupIds: [] };
-  } else if (available && typeof stored === "string") {
+  } else if (!corInexistente && available && typeof stored === "string") {
     const resolvido = resolveEditorialGroupScreenFilter(stored, conhecida ? groups.groups : null);
     choice = stored;
     pending = resolvido.pending;
@@ -373,5 +446,5 @@ export function useAreaGroupFilter(brandId: string | null, area: EditorialGroupA
   // A chave determina o recorte: o mesmo objeto enquanto ela não muda (os memos das planilhas dependem dele).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const filtroEstavel = useMemo(() => filter, [filterKey]);
-  return { choice, setChoice, groups, available, pending, readFailed, filter: filtroEstavel, filterKey };
+  return { choice, setChoice, groups, available, pending, readFailed, filter: filtroEstavel, filterKey, colorFallback: corInexistente ?? colorFallback, dismissColorFallback };
 }

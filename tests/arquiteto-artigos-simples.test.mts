@@ -42,7 +42,9 @@ test("sem Sobras, o cartão não manda para um lugar vazio: leva a Artigos novos
   assert.doesNotMatch(passo.sentence, /Veja artigos novos em Sobras/);
   // As âncoras existem na aba: Sobras no invólucro do painel, Artigos novos na barra de formação.
   assert.match(fonte, /<div id="architect-sobras" data-testid="architect-articles-sobras">/);
-  assert.match(fonte, /<section id="architect-articles-new" [^>]*data-testid="architect-articles-formation-actions">/);
+  // 2026-10-14 (tarde) · a barra de sempre virou componente próprio (testável no DOM); a âncora continua nela.
+  assert.match(barraFonte, /<section id="architect-articles-new" [^>]*data-testid="architect-articles-formation-actions">/);
+  assert.match(fonte, /\{articleMode && <ArticlesFormationBar\s/);
   assert.match(fonte, /hasLeftovers=\{hasLeftoverOpportunities\}/);
   assert.match(fonte, /const hasLeftoverOpportunities = !leftoversDismissed && Boolean\(leftoverOpportunities && \(leftoverOpportunities\.groups\.length \|\| leftoverOpportunities\.withoutVolume\.length\)\);/);
 });
@@ -92,34 +94,58 @@ const semComentarios = (codigo: string) => codigo
   .join("\n");
 const fonte = semComentarios(readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8"));
 const painel = semComentarios(readFileSync("modules/arquiteto/article-improvement-panel.tsx", "utf8"));
+const barraFonte = semComentarios(readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8"));
 
 const inicioGrade = fonte.indexOf("const workbenchGrid = (");
 const fimGrade = fonte.indexOf("\n  );\n", inicioGrade);
 const grade = fonte.slice(inicioGrade, fimGrade);
 const tela = fonte.slice(fonte.indexOf("<main className=\"min-w-0 flex-1 overflow-y-auto bg-background\">"), fonte.indexOf("</main>"));
 
-test("na aba Artigos: próximo passo e melhoria, a mesa, Sobras e, no fim, Detalhes técnicos fechado", () => {
+/*
+ * 2026-10-14 (tarde) · pedido do dono: "não está nos botões principais, sumiram
+ * os botões de processo normal, agora tem um lá no topo que faz de tudo (…) é
+ * tudo por esse painel cheio de textos". A ordem da aba passou a ser: a barra de
+ * sempre (Processar artigos · Concluir formação · Melhorar publicados…), a
+ * prévia das linhas do plano (só quando há ação), o painel "Melhorar publicados"
+ * SÓ quando aberto pelo botão, a tabela, Sobras e Detalhes técnicos.
+ */
+/*
+ * 2026-10-14 (noite) · pedido do dono: "apaga este painel de [Detalhes
+ * técnicos], não serve pra nada mesmo" e "só tem que ter uma tabela". A aba
+ * Artigos é: a barra (um lugar só), a prévia das linhas do plano (só quando há
+ * ação), o painel "Melhorar publicados" SÓ quando aberto, a tabela e Sobras.
+ */
+test("na aba Artigos: a barra de sempre, a mesa e Sobras; sem Detalhes técnicos, sem cartão no topo e UMA tabela só", () => {
   assert.ok(inicioGrade > 0 && fimGrade > inicioGrade, "a grade do Workbench é uma const só");
   const posicoes = [
-    tela.indexOf("{articleMode && <ArticleImprovementPanel"),
-    tela.indexOf("data-testid=\"architect-articles-formation-actions\""),
+    tela.indexOf("{articleMode && <ArticlesFormationBar"),
+    tela.indexOf("<PlanSheetOperations sheet={planSheet}"),
+    tela.indexOf("<ArticleImprovementPanel"),
     tela.indexOf("data-architect-table=\"articles\""),
     tela.indexOf("data-testid=\"architect-articles-sobras\""),
-    tela.indexOf("data-testid=\"architect-articles-technical\""),
   ];
   assert.ok(posicoes.every(posicao => posicao >= 0), JSON.stringify(posicoes));
   assert.deepEqual([...posicoes].sort((a, b) => a - b), posicoes, "a ordem é a do trabalho");
-  // O cartão Próximo passo abre o painel de melhoria.
+  // O painel dos publicados só existe depois do clique em "Melhorar publicados…" (fechado por padrão).
+  assert.match(tela, /\{articleMode && improvementPanel !== "closed" && \(/);
+  assert.match(fonte, /useState<"closed" \| "open" \| "hidden">\("closed"\)/);
+  assert.match(barraFonte, /data-testid="architect-articles-improve-published"/);
+  assert.match(tela, /onToggleImprovement=\{\(\) => setImprovementPanel\(atual => atual === "open" \? "hidden" : "open"\)\}/);
+  assert.doesNotMatch(tela, /activeColorHasPlan=/, "o modo recolhido com 'Próximo passo' para a planilha saiu");
+  // Dentro do painel (quando aberto), o cartão continua antes do título.
   assert.ok(painel.indexOf("architect-improvement-next-step") < painel.indexOf("<h3"), "o cartão vem antes do título do painel");
-  // Detalhes técnicos: um <details> fechado, com a grade inteira dentro.
-  const detalhes = tela.slice(tela.indexOf("data-testid=\"architect-articles-technical\"") - 120);
-  assert.match(detalhes, /<details className="[^"]*" data-testid="architect-articles-technical">\s*<summary[^>]*>Detalhes técnicos<\/summary>\s*\{workbenchGrid\}\s*<\/details>/);
-  assert.doesNotMatch(detalhes.slice(0, 200), /<details[^>]*\bopen\b/);
-  // Nas outras abas a grade abre a tela, como antes.
+  // Detalhes técnicos saiu da aba (sem cópia recolhida); a grade do Workbench só aparece fora da aba Artigos.
+  assert.doesNotMatch(tela, /Detalhes técnicos/);
+  assert.doesNotMatch(tela, /architect-articles-technical/);
+  assert.equal(tela.split("{workbenchGrid}").length - 1 + tela.split("&& workbenchGrid}").length - 1, 1, "a grade aparece num lugar só");
   assert.ok(tela.indexOf("{!articleMode && workbenchGrid}") < tela.indexOf("data-architect-table=\"articles\""));
+  // UMA tabela só na aba: nenhum outro <table> no markup da tela.
+  assert.equal(tela.split("<table").length - 1, 1, "um único <table> na tela (a tabela de artigos)");
+  // Nenhum texto que manda para "a planilha acima".
+  assert.doesNotMatch(tela, /planilha acima|Ir para a planilha|Ir para “Artigos do plano”/);
 });
 
-test("nada saiu da tela: os blocos técnicos continuam na grade, e melhoria e Sobras aparecem uma vez só", () => {
+test("os blocos técnicos continuam na grade (abas Silos e Links), e melhoria e Sobras aparecem uma vez só", () => {
   for (const marca of [
     "<ArticleFormationPanel",
     "data-testid=\"architect-process-context-panel\"",
@@ -135,18 +161,33 @@ test("nada saiu da tela: os blocos técnicos continuam na grade, e melhoria e So
     "data-testid=\"architect-formation-deferred-list\"",
     "Candidatas provisórias a Silo",
     "<ArchitectArchitectureMap",
-  ]) assert.ok(grade.includes(marca), `${marca} continua em Detalhes técnicos`);
+  ]) assert.ok(grade.includes(marca), `${marca} continua na grade do Workbench`);
   assert.equal(grade.includes("<ArticleImprovementPanel"), false);
   assert.equal(grade.includes("<LeftoverOpportunitiesPanel"), false);
   assert.equal(fonte.split("<ArticleImprovementPanel").length - 1, 1);
   assert.equal(fonte.split("<LeftoverOpportunitiesPanel").length - 1, 1);
 });
 
-test("Processar e Concluir formação ficam à mão, com os mesmos handlers e as mesmas travas", () => {
-  const barra = tela.slice(tela.indexOf("data-testid=\"architect-articles-formation-actions\""), tela.indexOf("data-architect-table=\"articles\""));
-  assert.match(barra, /onClick=\{\(\) => \{ void processArticleFormation\(\); \}\}\s*disabled=\{formationBusy \|\| Boolean\(formationSelectionScope\.reason\)\}/);
-  assert.match(barra, /onClick=\{\(\) => \{ void confirmArticleFormation\(\); \}\}\s*disabled=\{formationBusy \|\| !articleFormationMarker \|\| Boolean\(formationSelectionScope\.reason\)\}/);
+test("Processar e Concluir formação ficam à mão, com os mesmos handlers e as mesmas travas — e valem para as linhas do plano", () => {
+  // 2026-10-14 (tarde) · os botões de sempre: os artigos de sempre pelo handler de sempre; os do plano pelo núcleo do plano.
+  const uso = tela.slice(tela.indexOf("{articleMode && <ArticlesFormationBar"), tela.indexOf("<PlanSheetOperations sheet={planSheet}"));
+  assert.match(uso, /onProcess=\{\(\) => processArticleFormation\(\)\}/);
+  assert.match(uso, /onConfirm=\{\(\) => confirmArticleFormation\(\)\}/);
+  assert.match(uso, /selectionScope=\{formationSelectionScope\}/);
+  assert.match(uso, /processed=\{Boolean\(articleFormationMarker\)\}/);
+  assert.match(uso, /planTargets=\{tableSelection\.planTargets\}/);
+  const barra = barraFonte;
+  assert.match(barra, /if \(regulares > 0\) await onProcess\(\);\s*if \(doPlano\.length\) planSheet\.start\("validateSerp", doPlano\);/);
+  assert.match(barra, /if \(regulares > 0\) await onConfirm\(\);\s*if \(doPlano\.length\) planSheet\.start\("concludeFormation", doPlano\);/);
+  assert.match(barra, /const processarBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : Boolean\(selectionScope\.reason\)\);/);
+  assert.match(barra, /const concluirBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : !processed \|\| Boolean\(selectionScope\.reason\)\);/);
   assert.match(barra, /Concluir formação/);
+  assert.match(barra, /PLAN_FLOW_LABELS\.improvePublished/);
+  // 2026-10-14 (noite) · com UM plano no recorte, a barra é a das etapas: o botão da etapa atual e, só com publicados, "Melhorar publicados…".
+  assert.match(barra, /if \(planSheet\.rows\?\.length && planSheet\.planGroupId && planSheet\.flow && etapaAtual\)/);
+  assert.match(barra, /data-testid="architect-plan-stage"/);
+  assert.match(barra, /\{hasPublished && melhorar\}/);
+  assert.match(uso, /hasPublished=\{articlesList\.some\(art => art\.isPublished\)\}/);
 });
 
 test("validação em andamento: o cartão diz que está validando, com o andamento, e não 'parou no meio' com o botão desabilitado", async () => {

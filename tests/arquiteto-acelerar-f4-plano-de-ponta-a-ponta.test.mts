@@ -89,10 +89,12 @@ test("item 4 · as outras portas apontam para a do plano: Processar artigos (e a
   const processar = tela.slice(tela.indexOf("const processArticleFormation = useCallback("), tela.indexOf("const processArticleFormationRef = useRef("));
   const portaria = processar.indexOf("planoPorKeywordRef.current.get(id)");
   assert.ok(portaria > 0 && portaria < processar.indexOf("setFormationBusy(true);"), "recusa antes de qualquer processamento");
-  // F5 (ajuste declarado 2026-10-14): a porta do plano é a planilha "Artigos do plano"; o painel não recebe mais os grupos.
-  assert.match(processar, /use a planilha "Artigos do plano" \(Artigos novos, acima\)/);
+  // F5 (ajuste declarado 2026-10-14): a porta do plano é a das linhas do plano; o painel não recebe mais os grupos.
+  // 2026-10-14 (tarde) · pedido do dono ("uma lista só"): as linhas do plano estão na tabela de artigos, pelos mesmos botões da barra.
+  assert.match(processar, /o caminho do plano é o das linhas do plano nesta mesma tabela/);
   assert.doesNotMatch(tela, /planGroups=/);
-  assert.match(tela, /<PlanArticleSheet /);
+  assert.doesNotMatch(tela, /<PlanArticleSheet /, "a planilha separada não aparece na aba");
+  assert.match(tela, /const planSheet = usePlanArticleSheet\(\{/, "o mesmo núcleo, sem tela própria");
 });
 
 /* ------------------------------ item 10 ----------------------------- */

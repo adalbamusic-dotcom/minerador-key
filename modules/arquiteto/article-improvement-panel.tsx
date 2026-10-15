@@ -11,7 +11,6 @@ import { knownBeforeSearchAuthorizeLabel, KNOWN_VOLUME_MISSING_LABELS } from "@/
 import { IMPROVEMENT_NEEDS_MINERADOR_LABEL } from "@/lib/arquiteto/article-improvement-minerador";
 import { isEditorialGroupColor } from "@/lib/editorial/editorial-groups";
 import { ARCHITECT_SUGGESTIONS_LABEL, mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
-import { PLAN_SHEET_ANCHOR, PLAN_SHEET_TITLE, improvementPanelCollapsedLabel } from "@/lib/arquiteto/plan-article-sheet";
 
 const statuses = { ready: "Pronto para aplicar", adequate: "Já adequado", insufficient_evidence: "Evidência insuficiente", no_alternative: "Sem alternativa compatível" };
 const outcomes = { improved: "Melhoria gravada", dna_created: "DNA criado", unchanged: "Sem mudança material", insufficient_evidence: "Evidência insuficiente", failed: "Falha recuperável" };
@@ -46,13 +45,13 @@ export function ImprovementProgress({ activity, now, done, total, unit }: { acti
     note="o andamento fica guardado no servidor" testId="architect-improvement-progress" />;
 }
 
-function ArticleImprovementSession({ brandId, brandRef = null, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], activeGroup = null, mesaChangedAt = null, activeColorHasPlan = false }: {
-  /**
-   * 2026-10-14 (caso WifiConecta) · a cor ativa da etiqueta tem plano declarado:
-   * o trabalho dela está na planilha "Artigos do plano". O painel abre RECOLHIDO
-   * ("Melhorar publicados · recolhido") e o próximo passo aponta para a planilha.
+function ArticleImprovementSession({ brandId, brandRef = null, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], activeGroup = null, mesaChangedAt = null }: {
+  /*
+   * 2026-10-14 (tarde) · pedido do dono: o painel não fica mais no topo da aba
+   * Artigos. Ele abre só pelo botão "Melhorar publicados…" da barra e só serve
+   * aos publicados; o modo "recolhido apontando para a planilha" saiu junto com
+   * a planilha separada (os artigos do plano são linhas da tabela de artigos).
    */
-  activeColorHasPlan?: boolean;
   /**
    * 2026-10-14 · a última mudança da mesa (itens recebidos). A análise lida do
    * servidor ao abrir, feita ANTES dela, aparece recolhida como "análise
@@ -98,8 +97,6 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
    */
   const [restoredRunId, setRestoredRunId] = useState<string | null>(null);
   const [resumedPrevious, setResumedPrevious] = useState(false);
-  /* 2026-10-14 · com a cor do plano ativa, o painel fica recolhido até o dono abrir (por cor: trocar a cor recolhe de novo). */
-  const [abertoNaCor, setAbertoNaCor] = useState<string | null>(null);
   const previousRun = runState && runState.runId === restoredRunId && !resumedPrevious
     && improvementRunIsPrevious({ run: runState, activeGroupRequested: activeGroup?.requested ?? null, mesaChangedAt })
     ? runState : null;
@@ -279,30 +276,6 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
     if (current.action === "apply" && run?.acceptedIds?.length) return { done: run.outcomes.filter(o => run.acceptedIds!.includes(o.targetId)).length, total: run.acceptedIds.length, unit: "artigos gravados" };
     return { done: null, total: null, unit: "" };
   };
-  /*
-   * 2026-10-14 (caso WifiConecta) · COR COM PLANO = PAINEL RECOLHIDO. O trabalho
-   * da cor está na planilha "Artigos do plano"; o painel dos publicados não
-   * fica em cima pedindo "Buscar keywords". O próximo passo do topo aponta para
-   * a planilha; abrir o painel continua a um clique (vale até trocar de cor).
-   */
-  const corAtiva = activeGroup?.requested ?? "";
-  if (activeColorHasPlan && abertoNaCor !== corAtiva) {
-    const recolhido = improvementPanelCollapsedLabel(activeGroup?.label ?? null);
-    const emAndamento = run && (run.state === "applying" || run.state === "collecting");
-    return <section className="border-b border-divider bg-surface px-4 py-3 text-sm leading-6" aria-label={ARTICLE_IMPROVEMENT_LABEL} data-testid="architect-article-improvement" data-collapsed="true">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-module-accent/40 bg-module-accent/5 p-3" role="region" aria-label="Próximo passo" data-testid="architect-improvement-next-step" data-next-step="plan_sheet">
-        <div className="min-w-0">
-          <p className="font-semibold text-foreground">Próximo passo</p>
-          <p className="text-foreground">{recolhido.nextStep}</p>
-        </div>
-        <button type="button" className={primaryButtonClassName} onClick={() => document.getElementById(PLAN_SHEET_ANCHOR)?.scrollIntoView({ block: "start", behavior: "smooth" })}>{recolhido.button}</button>
-      </div>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-text-muted" data-testid="architect-improvement-collapsed">{recolhido.title}.{emAndamento ? " Há uma execução dos publicados em andamento aqui: abra para acompanhar." : ""}</p>
-        <button type="button" className={buttonClassName} onClick={() => setAbertoNaCor(corAtiva)} data-testid="architect-improvement-expand">Abrir “Melhorar publicados”</button>
-      </div>
-    </section>;
-  }
   return <section className="border-b border-divider bg-surface px-4 py-4 text-sm leading-6" aria-label={ARTICLE_IMPROVEMENT_LABEL} data-testid="architect-article-improvement">
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-module-accent/40 bg-module-accent/5 p-3" role="region" aria-label="Próximo passo" data-testid="architect-improvement-next-step" data-next-step={next.kind}>
       <div className="min-w-0">
@@ -329,7 +302,7 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
           <InfoHint title="Como funciona" description="1 · Buscar keywords lê, de graça, o que já temos de cada publicado e Assunto — DNA, volume já medido (inclusive “sem média” há menos de 30 dias), SERP em cache, Assunto, plano e trava — e mostra “Já temos · Falta · Custa”. A leitura da IA (IA da plataforma, OpenRouter; ela recebe o resumo do DNA de cada keyword) e a medição no Google Ads (cota, sem custo em dólar) só rodam quando você autoriza, e só para o que falta. O Arquiteto só lê keyword: keyword nova, medição a gravar e Lógica viram “Sugestões do Arquiteto” no Minerador, onde você decide (a medição guardada é gravada lá sem consultar de novo); a linha que depende delas fica “Precisa do Minerador”. A ordem: pares da SERP que já estão no cache, a leitura da IA na lista da marca (confira o motivo de cada uma), a leitura da lista pelo código (keywords que são o núcleo do slug) e, só para quem ficar sem nada e quando você pedir (o custo é dito antes), busca nova no Google Ads. Buscar de novo com os mesmos alvos e a mesma lista reaproveita a leitura da IA, as medições e a busca, sem chamar de novo. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
         </h3>
         <p className="text-text-muted">URL, slug e canonical nunca mudam.</p>
-        <p className="text-text-muted" data-testid="architect-improvement-plan-elsewhere">Artigo do plano (Assunto com plano) não passa por aqui: ele é uma linha da planilha “{PLAN_SHEET_TITLE}”, em Artigos novos, com Validar SERP, Trocar principal e Concluir formação.</p>
+        <p className="text-text-muted" data-testid="architect-improvement-plan-elsewhere">Artigo do plano (Assunto com plano) não passa por aqui: ele é uma linha da tabela de artigos, e a barra mostra a etapa dele (“Consolidar o Silo do plano” → “Completar sustentações e SERP” → “Links internos”).</p>
         {analiseDeOutroRecorte && activeGroup && <p className="text-warning" role="status" data-testid="architect-improvement-other-scope">Esta análise é {run?.groupScope ? `do grupo ${run.groupScope.requested}` : "da marca inteira"}, não da cor {activeGroup.label} escolhida na etiqueta. Para analisar só a cor {activeGroup.label}, toque em “Buscar keywords da cor {activeGroup.label}”.</p>}
         {run?.groupScope && <p className="text-text-muted" data-testid="architect-improvement-group-scope">Esta análise leu só o grupo {run.groupScope.requested} (alvos e lista do grupo; os publicados da marca inteira continuam protegidos).</p>}
         <p className="text-text-muted" data-testid="architect-improvement-scope">{selectedTargetIds.length

@@ -68,6 +68,43 @@ export async function canApprove(context: PipelineContext): Promise<boolean> {
   }
 }
 
+/**
+ * As keywords recebidas do grupo que ainda não têm Silo vão para o Silo do
+ * plano, pela decisão de Silo de sempre (`planSiloDecisionBatch` → PATCH
+ * canônico da mesa), e são relidas. Keyword publicada ou já em outro Silo não
+ * é movida (`keptElsewhere`). Usado pelo envio e por "Consolidar o Silo do plano".
+ */
+export async function assignPlanGroupKeywordsToTerritory(context: PipelineContext, input: { groupId: string; territoryRef: string; territories: readonly TerritoryWorkflowItem[]; patch?: Patch; decidedAt: string }): Promise<{ assignedKeywordIds: string[]; keptElsewhere: string[] }> {
+  const patch = input.patch ?? patchViaMesa;
+  const { loadCanonicalArquitetoWorkspace } = await import("./arquiteto-workspace");
+  const mesa = await loadCanonicalArquitetoWorkspace(context, { groupFilter: { kind: "group", groupId: input.groupId } });
+  const linhas = buildCanonicalWorkflowWorkspaceItems(mesa.workflowItems, mesa.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
+  const semSilo = linhas.filter(linha => !linha.territoryRef && !linha.isPublished);
+  const keptElsewhere = linhas.filter(linha => typeof linha.territoryRef === "string" && linha.territoryRef !== input.territoryRef).map(linha => String(linha.id));
+  if (!semSilo.length) return { assignedKeywordIds: [], keptElsewhere };
+  const paisagem = buildTerritorialLandscape({ brandId: context.brandId, keywords: linhas as Array<{ id: string }>, territories: input.territories.map(item => item.territory), assignments: [] });
+  const porId = new Map(linhas.map(linha => [String(linha.id), linha]));
+  const lote = planSiloDecisionBatch({
+    brandId: context.brandId,
+    landscape: paisagem,
+    keywordOf: keywordId => {
+      const linha = porId.get(keywordId);
+      const workflow = linha?.canonicalWorkflow as { id?: unknown; lockVersion?: unknown } | undefined;
+      if (!linha || typeof workflow?.id !== "string" || !Number.isInteger(workflow.lockVersion)) return null;
+      return { keywordId, brandId: context.brandId, workflowItemId: workflow.id, expectedLock: Number(workflow.lockVersion), currentTerritoryRef: null, isPublished: false };
+    },
+    decisions: semSilo.map(linha => ({ keywordId: String(linha.id), target: { kind: "territory" as const, territoryRef: input.territoryRef } })),
+    decidedAt: input.decidedAt,
+  });
+  if (lote.writes.length) {
+    await patch(context, { brandId: context.brandId, updates: lote.writes.map(write => ({ workflowItemId: write.workflowItemId, expectedLock: write.expectedLock, assignment: write.assignment as Record<string, unknown> })) });
+  }
+  // Releitura: só conta o que voltou no Silo do plano.
+  const relida = await loadCanonicalArquitetoWorkspace(context, { groupFilter: { kind: "group", groupId: input.groupId } });
+  const relidas = buildCanonicalWorkflowWorkspaceItems(relida.workflowItems, relida.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
+  return { assignedKeywordIds: relidas.filter(linha => linha.territoryRef === input.territoryRef && semSilo.some(antes => antes.id === linha.id)).map(linha => String(linha.id)), keptElsewhere };
+}
+
 export async function materializeDeclaredPlanSilo(context: PipelineContext, keywordIds: readonly string[], deps: { patch?: Patch; now?: () => string } = {}): Promise<DeclaredPlanSiloOutcome[]> {
   if (!keywordIds.length) return [];
   const grupos = await readKeywordGroupInfo(context.supabase, context.brandId, keywordIds);
@@ -82,7 +119,6 @@ export async function materializeDeclaredPlanSilo(context: PipelineContext, keyw
   const patch = deps.patch ?? patchViaMesa;
   const agora = deps.now?.() ?? new Date().toISOString();
   const aprova = await canApprove(context);
-  const { loadCanonicalArquitetoWorkspace } = await import("./arquiteto-workspace");
   const saida: DeclaredPlanSiloOutcome[] = [];
   let territorios: TerritoryWorkflowItem[] = await listTerritoryWorkflowItems(context);
 
@@ -137,33 +173,9 @@ export async function materializeDeclaredPlanSilo(context: PipelineContext, keyw
         }
       }
       // 3 · as keywords recebidas do grupo, sem Silo, vão para o Silo do plano
-      const mesa = await loadCanonicalArquitetoWorkspace(context, { groupFilter: { kind: "group", groupId: grupo.id } });
-      const linhas = buildCanonicalWorkflowWorkspaceItems(mesa.workflowItems, mesa.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
-      const semSilo = linhas.filter(linha => !linha.territoryRef && !linha.isPublished);
-      base.keptElsewhere = linhas.filter(linha => typeof linha.territoryRef === "string" && linha.territoryRef !== territorio.territoryRef).map(linha => String(linha.id));
-      if (semSilo.length) {
-        const paisagem = buildTerritorialLandscape({ brandId: context.brandId, keywords: linhas as Array<{ id: string }>, territories: territorios.map(item => item.territory), assignments: [] });
-        const porId = new Map(linhas.map(linha => [String(linha.id), linha]));
-        const lote = planSiloDecisionBatch({
-          brandId: context.brandId,
-          landscape: paisagem,
-          keywordOf: keywordId => {
-            const linha = porId.get(keywordId);
-            const workflow = linha?.canonicalWorkflow as { id?: unknown; lockVersion?: unknown } | undefined;
-            if (!linha || typeof workflow?.id !== "string" || !Number.isInteger(workflow.lockVersion)) return null;
-            return { keywordId, brandId: context.brandId, workflowItemId: workflow.id, expectedLock: Number(workflow.lockVersion), currentTerritoryRef: null, isPublished: false };
-          },
-          decisions: semSilo.map(linha => ({ keywordId: String(linha.id), target: { kind: "territory" as const, territoryRef: territorio.territoryRef } })),
-          decidedAt: agora,
-        });
-        if (lote.writes.length) {
-          await patch(context, { brandId: context.brandId, updates: lote.writes.map(write => ({ workflowItemId: write.workflowItemId, expectedLock: write.expectedLock, assignment: write.assignment as Record<string, unknown> })) });
-        }
-        // Releitura: só conta o que voltou no Silo do plano.
-        const relida = await loadCanonicalArquitetoWorkspace(context, { groupFilter: { kind: "group", groupId: grupo.id } });
-        const relidas = buildCanonicalWorkflowWorkspaceItems(relida.workflowItems, relida.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
-        base.assignedKeywordIds = relidas.filter(linha => linha.territoryRef === territorio.territoryRef && semSilo.some(antes => antes.id === linha.id)).map(linha => String(linha.id));
-      }
+      const posto = await assignPlanGroupKeywordsToTerritory(context, { groupId: grupo.id, territoryRef: territorio.territoryRef, territories: territorios, patch, decidedAt: agora });
+      base.keptElsewhere = posto.keptElsewhere;
+      base.assignedKeywordIds = posto.assignedKeywordIds;
       // 4 · o grupo ligado ao Silo (aditivo; nunca derruba)
       if (grupo.siloId !== territorio.territoryRef && !grupo.siloId) {
         await linkEditorialGroupSilo(context.supabase, { brandId: context.brandId, actorUserId: context.actorUserId, groupId: grupo.id, siloId: territorio.territoryRef }).catch(() => null);

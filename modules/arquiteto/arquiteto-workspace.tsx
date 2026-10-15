@@ -1,8 +1,9 @@
 "use client";
 
 import { ArticleImprovementPanel } from "./article-improvement-panel";
-import { PlanArticleSheet } from "./plan-article-sheet";
-import { PLAN_SHEET_ANCHOR, planCandidateShownInSheet, planCandidatesInSheetSentence, planSubjectOfKeyword } from "@/lib/arquiteto/plan-article-sheet";
+import { ArticlesFormationBar } from "./articles-formation-bar";
+import { PlanArticleTableRow, PlanRowActions, PlanRowSeals, PlanSheetOperations, usePlanArticleSheet } from "./plan-article-sheet";
+import { buildPlanSheetRows, planOrderedGroupItems, planRowsWithoutArticle, planSubjectOfKeyword, splitTableSelectionForPlan, type PlanGroupItem, type PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
 
 import { GLOBAL_WORKFLOW_STATUSES, GLOBAL_WORKFLOW_LABELS, globalWorkflowStatus, type GlobalWorkflowStatus } from "@/lib/editorial/global-workflow-status";
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
@@ -360,7 +361,7 @@ import { CompactSavedViews } from "@/components/editorial/compact-saved-views";
 import { WorkflowStatusBadge } from "@/components/editorial/workflow-status";
 import { MineradorImportDialog } from "./minerador-import-dialog";
 import { mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
-import { initialArquitetoImportColor, mineradorPackageUpdatesOf, mineradorPackageUpdatesSentence } from "@/lib/arquiteto/minerador-import";
+import { initialArquitetoImportColor, MINERADOR_PACKAGE_UPDATES_DETAIL, mineradorPackageUpdatesOf, mineradorPackageUpdatesSentence } from "@/lib/arquiteto/minerador-import";
 import { declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, type DeclaredPlanGroupView, type RecreatePlanSiloLine } from "@/lib/arquiteto/declared-plan-silo";
 import { classifyProposalAssignment, nothingToConfirmMessage, proposalAssignmentStatusLabel, type ProposalAssignmentState } from "@/lib/arquiteto/proposal-confirmability";
 import { ArticleSubjectLine, articleSubjectPhraseOf } from "@/components/editorial/article-subject-line";
@@ -7233,29 +7234,84 @@ export default function ArquitetoPage() {
    */
 
   /*
-   * 2026-10-14 (caso WifiConecta) · UMA LISTA SÓ. Em Artigos, o candidato da
-   * cópia de trabalho (sem ArticleDNA, não publicado) cuja principal é keyword
-   * do plano já é a linha da planilha "Artigos do plano": a mesa não o repete
-   * como linha solta "CANDIDATO · Sem Assunto · Fora do plano". Nada é apagado
-   * — o candidato continua na cópia de trabalho; formado, a linha volta à mesa.
+   * F5 · PLANILHA PRIMEIRO (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
+   * item 5): o que as linhas do plano leem da mesa — os artigos formados
+   * (versão vigente), os que já estão no Radar e o grupo de cada keyword. Só
+   * leitura; as linhas do plano gravam pelos núcleos de sempre.
    */
-  const planSheetCandidateIds = useMemo(() => {
-    if (workspaceMode !== "articles" || !selectedBrandId) return new Set<string>();
-    return new Set(articlesList.filter(art => planCandidateShownInSheet({
-      hasArticleDna: Boolean(articleDnaEntryFor({ articleId: articleEntityIdFor(art), candidateRef: art.candidateRef }).version),
-      published: Boolean(art.isPublished),
-      principalKeywordId: art.mainKeywordObj?.id != null ? String(art.mainKeywordObj.id) : null,
-      brandId: selectedBrandId,
-      standings: subjectStandings,
-    })).map(art => art.id));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceMode, selectedBrandId, articlesList, articleDnaEntryFor, subjectStandings]);
+  const planSheetArticles = useMemo(() => Object.values(acceptedArticleDnas).map(version => {
+    const articleId = String(version.payload.articleId);
+    // 2026-10-14 · o conflito da linha diz de qual artigo, Silo, Assunto e cor se trata (só leitura).
+    const siloRef = version.payload.siloId ?? version.payload.territoryRef ?? null;
+    const grupo = arquitetoGroups.articleGroupById.get(articleId)?.groupId;
+    const cor = grupo ? arquitetoGroups.groupById.get(grupo)?.color : undefined;
+    return {
+      articleId,
+      versionNumber: Number(version.versionNumber) || 0,
+      subjectKeywordId: version.payload.subject?.keywordId ? String(version.payload.subject.keywordId) : null,
+      principalKeywordId: version.payload.principalKeywordId ? String(version.payload.principalKeywordId) : null,
+      keywordIds: (version.payload.keywordReferences ?? []).map(reference => String(reference.keywordId)),
+      slug: version.payload.suggestedSlug ?? null,
+      siloRef,
+      siloLabel: siloRef ? acceptedSiloDnas[siloRef]?.payload.name || articleSiloViews.find(view => view.siloRef === siloRef || view.siloRef === version.payload.territoryRef)?.siloLabel || null : null,
+      subjectPhrase: version.payload.subject?.phrase ?? null,
+      subjectColorLabel: cor ? EDITORIAL_GROUP_COLOR_LABELS[cor] : null,
+      label: version.payload.principalKeywordId ? keywordLabelById.get(String(version.payload.principalKeywordId)) ?? null : null,
+      // 2026-10-14 (noite) · consolidado do plano sem SERP: a etapa 2 grava o parecer.
+      serpAssessed: Boolean(version.payload.serpAssessmentRef),
+    };
+  }), [acceptedArticleDnas, acceptedSiloDnas, articleSiloViews, arquitetoGroups.articleGroupById, arquitetoGroups.groupById, keywordLabelById]);
+  const planSheetRadarIds = useMemo(() => new Set(radarItems.map(item => String(item.articleId))), [radarItems]);
+  const planSheetGroupOf = useCallback((groupId: string) => {
+    const grupo = arquitetoGroups.groupById.get(groupId);
+    return grupo ? { color: String(grupo.color), name: grupo.name } : null;
+  }, [arquitetoGroups.groupById]);
+  const planSheetKeywordGroupOf = useCallback((keywordId: string) => arquitetoGroups.keywordGroupById.get(keywordId) ?? null, [arquitetoGroups.keywordGroupById]);
+  const serpSubjectBrandRef = useMemo(() => {
+    if (!activeBrand?.id || !activeBrand.nome) return null;
+    try { return buildBrandRef(activeBrand.nome, activeBrand.id); } catch { return null; }
+  }, [activeBrand?.id, activeBrand?.nome]);
+
+  /*
+   * 2026-10-14 (tarde) · UMA TABELA SÓ — pedido do dono: "coloca só numa lista,
+   * não cria várias listas, sem planilhas duplicadas (…) sumiram os botões de
+   * processo normal". A planilha separada "Artigos do plano" saiu da aba: o
+   * artigo do plano é uma LINHA da tabela de artigos de sempre, sob a SiloPage
+   * do Silo do plano, na ordem do plano. O candidato da mesa cujo Assunto é a
+   * keyword do plano volta a aparecer (com o detalhe de sempre) e ganha os
+   * selos e as ações do plano; a linha do plano sem artigo na mesa é linha
+   * própria. Os botões da barra valem para todas as linhas: para as do plano,
+   * o núcleo é o do plano (`usePlanArticleSheet`, os mesmos de antes).
+   */
+  /** O par canônico do Silo do plano (definido mais abaixo, junto do fechamento canônico de sempre). */
+  const planSiloPairRef = useRef<((input: { groupId: string; territoryRef: string; pillarKeywordId: string | null }) => Promise<{ ok: boolean; message: string }>) | null>(null);
+  const planBaseRows = useMemo<PlanSheetRow[]>(() => workspaceMode === "articles" ? buildPlanSheetRows({
+    brandId: selectedBrandId || null, keywords: masterList, standings: subjectStandings, groupOf: planSheetGroupOf, keywordGroupOf: planSheetKeywordGroupOf,
+    articles: planSheetArticles, radarArticleIds: planSheetRadarIds, serp: null, filter: arquitetoGroups.filter, now: new Date(),
+  }) : [], [workspaceMode, selectedBrandId, masterList, subjectStandings, planSheetGroupOf, planSheetKeywordGroupOf, planSheetArticles, planSheetRadarIds, arquitetoGroups.filter]);
+  const planSheet = usePlanArticleSheet({
+    brandId: selectedBrandId || null, brandRef: serpSubjectBrandRef, keywords: masterList, standings: subjectStandings,
+    groupOf: planSheetGroupOf, keywordGroupOf: planSheetKeywordGroupOf, filter: arquitetoGroups.filter, articles: planSheetArticles, radarArticleIds: planSheetRadarIds,
+    baseRows: planBaseRows,
+    onApplied: () => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); },
+    // 2026-10-14 (noite) · "Consolidar o Silo do plano": o par canônico do Silo e a consolidação dele pela mesa de sempre.
+    siloConsolidatedOf: territoryRef => canonicalSiloPairFor(territoryRef).complete,
+    consolidateSiloPair: input => planSiloPairRef.current ? planSiloPairRef.current(input) : Promise.resolve({ ok: false, message: "A mesa ainda não carregou: recarregue e consolide de novo." }),
+    onGoToLinks: () => { setSelectedArticleIds(new Set()); setWorkspaceMode("links"); },
+  });
+  /* 2026-10-14 · "Melhorar publicados…" é um botão da barra: o painel abre só no clique (fechado = escondido, sem perder a execução). */
+  const [improvementPanel, setImprovementPanel] = useState<"closed" | "open" | "hidden">("closed");
+  /** A linha do plano de um artigo da mesa: o Assunto dele é a keyword de uma linha do plano (candidato ou formado). */
+  const planRowOfArticle = useCallback((article: (typeof articlesList)[number]): PlanSheetRow | null => {
+    if (!planSheet.rowByKeywordId.size || article.isPublished) return null;
+    const assunto = articleSubjectFor(article)?.keywordId;
+    return assunto ? planSheet.rowByKeywordId.get(String(assunto)) ?? null : null;
+  }, [planSheet.rowByKeywordId, articleSubjectFor]);
+  /* As linhas do plano que nenhum artigo VISÍVEL da tabela representa são linhas próprias: ver `visiblePlanOnlyRows`. */
 
   // ── Filtros aplicados sobre a lista de artigos
   const filteredArticles = useMemo(() => {
     const porCampos = articlesList.filter(art => {
-      // 2026-10-14 · o artigo do plano tem UMA linha só: a da planilha "Artigos do plano".
-      if (planSheetCandidateIds.has(art.id)) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesMain = art.keywordPrincipal.toLowerCase().includes(q) || art.slug.toLowerCase().includes(q);
@@ -7277,13 +7333,24 @@ export default function ArquitetoPage() {
     // Filtro "Assuntos" (F2.2): só os artigos que o Assunto escolhido sustenta.
     const porAssunto = filterBySubject(porCampos, workspaceMode === "articles" ? activeSubjectFilter : null, art => articleSubjectFor(art)?.keywordId ?? null);
     // F2 · o grupo ativo no topo recorta o que aparece; a lista de artigos continua inteira.
-    return filterRowsByEditorialGroup(porAssunto, arquitetoGroups.filter, art => articleGroupInfoFor(art).groupId) as typeof porAssunto;
-  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode, activeSubjectFilter, articleSubjectFor, arquitetoGroups.filter, articleGroupInfoFor, planSheetCandidateIds]);
-  /** Os candidatos do plano que a planilha mostra, no recorte da cor ativa (a mesa diz quantos, no Silo deles). */
-  const planSheetCandidatesInScope = useMemo(
-    () => planSheetCandidateIds.size ? filterRowsByEditorialGroup(articlesList.filter(art => planSheetCandidateIds.has(art.id)), arquitetoGroups.filter, art => articleGroupInfoFor(art).groupId) as typeof articlesList : [],
-    [planSheetCandidateIds, articlesList, arquitetoGroups.filter, articleGroupInfoFor],
-  );
+    // 2026-10-14 (noite) · o artigo do plano (caso "jogos online") entra pelo grupo do PLANO — uma etiqueta perdida não o tira da tabela.
+    return filterRowsByEditorialGroup(porAssunto, arquitetoGroups.filter, art => (workspaceMode === "articles" ? planRowOfArticle(art)?.groupId : null) ?? articleGroupInfoFor(art).groupId) as typeof porAssunto;
+  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode, activeSubjectFilter, articleSubjectFor, arquitetoGroups.filter, articleGroupInfoFor, planRowOfArticle]);
+  /**
+   * As linhas do plano sem artigo na mesa, com os MESMOS filtros da tabela: a
+   * busca (keyword ou Assunto), o filtro de Assunto e o de status (linha do
+   * plano ainda não tem status gravado: só aparece em "Todos"). A cor já veio
+   * recortada em `buildPlanSheetRows`.
+   */
+  const visiblePlanOnlyRows = useMemo(() => {
+    if (workspaceMode !== "articles" || filterStatus !== "Todos") return [] as PlanSheetRow[];
+    const busca = searchQuery.trim().toLowerCase();
+    // 2026-10-14 (noite) · "todo artigo do plano tem que aparecer": a linha do plano só cede o lugar a um artigo que ESTÁ na tabela.
+    const naTabela = new Set<string>();
+    for (const art of filteredArticles) { const row = planRowOfArticle(art); if (row) naTabela.add(row.keywordId); }
+    return planRowsWithoutArticle(planSheet.rows, naTabela).filter(row => (!busca || row.keyword.toLowerCase().includes(busca) || row.title.toLowerCase().includes(busca))
+      && (!activeSubjectFilter || row.keywordId === activeSubjectFilter));
+  }, [workspaceMode, filterStatus, searchQuery, planSheet.rows, filteredArticles, planRowOfArticle, activeSubjectFilter]);
 
   const ungroupedKeywords = useMemo(
     () => masterList.filter(keyword => keyword.clusterId === null || keyword.clusterId === undefined || keyword.clusterId === "" || keyword.clusterId === 0),
@@ -7719,8 +7786,10 @@ export default function ArquitetoPage() {
         siloSlug: string | null;
         articles: typeof filteredArticles;
         published: typeof articleSiloViews[number]["nodes"];
-        /** 2026-10-14 · artigos do plano deste Silo que estão na planilha "Artigos do plano" (a mesa não os repete). */
-        planHidden: number;
+        /** 2026-10-14 · as linhas do plano deste Silo sem artigo na mesa (linhas próprias da MESMA tabela). */
+        planRows: PlanSheetRow[];
+        /** A ordem das linhas na tabela: as do plano pela ordem do plano, depois os demais artigos. */
+        items: PlanGroupItem<(typeof filteredArticles)[number]>[];
       }>();
 
       // A ordem é a das SiloPages; o patrimônio publicado abre cada grupo.
@@ -7733,21 +7802,15 @@ export default function ArquitetoPage() {
           siloSlug: view.siloSlug,
           articles: [],
           published: view.nodes.filter(node => node.kind === "published"),
-          planHidden: 0,
+          planRows: [],
+          items: [],
         });
       }
-      for (const art of planSheetCandidatesInScope) {
-        const ref = typeof art.mainKeywordObj?.territoryRef === "string" ? art.mainKeywordObj.territoryRef : null;
-        const grupo = ref ? grupos.get(ref) : null;
-        if (grupo) grupo.planHidden += 1;
-      }
-
-      for (const art of filteredArticles) {
-        const ref = typeof art.mainKeywordObj?.territoryRef === "string" ? art.mainKeywordObj.territoryRef : null;
-        const grupo = ref ? grupos.get(ref) : null;
-        if (grupo) { grupo.articles.push(art); continue; }
-        // Sem Silo resolvido a linha não some: ela ganha o próprio grupo.
-        const semSilo = grupos.get("sem-silo") ?? {
+      // Sem Silo resolvido a linha não some: ela ganha o próprio grupo.
+      const semSilo = () => {
+        const existente = grupos.get("sem-silo");
+        if (existente) return existente;
+        const novo = {
           key: "sem-silo",
           siloId: null,
           siloRef: null,
@@ -7755,13 +7818,29 @@ export default function ArquitetoPage() {
           siloSlug: null,
           articles: [] as typeof filteredArticles,
           published: [] as typeof articleSiloViews[number]["nodes"],
-          planHidden: 0,
+          planRows: [] as PlanSheetRow[],
+          items: [] as PlanGroupItem<(typeof filteredArticles)[number]>[],
         };
-        semSilo.articles.push(art);
-        grupos.set("sem-silo", semSilo);
+        grupos.set("sem-silo", novo);
+        return novo;
+      };
+
+      for (const art of filteredArticles) {
+        const ref = typeof art.mainKeywordObj?.territoryRef === "string" ? art.mainKeywordObj.territoryRef : null;
+        const grupo = ref ? grupos.get(ref) : null;
+        if (grupo) { grupo.articles.push(art); continue; }
+        semSilo().articles.push(art);
+      }
+      // 2026-10-14 · a linha do plano sem artigo na mesa entra sob a SiloPage do Silo dela (sem Silo: "ARTIGOS SEM SILO").
+      for (const row of visiblePlanOnlyRows) {
+        const grupo = row.territoryRef ? grupos.get(row.territoryRef) : null;
+        (grupo ?? semSilo()).planRows.push(row);
+      }
+      for (const grupo of grupos.values()) {
+        grupo.items = planOrderedGroupItems({ articles: grupo.articles, planRows: grupo.planRows, idOf: art => String(art.id), planRowOf: planRowOfArticle });
       }
 
-      return [...grupos.values()].filter(grupo => grupo.articles.length > 0 || grupo.published.length > 0 || grupo.planHidden > 0);
+      return [...grupos.values()].filter(grupo => grupo.articles.length > 0 || grupo.published.length > 0 || grupo.planRows.length > 0);
     }
     const groups = new Map<string, {
       key: string;
@@ -7772,7 +7851,8 @@ export default function ArquitetoPage() {
       siloSlug: string | null;
       articles: typeof filteredArticles;
       published: typeof articleSiloViews[number]["nodes"];
-      planHidden: number;
+      planRows: PlanSheetRow[];
+      items: PlanGroupItem<(typeof filteredArticles)[number]>[];
     }>();
 
     filteredArticles.forEach(art => {
@@ -7799,11 +7879,13 @@ export default function ArquitetoPage() {
           siloSlug,
           articles: [],
           published: [],
-          planHidden: 0,
+          planRows: [],
+          items: [],
         });
       }
 
       groups.get(key)!.articles.push(art);
+      groups.get(key)!.items.push({ kind: "article", key: String(art.id), article: art, planRow: null });
     });
 
     return Array.from(groups.values());
@@ -7811,7 +7893,7 @@ export default function ArquitetoPage() {
     // sem elas o agrupamento congelava no primeiro render, quando os Silos
     // confirmados ainda não tinham chegado — e todo artigo caía em
     // "ARTIGOS SEM SILO" para sempre.
-  }, [filteredArticles, articleSiloViews, workspaceMode, remoteTerritories, materializationPartition, acceptedArticleDnas, planSheetCandidatesInScope]);
+  }, [filteredArticles, articleSiloViews, workspaceMode, remoteTerritories, materializationPartition, acceptedArticleDnas, visiblePlanOnlyRows, planRowOfArticle]);
 
   const visibleArticleIds = useMemo(
     () => groupedArticles.flatMap(group => group.articles.map(article => article.id)),
@@ -7820,9 +7902,17 @@ export default function ArquitetoPage() {
   useEffect(() => {
     visibleArticleIdsRef.current = visibleArticleIds;
   }, [visibleArticleIds]);
+  /* 2026-10-14 · as linhas do plano sem artigo na mesa contam no "selecionar tudo que está visível" (uma tabela só). */
+  const visiblePlanKeywordIds = useMemo(
+    () => groupedArticles.flatMap(group => group.planRows.map(row => row.keywordId)),
+    [groupedArticles],
+  );
+  const visibleSelectedPlanCount = visiblePlanKeywordIds.filter(id => planSheet.selected.has(id)).length;
   const visibleSelectedArticleCount = visibleArticleIds.filter(id => selectedArticleIds.has(id)).length;
-  const allVisibleArticlesSelected = visibleArticleIds.length > 0 && visibleSelectedArticleCount === visibleArticleIds.length;
-  const someVisibleArticlesSelected = visibleSelectedArticleCount > 0 && !allVisibleArticlesSelected;
+  const allVisibleArticlesSelected = visibleArticleIds.length + visiblePlanKeywordIds.length > 0
+    && visibleSelectedArticleCount === visibleArticleIds.length
+    && visibleSelectedPlanCount === visiblePlanKeywordIds.length;
+  const someVisibleArticlesSelected = visibleSelectedArticleCount + visibleSelectedPlanCount > 0 && !allVisibleArticlesSelected;
   const hiddenSelectedArticleCount = selectedArticleIds.size - visibleSelectedArticleCount;
 
   // A seleção altera somente a célula do checkbox, o realce da linha e os
@@ -7870,6 +7960,8 @@ export default function ArquitetoPage() {
     activeArticleDnaTask,
     provisionalGroups,
     savingBriefingId,
+    // 2026-10-14 · os selos e as ações do plano na linha do artigo (SERP lida, resultado, ação em curso) redesenham a linha.
+    planRevision: planSheet.revision,
   }), [
     articlesList,
     pendingScenarioChange,
@@ -7902,6 +7994,7 @@ export default function ArquitetoPage() {
     activeArticleDnaTask,
     provisionalGroups,
     savingBriefingId,
+    planSheet.revision,
   ]);
 
   useEffect(() => {
@@ -11380,10 +11473,11 @@ export default function ArquitetoPage() {
   }, [silosDosPlanos, selectedBrandId, arquitetoGroups.keywordGroupById, masterList]);
   /*
    * SDD acelerar 2026-10-13, item 4 — UMA PORTA PARA O PLANO. Desde a F5 da
-   * SDD `sdd-arquiteto-so-le-e-listas-leves` (2026-10-14), a porta é a planilha
-   * "Artigos do plano" (Artigos novos); a keyword de cada grupo com plano é
-   * reconhecida pelas outras portas (Processar artigos e a formação
-   * automática), que apontam para lá.
+   * SDD `sdd-arquiteto-so-le-e-listas-leves` (2026-10-14), a porta é a das
+   * linhas do plano — desde 2026-10-14 (tarde) dentro da tabela de artigos,
+   * pelos mesmos botões da barra; a keyword de cada grupo com plano é
+   * reconhecida pelas outras portas (a formação de sempre e a automática),
+   * que apontam para lá.
    */
   const gruposDoPlanoNaMesa = useMemo(() => declaredPlanGroupsForArchitecture.flatMap(group => {
     const cor = arquitetoGroups.groupById.get(group.groupId)?.color;
@@ -11396,39 +11490,6 @@ export default function ArquitetoPage() {
   }, [gruposDoPlanoNaMesa]);
   const planoPorKeywordRef = useRef(planoPorKeyword);
   planoPorKeywordRef.current = planoPorKeyword;
-  /*
-   * F5 · PLANILHA PRIMEIRO (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
-   * item 5): o que a planilha "Artigos do plano" lê da mesa — os artigos
-   * formados (versão vigente), os que já estão no Radar e o grupo de cada
-   * keyword. Só leitura; a planilha grava pelos núcleos de sempre.
-   */
-  const planSheetArticles = useMemo(() => Object.values(acceptedArticleDnas).map(version => {
-    const articleId = String(version.payload.articleId);
-    // 2026-10-14 · o conflito da linha diz de qual artigo, Silo, Assunto e cor se trata (só leitura).
-    const siloRef = version.payload.siloId ?? version.payload.territoryRef ?? null;
-    const grupo = arquitetoGroups.articleGroupById.get(articleId)?.groupId;
-    const cor = grupo ? arquitetoGroups.groupById.get(grupo)?.color : undefined;
-    return {
-      articleId,
-      versionNumber: Number(version.versionNumber) || 0,
-      subjectKeywordId: version.payload.subject?.keywordId ? String(version.payload.subject.keywordId) : null,
-      principalKeywordId: version.payload.principalKeywordId ? String(version.payload.principalKeywordId) : null,
-      keywordIds: (version.payload.keywordReferences ?? []).map(reference => String(reference.keywordId)),
-      slug: version.payload.suggestedSlug ?? null,
-      siloRef,
-      siloLabel: siloRef ? acceptedSiloDnas[siloRef]?.payload.name || articleSiloViews.find(view => view.siloRef === siloRef || view.siloRef === version.payload.territoryRef)?.siloLabel || null : null,
-      subjectPhrase: version.payload.subject?.phrase ?? null,
-      subjectColorLabel: cor ? EDITORIAL_GROUP_COLOR_LABELS[cor] : null,
-      label: version.payload.principalKeywordId ? keywordLabelById.get(String(version.payload.principalKeywordId)) ?? null : null,
-    };
-  }), [acceptedArticleDnas, acceptedSiloDnas, articleSiloViews, arquitetoGroups.articleGroupById, arquitetoGroups.groupById, keywordLabelById]);
-  const planSheetRadarIds = useMemo(() => new Set(radarItems.map(item => String(item.articleId))), [radarItems]);
-  const planSheetGroupOf = useCallback((groupId: string) => {
-    const grupo = arquitetoGroups.groupById.get(groupId);
-    return grupo ? { color: String(grupo.color), name: grupo.name } : null;
-  }, [arquitetoGroups.groupById]);
-  const planSheetKeywordGroupOf = useCallback((keywordId: string) => arquitetoGroups.keywordGroupById.get(keywordId) ?? null, [arquitetoGroups.keywordGroupById]);
-
   const architectureProposal = useMemo(() => buildArchitectureWorkingProposal({
     analysis: architectureAnalysis,
     existingSilos: [
@@ -12261,12 +12322,9 @@ export default function ArquitetoPage() {
    * numa frase e oferece o ato: aplicar ou manter a troca da principal Livre,
    * trazer o par de outro Silo, buscar reforço no Minerador ou coletar a SERP
    * que falta (pago, com plano). Toda gravação é decisão humana confirmada
-   * pela releitura; nada muda URL, slug ou canonical.
+   * pela releitura; nada muda URL, slug ou canonical. (A rota da marca,
+   * `serpSubjectBrandRef`, é lida antes, junto das linhas do plano.)
    * ---------------------------------------------------------------------- */
-  const serpSubjectBrandRef = useMemo(() => {
-    if (!activeBrand?.id || !activeBrand.nome) return null;
-    try { return buildBrandRef(activeBrand.nome, activeBrand.id); } catch { return null; }
-  }, [activeBrand?.id, activeBrand?.nome]);
 
   /**
    * O Posto de cada principal publicada, pelo Vínculo do Minerador. Posto não
@@ -13505,10 +13563,26 @@ export default function ArquitetoPage() {
    * "Selecione pelo menos um artigo" — sobre a mesma seleção. Agora a recusa
    * nomeia quem ficou de fora, em vez de mandar selecionar o que já está.
    */
-  const formationSelectionScope = useMemo(
-    () => resolveFormationSelectionScope({ selectedArticleIds, articles: articlesList }),
-    [articlesList, selectedArticleIds],
-  );
+  /*
+   * 2026-10-14 · UMA TABELA SÓ, OS BOTÕES DE SEMPRE. A seleção da tabela se
+   * divide: os artigos de sempre seguem pelo escopo de sempre (abaixo); os do
+   * plano — o artigo da mesa cujo Assunto é keyword do plano e a linha do plano
+   * sem artigo — vão ao núcleo do plano pelos MESMOS botões da barra. A porta
+   * do plano (`planoPorKeywordRef` em `processArticleFormation`) continua lá.
+   */
+  const tableSelection = useMemo(() => splitTableSelectionForPlan({
+    articles: articlesList,
+    selectedArticleIds,
+    idOf: art => String(art.id),
+    planRowOf: planRowOfArticle,
+    planOnlyRows: visiblePlanOnlyRows,
+    selectedPlanKeywordIds: planSheet.selected,
+  }), [articlesList, selectedArticleIds, planRowOfArticle, visiblePlanOnlyRows, planSheet.selected]);
+  const formationSelectionScope = useMemo(() => {
+    // Só os artigos de sempre: os do plano já saíram para o núcleo do plano (`tableSelection.planTargets`).
+    const selectedArticleIds = tableSelection.regularArticleIds;
+    return resolveFormationSelectionScope({ selectedArticleIds, articles: articlesList });
+  }, [articlesList, tableSelection.regularArticleIds]);
   const selectedCandidateRefs = formationSelectionScope.candidateRefs;
 
   /**
@@ -14833,7 +14907,8 @@ export default function ArquitetoPage() {
     /*
      * SDD acelerar 2026-10-13, item 4 — UMA PORTA PARA O PLANO. Artigo de grupo
      * com plano declarado não roda aqui (nem pela formação automática): a porta
-     * é a planilha "Artigos do plano" (F5), a melhoria recortada pelo grupo, que
+     * é a das linhas do plano (F5; desde 2026-10-14 dentro da tabela de artigos,
+     * pelos mesmos botões da barra), a melhoria recortada pelo grupo, que
      * obedece ao plano, à trava e à guarda de retrabalho. Nada é gravado.
      */
     const doPlano = selecionados
@@ -14845,7 +14920,7 @@ export default function ArquitetoPage() {
       });
     if (doPlano.length) {
       const planos = [...new Set(doPlano.map(item => item.plano))];
-      showNotification("warning", `${doPlano.length === 1 ? `"${doPlano[0].nome}" é` : `${doPlano.length} artigos selecionados são`} do plano ${planos.join(", ")}: use a planilha "Artigos do plano" (Artigos novos, acima) — Validar SERP, Trocar principal e Concluir formação na linha ou no lote. Os artigos sem plano seguem por aqui — desmarque os do plano. Nada foi processado.`);
+      showNotification("warning", `${doPlano.length === 1 ? `"${doPlano[0].nome}" é` : `${doPlano.length} artigos selecionados são`} do plano ${planos.join(", ")}: o caminho do plano é o das linhas do plano nesta mesma tabela (as que têm os selos do plano, sob a SiloPage do Silo do plano) — marque-as e use os mesmos botões (Processar artigos valida a SERP com o custo antes; Concluir formação forma pelo plano) ou as ações da linha. Os artigos sem plano seguem por aqui — desmarque os do plano. Nada foi processado.`);
       return;
     }
     setFormationBusy(true);
@@ -15741,6 +15816,47 @@ export default function ArquitetoPage() {
       return { marker: marcadorPosArtigos, verification: vereditoSobre(posArtigos, false) };
     }
 
+    /* 2–4. SILOWORKINGCOPY + SILODNA + SILOPAGE — o helper de sempre (`writeSiloPairFromArticles`). */
+    await writeSiloPairFromArticles({
+      territoryRef: input.territoryRef,
+      snapshot: posArtigos,
+      articles: artigosDoSilo,
+      pillarArticleId: pilarArticleId,
+      // O ato humano é a conclusão da formação; o Pilar é a consequência
+      // determinística dela, e o motivo diz exatamente qual foi a regra.
+      // F4 — Pilar do plano declarado: a razão é a da declaração (ator e data), D7.
+      pillarReason: input.plan.pillarSource === "declared_plan"
+        ? input.plan.pillarReason
+        : `Fechamento canônico do Silo após a última formação concluída. ${input.plan.pillarReason}`,
+    });
+
+    /* §8 — o veredito final é o do remoto, relido depois de tudo. */
+    const posFechamento = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+    setCanonicalWorkspaceReload(current => current + 1);
+
+    return {
+      marker: posFechamento.articleFormationMarker || marcadorPosArtigos,
+      verification: vereditoSobre(posFechamento, true),
+    };
+  };
+
+  /**
+   * O PAR CANÔNICO DO SILO A PARTIR DOS ARTICLEDNA JÁ GRAVADOS — os passos 2 a 4
+   * do fechamento canônico (working copy com o Pilar decidido, SiloDNA e
+   * SiloPage pela consolidação de sempre). 2026-10-14 (noite): o fechamento e
+   * "Consolidar o Silo do plano" usam este MESMO caminho.
+   */
+  const writeSiloPairFromArticles = async (input: {
+    territoryRef: string;
+    snapshot: CanonicalWorkspaceSnapshot;
+    articles: readonly VersionEnvelope<ArticleDNA>[];
+    pillarArticleId: string;
+    pillarReason: string;
+  }) => {
+    if (!selectedBrandId) throw new Error("Selecione uma marca antes de consolidar o Silo.");
+    const artigosDoSilo = input.articles;
+    const posArtigos = input.snapshot;
+    const pilarArticleId = input.pillarArticleId;
     /* 2. SILOWORKINGCOPY — refs reais, Pilar derivado pelo plano aprovado. */
     const versoesPorId = new Map(artigosDoSilo.map(version => [String(version.payload.articleId), version]));
     const statusPorId = new Map(posArtigos.statuses.map(item => [item.versionId, item.status]));
@@ -15780,9 +15896,7 @@ export default function ArquitetoPage() {
       // O ato humano é a conclusão da formação; o Pilar é a consequência
       // determinística dela, e o motivo diz exatamente qual foi a regra.
       // F4 — Pilar do plano declarado: a razão é a da declaração (ator e data), D7.
-      reason: input.plan.pillarSource === "declared_plan"
-        ? input.plan.pillarReason
-        : `Fechamento canônico do Silo após a última formação concluída. ${input.plan.pillarReason}`,
+      reason: input.pillarReason,
       currentArticleIds: rascunho.articleRefs.map(reference => reference.articleId),
     });
     const suportes = deriveSupportArticleIds({
@@ -15834,15 +15948,38 @@ export default function ArquitetoPage() {
       articleStatusById: statusPorArtigo,
       quiet: true,
     });
+  };
 
-    /* §8 — o veredito final é o do remoto, relido depois de tudo. */
-    const posFechamento = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+  /**
+   * 2026-10-14 (noite) · "CONSOLIDAR O SILO DO PLANO", parte do Silo: depois que
+   * as linhas do plano têm ArticleDNA, o par canônico (SiloDNA + SiloPage) com o
+   * Pilar e a ordem do plano, pelo caminho de sempre. Relido no fim.
+   */
+  planSiloPairRef.current = async ({ territoryRef, pillarKeywordId }) => {
+    if (!selectedBrandId) return { ok: false, message: "Selecione uma marca antes de consolidar." };
+    const pos = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+    const artigos = pos.articleDnas.filter(version => version.payload.territoryRef === territoryRef);
+    if (!artigos.length) return { ok: false, message: "Nenhum ArticleDNA no Silo do plano ainda: nada a consolidar." };
+    const pilar = artigos.find(version => pillarKeywordId && (version.payload.subject?.keywordId === pillarKeywordId || version.payload.principalKeywordId === pillarKeywordId)) ?? null;
+    if (!pilar) return { ok: false, message: "O Pilar do plano ainda não tem ArticleDNA neste Silo: o SiloDNA e a SiloPage esperam por ele." };
+    const plano = resolveDeclaredSiloPlan({
+      units: artigos.map(version => ({ ref: String(version.payload.articleId), principalKeywordId: version.payload.principalKeywordId, keywordIds: version.payload.keywordReferences.map(reference => reference.keywordId), subjectKeywordId: version.payload.subject?.keywordId ?? null })),
+      entries: declaredSiloPlanEntriesRef.current,
+    });
+    await writeSiloPairFromArticles({
+      territoryRef,
+      snapshot: pos,
+      articles: artigos,
+      pillarArticleId: String(pilar.payload.articleId),
+      pillarReason: plano.applies ? plano.reason : "Pilar declarado no plano do grupo (consolidado do plano do Minerador, decisão humana).",
+    });
+    const relido = await loadCanonicalArquitetoWorkspace(selectedBrandId);
     setCanonicalWorkspaceReload(current => current + 1);
-
-    return {
-      marker: posFechamento.articleFormationMarker || marcadorPosArtigos,
-      verification: vereditoSobre(posFechamento, true),
-    };
+    const dna = relido.siloDnas.find(version => version.payload.territoryRef === territoryRef) ?? null;
+    const page = dna ? relido.siloPages.find(version => version.payload.siloId === dna.payload.siloId) ?? null : null;
+    return dna && page
+      ? { ok: true, message: `SiloDNA v${dna.versionNumber} e SiloPage v${page.versionNumber} gravados e relidos, com o Pilar e a ordem do plano.${plano.applies ? "" : ` ${plano.warnings.join(" ")}`}` }
+      : { ok: false, message: "O SiloDNA e a SiloPage não voltaram na releitura: recarregue e consolide de novo." };
   };
 
   /**
@@ -16134,7 +16271,7 @@ export default function ArquitetoPage() {
       if (nomes.length) {
         universosSelecionados = universosSelecionados.map(universe => ({ ...universe, candidates: universe.candidates.filter(candidate => !doPublicado(candidate)) }));
         const restam = universosSelecionados.some(universe => universe.candidates.length > 0);
-        showNotification("info", `${nomes.map(nome => `"${nome}"`).join(", ")} ${nomes.length === 1 ? "é artigo publicado" : "são artigos publicados"}: publicado não passa pelo "Concluir formação" (URL, slug e canonical protegidos). Para gravar, trocar a principal sem volume ou acertar as keywords que estão na tabela e fora do DNA: cartão "Melhorar publicados" → "1 · Buscar keywords (grátis)" → "3 · Gravar melhorias".${restam ? " Os artigos novos selecionados seguem para a conclusão." : " Nada foi gravado."}`);
+        showNotification("info", `${nomes.map(nome => `"${nome}"`).join(", ")} ${nomes.length === 1 ? "é artigo publicado" : "são artigos publicados"}: publicado não passa pelo "Concluir formação" (URL, slug e canonical protegidos). Para gravar, trocar a principal sem volume ou acertar as keywords que estão na tabela e fora do DNA: botão "Melhorar publicados…" da barra → "1 · Buscar keywords (grátis)" → "3 · Gravar melhorias".${restam ? " Os artigos novos selecionados seguem para a conclusão." : " Nada foi gravado."}`);
         if (!restam) {
           document.querySelector("[data-testid=\"architect-article-improvement\"]")?.scrollIntoView({ behavior: "smooth", block: "start" });
           return;
@@ -16312,7 +16449,7 @@ export default function ArquitetoPage() {
         const publicadosSelecionados = plano.blocked.filter(item => item.code === "PUBLISHED_COLLISION");
         if (!impeditivos.length && !plano.approved.length && publicadosSelecionados.length) {
           const nomes = publicadosSelecionados.map(item => `"${candidateGuards.rotuloDoCandidato.get(item.candidateRef) || item.candidateRef}"`).join(", ");
-          showNotification("info", `${nomes} ${publicadosSelecionados.length === 1 ? "é artigo publicado" : "são artigos publicados"}: publicado não passa pelo "Concluir formação" (URL, slug e canonical protegidos). Para gravar, trocar a principal sem volume ou ajustar as keywords: cartão "Melhorar publicados", no topo da aba Artigos → "1 · Buscar keywords (grátis)" → "3 · Gravar melhorias". Nada foi gravado.`);
+          showNotification("info", `${nomes} ${publicadosSelecionados.length === 1 ? "é artigo publicado" : "são artigos publicados"}: publicado não passa pelo "Concluir formação" (URL, slug e canonical protegidos). Para gravar, trocar a principal sem volume ou ajustar as keywords: botão "Melhorar publicados…", na barra da aba Artigos → "1 · Buscar keywords (grátis)" → "3 · Gravar melhorias". Nada foi gravado.`);
           document.querySelector("[data-testid=\"architect-article-improvement\"]")?.scrollIntoView({ behavior: "smooth", block: "start" });
           return;
         }
@@ -19637,8 +19774,9 @@ export default function ArquitetoPage() {
       <main className="min-w-0 flex-1 overflow-y-auto bg-background">
         {/* 2026-10-14 · o Arquiteto se mantém em dia com o Minerador: reaprovadas depois do envio, sem precisar reenviar. */}
         {mineradorPackageUpdates.length > 0 && (
-          <section role="status" className="flex flex-wrap items-center justify-between gap-3 border-b border-divider bg-surface-subtle px-4 py-3 text-sm leading-6" data-testid="architect-minerador-package-updates">
-            <p className="min-w-0 flex-1 text-foreground" title={mineradorPackageUpdates.map(item => item.keyword).join(", ")}>{mineradorPackageUpdatesSentence(mineradorPackageUpdates.length)}</p>
+          <section role="status" className="flex flex-wrap items-center justify-between gap-3 border-b border-divider bg-surface-subtle px-4 py-2 text-sm leading-6" data-testid="architect-minerador-package-updates">
+            {/* 2026-10-14 · pedido do dono: uma linha curta com o botão; o detalhe fica no `title`. */}
+            <p className="min-w-0 flex-1 truncate text-foreground" title={`${MINERADOR_PACKAGE_UPDATES_DETAIL} Keywords: ${mineradorPackageUpdates.map(item => item.keyword).join(", ")}.`}>{mineradorPackageUpdatesSentence(mineradorPackageUpdates.length)}</p>
             <button type="button" onClick={() => { setKeywordImportPreselect("refresh"); setKeywordImportOpen(true); }} className={ARCHITECT_UI.primaryButton} data-testid="architect-minerador-package-refresh">
               Atualizar do Minerador
             </button>
@@ -19654,66 +19792,49 @@ export default function ArquitetoPage() {
           </section>
         ))}
         {/* Recolhido ocupa um terço do topo (prioridade é a planilha); a seta abre para 72vh. */}
-        {/* Aba Artigos: a grade do Workbench vai para "Detalhes técnicos", no fim. */}
+        {/* A grade do Workbench é das abas Silos e Links; a aba Artigos não a mostra (2026-10-14, noite). */}
         {!articleMode && workbenchGrid}
         {/*
-          * ABA ARTIGOS, NA ORDEM DO TRABALHO: (1) o próximo passo e (2) a
-          * melhoria dos publicados — o painel mostra o cartão no topo —,
-          * (3) a mesa com o resultado, (4) Sobras. O resto fica em
-          * "Detalhes técnicos", fechado, no fim.
+          * ABA ARTIGOS, NA ORDEM DO TRABALHO (2026-10-14, pedido do dono: "uma
+          * lista só", "os botões de processo normal"): (1) a barra de sempre —
+          * Processar artigos, Concluir formação, Melhorar publicados… —, (2) a
+          * tabela de artigos, que é a lista (as linhas do plano estão nela),
+          * (3) Sobras. Sem cartão "Próximo passo" nem painel de texto no topo:
+          * "Melhorar publicados" abre só pelo botão. O resto fica em "Detalhes
+          * técnicos", fechado, no fim.
           */}
-        {/* Publicados marcados na planilha: "Buscar keywords" analisa só eles (sem marcação, todos). */}
-        {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
-          selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))}
-          activeGroup={(() => {
-            // 2026-10-14 · a etiqueta escolhe por COR (`kind: "groups"`); o formato antigo por id continua aceito.
-            const filtro = arquitetoGroups.filter;
-            const cor = filtro.kind === "groups" ? filtro.color : filtro.kind === "group" ? arquitetoGroups.groupById.get(filtro.groupId)?.color ?? null : null;
-            return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null;
-          })()}
-          activeColorHasPlan={(() => {
-            // 2026-10-14 · cor com plano: o painel abre recolhido e o próximo passo aponta para a planilha "Artigos do plano".
-            const filtro = arquitetoGroups.filter;
-            const ids = filtro.kind === "groups" ? filtro.groupIds : filtro.kind === "group" ? [filtro.groupId] : [];
-            return ids.some(groupId => grupoTemPlano(groupId)) || [...subjectStandings.values()].some(standing => Boolean(standing.plan && standing.received && ids.includes(standing.plan.groupId)));
-          })()}
-          mesaChangedAt={mesaChangedAt} />}
-        {/* Artigos novos: os dois atos da formação continuam à mão sem abrir
-            os detalhes. Mesmos handlers e mesmas travas do painel de formação. */}
-        {articleMode && (
-          <section id="architect-articles-new" className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-articles-formation-actions">
-            <span className="text-sm font-semibold text-foreground">Artigos novos</span>
-            <button
-              type="button"
-              onClick={() => { void processArticleFormation(); }}
-              disabled={formationBusy || Boolean(formationSelectionScope.reason)}
-              title={formationSelectionScope.reason ?? `Processar ${formationSelectionScope.selectedCount} artigo(s) selecionado(s).`}
-              data-testid="architect-articles-top-process"
-              className={ARCHITECT_UI.toolbarButton}
-            >
-              {formationBusy ? "Processando…" : articleFormationMarker ? "Reprocessar artigos" : "Processar artigos"}
-            </button>
-            <button
-              type="button"
-              onClick={() => { void confirmArticleFormation(); }}
-              disabled={formationBusy || !articleFormationMarker || Boolean(formationSelectionScope.reason)}
-              title={formationSelectionScope.reason
-                ?? (articleFormationMarker ? `Concluir os ${formationSelectionScope.selectedCount} artigo(s) selecionado(s).` : "Processe os artigos antes de concluir.")}
-              data-testid="architect-articles-top-confirm"
-              className={ARCHITECT_UI.toolbarButton}
-            >
-              Concluir formação
-            </button>
-            <span className={`text-sm ${formationSelectionScope.reason && formationSelectionScope.selectedCount > 0 ? "text-warning" : "text-text-muted"}`}>
-              {formationSelectionScope.reason ?? `${formationSelectionScope.selectedCount} artigo(s) selecionado(s) na mesa`}
-            </span>
-          </section>
+        {/* Os botões de sempre valem para TODAS as linhas: os do plano vão ao núcleo do plano, os demais ao de sempre (mesmos handlers, mesmas travas). */}
+        {articleMode && <ArticlesFormationBar
+          formationBusy={formationBusy}
+          processed={Boolean(articleFormationMarker)}
+          selectionScope={formationSelectionScope}
+          planTargets={tableSelection.planTargets}
+          planSheet={planSheet}
+          onProcess={() => processArticleFormation()}
+          onConfirm={() => confirmArticleFormation()}
+          improvementOpen={improvementPanel === "open"}
+          onToggleImprovement={() => setImprovementPanel(atual => atual === "open" ? "hidden" : "open")}
+          buttonClassName={ARCHITECT_UI.toolbarButton}
+          primaryButtonClassName={ARCHITECT_UI.primaryButton}
+          hasPublished={articlesList.some(art => art.isPublished)}
+        />}
+        {/* A prévia, o andamento e o resultado das linhas do plano: só aparecem quando há uma ação. */}
+        {articleMode && <PlanSheetOperations sheet={planSheet} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} controlClassName={ARCHITECT_UI.control} dangerButtonClassName={ARCHITECT_UI.dangerButton} />}
+        {/* "Melhorar publicados…": o painel abre só pelo botão da barra e fica montado depois (a execução em curso não se perde ao fechar). */}
+        {articleMode && improvementPanel !== "closed" && (
+          <div hidden={improvementPanel !== "open"} data-testid="architect-improvement-panel-slot">
+            {/* Publicados marcados na tabela: "Buscar keywords" analisa só eles (sem marcação, todos). */}
+            <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
+              selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))}
+              activeGroup={(() => {
+                // 2026-10-14 · a etiqueta escolhe por COR (`kind: "groups"`); o formato antigo por id continua aceito.
+                const filtro = arquitetoGroups.filter;
+                const cor = filtro.kind === "groups" ? filtro.color : filtro.kind === "group" ? arquitetoGroups.groupById.get(filtro.groupId)?.color ?? null : null;
+                return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null;
+              })()}
+              mesaChangedAt={mesaChangedAt} />
+          </div>
         )}
-        {/* F5 · Planilha primeiro: cada artigo do plano é uma linha, com Validar SERP, Trocar principal e Concluir formação (linha e lote). */}
-        {articleMode && <PlanArticleSheet brandId={selectedBrandId || null} brandRef={serpSubjectBrandRef} keywords={masterList} standings={subjectStandings}
-          groupOf={planSheetGroupOf} keywordGroupOf={planSheetKeywordGroupOf} filter={arquitetoGroups.filter} articles={planSheetArticles} radarArticleIds={planSheetRadarIds}
-          onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }}
-          buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} controlClassName={ARCHITECT_UI.control} dangerButtonClassName={ARCHITECT_UI.dangerButton} />}
         {canonicalBootstrapError ? (
           <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 px-6 text-center text-danger">
             <span className="text-base">Não foi possível carregar os dados do Arquiteto.</span>
@@ -19725,7 +19846,7 @@ export default function ArquitetoPage() {
           <div className="flex min-h-[50vh] items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-module-accent" />
           </div>
-        ) : workspaceMode !== "silos" && filteredArticles.length === 0 && !visiblePipelineRows.length && !groupedArticles.some(group => group.planHidden > 0) ? (
+        ) : workspaceMode !== "silos" && filteredArticles.length === 0 && !visiblePipelineRows.length && !groupedArticles.some(group => group.planRows.length > 0) ? (
           // O vazio de Article não pode apagar a mesa territorial: no modo Silos
           // quem responde pelo estado vazio é a própria superfície territorial.
           // Nem pode apagar as keywords que aguardam decisão de Silo: enquanto
@@ -19770,7 +19891,10 @@ export default function ArquitetoPage() {
                         aria-checked={someVisibleArticlesSelected ? "mixed" : allVisibleArticlesSelected}
                         onChange={() => {
                           markSelectionInteraction("visible-toggle");
-                          setSelectedArticleIds(current => toggleVisibleArticleSelection(current, visibleArticleIds));
+                          // 2026-10-14 · uma tabela só: "tudo que está visível" inclui as linhas do plano sem artigo na mesa.
+                          const marcar = !allVisibleArticlesSelected;
+                          setSelectedArticleIds(current => visibleArticleIds.length && visibleArticleIds.every(id => current.has(id)) === marcar ? current : toggleVisibleArticleSelection(current, visibleArticleIds));
+                          planSheet.setSelected(current => { const proximo = new Set(current); for (const id of visiblePlanKeywordIds) { if (marcar) proximo.add(id); else proximo.delete(id); } return proximo; });
                           setSelectionMenuOpen(false);
                         }}
                         className="h-4 w-4 cursor-pointer rounded border-slate-700 bg-slate-950 accent-blue-500"
@@ -19787,7 +19911,7 @@ export default function ArquitetoPage() {
                       {selectionMenuOpen && (
                         <div className="absolute left-0 top-full z-40 mt-2 w-72 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-2xl normal-case tracking-normal">
                           <button
-                            onClick={() => selectArticles(filteredArticles.map(art => art.id))}
+                            onClick={() => { selectArticles(filteredArticles.map(art => art.id)); planSheet.setSelected(new Set(visiblePlanKeywordIds)); }}
                             className="w-full cursor-pointer px-4 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-slate-800"
                           >
                             Selecionar Tudo
@@ -19813,7 +19937,7 @@ export default function ArquitetoPage() {
                             ))}
                           </div>
                           <button
-                            onClick={() => selectArticles([])}
+                            onClick={() => { selectArticles([]); planSheet.setSelected(new Set()); }}
                             className="w-full cursor-pointer px-4 py-3 text-left text-sm text-slate-400 transition-colors hover:bg-slate-800"
                           >
                             Desmarcar Tudo
@@ -20113,20 +20237,22 @@ export default function ArquitetoPage() {
                           />
                         );
                       })()}
-                      {/* 2026-10-14 · uma lista só: os artigos do plano deste Silo são linhas da planilha "Artigos do plano"; aqui fica só a frase com o atalho. */}
-                      {articleMode && group.planHidden > 0 && (
-                        <tr className="border-b border-divider bg-surface-subtle" data-testid="architect-plan-candidates-in-sheet" data-count={group.planHidden}>
-                          <td colSpan={architectColumnIds.length} className="px-4 py-2 text-sm text-text-muted">
-                            {planCandidatesInSheetSentence(group.planHidden)}{" "}
-                            <button type="button" className="font-medium text-module-accent underline underline-offset-2" onClick={() => document.getElementById(PLAN_SHEET_ANCHOR)?.scrollIntoView({ block: "start", behavior: "smooth" })}>Ir para a planilha</button>
-                          </td>
-                        </tr>
-                      )}
                       {/* A folha do sitemap não entra como Article: o Site
                           conhece a URL, não o DNA editorial dela. A evidência
                           continua no catálogo e serve para reconciliar. */}
 
-                      {group.articles.map((art) => (
+                      {/* 2026-10-14 · UMA TABELA SÓ: sob a SiloPage, as linhas do plano na ordem do plano (o artigo da mesa
+                          com os selos do plano, ou a linha do plano sem artigo), depois os demais artigos de sempre. */}
+                      {group.items.map(item => item.kind === "plan" ? (
+                        <PlanArticleTableRow
+                          key={item.key}
+                          sheet={planSheet}
+                          row={item.row}
+                          columns={architectColumnIds}
+                          buttonClassName={ARCHITECT_UI.toolbarButton}
+                          stripeClassName={item.row.color ? editorialGroupStripeClass(arquitetoGroups.groupById.get(item.row.groupId ?? "") ?? null) : ""}
+                        />
+                      ) : ((art: typeof item.article) => (
                         <MemoizedArticleRow
                           key={art.id}
                           articleId={art.id}
@@ -20307,7 +20433,7 @@ export default function ArquitetoPage() {
                         <td className="border-r border-slate-800/60 px-3 py-2">{/* O rótulo diz o que a unidade É: com ArticleDNA canônico ela deixou de estar "em formação". */}<p className={`text-sm font-semibold uppercase tracking-wider ${art.isPublished ? "text-success" : articleDnaVersion ? "text-positive-soft" : formacao.formationConcluded ? "text-positive-soft" : "text-module-accent"}`}>{formacao.unitLabel}</p><p className="mt-0.5 text-xs text-text-muted" data-testid="architect-formation-conclusion-detail">{formacao.unitDetail}</p>{/* O papel no Silo tem coluna própria: repeti-lo aqui daria dois lugares
                             para o mesmo fato, e eles divergem no primeiro caso de borda. */}</td>
                         {/* Keyword principal */}
-                        <td className="min-w-0 border-r border-slate-800/60 px-3 py-2"><div data-article-row-subject className="mb-1"><ArticleSubjectLine phrase={assuntoDaLinha}/></div><p className="break-words text-sm font-semibold text-keyword" title={art.keywordPrincipal}>{art.keywordPrincipal}</p><ArticleGroupRowTag group={grupoDaLinhaResumo} inherited={!grupoDaLinha.persisted} className="mt-1"/><DeclaredPlanSeals seals={declaredPlanSealsFor(art)} className="mt-1"/>{art.isPublished ? (publicationUrlFor(art) ? <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="mt-1 block max-w-[280px] truncate font-mono text-xs text-identity-published underline decoration-identity-published/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus select-all">{publicationUrlFor(art)}</a> : <span className="mt-1 block truncate font-mono text-xs text-identity-published">URL não recebida · /{art.slug}</span>) : <input type="text" value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug} onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)} onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }} onBlur={e => { if (!articleIdentityContext.slugProtected) persistArticleIdentityField(art, "computedSlug", e.target.value); }} disabled={articleIdentityContext.slugProtected} className={`${ARCHITECT_UI.control} mt-1 h-7 w-full max-w-[280px] font-mono text-xs text-identity-new disabled:cursor-not-allowed disabled:opacity-70`} />}</td>
+                        <td className="min-w-0 border-r border-slate-800/60 px-3 py-2"><div data-article-row-subject className="mb-1"><ArticleSubjectLine phrase={assuntoDaLinha}/></div><p className="break-words text-sm font-semibold text-keyword" title={art.keywordPrincipal}>{art.keywordPrincipal}</p><ArticleGroupRowTag group={grupoDaLinhaResumo} inherited={!grupoDaLinha.persisted} className="mt-1"/>{(() => { const linhaDoPlano = articleMode ? planRowOfArticle(art) : null; return linhaDoPlano ? <PlanRowSeals row={linhaDoPlano} result={planSheet.results.get(linhaDoPlano.keywordId) ?? null} className="mt-1"/> : <DeclaredPlanSeals seals={declaredPlanSealsFor(art)} className="mt-1"/>; })()}{art.isPublished ? (publicationUrlFor(art) ? <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="mt-1 block max-w-[280px] truncate font-mono text-xs text-identity-published underline decoration-identity-published/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus select-all">{publicationUrlFor(art)}</a> : <span className="mt-1 block truncate font-mono text-xs text-identity-published">URL não recebida · /{art.slug}</span>) : <input type="text" value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug} onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)} onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }} onBlur={e => { if (!articleIdentityContext.slugProtected) persistArticleIdentityField(art, "computedSlug", e.target.value); }} disabled={articleIdentityContext.slugProtected} className={`${ARCHITECT_UI.control} mt-1 h-7 w-full max-w-[280px] font-mono text-xs text-identity-new disabled:cursor-not-allowed disabled:opacity-70`} />}</td>
                         <td className="border-r border-slate-800/60 px-2 py-2 text-center text-sm text-foreground">{art.supportKeywords.length + 1} {art.supportKeywords.length === 0 ? "keyword" : "keywords"}</td>
                         {workspaceMode !== "silos" && <td className="border-r border-divider px-2 py-2 text-center">{(() => {
                           /*
@@ -20342,7 +20468,11 @@ export default function ArquitetoPage() {
                            */
                           const pai = articleParentFor(art);
                           return <span className="text-xs text-text-muted" title="O Silo do artigo foi decidido na fase Silos; aqui não se troca de Silo.">{pai.lifecycle.pendingIsExpected ? "Silo definido na fase Silos" : pai.pending || "Silo definido na fase Silos"}</span>;
-                        })() :!art.siloId ? <span className="text-xs text-text-muted" title="O Silo do artigo foi decidido na fase Silos; aqui não se troca de Silo.">Silo definido na fase Silos</span> :<select value={art.siloId || ""} onChange={e => handleMoveArticleToSilo(art, e.target.value)} className={`${ARCHITECT_UI.control} h-8 max-w-[145px] text-xs`} title="Mudar de Silo"><option value="" className="bg-surface-elevated">Sem silo</option>{siloOptions.map(silo => <option key={silo.id} value={silo.id} className="bg-surface-elevated">{silo.nome}</option>)}</select>}</div> : <span className="flex items-center justify-end gap-1.5 text-right text-sm font-medium text-text-muted" title="O artigo já está declarado como publicado. O Arquiteto preserva URL, slug, canonical e o Silo associado; isso não bloqueia revisar keywords conforme o Vínculo nem exige confirmação manual." aria-label="Artigo publicado: URL, slug, canonical e Silo associado preservados. As keywords seguem o Vínculo e não exigem nova confirmação."><ShieldCheck className="h-3.5 w-3.5 shrink-0" />{articleMode ? "URL, slug e Silo preservados" : "URL e Silo preservados"}</span>}</td>
+                        })() :!art.siloId ? <span className="text-xs text-text-muted" title="O Silo do artigo foi decidido na fase Silos; aqui não se troca de Silo.">Silo definido na fase Silos</span> :<select value={art.siloId || ""} onChange={e => handleMoveArticleToSilo(art, e.target.value)} className={`${ARCHITECT_UI.control} h-8 max-w-[145px] text-xs`} title="Mudar de Silo"><option value="" className="bg-surface-elevated">Sem silo</option>{siloOptions.map(silo => <option key={silo.id} value={silo.id} className="bg-surface-elevated">{silo.nome}</option>)}</select>}</div> : <span className="flex items-center justify-end gap-1.5 text-right text-sm font-medium text-text-muted" title="O artigo já está declarado como publicado. O Arquiteto preserva URL, slug, canonical e o Silo associado; isso não bloqueia revisar keywords conforme o Vínculo nem exige confirmação manual." aria-label="Artigo publicado: URL, slug, canonical e Silo associado preservados. As keywords seguem o Vínculo e não exigem nova confirmação."><ShieldCheck className="h-3.5 w-3.5 shrink-0" />{articleMode ? "URL, slug e Silo preservados" : "URL e Silo preservados"}</span>}{articleMode && (() => {
+                          // 2026-10-14 · artigo do plano: as ações por linha pelo núcleo do plano (os mesmos botões da linha do plano).
+                          const linhaDoPlano = planRowOfArticle(art);
+                          return linhaDoPlano ? <div className="mt-1.5"><PlanRowActions sheet={planSheet} row={linhaDoPlano} buttonClassName={ARCHITECT_UI.toolbarButton} /></div> : null;
+                        })()}</td>
                         {/*
                           * §1 — APROVAÇÃO NÃO EMPRESTA PALAVRA DO OPERACIONAL.
                           *
@@ -21027,7 +21157,7 @@ export default function ArquitetoPage() {
                                         : articleSerpVerdict.kind === "NOT_RUN"
                                           ? <p className="mt-3 rounded-md border border-divider bg-surface-subtle p-3 text-sm text-text-muted">Ainda não há avaliação SERP para este artigo.</p>
                                           : <details data-testid="architect-serp-technical" className="mt-3 rounded-md border border-divider bg-surface-subtle p-3">
-                                            <summary className="cursor-pointer text-sm font-semibold text-text-muted hover:text-foreground">Detalhes técnicos da SERP</summary>
+                                            <summary className="cursor-pointer text-sm font-semibold text-text-muted hover:text-foreground">Sinais técnicos da SERP</summary>
                                             <p className="mt-2 text-sm leading-6 text-text-muted">Sinais brutos do assessment e histórico das recomendações. Não governam a decisão humana quando o veredito é compatível ou inconclusivo.</p>
                                             <div className="mt-3">{renderSerpRecommendations(art)}</div>
                                             <div className="mt-3 space-y-3">{[art.mainKeywordObj, ...art.supportKeywords].filter((keyword): keyword is NonNullable<typeof art.mainKeywordObj> => Boolean(keyword)).map(keyword => <React.Fragment key={keyword.id}>{renderSerpRecommendationForKeyword(art, keyword.id, keyword.keyword)}</React.Fragment>)}</div>
@@ -21226,7 +21356,7 @@ export default function ArquitetoPage() {
                   );
                           }}
                         />
-                      ))}
+                      ))(item.article))}
                     </React.Fragment>
                   );
                 })}
@@ -21253,12 +21383,7 @@ export default function ArquitetoPage() {
             <button type="button" onClick={() => dismissLeftovers(false)} className={ARCHITECT_UI.toolbarButton}>Mostrar de novo</button>
           </div>
         )}
-        {articleMode && (
-          <details className="border-t border-divider bg-surface" data-testid="architect-articles-technical">
-            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-foreground">Detalhes técnicos</summary>
-            {workbenchGrid}
-          </details>
-        )}
+        {/* 2026-10-14 (noite) · pedido do dono: "apaga este painel de [Detalhes técnicos], não serve pra nada mesmo". A aba Artigos não tem mais a grade do Workbench; Silos e Links continuam com ela. */}
       </main>
 
       {/* Ações que dependem da seleção ficam sempre no rodapé, fora do scroll da planilha. */}
