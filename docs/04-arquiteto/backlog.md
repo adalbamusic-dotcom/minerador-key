@@ -1,3 +1,15 @@
+## Caso WifiConecta (azul) · corpo estranho, tema da página do Silo, vínculo velho, Processar arquitetura — Arquiteto — 2026-10-15
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Artigo do plano nunca reservado para a SiloPage ("jogos online" volta à tabela como ARTICLE v1).
+- [x] Tema do Silo do plano nunca de um suporte; sem pendência em frase; "Consolidar o Silo do plano" oferece "Corrigir a página do Silo (vN+1)" e grava na mesma confirmação; sem mudança real, nada novo.
+- [x] `editorial_groups.silo_id` velho (Silo que sumiu) religado ao Silo real; Silo vivo nunca trocado.
+- [x] Versão do plano dita = a do grupo; nada gravado nas keywords.
+- [x] "Processar arquitetura" reconhece o Silo do plano já existente (consolidado incluído): nenhum "Silo proposto" de novo; Silo proposto do plano sem semente.
+- [ ] Dono: abrir o azul → "Consolidar o Silo do plano" → conferir na prévia "Corrigir a página do Silo (v2)" → "Confirmar e consolidar" → SiloDNA/SiloPage v2 com "Wi-Fi e fibra óptica"; conferir que o aviso do Silo velho não volta.
+- [ ] Readback depois da homologação (SELECT): SiloDNA v2 `centralEntity`, SiloPage v2 `h1/intro/cta`, território `centralEntity`, `editorial_groups.silo_id`.
+
 ## Aba Artigos · consolidar, não reformar (volume do DNA, regra da principal, Consolidar o Silo do plano, etapas, uma tabela) — Arquiteto — 2026-10-14 (noite)
 
 Detalhe em `docs/04-arquiteto/estado-atual.md` e no adendo C10 da SDD do cadastro (§11.4). **Validado manualmente: não.**
@@ -11,7 +23,7 @@ Detalhe em `docs/04-arquiteto/estado-atual.md` e no adendo C10 da SDD do cadastr
 - [ ] "diferença entre internet e Wi-Fi" sem volume e sem sustentação com volume: decidir (medir no Minerador, trazer sustentações pela Pesquisa por Assunto ou trocar a principal livre) — sem isso o Radar pede a SERP.
 - [ ] Consolidar artigo novo em Silo que já tem o par canônico (hoje pelo caminho de edição/"Aplicar o plano declarado ao Silo").
 - [ ] Decidir o destino dos painéis avançados que viviam em "Detalhes técnicos" (Mesmo assunto no Google, Diferenciar/Reforçar publicados): hoje sem porta na tela.
-- [ ] Religar `editorial_groups.silo_id` do grupo azul ao Silo vivo (a store recusa trocar Silo ligado; operação estrutural à parte).
+- [x] Religar `editorial_groups.silo_id` do grupo azul ao Silo vivo — 2026-10-15: a store religa quando o Silo antigo não existe mais (ver a seção de 2026-10-15).
 - [ ] Ferramenta MCP para "Consolidar o Silo do plano" (hoje só na tela).
 
 ## Aba Artigos · uma tabela só, os botões de sempre, sem painel de texto no topo, cor entre marcas — Arquiteto — 2026-10-14 (tarde)

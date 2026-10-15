@@ -10,6 +10,7 @@ import {
   type VersionReference,
 } from "./contracts.ts";
 import { deterministicSiloDnaPayload, deterministicSiloPagePayload } from "./adapters.ts";
+import { isPendingPlaceholder, retitleSiloPageText, siloMacroProblemText } from "./silo-plan-identity.ts";
 import { createVersionEnvelope, toVersionReference } from "./versioning.ts";
 import { chooseSiloWorkingCopyPillar, shortSiloSlug, SHALLOW_SILO_REASON, type SiloWorkingCopy } from "./silo-formation.ts";
 import type { SerpFormationAssessment } from "./serp-formation.ts";
@@ -102,6 +103,13 @@ export type SiloConsolidationInput = {
    * SDD 2026-10-12 §5.4). Opcional: ausente ou vazio, o objetivo é o de sempre.
    */
   declaredObjective?: string | null;
+  /**
+   * 2026-10-15 (caso WifiConecta) · o tema do Silo do PLANO (o nome do Silo do
+   * plano). Aditivo: presente, vence a entidade do território — que pode ter
+   * sido gravada a partir de um suporte pelo "Processar arquitetura" antigo —
+   * e o texto da SiloPage que nasceu do tema antigo acompanha. Ausente: o de sempre.
+   */
+  declaredCentralEntity?: string | null;
   /**
    * Identidade publicada herdada de um Silo nascido do Site/Sitemap.
    *
@@ -230,7 +238,8 @@ export function siloConsolidationIssues(input: SiloConsolidationInput): string[]
 export function buildConsolidatedSiloDnaPayload(input: SiloConsolidationInput): SiloDNA {
   const articles = [...input.articleVersions];
   const firstArticle = articles[0]?.payload;
-  const centralEntity = input.territory?.centralEntity?.trim()
+  const centralEntity = input.declaredCentralEntity?.trim()
+    || input.territory?.centralEntity?.trim()
     || input.existingSiloDna?.payload.centralEntity?.trim()
     || firstArticle?.entities.find(entity => entity.trim())
     || input.copy.name;
@@ -289,10 +298,14 @@ export function buildConsolidatedSiloDnaPayload(input: SiloConsolidationInput): 
       : {}),
     name: input.copy.name,
     centralEntity,
-    centralEntitySource: previous?.centralEntitySource || "keyword_dna",
+    centralEntitySource: input.declaredCentralEntity?.trim() ? "manual" : previous?.centralEntitySource || "keyword_dna",
     objective: input.declaredObjective?.trim() || previous?.objective?.trim() || base.objective,
     audience: previous?.audience?.trim() || base.audience,
-    macroProblem: previous?.macroProblem?.trim() || base.macroProblem,
+    // 2026-10-15 · problema escrito sobre o tema antigo, ou com pendência na frase, é refeito com o tema de agora.
+    macroProblem: previous?.macroProblem?.trim() && !isPendingPlaceholder(previous.macroProblem)
+      && !(previous.centralEntity && previous.centralEntity !== centralEntity && previous.macroProblem.toLowerCase().includes(previous.centralEntity.toLowerCase()))
+      ? previous.macroProblem.trim()
+      : siloMacroProblemText(centralEntity, previous?.audience?.trim() || base.audience),
     dominantIntent: input.territory?.macroIntent?.trim() || previous?.dominantIntent?.trim() || base.dominantIntent,
     pillarArticleId,
     supportArticleIds,
@@ -375,7 +388,13 @@ export function buildConsolidatedSiloPagePayload(
     publishedUrl: existing.publishedUrl,
     publicationVerification: existing.publicationVerification,
   } : undefined);
-  const content = existing && existing.formationStatus === "formed" ? existing : base;
+  const formada = existing && existing.formationStatus === "formed" ? existing : null;
+  // 2026-10-15 · tema novo (ou pendência no texto): o texto que nasceu do tema antigo acompanha; o escrito por gente fica.
+  const temaAntigo = input.existingSiloDna?.payload.centralEntity?.trim() || "";
+  const temaNovo = siloDnaVersion.payload.centralEntity.trim();
+  const content = formada && ((temaAntigo && temaAntigo !== temaNovo) || [formada.h1, formada.intro, formada.cta, formada.seoTitle].some(isPendingPlaceholder))
+    ? retitleSiloPageText(formada, { from: temaAntigo, to: temaNovo, objective: siloDnaVersion.payload.objective, audience: siloDnaVersion.payload.audience, pillarArticleId: input.copy.pillarCandidateArticleId })
+    : formada ?? base;
   return SiloPageSchema.parse({
     ...base,
     ...content,

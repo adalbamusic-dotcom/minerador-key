@@ -338,7 +338,8 @@ export function buildPlanSheetRows(input: {
   brandId: string | null;
   keywords: readonly RecordLike[];
   standings?: ReadonlyMap<string, ArchitectSubjectStanding>;
-  groupOf: (groupId: string) => { color: string; name: string } | null;
+  /** 2026-10-15 · `planVersion` (aditivo): a versão vigente do plano do grupo — a única que a linha diz. */
+  groupOf: (groupId: string) => { color: string; name: string; planVersion?: number } | null;
   keywordGroupOf: (keywordId: string) => string | null;
   articles: readonly PlanSheetArticle[];
   radarArticleIds: ReadonlySet<string>;
@@ -383,7 +384,8 @@ export function buildPlanSheetRows(input: {
       groupName: group?.name ?? null,
       order: plan.order,
       role: plan.role,
-      planVersion: plan.planVersion,
+      // 2026-10-15 · as keywords guardam a versão em que cada uma entrou (2/3/4 na WifiConecta): vale a do grupo; nada é gravado nelas.
+      planVersion: group?.planVersion ?? plan.planVersion,
       territoryRef: text(keyword.territoryRef),
       lock: lockView(standing, volume),
       volume,
@@ -616,6 +618,27 @@ export function planSubjectOfKeyword(input: {
     if (valida(standing) && standing.plan!.declaredPrincipal?.keywordId === input.keywordId) return standing;
   }
   return null;
+}
+
+/**
+ * 2026-10-15 (caso WifiConecta, "corpo estranho") · AS KEYWORDS QUE O PLANO
+ * DECLARA COMO ARTIGO: a keyword de cada Assunto do plano (pacote aprovado
+ * desta marca) e a principal declarada dele. Pilar ou Suporte, é artigo por
+ * decisão humana — a página do Silo é o Silo do plano, nunca uma delas.
+ */
+export function planArticleKeywordIds(input: {
+  brandId: string | null | undefined;
+  standings: ReadonlyMap<string, ArchitectSubjectStanding> | Iterable<ArchitectSubjectStanding>;
+}): Set<string> {
+  const ids = new Set<string>();
+  if (!input.brandId) return ids;
+  const lista = input.standings instanceof Map ? input.standings.values() : input.standings as Iterable<ArchitectSubjectStanding>;
+  for (const standing of lista) {
+    if (!standing.plan || !standing.declared || !standing.received || !standing.approvedPackageRef || standing.brandId !== input.brandId) continue;
+    ids.add(standing.keywordId);
+    if (standing.plan.declaredPrincipal?.keywordId) ids.add(standing.plan.declaredPrincipal.keywordId);
+  }
+  return ids;
 }
 
 /**

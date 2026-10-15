@@ -258,8 +258,11 @@ test("§11 — a reserva da SiloPage chega ao universo de formação", () => {
    * `skincare` virava Principal de um artigo dentro do Silo `/skincare`.
    */
   const trecho = workspace.slice(workspace.indexOf("const reservedSiloHeadIds"));
-  const corpo = trecho.slice(0, trecho.indexOf("\n  }, ["));
-  assert.match(corpo, /reservedForSiloPage\(\{/);
+  // 2026-10-15 · a reserva da aba virou a função única `reservedSiloHeadKeywordIds` (que chama `reservedForSiloPage`
+  // e não reserva artigo do plano — o caso "jogos online"); o corpo do memo passa a fechar com "}), [".
+  const corpo = trecho.slice(0, trecho.indexOf("\n  }), ["));
+  assert.match(corpo, /reservedSiloHeadKeywordIds\(\{/);
+  assert.match(readFileSync(new URL("../lib/arquiteto/article-candidate-guards.ts", import.meta.url), "utf8"), /const doSilo = reservedForSiloPage\(\{/);
   assert.match(corpo, /siloIsHumanDecided\(item\.territory\.lifecycleStatus\)/);
   // A identidade vem do território confirmado, não de um campo do artigo.
   assert.match(corpo, /slugState\?\.confirmed/);

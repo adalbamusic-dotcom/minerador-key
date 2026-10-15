@@ -7,6 +7,7 @@ import { calculateArticleHierarchyStrategy, calculateArticleKeywordStrategy, cal
 import { resolveArticleSerpStrategy, resolveEditorialUnitPurpose, suggestEditorialUnitClassification } from "./unit-strategy.ts";
 import { assertArticleFormation } from "./article-formation-rules.ts";
 import { normalizeKeywordDemandEvidence, sanitizeKeywordProvenanceSnapshot } from "./demand-evidence.ts";
+import { siloMacroProblemText, siloPageIdentityTexts } from "./silo-plan-identity.ts";
 
 const text = (value: unknown, fallback: string) => typeof value === "string" && value.trim() ? value.trim() : fallback;
 const bool = (value: unknown) => value === true || value === "sim" || value === "true";
@@ -328,7 +329,8 @@ export function deterministicSiloDnaPayload(
     schemaVersion: 1, siloId, ...(options.brandId ? { brandId: options.brandId } : {}), name: siloName, centralEntity,
     ...(options.centralKeywordDnaRef ? { centralEntitySource: "keyword_dna" as const, centralKeywordDnaRef: options.centralKeywordDnaRef } : { centralEntitySource: "manual" as const }),
     objective: `Construir autoridade em ${centralEntity.toLowerCase()}.`,
-    audience, macroProblem: `Dificuldade em ${centralEntity.toLowerCase()} para ${audience.toLowerCase()}.`,
+    // 2026-10-15 · a pendência do público não entra na frase (caso WifiConecta).
+    audience, macroProblem: siloMacroProblemText(centralEntity, audience),
     dominantIntent, pillarArticleId: pillar, supportArticleIds, articleReferences,
     articleRoles, narrativeOrder, linkMap,
     boundary: `Manter a cobertura centrada em ${siloName.toLowerCase()} e revisar sobreposições antes da publicação.`,
@@ -396,7 +398,9 @@ export function deterministicSiloPagePayload(
   const h1 = silo.centralEntity;
   const seoTitle = `${silo.centralEntity} | Guia completo`;
   const metaDescription = silo.objective;
-  const intro = `${silo.objective} Este conteúdo organiza os principais temas sobre ${silo.centralEntity.toLowerCase()} para ${silo.audience.toLowerCase()}.`;
+  // 2026-10-15 · os textos do tema vêm de um lugar só, e a pendência do público não entra na frase.
+  const textos = siloPageIdentityTexts({ centralEntity: silo.centralEntity, objective: silo.objective, audience: silo.audience });
+  const intro = textos.intro;
   const sections = silo.narrativeOrder.map((articleId, index) => ({
     id: `section:${index + 1}`,
     // O título da seção nomeia o RECORTE, não a justificativa interna.
@@ -421,7 +425,7 @@ export function deterministicSiloPagePayload(
       httpStatus: null, sitemapUrl: null, sitemapMatch: null, message: null,
     },
     h1, seoTitle, metaDescription, canonical: null, intro, sections,
-    cta: `Conheça todos os conteúdos sobre ${silo.centralEntity.toLowerCase()}.`,
+    cta: textos.cta,
     coverImageBrief: `Imagem representativa de ${silo.centralEntity}.`,
     visualBriefing: `Layout de landing page com hero, seções em ordem narrativa e CTA final.`,
     breadcrumbs, pillarArticleId: silo.pillarArticleId, supportArticleIds: silo.supportArticleIds,

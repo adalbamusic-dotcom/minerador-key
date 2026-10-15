@@ -27,6 +27,7 @@ import { createVersionEnvelope, toVersionReference } from "./versioning.ts";
 import type { DeclaredSiloPlan } from "../minerador/declared-plan.ts";
 import { applyDeclaredSiloIdentity, declaredPlanEntryForUnit, resolveDeclaredSiloPlan, type DeclaredSiloPlanEntry, type DeclaredSiloPlanUnit } from "./silo-declared-plan.ts";
 import { articleWithdrawalLabel, SHALLOW_SILO_GAP, SHALLOW_SILO_PENDING } from "./silo-article-withdrawal.ts";
+import { diagnoseSiloIdentity, retitleSiloPageText, siloIdentityCorrectionSentence, siloMacroProblemText } from "./silo-plan-identity.ts";
 
 /** Rótulos da tela e do catálogo do MCP: um texto só. */
 export const SILO_DECLARED_PLAN_ACTION_LABEL = "Aplicar o plano declarado ao Silo" as const;
@@ -70,6 +71,12 @@ export type SiloDeclaredPlanInput = {
   groupPlans: ReadonlyMap<string, DeclaredSiloPlan>;
   /** A versão do SiloDNA que a prévia mostrou: diferente da vigente = recusa. */
   expectedSiloDnaVersionId?: string | null;
+  /**
+   * 2026-10-15 · aditivo: a versão VIGENTE do plano de cada grupo
+   * (`editorial_groups.plan_version`). As keywords guardam a versão do plano
+   * em que cada uma entrou (2/3/4 na WifiConecta); o que se diz é a do grupo.
+   */
+  groupPlanVersions?: ReadonlyMap<string, number>;
 };
 
 export type SiloDeclaredPlanApplicationPlan = {
@@ -235,8 +242,35 @@ export function planSiloDeclaredPlanApplication(input: SiloDeclaredPlanInput): S
   const objetivo = planoDoGrupo?.objective?.trim() || silo.objective;
   const raso = suportes.length === 0;
 
+  /*
+   * 2026-10-15 (caso WifiConecta) · O TEMA DO SILO NUNCA É O DE UM SUPORTE.
+   * O v1 nasceu com o tema "melhor internet para jogos online" (o 5º suporte)
+   * e a pendência do público dentro da frase. O tema volta a ser o nome do
+   * Silo do plano; o texto da SiloPage que nasceu do tema antigo acompanha.
+   */
+  const suporteRotulos = suportes.flatMap(id => {
+    const payload = artigos.get(id)!.payload;
+    return [articleWithdrawalLabel(payload), payload.suggestedSlug, payload.subject?.phrase];
+  }).concat(entradasDoGrupo.filter(entry => entry.plan.role !== "Pilar").map(entry => entry.plan.declaredPrincipal?.phrase));
+  const diagnostico = diagnoseSiloIdentity({
+    centralEntity: silo.centralEntity,
+    siloName: nome,
+    macroProblem: silo.macroProblem,
+    page: page.payload,
+    planSiloName: planoDoGrupo?.siloName ?? null,
+    pillarLabel: label(pilar),
+    supportLabels: suporteRotulos,
+  });
+  const tema = diagnostico?.expected ?? silo.centralEntity;
+
   const nextSiloDna = SiloDNASchema.parse({
     ...silo,
+    ...(diagnostico ? {
+      centralEntity: tema,
+      centralEntitySource: "manual" as const,
+      centralKeywordDnaRef: undefined,
+      macroProblem: siloMacroProblemText(tema, silo.audience),
+    } : {}),
     name: nome,
     objective: objetivo,
     pillarArticleId: pilar,
@@ -266,21 +300,25 @@ export function planSiloDeclaredPlanApplication(input: SiloDeclaredPlanInput): S
   const secaoDe = new Map(atual.sections.flatMap(section => section.linkedArticleIds.map(id => [id, section] as const)));
   const sections = ordem.map((id, index) => {
     const anterior = secaoDe.get(id);
-    const titulo = id === pilar ? `${silo.centralEntity}: visão geral` : `${silo.centralEntity}: aprofundamento ${index}`;
+    const titulo = id === pilar ? `${tema}: visão geral` : `${tema}: aprofundamento ${index}`;
     return {
       id: `section:${index + 1}`,
       // Título escrito por gente fica; o título gerado acompanha o papel e a ordem novos.
       heading: anterior && !anterior.heading.startsWith(prefixo) ? anterior.heading : titulo,
-      objective: anterior?.objective ?? `Conectar o leitor ao tema ${silo.centralEntity.toLowerCase()}.`,
+      objective: anterior?.objective ?? `Conectar o leitor ao tema ${tema.toLowerCase()}.`,
       linkedArticleIds: [id],
     };
   });
+  // O texto que nasceu do tema antigo (ou com pendência) acompanha o tema novo; o escrito por gente sobre outra coisa fica.
+  const textoDaPagina = diagnostico
+    ? retitleSiloPageText({ ...atual, sections }, { from: silo.centralEntity, to: tema, objective: objetivo, audience: silo.audience, pillarArticleId: pilar })
+    : { ...atual, sections };
   const nextSiloPage = SiloPageSchema.parse({
-    ...atual,
+    ...textoDaPagina,
     slug,
-    breadcrumbs: atual.breadcrumbs.map(crumb => (crumb.slug === atual.slug ? { ...crumb, slug } : crumb)),
-    metaDescription: atual.metaDescription === silo.objective ? objetivo : atual.metaDescription,
-    sections,
+    breadcrumbs: textoDaPagina.breadcrumbs.map(crumb => (crumb.slug === atual.slug ? { ...crumb, slug } : crumb)),
+    metaDescription: atual.metaDescription === silo.objective ? objetivo : textoDaPagina.metaDescription,
+    sections: textoDaPagina.sections,
     pillarArticleId: pilar,
     supportArticleIds: suportes,
   });
@@ -288,6 +326,7 @@ export function planSiloDeclaredPlanApplication(input: SiloDeclaredPlanInput): S
   const unchanged = stableJson(nextSiloDna) === stableJson(silo) && stableJson({ ...nextSiloPage, siloDnaRef: null }) === stableJson({ ...atual, siloDnaRef: null });
 
   const changes: string[] = [];
+  if (diagnostico) changes.push(siloIdentityCorrectionSentence(diagnostico));
   if (pilarAtual !== pilar) changes.push(`Pilar: ${pilarAtual ? `“${label(pilarAtual)}”` : "nenhum"} → “${label(pilar)}” (${resolucao.reason}).`);
   const entram = suportes.filter(id => !silo.supportArticleIds.includes(id) && id !== pilarAtual);
   const viramSuporte = pilarAtual && pilarAtual !== pilar && suportes.includes(pilarAtual) ? [pilarAtual] : [];
@@ -308,7 +347,8 @@ export function planSiloDeclaredPlanApplication(input: SiloDeclaredPlanInput): S
     siloId: input.siloId,
     siloName: silo.name || silo.centralEntity,
     groupId: grupo,
-    planVersion: resolucao.planVersion,
+    // A versão vigente é a do grupo (as keywords guardam a versão em que cada uma entrou).
+    planVersion: input.groupPlanVersions?.get(grupo) ?? resolucao.planVersion,
     current: { siloDna: dna, siloPage: page },
     nextSiloDna,
     nextSiloPage,

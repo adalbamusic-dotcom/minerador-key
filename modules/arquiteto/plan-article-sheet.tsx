@@ -16,7 +16,8 @@ import {
   type PlanRowSeal, type PlanSheetAction, type PlanSheetArticle, type PlanSheetConflict, type PlanSheetRow, type PlanSheetSerpRead, type PlanSwapCandidate,
 } from "@/lib/arquiteto/plan-article-sheet";
 import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "@/lib/arquiteto/silo-article-withdrawal";
-import type { PlanConsolidationLine } from "@/lib/arquiteto/plan-consolidation";
+import type { PlanConsolidationLine, PlanSiloPairStep } from "@/lib/arquiteto/plan-consolidation";
+import { PLAN_SILO_PAIR_FIX_LABEL } from "@/lib/arquiteto/silo-plan-identity";
 import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
 
 /**
@@ -68,8 +69,10 @@ export type PlanConsolidationPreviewData = {
   summary: string;
   acceptedKeywordIds: string[];
   decisionHash: string;
+  /** 2026-10-15 · aditivo: o par do Silo (falta, em dia, ou "Corrigir a página do Silo (vN+1)" na mesma confirmação). */
+  siloPair?: PlanSiloPairStep;
 };
-type Busy = { label: string; startedAt: number; done: number | null; total: number | null; unit: string };
+type Busy ={ label: string; startedAt: number; done: number | null; total: number | null; unit: string };
 
 const LINE_TONE: Record<LineKind, string> = {
   go: "text-foreground",
@@ -566,7 +569,21 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     }
     // Depois das linhas, o par canônico do Silo (SiloDNA + SiloPage com o Pilar e a ordem do plano).
     let silo: { ok: boolean; message: string } | null = null;
-    if (territoryRef && consolidateSiloPair && !falhas) {
+    const par = data.siloPair;
+    if (par?.state === "fix" && !falhas) {
+      // 2026-10-15 · o par já existe com o tema errado (ou fora do plano): a versão seguinte pelo núcleo de "Aplicar o plano declarado ao Silo", na mesma confirmação.
+      setBusy({ label: `${PLAN_SILO_PAIR_FIX_LABEL} (v${par.nextVersion})`, startedAt: agoraMs(), done: null, total: null, unit: "" });
+      const answer = await postJson("/api/arquiteto/silo-declared-plan", { brandId, siloId: par.siloId, mode: "apply", expectedSiloDnaVersionId: par.siloDnaVersionId, decisionHash: par.decisionHash });
+      if (!vivo()) return;
+      const feito = answer.body.data as { state?: string; siloDna?: { versionNumber: number }; siloPage?: { versionNumber: number }; message?: string } | undefined;
+      silo = answer.ok && answer.body.success
+        ? feito?.state === "APPLIED"
+          ? { ok: true, message: `SiloDNA v${feito.siloDna?.versionNumber} e SiloPage v${feito.siloPage?.versionNumber} gravados e relidos, com o tema do Silo do plano.` }
+          : { ok: true, message: feito?.message ?? "O Silo já segue o plano: nenhuma versão nova." }
+        : { ok: false, message: humanError(answer) };
+    } else if (par && par.state !== "missing") {
+      silo = par.state === "refused" ? { ok: false, message: par.sentence } : null;
+    } else if (territoryRef && consolidateSiloPair && !falhas) {
       setBusy({ label: "Gravando o SiloDNA e a SiloPage do plano (Pilar e ordem do plano)", startedAt: agoraMs(), done: null, total: null, unit: "" });
       try { silo = await consolidateSiloPair({ groupId: data.groupId, territoryRef, pillarKeywordId: data.pillarKeywordId }); }
       catch (e) { silo = { ok: false, message: e instanceof Error ? e.message : "A consolidação do Silo não foi confirmada." }; }
@@ -711,6 +728,7 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
       })()}
       {preview.action === "consolidate" && <div className="mt-1 grid gap-0.5" data-testid="architect-plan-consolidation-preview">
         <p className="text-foreground">{preview.data.territory.sentence}</p>
+        {preview.data.siloPair && preview.data.siloPair.state !== "missing" && <p className={preview.data.siloPair.state === "fix" ? "text-foreground" : preview.data.siloPair.state === "refused" ? "text-warning" : "text-text-muted"} data-testid="architect-plan-consolidation-silo-pair" data-state={preview.data.siloPair.state}>{preview.data.siloPair.sentence}</p>}
         <p className="text-text-muted">{preview.data.summary} Cada artigo grava o ArticleDNA v1 com o que veio do Minerador (Assunto = título; principal = a keyword do plano; papel e ordem do plano; escopo como promessa); depois o SiloDNA e a SiloPage com o Pilar e a ordem do plano. Decisão sua, registrada como “consolidado do plano do Minerador”.</p>
       </div>}
       {preview.action === "chooseSwap" && <p className="mt-1 text-text-muted">Só artigo do plano com a trava Livre. As candidatas são a keyword do Assunto e as sustentações com volume medido da lista dele, das que têm mais lentes de SERP e mais volume. A prévia (grátis) mostra o que muda; gravar é a sua confirmação e gera uma nova versão.</p>}

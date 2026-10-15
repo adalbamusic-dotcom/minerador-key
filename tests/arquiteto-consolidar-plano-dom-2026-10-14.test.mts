@@ -171,3 +171,54 @@ test("Consolidar · linha que falha não derruba as outras e o Silo NÃO é cons
   assert.deepEqual(registro.pares, [], "o Silo espera as linhas");
   assert.match(screen.get("architect-plan-sheet-summary").textContent!, /1 com falha.*O Silo não foi consolidado/);
 });
+
+/*
+ * 2026-10-15 · ESTADO DE 15/10 (depois da consolidação de 03:25): os 7 artigos
+ * formados e o par SiloDNA/SiloPage v1 gravado com o tema de um SUPORTE ("melhor
+ * internet para jogos online") e a pendência na frase. A aba diz que o par não
+ * está em dia (`siloConsolidatedOf` = falso) e a etapa 1 volta; a prévia
+ * oferece "Corrigir a página do Silo (v2)" e a MESMA confirmação grava a v2 pelo
+ * núcleo de "Aplicar o plano declarado ao Silo" — nenhuma linha é regravada.
+ */
+const SETE = AZUL_REAL.map(([id]) => id);
+const PREVIA_COM_PAR = {
+  ...PREVIA,
+  lines: PREVIA.lines.map(line => ({ ...line, action: "keep", sentence: "Já formado · v1: fica como está (nenhuma versão nova).", alerts: [], articleId: line.keywordId, versionNumber: 1 })),
+  territory: { kind: "rows", territoryRef: TERRITORIO_REAL, lifecycleStatus: "consolidated", name: "Wi-Fi e fibra óptica", sentence: "Silo do plano “Wi-Fi e fibra óptica” já existe e está consolidado (SiloDNA e SiloPage gravados): fica como está." },
+  summary: "0 artigo(s) do plano para gravar (v1), 7 já formado(s). Sem SERP e sem IA; nada é pago; nada é gravado no Minerador.",
+  acceptedKeywordIds: [],
+  siloPair: { state: "fix", siloId: TERRITORIO_REAL, siloDnaVersionId: "6168ca46-d22c-49d9-95c5-94105faa89ef", decisionHash: "d".repeat(64), nextVersion: 2, changes: ["Corrigir a página do Silo: o tema “melhor internet para jogos online” é de um suporte do Silo, não do Silo; há pendência (“pendente de enriquecimento…”) dentro do texto. A versão nova grava o tema “melhor internet para jogos online” → “Wi-Fi e fibra óptica” no SiloDNA e no H1, título, introdução, chamada e seções da SiloPage, sem pendência no texto."], sentence: "Corrigir a página do Silo (v2) nesta mesma confirmação: Corrigir a página do Silo: o tema “melhor internet para jogos online” é de um suporte do Silo, não do Silo." },
+};
+
+test("estado de 15/10 · par v1 com o tema de um suporte: a etapa 1 volta, a prévia oferece 'Corrigir a página do Silo (v2)' e a confirmação grava a v2 (nenhuma linha regravada, nada no Minerador)", async () => {
+  rede();
+  const anterior = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (url === "/api/arquiteto/plan-silo/consolidate" && body?.mode === "preview") { chamadas.push({ url, method: "POST", body }); return responder(PREVIA_COM_PAR); }
+    if (url === "/api/arquiteto/silo-declared-plan") { chamadas.push({ url, method: "POST", body }); return responder({ mode: "apply", state: "APPLIED", siloDna: { versionId: "v2", versionNumber: 2 }, siloPage: { versionId: "p2", versionNumber: 2 } }); }
+    return anterior(input, init);
+  };
+  const estado = estadoAtual();
+  const articles: PlanSheetArticle[] = SETE.map(id => ({ articleId: id, versionNumber: 1, subjectKeywordId: id, principalKeywordId: id, keywordIds: [id], slug: id, siloRef: TERRITORIO_REAL, siloLabel: "Wi-Fi e fibra óptica", serpAssessed: id !== "k10" && id !== "k11" }));
+  await screen.render(comProductShell(React.createElement(MesaDoPlano, {
+    marca: MARCA_WIFI, keywords: estado.keywords, standings: estado.standings, articles, mesa: SETE.map(id => ({ id: `art:${id}`, keyword: id, subjectKeywordId: id })), filtro: AZUL_FILTRO, registro,
+    groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal, siloConsolidado: false,
+  }))); await assentar();
+  assert.equal(screen.all("architect-plan-table-row").length, 0, "os 7 são artigos da tabela: nenhuma linha 'Ainda sem ArticleDNA'");
+  assert.equal(screen.all("mesa-article-row").length, 7);
+  assert.equal(screen.get("architect-plan-stage").textContent, "Consolidar o Silo do plano", "par com o tema errado: a etapa 1 volta");
+  await screen.click("architect-plan-stage"); await assentar();
+  const par = screen.get("architect-plan-consolidation-silo-pair");
+  assert.equal(par.dataset.state, "fix");
+  assert.match(par.textContent!, /^Corrigir a página do Silo \(v2\) nesta mesma confirmação/);
+  assert.match(screen.get("architect-plan-consolidation-preview").textContent!, /já existe e está consolidado/);
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/plan-silo/consolidate" && chamada.body?.mode === "apply").length, 0, "nenhuma linha é regravada");
+  const correcao = chamadas.filter(chamada => chamada.url === "/api/arquiteto/silo-declared-plan");
+  assert.deepEqual(correcao.map(chamada => chamada.body), [{ brandId: MARCA_WIFI, siloId: TERRITORIO_REAL, mode: "apply", expectedSiloDnaVersionId: "6168ca46-d22c-49d9-95c5-94105faa89ef", decisionHash: "d".repeat(64) }], "a mesma confirmação, o hash da prévia");
+  assert.deepEqual(registro.pares, [], "o par existente não passa pela consolidação de primeira vez");
+  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /Silo: SiloDNA v2 e SiloPage v2 gravados e relidos, com o tema do Silo do plano\./);
+  semMinerador();
+});

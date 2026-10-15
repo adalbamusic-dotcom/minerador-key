@@ -213,7 +213,8 @@ test("estrutural · a planilha só chama a melhoria, a SERP por keyword e a leit
   const tela = semComentarios(ler("../modules/arquiteto/plan-article-sheet.tsx"));
   const rotas = [...tela.matchAll(/["'`](\/api\/[^"'`?$]+)/g)].map(match => match[1]).sort();
   // 2026-10-14 (noite) · + "Consolidar o Silo do plano" (rota do Arquiteto; nada no Minerador).
-  assert.deepEqual([...new Set(rotas)], ["/api/arquiteto/article-improvement", "/api/arquiteto/keyword-serp", "/api/arquiteto/plan-silo/consolidate", "/api/arquiteto/serp-subject"]);
+  // 2026-10-15 · + "Corrigir a página do Silo (vN+1)" pelo núcleo de "Aplicar o plano declarado ao Silo" (rota do Arquiteto).
+  assert.deepEqual([...new Set(rotas)], ["/api/arquiteto/article-improvement", "/api/arquiteto/keyword-serp", "/api/arquiteto/plan-silo/consolidate", "/api/arquiteto/serp-subject", "/api/arquiteto/silo-declared-plan"]);
   assert.doesNotMatch(tela, /\/api\/minerador/);
   assert.doesNotMatch(tela, /measureKeywordVolume|runKeywordLogicWithCore|importSubjectDiscoveryWithCore|applyKeywordDecisionEntries|approveNewKeywords|keywords\/delete/);
   assert.match(tela, /onlyMeasuredVolume: true/, "o servidor confere o volume no banco antes de pagar");
