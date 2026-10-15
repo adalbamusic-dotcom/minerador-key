@@ -7,7 +7,7 @@ import { buildArchitectureWorkingProposal, resolveKeywordDnaSignals } from "../l
 import type { ArchitectureAnalysis, ClusterAnalysis } from "../lib/arquiteto/architecture-analysis.ts";
 import { buildPlanSheetRows, planArticleFlowSteps, planArticleKeywordIds, planArticleVisibleSteps, planReinforcementDetail, planSheetPreviewLines, type PlanSheetArticle } from "../lib/arquiteto/plan-article-sheet.ts";
 import { planConsolidationLines, planSiloDecisionHash } from "../lib/arquiteto/plan-consolidation.ts";
-import { articleEditorialPending, isEditorialPending, planEditorialLineChanges, planEditorialLineSentence, EDITORIAL_PENDING_TEXT } from "../lib/arquiteto/plan-editorial-line.ts";
+import { articleEditorialAwaitsAudienceOnly, articleEditorialPending, isEditorialPending, planEditorialLineChanges, planEditorialLineSentence, EDITORIAL_PENDING_TEXT } from "../lib/arquiteto/plan-editorial-line.ts";
 import { readArchitectSubjectStandings } from "../lib/arquiteto/declared-subject.ts";
 import { AZUL, GRUPOS, MARCA_WIFI } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import { AZUL_REAL, grupoDaKeywordReal, mesaWifiReal } from "./arquiteto-uma-lista-so-fixtures.mts";
@@ -189,6 +189,22 @@ test("3 · as etapas da aba Artigos são só de artigo: sem Silo decidido tudo e
   assert.deepEqual([semPagina[3].state, /aba Silos/.test(semPagina[3].reason)], ["blocked", true], "links esperam a página do Silo (aba Silos)");
   const links = planArticleFlowSteps({ rows: linhasDoPlano(formados(SETE)), silo: { ready: true, pairCurrent: true, sentence: "" } });
   assert.equal(links[3].state, "current");
+});
+
+test("3 · caso WifiConecta (15/10 noite): só o Público espera o BrandDNA — a etapa 3 não trava os links e continua clicável para rodar de novo", () => {
+  const pend = EDITORIAL_PENDING_TEXT;
+  const soPublico = { angle: "Ângulo gravado.", cta: "CTA gravado.", problem: "Problema gravado.", audience: pend };
+  assert.equal(articleEditorialAwaitsAudienceOnly(soPublico), true);
+  assert.equal(articleEditorialAwaitsAudienceOnly({ ...soPublico, angle: pend }), false, "outro campo pendente: a etapa 3 é a atual");
+  assert.equal(articleEditorialAwaitsAudienceOnly({ ...soPublico, audience: "Famílias" }), false);
+  const fluxo = planArticleFlowSteps({ rows: linhasDoPlano(formados(SETE, { audiencePending: true })), silo: { ready: true, pairCurrent: true, sentence: "" } });
+  assert.deepEqual(fluxo.map(step => step.state), ["done", "done", "done", "current"], "os links internos seguem");
+  assert.equal(fluxo[2].rerun, true);
+  assert.match(fluxo[2].reason, /espera o BrandDNA aprovado: aprove em Marca e rode “3 · Linha editorial” de novo\./);
+  assert.match(fluxo[3].reason, /espera o BrandDNA aprovado/);
+  assert.deepEqual(planArticleVisibleSteps(fluxo, 3).map(step => step.id), [3, 4], "a 3 fica visível para rodar de novo; a 4 é a atual");
+  const barra = semComentarios(ler("../modules/arquiteto/articles-formation-bar.tsx"));
+  assert.match(barra, /disabled=\{bloqueado \|\| \(step\.state !== "current" && step\.rerun !== true\)\}/);
 });
 
 /* -------------------------------------------- 4 · a linha editorial */

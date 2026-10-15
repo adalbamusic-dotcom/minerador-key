@@ -365,7 +365,7 @@ import { MineradorImportDialog } from "./minerador-import-dialog";
 import { mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
 import { initialArquitetoImportColor, MINERADOR_PACKAGE_UPDATES_DETAIL, mineradorPackageUpdatesOf, mineradorPackageUpdatesSentence } from "@/lib/arquiteto/minerador-import";
 import { declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, planGroupTerritory, planSiloCreationRefusal, planSiloHeadKeywordIds, planSiloHeadSentence, planSiloStatus, type DeclaredPlanGroupView, type RecreatePlanSiloLine } from "@/lib/arquiteto/declared-plan-silo";
-import { articleEditorialNeedsLine } from "@/lib/arquiteto/plan-editorial-line";
+import { articleEditorialAwaitsAudienceOnly, articleEditorialNeedsLine } from "@/lib/arquiteto/plan-editorial-line";
 import { PlanSiloBar, type PlanSiloBarEntry } from "./plan-silo-bar";
 import { architectureConfirmBlocker, classifyProposalAssignment, proposalAssignmentStatusLabel, type ProposalAssignmentState } from "@/lib/arquiteto/proposal-confirmability";
 import { ArticleSubjectLine, articleSubjectPhraseOf } from "@/components/editorial/article-subject-line";
@@ -7296,7 +7296,9 @@ export default function ArquitetoPage() {
       serpAssessed: Boolean(version.payload.serpAssessmentRef),
       // 2026-10-15 · etapa 3: ângulo, CTA, problema ou público ainda pendente no DNA
       // (noite: ou o texto da regra antiga a corrigir — enum cru no ângulo, objetivo do plano no CTA).
-      editorialPending: articleEditorialNeedsLine(version.payload),
+      editorialPending: articleEditorialNeedsLine(version.payload) && !articleEditorialAwaitsAudienceOnly(version.payload),
+      // 2026-10-15 (noite) · só o Público falta (espera o BrandDNA): aviso, não trava a barra.
+      audiencePending: articleEditorialAwaitsAudienceOnly(version.payload),
     };
   }), [acceptedArticleDnas, acceptedSiloDnas, articleSiloViews, arquitetoGroups.articleGroupById, arquitetoGroups.groupById, keywordLabelById]);
   const planSheetRadarIds = useMemo(() => new Set(radarItems.map(item => String(item.articleId))), [radarItems]);

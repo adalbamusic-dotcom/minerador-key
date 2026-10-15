@@ -98,6 +98,19 @@ export function articleEditorialNeedsLine(payload: Partial<Record<EditorialLineF
   return articleEditorialPending(payload) || isLegacyEditorialAngle(payload.angle) || isLegacyEditorialCta(payload.cta, [typeof payload.brandObjective === "string" ? payload.brandObjective : null]);
 }
 
+/**
+ * 2026-10-15 (noite) · só o Público falta, e ele depende do BrandDNA aprovado
+ * (a regra não inventa público). Caso real WifiConecta: sem BrandDNA, a etapa 3
+ * ficava "pendente" para sempre e travava os links internos. Agora isso não
+ * prende a barra: vira aviso "aprove o BrandDNA em Marca" e a etapa 3 fica
+ * disponível para rodar de novo.
+ */
+export function articleEditorialAwaitsAudienceOnly(payload: Partial<Record<EditorialLineField, unknown>> | null | undefined): boolean {
+  if (!payload || !isEditorialPending(payload.audience)) return false;
+  const semPublico = { ...payload, audience: "definido" };
+  return !articleEditorialNeedsLine(semPublico);
+}
+
 /** A intenção da SERP com o rótulo pt-BR da plataforma, em minúsculas; desconhecida = nada. */
 export function editorialIntentLabel(value: string | null | undefined): string | null {
   const chave = normalizeIntentKey(value);

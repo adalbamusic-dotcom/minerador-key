@@ -95,7 +95,7 @@ export function ArticlesFormationBar({
           key={step.id}
           type="button"
           onClick={() => planSheet.runStage?.(step.id)}
-          disabled={bloqueado || step.state !== "current"}
+          disabled={bloqueado || (step.state !== "current" && step.rerun !== true)}
           title={step.reason}
           data-testid={step.state === "current" ? "architect-plan-stage" : "architect-plan-stage-next"}
           data-stage={step.id}
