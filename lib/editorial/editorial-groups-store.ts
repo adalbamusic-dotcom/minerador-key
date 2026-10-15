@@ -460,21 +460,45 @@ export async function linkEditorialGroupSilo(client: Client, input: {
   if (!lido.ok) return lido;
   if (!lido.group) return { ok: false, code: "GROUP_NOT_FOUND", message: EDITORIAL_GROUP_REFUSAL_MESSAGES.GROUP_NOT_FOUND };
   if (lido.group.siloId === input.siloId) return { ok: true, changed: false };
-  if (lido.group.siloId) return { ok: false, code: "GROUP_SILO_TAKEN", message: `O grupo já está ligado ao Silo ${lido.group.siloId}.` };
-  const { data, error } = await client.from("editorial_groups").update({
+  /*
+   * 2026-10-15 (caso WifiConecta, azul) · VÍNCULO VELHO. O grupo apontava para
+   * `territory:09d9b92d…`, que não existe mais (sem território, sem SiloDNA,
+   * sem SiloPage), e cada passada avisava "O grupo já está ligado ao Silo …".
+   * Religar é permitido SÓ quando o Silo antigo sumiu de vez; Silo que existe
+   * continua não sendo trocado (`GROUP_SILO_TAKEN`).
+   */
+  const antigo = lido.group.siloId;
+  if (antigo && await editorialGroupSiloStillExists(client, input.brandId, antigo)) {
+    return { ok: false, code: "GROUP_SILO_TAKEN", message: `O grupo já está ligado ao Silo ${antigo}.` };
+  }
+  const update = client.from("editorial_groups").update({
     silo_id: input.siloId,
     lock_version: lido.group.lockVersion + 1,
     updated_by: input.actorUserId,
     updated_at: new Date().toISOString(),
-  }).eq("marca_id", input.brandId).eq("id", lido.group.id).eq("lock_version", lido.group.lockVersion).is("silo_id", null).select("id");
+  }).eq("marca_id", input.brandId).eq("id", lido.group.id).eq("lock_version", lido.group.lockVersion);
+  const { data, error } = await (antigo ? update.eq("silo_id", antigo) : update.is("silo_id", null)).select("id");
   if (error) {
     if (isEditorialGroupsSchemaMissing(error)) return groupsUnavailable();
     if (error.code === "23505") return { ok: false, code: "GROUP_SILO_TAKEN", message: "Outro grupo desta marca já está ligado a este Silo." };
     throw new EditorialGroupsPersistenceError(error, "ligar o Silo aos");
   }
   if (!Array.isArray(data) || data.length !== 1) return { ok: false, code: "GROUP_SILO_TAKEN", message: "O grupo mudou em outra sessão; recarregue." };
-  await appendEditorialGroupEvents(client, { brandId: input.brandId, actorUserId: input.actorUserId, events: [{ groupId: lido.group.id, eventType: "silo_linked", payload: { siloId: input.siloId } }] });
+  await appendEditorialGroupEvents(client, { brandId: input.brandId, actorUserId: input.actorUserId, events: [{ groupId: lido.group.id, eventType: "silo_linked", payload: antigo ? { siloId: input.siloId, replacedMissingSiloId: antigo } : { siloId: input.siloId } }] });
   return { ok: true, changed: true };
+}
+
+/**
+ * O Silo ligado ao grupo ainda existe? Território (item de workflow), SiloDNA
+ * ou SiloPage desta marca — qualquer um basta. Na dúvida (erro de leitura),
+ * responde que existe: melhor manter o vínculo do que trocar um Silo vivo.
+ */
+export async function editorialGroupSiloStillExists(client: Client, brandId: string, siloId: string): Promise<boolean> {
+  const territorio = await client.from("editorial_workflow_items").select("id").eq("marca_id", brandId).eq("subject_type", "territory").eq("subject_id", siloId).limit(1);
+  if (territorio.error || (Array.isArray(territorio.data) && territorio.data.length)) return true;
+  const artefatos = await client.from("editorial_artifact_versions").select("version_id").eq("marca_id", brandId).in("artifact_type", ["silo_dna", "silo_page"]).in("entity_id", [siloId, `silo-page:${siloId}`]).limit(1);
+  if (artefatos.error || (Array.isArray(artefatos.data) && artefatos.data.length)) return true;
+  return false;
 }
 
 /* ========================================================================== */

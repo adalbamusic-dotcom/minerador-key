@@ -71,6 +71,40 @@ export function reservedForSiloPage(input: {
   return reservadas;
 }
 
+/**
+ * 2026-10-15 (caso WifiConecta, "corpo estranho") · A RESERVA DA MESA, inteira.
+ *
+ * Junta o que estava espalhado na aba: a hipótese léxica, a cabeça DECLARADA
+ * Silo no Minerador e a identidade de cada Silo decidido por humano. A
+ * novidade é a última linha: keyword que o PLANO declara como artigo (Pilar ou
+ * Suporte) nunca fica reservada pela identidade do Silo nem pela hipótese
+ * léxica. Foi assim que "melhor internet para jogos online" — o 5º suporte do
+ * plano, gravado como entidade central do território pelo "Processar
+ * arquitetura" antigo — sumiu da tabela e voltou como "Artigo do plano ·
+ * Ainda sem ArticleDNA" com o DNA aprovado ao lado. A cabeça declarada Silo
+ * (decisão humana no Minerador) continua reservada.
+ */
+export function reservedSiloHeadKeywordIds(input: {
+  lexicalHeadIds: Iterable<string>;
+  declaredSiloHeadIds: Iterable<string>;
+  territories: readonly { territoryRef: string; humanDecided: boolean; siloPage: SiloPageIdentity }[];
+  keywords: readonly { keywordId: string; text: string; territoryRef: string | null }[];
+  planArticleKeywordIds?: ReadonlySet<string>;
+}): Set<string> {
+  const doPlano = input.planArticleKeywordIds ?? new Set<string>();
+  const reservadas = new Set([...input.lexicalHeadIds].filter(id => !doPlano.has(id)));
+  for (const id of input.declaredSiloHeadIds) reservadas.add(id);
+  for (const territorio of input.territories) {
+    if (!territorio.humanDecided) continue;
+    const doSilo = reservedForSiloPage({
+      siloPage: territorio.siloPage,
+      keywords: input.keywords.filter(keyword => keyword.territoryRef === territorio.territoryRef).map(keyword => ({ keywordId: keyword.keywordId, text: keyword.text })),
+    });
+    for (const keywordId of doSilo) if (!doPlano.has(keywordId)) reservadas.add(keywordId);
+  }
+  return reservadas;
+}
+
 /* ------------------------------------------- §6 · colisão de endereço */
 
 export type SlugCollision = {

@@ -20,6 +20,8 @@ import { createHash } from "node:crypto";
 import { readArchitectSubjectStanding, suggestSubjectSupport, type ArchitectSubjectStanding } from "./declared-subject.ts";
 import { declaredPlanSubjectList } from "./declared-plan-formation.ts";
 import { planSheetArticleConflict, planSheetLockOf, readPlanRowVolume, type PlanSheetArticle } from "./plan-article-sheet.ts";
+import { PLAN_SILO_PAIR_FIX_LABEL } from "./silo-plan-identity.ts";
+export { PLAN_SILO_PAIR_FIX_LABEL };
 
 type RecordLike = Record<string, unknown>;
 
@@ -62,7 +64,12 @@ export type PlanTerritoryChoice =
 
 export type PlanTerritoryView = { territoryRef: string; lifecycleStatus: string; name?: string | null; slugs: ReadonlyArray<string | null | undefined> };
 
-const VIVOS = new Set(["candidate", "confirmed"]);
+/*
+ * 2026-10-15 (caso WifiConecta) · o Silo onde as keywords do plano já estão
+ * conta também CONSOLIDADO: sem isto a prévia caía na regra do envio (que só
+ * vê candidato/confirmado) e dizia "será criado" sobre um Silo que existe.
+ */
+const VIVOS = new Set(["candidate", "confirmed", "consolidated"]);
 
 /**
  * QUAL É O SILO DO PLANO. Primeiro onde as keywords do plano JÁ estão (caso
@@ -93,6 +100,7 @@ export function planTerritoryChoiceSentence(choice: PlanTerritoryChoice, siloNam
     case "rows":
     case "linked":
     case "slug":
+      if (choice.lifecycleStatus === "consolidated") return `Silo do plano “${choice.name || siloName}” já existe e está consolidado (SiloDNA e SiloPage gravados): fica como está.`;
       return choice.lifecycleStatus === "confirmed"
         ? `Silo do plano “${choice.name || siloName}” já existe e está confirmado: fica como está.`
         : `Silo do plano “${choice.name || siloName}” existe como candidato: será confirmado (decisão sua nesta confirmação).`;
@@ -191,6 +199,41 @@ export function planConsolidationDecisionHash(input: { groupId: string; planVers
     }),
   };
   return createHash("sha256").update(JSON.stringify(corpo)).digest("hex");
+}
+
+/**
+ * 2026-10-15 (caso WifiConecta) · O PAR DO SILO NA PRÉVIA. Sem SiloDNA ainda:
+ * a consolidação de sempre grava o v1 depois das linhas. Com o par gravado, a
+ * prévia de "Aplicar o plano declarado ao Silo" (o mesmo núcleo, mesma
+ * releitura) diz se há mudança real: tema de um suporte, pendência no texto,
+ * Pilar ou ordem fora do plano → "Corrigir a página do Silo (vN+1)", gravado
+ * na MESMA confirmação; sem mudança, nada novo (versões consolidadas são
+ * imutáveis: o conserto é sempre a versão seguinte).
+ */
+export type PlanSiloPairStep =
+  | { state: "missing"; siloId: null; sentence: string }
+  | { state: "current"; siloId: string; sentence: string }
+  | { state: "fix"; siloId: string; siloDnaVersionId: string; decisionHash: string; nextVersion: number; changes: string[]; sentence: string }
+  | { state: "refused"; siloId: string; sentence: string };
+
+
+export function planSiloPairStep(input: {
+  siloId: string | null;
+  currentVersion: number | null;
+  declaredPlan: { state: "READY" | "UNCHANGED" | "REFUSED"; changes?: readonly string[]; message?: string; decisionHash?: string; siloDnaVersionId?: string } | null;
+}): PlanSiloPairStep {
+  if (!input.siloId) return { state: "missing", siloId: null, sentence: "O SiloDNA e a SiloPage do plano são gravados depois das linhas (Pilar e ordem do plano)." };
+  const previa = input.declaredPlan;
+  if (!previa || previa.state === "REFUSED") return { state: "refused", siloId: input.siloId, sentence: `A página do Silo fica como está: ${previa?.message ?? "a prévia do plano no Silo não pôde ser lida."}` };
+  if (previa.state === "UNCHANGED" || !previa.decisionHash || !previa.siloDnaVersionId) {
+    return { state: "current", siloId: input.siloId, sentence: `SiloDNA e SiloPage${input.currentVersion ? ` v${input.currentVersion}` : ""} já seguem o plano: nenhuma versão nova.` };
+  }
+  const proxima = (input.currentVersion ?? 0) + 1;
+  const mudancas = [...(previa.changes ?? [])];
+  return {
+    state: "fix", siloId: input.siloId, siloDnaVersionId: previa.siloDnaVersionId, decisionHash: previa.decisionHash, nextVersion: proxima, changes: mudancas,
+    sentence: `${PLAN_SILO_PAIR_FIX_LABEL} (v${proxima}) nesta mesma confirmação: ${mudancas.join(" ")}`,
+  };
 }
 
 /** O resumo da prévia numa frase. */

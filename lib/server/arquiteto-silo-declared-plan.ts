@@ -19,6 +19,7 @@ import { PipelineRuntimeError } from "./pipeline-runtime";
 import { persistSiloPairAtomic } from "./arquiteto-persistence";
 import { loadCanonicalArquitetoWorkspace } from "./arquiteto-workspace";
 import { linkDeclaredPlanGroupToSilo, type SiloGroupLinkOutcome } from "./arquiteto-silo-group-link";
+import { listTerritoryWorkflowItems, updateTerritoryWorkflowItem } from "./arquiteto-territory-store";
 import { reworkGuardPort, type ReworkGuardPort, type ReworkOperation } from "./rework-guard";
 import { operationFingerprint, reworkView, type ReworkView } from "@/lib/editorial/rework-guard";
 
@@ -56,6 +57,8 @@ export type SiloDeclaredPlanInputs = {
   statuses: Array<{ versionId: string; status: string }>;
   entries: DeclaredSiloPlanEntry[];
   groupPlans: Map<string, DeclaredSiloPlan>;
+  /** 2026-10-15 · aditivo: a versão vigente do plano de cada grupo (a que se diz). */
+  groupPlanVersions?: Map<string, number>;
 };
 
 export type SiloDeclaredPlanDeps = {
@@ -70,6 +73,12 @@ export type SiloDeclaredPlanDeps = {
   linkGroup: (input: { siloId: string; articleVersionIds: string[] }) => Promise<SiloGroupLinkOutcome>;
   /** F5 — a guarda de retrabalho (linha `operation_ledger`); ausente = sem guarda. */
   rework?: ReworkGuardPort;
+  /**
+   * 2026-10-15 (caso WifiConecta) · aditivo e nunca fatal: depois da releitura,
+   * o tema do TERRITÓRIO acompanha o tema corrigido do SiloDNA (o território
+   * guardava o de um suporte e a consolidação o copiava). Ausente = nada.
+   */
+  alignTerritory?: (input: { territoryRef: string; centralEntity: string }) => Promise<void>;
 };
 
 export type SiloDeclaredPlanPreview = {
@@ -123,6 +132,7 @@ export async function handleSiloDeclaredPlan(deps: SiloDeclaredPlanDeps, request
     statuses: inputs.statuses,
     entries: inputs.entries,
     groupPlans: inputs.groupPlans,
+    ...(inputs.groupPlanVersions ? { groupPlanVersions: inputs.groupPlanVersions } : {}),
     expectedSiloDnaVersionId: request.expectedSiloDnaVersionId ?? null,
   });
   const decisionHash = plan.ok ? hash({
@@ -202,6 +212,10 @@ export async function handleSiloDeclaredPlan(deps: SiloDeclaredPlanDeps, request
     throw new PipelineRuntimeError("QUERY_FAILURE", `A aplicação do plano não foi confirmada pela releitura: ${divergencias.join("; ")}.`, 503);
   }
 
+  // 2026-10-15 · o tema do território acompanha o tema corrigido (aditivo; nunca derruba a gravação).
+  if (deps.alignTerritory && plan.nextSiloDna.territoryRef && plan.nextSiloDna.centralEntity !== plan.current.siloDna.payload.centralEntity) {
+    await deps.alignTerritory({ territoryRef: plan.nextSiloDna.territoryRef, centralEntity: plan.nextSiloDna.centralEntity }).catch(() => undefined);
+  }
   // Depois do readback, nunca antes: o vínculo do grupo é aditivo e nunca derruba a gravação.
   const groupLink = await deps.linkGroup({ siloId: plan.siloId, articleVersionIds: gravado.siloDna.payload.articleReferences.map(reference => reference.articleDnaVersionId) });
   if (operation && deps.rework) {
@@ -241,9 +255,10 @@ export function siloDeclaredPlanRuntime(context: PipelineContext): SiloDeclaredP
         ...declaredSubjectAuthorship(linhaPorId.get(standing.keywordId) || {}),
       }));
       const groupPlans = new Map<string, DeclaredSiloPlan>();
+      const groupPlanVersions = new Map<string, number>();
       if (planos.ok) for (const group of planos.groups) {
         const plano = readDeclaredSiloPlan(group.plan);
-        if (plano) groupPlans.set(group.id, plano);
+        if (plano) { groupPlans.set(group.id, plano); groupPlanVersions.set(group.id, group.planVersion); }
       }
       return {
         articleDnas: workspace.articleDnas,
@@ -252,6 +267,7 @@ export function siloDeclaredPlanRuntime(context: PipelineContext): SiloDeclaredP
         statuses: workspace.statuses,
         entries,
         groupPlans,
+        groupPlanVersions,
       };
     },
     persistPair: async (siloDna, siloPage, statuses) => {
@@ -260,5 +276,10 @@ export function siloDeclaredPlanRuntime(context: PipelineContext): SiloDeclaredP
     },
     linkGroup: input => linkDeclaredPlanGroupToSilo(context, input),
     rework: reworkGuardPort(context),
+    alignTerritory: async ({ territoryRef, centralEntity }) => {
+      const territorio = (await listTerritoryWorkflowItems(context)).find(item => item.territoryRef === territoryRef);
+      if (!territorio || territorio.territory.centralEntity === centralEntity) return;
+      await updateTerritoryWorkflowItem(context, territoryRef, territorio.lockVersion, { ...(territorio.territory as unknown as Record<string, unknown>), centralEntity });
+    },
   };
 }

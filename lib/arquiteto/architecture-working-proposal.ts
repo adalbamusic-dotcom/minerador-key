@@ -293,7 +293,17 @@ export function buildArchitectureWorkingProposal(input: {
    * keywords do grupo. Elas seguem o plano; a análise automática não as
    * reorganiza. Ausente = a proposta de antes.
    */
-  declaredPlanGroups?: readonly { groupId: string; label: string; siloName: string; siloSlug: string | null; territoryRef: string | null; keywordIds: readonly string[] }[];
+  declaredPlanGroups?: readonly {
+    groupId: string; label: string; siloName: string; siloSlug: string | null; territoryRef: string | null; keywordIds: readonly string[];
+    /**
+     * 2026-10-15 (caso WifiConecta) · aditivo: o Silo do plano que JÁ existe
+     * (`planGroupTerritory`: onde as keywords do plano estão, o ligado ao
+     * grupo ou o de mesmo slug — consolidado incluído). Presente e fora do
+     * acervo comparável (consolidado), ele é REUSADO: o plano não ganha
+     * "Silo proposto" de novo. Não atrai keyword de fora pelo léxico.
+     */
+    territory?: { name: string | null; slug: string | null } | null;
+  }[];
 }): ArchitectureWorkingProposal {
   const dnaPorKeyword = new Map(input.keywords.map(item => [item.keywordId, item]));
   const emGrupoComPlano = new Set((input.declaredPlanGroups || []).flatMap(grupo => grupo.keywordIds));
@@ -562,12 +572,30 @@ export function buildArchitectureWorkingProposal(input: {
     if (!membros.length) continue;
     const slug = grupo.siloSlug || input.slugOf(grupo.siloName);
     let key = (grupo.territoryRef && silos.has(grupo.territoryRef) ? grupo.territoryRef : null) ?? slugsExistentes.get(slug) ?? null;
+    if (!key && grupo.territoryRef && grupo.territory) {
+      // 2026-10-15 · o Silo do plano já existe (consolidado, fora do acervo comparável): é ele — nada de "Silo proposto" de novo.
+      key = grupo.territoryRef;
+      silos.set(key, {
+        key, territoryRef: key, name: grupo.territory.name || grupo.siloName, slug: grupo.territory.slug || slug,
+        seedKeywordId: null,
+        primaryKeywordDeclaration: null,
+        source: "reused",
+        reason: `Silo do plano declarado (grupo ${grupo.label}), já existente: as keywords do plano seguem nele; a análise automática não o refaz.`,
+      });
+    }
     if (!key) {
       key = `proposed:${slug}`;
       if (!silos.has(key)) {
         silos.set(key, {
           key, territoryRef: null, name: grupo.siloName, slug,
-          seedKeywordId: membros[0],
+          /*
+           * 2026-10-15 (caso WifiConecta) · SEM SEMENTE. Era `membros[0]` — a
+           * primeira keyword do grupo, na ordem em que a mesa as lia — e o
+           * texto dela virava a entidade central do território ("melhor
+           * internet para jogos online", um suporte). O tema do Silo do plano
+           * é o NOME do Silo do plano (a identidade cai em `silo.name`).
+           */
+          seedKeywordId: null,
           primaryKeywordDeclaration: null,
           source: "proposed",
           reason: `Silo do plano declarado (grupo ${grupo.label}): nome e slug vêm do plano; a análise automática não reorganiza as keywords dele.`,

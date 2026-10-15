@@ -62,6 +62,35 @@ export function choosePlanSiloTerritory(input: {
   return { kind: "create" };
 }
 
+/**
+ * 2026-10-15 (caso WifiConecta) · O SILO DO PLANO QUE JÁ EXISTE, para
+ * "Processar arquitetura" — consolidado incluído. `editorial_groups.silo_id`
+ * pode apontar para um território que não existe mais (o azul apontava para
+ * `territory:09d9b92d…`), e o Silo consolidado fica fora do acervo que a
+ * análise compara: sem isto, o plano ganhava "Silo proposto" a cada passada.
+ * Ordem: onde as keywords do plano JÁ estão (um Silo só); o ligado ao grupo;
+ * o de mesmo slug (o do plano ou o do nome; slugs propostos incluídos).
+ * Desfeito ou arquivado nunca volta por aqui. Nenhum = `null` (proposta).
+ */
+export function planGroupTerritory(input: {
+  plan: { siloName: string; siloSlug: string | null };
+  linkedTerritoryRef: string | null;
+  keywordTerritoryRefs: ReadonlyArray<string | null | undefined>;
+  territories: readonly PlanSiloTerritoryView[];
+  slugOf: (text: string) => string;
+}): { territoryRef: string; name: string | null; slug: string | null } | null {
+  const ativos = input.territories.filter(territory => territory.lifecycleStatus !== "rejected" && territory.lifecycleStatus !== "archived");
+  const porRef = new Map(ativos.map(territory => [territory.territoryRef, territory]));
+  const vista = (territory: PlanSiloTerritoryView) => ({ territoryRef: territory.territoryRef, name: territory.name ?? null, slug: territory.slugs.find((item): item is string => Boolean(item)) ?? null });
+  const ondeEstao = [...new Set(input.keywordTerritoryRefs.filter((ref): ref is string => typeof ref === "string" && porRef.has(ref)))];
+  if (ondeEstao.length === 1) return vista(porRef.get(ondeEstao[0])!);
+  if (input.linkedTerritoryRef && porRef.has(input.linkedTerritoryRef) && (!ondeEstao.length || ondeEstao.includes(input.linkedTerritoryRef))) return vista(porRef.get(input.linkedTerritoryRef)!);
+  if (ondeEstao.length > 1) return null;
+  const slugs = new Set([input.plan.siloSlug, input.slugOf(input.plan.siloName)].filter((item): item is string => Boolean(item)));
+  const mesmoSlug = ativos.find(territory => territory.slugs.some(item => item && slugs.has(item)));
+  return mesmoSlug ? vista(mesmoSlug) : null;
+}
+
 /** O que a regra precisa do grupo com plano. */
 export type DeclaredPlanGroupView = { groupId: string; groupLabel: string; siloName: string; siloSlug: string | null; linkedTerritoryRef: string | null };
 

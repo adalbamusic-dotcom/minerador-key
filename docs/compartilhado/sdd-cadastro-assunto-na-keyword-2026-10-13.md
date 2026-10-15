@@ -420,6 +420,8 @@ posições, tudo confuso". Autorização do dono pela coordenação (mesma frent
 
 **Limites:** a consolidação de um Silo que JÁ tem o par canônico e ganha artigo novo depende do caminho de edição de sempre (`consolidateSilos` recusa cópia de trabalho só-leitura; "Aplicar o plano declarado ao Silo" segue valendo); artigo sem volume e Livre sem sustentação com volume fica sem parecer de SERP (a etapa 3 avisa; o Radar pede a SERP); o vínculo `editorial_groups.silo_id` velho da WifiConecta não é reescrito (a store recusa trocar Silo ligado; a consolidação acha o Silo pelas keywords). **Validado manualmente: não** (homologação do dono).
 
+**Continuação (2026-10-15, mesma frente, sem migration):** o "corpo estranho" (jogos online fora da tabela) vinha da entidade central do território gravada a partir da 1ª keyword do grupo pelo "Processar arquitetura" (semente do Silo proposto do plano) e da reserva da SiloPage sobre ela; artigo do plano nunca é mais reservado e o Silo proposto do plano não tem semente. O tema do SiloDNA/SiloPage do plano nunca é o de um suporte nem leva pendência em frase: "Consolidar o Silo do plano" oferece "Corrigir a página do Silo (vN+1)" pelo núcleo de "Aplicar o plano declarado ao Silo", na mesma confirmação. O limite acima do `silo_id` velho caiu: a store religa quando o Silo antigo não existe mais (sem território, SiloDNA ou SiloPage) e continua recusando trocar Silo vivo. "Processar arquitetura" reconhece o Silo do plano consolidado (nada de "Silo proposto"). Detalhe em `docs/04-arquiteto/estado-atual.md`.
+
 ## 12. Decisões pendentes do dono
 
 - Volume medido **= 0** conta como "sem volume" (livre). Recomendação: sim

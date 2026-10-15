@@ -3,9 +3,10 @@ import "server-only";
 import { choosePlanSiloTerritory, confirmedTerritoryDraft, declaredPlanSiloDraft, declaredPlanSiloNote } from "@/lib/arquiteto/declared-plan-silo";
 import { normalizeManualSiloPageSlug } from "@/lib/arquiteto/manual-silo";
 import {
-  choosePlanConsolidationTerritory, planConsolidationDecisionHash, planConsolidationLines, planConsolidationSummary, planTerritoryChoiceSentence,
-  type PlanConsolidationLine, type PlanTerritoryChoice,
+  choosePlanConsolidationTerritory, planConsolidationDecisionHash, planConsolidationLines, planConsolidationSummary, planSiloPairStep, planTerritoryChoiceSentence,
+  type PlanConsolidationLine, type PlanSiloPairStep, type PlanTerritoryChoice,
 } from "@/lib/arquiteto/plan-consolidation";
+import type { SiloDeclaredPlanResult } from "./arquiteto-silo-declared-plan";
 import { EDITORIAL_GROUP_COLOR_LABELS } from "@/lib/editorial/editorial-groups";
 import { linkEditorialGroupSilo, listEditorialGroupPlans, type EditorialGroupPlanRow } from "@/lib/editorial/editorial-groups-store";
 import { readDeclaredSiloPlan } from "@/lib/minerador/declared-plan";
@@ -59,6 +60,14 @@ export type PlanConsolidationPreview = {
   /** Linhas aceitas pela confirmação: as que vão gravar. */
   acceptedKeywordIds: string[];
   decisionHash: string;
+  /**
+   * 2026-10-15 (caso WifiConecta) · aditivo: o par SiloDNA + SiloPage do Silo
+   * do plano — falta (grava o v1 depois das linhas), em dia, ou "Corrigir a
+   * página do Silo (vN+1)" pelo núcleo de "Aplicar o plano declarado ao Silo"
+   * (o `decisionHash` dele vai junto; a tela grava na mesma confirmação). Só
+   * a prévia lê isto; aplicar uma linha não depende dele.
+   */
+  siloPair?: PlanSiloPairStep;
 };
 
 export type PlanConsolidationApplyResult = {
@@ -71,8 +80,17 @@ export type PlanConsolidationApplyResult = {
   preview: PlanConsolidationPreview;
 };
 
-/** Injetáveis (testes): o relógio, a leitura dos grupos com plano, as entradas da mesa e a gravação. */
-type Deps = { now?: () => string; groupPlans?: (context: PipelineContext) => Promise<EditorialGroupPlanRow[]>; inputs?: (context: PipelineContext) => Promise<PlanConsolidationInputs>; write?: typeof writePlanArticleFromPlan };
+/** Injetáveis (testes): o relógio, a leitura dos grupos com plano, as entradas da mesa, a gravação e a prévia do plano no Silo. */
+type Deps = {
+  now?: () => string;
+  groupPlans?: (context: PipelineContext) => Promise<EditorialGroupPlanRow[]>;
+  inputs?: (context: PipelineContext) => Promise<PlanConsolidationInputs>;
+  write?: typeof writePlanArticleFromPlan;
+  /** 2026-10-15 · a prévia de "Aplicar o plano declarado ao Silo" (padrão: o núcleo real, só leitura). */
+  siloPlanPreview?: (context: PipelineContext, siloId: string) => Promise<SiloDeclaredPlanResult>;
+  /** 2026-10-15 · o vínculo do grupo com o Silo (padrão: `linkEditorialGroupSilo`, aditivo e nunca fatal). */
+  linkGroup?: (context: PipelineContext, input: { groupId: string; siloId: string }) => Promise<unknown>;
+};
 
 async function readGroup(context: PipelineContext, groupId: string, deps: Deps) {
   let grupos: EditorialGroupPlanRow[];
@@ -157,11 +175,37 @@ async function buildPreview(context: PipelineContext, groupId: string, deps: Dep
 }
 
 export async function previewPlanConsolidation(context: PipelineContext, groupId: string, deps: Deps = {}): Promise<PlanConsolidationPreview> {
-  return (await buildPreview(context, groupId, deps)).preview;
+  const lido = await buildPreview(context, groupId, deps);
+  // 2026-10-15 · o par do Silo do plano: falta, em dia, ou "Corrigir a página do Silo (vN+1)" (o núcleo de "Aplicar o plano declarado ao Silo").
+  const territoryRef = "territoryRef" in lido.preview.territory ? lido.preview.territory.territoryRef : null;
+  const siloDna = territoryRef
+    ? lido.inputs.workspace.siloDnas
+      .filter(version => version.payload.territoryRef === territoryRef || version.payload.siloId === territoryRef)
+      .sort((a, b) => b.versionNumber - a.versionNumber)[0] ?? null
+    : null;
+  let previa: SiloDeclaredPlanResult | null = null;
+  if (siloDna) {
+    // Import tardio: só a prévia precisa do núcleo do plano no Silo (e a gravação do par não entra no grafo de quem só aplica linhas).
+    const padrao = async (ctx: PipelineContext, siloId: string) => {
+      const { handleSiloDeclaredPlan, siloDeclaredPlanRuntime } = await import("./arquiteto-silo-declared-plan");
+      return handleSiloDeclaredPlan(siloDeclaredPlanRuntime(ctx), { siloId, mode: "preview" });
+    };
+    try { previa = await (deps.siloPlanPreview ?? padrao)(context, siloDna.payload.siloId); }
+    catch { previa = null; }
+  }
+  const siloPair = planSiloPairStep({
+    siloId: siloDna?.payload.siloId ?? null,
+    currentVersion: siloDna?.versionNumber ?? null,
+    declaredPlan: previa === null ? null
+      : previa.state === "REFUSED" ? { state: "REFUSED", message: previa.message }
+      : previa.mode === "preview" ? { state: previa.state, changes: previa.changes, decisionHash: previa.decisionHash, siloDnaVersionId: previa.siloDnaVersionId }
+      : null,
+  });
+  return { ...lido.preview, siloPair };
 }
 
 /** O Silo do plano: confirmar o candidato, criar quando não existe, pôr nele as keywords do grupo sem Silo. Idempotente. */
-async function ensurePlanTerritory(context: PipelineContext, input: Awaited<ReturnType<typeof buildPreview>>, agora: string): Promise<string> {
+async function ensurePlanTerritory(context: PipelineContext, input: Awaited<ReturnType<typeof buildPreview>>, agora: string, deps: Deps = {}): Promise<string> {
   const escolha = input.preview.territory;
   if (escolha.kind === "split" || escolha.kind === "rejected") throw refusal(escolha.sentence);
   let territorios = input.territories;
@@ -184,8 +228,12 @@ async function ensurePlanTerritory(context: PipelineContext, input: Awaited<Retu
     territorios = territorios.map(item => item.territoryRef === territorio.territoryRef ? territorio : item);
   }
   await assignPlanGroupKeywordsToTerritory(context, { groupId: input.preview.groupId, territoryRef: territorio.territoryRef, territories: territorios, decidedAt: agora });
-  // O grupo sem Silo ligado passa a apontar para o do plano (aditivo; nunca derruba).
-  if (!input.linkedSiloId) await linkEditorialGroupSilo(context.supabase, { brandId: context.brandId, actorUserId: context.actorUserId, groupId: input.preview.groupId, siloId: territorio.territoryRef }).catch(() => null);
+  // O grupo passa a apontar para o Silo do plano (aditivo; nunca derruba). 2026-10-15: também quando o
+  // vínculo aponta para um Silo que não existe mais — a store religa só nesse caso e recusa trocar Silo vivo.
+  if (input.linkedSiloId !== territorio.territoryRef) {
+    const ligar = deps.linkGroup ?? ((ctx: PipelineContext, item: { groupId: string; siloId: string }) => linkEditorialGroupSilo(ctx.supabase, { brandId: ctx.brandId, actorUserId: ctx.actorUserId, groupId: item.groupId, siloId: item.siloId }));
+    await Promise.resolve().then(() => ligar(context, { groupId: input.preview.groupId, siloId: territorio.territoryRef })).catch(() => null);
+  }
   return territorio.territoryRef;
 }
 
@@ -199,7 +247,7 @@ export async function applyPlanConsolidationLine(runtime: ImprovementRuntime, in
   const lido = await buildPreview(context, input.groupId, deps, input.acceptedKeywordIds);
   if (lido.preview.decisionHash !== input.decisionHash) throw new PlanConsolidationStaleError();
   const agora = deps.now?.() ?? new Date().toISOString();
-  const territoryRef = await ensurePlanTerritory(context, lido, agora);
+  const territoryRef = await ensurePlanTerritory(context, lido, agora, deps);
   // Relido depois do Silo: a linha agora tem o território do plano.
   const relido = await buildPreview(context, input.groupId, deps, input.acceptedKeywordIds);
   if (relido.preview.decisionHash !== input.decisionHash) throw new PlanConsolidationStaleError();
