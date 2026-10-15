@@ -58,11 +58,24 @@ const runtime: any = { context, authorize: async (module: string, action: string
 mock.module("../lib/server/arquiteto-territory-store.ts", { namedExports: { listTerritoryWorkflowItems: async () => [{territoryRef:territory,lockVersion:1,territory:{name:"Wi-Fi e fibra óptica",lifecycleStatus:"confirmed",centralEntity:"clínica de estética",macroIntent:"Informativa",slugState:{publishedSlug:"captacao-de-pacientes",confirmed:null,proposals:[]}}}], createTerritoryWorkflowItem: async () => { throw new Error("criar território não é esperado neste teste"); }, updateTerritoryWorkflowItem: async () => { throw new Error("atualizar território não é esperado neste teste"); } } });
 const workspace = () => ({ workflowItems: [], keywords: clone(rows), articleDnas: clone(articles), siloDnas: [] });
 function setup() {
+  gruposDasKeywords = new Map();
   journal=[]; articles=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];disjoint=new Set();events=[];incompleteUntilPaid=false;diverge=new Set();legacyVolumes=new Map();legacyAsked=[];legacyFail=false;measured=[];logicRan=[];supportBasisPrincipal=null;noSerpPrincipal=null;medicoesProvider=[];replays=[];knownInBrand=new Map();
   rows = [oldId,newId].map((id,i) => ({ id, brand_id: brandId, keyword: i ? "captação de pacientes para clínica de estética" : "como captar clientes para clínica de estética", intent: "Informativa", volume_search: i ? 50 : null, volume_source: i ? "google_ads" : null, analise_semantica: semantic, isPublished: !i, publishedUrl: !i ? url : undefined, primaryKeywordPolicy: !i ? "reviewable" : "free", territoryRef: i ? "territory:other" : territory, keywordDnaRef: { entityId: id, versionId: `${id}:v1`, contentHash: `sha256:${"a".repeat(64)}` }, canonicalWorkflow: { id: `workflow-${id}`, lockVersion: 1, payload: { semanticQualification: { intent: "Informativa", semanticState: "conclusive" }, approvedDna: { analiseSemantica: semantic } } } }));
 }
 mock.module("../lib/arquiteto/canonical-workspace.ts", { namedExports: { buildCanonicalWorkflowWorkspaceItems: (_w: any,k: any) => k } });
-mock.module("../lib/server/arquiteto-workspace.ts", { namedExports: { loadCanonicalArquitetoWorkspace: async () => workspace(), createMineradorArquitetoHandoff: async () => { assert.ok(external);qualification.push("handoff"); } } });
+/*
+ * 2026-10-15 · o recorte por grupo de verdade (aditivo): com `gruposDasKeywords`
+ * preenchido, a leitura com `groupFilter` devolve só as keywords do grupo (ou,
+ * com `none`, só as sem grupo) — como a mesa real. Vazio = tudo, como antes.
+ */
+let gruposDasKeywords = new Map<string, string>();
+const recortado = (filtro: any) => {
+  const tudo = workspace();
+  if (!gruposDasKeywords.size || !filtro || filtro.kind === "all") return tudo;
+  const dentro = (id: string) => filtro.kind === "none" ? !gruposDasKeywords.has(id) : gruposDasKeywords.get(id) === filtro.groupId;
+  return { ...tudo, keywords: tudo.keywords.filter((k: any) => dentro(k.id)), articleDnas: tudo.articleDnas.filter((a: any) => a.payload.keywordReferences.some((r: any) => dentro(r.keywordId))) };
+};
+mock.module("../lib/server/arquiteto-workspace.ts", { namedExports: { loadCanonicalArquitetoWorkspace: async (_c: any, options: any = {}) => recortado(options.groupFilter), createMineradorArquitetoHandoff: async () => { assert.ok(external);qualification.push("handoff"); } } });
 mock.module("../lib/server/arquiteto-differentiation-store.ts", { namedExports: {
   readDifferentiationBrandKeywords: async () => ({ pages: rows[0].isPublished ? [{ keywordId: oldId, keyword: rows[0].keyword, url, canonical: url, slug: url.split('/').at(-1), post: "reviewable" }] : [], existingByNormalized: new Map(rows.map(r=>[normalizeKeyword(r.keyword),r.id])), knownVolumeByNormalized: knownInBrand }),
   readPublishedFootprints: async (_c: any, queries: any[]) => ({ missingLenses: [], footprints: queries.map(q => ({ ...q, lenses: SERP_SUBJECT_LENS_LABELS.map(lens => ({ lens, urls: (disjoint.has(q.keywordId) ? ["https://outro.org/1","https://outro.org/2","https://outro.org/3","https://outro.org/4"] : ["https://example.org/1","https://example.org/2","https://example.org/3","https://example.org/4"]) })) })) }),
@@ -1105,4 +1118,48 @@ test("etapa 2 · o consolidado sem SERP (travado) volta a ficar pronto: com a SE
   assert.ok(v2.payload.serpAssessmentRef, "a versão nova carrega o parecer");
   assert.equal(v2.payload.alerts.some((alerta: string) => alerta.startsWith("Consolidado do plano do Minerador")), false);
   assert.equal(paid, 0, "o parecer veio do cache");
+});
+
+/*
+ * 2026-10-15 · ETAPA 2 "REFORÇAR KEYWORDS E SERP" (pedido do dono: "lembrar das
+ * keywords soltas, livres, que não têm assunto nem nada (…) podem ser usadas
+ * como secundárias ou principais, sempre de acordo ao DNA delas"). O motor é o
+ * de sempre (`planArticleImprovements`), recortado pelo grupo do plano. O
+ * defeito achado: com o recorte do grupo, a mesa só trazia as keywords DO grupo
+ * e a lista da marca perdia as soltas (sem grupo). Agora elas entram na lista
+ * (nunca como alvo). A principal Livre SEM volume pode virar a solta com volume;
+ * Livre COM volume definido ou Travada ficam (regra do dono, R2).
+ */
+const looseId = "7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d";
+function soltaScenario(opcoes: { lock?: "locked" | "free"; volumeDaPrincipal?: number } = {}) {
+  planSheetScenario(opcoes.lock);
+  if (opcoes.volumeDaPrincipal) { rows[0].volume_search = opcoes.volumeDaPrincipal; rows[0].volume_source = "google_ads"; }
+  const solta = linhaDaMesa({ id: looseId, keyword: "diferença entre internet e wi-fi em casa", brandId, semantic });
+  rows.push({ ...solta, volume_search: 900, volume_source: "google_ads", territoryRef: territory, isPublished: false, primaryKeywordPolicy: "free", canonicalWorkflow: { ...(solta.canonicalWorkflow as object), id: `workflow-${looseId}`, lockVersion: 1 } });
+  // A solta não tem grupo nem Assunto; as do plano são do grupo azul.
+  gruposDasKeywords = new Map([[oldId, planGroupId], [newId, planGroupId]]);
+}
+
+test("2026-10-15 · etapa 2 recortada pelo grupo: a keyword SOLTA (sem Assunto, sem grupo) entra na lista; principal Livre sem volume pode virar a solta com volume", async () => {
+  soltaScenario();
+  const run = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
+  assert.equal(run.groupScope?.groupId, planGroupId, "o recorte é o do grupo do plano");
+  assert.ok(run.keywords.some(k => k.id === looseId), "a solta está na lista da marca");
+  assert.equal(run.targets.some(t => t.id === looseId), false, "a solta nunca é alvo");
+  const proposta = run.proposals.find(p => p.targetId === oldId)!;
+  assert.equal(proposta.status, "ready", JSON.stringify(run.proposals));
+  assert.ok(proposta.memberIds.includes(looseId), "a solta reforça o artigo");
+  assert.equal(proposta.principalId, looseId, "Livre e sem volume: a solta com volume pode ser a principal (DNA compatível, SERP completa)");
+  assert.deepEqual(minerador(), { measured: 0, logic: 0, qualification: 0, replays: 0, medicoes: 0 }, "nada no Minerador");
+  assert.equal(paid, 0);
+});
+
+test("2026-10-15 · etapa 2: principal Travada ou Livre COM volume definido fica; a solta entra só como secundária", async () => {
+  for (const caso of [{ lock: "locked" as const }, { volumeDaPrincipal: 30 }]) {
+    soltaScenario(caso);
+    const run = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
+    const proposta = run.proposals.find(p => p.targetId === oldId)!;
+    assert.equal(proposta.principalId, oldId, `${JSON.stringify(caso)}: a principal não troca`);
+    if (proposta.status === "ready") assert.ok(proposta.memberIds.includes(looseId), "a solta entra como secundária");
+  }
 });

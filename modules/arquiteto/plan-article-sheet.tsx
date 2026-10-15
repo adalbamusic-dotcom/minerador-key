@@ -10,14 +10,16 @@ import { describeSerpPaidPlan, type SerpPaidPlan, type SerpPaidPlanChoice } from
 import { runPaidSerpBlocks } from "@/lib/arquiteto/serp-blocks";
 import { ARCHITECT_SUGGESTIONS_LABEL, mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
 import {
-  PLAN_SHEET_ACTION_LABELS,
-  applyPlanSheetSerp, planFlowSteps, planRowAlerts, planStepTwoAction, PLAN_FLOW_LABELS, type PlanFlowStep, buildPlanSheetRows, planPrincipalSwapCandidates, planRowRoleLabel, planRowSeals, planSheetColorLabel, planSheetFormationSelection,
+  PLAN_SHEET_ACTION_LABELS, PLAN_ARTICLE_FLOW_LABELS, planArticleFlowSteps, type PlanArticleFlowStep, type PlanArticleSiloGate,
+  applyPlanSheetSerp, planRowAlerts, planStepTwoAction, buildPlanSheetRows, planPrincipalSwapCandidates, planRowRoleLabel, planRowSeals, planSheetColorLabel, planSheetFormationSelection,
   planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpSelection, planSheetServerErrorSentence, planSwapCandidateLabel,
   type PlanRowSeal, type PlanSheetAction, type PlanSheetArticle, type PlanSheetConflict, type PlanSheetRow, type PlanSheetSerpRead, type PlanSwapCandidate,
 } from "@/lib/arquiteto/plan-article-sheet";
 import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "@/lib/arquiteto/silo-article-withdrawal";
 import type { PlanConsolidationLine, PlanSiloPairStep } from "@/lib/arquiteto/plan-consolidation";
 import { PLAN_SILO_PAIR_FIX_LABEL } from "@/lib/arquiteto/silo-plan-identity";
+import { PLAN_SILO_CONSOLIDATE_LABEL, PLAN_SILO_TAB_SENTENCE } from "@/lib/arquiteto/plan-article-sheet";
+import { EDITORIAL_LINE_LABEL, EDITORIAL_LINE_ROUTE } from "@/lib/arquiteto/plan-editorial-line";
 import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
 
 /**
@@ -55,7 +57,20 @@ type Preview =
   | { action: "validateSerp"; lines: PreviewLine[]; plan: SerpPaidPlan; resolve: (choice: SerpPaidPlanChoice | null) => void }
   | { action: "concludeFormation" | "swapPrincipal"; lines: PreviewLine[]; runs: FormationRun[] }
   | { action: "chooseSwap"; rows: PlanSheetRow[]; candidates: Record<string, PlanSwapCandidate[]>; picks: Record<string, string>; refused: PreviewLine[] }
-  | { action: "consolidate"; lines: PreviewLine[]; data: PlanConsolidationPreviewData };
+  /* 2026-10-15 · "Silo na aba Silos, artigos na aba Artigos": dois escopos do mesmo núcleo, e a linha editorial. */
+  | { action: "consolidateSilo"; lines: PreviewLine[]; data: PlanConsolidationPreviewData }
+  | { action: "formArticles"; lines: PreviewLine[]; data: PlanConsolidationPreviewData }
+  | { action: "editorialLine"; lines: PreviewLine[]; data: EditorialLinePreviewData };
+
+/** A prévia da "Linha editorial" como o servidor a devolve (`/api/arquiteto/plan-silo/editorial-line`). */
+export type EditorialLinePreviewData = {
+  groupId: string;
+  siloName: string;
+  brandDnaAvailable: boolean;
+  lines: Array<{ articleId: string; versionNumber: number; keywordId: string; keyword: string; title: string; role: "Pilar" | "Suporte"; order: number; changes: Array<{ field: string; label: string; before: string; after: string; source: string }>; sentence: string; lineHash: string }>;
+  acceptedArticleIds: string[];
+  summary: string;
+};
 
 /** A prévia de "Consolidar o Silo do plano" como o servidor a devolve (`/api/arquiteto/plan-silo/consolidate`). */
 export type PlanConsolidationPreviewData = {
@@ -71,6 +86,13 @@ export type PlanConsolidationPreviewData = {
   decisionHash: string;
   /** 2026-10-15 · aditivo: o par do Silo (falta, em dia, ou "Corrigir a página do Silo (vN+1)" na mesma confirmação). */
   siloPair?: PlanSiloPairStep;
+  /** 2026-10-15 · aditivos do escopo `silo` (aba Silos). */
+  siloDecisionHash?: string;
+  siloReady?: boolean;
+  headKeyword?: { keywordId: string; keyword: string } | null;
+  headSentence?: string;
+  keywordsWithoutSilo?: string[];
+  pillarFormed?: boolean;
 };
 type Busy ={ label: string; startedAt: number; done: number | null; total: number | null; unit: string };
 
@@ -156,8 +178,16 @@ export type PlanArticleSheetProps = {
    * o Pilar e a ordem do plano) pela consolidação de sempre da mesa.
    */
   consolidateSiloPair?: (input: { groupId: string; territoryRef: string; pillarKeywordId: string | null }) => Promise<{ ok: boolean; message: string }>;
-  /** Etapa 3: leva à aba Links internos. */
+  /** Etapa 4: leva à aba Links internos. */
   onGoToLinks?: () => void;
+  /**
+   * 2026-10-15 · aditivo: o portão do Silo do plano para a aba Artigos (o Silo
+   * decidido na aba Silos; a página dele em dia para os links). Ausente: o Silo
+   * conta como decidido e a página pelo `siloConsolidatedOf` (contrato anterior).
+   */
+  siloGateOf?: (groupId: string) => PlanArticleSiloGate | null;
+  /** 2026-10-15 · leva à aba Silos ("O Silo do plano é consolidado na aba Silos"). */
+  onGoToSilos?: () => void;
 };
 
 export type PlanSheetResult = { tone: Tone; text: string };
@@ -188,11 +218,16 @@ export type PlanArticleSheetController = {
   /** Muda quando a linha do plano muda (SERP lida, resultado, ocupado): a linha memoizada da mesa redesenha. */
   revision: object;
   start: (action: PlanSheetAction, alvo: PlanSheetRow[]) => void;
-  /** 2026-10-14 (noite) · as três etapas do plano (uma só em destaque) e o grupo do recorte (null = mais de um plano). */
-  flow: PlanFlowStep[];
+  /** 2026-10-15 · as quatro etapas da aba Artigos (uma só em destaque) e o grupo do recorte (null = mais de um plano). */
+  flow: PlanArticleFlowStep[];
   planGroupId: string | null;
+  /** O portão do Silo do plano (aba Silos) para o grupo do recorte. */
+  siloGate: PlanArticleSiloGate | null;
   /** O botão da etapa atual. */
-  runStage: (step: PlanFlowStep["id"]) => void;
+  runStage: (step: PlanArticleFlowStep["id"]) => void;
+  /** 2026-10-15 · aba Silos: "Consolidar o Silo do plano" de um grupo (prévia grátis → uma confirmação). */
+  consolidateSilo: (groupId: string) => void;
+  onGoToSilos?: () => void;
   cancelPreview: () => void;
   prepareSwapPreview: (rows: PlanSheetRow[], picks: Record<string, string>, refused: PreviewLine[]) => void;
   confirmPreview: () => void;
@@ -522,13 +557,73 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     setPreview({ action: "chooseSwap", rows: livres, candidates, picks, refused: recusadas });
   }
 
-  /* ======================= CONSOLIDAR O SILO DO PLANO (2026-10-14, noite) ======================= */
-  async function consolidate() {
+  /* ============ ABA SILOS · CONSOLIDAR O SILO DO PLANO (escopo `silo`, 2026-10-15) ============ */
+  /*
+   * Pedido do dono (15/10): "se ele não detectou uma keyword destinada para o
+   * silo, mas no DNA já está definido, ele tem que fazer só isso, recriar e ir
+   * pra frente". O Silo do plano vem do DNA do plano (nome, slug, objetivo,
+   * Pilar, ordem); a keyword do Silo é opcional. Prévia grátis → UMA
+   * confirmação: o Silo (reusa/confirma/recria, keywords do plano e a do Silo
+   * nele, grupo religado) e, na mesma confirmação, a página do Silo — v1 pelo
+   * fechamento de sempre quando o Pilar já tem ArticleDNA, ou "Corrigir a
+   * página do Silo (vN+1)". Nenhum artigo é gravado aqui.
+   */
+  async function consolidateSilo(groupId: string) {
+    if (!brandId || !groupId || ocupado) return;
+    const vivo = vivoAgora();
+    setError(null); setSummary(null); setPreview(null);
+    startBusy("Preparando a prévia do Silo do plano (grátis, só leitura)");
+    const answer = await postJson("/api/arquiteto/plan-silo/consolidate", { brandId, groupId, mode: "preview", scope: "silo" });
+    if (!vivo()) return;
+    setBusy(null);
+    if (!answer.ok || !answer.body.success) { setError(humanError(answer)); return; }
+    setPreview({ action: "consolidateSilo", lines: [], data: answer.body.data as PlanConsolidationPreviewData });
+  }
+
+  async function confirmSiloConsolidation(data: PlanConsolidationPreviewData) {
+    if (!brandId) return;
+    const vivo = vivoAgora();
+    setPreview(null); setError(null);
+    startBusy("Consolidando o Silo do plano (identidade do plano; nenhum artigo é gravado)");
+    const answer = await postJson("/api/arquiteto/plan-silo/consolidate", { brandId, groupId: data.groupId, mode: "apply", scope: "silo", decisionHash: data.siloDecisionHash });
+    if (!vivo()) return;
+    if (!answer.ok || !answer.body.success) { setBusy(null); setError(humanError(answer)); onApplied(); return; }
+    const feito = answer.body.data as { territoryRef: string; message: string; preview: PlanConsolidationPreviewData };
+    const relido = feito.preview ?? data;
+    // A página do Silo, na MESMA confirmação: corrigir (vN+1) ou gravar o v1 quando o Pilar já tem ArticleDNA.
+    let pagina: { ok: boolean; message: string } | null = null;
+    const par = relido.siloPair;
+    if (par?.state === "fix") {
+      setBusy({ label: `${PLAN_SILO_PAIR_FIX_LABEL} (v${par.nextVersion})`, startedAt: agoraMs(), done: null, total: null, unit: "" });
+      const correcao = await postJson("/api/arquiteto/silo-declared-plan", { brandId, siloId: par.siloId, mode: "apply", expectedSiloDnaVersionId: par.siloDnaVersionId, decisionHash: par.decisionHash });
+      if (!vivo()) return;
+      const lido = correcao.body.data as { state?: string; siloDna?: { versionNumber: number }; siloPage?: { versionNumber: number }; message?: string } | undefined;
+      pagina = correcao.ok && correcao.body.success
+        ? lido?.state === "APPLIED"
+          ? { ok: true, message: `SiloDNA v${lido.siloDna?.versionNumber} e SiloPage v${lido.siloPage?.versionNumber} gravados e relidos, com o tema do Silo do plano.` }
+          : { ok: true, message: lido?.message ?? "A página do Silo já segue o plano: nenhuma versão nova." }
+        : { ok: false, message: humanError(correcao) };
+    } else if (par?.state === "refused") {
+      pagina = { ok: false, message: par.sentence };
+    } else if ((!par || par.state === "missing") && relido.pillarFormed && consolidateSiloPair) {
+      setBusy({ label: "Gravando o SiloDNA e a SiloPage do plano (Pilar e ordem do plano)", startedAt: agoraMs(), done: null, total: null, unit: "" });
+      try { pagina = await consolidateSiloPair({ groupId: data.groupId, territoryRef: feito.territoryRef, pillarKeywordId: relido.pillarKeywordId }); }
+      catch (e) { pagina = { ok: false, message: e instanceof Error ? e.message : "A página do Silo não foi confirmada." }; }
+      if (!vivo()) return;
+    } else if (!par || par.state === "missing") {
+      pagina = { ok: true, message: "A página do Silo (SiloDNA e SiloPage) é gravada quando o Pilar do plano tiver ArticleDNA: forme os artigos na aba Artigos (etapa 1) e volte aqui." };
+    }
+    finish(vivo, new Map(), { tone: pagina && !pagina.ok ? "warning" : "success", text: `${PLAN_SILO_CONSOLIDATE_LABEL}: ${feito.message}${pagina ? ` Página do Silo: ${pagina.message}` : ""} Nenhum artigo foi convertido em Silo; nada foi gravado no Minerador; nada foi pago.` });
+    if (vivo()) onApplied();
+  }
+
+  /* ============ ABA ARTIGOS · 1 · FORMAR ARTIGOS DO PLANO (escopo `articles`) ============ */
+  async function formArticles() {
     if (!brandId || !planGroupId) return;
     const vivo = vivoAgora();
     setError(null); setSummary(null); setPreview(null);
-    startBusy("Preparando a prévia da consolidação (grátis, só leitura)");
-    const answer = await postJson("/api/arquiteto/plan-silo/consolidate", { brandId, groupId: planGroupId, mode: "preview" });
+    startBusy("Preparando a prévia dos artigos do plano (grátis, só leitura)");
+    const answer = await postJson("/api/arquiteto/plan-silo/consolidate", { brandId, groupId: planGroupId, mode: "preview", scope: "articles" });
     if (!vivo()) return;
     setBusy(null);
     if (!answer.ok || !answer.body.success) { setError(humanError(answer)); return; }
@@ -539,26 +634,24 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       kind: line.action === "write" ? "go" : line.action === "keep" ? "known" : "refused",
       text: `${line.role} · ${line.order}º · ${line.sentence}${line.alerts.length ? ` Alertas: ${line.alerts.join("; ")}.` : ""}`,
     }));
-    setPreview({ action: "consolidate", lines, data });
+    setPreview({ action: "formArticles", lines, data });
   }
 
-  async function confirmConsolidation(data: PlanConsolidationPreviewData) {
+  async function confirmFormArticles(data: PlanConsolidationPreviewData) {
     if (!brandId) return;
     const vivo = vivoAgora();
     setPreview(null); setError(null);
     const linhas = new Map<string, PlanSheetResult>();
-    for (const line of data.lines) if (line.action === "refused") linhas.set(line.keywordId, { tone: "warning", text: `Fora desta consolidação: ${line.sentence}` });
+    for (const line of data.lines) if (line.action === "refused") linhas.set(line.keywordId, { tone: "warning", text: `Fora desta confirmação: ${line.sentence}` });
     const aceitas = data.acceptedKeywordIds;
-    let territoryRef: string | null = data.territory.territoryRef ?? null;
     let gravados = 0, falhas = 0;
-    if (aceitas.length) startBusy("Consolidando o Silo do plano (artigos do plano, sem SERP)", aceitas.length, "artigo(s)");
+    if (aceitas.length) startBusy("Gravando os artigos do plano (ArticleDNA v1, sem SERP)", aceitas.length, "artigo(s)");
     // Uma linha por chamada (o tempo do servidor), com o MESMO hash da prévia: a confirmação é uma só.
     for (const [indice, keywordId] of aceitas.entries()) {
-      const answer = await postJson("/api/arquiteto/plan-silo/consolidate", { brandId, groupId: data.groupId, mode: "apply", decisionHash: data.decisionHash, acceptedKeywordIds: aceitas, keywordId });
+      const answer = await postJson("/api/arquiteto/plan-silo/consolidate", { brandId, groupId: data.groupId, mode: "apply", scope: "articles", decisionHash: data.decisionHash, acceptedKeywordIds: aceitas, keywordId });
       if (!vivo()) return;
       if (answer.ok && answer.body.success) {
-        const resultado = answer.body.data as { status: string; message: string; territoryRef: string | null };
-        territoryRef = resultado.territoryRef ?? territoryRef;
+        const resultado = answer.body.data as { status: string; message: string };
         if (resultado.status === "written") gravados += 1;
         linhas.set(keywordId, { tone: resultado.status === "refused" ? "warning" : "success", text: resultado.message });
       } else {
@@ -567,38 +660,62 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       }
       setBusy(atual => atual ? { ...atual, done: indice + 1 } : atual);
     }
-    // Depois das linhas, o par canônico do Silo (SiloDNA + SiloPage com o Pilar e a ordem do plano).
-    let silo: { ok: boolean; message: string } | null = null;
-    const par = data.siloPair;
-    if (par?.state === "fix" && !falhas) {
-      // 2026-10-15 · o par já existe com o tema errado (ou fora do plano): a versão seguinte pelo núcleo de "Aplicar o plano declarado ao Silo", na mesma confirmação.
-      setBusy({ label: `${PLAN_SILO_PAIR_FIX_LABEL} (v${par.nextVersion})`, startedAt: agoraMs(), done: null, total: null, unit: "" });
-      const answer = await postJson("/api/arquiteto/silo-declared-plan", { brandId, siloId: par.siloId, mode: "apply", expectedSiloDnaVersionId: par.siloDnaVersionId, decisionHash: par.decisionHash });
-      if (!vivo()) return;
-      const feito = answer.body.data as { state?: string; siloDna?: { versionNumber: number }; siloPage?: { versionNumber: number }; message?: string } | undefined;
-      silo = answer.ok && answer.body.success
-        ? feito?.state === "APPLIED"
-          ? { ok: true, message: `SiloDNA v${feito.siloDna?.versionNumber} e SiloPage v${feito.siloPage?.versionNumber} gravados e relidos, com o tema do Silo do plano.` }
-          : { ok: true, message: feito?.message ?? "O Silo já segue o plano: nenhuma versão nova." }
-        : { ok: false, message: humanError(answer) };
-    } else if (par && par.state !== "missing") {
-      silo = par.state === "refused" ? { ok: false, message: par.sentence } : null;
-    } else if (territoryRef && consolidateSiloPair && !falhas) {
-      setBusy({ label: "Gravando o SiloDNA e a SiloPage do plano (Pilar e ordem do plano)", startedAt: agoraMs(), done: null, total: null, unit: "" });
-      try { silo = await consolidateSiloPair({ groupId: data.groupId, territoryRef, pillarKeywordId: data.pillarKeywordId }); }
-      catch (e) { silo = { ok: false, message: e instanceof Error ? e.message : "A consolidação do Silo não foi confirmada." }; }
-      if (!vivo()) return;
-    }
     const fora = data.lines.filter(line => line.action === "refused").length;
-    const textoSilo = silo ? ` Silo: ${silo.message}` : falhas ? " O Silo não foi consolidado: resolva as linhas com falha e consolide de novo." : "";
-    finish(vivo, linhas, { tone: falhas || (silo && !silo.ok) ? "warning" : "success", text: `${PLAN_FLOW_LABELS.consolidate}: ${gravados} artigo(s) gravado(s) e relido(s)${falhas ? `, ${falhas} com falha` : ""}${fora ? `; ${fora} fora (motivo na linha)` : ""}.${textoSilo} Nada foi gravado no Minerador; nada foi pago.` });
+    finish(vivo, linhas, { tone: falhas ? "warning" : "success", text: `${PLAN_ARTICLE_FLOW_LABELS.form}: ${gravados} artigo(s) gravado(s) e relido(s)${falhas ? `, ${falhas} com falha` : ""}${fora ? `; ${fora} fora (motivo na linha)` : ""}. A página do Silo é da aba Silos. Nada foi gravado no Minerador; nada foi pago.` });
     if (vivo()) onApplied();
   }
 
-  /** O botão da etapa atual: 1 consolidar; 2 SERP das principais e depois a formação com parecer e sustentações; 3 Links internos. */
-  function runStage(step: PlanFlowStep["id"]) {
+  /* ============ ABA ARTIGOS · 3 · LINHA EDITORIAL (Assunto → copy; grátis, sem IA) ============ */
+  async function editorialLine() {
+    if (!brandId || !planGroupId) return;
+    const vivo = vivoAgora();
+    setError(null); setSummary(null); setPreview(null);
+    startBusy("Preparando a prévia da linha editorial (grátis, sem IA)");
+    const answer = await postJson(EDITORIAL_LINE_ROUTE, { brandId, groupId: planGroupId, mode: "preview" });
+    if (!vivo()) return;
+    setBusy(null);
+    if (!answer.ok || !answer.body.success) { setError(humanError(answer)); return; }
+    const data = answer.body.data as EditorialLinePreviewData;
+    const lines: PreviewLine[] = data.lines.map(line => ({
+      keywordId: line.keywordId,
+      keyword: line.keyword,
+      kind: line.changes.length ? "go" : "known",
+      text: `${line.role} · ${line.order}º · ${line.sentence}${line.changes.length ? ` ${line.changes.map(change => `${change.label}: “${change.after}”`).join(" · ")}` : ""}`,
+    }));
+    setPreview({ action: "editorialLine", lines, data });
+  }
+
+  async function confirmEditorialLine(data: EditorialLinePreviewData) {
+    if (!brandId) return;
+    const vivo = vivoAgora();
+    setPreview(null); setError(null);
+    const aceitas = data.lines.filter(line => line.changes.length);
+    const linhas = new Map<string, PlanSheetResult>();
+    let gravados = 0, falhas = 0;
+    if (aceitas.length) startBusy("Gravando a linha editorial (ArticleDNA, versão seguinte)", aceitas.length, "artigo(s)");
+    for (const [indice, line] of aceitas.entries()) {
+      const answer = await postJson(EDITORIAL_LINE_ROUTE, { brandId, groupId: data.groupId, mode: "apply", articleId: line.articleId, lineHash: line.lineHash });
+      if (!vivo()) return;
+      if (answer.ok && answer.body.success) {
+        const resultado = answer.body.data as { status: string; message: string };
+        if (resultado.status === "written") gravados += 1;
+        linhas.set(line.keywordId, { tone: "success", text: resultado.message });
+      } else {
+        falhas += 1;
+        linhas.set(line.keywordId, { tone: "warning", text: humanError(answer) });
+      }
+      setBusy(atual => atual ? { ...atual, done: indice + 1 } : atual);
+    }
+    finish(vivo, linhas, { tone: falhas ? "warning" : "success", text: `${EDITORIAL_LINE_LABEL}: ${gravados} artigo(s) gravado(s) e relido(s)${falhas ? `, ${falhas} com falha` : ""}. Grátis, sem IA; nada no Minerador nem no Redator.` });
+    if (vivo()) onApplied();
+  }
+
+  /** O botão da etapa atual da aba Artigos: 1 formar; 2 SERP das principais e depois o reforço; 3 linha editorial; 4 Links internos. */
+  function runStage(step: PlanArticleFlowStep["id"]) {
     if (ocupado) return;
-    if (step === 1) { void consolidate(); return; }
+    const etapa = flow.find(item => item.id === step);
+    if (!etapa || etapa.state !== "current") return;
+    if (step === 1) { void formArticles(); return; }
     if (step === 2) {
       const passo = planStepTwoAction(rows);
       if (!passo) return;
@@ -606,6 +723,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       else void prepareFormation(passo.rows, "concludeFormation");
       return;
     }
+    if (step === 3) { void editorialLine(); return; }
     onGoToLinks?.();
   }
 
@@ -630,8 +748,12 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       resolver({ authorizedPaidQueries: preview.plan.paidQueries, payMissingExtraLenses: true, recollectStaleLenses: false });
     } else if (preview.action === "concludeFormation" || preview.action === "swapPrincipal") {
       void confirmFormation(preview.action, preview.runs, preview.lines);
-    } else if (preview.action === "consolidate") {
-      void confirmConsolidation(preview.data);
+    } else if (preview.action === "consolidateSilo") {
+      void confirmSiloConsolidation(preview.data);
+    } else if (preview.action === "formArticles") {
+      void confirmFormArticles(preview.data);
+    } else if (preview.action === "editorialLine") {
+      void confirmEditorialLine(preview.data);
     }
   }
 
@@ -639,7 +761,13 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   const planGroupId = gruposDoRecorte.length === 1 ? gruposDoRecorte[0] : null;
   const territoriosDoPlano = [...new Set(rows.map(row => row.territoryRef).filter((ref): ref is string => Boolean(ref)))];
   const siloConsolidado = territoriosDoPlano.length > 0 && territoriosDoPlano.every(ref => siloConsolidatedOf?.(ref) ?? false);
-  const flow = useMemo(() => planFlowSteps({ rows, siloConsolidated: siloConsolidado }), [rows, siloConsolidado]);
+  // 2026-10-15 · o portão da aba Artigos vem da aba Silos (o Silo do plano decidido; a página dele em dia para os links).
+  const siloGate: PlanArticleSiloGate | null = planGroupId
+    ? props.siloGateOf?.(planGroupId) ?? { ready: true, pairCurrent: siloConsolidado, sentence: PLAN_SILO_TAB_SENTENCE }
+    : null;
+  const flow = useMemo(() => planArticleFlowSteps({ rows, silo: siloGate ?? { ready: true, pairCurrent: siloConsolidado, sentence: PLAN_SILO_TAB_SENTENCE } }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- o portão é resumido pelos três campos.
+    [rows, siloGate?.ready, siloGate?.pairCurrent, siloGate?.sentence, siloConsolidado]);
 
   const toggleSelected = (keywordId: string, marcar?: boolean) => setSelected(atual => {
     const proximo = new Set(atual);
@@ -652,7 +780,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   return {
     brandId, rows, rowByKeywordId, selected, setSelected, toggleSelected, results, ocupado, busy, now, preview, setPreview,
     error, setError, summary, setSummary, resumable, withdrawing, setWithdrawing, sugestoesHref, corDoRecorte, revision,
-    start, flow, planGroupId, runStage, cancelPreview, prepareSwapPreview: (alvo, picks, refused) => { void prepareFormation(alvo, "swapPrincipal", picks, refused); },
+    start, flow, planGroupId, siloGate, runStage, consolidateSilo: groupId => { void consolidateSilo(groupId); }, onGoToSilos: props.onGoToSilos, cancelPreview, prepareSwapPreview: (alvo, picks, refused) => { void prepareFormation(alvo, "swapPrincipal", picks, refused); },
     confirmPreview, resume: run => { void resume(run); }, onApplied,
   };
 }
@@ -680,7 +808,9 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
   if (!brandId) return null;
   if (!preview && !busy && !error && !summary && !resumable && !(withdrawing && withdrawing.siloRef)) return null;
   const perigo = dangerButtonClassName ?? buttonClassName;
-  const tituloDaPrevia = preview?.action === "consolidate" ? `${PLAN_FLOW_LABELS.consolidate} · prévia`
+  const tituloDaPrevia = preview?.action === "consolidateSilo" ? `${PLAN_SILO_CONSOLIDATE_LABEL} · prévia`
+    : preview?.action === "formArticles" ? `${PLAN_ARTICLE_FLOW_LABELS.form} · prévia`
+    : preview?.action === "editorialLine" ? `${PLAN_ARTICLE_FLOW_LABELS.editorial} · prévia`
     : preview?.action === "validateSerp" ? `${PLAN_SHEET_ACTION_LABELS.validateSerp} · custo antes`
     : preview?.action === "chooseSwap" ? `${PLAN_SHEET_ACTION_LABELS.swapPrincipal} · escolha a nova principal`
     : preview?.action === "swapPrincipal" ? `${PLAN_SHEET_ACTION_LABELS.swapPrincipal} · prévia`
@@ -726,13 +856,29 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
           <p className="text-text-muted">O que já está no cache não é pago de novo. O servidor confere no banco o volume de cada keyword: sem volume, nada é coletado.</p>
         </div>;
       })()}
-      {preview.action === "consolidate" && <div className="mt-1 grid gap-0.5" data-testid="architect-plan-consolidation-preview">
+      {preview.action === "consolidateSilo" && <div className="mt-1 grid gap-0.5" data-testid="architect-plan-consolidation-preview" data-scope="silo">
         <p className="text-foreground">{preview.data.territory.sentence}</p>
-        {preview.data.siloPair && preview.data.siloPair.state !== "missing" && <p className={preview.data.siloPair.state === "fix" ? "text-foreground" : preview.data.siloPair.state === "refused" ? "text-warning" : "text-text-muted"} data-testid="architect-plan-consolidation-silo-pair" data-state={preview.data.siloPair.state}>{preview.data.siloPair.sentence}</p>}
-        <p className="text-text-muted">{preview.data.summary} Cada artigo grava o ArticleDNA v1 com o que veio do Minerador (Assunto = título; principal = a keyword do plano; papel e ordem do plano; escopo como promessa); depois o SiloDNA e a SiloPage com o Pilar e a ordem do plano. Decisão sua, registrada como “consolidado do plano do Minerador”.</p>
+        {preview.data.headSentence && <p className="text-text-muted" data-testid="architect-plan-silo-head">{preview.data.headSentence}</p>}
+        {preview.data.keywordsWithoutSilo && preview.data.keywordsWithoutSilo.length > 0 && <p className="text-text-muted">{preview.data.keywordsWithoutSilo.length} keyword(s) do plano sem Silo entram nele.</p>}
+        {preview.data.siloPair && preview.data.siloPair.state !== "missing"
+          ? <p className={preview.data.siloPair.state === "fix" ? "text-foreground" : preview.data.siloPair.state === "refused" ? "text-warning" : "text-text-muted"} data-testid="architect-plan-consolidation-silo-pair" data-state={preview.data.siloPair.state}>{preview.data.siloPair.sentence}</p>
+          : <p className="text-text-muted" data-testid="architect-plan-consolidation-silo-pair" data-state="missing">{preview.data.pillarFormed ? "O SiloDNA e a SiloPage v1 são gravados nesta mesma confirmação, com o Pilar e a ordem do plano." : "A página do Silo (SiloDNA e SiloPage) espera o Pilar do plano ter ArticleDNA (aba Artigos, etapa 1)."}</p>}
+        <p className="text-text-muted">A identidade do Silo é a do plano (nome, slug, objetivo, Pilar e ordem). Nenhum artigo vira Silo e nenhum Silo paralelo é criado. Decisão sua; nada no Minerador, nada pago.</p>
+      </div>}
+      {preview.action === "formArticles" && <div className="mt-1 grid gap-0.5" data-testid="architect-plan-consolidation-preview" data-scope="articles">
+        <p className="text-text-muted">{preview.data.summary} Cada artigo grava o ArticleDNA v1 com o que veio do Minerador (Assunto = título; principal = a keyword do plano; papel e ordem do plano; escopo como promessa). Decisão sua, registrada como “consolidado do plano do Minerador”. O Silo não é tocado.</p>
+      </div>}
+      {preview.action === "editorialLine" && <div className="mt-1 grid gap-0.5" data-testid="architect-plan-editorial-line-preview">
+        <p className="text-text-muted">{preview.data.summary} Só campo pendente ganha valor; o que já foi decidido fica.</p>
       </div>}
       {preview.action === "chooseSwap" && <p className="mt-1 text-text-muted">Só artigo do plano com a trava Livre. As candidatas são a keyword do Assunto e as sustentações com volume medido da lista dele, das que têm mais lentes de SERP e mais volume. A prévia (grátis) mostra o que muda; gravar é a sua confirmação e gera uma nova versão.</p>}
       {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && <p className="mt-1 text-text-muted">Grava só o ArticleDNA, a composição e o parecer, pelo mesmo núcleo da formação; nada é gravado no Minerador. Uma confirmação vale para as linhas “vai gravar”; as outras ficam como estão, com o motivo.</p>}
+      {/* 2026-10-15 · etapa 2: o que já temos, o que falta e o que custa — dito antes de qualquer chamada paga (o motor de sempre). */}
+      {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && preview.runs.map(item => {
+        const lido = item.run.reading?.sentences;
+        const frases = [...(lido ? [lido.known, lido.missing, lido.cost, lido.done].filter((frase): frase is string => Boolean(frase)) : []), ...(item.run.costs.paidQueries > 0 ? [`Custo antes: ${item.run.costs.paidQueries} consulta(s) de SERP (US$ ${item.run.costs.estimatedCostUsd.min.toFixed(2)}–${item.run.costs.estimatedCostUsd.max.toFixed(2)}), só com a sua autorização.`] : ["Nada pago nesta prévia: SERP do cache e lista da marca (keywords soltas incluídas)."])];
+        return <p key={item.groupId} className="mt-1 text-text-muted" data-testid="architect-plan-sheet-reading">{frases.join(" ")}</p>;
+      })}
 
       {preview.action === "chooseSwap"
         ? <ul className="mt-2 grid gap-2">
@@ -757,7 +903,9 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={buttonClassName} onClick={sheet.cancelPreview}>Cancelar</button>
         {preview.action === "validateSerp" && <button type="button" className={primaryButtonClassName} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{preview.plan.paidQueries > 0 ? `Autorizar ${preview.plan.paidQueries} consulta(s) e validar` : "Ler do cache (sem custo)"}</button>}
-        {preview.action === "consolidate" && <button type="button" className={primaryButtonClassName} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>Confirmar e consolidar</button>}
+        {preview.action === "consolidateSilo" && <button type="button" className={primaryButtonClassName} disabled={!preview.data.siloDecisionHash || preview.data.territory.kind === "split" || preview.data.territory.kind === "rejected"} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>Confirmar e consolidar o Silo</button>}
+        {preview.action === "formArticles" && <button type="button" className={primaryButtonClassName} disabled={!preview.data.acceptedKeywordIds.length} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>Confirmar e gravar</button>}
+        {preview.action === "editorialLine" && <button type="button" className={primaryButtonClassName} disabled={!preview.data.lines.some(line => line.changes.length)} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>Confirmar e gravar</button>}
         {preview.action === "chooseSwap" && <button type="button" className={primaryButtonClassName} disabled={!preview.rows.length} data-testid="architect-plan-sheet-swap-preview" onClick={() => sheet.prepareSwapPreview(preview.rows, preview.picks, preview.refused)}>Ver prévia da troca (grátis)</button>}
         {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && (() => {
           const prontas = preview.runs.reduce((soma, item) => soma + item.readyIds.length, 0);

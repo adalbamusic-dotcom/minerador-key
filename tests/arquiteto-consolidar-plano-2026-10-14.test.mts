@@ -184,7 +184,8 @@ test("estrutural · a aba Artigos: uma tabela, uma barra, sem 'Detalhes técnico
   const folha = ler("../modules/arquiteto/plan-article-sheet.tsx");
   assert.doesNotMatch(folha, /PlanArticleSheetSession|architect-plan-sheet-batch|architect-plan-sheet-select-all|data-plan-action="validateSerp"|data-plan-action="concludeFormation"/);
   const barra = ler("../modules/arquiteto/articles-formation-bar.tsx");
-  assert.match(barra, /data-testid="architect-plan-stage"/);
+  // 2026-10-15 · a etapa atual em destaque e as seguintes desabilitadas (o testid diz qual é qual).
+  assert.match(barra, /data-testid=\{step\.state === "current" \? "architect-plan-stage" : "architect-plan-stage-next"\}/);
   assert.doesNotMatch(barra, /\(\$\{[^}]*\.length\}\)/, "nenhum contador nos botões da barra");
 });
 

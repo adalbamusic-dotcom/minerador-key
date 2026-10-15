@@ -19,11 +19,41 @@
 import { createHash } from "node:crypto";
 import { readArchitectSubjectStanding, suggestSubjectSupport, type ArchitectSubjectStanding } from "./declared-subject.ts";
 import { declaredPlanSubjectList } from "./declared-plan-formation.ts";
-import { planSheetArticleConflict, planSheetLockOf, readPlanRowVolume, type PlanSheetArticle } from "./plan-article-sheet.ts";
+import { planSheetArticleConflict, planSheetLockOf, readPlanRowVolume, PLAN_SILO_CONSOLIDATE_LABEL, PLAN_SILO_TAB_SENTENCE, type PlanSheetArticle } from "./plan-article-sheet.ts";
 import { PLAN_SILO_PAIR_FIX_LABEL } from "./silo-plan-identity.ts";
 export { PLAN_SILO_PAIR_FIX_LABEL };
 
 type RecordLike = Record<string, unknown>;
+const text = (value: unknown): string | null => typeof value === "string" && value.trim() ? value.trim() : null;
+
+/*
+ * 2026-10-15 · PEDIDO DO DONO: "a definição do silo já tem que estar na aba do
+ * Silo e não nos artigos. Artigo só mexe com artigos". A consolidação tem dois
+ * escopos sobre o MESMO núcleo: `silo` (aba Silos: o Silo do plano — reusa,
+ * confirma ou recria com nome/slug/objetivo do plano, põe nele as keywords do
+ * plano e a keyword do Silo quando existe, religa o grupo; depois o par
+ * SiloDNA + SiloPage) e `articles` (aba Artigos: só o ArticleDNA v1 dos artigos
+ * do plano que faltam; nunca cria, confirma ou mexe no Silo).
+ */
+export type PlanConsolidationScope = "silo" | "articles";
+export { PLAN_SILO_CONSOLIDATE_LABEL, PLAN_SILO_TAB_SENTENCE };
+
+/**
+ * A IMPRESSÃO DIGITAL DA DECISÃO DO SILO (escopo `silo`): o grupo, a versão do
+ * plano, o Silo escolhido (tipo, ref, ciclo), o vínculo do grupo e as keywords
+ * que entram nele. Outra pessoa mudou algo no meio = "gere a prévia de novo".
+ */
+export function planSiloDecisionHash(input: { groupId: string; planVersion: number; territory: { kind: string; territoryRef?: string | null; lifecycleStatus?: string | null }; linkedSiloId: string | null; keywordsWithoutSilo: readonly string[]; headKeywordIds: readonly string[] }): string {
+  const corpo = {
+    groupId: input.groupId,
+    planVersion: input.planVersion,
+    territory: { kind: input.territory.kind, ref: input.territory.territoryRef ?? null, lifecycle: input.territory.lifecycleStatus ?? null },
+    linked: input.linkedSiloId,
+    entering: [...new Set(input.keywordsWithoutSilo)].sort(),
+    heads: [...new Set(input.headKeywordIds)].sort(),
+  };
+  return createHash("sha256").update(JSON.stringify(corpo)).digest("hex");
+}
 
 /** No máximo seis keywords por artigo (ADR-022): a principal e até cinco sustentações. */
 export const PLAN_CONSOLIDATION_MAX_KEYWORDS = 6;
@@ -157,6 +187,8 @@ export function planConsolidationLines(input: {
     const recusa = conflito ? conflito.sentence
       : !input.rows.has(principalId) ? `Aguarda a principal “${plan.declaredPrincipal?.phrase ?? principalId}” chegar ao Arquiteto: aprove-a no Minerador e envie.`
       : input.ownerOf(keywordId) ? "A keyword do plano já é membro de outro artigo: retire-a de lá primeiro (decisão sua)."
+      // 2026-10-15 · a aba Artigos não cria nem mexe no Silo: sem Silo, a linha espera "Consolidar o Silo do plano" (aba Silos).
+      : !text(row.territoryRef) ? `Sem Silo ainda. ${PLAN_SILO_TAB_SENTENCE} (“${PLAN_SILO_CONSOLIDATE_LABEL}”); depois, esta linha forma aqui.`
       : null;
     if (recusa) {
       linhas.push({ ...base, action: "refused", sentence: recusa, principalId: null, memberIds: [], alerts: alertas, articleId: null, versionNumber: null });

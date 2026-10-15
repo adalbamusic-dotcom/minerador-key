@@ -286,7 +286,8 @@ test("2b · o Silo do plano desfeito: o envio não o duplica nem põe keyword ne
   assert.doesNotMatch(recriar, /\.delete\(|purge|keywords\/delete/);
   const rota = ler("app/api/arquiteto/plan-silo/recreate/route.ts");
   assert.match(rota, /resolvePipelineContext\(\{ brandId: input\.brandId, module: "arquiteto", action: "approve" \}\)/);
-  const tela = ler("modules/arquiteto/arquiteto-workspace.tsx");
+  // 2026-10-15 · "Recriar o Silo do plano" mora na linha do Silo do plano, na aba Silos (`plan-silo-bar.tsx`); o fetch continua na tela.
+  const tela = ler("modules/arquiteto/arquiteto-workspace.tsx") + ler("modules/arquiteto/plan-silo-bar.tsx");
   assert.match(tela, /`Recriar o Silo do plano · \$\{/);
   assert.match(tela, /fetch\("\/api\/arquiteto\/plan-silo\/recreate"/);
 });

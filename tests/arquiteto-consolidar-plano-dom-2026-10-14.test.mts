@@ -3,7 +3,7 @@ import test from "node:test";
 import { comProductShell, montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
 import { GRUPOS } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import { AZUL, AZUL_REAL, MARCA_WIFI, grupoDaKeywordReal, mesaWifiReal } from "./arquiteto-uma-lista-so-fixtures.mts";
-import { MesaDoPlano, ROTULOS_REMOVIDOS, novoRegistro, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
+import { AbaSilosDoPlano, MesaDoPlano, ROTULOS_REMOVIDOS, novoRegistro, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
 import { readArchitectSubjectStandings } from "../lib/arquiteto/declared-subject.ts";
 import type { PlanSheetArticle } from "../lib/arquiteto/plan-article-sheet.ts";
 import type { EditorialGroupScreenFilter } from "../lib/editorial/editorial-groups.ts";
@@ -107,30 +107,61 @@ test("estado atual · volume do DNA é volume: os 5 formados mostram o número e
   semMinerador();
 });
 
-test("a barra · UM lugar, no máximo 3 botões (a etapa atual em destaque e 'Melhorar publicados…' só com publicados); nenhum dos 9 botões antigos fora dela", async () => {
+/*
+ * 2026-10-15 · PEDIDO DO DONO: "a definição do silo já tem que estar na aba do
+ * Silo e não nos artigos. Artigo só mexe com artigos". A aba Artigos tem quatro
+ * etapas SÓ DE ARTIGO (1 formar · 2 reforçar · 3 linha editorial · 4 links); o
+ * "Consolidar o Silo do plano" mora na aba Silos (`AbaSilosDoPlano`, as mesmas
+ * peças da tela). Testes reescritos com o motivo (antes a barra da aba Artigos
+ * consolidava o Silo).
+ */
+test("a barra · UM lugar, no máximo 3 botões: a etapa atual em destaque, a seguinte desabilitada com o motivo, 'Melhorar publicados…' só com publicados; nenhum dos 9 botões antigos fora dela; nada de Silo", async () => {
   rede();
   await screen.render(mesa({ hasPublished: true })); await assentar();
   const barra = screen.get("architect-articles-formation-actions");
   const botoes = [...barra.querySelectorAll<HTMLButtonElement>("button")];
   assert.ok(botoes.length <= 3, `até 3 botões (${botoes.length})`);
-  assert.deepEqual(botoes.map(botao => botao.textContent), ["Consolidar o Silo do plano", "Melhorar publicados…"]);
+  assert.deepEqual(botoes.map(botao => botao.textContent), ["1 · Formar artigos do plano", "2 · Reforçar keywords e SERP", "Melhorar publicados…"]);
   assert.equal(botoes[0].className, "primary", "a etapa atual em destaque");
+  assert.equal(botoes[1].disabled, true, "a seguinte desabilitada");
+  assert.match(botoes[1].title, /Depois de formar os artigos do plano \(etapa 1\)/);
   assert.doesNotMatch(botoes[0].textContent!, /\(\d+\)/, "sem contador");
-  assert.match(screen.get("architect-plan-stage-line").textContent!, /2 artigo\(s\) do plano para gravar e o Silo do plano para consolidar/);
+  assert.match(screen.get("architect-plan-stage-line").textContent!, /2 artigo\(s\) do plano sem ArticleDNA para gravar/);
+  assert.doesNotMatch(barra.textContent!, /Consolidar o Silo do plano/, "a aba Artigos não consolida Silo");
   const fora = screen.container.textContent!.replace(barra.textContent!, "");
   for (const rotulo of [...ROTULOS_REMOVIDOS, /Reprocessar artigos/, /Processar artigos/, /Concluir formação/, /Validar SERP/]) assert.doesNotMatch(fora, rotulo, String(rotulo));
   assert.equal(screen.all("architect-articles-formation-actions").length, 1, "uma barra só");
 });
 
-test("Consolidar o Silo do plano · prévia grátis → cancelar não grava → confirmar: uma linha por chamada com o MESMO hash, depois o SiloDNA/SiloPage do plano; sem SERP, sem IA, nada no Minerador", async () => {
+test("sem o Silo do plano decidido: 'O Silo do plano é consolidado na aba Silos' com o link; as etapas desabilitadas com o motivo; nada é pedido ao servidor", async () => {
+  rede();
+  const estado = estadoAtual();
+  await screen.render(comProductShell(React.createElement(MesaDoPlano, {
+    marca: MARCA_WIFI, keywords: estado.keywords, standings: estado.standings, articles: estado.articles, mesa: [], filtro: AZUL_FILTRO, registro,
+    groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal, siloGate: { ready: false, pairCurrent: false, sentence: "O Silo do plano é consolidado na aba Silos" },
+  }))); await assentar();
+  const barra = screen.get("architect-articles-formation-actions");
+  const etapas = [...barra.querySelectorAll<HTMLButtonElement>("button[data-stage]")];
+  assert.ok(etapas.length >= 1 && etapas.every(botao => botao.disabled), "as etapas ficam desabilitadas");
+  assert.ok(etapas.every(botao => /aba Silos/.test(botao.title)), "o motivo no title");
+  assert.equal(screen.query("architect-plan-stage"), null, "nenhuma etapa em destaque");
+  assert.match(screen.get("architect-plan-stage-line").textContent!, /^O Silo do plano é consolidado na aba Silos\./);
+  assert.ok([...barra.querySelectorAll("button")].length <= 3);
+  await screen.click("architect-plan-go-silos");
+  assert.equal(registro.silos, 1, "o link leva à aba Silos");
+  assert.equal(chamadas.some(chamada => chamada.url.startsWith("/api/arquiteto/plan-silo")), false, "a aba Artigos não cria nem consolida Silo");
+});
+
+test("1 · Formar artigos do plano · prévia grátis → cancelar não grava → confirmar: uma linha por chamada (escopo artigos) com o MESMO hash; nenhum Silo tocado; sem SERP, sem IA, nada no Minerador", async () => {
   rede();
   await screen.render(mesa()); await assentar();
   await screen.click("architect-plan-stage"); await assentar();
   const previa = screen.get("architect-plan-sheet-preview");
-  assert.equal(previa.dataset.action, "consolidate");
+  assert.equal(previa.dataset.action, "formArticles");
   const pedido = chamadas.find(chamada => chamada.url === "/api/arquiteto/plan-silo/consolidate")!;
-  assert.deepEqual(pedido.body, { brandId: MARCA_WIFI, groupId: AZUL, mode: "preview" });
-  assert.match(screen.get("architect-plan-consolidation-preview").textContent!, /já existe e está confirmado: fica como está/);
+  assert.deepEqual(pedido.body, { brandId: MARCA_WIFI, groupId: AZUL, mode: "preview", scope: "articles" });
+  assert.equal(screen.get("architect-plan-consolidation-preview").dataset.scope, "articles");
+  assert.match(screen.get("architect-plan-consolidation-preview").textContent!, /O Silo não é tocado/);
   const linhas = screen.all("architect-plan-sheet-preview-line");
   assert.deepEqual(linhas.map(item => item.dataset.kind), ["known", "go", "go", "known", "known", "known", "known"]);
   assert.match(linhas[1].textContent!, /Suporte · 10º · Vai gravar o ArticleDNA v1 do plano.*Alertas: sem volume — livre, pode trocar/);
@@ -138,21 +169,22 @@ test("Consolidar o Silo do plano · prévia grátis → cancelar não grava → 
   await screen.click([...previa.querySelectorAll<HTMLButtonElement>("button")].find(botao => botao.textContent === "Cancelar")!); await assentar();
   assert.equal(chamadas.filter(chamada => chamada.body?.mode === "apply").length, 0, "cancelar não grava");
   await screen.click("architect-plan-stage"); await assentar();
-  assert.equal(screen.get("architect-plan-sheet-confirm").textContent, "Confirmar e consolidar");
+  assert.equal(screen.get("architect-plan-sheet-confirm").textContent, "Confirmar e gravar");
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   const aplicacoes = chamadas.filter(chamada => chamada.body?.mode === "apply");
   assert.deepEqual(aplicacoes.map(chamada => chamada.body.keywordId), ["k10", "k11"], "uma linha por chamada");
-  assert.ok(aplicacoes.every(chamada => chamada.body.decisionHash === "c".repeat(64) && chamada.body.acceptedKeywordIds.join() === "k10,k11"), "a confirmação é uma só: o mesmo hash");
-  assert.deepEqual(registro.pares, [{ groupId: AZUL, territoryRef: TERRITORIO_REAL, pillarKeywordId: "k9" }], "depois das linhas, o par do Silo com o Pilar do plano");
+  assert.ok(aplicacoes.every(chamada => chamada.body.scope === "articles" && chamada.body.decisionHash === "c".repeat(64) && chamada.body.acceptedKeywordIds.join() === "k10,k11"), "a confirmação é uma só: o mesmo hash, escopo artigos");
+  assert.deepEqual(registro.pares, [], "a aba Artigos não grava o SiloDNA/SiloPage");
+  assert.equal(chamadas.some(chamada => chamada.url === "/api/arquiteto/silo-declared-plan"), false, "nem corrige a página do Silo");
   assert.match(linhaDa("k10").querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /ArticleDNA v1 gravado e relido \(consolidado do plano, sem SERP\)/);
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /Consolidar o Silo do plano: 2 artigo\(s\) gravado\(s\) e relido\(s\)\. Silo: SiloDNA v1 e SiloPage v1 gravados.*Nada foi gravado no Minerador; nada foi pago/);
+  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /1 · Formar artigos do plano: 2 artigo\(s\) gravado\(s\) e relido\(s\)\. A página do Silo é da aba Silos\. Nada foi gravado no Minerador; nada foi pago/);
   assert.equal(registro.aplicados, 1, "a mesa é relida");
   assert.equal(chamadas.some(chamada => chamada.url === "/api/arquiteto/keyword-serp" || chamada.url === "/api/arquiteto/article-improvement" && chamada.method === "POST"), false, "sem SERP e sem a melhoria");
   assert.equal(screen.query("architect-plan-sheet-progress"), null, "nada fica girando");
   semMinerador();
 });
 
-test("Consolidar · linha que falha não derruba as outras e o Silo NÃO é consolidado sobre ela (o resumo diz o caminho)", async () => {
+test("1 · Formar · linha que falha não derruba as outras (o resumo diz quantas)", async () => {
   rede();
   const original = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -168,57 +200,103 @@ test("Consolidar · linha que falha não derruba as outras e o Silo NÃO é cons
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   assert.match(linhaDa("k11").querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /mudou desde a prévia/);
   assert.match(linhaDa("k10").querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /gravado e relido/);
-  assert.deepEqual(registro.pares, [], "o Silo espera as linhas");
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /1 com falha.*O Silo não foi consolidado/);
+  assert.deepEqual(registro.pares, []);
+  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /1 com falha/);
 });
 
 /*
- * 2026-10-15 · ESTADO DE 15/10 (depois da consolidação de 03:25): os 7 artigos
- * formados e o par SiloDNA/SiloPage v1 gravado com o tema de um SUPORTE ("melhor
- * internet para jogos online") e a pendência na frase. A aba diz que o par não
- * está em dia (`siloConsolidatedOf` = falso) e a etapa 1 volta; a prévia
- * oferece "Corrigir a página do Silo (v2)" e a MESMA confirmação grava a v2 pelo
- * núcleo de "Aplicar o plano declarado ao Silo" — nenhuma linha é regravada.
+ * ABA SILOS · ESTADO DE 15/10 (SELECT): os 7 artigos formados e o par
+ * SiloDNA/SiloPage v1 gravado com o tema de um SUPORTE ("melhor internet para
+ * jogos online"); a keyword do Silo "Wi-Fi e fibra óptica" (34bd7c0f) NÃO está
+ * no Arquiteto (0 volume, bruta no Minerador) — e isso é normal. "Consolidar o
+ * Silo do plano" (aba Silos) reusa o Silo do plano e, na MESMA confirmação,
+ * grava "Corrigir a página do Silo (v2)"; nenhum artigo é gravado.
  */
 const SETE = AZUL_REAL.map(([id]) => id);
-const PREVIA_COM_PAR = {
+const PREVIA_DO_SILO = {
   ...PREVIA,
   lines: PREVIA.lines.map(line => ({ ...line, action: "keep", sentence: "Já formado · v1: fica como está (nenhuma versão nova).", alerts: [], articleId: line.keywordId, versionNumber: 1 })),
   territory: { kind: "rows", territoryRef: TERRITORIO_REAL, lifecycleStatus: "consolidated", name: "Wi-Fi e fibra óptica", sentence: "Silo do plano “Wi-Fi e fibra óptica” já existe e está consolidado (SiloDNA e SiloPage gravados): fica como está." },
   summary: "0 artigo(s) do plano para gravar (v1), 7 já formado(s). Sem SERP e sem IA; nada é pago; nada é gravado no Minerador.",
   acceptedKeywordIds: [],
-  siloPair: { state: "fix", siloId: TERRITORIO_REAL, siloDnaVersionId: "6168ca46-d22c-49d9-95c5-94105faa89ef", decisionHash: "d".repeat(64), nextVersion: 2, changes: ["Corrigir a página do Silo: o tema “melhor internet para jogos online” é de um suporte do Silo, não do Silo; há pendência (“pendente de enriquecimento…”) dentro do texto. A versão nova grava o tema “melhor internet para jogos online” → “Wi-Fi e fibra óptica” no SiloDNA e no H1, título, introdução, chamada e seções da SiloPage, sem pendência no texto."], sentence: "Corrigir a página do Silo (v2) nesta mesma confirmação: Corrigir a página do Silo: o tema “melhor internet para jogos online” é de um suporte do Silo, não do Silo." },
+  siloDecisionHash: "e".repeat(64),
+  siloReady: true,
+  headKeyword: null,
+  headSentence: "Keyword do Silo: nenhuma no Arquiteto — normal (0 volume, não cadastrada, Silo não indexado). A identidade vem do plano: “Wi-Fi e fibra óptica” · /wifi-e-fibra.",
+  keywordsWithoutSilo: [],
+  pillarFormed: true,
+  siloPair: { state: "fix", siloId: TERRITORIO_REAL, siloDnaVersionId: "6168ca46-d22c-49d9-95c5-94105faa89ef", decisionHash: "d".repeat(64), nextVersion: 2, changes: ["Corrigir a página do Silo: o tema “melhor internet para jogos online” é de um suporte do Silo, não do Silo."], sentence: "Corrigir a página do Silo (v2) nesta mesma confirmação: Corrigir a página do Silo: o tema “melhor internet para jogos online” é de um suporte do Silo, não do Silo." },
 };
-
-test("estado de 15/10 · par v1 com o tema de um suporte: a etapa 1 volta, a prévia oferece 'Corrigir a página do Silo (v2)' e a confirmação grava a v2 (nenhuma linha regravada, nada no Minerador)", async () => {
+const ENTRADA_AZUL = (stage: "fix" | "pair" | "done", actionable = true) => ({
+  groupId: AZUL, colorLabel: "Azul", color: "azul" as const, siloName: "Wi-Fi e fibra óptica", siloSlug: "wifi-e-fibra",
+  status: { stage, actionable, readyForArticles: true, pairCurrent: stage === "done", sentence: stage === "fix" ? "A página do Silo “Wi-Fi e fibra óptica” está fora do plano (tema, Pilar ou ordem): consolidar grava a versão seguinte." : "O Silo do plano “Wi-Fi e fibra óptica” está pronto: consolidar grava o SiloDNA e a SiloPage com o Pilar e a ordem do plano." },
+  headSentence: PREVIA_DO_SILO.headSentence,
+});
+function redeDoSilo(previa: Record<string, unknown>) {
   rede();
   const anterior = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const body = init?.body ? JSON.parse(String(init.body)) : null;
-    if (url === "/api/arquiteto/plan-silo/consolidate" && body?.mode === "preview") { chamadas.push({ url, method: "POST", body }); return responder(PREVIA_COM_PAR); }
+    if (url === "/api/arquiteto/plan-silo/consolidate" && body?.mode === "preview") { chamadas.push({ url, method: "POST", body }); return responder(previa); }
+    if (url === "/api/arquiteto/plan-silo/consolidate" && body?.scope === "silo") { chamadas.push({ url, method: "POST", body }); return responder({ territoryRef: TERRITORIO_REAL, message: "Silo do plano “Wi-Fi e fibra óptica” confirmado. Relido.", preview: previa }); }
     if (url === "/api/arquiteto/silo-declared-plan") { chamadas.push({ url, method: "POST", body }); return responder({ mode: "apply", state: "APPLIED", siloDna: { versionId: "v2", versionNumber: 2 }, siloPage: { versionId: "p2", versionNumber: 2 } }); }
     return anterior(input, init);
   };
+}
+const abaSilos = (entrada: ReturnType<typeof ENTRADA_AZUL>) => {
   const estado = estadoAtual();
-  const articles: PlanSheetArticle[] = SETE.map(id => ({ articleId: id, versionNumber: 1, subjectKeywordId: id, principalKeywordId: id, keywordIds: [id], slug: id, siloRef: TERRITORIO_REAL, siloLabel: "Wi-Fi e fibra óptica", serpAssessed: id !== "k10" && id !== "k11" }));
-  await screen.render(comProductShell(React.createElement(MesaDoPlano, {
-    marca: MARCA_WIFI, keywords: estado.keywords, standings: estado.standings, articles, mesa: SETE.map(id => ({ id: `art:${id}`, keyword: id, subjectKeywordId: id })), filtro: AZUL_FILTRO, registro,
-    groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal, siloConsolidado: false,
-  }))); await assentar();
-  assert.equal(screen.all("architect-plan-table-row").length, 0, "os 7 são artigos da tabela: nenhuma linha 'Ainda sem ArticleDNA'");
-  assert.equal(screen.all("mesa-article-row").length, 7);
-  assert.equal(screen.get("architect-plan-stage").textContent, "Consolidar o Silo do plano", "par com o tema errado: a etapa 1 volta");
-  await screen.click("architect-plan-stage"); await assentar();
+  const articles: PlanSheetArticle[] = SETE.map(id => ({ articleId: id, versionNumber: 1, subjectKeywordId: id, principalKeywordId: id, keywordIds: [id], slug: id, siloRef: TERRITORIO_REAL, siloLabel: "Wi-Fi e fibra óptica", serpAssessed: true }));
+  return comProductShell(React.createElement(AbaSilosDoPlano, {
+    marca: MARCA_WIFI, keywords: estado.keywords, standings: estado.standings, articles, filtro: AZUL_FILTRO, registro,
+    groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal, entradas: [entrada],
+  }));
+};
+
+test("aba Silos · estado de 15/10: a linha do Silo do plano oferece 'Consolidar o Silo do plano'; prévia com a identidade do plano, a keyword do Silo ausente (normal) e 'Corrigir a página do Silo (v2)'; a confirmação grava o Silo e a v2 — nenhum artigo, nenhum Silo novo, nada no Minerador", async () => {
+  redeDoSilo(PREVIA_DO_SILO);
+  await screen.render(abaSilos(ENTRADA_AZUL("fix"))); await assentar();
+  const linha = screen.get("architect-plan-silo-row");
+  assert.equal(linha.dataset.stage, "fix");
+  assert.match(linha.textContent!, /Silo do plano.*“Wi-Fi e fibra óptica” · \/wifi-e-fibra/);
+  const botao = screen.get("architect-plan-silo-consolidate");
+  assert.equal(botao.textContent, "Consolidar o Silo do plano");
+  assert.equal(botao.className, "primary");
+  await screen.click(botao); await assentar();
+  assert.deepEqual(chamadas.find(chamada => chamada.url === "/api/arquiteto/plan-silo/consolidate")!.body, { brandId: MARCA_WIFI, groupId: AZUL, mode: "preview", scope: "silo" });
+  const previa = screen.get("architect-plan-consolidation-preview");
+  assert.equal(previa.dataset.scope, "silo");
+  assert.match(previa.textContent!, /já existe e está consolidado/);
+  assert.match(screen.get("architect-plan-silo-head").textContent!, /Keyword do Silo: nenhuma no Arquiteto — normal/);
+  assert.match(previa.textContent!, /Nenhum artigo vira Silo e nenhum Silo paralelo é criado/);
   const par = screen.get("architect-plan-consolidation-silo-pair");
   assert.equal(par.dataset.state, "fix");
   assert.match(par.textContent!, /^Corrigir a página do Silo \(v2\) nesta mesma confirmação/);
-  assert.match(screen.get("architect-plan-consolidation-preview").textContent!, /já existe e está consolidado/);
+  assert.equal(screen.get("architect-plan-sheet-confirm").textContent, "Confirmar e consolidar o Silo");
   await screen.click("architect-plan-sheet-confirm"); await assentar();
-  assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/plan-silo/consolidate" && chamada.body?.mode === "apply").length, 0, "nenhuma linha é regravada");
+  const doSilo = chamadas.filter(chamada => chamada.url === "/api/arquiteto/plan-silo/consolidate" && chamada.body?.mode === "apply");
+  assert.deepEqual(doSilo.map(chamada => chamada.body), [{ brandId: MARCA_WIFI, groupId: AZUL, mode: "apply", scope: "silo", decisionHash: "e".repeat(64) }], "uma chamada do Silo, sem linha de artigo");
   const correcao = chamadas.filter(chamada => chamada.url === "/api/arquiteto/silo-declared-plan");
   assert.deepEqual(correcao.map(chamada => chamada.body), [{ brandId: MARCA_WIFI, siloId: TERRITORIO_REAL, mode: "apply", expectedSiloDnaVersionId: "6168ca46-d22c-49d9-95c5-94105faa89ef", decisionHash: "d".repeat(64) }], "a mesma confirmação, o hash da prévia");
   assert.deepEqual(registro.pares, [], "o par existente não passa pela consolidação de primeira vez");
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /Silo: SiloDNA v2 e SiloPage v2 gravados e relidos, com o tema do Silo do plano\./);
+  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /Consolidar o Silo do plano: Silo do plano “Wi-Fi e fibra óptica” confirmado\. Relido\. Página do Silo: SiloDNA v2 e SiloPage v2 gravados e relidos, com o tema do Silo do plano\. Nenhum artigo foi convertido em Silo/);
   semMinerador();
+});
+
+test("aba Silos · Silo pronto sem página e o Pilar já formado: a mesma confirmação grava o SiloDNA e a SiloPage v1 pelo fechamento de sempre (Pilar do plano)", async () => {
+  redeDoSilo({ ...PREVIA_DO_SILO, siloPair: { state: "missing", siloId: null, sentence: "O SiloDNA e a SiloPage do plano são gravados depois das linhas (Pilar e ordem do plano)." }, territory: { ...PREVIA_DO_SILO.territory, lifecycleStatus: "confirmed", sentence: "Silo do plano “Wi-Fi e fibra óptica” já existe e está confirmado: fica como está." } });
+  await screen.render(abaSilos(ENTRADA_AZUL("pair"))); await assentar();
+  await screen.click("architect-plan-silo-consolidate"); await assentar();
+  assert.match(screen.get("architect-plan-consolidation-silo-pair").textContent!, /SiloDNA e a SiloPage v1 são gravados nesta mesma confirmação/);
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(registro.pares, [{ groupId: AZUL, territoryRef: TERRITORIO_REAL, pillarKeywordId: "k9" }], "o par do Silo com o Pilar do plano");
+  assert.equal(chamadas.some(chamada => chamada.body?.keywordId), false, "nenhuma linha de artigo");
+});
+
+test("aba Silos · Silo do plano em dia: o botão fica desabilitado com o motivo (nada a consolidar)", async () => {
+  rede();
+  await screen.render(abaSilos({ ...ENTRADA_AZUL("done", false), status: { stage: "done", actionable: false, readyForArticles: true, pairCurrent: true, sentence: "O Silo do plano “Wi-Fi e fibra óptica” e a página dele seguem o plano." } })); await assentar();
+  const botao = screen.get("architect-plan-silo-consolidate") as HTMLButtonElement;
+  assert.equal(botao.disabled, true);
+  assert.match(botao.title, /seguem o plano/);
 });

@@ -262,12 +262,37 @@ async function readInputs(context: PipelineContext, requested?: string[], groupF
      */
     const fixa = lockedPlanPrincipal(standing);
     const livre = freePlanPrincipal(standing);
-    targets.push({ id: row.id, kind: "subject", theme: standing.phrase, note: standing.note, primaryId: article?.payload.principalKeywordId ?? livre?.keywordId ?? null, post: "free", memberIds: article?.payload.keywordReferences.map(r => r.keywordId) ?? [], territoryRef: text(row.territoryRef), slug: article?.payload.suggestedSlug ?? null, url: null, canonical: null, signals: signals(row),
-      // F4 — principal declarada no plano (pacote aprovado do Assunto): fixa SÓ quando travada; e o plano ainda não aplicado ao DNA (D8).
-      ...(fixa ? { declaredPrincipalId: fixa.keywordId } : {}),
+    const principalAtual = article?.payload.principalKeywordId ?? livre?.keywordId ?? null;
+    /*
+     * 2026-10-15 · A REGRA DO DONO (R2) TAMBÉM NO MOTOR DA ETAPA 2: "se já está
+     * definido [o volume], não pode trocar mesmo que só tenha 10". A principal
+     * Livre do plano com volume medido no DNA fica fixa como a travada; só a
+     * Livre SEM volume pode receber outra principal (a keyword solta incluída).
+     */
+    const linhaDaPrincipal = !fixa && standing.plan && principalAtual ? rows.get(principalAtual) : undefined;
+    const volumeDaPrincipal = linhaDaPrincipal ? knownVolumeOfRow(linhaDaPrincipal, new Date()) : null;
+    const livreComVolume = volumeDaPrincipal?.state === "measured" && volumeDaPrincipal.volume > 0 ? principalAtual : null;
+    targets.push({ id: row.id, kind: "subject", theme: standing.phrase, note: standing.note, primaryId: principalAtual, post: "free", memberIds: article?.payload.keywordReferences.map(r => r.keywordId) ?? [], territoryRef: text(row.territoryRef), slug: article?.payload.suggestedSlug ?? null, url: null, canonical: null, signals: signals(row),
+      // F4 — principal declarada no plano (pacote aprovado do Assunto): fixa SÓ quando travada (ou, desde 15/10, Livre com volume definido); e o plano ainda não aplicado ao DNA (D8).
+      ...(fixa ? { declaredPrincipalId: fixa.keywordId } : livreComVolume ? { declaredPrincipalId: livreComVolume } : {}),
       ...(standing.plan?.declaredPrincipal ? { planPrincipalId: standing.plan.declaredPrincipal.keywordId } : {}),
       // 2026-10-14 (noite) · o artigo consolidado do plano sem SERP volta a ficar "pronto" para receber o parecer (etapa 2).
       ...(standing.plan && article && (!declaredPlanAppliedTo(article.payload, standing) || (!article.payload.serpAssessmentRef && isDeclaredPlanConsolidation(article.payload))) ? { declaredPlanPending: true } : {}) });
+  }
+  /*
+   * 2026-10-15 · AS KEYWORDS SOLTAS ENTRAM NA LISTA (pedido do dono: "lembrar
+   * das keywords soltas, livres, que não têm assunto nem nada (…) podem ser
+   * usadas como secundárias ou principais, sempre de acordo ao DNA delas").
+   * Com o recorte de um grupo, a mesa só trazia as keywords DO grupo e a lista
+   * da marca perdia as que não têm grupo. Agora as sem grupo (recebidas, com o
+   * dono de cada uma pelos artigos delas) entram só na LISTA — nunca como alvo.
+   */
+  if (groupFilter?.kind === "group") {
+    const soltas = await loadCanonicalArquitetoWorkspace(context, { keywordDetail: "full", groupFilter: { kind: "none" } }).catch(() => null);
+    if (soltas) {
+      for (const a of soltas.articleDnas) for (const reference of a.payload.keywordReferences) if (!owned.has(reference.keywordId)) owned.set(reference.keywordId, a.payload.subject?.keywordId ?? a.payload.articleId);
+      for (const [id, row] of projected(soltas, context.brandId)) if (!rows.has(id)) rows.set(id, row);
+    }
   }
   for (const target of targets) {
     const territory = territories.find(t => t.territoryRef === target.territoryRef)?.territory;

@@ -155,6 +155,9 @@ test("servidor da melhoria (estrutural): a keyword nova do Assunto nasce ligada 
   // 2026-10-13 · só a principal TRAVADA é fixa; a livre é a principal atual e pode ser trocada.
   assert.match(fonte, /declaredPrincipalId: fixa\.keywordId/);
   assert.match(fonte, /const fixa = lockedPlanPrincipal\(standing\);/);
-  assert.match(fonte, /primaryId: article\?\.payload\.principalKeywordId \?\? livre\?\.keywordId \?\? null/);
+  // 2026-10-15 · a principal atual virou variável: a Livre com volume definido fica fixa (regra do dono R2, também no motor).
+  assert.match(fonte, /const principalAtual = article\?\.payload\.principalKeywordId \?\? livre\?\.keywordId \?\? null;/);
+  assert.match(fonte, /primaryId: principalAtual,/);
+  assert.match(fonte, /livreComVolume \? \{ declaredPrincipalId: livreComVolume \}/);
   assert.match(fonte, /declaredPrincipalId: target\.declaredPrincipalId/);
 });

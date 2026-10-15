@@ -91,8 +91,162 @@ export function planGroupTerritory(input: {
   return mesmoSlug ? vista(mesmoSlug) : null;
 }
 
+/* ===================== 2026-10-15 · O SILO DO PLANO É O DNA DO PLANO ===================== */
+
+/*
+ * PALAVRAS DO DONO (15/10): "muitas vezes eu já tenho a keyword e o slug do
+ * silo (…) o Google provider barra ele porque tem 0 volume e não cadastra ele
+ * como keyword (…) o silo é um cluster só pra unir grupos, não precisa ter
+ * volume (…) se ele não detectou uma keyword destinada para o silo, mas no DNA
+ * já está definido, ele tem que fazer só isso, recriar e ir pra frente, os
+ * dados são claros, não tem que tentar converter ninguém."
+ *
+ * A identidade do Silo do plano é o que o plano grava: nome, slug, objetivo,
+ * Pilar e ordem (`editorial_groups.plan` + `keyword_subject.plan` de cada
+ * artigo). A KEYWORD do Silo é OPCIONAL: 0 volume, não cadastrada ou não
+ * enviada é estado normal — nunca erro nem pendência. Quando ela existe (o
+ * texto é o nome ou o slug do Silo do plano), é a cabeça da SiloPage: nunca
+ * vira artigo nem "não agrupada". Keyword que o plano declara como artigo
+ * (Pilar ou Suporte) nunca é cabeça de Silo.
+ */
+
+/** O texto comparável do nome/slug do Silo: sem acento, sem caixa, só letras e números ("Wi-Fi e fibra óptica" → "wifiefibraoptica"). */
+export function planSiloTextKey(value: string | null | undefined): string {
+  return String(value ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "");
+}
+
+/** O grupo com plano, na forma mínima que a identidade do Silo lê. */
+export type PlanSiloIdentityPlan = { groupId: string; siloName: string; siloSlug: string | null };
+
+/**
+ * AS KEYWORDS DO SILO DO PLANO (cabeça da SiloPage), por texto: a keyword cujo
+ * texto é o nome ou o slug do Silo do plano. Nunca a que o plano declara como
+ * artigo. Texto que casa com mais de um plano não é reconhecido (ambíguo:
+ * decisão humana). Devolve keywordId → groupId.
+ */
+export function planSiloHeadKeywordIds(input: {
+  plans: readonly PlanSiloIdentityPlan[];
+  keywords: readonly { keywordId: string; text: string }[];
+  planArticleKeywordIds?: ReadonlySet<string>;
+}): Map<string, string> {
+  const artigos = input.planArticleKeywordIds ?? new Set<string>();
+  const porChave = new Map<string, Set<string>>();
+  for (const plan of input.plans) {
+    for (const chave of [planSiloTextKey(plan.siloName), planSiloTextKey(plan.siloSlug)]) {
+      if (!chave) continue;
+      porChave.set(chave, new Set([...(porChave.get(chave) ?? []), plan.groupId]));
+    }
+  }
+  const cabecas = new Map<string, string>();
+  for (const keyword of input.keywords) {
+    if (artigos.has(keyword.keywordId)) continue;
+    const grupos = porChave.get(planSiloTextKey(keyword.text));
+    if (grupos && grupos.size === 1) cabecas.set(keyword.keywordId, [...grupos][0]);
+  }
+  return cabecas;
+}
+
+/** A frase da keyword do Silo: reconhecida como cabeça, ou ausente — e ausente é normal. */
+export function planSiloHeadSentence(input: { siloName: string; siloSlug: string | null; head: { keyword: string } | null }): string {
+  if (input.head) return `Keyword do Silo: “${input.head.keyword}” — cabeça da SiloPage (nunca vira artigo nem “não agrupada”).`;
+  return `Keyword do Silo: nenhuma no Arquiteto — normal (0 volume, não cadastrada, Silo não indexado). A identidade vem do plano: “${input.siloName}”${input.siloSlug ? ` · /${input.siloSlug}` : ""}.`;
+}
+
+/**
+ * NUNCA CONVERTER ARTIGO EM SILO, NUNCA DOIS SILOS DO MESMO PLANO. Antes de
+ * criar um Silo (manual, sugestão, "Usar como Silo"), a aba pergunta isto:
+ * o nome/slug pedido é o de um Silo do plano, ou a keyword escolhida é artigo
+ * do plano? Então a criação é recusada com o caminho ("Consolidar o Silo do
+ * plano", que recria ou reusa o Silo exatamente com o nome e o slug do plano).
+ * `null` = livre para seguir como sempre (marca sem plano).
+ */
+export function planSiloCreationRefusal(input: {
+  name?: string | null;
+  slug?: string | null;
+  keywordIds?: readonly string[];
+  plans: readonly (PlanSiloIdentityPlan & { groupLabel?: string })[];
+  planArticleKeywordIds?: ReadonlySet<string>;
+  existingTerritoryName?: (groupId: string) => string | null;
+}): string | null {
+  const artigos = input.planArticleKeywordIds ?? new Set<string>();
+  const artigo = (input.keywordIds ?? []).find(id => artigos.has(id));
+  if (artigo) return "Esta keyword é artigo do plano (Pilar ou Suporte): artigo do plano nunca vira Silo. O Silo do plano é o do cadastro — use “Consolidar o Silo do plano” na aba Silos.";
+  const pedidos = new Set([planSiloTextKey(input.name), planSiloTextKey(input.slug)].filter(Boolean));
+  if (!pedidos.size) return null;
+  const plano = input.plans.find(plan => pedidos.has(planSiloTextKey(plan.siloName)) || pedidos.has(planSiloTextKey(plan.siloSlug)));
+  if (!plano) return null;
+  const existente = input.existingTerritoryName?.(plano.groupId) ?? null;
+  return existente
+    ? `“${plano.siloName}” é o Silo do plano${plano.groupLabel ? ` ${plano.groupLabel}` : ""} e já existe (“${existente}”): não se cria um segundo. Use “Consolidar o Silo do plano” na aba Silos.`
+    : `“${plano.siloName}” é o Silo do plano${plano.groupLabel ? ` ${plano.groupLabel}` : ""}: ele é criado (ou recriado) com o nome e o slug do plano por “Consolidar o Silo do plano”, na aba Silos — não por aqui.`;
+}
+
+/** Em que pé está o Silo do plano, para a linha da aba Silos e o portão da aba Artigos. */
+export type PlanSiloStage =
+  /** Desfeito por alguém: volta por "Recriar o Silo do plano". */
+  | "rejected"
+  /** As keywords do plano estão em Silos diferentes: decisão humana em Silos. */
+  | "split"
+  /** Não existe: "Consolidar o Silo do plano" cria com nome, slug e objetivo do plano. */
+  | "create"
+  /** Existe como candidato: a consolidação confirma. */
+  | "confirm"
+  /** Existe e está confirmado, mas o grupo aponta para outro Silo ou há keyword do plano sem Silo. */
+  | "link"
+  /** Falta o par SiloDNA + SiloPage e o Pilar do plano já tem ArticleDNA: a consolidação grava o v1. */
+  | "pair"
+  /** O par existe com tema/Pilar/ordem fora do plano: a consolidação grava a versão seguinte. */
+  | "fix"
+  /** Silo pronto; o par espera o Pilar do plano ter ArticleDNA (aba Artigos, etapa 1). */
+  | "wait_articles"
+  /** Silo e página do Silo em dia. */
+  | "done";
+
+export type PlanSiloStatus = {
+  stage: PlanSiloStage;
+  /** A linha da aba Silos tem o que consolidar agora (o botão fica em destaque). */
+  actionable: boolean;
+  /** O Silo existe e está decidido (confirmado/consolidado): a aba Artigos pode formar. */
+  readyForArticles: boolean;
+  /** SiloDNA + SiloPage em dia com o plano: os links internos podem seguir. */
+  pairCurrent: boolean;
+  sentence: string;
+};
+
+const DECIDIDOS = new Set(["confirmed", "consolidated"]);
+
+export function planSiloStatus(input: {
+  siloName: string;
+  territory: { territoryRef: string; lifecycleStatus: string; name?: string | null } | null;
+  linkedTerritoryRef: string | null;
+  rejected: boolean;
+  split: boolean;
+  /** Keywords do plano recebidas no Arquiteto ainda sem Silo. */
+  keywordsWithoutSilo: number;
+  pair: "missing" | "current" | "fix";
+  pillarFormed: boolean;
+}): PlanSiloStatus {
+  const nome = input.territory?.name || input.siloName;
+  const pronto = Boolean(input.territory && DECIDIDOS.has(input.territory.lifecycleStatus));
+  const base = { readyForArticles: pronto, pairCurrent: pronto && input.pair === "current" };
+  if (!input.territory && input.rejected) return { ...base, stage: "rejected", actionable: true, sentence: `O Silo do plano “${input.siloName}” foi desfeito: recrie-o (prévia antes; nada é apagado).` };
+  if (input.split) return { ...base, stage: "split", actionable: false, sentence: "As keywords do plano estão em Silos diferentes: decida qual é o do plano antes de consolidar." };
+  if (!input.territory) return { ...base, stage: "create", actionable: true, sentence: `O Silo do plano “${input.siloName}” ainda não existe: consolidar cria com o nome, o slug e o objetivo do plano (sem keyword do Silo, normal).` };
+  if (!pronto) return { ...base, stage: "confirm", actionable: true, sentence: `O Silo do plano “${nome}” é candidato: consolidar o confirma com a identidade do plano.` };
+  if (input.linkedTerritoryRef !== input.territory.territoryRef || input.keywordsWithoutSilo > 0) {
+    return { ...base, stage: "link", actionable: true, sentence: `O Silo do plano “${nome}” existe${input.keywordsWithoutSilo ? `; ${input.keywordsWithoutSilo} keyword(s) do plano sem Silo entram nele` : ""}${input.linkedTerritoryRef !== input.territory.territoryRef ? "; o grupo volta a apontar para ele" : ""}.` };
+  }
+  if (input.pair === "fix") return { ...base, stage: "fix", actionable: true, sentence: `A página do Silo “${nome}” está fora do plano (tema, Pilar ou ordem): consolidar grava a versão seguinte.` };
+  if (input.pair === "missing") {
+    return input.pillarFormed
+      ? { ...base, stage: "pair", actionable: true, sentence: `O Silo do plano “${nome}” está pronto: consolidar grava o SiloDNA e a SiloPage com o Pilar e a ordem do plano.` }
+      : { ...base, stage: "wait_articles", actionable: false, sentence: `O Silo do plano “${nome}” está pronto. A página do Silo (SiloDNA e SiloPage) é gravada quando o Pilar do plano tiver ArticleDNA — forme os artigos na aba Artigos.` };
+  }
+  return { ...base, stage: "done", actionable: false, sentence: `O Silo do plano “${nome}” e a página dele seguem o plano.` };
+}
+
 /** O que a regra precisa do grupo com plano. */
-export type DeclaredPlanGroupView = { groupId: string; groupLabel: string; siloName: string; siloSlug: string | null; linkedTerritoryRef: string | null };
+export type DeclaredPlanGroupView ={ groupId: string; groupLabel: string; siloName: string; siloSlug: string | null; linkedTerritoryRef: string | null };
 
 /** O que ela lê do território. */
 export type DeclaredPlanTerritoryView = PlanSiloTerritoryView & {

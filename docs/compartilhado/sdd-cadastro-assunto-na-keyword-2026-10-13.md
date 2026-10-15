@@ -422,6 +422,14 @@ posições, tudo confuso". Autorização do dono pela coordenação (mesma frent
 
 **Continuação (2026-10-15, mesma frente, sem migration):** o "corpo estranho" (jogos online fora da tabela) vinha da entidade central do território gravada a partir da 1ª keyword do grupo pelo "Processar arquitetura" (semente do Silo proposto do plano) e da reserva da SiloPage sobre ela; artigo do plano nunca é mais reservado e o Silo proposto do plano não tem semente. O tema do SiloDNA/SiloPage do plano nunca é o de um suporte nem leva pendência em frase: "Consolidar o Silo do plano" oferece "Corrigir a página do Silo (vN+1)" pelo núcleo de "Aplicar o plano declarado ao Silo", na mesma confirmação. O limite acima do `silo_id` velho caiu: a store religa quando o Silo antigo não existe mais (sem território, SiloDNA ou SiloPage) e continua recusando trocar Silo vivo. "Processar arquitetura" reconhece o Silo do plano consolidado (nada de "Silo proposto"). Detalhe em `docs/04-arquiteto/estado-atual.md`.
 
+**Continuação (2026-10-15, tarde, mesma frente, sem migration) — "o Silo do plano é o DNA do plano":** a
+"Consolidar o Silo do plano" saiu da aba Artigos e foi para a aba Silos (núcleo único com `scope: "silo"`; a aba
+Artigos usa `scope: "articles"` e nunca cria nem consolida Silo); a keyword do Silo é opcional (0 volume normal) e,
+quando existe, é a cabeça da SiloPage; nenhum caminho converte artigo em Silo nem cria Silo paralelo; a aba Artigos
+ganhou as etapas 2 · Reforçar keywords e SERP (o motor de sempre, com as keywords soltas na lista) e 3 · Linha
+editorial. Contrato e frase do dono: adendo de 2026-10-15 em `sdd-plano-declarado-e-grupos-2026-10-12.md` e
+`docs/04-arquiteto/spec.md` §32.
+
 ## 12. Decisões pendentes do dono
 
 - Volume medido **= 0** conta como "sem volume" (livre). Recomendação: sim

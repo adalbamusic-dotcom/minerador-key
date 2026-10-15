@@ -1,7 +1,8 @@
 import { React } from "./radar-dom-harness.mts";
 import { PlanArticleTableRow, PlanRowActions, PlanRowSeals, PlanSheetOperations, usePlanArticleSheet } from "../modules/arquiteto/plan-article-sheet.tsx";
 import { ArticlesFormationBar } from "../modules/arquiteto/articles-formation-bar.tsx";
-import { planOrderedGroupItems, planRowsWithoutArticle, splitTableSelectionForPlan, type PlanSheetArticle, type PlanSheetRow } from "../lib/arquiteto/plan-article-sheet.ts";
+import { planOrderedGroupItems, planRowsWithoutArticle, splitTableSelectionForPlan, type PlanArticleSiloGate, type PlanSheetArticle, type PlanSheetRow } from "../lib/arquiteto/plan-article-sheet.ts";
+import { PlanSiloBar, type PlanSiloBarEntry } from "../modules/arquiteto/plan-silo-bar.tsx";
 import type { EditorialGroupScreenFilter } from "../lib/editorial/editorial-groups.ts";
 import type { ArchitectSubjectStanding } from "../lib/arquiteto/declared-subject.ts";
 
@@ -20,10 +21,40 @@ const VAZIO = new Set<string>();
 
 /** O artigo da mesa, na forma mínima: o Assunto dele diz se é do plano (o mesmo critério da aba). */
 export type ArtigoDaMesa = { id: string; keyword: string; subjectKeywordId: string | null; published?: boolean };
-export type Registro = { processar: string[][]; concluir: string[][]; links: number; pares: Array<{ groupId: string; territoryRef: string; pillarKeywordId: string | null }>; aplicados: number };
-export const novoRegistro = (): Registro => ({ processar: [], concluir: [], links: 0, pares: [], aplicados: 0 });
+export type Registro = { processar: string[][]; concluir: string[][]; links: number; pares: Array<{ groupId: string; territoryRef: string; pillarKeywordId: string | null }>; aplicados: number;
+  /** 2026-10-15 · quantas vezes a aba Artigos mandou para a aba Silos. */
+  silos: number };
+export const novoRegistro = (): Registro => ({ processar: [], concluir: [], links: 0, pares: [], aplicados: 0, silos: 0 });
 
-export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro, registro, groupOf, keywordGroupOf, siloConsolidado = false, parDoSilo, hasPublished = false }: {
+/**
+ * 2026-10-15 · A ABA SILOS com as MESMAS peças: a linha do Silo do plano
+ * (`PlanSiloBar`) e a prévia/andamento (`PlanSheetOperations`) sobre o mesmo
+ * hook. "Consolidar o Silo do plano" mora aqui; a aba Artigos não o tem.
+ */
+export function AbaSilosDoPlano({ marca, keywords, standings, articles, filtro, registro, groupOf, keywordGroupOf, entradas, parDoSilo }: {
+  marca: string;
+  keywords: readonly Record<string, unknown>[];
+  standings?: ReadonlyMap<string, ArchitectSubjectStanding>;
+  articles: readonly PlanSheetArticle[];
+  filtro: EditorialGroupScreenFilter;
+  registro: Registro;
+  groupOf: (id: string) => { color: string; name: string } | null;
+  keywordGroupOf: (id: string) => string | null;
+  entradas: readonly PlanSiloBarEntry[];
+  parDoSilo?: (input: { groupId: string; territoryRef: string; pillarKeywordId: string | null }) => Promise<{ ok: boolean; message: string }>;
+}) {
+  const sheet = usePlanArticleSheet({
+    brandId: marca, brandRef: "wificonecta--d4fa133a", keywords, standings, groupOf, keywordGroupOf, filter: filtro, articles, radarArticleIds: VAZIO,
+    onApplied: () => { registro.aplicados += 1; },
+    consolidateSiloPair: async input => { registro.pares.push(input); return parDoSilo ? parDoSilo(input) : { ok: true, message: "SiloDNA v1 e SiloPage v1 gravados e relidos, com o Pilar e a ordem do plano." }; },
+  });
+  return h(React.Fragment, null,
+    h(PlanSiloBar, { entries: entradas, sheet, onRecreate: () => undefined, buttonClassName: "button", primaryButtonClassName: "primary" }),
+    h(PlanSheetOperations, { sheet, buttonClassName: "button", primaryButtonClassName: "primary", controlClassName: "control", dangerButtonClassName: "danger" }),
+  );
+}
+
+export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro, registro, groupOf, keywordGroupOf, siloConsolidado = false, parDoSilo, hasPublished = false, siloGate }: {
   marca: string;
   keywords: readonly Record<string, unknown>[];
   /** Como na aba: o Assunto lido do pacote aprovado, à parte da linha (a linha que veio do ArticleDNA não traz a semântica). */
@@ -37,11 +68,15 @@ export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro
   siloConsolidado?: boolean;
   parDoSilo?: (input: { groupId: string; territoryRef: string; pillarKeywordId: string | null }) => Promise<{ ok: boolean; message: string }>;
   hasPublished?: boolean;
+  /** 2026-10-15 · o portão do Silo do plano (aba Silos); ausente = Silo decidido, página pelo `siloConsolidado`. */
+  siloGate?: PlanArticleSiloGate;
 }) {
   const sheet = usePlanArticleSheet({
     brandId: marca, brandRef: "wificonecta--d4fa133a", keywords, standings, groupOf, keywordGroupOf, filter: filtro, articles, radarArticleIds: VAZIO,
     onApplied: () => { registro.aplicados += 1; },
     siloConsolidatedOf: () => siloConsolidado,
+    ...(siloGate ? { siloGateOf: () => siloGate } : {}),
+    onGoToSilos: () => { registro.silos += 1; },
     consolidateSiloPair: async input => { registro.pares.push(input); return parDoSilo ? parDoSilo(input) : { ok: true, message: "SiloDNA v1 e SiloPage v1 gravados e relidos, com o Pilar e a ordem do plano." }; },
     onGoToLinks: () => { registro.links += 1; },
   });

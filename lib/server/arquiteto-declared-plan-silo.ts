@@ -74,11 +74,26 @@ export async function canApprove(context: PipelineContext): Promise<boolean> {
  * canônico da mesa), e são relidas. Keyword publicada ou já em outro Silo não
  * é movida (`keptElsewhere`). Usado pelo envio e por "Consolidar o Silo do plano".
  */
-export async function assignPlanGroupKeywordsToTerritory(context: PipelineContext, input: { groupId: string; territoryRef: string; territories: readonly TerritoryWorkflowItem[]; patch?: Patch; decidedAt: string }): Promise<{ assignedKeywordIds: string[]; keptElsewhere: string[] }> {
+export async function assignPlanGroupKeywordsToTerritory(context: PipelineContext, input: { groupId: string; territoryRef: string; territories: readonly TerritoryWorkflowItem[]; patch?: Patch; decidedAt: string;
+  /**
+   * 2026-10-15 · aditivo: a keyword do Silo do plano (texto = nome/slug do
+   * plano; sem grupo). Opcional; presente, entra no Silo do plano como as do
+   * grupo (sem Silo, não publicada). Ausente = o comportamento de sempre.
+   */
+  extraKeywordIds?: readonly string[] }): Promise<{ assignedKeywordIds: string[]; keptElsewhere: string[] }> {
   const patch = input.patch ?? patchViaMesa;
   const { loadCanonicalArquitetoWorkspace } = await import("./arquiteto-workspace");
-  const mesa = await loadCanonicalArquitetoWorkspace(context, { groupFilter: { kind: "group", groupId: input.groupId } });
-  const linhas = buildCanonicalWorkflowWorkspaceItems(mesa.workflowItems, mesa.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
+  const extras = new Set(input.extraKeywordIds ?? []);
+  const lerLinhas = async () => {
+    const doGrupo = await loadCanonicalArquitetoWorkspace(context, { groupFilter: { kind: "group", groupId: input.groupId } });
+    const linhasDoGrupo = buildCanonicalWorkflowWorkspaceItems(doGrupo.workflowItems, doGrupo.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
+    if (!extras.size) return linhasDoGrupo;
+    const marca = await loadCanonicalArquitetoWorkspace(context);
+    const daMarca = buildCanonicalWorkflowWorkspaceItems(marca.workflowItems, marca.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
+    const ja = new Set(linhasDoGrupo.map(linha => String(linha.id)));
+    return [...linhasDoGrupo, ...daMarca.filter(linha => extras.has(String(linha.id)) && !ja.has(String(linha.id)))];
+  };
+  const linhas = await lerLinhas();
   const semSilo = linhas.filter(linha => !linha.territoryRef && !linha.isPublished);
   const keptElsewhere = linhas.filter(linha => typeof linha.territoryRef === "string" && linha.territoryRef !== input.territoryRef).map(linha => String(linha.id));
   if (!semSilo.length) return { assignedKeywordIds: [], keptElsewhere };
@@ -100,8 +115,7 @@ export async function assignPlanGroupKeywordsToTerritory(context: PipelineContex
     await patch(context, { brandId: context.brandId, updates: lote.writes.map(write => ({ workflowItemId: write.workflowItemId, expectedLock: write.expectedLock, assignment: write.assignment as Record<string, unknown> })) });
   }
   // Releitura: só conta o que voltou no Silo do plano.
-  const relida = await loadCanonicalArquitetoWorkspace(context, { groupFilter: { kind: "group", groupId: input.groupId } });
-  const relidas = buildCanonicalWorkflowWorkspaceItems(relida.workflowItems, relida.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
+  const relidas = await lerLinhas();
   return { assignedKeywordIds: relidas.filter(linha => linha.territoryRef === input.territoryRef && semSilo.some(antes => antes.id === linha.id)).map(linha => String(linha.id)), keptElsewhere };
 }
 

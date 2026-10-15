@@ -1,3 +1,18 @@
+## O Silo do plano é o DNA do plano · Silo na aba Silos, artigos na aba Artigos · reforço com as soltas · linha editorial — Arquiteto — 2026-10-15 (tarde)
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`; contrato em `spec.md` §32 e no adendo de 2026-10-15 da SDD do plano declarado. **Validado manualmente: não.**
+
+- [x] Identidade do Silo do plano = DNA do plano; keyword do Silo opcional (ausente = normal); presente = cabeça da SiloPage (nunca artigo nem "não agrupada").
+- [x] Nenhum caminho converte artigo em Silo nem cria Silo paralelo do plano (Processar arquitetura, "+ Silo", "Usar como Silo", sugestões, primária pela SERP, reserva).
+- [x] "Consolidar o Silo do plano" na aba Silos (linha do Silo do plano; `scope: "silo"`; página do Silo na mesma confirmação); "Recriar o Silo do plano" só na aba Silos.
+- [x] Aba Artigos só de artigo: 1 Formar (só se faltar) · 2 Reforçar keywords e SERP · 3 Linha editorial · 4 Links internos; sem Silo decidido, aponta a aba Silos.
+- [x] Etapa 2 no motor de sempre; corrigido: as keywords soltas entram na lista do recorte do grupo; Livre com volume definido fica fixa; prévia com a mais fraca, o que entra (fonte) e o que sai.
+- [x] Etapa 3 "Linha editorial" (grátis, sem IA, só o pendente, fonte declarada, v+1 com decisão humana).
+- [ ] Dono: no azul, aba Silos → "Consolidar o Silo do plano" (esperado: Silo existe e consolidado; "Keyword do Silo: nenhuma no Arquiteto — normal"; "Corrigir a página do Silo (v2)") → confirmar; aba Artigos → 2 → 3 → 4.
+- [ ] Readback depois da homologação (SELECT): SiloDNA/SiloPage v2 com "Wi-Fi e fibra óptica", `editorial_groups.silo_id` = `territory:5e689f8c…`, ArticleDNA v+1 com a linha editorial.
+- [ ] Ferramenta MCP para a consolidação do Silo do plano e para a linha editorial (hoje só na tela).
+- [ ] Silo com o par já gravado que ganha artigo novo: incluir na página do Silo pela consolidação (hoje pelo caminho de edição de sempre).
+
 ## Caso WifiConecta (azul) · corpo estranho, tema da página do Silo, vínculo velho, Processar arquitetura — Arquiteto — 2026-10-15
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**

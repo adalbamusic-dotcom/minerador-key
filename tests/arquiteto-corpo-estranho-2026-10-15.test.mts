@@ -98,7 +98,10 @@ test("a aba usa a reserva única com as keywords do plano (estrutural)", () => {
   const inicio = tela.indexOf("const reservedSiloHeadIds = useMemo(");
   const trecho = tela.slice(inicio, tela.indexOf("const confirmedTerritoryRefs", inicio));
   assert.match(trecho, /reservedSiloHeadKeywordIds\(\{/);
-  assert.match(trecho, /planArticleKeywordIds: planArticleKeywordIds\(\{ brandId: selectedBrandId \|\| null, standings: subjectStandings \}\)/);
+  // 2026-10-15 (tarde) · o conjunto virou memo próprio (`planArticleKeywordIdSet`), usado também pela aba Silos; + a keyword do Silo do plano.
+  assert.match(tela, /const planArticleKeywordIdSet = useMemo\(\(\) => planArticleKeywordIds\(\{ brandId: selectedBrandId \|\| null, standings: subjectStandings \}\)/);
+  assert.match(trecho, /planArticleKeywordIds: planArticleKeywordIdSet,/);
+  assert.match(trecho, /planSiloHeadIds: planSiloHeadIds\.keys\(\),/);
   assert.ok(tela.indexOf("const subjectStandings = useMemo(") < inicio, "o Assunto é lido antes da reserva");
   assert.doesNotMatch(tela, /reservedForSiloPage\(/, "a aba não tem mais reserva própria");
   assert.match(tela, /planVersion: grupo\.planVersion/, "a linha diz a versão do grupo");

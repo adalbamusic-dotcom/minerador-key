@@ -85,7 +85,8 @@ test("azul real: 7 linhas; 12, 13 e 14 presas no artigo do laranja com o caminho
   assert.match(linhaDa("k13").querySelector<HTMLElement>("[data-plan-seal='conflict']")!.title, /Presa no artigo “melhor-para-jogos-online” do Silo “planos de internet” \(Assunto “Internet de 300, 500, 600 Mega ou 1 Giga: qual velocidade contratar\?” · cor Laranja\)/);
   assert.equal(linhaDa("k13").querySelector("[data-testid='architect-plan-row-withdraw']")?.textContent, "Retirar artigo do Silo");
   assert.equal(screen.query("architect-plan-sheet-next-step"), null);
-  assert.equal(screen.get("architect-plan-stage").textContent, "Consolidar o Silo do plano");
+  // 2026-10-15 · a aba Artigos não consolida Silo: a etapa atual é a de artigo.
+  assert.equal(screen.get("architect-plan-stage").textContent, "1 · Formar artigos do plano");
   semMinerador();
 });
 

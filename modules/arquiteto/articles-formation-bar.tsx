@@ -1,5 +1,5 @@
 "use client";
-import { PLAN_FLOW_LABELS, type PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
+import { PLAN_FLOW_LABELS, planArticleVisibleSteps, type PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
 import type { PlanArticleSheetController } from "./plan-article-sheet";
 
 /**
@@ -41,7 +41,7 @@ export function ArticlesFormationBar({
   selectionScope: { selectedCount: number; reason: string | null };
   /** As linhas do plano marcadas na tabela (o artigo do plano da mesa e a linha do plano sem artigo). */
   planTargets: readonly PlanSheetRow[];
-  planSheet: Pick<PlanArticleSheetController, "ocupado" | "start"> & Partial<Pick<PlanArticleSheetController, "rows" | "flow" | "planGroupId" | "runStage">>;
+  planSheet: Pick<PlanArticleSheetController, "ocupado" | "start"> & Partial<Pick<PlanArticleSheetController, "rows" | "flow" | "planGroupId" | "runStage" | "siloGate" | "onGoToSilos">>;
   onProcess: () => Promise<unknown> | unknown;
   onConfirm: () => Promise<unknown> | unknown;
   improvementOpen: boolean;
@@ -63,27 +63,41 @@ export function ArticlesFormationBar({
     {improvementOpen ? "Fechar “Melhorar publicados”" : PLAN_FLOW_LABELS.improvePublished}
   </button>;
 
-  /* ---------------- um plano no recorte: as três etapas, uma de cada vez ---------------- */
-  const etapaAtual = planSheet.flow?.find(step => step.state === "current") ?? null;
-  if (planSheet.rows?.length && planSheet.planGroupId && planSheet.flow && etapaAtual) {
-    // A prévia diz por linha o que fica fora (presa em outro artigo, principal que não chegou): o botão nunca é beco sem saída.
+  /*
+   * ---------------- um plano no recorte: as quatro etapas SÓ DE ARTIGO ----------------
+   * 2026-10-15 · pedido do dono: "a definição do silo já tem que estar na aba
+   * do Silo e não nos artigos. Artigo só mexe com artigos". A barra não cria nem
+   * consolida Silo: sem o Silo do plano decidido, uma linha curta aponta a aba
+   * Silos e as etapas ficam desabilitadas com o motivo. Um botão em destaque (a
+   * etapa atual); as seguintes desabilitadas com o motivo no `title`; no
+   * máximo 3 botões visíveis.
+   */
+  if (planSheet.rows?.length && planSheet.planGroupId && planSheet.flow?.length) {
+    const fluxo = planSheet.flow;
+    const semSilo = planSheet.siloGate ? !planSheet.siloGate.ready : false;
+    const reservados = (hasPublished ? 1 : 0) + (semSilo && planSheet.onGoToSilos ? 1 : 0);
+    const visiveis = planArticleVisibleSteps(fluxo, 3 - reservados);
+    const atual = visiveis.find(step => step.state === "current") ?? null;
     const bloqueado = formationBusy || planSheet.ocupado;
+    const linha = semSilo ? `${planSheet.siloGate!.sentence}.` : atual?.reason ?? visiveis[0]?.reason ?? "";
     return (
-      <section id="architect-articles-new" className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface-subtle px-4 py-3" data-plan-mode="true" data-stage={etapaAtual.id} data-testid="architect-articles-formation-actions">
-        <button
+      <section id="architect-articles-new" className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface-subtle px-4 py-3" data-plan-mode="true" data-stage={atual?.id ?? "none"} data-testid="architect-articles-formation-actions">
+        {visiveis.map(step => <button
+          key={step.id}
           type="button"
-          onClick={() => planSheet.runStage?.(etapaAtual.id)}
-          disabled={bloqueado}
-          title={etapaAtual.reason}
-          data-testid="architect-plan-stage"
-          data-stage={etapaAtual.id}
-          className={primaryButtonClassName ?? buttonClassName}
+          onClick={() => planSheet.runStage?.(step.id)}
+          disabled={bloqueado || step.state !== "current"}
+          title={step.reason}
+          data-testid={step.state === "current" ? "architect-plan-stage" : "architect-plan-stage-next"}
+          data-stage={step.id}
+          className={step.state === "current" ? primaryButtonClassName ?? buttonClassName : buttonClassName}
         >
-          {etapaAtual.label}
-        </button>
+          {step.label}
+        </button>)}
         {hasPublished && melhorar}
-        <span className="min-w-0 flex-1 truncate text-sm text-text-muted" title={planSheet.flow.map(step => `${step.id} · ${step.label}: ${step.reason}`).join("\n")} data-testid="architect-plan-stage-line">
-          {etapaAtual.reason}
+        <span className="min-w-0 flex-1 truncate text-sm text-text-muted" title={fluxo.filter(step => !step.hidden).map(step => `${step.label}: ${step.reason}`).join("\n")} data-testid="architect-plan-stage-line">
+          {linha}
+          {semSilo && planSheet.onGoToSilos && <>{" "}<button type="button" onClick={planSheet.onGoToSilos} className="font-medium text-module-accent underline underline-offset-2" data-testid="architect-plan-go-silos">Abrir a aba Silos</button></>}
         </span>
       </section>
     );
@@ -131,7 +145,7 @@ export function ArticlesFormationBar({
       {melhorar}
       <span className={`text-sm ${selectionScope.reason && regulares > 0 ? "text-warning" : "text-text-muted"}`} data-testid="architect-articles-selection-count">
         {variosPlanos
-          ? "Escolha a cor do plano na etiqueta para consolidar o Silo do plano."
+          ? "Escolha a cor do plano na etiqueta para as etapas dos artigos do plano (o Silo do plano é consolidado na aba Silos)."
           : total === 0
             ? selectionScope.reason
             : regulares > 0 && selectionScope.reason
