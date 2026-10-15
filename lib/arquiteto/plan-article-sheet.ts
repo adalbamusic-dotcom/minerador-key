@@ -1013,7 +1013,14 @@ export type PlanArticleFlowStep = {
 };
 
 /** O portão da aba Artigos: o Silo do plano decidido (aba Silos) e a página dele em dia (para os links). */
-export type PlanArticleSiloGate = { ready: boolean; pairCurrent: boolean; sentence: string };
+export type PlanArticleSiloGate = { ready: boolean; pairCurrent: boolean; sentence: string;
+  /**
+   * 2026-10-15 (noite) · aditivo: o Silo do plano está decidido, mas a página
+   * dele (SiloDNA/SiloPage) precisa de correção — o que corrigir ("tema",
+   * "pendência no texto"). A barra da aba Artigos diz isso numa linha curta,
+   * com o link para a aba Silos. Ausente/nulo = nada a dizer.
+   */
+  pageFix?: string | null };
 
 export function planArticleFlowSteps(input: { rows: readonly PlanSheetRow[]; silo: PlanArticleSiloGate }): PlanArticleFlowStep[] {
   const rows = input.rows;

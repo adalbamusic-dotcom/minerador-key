@@ -19,7 +19,7 @@ import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "@/lib/arquiteto/silo-artic
 import type { PlanConsolidationLine, PlanSiloPairStep } from "@/lib/arquiteto/plan-consolidation";
 import { PLAN_SILO_PAIR_FIX_LABEL } from "@/lib/arquiteto/silo-plan-identity";
 import { PLAN_SILO_CONSOLIDATE_LABEL, PLAN_SILO_TAB_SENTENCE } from "@/lib/arquiteto/plan-article-sheet";
-import { EDITORIAL_LINE_LABEL, EDITORIAL_LINE_ROUTE } from "@/lib/arquiteto/plan-editorial-line";
+import { EDITORIAL_LINE_BRAND_DNA_HINT, EDITORIAL_LINE_LABEL, EDITORIAL_LINE_ROUTE } from "@/lib/arquiteto/plan-editorial-line";
 import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
 
 /**
@@ -869,7 +869,9 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
         <p className="text-text-muted">{preview.data.summary} Cada artigo grava o ArticleDNA v1 com o que veio do Minerador (Assunto = título; principal = a keyword do plano; papel e ordem do plano; escopo como promessa). Decisão sua, registrada como “consolidado do plano do Minerador”. O Silo não é tocado.</p>
       </div>}
       {preview.action === "editorialLine" && <div className="mt-1 grid gap-0.5" data-testid="architect-plan-editorial-line-preview">
-        <p className="text-text-muted">{preview.data.summary} Só campo pendente ganha valor; o que já foi decidido fica.</p>
+        <p className="text-text-muted">{preview.data.summary} Só campo pendente ganha valor (e o texto gerado pela regra antiga é corrigido); o que foi decidido por gente fica.</p>
+        {/* 2026-10-15 (noite) · sem BrandDNA aprovado o Público fica pendente: a prévia diz o caminho com clareza. */}
+        {!preview.data.brandDnaAvailable && <p className="text-warning" data-testid="architect-plan-editorial-line-brand-dna">Público pendente: {EDITORIAL_LINE_BRAND_DNA_HINT}.</p>}
       </div>}
       {preview.action === "chooseSwap" && <p className="mt-1 text-text-muted">Só artigo do plano com a trava Livre. As candidatas são a keyword do Assunto e as sustentações com volume medido da lista dele, das que têm mais lentes de SERP e mais volume. A prévia (grátis) mostra o que muda; gravar é a sua confirmação e gera uma nova versão.</p>}
       {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && <p className="mt-1 text-text-muted">Grava só o ArticleDNA, a composição e o parecer, pelo mesmo núcleo da formação; nada é gravado no Minerador. Uma confirmação vale para as linhas “vai gravar”; as outras ficam como estão, com o motivo.</p>}

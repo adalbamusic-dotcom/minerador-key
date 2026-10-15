@@ -234,7 +234,8 @@ export function planSiloStatus(input: {
   if (!input.territory) return { ...base, stage: "create", actionable: true, sentence: `O Silo do plano “${input.siloName}” ainda não existe: consolidar cria com o nome, o slug e o objetivo do plano (sem keyword do Silo, normal).` };
   if (!pronto) return { ...base, stage: "confirm", actionable: true, sentence: `O Silo do plano “${nome}” é candidato: consolidar o confirma com a identidade do plano.` };
   if (input.linkedTerritoryRef !== input.territory.territoryRef || input.keywordsWithoutSilo > 0) {
-    return { ...base, stage: "link", actionable: true, sentence: `O Silo do plano “${nome}” existe${input.keywordsWithoutSilo ? `; ${input.keywordsWithoutSilo} keyword(s) do plano sem Silo entram nele` : ""}${input.linkedTerritoryRef !== input.territory.territoryRef ? "; o grupo volta a apontar para ele" : ""}.` };
+    // 2026-10-15 (noite) · a página do Silo fora do plano também é dita aqui: a mesma confirmação a corrige (versão seguinte).
+    return { ...base, stage: "link", actionable: true, sentence: `O Silo do plano “${nome}” existe${input.keywordsWithoutSilo ? `; ${input.keywordsWithoutSilo} keyword(s) do plano sem Silo entram nele` : ""}${input.linkedTerritoryRef !== input.territory.territoryRef ? "; o grupo volta a apontar para ele" : ""}${input.pair === "fix" ? "; a página do Silo está fora do plano e é corrigida na versão seguinte" : ""}.` };
   }
   if (input.pair === "fix") return { ...base, stage: "fix", actionable: true, sentence: `A página do Silo “${nome}” está fora do plano (tema, Pilar ou ordem): consolidar grava a versão seguinte.` };
   if (input.pair === "missing") {

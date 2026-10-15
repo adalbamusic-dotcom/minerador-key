@@ -70,6 +70,8 @@ const centerKindOf = (cluster: ClusterAnalysis, publishedRefs: ReadonlySet<strin
 
 const centerMetaOf = (cluster: ClusterAnalysis, slug: string | null, kind: ArchitectureFlowNodeKind) => {
   if (kind === "cluster") {
+    // 2026-10-15 (noite) · grupo de keywords do plano declarado: segue o plano, não "sem profundidade".
+    if (cluster.declaredPlan) return `Segue o plano do Silo “${cluster.declaredPlan.siloName}”`;
     return cluster.destination === "new_silo_candidate"
       ? "Destino sugerido: novo Silo"
       : cluster.destination === "ambiguous"

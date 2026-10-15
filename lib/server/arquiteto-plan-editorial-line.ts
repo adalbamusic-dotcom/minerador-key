@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { ArticleDNASchema, type ArticleDNA, type VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { articleApprovalRevalidationIssues, isDeclaredPlanConsolidation } from "@/lib/arquiteto/article-approval-revalidation";
 import {
-  articleEditorialPending, EDITORIAL_LINE_FIELDS, EDITORIAL_LINE_LABEL, isEditorialPending, planEditorialLineChanges, planEditorialLineHashBody, planEditorialLineSentence,
+  articleEditorialPending, EDITORIAL_LINE_BRAND_DNA_HINT, EDITORIAL_LINE_FIELDS, EDITORIAL_LINE_LABEL, isEditorialPending, planEditorialLineChanges, planEditorialLineHashBody, planEditorialLineSentence,
   type EditorialLineChange, type EditorialLineField,
 } from "@/lib/arquiteto/plan-editorial-line";
 
@@ -95,6 +95,8 @@ async function buildPreview(context: PipelineContext, groupId: string, deps: Dep
   const [inputs, publico] = await Promise.all([(deps.inputs ?? readPlanConsolidationInputs)(context), lerPublico(context, deps)]);
   const doPlano = [...inputs.standings.values()].filter(standing => standing.plan?.groupId === groupId && standing.declared && standing.received && standing.approvedPackageRef && standing.brandId === context.brandId);
   const pilar = doPlano.find(standing => standing.plan?.role === "Pilar") ?? null;
+  // 2026-10-15 (noite) · o CTA do Pilar convida aos Suportes do Silo pelos Assuntos deles, na ordem do plano.
+  const suportes = doPlano.filter(standing => standing.plan?.role === "Suporte").sort((a, b) => a.plan!.order - b.plan!.order);
   const lines: EditorialLineLine[] = [];
   for (const standing of doPlano) {
     const artigo = inputs.workspace.articleDnas.filter(version => version.payload.subject?.keywordId === standing.keywordId).sort((a, b) => b.versionNumber - a.versionNumber)[0];
@@ -111,6 +113,7 @@ async function buildPreview(context: PipelineContext, groupId: string, deps: Dep
       siloName: plano.siloName,
       siloObjective: plano.objective ?? null,
       pillarSubject: pilar && pilar.keywordId !== standing.keywordId ? pilar.phrase : null,
+      supportSubjects: suportes.filter(suporte => suporte.keywordId !== standing.keywordId).map(suporte => suporte.phrase),
       brandAudience: publico ?? [],
       serpIntent: payload.serpAssessmentRef ? payload.mainIntent ?? null : null,
     });
@@ -130,7 +133,7 @@ async function buildPreview(context: PipelineContext, groupId: string, deps: Dep
       groupId, siloName: plano.siloName, brandDnaAvailable: Boolean(publico?.length), lines,
       acceptedArticleIds: aceitas,
       decisionHash: planEditorialLineDecisionHash({ groupId, lines: lines.filter(line => aceitas.includes(line.articleId)) }),
-      summary: `${aceitas.length} artigo(s) com a linha editorial para gravar (versão seguinte), ${lines.length - aceitas.length} sem mudança. Grátis, sem IA; nada no Minerador nem no Redator.${publico?.length ? "" : " Sem BrandDNA aprovado: o público fica pendente (aprove o BrandDNA em Marca)."}`,
+      summary: `${aceitas.length} artigo(s) com a linha editorial para gravar (versão seguinte), ${lines.length - aceitas.length} sem mudança. Grátis, sem IA; nada no Minerador nem no Redator.${publico?.length ? "" : ` Sem BrandDNA aprovado, o Público fica pendente: ${EDITORIAL_LINE_BRAND_DNA_HINT}.`}`,
     } satisfies EditorialLinePreview,
     inputs,
   };
@@ -168,5 +171,5 @@ export async function applyPlanEditorialLine(runtime: ImprovementRuntime, input:
   const relido = await buildPreview(context, input.groupId, deps);
   const depois = relido.inputs.workspace.articleDnas.find(item => item.versionId === gravado.versionId);
   if (!depois || depois.contentHash !== gravado.contentHash) throw refusal("A releitura não confirmou a versão nova do ArticleDNA. Gere a prévia de novo antes de repetir.");
-  return { articleId: linha.articleId, status: "written", versionNumber: depois.versionNumber, message: `ArticleDNA v${depois.versionNumber} gravado e relido com a linha editorial (${linha.changes.map(change => change.label).join(", ")}).${articleEditorialPending(depois.payload) ? " Algum campo continua pendente sem fonte (revisão humana)." : ""}` };
+  return { articleId: linha.articleId, status: "written", versionNumber: depois.versionNumber, message: `ArticleDNA v${depois.versionNumber} gravado e relido com a linha editorial (${linha.changes.map(change => change.label).join(", ")}).${isEditorialPending(depois.payload.audience) ? ` Público continua pendente: ${EDITORIAL_LINE_BRAND_DNA_HINT}.` : articleEditorialPending(depois.payload) ? " Algum campo continua pendente sem fonte (revisão humana)." : ""}` };
 }

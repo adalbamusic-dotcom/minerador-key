@@ -62,6 +62,18 @@ export type ClusterAnalysis = {
   confidence: "alta" | "média" | "baixa";
   /** Frase única que explica a recomendação. */
   reason: string;
+  /**
+   * 2026-10-15 (noite) · aditivo, só de LEITURA (`withDeclaredPlanReading`):
+   * todas as keywords do grupo são artigos de um mesmo plano declarado. A
+   * análise então só diz que o grupo segue o plano — sem escores (que não
+   * decidem nada aqui) e sem contar como "sem profundidade".
+   */
+  declaredPlan?: ClusterDeclaredPlan;
+};
+
+export type ClusterDeclaredPlan = {
+  siloName: string;
+  members: Array<{ keywordId: string; role: "Pilar" | "Suporte"; order: number }>;
 };
 
 export type ArchitectureAnalysis = {
@@ -74,6 +86,8 @@ export type ArchitectureAnalysis = {
     insufficient: number;
     ambiguous: number;
     confidence: "alta" | "média" | "baixa";
+    /** 2026-10-15 (noite) · aditivo: grupos que só seguem um plano declarado (fora das quatro contagens acima). */
+    declaredPlan?: number;
   };
   /** Explicação curta do lote, em frases simples. */
   narrative: string[];
@@ -315,6 +329,58 @@ export function buildArchitectureAnalysis(input: {
       territoryRefs: input.territories.map(territory => territory.territoryRef),
       publishedRootPaths: published?.editorialRoots.map(node => node.path) ?? [],
     }),
+  };
+}
+
+/* --------------------------- leitura do plano declarado --------------------------- */
+
+/** A frase do grupo que segue o plano: "Segue o plano do Silo “X” (Pilar, posição 9)." */
+export function declaredPlanClusterReason(plan: ClusterDeclaredPlan): string {
+  const posicoes = [...plan.members].sort((a, b) => a.order - b.order).map(member => `${member.role}, posição ${member.order}`);
+  return `Segue o plano do Silo “${plan.siloName}” (${posicoes.join("; ")}).`;
+}
+
+/**
+ * 2026-10-15 (noite) · readback da WifiConecta azul: a análise dizia "7 sem
+ * profundidade para Silo", por keyword "O grupo não tem profundidade para um
+ * silo próprio neste lote…" e "Coerência 0 · Aderência 0 · Profundidade 0"
+ * para as 7 keywords do plano — que não precisam de profundidade: seguem o
+ * plano do Silo. Esta LEITURA (só para a tela) marca o grupo cujas keywords
+ * são todas artigos de UM plano declarado: a frase passa a ser a do plano, e
+ * ele sai das quatro contagens (entra em `summary.declaredPlan`). O destino,
+ * os escores e o `baseHash` ficam como estão — a proposta e a confirmação não
+ * leem isto. Marca sem plano (`planOf` sempre nulo): a mesma análise, intacta.
+ */
+export function withDeclaredPlanReading(
+  analysis: ArchitectureAnalysis,
+  planOf: (keywordId: string) => { siloName: string; role: "Pilar" | "Suporte"; order: number } | null,
+): ArchitectureAnalysis {
+  let marcados = 0;
+  const clusters = analysis.clusters.map(cluster => {
+    if (!cluster.memberKeywordIds.length) return cluster;
+    const planos = cluster.memberKeywordIds.map(keywordId => ({ keywordId, plano: planOf(keywordId) }));
+    if (planos.some(item => !item.plano)) return cluster;
+    const nomes = new Set(planos.map(item => item.plano!.siloName));
+    if (nomes.size !== 1) return cluster;
+    const declaredPlan: ClusterDeclaredPlan = { siloName: planos[0].plano!.siloName, members: planos.map(item => ({ keywordId: item.keywordId, role: item.plano!.role, order: item.plano!.order })) };
+    marcados += 1;
+    return { ...cluster, declaredPlan, reason: declaredPlanClusterReason(declaredPlan) };
+  });
+  if (!marcados) return analysis;
+  const livres = clusters.filter(cluster => !cluster.declaredPlan);
+  const conta = (destino: ClusterDestination) => livres.filter(cluster => cluster.destination === destino).length;
+  return {
+    ...analysis,
+    clusters,
+    summary: {
+      ...analysis.summary,
+      strengthening: conta("strengthen_existing_silo"),
+      newSilos: conta("new_silo_candidate"),
+      insufficient: conta("insufficient_depth"),
+      ambiguous: conta("ambiguous"),
+      declaredPlan: marcados,
+    },
+    narrative: clusters.slice(0, 6).map(item => `${item.label}: ${item.reason}`),
   };
 }
 

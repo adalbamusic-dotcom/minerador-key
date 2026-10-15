@@ -1,5 +1,6 @@
 "use client";
 import { PLAN_FLOW_LABELS, planArticleVisibleSteps, type PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
+import { siloPageFixLine } from "@/lib/arquiteto/silo-plan-identity";
 import type { PlanArticleSheetController } from "./plan-article-sheet";
 
 /**
@@ -75,11 +76,19 @@ export function ArticlesFormationBar({
   if (planSheet.rows?.length && planSheet.planGroupId && planSheet.flow?.length) {
     const fluxo = planSheet.flow;
     const semSilo = planSheet.siloGate ? !planSheet.siloGate.ready : false;
-    const reservados = (hasPublished ? 1 : 0) + (semSilo && planSheet.onGoToSilos ? 1 : 0);
+    /*
+     * 2026-10-15 (noite) · readback da WifiConecta: o Silo do plano decidido,
+     * mas a página dele com o tema de um suporte — a aba deixava seguir sem
+     * dizer nada. Agora uma linha curta aponta a correção na aba Silos (as
+     * etapas de artigo seguem; os links internos esperam a página em dia).
+     */
+    const paginaACorrigir = !semSilo && planSheet.siloGate?.pageFix ? siloPageFixLine(planSheet.siloGate.pageFix) : null;
+    const irParaSilos = (semSilo || Boolean(paginaACorrigir)) && Boolean(planSheet.onGoToSilos);
+    const reservados = (hasPublished ? 1 : 0) + (irParaSilos ? 1 : 0);
     const visiveis = planArticleVisibleSteps(fluxo, 3 - reservados);
     const atual = visiveis.find(step => step.state === "current") ?? null;
     const bloqueado = formationBusy || planSheet.ocupado;
-    const linha = semSilo ? `${planSheet.siloGate!.sentence}.` : atual?.reason ?? visiveis[0]?.reason ?? "";
+    const linha = semSilo ? `${planSheet.siloGate!.sentence}.` : paginaACorrigir ? `${paginaACorrigir}.` : atual?.reason ?? visiveis[0]?.reason ?? "";
     return (
       <section id="architect-articles-new" className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface-subtle px-4 py-3" data-plan-mode="true" data-stage={atual?.id ?? "none"} data-testid="architect-articles-formation-actions">
         {visiveis.map(step => <button
@@ -95,9 +104,9 @@ export function ArticlesFormationBar({
           {step.label}
         </button>)}
         {hasPublished && melhorar}
-        <span className="min-w-0 flex-1 truncate text-sm text-text-muted" title={fluxo.filter(step => !step.hidden).map(step => `${step.label}: ${step.reason}`).join("\n")} data-testid="architect-plan-stage-line">
+        <span className={`min-w-0 flex-1 truncate text-sm ${paginaACorrigir ? "text-warning" : "text-text-muted"}`} title={fluxo.filter(step => !step.hidden).map(step => `${step.label}: ${step.reason}`).join("\n")} data-testid="architect-plan-stage-line" data-page-fix={paginaACorrigir ? "true" : undefined}>
           {linha}
-          {semSilo && planSheet.onGoToSilos && <>{" "}<button type="button" onClick={planSheet.onGoToSilos} className="font-medium text-module-accent underline underline-offset-2" data-testid="architect-plan-go-silos">Abrir a aba Silos</button></>}
+          {irParaSilos && <>{" "}<button type="button" onClick={planSheet.onGoToSilos} className="font-medium text-module-accent underline underline-offset-2" data-testid="architect-plan-go-silos">Abrir a aba Silos</button></>}
         </span>
       </section>
     );

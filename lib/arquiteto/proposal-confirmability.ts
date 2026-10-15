@@ -60,3 +60,29 @@ export function nothingToConfirmMessage(counts: Partial<Record<ProposalAssignmen
   if (counts.missing_silo) partes.push(`${counts.missing_silo} esperam o Silo proposto ser criado (“Processar arquitetura”)`);
   return partes.length ? `Nada a confirmar: ${partes.join("; ")}.` : "Nada a confirmar no cenário atual.";
 }
+
+/**
+ * 2026-10-15 (noite) · readback da WifiConecta azul: depois de "Processar
+ * arquitetura" com tudo reusado (SILOS_REUSED = 1, nada novo), o clique em
+ * "Confirmar propostas novas" disparava "Nada a confirmar no cenário atual."
+ * como notificação de ERRO. Não há erro: não há o que confirmar.
+ *
+ * Uma leitura só para o botão e para o clique: `null` = há o que gravar;
+ * senão, o motivo — o botão fica DESABILITADO com ele no `title`, e o clique
+ * (se chegar) avisa como informação (Silo ainda não pronto = aviso), nunca erro.
+ */
+export type ArchitectureConfirmBlocker = { tone: "info" | "warning"; message: string };
+
+export function architectureConfirmBlocker(input: {
+  confirmTerritoryCount: number;
+  assignmentCount: number;
+  /** O que a tabela marca como "Aguardando confirmação" (o que o clique grava). */
+  confirmableCount: number;
+  skipped: readonly { label: string; blockers: readonly string[] }[];
+  counts: Partial<Record<ProposalAssignmentState, number>>;
+  declaredPlanSilo?: boolean;
+}): ArchitectureConfirmBlocker | null {
+  if (input.confirmTerritoryCount > 0 || input.assignmentCount > 0 || input.confirmableCount > 0) return null;
+  if (input.skipped.length) return { tone: "warning", message: `Nenhum silo está pronto. ${input.skipped[0].label}: ${input.skipped[0].blockers.join(" ")}` };
+  return { tone: "info", message: nothingToConfirmMessage(input.counts, { declaredPlanSilo: input.declaredPlanSilo }) };
+}

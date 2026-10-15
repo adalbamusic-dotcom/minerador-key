@@ -19,7 +19,7 @@ import { applyApproval, approvedPackageDiverged } from "../lib/minerador/approve
 import { buildPlanSheetRows } from "../lib/arquiteto/plan-article-sheet.ts";
 import { choosePlanSiloTerritory, declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, planRecreatePlanSiloLines } from "../lib/arquiteto/declared-plan-silo.ts";
 import { territoryUndoRefusals } from "../lib/arquiteto/territory-undo.ts";
-import { classifyProposalAssignment, nothingToConfirmMessage, proposalAssignmentStatusLabel } from "../lib/arquiteto/proposal-confirmability.ts";
+import { architectureConfirmBlocker, classifyProposalAssignment, nothingToConfirmMessage, proposalAssignmentStatusLabel } from "../lib/arquiteto/proposal-confirmability.ts";
 import { humanizeOperationMessage, improvementPreviousRunLabel, improvementRunIsPrevious } from "../lib/arquiteto/article-improvement-next-step.ts";
 import { AZUL, AZUL_PLANO, GRUPOS, MARCA_WIFI, cadastro, grupoDaKeyword, linha } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import { VOLUME_VALIDADO } from "./arquiteto-assunto-fixtures.mts";
@@ -305,9 +305,10 @@ test("2c · 'Confirmar propostas novas' confirma o que a tela mostra como confir
   assert.equal(nothingToConfirmMessage({ rejected_silo: 5 }, { declaredPlanSilo: true }), "Nada a confirmar: 5 apontam para Silo desfeito (o Silo do plano: use “Recriar o Silo do plano”).");
   const tela = ler("modules/arquiteto/arquiteto-workspace.tsx");
   assert.match(tela, /const pendentes = architectureProposal\.assignments\.filter\(item => proposalAssignmentStates\.get\(item\.keywordId\)\?\.state === "confirmable"\);/);
-  assert.match(tela, /const confirmaveis = architectureProposalPending\.pendentes;/);
-  assert.match(tela, /if \(!plan\.confirmTerritoryRefs\.length && !plan\.assignments\.length && confirmaveis === 0\) \{/, "não diz 'nada' com confirmável na tela");
-  assert.match(tela, /nothingToConfirmMessage\(contagem/);
+  // 2026-10-15 (noite) · a regra do "nada" virou `architectureConfirmBlocker` (botão desabilitado com o motivo; aviso informativo, nunca erro).
+  assert.match(tela, /confirmableCount: architectureProposalPending\.pendentes,/);
+  assert.equal(architectureConfirmBlocker({ confirmTerritoryCount: 0, assignmentCount: 0, confirmableCount: 3, skipped: [], counts: {} }), null, "não diz 'nada' com confirmável na tela");
+  assert.match(tela, /const blocker = architectureConfirmBlocker\(\{/);
   assert.match(tela, /const buscasFixas = buscasFixasDaProposta;/, "o clique e a tabela usam a MESMA leitura das keywords fixas");
 });
 

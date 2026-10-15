@@ -206,12 +206,16 @@ test("4 · linha editorial: só o pendente ganha valor, de fonte declarada (Assu
   // Sem BrandDNA: o público continua pendente (não se inventa), e a frase diz.
   const semMarca = planEditorialLineChanges({ ...entrada, brandAudience: [] });
   assert.equal(semMarca.some(change => change.field === "audience"), false);
-  assert.match(planEditorialLineSentence(semMarca, ["angle", "cta", "problem", "audience"]), /Continua pendente: Público \(sem fonte\)/);
+  // 2026-10-15 (noite) · a frase diz o caminho: "Aprove o BrandDNA em Marca e rode a Linha editorial de novo" (antes: "(sem fonte)").
+  assert.match(planEditorialLineSentence(semMarca, ["angle", "cta", "problem", "audience"]), /Público pendente \(sem BrandDNA aprovado\): Aprove o BrandDNA em Marca e rode a Linha editorial de novo\./);
   // Valor decidido por gente fica.
   assert.equal(planEditorialLineChanges({ ...entrada, current: { ...atual, angle: "Ângulo escolhido pelo dono" } }).some(change => change.field === "angle"), false);
-  // Pilar: o CTA é o objetivo do Silo do plano; sem objetivo, fica pendente.
-  assert.match(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null }).find(change => change.field === "cta")!.after, /^Próximo passo do Silo “Wi-Fi e fibra óptica”: conquistar tráfego/);
-  assert.equal(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null, siloObjective: null }).some(change => change.field === "cta"), false);
+  // Pilar · 2026-10-15 (noite, readback do dono): o CTA é para o LEITOR — os Suportes pelos Assuntos; sem Suporte,
+  // a página do Silo pelo nome. O objetivo do plano (meta de negócio) nunca vira CTA. Sem Silo nem Suporte, fica pendente.
+  assert.equal(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null, supportSubjects: ["Wi-Fi lento em casa", "Internet para home office?"] }).find(change => change.field === "cta")!.after, "Leia também os artigos do Silo “Wi-Fi e fibra óptica”: “Wi-Fi lento em casa” e “Internet para home office?”.");
+  assert.equal(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null }).find(change => change.field === "cta")!.after, "Conheça todos os conteúdos do Silo “Wi-Fi e fibra óptica”.");
+  assert.ok(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null }).every(change => change.field === "brandObjective" || !/conquistar tráfego/.test(change.after)), "o objetivo só vai para o campo Objetivo");
+  assert.equal(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null, siloName: null }).some(change => change.field === "cta"), false);
   assert.equal(isEditorialPending("Cobrir com clareza o tema “x”."), true, "a moldura genérica da promessa conta como pendente");
   assert.equal(articleEditorialPending({ angle: "a", cta: "b", problem: "c", audience: EDITORIAL_PENDING_TEXT }), true);
   assert.equal(articleEditorialPending({ angle: "a", cta: "b", problem: "c", audience: "d" }), false);
