@@ -7,6 +7,9 @@ import { AbaSilosDoPlano, MesaDoPlano, ROTULOS_REMOVIDOS, novoRegistro, type Reg
 import { readArchitectSubjectStandings } from "../lib/arquiteto/declared-subject.ts";
 import type { PlanSheetArticle } from "../lib/arquiteto/plan-article-sheet.ts";
 import type { EditorialGroupScreenFilter } from "../lib/editorial/editorial-groups.ts";
+import { diagnoseSiloIdentity, siloIdentityCorrectionSentence, siloIdentityFixKind } from "../lib/arquiteto/silo-plan-identity.ts";
+import { planSiloHeadSentence, planSiloStatus } from "../lib/arquiteto/declared-plan-silo.ts";
+import { planSiloPairStep } from "../lib/arquiteto/plan-consolidation.ts";
 
 /*
  * 2026-10-14 (noite) · "CONSOLIDAR O SILO DO PLANO" — o pedido do dono, na tela
@@ -299,4 +302,119 @@ test("aba Silos · Silo do plano em dia: o botão fica desabilitado com o motivo
   const botao = screen.get("architect-plan-silo-consolidate") as HTMLButtonElement;
   assert.equal(botao.disabled, true);
   assert.match(botao.title, /seguem o plano/);
+});
+
+/*
+ * 2026-10-15 (noite) · READBACK DO DONO (SELECT 18:35): nenhum SiloDNA/SiloPage
+ * novo — a SiloPage v1 continua com o H1 "melhor internet para jogos online" — e
+ * a aba Artigos deixou seguir na etapa 2 sem dizer nada. O estado REAL, montado
+ * pelas regras de verdade (sem entrada feita à mão): SiloPage v1 com o H1 de um
+ * suporte, a entidade central do território = um suporte, a keyword do Silo
+ * ausente e o grupo apontando para um território que sumiu.
+ */
+const TERRITORIO_QUE_SUMIU = "territory:09d9b92d-db4d-4409-88c7-bd7ca5e77c7e";
+const SUPORTES_DO_AZUL = AZUL_REAL.filter(([, , , , papel]) => papel === "Suporte").flatMap(([id, keyword, titulo]) => [keyword, id, titulo]);
+const DIAGNOSTICO_REAL = diagnoseSiloIdentity({
+  centralEntity: "melhor internet para jogos online",
+  siloName: "Wi-Fi e fibra óptica",
+  macroProblem: "Dificuldade em melhor internet para jogos online para pendente de enriquecimento e revisão humana.",
+  page: { h1: "melhor internet para jogos online", intro: "Este conteúdo organiza os principais temas sobre melhor internet para jogos online para pendente de enriquecimento e revisão humana.", cta: "Conheça todos os conteúdos sobre melhor internet para jogos online.", seoTitle: "melhor internet para jogos online | Guia completo" },
+  planSiloName: "Wi-Fi e fibra óptica",
+  pillarLabel: "internet fibra óptica",
+  supportLabels: SUPORTES_DO_AZUL,
+});
+
+test("aba Artigos · Silo do plano decidido e a página com o tema de um suporte: a barra diz 'A página do Silo precisa de correção (tema) — corrija na aba Silos' com o link; as etapas de artigo seguem", async () => {
+  assert.ok(DIAGNOSTICO_REAL, "o par v1 do readback precisa de correção");
+  const pageFix = siloIdentityFixKind(DIAGNOSTICO_REAL!);
+  assert.equal(pageFix, "tema");
+  rede();
+  const estado = estadoAtual();
+  const sete: PlanSheetArticle[] = SETE.map(id => ({ articleId: id, versionNumber: 2, subjectKeywordId: id, principalKeywordId: id, keywordIds: [id], slug: id, siloRef: TERRITORIO_REAL, siloLabel: "Wi-Fi e fibra óptica", serpAssessed: true }));
+  await screen.render(comProductShell(React.createElement(MesaDoPlano, {
+    marca: MARCA_WIFI, keywords: estado.keywords, standings: estado.standings, articles: sete, mesa: [], filtro: AZUL_FILTRO, registro,
+    groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal, siloGate: { ready: true, pairCurrent: false, sentence: "O Silo do plano é consolidado na aba Silos", pageFix },
+  }))); await assentar();
+  const linha = screen.get("architect-plan-stage-line");
+  assert.equal(linha.dataset.pageFix, "true");
+  assert.match(linha.textContent!, /^A página do Silo precisa de correção \(tema\) — corrija na aba Silos\. Abrir a aba Silos$/);
+  const etapas = [...screen.get("architect-articles-formation-actions").querySelectorAll<HTMLButtonElement>("button[data-stage]")];
+  assert.ok(etapas.some(botao => !botao.disabled), "as etapas de artigo seguem (o aviso não trava a aba)");
+  assert.ok([...screen.get("architect-articles-formation-actions").querySelectorAll("button")].length <= 3, "no máximo 3 botões, o link incluído");
+  await screen.click("architect-plan-go-silos");
+  assert.equal(registro.silos, 1, "o link leva à aba Silos");
+  assert.equal(chamadas.some(chamada => chamada.url.startsWith("/api/arquiteto/plan-silo")), false, "a aba Artigos não corrige nem consolida Silo");
+  // Página em dia: nenhuma linha de correção.
+  await screen.render(comProductShell(React.createElement(MesaDoPlano, {
+    marca: MARCA_WIFI, keywords: estado.keywords, standings: estado.standings, articles: sete, mesa: [], filtro: AZUL_FILTRO, registro,
+    groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal, siloGate: { ready: true, pairCurrent: true, sentence: "O Silo do plano é consolidado na aba Silos", pageFix: null },
+  }))); await assentar();
+  assert.doesNotMatch(screen.get("architect-plan-stage-line").textContent!, /precisa de correção/);
+  assert.equal(screen.query("architect-plan-go-silos"), null);
+});
+
+test("aba Silos · o estado REAL do readback (par v1 com o tema de um suporte, keyword do Silo ausente, vínculo velho): 'Consolidar o Silo do plano' HABILITADO, a linha diz a correção e a prévia traz 'Corrigir a página do Silo (v2)'", async () => {
+  const status = planSiloStatus({
+    siloName: "Wi-Fi e fibra óptica",
+    territory: { territoryRef: TERRITORIO_REAL, lifecycleStatus: "consolidated", name: "Wi-Fi e fibra óptica" },
+    linkedTerritoryRef: TERRITORIO_QUE_SUMIU, rejected: false, split: false, keywordsWithoutSilo: 0,
+    pair: DIAGNOSTICO_REAL ? "fix" : "current", pillarFormed: true,
+  });
+  assert.deepEqual([status.stage, status.actionable, status.readyForArticles, status.pairCurrent], ["link", true, true, false]);
+  assert.match(status.sentence, /o grupo volta a apontar para ele; a página do Silo está fora do plano e é corrigida na versão seguinte\.$/);
+  const entrada = { groupId: AZUL, colorLabel: "Azul", color: "azul" as const, siloName: "Wi-Fi e fibra óptica", siloSlug: "wifi-e-fibra", status, headSentence: planSiloHeadSentence({ siloName: "Wi-Fi e fibra óptica", siloSlug: "wifi-e-fibra", head: null }) };
+  const siloPair = planSiloPairStep({ siloId: TERRITORIO_REAL, currentVersion: 1, declaredPlan: { state: "READY", changes: [siloIdentityCorrectionSentence(DIAGNOSTICO_REAL!)], decisionHash: "d".repeat(64), siloDnaVersionId: "6168ca46-d22c-49d9-95c5-94105faa89ef" } });
+  redeDoSilo({ ...PREVIA_DO_SILO, linkedSiloId: TERRITORIO_QUE_SUMIU, siloPair });
+  await screen.render(abaSilos(entrada as never)); await assentar();
+  const botao = screen.get("architect-plan-silo-consolidate") as HTMLButtonElement;
+  assert.equal(botao.disabled, false, "habilitado");
+  assert.equal(botao.className, "primary");
+  assert.match(screen.get("architect-plan-silo-line").textContent!, /página do Silo está fora do plano/);
+  await screen.click(botao); await assentar();
+  const par = screen.get("architect-plan-consolidation-silo-pair");
+  assert.equal(par.dataset.state, "fix");
+  assert.match(par.textContent!, /^Corrigir a página do Silo \(v2\) nesta mesma confirmação: Corrigir a página do Silo: o tema “melhor internet para jogos online” é de um suporte do Silo, não do Silo/);
+  assert.match(screen.get("architect-plan-silo-head").textContent!, /Keyword do Silo: nenhuma no Arquiteto — normal/);
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/silo-declared-plan").length, 1, "a v2 é gravada na mesma confirmação");
+  semMinerador();
+});
+
+test("3 · Linha editorial sem BrandDNA aprovado: a prévia diz 'Público pendente: Aprove o BrandDNA em Marca e rode a Linha editorial de novo.'; com o BrandDNA, a linha some", async () => {
+  const PREVIA_EDITORIAL = (brandDnaAvailable: boolean) => ({
+    groupId: AZUL, siloName: "Wi-Fi e fibra óptica", brandDnaAvailable,
+    lines: [{ articleId: "k9", versionNumber: 2, keywordId: "k9", keyword: "internet fibra óptica", title: "", role: "Pilar", order: 9, changes: [{ field: "angle", label: "Ângulo", before: "x — intenção commercial_investigation confirmada pela SERP.", after: "x — intenção comercial investigativa confirmada pela SERP.", source: "Assunto + parecer de SERP · corrige o texto da regra antiga" }], sentence: "Vai gravar a versão seguinte com Ângulo.", lineHash: "f".repeat(64) }],
+    acceptedArticleIds: ["k9"],
+    summary: `1 artigo(s) com a linha editorial para gravar (versão seguinte), 0 sem mudança.${brandDnaAvailable ? "" : " Sem BrandDNA aprovado, o Público fica pendente: Aprove o BrandDNA em Marca e rode a Linha editorial de novo."}`,
+  });
+  let comMarca = false;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    chamadas.push({ url, method: init?.method ?? "GET", body });
+    if (url.startsWith("/api/arquiteto/article-improvement") && !init?.method) return responder(null);
+    if (url === "/api/arquiteto/serp-subject") return responder({ footprints: body.keywords.map((item: any) => ({ keywordId: item.keywordId, keyword: item.keyword, lenses: lentes.map(lens => ({ lens, urls: [], domains: [], collectedAt: "2026-10-14T00:00:00Z" })) })), withoutSerp: [], missingLenses: [] });
+    if (url === "/api/arquiteto/plan-silo/editorial-line") return responder(PREVIA_EDITORIAL(comMarca));
+    throw new Error(`Rede inesperada: ${url}`);
+  };
+  const estado = estadoAtual();
+  const sete: PlanSheetArticle[] = SETE.map(id => ({ articleId: id, versionNumber: 2, subjectKeywordId: id, principalKeywordId: id, keywordIds: [id], slug: id, siloRef: TERRITORIO_REAL, siloLabel: "Wi-Fi e fibra óptica", serpAssessed: true, editorialPending: true }));
+  const montar = () => comProductShell(React.createElement(MesaDoPlano, {
+    marca: MARCA_WIFI, keywords: estado.keywords, standings: estado.standings, articles: sete, mesa: [], filtro: AZUL_FILTRO, registro,
+    groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal, siloGate: { ready: true, pairCurrent: true, sentence: "O Silo do plano é consolidado na aba Silos" },
+  }));
+  await screen.render(montar()); await assentar();
+  const etapa = screen.get("architect-plan-stage");
+  assert.equal(etapa.dataset.stage, "3", "a etapa 3 é a atual (os 7 com a linha editorial a corrigir)");
+  await screen.click(etapa); await assentar();
+  assert.equal(screen.get("architect-plan-editorial-line-brand-dna").textContent, "Público pendente: Aprove o BrandDNA em Marca e rode a Linha editorial de novo.");
+  assert.match(screen.get("architect-plan-editorial-line-preview").textContent!, /corrigido/);
+  // O dono aprova o BrandDNA em Marca, cancela esta prévia e roda a Linha editorial de novo.
+  comMarca = true;
+  const cancelar = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find(botao => botao.textContent === "Cancelar")!;
+  await screen.click(cancelar); await assentar();
+  await screen.click("architect-plan-stage"); await assentar();
+  assert.equal(Boolean(screen.query("architect-plan-editorial-line-preview")), true, "a prévia nova");
+  assert.equal(Boolean(screen.query("architect-plan-editorial-line-brand-dna")), false, "com o BrandDNA aprovado, o público entra e o aviso some");
+  semMinerador();
 });

@@ -88,6 +88,8 @@ export type PlanSheetFormationView = {
   serpPending?: boolean;
   /** 2026-10-15 · formado com a linha editorial pendente (etapa 3 da aba Artigos). */
   editorialPending?: boolean;
+  /** 2026-10-15 (noite) · só o Público falta (espera o BrandDNA aprovado): não prende a barra. */
+  audiencePending?: boolean;
   version: number | null;
   articleId: string | null;
   principalKeywordId: string | null;
@@ -146,6 +148,8 @@ export type PlanSheetArticle = {
   serpAssessed?: boolean;
   /** 2026-10-15 · a linha editorial (ângulo, promessa, CTA, problema, público) ainda tem campo pendente no ArticleDNA (etapa 3). */
   editorialPending?: boolean;
+  /** 2026-10-15 (noite) · só o Público falta no ArticleDNA (depende do BrandDNA aprovado). */
+  audiencePending?: boolean;
 };
 
 /** O artigo que prende a keyword de uma linha do plano. */
@@ -313,7 +317,7 @@ function formationView(input: { keywordId: string; standing: ArchitectSubjectSta
   const article = input.articles.filter(item => item.subjectKeywordId === input.keywordId).sort((a, b) => b.versionNumber - a.versionNumber)[0];
   if (article) {
     if (input.radarArticleIds.has(article.articleId)) return { state: "in_radar", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `No Radar · v${article.versionNumber}` };
-    return { state: "formed", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `Formado · v${article.versionNumber}`, ...(article.serpAssessed === false ? { serpPending: true } : {}), ...(article.editorialPending === true ? { editorialPending: true } : {}) };
+    return { state: "formed", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `Formado · v${article.versionNumber}`, ...(article.serpAssessed === false ? { serpPending: true } : {}), ...(article.editorialPending === true ? { editorialPending: true } : {}), ...(article.audiencePending === true ? { audiencePending: true } : {}) };
   }
   if (input.conflict) return { state: "conflict", version: null, articleId: null, principalKeywordId: null, label: PLAN_SHEET_CONFLICT_LABEL };
   const declarada = input.standing.plan?.declaredPrincipal;
@@ -1008,12 +1012,24 @@ export type PlanArticleFlowStep = {
   state: "current" | "done" | "blocked";
   /** A etapa 1 some quando todo artigo do plano já tem ArticleDNA. */
   hidden: boolean;
+  /**
+   * 2026-10-15 (noite) · etapa feita que pode rodar de novo (a 3, quando só o
+   * Público espera o BrandDNA): fica visível e clicável, sem destaque.
+   */
+  rerun?: boolean;
   reason: string;
   keywordIds: string[];
 };
 
 /** O portão da aba Artigos: o Silo do plano decidido (aba Silos) e a página dele em dia (para os links). */
-export type PlanArticleSiloGate = { ready: boolean; pairCurrent: boolean; sentence: string };
+export type PlanArticleSiloGate = { ready: boolean; pairCurrent: boolean; sentence: string;
+  /**
+   * 2026-10-15 (noite) · aditivo: o Silo do plano está decidido, mas a página
+   * dele (SiloDNA/SiloPage) precisa de correção — o que corrigir ("tema",
+   * "pendência no texto"). A barra da aba Artigos diz isso numa linha curta,
+   * com o link para a aba Silos. Ausente/nulo = nada a dizer.
+   */
+  pageFix?: string | null };
 
 export function planArticleFlowSteps(input: { rows: readonly PlanSheetRow[]; silo: PlanArticleSiloGate }): PlanArticleFlowStep[] {
   const rows = input.rows;
@@ -1024,6 +1040,9 @@ export function planArticleFlowSteps(input: { rows: readonly PlanSheetRow[]; sil
   const passo2 = planStepTwoAction(rows);
   const etapa2 = passo2 ? passo2.rows.map(row => row.keywordId) : [];
   const editoriais = rows.filter(row => formada(row) && row.formation.editorialPending === true).map(row => row.keywordId);
+  // Só o Público falta (espera o BrandDNA aprovado): aviso, não trava (caso WifiConecta, 2026-10-15).
+  const soPublico = rows.filter(row => formada(row) && row.formation.editorialPending !== true && row.formation.audiencePending === true).map(row => row.keywordId);
+  const avisoPublico = soPublico.length ? ` O Público de ${soPublico.length} artigo(s) espera o BrandDNA aprovado: aprove em Marca e rode “${PLAN_ARTICLE_FLOW_LABELS.editorial}” de novo.` : "";
   const passo1: PlanArticleFlowStep = !faltam.length
     ? { id: 1, label: PLAN_ARTICLE_FLOW_LABELS.form, state: "done", hidden: true, reason: "Todos os artigos do plano têm ArticleDNA.", keywordIds: [] }
     : !input.silo.ready
@@ -1048,7 +1067,9 @@ export function planArticleFlowSteps(input: { rows: readonly PlanSheetRow[]; sil
       ? { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "blocked", hidden: false, reason: passo1.state === "current" ? "Depois de formar os artigos do plano (etapa 1)." : "Depois de reforçar keywords e SERP (etapa 2).", keywordIds: editoriais }
       : editoriais.length
         ? { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "current", hidden: false, reason: `${editoriais.length} artigo(s) com a linha editorial pendente: ângulo, promessa, CTA, problema e público a partir do Assunto, do escopo do plano e do BrandDNA (grátis, sem IA); prévia antes, uma confirmação.`, keywordIds: editoriais }
-        : { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "done", hidden: false, reason: "Linha editorial dos artigos em dia.", keywordIds: [] };
+        : soPublico.length
+          ? { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "done", hidden: false, rerun: true, reason: `Linha editorial gravada.${avisoPublico}`, keywordIds: soPublico }
+          : { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "done", hidden: false, reason: "Linha editorial dos artigos em dia.", keywordIds: [] };
   const ate3 = ate2 && passo3.state === "done";
   const semParecer = rows.filter(row => row.formation.serpPending === true).length;
   const passo4: PlanArticleFlowStep = !input.silo.ready
@@ -1057,7 +1078,7 @@ export function planArticleFlowSteps(input: { rows: readonly PlanSheetRow[]; sil
       ? { id: 4, label: PLAN_ARTICLE_FLOW_LABELS.links, state: "blocked", hidden: false, reason: `Depois da etapa ${passo1.state === "current" ? 1 : passo2Step.state !== "done" ? 2 : 3}.`, keywordIds: [] }
       : !input.silo.pairCurrent
         ? { id: 4, label: PLAN_ARTICLE_FLOW_LABELS.links, state: "blocked", hidden: false, reason: "A página do Silo (SiloDNA e SiloPage) ainda não segue o plano: na aba Silos, “Consolidar o Silo do plano”; depois, os links internos.", keywordIds: [] }
-        : { id: 4, label: PLAN_ARTICLE_FLOW_LABELS.links, state: "current", hidden: false, reason: `Artigos completos e Silo consolidado: siga para a aba Links internos.${semParecer ? ` ${semParecer} artigo(s) sem parecer de SERP (sem volume): o Radar pede a SERP antes de receber.` : ""}`, keywordIds: [] };
+        : { id: 4, label: PLAN_ARTICLE_FLOW_LABELS.links, state: "current", hidden: false, reason: `Artigos completos e Silo consolidado: siga para a aba Links internos.${semParecer ? ` ${semParecer} artigo(s) sem parecer de SERP (sem volume): o Radar pede a SERP antes de receber.` : ""}${avisoPublico}`, keywordIds: [] };
   return [passo1, passo2Step, passo3, passo4];
 }
 
@@ -1067,7 +1088,7 @@ export function planArticleFlowSteps(input: { rows: readonly PlanSheetRow[]; sil
  * escondida; no máximo `max` botões de etapa.
  */
 export function planArticleVisibleSteps(steps: readonly PlanArticleFlowStep[], max: number): PlanArticleFlowStep[] {
-  const abertas = steps.filter(step => !step.hidden && step.state !== "done");
+  const abertas = steps.filter(step => !step.hidden && (step.state !== "done" || step.rerun === true));
   return abertas.slice(0, Math.max(1, max));
 }
 

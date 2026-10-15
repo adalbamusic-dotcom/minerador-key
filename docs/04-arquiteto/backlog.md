@@ -1,3 +1,17 @@
+## Acabamentos do azul · linha editorial pt-BR e para o leitor, página do Silo dita na aba Artigos, "nada a confirmar" sem erro, análise do plano — Arquiteto — 2026-10-15 (noite)
+
+Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Ângulo com o rótulo pt-BR da intenção (nunca o enum cru).
+- [x] CTA do Pilar para o leitor (Suportes pelos Assuntos; sem Suporte, a página do Silo); o objetivo do plano só em "Objetivo".
+- [x] Texto da regra antiga (ângulo com enum cru; CTA do Pilar = objetivo) reconhecido pela forma exata e corrigido na versão seguinte; texto editado por gente fica; idempotente.
+- [x] Aba Artigos: "A página do Silo precisa de correção (tema) — corrija na aba Silos" + "Abrir a aba Silos"; aba Silos no estado real com "Consolidar o Silo do plano" habilitado e "Corrigir a página do Silo (v2)" (teste).
+- [x] "Confirmar propostas novas" desabilitado com o motivo quando não há nada; aviso informativo, nunca erro.
+- [x] Análise: grupo do plano "segue o plano do Silo “…” (Pilar/Suporte, posição N)", fora de "sem profundidade", sem escores 0; marca sem plano igual.
+- [x] Sem BrandDNA aprovado: "Aprove o BrandDNA em Marca e rode a Linha editorial de novo"; com ele, a próxima Linha editorial preenche o Público (teste).
+- [ ] Dono: azul → aba Silos "Consolidar o Silo do plano" (v2 da página) → aba Artigos "3 · Linha editorial" (6 ângulos + CTA do Pilar corrigidos) → depois de aprovar o BrandDNA em Marca, "3 · Linha editorial" de novo (Público).
+- [ ] Readback (SELECT) depois: SiloDNA/SiloPage v2 com "Wi-Fi e fibra óptica"; ArticleDNA v+1 com ângulo pt-BR e o CTA novo do Pilar; público preenchido após o BrandDNA.
+
 ## O Silo do plano é o DNA do plano · Silo na aba Silos, artigos na aba Artigos · reforço com as soltas · linha editorial — Arquiteto — 2026-10-15 (tarde)
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`; contrato em `spec.md` §32 e no adendo de 2026-10-15 da SDD do plano declarado. **Validado manualmente: não.**

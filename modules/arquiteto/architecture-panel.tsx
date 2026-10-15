@@ -83,6 +83,7 @@ export function ArchitecturePanel({
   homologation,
   onProcess,
   onConfirm,
+  confirmBlocker = null,
   onContinueToArticles,
 }: {
   analysis: ArchitectureAnalysis;
@@ -233,6 +234,12 @@ export function ArchitecturePanel({
   } | null;
   onProcess: () => void;
   onConfirm: () => void;
+  /**
+   * 2026-10-15 (noite) · aditivo: nada a confirmar (o motivo). Presente, o
+   * botão "Confirmar propostas novas" fica desabilitado com ele no `title` —
+   * nunca mais "Nada a confirmar" como erro depois de processar.
+   */
+  confirmBlocker?: string | null;
   onContinueToArticles: () => void;
 }) {
   const [detalhes, setDetalhes] = React.useState(false);
@@ -242,7 +249,7 @@ export function ArchitecturePanel({
   // Cobertura do lote: quantas keywords já têm destino e quantas não têm.
   const cobertura = analysis.clusters.reduce((acc, cluster) => {
     const membros = cluster.memberKeywordIds.length;
-    if (cluster.destination === "strengthen_existing_silo") acc.associadas += membros;
+    if (cluster.declaredPlan || cluster.destination === "strengthen_existing_silo") acc.associadas += membros;
     else if (cluster.destination === "new_silo_candidate") acc.sugeridas += membros;
     else if (cluster.destination === "ambiguous") acc.ambiguas += membros;
     else acc.semDestino += membros;
@@ -265,13 +272,16 @@ export function ArchitecturePanel({
         <button
           type="button"
           onClick={onConfirm}
-          disabled={busy || !processed}
+          disabled={busy || !processed || Boolean(confirmBlocker)}
           data-testid="architect-confirm-architecture"
-          title={processed ? "Confirmar somente propostas novas; Silos publicados declarados já foram reconhecidos." : "Processe a arquitetura antes de confirmar propostas novas."}
+          title={!processed ? "Processe a arquitetura antes de confirmar propostas novas." : confirmBlocker || "Confirmar somente propostas novas; Silos publicados declarados já foram reconhecidos."}
           className="inline-flex min-h-9 items-center gap-1.5 rounded border border-positive-soft/45 px-3 text-sm font-semibold text-positive-soft transition-colors hover:bg-positive-soft/10 disabled:opacity-40"
         >
           Confirmar propostas novas
         </button>
+        {processed && confirmBlocker && (
+          <span className="text-sm text-text-muted" data-testid="architect-confirm-blocker">{confirmBlocker}</span>
+        )}
         {canContinueToArticles && (
           <button
             type="button"
@@ -438,6 +448,7 @@ export function ArchitecturePanel({
             <p className="text-sm leading-6 text-text-muted">
               {summary.strengthening} fortalece(m) Silos existentes · {summary.newSilos} novo(s) Silo(s) recomendado(s) ·{" "}
               {summary.insufficient} sem profundidade para Silo · {summary.ambiguous} precisa(m) de revisão
+              {(summary.declaredPlan ?? 0) > 0 ? <span data-testid="architect-architecture-summary-plan">{` · ${summary.declaredPlan} segue(m) o plano do Silo`}</span> : null}
             </p>
             {proposal && (
               <p className="mt-1 text-sm leading-6 text-foreground" data-testid="architect-architecture-proposal">
@@ -498,11 +509,14 @@ export function ArchitecturePanel({
               <Bar
                 key={destino}
                 label={DESTINATION_LABELS[destino]}
-                value={analysis.clusters.filter(cluster => cluster.destination === destino).length}
+                value={analysis.clusters.filter(cluster => !cluster.declaredPlan && cluster.destination === destino).length}
                 total={totalClusters}
                 tone={DESTINATION_TONES[destino]}
               />
             ))}
+            {(summary.declaredPlan ?? 0) > 0 && (
+              <Bar label="Segue o plano do Silo" value={summary.declaredPlan ?? 0} total={totalClusters} tone="bg-success/70" />
+            )}
           </div>
 
           {/* Cobertura do lote — sempre com a quantidade, nunca só o percentual. */}
@@ -544,6 +558,10 @@ export function ArchitecturePanel({
           {selectedCluster && (
             <div className="mt-3 rounded border border-divider bg-surface p-2" data-testid="architect-chart-cluster">
               <p className="text-sm font-semibold text-foreground">Grupo: {selectedCluster.label}</p>
+              {/* 2026-10-15 (noite) · grupo do plano declarado: só a frase do plano, sem escores (eles não decidem nada aqui). */}
+              {selectedCluster.declaredPlan ? (
+                <p className="mt-1 text-sm leading-6 text-text-muted" data-testid="architect-chart-cluster-plan">{selectedCluster.reason}</p>
+              ) : (<>
               <div className="mt-1 grid gap-1">
                 <ScoreBar label="Coerência" score={selectedCluster.scores.coherence} />
                 <ScoreBar label="Aderência" score={selectedCluster.scores.siloFit} />
@@ -556,6 +574,7 @@ export function ArchitecturePanel({
                   .slice(0, 6)
                   .map(razao => <li key={razao}>{razao.startsWith("atenção") ? "△" : "✓"} {razao}</li>)}
               </ul>
+              </>)}
             </div>
           )}
 

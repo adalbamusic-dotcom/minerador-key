@@ -7,7 +7,7 @@ import { buildArchitectureWorkingProposal, resolveKeywordDnaSignals } from "../l
 import type { ArchitectureAnalysis, ClusterAnalysis } from "../lib/arquiteto/architecture-analysis.ts";
 import { buildPlanSheetRows, planArticleFlowSteps, planArticleKeywordIds, planArticleVisibleSteps, planReinforcementDetail, planSheetPreviewLines, type PlanSheetArticle } from "../lib/arquiteto/plan-article-sheet.ts";
 import { planConsolidationLines, planSiloDecisionHash } from "../lib/arquiteto/plan-consolidation.ts";
-import { articleEditorialPending, isEditorialPending, planEditorialLineChanges, planEditorialLineSentence, EDITORIAL_PENDING_TEXT } from "../lib/arquiteto/plan-editorial-line.ts";
+import { articleEditorialAwaitsAudienceOnly, articleEditorialPending, isEditorialPending, planEditorialLineChanges, planEditorialLineSentence, EDITORIAL_PENDING_TEXT } from "../lib/arquiteto/plan-editorial-line.ts";
 import { readArchitectSubjectStandings } from "../lib/arquiteto/declared-subject.ts";
 import { AZUL, GRUPOS, MARCA_WIFI } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import { AZUL_REAL, grupoDaKeywordReal, mesaWifiReal } from "./arquiteto-uma-lista-so-fixtures.mts";
@@ -191,6 +191,22 @@ test("3 · as etapas da aba Artigos são só de artigo: sem Silo decidido tudo e
   assert.equal(links[3].state, "current");
 });
 
+test("3 · caso WifiConecta (15/10 noite): só o Público espera o BrandDNA — a etapa 3 não trava os links e continua clicável para rodar de novo", () => {
+  const pend = EDITORIAL_PENDING_TEXT;
+  const soPublico = { angle: "Ângulo gravado.", cta: "CTA gravado.", problem: "Problema gravado.", audience: pend };
+  assert.equal(articleEditorialAwaitsAudienceOnly(soPublico), true);
+  assert.equal(articleEditorialAwaitsAudienceOnly({ ...soPublico, angle: pend }), false, "outro campo pendente: a etapa 3 é a atual");
+  assert.equal(articleEditorialAwaitsAudienceOnly({ ...soPublico, audience: "Famílias" }), false);
+  const fluxo = planArticleFlowSteps({ rows: linhasDoPlano(formados(SETE, { audiencePending: true })), silo: { ready: true, pairCurrent: true, sentence: "" } });
+  assert.deepEqual(fluxo.map(step => step.state), ["done", "done", "done", "current"], "os links internos seguem");
+  assert.equal(fluxo[2].rerun, true);
+  assert.match(fluxo[2].reason, /espera o BrandDNA aprovado: aprove em Marca e rode “3 · Linha editorial” de novo\./);
+  assert.match(fluxo[3].reason, /espera o BrandDNA aprovado/);
+  assert.deepEqual(planArticleVisibleSteps(fluxo, 3).map(step => step.id), [3, 4], "a 3 fica visível para rodar de novo; a 4 é a atual");
+  const barra = semComentarios(ler("../modules/arquiteto/articles-formation-bar.tsx"));
+  assert.match(barra, /disabled=\{bloqueado \|\| \(step\.state !== "current" && step\.rerun !== true\)\}/);
+});
+
 /* -------------------------------------------- 4 · a linha editorial */
 
 test("4 · linha editorial: só o pendente ganha valor, de fonte declarada (Assunto, escopo, BrandDNA, Pilar/objetivo do plano, SERP); nada inventado; nada sobrescrito", () => {
@@ -206,12 +222,16 @@ test("4 · linha editorial: só o pendente ganha valor, de fonte declarada (Assu
   // Sem BrandDNA: o público continua pendente (não se inventa), e a frase diz.
   const semMarca = planEditorialLineChanges({ ...entrada, brandAudience: [] });
   assert.equal(semMarca.some(change => change.field === "audience"), false);
-  assert.match(planEditorialLineSentence(semMarca, ["angle", "cta", "problem", "audience"]), /Continua pendente: Público \(sem fonte\)/);
+  // 2026-10-15 (noite) · a frase diz o caminho: "Aprove o BrandDNA em Marca e rode a Linha editorial de novo" (antes: "(sem fonte)").
+  assert.match(planEditorialLineSentence(semMarca, ["angle", "cta", "problem", "audience"]), /Público pendente \(sem BrandDNA aprovado\): Aprove o BrandDNA em Marca e rode a Linha editorial de novo\./);
   // Valor decidido por gente fica.
   assert.equal(planEditorialLineChanges({ ...entrada, current: { ...atual, angle: "Ângulo escolhido pelo dono" } }).some(change => change.field === "angle"), false);
-  // Pilar: o CTA é o objetivo do Silo do plano; sem objetivo, fica pendente.
-  assert.match(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null }).find(change => change.field === "cta")!.after, /^Próximo passo do Silo “Wi-Fi e fibra óptica”: conquistar tráfego/);
-  assert.equal(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null, siloObjective: null }).some(change => change.field === "cta"), false);
+  // Pilar · 2026-10-15 (noite, readback do dono): o CTA é para o LEITOR — os Suportes pelos Assuntos; sem Suporte,
+  // a página do Silo pelo nome. O objetivo do plano (meta de negócio) nunca vira CTA. Sem Silo nem Suporte, fica pendente.
+  assert.equal(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null, supportSubjects: ["Wi-Fi lento em casa", "Internet para home office?"] }).find(change => change.field === "cta")!.after, "Leia também os artigos do Silo “Wi-Fi e fibra óptica”: “Wi-Fi lento em casa” e “Internet para home office?”.");
+  assert.equal(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null }).find(change => change.field === "cta")!.after, "Conheça todos os conteúdos do Silo “Wi-Fi e fibra óptica”.");
+  assert.ok(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null }).every(change => change.field === "brandObjective" || !/conquistar tráfego/.test(change.after)), "o objetivo só vai para o campo Objetivo");
+  assert.equal(planEditorialLineChanges({ ...entrada, role: "Pilar", pillarSubject: null, siloName: null }).some(change => change.field === "cta"), false);
   assert.equal(isEditorialPending("Cobrir com clareza o tema “x”."), true, "a moldura genérica da promessa conta como pendente");
   assert.equal(articleEditorialPending({ angle: "a", cta: "b", problem: "c", audience: EDITORIAL_PENDING_TEXT }), true);
   assert.equal(articleEditorialPending({ angle: "a", cta: "b", problem: "c", audience: "d" }), false);

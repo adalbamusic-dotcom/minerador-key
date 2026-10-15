@@ -128,7 +128,7 @@ import type { ArticleSerpHumanDecision } from "@/lib/arquiteto/article-serp-reco
 import { resolveApprovedArticleSerpGate, type ApprovedSerpRecord } from "@/lib/arquiteto/approved-article-serp-gate";
 import { buildArchitectureWorkingProposal, formatProposalCounters, intentIsKnown, proposalCoversScope, resolveKeywordDnaSignals, type KeywordDnaSignals } from "@/lib/arquiteto/architecture-working-proposal";
 import { detectCandidateOverlap, detectSlugCollisions, reservedSiloHeadKeywordIds, unresolvedCannibalization, type CandidateOverlapRisk } from "@/lib/arquiteto/article-candidate-guards";
-import { diagnoseSiloIdentity } from "@/lib/arquiteto/silo-plan-identity";
+import { diagnoseSiloIdentity, siloIdentityFixKind } from "@/lib/arquiteto/silo-plan-identity";
 import { articleWithdrawalLabel } from "@/lib/arquiteto/silo-article-withdrawal";
 import { describeRadarReadback, verifyRadarHandoffReadback } from "@/lib/arquiteto/radar-handoff-readback";
 import { articleRunRowsFromGates, formatArticleRunBlockers } from "@/lib/arquiteto/process-observability";
@@ -178,7 +178,7 @@ import { buildTerritorialSerpQuestions, territorialSerpBlockedReason, type Terri
 import { buildTerritorialSerpBase, territorialSerpBaseHash } from "@/lib/arquiteto/territorial-serp-record";
 import { territorialAiAvailabilityOf, type TerritorialAiProposal } from "@/lib/arquiteto/territorial-ai";
 import { buildTerritorialReviewView, territorialHumanDecisionLabel, territorialProcessCells, type TerritorialReviewAction } from "@/lib/arquiteto/territorial-review";
-import { buildArchitectureAnalysis, buildArchitectureConfirmationPlan } from "@/lib/arquiteto/architecture-analysis";
+import { buildArchitectureAnalysis, buildArchitectureConfirmationPlan, withDeclaredPlanReading } from "@/lib/arquiteto/architecture-analysis";
 import { ArchitecturePanel } from "./architecture-panel";
 import { buildArchitectureFlowProjection, clusterRefOfFlowNode } from "@/lib/arquiteto/architecture-flow";
 import { ARCHITECTURE_MARKER_CONTRACT_VERSION, ARCHITECTURE_SCENARIO_LABELS, resolveArchitectureScenarioState, type ArchitectureMarkerPayload } from "@/lib/arquiteto/architecture-marker-record";
@@ -365,9 +365,9 @@ import { MineradorImportDialog } from "./minerador-import-dialog";
 import { mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
 import { initialArquitetoImportColor, MINERADOR_PACKAGE_UPDATES_DETAIL, mineradorPackageUpdatesOf, mineradorPackageUpdatesSentence } from "@/lib/arquiteto/minerador-import";
 import { declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, planGroupTerritory, planSiloCreationRefusal, planSiloHeadKeywordIds, planSiloHeadSentence, planSiloStatus, type DeclaredPlanGroupView, type RecreatePlanSiloLine } from "@/lib/arquiteto/declared-plan-silo";
-import { articleEditorialPending } from "@/lib/arquiteto/plan-editorial-line";
+import { articleEditorialAwaitsAudienceOnly, articleEditorialNeedsLine } from "@/lib/arquiteto/plan-editorial-line";
 import { PlanSiloBar, type PlanSiloBarEntry } from "./plan-silo-bar";
-import { classifyProposalAssignment, nothingToConfirmMessage, proposalAssignmentStatusLabel, type ProposalAssignmentState } from "@/lib/arquiteto/proposal-confirmability";
+import { architectureConfirmBlocker, classifyProposalAssignment, proposalAssignmentStatusLabel, type ProposalAssignmentState } from "@/lib/arquiteto/proposal-confirmability";
 import { ArticleSubjectLine, articleSubjectPhraseOf } from "@/components/editorial/article-subject-line";
 import { DangerApprovalDialog } from "@/components/editorial/danger-approval-dialog";
 import { BackgroundTaskNotice } from "@/components/editorial/background-task-notice";
@@ -7294,8 +7294,11 @@ export default function ArquitetoPage() {
       label: version.payload.principalKeywordId ? keywordLabelById.get(String(version.payload.principalKeywordId)) ?? null : null,
       // 2026-10-14 (noite) · consolidado do plano sem SERP: a etapa 2 grava o parecer.
       serpAssessed: Boolean(version.payload.serpAssessmentRef),
-      // 2026-10-15 · etapa 3: ângulo, CTA, problema ou público ainda pendente no DNA.
-      editorialPending: articleEditorialPending(version.payload),
+      // 2026-10-15 · etapa 3: ângulo, CTA, problema ou público ainda pendente no DNA
+      // (noite: ou o texto da regra antiga a corrigir — enum cru no ângulo, objetivo do plano no CTA).
+      editorialPending: articleEditorialNeedsLine(version.payload) && !articleEditorialAwaitsAudienceOnly(version.payload),
+      // 2026-10-15 (noite) · só o Público falta (espera o BrandDNA): aviso, não trava a barra.
+      audiencePending: articleEditorialAwaitsAudienceOnly(version.payload),
     };
   }), [acceptedArticleDnas, acceptedSiloDnas, articleSiloViews, arquitetoGroups.articleGroupById, arquitetoGroups.groupById, keywordLabelById]);
   const planSheetRadarIds = useMemo(() => new Set(radarItems.map(item => String(item.articleId))), [radarItems]);
@@ -7328,13 +7331,13 @@ export default function ArquitetoPage() {
    * incluído), a keyword do Silo (opcional), o par SiloDNA + SiloPage e o que a
    * consolidação faria. A mesma leitura dá o portão da aba Artigos.
    */
-  const pairStateOfTerritory = (territoryRef: string, planSiloName: string | null): "missing" | "current" | "fix" => {
+  /** 2026-10-15 (noite) · o que corrigir na página do Silo (a linha curta da aba Artigos); nulo = nada. */
+  const pairFixKindOfTerritory = (territoryRef: string, planSiloName: string | null): string | null => {
     const par = canonicalSiloPairFor(territoryRef);
-    if (!par.siloDna) return "missing";
-    if (!par.complete) return "missing";
+    if (!par.siloDna || !par.complete) return null;
     const silo = par.siloDna.payload;
     const pilar = silo.pillarArticleId ? acceptedArticleDnas[silo.pillarArticleId] : undefined;
-    return diagnoseSiloIdentity({
+    const diagnostico = diagnoseSiloIdentity({
       centralEntity: silo.centralEntity,
       siloName: silo.name,
       macroProblem: silo.macroProblem,
@@ -7342,10 +7345,16 @@ export default function ArquitetoPage() {
       planSiloName,
       pillarLabel: pilar ? articleWithdrawalLabel(pilar.payload) : null,
       supportLabels: silo.supportArticleIds.flatMap(id => { const artigo = acceptedArticleDnas[id]; return artigo ? [articleWithdrawalLabel(artigo.payload), artigo.payload.suggestedSlug, artigo.payload.subject?.phrase] : []; }),
-    }) ? "fix" : "current";
+    });
+    return diagnostico ? siloIdentityFixKind(diagnostico) : null;
+  };
+  const pairStateOfTerritory = (territoryRef: string, planSiloName: string | null): "missing" | "current" | "fix" => {
+    const par = canonicalSiloPairFor(territoryRef);
+    if (!par.siloDna || !par.complete) return "missing";
+    return pairFixKindOfTerritory(territoryRef, planSiloName) ? "fix" : "current";
   };
   const planSiloStatuses = useMemo(() => {
-    const saida = new Map<string, PlanSiloBarEntry & { territoryRef: string | null }>();
+    const saida = new Map<string, PlanSiloBarEntry & { territoryRef: string | null; pageFix: string | null }>();
     if (!planosLidos) return saida;
     const vistas = remoteTerritories.map(item => declaredPlanViewOfTerritory(item.territory));
     for (const plano of planosLidos) {
@@ -7381,6 +7390,8 @@ export default function ArquitetoPage() {
         status,
         headSentence: planSiloHeadSentence({ siloName: plano.siloName, siloSlug: plano.siloSlug, head: cabeca ? { keyword: String(cabeca.keyword || "") } : null }),
         territoryRef: remoto?.territoryRef ?? null,
+        // 2026-10-15 (noite) · a página do Silo a corrigir (tema/pendência): a aba Artigos diz numa linha curta.
+        pageFix: remoto && status.readyForArticles ? pairFixKindOfTerritory(remoto.territoryRef, plano.siloName) : null,
       });
     }
     return saida;
@@ -7421,7 +7432,7 @@ export default function ArquitetoPage() {
     // 2026-10-15 · o portão da aba Artigos vem da aba Silos; a aba Artigos nunca cria nem consolida Silo.
     siloGateOf: groupId => {
       const lido = planSiloStatuses.get(groupId);
-      return lido ? { ready: lido.status.readyForArticles, pairCurrent: lido.status.pairCurrent, sentence: PLAN_SILO_TAB_SENTENCE } : null;
+      return lido ? { ready: lido.status.readyForArticles, pairCurrent: lido.status.pairCurrent, sentence: PLAN_SILO_TAB_SENTENCE, pageFix: lido.pageFix } : null;
     },
     onGoToSilos: () => { setSelectedArticleIds(new Set()); setWorkspaceMode("silos"); },
   });
@@ -11625,6 +11636,19 @@ export default function ArquitetoPage() {
       })
       .filter(group => group.keywordIds.length > 0 || group.headKeywordIds.length > 0);
   }, [silosDosPlanos, selectedBrandId, arquitetoGroups.keywordGroupById, masterList, remoteTerritories, planSiloHeadIds]);
+  /*
+   * 2026-10-15 (noite) · A ANÁLISE COMO A TELA A LÊ: o grupo de keywords que
+   * são artigos de um plano declarado "segue o plano do Silo “…” (Pilar/Suporte,
+   * posição N)" — não conta como "sem profundidade" nem mostra escores 0.
+   * Só leitura (painel e mapa); a proposta e a confirmação leem a análise de
+   * sempre. Marca sem plano: a mesma análise.
+   */
+  const architectureAnalysisView = useMemo(() => withDeclaredPlanReading(architectureAnalysis, keywordId => {
+    const standing = subjectStandings.get(keywordId);
+    if (!standing?.declared || !standing.plan) return null;
+    const plano = planosLidos?.find(item => item.groupId === standing.plan!.groupId);
+    return plano ? { siloName: plano.siloName, role: standing.plan.role, order: standing.plan.order } : null;
+  }), [architectureAnalysis, subjectStandings, planosLidos]);
   /*
    * SDD acelerar 2026-10-13, item 4 — UMA PORTA PARA O PLANO. Desde a F5 da
    * SDD `sdd-arquiteto-so-le-e-listas-leves` (2026-10-14), a porta é a das
@@ -17351,15 +17375,14 @@ export default function ArquitetoPage() {
     }
   };
 
-  /**
-   * Confirmar arquitetura — uma vez, para o cenário revisado.
-   *
-   * Traduz o plano nos writers canônicos existentes, com lock e readback por
-   * item. Silo com bloqueio fica de fora com o motivo: confirmação em lote não
-   * atropela a prontidão de ninguém.
+  /*
+   * O PLANO DA CONFIRMAÇÃO, lido uma vez por render (2026-10-15, noite): o
+   * botão "Confirmar propostas novas" e o clique leem a MESMA coisa. Sem nada a
+   * gravar, o botão fica desabilitado com o motivo (antes: o clique disparava
+   * "Nada a confirmar no cenário atual." como ERRO depois de "Processar
+   * arquitetura" com tudo reusado).
    */
-  const confirmArchitecture = async () => {
-    if (!selectedBrandId) { showNotification("error", "Selecione uma marca ativa."); return; }
+  const architectureConfirmation = useMemo(() => {
     /*
      * A PRONTIDÃO ENXERGA O PRÓPRIO PLANO.
      *
@@ -17392,6 +17415,37 @@ export default function ArquitetoPage() {
       candidateTerritoryRefs: new Set(territorialSurface.landscape.candidateTerritories.map(item => item.territoryRef)),
     });
     /*
+     * 2026-10-14 (WifiConecta, azul) — "Nada a confirmar" só quando a TELA
+     * também não mostra nada confirmável. O clique grava a proposta da tela
+     * (`architectureProposal`, §8 abaixo); o plano do analisador só olhava os
+     * grupos que "fortalecem Silo existente" e dizia "nada" com três
+     * "Aguardando confirmação" na tabela.
+     */
+    const estadosDaProposta = [...proposalAssignmentStates.values()];
+    const contagem: Partial<Record<ProposalAssignmentState, number>> = {};
+    for (const item of estadosDaProposta) contagem[item.state] = (contagem[item.state] || 0) + 1;
+    const blocker = architectureConfirmBlocker({
+      confirmTerritoryCount: plan.confirmTerritoryRefs.length,
+      assignmentCount: plan.assignments.length,
+      confirmableCount: architectureProposalPending.pendentes,
+      skipped: plan.skipped,
+      counts: contagem,
+      declaredPlanSilo: estadosDaProposta.some(item => item.state === "rejected_silo" && item.declaredPlanSilo),
+    });
+    return { plan, sustentadosPelaPrevisao, blocker };
+  }, [architectureProposal, resolveProposalSiloRef, territorialSurface, architectureAnalysis, proposalAssignmentStates, architectureProposalPending.pendentes]);
+
+  /**
+   * Confirmar arquitetura — uma vez, para o cenário revisado.
+   *
+   * Traduz o plano nos writers canônicos existentes, com lock e readback por
+   * item. Silo com bloqueio fica de fora com o motivo: confirmação em lote não
+   * atropela a prontidão de ninguém.
+   */
+  const confirmArchitecture = async () => {
+    if (!selectedBrandId) { showNotification("error", "Selecione uma marca ativa."); return; }
+    const { plan, sustentadosPelaPrevisao, blocker } = architectureConfirmation;
+    /*
      * §1/§10 — CONFIRMAR ARQUITETURA NÃO CONSOLIDA O SILO CANÔNICO.
      *
      * Uma passada anterior fazia este ato criar SiloDNA e SiloPage na hora,
@@ -17410,23 +17464,8 @@ export default function ArquitetoPage() {
      * formação dos Articles ter concluído e nenhuma reconsideração de Silo
      * estar aberta.
      */
-    /*
-     * 2026-10-14 (WifiConecta, azul) — "Nada a confirmar" só quando a TELA
-     * também não mostra nada confirmável. O clique grava a proposta da tela
-     * (`architectureProposal`, §8 abaixo); o plano do analisador só olhava os
-     * grupos que "fortalecem Silo existente" e dizia "nada" com três
-     * "Aguardando confirmação" na tabela.
-     */
-    const estadosDaProposta = [...proposalAssignmentStates.values()];
-    const confirmaveis = architectureProposalPending.pendentes;
-    if (!plan.confirmTerritoryRefs.length && !plan.assignments.length && confirmaveis === 0) {
-      const contagem: Partial<Record<ProposalAssignmentState, number>> = {};
-      for (const item of estadosDaProposta) contagem[item.state] = (contagem[item.state] || 0) + 1;
-      showNotification("error", plan.skipped.length
-        ? `Nenhum silo está pronto. ${plan.skipped[0].label}: ${plan.skipped[0].blockers.join(" ")}`
-        : nothingToConfirmMessage(contagem, { declaredPlanSilo: estadosDaProposta.some(item => item.state === "rejected_silo" && item.declaredPlanSilo) }));
-      return;
-    }
+    // Nada a gravar não é erro: o aviso é informativo (Silo ainda não pronto = aviso). O botão já fica desabilitado com o motivo.
+    if (blocker) { showNotification(blocker.tone, blocker.message); return; }
 
     /*
      * SILOS NÃO DESMONTA ARTICLE APROVADO EM SILÊNCIO.
@@ -17738,7 +17777,7 @@ export default function ArquitetoPage() {
 
   /** Mapa da análise: Silo/Cluster no centro, keywords em órbita. */
   const architectureFlow = useMemo(() => buildArchitectureFlowProjection({
-    analysis: architectureAnalysis,
+    analysis: architectureAnalysisView,
     keywordTexts: new Map(masterList.map(keyword => [String(keyword.id), String(keyword.keyword || "")])),
     territoryLabels: new Map([...territorialSurface.landscape.candidateTerritories, ...territorialSurface.landscape.confirmedTerritories]
       .map(territory => [territory.territoryRef, {
@@ -17752,14 +17791,14 @@ export default function ArquitetoPage() {
       .filter(keyword => typeof keyword.territoryRef === "string")
       .map(keyword => [String(keyword.id), String(keyword.territoryRef)])),
     expandedClusterRefs,
-  }), [architectureAnalysis, masterList, territorialSurface, expandedClusterRefs]);
+  }), [architectureAnalysisView, masterList, territorialSurface, expandedClusterRefs]);
 
   /** Grupo em foco no painel: quem manda é a seleção feita no mapa. */
   const selectedClusterAnalysis = useMemo(() => {
     const clusterRef = clusterRefOfFlowNode(architectureFlow, mapState.selectedNodeId);
-    return architectureAnalysis.clusters.find(cluster => cluster.clusterRef === clusterRef)
-      ?? architectureAnalysis.clusters[0] ?? null;
-  }, [architectureAnalysis, architectureFlow, mapState.selectedNodeId]);
+    return architectureAnalysisView.clusters.find(cluster => cluster.clusterRef === clusterRef)
+      ?? architectureAnalysisView.clusters[0] ?? null;
+  }, [architectureAnalysisView, architectureFlow, mapState.selectedNodeId]);
 
   const processState = useMemo<Record<ArchitectProcess, { state: ArchitectProcessState; onClick?: () => void; disabled?: boolean; title?: string; progress?: string }>>(() => {
     const logicState: ArchitectProcessState = workspaceMode === "links"
@@ -19128,7 +19167,7 @@ export default function ArquitetoPage() {
                     </section>
                   )}
                   <ArchitecturePanel
-                    analysis={architectureAnalysis}
+                    analysis={architectureAnalysisView}
                     processed={Boolean(architectureMarker)}
                     stale={architectureIsStale}
                     scenarioState={ARCHITECTURE_SCENARIO_LABELS[resolveArchitectureScenarioState({
@@ -19189,6 +19228,7 @@ export default function ArquitetoPage() {
                     }}
                     homologation={null}
                     onConfirm={() => { void confirmArchitecture(); }}
+                    confirmBlocker={architectureConfirmation.blocker?.message ?? null}
                     onContinueToArticles={() => setWorkspaceMode("articles")}
                   />
                   </>

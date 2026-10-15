@@ -106,6 +106,20 @@ export function diagnoseSiloIdentity(input: {
   return reasons.length ? { expected, current, reasons } : null;
 }
 
+/**
+ * 2026-10-15 (noite) · O QUE CORRIGIR, numa palavra (a linha curta da aba
+ * Artigos): "tema" quando o tema/H1 é de um suporte ou falta; senão
+ * "pendência no texto".
+ */
+export function siloIdentityFixKind(diagnosis: SiloIdentityDiagnosis): "tema" | "pendência no texto" {
+  return diagnosis.reasons.some(reason => /tema|H1/.test(reason)) ? "tema" : "pendência no texto";
+}
+
+/** A linha curta da aba Artigos quando a página do Silo do plano precisa de correção (o conserto é na aba Silos). */
+export function siloPageFixLine(kind: string): string {
+  return `A página do Silo precisa de correção (${kind}) — corrija na aba Silos`;
+}
+
 /** A frase da prévia: o que está errado e o que a versão nova grava. */
 export function siloIdentityCorrectionSentence(diagnosis: SiloIdentityDiagnosis): string {
   const tema = diagnosis.current && identityKey(diagnosis.current) !== identityKey(diagnosis.expected)
