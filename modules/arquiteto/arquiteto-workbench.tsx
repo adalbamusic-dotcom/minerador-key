@@ -43,8 +43,6 @@ const SILO_SCOPE_LABELS: Record<SiloScope, string> = {
 
 export function ArchitectWorkbench({
   mode,
-  articleCount,
-  articleScope = null,
   siloCount,
   selectedCount,
   // `activeProcess`, `onProcessChange` e `processes` continuam no contrato e
@@ -60,9 +58,6 @@ export function ArchitectWorkbench({
   links = null,
 }: {
   mode: ArchitectWorkspaceMode;
-  articleCount: number;
-  /** Contagem da aba Artigos: SiloPage NUNCA entra como Article. */
-  articleScope?: { siloPages: number; articles: number; candidates: number; published: number; waiting: number } | null;
   siloCount: number;
   selectedCount: number;
   activeProcess: ArchitectProcess;
@@ -95,20 +90,20 @@ export function ArchitectWorkbench({
    */
   links?: { panel: React.ReactNode } | null;
 }) {
-  const modeLabel = mode === "articles" ? "Artigos" : mode === "silos" ? "Silos" : "Links internos";
+  const modeLabel = mode === "silos" ? "Silos" : "Links internos";
 
   return <section className="shrink-0 border-b border-divider bg-surface px-4 py-3" aria-label="Workbench do Arquiteto" data-testid="architect-workbench">
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    {/*
+      * 2026-10-16 · na aba Artigos o painel mora em "Detalhes técnicos" e não
+      * tem cabeçalho: o título "Workbench do Arquiteto" e as contagens de
+      * SiloPage/Article/candidato/selecionado saíram (pedido do dono: "mostra
+      * só o que é útil para o user").
+      */}
+    {mode !== "articles" && <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0">
         <p className="text-sm font-semibold uppercase tracking-[0.14em] text-module-accent">Workbench do Arquiteto</p>
         <p className="mt-1 text-sm text-text-muted" data-testid="architect-workbench-counts">{modeLabel} · {
-          mode === "articles" && articleScope
-            // A SiloPage é o pai, não um Article: somá-los inflaria o lote e
-            // faria a mesa mentir sobre o tamanho do trabalho.
-            ? `${articleScope.siloPages} SiloPage(s) · ${articleScope.articles} Article(s) formado(s) · ${articleScope.candidates} candidato(s) · ${articleScope.published} publicado(s)`
-            : mode === "articles" ? `${articleCount} artigo(s)`
-              : mode === "silos" ? `${siloCount} silo(s)`
-                : "working copy e versões do grafo"
+          mode === "silos" ? `${siloCount} silo(s)` : "working copy e versões do grafo"
         }{selectedCount ? ` · ${selectedCount} selecionado(s)` : ""}</p>
       </div>
       {/* Projeção da MESMA aba: nenhuma rota, aba ou workspace novo. */}
@@ -144,7 +139,7 @@ export function ArchitectWorkbench({
           </select>
         </label>
       )}
-    </div>
+    </div>}
     {/* Operação principal: uma ação para entender o lote, outra para
         confirmar o que foi revisado. Os quatro motores continuam abaixo. */}
     {/* Painel único da aba Silos: o que foi encontrado, por que, e o

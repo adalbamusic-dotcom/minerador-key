@@ -974,7 +974,7 @@ test("F5 · Trocar principal (livre): prévia com a escolha do humano, uma confi
   assert.equal(proposta.principalId, newId);
   assert.equal(proposta.currentPrimaryId, oldId);
   assert.deepEqual(proposta.memberIds, [newId], "a keyword do Assunto não é secundária do próprio artigo: continua como o Assunto (fundamento)");
-  assert.ok(proposta.reasons.some(reason => /Troca de principal escolhida por você na planilha/.test(reason)), JSON.stringify(proposta.reasons));
+  assert.ok(proposta.reasons.some(reason => /Troca de principal escolhida por você na linha do plano/.test(reason)), JSON.stringify(proposta.reasons));
   assert.equal(articles.length, 0, "a prévia não grava ArticleDNA");
   const result = await apply(run);
   assert.equal(result.state, "complete");

@@ -1,5 +1,7 @@
 # Backlog — Minerador
 
+- [ ] **Linha única do Minerador (2026-10-16, PROPOSTA — aguarda o dono):** `docs/compartilhado/sdd-linha-unica-do-minerador-2026-10-16.md` — F0 cenários-ouro, depois uma fase por etapa unificada; decisões D1–D5 no §8.
+
 ## "Aprovar e enviar" atualiza quem já está no Arquiteto — 2026-10-14
 
 - [x] Linha "atualiza no Arquiteto (pacote novo)" e aviso no resultado (núcleo compartilhado, aditivo).

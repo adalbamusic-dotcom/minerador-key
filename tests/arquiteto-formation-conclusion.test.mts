@@ -226,12 +226,18 @@ test("os chips do mapa se declaram como visão, não como processo", () => {
   assert.match(workbench, /aria-label="Visão do mapa"/);
 });
 
-test("o painel separa Article formado de candidato", () => {
+/*
+ * 2026-10-16 · as contagens "SiloPages / Articles formados / Articles
+ * candidatos" saíram da tela (pedido do dono: "mostra só o que é útil para o
+ * user"). A separação continua no domínio e decide se "Detalhes técnicos"
+ * abre sozinho: candidato sem ArticleDNA é trabalho pendente.
+ */
+test("formado e candidato continuam separados no domínio; a contagem saiu do painel", () => {
   for (const rotulo of ["SiloPages", "Articles formados", "Articles candidatos"]) {
-    assert.ok(panel.includes(rotulo), `falta o campo ${rotulo}`);
+    assert.ok(!panel.includes(rotulo), `${rotulo} saiu do painel`);
   }
-  assert.match(workspace, /articles: articleSiloSummary\.articles/);
-  assert.match(workspace, /candidates: articleSiloSummary\.candidates/);
+  assert.match(workspace, /summarizeArticleSiloViews\(articleSiloViews\)/);
+  assert.match(workspace, /\|\| articleSiloSummary\.candidates > 0 \|\|/);
 });
 
 /* -------------------- §5.B papel editorial chega ao DNA ------------------ */

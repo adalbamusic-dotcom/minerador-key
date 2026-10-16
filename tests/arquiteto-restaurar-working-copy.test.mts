@@ -192,14 +192,16 @@ test("§6 · a aba Silos oferece a restauração com preview antes de gravar", (
   assert.match(painel, /coloca cada uma\s+de volta no Silo do artigo\. Não muda o artigo, não cria versão nova e não cobra nada\./);
 });
 
-test("§15 · o painel de formação lê o escopo da autoridade única", () => {
+test("§15 · a barra de sempre lê o escopo da autoridade única", () => {
+  // 2026-10-16 · os dois botões são só os da barra (topo de "Detalhes técnicos"); o painel de formação não tem mais escopo próprio.
   const painel = readFileSync("modules/arquiteto/article-formation-panel.tsx", "utf8");
+  const barra = readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8");
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
   // Nenhuma contagem própria: o motivo vem pronto.
   assert.ok(!painel.includes("selectedCount === 0"), "o painel não pode recalcular a recusa");
-  assert.match(painel, /scopeReason: string \| null;/);
-  assert.match(workspace, /scopeReason=\{formationSelectionScope\.reason\}/);
-  assert.match(workspace, /selectedCount=\{formationSelectionScope\.selectedCount\}/);
+  assert.ok(!barra.includes("selectedCount === 0"), "a barra não pode recalcular a recusa");
+  assert.match(barra, /selectionScope: \{ selectedCount: number; reason: string \| null \};/);
+  assert.match(workspace, /selectionScope=\{formationSelectionScope\}/);
   // E o lote de fechamento passa pela MESMA autoridade, lida no clique.
   assert.ok(workspace.includes("const escopoDoFechamento = formationScopeRef.current.scope;"));
   assert.ok(workspace.includes('escopoDoFechamento.reason ?? "Selecione pelo menos um artigo."'));

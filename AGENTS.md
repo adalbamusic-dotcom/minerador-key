@@ -85,6 +85,35 @@ com a SERP como autoridade acima da lógica e da IA (4 lentes). Em especial:
   existem uma vez cada, e não existe porta paralela.
 - Entrega sem a suíte verde não é entrega.
 
+### 0.4 Forma na cópia de trabalho; grava só ao confirmar
+
+Regra do dono (16/10): "tudo tem que ser formado pelo navegador, e só quando
+confirmar ou finalizar que vai aplicado no servidor". Vale para todas as áreas.
+
+- Montar, agrupar, reforçar e propor acontece na cópia de trabalho, que é
+  editável e mostrada ao usuário (spec do Arquiteto: "antes da confirmação,
+  artigos novos mantêm uma cópia de trabalho editável"; §9 deste arquivo).
+- O que exige segredo ou provider (Google Ads, SERP, IA) roda no servidor só
+  para LER ou CALCULAR. O resultado volta como proposta para a cópia de
+  trabalho, com o custo dito antes. Cache de SERP e recibos de uso não são
+  artefato editorial.
+- O artefato canônico (KeywordDNA, ArticleDNA, SiloDNA/SiloPage,
+  InternalLinkGraph, pacotes) só é gravado no servidor quando o usuário
+  confirma ou finaliza, por UM gravador por artefato. Esse gravador revalida
+  (aprovação, plano declarado, trava, guarda de retrabalho, isolamento por
+  marca) e relê.
+
+### 0.5 A melhoria nova prevalece sobre a antiga
+
+- Quando uma regra ou melhoria nova substitui uma antiga, a antiga deixa de
+  valer em TODO caminho da área, não só onde a nova foi feita. Não fica
+  caminho velho rodando ao lado.
+- Na mesma entrega, a spec, a SDD e o catálogo marcam o texto antigo como
+  SUBSTITUÍDO, com a data e o que vale agora, e o código antigo sai ou passa
+  a chamar a regra nova. O cenário de fluxo (§0.3) passa a exigir a regra nova.
+- Em conflito entre documentos, vale a decisão mais recente do dono que esteja
+  registrada com data. Se não houver registro, pergunta-se ao dono.
+
 ## 1. Fontes de verdade
 
 Antes de alterar código ou documentação, leia:

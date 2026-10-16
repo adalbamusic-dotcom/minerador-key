@@ -501,7 +501,7 @@ export function planArticleImprovements(input: {
 }
 
 /** F5 — o motivo que a prévia mostra quando o humano escolheu a principal na planilha. */
-export const CHOSEN_PRINCIPAL_REASON = "Troca de principal escolhida por você na planilha “Artigos do plano” (trava Livre, decisão humana).";
+export const CHOSEN_PRINCIPAL_REASON = "Troca de principal escolhida por você na linha do plano (“Procurar outra principal”, trava Livre, decisão humana).";
 
 /**
  * F5 · PLANILHA PRIMEIRO — "TROCAR PRINCIPAL" (SDD 2026-10-13, item 5). A

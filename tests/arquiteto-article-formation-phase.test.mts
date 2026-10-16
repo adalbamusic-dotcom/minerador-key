@@ -136,31 +136,35 @@ test("o hash muda com o lote e não com a ordem", () => {
 
 /* -------------------------------- painel --------------------------------- */
 
-test("o painel nasce com os dois botões da operação", () => {
-  assert.match(panel, /data-testid="architect-process-articles"/);
-  assert.match(panel, /data-testid="architect-confirm-formation"/);
-  assert.match(panel, /Processar artigos/);
-  assert.match(panel, /Concluir formação/);
-  // Confirmar só depois de processar.
-  // Concluir exige processar ANTES e exige seleção: sem escopo o botão
-  // prometeria agir sobre "tudo", que é o que fazia o gate reclamar de artigo
-  // que a pessoa não escolheu.
-  /*
-   * A recusa vem da AUTORIDADE ÚNICA de escopo, não de uma contagem própria.
-   *
-   * O painel lia `selectedCandidateRefs.size` e dizia "Selecione pelo menos um
-   * artigo" com uma linha já selecionada — recusa que nenhum clique resolve.
-   */
-  assert.match(panel, /disabled=\{busy \|\| !processed \|\| Boolean\(scopeReason\)\}/);
-  assert.match(panel, /disabled=\{busy \|\| Boolean\(scopeReason\)\}/);
-  assert.match(panel, /data-testid="architect-formation-selection-count"/);
-  assert.match(panel, /title=\{scopeReason \?\? /);
+/*
+ * 2026-10-16 · os dois botões da operação são só os da barra de sempre
+ * (`articles-formation-bar.tsx`), no topo de "Detalhes técnicos": o painel de
+ * formação perdeu a cópia opcional (código morto desde a restauração), e com
+ * ela a contagem de seleção repetida. O escopo continua vindo da autoridade
+ * única (`formationSelectionScope`), agora lido pela barra.
+ */
+test("os dois botões da operação são os da barra de sempre, com o escopo da autoridade única", () => {
+  const barra = readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8");
+  assert.match(barra, /data-testid="architect-articles-top-process"/);
+  assert.match(barra, /data-testid="architect-articles-top-confirm"/);
+  assert.match(barra, /"Processar artigos"/);
+  assert.match(barra, /Concluir formação/);
+  assert.doesNotMatch(panel, /architect-process-articles|architect-confirm-formation|architect-formation-selection-count/);
+  assert.match(barra, /const concluirBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : !processed \|\| Boolean\(selectionScope\.reason\)\)/);
+  assert.match(barra, /const processarBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : Boolean\(selectionScope\.reason\)\)/);
+  assert.match(barra, /data-testid="architect-articles-selection-count"/);
 });
 
-test("o painel traz os gráficos e as pontuações do candidato", () => {
-  assert.match(panel, /data-testid="architect-chart-keyword-destination"/);
-  assert.match(panel, /data-testid="architect-chart-composition"/);
-  assert.match(panel, /data-testid="architect-chart-state"/);
+/*
+ * 2026-10-16 · os gráficos de contagem do lote (destino das keywords,
+ * composição, estado) saíram do painel — pedido do dono: "mostra só o que é
+ * útil para o user". As pontuações do candidato aberto ficam: elas explicam a
+ * decisão que a pessoa toma ali.
+ */
+test("o painel traz as pontuações do candidato aberto, sem os gráficos de contagem do lote", () => {
+  for (const fora of ["architect-chart-keyword-destination", "architect-chart-composition", "architect-chart-state"]) {
+    assert.ok(!panel.includes(fora), `${fora} saiu do painel`);
+  }
   for (const rotulo of ["Coerência", "Intenção", "Centralidade", "Sobreposição"]) {
     assert.ok(panel.includes(rotulo), `falta a pontuação ${rotulo}`);
   }

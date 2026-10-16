@@ -256,7 +256,9 @@ test("a fase Artigos mantém o fechamento do ArticleDNA no fluxo", () => {
   assert.doesNotMatch(review, /data-testid="architect-approve-article"/);
   assert.match(review, /Concluir formação/);
   assert.match(review, /data-testid="architect-approval-blockers"/);
-  assert.match(formacao, /data-testid="architect-confirm-formation"/);
+  // 2026-10-16 · o ato é o "Concluir formação" da barra de sempre (topo de "Detalhes técnicos"); o painel de formação não tem cópia.
+  assert.match(readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8"), /data-testid="architect-articles-top-confirm"/);
+  assert.doesNotMatch(formacao, /data-testid="architect-confirm-formation"/);
   // E o painel da fase Artigos recebe o fechamento de fato.
   assert.match(workspace, /closure=\{\{ approved: articleReview\.approved/);
   assert.match(workspace, /data-testid="architect-closing-authority"/);

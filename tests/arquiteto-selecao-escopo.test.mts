@@ -143,10 +143,12 @@ test("o painel e os handlers usam o mesmo escopo", () => {
   assert.ok(workspace.includes(
     "formationScopeRef.current = { scope: formationSelectionScope, universes: selectedFormationUniverses };",
   ));
-  // E a barra diz o escopo por extenso.
-  assert.match(painel, /data-testid="architect-formation-selection-count"/);
-  // O painel recebe o motivo da autoridade única, não recalcula o seu.
-  assert.match(painel, /scopeReason: string \| null;/);
+  // E a barra diz o escopo por extenso. 2026-10-16 · só a barra de sempre (topo de "Detalhes técnicos"): o painel não repete a contagem.
+  const barra = readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8");
+  assert.match(barra, /data-testid="architect-articles-selection-count"/);
+  assert.doesNotMatch(painel, /architect-formation-selection-count|scopeReason/);
+  // A barra recebe o motivo da autoridade única, não recalcula o seu.
+  assert.match(barra, /selectionScope: \{ selectedCount: number; reason: string \| null \};/);
 });
 
 /* ------------- a resolução humana da SERP existe de verdade -------------- */

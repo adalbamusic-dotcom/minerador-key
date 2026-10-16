@@ -5,6 +5,8 @@
 - Cada área tem uma única linha de processo, a dos contratos. Correção, caso novo ou situação de marca entram nela, nos botões e núcleos que já existem. Processo paralelo, rota ou etapa duplicada e função removida ao "limpar a tela" violam este invariante (detalhe e origem em `AGENTS.md` §0).
 - Agrupar, reforçar, investigar, escrever e ligar seguem o SEO semântico (entidade, intenção, contexto, cobertura), com a SERP como autoridade acima da lógica e da IA.
 - A linha de cada área é guardada por cenários de fluxo automáticos que chegam à conclusão documentada. Mudança de regra atualiza o cenário na mesma entrega.
+- Formar, agrupar, reforçar e propor acontece na cópia de trabalho. O artefato canônico só é gravado no servidor quando o usuário confirma ou finaliza, por um gravador por artefato que revalida e relê. Provider e IA rodam no servidor só para ler e calcular (`AGENTS.md` §0.4).
+- A melhoria nova prevalece sobre a antiga em todo caminho da área. Na mesma entrega, o texto antigo é marcado SUBSTITUÍDO na spec, na SDD e no catálogo, e o código antigo sai (`AGENTS.md` §0.5).
 
 13. Site observa, Minerador qualifica, Arquiteto forma e Radar valida somente o ArticleDNA formado; KGR, volume, resultados e intenção não podem ser promovidos por inferência de URL ou slug.
 

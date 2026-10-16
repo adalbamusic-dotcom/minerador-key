@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import type { ArticleSiloView } from "@/lib/arquiteto/article-silo-view";
 import {
   SINGLETON_CLASSIFICATION_LABELS,
   type ArticleCandidate,
@@ -13,17 +12,20 @@ import {
 /**
  * Painel da fase Artigos.
  *
- * Mesmo padrão operacional da aba Silos: uma ação para entender o lote, outra
- * para confirmar o que foi revisado. Entre as duas, a leitura do que o
- * Arquiteto encontrou e por quê.
+ * 2026-10-16 · mora em "Detalhes técnicos", logo abaixo da barra de sempre
+ * (Processar artigos · Concluir formação · Melhorar publicados…), que é quem
+ * age. Pedido do dono: "tem muita coisa que está demais para mostrar nesse
+ * painel, pode reduzir os dados do banco de dados, mostra só o que é útil para
+ * o user". Por isso o painel diz só o que leva a uma ação ou é alerta real: o
+ * que falta fazer, a formação desatualizada (o botão que resolve está logo
+ * acima), conflitos e pendências quando existem, a portaria da conclusão e o
+ * artigo aberto com as decisões dele. As contagens internas (leitura do lote,
+ * singletons, agrupamentos, distribuição, estado do cenário, acervo antigo)
+ * saíram da tela; nenhum dado foi apagado.
  *
  * A pergunta que o painel responde é editorial, não técnica: estes candidatos
- * são mesmo conteúdos diferentes? Por isso todo número vem com o motivo, e um
- * candidato de uma keyword só precisa dizer POR QUE ficou sozinho — "1
- * keyword" não é explicação.
- *
- * Os números são pontuação editorial explicável — não são score de SEO nem
- * probabilidade de ranking.
+ * são mesmo conteúdos diferentes? Os números são pontuação editorial
+ * explicável — não são score de SEO nem probabilidade de ranking.
  */
 
 const RISK_TONES: Record<ArticleCandidate["cannibalizationRisk"], string> = {
@@ -49,21 +51,6 @@ const SINGLETON_REVIEW: ReadonlySet<SingletonAudit["classification"]> = new Set(
 /** D2/D3 — publicado e Assunto sozinhos são artigos completos, nunca "candidato independente". */
 const SINGLETON_ANCHORS: ReadonlySet<SingletonAudit["classification"]> = new Set(["PUBLISHED_ANCHOR", "SUBJECT_TRUNK"]);
 
-function Bar({ label, value, total, tone }: { label: string; value: number; total: number; tone: string }) {
-  const ratio = total > 0 ? value / total : 0;
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className="w-44 shrink-0 truncate text-text-muted">{label}</span>
-      <span className="h-2 min-w-0 flex-1 overflow-hidden rounded bg-surface">
-        <span className={`block h-full ${tone}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
-      </span>
-      <span className="w-16 shrink-0 text-right tabular-nums text-foreground">
-        {value}{total > 0 ? `/${total}` : ""}
-      </span>
-    </div>
-  );
-}
-
 function ScoreBar({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center gap-2 text-sm">
@@ -81,29 +68,18 @@ export function ArticleFormationPanel({
   summary,
   processed,
   stale,
-  scenarioState,
   busy,
-  selectedCount,
-  scopeReason,
   confirmed,
   selectedCandidate,
   selectedCandidateSerp = null,
   selectedSingletonAudit,
   keywordLabels,
   mergeTargets,
-  siloViews,
-  selectedSiloRef,
-  onSelectSilo,
   waiting,
   crossSilo,
   parentBinding,
-  batch,
   serpGate,
-  preSerpArtifacts,
-  legacy,
   conclusionGates,
-  onProcess,
-  onConfirm,
   onChangePrincipal,
   onSplitKeyword,
   onMoveKeyword,
@@ -113,26 +89,7 @@ export function ArticleFormationPanel({
   summary: ReturnType<typeof summarizeArticleFormation>;
   processed: boolean;
   stale: boolean;
-  /** Estágio do cenário em uma palavra: processada, parcial, confirmada… */
-  scenarioState: string;
   busy: boolean;
-  /**
-   * Quantos Articles estão selecionados na tabela.
-   *
-   * A tabela é a área de seleção e o painel é a área de trabalho: sem seleção
-   * não há escopo, e um botão habilitado prometeria agir sobre "tudo" — que é
-   * justamente o que fazia o gate reclamar de artigo que ninguém escolheu.
-   */
-  /** Linhas selecionadas na planilha — a mesma contagem do rodapé. */
-  selectedCount: number;
-  /**
-   * Por que a fase não consegue agir sobre esta seleção; `null` quando pode.
-   *
-   * O painel lia `selectedCandidateRefs.size` e dizia "Selecione pelo menos um
-   * artigo" com uma linha já selecionada — recusa que nenhum clique resolve. A
-   * frase agora vem da autoridade única de escopo e nomeia o que ficou de fora.
-   */
-  scopeReason: string | null;
   confirmed: { articles: number; keywords: number; pending: number } | null;
   selectedCandidate: ArticleCandidate | null;
   /**
@@ -145,40 +102,16 @@ export function ArticleFormationPanel({
   keywordLabels: ReadonlyMap<string, string>;
   /** Outros candidatos do MESMO Silo — juntar atravessa Silo nenhum. */
   mergeTargets: readonly { candidateRef: string; label: string }[];
-  /** Hierarquia por SiloPage — a leitura por Silo vive aqui. */
-  siloViews: readonly ArticleSiloView[];
-  /** Silo aberto; `null` mostra o resumo global. */
-  selectedSiloRef: string | null;
-  onSelectSilo: (siloRef: string | null) => void;
   /** Keywords que ainda não pertencem à arquitetura de Article. */
   waiting: {
-    received: number;
     awaitingConfirmation: number;
     withoutSilo: number;
     rows: readonly { keywordId: string; keyword: string; reason: string; siloName: string | null }[];
   };
   /** §1 — nenhum Article pode misturar Silos. */
   crossSilo: number;
-  /**
-   * Como cada ArticleDNA conhece o próprio Silo.
-   *
-   * Declarado é contrato; inferido é legado legível; conflito não move nada.
-   */
-  parentBinding: { declared: number; legacy: number; conflict: number; unresolved: number };
-  /** §13 — a leitura do lote corrente, com os nomes que a operação usa. */
-  batch: {
-    keywords: number;
-    siloPages: number;
-    /** Ainda cenário: nenhum ArticleDNA os descreve. */
-    candidates: number;
-    /** Já materializados — o remoto confirmou a composição. */
-    articles: number;
-    grouped: number;
-    singletons: number;
-    pendencias: number;
-    conflitos: number;
-    revisoesHumanas: number;
-  };
+  /** §21 — artigo cujo Silo não se resolve: conflito não move nada. */
+  parentBinding: { conflict: number; unresolved: number };
   /**
    * §12 — o gate SERP do lote.
    *
@@ -190,7 +123,6 @@ export function ArticleFormationPanel({
     total: number;
     /** Foram ao mercado — divergente e inconclusivo INCLUSOS. */
     analyzed: number;
-    supported: number;
     divergent: number;
     divergentResolved: number;
     inconclusive: number;
@@ -202,25 +134,8 @@ export function ArticleFormationPanel({
     awaitingHuman: number;
     blocking: number;
   };
-  /** ArticleDNA gravado antes do gate: homologação, não formação vigente. */
-  preSerpArtifacts: number;
-  /**
-   * §1 — ArticleDNA de formações anteriores.
-   *
-   * Eles continuam no acervo canônico; ficam fora de grid, contagem, mapa,
-   * seleção e formação. Contá-los aqui é o oposto de escondê-los: a mesa diz
-   * quantos existem e por que não participam do cenário corrente.
-   */
-  legacy: { current: number; legacy: number; reasons: readonly { reason: string; count: number; label: string }[] };
   /** §14 — resposta da portaria na última tentativa de concluir. */
   conclusionGates: readonly { code: string; ok: boolean; detail: string }[];
-  /**
-   * 2026-10-16 · opcionais: na aba Artigos o painel mora em "Detalhes técnicos"
-   * e os dois botões são só os da barra de sempre (nada em dobro). Ausentes, o
-   * painel não desenha "Processar artigos" nem "Concluir formação".
-   */
-  onProcess?: () => void;
-  onConfirm?: () => void;
   onChangePrincipal: (candidateRef: string, keywordId: string) => void;
   onSplitKeyword: (candidateRef: string, keywordId: string) => void;
   onMoveKeyword: (keywordId: string, targetCandidateRef: string) => void;
@@ -228,121 +143,52 @@ export function ArticleFormationPanel({
 }) {
   const [mergeTarget, setMergeTarget] = React.useState("");
   const [waitingOpen, setWaitingOpen] = React.useState(false);
-  const jaPublicadas = universes.reduce((total, universe) => total + universe.matchedToPublished.length, 0);
-  const totalKeywords = summary.keywordsEmCandidatos + jaPublicadas + summary.freeKeywords;
 
-  // Estado da formação. Publicado NÃO entra na mesma autoridade dos
-  // candidatos: ele já existe e não está esperando decisão nenhuma.
+  // Formações que pedem olhar humano. Publicado NÃO entra: ele já existe e
+  // não está esperando decisão nenhuma.
   const singletonsARevisar = universes
     .flatMap(universe => universe.singletonAudits)
     .filter(audit => SINGLETON_REVIEW.has(audit.classification)).length;
-  const comConflito = summary.needsReview;
-  const prontos = Math.max(summary.candidates - comConflito - singletonsARevisar, 0);
+  const aRevisar = summary.needsReview + singletonsARevisar;
+  const semSilo = waiting.awaitingConfirmation + waiting.withoutSilo;
 
   const nomeDaKeyword = (keywordId: string) => keywordLabels.get(keywordId) || "keyword";
-  const siloAberto = selectedSiloRef
-    ? siloViews.find(view => view.siloRef === selectedSiloRef) ?? null
-    : null;
 
   return (
     <section className="mt-3 rounded border border-divider bg-surface-subtle p-3" data-testid="architect-formation-panel">
-      <div className="flex flex-wrap items-center gap-2">
-        {onProcess && <button
-          type="button"
-          onClick={onProcess}
-          disabled={busy || Boolean(scopeReason)}
-          title={scopeReason ?? `Processar ${selectedCount} artigo(s) selecionado(s).`}
-          data-testid="architect-process-articles"
-          className="inline-flex min-h-9 items-center gap-1.5 rounded border border-module-accent/50 bg-module-accent/10 px-3 text-sm font-semibold text-module-accent transition-colors hover:bg-module-accent/20 disabled:opacity-40"
-        >
-          {busy ? "Processando…" : processed ? "Reprocessar artigos" : "Processar artigos"}
-        </button>}
-        {onConfirm && <button
-          type="button"
-          onClick={onConfirm}
-          disabled={busy || !processed || Boolean(scopeReason)}
-          data-testid="architect-confirm-formation"
-          title={scopeReason
-            ?? (processed ? `Concluir os ${selectedCount} artigo(s) selecionado(s) e materializar os ArticleDNA` : "Processe os artigos antes de concluir.")}
-          className="inline-flex min-h-9 items-center gap-1.5 rounded border border-positive-soft/45 px-3 text-sm font-semibold text-positive-soft transition-colors hover:bg-positive-soft/10 disabled:opacity-40"
-        >
-          Concluir formação
-        </button>}
-        {/* O escopo fica dito por extenso: a pessoa não deve precisar deduzir
-            sobre o que os dois botões vão agir. */}
-        <span className={`text-sm ${scopeReason && selectedCount > 0 ? "text-warning" : "text-text-muted"}`} data-testid="architect-formation-selection-count">
-          {scopeReason ?? `${selectedCount} artigo${selectedCount === 1 ? "" : "s"} selecionado${selectedCount === 1 ? "" : "s"}`}
-        </span>
-        {stale && (
-          <span className="text-sm text-warning" data-testid="architect-formation-stale">
-            Formação desatualizada: o lote mudou desde a última análise.
-          </span>
-        )}
-      </div>
+      {/* Desatualizada: o botão que resolve ("Reprocessar artigos") é o da barra, logo acima. */}
+      {stale && (
+        <p className="text-sm leading-6 text-warning" data-testid="architect-formation-stale">
+          Formação desatualizada: o lote mudou desde a última análise. Use “Reprocessar artigos”, acima.
+        </p>
+      )}
 
       {!processed ? (
-        <p className="mt-2 text-sm leading-6 text-text-muted" data-testid="architect-formation-idle">
+        <p className="text-sm leading-6 text-text-muted" data-testid="architect-formation-idle">
           {summary.silos
-            ? `${summary.silos} Silo(s) confirmado(s) com ${summary.keywords} keyword(s). Processe os artigos: o Arquiteto lê o conjunto de cada Silo antes de propor qualquer artigo.`
+            ? "Processe os artigos: o Arquiteto lê o conjunto de cada Silo antes de propor qualquer artigo."
             : "Confirme a arquitetura na aba Silos para liberar a formação de artigos."}
         </p>
       ) : (
         <>
-          <div className="mt-3">
-            <p className="text-sm font-semibold uppercase tracking-wider text-module-accent">Análise dos artigos</p>
-            <p className="mt-1 text-sm leading-6 text-foreground" data-testid="architect-formation-summary">
-              {summary.keywords} keyword(s) analisada(s) · {summary.candidates} candidato(s)
+          {/* O que falta fazer — só o que existe. */}
+          {(summary.publishedAwaitingSupport > 0 || summary.subjectsAwaitingSupport > 0 || aRevisar > 0) && (
+            <ul className="space-y-0.5 text-sm leading-6 text-foreground" data-testid="architect-formation-todo">
+              {summary.publishedAwaitingSupport > 0 && <li>{summary.publishedAwaitingSupport} publicado(s) aguardando reforço</li>}
+              {summary.subjectsAwaitingSupport > 0 && <li>{summary.subjectsAwaitingSupport} Assunto(s) aguardando sustentação</li>}
+              {aRevisar > 0 && <li className="text-warning">{aRevisar} formação(ões) precisa(m) de revisão</li>}
+            </ul>
+          )}
+          {summary.overflowKeywords > 0 && (
+            <p className="text-sm leading-6 text-warning" data-testid="architect-formation-overflow">
+              {summary.overflowKeywords} busca(s) convergem além do teto de seis e esperam decisão editorial.
             </p>
-            <p className="text-sm leading-6 text-text-muted">
-              {summary.singles} candidato(s) individual(is) · {summary.grouped} agrupamento(s)
-              {summary.publishedAwaitingSupport > 0 ? ` · ${summary.publishedAwaitingSupport} publicado(s) aguardando reforço` : ""}
-              {summary.subjectsAwaitingSupport > 0 ? ` · ${summary.subjectsAwaitingSupport} Assunto(s) aguardando sustentação` : ""}
+          )}
+          {summary.deferredKeywords > 0 && (
+            <p className="text-sm leading-6 text-text-muted" data-testid="architect-formation-deferred">
+              {summary.deferredKeywords} keyword(s) em Keywords não agrupadas por precedência ou pelo teto de seis, cada uma com o motivo.
             </p>
-            <p className="text-sm leading-6 text-text-muted">
-              {summary.publishedArticles} artigo(s) publicado(s) reconhecido(s) · {summary.possibleOverlaps} possível(is) sobreposição(ões) ·{" "}
-              {comConflito + singletonsARevisar} formação(ões) precisa(m) de revisão
-            </p>
-            {summary.overflowKeywords > 0 && (
-              <p className="text-sm leading-6 text-warning" data-testid="architect-formation-overflow">
-                {summary.overflowKeywords} busca(s) convergem além do teto de seis e esperam decisão editorial.
-              </p>
-            )}
-            {summary.deferredKeywords > 0 && (
-              <p className="text-sm leading-6 text-text-muted" data-testid="architect-formation-deferred">
-                {summary.deferredKeywords} keyword(s) em Keywords não agrupadas por precedência ou pelo teto de seis, cada uma com o motivo.
-              </p>
-            )}
-          </div>
-
-          {/* §13 — a leitura do lote com os nomes que a operação usa. Nada
-              aqui é fixo no código: todo número vem do cenário corrente. */}
-          <div className="mt-3" data-testid="architect-batch-reading">
-            <p className="text-sm font-semibold text-text-muted">Leitura do lote</p>
-            <dl className="mt-1 grid gap-x-4 gap-y-0.5 text-sm sm:grid-cols-2">
-              {([
-                ["Keywords analisadas", batch.keywords],
-                ["SiloPages", batch.siloPages],
-                ["Articles formados", batch.articles],
-                ["Articles candidatos", batch.candidates],
-                ["Agrupamentos", batch.grouped],
-                ["Singletons", batch.singletons],
-                ["Pendências", batch.pendencias],
-                ["Conflitos", batch.conflitos],
-                ["SERP analisada", serpGate.analyzed],
-                ["SERP sustentada", serpGate.supported],
-                ["SERP divergente", serpGate.divergent],
-                ["SERP inconclusiva", serpGate.inconclusive],
-                ["SERP a coletar", serpGate.missing + serpGate.stale + serpGate.failed],
-                ["Aguardando decisão", serpGate.awaitingHuman],
-                ["Revisões humanas", batch.revisoesHumanas],
-              ] as const).map(([rotulo, valor]) => (
-                <div key={rotulo} className="flex items-baseline justify-between gap-2">
-                  <dt className="text-text-muted">{rotulo}</dt>
-                  <dd className="tabular-nums text-foreground">{valor}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
+          )}
 
           {/* O gate em uma frase: por que Concluir não está liberado. */}
           {serpGate.blocking > 0 && (
@@ -361,168 +207,53 @@ export function ArticleFormationPanel({
             </p>
           )}
 
-          {/* §0 — ArticleDNA gravado antes do gate não é formação vigente. */}
-          {preSerpArtifacts > 0 && (
-            <p className="mt-2 text-sm leading-6 text-text-muted" data-testid="architect-pre-serp-artifacts">
-              {preSerpArtifacts} ArticleDNA foram gravados antes do gate SERP. Eles permanecem no acervo como
-              homologação, não contam como prontos para aprovação e serão sucedidos quando a composição
-              passar pela evidência.
-            </p>
-          )}
-
-          {/* §1 — o acervo antigo é contado, nunca misturado ao cenário. */}
-          {legacy.legacy > 0 && (
-            <p className="mt-2 text-sm leading-6 text-text-muted" data-testid="architect-legacy-articles">
-              {legacy.legacy} ArticleDNA de formações anteriores continuam no acervo e ficam fora deste cenário
-              {legacy.reasons.length ? `: ${legacy.reasons.map(item => `${item.count} ${item.label}`).join(" · ")}` : ""}.
-            </p>
-          )}
-
-          <div className="mt-3">
-            <p className="mt-1 text-sm text-text-muted" data-testid="architect-formation-state">
-              Estado: <span className="text-foreground">{scenarioState}</span>
-            </p>
-          </div>
-
-          {/* §1: um Article que mistura Silos não tem pai. Isso é defeito, não
-              preferência — e aparece antes de qualquer número bonito. */}
+          {/* §1: um Article que mistura Silos não tem pai. Isso é defeito, não preferência. */}
           {crossSilo > 0 && (
             <p className="mt-2 text-sm leading-6 text-danger" data-testid="architect-cross-silo-alert">
               {crossSilo} artigo(s) reúnem keywords de Silos diferentes e não pertencem a nenhuma SiloPage.
             </p>
           )}
 
-          {/* §21: a mesa precisa dizer COMO cada artigo conhece o Silo dele.
-              Inferir pelo consenso das keywords serve para ler o legado; não
-              serve como contrato, porque o pai mudaria junto com elas. */}
-          {(parentBinding.legacy > 0 || parentBinding.conflict > 0 || parentBinding.unresolved > 0) && (
-            <p
-              className={`mt-2 text-sm leading-6 ${parentBinding.conflict || parentBinding.unresolved ? "text-danger" : "text-text-muted"}`}
-              data-testid="architect-parent-binding"
-            >
-              Vínculo com o Silo: {parentBinding.declared} declarado(s)
-              {parentBinding.legacy ? ` · ${parentBinding.legacy} inferido(s) do consenso das keywords (legado)` : ""}
-              {parentBinding.conflict ? ` · ${parentBinding.conflict} em conflito` : ""}
-              {parentBinding.unresolved ? ` · ${parentBinding.unresolved} sem Silo resolvível` : ""}
+          {/* §21: só o conflito de verdade; o vínculo inferido do legado é leitura interna. */}
+          {(parentBinding.conflict > 0 || parentBinding.unresolved > 0) && (
+            <p className="mt-2 text-sm leading-6 text-danger" data-testid="architect-parent-binding">
+              Vínculo com o Silo:
+              {parentBinding.conflict ? ` ${parentBinding.conflict} em conflito` : ""}
+              {parentBinding.conflict && parentBinding.unresolved ? " ·" : ""}
+              {parentBinding.unresolved ? ` ${parentBinding.unresolved} sem Silo resolvível` : ""}
             </p>
           )}
 
-          {/* As pendências não pertencem à arquitetura de Article: elas são
-              contadas aqui, com o detalhe sob demanda, em vez de ocupar a mesa
-              como se já fossem conteúdo. */}
-          <div className="mt-3" data-testid="architect-waiting-summary">
-            <p className="text-sm leading-6 text-text-muted">
-              {waiting.received} keyword(s) recebida(s) · {summary.keywords} participam da formação ·{" "}
-              {waiting.awaitingConfirmation} aguardam confirmação do Silo · {waiting.withoutSilo} ainda não possuem Silo
-            </p>
-            {waiting.rows.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setWaitingOpen(valor => !valor)}
-                data-testid="architect-waiting-toggle"
-                className="mt-1 text-sm text-text-muted transition-colors hover:text-foreground"
-              >
-                {waitingOpen ? "Ocultar pendências" : `Ver ${waiting.rows.length} pendência(s)`}
-              </button>
-            )}
-            {waitingOpen && (
-              <ul className="mt-1 space-y-0.5 text-sm leading-6 text-text-muted" data-testid="architect-waiting-details">
-                {waiting.rows.map(row => (
-                  <li key={row.keywordId}>
-                    <span className="text-keyword">{row.keyword}</span>
-                    {row.siloName ? ` · ${row.siloName}` : ""} · {row.reason}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* §9: 13 de 17 com uma keyword só não é formação validada — é
-              fragmentação que ainda não foi explicada. Informativo, não trava. */}
-          {summary.singles > 0 && summary.candidates > 0 && (
-            <div className="mt-3" data-testid="architect-fragmentation-alert">
-              <p className="text-sm leading-6 text-warning">
-                {summary.singles} de {summary.candidates} candidato(s) têm apenas uma keyword. Ainda não há
-                evidência suficiente para afirmar que representam {summary.singles} intenções únicas.
-              </p>
-              {/* O agrupamento já descontou o tema do pai — nome, entidade
-                  central, intenção macro, fronteira e narrativa do Silo. O que
-                  sobrou e continua separado são os modificadores; dizer isso
-                  evita concluir que faltou contexto quando não faltou. */}
-              <p className="mt-1 text-sm leading-6 text-text-muted" data-testid="architect-fragmentation-explanation">
-                O agrupamento já desconta o universo do Silo — entidade central, intenção macro,
-                fronteira e narrativa. O que mantém estes candidatos separados são os modificadores
-                de cada busca, não a falta de contexto do pai.
-              </p>
+          {/* As pendências não pertencem à arquitetura de Article: o detalhe fica sob demanda. */}
+          {(semSilo > 0 || waiting.rows.length > 0) && (
+            <div className="mt-2" data-testid="architect-waiting-summary">
+              {semSilo > 0 && (
+                <p className="text-sm leading-6 text-text-muted">
+                  {waiting.awaitingConfirmation} keyword(s) aguardam confirmação do Silo · {waiting.withoutSilo} ainda não possuem Silo
+                </p>
+              )}
+              {waiting.rows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setWaitingOpen(valor => !valor)}
+                  data-testid="architect-waiting-toggle"
+                  className="mt-1 text-sm text-text-muted transition-colors hover:text-foreground"
+                >
+                  {waitingOpen ? "Ocultar pendências" : `Ver ${waiting.rows.length} pendência(s)`}
+                </button>
+              )}
+              {waitingOpen && (
+                <ul className="mt-1 space-y-0.5 text-sm leading-6 text-text-muted" data-testid="architect-waiting-details">
+                  {waiting.rows.map(row => (
+                    <li key={row.keywordId}>
+                      <span className="text-keyword">{row.keyword}</span>
+                      {row.siloName ? ` · ${row.siloName}` : ""} · {row.reason}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
-
-          {/* §20: fragmentação por Silo, visível de relance. */}
-          <div className="mt-3 grid gap-1" data-testid="architect-chart-silo-distribution">
-            <p className="text-sm font-semibold text-text-muted">Distribuição da formação</p>
-            {siloViews.length === 0
-              ? <p className="text-sm leading-6 text-text-muted">Nenhum Silo confirmado participa da formação.</p>
-              : siloViews.map(view => (
-                <Bar
-                  key={view.siloRef}
-                  label={view.siloLabel}
-                  value={view.counts.articles + view.counts.candidates}
-                  total={summary.candidates || 1}
-                  tone="bg-module-accent/70"
-                />
-              ))}
-          </div>
-
-          {/* §8: a leitura por Silo, sem sair da mesma mesa. */}
-          <div className="mt-3" data-testid="architect-silo-panel">
-            <label className="flex flex-wrap items-center gap-2 text-sm text-text-muted" htmlFor="architect-panel-silo">
-              Silo:
-              <select
-                id="architect-panel-silo"
-                value={selectedSiloRef ?? ""}
-                onChange={event => onSelectSilo(event.target.value || null)}
-                className="min-h-8 min-w-0 flex-1 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm text-foreground"
-              >
-                <option value="">Todos os Silos</option>
-                {siloViews.map(view => (
-                  <option key={view.siloRef} value={view.siloRef}>{view.siloLabel}</option>
-                ))}
-              </select>
-            </label>
-            {siloAberto && (
-              <p className="mt-1 text-sm leading-6 text-text-muted" data-testid="architect-silo-panel-counts">
-                Keywords: {siloAberto.counts.keywords} · Articles: {siloAberto.counts.articles} ·
-                Candidatos: {siloAberto.counts.candidates} · Publicados: {siloAberto.counts.published} ·
-                Singletons: {siloAberto.counts.singletons} · Agrupamentos: {siloAberto.counts.grouped} ·
-                Possíveis sobreposições: {siloAberto.counts.possibleOverlaps}
-              </p>
-            )}
-          </div>
-
-          {/* Composição: revela fragmentação de relance. */}
-          <div className="mt-3 grid gap-1" data-testid="architect-chart-composition">
-            <p className="text-sm font-semibold text-text-muted">Composição dos candidatos</p>
-            <Bar label="1 keyword" value={summary.composition.um} total={summary.candidates} tone="bg-text-muted/50" />
-            <Bar label="2 keywords" value={summary.composition.dois} total={summary.candidates} tone="bg-module-accent/70" />
-            <Bar label="3–6 keywords" value={summary.composition.tresASeis} total={summary.candidates} tone="bg-module-accent/70" />
-          </div>
-
-          {/* Estado. Publicado aparece à parte: é patrimônio, não candidato. */}
-          <div className="mt-3 grid gap-1" data-testid="architect-chart-state">
-            <p className="text-sm font-semibold text-text-muted">Estado da formação</p>
-            <Bar label="Prontos" value={prontos} total={summary.candidates} tone="bg-success/70" />
-            <Bar label="Revisar agrupamento" value={comConflito} total={summary.candidates} tone="bg-warning/70" />
-            <Bar label="Possível sobreposição" value={singletonsARevisar} total={summary.candidates} tone="bg-warning/70" />
-            <Bar label="Publicado/protegido" value={summary.publishedArticles} total={summary.publishedArticles} tone="bg-module-accent/40" />
-          </div>
-
-          {/* Destino de cada keyword do lote. */}
-          <div className="mt-3 grid gap-1" data-testid="architect-chart-keyword-destination">
-            <p className="text-sm font-semibold text-text-muted">Destino das keywords</p>
-            <Bar label="Em artigo candidato" value={summary.keywordsEmCandidatos} total={totalKeywords} tone="bg-module-accent/70" />
-            <Bar label="Já publicadas" value={jaPublicadas} total={totalKeywords} tone="bg-success/70" />
-            <Bar label="Keywords não agrupadas" value={summary.freeKeywords} total={totalKeywords} tone="bg-text-muted/50" />
-          </div>
 
           {selectedCandidate && (
             <div className="mt-3 rounded border border-divider bg-surface p-2" data-testid="architect-chart-candidate">

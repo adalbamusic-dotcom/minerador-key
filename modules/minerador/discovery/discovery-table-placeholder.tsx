@@ -219,6 +219,11 @@ export function DiscoveryTablePlaceholder({ candidates = [], seoFilters = DEFAUL
     if (allintitleMeasuring || !selectedCandidateIds.length) return;
     const brandId = brandRef.split("--").at(-1)?.trim() || "";
     if (!isTenantId(brandId)) { setInlineNotice("A medição não pôde ser iniciada. Sua seleção foi preservada."); return; }
+    // 2026-10-16 · auditoria do Minerador (S-1): esta chamada é paga e não pedia confirmação (o "Resultados" do Processador pede).
+    if (!window.confirm(`Medir Resultado e KD de ${selectedCandidateIds.length} candidata(s) chama o DataForSEO, que é PAGO. Não é exigido para aprovar nem para enviar ao Arquiteto. Confirmar?`)) {
+      setInlineNotice("Medição cancelada: nenhuma chamada foi paga. Sua seleção foi preservada.");
+      return;
+    }
     setAllintitleMeasuring(true);
     setInlineNotice(null);
     const operationRequestId = crypto.randomUUID();

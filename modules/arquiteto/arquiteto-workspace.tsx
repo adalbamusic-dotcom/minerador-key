@@ -75,8 +75,7 @@ import { validateManualSiloSlug, type SlugSubject } from "@/lib/arquiteto/slug-a
 import { TerritorialWorkspaceHeader, TerritorialWorkspaceRows, type KeywordDnaInspection, type KeywordVinculoLine } from "./territorial-workspace-rows";
 import { ArticleFormationPanel } from "./article-formation-panel";
 import { ArticleSiloPageRow } from "./article-silo-rows";
-import { buildArticleSiloViews, filterArticleSiloViews, summarizeArticleSiloViews } from "@/lib/arquiteto/article-silo-view";
-import { buildArticleFlowProjection } from "@/lib/arquiteto/article-flow";
+import { buildArticleSiloViews, summarizeArticleSiloViews } from "@/lib/arquiteto/article-silo-view";
 import { auditArticleSiloScope } from "@/lib/arquiteto/article-silo-scope";
 import { buildSiloScopedProvisionalGroups, countCrossSiloGroups, summarizeScopedGroups } from "@/lib/arquiteto/article-formation-scope";
 import { articleParentLabel, assertSingleParent, readArticleParent, resolveParentBinding } from "@/lib/arquiteto/article-parent-binding";
@@ -158,7 +157,7 @@ import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, siloThemeTokens, summar
 import { siloContextTokens } from "@/lib/arquiteto/semantic-nucleus";
 import { resolveCandidateBoundaries, type CandidateSerpEvidence } from "@/lib/arquiteto/candidate-serp-boundary";
 import { challengesRequiringSiloReview, describeSiloReconsideration, resolveSiloBoundaryChallenge, type SiloBoundaryChallenge } from "@/lib/arquiteto/silo-boundary-challenge";
-import { partitionMaterializedArticles, summarizeLegacyArticles } from "@/lib/arquiteto/formation-materialization";
+import { partitionMaterializedArticles } from "@/lib/arquiteto/formation-materialization";
 import { observedFromArticleDna, readbackMaterializedArticles, type MaterializationReadback, type MaterializedArticleExpectation } from "@/lib/arquiteto/article-materialization-readback";
 import { articleSerpParecerFromAssessment } from "@/lib/arquiteto/article-serp-interpretation";
 import { SERP_LENS_LABELS, describeQualificationLenses, describeSerpLensesMarker, describeSerpLensesMissing, mergeSerpPaidPlans, type SerpPaidPlan, type SerpPaidPlanChoice } from "@/lib/arquiteto/serp-lens-plan";
@@ -170,7 +169,7 @@ import { SerpPaidPlanDialog } from "./serp-paid-plan-dialog";
 import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, articleSerpIntentOf, articleSerpLensesComplete, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
 import { comparePrincipalCandidates, simulateScenarioChange, type ScenarioChange, type ScenarioKeyword } from "@/lib/arquiteto/formation-scenario";
 import { ArticleFormationReviewPanel, type EvidenceState } from "./article-formation-review";
-import { ARTICLE_FORMATION_MARKER_CONTRACT_VERSION, ARTICLE_FORMATION_SCENARIO_LABELS, resolveArticleFormationScenarioState, type ArticleFormationMarkerPayload } from "@/lib/arquiteto/article-formation-marker";
+import { ARTICLE_FORMATION_MARKER_CONTRACT_VERSION, type ArticleFormationMarkerPayload } from "@/lib/arquiteto/article-formation-marker";
 import { SitemapViewHeader, SitemapViewRows } from "./sitemap-rows";
 import { buildArticlePipelineRows } from "@/lib/arquiteto/article-pipeline";
 import { buildSitemapView } from "@/lib/arquiteto/sitemap-view";
@@ -180,7 +179,6 @@ import { territorialAiAvailabilityOf, type TerritorialAiProposal } from "@/lib/a
 import { buildTerritorialReviewView, territorialHumanDecisionLabel, territorialProcessCells, type TerritorialReviewAction } from "@/lib/arquiteto/territorial-review";
 import { buildArchitectureAnalysis, buildArchitectureConfirmationPlan, withDeclaredPlanReading } from "@/lib/arquiteto/architecture-analysis";
 import { ArchitecturePanel } from "./architecture-panel";
-import { buildArchitectureFlowProjection, clusterRefOfFlowNode } from "@/lib/arquiteto/architecture-flow";
 import { ARCHITECTURE_MARKER_CONTRACT_VERSION, ARCHITECTURE_SCENARIO_LABELS, resolveArchitectureScenarioState, type ArchitectureMarkerPayload } from "@/lib/arquiteto/architecture-marker-record";
 import { buildPublishedSiteArchitecture } from "@/lib/arquiteto/published-site-architecture";
 import { readinessWithPlannedMembers, resolveTerritoryConfirmationReadiness, siloIsHumanDecided } from "@/lib/arquiteto/territory";
@@ -317,7 +315,7 @@ import { aiReviewErrorMessage } from "@/lib/arquiteto/ai-review-error";
 import { applyArticleSelectionClick, applySelectionPaint, articleSelectionIdForCandidate, articleSelectionIdForWorkingArticle, resolveWorkingArticleId, sameSelectionSet, toggleVisibleArticleSelection } from "@/lib/arquiteto/article-selection";
 import { selectedArticleKeywordIds } from "@/lib/arquiteto/selected-keyword-delete-lifecycle";
 import { applyCanonicalSiloNames, assignSiloToArticleMembers, canonicalSiloOptions, type CanonicalSiloOption } from "@/lib/arquiteto/silo-workspace";
-import { chooseSiloWorkingCopyPillar, formSiloWorkingCopies, orderSiloWorkingCopyByDeclaredPlan, type SiloWorkingCopy, type SiloWorkingCopyArticleReference } from "@/lib/arquiteto/silo-formation";
+import { chooseSiloWorkingCopyPillar, formSiloWorkingCopies, orderSiloWorkingCopyByDeclaredPlan, type SiloWorkingCopy } from "@/lib/arquiteto/silo-formation";
 import { applyDeclaredSiloIdentity, declaredPillarForFormations, declaredSubjectAuthorship, resolveDeclaredSiloPlan, type DeclaredSiloPlanEntry } from "@/lib/arquiteto/silo-declared-plan";
 import { listEditorialGroupPlans } from "@/lib/editorial/editorial-groups-store";
 import { readDeclaredSiloPlan, type DeclaredSiloPlan } from "@/lib/minerador/declared-plan";
@@ -1175,8 +1173,6 @@ export default function ArquitetoPage() {
       return proximo;
     });
   }, []);
-  /** Silo aberto no painel; `null` mostra o resumo global. */
-  const [panelSiloRef, setPanelSiloRef] = useState<string | null>(null);
   /** Cenário de formação vigente vindo do remoto; os candidatos são reconstruídos. */
   const [articleFormationMarker, setArticleFormationMarker] = useState<ArticleFormationMarkerPayload | null>(null);
   /*
@@ -1189,8 +1185,6 @@ export default function ArquitetoPage() {
   const [repairBusy, setRepairBusy] = useState(false);
   const [repairMessage, setRepairMessage] = useState<{ tom: "erro" | "sucesso" | "progresso"; texto: string } | null>(null);
 
-  /** Grupos abertos no mapa; fora deles vale o limite anti-hairball. */
-  const [expandedClusterRefs, setExpandedClusterRefs] = useState<Set<string>>(new Set());
   /** Promoções de página em voo — trava síncrona contra duplicar o silo. */
   const siteStructurePromotionsInFlight = useRef<Set<string>>(new Set());
   const [siloContextRef, setSiloContextRef] = useState<string | null>(null);
@@ -1409,6 +1403,13 @@ export default function ArquitetoPage() {
   }, [workspaceMode]);
   const [activeProcess, setActiveProcess] = useState<ArchitectProcess>("logic");
   const [mapExpanded, setMapExpanded] = useState(false);
+  /*
+   * 2026-10-16 · "Detalhes técnicos" no topo da aba Artigos: abre sozinho
+   * quando a marca tem ação pendente (o `open={condição}` de sempre dos
+   * painéis recolhíveis); depois vale o que a pessoa escolheu ao abrir ou
+   * fechar — o painel não fecha sozinho quando a ação termina.
+   */
+  const [articlesTechnicalOpen, setArticlesTechnicalOpen] = useState<boolean | null>(null);
   useEffect(() => {
     setActiveProcess(workspaceMode === "links" ? "review" : "logic");
   }, [workspaceMode]);
@@ -6229,12 +6230,6 @@ export default function ArquitetoPage() {
 
   /** `candidateRef` dos artigos do cenário já materializados — ARTICLE vs CANDIDATO. */
   const materializedArticleIds = materializationPartition.current;
-
-  /** Artefatos de formações anteriores: contados no painel, fora da mesa. */
-  const legacyArticleSummary = useMemo(
-    () => summarizeLegacyArticles(materializationPartition),
-    [materializationPartition],
-  );
 
   const legacyArticleDnaIds = useMemo(
     () => new Set(materializationPartition.legacy.map(item => item.articleId)),
@@ -11893,23 +11888,12 @@ export default function ArquitetoPage() {
    */
 
 
-  /** A mesma busca da área alcança Silo, artigo, keyword e slug. */
-  const visibleArticleSiloViews = useMemo(
-    () => filterArticleSiloViews(articleSiloViews, searchQuery),
-    [articleSiloViews, searchQuery],
-  );
-
+  /** O que ainda é só candidato (sem ArticleDNA): decide se "Detalhes técnicos" abre sozinho. */
   const articleSiloSummary = useMemo(
     () => summarizeArticleSiloViews(articleSiloViews),
     [articleSiloViews],
   );
 
-
-  /** Mapa da aba: um cluster fechado por SiloPage. */
-  const articleFlow = useMemo(
-    () => buildArticleFlowProjection({ views: visibleArticleSiloViews, materializedArticleIds }),
-    [visibleArticleSiloViews, materializedArticleIds],
-  );
 
   /**
    * §1 — nenhum Article pode misturar Silos.
@@ -13028,11 +13012,8 @@ export default function ArquitetoPage() {
         showNotification("warning", "O artigo não está mais na mesa: recarregue a formação e tente de novo.");
         return;
       }
-      const no = articleFlow.nodes.find(item => item.articleRef === candidateRef && item.kind !== "silo_page" && item.kind !== "keyword")
-        || articleFlow.nodes.find(item => item.articleRef === candidateRef && item.kind !== "silo_page");
-      setPanelSiloRef(siloRef);
+      // 2026-10-16 · sem mapa na aba Artigos: abre o artigo no painel de formação de "Detalhes técnicos".
       setSelectedArticleNodeRef(candidateRef);
-      if (no) setMapState(current => ({ ...current, selectedNodeId: no.id }));
     },
   };
 
@@ -16289,6 +16270,21 @@ export default function ArquitetoPage() {
       candidates: universe.candidates.filter(candidate => !concluidaEm.has(candidate.candidateRef) || concluidaEm.get(candidate.candidateRef) === universe.siloRef),
     }));
     /*
+     * 2026-10-16 · A MESMA PORTA DO PLANO DE `Processar artigos` (auditoria: o
+     * Concluir não a tinha; só a divisão da seleção na barra evitava gravar um
+     * artigo do plano por aqui). Artigo de grupo com plano segue pelas linhas do
+     * plano, com os mesmos botões. Nada é gravado.
+     */
+    const doPlanoNoConcluir = universosSelecionados.flatMap(universe => universe.candidates).flatMap(candidate => {
+      const plano = [candidate.principalKeywordId, ...candidate.keywords.map(item => item.keywordId)].map(id => planoPorKeywordRef.current.get(id)).find(Boolean);
+      return plano ? [{ nome: masterListRef.current.find(item => String(item.id) === candidate.principalKeywordId)?.keyword || candidate.candidateRef, plano }] : [];
+    });
+    if (doPlanoNoConcluir.length) {
+      const planos = [...new Set(doPlanoNoConcluir.map(item => item.plano))];
+      showNotification("warning", `${doPlanoNoConcluir.length === 1 ? `"${doPlanoNoConcluir[0].nome}" é` : `${doPlanoNoConcluir.length} artigos selecionados são`} do plano ${planos.join(", ")}: o caminho do plano é o das linhas do plano nesta mesma tabela — marque-as e use os mesmos botões. Os artigos sem plano seguem por aqui — desmarque os do plano. Nada foi gravado.`);
+      return;
+    }
+    /*
      * PUBLICADO SAI DO CONCLUIR COM O CAMINHO DITO (2026-10-01).
      *
      * A formação da mesa de um publicado pode ter crescido além do DNA aprovado
@@ -17630,32 +17626,12 @@ export default function ArquitetoPage() {
     ];
   }, [territorialReviewViews, territorialSurface]);
 
-  /** Grupo em foco no painel. O primeiro do lote enquanto o canvas de
-
-  /** Mapa da análise: Silo/Cluster no centro, keywords em órbita. */
-  const architectureFlow = useMemo(() => buildArchitectureFlowProjection({
-    analysis: architectureAnalysisView,
-    keywordTexts: new Map(masterList.map(keyword => [String(keyword.id), String(keyword.keyword || "")])),
-    territoryLabels: new Map([...territorialSurface.landscape.candidateTerritories, ...territorialSurface.landscape.confirmedTerritories]
-      .map(territory => [territory.territoryRef, {
-        label: territory.name || territory.centralEntity || "Silo sem nome",
-        slug: territory.slugState.publishedSlug || territory.slugState.confirmed,
-      }])),
-    publishedTerritoryRefs: new Set([...territorialSurface.landscape.candidateTerritories, ...territorialSurface.landscape.confirmedTerritories]
-      .filter(territory => territory.publicationProtection === "protected")
-      .map(territory => territory.territoryRef)),
-    confirmedMembership: new Map(masterList
-      .filter(keyword => typeof keyword.territoryRef === "string")
-      .map(keyword => [String(keyword.id), String(keyword.territoryRef)])),
-    expandedClusterRefs,
-  }), [architectureAnalysisView, masterList, territorialSurface, expandedClusterRefs]);
-
-  /** Grupo em foco no painel: quem manda é a seleção feita no mapa. */
-  const selectedClusterAnalysis = useMemo(() => {
-    const clusterRef = clusterRefOfFlowNode(architectureFlow, mapState.selectedNodeId);
-    return architectureAnalysisView.clusters.find(cluster => cluster.clusterRef === clusterRef)
-      ?? architectureAnalysisView.clusters[0] ?? null;
-  }, [architectureAnalysisView, architectureFlow, mapState.selectedNodeId]);
+  /*
+   * Grupo em foco no painel da aba Silos: o primeiro do lote. Escolher outro
+   * grupo era clicar no mapa, que saiu da aba Silos em 2026-10-16 (pedido do
+   * dono: o React Flow fica só em Links internos).
+   */
+  const selectedClusterAnalysis = architectureAnalysisView.clusters[0] ?? null;
 
   const processState = useMemo<Record<ArchitectProcess, { state: ArchitectProcessState; onClick?: () => void; disabled?: boolean; title?: string; progress?: string }>>(() => {
     const logicState: ArchitectProcessState = workspaceMode === "links"
@@ -18016,124 +17992,20 @@ export default function ArquitetoPage() {
     setSelectedArticleIds(previous => previous.has(article.id) ? previous : new Set([...previous, article.id]));
   }, [articlesList]);
 
-  const syncArticleInSiloWorkingCopies = (articleId: string, siloId: string | null) => {
-    setSiloWorkingCopies(previous => {
-      const withoutArticle = previous.map(copy => {
-        const remaining = copy.articleReferences.filter(reference => reference.articleId !== articleId);
-        const pillarChanged = copy.pillarCandidateArticleId === articleId;
-        const nextPillar = pillarChanged ? remaining[0]?.articleId || null : copy.pillarCandidateArticleId;
-        return {
-          ...copy,
-          articleReferences: remaining.map(reference => ({ ...reference, role: reference.articleId === nextPillar ? "pillar_candidate" as const : "support" as const })),
-          pillarCandidateArticleId: nextPillar,
-          supportArticleIds: copy.supportArticleIds.filter(id => id !== articleId && id !== nextPillar),
-          siloPage: { ...copy.siloPage, pillarArticleId: null, supportArticleIds: copy.supportArticleIds.filter(id => id !== articleId && id !== nextPillar) },
-        };
-      });
-      if (!siloId) return withoutArticle;
-      const targetIndex = withoutArticle.findIndex(copy => copy.id === siloId || copy.existingSiloId === siloId);
-      if (targetIndex < 0) return previous;
-      const target = withoutArticle[targetIndex];
-      const articleDna = acceptedArticleDnas[articleId];
-      if (!articleDna) return previous;
-      const targetPillar = target.pillarCandidateArticleId || articleId;
-      const reference: SiloWorkingCopyArticleReference = {
-        articleId,
-        articleDnaVersionId: articleDna.versionId,
-        articleDnaContentHash: articleDna.contentHash,
-        keywordDnaReferences: articleDna.payload.keywordReferences.map(item => ({ keywordId: item.keywordId, keywordDnaVersionId: item.keywordDnaVersionId, keywordDnaContentHash: item.keywordDnaContentHash })),
-        role: targetPillar === articleId ? "pillar_candidate" : "support",
-        rationale: "Movimentação humana pela projeção do Workbench; confirmação do Silo ainda pendente.",
-      };
-      const next = [...withoutArticle];
-      next[targetIndex] = {
-        ...target,
-        articleReferences: [...target.articleReferences, reference].map(item => ({ ...item, role: item.articleId === targetPillar ? "pillar_candidate" as const : "support" as const })),
-        pillarCandidateArticleId: targetPillar,
-        supportArticleIds: [...target.supportArticleIds, ...(targetPillar === articleId ? [] : [articleId])],
-        siloPage: { ...target.siloPage, supportArticleIds: [...target.supportArticleIds, ...(targetPillar === articleId ? [] : [articleId])] },
-      };
-      return next;
-    });
-  };
-
-  const handleMapMoveArticleToSilo = (articleId: string, siloId: string | null) => {
-    const article = articlesList.find(candidate => candidate.id === articleId || (candidate.isPublished ? candidate.mainKeywordObj?.id : candidate.mainKeywordObj?.provisionalGroupId || candidate.briefingId) === articleId);
-    if (!article) return;
-    const targetWorkingCopy = siloId ? siloWorkingCopies.find(copy => copy.id === siloId || copy.existingSiloId === siloId) : null;
-    if (targetWorkingCopy && !siloOptions.some(option => option.id === siloId)) {
-      if (article.isPublished) return showNotification("error", "Artigos publicados permanecem protegidos.");
-      syncArticleInSiloWorkingCopies(articleId, siloId);
-      showNotification("success", "ArticleDNA movido na working copy do Silo; a confirmação humana continua pendente.");
-      return;
-    }
-    void handleMoveArticleToSilo(article, siloId || "").then(moved => {
-      if (moved) syncArticleInSiloWorkingCopies(articleId, siloId);
-    });
-  };
-
-  const handleMapMoveKeywordToGroup = (keywordId: string, targetGroupId: string) => {
-    const keyword = masterList.find(item => String(item.id) === keywordId);
-    if (!keyword) return;
-    const sourceArticle = articlesList.find(article => article.mainKeywordObj?.id === keywordId || article.supportKeywords.some(item => String(item.id) === keywordId));
-    if (sourceArticle?.isPublished || keyword.isPublished) {
-      showNotification("error", "Keywords de artigos publicados permanecem protegidas.");
-      return;
-    }
-    const targetArticle = targetGroupId !== "__none__" && targetGroupId !== "__new__"
-      ? articlesList.find(article => articleEntityIdFor(article) === targetGroupId || article.id === targetGroupId)
-      : null;
-    const newGroupId = targetGroupId === "__new__" ? `manual-${keywordId}-${Date.now()}` : null;
-    const clusterId = newGroupId || targetArticle?.clusterId || targetArticle?.mainKeywordObj?.provisionalGroupId || targetArticle?.briefingId || null;
-    const workingArticleId = newGroupId ? `working-article:${newGroupId}` : targetArticle?.workingArticleId || null;
-    const targetHasPrincipal = Boolean(targetArticle?.mainKeywordObj && String(targetArticle.mainKeywordObj.id) !== keywordId);
-    const reviewRole = targetGroupId === "__new__" ? "principal" : targetHasPrincipal ? "secundaria" : keyword.reviewRole;
-    const nextMasterList = masterList.map(item => String(item.id) === keywordId
-      ? { ...normalizeArticleWorkingCopyKeyword(item), clusterId, provisionalGroupId: clusterId, workingArticleId, ...(targetGroupId === "__none__" ? { reviewRole: null } : { reviewRole }) }
-      : item);
-    if (nextMasterList.every((item, index) => item === masterList[index])) return;
-    pushMasterHistory(masterList, `Mover a keyword ${keyword.keyword} para a organização selecionada`);
-    setMasterList(nextMasterList);
-    setProvisionalGroups(describeAssignedGroups(nextMasterList));
-    void persistWorkingCopyAssignmentsRef.current?.(nextMasterList.filter(item => String(item.id) === keywordId));
-    showNotification("success", targetGroupId === "__none__" ? "Keyword movida para Não agrupadas." : targetGroupId === "__new__" ? "Novo grupo provisório criado para a keyword." : "Keyword movida para o grupo selecionado.");
-  };
-
+  /*
+   * 2026-10-16 · o mapa só é desenhado em Links internos: a seleção de nó que
+   * abria a composição (Artigos) ou o grupo escondido (Silos) saiu com ele. Na
+   * aba Artigos o artigo abre pela linha da tabela (revisão da composição) ou
+   * pelo "Abrir artigo" da análise por keyword.
+   */
   const handleMapStateChange = useCallback((next: ArchitectMapState) => {
-    /**
-     * Aba Artigos: clicar no mapa abre a mesma leitura da mesa.
-     *
-     * Mapa e painel precisam olhar o MESMO objeto; duas seleções paralelas
-     * fariam a tela mostrar um artigo e explicar outro. A SiloPage abre o
-     * resumo do Silo; Article e keyword abrem a composição.
-     */
-    if (workspaceMode === "articles" && next.selectedNodeId !== mapState.selectedNodeId) {
-      const no = articleFlow.nodes.find(item => item.id === next.selectedNodeId) || null;
-      if (!no) {
-        setSelectedArticleNodeRef(null);
-      } else if (no.kind === "silo_page") {
-        setPanelSiloRef(no.siloRef);
-        setSelectedArticleNodeRef(null);
-      } else {
-        setPanelSiloRef(no.siloRef);
-        setSelectedArticleNodeRef(no.articleRef);
-      }
-    }
-    // Selecionar o centro de um grupo com keywords escondidas abre o grupo:
-    // é assim que "+ N keywords" deixa de ser um beco sem saída.
-    if (next.selectedNodeId && next.selectedNodeId !== mapState.selectedNodeId) {
-      const clusterRef = clusterRefOfFlowNode(architectureFlow, next.selectedNodeId);
-      if (clusterRef && architectureFlow.hiddenByCluster[clusterRef]) {
-        setExpandedClusterRefs(previous => new Set(previous).add(clusterRef));
-      }
-    }
     setMapState(previous => previous.scenario === next.scenario
       && previous.compare === next.compare
       && previous.selectedNodeId === next.selectedNodeId
       && previous.selectedArticleId === next.selectedArticleId
       && previous.selectedKeywordId === next.selectedKeywordId
       && previous.selectedSiloId === next.selectedSiloId ? previous : next);
-  }, [architectureFlow, articleFlow, mapState.selectedNodeId, workspaceMode]);
+  }, []);
 
   const handleMapScenarioChange = useCallback((scenario: ArchitectMapScenario) => {
     setMapState(previous => ({
@@ -18158,9 +18030,6 @@ export default function ArquitetoPage() {
   const mapSelectedSilo = mapState.selectedSiloId
     ? mapSelectedSnapshot.silos.find(silo => silo.id === mapState.selectedSiloId) || architectureMapSnapshots.current.silos.find(silo => silo.id === mapState.selectedSiloId)
     : null;
-  const mapSelectedKeyword = mapSelectedArticle?.keywords.find(keyword => keyword.id === mapState.selectedKeywordId) || null;
-  const mapGroupOptions = architectureMapSnapshots.current.articles.filter(article => !article.siloCandidate).map(article => ({ id: article.id, label: article.label }));
-  const mapSiloOptions = architectureMapSnapshots.current.silos.map(silo => ({ id: silo.id, label: silo.label }));
   const mapVisibleArticleIds = useMemo(() => new Set(filteredArticles.map(article => article.id)), [filteredArticles]);
   const mapScenarioLabel = mapState.scenario === "logic" ? "Lógica" : mapState.scenario === "serp" ? "SERP" : mapState.scenario === "ai" ? "IA" : "Atual";
 
@@ -18614,26 +18483,44 @@ export default function ArquitetoPage() {
   const articleMode = workspaceMode === "articles";
 
   /*
-   * A GRADE DO WORKBENCH (painel + mapa) — uma só, em dois lugares.
+   * A GRADE DO WORKBENCH — uma só, em dois lugares.
    *
    * Nas abas Silos e Links ela abre a tela, como sempre. Na aba Artigos ela
-   * vai inteira para "Detalhes técnicos", fechado, no fim: na frente ficam o
-   * próximo passo, a melhoria dos publicados, a mesa e as Sobras. Nada saiu
-   * da tela nem mudou de comportamento; só a ordem.
+   * vai inteira para "Detalhes técnicos", no TOPO, logo depois dos botões de
+   * processo (2026-10-16, pedido do dono: "centraliza tudo nele").
+   *
+   * O mapa (React Flow) só existe em Links internos (2026-10-16, pedido do
+   * dono: "retirar o react-flow do Silo e da aba dos Artigos, deixar ele só
+   * nos Links internos"). Em Silos o painel ocupa a largura toda; em Artigos
+   * ele flui dentro de "Detalhes técnicos", sem altura fixa.
    */
+  const linksMode = workspaceMode === "links";
+  /* Abre "Detalhes técnicos" sozinho quando a aba Artigos tem o que fazer (o resto do tempo, fechado como antes). */
+  const articlesHavePendingAction = articleMode && (
+    formationBusy || planSheet.ocupado || improvementPanel === "open" || formationIsStale || Boolean(pendingKeywordReview)
+    || selectedArticleIds.size > 0 || tableSelection.planTargets.length > 0
+    || articleSiloSummary.candidates > 0 || visiblePipelineRows.length > 0
+    || articleSerpGateSummary.blocking > 0 || articleFormationSummary.needsReview > 0
+    || groupedArticles.some(group => group.planRows.length > 0)
+  );
+  /* O "Processo ativo" da aba Artigos: o mesmo texto de sempre, com a barra de progresso da plataforma, só enquanto algo roda. */
+  const articleProcessActivity = articleMode && (activeLogicalTask || serpBusy || activeKeywordReviewTask) ? (
+    <section role="status" className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-articles-process-activity">
+      <p className="text-sm font-semibold text-foreground">Processo ativo · {activeLogicalTask ? "Lógica" : serpBusy ? "SERP" : "IA"}</p>
+      {activeLogicalTask
+        ? <OperationProgress label={activeLogicalTask.message || "Processando grupos"} done={activeLogicalTask.current ?? null} total={activeLogicalTask.total ?? masterList.length} testId="architect-articles-process-progress" />
+        : serpBusy
+          ? <OperationProgress label="SERP em andamento" note={serpProgress || "consultas iniciadas"} testId="architect-articles-process-progress" />
+          : <OperationProgress label={activeKeywordReviewTask?.message || "Revisão de grupos"} note="proposta ainda não aplicada" testId="architect-articles-process-progress" />}
+    </section>
+  ) : null;
   const workbenchGrid = (
-        <div className={`grid min-h-0 shrink-0 gap-0 bg-surface lg:grid-cols-2 lg:overflow-hidden ${mapExpanded ? "lg:h-[72vh]" : "lg:h-[33vh]"}`} data-testid="architect-workbench-layout">
-          <div className="min-h-0 min-w-0 overflow-y-auto border-b border-divider lg:border-b-0 lg:border-r border-divider" data-testid="architect-workbench-left" aria-label="Painel do Workbench do Arquiteto">
+        <div className={linksMode
+          ? `grid min-h-0 shrink-0 gap-0 bg-surface lg:grid-cols-2 lg:overflow-hidden ${mapExpanded ? "lg:h-[72vh]" : "lg:h-[33vh]"}`
+          : articleMode ? "min-w-0 bg-surface" : "grid min-h-0 shrink-0 gap-0 bg-surface lg:h-[33vh] lg:overflow-hidden"} data-testid="architect-workbench-layout">
+          <div className={linksMode ? "min-h-0 min-w-0 overflow-y-auto border-b border-divider lg:border-b-0 lg:border-r" : articleMode ? "min-w-0" : "min-h-0 min-w-0 overflow-y-auto border-b border-divider"} data-testid="architect-workbench-left" aria-label="Painel do Workbench do Arquiteto">
             <ArchitectWorkbench
               mode={workspaceMode}
-              articleCount={filteredArticles.length}
-              articleScope={workspaceMode === "articles" ? {
-                siloPages: articleSiloSummary.siloPages,
-                articles: articleSiloSummary.articles,
-                candidates: articleSiloSummary.candidates,
-                published: articleSiloSummary.published,
-                waiting: visiblePipelineRows.length,
-              } : null}
               // A contagem do cabeçalho é a mesma da mesa: silos candidatos e
               // confirmados. Contar só working copy escondia o Silo recém-criado.
               siloCount={territorialSurface.surface.counts.territories
@@ -18654,24 +18541,14 @@ export default function ArquitetoPage() {
                     summary={articleFormationSummary}
                     processed={Boolean(articleFormationMarker)}
                     stale={formationIsStale}
-                    scenarioState={ARTICLE_FORMATION_SCENARIO_LABELS[resolveArticleFormationScenarioState({
-                      marker: articleFormationMarker,
-                      currentBaseHash: articleFormationBase,
-                    })]}
                     busy={formationBusy}
-                    selectedCount={formationSelectionScope.selectedCount}
-                    scopeReason={formationSelectionScope.reason}
                     confirmed={confirmedFormation}
                     selectedCandidate={selectedFormationCandidate}
                     selectedCandidateSerp={serpSubjectCardForCandidate(selectedFormationCandidate)}
                     selectedSingletonAudit={selectedSingletonAudit}
                     keywordLabels={formationKeywordLabels}
                     mergeTargets={formationMergeTargets}
-                    siloViews={articleSiloViews}
-                    selectedSiloRef={panelSiloRef}
-                    onSelectSilo={setPanelSiloRef}
                     waiting={{
-                      received: masterList.length,
                       awaitingConfirmation: articlePipeline.counts.awaiting_silo_confirmation,
                       withoutSilo: articlePipeline.counts.awaiting_silo,
                       rows: [
@@ -18685,33 +18562,9 @@ export default function ArquitetoPage() {
                       ],
                     }}
                     crossSilo={articleScopeAudit.crossSilo}
-                    // §13 — leitura do lote corrente. Todo número é derivado do
-                    // cenário; nenhum deles é fixo no código.
-                    batch={{
-                      keywords: articleFormationSummary.keywords,
-                      siloPages: articleSiloSummary.siloPages,
-                      // Formado é o que o acervo canônico descreve; candidato é
-                      // o que ainda é só cenário. Somá-los esconderia o que
-                      // falta concluir.
-                      articles: articleSiloSummary.articles,
-                      candidates: articleSiloSummary.candidates,
-                      grouped: articleFormationSummary.grouped,
-                      singletons: articleFormationSummary.singles,
-                      pendencias: visiblePipelineRows.length,
-                      conflitos: articleFormationSummary.needsReview,
-                      revisoesHumanas: articleFormationUniverses
-                        .flatMap(universe => universe.candidates)
-                        .filter(candidate => candidate.origin === "human").length,
-                    }}
                     serpGate={articleSerpGateSummary}
-                    // Article materializado cujo gate SERP não está vigente: ele
-                    // foi gravado antes da evidência e não fecha o gate de hoje.
-                    preSerpArtifacts={[...materializationPartition.matched.keys()].filter(ref => !serpWasExecutedFor(articleSerpGates.get(ref)?.state || "missing")).length}
-                    legacy={legacyArticleSummary}
                     conclusionGates={conclusionGates}
                     parentBinding={{
-                      declared: [...articleParentBindings.values()].filter(item => item.code === "PARENT_DECLARED").length,
-                      legacy: [...articleParentBindings.values()].filter(item => item.code === "PARENT_INFERRED_LEGACY").length,
                       conflict: [...articleParentBindings.values()].filter(item => item.code === "PARENT_CONFLICT").length,
                       unresolved: [...articleParentBindings.values()].filter(item => item.code === "PARENT_UNRESOLVED").length,
                     }}
@@ -18741,7 +18594,7 @@ export default function ArquitetoPage() {
                       setPendingScenarioChange({ kind: "move_keyword", keywordId, fromCandidateRef: origem.candidateRef, toCandidateRef: targetCandidateRef });
                     }}
                     onMergeCandidates={(left, right) => setPendingScenarioChange({ kind: "merge_candidates", leftCandidateRef: left, rightCandidateRef: right })}
-                    /* 2026-10-16 · sem onProcess/onConfirm: "Processar artigos" e "Concluir formação" são só os da barra de sempre (nada em dobro em "Detalhes técnicos"). */
+                    /* 2026-10-16 · "Processar artigos" e "Concluir formação" são só os da barra de sempre, no topo de "Detalhes técnicos" (nada em dobro). */
                   />
                 ),
               }}
@@ -19090,12 +18943,13 @@ export default function ArquitetoPage() {
                 ),
               }}
             />
-            <div id="architect-contextual-area" data-testid="architect-contextual-area" className="border-b border-divider" aria-hidden="false">
+            <div id="architect-contextual-area" data-testid="architect-contextual-area" className={articleMode ? undefined : "border-b border-divider"} aria-hidden="false">
             <div data-testid="architect-process-context-panel">
             {/* Na aba Silos quem responde "o que aconteceu" é o painel de
                 arquitetura; repetir "Processo ativo" aqui reintroduziria a
                 leitura de quatro etapas manuais. */}
-            {workspaceMode !== "silos" && (
+            {/* Na aba Artigos o "Processo ativo" mora no topo de "Detalhes técnicos", logo abaixo dos botões, e só aparece enquanto algo roda. */}
+            {workspaceMode === "links" && (
             <section className="rounded-lg border border-divider bg-surface-subtle p-3">
               <p className="text-sm font-semibold text-foreground">Processo ativo · {activeProcess === "logic" ? "Lógica" : activeProcess === "serp" ? "SERP" : activeProcess === "ai" ? "IA" : "Revisão"}</p>
               <p className="mt-1 text-sm leading-6 text-text-muted">{contextSummary}</p>
@@ -19330,12 +19184,16 @@ export default function ArquitetoPage() {
               * Na fase Silos ele convidava a decidir keyword por keyword —
               * exatamente o trabalho que o processamento passou a fazer.
               */}
-            {(SILO_ADVANCED_CONTROLS || workspaceMode !== "silos") && (
+            {/*
+              * 2026-10-16 · só em Links internos, onde o mapa ficou. Em Artigos e
+              * Silos o mapa saiu; mover keyword continua na linha da tabela
+              * ("Mover para outro artigo", "Separar", "Desagrupar", com a
+              * confirmação de sempre).
+              */}
+            {workspaceMode === "links" && (
             <section className="rounded-lg border border-divider bg-surface-subtle p-3" data-testid="architect-map-human-actions">
               <p className="text-sm font-semibold text-foreground">Ações humanas</p>
-              {/* A instrução tem que descrever a unidade da aba: no modo Silos a
-                  relação em revisão é territorial, não Article → Silo. */}
-              {!mapSelectedArticle && !mapSelectedSilo ? <p className="mt-1 text-sm text-text-muted">{workspaceMode === "silos" ? "Selecione uma keyword, silo ou estrutura para revisar a relação com o silo." : articleMode ? "Selecione um artigo ou keyword no mapa." : "Selecione um artigo, keyword, SiloPage, Pilar ou Suporte no mapa."}</p> : null}
+              {!mapSelectedArticle && !mapSelectedSilo ? <p className="mt-1 text-sm text-text-muted">Selecione um artigo, keyword, SiloPage, Pilar ou Suporte no mapa.</p> : null}
               {mapSelectedArticle && <>
                 <p className="mt-1 font-semibold text-foreground">{mapSelectedArticle.label}</p>
                 <p className="mt-1 text-sm text-text-muted">Principal: {mapSelectedArticle.keywords.find(keyword => keyword.role === "principal")?.label || "não definida"}</p>
@@ -19350,8 +19208,6 @@ export default function ArquitetoPage() {
                 {mapSelectedSilo.published && <p className="mt-1 text-sm text-positive-soft">Publicado protegido: slug, URL e canonical preservados.</p>}
                 {mapSelectedSilo.conflicts.length > 0 && <p className="mt-1 text-sm text-warning">{mapSelectedSilo.conflicts.join(" ")}</p>}
               </>}
-              {mapSelectedKeyword && workspaceMode === "articles" && !mapSelectedArticle?.published && <label className="mt-3 block text-sm font-semibold text-text-muted">Mover keyword para grupo da working copy<select aria-label="Grupo destino da keyword" defaultValue="" onChange={event => { if (event.target.value) handleMapMoveKeywordToGroup(mapSelectedKeyword.id, event.target.value); }} className="mt-1 w-full rounded border border-divider bg-surface-elevated px-2 py-1.5 text-sm text-foreground"><option value="">Escolher destino</option><option value="__none__">Não agrupadas</option><option value="__new__">Novo grupo provisório</option>{mapGroupOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>}
-              {mapSelectedArticle && workspaceMode === "silos" && !mapSelectedArticle.siloCandidate && !mapSelectedArticle.published && <label className="mt-3 block text-sm font-semibold text-text-muted">Mover ArticleDNA para Silo da working copy<select aria-label="Silo destino do ArticleDNA" defaultValue="" onChange={event => { if (event.target.value) handleMapMoveArticleToSilo(mapSelectedArticle.id, event.target.value === "__none__" ? null : event.target.value); }} className="mt-1 w-full rounded border border-divider bg-surface-elevated px-2 py-1.5 text-sm text-foreground"><option value="">Escolher destino</option><option value="__none__">Sem silo</option>{mapSiloOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>}
              </section>
              )}
              </div>
@@ -19778,10 +19634,9 @@ export default function ArquitetoPage() {
           </section>
         )}
           </div>
-          <div className="min-h-0 min-w-0 overflow-hidden p-0">
+          {/* O mapa (React Flow) só em Links internos (2026-10-16, pedido do dono). */}
+          {linksMode && <div className="min-h-0 min-w-0 overflow-hidden p-0">
             <ArchitectArchitectureMap
-              clusterFlow={workspaceMode === "silos" ? architectureFlow : null}
-              articleFlow={workspaceMode === "articles" ? articleFlow : null}
               mode={workspaceMode}
               snapshots={architectureMapSnapshots}
               expanded={mapExpanded}
@@ -19806,7 +19661,7 @@ export default function ArquitetoPage() {
               onStateChange={handleMapStateChange}
               onScenarioChange={handleMapScenarioChange}
             />
-          </div>
+          </div>}
         </div>
   );
 
@@ -19840,47 +19695,62 @@ export default function ArquitetoPage() {
             </button>
           </section>
         ))}
-        {/* Recolhido ocupa um terço do topo (prioridade é a planilha); a seta abre para 72vh. */}
-        {/* Aba Artigos: a grade do Workbench vai para "Detalhes técnicos", no fim. */}
+        {/* Silos e Links: a grade do Workbench abre a tela (o mapa, só em Links). */}
         {!articleMode && workbenchGrid}
         {/*
-          * ABA ARTIGOS, NA ORDEM DO TRABALHO (2026-10-14, pedido do dono: "uma
-          * lista só", "os botões de processo normal"): (1) a barra de sempre —
-          * Processar artigos, Concluir formação, Melhorar publicados… —, (2) a
-          * tabela de artigos, que é a lista (as linhas do plano estão nela),
-          * (3) Sobras. Sem cartão "Próximo passo" nem painel de texto no topo:
-          * "Melhorar publicados" abre só pelo botão. O resto fica em "Detalhes
-          * técnicos", fechado, no fim.
+          * ABA ARTIGOS (2026-10-16, pedido do dono: "colocar em cima de volta o
+          * painel do [Detalhes técnicos]… coloca dentro dele, no topo, todos os
+          * botões dos processos e funções, até a barra de progressão… centraliza
+          * tudo nele"). De cima para baixo: "Detalhes técnicos" — a barra de
+          * sempre (Processar artigos · Concluir formação · Melhorar publicados…),
+          * o processo em andamento, a prévia/andamento das linhas do plano, o
+          * painel "Melhorar publicados", a formação e as funções de sempre — e,
+          * fora dele, só a tabela única e as Sobras. Os mesmos handlers, núcleos
+          * e rotas; nada em dobro.
           */}
-        {/* Os botões de sempre valem para TODAS as linhas: os do plano vão ao núcleo do plano, os demais ao de sempre (mesmos handlers, mesmas travas). */}
-        {articleMode && <ArticlesFormationBar
-          formationBusy={formationBusy}
-          processed={Boolean(articleFormationMarker)}
-          selectionScope={formationSelectionScope}
-          planTargets={tableSelection.planTargets}
-          planSheet={planSheet}
-          onProcess={() => processArticleFormation()}
-          onConfirm={() => confirmArticleFormation()}
-          improvementOpen={improvementPanel === "open"}
-          onToggleImprovement={() => setImprovementPanel(atual => atual === "open" ? "hidden" : "open")}
-          buttonClassName={ARCHITECT_UI.toolbarButton}
-        />}
-        {/* A prévia, o andamento e o resultado das linhas do plano: só aparecem quando há uma ação. */}
-        {articleMode && <PlanSheetOperations sheet={planSheet} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} controlClassName={ARCHITECT_UI.control} dangerButtonClassName={ARCHITECT_UI.dangerButton} />}
-        {/* "Melhorar publicados…": o painel abre só pelo botão da barra e fica montado depois (a execução em curso não se perde ao fechar). */}
-        {articleMode && improvementPanel !== "closed" && (
-          <div hidden={improvementPanel !== "open"} data-testid="architect-improvement-panel-slot">
-            {/* Publicados marcados na tabela: "Buscar keywords" analisa só eles (sem marcação, todos). */}
-            <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
-              selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))}
-              activeGroup={(() => {
-                // 2026-10-14 · a etiqueta escolhe por COR (`kind: "groups"`); o formato antigo por id continua aceito.
-                const filtro = arquitetoGroups.filter;
-                const cor = filtro.kind === "groups" ? filtro.color : filtro.kind === "group" ? arquitetoGroups.groupById.get(filtro.groupId)?.color ?? null : null;
-                return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null;
-              })()}
-              mesaChangedAt={mesaChangedAt} />
-          </div>
+        {articleMode && (
+          <details
+            open={articlesTechnicalOpen ?? articlesHavePendingAction}
+            onToggle={event => { const aberto = event.currentTarget.open; setArticlesTechnicalOpen(atual => atual === aberto ? atual : aberto); }}
+            className="border-b border-divider bg-surface"
+            data-testid="architect-articles-technical"
+          >
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-foreground">Detalhes técnicos<span className="font-normal text-text-muted"> · processos e funções da aba</span></summary>
+            {/* Os botões de sempre valem para TODAS as linhas: os do plano vão ao núcleo do plano, os demais ao de sempre (mesmos handlers, mesmas travas). */}
+            <ArticlesFormationBar
+              formationBusy={formationBusy}
+              processed={Boolean(articleFormationMarker)}
+              selectionScope={formationSelectionScope}
+              planTargets={tableSelection.planTargets}
+              planSheet={planSheet}
+              onProcess={() => processArticleFormation()}
+              onConfirm={() => confirmArticleFormation()}
+              improvementOpen={improvementPanel === "open"}
+              onToggleImprovement={() => setImprovementPanel(atual => atual === "open" ? "hidden" : "open")}
+              buttonClassName={ARCHITECT_UI.toolbarButton}
+            />
+            {/* A barra de progressão dos processos: o "Processo ativo" de sempre (Lógica, SERP ou IA), só enquanto roda. */}
+            {articleProcessActivity}
+            {/* A prévia, o andamento e o resultado das linhas do plano: só aparecem quando há uma ação. */}
+            <PlanSheetOperations sheet={planSheet} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} controlClassName={ARCHITECT_UI.control} dangerButtonClassName={ARCHITECT_UI.dangerButton} />
+            {/* "Melhorar publicados…": o painel abre só pelo botão da barra e fica montado depois (a execução em curso não se perde ao fechar). */}
+            {improvementPanel !== "closed" && (
+              <div hidden={improvementPanel !== "open"} data-testid="architect-improvement-panel-slot">
+                {/* Publicados marcados na tabela: "Buscar keywords" analisa só eles (sem marcação, todos). */}
+                <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
+                  selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))}
+                  activeGroup={(() => {
+                    // 2026-10-14 · a etiqueta escolhe por COR (`kind: "groups"`); o formato antigo por id continua aceito.
+                    const filtro = arquitetoGroups.filter;
+                    const cor = filtro.kind === "groups" ? filtro.color : filtro.kind === "group" ? arquitetoGroups.groupById.get(filtro.groupId)?.color ?? null : null;
+                    return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null;
+                  })()}
+                  mesaChangedAt={mesaChangedAt} />
+              </div>
+            )}
+            {/* A formação (alertas e o artigo aberto) e as funções de sempre: análise por keyword, diferenciar publicados, objetivo do lote, composição e as listas de conservação. */}
+            {workbenchGrid}
+          </details>
         )}
         {canonicalBootstrapError ? (
           <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 px-6 text-center text-danger">
@@ -21429,18 +21299,6 @@ export default function ArquitetoPage() {
             <span>{`${leftoverKeywordIds.length} sobra(s) descartada(s). Continuam em Keywords não agrupadas; nada foi apagado.`}</span>
             <button type="button" onClick={() => dismissLeftovers(false)} className={ARCHITECT_UI.toolbarButton}>Mostrar de novo</button>
           </div>
-        )}
-        {/*
-          * 2026-10-16 · "Detalhes técnicos" VOLTA (ordem do dono, 15/10 noite: "tem que voltar tudo, mas sem os
-          * erros, nem esse monte de botões"). Fechado, no fim da aba Artigos, com as funções de sempre (análise por
-          * keyword, diferenciar publicados, objetivo do lote, composição, listas de conservação) — sem Processar nem
-          * Concluir em dobro: esses são só os da barra de sempre, no topo.
-          */}
-        {articleMode && (
-          <details className="border-t border-divider bg-surface" data-testid="architect-articles-technical">
-            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-foreground">Detalhes técnicos</summary>
-            {workbenchGrid}
-          </details>
         )}
       </main>
 

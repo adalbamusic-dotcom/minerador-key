@@ -366,7 +366,9 @@ test("R2.4 absorve a operação completa do Arquiteto na GlobalTopbar", async ()
   assert.match(workbench, /architecture\?\.panel/);
   assert.match(workbench, /formation\?\.panel/);
   assert.match(architecturePanel, /data-testid="architect-process-architecture"/);
-  assert.match(formationPanel, /data-testid="architect-process-articles"/);
+  // 2026-10-16 · "Processar artigos" é só o da barra de sempre (topo de "Detalhes técnicos"); o painel de formação não tem cópia.
+  assert.doesNotMatch(formationPanel, /data-testid="architect-process-articles"/);
+  assert.match(await read("modules/arquiteto/articles-formation-bar.tsx"), /data-testid="architect-articles-top-process"/);
   assert.doesNotMatch(arquiteto, /contextExpanded|setContextExpanded|architect-context-toggle/);
   assert.match(arquiteto, /architect-process-context-panel/);
   assert.match(arquiteto, /setKeywordImportOpen\(true\); void topbarHandlersRef\.current\.fetchMasterList\(\)/);

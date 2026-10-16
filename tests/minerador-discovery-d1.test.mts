@@ -149,3 +149,11 @@ test("handoff preserva o contexto D1 como proveniência, sem criar etapa de DNA"
   assert.match(table, /candidateMatchesDiscoveryPerspective/);
   assert.doesNotMatch(table, /Lógica ✓|IA executada|KeywordDNA consolidado/);
 });
+
+test("2026-10-16 · Medir resultados (pago) pede confirmação antes de chamar o DataForSEO, como o Resultados do Processador", async () => {
+  const { readFileSync } = await import("node:fs");
+  const fonte = readFileSync(new URL("../modules/minerador/discovery/discovery-table-placeholder.tsx", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const medir = fonte.slice(fonte.indexOf("const measureAllintitle = async"), fonte.indexOf("dataforseo/allintitle"));
+  assert.match(medir, /window\.confirm\(`Medir Resultado e KD de \$\{selectedCandidateIds\.length\} candidata\(s\) chama o DataForSEO, que é PAGO\./);
+  assert.ok(medir.indexOf("window.confirm(") < medir.indexOf("setAllintitleMeasuring(true)"), "a confirmação vem antes de qualquer chamada");
+});

@@ -272,7 +272,9 @@ test("a bancada da aba Silos conta a estrutura de silos, não só SiloDNA", () =
 });
 
 test("a instrução de ação humana descreve a unidade da aba", () => {
-  assert.match(workspace, /Selecione uma keyword, silo ou estrutura para revisar a relação com o silo\./);
+  // 2026-10-16 · "Ações humanas" dependia do mapa, que só existe em Links internos: a instrução é a de Links.
+  assert.match(workspace, /Selecione um artigo, keyword, SiloPage, Pilar ou Suporte no mapa\./);
+  assert.doesNotMatch(workspace, /Selecione uma keyword, silo ou estrutura para revisar a relação com o silo\./);
 });
 
 test("o canvas do modo Silos não projeta cenário de Article nem fabrica territoryRef", () => {

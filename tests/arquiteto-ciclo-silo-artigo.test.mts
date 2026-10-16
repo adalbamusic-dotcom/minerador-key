@@ -187,11 +187,13 @@ test("§10 — houve trabalho e houve pendência: aviso, não sucesso", () => {
 
 test("§8 — ARTICLE_FINAL_HUMAN_ACTION_COUNT = 1", () => {
   const painel = readFileSync("modules/arquiteto/article-formation-panel.tsx", "utf8");
+  // 2026-10-16 · Processar e Concluir são só os da barra de sempre (topo de "Detalhes técnicos").
+  const barra = readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8");
   // Processar e Concluir. Nada de "Aprovar formação", "Consolidar Silo" ou
   // "Aprovar ArticleDNA" como terceira ação.
-  assert.match(painel, /data-testid="architect-process-articles"/);
-  assert.match(painel, /data-testid="architect-confirm-formation"/);
-  assert.doesNotMatch(painel, /Aprovar formação|Consolidar Silo|Aprovar ArticleDNA/);
+  assert.match(barra, /data-testid="architect-articles-top-process"/);
+  assert.match(barra, /data-testid="architect-articles-top-confirm"/);
+  for (const fonte of [painel, barra]) assert.doesNotMatch(fonte, /Aprovar formação|Consolidar Silo|Aprovar ArticleDNA/);
 });
 
 /* ======================= §12 · nenhuma coleta nova ===================== */

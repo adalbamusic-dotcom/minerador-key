@@ -23,12 +23,14 @@ test("a aba Artigos não expõe mais Lógica, SERP e IA como botões", () => {
   assert.doesNotMatch(workbench, /mode === "links" \? \(\["ai", "review"\] as const\) : \(\["logic", "serp", "ai", "review"\] as const\)/);
 });
 
-test("restam duas ações principais na fase Artigos", () => {
-  assert.match(panel, /data-testid="architect-process-articles"/);
-  assert.match(panel, /data-testid="architect-confirm-formation"/);
-  assert.match(panel, /Reprocessar artigos/);
-  assert.match(panel, /Concluir formação/);
-  assert.doesNotMatch(panel, /Confirmar formação/);
+test("restam duas ações principais na fase Artigos — as da barra de sempre (2026-10-16: só nela, no topo de Detalhes técnicos)", () => {
+  const barra = readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8");
+  assert.match(barra, /data-testid="architect-articles-top-process"/);
+  assert.match(barra, /data-testid="architect-articles-top-confirm"/);
+  assert.match(barra, /Reprocessar artigos/);
+  assert.match(barra, /Concluir formação/);
+  assert.doesNotMatch(barra, /Confirmar formação/);
+  assert.doesNotMatch(panel, /architect-process-articles|architect-confirm-formation/);
 });
 
 /* --------------- §6 um painel no lugar das quatro abas ------------------- */
@@ -125,27 +127,24 @@ test("o workspace liga a proposta ao simulador, não a um cálculo próprio", ()
 
 /* --------------------------- §13 painel global --------------------------- */
 
-test("o painel lê o lote com os nomes que a operação usa", () => {
-  assert.match(panel, /data-testid="architect-batch-reading"/);
-  for (const rotulo of [
-    "Keywords analisadas", "Articles candidatos", "Agrupamentos", "Singletons",
-    "Pendências", "Conflitos", "SERP analisada", "SERP sustentada", "Aguardando decisão", "Revisões humanas",
-  ]) {
-    assert.ok(panel.includes(rotulo), `falta o campo ${rotulo}`);
-  }
+/*
+ * 2026-10-16 · a tabela "Leitura do lote" saiu do painel (pedido do dono:
+ * "pode reduzir os dados do banco de dados, mostra só o que é útil para o
+ * user"). O gate SERP continua dito numa frase, só quando bloqueia, e todo
+ * número dele vem do cenário (`serpGate.`), nunca de constante.
+ */
+test("o painel não tem mais a 'Leitura do lote'; o gate SERP é dito só quando bloqueia", () => {
+  assert.ok(!panel.includes("architect-batch-reading"));
+  assert.ok(!panel.includes("Leitura do lote"));
+  assert.match(panel, /\{serpGate\.blocking > 0 && \(/);
+  assert.match(panel, /data-testid="architect-serp-gate-alert"/);
 });
 
-test("nenhum número do painel é fixo no código", () => {
-  const bloco = panel.slice(panel.indexOf("architect-batch-reading"), panel.indexOf("architect-legacy-articles"));
-  // Cada campo da leitura precisa vir do cenário: 21 e 7 são o que o lote de
-  // hoje calhou de ter, não contrato que a tela possa afirmar sozinha.
-  const pares = [...bloco.matchAll(/\["([^"]+)", ([^\]]+)\]/g)];
-  assert.ok(pares.length >= 8, "a leitura do lote precisa cobrir os campos da operação");
-  for (const [, rotulo, valor] of pares) {
-    // Cada campo vem do cenário (batch) ou do gate SERP — nunca de constante.
-    assert.ok(valor.startsWith("batch.") || valor.startsWith("serpGate."),
-      `o campo ${rotulo} precisa vir do cenário, e veio de ${valor}`);
-  }
+test("nenhum número do alerta do gate é fixo no código", () => {
+  const bloco = panel.slice(panel.indexOf("architect-serp-gate-alert"), panel.indexOf("architect-cross-silo-alert"));
+  const numeros = [...bloco.matchAll(/\{([^}]+)\}/g)].map(match => match[1].trim()).filter(expr => /serpGate|^\d/.test(expr));
+  assert.ok(numeros.length >= 4, "o alerta cita os números do gate");
+  for (const expr of numeros) assert.ok(expr.includes("serpGate."), `o número ${expr} precisa vir do cenário`);
 });
 
 /* ------------------------- §14 portaria da conclusão --------------------- */

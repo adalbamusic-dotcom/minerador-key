@@ -366,8 +366,8 @@ test("§11 — a fase Silos não oferece mais o caminho manual", async () => {
   assert.ok(source.includes("controls={SILO_ADVANCED_CONTROLS ?"));
   // Formar cópias de trabalho / Consolidar Silos.
   assert.ok(source.includes("consolidation={!SILO_ADVANCED_CONTROLS ? null"));
-  // Ações humanas.
-  assert.ok(source.includes('(SILO_ADVANCED_CONTROLS || workspaceMode !== "silos")'));
+  // Ações humanas: dependiam do mapa, que desde 2026-10-16 só existe em Links internos.
+  assert.ok(source.includes('{workspaceMode === "links" && (\n            <section className="rounded-lg border border-divider bg-surface-subtle p-3" data-testid="architect-map-human-actions">'));
   // A implementação FICA: os handlers continuam no arquivo.
   assert.ok(source.includes("const applySiloDecision"));
   assert.ok(source.includes("confirmSiloCandidate"));

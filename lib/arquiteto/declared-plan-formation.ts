@@ -87,7 +87,7 @@ export type DeclaredPlanArticleApplication =
  * item 12): a mensagem diz cada clique, do Minerador de volta ao Arquiteto.
  */
 export function declaredPrincipalLockedMessage(phrase: string): string {
-  return `A principal está travada no plano (“${phrase}”). Para trocar: Minerador → Cadastrar Assuntos → trava "Livre" → aprovar e enviar a keyword ao Arquiteto → aqui, Artigos → planilha “Artigos do plano” → “Trocar principal” na linha. O Arquiteto não troca o que foi travado.`;
+  return `A principal está travada no plano (“${phrase}”). Para trocar: Minerador → Cadastrar Assuntos → trava "Livre" → aprovar e enviar a keyword ao Arquiteto → aqui, Artigos → na linha do artigo do plano, “Procurar outra principal”. O Arquiteto não troca o que foi travado.`;
 }
 
 /**

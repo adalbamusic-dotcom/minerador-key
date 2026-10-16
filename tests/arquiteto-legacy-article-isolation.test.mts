@@ -128,7 +128,10 @@ test("a fase Artigos tem caminho para registrar tipo de unidade e aprovar", () =
    * painel de revisão diz onde o ato está, para não virar beco sem saída.
    */
   assert.doesNotMatch(painel, /data-testid="architect-approve-article"/);
-  assert.match(formacao, /data-testid="architect-confirm-formation"/);
+  // 2026-10-16 · "Concluir formação" é só o da barra de sempre (topo de "Detalhes técnicos"); o painel de formação não tem cópia.
+  const barra = readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8");
+  assert.match(barra, /data-testid="architect-articles-top-confirm"/);
+  assert.doesNotMatch(formacao, /data-testid="architect-confirm-formation"/);
   assert.match(painel, /Concluir formação/);
 });
 
@@ -143,18 +146,23 @@ test("a fase Silos tem caminho para formar cópia de trabalho e consolidar", () 
   assert.match(workspace, /onConsolidate: \(\) => \{ void consolidateSilos\(\); \}/);
 });
 
-test("o mapa e a seleção herdam a mesma partição", () => {
-  // React Flow recebe o conjunto já filtrado.
-  assert.match(workspace, /buildArticleFlowProjection\(\{ views: visibleArticleSiloViews, materializedArticleIds \}\)/);
+test("a seleção herda a mesma partição (o mapa saiu da aba Artigos em 2026-10-16)", () => {
+  // React Flow só em Links internos: a projeção da aba Artigos não é mais montada.
+  assert.doesNotMatch(workspace, /buildArticleFlowProjection/);
   // Seleção só existe para candidato do cenário corrente.
   assert.match(workspace, /articleSelectionIdForCandidate\(c\.candidateRef\)/);
 });
 
-test("o painel declara o acervo em vez de escondê-lo", () => {
+/*
+ * 2026-10-16 · a frase do acervo antigo saiu do painel (pedido do dono: "mostra
+ * só o que é útil para o user"). O acervo continua isolado no domínio: a
+ * partição o separa e o vínculo com o Silo não o conta (teste abaixo).
+ */
+test("o acervo antigo fica fora do cenário sem virar texto no painel", () => {
   const panel = readFileSync("modules/arquiteto/article-formation-panel.tsx", "utf8");
-  assert.match(panel, /data-testid="architect-legacy-articles"/);
-  assert.match(panel, /continuam no acervo e ficam fora deste cenário/);
-  assert.match(workspace, /legacy=\{legacyArticleSummary\}/);
+  assert.doesNotMatch(panel, /architect-legacy-articles/);
+  assert.doesNotMatch(workspace, /legacy=\{legacyArticleSummary\}/);
+  assert.match(workspace, /const legacyArticleDnaIds = useMemo/);
 });
 
 test("a partição diz qual artefato descreve cada artigo do cenário", () => {
