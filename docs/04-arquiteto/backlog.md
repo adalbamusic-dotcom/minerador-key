@@ -1,3 +1,18 @@
+## Restauração do fluxo de sempre — Arquiteto — 2026-10-16
+
+Ordem do dono (15/10, noite): "tem que voltar tudo, mas sem os erros, nem esse monte de botões, nem processo em paralelo". Detalhe em `estado-atual.md` (mesmo título).
+
+- [x] Barra de sempre (Processar artigos · Concluir formação · Melhorar publicados…) para todo recorte; etapas 1–4 fora.
+- [x] Aba Silos: "Consolidar o Silo do plano" fora; aviso "Recriar o Silo do plano · <cor>" de volta.
+- [x] Rotas `plan-silo/consolidate` e `plan-silo/editorial-line` e seus módulos removidos; exceção da SERP (R4) removida.
+- [x] "Detalhes técnicos" de volta, fechado, no fim, sem Processar/Concluir em dobro (e a grade volta a desenhar as seções da aba Artigos).
+- [x] Painel "Melhorar publicados e formar Assuntos" completo, uma cópia, com os Assuntos de grupo com plano (sem `excludePlanArticles`).
+- [x] "Concluir formação" só forma; a linha já formada aponta para "Melhorar publicados…".
+- [x] Catálogo MCP: `plan_articles_sheet` como em `99ec14f` (ajustado aos consertos), `plan_silo` fora, 6 `howOnScreen` de publicados de volta.
+- [x] spec §32 itens 3, 5 e 7 revistos; adendos das SDDs (S4, S5, S7; R3, R5, R6) marcados REVERTIDOS.
+- [ ] Homologação do dono na WifiConecta (azul): marcar as linhas do plano → "Processar artigos" → "Concluir formação"; reforço pelo "Melhorar publicados…" com a cor azul; aba Silos com o caminho de sempre.
+- [ ] Decidir se a opção `excludePlanArticles` (aditiva, hoje sem chamador na tela) continua no contrato da rota.
+
 ## Acabamentos do azul · linha editorial pt-BR e para o leitor, página do Silo dita na aba Artigos, "nada a confirmar" sem erro, análise do plano — Arquiteto — 2026-10-15 (noite)
 
 Detalhe em `docs/04-arquiteto/estado-atual.md`. **Validado manualmente: não.**

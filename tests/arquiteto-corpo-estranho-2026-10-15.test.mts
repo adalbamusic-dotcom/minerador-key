@@ -7,7 +7,6 @@ import { readArchitectSubjectStandings } from "../lib/arquiteto/declared-subject
 import { buildArchitectureWorkingProposal, resolveKeywordDnaSignals } from "../lib/arquiteto/architecture-working-proposal.ts";
 import type { ArchitectureAnalysis, ClusterAnalysis } from "../lib/arquiteto/architecture-analysis.ts";
 import { declaredPlanViewOfTerritory, planGroupTerritory } from "../lib/arquiteto/declared-plan-silo.ts";
-import { choosePlanConsolidationTerritory, planSiloPairStep, planTerritoryChoiceSentence } from "../lib/arquiteto/plan-consolidation.ts";
 import { diagnoseSiloIdentity, isPendingPlaceholder, retitleSiloPageText, siloPageIdentityTexts } from "../lib/arquiteto/silo-plan-identity.ts";
 import { buildSiloDeclaredPlanVersions, planSiloDeclaredPlanApplication } from "../lib/arquiteto/silo-declared-plan-application.ts";
 import { buildConsolidatedSiloDnaPayload, buildConsolidatedSiloPagePayload } from "../lib/arquiteto/silo-consolidation.ts";
@@ -183,7 +182,7 @@ test("o construtor não põe mais pendência em frase, e o tema do Pilar ou do S
   assert.equal(nova.intro, "Objetivo. Este conteúdo organiza os principais temas sobre wi-fi e fibra óptica.");
 });
 
-test("Consolidar o Silo do plano · reencontrando o par com o tema de um suporte: 'Corrigir a página do Silo (v2)' com o tema do Silo do plano; depois, nada novo", async () => {
+test("'Aplicar o plano declarado ao Silo' · o par com o tema de um suporte: 'Corrigir a página do Silo' (v2) com o tema do Silo do plano; depois, nada novo", async () => {
   const artigos = await artigosDoAzul();
   const { dna, page } = await parV1(artigos);
   const entrada = {
@@ -214,14 +213,9 @@ test("Consolidar o Silo do plano · reencontrando o par com o tema de um suporte
   assert.equal(versoes.siloDna.previousVersionId, dna.versionId, "o v1 fica no histórico (imutável)");
   assert.match(versoes.siloDna.changeReason, /ordem do plano \(v4\)/);
 
-  // A prévia da consolidação diz isso numa frase; com a v2 gravada, nada novo.
-  const passo = planSiloPairStep({ siloId: TERRITORIO_REAL, currentVersion: 1, declaredPlan: { state: "READY", changes: plano.changes, decisionHash: "a".repeat(64), siloDnaVersionId: dna.versionId } });
-  assert.equal(passo.state, "fix");
-  assert.match(passo.sentence, /^Corrigir a página do Silo \(v2\) nesta mesma confirmação: Corrigir a página do Silo: /);
+  // Com a v2 gravada, nada novo.
   const depois = planSiloDeclaredPlanApplication({ ...entrada, siloDnaVersions: [dna, versoes.siloDna], siloPageVersions: [page, versoes.siloPage], statuses: [dna, page, versoes.siloDna, versoes.siloPage].map(version => ({ versionId: version.versionId, status: "approved" })) });
   assert.equal(depois.ok && depois.unchanged, true, JSON.stringify(depois.ok ? depois.changes : depois));
-  assert.equal(planSiloPairStep({ siloId: TERRITORIO_REAL, currentVersion: 2, declaredPlan: { state: "UNCHANGED", changes: [] } }).state, "current");
-  assert.equal(planSiloPairStep({ siloId: null, currentVersion: null, declaredPlan: null }).state, "missing");
 });
 
 test("a consolidação de sempre também usa o tema do plano quando ele vier (aditivo)", async () => {
@@ -234,7 +228,8 @@ test("a consolidação de sempre também usa o tema do plano quando ele vier (ad
   assert.equal(comPlano.centralEntitySource, "manual");
   const tela = ler("../modules/arquiteto/arquiteto-workspace.tsx");
   assert.match(tela, /declaredCentralEntity: siloDoPlano \? diagnoseSiloIdentity\(\{/);
-  assert.match(tela, /siloConsolidatedOf: territoryRef => \{[\s\S]*?return !diagnoseSiloIdentity\(\{/, "par com tema errado: a etapa 1 volta");
+  // 2026-10-16 · restauração do fluxo de sempre: sem "Consolidar o Silo do plano", a correção é por "Aplicar o plano declarado ao Silo".
+  assert.doesNotMatch(tela, /siloConsolidatedOf|consolidateSiloPair|planSiloStatuses/);
 });
 
 /* -------------------------- 3 · o vínculo velho e 5 · Processar arquitetura */
@@ -249,10 +244,6 @@ test("o Silo do plano que já existe: onde as keywords estão (consolidado inclu
   // Sem keyword no Silo: o de mesmo slug (proposto incluído). Desfeito nunca volta por aqui.
   assert.equal(planGroupTerritory({ plan: { siloName: "Wi-Fi e fibra óptica", siloSlug: "wifi-e-fibra" }, linkedTerritoryRef: TERRITORIO_VELHO, keywordTerritoryRefs: [], territories: [real], slugOf })?.territoryRef, TERRITORIO_REAL);
   assert.equal(planGroupTerritory({ plan: { siloName: "Wi-Fi e fibra óptica", siloSlug: "wifi-e-fibra" }, linkedTerritoryRef: null, keywordTerritoryRefs: [], territories: [territorio(TERRITORIO_REAL, "rejected", "wifi-e-fibra")], slugOf }), null);
-  // A prévia da consolidação também reconhece o consolidado (antes dizia "será criado").
-  const escolha = choosePlanConsolidationTerritory({ rowTerritoryRefs: Array(7).fill(TERRITORIO_REAL), territories: [{ territoryRef: TERRITORIO_REAL, lifecycleStatus: "consolidated", name: "Wi-Fi e fibra óptica", slugs: ["wifi-e-fibra"] }], fallback: { kind: "create" } });
-  assert.equal(escolha.kind, "rows");
-  assert.match(planTerritoryChoiceSentence(escolha, "Wi-Fi e fibra óptica"), /já existe e está consolidado/);
 });
 
 test("Processar arquitetura com o plano consolidado: reusa o Silo do plano (nenhum 'Silo proposto'), e o Silo proposto do plano não tem semente (tema = nome do plano)", () => {
@@ -330,12 +321,14 @@ test("store: o grupo ligado a um Silo que sumiu (sem território, SiloDNA nem Si
   assert.ok(livre.chamadas.find(item => item.operacao === "update")!.filtros.some(([op, coluna]) => op === "is" && coluna === "silo_id"));
 });
 
-test("o vínculo do grupo: religa só quando o Silo antigo sumiu (store), e a consolidação tenta religar quando o vínculo difere", () => {
+test("o vínculo do grupo: religa só quando o Silo antigo sumiu (store), pelos caminhos de sempre (consolidação e 'Aplicar o plano declarado ao Silo')", () => {
   const store = ler("../lib/editorial/editorial-groups-store.ts");
   assert.match(store, /if \(antigo && await editorialGroupSiloStillExists\(client, input\.brandId, antigo\)\) \{\s*return \{ ok: false, code: "GROUP_SILO_TAKEN"/);
   assert.match(store, /\(antigo \? update\.eq\("silo_id", antigo\) : update\.is\("silo_id", null\)\)/);
   assert.match(store, /\.eq\("subject_type", "territory"\)\.eq\("subject_id", siloId\)/);
   assert.match(store, /\.in\("artifact_type", \["silo_dna", "silo_page"\]\)\.in\("entity_id", \[siloId, `silo-page:\$\{siloId\}`\]\)/);
-  const servidor = ler("../lib/server/arquiteto-plan-consolidation.ts");
-  assert.match(servidor, /if \(input\.linkedSiloId !== territorio\.territoryRef\) \{/);
+  // 2026-10-16 · o religar chega pelo vínculo de sempre (depois da consolidação do Silo e de "Aplicar o plano declarado ao Silo").
+  const vinculo = ler("../lib/server/arquiteto-silo-group-link.ts");
+  assert.match(vinculo, /const ligado = await linkEditorialGroupSilo\(context\.supabase, \{/);
+  assert.match(ler("../lib/server/arquiteto-silo-declared-plan.ts"), /linkGroup: input => linkDeclaredPlanGroupToSilo\(context, input\)/);
 });

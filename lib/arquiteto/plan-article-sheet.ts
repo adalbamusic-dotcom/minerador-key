@@ -84,12 +84,6 @@ export type PlanSheetSerpView = {
 export type PlanSheetFormationView = {
   /** 2026-10-14 · `conflict`: a keyword da linha está dentro do ArticleDNA vigente de OUTRO artigo (ver `conflict` da linha). */
   state: "awaiting" | "awaiting_principal" | "formed" | "in_radar" | "conflict";
-  /** 2026-10-14 · formado (consolidado do plano) ainda sem parecer de SERP: a etapa 2 grava o parecer. */
-  serpPending?: boolean;
-  /** 2026-10-15 · formado com a linha editorial pendente (etapa 3 da aba Artigos). */
-  editorialPending?: boolean;
-  /** 2026-10-15 (noite) · só o Público falta (espera o BrandDNA aprovado): não prende a barra. */
-  audiencePending?: boolean;
   version: number | null;
   articleId: string | null;
   principalKeywordId: string | null;
@@ -115,9 +109,7 @@ export type PlanSheetRow = {
   /** A principal de agora: a do ArticleDNA formado ou, antes dele, a principal declarada no plano. */
   currentPrincipalId: string | null;
   /** Sustentações da lista do Assunto (Pesquisa por Assunto), quantas têm volume medido e quais (candidatas da troca). */
-  supports: { count: number; withVolume: number; withVolumeIds: string[];
-    /** 2026-10-14 · formado: as sustentações com volume da lista do Assunto que ainda não estão no artigo (etapa 2). */
-    missingInArticle?: string[] };
+  supports: { count: number; withVolume: number; withVolumeIds: string[] };
   /**
    * 2026-10-14 (caso WifiConecta) · a keyword da linha (ou a principal declarada
    * dela) está presa no ArticleDNA vigente de OUTRO artigo — de outro Assunto,
@@ -144,12 +136,6 @@ export type PlanSheetArticle = {
   subjectColorLabel?: string | null;
   /** A principal do artigo, legível. */
   label?: string | null;
-  /** 2026-10-14 · o artigo tem parecer de SERP (`serpAssessmentRef`)? `false` = consolidado do plano sem SERP (etapa 2). */
-  serpAssessed?: boolean;
-  /** 2026-10-15 · a linha editorial (ângulo, promessa, CTA, problema, público) ainda tem campo pendente no ArticleDNA (etapa 3). */
-  editorialPending?: boolean;
-  /** 2026-10-15 (noite) · só o Público falta no ArticleDNA (depende do BrandDNA aprovado). */
-  audiencePending?: boolean;
 };
 
 /** O artigo que prende a keyword de uma linha do plano. */
@@ -317,7 +303,7 @@ function formationView(input: { keywordId: string; standing: ArchitectSubjectSta
   const article = input.articles.filter(item => item.subjectKeywordId === input.keywordId).sort((a, b) => b.versionNumber - a.versionNumber)[0];
   if (article) {
     if (input.radarArticleIds.has(article.articleId)) return { state: "in_radar", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `No Radar · v${article.versionNumber}` };
-    return { state: "formed", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `Formado · v${article.versionNumber}`, ...(article.serpAssessed === false ? { serpPending: true } : {}), ...(article.editorialPending === true ? { editorialPending: true } : {}), ...(article.audiencePending === true ? { audiencePending: true } : {}) };
+    return { state: "formed", version: article.versionNumber, articleId: article.articleId, principalKeywordId: article.principalKeywordId, label: `Formado · v${article.versionNumber}` };
   }
   if (input.conflict) return { state: "conflict", version: null, articleId: null, principalKeywordId: null, label: PLAN_SHEET_CONFLICT_LABEL };
   const declarada = input.standing.plan?.declaredPrincipal;
@@ -400,7 +386,7 @@ export function buildPlanSheetRows(input: {
       serp: serpView(keywordId, input.serp),
       formation,
       currentPrincipalId: formation.principalKeywordId ?? plan.declaredPrincipal?.keywordId ?? null,
-      supports: { count: lista.length, withVolume: comVolume.length, withVolumeIds: comVolume, missingInArticle: formation.articleId ? comVolume.filter(id => id !== keywordId && !porId.get(id)?.isPublished && !(input.articles.find(article => article.articleId === formation.articleId)?.keywordIds ?? []).includes(id) && !input.articles.some(article => article.articleId !== formation.articleId && article.keywordIds.includes(id))) : [] },
+      supports: { count: lista.length, withVolume: comVolume.length, withVolumeIds: comVolume },
       conflict,
     });
   }
@@ -522,6 +508,17 @@ export function planSheetSerpSelection(rows: readonly PlanSheetRow[]): { toPlan:
 }
 
 /**
+ * A linha do plano já formada não passa de novo por "Concluir formação"
+ * (2026-10-16, restauração do fluxo de sempre): Concluir = formar; o reforço do
+ * artigo formado com keywords de respaldo é o painel "Melhorar publicados…"
+ * ("Melhorar publicados e formar Assuntos"), o mesmo núcleo, num lugar só.
+ */
+export const PLAN_SHEET_FORMED_REFUSAL_PATH = "para reforçar com keywords de respaldo, use “Melhorar publicados…” (prévia antes; custo dito antes de pagar)";
+export function planSheetFormedRefusal(formationLabel: string): string {
+  return `${formationLabel}: já formado — ${PLAN_SHEET_FORMED_REFUSAL_PATH}.`;
+}
+
+/**
  * CONCLUIR FORMAÇÃO / TROCAR PRINCIPAL — o recorte por grupo que a melhoria
  * prepara (um `prepare` por grupo, com `targetIds`), e as recusas que já se
  * sabem sem ir ao servidor.
@@ -532,6 +529,8 @@ export function planSheetFormationSelection(rows: readonly PlanSheetRow[], actio
   for (const row of rows) {
     // 2026-10-14 · a keyword presa no artigo de outro Assunto: só esta linha é recusada, com o caminho; as outras seguem.
     const recusa = row.conflict ? row.conflict.sentence
+      // 2026-10-16 · Concluir formação FORMA (só a linha sem ArticleDNA); reforçar o artigo já formado é do painel "Melhorar publicados…", um lugar só.
+      : action === "concludeFormation" && (row.formation.state === "formed" || row.formation.state === "in_radar") ? planSheetFormedRefusal(row.formation.label)
       : action === "swapPrincipal" && row.lock.state !== "free"
       ? row.lock.state === "locked" ? `${PLAN_SHEET_LOCKED_SEAL} (${row.lock.label}).` : "Sem principal declarada no plano: não há trava livre para trocar."
       : row.formation.state === "awaiting_principal" ? `${row.formation.label}: aprove-a no Minerador e envie.`
@@ -554,66 +553,10 @@ export type PlanSheetPreviewLine = {
 };
 
 type RunLike = {
-  proposals: readonly (Pick<ImprovementProposal, "targetId" | "status" | "reasons" | "principalId" | "currentPrimaryId" | "memberIds" | "needsValidation" | "needsMinerador"> & Partial<Pick<ImprovementProposal, "addIds" | "removeIds" | "evidenceBasis">>)[];
-  keywords?: readonly { id: string; keyword: string; volume?: number | null; volumeValidated?: boolean; external?: boolean; ownerId?: string | null }[];
+  proposals: readonly Pick<ImprovementProposal, "targetId" | "status" | "reasons" | "principalId" | "currentPrimaryId" | "memberIds" | "needsValidation" | "needsMinerador">[];
+  keywords?: readonly { id: string; keyword: string }[];
   refusedTargets?: readonly { id: string; reason: string }[];
-  /** 2026-10-15 · aditivo: os alvos (membros de antes) para dizer o membro mais fraco. */
-  targets?: readonly { id: string; memberIds: readonly string[]; primaryId: string | null }[];
 };
-
-/*
- * 2026-10-15 · ETAPA 2 "REFORÇAR KEYWORDS E SERP" (pedido do dono: "sempre
- * revisa os DNAs das keywords, vê qual é a mais fraca, compara com as coletas
- * da SERP e decide se agrega esta ou aquela, ou busca outras (…) lembrar das
- * keywords soltas, livres"). O motor é o de sempre (`planArticleImprovements`:
- * pares da SERP → leitura da IA na lista → leitura da lista pelo código → busca
- * nova só com pedido e custo antes). Aqui só se DIZ, por artigo, o que ele
- * decidiu: o membro mais fraco e por quê, o que entra, o que sai e de onde veio.
- */
-export const PLAN_REINFORCEMENT_SOURCE_LABELS = {
-  serp: "SERP (páginas em comum no cache)",
-  editorial_and_candidate_serp: "SERP da candidata + DNA",
-  editorial_ai: "lista da marca · leitura da IA",
-  list_core: "lista da marca · núcleo do slug",
-  discovery: "busca nova no Google Ads",
-} as const;
-
-export type PlanReinforcementDetail = {
-  weakest: { keywordId: string; keyword: string; why: string } | null;
-  enters: { keywordId: string; keyword: string; source: string }[];
-  leaves: { keywordId: string; keyword: string }[];
-  sentence: string;
-};
-
-/** O membro mais fraco, o que entra e o que sai de UM artigo, lidos da execução preparada (nada é recalculado). */
-export function planReinforcementDetail(run: RunLike, targetId: string): PlanReinforcementDetail | null {
-  const proposta = run.proposals.find(item => item.targetId === targetId);
-  if (!proposta) return null;
-  const porId = new Map((run.keywords ?? []).map(keyword => [keyword.id, keyword]));
-  const nome = (id: string) => porId.get(id)?.keyword ?? id;
-  const alvo = run.targets?.find(item => item.id === targetId);
-  const antes = alvo?.memberIds ?? proposta.memberIds.filter(id => !(proposta.addIds ?? []).includes(id));
-  const sai = proposta.removeIds ?? [];
-  const candidatos = antes.filter(id => id !== (alvo?.primaryId ?? proposta.currentPrimaryId));
-  const fraco = (() => {
-    const removido = sai.find(id => candidatos.includes(id));
-    if (removido) return { keywordId: removido, keyword: nome(removido), why: porId.get(removido)?.volumeValidated ? "sem par de SERP com a principal nem encaixe no DNA" : "sem volume validado" };
-    const semVolume = candidatos.find(id => !porId.get(id)?.volumeValidated);
-    if (semVolume) return { keywordId: semVolume, keyword: nome(semVolume), why: "sem volume validado" };
-    const menor = [...candidatos].sort((a, b) => (porId.get(a)?.volume ?? 0) - (porId.get(b)?.volume ?? 0))[0];
-    return menor ? { keywordId: menor, keyword: nome(menor), why: `menor volume (${(porId.get(menor)?.volume ?? 0).toLocaleString("pt-BR")})` } : null;
-  })();
-  const fonte = (id: string) => porId.get(id)?.external ? PLAN_REINFORCEMENT_SOURCE_LABELS.discovery
-    : proposta.evidenceBasis ? PLAN_REINFORCEMENT_SOURCE_LABELS[proposta.evidenceBasis] : PLAN_REINFORCEMENT_SOURCE_LABELS.serp;
-  const enters = (proposta.addIds ?? []).filter(id => !antes.includes(id)).map(id => ({ keywordId: id, keyword: nome(id), source: fonte(id) }));
-  const leaves = sai.map(id => ({ keywordId: id, keyword: nome(id) }));
-  const partes = [
-    fraco ? `Mais fraca: “${fraco.keyword}” (${fraco.why})` : null,
-    enters.length ? `entra ${enters.map(item => `“${item.keyword}” (${item.source})`).join(", ")}` : "nada entra",
-    leaves.length ? `sai ${leaves.map(item => `“${item.keyword}”`).join(", ")} (volta para “Keywords não agrupadas”, nada é apagado)` : null,
-  ].filter(Boolean);
-  return { weakest: fraco, enters, leaves, sentence: `${partes.join(" · ")}.` };
-}
 
 /**
  * A prévia por linha, lida da execução preparada (`prepare`, grátis). Pronta e
@@ -638,14 +581,9 @@ export function planSheetPreviewLines(run: RunLike, rows: readonly (Pick<PlanShe
     if (proposta.status === "ready") {
       const troca = para && de !== para ? ` · principal: ${de ?? "nenhuma"} → ${para}` : para ? ` · principal: ${para}` : "";
       const versao = row.formation.version ? `nova versão (v${row.formation.version + 1})` : "primeiro ArticleDNA (v1)";
-      // 2026-10-15 · a etapa 2 diz por artigo o membro mais fraco, o que entra, o que sai e de onde veio.
-      const reforco = row.formation.version ? planReinforcementDetail(run, row.keywordId) : null;
-      return { keywordId: row.keywordId, kind: "will_write", sentence: `Vai gravar: ${versao}${troca} · ${proposta.memberIds.length} keyword(s).${reforco ? ` ${reforco.sentence}` : ""}`, principalFrom: de, principalTo: para };
+      return { keywordId: row.keywordId, kind: "will_write", sentence: `Vai gravar: ${versao}${troca} · ${proposta.memberIds.length} keyword(s).`, principalFrom: de, principalTo: para };
     }
-    if (proposta.status === "adequate") {
-      const fraca = planReinforcementDetail(run, row.keywordId)?.weakest;
-      return { keywordId: row.keywordId, kind: "adequate", sentence: `Já formado e adequado: nada a gravar.${fraca ? ` Mais fraca: “${fraca.keyword}” (${fraca.why}) — sem substituta com volume, SERP e DNA na lista da marca (keywords soltas incluídas).` : ""}`, principalFrom: de, principalTo: para };
-    }
+    if (proposta.status === "adequate") return { keywordId: row.keywordId, kind: "adequate", sentence: "Já formado e adequado: nada a gravar.", principalFrom: de, principalTo: para };
     const util = [...proposta.reasons].reverse().find(reason => !GENERIC_SUBJECT_REASON.test(reason));
     const semVolume = row.volume && row.volume.state !== "measured";
     const dica = semVolume
@@ -883,29 +821,19 @@ export function planSheetNextStep(rows: readonly PlanSheetRow[]): PlanSheetNextS
   return { action: "none", sentence: "Os artigos do plano desta cor estão formados (ou aguardam a principal declarada). Sigam pela mesa, abaixo.", keywordIds: [] };
 }
 
-/* ------------------------- consolidar, não reformar (2026-10-14, noite) */
+/* ------------------------------------- alertas da linha (2026-10-14, noite) */
 
 /*
- * PEDIDO DO DONO (2026-10-14, noite, depois de testar com a WifiConecta azul):
- * "o grupo entrou no Arquiteto bem mastigado, com tudo pronto era só olhar e
- * consolidar, alertar né, vai ser isso mesmo, e consolida, depois vê o que
- * está faltando as keywords de suporte, depois fazer as coletas de acordo as
- * principais (…) Aí ele só vê se já tem o silo, cria ele, consolida/valida
- * tudo e vai em frente para os links internos." Três etapas na mesma barra; o
- * que falta numa linha é ALERTA, não bloqueio.
+ * O que falta numa linha do plano é ALERTA curto (o porquê no `title`), nunca
+ * bloqueio. 2026-10-16 · restauração do fluxo de sempre: a SERP das principais
+ * é a de sempre — "Processar artigos" (Validar SERP das linhas do plano, custo
+ * antes, cache primeiro); formar é "Concluir formação".
  */
 
-export const PLAN_FLOW_LABELS = {
-  consolidate: "Consolidar o Silo do plano",
-  complete: "Completar sustentações e SERP",
-  links: "Links internos",
-  improvePublished: "Melhorar publicados…",
-} as const;
-
-/** Um alerta curto da linha do plano (o que falta), mostrado na prévia e na linha. */
+/** Um alerta curto da linha do plano (o que falta), mostrado na linha. */
 export type PlanRowAlert = { kind: "no_volume" | "no_serp" | "conflict" | "awaiting_principal"; label: string; title: string };
 
-/** Os alertas da linha: nada aqui bloqueia a consolidação, exceto a keyword presa em outro artigo e a principal que não chegou. */
+/** Os alertas da linha: só a keyword presa em outro artigo e a principal que não chegou ficam fora de "Concluir formação". */
 export function planRowAlerts(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" | "conflict" | "formation">): PlanRowAlert[] {
   const alertas: PlanRowAlert[] = [];
   const semVolume = !(row.volume.state === "measured" && (row.volume.value ?? 0) > 0);
@@ -916,180 +844,9 @@ export function planRowAlerts(row: Pick<PlanSheetRow, "lock" | "volume" | "serp"
       ? { kind: "no_volume", label: "sem volume — livre, pode trocar", title: `${row.volume.label}. ${row.lock.why}` }
       : { kind: "no_volume", label: "sem volume — travada", title: `${row.volume.label}. ${row.lock.why}` });
   } else if (row.serp.state === "none" || row.serp.state === "partial") {
-    alertas.push({ kind: "no_serp", label: row.serp.state === "partial" ? `SERP ${row.serp.lenses}/4 — completar na etapa 2` : "sem SERP no cache — coletar na etapa 2", title: `${row.serp.label}. A coleta das principais é a etapa 2 (custo antes, cache primeiro).` });
+    alertas.push({ kind: "no_serp", label: row.serp.state === "partial" ? `SERP ${row.serp.lenses}/4 — completar em “Processar artigos”` : "sem SERP no cache — coletar em “Processar artigos”", title: `${row.serp.label}. Marque a linha e use “Processar artigos” (Validar SERP: custo antes, cache primeiro).` });
   }
   return alertas;
-}
-
-/** A linha consolida (grava/confirma o ArticleDNA do plano) ou fica fora com o motivo. */
-export function planRowConsolidationRefusal(row: Pick<PlanSheetRow, "conflict" | "formation" | "territoryRef" | "groupId">): string | null {
-  if (row.conflict) return row.conflict.sentence;
-  if (row.formation.state === "awaiting_principal") return `${row.formation.label}: aprove-a no Minerador e envie.`;
-  if (!row.groupId) return "Sem grupo (cor): o Silo do plano é o do grupo.";
-  return null;
-}
-
-export type PlanFlowStep = {
-  id: 1 | 2 | 3;
-  label: string;
-  /** Etapa atual (destaque) ou concluída/futura (desabilitada com o motivo no `title`). */
-  state: "current" | "done" | "blocked";
-  reason: string;
-  /** As linhas a que a etapa se aplica agora. */
-  keywordIds: string[];
-};
-
-/**
- * AS TRÊS ETAPAS DA BARRA. 1 · Consolidar o Silo do plano (enquanto houver
- * linha sem ArticleDNA ou o Silo sem a consolidação canônica); 2 · Completar
- * sustentações e SERP (linhas com volume sem as 4 lentes, ou com sustentações
- * da lista do Assunto com volume fora do artigo); 3 · Links internos. Só a
- * etapa atual fica em destaque; as outras dizem por que estão paradas.
- */
-export function planFlowSteps(input: { rows: readonly PlanSheetRow[]; siloConsolidated: boolean }): PlanFlowStep[] {
-  const rows = input.rows;
-  const formada = (row: PlanSheetRow) => row.formation.state === "formed" || row.formation.state === "in_radar";
-  const consolidaveis = rows.filter(row => !formada(row) && !planRowConsolidationRefusal(row));
-  const faltaConsolidar = rows.some(row => !formada(row)) || !input.siloConsolidated;
-  const semSerp = rows.filter(row => row.volume.state === "measured" && (row.volume.value ?? 0) > 0 && (row.serp.state === "none" || row.serp.state === "partial"));
-  // Formado (consolidado do plano) sem parecer, com as 4 lentes no cache, ou com sustentações para acrescentar: a melhoria grava a versão nova.
-  const semSustentacao = rows.filter(row => formada(row) && ((row.supports.missingInArticle?.length ?? 0) > 0 || (row.formation.serpPending === true && row.serp.state === "complete")));
-  const etapa2 = [...new Set([...semSerp, ...semSustentacao].map(row => row.keywordId))];
-  const passo1: PlanFlowStep = faltaConsolidar
-    ? { id: 1, label: PLAN_FLOW_LABELS.consolidate, state: "current", reason: consolidaveis.length || !input.siloConsolidated ? `Prévia grátis: ${consolidaveis.length} artigo(s) do plano para gravar${!input.siloConsolidated ? " e o Silo do plano para consolidar (SiloDNA e SiloPage com o Pilar e a ordem do plano)" : ""}; uma confirmação.` : "As linhas que faltam estão presas ou aguardam a principal: veja o alerta de cada uma.", keywordIds: consolidaveis.map(row => row.keywordId) }
-    : { id: 1, label: PLAN_FLOW_LABELS.consolidate, state: "done", reason: "Silo do plano consolidado: todos os artigos do plano têm ArticleDNA.", keywordIds: [] };
-  const passo2: PlanFlowStep = faltaConsolidar
-    ? { id: 2, label: PLAN_FLOW_LABELS.complete, state: "blocked", reason: "Depois de consolidar o Silo do plano (etapa 1).", keywordIds: etapa2 }
-    : etapa2.length
-      ? { id: 2, label: PLAN_FLOW_LABELS.complete, state: "current", reason: `${semSerp.length} principal(is) sem as 4 lentes de SERP (custo antes, cache primeiro) · ${semSustentacao.length} artigo(s) com sustentações da lista do Assunto para acrescentar (prévia grátis).`, keywordIds: etapa2 }
-      : { id: 2, label: PLAN_FLOW_LABELS.complete, state: "done", reason: "Sustentações e SERP das principais em dia.", keywordIds: [] };
-  const passo3: PlanFlowStep = faltaConsolidar || etapa2.length
-    ? { id: 3, label: PLAN_FLOW_LABELS.links, state: "blocked", reason: faltaConsolidar ? "Depois de consolidar o Silo do plano (etapa 1)." : "Depois de completar sustentações e SERP (etapa 2).", keywordIds: [] }
-    : { id: 3, label: PLAN_FLOW_LABELS.links, state: "current", reason: (() => {
-      // Consolidado sem parecer e sem volume (não há SERP a coletar): segue, mas o Radar pede a SERP antes de receber.
-      const semParecer = rows.filter(row => row.formation.serpPending === true).length;
-      return `Silo consolidado e artigos completos: siga para a aba Links internos.${semParecer ? ` ${semParecer} artigo(s) sem parecer de SERP (sem volume): o Radar pede a SERP antes de receber — troque a principal livre ou meça o volume no Minerador.` : ""}`;
-    })(), keywordIds: [] };
-  return [passo1, passo2, passo3];
-}
-
-/**
- * O QUE "2 · COMPLETAR SUSTENTAÇÕES E SERP" FAZ AGORA. Primeiro a SERP das
- * principais com volume que não têm as 4 lentes ("Validar SERP": cache
- * primeiro, custo antes); com a SERP no cache, a formação pela melhoria
- * (prévia grátis) grava a versão nova com o parecer e as sustentações da lista.
- */
-export function planStepTwoAction(rows: readonly PlanSheetRow[]): { action: "validateSerp" | "concludeFormation"; rows: PlanSheetRow[] } | null {
-  const semSerp = rows.filter(row => row.volume.state === "measured" && (row.volume.value ?? 0) > 0 && (row.serp.state === "none" || row.serp.state === "partial"));
-  if (semSerp.length) return { action: "validateSerp", rows: semSerp };
-  const formada = (row: PlanSheetRow) => row.formation.state === "formed" || row.formation.state === "in_radar";
-  const completar = rows.filter(row => formada(row) && ((row.supports.missingInArticle?.length ?? 0) > 0 || (row.formation.serpPending === true && row.serp.state === "complete")));
-  return completar.length ? { action: "concludeFormation", rows: completar } : null;
-}
-
-/* ------------------- a aba Artigos só mexe com artigos (2026-10-15) ------------------- */
-
-/*
- * PEDIDO DO DONO (15/10): "a definição do silo já tem que estar na aba do Silo
- * e não nos artigos. Artigo só mexe com artigos: só reforçar as keywords, fazer
- * do assunto/tema uma linha editorial de copy, e finalizar com os links
- * internos." A barra da aba Artigos tem quatro etapas só de artigo; o Silo do
- * plano (criar, reusar, confirmar, a página do Silo) é da aba Silos.
- */
-export const PLAN_SILO_CONSOLIDATE_LABEL = "Consolidar o Silo do plano";
-export const PLAN_SILO_TAB_SENTENCE = "O Silo do plano é consolidado na aba Silos";
-
-export const PLAN_ARTICLE_FLOW_LABELS = {
-  form: "1 · Formar artigos do plano",
-  reinforce: "2 · Reforçar keywords e SERP",
-  editorial: "3 · Linha editorial",
-  links: "4 · Links internos",
-} as const;
-
-export type PlanArticleFlowStep = {
-  id: 1 | 2 | 3 | 4;
-  label: string;
-  state: "current" | "done" | "blocked";
-  /** A etapa 1 some quando todo artigo do plano já tem ArticleDNA. */
-  hidden: boolean;
-  /**
-   * 2026-10-15 (noite) · etapa feita que pode rodar de novo (a 3, quando só o
-   * Público espera o BrandDNA): fica visível e clicável, sem destaque.
-   */
-  rerun?: boolean;
-  reason: string;
-  keywordIds: string[];
-};
-
-/** O portão da aba Artigos: o Silo do plano decidido (aba Silos) e a página dele em dia (para os links). */
-export type PlanArticleSiloGate = { ready: boolean; pairCurrent: boolean; sentence: string;
-  /**
-   * 2026-10-15 (noite) · aditivo: o Silo do plano está decidido, mas a página
-   * dele (SiloDNA/SiloPage) precisa de correção — o que corrigir ("tema",
-   * "pendência no texto"). A barra da aba Artigos diz isso numa linha curta,
-   * com o link para a aba Silos. Ausente/nulo = nada a dizer.
-   */
-  pageFix?: string | null };
-
-export function planArticleFlowSteps(input: { rows: readonly PlanSheetRow[]; silo: PlanArticleSiloGate }): PlanArticleFlowStep[] {
-  const rows = input.rows;
-  const formada = (row: PlanSheetRow) => row.formation.state === "formed" || row.formation.state === "in_radar";
-  const faltam = rows.filter(row => !formada(row));
-  const formaveis = faltam.filter(row => !planRowConsolidationRefusal(row));
-  const naAbaSilos = `${input.silo.sentence}: abra a aba Silos e use “Consolidar o Silo do plano”.`;
-  const passo2 = planStepTwoAction(rows);
-  const etapa2 = passo2 ? passo2.rows.map(row => row.keywordId) : [];
-  const editoriais = rows.filter(row => formada(row) && row.formation.editorialPending === true).map(row => row.keywordId);
-  // Só o Público falta (espera o BrandDNA aprovado): aviso, não trava (caso WifiConecta, 2026-10-15).
-  const soPublico = rows.filter(row => formada(row) && row.formation.editorialPending !== true && row.formation.audiencePending === true).map(row => row.keywordId);
-  const avisoPublico = soPublico.length ? ` O Público de ${soPublico.length} artigo(s) espera o BrandDNA aprovado: aprove em Marca e rode “${PLAN_ARTICLE_FLOW_LABELS.editorial}” de novo.` : "";
-  const passo1: PlanArticleFlowStep = !faltam.length
-    ? { id: 1, label: PLAN_ARTICLE_FLOW_LABELS.form, state: "done", hidden: true, reason: "Todos os artigos do plano têm ArticleDNA.", keywordIds: [] }
-    : !input.silo.ready
-      ? { id: 1, label: PLAN_ARTICLE_FLOW_LABELS.form, state: "blocked", hidden: false, reason: naAbaSilos, keywordIds: [] }
-      : formaveis.length
-        ? { id: 1, label: PLAN_ARTICLE_FLOW_LABELS.form, state: "current", hidden: false, reason: `Prévia grátis: ${formaveis.length} artigo(s) do plano sem ArticleDNA para gravar (v1, do plano: principal, papel, ordem e escopo); uma confirmação. Sem SERP e sem IA.`, keywordIds: formaveis.map(row => row.keywordId) }
-        : { id: 1, label: PLAN_ARTICLE_FLOW_LABELS.form, state: "blocked", hidden: false, reason: "As linhas que faltam estão presas em outro artigo ou aguardam a principal: veja o alerta de cada uma.", keywordIds: [] };
-  const antes1 = passo1.state === "done" || (passo1.state === "blocked" && input.silo.ready && !formaveis.length && faltam.every(row => row.conflict || row.formation.state === "awaiting_principal"));
-  const passo2Step: PlanArticleFlowStep = !input.silo.ready
-    ? { id: 2, label: PLAN_ARTICLE_FLOW_LABELS.reinforce, state: "blocked", hidden: false, reason: naAbaSilos, keywordIds: etapa2 }
-    : passo1.state === "current"
-      ? { id: 2, label: PLAN_ARTICLE_FLOW_LABELS.reinforce, state: "blocked", hidden: false, reason: "Depois de formar os artigos do plano (etapa 1).", keywordIds: etapa2 }
-      : etapa2.length
-        ? { id: 2, label: PLAN_ARTICLE_FLOW_LABELS.reinforce, state: "current", hidden: false, reason: passo2!.action === "validateSerp"
-          ? `${etapa2.length} principal(is) com volume sem as 4 lentes de SERP: o custo aparece antes de pagar (cache primeiro). Depois, o reforço das keywords pelo DNA, pela SERP e pela lista da marca (soltas incluídas).`
-          : `${etapa2.length} artigo(s) para reforçar: o membro mais fraco é comparado com a SERP e com a lista da marca (keywords soltas incluídas); prévia grátis, uma confirmação.`, keywordIds: etapa2 }
-        : { id: 2, label: PLAN_ARTICLE_FLOW_LABELS.reinforce, state: "done", hidden: false, reason: "Keywords e SERP das principais em dia.", keywordIds: [] };
-  const ate2 = antes1 && passo2Step.state === "done";
-  const passo3: PlanArticleFlowStep = !input.silo.ready
-    ? { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "blocked", hidden: false, reason: naAbaSilos, keywordIds: editoriais }
-    : !ate2
-      ? { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "blocked", hidden: false, reason: passo1.state === "current" ? "Depois de formar os artigos do plano (etapa 1)." : "Depois de reforçar keywords e SERP (etapa 2).", keywordIds: editoriais }
-      : editoriais.length
-        ? { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "current", hidden: false, reason: `${editoriais.length} artigo(s) com a linha editorial pendente: ângulo, promessa, CTA, problema e público a partir do Assunto, do escopo do plano e do BrandDNA (grátis, sem IA); prévia antes, uma confirmação.`, keywordIds: editoriais }
-        : soPublico.length
-          ? { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "done", hidden: false, rerun: true, reason: `Linha editorial gravada.${avisoPublico}`, keywordIds: soPublico }
-          : { id: 3, label: PLAN_ARTICLE_FLOW_LABELS.editorial, state: "done", hidden: false, reason: "Linha editorial dos artigos em dia.", keywordIds: [] };
-  const ate3 = ate2 && passo3.state === "done";
-  const semParecer = rows.filter(row => row.formation.serpPending === true).length;
-  const passo4: PlanArticleFlowStep = !input.silo.ready
-    ? { id: 4, label: PLAN_ARTICLE_FLOW_LABELS.links, state: "blocked", hidden: false, reason: naAbaSilos, keywordIds: [] }
-    : !ate3
-      ? { id: 4, label: PLAN_ARTICLE_FLOW_LABELS.links, state: "blocked", hidden: false, reason: `Depois da etapa ${passo1.state === "current" ? 1 : passo2Step.state !== "done" ? 2 : 3}.`, keywordIds: [] }
-      : !input.silo.pairCurrent
-        ? { id: 4, label: PLAN_ARTICLE_FLOW_LABELS.links, state: "blocked", hidden: false, reason: "A página do Silo (SiloDNA e SiloPage) ainda não segue o plano: na aba Silos, “Consolidar o Silo do plano”; depois, os links internos.", keywordIds: [] }
-        : { id: 4, label: PLAN_ARTICLE_FLOW_LABELS.links, state: "current", hidden: false, reason: `Artigos completos e Silo consolidado: siga para a aba Links internos.${semParecer ? ` ${semParecer} artigo(s) sem parecer de SERP (sem volume): o Radar pede a SERP antes de receber.` : ""}${avisoPublico}`, keywordIds: [] };
-  return [passo1, passo2Step, passo3, passo4];
-}
-
-/**
- * OS BOTÕES VISÍVEIS DA BARRA: a etapa atual em destaque e as seguintes
- * desabilitadas (o motivo no `title`), sem as concluídas nem a etapa 1
- * escondida; no máximo `max` botões de etapa.
- */
-export function planArticleVisibleSteps(steps: readonly PlanArticleFlowStep[], max: number): PlanArticleFlowStep[] {
-  const abertas = steps.filter(step => !step.hidden && (step.state !== "done" || step.rerun === true));
-  return abertas.slice(0, Math.max(1, max));
 }
 
 /* ---------------------------------------------- erro do servidor, humano */

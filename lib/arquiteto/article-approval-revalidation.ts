@@ -28,17 +28,11 @@ export type ArticleApprovalRevalidationIssue = {
 };
 
 /**
- * Este ArticleDNA pode ser gravado como aprovado sob esta marca?
- *
- * Lista vazia significa que sim. A marca vem do contexto autorizado, nunca do
- * corpo da requisição: é o isolamento entre marcas que depende disso.
- */
-/**
- * 2026-10-14 (noite) · "CONSOLIDAR O SILO DO PLANO" (pedido do dono; adendo
- * datado na SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`): o artigo do
- * plano que chegou "mastigado" do Minerador é consolidado como decisão humana
- * SEM parecer de SERP; a coleta das principais é a etapa 2, e o Radar continua
- * exigindo a SERP antes de receber. A marca fica escrita no próprio DNA.
+ * A MARCA "Consolidado do plano do Minerador" nos ArticleDNA gravados entre
+ * 2026-10-14 (noite) e 2026-10-15 pelo núcleo "Consolidar o Silo do plano"
+ * (REVERTIDO em 2026-10-16: a gravação sem parecer de SERP não existe mais).
+ * Os DNA já gravados ficam como estão; a melhoria lê a marca para gravar o
+ * parecer na versão seguinte e tira o alerta nessa versão.
  */
 export const DECLARED_PLAN_CONSOLIDATION_ALERT_PREFIX = "Consolidado do plano do Minerador";
 
@@ -47,16 +41,15 @@ export function isDeclaredPlanConsolidation(payload: ArticleDNA): boolean {
   return Boolean(payload.subject?.keywordId) && payload.alerts.some(alert => alert.startsWith(DECLARED_PLAN_CONSOLIDATION_ALERT_PREFIX));
 }
 
+/**
+ * Este ArticleDNA pode ser gravado como aprovado sob esta marca?
+ *
+ * Lista vazia significa que sim. A marca vem do contexto autorizado, nunca do
+ * corpo da requisição: é o isolamento entre marcas que depende disso.
+ */
 export function articleApprovalRevalidationIssues(input: {
   version: VersionEnvelope<ArticleDNA>;
   authorizedBrandId: string;
-  /**
-   * Aditivo (2026-10-14): só o núcleo "Consolidar o Silo do plano" passa
-   * `true`. Com ele — e com a marca da consolidação no DNA — a falta da
-   * referência de SERP não recusa a gravação. Nenhuma rota de artefato passa
-   * esta opção; ausente, a regra é a de sempre.
-   */
-  declaredPlanConsolidation?: boolean;
 }): ArticleApprovalRevalidationIssue[] {
   const payload = input.version.payload;
   const issues: ArticleApprovalRevalidationIssue[] = [];
@@ -102,7 +95,7 @@ export function articleApprovalRevalidationIssues(input: {
    * servidor consegue afirmar sozinho é o mínimo: sem referência nenhuma, a
    * hipótese da lógica nunca foi ao mercado.
    */
-  if (!payload.serpAssessmentRef && !(input.declaredPlanConsolidation === true && isDeclaredPlanConsolidation(payload))) {
+  if (!payload.serpAssessmentRef) {
     issues.push({
       code: "SERP_EVIDENCE_MISSING",
       detail: "O artigo não carrega referência de evidência SERP.",

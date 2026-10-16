@@ -17,9 +17,6 @@
  * Domínio puro: sem React, sem rede, sem banco, sem imports.
  */
 
-/** O rótulo da correção (prévia de "Consolidar o Silo do plano", andamento e catálogo do MCP). */
-export const PLAN_SILO_PAIR_FIX_LABEL = "Corrigir a página do Silo" as const;
-
 /** A pendência que o construtor determinístico grava em campo vazio (ex.: público). */
 const PENDENCIA = /pendente de (enriquecimento|forma[cç][aã]o)|^\s*pendente\b/i;
 
@@ -104,20 +101,6 @@ export function diagnoseSiloIdentity(input: {
   const frases = [input.macroProblem, input.page?.h1, input.page?.intro, input.page?.cta, input.page?.seoTitle];
   if (frases.some(frase => isPendingPlaceholder(frase))) reasons.push("há pendência (“pendente de enriquecimento…”) dentro do texto");
   return reasons.length ? { expected, current, reasons } : null;
-}
-
-/**
- * 2026-10-15 (noite) · O QUE CORRIGIR, numa palavra (a linha curta da aba
- * Artigos): "tema" quando o tema/H1 é de um suporte ou falta; senão
- * "pendência no texto".
- */
-export function siloIdentityFixKind(diagnosis: SiloIdentityDiagnosis): "tema" | "pendência no texto" {
-  return diagnosis.reasons.some(reason => /tema|H1/.test(reason)) ? "tema" : "pendência no texto";
-}
-
-/** A linha curta da aba Artigos quando a página do Silo do plano precisa de correção (o conserto é na aba Silos). */
-export function siloPageFixLine(kind: string): string {
-  return `A página do Silo precisa de correção (${kind}) — corrija na aba Silos`;
 }
 
 /** A frase da prévia: o que está errado e o que a versão nova grava. */

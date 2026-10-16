@@ -11,11 +11,13 @@ import { planPrincipalSwapCandidates, type PlanSheetArticle } from "../lib/arqui
  * plano só falam com a melhoria, com a SERP por keyword e com a leitura do
  * cache; nada vai ao Minerador e nada é pago sem a confirmação.
  *
- * 2026-10-14 (noite) · pedido do dono ("tem 9 botões no painel do topo"; "era
- * só olhar e consolidar"): sem planilha separada nem botões em lote. A mesa é a
- * da aba (harness comum); "Validar SERP" e a formação com o parecer são a
- * ETAPA 2 da barra ("Completar sustentações e SERP"); na linha, só "Procurar
- * outra principal" (sem volume e Livre).
+ * 2026-10-14 (noite) · pedido do dono ("tem 9 botões no painel do topo"): sem
+ * planilha separada nem botões em lote. A mesa é a da aba (harness comum); na
+ * linha, só "Procurar outra principal" (sem volume e Livre).
+ *
+ * 2026-10-16 · restauração do fluxo de sempre: "Validar SERP" é o "Processar
+ * artigos" da barra e formar é o "Concluir formação" da barra, para as linhas
+ * do plano marcadas; a linha já formada é reforçada pelo "Melhorar publicados…".
  */
 
 type Chamada = { url: string; method: string; body: any };
@@ -55,13 +57,14 @@ function rede(opcoes: { serpLida?: Record<string, number> } = {}) {
 }
 const assentar = async () => { for (let i = 0; i < 25; i += 1) await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
 const AZUL_FILTRO = { kind: "groups" as const, color: "azul" as const, groupIds: [AZUL] };
-/** Os 7 artigos do plano já formados (consolidados), com ou sem parecer de SERP. */
-const formados = (semParecer: readonly string[] = []): PlanSheetArticle[] => ["k9", "k10", "k11", "k12", "k13", "k14", "k15"].map(id => ({ articleId: id, versionNumber: 1, subjectKeywordId: id, principalKeywordId: id, keywordIds: [id], slug: id, siloRef: TERRITORIO, siloLabel: "Wi-Fi e fibra óptica", serpAssessed: !semParecer.includes(id) }));
-const mesa = (opcoes: { articles?: PlanSheetArticle[]; siloConsolidado?: boolean; keywords?: Record<string, unknown>[] } = {}) => comProductShell(React.createElement(MesaDoPlano, {
+/** Os 7 artigos do plano já formados. */
+const formados = (): PlanSheetArticle[] => ["k9", "k10", "k11", "k12", "k13", "k14", "k15"].map(id => ({ articleId: id, versionNumber: 1, subjectKeywordId: id, principalKeywordId: id, keywordIds: [id], slug: id, siloRef: TERRITORIO, siloLabel: "Wi-Fi e fibra óptica" }));
+const mesa = (opcoes: { articles?: PlanSheetArticle[]; keywords?: Record<string, unknown>[] } = {}) => comProductShell(React.createElement(MesaDoPlano, {
   marca: MARCA_WIFI, keywords: opcoes.keywords ?? mesaWifi(), articles: opcoes.articles ?? [], mesa: [], filtro: AZUL_FILTRO, registro,
-  groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeyword, siloConsolidado: opcoes.siloConsolidado ?? false,
+  groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeyword,
 }));
 const linhaDa = (keywordId: string) => screen.container.querySelector<HTMLElement>(`[data-testid="architect-plan-table-row"][data-keyword-id="${keywordId}"]`)!;
+const marcarTodas = async () => { for (const id of ["k9", "k10", "k11", "k12", "k13", "k14", "k15"]) await screen.click(linhaDa(id).querySelector<HTMLInputElement>("input[type='checkbox']")!); };
 const botao = (texto: string, dentro?: HTMLElement) => [...(dentro ?? screen.container).querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === texto);
 const resultado = (keywordId: string) => linhaDa(keywordId).querySelector("[data-testid='architect-plan-row-result']")?.textContent ?? "";
 const semMinerador = () => assert.equal(chamadas.some(chamada => chamada.url.includes("/api/minerador")), false, "nenhum pedido ao Minerador");
@@ -83,28 +86,26 @@ test("azul: 7 linhas na ordem do plano; 'Procurar outra principal' só na livre 
   assert.match(linhaDa("k9").textContent!, /Pilar · 9º/);
   assert.equal(linhaDa("k9").querySelector("[data-plan-seal='serp']")!.textContent, "SERP 4/4");
   assert.equal(linhaDa("k11").querySelector("[data-plan-seal='serp']")!.textContent, "Sem SERP");
-  assert.match(linhaDa("k11").querySelector("[data-testid='architect-plan-row-alerts']")!.textContent!, /sem SERP no cache — coletar na etapa 2/);
+  assert.match(linhaDa("k11").querySelector("[data-testid='architect-plan-row-alerts']")!.textContent!, /sem SERP no cache — coletar em “Processar artigos”/);
   assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/serp-subject").length, 1, "uma leitura grátis do cache");
   for (const rotulo of ROTULOS_REMOVIDOS) assert.doesNotMatch(screen.text(), rotulo, String(rotulo));
   semMinerador();
 });
 
-test("etapa 2 · 'Completar sustentações e SERP' começa pela SERP das principais: prévia com o custo, cancelar não paga; confirmar coleta, resultado por linha e relê", async () => {
+test("'Processar artigos' (barra de sempre) com as linhas do plano marcadas = Validar SERP: prévia com o custo, cancelar não paga; confirmar coleta, resultado por linha e relê", async () => {
   rede();
-  await screen.render(mesa({ articles: formados(), siloConsolidado: true })); await assentar();
-  const etapa = screen.get("architect-plan-stage");
-  assert.equal(etapa.dataset.stage, "2");
-  // 2026-10-15 · as etapas da aba Artigos são só de artigo (1 formar · 2 reforçar · 3 linha editorial · 4 links).
-  assert.equal(etapa.textContent, "2 · Reforçar keywords e SERP");
-  await screen.click(etapa); await assentar();
+  await screen.render(mesa()); await assentar();
+  assert.equal(screen.query("architect-plan-stage"), null, "sem etapas do plano: a barra de sempre");
+  await marcarTodas();
+  await screen.click("architect-articles-top-process"); await assentar();
   const previa = screen.get("architect-plan-sheet-preview");
   assert.equal(previa.dataset.action, "validateSerp");
   assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /Até 20 chamada\(s\) paga\(s\)/);
-  assert.deepEqual(screen.all("architect-plan-sheet-preview-line").map(item => item.dataset.kind), ["go", "go", "go", "go", "go"], "só as principais com volume sem as 4 lentes");
+  assert.deepEqual(screen.all("architect-plan-sheet-preview-line").filter(item => item.dataset.kind === "go").map(item => item.textContent!.split(" · ")[0]).length, 5, "só as principais com volume sem as 4 lentes vão ao custo");
   await screen.click(botao("Cancelar", previa)!); await assentar();
   assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute").length, 0, "cancelar não paga nada");
   assert.match(screen.get("architect-plan-sheet-summary").textContent!, /nenhuma chamada foi paga/);
-  await screen.click("architect-plan-stage"); await assentar();
+  await screen.click("architect-articles-top-process"); await assentar();
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   const executados = chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute");
   assert.equal(executados.length, 1);
@@ -117,33 +118,25 @@ test("etapa 2 · 'Completar sustentações e SERP' começa pela SERP das princip
   semMinerador();
 });
 
-test("etapa 2 · com a SERP no cache: a formação (prévia grátis) grava a versão com o parecer (consolidado sem SERP) e as sustentações da lista; uma confirmação; releitura", async () => {
+test("'Concluir formação' (barra de sempre) FORMA: a linha sem ArticleDNA vai à melhoria do plano (prévia grátis, uma confirmação, releitura); a já formada fica fora com o caminho do reforço", async () => {
   rede({ serpLida: { k9: 4, k11: 4, k12: 4, k13: 4, k14: 4, k15: 4, s1: 4, s2: 4 } });
-  await screen.render(mesa({ articles: formados(["k9"]), siloConsolidado: true })); await assentar();
-  assert.equal(screen.get("architect-plan-stage").dataset.stage, "2");
-  await screen.click("architect-plan-stage"); await assentar();
+  await screen.render(mesa({ articles: formados().filter(artigo => artigo.articleId === "k9") })); await assentar();
+  await marcarTodas();
+  await screen.click("architect-articles-top-confirm"); await assentar();
   const preparo = chamadas.find(chamada => chamada.url === "/api/arquiteto/article-improvement" && chamada.body?.action === "prepare")!;
-  assert.deepEqual([preparo.body.group, preparo.body.origin, preparo.body.targetIds], [AZUL, "plan_sheet", ["k9", "k10"]], "k9 sem parecer; k10 com sustentações da lista fora do artigo");
+  assert.deepEqual([preparo.body.group, preparo.body.origin, preparo.body.targetIds], [AZUL, "plan_sheet", ["k10", "k11", "k12", "k13", "k14", "k15"]], "o k9 já formado não vai de novo");
   assert.equal(screen.get("architect-plan-sheet-preview").dataset.action, "concludeFormation");
+  const k9 = screen.all("architect-plan-sheet-preview-line").find(item => item.textContent!.startsWith("internet fibra óptica"))!;
+  assert.equal(k9.dataset.kind, "refused");
+  assert.match(k9.textContent!, /Formado · v1: já formado — para reforçar com keywords de respaldo, use “Melhorar publicados…”/);
   assert.equal(chamadas.filter(chamada => chamada.body?.action === "apply").length, 0, "a prévia não grava");
   assert.equal(screen.get("architect-plan-sheet-confirm").textContent, "Confirmar e gravar");
   await screen.click("architect-plan-sheet-confirm"); await assentar();
-  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k9", "k10"]]);
-  assert.match(resultado("k9"), /ArticleDNA de k9 gravado \(v2\) e relido/);
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k10", "k11", "k12", "k13", "k14", "k15"]]);
+  assert.match(resultado("k10"), /ArticleDNA de k10 gravado \(v2\) e relido/);
+  assert.match(resultado("k9"), /^Não gravado: Formado · v1: já formado/);
   assert.equal(registro.aplicados, 1, "a mesa é relida depois de gravar");
   semMinerador();
-});
-
-test("etapa 3 · tudo consolidado e com SERP: a barra leva a 'Links internos'", async () => {
-  rede({ serpLida: { k9: 4, k11: 4, k12: 4, k13: 4, k14: 4, k15: 4 } });
-  const semLista = mesaWifi().filter(linha => !String(linha.id).startsWith("s"));
-  await screen.render(mesa({ articles: formados(), siloConsolidado: true, keywords: semLista })); await assentar();
-  const etapa = screen.get("architect-plan-stage");
-  assert.equal(etapa.dataset.stage, "4", "2026-10-15: links é a etapa 4 (a 3 é a linha editorial, em dia aqui)");
-  assert.equal(etapa.textContent, "4 · Links internos");
-  await screen.click(etapa);
-  assert.equal(registro.links, 1);
-  assert.equal(chamadas.filter(chamada => chamada.method === "POST" && chamada.url !== "/api/arquiteto/serp-subject").length, 0);
 });
 
 test("Procurar outra principal na linha livre: escolha entre as candidatas, prévia com a troca, uma confirmação, nova versão", async () => {

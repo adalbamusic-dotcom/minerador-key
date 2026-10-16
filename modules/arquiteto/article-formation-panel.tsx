@@ -214,8 +214,13 @@ export function ArticleFormationPanel({
   legacy: { current: number; legacy: number; reasons: readonly { reason: string; count: number; label: string }[] };
   /** §14 — resposta da portaria na última tentativa de concluir. */
   conclusionGates: readonly { code: string; ok: boolean; detail: string }[];
-  onProcess: () => void;
-  onConfirm: () => void;
+  /**
+   * 2026-10-16 · opcionais: na aba Artigos o painel mora em "Detalhes técnicos"
+   * e os dois botões são só os da barra de sempre (nada em dobro). Ausentes, o
+   * painel não desenha "Processar artigos" nem "Concluir formação".
+   */
+  onProcess?: () => void;
+  onConfirm?: () => void;
   onChangePrincipal: (candidateRef: string, keywordId: string) => void;
   onSplitKeyword: (candidateRef: string, keywordId: string) => void;
   onMoveKeyword: (keywordId: string, targetCandidateRef: string) => void;
@@ -242,7 +247,7 @@ export function ArticleFormationPanel({
   return (
     <section className="mt-3 rounded border border-divider bg-surface-subtle p-3" data-testid="architect-formation-panel">
       <div className="flex flex-wrap items-center gap-2">
-        <button
+        {onProcess && <button
           type="button"
           onClick={onProcess}
           disabled={busy || Boolean(scopeReason)}
@@ -251,8 +256,8 @@ export function ArticleFormationPanel({
           className="inline-flex min-h-9 items-center gap-1.5 rounded border border-module-accent/50 bg-module-accent/10 px-3 text-sm font-semibold text-module-accent transition-colors hover:bg-module-accent/20 disabled:opacity-40"
         >
           {busy ? "Processando…" : processed ? "Reprocessar artigos" : "Processar artigos"}
-        </button>
-        <button
+        </button>}
+        {onConfirm && <button
           type="button"
           onClick={onConfirm}
           disabled={busy || !processed || Boolean(scopeReason)}
@@ -262,7 +267,7 @@ export function ArticleFormationPanel({
           className="inline-flex min-h-9 items-center gap-1.5 rounded border border-positive-soft/45 px-3 text-sm font-semibold text-positive-soft transition-colors hover:bg-positive-soft/10 disabled:opacity-40"
         >
           Concluir formação
-        </button>
+        </button>}
         {/* O escopo fica dito por extenso: a pessoa não deve precisar deduzir
             sobre o que os dois botões vão agir. */}
         <span className={`text-sm ${scopeReason && selectedCount > 0 ? "text-warning" : "text-text-muted"}`} data-testid="architect-formation-selection-count">

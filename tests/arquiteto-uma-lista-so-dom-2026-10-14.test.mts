@@ -15,10 +15,10 @@ import type { EditorialGroupScreenFilter } from "../lib/editorial/editorial-grou
  * abre "Retirar artigo do Silo" com prévia e só o dono confirma.
  *
  * 2026-10-14 (noite) · sem planilha separada (pedido do dono: "por que no
- * arquiteto tem duas planilhas?"). A mesa é a da aba (harness comum). Com UM
- * plano no recorte, a barra é a das etapas ("Consolidar o Silo do plano");
- * com "Todos" (azul e laranja com plano), a barra de sempre — é por ela que
- * estes testes marcam as 7 linhas e usam "Processar artigos"/"Concluir formação".
+ * arquiteto tem duas planilhas?"). A mesa é a da aba (harness comum).
+ *
+ * 2026-10-16 · restauração do fluxo de sempre: em todo recorte (uma cor ou
+ * "Todos") a barra é a de sempre — "Processar artigos"/"Concluir formação".
  */
 
 type Chamada = { url: string; method: string; body: any };
@@ -76,7 +76,7 @@ const semMinerador = () => assert.equal(chamadas.some(chamada => chamada.url.inc
 test.beforeEach(async () => { chamadas = []; registro = novoRegistro(); screen = await montarRadar(); });
 test.afterEach(() => screen.destroy());
 
-test("azul real: 7 linhas; 12, 13 e 14 presas no artigo do laranja com o caminho; no topo, só a etapa atual (sem cartão 'Próximo passo')", async () => {
+test("azul real: 7 linhas; 12, 13 e 14 presas no artigo do laranja com o caminho; no topo, a barra de sempre (sem cartão 'Próximo passo' nem etapas)", async () => {
   rede();
   await screen.render(mesa()); await assentar();
   assert.equal(screen.all("architect-plan-table-row").length, 7);
@@ -85,8 +85,9 @@ test("azul real: 7 linhas; 12, 13 e 14 presas no artigo do laranja com o caminho
   assert.match(linhaDa("k13").querySelector<HTMLElement>("[data-plan-seal='conflict']")!.title, /Presa no artigo “melhor-para-jogos-online” do Silo “planos de internet” \(Assunto “Internet de 300, 500, 600 Mega ou 1 Giga: qual velocidade contratar\?” · cor Laranja\)/);
   assert.equal(linhaDa("k13").querySelector("[data-testid='architect-plan-row-withdraw']")?.textContent, "Retirar artigo do Silo");
   assert.equal(screen.query("architect-plan-sheet-next-step"), null);
-  // 2026-10-15 · a aba Artigos não consolida Silo: a etapa atual é a de artigo.
-  assert.equal(screen.get("architect-plan-stage").textContent, "1 · Formar artigos do plano");
+  // 2026-10-16 · sem etapas do plano: os botões de sempre, uma vez cada.
+  assert.equal(screen.query("architect-plan-stage"), null);
+  assert.deepEqual([...screen.get("architect-articles-formation-actions").querySelectorAll("button")].map(item => item.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
   semMinerador();
 });
 
@@ -178,13 +179,15 @@ test("linha presa → 'Retirar artigo do Silo': abre a PRÉVIA (grátis) do arti
 
 const painel = () => comProductShell(React.createElement(ArticleImprovementPanel, { brandId: MARCA_WIFI, onApplied: () => undefined, buttonClassName: "button", primaryButtonClassName: "button", activeGroup: { requested: "azul", label: "Azul" } }));
 
-test("o painel dos publicados (aberto pelo botão da barra) é o de sempre: sem modo recolhido nem 'Ir para a planilha'; o artigo do plano segue a etapa da barra", async () => {
+test("o painel dos publicados (aberto pelo botão da barra) é o de sempre: sem modo recolhido nem 'Ir para a planilha'; sem frase de 'o artigo do plano não passa por aqui'", async () => {
   rede();
   await screen.render(painel()); await assentar();
   assert.equal(screen.get("architect-article-improvement").dataset.collapsed, undefined);
   assert.equal(screen.query("architect-improvement-collapsed"), null);
   assert.equal(screen.get("architect-improvement-next-step").dataset.nextStep, "prepare");
   assert.doesNotMatch(screen.text(), /Artigos do plano|planilha abaixo|Ir para “Artigos do plano”/);
-  assert.match(screen.get("architect-improvement-plan-elsewhere").textContent!, /linha da tabela de artigos, e a barra mostra a etapa dele \(“Consolidar o Silo do plano” → “Completar sustentações e SERP” → “Links internos”\)/);
+  // 2026-10-16 · o painel volta a reforçar os artigos do plano (como em 4d546ce): a frase que os mandava para outro lugar saiu.
+  assert.equal(screen.query("architect-improvement-plan-elsewhere"), null);
+  assert.doesNotMatch(screen.text(), /Consolidar o Silo do plano|Completar sustentações e SERP/);
   assert.equal(chamadas.filter(chamada => chamada.method === "POST").length, 0, "abrir não prepara nada");
 });

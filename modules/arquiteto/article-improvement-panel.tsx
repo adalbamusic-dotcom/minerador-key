@@ -48,9 +48,9 @@ export function ImprovementProgress({ activity, now, done, total, unit }: { acti
 function ArticleImprovementSession({ brandId, brandRef = null, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [], activeGroup = null, mesaChangedAt = null }: {
   /*
    * 2026-10-14 (tarde) · pedido do dono: o painel não fica mais no topo da aba
-   * Artigos. Ele abre só pelo botão "Melhorar publicados…" da barra e só serve
-   * aos publicados; o modo "recolhido apontando para a planilha" saiu junto com
-   * a planilha separada (os artigos do plano são linhas da tabela de artigos).
+   * Artigos. Ele abre só pelo botão "Melhorar publicados…" da barra; o modo
+   * "recolhido apontando para a planilha" saiu junto com a planilha separada
+   * (os artigos do plano são linhas da tabela de artigos).
    */
   /**
    * 2026-10-14 · a última mudança da mesa (itens recebidos). A análise lida do
@@ -79,11 +79,13 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
    */
   selectedTargetIds?: readonly string[];
   /*
-   * F5 · PLANILHA PRIMEIRO (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
-   * item 5): o recorte do plano saiu deste painel. Os artigos do plano são
-   * linhas da planilha "Artigos do plano" (Artigos novos), com Validar SERP,
-   * Trocar principal e Concluir formação na linha e no lote. Este painel fica
-   * para os publicados (e o Assunto sem plano, do formato anterior).
+   * 2026-10-16 · RESTAURAÇÃO DO FLUXO DE SEMPRE: o painel completo (IA,
+   * medição, busca nova no Google Ads, SERP) volta a valer para os publicados E
+   * para os Assuntos, inclusive os de grupo com plano (como em 4d546ce, sem
+   * `excludePlanArticles`). O reforço respeita a regra da principal: declarada,
+   * travada ou com volume no DNA fica; Livre sem volume pode trocar; as keywords
+   * soltas entram na lista. "Concluir formação" (barra) só forma a linha sem
+   * ArticleDNA; reforçar o artigo formado é daqui.
    */
 }) {
   const mounted = useRef(false);
@@ -137,8 +139,7 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
       // F4: o Arquiteto não aprova keyword no Minerador (nada de `approveNewKeywords`); só as linhas prontas, sem keyword nova.
       ...(action === "apply" && !current?.acceptedIds ? { targetIds: [...selected] } : {}),
       ...(action === "prepare" && selectedTargetIds.length ? { targetIds: [...selectedTargetIds] } : {}),
-      // F5 · planilha primeiro: o Assunto com plano é da planilha "Artigos do plano"; este painel fica para publicados.
-      ...(action === "prepare" ? { excludePlanArticles: true } : {}),
+      // 2026-10-16 · o painel volta a incluir os Assuntos de grupo com plano (como em 4d546ce): é por aqui que o dono reforça os artigos do plano.
       // Busca nova no Google Ads só quando o dono pede, depois de ver o custo (2026-10-12).
       ...(action === "prepare" && options.discover ? { discover: true } : {}),
       // F5 — "Refazer mesmo assim" (D11): os mesmos insumos de novo, só com o motivo dito.
@@ -302,7 +303,6 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, button
           <InfoHint title="Como funciona" description="1 · Buscar keywords lê, de graça, o que já temos de cada publicado e Assunto — DNA, volume já medido (inclusive “sem média” há menos de 30 dias), SERP em cache, Assunto, plano e trava — e mostra “Já temos · Falta · Custa”. A leitura da IA (IA da plataforma, OpenRouter; ela recebe o resumo do DNA de cada keyword) e a medição no Google Ads (cota, sem custo em dólar) só rodam quando você autoriza, e só para o que falta. O Arquiteto só lê keyword: keyword nova, medição a gravar e Lógica viram “Sugestões do Arquiteto” no Minerador, onde você decide (a medição guardada é gravada lá sem consultar de novo); a linha que depende delas fica “Precisa do Minerador”. A ordem: pares da SERP que já estão no cache, a leitura da IA na lista da marca (confira o motivo de cada uma), a leitura da lista pelo código (keywords que são o núcleo do slug) e, só para quem ficar sem nada e quando você pedir (o custo é dito antes), busca nova no Google Ads. Buscar de novo com os mesmos alvos e a mesma lista reaproveita a leitura da IA, as medições e a busca, sem chamar de novo. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
         </h3>
         <p className="text-text-muted">URL, slug e canonical nunca mudam.</p>
-        <p className="text-text-muted" data-testid="architect-improvement-plan-elsewhere">Artigo do plano (Assunto com plano) não passa por aqui: ele é uma linha da tabela de artigos, e a barra mostra a etapa dele (“Consolidar o Silo do plano” → “Completar sustentações e SERP” → “Links internos”).</p>
         {analiseDeOutroRecorte && activeGroup && <p className="text-warning" role="status" data-testid="architect-improvement-other-scope">Esta análise é {run?.groupScope ? `do grupo ${run.groupScope.requested}` : "da marca inteira"}, não da cor {activeGroup.label} escolhida na etiqueta. Para analisar só a cor {activeGroup.label}, toque em “Buscar keywords da cor {activeGroup.label}”.</p>}
         {run?.groupScope && <p className="text-text-muted" data-testid="architect-improvement-group-scope">Esta análise leu só o grupo {run.groupScope.requested} (alvos e lista do grupo; os publicados da marca inteira continuam protegidos).</p>}
         <p className="text-text-muted" data-testid="architect-improvement-scope">{selectedTargetIds.length
