@@ -118,7 +118,7 @@ const MENSAGENS_DOS_CODIGOS: Record<string, string> = {
   REWORK_SAME_REFUSAL: "Isto já foi tentado com os mesmos insumos e deu a mesma recusa; nada foi pago de novo.",
   REWORK_SAME_INPUTS: "Isto já foi feito com os mesmos insumos; o resultado anterior foi reaproveitado.",
   DECLARED_PLAN_CONTRADICTION: "Isto contradiz o plano declarado no Minerador; o plano muda lá.",
-  REWORK_PARALLEL_PATH: "Este caminho é paralelo ao do plano; use a planilha “Artigos do plano”.",
+  REWORK_PARALLEL_PATH: "Este caminho é paralelo ao do plano; o artigo do plano é a linha dele na tabela de artigos (“Processar artigos” → “Concluir formação”).",
   TEMPO_ESGOTADO: "O servidor demorou demais nesta etapa. O que foi feito ficou salvo: toque de novo no mesmo botão para continuar.",
 };
 

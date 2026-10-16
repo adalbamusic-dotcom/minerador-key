@@ -98,9 +98,10 @@ test("SiloPage projetada mostra a página projetada, não 'sem página definida'
 
 /* ------------------------- o que não pode ter sumido --------------------- */
 
-test("painel, mapa e pendências continuam onde estavam", () => {
+test("painel e pendências continuam; o mapa saiu da aba Artigos", () => {
   assert.match(workspace, /<ArticleFormationPanel/);
-  assert.match(workspace, /articleFlow=\{workspaceMode === "articles" \? articleFlow : null\}/);
+  // 2026-10-16 · pedido do dono: o React Flow fica só em Links internos (a projeção da aba Artigos não chega mais ao mapa).
+  assert.doesNotMatch(workspace, /articleFlow=\{/);
   // As pendências seguem fora da grade.
   assert.doesNotMatch(workspace, /workspaceMode === "articles" && <ArticlePipelineRows/);
 });

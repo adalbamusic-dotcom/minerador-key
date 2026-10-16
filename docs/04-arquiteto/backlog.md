@@ -1,3 +1,18 @@
+- [ ] **PROPOSTA (aguarda aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 pendentes.
+
+## Aba Artigos centralizada em "Detalhes técnicos" · mapa só em Links internos — Arquiteto — 2026-10-16 (tarde)
+
+Pedido do dono (16/10): "retirar o react-flow do Silo e da aba dos Artigos… colocar em cima de volta o painel do [Detalhes técnicos]… mostra só o que é útil para o user, centraliza tudo nele". Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] "Detalhes técnicos" é o primeiro bloco da aba Artigos; abre sozinho com ação pendente; dentro, no topo: barra de sempre → "Processo ativo" com barra de progresso → prévia/andamento do plano → "Melhorar publicados" → formação e funções. Fora: só a tabela e as Sobras.
+- [x] A barra que ficava acima da tabela foi movida (não duplicada); o "Detalhes técnicos" do fim saiu.
+- [x] Painel reduzido ao que leva a ação ou alerta real (sem "Workbench do Arquiteto", "Leitura do lote", contagens, singletons, agrupamentos, sobreposições sem ação, estado interno, acervo legado).
+- [x] Mapa (React Flow) só em Links internos; "Ações humanas" só lá; mover keyword segue na linha da tabela.
+- [x] Pente fino: helpers da planilha separada e do "próximo passo" dela, botões opcionais mortos do painel de formação, props e estados sem uso, textos que citavam a planilha "Artigos do plano", ajuda contextual e catálogo.
+- [ ] Dono: homologar a aba Artigos (abrir/fechar "Detalhes técnicos", Processar → Concluir, Melhorar publicados…) e a aba Silos sem mapa.
+- [ ] Dono decide: sem o mapa, a "Visão do mapa" Lógica/SERP/IA + "Comparativo × Atual" (Silos/Artigos) e a escolha do grupo explicado no painel da aba Silos ficaram sem controle (o painel mostra o primeiro grupo). Voltar por outro controle ou remover de vez.
+- [ ] Decidir remover as projeções de mapa de Silos/Artigos que ficaram no domínio sem consumidor na tela (`article-flow.ts`, `architecture-flow.ts`, ramos de `buildArchitectFlowProjection`) e os exports `ARTICLE_FORMATION_SCENARIO_LABELS`, `resolveArticleFormationScenarioState`, `summarizeLegacyArticles`, `filterArticleSiloViews`.
+
 ## Restauração do fluxo de sempre — Arquiteto — 2026-10-16
 
 Ordem do dono (15/10, noite): "tem que voltar tudo, mas sem os erros, nem esse monte de botões, nem processo em paralelo". Detalhe em `estado-atual.md` (mesmo título).

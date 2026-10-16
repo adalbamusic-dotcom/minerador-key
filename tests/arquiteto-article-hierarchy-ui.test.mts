@@ -26,12 +26,18 @@ test("nenhuma rota, aba ou workspace novo foi criado para SiloPage", () => {
 
 /* ------------------- §4 SiloPage não conta como Article ------------------ */
 
-test("o cabeçalho distingue SiloPage de Article", () => {
-  assert.match(workbench, /data-testid="architect-workbench-counts"/);
-  for (const rotulo of ["SiloPage(s)", "Article(s) formado(s)", "candidato(s)", "publicado(s)"]) {
-    assert.ok(workbench.includes(rotulo), `o cabeçalho precisa distinguir ${rotulo}`);
-  }
-  assert.match(workspace, /articleScope=\{workspaceMode === "articles"/);
+/*
+ * 2026-10-16 · pedido do dono ("mostra só o que é útil para o user"): o
+ * cabeçalho "Workbench do Arquiteto" com as contagens SiloPage/Article/
+ * candidato/publicado saiu da aba Artigos. A distinção continua no domínio
+ * (`summarizeArticleSiloViews`) e na mesa (a SiloPage é a linha-pai).
+ */
+test("a aba Artigos não tem o cabeçalho de contagens; a SiloPage continua sendo a linha-pai, não um Article", () => {
+  assert.match(workbench, /\{mode !== "articles" && <div className="flex flex-wrap items-center justify-between gap-3">/);
+  assert.doesNotMatch(workbench, /SiloPage\(s\)|Article\(s\) formado\(s\)|articleScope/);
+  assert.doesNotMatch(workspace, /articleScope=\{/);
+  assert.match(workspace, /<ArticleSiloPageRow/);
+  assert.match(workspace, /summarizeArticleSiloViews\(articleSiloViews\)/);
 });
 
 /* ----------------------------- §5 rótulos -------------------------------- */
@@ -74,25 +80,19 @@ test("o detalhe das pendências abre sob demanda, com nome e motivo", () => {
 
 /* ---------------------------- §8 painel por Silo ------------------------- */
 
-test("o painel permite ler um Silo por vez", () => {
-  assert.match(panel, /data-testid="architect-silo-panel"/);
-  assert.match(panel, /data-testid="architect-silo-panel-counts"/);
-  for (const campo of ["Keywords:", "Articles:", "Candidatos:", "Publicados:", "Singletons:", "Agrupamentos:"]) {
-    assert.ok(panel.includes(campo), `falta o campo ${campo} na leitura por Silo`);
+/*
+ * 2026-10-16 · §8 e §9 na tela saíram (pedido do dono: "mostra só o que é
+ * útil para o user"): a leitura por Silo era só contagem (Keywords, Articles,
+ * Candidatos, Singletons, Agrupamentos, sobreposições) e o alerta de
+ * fragmentação não levava a nenhuma ação. O que pede decisão continua: as
+ * formações que precisam de revisão e o artigo aberto com o "Por quê?".
+ */
+test("o painel não tem mais a leitura por Silo em contagens nem o alerta de fragmentação; diz o que precisa de revisão", () => {
+  for (const fora of ["architect-silo-panel", "Singletons:", "Agrupamentos:", "architect-fragmentation-alert", "architect-fragmentation-explanation"]) {
+    assert.ok(!panel.includes(fora), `${fora} saiu do painel`);
   }
-});
-
-/* ------------------------ §9 fragmentação visível ------------------------ */
-
-test("a fragmentação aparece como alerta editorial, não como validação", () => {
-  assert.match(panel, /data-testid="architect-fragmentation-alert"/);
-  assert.match(panel, /Ainda não há\s+evidência suficiente/);
-  // Informativo: não desabilita o botão de confirmar.
-  const trecho = panel.slice(panel.indexOf("architect-fragmentation-alert"));
-  assert.doesNotMatch(trecho.slice(0, 400), /disabled/);
-  // O painel diz POR QUE eles continuam separados, em vez de só contar.
-  assert.match(panel, /data-testid="architect-fragmentation-explanation"/);
-  assert.match(panel, /já desconta o universo do Silo/);
+  assert.match(panel, /formação\(ões\) precisa\(m\) de revisão/);
+  assert.match(panel, /Por quê\?/);
 });
 
 /* ----------------------------- §18 slug pobre ---------------------------- */
@@ -108,18 +108,17 @@ test("slug pobre continua sendo observação, nunca correção", () => {
 
 /* ------------------------- §20 gráfico por Silo -------------------------- */
 
-test("a distribuição por Silo é um gráfico do painel", () => {
-  assert.match(panel, /data-testid="architect-chart-silo-distribution"/);
-  assert.match(panel, /Distribuição da formação/);
-  assert.match(panel, /data-testid="architect-chart-composition"/);
+test("os gráficos de distribuição e composição saíram do painel (2026-10-16)", () => {
+  assert.ok(!panel.includes("architect-chart-silo-distribution"));
+  assert.ok(!panel.includes("Distribuição da formação"));
+  assert.ok(!panel.includes("architect-chart-composition"));
 });
 
 /* ---------------------------- §13 React Flow ----------------------------- */
 
-test("o mapa da aba Artigos é alimentado pela projeção hierárquica", () => {
-  assert.match(workspace, /articleFlow=\{workspaceMode === "articles" \? articleFlow : null\}/);
-  assert.match(workbench, /if \(mode === "articles" && articleFlow\) return buildArticleHierarchyFlow/);
-  assert.match(workbench, /silo_page: "silo"/);
+test("a aba Artigos não tem mais mapa (2026-10-16: o React Flow fica só em Links internos)", () => {
+  assert.doesNotMatch(workspace, /articleFlow=\{/);
+  assert.match(workspace, /\{linksMode && <div className="min-h-0 min-w-0 overflow-hidden p-0">/);
 });
 
 /* ------------------------------ §22 sem v3 ------------------------------- */
@@ -155,14 +154,13 @@ test("o cross-silo é auditado e mostrado antes de qualquer número", () => {
 
 /* --------------------- §16 sincronia mapa ↔ painel ----------------------- */
 
-test("clicar no mapa abre a mesma leitura da mesa", () => {
-  const trecho = workspace.slice(workspace.indexOf("const handleMapStateChange"));
-  const corpo = trecho.slice(0, trecho.indexOf("\n  }, ["));
-  assert.match(corpo, /workspaceMode === "articles"/);
-  // SiloPage abre o resumo do Silo; Article e keyword abrem a composição.
-  assert.match(corpo, /no\.kind === "silo_page"/);
-  assert.match(corpo, /setPanelSiloRef\(no\.siloRef\)/);
-  assert.match(corpo, /setSelectedArticleNodeRef\(no\.articleRef\)/);
+test("sem mapa na aba Artigos, o artigo abre pelo 'Abrir artigo' da análise por keyword (e a composição segue na linha da tabela)", () => {
+  // 2026-10-16 · o clique no mapa saiu com o mapa; o mesmo nó abre pelo handler de sempre da análise.
+  const trecho = workspace.slice(workspace.indexOf("onOpenArticle: (siloRef: string, principalKeywordId: string) => {"));
+  const corpo = trecho.slice(0, trecho.indexOf("\n    },"));
+  assert.match(corpo, /setSelectedArticleNodeRef\(candidateRef\)/);
+  assert.doesNotMatch(workspace, /setPanelSiloRef/);
+  assert.match(workspace, /<ArticleFormationReviewPanel/);
 });
 
 /* ------------------- §17 composição do Article selecionado --------------- */

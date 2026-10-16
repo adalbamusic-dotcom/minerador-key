@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  PLAN_SHEET_CONFLICT_LABEL, buildPlanSheetRows, improvementPanelCollapsedLabel, planCandidateShownInSheet, planCandidatesInSheetSentence,
-  planSheetFormationSelection, planSheetNextStep, planSheetServerErrorSentence, planSubjectOfKeyword, applyPlanSheetSerp,
+  PLAN_SHEET_CONFLICT_LABEL, buildPlanSheetRows,
+  planSheetFormationSelection, planSheetServerErrorSentence, planSubjectOfKeyword,
   type PlanSheetArticle,
 } from "../lib/arquiteto/plan-article-sheet.ts";
 import { readArchitectSubjectStandings } from "../lib/arquiteto/declared-subject.ts";
@@ -29,19 +29,19 @@ const linhas = (articles: PlanSheetArticle[] = [ARTIGO_INTRUSO]) => buildPlanShe
 
 /* ----------------------------------------------------------- uma lista só */
 
-test("uma lista só: o candidato da cópia de trabalho cuja principal é keyword do plano é a linha da planilha; a mesa não o repete", () => {
-  // Os 4 candidatos da tela do dono (internet fibra óptica, diferença…, Wi-Fi lento, teste de velocidade).
+/*
+ * 2026-10-16 · `planCandidateShownInSheet` e `planCandidatesInSheetSentence`
+ * saíram do domínio (serviam à planilha separada, sem consumidor desde "uma
+ * tabela só"). O que fica: uma linha por artigo do plano, e o plano só vale
+ * para a keyword do plano da própria marca.
+ */
+test("uma lista só: uma linha por artigo do plano; keyword sem plano ou de outra marca não é do plano", () => {
   for (const principal of ["k9", "k10", "k11", "k15"]) {
-    assert.equal(planCandidateShownInSheet({ hasArticleDna: false, published: false, principalKeywordId: principal, brandId: MARCA_WIFI, standings }), true, principal);
+    assert.ok(planSubjectOfKeyword({ keywordId: principal, brandId: MARCA_WIFI, standings }), principal);
   }
-  // Com ArticleDNA, a linha volta à mesa (é lá que o artigo segue); publicado e keyword sem plano também ficam.
-  assert.equal(planCandidateShownInSheet({ hasArticleDna: true, published: false, principalKeywordId: "k9", brandId: MARCA_WIFI, standings }), false);
-  assert.equal(planCandidateShownInSheet({ hasArticleDna: false, published: true, principalKeywordId: "k9", brandId: MARCA_WIFI, standings }), false);
-  assert.equal(planCandidateShownInSheet({ hasArticleDna: false, published: false, principalKeywordId: INTRUSO_ID, brandId: MARCA_WIFI, standings }), false, "Assunto sem plano: a mesa de sempre");
-  assert.equal(planCandidateShownInSheet({ hasArticleDna: false, published: false, principalKeywordId: "k9", brandId: "outra-marca", standings }), false, "pacote de outra marca nunca vale");
-  // A planilha tem as 7 linhas: uma por artigo do plano.
+  assert.equal(planSubjectOfKeyword({ keywordId: INTRUSO_ID, brandId: MARCA_WIFI, standings }), null, "Assunto sem plano: a mesa de sempre");
+  assert.equal(planSubjectOfKeyword({ keywordId: "k9", brandId: "outra-marca", standings }), null, "pacote de outra marca nunca vale");
   assert.equal(linhas([]).length, 7);
-  assert.match(planCandidatesInSheetSentence(4), /^4 artigo\(s\) do plano deste Silo estão na planilha “Artigos do plano”, acima/);
 });
 
 test("principal declarada de outro Assunto também é do plano (o Assunto é o do plano, não 'Sem Assunto')", () => {
@@ -110,22 +110,7 @@ test("o artigo do próprio plano não é conflito (a formação dele responde)",
   assert.equal(k13.formation.label, "Formado · v1");
 });
 
-/* ---------------------------------------------------------- próximo passo */
-
-test("próximo passo da planilha: SERP primeiro (custo antes), depois Concluir formação; as presas são ditas com o caminho", () => {
-  const lido = new Map([["k9", { lenses: 4, collectedAt: null }], ["k15", { lenses: 4, collectedAt: null }], ["k11", { lenses: 2, collectedAt: null }]]);
-  const comSerp = applyPlanSheetSerp(linhas(), { state: "ready", byKeyword: lido });
-  const passo = planSheetNextStep(comSerp)!;
-  assert.equal(passo.action, "validateSerp");
-  assert.deepEqual(passo.keywordIds, ["k11"], "só a livre-de-conflito com volume e sem as 4 lentes");
-  assert.match(passo.sentence, /3 linha\(s\) presa\(s\) em outro artigo: “Retirar artigo do Silo” na linha/);
-  const tudoLido = applyPlanSheetSerp(linhas(), { state: "ready", byKeyword: new Map([...lido, ["k11", { lenses: 4, collectedAt: null }]]) });
-  const formar = planSheetNextStep(tudoLido)!;
-  assert.equal(formar.action, "concludeFormation");
-  assert.deepEqual(formar.keywordIds, ["k9", "k10", "k11", "k15"]);
-  const soPresas = planSheetNextStep(linhas().filter(row => row.conflict))!;
-  assert.equal(soPresas.action, "withdraw");
-});
+/* 2026-10-16 · o teste do "próximo passo da planilha" saiu com `planSheetNextStep` (sem consumidor na tela). */
 
 /* -------------------------------------------- erro do servidor, humano */
 
@@ -141,13 +126,6 @@ test("erro do servidor vira frase humana com o que fazer; recusa de negócio pas
 });
 
 /* ------------------------------------------------- painel e leitura grátis */
-
-test("painel recolhido com cor que tem plano: o título e o próximo passo apontam para a planilha", () => {
-  const rotulo = improvementPanelCollapsedLabel("Azul");
-  assert.equal(rotulo.title, "Melhorar publicados · recolhido — os artigos do plano da cor Azul estão na planilha abaixo");
-  assert.match(rotulo.nextStep, /“Artigos do plano”: Validar SERP e depois Concluir formação/);
-  assert.equal(rotulo.button, "Ir para “Artigos do plano”");
-});
 
 test("guarda de retrabalho: leitura GRÁTIS repetida nunca pede motivo; o motivo é só para o que custa", () => {
   const previous: ReworkPrevious = { kind: "article_improvement_prepare", fingerprint: "f", at: "2026-10-14T15:30:00Z", actorId: "a", outcome: "succeeded", outcomeCode: null, resultRef: "run", costUsd: 0, message: null, attempts: 1, source: "article_improvement_run", summary: "7 alvo(s), IA leu a lista, 0 consulta(s) paga(s) no plano" };

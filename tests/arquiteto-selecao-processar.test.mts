@@ -195,15 +195,15 @@ test("§7 — nenhum handler da aba Artigos emite a frase por conta própria", (
 });
 
 test("§8 — botão e handler usam a MESMA leitura", () => {
-  // O painel recebe contagem e recusa da autoridade; o botão desabilita pela
+  // A barra recebe contagem e recusa da autoridade; o botão desabilita pela
   // recusa. Handler e botão não podem discordar sobre a mesma seleção.
-  assert.match(workspace, /selectedCount=\{formationSelectionScope\.selectedCount\}/);
-  assert.match(workspace, /scopeReason=\{formationSelectionScope\.reason\}/);
-  const painel = readFileSync("modules/arquiteto/article-formation-panel.tsx", "utf8");
-  assert.match(painel, /disabled=\{busy \|\| Boolean\(scopeReason\)\}/);
-  assert.match(painel, /disabled=\{busy \|\| !processed \|\| Boolean\(scopeReason\)\}/);
+  // 2026-10-16 · os botões são só os da barra de sempre (topo de "Detalhes técnicos").
+  assert.match(workspace, /selectionScope=\{formationSelectionScope\}/);
+  const barra = readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8");
+  assert.match(barra, /const processarBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : Boolean\(selectionScope\.reason\)\);/);
+  assert.match(barra, /const concluirBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : !processed \|\| Boolean\(selectionScope\.reason\)\);/);
   // A recusa aparece por extenso, não só como title.
-  assert.match(painel, /data-testid="architect-formation-selection-count"/);
+  assert.match(barra, /data-testid="architect-articles-selection-count"/);
 });
 
 test("§11 — a autoridade de seleção não alcança motor, DNA, SERP nem Silo", () => {

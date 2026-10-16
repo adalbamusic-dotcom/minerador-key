@@ -92,7 +92,9 @@ test("Artigos e Links internos mantêm o vocabulário deles", () => {
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
   const workbench = readFileSync("modules/arquiteto/arquiteto-workbench.tsx", "utf8");
 
-  assert.match(workbench, /mode === "articles" \? "Artigos" : mode === "silos" \? "Silos" : "Links internos"/);
+  // 2026-10-16 · a aba Artigos não tem o cabeçalho do Workbench (o painel mora em "Detalhes técnicos").
+  assert.match(workbench, /const modeLabel = mode === "silos" \? "Silos" : "Links internos";/);
+  assert.match(workbench, /\{mode !== "articles" && <div/);
   for (const label of ["Keyword principal", "Definição do artigo", "Revisão IA", "Artigo"]) {
     assert.ok(workspace.includes(label), `rótulo de Artigos perdido: ${label}`);
   }

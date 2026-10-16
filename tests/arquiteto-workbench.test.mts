@@ -115,7 +115,8 @@ describe("Workbench de processos do Arquiteto", () => {
     assert.match(workbench, /data-testid="architect-map-toggle"/);
     assert.match(workbench, /onClick=\{\(\) => onExpandedChange\(!expanded\)\}/);
     const focusStart = workspace.indexOf("const handleMapFocusArticle");
-    const focusHandler = workspace.slice(focusStart, workspace.indexOf("const syncArticleInSiloWorkingCopies", focusStart));
+    // 2026-10-16 · `syncArticleInSiloWorkingCopies` saiu com o "Mover ArticleDNA" do mapa da aba Silos.
+    const focusHandler = workspace.slice(focusStart, workspace.indexOf("}, [articlesList]);", focusStart));
     assert.doesNotMatch(focusHandler, /setExpandedIds/);
   });
 
@@ -134,7 +135,8 @@ describe("Workbench de processos do Arquiteto", () => {
     assert.match(workspace, /mapExpanded \? "lg:h-\[72vh\]" : "lg:h-\[33vh\]"/);
     assert.doesNotMatch(workspace, /architect-scrollbar|scrollbar-gutter/);
     assert.match(globalStyles, /\*::-webkit-scrollbar\s*\{[\s\S]*?width:\s*8px/);
-    assert.match(workspace, /className="min-h-0 min-w-0 overflow-y-auto[^\"]*" data-testid="architect-workbench-left" aria-label="Painel do Workbench do Arquiteto"/);
+    // 2026-10-16 · o mapa só em Links: a coluna da esquerda só ganha a borda do mapa lá; em Artigos flui em "Detalhes técnicos".
+    assert.match(workspace, /className=\{linksMode \? "min-h-0 min-w-0 overflow-y-auto border-b border-divider lg:border-b-0 lg:border-r" : articleMode \? "min-w-0" : "min-h-0 min-w-0 overflow-y-auto border-b border-divider"\} data-testid="architect-workbench-left" aria-label="Painel do Workbench do Arquiteto"/);
     assert.match(workbench, /expanded \? "h-\[clamp\(24rem,72vh,56rem\)\]" : "h-\[clamp\(12rem,33vh,24rem\)\]"/);
     assert.doesNotMatch(workbench, /h-\[clamp\(11rem,18vh,15rem\)\]/);
     // O mapa começa recolhido e só a seta abre: trocar de processo não expande.

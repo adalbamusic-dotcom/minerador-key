@@ -186,7 +186,7 @@ test("núcleo da melhoria: a escolha do humano vira a principal (livre), a trava
   assert.equal(escolhida.principalId, "s2");
   assert.deepEqual(escolhida.memberIds, ["s2"], "a keyword do Assunto não é secundária do próprio artigo");
   assert.equal(escolhida.status, "ready");
-  assert.match(escolhida.reasons.join(" "), /Troca de principal escolhida por você na planilha/);
+  assert.match(escolhida.reasons.join(" "), /Troca de principal escolhida por você na linha do plano/);
   const [recusada] = planArticleImprovements({ targets: [alvo({ chosenPrincipalId: null, principalChoiceRefusal: "Principal travada · mude a trava no Minerador." })], keywords, evidence: [] });
   assert.equal(recusada.status, "no_alternative");
   assert.match(recusada.reasons.join(" "), /Principal travada/);

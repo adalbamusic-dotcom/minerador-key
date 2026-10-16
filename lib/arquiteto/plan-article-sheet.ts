@@ -28,17 +28,7 @@ type RecordLike = Record<string, unknown>;
 
 /* --------------------------------------------------------------- rótulos */
 
-export const PLAN_SHEET_TITLE = "Artigos do plano";
-/** A âncora da planilha (o próximo passo do painel recolhido leva até ela). */
-export const PLAN_SHEET_ANCHOR = "architect-plan-sheet";
-/** 2026-10-14 · o painel "Melhorar publicados" recolhido quando a cor ativa tem plano. */
-export function improvementPanelCollapsedLabel(colorLabel: string | null): { title: string; nextStep: string; button: string } {
-  return {
-    title: `Melhorar publicados · recolhido — os artigos do plano${colorLabel ? ` da cor ${colorLabel}` : ""} estão na planilha abaixo`,
-    nextStep: `Na planilha “${PLAN_SHEET_TITLE}”: Validar SERP e depois Concluir formação. Cada linha diz o que falta; nada é pago sem o custo antes.`,
-    button: `Ir para “${PLAN_SHEET_TITLE}”`,
-  };
-}
+/* 2026-10-16 · saíram PLAN_SHEET_TITLE, PLAN_SHEET_ANCHOR e o rótulo do painel "recolhido": serviam à planilha separada "Artigos do plano", que não existe mais (os artigos do plano são linhas da tabela de artigos). */
 export const PLAN_SHEET_ACTION_LABELS = {
   validateSerp: "Validar SERP",
   swapPrincipal: "Procurar outra principal",
@@ -648,28 +638,7 @@ export function planArticleKeywordIds(input: {
   return ids;
 }
 
-/**
- * A LINHA DA MESA QUE A PLANILHA JÁ MOSTRA. Candidato da cópia de trabalho
- * (sem ArticleDNA, não publicado) cuja principal é keyword do plano: o artigo
- * do plano tem UMA linha só, a da planilha "Artigos do plano". A mesa não o
- * repete como linha solta — nada é apagado, o candidato continua na cópia de
- * trabalho. Com ArticleDNA, a linha da mesa volta (é lá que o artigo segue).
- */
-export function planCandidateShownInSheet(input: {
-  hasArticleDna: boolean;
-  published: boolean;
-  principalKeywordId: string | null | undefined;
-  brandId: string | null | undefined;
-  standings: ReadonlyMap<string, ArchitectSubjectStanding>;
-}): boolean {
-  if (input.hasArticleDna || input.published) return false;
-  return planSubjectOfKeyword({ keywordId: input.principalKeywordId, brandId: input.brandId, standings: input.standings }) !== null;
-}
-
-/** A frase da mesa no lugar das linhas que a planilha já mostra. */
-export function planCandidatesInSheetSentence(count: number): string {
-  return `${count} artigo(s) do plano deste Silo ${count === 1 ? "está" : "estão"} na planilha “${PLAN_SHEET_TITLE}”, acima — uma linha por artigo, com Validar SERP e Concluir formação. Depois de formado, o artigo volta a aparecer aqui.`;
-}
+/* 2026-10-16 · saíram `planCandidateShownInSheet` e `planCandidatesInSheetSentence` (a mesa que escondia o candidato atrás da planilha separada): sem consumidor desde "uma tabela só". */
 
 /* ----------------------------- uma tabela só, de novo (2026-10-14, tarde) */
 
@@ -795,31 +764,7 @@ export function splitTableSelectionForPlan<A>(input: {
   return { regularArticleIds, planTargets: [...alvos.values()].sort((a, b) => a.order - b.order || a.keyword.localeCompare(b.keyword, "pt-BR")) };
 }
 
-/* -------------------------------------------------------- próximo passo */
-
-export type PlanSheetNextStep = {
-  action: "validateSerp" | "concludeFormation" | "withdraw" | "none";
-  sentence: string;
-  keywordIds: string[];
-};
-
-/**
- * O PRÓXIMO PASSO DA PLANILHA: uma frase e as linhas a que ele se aplica. A
- * ordem é a do trabalho: o que está preso em outro artigo é dito primeiro (só
- * o dono retira); depois a SERP das linhas com volume que ainda não têm as 4
- * lentes (custo antes); depois Concluir formação das que podem formar.
- */
-export function planSheetNextStep(rows: readonly PlanSheetRow[]): PlanSheetNextStep | null {
-  if (!rows.length) return null;
-  const presas = rows.filter(row => row.conflict && row.formation.state === "conflict");
-  const formaveis = rows.filter(row => !row.conflict && (row.formation.state === "awaiting"));
-  const semSerp = formaveis.filter(row => row.volume.state === "measured" && (row.volume.value ?? 0) > 0 && (row.serp.state === "none" || row.serp.state === "partial"));
-  const aviso = presas.length ? ` ${presas.length} linha(s) presa(s) em outro artigo: “${SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}” na linha, decisão sua.` : "";
-  if (semSerp.length) return { action: "validateSerp", sentence: `${PLAN_SHEET_ACTION_LABELS.validateSerp} de ${semSerp.length} linha(s) com volume sem as 4 lentes (o custo aparece antes de pagar).${aviso}`, keywordIds: semSerp.map(row => row.keywordId) };
-  if (formaveis.length) return { action: "concludeFormation", sentence: `${PLAN_SHEET_ACTION_LABELS.concludeFormation} de ${formaveis.length} linha(s) (prévia grátis antes de gravar).${aviso}`, keywordIds: formaveis.map(row => row.keywordId) };
-  if (presas.length) return { action: "withdraw", sentence: `${presas.length} linha(s) presa(s) em outro artigo: use “${SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}” na linha (prévia e decisão sua); depois, Concluir formação.`, keywordIds: presas.map(row => row.keywordId) };
-  return { action: "none", sentence: "Os artigos do plano desta cor estão formados (ou aguardam a principal declarada). Sigam pela mesa, abaixo.", keywordIds: [] };
-}
+/* 2026-10-16 · saiu `planSheetNextStep` (o "próximo passo" da planilha separada, sem consumidor na tela): os botões de sempre ficam no topo de "Detalhes técnicos" e cada linha diz o que falta. */
 
 /* ------------------------------------- alertas da linha (2026-10-14, noite) */
 

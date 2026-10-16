@@ -163,14 +163,21 @@ test("o vínculo é leitura: o módulo não escreve nem chama nada", () => {
 
 /* -------------------- §21 a UI diz como o pai é conhecido ---------------- */
 
-test("o painel distingue Silo declarado de Silo inferido", () => {
+/*
+ * 2026-10-16 · pedido do dono ("mostra só o que é útil para o user"): o painel
+ * diz só o vínculo que pede decisão — em conflito ou sem Silo resolvível. O
+ * inferido do legado continua no domínio (`resolveParentBinding`), fora da tela.
+ */
+test("o painel mostra o vínculo com o Silo só quando há conflito de verdade", () => {
   const panel = readFileSync("modules/arquiteto/article-formation-panel.tsx", "utf8");
   assert.match(panel, /data-testid="architect-parent-binding"/);
-  assert.match(panel, /inferido\(s\) do consenso das keywords \(legado\)/);
   assert.match(panel, /em conflito/);
+  assert.match(panel, /sem Silo resolvível/);
+  assert.doesNotMatch(panel, /inferido\(s\) do consenso das keywords \(legado\)/);
 
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
-  assert.match(workspace, /PARENT_INFERRED_LEGACY/);
+  assert.match(workspace, /PARENT_CONFLICT/);
+  assert.match(workspace, /PARENT_UNRESOLVED/);
   assert.match(workspace, /articleParentBindings/);
 });
 

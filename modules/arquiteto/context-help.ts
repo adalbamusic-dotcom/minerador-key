@@ -19,9 +19,9 @@ const GENERAL_TOPICS: readonly ContextHelpTopic[] = [
       { heading: "O que ele nunca faz sozinho", body: "Não troca a URL, o slug nem o canonical de uma página publicada, não move keyword sem a sua confirmação e não aprova nada no seu lugar. A IA sugere; você decide." },
     ],
     howToUse: [
-      "Comece pelo cartão “Próximo passo”, no topo da aba Artigos: ele mostra uma frase e um botão só.",
-      "Siga os botões numerados (1, 2, 3) e confira a tabela antes de gravar.",
-      "Use “Detalhes técnicos” apenas quando quiser ver a análise completa.",
+      "Na aba Artigos, tudo começa em “Detalhes técnicos”, no topo: ali ficam os botões “Processar artigos”, “Concluir formação” e “Melhorar publicados…”, o andamento e as funções da aba.",
+      "Em “Melhorar publicados…”, siga o cartão “Próximo passo” e os botões numerados (1, 2, 3); confira a tabela antes de gravar.",
+      "Fora do painel ficam só a tabela de artigos e as Sobras.",
     ],
     keywords: ["arquiteto", "artigos", "silos", "estrutura", "articledna", "silodna", "o que faz"],
   },
@@ -33,7 +33,7 @@ const GENERAL_TOPICS: readonly ContextHelpTopic[] = [
     howToUse: [
       "Importar do Minerador: traga as keywords aprovadas (botão no topo).",
       "Silos: “Processar arquitetura”, confira e use “Confirmar propostas novas”; desfaça os Silos sugeridos que não quer; depois “Continuar para Artigos”.",
-      "Artigos: siga o cartão “Próximo passo” para melhorar os publicados; depois “Processar artigos” e “Concluir formação” para os artigos novos, ou crie a partir das Sobras.",
+      "Artigos: abra “Detalhes técnicos” (no topo); “Melhorar publicados…” para os publicados; “Processar artigos” e “Concluir formação” para os artigos novos, ou crie a partir das Sobras.",
       "Links internos: “Processar links”, revise e “Confirmar links internos”; selecione os artigos prontos e use “Enviar ao Radar” no rodapé.",
     ],
     keywords: ["ordem", "fluxo", "etapas", "passo a passo", "por onde começar", "sequência"],
@@ -210,9 +210,9 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
   },
   {
     id: "detalhes-tecnicos",
-    title: "Detalhes técnicos (avançado)",
-    summary: "Guarda as análises completas: mesmo assunto no Google, reforço por publicado, diferenciação e objetivo do lote.",
-    description: "Você não precisa abrir esta área para o trabalho do dia a dia: o cartão “Próximo passo” cobre o caminho principal. Abra quando quiser conferir a evidência de uma sugestão, gravar reforços um a um ou diferenciar publicados que disputam o mesmo assunto.",
+    title: "Detalhes técnicos",
+    summary: "O painel do topo da aba Artigos: os botões de processo, o andamento, a melhoria dos publicados e as funções da aba, cada um uma vez.",
+    description: "No topo do painel: “Processar artigos”, “Concluir formação” e “Melhorar publicados…”; logo abaixo, o andamento do processo e a prévia das linhas do plano. Depois, os avisos que pedem ação (formação desatualizada, conflitos, pendências, portaria da conclusão) e as funções avançadas: mesmo assunto no Google, reforço por publicado, diferenciação e objetivo do lote. Abre sozinho quando há algo a fazer; fora dele ficam só a tabela e as Sobras.",
     sections: [
       { heading: "Reforçar publicados", body: "Tabela por página publicada: Forte (3+ páginas em comum) vem marcada, Provável desmarcada. “Gravar reforços” grava numa confirmação." },
       { heading: "Buscar keywords para os publicados sem par", body: "Busca em lote no Google Ads e valida as melhores pela SERP, com teto de US$ 1,00 por rodada." },
@@ -382,9 +382,9 @@ const FINAL_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "mapa-e-workbench",
     title: "Mapa do Arquiteto",
-    summary: "Desenho dos Silos e artigos. Fica em “Detalhes técnicos” e só mostra: nada é gravado por ele.",
-    description: "“Visão do mapa” troca o ponto de vista: Atual (o que está gravado), Lógica, SERP ou IA. “Comparar com Atual” destaca a diferença. Tocar num ponto do mapa oferece “Abrir na planilha”. Na aba Silos, “Visualização” alterna entre Arquitetura e Sitemap, e “Mostrar” filtra os Silos.",
-    keywords: ["mapa", "workbench", "visão do mapa", "comparar com atual", "sitemap", "abrir na planilha", "expandir mapa"],
+    summary: "Desenho dos links internos do Silo. Fica só na aba Links internos e, fora a working copy, só mostra.",
+    description: "“Visão do mapa” alterna entre Aprovado e Working copy. Na working copy, arrastar de um nó para outro cria uma relação humana; tocar numa aresta abre a edição dela. As abas Silos e Artigos não têm mapa: na aba Silos, “Visualização” alterna entre Arquitetura e Sitemap, e “Mostrar” filtra os Silos.",
+    keywords: ["mapa", "visão do mapa", "aprovado", "working copy", "sitemap", "expandir mapa", "links internos"],
   },
   {
     id: "progresso-e-recuperacao",
