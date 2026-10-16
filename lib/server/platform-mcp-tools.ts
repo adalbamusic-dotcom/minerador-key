@@ -352,7 +352,8 @@ export function projectPlatformKeywordRow(row: Record<string, unknown>) {
     kgrFull: naoUtilizada || visual.range === "unavailable" ? null : visual.favorable,
     kgrApplicability: applicability,
     kgrApplicabilityLabel: kgrApplicabilityLabel(applicability),
-    kgrUse: naoUtilizada ? "nao_utilizada" as const : applicability === "applicable" ? "aplicavel" as const : "decisao_pendente" as const,
+    // `readKgrApplicability` só devolve "applicable" ou "not_applicable" (2026-09-28): o antigo "decisao_pendente" era inalcançável e saiu (F1 da linha única).
+    kgrUse: naoUtilizada ? "nao_utilizada" as const : "aplicavel" as const,
     intent: dna.intent ? dna.intentLabel : null,
     intentLabel: dna.intentLabel,
     intentSource: dna.intentSource,

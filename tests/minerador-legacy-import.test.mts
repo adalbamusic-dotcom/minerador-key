@@ -27,13 +27,16 @@ test("lista opcional não cruza marcas", () => {
 });
 
 test("workspace não descarta keyword sem silo nem cria silo automaticamente", async () => {
+  /*
+   * 2026-10-16 · F1 da linha única do Minerador (E-1): o CSV e a importação
+   * manual do navegador do Processador saíram (inalcançáveis, sem deduplicação).
+   * A lista opcional é resolvida pelo núcleo do servidor, com as mesmas funções.
+   */
   const source = await read("modules/minerador/minerador-workspace.tsx");
-  assert.match(source, /resolveLegacyCsvSilo/);
-  assert.match(source, /lista_id: matchedListId/);
-  assert.match(source, /lista_id: resolvedManualListId/);
-  assert.match(source, /<option value="">Sem silo<\/option>/);
-  assert.match(source, /Nenhum silo disponível\. As keywords serão importadas sem silo\./);
-  assert.match(source, /const openManualModal = \(\) => \{\s*setManualListId\(""\);/);
+  assert.doesNotMatch(source, /resolveLegacyCsvSilo|manualImportListaId|openManualModal/);
+  const core = await read("lib/minerador/keyword-import-core.ts");
+  assert.match(core, /manualImportListaId\(\{ selectedListId: input\.defaultListaId \|\| "", brandId, lists \}\)/);
+  assert.match(core, /resolveLegacyCsvSilo\(\{ rawReference: reference, brandId, lists \}\)/);
   assert.doesNotMatch(source, /Erro ao auto-criar silo do CSV/);
   assert.doesNotMatch(source, /Nenhuma palavra-chave válida associada a um Silo/);
   assert.doesNotMatch(source, /Selecione uma Categoria\/Silo para associar os novos termos/);

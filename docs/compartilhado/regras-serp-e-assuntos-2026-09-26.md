@@ -159,6 +159,8 @@ O Assunto é uma frase que **o humano declara** como o tronco de um ou mais arti
 
 ### B2. Quem declara, e como
 
+> **SUBSTITUÍDO em 2026-10-16** (a lista "Onde se declara": select "Esta lista é", Revisão Humana, rodapé e o envio da Pesquisa por Assunto). Desde 2026-10-13 ([SDD do cadastro único](sdd-cadastro-assunto-na-keyword-2026-10-13.md)) o Assunto é cadastrado só pelo card "Cadastrar Assuntos" do Processador (MCP `declare_silo_plan`), dentro da keyword; nenhum outro lugar declara (a rota `subjects/import` responde 410, e o código que a chamava saiu na F1 da [linha única do Minerador](sdd-linha-unica-do-minerador-2026-10-16.md)). Continua valendo: só o humano declara, com autor e data.
+
 - **Só o humano declara Assunto,** com autor (`auth.users.id`) e data. A IA nunca declara nem prende Assunto, e proposta de IA só vale depois de aceita.
 - **Onde se declara:**
   - no **import do Processador**: o select "Esta lista é", com padrão Assunto, e as colunas opcionais `nota` e `página`;
@@ -172,6 +174,8 @@ O Assunto é uma frase que **o humano declara** como o tronco de um ou mais arti
 - **Declarar numa keyword aprovada** manda ela para "Em revisão", com aviso antes. Retirar a declaração também.
 
 ### B3. O Assunto no Vínculo
+
+> **SUBSTITUÍDO em 2026-10-16** (as três declarações e "Assunto declarado desliga o Posto e o KGR"). Desde 2026-10-13 (SDD do cadastro único, C7) o Vínculo tem só Posto de principal e Potencial de página; o Assunto mora dentro da keyword e o painel dela o mostra só leitura. Na keyword não publicada do plano, o Posto é a trava do cadastro.
 
 O Vínculo tem **três declarações** independentes, iguais no card da Revisão Humana, no rodapé e na coluna:
 
@@ -191,6 +195,8 @@ Regras entre elas:
 - **Mesma regra na tela e no servidor:** a tela e a trava do envio ao Arquiteto usam a mesma regra.
 
 ### B5. Principal, slug e H1
+
+> **SUBSTITUÍDO em 2026-10-16** ("A principal do artigo é sempre uma keyword com busca" e "O Assunto só pode ser a própria principal quando tem Volume validado"). Vale a D1-ter de 2026-10-13 (SDD do cadastro único, §3.3): a keyword que carrega o Assunto pode ser a principal sem volume, e a trava decide se ela fica fixa ou se o Arquiteto pode propor outra. A regra da trava com o volume é a D1 de 2026-10-16 (volume definido fixa), implementada na F2 da linha única. Continua valendo: na publicada, o Assunto não muda URL, slug, canonical nem a principal.
 
 - **A principal do artigo é sempre uma keyword com busca:** a âncora, dona do slug, do KGR e do H1.
 - **O Assunto é o fundamento:** entra no H1 como complemento da principal ou num H2/H3, conforme a semântica e a SERP das keywords de sustentação.
@@ -212,6 +218,7 @@ Regras entre elas:
 - **Candidatas:**
   - cada uma mostra de onde veio e por quê;
   - a estimativa de volume do Labs, só em pesquisas antigas, aparece rotulada e **nunca vira volume**, porque o volume oficial é medido depois no Processador pelo Google Ads;
+    > **SUBSTITUÍDO em 2026-10-16** ("o volume oficial é medido depois no Processador"). Desde 2026-10-13 (SDD acelerar, item 8) o envio grava o Volume do Google Ads pelo recibo da pesquisa guardado no servidor e roda a Lógica; só sem recibo o Volume é medido no Processador. A estimativa do Labs continua nunca virando volume.
   - o Minerador não inventa keyword: toda candidata vem de um provider.
 - **Onde fica a lista:**
   - a lista fica **no navegador**, por 30 dias, com no máximo 10 pesquisas por marca, e a vencida e a mais antiga saem sozinhas;

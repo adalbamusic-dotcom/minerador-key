@@ -17,13 +17,10 @@ import {
 import {
   SUBJECT_SEARCH_ENTER_HELP,
   SUBJECT_SEARCH_RULE_TEXT,
-  SUBJECT_SEARCH_UNDECLARED_TEXT,
   SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT,
   buildSubjectDiscoveryImportItems,
   buildSubjectSearchRequest,
-  declarePhraseAsSubjectLabel,
   declaredSubjectOptions,
-  defaultDeclarePhraseAsSubject,
   filterSubjectCandidates,
   countSelectedWithoutVolume,
   countSubjectCandidatesHiddenWithoutVolume,
@@ -34,8 +31,6 @@ import {
   SUBJECT_SEARCH_ONLY_WITH_VOLUME_LABEL,
   parseSubjectSearchLink,
   subjectCandidateGoogleAdsVolume,
-  subjectIdFromApply,
-  subjectPhraseDeclarationPlan,
   subjectSearchLinkHref,
   subjectSearchOriginLabel,
   formatSubjectSearchUsd,
@@ -252,26 +247,10 @@ test("lista local: registro de outra chave não é aceito", () => {
 
 /* --------------------------- Q14: declarar a frase --------------------------- */
 
-test("Q14: frase nova vem MARCADA; frase que já existe vem DESMARCADA; Assunto declarado não oferece", () => {
-  assert.deepEqual(defaultDeclarePhraseAsSubject({ subjectKeywordId: null, phraseExistingKeywordId: null }), { offered: true, checked: true });
-  assert.deepEqual(defaultDeclarePhraseAsSubject({ subjectKeywordId: null, phraseExistingKeywordId: "55555555-5555-4555-8555-555555555555" }), { offered: true, checked: false });
-  assert.deepEqual(defaultDeclarePhraseAsSubject({ subjectKeywordId: "55555555-5555-4555-8555-555555555555", phraseExistingKeywordId: "55555555-5555-4555-8555-555555555555" }), { offered: false, checked: false });
-  assert.equal(declarePhraseAsSubjectLabel("SEO para clínicas"), "Declarar também \"SEO para clínicas\" como Assunto, com a nota e a página informadas");
-});
-
-test("declaração da frase pela prévia da F1.3: criar, declarar a existente, usar a já declarada ou parar", () => {
-  const id = "66666666-6666-4666-8666-666666666666";
-  assert.deepEqual(subjectPhraseDeclarationPlan({ classification: "new", keywordId: null, approvalWarning: null, reason: null }), { action: "create" });
-  assert.deepEqual(subjectPhraseDeclarationPlan({ classification: "existing_without_subject", keywordId: id, approvalWarning: "vai para Em revisão", reason: null }), { action: "declare_existing", keywordId: id, warning: "vai para Em revisão" });
-  assert.deepEqual(subjectPhraseDeclarationPlan({ classification: "published", keywordId: id, approvalWarning: null, reason: null }), { action: "declare_existing", keywordId: id, warning: null });
-  assert.deepEqual(subjectPhraseDeclarationPlan({ classification: "existing_subject_same", keywordId: id, approvalWarning: null, reason: null }), { action: "already_subject", keywordId: id });
-  assert.equal(subjectPhraseDeclarationPlan({ classification: "invalid", keywordId: null, approvalWarning: null, reason: "Frase vazia." }).action, "refuse");
-  assert.equal(subjectPhraseDeclarationPlan(null).action, "refuse");
-  assert.equal(subjectIdFromApply({ classification: "new", keywordId: id, approvalWarning: null, reason: null, outcome: "created" }), id);
-  assert.equal(subjectIdFromApply({ classification: "existing_without_subject", keywordId: id, approvalWarning: null, reason: null, outcome: "declared" }), id);
-  assert.equal(subjectIdFromApply({ classification: "new", keywordId: null, approvalWarning: null, reason: "falhou", outcome: "failed" }), null);
-  assert.equal(subjectIdFromApply({ classification: "existing_without_subject", keywordId: id, approvalWarning: null, reason: null, outcome: "not_marked" }), null, "não marcada não é declarada");
-});
+// 2026-10-16 · F1 da linha única (A8): a opção "Declarar também como Assunto" e o
+// plano da declaração (`defaultDeclarePhraseAsSubject`, `declarePhraseAsSubjectLabel`,
+// `subjectPhraseDeclarationPlan`, `subjectIdFromApply`) saíram — inalcançáveis desde
+// 2026-10-13 — e os dois testes que só os testavam saíram junto.
 
 /* ------------------------- envio: sem métrica, sem a frase ------------------------- */
 
@@ -444,7 +423,7 @@ test("textos fixos da tela", () => {
   assert.doesNotMatch(SUBJECT_SEARCH_LANGUAGE_TEXT + SUBJECT_SEARCH_LOCAL_LIST_TEXT + SUBJECT_SEARCH_PLAN_TEXT, /Labs|paga de novo|Nada é pago/, "nenhum texto promete ou cobra o Labs");
   // 2026-10-13 (SDD acelerar-fluxo, item 8 — mudança declarada): o Volume vai pelo recibo do servidor.
   assert.equal(SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT, "O Volume que a pesquisa mediu no Google Ads vai junto, pelo recibo guardado no servidor (sem medir de novo), e a Lógica roda sozinha. Sem recibo, o Volume é medido no Processador, sem custo.");
-  assert.equal(SUBJECT_SEARCH_UNDECLARED_TEXT, "Para ligar estas keywords a um Assunto, declare-o antes, aqui ou no Processador.");
+  // 2026-10-16 (F1, A8/A9): SUBJECT_SEARCH_UNDECLARED_TEXT ("declare-o antes, aqui ou no Processador") saiu com o ramo de declaração, o único lugar que o mostrava.
 });
 
 /* ---------------------------- Buscar sustentação ---------------------------- */

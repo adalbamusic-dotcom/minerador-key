@@ -1,6 +1,6 @@
 # SDD — A linha única do Arquiteto — 2026-10-16
 
-> **Status: PROPOSTA — aguarda aprovação do dono.**
+> **Status: APROVADA pelo dono em 2026-10-16 ("segue as recomendações").** Decisões D1–D5 conforme as recomendações do §13: D1 formação pelo caminho de sempre (navegador → Concluir → gravador), o plan_sheet deixa de formar linha sem DNA; D2 candidatas da principal Livre sem volume: núcleo do slug/lista do Assunto → páginas em comum → lentes → volume; D3 o que o dono confirma após a prévia fica aprovado (§35.4/§37.7 viram SUBSTITUÍDO na fase); D4 Silo sem migration se der, senão a migration é preparada para o dono executar; D5 rotas legadas aposentadas e ferramenta MCP da formação só na F7. Autoriza as fases na ordem, uma por vez, começando pela F0 (só testes).
 > Este documento não autoriza código, migration, SQL, escrita remota nem
 > chamada paga. O dono aprova a SDD e a F0 antes de qualquer código. Cada fase
 > seguinte é aprovada por vez (`AGENTS.md` §0.1, §4 e §15).

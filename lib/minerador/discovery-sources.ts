@@ -131,14 +131,6 @@ export function parseManualKeywords(value: string): DiscoverySourceEntryInput[] 
   return value.split(/[\n,;]+/).map(keyword => ({ keyword, recognizedFields: ["keyword"] }));
 }
 
-/**
- * Lista colada de Assuntos: um por linha. Vírgula e ponto e vírgula não
- * separam, porque o Assunto é uma frase ("SEO para clínicas, em São Paulo").
- */
-export function parseManualSubjects(value: string): DiscoverySourceEntryInput[] {
-  return value.split(/\r?\n/).filter(line => line.trim()).map(keyword => ({ keyword, recognizedFields: ["keyword"] }));
-}
-
 function normalizeHeader(value: string) {
   return value.replace(/^\uFEFF/, "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }

@@ -6,15 +6,11 @@ import { SUBJECT_DISCOVERY_NOTICES, SUBJECT_DISCOVERY_SERP_LABEL } from "@/lib/m
 import {
   SUBJECT_SEARCH_FREE_PLAN_TEXT,
   SUBJECT_SEARCH_PLAN_TEXT,
-  SUBJECT_SEARCH_UNDECLARED_TEXT,
   SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT,
-  declarePhraseAsSubjectLabel,
   formatSubjectSearchUsd,
-  subjectPhraseDeclarationPlan,
   subjectSearchLensName,
   subjectSearchOriginLabel,
   subjectSearchSelectedWithoutVolumeText,
-  type SubjectPhrasePreviewRow,
 } from "./subject-search-model";
 import type { SubjectSearchController } from "./use-subject-search";
 
@@ -34,15 +30,6 @@ import type { SubjectSearchController } from "./use-subject-search";
 const button = "inline-flex h-9 items-center justify-center gap-2 rounded border px-3 text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50";
 const primaryButton = `${button} border-action-accent bg-action-accent text-foreground hover:bg-action-accent/90`;
 const neutralButton = `${button} border-border bg-surface text-text hover:border-text-muted hover:bg-surface-elevated`;
-
-const PHRASE_CLASSIFICATION_LABELS: Record<SubjectPhrasePreviewRow["classification"], string> = {
-  new: "A frase ainda não existe nesta marca: será criada como Assunto.",
-  existing_without_subject: "A frase já existe nesta marca, sem Assunto: será declarada.",
-  existing_subject_same: "A frase já é Assunto nesta marca: nada é regravado.",
-  existing_subject_different: "A frase já é Assunto, com outra nota ou página: o que está gravado fica como está.",
-  published: "A frase já está publicada nesta marca: será declarada, sem mudar URL, slug ou canonical.",
-  invalid: "A frase não pode ser declarada como Assunto.",
-};
 
 function useEscape(onEscape: () => void, enabled: boolean) {
   useEffect(() => {
@@ -166,7 +153,8 @@ export function SubjectSearchPlanDialog({ controller }: { controller: SubjectSea
 /**
  * 2026-10-13 · cadastro único (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`):
  * a Pesquisa por Assunto não declara mais a frase pesquisada. Sem Assunto
- * cadastrado, as keywords entram sem vínculo — e a tela diz isso.
+ * cadastrado, as keywords entram sem vínculo — e a tela diz isso. O ramo de
+ * declaração (inalcançável desde então) saiu na F1 da linha única (2026-10-16).
  */
 export const SUBJECT_SEARCH_CADASTRO_HINT = "Esta frase não é um Assunto cadastrado: as keywords entram sem vínculo com Assunto. Para ligá-las a um Assunto, cadastre-o em \"Cadastrar Assuntos\" (o Assunto mora na keyword) e pesquise a partir dele." as const;
 
@@ -178,8 +166,6 @@ export function SubjectSearchImportDialog({ controller, selectedKeys, selectedIt
   useDialogFocus(Boolean(dialog && record), dialogRef);
   if (!dialog || !record) return null;
   const subject = record.result.subject;
-  const decision = dialog.offered && dialog.declare && !dialog.declaredId && dialog.preview.row ? subjectPhraseDeclarationPlan(dialog.preview.row) : null;
-  const waitingPreview = dialog.offered && dialog.declare && !dialog.declaredId && (dialog.preview.loading || Boolean(dialog.preview.error) || !dialog.preview.row || decision?.action === "refuse");
   const done = Boolean(dialog.result);
   // D2.3: avisa, sem bloquear. Quem decide o envio é o dono.
   const withoutVolumeText = subjectSearchSelectedWithoutVolumeText(selectedWithoutVolume);
@@ -194,29 +180,9 @@ export function SubjectSearchImportDialog({ controller, selectedKeys, selectedIt
 
       {subject.subjectKeywordId
         ? <p className="text-sm leading-6 text-foreground/85">As keywords entram ligadas a este Assunto declarado.</p>
-        : dialog.declaredId && !dialog.offered
+        : dialog.declaredId
           ? <p className="text-sm leading-6 text-foreground/85">A frase já foi declarada como Assunto num envio anterior desta busca: as keywords entram ligadas a ela.</p>
-          : !dialog.offered ? <p className="text-sm leading-6 text-text-muted" data-subject-search-cadastro-hint>{SUBJECT_SEARCH_CADASTRO_HINT}</p> : <div className="space-y-2 rounded border border-divider bg-surface-subtle p-3" data-subject-search-declare>
-            <label className="flex items-start gap-2 text-sm leading-6 text-foreground">
-              <input type="checkbox" className="mt-1 h-4 w-4" checked={dialog.declare} disabled={dialog.submitting || done || Boolean(dialog.declaredId)} onChange={event => controller.setDeclare(event.target.checked)} />
-              <span>{declarePhraseAsSubjectLabel(subject.phrase)}</span>
-            </label>
-            {dialog.declare ? <div className="space-y-1 text-sm leading-6">
-              <p className="text-text-muted">Nota: {subject.note || "(sem nota)"} · Página: {subject.destination.url || "(sem página aceita no site da marca)"}</p>
-              {dialog.declaredId
-                ? <p className="text-success">A frase já foi declarada como Assunto neste envio.</p>
-                : dialog.preview.loading
-                  ? <p className="text-text-muted">Conferindo a frase nesta marca…</p>
-                  : dialog.preview.error
-                    ? <p className="text-danger" role="alert">{dialog.preview.error}</p>
-                    : dialog.preview.row && <>
-                      <p className={dialog.preview.row.classification === "invalid" ? "text-danger" : "text-foreground/85"}>{PHRASE_CLASSIFICATION_LABELS[dialog.preview.row.classification]}</p>
-                      {dialog.preview.row.approvalWarning && <p className="text-warning" data-subject-search-declare-warning>{dialog.preview.row.approvalWarning}</p>}
-                      {dialog.preview.row.reason && dialog.preview.row.classification === "invalid" && <p className="text-danger">{dialog.preview.row.reason}</p>}
-                      {dialog.preview.notices.map(notice => <p key={notice} className="text-text-muted">{notice}</p>)}
-                    </>}
-            </div> : <p className="text-sm leading-6 text-text-muted">{SUBJECT_SEARCH_UNDECLARED_TEXT}</p>}
-          </div>}
+          : <p className="text-sm leading-6 text-text-muted" data-subject-search-cadastro-hint>{SUBJECT_SEARCH_CADASTRO_HINT}</p>}
 
       <div className="space-y-1 text-sm leading-6 text-text-muted">
         <p className="text-foreground/85">{SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT}</p>
@@ -239,7 +205,7 @@ export function SubjectSearchImportDialog({ controller, selectedKeys, selectedIt
 
       <div className="flex shrink-0 flex-col-reverse justify-end gap-2 sm:flex-row">
         <button type="button" onClick={controller.closeImport} disabled={dialog.submitting} className={`${neutralButton} w-full sm:w-auto`}>{done ? "Fechar" : "Cancelar"}</button>
-        {!done && <button type="button" onClick={() => void controller.confirmImport(selectedKeys)} disabled={dialog.submitting || !selectedItemCount || waitingPreview} aria-busy={dialog.submitting} className={`${primaryButton} w-full sm:w-auto`}>
+        {!done && <button type="button" onClick={() => void controller.confirmImport(selectedKeys)} disabled={dialog.submitting || !selectedItemCount} aria-busy={dialog.submitting} className={`${primaryButton} w-full sm:w-auto`}>
           {dialog.submitting && <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />}
           {dialog.submitting ? "Enviando..." : "Confirmar envio"}
         </button>}

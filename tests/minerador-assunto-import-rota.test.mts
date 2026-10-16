@@ -42,45 +42,24 @@ test("núcleo: importKeywordsWithCore e KeywordImportSource continuam como estav
   assert.doesNotMatch(discoveryImport, /importSubjectsWithCore/);
 });
 
-test("Descobrir intacto: não passa subjectEntry, e o select só existe com a prop", async () => {
+/*
+ * 2026-10-16 · F1 da linha única do Minerador (A8): o modo "Esta lista é:
+ * Assunto" (prop `subjectEntry`), que chamava `subjects/import` (410), saiu dos
+ * controles; os testes que só conferiam esse ramo saíram junto. Fica a guarda
+ * de que ele não volta e de que o ramo de keyword segue como estava.
+ */
+test("Descobrir intacto: colar e CSV de keyword seguem para /discovery/sources; o modo Assunto não existe mais", async () => {
   const page = await source("modules/minerador/discovery/discovery-keywords-page.tsx");
   assert.match(page, /<DiscoverySourceControls\b/);
   assert.doesNotMatch(page, /subjectEntry|onSubjectsImported/);
 
   const controls = await source(CONTROLS);
-  assert.match(controls, /subjectEntry\?: boolean;/);
-  assert.match(controls, /onSubjectsImported\?: \(result: \{ createdIds: string\[\]; declaredIds: string\[\] \}\) => void;/);
-  assert.match(controls, /const subjectMode = Boolean\(subjectEntry\) && entryKind === "subject";/);
-  const selectAt = controls.indexOf("Esta lista é");
-  assert.ok(selectAt > 0);
-  assert.match(controls.slice(Math.max(0, selectAt - 80), selectAt), /\{subjectEntry && <label/, "o select só aparece com subjectEntry");
-  assert.match(controls, /<option value="subject">Assunto<\/option>/);
-  assert.match(controls, /<option value="keyword">Keyword<\/option>/);
-  assert.match(controls, /useState<EntryKind>\("subject"\)/, "padrão Assunto");
-});
-
-test("tela: Keyword segue para /discovery/sources; Assunto vai para a rota nova com prévia e apply", async () => {
-  const controls = await source(CONTROLS);
+  assert.doesNotMatch(controls, /subjectEntry|onSubjectsImported|EntryKind|subjectMode|Esta lista é|\/subjects\/import|declareExistingIds|parseManualSubjects|subjectColumns/);
   assert.match(controls, /\/discovery\/sources`, \{ method: "POST"/);
-  assert.match(controls, /\/subjects\/import`/);
-  assert.match(controls, /mode: "preview"/);
-  assert.match(controls, /mode: "apply"/);
-  assert.match(controls, /declareExistingIds: chosen\.filter\(row => row\.classification !== "new"/);
-  assert.match(controls, /return row\.classification === "new" && !looksLikeSubjectHeader\(row\);/, "só a nova vem marcada; o provável cabeçalho não");
-  assert.match(controls, /row\.index === 0 && \(row\.normalizedKeyword === "assunto" \|\| row\.normalizedKeyword === "assuntos"\)/);
-  assert.match(controls, /onSubjectsImported\?\.\(\{ createdIds, declaredIds \}\)/);
-  assert.match(controls, /disabled=\{submitting \|\| !subjectPreview\.rows\.some/, "o botão fica desabilitado durante o envio");
   const csvParse = controls.slice(controls.indexOf("function buildCsvPreview"), controls.indexOf("function previewFields"));
-  assert.match(csvParse, /subjectColumns \? parseDiscoveryCsvRows\(rows, \{ subjectColumns: true \}\) : parseDiscoveryCsvRows\(rows\)/);
-});
-
-test("tela: 'Esta lista é' volta a Assunto a cada abertura; a prévia do CSV no modo Assunto não fala de métricas", async () => {
-  const controls = await source(CONTROLS);
-  const openSource = controls.slice(controls.indexOf("const openSource = useCallback"), controls.indexOf("useImperativeHandle("));
-  assert.match(openSource, /if \(subjectEntry\) \{\s*setEntryKind\("subject"\);\s*if \(csvRows\) setCsvPreview\(buildCsvPreview\(csvRows, true\)\);\s*\}/);
-  assert.match(controls, /\{!subjectMode && <p className="text-text"><span className="font-semibold">Linhas com métricas:<\/span>/);
-  assert.match(controls, /\{subjectMode \? "Ver amostra de Assuntos" : "Ver amostra de keywords"\}/);
-  assert.match(controls, /um cabeçalho Assunto não é reconhecido/);
+  assert.match(csvParse, /const parsed = parseDiscoveryCsvRows\(rows\);/);
+  assert.match(controls, /<p className="text-text"><span className="font-semibold">Linhas com métricas:<\/span>/);
+  assert.match(controls, /Ver amostra de keywords/);
 });
 
 test("tela: texto essencial sem text-xs nem cor fixa no fluxo novo", async () => {

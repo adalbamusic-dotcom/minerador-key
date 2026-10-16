@@ -10,7 +10,6 @@ import {
   resolveKeywordSubject,
   semanticForKeywordWrite,
   setKeywordSubject,
-  withdrawKeywordSubject,
   type KeywordSubjectRelease,
 } from "../lib/minerador/keyword-subject.ts";
 import { importDeclaredPlanWithCore, readDeclaredPlanCardRows } from "../lib/minerador/declared-plan-import-core.ts";
@@ -228,7 +227,7 @@ test("guarda: o histórico é append-only (cópia velha volta a ter as linhas gr
   assert.ok(semAssunto.ok && semAssunto.carried === false, "keyword comum: nada muda");
 });
 
-test("setKeywordSubject/withdrawKeywordSubject: tirar plano ou Assunto exige o marcador; com ele, o marcador e o histórico registram", () => {
+test("setKeywordSubject: tirar o plano exige o marcador; com ele, o marcador e o histórico registram", () => {
   const antes = cadastrado();
   const semMarcador = setKeywordSubject(antes, { actorId: ACTOR, changedAt: LATER, origin: "review", plan: null });
   assert.equal(semMarcador.ok, false);
@@ -242,13 +241,8 @@ test("setKeywordSubject/withdrawKeywordSubject: tirar plano ou Assunto exige o m
   // O histórico do cadastro já leva os detalhes (escopo) para uma recuperação futura.
   const gravacao = (antes.keyword_subject_history as Array<Record<string, unknown>>).at(-1)!;
   assert.equal((gravacao.plan as Record<string, unknown>).scope, "Roteador, interferência e testes.");
-
-  assert.equal(withdrawKeywordSubject(antes, { actorId: ACTOR, changedAt: LATER, origin: "batch" }).ok, false, "o antigo \"Assunto: Não\" é recusado");
-  const retirado = withdrawKeywordSubject(antes, { actorId: ACTOR, changedAt: LATER, origin: "review", release: release("conv:1", "conversao") });
-  assert.ok(retirado.ok && retirado.changed);
-  const saida = (retirado.semantic.keyword_subject_history as Array<Record<string, unknown>>).at(-1)!;
-  assert.equal(saida.entryTitle, "Wi-Fi lento em casa");
-  assert.equal((saida.plan as Record<string, unknown>).order, 11);
+  // 2026-10-16 (F1 da linha única, D4): a retirada do Assunto inteiro (`withdrawKeywordSubject`) saiu, sem chamador;
+  // as asserções que só a testavam saíram junto. O antigo "Assunto: Não" continua recusado pela guarda (acima).
 });
 
 test("exclusão: a mesma regra do gatilho (plano bloqueia; título só sai depois de Tirar do plano ou da futura exclusão da cor)", () => {
@@ -289,7 +283,7 @@ test("lista fechada: só \"Tirar do plano\" grava o marcador; \"excluir_cor\" e 
   assert.deepEqual(usam(/excluir_cor/), ["lib/minerador/group-delete-all.ts", "lib/minerador/keyword-subject.ts"], "a exclusão por cor só pela M-E");
   assert.deepEqual(usam(/["']conversao["']/), ["lib/minerador/keyword-subject.ts"], "a conversão não retira o Assunto da linha-título hoje");
   assert.deepEqual(usam(/keyword_subject_release|KEYWORD_SUBJECT_RELEASE_KEY/), ["lib/minerador/keyword-subject.ts"]);
-  assert.deepEqual(usam(/withdrawKeywordSubject\(/), ["lib/minerador/keyword-subject.ts"], "ninguém chama a retirada do Assunto inteiro");
+  assert.deepEqual(usam(/withdrawKeywordSubject\(/), [], "a retirada do Assunto inteiro saiu (F1 da linha única, D4) e não volta");
   // "Tirar do plano": as duas escritas que tiram o plano levam o marcador.
   const tirar = limpa("../lib/minerador/declared-plan-withdraw-core.ts");
   const chamadas = tirar.match(/setKeywordSubject\([^;]*plan: null[^;]*\)/g) || [];

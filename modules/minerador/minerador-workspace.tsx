@@ -7,9 +7,7 @@ import {
   ArrowUpDown,
   Trash2,
   X,
-  Plus,
   RefreshCw,
-  FolderPlus,
   ArrowRight,
   AlertTriangle,
   BarChart3,
@@ -39,10 +37,7 @@ import { useSupabaseSession as useSession } from "@/components/auth/supabase-ses
 import { useNoticeCenter } from "@/components/global-notice-center";
 import { useRouter } from "next/navigation";
 import {
-  autoClassifyIntent,
   autoDetectNiche,
-  deriveLogicalKeywordDna,
-  mergeLogicalKeywordSemantic,
 } from "@/lib/arquiteto/keyword-dna-engine";
 import { persistMineradorArquitetoHandoff } from "@/lib/arquiteto/canonical-workspace";
 import { buildMineradorSiteSyncPlan, loadMineradorSiteSyncSnapshot, uniqueSiteSyncCandidates, type MineradorSiteSyncCandidate, type MineradorSiteSyncPlan } from "@/lib/minerador/site-sync-adapter";
@@ -52,7 +47,7 @@ import { describeHumanReviewCompletionBatch, planHumanReviewCompletionBatch } fr
 import { applyHumanReviewField, applyHumanReviewKgrApplicability, canCompleteHumanReview, completeHumanReview, humanReviewRecord, isHumanReviewCompleted, type HumanReviewAction } from "@/lib/minerador/human-review";
 import { evaluateMineradorArquitetoHandoffBatch } from "@/lib/minerador/arquiteto-handoff-gates";
 import { describeMineradorResultsBatchPlan, planMineradorResultsBatch } from "@/lib/minerador/results-batch-plan";
-import { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";
+import { normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";
 import { assessVolumeKgrConsistency, hasExplicitZeroMeasurement, volumeKgrConsistencyLabel, type VolumeKgrConsistency } from "@/lib/minerador/volume-kgr-consistency";
 import { combinedKgrFilterValue, combinedVinculoFilterValue, deriveMineradorTableRows, KGR_FILTER_GROUPS, parseCombinedKgrFilter, parseCombinedVinculoFilter, PROCESS_RUN_FILTER_OPTIONS, VINCULO_FILTER_GROUPS } from "@/lib/minerador/table-view";
 import { processorCpcCell, processorKdCell, processorResultsCell, processorVolumeCell, type ProcessorCellState, type ProcessorRunFilter } from "@/lib/minerador/processor-table-cells";
@@ -113,7 +108,6 @@ import { readMineradorHandoff } from "@/lib/arquiteto/minerador-suggestions";
 /** Teto de "Aprovar e enviar ao Arquiteto" por pedido (o mesmo da rota). */
 const APPROVE_AND_SEND_MAX = 500;
 import type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";
-import { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legacy-import";
 import { KeywordTableBulkBarShell } from "./keyword-table/keyword-table-bulk-bar-shell";
 import { useMineradorGroups } from "./use-minerador-groups";
 import { EditorialGroupTag } from "@/components/editorial/group-tag";
@@ -434,19 +428,6 @@ const bulkProgressStepMeta: Record<BulkProgressStep, {
   },
 };
 
-// Helper para formatar texto em slug de SEO
-const toSlug = (text: string) => {
-  return text
-    .toString()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/[^\w\-]+/g, "")
-    .replace(/\-\-+/g, "-");
-};
-
 /**
  * De onde a listagem lê: a view podada, com recuo para a tabela.
  *
@@ -556,7 +537,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const [approveAndSendRequest, setApproveAndSendRequest] = useState<{ keywordIds: string[]; scopeLabel: string; send: boolean } | null>(null);
   // F4 (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`, item 2): a caixa "Sugestões do Arquiteto · cor X", aberta pela barra ou pelo link do Arquiteto.
   const [architectSuggestionsOpen, setArchitectSuggestionsOpen] = useState<{ color: (typeof EDITORIAL_GROUP_COLORS)[number] | null } | null>(null);
-  const [, setImporting] = useState(false);
   const [queueProcessing, setQueueProcessing] = useState(false);
   const [, setQueueProgress] = useState(0);
   const [dnaProcessing, setDnaProcessing] = useState(false);
@@ -591,8 +571,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   // canônico e nunca resolvida no carregamento da página.
   // Tentativa gerada mas não persistida: fica separada da versão canônica para
   // nunca substituí-la silenciosamente. F5 descarta a tentativa e mantém vN.
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const fetchDataInFlightRef = useRef<string | null>(null);
   const fetchDataLoadedKeyRef = useRef<string | null>(null);
   const fetchDataActiveKeyRef = useRef<string | null>(null);
@@ -765,19 +744,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
     return byId;
   }, [selectedBrandId, supabase]);
-  // Modal de CriaÃ§Ã£o de Lista
-  const [isListModalOpen, setIsListModalOpen] = useState(false);
-  const [newListName, setNewListName] = useState("");
-  const [newListNicho, setNewListNicho] = useState("");
-
-  // Modal de ImportaÃ§Ã£o Manual (Copiar e Colar)
-  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
-  const [manualKeywordsText, setManualKeywordsText] = useState("");
-  const [manualListId, setManualListId] = useState("");
-  const [manualIntent, setManualIntent] = useState("");
-  const [manualNicho, setManualNicho] = useState("");
-  const [manualStatus, setManualStatus] = useState("bruto");
-  const [manualLocation, setManualLocation] = useState("Brasil");
+  // 2026-10-16 · F1 da linha única (SDD sdd-linha-unica-do-minerador-2026-10-16, E-1): saíram
+  // os estados do modal "Criar lista" e da importação manual/CSV do navegador (inalcançáveis;
+  // inseriam sem deduplicar). Colar e CSV de keyword ficam no Descobrir, pelo núcleo do servidor.
 
   // Modal de ExportaÃ§Ã£o
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -2753,261 +2722,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     await handleBatchDelete(false, idsToDelete);
   };
 
-  // Importar palavras do arquivo CSV selecionado
-  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedBrandId) {
-      showNotification("error", "Selecione uma marca antes de importar keywords.");
-      e.target.value = "";
-      return;
-    }
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setImporting(true);
-
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        try {
-          const rows = results.data as any[];
-          if (rows.length === 0) {
-            showNotification("error", "Nenhum dado encontrado no arquivo CSV.");
-            setImporting(false);
-            e.target.value = "";
-            return;
-          }
-
-          const parsedKeywords = [];
-          
-          for (const row of rows) {
-            // Procura por Keyword / Palavra
-            const keywordKey = Object.keys(row).find(
-              (k) => k.toLowerCase() === "keyword" || k.toLowerCase() === "palavra"
-            );
-            if (!keywordKey || !row[keywordKey]) continue;
-
-            const keyword = row[keywordKey].trim();
-            if (!keyword) continue;
-
-            // Procura por Resultados
-            const resultsKey = Object.keys(row).find(
-              (k) => k.toLowerCase() === "resultados" || k.toLowerCase() === "results_allintitle"
-            );
-            let resultsVal: number | null = null;
-            if (resultsKey && row[resultsKey]) {
-              const parsed = parseInt(row[resultsKey], 10);
-              if (!isNaN(parsed)) resultsVal = parsed;
-            }
-
-            // Procura por Volume
-            const volumeKey = Object.keys(row).find(
-              (k) => k.toLowerCase() === "volume" || k.toLowerCase() === "volume_search"
-            );
-            let volumeVal: number | null = null;
-            if (volumeKey && row[volumeKey]) {
-              const parsed = parseInt(row[volumeKey], 10);
-              if (!isNaN(parsed)) volumeVal = parsed;
-            }
-
-            // Procura por Intent
-            const intentKey = Object.keys(row).find(
-              (k) => k.toLowerCase() === "intent" || k.toLowerCase() === "intencao" || k.toLowerCase() === "intenÃ§Ã£o"
-            );
-            const intentVal = intentKey ? row[intentKey] : null;
-
-            // Procura por Status
-            const statusKey = Object.keys(row).find(
-              (k) => k.toLowerCase() === "status"
-            );
-            let statusVal: MineradorWorkflowStatus = "bruto";
-            let publicationSignal: "published" | null = null;
-            if (statusKey && row[statusKey]) {
-              const s = String(row[statusKey]).trim().toLowerCase();
-              if (isLegacyPublishedStatus(s)) publicationSignal = "published";
-              else if (mineradorWorkflowStatuses.includes(s as MineradorWorkflowStatus)) statusVal = s as MineradorWorkflowStatus;
-            }
-
-            // Procura por Silo do CSV
-            const siloKey = Object.keys(row).find(
-              (k) => ["silo", "lista", "categoria", "silo_slug", "silo_nome"].includes(k.toLowerCase().trim())
-            );
-            const rowSiloVal = siloKey ? String(row[siloKey]).trim() : "";
-            
-            const siloResolution = resolveLegacyCsvSilo({ rawReference: rowSiloVal, brandId: selectedBrandId, lists });
-            if (siloResolution.issue) {
-              showNotification("error", `Referência de silo não encontrada para "${keyword}". A keyword não foi importada.`);
-              continue;
-            }
-            const matchedListId = siloResolution.listaId;
-
-            // Procura por Slug do CSV
-            const slugKey = Object.keys(row).find(
-              (k) => ["slug", "slug_sugerido", "keyword_slug"].includes(k.toLowerCase().trim())
-            );
-            const rowSlugVal = slugKey ? String(row[slugKey]).trim().toLowerCase() : "";
-
-            // Calcula o score KGR caso tenha ambos
-            let kgrScore: number | null = null;
-            if (resultsVal !== null && volumeVal !== null && volumeVal > 0) {
-              kgrScore = Number((resultsVal / volumeVal).toFixed(4));
-            }
-
-            const resolvedIntent = intentVal ? canonicalIntentLabel(intentVal) : canonicalIntentLabel(autoClassifyIntent(keyword));
-            const resolvedNiche = autoDetectNiche(keyword);
-            const logicalDna = deriveLogicalKeywordDna({
-              keywordId: `import:${toSlug(keyword)}`,
-              keyword,
-              intent: resolvedIntent,
-              niche: resolvedNiche,
-            });
-            const semanticObj: Record<string, unknown> = mergeLogicalKeywordSemantic(null, {
-              ...logicalDna.semantic,
-              nicho_override: resolvedNiche,
-            });
-            if (rowSlugVal) {
-              semanticObj.slug_sugerido = toSlug(rowSlugVal);
-            }
-            if (publicationSignal) {
-              semanticObj.publication_signal = publicationSignal;
-              semanticObj.publication_signal_source = "csv";
-            }
-
-            parsedKeywords.push({
-              brand_id: selectedBrandId,
-              keyword,
-              results_allintitle: resultsVal,
-              volume_search: volumeVal,
-              kgr_score: kgrScore,
-              intent: resolvedIntent,
-              lista_id: matchedListId,
-              status: statusVal,
-              analise_semantica: semanticObj
-            });
-          }
-
-          if (parsedKeywords.length === 0) {
-            showNotification("error", "Nenhuma palavra-chave válida foi encontrada no CSV. Verifique a coluna Keyword e as referências explícitas de silo.");
-            setImporting(false);
-            e.target.value = "";
-            return;
-          }
-
-          // Insere dados em lote no Supabase
-          const { data: insertedKeywords, error } = await supabase
-            .from("minerador_keywords")
-            .insert(parsedKeywords)
-            .select("*");
-
-          if (error) throw error;
-
-          if (insertedKeywords?.length) setKeywords(current => [...insertedKeywords as KeywordItem[], ...current]);
-
-          showNotification("success", `${parsedKeywords.length} palavras-chave importadas com sucesso!`);
-        } catch (err: any) {
-          console.error("Erro ao importar CSV:", err);
-          showNotification("error", `Erro na importaÃ§Ã£o: ${err.message || "Erro no banco"}`);
-        } finally {
-          setImporting(false);
-          e.target.value = "";
-        }
-      },
-      error: (err) => {
-        console.error("Erro no PapaParse:", err);
-        showNotification("error", "Falha ao processar a estrutura do arquivo CSV.");
-        setImporting(false);
-        e.target.value = "";
-      }
-    });
-  };
-  // Abre a importação manual sempre sem silo por padrão.
-  const openManualModal = () => {
-    setManualListId("");
-    setManualKeywordsText("");
-    setManualIntent("");
-    setManualNicho("");
-    setManualStatus("bruto");
-    setManualLocation("Brasil");
-    setIsManualModalOpen(true);
-  };
-
-  // Salva palavras importadas de forma manual (copiar/colar) no Supabase em lote
-  const handleManualImport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedBrandId) {
-      showNotification("error", "Selecione uma marca antes de importar keywords.");
-      return;
-    }
-    if (!manualKeywordsText.trim()) {
-      showNotification("error", "Digite ou cole pelo menos uma palavra-chave.");
-      return;
-    }
-    const resolvedManualListId = manualImportListaId({ selectedListId: manualListId, brandId: selectedBrandId, lists });
-    if (manualListId && !resolvedManualListId) {
-      showNotification("error", "A lista selecionada não pertence à marca ativa.");
-      return;
-    }
-
-    setUpdating(true);
-    try {
-      const keywordLines = manualKeywordsText
-        .split("\n")
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
-
-      if (keywordLines.length === 0) {
-        showNotification("error", "Nenhuma palavra-chave vÃ¡lida encontrada no texto.");
-        setUpdating(false);
-        return;
-      }
-
-      const payload = keywordLines.map(keyword => {
-        const resolvedNiche = manualNicho || autoDetectNiche(keyword);
-        const resolvedIntent = manualIntent ? canonicalIntentLabel(manualIntent) : canonicalIntentLabel(autoClassifyIntent(keyword));
-        const logicalDna = deriveLogicalKeywordDna({
-          keywordId: `manual:${toSlug(keyword)}`,
-          keyword,
-          intent: resolvedIntent,
-          niche: resolvedNiche,
-          location: manualLocation.trim() || null,
-        });
-        const analise = mergeLogicalKeywordSemantic(null, {
-          ...logicalDna.semantic,
-          nicho_override: resolvedNiche,
-        });
-        return {
-          brand_id: selectedBrandId,
-          keyword,
-          location: manualLocation.trim() || null,
-          results_allintitle: null,
-          volume_search: null,
-          kgr_score: null,
-          intent: resolvedIntent,
-          status: manualStatus,
-          lista_id: resolvedManualListId,
-          analise_semantica: analise
-        };
-      });
-
-      const { data: insertedKeywords, error } = await supabase
-        .from("minerador_keywords")
-        .insert(payload)
-        .select("*");
-
-      if (error) throw error;
-
-      if (insertedKeywords?.length) setKeywords(current => [...insertedKeywords as KeywordItem[], ...current]);
-
-      showNotification("success", `${payload.length} palavras-chave importadas manualmente com sucesso!`);
-      setIsManualModalOpen(false);
-    } catch (err: any) {
-      console.error("Erro na importaÃ§Ã£o manual:", err);
-      showNotification("error", `Erro ao importar: ${err.message || "Erro de conexÃ£o"}`);
-    } finally {
-      setUpdating(false);
-    }
-  };
-
   // FunÃ§Ã£o para lidar com clique de ordenaÃ§Ã£o no cabeÃ§alho
   const handleSort = (column: typeof sortColumn) => {
     setOrderMode("auto");
@@ -3039,52 +2753,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const handleKeywordRowDrop = (event: DragEvent<HTMLTableRowElement>) => {
     if (orderMode !== "manual") return;
     event.preventDefault();
-  };
-
-  // Cria nova lista (Silo/Categoria)
-  const handleCreateList = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newListName.trim()) return;
-    if (!selectedBrandId) {
-      showNotification("error", "Selecione ou cadastre uma marca primeiro.");
-      return;
-    }
-
-    try {
-      const payload: Record<string, any> = {
-        nome: newListName.trim(),
-        nicho: newListNicho.trim() || null,
-        marca_id: selectedBrandId,
-      };
-
-      const { data, error } = await supabase
-        .from("minerador_keyword_lists")
-        .insert([payload])
-        .select();
-
-      if (error) throw error;
-      
-      showNotification("success", "Lista criada com sucesso!");
-      setNewListName("");
-      setNewListNicho("");
-      setIsListModalOpen(false);
-      
-      // Recarrega listas do banco filtradas
-      let listsQuery = supabase
-        .from("minerador_keyword_lists")
-        .select("*");
-       listsQuery = listsQuery.eq("marca_id", selectedBrandId);
-      const { data: listsData } = await listsQuery.order("nome", { ascending: true });
-      
-      const loadedLists = listsData || [];
-      setLists(loadedLists);
-      if (loadedLists.length > 0 && !targetListId) {
-        setTargetListId(loadedLists[0].id);
-      }
-    } catch (err: any) {
-      console.error(err);
-      showNotification("error", `Erro ao criar lista: ${err.message || "Erro no banco"}`);
-    }
   };
 
   // AtualizaÃ§Ã£o direta da lista/grupo pertencente na cÃ©lula (com suporte a aplicaÃ§Ã£o em massa)
@@ -4348,7 +4016,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           setSortColumn(view.sortColumn); setSortDirection(view.sortDirection);
         }}
       />
-      <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
       <HistoryControls moduleId="minerador" showHistory={false} showUndoRedo={false} entries={keywordHistory.entries} canUndo={keywordHistory.canUndo} canRedo={keywordHistory.canRedo}
         onUndo={undoKeywords} onRedo={redoKeywords} onRestore={keywordHistory.restore} compact presentation="popover"/>
       {/* 2026-10-13 · cadastro único (SDD sdd-cadastro-assunto-na-keyword): o
@@ -5691,203 +5358,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         description={`Esta ação removerá ${deleteReview?.publishedIds.length || 0} keyword(s) publicada(s) da operação e permitirá restauração durante 24 horas.`}
         confirmationName={deleteReview?.confirmationName || ""} impact={deleteReview?.impact || []}
         onCancel={() => { setDeleteApprovalOpen(false); setDeleteReview(null); }} onConfirm={() => handleBatchDelete(true)}/>
-
-      {/* Modal de criaÃ§Ã£o de Categoria/Silo */}
-      {isListModalOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0b0c10] border border-slate-800 w-full max-w-sm rounded overflow-hidden relative shadow-2xl">
-            <div className="absolute inset-x-0 top-0 h-[3px] bg-action-accent"></div>
-            
-            <div className="px-4 py-3 border-b border-slate-950 flex items-center justify-between">
-              <span className="font-bold text-[10px] text-white uppercase tracking-wider flex items-center gap-1">
-                <FolderPlus className="w-3.5 h-3.5 text-module-accent" /> Criar Silo / Categoria
-              </span>
-              <button onClick={() => setIsListModalOpen(false)} className="text-slate-500 hover:text-white transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateList} className="p-4 flex flex-col gap-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Nome da Categoria/Silo</label>
-                <input 
-                  type="text" 
-                  required
-                  placeholder="Ex: ClÃ­nicas Campinas, Blog Silo RJ"
-                  value={newListName}
-                  onChange={(e) => setNewListName(e.target.value)}
-                  className="w-full rounded border border-divider bg-surface-subtle px-2.5 py-1.5 text-foreground placeholder:text-text-muted focus:border-module-accent focus:outline-none"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Nicho / Setor do Projeto</label>
-                <input 
-                  type="text" 
-                  placeholder="Ex: Odontologia, Advocacia"
-                  value={newListNicho}
-                  onChange={(e) => setNewListNicho(e.target.value)}
-                  className="w-full rounded border border-divider bg-surface-subtle px-2.5 py-1.5 text-foreground placeholder:text-text-muted focus:border-module-accent focus:outline-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 mt-2">
-                <button 
-                  type="button" 
-                  onClick={() => setIsListModalOpen(false)} 
-                  className="bg-[#06070a] hover:bg-slate-900 border border-slate-800 text-slate-400 font-bold py-1.5 px-3 rounded transition-all"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  type="submit" 
-                    className="rounded bg-action-accent px-4 py-1.5 font-bold text-foreground transition-colors hover:bg-action-accent/85"
-                >
-                  Criar Silo
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de ImportaÃ§Ã£o Manual (Copy e Cola) */}
-      {isManualModalOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0b0c10] border border-slate-800 w-full max-w-lg rounded overflow-hidden relative shadow-2xl">
-            <div className="absolute inset-x-0 top-0 h-[3px] bg-action-accent"></div>
-            
-            <div className="px-4 py-3 border-b border-slate-950 flex items-center justify-between">
-              <span className="font-bold text-[10px] text-white uppercase tracking-wider flex items-center gap-1.5">
-                <Plus className="w-4 h-4 text-module-accent" /> Importar Lista Manualmente (Copiar & Colar)
-              </span>
-              <button onClick={() => setIsManualModalOpen(false)} className="text-slate-500 hover:text-white transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleManualImport} className="p-4 flex flex-col gap-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
-                  Cole as Palavras-Chave (uma por linha)
-                </label>
-                <textarea
-                  required
-                  rows={6}
-                  placeholder="Ex:&#10;como fazer seo para dentista&#10;agencia de marketing clinica estetica&#10;dentista em campinas preco"
-                  value={manualKeywordsText}
-                  onChange={(e) => setManualKeywordsText(e.target.value)}
-                    className="min-h-[120px] w-full resize-y rounded border border-divider bg-surface-subtle px-2.5 py-1.5 font-sans text-xs text-foreground placeholder:text-text-muted focus:border-module-accent focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {/* Silo opcional */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider font-semibold">
-                    Silo (opcional)
-                  </label>
-                  <select
-                    value={manualListId}
-                    onChange={(e) => setManualListId(e.target.value)}
-                    className="w-full cursor-pointer rounded border border-divider bg-surface-subtle px-2 py-1.5 text-xs font-semibold text-text-muted focus:border-module-accent focus:outline-none"
-                  >
-                    <option value="">Sem silo</option>
-                    {lists.map(list => (
-                      <option key={list.id} value={list.id}>{list.nome}</option>
-                    ))}
-                  </select>
-                  {lists.length === 0 && <p className="text-xs text-slate-500">Nenhum silo disponível. As keywords serão importadas sem silo.</p>}
-                </div>
-
-                {/* LocalizaÃ§Ã£o padrÃ£o */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider font-semibold">Localidade / RegiÃ£o</label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Brasil, SP, Rio de Janeiro"
-                    value={manualLocation}
-                    onChange={(e) => setManualLocation(e.target.value)}
-                    className="w-full rounded border border-divider bg-surface-subtle px-2.5 py-1.5 text-xs font-semibold text-foreground placeholder:text-text-muted focus:border-module-accent focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {/* IntenÃ§Ã£o Inicial */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider font-semibold">IntenÃ§Ã£o Inicial</label>
-                  <select
-                    value={manualIntent}
-                    onChange={(e) => setManualIntent(e.target.value)}
-                    className="w-full cursor-pointer rounded border border-divider bg-surface-subtle px-2 py-1.5 text-xs font-semibold text-text-muted focus:border-module-accent focus:outline-none"
-                  >
-                    <option value="">AutomÃ¡tico (HeurÃ­stica)</option>
-                    <option value="Informativa">Informativa</option>
-                    <option value="Comercial investigativa">Comercial investigativa</option>
-                    <option value="Transacional">Transacional</option>
-                    <option value="Navegacional">Navegacional</option>
-                    <option value="Local">Local</option>
-                    <option value="Mista">Mista</option>
-                  </select>
-                </div>
-
-                {/* Nicho Inicial */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider font-semibold">Nicho Inicial</label>
-                  <select
-                    value={manualNicho}
-                    onChange={(e) => setManualNicho(e.target.value)}
-                    className="w-full cursor-pointer rounded border border-divider bg-surface-subtle px-2 py-1.5 text-xs font-semibold text-text-muted focus:border-module-accent focus:outline-none"
-                  >
-                    <option value="">AutomÃ¡tico (HeurÃ­stica)</option>
-                    <option value="Odontologia">Odontologia</option>
-                    <option value="Advocacia">Advocacia</option>
-                    <option value="SaÃºde">SaÃºde</option>
-                    <option value="EstÃ©tica">EstÃ©tica</option>
-                    <option value="Fitness">Fitness</option>
-                    <option value="ServiÃ§os">ServiÃ§os</option>
-                    <option value="Marketing">Marketing</option>
-                    <option value="Geral">Geral</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {/* Status Inicial */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider font-semibold">Status Inicial</label>
-                  <select
-                    value={manualStatus}
-                    onChange={(e) => setManualStatus(e.target.value)}
-                    className="w-full cursor-pointer rounded border border-divider bg-surface-subtle px-2 py-1.5 text-xs font-semibold text-text-muted focus:border-module-accent focus:outline-none"
-                  >
-                    {MINERADOR_EDITORIAL_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 mt-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setIsManualModalOpen(false)}
-                  className="bg-[#06070a] hover:bg-slate-900 border border-slate-800 text-slate-400 font-bold py-1.5 px-3 rounded transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={updating}
-                  className="flex items-center gap-1.5 rounded bg-action-accent px-4 py-1.5 font-bold text-foreground transition-colors hover:bg-action-accent/85 disabled:opacity-50"
-                >
-                  {updating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>Importar Palavras</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Modal de ExportaÃ§Ã£o com OpÃ§Ã£o de Renomear Arquivo */}
       {isExportModalOpen && (

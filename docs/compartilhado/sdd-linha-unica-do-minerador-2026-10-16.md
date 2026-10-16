@@ -1,6 +1,6 @@
 # SDD — A linha única do Minerador — 2026-10-16
 
-> **Status: PROPOSTA — aguarda aprovação do dono.**
+> **Status: APROVADA pelo dono em 2026-10-16 ("segue as recomendações").** Decisões: D1 regra de 14/10 (volume definido fixa a principal mesmo com Livre gravado); D2 Silo com menos de 4 artigos só avisa, em todo lugar; D3 o carregamento não grava o nicho (vira proposta confirmada); D4 remover withdrawKeywordSubject; D5 F0 com F1, depois uma fase por deploy; D6 o Minerador fica só com o allintitle do KGR opcional (custo antes, sem keyword sem volume, carrega a aprovação) e KD/SERP canônica/4 lentes/evidência SERP saem; D7 desfazer só para seleção/filtro/organização, nunca volta dado gravado sem o servidor; D8 o botão antigo Enviar ao Arquiteto sai e o MCP send_keywords_to_arquiteto passa ao modo parcial. Autoriza as fases na ordem, uma por vez, começando pela F0 (só testes). **Andamento:** F0 feita (2026-10-16); F1 feita (2026-10-16, §6 F1).
 > Documento só de leitura do código: nenhuma linha de código, teste, migration,
 > SQL ou chamada paga foi feita para escrevê-lo. Git só leitura. Commit, push,
 > deploy, migration e SQL são do dono (`AGENTS.md` §15).
@@ -215,6 +215,8 @@ e viram exigência na fase que os corrige (§0.3: a suíte passa a exigir a regr
 nova).
 
 ### F1 — tirar as portas mortas e os textos errados (A8, A9, A10, A12, A13 e §5)
+
+> **Status: FEITA em 2026-10-16** (código, testes e documentos; sem deploy, que é do dono). Saíram o ramo que chamava `subjects/import` (a rota fica 410), `withdrawKeywordSubject`, os inserts mortos do navegador e "Criar lista" (E-1), `package-freshness.ts`, os normalizadores da RapidAPI e `seo-keyword-research8`, as sobras da Extensão em `allintitle.ts` e `allintitle-persistence.ts`, as decisões de exclusão do cliente em `keyword-lifecycle.ts` e o `kgrUse: "decisao_pendente"` (S-8/P-8). Textos A9 e catálogo A12 corrigidos; marcas SUBSTITUÍDO do §5 e o §79 da spec feitos. Ficou, por ter consumidor: o "· Assunto" de `keywordVinculoSummary` (Arquiteto, MCP, painel) e `resignApprovalRecord` (script de backfill). Os 7 `todo` da F1 viraram testes normais. Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
 
 - Código: remover o ramo de declaração da Pesquisa por Assunto e do
   colar/CSV (A8), a função sem chamador (A10, conforme D4); corrigir os textos

@@ -135,6 +135,8 @@ Arquiteto:
 | Plano anterior ao cadastro (Assunto e principal em linhas separadas), sem `lock` | **travada** | `declarada` (D1-bis, decisão humana já confirmada — `AGENTS.md` §9) |
 | Sem principal declarada | — | — |
 
+> **SUBSTITUÍDO em 2026-10-16** (linha "`plan.lock` gravado → o valor gravado": a trava manual vence o volume). Vale a D1 da [SDD da linha única do Minerador](sdd-linha-unica-do-minerador-2026-10-16.md), aprovada pelo dono em 2026-10-16 (regra dele de 2026-10-14, C10 R2): o volume definido fixa a principal mesmo com "Livre" gravado; sem volume, a trava gravada decide. **Planejado:** entra no código na F2 da linha única; até lá `declaredPrincipalLock` ainda aplica esta tabela.
+
 - **Medir volume atualiza a trava sozinha**, sem escrita nova: a trava
   automática é derivada do Volume do pacote aprovado. Medir é por clique do dono
   (botão "Volume", pago, com prévia); nada mede automaticamente.

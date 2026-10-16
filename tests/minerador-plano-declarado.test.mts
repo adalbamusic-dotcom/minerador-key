@@ -17,7 +17,6 @@ import {
   resolveKeywordSubject,
   setDeclaredPrincipal,
   setKeywordSubject,
-  withdrawKeywordSubject,
 } from "../lib/minerador/keyword-subject.ts";
 import { importDeclaredPlanWithCore } from "../lib/minerador/declared-plan-import-core.ts";
 import { PlanFakeDb, type Row } from "./plano-declarado-fake-db.mts";
@@ -198,11 +197,12 @@ test("Assunto: o plano grava aditivo, preserva o plano quando outro writer não 
   const torto = { ...declarado.semantic, keyword_subject: { ...(declarado.semantic.keyword_subject as Row), plan: { order: "x" } } };
   assert.equal(resolveKeywordSubject(torto).declared, true);
   assert.equal(resolveKeywordSubject(torto).plan, null);
-  // Retirar o Assunto retira o plano junto (o histórico fica).
-  // 2026-10-13 (ajuste declarado, "o Assunto nunca se perde"): retirar exige o marcador de liberação.
-  const retirado = withdrawKeywordSubject(comPlano.semantic, { actorId: ACTOR, changedAt: AT, origin: "review", release: { requestId: "teste:1", reason: "teste", actorId: ACTOR, at: AT, via: "tirar_do_plano" } });
+  // Tirar o plano (o caminho de "Tirar do plano"): `setKeywordSubject` com `plan: null` e o marcador de liberação; o Assunto continua declarado.
+  // 2026-10-16 (F1 da linha única, D4): a retirada do Assunto inteiro (`withdrawKeywordSubject`, sem chamador) saiu.
+  const retirado = setKeywordSubject(comPlano.semantic, { note: null, actorId: ACTOR, changedAt: AT, origin: "review", plan: null, release: { requestId: "teste:1", reason: "teste", actorId: ACTOR, at: AT, via: "tirar_do_plano" } });
   assert.ok(retirado.ok && retirado.changed);
   assert.equal(resolveKeywordSubject(retirado.semantic).plan, null);
+  assert.equal(resolveKeywordSubject(retirado.semantic).declared, true);
 });
 
 test("principal declarada: marca recíproca, idempotente, ator humano e a conferência de reciprocidade", () => {

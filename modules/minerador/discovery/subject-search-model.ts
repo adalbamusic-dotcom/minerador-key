@@ -20,9 +20,11 @@ import { compareSubjectDiscoveryByVolume, subjectDiscoveryHasVolume } from "../.
  * F1b.6 e F1b.7).
  *
  * Aqui não há rede, banco nem armazenamento: só o que a tela decide sozinha e
- * que precisa ser igual toda vez — os textos fixos, o padrão da opção
- * "Declarar também como Assunto" (Q14), o corpo dos pedidos (sem métrica), o
- * filtro "Só com volume" (D2.3, ligado por padrão) e o link "Buscar sustentação" (só o UUID).
+ * que precisa ser igual toda vez — os textos fixos, o corpo dos pedidos (sem
+ * métrica), o filtro "Só com volume" (D2.3, ligado por padrão) e o link
+ * "Buscar sustentação" (só o UUID). A opção "Declarar também como Assunto"
+ * (Q14) e o plano da declaração saíram na F1 da linha única (2026-10-16): desde
+ * 2026-10-13 o Assunto entra só pelo card "Cadastrar Assuntos".
  */
 
 /* ---------------------------------- textos --------------------------------- */
@@ -33,7 +35,8 @@ export const SUBJECT_SEARCH_LOCALE_TEXT = SUBJECT_DISCOVERY_NOTICES.locale;
 /** O select de Idioma continua visível no modo: ele vale para o Google Ads, a única fonte. */
 export const SUBJECT_SEARCH_LANGUAGE_TEXT = "A pesquisa não consulta o DataForSEO: não tem custo por pesquisa, só usa a cota do Google Ads.";
 export const SUBJECT_SEARCH_ENTER_HELP = "Enter mostra o plano antes de pesquisar.";
-export const SUBJECT_SEARCH_NOTE_HELP = "A nota não muda a pesquisa; ela acompanha o Assunto, se você o declarar no envio.";
+/** 2026-10-16 (F1, A9): a pesquisa não declara Assunto; o texto aponta o caminho de hoje. */
+export const SUBJECT_SEARCH_NOTE_HELP = "A nota não muda a pesquisa nem vai ao banco. Para ligar a um Assunto, cadastre-o em Cadastrar Assuntos.";
 export const SUBJECT_SEARCH_DESTINATION_HELP = "Opcional. Só uma página https do site da marca entra no Google Ads, junto com a frase.";
 export const SUBJECT_SEARCH_DECLARED_HELP = "Com um Assunto declarado, o servidor relê a frase, a nota e a página gravadas na marca.";
 export const SUBJECT_SEARCH_LOCAL_LIST_TEXT = "Lista guardada só neste navegador. Só o envio ao Processador salva no banco. Limpar os dados do navegador apaga a lista. Repetir a pesquisa consulta o Google Ads de novo, sem custo.";
@@ -45,16 +48,11 @@ export const SUBJECT_SEARCH_MEMORY_ONLY_TEXT = "O armazenamento deste navegador 
  * Processador mede como antes.
  */
 export const SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT = "O Volume que a pesquisa mediu no Google Ads vai junto, pelo recibo guardado no servidor (sem medir de novo), e a Lógica roda sozinha. Sem recibo, o Volume é medido no Processador, sem custo.";
-export const SUBJECT_SEARCH_UNDECLARED_TEXT = "Para ligar estas keywords a um Assunto, declare-o antes, aqui ou no Processador.";
 export const SUBJECT_SEARCH_PLAN_TEXT = "Nada é consultado antes de você confirmar. O plano é confirmado inteiro: a frase, a página de destino e a segmentação do Google Ads que você vê são as que a pesquisa usa.";
 /** O resumo do plano sem chamada paga (o de hoje, só Google Ads). */
 export const SUBJECT_SEARCH_FREE_PLAN_TEXT = "Sem custo no DataForSEO; usa a cota do Google Ads";
 /** Coluna de buscas antigas (antes de 2026-09-28): só aparece quando alguma candidata tem estimativa. */
 export const SUBJECT_SEARCH_ESTIMATE_COLUMN = "Estimativa DataForSEO";
-
-export function declarePhraseAsSubjectLabel(phrase: string) {
-  return `Declarar também "${phrase}" como Assunto, com a nota e a página informadas`;
-}
 
 /* ------------------------------ origens e estados ------------------------------ */
 
@@ -259,22 +257,13 @@ export function buildSubjectSearchRequest(input: SubjectSearchRequestInput) {
 
 /* ------------------------------ envio (F1b.7) ------------------------------ */
 
-/**
- * Q14: sem Assunto declarado na busca, a opção "Declarar também como Assunto"
- * aparece; vem MARCADA quando a frase ainda não existe na marca e DESMARCADA
- * quando já existe. Com Assunto declarado, a opção não aparece.
- */
-export function defaultDeclarePhraseAsSubject(subject: { subjectKeywordId: string | null; phraseExistingKeywordId: string | null }): { offered: boolean; checked: boolean } {
-  if (subject.subjectKeywordId) return { offered: false, checked: false };
-  return { offered: true, checked: !subject.phraseExistingKeywordId };
-}
-
 export type SubjectSearchImportItem = { keyword: string; origins: SubjectDiscoverySource[]; evidence: string[] };
 
 /**
  * Os itens do envio: SÓ keyword, origens e evidência curta. Nenhuma métrica
  * (volume, CPC, estimativa) vai ao servidor. A frase do Assunto fica fora: ela
- * é declarada pela rota da F1.3, nunca importada como sustentação.
+ * nunca é importada como sustentação (o Assunto entra só pelo card
+ * "Cadastrar Assuntos").
  */
 export function buildSubjectDiscoveryImportItems(candidates: readonly SubjectDiscoveryCandidate[], selectedKeys: ReadonlySet<string>, normalizedPhrase: string): { items: SubjectSearchImportItem[]; skippedSubjectPhrase: number } {
   const items: SubjectSearchImportItem[] = [];
@@ -297,41 +286,6 @@ export function buildSubjectDiscoveryImportItems(candidates: readonly SubjectDis
     items.push({ keyword, origins, evidence });
   }
   return { items, skippedSubjectPhrase };
-}
-
-/** Linha da prévia da F1.3 (subset lido pela tela). */
-export type SubjectPhrasePreviewRow = {
-  classification: "new" | "existing_without_subject" | "existing_subject_same" | "existing_subject_different" | "published" | "invalid";
-  keywordId: string | null;
-  approvalWarning: string | null;
-  reason: string | null;
-  outcome?: string;
-};
-
-/**
- * O que fazer com a frase, lida a prévia da F1.3: criar como Assunto, declarar
- * a existente (só porque o humano marcou), usar a que já é Assunto, ou parar.
- */
-export function subjectPhraseDeclarationPlan(row: SubjectPhrasePreviewRow | null | undefined):
-  | { action: "create" }
-  | { action: "declare_existing"; keywordId: string; warning: string | null }
-  | { action: "already_subject"; keywordId: string }
-  | { action: "refuse"; reason: string } {
-  if (!row) return { action: "refuse", reason: "A prévia da declaração não devolveu a frase." };
-  if (row.classification === "new") return { action: "create" };
-  if ((row.classification === "existing_without_subject" || row.classification === "published") && row.keywordId) {
-    return { action: "declare_existing", keywordId: row.keywordId, warning: row.approvalWarning };
-  }
-  if ((row.classification === "existing_subject_same" || row.classification === "existing_subject_different") && row.keywordId) {
-    return { action: "already_subject", keywordId: row.keywordId };
-  }
-  return { action: "refuse", reason: row.reason || "A frase não pode ser declarada como Assunto." };
-}
-
-/** O id do Assunto depois do `apply` da F1.3; `null` quando a declaração não aconteceu. */
-export function subjectIdFromApply(row: SubjectPhrasePreviewRow | null | undefined): string | null {
-  if (!row || !row.keywordId) return null;
-  return row.outcome === "created" || row.outcome === "declared" || row.outcome === "unchanged" || row.outcome === "kept" ? row.keywordId : null;
 }
 
 /* ---------------------------- "Buscar sustentação" ---------------------------- */

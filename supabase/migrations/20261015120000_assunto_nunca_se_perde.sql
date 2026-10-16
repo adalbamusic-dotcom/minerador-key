@@ -10,7 +10,9 @@
 -- Revisão Humana). O código daquela porta já saiu; este arquivo põe a garantia
 -- no BANCO, abaixo de qualquer escritor (tela, servidor, MCP, script).
 --
--- ESTADO: NÃO APLICADA. O código funciona sem ela (a guarda do código recusa a
+-- ESTADO: APLICADA (conferido por SELECT em 2026-10-16: gatilhos ativos).
+-- (Este cabeçalho dizia "NÃO APLICADA" — SUBSTITUÍDO em 2026-10-16, F1 da linha
+-- única do Minerador.) O código funciona sem ela (a guarda do código recusa a
 -- retirada sem liberação e "Tirar do plano" já grava o marcador); ela só fecha
 -- a porta para escritas que a guarda do código não vê (cópia velha da tela,
 -- script, SQL).

@@ -68,7 +68,8 @@ test("campos: Assunto obrigatório, nota e página opcionais, Assunto declarado 
   assert.match(fields, /onChange=\{event => controller\.chooseDeclaredSubject\(event\.target\.value \|\| null\)\}/);
   assert.match(hook, /setSubjectKeywordId\(option\.id\);\s*setPhrase\(option\.keyword\);\s*setNote\(option\.note \|\| ""\);\s*setDestinationUrl\(option\.destinationUrl \|\| ""\);/);
   assert.match(fields, /\{SUBJECT_SEARCH_NOTE_HELP\}/);
-  assert.match(model, /"A nota não muda a pesquisa; ela acompanha o Assunto, se você o declarar no envio\."/);
+  // 2026-10-16 (F1 da linha única, A9): a pesquisa não declara Assunto; o texto aponta "Cadastrar Assuntos".
+  assert.match(model, /"A nota não muda a pesquisa nem vai ao banco\. Para ligar a um Assunto, cadastre-o em Cadastrar Assuntos\."/);
 });
 
 test("Enter ou Pesquisar só montam o plano; a ajuda diz isso; o texto da regra aparece no modo", () => {
@@ -174,13 +175,14 @@ test("lista local: texto da tela, política e armazenamento só em IndexedDB pr�
 test("envio (cadastro único, 2026-10-13): a pesquisa não declara a frase; sem Assunto cadastrado, entra sem vínculo e a tela diz isso", () => {
   const importDialog = dialogs.slice(dialogs.indexOf("export function SubjectSearchImportDialog"));
   assert.match(importDialog, /\{SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT\}/);
-  assert.match(importDialog, /!dialog\.offered \? <p className="text-sm leading-6 text-text-muted" data-subject-search-cadastro-hint>\{SUBJECT_SEARCH_CADASTRO_HINT\}<\/p>/);
+  assert.match(importDialog, /: <p className="text-sm leading-6 text-text-muted" data-subject-search-cadastro-hint>\{SUBJECT_SEARCH_CADASTRO_HINT\}<\/p>/);
   assert.match(dialogs, /SUBJECT_SEARCH_CADASTRO_HINT = "Esta frase não é um Assunto cadastrado/);
-  const openImport = between(hook, "const openImport = useCallback", "const setDeclare");
-  assert.match(openImport, /const choice = \{ offered: false, checked: false \};/, "a oferta de declarar a frase não aparece mais");
-  assert.doesNotMatch(openImport, /defaultDeclarePhraseAsSubject/);
+  // 2026-10-16 (F1 da linha única, A8): o ramo de declaração (inalcançável) saiu — nada de oferta, prévia nem rota `subjects/import`.
+  assert.doesNotMatch(importDialog, /data-subject-search-declare|offered|setDeclare|declarePhraseAsSubjectLabel/);
+  const openImport = between(hook, "const openImport = useCallback", "const closeImport");
+  assert.doesNotMatch(openImport, /offered|defaultDeclarePhraseAsSubject|declareRequestId/, "a oferta de declarar a frase não existe mais");
   const confirmImport = between(hook, "const confirmImport = useCallback", "return {\n");
-  assert.match(confirmImport, /if \(dialog\.offered && dialog\.declare && !dialog\.declaredId\)/, "a declaração só rodaria com a oferta, que não existe mais");
+  assert.doesNotMatch(hook, /subjects\/import|subjectPhraseDeclarationPlan|subjectIdFromApply|postSubjects/, "o envio não declara a frase");
   assert.match(confirmImport, /body: JSON\.stringify\(\{ importRequestId: dialog\.importRequestId, searchId: record\.searchId, subjectKeywordId: subjectId, subjectPhrase: record\.result\.subject\.phrase, items \}\)/);
   assert.match(model, /if \(candidate\.isSubjectPhrase \|\| candidate\.normalizedKeyword === normalizedPhrase\) \{ skippedSubjectPhrase \+= 1; continue; \}/);
 });

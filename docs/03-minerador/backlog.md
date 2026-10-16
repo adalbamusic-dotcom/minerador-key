@@ -1,6 +1,28 @@
 # Backlog — Minerador
 
-- [ ] **Linha única do Minerador (2026-10-16, PROPOSTA — aguarda o dono):** `docs/compartilhado/sdd-linha-unica-do-minerador-2026-10-16.md` — F0 cenários-ouro, depois uma fase por etapa unificada; decisões D1–D5 no §8.
+- [ ] **Linha única do Minerador (2026-10-16, APROVADA — F0 e F1 feitas):** `docs/compartilhado/sdd-linha-unica-do-minerador-2026-10-16.md` — F0 cenários-ouro, depois uma fase por etapa unificada; decisões D1–D8 no topo e no §8.
+
+## F1 da linha única — 2026-10-16
+
+Detalhe em `docs/03-minerador/estado-atual.md`. **Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- [x] Portas mortas fora: o ramo que chamava `subjects/import` (Pesquisa por Assunto e colar/CSV do Descobrir), os inserts do navegador e "Criar lista" do Processador, `withdrawKeywordSubject` (D4). A rota `subjects/import` continua respondendo 410.
+- [x] Textos: a ajuda da Nota da Pesquisa por Assunto aponta "Cadastrar Assuntos"; o "declare-o antes, aqui ou no Processador" saiu com o ramo que o mostrava.
+- [x] Sobras sem chamador fora: `package-freshness.ts`, os normalizadores da RapidAPI e o `seo-keyword-research8`, `allintitle.ts` só com `buildAllintitleQuery`, `allintitle-persistence.ts`, as decisões de exclusão do cliente em `keyword-lifecycle.ts`, `kgrUse: "decisao_pendente"`.
+- [x] Catálogo: "Tirar do plano" no formato do cadastro único (o anterior como caso).
+- [x] Documentos: SUBSTITUÍDO na spec (§8–§10, §16, §17, §23–§28, §32–§44 da Extensão, §61, §67) e o §79 novo; `regras-serp-e-assuntos` B2/B3/B5/B7; SDD do cadastro §3.3 e SDD do plano D3 (com a ressalva "entra na F2"); cabeçalho da migration `20261015120000` = APLICADA.
+- [x] Cenários: os 7 `todo` "vermelho até a F1" viraram testes normais e a guarda exige que o removido não volte.
+- [ ] Dono: abrir Descobrir → Por Assunto → "Enviar ao Processador" e ler o texto do diálogo e a ajuda do campo Nota; abrir "Cadastrar Assuntos" no Processador; conferir que nada mais mudou.
+- [ ] Ficou de fora (motivo no `estado-atual.md`): o "· Assunto" de `keywordVinculoSummary`/`resolveKeywordVinculo` (o Arquiteto, o MCP e o cabeçalho do painel leem o texto e o campo — mudar mexe em consumidor); `resignApprovalRecord` (usado por `scripts/minerador-backfill-evidencia-serp.mts`); a opção `subjectColumns` do parser de CSV (dentro de uma função viva); o `normalizeIntentKey` importado e sem uso na tela (já estava assim).
+
+## F0 da linha única — cenários-ouro — 2026-10-16
+
+- [x] `npm run test:minerador:cenarios` (cenários + guarda de forma; 45 verdes, 25 `todo`). Cada fase troca o teste "hoje:" pela regra nova e tira o `todo` correspondente (§0.3).
+- [x] (2026-10-16, feita; ver "F1 da linha única" acima) **F1** — tirar os inserts mortos CSV/manual (E-1); o ramo que chama `subjects/import` (A8); os textos A9; `withdrawKeywordSubject` (A10/D4); o catálogo de duas linhas (A12); SUBSTITUÍDO na spec (A13/§5); `package-freshness.ts` e `seo-keyword-research8` (S-8/P-8).
+- [ ] **F2** — `siloPage.keyword` opcional no MCP (G4); uma severidade para o Silo pequeno (G5/D2); uma regra de trava com o volume (G6/A1/E-7/D1); dedup paginada no import comum (E-2); uma leitura de "volume medido" (S-2/A7); descrição do `validate_silo_plan`.
+- [ ] **F3** — o botão Lógica pelo núcleo do servidor (G13/A3); abrir a tela não grava o nicho (G14/A6/D3); todo Status pelo núcleo de decisão (S-6/A4).
+- [ ] **F5/F6** — o site pelo gravador de entrada (E-3); uma chave de dedup (E-4); ids obrigatórios no `import_subject_keywords` e URL publicada no núcleo do cadastro (E-5); allintitle carregando a aprovação (S-1/D6); leitores do MCP pelo resolver (S-7); um envio só e MCP parcial (P-1/D8); desfazer sem voltar dado gravado (P-3/D7); exclusão comum com hash (P-4); a marca de principal órfã não dispensa o Volume (A11).
+- [ ] Fora do Minerador, achado ao rodar `tsc`: 16 erros de tipo em `tests/arquiteto-cenarios-ouro-servidor-2026-10-16.test.mts` (frente do Arquiteto, em paralelo).
 
 ## "Aprovar e enviar" atualiza quem já está no Arquiteto — 2026-10-14
 
@@ -101,8 +123,8 @@ Pedido do dono de 2026-10-13. Detalhe em `docs/03-minerador/estado-atual.md`. **
 - [ ] Dono: homologar o painel (bloco do Assunto em keyword do cadastro, do formato anterior e com marca órfã), o Vínculo sem Assunto (individual e em grupo), dark mode e 360/768/1024/1440 px.
 - [ ] **WifiConecta · azul (Wi-Fi e fibra óptica):** recadastrar os 7 artigos pelo card (Silo existente → Azul → "Colar plano em texto" com o mesmo texto do Silo 2 → prévia → Cadastrar). As keywords existem e já têm a marca de principal; o card as reconhece (estado "mesma keyword, sem volume"). Os títulos estão no histórico (`keyword_subject_history.entryTitle`); os detalhes precisam do texto original.
 - [x] **WifiConecta · laranja (8 Assuntos no formato antigo, já no Arquiteto):** SDD própria escrita e implementada — `docs/compartilhado/sdd-conversao-assunto-legado-2026-10-13.md` (a linha-título NÃO vai para a lixeira: fica arquivada por derivação). Falta o dono executar o runbook (§18).
-- [ ] Sem porta para retirar o Assunto anterior SEM plano (o select do Vínculo saiu): decidir se a conversão acima basta ou se "Tirar do plano" deve aceitar também o Assunto solto.
-- [ ] Limpar código morto: `withdrawKeywordSubject` não tem mais chamador (fica exportado até a decisão acima).
+- [x] (2026-10-16, D4 da SDD da linha única) Sem porta para retirar o Assunto anterior SEM plano (o select do Vínculo saiu): decidido — a conversão resolve o formato anterior; se aparecer o caso, o Assunto solto vira caso de "Tirar do plano" (sem pedido hoje).
+- [x] (2026-10-16, F1 da linha única) Limpar código morto: `withdrawKeywordSubject` não tem mais chamador (fica exportado até a decisão acima). Removido.
 
 ## Cadastro único: o Assunto mora na keyword — 2026-10-13
 
@@ -113,7 +135,7 @@ SDD `docs/compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md` (ADR-022 
 - [x] Núcleo único com destino (Silo novo / existente em acréscimo / publicado) e leitura compatível do plano gravado.
 - [x] Portas antigas fora: diálogo do plano, "Esta lista é: Assunto", declarar a frase na Pesquisa por Assunto, rota `subjects/import` (410), MCP `declare_subjects`.
 - [ ] Dono: homologar o card (Silo 2 em outra cor; Silo 1 como "Silo existente → Laranja", só leitura), dark mode, 360/768/1024/1440 px, foco e Esc.
-- [ ] Limpar o fluxo de Assunto morto em `discovery-source-controls.tsx` (prop `subjectEntry` sem chamador) e as funções de declarar a frase em `subject-search-model.ts`.
+- [x] (2026-10-16, F1 da linha única) Limpar o fluxo de Assunto morto em `discovery-source-controls.tsx` (prop `subjectEntry` sem chamador) e as funções de declarar a frase em `subject-search-model.ts`.
 - [ ] Decidir com o dono: volume medido = 0 conta como "sem volume" (aplicado: livre).
 - [ ] Teste DOM de ponta a ponta do card (prévia com bloqueio, Silo existente carregando as linhas, destino publicado).
 
@@ -531,6 +553,9 @@ SDD: [cache temporário de SERP](../compartilhado/sdd-cache-serp-temporario-2026
 - [x] Contrato de frescor (`lib/minerador/package-freshness.ts`): o Minerador
   responde se o artefato a jusante leu a versão vigente, no vocabulário de
   `staleReasons` do Arquiteto. Keyword em revisão declara, mas não impede.
+  **SUBSTITUÍDO em 2026-10-16:** o arquivo nunca teve chamador em produção e
+  saiu na F1 da linha única; vale o "Aprovar e enviar" que atualiza no
+  Arquiteto o pacote da keyword já recebida (2026-10-14).
 - [ ] Propagação para ArticleDNA já formado: o `ArticleKeywordReference` copia
   volume, resultado, KGR e intenção, então atualizar artigo formado cria versão
   nova do ArticleDNA. Decidido que é automático; ainda não implementado.
@@ -1035,6 +1060,7 @@ O contrato e o código server-side desta fase estão implementados localmente; p
 - Migração local de Volume implementada em 2026-08-03: rota Google Ads tenantizada, conexão por marca, medição versionada, lote interno e projeção após persistência. A migration `0007_minerador_google_ads_volume.sql`, cadastro da conexão e validação manual continuam pendentes.
 - Caminho de cadastro implementado localmente: `POST /api/minerador/marcas/[brandId]/google-ads/conexao` valida a conta antes de gravar. Pendente cadastrar a conexão real da Adalba e validar Lindisse sem conexão.
 - RapidAPI está congelada nos endpoints de volume; sua remoção física, dos normalizadores e testes legados só ocorre depois da paridade confirmada e de uma busca de consumidores vazia.
+  **Feito em 2026-10-16 (F1 da linha única):** busca de consumidores vazia; os normalizadores, as fixtures e os testes da RapidAPI saíram de `lib/minerador/volume-provider.ts` e `tests/`. `/api/volume` continua respondendo 410.
 
 - SDD aprovada em `propostas/migracao-google-ads-retirada-extensao.md`; a decisão ainda não está implementada e não autoriza código automaticamente.
 - Decisão: preservar `allintitle`/KGR históricos; keywords novas podem existir sem ambos; ausência permanece indisponível, nunca zero; Google Ads centraliza ideias, volume, histórico, CPC, lances e concorrência Ads server-side.
