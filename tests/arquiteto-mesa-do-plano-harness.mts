@@ -1,8 +1,7 @@
 import { React } from "./radar-dom-harness.mts";
 import { PlanArticleTableRow, PlanRowActions, PlanRowSeals, PlanSheetOperations, usePlanArticleSheet } from "../modules/arquiteto/plan-article-sheet.tsx";
 import { ArticlesFormationBar } from "../modules/arquiteto/articles-formation-bar.tsx";
-import { planOrderedGroupItems, planRowsWithoutArticle, splitTableSelectionForPlan, type PlanArticleSiloGate, type PlanSheetArticle, type PlanSheetRow } from "../lib/arquiteto/plan-article-sheet.ts";
-import { PlanSiloBar, type PlanSiloBarEntry } from "../modules/arquiteto/plan-silo-bar.tsx";
+import { planOrderedGroupItems, planRowsWithoutArticle, splitTableSelectionForPlan, type PlanSheetArticle, type PlanSheetRow } from "../lib/arquiteto/plan-article-sheet.ts";
 import type { EditorialGroupScreenFilter } from "../lib/editorial/editorial-groups.ts";
 import type { ArchitectSubjectStanding } from "../lib/arquiteto/declared-subject.ts";
 
@@ -11,8 +10,9 @@ import type { ArchitectSubjectStanding } from "../lib/arquiteto/declared-subject
  * (`usePlanArticleSheet`, `ArticlesFormationBar`, `PlanSheetOperations`,
  * `PlanArticleTableRow`, `PlanRowSeals`, `PlanRowActions` e a ordem/seleção
  * do domínio): uma barra, uma tabela. Sem rede real, sem provider, sem custo.
- * 2026-10-14 (noite): extraída do teste "uma tabela só" para os testes das
- * etapas do plano ("Consolidar o Silo do plano").
+ * 2026-10-16 · restauração do fluxo de sempre: a barra é a de sempre
+ * (Processar artigos · Concluir formação · Melhorar publicados…) em todo
+ * recorte; sem etapas do plano e sem a linha "Consolidar o Silo do plano".
  */
 
 const h = React.createElement;
@@ -21,40 +21,10 @@ const VAZIO = new Set<string>();
 
 /** O artigo da mesa, na forma mínima: o Assunto dele diz se é do plano (o mesmo critério da aba). */
 export type ArtigoDaMesa = { id: string; keyword: string; subjectKeywordId: string | null; published?: boolean };
-export type Registro = { processar: string[][]; concluir: string[][]; links: number; pares: Array<{ groupId: string; territoryRef: string; pillarKeywordId: string | null }>; aplicados: number;
-  /** 2026-10-15 · quantas vezes a aba Artigos mandou para a aba Silos. */
-  silos: number };
-export const novoRegistro = (): Registro => ({ processar: [], concluir: [], links: 0, pares: [], aplicados: 0, silos: 0 });
+export type Registro = { processar: string[][]; concluir: string[][]; aplicados: number };
+export const novoRegistro = (): Registro => ({ processar: [], concluir: [], aplicados: 0 });
 
-/**
- * 2026-10-15 · A ABA SILOS com as MESMAS peças: a linha do Silo do plano
- * (`PlanSiloBar`) e a prévia/andamento (`PlanSheetOperations`) sobre o mesmo
- * hook. "Consolidar o Silo do plano" mora aqui; a aba Artigos não o tem.
- */
-export function AbaSilosDoPlano({ marca, keywords, standings, articles, filtro, registro, groupOf, keywordGroupOf, entradas, parDoSilo }: {
-  marca: string;
-  keywords: readonly Record<string, unknown>[];
-  standings?: ReadonlyMap<string, ArchitectSubjectStanding>;
-  articles: readonly PlanSheetArticle[];
-  filtro: EditorialGroupScreenFilter;
-  registro: Registro;
-  groupOf: (id: string) => { color: string; name: string } | null;
-  keywordGroupOf: (id: string) => string | null;
-  entradas: readonly PlanSiloBarEntry[];
-  parDoSilo?: (input: { groupId: string; territoryRef: string; pillarKeywordId: string | null }) => Promise<{ ok: boolean; message: string }>;
-}) {
-  const sheet = usePlanArticleSheet({
-    brandId: marca, brandRef: "wificonecta--d4fa133a", keywords, standings, groupOf, keywordGroupOf, filter: filtro, articles, radarArticleIds: VAZIO,
-    onApplied: () => { registro.aplicados += 1; },
-    consolidateSiloPair: async input => { registro.pares.push(input); return parDoSilo ? parDoSilo(input) : { ok: true, message: "SiloDNA v1 e SiloPage v1 gravados e relidos, com o Pilar e a ordem do plano." }; },
-  });
-  return h(React.Fragment, null,
-    h(PlanSiloBar, { entries: entradas, sheet, onRecreate: () => undefined, buttonClassName: "button", primaryButtonClassName: "primary" }),
-    h(PlanSheetOperations, { sheet, buttonClassName: "button", primaryButtonClassName: "primary", controlClassName: "control", dangerButtonClassName: "danger" }),
-  );
-}
-
-export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro, registro, groupOf, keywordGroupOf, siloConsolidado = false, parDoSilo, hasPublished = false, siloGate }: {
+export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro, registro, groupOf, keywordGroupOf }: {
   marca: string;
   keywords: readonly Record<string, unknown>[];
   /** Como na aba: o Assunto lido do pacote aprovado, à parte da linha (a linha que veio do ArticleDNA não traz a semântica). */
@@ -65,20 +35,10 @@ export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro
   registro: Registro;
   groupOf: (id: string) => { color: string; name: string } | null;
   keywordGroupOf: (id: string) => string | null;
-  siloConsolidado?: boolean;
-  parDoSilo?: (input: { groupId: string; territoryRef: string; pillarKeywordId: string | null }) => Promise<{ ok: boolean; message: string }>;
-  hasPublished?: boolean;
-  /** 2026-10-15 · o portão do Silo do plano (aba Silos); ausente = Silo decidido, página pelo `siloConsolidado`. */
-  siloGate?: PlanArticleSiloGate;
 }) {
   const sheet = usePlanArticleSheet({
     brandId: marca, brandRef: "wificonecta--d4fa133a", keywords, standings, groupOf, keywordGroupOf, filter: filtro, articles, radarArticleIds: VAZIO,
     onApplied: () => { registro.aplicados += 1; },
-    siloConsolidatedOf: () => siloConsolidado,
-    ...(siloGate ? { siloGateOf: () => siloGate } : {}),
-    onGoToSilos: () => { registro.silos += 1; },
-    consolidateSiloPair: async input => { registro.pares.push(input); return parDoSilo ? parDoSilo(input) : { ok: true, message: "SiloDNA v1 e SiloPage v1 gravados e relidos, com o Pilar e a ordem do plano." }; },
-    onGoToLinks: () => { registro.links += 1; },
   });
   const [selecionados, setSelecionados] = React.useState<Set<string>>(new Set());
   const planRowOf = (art: ArtigoDaMesa): PlanSheetRow | null => !art.published && art.subjectKeywordId ? sheet.rowByKeywordId.get(art.subjectKeywordId) ?? null : null;
@@ -93,7 +53,7 @@ export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro
       formationBusy: false, processed: false, selectionScope: escopo, planTargets: divisao.planTargets, planSheet: sheet,
       onProcess: async () => { registro.processar.push([...divisao.regularArticleIds]); },
       onConfirm: async () => { registro.concluir.push([...divisao.regularArticleIds]); },
-      improvementOpen: false, onToggleImprovement: () => undefined, buttonClassName: "button", primaryButtonClassName: "primary", hasPublished,
+      improvementOpen: false, onToggleImprovement: () => undefined, buttonClassName: "button",
     }),
     h(PlanSheetOperations, { sheet, buttonClassName: "button", primaryButtonClassName: "primary", controlClassName: "control", dangerButtonClassName: "danger" }),
     h("table", { "data-architect-table": "articles" }, h("tbody", null, itens.map(item => item.kind === "plan"
@@ -105,5 +65,9 @@ export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro
   );
 }
 
-/** Os rótulos que o dono mandou tirar da aba (2026-10-14): nenhum pode aparecer fora da barra. */
-export const ROTULOS_REMOVIDOS = [/Ir para “Artigos do plano”/, /Abrir “Melhorar publicados”/, /Marcar toda a cor/, /Validar SERP \(\d+\)/, /Trocar principal/, /Concluir formação \(\d+\)/, /Próximo passo/, /Melhorar publicados · recolhido/, /Detalhes técnicos/, /mude a trava no Minerador/, /Volume de outra fonte/];
+/**
+ * Os rótulos que o dono mandou tirar da aba (2026-10-14) e as portas paralelas
+ * que saíram na restauração (2026-10-16): nenhum pode aparecer na mesa.
+ */
+export const ROTULOS_REMOVIDOS = [/Ir para “Artigos do plano”/, /Abrir “Melhorar publicados”/, /Marcar toda a cor/, /Validar SERP \(\d+\)/, /Trocar principal/, /Concluir formação \(\d+\)/, /Próximo passo/, /Melhorar publicados · recolhido/, /mude a trava no Minerador/, /Volume de outra fonte/,
+  /1 · Formar/, /2 · Reforçar/, /3 · Linha editorial/, /4 · Links internos/, /Consolidar o Silo do plano/, /Completar sustentações e SERP/];

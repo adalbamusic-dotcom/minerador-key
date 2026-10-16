@@ -1022,12 +1022,12 @@ test("F5 · Concluir formação pela planilha: alvo que não é do plano é recu
   assert.deepEqual(minerador(), { measured: 0, logic: 0, qualification: 0, replays: 0, medicoes: 0 }, "nada gravado no Minerador");
 });
 
-test("F5 · o painel de texto fica para publicados: excludePlanArticles tira o Assunto com plano dos alvos", async () => {
+test("F5 · a opção aditiva excludePlanArticles tira o Assunto com plano dos alvos; sem ela (o painel desde 2026-10-16), o artigo do plano entra", async () => {
   planSheetScenario();
-  const painel = await handleArticleImprovement(runtime, { brandId, action: "prepare", excludePlanArticles: true });
-  assert.equal(painel.targets.some(target => target.id === oldId), false, "o artigo do plano é da planilha");
+  const comOpcao = await handleArticleImprovement(runtime, { brandId, action: "prepare", excludePlanArticles: true });
+  assert.equal(comOpcao.targets.some(target => target.id === oldId), false, "com a opção, só publicados");
   const sem = await handleArticleImprovement(runtime, { brandId, action: "prepare" });
-  assert.equal(sem.targets.some(target => target.id === oldId), true, "sem a opção, o contrato de sempre");
+  assert.equal(sem.targets.some(target => target.id === oldId), true, "sem a opção (o painel 'Melhorar publicados…'), o artigo do plano é alvo do reforço");
 });
 
 /*
@@ -1050,63 +1050,20 @@ test("2026-10-14 · Concluir formação pela planilha: keyword presa no artigo d
 });
 
 /*
- * 2026-10-14 (noite) · "CONSOLIDAR O SILO DO PLANO" (pedido do dono: "era só
- * olhar e consolidar"). O artigo do plano sem ArticleDNA é gravado v1 a partir
- * do plano — principal = a keyword do plano (livre ou travada; consolidar nunca
- * troca), sustentações já ligadas, papel e escopo do plano — pela MESMA
- * montagem e gravação da melhoria, SEM SERP e sem IA; a decisão humana fica
- * escrita no DNA. Depois, a etapa 2 grava a versão com o parecer.
+ * 2026-10-16 · RESTAURAÇÃO DO FLUXO DE SEMPRE: o núcleo "Consolidar o Silo do
+ * plano" saiu (ele gravava o ArticleDNA v1 SEM parecer de SERP, com a marca
+ * "Consolidado do plano do Minerador"). Os DNA já gravados assim ficam como
+ * estão; a melhoria (o painel "Melhorar publicados…" ou "Concluir formação"
+ * de antes) os trata como prontos para receber o parecer e tira a marca.
  */
-const consolidacao = await import("../lib/server/arquiteto-plan-consolidation.ts");
-const gruposDoPlano = async () => [{ id: planGroupId, name: "Wi-Fi e fibra óptica", color: "azul" as const, origin: "declared_plan" as const, status: "active" as const, plan: { siloName: "Wi-Fi e fibra óptica", siloSlug: "wifi-e-fibra", objective: "Conquistar quem quer entender a tecnologia.", articleCount: 7 }, planVersion: 3, planHash: null, siloId: territory, lockVersion: 1 }];
-
-test("Consolidar o Silo do plano · a linha livre e sem volume grava o ArticleDNA v1 do plano SEM SERP e sem IA, com a decisão humana no DNA; repetir não duplica; nada no Minerador", async () => {
-  planSheetScenario();
-  const previa = await consolidacao.previewPlanConsolidation(context, planGroupId, { groupPlans: gruposDoPlano });
-  assert.equal(previa.territory.kind, "rows", "o Silo é aquele em que as keywords do plano já estão");
-  const linha = previa.lines.find(item => item.keywordId === oldId)!;
-  assert.equal(linha.action, "write");
-  assert.deepEqual(linha.memberIds, [oldId, newId], "a principal do plano e a sustentação já ligada (com volume)");
-  assert.deepEqual(linha.alerts, ["sem volume — livre, pode trocar"]);
-  assert.deepEqual(previa.acceptedKeywordIds, [oldId]);
-  assert.equal(articles.length, 0, "a prévia não grava");
-  const feito = await consolidacao.applyPlanConsolidationLine(runtime, { groupId: planGroupId, decisionHash: previa.decisionHash, acceptedKeywordIds: previa.acceptedKeywordIds, keywordId: oldId }, { groupPlans: gruposDoPlano });
-  assert.equal(feito.status, "written", feito.message);
-  assert.equal(articles.length, 1);
-  const dna = articles[0].payload;
-  assert.equal(articles[0].versionNumber, 1);
-  assert.equal(dna.principalKeywordId, oldId, "consolidar nunca troca a principal (a livre também fica)");
-  assert.equal(dna.subject.keywordId, oldId);
-  assert.equal(dna.hierarchy, "Suporte", "o papel do plano");
-  assert.equal(dna.promise, "Explica a diferença entre a internet contratada e a rede Wi-Fi da casa.", "o escopo do plano vira a promessa");
-  assert.deepEqual(dna.keywordReferences.map((reference: any) => reference.keywordId).sort(), [oldId, newId].sort());
-  assert.equal(dna.serpAssessmentRef, undefined, "sem parecer de SERP: é a etapa 2");
-  assert.equal(dna.architectureStatus, "architecture_confirmed");
-  assert.ok(dna.alerts.some((alerta: string) => /^Consolidado do plano do Minerador \(decisão humana de 11111111-1111-4111-8111-111111111111 em \d{4}-\d{2}-\d{2}\)/.test(alerta)), JSON.stringify(dna.alerts));
-  assert.equal(assessments.length, 0, "nenhuma leitura de SERP");
-  assert.equal(paid, 0);
-  assert.ok(marker.payload.concludedFormations.some((formacao: any) => formacao.materializedArticleId === dna.articleId), "o marcador registra a formação (o fechamento do Silo a lê)");
-  assert.equal(rows.find(row => row.id === newId).articleFormationDecision.role, "secundaria");
-  // A MESMA confirmação, de novo: a linha já está formada com a mesma composição — nada é regravado.
-  const repetido = await consolidacao.applyPlanConsolidationLine(runtime, { groupId: planGroupId, decisionHash: previa.decisionHash, acceptedKeywordIds: previa.acceptedKeywordIds, keywordId: oldId }, { groupPlans: gruposDoPlano });
-  assert.equal(repetido.status, "kept");
-  assert.equal(articles.length, 1);
-  assert.deepEqual(minerador(), { measured: 0, logic: 0, qualification: 0, replays: 0, medicoes: 0 });
-});
-
-test("Consolidar o Silo do plano · hash de outra prévia (o plano ou o artigo mudou): recusa sem gravar", async () => {
-  planSheetScenario();
-  const previa = await consolidacao.previewPlanConsolidation(context, planGroupId, { groupPlans: gruposDoPlano });
-  await assert.rejects(() => consolidacao.applyPlanConsolidationLine(runtime, { groupId: planGroupId, decisionHash: "f".repeat(64), acceptedKeywordIds: previa.acceptedKeywordIds, keywordId: oldId }, { groupPlans: gruposDoPlano }), /mudou desde a prévia/);
-  await assert.rejects(() => consolidacao.applyPlanConsolidationLine(runtime, { groupId: planGroupId, decisionHash: previa.decisionHash, acceptedKeywordIds: previa.acceptedKeywordIds, keywordId: newId }, { groupPlans: gruposDoPlano }), /não foi aceita na prévia/);
-  assert.equal(articles.length, 0);
-});
-
-test("etapa 2 · o consolidado sem SERP (travado) volta a ficar pronto: com a SERP no cache, a melhoria grava a v2 com o parecer e tira a marca 'sem parecer'", async () => {
+test("A4 · ArticleDNA 'Consolidado do plano do Minerador' sem SERP (gravado antes de 16/10) volta pronto: com a SERP no cache, a melhoria grava a v2 com o parecer e tira a marca", async () => {
   planSheetScenario("locked");
-  const previa = await consolidacao.previewPlanConsolidation(context, planGroupId, { groupPlans: gruposDoPlano });
-  await consolidacao.applyPlanConsolidationLine(runtime, { groupId: planGroupId, decisionHash: previa.decisionHash, acceptedKeywordIds: previa.acceptedKeywordIds, keywordId: oldId }, { groupPlans: gruposDoPlano });
+  const primeiro = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
+  await handleArticleImprovement(runtime, { brandId, action: "apply", runId: primeiro.runId, decisionHash: primeiro.decisionHash, targetIds: [oldId] });
   assert.equal(articles.length, 1);
+  // O dado gravado pelo núcleo que saiu: sem parecer de SERP e com a marca da decisão humana.
+  const gravado = articles[0];
+  gravado.payload = { ...gravado.payload, serpAssessmentRef: undefined, alerts: [...(gravado.payload.alerts ?? []), "Consolidado do plano do Minerador (decisão humana de 11111111-1111-4111-8111-111111111111 em 2026-10-15): papel, ordem, principal e escopo do plano; sem parecer de SERP."] };
   const run = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
   const proposta = run.proposals.find(p => p.targetId === oldId)!;
   assert.equal(proposta.status, "ready", JSON.stringify(run.proposals));
@@ -1140,7 +1097,7 @@ function soltaScenario(opcoes: { lock?: "locked" | "free"; volumeDaPrincipal?: n
   gruposDasKeywords = new Map([[oldId, planGroupId], [newId, planGroupId]]);
 }
 
-test("2026-10-15 · etapa 2 recortada pelo grupo: a keyword SOLTA (sem Assunto, sem grupo) entra na lista; principal Livre sem volume pode virar a solta com volume", async () => {
+test("2026-10-15 · a melhoria recortada pelo grupo: a keyword SOLTA (sem Assunto, sem grupo) entra na lista; principal Livre sem volume pode virar a solta com volume", async () => {
   soltaScenario();
   const run = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
   assert.equal(run.groupScope?.groupId, planGroupId, "o recorte é o do grupo do plano");
@@ -1154,7 +1111,7 @@ test("2026-10-15 · etapa 2 recortada pelo grupo: a keyword SOLTA (sem Assunto, 
   assert.equal(paid, 0);
 });
 
-test("2026-10-15 · etapa 2: principal Travada ou Livre COM volume definido fica; a solta entra só como secundária", async () => {
+test("2026-10-15 · a melhoria: principal Travada ou Livre COM volume definido fica; a solta entra só como secundária", async () => {
   for (const caso of [{ lock: "locked" as const }, { volumeDaPrincipal: 30 }]) {
     soltaScenario(caso);
     const run = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });

@@ -146,18 +146,13 @@ export function planSiloHeadKeywordIds(input: {
   return cabecas;
 }
 
-/** A frase da keyword do Silo: reconhecida como cabeça, ou ausente — e ausente é normal. */
-export function planSiloHeadSentence(input: { siloName: string; siloSlug: string | null; head: { keyword: string } | null }): string {
-  if (input.head) return `Keyword do Silo: “${input.head.keyword}” — cabeça da SiloPage (nunca vira artigo nem “não agrupada”).`;
-  return `Keyword do Silo: nenhuma no Arquiteto — normal (0 volume, não cadastrada, Silo não indexado). A identidade vem do plano: “${input.siloName}”${input.siloSlug ? ` · /${input.siloSlug}` : ""}.`;
-}
-
 /**
  * NUNCA CONVERTER ARTIGO EM SILO, NUNCA DOIS SILOS DO MESMO PLANO. Antes de
  * criar um Silo (manual, sugestão, "Usar como Silo"), a aba pergunta isto:
  * o nome/slug pedido é o de um Silo do plano, ou a keyword escolhida é artigo
- * do plano? Então a criação é recusada com o caminho ("Consolidar o Silo do
- * plano", que recria ou reusa o Silo exatamente com o nome e o slug do plano).
+ * do plano? Então a criação é recusada com o caminho de sempre ("Processar
+ * arquitetura" propõe o Silo do plano com o nome e o slug do plano e
+ * "Confirmar propostas novas" o confirma; desfeito, "Recriar o Silo do plano").
  * `null` = livre para seguir como sempre (marca sem plano).
  */
 export function planSiloCreationRefusal(input: {
@@ -170,81 +165,19 @@ export function planSiloCreationRefusal(input: {
 }): string | null {
   const artigos = input.planArticleKeywordIds ?? new Set<string>();
   const artigo = (input.keywordIds ?? []).find(id => artigos.has(id));
-  if (artigo) return "Esta keyword é artigo do plano (Pilar ou Suporte): artigo do plano nunca vira Silo. O Silo do plano é o do cadastro — use “Consolidar o Silo do plano” na aba Silos.";
+  if (artigo) return `Esta keyword é artigo do plano (Pilar ou Suporte): artigo do plano nunca vira Silo. O Silo do plano é o do cadastro — ${PLAN_SILO_PATH}.`;
   const pedidos = new Set([planSiloTextKey(input.name), planSiloTextKey(input.slug)].filter(Boolean));
   if (!pedidos.size) return null;
   const plano = input.plans.find(plan => pedidos.has(planSiloTextKey(plan.siloName)) || pedidos.has(planSiloTextKey(plan.siloSlug)));
   if (!plano) return null;
   const existente = input.existingTerritoryName?.(plano.groupId) ?? null;
   return existente
-    ? `“${plano.siloName}” é o Silo do plano${plano.groupLabel ? ` ${plano.groupLabel}` : ""} e já existe (“${existente}”): não se cria um segundo. Use “Consolidar o Silo do plano” na aba Silos.`
-    : `“${plano.siloName}” é o Silo do plano${plano.groupLabel ? ` ${plano.groupLabel}` : ""}: ele é criado (ou recriado) com o nome e o slug do plano por “Consolidar o Silo do plano”, na aba Silos — não por aqui.`;
+    ? `“${plano.siloName}” é o Silo do plano${plano.groupLabel ? ` ${plano.groupLabel}` : ""} e já existe (“${existente}”): não se cria um segundo.`
+    : `“${plano.siloName}” é o Silo do plano${plano.groupLabel ? ` ${plano.groupLabel}` : ""}: ele nasce com o nome e o slug do plano — ${PLAN_SILO_PATH} — não por aqui.`;
 }
 
-/** Em que pé está o Silo do plano, para a linha da aba Silos e o portão da aba Artigos. */
-export type PlanSiloStage =
-  /** Desfeito por alguém: volta por "Recriar o Silo do plano". */
-  | "rejected"
-  /** As keywords do plano estão em Silos diferentes: decisão humana em Silos. */
-  | "split"
-  /** Não existe: "Consolidar o Silo do plano" cria com nome, slug e objetivo do plano. */
-  | "create"
-  /** Existe como candidato: a consolidação confirma. */
-  | "confirm"
-  /** Existe e está confirmado, mas o grupo aponta para outro Silo ou há keyword do plano sem Silo. */
-  | "link"
-  /** Falta o par SiloDNA + SiloPage e o Pilar do plano já tem ArticleDNA: a consolidação grava o v1. */
-  | "pair"
-  /** O par existe com tema/Pilar/ordem fora do plano: a consolidação grava a versão seguinte. */
-  | "fix"
-  /** Silo pronto; o par espera o Pilar do plano ter ArticleDNA (aba Artigos, etapa 1). */
-  | "wait_articles"
-  /** Silo e página do Silo em dia. */
-  | "done";
-
-export type PlanSiloStatus = {
-  stage: PlanSiloStage;
-  /** A linha da aba Silos tem o que consolidar agora (o botão fica em destaque). */
-  actionable: boolean;
-  /** O Silo existe e está decidido (confirmado/consolidado): a aba Artigos pode formar. */
-  readyForArticles: boolean;
-  /** SiloDNA + SiloPage em dia com o plano: os links internos podem seguir. */
-  pairCurrent: boolean;
-  sentence: string;
-};
-
-const DECIDIDOS = new Set(["confirmed", "consolidated"]);
-
-export function planSiloStatus(input: {
-  siloName: string;
-  territory: { territoryRef: string; lifecycleStatus: string; name?: string | null } | null;
-  linkedTerritoryRef: string | null;
-  rejected: boolean;
-  split: boolean;
-  /** Keywords do plano recebidas no Arquiteto ainda sem Silo. */
-  keywordsWithoutSilo: number;
-  pair: "missing" | "current" | "fix";
-  pillarFormed: boolean;
-}): PlanSiloStatus {
-  const nome = input.territory?.name || input.siloName;
-  const pronto = Boolean(input.territory && DECIDIDOS.has(input.territory.lifecycleStatus));
-  const base = { readyForArticles: pronto, pairCurrent: pronto && input.pair === "current" };
-  if (!input.territory && input.rejected) return { ...base, stage: "rejected", actionable: true, sentence: `O Silo do plano “${input.siloName}” foi desfeito: recrie-o (prévia antes; nada é apagado).` };
-  if (input.split) return { ...base, stage: "split", actionable: false, sentence: "As keywords do plano estão em Silos diferentes: decida qual é o do plano antes de consolidar." };
-  if (!input.territory) return { ...base, stage: "create", actionable: true, sentence: `O Silo do plano “${input.siloName}” ainda não existe: consolidar cria com o nome, o slug e o objetivo do plano (sem keyword do Silo, normal).` };
-  if (!pronto) return { ...base, stage: "confirm", actionable: true, sentence: `O Silo do plano “${nome}” é candidato: consolidar o confirma com a identidade do plano.` };
-  if (input.linkedTerritoryRef !== input.territory.territoryRef || input.keywordsWithoutSilo > 0) {
-    // 2026-10-15 (noite) · a página do Silo fora do plano também é dita aqui: a mesma confirmação a corrige (versão seguinte).
-    return { ...base, stage: "link", actionable: true, sentence: `O Silo do plano “${nome}” existe${input.keywordsWithoutSilo ? `; ${input.keywordsWithoutSilo} keyword(s) do plano sem Silo entram nele` : ""}${input.linkedTerritoryRef !== input.territory.territoryRef ? "; o grupo volta a apontar para ele" : ""}${input.pair === "fix" ? "; a página do Silo está fora do plano e é corrigida na versão seguinte" : ""}.` };
-  }
-  if (input.pair === "fix") return { ...base, stage: "fix", actionable: true, sentence: `A página do Silo “${nome}” está fora do plano (tema, Pilar ou ordem): consolidar grava a versão seguinte.` };
-  if (input.pair === "missing") {
-    return input.pillarFormed
-      ? { ...base, stage: "pair", actionable: true, sentence: `O Silo do plano “${nome}” está pronto: consolidar grava o SiloDNA e a SiloPage com o Pilar e a ordem do plano.` }
-      : { ...base, stage: "wait_articles", actionable: false, sentence: `O Silo do plano “${nome}” está pronto. A página do Silo (SiloDNA e SiloPage) é gravada quando o Pilar do plano tiver ArticleDNA — forme os artigos na aba Artigos.` };
-  }
-  return { ...base, stage: "done", actionable: false, sentence: `O Silo do plano “${nome}” e a página dele seguem o plano.` };
-}
+/** O caminho de sempre do Silo do plano, dito nas recusas (2026-10-16: restauração do fluxo de sempre). */
+export const PLAN_SILO_PATH = "na aba Silos, “Processar arquitetura” o propõe e “Confirmar propostas novas” o confirma (desfeito: “Recriar o Silo do plano”)";
 
 /** O que a regra precisa do grupo com plano. */
 export type DeclaredPlanGroupView ={ groupId: string; groupLabel: string; siloName: string; siloSlug: string | null; linkedTerritoryRef: string | null };

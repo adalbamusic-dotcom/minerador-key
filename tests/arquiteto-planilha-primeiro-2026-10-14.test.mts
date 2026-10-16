@@ -212,9 +212,8 @@ const semComentarios = (codigo: string) => codigo.replace(/\/\*[\s\S]*?\*\//g, "
 test("estrutural · a planilha só chama a melhoria, a SERP por keyword e a leitura do cache: nada no Minerador", () => {
   const tela = semComentarios(ler("../modules/arquiteto/plan-article-sheet.tsx"));
   const rotas = [...tela.matchAll(/["'`](\/api\/[^"'`?$]+)/g)].map(match => match[1]).sort();
-  // 2026-10-14 (noite) · + "Consolidar o Silo do plano" (rota do Arquiteto; nada no Minerador).
-  // 2026-10-15 · + "Corrigir a página do Silo (vN+1)" pelo núcleo de "Aplicar o plano declarado ao Silo" (rota do Arquiteto).
-  assert.deepEqual([...new Set(rotas)], ["/api/arquiteto/article-improvement", "/api/arquiteto/keyword-serp", "/api/arquiteto/plan-silo/consolidate", "/api/arquiteto/serp-subject", "/api/arquiteto/silo-declared-plan"]);
+  // 2026-10-16 · restauração do fluxo de sempre: sem "Consolidar o Silo do plano" nem "Linha editorial", as rotas são as de 99ec14f.
+  assert.deepEqual([...new Set(rotas)], ["/api/arquiteto/article-improvement", "/api/arquiteto/keyword-serp", "/api/arquiteto/serp-subject"]);
   assert.doesNotMatch(tela, /\/api\/minerador/);
   assert.doesNotMatch(tela, /measureKeywordVolume|runKeywordLogicWithCore|importSubjectDiscoveryWithCore|applyKeywordDecisionEntries|approveNewKeywords|keywords\/delete/);
   assert.match(tela, /onlyMeasuredVolume: true/, "o servidor confere o volume no banco antes de pagar");
@@ -229,10 +228,11 @@ test("estrutural · a planilha só chama a melhoria, a SERP por keyword e a leit
   assert.doesNotMatch(dominio, /fetch\(|supabase|\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
 });
 
-test("estrutural · o painel de texto fica para publicados; as outras portas apontam para a planilha", () => {
+test("estrutural · o painel 'Melhorar publicados' inclui os Assuntos com plano (como em 4d546ce); as linhas do plano estão na tabela", () => {
   const painel = semComentarios(ler("../modules/arquiteto/article-improvement-panel.tsx"));
   assert.doesNotMatch(painel, /planGroups|Formar os artigos do plano|architect-improvement-plan-group/);
-  assert.match(painel, /excludePlanArticles: true/);
+  // 2026-10-16 · restauração do fluxo de sempre: o painel volta a reforçar os artigos do plano (sem excludePlanArticles).
+  assert.doesNotMatch(painel, /excludePlanArticles/);
   assert.match(painel, /restored\.origin === "plan_sheet"/, "o painel não retoma a execução da planilha");
   const tela = semComentarios(ler("../modules/arquiteto/arquiteto-workspace.tsx"));
   assert.doesNotMatch(tela, /planGroups=/);

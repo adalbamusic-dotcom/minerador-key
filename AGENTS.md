@@ -21,6 +21,70 @@ A fase vigente é `FUNCTIONAL_AREA_DEVELOPMENT`, na ordem:
 `Marca → Minerador → Arquiteto → Radar → Redator → Publicações`.
 Não reabrir o refresh para desenvolver uma área funcional.
 
+## 0. Regras do dono — valem para todas as áreas (2026-10-16)
+
+Origem: o Arquiteto "se perdeu por completo" entre 14 e 15/10. Pedidos de
+corrigir erros e limpar botões viraram uma barra de etapas nova, rotas novas,
+uma etapa que ligava só parte do motor de reforço e funções que ficaram sem
+porta. O dono, literal: "vocês não podem ficar mudando as funcionalidades";
+"toda arrumação tem que ser em cima dos processos e funcionalidades que já
+existem em cada área… nada pode ser criado outro em paralelo, nem para cada
+marca, nem para cada tipo de erro ou situação; todas têm que ser no mesmo, e
+essa mesma linha de processo vai se atualizando e melhorando".
+
+### 0.1 Uma linha de processo por área — nunca paralela
+
+- Cada área tem UMA linha de processo: a dos contratos (spec, SDD aprovada,
+  catálogo `lib/agent/platform-catalog.ts`), com os botões e núcleos de servidor
+  que já existem.
+- Erro, bug ou caso novo (marca nova, plano declarado, publicado, keyword
+  solta, Silo sem keyword…) se resolve DENTRO dessa linha: corrigir a causa no
+  núcleo e no botão que já executam a etapa. A linha ganha o caso; não nasce
+  outra.
+- Proibido sem pedido explícito do dono: rota, etapa, barra, botão, painel ou
+  núcleo novo que faça o que um existente já faz (ou faz em parte); caminho
+  separado por marca, por tipo de erro ou por situação; esconder ou remover
+  função ao "limpar a tela".
+- Limpar a tela = tirar DUPLICATAS (a mesma ação em dois lugares) e ruído de
+  texto. Nunca é tirar função.
+- Quando parecer que algo precisa mudar de processo: parar, mostrar ao dono o
+  que sai e o que entra, e esperar a decisão. Ao delegar a agentes, o prompt
+  diz "não mudar funcionalidade; só corrigir dentro da linha existente", e o
+  relatório é revisado procurando portas novas ou funções sumidas antes de ser
+  repassado.
+
+### 0.2 SEO semântico em todas as áreas
+
+Todo trabalho de keyword, agrupamento, reforço, investigação, escrita e links
+segue o SEO semântico (entidades, intenção, contexto e cobertura do tópico),
+com a SERP como autoridade acima da lógica e da IA (4 lentes). Em especial:
+
+- **Arquiteto:** agrupa as keywords pelo contexto semântico (entidade central,
+  intenção, problema e resultado do DNA de cada keyword, confirmados pela SERP).
+  Reforça os artigos já montados — novos, publicados e os que chegam definidos
+  pelo plano do Minerador — com keywords de reforço editorial: lê os DNAs, acha
+  o membro mais fraco, compara com as coletas da SERP, usa a lista da marca
+  (inclusive keywords soltas, sem Assunto, conforme o DNA delas, como
+  secundária ou principal) e só então busca novas. Monta o Silo interligado
+  (SDD `sdd-silo-interligado-seo-semantico-2026-10-14.md`).
+- As demais áreas aplicam o mesmo princípio dentro das próprias fronteiras
+  (Minerador qualifica; Radar investiga; Redator escreve; Publicações registra).
+
+### 0.3 Não regressão — o fluxo inteiro testado em automático
+
+- Existe uma suíte de cenários de fluxo (cenários-ouro) que roda a linha de
+  processo de ponta a ponta com fixtures, sem chamada paga. Ela cobre as
+  situações já resolvidas: marca sem plano; grupo com plano declarado (com e
+  sem keyword do Silo); publicados (reforço, diferenciação, troca da principal
+  Livre); keywords soltas; trava e volume. Cada cenário chega à conclusão
+  esperada e documentada no contrato da área.
+- Toda mudança de regra ou de funcionalidade atualiza ou acrescenta o cenário
+  na mesma entrega. Toda situação nova vira cenário novo da MESMA linha, nunca
+  um fluxo à parte.
+- A suíte também guarda a forma da linha: os botões e etapas do contrato
+  existem uma vez cada, e não existe porta paralela.
+- Entrega sem a suíte verde não é entrega.
+
 ## 1. Fontes de verdade
 
 Antes de alterar código ou documentação, leia:

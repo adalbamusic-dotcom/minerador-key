@@ -94,12 +94,11 @@ test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mes
   assert.equal(screen.query("architect-plan-operations"), null, "a prévia só aparece quando há ação");
   const ordem = [...screen.container.querySelectorAll<HTMLElement>("tbody > tr")].map(tr => tr.dataset.keywordId ?? tr.dataset.articleId);
   assert.deepEqual(ordem, ["cand-k9", "cand-k10", "cand-k11", "k12", "k13", "k14", "cand-k15", "comum-1"], "a ordem do plano (9–15), e os demais depois");
-  // A barra: um plano no recorte → o botão da etapa atual, sem contador; sem publicados, nada mais.
+  // 2026-10-16 · restauração do fluxo de sempre: com um plano no recorte, a barra é a de sempre (sem etapas do plano).
   const barra = screen.get("architect-articles-formation-actions");
-  assert.equal(barra.dataset.planMode, "true");
-  // 2026-10-15 · as etapas só de artigo: a atual em destaque, as seguintes desabilitadas (no máximo 3 botões).
-  assert.deepEqual([...barra.querySelectorAll("button")].map(botao => botao.textContent), ["1 · Formar artigos do plano", "2 · Reforçar keywords e SERP", "3 · Linha editorial"]);
-  assert.deepEqual([...barra.querySelectorAll<HTMLButtonElement>("button")].map(botao => botao.disabled), [false, true, true]);
+  assert.equal(barra.dataset.planMode, undefined);
+  assert.deepEqual([...barra.querySelectorAll("button")].map(botao => botao.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
+  assert.deepEqual([...barra.querySelectorAll<HTMLButtonElement>("button")].map(botao => botao.disabled), [true, true, false], "sem nada marcado, Processar e Concluir esperam a seleção");
   // A linha do artigo do plano ganha os selos curtos: trava, volume, SERP e formação.
   const selosK9 = [...linhaDaMesa("cand-k9").querySelectorAll<HTMLElement>("[data-plan-seal]")].map(selo => `${selo.dataset.planSeal}:${selo.textContent}`);
   assert.deepEqual(selosK9, ["lock:Travada", "volume:Vol. 5.400", "serp:SERP 4/4", "formation:Aguardando formação"]);
@@ -129,7 +128,6 @@ test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mes
 test("'Todos' (azul e laranja com plano): a barra de sempre — Processar artigos com linhas do plano marcadas: o comum vai ao handler de sempre; as do plano, ao Validar SERP com custo antes", async () => {
   rede();
   await screen.render(mesaWifi(TODOS)); await assentar();
-  assert.match(screen.get("architect-articles-selection-count").textContent!, /Escolha a cor do plano na etiqueta para as etapas dos artigos do plano \(o Silo do plano é consolidado na aba Silos\)/);
   await marcar(linhaDaMesa("cand-k9"));
   await marcar(linhaDoPlano("k13")!);
   await marcar(linhaDaMesa("comum-1"));
@@ -171,6 +169,20 @@ test("'Todos' · Concluir formação (barra) com o plano azul marcado: as 3 pres
   assert.match(linhaDoPlano("k14")!.querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /^Não gravado: Presa no artigo/);
   assert.match(screen.get("architect-plan-sheet-summary").textContent!, /4 gravado\(s\) e relido\(s\); 3 fora desta confirmação/);
   assert.equal(registro.aplicados, 1, "a mesa é relida");
+  semMinerador();
+});
+
+test("2026-10-16 · Concluir formação FORMA: a linha do plano já formada fica fora com o caminho do reforço ('Melhorar publicados…'); só a sem ArticleDNA vai ao servidor", async () => {
+  rede();
+  const formadoK9 = { articleId: "art-k9", versionNumber: 2, subjectKeywordId: "k9", principalKeywordId: "k9", keywordIds: ["k9"] };
+  await screen.render(comProductShell(h(MesaDoPlano, { marca: MARCA_WIFI, keywords: mesaWifiReal(), articles: [ARTIGO_INTRUSO, formadoK9], mesa: MESA_WIFI, filtro: AZUL_FILTRO, registro, groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal }))); await assentar();
+  await marcar(linhaDaMesa("cand-k9"));
+  await marcar(linhaDaMesa("cand-k10"));
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  const preparos = chamadas.filter(chamada => chamada.body?.action === "prepare");
+  assert.deepEqual(preparos.map(chamada => chamada.body.targetIds), [["k10"]], "o formado não vai de novo à formação");
+  const linhaK9 = [...screen.all("architect-plan-sheet-preview-line")].find(item => item.textContent!.startsWith("internet fibra óptica"))!;
+  assert.match(linhaK9.textContent!, /Formado · v2: já formado — para reforçar com keywords de respaldo, use “Melhorar publicados…”/);
   semMinerador();
 });
 

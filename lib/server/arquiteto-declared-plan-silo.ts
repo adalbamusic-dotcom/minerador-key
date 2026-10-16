@@ -72,26 +72,15 @@ export async function canApprove(context: PipelineContext): Promise<boolean> {
  * As keywords recebidas do grupo que ainda não têm Silo vão para o Silo do
  * plano, pela decisão de Silo de sempre (`planSiloDecisionBatch` → PATCH
  * canônico da mesa), e são relidas. Keyword publicada ou já em outro Silo não
- * é movida (`keptElsewhere`). Usado pelo envio e por "Consolidar o Silo do plano".
+ * é movida (`keptElsewhere`). Usado pelo envio (extraído do passo 3 de
+ * `materializeDeclaredPlanSilo`, sem mudar o comportamento).
  */
-export async function assignPlanGroupKeywordsToTerritory(context: PipelineContext, input: { groupId: string; territoryRef: string; territories: readonly TerritoryWorkflowItem[]; patch?: Patch; decidedAt: string;
-  /**
-   * 2026-10-15 · aditivo: a keyword do Silo do plano (texto = nome/slug do
-   * plano; sem grupo). Opcional; presente, entra no Silo do plano como as do
-   * grupo (sem Silo, não publicada). Ausente = o comportamento de sempre.
-   */
-  extraKeywordIds?: readonly string[] }): Promise<{ assignedKeywordIds: string[]; keptElsewhere: string[] }> {
+export async function assignPlanGroupKeywordsToTerritory(context: PipelineContext, input: { groupId: string; territoryRef: string; territories: readonly TerritoryWorkflowItem[]; patch?: Patch; decidedAt: string }): Promise<{ assignedKeywordIds: string[]; keptElsewhere: string[] }> {
   const patch = input.patch ?? patchViaMesa;
   const { loadCanonicalArquitetoWorkspace } = await import("./arquiteto-workspace");
-  const extras = new Set(input.extraKeywordIds ?? []);
   const lerLinhas = async () => {
     const doGrupo = await loadCanonicalArquitetoWorkspace(context, { groupFilter: { kind: "group", groupId: input.groupId } });
-    const linhasDoGrupo = buildCanonicalWorkflowWorkspaceItems(doGrupo.workflowItems, doGrupo.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
-    if (!extras.size) return linhasDoGrupo;
-    const marca = await loadCanonicalArquitetoWorkspace(context);
-    const daMarca = buildCanonicalWorkflowWorkspaceItems(marca.workflowItems, marca.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
-    const ja = new Set(linhasDoGrupo.map(linha => String(linha.id)));
-    return [...linhasDoGrupo, ...daMarca.filter(linha => extras.has(String(linha.id)) && !ja.has(String(linha.id)))];
+    return buildCanonicalWorkflowWorkspaceItems(doGrupo.workflowItems, doGrupo.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
   };
   const linhas = await lerLinhas();
   const semSilo = linhas.filter(linha => !linha.territoryRef && !linha.isPublished);
