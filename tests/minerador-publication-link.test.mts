@@ -128,7 +128,8 @@ test("Publicado não é opção ativa e sinais CSV não promovem publicação", 
   assert.doesNotMatch(statusCell, /value=\"publicado\"/);
   assert.match(workspace, /allowPublishedWorkflowStatus=\{false\}/);
   assert.doesNotMatch(workspace, /handleBatchPublish/);
-  assert.match(workspace, /if \(isLegacyPublishedStatus\(s\)\) publicationSignal = \"published\"/);
+  // 2026-10-16 (F1 da linha única, E-1): o CSV do navegador, que só gravava `publication_signal`, saiu; nenhum sinal de CSV chega à tela.
+  assert.doesNotMatch(workspace, /publication_signal_source = "csv"|publicationSignal = "published"/);
   assert.doesNotMatch(workspace, /statusVal = s;/);
   // A conferência saiu da coluna e virou botão do card DECISÃO (spec §67);
   // o handler em lote continua onde estava.

@@ -526,54 +526,14 @@ export function setKeywordSubject(semantic: Semantic, input: SetKeywordSubjectIn
   };
 }
 
-/**
- * Retira a declaração (F1.5): grava `keyword_subject: null` e acrescenta ao
- * histórico. O histórico nunca é apagado. Sem declaração, `changed: false`.
- *
- * 2026-10-13 · sem chamador (lista fechada vazia). Exige o marcador de
- * liberação: a retirada sem ele é exatamente o que apagou o Assunto das 7
- * keywords do Silo azul da WifiConecta. A linha do histórico guarda o que saiu
- * (título, plano com o escopo) para a recuperação.
+/*
+ * 2026-10-16 · F1 da linha única do Minerador (SDD
+ * `sdd-linha-unica-do-minerador-2026-10-16.md`, A10, decisão D4): a retirada do
+ * Assunto inteiro (`keyword_subject: null`) saiu — não tinha chamador desde
+ * 2026-10-13. Tirar o plano é `setKeywordSubject` com `plan: null` e o marcador
+ * de liberação ("Tirar do plano", "Substituir o plano"); o formato anterior se
+ * resolve pela conversão.
  */
-export function withdrawKeywordSubject(
-  semantic: Semantic,
-  input: { actorId: string; changedAt: string; origin: KeywordSubjectOrigin; release?: KeywordSubjectRelease | null },
-): KeywordSubjectWriteResult {
-  const current = { ...(semantic || {}) };
-  const guard = checkActorAndOrigin(current, input.actorId, input.origin);
-  if (guard) return guard;
-  const previous = resolveKeywordSubject(current);
-  if (!previous.declared) return { ok: true, semantic: current, changed: false };
-  const release = readKeywordSubjectRelease(input.release);
-  if (!release) return refuse(current, "SUBJECT_RELEASE_REQUIRED", KEYWORD_SUBJECT_RELEASE_REFUSAL);
-
-  const history = readHistory(current[KEYWORD_SUBJECT_HISTORY_KEY]);
-  history.push({
-    previous: "declared",
-    next: "none",
-    note: null,
-    destinationUrl: null,
-    actorId: input.actorId.trim(),
-    changedAt: input.changedAt,
-    origin: input.origin,
-    ...(previous.plan ? { plan: planSummary(previous.plan) } : {}),
-    ...(previous.entry ? { entryTitle: previous.entry.title } : {}),
-    release,
-  });
-  return {
-    ok: true,
-    changed: true,
-    semantic: {
-      ...current,
-      [KEYWORD_SUBJECT_RELEASE_KEY]: release,
-      [KEYWORD_SUBJECT_KEY]: null,
-      [KEYWORD_SUBJECT_ACTOR_KEY]: input.actorId.trim(),
-      [KEYWORD_SUBJECT_AT_KEY]: input.changedAt,
-      [KEYWORD_SUBJECT_ORIGIN_KEY]: input.origin,
-      [KEYWORD_SUBJECT_HISTORY_KEY]: history,
-    },
-  };
-}
 
 /**
  * 2026-10-13 · SUBSTITUIR O PLANO (SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`

@@ -20,10 +20,7 @@ import {
   countSubjectCandidatesHiddenWithoutVolume,
   declaredSubjectOptions,
   filterSubjectCandidates,
-  subjectIdFromApply,
-  subjectPhraseDeclarationPlan,
   type DeclaredSubjectOption,
-  type SubjectPhrasePreviewRow,
   type SubjectSearchFilters,
   type SubjectSearchImportMark,
 } from "./subject-search-model";
@@ -47,8 +44,10 @@ import { postSubjectSearch, subjectDiscoveryImportRoute, subjectImportResultText
  *      do plano confirmado e um `operationRequestId` novo por plano (desde
  *      2026-09-28 o plano é só do Google Ads e o custo máximo é zero);
  *   3. o resultado fica na lista local (IndexedDB próprio), nunca no banco;
- *   4. o envio ao Processador, se o humano marcar, declara a frase pela rota
- *      da F1.3 (prévia e apply) e só depois importa pela rota da F1b.
+ *   4. o envio ao Processador importa pela rota da F1b. Desde 2026-10-13
+ *      (cadastro único) a pesquisa não declara a frase como Assunto: ele entra
+ *      só pelo card "Cadastrar Assuntos". O ramo que declarava pela rota
+ *      aposentada `subjects/import` saiu na F1 da linha única (2026-10-16).
  *
  * A marca vem da rota (`brandRef`); o ator, da sessão. Nada aqui fabrica
  * candidata: todas vêm da resposta do servidor.
@@ -79,18 +78,12 @@ export type SubjectSearchImportResult = {
 export type SubjectSearchImportDialogState = {
   searchId: string;
   importRequestId: string;
-  declareRequestId: string;
-  offered: boolean;
-  declare: boolean;
-  preview: { loading: boolean; row: SubjectPhrasePreviewRow | null; error: string | null; notices: string[] };
-  /** Id do Assunto já declarado neste envio (numa tentativa anterior). */
+  /** Id do Assunto declarado num envio anterior desta busca (registros locais de antes de 2026-10-13). */
   declaredId: string | null;
   submitting: boolean;
   error: string | null;
   result: SubjectSearchImportResult | null;
 };
-
-type SubjectImportRouteResponse = { success?: boolean; message?: string; rows?: Array<SubjectPhrasePreviewRow & { index?: number }>; notices?: string[]; diagnostic?: unknown };
 
 function brandIdFromRef(brandRef: string) { return brandRef.split("--").at(-1)?.trim() || ""; }
 
@@ -379,63 +372,23 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
 
   /* ------------------------ envio ao Processador ------------------------ */
 
-  const postSubjects = useCallback(async (body: Record<string, unknown>) => {
-    const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(brandId)}/subjects/import`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const payload = await readJson(response) as SubjectImportRouteResponse | null;
-    if (!response.ok || !payload || payload.success !== true) throw new Error(payload?.message || "A declaração do Assunto não pôde ser concluída.");
-    return payload;
-  }, [brandId]);
-
-  const subjectEntry = useCallback((record: SubjectSearchLocalRecord) => ({
-    keyword: record.result.subject.phrase,
-    note: record.result.subject.note,
-    // Só a página ACEITA no site da marca acompanha a declaração.
-    destinationUrl: record.result.subject.destination.url,
-    listaReference: null,
-  }), []);
-
-  const loadDeclarePreview = useCallback(async (record: SubjectSearchLocalRecord) => {
-    setImportDialog(current => current ? { ...current, preview: { loading: true, row: null, error: null, notices: [] } } : current);
-    try {
-      // Prévia da F1.3: não escreve nada.
-      const payload = await postSubjects({ mode: "preview", source: "manual", entries: [subjectEntry(record)] });
-      const row = payload.rows?.[0] ?? null;
-      setImportDialog(current => current ? { ...current, preview: { loading: false, row, error: null, notices: payload.notices || [] } } : current);
-    } catch (error) {
-      setImportDialog(current => current ? { ...current, preview: { loading: false, row: null, error: error instanceof Error ? error.message : "A prévia da declaração falhou.", notices: [] } } : current);
-    }
-  }, [postSubjects, subjectEntry]);
-
   const openImport = useCallback((selectedCount: number) => {
     if (!activeRecord || !selectedCount) return;
-    const already = activeRecord.declaredSubjectKeywordId;
     /*
      * 2026-10-13 · cadastro único (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`
      * §3.1): o Assunto entra só pelo card "Cadastrar Assuntos", dentro da
-     * keyword. Declarar a frase pesquisada aqui criaria um Assunto solto: a
-     * oferta não aparece mais; sem Assunto cadastrado, as keywords entram sem
-     * vínculo (e o diálogo diz isso).
+     * keyword. A pesquisa não declara a frase (criaria um Assunto solto); sem
+     * Assunto cadastrado, as keywords entram sem vínculo (e o diálogo diz isso).
      */
-    const choice = { offered: false, checked: false };
     setImportDialog({
       searchId: activeRecord.searchId,
       importRequestId: crypto.randomUUID(),
-      declareRequestId: crypto.randomUUID(),
-      offered: choice.offered,
-      declare: choice.checked,
-      preview: { loading: false, row: null, error: null, notices: [] },
-      declaredId: already,
+      declaredId: activeRecord.declaredSubjectKeywordId,
       submitting: false,
       error: null,
       result: null,
     });
-    if (choice.checked) void loadDeclarePreview(activeRecord);
-  }, [activeRecord, loadDeclarePreview]);
-
-  const setDeclare = useCallback((checked: boolean) => {
-    setImportDialog(current => current ? { ...current, declare: checked, error: null } : current);
-    if (checked && activeRecord && importDialog && !importDialog.preview.row && !importDialog.preview.loading) void loadDeclarePreview(activeRecord);
-  }, [activeRecord, importDialog, loadDeclarePreview]);
+  }, [activeRecord]);
 
   const closeImport = useCallback(() => { setImportDialog(current => current?.submitting ? current : null); }, []);
 
@@ -446,27 +399,8 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
     const { items } = buildSubjectDiscoveryImportItems(record.result.candidates, selectedKeys, record.result.subject.normalizedPhrase);
     if (!items.length) { setImportDialog({ ...dialog, error: "Nenhuma keyword de sustentação selecionada: a frase do Assunto não entra como item." }); return; }
     setImportDialog({ ...dialog, submitting: true, error: null });
-    let subjectId: string | null = record.result.subject.subjectKeywordId || dialog.declaredId || record.declaredSubjectKeywordId || null;
+    const subjectId: string | null = record.result.subject.subjectKeywordId || dialog.declaredId || record.declaredSubjectKeywordId || null;
     try {
-      if (dialog.offered && dialog.declare && !dialog.declaredId) {
-        const decision = subjectPhraseDeclarationPlan(dialog.preview.row);
-        if (decision.action === "refuse") throw new Error(`${decision.reason} Nada foi importado.`);
-        if (decision.action === "already_subject") {
-          subjectId = decision.keywordId;
-        } else {
-          const applied = await postSubjects({
-            mode: "apply",
-            importRequestId: dialog.declareRequestId,
-            source: "manual",
-            entries: [subjectEntry(record)],
-            declareExistingIds: decision.action === "declare_existing" ? [decision.keywordId] : [],
-          });
-          subjectId = subjectIdFromApply(applied.rows?.[0]);
-          if (!subjectId) throw new Error(`A frase não foi declarada como Assunto${applied.rows?.[0]?.reason ? `: ${applied.rows[0].reason}` : "."} Nada foi importado.`);
-        }
-        const declared = subjectId;
-        setImportDialog(current => current ? { ...current, declaredId: declared } : current);
-      }
       const response = await fetch(subjectDiscoveryImportRoute(brandId), {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -494,7 +428,7 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
     } catch (error) {
       setImportDialog(current => current ? { ...current, submitting: false, error: error instanceof Error ? error.message : "O envio ao Processador não pôde ser concluído." } : current);
     }
-  }, [importDialog, activeRecord, brandId, postSubjects, subjectEntry, actorUserId, persistRecord, publishNotice]);
+  }, [importDialog, activeRecord, brandId, actorUserId, persistRecord, publishNotice]);
 
   return {
     brandId,
@@ -514,7 +448,7 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
     filters, setFilters,
     visibleCandidates,
     hiddenWithoutVolume,
-    importDialog, openImport, setDeclare, closeImport, confirmImport,
+    importDialog, openImport, closeImport, confirmImport,
   };
 }
 

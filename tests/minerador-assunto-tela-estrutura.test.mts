@@ -200,7 +200,8 @@ test("cadastro único (2026-10-13): nem o Processador nem o Descobrir importam A
   const imported = handlerBody(workspace, "handleSubjectsImported");
   assert.match(imported, /readCanonicalKeywordRows\(ids, \{ source: fonteDaListagem \}\)/, "relê as linhas da marca ativa pela view da listagem antes da Lógica");
   // Mais de 200 ids: a leitura é feita em blocos, e a completude é conferida sobre o total.
-  const reader = workspace.slice(workspace.indexOf("const readCanonicalKeywordRows"), workspace.indexOf("const [isListModalOpen"));
+  // 2026-10-16 (F1 da linha única): o estado do modal "Criar lista" saiu; o leitor termina antes do modal de exportação.
+  const reader = workspace.slice(workspace.indexOf("const readCanonicalKeywordRows"), workspace.indexOf("const [isExportModalOpen"));
   assert.match(workspace, /const KEYWORD_READBACK_ID_CHUNK = 200;/);
   assert.match(reader, /for \(let start = 0; start < uniqueIds\.length; start \+= KEYWORD_READBACK_ID_CHUNK\)/, "leitura em blocos de ids");
   assert.match(reader, /\.in\("id", chunk\)/);

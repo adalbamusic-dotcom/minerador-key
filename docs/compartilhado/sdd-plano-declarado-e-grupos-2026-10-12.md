@@ -1082,6 +1082,13 @@ Onde a SDD só fazia a pergunta, vale a proposta do próprio texto.
   3 Silos é escolha editorial, não exigência da plataforma. Implementado em
   2026-10-12 (ver `docs/04-arquiteto/estado-atual.md`), incluindo o lote de
   âncoras do grafo de links, que recusava Silos de 14+ artigos.
+  > **SUBSTITUÍDO em 2026-10-16** ("validação do plano, ferramenta MCP,
+  > catálogo, telas" com a mesma régua, sem dizer a severidade abaixo de 4).
+  > Vale a D2 da [SDD da linha única do Minerador](sdd-linha-unica-do-minerador-2026-10-16.md)
+  > (aprovada em 2026-10-16): Silo com menos de 4 artigos só **avisa**, em todo
+  > lugar, com uma constante (`SILO_ARTICLE_RANGE`). **Planejado:** entra no
+  > código na F2; até lá o MCP `validate_silo_plan` ainda bloqueia e o cadastro
+  > só avisa.
 - **D4 · Paleta de grupo:** as 5 cores do §9.3 (amarelo, azul, verde, lima,
   laranja), sempre com nome, mesmo reaproveitando tons que também marcam
   status. **Decidido: sim** (registrado no `sistema-visual.md` §5.0.2).

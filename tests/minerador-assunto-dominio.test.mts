@@ -14,7 +14,6 @@ import {
   normalizeKeywordSubjectNote,
   resolveKeywordSubject,
   setKeywordSubject,
-  withdrawKeywordSubject,
   type DestinationCheck,
 } from "../lib/minerador/keyword-subject.ts";
 import {
@@ -34,7 +33,6 @@ const OTHER_ACTOR = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const AT = "2026-09-24T12:00:00+00:00";
 const LATER = "2026-09-24T13:00:00+00:00";
 /** 2026-10-13 (ajuste declarado, "o Assunto nunca se perde"): retirar exige o marcador de liberação. */
-const RELEASE = { requestId: "teste:1", reason: "teste", actorId: ACTOR, at: LATER, via: "tirar_do_plano" as const };
 const SITE = "https://www.clinicaexemplo.com.br";
 
 function check(overrides: Partial<DestinationCheck> = {}): DestinationCheck {
@@ -95,45 +93,35 @@ test("idempotência: mesma nota e mesmo destino não regravam, nem com nova conf
   assert.equal(recheck.changed, false, "reconferir o catálogo não é mudança");
 });
 
-test("histórico append-only: trocar nota, retirar e declarar de novo só acrescentam", () => {
+/*
+ * 2026-10-16 · F1 da linha única do Minerador (D4): a retirada do Assunto
+ * inteiro (`withdrawKeywordSubject`, sem chamador desde 2026-10-13) saiu; os
+ * passos e o teste que só a testavam saíram junto. O histórico continua
+ * append-only pelas regravações; tirar o plano é com o marcador
+ * (`tests/minerador-assunto-nunca-se-perde.test.mts`).
+ */
+test("histórico append-only: trocar a nota e regravar só acrescentam", () => {
   const a = setKeywordSubject({}, { note: "v1", actorId: ACTOR, changedAt: AT, origin: "review" });
   assert.ok(a.ok);
   const b = setKeywordSubject(a.semantic, { note: "v2", actorId: ACTOR, changedAt: LATER, origin: "review" });
   assert.ok(b.ok && b.changed);
-  const c = withdrawKeywordSubject(b.semantic, { actorId: OTHER_ACTOR, changedAt: LATER, origin: "review", release: RELEASE });
-  assert.ok(c.ok && c.changed);
-  const d = setKeywordSubject(c.semantic, { note: null, actorId: ACTOR, changedAt: LATER, origin: "batch" });
+  const d = setKeywordSubject(b.semantic, { note: null, actorId: ACTOR, changedAt: LATER, origin: "batch" });
   assert.ok(d.ok && d.changed);
 
   const history = d.semantic[KEYWORD_SUBJECT_HISTORY_KEY] as Array<Record<string, unknown>>;
   assert.deepEqual(history.map(entry => [entry.previous, entry.next, entry.note, entry.origin]), [
     ["none", "declared", "v1", "review"],
     ["declared", "declared", "v2", "review"],
-    ["declared", "none", null, "review"],
-    ["none", "declared", null, "batch"],
+    ["declared", "declared", null, "batch"],
   ]);
   // Cada passo preserva as entradas anteriores tal como estavam.
-  assert.deepEqual((c.semantic[KEYWORD_SUBJECT_HISTORY_KEY] as unknown[]).slice(0, 2), (b.semantic[KEYWORD_SUBJECT_HISTORY_KEY] as unknown[]));
+  assert.deepEqual((d.semantic[KEYWORD_SUBJECT_HISTORY_KEY] as unknown[]).slice(0, 2), (b.semantic[KEYWORD_SUBJECT_HISTORY_KEY] as unknown[]));
 });
 
-test("retirar grava keyword_subject: null, não apaga o histórico e sem declaração não muda nada", () => {
-  const declared = setKeywordSubject({}, { note: "Para clínicas", actorId: ACTOR, changedAt: AT, origin: "review" });
-  assert.ok(declared.ok);
-  assert.equal(withdrawKeywordSubject(declared.semantic, { actorId: ACTOR, changedAt: LATER, origin: "review" }).ok, false, "sem marcador de liberação, recusado");
-  const withdrawn = withdrawKeywordSubject(declared.semantic, { actorId: ACTOR, changedAt: LATER, origin: "review", release: RELEASE });
-  assert.ok(withdrawn.ok && withdrawn.changed);
-  assert.equal(withdrawn.semantic[KEYWORD_SUBJECT_KEY], null);
-  assert.equal(KEYWORD_SUBJECT_KEY in withdrawn.semantic, true, "a retirada é registrada, não some");
-  assert.equal((withdrawn.semantic[KEYWORD_SUBJECT_HISTORY_KEY] as unknown[]).length, 2);
-  assert.equal(resolveKeywordSubject(withdrawn.semantic).declared, false);
-  assert.equal(keywordSubjectLabel(resolveKeywordSubject(withdrawn.semantic)), null);
-
-  const nothing = withdrawKeywordSubject({ nicho: "Estética" }, { actorId: ACTOR, changedAt: AT, origin: "batch" });
-  assert.equal(nothing.ok, true);
-  assert.equal(nothing.changed, false);
-  assert.deepEqual(nothing.semantic, { nicho: "Estética" });
-  const twice = withdrawKeywordSubject(withdrawn.semantic, { actorId: ACTOR, changedAt: LATER, origin: "review" });
-  assert.equal(twice.changed, false);
+test("keyword_subject: null gravado antes (dado antigo) é lido como sem Assunto", () => {
+  const antigo = { [KEYWORD_SUBJECT_KEY]: null, nicho: "Estética" };
+  assert.equal(resolveKeywordSubject(antigo).declared, false);
+  assert.equal(keywordSubjectLabel(resolveKeywordSubject(antigo)), null);
 });
 
 test("nota: até 280 caracteres, uma linha só; vazia vira null (desde 2026-10-13 o rótulo não cobra mais a nota)", () => {
@@ -165,8 +153,6 @@ test("ator: só auth.users.id; e-mail, local-user e vazio são recusados e nada 
     assert.equal(declared.ok, false, actorId);
     assert.equal(!declared.ok && declared.code, "ACTOR_REQUIRED");
     assert.deepEqual(declared.semantic, {});
-    const withdrawn = withdrawKeywordSubject({ [KEYWORD_SUBJECT_KEY]: { declared: true, note: null, destinationUrl: null, destinationCheck: null } }, { actorId, changedAt: AT, origin: "review" });
-    assert.equal(!withdrawn.ok && withdrawn.code, "ACTOR_REQUIRED");
   }
   assert.equal(isKeywordSubjectActorId(ACTOR), true);
   assert.equal(isKeywordSubjectActorId(undefined), false);
@@ -300,6 +286,7 @@ const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   // 2026-10-13 (pedido do dono): o Vínculo — Revisão Humana, lote e MCP — não
   // declara nem retira Assunto; vinculo-batch.ts e a tela saíram da lista.
   setKeywordSubject: ["lib/minerador/keyword-import-core.ts", "lib/minerador/declared-plan-import-core.ts", "lib/minerador/declared-plan-withdraw-core.ts"],
+  // 2026-10-16 (F1 da linha única, D4): a função saiu; a entrada vazia guarda que nenhum chamador volte.
   withdrawKeywordSubject: [],
   // 2026-09-24 (pedido do dono): o seletor Vínculo único grava as três
   // escolhas de uma vez por planVinculoBatchChoices, que chama o

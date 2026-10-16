@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseDiscoveryCsvRecords, parseDiscoveryCsvRows, parseManualKeywords, parseManualSubjects } from "../lib/minerador/discovery-sources.ts";
+import { parseDiscoveryCsvRecords, parseDiscoveryCsvRows, parseManualKeywords } from "../lib/minerador/discovery-sources.ts";
 
 /**
  * IMPORT DE ASSUNTOS — PARSER (SDD 2026-09-24, F1.3).
@@ -56,9 +56,8 @@ test("CSV de uma coluna, só títulos, continua válido com e sem cabeçalho", (
   assert.equal(bare.entries[0].note, undefined);
 });
 
-test("lista colada de Assuntos: um por linha, vírgula faz parte da frase", () => {
-  const entries = parseManualSubjects("SEO para clínicas, em São Paulo\n\n  estratégias de tráfego; 2026  \r\n");
-  assert.deepEqual(entries.map(entry => entry.keyword), ["SEO para clínicas, em São Paulo", "  estratégias de tráfego; 2026  "]);
-  // A lista de keywords do Descobrir continua separando por vírgula.
+// 2026-10-16 · F1 da linha única (A8): `parseManualSubjects` (lista colada de Assuntos do
+// modo "Esta lista é: Assunto") saiu com o ramo; o Assunto entra só pelo card "Cadastrar Assuntos".
+test("a lista colada de keywords do Descobrir continua separando por vírgula", () => {
   assert.equal(parseManualKeywords("a, b; c").length, 3);
 });

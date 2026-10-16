@@ -379,7 +379,8 @@ test("uma lista de status editorial em todas as telas, sem opção escrita à m�
       assert.doesNotMatch(fonte, new RegExp(`<option value="${status}"`), `${nome}: <option> de status escrito à mão (${status})`);
     }
   }
-  assert.equal((limpo(workspace).match(/MINERADOR_EDITORIAL_STATUS_OPTIONS\.map/g) || []).length, 5, "filtro, recuperação de legado, lote (duas barras) e criação manual — a coluna deixou de escrever");
+  // 2026-10-16 (F1 da linha única, E-1): a "criação manual" (modal inalcançável) saiu; ficam quatro.
+  assert.equal((limpo(workspace).match(/MINERADOR_EDITORIAL_STATUS_OPTIONS\.map/g) || []).length, 4, "filtro, recuperação de legado e lote (duas barras) — a coluna deixou de escrever");
   assert.equal((limpo(panels).match(/MINERADOR_EDITORIAL_STATUS_OPTIONS\.map/g) || []).length, 1, "Status final na Decisão");
 
   assert.deepEqual(

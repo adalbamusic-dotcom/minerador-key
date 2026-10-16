@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { keywordVinculoSummary, resolveKeywordVinculo } from "../lib/minerador/keyword-vinculo.ts";
 import { KEYWORD_PAGE_TYPES } from "../lib/minerador/keyword-page-type.ts";
-import { setKeywordSubject, withdrawKeywordSubject } from "../lib/minerador/keyword-subject.ts";
+import { setKeywordSubject } from "../lib/minerador/keyword-subject.ts";
 import { EditorialUnitDeclarationSchema } from "../lib/arquiteto/contracts.ts";
 
 /**
@@ -65,10 +65,10 @@ test("Assunto retirado volta ao objeto de antes (keyword_subject: null)", () => 
   FIXTURES.forEach((input, index) => {
     const declared = setKeywordSubject(input.semantic, { note: "x", actorId: ACTOR, changedAt: AT, origin: "review" });
     assert.ok(declared.ok);
-    // 2026-10-13 (ajuste declarado, "o Assunto nunca se perde"): retirar exige o marcador de liberação.
-    const withdrawn = withdrawKeywordSubject(declared.semantic, { actorId: ACTOR, changedAt: AT, origin: "review", release: { requestId: "teste:1", reason: "teste", actorId: ACTOR, at: AT, via: "tirar_do_plano" } });
-    assert.ok(withdrawn.ok);
-    const vinculo = resolveKeywordVinculo({ status: input.status, semantic: withdrawn.semantic });
+    // 2026-10-16 (F1 da linha única, D4): `withdrawKeywordSubject` saiu (sem chamador); o dado
+    // antigo com `keyword_subject: null` continua sendo lido como "sem Assunto".
+    const retirado = { ...declared.semantic, keyword_subject: null };
+    const vinculo = resolveKeywordVinculo({ status: input.status, semantic: retirado });
     assert.equal(JSON.stringify(vinculo), SNAPSHOT[index][0]);
     assert.equal(keywordVinculoSummary(vinculo), SNAPSHOT[index][1]);
   });

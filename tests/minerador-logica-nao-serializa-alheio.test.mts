@@ -111,7 +111,8 @@ test("a proteção não se desliga porque o dado mudou de forma", () => {
    * Defesa em profundidade. O motor foi corrigido e há script de reparo, mas
    * enquanto houver linha serializada no banco a keyword publicada não pode
    * ser tratada como livre — é dessa leitura que sai a proteção contra
-   * exclusão, tanto na tela quanto no `assessKeywordHardDelete`.
+   * exclusão na tela (`isKeywordPublished`; o espelho `assessKeywordHardDelete`
+   * saiu na F1 da linha única, 2026-10-16 — quem decide é a RPC).
    */
   const serializada = { site_origin: JSON.stringify(siteOrigin) };
   const lida = readSiteOrigin(serializada);

@@ -1,4 +1,16 @@
-- [ ] **PROPOSTA (aguarda aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 pendentes.
+- [ ] **APROVADA em 2026-10-16 (F0 entregue em 16/10; F1 aguarda a aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 aprovadas com as recomendações.
+
+## F0 da linha única — cenários-ouro — Arquiteto — 2026-10-16
+
+Só testes; nenhum código de produção mudou. Detalhe e a conclusão de cada cenário em `estado-atual.md` (mesmo título). **Validado manualmente: não** (nada mudou na tela).
+
+- [x] Os 15 cenários da SDD §11.1 (C1–C15, com C9b) gravados com a conclusão de HOJE, núcleos reais e I/O simulado, sem rede nem custo: `npm run test:arquiteto:cenarios` (35 testes, 33 verdes, 2 vermelhos marcados), com a guarda da forma da linha junto.
+- [x] Os que mudam numa fase dizem "muda na Fn": C2/C3 (B sem fechar o Silo → F2), C6 e C9b (R1 → F4), C7 e C14 (`approve` no núcleo → F1), C8 e C9 da mesa (`proposed` → F5), C13 (`validate_silo_plan` e o corpo à mão → F7).
+- [ ] **Vermelho até a F6 · C4:** "Recriar o Silo do plano" não religa o grupo com o `silo_id` velho de um Silo que sumiu (só liga quando `silo_id` é nulo).
+- [ ] **Vermelho até a F3 · C15:** a falha depois do PATCH e antes do append não diz que a gravação foi parcial (repete o erro cru).
+- [ ] Dono: conferir a lista e a conclusão de cada cenário (vale como contrato da linha, SDD §11.1 "O que o dono valida").
+- [ ] Dono: o SELECT de leitura do C12 (quantos ArticleDNA têm `serpAssessmentRef` com `:v`), no comentário do cenário.
+- [ ] Próxima fase: F1 (gravador único do ArticleDNA), só com a aprovação do dono; toda fase atualiza o cenário cuja regra mudou e só termina com a suíte verde.
 
 ## Aba Artigos centralizada em "Detalhes técnicos" · mapa só em Links internos — Arquiteto — 2026-10-16 (tarde)
 

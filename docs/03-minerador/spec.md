@@ -208,10 +208,16 @@ Keywords são escopadas por marca/lista; seleção é parcial e não decide rend
 Carregando Supabase, lista ativa, filtros, seleção, edição, importação e erro.
 ## 8. Ações
 Importar planilha/manual, criar lista, editar, analisar, calcular volume/KGR, exportar e excluir conforme UI.
+
+> **SUBSTITUÍDO em 2026-10-16** (SDD `sdd-linha-unica-do-minerador-2026-10-16.md`, F1). "Importar planilha/manual" e "criar lista" pelo navegador saíram (eram inalcançáveis e inseriam sem deduplicar); "analisar" saiu com o R5 (2026-09-18). Vale agora a linha única do §79: entrada pelos núcleos do servidor (Descobrir, Pesquisa por Assunto, card "Cadastrar Assuntos", site, sugestões do Arquiteto), Lógica, Volume pelo Google Ads, Resultados opcional, aprovação e envio pelo servidor.
 ## 9. Entradas
 CSV/copiar-colar, lista, marca e APIs de análise/volume.
+
+> **SUBSTITUÍDO em 2026-10-16.** Não há "APIs de análise" (R5 revogado em 2026-09-18) nem provider de volume além do Google Ads. Colar e CSV de keyword ficam no Descobrir; o Assunto entra só pelo card "Cadastrar Assuntos" (2026-10-13). Vale o §79.
 ## 10. Saídas
 Keywords persistidas, dados de KGR/status e exportações.
+
+> **SUBSTITUÍDO em 2026-10-16.** A saída canônica é o KeywordDNA aprovado no servidor (pacote com `contentHash`, §61) enviado ao Arquiteto; o KGR é opcional e não trava nada (§78). Vale o §79.
 ## 11. Contratos com outros módulos
 Fornece keywords para Arquiteto; a transferência completa ainda requer confirmação ponta a ponta. Quando disponíveis, a carga pode trazer aditivamente relação keyword↔URL, evidência de URL/canonical/slug, situação arquitetural e designação/vínculo KGR. Esses campos são evidência de entrada; a decisão de agrupamento e confirmação arquitetural continua no Arquiteto.
 ## 12. Proteções
@@ -230,10 +236,16 @@ A mesma `brand_id + operation_request_id` é idempotente. Após recarregar a rot
 
 **Exceção da Pesquisa por Assunto — emenda de 2026-09-24** ([SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), F1b.5). O modo **Por Assunto** do Descobrir **não** persiste execução nem candidatas: não grava run, candidata, métrica atual nem histórico, e não chama as tabelas nem as RPCs da Descoberta. O resultado volta ao navegador e fica numa lista local própria (IndexedDB `minerador-pesquisa-assunto`, por ator e marca), que é estado de apresentação e recuperação, nunca canônico. A lista vale 30 dias, com no máximo 10 buscas por ator e marca; a vencida e a mais antiga saem sozinhas, só no próprio escopo (Q12, autorizada pelo dono). Na pesquisa, o banco recebe só o ledger de uso e a SERP da frase no cache da marca; no envio, só as keywords importadas. Os outros modos seguem esta seção até a [SDD da Descoberta temporária](propostas/sdd-descoberta-temporaria-local-2026-09-23.md) ser decidida.
 
+> **SUBSTITUÍDO em 2026-10-16** (trecho "a SERP da frase no cache da marca" e "no envio, só as keywords importadas"). Desde 2026-09-28 ([SDD SERP no artigo e KGR opcional](../compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md)) a Pesquisa por Assunto usa só o Google Ads e não grava SERP. Desde 2026-10-13 (SDD acelerar, item 8) o servidor guarda o recibo da pesquisa (`minerador_subject_search_receipts`), e o envio ao Processador grava o Volume pelo recibo e roda a Lógica (`importSubjectDiscoveryWithCore`). A pesquisa não declara Assunto: ele entra só pelo card "Cadastrar Assuntos". Vale o §79.
+
 ## 17. Fora do escopo atual
 Importação da Descoberta ao Processador, exclusão/retenção de histórico e execução remota da migration.
+
+> **SUBSTITUÍDO em 2026-10-16.** A importação da Descoberta ao Processador existe desde o §48, e a exclusão tem ciclo de vida próprio (§52, §71–§75). Vale o §79.
 ## 17. Arquivos pertencentes ao módulo
 `app/(brand)/[brandRef]/minerador/page.tsx`, `app/api/mine`, `volume`, `analyze`, `clusterize`.
+
+> **SUBSTITUÍDO em 2026-10-16.** `app/api/mine` e `app/api/volume` só respondem 410 (recusa explícita do legado: exportador do Google Sheets desativado; volume movido para o Google Ads); `analyze` e `clusterize` saíram em 2026-09-18. Vale agora: a página `app/(brand)/[brandRef]/minerador/page.tsx` (e `…/minerador/descobrir`), as rotas de `app/api/minerador/marcas/[brandId]/**`, `modules/minerador/**` e `lib/minerador/**` (§79; SDD da linha única §3).
 ## 18. Arquivos compartilhados consumidos
 `components/brand-context.tsx`, Supabase e contratos de Arquiteto.
 ## 19. Arquivos proibidos sem autorização
@@ -266,23 +278,38 @@ Os filtros ficam no painel recolhivel `Organizar`, com contador de filtros ativo
 A taxonomia apresentada e retrocompativel: Informativa, Comercial investigativa, Transacional, Navegacional, Local, Mista e Pendente/nao classificada. Valores legados sao normalizados na apresentacao sem reescrita em massa durante a hidratacao.
 
 ## 23. Qualificacao de volume sem perda de metadados - Fase B.2
+
+> **SUBSTITUÍDO em 2026-10-16** (§23 a §27: RapidAPI como provider de volume e a rota `/api/volume`). Vale agora: Volume só pelo Google Ads (§45.1; rota `…/google-ads/metricas-keywords`, botão Volume e MCP `measure_keywords`), e a RapidAPI nunca ([SDD de 2026-09-28](../compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md)). `/api/volume` só responde 410 `VOLUME_MOVED_TO_GOOGLE_ADS`; os normalizadores da RapidAPI e o padrão `seo-keyword-research8` saíram de `lib/minerador/volume-provider.ts` na F1 da linha única. Continua valendo deste trecho: resposta inválida, erro ou keyword ausente não grava `null` nem apaga a medição anterior.
+
 A qualificacao somente persiste uma medicao de volume quando a resposta do provedor e valida e vinculada a uma keyword solicitada. Resposta invalida, erro do provedor ou keyword ausente nao grava `null`, nao altera `volume_source` e nao substitui `volume_search`, `results_allintitle` ou `kgr_score` existentes.
  `/api/volume` normaliza respostas para um contrato interno minimo (keyword + volume), rejeita endpoint RapidAPI de auditoria de site e permanece server-side. A integracao do provedor de volume e preparada por contrato e nao e considerada validada sem chamada externa autorizada.
 
 ## 24. Google Keyword Insight - Fase B.3
+
+> **SUBSTITUÍDO em 2026-10-16:** provider RapidAPI aposentado; ver a nota do §23.
+
 `/api/volume` usa `GET /keysuggest` com `keyword`, `location=BR` e `lang=pt`. A resposta real observada e um array de sugestoes; somente o item com `text` normalizado igual a keyword solicitada pode produzir medicao. Os campos de competencia, bids e trend sao metadados de resposta e nao substituem `results_allintitle`.
  Cada item retornado ao front possui status `success`, `not_found` ou `error`. O front persiste somente volume e `volume_source`, recalculando KGR quando houver resultado existente; nenhum erro ou ausencia persiste `null`.
 
 ## 25. Google Keyword Trending Insight - bloqueio de volume - Fase B.4
+
+> **SUBSTITUÍDO em 2026-10-16:** provider RapidAPI aposentado; ver a nota do §23.
+
 `/related-queries` retorna um envelope com `meta.keyword` e listas `data.top`/`data.rising` de consultas relacionadas. Os campos `query` e `value` representam consultas e indices de tendencia; nao sao medicao mensal da keyword e nunca podem preencher `volume_search`.
 Quando `meta.keyword` nao corresponde a solicitacao, o normalizador retorna `not_found`. Quando a consulta existe mas nao ha campo de volume, retorna `error`, impedindo persistencia e recalculo de KGR.
 
 ## 26. Keyword Magic Tool - normalizacao pendente de contrato de requisicao - Fase B.5
+
+> **SUBSTITUÍDO em 2026-10-16:** provider RapidAPI aposentado; ver a nota do §23.
+
 O payload observado possui `keyword_ideas`, com a keyword em `keyword` e o volume mensal em `search volume`. Apenas uma correspondencia normalizada exata pode retornar `success`; ausencia da keyword retorna `not_found` e volume ausente, invalido ou negativo retorna `error`.
 
 `Keyword Difficulty %`, `Keyword Difficulty Label`, `Low_CPC`, `High_CPC` e `Trend` sao metadados observados do provedor e nao alteram `results_allintitle`, KGR ou o contrato interno minimo nesta fase. O metodo e os parametros do endpoint `searchby-country-url` nao foram fornecidos no payload; portanto a rota `/api/volume` continua sem adotar essa configuracao ate que o contrato de requisicao seja confirmado.
 
 ## 27. SEO Keyword Research - provedor ativo de volume - Fase B.6
+
+> **SUBSTITUÍDO em 2026-10-16:** não é mais o provedor ativo; o Volume é só do Google Ads. Ver a nota do §23.
+
 `/api/volume` usa `GET /keyword-research?keyword=<keyword>&country=br` no host `seo-keyword-research8.p.rapidapi.com`. O normalizador aceita somente `result[]` com `keyword` normalizada igual a solicitacao e usa `avg_monthly_searches` como volume; sugestoes relacionadas retornam `not_found`.
 
 Os metadados de CPC, competencia, historico mensal, intencao e recomendacoes nao alteram o contrato interno minimo. O provedor foi confirmado uma vez para `country=br`; o payload nao devolve a localizacao, portanto a medicao e tratada como referente ao pais solicitado. Falhas, schema invalido e ausencia de match nao persistem `null`, nao alteram `results_allintitle` e nao recalculam KGR.
@@ -293,6 +320,8 @@ Os metadados de CPC, competencia, historico mensal, intencao e recomendacoes nao
 A tabela deriva diretamente de `keywords`, listas, filtros e ordenacao por calculo puro memoizado. `Organizar` controla somente a visibilidade do painel: nunca participa da derivacao das linhas. Sem visualizacao salva valida, `Status` inicia em `Todos`; filtros e selecao nao alteram a colecao original nem decidem renderizacao.
 
 Ha apenas uma barra operacional inferior para a selecao, com contador integrado e decisao KGR unica (`Aprovar como KGR` ou `Marcar nao aplicavel`).
+
+> **SUBSTITUÍDO em 2026-10-16** (trecho "decisão KGR única (`Aprovar como KGR` ou `Marcar não aplicável`)"). Vale o §22 revisado em 2026-09-03 (o seletor de aplicabilidade na coluna KGR, na Revisão Humana e em lote no rodapé) e o §78 (KGR padrão "não aplicável"; só o humano marca "Aplicável"; nunca trava aprovação).
 
 ## 29. Última organização local — Fase B.4
 
@@ -314,6 +343,8 @@ Uma troca entre `locked` e `reviewable` preserva `primary_keyword_published_orig
 
 ## 32. Coleta de `results_allintitle` pela extensão
 
+> **SUBSTITUÍDO em 2026-10-16** (vale para cada seção da Extensão Chrome: §32, §33, §34, §37, §38, §39, §41, §43 e §44). A Extensão saiu da aplicação (regra vigente de 2026-08-04, no topo desta spec). Vale agora: o allintitle é medido só pelo DataForSEO no servidor, por ação explícita, opcional e paga ("Resultados", §78). Na F1 da linha única saíram as sobras da era da Extensão: `lib/minerador/allintitle.ts` ficou só com `buildAllintitleQuery` (a consulta do DataForSEO), e `lib/minerador/allintitle-persistence.ts` (sem chamador) saiu. §35, §36 e §42 não são da Extensão e continuam valendo.
+
 `results_allintitle` é coletado somente por ação explícita, em lote pequeno, pela extensão Chrome conectada à aba do Minerador via `activeTab`. A extensão é uma coletora de evidência: não grava no Supabase. Ela usa uma aba Google reutilizável, uma consulta por vez, intervalo conservador, parser com fallback e estados terminais `success`, `zero_results`, `unavailable`, `captcha`, `blocked`, `error`, `timeout` e `cancelled`.
 
 O Minerador mostra prévia e só persiste `success` numérico ou `zero_results` explicitamente comprovado. Falha, ausência, CAPTCHA, bloqueio e cancelamento preservam resultado anterior e nunca enviam `null`. A confirmação atualiza somente a keyword real da marca/silo ativo, registra fonte/data/lote/consulta no metadado existente e recalcula KGR apenas quando houver volume válido e a aplicabilidade não for `not_applicable`. Volume e resultados permanecem independentes.
@@ -321,6 +352,8 @@ O Minerador mostra prévia e só persiste `success` numérico ou `zero_results` 
 > **Corrigido pela §78 (2026-09-28):** o KGR é recalculado em toda medição com volume válido, com qualquer aplicabilidade; a aplicabilidade decide só o uso.
 
 ## 33. Contrato autenticado da extensão e handshake v2
+
+> **SUBSTITUÍDO em 2026-10-16:** Extensão Chrome fora da aplicação; ver a nota do §32. As rotas `/api/extensao/**` não existem.
 
 A extensão Chrome autentica chamadas específicas do Minerador com `Authorization: Bearer <supabase_access_token>`. O servidor valida o token pelo Supabase Auth, obtém o `sub` validado e resolve perfil, owner, memberships, estado da marca e capacidade do módulo pelos helpers canônicos. O popup não concede acesso por papel, email, `brandId` ou `brandRef` enviados pelo cliente e não consulta diretamente `marcas`, `perfis` ou `listas_kgr` para listar opções.
 
@@ -331,6 +364,8 @@ O handshake v2 da extensão é liberado somente quando a aba está em `/{brandRe
 Uma marca é selecionada automaticamente; várias marcas exigem dropdown somente com a resposta autorizada; zero marcas ou erro bloqueiam operação e oferecem estado/retry visível. A última preferência local é apenas uma sugestão e sempre é revalidada pelo endpoint.
 
 ## 34. Correlacao do allintitle pela extensao
+
+> **SUBSTITUÍDO em 2026-10-16:** Extensão Chrome fora da aplicação; ver a nota do §32. A correlação vigente é a do DataForSEO (`operationRequestId`).
 
 Cada operacao de allintitle recebe um `requestId` uma unica vez no workspace. O mesmo identificador percorre bridge, background, aba Google, reader e retorno ao Minerador; a extensao nao cria substituto. `batchId` identifica o lote operacional e permanece separado de `requestId`; um fluxo individual pode ser um lote de um item. Eventos de progresso, resultado, pausa, cancelamento e `batch_completed` carregam a correlacao raiz, a marca e os IDs reais das keywords.
 
@@ -351,10 +386,14 @@ A prévia diagnóstica exibe contagens derivadas por categoria: `Medição pende
 
 ## 37. Ciclo de vida reinjetável da bridge
 
+> **SUBSTITUÍDO em 2026-10-16:** Extensão Chrome fora da aplicação; ver a nota do §32.
+
 A bridge da extensão é uma instância versionada e descartável. Após reload da extensão, a nova injeção chama `dispose` na instância anterior, remove listeners e invalida operações pendentes antes de registrar os handlers nomeados. O background exige `bridge_ready` com `bridgeVersion`, `protocolVersion`, `instanceId`, `extensionVersion` e timestamp antes de enviar o ping do handshake v2.
 
 Falhas de `chrome.runtime.lastError`, exceções síncronas e contexto invalidado retornam códigos específicos (`bridge_context_invalidated`, `bridge_not_ready` ou `bridge_version_mismatch`) e permitem nova injeção sem recarregar a página. O ACK continua exigindo requestId, usuário, marca, rota e acesso confirmados.
 ## 38. Qualificação simplificada e cálculo KGR
+
+> **SUBSTITUÍDO em 2026-10-16:** a ação "Qualificar volume (KGR calculado)" e o allintitle "pela extensão" saíram. Vale agora: o botão Volume (Google Ads, §45.1) e "Resultados" (DataForSEO, opcional, §78); o KGR é calculado em toda medição com volume válido (§78). Ver a nota do §32.
 
 A ação `Qualificar volume (KGR calculado)` consulta somente o provedor de volume e recalcula `kgr_score` quando volume e `results_allintitle` permitem o cálculo. KGR é uma pontuação derivada; não é uma métrica medida por provedor. A medição de `results_allintitle` é uma ação explícita separada pela extensão, com confirmação humana própria.
 
@@ -362,14 +401,20 @@ Erros do provedor devem preservar os metadados existentes e permanecer visíveis
 
 ## 39. ACK estável da página
 
+> **SUBSTITUÍDO em 2026-10-16:** Extensão Chrome fora da aplicação; ver a nota do §32.
+
 O listener de `minerador:extension-handshake-ping` permanece independente do estado do lote allintitle. A página responde positivamente quando usuário, marca, rota e sessão coincidem e responde negativamente com código estruturado quando consegue identificar acesso ausente ou marca divergente. O background aguarda a reinjeção, `bridge_ready` e o ACK dentro de uma janela operacional compatível com o despertar do service worker, sem alterar autenticação ou tenant.
 ## 40. Decisão KGR e limite externo de volume
+
+> **SUBSTITUÍDO em 2026-10-16** (o parágrafo da RapidAPI HTTP 429). O Volume é só do Google Ads (§45.1); a RapidAPI nunca (ver a nota do §23). Continua valendo o primeiro parágrafo, com o §78: a decisão de aplicabilidade não inicia coleta e o score é calculado em toda medição.
 
 Volume e `results_allintitle` são métricas independentes. A decisão humana de aplicabilidade não inicia coleta externa; quando aplicável, o KGR é calculado localmente com as duas métricas persistidas. A decisão não aplicável preserva as métricas e apenas retira o score da estratégia.
 
 Se a RapidAPI responder HTTP 429, o Minerador informa somente `Não foi possível coletar volume.`. A rota encerra a coleta, não faz retry automático, não transforma a falha em zero e não altera nenhum registro ou metadado existente.
 
 ## 41. Persistência server-side de `results_allintitle` — aprovada em 2026-07-29
+
+> **SUBSTITUÍDO em 2026-10-16:** Extensão Chrome fora da aplicação; ver a nota do §32. O endpoint `/api/extensao/…/resultados-allintitle` não existe, e o schema que o descrevia (`lib/minerador/allintitle-persistence.ts`, sem chamador) saiu na F1 da linha única. O allintitle vigente grava pela rota `…/dataforseo/allintitle`.
 
 O allintitle continua sendo uma ação explícita da Extensão, mas sua execução é background-owned: o workspace entrega o lote por relay declarado, o background executa consultas sequenciais e envia cada resultado terminal ao endpoint autenticado `POST /api/extensao/marcas/{brandId}/keywords/resultados-allintitle`. O popup, a página e o estado `connected` não são requisitos para a continuidade do lote.
 
@@ -385,11 +430,15 @@ O arraste é complementar e atua somente nos controles de seleção. O gesto com
 
 ## 43. Extração localizada do contador allintitle no Google
 
+> **SUBSTITUÍDO em 2026-10-16:** Extensão Chrome fora da aplicação; ver a nota do §32. O total vigente é o `se_results_count` do DataForSEO.
+
 O leitor da Extensão procura primeiro os seletores semânticos conhecidos, incluindo `#result-stats` e `role=status`. Quando a página concluída não apresenta um contador nesses pontos, ele localiza e abre uma única vez o controle localizado como `Ferramentas`, `Tools` ou `Herramientas`, aguarda a estabilização do painel e consulta seus textos visíveis. A extração não usa a quantidade de cards orgânicos nem números sem a palavra `resultado`, `resultados`, `result` ou `results`.
 
 O parser aceita contagens localizadas com separadores de milhar e ignora o tempo entre parênteses. `success` exige contagem positiva, `zero_results` exige contador zero ou indicação explícita de ausência, e a página com resultados orgânicos sem contador retorna `unavailable`, código `result_count_not_found` e estágio `google_result_extraction`. Esse estado preserva a métrica anterior e exibe que a consulta foi concluída, mas o contador não pôde ser identificado.
 
 ## 44. Ciclo de vida e reconciliação do lote allintitle
+
+> **SUBSTITUÍDO em 2026-10-16:** Extensão Chrome fora da aplicação (o "background" e o `chrome.storage` não existem); ver a nota do §32.
 
 O background mantém um ponteiro efêmero `allintitle:activeOperationByBrand:{brandId}` somente para estados `queued`, `running`, `paused` ou `captcha_required`. Estados `completed`, `cancelled`, `failed`, `interrupted` e `orphaned` permanecem no histórico com resultados e progresso, mas nunca bloqueiam uma nova operação.
 
@@ -702,7 +751,11 @@ Decisão de produto: **quando o status é `aprovado`, a keyword está pronta par
 
 **Handoff sem fluxo explícito para reaprovação:** o envio explícito vale só para keyword nova. Keyword já recebida tem o item reescrito quando o `contentHash` aprovado muda (`plan.updates`). Frescor a jusante: `lib/minerador/package-freshness.ts` (`fresh | in_review | stale | never_approved | unknown`; só `stale` impede).
 
+> **SUBSTITUÍDO em 2026-10-16** (trecho do frescor a jusante). `lib/minerador/package-freshness.ts` nunca teve chamador em produção e saiu na F1 da linha única. Vale agora: "Aprovar e enviar" (2026-10-14) atualiza no Arquiteto a keyword já recebida quando o `contentHash` aprovado muda, e o Arquiteto lê só o pacote aprovado.
+
 ### Exceção do Assunto (D2) — 2026-09-24
+
+> **SUBSTITUÍDO em 2026-10-16** (a D2 para todo Assunto e "declarar ou retirar" pela Revisão). Desde 2026-10-13 (SDD `sdd-cadastro-assunto-na-keyword-2026-10-13.md`; SDD acelerar), a D2 vale só para o Assunto do formato anterior (linha própria, `SUBJECT_APPROVAL_REASON`); a principal do plano aprova pela D2-bis (`DECLARED_PRINCIPAL_APPROVAL_REASON`: só a Lógica). O Assunto entra só pelo card "Cadastrar Assuntos" e só "Tirar do plano" o libera (§79).
 
 Com o Assunto declarado (§67, declaração 3), `resolveApprovalReadiness` só exige a **Lógica**. Volume, Resultados e KGR são dispensados, com o motivo "Assunto declarado: dispensa Volume, Resultados e KGR; a Lógica continua exigida." `ApprovalRequirement` não muda. A dispensa só vale com a declaração: retirar o Assunto volta a exigir tudo. As chaves `keyword_subject*` são assinadas, então declarar ou retirar numa aprovada a leva para Em revisão. A Lógica roda sozinha depois de cada declaração, pela mesma rotina do botão, e nunca aprova.
 
@@ -710,7 +763,9 @@ Com o Assunto declarado (§67, declaração 3), `resolveApprovalReadiness` só e
 
 ### Trava no envio ao Arquiteto — 2026-09-24
 
-A trava de aprovação passa a valer **também no envio**, na tela e no servidor, pela mesma função (`resolveHandoffApprovalGate`, `lib/minerador/approved-package.ts`). No servidor, ela fica em `prepareCanonicalHandoff`. A decisão Q3 manteve a trava **só no envio**: a aprovação continua sendo gravada pelo navegador, e a rota de aprovação no servidor fica para uma SDD própria.
+A trava de aprovação passa a valer **também no envio**, na tela e no servidor, pela mesma função (`resolveHandoffApprovalGate`, `lib/minerador/approved-package.ts`). No servidor, ela fica em `prepareCanonicalHandoff`. A decisão Q3 manteve a trava **só no envio** (trecho SUBSTITUÍDO em 2026-10-16, ver a nota abaixo): a aprovação continua sendo gravada pelo navegador, e a rota de aprovação no servidor fica para uma SDD própria.
+
+> **SUBSTITUÍDO em 2026-10-16** ("a aprovação continua sendo gravada pelo navegador"). Desde 2026-10-13 (SDD acelerar, item 2) a aprovação é gravada pelo servidor: "Aprovar e enviar ao Arquiteto" (`POST …/keywords/approve-and-send`, prévia com `decisionHash` → `applyKeywordDecisionEntries` em `lib/server/minerador-keyword-decision-core.ts`, com releitura e o ator autenticado), o mesmo núcleo do MCP `decide_keywords`. A tela nunca grava `aprovado` direto. Os outros status (rejeitado, bruto, em revisão) ainda vão pelo navegador até a F3 da linha única (§79).
 
 **Só para frente.** A trava vale só para aprovações registradas a partir de `SERVER_APPROVAL_GATE_SINCE = "2026-09-24T00:00:00-03:00"` (Q9). Por que essa data: a tela aplica `resolveApprovalReadiness` desde este §61 (2026-09-18), então tudo o que a tela aprovou desde então já passou pela mesma trava. Ligar o envio no dia da aprovação da SDD não revoga nenhuma decisão tomada sob outra regra. A constante fica no código, e nenhum dado é regravado.
 
@@ -847,6 +902,8 @@ Amplia o §66. O Vínculo passa a carregar **duas declarações humanas**, e só
 
 > **Ampliado em 2026-09-24:** o Vínculo passa a ter **três** declarações. A terceira é o Assunto (seção "3. Assunto", abaixo; [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), P2).
 
+> **SUBSTITUÍDO em 2026-10-16** (as "três declarações" e o Assunto no Vínculo). Desde 2026-10-13 ([SDD do cadastro único](../compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md), C7) o Vínculo volta a ter **duas** declarações, Posto e Potencial; na keyword não publicada do plano, o Posto é a trava do cadastro (2026-10-13). O Assunto mora dentro da keyword (`keyword_subject.entry` e `plan`), entra só pelo card "Cadastrar Assuntos" (MCP `declare_silo_plan`) e só "Tirar do plano" o libera. O painel da keyword o mostra só leitura. Vale o §79.
+
 ### 1. Posto de principal
 
 `free` · `locked` · `reviewable` (`lib/minerador/primary-keyword-policy.ts`). Sem publicação declarada a keyword é **Livre** — livre para ser primária ou secundária de qualquer coisa. Com publicação, o humano declara se ela pode perder a vaga (`Revisável`) ou está presa ao slug/URL (`Travada`).
@@ -869,6 +926,8 @@ publicada    Silo · declarado        seleção livre
 > **Corrigido em 2026-09-24 (seção 4, abaixo):** o peso potencial ou declarado deixou de depender só da publicação. O humano escolhe o peso para qualquer keyword, e a publicada continua declarada pela publicação.
 
 ### 3. Assunto — 2026-09-24
+
+> **SUBSTITUÍDO em 2026-10-16** (onde se declara, "só o humano declara pela Revisão, pelo rodapé ou pelo select do import", a retirada com `keyword_subject: null` e a aprovação "com Assunto, só a Lógica"). Vale agora (2026-10-13, SDD do cadastro único e SDD acelerar; 2026-10-15, o Assunto nunca se perde): o Assunto é cadastrado só pelo card "Cadastrar Assuntos" (ou MCP `declare_silo_plan`), dentro da keyword que carrega o artigo; o Vínculo, o rodapé e a Pesquisa por Assunto não declaram; só "Tirar do plano" (e "Excluir tudo da cor") libera, com o marcador `keyword_subject_release`, e o banco repõe o Assunto em qualquer outra escrita (migration `20261015120000`, aplicada). A retirada sem marcador (`withdrawKeywordSubject`) saiu na F1 da linha única. Aprovação: D2 só para o formato anterior, D2-bis para a principal do plano (§61). O domínio continua em `lib/minerador/keyword-subject.ts`.
 
 O Assunto é a frase que o humano declara como **tronco** de um ou mais artigos, mesmo sem volume de busca. Ele é uma marca **ao lado** do tipo de página, não um quinto tipo: `KEYWORD_PAGE_TYPES` não muda, e uma keyword pode ser Assunto e Página de serviço ao mesmo tempo.
 
@@ -909,6 +968,8 @@ declarado    Artigo · declarado      "vai ser um Artigo, travado"
 
 #### 4.2 Rodapé: KGR, seletor Vínculo e o Assunto
 
+> **SUBSTITUÍDO em 2026-10-16** (o select "Assunto" no Vínculo, "Assunto: Não" na coluna e "O Assunto anula o Posto e o KGR"). Desde 2026-10-13 (SDD do cadastro único, C7) o painel "Vínculo das selecionadas" e a Revisão Humana têm só Posto de principal e Potencial de página; a coluna mostra "Livre · Artigo · potencial" (`keywordVinculoChoicesSummary`). Na keyword do plano, o Posto é a trava do cadastro (Travada · Livre · Automática), e o KGR segue a regra de todas (§78). Vale o §79.
+
 - O rodapé tem o **KGR** e **um seletor "Vínculo"** (pedido do dono, 2026-09-24: os três selects separados poluíam o rodapé). O Vínculo abre um painel com os **mesmos três selects do card REVISÃO HUMANA** (componente comum `components/editorial/vinculo-selects.tsx`) — Posto de principal, Potencial de página e Assunto (Não · Declarado) —, com os mesmos rótulos e valores e **sem "Não mudar"** (pedido do dono, 2026-09-24, terceira rodada). Cada select mostra o valor comum das selecionadas ou o marcador desabilitado "Valores diferentes", que não é valor gravável; "Aplicar" grava só os selects que o humano mudou, de uma vez. Assunto Declarado (escolhido ou comum a todas) desliga o Posto. A coluna Vínculo mostra as três escolhas, default ou do usuário (ex.: "Livre · Artigo · potencial · Assunto: Não"). Os mesmos aparecem em "Mais ações". Nada é gravado antes da confirmação.
 - **O rodapé só existe com seleção feita pelo humano.** Nenhum processo automático seleciona keywords.
 - **O Assunto anula o Posto e o KGR.** São as keywords do artigo que definem posto e KGR. No lote, a keyword com Assunto é pulada e contada. Na Revisão, os dois selects ficam desligados. A conclusão da revisão não cobra o KGR de um Assunto.
@@ -941,6 +1002,8 @@ Medindo…   processo em andamento
 ### Vocabulário das duas declarações
 
 > **Nota de 2026-09-24:** este vocabulário cobre o posto e o tipo de página. O Assunto tem vocabulário próprio na seção "3. Assunto", acima, e, quando declarado, aparece também na coluna Vínculo (`data-keyword-subject-label`, lido por `resolveKeywordVinculo`).
+>
+> **SUBSTITUÍDO em 2026-10-16** (o Assunto na coluna Vínculo). Desde 2026-10-13 a coluna mostra só Posto e Potencial; o Assunto aparece no painel da keyword ("Assunto deste artigo") e no cabeçalho do perfil.
 
 A tela mostra exatamente três coisas, no mesmo lugar na coluna e no DNA:
 
@@ -965,6 +1028,8 @@ O posto tem **três valores internos e duas respostas visíveis**: `free` (sem p
 **O endereço** aparece na coluna da palavra-chave, completo, em `font-mono` com a cor `text-identity-published` — a mesma cor que marca publicação em toda a plataforma. Surge assim que há URL conferida, não só depois de declarada; o `title` distingue "canônico declarado" de "página conferida". Marcado com `data-keyword-page-url` para os guardas visuais.
 
 A coluna Vínculo mostra o posto (com cor por estado) e o tipo (borda tracejada quando ainda é o padrão, sólida quando declarado ou observado). Desde 2026-09-24, mostra também o selo do Assunto quando ele foi declarado: "Assunto · declarado", ou "Assunto sem nota" (seção 3. Assunto, abaixo). Nada mais.
+
+> **SUBSTITUÍDO em 2026-10-16** (o selo do Assunto na coluna Vínculo). Desde 2026-10-13 a coluna não mostra o Assunto (ver a nota do vocabulário, acima).
 
 ## 68. Declaração no ato do link e as cores do vínculo — 2026-09-20
 
@@ -1497,3 +1562,38 @@ KGR_SCORE_ALWAYS_CALCULATED = YES
 KGR_INTEREST_VOLUME_RANGE = 150..550 (informativa)
 RESULTS_PROCESS = manual, opcional, pago
 ```
+
+## 79. A linha única do Minerador e as decisões de outubro — 2026-10-16
+
+SDD [`sdd-linha-unica-do-minerador-2026-10-16.md`](../compartilhado/sdd-linha-unica-do-minerador-2026-10-16.md), APROVADA pelo dono em 2026-10-16 (decisões D1 a D8). Esta seção resume o que vale desde 2026-10-12 e prevalece sobre os trechos marcados **SUBSTITUÍDO** acima (`AGENTS.md` §0.5). O que diz "vale" está **verificado no código**; o que diz "fase" é **planejado**.
+
+**Uma linha, um gravador por etapa** (`AGENTS.md` §0.1 e §0.4). A tela e o MCP montam a cópia de trabalho; o servidor grava ao confirmar, com revalidação e releitura.
+
+| Etapa | Gravador no servidor | Estado |
+| --- | --- | --- |
+| Entrada de keyword | `importKeywordsWithCore` (Descobrir: Google Ads, colar, CSV), `importSubjectDiscoveryWithCore` (Pesquisa por Assunto, com recibo), rota de importação do site | vale. Os inserts do navegador do Processador (CSV, manual) e "Criar lista" saíram na F1. O site pelo gravador de entrada: F5/F6 |
+| Cadastro de Assuntos e plano | `importDeclaredPlanWithCore` (card "Cadastrar Assuntos", MCP `declare_silo_plan`, conversão do formato anterior, trava pelo Posto em `plans/lock`) | vale |
+| Lógica | `runKeywordLogicWithCore` (MCP, reaprovar, recibo, sugestões, conversão) | vale. O botão Lógica ainda grava pelo navegador até a F3 |
+| Volume | rota do Google Ads `…/google-ads/metricas-keywords` (botão Volume, MCP `measure_keywords`) e o recibo da Pesquisa por Assunto | vale |
+| Resultados | rota `…/dataforseo/allintitle`, opcional e paga (§78) | vale. D6 (só o allintitle do KGR opcional, carregando a aprovação) numa fase própria |
+| Aprovação | `applyKeywordDecisionEntries` ("Aprovar e enviar", MCP `decide_keywords`) | vale. Rejeitado, bruto e em revisão pelo servidor: F3 |
+| Envio ao Arquiteto | "Aprovar e enviar" → `prepareCanonicalHandoff`, pacote por `contentHash` | vale. O botão antigo "Enviar ao Arquiteto" sai e o MCP passa ao modo parcial (D8, fase própria) |
+| Vínculo, KGR, Revisão Humana, posto, link de publicação | MCP: `persistSemanticDecision`; tela: navegador | a tela pelo núcleo do MCP: F4/F5 |
+| Grupos e exclusão | `keyword-group-core.ts`; RPCs do ciclo de vida (`keywords/delete`, `keywords/delete-group`) | vale |
+
+**Decisões de outubro que valem:**
+
+- **2026-10-12:** plano declarado do Silo e grupos por cor ([SDD](../compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md)); Silo de 4 a 30 artigos (D3).
+- **2026-10-13:** cadastro único — o Assunto mora dentro da keyword (`keyword_subject.entry` e `plan`) e entra só pelo card "Cadastrar Assuntos"; o Vínculo tem só Posto e Potencial (C7); `subjects/import` responde 410 ([SDD](../compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md)). Conversão do formato anterior ([SDD](../compartilhado/sdd-conversao-assunto-legado-2026-10-13.md)). Aprovação pelo servidor e recibo da Pesquisa por Assunto ([SDD acelerar](../compartilhado/sdd-acelerar-fluxo-do-plano-2026-10-13.md)). O Arquiteto só lê keywords, listas leves, "Substituir o plano" e "Excluir tudo da cor" ([SDD](../compartilhado/sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md)). Na keyword não publicada do plano, o Posto é a trava do cadastro. A D2 vale só para o Assunto do formato anterior; a D2-bis, para a principal do plano.
+- **2026-10-14:** "Aprovar e enviar" atualiza no Arquiteto a keyword já recebida (pacote novo). As sugestões do Arquiteto por cor só gravam com o clique do dono.
+- **2026-10-15:** o Assunto nunca se perde — só "Tirar do plano" (e "Excluir tudo da cor", com a sua migration) libera, com o marcador `keyword_subject_release`; os gatilhos do banco (migration `20261015120000`) estão aplicados, conferido por SELECT em 2026-10-16. A keyword da página do Silo é opcional no cadastro (adendo S2); o MCP `validate_silo_plan` ainda a exige até a F2.
+- **2026-10-16:** a linha única (esta seção) e as decisões D1 a D8 da SDD.
+
+**Planejado (uma fase por deploy):**
+
+- **F2:** uma régua para a trava (D1: volume definido fixa a principal, mesmo com "Livre" gravado), para o tamanho do Silo (D2: só aviso, em todo lugar; `siloPage.keyword` opcional no MCP) e para "volume medido"; dedup paginada no import comum.
+- **F3:** a Lógica e o Status pelo núcleo do servidor; abrir a tela não grava o nicho (D3).
+- **F4/F5:** Vínculo, KGR, Revisão Humana, posto, link de publicação, CSV e site pelos núcleos do servidor.
+- **F6:** o resto que a F0 achou (D6, D7, D8, uma chave de dedup, leitores do MCP pelo resolver, exclusão comum com hash, marca de principal órfã).
+
+**F1 (2026-10-16), feita:** saíram as portas mortas e as sobras sem chamador — o ramo de declaração que chamava `subjects/import` (Pesquisa por Assunto e colar/CSV do Descobrir); `withdrawKeywordSubject`; os inserts do navegador e "Criar lista" do Processador; `package-freshness.ts`; os normalizadores da RapidAPI; as sobras da Extensão em `allintitle.ts` e `allintitle-persistence.ts`; as decisões de exclusão do cliente em `keyword-lifecycle.ts`; o `kgrUse: "decisao_pendente"` inalcançável do MCP. Os textos da Pesquisa por Assunto apontam para "Cadastrar Assuntos". Nenhuma função viva mudou. Detalhe em [`estado-atual.md`](estado-atual.md).
