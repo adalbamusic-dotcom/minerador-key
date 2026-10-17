@@ -94,6 +94,38 @@ test("adapter: `deterministicArticleDnaPayload` usa o papel e o escopo do grupo 
   const fonte = readFileSync(new URL("../lib/arquiteto/adapters.ts", import.meta.url), "utf8");
   assert.match(fonte, /hierarchy: group\.declaredPlan\?\.role \?\? group\.suggestedHierarchy/);
   assert.match(fonte, /promise: group\.declaredPlan\?\.scope \|\| text\(semantic\.promessa/);
+  // 2026-10-16 · o slug declarado no Minerador vale para o artigo NOVO (sem âncora publicada).
+  assert.match(fonte, /const suggestedSlug = \(!group\.publishedAnchorId && group\.declaredPlan\?\.slug\) \|\| principal\.slug_sugerido/);
+});
+
+test("slug declarado no plano (Minerador, 2026-10-16): a formação, o grupo e o ArticleDNA do artigo NOVO usam o slug declarado; o publicado nunca muda; plano sem slug fica como antes", () => {
+  const comSlug = { ...standing, plan: { ...standing.plan, slug: "claro-vivo-tim-internet-residencial" } };
+  assert.deepEqual(declaredPlanForGroup(comSlug), { role: "Pilar", scope: "Explicar o que comparar antes da contratação.", slug: "claro-vivo-tim-internet-residencial" });
+  // O ArticleDNA vigente (artigo novo): o slug declarado vira o suggestedSlug, com papel e promessa.
+  const novo = applyDeclaredPlanToArticleDna(article({ suggestedSlug: "claro-vivo-ou-tim-internet" }), comSlug);
+  assert.ok(novo.ok && novo.changed);
+  if (novo.ok) {
+    assert.equal(novo.value.suggestedSlug, "claro-vivo-tim-internet-residencial");
+    assert.equal(declaredPlanAppliedTo(novo.value, comSlug), true);
+  }
+  assert.equal(declaredPlanAppliedTo(article({ hierarchy: "Pilar", promise: "Explicar o que comparar antes da contratação.", suggestedSlug: "outro" }), comSlug), false, "slug diferente do declarado pede versão nova");
+  // Publicado: URL, slug e canonical protegidos (AGENTS §11) — o slug declarado não entra.
+  const publicado = article({ hierarchy: "Pilar", promise: "Explicar o que comparar antes da contratação.", suggestedSlug: "claro-ou-vivo", publishedIdentityRef: { slug: "claro-ou-vivo" } as never });
+  const aplicadoNoPublicado = applyDeclaredPlanToArticleDna(publicado, comSlug);
+  assert.ok(aplicadoNoPublicado.ok && !aplicadoNoPublicado.changed);
+  if (aplicadoNoPublicado.ok) assert.equal(aplicadoNoPublicado.value.suggestedSlug, "claro-ou-vivo");
+  assert.equal(declaredPlanAppliedTo(publicado, comSlug), true);
+  // Plano sem slug: nada muda no slug (o de antes, pela principal).
+  const semSlug = applyDeclaredPlanToArticleDna(article({ suggestedSlug: "claro-vivo-ou-tim-internet" }), standing);
+  assert.ok(semSlug.ok && semSlug.value.suggestedSlug === "claro-vivo-ou-tim-internet");
+  // A formação: o candidato do artigo do plano nasce com o slug declarado (a mesma entrada `declaredPlans`).
+  const base = { declared: true, received: true, approvedPackageRef: { version: 1, contentHash: "sha256:x" }, brandId: "b1" };
+  const entradas = declaredPlanFormationInputs({ standings: [{ ...base, keywordId: "s3", plan: { ...comSlug.plan, order: 3, role: "Suporte" as const } }] as never, brandId: "b1" });
+  assert.equal(entradas.get("s3")?.slug, "claro-vivo-tim-internet-residencial");
+  const formacao = planSiloArticleFormation({ siloRef, siloLabel: "Planos", siloSlug: "/planos-de-internet", siloTokens: new Set<string>(), keywords, subjects, subjectClaims: [{ subjectKeywordId: "s3", keywordIds: ["cv", "vc"] }], declaredPlans: new Map([["s3", { ...declaredPlans.get("s3")!, slug: "claro-vivo-tim-internet-residencial" }]]), groupOfKeyword });
+  assert.equal(formacao.universe.candidates.find(candidate => candidate.subjectKeywordId === "s3")?.suggestedSlug, "claro-vivo-tim-internet-residencial");
+  const semSlugNaFormacao = planSiloArticleFormation({ siloRef, siloLabel: "Planos", siloSlug: "/planos-de-internet", siloTokens: new Set<string>(), keywords, subjects, subjectClaims: [{ subjectKeywordId: "s3", keywordIds: ["cv", "vc"] }], declaredPlans, groupOfKeyword });
+  assert.notEqual(semSlugNaFormacao.universe.candidates.find(candidate => candidate.subjectKeywordId === "s3")?.suggestedSlug, "claro-vivo-tim-internet-residencial", "sem slug declarado, o slug sai da principal como sempre");
 });
 
 test("leituras únicas: só Assunto declarado, recebido, com pacote e desta marca entra no plano; a lista é a da Pesquisa por Assunto", () => {

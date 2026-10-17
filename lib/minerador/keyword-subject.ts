@@ -132,7 +132,7 @@ export type KeywordSubjectHistoryEntry = {
    * 2026-10-13 leva também o escopo (os detalhes): sem ele, o Assunto
    * recuperado do histórico voltava sem detalhes.
    */
-  plan?: { groupId: string; planVersion: number; order: number; role: string; declaredPrincipalKeywordId: string | null; lock?: string | null; scope?: string } | null;
+  plan?: { groupId: string; planVersion: number; order: number; role: string; declaredPrincipalKeywordId: string | null; lock?: string | null; scope?: string; slug?: string } | null;
   /** 2026-10-13 · só quando a mudança envolveu o Assunto cadastrado na keyword: o título. */
   entryTitle?: string | null;
   /** 2026-10-13 · a retirada liberada ("Tirar do plano" ou conversão): o marcador da mesma escrita. */
@@ -312,7 +312,7 @@ export type SetKeywordSubjectInput = {
 };
 
 function planSummary(plan: DeclaredArticlePlan | null): KeywordSubjectHistoryEntry["plan"] {
-  return plan ? { groupId: plan.groupId, planVersion: plan.planVersion, order: plan.order, role: plan.role, declaredPrincipalKeywordId: plan.declaredPrincipal?.keywordId ?? null, ...(plan.lock ? { lock: plan.lock } : {}), scope: plan.scope } : null;
+  return plan ? { groupId: plan.groupId, planVersion: plan.planVersion, order: plan.order, role: plan.role, declaredPrincipalKeywordId: plan.declaredPrincipal?.keywordId ?? null, ...(plan.lock ? { lock: plan.lock } : {}), scope: plan.scope, ...(plan.slug ? { slug: plan.slug } : {}) } : null;
 }
 
 /* ========================================================================== */

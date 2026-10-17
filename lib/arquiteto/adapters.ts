@@ -207,7 +207,8 @@ export function deterministicArticleDnaPayload(group: ProvisionalArticleGroup, b
   const pending = "Pendente de enriquecimento e revisão humana";
   const entities = [...new Set(group.keywords.flatMap(keyword => stringList(keyword.analise_semantica?.entidade_central)))];
   const architectureStatus = group.architectureStatus || principal.architectureStatus;
-  const suggestedSlug = principal.slug_sugerido || principal.keyword.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  // 2026-10-16 · o slug declarado no plano do Minerador vale para o artigo NOVO; o publicado mantém o dele (AGENTS §11).
+  const suggestedSlug = (!group.publishedAnchorId && group.declaredPlan?.slug) || principal.slug_sugerido || principal.keyword.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const volumeStrategy = calculateArticleVolumeStrategy(group);
   const enrichedReferences = references.map(reference => {
     const contribution = volumeStrategy.contributions.find(item => item.keywordId === reference.keywordId);

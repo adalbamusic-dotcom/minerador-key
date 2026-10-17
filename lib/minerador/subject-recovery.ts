@@ -54,6 +54,8 @@ export type RecoveredSubjectRow = {
   /** O escopo, quando o histórico o guardou; senão "" (o dono cola o plano). */
   details: string;
   lock: DeclaredPlanLockChoice;
+  /** 2026-10-16 · o slug declarado, quando o histórico o guardou. */
+  slug?: string | null;
   /** A linha do histórico de onde a recuperação saiu. */
   fromHistoryAt: string | null;
   loss: SubjectLoss;
@@ -70,7 +72,7 @@ function historyOf(semantic: Semantic): HistoryLine[] {
   return Array.isArray(value) ? value.map(asRecord).filter((line): line is HistoryLine => Boolean(line)) : [];
 }
 
-type PlanSummary = { groupId: string; order: number; role: DeclaredPlanRole; declaredPrincipalKeywordId: string | null; lock: string | null; scope: string | null };
+type PlanSummary = { groupId: string; order: number; role: DeclaredPlanRole; declaredPrincipalKeywordId: string | null; lock: string | null; scope: string | null; slug: string | null };
 
 function readPlanSummary(value: unknown): PlanSummary | null {
   const plan = asRecord(value);
@@ -79,7 +81,7 @@ function readPlanSummary(value: unknown): PlanSummary | null {
   const order = typeof plan.order === "number" && Number.isInteger(plan.order) && plan.order > 0 ? plan.order : null;
   const role = (DECLARED_PLAN_ROLES as readonly string[]).includes(String(plan.role)) ? plan.role as DeclaredPlanRole : null;
   if (!groupId || !order || !role) return null;
-  return { groupId, order, role, declaredPrincipalKeywordId: text(plan.declaredPrincipalKeywordId), lock: text(plan.lock), scope: text(plan.scope) };
+  return { groupId, order, role, declaredPrincipalKeywordId: text(plan.declaredPrincipalKeywordId), lock: text(plan.lock), scope: text(plan.scope), slug: text(plan.slug) };
 }
 
 /**
@@ -143,6 +145,7 @@ export function recoverSubjectFromHistory(input: { keywordId: string; keyword: s
     title: titleUpTo(history, decisao.index) ?? input.keyword.trim(),
     details: plan.scope ?? "",
     lock: plan.lock === "locked" || plan.lock === "free" ? plan.lock : "auto",
+    ...(plan.slug ? { slug: plan.slug } : {}),
     fromHistoryAt: text(decisao.line.changedAt),
     loss: lossAfter(history, decisao.index, input.semantic),
   };

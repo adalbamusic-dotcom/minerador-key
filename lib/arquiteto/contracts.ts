@@ -627,7 +627,7 @@ export const ProvisionalArticleGroupSchema = z.object({
    * o papel vira `hierarchy` e o escopo vira `promise` no adapter. Opcional e
    * aditivo: sem plano, o grupo e o ArticleDNA são os de sempre.
    */
-  declaredPlan: z.object({ role: z.enum(["Pilar", "Suporte"]), scope: z.string().min(1).max(1200) }).strict().optional(),
+  declaredPlan: z.object({ role: z.enum(["Pilar", "Suporte"]), scope: z.string().min(1).max(1200), slug: z.string().max(200).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional() }).strict().optional(),
 });
 
 export type ProvisionalArticleGroup = z.infer<typeof ProvisionalArticleGroupSchema>;

@@ -493,6 +493,8 @@ export type DeclaredPlanFormationInput = {
   groupId: string;
   order: number;
   role: "Pilar" | "Suporte";
+  /** 2026-10-16 · o slug declarado do artigo (o último segmento). Ausente = o slug sai da principal, como sempre. */
+  slug?: string;
 };
 
 /** F4 — os motivos de "não agrupadas do grupo" e a ação que a tela e o catálogo citam. */
@@ -1049,6 +1051,9 @@ export function planSiloArticleFormation(input: {
     ...ancoras.filter(ancora => ancora.kind === "subject" && ancora.planned).map(ancora => ancora.principal.keywordId),
   ]);
 
+  const slugsDoPlano = new Map<string, string>([...(input.declaredPlans || new Map<string, DeclaredPlanFormationInput>())]
+    .filter(([, plano]) => Boolean(plano.slug))
+    .map(([subjectKeywordId, plano]) => [subjectKeywordId, plano.slug!] as const));
   const universe = buildArticleFormationUniverse({
     groups: [
       ...ancoras.filter(ancora => ancora.kind === "published").map(ancora => ({ principalKeywordId: ancora.principal.keywordId, keywordIds: ancora.keywordIds })),
@@ -1075,6 +1080,8 @@ export function planSiloArticleFormation(input: {
       ]) }
       : {}),
     ...(input.siloSubjectKeywordId ? { siloSubjectKeywordId: input.siloSubjectKeywordId } : {}),
+    // 2026-10-16 · o slug declarado no plano do Minerador, por Assunto (o candidato novo do artigo do plano nasce com ele).
+    ...(slugsDoPlano.size ? { declaredSlugBySubjectKeywordId: slugsDoPlano } : {}),
   });
   const awaitingSubjectKeywordIds = input.keywords
     .filter(keyword => !keyword.isPublished && declarado(keyword.keywordId) && !keyword.humanFormationRef

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 import { AlertTriangle, CheckCircle2, ListOrdered, Loader2, Plus, Trash2, X } from "lucide-react";
 import { GLOBAL_TOPBAR_ACTION_CONTROL } from "@/components/global-topbar-control";
 import { internalButton, internalButtonPrimary, internalField } from "@/components/editorial/internal-page-visual";
@@ -13,7 +13,7 @@ import {
   type EditorialGroupColor,
   type EditorialGroupSummary,
 } from "@/lib/editorial/editorial-groups";
-import { DECLARED_PLAN_SCOPE_MAX, SUBJECT_ENTRY_TITLE_MAX, parseDeclaredPlanText, type DeclaredPlanLockChoice, type DeclaredPlanRole } from "@/lib/minerador/declared-plan";
+import { DECLARED_PLAN_SCOPE_MAX, SUBJECT_ENTRY_TITLE_MAX, decodeDeclaredPlanFile, normalizeDeclaredPhraseKey, parseDeclaredPlanText, type DeclaredPlanFileEncoding, type DeclaredPlanLockChoice, type DeclaredPlanRole, type DeclaredPlanTextFormat, type DeclaredPlanTextSilo } from "@/lib/minerador/declared-plan";
 import { looksLikeSiloPlanText } from "@/lib/minerador/plan-text-detector";
 import type { DeclaredPlanApplyArticle, DeclaredPlanCardRow, DeclaredPlanMode, DeclaredPlanPreview, DeclaredPlanReplaceApplied, DeclaredPlanReplaceItem, DeclaredPlanReplacePreview } from "@/lib/minerador/declared-plan-import-core";
 import { SubjectConversionDialog } from "./subject-conversion-dialog";
@@ -44,6 +44,15 @@ import { CADASTRO_FOLLOW_UP_TEXTS, cadastroLeftoversToDelete, cadastroReapproval
  * de ordem e de keyword), a prévia mostra as quatro listas com o motivo, e
  * "Substituir o plano" manda o `decisionHash` dela — com algo saindo, só depois
  * do nome da cor digitado. O MESMO núcleo e a MESMA rota do cadastro.
+ *
+ * 2026-10-16 · o CSV de planejamento (pedido do dono: "reconhecer este tipo de
+ * CSV também, reconhecer os campos e preencher"): em "Colar plano em texto", o
+ * .csv pode ser aberto ("ou abrir um arquivo .csv") ou arrastado — vira o
+ * texto do MESMO campo, lido pelo MESMO leitor. Com vários Silos no texto, o
+ * card pede a escolha ("Este texto tem 2 Silos: … — escolha qual cadastrar
+ * agora") e preenche o escolhido; um cadastro = um Silo, e o outro continua no
+ * mesmo texto. Do CSV entram Silo, papel, ordem, Assunto, keyword, slug e
+ * detalhes; as outras colunas são ditas numa linha ("Colunas ignoradas").
  */
 
 const CADASTRO_ROUTE = (brandId: string) => `/api/minerador/marcas/${encodeURIComponent(brandId)}/plans/import`;
@@ -55,6 +64,8 @@ type Linha = {
   role: DeclaredPlanRole;
   title: string;
   keyword: string;
+  /** 2026-10-16 · o slug do artigo como o dono escreveu ("/silo/artigo/", URL ou "artigo"); vazio = o Arquiteto forma pela keyword. */
+  slug: string;
   details: string;
   lock: DeclaredPlanLockChoice;
   /** Já gravada no plano do Silo existente: não sai pelo card ("Tirar do plano" é o caminho). */
@@ -66,7 +77,7 @@ type Linha = {
 type GroupChoice = { mode: "existing"; groupId: string } | { mode: "new"; name: null; color: EditorialGroupColor };
 type SiloDoPlano = { name: string; slug: string | null; objective: string | null };
 type CadastroRequest = {
-  plan: { silo: SiloDoPlano | null; articles: Array<{ order: number; subject: string; principal: string | null; role: DeclaredPlanRole; scope: string; lock: DeclaredPlanLockChoice }> };
+  plan: { silo: SiloDoPlano | null; articles: Array<{ order: number; subject: string; principal: string | null; role: DeclaredPlanRole; scope: string; lock: DeclaredPlanLockChoice; slug?: string | null }> };
   group: GroupChoice;
   destination: { kind: "new_silo" } | { kind: "existing_silo"; groupId: string } | { kind: "published"; url: string };
   /** 2026-10-13 · só no Silo existente com "Substituir o plano" (ausente = acréscimo, o pedido de sempre). */
@@ -95,8 +106,28 @@ const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filt
 const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 let sequencia = 0;
 const novaChave = () => `linha-${Date.now()}-${(sequencia += 1)}`;
-const linhaVazia = (order: number, role: DeclaredPlanRole): Linha => ({ key: novaChave(), order, role, title: "", keyword: "", details: "", lock: "auto", stored: false, storedLockLabel: null });
+const linhaVazia = (order: number, role: DeclaredPlanRole): Linha => ({ key: novaChave(), order, role, title: "", keyword: "", slug: "", details: "", lock: "auto", stored: false, storedLockLabel: null });
+/** 2026-10-16 · o formato que o leitor único reconheceu no texto colado (o aviso da colagem diz). */
+const FORMATO_LABELS: Record<DeclaredPlanTextFormat, string> = {
+  lista: "lista numerada",
+  blocos: "blocos (Silo, Pilar, Suporte)",
+  tabela: "tabela",
+  planilha: "planilha (TAB)",
+  csv: "CSV com cabeçalho",
+};
 const groupOfColor = (groups: readonly EditorialGroupSummary[], color: EditorialGroupColor) => groups.find(group => group.status === "active" && group.color === color) ?? null;
+/** 2026-10-16 · o .csv aberto ou arrastado em "Colar plano em texto": o mesmo campo, o mesmo leitor; nada é gravado. */
+const ARQUIVO_DO_PLANO = /\.(?:csv|tsv|txt)$/i;
+const ARQUIVO_DO_PLANO_MAX_BYTES = 2_000_000;
+const COLADO_MAX = 60000;
+const CODIFICACAO_LABELS: Record<DeclaredPlanFileEncoding, string> = {
+  "utf-8": "UTF-8",
+  "utf-8-bom": "UTF-8",
+  "utf-16le": "UTF-16",
+  "utf-16be": "UTF-16",
+  "windows-1252": "Windows-1252, convertido",
+};
+type ArquivoDoPlano = { name: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> };
 
 async function callCadastro(brandId: string, init: { method: "POST"; body: Record<string, unknown> } | { method: "GET"; groupId: string }): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; refusal: Refusal }> {
   const url = init.method === "GET" ? `${CADASTRO_ROUTE(brandId)}?groupId=${encodeURIComponent(init.groupId)}` : CADASTRO_ROUTE(brandId);
@@ -176,6 +207,16 @@ export function SubjectCadastroCard({
   const [linhas, setLinhas] = useState<Linha[]>(() => [linhaVazia(1, "Pilar")]);
   const [colado, setColado] = useState(initialText);
   const [colagemAviso, setColagemAviso] = useState<string | null>(null);
+  /** 2026-10-16 · o texto traz mais de um Silo (o CSV de planejamento): a escolha de qual cadastrar agora. */
+  const [silosDoTexto, setSilosDoTexto] = useState<DeclaredPlanTextSilo[]>([]);
+  const [siloDoTextoEscolhido, setSiloDoTextoEscolhido] = useState<string | null>(null);
+  /** Os Silos do texto já cadastrados nesta abertura do card (o outro continua disponível no mesmo texto). */
+  const [silosCadastrados, setSilosCadastrados] = useState<string[]>([]);
+  /** 2026-10-16 · as colunas do cabeçalho que o plano não usa (uma linha informativa). */
+  const [colunasIgnoradas, setColunasIgnoradas] = useState<string[]>([]);
+  const [arquivoAviso, setArquivoAviso] = useState<string | null>(null);
+  const [arrastando, setArrastando] = useState(false);
+  const arquivoRef = useRef<HTMLInputElement | null>(null);
   const [phase, setPhase] = useState<"idle" | "loading" | "previewing" | "applying">("idle");
   const [preview, setPreview] = useState<{ request: CadastroRequest; importRequestId: string; result: DeclaredPlanPreview } | null>(null);
   const [applied, setApplied] = useState<ApplyResult | null>(null);
@@ -232,16 +273,40 @@ export function SubjectCadastroCard({
     invalidate();
   };
 
-  /** "Colar plano em texto": o parser de sempre preenche o topo e as linhas. */
-  const preencherDoTexto = (texto: string = colado) => {
+  /**
+   * "Colar plano em texto": o parser de sempre preenche o topo e as linhas.
+   * 2026-10-16 · texto com vários Silos (o CSV de planejamento): nada é
+   * preenchido até o dono escolher o Silo (`siloName`); escolhido, o MESMO
+   * leitor devolve só aquele Silo e o card preenche como sempre.
+   */
+  const preencherDoTexto = (texto: string = colado, siloName: string | null = null) => {
     if (!texto.trim()) return;
-    const lido = parseDeclaredPlanText(texto);
-    if (destino === "new_silo") {
-      if (lido.silo.name) setSiloName(lido.silo.name);
-      if (lido.silo.rawSlug) setSiloSlug(lido.silo.rawSlug);
-      if (lido.silo.objective) setSiloObjective(lido.silo.objective);
+    const todos = parseDeclaredPlanText(texto);
+    const silosLidos = todos.silos ?? [];
+    setSilosDoTexto(silosLidos);
+    setColunasIgnoradas(todos.ignoredColumns ?? []);
+    const escolhido = silosLidos.length > 1 ? silosLidos.find(silo => siloName !== null && silo.name === siloName)?.name ?? null : null;
+    setSiloDoTextoEscolhido(escolhido);
+    if (silosLidos.length > 1 && !escolhido) {
+      setColagemAviso(`Formato: ${todos.format ? FORMATO_LABELS[todos.format] : "texto"}. Escolha abaixo qual Silo cadastrar agora; as linhas são preenchidas com ele.`);
+      invalidate();
+      return;
     }
-    const lidas = lido.articles.map(article => ({ ...linhaVazia(article.order, article.role), title: article.subject, keyword: article.principal ?? "", details: article.scope, lock: article.lock ?? "auto" as const }));
+    const lido = escolhido ? parseDeclaredPlanText(texto, { siloName: escolhido }) : todos;
+    if (destino === "new_silo") {
+      if (escolhido) {
+        // Trocar de Silo do texto troca o topo inteiro (nada do Silo anterior fica).
+        setSiloName(lido.silo.name ?? "");
+        setSiloSlug(lido.silo.rawSlug ?? "");
+        setSiloObjective(lido.silo.objective ?? "");
+      } else {
+        if (lido.silo.name) setSiloName(lido.silo.name);
+        if (lido.silo.rawSlug) setSiloSlug(lido.silo.rawSlug);
+        if (lido.silo.objective) setSiloObjective(lido.silo.objective);
+      }
+    }
+    const lidas = lido.articles.map(article => ({ ...linhaVazia(article.order, article.role), title: article.subject, keyword: article.principal ?? "", slug: article.rawSlug ?? "", details: article.scope, lock: article.lock ?? "auto" as const }));
+    const formato = lido.format ? ` (formato: ${FORMATO_LABELS[lido.format]})` : "";
     // No Silo existente, o artigo colado que já está gravado (mesma keyword ou mesmo título) fica como está.
     const chave = (value: string) => value.trim().toLocaleLowerCase("pt-BR");
     const gravadas = linhas.filter(linha => linha.stored);
@@ -260,13 +325,14 @@ export function SubjectCadastroCard({
         const lida = lidas[index];
         const atual = atuais.find(linha => casa(linha, lida)) ?? null;
         if (!atual) return lida;
-        return { ...lida, key: atual.key, stored: atual.stored, storedLockLabel: atual.storedLockLabel, recovered: atual.recovered ?? null, lock: article.lock ?? atual.lock, title: lida.title.trim() ? lida.title : atual.title, details: lida.details.trim() ? lida.details : atual.details };
+        return { ...lida, key: atual.key, stored: atual.stored, storedLockLabel: atual.storedLockLabel, recovered: atual.recovered ?? null, lock: article.lock ?? atual.lock, title: lida.title.trim() ? lida.title : atual.title, slug: lida.slug.trim() ? lida.slug : atual.slug, details: lida.details.trim() ? lida.details : atual.details };
       });
       setLinhas(plano);
-      setSiloDoTexto(lido.silo.name ? { name: lido.silo.name, slug: lido.silo.rawSlug ?? null, objective: lido.silo.objective ?? null } : null);
+      // 2026-10-16 · o slug tirado dos endereços dos artigos não é pedido de troca: o Silo gravado fica com o dele.
+      setSiloDoTexto(lido.silo.name ? { name: lido.silo.name, slug: lido.silo.slugDerived ? null : lido.silo.rawSlug ?? null, objective: lido.silo.objective ?? null } : null);
       const casadas = plano.filter(linha => linha.stored || linha.recovered).length;
       const foraDoTexto = atuais.length - casadas;
-      setColagemAviso(`O texto vira o plano novo inteiro: ${plano.length} artigo(s)${casadas ? `, ${casadas} casado(s) com as linhas gravadas ou recuperadas` : ""}${foraDoTexto > 0 ? `; ${foraDoTexto} linha(s) gravada(s) fora do texto vão para “Sai” na prévia` : ""}${lido.silo.name ? `; Silo do texto: ${lido.silo.name}` : ""}${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
+      setColagemAviso(`O texto vira o plano novo inteiro${formato}: ${plano.length} artigo(s)${casadas ? `, ${casadas} casado(s) com as linhas gravadas ou recuperadas` : ""}${foraDoTexto > 0 ? `; ${foraDoTexto} linha(s) gravada(s) fora do texto vão para “Sai” na prévia` : ""}${lido.silo.name ? `; Silo do texto: ${lido.silo.name}` : ""}${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
       invalidate();
       return;
     }
@@ -276,14 +342,14 @@ export function SubjectCadastroCard({
     const recuperadasAgora = recuperadas.map(recuperada => {
       const lida = lidas.find(linha => casa(recuperada, linha));
       if (!lida) return recuperada;
-      const proxima = { ...recuperada, details: recuperada.details.trim() ? recuperada.details : lida.details, title: recuperada.title.trim() ? recuperada.title : lida.title };
-      if (proxima.details !== recuperada.details || proxima.title !== recuperada.title) completadas += 1;
+      const proxima = { ...recuperada, details: recuperada.details.trim() ? recuperada.details : lida.details, title: recuperada.title.trim() ? recuperada.title : lida.title, slug: recuperada.slug.trim() ? recuperada.slug : lida.slug };
+      if (proxima.details !== recuperada.details || proxima.title !== recuperada.title || proxima.slug !== recuperada.slug) completadas += 1;
       return proxima;
     });
     const novas = lidas.filter(linha => !jaGravada(linha) && !recuperadas.some(recuperada => casa(recuperada, linha)));
     setLinhas([...gravadas, ...recuperadasAgora, ...novas]);
     const repetidas = lidas.length - novas.length - recuperadas.filter(recuperada => lidas.some(linha => casa(recuperada, linha))).length;
-    setColagemAviso(`${novas.length} artigo(s) lido(s) do texto${repetidas ? `; ${repetidas} já gravado(s) no Silo ficam como estão` : ""}${recuperadas.length ? `; ${completadas} linha(s) recuperada(s) do histórico completada(s) só no que faltava` : ""}${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
+    setColagemAviso(`${novas.length} artigo(s) lido(s) do texto${formato}${lido.silo.name && destino === "new_silo" ? `; Silo: ${lido.silo.name}` : ""}${repetidas ? `; ${repetidas} já gravado(s) no Silo ficam como estão` : ""}${recuperadas.length ? `; ${completadas} linha(s) recuperada(s) do histórico completada(s) só no que faltava` : ""}${lido.unparsed.length ? `; ${lido.unparsed.length} linha(s) não entendida(s) ficaram de fora` : ""}. Confira as linhas antes da prévia.`);
     invalidate();
   };
 
@@ -306,7 +372,54 @@ export function SubjectCadastroCard({
     if (!looksLikeSiloPlanText(texto)) return;
     event.preventDefault();
     setColado(texto);
+    setArquivoAviso(null);
     preencherDoTexto(texto);
+  };
+
+  /** 2026-10-16 · escolher, entre os Silos do texto, o que cadastrar agora: o MESMO texto, o MESMO leitor. */
+  const escolherSiloDoTexto = (nome: string | null) => {
+    if (busyRef.current || nome === null) return;
+    preencherDoTexto(colado, nome);
+  };
+
+  /**
+   * 2026-10-16 · "ou abrir um arquivo .csv" / arrastar o .csv: lê o arquivo
+   * (UTF-8, com ou sem BOM, ou Windows-1252) para o MESMO campo de texto e
+   * preenche pelo MESMO leitor. Não é etapa nova e nada é gravado.
+   */
+  const abrirArquivo = async (arquivo: ArquivoDoPlano | null | undefined) => {
+    if (!arquivo || busyRef.current) return;
+    if (!ARQUIVO_DO_PLANO.test(arquivo.name)) { setArquivoAviso(`“${arquivo.name}” não é um .csv: abra o .csv do plano (ou cole o texto).`); return; }
+    if (arquivo.size > ARQUIVO_DO_PLANO_MAX_BYTES) { setArquivoAviso(`“${arquivo.name}” passa de 2 MB: um plano de Silo cabe em bem menos. Nada foi lido.`); return; }
+    let lido: ReturnType<typeof decodeDeclaredPlanFile>;
+    try {
+      lido = decodeDeclaredPlanFile(await arquivo.arrayBuffer());
+    } catch {
+      if (mountedRef.current) setArquivoAviso(`Não foi possível ler “${arquivo.name}”. Nada foi gravado.`);
+      return;
+    }
+    if (!mountedRef.current) return;
+    if (lido.text.length > COLADO_MAX) { setArquivoAviso(`“${arquivo.name}” passa de ${COLADO_MAX.toLocaleString("pt-BR")} caracteres. Nada foi lido.`); return; }
+    setColado(lido.text);
+    setArquivoAviso(`Arquivo “${arquivo.name}” aberto (${CODIFICACAO_LABELS[lido.encoding]}${lido.repaired ? ", acentos corrigidos" : ""}). Nada foi gravado.`);
+    preencherDoTexto(lido.text);
+  };
+  const escolherArquivo = (event: ChangeEvent<HTMLInputElement>) => {
+    const arquivo = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    void abrirArquivo(arquivo);
+  };
+  const temArquivo = (event: DragEvent<HTMLElement>) => [...(event.dataTransfer?.types ?? [])].includes("Files");
+  const arrastarSobre = (event: DragEvent<HTMLElement>) => {
+    if (!temArquivo(event)) return;
+    event.preventDefault();
+    if (!arrastando) setArrastando(true);
+  };
+  const soltarArquivo = (event: DragEvent<HTMLElement>) => {
+    if (!temArquivo(event)) return;
+    event.preventDefault();
+    setArrastando(false);
+    void abrirArquivo(event.dataTransfer.files?.[0] ?? null);
   };
 
   /** Silo existente: as linhas gravadas aparecem no formato do card (leitura compatível). */
@@ -315,6 +428,8 @@ export function SubjectCadastroCard({
     invalidate();
     setLinhas([]);
     setSiloDoTexto(null);
+    // 2026-10-16 · as linhas passam a ser as gravadas: a escolha do Silo do texto volta a ser feita (o clique preenche).
+    setSiloDoTextoEscolhido(null);
     if (!groupId || busyRef.current) return;
     busyRef.current = true;
     setPhase("loading");
@@ -328,7 +443,7 @@ export function SubjectCadastroCard({
       }
       const rows = (Array.isArray(answer.body.rows) ? answer.body.rows : []) as DeclaredPlanCardRow[];
       // 2026-10-13 · a linha recuperada do histórico NÃO está no plano gravado: entra como nova, com o selo (o dono confere e cadastra).
-      setLinhas(rows.map(row => ({ key: novaChave(), order: row.order, role: row.role, title: row.title, keyword: row.keyword ?? "", details: row.details, lock: row.lock, stored: !row.recovered, storedLockLabel: row.lockLabel, recovered: row.recovered?.label ?? null })));
+      setLinhas(rows.map(row => ({ key: novaChave(), order: row.order, role: row.role, title: row.title, keyword: row.keyword ?? "", slug: row.slug ?? "", details: row.details, lock: row.lock, stored: !row.recovered, storedLockLabel: row.lockLabel, recovered: row.recovered?.label ?? null })));
     } finally {
       busyRef.current = false;
       if (mountedRef.current) setPhase("idle");
@@ -343,11 +458,14 @@ export function SubjectCadastroCard({
     if (modo === modoPlano || busyRef.current) return;
     setModoPlano(modo);
     setSiloDoTexto(null);
+    setSiloDoTextoEscolhido(null);
     invalidate();
     if (modo === "append" && existingGroupId) void escolherSiloExistente(existingGroupId);
   };
 
   const grupoExistente = silosExistentes.find(group => group.id === existingGroupId) ?? null;
+  /** 2026-10-16 · o Silo escolhido no texto já tem grupo com o mesmo nome (o caminho é "Silo existente", com a prévia de sempre). */
+  const grupoDoSiloDoTexto = siloDoTextoEscolhido ? silosExistentes.find(group => normalizeDeclaredPhraseKey(group.name) === normalizeDeclaredPhraseKey(siloDoTextoEscolhido)) ?? null : null;
   const corEfetiva: EditorialGroupColor = destino === "existing_silo" && grupoExistente ? grupoExistente.color : color;
   /** 2026-10-13 · substituir com algo saindo pede o nome da cor digitado (SDD §5.3, riscos); sem saída, a confirmação é o clique. */
   const saidasDaPrevia = preview?.result.replace?.leaving.length ?? 0;
@@ -355,9 +473,10 @@ export function SubjectCadastroCard({
   const confirmacaoSubstituicaoOk = !preview?.result.replace || saidasDaPrevia === 0 || corDigitada.trim().toLocaleLowerCase("pt-BR") === nomeDaCorDoPlano.toLocaleLowerCase("pt-BR");
 
   const currentRequest = (): CadastroRequest | null => {
-    const preenchidas = linhas.filter(linha => linha.title.trim() || linha.keyword.trim() || linha.details.trim());
+    const preenchidas = linhas.filter(linha => linha.title.trim() || linha.keyword.trim() || linha.details.trim() || linha.slug.trim());
     if (!preenchidas.length) return null;
-    const articles = preenchidas.map(linha => ({ order: linha.order, subject: linha.title.trim(), principal: linha.keyword.trim() || null, role: destino === "published" ? "Suporte" as const : linha.role, scope: linha.details.trim(), lock: linha.lock }));
+    // 2026-10-16 · o slug da linha vai para o Silo (novo ou existente); no publicado, URL/slug/canonical são da página.
+    const articles = preenchidas.map(linha => ({ order: linha.order, subject: linha.title.trim(), principal: linha.keyword.trim() || null, role: destino === "published" ? "Suporte" as const : linha.role, scope: linha.details.trim(), lock: linha.lock, ...(destino === "published" ? {} : { slug: linha.slug.trim() || null }) }));
     if (destino === "existing_silo") {
       if (!existingGroupId) return null;
       if (substituir) return { plan: { silo: siloDoTexto, articles }, group: { mode: "existing", groupId: existingGroupId }, destination: { kind: "existing_silo", groupId: existingGroupId }, planMode: "replace" };
@@ -445,7 +564,10 @@ export function SubjectCadastroCard({
         replaced: body.replaced && typeof body.replaced === "object" ? body.replaced as DeclaredPlanReplaceApplied : null,
       };
       setApplied(result);
-      const subjectIds = [...new Set(result.articles.map(article => article.subjectKeywordId).filter((id): id is string => Boolean(id)))];
+      // 2026-10-16 · o Silo do texto cadastrado agora; o outro continua disponível no mesmo texto.
+      const siloCadastrado = siloDoTextoEscolhido;
+      if (siloCadastrado && result.failed === 0) setSilosCadastrados(atuais => atuais.includes(siloCadastrado) ? atuais : [...atuais, siloCadastrado]);
+      const subjectIds =[...new Set(result.articles.map(article => article.subjectKeywordId).filter((id): id is string => Boolean(id)))];
       const principalIds = [...new Set(result.articles.map(article => article.principalKeywordId).filter((id): id is string => Boolean(id)))];
       // A planilha relê (e roda a Lógica automática do Assunto) antes da reaprovação: um passo de cada vez.
       await Promise.resolve(onApplied({ subjectIds, createdSubjectIds: result.createdSubjectIds, principalIds })).catch(() => undefined);
@@ -509,7 +631,7 @@ export function SubjectCadastroCard({
               <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Destino do cadastro">
                 {(Object.keys(DESTINO_LABELS) as Destino[]).map(option => (
                   <label key={option} data-subject-cadastro-destino={option} className={`flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-module-accent/30 ${destino === option ? "border-module-accent/50 bg-surface" : "border-divider hover:bg-surface-subtle"}`}>
-                    <input type="radio" name="subject-cadastro-destino" value={option} checked={destino === option} disabled={busy || (option === "existing_silo" && !silosExistentes.length)} onChange={() => { setDestino(option); setLinhas(option === "existing_silo" ? [] : [linhaVazia(option === "new_silo" ? 1 : 1, option === "new_silo" ? "Pilar" : "Suporte")]); setExistingGroupId(""); setModoPlano("append"); setSiloDoTexto(null); invalidate(); }} className="sr-only" />
+                    <input type="radio" name="subject-cadastro-destino" value={option} checked={destino === option} disabled={busy || (option === "existing_silo" && !silosExistentes.length)} onChange={() => { setDestino(option); setLinhas(option === "existing_silo" ? [] : [linhaVazia(option === "new_silo" ? 1 : 1, option === "new_silo" ? "Pilar" : "Suporte")]); setExistingGroupId(""); setModoPlano("append"); setSiloDoTexto(null); setSiloDoTextoEscolhido(null); invalidate(); }} className="sr-only" />
                     {DESTINO_LABELS[option]}
                   </label>
                 ))}
@@ -587,26 +709,53 @@ export function SubjectCadastroCard({
             {destino !== "existing_silo" || existingGroupId ? (
               <details className="rounded-md border border-divider px-3 py-2" open={destino !== "existing_silo"}>
                 <summary className="cursor-pointer text-sm font-medium text-foreground">Colar plano em texto</summary>
-                <div className="mt-2 flex flex-col gap-2">
+                <div className="mt-2 flex flex-col gap-2" onDragOver={arrastarSobre} onDragLeave={() => setArrastando(false)} onDrop={soltarArquivo} data-subject-cadastro-soltar-arquivo={arrastando ? "ativo" : undefined}>
                   {substituir ? <p className="text-sm text-warning" data-subject-cadastro-colar-substitui>Substituir o plano: o texto colado vira o plano novo INTEIRO (as linhas gravadas que ele não trouxer vão para “Sai” na prévia).</p> : null}
-                  <label htmlFor={ids.paste} className="text-sm text-text-muted">Formato: “Silo 2 — …”, “Nome:”, “Slug:”, “Objetivo:” e, por artigo, “9. Título”, “Palavra-chave: …” (com “Artigo pilar •” no Pilar), a descrição e, se quiser, “Trava: travada” ou “Trava: livre”.</label>
-                  <textarea id={ids.paste} value={colado} onPaste={colarPlano} onChange={event => setColado(event.target.value)} rows={6} maxLength={60000} spellCheck={false} className={`${internalField} min-h-32 resize-y leading-6`} />
+                  <label htmlFor={ids.paste} className="text-sm text-text-muted">Aceita a lista (“Silo 2 — …”, “Nome:”, “Slug:”, “Objetivo:” e, por artigo, “9. Título”, “Palavra-chave: …”, com “Artigo pilar •” no Pilar), blocos separados por linha em branco com o papel na primeira linha (“Silo”, “Pilar”, “Suporte”) e, no bloco, título, keyword, slug (/silo/artigo/) e descrição, com ou sem rótulo, a tabela com “|” e a planilha colada ou CSV com cabeçalho (Papel ou hierarquia, Assunto ou título, Keyword, Slug, Descrição ou intenção, Silo, número). “Trava: travada” ou “Trava: livre” também valem. O .csv também pode ser arrastado para cá.</label>
+                  <textarea id={ids.paste} value={colado} onPaste={colarPlano} onChange={event => setColado(event.target.value)} rows={6} maxLength={COLADO_MAX} spellCheck={false} className={`${internalField} min-h-32 resize-y leading-6 ${arrastando ? "ring-2 ring-module-accent/30" : ""}`} />
                   <div className="flex flex-wrap items-center gap-2">
-                    <button type="button" onClick={() => preencherDoTexto()} disabled={busy || !colado.trim()} className={internalButton}>Preencher as linhas</button>
-                    {colagemAviso ? <span className="text-sm text-text-muted" role="status">{colagemAviso}</span> : null}
+                    <button type="button" onClick={() => preencherDoTexto(colado, siloDoTextoEscolhido)} disabled={busy || !colado.trim()} className={internalButton}>Preencher as linhas</button>
+                    <button type="button" onClick={() => arquivoRef.current?.click()} disabled={busy} className="inline-flex min-h-9 items-center rounded-md px-2 text-sm font-medium text-text-muted underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 disabled:cursor-not-allowed disabled:opacity-50" data-subject-cadastro-abrir-arquivo>ou abrir um arquivo .csv</button>
+                    <input ref={arquivoRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" onChange={escolherArquivo} className="sr-only" tabIndex={-1} aria-label="Arquivo .csv do plano" data-subject-cadastro-arquivo />
                   </div>
+                  {arquivoAviso ? <p className="text-sm text-text-muted" role="status" data-subject-cadastro-arquivo-aviso>{arquivoAviso}</p> : null}
+                  {colagemAviso ? <p className="text-sm text-text-muted" role="status">{colagemAviso}</p> : null}
+                  {colunasIgnoradas.length ? <p className="text-sm text-text-muted" data-subject-cadastro-colunas-ignoradas>Colunas ignoradas: {colunasIgnoradas.join(", ")}.</p> : null}
                 </div>
               </details>
             ) : null}
 
+            {silosDoTexto.length > 1 ? (
+              <fieldset className="flex flex-col gap-2 rounded-md border border-divider px-3 py-2" data-subject-cadastro-silos-do-texto>
+                <legend className="px-1 text-sm font-medium text-foreground">Este texto tem {silosDoTexto.length} Silos: {silosDoTexto.map(silo => `${silo.name || "Silo sem nome"} (${silo.articleCount})`).join(" · ")} — escolha qual cadastrar agora</legend>
+                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Silo do texto a cadastrar agora">
+                  {silosDoTexto.map(silo => (
+                    <label key={`${silo.name ?? ""}:${silo.rawSlug ?? ""}`} data-subject-cadastro-silo-do-texto={silo.name ?? ""} className={`flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm text-foreground transition-colors focus-within:ring-2 focus-within:ring-module-accent/30 ${siloDoTextoEscolhido !== null && siloDoTextoEscolhido === silo.name ? "border-module-accent/50 bg-surface" : "border-divider hover:bg-surface-subtle"}`}>
+                      <input type="radio" name="subject-cadastro-silo-do-texto" value={silo.name ?? ""} checked={siloDoTextoEscolhido !== null && siloDoTextoEscolhido === silo.name} disabled={busy || !silo.name} onChange={() => escolherSiloDoTexto(silo.name)} className="sr-only" />
+                      <span className="font-medium">{silo.name || "Silo sem nome"}</span>
+                      {silo.name && silosCadastrados.includes(silo.name) ? <span className="text-success">· cadastrado agora</span> : null}
+                    </label>
+                  ))}
+                </div>
+                {silosExistentes.length > 0 && destino !== "existing_silo" ? (
+                  <p className={`text-sm ${grupoDoSiloDoTexto ? "text-warning" : "text-text-muted"}`} data-subject-cadastro-silo-ja-existe>
+                    {grupoDoSiloDoTexto
+                      ? `“${siloDoTextoEscolhido}” já é o Silo da cor ${EDITORIAL_GROUP_COLOR_LABELS[grupoDoSiloDoTexto.color]} (plano v${grupoDoSiloDoTexto.planVersion}): para mexer nele, escolha “Silo existente” e Acrescentar ou Substituir o plano. A prévia mostra o que entra, muda e sai; nada muda sem a sua confirmação.`
+                      : "Se um destes Silos já está cadastrado numa cor, escolha “Silo existente” e Acrescentar ou Substituir o plano: a prévia mostra o que entra, muda e sai, e nada muda sem a sua confirmação."}
+                  </p>
+                ) : null}
+              </fieldset>
+            ) : null}
+
             <div className="overflow-x-auto rounded-md border border-divider">
-              <table className="w-full min-w-[960px] text-left text-sm" data-subject-cadastro-linhas>
+              <table className="w-full min-w-[1120px] text-left text-sm" data-subject-cadastro-linhas>
                 <thead className="bg-surface text-text-muted">
                   <tr>
                     <th scope="col" className="w-16 px-2 py-2 font-semibold">#</th>
                     {!publicado ? <th scope="col" className="w-28 px-2 py-2 font-semibold">Papel</th> : null}
                     <th scope="col" className="px-2 py-2 font-semibold">Assunto (título)</th>
                     <th scope="col" className="px-2 py-2 font-semibold">Keyword</th>
+                    {!publicado ? <th scope="col" className="px-2 py-2 font-semibold">Slug</th> : null}
                     <th scope="col" className="px-2 py-2 font-semibold">Detalhes</th>
                     {!publicado ? <th scope="col" className="w-44 px-2 py-2 font-semibold">Trava</th> : null}
                     <th scope="col" className="w-12 px-2 py-2"><span className="sr-only">Ações</span></th>
@@ -634,6 +783,9 @@ export function SubjectCadastroCard({
                         ) : null}
                       </td>
                       <td className="px-2 py-2"><input aria-label={`Keyword da linha ${index + 1}`} onPaste={colarPlano} value={linha.keyword} maxLength={400} disabled={busy || (!substituir && (linha.stored || Boolean(linha.recovered)) && Boolean(linha.keyword))} onChange={event => mudarLinha(linha.key, { keyword: event.target.value })} className={`${internalField} text-keyword`} placeholder="keyword" /></td>
+                      {!publicado ? (
+                        <td className="px-2 py-2"><input aria-label={`Slug da linha ${index + 1}`} onPaste={colarPlano} value={linha.slug} maxLength={400} disabled={busy} spellCheck={false} onChange={event => mudarLinha(linha.key, { slug: event.target.value })} className={`${internalField} text-identity-slug`} placeholder="/silo/artigo/ (opcional)" /></td>
+                      ) : null}
                       <td className="px-2 py-2"><textarea aria-label={`Detalhes da linha ${index + 1}`} onPaste={colarPlano} value={linha.details} maxLength={DECLARED_PLAN_SCOPE_MAX} rows={2} disabled={busy} onChange={event => mudarLinha(linha.key, { details: event.target.value.replace(/[\r\n]+/g, " ") })} className={`${internalField} resize-y leading-6`} placeholder={publicado && index > 0 ? "(os da primeira linha)" : "O que o artigo cobre (até 1.200)"} /></td>
                       {!publicado ? (
                         <td className="px-2 py-2">
@@ -820,13 +972,14 @@ export function CadastroPreview({ result }: { result: DeclaredPlanPreview }) {
       </dl>
 
       <div className="overflow-x-auto rounded-md border border-divider">
-        <table className="w-full min-w-[840px] text-left text-sm">
+        <table className="w-full min-w-[960px] text-left text-sm">
           <thead className="bg-surface text-text-muted">
             <tr>
               <th scope="col" className="w-12 px-2 py-2 font-semibold">#</th>
               <th scope="col" className="w-20 px-2 py-2 font-semibold">Papel</th>
               <th scope="col" className="px-2 py-2 font-semibold">Assunto</th>
               <th scope="col" className="px-2 py-2 font-semibold">Keyword</th>
+              {result.destination.kind !== "published" ? <th scope="col" className="px-2 py-2 font-semibold">Slug</th> : null}
               <th scope="col" className="w-48 px-2 py-2 font-semibold">Trava</th>
               <th scope="col" className="px-2 py-2 font-semibold">Detalhes</th>
             </tr>
@@ -849,6 +1002,11 @@ export function CadastroPreview({ result }: { result: DeclaredPlanPreview }) {
                     </ul>
                   ) : null}
                 </td>
+                {result.destination.kind !== "published" ? (
+                  <td className="px-2 py-2" data-subject-cadastro-slug>
+                    {article.slug ? <span className="break-all text-identity-slug">/{silo.slug ? `${silo.slug}/` : ""}{article.slug}/</span> : <span className="text-text-muted">sem slug: o Arquiteto forma pela keyword</span>}
+                  </td>
+                ) : null}
                 <td className={`px-2 py-2 ${article.lock?.state === "free" ? "text-pending" : "text-foreground"}`}>{article.lock ? article.lock.label : <span className="text-text-muted">protegida pelo publicado</span>}</td>
                 <td className="px-2 py-2 text-foreground">{article.scope || <span className="text-text-muted">sem detalhes</span>}</td>
               </tr>

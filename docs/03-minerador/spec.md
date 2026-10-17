@@ -1597,3 +1597,44 @@ SDD [`sdd-linha-unica-do-minerador-2026-10-16.md`](../compartilhado/sdd-linha-un
 - **F6:** o resto que a F0 achou (D6, D7, D8, uma chave de dedup, leitores do MCP pelo resolver, exclusão comum com hash, marca de principal órfã).
 
 **F1 (2026-10-16), feita:** saíram as portas mortas e as sobras sem chamador — o ramo de declaração que chamava `subjects/import` (Pesquisa por Assunto e colar/CSV do Descobrir); `withdrawKeywordSubject`; os inserts do navegador e "Criar lista" do Processador; `package-freshness.ts`; os normalizadores da RapidAPI; as sobras da Extensão em `allintitle.ts` e `allintitle-persistence.ts`; as decisões de exclusão do cliente em `keyword-lifecycle.ts`; o `kgrUse: "decisao_pendente"` inalcançável do MCP. Os textos da Pesquisa por Assunto apontam para "Cadastrar Assuntos". Nenhuma função viva mudou. Detalhe em [`estado-atual.md`](estado-atual.md).
+
+### 79.1 O plano colado: os formatos aceitos e o slug do artigo — 2026-10-16
+
+Regra permanente do cadastro (pedido do dono, 16/10: "ele tem que poder reconhecer todo tipo de organização desses dados"). **Verificado no código e confirmado por teste.** Amplia — não substitui — o formato do §3.1 da [SDD do cadastro único](../compartilhado/sdd-cadastro-assunto-na-keyword-2026-10-13.md): os formatos de antes continuam valendo.
+
+**Um leitor só** (`parseDeclaredPlanText`, `lib/minerador/declared-plan.ts`): o card "Cadastrar Assuntos", o detector das entradas de keyword (`looksLikeSiloPlanText`), a rota `plans/import` e o MCP `declare_silo_plan` (o `text`) leem por ele. Formatos aceitos:
+
+| Formato | Exemplo |
+| --- | --- |
+| Lista numerada (a de sempre) | `Silo 1 — …` / `Nome:` / `Slug:` / `Objetivo:`, depois `1. Título`, `Artigo pilar • Palavra-chave: x` ou `Palavra-chave: x`, a descrição, `Papel:`, `Trava:` |
+| Numerada sem rótulo | `1. Título` / `keyword na linha de baixo` / `/silo/artigo/` / descrição (também `Artigo 4` sozinho e `Pilar` na linha de cima do número) |
+| Blocos (sem número) | blocos separados por linha em branco, o papel sozinho na 1ª linha (`Silo`, `Pilar`, `Suporte`, `Artigo pilar`, `Artigo de suporte`, qualquer caixa); a ordem é a sequência |
+| Bloco do Silo | `Keyword:`/`Nome:`/`Silo:` ou a 1ª linha = nome; `Slug:`/`URL:` ou o endereço = slug; `Objetivo:`/`Descrição:` = objetivo |
+| Bloco do artigo, com rótulo | `Título:`, `Assunto:`, `Keyword:`, `Palavra-chave:`, `Slug:`, `URL:`, `Canonical:`, `Descrição:`, `Detalhes:`, `Escopo:`, `Papel:`, `Trava:`, `Ordem:` — o rótulo manda |
+| Bloco do artigo, sem rótulo | caminho ou URL = slug/canonical; frase curta em minúsculas sem pontuação = keyword; a 1ª linha textual = Assunto; o resto = detalhes |
+| Tabela com `\|` | numerada (`# \| Assunto \| Keyword principal \| Papel \| Descrição`), ou com cabeçalho em qualquer ordem e sem número, ou com o papel numa célula |
+| Planilha (TAB) e CSV (`;` ou `,`) | cabeçalho Papel, Assunto/Título, Keyword/Palavra-chave, Slug/URL, Descrição/Detalhes, Ordem (e Trava, Silo) em qualquer ordem; sem Ordem = sequência; a linha de papel `Silo` é o Silo |
+
+O ambíguo nunca é adivinhado em silêncio: vai para "não entendidas" com a linha e o motivo (segundo endereço no artigo, linha sem rótulo no bloco do Silo depois do nome, bloco vazio); papel, ordem ou trava não reconhecidos na planilha viram aviso. ~~dois Silos no mesmo texto são recusa~~ — **SUBSTITUÍDO em 2026-10-16** (pedido do dono, o CSV de planejamento): o leitor agrupa os artigos por Silo e pede a escolha (ver "Vários Silos" abaixo). Lista simples de keywords (uma por linha) nunca é plano.
+
+**O CSV de planejamento (2026-10-16, pedido do dono: "pode reconhecer este tipo de CSV também, reconhecer os campos e preencher").** **Verificado no código e confirmado por teste** (a fixture é o arquivo real, `tests/fixtures/wificonecta-planejamento-editorial-15.csv`). O cabeçalho da tabela, da planilha e do CSV é lido por sinônimo e por token, em qualquer ordem, com BOM, `_`, acento e caixa:
+
+| Coluna do arquivo (exemplos) | Campo do cadastro |
+| --- | --- |
+| `numero`, `ordem`, `nº`, `posição` | ordem |
+| `silo`, `cluster`, `nome do silo` | Silo |
+| `hierarquia`, `papel`, `tipo`, `role` | papel (Pilar/Suporte) |
+| `titulo`, `título`, `h1`, `assunto`, `titulo_h1_sugerido` | Assunto (título) |
+| `keyword`, `palavra-chave`, `principal`, `keyword_hipotese_a_validar` | keyword |
+| `slug`, `url`, `canonical`, `slug_proposto` | slug do artigo |
+| `intencao`, `intenção`, `escopo`, `detalhes`, `descrição`, `intencao_exclusiva` | detalhes |
+
+Do arquivo entram só esses campos (decisão do dono, 16/10: "só os 4 campos e colocar eles dentro do DNA das keywords… o resto pode ignorar"), gravados no DNA da keyword pelo caminho de sempre (`keyword_subject.entry` e `keyword_subject.plan`, como o slug). Fora do escopo, CTA, página comercial, links e qualquer coluna desconhecida não entram no plano, no card, na prévia nem no Arquiteto: aparecem numa linha só, "Colunas ignoradas: …" — nunca recusa. Coluna de keyword secundária ("keywords secundárias", "de apoio"…) também é ignorada, nunca toma o lugar da keyword.
+
+**Vários Silos no mesmo texto (2026-10-16).** Os artigos são agrupados pelo Silo (coluna Silo, outro bloco "Silo" ou outro "Silo N — …", este também colado logo depois do último artigo); sem número, a ordem é a sequência dentro do Silo. Sem a escolha, o leitor devolve os Silos com a contagem e a recusa `SILO_REPEATED` ("Este texto tem 2 Silos: Planos e contratação (8) · Wi-Fi e fibra óptica (7) — escolha qual cadastrar agora"); com `siloName`, devolve só aquele Silo. Um cadastro = um Silo, como sempre (cor, destino, prévia); o outro continua no mesmo texto. O núcleo (rota `plans/import` e MCP `declare_silo_plan`, só com `text`) recusa sem `siloName` com `SILO_CHOICE_REQUIRED`, os Silos em `blockers`, antes de ler o banco; `siloName` fora do texto é `SILO_NOT_IN_TEXT` no leitor e a mesma recusa no núcleo. Silo que já existe numa cor é cadastrado pelo destino "Silo existente" (Acrescentar, ou Substituir o plano com as quatro listas e o `decisionHash`): nada muda sem a confirmação do dono.
+
+**Slug do Silo pelo começo comum (2026-10-16).** Sem "Slug:" do Silo e com todos os artigos de slug no mesmo caminho, o Silo fica com o trecho logo acima do artigo (`/planos-de-internet/x/` → `/planos-de-internet/`; `silo.slugDerived`), e o aviso diz. Caminhos diferentes: nada é derivado. No Silo existente vale o slug gravado; na substituição, o derivado só vale quando o Silo ainda não tem slug nem foi confirmado no Arquiteto.
+
+**Abrir o arquivo (2026-10-16).** Em "Colar plano em texto" o .csv pode ser colado, arrastado ou aberto por "ou abrir um arquivo .csv": vira o texto do MESMO campo, lido pelo MESMO leitor (`decodeDeclaredPlanFile`: UTF-8 com ou sem BOM, UTF-16 com BOM, Windows-1252 convertido e o UTF-8 de acento quebrado — "Ã§" — desfeito). Não é etapa nem fluxo novo; nada é gravado ao abrir.
+
+**Slug do artigo** (opcional): o último trecho do caminho, em `keyword_subject.plan.slug`; o caminho inteiro sai do slug do Silo. Recusa: inválido, repetido no plano ou igual ao do Silo; aviso: fora do caminho do Silo. Ausente mantém o gravado; o campo limpo tira. O Arquiteto usa o slug declarado como `suggestedSlug` só no artigo NOVO (a formação do artigo do plano nasce com ele); publicado nunca muda (§11 do `AGENTS.md`), e no destino "Artigo publicado" o slug colado é ignorado. Plano sem slug: o slug sai da principal, como sempre.

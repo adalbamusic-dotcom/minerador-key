@@ -5,7 +5,11 @@ import test from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { LinhaUnicaFakeDb, type Row } from "./minerador-linha-unica-fake-db.mts";
 import { importKeywordsWithCore, importSubjectsWithCore, normalizeKeyword, type KeywordImportCoreItem } from "../lib/minerador/keyword-import-core.ts";
-import { importDeclaredPlanWithCore, setKeywordPlanLockWithCore, type StructuredDeclaredPlan } from "../lib/minerador/declared-plan-import-core.ts";
+import { importDeclaredPlanWithCore, readDeclaredPlanCardRows, setKeywordPlanLockWithCore, type StructuredDeclaredPlan } from "../lib/minerador/declared-plan-import-core.ts";
+import { declaredPlanForGroup, declaredPlanFormationInputs } from "../lib/arquiteto/declared-plan-formation.ts";
+import { looksLikeSiloPlanText } from "../lib/minerador/plan-text-detector.ts";
+import { PLANO_EM_BLOCOS_DO_DONO, PLANO_EM_BLOCOS_ESPERADO } from "./minerador-plano-blocos-fixture.mts";
+import { COLUNAS_IGNORADAS_DO_CSV, PLANEJAMENTO_CSV_DO_DONO, SILO_PLANOS_ESPERADO, SILO_WIFI_ESPERADO, TRECHOS_DAS_COLUNAS_IGNORADAS } from "./minerador-plano-csv-fixture.mts";
 import { normalizeDeclaredPhraseKey, parseDeclaredPlanText } from "../lib/minerador/declared-plan.ts";
 import { SILO_ARTICLE_RANGE, SiloPlanSchema, validateSiloPlan, type SiloPlan } from "../lib/agent/silo-plan.ts";
 import {
@@ -809,6 +813,222 @@ test("G15 · exclusão: não publicada sai de vez; publicada vai à lixeira por 
 });
 
 /* ======================================================= E-1 · entrada */
+
+/* ===================================================================== G16 */
+
+/*
+ * 2026-10-16 · o dono cadastrou uma lista nova colando o plano em BLOCOS (sem
+ * número, o papel sozinho na 1ª linha, título/keyword/slug/descrição sem rótulo)
+ * e o card não preencheu. A MESMA linha (leitor único → núcleo do cadastro →
+ * pacote aprovado → Arquiteto) ganha o caso; nenhum caminho novo.
+ */
+const PLANO_EM_BLOCOS = (extra: Partial<Parameters<typeof importDeclaredPlanWithCore>[0]> = {}) => ({ text: PLANO_EM_BLOCOS_DO_DONO, ...extra });
+
+test("G16 · plano em blocos sem número (Silo/Pilar/Suporte, slug por artigo): o texto do dono → prévia com Silo + 8 linhas e o slug de cada artigo → cadastrar grava o slug no plano → reaplicar não muda nada → a trava do Posto mantém o slug → Lógica → aprovar (D2-bis) → enviar: o Arquiteto recebe o slug declarado", async () => {
+  assert.equal(looksLikeSiloPlanText(PLANO_EM_BLOCOS_DO_DONO), true, "colar em qualquer campo do card dispara o preenchimento (o detector reconhece)");
+  const db = wifiConecta();
+  const previa = await cadastro(db, PLANO_EM_BLOCOS());
+  assert.ok(previa.ok && previa.mode === "preview", JSON.stringify(previa));
+  if (!previa.ok || previa.mode !== "preview") return;
+  assert.deepEqual(previa.blockers, []);
+  assert.deepEqual(previa.unparsed, []);
+  assert.equal(previa.canApply, true);
+  assert.equal(previa.silo.name, "Planos e contratação");
+  assert.equal(previa.silo.slug, "planos-de-internet");
+  assert.deepEqual(previa.articles.map(article => [article.order, article.role, article.title, article.principal.phrase, article.slug, article.scope]), PLANO_EM_BLOCOS_ESPERADO.map(item => [item.order, item.role, item.subject, item.principal, item.slug, item.scope]));
+  assert.equal(db.writes().length, 0, "prévia não grava");
+
+  const aplicado = await cadastro(db, PLANO_EM_BLOCOS({ mode: "apply", importRequestId: novoPedido() }));
+  assert.ok(aplicado.ok && aplicado.mode === "apply" && aplicado.failed === 0, JSON.stringify(aplicado));
+  if (!aplicado.ok || aplicado.mode !== "apply") return;
+  assert.equal(aplicado.reciprocityConfirmed, 8);
+  const grupo = db.rows("editorial_groups").find(row => row.id === aplicado.groupId)!;
+  assert.equal((grupo.plan as Row).siloName, "Planos e contratação");
+  assert.equal((grupo.plan as Row).siloSlug, "planos-de-internet");
+  assert.equal((grupo.plan as Row).articleCount, 8);
+  const ids = PLANO_EM_BLOCOS_ESPERADO.map(item => String(linha(db, item.principal)!.id));
+  for (const [indice, id] of ids.entries()) {
+    const assunto = resolveKeywordSubject(semantica(porId(db, id)));
+    assert.equal(assunto.entry?.title, PLANO_EM_BLOCOS_ESPERADO[indice].subject, "o Assunto mora na keyword");
+    assert.equal(assunto.plan?.order, indice + 1);
+    assert.equal(assunto.plan?.role, PLANO_EM_BLOCOS_ESPERADO[indice].role);
+    assert.equal(assunto.plan?.scope, PLANO_EM_BLOCOS_ESPERADO[indice].scope);
+    assert.equal(assunto.plan?.slug, PLANO_EM_BLOCOS_ESPERADO[indice].slug, "o slug declarado fica no plano do artigo");
+  }
+  for (const item of PLANO_EM_BLOCOS_ESPERADO) assert.equal(linha(db, item.subject), undefined, `o título "${item.subject}" não vira keyword`);
+  assert.equal(linha(db, "Planos e contratação"), undefined, "o nome do Silo não vira keyword");
+
+  // O card relê o Silo existente com o slug de cada linha; colar o mesmo texto de novo não muda nada.
+  const relido = await readDeclaredPlanCardRows({ brandId: BRAND, keywordsClient: db as never, groupsClient: db as never, groupId: aplicado.groupId });
+  assert.ok(relido.ok);
+  if (relido.ok) assert.deepEqual(relido.rows.map(row => row.slug), PLANO_EM_BLOCOS_ESPERADO.map(item => item.slug));
+  const antes = JSON.stringify(db.rows("minerador_keywords"));
+  const deNovo = await cadastro(db, PLANO_EM_BLOCOS({ mode: "apply", importRequestId: novoPedido(), group: { mode: "existing", groupId: aplicado.groupId }, destination: { kind: "existing_silo", groupId: aplicado.groupId } }));
+  assert.ok(deNovo.ok && deNovo.mode === "apply", JSON.stringify(deNovo));
+  if (deNovo.ok && deNovo.mode === "apply") {
+    assert.equal(deNovo.planVersion, aplicado.planVersion, "mesmo plano = mesma versão");
+    assert.ok(deNovo.articles.every(article => article.outcome === "unchanged"));
+  }
+  assert.equal(JSON.stringify(db.rows("minerador_keywords")), antes);
+
+  // A trava pelo Posto de principal regrava a linha igual: o slug fica.
+  const trava = await setKeywordPlanLockWithCore({ brandId: BRAND, actorUserId: ACTOR, keywordsClient: db as never, groupsClient: db as never, mode: "apply", keywordIds: [ids[1]], lock: "locked", importRequestId: novoPedido(), now: LATER });
+  assert.ok(trava.ok && trava.counts.changed === 1, JSON.stringify(trava));
+  assert.equal(resolveKeywordSubject(semantica(porId(db, ids[1]))).plan?.lock, "locked");
+  assert.equal(resolveKeywordSubject(semantica(porId(db, ids[1]))).plan?.slug, "internet-residencial-barata", "a trava não apaga o slug declarado");
+
+  const rodada = await logica(db, ids);
+  assert.equal(rodada.failed, 0);
+  const arquiteto = arquitetoFalso(db);
+  const { resultado } = await aprovarEEnviar(db, arquiteto, ids);
+  assert.equal(resultado.counts.approved_and_sent, 8, JSON.stringify(resultado.results));
+  const standings = ids.map(id => readArchitectSubjectStanding(arquiteto.mesa.get(id)!));
+  for (const [indice, standing] of standings.entries()) {
+    assert.equal(standing.plan?.slug, PLANO_EM_BLOCOS_ESPERADO[indice].slug, "o slug chega pelo pacote aprovado");
+    assert.equal(declaredPlanForGroup(standing)?.slug, PLANO_EM_BLOCOS_ESPERADO[indice].slug, "o adapter do Arquiteto recebe o slug declarado");
+  }
+  const formacao = declaredPlanFormationInputs({ standings, brandId: BRAND });
+  assert.equal(formacao.get(ids[0])?.slug, "como-escolher-plano-internet-residencial", "a formação do artigo do plano nasce com o slug declarado");
+  assert.equal(formacao.get(ids[0])?.role, "Pilar");
+});
+
+test("G16 · os outros formatos entram pela MESMA linha: planilha (TAB), CSV com cabeçalho e numerado sem rótulo chegam à prévia sem impedimento; o MCP estruturado manda o slug igual; o publicado ignora o slug", async () => {
+  const TAB = String.fromCharCode(9);
+  const linhasDoPlano = PLANO_EM_BLOCOS_ESPERADO.slice(0, 4);
+  const planilha = [["Papel", "Assunto", "Keyword", "Slug", "Descrição"], ...linhasDoPlano.map(item => [item.role, item.subject, item.principal, `/planos-de-internet/${item.slug}/`, item.scope])].map(celulas => celulas.join(TAB)).join("\n");
+  const csv = ["Ordem;Papel;Título;Palavra-chave;URL;Detalhes", ...linhasDoPlano.map(item => [item.order, item.role, item.subject, item.principal, `https://wificonecta.com.br/planos-de-internet/${item.slug}/`, `"${item.scope}"`].join(";"))].join("\n");
+  const numerado = linhasDoPlano.map(item => [`${item.order}. ${item.subject}`, ...(item.role === "Pilar" ? ["Papel: Pilar"] : []), item.principal, `/planos-de-internet/${item.slug}/`, item.scope].join("\n")).join("\n");
+  for (const [formato, corpo] of [["planilha", planilha], ["csv", csv], ["lista", numerado]] as const) {
+    const texto = `Nome: Planos e contratação\nSlug: /planos-de-internet/\n${corpo}`;
+    assert.equal(parseDeclaredPlanText(texto).format, formato);
+    assert.equal(looksLikeSiloPlanText(texto), true, formato);
+    const previa = await cadastro(wifiConecta(), { text: texto });
+    assert.ok(previa.ok && previa.mode === "preview", JSON.stringify(previa));
+    if (!previa.ok || previa.mode !== "preview") continue;
+    assert.deepEqual(previa.blockers, [], formato);
+    assert.deepEqual(previa.articles.map(article => [article.order, article.role, article.title, article.principal.phrase, article.slug]), linhasDoPlano.map(item => [item.order, item.role, item.subject, item.principal, item.slug]), formato);
+  }
+
+  // O MCP `declare_silo_plan` com o plano estruturado: o slug no caminho inteiro é normalizado igual.
+  const estruturado: StructuredDeclaredPlan = {
+    silo: { name: "Planos e contratação", slug: "/planos-de-internet/" },
+    articles: linhasDoPlano.map(item => ({ order: item.order, subject: item.subject, principal: item.principal, role: item.role, scope: item.scope, slug: `/planos-de-internet/${item.slug}/` })),
+  };
+  const pelaEstrutura = await cadastro(wifiConecta(), { text: null, plan: estruturado });
+  assert.ok(pelaEstrutura.ok && pelaEstrutura.mode === "preview");
+  if (pelaEstrutura.ok && pelaEstrutura.mode === "preview") assert.deepEqual(pelaEstrutura.articles.map(article => article.slug), linhasDoPlano.map(item => item.slug));
+  const repetido = await cadastro(wifiConecta(), { text: null, plan: { ...estruturado, articles: estruturado.articles.map(article => ({ ...article, slug: "/planos-de-internet/mesmo/" })) } });
+  assert.ok(repetido.ok && repetido.mode === "preview" && !repetido.canApply && repetido.blockers.some(blocker => /aparece nos artigos/.test(blocker)), "slug repetido no plano é recusa");
+  // `validate_silo_plan` aceita o caminho inteiro (vale o último trecho) e avisa quando ele sai do slug do silo.
+  const validado = validateSiloPlan(SiloPlanSchema.parse({ siloName: "Planos e contratação", siloPage: { keyword: "planos de internet", slug: "planos-de-internet" }, articles: linhasDoPlano.map((item, indice) => ({ subject: item.subject, targetKeyword: item.principal, slug: indice === 3 ? `/outro-silo/${item.slug}/` : `/planos-de-internet/${item.slug}/`, role: item.role, funnel: indice % 2 ? "MOFU" : "TOFU", intent: indice % 2 ? "comercial" : "informacional" })) }), CONTEXTO_VAZIO);
+  assert.deepEqual(validado.plan.articles.map(article => article.slug), linhasDoPlano.map(item => item.slug));
+  assert.ok(validado.issues.some(issue => issue.field === "articles.3.slug" && /não fica dentro do slug do silo/.test(issue.message)));
+  assert.ok(!validado.issues.some(issue => /aparece mais de uma vez/.test(issue.message)));
+
+  // Publicado: URL, slug e canonical são da página (AGENTS §11) — o slug colado é ignorado e a prévia diz.
+  const publicado = await cadastro(wifiConecta(), { text: null, plan: { articles: [{ order: 1, subject: "Fibra empresarial: como escolher", principal: "fibra empresarial para pequenas empresas", role: "Suporte", scope: "Para quem tem CNPJ.", slug: "/outro-endereco/" }] }, destination: { kind: "published", url: PAGINA_URL } });
+  assert.ok(publicado.ok && publicado.mode === "preview", JSON.stringify(publicado));
+  if (publicado.ok && publicado.mode === "preview") {
+    assert.ok(publicado.notices.some(notice => /slug das linhas não vale no destino/.test(notice)));
+    assert.ok(publicado.articles.every(article => article.slug === undefined));
+  }
+});
+
+/* ===================================================================== G17 */
+
+test("G17 · planejamento em CSV com 2 Silos (o arquivo do dono): sem a escolha, recusa listando os Silos e nada é lido do banco; Silo 1 num verde novo → prévia (slug do Silo tirado dos endereços, colunas extras numa linha) → cadastrar grava Assunto, keyword, slug e detalhes no DNA de cada keyword; Silo 2 no azul que já existe: acréscimo bloqueia, a substituição mostra entra/muda/sai e só muda com o decisionHash", async () => {
+  const { db, ids: idsDoAzul } = await azulCadastrado();
+  // A cor Verde da marca, ainda sem plano (o banco em memória não cria grupo: a cor com grupo leva o cadastro para ele, como na tela).
+  const VERDE_ID = "33333333-4444-4555-8666-777777777777";
+  db.tables.editorial_groups.push({ id: VERDE_ID, marca_id: BRAND, name: "verde", color: "verde", origin: "manual", status: "active", plan: null, plan_version: 0, plan_hash: null, silo_id: null, lock_version: 1, updated_at: AT, created_at: AT });
+  const CSV = PLANEJAMENTO_CSV_DO_DONO;
+  const VERDE = { mode: "new" as const, color: "verde", name: null };
+
+  // 1 — o texto traz 2 Silos: o núcleo (rota e MCP) pede siloName e lista os dois, antes de qualquer leitura.
+  const antesDeTudo = db.writes().length;
+  const leiturasAntes = db.log.length;
+  const semEscolha = await cadastro(db, { text: CSV, group: VERDE });
+  assert.ok(!semEscolha.ok && semEscolha.code === "SILO_CHOICE_REQUIRED", JSON.stringify(semEscolha));
+  if (!semEscolha.ok) {
+    assert.match(semEscolha.reason, /Este texto tem 2 Silos: Planos e contratação \(8\) · Wi-Fi e fibra óptica \(7\)[\s\S]*siloName/);
+    assert.deepEqual(semEscolha.blockers, ["Planos e contratação: 8 artigo(s), /planos-de-internet/", "Wi-Fi e fibra óptica: 7 artigo(s), /wifi-e-fibra/"]);
+  }
+  const outro = await cadastro(db, { text: CSV, group: VERDE, siloName: "Velocidade" });
+  assert.ok(!outro.ok && outro.code === "SILO_CHOICE_REQUIRED", "o Silo pedido que não está no texto também é recusa");
+  assert.equal(db.log.length, leiturasAntes, "a recusa vem antes de qualquer leitura ou escrita no banco");
+  assert.equal(db.writes().length, antesDeTudo, "recusar não grava");
+
+  // 2 — Silo 1, Silo novo no verde: a prévia de sempre, com os 8 artigos do arquivo.
+  const previa = await cadastro(db, { text: CSV, group: VERDE, siloName: "Planos e contratação" });
+  assert.ok(previa.ok && previa.mode === "preview", JSON.stringify(previa));
+  if (!previa.ok || previa.mode !== "preview") return;
+  assert.deepEqual(previa.blockers, []);
+  assert.equal(previa.canApply, true);
+  assert.equal(previa.silo.name, "Planos e contratação");
+  assert.equal(previa.silo.slug, "planos-de-internet", "sem slug do Silo no arquivo: o começo comum dos endereços");
+  assert.deepEqual(previa.articles.map(article => [article.order, article.role, article.title, article.principal.phrase, article.slug, article.scope]), SILO_PLANOS_ESPERADO.map(item => [item.order, item.role, item.subject, item.principal, item.slug, item.scope]));
+  assert.equal(previa.notices.filter(notice => notice === `Colunas ignoradas: ${COLUNAS_IGNORADAS_DO_CSV.join(", ")}.`).length, 1, "as colunas extras numa linha só, sem recusa");
+  assert.equal(db.writes().length, antesDeTudo, "prévia não grava");
+
+  const aplicado = await cadastro(db, { text: CSV, group: VERDE, siloName: "Planos e contratação", mode: "apply", importRequestId: novoPedido() });
+  assert.ok(aplicado.ok && aplicado.mode === "apply" && aplicado.failed === 0, JSON.stringify(aplicado));
+  if (!aplicado.ok || aplicado.mode !== "apply") return;
+  assert.equal(aplicado.reciprocityConfirmed, 8);
+  const verde = db.rows("editorial_groups").find(row => row.id === aplicado.groupId)!;
+  assert.equal(verde.color, "verde");
+  assert.deepEqual(verde.plan, { siloName: "Planos e contratação", siloSlug: "planos-de-internet", objective: null, articleCount: 8 });
+  for (const item of SILO_PLANOS_ESPERADO) {
+    const row = linha(db, item.principal);
+    assert.ok(row, `a keyword "${item.principal}" existe`);
+    const assunto = resolveKeywordSubject(semantica(row!));
+    assert.equal(assunto.entry?.title, item.subject, "o Assunto mora na keyword");
+    assert.deepEqual([assunto.plan?.order, assunto.plan?.role, assunto.plan?.scope, assunto.plan?.slug, assunto.plan?.groupId], [item.order, item.role, item.scope, item.slug, aplicado.groupId]);
+    assert.equal(linha(db, item.subject), undefined, "o título não vira keyword");
+    const dna = JSON.stringify(semantica(row!));
+    for (const trecho of TRECHOS_DAS_COLUNAS_IGNORADAS) assert.ok(!dna.includes(trecho), `"${trecho}" (coluna ignorada) não entra no DNA`);
+  }
+  assert.equal(linha(db, "Planos e contratação"), undefined, "o nome do Silo não vira keyword");
+  assert.ok(idsDoAzul.every(id => resolveKeywordSubject(semantica(porId(db, id))).plan?.groupId === AZUL), "cadastrar o Silo 1 não mexe no azul");
+
+  // 3 — Silo 2 do MESMO texto no azul que já tem "Wi-Fi e fibra óptica" (plano com outros títulos e keywords).
+  const daCor = { text: CSV, siloName: "Wi-Fi e fibra óptica", group: { mode: "existing" as const, groupId: AZUL }, destination: { kind: "existing_silo" as const, groupId: AZUL } };
+  const congelado = JSON.stringify(db.rows("minerador_keywords"));
+  const acrescimo = await cadastro(db, daCor);
+  assert.ok(acrescimo.ok && acrescimo.mode === "preview", JSON.stringify(acrescimo));
+  if (acrescimo.ok && acrescimo.mode === "preview") {
+    assert.equal(acrescimo.canApply, false, "acrescentar um 2º Pilar ao azul não passa");
+    assert.ok(acrescimo.blockers.some(blocker => /Pilar/.test(blocker)), JSON.stringify(acrescimo.blockers));
+    assert.ok(!acrescimo.notices.some(notice => /O texto não trouxe o slug do Silo/.test(notice)), "no Silo existente vale o slug gravado");
+  }
+  const troca = await cadastro(db, { ...daCor, planMode: "replace" });
+  assert.ok(troca.ok && troca.mode === "preview" && troca.replace, JSON.stringify(troca));
+  if (!troca.ok || troca.mode !== "preview" || !troca.replace) return;
+  assert.deepEqual(troca.blockers, []);
+  assert.deepEqual(troca.replace.changed.map(item => item.order), [13, 14], "as duas keywords que o azul já tinha mudam (título, detalhes, slug)");
+  assert.deepEqual(troca.replace.entering.map(item => item.order), [9, 10, 11, 12, 15]);
+  assert.deepEqual(troca.replace.leaving.map(item => item.order), [9, 10, 11, 12, 15], "as do plano v anterior que o arquivo não traz saem pelo Tirar do plano");
+  assert.equal(troca.replace.same.length, 0);
+  assert.ok(troca.replace.changed[0].reasons.some(reason => /slug sem slug → \/internet-para-jogos-ping-estabilidade\//.test(reason)), JSON.stringify(troca.replace.changed[0].reasons));
+  assert.equal(troca.silo.slug, "wifi-e-fibra", "o Silo gravado fica com o slug dele");
+  assert.equal(JSON.stringify(db.rows("minerador_keywords")), congelado, "nada muda sem a confirmação (prévias não gravam)");
+  const semHash = await cadastro(db, { ...daCor, planMode: "replace", mode: "apply", importRequestId: novoPedido() });
+  assert.ok(!semHash.ok && semHash.code === "DECISION_REQUIRED");
+  assert.equal(JSON.stringify(db.rows("minerador_keywords")), congelado);
+
+  const trocado = await cadastro(db, { ...daCor, planMode: "replace", mode: "apply", importRequestId: novoPedido(), decisionHash: troca.replace.decisionHash });
+  assert.ok(trocado.ok && trocado.mode === "apply" && trocado.failed === 0, JSON.stringify(trocado));
+  for (const item of SILO_WIFI_ESPERADO) {
+    const assunto = resolveKeywordSubject(semantica(linha(db, item.principal)!));
+    assert.equal(assunto.entry?.title, item.subject);
+    assert.deepEqual([assunto.plan?.order, assunto.plan?.role, assunto.plan?.slug, assunto.plan?.groupId], [item.order, item.role, item.slug, AZUL]);
+  }
+  const saiu = semantica(linha(db, "internet fibra óptica")!);
+  assert.equal(resolveKeywordSubject(saiu).plan, null, "o Pilar anterior sai do plano (o arquivo traz outro)");
+  assert.equal((saiu.keyword_subject_release as Row).via, "tirar_do_plano", "liberado pelo marcador; nada é apagado");
+  assert.ok(db.rows("minerador_keywords").every(row => !row.deleted_at));
+  assert.equal((db.rows("editorial_groups").find(row => row.id === AZUL)!.plan as Row).siloSlug, "wifi-e-fibra");
+  assert.ok(SILO_PLANOS_ESPERADO.every(item => resolveKeywordSubject(semantica(linha(db, item.principal)!)).plan?.groupId === aplicado.groupId), "o Silo 1 (verde) fica como está");
+});
 
 test("E-1 · os gravadores de entrada que existem hoje deduplicam pela mesma chave na marca? núcleo comum, Assunto, Pesquisa por Assunto e cadastro reconhecem a existente; o site não (outra lista)", async () => {
   const base = () => new LinhaUnicaFakeDb({ minerador_keywords: [kw("72000000-0000-4000-8000-000000000001", "Internet Fibra Óptica", { lista_id: "60000000-0000-4000-8000-000000000002" })], minerador_keyword_lists: [], editorial_groups: [], editorial_group_events: [], editorial_group_articles: [], brand_site_catalog_entries: [], editorial_workflow_items: [] });

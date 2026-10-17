@@ -41,6 +41,8 @@ const StructuredPlanSchema = z.object({
     role: z.enum(DECLARED_PLAN_ROLES),
     scope: z.string().max(DECLARED_PLAN_SCOPE_MAX * 2),
     lock: z.enum(DECLARED_PLAN_LOCK_CHOICES).nullable().optional(),
+    /** 2026-10-16 · o slug do artigo ("/silo/artigo/", URL ou "artigo"); ausente = mantém o gravado; null = tira. O núcleo normaliza e recusa o inválido. */
+    slug: z.string().trim().max(400).nullable().optional(),
   }).strict()).min(1).max(DECLARED_PLAN_ARTICLES_MAX + 10),
 }).strict();
 
@@ -64,6 +66,8 @@ const RequestSchema = z.object({
   planMode: z.enum(["append", "replace"]).optional(),
   /** 2026-10-13 · "replace": o decisionHash da prévia das quatro listas (obrigatório no apply). */
   decisionHash: z.string().trim().min(1).max(200).optional(),
+  /** 2026-10-16 · o texto traz vários Silos (CSV de planejamento): o Silo a cadastrar agora. Sem ele, 422 SILO_CHOICE_REQUIRED com os Silos. */
+  siloName: z.string().trim().min(1).max(200).optional(),
 }).strict().refine(value => Boolean(value.text?.trim()) !== Boolean(value.plan), "Envie o texto colado ou o plano estruturado (um dos dois).");
 
 const REFUSAL_STATUS: Record<DeclaredPlanImportRefusalCode, number> = {
@@ -78,6 +82,7 @@ const REFUSAL_STATUS: Record<DeclaredPlanImportRefusalCode, number> = {
   DECISION_REQUIRED: 400,
   DECISION_STALE: 409,
   WITHDRAWAL_FAILED: 409,
+  SILO_CHOICE_REQUIRED: 422,
 };
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ brandId: string }> }) {
@@ -107,6 +112,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       brandSiteUrl,
       planMode: input.planMode ?? null,
       decisionHash: input.decisionHash ?? null,
+      siloName: input.siloName ?? null,
     });
     if (!result.ok) return editorialGroupsFailure(result.code, REFUSAL_STATUS[result.code], result.reason, { requestId, ...(result.blockers ? { blockers: result.blockers } : {}) });
     return NextResponse.json({ success: true, requestId, ...result });

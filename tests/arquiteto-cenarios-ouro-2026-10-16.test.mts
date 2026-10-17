@@ -537,6 +537,35 @@ test("C13 · plano de 3 artigos: HOJE validate_silo_plan (MCP) BLOQUEIA e o cada
 /* C14 · a forma da linha (estende tests/arquiteto-linha-de-processo-guarda) */
 /* ======================================================================= */
 
+/* ======================================================================= */
+/* C16 · slug declarado no plano do Minerador (2026-10-16)                  */
+/* ======================================================================= */
+
+test("C16 · slug declarado no plano do Minerador: o candidato NOVO do Assunto nasce com ele e o ArticleDNA o grava como suggestedSlug; sem slug declarado, o de sempre (pela principal)", () => {
+  const territorio = "territory:7c1e0000-0000-4000-8000-0000000000b1";
+  const sem = { entidade_central: "planos de internet", intencao_principal: "Comercial", dna_origem: "logico_deterministico" };
+  const mesa: Linha[] = ([["k1", "como escolher plano de internet residencial", 320], ["k2", "melhor plano de internet residencial", 210]] as const)
+    .map(([id, keyword, volume]) => ({ ...linhaDaMesa({ id, keyword, brandId: MARCA_SEM_PLANO, semantic: { ...sem, ...VOLUME_VALIDADO } }), territoryRef: territorio, volume_search: volume, volume_source: "google_ads" }));
+  const formar = (slugs?: ReadonlyMap<string, string>) => {
+    const inicial = buildArticleFormationUniverse({ siloRef: territorio, siloLabel: "Planos e contratação", siloSlug: "planos-de-internet", keywords: mesa.map(linha => entradaDaFormacao(linha)) });
+    const ref = inicial.candidates.find(candidato => candidato.principalKeywordId === "k1")!.candidateRef;
+    return buildArticleFormationUniverse({ siloRef: territorio, siloLabel: "Planos e contratação", siloSlug: "planos-de-internet", keywords: mesa.map(linha => entradaDaFormacao(linha)), subjectByCandidateRef: new Map([[ref, "k1"]]), ...(slugs ? { declaredSlugBySubjectKeywordId: slugs } : {}) })
+      .candidates.find(candidato => candidato.candidateRef === ref)!;
+  };
+  const semSlug = formar();
+  const comSlug = formar(new Map([["k1", "como-escolher-plano-internet-residencial"]]));
+  assert.equal(comSlug.suggestedSlug, "como-escolher-plano-internet-residencial", "o candidato do artigo do plano nasce com o slug declarado");
+  assert.notEqual(semSlug.suggestedSlug, "como-escolher-plano-internet-residencial", "sem slug declarado, o slug sai da principal");
+  const dna = deterministicArticleDnaPayload(grupoDoCandidato(comSlug, mesa, { declaredPlan: { role: "Pilar", scope: "Escolha de plano: cobertura e custo.", slug: "como-escolher-plano-internet-residencial" } }), MARCA_SEM_PLANO);
+  const relido = ArticleDNASchema.parse(JSON.parse(JSON.stringify(dna)));
+  assert.equal(relido.suggestedSlug, "como-escolher-plano-internet-residencial");
+  assert.equal(relido.hierarchy, "Pilar");
+  assert.equal(relido.promise, "Escolha de plano: cobertura e custo.");
+  const dnaSemSlug = deterministicArticleDnaPayload(grupoDoCandidato(semSlug, mesa, { declaredPlan: { role: "Pilar", scope: "Escolha de plano: cobertura e custo." } }), MARCA_SEM_PLANO);
+  assert.notEqual(dnaSemSlug.suggestedSlug, "como-escolher-plano-internet-residencial", "plano sem slug: o ArticleDNA de sempre");
+  assert.equal(chamadasDeRede, 0);
+});
+
 test("C14 · forma da linha: cada botão da linha existe uma vez; nenhuma rota nova do Arquiteto; HOJE há gravador de article_dna 'approved' fora do núcleo — muda na F1", () => {
   const barra = codigoSemComentarios("modules/arquiteto/articles-formation-bar.tsx");
   for (const testId of ["architect-articles-top-process", "architect-articles-top-confirm", "architect-articles-improve-published"]) assert.equal(contar(barra, `data-testid="${testId}"`), 1, testId);

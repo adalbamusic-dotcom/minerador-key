@@ -39,6 +39,8 @@ export function declaredPlanFormationInputs(input: { standings: readonly Standin
       groupId: standing.plan!.groupId,
       order: standing.plan!.order,
       role: standing.plan!.role,
+      // 2026-10-16 · o slug declarado no Minerador: o candidato do artigo NOVO nasce com ele.
+      ...(standing.plan!.slug ? { slug: standing.plan!.slug } : {}),
     }];
   }));
 }
@@ -73,9 +75,18 @@ export function declaredPlanGateInputs(input: {
   }));
 }
 
-/** O papel e o escopo que o adapter grava (`ProvisionalArticleGroup.declaredPlan`). */
-export function declaredPlanForGroup(standing: Pick<ArchitectSubjectStanding, "plan"> | null | undefined): { role: "Pilar" | "Suporte"; scope: string } | undefined {
-  return standing?.plan ? { role: standing.plan.role, scope: standing.plan.scope } : undefined;
+/**
+ * O papel e o escopo que o adapter grava (`ProvisionalArticleGroup.declaredPlan`).
+ * 2026-10-16 · e o slug declarado, quando o plano trouxe: o adapter o usa só no
+ * artigo novo (o publicado mantém URL, slug e canonical — AGENTS §11).
+ */
+export function declaredPlanForGroup(standing: Pick<ArchitectSubjectStanding, "plan"> | null | undefined): { role: "Pilar" | "Suporte"; scope: string; slug?: string } | undefined {
+  return standing?.plan ? { role: standing.plan.role, scope: standing.plan.scope, ...(standing.plan.slug ? { slug: standing.plan.slug } : {}) } : undefined;
+}
+
+/** 2026-10-16 · o slug declarado que vale para ESTE ArticleDNA: só no artigo novo (sem identidade publicada). */
+function declaredSlugFor(article: Partial<Pick<ArticleDNA, "publishedIdentityRef">>, plan: { slug?: string } | null | undefined): string | null {
+  return plan?.slug && !article.publishedIdentityRef ? plan.slug : null;
 }
 
 export type DeclaredPlanArticleApplication =
@@ -104,17 +115,22 @@ export function applyDeclaredPlanToArticleDna(article: ArticleDNA, standing: (Pi
   if (fixa && article.principalKeywordId !== fixa.keywordId) {
     return { ok: false, code: "DECLARED_PRINCIPAL_CONTRADICTION", reason: declaredPrincipalLockedMessage(fixa.phrase) };
   }
-  if (article.hierarchy === plan.role && article.promise === plan.scope) return { ok: true, value: article, changed: false };
-  return { ok: true, value: { ...article, hierarchy: plan.role, promise: plan.scope }, changed: true };
+  // 2026-10-16 · o slug declarado no plano vira o `suggestedSlug` do artigo NOVO; o publicado nunca muda.
+  const slug = declaredSlugFor(article, plan);
+  const slugMuda = Boolean(slug) && article.suggestedSlug !== slug;
+  if (article.hierarchy === plan.role && article.promise === plan.scope && !slugMuda) return { ok: true, value: article, changed: false };
+  return { ok: true, value: { ...article, hierarchy: plan.role, promise: plan.scope, ...(slugMuda ? { suggestedSlug: slug! } : {}) }, changed: true };
 }
 
-/** O plano de um ArticleDNA já está aplicado (papel e promessa)? Sem plano = sim. */
-export function declaredPlanAppliedTo(article: Pick<ArticleDNA, "hierarchy" | "promise" | "principalKeywordId">, standing: (Pick<ArchitectSubjectStanding, "plan"> & { keywordId?: string; planLock?: DeclaredPrincipalLockView | null }) | null | undefined): boolean {
+/** O plano de um ArticleDNA já está aplicado (papel, promessa e, no artigo novo, o slug declarado)? Sem plano = sim. */
+export function declaredPlanAppliedTo(article: Pick<ArticleDNA, "hierarchy" | "promise" | "principalKeywordId"> & Partial<Pick<ArticleDNA, "suggestedSlug" | "publishedIdentityRef">>, standing: (Pick<ArchitectSubjectStanding, "plan"> & { keywordId?: string; planLock?: DeclaredPrincipalLockView | null }) | null | undefined): boolean {
   const plan = standing?.plan;
   if (!plan) return true;
   const fixa = lockedPlanPrincipal({ plan, keywordId: standing?.keywordId ?? "", ...(standing && "planLock" in standing ? { planLock: standing.planLock } : {}) });
+  const slug = declaredSlugFor(article, plan);
   return article.hierarchy === plan.role && article.promise === plan.scope
-    && (!fixa || article.principalKeywordId === fixa.keywordId);
+    && (!fixa || article.principalKeywordId === fixa.keywordId)
+    && (!slug || article.suggestedSlug === undefined || article.suggestedSlug === slug);
 }
 
 /**

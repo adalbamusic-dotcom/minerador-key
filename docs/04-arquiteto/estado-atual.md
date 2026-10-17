@@ -1,3 +1,12 @@
+## Slug declarado no plano do Minerador chega ao artigo novo — 2026-10-16
+
+Frente do Minerador (Cadastrar Assuntos: o leitor tolerante e o slug do artigo; detalhe em `docs/03-minerador/estado-atual.md`). No Arquiteto, mudança **aditiva** pelo caminho que já aplica o plano — nenhuma rota, botão, etapa ou contrato incompatível. **Verificado no código e confirmado por teste (fixtures). Validado manualmente: não.**
+
+- O plano do Assunto pode trazer `slug` (o último trecho do endereço). `declaredPlanFormationInputs` o leva (`DeclaredPlanFormationInput.slug?`) e `buildArticleFormationUniverse` (`declaredSlugBySubjectKeywordId`, passado por `planSiloArticleFormation`) faz o candidato NOVO do artigo do plano nascer com ele; a conferência de endereço já publicado vale para o slug declarado.
+- `declaredPlanForGroup` → `ProvisionalArticleGroup.declaredPlan.slug?` (`contracts.ts`, campo opcional no `.strict()`) → `deterministicArticleDnaPayload` grava o `suggestedSlug` com ele quando não há âncora publicada. `applyDeclaredPlanToArticleDna` e `declaredPlanAppliedTo` aplicam/conferem o slug só sem `publishedIdentityRef` (publicado: URL, slug e canonical intocados, `AGENTS.md` §11). O hash da SERP da melhoria (`baseHash` em `lib/server/arquiteto-article-improvement.ts`) usa o mesmo slug que a mesa usa no candidato.
+- Plano sem slug: tudo como antes (o slug sai da principal). O contrato do ArticleDNA não mudou.
+- Testes: `tests/arquiteto-plano-declarado-portaria.test.mts` (formação, grupo, ArticleDNA, publicado intocado) e o cenário C16 em `tests/arquiteto-cenarios-ouro-2026-10-16.test.mts`. `test:arquiteto` 3.013/3.013, `test:arquiteto:cenarios` 36 (34 + 2 `todo`), `test:arquiteto:servidor` 176/176.
+
 ## F0 da linha única — cenários-ouro — 2026-10-16
 
 SDD aprovada pelo dono em 16/10 (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`, D1–D5): a F0 é **só testes**. Ela grava, em teste automático, a conclusão que cada caso alcança **hoje**, antes de qualquer fase (`AGENTS.md` §0.3). Onde a SDD diz que a conclusão muda numa fase, o cenário grava a de hoje com "muda na Fn". Onde o cenário achou defeito, ele ficou **vermelho marcado** (`todo`, com o motivo), sem conserto.

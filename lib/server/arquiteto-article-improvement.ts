@@ -422,7 +422,8 @@ function baseHash(group: ProvisionalArticleGroup) {
   const target = groupContexts.get(group);
   return articleSerpBaseHash({ territoryRef: group.territoryRef!, principalKeywordId: group.principalSuggestion.keywordId,
     roles: group.keywordIds.map(keywordId => ({ keywordId, role: keywordId === group.principalSuggestion.keywordId ? "principal" : "secundaria" })),
-    suggestedSlug: target?.kind === "published" ? null : suggestArticleSlug({ principal: group.keywords.find(k => k.id === group.principalSuggestion.keywordId)!, siloSlug: target?.siloContext?.slug ?? null }),
+    // 2026-10-16 · o slug declarado no plano (artigo novo) entra no hash como na mesa (o candidato do plano nasce com ele).
+    suggestedSlug: target?.kind === "published" ? null : group.declaredPlan?.slug ?? suggestArticleSlug({ principal: group.keywords.find(k => k.id === group.principalSuggestion.keywordId)!, siloSlug: target?.siloContext?.slug ?? null }),
     // A MESMA intenção que a mesa usa no hash esperado (articleSerpIntentOf).
     intents: group.keywords.map(k => ({ keywordId: k.id, intent: articleSerpIntentOf(k) })),
     siloContext: { centralEntity: target?.siloContext?.centralEntity ?? null, macroIntent: target?.siloContext?.macroIntent ?? null },
