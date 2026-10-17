@@ -24,18 +24,90 @@ export type ImprovementMineradorNeeds = {
 
 export const IMPROVEMENT_NEEDS_MINERADOR_LABEL = "Precisa do Minerador";
 
-/** A recusa do pedido antigo `approveNewKeywords: true` (tela antiga ou MCP): o caminho é o Minerador. */
+/**
+ * SUBSTITUÍDO em 2026-10-16 (decisão do dono, SDD da linha única §15 passo 4):
+ * a keyword NOVA (que não existe na marca) volta a entrar na MESMA confirmação.
+ * Mantido só para leitura de execuções e mensagens antigas.
+ */
 export const IMPROVEMENT_APPROVE_NEW_KEYWORDS_RETIRED = "O Arquiteto não aprova keyword no Minerador. Keywords novas, medições e a Lógica vão como sugestão: decida em “Sugestões do Arquiteto” no Minerador (lá, importar e depois “Aprovar e enviar”) e prepare de novo aqui. Nada foi gravado.";
 
-const vazio = (needs: ImprovementMineradorNeeds) => !needs.newKeywordIds.length && !needs.measureKeywordIds.length && !needs.logicKeywordIds.length;
+/*
+ * 2026-10-16 · KEYWORD NOVA ENTRA NA MESMA CONFIRMAÇÃO (dono: "PROCURA NOVOS,
+ * DIFERENTES DAS QUE JÁ ESTÃO NA LISTA, PODE PROCESSAR ELES E INCORPORAR ELES";
+ * "TUDO QUE VEM DO MINERADOR NÃO PODE MEXER, SÓ ANALISAR E TRABALHAR COM ISSO").
+ *
+ * Nova = não existe na marca (chave normalizada do Minerador, qualquer lista,
+ * qualquer status, viva). A confirmação a importa, roda a Lógica, grava o
+ * Volume medido, aprova e envia ao Arquiteto — pelos núcleos do Minerador, só
+ * nas linhas que ela mesma criou. A keyword que JÁ existe é só lida: nunca é
+ * importada, medida, processada nem aprovada de novo pelo Arquiteto.
+ */
+export const IMPROVEMENT_NEW_KEYWORDS_APPROVAL_TEXT = "Ao confirmar, as keywords NOVAS desta prévia (que não existem na marca) são importadas no Minerador, processadas pela Lógica, recebem o Volume do Google Ads já medido na prévia (sem consultar de novo), são aprovadas e enviadas ao Arquiteto e entram no artigo — tudo nesta mesma confirmação. As keywords que já vieram do Minerador não são alteradas.";
+export const IMPROVEMENT_NEW_KEYWORDS_APPROVAL_REQUIRED = `Há keywords novas nesta prévia: a confirmação precisa dizer que elas entram no Minerador (approveNewKeywords). ${IMPROVEMENT_NEW_KEYWORDS_APPROVAL_TEXT} Nada foi gravado.`;
+
+/** As keywords NOVAS da proposta: ideias da busca que não existem na marca. */
+export function improvementNewKeywordIds(
+  proposal: Pick<ImprovementProposal, "memberIds" | "principalId">,
+  keywords: readonly Pick<ImprovementKeyword, "id" | "external" | "knownInMinerador">[],
+): string[] {
+  const porId = new Map(keywords.map(keyword => [keyword.id, keyword]));
+  return [...new Set([...proposal.memberIds, ...(proposal.principalId ? [proposal.principalId] : [])])].filter(id => { const k = porId.get(id); return Boolean(k?.external && !k.knownInMinerador); });
+}
+
+/** De onde veio a keyword nova (a única fonte que a busca nova executa hoje). */
+export const IMPROVEMENT_NEW_KEYWORD_SOURCE_LABEL = "busca nova no Google Ads";
+
+export type ImprovementNewKeywordsPreview = {
+  total: number;
+  articles: Array<{ targetId: string; theme: string; keywords: Array<{ keywordId: string; keyword: string; volume: number | null; source: string }> }>;
+  /** Uma frase por artigo: as keywords novas com volume e fonte. */
+  lines: string[];
+  /** O que a confirmação faz com elas; null quando não há nova. */
+  approvalText: string | null;
+};
+
+/**
+ * 2026-10-17 · A PRÉVIA DIZ, POR ARTIGO, AS KEYWORDS NOVAS (pedido do dono): o
+ * texto que a tela mostra antes de "Confirmar e aplicar" e que acompanha o
+ * `approveNewKeywords: true`. Só as linhas marcadas; só as NOVAS na marca (a
+ * que já existe no Minerador é só lida e não aparece aqui).
+ */
+export function improvementNewKeywordsPreview(
+  run: {
+    proposals: readonly Pick<ImprovementProposal, "targetId" | "theme" | "memberIds" | "principalId">[];
+    keywords: readonly Pick<ImprovementKeyword, "id" | "keyword" | "volume" | "volumeValidated" | "external" | "knownInMinerador">[];
+  },
+  targetIds: Iterable<string>,
+): ImprovementNewKeywordsPreview {
+  const marcadas = new Set(targetIds);
+  const porId = new Map(run.keywords.map(keyword => [keyword.id, keyword]));
+  const articles = run.proposals.filter(proposal => marcadas.has(proposal.targetId)).map(proposal => ({
+    targetId: proposal.targetId,
+    theme: proposal.theme,
+    keywords: improvementNewKeywordIds(proposal, run.keywords).map(id => {
+      const keyword = porId.get(id)!;
+      return { keywordId: id, keyword: keyword.keyword, volume: keyword.volumeValidated ? keyword.volume : null, source: IMPROVEMENT_NEW_KEYWORD_SOURCE_LABEL };
+    }),
+  })).filter(article => article.keywords.length > 0);
+  const total = articles.reduce((soma, article) => soma + article.keywords.length, 0);
+  const volume = (value: number | null) => value === null ? "sem volume" : `${value.toLocaleString("pt-BR")}/mês`;
+  return {
+    total,
+    articles,
+    lines: articles.map(article => `“${article.theme}”: ${article.keywords.map(item => `“${item.keyword}” (${volume(item.volume)}, ${item.source})`).join(", ")}.`),
+    approvalText: total ? `${total} keyword(s) NOVA(S) na marca. ${IMPROVEMENT_NEW_KEYWORDS_APPROVAL_TEXT}` : null,
+  };
+}
+
+const vazio = (needs: ImprovementMineradorNeeds) =>!needs.newKeywordIds.length && !needs.measureKeywordIds.length && !needs.logicKeywordIds.length;
 
 /**
  * O que a proposta precisaria do Minerador. `hasIntent` lê a linha atual
  * (na gravação) ou o sinal da preparação; ausente = o sinal da execução.
  */
 export function improvementMineradorNeeds(
-  proposal: Pick<ImprovementProposal, "memberIds" | "principalId">,
-  keywords: readonly Pick<ImprovementKeyword, "id" | "external" | "volumePendingWrite" | "signals">[],
+  proposal: Pick<ImprovementProposal, "memberIds" | "principalId"> & Partial<Pick<ImprovementProposal, "targetId" | "kind">>,
+  keywords: readonly (Pick<ImprovementKeyword, "id" | "external" | "volumePendingWrite" | "signals"> & Partial<Pick<ImprovementKeyword, "knownInMinerador">>)[],
   hasIntent?: (keywordId: string) => boolean | null,
 ): ImprovementMineradorNeeds | null {
   const porId = new Map(keywords.map(keyword => [keyword.id, keyword]));
@@ -44,8 +116,17 @@ export function improvementMineradorNeeds(
   for (const id of ids) {
     const keyword = porId.get(id);
     if (!keyword) continue;
+    // 2026-10-16 · a NOVA (não existe na marca) entra na mesma confirmação; só a que JÁ existe no Minerador e não chegou ao Arquiteto precisa dele (o Arquiteto não mexe nela).
+    if (keyword.external && !keyword.knownInMinerador) continue;
     if (keyword.external) { needs.newKeywordIds.push(id); continue; }
     if (keyword.volumePendingWrite) needs.measureKeywordIds.push(id);
+    /*
+     * 2026-10-16 · a keyword que carrega o Assunto (cadastro único) é a
+     * identidade do artigo do plano, aprovada no Minerador com o plano: ela não
+     * pede a Lógica para ficar no próprio artigo (antes ela nem estava na lista
+     * da melhoria, e a regra não a via).
+     */
+    if (proposal.kind === "subject" && id === proposal.targetId) continue;
     const intencao = hasIntent ? hasIntent(id) : Boolean(keyword.signals?.intent);
     if (intencao === false) needs.logicKeywordIds.push(id);
   }

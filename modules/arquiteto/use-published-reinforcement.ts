@@ -243,7 +243,7 @@ export function usePublishedReinforcement(input: {
     setDialog(dialogoFechado());
   }, [dialog.status]);
 
-  /** Só pela confirmação: o hash da prévia vista. F4: keyword nova vai como sugestão ao Minerador (sem aceite de aprovar aqui). */
+  /** Só pela confirmação: o hash da prévia vista. Com keyword nova na prévia (texto de aprovação mostrado), o aceite vai junto (2026-10-17). */
   const applyReinforcement = useCallback(async () => {
     const data = dialog.data;
     if (!brandId || !data || busy) return;
@@ -256,6 +256,7 @@ export function usePublishedReinforcement(input: {
         pages,
         decisionHash: data.decisionHash,
         operationRequestId: crypto.randomUUID(),
+        approveNewKeywords: Boolean(data.approvalText),
       }));
       if (!result.ok) {
         const nova = result.code === "PREVIEW_CHANGED" && result.body?.preview && typeof result.body.preview === "object" ? result.body.preview as ReinforcementPreviewData : null;

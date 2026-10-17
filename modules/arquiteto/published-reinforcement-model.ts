@@ -23,9 +23,11 @@ import { initialSuggestionSelection, type SerpSubjectCardView, type SerpSubjectT
  *
  *   "Reforçar publicados"   uma confirmação só grava, por página, o ArticleDNA
  *                           (o primeiro, quando não existe), a troca aceita e
- *                           os reforços marcados. As keywords novas vão como
- *                           sugestão ao Minerador (F4, SDD 2026-10-13 item 2:
- *                           o Arquiteto só lê keyword; o dono decide lá).
+ *                           os reforços marcados. As keywords NOVAS na marca
+ *                           entram no Minerador e no artigo nesta mesma
+ *                           confirmação (2026-10-16, decisão do dono; SUBSTITUI
+ *                           a F4 de 14/10, quando iam como sugestão); as que já
+ *                           estão no Minerador são só lidas.
  *                           Custo para gravar: zero.
  *   "Buscar keywords para   em lote, para os "Sem par no lote": Google Ads
  *    os publicados sem par" (grátis) e SERP das melhores (paga, até US$ 1,00
@@ -182,14 +184,20 @@ export function reinforcementApplyRequest(input: {
   pages: readonly ReinforcementRequestPage[];
   decisionHash: string;
   operationRequestId: string;
+  /**
+   * 2026-10-17 · KEYWORD NOVA NA MESMA CONFIRMAÇÃO (decisão do dono de 16/10;
+   * SUBSTITUI a F4 de 14/10, quando o pedido nunca levava o aceite): vai só
+   * quando a confirmação mostrou, por artigo, as keywords novas com volume e fonte.
+   */
+  approveNewKeywords?: boolean;
 }) {
-  // F4 · O ARQUITETO SÓ LÊ: o pedido nunca leva `approveNewKeywords` (o servidor o recusa).
   return {
     brandId: input.brandId,
     mode: "apply" as const,
     pages: input.pages.map(page => ({ ...page })),
     decisionHash: input.decisionHash,
     operationRequestId: input.operationRequestId,
+    ...(input.approveNewKeywords ? { approveNewKeywords: true as const } : {}),
   };
 }
 
@@ -223,6 +231,8 @@ export type ReinforcementPreviewView = {
   swaps: number;
   headline: string;
   approvalText: string | null;
+  /** 2026-10-17 · por artigo, as keywords NOVAS na marca com volume e fonte (o que o aceite aprova). */
+  newKeywordLines: string[];
   confirmLabel: string;
 };
 
@@ -237,6 +247,12 @@ function statusDaPagina(plan: PublishedReinforcementPagePlan): { label: string; 
   return { label: `Nova versão (v${(plan.dna.fromVersionNumber ?? 0) + 1})`, tone: "success" };
 }
 
+/** A fonte da keyword nova, em palavras: a Pesquisa por Assunto pelo Google Ads (frase ou página). */
+function fonteDaNova(origins: readonly string[]): string {
+  const url = origins.includes("ads_url_seed"), frase = origins.includes("ads_keyword_seed") || !origins.length;
+  return url && frase ? "Google Ads, pela frase e pela página" : url ? "Google Ads, pela página publicada" : "Google Ads, pela frase";
+}
+
 /** O que a confirmação diz: por página, as frases do servidor; no topo, a conta. */
 export function reinforcementPreviewView(preview: ReinforcementPreviewData): ReinforcementPreviewView {
   const prontas = preview.pages.filter(plan => plan.status === "ready");
@@ -249,7 +265,7 @@ export function reinforcementPreviewView(preview: ReinforcementPreviewData): Rei
     firstDna ? plural(firstDna, "ArticleDNA novo", "ArticleDNAs novos") : "",
     successors ? plural(successors, "versão nova", "versões novas") : "",
     adicionadas ? plural(adicionadas, "keyword do Minerador entra", "keywords do Minerador entram") : "",
-    newKeywords ? plural(newKeywords, "keyword nova vai como sugestão ao Minerador", "keywords novas vão como sugestão ao Minerador") : "",
+    newKeywords ? plural(newKeywords, "keyword nova entra no Minerador e no artigo nesta confirmação", "keywords novas entram no Minerador e nos artigos nesta confirmação") : "",
     swaps ? plural(swaps, "troca de principal", "trocas de principal") : "",
   ].filter(Boolean);
   return {
@@ -266,7 +282,8 @@ export function reinforcementPreviewView(preview: ReinforcementPreviewData): Rei
       ? `${plural(prontas.length, "artigo publicado será gravado", "artigos publicados serão gravados")}: ${partes.join(", ") || "ArticleDNA"}. ${PUBLISHED_REINFORCEMENT_COST_LINE} URL, slug e canonical não mudam.`
       : "Nada a gravar: os publicados escolhidos já têm tudo o que foi marcado, ou foram recusados com o motivo abaixo.",
     approvalText: preview.approvalText,
-    confirmLabel: `Gravar e reler (${prontas.length})`,
+    newKeywordLines: prontas.filter(plan => plan.create.length > 0).map(plan => `“${plan.keyword}”: ${plan.create.map(nova => `“${nova.keyword}” (${nova.adsVolume.toLocaleString("pt-BR")}/mês, ${fonteDaNova(nova.origins)})`).join(", ")}.`),
+    confirmLabel: newKeywords ? `Gravar e reler (${prontas.length}, com ${newKeywords} keyword(s) nova(s))` : `Gravar e reler (${prontas.length})`,
   };
 }
 
@@ -840,10 +857,7 @@ export function reinforcementTableSummary(rows: readonly ReinforcementTableRow[]
 
 const MENSAGENS: Record<string, string> = {
   PREVIEW_CHANGED: "O estado mudou desde a prévia: confira a prévia nova antes de gravar. Nada foi gravado.",
-  MINERADOR_DECIDES_NEW_KEYWORDS: "O Arquiteto não aprova keyword no Minerador: as keywords novas vão como sugestão (“Sugestões do Arquiteto”). Nada foi gravado.",
   ARTICLE_WRITER_UNAVAILABLE: "O gravador do Arquiteto não está disponível agora. Nada foi gravado.",
-  SUGGESTIONS_UNAVAILABLE: "O registro das sugestões ao Minerador não está disponível agora. Nada foi gravado.",
-  SUGGESTIONS_NOT_RECORDED: "As sugestões ao Minerador não foram gravadas. Nada foi gravado.",
   REINFORCEMENT_RESULT_PENDING: "Esta busca já tem uma rodada paga gravada: o resultado foi reaberto, sem custo.",
   REINFORCEMENT_ALREADY_RUN: "Esta prévia já foi usada numa rodada paga. Nada foi pago de novo; peça uma nova busca se quiser outra rodada.",
   REINFORCEMENT_PLAN_ABOVE_CAP: `O plano passa do teto de US$ ${formatUsd(REINFORCEMENT_MAX_COST_USD)}. Nada foi pago.`,

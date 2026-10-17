@@ -1,4 +1,75 @@
+- [ ] **Situações resolvidas (2026-10-17)** · [`situacoes-resolvidas.md`](situacoes-resolvidas.md) é leitura obrigatória antes de mexer no Arquiteto: transformar em cenário-ouro as 12 situações da lista (a), tirar da lista (b) cada item quando a fase dele for entregue e registrar ali, com o cenário que a guarda, toda situação nova resolvida.
 - [ ] **APROVADA em 2026-10-16 (F0 entregue em 16/10; F1 aguarda a aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 aprovadas com as recomendações.
+
+## A régua única da coleta da SERP (sem volume, só a principal de identidade) — Arquiteto — 2026-10-17 (tarde)
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] Uma régua só (`serpCollectionAllowed`): sem volume não coleta, exceto a principal de identidade do artigo; as réguas antigas reconduzidas a ela (lote do "Processar artigos", "Validar SERP", "Consultar nas 4 lentes", rota `keyword-serp`, rota `serp`, melhoria).
+- [x] O servidor confere no banco (`readSerpIdentityPrincipals`: pacote aprovado, status legado, ArticleDNA vigente) e recusa com o motivo; nunca paga a principal recusada.
+- [x] Prévia por artigo: "SERP da principal de identidade “…” (sem buscas no Google Ads): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo"; a secundária de mais volume não é coletada por padrão.
+- [x] Cenário-ouro amarelo (16 consultas, até US$ 0,056, só as principais de identidade); teste no servidor da sem volume fora da identidade, recusada; docs (spec §42, SDD §15.6, situações resolvidas G6/T12/Q2, catálogo).
+- [ ] **Dono:** homologar no amarelo — "Validar SERP"/"Processar artigos" nas 4 Livres: a frase por artigo, 16 consultas até US$ 0,056; depois "Melhorar publicados…": a coleta paga só as 4 principais e o parecer usa a SERP delas.
+- [ ] Q2 resolvida por esta régua: conferir na tela de "Processar artigos" que a principal sem volume fora da identidade não entra mais no plano pago (o cache dela continua lido).
+
+## Principal de identidade — Arquiteto — 2026-10-17
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] Teste de identidade único (`principalIsIdentity`/`targetPrincipalIsIdentity`): título do Assunto ou slug declarado/publicado feito da principal.
+- [x] Identidade fica (Travada ou Livre, com pouco ou nenhum volume) em todo caminho: melhoria (linha de copy, `needsPrimary`, reserva, IA), mesa D2.1, Reforçar publicados, diferenciação; as mais amplas entram como secundárias.
+- [x] Troca só fora da identidade; no plano e no Assunto, primeiro a que leva o núcleo do slug com a entidade do DNA (régua de 30/09 estendida, X14).
+- [x] Formar sem trocar: D2a também para a keyword da própria página publicada; a primeira SERP paga é a da secundária de mais volume (frase da prévia com propósito e custo). **SUBSTITUÍDO em 17/10 (tarde):** a SERP paga é a da principal de identidade (régua única, entrada acima).
+- [x] Cenário-ouro amarelo, C6, C9, C9b, C10 e os testes do motor atualizados; spec §41, SDD §15.5, catálogo e situações resolvidas (T12, X14) com o SUBSTITUÍDO.
+- [ ] **Dono:** homologar no amarelo — prévia: Pilar com "como escolher plano de internet residencial" + as 5 variantes; os 3 Suportes Livres com a principal e o reforço da busca nova; a coleta paga (16 consultas, até US$ 0,056) só das secundárias de mais volume (**SUBSTITUÍDO em 17/10, tarde:** só das principais de identidade; ver a entrada acima).
+- [x] **Dúvida para o dono (Q2 de `situacoes-resolvidas.md`, agora mais urgente):** "Processar artigos" (rota da SERP do artigo) ainda consulta e paga a principal sem volume quando ela falta no cache; a melhoria já não paga. Tirar a principal sem volume do plano pago de "Processar artigos" espera a decisão. **Decidida em 17/10 (tarde):** só a principal de identidade sem volume é paga (régua única, entrada acima); a fora da identidade sai do plano pago, com o motivo.
+- [ ] Tela: o texto da linha do plano "Livre sem número de buscas → use “Procurar outra principal”" (`planRowWithoutVolumeSentence`) continua oferecendo a troca; avaliar dizer "principal de identidade: fica" quando for o caso (só texto, sem mudar função).
+
+## Sem canibalização no Silo, a keyword nova nas telas e na diferenciação — Arquiteto — 2026-10-17
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] Variantes da mesma busca num artigo só do Silo (o da principal; senão o da secundária; senão o que melhor as contém; o Pilar desempata).
+- [x] Busca com marca só no artigo que nomeia a marca ou fala de operadoras; cabeça acima da principal só no Pilar; secundária com palavra própria do artigo.
+- [x] Sementes sem palavra solta do DNA e sem marca alheia.
+- [x] A antiga principal que carrega o Assunto fica como âncora do Assunto (SDD §15.2, SUBSTITUI "a antiga vira secundária" nesse caso).
+- [x] Telas: confirmação com as keywords novas por artigo (volume e fonte) e `approveNewKeywords` só então (melhoria, Artigos do plano, Reforçar publicados).
+- [x] "Coletar a SERP no DataForSEO (pago: N consultas, até US$ X)" no lugar de "Validar no Google"; Google Ads como "grátis (cota do Google Ads)".
+- [x] Diferenciação: a keyword nova entra no próprio aceite pelas mesmas portas do Reforçar; a que já existe é só lida.
+- [ ] Dono: homologar no amarelo (WifiConecta) — rodar "Buscar keywords novas no Google Ads" para os 3 Livres sem lista e conferir a confirmação com as novas.
+- [ ] `situacoes-resolvidas.md`: registrar as situações desta entrega (variantes no Silo, marca, cabeça no Pilar, âncora do Assunto, nova na diferenciação) com o cenário que guarda.
+
+## Reforço pela linha de copy e keyword NOVA na mesma confirmação — Arquiteto — 2026-10-16 (noite)
+
+Detalhe, causas e arquivos em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] A keyword que carrega o Assunto entra na lista da melhoria (dona do próprio artigo); a SERP da Travada é lida pela keyword.
+- [x] Reforço e troca pela linha de copy (Assunto, slug, detalhes, DNA) e pela SERP da principal já em cache; nenhuma SERP paga por candidata.
+- [x] Livre sem volume troca pela candidata com volume que mantém entidade e intenção; Travada e Livre com volume nunca trocam.
+- [x] Busca nova semeada pelo plano, pelo DNA e pelas relacionadas da SERP da principal; ideia fora do assunto nem é medida.
+- [x] Coleta paga só da primeira SERP da principal sem SERP; parecer pelo cache pela SERP da principal (`observeCachedSupportsOnly`).
+- [x] Guarda de retrabalho: pedir o que a anterior não fez não é retrabalho; rodada parada antes do pago continua.
+- [x] Keyword NOVA na mesma confirmação (melhoria e Reforçar publicados); a que já existe no Minerador só é lida (SUBSTITUI a F4 de 14/10 neste ponto).
+- [x] Cenário-ouro do amarelo (§15) e guarda "nada que veio do Minerador é escrito".
+- [x] Tela (2026-10-17): `approveNewKeywords` com o texto da prévia nos botões; "Coletar a SERP no DataForSEO (pago: N consultas, até US$ X)" no lugar de "Validar no Google".
+- [x] Diferenciação de publicados (2026-10-17): a keyword nova entra no próprio aceite, pelas mesmas portas do Reforçar.
+- [ ] Dono: homologar no amarelo (WifiConecta).
+
+## Teste do dono na WifiConecta (amarelo) — frases, painel e leituras do plano — Arquiteto — 2026-10-16 (noite)
+
+Correção dentro da linha de sempre; detalhe, causas e arquivos em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] Livre medida sem número de buscas: "Procurar outra principal" ou "Buscar sustentação" (grátis), nunca "meça no Minerador"; a nunca medida segue "meça"; a Travada só busca sustentação. A mesma frase na prévia do Concluir, no Validar SERP, no alerta e no selo ("Sem buscas").
+- [x] Painel da aba Artigos sem "Assuntos · N", "Assuntos como tronco · N", "N Assunto(s) aguardando sustentação", "N de M… SERP", "Formação concluída…" e "Formação desatualizada…"; pendências = "Pendências (N)"; "Reprocessar artigos" destacado quando a formação de sempre envelheceu; o que ficou conta o recorte da cor.
+- [x] Ações do Assunto (Prender, Formar artigos automaticamente, Soltar, Confirmar o do Silo) na barra de sempre ("Ações do Assunto"); o filtro de Assunto da tabela saiu (o filtro é a etiqueta da cor).
+- [x] "1 fica de fora: Silo do plano…" só com o botão do lote de desfazer, e com a frase verdadeira.
+- [x] O marcador nascido pela linha do plano (`serpbase:`) não deixa a formação "desatualizada" para sempre.
+- [x] Análise da arquitetura: cada artigo do plano é a sua leitura (15 = 15; "combo internet tv streaming" segue o plano).
+- [x] "Papel no Silo" e "Definição do artigo" das linhas do plano leem o plano, com o porquê curto.
+- [x] Cenário-ouro C17 e guarda da forma atualizados.
+- [ ] Dono: homologar na WifiConecta (`?grupo=amarelo`): a frase das 4 Livres, o painel sem os textos, "Ações do Assunto" na barra, a coluna Papel/Definição, a aba Silos sem "fica de fora" e a Análise com 15 que seguem o plano.
+- [ ] F2 (não mexido): "Fechamento dos Silos — falta concluir 8 artigos" lista os 4 já formados — causa provável no `candidateRef` da conclusão pela linha do plano (ver `estado-atual.md`).
+- [ ] Resíduo: depois de um "Processar artigos" de artigos sem plano, mudança só nas keywords do plano deixa "Reprocessar artigos" destacado até o próximo "Processar artigos" de artigos sem plano.
 
 ## Slug declarado no plano do Minerador — 2026-10-16
 

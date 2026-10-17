@@ -1,6 +1,14 @@
 "use client";
+import type { ReactNode } from "react";
 import type { PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
 import type { PlanArticleSheetController } from "./plan-article-sheet";
+
+/**
+ * 2026-10-16 (noite) · pedido do dono: a frase "Formação desatualizada: o lote
+ * mudou desde a última análise…" saiu do painel. O que pedia "Reprocessar
+ * artigos" é o próprio botão: destacado, com o porquê curto no `title`.
+ */
+export const ARTICLES_STALE_TITLE = "O lote mudou desde a última análise: reprocesse os artigos.";
 
 /**
  * A BARRA DE SEMPRE DA ABA ARTIGOS — "Artigos novos · Processar artigos /
@@ -26,10 +34,23 @@ export function ArticlesFormationBar({
   improvementOpen,
   onToggleImprovement,
   buttonClassName,
+  stale = false,
+  attentionClassName,
+  subjectActions = null,
 }: {
   formationBusy: boolean;
   /** Há marcador de formação (os artigos de sempre já foram processados): o rótulo vira "Reprocessar artigos". */
   processed: boolean;
+  /** 2026-10-16 (noite) · a formação de sempre está desatualizada: o botão "Reprocessar artigos" fica destacado (aditivo). */
+  stale?: boolean;
+  /** A variante de destaque do botão (a do sistema visual da área). */
+  attentionClassName?: string;
+  /**
+   * 2026-10-16 (noite) · as ações do Assunto que moravam no bloco "Assuntos · N"
+   * (Prender Assunto, Formar artigos automaticamente, Soltar Assunto, Confirmar
+   * Assunto do Silo): o bloco saiu, as ações ficam na barra.
+   */
+  subjectActions?: ReactNode;
   /** O escopo dos artigos de sempre (sem as linhas do plano). */
   selectionScope: { selectedCount: number; reason: string | null };
   /** As linhas do plano marcadas na tabela (o artigo do plano da mesa e a linha do plano sem artigo). */
@@ -58,9 +79,10 @@ export function ArticlesFormationBar({
           if (doPlano.length) planSheet.start("validateSerp", doPlano);
         })(); }}
         disabled={processarBloqueado}
-        title={(doPlano.length ? null : selectionScope.reason) ?? `Processar ${total} artigo(s) selecionado(s).${rotaDoPlano}`}
+        title={`${stale ? `${ARTICLES_STALE_TITLE} ` : ""}${(doPlano.length ? null : selectionScope.reason) ?? `Processar ${total} artigo(s) selecionado(s).${rotaDoPlano}`}`}
         data-testid="architect-articles-top-process"
-        className={buttonClassName}
+        data-stale={stale ? "true" : undefined}
+        className={stale && attentionClassName ? attentionClassName : buttonClassName}
       >
         {formationBusy ? "Processando…" : processed ? "Reprocessar artigos" : "Processar artigos"}
       </button>
@@ -82,12 +104,13 @@ export function ArticlesFormationBar({
         type="button"
         onClick={onToggleImprovement}
         aria-expanded={improvementOpen}
-        title="Abre a melhoria dos artigos publicados (buscar keywords, validar no Google e gravar). Só para publicados; URL, slug e canonical nunca mudam."
+        title="Abre a melhoria dos artigos publicados (buscar keywords, coletar a SERP no DataForSEO e gravar). Só para publicados; URL, slug e canonical nunca mudam."
         data-testid="architect-articles-improve-published"
         className={buttonClassName}
       >
         {improvementOpen ? "Fechar “Melhorar publicados”" : "Melhorar publicados…"}
       </button>
+      {subjectActions}
       <span className={`text-sm ${selectionScope.reason && regulares > 0 ? "text-warning" : "text-text-muted"}`} data-testid="architect-articles-selection-count">
         {total === 0
           ? selectionScope.reason

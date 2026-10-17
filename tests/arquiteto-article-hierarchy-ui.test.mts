@@ -67,8 +67,10 @@ test("as pendências de Silo saíram da mesa e viraram contagem no painel", () =
   // A grid não emite mais as seções de espera na aba Artigos.
   assert.doesNotMatch(workspace, /workspaceMode === "articles" && <ArticlePipelineRows/);
   assert.match(panel, /data-testid="architect-waiting-summary"/);
-  assert.match(panel, /aguardam confirmação do Silo/);
-  assert.match(panel, /ainda não possuem Silo/);
+  // 2026-10-16 (noite) · pedido do dono ("Ver 1 pendência(s)… não sei o que significam"): só o contador no botão que as abre, quando há; a frase solta saiu.
+  assert.match(panel, /\{`Pendências \(\$\{waiting\.rows\.length\}\)`\}/);
+  assert.match(panel, /\{waiting\.rows\.length > 0 && \(/);
+  assert.doesNotMatch(panel, /keyword\(s\) aguardam confirmação do Silo ·|ainda não possuem Silo|Ver \$\{waiting\.rows\.length\} pendência/);
 });
 
 test("o detalhe das pendências abre sob demanda, com nome e motivo", () => {

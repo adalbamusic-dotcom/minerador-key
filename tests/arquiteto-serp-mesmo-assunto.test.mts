@@ -285,13 +285,25 @@ test("entre Silos: o par real noutro Silo vira proposta pela SERP; pelas palavra
 
 const identidade = { url: "https://adalbapro.com.br/captacao/como-atrair-pacientes-para-clinica", canonical: "https://adalbapro.com.br/captacao/como-atrair-pacientes-para-clinica", slug: "como-atrair-pacientes-para-clinica" };
 const candidatasAtrair = () => ["kw-09", "kw-10", "kw-11", "kw-12", "kw-13"].map(id => ({ ...kw(id), volumeValidated: true }));
+/*
+ * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono: "Se o termo principal tem pouco volume, mas faz sentido preservá-lo
+ * por ser a identidade do assunto/tema, principalmente nos publicados"). A página real "como atrair pacientes para
+ * clínica" tem o slug feito da principal: identidade — nada é proposto, as mais amplas só reforçam. Os testes da
+ * MÁQUINA da troca (D2.1, decisão, níveis) usam uma principal FORA da identidade: a mesma página com uma principal
+ * estranha ao slug ("consultório" num slug de "clínica").
+ */
+const FORA_DA_IDENTIDADE = "atrair pacientes no consultório";
 
-test("D2.1 Livre: propõe a de maior volume que divide a SERP; URL, slug e canonical intocados", () => {
+test("D2.1 Livre: principal de identidade fica (nada proposto); fora da identidade, propõe a de maior volume que divide a SERP; URL, slug e canonical intocados", () => {
   assert.equal(publishedPrimaryPostOf("reviewable"), "free");
   assert.equal(publishedPrimaryPostOf("locked"), "locked");
   assert.equal(publishedPrimaryPostOf(null), "unknown");
+  const deIdentidade = proposePublishedPrimarySwap({ published: kw("kw-01", { intent: "Informativo" }), post: "free", identity: identidade, candidates: candidatasAtrair(), serp: INDICE });
+  assert.equal(deIdentidade.state, "locked");
+  assert.equal(deIdentidade.substitute, null);
+  assert.match(deIdentidade.note, /^Principal de identidade: o slug publicado foi feito de "como atrair pacientes para clínica".*As buscas mais amplas entram como reforço\.$/);
   const proposta = proposePublishedPrimarySwap({
-    published: kw("kw-01", { intent: "Informativo" }), post: "free", identity: identidade,
+    published: kw("kw-01", { intent: "Informativo", keyword: FORA_DA_IDENTIDADE }), post: "free", identity: identidade,
     candidates: candidatasAtrair(), serp: INDICE,
   });
   assert.equal(proposta.state, "proposed");
@@ -342,8 +354,8 @@ test("D2.1: cada recusa diz o que faltou — volume menor, intenção, SERP, pub
   assert.ok(intencao.rejected.filter(item => item.missing !== "slug_entity").every(item => item.missing === "intent"), "Comercial × Informativa: a troca exige a mesma intenção");
 });
 
-test("D2.1 decisão humana: aceita troca a principal, a antiga vira secundária, identidade igual", () => {
-  const proposta = proposePublishedPrimarySwap({ published: kw("kw-01", { intent: "Informativo" }), post: "free", identity: identidade, candidates: candidatasAtrair(), serp: INDICE });
+test("D2.1 decisão humana (principal fora da identidade): aceita troca a principal, a antiga vira secundária, identidade igual", () => {
+  const proposta = proposePublishedPrimarySwap({ published: kw("kw-01", { intent: "Informativo", keyword: FORA_DA_IDENTIDADE }), post: "free", identity: identidade, candidates: candidatasAtrair(), serp: INDICE });
   const artigo = { principalKeywordId: "kw-01", keywordIds: ["kw-01", "kw-09", "kw-10"], identity: identidade };
   const aceita = decidePublishedPrimarySwap({ proposal: proposta, article: artigo, currentPost: "free", accepted: true, actorUserId: "11111111-1111-4111-8111-111111111111", decidedAt: "2026-09-26T21:00:00-03:00" });
   assert.ok(aceita.ok);
@@ -376,9 +388,10 @@ test("D2.1 decisão humana: aceita troca a principal, a antiga vira secundária,
 const publicado = (post: PublishedAnchorInfo["post"], slug: string): PublishedAnchorInfo => ({ post, url: `https://adalbapro.com.br/${slug}`, canonical: `https://adalbapro.com.br/${slug}`, slug });
 
 test("diagnóstico: cada dilema tem um estado claro e uma ação", () => {
+  // 2026-10-17 · kw-01 com principal FORA da identidade (a máquina da troca); com a real, de identidade, ver o fim do teste.
   const keywords = mapaDe(
     ["kw-01", "kw-02", "kw-04", "kw-07", "kw-08", "kw-09", "kw-10", "kw-11", "kw-15", "kw-16", "kw-17", "kw-19"],
-    { "kw-01": { intent: "Informativo" } },
+    { "kw-01": { intent: "Informativo", keyword: FORA_DA_IDENTIDADE } },
   );
   const silos = [
     { siloRef: "territory:a", siloLabel: "Captação de pacientes", siloTokens: sem, plan: {
@@ -447,6 +460,17 @@ test("diagnóstico: cada dilema tem um estado claro e uma ação", () => {
   assert.equal(resumo.published, 5);
   assert.equal(resumo.byState.swap_proposed + resumo.byState.reinforced + resumo.byState.pair_in_other_silo + resumo.byState.no_pair_in_batch + resumo.byState.serp_missing, 5);
   assert.match(resumo.headline, /^5 publicados e 0 Assuntos: 1 troca proposta, 1 reforçado, 1 par em outro silo, 1 sem serp no cache, 1 sem par no lote\.$/);
+
+  // A página real (o slug foi feito de "como atrair pacientes para clínica"): principal de identidade — nenhuma troca; as mais amplas reforçam.
+  const reais = diagnoseSerpSubjectAnchors({
+    silos, keywords: mapaDe([...keywords.keys()], { "kw-01": { intent: "Informativo" } }), serp: semSerpDoOito, crossSiloProposals,
+    published: new Map([["kw-01", publicado("free", "como-atrair-pacientes-para-clinica")]]),
+    volumeValidated: new Set(["kw-09", "kw-10", "kw-11", "kw-15", "kw-16", "kw-17", "kw-19"]),
+  });
+  const real = reais.find(item => item.anchorKeywordId === "kw-01")!;
+  assert.equal(real.swap?.state, "locked");
+  assert.notEqual(real.state, "swap_proposed");
+  assert.ok(!real.actions.some(action => action.kind === "decide_swap"));
   assert.equal(chamadasDeRede, 0);
 });
 
@@ -521,6 +545,16 @@ test("diagnóstico do Assunto: aguardando sustentação e par sem volume", () =>
   assert.match(sozinho[0].headline, /^Assunto · aguardando sustentação: nenhuma keyword deste lote trata do mesmo assunto no Google\./);
 });
 
+test("2026-10-16 · teste do dono (amarelo): Assunto com só a própria keyword NÃO é 'Reforçado'; sem volume, não pede SERP paga — pede a busca de reforço", () => {
+  const assunto = { ...kw("kw-11"), keywordId: "assunto-sem-media", keyword: "como escolher plano de internet residencial" };
+  const silo = { siloRef: "territory:p", siloLabel: "Planos e contratação", plan: { anchors: [{ kind: "subject" as const, principalKeywordId: "assunto-sem-media", keywordIds: ["assunto-sem-media"] }], awaitingSubjectKeywordIds: [], leftoverKeywordIds: [] } };
+  const [lido] = diagnoseSerpSubjectAnchors({ silos: [silo], keywords: new Map([["assunto-sem-media", assunto]]), serp: INDICE, published: new Map(), volumeValidated: new Set() });
+  assert.equal(lido.kind, "subject");
+  assert.notEqual(lido.state, "reinforced", "zero apoio além da âncora não é reforço");
+  assert.notEqual(lido.state, "serp_missing", "keyword sem volume não tem SERP coletada: o caminho é a busca de reforço");
+  assert.ok(lido.actions.some(action => action.kind === "search_reinforcement"));
+});
+
 test("Buscar reforço do Assunto usa o mesmo link de 'Buscar sustentação' do Minerador", () => {
   const id = "0f4a2c1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b";
   assert.equal(reinforcementSearchHref("adalbapro--x", { kind: "subject", anchorKeywordId: id }), subjectSearchLinkHref("adalbapro--x", id));
@@ -587,17 +621,24 @@ test("formação: entre as que o Google junta, entra primeiro a de maior volume 
   assert.ok(forte210.score > forte10.score, "210 com 3 páginas passa na frente de 10 com 4");
   assert.ok(forte10.score >= 1 && forte210.score < 2, "o volume não tira ninguém da faixa forte");
 
-  // A troca do Posto Livre sai para uma keyword que JÁ está no artigo: dá para aplicar.
-  const diagnostico = diagnoseSerpSubjectAnchors({
+  // 2026-10-17 · Principal de identidade: o slug "marketing-digital-para-dentistas" foi feito da principal — com Posto
+  // Livre, ela FICA e "marketing para dentistas" (210) reforça o contexto (SUBSTITUÍDO: a troca para a de 210).
+  const entrada = {
     silos: [{ siloRef: "territory:odonto", siloLabel: "Marketing odontológico", plan: plano, keywordIds: [...publicado.keywordIds, ...plano.leftoverKeywordIds] }],
     keywords: new Map([kw("kw-02"), kw("kw-15"), kw("kw-16"), kw("kw-17"), kw("kw-18"), clone("kw-17b"), clone("kw-17c")].map(item => [item.keywordId, item] as const)),
     serp: indice,
-    published: new Map([["kw-02", publicado_("free", "marketing-digital-para-dentistas")]]),
     volumeValidated: new Set(["kw-15", "kw-16", "kw-17", "kw-18", "kw-17b", "kw-17c"]),
-  })[0];
-  assert.equal(diagnostico.state, "swap_proposed");
-  assert.equal(diagnostico.swap?.substitute?.keywordId, "kw-15");
-  assert.ok(publicado.keywordIds.includes(diagnostico.swap!.substitute!.keywordId));
+  };
+  const diagnostico = diagnoseSerpSubjectAnchors({ ...entrada, published: new Map([["kw-02", publicado_("free", "marketing-digital-para-dentistas")]]) })[0];
+  assert.equal(diagnostico.state, "reinforced");
+  assert.equal(diagnostico.swap?.state, "locked");
+  assert.match(diagnostico.swap!.note, /^Principal de identidade/);
+  assert.ok(diagnostico.members.some(item => item.keywordId === "kw-15"), "a mais ampla reforça");
+  // Fora da identidade (o slug não foi feito da principal): a troca sai para uma keyword que JÁ está no artigo: dá para aplicar.
+  const fora = diagnoseSerpSubjectAnchors({ ...entrada, published: new Map([["kw-02", publicado_("free", "dicas-de-marketing-para-dentistas")]]) })[0];
+  assert.equal(fora.state, "swap_proposed");
+  assert.equal(fora.swap?.substitute?.keywordId, "kw-15");
+  assert.ok(publicado.keywordIds.includes(fora.swap!.substitute!.keywordId));
   assert.equal(chamadasDeRede, 0);
 });
 
@@ -607,10 +648,11 @@ test("troca: a melhor substituta fora de um artigo cheio não vira botão morto 
   const keywords = new Map([kw("kw-02"), kw("kw-15"), kw("kw-16"), kw("kw-17"), kw("kw-18"), clone("kw-17b"), clone("kw-17c")].map(item => [item.keywordId, item] as const));
   // O plano de antes da correção: cheio com as de volume 10; a de 210 ficou de fora.
   const plan = { anchors: [{ kind: "published" as const, principalKeywordId: "kw-02", keywordIds: ["kw-02", "kw-17", "kw-18", "kw-17b", "kw-17c", "kw-16"] }], awaitingSubjectKeywordIds: [], leftoverKeywordIds: ["kw-15"] };
+  // 2026-10-17 · a máquina da troca vale só FORA da identidade: o slug aqui não foi feito da principal.
   const [diagnostico] = diagnoseSerpSubjectAnchors({
     silos: [{ siloRef: "territory:odonto", siloLabel: "Marketing odontológico", plan, keywordIds: [...keywords.keys()] }],
     keywords, serp: indice,
-    published: new Map([["kw-02", publicado_("free", "marketing-digital-para-dentistas")]]),
+    published: new Map([["kw-02", publicado_("free", "dicas-de-marketing-para-dentistas")]]),
     volumeValidated: new Set(["kw-15", "kw-16", "kw-17", "kw-18", "kw-17b", "kw-17c"]),
   });
   assert.notEqual(diagnostico.swap?.substitute?.keywordId, "kw-15", "não propõe uma substituta que não cabe");
@@ -676,6 +718,7 @@ test("Par em outro artigo: o par real do publicado está em outro artigo do Silo
   assert.match(summarizeSerpSubjectDiagnoses(diagnosticos).headline, /1 par em outro artigo/);
 });
 
+// 2026-10-17 · fora da identidade: o slug "anuncios-pagos-vs-organico" não foi feito da principal "tráfego pago vs orgânico…" (com o slug dela, ela fica).
 test("Posto Livre (D2.3): a Provável de 2 páginas com volume maior vira troca proposta, com aviso; SERP de apoio não é chamada de 'divide'", () => {
   const pegada = (keywordId: string, urls: string[]): KeywordSerpFootprint => ({ keywordId, keyword: keywordId, lenses: [{ lens: "mobile-android", urls, domains: null, collectedAt: null }] });
   const indice = buildSerpSubjectIndex([
@@ -688,7 +731,7 @@ test("Posto Livre (D2.3): a Provável de 2 páginas com volume maior vira troca 
     silos: [{ siloRef: "territory:e", siloLabel: "Estética", plan: { anchors: [{ kind: "published", principalKeywordId: "pub", keywordIds: ["pub", "viz"] }], awaitingSubjectKeywordIds: [], leftoverKeywordIds: [] }, siloTokens: new Set(["trafego", "pago", "organico"]) }],
     keywords: new Map([["pub", pub], ["viz", viz]]),
     serp: indice,
-    published: new Map([["pub", publicado_("free", "trafego-pago-vs-organico")]]),
+    published: new Map([["pub", publicado_("free", "anuncios-pagos-vs-organico")]]),
     volumeValidated: new Set(["viz"]),
     brandRef: "adalbapro--brand",
   });
@@ -705,7 +748,7 @@ test("Posto Livre (D2.3): a Provável de 2 páginas com volume maior vira troca 
     silos: [{ siloRef: "territory:e", siloLabel: "Estética", plan: { anchors: [{ kind: "published", principalKeywordId: "pub", keywordIds: ["pub", "viz"] }], awaitingSubjectKeywordIds: [], leftoverKeywordIds: [] }, siloTokens: new Set(["trafego", "pago", "organico"]) }],
     keywords: new Map([["pub", pub], ["viz", { ...viz, volume: null }]]),
     serp: indice,
-    published: new Map([["pub", publicado_("free", "trafego-pago-vs-organico")]]),
+    published: new Map([["pub", publicado_("free", "anuncios-pagos-vs-organico")]]),
     volumeValidated: new Set(),
     brandRef: "adalbapro--brand",
   });
@@ -720,7 +763,8 @@ test("Posto não declarado: diz que o Minerador mostra 'Travado' por padrão e o
   const [diagnostico] = diagnoseSerpSubjectAnchors({
     silos: [{ siloRef: "territory:odonto", siloLabel: "Marketing odontológico", plan: { anchors: [{ kind: "published", principalKeywordId: "kw-02", keywordIds: ["kw-02", "kw-15", "kw-16"] }], awaitingSubjectKeywordIds: [], leftoverKeywordIds: [] } }],
     keywords, serp: INDICE,
-    published: new Map([["kw-02", publicado_("unknown", "marketing-digital-para-dentistas")]]),
+    // 2026-10-17 · a hipótese "se fosse Livre" só existe FORA da identidade: o slug aqui não foi feito da principal.
+    published: new Map([["kw-02", publicado_("unknown", "dicas-de-marketing-para-dentistas")]]),
     volumeValidated: new Set(["kw-15", "kw-16"]),
   });
   assert.equal(diagnostico.state, "reinforced", "nada é proposto nem bloqueado sem declaração");
@@ -942,7 +986,8 @@ test("D2.3 · troca: a Forte tem prioridade; a Provável (2 páginas e palavras)
     pegada("forte", ["https://a.com/1", "https://b.com/2", "https://c.com/3"]),
     pegada("provavel", ["https://a.com/1", "https://b.com/2"]),
   ]);
-  const nomes: Record<string, string> = { pub: "como atrair pacientes para clínica", forte: "atrair pacientes clínica", provavel: "como atrair pacientes para clínica médica" };
+  // 2026-10-17 · a principal publicada FORA da identidade (o slug "como-atrair-pacientes-para-clinica" não foi feito dela).
+  const nomes: Record<string, string> = { pub: FORA_DA_IDENTIDADE, forte: "atrair pacientes clínica", provavel: "como atrair pacientes para clínica médica" };
   const linha = (keywordId: string, volume: number | null, isPublished = false): ArticleFormationKeyword => ({ keywordId, keyword: nomes[keywordId], intent: "Informativo", volume, kgr: null, entity: null, problem: null, isPublished });
   const proposta = proposePublishedPrimarySwap({
     published: linha("pub", null, true), post: "free", identity: identidade, serp: indice,
@@ -970,7 +1015,8 @@ test("D2.1 · troca exige páginas em comum: 2 páginas sem palavras, só sites,
     pegada("dna", ["https://z.com/9"]),
   ]);
   const dna = { entity: "Clínica", problem: "atrair pacientes", semanticState: "conclusive" as const };
-  const nomes: Record<string, string> = { pub: "como atrair pacientes para clínica", duas: "receita de bolo", sites: "marketing odontológico", dna: "bolo de cenoura", fora: "torta de limão" };
+  // 2026-10-17 · a principal publicada FORA da identidade: só assim a máquina da troca é exercitada.
+  const nomes: Record<string, string> = { pub: FORA_DA_IDENTIDADE, duas: "receita de bolo", sites: "marketing odontológico", dna: "bolo de cenoura", fora: "torta de limão" };
   const linha = (keywordId: string, volume: number | null, isPublished = false): ArticleFormationKeyword => ({ keywordId, keyword: nomes[keywordId], intent: "Informativo", volume, kgr: null, isPublished, ...dna });
   const proposta = proposePublishedPrimarySwap({
     published: linha("pub", null, true), post: "free", identity: identidade, serp: indice,

@@ -76,7 +76,7 @@ export function SearchSuggestionList({ controller, pageId, result }: { controlle
           );
         })}
       </ul>
-      <p className="text-sm leading-6 text-text-muted">{`As marcadas entram em "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}". As novas vão como sugestão ao Minerador (“Sugestões do Arquiteto”): o Arquiteto só lê keyword; importar, medir e aprovar é lá, pelo seu clique.`}</p>
+      <p className="text-sm leading-6 text-text-muted">{`As marcadas entram em "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}". As novas (que não existem na marca) entram no Minerador e no artigo na mesma confirmação, com a sua aprovação; as que já estão no Minerador são só lidas.`}</p>
     </div>
   );
 }
@@ -108,9 +108,9 @@ function ReinforcementDialog({ controller, cards, rows = [], buttonClassName, pr
   // A tabela acrescenta, por artigo, a mudança de Silo e o total depois de gravar.
   const daTabela = new Map(rows.map(row => [row.anchorKeywordId, row.confirmLines]));
   const depoisPelaTabela = new Map(rows.map(row => [row.anchorKeywordId, row.after.keywords]));
-  // O total que o servidor vai gravar: a página, quem fica e as marcadas aceitas (F4: as novas vão como sugestão ao Minerador, fora do artigo).
-  const doServidor = new Map((dialog.data?.pages || []).map(plano => [plano.publishedKeywordId, { total: 1 + plano.keep.length + plano.add.length, recusadas: plano.refused.length }]));
-  // F4 · O ARQUITETO SÓ LÊ: não há mais aceite de "aprovar no Minerador" aqui.
+  // O total que o servidor vai gravar: a página, quem fica, as marcadas aceitas e (2026-10-17) as NOVAS, que entram no artigo nesta confirmação.
+  const doServidor = new Map((dialog.data?.pages || []).map(plano => [plano.publishedKeywordId, { total: 1 + plano.keep.length + plano.add.length + plano.create.length, recusadas: plano.refused.length }]));
+  // 2026-10-17 · o aceite das keywords novas é esta confirmação: o texto e a lista por artigo ficam acima do botão.
   const podeGravar = Boolean(view && view.ready > 0 && !busy);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="presentation">
@@ -180,8 +180,9 @@ function ReinforcementDialog({ controller, cards, rows = [], buttonClassName, pr
           )}
           {dialog.left.length > 0 && <p className="text-text-muted">{`Mais ${dialog.left.length} publicado(s) ficam para a próxima confirmação (até 30 por vez).`}</p>}
           {view?.approvalText && (
-            <div className="rounded-md border border-divider bg-surface-subtle p-2" data-testid="architect-reinforcement-suggestions-note">
-              <p className="text-foreground">{view.approvalText}</p>
+            <div className="rounded-md border border-divider bg-surface-subtle p-2" data-testid="architect-reinforcement-new-keywords">
+              <p className="font-medium text-foreground">{view.approvalText}</p>
+              {view.newKeywordLines.length > 0 && <ul className="mt-1 list-disc pl-5 text-foreground">{view.newKeywordLines.map(line => <li key={line}>{line}</li>)}</ul>}
             </div>
           )}
           <p className="text-text-muted">{`${PUBLISHED_REINFORCEMENT_COST_LINE} Nada é gravado sem esta confirmação, e o resultado só é anunciado depois da releitura.`}</p>

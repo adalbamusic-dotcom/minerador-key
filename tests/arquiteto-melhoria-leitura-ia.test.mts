@@ -33,12 +33,18 @@ test("casos BONS: a IA completa o publicado sem par da SERP, com motivo visível
   assert.deepEqual(checked.rejected, []);
   const [a, b] = planArticleImprovements({ targets, keywords, evidence: noEvidence, editorialPicks: checked.picks, ranking: { consultorio: false, estetica: false } });
   assert.equal(a.status, "ready"); assert.equal(a.evidenceBasis, "editorial_ai");
-  assert.equal(a.principalId, "atrair"); assert.deepEqual(a.memberIds, ["consultorio", "atrair", "atrair-os"]); assert.deepEqual(a.addIds, ["atrair", "atrair-os"]);
+  // 2026-10-17 · Principal de identidade: o slug das duas páginas foi feito da principal delas — a principal FICA e as
+  // mais amplas da IA reforçam o contexto (SUBSTITUÍDO: a troca para "como atrair clientes" de 30/09).
+  assert.equal(a.principalId, "consultorio"); assert.deepEqual(a.memberIds, ["consultorio", "atrair", "atrair-os"]); assert.deepEqual(a.addIds, ["atrair", "atrair-os"]);
   assert.deepEqual(a.aiReasons?.map(r => r.keywordId), ["atrair", "atrair-os"]);
   assert.match(a.reasons.join(" "), /parecer da SERP da composição final continua obrigatório/);
-  // A principal nova é mais ampla que o slug ("para consultório" sai da busca): o aviso de SEO fica escrito na linha.
-  assert.match(a.reasons.join(" "), /Principal mais ampla, com volume: "como atrair clientes" leva o núcleo do assunto da página; o nicho do slug continua no texto/);
-  assert.equal(b.status, "ready"); assert.equal(b.principalId, "captar"); assert.deepEqual(b.memberIds, ["estetica", "captar"]);
+  assert.match(a.reasons.join(" "), /A IA sugeriu “como atrair clientes” como principal, mas a principal atual é a identidade do assunto \(está no título ou no slug\) e fica: entra como secundária/);
+  assert.equal(b.status, "ready"); assert.equal(b.principalId, "estetica"); assert.deepEqual(b.memberIds, ["estetica", "captar"]);
+  // Fora da identidade (a principal da página não é o assunto do slug): a mais ampla com o núcleo do slug assume, com o aviso de SEO.
+  const estranha = pub("consultorio", "consultório odontológico sem agenda", { slug: "como-atrair-clientes-para-consultorio" });
+  const [fora] = planArticleImprovements({ targets: [estranha], keywords: [own(estranha), ...boas], evidence: noEvidence, editorialPicks: checked.picks.filter(p => p.targetId === "consultorio"), ranking: { consultorio: false } });
+  assert.equal(fora.principalId, "atrair", JSON.stringify(fora.reasons));
+  assert.match(fora.reasons.join(" "), /Principal mais ampla, com volume: "como atrair clientes" leva o núcleo do assunto da página; o nicho do slug continua no texto/);
   assert.equal(IMPROVEMENT_AI_LABEL, "Leitura da IA — confira");
 });
 
@@ -98,12 +104,15 @@ test("barreiras da lista: publicada, sem volume validado, de outro artigo aprova
 test("principal nova só com Posto Livre, atual sem volume e página que não ranqueia; senão entra como secundária", () => {
   const candidate = boas[0];
   const semVolume = own(consultorio), comVolume = kw("consultorio", consultorio.theme, 140, { published: true });
-  assert.equal(editorialAiPrincipalBlock(consultorio, semVolume, candidate, false), null);
+  // 2026-10-17 · a principal de identidade (o slug foi feito dela) fica; fora da identidade, a IA pode propor a troca.
+  assert.match(editorialAiPrincipalBlock(consultorio, semVolume, candidate, false)!, /identidade do assunto/);
+  const estranha = pub("consultorio", "consultório odontológico sem agenda", { slug: "como-atrair-clientes-para-consultorio" });
+  assert.equal(editorialAiPrincipalBlock(estranha, own(estranha), candidate, false), null);
   assert.match(editorialAiPrincipalBlock({ ...consultorio, post: "locked" }, semVolume, candidate, false)!, /Travado/);
   assert.match(editorialAiPrincipalBlock({ ...consultorio, post: "unknown" }, semVolume, candidate, false)!, /não foi declarado/);
   assert.match(editorialAiPrincipalBlock(consultorio, comVolume, candidate, false)!, /já tem volume/);
-  assert.match(editorialAiPrincipalBlock(consultorio, semVolume, candidate, true)!, /ranqueia/);
-  assert.match(editorialAiPrincipalBlock(consultorio, semVolume, candidate, null)!, /não deu para reler/);
+  assert.match(editorialAiPrincipalBlock(estranha, own(estranha), candidate, true)!, /ranqueia/);
+  assert.match(editorialAiPrincipalBlock(estranha, own(estranha), candidate, null)!, /não deu para reler/);
   for (const [target, ranking, current] of [[{ ...consultorio, post: "locked" as const }, false, semVolume], [consultorio, true, semVolume], [consultorio, null, semVolume], [consultorio, false, comVolume]] as const) {
     const keywords = [current, ...boas];
     const checked = validateImprovementAiPicks({ picks: [pick("consultorio", "atrair", "principal")] }, { targets: [target], keywords, listIds: ["atrair"] });
@@ -149,12 +158,14 @@ test("ordem: a proposta pronta pela SERP vence e a keyword dela não é reaprove
   const keywords = [own(consultorio), own(estetica), ...boas];
   const evidence: ImprovementEvidence[] = [{ targetId: "estetica", keywordId: "captar", complete: true, sharedPages: 4, contradiction: false, anchorConclusive: false }];
   const serp = planArticleImprovements({ targets: [consultorio, estetica], keywords, evidence, listReading: false });
-  assert.equal(serp[1].status, "ready"); assert.equal(serp[1].evidenceBasis, "serp");
+  assert.equal(serp[1].status, "ready"); assert.deepEqual(serp[1].addIds, ["captar"], "o par da SERP entra (a principal de identidade fica)");
   assert.deepEqual(improvementAiTargets([consultorio, estetica], serp).map(t => t.id), ["consultorio"], "só quem ficou sem proposta pronta vai para a IA");
   assert.ok(!improvementAiList(keywords, serp).some(k => k.id === "captar"));
   const forced: ImprovementEditorialPick[] = [{ ...pick("estetica", "atrair"), rank: 0 }, { ...pick("consultorio", "captar"), rank: 0 }];
   const [a, b] = planArticleImprovements({ targets: [consultorio, estetica], keywords, evidence, editorialPicks: forced, ranking: { consultorio: false, estetica: false } });
-  assert.equal(b.evidenceBasis, "serp", "a IA não sobrescreve a SERP");
+  // 2026-10-17 · "estetica" é principal de identidade: fica, e "captar" (par da SERP) entra como secundária — a IA não sobrescreve.
+  assert.equal(b.principalId, "estetica"); assert.deepEqual(b.addIds, ["captar"]);
+  assert.notEqual(b.evidenceBasis, "editorial_ai", "a IA não sobrescreve a SERP");
   assert.ok(!a.addIds.includes("captar"), "a keyword da proposta da SERP não vai para outro alvo");
   // O consultório recebe as de "atrair" pela leitura da lista pelo código (núcleo do slug).
   assert.equal(a.evidenceBasis, "list_core"); assert.deepEqual([...a.addIds].sort(), ["atrair", "atrair-os"]);
@@ -167,7 +178,10 @@ test("pedido único em lote: instrução com exemplos, lista com ids e quem pode
   for (const exemplo of ["como atrair os clientes", "como captar clientes", "tráfego pago como funciona", "clínica de estética facial", "marketing para veterinários", "18.100", "Nunca invente id"]) assert.ok(prompt.system.includes(exemplo), exemplo);
   const user = JSON.parse(prompt.user);
   // Apelidos curtos no pedido (resposta menor, cabe no limite de tempo); o código traduz de volta.
-  assert.deepEqual(user.alvos.map((a: any) => [a.targetId, a.tema, a.podeTrocarPrincipal, a.vagas]), [["A1", consultorio.theme, true, 3], ["A2", estetica.theme, false, 3]]);
+  // 2026-10-17 · as duas principais são de identidade (o slug foi feito delas): nenhuma pode ser trocada pela IA.
+  assert.deepEqual(user.alvos.map((a: any) => [a.targetId, a.tema, a.podeTrocarPrincipal, a.vagas]), [["A1", consultorio.theme, false, 3], ["A2", estetica.theme, false, 3]]);
+  const estranha = pub("consultorio", "consultório odontológico sem agenda", { slug: "como-atrair-clientes-para-consultorio" });
+  assert.equal(JSON.parse(buildImprovementAiPrompt({ targets: [estranha], list: boas, keywords: [own(estranha), ...boas], ranking: { consultorio: false } }).user).alvos[0].podeTrocarPrincipal, true, "fora da identidade, pode");
   assert.deepEqual(user.lista.map((k: any) => [k.keywordId, k.keyword, k.volume]), [["K1", "como atrair clientes", 720], ["K2", "como atrair os clientes", 720], ["K3", "como captar clientes", 390]]);
   assert.deepEqual(prompt.aliases, { targets: { A1: "consultorio", A2: "estetica" }, keywords: { K1: "atrair", K2: "atrair-os", K3: "captar" } });
   assert.ok(!prompt.user.includes("\"atrair-os\""), "os ids reais não vão para a IA");
@@ -271,7 +285,8 @@ test("caso real 2026-09-30: a IA deu 'captar' aos dois; a leitura da lista pelo 
   assert.ok(pa.addIds.every(id => id.startsWith("a")) && pa.addIds.length === 3, `atrair fica com as de atrair: ${pa.addIds}`);
   assert.ok(!pa.addIds.includes("ig"), "ângulo instagram não é o núcleo");
   assert.ok(!pa.addIds.includes("zero"), "sem volume nunca entra");
-  assert.ok(pc.principalId === "c1" || pc.principalId === "c2", "Livre sem volume e sem ranquear: principal com volume da lista");
+  // 2026-10-17 · Principal de identidade (o slug foi feito dela): fica, mesmo Livre e sem volume; as de "captar" reforçam (SUBSTITUÍDO: "principal com volume da lista").
+  assert.equal(pc.principalId, "captar-pg", "principal de identidade: fica");
   assert.ok(!pc.reasons.concat(pa.reasons).some(r => /Risco de canibalização/.test(r)), "par separado pelo verbo não é barrado");
   assert.equal(slugCoreListPicks(atrair, lista).some(p => p.keywordId === "c1"), false, "'captar' não vai para a página de 'atrair'");
 

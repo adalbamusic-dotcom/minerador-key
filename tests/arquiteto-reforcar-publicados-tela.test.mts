@@ -277,10 +277,11 @@ test("a confirmação: por artigo, o que será gravado; no topo a conta, o custo
   };
   const view = reinforcementPreviewView(previa);
   assert.equal(view.ready, 2);
-  // F4 (ajuste declarado 2026-10-14): a keyword nova vai como sugestão ao Minerador; não há caixa de aprovar.
-  assert.equal(view.headline, `2 artigos publicados serão gravados: 1 ArticleDNA novo, 1 versão nova, 1 keyword do Minerador entra, 1 keyword nova vai como sugestão ao Minerador, 1 troca de principal. ${PUBLISHED_REINFORCEMENT_COST_LINE} URL, slug e canonical não mudam.`);
+  // 2026-10-17 · a keyword nova entra no Minerador e no artigo nesta confirmação; a lista por artigo diz volume e fonte.
+  assert.equal(view.headline, `2 artigos publicados serão gravados: 1 ArticleDNA novo, 1 versão nova, 1 keyword do Minerador entra, 1 keyword nova entra no Minerador e no artigo nesta confirmação, 1 troca de principal. ${PUBLISHED_REINFORCEMENT_COST_LINE} URL, slug e canonical não mudam.`);
   assert.deepEqual(view.pages.map(page => page.statusLabel), ["Cria o ArticleDNA (v1)", "Nova versão (v2)", "Nada muda", "Não será gravado"]);
-  assert.equal(view.confirmLabel, "Gravar e reler (2)");
+  assert.deepEqual(view.newKeywordLines, ["“marketing digital para dentistas”: “marketing para dentistas” (210/mês, Google Ads, pela frase)."]);
+  assert.equal(view.confirmLabel, "Gravar e reler (2, com 1 keyword(s) nova(s))");
   assert.match(view.approvalText ?? "", /você aprova estas keywords no Minerador/, "o texto vem do servidor (aqui, a fixture antiga)");
   assert.match(reinforcementPreviewView({ ...previa, pages: [previa.pages[2]] }).headline, /^Nada a gravar/);
 
@@ -299,8 +300,9 @@ test("a confirmação: por artigo, o que será gravado; no topo a conta, o custo
 
 test("erros: o código vira frase curta que diz que nada foi gravado/pago; pedido recusado traz o motivo do servidor", () => {
   assert.match(reinforcementErrorMessage(409, { code: "PREVIEW_CHANGED" }), /confira a prévia nova antes de gravar\. Nada foi gravado\./);
-  // F4 (ajuste declarado 2026-10-14): o código antigo de "aprovar no Minerador" deu lugar à recusa do pedido de aprovar daqui.
-  assert.match(reinforcementErrorMessage(422, { code: "MINERADOR_DECIDES_NEW_KEYWORDS" }), /O Arquiteto não aprova keyword no Minerador.*Nada foi gravado\./);
+  // 2026-10-17 · a keyword nova entra na mesma confirmação: sem o aceite, o servidor diz o que falta (e a frase dele chega à tela).
+  assert.match(reinforcementErrorMessage(422, { code: "HUMAN_APPROVAL_REQUIRED", error: "Há keywords novas: a confirmação precisa dizer que você as aprova no Minerador. Nada foi gravado." }), /aprova no Minerador\. Nada foi gravado\./);
+  assert.match(reinforcementErrorMessage(403, { code: "MINERADOR_PERMISSION_REQUIRED", error: "Para incorporar keyword nova é preciso criar, editar e aprovar no Minerador. Nada foi gravado." }), /criar, editar e aprovar no Minerador/);
   assert.match(reinforcementErrorMessage(422, { code: "REINFORCEMENT_PLAN_ABOVE_CAP" }), /teto de US\$ 1,00\. Nada foi pago\./);
   assert.equal(
     reinforcementErrorMessage(400, { code: "INVALID_REINFORCEMENT_REQUEST", error: "Pedido do Reforçar publicados inválido. Nada foi gravado.", issues: { formErrors: [], fieldErrors: { pages: ["Cada keyword vai para um artigo só nesta confirmação: kw-a."] } } }),
@@ -572,10 +574,12 @@ test("painel e modelo: sem rede, tokens, 14px+, diálogos com foco, keyword na c
   assert.equal((painel.match(/controller\.applyReinforcement\(/g) || []).length, 1, "gravar só no botão da confirmação");
   assert.equal((painel.match(/controller\.runSearchConfirmed\(/g) || []).length, 1, "pagar só no botão da confirmação do custo");
   assert.match(painel, /disabled=\{!podeGravar\}/);
-  // F4 (ajuste declarado 2026-10-14): sem aceite de aprovar no Minerador; a keyword nova só é avisada como sugestão.
+  // 2026-10-17 · o aceite é a própria confirmação: o texto do servidor e a lista das novas por artigo ficam acima do botão; não há caixa à parte.
   assert.match(painel, /const podeGravar = Boolean\(view && view\.ready > 0 && !busy\)/);
-  assert.doesNotMatch(painel, /aprovadoPara|architect-reinforcement-approve/, "não há caixa de aprovar no Minerador");
-  assert.match(painel, /data-testid="architect-reinforcement-suggestions-note"/);
+  assert.doesNotMatch(painel, /aprovadoPara|architect-reinforcement-approve/, "não há caixa de aprovar à parte");
+  assert.match(painel, /data-testid="architect-reinforcement-new-keywords"/);
+  assert.match(painel, /view\.newKeywordLines\.map/);
+  assert.match(gancho, /approveNewKeywords: Boolean\(data\.approvalText\)/, "o aceite vai só quando a prévia mostrou as novas");
   assert.match(painel, /Cancelar \(nada é pago\)/);
   assert.doesNotMatch(`${painel} ${modelo} ${cartoes}`, /conclua a formação|volte aqui/);
 });

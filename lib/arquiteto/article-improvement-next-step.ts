@@ -140,9 +140,18 @@ export function humanizeOperationMessage(message: string): string {
 export const ARTICLES_SOBRAS_ANCHOR = "architect-sobras";
 export const ARTICLES_NEW_ANCHOR = "architect-articles-new";
 
+/**
+ * 2026-10-17 · pedido do dono: o passo pago diz o que faz e quem cobra.
+ * SUBSTITUI o nome "Validar no Google" (que parecia o Google Ads, grátis):
+ * vale "Coletar a SERP no DataForSEO (pago: N consultas, até US$ X)". O
+ * Google Ads aparece sempre como "grátis (cota do Google Ads)".
+ */
+export const IMPROVEMENT_SERP_STEP_NAME = "Coletar a SERP no DataForSEO";
+export const GOOGLE_ADS_FREE_LABEL = "grátis (cota do Google Ads)";
+
 /** `numbered: false` tira o número quando o botão NÃO é o próximo passo. */
 export function improvementValidateLabel(paidQueries: number, costMaxUsd: number, numbered = true): string {
-  return `${numbered ? "2 · " : ""}Validar no Google (${paidQueries} consultas, até US$ ${costMaxUsd.toFixed(2)})`;
+  return `${numbered ? "2 · " : ""}${IMPROVEMENT_SERP_STEP_NAME} (pago: ${paidQueries} consultas, até US$ ${costMaxUsd.toFixed(2)})`;
 }
 
 export function improvementApplyLabel(selectedCount: number, numbered = true): string {
@@ -167,14 +176,14 @@ export function resolveImprovementNextStep(input: ImprovementNextStepInput): Imp
   if (input.busy && input.hasRun && input.state === "collecting") {
     const p = input.collectProgress;
     const andamento = p ? (p.total ? ` ${p.done} de ${p.total} grupos validados.` : ` ${p.done} grupo(s) validado(s).`) : "";
-    return { kind: "working", sentence: `Validando no Google, um grupo por vez.${andamento} Pode levar alguns minutos; não feche a aba.`, button: "Validando…" };
+    return { kind: "working", sentence: `Coletando a SERP no DataForSEO, um grupo por vez.${andamento} Pode levar alguns minutos; não feche a aba.`, button: "Coletando…" };
   }
   if (input.busy && input.hasRun && input.accepted && !done) {
     const p = input.applyProgress;
     return { kind: "working", sentence: `Gravando as melhorias, um artigo por vez.${p ? ` ${p.done} de ${p.total} artigos gravados.` : ""} Não feche a aba.`, button: "Gravando…" };
   }
   if (input.hasRun && input.state === "collecting") {
-    return { kind: "resume_collect", sentence: "A validação parou no meio. O que já foi pago está guardado e não é cobrado de novo.", button: "Continuar" };
+    return { kind: "resume_collect", sentence: "A coleta da SERP no DataForSEO parou no meio. O que já foi pago está guardado e não é cobrado de novo.", button: "Continuar" };
   }
   if (input.hasRun && input.leaseActive) {
     return { kind: "refresh", sentence: "Uma execução está em andamento no servidor. Toque para ver como está.", button: "Ver andamento" };
@@ -183,14 +192,14 @@ export function resolveImprovementNextStep(input: ImprovementNextStepInput): Imp
     return { kind: "resume_apply", sentence: "A gravação das melhorias que você aceitou parou no meio. Ela continua de onde parou.", button: "Continuar" };
   }
   if (!input.hasRun) {
-    return { kind: "prepare", sentence: "Comece aqui: leia o que já temos de cada publicado e Assunto — DNA, volume medido, SERP em cache, Assunto, plano e trava. É grátis: a IA e o Google Ads só rodam depois, com o custo dito e a sua autorização.", button: "1 · Buscar keywords (grátis)" };
+    return { kind: "prepare", sentence: "Comece aqui: leia o que já temos de cada publicado e Assunto — DNA, volume medido, SERP em cache, Assunto, plano e trava. É grátis: a IA e o Google Ads (grátis, cota do Google Ads) só rodam depois, com a sua autorização.", button: "1 · Buscar keywords (grátis)" };
   }
   // F3 · o que custa para ler (IA, medição) vem antes de validar: a proposta muda com o que a leitura traz.
   if (input.paidReading && !input.accepted && input.state === "prepared") {
     return { kind: "read_paid", sentence: input.paidReading.sentence, button: input.paidReading.button };
   }
   if (input.paidQueries - Math.max(0, input.optionalPaidQueries ?? 0) > 0 && !input.accepted) {
-    return { kind: "validate", sentence: "Confira no Google as keywords com volume antes de gravar. Você vê o custo antes.", button: improvementValidateLabel(input.paidQueries, input.costMaxUsd) };
+    return { kind: "validate", sentence: "Falta a primeira SERP da principal: colete no DataForSEO antes de gravar. É pago; você vê as consultas e o valor máximo antes.", button: improvementValidateLabel(input.paidQueries, input.costMaxUsd) };
   }
   if (input.selectedCount > 0 && !done) {
     return { kind: "apply", sentence: `${input.selectedCount} melhoria(s) pronta(s). Confira na tabela abaixo e grave.`, button: improvementApplyLabel(input.selectedCount) };

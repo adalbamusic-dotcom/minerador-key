@@ -51,6 +51,7 @@ import { SERP_SUBJECT_THRESHOLDS, type SerpSubjectIndex, type SerpSubjectOverlap
 import { logicDnaDivergence, logicWarningText, measureAnchorConvergence, serpAwareDnaBarrier } from "./serp-subject-convergence.ts";
 import { SERP_SUGGESTION_LEVEL_LABELS, type SerpSuggestionLevel } from "./serp-subject-suggestions.ts";
 import { classifySlugFit, slugTextOf, type SlugFit } from "./published-slug-fit.ts";
+import { principalIsIdentity } from "./article-improvement.ts";
 
 /* -------------------------------- o posto -------------------------------- */
 
@@ -179,6 +180,12 @@ export function proposePublishedPrimarySwap(input: {
    * humana), ou `null`. Quem já mora em outro artigo não vira principal deste.
    */
   elsewhere?: (keywordId: string) => string | null;
+  /**
+   * Aditivo (2026-10-17): o texto da principal ATUAL do ArticleDNA, quando ela
+   * já não é a keyword da página (uma troca confirmada antes). A régua da
+   * principal de identidade lê a atual; ausente, a da página.
+   */
+  currentPrincipalKeyword?: string | null;
 }): PublishedPrimarySwapProposal {
   const { published } = input;
   const slugPublicado = slugTextOf(input.identity);
@@ -212,6 +219,21 @@ export function proposePublishedPrimarySwap(input: {
     return {
       ...base, state: "unknown_post", substitute: null, alternatives: [], rejected: [], candidates: candidatesBase, decision: null,
       note: `O Posto de "${published.keyword}" não está declarado. O Minerador mostra "Travado ao slug" por padrão em página publicada, mas padrão não é decisão: nada é proposto nem bloqueado até você declarar, na Revisão Humana do Minerador, "Travado ao slug" (só reforço) ou "Livre" (a principal está ali para ser trocada).`,
+    };
+  }
+  /*
+   * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono: "Se o termo principal tem pouco
+   * volume, mas faz sentido preservá-lo por ser a identidade do assunto/tema,
+   * principalmente nos publicados"). O slug publicado foi feito desta keyword
+   * (`principalIsIdentity`, a mesma régua da melhoria): mesmo com Posto Livre e
+   * pouco volume, ela fica; as buscas mais amplas entram como reforço. Nada é
+   * proposto (o estado é o de "só reforço").
+   */
+  const principalAtual = input.currentPrincipalKeyword?.trim() || published.keyword;
+  if (principalIsIdentity({ keyword: principalAtual, slug: slugPublicado })) {
+    return {
+      ...base, state: "locked", substitute: null, alternatives: [], rejected: [], candidates: candidatesBase, decision: null,
+      note: `Principal de identidade: o slug publicado foi feito de "${principalAtual}", então ela fica como principal mesmo com Posto Livre e pouco volume. As buscas mais amplas entram como reforço.`,
     };
   }
 

@@ -564,7 +564,8 @@ test("A8 · keyword do acervo usa os códigos do Minerador, lidos da marca ativa
   process.env.DATAFORSEO_LANGUAGE_CODE = "pt-br";
   try {
     banco.linhas("minerador_keywords").push(
-      { id: KW_1, lock_version: 1, brand_id: MARCA, deleted_at: null, analise_semantica: { allintitle_measurement: { targeting: { languageCode: "pt", sourceGeoTargetConstants: ["geoTargetConstants/2076"] } } } },
+      // 2026-10-17 · com o volume no banco: a principal SEM volume que não é a de identidade não entraria no plano pago (régua única).
+      { id: KW_1, lock_version: 1, brand_id: MARCA, deleted_at: null, volume_search: 880, volume_source: "google_ads", analise_semantica: { allintitle_measurement: { targeting: { languageCode: "pt", sourceGeoTargetConstants: ["geoTargetConstants/2076"] } } } },
       { id: KW_2, lock_version: 1, brand_id: "marca-b", deleted_at: null, analise_semantica: { allintitle_measurement: { targeting: { languageCode: "pt" } } } },
     );
     await semear("skincare facial", KW_1, 0);
@@ -1080,14 +1081,63 @@ test("D2(a) · nenhuma sustentação com as 4 lentes no cache: nada de parecer, 
   assert.deepEqual(usos, []);
 });
 
-test("D2(b) continua opcional: o plano pago ainda conta as 4 lentes da principal declarada", async () => {
+/*
+ * 2026-10-17 · A RÉGUA ÚNICA DA COLETA (dono: "implementa a sua recomendação"):
+ * sem volume, só a principal de IDENTIDADE do artigo tem a SERP paga — e o
+ * servidor confere isso no banco (pacote aprovado do Arquiteto: o plano, o
+ * título do Assunto e a marca de principal declarada), nunca pelo pedido. A
+ * principal sem volume que não é a identidade fica fora do plano pago e da
+ * coleta, com o motivo. SUBSTITUI "a Principal continua sempre consultada" (Q2).
+ */
+const ASSUNTO_DECLARADO = MARCA_DECLARADA.subjectKeywordId;
+const semearPacotes = (plano: { titulo: string; slug: string }) => {
+  const item = (subjectId: string, keyword: string, analiseSemantica: Record<string, unknown>) => ({
+    id: `wf-${subjectId}`, lock_version: 1, marca_id: MARCA, subject_type: "keyword", subject_id: subjectId, stage: "architect", state: "received",
+    payload: { approvedDna: { keywordId: subjectId, brandId: MARCA, keyword, version: 1, contentHash: `pkg-${subjectId}`, approvedAt: "2026-10-16T10:00:00+00:00", analiseSemantica } },
+  });
+  banco.linhas("editorial_workflow_items").push(
+    item(KW_DECLARADA, "claro vivo ou tim internet", { keyword_declared_principal: MARCA_DECLARADA }),
+    item(ASSUNTO_DECLARADO, "operadoras para casa", { keyword_subject: { declared: true, note: null, destinationUrl: null, destinationCheck: null,
+      entry: { title: plano.titulo, source: "cadastro" },
+      plan: { groupId: MARCA_DECLARADA.groupId, planVersion: 1, order: 3, role: "Suporte", scope: "Comparar operadoras por endereço", declaredPrincipal: { keywordId: KW_DECLARADA, phrase: "claro vivo ou tim internet" }, lock: "free", slug: plano.slug } } }),
+  );
+};
+
+test("régua única · a principal declarada SEM volume que é a IDENTIDADE (no título e no slug do plano): o plano pago conta as 4 lentes dela, conferida no banco", async () => {
   recomecar();
   await semearSustentacoes();
+  semearPacotes({ titulo: "Claro, Vivo ou TIM internet: como comparar onde você mora", slug: "claro-vivo-tim-internet" });
   const { status, corpo } = await chamar({ mode: "plan", groups: [grupoDeclarado()], formationBaseHashes: { "artigo-declarado": "base-1" } });
-  assert.equal(status, 200);
-  assert.equal(corpo.data.plan.paidQueries, 4, "só as 4 lentes da principal declarada; as sustentações estão no cache");
+  assert.equal(status, 200, JSON.stringify(corpo).slice(0, 600));
+  assert.equal(corpo.data.plan.paidQueries, 4, "só as 4 lentes da principal de identidade; as sustentações estão no cache");
   assert.ok(corpo.data.plan.missingDetails.every((item: { keyword: string }) => item.keyword === "claro vivo ou tim internet"));
+  assert.equal(corpo.data.refusedPrincipals, undefined);
+  const doPacote = banco.consultas.filter(consulta => consulta.tabela === "editorial_workflow_items" && consulta.colunas.includes("payload->approvedDna"));
+  assert.ok(doPacote.length > 0, "o servidor leu o pacote aprovado");
+  assert.ok(doPacote.every(consulta => !/(^|,)payload(,|$)/.test(consulta.colunas)), "nunca o pacote inteiro");
   assert.deepEqual(pedidosAoProvider, []);
+});
+
+test("régua única · servidor: a principal SEM volume que NÃO é a identidade (fora do título e do slug), ou sem pacote no Arquiteto, continua recusada — fora do plano pago e da coleta, com o motivo; nada é pago mesmo autorizado", async () => {
+  for (const caso of ["fora da identidade", "sem pacote"] as const) {
+    recomecar();
+    await semearSustentacoes();
+    if (caso === "fora da identidade") semearPacotes({ titulo: "Operadoras de internet: qual escolher", slug: "operadoras-de-internet" });
+    const plano = await chamar({ mode: "plan", groups: [grupoDeclarado()], formationBaseHashes: { "artigo-declarado": "base-1" } });
+    assert.equal(plano.status, 200, JSON.stringify(plano.corpo).slice(0, 600));
+    assert.equal(plano.corpo.data.plan.paidQueries, 0, `${caso}: a principal sem volume não entra no plano pago`);
+    assert.equal(plano.corpo.data.refusedPrincipals.length, 1);
+    assert.equal(plano.corpo.data.refusedPrincipals[0].keywordId, KW_DECLARADA);
+    assert.match(plano.corpo.data.refusedPrincipals[0].reason, caso === "fora da identidade"
+      ? /^Sem volume no Google Ads e é a principal, mas não está no título do Assunto nem no slug declarado ou publicado \(não é a identidade do artigo\): a SERP não é coletada\. Sem volume, só a SERP da principal de identidade do artigo é coletada/
+      : /^Sem volume no Google Ads e não chegou ao Arquiteto com o pacote aprovado: a SERP não é coletada/);
+    // Mesmo com autorização (o pedido não manda), a execução não paga a principal recusada.
+    const executado = await chamar({ mode: "execute", groups: [grupoDeclarado()], formationBaseHashes: { "artigo-declarado": "base-1" }, authorizedPaidQueries: 4 });
+    assert.equal(executado.status, 200, JSON.stringify(executado.corpo).slice(0, 600));
+    assert.deepEqual(pedidosAoProvider, [], `${caso}: nada pago`);
+    assert.deepEqual(usos, []);
+    assert.match(JSON.stringify(executado.corpo.data.failures), /Sem volume no Google Ads e/);
+  }
 });
 
 /* ============ F3 · ler antes de buscar: o SERVIDOR decide o volume (SDD 2026-10-13, item 3, regra 6) ============ */
@@ -1140,5 +1190,30 @@ test("F3 · coleta do lote: com onlyMeasuredVolume, a keyword sem volume no banc
   const nenhuma = await chamarLote([{ keywordId: KW_2, keyword: "rotina skincare facial" }], { mode: "execute", authorizedPaidQueries: 4, onlyMeasuredVolume: true });
   assert.equal(nenhuma.status, 409);
   assert.equal(nenhuma.corpo.code, "KEYWORD_SERP_NO_VOLUME");
+  assert.deepEqual(pedidosAoProvider, [], "nada pago");
+});
+
+test("régua única · coleta por keyword (Validar SERP e Processar artigos): sem volume, só a principal de identidade do artigo entra no plano, conferida no banco e com o propósito dito; a sem volume que não é continua recusada", async () => {
+  recomecar();
+  const doisDiasAtras = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  banco.linhas("minerador_keywords").push(
+    { id: KW_1, lock_version: 1, brand_id: MARCA, deleted_at: null, keyword: "skincare facial", status: "aprovado", volume_search: 880, volume_source: "google_ads", analise_semantica: {} },
+    // Medida no Google Ads sem número de buscas (há 2 dias): é a principal de identidade da linha do plano.
+    { id: KW_DECLARADA, lock_version: 1, brand_id: MARCA, deleted_at: null, keyword: "claro vivo ou tim internet", status: "aprovado", volume_search: null, volume_source: null, analise_semantica: { volume_eligibility: { status: "unavailable", provider: "google_ads", measuredAt: doisDiasAtras, averageMonthlySearches: null } } },
+    { id: KW_2, lock_version: 1, brand_id: MARCA, deleted_at: null, keyword: "rotina skincare facial", status: "aprovado", volume_search: null, volume_source: null, analise_semantica: {} },
+  );
+  semearPacotes({ titulo: "Claro, Vivo ou TIM internet: como comparar onde você mora", slug: "claro-vivo-tim-internet" });
+  const tres = [{ keywordId: KW_1, keyword: "skincare facial" }, { keywordId: KW_DECLARADA, keyword: "claro vivo ou tim internet" }, { keywordId: KW_2, keyword: "rotina skincare facial" }];
+  const plano = await chamarLote(tres, { mode: "plan", onlyMeasuredVolume: true });
+  assert.equal(plano.status, 200, JSON.stringify(plano.corpo).slice(0, 600));
+  assert.equal(plano.corpo.data.plan.paidQueries, 8, "2 keywords × 4 lentes: a com volume e a principal de identidade");
+  assert.deepEqual(plano.corpo.data.identityPrincipals, [{ keywordId: KW_DECLARADA, keyword: "claro vivo ou tim internet",
+    reason: "SERP da principal de identidade “claro vivo ou tim internet” (sem buscas no Google Ads): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo." }]);
+  assert.deepEqual(plano.corpo.data.excludedByVolume.map((item: { keywordId: string }) => item.keywordId), [KW_2]);
+  assert.match(plano.corpo.data.excludedByVolume[0].reason, /^Sem volume no Google Ads e não chegou ao Arquiteto com o pacote aprovado: a SERP não é coletada\. Sem volume, só a SERP da principal de identidade do artigo é coletada \(dono, 17\/10\)\. \(O servidor conferiu\.\)$/);
+  // A sem volume que não é a principal de identidade, sozinha: nada é planejado nem pago, mesmo autorizado.
+  const sozinha = await chamarLote([{ keywordId: KW_2, keyword: "rotina skincare facial" }], { mode: "execute", authorizedPaidQueries: 4, onlyMeasuredVolume: true });
+  assert.equal(sozinha.status, 409);
+  assert.equal(sozinha.corpo.code, "KEYWORD_SERP_NO_VOLUME");
   assert.deepEqual(pedidosAoProvider, [], "nada pago");
 });

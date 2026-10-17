@@ -87,7 +87,7 @@ test("catálogo local do Arquiteto explica todos os processos e botões para que
   const summaries = [...arquitetoContent.matchAll(/summary: "([^"]*)"/g)].map(match => match[1]);
   assert.equal(summaries.length, topicIds.length, "cada tópico deve ter um resumo");
   assert.ok(summaries.every(summary => summary.length <= 240), "resumos devem permanecer curtos");
-  for (const botao of ["1 · Buscar keywords (grátis)", "2 · Validar no Google", "3 · Gravar melhorias", "Buscar de novo", "Continuar", "Manter no artigo", "Aplicar recomendação", "Desfazer Silo", "Restaurar", "Criar artigo novo com este grupo", "Processar artigos", "Medir allintitle (pago)"]) {
+  for (const botao of ["1 · Buscar keywords (grátis)", "2 · Coletar a SERP no DataForSEO", "3 · Gravar melhorias", "Buscar de novo", "Continuar", "Manter no artigo", "Aplicar recomendação", "Desfazer Silo", "Restaurar", "Criar artigo novo com este grupo", "Processar artigos", "Medir allintitle (pago)"]) {
     assert.ok(arquitetoContent.includes(botao), `botão sem explicação: ${botao}`);
   }
   assert.doesNotMatch(arquitetoContent, /fetch\(|supabase|OpenAI|DeepSeek|requestId|raw payload/i);

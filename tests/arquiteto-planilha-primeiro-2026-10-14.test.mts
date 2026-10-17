@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   PLAN_SHEET_LOCKED_SEAL, applyPlanSheetSerp, buildPlanSheetRows, planPrincipalSwapCandidates, planSheetColorLabel,
-  planSheetFormationSelection, planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpSelection,
+  planSheetFormationSelection, planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpPlanLine, planSheetSerpSelection,
   type PlanSheetArticle,
 } from "../lib/arquiteto/plan-article-sheet.ts";
 import { planArticleImprovements, type ImprovementKeyword, type ImprovementTarget } from "../lib/arquiteto/article-improvement.ts";
@@ -104,15 +104,32 @@ test("SERP: a leitura do cache (grátis) dá as lentes por linha; vencida conta 
   assert.equal(applyPlanSheetSerp(linhas(), { state: "loading", byKeyword: new Map() })[0].serp.label, "Lendo o cache…");
 });
 
-test("Validar SERP: já temos (sem custo), falta (vai ao plano de custo) e recusa por item (sem volume)", () => {
+test("Validar SERP: já temos (sem custo), falta (vai ao plano de custo) e recusa por item (sem volume que não é a principal de identidade)", () => {
   const lido = new Map([["k9", { lenses: 4, collectedAt: "2026-10-01T00:00:00Z" }], ["k11", { lenses: 2, collectedAt: null }]]);
   const rows = applyPlanSheetSerp(linhas(), { state: "ready", byKeyword: lido });
   const escolha = planSheetSerpSelection(rows);
   assert.deepEqual(escolha.known.map(item => item.keywordId), ["k9"]);
   assert.match(escolha.known[0].reason, /Já temos as 4 lentes/);
-  assert.deepEqual(escolha.refused.map(item => item.keywordId), ["k10"], "a livre sem volume não é coletada");
-  assert.match(escolha.refused[0].reason, /Sem volume medido no Minerador/);
-  assert.deepEqual(escolha.toPlan.map(row => row.keywordId), ["k11", "k12", "k13", "k14", "k15"]);
+  /*
+   * 2026-10-17 · A RÉGUA ÚNICA DA COLETA (dono: "implementa a sua recomendação"):
+   * "diferença entre internet e wi-fi" (Livre, sem volume) está no título do
+   * Assunto — é a principal de IDENTIDADE e tem a SERP coletada, com o propósito
+   * e o custo ditos. SUBSTITUI "a livre sem volume não é coletada".
+   */
+  assert.deepEqual(escolha.refused, [], "a principal de identidade sem volume não é recusada");
+  assert.deepEqual(escolha.toPlan.map(row => row.keywordId), ["k10", "k11", "k12", "k13", "k14", "k15"]);
+  const k10 = escolha.toPlan.find(row => row.keywordId === "k10")!;
+  assert.equal(k10.identityPrincipal, true);
+  assert.equal(planSheetSerpPlanLine(k10), "SERP da principal de identidade “diferença entre internet e wi-fi” (sem volume medido): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo.");
+  assert.equal(planSheetSerpPlanLine(escolha.toPlan.find(row => row.keywordId === "k11")!), "Falta 2 lente(s): coleta nas 4 lentes (cache primeiro).");
+  // Fora da identidade (a frase não está no título do Assunto nem no slug do plano): continua recusada.
+  const mesa = mesaWifi().map(row => row.id === "k10" ? linha("k10", "diferença entre internet e wi-fi", cadastro("k10", "diferença entre internet e wi-fi", "Wi-Fi em casa: o que muda na sua rede", 10, "Suporte")) : row);
+  const fora = planSheetSerpSelection(applyPlanSheetSerp(linhas({ keywords: mesa }), { state: "ready", byKeyword: lido }));
+  assert.deepEqual(fora.refused.map(item => item.keywordId), ["k10"], "a sem volume fora da identidade não é coletada");
+  assert.match(fora.refused[0].reason, /^Sem volume medido no Minerador: a SERP não é coletada para keyword sem volume que não é a principal de identidade do artigo/);
+  // A mesma linha num artigo formado em que ela NÃO é a principal (a âncora do Assunto depois de uma troca): fora.
+  const trocada = planSheetSerpSelection(applyPlanSheetSerp(linhas({ articles: [{ articleId: "art-10", versionNumber: 2, subjectKeywordId: "k10", principalKeywordId: "s2", keywordIds: ["s2", "s1"] }] }), { state: "ready", byKeyword: lido }));
+  assert.deepEqual(trocada.refused.map(item => item.keywordId), ["k10"], "a do Assunto que deixou de ser a principal não é a principal de identidade");
 });
 
 test("Trocar principal: só a livre; candidatas = sustentações com volume da lista do Assunto, por lentes e volume; travada recusa com o selo", () => {
@@ -215,7 +232,10 @@ test("estrutural · a planilha só chama a melhoria, a SERP por keyword e a leit
   // 2026-10-16 · restauração do fluxo de sempre: sem "Consolidar o Silo do plano" nem "Linha editorial", as rotas são as de 99ec14f.
   assert.deepEqual([...new Set(rotas)], ["/api/arquiteto/article-improvement", "/api/arquiteto/keyword-serp", "/api/arquiteto/serp-subject"]);
   assert.doesNotMatch(tela, /\/api\/minerador/);
-  assert.doesNotMatch(tela, /measureKeywordVolume|runKeywordLogicWithCore|importSubjectDiscoveryWithCore|applyKeywordDecisionEntries|approveNewKeywords|keywords\/delete/);
+  assert.doesNotMatch(tela, /measureKeywordVolume|runKeywordLogicWithCore|importSubjectDiscoveryWithCore|applyKeywordDecisionEntries|keywords\/delete/);
+  // 2026-10-17 (decisão do dono de 16/10; SUBSTITUI "nunca approveNewKeywords" aqui): o aceite das keywords NOVAS vai só quando a prévia as listou — o servidor incorpora pelos núcleos do Minerador; a tela não fala com o Minerador.
+  assert.match(tela, /const comNovas = improvementNewKeywordsPreview\(item\.run, item\.readyIds\)\.total > 0;/);
+  assert.match(tela, /\.\.\.\(approveNewKeywords \? \{ approveNewKeywords: true \} : \{\}\)/);
   assert.match(tela, /onlyMeasuredVolume: true/, "o servidor confere o volume no banco antes de pagar");
   assert.match(tela, /origin: "plan_sheet"/);
   assert.match(tela, /runPaidSerpBlocks/, "o mesmo executor de blocos pagos da mesa (plano somado, uma confirmação)");

@@ -63,9 +63,11 @@ test("5 · a leitura do plano: o grupo do plano 'segue o plano do Silo “Wi-Fi 
   assert.deepEqual(vista.clusters.map(item => item.destination), ANALISE.clusters.map(item => item.destination), "o destino não muda (a proposta e a confirmação não leem a leitura)");
   const candidatos = new Set<string>();
   assert.deepEqual(buildArchitectureConfirmationPlan({ analysis: vista, readiness: new Map(), candidateTerritoryRefs: candidatos }), buildArchitectureConfirmationPlan({ analysis: ANALISE, readiness: new Map(), candidateTerritoryRefs: candidatos }));
-  // Grupo misto (plano + solta) ou de dois planos: a análise de sempre.
-  const misto = withDeclaredPlanReading({ ...ANALISE, clusters: [{ ...cluster("k9", "internet fibra óptica"), memberKeywordIds: ["k9", "solta"] }] }, planOf);
-  assert.equal(misto.clusters[0].declaredPlan, undefined);
+  // 2026-10-16 (noite) · SUBSTITUÍDO: "grupo misto (plano + solta) ou de dois planos: a análise de sempre". Agora cada artigo do plano é a sua leitura;
+  // só a solta continua com a análise de sempre (ver o cenário-ouro C17 do amarelo).
+  const misto = withDeclaredPlanReading({ ...ANALISE, clusters: [{ ...cluster("k9", "internet fibra óptica"), memberKeywordIds: ["k9", "solta"] }] }, planOf, id => id === "solta" ? "como melhorar o wifi de casa" : "internet fibra óptica");
+  assert.deepEqual(misto.clusters.map(item => [item.memberKeywordIds, item.declaredPlan?.siloName ?? null]), [[["k9"], "Wi-Fi e fibra óptica"], [["solta"], null]]);
+  assert.equal(misto.clusters[1].label, "como melhorar o wifi de casa", "a sobra sem plano leva o nome da própria cabeça");
   // O mapa: o centro do grupo do plano diz o plano.
   const mapa = buildArchitectureFlowProjection({ analysis: vista, keywordTexts: new Map(AZUL_REAL.map(([id, keyword]) => [id, keyword])), territoryLabels: new Map(), publishedTerritoryRefs: new Set() });
   assert.equal(mapa.nodes.find(node => node.id === "cluster:cluster:k9")?.meta, "Segue o plano do Silo “Wi-Fi e fibra óptica”");

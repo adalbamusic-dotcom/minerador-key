@@ -53,6 +53,15 @@ test("D2(a) · só se aplica à principal declarada, sem volume e sem SERP; usa 
   assert.equal(selectDeclaredPrincipalSupports({ ...base, candidates: candidatos.filter(item => item.keywordId === "s3" || item.keywordId === "s4") }), null, "sem sustentação em cache: nada");
 });
 
+test("2026-10-17 · D2(a) também para a principal de identidade da página publicada (a keyword da própria página, sem volume e sem SERP): o parecer vem das sustentações e diz isso", () => {
+  const candidatos = [{ keywordId: "s1", keyword: "planos de internet residencial", volume: 6600, lensesCached: true }];
+  const pagina = { principalKeywordId: "pub", principalDeclared: false, principalIsPublishedPage: true, principalHasVolume: false, principalCached: false, candidates: candidatos };
+  assert.deepEqual(selectDeclaredPrincipalSupports(pagina), { principalKeywordId: "pub", anchorKeywordId: "s1", supportKeywordIds: ["s1"], publishedPage: true });
+  assert.equal(selectDeclaredPrincipalSupports({ ...pagina, principalIsPublishedPage: false }), null, "nem declarada nem a página: regra de sempre");
+  assert.equal(selectDeclaredPrincipalSupports({ ...pagina, principalCached: true }), null, "com a SERP da página no cache vale a SERP dela");
+  assert.match(declaredPrincipalSupportBasisReason("como escolher plano de internet residencial", ["planos de internet residencial"], true), /a principal de identidade da página “como escolher plano de internet residencial” não tem volume nem SERP no cache \(D2a\)/);
+});
+
 test("D2(a) · o parecer fala da principal declarada: nunca 'alternativa melhor', a declarada fica não observada com o motivo, e o veredito é o do grupo", () => {
   const lentes = ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"];
   const s1 = fatos("s1", ["a.com/1", "b.com/2", "c.com/3", "d.com/4"]);

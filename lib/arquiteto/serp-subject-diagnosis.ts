@@ -580,7 +580,14 @@ export function diagnoseSerpSubjectAnchors(input: {
       state = "swap_proposed";
       headline = `Troca proposta${swap.substitute.level === "probable" ? " (Provável)" : ""}: "${swap.substitute.keyword}" (volume ${swap.substitute.volume}, ${swap.substitute.sharedPageCount} páginas em comum no top 10) assume a principal; "${nome(params.anchorKeywordId)}" vira secundária. URL, slug e canonical não mudam.`;
       actions.push({ kind: "decide_swap", label: "Decidir a troca" });
-    } else if (apoios > 0 || (params.kind === "subject" && !semArtigoDeAssunto)) {
+    } else if (apoios > 0) {
+      /*
+       * 2026-10-16 · teste do dono (amarelo): o Assunto com a própria keyword
+       * como único membro saía "Reforçado" / "Assunto sustentado com 0
+       * keywords". Sustentado é ter APOIO além da âncora; sem apoio ele segue
+       * para os estados que dizem o que falta (sugestões, par em outro lugar,
+       * "aguardando sustentação" com "Buscar reforço").
+       */
       state = "reinforced";
       const base = params.kind === "published"
         ? `Reforçado com ${plural(apoios, "keyword", "keywords")}`
@@ -648,7 +655,8 @@ export function diagnoseSerpSubjectAnchors(input: {
       state = "suggestions_available";
       headline = sugestoesFrase();
       actions.push({ kind: "apply_suggestions", label: "Aplicar selecionadas" });
-    } else if (serpEvidence === "missing") {
+    } else if (serpEvidence === "missing" && !(params.kind === "subject" && !input.volumeValidated.has(params.anchorKeywordId))) {
+      // Assunto cuja keyword não tem volume: a SERP não é coletada para keyword sem volume — o caminho é a busca de reforço.
       state = "serp_missing";
       const alvo = nome(params.anchorKeywordId);
       if (serpGap?.kind === "stale") {

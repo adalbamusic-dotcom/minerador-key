@@ -21,8 +21,10 @@ import { readArchitectSubjectStanding, readArchitectSubjectStandings, suggestSub
 import { declaredPlanSubjectList } from "./declared-plan-formation.ts";
 import { readKnownVolume, type KnownVolume } from "../editorial/known-before-search.ts";
 import { EDITORIAL_GROUP_COLORS, EDITORIAL_GROUP_COLOR_LABELS, editorialGroupFilterMatches, isEditorialGroupColor, type EditorialGroupColor, type EditorialGroupScreenFilter } from "../editorial/editorial-groups.ts";
+import { articleKeywordIndex, inheritArticleGroup } from "../editorial/article-groups.ts";
 import type { ImprovementProposal } from "./article-improvement.ts";
 import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "./silo-article-withdrawal.ts";
+import { identityPrincipalSerpSentence, serpCollectionAllowed, serpIdentityPrincipalCheck, serpIdentityRowOf, type SerpIdentityArticle } from "./article-batch-serp.ts";
 
 type RecordLike = Record<string, unknown>;
 
@@ -42,6 +44,20 @@ export type PlanSheetAction = keyof typeof PLAN_SHEET_ACTION_LABELS;
  */
 export const PLAN_SHEET_LOCKED_SEAL = "Travada";
 export const PLAN_SHEET_LENSES = 4;
+
+/*
+ * 2026-10-16 (noite) · teste do dono na WifiConecta (amarelo): as 4 Livres
+ * MEDIDAS no Google Ads sem média oficial ouviam "meça no Minerador (Volume)" —
+ * falso, o volume já foi medido. A régua é a de sempre (`readPlanRowVolume`:
+ * `measured` · `no_average` · `missing`); a frase muda com ela. E em linguagem
+ * simples (pedido do dono): "sem média" = "sem número de buscas".
+ */
+/** O Google Ads respondeu sem número de buscas (a "sem média" de antes), numa frase. */
+export const PLAN_NO_SEARCHES_SENTENCE = "O Google Ads não tem número de buscas para esta keyword (zero ou poucas buscas)";
+/** O mesmo, curto (o rótulo do volume e do alerta da linha). */
+export const PLAN_NO_SEARCHES_SHORT = "Google Ads sem número de buscas (zero ou poucas)";
+/** O caminho grátis das sustentações com volume, no Minerador (o botão de sempre do perfil da keyword). */
+export const PLAN_SUPPORT_SEARCH_PATH = "Minerador → perfil da keyword → “Buscar sustentação”, grátis";
 
 /* ----------------------------------------------------------------- tipos */
 
@@ -107,6 +123,12 @@ export type PlanSheetRow = {
    * dali é "Retirar artigo do Silo" nesse artigo, decisão do dono. Sem conflito, `null`.
    */
   conflict: PlanSheetConflict | null;
+  /**
+   * 2026-10-17 · a keyword da linha é a principal de identidade do artigo (a
+   * régua de T12 lida dos dados, `serpIdentityPrincipalCheck`): sem volume, só
+   * ela tem a SERP coletada no "Validar SERP". Aditivo; ausente = não é.
+   */
+  identityPrincipal?: boolean;
 };
 
 /** O artigo já formado, na forma mínima que a planilha precisa (da mesa, versão vigente). */
@@ -186,7 +208,9 @@ function lockView(standing: ArchitectSubjectStanding, volume?: PlanSheetVolumeVi
   }
   const why = lock.origin === "manual"
     ? "Livre por escolha no Minerador: você pode trocar a principal por uma sustentação com volume (decisão humana, nova versão)."
-    : "Sem volume medido: a principal está livre e pode ser trocada por uma sustentação com volume da lista do Assunto (decisão humana, nova versão).";
+    : planRowHasNoSearches(volume)
+      ? `${PLAN_NO_SEARCHES_SENTENCE}: a principal está livre e pode ser trocada por uma sustentação com volume da lista do Assunto (decisão humana, nova versão).`
+      : "Sem volume medido: a principal está livre e pode ser trocada por uma sustentação com volume da lista do Assunto (decisão humana, nova versão).";
   return { state: "free", label: lock.label, why };
 }
 
@@ -214,7 +238,8 @@ export function readPlanRowVolume(row: RecordLike, now: Date): PlanSheetVolumeVi
     return { state: "measured", value, measuredAt, origin, label: `${number(value)}${data ? ` · medido em ${data}` : ""} · ${PLAN_VOLUME_ORIGIN_LABELS[origin]}` };
   };
   if (known.state === "measured") return medido(known.volume, known.measuredAt, origemDaMedicao);
-  if (known.state === "no_average") return { state: "no_average", value: null, measuredAt: known.measuredAt, origin: null, label: `Sem média no Google Ads (${dateLabel(known.measuredAt) ?? "recente"})` };
+  // 2026-10-16 (noite) · pedido do dono: linguagem simples — "sem média" virou "sem número de buscas".
+  if (known.state === "no_average") return { state: "no_average", value: null, measuredAt: known.measuredAt, origin: null, label: `${PLAN_NO_SEARCHES_SHORT} (medido em ${dateLabel(known.measuredAt) ?? "data recente"})` };
   // A linha que veio do ArticleDNA: a evidência do Google Ads da referência (a mesma medição do Minerador).
   const ads = objeto(objeto(row.demandEvidence)?.googleAds);
   const media = typeof ads?.averageMonthlySearches === "number" && Number.isFinite(ads.averageMonthlySearches) && ads.averageMonthlySearches >= 0 ? ads.averageMonthlySearches : null;
@@ -230,6 +255,40 @@ function volumeView(row: RecordLike, now: Date): PlanSheetVolumeView {
 /** A trava efetiva da linha do plano pela regra do dono (volume definido primeiro, depois a trava). */
 export function planSheetLockOf(standing: ArchitectSubjectStanding, volume: PlanSheetVolumeView): PlanSheetLockView {
   return lockView(standing, volume);
+}
+
+/**
+ * A keyword foi MEDIDA e o Google Ads não tem número de buscas para ela (a
+ * resposta "sem média" de menos de 30 dias, ou a medição que deu zero). A
+ * mesma régua de `readPlanRowVolume` — nenhuma outra.
+ */
+export function planRowHasNoSearches(volume: Pick<PlanSheetVolumeView, "state" | "value"> | null | undefined): boolean {
+  if (!volume) return false;
+  return volume.state === "no_average" || (volume.state === "measured" && !((volume.value ?? 0) > 0));
+}
+
+/** O caminho de quem foi medida sem número de buscas, pela trava: Livre troca ou busca sustentação; Travada só busca sustentação. */
+function planNoSearchesPath(lockState: PlanSheetLockView["state"] | null | undefined): string {
+  if (lockState === "free") return `Como ela é Livre, use “${PLAN_SHEET_ACTION_LABELS.swapPrincipal}” ou traga sustentações com volume (${PLAN_SUPPORT_SEARCH_PATH}).`;
+  if (lockState === "locked") return `Como ela é Travada, a principal fica: traga sustentações com volume (${PLAN_SUPPORT_SEARCH_PATH}).`;
+  return `Traga sustentações com volume (${PLAN_SUPPORT_SEARCH_PATH}).`;
+}
+
+/**
+ * A FRASE DA LINHA SEM VOLUME, pelo estado do volume e pela trava (2026-10-16, noite):
+ *  (a) nunca medida → "meça no Minerador (Volume)" (como antes);
+ *  (b) medida sem número de buscas e Livre → "Procurar outra principal" ou
+ *      sustentações pelo "Buscar sustentação" do Minerador (grátis);
+ *  (c) medida sem número de buscas e Travada → só as sustentações.
+ * `null` quando a linha tem volume. Uma frase só para a prévia do Concluir,
+ * o Validar SERP e o alerta da linha.
+ */
+export function planRowWithoutVolumeSentence(row: { volume: Pick<PlanSheetVolumeView, "state" | "value">; lock?: Pick<PlanSheetLockView, "state"> | null; supports?: Pick<PlanSheetRow["supports"], "withVolume"> | null }): string | null {
+  if (row.volume.state === "measured" && (row.volume.value ?? 0) > 0) return null;
+  if (planRowHasNoSearches(row.volume)) return `${PLAN_NO_SEARCHES_SENTENCE}. ${planNoSearchesPath(row.lock?.state)}`;
+  return row.lock?.state === "free" && (row.supports?.withVolume ?? 0) > 0
+    ? `A keyword do Assunto não tem volume medido: com a trava Livre, use “${PLAN_SHEET_ACTION_LABELS.swapPrincipal}” para uma sustentação com volume, ou “${PLAN_SHEET_ACTION_LABELS.validateSerp}” nas sustentações antes.`
+    : "A keyword do Assunto não tem volume medido e nenhuma sustentação com volume e SERP no cache sustenta o artigo: meça no Minerador (Volume) ou traga sustentações pela Pesquisa por Assunto.";
 }
 
 function serpView(keywordId: string, read: PlanSheetSerpRead | null): PlanSheetSerpView {
@@ -342,6 +401,9 @@ export function buildPlanSheetRows(input: {
     const lido = volumeView(linha, input.now);
     return lido.state === "measured" && (lido.value ?? 0) > 0;
   };
+  // 2026-10-17 · a régua única da coleta: a principal de identidade (mesma função do servidor), lida do pacote e dos artigos.
+  const linhasDaRegua = new Map(input.keywords.map(item => [String(item.id ?? ""), serpIdentityRowOf(item)]));
+  const artigosDaRegua: SerpIdentityArticle[] = input.articles.map(article => ({ principalKeywordId: article.principalKeywordId, subjectKeywordId: article.subjectKeywordId, keywordIds: article.keywordIds, subjectPhrase: article.subjectPhrase ?? null }));
   const rows: PlanSheetRow[] = [];
   for (const keyword of input.keywords) {
     const keywordId = String(keyword.id ?? "");
@@ -378,6 +440,7 @@ export function buildPlanSheetRows(input: {
       currentPrincipalId: formation.principalKeywordId ?? plan.declaredPrincipal?.keywordId ?? null,
       supports: { count: lista.length, withVolume: comVolume.length, withVolumeIds: comVolume },
       conflict,
+      ...(!(volume.state === "measured" && (volume.value ?? 0) > 0) && serpIdentityPrincipalCheck({ keywordId, rowOf: id => linhasDaRegua.get(id), articles: artigosDaRegua }).identity ? { identityPrincipal: true } : {}),
     });
   }
   return rows.sort((a, b) => colorRank(a.color) - colorRank(b.color)
@@ -490,11 +553,23 @@ export type PlanSheetRefusal = { keywordId: string; keyword: string; reason: str
 export function planSheetSerpSelection(rows: readonly PlanSheetRow[]): { toPlan: PlanSheetRow[]; known: PlanSheetRefusal[]; refused: PlanSheetRefusal[] } {
   const toPlan: PlanSheetRow[] = [], known: PlanSheetRefusal[] = [], refused: PlanSheetRefusal[] = [];
   for (const row of rows) {
-    if (row.volume.state !== "measured" || !(row.volume.value && row.volume.value > 0)) refused.push({ keywordId: row.keywordId, keyword: row.keyword, reason: "Sem volume medido no Minerador: a SERP não é coletada para keyword sem volume (meça no Minerador, botão Volume)." });
+    // 2026-10-17 · a régua única da coleta: sem volume, só a principal de identidade do artigo (o servidor confere de novo).
+    const comVolume = row.volume.state === "measured" && Boolean(row.volume.value && row.volume.value > 0);
+    if (!serpCollectionAllowed({ volume: comVolume ? row.volume.value : null, identityPrincipal: row.identityPrincipal === true })) refused.push({ keywordId: row.keywordId, keyword: row.keyword, reason: planRowHasNoSearches(row.volume)
+      ? `${PLAN_NO_SEARCHES_SENTENCE}: a SERP não é coletada para keyword sem volume que não é a principal de identidade do artigo. ${planNoSearchesPath(row.lock.state)}`
+      : "Sem volume medido no Minerador: a SERP não é coletada para keyword sem volume que não é a principal de identidade do artigo (meça no Minerador, botão Volume)." });
     else if (row.serp.state === "complete") known.push({ keywordId: row.keywordId, keyword: row.keyword, reason: `Já temos as 4 lentes no cache${row.serp.collectedAt ? ` (${dateLabel(row.serp.collectedAt)})` : ""}: nada a pagar.` });
     else toPlan.push(row);
   }
   return { toPlan, known, refused };
+}
+
+/** A linha "vai coletar" da prévia do Validar SERP: a principal de identidade sem volume diz o propósito e o custo. */
+export function planSheetSerpPlanLine(row: Pick<PlanSheetRow, "keyword" | "volume" | "serp"> & { identityPrincipal?: boolean }): string {
+  const faltam = Math.max(0, PLAN_SHEET_LENSES - row.serp.lenses);
+  const comVolume = row.volume.state === "measured" && Boolean(row.volume.value && row.volume.value > 0);
+  if (!comVolume && row.identityPrincipal) return identityPrincipalSerpSentence(row.keyword, { queries: faltam, neverMeasured: row.volume.state === "missing" });
+  return `Falta ${faltam} lente(s): coleta nas 4 lentes (cache primeiro).`;
 }
 
 /**
@@ -575,12 +650,9 @@ export function planSheetPreviewLines(run: RunLike, rows: readonly (Pick<PlanShe
     }
     if (proposta.status === "adequate") return { keywordId: row.keywordId, kind: "adequate", sentence: "Já formado e adequado: nada a gravar.", principalFrom: de, principalTo: para };
     const util = [...proposta.reasons].reverse().find(reason => !GENERIC_SUBJECT_REASON.test(reason));
-    const semVolume = row.volume && row.volume.state !== "measured";
-    const dica = semVolume
-      ? row.lock?.state === "free" && (row.supports?.withVolume ?? 0) > 0
-        ? `A keyword do Assunto não tem volume medido: com a trava Livre, use “${PLAN_SHEET_ACTION_LABELS.swapPrincipal}” para uma sustentação com volume, ou “${PLAN_SHEET_ACTION_LABELS.validateSerp}” nas sustentações antes.`
-        : "A keyword do Assunto não tem volume medido e nenhuma sustentação com volume e SERP no cache sustenta o artigo: meça no Minerador (Volume) ou traga sustentações pela Pesquisa por Assunto."
-      : `Sem evidência suficiente para formar agora (SERP da composição no cache): use “${PLAN_SHEET_ACTION_LABELS.validateSerp}” e prepare de novo.`;
+    // 2026-10-16 (noite) · a frase sai da régua de volume da linha: nunca medida, medida sem número de buscas (Livre ou Travada).
+    const semVolume = row.volume ? planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock ?? null, supports: row.supports ?? null }) : null;
+    const dica = semVolume ?? `Sem evidência suficiente para formar agora (SERP da composição no cache): use “${PLAN_SHEET_ACTION_LABELS.validateSerp}” e prepare de novo.`;
     return { keywordId: row.keywordId, kind: "refused", sentence: util ?? dica, principalFrom: de, principalTo: para };
   });
 }
@@ -675,7 +747,7 @@ export function planRowSeals(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" 
   selos.push(row.volume.state === "measured"
     ? { kind: "volume", label: `Vol. ${(row.volume.value ?? 0).toLocaleString("pt-BR")}`, title: `${row.volume.label}.${sustentacoes}`, tone: "neutral" }
     : row.volume.state === "no_average"
-      ? { kind: "volume", label: "Sem média", title: `${row.volume.label}.${sustentacoes}`, tone: "muted" }
+      ? { kind: "volume", label: "Sem buscas", title: `${row.volume.label}.${sustentacoes}`, tone: "muted" }
       : { kind: "volume", label: "Sem volume", title: `${row.volume.label}.${sustentacoes}`, tone: "muted" });
   const serp = row.serp.state === "complete" ? { label: "SERP 4/4", tone: "positive" as const }
     : row.serp.state === "partial" ? { label: `SERP ${row.serp.lenses}/4`, tone: "warning" as const }
@@ -691,6 +763,81 @@ export function planRowSeals(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" 
 /** O rótulo curto do papel e da ordem: "Pilar · 9º", "Suporte · 11º". */
 export function planRowRoleLabel(row: Pick<PlanSheetRow, "role" | "order">): string {
   return `${row.role} · ${row.order}º`;
+}
+
+/** A coluna "Definição do artigo" da linha do plano: o estado de verdade e o porquê curto. */
+export type PlanRowDefinition = { label: string; reason: string | null; title: string; tone: "positive" | "neutral" | "warning" };
+
+/**
+ * 2026-10-16 (noite) · pedido do dono: "na lista ele nem reconheceu o Papel no
+ * Silo, a Definição do artigo". Para a linha do plano (candidato ou artigo da
+ * mesa), a Definição diz o estado lido da própria linha — "Formado · vN",
+ * "No Radar · vN", "Aguardando formação" ou "Pendente" — com o porquê curto
+ * (o inteiro vai no `title`). Só lê a linha; nada é gravado.
+ */
+export function planRowDefinition(row: Pick<PlanSheetRow, "formation" | "conflict" | "volume" | "lock" | "serp">): PlanRowDefinition {
+  const formation = row.formation;
+  if (formation.state === "formed" || formation.state === "in_radar") return { label: formation.label, reason: null, title: `ArticleDNA ${formation.version ? `v${formation.version}` : "gravado"} pelo plano.`, tone: "positive" };
+  if (row.conflict || formation.state === "conflict") return { label: "Pendente", reason: "presa em outro artigo", title: row.conflict?.sentence ?? formation.label, tone: "warning" };
+  if (formation.state === "awaiting_principal") return { label: "Pendente", reason: "aguarda a principal chegar ao Arquiteto", title: formation.label, tone: "warning" };
+  const semVolume = planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock });
+  if (semVolume) {
+    const semBuscas = planRowHasNoSearches(row.volume);
+    const reason = semBuscas
+      ? row.lock.state === "free" ? `sem número de buscas · Livre: “${PLAN_SHEET_ACTION_LABELS.swapPrincipal}” ou sustentação` : "sem número de buscas · traga sustentação"
+      : row.lock.state === "free" ? "sem volume medido · Livre: pode trocar" : "sem volume medido: meça no Minerador";
+    return { label: "Aguardando formação", reason, title: semVolume, tone: "warning" };
+  }
+  if (row.serp.state === "none" || row.serp.state === "partial") return { label: "Aguardando formação", reason: "falta SERP: “Processar artigos”", title: `${row.serp.label}. Marque a linha e use “Processar artigos” (Validar SERP: custo antes, cache primeiro).`, tone: "warning" };
+  if (row.serp.state === "complete") return { label: "Aguardando formação", reason: `pronta: “${PLAN_SHEET_ACTION_LABELS.concludeFormation}”`, title: `SERP 4/4 no cache: marque a linha e use “${PLAN_SHEET_ACTION_LABELS.concludeFormation}” (prévia antes).`, tone: "neutral" };
+  return { label: "Aguardando formação", reason: null, title: formation.label, tone: "neutral" };
+}
+
+/* ------------------------------ o recorte da cor fora da tabela (2026-10-16) */
+
+/**
+ * 2026-10-16 (noite) · teste do dono (WifiConecta, `?grupo=amarelo`): as
+ * contagens fora da tabela misturavam o azul com o amarelo. O RECORTE é o MESMO
+ * que a tabela já usa: a keyword pelo grupo dela (sem etiqueta, o grupo do
+ * plano dela); o artigo pelo grupo do plano do Assunto, senão a etiqueta
+ * gravada do artigo, senão a herança (Assunto → principal → maioria). Sem cor
+ * escolhida (`all`), a marca inteira, como sempre.
+ */
+export type EditorialGroupCut = {
+  all: boolean;
+  keyword: (keywordId: string) => boolean;
+  article: (article: { articleId?: string | null; subjectKeywordId?: string | null; principalKeywordId?: string | null; keywordIds?: readonly (string | null | undefined)[] | null }) => boolean;
+};
+
+export function editorialGroupCut(input: {
+  brandId: string | null | undefined;
+  filter: EditorialGroupScreenFilter;
+  keywordGroupById: ReadonlyMap<string, string | null>;
+  standings: ReadonlyMap<string, ArchitectSubjectStanding>;
+  /** A etiqueta gravada do artigo (`editorial_group_articles`), quando a tela sabe. */
+  articleGroupOf?: (articleId: string) => string | null;
+}): EditorialGroupCut {
+  if (input.filter.kind === "all") return { all: true, keyword: () => true, article: () => true };
+  // O grupo do plano de cada keyword do plano (a do Assunto e a principal declarada dele): a MESMA leitura de `planSubjectOfKeyword`, lida uma vez.
+  const doPlano = new Map<string, string>();
+  for (const keywordId of planArticleKeywordIds({ brandId: input.brandId, standings: input.standings })) {
+    const grupo = planSubjectOfKeyword({ keywordId, brandId: input.brandId, standings: input.standings })?.plan?.groupId;
+    if (grupo) doPlano.set(keywordId, grupo);
+  }
+  const planoDe = (keywordId: string) => doPlano.get(keywordId) ?? null;
+  const grupoDaKeyword = (keywordId: string) => input.keywordGroupById.get(keywordId) || planoDe(keywordId) || null;
+  const mapa = new Map<string, string | null>(input.keywordGroupById);
+  for (const [keywordId, grupo] of doPlano) if (!mapa.get(keywordId)) mapa.set(keywordId, grupo);
+  return {
+    all: false,
+    keyword: keywordId => editorialGroupFilterMatches(input.filter, grupoDaKeyword(keywordId)),
+    article: article => {
+      const assunto = article.subjectKeywordId && planoDe(article.subjectKeywordId) ? grupoDaKeyword(article.subjectKeywordId) : null;
+      const gravado = article.articleId ? input.articleGroupOf?.(article.articleId) ?? null : null;
+      const herdado = inheritArticleGroup(articleKeywordIndex({ articleId: article.articleId ?? "", principalKeywordId: article.principalKeywordId ?? null, subjectKeywordId: article.subjectKeywordId ?? null, keywordIds: article.keywordIds ?? [] }), mapa).groupId;
+      return editorialGroupFilterMatches(input.filter, assunto ?? gravado ?? herdado);
+    },
+  };
 }
 
 /**
@@ -785,9 +932,12 @@ export function planRowAlerts(row: Pick<PlanSheetRow, "lock" | "volume" | "serp"
   if (row.conflict) alertas.push({ kind: "conflict", label: "presa em outro artigo", title: row.conflict.sentence });
   if (row.formation.state === "awaiting_principal") alertas.push({ kind: "awaiting_principal", label: "aguarda a principal", title: row.formation.label });
   if (semVolume) {
+    // 2026-10-16 (noite) · medida sem número de buscas não é "sem volume medido": o rótulo e o porquê dizem o que é.
+    const semBuscas = planRowHasNoSearches(row.volume);
+    const frase = planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock });
     alertas.push(row.lock.state === "free"
-      ? { kind: "no_volume", label: "sem volume — livre, pode trocar", title: `${row.volume.label}. ${row.lock.why}` }
-      : { kind: "no_volume", label: "sem volume — travada", title: `${row.volume.label}. ${row.lock.why}` });
+      ? { kind: "no_volume", label: semBuscas ? "sem número de buscas — livre, pode trocar" : "sem volume — livre, pode trocar", title: semBuscas ? `${row.volume.label}. ${frase}` : `${row.volume.label}. ${row.lock.why}` }
+      : { kind: "no_volume", label: semBuscas ? "sem número de buscas — travada" : "sem volume — travada", title: semBuscas ? `${row.volume.label}. ${frase}` : `${row.volume.label}. ${row.lock.why}` });
   } else if (row.serp.state === "none" || row.serp.state === "partial") {
     alertas.push({ kind: "no_serp", label: row.serp.state === "partial" ? `SERP ${row.serp.lenses}/4 — completar em “Processar artigos”` : "sem SERP no cache — coletar em “Processar artigos”", title: `${row.serp.label}. Marque a linha e use “Processar artigos” (Validar SERP: custo antes, cache primeiro).` });
   }

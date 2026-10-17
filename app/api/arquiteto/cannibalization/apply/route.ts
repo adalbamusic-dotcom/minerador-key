@@ -3,7 +3,7 @@ import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { DifferentiationApplyRequestSchema, handleDifferentiationApply } from "@/lib/server/arquiteto-differentiation";
 import { differentiationErrorResponse } from "@/lib/server/arquiteto-differentiation-http";
 import { appendArquitetoArtifact } from "@/lib/server/arquiteto-persistence";
-import { recordArquitetoMineradorSuggestionsSafely } from "@/lib/server/arquiteto-minerador-suggestions";
+import { mineradorPortsForNewKeywords } from "@/lib/server/arquiteto-minerador-new-keyword-ports";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
 /**
@@ -15,6 +15,12 @@ import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
  * histórico, e confirma pela releitura. URL, slug, canonical e marca não mudam.
  * `keep` registra "Manter como está" até haver SERP nova. Esta rota não é
  * exposta ao MCP: aplicar é ato humano na tela.
+ *
+ * 2026-10-17 · keyword NOVA (que não existe na marca) entra NESTE aceite, com
+ * `approveNewKeywords: true`, pelas MESMAS portas do Minerador do "Reforçar
+ * publicados" (import, Lógica, Volume, aprovação e envio), só nas linhas que o
+ * import cria; as permissões do Minerador são conferidas antes de escrever.
+ * SUBSTITUI a F4 de 14/10 (a nova ia como "Sugestões do Arquiteto").
  */
 export async function POST(request: Request) {
   try {
@@ -30,8 +36,8 @@ export async function POST(request: Request) {
         const gravada = await appendArquitetoArtifact(context, "article_dna", version, "proposed");
         return { status: gravada.status, versionId: gravada.version.versionId };
       },
-      // F4 · O ARQUITETO SÓ LÊ: keyword nova do aceite vira "Sugestões do Arquiteto" (nada no Minerador).
-      recordMineradorSuggestions: input => recordArquitetoMineradorSuggestionsSafely(context, input),
+      // Montadas só quando o aceite tem keyword nova (a permissão do Minerador é conferida ali).
+      loadMinerador: () => mineradorPortsForNewKeywords(parsed.data.brandId),
     }, parsed.data);
     return NextResponse.json(outcome.body, { status: outcome.status });
   } catch (error) {

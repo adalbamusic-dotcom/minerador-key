@@ -382,7 +382,8 @@ test("tela do Arquiteto · seletor no topo, faixa e etiqueta nas abas Artigos e 
   assert.doesNotMatch(tela, /<EditorialGroupSelector|groupTag:/, "o Arquiteto não monta mais o seletor");
   assert.match(tela, /title=\{art\.keywordPrincipal\}>\{art\.keywordPrincipal\}<\/p><ArticleGroupRowTag group=\{grupoDaLinhaResumo\}/);
   assert.match(tela, /editorialGroupStripeClass\(grupoDaLinhaResumo\)/);
-  assert.match(tela, /filterRowsByEditorialGroup\(porAssunto, arquitetoGroups\.filter/);
+  // 2026-10-16 (noite) · sem o filtro de fichas "Assuntos" (pedido do dono), a cor recorta a lista filtrada pelos campos.
+  assert.match(tela, /filterRowsByEditorialGroup\(porCampos, arquitetoGroups\.filter/);
   assert.match(tela, /surface=\{groupScopedTerritorialSurface\}\s*groupForKeyword=/);
   assert.match(tela, /<ArticleGroupMoveSelect groups=\{arquitetoGroups\.groups\} disabled=\{updating\} onMove=\{color => \{ void moverArtigosDeGrupo\(color\); \}\} \/>/);
   assert.match(tela, /await arquitetoGroups\.moveArticlesToColor\(ids, color\)/, "mover por cor garante o grupo da cor antes");

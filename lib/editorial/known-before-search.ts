@@ -122,7 +122,7 @@ export type KnownBeforeSearchInput = {
   aiReadingReused: boolean;
   /** Falta a leitura da IA (alvos sem proposta e lista com volume): `null` = não falta. */
   aiReading: { targets: number; listSize: number } | null;
-  /** O passo "Validar no Google" (DataForSEO), já com o cache descontado. */
+  /** O passo "Coletar a SERP no DataForSEO" (pago; antes "Validar no Google"), já com o cache descontado. */
   serp: { calls: number; costUsd: { min: number; max: number } };
   /** O que esta preparação chamou com a autorização (zero na leitura grátis). */
   done?: { aiCalls: number; measuredKeywords: number; googleAdsCalls: number };
@@ -157,7 +157,7 @@ export type KnownBeforeSearchPlan = {
   };
   /** Nada a pagar: nem cota, nem IA, nem DataForSEO. Só então o botão pode dizer "grátis". */
   free: boolean;
-  /** Falta algo que a leitura paga (IA e medição) resolve, antes do "Validar no Google". */
+  /** Falta algo que a leitura paga (IA e medição) resolve, antes do "Coletar a SERP no DataForSEO". */
   needsPaidReading: boolean;
   done: { aiCalls: number; measuredKeywords: number; googleAdsCalls: number };
 };
@@ -218,13 +218,13 @@ export function knownBeforeSearchSentences(plan: KnownBeforeSearchPlan): { known
   const falta = [
     m.volumeToMeasure ? `medir ${m.volumeToMeasure} keyword(s) no Google Ads` : null,
     m.aiReading ? `1 leitura da IA (${m.aiReading.targets} alvo(s) sem proposta, lista de ${m.aiReading.listSize})` : null,
-    m.serpQueries ? `${m.serpQueries} consulta(s) de SERP no passo “Validar no Google”` : null,
+    m.serpQueries ? `${m.serpQueries} consulta(s) de SERP no passo “Coletar a SERP no DataForSEO”` : null,
   ].filter((parte): parte is string => Boolean(parte));
   const p = plan.plan;
   const custo = [
-    p.googleAds.calls ? `Google Ads: ${p.googleAds.calls} consulta(s) de métricas para ${p.googleAds.keywords} keyword(s) — sem custo em dólar, usa a cota da marca` : null,
+    p.googleAds.calls ? `Google Ads: ${p.googleAds.calls} consulta(s) de métricas para ${p.googleAds.keywords} keyword(s) — grátis (cota do Google Ads)` : null,
     p.ai.calls ? `IA: ${p.ai.calls} chamada (${p.ai.provider}, cobrada pelo uso)` : null,
-    p.dataForSeo.calls ? `DataForSEO: ${p.dataForSeo.calls} consulta(s), ${usd(p.dataForSeo.costUsd.min)} a ${usd(p.dataForSeo.costUsd.max)} (só no “Validar no Google”, com o seu aceite)` : null,
+    p.dataForSeo.calls ? `DataForSEO: ${p.dataForSeo.calls} consulta(s), ${usd(p.dataForSeo.costUsd.min)} a ${usd(p.dataForSeo.costUsd.max)} (pago, só no “Coletar a SERP no DataForSEO”, com o seu aceite)` : null,
   ].filter((parte): parte is string => Boolean(parte));
   const d = plan.done;
   const feito = d.aiCalls || d.measuredKeywords
@@ -242,7 +242,7 @@ export function knownBeforeSearchSentences(plan: KnownBeforeSearchPlan): { known
 export function knownBeforeSearchAuthorizeLabel(plan: KnownBeforeSearchPlan): string | null {
   const medir = plan.plan.googleAds.keywords, ia = plan.plan.ai.calls;
   if (!medir && !ia) return null;
-  if (medir && ia) return `Ler com IA e medir · 1 chamada de IA + ${medir} keyword(s) no Google Ads (cota)`;
+  if (medir && ia) return `Ler com IA e medir · 1 chamada de IA + ${medir} keyword(s) no Google Ads, grátis (cota do Google Ads)`;
   if (ia) return "Ler com IA · 1 chamada de IA (OpenRouter)";
-  return `Medir ${medir} keyword(s) no Google Ads · cota, sem custo em dólar`;
+  return `Medir ${medir} keyword(s) no Google Ads · grátis (cota do Google Ads)`;
 }

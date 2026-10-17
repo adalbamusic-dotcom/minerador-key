@@ -141,7 +141,7 @@ export function improvementDiscoveryMaxRequests(gapCount: number): number {
 /** A frase de custo da busca nova, a mesma na tela e no MCP. */
 export function improvementDiscoveryCostSentence(gapCount: number): string {
   const max = improvementDiscoveryMaxRequests(gapCount);
-  return `Busca nova no Google Ads para ${gapCount} publicado(s) ou Assunto(s) sem proposta: até ${max} chamada(s) de ideias de keywords. Sem custo em dólar; cada chamada conta 1 unidade na cota de Descoberta da marca e fica no registro de uso. Traz keywords de fora da lista: só entram as do mesmo assunto, com volume medido. A ideia que já existe no Minerador com volume medido usa o volume dele, sem medir de novo; só a nova vai às métricas do Google Ads (cota, sem custo em dólar), e “Gravar melhorias” grava essa medição sem consultar outra vez.`;
+  return `Busca nova no Google Ads para ${gapCount} publicado(s) ou Assunto(s) sem proposta: até ${max} chamada(s) de ideias de keywords. Grátis (cota do Google Ads): cada chamada conta 1 unidade na cota de Descoberta da marca e fica no registro de uso. Traz keywords de fora da lista: só entram as do mesmo assunto, com volume medido. A ideia que já existe no Minerador é só lida (usa o volume dele, sem medir de novo; o Arquiteto não a altera); só a nova vai às métricas do Google Ads, grátis (cota do Google Ads), e, se você confirmar, entra no Minerador e no artigo na mesma confirmação de “Gravar melhorias”, que grava essa medição sem consultar outra vez.`;
 }
 
 /** Chave idempotente do registro de uso da leitura da IA desta execução. */

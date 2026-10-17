@@ -3,9 +3,10 @@ import { readdirSync, statSync } from "node:fs";
 import test from "node:test";
 
 import { buildKeywordUniverse } from "../lib/arquiteto/keyword-universe.ts";
-import { buildArchitectureAnalysis } from "../lib/arquiteto/architecture-analysis.ts";
+import { buildArchitectureAnalysis, withDeclaredPlanReading, type ArchitectureAnalysis, type ClusterAnalysis } from "../lib/arquiteto/architecture-analysis.ts";
+import { ARTICLE_FORMATION_LOT_BASE_PREFIX, articleFormationMarkerIsStale } from "../lib/arquiteto/article-formation-marker.ts";
 import { buildArchitectureWorkingProposal, resolveKeywordDnaSignals } from "../lib/arquiteto/architecture-working-proposal.ts";
-import { buildArticleFormationUniverse, type ArticleCandidate, type ArticleFormationKeyword } from "../lib/arquiteto/article-formation.ts";
+import { articleFormationBaseHash, buildArticleFormationUniverse, cutArticleFormationUniverses, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "../lib/arquiteto/article-formation.ts";
 import { reservedSiloHeadKeywordIds } from "../lib/arquiteto/article-candidate-guards.ts";
 import { deterministicArticleDnaPayload, deterministicSiloDnaPayload, deterministicSiloPagePayload } from "../lib/arquiteto/adapters.ts";
 import { confirmedArticlePayload } from "../lib/arquiteto/architecture-confirmation.ts";
@@ -21,7 +22,7 @@ import { createInternalLinkGraph, createInternalLinkGraphWorkingCopy } from "../
 import { resolveRadarEligibility } from "../lib/arquiteto/radar-handoff-gate.ts";
 import { ArticleDNASchema, type ArchitectKeyword, type ArticleDNA, type InternalLinkGraphEdge, type InternalLinkGraphNode, type ProvisionalArticleGroup, type SiloDNA, type VersionEnvelope } from "../lib/arquiteto/contracts.ts";
 import { choosePlanSiloTerritory, planGroupTerritory, planRecreatePlanSiloLines, planSiloHeadKeywordIds } from "../lib/arquiteto/declared-plan-silo.ts";
-import { buildPlanSheetRows, planArticleKeywordIds, planPrincipalSwapCandidates, planSheetFormationSelection, splitTableSelectionForPlan, PLAN_SHEET_LOCKED_SEAL } from "../lib/arquiteto/plan-article-sheet.ts";
+import { buildPlanSheetRows, editorialGroupCut, planArticleKeywordIds, planPrincipalSwapCandidates, planRowAlerts, planRowDefinition, planRowRoleLabel, planRowSeals, planSheetFormationSelection, planSheetPreviewLines, planSheetSerpPlanLine, planSheetSerpSelection, splitTableSelectionForPlan, PLAN_NO_SEARCHES_SENTENCE, PLAN_SHEET_LOCKED_SEAL, PLAN_SUPPORT_SEARCH_PATH } from "../lib/arquiteto/plan-article-sheet.ts";
 import { attachSubjectToArticleDna, planSubjectAttachment, readArchitectSubjectStanding, readArchitectSubjectStandings, suggestSubjectSupport } from "../lib/arquiteto/declared-subject.ts";
 import { planArticleImprovements, volumelessPrincipalSwap, type ImprovementEvidence, type ImprovementKeyword, type ImprovementTarget } from "../lib/arquiteto/article-improvement.ts";
 import { buildSerpSubjectIndex } from "../lib/arquiteto/serp-subject-overlap.ts";
@@ -29,6 +30,7 @@ import { decidePublishedPrimarySwap, proposePublishedPrimarySwap } from "../lib/
 import { validateSiloPlan, SILO_ARTICLE_RANGE } from "../lib/agent/silo-plan.ts";
 import { DECLARED_PLAN_ARTICLES_MIN_FOR_SILO, parseDeclaredPlanText } from "../lib/minerador/declared-plan.ts";
 import { declarado, linhaDaMesa } from "./arquiteto-assunto-fixtures.mts";
+import { cadastro } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import {
   ATOR, AZUL, CABECA_DO_SILO, GRUPOS_WIFI, LENTES, LINHAS_AZUL, MARCA_SEM_PLANO, MARCA_WIFI, PLANO_AZUL, SEMANTICO_SEM_PLANO, SEM_PLANO,
   SILO_ID_VELHO, TERRITORIO_AZUL, VOLUME_VALIDADO, codigoSemComentarios, contar, escopoDo, grupoDaKeywordAzul, mesaAzul, top10,
@@ -390,12 +392,21 @@ const sinais = (keywordId: string, texto: string) => resolveKeywordDnaSignals({ 
 const termo = (id: string, keyword: string, extra: Partial<ImprovementKeyword> = {}): ImprovementKeyword => ({ id, keyword, volume: 50, volumeValidated: true, signals: sinais(id, keyword), ownerId: null, published: false, territoryRef: "territory:t", external: false, ...extra });
 const prova = (targetId: string, keywordId: string, extra: Partial<ImprovementEvidence> = {}): ImprovementEvidence => ({ targetId, keywordId, complete: true, sharedPages: 4, contradiction: false, anchorConclusive: true, ...extra });
 
-test("C6 · Assunto sem plano com DNA, principal de volume 10, candidata de 500 na lista: HOJE a melhoria troca para a de 500 — muda na F4: fica (R1, volume definido)", () => {
+test("C6 · Assunto sem plano com DNA, principal de volume 10, candidata de 500 na lista: a principal de IDENTIDADE (no título e no slug) fica desde 2026-10-17; fora da identidade, HOJE a melhoria troca para a de 500 — muda na F4: fica (R1, volume definido)", () => {
   const alvo: ImprovementTarget = { id: "assunto", kind: "subject", theme: "Captação de pacientes para clínica", note: null, primaryId: "p10", post: "free", memberIds: ["p10"], territoryRef: "territory:t", slug: "captacao-de-pacientes-para-clinica", url: null, canonical: null, signals: sinais("assunto", "captação de pacientes para clínica") };
-  const [proposta] = planArticleImprovements({ targets: [alvo], keywords: [termo("p10", "captação de pacientes para clínica", { volume: 10, ownerId: "assunto" }), termo("c500", "captação de pacientes clínica de estética", { volume: 500 })], evidence: [prova("assunto", "p10"), prova("assunto", "c500")] });
+  const keywords = [termo("p10", "captação de pacientes para clínica", { volume: 10, ownerId: "assunto" }), termo("c500", "captação de pacientes clínica de estética", { volume: 500 })];
+  const evidencia = [prova("assunto", "p10"), prova("assunto", "c500")];
+  // 2026-10-17 · Principal de identidade (dono): ela está no título e no slug do Assunto — fica; a de 500 reforça.
+  const [identidade] = planArticleImprovements({ targets: [alvo], keywords, evidence: evidencia });
+  assert.equal(identidade.status, "ready");
+  assert.equal(identidade.principalId, "p10", "a principal de identidade fica (R1 cumprida neste caso)");
+  assert.ok(identidade.memberIds.includes("c500"), "a mais ampla entra como secundária");
+  // Fora da identidade (o título e o slug falam de outra coisa): HOJE a régua própria do Assunto com volume ainda troca — muda na F4.
+  const fora = { ...alvo, theme: "Agenda vazia na clínica", slug: "agenda-vazia-na-clinica" };
+  const [proposta] = planArticleImprovements({ targets: [fora], keywords, evidence: evidencia });
   assert.equal(proposta.status, "ready");
   assert.equal(proposta.currentPrimaryId, "p10");
-  assert.equal(proposta.principalId, "c500", "HOJE: a regra própria do Assunto (needsPrimary, article-improvement.ts:399-401) troca a principal COM volume — muda na F4: R1 mantém p10");
+  assert.equal(proposta.principalId, "c500", "HOJE: a regra própria do Assunto (needsPrimary) troca a principal COM volume fora da identidade — muda na F4: R1 mantém p10");
   assert.ok(proposta.memberIds.includes("p10"), "a antiga fica no artigo");
   // O publicado na mesma situação NÃO troca (a régua do publicado já é a R1 para Livre com volume).
   const [publicado] = planArticleImprovements({ targets: [{ ...alvo, kind: "published", url: "https://x.test/a", canonical: "https://x.test/a" }], keywords: [termo("p10", "captação de pacientes para clínica", { volume: 10, published: true }), termo("c500", "captação de pacientes clínica de estética", { volume: 500 })], evidence: [prova("assunto", "c500")] });
@@ -410,9 +421,22 @@ const identidade = { url: "https://adalbapro.com.br/blog/como-captar-clientes-pa
 const pegada = (keywordId: string, keyword: string, prefixo: string) => ({ keywordId, keyword, lenses: LENTES.map(lens => ({ lens, urls: top10(prefixo), domains: null, collectedAt: "2026-10-10T12:00:00+00:00" })) });
 const formacaoKw = (keywordId: string, keyword: string, volume: number | null, extra: Partial<ArticleFormationKeyword> = {}): ArticleFormationKeyword => ({ keywordId, keyword, intent: "Informativa", volume, kgr: null, entity: null, problem: null, isPublished: false, ...extra });
 
-test("C9 · publicado Livre com a principal SEM volume e uma keyword do artigo com volume e o núcleo do slug: a troca é proposta, a antiga fica secundária, decisão confirmada com ator e hora, identidade intacta (mesa: hoje grava 'proposed' pelo navegador — muda na F5)", () => {
+/*
+ * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono: "Se o termo principal tem pouco volume, mas faz sentido preservá-lo
+ * por ser a identidade do assunto/tema, principalmente nos publicados"). A página com o slug feito da principal
+ * ("como-captar-clientes-para-clinica-de-estetica") não recebe proposta de troca: ela fica e as mais amplas reforçam.
+ * A troca do C9 vale para a principal FORA da identidade (estranha ao slug).
+ */
+const PRINCIPAL_FORA_DA_IDENTIDADE = "agenda vazia na estética";
+test("C9 · publicado Livre com a principal SEM volume e uma keyword do artigo com volume e o núcleo do slug: de identidade, nada é proposto; fora da identidade, a troca é proposta, a antiga fica secundária, decisão confirmada com ator e hora, identidade intacta (mesa: hoje grava 'proposed' pelo navegador — muda na F5)", () => {
   const indice = buildSerpSubjectIndex([pegada("pub", "como captar clientes para clínica de estética", "captar"), pegada("nova", "como captar clientes clínica de estética", "captar")]);
-  const proposta = proposePublishedPrimarySwap({ published: formacaoKw("pub", "como captar clientes para clínica de estética", null, { isPublished: true }), post: "free", identity: identidade, candidates: [{ ...formacaoKw("nova", "como captar clientes clínica de estética", 390), volumeValidated: true }], serp: indice });
+  const deIdentidade = proposePublishedPrimarySwap({ published: formacaoKw("pub", "como captar clientes para clínica de estética", null, { isPublished: true }), post: "free", identity: identidade, candidates: [{ ...formacaoKw("nova", "como captar clientes clínica de estética", 390), volumeValidated: true }], serp: indice });
+  assert.equal(deIdentidade.state, "locked");
+  assert.match(deIdentidade.note, /^Principal de identidade/);
+  const daPagina = (texto: string) => new Map([["pub", termo("pub", texto, { volume: null, volumeValidated: false, published: true })], ["nova", termo("nova", "como captar clientes clínica de estética", { volume: 390, ownerId: "pub" })]]);
+  const alvoReal: ImprovementTarget = { id: "pub", kind: "published", theme: "como captar clientes para clínica de estética", note: null, primaryId: "pub", post: "free", memberIds: ["pub", "nova"], territoryRef: "territory:t", slug: identidade.slug, url: identidade.url, canonical: identidade.canonical, signals: sinais("pub", "como captar clientes para clínica de estética") };
+  assert.equal(volumelessPrincipalSwap(alvoReal, daPagina("como captar clientes para clínica de estética")), null, "a melhoria também não troca a principal de identidade");
+  const proposta = proposePublishedPrimarySwap({ published: formacaoKw("pub", PRINCIPAL_FORA_DA_IDENTIDADE, null, { isPublished: true }), post: "free", identity: identidade, candidates: [{ ...formacaoKw("nova", "como captar clientes clínica de estética", 390), volumeValidated: true }], serp: indice });
   assert.equal(proposta.state, "proposed", proposta.note);
   assert.equal(proposta.substitute?.keywordId, "nova");
   assert.deepEqual(proposta.protectedIdentity, identidade);
@@ -425,9 +449,8 @@ test("C9 · publicado Livre com a principal SEM volume e uma keyword do artigo c
   assert.equal(decisao.articleDnaFields.primaryKeywordDecision.actorId, ATOR);
   assert.deepEqual(decisao.identity, identidade, "URL, slug e canonical intactos");
   assert.equal(decisao.requiresNewVersion, true);
-  // A melhoria (núcleo puro): a mesma troca, pela keyword do artigo mais próxima do slug.
-  const alvo: ImprovementTarget = { id: "pub", kind: "published", theme: "como captar clientes para clínica de estética", note: null, primaryId: "pub", post: "free", memberIds: ["pub", "nova"], territoryRef: "territory:t", slug: identidade.slug, url: identidade.url, canonical: identidade.canonical, signals: sinais("pub", "como captar clientes para clínica de estética") };
-  const troca = volumelessPrincipalSwap(alvo, new Map([["pub", termo("pub", "como captar clientes para clínica de estética", { volume: null, volumeValidated: false, published: true })], ["nova", termo("nova", "como captar clientes clínica de estética", { volume: 390, ownerId: "pub" })]]));
+  // A melhoria (núcleo puro): a mesma troca, pela keyword do artigo mais próxima do slug (principal fora da identidade).
+  const troca = volumelessPrincipalSwap(alvoReal, daPagina(PRINCIPAL_FORA_DA_IDENTIDADE));
   assert.equal(troca?.principalId, "nova");
   assert.deepEqual(troca?.memberIds, ["pub", "nova"], "nada entra nem sai");
   // HOJE: a mesa grava a troca como 'proposed' pelo navegador (ws → persistArticleSubjectVersion) — muda na F5 (R2: approved pelo gravador único).
@@ -436,10 +459,11 @@ test("C9 · publicado Livre com a principal SEM volume e uma keyword do artigo c
   assert.match(gravarPelaMesa, /persistArquitetoArtifact\(\{ brandId: selectedBrandId, artifactType: "article_dna", action: "edit", version: successor, status: "proposed" \}\)/, "HOJE: a troca pela mesa grava 'proposed' com 'edit' — muda na F5");
 });
 
-test("C9b · publicado Livre com a principal de volume 10 e candidata Forte de 500: HOJE a mesa propõe a troca e a melhoria não — muda na F4: nenhuma propõe (R1)", () => {
+test("C9b · publicado Livre com a principal de volume 10 e candidata Forte de 500: de identidade, nenhuma propõe (2026-10-17); fora da identidade, HOJE a mesa propõe a troca e a melhoria não — muda na F4: nenhuma propõe (R1)", () => {
   const indice = buildSerpSubjectIndex([pegada("pub", "como captar clientes para clínica de estética", "captar"), pegada("c500", "como captar clientes clínica de estética", "captar")]);
-  const mesa = proposePublishedPrimarySwap({ published: formacaoKw("pub", "como captar clientes para clínica de estética", 10, { isPublished: true }), post: "free", identity: identidade, candidates: [{ ...formacaoKw("c500", "como captar clientes clínica de estética", 500), volumeValidated: true }], serp: indice });
-  assert.equal(mesa.state, "proposed", "HOJE a régua D2.1 (published-primary-swap.ts:170) troca Livre com volume quando a substituta tem mais — muda na F4");
+  assert.equal(proposePublishedPrimarySwap({ published: formacaoKw("pub", "como captar clientes para clínica de estética", 10, { isPublished: true }), post: "free", identity: identidade, candidates: [{ ...formacaoKw("c500", "como captar clientes clínica de estética", 500), volumeValidated: true }], serp: indice }).state, "locked", "principal de identidade: a mesa não propõe");
+  const mesa = proposePublishedPrimarySwap({ published: formacaoKw("pub", PRINCIPAL_FORA_DA_IDENTIDADE, 10, { isPublished: true }), post: "free", identity: identidade, candidates: [{ ...formacaoKw("c500", "como captar clientes clínica de estética", 500), volumeValidated: true }], serp: indice });
+  assert.equal(mesa.state, "proposed", "HOJE, fora da identidade, a régua D2.1 (published-primary-swap.ts) troca Livre com volume quando a substituta tem mais — muda na F4");
   const alvo: ImprovementTarget = { id: "pub", kind: "published", theme: "como captar clientes para clínica de estética", note: null, primaryId: "pub", post: "free", memberIds: ["pub"], territoryRef: "territory:t", slug: identidade.slug, url: identidade.url, canonical: identidade.canonical, signals: sinais("pub", "como captar clientes para clínica de estética") };
   const [melhoria] = planArticleImprovements({ targets: [alvo], keywords: [termo("pub", "como captar clientes para clínica de estética", { volume: 10, published: true }), termo("c500", "como captar clientes clínica de estética", { volume: 500 })], evidence: [prova("pub", "c500", { sharedPages: 10 })] });
   assert.equal(melhoria.principalId, "pub", "a melhoria já mantém a Livre com volume (needsPrimary do publicado só para sem volume)");
@@ -450,11 +474,13 @@ test("C9b · publicado Livre com a principal de volume 10 e candidata Forte de 5
 /* C10 · keyword solta (sem Assunto, grupo ou artigo)                       */
 /* ======================================================================= */
 
-test("C10 · keyword solta com volume: entra como secundária; como principal só da Livre sem volume; a Travada recebe só secundária", () => {
+test("C10 · keyword solta com volume: entra como secundária; como principal só da Livre sem volume FORA da identidade (2026-10-17); a de identidade e a Travada recebem só secundária", () => {
   const alvo = (extra: Partial<ImprovementTarget> = {}): ImprovementTarget => ({ id: "k10", kind: "subject", theme: "Diferença entre internet e Wi-Fi", note: null, primaryId: "dif", post: "free", memberIds: ["dif"], territoryRef: TERRITORIO_AZUL, slug: "diferenca-entre-internet-e-wi-fi", url: null, canonical: null, signals: sinais("k10", "diferença entre internet e wi-fi"), ...extra });
   const solta = termo("solta", "diferença entre internet e wi-fi em casa", { volume: 900 });
   const casos = [
-    { nome: "Livre sem volume", target: alvo(), principal: termo("dif", "diferença entre internet e wi-fi", { volume: null, volumeValidated: false, ownerId: "k10" }), espera: "solta" },
+    // A principal está no título e no slug: identidade, fica (dono, 17/10). SUBSTITUÍDO: "a solta assume" na Livre sem volume.
+    { nome: "Livre sem volume de identidade", target: alvo(), principal: termo("dif", "diferença entre internet e wi-fi", { volume: null, volumeValidated: false, ownerId: "k10" }), espera: "dif" },
+    { nome: "Livre sem volume fora da identidade", target: alvo(), principal: termo("dif", "roteador antigo em casa", { volume: null, volumeValidated: false, ownerId: "k10" }), espera: "solta" },
     { nome: "Livre com volume", target: alvo({ declaredPrincipalId: "dif" }), principal: termo("dif", "diferença entre internet e wi-fi", { volume: 30, ownerId: "k10" }), espera: "dif" },
     { nome: "Travada", target: alvo({ declaredPrincipalId: "dif" }), principal: termo("dif", "diferença entre internet e wi-fi", { volume: null, volumeValidated: false, ownerId: "k10" }), espera: "dif" },
   ];
@@ -564,6 +590,190 @@ test("C16 · slug declarado no plano do Minerador: o candidato NOVO do Assunto n
   const dnaSemSlug = deterministicArticleDnaPayload(grupoDoCandidato(semSlug, mesa, { declaredPlan: { role: "Pilar", scope: "Escolha de plano: cobertura e custo." } }), MARCA_SEM_PLANO);
   assert.notEqual(dnaSemSlug.suggestedSlug, "como-escolher-plano-internet-residencial", "plano sem slug: o ArticleDNA de sempre");
   assert.equal(chamadasDeRede, 0);
+});
+
+/* ======================================================================= */
+/* C17 · grupo amarelo com 4 Livres sem número de buscas (inclui o Pilar)  */
+/*       e outro grupo (azul) na mesma marca — teste do dono, 16/10 noite   */
+/* ======================================================================= */
+
+/*
+ * WifiConecta, `?grupo=amarelo&area=articles` (SELECT de 16/10, só leitura):
+ * plano "Planos e contratação" de 8 artigos (o grupo está no plano v3; as 4
+ * Livres entraram na v2, as 4 Travadas na v3). As 4 Travadas com volume já
+ * formaram (ArticleDNA v1); as 4 Livres foram MEDIDAS no Google Ads e ele não
+ * tem número de buscas para elas (a resposta "sem média"). O azul (7 artigos)
+ * está na mesma marca. Conclusões esperadas (AGENTS.md §0.3):
+ *  1. a frase da linha Livre medida sem número de buscas NÃO diz "meça no
+ *     Minerador": diz "Procurar outra principal" ou "Buscar sustentação"
+ *     (grátis); a nunca medida continua "meça"; a Travada sem número de
+ *     buscas só busca sustentação;
+ *  2. o recorte da cor fora da tabela conta só o amarelo;
+ *  3. "Papel no Silo" e "Definição do artigo" da linha do plano leem o plano;
+ *  4. a análise da arquitetura: cada artigo do plano é a sua leitura (15 = 15);
+ *  5. o marcador nascido pela linha do plano (`serpbase:`) não deixa a
+ *     formação "desatualizada" para sempre;
+ *  6. o Silo do plano Confirmado e visível não "fica de fora" de nada; os
+ *     textos que o dono mandou tirar do painel não voltam (a guarda da forma).
+ */
+const AMARELO = "aaaa0000-0000-4000-8000-00000000a203";
+const TERRITORIO_AMARELO = "territory:2318febb-f4c7-4036-ac8c-b7416be0de3c";
+const GRUPOS_COM_AMARELO: Record<string, { color: string; name: string; planVersion?: number }> = { ...GRUPOS_WIFI, [AMARELO]: { color: "amarelo", name: "Planos e contratação", planVersion: 3 } };
+/** A resposta do Google Ads sem número de buscas (medida em 15/10: menos de 30 dias). */
+const SEM_BUSCAS = { volume_eligibility: { status: "unavailable", provider: "google_ads", measuredAt: "2026-10-15T12:00:00+00:00", averageMonthlySearches: null } };
+/** [id, keyword, ordem, papel, volume | null] — null = medida sem número de buscas (Livre). */
+const AMARELO_REAL: Array<[string, string, number, "Pilar" | "Suporte", number | null]> = [
+  ["a1", "como escolher plano de internet residencial", 1, "Pilar", null],
+  ["a2", "internet residencial barata", 2, "Suporte", 1600],
+  ["a3", "claro vivo ou tim internet residencial", 3, "Suporte", null],
+  ["a4", "internet no meu cep", 4, "Suporte", 720],
+  ["a5", "quantos mega de internet preciso", 5, "Suporte", null],
+  ["a6", "combo internet e celular", 6, "Suporte", 720],
+  ["a7", "combo internet tv streaming", 7, "Suporte", null],
+  ["a8", "instalação de internet residencial", 8, "Suporte", 170],
+];
+function mesaAmarela(extra: { travadaSemBuscas?: boolean } = {}): Linha[] {
+  return AMARELO_REAL.map(([id, keyword, ordem, papel, volume]) => {
+    const base = cadastro(id, keyword, keyword, ordem, papel, AMARELO, volume !== null ? VOLUME_VALIDADO : SEM_BUSCAS);
+    const assunto = base.keyword_subject as Record<string, unknown>;
+    const plano = { ...(assunto.plan as Record<string, unknown>), planVersion: volume !== null ? 3 : 2, ...(extra.travadaSemBuscas && id === "a3" ? { lock: "locked" } : {}) };
+    return { ...linhaDaMesa({ id, keyword, brandId: MARCA_WIFI, semantic: { ...base, keyword_subject: { ...assunto, plan: plano } } }), territoryRef: TERRITORIO_AMARELO, ...(volume !== null ? { volume_search: volume, volume_source: "google_ads" } : {}) } as Linha;
+  });
+}
+const grupoDaKeywordWifi = (id: string) => id.startsWith("a") ? AMARELO : grupoDaKeywordAzul(id);
+const FILTRO_AMARELO = { kind: "groups" as const, color: "amarelo" as const, groupIds: [AMARELO] };
+/** Os 4 artigos já formados do amarelo (as Travadas com volume), como a mesa os lê. */
+const FORMADOS_AMARELO = ["a2", "a4", "a6", "a8"].map(id => ({ articleId: `art-${id}`, versionNumber: 1, subjectKeywordId: id, principalKeywordId: id, keywordIds: [id] }));
+
+test("C17 · amarelo com 4 Livres medidas sem número de buscas (o Pilar entre elas) e o azul na marca: a frase certa por estado, o recorte da cor, o Papel e a Definição do plano, uma leitura por artigo, o marcador do plano não envelhece, nada de 'fica de fora' nem dos textos que saíram", () => {
+  const mesa = [...(mesaAzul() as Linha[]), ...mesaAmarela()];
+  const linhas = buildPlanSheetRows({ brandId: MARCA_WIFI, keywords: mesa, groupOf: id => GRUPOS_COM_AMARELO[id] ?? null, keywordGroupOf: grupoDaKeywordWifi, articles: FORMADOS_AMARELO, radarArticleIds: new Set(), serp: null, filter: FILTRO_AMARELO, now: AGORA });
+
+  // 2 · a tabela já recortava: só as 8 do amarelo, na ordem do plano, na versão do GRUPO (v3).
+  assert.deepEqual(linhas.map(linha => linha.keywordId), ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"]);
+  assert.ok(linhas.every(linha => linha.planVersion === 3), "a versão do grupo, não a da keyword (2/3)");
+  const livres = linhas.filter(linha => linha.volume.state === "no_average");
+  assert.deepEqual(livres.map(linha => [linha.keywordId, linha.lock.state]), [["a1", "free"], ["a3", "free"], ["a5", "free"], ["a7", "free"]], "as 4 Livres foram medidas: 'sem número de buscas', nunca 'sem volume medido'");
+  assert.match(livres[0].volume.label, /^Google Ads sem número de buscas \(zero ou poucas\) \(medido em 15\/10\/2026\)$/);
+  assert.equal(planRowSeals(livres[0]).find(selo => selo.kind === "volume")?.label, "Sem buscas", "linguagem simples no selo");
+  assert.doesNotMatch(livres[0].lock.why, /Sem volume medido/);
+
+  // 1 · CONCLUIR FORMAÇÃO (a prévia por linha, da execução preparada): a Livre medida ouve (b), nunca "meça no Minerador".
+  const doGrupo = planSheetFormationSelection(linhas, "concludeFormation");
+  assert.deepEqual(doGrupo.byGroup.get(AMARELO)?.map(linha => linha.keywordId), ["a1", "a3", "a5", "a7"], "as 4 formadas ficam fora (o reforço é do 'Melhorar publicados…')");
+  const naoSustenta = (id: string) => ({ targetId: id, status: "insufficient_evidence" as const, reasons: ["Assunto declarado mantido como fundamento do artigo."], principalId: id, currentPrimaryId: id, memberIds: [id], needsValidation: false });
+  const previa = planSheetPreviewLines({ proposals: livres.map(linha => naoSustenta(linha.keywordId)) }, livres);
+  const FRASE_B = "O Google Ads não tem número de buscas para esta keyword (zero ou poucas buscas). Como ela é Livre, use “Procurar outra principal” ou traga sustentações com volume (Minerador → perfil da keyword → “Buscar sustentação”, grátis).";
+  assert.deepEqual(previa.map(linha => [linha.kind, linha.sentence]), livres.map(() => ["refused", FRASE_B]), "a frase (b), igual para as 4 — o Pilar incluído");
+  assert.ok(previa.every(linha => !/meça no Minerador|não tem volume medido/.test(linha.sentence)));
+  assert.ok(FRASE_B.startsWith(PLAN_NO_SEARCHES_SENTENCE) && FRASE_B.includes(PLAN_SUPPORT_SEARCH_PATH));
+  /*
+   * VALIDAR SERP ("Processar artigos" nas linhas do plano). 2026-10-17 · A RÉGUA
+   * ÚNICA DA COLETA (dono: "implementa a sua recomendação"): as 4 Livres sem
+   * buscas são a principal de IDENTIDADE (a frase do título do Assunto) — a SERP
+   * delas é coletada, com o propósito e o custo ditos. SUBSTITUI "recusa com o
+   * caminho" para a principal de identidade; a sem volume fora da identidade
+   * continua recusada com o caminho, sem "meça" (abaixo).
+   */
+  const serp = planSheetSerpSelection(linhas);
+  assert.deepEqual(serp.refused, []);
+  const deIdentidade = serp.toPlan.filter(row => row.identityPrincipal);
+  assert.deepEqual(deIdentidade.map(row => row.keywordId), ["a1", "a3", "a5", "a7"]);
+  assert.deepEqual(deIdentidade.map(planSheetSerpPlanLine), deIdentidade.map(row => `SERP da principal de identidade “${row.keyword}” (sem buscas no Google Ads): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo.`));
+  // A Livre sem buscas FORA da identidade (a frase não está no título nem no slug): recusada com o caminho, sem "meça".
+  const foraDaIdentidade = buildPlanSheetRows({ brandId: MARCA_WIFI, keywords: [...(mesaAzul() as Linha[]), ...mesaAmarela().map(linha => linha.id === "a3" ? { ...linha, ...linhaDaMesa({ id: "a3", keyword: "claro vivo ou tim internet residencial", brandId: MARCA_WIFI, semantic: { ...cadastro("a3", "claro vivo ou tim internet residencial", "Qual operadora atende a sua rua", 3, "Suporte", AMARELO, SEM_BUSCAS) } }), territoryRef: TERRITORIO_AMARELO } : linha)], groupOf: id => GRUPOS_COM_AMARELO[id] ?? null, keywordGroupOf: grupoDaKeywordWifi, articles: FORMADOS_AMARELO, radarArticleIds: new Set(), serp: null, filter: FILTRO_AMARELO, now: AGORA });
+  const recusadas = planSheetSerpSelection(foraDaIdentidade).refused;
+  assert.deepEqual(recusadas.map(item => item.keywordId), ["a3"]);
+  assert.ok(recusadas.every(item => item.reason.startsWith(`${PLAN_NO_SEARCHES_SENTENCE}: a SERP não é coletada para keyword sem volume que não é a principal de identidade do artigo`) && item.reason.includes("Procurar outra principal") && !/meça no Minerador/.test(item.reason)));
+  // O alerta da linha: "sem número de buscas — livre, pode trocar" (o porquê inteiro no title).
+  assert.equal(planRowAlerts(livres[0]).find(alerta => alerta.kind === "no_volume")?.label, "sem número de buscas — livre, pode trocar");
+  // (a) a NUNCA medida (azul, "diferença entre internet e Wi-Fi", Livre) continua "meça no Minerador (Volume)".
+  const azul = buildPlanSheetRows({ brandId: MARCA_WIFI, keywords: mesa, groupOf: id => GRUPOS_COM_AMARELO[id] ?? null, keywordGroupOf: grupoDaKeywordWifi, articles: [], radarArticleIds: new Set(), serp: null, filter: { kind: "groups", color: "azul", groupIds: [AZUL] }, now: AGORA });
+  const nuncaMedida = azul.find(linha => linha.keywordId === "k10")!;
+  assert.equal(nuncaMedida.volume.state, "missing");
+  assert.match(planSheetPreviewLines({ proposals: [naoSustenta("k10")] }, [nuncaMedida])[0].sentence, /meça no Minerador \(Volume\)/);
+  // 2026-10-17 · ela é a principal de identidade (no título do Assunto): a SERP dela vai ao custo, dita "sem volume medido".
+  assert.equal(planSheetSerpPlanLine(planSheetSerpSelection([nuncaMedida]).toPlan[0]), `SERP da principal de identidade “${nuncaMedida.keyword}” (sem volume medido): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo.`);
+  // (c) a TRAVADA medida sem número de buscas: só as sustentações (sem "Procurar outra principal", sem "meça").
+  const travada = buildPlanSheetRows({ brandId: MARCA_WIFI, keywords: [...(mesaAzul() as Linha[]), ...mesaAmarela({ travadaSemBuscas: true })], groupOf: id => GRUPOS_COM_AMARELO[id] ?? null, keywordGroupOf: grupoDaKeywordWifi, articles: FORMADOS_AMARELO, radarArticleIds: new Set(), serp: null, filter: FILTRO_AMARELO, now: AGORA }).find(linha => linha.keywordId === "a3")!;
+  assert.equal(travada.lock.state, "locked");
+  assert.equal(planSheetPreviewLines({ proposals: [naoSustenta("a3")] }, [travada])[0].sentence, `${PLAN_NO_SEARCHES_SENTENCE}. Como ela é Travada, a principal fica: traga sustentações com volume (${PLAN_SUPPORT_SEARCH_PATH}).`);
+
+  // 3 · "Papel no Silo" e "Definição do artigo" da linha do plano (candidato e artigo da mesa): o plano, com o porquê curto.
+  assert.equal(planRowRoleLabel(linhas[0]), "Pilar · 1º");
+  assert.equal(planRowRoleLabel(linhas[6]), "Suporte · 7º");
+  assert.deepEqual(linhas.map(linha => planRowDefinition(linha).label), ["Aguardando formação", "Formado · v1", "Aguardando formação", "Formado · v1", "Aguardando formação", "Formado · v1", "Aguardando formação", "Formado · v1"], "nunca 'Pendente' sem explicação para a linha do plano");
+  assert.equal(planRowDefinition(linhas[0]).reason, "sem número de buscas · Livre: “Procurar outra principal” ou sustentação");
+  assert.equal(planRowDefinition(linhas[0]).title, FRASE_B);
+  assert.equal(planRowDefinition(linhas[1]).reason, null);
+  // Na tabela de sempre: o artigo da mesa que é do plano lê as MESMAS funções (a linha do plano sem artigo também).
+  const mesaDaTela = codigoSemComentarios("modules/arquiteto/arquiteto-workspace.tsx");
+  assert.match(mesaDaTela, /const linhaDoPlanoDaLinha = articleMode \? planRowOfArticle\(art\) : null;/);
+  assert.match(mesaDaTela, /if \(linhaDoPlanoDaLinha\) return <span data-testid="architect-silo-role-cell"[^>]*>\{planRowRoleLabel\(linhaDoPlanoDaLinha\)\}<\/span>;/);
+  assert.match(mesaDaTela, /\{definicaoDoPlano \? <PlanRowDefinitionCell definition=\{definicaoDoPlano\} \/> : articleDnaVersion \?/);
+  assert.match(codigoSemComentarios("modules/arquiteto/plan-article-sheet.tsx"), /case "articleDefinition":\s*return <td key=\{columnId\} className="border-r border-divider px-2 py-2 text-center"><PlanRowDefinitionCell definition=\{planRowDefinition\(row\)\} \/><\/td>;/);
+
+  // 2 · O RECORTE DA COR fora da tabela: a keyword e o candidato do amarelo dentro; os do azul fora; sem cor, tudo.
+  const posicoes = readArchitectSubjectStandings(mesa);
+  const grupos = new Map(mesa.map(linha => [linha.id, grupoDaKeywordWifi(linha.id)] as const));
+  const recorte = editorialGroupCut({ brandId: MARCA_WIFI, filter: FILTRO_AMARELO, keywordGroupById: grupos, standings: posicoes });
+  assert.equal(recorte.all, false);
+  assert.deepEqual(mesa.filter(linha => recorte.keyword(linha.id)).map(linha => linha.id), AMARELO_REAL.map(([id]) => id));
+  assert.equal(recorte.article({ subjectKeywordId: "k9", principalKeywordId: "k9", keywordIds: ["k9"] }), false);
+  assert.equal(recorte.article({ subjectKeywordId: "a1", principalKeywordId: "s-sem-grupo", keywordIds: ["s-sem-grupo"] }), true, "o artigo do plano entra pelo grupo do plano do Assunto");
+  // Etiqueta perdida: o artigo do plano continua no recorte pelo plano (o caso "jogos online").
+  const semEtiqueta = editorialGroupCut({ brandId: MARCA_WIFI, filter: FILTRO_AMARELO, keywordGroupById: new Map(), standings: posicoes });
+  assert.equal(semEtiqueta.keyword("a7"), true);
+  assert.equal(editorialGroupCut({ brandId: MARCA_WIFI, filter: { kind: "all" }, keywordGroupById: grupos, standings: posicoes }).all, true, "sem cor: a marca inteira, como hoje");
+  // O painel conta o recorte (a formação e o hash seguem lendo os universos inteiros).
+  const universo = (siloRef: string, label: string, ids: readonly string[]) => buildArticleFormationUniverse({ siloRef, siloLabel: label, siloSlug: slugOf(label), keywords: mesa.filter(linha => ids.includes(linha.id)).map(linha => entradaDaFormacao(linha)) });
+  const universos = [universo(TERRITORIO_AZUL, "Wi-Fi e fibra óptica", LINHAS_AZUL.map(linha => linha.id)), universo(TERRITORIO_AMARELO, "Planos e contratação", AMARELO_REAL.map(([id]) => id))];
+  const noRecorte = cutArticleFormationUniverses(universos, { candidate: candidato => recorte.article({ subjectKeywordId: candidato.subjectKeywordId ?? null, principalKeywordId: candidato.principalKeywordId, keywordIds: candidato.keywords.map(item => item.keywordId) }), keyword: recorte.keyword });
+  assert.deepEqual(noRecorte.map(item => item.siloRef), [TERRITORIO_AMARELO], "o universo do azul sai do recorte do amarelo");
+  const todos = summarizeArticleFormation(universos), doAmarelo = summarizeArticleFormation(noRecorte);
+  assert.equal(doAmarelo.keywords, 8);
+  assert.equal(doAmarelo.candidates, summarizeArticleFormation([universos[1]]).candidates);
+  assert.ok(todos.candidates > doAmarelo.candidates && todos.keywords === 15, "a marca inteira continua 15 (azul + amarelo)");
+
+  // 4 · ANÁLISE DA ARQUITETURA: o léxico juntou "internet residencial barata" + "internet no meu cep" (posições 2 e 4) e
+  // "combo internet tv streaming" (amarelo, 7) + "internet para streaming" (azul, 12). Cada artigo do plano é a sua leitura.
+  const SEM = { value: 0, reasons: ["r"] };
+  const grupo = (ref: string, ids: string[]): ClusterAnalysis => ({ clusterRef: ref, label: ids[0], memberKeywordIds: ids, headKeywordId: ids[0], ambiguousHeadKeywordIds: [], destination: "insufficient_depth", suggestedTerritoryRef: null, suggestedTerritoryLabel: null, alternativeTerritoryRefs: [], scores: { coherence: SEM, siloFit: SEM, depth: SEM, publishedEvidence: SEM }, confidence: "baixa", reason: "O grupo não tem profundidade para um silo próprio neste lote; segue para a formação de artigos." });
+  const juntos = [["a2", "a4"], ["a7", "k12"]];
+  const sozinhos = [...AMARELO_REAL.map(([id]) => id), ...LINHAS_AZUL.map(linha => linha.id)].filter(id => !juntos.flat().includes(id));
+  const lexico: ArchitectureAnalysis = { clusters: [...juntos.map((ids, indice) => grupo(`c-junto-${indice}`, ids)), ...sozinhos.map(id => grupo(`c-${id}`, [id]))], summary: { keywords: 15, clusters: 2 + sozinhos.length, strengthening: 0, newSilos: 0, insufficient: 2 + sozinhos.length, ambiguous: 0, confidence: "baixa" }, narrative: [], baseHash: "arch:wifi" };
+  assert.equal(lexico.summary.clusters, 13, "15 keywords em 13 grupos léxicos");
+  const nomeDo = new Map(mesa.map(linha => [linha.id, linha.keyword] as const));
+  const planoDe = (id: string) => { const posicao = posicoes.get(id); if (!posicao?.plan) return null; return { siloName: posicao.plan.groupId === AMARELO ? "Planos e contratação" : PLANO_AZUL.siloName, role: posicao.plan.role, order: posicao.plan.order }; };
+  const leitura = withDeclaredPlanReading(lexico, planoDe, id => nomeDo.get(id) ?? null);
+  assert.deepEqual([leitura.summary.declaredPlan, leitura.summary.insufficient, leitura.summary.clusters], [15, 0, 15], "15 seguem o plano, nenhuma 'sem profundidade'");
+  assert.ok(leitura.clusters.every(item => item.memberKeywordIds.length === 1 && item.declaredPlan), "uma leitura por artigo do plano");
+  const dizDe = (id: string) => leitura.clusters.find(item => item.memberKeywordIds[0] === id)!;
+  assert.equal(dizDe("a2").reason, "Segue o plano do Silo “Planos e contratação” (Suporte, posição 2).");
+  assert.equal(dizDe("a4").reason, "Segue o plano do Silo “Planos e contratação” (Suporte, posição 4).");
+  assert.equal(dizDe("a4").label, "internet no meu cep");
+  assert.equal(dizDe("a7").reason, "Segue o plano do Silo “Planos e contratação” (Suporte, posição 7).", "combo internet tv streaming: o grupo com o azul não a tira do plano");
+  assert.equal(dizDe("k12").reason, "Segue o plano do Silo “Wi-Fi e fibra óptica” (Suporte, posição 12).");
+  assert.ok(leitura.narrative.every(linha => !/não tem profundidade/.test(linha)));
+  assert.equal(leitura.baseHash, lexico.baseHash, "só leitura: a base da análise não muda");
+
+  // 5 · O MARCADOR NASCIDO PELA LINHA DO PLANO (WifiConecta, SELECT de 16/10: baseHash "serpbase:85ffd702b788a0e8") não envelhece;
+  // o de "Processar artigos" (artbase) envelhece quando o lote muda.
+  const baseDoLote = articleFormationBaseHash({ siloRefs: universos.map(item => item.siloRef), keywordIds: universos.flatMap(item => item.keywordIds), publishedArticlePaths: [] });
+  assert.ok(baseDoLote.startsWith(ARTICLE_FORMATION_LOT_BASE_PREFIX), "o prefixo da base do lote é o que o marcador reconhece");
+  assert.equal(articleFormationMarkerIsStale({ storedBaseHash: "serpbase:85ffd702b788a0e8", currentBaseHash: baseDoLote }), false, "nunca mais 'Formação desatualizada' para sempre");
+  assert.equal(articleFormationMarkerIsStale({ storedBaseHash: baseDoLote, currentBaseHash: baseDoLote }), false);
+  assert.equal(articleFormationMarkerIsStale({ storedBaseHash: "artbase:0000000000000000", currentBaseHash: baseDoLote }), true);
+
+  // 6 · Silos: a frase do lote de desfazer só acompanha o botão e diz a verdade; o painel sem os textos que saíram (guarda da forma).
+  const linhasDeSilo = codigoSemComentarios("modules/arquiteto/territorial-workspace-rows.tsx");
+  assert.match(linhasDeSilo, /\{undoAll && undoAll\.count > 0 && undoAll\.excludedNote && \(/);
+  const tela = codigoSemComentarios("modules/arquiteto/arquiteto-workspace.tsx");
+  assert.match(tela, /o Silo do plano segue o cadastro do Minerador/);
+  assert.doesNotMatch(tela, /fica\$\{siloUndoPlanExcluded\.length === 1 \? "" : "m"\} de fora/);
+  const painel = codigoSemComentarios("modules/arquiteto/article-formation-panel.tsx");
+  for (const saiu of ["Formação desatualizada", "Assunto(s) aguardando sustentação", "foram confrontados com a SERP", "artigo(s) confirmado(s)"]) assert.ok(!painel.includes(saiu), saiu);
+  assert.equal(chamadasDeRede, 0, "0 chamada paga, 0 rede");
 });
 
 test("C14 · forma da linha: cada botão da linha existe uma vez; nenhuma rota nova do Arquiteto; HOJE há gravador de article_dna 'approved' fora do núcleo — muda na F1", () => {

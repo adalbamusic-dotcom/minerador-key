@@ -111,7 +111,7 @@ test("Concluir formação (7, barra de sempre em 'Todos'): as 3 presas recusadas
   semGirar(); semMinerador();
 });
 
-test("Processar artigos (7, barra de sempre em 'Todos') = Validar SERP: custo antes, uma confirmação, resultado por linha (sem volume, já no cache, coletada) e nada gira", async () => {
+test("Processar artigos (7, barra de sempre em 'Todos') = Validar SERP: custo antes, uma confirmação, resultado por linha (principal de identidade sem volume, já no cache, coletada) e nada gira", async () => {
   rede();
   await screen.render(mesa(TODOS)); await assentar();
   await marcarAzuis();
@@ -120,9 +120,10 @@ test("Processar artigos (7, barra de sempre em 'Todos') = Validar SERP: custo an
   assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /chamada\(s\) paga\(s\)/);
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   const pagos = chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute");
-  assert.deepEqual(pagos.flatMap(chamada => chamada.body.keywords.map((item: any) => item.keywordId)), ["k11", "k12", "k13", "k14", "k15"]);
+  // 2026-10-17 · régua única: a Livre sem volume que está no título do Assunto (principal de identidade) também é coletada; o servidor confere de novo.
+  assert.deepEqual(pagos.flatMap(chamada => chamada.body.keywords.map((item: any) => item.keywordId)), ["k10", "k11", "k12", "k13", "k14", "k15"]);
   for (const id of AZUIS) assert.ok(resultado(id), `a linha ${id} tem resultado`);
-  assert.match(resultado("k10"), /Sem volume medido/);
+  assert.match(resultado("k10"), /SERP coletada nas 4 lentes/);
   assert.match(resultado("k9"), /Já temos as 4 lentes/);
   semGirar(); semMinerador();
 });

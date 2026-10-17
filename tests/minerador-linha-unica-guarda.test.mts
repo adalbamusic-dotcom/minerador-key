@@ -103,18 +103,31 @@ test("linha: UM leitor do plano colado (`parseDeclaredPlanText`) — o card, o d
   assert.equal((card.match(/data-subject-cadastro-abrir-arquivo/g) || []).length, 1, "um link só para abrir o arquivo");
 });
 
-test("linha: a Pesquisa por Assunto entra pelo mesmo núcleo na tela, no MCP, no cadastro e nas sugestões do Arquiteto", () => {
+/*
+ * 2026-10-16 (decisão do dono; SDD da linha única do Arquiteto §15.1): a
+ * keyword NOVA que o Arquiteto acha entra na confirmação dele pelos MESMOS
+ * núcleos daqui — a incorporação da melhoria e as portas do "Reforçar
+ * publicados" — só nas linhas que o import cria. Os dois lugares entram na lista.
+ * 2026-10-17: as portas saíram da rota do Reforçar para um arquivo próprio
+ * (`arquiteto-minerador-new-keyword-ports.ts`), usado também pelo "Aceitar
+ * grupo" da diferenciação — a mesma função, nenhuma porta nova.
+ */
+test("linha: a Pesquisa por Assunto entra pelo mesmo núcleo na tela, no MCP, no cadastro, nas sugestões e na keyword nova do Arquiteto", () => {
   assert.deepEqual(quemTem(/importSubjectDiscoveryWithCore\(\{/), [
     "app/api/minerador/marcas/[brandId]/subject-discovery/import/route.ts",
     "lib/minerador/declared-plan-import-core.ts",
+    "lib/server/arquiteto-article-improvement.ts",
+    "lib/server/arquiteto-minerador-new-keyword-ports.ts",
     "lib/server/minerador-architect-suggestions.ts",
     "lib/server/platform-mcp-tools.ts",
   ]);
 });
 
-test("linha: a Lógica do servidor é uma só (MCP, reaprovar, recibo, sugestões, conversão)", () => {
+test("linha: a Lógica do servidor é uma só (MCP, reaprovar, recibo, sugestões, conversão, keyword nova do Arquiteto)", () => {
   assert.deepEqual(quemTem(/runKeywordLogicWithCore\(\{/), [
     "app/api/minerador/marcas/[brandId]/plans/reapprove/route.ts",
+    "lib/server/arquiteto-article-improvement.ts",
+    "lib/server/arquiteto-minerador-new-keyword-ports.ts",
     "lib/server/minerador-architect-suggestions.ts",
     "lib/server/minerador-subject-conversion.ts",
     "lib/server/platform-mcp-tools.ts",

@@ -383,11 +383,20 @@ function portasFalsas(options: { usado?: boolean; adsFalha?: "keyword_and_url"; 
   return { ports, registro };
 }
 
-async function montarPar(postoAtrair: DifferentiationPage["post"] = "locked") {
+/*
+ * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono: "Se o termo principal tem pouco volume, mas faz sentido preservá-lo por
+ * ser a identidade do assunto/tema, principalmente nos publicados"). A página real de "captar" tem a URL feita da
+ * principal: ela fica e a diferenciação só traz secundárias e a nota. Para exercitar a MÁQUINA da troca, o par
+ * abaixo usa a página de "captar" com uma principal estranha ao slug (fora da identidade); a real é conferida à parte.
+ */
+const CAPTAR_FORA_DA_IDENTIDADE = "agenda vazia na estética";
+async function montarPar(postoAtrair: DifferentiationPage["post"] = "locked", foraDaIdentidade = true) {
   const deteccao = detectarReal(keyword => keyword === ATRAIR ? { post: postoAtrair } : {});
-  const grupo = deteccao.groups.find(item => item.members.some(membro => membro.page.keyword === CAPTAR))!;
-  const angles = proposeDifferentiationAngles({ group: grupo });
-  const plan = await buildDifferentiationPlan({ brandId: "marca", group: grupo, angles, aiUsed: false });
+  const real = deteccao.groups.find(item => item.members.some(membro => membro.page.keyword === CAPTAR))!;
+  const angles = proposeDifferentiationAngles({ group: real });
+  const plan = await buildDifferentiationPlan({ brandId: "marca", group: real, angles, aiUsed: false });
+  // Os ângulos, as sementes e o plano saem da página real; só a régua da troca lê a principal fora da identidade.
+  const grupo = foraDaIdentidade ? { ...real, members: real.members.map(membro => membro.page.keywordId === CAPTAR ? { ...membro, page: { ...membro.page, keyword: CAPTAR_FORA_DA_IDENTIDADE } } : membro) } : real;
   const pageFootprints = pegadasReais().filter(pegada => pegada.keywordId === CAPTAR || pegada.keywordId === ATRAIR);
   return { grupo, angles, plan, pageFootprints };
 }
@@ -440,6 +449,16 @@ test("rodada paga com portas falsas: Google Ads grátis (sementes e URL), SERP c
   assert.ok(result.refused[CAPTAR].some(item => item.keyword === "como atrair pacientes estética"));
   assert.ok(result.refused[CAPTAR].some(item => item.keyword === "captar clientes estética grátis"), "sem volume nunca é proposta");
   assert.ok(result.refused[CAPTAR].some(item => item.keyword === "marketing para clínica de estética"), "outra publicada não entra");
+});
+
+test("2026-10-17 · principal de identidade na diferenciação: a página real de 'captar' (URL feita da principal) não troca a principal, mesmo Livre; só secundárias e a nota", async () => {
+  const { grupo, angles, plan, pageFootprints } = await montarPar("locked", false);
+  const desfecho = await runPublishedDifferentiation({ brandId: "marca", plan, group: grupo, angles, pageFootprints, publishedNormalized: new Set(REAL.publicados.map(item => normalizeKeyword(item.keyword))), operationRequestId: "44444444-2222-4333-8444-555555555555", authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.costRange.maxUsd } }, portasFalsas().ports);
+  assert.ok(desfecho.ok, JSON.stringify(desfecho));
+  if (!desfecho.ok) return;
+  const captar = desfecho.result.evaluation.pages.find(pagina => pagina.keywordId === CAPTAR)!;
+  assert.equal(captar.newPrincipal, null, "a principal de identidade fica");
+  assert.equal(chamadasDeRede, 0);
 });
 
 test("rodada: ledger com a operação → nada é pago; plano adulterado → nada é pago", async () => {

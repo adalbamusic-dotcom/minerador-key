@@ -245,8 +245,12 @@ test("2a · o Silo do plano declarado NÃO entra em 'Desfazer os Silos sugeridos
   assert.deepEqual(territoryUndoRefusals({ ...base, territory: territorio(SILO_SUGERIDO), declaredPlan: null }), []);
   const tela = ler("modules/arquiteto/arquiteto-workspace.tsx");
   assert.match(tela, /territoryUndoRefusals\(\{ territory, members: membros, approvedArticles: aprovados, siloArtifacts: artefatos, declaredPlan: doPlano \}\)/);
-  assert.match(tela, /fica\$\{siloUndoPlanExcluded\.length === 1 \? "" : "m"\} de fora: /, "o lote diz quantos ficaram de fora e por quê");
-  assert.match(ler("modules/arquiteto/territorial-workspace-rows.tsx"), /data-testid="architect-undo-all-excluded"/);
+  // 2026-10-16 (noite) · teste do dono: "1 fica de fora: Silo do plano…" aparecia sem o botão do lote, sobre o Silo do plano Confirmado e visível.
+  // A frase diz só o que é verdade (não entra no Desfazer; segue o cadastro do Minerador) e só acompanha o botão do lote.
+  assert.match(tela, /`Não entra\$\{siloUndoPlanExcluded\.length === 1 \? "" : "m"\} no Desfazer: /, "o lote diz o que não entra nele e por quê");
+  assert.match(tela, /o Silo do plano segue o cadastro do Minerador \(“Tirar do plano” ou “Substituir o plano”\)/);
+  assert.doesNotMatch(tela, /de fora: \$\{siloUndoPlanExcluded/);
+  assert.match(ler("modules/arquiteto/territorial-workspace-rows.tsx"), /\{undoAll && undoAll\.count > 0 && undoAll\.excludedNote && \(\s*<span className="text-sm text-text-muted" data-testid="architect-undo-all-excluded">/);
 });
 
 test("2b · o Silo do plano desfeito: o envio não o duplica nem põe keyword nele; 'Recriar o Silo do plano' traz as 4 sem artigo e deixa as 3 do artigo", () => {

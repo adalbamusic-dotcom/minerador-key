@@ -96,7 +96,7 @@ const GENERAL_TOPICS: readonly ContextHelpTopic[] = [
     description: "Nenhuma ação paga acontece sem uma confirmação sua com o valor máximo. O que já foi pago fica guardado e não é cobrado de novo, mesmo se a tela parar no meio.",
     sections: [
       { heading: "Grátis", body: "Buscar keywords no Google Ads (usa a cota do Google Ads), ler a SERP guardada, gravar melhorias, desfazer Silo, aprovar artigos e montar links internos." },
-      { heading: "Pago", body: "“Validar no Google” (SERP nova), “Processar artigos” quando falta SERP, “Medir allintitle (pago)” e as buscas em lote com teto de US$ 1,00." },
+      { heading: "Pago", body: "“Coletar a SERP no DataForSEO” (SERP nova; antes chamado “Validar no Google”), “Processar artigos” quando falta SERP, “Medir allintitle (pago)” e as buscas em lote com teto de US$ 1,00. O Google Ads é grátis (cota do Google Ads)." },
       { heading: "IA", body: "A leitura da IA usa a conexão de IA configurada para a marca." },
     ],
     keywords: ["custo", "pago", "grátis", "preço", "us$", "dólar", "cobrança", "cota", "google ads", "dataforseo"],
@@ -108,9 +108,9 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
     id: "proximo-passo",
     title: "Cartão “Próximo passo”",
     summary: "Mostra uma frase e um botão só: o que fazer agora para melhorar os publicados e os Assuntos.",
-    description: "O cartão lê o estado do trabalho e oferece a próxima ação. Os botões numerados seguem a ordem 1 · Buscar keywords, 2 · Validar no Google e 3 · Gravar melhorias. Quando não há nada a fazer nos publicados, ele leva às Sobras ou aos artigos novos.",
+    description: "O cartão lê o estado do trabalho e oferece a próxima ação. Os botões numerados seguem a ordem 1 · Buscar keywords, 2 · Coletar a SERP no DataForSEO e 3 · Gravar melhorias. Quando não há nada a fazer nos publicados, ele leva às Sobras ou aos artigos novos.",
     sections: [
-      { heading: "Continuar", body: "Aparece quando a validação ou a gravação parou no meio (aba fechada, tempo esgotado). Continua de onde parou, sem cobrar de novo o que já foi pago." },
+      { heading: "Continuar", body: "Aparece quando a coleta da SERP ou a gravação parou no meio (aba fechada, tempo esgotado). Continua de onde parou, sem cobrar de novo o que já foi pago." },
       { heading: "Ver andamento", body: "Aparece quando outra execução está rodando no servidor. Toque para atualizar." },
       { heading: "Barra de progresso", body: "Enquanto trabalha, o cartão mostra a barra, o contador (ex.: 3 de 12 grupos) e o tempo. Não feche a aba." },
     ],
@@ -120,10 +120,10 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
     id: "buscar-keywords",
     title: "1 · Buscar keywords (grátis)",
     summary: "Lê de graça o que já temos e mostra “Já temos · Falta · Custa”; a IA e o Google Ads só rodam com a sua autorização.",
-    description: "Primeiro a leitura grátis: DNA de cada keyword, volume já medido (inclusive “sem média” do Google Ads há menos de 30 dias, que não é medido de novo), SERP em cache, Assunto, plano e trava. O cartão diz o que já temos, o que falta e quanto custa; a leitura da IA (OpenRouter, que recebe o resumo do DNA) e a medição no Google Ads (cota, sem custo em dólar) só rodam quando você toca no botão que diz o custo, e só para o que falta. A medição feita aqui é gravada no “Gravar melhorias” sem consultar o Google Ads de novo. A busca segue esta ordem: (1) keywords da lista que o Google já junta com o artigo, pela SERP guardada; (2) leitura da IA na sua lista, que escolhe de 1 a 3 keywords por artigo, com o papel e um motivo; (3) leitura da lista pelo código, para quem a IA não resolveu: keywords com volume que são o núcleo do slug e levam a palavra do próprio slug (“como atrair clientes” vai para a página de atrair, “como captar clientes” para a de captar); (4) só para quem ficou sem nada, uma busca nova no Google Ads. Nada é gravado neste passo.",
+    description: "Primeiro a leitura grátis: DNA de cada keyword, volume já medido (inclusive “sem média” do Google Ads há menos de 30 dias, que não é medido de novo), SERP em cache, Assunto, plano e trava. O cartão diz o que já temos, o que falta e quanto custa; a leitura da IA (OpenRouter, que recebe o resumo do DNA) e a medição no Google Ads (grátis, cota do Google Ads) só rodam quando você toca no botão que diz o custo, e só para o que falta. A medição feita aqui é gravada no “Gravar melhorias” sem consultar o Google Ads de novo. A busca segue esta ordem: (1) keywords da lista que o Google já junta com o artigo, pela SERP guardada; (2) leitura da IA na sua lista, que escolhe de 1 a 3 keywords por artigo, com o papel e um motivo; (3) leitura da lista pelo código, para quem a IA não resolveu: keywords com volume que são o núcleo do slug e levam a palavra do próprio slug (“como atrair clientes” vai para a página de atrair, “como captar clientes” para a de captar); (4) só para quem ficou sem nada, uma busca nova no Google Ads. Nada é gravado neste passo.",
     sections: [
-      { heading: "Buscar de novo", body: "Refaz a busca com a lista atual. Use depois de aprovar keywords novas no Minerador." },
-      { heading: "Ler com IA e medir", body: "Aparece quando falta algo que custa: diz quantas keywords serão medidas no Google Ads (cota) e se há uma chamada de IA. O que já temos não é pedido de novo." },
+      { heading: "Buscar de novo", body: "Refaz a busca com a lista atual. Use depois de decidir no Minerador uma keyword que já existia lá." },
+      { heading: "Ler com IA e medir", body: "Aparece quando falta algo que custa: diz quantas keywords serão medidas no Google Ads (grátis, cota do Google Ads) e se há uma chamada de IA. O que já temos não é pedido de novo." },
       { heading: "Origem de cada linha", body: "A tabela diz de onde veio cada sugestão: Pares da SERP, Leitura da IA — confira, Lista · núcleo do slug ou Busca nova no Google Ads." },
       { heading: "Quando o Google separa parte do grupo", body: "Se o parecer da SERP mostra que algumas keywords não dividem páginas com a principal, elas saem e o grupo menor é conferido de novo pelo cache, sem custo. A linha diz quem saiu." },
       { heading: "Regras que a IA não pode furar", body: "Sem volume, publicada, de outro artigo aprovado, que troca a entidade do slug, de outro público ou cabeça genérica muito ampla (acima de 5.000 buscas com até duas palavras) ficam de fora. As recusas aparecem em “Sugestões da IA recusadas pelas regras”." },
@@ -132,14 +132,14 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
   },
   {
     id: "validar-no-google",
-    title: "2 · Validar no Google",
-    summary: "Confere na SERP se as keywords sugeridas pedem o mesmo conteúdo do artigo. Pode ser pago; o custo aparece antes.",
-    description: "Antes de gravar, cada composição nova (principal + apoios) precisa do parecer da SERP. O botão mostra quantas consultas faltam e o valor máximo. O que já está guardado não é cobrado. A validação roda um grupo por vez, com barra de progresso.",
+    title: "2 · Coletar a SERP no DataForSEO",
+    summary: "Coleta, no DataForSEO, a primeira SERP da principal que ainda não tem. É pago: o botão diz as consultas e o valor máximo antes.",
+    description: "Antes de gravar, a composição nova (principal + apoios) recebe o parecer da SERP. A SERP paga é só a primeira da principal que ainda não tem (4 lentes); a secundária usa a SERP da principal guardada e nunca paga a dela. O botão mostra quantas consultas faltam e o valor máximo, em “Coletar a SERP no DataForSEO (pago: N consultas, até US$ X)”. O que já está guardado não é cobrado. A coleta roda um grupo por vez, com barra de progresso. (Até 17/10 este passo se chamava “Validar no Google”.)",
     sections: [
-      { heading: "Precisa validar no Google", body: "Linha que ainda não tem o parecer da composição. Ela só pode ser gravada depois deste passo." },
+      { heading: "Precisa coletar a SERP no DataForSEO", body: "Linha cuja principal ainda não tem SERP. Ela só pode ser gravada depois deste passo." },
       { heading: "Se parar no meio", body: "Use “Continuar”: o que já foi pago está guardado." },
     ],
-    keywords: ["validar no google", "serp", "pago", "parecer", "precisa validar", "consultas", "custo"],
+    keywords: ["coletar a serp", "dataforseo", "validar no google", "serp", "pago", "parecer", "precisa coletar", "consultas", "custo"],
   },
   {
     id: "gravar-melhorias",
@@ -148,6 +148,7 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
     description: "Marque na tabela as melhorias que quer. A confirmação aparece logo abaixo dos botões com o resumo; ao confirmar, o Arquiteto grava um artigo por vez e só diz que deu certo depois de reler o que ficou salvo. URL, slug e canonical nunca mudam.",
     sections: [
       { heading: "Se uma linha falhar", body: "As outras seguem. Tente de novo com “Continuar”. Se a mensagem disser que uma keyword mudou desde a prévia, use “Buscar de novo”." },
+      { heading: "Keyword nova", body: "A confirmação lista, por artigo, as keywords novas na marca com volume e fonte. Ao confirmar, elas são importadas no Minerador, processadas, aprovadas e enviadas ao Arquiteto e entram no artigo, tudo de uma vez. As que já vieram do Minerador não são alteradas." },
       { heading: "Depois de gravar", body: "O artigo ganha uma nova versão em revisão. A aprovação final continua sendo sua, na Revisão do artigo." },
     ],
     keywords: ["gravar melhorias", "confirmar", "aplicar", "marcar", "tabela", "versão nova", "falhou", "keyword mudou"],
@@ -187,7 +188,7 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
     id: "processar-artigos",
     title: "Processar artigos",
     summary: "Monta os artigos novos e dá o parecer da SERP de cada um. Coleta a SERP que falta, com o custo mostrado antes. Não grava nada no artigo.",
-    description: "Processar faz, nesta ordem: a primeira coleta da SERP das keywords com volume (só o que não está guardado), o parecer de cada artigo e o allintitle da principal. Cada passo pago abre o plano de custo antes. Se tudo já estiver no cache, segue sem custo.",
+    description: "Processar faz, nesta ordem: a primeira coleta da SERP das keywords com volume e da principal de identidade de cada artigo, mesmo sem volume (só o que não está guardado), o parecer de cada artigo e o allintitle da principal. Cada passo pago abre o plano de custo antes. Se tudo já estiver no cache, segue sem custo.",
     sections: [
       { heading: "Plano de custo", body: "Mostra, por lente, o que está no cache e o que seria pago. Você pode pagar e validar, validar só com o que está guardado ou “Cancelar pagamento · analisar com o cache (US$ 0)”." },
       { heading: "Concluir formação", body: "É o botão que grava: transforma a proposta em ArticleDNA aprovado. Quando todos os artigos de um Silo ficam prontos, o Silo e a página dele são consolidados na mesma hora." },
@@ -196,8 +197,8 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
   },
   {
     id: "assuntos-painel",
-    title: "Painel de Assuntos",
-    summary: "Lista os Assuntos declarados no Minerador. Tocar num Assunto filtra os artigos dele e mostra onde ele está preso.",
+    title: "Ações do Assunto",
+    summary: "Na barra da aba Artigos, escolha um Assunto declarado no Minerador para ver onde ele está preso e agir nele. Não filtra a tabela: o filtro é a etiqueta da cor.",
     description: "Cada Assunto mostra se tem volume, a nota, a página de destino e em quais artigos ou Silos está “Preso em”. “Prender Assunto” liga o Assunto a um artigo ou Silo; “Soltar Assunto” desfaz a ligação sem apagar nada; “Confirmar Assunto do Silo” aceita a sugestão do Silo. “Formar artigos automaticamente” forma artigos com as keywords que sustentam o Assunto, com confirmação antes.",
     keywords: ["assuntos", "prender assunto", "soltar assunto", "confirmar assunto do silo", "formar artigos automaticamente"],
   },
@@ -339,7 +340,7 @@ const REVIEW_TOPICS: readonly ContextHelpTopic[] = [
     sections: [
       { heading: "Aprovação", body: "Bruto (ainda sem aprovação), Aprovado ou Rejeitado. Um traço quer dizer que o artigo ainda não tem definição gravada." },
       { heading: "Status", body: "Em processamento, Aguardando conclusão, Aguardando consolidação do Silo, Concluído, Pronto para Radar, Enviado ao Radar ou Publicado." },
-      { heading: "Definição do artigo", body: "Consolidado · vN (aprovado), Em revisão · vN (versão nova esperando), Formação concluída, Pendente ou “Reprocessar e concluir de novo” quando a composição mudou." },
+      { heading: "Definição do artigo", body: "Consolidado · vN (aprovado), Em revisão · vN (versão nova esperando), Formação concluída, Pendente ou “Reprocessar e concluir de novo” quando a composição mudou. No artigo do plano, o estado lido do plano: Formado · vN, Aguardando formação ou Pendente, com o porquê curto embaixo (e o Papel no Silo é o do plano: Pilar ou Suporte, com a posição)." },
       { heading: "Publicado", body: "“ARTICLE · PUBLICADO” e “URL, slug e Silo preservados”: a página no ar é protegida." },
     ],
     keywords: ["estado", "status", "aprovação", "bruto", "aprovado", "rejeitado", "em revisão", "consolidado", "pronto para radar", "enviado ao radar", "publicado", "versão"],

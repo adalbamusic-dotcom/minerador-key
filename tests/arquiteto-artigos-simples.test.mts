@@ -28,7 +28,7 @@ test("próximo passo: uma frase e um botão por estado, na ordem 1 → 2 → 3",
   const sem = resolveImprovementNextStep({ ...base, hasRun: false, state: null });
   assert.deepEqual([sem.kind, sem.button], ["prepare", "1 · Buscar keywords (grátis)"]);
   const validar = resolveImprovementNextStep({ ...base, paidQueries: 2, costMaxUsd: 0.006, selectedCount: 2 });
-  assert.deepEqual([validar.kind, validar.button], ["validate", "2 · Validar no Google (2 consultas, até US$ 0.01)"]);
+  assert.deepEqual([validar.kind, validar.button], ["validate", "2 · Coletar a SERP no DataForSEO (pago: 2 consultas, até US$ 0.01)"]);
   const gravar = resolveImprovementNextStep({ ...base, selectedCount: 3 });
   assert.deepEqual([gravar.kind, gravar.button], ["apply", "3 · Gravar melhorias (3)"]);
   const nada = resolveImprovementNextStep({ ...base, state: "complete", accepted: true, selectedCount: 2, readyCount: 2, hasLeftovers: true });
@@ -74,7 +74,7 @@ test("execução presa vem antes de tudo; retomar é Continuar e só ler o andam
 
 test("os números 1 · 2 · 3 ficam só no cartão; a fileira mostra os outros atos sem número", () => {
   assert.equal(improvementApplyLabel(2, false), "Gravar melhorias (2)");
-  assert.equal(improvementValidateLabel(2, 0.006, false), "Validar no Google (2 consultas, até US$ 0.01)");
+  assert.equal(improvementValidateLabel(2, 0.006, false), "Coletar a SERP no DataForSEO (pago: 2 consultas, até US$ 0.01)");
   const fileira = painel.slice(painel.indexOf("<div className=\"flex flex-wrap gap-2\">"), painel.indexOf("{confirm && run &&"));
   assert.ok(fileira.length > 0);
   assert.doesNotMatch(fileira, /[123] · /, "nenhum botão numerado na fileira");
@@ -160,8 +160,6 @@ test("nada saiu da tela: os blocos técnicos continuam na grade, e melhoria e So
     "data-testid=\"architect-process-context-panel\"",
     "data-testid=\"architect-map-human-actions\"",
     "data-testid=\"architect-reserved-silo-heads\"",
-    "<SubjectFilterPanel",
-    "data-testid=\"architect-anchored-subjects\"",
     "data-testid=\"architect-ungrouped-keywords\"",
     "data-testid=\"architect-formation-objective\"",
     "data-testid=\"architect-cross-silo-proposals\"",
@@ -170,6 +168,9 @@ test("nada saiu da tela: os blocos técnicos continuam na grade, e melhoria e So
     "data-testid=\"architect-formation-deferred-list\"",
     "Candidatas provisórias a Silo",
   ]) assert.ok(grade.includes(marca), `${marca} continua em Detalhes técnicos`);
+  // 2026-10-16 (noite) · pedido do dono: os blocos "Assuntos · N" (fichas com o filtro) e "Assuntos como tronco · N" saíram; as AÇÕES do Assunto foram para a barra de sempre.
+  assert.equal(grade.includes("<SubjectFilterPanel") || grade.includes("architect-anchored-subjects"), false);
+  assert.ok(tela.indexOf("subjectActions={") > tela.indexOf("<ArticlesFormationBar") && tela.indexOf("subjectActions={") < tela.indexOf("<PlanSheetOperations"), "as ações do Assunto moram na barra");
   // 2026-10-16 · o mapa continua na grade, mas só é desenhado em Links internos.
   assert.match(grade, /\{linksMode && <div className="min-h-0 min-w-0 overflow-hidden p-0">\s*<ArchitectArchitectureMap/);
   assert.equal(grade.includes("<ArticleImprovementPanel"), false);

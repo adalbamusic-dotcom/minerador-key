@@ -20,24 +20,29 @@ import { readArticleKgrDecision } from "@/lib/arquiteto/article-kgr-decision";
 import { readArchitectSubjectStanding, readArchitectSubjectStandings, planSubjectAttachment, attachSubjectToArticleDna, freePlanPrincipal, lockedPlanPrincipal, subjectMayBePrincipal } from "@/lib/arquiteto/declared-subject";
 import { applyDeclaredPlanToArticleDna, applySerpSupportBasisProvenance, declaredPlanAppliedTo, declaredPlanForGroup } from "@/lib/arquiteto/declared-plan-formation";
 import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
+import { identityPrincipalSerpSentence, serpCollectionAllowed } from "@/lib/arquiteto/article-batch-serp";
 import { shortSeedsOf, sharesTheme } from "@/lib/minerador/short-seeds";
-import { ARTICLE_IMPROVEMENT_VERSION, volumelessPrincipalSwap, carriesSlugCore, planArticleImprovements, improvementEditorialFit, isListReading, serpSupportedMembers, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence } from "@/lib/arquiteto/article-improvement";
+import { ARTICLE_IMPROVEMENT_VERSION, volumelessPrincipalSwap, carriesSlugCore, targetPrincipalIsIdentity, planArticleImprovements, improvementEditorialFit, isListReading, isCopyLineReading, serpSupportedMembers, improvementDiscoverySeeds, improvementIdeaOnCopyLine, IMPROVEMENT_ARTICLE_MAX_KEYWORDS, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence, type ImprovementSerpVocabulary } from "@/lib/arquiteto/article-improvement";
 import { buildImprovementAiPrompt, editorialAiRecord, improvementAiEligibleTargets, improvementAiList, improvementAiTargets, IMPROVEMENT_AI_TIMEOUT_MS, validateImprovementAiPicks, type ImprovementEditorialAi } from "@/lib/arquiteto/article-improvement-ai";
 import { readPageRanking, rankingBlocksSwap } from "@/lib/arquiteto/published-differentiation";
 import { buildSerpSubjectIndex, SERP_SUBJECT_LENS_LABELS } from "@/lib/arquiteto/serp-subject-overlap";
 import { createVersionEnvelope } from "@/lib/arquiteto/versioning";
 import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
 import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";
-import { readSubjectDiscoveryBlock } from "@/lib/minerador/subject-discovery-import";
-import { IMPROVEMENT_APPROVE_NEW_KEYWORDS_RETIRED, improvementMineradorNeeds, improvementMineradorNeedsSentence, improvementSuggestionDrafts, markImprovementMineradorNeeds } from "@/lib/arquiteto/article-improvement-minerador";
+import { importSubjectDiscoveryWithCore, readSubjectDiscoveryBlock } from "@/lib/minerador/subject-discovery-import";
+import { IMPROVEMENT_NEW_KEYWORDS_APPROVAL_REQUIRED, improvementMineradorNeeds, improvementMineradorNeedsSentence, improvementNewKeywordIds, improvementSuggestionDrafts, markImprovementMineradorNeeds } from "@/lib/arquiteto/article-improvement-minerador";
 import { recordArquitetoMineradorSuggestionsSafely } from "./arquiteto-minerador-suggestions";
 import { assessRework, decideRework, formatReworkWhen, reworkView, type ReworkView } from "@/lib/editorial/rework-guard";
 import { isEditorialGroupColor, type EditorialGroupFilter } from "@/lib/editorial/editorial-groups";
 import { parseGroupIdQuery } from "@/lib/editorial/article-groups";
 import { listEditorialGroupSummaries } from "@/lib/editorial/editorial-groups-store";
 import { getOperationalClient } from "./editorial-db";
-import { loadCanonicalArquitetoWorkspace } from "./arquiteto-workspace";
-import { readDifferentiationBrandKeywords, readPublishedFootprints } from "./arquiteto-differentiation-store";
+import { loadCanonicalArquitetoWorkspace, createMineradorArquitetoHandoff } from "./arquiteto-workspace";
+import { applyKeywordDecisionEntries, keywordDecisionEntries, readDecisionKeywords, runKeywordLogicWithCore } from "./minerador-keyword-decision-core";
+import { measureKeywordVolume } from "./minerador-volume-measure";
+import { handleGoogleAdsKeywordMetrics } from "./minerador-google-ads-metrics-http";
+import { replayStoredMeasurements } from "./minerador-architect-suggestions";
+import { readDifferentiationBrandKeywords, readPrincipalSerpVocabulary, readPublishedFootprints } from "./arquiteto-differentiation-store";
 import { proposeArticleImprovementAiPicks, readGoogleAdsAverageVolumes } from "./arquiteto-differentiation-runtime";
 import { handleArchitectWorkspacePatch } from "./arquiteto-workspace-http";
 import { handleArchitectFormationSerp } from "./arquiteto-serp-http";
@@ -273,6 +278,8 @@ async function readInputs(context: PipelineContext, requested?: string[], groupF
     const volumeDaPrincipal = linhaDaPrincipal ? knownVolumeOfRow(linhaDaPrincipal, new Date()) : null;
     const livreComVolume = volumeDaPrincipal?.state === "measured" && volumeDaPrincipal.volume > 0 ? principalAtual : null;
     targets.push({ id: row.id, kind: "subject", theme: standing.phrase, note: standing.note, primaryId: principalAtual, post: "free", memberIds: article?.payload.keywordReferences.map(r => r.keywordId) ?? [], territoryRef: text(row.territoryRef), slug: article?.payload.suggestedSlug ?? null, url: null, canonical: null, signals: signals(row),
+      // 2026-10-16 · §15: o slug e os detalhes do plano aprovado são sementes e régua da linha de copy (aditivo).
+      ...(standing.plan?.slug ? { planSlug: standing.plan.slug } : {}), ...(standing.plan?.scope ? { planScope: standing.plan.scope } : {}), ...(standing.plan?.role ? { planRole: standing.plan.role } : {}),
       // F4 — principal declarada no plano (pacote aprovado do Assunto): fixa SÓ quando travada (ou, desde 15/10, Livre com volume definido); e o plano ainda não aplicado ao DNA (D8).
       ...(fixa ? { declaredPrincipalId: fixa.keywordId } : livreComVolume ? { declaredPrincipalId: livreComVolume } : {}),
       ...(standing.plan?.declaredPrincipal ? { planPrincipalId: standing.plan.declaredPrincipal.keywordId } : {}),
@@ -342,10 +349,20 @@ async function readInputs(context: PipelineContext, requested?: string[], groupF
   const refusedTargets = foraDosAlvos.map(id => ({ id, reason: esperaPorId.get(id) ?? (rows.has(id) ? "Não é um Assunto do plano recebido no Arquiteto neste recorte de cor (ou já é membro de outro artigo)." : "A keyword não está recebida no Arquiteto nesta marca ou nesta cor.") }));
   // F3 · LER ANTES DE BUSCAR (D4): o que já sabemos do volume de cada keyword, lido da linha (nunca do navegador).
   const agora = new Date();
-  const keywords: ImprovementKeyword[] = [...rows.values()].filter(r => !readArchitectSubjectStanding(r).declared).map(r => {
+  /*
+   * 2026-10-16 · A KEYWORD QUE CARREGA O ASSUNTO É KEYWORD DA LISTA (cadastro
+   * único, ADR-022 D1-ter; regra do dono de 13/10: "keyword que carrega Assunto
+   * é keyword como qualquer outra"). Ela ficava fora: a prévia dizia "volume
+   * medido de 0 de 0", a SERP da principal Travada era lida pelo TÍTULO do
+   * Assunto (nunca achava o cache) e a Livre não tinha com quem se comparar. Ela
+   * entra dona do próprio artigo (nunca reforça outro). A linha-título do
+   * formato anterior (Assunto sem cadastro na keyword) continua fora.
+   */
+  const carregaOAssunto = (r: Row) => (standings.get(r.id) ?? readArchitectSubjectStanding(r)).carriesSubject === true;
+  const keywords: ImprovementKeyword[] = [...rows.values()].filter(r => { const standing = standings.get(r.id) ?? readArchitectSubjectStanding(r); return !standing.declared || standing.carriesSubject === true; }).map(r => {
     const googleAds = String(r.volume_source ?? object(r.demandEvidence).source ?? "").toLowerCase() === "google_ads";
     const conhecido = knownVolumeOfRow(r, agora);
-    return { id: r.id, keyword: r.keyword, volume: r.volume_search ?? null, volumeValidated: googleAds && (r.volume_search ?? 0) > 0, signals: signals(r), ownerId: owned.get(r.id) ?? formacaoDoAlvo.get(text(r.articleFormationRef) ?? "") ?? (text(r.articleFormationRef) && object(r.articleFormationDecision).source === "human" ? `formation:${r.articleFormationRef}` : null), published: Boolean(r.isPublished) || brand.pages.some(p => p.keywordId === r.id), territoryRef: text(r.territoryRef), external: false, ...(googleAds || conhecido.state !== "missing" ? { googleAdsMeasured: true } : {}), ...(conhecido.state === "no_average" ? { noAverageAt: conhecido.measuredAt } : {}) };
+    return { id: r.id, keyword: r.keyword, volume: r.volume_search ?? null, volumeValidated: googleAds && (r.volume_search ?? 0) > 0, signals: signals(r), ownerId: owned.get(r.id) ?? (carregaOAssunto(r) ? r.id : null) ?? formacaoDoAlvo.get(text(r.articleFormationRef) ?? "") ?? (text(r.articleFormationRef) && object(r.articleFormationDecision).source === "human" ? `formation:${r.articleFormationRef}` : null), published: Boolean(r.isPublished) || brand.pages.some(p => p.keywordId === r.id), territoryRef: text(r.territoryRef), external: false, ...(googleAds || conhecido.state !== "missing" ? { googleAdsMeasured: true } : {}), ...(conhecido.state === "no_average" ? { noAverageAt: conhecido.measuredAt } : {}) };
   });
   /*
    * F5 — ASSUNTO COM LISTA DO MINERADOR NÃO BUSCA (SDD 2026-10-12 §10.3). O
@@ -385,12 +402,31 @@ function keywordsTiedToTargets(run: Pick<ImprovementRun, "targets" | "keywords">
   const membros = new Set(run.targets.flatMap(target => target.memberIds));
   return run.keywords.filter(k => !k.external && (membros.has(k.id) || run.targets.some(target => sharesTheme(target.theme, k.keyword))));
 }
-type EvidenceRead = { evidence: ImprovementEvidence[]; ranking: Record<string, boolean | null> };
+type EvidenceRead = { evidence: ImprovementEvidence[]; ranking: Record<string, boolean | null>; vocabulary: Record<string, ImprovementSerpVocabulary> };
+/**
+ * 2026-10-16 · §15 passo 4: o que a SERP da principal de cada alvo mostra, do
+ * cache (grátis). Só a principal com volume tem SERP (sem volume, nunca é
+ * coletada). Falha de leitura = sem vocabulário: o reforço segue pela linha de
+ * copy do plano e do DNA, sem inventar evidência.
+ */
+async function principalVocabularyOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]): Promise<Record<string, ImprovementSerpVocabulary>> {
+  const porId = new Map(keywords.map(k => [k.id, k]));
+  const principais = targets.flatMap(target => {
+    const principal = porId.get(target.primaryId ?? "") ?? porId.get(target.declaredPrincipalId ?? "") ?? porId.get(target.planPrincipalId ?? "");
+    return principal && principal.volumeValidated && !principal.external ? [{ targetId: target.id, keywordId: principal.id, keyword: principal.keyword }] : [];
+  });
+  if (!principais.length) return {};
+  try {
+    const lido = await readPrincipalSerpVocabulary(context, principais.map(({ keywordId, keyword }) => ({ keywordId, keyword })), new Date());
+    return Object.fromEntries(principais.flatMap(item => { const vocab = lido.get(item.keywordId); return vocab ? [[item.targetId, vocab] as const] : []; }));
+  } catch { return {}; }
+}
 async function evidenceOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]): Promise<EvidenceRead> {
   const queries = new Map([...targets.map(t => [t.id, t.theme] as const), ...keywords.map(k => [k.id, k.keyword] as const)]);
+  const vocabulary = await principalVocabularyOf(context, targets, keywords);
   let cache: Awaited<ReturnType<typeof readPublishedFootprints>>;
   try { cache = await readPublishedFootprints(context, [...queries].map(([keywordId, keyword]) => ({ keywordId, keyword })), new Date()); }
-  catch { return { ranking: Object.fromEntries(targets.map(t => [t.id, null])), evidence: targets.flatMap(t => keywords.map(k => ({ targetId: t.id, keywordId: k.id, complete: false, sharedPages: 0, contradiction: false, anchorConclusive: false }))) }; }
+  catch { return { vocabulary, ranking: Object.fromEntries(targets.map(t => [t.id, null])), evidence: targets.flatMap(t => keywords.map(k => ({ targetId: t.id, keywordId: k.id, complete: false, sharedPages: 0, contradiction: false, anchorConclusive: false }))) }; }
   const index = buildSerpSubjectIndex(cache.footprints);
   const missing = new Set(cache.missingLenses.map(m => m.keywordId));
   // "Página que ranqueia não troca de principal": a mesma leitura do Reforçar
@@ -405,7 +441,7 @@ async function evidenceOf(context: PipelineContext, targets: ImprovementTarget[]
     const overlap = index.overlap(t.id, k.id);
     return { targetId: t.id, keywordId: k.id, complete: !missing.has(k.id) && cache.footprints.some(f => f.keywordId === k.id && f.lenses.length === 4), sharedPages: overlap.sharedPageCount ?? 0, contradiction: overlap.strength === "none" && (keywords.find(old => old.id === t.primaryId)?.volumeValidated ?? false), anchorConclusive: overlap.strength !== "unknown" && !missing.has(t.id) && (keywords.find(old => old.id === t.primaryId)?.volumeValidated ?? false) };
   }));
-  return { evidence, ranking };
+  return { evidence, ranking, vocabulary };
 }
 const groupContexts = new WeakMap<ProvisionalArticleGroup, ImprovementTarget>();
 function makeGroup(target: ImprovementTarget, proposal: ImprovementProposal, rows: Map<string, Row>): ProvisionalArticleGroup {
@@ -452,7 +488,8 @@ async function serpOperation(context: PipelineContext, supplied: ProvisionalArti
     }
     return { plan: { paidQueries, estimatedCostUsd: { min, max }, missingDetails: details, ...(cacheUnavailable ? { cacheUnavailable: true } : {}) } };
   }
-  return responseData(await handleArchitectFormationSerp(internalRequest("/api/arquiteto/serp", { brandId: context.brandId, groups, formationBaseHashes: Object.fromEntries(groups.map(group => [group.id, baseHash(group)])), lenses: SERP_SUBJECT_LENS_LABELS, mode, cacheOnly: mode === "execute" && budget === 0, authorizedPaidQueries: budget, payMissingExtraLenses: mode === "plan" || budget > 0, recollectStaleLenses: false }), context));
+  // 2026-10-16 · §15 passo 4: a leitura só com cache dá o parecer pela SERP da principal; a secundária sem SERP no cache fica "não observada" (não derruba o parecer, nada é pago).
+  return responseData(await handleArchitectFormationSerp(internalRequest("/api/arquiteto/serp", { brandId: context.brandId, groups, formationBaseHashes: Object.fromEntries(groups.map(group => [group.id, baseHash(group)])), lenses: SERP_SUBJECT_LENS_LABELS, mode, cacheOnly: mode === "execute" && budget === 0, ...(mode === "execute" && budget === 0 ? { observeCachedSupportsOnly: true } : {}), authorizedPaidQueries: budget, payMissingExtraLenses: mode === "plan" || budget > 0, recollectStaleLenses: false }), context));
 }
 /** Até aqui (a partir do início do prepare) cabem IA + busca gratuita; o resto é cache da SERP e gravação. */
 const PREPARE_SEARCH_DEADLINE_MS = 60000;
@@ -606,7 +643,7 @@ async function measureOldVolumes(runtime: ImprovementRuntime, run: ImprovementRu
       if (medicao) k.measurement = medicao;
       comVolume++;
     }
-    run.notices.push(`${alvo.length} keyword(s) sem volume medido no Google Ads foram medidas agora, com a sua autorização (cota do Google Ads, sem custo em dólar): ${comVolume} com volume${semMedia ? `, ${semMedia} sem média oficial` : ""}.${comVolume ? " O Arquiteto não grava a medição: ela vai em “Sugestões do Arquiteto” e o Minerador a grava pelo seu clique, sem consultar o Google Ads de novo." : ""}`);
+    run.notices.push(`${alvo.length} keyword(s) sem volume medido no Google Ads foram medidas agora, com a sua autorização, grátis (cota do Google Ads): ${comVolume} com volume${semMedia ? `, ${semMedia} sem média oficial` : ""}.${comVolume ? " O Arquiteto não grava a medição: ela vai em “Sugestões do Arquiteto” e o Minerador a grava pelo seu clique, sem consultar o Google Ads de novo." : ""}`);
     return { asked: alvo.length, calls };
   } catch (error) {
     run.notices.push(`Não deu para medir no Google Ads o volume de ${alvo.length} keyword(s): ${error instanceof Error ? error.message : "provider indisponível"}. Elas seguem sem volume validado nesta prévia.`);
@@ -614,7 +651,19 @@ async function measureOldVolumes(runtime: ImprovementRuntime, run: ImprovementRu
   }
 }
 
-async function discover(runtime: ImprovementRuntime, run: ImprovementRun, targets: ImprovementTarget[], existing: ImprovementKeyword[], notices: string[], budgetMs = 35000, knownInBrand?: ReadonlyMap<string, { keywordId: string; known: KnownVolume }>) {
+async function discover(runtime: ImprovementRuntime, run: ImprovementRun, targets: ImprovementTarget[], existing: ImprovementKeyword[], notices: string[], budgetMs = 35000, knownInBrand?: ReadonlyMap<string, { keywordId: string; known: KnownVolume }>, vocabulary: Readonly<Record<string, ImprovementSerpVocabulary>> = {}, existingInBrand?: ReadonlyMap<string, string>) {
+  /*
+   * 2026-10-16 · §15 — AS SEMENTES SÃO DO PLANO E DO DNA. Para o Assunto: a
+   * principal, o slug, a entidade do DNA, o Assunto e as buscas relacionadas da
+   * SERP da principal em cache. Antes eram só pedaços do TÍTULO ("entra na
+   * conta", "primeira fatura"), e a busca voltava com "entra na conta do google".
+   * Alvo sem semente não busca.
+   */
+  const porIdDaLista = new Map(existing.map(k => [k.id, k]));
+  const sementesDe = (target: ImprovementTarget) => target.kind === "subject" ? improvementDiscoverySeeds(target, porIdDaLista, vocabulary[target.id], shortSeedsOf(target.theme).slice(0, 2)) : shortSeedsOf(target.theme);
+  const semSemente = targets.filter(target => !sementesDe(target).length);
+  if (semSemente.length) notices.push(`Busca nova sem semente do plano ou do DNA não roda: ${semSemente.slice(0, 3).map(t => t.theme).join("; ")}${semSemente.length > 3 ? "…" : ""}.`);
+  targets = targets.filter(target => sementesDe(target).length);
   const context = runtime.context;
   const canonical = await resolveGoogleAdsCanonicalContext({ actorUserId: context.actorUserId, agencyId: null, brandId: context.brandId, operation: "discovery" });
   const { client } = await createGoogleAdsCanonicalClient({ context: canonical });
@@ -656,14 +705,15 @@ async function discover(runtime: ImprovementRuntime, run: ImprovementRun, target
     if (requests >= LIMIT || Date.now() - started > BUDGET_MS) { pending.push(target.theme); continue; }
     // Google Ads returns only the phrase itself for long titles; short cores
     // ("plano de marketing", "clínica de estética") bring the related searches.
-    const cores = shortSeedsOf(target.theme);
+    const cores = sementesDe(target);
     const direct: GoogleAdsKeywordIdeasInput["seed"] = target.url ? { kind: "keyword_and_url", keywords: cores, url: target.url } : { kind: "keyword", keywords: cores };
     const fresh = await ask(direct);
     const concepts = [target.signals.centralEntity, target.signals.perceivedProblem].filter((s): s is string => Boolean(s));
     if (fresh === 0 && concepts.length && requests < LIMIT) await ask({ kind: "keyword", keywords: concepts.slice(0, 2) });
   }
   if (pending.length) notices.push(`Pesquisa gratuita pendente para ${pending.length} item(ns) nesta rodada (${pending.slice(0, 3).join("; ")}${pending.length > 3 ? "…" : ""}). Prepare de novo para continuar.`);
-  const candidates = [...found.values()].filter(k => k.external && !k.published && !k.ownerId && targets.some(t => sharesTheme(t.theme, k.keyword) || improvementEditorialFit(t, k).fits));
+  // §15: no Assunto, só a ideia na linha de copy dele (Assunto, slug, DNA, SERP da principal) é medida; no publicado, a regra de sempre.
+  const candidates = [...found.values()].filter(k => k.external && !k.published && !k.ownerId && targets.some(t => t.kind === "subject" ? improvementIdeaOnCopyLine(t, porIdDaLista, vocabulary[t.id], k.keyword) : sharesTheme(t.theme, k.keyword) || improvementEditorialFit(t, k).fits));
   /*
    * F3 · A BUSCA NOVA DEDUPLICA CONTRA A MARCA INTEIRA (regra 5 do item 3). A
    * ideia que já existe no Minerador com volume medido (ou "sem média" há
@@ -672,13 +722,21 @@ async function discover(runtime: ImprovementRuntime, run: ImprovementRun, target
    * para "Gravar melhorias" gravar sem consultar de novo.
    */
   let jaTemos = 0;
+  /*
+   * 2026-10-16 · "NOVA" = NÃO EXISTE NA MARCA (dono: "TUDO QUE VEM DO MINERADOR
+   * NÃO PODE MEXER"). A ideia que já existe no Minerador — qualquer lista,
+   * qualquer status, com ou sem volume — é só lida: usa o que ele já sabe e
+   * nunca é medida, importada, processada nem aprovada de novo pelo Arquiteto.
+   */
   const aMedir = candidates.filter(k => {
-    const conhecida = knownInBrand?.get(normalizeKeyword(k.keyword));
-    if (!conhecida || conhecida.known.state === "missing") return true;
-    k.knownInMinerador = { keywordId: conhecida.keywordId };
-    k.googleAdsMeasured = true;
-    if (conhecida.known.state === "measured") { k.volume = conhecida.known.volume; k.volumeValidated = conhecida.known.volume > 0; }
-    else { k.volume = null; k.volumeValidated = false; k.noAverageAt = conhecida.known.measuredAt; }
+    const normal = normalizeKeyword(k.keyword);
+    const conhecida = knownInBrand?.get(normal);
+    const existente = existingInBrand?.get(normal) ?? conhecida?.keywordId ?? null;
+    if (!existente) return true;
+    k.knownInMinerador = { keywordId: existente };
+    if (conhecida?.known.state === "measured") { k.googleAdsMeasured = true; k.volume = conhecida.known.volume; k.volumeValidated = conhecida.known.volume > 0; }
+    else if (conhecida?.known.state === "no_average") { k.googleAdsMeasured = true; k.volume = null; k.volumeValidated = false; k.noAverageAt = conhecida.known.measuredAt; }
+    else { k.volume = null; k.volumeValidated = false; }
     jaTemos++;
     return false;
   });
@@ -692,7 +750,7 @@ async function discover(runtime: ImprovementRuntime, run: ImprovementRun, target
     const medicao = measurements.get(normalizeKeyword(k.keyword));
     if (k.volumeValidated && medicao) k.measurement = medicao;
   }
-  if (jaTemos) notices.push(`${jaTemos} ideia(s) da busca nova já existem no Minerador com volume medido: usei o volume dele, sem medir de novo.`);
+  if (jaTemos) notices.push(`${jaTemos} ideia(s) da busca nova já existem no Minerador: usei o que ele já sabe (volume incluído), sem medir de novo. O Arquiteto não mexe nelas; só as novas entram pela confirmação.`);
   return [...found.values()].filter(k => !k.external || k.volumeValidated);
 }
 async function findRun(context: PipelineContext, runId: string) {
@@ -770,7 +828,15 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
      */
     const anterior = await findReusableRun(context, run.inputsHash);
     // 2026-10-14 · sem IA, medição nem busca pedidas, a preparação é LEITURA GRÁTIS: repetir não pede motivo (só o que custa pede).
-    const leituraGratis = !(request.authorizeReading?.ai === true || request.authorizeReading?.measure === true || request.discover === true);
+    /*
+     * 2026-10-16 (amarelo da WifiConecta) · pedir o que a preparação anterior
+     * NÃO fez (a busca nova, a leitura da IA) não é retrabalho: o aviso dizia
+     * "Já feito com os mesmos insumos… Refazer mesmo assim" no clique que fazia a
+     * busca pela primeira vez. Com a semente, o que já foi pago é reaproveitado;
+     * o motivo só vale para pagar de novo o que custa.
+     */
+    const repeteOQueCusta = Boolean(anterior) && ((request.discover === true && anterior!.discovery?.requested === true && (anterior!.discovery.requests ?? 0) > 0) || (request.authorizeReading?.ai === true && anterior!.editorialAi?.status === "answered"));
+    const leituraGratis = !(request.authorizeReading?.ai === true || request.authorizeReading?.measure === true || request.discover === true) || !repeteOQueCusta;
     const rework = assessRework({ kind: "article_improvement_prepare", fingerprint: run.inputsHash, previous: improvementReworkPrevious(anterior), policy: { sameInputs: "reuse", sameRefusal: "inform", freeRepeat: leituraGratis } });
     const decisao = decideRework(rework, request.reworkOverride);
     const refazer = decisao.proceed && decisao.overridden && Boolean(decisao.overrideReason);
@@ -780,7 +846,14 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
       run.reworkOverride = { reason: decisao.overrideReason!, at: run.createdAt };
       run.notices.push(`Refeito com os mesmos insumos da preparação de ${formatReworkWhen(anterior!.createdAt)} por pedido (“${decisao.overrideReason}”): ${autorizado.ai || autorizado.measure ? `${[autorizado.ai ? "a leitura da IA" : null, autorizado.measure ? "as medições que faltam" : null].filter(Boolean).join(" e ")} e a busca pedida foram feitas de novo` : "só a leitura grátis foi refeita; IA e medições só com a sua autorização"}.`);
     }
-    if (rework.verdict !== "fresh") run.rework = reworkView(rework)!;
+    /*
+     * A preparação anterior com estes insumos parou ANTES da coleta paga: não há
+     * o que refazer — a mesma rodada continua ("Coletar a SERP", com o custo
+     * antes). O aviso diz isso, em vez de "Refazer mesmo assim".
+     */
+    const anteriorComoExecucao = anterior as unknown as ImprovementRun | null;
+    const paradaAntesDoPago = anteriorComoExecucao?.state === "prepared" && !anteriorComoExecucao.acceptedIds && (anteriorComoExecucao.costs?.paidQueries ?? 0) > 0;
+    if (rework.verdict !== "fresh") run.rework = { ...reworkView(rework)!, ...(paradaAntesDoPago && rework.verdict === "same_inputs_reuse" ? { message: `A preparação de ${formatReworkWhen(anterior!.createdAt)} com estes mesmos insumos parou antes da coleta paga da SERP (${anteriorComoExecucao!.costs.paidQueries} consulta(s) no DataForSEO). Não há nada a refazer: continue nesta rodada; o custo aparece antes de autorizar.` } : {}) };
     const seed = refazer ? null : improvementReuseSeed(anterior, { version: run.version, brandId: run.brandId, inputsHash: run.inputsHash, now: new Date() });
     run.reusedFromRunId = seed?.fromRunId ?? null;
     run.notices.push(...input.waitingDeclaredPrincipal);
@@ -797,9 +870,9 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
      * media e chamava a IA sem dizer.
      */
     const medidas = autorizado.measure ? await measureOldVolumes(runtime, run) : { asked: 0, calls: 0 };
-    const { evidence, ranking } = await evidenceOf(context, run.targets, run.keywords);
-    // 1 · pares da SERP (cache).
-    run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, listReading: false });
+    const { evidence, ranking, vocabulary } = await evidenceOf(context, run.targets, run.keywords);
+    // 1 · pares da SERP (cache) e a linha de copy com a SERP da principal em cache (§15, grátis).
+    run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, listReading: false, serpVocabulary: vocabulary });
     // 2 · leitura da IA na lista existente, só para quem ficou sem proposta pronta — e só com a autorização.
     const iaAntes = run.editorialAi;
     if (autorizado.ai) await readEditorialAi(runtime, run, ranking);
@@ -810,14 +883,25 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
       run.notices.push(`Mesmos alvos e mesma lista da preparação anterior: reaproveitei o que ela já tinha lido; só o que faltava foi chamado agora, com a sua autorização (veja “Já temos · Falta · Custa”).${iaChamadaAgora && !seed.editorialAi && iaAntes === undefined && /tinha falhado/.test(seed.notice) ? " A leitura da IA tinha falhado e foi tentada de novo." : ""}`);
     }
     // 2b · leitura da lista pelo código (núcleo do slug) para quem a IA não resolveu.
-    run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, editorialPicks: run.editorialAi?.picks });
+    run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, editorialPicks: run.editorialAi?.picks, serpVocabulary: vocabulary });
     // 3 · busca nova no Google Ads só para quem ainda ficou sem nada — e só
     // quando o dono pede (`discover: true`, com o custo dito antes do clique).
     // Nunca automática (2026-10-12). O tempo que a IA usou sai do orçamento da
     // busca: o prepare inteiro fica abaixo de 120 s.
     // F5 — Assunto com lista da Pesquisa por Assunto do Minerador não busca: as sustentações saem da lista dele.
     const comLista = (t: ImprovementTarget) => t.kind === "subject" && input.subjectsWithMineradorList.has(t.id);
-    const gaps = run.targets.filter(t => !comLista(t) && run.proposals.find(p => p.targetId === t.id)?.status !== "ready" && run.proposals.find(p => p.targetId === t.id)?.status !== "adequate");
+    /*
+     * 2026-10-16 · §15 passo 4: o reforço é de TODOS os artigos do plano. O
+     * Assunto com a principal fixa e com vaga (menos de 6 keywords) fica
+     * "adequado", mas ainda pede reforço: entra na busca nova quando ela é pedida.
+     */
+    const pedeReforco = (t: ImprovementTarget) => {
+      const proposta = run.proposals.find(p => p.targetId === t.id);
+      // O artigo do Assunto que só forma com a principal (sem nenhuma secundária) também pede reforço.
+      if (t.kind === "subject" && proposta && !proposta.memberIds.some(id => id !== proposta.principalId)) return true;
+      return proposta?.status !== "ready" && (proposta?.status !== "adequate" || (t.kind === "subject" && t.memberIds.length < IMPROVEMENT_ARTICLE_MAX_KEYWORDS));
+    };
+    const gaps = run.targets.filter(t => !comLista(t) && pedeReforco(t));
     run.discovery = { requested: request.discover === true, gapTargetIds: gaps.map(t => t.id), requests: 0 };
     const discoverBudgetMs = Math.max(5000, Math.min(35000, PREPARE_SEARCH_DEADLINE_MS - (Date.now() - started)));
     const assuntosComLista = run.targets.filter(t => comLista(t) && run.proposals.find(p => p.targetId === t.id)?.status !== "ready" && run.proposals.find(p => p.targetId === t.id)?.status !== "adequate");
@@ -825,12 +909,12 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     // F5 — a busca já feita com estes mesmos insumos não é repetida (as keywords dela vêm na semente); só com "Refazer mesmo assim".
     const buscaJaFeita = !refazer && Boolean(seed) && anterior?.discovery?.requested === true && (anterior.discovery.requests ?? 0) > 0;
     if (gaps.length && request.discover === true && buscaJaFeita) run.notices.push(`A busca nova no Google Ads já foi feita com estes mesmos insumos em ${formatReworkWhen(anterior!.createdAt)}: as keywords dela foram reaproveitadas, sem chamada nova. Para buscar de novo, use “Refazer mesmo assim” com o motivo.`);
-    else if (gaps.length && request.discover === true) try { run.keywords = await discover(runtime, run, gaps, run.keywords, run.notices, discoverBudgetMs, input.brand.knownVolumeByNormalized); } catch (error) { run.notices.push(`Busca nova no Google Ads incompleta: ${error instanceof Error ? error.message : "provider indisponível"}. O acervo continua válido.`); }
+    else if (gaps.length && request.discover === true) try { run.keywords = await discover(runtime, run, gaps, run.keywords, run.notices, discoverBudgetMs, input.brand.knownVolumeByNormalized, vocabulary, input.brand.existingByNormalized); } catch (error) { run.notices.push(`Busca nova no Google Ads incompleta: ${error instanceof Error ? error.message : "provider indisponível"}. O acervo continua válido.`); }
     await refreshPlan(runtime, run, input.rows, started + (runtime.compositionDeadlineMs ?? COMPOSITION_DEADLINE_MS));
     await planSerpRefreshes(context, run, input);
     // Quem segue sem proposta depois da conferência é quem a busca nova poderia ajudar.
     // F4: quem já tem proposta à espera do Minerador não pede busca nova (a sugestão está lá).
-    run.discovery.gapTargetIds = run.targets.filter(t => { const proposta = run.proposals.find(p => p.targetId === t.id); return !comLista(t) && !proposta?.needsMinerador && proposta?.status !== "ready" && proposta?.status !== "adequate"; }).map(t => t.id);
+    run.discovery.gapTargetIds = run.targets.filter(t => { const proposta = run.proposals.find(p => p.targetId === t.id); return !comLista(t) && !proposta?.needsMinerador && pedeReforco(t); }).map(t => t.id);
     if (!run.discovery.requested && run.discovery.gapTargetIds.length) run.notices.push(`${run.discovery.gapTargetIds.length} publicado(s) ou Assunto(s) ficaram sem proposta só com a lista da marca. A busca nova no Google Ads não roda sozinha: peça em “Buscar keywords novas no Google Ads”, com o custo dito antes.`);
     // F3 · "JÁ TEMOS · FALTA · CUSTA": lido de graça, dito antes de qualquer pagamento.
     const lidoAgora = new Date();
@@ -928,13 +1012,24 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
   }
   // One human confirmation persists the accepted set. Subsequent requests only
   // continue this exact set and hash, one article per bounded server request.
-  // F4 · o Arquiteto não aprova keyword: o pedido antigo de "aprovar as novas" é recusado com o caminho.
-  if (request.approveNewKeywords === true) throw refusal(IMPROVEMENT_APPROVE_NEW_KEYWORDS_RETIRED);
   if (!run.acceptedIds) {
     const selected = request.targetIds ?? run.proposals.filter(p => p.status === "ready").map(p => p.targetId);
     const precisam = selected.filter(id => run.proposals.find(p => p.targetId === id)?.needsMinerador);
-    if (precisam.length) throw refusal(`${precisam.length} linha(s) precisam do Minerador antes de gravar (keyword nova, medição ou Lógica): decida em “Sugestões do Arquiteto” no Minerador e prepare de novo. Nada foi gravado.`);
+    if (precisam.length) throw refusal(`${precisam.length} linha(s) precisam do Minerador antes de gravar: dependem de keyword que JÁ existe lá (não enviada ao Arquiteto, medição a gravar ou sem a Lógica), e o Arquiteto não mexe nela — decida em “Sugestões do Arquiteto” no Minerador e prepare de novo. Nada foi gravado.`);
     if (selected.some(id => !run.proposals.some(p => p.targetId === id && p.status === "ready"))) throw refusal("Só propostas prontas podem ser aceitas; nenhuma keyword será forçada.");
+    /*
+     * 2026-10-16 · KEYWORD NOVA NA MESMA CONFIRMAÇÃO (decisão do dono; SDD da
+     * linha única §15 passo 4). Com keyword nova (que não existe na marca) no
+     * lote aceito: o aceite explícito e as permissões do Minerador (criar,
+     * editar, aprovar) e do Arquiteto (criar, aprovar) são conferidos AQUI,
+     * antes de qualquer escrita. Substitui a recusa da F4 ("o Arquiteto não
+     * aprova keyword"), que valia de 14 a 16/10.
+     */
+    const comNovas = selected.filter(id => { const proposta = run.proposals.find(p => p.targetId === id); return proposta ? improvementNewKeywordIds(proposta, run.keywords).length > 0 : false; });
+    if (comNovas.length) {
+      if (request.approveNewKeywords !== true) throw refusal(IMPROVEMENT_NEW_KEYWORDS_APPROVAL_REQUIRED);
+      await newKeywordPermissions(runtime);
+    }
     run.acceptedIds = selected;
   } else if (request.targetIds && stableHash(request.targetIds) !== stableHash(run.acceptedIds)) throw refusal("A retomada não pode alterar os alvos aceitos.");
   if (run.leaseUntil && Date.parse(run.leaseUntil) > Date.now()) throw refusal("Execução em andamento. Consulte o progresso antes de retomar.");
@@ -968,24 +1063,51 @@ function validationGroups(run: ImprovementRun, rows: Map<string, Row>): Provisio
   const groups: ProvisionalArticleGroup[] = [];
   // Potential candidates not yet in cache are validated individually. Candidate
   // proof may support an old zero-demand phrase without paying for it again.
+  /*
+   * 2026-10-16 · §15 (passos 3a, 3b e 4) — A SERP PAGA É SÓ A DA PRINCIPAL.
+   * Antes, o "Validar no Google" pagava a SERP de cada keyword com volume da
+   * composição e de até 5 candidatas por alvo escolhidas pelo TÍTULO do
+   * Assunto (no amarelo de 16/10: 25 keywords × 4 lentes = 100 consultas,
+   * até US$ 0,35, quase todas fora do assunto — "entra na conta do google",
+   * "qual é o meu cep"). Agora o reforço sai da SERP da principal em cache
+   * (grátis) e a coleta paga é a primeira da principal que ainda não tem SERP
+   * (4 lentes, custo antes); principal sem volume: a de identidade é coletada
+   * (2026-10-17, régua única), a de fora da identidade (D2a) usa a sustentação
+   * de mais volume. Coletar a SERP de uma candidata para ter evidência a mais
+   * continua possível pelo artigo ("Processar artigos"), nunca obrigatório.
+   */
+  const volumeDe = (id: string) => rows.get(id)?.volume_search ?? 0;
   for (const target of run.targets) {
     if (!target.territoryRef) continue;
     const proposal = run.proposals.find(p => p.targetId === target.id)!;
-    // SERP is paid only for keywords with volume. The page's own composition is
-    // checked only when there is a real proposal to check.
-    // A composição escolhida pela IA que ainda não tem as quatro lentes entra no passo 2 (pago, com prévia).
     const validating = proposal.status === "ready" || proposal.needsValidation === true;
-    if (validating && proposal.principalId && proposal.memberIds.length) groups.push(makeGroup(target, proposal, rows));
-    const recommended = validating ? proposal.memberIds.filter(id => id === proposal.principalId || (rows.get(id)?.volume_search ?? 0) > 0) : [];
-    const ids = [...new Set([...recommended, ...(isListReading(proposal) ? proposal.addIds : []), ...run.keywords.filter(k => !k.published && k.volumeValidated && (!k.ownerId || k.ownerId === target.id) && (sharesTheme(target.theme, k.keyword) || improvementEditorialFit(target, k).fits)).sort((a, b) => Number(carriesSlugCore(target.slug, b)) - Number(carriesSlugCore(target.slug, a)) || b.volume! - a.volume!).slice(0, 5).map(k => k.id)])];
-    for (const id of ids) groups.push(makeGroup({ ...target, id, kind: "subject" }, { ...proposal, targetId: id, principalId: id, memberIds: [id] }, rows));
+    if (validating && proposal.principalId && proposal.memberIds.length) {
+      /*
+       * 2026-10-17 · A RÉGUA ÚNICA (`serpCollectionAllowed`): a primeira coleta
+       * é a da principal — com volume ou, sem volume, quando é a principal de
+       * identidade do artigo (a SERP da frase do artigo). A secundária de mais
+       * volume só é a base quando a principal sem volume NÃO é a identidade
+       * (D2a); com a identidade coletada, ela fica opcional (evita gasto duplo).
+       */
+      const principalDaProposta = run.keywords.find(k => k.id === proposal.principalId);
+      const daPrincipal = serpCollectionAllowed({ volume: volumeDe(proposal.principalId), identityPrincipal: targetPrincipalIsIdentity(target, principalDaProposta) });
+      const base = daPrincipal ? proposal.principalId : [...proposal.memberIds].filter(id => volumeDe(id) > 0).sort((a, b) => volumeDe(b) - volumeDe(a))[0];
+      if (base) groups.push(makeGroup({ ...target, id: base, kind: "subject" }, { ...proposal, targetId: base, principalId: base, memberIds: [base] }, rows));
+    }
+    // Publicado Livre SEM volume: a candidata vira a principal, e a SERP dela decide a troca (a página não tem SERP para comparar).
+    const principalDaPagina = target.primaryId ? run.keywords.find(k => k.id === target.primaryId) : undefined;
+    // 2026-10-17 · Principal de identidade (o slug publicado foi feito dela): não há troca, então nenhuma SERP de candidata a principal é paga.
+    if (target.kind === "published" && target.post === "free" && !principalDaPagina?.volumeValidated && !targetPrincipalIsIdentity(target, principalDaPagina)) {
+      const ids = [...new Set([...(isListReading(proposal) ? proposal.addIds : []), ...run.keywords.filter(k => !k.published && k.volumeValidated && (!k.ownerId || k.ownerId === target.id) && (sharesTheme(target.theme, k.keyword) || improvementEditorialFit(target, k).fits)).sort((a, b) => Number(carriesSlugCore(target.slug, b)) - Number(carriesSlugCore(target.slug, a)) || b.volume! - a.volume!).slice(0, 5).map(k => k.id)])];
+      for (const id of ids) groups.push(makeGroup({ ...target, id, kind: "subject" }, { ...proposal, targetId: id, principalId: id, memberIds: [id] }, rows));
+    }
   }
   return [...new Map(groups.map(g => [g.id, g])).values()];
 }
 async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, existing: Map<string, Row>, deadlineAt = Number.POSITIVE_INFINITY) {
-  const { evidence, ranking } = await evidenceOf(runtime.context, run.targets, run.keywords);
+  const { evidence, ranking, vocabulary } = await evidenceOf(runtime.context, run.targets, run.keywords);
   // As escolhas da IA guardadas no prepare valem de novo aqui; a IA não é chamada outra vez.
-  run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, editorialPicks: run.editorialAi?.picks });
+  run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, editorialPicks: run.editorialAi?.picks, serpVocabulary: vocabulary });
   // F4 · O ARQUITETO SÓ LÊ: a proposta que precisaria do Minerador (keyword nova, medição, Lógica) sai das prontas antes de qualquer SERP paga.
   markImprovementMineradorNeeds(run.proposals, run.keywords, id => { const row = existing.get(id); return row ? Boolean(signals(row).intent) : null; });
   const rows = candidateRows(run.keywords, existing), groups = validationGroups(run, rows);
@@ -1001,6 +1123,9 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
       calls = plan.paidQueries; maximum = plan.estimatedCostUsd.max; minimum = plan.estimatedCostUsd.min; details.push(...(plan.missingDetails ?? []));
     } else run.notices.push("O plano completo ultrapassa o teto de US$ 1. Prepare um lote menor; as propostas já sustentadas pelo cache continuam aplicáveis.");
   }
+  /** 2026-10-17 · as lentes que faltam por keyword (texto normalizado), para a frase de custo da principal de identidade. */
+  const faltamPorKeyword = new Map<string, number>();
+  for (const raw of details) { const chave = normalizeKeyword(String(object(raw).keyword ?? "")); if (chave) faltamPorKeyword.set(chave, (faltamPorKeyword.get(chave) ?? 0) + 1); }
   // A candidate's cache does not by itself prove the whole proposed article.
   // Check the final roles and composition before asking for editorial acceptance.
   // Os pares da SERP primeiro (regra anterior); as composições da IA depois. Uma
@@ -1009,7 +1134,7 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
   const executed: { proposal: ImprovementProposal; group: ProvisionalArticleGroup }[] = [];
   const unreadable = (proposal: ImprovementProposal) => {
     proposal.status = "insufficient_evidence"; proposal.reasons.push("Não foi possível validar a composição pelo cache. Consulte ou complete a evidência antes do aceite.");
-    if (isListReading(proposal)) proposal.needsValidation = true;
+    if (isListReading(proposal) || isCopyLineReading(proposal)) proposal.needsValidation = true;
   };
   for (const proposal of pending) {
     if (Date.now() > deadlineAt) {
@@ -1038,10 +1163,38 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
         const composition = assessment ? serpAssessmentComposition(assessment.payload.assessment, object(assessment.payload.interpretation).lenses) : null;
         const mismatch = serpCompositionMismatch(composition, { keywordIds: proposal.memberIds, principalKeywordId: proposal.principalId!, roles: Object.fromEntries(group.keywordIds.map(id => [id, id === group.principalSuggestion.keywordId ? "principal" as const : "secundaria" as const])) });
         // Sem lente no cache, a rota em modo só-cache deixa a composição sem parecer (nada pago).
-        if (isListReading(proposal) && (!assessment || composition?.lensesComplete !== true) && assessment?.payload.verdict !== "DIVERGENCE") {
+        if ((isListReading(proposal) || isCopyLineReading(proposal)) && (!assessment || composition?.lensesComplete !== true) && assessment?.payload.verdict !== "DIVERGENCE") {
           // Faltam lentes da composição escolhida na lista: a linha fica "precisa validar" (passo 2, pago, com prévia).
           proposal.status = "insufficient_evidence"; proposal.needsValidation = true;
-          proposal.reasons.push("Precisa validar no Google: faltam lentes da SERP para esta composição. Valide no passo 2 antes de gravar.");
+          const principal = run.keywords.find(k => k.id === proposal.principalId)?.keyword ?? proposal.principalId;
+          /*
+           * 2026-10-17 · A RÉGUA ÚNICA DA COLETA (decisão do dono, "implementa a
+           * sua recomendação"): a principal de identidade SEM volume tem a SERP
+           * coletada na primeira coleta do artigo (4 lentes, ~US$ 0,014) — mostra
+           * o que o Google exibe para a frase exata do artigo. A secundária de mais
+           * volume NÃO é mais coletada por padrão (gasto duplo); continua opcional
+           * para mais evidência. Ela só é a base quando a principal sem volume não
+           * é a identidade (D2a). SUBSTITUI a frase da manhã de 17/10 ("a SERP dela
+           * não é coletada; a primeira coleta é a da secundária de mais volume").
+           */
+          const volumeDaLinha = (id: string | null) => (id ? rows.get(id)?.volume_search ?? 0 : 0);
+          const alvoDaProposta = run.targets.find(t => t.id === proposal.targetId);
+          const semVolume = !(volumeDaLinha(proposal.principalId) > 0);
+          const deIdentidade = semVolume && Boolean(alvoDaProposta) && targetPrincipalIsIdentity(alvoDaProposta!, run.keywords.find(k => k.id === proposal.principalId));
+          const maisVolume = semVolume ? [...proposal.memberIds].filter(id => id !== proposal.principalId && volumeDaLinha(id) > 0).sort((a, b) => volumeDaLinha(b) - volumeDaLinha(a))[0] ?? null : null;
+          const nomeDaBase = maisVolume ? run.keywords.find(k => k.id === maisVolume)?.keyword ?? maisVolume : null;
+          const principalTexto = String(principal ?? "");
+          const faltam = faltamPorKeyword.get(normalizeKeyword(principalTexto)) || 4;
+          const linhaDaPrincipal = proposal.principalId ? rows.get(proposal.principalId) : undefined;
+          const principalDaRun = run.keywords.find(k => k.id === proposal.principalId);
+          // §15 passos 3a/3b: o reforço já está escolhido; o que falta é a primeira coleta da SERP da principal (4 lentes), paga e com o custo antes.
+          proposal.reasons.push(isCopyLineReading(proposal)
+            ? deIdentidade
+              ? `${identityPrincipalSerpSentence(principalTexto, { queries: faltam, neverMeasured: principalDaRun ? knownVolumeOfKeyword(principalDaRun, linhaDaPrincipal, new Date()).state === "missing" : false })} É a primeira coleta do artigo no DataForSEO (paga; o custo aparece antes de autorizar) e o parecer passa a usar a SERP dela.${nomeDaBase ? ` A secundária de mais volume (“${nomeDaBase}”) não é coletada por padrão; colete pelo artigo se quiser mais evidência.` : ""} A principal fica; o reforço já está escolhido; nada foi pago nem gravado.`
+              : nomeDaBase
+                ? `A principal “${principal}” não tem volume e não é a identidade do artigo: a SERP dela não é coletada e o parecer do artigo vem das secundárias. Falta a SERP de “${nomeDaBase}”, a secundária de mais volume, no cache: a primeira coleta dela no DataForSEO (4 lentes) é paga, serve de base de evidência do artigo, e o custo aparece antes de autorizar. A principal fica; o reforço já está escolhido; nada foi pago nem gravado.`
+                : `Falta a SERP da principal “${principal}” no cache: a primeira coleta dela no DataForSEO (4 lentes) é paga e o custo aparece antes de autorizar. O reforço já está escolhido; nada foi pago nem gravado.`
+            : "Precisa coletar a SERP no DataForSEO: faltam lentes da SERP para esta composição. Colete no passo 2 (pago, com prévia) antes de gravar.");
         } else if (!assessment || mismatch || composition?.lensesComplete !== true || assessment.payload.verdict === "DIVERGENCE") {
           /*
            * O Google separou parte da composição (dono, 2026-09-30: "campanhas
@@ -1087,7 +1240,12 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
         // D2(a): o parecer veio das sustentações, sem custo; a coleta da própria principal declarada fica opcional (D2(b)).
         const apoio = (assessment?.payload.assessment as { supportBasis?: SerpFormationAssessment["supportBasis"] } | undefined)?.supportBasis;
         if (proposal.status === "ready" && apoio && apoio.principalKeywordId === proposal.principalId) {
-          proposal.reasons.push(`${apoio.reason} “Validar no Google” é opcional (D2b): só coletaria a SERP da própria principal declarada.`);
+          // 2026-10-17 · a principal de identidade: a coleta dela tem propósito e custo ditos (régua única); o parecer de agora já veio das secundárias, sem custo.
+          const doAlvo = run.targets.find(t => t.id === proposal.targetId);
+          const principalTexto = run.keywords.find(k => k.id === proposal.principalId)?.keyword ?? "";
+          proposal.reasons.push(doAlvo && principalTexto && targetPrincipalIsIdentity(doAlvo, { keyword: principalTexto })
+            ? `${apoio.reason} ${identityPrincipalSerpSentence(principalTexto, { queries: faltamPorKeyword.get(normalizeKeyword(principalTexto)) || 4 })} Ela fica em “Coletar a SERP no DataForSEO”, opcional agora (D2b): o parecer já veio das secundárias, sem custo.`
+            : `${apoio.reason} “Coletar a SERP no DataForSEO” é opcional (D2b): só coletaria a SERP da própria principal (sem volume).`);
           principaisPeloApoio.add(apoio.principalKeywordId);
         }
       } catch { unreadable(proposal); }
@@ -1265,9 +1423,79 @@ async function applySerpRefresh(runtime: ImprovementRuntime, run: ImprovementRun
   return { targetId: target.id, status: "improved", message: `DNA atualizado com a SERP e relido: intenção ${check.intent}, funil ${check.funnel}. Composição, URL, slug e canonical não mudaram.`, versionId: dna.versionId };
 }
 
+/** As permissões da confirmação com keyword nova: conferidas antes de qualquer escrita (sem elas, recusa com o motivo). */
+async function newKeywordPermissions(runtime: ImprovementRuntime) {
+  const pedidos: Array<[string, string]> = [["minerador", "create"], ["minerador", "edit"], ["minerador", "approve"], ["arquiteto", "create"], ["arquiteto", "approve"]];
+  const contextos: Record<string, PipelineContext> = {};
+  for (const [modulo, acao] of pedidos) {
+    try { contextos[`${modulo}:${acao}`] = await runtime.authorize(modulo, acao); }
+    catch (error) { throw refusal(`Para incorporar keyword nova nesta confirmação é preciso a permissão ${modulo}:${acao} (${error instanceof Error ? error.message : "sem permissão"}). Nada foi gravado.`); }
+  }
+  return contextos;
+}
+type NewKeywordIncorporation = { remap: Map<string, string>; leftOut: Array<{ id: string; keyword: string; reason: string }>; saved: string[]; created: number };
+/**
+ * 2026-10-16 · INCORPORAR A KEYWORD NOVA (decisão do dono: "PROCURA NOVOS,
+ * DIFERENTES DAS QUE JÁ ESTÃO NA LISTA, PODE PROCESSAR ELES E INCORPORAR
+ * ELES"). Os MESMOS núcleos das telas do Minerador, na ordem, cada um com
+ * releitura: import da Pesquisa por Assunto (com a Lógica nas criadas) →
+ * Volume (a medição guardada na prévia, sem consultar o Google Ads de novo;
+ * sem ela, o "Medir volume" de sempre) → aprovação → envio ao Arquiteto.
+ * Só as linhas que ESTE import criou são tocadas; a keyword que passou a
+ * existir na marca depois da prévia recusa a linha antes de qualquer escrita.
+ */
+async function incorporateNewKeywords(runtime: ImprovementRuntime, run: ImprovementRun, target: ImprovementTarget, novasIds: readonly string[]): Promise<NewKeywordIncorporation> {
+  const context = runtime.context;
+  const permissoes = await newKeywordPermissions(runtime);
+  const criar = permissoes["minerador:create"], editar = permissoes["minerador:edit"], aprovar = permissoes["minerador:approve"], enviar = permissoes["arquiteto:create"];
+  const novas = novasIds.map(id => run.keywords.find(k => k.id === id)!).filter(Boolean);
+  const nomes = (lista: readonly { keyword: string }[]) => lista.map(k => `“${k.keyword}”`).join(", ");
+  const marca = await readDifferentiationBrandKeywords(context);
+  const jaExistem = novas.filter(k => marca.existingByNormalized.has(normalizeKeyword(k.keyword)));
+  if (jaExistem.length) throw refusal(`${nomes(jaExistem)} passou a existir no Minerador depois da prévia: o Arquiteto não mexe em keyword que já existe. Prepare de novo. Nada foi gravado.`);
+  const saved: string[] = [];
+  const parcial = (motivo: string) => refusal(`${motivo} Já gravado no Minerador nesta confirmação: ${saved.join("; ") || "nada"}. O artigo não foi gravado; prepare de novo para continuar.`);
+  const importado = await importSubjectDiscoveryWithCore({
+    brandId: context.brandId, actorUserId: criar.actorUserId, supabase: criar.supabase,
+    request: { importRequestId: stableUuid(run.runId, target.id, "import"), searchId: run.runId, subjectKeywordId: target.kind === "subject" ? target.id : null, subjectPhrase: target.theme, items: novas.map(k => ({ keyword: k.keyword, origins: ["ads_keyword_seed"], evidence: [`Google Ads: ideia da busca pelas sementes do plano e do DNA, Volume medido para ${target.theme}`] })) },
+    runLogic: async keywordIds => { const logica = await runKeywordLogicWithCore({ brandId: editar.brandId, keywordIds, db: editar.supabase }); return { applied: logica.applied, unchanged: logica.unchanged, failed: logica.failed }; },
+  });
+  if (!importado.ok) throw refusal(`O import das keywords novas no Minerador não foi feito: ${importado.reason}. Nada foi gravado.`);
+  // Só as linhas que este import CRIOU (nunca uma que já existia).
+  const criadas = new Map(importado.rows.filter(row => row.outcome === "created" && row.keywordId).map(row => [row.normalizedKeyword, row.keywordId!]));
+  const remapTodas = new Map<string, string>();
+  for (const k of novas) { const id = criadas.get(normalizeKeyword(k.keyword)); if (id) remapTodas.set(k.id, id); }
+  if (remapTodas.size !== novas.length) throw parcial(`O import não confirmou como NOVAS todas as keywords (${nomes(novas.filter(k => !remapTodas.has(k.id)))}).`);
+  saved.push(`${remapTodas.size} keyword(s) nova(s) importada(s) com a Lógica (${nomes(novas)})`);
+  const idsNovos = [...remapTodas.values()];
+  const guardadas = novas.map(k => k.measurement).filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const medicao = await measureKeywordVolume(editar, idsNovos, guardadas.length === novas.length ? { measure: (req, params, ctx) => handleGoogleAdsKeywordMetrics(req, params, ctx, { replay: replayStoredMeasurements(guardadas) }) } : {});
+  const medidas = new Map(medicao.outcomes.map(item => [item.keywordId, item]));
+  saved.push("o Volume do Google Ads delas");
+  const remap = new Map<string, string>(), leftOut: NewKeywordIncorporation["leftOut"] = [];
+  for (const [antigo, novo] of remapTodas) {
+    const medida = medidas.get(novo);
+    if (medida && medida.outcome !== "failed" && (medida.volume ?? 0) > 0) remap.set(antigo, novo);
+    else leftOut.push({ id: antigo, keyword: run.keywords.find(k => k.id === antigo)?.keyword ?? antigo, reason: medida?.outcome === "failed" ? `a medição não foi gravada (${medida.reason ?? "sem confirmação"})` : "o Google Ads não confirmou volume" });
+  }
+  if (remap.size) {
+    const decisao = await readDecisionKeywords(context.brandId, [...remap.values()], aprovar.supabase);
+    const entradas = keywordDecisionEntries(decisao.rows, "approve");
+    const barrada = entradas.find(entry => entry.outcome === "blocked");
+    if (decisao.missingCount || barrada) throw parcial(`A aprovação no Minerador não pôde ser feita${barrada ? ` (“${barrada.keyword}”: ${barrada.blockers[0]})` : ""}.`);
+    const aplicadas = await applyKeywordDecisionEntries({ brandId: context.brandId, actorId: aprovar.actorUserId, action: "approve", rows: decisao.rows, entries: entradas, db: aprovar.supabase });
+    if (aplicadas.some(item => item.outcome !== "applied" && item.outcome !== "unchanged")) throw parcial("A releitura não confirmou a aprovação no Minerador.");
+    saved.push(`aprovação de ${remap.size} no Minerador`);
+    try { await createMineradorArquitetoHandoff(enviar, [...remap.values()]); }
+    catch (error) { throw parcial(`O envio ao Arquiteto falhou (${error instanceof Error ? error.message.slice(0, 160) : "erro"}).`); }
+    saved.push(`envio de ${remap.size} ao Arquiteto`);
+  }
+  return { remap, leftOut, saved, created: remapTodas.size };
+}
+
 async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, proposal: ImprovementProposal): Promise<Outcome> {
   const context = runtime.context, target = run.targets.find(t => t.id === proposal.targetId)!;
-  const input = await readInputs(context, [target.id]);
+  let input = await readInputs(context, [target.id]);
   if (proposal.serpRefresh) return applySerpRefresh(runtime, run, proposal, target, input);
   // The last article may have committed before its journal response was lost.
   // Recover only when the DNA, marker and every assignment prove this run;
@@ -1300,8 +1528,8 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
     return row ? Boolean(signals(row).intent) : null;
   });
   if (precisaDoMinerador) throw refusal(improvementMineradorNeedsSentence(precisaDoMinerador, id => run.keywords.find(k => k.id === id)?.keyword ?? input.rows.get(id)?.keyword ?? id));
-  const members = [...proposal.memberIds], principalId = proposal.principalId!;
-  const transfers = [...proposal.transfers];
+  let members = [...proposal.memberIds], principalId = proposal.principalId!;
+  let transfers = [...proposal.transfers];
   // Só o que muda o artigo conta como "mudou": texto, volume, Silo, dono e publicação.
   // A página publicada e o Assunto declarado nunca entram na lista de keywords
   // (nem na prévia nem agora): antes, isso acusava "mudou" para sempre e o
@@ -1324,18 +1552,35 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
     }
   }
   /*
-   * F4: a keyword sem intenção (antes: a Lógica do Minerador rodava aqui) e a
-   * keyword nova (antes: import, Lógica, métricas, aprovação e envio aqui)
-   * foram recusadas acima, com a sugestão no Minerador. Nada abaixo escreve
-   * no Minerador.
+   * A keyword que JÁ existe no Minerador e não tem a Lógica, a medição gravada
+   * ou o envio foi recusada acima: o Arquiteto não mexe nela.
+   *
+   * 2026-10-16 · A KEYWORD NOVA ENTRA NESTA MESMA CONFIRMAÇÃO (decisão do dono;
+   * SDD da linha única §15 passo 4): import → Lógica → Volume → aprovação →
+   * envio, pelos núcleos do Minerador, SÓ nas linhas que esta confirmação
+   * criou. A que ficou sem volume confirmado sai do artigo e fica no
+   * Minerador, dita. Depois, a composição e o ArticleDNA, como sempre.
    */
+  const novas = improvementNewKeywordIds({ memberIds: members, principalId }, run.keywords);
+  let incorporadas: NewKeywordIncorporation | null = null;
+  if (novas.length) {
+    incorporadas = await incorporateNewKeywords(runtime, run, target, novas);
+    const semVolume = new Set(incorporadas.leftOut.map(item => item.id));
+    if (semVolume.has(principalId)) throw refusal(`A nova principal “${run.keywords.find(k => k.id === principalId)?.keyword ?? principalId}” ficou sem volume confirmado no Google Ads: ela ficou no Minerador e a troca não foi gravada. Já gravado no Minerador nesta confirmação: ${incorporadas.saved.join("; ") || "nada"}. Prepare de novo.`);
+    members = members.flatMap(id => semVolume.has(id) ? [] : [incorporadas!.remap.get(id) ?? id]);
+    principalId = incorporadas.remap.get(principalId) ?? principalId;
+    transfers = transfers.flatMap(id => semVolume.has(id) ? [] : [incorporadas!.remap.get(id) ?? id]);
+    input = await readInputs(context, [target.id]);
+    const naoChegaram = [...incorporadas.remap.values()].filter(id => !input.rows.has(id));
+    if (naoChegaram.length) throw refusal(`As keywords novas não chegaram ao Arquiteto na releitura. Já gravado no Minerador nesta confirmação: ${incorporadas.saved.join("; ")}. Prepare de novo para continuar.`);
+  }
   const final = { ...proposal, principalId, memberIds: members }, group = makeGroup(target, final, input.rows);
   // No provider call here: the approved final composition is evaluated against
   // the cache in this same action, without a second editorial confirmation.
   // D2(a): principal declarada no plano aprovado, sem volume — o parecer pode vir das sustentações (sem custo).
   // 2026-10-13 · a keyword do plano, travada ou livre (a livre que ficou principal também vale).
   const principalDeclarada = target.kind === "subject" && Boolean(target.declaredPrincipalId ?? target.planPrincipalId) && (target.declaredPrincipalId ?? target.planPrincipalId) === principalId;
-  const semParecerDaDeclarada = () => refusal(`A principal declarada “${input.rows.get(principalId)?.keyword ?? principalId}” não tem SERP no cache e nenhuma sustentação com volume do artigo tem as 4 lentes no cache: não há base para o parecer pelas sustentações (D2a). Nada foi gravado. Para gravar, use “Validar no Google” (pago; o custo aparece antes de autorizar).`);
+  const semParecerDaDeclarada = () => refusal(`A principal declarada “${input.rows.get(principalId)?.keyword ?? principalId}” não tem SERP no cache e nenhuma sustentação com volume do artigo tem as 4 lentes no cache: não há base para o parecer pelas sustentações (D2a). Nada foi gravado. Para gravar, use “Coletar a SERP no DataForSEO” (pago; o custo aparece antes de autorizar).`);
   try { await serpOperation(context, group, "execute", 0); }
   catch (error) { if (principalDeclarada && !hasSearchVolume(input.rows.get(principalId)?.volume_search)) throw semParecerDaDeclarada(); throw error; }
   // F2 das listas leves (2026-10-14): o parecer desta composição por `candidateRef`, não a lista inteira da marca.
@@ -1464,7 +1709,9 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   const dna = readback.articleDnas.find(a => a.versionId === written.version.versionId), rows = projected(readback, context.brandId);
   if (!dna || dna.contentHash !== written.version.contentHash || !markerReadback.payload.concludedFormations.some(f => f.materializedArticleId === payload.articleId && f.formationBaseHash === baseHash(group)) || members.some(id => text(rows.get(id)?.articleFormationRef) !== formationRef || object(rows.get(id)?.articleFormationDecision).role !== (id === principalId ? "principal" : "secundaria") || (transfers.includes(id) && text(rows.get(id)?.territoryRef) !== target.territoryRef)) || proposal.removeIds.some(id => text(rows.get(id)?.articleFormationRef))) throw refusal("A releitura não confirmou DNA, composição e marcador. Revise o progresso antes de retomar.");
   const material = proposal.addIds.length > 0 || proposal.removeIds.length > 0 || proposal.principalId !== proposal.currentPrimaryId || proposal.exclusions.length > 0 || Boolean(target.declaredPlanPending);
-  return { targetId: target.id, status: material ? "improved" : currentArticle ? "unchanged" : "dna_created", message: `${material ? "Melhoria material gravada e relida." : currentArticle ? "Composição já adequada." : "Primeiro ArticleDNA criado; composição não foi ampliada."}${liberadas.length ? ` A tabela voltou a bater com o artigo: ${liberadas.map(id => `“${input.rows.get(id)?.keyword ?? id}”`).join(", ")} ${liberadas.length === 1 ? "foi liberada" : "foram liberadas"} para “Keywords não agrupadas” (nenhuma foi apagada).` : ""}`, versionId: dna.versionId };
+  // 2026-10-16 · o que a confirmação gravou no Minerador (só keywords novas) e o que ficou de fora, com o motivo.
+  const doMinerador = incorporadas ? ` Keywords novas: ${incorporadas.saved.join("; ")}.${incorporadas.leftOut.length ? ` Ficaram fora do artigo (no Minerador, sem aprovação): ${incorporadas.leftOut.map(item => `“${item.keyword}” — ${item.reason}`).join("; ")}.` : ""} As keywords que já vieram do Minerador não foram alteradas.` : "";
+  return { targetId: target.id, status: material ? "improved" : currentArticle ? "unchanged" : "dna_created", message: `${material ? "Melhoria material gravada e relida." : currentArticle ? "Composição já adequada." : "Primeiro ArticleDNA criado; composição não foi ampliada."}${doMinerador}${liberadas.length ? ` A tabela voltou a bater com o artigo: ${liberadas.map(id => `“${input.rows.get(id)?.keyword ?? id}”`).join(", ")} ${liberadas.length === 1 ? "foi liberada" : "foram liberadas"} para “Keywords não agrupadas” (nenhuma foi apagada).` : ""}`, versionId: dna.versionId };
 }
 
 export function improvementRuntime(context: PipelineContext): ImprovementRuntime {

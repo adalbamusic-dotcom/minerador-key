@@ -17,7 +17,14 @@ globalThis.fetch = async () => { throw new Error("Network forbidden in improveme
 const brandId = "61d2e019-f44f-4fa3-af2f-d86b95628ab3", actorUserId = "11111111-1111-4111-8111-111111111111";
 const oldId = "aaaaaaaa-0000-4000-8000-000000000001", newId = "aaaaaaaa-0000-4000-8000-000000000002";
 const territory = "territory:0b8f7c3e-1a2b-4c3d-8e9f-0a1b2c3d4e5f";
-const url = "https://adalbapro.com.br/captacao-de-pacientes/como-captar-clientes-para-clinica-de-estetica";
+/*
+ * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono): com o slug feito da principal ("como-captar-clientes-para-clinica-de-
+ * estetica"), a Livre sem volume FICA e só recebe reforço (teste próprio, `URL_DE_IDENTIDADE`). Os testes da troca
+ * deste arquivo usam a mesma página com um slug que não foi feito da principal (fora da identidade).
+ */
+const URL_DE_IDENTIDADE = "https://adalbapro.com.br/captacao-de-pacientes/como-captar-clientes-para-clinica-de-estetica";
+const URL_FORA_DA_IDENTIDADE = "https://adalbapro.com.br/captacao-de-pacientes/captacao-de-pacientes-para-clinica-de-estetica";
+let url = URL_DE_IDENTIDADE;
 const semantic = { entidade_central: "captação de pacientes", problema_percebido: "poucos agendamentos", publico: "gestores de clínicas", resultado_desejado: "ampliar agendamentos", intencao_principal: "Informativa", modificadores: "agenda da clínica" };
 let rows: any[], articles: any[], journal: any[], assessments: any[], marker: any;
 let paid = 0, plansMissing = 0, failReadback = false, failPatch = false, incomplete = false, wrongRole = false;
@@ -57,7 +64,8 @@ const runtime: any = { context, authorize: async (module: string, action: string
 // 2026-10-14 (noite) · "Consolidar o Silo do plano" importa também criar/atualizar território (nunca chamados aqui: o Silo do plano já está confirmado).
 mock.module("../lib/server/arquiteto-territory-store.ts", { namedExports: { listTerritoryWorkflowItems: async () => [{territoryRef:territory,lockVersion:1,territory:{name:"Wi-Fi e fibra óptica",lifecycleStatus:"confirmed",centralEntity:"clínica de estética",macroIntent:"Informativa",slugState:{publishedSlug:"captacao-de-pacientes",confirmed:null,proposals:[]}}}], createTerritoryWorkflowItem: async () => { throw new Error("criar território não é esperado neste teste"); }, updateTerritoryWorkflowItem: async () => { throw new Error("atualizar território não é esperado neste teste"); } } });
 const workspace = () => ({ workflowItems: [], keywords: clone(rows), articleDnas: clone(articles), siloDnas: [] });
-function setup() {
+function setup(paginaUrl = URL_DE_IDENTIDADE) {
+  url = paginaUrl;
   gruposDasKeywords = new Map();
   journal=[]; articles=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];disjoint=new Set();events=[];incompleteUntilPaid=false;diverge=new Set();legacyVolumes=new Map();legacyAsked=[];legacyFail=false;measured=[];logicRan=[];supportBasisPrincipal=null;noSerpPrincipal=null;medicoesProvider=[];replays=[];knownInBrand=new Map();
   rows = [oldId,newId].map((id,i) => ({ id, brand_id: brandId, keyword: i ? "captação de pacientes para clínica de estética" : "como captar clientes para clínica de estética", intent: "Informativa", volume_search: i ? 50 : null, volume_source: i ? "google_ads" : null, analise_semantica: semantic, isPublished: !i, publishedUrl: !i ? url : undefined, primaryKeywordPolicy: !i ? "reviewable" : "free", territoryRef: i ? "territory:other" : territory, keywordDnaRef: { entityId: id, versionId: `${id}:v1`, contentHash: `sha256:${"a".repeat(64)}` }, canonicalWorkflow: { id: `workflow-${id}`, lockVersion: 1, payload: { semanticQualification: { intent: "Informativa", semanticState: "conclusive" }, approvedDna: { analiseSemantica: semantic } } } }));
@@ -78,6 +86,8 @@ const recortado = (filtro: any) => {
 mock.module("../lib/server/arquiteto-workspace.ts", { namedExports: { loadCanonicalArquitetoWorkspace: async (_c: any, options: any = {}) => recortado(options.groupFilter), createMineradorArquitetoHandoff: async () => { assert.ok(external);qualification.push("handoff"); } } });
 mock.module("../lib/server/arquiteto-differentiation-store.ts", { namedExports: {
   readDifferentiationBrandKeywords: async () => ({ pages: rows[0].isPublished ? [{ keywordId: oldId, keyword: rows[0].keyword, url, canonical: url, slug: url.split('/').at(-1), post: "reviewable" }] : [], existingByNormalized: new Map(rows.map(r=>[normalizeKeyword(r.keyword),r.id])), knownVolumeByNormalized: knownInBrand }),
+  // 2026-10-16 · §15: o vocabulário da SERP da principal em cache; vazio aqui (os cenários deste arquivo são pelos pares da SERP).
+  readPrincipalSerpVocabulary: async () => new Map(),
   readPublishedFootprints: async (_c: any, queries: any[]) => ({ missingLenses: [], footprints: queries.map(q => ({ ...q, lenses: SERP_SUBJECT_LENS_LABELS.map(lens => ({ lens, urls: (disjoint.has(q.keywordId) ? ["https://outro.org/1","https://outro.org/2","https://outro.org/3","https://outro.org/4"] : ["https://example.org/1","https://example.org/2","https://example.org/3","https://example.org/4"]) })) })) }),
 } });
 mock.module("../lib/server/arquiteto-differentiation-runtime.ts", { namedExports: {
@@ -144,7 +154,10 @@ const subjectImportActual = await import("../lib/minerador/subject-discovery-imp
 mock.module("../lib/minerador/subject-discovery-import.ts", { namedExports: { ...subjectImportActual, importSubjectDiscoveryWithCore: async (input:any)=>{
   assert.ok(external);qualification.push("import"); const logic=deriveLogicalKeywordBatchItem({id:newId,keyword:discoveredPhrase,location:null,intent:null,analise_semantica:{}},null,new Date().toISOString());
   const jaNoMinerador=knownInBrand.get(normalizeKeyword(input.request.items[0].keyword));
-  rows.push({...clone(rows[0]),id:newId,keyword:input.request.items[0].keyword,isPublished:false,publishedUrl:undefined,volume_search:jaNoMinerador?.known.volume??null,volume_source:jaNoMinerador?"google_ads":null,territoryRef:null,analise_semantica:logic.update.analise_semantica,primaryKeywordPolicy:"free",keywordDnaRef:{entityId:newId,versionId:`${newId}:v1`,contentHash:`sha256:${"c".repeat(64)}`},canonicalWorkflow:{id:`workflow-${newId}`,lockVersion:1,payload:{approvedDna:{analiseSemantica:logic.update.analise_semantica}}}});return {ok:true};
+  rows.push({...clone(rows[0]),id:newId,keyword:input.request.items[0].keyword,isPublished:false,publishedUrl:undefined,volume_search:jaNoMinerador?.known.volume??null,volume_source:jaNoMinerador?"google_ads":null,territoryRef:null,analise_semantica:logic.update.analise_semantica,primaryKeywordPolicy:"free",keywordDnaRef:{entityId:newId,versionId:`${newId}:v1`,contentHash:`sha256:${"c".repeat(64)}`},canonicalWorkflow:{id:`workflow-${newId}`,lockVersion:1,payload:{approvedDna:{analiseSemantica:logic.update.analise_semantica}}}});
+  // 2026-10-16 · como o núcleo real: devolve as linhas CRIADAS e roda a Lógica nelas pela porta.
+  if (input.runLogic) await input.runLogic([newId]);
+  return {ok:true,rows:[{index:0,keyword:input.request.items[0].keyword,normalizedKeyword:normalizeKeyword(input.request.items[0].keyword),outcome:"created",keywordId:newId,reason:null}]};
 } } });
 mock.module("../lib/server/minerador-keyword-decision-core.ts", { namedExports: {
   runKeywordLogicWithCore: async (input:any)=>{
@@ -183,8 +196,17 @@ const LER={ai:true,measure:true} as const;
 const prepare=()=>handleArticleImprovement(runtime,{brandId,action:"prepare",authorizeReading:LER});
 const apply=(run: any)=>handleArticleImprovement(runtime,{brandId,action:"apply",runId:run.runId,decisionHash:run.decisionHash});
 
-test("single acceptance swaps Livre, preserves published identity, transfers, materializes and reads back", async()=>{
-  setup();const run=await prepare(); assert.equal(run.proposals[0].status,"ready",JSON.stringify(run.proposals)); assert.equal(paid,0); assert.equal(articles.length,0);
+test("2026-10-17 · principal de identidade: o publicado Livre sem volume com o slug feito da principal NÃO troca; a candidata entra como secundária e nenhuma SERP de candidata a principal é paga", async()=>{
+  setup(URL_DE_IDENTIDADE);const run=await prepare();
+  const proposta=run.proposals[0];
+  assert.equal(proposta.principalId,oldId,JSON.stringify(proposta.reasons));
+  assert.ok(proposta.memberIds.includes(newId),"a mais ampla reforça");
+  assert.ok(proposta.reasons.some((r: string)=>/^Principal de identidade: “como captar clientes para clínica de estética” \(sem volume\) é o assunto do slug publicado/.test(r)),JSON.stringify(proposta.reasons));
+  assert.equal(paid,0);
+});
+
+test("single acceptance swaps Livre (fora da identidade), preserves published identity, transfers, materializes and reads back", async()=>{
+  setup(URL_FORA_DA_IDENTIDADE);const run=await prepare(); assert.equal(run.proposals[0].status,"ready",JSON.stringify(run.proposals)); assert.equal(paid,0); assert.equal(articles.length,0);
   const result=await apply(run); assert.equal(result.state,"complete");assert.equal(result.outcomes[0].status,"improved",JSON.stringify(result.outcomes));
   const dna=articles[0].payload;assert.equal(dna.principalKeywordId,newId);assert.deepEqual(dna.secondaryKeywordIds,[oldId]);assert.equal(dna.canonical,url);assert.equal(dna.suggestedSlug,url.split('/').at(-1));assert.equal(dna.territoryRef,territory);assert.equal(rows[1].territoryRef,territory);assert.equal(dna.primaryKeywordMetrics.volumeSearch,50);
   assert.equal(assessments.find(a=>a.candidateRef===oldId).payload.humanResolution.decidedBy,actorUserId);
@@ -227,26 +249,43 @@ test("declared subject automatically forms around a measured principal and survi
  * "Precisa do Minerador", a sugestão é gravada para a caixa do Minerador e o
  * apply é recusado sem nenhuma chamada ao Minerador.
  */
-test("F4 · ideia externa: 'Precisa do Minerador', vira sugestão do Arquiteto e o apply não toca o Minerador",async()=>{
+/*
+ * 2026-10-16 · DECISÃO DO DONO (SUBSTITUI a F4 de 14/10 neste ponto): a
+ * keyword NOVA (que não existe na marca) volta a entrar na MESMA confirmação —
+ * import, Lógica, Volume (a medição guardada na prévia, sem consultar de
+ * novo), aprovação e envio — e no ArticleDNA. Não vira mais sugestão. O que já
+ * veio do Minerador não é tocado.
+ */
+test("2026-10-16 · ideia NOVA: pronta na prévia, sem sugestão; sem o aceite explícito nada é gravado; com ele, a MESMA confirmação a incorpora e grava o artigo",async()=>{
   setup();external=true;rows=rows.slice(0,1);
   const logic=deriveLogicalKeywordBatchItem({id:oldId,keyword:discoveredPhrase,location:null,intent:null,analise_semantica:{}},null,new Date().toISOString());
   rows[0].analise_semantica=logic.update.analise_semantica;rows[0].canonicalWorkflow.payload.approvedDna.analiseSemantica=logic.update.analise_semantica;rows[0].canonicalWorkflow.payload.semanticQualification={};
-  const run=await handleArticleImprovement(runtime,{brandId,action:"prepare",discover:true,authorizeReading:LER});
+  const antes=JSON.stringify(rows[0].analise_semantica);
+  const rt=medindo(runtime,new Map([[normalizeKeyword(discoveredPhrase),50]]));
+  const run=await handleArticleImprovement(rt,{brandId,action:"prepare",discover:true,authorizeReading:LER});
+  const medicoesDaPrevia=medicoesProvider.length;
   const p=run.proposals[0];
-  assert.equal(p.status,"insufficient_evidence",JSON.stringify(run.proposals));assert.equal(p.needsMinerador?.newKeywordIds.length,1);assert.match(p.reasons.join(" "),/Precisa do Minerador: 1 keyword\(s\) nova\(s\)/);
-  assert.equal(qualification.length,0);assert.equal(rows.length,1);
-  // A sugestão: item de workflow do Arquiteto, chave = a execução; nada no Minerador.
-  const sugestao=journal.find(r=>r.subject_type==="architect_minerador_suggestions");
-  assert.ok(sugestao,"a sugestão foi gravada");assert.equal(sugestao.subject_id,`improvement:${run.runId}`);assert.equal(sugestao.stage,"architect");
-  assert.equal(sugestao.payload.items.length,1);assert.equal(sugestao.payload.items[0].kind,"new_keyword");assert.equal(sugestao.payload.items[0].keyword,discoveredPhrase);
-  assert.equal(sugestao.payload.items[0].keywordId,null);assert.equal(sugestao.payload.items[0].targetKeywordId,oldId);assert.equal(sugestao.payload.items[0].searchId,run.runId);
-  assert.ok(run.notices.some((n:string)=>/sugestão\(ões\) foram para o Minerador/.test(n)),JSON.stringify(run.notices));
-  // O pedido antigo de aprovar as novas é recusado com o caminho; a linha não é aceitável.
-  await assert.rejects(()=>handleArticleImprovement(runtime,{brandId,action:"apply",runId:run.runId,decisionHash:run.decisionHash,approveNewKeywords:true}),/não aprova keyword no Minerador/);
-  await assert.rejects(()=>handleArticleImprovement(runtime,{brandId,action:"apply",runId:run.runId,decisionHash:run.decisionHash,targetIds:[oldId]}),/precisam do Minerador/);
-  assert.deepEqual(qualification,[],"nenhum núcleo do Minerador foi chamado");assert.equal(articles.length,0);assert.equal(rows.length,1);assert.equal(paid,0);
-  // A projeção do navegador e do MCP leva o needsMinerador.
-  assert.deepEqual(projectImprovementRun(run).proposals[0].needsMinerador,p.needsMinerador);
+  assert.equal(p.status,"ready",JSON.stringify(run.proposals));assert.equal(p.needsMinerador,undefined);
+  assert.equal(qualification.length,0,"a prévia não grava nada no Minerador");assert.equal(rows.length,1);
+  assert.equal(journal.find(r=>r.subject_type==="architect_minerador_suggestions"),undefined,"a keyword nova não vira sugestão");
+  // Sem o aceite explícito das novas: recusa, nada gravado.
+  await assert.rejects(()=>handleArticleImprovement(rt,{brandId,action:"apply",runId:run.runId,decisionHash:run.decisionHash,targetIds:[oldId]}),/approveNewKeywords/);
+  assert.deepEqual(qualification,[]);assert.equal(articles.length,0);assert.equal(rows.length,1);
+  // Sem a permissão de aprovar no Minerador: recusa ANTES de qualquer escrita.
+  const semAprovar:any={...rt,authorize:async(module:string,action:string)=>{if(module==="minerador"&&action==="approve")throw new Error("sem permissão de aprovar");return{...context,module,action};}};
+  await assert.rejects(()=>handleArticleImprovement(semAprovar,{brandId,action:"apply",runId:run.runId,decisionHash:run.decisionHash,targetIds:[oldId],approveNewKeywords:true}),/minerador:approve/);
+  assert.deepEqual(qualification,[]);assert.equal(articles.length,0);
+  // Com o aceite: import (com a Lógica nas criadas) → Volume pela medição guardada → aprovação → envio → ArticleDNA.
+  let fim=await handleArticleImprovement(rt,{brandId,action:"apply",runId:run.runId,decisionHash:run.decisionHash,targetIds:[oldId],approveNewKeywords:true});
+  for(let volta=0;fim.state!=="complete"&&volta<5;volta++) fim=await handleArticleImprovement(rt,{brandId,action:"apply",runId:run.runId,decisionHash:run.decisionHash});
+  assert.equal(fim.outcomes[0].status,"improved",JSON.stringify(fim.outcomes));
+  assert.deepEqual(qualification,["import","logic","metrics","approve","handoff"]);
+  assert.deepEqual(replays,[discoveredPhrase],"o Volume gravado é a medição da prévia (nenhuma consulta nova)");
+  assert.equal(medicoesProvider.length,medicoesDaPrevia,"a confirmação não consulta o Google Ads de novo");
+  assert.equal(articles.length,1);assert.ok(articles[0].payload.keywordReferences.some((r:any)=>r.keywordId===newId));
+  assert.match(fim.outcomes[0].message,/Keywords novas: 1 keyword\(s\) nova\(s\) importada\(s\) com a Lógica/);
+  assert.equal(JSON.stringify(rows[0].analise_semantica),antes,"o que veio do Minerador não foi alterado");
+  assert.equal(paid,0);
 });
 test("lost journal response recovers a committed article without another version",async()=>{
   setup();const run=await prepare();const completed=await apply(run);assert.equal(completed.outcomes[0].status,"improved");
@@ -371,7 +410,7 @@ test("faltando lente, a linha da IA fica 'precisa validar' (passo 2 pago) e o co
   const run = await handleArticleImprovement(comIa, { brandId, action: "prepare", authorizeReading: LER });
   const proposal = run.proposals[0];
   assert.equal(proposal.status, "insufficient_evidence"); assert.equal(proposal.needsValidation, true, JSON.stringify(proposal));
-  assert.match(proposal.reasons.join(" "), /Precisa validar no Google/);
+  assert.match(proposal.reasons.join(" "), /Precisa coletar a SERP no DataForSEO/);
   assert.ok(run.costs.paidQueries > 0, "o passo 2 pago aparece com prévia de custo");
   await assert.rejects(() => handleArticleImprovement(comIa, { brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash, targetIds: [oldId] }), /prontas/);
   const pedido = { brandId, action: "collect" as const, runId: run.runId, decisionHash: run.decisionHash, authorizedCostUsd: run.costs.estimatedCostUsd.max };
@@ -427,7 +466,7 @@ test("publicado que também é Assunto declarado grava: a página fora da lista 
 });
 
 test("o Google separou parte da composição: sai quem não divide páginas com a principal e a menor é conferida de novo, sem custo (caso real 'campanhas de marketing', 2026-09-30)", async()=>{
-  setup();
+  setup(URL_FORA_DA_IDENTIDADE);
   const k3 = "aaaaaaaa-0000-4000-8000-000000000003";
   rows.push({ ...clone(rows[1]), id: k3, keyword: "captação de pacientes em clínica de estética", volume_search: 40, territoryRef: "territory:other", keywordDnaRef: { entityId: k3, versionId: `${k3}:v1`, contentHash: `sha256:${"d".repeat(64)}` }, canonicalWorkflow: { ...clone(rows[1].canonicalWorkflow), id: `workflow-${k3}` } });
   diverge = new Set([k3]);
@@ -468,8 +507,8 @@ test("o Google separa todas as entradas da página: a linha diz 'outro assunto' 
 });
 
 // F4 (ajuste declarado 2026-10-14): a medição feita no preparo NÃO é gravada pelo Arquiteto — a linha espera o Minerador.
-test("volume de outra era é medido no Google Ads no preparo e a principal sem volume seria trocada; F4: a gravação da medição é do Minerador (caso real 'tráfego pago vs orgânico', 2026-09-30)", async()=>{
-  setup();
+test("volume de outra era é medido no Google Ads no preparo e a principal sem volume (fora da identidade) seria trocada; F4: a gravação da medição é do Minerador (caso real 'tráfego pago vs orgânico', 2026-09-30)", async()=>{
+  setup(URL_FORA_DA_IDENTIDADE);
   rows[1].volume_search = 140; rows[1].volume_source = "previous";
   legacyVolumes = new Map([[normalizeKeyword(rows[1].keyword), 50]]);
   const run = await prepare();
@@ -479,7 +518,7 @@ test("volume de outra era é medido no Google Ads no preparo e a principal sem v
   assert.equal(p.status, "insufficient_evidence", JSON.stringify(p.reasons));
   assert.deepEqual(p.needsMinerador?.measureKeywordIds, [newId]);
   assert.match(p.reasons.join(" "), /medição\(ões\) de volume para gravar no Minerador/);
-  assert.ok(run.notices.some((n: string) => /medidas agora, com a sua autorização \(cota do Google Ads, sem custo em dólar\): 1 com volume/.test(n)), JSON.stringify(run.notices));
+  assert.ok(run.notices.some((n: string) => /medidas agora, com a sua autorização, grátis \(cota do Google Ads\): 1 com volume/.test(n)), JSON.stringify(run.notices));
   const sugestao = journal.find(r => r.subject_type === "architect_minerador_suggestions");
   assert.equal(sugestao.payload.items[0].kind, "measure"); assert.equal(sugestao.payload.items[0].keywordId, newId); assert.equal(sugestao.payload.items[0].volume, 50);
   await assert.rejects(() => handleArticleImprovement(runtime, { brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash, targetIds: [oldId] }), /precisam do Minerador/);
@@ -678,10 +717,10 @@ test("2026-10-12 · a busca nova no Google Ads só roda sob pedido, e cada chama
   assert.equal(comPedido.discovery?.requested, true);
   assert.equal(comPedido.discovery?.requests, 1);
   assert.equal(comPedido.reusedFromRunId, semPedido.runId, "a busca pedida reaproveita o resto da preparação");
-  // F4 (ajuste declarado 2026-10-14): a proposta com a ideia da busca fica "Precisa do Minerador" (antes: "ready", importada no apply).
-  assert.equal(comPedido.proposals[0].status, "insufficient_evidence", JSON.stringify(comPedido.proposals));
-  assert.equal(comPedido.proposals[0].needsMinerador?.newKeywordIds.length, 1);
-  assert.deepEqual(comPedido.discovery?.gapTargetIds, [], "à espera do Minerador, o alvo não pede outra busca");
+  // 2026-10-16 (decisão do dono, SUBSTITUI a F4 de 14/10): a ideia NOVA fica pronta na prévia e entra pela mesma confirmação.
+  assert.equal(comPedido.proposals[0].status, "ready", JSON.stringify(comPedido.proposals));
+  assert.equal(comPedido.proposals[0].needsMinerador, undefined);
+  assert.deepEqual(comPedido.discovery?.gapTargetIds, [], "com proposta pronta, o alvo não pede outra busca");
   assert.deepEqual(usage.map(u => [u.kind, u.resultStatus, u.runId, u.suffix, u.receivedCount]), [["google_ads_discovery", "succeeded", comPedido.runId, "url_seed:p1", 1]]);
 });
 
@@ -826,7 +865,7 @@ test("F3 · falta medir: a prévia diz já temos · falta · custa e NÃO chama 
   assert.equal(run.reading?.needsPaidReading, true);
   assert.deepEqual(run.reading?.missing.volumeToMeasureSample.map(k => [k.keyword, k.reason]).sort(), [[rows[0].keyword, "never_measured"], [rows[1].keyword, "other_provider"]].sort());
   assert.deepEqual(run.reading?.plan.googleAds, { keywords: 2, calls: 1, moneyUsd: 0, quota: true });
-  assert.match(run.reading?.sentences.cost ?? "", /Google Ads: 1 consulta\(s\) de métricas para 2 keyword\(s\) — sem custo em dólar, usa a cota da marca/);
+  assert.match(run.reading?.sentences.cost ?? "", /Google Ads: 1 consulta\(s\) de métricas para 2 keyword\(s\) — grátis \(cota do Google Ads\)/);
   assert.notEqual(run.proposals[0].principalId, newId, "sem medir, a troca pela keyword de volume antigo não é proposta");
 });
 
@@ -839,7 +878,7 @@ test("F3 · falta medir: a prévia diz já temos · falta · custa e NÃO chama 
  * aqui lê o volume gravado e grava só o ArticleDNA.
  */
 test("F3 · medição única: a preparação mede uma vez; F4 — o Minerador grava a MESMA medição (replay) e o Arquiteto grava só o ArticleDNA", async () => {
-  setup(); rows[1].volume_search = 140; rows[1].volume_source = "previous";
+  setup(URL_FORA_DA_IDENTIDADE); rows[1].volume_search = 140; rows[1].volume_source = "previous";
   const rt = medindo(runtime, new Map([[normalizeKeyword(rows[1].keyword), 50]]));
   const run = await handleArticleImprovement(rt, { brandId, action: "prepare", authorizeReading: { measure: true } });
   assert.equal(medicoesProvider.length, 1, "uma consulta ao Google Ads na preparação");
@@ -912,7 +951,7 @@ test("F3 · a IA só roda com a autorização e recebe o resumo do DNA", async (
 });
 
 // F4 (ajuste declarado 2026-10-14): as duas ideias viram "Sugestões do Arquiteto"; o apply não importa nem grava nada no Minerador.
-test("F3 · busca nova: ideia que o Minerador já mediu não é medida de novo; a nova é medida uma vez e a medição vai guardada na sugestão (F4)", async () => {
+test("F3 · busca nova: ideia que JÁ existe no Minerador não é medida nem tocada; a NOVA é medida uma vez e a mesma medição é gravada na confirmação (2026-10-16)", async () => {
   const comoExterna = () => {
     setup(); external = true; rows = rows.slice(0, 1);
     const logic = deriveLogicalKeywordBatchItem({ id: oldId, keyword: discoveredPhrase, location: null, intent: null, analise_semantica: {} }, null, new Date().toISOString());
@@ -924,24 +963,24 @@ test("F3 · busca nova: ideia que o Minerador já mediu não é medida de novo; 
   const rt = medindo(runtime, new Map([[normalizeKeyword(discoveredPhrase), 50]]));
   const jaTemos = await handleArticleImprovement(rt, { brandId, action: "prepare", discover: true });
   assert.equal(medicoesProvider.length, 0, "a ideia que o Minerador já mediu não vai ao Google Ads");
-  assert.ok(jaTemos.notices.some(n => /já existem no Minerador com volume medido/.test(n)), JSON.stringify(jaTemos.notices));
-  assert.equal(jaTemos.proposals[0].needsMinerador?.newKeywordIds.length, 1);
+  assert.ok(jaTemos.notices.some(n => /já existem no Minerador/.test(n)), JSON.stringify(jaTemos.notices));
+  assert.equal(jaTemos.proposals[0].needsMinerador?.newKeywordIds.length, 1, "a que já existe e não chegou ao Arquiteto precisa do Minerador (o Arquiteto não mexe nela)");
   const registroJa = journal.find(r => r.subject_type === "architect_minerador_suggestions" && r.subject_id === `improvement:${jaTemos.runId}`);
   assert.equal(registroJa.payload.items[0].keywordId, newId, "a sugestão aponta a keyword que já está no Minerador");
   assert.equal(registroJa.payload.items[0].hasStoredMeasurement, false, "nada a gravar: o Minerador já mediu");
-  await assert.rejects(() => handleArticleImprovement(rt, { brandId, action: "apply", runId: jaTemos.runId, decisionHash: jaTemos.decisionHash, approveNewKeywords: true }), /não aprova keyword/);
-  assert.deepEqual(qualification, [], "nada importado, medido, aprovado ou enviado pelo Arquiteto");
-  // (b) ideia nova: medida uma vez na busca; a medição vai guardada na sugestão (o Minerador grava sem consultar de novo).
+  await assert.rejects(() => handleArticleImprovement(rt, { brandId, action: "apply", runId: jaTemos.runId, decisionHash: jaTemos.decisionHash, targetIds: [oldId], approveNewKeywords: true }), /precisam do Minerador/);
+  assert.deepEqual(qualification, [], "nada importado, medido, aprovado ou enviado na que já existe");
+  // (b) ideia NOVA: medida uma vez na busca; a confirmação grava a MESMA medição (replay), sem consultar de novo.
   comoExterna();
   const nova = await handleArticleImprovement(rt, { brandId, action: "prepare", discover: true });
   assert.equal(medicoesProvider.length, 1);
-  const registroNovo = journal.find(r => r.subject_type === "architect_minerador_suggestions" && r.subject_id === `improvement:${nova.runId}`);
-  const itemNovo = registroNovo.payload.items[0];
-  assert.deepEqual([itemNovo.kind, itemNovo.keywordId, itemNovo.hasStoredMeasurement], ["new_keyword", null, true]);
-  assert.equal(registroNovo.payload.measurements[itemNovo.id].metric.averageMonthlySearches, 50);
-  await assert.rejects(() => handleArticleImprovement(rt, { brandId, action: "apply", runId: nova.runId, decisionHash: nova.decisionHash, targetIds: [oldId] }), /precisam do Minerador/);
-  assert.equal(medicoesProvider.length, 1, "nenhuma consulta nova");
-  assert.deepEqual(replays, []); assert.deepEqual(qualification, []); assert.equal(articles.length, 0);
+  assert.equal(journal.find(r => r.subject_type === "architect_minerador_suggestions" && r.subject_id === `improvement:${nova.runId}`), undefined, "a nova não vira sugestão");
+  assert.equal(nova.proposals[0].status, "ready", JSON.stringify(nova.proposals));
+  let fim = await handleArticleImprovement(rt, { brandId, action: "apply", runId: nova.runId, decisionHash: nova.decisionHash, targetIds: [oldId], approveNewKeywords: true });
+  for (let volta = 0; fim.state !== "complete" && volta < 5; volta++) fim = await handleArticleImprovement(rt, { brandId, action: "apply", runId: nova.runId, decisionHash: nova.decisionHash });
+  assert.equal(fim.outcomes[0].status, "improved", JSON.stringify(fim.outcomes));
+  assert.equal(medicoesProvider.length, 1, "nenhuma consulta nova ao Google Ads");
+  assert.deepEqual(replays, [discoveredPhrase]); assert.deepEqual(qualification, ["import", "logic", "metrics", "approve", "handoff"]); assert.equal(articles.length, 1);
 });
 
 /*
@@ -1097,7 +1136,7 @@ function soltaScenario(opcoes: { lock?: "locked" | "free"; volumeDaPrincipal?: n
   gruposDasKeywords = new Map([[oldId, planGroupId], [newId, planGroupId]]);
 }
 
-test("2026-10-15 · a melhoria recortada pelo grupo: a keyword SOLTA (sem Assunto, sem grupo) entra na lista; principal Livre sem volume pode virar a solta com volume", async () => {
+test("2026-10-15 · a melhoria recortada pelo grupo: a keyword SOLTA (sem Assunto, sem grupo) entra na lista; a principal Livre sem volume que é a identidade do Assunto (no título) FICA e a solta reforça (2026-10-17)", async () => {
   soltaScenario();
   const run = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
   assert.equal(run.groupScope?.groupId, planGroupId, "o recorte é o do grupo do plano");
@@ -1106,7 +1145,9 @@ test("2026-10-15 · a melhoria recortada pelo grupo: a keyword SOLTA (sem Assunt
   const proposta = run.proposals.find(p => p.targetId === oldId)!;
   assert.equal(proposta.status, "ready", JSON.stringify(run.proposals));
   assert.ok(proposta.memberIds.includes(looseId), "a solta reforça o artigo");
-  assert.equal(proposta.principalId, looseId, "Livre e sem volume: a solta com volume pode ser a principal (DNA compatível, SERP completa)");
+  // SUBSTITUÍDO em 2026-10-17 ("a solta com volume pode ser a principal"): a principal está no título do Assunto — identidade, fica.
+  // Fora da identidade, a solta ainda pode assumir: C10 dos cenários-ouro.
+  assert.equal(proposta.principalId, oldId, "principal de identidade: fica");
   assert.deepEqual(minerador(), { measured: 0, logic: 0, qualification: 0, replays: 0, medicoes: 0 }, "nada no Minerador");
   assert.equal(paid, 0);
 });

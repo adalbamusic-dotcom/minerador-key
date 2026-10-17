@@ -241,7 +241,8 @@ export function usePublishedDifferentiation(input: {
     });
   }, [patch]);
 
-  const accept = useCallback(async (groupId: string) => {
+  /** `approveNewKeywords` (2026-10-17): só quando a confirmação listou as keywords novas, por página, com volume e fonte. */
+  const accept = useCallback(async (groupId: string, options: { approveNewKeywords?: boolean } = {}) => {
     const entry = entries[groupId];
     const run = entry?.run;
     if (!brandId || !run || busy) return;
@@ -250,7 +251,7 @@ export function usePublishedDifferentiation(input: {
     setBusy(true);
     patch(groupId, () => ({ applying: true, applyError: null }));
     try {
-      const result = await postJson<DifferentiationApplyData>("/api/arquiteto/cannibalization/apply", { brandId, groupId, decision: "accept", evaluationHash: run.evaluationHash, pageKeywordIds: paginas });
+      const result = await postJson<DifferentiationApplyData>("/api/arquiteto/cannibalization/apply", { brandId, groupId, decision: "accept", evaluationHash: run.evaluationHash, pageKeywordIds: paginas, ...(options.approveNewKeywords ? { approveNewKeywords: true } : {}) });
       if (!result.ok) patch(groupId, () => ({ applying: false, applyError: result.message }));
       else if (result.data.decision !== "accept") patch(groupId, () => ({ applying: false, applyError: "Resposta inesperada do servidor." }));
       else {
@@ -282,9 +283,9 @@ export function usePublishedDifferentiation(input: {
   }, [brandId, busy, patch]);
 
   /*
-   * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13, item 2): o "Enviar ao Minerador"
-   * (que chamava a rota de import do Minerador daqui) saiu. O aceite grava as
-   * keywords novas como "Sugestões do Arquiteto"; o dono importa no Minerador.
+   * 2026-10-17 · o "Enviar ao Minerador" da tela (que chamava a rota de import
+   * do Minerador daqui) continua fora: a keyword NOVA entra no Minerador pelo
+   * servidor, no próprio aceite (SUBSTITUI a F4, quando ia como sugestão).
    */
 
   /** Passo seguinte do aceite: keyword do Minerador que ainda não está no artigo, pela formação. */

@@ -1,5 +1,21 @@
 # Estado atual — Minerador
 
+## As portas da keyword nova do Arquiteto num lugar só, também na diferenciação — 2026-10-17
+
+Mudança do Arquiteto (detalhe em `docs/04-arquiteto/estado-atual.md`, mesma data); nada mudou nas telas, rotas nem núcleos do Minerador. **Verificado no código e confirmado por teste (fixtures). Validado manualmente: não.**
+
+- As portas dos núcleos do Minerador para a keyword NOVA do Arquiteto (`mineradorPortsForNewKeywords`: import, Lógica, Volume, aprovação, envio) saíram da rota do "Reforçar publicados" para `lib/server/arquiteto-minerador-new-keyword-ports.ts` — a mesma função — e passaram a servir também o "Aceitar grupo" da diferenciação de publicados. Continua: só a keyword que não existe na marca, só nas linhas que o import cria, com as permissões de quem confirma.
+- "Sugestões do Arquiteto" deixa de receber a keyword NOVA da diferenciação (SUBSTITUÍDO em 2026-10-17); continua recebendo a que já existe e não chegou ao Arquiteto, a medição a gravar e a Lógica a rodar.
+- Guarda: `tests/minerador-linha-unica-guarda.test.mts` (a Pesquisa por Assunto e a Lógica do servidor listam o arquivo das portas no lugar da rota).
+
+## O Arquiteto não mexe em keyword do Minerador; a keyword NOVA dele passa pelos núcleos daqui — 2026-10-16 (noite)
+
+Decisão do dono (16/10, noite): "TUDO QUE VEM DO MINERADOR NÃO PODE MEXER… PROCURA NOVOS, DIFERENTES DAS QUE JÁ ESTÃO NA LISTA, PODE PROCESSAR ELES E INCORPORAR ELES". Mudança do Arquiteto (detalhe em `docs/04-arquiteto/estado-atual.md`, mesma data); nada mudou nas telas, rotas nem núcleos do Minerador. **Verificado no código e confirmado por teste (fixtures). Validado manualmente: não.**
+
+- **A keyword que já existe no Minerador** (qualquer lista, qualquer status) nunca é escrita pelo Arquiteto: nem Lógica, nem Volume, nem status, aprovação, Assunto, trava ou semântica. Guardado por teste (`tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts`, as 8 originais byte a byte; `tests/arquiteto-so-le-keyword-2026-10-13.test.mts`, lista fechada com dois lugares permitidos).
+- **A keyword NOVA** que o Arquiteto acha (não existe na marca) entra pela confirmação dele, pelos núcleos de sempre do Minerador — `importSubjectDiscoveryWithCore` (com a Lógica nas criadas), `measureKeywordVolume` (na melhoria, gravando a medição da prévia sem consultar o Google Ads de novo), `keywordDecisionEntries`/`applyKeywordDecisionEntries` e `createMineradorArquitetoHandoff` — só nas linhas que esse import criou e com as permissões minerador:create/edit/approve de quem confirma.
+- **"Sugestões do Arquiteto"**: deixa de receber keyword NOVA da melhoria e do "Reforçar publicados" (SUBSTITUÍDO em 2026-10-16); continua recebendo a keyword que já existe e não chegou ao Arquiteto, a medição a gravar e a Lógica a rodar (a diferenciação de publicados também deixou de mandar a nova em 2026-10-17). As sugestões gravadas continuam legíveis; nada foi apagado.
+
 ## Cadastrar Assuntos: o CSV de planejamento, vários Silos e abrir o .csv — 2026-10-16
 
 Pedido do dono (16/10): "pode reconhecer este tipo de CSV também, reconhecer os campos e preencher" — o arquivo `wificonecta_planejamento_editorial_15_artigos (1).csv` (UTF-8 com BOM, CRLF, `;`, aspas com `""`; 15 artigos em dois Silos), com a decisão seguinte do dono: "não precisa todos esses campos, com que consiga só os 4 campos e colocar eles dentro do DNA das keywords, já está bom, o resto pode ignorar". **Verificado no código e confirmado por teste (fixtures; nenhuma rede, banco ou chamada paga). Validado manualmente: não (homologação do dono).** Construído por cima do leitor tolerante (entrada abaixo): o MESMO leitor, o MESMO card, o MESMO núcleo; sem migration (o plano é JSON e nenhum campo novo entrou no schema), sem SQL, sem rota, etapa ou leitor novo.

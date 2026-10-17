@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { PublishedReinforcementRequestSchema, handlePublishedReinforcement, inProcessRequestHeaders, type PublishedReinforcementDeps } from "@/lib/server/arquiteto-published-reinforcement";
 import { publishedReinforcementReadDeps, publishedReinforcementSerpBinding } from "@/lib/server/arquiteto-published-reinforcement-deps";
+import { mineradorPortsForNewKeywords } from "@/lib/server/arquiteto-minerador-new-keyword-ports";
 import { differentiationErrorResponse } from "@/lib/server/arquiteto-differentiation-http";
 import { appendArquitetoArtifact } from "@/lib/server/arquiteto-persistence";
-import { recordArquitetoMineradorSuggestionsSafely } from "@/lib/server/arquiteto-minerador-suggestions";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { PATCH as patchArchitectWorkspace } from "@/app/api/arquiteto/workspace/route";
 
@@ -12,22 +12,30 @@ import { PATCH as patchArchitectWorkspace } from "@/app/api/arquiteto/workspace/
  * REFORÇAR PUBLICADOS — PRÉVIA E CONFIRMAÇÃO (SDD docs/04-arquiteto/sdd-reforcar-publicados-2026-09-28.md).
  *
  * `preview` (grátis, permissão de ver o Arquiteto): o que será gravado em cada
- * publicado e o `decisionHash`. `apply` (humano, com o hash): grava, na ordem,
- * parando no primeiro erro com o motivo:
+ * publicado e o `decisionHash`. `apply` (humano, com o hash e, havendo keyword
+ * NOVA, o aceite de que o dono a aprova no Minerador): grava pelos MESMOS
+ * núcleos das telas, na ordem, parando no primeiro erro com o motivo:
  *
- *   keywords novas → "Sugestões do Arquiteto" (F4, SDD 2026-10-13
- *   `sdd-arquiteto-so-le-e-listas-leves`, item 2: o Arquiteto só lê keyword;
- *   importar, medir, aprovar e enviar são do dono, no Minerador) →
+ *   keywords NOVAS (2026-10-16, decisão do dono; SUBSTITUI a F4 de 14/10, que
+ *   as mandava só como "Sugestões do Arquiteto"): import da Pesquisa por
+ *   Assunto (`importSubjectDiscoveryWithCore`) → Lógica
+ *   (`runKeywordLogicWithCore`) → Volume do Google Ads (`measureKeywordVolume`,
+ *   o núcleo do "Medir volume") → aprovação (`keywordDecisionEntries` +
+ *   `applyKeywordDecisionEntries`, ator = a sessão) → envio ao Arquiteto
+ *   (`createMineradorArquitetoHandoff`) — só nas linhas que esta confirmação
+ *   cria; a keyword que já veio do Minerador nunca é escrita daqui →
  *   composição e Silo no item de workflow (a MESMA rota PATCH da mesa) →
  *   ArticleDNA aprovado pelo writer canônico (`appendArquitetoArtifact`).
  *
  * Cada passo confirma pela releitura. A marca e o ator vêm do contexto
- * resolvido no servidor; nenhuma permissão do Minerador é pedida (nada é
- * gravado lá). O ArticleDNA aprovado passa pela mesma revalidação da rota de artefatos
- * (`articleApprovalRevalidationIssues`, no núcleo). As chamadas em processo
- * levam só a sessão (cookie) e o tipo do corpo. URL, slug, canonical e marca
- * nunca mudam.
+ * resolvido no servidor; cada módulo tocado confere a própria permissão — as
+ * do Minerador só quando a prévia confirmada tem keyword nova de fato, antes
+ * de qualquer escrita. O ArticleDNA aprovado passa pela mesma revalidação da
+ * rota de artefatos (`articleApprovalRevalidationIssues`, no núcleo). As
+ * chamadas em processo levam só a sessão (cookie) e o tipo do corpo. URL,
+ * slug, canonical e marca nunca mudam.
  */
+
 export async function POST(request: NextRequest) {
   try {
     const parsed = PublishedReinforcementRequestSchema.safeParse(await request.json().catch(() => null));
@@ -60,8 +68,8 @@ export async function POST(request: NextRequest) {
       // O parecer da SERP e a conclusão na formação: o aceite é decisão de aprovar.
       deps.bindSerpToFormation = publishedReinforcementSerpBinding(context, await resolvePipelineContext({ brandId: body.brandId, module: "arquiteto", action: "approve" }));
     }
-    // F4 · O ARQUITETO SÓ LÊ: as keywords novas viram "Sugestões do Arquiteto" (item de workflow do Arquiteto); nada no Minerador.
-    if (aplicar) deps.recordMineradorSuggestions = input => recordArquitetoMineradorSuggestionsSafely(context, input);
+    // 2026-10-16 · a keyword NOVA entra nesta confirmação: os núcleos do Minerador, montados só quando há keyword nova.
+    if (aplicar) deps.loadMinerador = () => mineradorPortsForNewKeywords(body.brandId);
     const outcome = await handlePublishedReinforcement(deps, body);
     return NextResponse.json(outcome.body, { status: outcome.status });
   } catch (error) {

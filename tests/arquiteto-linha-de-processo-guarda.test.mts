@@ -124,7 +124,8 @@ test("'Detalhes técnicos' é o PRIMEIRO bloco da aba Artigos e tem, no topo e u
   // A grade: em Silos e Links abre a tela; em Artigos, dentro de Detalhes técnicos.
   assert.match(main, /\{!articleMode && workbenchGrid\}/);
   assert.equal(contar(main, "workbenchGrid}"), 2);
-  for (const marca of ["{workspaceMode === \"articles\" && pendingKeywordReview && (", "<SerpSubjectDiagnosisPanel", "<PublishedDifferentiationSection", "{FORM_NEW_FROM_LEFTOVERS_ACTION}", "Mover todas para o Silo do destino", "<ArticleFormationPanel", "data-testid=\"architect-ungrouped-keywords\"", "data-testid=\"architect-anchored-subjects\"", "data-testid=\"architect-formation-deferred-list\"", "data-testid=\"architect-reserved-silo-heads\"", "Candidatas provisórias a Silo", "<SubjectFilterPanel"]) {
+  // 2026-10-16 (noite) · saíram "architect-anchored-subjects" e "<SubjectFilterPanel" (pedido do dono; ver o teste "os textos que o dono mandou tirar").
+  for (const marca of ["{workspaceMode === \"articles\" && pendingKeywordReview && (", "<SerpSubjectDiagnosisPanel", "<PublishedDifferentiationSection", "{FORM_NEW_FROM_LEFTOVERS_ACTION}", "Mover todas para o Silo do destino", "<ArticleFormationPanel", "data-testid=\"architect-ungrouped-keywords\"", "data-testid=\"architect-formation-deferred-list\"", "data-testid=\"architect-reserved-silo-heads\"", "Candidatas provisórias a Silo"]) {
     assert.ok(grade.includes(marca), `${marca} em Detalhes técnicos`);
   }
   // Os rótulos das funções, nas peças que a grade desenha.
@@ -169,14 +170,58 @@ test("o painel mostra só o que é útil: sem 'Workbench do Arquiteto', 'Leitura
     assert.ok(!painelDeFormacao.includes(fora), `${fora} saiu do painel`);
   }
   // Fica o que leva a uma ação ou é alerta real.
-  for (const fica of ["architect-formation-stale", "Reprocessar artigos", "architect-serp-gate-alert", "architect-cross-silo-alert", "architect-parent-binding", "architect-waiting-toggle", "architect-chart-candidate", "architect-conclusion-gates", "architect-formation-confirmed", "aguardando sustentação", "precisa(m) de revisão"]) {
+  // 2026-10-16 (noite) · SUBSTITUÍDO: "Formação desatualizada", o gate SERP em frase, "Formação concluída" e "aguardando sustentação" ficavam aqui — saíram (pedido do dono, ver o teste abaixo).
+  for (const fica of ["architect-cross-silo-alert", "architect-parent-binding", "architect-waiting-toggle", "architect-chart-candidate", "architect-conclusion-gates", "precisa(m) de revisão"]) {
     assert.ok(painelDeFormacao.includes(fica), `${fica} fica no painel`);
   }
   // O vínculo com o Silo só aparece no conflito de verdade (o inferido do legado é leitura interna).
   assert.match(painelDeFormacao, /\(parentBinding\.conflict > 0 \|\| parentBinding\.unresolved > 0\) &&/);
-  // Os dados não foram apagados: só a exibição. A formação continua lendo as mesmas fontes.
-  assert.match(tela, /serpGate=\{articleSerpGateSummary\}/);
+  // Os dados não foram apagados: só a exibição. A formação continua lendo as mesmas fontes (o gate SERP barra "Concluir formação" na portaria).
+  assert.match(tela, /const articleSerpGateSummary = useMemo\(/);
   assert.match(tela, /conclusionGates=\{conclusionGates\}/);
+});
+
+/*
+ * 2026-10-16 (noite) · PEDIDO DO DONO, literal: "quero que desapareça esse
+ * monte de texto no painel que só confunde e não ajuda em nada, Assuntos · 15,
+ * Assuntos como tronco · 11, e não sei o que significam todas estas mensagens:
+ * Formação desatualizada…, 15 Assunto(s) aguardando sustentação, 4 de 15
+ * artigo(s) foram confrontados com a SERP…, Ver 1 pendência(s), Formação
+ * concluída. 11 artigo(s)…". A guarda impede que voltem — e que as FUNÇÕES
+ * deles sumam: o que pedia "Reprocessar artigos" é o destaque do próprio botão;
+ * as pendências, um contador no botão que as abre; as ações do Assunto
+ * (Prender, Formar automaticamente, Soltar, Confirmar o do Silo), a barra.
+ */
+test("os textos que o dono mandou tirar não voltam, e as funções deles continuam (botão destacado, contador, ações do Assunto na barra)", () => {
+  const painelCru = ler("modules/arquiteto/article-formation-panel.tsx");
+  for (const fora of ["architect-formation-stale", "Formação desatualizada: o lote mudou", "subjectsAwaitingSupport", "Assunto(s) aguardando sustentação", "architect-serp-gate-alert", "foram confrontados com a SERP.{\" \"}", "architect-formation-confirmed", "artigo(s) confirmado(s)", "Ver ${waiting.rows.length} pendência(s)", "ainda não possuem Silo"]) {
+    assert.ok(!painelDeFormacao.includes(fora), `${fora} não volta ao painel`);
+  }
+  assert.ok(!painelCru.includes("data-testid=\"architect-formation-stale\""));
+  // Nenhuma das props da frase volta ao painel nem à chamada dele.
+  assert.doesNotMatch(painelDeFormacao, /\bstale: boolean|\bconfirmed: \{|\bserpGate: \{/);
+  const chamada = grade.slice(grade.indexOf("<ArticleFormationPanel"), grade.indexOf("onMergeCandidates=", grade.indexOf("<ArticleFormationPanel")));
+  assert.doesNotMatch(chamada, /stale=\{|confirmed=\{|serpGate=\{/);
+  // As fichas "Assuntos · N" e "Assuntos como tronco · N" não voltam (nem o filtro de Assunto da tabela).
+  for (const fora of ["<SubjectFilterPanel", "architect-anchored-subjects", "Assuntos como tronco", "filterBySubject(", "architect-subject-filter"]) assert.ok(!tela.includes(fora), `${fora} não volta`);
+  assert.doesNotMatch(semComentarios(ler("modules/arquiteto/subject-panels.tsx")), /SubjectFilterPanel|SUBJECT_FILTER_LABEL|Todos os artigos|architect-subject-filter/);
+  // A função continua: "Reprocessar artigos" destacado (title curto) quando a formação de sempre está desatualizada.
+  assert.match(barra, /data-stale=\{stale \? "true" : undefined\}/);
+  assert.match(barra, /className=\{stale && attentionClassName \? attentionClassName : buttonClassName\}/);
+  assert.match(barra, /ARTICLES_STALE_TITLE = "O lote mudou desde a última análise: reprocesse os artigos\."/);
+  assert.match(tela, /stale=\{formationIsStale\}\s*attentionClassName=\{ARCHITECT_UI\.primaryButton\}/);
+  // As pendências: só o contador no botão que as abre, quando há.
+  assert.match(painelDeFormacao, /\{waiting\.rows\.length > 0 && \(/);
+  assert.match(painelDeFormacao, /\{`Pendências \(\$\{waiting\.rows\.length\}\)`\}/);
+  // As ações do Assunto: na barra de sempre, pelos MESMOS handlers, uma vez cada.
+  assert.equal(contar(tela, "<SubjectActionsControl"), 1);
+  assert.ok(detalhes.includes("subjectActions={"), "as ações do Assunto moram na barra, em Detalhes técnicos");
+  assert.match(barra, /\{subjectActions\}/);
+  for (const handler of ["onOpenAttach={() => setSubjectAttachOpen(true)}", "onOpenSupport={() => setSubjectSupportOpen(true)}", "onDetach={anchor => { void detachSubjectAnchor(anchor); }}", "onConfirmSiloSuggestion={ref => { void confirmSiloSubjectSuggestion(ref); }}"]) assert.equal(contar(tela, handler), 1, handler);
+  const acoes = semComentarios(ler("modules/arquiteto/subject-panels.tsx"));
+  for (const rotulo of ["{SUBJECT_ATTACH_ACTION_LABEL}", "Formar artigos automaticamente", "{SUBJECT_DETACH_ACTION_LABEL}", "{SUBJECT_SILO_SUGGESTION_ACTION_LABEL}"]) assert.ok(acoes.includes(rotulo), `${rotulo} continua`);
+  // E o "1 fica de fora: Silo do plano…" da aba Silos só acompanha o botão do lote de desfazer.
+  assert.doesNotMatch(tela, /fica\$\{siloUndoPlanExcluded\.length === 1 \? "" : "m"\} de fora/);
 });
 
 test("aba Silos: o aviso 'Recriar o Silo do plano' de sempre existe; sem a linha 'Consolidar o Silo do plano'", () => {

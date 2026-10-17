@@ -133,18 +133,23 @@ test("o workspace liga a proposta ao simulador, não a um cálculo próprio", ()
  * user"). O gate SERP continua dito numa frase, só quando bloqueia, e todo
  * número dele vem do cenário (`serpGate.`), nunca de constante.
  */
-test("o painel não tem mais a 'Leitura do lote'; o gate SERP é dito só quando bloqueia", () => {
+/*
+ * 2026-10-16 (noite) · SUBSTITUÍDO: "o gate SERP continua dito numa frase, só
+ * quando bloqueia". Pedido do dono, literal: "não sei o que significam todas
+ * estas mensagens: (…) 4 de 15 artigo(s) foram confrontados com a SERP…". A
+ * frase saiu do painel; o gate continua barrando "Concluir formação" e a
+ * portaria da conclusão diz o que barrou, quando barra.
+ */
+test("o painel não tem mais a 'Leitura do lote' nem a frase do gate SERP; a portaria da conclusão continua", () => {
   assert.ok(!panel.includes("architect-batch-reading"));
   assert.ok(!panel.includes("Leitura do lote"));
-  assert.match(panel, /\{serpGate\.blocking > 0 && \(/);
-  assert.match(panel, /data-testid="architect-serp-gate-alert"/);
+  assert.doesNotMatch(panel, /architect-serp-gate-alert|serpGate\.|foram confrontados com a SERP\.\{" "\}/);
+  assert.match(panel, /data-testid="architect-conclusion-gates"/);
 });
 
-test("nenhum número do alerta do gate é fixo no código", () => {
-  const bloco = panel.slice(panel.indexOf("architect-serp-gate-alert"), panel.indexOf("architect-cross-silo-alert"));
-  const numeros = [...bloco.matchAll(/\{([^}]+)\}/g)].map(match => match[1].trim()).filter(expr => /serpGate|^\d/.test(expr));
-  assert.ok(numeros.length >= 4, "o alerta cita os números do gate");
-  for (const expr of numeros) assert.ok(expr.includes("serpGate."), `o número ${expr} precisa vir do cenário`);
+test("o gate SERP do lote continua lido do cenário (só não é mais frase no painel)", () => {
+  assert.match(workspace, /const articleSerpGateSummary = useMemo\(\s*\(\) => summarizeArticleSerpGate\(\[\.\.\.articleSerpGates\.values\(\)\]\)/);
+  assert.match(workspace, /articleSerpGateSummary\.blocking > 0/);
 });
 
 /* ------------------------- §14 portaria da conclusão --------------------- */
