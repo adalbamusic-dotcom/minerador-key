@@ -200,8 +200,10 @@ test("§8 — botão e handler usam a MESMA leitura", () => {
   // 2026-10-16 · os botões são só os da barra de sempre (topo de "Detalhes técnicos").
   assert.match(workspace, /selectionScope=\{formationSelectionScope\}/);
   const barra = readFileSync("modules/arquiteto/articles-formation-bar.tsx", "utf8");
-  assert.match(barra, /const processarBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : Boolean\(selectionScope\.reason\)\);/);
-  assert.match(barra, /const concluirBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : !processed \|\| Boolean\(selectionScope\.reason\)\);/);
+  // 2026-10-17 (noite) · a mesma recusa da autoridade, agora no motivo de cada botão (o porquê no `title`), em sequência.
+  assert.match(barra, /const semSelecao = total === 0 \? selectionScope\.reason \?\? "Selecione os artigos na tabela\." : regulares > 0 \? selectionScope\.reason : null;/);
+  assert.match(barra, /const motivoProcessar = ocupado \?\? semSelecao;/);
+  assert.match(barra, /const motivoConcluir = ocupado \?\? semSelecao \?\? \(processou \? null : /);
   // A recusa aparece por extenso, não só como title.
   assert.match(barra, /data-testid="architect-articles-selection-count"/);
 });

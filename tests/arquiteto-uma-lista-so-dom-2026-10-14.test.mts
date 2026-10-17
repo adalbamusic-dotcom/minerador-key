@@ -91,13 +91,20 @@ test("azul real: 7 linhas; 12, 13 e 14 presas no artigo do laranja com o caminho
   semMinerador();
 });
 
-test("Concluir formação (7, barra de sempre em 'Todos'): as 3 presas recusadas com o motivo antes do servidor; as 4 formam; resultado por linha; nada gira", async () => {
+/*
+ * 2026-10-17 (noite) · os 3 botões em sequência: o Concluir espera o Processar (a presa recusada pelo Processar conta
+ * como feita: ele disse o motivo); o Concluir grava a cópia de trabalho do Processar, sem preparar de novo.
+ */
+test("Concluir formação (7, barra de sempre em 'Todos', depois do Processar): as 3 presas recusadas com o motivo antes do servidor; as 4 formam; resultado por linha; nada gira", async () => {
   rede();
   await screen.render(mesa(TODOS)); await assentar();
   await marcarAzuis();
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, true, "o Concluir espera o Processar");
+  await screen.click("architect-articles-top-process"); await assentar();
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false, "a presa recusada pelo Processar não trava o Concluir");
   await screen.click("architect-articles-top-confirm"); await assentar();
   const preparos = chamadas.filter(chamada => chamada.body?.action === "prepare");
-  assert.equal(preparos.length, 1);
+  assert.equal(preparos.length, 1, "uma leitura só: a do Processar");
   assert.deepEqual(preparos[0].body.targetIds, ["k9", "k10", "k11", "k15"], "a presa não vai ao servidor");
   const kinds = screen.all("architect-plan-sheet-preview-line").map(item => [item.textContent!.split(" · ")[0], item.dataset.kind]);
   assert.deepEqual(kinds.filter(([, kind]) => kind === "refused").map(([keyword]) => keyword), ["internet para streaming", "melhor internet para jogos online", "internet para home office"]);
@@ -111,40 +118,39 @@ test("Concluir formação (7, barra de sempre em 'Todos'): as 3 presas recusadas
   semGirar(); semMinerador();
 });
 
-test("Processar artigos (7, barra de sempre em 'Todos') = Validar SERP: custo antes, uma confirmação, resultado por linha (principal de identidade sem volume, já no cache, coletada) e nada gira", async () => {
+test("Processar artigos (7, barra de sempre em 'Todos'): a leitura com a busca do reforço; sem SERP por pagar, a cópia de trabalho vai direto para cada linha; as presas com o motivo; nada gira", async () => {
   rede();
   await screen.render(mesa(TODOS)); await assentar();
   await marcarAzuis();
   await screen.click("architect-articles-top-process"); await assentar();
-  assert.equal(screen.get("architect-plan-sheet-preview").dataset.action, "validateSerp");
-  assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /chamada\(s\) paga\(s\)/);
-  await screen.click("architect-plan-sheet-confirm"); await assentar();
-  const pagos = chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute");
-  // 2026-10-17 · régua única: a Livre sem volume que está no título do Assunto (principal de identidade) também é coletada; o servidor confere de novo.
-  assert.deepEqual(pagos.flatMap(chamada => chamada.body.keywords.map((item: any) => item.keywordId)), ["k10", "k11", "k12", "k13", "k14", "k15"]);
+  const preparo = chamadas.filter(chamada => chamada.body?.action === "prepare");
+  assert.deepEqual(preparo.map(chamada => [chamada.body.discover, chamada.body.targetIds]), [[true, ["k9", "k10", "k11", "k15"]]]);
+  assert.equal(screen.query("architect-plan-sheet-preview"), null, "nada a pagar: nenhuma prévia de custo");
+  assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp").length, 0, "o Validar SERP à parte saiu (F3 da linha única)");
   for (const id of AZUIS) assert.ok(resultado(id), `a linha ${id} tem resultado`);
-  assert.match(resultado("k10"), /SERP coletada nas 4 lentes/);
-  assert.match(resultado("k9"), /Já temos as 4 lentes/);
+  assert.match(resultado("k9"), /^Cópia de trabalho \(nada gravado\): principal/);
+  assert.match(resultado("k13"), /^Presa no artigo/);
   semGirar(); semMinerador();
 });
 
-test("erro do servidor na prévia: frase humana com o que fazer, por linha; nada gira e os botões voltam", async () => {
+test("erro do servidor na leitura do Processar: frase humana com o que fazer, por linha; nada gira e os botões voltam", async () => {
   rede({ prepareStatus: 500 });
   await screen.render(mesa(TODOS)); await assentar();
   await marcarAzuis();
-  await screen.click("architect-articles-top-confirm"); await assentar();
-  const recusadas = screen.all("architect-plan-sheet-preview-line").filter(item => /O servidor falhou nesta etapa \(erro 500\)\. Nada foi gravado por ela; tente de novo/.test(item.textContent!));
-  assert.equal(recusadas.length, 4);
+  await screen.click("architect-articles-top-process"); await assentar();
+  for (const id of ["k9", "k10", "k11", "k15"]) assert.match(resultado(id), /O servidor falhou nesta etapa \(erro 500\)\. Nada foi gravado por ela; tente de novo/, id);
+  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /a leitura não foi confirmada \(o motivo está em cada linha\)/);
   assert.doesNotMatch(screen.text(), /QUERY_FAILURE/);
   semGirar();
-  await screen.click(botao("Cancelar", screen.get("architect-plan-sheet-preview"))!);
-  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false);
+  assert.equal((screen.get("architect-articles-top-process") as HTMLButtonElement).disabled, false, "o Processar volta");
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, true, "sem a leitura, o Concluir espera");
 });
 
 test("gravação que não avança: para com a frase e oferece 'Continuar a gravação'; nunca gira sem fim", async () => {
   rede({ applyPreso: true });
   await screen.render(mesa(TODOS)); await assentar();
   await marcarAzuis();
+  await screen.click("architect-articles-top-process"); await assentar();
   await screen.click("architect-articles-top-confirm"); await assentar();
   await screen.click("architect-plan-sheet-confirm"); await assentar(200);
   const aplicacoes = chamadas.filter(chamada => chamada.body?.action === "apply").length;
@@ -180,15 +186,16 @@ test("linha presa → 'Retirar artigo do Silo': abre a PRÉVIA (grátis) do arti
 
 const painel = () => comProductShell(React.createElement(ArticleImprovementPanel, { brandId: MARCA_WIFI, onApplied: () => undefined, buttonClassName: "button", primaryButtonClassName: "button", activeGroup: { requested: "azul", label: "Azul" } }));
 
-test("o painel dos publicados (aberto pelo botão da barra) é o de sempre: sem modo recolhido nem 'Ir para a planilha'; sem frase de 'o artigo do plano não passa por aqui'", async () => {
+test("o painel dos publicados (aberto pelo botão da barra) é o refazedor: sem modo recolhido, sem cartão 'Próximo passo', sem 'Ir para a planilha'; abrir LÊ (grátis, na cor)", async () => {
   rede();
   await screen.render(painel()); await assentar();
   assert.equal(screen.get("architect-article-improvement").dataset.collapsed, undefined);
   assert.equal(screen.query("architect-improvement-collapsed"), null);
-  assert.equal(screen.get("architect-improvement-next-step").dataset.nextStep, "prepare");
+  assert.equal(screen.query("architect-improvement-next-step"), null, "2026-10-17 (noite) · SUBSTITUÍDO o cartão 'Próximo passo'");
   assert.doesNotMatch(screen.text(), /Artigos do plano|planilha abaixo|Ir para “Artigos do plano”/);
   // 2026-10-16 · o painel volta a reforçar os artigos do plano (como em 4d546ce): a frase que os mandava para outro lugar saiu.
   assert.equal(screen.query("architect-improvement-plan-elsewhere"), null);
   assert.doesNotMatch(screen.text(), /Consolidar o Silo do plano|Completar sustentações e SERP/);
-  assert.equal(chamadas.filter(chamada => chamada.method === "POST").length, 0, "abrir não prepara nada");
+  // 2026-10-17 (noite) · SUBSTITUÍDO "abrir não prepara nada": abrir o refazedor lê de graça (com a busca nova), na cor da etiqueta.
+  assert.deepEqual(chamadas.filter(chamada => chamada.method === "POST").map(chamada => [chamada.body.action, chamada.body.discover, chamada.body.group]), [["prepare", true, "azul"]]);
 });

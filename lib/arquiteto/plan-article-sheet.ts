@@ -7,9 +7,10 @@
  * `keyword_subject.entry`/`plan`) vira UMA linha em "Artigos novos" assim que
  * chega — sem passar pelo painel de texto da melhoria. A linha mostra cor,
  * ordem, papel, Assunto, keyword, trava, volume, SERP (4 lentes) e o estado da
- * formação; as ações (Validar SERP, Trocar principal, Concluir formação) usam
- * os MESMOS núcleos de sempre (rota `keyword-serp` para a SERP; a melhoria
- * recortada por grupo para a formação e a troca de principal). Nada aqui grava
+ * formação; as ações (Processar artigos, Trocar principal, Concluir formação)
+ * usam o MESMO núcleo de sempre (a melhoria recortada por grupo: leitura,
+ * reforço, SERP com custo antes, gravação; desde 2026-10-17, noite, o
+ * "Validar SERP" pela rota `keyword-serp` é o Processar). Nada aqui grava
  * nada — e nada da planilha grava no Minerador (F4: o Arquiteto só lê).
  *
  * Linha do plano NÃO é Article: não cria ArticleDNA, não fabrica `articleId`
@@ -31,8 +32,14 @@ type RecordLike = Record<string, unknown>;
 /* --------------------------------------------------------------- rótulos */
 
 /* 2026-10-16 · saíram PLAN_SHEET_TITLE, PLAN_SHEET_ANCHOR e o rótulo do painel "recolhido": serviam à planilha separada "Artigos do plano", que não existe mais (os artigos do plano são linhas da tabela de artigos). */
+/*
+ * 2026-10-17 (noite) · SUBSTITUÍDO "Validar SERP" (só coleta, rota `keyword-serp`) por "Processar artigos" (dono:
+ * "3 botões já é suficiente… na mesma linha de processo"; SDD da linha única §11.4, F3 "Sai: o Validar SERP só de
+ * coleta para linhas do plano"). Processar lê o plano e os DNAs, busca o reforço (lista da marca e Google Ads,
+ * grátis) e coleta a SERP da principal que falta, com UMA confirmação de custo — o motor da melhoria de sempre.
+ */
 export const PLAN_SHEET_ACTION_LABELS = {
-  validateSerp: "Validar SERP",
+  processArticles: "Processar artigos",
   swapPrincipal: "Procurar outra principal",
   concludeFormation: "Concluir formação",
 } as const;
@@ -281,13 +288,21 @@ function planNoSearchesPath(lockState: PlanSheetLockView["state"] | null | undef
  *      sustentações pelo "Buscar sustentação" do Minerador (grátis);
  *  (c) medida sem número de buscas e Travada → só as sustentações.
  * `null` quando a linha tem volume. Uma frase só para a prévia do Concluir,
- * o Validar SERP e o alerta da linha.
+ * a do Processar e o alerta da linha.
  */
-export function planRowWithoutVolumeSentence(row: { volume: Pick<PlanSheetVolumeView, "state" | "value">; lock?: Pick<PlanSheetLockView, "state"> | null; supports?: Pick<PlanSheetRow["supports"], "withVolume"> | null }): string | null {
+/**
+ * 2026-10-17 (noite) · a principal de IDENTIDADE (T12: no título do Assunto ou o slug do plano foi feito dela) fica,
+ * com ou sem número de buscas. SUBSTITUI, para ela, o "use Procurar outra principal ou traga sustentações" (que o dono
+ * viu nos 4 Livres do amarelo, no Concluir): o reforço e a SERP dela vêm do "Processar artigos".
+ */
+export const PLAN_IDENTITY_NO_VOLUME_SENTENCE = `Principal de identidade (está no título ou no slug do plano): fica como principal, mesmo sem número de buscas no Google Ads. “${PLAN_SHEET_ACTION_LABELS.processArticles}” busca o reforço (Google Ads, grátis) e coleta a SERP dela (custo antes).`;
+export function planRowWithoutVolumeSentence(row: { volume: Pick<PlanSheetVolumeView, "state" | "value">; lock?: Pick<PlanSheetLockView, "state"> | null; supports?: Pick<PlanSheetRow["supports"], "withVolume"> | null; identityPrincipal?: boolean }): string | null {
   if (row.volume.state === "measured" && (row.volume.value ?? 0) > 0) return null;
+  // A Travada fica de qualquer jeito: ela ouve a frase dela (abaixo). A nunca medida também ouve o caminho do Volume (T6).
+  if (row.identityPrincipal && row.lock?.state !== "locked") return row.volume.state === "missing" ? `${PLAN_IDENTITY_NO_VOLUME_SENTENCE} Ela nunca foi medida no Google Ads: meça no Minerador (Volume) se quiser o número de buscas.` : PLAN_IDENTITY_NO_VOLUME_SENTENCE;
   if (planRowHasNoSearches(row.volume)) return `${PLAN_NO_SEARCHES_SENTENCE}. ${planNoSearchesPath(row.lock?.state)}`;
   return row.lock?.state === "free" && (row.supports?.withVolume ?? 0) > 0
-    ? `A keyword do Assunto não tem volume medido: com a trava Livre, use “${PLAN_SHEET_ACTION_LABELS.swapPrincipal}” para uma sustentação com volume, ou “${PLAN_SHEET_ACTION_LABELS.validateSerp}” nas sustentações antes.`
+    ? `A keyword do Assunto não tem volume medido: com a trava Livre, use “${PLAN_SHEET_ACTION_LABELS.swapPrincipal}” para uma sustentação com volume, ou “${PLAN_SHEET_ACTION_LABELS.processArticles}” antes (reforço e SERP, custo antes).`
     : "A keyword do Assunto não tem volume medido e nenhuma sustentação com volume e SERP no cache sustenta o artigo: meça no Minerador (Volume) ou traga sustentações pela Pesquisa por Assunto.";
 }
 
@@ -573,29 +588,28 @@ export function planSheetSerpPlanLine(row: Pick<PlanSheetRow, "keyword" | "volum
 }
 
 /**
- * A linha do plano já formada não passa de novo por "Concluir formação"
- * (2026-10-16, restauração do fluxo de sempre): Concluir = formar; o reforço do
- * artigo formado com keywords de respaldo é o painel "Melhorar publicados…"
- * ("Melhorar publicados e formar Assuntos"), o mesmo núcleo, num lugar só.
+ * 2026-10-17 (noite) · SUBSTITUÍDO o "já formado — use Melhorar publicados…" (16/10): o dono viu os 4 Travados do
+ * amarelo recusados no Concluir e o reforço nunca chegava. Agora "Processar artigos" e "Concluir formação" levam
+ * TAMBÉM o artigo do plano já formado: o reforço dele entra na mesma confirmação e vira a versão seguinte (v2). Só o
+ * artigo que já está no Radar fica fora: refazê-lo é o "Melhorar publicados…" (o refazedor, prévia antes).
  */
-export const PLAN_SHEET_FORMED_REFUSAL_PATH = "para reforçar com keywords de respaldo, use “Melhorar publicados…” (prévia antes; custo dito antes de pagar)";
-export function planSheetFormedRefusal(formationLabel: string): string {
-  return `${formationLabel}: já formado — ${PLAN_SHEET_FORMED_REFUSAL_PATH}.`;
+export const PLAN_SHEET_IN_RADAR_REFUSAL_PATH = "para refazer o reforço ou a leitura dele, use “Melhorar publicados…” (prévia antes; custo dito antes de pagar)";
+export function planSheetInRadarRefusal(formationLabel: string): string {
+  return `${formationLabel}: já está no Radar — ${PLAN_SHEET_IN_RADAR_REFUSAL_PATH}.`;
 }
 
 /**
- * CONCLUIR FORMAÇÃO / TROCAR PRINCIPAL — o recorte por grupo que a melhoria
- * prepara (um `prepare` por grupo, com `targetIds`), e as recusas que já se
- * sabem sem ir ao servidor.
+ * PROCESSAR ARTIGOS / CONCLUIR FORMAÇÃO / TROCAR PRINCIPAL — o recorte por grupo
+ * que a melhoria prepara (um `prepare` por grupo, com `targetIds`), e as recusas
+ * que já se sabem sem ir ao servidor.
  */
-export function planSheetFormationSelection(rows: readonly PlanSheetRow[], action: "concludeFormation" | "swapPrincipal"): { byGroup: Map<string, PlanSheetRow[]>; refused: PlanSheetRefusal[] } {
+export function planSheetFormationSelection(rows: readonly PlanSheetRow[], action: PlanSheetAction): { byGroup: Map<string, PlanSheetRow[]>; refused: PlanSheetRefusal[] } {
   const byGroup = new Map<string, PlanSheetRow[]>();
   const refused: PlanSheetRefusal[] = [];
   for (const row of rows) {
     // 2026-10-14 · a keyword presa no artigo de outro Assunto: só esta linha é recusada, com o caminho; as outras seguem.
     const recusa = row.conflict ? row.conflict.sentence
-      // 2026-10-16 · Concluir formação FORMA (só a linha sem ArticleDNA); reforçar o artigo já formado é do painel "Melhorar publicados…", um lugar só.
-      : action === "concludeFormation" && (row.formation.state === "formed" || row.formation.state === "in_radar") ? planSheetFormedRefusal(row.formation.label)
+      : action !== "swapPrincipal" && row.formation.state === "in_radar" ? planSheetInRadarRefusal(row.formation.label)
       : action === "swapPrincipal" && row.lock.state !== "free"
       ? row.lock.state === "locked" ? `${PLAN_SHEET_LOCKED_SEAL} (${row.lock.label}).` : "Sem principal declarada no plano: não há trava livre para trocar."
       : row.formation.state === "awaiting_principal" ? `${row.formation.label}: aprove-a no Minerador e envie.`
@@ -617,11 +631,30 @@ export type PlanSheetPreviewLine = {
   principalTo: string | null;
 };
 
+type RunKeywordLike = { id: string; keyword: string; volume?: number | null; volumeValidated?: boolean; external?: boolean; knownInMinerador?: { keywordId: string } | null };
 type RunLike = {
   proposals: readonly Pick<ImprovementProposal, "targetId" | "status" | "reasons" | "principalId" | "currentPrimaryId" | "memberIds" | "needsValidation" | "needsMinerador">[];
-  keywords?: readonly { id: string; keyword: string }[];
+  keywords?: readonly RunKeywordLike[];
   refusedTargets?: readonly { id: string; reason: string }[];
 };
+
+/**
+ * 2026-10-17 (noite) · A COMPOSIÇÃO DE UM ARTIGO NA CÓPIA DE TRABALHO, numa frase (dono: "cadê as keywords de
+ * reforço?"): a principal (e se fica por ser a identidade, Travada ou com volume), as secundárias com o volume e se são
+ * NOVAS na marca (entram no Minerador na confirmação). Só lê a execução preparada; nada é gravado.
+ */
+export function planSheetCompositionText(run: RunLike, proposal: Pick<ImprovementProposal, "principalId" | "currentPrimaryId" | "memberIds">, options: { identityPrincipal?: boolean; locked?: boolean; nameOf?: (id: string) => string | null } = {}): string {
+  const porId = new Map((run.keywords ?? []).map(keyword => [keyword.id, keyword]));
+  const nome = (id: string | null) => !id ? "nenhuma" : porId.get(id)?.keyword ?? options.nameOf?.(id) ?? id;
+  const troca = proposal.principalId && proposal.currentPrimaryId && proposal.principalId !== proposal.currentPrimaryId;
+  const porque = troca ? ` (troca proposta: “${nome(proposal.currentPrimaryId)}” → esta; decisão sua)` : options.locked ? " (Travada, fica)" : options.identityPrincipal ? " (identidade, fica)" : " (fica)";
+  const secundarias = proposal.memberIds.filter(id => id !== proposal.principalId).map(id => {
+    const keyword = porId.get(id);
+    const volume = keyword?.volumeValidated && (keyword.volume ?? 0) > 0 ? `${number(keyword.volume ?? 0)}/mês` : "sem volume";
+    return `“${nome(id)}” (${volume}${keyword?.external && !keyword.knownInMinerador ? ", nova" : ""})`;
+  });
+  return `principal “${nome(proposal.principalId)}”${porque} · ${secundarias.length ? `secundárias: ${secundarias.join("; ")}` : "sem secundária"}`;
+}
 
 /**
  * A prévia por linha, lida da execução preparada (`prepare`, grátis). Pronta e
@@ -632,7 +665,8 @@ type RunLike = {
 /** O motivo genérico do núcleo para todo Assunto: não explica a recusa da linha. */
 const GENERIC_SUBJECT_REASON = /^Assunto declarado mantido como fundamento/;
 
-export function planSheetPreviewLines(run: RunLike, rows: readonly (Pick<PlanSheetRow, "keywordId" | "keyword" | "formation"> & Partial<Pick<PlanSheetRow, "volume" | "lock" | "supports">>)[]): PlanSheetPreviewLine[] {
+type PreviewRow = Pick<PlanSheetRow, "keywordId" | "keyword" | "formation"> & Partial<Pick<PlanSheetRow, "volume" | "lock" | "supports" | "identityPrincipal">>;
+export function planSheetPreviewLines(run: RunLike, rows: readonly PreviewRow[]): PlanSheetPreviewLine[] {
   const nome = (id: string | null) => !id ? null : rows.find(row => row.keywordId === id)?.keyword ?? run.keywords?.find(keyword => keyword.id === id)?.keyword ?? id;
   return rows.map(row => {
     const recusada = run.refusedTargets?.find(item => item.id === row.keywordId);
@@ -641,20 +675,111 @@ export function planSheetPreviewLines(run: RunLike, rows: readonly (Pick<PlanShe
     if (!proposta) return { keywordId: row.keywordId, kind: "refused", sentence: "O núcleo da formação não devolveu proposta para esta linha.", principalFrom: null, principalTo: null };
     const de = nome(proposta.currentPrimaryId), para = nome(proposta.principalId);
     const ultimo = proposta.reasons[proposta.reasons.length - 1] ?? "";
+    const composicao = planSheetCompositionText(run, proposta, { identityPrincipal: row.identityPrincipal === true, locked: row.lock?.state === "locked", nameOf: nome });
     if (proposta.needsMinerador) return { keywordId: row.keywordId, kind: "needs_minerador", sentence: ultimo, principalFrom: de, principalTo: para };
-    if (proposta.needsValidation) return { keywordId: row.keywordId, kind: "needs_serp", sentence: `Falta SERP da composição: use “${PLAN_SHEET_ACTION_LABELS.validateSerp}” (o custo aparece antes). ${ultimo}`.trim(), principalFrom: de, principalTo: para };
+    // 2026-10-17 (noite) · a SERP que falta é coletada no "Processar artigos" (custo antes), não mais num "Validar SERP" à parte.
+    if (proposta.needsValidation) return { keywordId: row.keywordId, kind: "needs_serp", sentence: `${composicao}. Falta a SERP da principal: “${PLAN_SHEET_ACTION_LABELS.processArticles}” coleta, com o custo antes.`, principalFrom: de, principalTo: para };
     if (proposta.status === "ready") {
-      const troca = para && de !== para ? ` · principal: ${de ?? "nenhuma"} → ${para}` : para ? ` · principal: ${para}` : "";
       const versao = row.formation.version ? `nova versão (v${row.formation.version + 1})` : "primeiro ArticleDNA (v1)";
-      return { keywordId: row.keywordId, kind: "will_write", sentence: `Vai gravar: ${versao}${troca} · ${proposta.memberIds.length} keyword(s).`, principalFrom: de, principalTo: para };
+      return { keywordId: row.keywordId, kind: "will_write", sentence: `Vai gravar: ${versao} · ${composicao}.`, principalFrom: de, principalTo: para };
     }
     if (proposta.status === "adequate") return { keywordId: row.keywordId, kind: "adequate", sentence: "Já formado e adequado: nada a gravar.", principalFrom: de, principalTo: para };
     const util = [...proposta.reasons].reverse().find(reason => !GENERIC_SUBJECT_REASON.test(reason));
     // 2026-10-16 (noite) · a frase sai da régua de volume da linha: nunca medida, medida sem número de buscas (Livre ou Travada).
-    const semVolume = row.volume ? planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock ?? null, supports: row.supports ?? null }) : null;
-    const dica = semVolume ?? `Sem evidência suficiente para formar agora (SERP da composição no cache): use “${PLAN_SHEET_ACTION_LABELS.validateSerp}” e prepare de novo.`;
+    // 2026-10-17 (noite) · a principal de identidade ouve a frase dela (fica), nunca "Procurar outra principal".
+    const semVolume = row.volume ? planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock ?? null, supports: row.supports ?? null, identityPrincipal: row.identityPrincipal === true }) : null;
+    const dica = semVolume ?? `Sem evidência suficiente para formar agora: “${PLAN_SHEET_ACTION_LABELS.processArticles}” busca o reforço e coleta a SERP que falta (custo antes).`;
     return { keywordId: row.keywordId, kind: "refused", sentence: util ?? dica, principalFrom: de, principalTo: para };
   });
+}
+
+/**
+ * 2026-10-17 (noite) · O RESULTADO DO "PROCESSAR ARTIGOS" NA LINHA: a cópia de trabalho de cada artigo (nada
+ * gravado) — a principal, as secundárias propostas (volume, nova) e o que falta. A mesma leitura da prévia do Concluir.
+ */
+export function planSheetWorkingCopyLines(run: RunLike, rows: readonly PreviewRow[]): { keywordId: string; tone: "success" | "neutral" | "warning"; text: string }[] {
+  return planSheetPreviewLines(run, rows).map(line => {
+    if (line.kind === "will_write") return { keywordId: line.keywordId, tone: "success", text: `Cópia de trabalho (nada gravado): ${line.sentence.replace(/^Vai gravar: [^·]+· /, "")} Pronto para “${PLAN_SHEET_ACTION_LABELS.concludeFormation}”.` };
+    if (line.kind === "adequate") return { keywordId: line.keywordId, tone: "neutral", text: line.sentence };
+    return { keywordId: line.keywordId, tone: "warning", text: line.sentence };
+  });
+}
+
+/** Um item do checklist da prévia do "Concluir formação" (✓ / ✗ e o que falhou). */
+export type PlanConclusionCheck = { key: "principal" | "reforco" | "serp" | "plano" | "silo"; ok: boolean; label: string; detail: string };
+
+/**
+ * 2026-10-17 (noite) · "CONFIRMAR E FINALIZAR" É O CONCLUIR (dono: "pode fazer checking e validar todo o
+ * processo… algum desses botões já fazia isso"). A portaria do Concluir já confere composição, SERP, plano e
+ * conflitos e fecha o Silo; a prévia diz isso em cinco itens, com o que falhou. Só lê a prévia; nenhum botão novo.
+ */
+export function planSheetConclusionChecklist(input: {
+  lines: readonly PlanSheetPreviewLine[];
+  /** As linhas pedidas (nome para o detalhe). */
+  rows: readonly Pick<PlanSheetRow, "keywordId" | "keyword">[];
+  /** As composições propostas (as secundárias de cada artigo). */
+  proposals: readonly Pick<ImprovementProposal, "targetId" | "principalId" | "memberIds">[];
+  /** Todas as linhas do plano dos grupos pedidos (o Silo fecha com todas formadas). */
+  groupRows: readonly Pick<PlanSheetRow, "keywordId" | "keyword" | "formation">[];
+}): PlanConclusionCheck[] {
+  const nome = (id: string) => input.rows.find(row => row.keywordId === id)?.keyword ?? input.groupRows.find(row => row.keywordId === id)?.keyword ?? id;
+  const lista = (ids: readonly string[]) => ids.slice(0, 4).map(id => `“${nome(id)}”`).join(", ") + (ids.length > 4 ? "…" : "");
+  const gravam = input.lines.filter(line => line.kind === "will_write");
+  const semSerp = input.lines.filter(line => line.kind === "needs_serp").map(line => line.keywordId);
+  const fora = input.lines.filter(line => line.kind === "refused" || line.kind === "needs_minerador").map(line => line.keywordId);
+  const trocas = gravam.filter(line => line.principalFrom && line.principalTo && line.principalFrom !== line.principalTo).length;
+  const semPrincipal = gravam.filter(line => !line.principalTo).map(line => line.keywordId);
+  const semReforco = gravam.filter(line => { const proposta = input.proposals.find(item => item.targetId === line.keywordId); return !proposta || !proposta.memberIds.some(id => id !== proposta.principalId); }).map(line => line.keywordId);
+  const ficaFormado = new Set([...input.groupRows.filter(row => row.formation.state === "formed" || row.formation.state === "in_radar").map(row => row.keywordId), ...gravam.map(line => line.keywordId)]);
+  const faltamNoSilo = input.groupRows.filter(row => !ficaFormado.has(row.keywordId)).map(row => row.keywordId);
+  return [
+    { key: "principal", ok: !semPrincipal.length, label: "principal", detail: semPrincipal.length ? `sem principal: ${lista(semPrincipal)}` : `${gravam.length} artigo(s) com a principal${trocas ? `; ${trocas} troca(s) proposta(s), decisão sua` : " (nenhuma troca)"}` },
+    { key: "reforco", ok: !semReforco.length, label: "reforço", detail: semReforco.length ? `sem secundária: ${lista(semReforco)} (o artigo grava só com a principal; refaça depois pelo “Melhorar publicados…”)` : "todos com secundárias" },
+    { key: "serp", ok: !semSerp.length, label: "SERP", detail: semSerp.length ? `falta a SERP da principal em ${lista(semSerp)}: “${PLAN_SHEET_ACTION_LABELS.processArticles}” coleta (custo antes)` : "parecer das 4 lentes em cache para todos" },
+    { key: "plano", ok: !fora.length, label: "plano", detail: fora.length ? `fora desta confirmação: ${lista(fora)} (o motivo está na linha)` : "papel, ordem e escopo do plano no ArticleDNA" },
+    { key: "silo", ok: !faltamNoSilo.length, label: "Silo", detail: faltamNoSilo.length ? `fica para depois: faltam ${faltamNoSilo.length} artigo(s) do plano (${lista(faltamNoSilo)})` : "fecha neste ato: SiloDNA e SiloPage com o Pilar e a ordem do plano; o grupo é ligado ao Silo" },
+  ];
+}
+
+/**
+ * 2026-10-17 (noite) · OS 3 BOTÕES SÃO SEQUENCIAIS (dono: "tem que ser sequencial e na mesma linha de trabalho").
+ * Processar fez a parte dele quando toda linha pedida tem a cópia de trabalho (reforço e SERP); Concluir fez a
+ * parte dele quando toda linha pedida está formada e nenhuma cópia de trabalho espera gravação. O passo atual é o
+ * primeiro que falta; o Melhorar (o refazedor) vem depois do Concluir.
+ */
+export function planSheetSequence(input: {
+  rows: readonly Pick<PlanSheetRow, "keywordId" | "formation">[];
+  /** As linhas que o "Processar artigos" já deixou prontas (cópia de trabalho com o reforço e a SERP). */
+  processedIds: ReadonlySet<string>;
+  /** As linhas com cópia de trabalho processada que ainda não foi gravada pelo "Concluir formação". */
+  pendingIds: ReadonlySet<string>;
+}): { processed: boolean; concluded: boolean; step: "process" | "conclude" | "improve" } {
+  const temLinhas = input.rows.length > 0;
+  const processed = temLinhas && input.rows.every(row => input.processedIds.has(row.keywordId));
+  const concluded = temLinhas && input.rows.every(row => row.formation.state === "formed" || row.formation.state === "in_radar") && !input.rows.some(row => input.pendingIds.has(row.keywordId));
+  return { processed, concluded, step: concluded ? "improve" : processed ? "conclude" : "process" };
+}
+
+/**
+ * 2026-10-17 (noite) · O SILO DO PLANO FECHA NO MESMO ATO DO CONCLUIR (SDD da linha única §11.3, F2: "o Silo fecha
+ * no mesmo ato"). Pronto quando cada artigo do plano do grupo tem o ArticleDNA vigente e todos estão no mesmo Silo; o
+ * Pilar e a ordem são os do plano. A gravação é a de sempre (o par do fechamento canônico); isto só decide.
+ */
+export function planGroupSiloClosure(input: {
+  planRows: readonly { keywordId: string; keyword: string; role: "Pilar" | "Suporte"; order: number }[];
+  articles: readonly { articleId: string; subjectKeywordId: string | null; territoryRef: string | null }[];
+}): { state: "ready"; territoryRef: string; pillarArticleId: string; orderedArticleIds: string[] } | { state: "waiting"; missing: string[] } | { state: "conflict"; reason: string } {
+  if (!input.planRows.length) return { state: "conflict", reason: "O grupo não tem artigos no plano." };
+  const doAssunto = new Map(input.articles.filter(article => article.subjectKeywordId).map(article => [article.subjectKeywordId!, article]));
+  const faltam = input.planRows.filter(row => !doAssunto.has(row.keywordId)).map(row => row.keyword);
+  if (faltam.length) return { state: "waiting", missing: faltam };
+  const ordenadas = [...input.planRows].sort((a, b) => a.order - b.order || a.keyword.localeCompare(b.keyword, "pt-BR"));
+  const artigos = ordenadas.map(row => doAssunto.get(row.keywordId)!);
+  const silos = [...new Set(artigos.map(article => article.territoryRef).filter((ref): ref is string => Boolean(ref)))];
+  if (silos.length !== 1 || artigos.some(article => !article.territoryRef)) return { state: "conflict", reason: silos.length > 1 ? `Os artigos do plano estão em ${silos.length} Silos: confira na aba Silos.` : "Há artigo do plano sem Silo: confirme o Silo do plano na aba Silos." };
+  const pilares = ordenadas.filter(row => row.role === "Pilar");
+  if (pilares.length !== 1) return { state: "conflict", reason: pilares.length ? `O plano declara ${pilares.length} Pilares: o Pilar muda no Minerador.` : "O plano não declara o Pilar: o Pilar muda no Minerador." };
+  return { state: "ready", territoryRef: silos[0], pillarArticleId: doAssunto.get(pilares[0].keywordId)!.articleId, orderedArticleIds: artigos.map(article => article.articleId) };
 }
 
 /** O resultado de UMA linha depois de gravar (o desfecho relido pelo núcleo). */
@@ -722,8 +847,9 @@ export function planArticleKeywordIds(input: {
  * (candidato ou formado, cujo Assunto é a keyword do plano), é a linha dele que
  * ganha os selos do plano; sem artigo na mesa, a linha é a do plano. Os botões
  * da barra ("Processar artigos", "Concluir formação") valem para as duas: para
- * a linha do plano, o núcleo é o do plano (Validar SERP com custo antes;
- * Concluir formação pela melhoria recortada por grupo). Nenhuma regra nova.
+ * a linha do plano, o núcleo é a melhoria recortada por grupo (Processar =
+ * leitura, reforço e SERP com custo antes; Concluir = a gravação e o Silo do
+ * plano no mesmo ato, 2026-10-17, noite). Nenhuma regra nova.
  */
 
 /** Um selo curto da linha do plano (trava, volume, SERP, formação, conflito). */
@@ -775,20 +901,23 @@ export type PlanRowDefinition = { label: string; reason: string | null; title: s
  * "No Radar · vN", "Aguardando formação" ou "Pendente" — com o porquê curto
  * (o inteiro vai no `title`). Só lê a linha; nada é gravado.
  */
-export function planRowDefinition(row: Pick<PlanSheetRow, "formation" | "conflict" | "volume" | "lock" | "serp">): PlanRowDefinition {
+export function planRowDefinition(row: Pick<PlanSheetRow, "formation" | "conflict" | "volume" | "lock" | "serp"> & Partial<Pick<PlanSheetRow, "identityPrincipal">>): PlanRowDefinition {
   const formation = row.formation;
   if (formation.state === "formed" || formation.state === "in_radar") return { label: formation.label, reason: null, title: `ArticleDNA ${formation.version ? `v${formation.version}` : "gravado"} pelo plano.`, tone: "positive" };
   if (row.conflict || formation.state === "conflict") return { label: "Pendente", reason: "presa em outro artigo", title: row.conflict?.sentence ?? formation.label, tone: "warning" };
   if (formation.state === "awaiting_principal") return { label: "Pendente", reason: "aguarda a principal chegar ao Arquiteto", title: formation.label, tone: "warning" };
-  const semVolume = planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock });
+  const semVolume = planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock, identityPrincipal: row.identityPrincipal === true });
   if (semVolume) {
     const semBuscas = planRowHasNoSearches(row.volume);
-    const reason = semBuscas
+    // 2026-10-17 (noite) · a principal de identidade fica: o caminho é o "Processar artigos" (reforço e SERP dela).
+    const identidade = row.identityPrincipal === true && row.lock.state !== "locked";
+    const reason = identidade ? `identidade, fica · “${PLAN_SHEET_ACTION_LABELS.processArticles}”`
+      : semBuscas
       ? row.lock.state === "free" ? `sem número de buscas · Livre: “${PLAN_SHEET_ACTION_LABELS.swapPrincipal}” ou sustentação` : "sem número de buscas · traga sustentação"
       : row.lock.state === "free" ? "sem volume medido · Livre: pode trocar" : "sem volume medido: meça no Minerador";
-    return { label: "Aguardando formação", reason, title: semVolume, tone: "warning" };
+    return { label: "Aguardando formação", reason, title: semVolume, tone: identidade ? "neutral" : "warning" };
   }
-  if (row.serp.state === "none" || row.serp.state === "partial") return { label: "Aguardando formação", reason: "falta SERP: “Processar artigos”", title: `${row.serp.label}. Marque a linha e use “Processar artigos” (Validar SERP: custo antes, cache primeiro).`, tone: "warning" };
+  if (row.serp.state === "none" || row.serp.state === "partial") return { label: "Aguardando formação", reason: "falta SERP: “Processar artigos”", title: `${row.serp.label}. Marque a linha e use “Processar artigos” (custo antes, cache primeiro).`, tone: "warning" };
   if (row.serp.state === "complete") return { label: "Aguardando formação", reason: `pronta: “${PLAN_SHEET_ACTION_LABELS.concludeFormation}”`, title: `SERP 4/4 no cache: marque a linha e use “${PLAN_SHEET_ACTION_LABELS.concludeFormation}” (prévia antes).`, tone: "neutral" };
   return { label: "Aguardando formação", reason: null, title: formation.label, tone: "neutral" };
 }
@@ -918,20 +1047,24 @@ export function splitTableSelectionForPlan<A>(input: {
 /*
  * O que falta numa linha do plano é ALERTA curto (o porquê no `title`), nunca
  * bloqueio. 2026-10-16 · restauração do fluxo de sempre: a SERP das principais
- * é a de sempre — "Processar artigos" (Validar SERP das linhas do plano, custo
- * antes, cache primeiro); formar é "Concluir formação".
+ * é a de sempre — "Processar artigos" (desde 2026-10-17, noite: a leitura, o
+ * reforço e a SERP que falta, custo antes, cache primeiro); formar é "Concluir
+ * formação".
  */
 
 /** Um alerta curto da linha do plano (o que falta), mostrado na linha. */
 export type PlanRowAlert = { kind: "no_volume" | "no_serp" | "conflict" | "awaiting_principal"; label: string; title: string };
 
 /** Os alertas da linha: só a keyword presa em outro artigo e a principal que não chegou ficam fora de "Concluir formação". */
-export function planRowAlerts(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" | "conflict" | "formation">): PlanRowAlert[] {
+export function planRowAlerts(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" | "conflict" | "formation"> & Partial<Pick<PlanSheetRow, "identityPrincipal">>): PlanRowAlert[] {
   const alertas: PlanRowAlert[] = [];
   const semVolume = !(row.volume.state === "measured" && (row.volume.value ?? 0) > 0);
   if (row.conflict) alertas.push({ kind: "conflict", label: "presa em outro artigo", title: row.conflict.sentence });
   if (row.formation.state === "awaiting_principal") alertas.push({ kind: "awaiting_principal", label: "aguarda a principal", title: row.formation.label });
-  if (semVolume) {
+  if (semVolume && row.identityPrincipal && row.lock.state !== "locked") {
+    // 2026-10-17 (noite) · T12: a principal de identidade fica (o "livre, pode trocar" contradizia a regra do dono).
+    alertas.push({ kind: "no_volume", label: planRowHasNoSearches(row.volume) ? "sem número de buscas — identidade, fica" : "sem volume — identidade, fica", title: `${row.volume.label}. ${PLAN_IDENTITY_NO_VOLUME_SENTENCE}` });
+  } else if (semVolume) {
     // 2026-10-16 (noite) · medida sem número de buscas não é "sem volume medido": o rótulo e o porquê dizem o que é.
     const semBuscas = planRowHasNoSearches(row.volume);
     const frase = planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock });
@@ -939,7 +1072,7 @@ export function planRowAlerts(row: Pick<PlanSheetRow, "lock" | "volume" | "serp"
       ? { kind: "no_volume", label: semBuscas ? "sem número de buscas — livre, pode trocar" : "sem volume — livre, pode trocar", title: semBuscas ? `${row.volume.label}. ${frase}` : `${row.volume.label}. ${row.lock.why}` }
       : { kind: "no_volume", label: semBuscas ? "sem número de buscas — travada" : "sem volume — travada", title: semBuscas ? `${row.volume.label}. ${frase}` : `${row.volume.label}. ${row.lock.why}` });
   } else if (row.serp.state === "none" || row.serp.state === "partial") {
-    alertas.push({ kind: "no_serp", label: row.serp.state === "partial" ? `SERP ${row.serp.lenses}/4 — completar em “Processar artigos”` : "sem SERP no cache — coletar em “Processar artigos”", title: `${row.serp.label}. Marque a linha e use “Processar artigos” (Validar SERP: custo antes, cache primeiro).` });
+    alertas.push({ kind: "no_serp", label: row.serp.state === "partial" ? `SERP ${row.serp.lenses}/4 — completar em “Processar artigos”` : "sem SERP no cache — coletar em “Processar artigos”", title: `${row.serp.label}. Marque a linha e use “Processar artigos” (custo antes, cache primeiro).` });
   }
   return alertas;
 }

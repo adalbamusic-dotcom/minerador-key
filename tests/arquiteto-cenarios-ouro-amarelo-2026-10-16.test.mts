@@ -6,6 +6,8 @@ import { ArticleDNASchema, ProvisionalArticleGroupSchema } from "../lib/arquitet
 import { SERP_SUBJECT_LENS_LABELS } from "../lib/arquiteto/serp-subject-overlap.ts";
 import { normalizeKeyword } from "../lib/minerador/keyword-import-core.ts";
 import { ATOR, linhaDaMesa } from "./arquiteto-assunto-fixtures.mts";
+import { planGroupSiloClosure, planSheetConclusionChecklist, planSheetPreviewLines, planSheetSequence, planSheetWorkingCopyLines } from "../lib/arquiteto/plan-article-sheet.ts";
+import { resolveSiloDeclaredGroup } from "../lib/arquiteto/silo-declared-plan.ts";
 
 /*
  * CENÁRIO-OURO DO AMARELO DA WIFICONECTA (16/10) — SDD
@@ -308,9 +310,11 @@ mock.module("../lib/server/google-ads-canonical.ts", { namedExports: {
   resolveGoogleAdsCanonicalContext: async () => ({ customerId: "1234567890", managerCustomerId: null, targeting: null }),
   createGoogleAdsCanonicalClient: async () => ({ client: {} }), targetingToProviderInput: () => ({}), defaultGoogleAdsCanonicalTargeting: () => ({}),
 } });
+/** 2026-10-17 (noite) · a busca nova que não traz nada (o caso da Livre de identidade sem nenhuma candidata). */
+let semIdeias = false;
 mock.module("../lib/google/ads/keyword-ideas.ts", { namedExports: { generateGoogleAdsKeywordIdeas: async (_client: any, input: any) => {
   sementes.push([...input.seed.keywords]);
-  return { ideas: IDEIAS.map(([keyword]) => ({ keyword })), nextPageToken: null, requestId: "ads-ideias" };
+  return { ideas: semIdeias ? [] : IDEIAS.map(([keyword]) => ({ keyword })), nextPageToken: null, requestId: "ads-ideias" };
 } } });
 mock.module("../lib/server/arquiteto-published-reinforcement.ts", { namedExports: { stableUuid: (...parts: string[]) => { const h = createHash("sha256").update(parts.join("|")).digest("hex"); return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`; } } });
 mock.module("../lib/server/arquiteto-minerador-suggestions.ts", { namedExports: { recordArquitetoMineradorSuggestionsSafely: async (_c: any, input: any) => { sugestoes.push(clone(input)); return { recorded: input.drafts.length, recordKey: "registro" }; } } });
@@ -342,7 +346,7 @@ const doMineradorDe = (r: Row) => JSON.stringify({ keyword: r.keyword, status: r
 function zerar() {
   mesa = PLANO.map(linhaDoPlano);
   minerador = mesa.map(r => ({ id: r.id, keyword: r.keyword, brand_id: MARCA, status: r.status, intent: r.intent, volume_search: r.volume_search, volume_source: r.volume_source, group_id: AMARELO, analise_semantica: clone(r.analise_semantica) }));
-  gravacoes = []; journal = []; assessments = []; marker = null; pagas = []; pago = 0; sementes = []; medicoes = []; sugestoes = []; observeFlags = []; parecerPelasSustentacoes = [];
+  gravacoes = []; journal = []; assessments = []; marker = null; pagas = []; pago = 0; sementes = []; medicoes = []; sugestoes = []; observeFlags = []; parecerPelasSustentacoes = []; semIdeias = false;
   for (const lista of Object.values(chamadas)) lista.length = 0;
   autorizados.length = 0; proximoId = 0;
   // A SERP das 4 lentes da principal de cada Travado já está no cache (coletada em 16/10).
@@ -497,4 +501,130 @@ test("amarelo · guarda: a ideia que JÁ existe no Minerador (qualquer status) �
   assert.deepEqual(chamadas, { import: [], logic: [], measure: [], approve: [], handoff: [] });
   assert.equal(gravacoes.length, 0);
   assert.equal(doMineradorDe(doMinerador("ja-existe")!), antes);
+});
+
+/* =================================================================== */
+/*
+ * 2026-10-17 (noite) · O DONO, depois do deploy, no amarelo: "o arquiteto ainda não está cumprindo o papel dele… ficou
+ * travado… Estes dois botões ficam sem estar habilitados: Reprocessar artigos, Concluir formação… cadê as keywords de
+ * reforço?… 3 botões já é suficiente… na mesma linha de processo". O caminho EXATO dos 3 botões da barra (as 8 linhas do
+ * plano marcadas, `origin: "plan_sheet"`): Processar = a leitura com o reforço (Google Ads, grátis) e o custo da SERP
+ * das principais de identidade → a coleta (a única confirmação do Processar) → Concluir = o checklist e UMA
+ * confirmação → o Silo do plano fecha no mesmo ato. O estado de partida é o do banco (SELECT de 17/10): os 4 Travados
+ * com v1 só com a principal; os 4 Livres sem ArticleDNA.
+ */
+const linhaDaPlanilha = (l: LinhaAmarela) => {
+  const dna = vigentes().find(v => v.payload.subject?.keywordId === l.id);
+  return {
+    keywordId: l.id, keyword: l.keyword, groupId: AMARELO, role: l.role, order: l.order,
+    formation: dna ? { state: "formed" as const, version: dna.versionNumber, articleId: dna.payload.articleId, principalKeywordId: dna.payload.principalKeywordId, label: `Formado · v${dna.versionNumber}` } : { state: "awaiting" as const, version: null, articleId: null, principalKeywordId: null, label: "Aguardando formação" },
+    lock: { state: l.lock, label: l.lock === "locked" ? "Travada" : "Livre", why: "" },
+    ...(l.lock === "free" ? { identityPrincipal: true } : {}),
+  };
+};
+const processadasDe = (run: any) => new Set<string>([...run.proposals.filter((p: any) => !p.needsValidation).map((p: any) => p.targetId), ...(run.refusedTargets ?? []).map((r: any) => r.id)]);
+async function coletar(run: any) {
+  let coleta = await handleArticleImprovement(runtime(), { brandId: MARCA, action: "collect", runId: run.runId, decisionHash: run.decisionHash, authorizedCostUsd: run.costs.estimatedCostUsd.max } as any);
+  for (let volta = 0; coleta.state === "collecting" && volta < 10; volta += 1) coleta = await handleArticleImprovement(runtime(), { brandId: MARCA, action: "collect", runId: run.runId, decisionHash: coleta.decisionHash } as any);
+  return coleta;
+}
+
+test("amarelo · OS 3 BOTÕES pela barra: Processar (reforço grátis + custo da SERP das 4 principais de identidade, 16 consultas, até US$ 0,056) → coleta → reforço para os 8 → Concluir (checklist ✓, UMA confirmação) → 4 v1 + 4 v2, novas incorporadas, originais intactas, Silo pronto no mesmo ato e do grupo amarelo → o refazedor é o passo seguinte", async () => {
+  zerar();
+  const originais = new Map(minerador.map(r => [r.id, doMineradorDe(r)]));
+  const v1 = await aplicarTudo(await prepare({ targetIds: TRAVADOS, origin: "plan_sheet" }));
+  assert.equal(v1.state, "complete", "o estado do banco: os 4 Travados com v1");
+  const versoesAntes = new Map(vigentes().map(v => [v.payload.subject?.keywordId, v.versionNumber]));
+  const linhas = PLANO.map(linhaDaPlanilha);
+  assert.equal(planSheetSequence({ rows: linhas, processedIds: new Set(), pendingIds: new Set() }).step, "process", "(a) no começo, só o Processar é o passo");
+
+  // 1 · PROCESSAR ARTIGOS — o MESMO pedido da barra para as 8 linhas.
+  const processado = await prepare({ targetIds: PLANO.map(l => l.id), origin: "plan_sheet", discover: true });
+  assert.equal(processado.origin, "plan_sheet");
+  assert.equal(processado.discovery?.requested, true, "a busca do reforço roda sozinha (sem o botão 'Buscar keywords novas no Google Ads')");
+  assert.ok(sementes.length > 0);
+  assert.equal(gravacoes.length, 4, "Processar não grava artigo");
+  assert.deepEqual(chamadas, { import: [], logic: [], measure: [], approve: [], handoff: [] }, "Processar não toca o Minerador");
+  assert.equal(processado.costs.paidQueries, 16);
+  assert.equal(processado.costs.estimatedCostUsd.max, 0.056);
+  assert.deepEqual([...new Set(processado.costs.missingDetails.map((d: any) => d.keyword))].sort(), LIVRES.map(id => normalizeKeyword(PLANO.find(l => l.id === id)!.keyword)).sort(), "a SERP paga é só a da principal de identidade de cada Livre");
+  assert.match(processado.reading?.sentences.missing ?? "", /^Falta: 16 consulta\(s\) de SERP/, "nunca 'Falta: nada' com a SERP por pagar");
+  const copia = planSheetWorkingCopyLines(processado, linhas);
+  for (const id of TRAVADOS) assert.match(copia.find(c => c.keywordId === id)!.text, /^Cópia de trabalho \(nada gravado\): principal “.+” \(Travada, fica\) · secundárias: .*, nova\)/, id);
+  for (const id of LIVRES) assert.match(copia.find(c => c.keywordId === id)!.text, /\(identidade, fica\) · secundárias: .*\. Falta a SERP da principal: “Processar artigos” coleta, com o custo antes\.$/, id);
+  assert.equal(planSheetSequence({ rows: linhas, processedIds: processadasDe(processado), pendingIds: new Set() }).step, "process", "com a SERP por pagar, o passo 1 não terminou para os Livres");
+
+  const coleta = await coletar(processado);
+  assert.equal(coleta.state, "prepared");
+  assert.equal(pago, 16);
+  for (const p of coleta.proposals) assert.equal(p.status, "ready", `${p.targetId}: ${JSON.stringify(p.reasons)}`);
+  const pendentes = new Set<string>(coleta.proposals.filter((p: any) => p.status === "ready").map((p: any) => p.targetId));
+  assert.equal(planSheetSequence({ rows: linhas, processedIds: processadasDe(coleta), pendingIds: pendentes }).step, "conclude", "(b) depois do Processar, o Concluir é o passo");
+
+  // 2 · CONCLUIR FORMAÇÃO — a prévia e o checklist da finalização.
+  const previa = planSheetPreviewLines(coleta, linhas);
+  assert.ok(previa.every(l => l.kind === "will_write"), JSON.stringify(previa));
+  for (const id of TRAVADOS) assert.match(previa.find(l => l.keywordId === id)!.sentence, /^Vai gravar: nova versão \(v2\) · principal/, id);
+  for (const id of LIVRES) assert.match(previa.find(l => l.keywordId === id)!.sentence, /^Vai gravar: primeiro ArticleDNA \(v1\) · principal “.+” \(identidade, fica\)/, id);
+  assert.ok(previa.every(l => !/Procurar outra principal|Buscar sustentação/.test(l.sentence)), "a regra da principal de identidade chega ao Concluir");
+  const checklist = planSheetConclusionChecklist({ lines: previa, rows: linhas, proposals: coleta.proposals, groupRows: linhas });
+  assert.deepEqual(checklist.map(item => [item.key, item.ok]), [["principal", true], ["reforco", true], ["serp", true], ["plano", true], ["silo", true]], JSON.stringify(checklist));
+  assert.match(checklist.find(item => item.key === "silo")!.detail, /^fecha neste ato/);
+  const fim = await aplicarTudo({ runId: processado.runId, decisionHash: coleta.decisionHash }, { approveNewKeywords: true });
+  assert.equal(fim.state, "complete", JSON.stringify(fim.outcomes));
+  assert.equal(pago, 16, "a confirmação não paga nada");
+  const dnas = vigentes();
+  assert.equal(dnas.length, 8);
+  for (const l of PLANO) {
+    const dna = dnas.find(v => v.payload.subject?.keywordId === l.id)!;
+    assert.ok(dna, l.id);
+    assert.equal(dna.versionNumber, l.lock === "locked" ? versoesAntes.get(l.id)! + 1 : 1, `${l.id}: ${l.lock === "locked" ? "v2 (reforço)" : "v1"}`);
+    assert.equal(dna.payload.principalKeywordId, l.id, `${l.id}: a principal fica (Travada ou de identidade)`);
+    assert.ok(dna.payload.keywordReferences.length > 1, `${l.id}: com reforço`);
+    assert.equal(dna.payload.hierarchy, l.role);
+    assert.ok(dna.payload.serpAssessmentRef, `${l.id}: aprovado com o parecer`);
+  }
+  assert.ok(chamadas.import.length > 0 && chamadas.handoff.length === chamadas.import.length && (chamadas.handoff as unknown[]).every(id => String(id).startsWith("nova-")), "só as novas pelos núcleos do Minerador");
+  for (const [id, antes] of originais) assert.equal(doMineradorDe(doMinerador(id)!), antes, `${id}: o Arquiteto mexeu em keyword do Minerador`);
+  assert.equal(sugestoes.length, 0);
+
+  // O Silo do plano fecha no MESMO ato (a tela grava o par pelo fechamento canônico): pronto, Pilar "como escolher…", a ordem do plano; e é do grupo amarelo.
+  const fechamento = planGroupSiloClosure({ planRows: PLANO.map(l => ({ keywordId: l.id, keyword: l.keyword, role: l.role, order: l.order })), articles: dnas.map(v => ({ articleId: v.payload.articleId, subjectKeywordId: v.payload.subject?.keywordId ?? null, territoryRef: v.payload.territoryRef ?? null })) });
+  assert.equal(fechamento.state, "ready", JSON.stringify(fechamento));
+  if (fechamento.state === "ready") {
+    assert.equal(fechamento.territoryRef, TERRITORIO);
+    assert.equal(fechamento.pillarArticleId, dnas.find(v => v.payload.subject?.keywordId === "l1")!.payload.articleId);
+    assert.deepEqual(fechamento.orderedArticleIds, [...PLANO].sort((a, b) => a.order - b.order).map(l => dnas.find(v => v.payload.subject?.keywordId === l.id)!.payload.articleId));
+  }
+  const grupo = resolveSiloDeclaredGroup({ articles: dnas.map(v => ({ articleId: v.payload.articleId, subjectKeywordId: v.payload.subject?.keywordId ?? null })), keywordGroupById: new Map(PLANO.map(l => [l.id, AMARELO])) });
+  assert.equal(grupo.groupId, AMARELO, "a consolidação de sempre liga o grupo amarelo ao Silo (linkDeclaredPlanGroupToSilo, depois do readback)");
+  assert.equal(planSheetSequence({ rows: PLANO.map(linhaDaPlanilha), processedIds: new Set(), pendingIds: new Set() }).step, "improve", "(c) depois do Concluir, o refazedor é o passo");
+  assert.equal(chamadasDeRede, 0);
+});
+
+test("amarelo · a Livre de IDENTIDADE sem nenhuma candidata (a busca nova não traz nada) forma só com a principal: a SERP dela é a coleta paga e o Concluir NÃO a recusa (a causa do 'use Procurar outra principal' nos 4 Livres, 17/10)", async () => {
+  zerar(); semIdeias = true;
+  const processado = await prepare({ targetIds: LIVRES, origin: "plan_sheet", discover: true });
+  for (const id of LIVRES) {
+    const p = processado.proposals.find((x: any) => x.targetId === id)!;
+    assert.equal(p.principalId, id, `${id}: a principal de identidade fica`);
+    assert.deepEqual(p.memberIds, [id], `${id}: forma só com a principal (antes: zero membros, "evidência insuficiente")`);
+    assert.equal(p.needsValidation, true, `${id}: falta a SERP da principal`);
+    assert.match(p.reasons.join(" "), /SERP da principal de identidade “.+” \(sem buscas no Google Ads\): 4 consultas, até US\$ 0,014/);
+    assert.match(p.reasons.join(" "), /sem reforço novo nesta leitura/);
+  }
+  assert.equal(processado.costs.paidQueries, 16);
+  const linhas = PLANO.filter(l => l.lock === "free").map(linhaDaPlanilha);
+  assert.ok(planSheetPreviewLines(processado, linhas).every(l => l.kind === "needs_serp" && !/Procurar outra principal/.test(l.sentence)));
+  const coleta = await coletar(processado);
+  for (const p of coleta.proposals) assert.equal(p.status, "ready", `${p.targetId}: ${JSON.stringify(p.reasons)}`);
+  const fim = await aplicarTudo({ runId: processado.runId, decisionHash: coleta.decisionHash });
+  assert.equal(fim.state, "complete", JSON.stringify(fim.outcomes));
+  for (const id of LIVRES) {
+    const dna = vigentes().find(v => v.payload.subject?.keywordId === id)!;
+    assert.deepEqual(dna.payload.keywordReferences.map((r: any) => r.keywordId), [id]);
+    assert.ok(dna.payload.serpAssessmentRef, `${id}: aprovado com o parecer da SERP da principal de identidade`);
+  }
+  assert.deepEqual(chamadas.import, [], "sem keyword nova, nada no Minerador");
+  assert.equal(chamadasDeRede, 0);
 });

@@ -262,12 +262,17 @@ test("(c) o custo da busca nova é dito antes do clique, na tela", () => {
   const frase = improvementDiscoveryCostSentence(3);
   assert.match(frase, /até 6 chamada\(s\)/);
   assert.match(frase, /Grátis \(cota do Google Ads\): cada chamada conta 1 unidade na cota de Descoberta da marca e fica no registro de uso/);
+  /*
+   * 2026-10-17 (noite) · SUBSTITUÍDO o botão "Buscar keywords novas no Google Ads (N)" com a frase da cota antes do
+   * clique (dono: "cadê as keywords de reforço?… 3 botões já é suficiente"): a busca nova é grátis (cota do Google Ads)
+   * e roda sozinha como passo da leitura — no refazedor e no "Processar artigos" das linhas do plano. Cada chamada
+   * continua no registro de uso (teste abaixo); o que tem custo em dinheiro (SERP, IA) segue com o custo antes.
+   */
   const painel = semComentarios(readFileSync("modules/arquiteto/article-improvement-panel.tsx", "utf8"));
-  assert.match(painel, /onClick=\{\(\) => setConfirm\("discover"\)\}>Buscar keywords novas no Google Ads \(\{discoveryGaps\}\) · \{GOOGLE_ADS_FREE_LABEL\}<\/button>/);
-  assert.match(painel, /\{improvementDiscoveryCostSentence\(discoveryGaps\)\}/);
-  // 2026-10-13 · a busca nova mantém o recorte (cor) da execução que ela completa.
-  assert.match(painel, /confirm === "discover" \? execute\("prepare", \{ \.\.\.recorteDaExecucao, discover: true \}\)/);
-  assert.match(painel, /\.\.\.\(action === "prepare" && options\.discover \? \{ discover: true \} : \{\}\)/);
+  assert.doesNotMatch(painel, /setConfirm\("discover"\)|Buscar keywords novas no Google Ads/);
+  assert.match(painel, /\.\.\.\(action === "prepare" \? \{ discover: true \} : \{\}\)/);
+  const linhasDoPlano = semComentarios(readFileSync("modules/arquiteto/plan-article-sheet.tsx", "utf8"));
+  assert.match(linhasDoPlano, /action: "prepare", group: groupId, targetIds: doGrupo\.map\(row => row\.keywordId\), origin: "plan_sheet", discover: true/);
 });
 
 test("(c) registro de uso: a IA e a busca vão para integration_usage_events pelo caminho de sempre", () => {

@@ -7,6 +7,7 @@ import { SERP_SUBJECT_LENS_LABELS } from "../lib/arquiteto/serp-subject-overlap.
 import { normalizeKeyword } from "../lib/minerador/keyword-import-core.ts";
 import { declarado, linhaDaMesa } from "./arquiteto-assunto-fixtures.mts";
 import { ATOR, AZUL, LINHAS_AZUL, MARCA_WIFI, TERRITORIO_AZUL, VOLUME_VALIDADO, codigoSemComentarios, escopoDo, semanticoDoPlano } from "./arquiteto-cenarios-ouro-fixtures.mts";
+import { planGroupSiloClosure } from "../lib/arquiteto/plan-article-sheet.ts";
 
 /*
  * F0 DA LINHA ÚNICA DO ARQUITETO — CENÁRIOS-OURO NO SERVIDOR (2026-10-16).
@@ -181,7 +182,15 @@ function mesaAzulNoServidor() {
 /* C2 · C3 — o plano formado HOJE por B (a melhoria com origin plan_sheet)  */
 /* ======================================================================= */
 
-test("C2/C3 · servidor · 'Concluir formação' das 7 linhas do azul HOJE por B: 6 DNAs aprovados com hierarquia = papel e promessa = escopo, a Travada intacta; a Livre sem volume e sem sustentação fica de fora com o motivo; NENHUM SiloDNA/SiloPage no mesmo ato — muda na F2", async () => {
+/*
+ * 2026-10-17 (noite) · F2 DA LINHA ÚNICA (o dono, no amarelo: "cadê o verdadeiro papel do arquiteto? 3 botões já é
+ * suficiente"). SUBSTITUI o "HOJE por B: 6 DNAs; a Livre sem volume e sem sustentação fica de fora; NENHUM SiloDNA no
+ * mesmo ato — muda na F2": (1) a Livre sem volume que é a principal de IDENTIDADE (no título do Assunto, T12) forma com
+ * ela, pela SERP dela (G6) — L13 vale só fora da identidade; (2) o Silo do plano fecha no mesmo ato do Concluir: a tela
+ * relê os DNAs e grava o par pelo fechamento canônico (`writeSiloPairFromArticles`); a decisão é de domínio
+ * (`planGroupSiloClosure`) e é conferida aqui com os 7 DNAs gravados.
+ */
+test("C2/C3 · servidor · 'Concluir formação' das 7 linhas do azul pela linha única: 7 DNAs aprovados (a Livre de identidade forma com a principal dela) com hierarquia = papel e promessa = escopo, a Travada intacta; o Silo do plano fica PRONTO para fechar no mesmo ato (Pilar e ordem do plano)", async () => {
   mesaAzulNoServidor();
   const ids = LINHAS_AZUL.map(linha => linha.id);
   const run = await prepare({ group: AZUL, targetIds: ids, origin: "plan_sheet" });
@@ -189,17 +198,20 @@ test("C2/C3 · servidor · 'Concluir formação' das 7 linhas do azul HOJE por B
   assert.equal(run.groupScope?.groupId, AZUL);
   assert.equal(gravacoes.length, 0, "a prévia não grava nada");
   const prontas = run.proposals.filter((p: any) => p.status === "ready").map((p: any) => p.targetId).sort();
-  assert.deepEqual(prontas, ["k11", "k12", "k13", "k14", "k15", "k9"], JSON.stringify(run.proposals.map((p: any) => [p.targetId, p.status, p.reasons])));
-  const livre = run.proposals.find((p: any) => p.targetId === "k10");
-  assert.ok(livre && livre.status !== "ready", "a Livre sem volume e sem sustentação com volume não forma: sem principal com volume (a saída é 'Procurar outra principal' ou a D2(b))");
-  for (const p of run.proposals.filter((item: any) => item.status === "ready")) assert.equal(p.principalId, p.targetId, `${p.targetId}: a principal declarada (travada pelo volume) fica`);
+  assert.deepEqual(prontas, ["k10", "k11", "k12", "k13", "k14", "k15", "k9"], JSON.stringify(run.proposals.map((p: any) => [p.targetId, p.status, p.reasons])));
+  const livre: any = run.proposals.find((p: any) => p.targetId === "k10");
+  assert.ok(livre, "a Livre de identidade está na leitura");
+  assert.equal(livre.principalId, "k10", "a principal de identidade fica (T12)");
+  assert.deepEqual(livre.memberIds, ["k10"], "forma só com a principal quando nenhum reforço tem par (a busca nova é do Processar)");
+  assert.ok(livre.reasons.some((r: string) => /^Principal de identidade: “diferença entre internet e Wi-Fi”/.test(r)), JSON.stringify(livre.reasons));
+  for (const p of run.proposals.filter((item: any) => item.status === "ready")) assert.equal(p.principalId, p.targetId, `${p.targetId}: a principal declarada (travada pelo volume) ou de identidade fica`);
   // Uma confirmação; cada chamada do apply avança um artigo até `complete` (o mesmo laço da tela e do MCP).
   let fim = await apply(run, { targetIds: prontas });
   for (let volta = 0; fim.state !== "complete" && volta < 10; volta += 1) fim = await apply(fim);
   assert.equal(fim.state, "complete", JSON.stringify(fim.outcomes));
   assert.ok(fim.outcomes.every((o: any) => ["improved", "dna_created"].includes(o.status)), JSON.stringify(fim.outcomes));
   const dnas = artigos();
-  assert.equal(dnas.length, 6);
+  assert.equal(dnas.length, 7);
   for (const versao of dnas) {
     const linha = LINHAS_AZUL.find(item => item.id === versao.payload.subject?.keywordId)!;
     assert.ok(linha, "cada DNA carrega o Assunto do plano");
@@ -210,7 +222,24 @@ test("C2/C3 · servidor · 'Concluir formação' das 7 linhas do azul HOJE por B
     assert.match(versao.payload.serpAssessmentRef.versionId, /^assessment:.+:serpbase:[0-9a-f]{16}$/, "serpAssessmentRef = `${id}:${formationBaseHash}`");
   }
   assert.equal(dnas.find((v: any) => v.payload.subject.keywordId === "k9").payload.hierarchy, "Pilar");
-  assert.deepEqual([...new Set(gravacoes.map(g => `${g.type}:${g.status}`))], ["article_dna:approved"], "HOJE: B grava só ArticleDNA aprovado; o fechamento do Silo (SiloDNA + SiloPage) NÃO acontece no mesmo ato — muda na F2");
+  assert.deepEqual([...new Set(gravacoes.map(g => `${g.type}:${g.status}`))], ["article_dna:approved"], "o servidor da melhoria grava só ArticleDNA aprovado; o par do Silo é do fechamento canônico, no mesmo ato, pela tela");
+  // O Silo do plano fecha no mesmo ato: a decisão do domínio com os 7 DNAs gravados — pronto, Pilar = k9, a ordem do plano.
+  const fechamento = planGroupSiloClosure({
+    planRows: LINHAS_AZUL.map(linha => ({ keywordId: linha.id, keyword: linha.keyword, role: linha.role, order: linha.order })),
+    articles: dnas.map((v: any) => ({ articleId: v.payload.articleId, subjectKeywordId: v.payload.subject?.keywordId ?? null, territoryRef: v.payload.territoryRef ?? null })),
+  });
+  assert.equal(fechamento.state, "ready", JSON.stringify(fechamento));
+  if (fechamento.state === "ready") {
+    assert.equal(fechamento.territoryRef, TERRITORIO_AZUL);
+    assert.equal(fechamento.pillarArticleId, dnas.find((v: any) => v.payload.subject.keywordId === "k9").payload.articleId);
+    assert.deepEqual(fechamento.orderedArticleIds, [...LINHAS_AZUL].sort((a, b) => a.order - b.order).map(linha => dnas.find((v: any) => v.payload.subject.keywordId === linha.id).payload.articleId));
+  }
+  // A tela chama o MESMO par do fechamento canônico (nenhum gravador novo), depois de reler os DNAs.
+  const tela = codigoSemComentarios("modules/arquiteto/arquiteto-workspace.tsx");
+  const fechar = tela.slice(tela.indexOf("const closePlanGroupSilos = async"), tela.indexOf("closePlanGroupSilosRef.current = closePlanGroupSilos;"));
+  assert.match(fechar, /const decisao = planGroupSiloClosure\(\{/);
+  assert.match(fechar, /await writeSiloPairFromArticles\(\{/);
+  assert.match(tela, /onConcluded: groupIds => closePlanGroupSilosRef\.current\(groupIds\),/);
   assert.ok(autorizados.includes("arquiteto:approve"), "o append aprovado pede 'approve'");
   assert.equal(pago, 0, "nada pago: o parecer veio do cache");
   assert.equal(chamadasDeRede, 0);

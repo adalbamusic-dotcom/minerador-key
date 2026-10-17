@@ -70,9 +70,69 @@ test("a aba Artigos tem a barra de sempre — Processar artigos · Concluir form
   assert.equal(contar(barra, "\"Melhorar publicados…\""), 1);
   // Sem ramo de "um plano no recorte": a mesma barra para grupo com plano, sem plano e "Todos".
   assert.doesNotMatch(barra, /planGroupId|runStage|architect-plan-stage|hasPublished|primaryButtonClassName|PLAN_FLOW_LABELS/);
-  // As linhas do plano marcadas seguem pelo MESMO botão: Processar = Validar SERP; Concluir = formar.
-  assert.match(barra, /if \(doPlano\.length\) planSheet\.start\("validateSerp", doPlano\);/);
+  /*
+   * 2026-10-17 (noite) · SUBSTITUÍDO "Processar = Validar SERP" (16/10): as linhas do plano marcadas seguem pelo MESMO
+   * botão — Processar = a leitura com o reforço e a SERP que falta (custo antes); Concluir = gravar tudo e fechar o Silo.
+   */
+  assert.match(barra, /if \(doPlano\.length\) planSheet\.start\("processArticles", doPlano\);/);
   assert.match(barra, /if \(doPlano\.length\) planSheet\.start\("concludeFormation", doPlano\);/);
+  assert.doesNotMatch(barra, /validateSerp/);
+});
+
+/*
+ * 2026-10-17 (noite) · O DONO, literal: "3 botões já é suficiente para resolver tudo, e na mesma linha de processo sem
+ * inventar outras linhas"; "tem 7 botões totalmente inúteis"; "tem que ser sequencial". Na barra, só os 3, uma vez cada,
+ * em sequência (o passo atual destacado; o seguinte só habilita com o anterior feito, o porquê no `title`).
+ */
+test("a barra tem SÓ 3 botões, em sequência — Processar artigos → Concluir formação → Melhorar publicados… — sem 'Ações do Assunto' nem 'Fechar “Melhorar publicados”'", () => {
+  assert.equal(contar(barra, "<button"), 3, "três botões e nenhum outro");
+  assert.doesNotMatch(barra, /subjectActions|SubjectActionsControl|Ações do Assunto|Prender Assunto|Formar artigos automaticamente|Fechar “Melhorar publicados”/);
+  assert.doesNotMatch(detalhes, /subjectActions=\{|<SubjectActionsControl/, "as ações do Assunto não moram em Detalhes técnicos");
+  // A sequência: o passo atual é o destacado; Concluir espera o Processar; Melhorar espera o Concluir (publicados: sempre).
+  assert.match(barra, /const passo: ArticlesFormationStep \| null = total === 0 \? \(publishedCount > 0 \? "improve" : null\) : concluiu \? "improve" : processou \? "conclude" : "process";/);
+  assert.match(barra, /const motivoConcluir = ocupado \?\? semSelecao \?\? \(processou \? null : "Passo 1 primeiro: /);
+  assert.match(barra, /const motivoMelhorar = improvementOpen \|\| publishedCount > 0 \|\| concluiu \? null : "Passo 2 primeiro: /);
+  for (const passo of ["process", "conclude", "improve"]) assert.match(barra, new RegExp(`data-step="${passo}"`), passo);
+  // O mesmo botão abre e fecha o refazedor; o rótulo não muda.
+  assert.match(barra, /aria-pressed=\{improvementOpen\}/);
+  assert.match(tela, /onToggleImprovement=\{\(\) => setImprovementPanel\(atual => atual === "open" \? "closed" : "open"\)\}/);
+  // As ações do Assunto (Prender, Soltar, Confirmar o do Silo) moram no painel do artigo aberto, pelos MESMOS handlers, uma vez.
+  assert.equal(contar(tela, "<SubjectActionsControl"), 1);
+  const linhaAberta = tela.slice(tela.indexOf("data-testid=\"architect-article-subject-actions\"") - 400, tela.indexOf("data-testid=\"architect-article-subject-actions\"") + 2400);
+  assert.match(linhaAberta, /\{isExpanded && subjectFilterEntries\.length > 0 && \(/);
+  assert.match(linhaAberta, /<SubjectActionsControl/);
+  // "Formar artigos automaticamente": duplicata de Processar + Concluir no grupo com plano — só para o Assunto sem plano.
+  assert.match(linhaAberta, /onOpenSupport=\{activeSubjectFilter && !subjectStandings\.get\(activeSubjectFilter\)\?\.plan \? \(\) => setSubjectSupportOpen\(true\) : null\}/);
+});
+
+/*
+ * 2026-10-17 (noite) · O DONO: "do resto dos dados inúteis ou que não aportam em nada pode apagar" (exibição, não o
+ * banco). Os textos fixos sem ação saíram de "Detalhes técnicos" e do refazedor; ficam o custo antes de pagar, o que
+ * falta em cada linha, os erros e o checklist da prévia. As FUNÇÕES ficam (recolhidas, com título curto).
+ */
+test("os textos sem ação não voltam (painel do refazedor, Detalhes técnicos e prévias), e as funções continuam", () => {
+  const painelCru = ler("modules/arquiteto/article-improvement-panel.tsx");
+  for (const fora of ["URL, slug e canonical nunca mudam.</p>", "Esta análise leu só o grupo", "Sem publicado marcado na planilha", "analisado(s):", "Nenhum publicado ou Assunto tem melhoria", "sem melhoria possível agora", "architect-improvement-known", "architect-improvement-next-step", "Próximo passo", "Retomar esta análise", "Buscar keywords novas no Google Ads", "Buscar keywords da cor", "Buscar de novo", "Gravar sem validar", "<ReworkNotice", "Refazer mesmo assim", "Ir para Artigos novos", "Ver Sobras"]) {
+    assert.ok(!painelDeMelhoria.includes(fora), `${fora} não volta ao refazedor`);
+  }
+  // No refazedor, os botões são só os da prévia: Cancelar e Confirmar.
+  assert.equal(contar(painelDeMelhoria, "<button"), 2, "Cancelar e Confirmar, e nenhum outro");
+  assert.match(painelDeMelhoria, /\{previaAberta && run \? <div[^>]*data-testid="architect-improvement-preview"/);
+  assert.match(painelCru, /discover: true/, "a busca nova no Google Ads é um passo da leitura (grátis), não um botão");
+  // O "refazer com motivo" vive DENTRO da prévia (a guarda de retrabalho de sempre, `reworkOverride`).
+  assert.match(painelDeMelhoria, /data-testid="architect-improvement-rework-reason"/);
+  assert.match(painelDeMelhoria, /reworkOverride: \{ reason: options\.reworkReason \}/);
+  // Detalhes técnicos: sem o parágrafo do "Objetivo do lote" e com os títulos curtos das funções avançadas.
+  for (const fora of ["O lote tem páginas publicadas ou Assuntos declarados: as livres reforçam", "Você pediu artigos novos com as sobras: depois de reforçar", "(as com volume estão em Sobras, abaixo)", "mesmo assunto no Google, trocas e reforços um a um</summary>", "Fora de artigo por precedência, pelo objetivo do lote ou pelo teto de seis"]) assert.ok(!tela.includes(fora), `${fora} não volta`);
+  assert.match(grade, />Análise por keyword \(avançado\)<\/summary>/);
+  assert.match(grade, />Diferenciar publicados \(avançado\)<\/summary>/);
+  // A linha do plano não se repete em "Pendências", "Keywords sem artigo" nem "Keywords não agrupadas pela formação".
+  assert.match(grade, /\]\.filter\(row => groupCut\.keyword\(row\.keywordId\) && !planSheet\.rowByKeywordId\.has\(row\.keywordId\)\),/);
+  assert.match(tela, /groupCut\.keyword\(String\(keyword\.id\)\) && !planSheet\.rowByKeywordId\.has\(String\(keyword\.id\)\)/);
+  // As prévias das linhas do plano: o custo e o checklist ficam; o resumo não tem botão "Fechar".
+  assert.doesNotMatch(linhasDoPlano, /architect-plan-sheet-summary-close/);
+  assert.match(linhasDoPlano, /data-testid="architect-plan-sheet-serp-cost"/);
+  assert.match(linhasDoPlano, /data-testid="architect-plan-sheet-checklist"/);
 });
 
 test("não existem as portas paralelas: etapas '1 · Formar', '2 · Reforçar', '3 · Linha editorial', '4 · Links internos', 'Consolidar o Silo do plano' nem as rotas plan-silo/consolidate|editorial-line", () => {
@@ -207,17 +267,17 @@ test("os textos que o dono mandou tirar não voltam, e as funções deles contin
   assert.doesNotMatch(semComentarios(ler("modules/arquiteto/subject-panels.tsx")), /SubjectFilterPanel|SUBJECT_FILTER_LABEL|Todos os artigos|architect-subject-filter/);
   // A função continua: "Reprocessar artigos" destacado (title curto) quando a formação de sempre está desatualizada.
   assert.match(barra, /data-stale=\{stale \? "true" : undefined\}/);
-  assert.match(barra, /className=\{stale && attentionClassName \? attentionClassName : buttonClassName\}/);
+  // 2026-10-17 (noite) · o destaque é o do passo atual da sequência; a formação desatualizada também destaca o Processar.
+  assert.match(barra, /className=\{destaque\("process", stale\)\}/);
   assert.match(barra, /ARTICLES_STALE_TITLE = "O lote mudou desde a última análise: reprocesse os artigos\."/);
   assert.match(tela, /stale=\{formationIsStale\}\s*attentionClassName=\{ARCHITECT_UI\.primaryButton\}/);
   // As pendências: só o contador no botão que as abre, quando há.
   assert.match(painelDeFormacao, /\{waiting\.rows\.length > 0 && \(/);
   assert.match(painelDeFormacao, /\{`Pendências \(\$\{waiting\.rows\.length\}\)`\}/);
-  // As ações do Assunto: na barra de sempre, pelos MESMOS handlers, uma vez cada.
+  // As ações do Assunto: pelos MESMOS handlers, uma vez cada. 2026-10-17 (noite) · SUBSTITUÍDO "na barra": no painel do artigo aberto (o teste acima, dos 3 botões).
   assert.equal(contar(tela, "<SubjectActionsControl"), 1);
-  assert.ok(detalhes.includes("subjectActions={"), "as ações do Assunto moram na barra, em Detalhes técnicos");
-  assert.match(barra, /\{subjectActions\}/);
-  for (const handler of ["onOpenAttach={() => setSubjectAttachOpen(true)}", "onOpenSupport={() => setSubjectSupportOpen(true)}", "onDetach={anchor => { void detachSubjectAnchor(anchor); }}", "onConfirmSiloSuggestion={ref => { void confirmSiloSubjectSuggestion(ref); }}"]) assert.equal(contar(tela, handler), 1, handler);
+  assert.doesNotMatch(barra, /\{subjectActions\}/);
+  for (const handler of ["onOpenAttach={() => setSubjectAttachOpen(true)}", "() => setSubjectSupportOpen(true)", "onDetach={anchor => { void detachSubjectAnchor(anchor); }}", "onConfirmSiloSuggestion={ref => { void confirmSiloSubjectSuggestion(ref); }}"]) assert.equal(contar(tela, handler), 1, handler);
   const acoes = semComentarios(ler("modules/arquiteto/subject-panels.tsx"));
   for (const rotulo of ["{SUBJECT_ATTACH_ACTION_LABEL}", "Formar artigos automaticamente", "{SUBJECT_DETACH_ACTION_LABEL}", "{SUBJECT_SILO_SUGGESTION_ACTION_LABEL}"]) assert.ok(acoes.includes(rotulo), `${rotulo} continua`);
   // E o "1 fica de fora: Silo do plano…" da aba Silos só acompanha o botão do lote de desfazer.
@@ -236,8 +296,13 @@ test("o painel 'Melhorar publicados…' não exclui os artigos do plano (como em
   assert.doesNotMatch(painelDeMelhoria, /excludePlanArticles/);
   assert.doesNotMatch(painelDeMelhoria, /architect-improvement-plan-elsewhere/);
   assert.equal(contar(tela, "<ArticleImprovementPanel"), 1, "uma cópia só");
-  // "Concluir formação" FORMA: a linha já formada fica fora, com o caminho do reforço.
-  assert.match(dominioDoPlano, /action === "concludeFormation" && \(row\.formation\.state === "formed" \|\| row\.formation\.state === "in_radar"\) \? planSheetFormedRefusal\(row\.formation\.label\)/);
+  /*
+   * 2026-10-17 (noite) · SUBSTITUÍDO "Concluir formação FORMA: a linha já formada fica fora" (16/10): o Processar e o
+   * Concluir levam também o artigo do plano já formado (o reforço dele vira a versão seguinte, na mesma confirmação).
+   * Só o que já está no Radar fica fora, com o caminho do refazedor ("Melhorar publicados…").
+   */
+  assert.match(dominioDoPlano, /action !== "swapPrincipal" && row\.formation\.state === "in_radar" \? planSheetInRadarRefusal\(row\.formation\.label\)/);
+  assert.doesNotMatch(dominioDoPlano, /planSheetFormedRefusal|row\.formation\.state === "formed" \|\| row\.formation\.state === "in_radar"\) \? /);
   assert.match(dominioDoPlano, /use “Melhorar publicados…”/);
 });
 

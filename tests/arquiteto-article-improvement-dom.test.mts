@@ -3,136 +3,133 @@ import test from "node:test";
 import { comProductShell, montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
 import { ArticleImprovementPanel } from "../modules/arquiteto/article-improvement-panel.tsx";
 
-let screen: RadarDomScreen, calls: any[], restored: any, applied: number;
-const fixture = () => ({ brandId: "brand-a", runId: "run", decisionHash: "a".repeat(64), state: "prepared", acceptedIds: null, leaseUntil: null, costs: { paidQueries: 2, estimatedCostUsd: {min:.004,max:.006}, missingDetails:[{keyword:"demanda nova",lens:"mobile-ios",reason:"missing"}] }, keywords:[{id:"old",keyword:"tema antigo",volumeValidated:false},{id:"new",keyword:"demanda nova",volume:50,volumeValidated:true}], proposals:["a","b"].map(id=>({targetId:id,kind:"published",theme:`Publicado ${id}`,currentPrimaryId:"old",principalId:"new",memberIds:["old","new"],addIds:["new"],removeIds:[],transfers:[],angle:`enfoque ${id}`,exclusions:[],reasons:["Cache completo"],status:"ready"})),notices:[],outcomes:[] });
-const panel = (brandId="brand-a", hasLeftovers?: boolean) => comProductShell(React.createElement(ArticleImprovementPanel,{brandId,onApplied:()=>{applied++;},buttonClassName:"button",primaryButtonClassName:"button",hasLeftovers}));
-const button = (text: string) => [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent===text)!;
-const nextStep = () => screen.container.querySelector<HTMLElement>("[data-testid='architect-improvement-next-step']");
-test.beforeEach(async()=>{
-  calls=[]; restored=null; applied=0; screen=await montarRadar();
-  globalThis.fetch=async (_url,options) => {
-    if(!options?.method) return new Response(JSON.stringify({success:true,data:restored}));
-    const body=JSON.parse(String(options.body));calls.push(body);
-    const run=fixture();
-    if(body.action==="apply"){
-      const number=calls.filter(c=>c.action==="apply").length;
-      Object.assign(run,{state:number===1?"applying":"complete",acceptedIds:["a","b"],outcomes:[{targetId:"a",status:"improved",message:"Relido"},...(number===2?[{targetId:"b",status:"failed",message:"Falha por alvo"}]:[])]});
+/*
+ * O REFAZEDOR ("Melhorar publicados…") NA TELA (DOM). 2026-10-17 (noite) · SUBSTITUÍDOS o cartão "Próximo passo" e
+ * a fileira de botões (dono: "tem 7 botões totalmente inúteis"): abrir LÊ sozinho (a busca nova no Google Ads incluída,
+ * grátis); a prévia tem só "Cancelar" e "Confirmar", e o Confirmar faz o passo que falta. O que fica, e estes testes
+ * guardam: um aceite só para o lote; a coleta e a gravação autorizadas continuam sozinhas; tempo esgotado não para a
+ * coleta; a tabela mostra só o que pode mudar; a troca de marca não restaura nada; a leitura da IA e a origem por
+ * linha; "Precisa do Minerador"; a keyword nova com o aceite explícito.
+ */
+
+let screen: RadarDomScreen, calls: any[], restored: any, applied: number, closed: number;
+const fixture = () => ({ brandId: "brand-a", runId: "run", decisionHash: "a".repeat(64), state: "prepared", acceptedIds: null, leaseUntil: null, costs: { paidQueries: 2, estimatedCostUsd: { min: .004, max: .006 }, missingDetails: [{ keyword: "demanda nova", lens: "mobile-ios", reason: "missing" }] }, keywords: [{ id: "old", keyword: "tema antigo", volumeValidated: false }, { id: "new", keyword: "demanda nova", volume: 50, volumeValidated: true }], proposals: ["a", "b"].map(id => ({ targetId: id, kind: "published", theme: `Publicado ${id}`, currentPrimaryId: "old", principalId: "new", memberIds: ["old", "new"], addIds: ["new"], removeIds: [], transfers: [], angle: `enfoque ${id}`, exclusions: [], reasons: ["Cache completo"], status: "ready" })), notices: [], outcomes: [] });
+const semCusto = () => ({ ...fixture(), costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] } });
+let prepared: () => any = fixture;
+const panel = (brandId = "brand-a", extra: Record<string, unknown> = {}) => comProductShell(React.createElement(ArticleImprovementPanel, { brandId, onApplied: () => { applied++; }, onClose: () => { closed++; }, buttonClassName: "button", primaryButtonClassName: "button", ...extra }));
+const button = (text: string) => [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text);
+const settle = async (times = 20) => { for (let i = 0; i < times; i += 1) await React.act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+test.beforeEach(async () => {
+  calls = []; restored = null; applied = 0; closed = 0; prepared = fixture; screen = await montarRadar();
+  globalThis.fetch = async (_url, options) => {
+    if (!options?.method) return new Response(JSON.stringify({ success: true, data: restored }));
+    const body = JSON.parse(String(options.body)); calls.push(body);
+    const run = body.action === "prepare" ? prepared() : fixture();
+    if (body.action === "collect") Object.assign(run, semCusto());
+    if (body.action === "apply") {
+      const number = calls.filter(c => c.action === "apply").length;
+      Object.assign(run, { costs: semCusto().costs, state: number === 1 ? "applying" : "complete", acceptedIds: ["a", "b"], outcomes: [{ targetId: "a", status: "improved", message: "Relido" }, ...(number === 2 ? [{ targetId: "b", status: "failed", message: "Falha por alvo" }] : [])] });
     }
-    return new Response(JSON.stringify({success:true,data:run}));
+    return new Response(JSON.stringify({ success: true, data: run }));
   };
 });
-test.afterEach(()=>screen.destroy());
-test("one acceptance completes the batch; cancelling costs does not block ready targets",async()=>{
-  await screen.render(panel());await screen.click(button("1 · Buscar keywords (grátis)"));assert.equal(calls.length,1);
-  assert.match(screen.text(),/volume 50/);await screen.click(button("2 · Coletar a SERP no DataForSEO (pago: 2 consultas, até US$ 0.01)"));assert.match(screen.text(),/Coletar a SERP no DataForSEO · pago: 2 consulta\(s\)/);assert.match(screen.text(),/mobile-ios/);await screen.click(button("Cancelar"));assert.equal(calls.filter(c=>c.action==="collect").length,0);
-  // Com a validação pendente (passo 2 no cartão), gravar direto fica na fileira, sem número.
-  await screen.click(button("Gravar sem validar (2)"));assert.equal(calls.length,1);await screen.click(button("Confirmar e aplicar"));
-  const applies=calls.filter(c=>c.action==="apply");assert.equal(applies.length,2);assert.deepEqual(applies[0].targetIds,["a","b"]);
-  // 2026-10-17 · sem keyword nova na confirmação, o pedido não leva o aceite de incorporar (ele só vai quando a confirmação lista as novas).
-  assert.equal("approveNewKeywords" in applies[0],false);assert.equal(applies[1].targetIds,undefined);
-  assert.match(screen.text(),/Melhoria gravada/);assert.match(screen.text(),/Falha recuperável/);assert.equal(applied,1);
+test.afterEach(() => screen.destroy());
+
+test("abrir lê sozinho (com a busca nova); o custo vem antes; UMA confirmação completa o lote; cancelar a coleta fecha sem pagar", async () => {
+  await screen.render(panel()); await settle();
+  assert.deepEqual(calls.map(c => [c.action, c.discover]), [["prepare", true]]);
+  assert.match(screen.text(), /volume 50/);
+  assert.match(screen.get("architect-improvement-cost").textContent!, /SERP no DataForSEO: 2 consulta\(s\), até US\$ 0,006/);
+  assert.equal(button("Autorizar 2 consulta(s) e coletar a SERP (até US$ 0,006)")?.disabled, false);
+  await screen.click(button("Cancelar")!);
+  assert.equal(calls.filter(c => c.action === "collect").length, 0, "cancelar não paga");
+  assert.equal(closed, 1, "cancelar fecha o refazedor");
+  // A prévia de novo: autorizar coleta; depois, o MESMO Confirmar grava o lote (um aceite, a retomada continua sem outro).
+  await screen.click(button("Autorizar 2 consulta(s) e coletar a SERP (até US$ 0,006)")!); await settle();
+  assert.deepEqual(calls.filter(c => c.action === "collect").map(c => c.authorizedCostUsd), [0.006]);
+  await screen.click(button("Confirmar e gravar (2)")!); await settle();
+  const applies = calls.filter(c => c.action === "apply"); assert.equal(applies.length, 2); assert.deepEqual(applies[0].targetIds, ["a", "b"]);
+  assert.equal("approveNewKeywords" in applies[0], false, "sem keyword nova, o pedido não leva o aceite de incorporar"); assert.equal(applies[1].targetIds, undefined);
+  assert.match(screen.text(), /Melhoria gravada/); assert.match(screen.text(), /Falha recuperável/); assert.equal(applied, 1);
 });
-test("F5 restores server acceptance and offers continuation without another confirmation",async()=>{
-  restored={...fixture(),state:"applying",acceptedIds:["a","b"]};await screen.render(panel());
-  // O cartão Próximo passo assume o "Continuar"; a fileira não repete o mesmo ato.
-  assert.equal(nextStep()?.dataset.nextStep,"resume_apply");assert.equal(button("Continuar melhorias aceitas"),undefined);
-  await screen.click(button("Continuar"));assert.equal(calls[0].action,"apply");assert.equal(calls[0].targetIds,undefined);assert.equal(calls.length,2);
+
+test("gravar só as prontas sem coletar a SERP continua possível (a caixa dentro da prévia, no lugar do 'Gravar sem validar')", async () => {
+  await screen.render(panel()); await settle();
+  await screen.click(screen.get("architect-improvement-without-serp"));
+  assert.equal(button("Confirmar e gravar (2)")?.disabled, false);
+  await screen.click(button("Confirmar e gravar (2)")!); await settle();
+  assert.equal(calls.filter(c => c.action === "collect").length, 0);
+  assert.deepEqual(calls.filter(c => c.action === "apply")[0].targetIds, ["a", "b"]);
 });
-test("o cartão Próximo passo mostra uma frase e um botão, na ordem 1 → 2 → 3",async()=>{
-  await screen.render(panel());
-  assert.equal(nextStep()?.dataset.nextStep,"prepare");assert.match(nextStep()!.textContent!,/Comece aqui/);
-  assert.equal(nextStep()!.querySelectorAll("button").length,1);
-  // Um botão por ato: o "1 · Buscar" do cartão não aparece de novo na fileira.
-  assert.equal([...screen.container.querySelectorAll("button")].filter(b=>b.textContent==="1 · Buscar keywords (grátis)").length,1);
-  await screen.click(button("1 · Buscar keywords (grátis)"));
-  assert.equal(nextStep()?.dataset.nextStep,"validate");assert.equal(nextStep()!.querySelector("button")!.textContent,"2 · Coletar a SERP no DataForSEO (pago: 2 consultas, até US$ 0.01)");
+
+test("a gravação já aceita continua sozinha ao abrir (F5), sem outra confirmação e sem nova leitura", async () => {
+  restored = { ...fixture(), state: "applying", acceptedIds: ["a", "b"] }; await screen.render(panel()); await settle();
+  assert.equal(calls[0].action, "apply"); assert.equal(calls[0].targetIds, undefined);
+  assert.equal(calls.some(c => c.action === "prepare"), false);
 });
-test("sem nada pendente, o cartão manda para as Sobras quando elas existem",async()=>{
-  restored={...fixture(),state:"complete",acceptedIds:["a","b"],costs:{paidQueries:0,estimatedCostUsd:{min:0,max:0},missingDetails:[]}};
-  await screen.render(panel("brand-a",true));
-  assert.equal(nextStep()?.dataset.nextStep,"none");assert.match(nextStep()!.textContent!,/Nada a fazer nos publicados agora\. Veja artigos novos em Sobras\./);
-  assert.equal(nextStep()!.querySelector("button")!.textContent,"Ver Sobras");
-});
-test("sem Sobras, o cartão não promete Sobras e o botão leva a Artigos novos",async()=>{
-  restored={...fixture(),state:"complete",acceptedIds:["a","b"],costs:{paidQueries:0,estimatedCostUsd:{min:0,max:0},missingDetails:[]}};
-  const alvo=document.createElement("section");alvo.id="architect-articles-new";let rolou=0;alvo.scrollIntoView=()=>{rolou++;};document.body.appendChild(alvo);
-  try{
-    await screen.render(panel("brand-a",false));
-    assert.doesNotMatch(nextStep()!.textContent!,/Veja artigos novos em Sobras/);assert.match(nextStep()!.textContent!,/Processar artigos/);
-    await screen.click(button("Ir para Artigos novos"));assert.equal(rolou,1);assert.equal(calls.length,0);
-  }finally{alvo.remove();}
-});
-test("linhas prontas desmarcadas: o cartão pede a marcação, com o botão desabilitado",async()=>{
-  restored={...fixture(),costs:{paidQueries:0,estimatedCostUsd:{min:0,max:0},missingDetails:[]}};await screen.render(panel());
-  assert.equal(nextStep()?.dataset.nextStep,"apply");
-  for(const caixa of screen.container.querySelectorAll<HTMLInputElement>("input[type='checkbox']")) await screen.click(caixa);
-  assert.equal(nextStep()?.dataset.nextStep,"select");assert.match(nextStep()!.textContent!,/2 melhoria\(s\) pronta\(s\)\. Marque na tabela/);
-  assert.equal(nextStep()!.querySelector("button")!.disabled,true);assert.doesNotMatch(screen.text(),/Nada a fazer/);
-});
-test("a fileira não repete números: no passo 2, gravar aparece como 'Gravar sem validar'",async()=>{
-  restored=fixture();await screen.render(panel());
-  assert.equal(nextStep()?.dataset.nextStep,"validate");
-  assert.ok(button("Gravar sem validar (2)"));assert.equal(button("3 · Gravar melhorias (2)"),undefined);
-});
-test("tempo esgotado na validação: continua sozinho pelo andamento guardado",async()=>{
-  restored={...fixture(),state:"collecting"};await screen.render(panel());
-  let collects=0;
-  globalThis.fetch=async (_url,options)=>{
-    const body=JSON.parse(String(options!.body));calls.push(body);
+
+test("a coleta pela metade continua sozinha ao abrir; tempo esgotado numa volta não para (o andamento está no servidor)", async () => {
+  restored = { ...fixture(), state: "collecting" };
+  let collects = 0;
+  globalThis.fetch = async (_url, options) => {
+    if (!options?.method) return new Response(JSON.stringify({ success: true, data: restored }));
+    const body = JSON.parse(String(options.body)); calls.push(body);
     // 1º passo avança e continua "collecting"; o 2º esgota o tempo (a plataforma responde HTML); o 3º termina.
-    if(body.action==="collect"&&++collects===2) return new Response("<html>timeout</html>",{status:504});
-    return new Response(JSON.stringify({success:true,data:{...fixture(),state:body.action==="collect"&&collects>=3?"validated":"collecting"}}));
+    if (body.action === "collect" && ++collects === 2) return new Response("<html>timeout</html>", { status: 504 });
+    return new Response(JSON.stringify({ success: true, data: { ...fixture(), state: body.action === "collect" && collects >= 3 ? "prepared" : "collecting" } }));
   };
-  await screen.click(button("Continuar"));
-  assert.deepEqual(calls.map(c=>c.action),["collect","collect","status","collect"]);assert.doesNotMatch(screen.text(),/demorou demais/);
+  await screen.render(panel()); await settle(40);
+  assert.deepEqual(calls.map(c => c.action), ["collect", "collect", "status", "collect"]); assert.doesNotMatch(screen.text(), /demorou demais/);
 });
-test("a tabela mostra só o que pode mudar; o resto fica em 'sem melhoria possível'",async()=>{
-  const base=fixture();restored={...base,proposals:[base.proposals[0],{...base.proposals[1],status:"adequate",reasons:["Já cobre a busca"]}]};
-  await screen.render(panel());
-  assert.equal(screen.container.querySelectorAll("tbody tr").length,1);
-  const guardado=[...screen.container.querySelectorAll("details")].find(d=>/sem melhoria possível/.test(d.querySelector("summary")?.textContent??""));
-  assert.ok(guardado);assert.equal(guardado!.open,false);assert.match(guardado!.textContent!,/1 sem melhoria possível agora[\s\S]*Publicado b · Já adequado · Já cobre a busca/);
+
+test("a tabela mostra só o que pode mudar (sem a lista 'sem melhoria possível'); nada a refazer = uma linha, sem botão", async () => {
+  const base = fixture();
+  prepared = () => ({ ...base, proposals: [base.proposals[0], { ...base.proposals[1], status: "adequate", reasons: ["Já cobre a busca"] }] });
+  await screen.render(panel()); await settle();
+  assert.equal(screen.container.querySelectorAll("tbody tr").length, 1);
+  assert.doesNotMatch(screen.text(), /sem melhoria possível/);
+  screen.destroy(); screen = await montarRadar(); calls = [];
+  prepared = () => ({ ...semCusto(), proposals: [{ ...base.proposals[0], status: "adequate", addIds: [], memberIds: ["old"], principalId: "old" }] });
+  await screen.render(panel()); await settle();
+  assert.equal(screen.get("architect-improvement-nothing").textContent, "Nada a refazer agora nos artigos lidos.");
+  assert.equal(screen.container.querySelectorAll("button").length, 0);
 });
-test("validação pela metade: o cartão oferece Continuar, sem custo novo",async()=>{
-  restored={...fixture(),state:"collecting"};await screen.render(panel());
-  assert.equal(nextStep()?.dataset.nextStep,"resume_collect");assert.equal(button("Continuar validação (sem custo novo)"),undefined);
+
+test("an old-brand response cannot restore state after switching brand", async () => {
+  let deliver: ((value: Response) => void) | undefined;
+  globalThis.fetch = async (_url, options) => options?.method ? new Promise<Response>(resolve => { deliver = resolve; }) : new Response(JSON.stringify({ success: true, data: null }));
+  await screen.render(panel()); await settle(); await screen.render(panel("brand-b")); await settle();
+  await React.act(async () => { deliver!(new Response(JSON.stringify({ success: true, data: fixture() }))); });
+  assert.doesNotMatch(screen.text(), /Publicado a/);
 });
-test("an old-brand response cannot restore state after switching brand",async()=>{
-  let deliver: ((value: Response)=>void)|undefined;
-  globalThis.fetch=async (_url,options)=>options?.method?new Promise<Response>(resolve=>{deliver=resolve;}):new Response(JSON.stringify({success:true,data:null}));
-  await screen.render(panel());await screen.click(button("1 · Buscar keywords (grátis)"));await screen.render(panel("brand-b"));
-  await React.act(async()=>{deliver!(new Response(JSON.stringify({success:true,data:fixture()})));});
-  assert.doesNotMatch(screen.text(),/Publicado a/);assert.equal(button("1 · Buscar keywords (grátis)").disabled,false);
+
+test("leitura da IA: a linha mostra 'Leitura da IA — confira' com o motivo; a que falta a SERP fica sem marcação", async () => {
+  const base = fixture();
+  prepared = () => ({ ...base, keywords: [...base.keywords, { id: "lista", keyword: "como atrair clientes", volume: 720, volumeValidated: true }], proposals: [
+    { ...base.proposals[0], principalId: "old", memberIds: ["old", "lista"], addIds: ["lista"], evidenceBasis: "editorial_ai", aiReasons: [{ keywordId: "lista", reason: "Quem busca quer o mesmo passo a passo." }] },
+    { ...base.proposals[1], status: "insufficient_evidence", needsValidation: true, evidenceBasis: "editorial_ai", aiReasons: [{ keywordId: "new", reason: "Mesmo público da página." }] },
+  ] });
+  await screen.render(panel()); await settle();
+  const leituras = screen.container.querySelectorAll("[data-testid='architect-improvement-ai-reading']");
+  assert.equal(leituras.length, 2);
+  assert.match(leituras[0].textContent!, /Leitura da IA — confira[\s\S]*como atrair clientes: Quem busca quer o mesmo passo a passo\./);
+  const caixas = [...screen.container.querySelectorAll<HTMLInputElement>("input[type='checkbox'][aria-label^='Aplicar']")];
+  assert.equal(caixas[0].disabled, false); assert.equal(caixas[1].disabled, true);
+  assert.match(screen.text(), /Falta a SERP da principal \(coleta paga, custo antes\)/);
 });
-test("leitura da IA: a linha mostra 'Leitura da IA — confira' com o motivo; a que falta validar fica sem marcação",async()=>{
-  const base=fixture();
-  restored={...base,keywords:[...base.keywords,{id:"lista",keyword:"como atrair clientes",volume:720,volumeValidated:true}],proposals:[
-    {...base.proposals[0],principalId:"old",memberIds:["old","lista"],addIds:["lista"],evidenceBasis:"editorial_ai",aiReasons:[{keywordId:"lista",reason:"Quem busca quer o mesmo passo a passo."}]},
-    {...base.proposals[1],status:"insufficient_evidence",needsValidation:true,evidenceBasis:"editorial_ai",aiReasons:[{keywordId:"new",reason:"Mesmo público da página."}]},
-  ]};
-  await screen.render(panel());
-  const leituras=screen.container.querySelectorAll("[data-testid='architect-improvement-ai-reading']");
-  assert.equal(leituras.length,2);
-  assert.match(leituras[0].textContent!,/Leitura da IA — confira[\s\S]*como atrair clientes: Quem busca quer o mesmo passo a passo\./);
-  assert.equal(screen.container.querySelectorAll("tbody tr").length,2,"a linha que precisa validar continua visível");
-  const caixas=[...screen.container.querySelectorAll<HTMLInputElement>("input[type='checkbox']")];
-  assert.equal(caixas[0].disabled,false);assert.equal(caixas[1].disabled,true);
-  assert.match(screen.text(),/Precisa coletar a SERP no DataForSEO \(passo 2\)/);
+
+test("origem por linha e as recusas da IA recolhidas", async () => {
+  const base = fixture();
+  prepared = () => ({ ...base, costs: semCusto().costs, keywords: [...base.keywords, { id: "ideia", keyword: "ideia nova", volume: 90, volumeValidated: true, external: true }], proposals: [
+    { ...base.proposals[0], evidenceBasis: "serp" },
+    { ...base.proposals[1], principalId: "old", memberIds: ["old", "ideia"], addIds: ["ideia"], evidenceBasis: "editorial_and_candidate_serp" },
+  ], editorialAi: { status: "answered", askedTargetIds: ["c"], listSize: 3, picks: [], rejected: [{ targetId: "c", keywordId: "k9", keyword: "clinica de estetica facial", theme: "Publicado c", reason: "Não leva o núcleo do assunto do artigo: outro público ou outra necessidade." }], rejectedCount: 1 } });
+  await screen.render(panel()); await settle();
+  assert.deepEqual([...screen.container.querySelectorAll("[data-testid='architect-improvement-origin']")].map(e => e.textContent), ["Origem: Pares da SERP", "Origem: Busca nova no Google Ads"]);
+  const recusas = screen.container.querySelector<HTMLDetailsElement>("[data-testid='architect-improvement-ai-rejected']")!;
+  assert.equal(recusas.open, false); assert.match(recusas.textContent!, /Sugestões da IA recusadas pelas regras \(1\)[\s\S]*clinica de estetica facial → Publicado c: Não leva o núcleo/);
 });
-test("origem por linha, recusas da IA recolhidas e sugestão da IA derrubada pela SERP com o motivo",async()=>{
-  const base=fixture();
-  restored={...base,costs:{paidQueries:0,estimatedCostUsd:{min:0,max:0},missingDetails:[]},keywords:[...base.keywords,{id:"lista",keyword:"como atrair clientes",volume:720,volumeValidated:true},{id:"ideia",keyword:"ideia nova",volume:90,volumeValidated:true,external:true}],proposals:[
-    {...base.proposals[0],evidenceBasis:"serp"},
-    {...base.proposals[1],principalId:"old",memberIds:["old","ideia"],addIds:["ideia"],evidenceBasis:"editorial_and_candidate_serp"},
-    {...base.proposals[0],targetId:"c",theme:"Publicado c",principalId:"old",memberIds:["old","lista"],addIds:["lista"],status:"insufficient_evidence",evidenceBasis:"editorial_ai",aiReasons:[{keywordId:"lista",reason:"Mesmo passo a passo."}],reasons:["A IA sugeriu esta composição, mas a SERP dela não confirmou: nada entra."]},
-  ],editorialAi:{status:"answered",askedTargetIds:["c"],listSize:3,picks:[],rejected:[{targetId:"c",keywordId:"k9",keyword:"clinica de estetica facial",theme:"Publicado c",reason:"Não leva o núcleo do assunto do artigo: outro público ou outra necessidade."}],rejectedCount:1}};
-  await screen.render(panel());
-  assert.deepEqual([...screen.container.querySelectorAll("[data-testid='architect-improvement-origin']")].map(e=>e.textContent),["Origem: Pares da SERP","Origem: Busca nova no Google Ads"]);
-  assert.match(screen.container.querySelector("[data-testid='architect-improvement-ai-parked']")!.textContent!,/Leitura da IA — confira: como atrair clientes \(Mesmo passo a passo\.\)/);
-  assert.match(screen.text(),/Publicado c · Evidência insuficiente · A IA sugeriu esta composição/);
-  const recusas=screen.container.querySelector<HTMLDetailsElement>("[data-testid='architect-improvement-ai-rejected']")!;
-  assert.equal(recusas.open,false);assert.match(recusas.textContent!,/Sugestões da IA recusadas pelas regras \(1\)[\s\S]*clinica de estetica facial → Publicado c: Não leva o núcleo/);
-});
+
 test("barra de progresso: contador e porcentagem quando o total é conhecido; pulso e tempo decorrido quando não é", async () => {
   const { ImprovementProgress } = await import("../modules/arquiteto/article-improvement-panel.tsx");
   const inicio = 1_000_000;
@@ -141,76 +138,35 @@ test("barra de progresso: contador e porcentagem quando o total é conhecido; pu
   assert.match(screen.text(), /7 de 36 grupos validados/);
   assert.match(screen.text(), /19%/);
   assert.match(screen.text(), /1 min 15 s/);
-  const barra = screen.container.querySelector('[role="progressbar"]')!;
-  assert.equal(barra.getAttribute("aria-valuenow"), "19");
+  assert.equal(screen.container.querySelector('[role="progressbar"]')!.getAttribute("aria-valuenow"), "19");
   await screen.render(React.createElement(ImprovementProgress, { activity: { action: "prepare", startedAt: inicio }, now: inicio + 12_000, done: null, total: null, unit: "" }));
-  assert.match(screen.text(), /Buscando keywords/);
+  assert.match(screen.text(), /Lendo os artigos e buscando o reforço/);
   assert.match(screen.text(), /Em andamento · 12 s/);
   assert.equal(screen.container.querySelector('[role="progressbar"]')!.getAttribute("aria-valuenow"), null);
 });
 
-/*
- * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`, item 2).
- * O que o dono vê: a linha que precisaria de keyword nova fica "Precisa do
- * Minerador", sem caixa marcável, com o link para "Sugestões do Arquiteto" no
- * Minerador (filtrado na cor da análise); nada é gravado daqui.
- */
-test("F4 · linha 'Precisa do Minerador': à vista, não marcável, com o link para as Sugestões do Arquiteto no Minerador", async () => {
+test("linha 'Precisa do Minerador': à vista, não marcável, com o link para as Sugestões do Arquiteto no Minerador (na cor da leitura)", async () => {
   const base = fixture();
-  // 2026-10-17 · só a keyword que JÁ existe no Minerador (e não chegou ao Arquiteto) faz a linha precisar dele; a nova entra na confirmação.
-  restored = { ...base, groupScope: { requested: "azul", filter: "group", groupId: "g-azul" }, keywords: [...base.keywords, { id: "ext", keyword: "ideia nova", volume: 90, volumeValidated: true, external: true, knownInMinerador: { keywordId: "ja-no-minerador" } }],
-    proposals: [{ ...base.proposals[0], addIds: ["ext"], memberIds: ["old", "ext"], principalId: "old", status: "insufficient_evidence", needsMinerador: { newKeywordIds: ["ext"], measureKeywordIds: [], logicKeywordIds: [] }, reasons: ["Precisa do Minerador: 1 keyword(s) nova(s) para importar e aprovar no Minerador (“ideia nova”)."] }] };
-  // 2026-10-14: a análise do azul é a atual quando a etiqueta está no azul (com outra etiqueta ela fica recolhida como "análise anterior").
-  await screen.render(comProductShell(React.createElement(ArticleImprovementPanel, { brandId: "brand-a", brandRef: "adalbapro--brand-a", onApplied: () => { applied++; }, buttonClassName: "button", primaryButtonClassName: "button", activeGroup: { requested: "azul", label: "Azul" } })));
+  prepared = () => ({ ...base, groupScope: { requested: "azul", filter: "group", groupId: "g-azul" }, keywords: [...base.keywords, { id: "ext", keyword: "ideia nova", volume: 90, volumeValidated: true, external: true, knownInMinerador: { keywordId: "ja-no-minerador" } }],
+    proposals: [{ ...base.proposals[0], addIds: ["ext"], memberIds: ["old", "ext"], principalId: "old", status: "insufficient_evidence", needsMinerador: { newKeywordIds: ["ext"], measureKeywordIds: [], logicKeywordIds: [] }, reasons: ["Precisa do Minerador."] }] });
+  await screen.render(panel("brand-a", { brandRef: "adalbapro--brand-a", activeGroup: { requested: "azul", label: "Azul" } })); await settle();
+  assert.deepEqual(calls.map(c => [c.action, c.group]), [["prepare", "azul"]], "a leitura recorta a cor da etiqueta");
   assert.match(screen.text(), /1 linha\(s\) precisa do minerador: dependem de keyword que JÁ existe no Minerador/);
-  const celula = screen.container.querySelector("[data-testid='architect-improvement-row-needs-minerador']")!;
-  assert.match(celula.textContent ?? "", /Precisa do Minerador · Sugestões do Arquiteto/);
-  const link = screen.container.querySelector<HTMLAnchorElement>("[data-testid='architect-improvement-open-suggestions']")!;
-  assert.equal(link.getAttribute("href"), "/adalbapro--brand-a/minerador?arquiteto=sugestoes&cor=azul");
-  const caixa = screen.container.querySelector<HTMLInputElement>("input[aria-label='Aplicar melhoria em Publicado a']")!;
-  assert.equal(caixa.disabled, true, "a linha que precisa do Minerador não é aceitável aqui");
-  assert.equal(calls.length, 0, "nada foi pedido ao servidor");
+  assert.match(screen.container.querySelector("[data-testid='architect-improvement-row-needs-minerador']")!.textContent ?? "", /Precisa do Minerador · Sugestões do Arquiteto/);
+  assert.equal(screen.container.querySelector<HTMLAnchorElement>("[data-testid='architect-improvement-open-suggestions']")!.getAttribute("href"), "/adalbapro--brand-a/minerador?arquiteto=sugestoes&cor=azul");
+  assert.equal(screen.container.querySelector<HTMLInputElement>("input[aria-label='Aplicar melhoria em Publicado a']")!.disabled, true);
 });
 
-/*
- * 2026-10-14 · caso WifiConecta: com a etiqueta em "todos", o painel abria a
- * análise antiga (Assuntos do laranja, de antes do recadastro) como estado
- * atual. A execução lida ao abrir, anterior à última mudança da mesa, fica
- * recolhida; "Retomar esta análise" a traz de volta.
- */
-test("análise anterior à última mudança da mesa: recolhida, sem linhas à vista; 'Retomar esta análise' a traz", async () => {
-  restored = { ...fixture(), state: "collecting", createdAt: "2026-10-14T01:33:53.827Z" };
-  await screen.render(comProductShell(React.createElement(ArticleImprovementPanel, { brandId: "brand-a", onApplied: () => { applied++; }, buttonClassName: "button", primaryButtonClassName: "button", mesaChangedAt: "2026-10-14T03:09:13.520Z" })));
-  const recolhida = screen.container.querySelector("[data-testid='architect-improvement-previous']");
-  assert.ok(recolhida, "a análise anterior aparece recolhida");
-  assert.match(recolhida!.textContent ?? "", /Análise anterior de .* · marca inteira · recolhida/);
-  assert.equal(screen.container.querySelector("input[aria-label='Aplicar melhoria em Publicado a']"), null, "as linhas antigas não aparecem como estado atual");
-  await screen.click(button("Retomar esta análise"));
-  assert.ok(screen.container.querySelector("input[aria-label='Aplicar melhoria em Publicado a']"), "retomada, ela volta a ser a atual");
-  assert.equal(calls.length, 0, "nada foi pedido ao servidor");
-});
-
-/*
- * 2026-10-17 · KEYWORD NOVA NA MESMA CONFIRMAÇÃO (decisão do dono de 16/10).
- * O que o dono vê: a keyword nova vem marcada "nova" na linha; a confirmação
- * lista, por artigo, as novas com volume e fonte e diz que elas são
- * importadas, processadas, aprovadas e enviadas nesta confirmação; o botão diz
- * quantas são; o pedido leva approveNewKeywords: true só nesse caso.
- */
-test("2026-10-17 · keyword nova: a confirmação lista por artigo (volume e fonte) e o pedido leva approveNewKeywords", async () => {
+test("keyword nova: a prévia lista por artigo (volume e fonte); o Confirmar diz quantas e o pedido leva approveNewKeywords", async () => {
   const base = fixture();
-  restored = { ...base, costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] },
-    keywords: [...base.keywords, { id: "ideia", keyword: "preço internet residencial", volume: 170, volumeValidated: true, external: true }],
-    proposals: [{ ...base.proposals[0], theme: "Internet residencial barata", principalId: "new", memberIds: ["new", "ideia"], addIds: ["ideia"], evidenceBasis: "copy_line" }, base.proposals[1]] };
-  await screen.render(panel());
+  prepared = () => ({ ...semCusto(), keywords: [...base.keywords, { id: "ideia", keyword: "preço internet residencial", volume: 170, volumeValidated: true, external: true }],
+    proposals: [{ ...base.proposals[0], theme: "Internet residencial barata", principalId: "new", memberIds: ["new", "ideia"], addIds: ["ideia"], evidenceBasis: "copy_line" }, base.proposals[1]] });
+  await screen.render(panel()); await settle();
   assert.match(screen.text(), /Entram: preço internet residencial · volume 170 · nova/);
-  await screen.click(button("3 · Gravar melhorias (2)"));
-  const caixa = screen.container.querySelector<HTMLElement>("[data-testid='architect-improvement-new-keywords']")!;
-  assert.ok(caixa, "a confirmação mostra as keywords novas");
-  assert.match(caixa.textContent ?? "", /1 keyword\(s\) NOVA\(S\) na marca\. Ao confirmar, as keywords NOVAS desta prévia \(que não existem na marca\) são importadas no Minerador, processadas pela Lógica, recebem o Volume do Google Ads já medido na prévia \(sem consultar de novo\), são aprovadas e enviadas ao Arquiteto e entram no artigo — tudo nesta mesma confirmação\./);
+  const caixa = screen.get("architect-improvement-new-keywords");
+  assert.match(caixa.textContent ?? "", /1 keyword\(s\) NOVA\(S\) na marca\. Ao confirmar, as keywords NOVAS desta prévia/);
   assert.match(caixa.textContent ?? "", /“Internet residencial barata”: “preço internet residencial” \(170\/mês, busca nova no Google Ads\)\./);
-  assert.doesNotMatch(screen.text(), /nenhuma keyword do Minerador é importada/);
-  await screen.click(button("Confirmar e aplicar (com 1 keyword(s) nova(s))"));
+  await screen.click(button("Confirmar e gravar (com 1 keyword(s) nova(s))")!); await settle();
   const applies = calls.filter(c => c.action === "apply");
   assert.equal(applies[0].approveNewKeywords, true);
   assert.deepEqual(applies[0].targetIds, ["a", "b"]);

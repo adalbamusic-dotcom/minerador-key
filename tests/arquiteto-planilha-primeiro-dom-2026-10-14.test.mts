@@ -28,7 +28,9 @@ const execucao = (extra: Record<string, unknown>) => ({ version: 1, runId: "1111
 const proposta = (targetId: string, extra: Record<string, unknown> = {}) => ({ targetId, kind: "subject", theme: targetId, currentPrimaryId: targetId, principalId: targetId, memberIds: [targetId], addIds: [], removeIds: [], transfers: [], angle: "", exclusions: [], reasons: ["Motivo do núcleo."], status: "ready", evidenceBasis: "serp", ...extra });
 
 const responder = (data: unknown, ok = true, extra: Record<string, unknown> = {}) => new Response(JSON.stringify({ success: ok, data, ...extra }), { status: ok ? 200 : 409 });
-function rede(opcoes: { serpLida?: Record<string, number> } = {}) {
+/** 2026-10-17 (noite) · a leitura do Processar com a SERP de uma principal por pagar (a de identidade, k10). */
+const comSerpPorPagar = (targetIds: string[]) => execucao({ costs: { paidQueries: 4, estimatedCostUsd: { min: 0.0095, max: 0.014 }, missingDetails: [] }, proposals: targetIds.map(id => id === "k10" ? proposta(id, { status: "insufficient_evidence", needsValidation: true }) : proposta(id)) });
+function rede(opcoes: { serpLida?: Record<string, number>; serpPorPagar?: boolean } = {}) {
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const body = init?.body ? JSON.parse(String(init.body)) : null;
@@ -45,8 +47,10 @@ function rede(opcoes: { serpLida?: Record<string, number> } = {}) {
     if (url === "/api/arquiteto/article-improvement") {
       if (body.action === "prepare") {
         const escolhida = body.principalChoice?.k10;
+        if (opcoes.serpPorPagar && body.discover) return responder(comSerpPorPagar(body.targetIds));
         return responder(execucao({ proposals: body.targetIds.map((id: string) => id === "k10" && escolhida ? proposta("k10", { currentPrimaryId: "k10", principalId: escolhida, memberIds: [escolhida] }) : proposta(id)) }));
       }
+      if (body.action === "collect") return responder(execucao({ proposals: ["k9", "k10", "k11", "k12", "k13", "k14", "k15"].map(id => proposta(id)) }));
       if (body.action === "apply") {
         const ids: string[] = body.targetIds ?? [];
         return responder(execucao({ state: "complete", acceptedIds: ids, outcomes: ids.map(id => ({ targetId: id, status: "improved", message: `ArticleDNA de ${id} gravado (v2) e relido.` })) }));
@@ -92,54 +96,58 @@ test("azul: 7 linhas na ordem do plano; 'Procurar outra principal' só na livre 
   semMinerador();
 });
 
-test("'Processar artigos' (barra de sempre) com as linhas do plano marcadas = Validar SERP: prévia com o custo, cancelar não paga; confirmar coleta, resultado por linha e relê", async () => {
-  rede();
+/*
+ * 2026-10-17 (noite) · SUBSTITUÍDOS "Processar = Validar SERP" e "Concluir FORMA só a linha sem ArticleDNA" (16/10):
+ * Processar = a leitura da melhoria com a busca do reforço (grátis) e UMA prévia de custo da SERP que falta (a da
+ * principal de identidade "diferença entre internet e wi-fi"); Concluir = a cópia de trabalho do Processar, com o
+ * artigo já formado junto (o reforço dele vira a versão seguinte), UMA confirmação e o Silo do plano no mesmo ato.
+ */
+test("'Processar artigos' (barra de sempre) com as linhas do plano marcadas: a leitura com a busca do reforço; prévia com o custo; cancelar não paga; confirmar coleta pela melhoria e a cópia de trabalho fica em cada linha", async () => {
+  rede({ serpPorPagar: true });
   await screen.render(mesa()); await assentar();
   assert.equal(screen.query("architect-plan-stage"), null, "sem etapas do plano: a barra de sempre");
   await marcarTodas();
   await screen.click("architect-articles-top-process"); await assentar();
+  const preparo = chamadas.find(chamada => chamada.body?.action === "prepare")!;
+  assert.deepEqual([preparo.body.group, preparo.body.origin, preparo.body.discover, preparo.body.targetIds], [AZUL, "plan_sheet", true, ["k9", "k10", "k11", "k12", "k13", "k14", "k15"]]);
   const previa = screen.get("architect-plan-sheet-preview");
-  assert.equal(previa.dataset.action, "validateSerp");
-  // 2026-10-17 · régua única: a Livre sem volume "diferença entre internet e wi-fi" é a principal de identidade (no título do Assunto) e vai ao custo, com o propósito.
-  assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /Até 24 chamada\(s\) paga\(s\)/);
-  const vaiColetar = screen.all("architect-plan-sheet-preview-line").filter(item => item.dataset.kind === "go");
-  assert.equal(vaiColetar.length, 6, "as principais com volume sem as 4 lentes e a principal de identidade sem volume vão ao custo");
-  assert.ok(vaiColetar.some(item => item.textContent!.includes("SERP da principal de identidade “diferença entre internet e wi-fi” (sem volume medido): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo.")), vaiColetar.map(item => item.textContent).join(" | "));
-  assert.match(previa.textContent!, /sem volume, nada é coletado — exceto a principal de identidade do artigo, que o servidor também confere/);
+  assert.equal(previa.dataset.action, "processArticles");
+  assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /^SERP no DataForSEO: 4 consulta\(s\), até US\$ 0,014 — a primeira coleta da principal que falta \(inclusive a principal de identidade, sem buscas no Google Ads\)/);
   await screen.click(botao("Cancelar", previa)!); await assentar();
-  assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute").length, 0, "cancelar não paga nada");
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /nenhuma chamada foi paga/);
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "collect").length, 0, "cancelar não paga nada");
+  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /a coleta paga foi cancelada — nada foi pago nem gravado/);
   await screen.click("architect-articles-top-process"); await assentar();
   await screen.click("architect-plan-sheet-confirm"); await assentar();
-  const executados = chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute");
-  assert.equal(executados.length, 1);
-  assert.equal(executados[0].body.authorizedPaidQueries, 24);
-  assert.equal(executados[0].body.onlyMeasuredVolume, true, "o servidor confere de novo o volume e a identidade");
-  assert.deepEqual(executados[0].body.keywords.map((item: any) => item.keywordId), ["k10", "k11", "k12", "k13", "k14", "k15"]);
-  assert.match(resultado("k11"), /SERP coletada nas 4 lentes/);
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /Validar SERP: 24 lente\(s\) paga\(s\) agora/);
+  const coletas = chamadas.filter(chamada => chamada.body?.action === "collect");
+  assert.equal(coletas.length, 1);
+  assert.equal(coletas[0].body.authorizedCostUsd, 0.014, "só o custo autorizado na prévia; o servidor confere volume e identidade");
+  assert.match(resultado("k11"), /^Cópia de trabalho \(nada gravado\): principal “wi-fi lento” \(Travada, fica\) · sem secundária\. Pronto para “Concluir formação”\.$/);
+  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /^Processar artigos: 7 artigo\(s\) lido\(s\), reforço proposto para 0; SERP paga agora: 4 consulta\(s\)\. Nada foi gravado/);
+  assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp").length, 0, "o Validar SERP de coleta à parte saiu (F3 da linha única)");
   assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/serp-subject").length, 2, "a coluna SERP é relida do cache");
   semMinerador();
 });
 
-test("'Concluir formação' (barra de sempre) FORMA: a linha sem ArticleDNA vai à melhoria do plano (prévia grátis, uma confirmação, releitura); a já formada fica fora com o caminho do reforço", async () => {
+test("'Concluir formação' (barra de sempre) grava a cópia de trabalho do Processar: o artigo já formado entra (v2), checklist, UMA confirmação, releitura e o Silo do plano no mesmo ato", async () => {
   rede({ serpLida: { k9: 4, k11: 4, k12: 4, k13: 4, k14: 4, k15: 4, s1: 4, s2: 4 } });
   await screen.render(mesa({ articles: formados().filter(artigo => artigo.articleId === "k9") })); await assentar();
   await marcarTodas();
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, true, "o Concluir espera o Processar");
+  await screen.click("architect-articles-top-process"); await assentar();
   await screen.click("architect-articles-top-confirm"); await assentar();
-  const preparo = chamadas.find(chamada => chamada.url === "/api/arquiteto/article-improvement" && chamada.body?.action === "prepare")!;
-  assert.deepEqual([preparo.body.group, preparo.body.origin, preparo.body.targetIds], [AZUL, "plan_sheet", ["k10", "k11", "k12", "k13", "k14", "k15"]], "o k9 já formado não vai de novo");
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "prepare").length, 1, "o Concluir não prepara de novo: grava a cópia de trabalho do Processar");
   assert.equal(screen.get("architect-plan-sheet-preview").dataset.action, "concludeFormation");
   const k9 = screen.all("architect-plan-sheet-preview-line").find(item => item.textContent!.startsWith("internet fibra óptica"))!;
-  assert.equal(k9.dataset.kind, "refused");
-  assert.match(k9.textContent!, /Formado · v1: já formado — para reforçar com keywords de respaldo, use “Melhorar publicados…”/);
+  assert.equal(k9.dataset.kind, "go");
+  assert.match(k9.textContent!, /Vai gravar: nova versão \(v2\)/);
+  assert.ok(screen.query("architect-plan-sheet-checklist"), "o checklist da finalização");
   assert.equal(chamadas.filter(chamada => chamada.body?.action === "apply").length, 0, "a prévia não grava");
   assert.equal(screen.get("architect-plan-sheet-confirm").textContent, "Confirmar e gravar");
   await screen.click("architect-plan-sheet-confirm"); await assentar();
-  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k10", "k11", "k12", "k13", "k14", "k15"]]);
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k9", "k10", "k11", "k12", "k13", "k14", "k15"]]);
   assert.match(resultado("k10"), /ArticleDNA de k10 gravado \(v2\) e relido/);
-  assert.match(resultado("k9"), /^Não gravado: Formado · v1: já formado/);
   assert.equal(registro.aplicados, 1, "a mesa é relida depois de gravar");
+  assert.deepEqual(registro.silos, [[AZUL]], "o Silo do plano fecha no mesmo ato");
   semMinerador();
 });
 
@@ -157,7 +165,8 @@ test("Procurar outra principal na linha livre: escolha entre as candidatas, pré
   assert.deepEqual(preparo.body.principalChoice, { k10: "s2" });
   const linha = screen.get("architect-plan-sheet-preview-line");
   assert.equal(linha.dataset.kind, "go");
-  assert.match(linha.textContent!, /principal: diferença entre internet e wi-fi → wifi e internet são a mesma coisa/);
+  // 2026-10-17 (noite) · a composição inteira na frase da prévia (a troca e as secundárias).
+  assert.match(linha.textContent!, /principal “wifi e internet são a mesma coisa” \(troca proposta: “diferença entre internet e wi-fi” → esta; decisão sua\)/);
   assert.equal(screen.get("architect-plan-sheet-confirm").textContent, "Confirmar a troca");
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k10"]]);

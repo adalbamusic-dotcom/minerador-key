@@ -3,7 +3,7 @@
 import { ArticleImprovementPanel } from "./article-improvement-panel";
 import { ArticlesFormationBar } from "./articles-formation-bar";
 import { PlanArticleTableRow, PlanRowActions, PlanRowDefinitionCell, PlanRowSeals, PlanSheetOperations, usePlanArticleSheet } from "./plan-article-sheet";
-import { buildPlanSheetRows, editorialGroupCut, planArticleKeywordIds, planOrderedGroupItems, planRowDefinition, planRowRoleLabel, planRowsWithoutArticle, planSubjectOfKeyword, splitTableSelectionForPlan, type PlanGroupItem, type PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
+import { buildPlanSheetRows, editorialGroupCut, planArticleKeywordIds, planGroupSiloClosure, planOrderedGroupItems, planRowDefinition, planRowRoleLabel, planRowsWithoutArticle, planSubjectOfKeyword, splitTableSelectionForPlan, type PlanGroupItem, type PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
 
 import { GLOBAL_WORKFLOW_STATUSES, GLOBAL_WORKFLOW_LABELS, globalWorkflowStatus, type GlobalWorkflowStatus } from "@/lib/editorial/global-workflow-status";
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
@@ -6270,7 +6270,8 @@ export default function ArquitetoPage() {
   /**
    * Os Assuntos recebidos e quantos artigos cada um sustenta. 2026-10-16 (noite) ·
    * o bloco de fichas "Assuntos · N" saiu (pedido do dono): a lista serve só ao
-   * seletor "Ações do Assunto" da barra, no recorte da cor (o filtro é a etiqueta).
+   * seletor "Assunto (prender ou soltar)" do painel do artigo aberto (desde
+   * 2026-10-17, noite; antes, "Ações do Assunto" da barra), no recorte da cor.
    */
   const subjectFilterEntries = useMemo(
     () => selectedBrandId ? buildSubjectFilterEntries({ brandId: selectedBrandId, standings: subjectStandings, anchors: subjectAnchorCarriers }).filter(entry => groupCut.keyword(entry.keywordId)) : [],
@@ -7329,11 +7330,14 @@ export default function ArquitetoPage() {
     brandId: selectedBrandId || null, keywords: masterList, standings: subjectStandings, groupOf: planSheetGroupOf, keywordGroupOf: planSheetKeywordGroupOf,
     articles: planSheetArticles, radarArticleIds: planSheetRadarIds, serp: null, filter: arquitetoGroups.filter, now: new Date(),
   }) : [], [workspaceMode, selectedBrandId, masterList, subjectStandings, planSheetGroupOf, planSheetKeywordGroupOf, planSheetArticles, planSheetRadarIds, arquitetoGroups.filter]);
+  /* 2026-10-17 (noite) · o fechamento do Silo do plano no mesmo ato do Concluir é definido mais abaixo (usa o par do fechamento canônico): a ref o entrega ao hook. */
+  const closePlanGroupSilosRef = useRef<(groupIds: readonly string[]) => Promise<{ tone: "success" | "neutral" | "warning"; text: string } | null>>(async () => null);
   const planSheet = usePlanArticleSheet({
     brandId: selectedBrandId || null, brandRef: serpSubjectBrandRef, keywords: masterList, standings: subjectStandings,
     groupOf: planSheetGroupOf, keywordGroupOf: planSheetKeywordGroupOf, filter: arquitetoGroups.filter, articles: planSheetArticles, radarArticleIds: planSheetRadarIds,
     baseRows: planBaseRows,
     onApplied: () => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); },
+    onConcluded: groupIds => closePlanGroupSilosRef.current(groupIds),
   });
   /* 2026-10-14 · "Melhorar publicados…" é um botão da barra: o painel abre só no clique (fechado = escondido, sem perder a execução). */
   const [improvementPanel, setImprovementPanel] = useState<"closed" | "open" | "hidden">("closed");
@@ -7423,8 +7427,9 @@ export default function ArquitetoPage() {
   );
   // 2026-10-16 (noite) · "Keywords sem artigo" conta só o recorte da cor (o mesmo da tabela); sem cor, a marca inteira.
   const visibleUngroupedArticleKeywords = useMemo(
-    () => ungroupedArticleKeywords.filter(keyword => ungroupedSubjectLabels.has(String(keyword.id)) && groupCut.keyword(String(keyword.id))),
-    [ungroupedArticleKeywords, ungroupedSubjectLabels, groupCut],
+    // 2026-10-17 (noite) · a keyword do plano é linha da tabela (nunca "sem artigo" nem candidata a Silo, spec §32.4): fora daqui.
+    () => ungroupedArticleKeywords.filter(keyword => ungroupedSubjectLabels.has(String(keyword.id)) && groupCut.keyword(String(keyword.id)) && !planSheet.rowByKeywordId.has(String(keyword.id))),
+    [ungroupedArticleKeywords, ungroupedSubjectLabels, groupCut, planSheet.rowByKeywordId],
   );
   /* 2026-10-16 (noite) · saiu o bloco "Assuntos como tronco · N" (pedido do dono): o tronco continua fora de "não agrupadas" (`ungroupedSubjectView`). */
 
@@ -13655,6 +13660,16 @@ export default function ArquitetoPage() {
     return resolveFormationSelectionScope({ selectedArticleIds, articles: articlesList });
   }, [articlesList, tableSelection.regularArticleIds]);
   const selectedCandidateRefs = formationSelectionScope.candidateRefs;
+  /*
+   * 2026-10-17 (noite) · A SEQUÊNCIA DOS 3 BOTÕES (dono: "tem que ser sequencial e na mesma linha de trabalho"): os
+   * publicados do recorte deixam "Melhorar publicados…" habilitado (não passam por Processar e Concluir); os artigos
+   * de sempre marcados que já têm o ArticleDNA (ou são publicados) contam como o passo 2 feito.
+   */
+  const publishedInCutCount = useMemo(() => filteredArticles.filter(article => article.isPublished).length, [filteredArticles]);
+  const regularSelectionConcluded = useMemo(() => {
+    const ids = [...tableSelection.regularArticleIds];
+    return ids.length > 0 && ids.every(id => Boolean(acceptedArticleDnas[id]) || Boolean(articlesList.find(article => String(article.id) === id)?.isPublished));
+  }, [tableSelection.regularArticleIds, acceptedArticleDnas, articlesList]);
 
   /**
    * Os universos recortados pela seleção.
@@ -16028,6 +16043,56 @@ export default function ArquitetoPage() {
    */
   const canonicalClosureRef = useRef(runCanonicalSiloClosure);
   canonicalClosureRef.current = runCanonicalSiloClosure;
+
+  /*
+   * 2026-10-17 (noite) · O SILO DO PLANO FECHA NO MESMO ATO DO "CONCLUIR FORMAÇÃO" (SDD da linha única §11.3, F2: "o
+   * Silo fecha no mesmo ato"; dono: "não está fazendo nada… ficou travado"). Depois que a confirmação gravou os
+   * ArticleDNA (relidos pelo servidor), a tela relê o snapshot remoto, decide pelo domínio (`planGroupSiloClosure`:
+   * todo artigo do plano com o DNA vigente, um Silo só, o Pilar do plano) e grava o par pelo MESMO helper do
+   * fechamento canônico (`writeSiloPairFromArticles` → a consolidação de sempre, que liga o grupo ao Silo depois do
+   * readback). Nenhum núcleo novo: só o gatilho deixou de depender do marcador da formação de sempre (a causa provável
+   * do "falta concluir 8 artigos" com os formados, b2-12).
+   */
+  const closePlanGroupSilos = async (groupIds: readonly string[]): Promise<{ tone: "success" | "neutral" | "warning"; text: string } | null> => {
+    if (!selectedBrandId || !groupIds.length) return null;
+    const snapshot = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+    const vigentes = new Map<string, VersionEnvelope<ArticleDNA>>();
+    for (const version of snapshot.articleDnas) {
+      const atual = vigentes.get(version.entityId);
+      if (!atual || atual.versionNumber < version.versionNumber) vigentes.set(version.entityId, version);
+    }
+    const frases: string[] = [];
+    let aviso = false;
+    for (const groupId of groupIds) {
+      const linhas = planSheet.rows.filter(row => row.groupId === groupId);
+      const nomeDoGrupo = linhas[0]?.groupName ?? "do plano";
+      const decisao = planGroupSiloClosure({
+        planRows: linhas.map(row => ({ keywordId: row.keywordId, keyword: row.keyword, role: row.role, order: row.order })),
+        articles: [...vigentes.values()].map(version => ({ articleId: String(version.payload.articleId), subjectKeywordId: version.payload.subject?.keywordId ?? null, territoryRef: version.payload.territoryRef ?? null })),
+      });
+      if (decisao.state === "waiting") { frases.push(`O Silo do plano “${nomeDoGrupo}” fecha quando os ${linhas.length} artigos estiverem gravados (faltam: ${decisao.missing.slice(0, 3).join(", ")}${decisao.missing.length > 3 ? "…" : ""}).`); continue; }
+      if (decisao.state === "conflict") { aviso = true; frases.push(`O Silo do plano “${nomeDoGrupo}” não fechou: ${decisao.reason}`); continue; }
+      // Já fechado (SiloDNA e SiloPage): o fechamento de sempre não reconsolida um par vivo; a versão nova dos artigos segue como sempre.
+      const parExistente = snapshot.siloDnas.find(version => version.payload.territoryRef === decisao.territoryRef);
+      if (parExistente && snapshot.siloPages.some(version => version.payload.siloId === parExistente.payload.siloId)) { frases.push(`O Silo do plano “${nomeDoGrupo}” já está fechado (SiloDNA e SiloPage): nada a regravar nele.`); continue; }
+      const artigosDoSilo = [...vigentes.values()].filter(version => version.payload.territoryRef === decisao.territoryRef);
+      await writeSiloPairFromArticles({
+        territoryRef: decisao.territoryRef,
+        snapshot,
+        articles: artigosDoSilo,
+        pillarArticleId: decisao.pillarArticleId,
+        pillarReason: `Pilar declarado no plano do Minerador (grupo “${nomeDoGrupo}”): decisão humana do cadastro, fechada no “Concluir formação”.`,
+      });
+      const relido = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+      const dna = relido.siloDnas.find(version => version.payload.territoryRef === decisao.territoryRef);
+      const page = dna ? relido.siloPages.find(version => version.payload.siloId === dna.payload.siloId) : undefined;
+      if (dna && page) frases.push(`Silo do plano “${nomeDoGrupo}” fechado: SiloDNA e SiloPage gravados e relidos, com o Pilar e a ordem do plano; o grupo fica ligado ao Silo.`);
+      else { aviso = true; frases.push(`O Silo do plano “${nomeDoGrupo}” não foi confirmado na releitura: os ArticleDNA ficam; “Concluir formação” tenta de novo.`); }
+    }
+    setCanonicalWorkspaceReload(current => current + 1);
+    return frases.length ? { tone: aviso ? "warning" : "success", text: frases.join(" ") } : null;
+  };
+  closePlanGroupSilosRef.current = closePlanGroupSilos;
 
   /**
    * §5 — CANONICAL_CLOSURE_RESUMABLE: a retomada acontece sozinha.
@@ -18581,7 +18646,8 @@ export default function ArquitetoPage() {
                           siloName: row.siloName,
                         })),
                         ...formationDeferredRows,
-                      ].filter(row => groupCut.keyword(row.keywordId)),
+                      // 2026-10-17 (noite) · a linha do plano não entra em "Pendências": a própria linha da tabela diz o estado e o que falta (dono: "combo internet tv streaming · Silo confirmado; aguardando processar artigos").
+                      ].filter(row => groupCut.keyword(row.keywordId) && !planSheet.rowByKeywordId.has(row.keywordId)),
                     }}
                     crossSilo={articleScopeAudit.crossSilo}
                     conclusionGates={conclusionGates}
@@ -19357,7 +19423,7 @@ export default function ArquitetoPage() {
         {/* 2026-10-16 (noite) · pedido do dono: saíram os blocos "Assuntos · N" (as fichas com o filtro) e "Assuntos como tronco · N". As ações do Assunto (Prender, Formar automaticamente, Soltar, Confirmar o do Silo) ficam na barra de sempre (`SubjectActionsControl`). */}
         {workspaceMode === "articles" && visibleUngroupedArticleKeywords.length > 0 && (
           <details className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-ungrouped-keywords">
-            <summary className="cursor-pointer text-sm font-semibold text-foreground">Keywords sem artigo · {visibleUngroupedArticleKeywords.length} (as com volume estão em Sobras, abaixo)</summary>
+            <summary className="cursor-pointer text-sm font-semibold text-foreground">Keywords sem artigo · {visibleUngroupedArticleKeywords.length}</summary>
             <div className="flex flex-wrap gap-1.5">
               {visibleUngroupedArticleKeywords.map(keyword => {
                 const selo = ungroupedSubjectLabels.get(String(keyword.id)) ?? null;
@@ -19372,17 +19438,14 @@ export default function ArquitetoPage() {
             </div>
           </details>
         )}
-        {workspaceMode === "articles" && articleFormation.batchObjective === "improve" && (
+        {/*
+          * 2026-10-17 (noite) · pedido do dono ("do resto dos dados inúteis ou que não aportam em nada pode apagar"): saiu o
+          * parágrafo fixo "Objetivo do lote · …"; a seção só aparece quando tem ação (formar com as sobras, voltar a só
+          * melhorar, mover para o Silo do destino). O motivo curto foi para o `title` do botão.
+          */}
+        {workspaceMode === "articles" && articleFormation.batchObjective === "improve" && (formNewFromLeftovers || formationDeferredRows.some(row => !planSheet.rowByKeywordId.has(row.keywordId)) || articleFormation.crossSiloProposals.length > 0) && (
           <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-formation-objective">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0">
-                <span className="text-sm font-bold uppercase tracking-widest text-text-muted">Objetivo do lote · melhorar publicados e Assuntos</span>
-                <p className="mt-1 text-sm leading-6 text-text-muted">
-                  {formNewFromLeftovers
-                    ? "Você pediu artigos novos com as sobras: depois de reforçar publicados e Assuntos, as livres sem encaixe formam candidatos novos (até seis keywords cada). Nada é gravado antes de você confirmar na mesa."
-                    : "O lote tem páginas publicadas ou Assuntos declarados: as livres reforçam cada publicado e cada Assunto (até seis keywords por artigo), e a sobra sem encaixe fica em Keywords não agrupadas, com o motivo. Nenhum artigo novo nasce sozinho."}
-                </p>
-              </div>
               {formNewFromLeftovers ? (
                 <button type="button" onClick={() => setNewFromLeftoversBrandId(null)} className={ARCHITECT_UI.toolbarButton} data-testid="architect-formation-improve-only">
                   Voltar a só melhorar publicados e Assuntos
@@ -19421,7 +19484,8 @@ export default function ArquitetoPage() {
         )}
         {workspaceMode === "articles" && serpSubjectCards.length > 0 && (
           <details className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-serp-subject-advanced">
-          <summary className="cursor-pointer text-sm font-semibold text-foreground">Análise por keyword (avançado): mesmo assunto no Google, trocas e reforços um a um</summary>
+          {/* 2026-10-17 (noite) · pedido do dono: a função fica, recolhida, com o título curto (o que ela faz vai no `title`). */}
+          <summary className="cursor-pointer text-sm font-semibold text-foreground" title="Mesmo assunto no Google, trocas e reforços um a um, keyword por keyword.">Análise por keyword (avançado)</summary>
           <SerpSubjectDiagnosisPanel
             cards={serpSubjectCards}
             summary={serpSubjectSummary}
@@ -19446,7 +19510,7 @@ export default function ArquitetoPage() {
         )}
         {workspaceMode === "articles" && (
           <details className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-differentiation-advanced">
-          <summary className="cursor-pointer text-sm font-semibold text-foreground">Diferenciar publicados que disputam o mesmo assunto (avançado)</summary>
+          <summary className="cursor-pointer text-sm font-semibold text-foreground" title="Diferenciar publicados que disputam o mesmo assunto no Google (URL, slug e canonical nunca mudam).">Diferenciar publicados (avançado)</summary>
           <PublishedDifferentiationSection
             brandId={selectedBrandId}
             enabled={workspaceMode === "articles"}
@@ -19458,7 +19522,8 @@ export default function ArquitetoPage() {
           />
           </details>
         )}
-        {workspaceMode === "articles" && formationDeferredRows.length > 0 && (
+        {/* 2026-10-17 (noite) · a keyword do plano é linha da tabela: não se repete aqui; e saiu o parágrafo fixo (cada linha diz o motivo). */}
+        {workspaceMode === "articles" && formationDeferredRows.some(row => !planSheet.rowByKeywordId.has(row.keywordId)) && (
           <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-formation-deferred-list">
             {/*
               D2.3 — com o painel de Sobras na tela, esta lista fica recolhida
@@ -19466,14 +19531,9 @@ export default function ArquitetoPage() {
               as sem volume ficam no fim. Nenhuma some.
             */}
             <details open={!leftoverOpportunities}>
-              <summary className="cursor-pointer text-sm font-bold uppercase tracking-widest text-text-muted">Keywords não agrupadas pela formação · {formationDeferredRows.length}</summary>
-              <p className="mt-1 text-sm leading-6 text-text-muted">
-                {leftoverOpportunities
-                  ? "As com volume estão agrupadas acima, em Sobras. Aqui, a lista completa, por volume, com o motivo."
-                  : "Fora de artigo por precedência, pelo objetivo do lote ou pelo teto de seis. Nenhuma some; cada uma diz o motivo."}
-              </p>
+              <summary className="cursor-pointer text-sm font-bold uppercase tracking-widest text-text-muted">Keywords não agrupadas pela formação · {formationDeferredRows.filter(row => !planSheet.rowByKeywordId.has(row.keywordId)).length}</summary>
               <ul className="mt-2 grid gap-1 text-sm leading-6 text-text-muted">
-                {formationDeferredRowsByVolume.map(row => (
+                {formationDeferredRowsByVolume.filter(row => !planSheet.rowByKeywordId.has(row.keywordId)).map(row => (
                   <li key={row.keywordId}>
                     <span className="font-medium text-keyword">{row.keyword}</span>
                     {row.volume !== null ? ` · volume ${row.volume.toLocaleString("pt-BR")}` : " · sem volume"}
@@ -19716,27 +19776,13 @@ export default function ArquitetoPage() {
               onProcess={() => processArticleFormation()}
               onConfirm={() => confirmArticleFormation()}
               improvementOpen={improvementPanel === "open"}
-              onToggleImprovement={() => setImprovementPanel(atual => atual === "open" ? "hidden" : "open")}
+              // 2026-10-17 (noite) · abrir = ler de novo (o refazedor); fechar desmonta. O que estava autorizado (coleta, gravação) continua ao reabrir, pelo servidor.
+              onToggleImprovement={() => setImprovementPanel(atual => atual === "open" ? "closed" : "open")}
               buttonClassName={ARCHITECT_UI.toolbarButton}
               stale={formationIsStale}
               attentionClassName={ARCHITECT_UI.primaryButton}
-              subjectActions={
-                <SubjectActionsControl
-                  entries={subjectFilterEntries}
-                  selectedKeywordId={activeSubjectFilter}
-                  anchors={selectedSubjectAnchors}
-                  siloSuggestions={selectedSubjectSiloSuggestions}
-                  busy={subjectBusy || formationBusy}
-                  buttonClassName={ARCHITECT_UI.toolbarButton}
-                  primaryButtonClassName={ARCHITECT_UI.primaryButton}
-                  controlClassName={ARCHITECT_UI.control}
-                  onSelect={setSubjectFilterKeywordId}
-                  onOpenAttach={() => setSubjectAttachOpen(true)}
-                  onOpenSupport={() => setSubjectSupportOpen(true)}
-                  onDetach={anchor => { void detachSubjectAnchor(anchor); }}
-                  onConfirmSiloSuggestion={ref => { void confirmSiloSubjectSuggestion(ref); }}
-                />
-              }
+              publishedCount={publishedInCutCount}
+              regularConcluded={regularSelectionConcluded}
             />
             {/* A barra de progressão dos processos: o "Processo ativo" de sempre (Lógica, SERP ou IA), só enquanto roda. */}
             {articleProcessActivity}
@@ -19745,16 +19791,22 @@ export default function ArquitetoPage() {
             {/* "Melhorar publicados…": o painel abre só pelo botão da barra e fica montado depois (a execução em curso não se perde ao fechar). */}
             {improvementPanel !== "closed" && (
               <div hidden={improvementPanel !== "open"} data-testid="architect-improvement-panel-slot">
-                {/* Publicados marcados na tabela: "Buscar keywords" analisa só eles (sem marcação, todos). */}
-                <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
-                  selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))}
+                {/*
+                  * O refazedor (2026-10-17, noite): os publicados marcados e os artigos do plano JÁ formados marcados
+                  * (sem marcação, todos do recorte). Abrir lê sozinho; "Cancelar" da prévia fecha, como o botão da barra.
+                  */}
+                <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton}
+                  onClose={() => setImprovementPanel("closed")}
+                  selectedTargetIds={[
+                    ...articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id)),
+                    ...tableSelection.planTargets.filter(row => row.formation.state === "formed").map(row => row.keywordId),
+                  ]}
                   activeGroup={(() => {
                     // 2026-10-14 · a etiqueta escolhe por COR (`kind: "groups"`); o formato antigo por id continua aceito.
                     const filtro = arquitetoGroups.filter;
                     const cor = filtro.kind === "groups" ? filtro.color : filtro.kind === "group" ? arquitetoGroups.groupById.get(filtro.groupId)?.color ?? null : null;
                     return cor ? { requested: cor, label: EDITORIAL_GROUP_COLOR_LABELS[cor] } : null;
-                  })()}
-                  mesaChangedAt={mesaChangedAt} />
+                  })()} />
               </div>
             )}
             {/* A formação (alertas e o artigo aberto) e as funções de sempre: análise por keyword, diferenciar publicados, objetivo do lote, composição e as listas de conservação. */}
@@ -21281,6 +21333,35 @@ export default function ArquitetoPage() {
                           </td>
                           </tr>
                         )} />
+                      )}
+                      {/*
+                        * 2026-10-17 (noite) · AS AÇÕES DO ASSUNTO NO PAINEL DO ARTIGO ABERTO (dono: "não sei o que é Ações do
+                        * Assunto… Prender Assunto"). Saíram da barra; os MESMOS handlers e diálogos, aqui, quando a linha é
+                        * aberta. Fora do memo da linha: escolher o Assunto redesenha. "Formar artigos automaticamente" só
+                        * para o Assunto SEM plano (no grupo com plano é duplicata de Processar + Concluir).
+                        */}
+                      {isExpanded && subjectFilterEntries.length > 0 && (
+                        <tr className="border-b border-divider bg-surface" data-testid="architect-article-subject-actions">
+                          <td colSpan={architectColumnIds.length} className="border-l-2 border-l-module-accent px-6 py-3 lg:px-10">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <SubjectActionsControl
+                                entries={subjectFilterEntries}
+                                selectedKeywordId={activeSubjectFilter}
+                                anchors={selectedSubjectAnchors}
+                                siloSuggestions={selectedSubjectSiloSuggestions}
+                                busy={subjectBusy || formationBusy}
+                                buttonClassName={ARCHITECT_UI.toolbarButton}
+                                primaryButtonClassName={ARCHITECT_UI.primaryButton}
+                                controlClassName={ARCHITECT_UI.control}
+                                onSelect={setSubjectFilterKeywordId}
+                                onOpenAttach={() => setSubjectAttachOpen(true)}
+                                onOpenSupport={activeSubjectFilter && !subjectStandings.get(activeSubjectFilter)?.plan ? () => setSubjectSupportOpen(true) : null}
+                                onDetach={anchor => { void detachSubjectAnchor(anchor); }}
+                                onConfirmSiloSuggestion={ref => { void confirmSiloSubjectSuggestion(ref); }}
+                              />
+                            </div>
+                          </td>
+                        </tr>
                       )}
                     </React.Fragment>
                   );

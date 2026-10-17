@@ -1,6 +1,7 @@
 # SDD — A linha única do Arquiteto — 2026-10-16
 
 > **Status: APROVADA pelo dono em 2026-10-16 ("segue as recomendações").** Decisões D1–D5 conforme as recomendações do §13: D1 formação pelo caminho de sempre (navegador → Concluir → gravador), o plan_sheet deixa de formar linha sem DNA; D2 candidatas da principal Livre sem volume: núcleo do slug/lista do Assunto → páginas em comum → lentes → volume; D3 o que o dono confirma após a prévia fica aprovado (§35.4/§37.7 viram SUBSTITUÍDO na fase); D4 Silo sem migration se der, senão a migration é preparada para o dono executar; D5 rotas legadas aposentadas e ferramenta MCP da formação só na F7. Autoriza as fases na ordem, uma por vez, começando pela F0 (só testes).
+> **2026-10-17 (noite) · F2 FEITA, com um desvio declarado de D1** (§11.3 e §15.7): pelo pedido do dono no amarelo ("3 botões já é suficiente… na mesma linha de processo"), a linha do plano é gravada pelo gravador da melhoria (`origin: "plan_sheet"`, que revalida e relê e é o único que incorpora as keywords novas pelos núcleos do Minerador), não por `confirmArticleFormation`; o Silo do plano fecha no mesmo ato do Concluir. Manter o desvio ou voltar a D1 ao pé da letra é decisão do dono.
 > Este documento não autoriza código, migration, SQL, escrita remota nem
 > chamada paga. O dono aprova a SDD e a F0 antes de qualquer código. Cada fase
 > seguinte é aprovada por vez (`AGENTS.md` §0.1, §4 e §15).
@@ -377,6 +378,11 @@ Cada etapa tem um núcleo. Os casos são: **sem plano**, **plano declarado**,
 - **Hoje × linha:** a linha do plano tem "Validar SERP" só de coleta
   (`/keyword-serp`), sem parecer. Na linha única, ela recebe o mesmo parecer do
   mesmo Processar (F3).
+- **Feito em 2026-10-17 (noite, F2; §15.7):** "Processar artigos" das linhas do
+  plano = a leitura da melhoria (`prepare` com `discover: true`, grátis: plano,
+  DNAs, lista da marca e Google Ads) → UMA confirmação de custo da SERP que
+  falta (`collect`) → o parecer da composição. Cópia de trabalho por linha;
+  nenhum artefato gravado. SUBSTITUI o "Validar SERP" só de coleta.
 
 ### E4 · Concluir formação
 
@@ -398,6 +404,10 @@ Cada etapa tem um núcleo. Os casos são: **sem plano**, **plano declarado**,
   - sem plano: como hoje;
   - plano: o mesmo `confirmArticleFormation`, com o portão do plano que já
     existe (`declaredPlanGateInputs`, ws:16429) e o adapter do plano;
+    **SUBSTITUÍDO em 2026-10-17 (noite), desvio declarado (§15.7):** o
+    "Concluir formação" das linhas do plano grava pelo `apply` da melhoria
+    (`origin: "plan_sheet"`; revalida, grava `approved` e relê), com o
+    checklist na prévia, e o Silo do plano fecha no mesmo ato;
   - Assunto: o mesmo, pelo painel ou pela automação já autorizada (spec §33.2);
   - publicado: **nunca** passa por aqui (§39.1) e vai para E5;
   - keyword solta: só se estiver num candidato.
@@ -580,8 +590,8 @@ na decisão D3.
 
 | Onde | Texto antigo | O que vale | Fase |
 |---|---|---|---|
-| spec §8, 1º parágrafo | "`Processar lógica`, `Validar SERP`, `Revisar com IA`, `Confirmar arquitetura` e `Enviar ao Radar`" | Os botões da linha (§6). O 2º parágrafo, "cópia de trabalho editável", fica e passa a citar `AGENTS.md` §0.4. | F2 |
-| spec §32 (Silo do plano, 2026-10-15), itens 5 e 6 | "As linhas do plano marcadas: 'Processar artigos' = Validar SERP; 'Concluir formação' forma a linha sem ArticleDNA [pela melhoria do plano]"; "(§ regra R2 do adendo C10)" | E3 e E4: a mesma formação e o mesmo parecer. R1 (§8.1) generaliza o R2 do C10. | F2, F3 e F4 |
+| spec §8, 1º parágrafo | "`Processar lógica`, `Validar SERP`, `Revisar com IA`, `Confirmar arquitetura` e `Enviar ao Radar`" | Os botões da linha (§6). O 2º parágrafo, "cópia de trabalho editável", fica e passa a citar `AGENTS.md` §0.4. | F2 — **marcado em 2026-10-17 (noite)**, spec §43 |
+| spec §32 (Silo do plano, 2026-10-15), itens 5 e 6 | "As linhas do plano marcadas: 'Processar artigos' = Validar SERP; 'Concluir formação' forma a linha sem ArticleDNA [pela melhoria do plano]"; "(§ regra R2 do adendo C10)" | E3 e E4: a mesma formação e o mesmo parecer. R1 (§8.1) generaliza o R2 do C10. | F2, F3 e F4 — item 5 **marcado em 2026-10-17 (noite)**, spec §43 (o item 6 já foi marcado pela §41) |
 | spec §35.3 | "'Livre' está ali para ser trocada: a substituta tem Volume validado maior" | R1: Livre com volume fica. | F4 |
 | spec §35.4 | "nova versão do ArticleDNA em revisão" | R2: `approved` no confirmar. | F5 |
 | spec §36.5 | "Troca da principal Livre: Forte (3+ páginas) ou Provável… sempre com volume maior" | R1, mais a ordem da D2. | F4 |
@@ -679,6 +689,16 @@ Regras comuns a todas as fases:
   costume, com o usuário dono da marca. Nenhuma mudança visível para o owner.
 
 ### 11.3 F2 — Formação: plano e Assunto como casos da formação de sempre
+
+> **FEITA em 2026-10-17 (noite), com desvio declarado** — ver §15.7. Do "Sai"
+> abaixo, saiu o desvio de rótulo ("Validar SERP") e a recusa da linha já
+> formada no Concluir; o `origin: "plan_sheet"` **ficou** como o gravador da
+> linha do plano (o único que incorpora as keywords novas pelos núcleos do
+> Minerador na mesma confirmação). Do "Entra", entrou o Silo do plano fechado
+> no mesmo ato (pela tela, `writeSiloPairFromArticles` →
+> `linkDeclaredPlanGroupToSilo`, depois da releitura dos DNAs); não entrou a
+> linha do plano em `articleFormationUniverses`/`confirmArticleFormation`. O
+> Assunto sem plano segue pelo painel do artigo, como antes.
 
 - **Pré-requisito:** o parecer D2a no Processar (item da F3). A F2 só entra
   depois da F3, ou leva esse item junto (decisão de ordem na aprovação).
@@ -1162,3 +1182,73 @@ Decisão do dono sobre a recomendação: "implementa a sua recomendação".
   `tests/arquiteto-quatro-lentes-rota.test.mts` ("régua única ·…": identidade
   conferida no pacote → paga; fora da identidade ou sem pacote → recusada, nada
   pago mesmo autorizado).
+
+### 15.7 Os 3 botões em sequência e a F2 (dono, 2026-10-17, noite)
+
+O dono, no amarelo da WifiConecta (marca `d4fa133a-…`), depois do deploy:
+"o arquiteto ainda não está cumprindo o papel dele… ficou travado… Reprocessar
+artigos, Concluir formação [sem estar habilitados]… cadê as keywords de
+reforço?… 3 botões já é suficiente… na mesma linha de processo"; "tem 7 botões
+totalmente inúteis"; "tem que ser sequencial"; o último botão "era como o botão
+milagroso do refazedor". Regra permanente: spec §43.
+
+- **Causas (verificado no código do HEAD `0dfa4bd`):**
+  1. "Processar artigos" das linhas do plano era só "Validar SERP" (coleta das
+     linhas com volume): não buscava reforço, e a busca nova no Google Ads era
+     um botão à parte dentro do painel de melhoria;
+  2. "Concluir formação" recusava a linha já formada (os 4 Travados com v1:
+     "use Melhorar publicados…") e, para a Livre de identidade sem volume e sem
+     candidata, a melhoria não via mudança (só a principal) e devolvia "sem
+     evidência / use Procurar outra principal": nada a gravar nas 8 linhas;
+  3. os dois botões ficavam desabilitados enquanto uma prévia do plano estava
+     aberta ou trabalhando (`ocupado = busy || preview`), e o `title` não dizia
+     por quê;
+  4. a leitura dizia "Falta: nada" quando a busca nova ainda não tinha rodado;
+  5. o Silo do plano não fechava no Concluir das linhas do plano (b2-12).
+- **O que mudou (dentro da linha de sempre, sem rota, etapa nem núcleo novo):**
+  - "Processar artigos" = `prepare` (`origin: "plan_sheet"`, `discover: true`)
+    → custo da SERP que falta → `collect` (a única confirmação do Processar);
+    o resultado é a cópia de trabalho de cada linha (`planSheetWorkingCopyLines`);
+  - "Concluir formação" = a prévia (`planSheetPreviewLines`) com o checklist
+    (`planSheetConclusionChecklist`: principal · reforço · SERP · plano · Silo)
+    → `apply` com `approveNewKeywords` (as novas pelos núcleos do Minerador) →
+    os DNAs relidos → o Silo do plano pelo fechamento canônico
+    (`planGroupSiloClosure` decide; `writeSiloPairFromArticles` grava;
+    `linkDeclaredPlanGroupToSilo` liga o grupo). A linha já formada entra (versão
+    seguinte); a linha no Radar ou depois é recusada com o motivo;
+  - a Livre de identidade sem candidata conta como mudança (`formaOPrimeiro`,
+    `lib/arquiteto/article-improvement.ts`) e o alvo sem DNA pede a SERP dela
+    (`lib/server/arquiteto-article-improvement.ts`);
+  - "Melhorar publicados…" virou o refazedor (o mesmo painel e motor): abrir lê
+    sozinho; prévia com só "Cancelar" e "Confirmar"; o motivo do refazer
+    (`reworkOverride`) dentro da prévia;
+  - a sequência (`planSheetSequence`; na barra, `passo`, `motivoConcluir`,
+    `motivoMelhorar`): o passo atual destacado, o seguinte só com o anterior
+    feito, o porquê no `title`; publicados com "Melhorar publicados…" sempre
+    habilitado;
+  - "Ações do Assunto" saiu da barra (prender/soltar no painel do artigo);
+    "Formar artigos automaticamente" saiu do grupo com plano (fica no Assunto
+    sem plano, dúvida Q4 do registro); textos sem ação saíram da tela.
+- **Desvio de D1 (declarado):** D1 dizia "o plan_sheet deixa de formar linha
+  sem DNA". O pedido de 17/10 exige que o Concluir grave numa confirmação as
+  keywords novas pelos núcleos do Minerador, e o único gravador que faz isso,
+  revalidando e relendo, é o `apply` da melhoria. Por isso a linha do plano é
+  gravada por ele, e `confirmArticleFormation` continua só para os artigos de
+  sempre. É um gravador por artefato (o ArticleDNA da linha do plano tem um).
+  Voltar a D1 ao pé da letra exigiria levar a incorporação das novas para o
+  `confirmArticleFormation` — outra entrega, se o dono quiser.
+- **Sem migration e sem mudança incompatível de contrato:** os campos novos são
+  só da tela e do domínio; o pedido ao servidor usa os campos que já existiam
+  (`origin`, `discover`, `targetIds`, `approveNewKeywords`, `reworkOverride`).
+- **Limite:** o fechamento do Silo roda no navegador, depois da releitura. É
+  conferido por domínio (`planGroupSiloClosure` com os 8 DNAs gravados) e por
+  teste estrutural, não de ponta a ponta no servidor. Nada validado na tela
+  pelo dono.
+- **Cenários:** `tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts`
+  ("OS 3 BOTÕES pela barra": 16 consultas, até US$ 0,056; 4 v2 + 4 v1; novas só
+  pelos núcleos do Minerador; originais intactas; Silo pronto com o Pilar l1 e
+  a ordem do plano; e "a Livre de IDENTIDADE sem nenhuma candidata…");
+  `tests/arquiteto-cenarios-ouro-servidor-2026-10-16.test.mts` (C2/C3 com a
+  regra nova); `tests/arquiteto-tres-botoes-dom-2026-10-17.test.mts` (a
+  sequência (a)(b)(c) e os 3 botões contados na tela); a forma da linha em
+  `tests/arquiteto-linha-de-processo-guarda.test.mts`.

@@ -6,15 +6,13 @@ import { OperationProgress } from "./operation-progress";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
 import type { ArchitectSubjectStanding } from "@/lib/arquiteto/declared-subject";
 import type { EditorialGroupScreenFilter } from "@/lib/editorial/editorial-groups";
-import { describeSerpPaidPlan, type SerpPaidPlan, type SerpPaidPlanChoice } from "@/lib/arquiteto/serp-lens-plan";
-import { runPaidSerpBlocks } from "@/lib/arquiteto/serp-blocks";
 import { ARCHITECT_SUGGESTIONS_LABEL, mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
 import { improvementNewKeywordsPreview } from "@/lib/arquiteto/article-improvement-minerador";
 import {
   PLAN_SHEET_ACTION_LABELS,
-  applyPlanSheetSerp, planRowAlerts, buildPlanSheetRows, planPrincipalSwapCandidates, planRowDefinition, planRowRoleLabel, planRowSeals, planSheetColorLabel, planSheetFormationSelection,
-  planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpPlanLine, planSheetSerpSelection, planSheetServerErrorSentence, planSwapCandidateLabel,
-  type PlanRowDefinition, type PlanRowSeal, type PlanSheetAction, type PlanSheetArticle, type PlanSheetConflict, type PlanSheetRow, type PlanSheetSerpRead, type PlanSwapCandidate,
+  applyPlanSheetSerp, planRowAlerts, buildPlanSheetRows, planPrincipalSwapCandidates, planRowDefinition, planRowRoleLabel, planRowSeals, planSheetColorLabel, planSheetConclusionChecklist, planSheetFormationSelection,
+  planSheetOutcomeSentence, planSheetPreviewLines, planSheetSequence, planSheetSerpByKeyword, planSheetServerErrorSentence, planSheetWorkingCopyLines, planSwapCandidateLabel,
+  type PlanConclusionCheck, type PlanRowDefinition, type PlanRowSeal, type PlanSheetAction, type PlanSheetArticle, type PlanSheetConflict, type PlanSheetPreviewLine, type PlanSheetRow, type PlanSheetSerpRead, type PlanSwapCandidate,
 } from "@/lib/arquiteto/plan-article-sheet";
 import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "@/lib/arquiteto/silo-article-withdrawal";
 import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
@@ -25,9 +23,9 @@ import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
  * prévia (grátis) → UMA confirmação → recusa por item → andamento → resultado
  * por linha → releitura.
  *
- * Um caminho só: "Validar SERP" é a rota `keyword-serp` (cache primeiro, custo
- * antes, `onlyMeasuredVolume`), pelo mesmo executor de blocos pagos da mesa;
- * "Concluir formação" e "Trocar principal" são a melhoria recortada por grupo
+ * Um caminho só (2026-10-17, noite: "Processar artigos" SUBSTITUI o "Validar
+ * SERP" pela rota `keyword-serp`): "Processar artigos", "Concluir formação" e
+ * "Trocar principal" são a melhoria recortada por grupo
  * (`/api/arquiteto/article-improvement`, prepare → apply), que grava SÓ o
  * ArticleDNA, a composição e o parecer. Nenhum pedido daqui vai ao Minerador
  * (F4): o que faltar vira "Sugestões do Arquiteto".
@@ -45,19 +43,42 @@ import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
  *
  * 2026-10-16 · RESTAURAÇÃO DO FLUXO DE SEMPRE (ordem do dono: "tem que voltar
  * tudo, mas sem os erros, nem esse monte de botões, nem processo em paralelo"):
- * as linhas do plano seguem pelos botões de sempre da barra — "Processar
- * artigos" = Validar SERP; "Concluir formação" = formar a linha sem ArticleDNA.
- * O reforço do artigo já formado é do painel "Melhorar publicados…".
+ * as linhas do plano seguem pelos botões de sempre da barra.
+ *
+ * 2026-10-17 (noite) · O DONO: "o arquiteto ainda não está cumprindo o papel
+ * dele… cadê as keywords de reforço?… 3 botões já é suficiente". SUBSTITUÍDO o
+ * "Processar artigos = Validar SERP" e o "Concluir formação = só a linha sem
+ * ArticleDNA" de 16/10. Agora, pela MESMA melhoria recortada por grupo
+ * (`/api/arquiteto/article-improvement`, o roteiro §15 da SDD da linha única):
+ *  - "Processar artigos" = prepare com a busca do reforço (lista da marca e
+ *    Google Ads, grátis) → UMA prévia de custo da SERP da principal que falta
+ *    (inclusive a de identidade sem volume) → coleta → a cópia de trabalho de
+ *    cada artigo na própria linha (principal, secundárias com volume e "nova",
+ *    o que falta). Nada é gravado;
+ *  - "Concluir formação" = a prévia com o checklist (principal · reforço · SERP
+ *    · plano · Silo) → UMA confirmação → apply (keywords novas pelos núcleos do
+ *    Minerador, ArticleDNA v1 dos novos e vN+1 dos já formados) → o Silo do
+ *    plano fecha no mesmo ato (`onConcluded`, o par do fechamento canônico) e o
+ *    grupo é ligado a ele.
  */
 
 type Tone = "success" | "neutral" | "warning";
 type LineKind = "go" | "known" | "refused" | "minerador" | "serp" | "adequate";
 type PreviewLine = { keywordId: string; keyword: string; kind: LineKind; text: string };
-type FormationRun = { groupId: string; run: ImprovementRun; readyIds: string[] };
+/** `rows`: as linhas do plano deste grupo pedidas nesta ação (a cópia de trabalho de cada uma). */
+type FormationRun = { groupId: string; run: ImprovementRun; readyIds: string[]; rows?: PlanSheetRow[] };
+/*
+ * 2026-10-17 (noite) · "processArticles" SUBSTITUI "validateSerp": a prévia de custo do Processar (a SERP da principal
+ * que falta, paga) é a ÚNICA confirmação dele; a busca do reforço (Google Ads, grátis) já rodou antes dela.
+ */
 type Preview =
-  | { action: "validateSerp"; lines: PreviewLine[]; plan: SerpPaidPlan; resolve: (choice: SerpPaidPlanChoice | null) => void }
-  | { action: "concludeFormation" | "swapPrincipal"; lines: PreviewLine[]; runs: FormationRun[] }
+  | { action: "processArticles"; lines: PreviewLine[]; runs: FormationRun[]; paidQueries: number; costMaxUsd: number }
+  | { action: "concludeFormation" | "swapPrincipal"; lines: PreviewLine[]; runs: FormationRun[]; checklist?: PlanConclusionCheck[] }
   | { action: "chooseSwap"; rows: PlanSheetRow[]; candidates: Record<string, PlanSwapCandidate[]>; picks: Record<string, string>; refused: PreviewLine[] };
+const KIND_OF: Record<PlanSheetPreviewLine["kind"], LineKind> = { will_write: "go", needs_minerador: "minerador", needs_serp: "serp", adequate: "adequate", refused: "refused" };
+/** As consultas pagas que faltam numa execução preparada (a D2(b) opcional fica fora). */
+const pagasDe = (run: Pick<ImprovementRun, "costs">) => Math.max(0, run.costs.paidQueries - Math.max(0, run.costs.optionalPaidQueries ?? 0));
+const usd = (valor: number) => `US$ ${valor.toFixed(3).replace(".", ",")}`;
 type Busy = { label: string; startedAt: number; done: number | null; total: number | null; unit: string };
 
 const LINE_TONE: Record<LineKind, string> = {
@@ -75,7 +96,6 @@ const SEAL_TONE: Record<PlanRowSeal["tone"], string> = {
   warning: "border-warning/40 text-warning",
   positive: "border-positive-soft/40 text-positive-soft",
 };
-const SERP_BLOCK = 6;
 
 /**
  * 2026-10-14 ("travou, sem poder avançar") · nenhum pedido fica girando sem
@@ -115,7 +135,8 @@ const APPLY_STALL_LIMIT = 40;
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /** O relógio das ações (fora do render: só os handlers e os efeitos o chamam). */
 const agoraMs = () => Date.now();
-const ZERO_PLAN: SerpPaidPlan = { lenses: [], perLens: [], paidQueries: 0, primaryPaidQueries: 0, extraPaidQueries: 0, conditionalPaidQueries: 0, recollectableQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, collectedAtSpreadDays: 0, datesDiverge: false, payMissingExtraLenses: true, recollectStaleLenses: false, digestChecked: false };
+/** Quantas voltas de coleta (cada uma ≤ 120 s no servidor) a tela espera antes de parar com a frase. */
+const COLLECT_TURNS_LIMIT = 60;
 
 export type PlanArticleSheetProps = {
   brandId: string | null;
@@ -135,9 +156,17 @@ export type PlanArticleSheetProps = {
   baseRows?: readonly PlanSheetRow[];
   /** Releitura da mesa depois de gravar (a linha passa a "Formado · vN"). */
   onApplied: () => void;
+  /**
+   * 2026-10-17 (noite) · o Silo do plano fecha no MESMO ato do "Concluir formação" (SDD da linha única, F2): a tela
+   * grava o par SiloDNA + SiloPage pelo fechamento canônico de sempre e diz o desfecho. Ausente = o Silo fica para o
+   * fechamento de sempre (aditivo).
+   */
+  onConcluded?: (groupIds: readonly string[]) => Promise<PlanSheetResult | null>;
 };
 
 export type PlanSheetResult = { tone: Tone; text: string };
+/** Os 3 botões em sequência para as linhas pedidas (ver `planSheetSequence`). */
+export type PlanSheetStep = ReturnType<typeof planSheetSequence>;
 
 export type PlanArticleSheetController = {
   brandId: string | null;
@@ -165,6 +194,8 @@ export type PlanArticleSheetController = {
   /** Muda quando a linha do plano muda (SERP lida, resultado, ocupado): a linha memoizada da mesa redesenha. */
   revision: object;
   start: (action: PlanSheetAction, alvo: PlanSheetRow[]) => void;
+  /** 2026-10-17 (noite) · em que passo da sequência (Processar → Concluir → Melhorar) estão estas linhas. */
+  stepOf: (alvo: readonly PlanSheetRow[]) => PlanSheetStep;
   cancelPreview: () => void;
   prepareSwapPreview: (rows: PlanSheetRow[], picks: Record<string, string>, refused: PreviewLine[]) => void;
   confirmPreview: () => void;
@@ -258,6 +289,13 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   const [resumable, setResumable] = useState<ImprovementRun | null>(null);
   /* 2026-10-14 · "Retirar artigo do Silo" aberto a partir da linha presa (prévia grátis; motivo e confirmação do dono). */
   const [withdrawing, setWithdrawing] = useState<PlanSheetConflict | null>(null);
+  /*
+   * 2026-10-17 (noite) · A CÓPIA DE TRABALHO DO "PROCESSAR ARTIGOS", por grupo: a execução preparada (reforço e SERP)
+   * que o "Concluir formação" grava. É proposta persistida no servidor (o run da melhoria, §4.1 da SDD), nunca artefato.
+   */
+  const [processed, setProcessed] = useState<Map<string, ImprovementRun>>(new Map());
+  /** As linhas que o Processar recusou antes do servidor (presa em outro artigo, sem Silo…): ele fez a parte dele, disse o motivo. */
+  const [processedRefused, setProcessedRefused] = useState<Set<string>>(new Set());
 
   // Troca de marca: nada da marca anterior fica na tela (o mesmo efeito da remontagem).
   const [dono, setDono] = useState(brandId);
@@ -272,18 +310,37 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     setResumable(null);
     setWithdrawing(null);
     setSerpRead(null);
+    setProcessed(new Map());
+    setProcessedRefused(new Set());
   }
 
   // F5 (recarregar a página) — a gravação da planilha interrompida é retomada daqui, sem novo aceite.
+  // 2026-10-17 (noite) · e a cópia de trabalho do último "Processar artigos" volta (o passo 1 continua feito).
   useEffect(() => {
     if (!brandId) return;
     let ativo = true;
     void fetch(`/api/arquiteto/article-improvement?brandId=${encodeURIComponent(brandId)}`).then(r => r.json()).then(body => {
       const run = body?.data as ImprovementRun | null;
-      if (ativo && run && run.origin === "plan_sheet" && run.state === "applying" && run.acceptedIds?.length) setResumable(run);
+      if (!ativo || !run || run.origin !== "plan_sheet") return;
+      if (run.state === "applying" && run.acceptedIds?.length) setResumable(run);
+      else if (run.state === "prepared" && !run.acceptedIds && run.discovery?.requested && run.groupScope?.groupId) setProcessed(atual => new Map([...atual, [run.groupScope!.groupId!, run]]));
     }).catch(() => undefined);
     return () => { ativo = false; };
   }, [brandId]);
+
+  /* -------------------- a sequência dos 3 botões (2026-10-17, noite) -------------------- */
+  // Processar fez a parte da linha quando ela tem a cópia de trabalho sem SERP paga pendente (ou a recusa com o motivo).
+  const processedIds = useMemo(() => {
+    const ids = new Set<string>(processedRefused);
+    for (const run of processed.values()) {
+      for (const proposal of run.proposals) if (!proposal.needsValidation) ids.add(proposal.targetId);
+      for (const recusa of run.refusedTargets ?? []) ids.add(recusa.id);
+    }
+    return ids;
+  }, [processed, processedRefused]);
+  // A cópia de trabalho que ainda espera a gravação do Concluir (o que está pronto para gravar).
+  const pendingIds = useMemo(() => new Set([...processed.values()].flatMap(run => run.proposals.filter(proposal => proposal.status === "ready").map(proposal => proposal.targetId))), [processed]);
+  const stepOf = (alvo: readonly PlanSheetRow[]) => planSheetSequence({ rows: alvo, processedIds, pendingIds });
 
   const sugestoesHref = brandRef ? mineradorHandoffHref(brandRef, { action: "sugestoes", color: corDoRecorte }) : null;
   const nomeDe = (keywordId: string): string => {
@@ -302,75 +359,96 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     setBusy(null);
   };
 
-  /* ================================ VALIDAR SERP ================================ */
-  async function validateSerp(alvo: PlanSheetRow[]) {
+  /* ============================== PROCESSAR ARTIGOS ============================== */
+  /** A cópia de trabalho (as linhas da prévia) de uma execução preparada, com o nome legível de cada artigo. */
+  const linhasDaCopia = (item: FormationRun): PreviewLine[] => {
+    const tipos = new Map(planSheetPreviewLines(item.run, item.rows ?? []).map(line => [line.keywordId, KIND_OF[line.kind]]));
+    return planSheetWorkingCopyLines(item.run, item.rows ?? []).map(line => ({ keywordId: line.keywordId, keyword: nomeDe(line.keywordId), kind: tipos.get(line.keywordId) ?? "refused", text: line.text }));
+  };
+
+  /*
+   * 2026-10-17 (noite) · PASSO 1 DO ROTEIRO §15, numa passada (dono: "cadê as keywords de reforço?"): lê o plano e os
+   * DNAs, busca o reforço (sementes do plano, do DNA e da SERP em cache; lista da marca e ideias do Google Ads, grátis,
+   * cota) e diz o custo da SERP da principal que falta (inclusive a de identidade sem volume). A busca roda sozinha
+   * (SUBSTITUI o "Buscar keywords novas no Google Ads (N)" do painel); a SERP paga só com a confirmação. Nada é gravado.
+   */
+  async function processArticles(alvo: PlanSheetRow[]) {
     if (!brandId) return;
     const vivo = vivoAgora();
-    setError(null); setSummary(null);
-    const escolha = planSheetSerpSelection(alvo);
+    setError(null); setSummary(null); setPreview(null);
+    const escolha = planSheetFormationSelection(alvo, "processArticles");
     const linhas = new Map<string, PlanSheetResult>();
     for (const item of escolha.refused) linhas.set(item.keywordId, { tone: "warning", text: item.reason });
-    for (const item of escolha.known) linhas.set(item.keywordId, { tone: "neutral", text: item.reason });
-    if (!escolha.toPlan.length) { finish(vivo, linhas, { tone: "neutral", text: `Validar SERP: nada a coletar — ${escolha.known.length} já com as 4 lentes, ${escolha.refused.length} fora (sem volume e fora da principal de identidade). Nenhuma chamada paga.` }); return; }
-    const blocos: { keywordId: string; keyword: string }[][] = [];
-    for (let inicio = 0; inicio < escolha.toPlan.length; inicio += SERP_BLOCK) blocos.push(escolha.toPlan.slice(inicio, inicio + SERP_BLOCK).map(row => ({ keywordId: row.keywordId, keyword: row.keyword })));
-    const foraPorVolume = new Map<string, string>();
-    const semPlano = new Set<number>();
-    const scopeId = `plan-sheet:${[...new Set(escolha.toPlan.map(row => row.groupId ?? "sem-grupo"))].sort().join("+")}`;
-    const pedir = (bloco: { keywordId: string; keyword: string }[], extra: Record<string, unknown>) => postJson("/api/arquiteto/keyword-serp", { brandId, scopeId, territoryRef: null, keywords: bloco, onlyMeasuredVolume: true, ...extra });
-    startBusy("Lendo no cache o que já temos e o custo do que falta (grátis)", blocos.length, "bloco(s)");
-    try {
-      const resultado = await runPaidSerpBlocks<{ keywordId: string; keyword: string }[], { collected: number; reused: number; gaps: number }>({
-        label: PLAN_SHEET_ACTION_LABELS.validateSerp,
-        blocks: blocos,
-        itemIdsOf: bloco => bloco.map(item => item.keywordId),
-        plan: async (bloco, indice) => {
-          const answer = await pedir(bloco, { mode: "plan" });
-          const data = answer.body.data as { plan?: SerpPaidPlan; excludedByVolume?: { keywordId: string; reason: string }[] } | undefined;
-          for (const item of data?.excludedByVolume ?? []) foraPorVolume.set(item.keywordId, item.reason);
-          // O servidor conferiu o volume no banco e nenhuma tem: o bloco fica fora, nada a pagar.
-          if (answer.body.code === "KEYWORD_SERP_NO_VOLUME") { semPlano.add(indice); return ZERO_PLAN; }
-          if (!answer.ok || !answer.body.success || !data?.plan) throw new Error(answer.ok && answer.body.success ? "O servidor não devolveu o custo da SERP. Nada foi pago; tente de novo." : humanError(answer));
-          if (vivo()) setBusy(atual => atual ? { ...atual, done: (atual.done ?? 0) + 1 } : atual);
-          return data.plan;
-        },
-        ask: merged => new Promise<SerpPaidPlanChoice | null>(resolve => {
-          if (!vivo()) { resolve(null); return; }
-          const prevista: PreviewLine[] = [
-            ...escolha.toPlan.map(row => foraPorVolume.has(row.keywordId)
-              ? { keywordId: row.keywordId, keyword: row.keyword, kind: "refused" as const, text: foraPorVolume.get(row.keywordId)! }
-              : { keywordId: row.keywordId, keyword: row.keyword, kind: "go" as const, text: planSheetSerpPlanLine(row) }),
-            ...escolha.known.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, kind: "known" as const, text: item.reason })),
-            ...escolha.refused.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, kind: "refused" as const, text: item.reason })),
-          ];
-          setBusy(null);
-          setPreview({ action: "validateSerp", lines: prevista, plan: merged, resolve });
-        }),
-        onProgress: snapshot => { if (vivo()) setBusy(atual => ({ label: "Validando a SERP nas 4 lentes", startedAt: atual?.startedAt ?? agoraMs(), done: snapshot.done, total: snapshot.total, unit: "keyword(s)" })); },
-        execute: async (bloco, choice, contexto) => {
-          if (semPlano.has(contexto.blockIndex)) return { result: { collected: 0, reused: 0, gaps: 0 }, outcomes: bloco.map(item => ({ id: item.keywordId, status: "failed" as const, reason: foraPorVolume.get(item.keywordId) ?? "Sem volume no banco." })) };
-          const answer = await pedir(bloco, { mode: "execute", authorizedPaidQueries: choice.authorizedPaidQueries });
-          const data = answer.body.data as { gaps?: { keywordId: string; lens: string; reason: string }[]; collected?: number; reused?: number } | undefined;
-          if (!answer.ok || !answer.body.success) throw new Error(humanError(answer));
-          const lacunas = new Map<string, string>();
-          for (const gap of data?.gaps ?? []) lacunas.set(gap.keywordId, `${lacunas.has(gap.keywordId) ? `${lacunas.get(gap.keywordId)}; ` : ""}${gap.lens}: ${gap.reason}`);
-          return {
-            result: { collected: Number(data?.collected) || 0, reused: Number(data?.reused) || 0, gaps: lacunas.size },
-            outcomes: bloco.map(item => lacunas.has(item.keywordId) ? { id: item.keywordId, status: "failed" as const, reason: lacunas.get(item.keywordId)! } : { id: item.keywordId, status: "succeeded" as const }),
-          };
-        },
-      });
-      if (resultado.status === "cancelled") { finish(vivo, linhas, { tone: "neutral", text: "Validar SERP cancelado: nenhuma chamada foi paga." }); return; }
-      for (const row of escolha.toPlan) {
-        const falha = resultado.snapshot.failures.find(item => item.id === row.keywordId);
-        linhas.set(row.keywordId, falha ? { tone: "warning", text: `SERP incompleta: ${falha.reason}` } : { tone: "success", text: "SERP coletada nas 4 lentes (cache primeiro) e relida." });
+    if (escolha.refused.length) setProcessedRefused(atual => new Set([...atual, ...escolha.refused.map(item => item.keywordId)]));
+    if (!escolha.byGroup.size) { finish(vivo, linhas, { tone: "warning", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: nenhuma linha pode ser processada agora (o motivo está em cada uma). Nada foi pago nem gravado.` }); return; }
+    startBusy("Lendo o plano, os DNAs e a SERP em cache e buscando o reforço no Google Ads (grátis, cota)", escolha.byGroup.size, "cor(es)");
+    const runs: FormationRun[] = [];
+    for (const [indice, [groupId, doGrupo]] of [...escolha.byGroup].entries()) {
+      try {
+        const run = await improvement({ brandId, action: "prepare", group: groupId, targetIds: doGrupo.map(row => row.keywordId), origin: "plan_sheet", discover: true });
+        runs.push({ groupId, run, readyIds: [], rows: doGrupo });
+      } catch (e) {
+        for (const row of doGrupo) linhas.set(row.keywordId, { tone: "warning", text: e instanceof Error ? e.message : "A leitura não foi confirmada." });
       }
-      const somas = resultado.results.reduce((total, item) => ({ collected: total.collected + item.result.collected, reused: total.reused + item.result.reused }), { collected: 0, reused: 0 });
-      finish(vivo, linhas, { tone: resultado.snapshot.failed ? "warning" : "success", text: `Validar SERP: ${somas.collected} lente(s) paga(s) agora, ${somas.reused} do cache; ${resultado.snapshot.failed} keyword(s) com lacuna. A coluna SERP foi relida do cache.` });
-      if (vivo()) setSerpReload(valor => valor + 1);
-    } catch (e) {
-      if (vivo()) { setBusy(null); setError(e instanceof Error ? e.message : "Falha ao validar a SERP."); }
+      if (vivo()) setBusy(atual => atual ? { ...atual, done: indice + 1 } : atual);
     }
+    if (!vivo()) return;
+    if (!runs.length) { finish(vivo, linhas, { tone: "warning", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: a leitura não foi confirmada (o motivo está em cada linha). Nada foi pago nem gravado.` }); return; }
+    const consultas = runs.reduce((soma, item) => soma + pagasDe(item.run), 0);
+    if (consultas > 0) {
+      const teto = runs.reduce((soma, item) => soma + (pagasDe(item.run) > 0 ? item.run.costs.estimatedCostUsd.max : 0), 0);
+      setResults(atual => new Map([...atual, ...linhas]));
+      setBusy(null);
+      setPreview({ action: "processArticles", lines: runs.flatMap(linhasDaCopia), runs, paidQueries: consultas, costMaxUsd: teto });
+      return;
+    }
+    finishProcess(vivo, runs, linhas, 0);
+  }
+
+  /** A coleta paga autorizada na prévia (cache primeiro; o servidor recusa pagar além do autorizado), uma execução por vez. */
+  async function collectProcess(previa: Extract<Preview, { action: "processArticles" }>) {
+    if (!brandId) return;
+    const vivo = vivoAgora();
+    setPreview(null); setError(null);
+    startBusy("Coletando a SERP no DataForSEO (pago, com o seu aceite)", previa.runs.filter(item => pagasDe(item.run) > 0).length, "cor(es)");
+    const prontos: FormationRun[] = [];
+    let pagas = 0, feitas = 0;
+    try {
+      for (const item of previa.runs) {
+        if (pagasDe(item.run) === 0) { prontos.push(item); continue; }
+        let atual = await improvement({ brandId, action: "collect", runId: item.run.runId, decisionHash: item.run.decisionHash, authorizedCostUsd: item.run.costs.estimatedCostUsd.max });
+        for (let volta = 0; vivo() && atual.state === "collecting" && volta < COLLECT_TURNS_LIMIT; volta += 1) {
+          try { atual = await improvement({ brandId, action: "collect", runId: atual.runId, decisionHash: atual.decisionHash }); }
+          catch (e) {
+            // Tempo esgotado numa volta: o andamento está salvo no servidor; lê e segue.
+            if (!(e instanceof Error && /demorou demais/.test(e.message))) throw e;
+            atual = await improvement({ brandId, action: "status", runId: atual.runId });
+          }
+        }
+        if (atual.state === "collecting") throw new Error(`A coleta da SERP não terminou nesta tela. O que já foi pago está no cache e não é cobrado de novo: toque em “${PLAN_SHEET_ACTION_LABELS.processArticles}” para continuar.`);
+        pagas += pagasDe(item.run);
+        prontos.push({ ...item, run: atual });
+        feitas += 1;
+        if (vivo()) setBusy(andamento => andamento ? { ...andamento, done: feitas } : andamento);
+      }
+      finishProcess(vivo, prontos, new Map(), pagas);
+    } catch (e) {
+      if (vivo()) { setBusy(null); setError(e instanceof Error ? e.message : "A coleta da SERP não foi confirmada."); }
+    }
+  }
+
+  /** A cópia de trabalho de cada linha e a frase do Processar; o passo 1 fica feito para as linhas sem SERP pendente. */
+  function finishProcess(vivo: () => boolean, runs: FormationRun[], linhas: Map<string, PlanSheetResult>, pagas: number) {
+    if (!vivo()) return;
+    let comReforco = 0, lidos = 0;
+    for (const item of runs) {
+      for (const line of planSheetWorkingCopyLines(item.run, item.rows ?? [])) { linhas.set(line.keywordId, { tone: line.tone, text: line.text }); lidos += 1; }
+      comReforco += item.run.proposals.filter(proposal => proposal.memberIds.some(id => id !== proposal.principalId) && (proposal.status === "ready" || proposal.needsValidation)).length;
+    }
+    setProcessed(atual => { const proximo = new Map(atual); for (const item of runs) proximo.set(item.groupId, item.run); return proximo; });
+    const faltaSerp = runs.reduce((soma, item) => soma + item.run.proposals.filter(proposal => proposal.needsValidation).length, 0);
+    finish(vivo, linhas, { tone: faltaSerp ? "warning" : "success", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: ${lidos} artigo(s) lido(s), reforço proposto para ${comReforco}; ${pagas ? `SERP paga agora: ${pagas} consulta(s)` : "nada pago"}.${faltaSerp ? ` ${faltaSerp} ainda sem a SERP da principal.` : ""} Nada foi gravado: confira cada linha e use “${PLAN_SHEET_ACTION_LABELS.concludeFormation}”.` });
+    if (pagas && vivo()) setSerpReload(valor => valor + 1);
   }
 
   /* ================ CONCLUIR FORMAÇÃO / TROCAR PRINCIPAL (prévia) ================ */
@@ -382,17 +460,22 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     const linhas: PreviewLine[] = [...extraRefused, ...escolha.refused.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, kind: "refused" as const, text: item.reason }))];
     const runs: FormationRun[] = [];
     startBusy(action === "swapPrincipal" ? "Preparando a prévia da troca (grátis, só leitura)" : "Preparando a prévia da formação (grátis, só leitura)", escolha.byGroup.size, "cor(es)");
+    const doDominio: PlanSheetPreviewLine[] = [];
     for (const [indice, [groupId, linhasDoGrupo]] of [...escolha.byGroup].entries()) {
       const feitas = indice + 1;
       try {
         const escolhas = picks ? Object.fromEntries(linhasDoGrupo.filter(row => picks[row.keywordId]).map(row => [row.keywordId, picks[row.keywordId]])) : null;
-        const run = await improvement({ brandId, action: "prepare", group: groupId, targetIds: linhasDoGrupo.map(row => row.keywordId), origin: "plan_sheet", ...(escolhas && Object.keys(escolhas).length ? { principalChoice: escolhas } : {}) });
+        /*
+         * 2026-10-17 (noite) · o Concluir grava a cópia de trabalho do "Processar artigos" (reforço e SERP já lidos);
+         * só sem ela (ou sem estas linhas nela) prepara de novo, grátis, como antes.
+         */
+        const processado = action === "concludeFormation" && !escolhas ? processed.get(groupId) : undefined;
+        const cobre = processado && linhasDoGrupo.every(row => processado.proposals.some(proposal => proposal.targetId === row.keywordId) || processado.refusedTargets?.some(item => item.id === row.keywordId));
+        const run = cobre ? processado! : await improvement({ brandId, action: "prepare", group: groupId, targetIds: linhasDoGrupo.map(row => row.keywordId), origin: "plan_sheet", ...(escolhas && Object.keys(escolhas).length ? { principalChoice: escolhas } : {}) });
         const previa = planSheetPreviewLines(run, linhasDoGrupo);
-        for (const item of previa) {
-          const kind: LineKind = item.kind === "will_write" ? "go" : item.kind === "needs_minerador" ? "minerador" : item.kind === "needs_serp" ? "serp" : item.kind === "adequate" ? "adequate" : "refused";
-          linhas.push({ keywordId: item.keywordId, keyword: nomeDe(item.keywordId), kind, text: item.sentence });
-        }
-        runs.push({ groupId, run, readyIds: previa.filter(item => item.kind === "will_write").map(item => item.keywordId) });
+        doDominio.push(...previa);
+        for (const item of previa) linhas.push({ keywordId: item.keywordId, keyword: nomeDe(item.keywordId), kind: KIND_OF[item.kind], text: item.sentence });
+        runs.push({ groupId, run, readyIds: previa.filter(item => item.kind === "will_write").map(item => item.keywordId), rows: linhasDoGrupo });
       } catch (e) {
         for (const row of linhasDoGrupo) linhas.push({ keywordId: row.keywordId, keyword: row.keyword, kind: "refused", text: e instanceof Error ? e.message : "A prévia não foi confirmada." });
       }
@@ -400,7 +483,10 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     }
     if (!vivo()) return;
     setBusy(null);
-    setPreview({ action, lines: linhas, runs });
+    // 2026-10-17 (noite) · o checklist da finalização (principal · reforço · SERP · plano · Silo), lido da própria prévia.
+    const grupos = new Set(runs.map(item => item.groupId));
+    const checklist = action === "concludeFormation" ? planSheetConclusionChecklist({ lines: doDominio, rows: alvo, proposals: runs.flatMap(item => item.run.proposals), groupRows: rows.filter(row => row.groupId && grupos.has(row.groupId)) }) : undefined;
+    setPreview({ action, lines: linhas, runs, ...(checklist ? { checklist } : {}) });
   }
 
   /* ================ CONCLUIR FORMAÇÃO / TROCAR PRINCIPAL (gravar) ================ */
@@ -433,14 +519,16 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     return current;
   }
 
-  async function confirmFormation(action: "concludeFormation" | "swapPrincipal", runs: FormationRun[], previa: PreviewLine[]) {
+  async function confirmFormation(action: "concludeFormation" | "swapPrincipal", runs: FormationRun[], previa: PreviewLine[], checklist?: readonly PlanConclusionCheck[]) {
     const vivo = vivoAgora();
     setPreview(null); setError(null);
     const total = runs.reduce((soma, item) => soma + item.readyIds.length, 0);
     const linhas = new Map<string, PlanSheetResult>();
     for (const item of previa) if (item.kind !== "go") linhas.set(item.keywordId, { tone: item.kind === "adequate" ? "neutral" : "warning", text: `Não gravado: ${item.text}` });
-    if (!total) { finish(vivo, linhas, { tone: "warning", text: "Nada a gravar: nenhuma linha ficou pronta na prévia. Veja o motivo de cada uma." }); return; }
-    startBusy(action === "swapPrincipal" ? "Gravando a troca de principal (nova versão do ArticleDNA)" : "Concluindo a formação (ArticleDNA, composição e parecer)", total, "artigo(s)");
+    // 2026-10-17 (noite) · nada a gravar mas o Silo do plano pronto (todos formados): a confirmação só fecha o Silo.
+    const soOSilo = !total && action === "concludeFormation" && checklist?.find(item => item.key === "silo")?.ok === true;
+    if (!total && !soOSilo) { finish(vivo, linhas, { tone: "warning", text: "Nada a gravar: nenhuma linha ficou pronta na prévia. Veja o motivo de cada uma." }); return; }
+    startBusy(action === "swapPrincipal" ? "Gravando a troca de principal (nova versão do ArticleDNA)" : soOSilo ? "Fechando o Silo do plano (SiloDNA e SiloPage)" : "Concluindo a formação (keywords novas, ArticleDNA e o Silo do plano)", total || null, "artigo(s)");
     let antes = 0, gravados = 0, falhas = 0, novasNaConfirmacao = false;
     try {
       for (const item of runs) {
@@ -456,7 +544,19 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
           linhas.set(id, desfecho);
         }
       }
-      finish(vivo, linhas, { tone: falhas ? "warning" : "success", text: `${action === "swapPrincipal" ? PLAN_SHEET_ACTION_LABELS.swapPrincipal : PLAN_SHEET_ACTION_LABELS.concludeFormation}: ${gravados} gravado(s) e relido(s)${falhas ? `, ${falhas} com falha` : ""}; ${previa.filter(line => line.kind !== "go").length} fora desta confirmação.${novasNaConfirmacao ? " As keywords novas da prévia seguiram pelos núcleos do Minerador (import, Lógica, Volume, aprovação e envio) nos artigos gravados; as que já estavam lá não mudaram." : " Nada foi gravado no Minerador."}` });
+      // A cópia de trabalho gravada saiu da fila: o passo 2 está feito para estas linhas.
+      const grupos = runs.map(item => item.groupId);
+      if (action === "concludeFormation" && vivo()) setProcessed(atual => { const proximo = new Map(atual); for (const grupo of grupos) proximo.delete(grupo); return proximo; });
+      // 2026-10-17 (noite) · o Silo do plano fecha no MESMO ato (SDD da linha única, F2), pelo fechamento canônico de sempre.
+      let silo: PlanSheetResult | null = null;
+      if (action === "concludeFormation" && props.onConcluded && (gravados > 0 || soOSilo) && vivo()) {
+        if (vivo()) setBusy(atual => atual ? { ...atual, label: "Fechando o Silo do plano (SiloDNA e SiloPage) e ligando o grupo a ele" } : atual);
+        try { silo = await props.onConcluded(grupos); }
+        catch (e) { silo = { tone: "warning", text: `O Silo do plano não fechou agora: ${e instanceof Error ? e.message : "erro sem resposta"}. Os ArticleDNA gravados continuam válidos; “${PLAN_SHEET_ACTION_LABELS.concludeFormation}” tenta de novo.` }; }
+      }
+      const artigos = soOSilo ? "nenhum artigo novo a gravar" : `${gravados} gravado(s) e relido(s)${falhas ? `, ${falhas} com falha` : ""}; ${previa.filter(line => line.kind !== "go").length} fora desta confirmação`;
+      const minerador = soOSilo ? "" : novasNaConfirmacao ? " As keywords novas da prévia seguiram pelos núcleos do Minerador (import, Lógica, Volume, aprovação e envio) nos artigos gravados; as que já estavam lá não mudaram." : " Nada foi gravado no Minerador.";
+      finish(vivo, linhas, { tone: falhas || silo?.tone === "warning" ? "warning" : "success", text: `${action === "swapPrincipal" ? PLAN_SHEET_ACTION_LABELS.swapPrincipal : PLAN_SHEET_ACTION_LABELS.concludeFormation}: ${artigos}.${minerador}${silo ? ` ${silo.text}` : ""}` });
       if (vivo()) onApplied();
     } catch (e) {
       if (vivo()) { setBusy(null); setResults(atual => new Map([...atual, ...linhas])); setError(e instanceof Error ? e.message : "A gravação não foi confirmada."); onApplied(); }
@@ -499,25 +599,29 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
 
   function start(action: PlanSheetAction, alvo: PlanSheetRow[]) {
     if (!alvo.length || ocupado) return;
-    if (action === "validateSerp") void validateSerp(alvo);
+    if (action === "processArticles") void processArticles(alvo);
     else if (action === "swapPrincipal") chooseSwap(alvo);
     else void prepareFormation(alvo, "concludeFormation");
   }
 
   function cancelPreview() {
-    if (preview?.action === "validateSerp") preview.resolve(null);
+    // 2026-10-17 (noite) · cancelar a coleta paga do Processar: a leitura grátis fica (o reforço proposto, na linha); nada pago.
+    if (preview?.action === "processArticles") {
+      const linhas = new Map<string, PlanSheetResult>();
+      for (const item of preview.runs) for (const line of planSheetWorkingCopyLines(item.run, item.rows ?? [])) linhas.set(line.keywordId, { tone: line.tone, text: line.text });
+      setResults(atual => new Map([...atual, ...linhas]));
+      setProcessed(atual => { const proximo = new Map(atual); for (const item of preview.runs) proximo.set(item.groupId, item.run); return proximo; });
+      setSummary({ tone: "neutral", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: a coleta paga foi cancelada — nada foi pago nem gravado. O reforço proposto está em cada linha; sem a SERP da principal, “${PLAN_SHEET_ACTION_LABELS.concludeFormation}” espera.` });
+    }
     setPreview(null);
   }
 
   /** O botão principal da prévia aberta: autorizar a SERP, ou gravar o que ficou pronto. */
   function confirmPreview() {
     if (!preview) return;
-    if (preview.action === "validateSerp") {
-      const resolver = preview.resolve;
-      setPreview(null);
-      resolver({ authorizedPaidQueries: preview.plan.paidQueries, payMissingExtraLenses: true, recollectStaleLenses: false });
-    } else if (preview.action === "concludeFormation" || preview.action === "swapPrincipal") {
-      void confirmFormation(preview.action, preview.runs, preview.lines);
+    if (preview.action === "processArticles") void collectProcess(preview);
+    else if (preview.action === "concludeFormation" || preview.action === "swapPrincipal") {
+      void confirmFormation(preview.action, preview.runs, preview.lines, preview.checklist);
     }
   }
 
@@ -532,7 +636,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   return {
     brandId, rows, rowByKeywordId, selected, setSelected, toggleSelected, results, ocupado, busy, now, preview, setPreview,
     error, setError, summary, setSummary, resumable, withdrawing, setWithdrawing, sugestoesHref, corDoRecorte, revision,
-    start, cancelPreview, prepareSwapPreview: (alvo, picks, refused) => { void prepareFormation(alvo, "swapPrincipal", picks, refused); },
+    start, stepOf, cancelPreview, prepareSwapPreview: (alvo, picks, refused) => { void prepareFormation(alvo, "swapPrincipal", picks, refused); },
     confirmPreview, resume: run => { void resume(run); }, onApplied,
   };
 }
@@ -560,7 +664,7 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
   if (!brandId) return null;
   if (!preview && !busy && !error && !summary && !resumable && !(withdrawing && withdrawing.siloRef)) return null;
   const perigo = dangerButtonClassName ?? buttonClassName;
-  const tituloDaPrevia = preview?.action === "validateSerp" ? `${PLAN_SHEET_ACTION_LABELS.validateSerp} · custo antes`
+  const tituloDaPrevia = preview?.action === "processArticles" ? `${PLAN_SHEET_ACTION_LABELS.processArticles} · custo antes`
     : preview?.action === "chooseSwap" ? `${PLAN_SHEET_ACTION_LABELS.swapPrincipal} · escolha a nova principal`
     : preview?.action === "swapPrincipal" ? `${PLAN_SHEET_ACTION_LABELS.swapPrincipal} · prévia`
     : preview ? `${PLAN_SHEET_ACTION_LABELS.concludeFormation} · prévia` : "";
@@ -587,30 +691,24 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
       <button type="button" className={buttonClassName} onClick={() => sheet.resume(resumable)}>Continuar a gravação</button>
     </div>}
 
-    {busy && <OperationProgress label={busy.label} startedAt={busy.startedAt} now={now} done={busy.done} total={busy.total} unit={busy.unit} note="nada é gravado no Minerador" testId="architect-plan-sheet-progress" />}
+    {busy && <OperationProgress label={busy.label} startedAt={busy.startedAt} now={now} done={busy.done} total={busy.total} unit={busy.unit} note="o andamento fica guardado no servidor" testId="architect-plan-sheet-progress" />}
     {error && <p role="alert" className="mt-2 text-warning">{error}</p>}
-    {summary && !busy && <div className="mt-2 flex flex-wrap items-center gap-2">
-      <p role="status" className={TONE_CLASS[summary.tone]} data-testid="architect-plan-sheet-summary">{summary.text}</p>
-      <button type="button" className={buttonClassName} onClick={() => sheet.setSummary(null)} data-testid="architect-plan-sheet-summary-close">Fechar</button>
-    </div>}
+    {/* 2026-10-17 (noite) · sem botão "Fechar" no resumo (pedido do dono: só os 3 botões na área): a próxima ação o substitui. */}
+    {summary && !busy && <p role="status" className={`mt-2 ${TONE_CLASS[summary.tone]}`} data-testid="architect-plan-sheet-summary">{summary.text}</p>}
 
     {preview && <div ref={previewRef} className="mt-3 rounded-md border border-divider bg-surface-subtle p-3" role="region" aria-label={tituloDaPrevia} data-testid="architect-plan-sheet-preview" data-action={preview.action}>
       <h4 className="font-semibold text-foreground">{tituloDaPrevia}</h4>
-      {preview.action === "validateSerp" && (() => {
-        const frases = describeSerpPaidPlan(preview.plan);
-        return <div className="mt-1 grid gap-0.5">
-          {frases.cacheWarning && <p className="text-warning">{frases.cacheWarning}</p>}
-          <p className="text-foreground" data-testid="architect-plan-sheet-serp-cost">{frases.headline}{frases.cost ? ` ${frases.cost}` : ""}</p>
-          {frases.dates && <p className="text-text-muted">{frases.dates}</p>}
-          <p className="text-text-muted">O que já está no cache não é pago de novo. O servidor confere no banco o volume de cada keyword: sem volume, nada é coletado — exceto a principal de identidade do artigo, que o servidor também confere.</p>
-        </div>;
-      })()}
-      {preview.action === "chooseSwap" && <p className="mt-1 text-text-muted">Só artigo do plano com a trava Livre. As candidatas são a keyword do Assunto e as sustentações com volume medido da lista dele, das que têm mais lentes de SERP e mais volume. A prévia (grátis) mostra o que muda; gravar é a sua confirmação e gera uma nova versão.</p>}
+      {/* 2026-10-17 (noite) · o custo antes de pagar: a ÚNICA confirmação do Processar (o reforço, grátis, já foi buscado). */}
+      {preview.action === "processArticles" && <p className="mt-1 text-foreground" data-testid="architect-plan-sheet-serp-cost">SERP no DataForSEO: {preview.paidQueries} consulta(s), até {usd(preview.costMaxUsd)} — a primeira coleta da principal que falta (inclusive a principal de identidade, sem buscas no Google Ads). O que está no cache não é pago; nada é gravado.</p>}
+      {preview.action === "chooseSwap" && <p className="mt-1 text-text-muted">Candidatas: a keyword do Assunto e as sustentações com volume da lista dele. Gravar gera uma nova versão.</p>}
       {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && (() => {
         // 2026-10-17 · as keywords NOVAS das linhas "vai gravar", por artigo, com volume e fonte: entram nesta confirmação.
         const novas = preview.runs.map(item => improvementNewKeywordsPreview(item.run, item.readyIds)).filter(item => item.total > 0);
         return <>
-          <p className="mt-1 text-text-muted">{novas.length ? "Grava o ArticleDNA, a composição e o parecer, pelo mesmo núcleo da formação, e incorpora as keywords novas listadas abaixo; as que já estão no Minerador não mudam." : "Grava só o ArticleDNA, a composição e o parecer, pelo mesmo núcleo da formação; nada é gravado no Minerador."} Uma confirmação vale para as linhas “vai gravar”; as outras ficam como estão, com o motivo.</p>
+          {/* 2026-10-17 (noite) · "confirmar e finalizar": o checklist do que a confirmação confere e grava (dono: "fazer checking e validar todo o processo"). */}
+          {preview.action === "concludeFormation" && preview.checklist && <ul className="mt-1 grid gap-0.5" data-testid="architect-plan-sheet-checklist">
+            {preview.checklist.map(item => <li key={item.key} className={item.ok ? "text-foreground" : "text-warning"} data-check={item.key} data-ok={item.ok ? "true" : "false"}><span aria-hidden="true">{item.ok ? "✓" : "✗"}</span> {item.label} — {item.detail}</li>)}
+          </ul>}
           {novas.length > 0 && <div className="mt-2 rounded-md border border-divider bg-surface p-2" data-testid="architect-plan-sheet-new-keywords">
             {novas.map(item => <div key={item.lines.join("|")}><p className="font-medium text-foreground">{item.approvalText}</p><ul className="mt-1 list-disc pl-5 text-foreground">{item.lines.map(line => <li key={line}>{line}</li>)}</ul></div>)}
           </div>}
@@ -639,11 +737,14 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
 
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={buttonClassName} onClick={sheet.cancelPreview}>Cancelar</button>
-        {preview.action === "validateSerp" && <button type="button" className={primaryButtonClassName} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{preview.plan.paidQueries > 0 ? `Autorizar ${preview.plan.paidQueries} consulta(s) e validar` : "Ler do cache (sem custo)"}</button>}
+        {preview.action === "processArticles" && <button type="button" className={primaryButtonClassName} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{`Autorizar ${preview.paidQueries} consulta(s) e coletar (até ${usd(preview.costMaxUsd)})`}</button>}
         {preview.action === "chooseSwap" && <button type="button" className={primaryButtonClassName} disabled={!preview.rows.length} data-testid="architect-plan-sheet-swap-preview" onClick={() => sheet.prepareSwapPreview(preview.rows, preview.picks, preview.refused)}>Ver prévia da troca (grátis)</button>}
         {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && (() => {
           const prontas = preview.runs.reduce((soma, item) => soma + item.readyIds.length, 0);
-          return <button type="button" className={primaryButtonClassName} disabled={!prontas} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{preview.action === "swapPrincipal" ? "Confirmar a troca" : "Confirmar e gravar"}</button>;
+          const novas = preview.runs.reduce((soma, item) => soma + improvementNewKeywordsPreview(item.run, item.readyIds).total, 0);
+          const soOSilo = !prontas && preview.action === "concludeFormation" && preview.checklist?.find(item => item.key === "silo")?.ok === true;
+          const rotulo = preview.action === "swapPrincipal" ? "Confirmar a troca" : soOSilo ? "Confirmar e fechar o Silo" : novas ? `Confirmar e gravar (com ${novas} keyword(s) nova(s))` : "Confirmar e gravar";
+          return <button type="button" className={primaryButtonClassName} disabled={!prontas && !soOSilo} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{rotulo}</button>;
         })()}
       </div>
     </div>}

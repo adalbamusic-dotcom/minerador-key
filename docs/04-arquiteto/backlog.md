@@ -1,5 +1,23 @@
 - [ ] **Situações resolvidas (2026-10-17)** · [`situacoes-resolvidas.md`](situacoes-resolvidas.md) é leitura obrigatória antes de mexer no Arquiteto: transformar em cenário-ouro as 12 situações da lista (a), tirar da lista (b) cada item quando a fase dele for entregue e registrar ali, com o cenário que a guarda, toda situação nova resolvida.
-- [ ] **APROVADA em 2026-10-16 (F0 entregue em 16/10; F1 aguarda a aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 aprovadas com as recomendações.
+- [ ] **APROVADA em 2026-10-16 (F0 entregue em 16/10; F2 entregue em 17/10, noite, a pedido do dono no amarelo, com desvio declarado de D1 — §15.7; F1 aguarda a aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 aprovadas com as recomendações.
+
+## Os 3 botões em sequência — Processar, Concluir e o refazedor (F2 da linha única) — Arquiteto — 2026-10-17 (noite)
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] Só 3 botões de ação na aba Artigos, sequenciais (passo atual destacado; o seguinte só com o anterior feito, o porquê no `title`); "Cancelar"/"Confirmar" só na prévia aberta.
+- [x] Processar das linhas do plano = leitura + reforço (Google Ads grátis) + UMA confirmação do custo da SERP que falta; cópia de trabalho por linha; nada gravado.
+- [x] Concluir = checklist (principal · reforço · SERP · plano · Silo) + UMA confirmação: as novas pelos núcleos do Minerador, o ArticleDNA de cada linha (já formada incluída) e o Silo do plano fechado e ligado ao grupo no mesmo ato.
+- [x] A Livre de identidade sem candidata forma com a principal; "Falta: nada" só quando nada falta.
+- [x] "Melhorar publicados…" = o refazedor (abrir lê sozinho; Cancelar/Confirmar; o motivo do refazer dentro da prévia).
+- [x] "Ações do Assunto" fora da barra (prender/soltar no painel do artigo); textos sem ação fora da tela (nada apagado do banco).
+- [x] Cenários: amarelo ("OS 3 BOTÕES pela barra", "a Livre de IDENTIDADE sem nenhuma candidata…"), C2/C3 com a regra nova, `arquiteto-tres-botoes-dom-2026-10-17`, guarda da forma da linha; docs (spec §43, SDD §11.3/§15.7, situações resolvidas, catálogo).
+- [ ] **Dono:** homologar no amarelo — marcar as 8 linhas → "Processar artigos" (custo da SERP antes; até US$ 0,056 se as 4 principais de identidade não estiverem no cache) → "Concluir formação" (checklist todo ✓, uma confirmação) → conferir 4 v2 + 4 v1, o reforço em cada artigo e o Silo do plano fechado com o Pilar; depois "Melhorar publicados…".
+- [ ] **Dono:** decidir o desvio de D1 (a linha do plano gravada pelo `apply` da melhoria, não por `confirmArticleFormation`) — SDD §15.7.
+- [ ] **Dono:** Q4 ("Formar artigos automaticamente" no Assunto sem plano: tirar ou deixar) e Q5 (nome do 3º botão; proposta "Refazer e melhorar…").
+- [ ] O fechamento do Silo do plano roda no navegador depois da releitura: levar para o gravador do par no servidor na F6 (cenário de ponta a ponta no servidor).
+- [ ] "Continuar a gravação" (linhas do plano) aparece só quando uma gravação foi interrompida; avaliar se continua sozinha, como no refazedor (F5), sem botão.
+- [ ] `planSheetSerpSelection` e `planSheetSerpPlanLine` (`lib/arquiteto/plan-article-sheet.ts`, a seleção do antigo "Validar SERP") ficaram sem chamador na tela: só os testes C17 e `arquiteto-planilha-primeiro-2026-10-14` os usam (eles já seguem a régua única `serpCollectionAllowed`). Tirar junto com a passagem do C17 para o caminho do Processar (§0.5).
 
 ## A régua única da coleta da SERP (sem volume, só a principal de identidade) — Arquiteto — 2026-10-17 (tarde)
 
@@ -23,7 +41,7 @@ Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
 - [x] Cenário-ouro amarelo, C6, C9, C9b, C10 e os testes do motor atualizados; spec §41, SDD §15.5, catálogo e situações resolvidas (T12, X14) com o SUBSTITUÍDO.
 - [ ] **Dono:** homologar no amarelo — prévia: Pilar com "como escolher plano de internet residencial" + as 5 variantes; os 3 Suportes Livres com a principal e o reforço da busca nova; a coleta paga (16 consultas, até US$ 0,056) só das secundárias de mais volume (**SUBSTITUÍDO em 17/10, tarde:** só das principais de identidade; ver a entrada acima).
 - [x] **Dúvida para o dono (Q2 de `situacoes-resolvidas.md`, agora mais urgente):** "Processar artigos" (rota da SERP do artigo) ainda consulta e paga a principal sem volume quando ela falta no cache; a melhoria já não paga. Tirar a principal sem volume do plano pago de "Processar artigos" espera a decisão. **Decidida em 17/10 (tarde):** só a principal de identidade sem volume é paga (régua única, entrada acima); a fora da identidade sai do plano pago, com o motivo.
-- [ ] Tela: o texto da linha do plano "Livre sem número de buscas → use “Procurar outra principal”" (`planRowWithoutVolumeSentence`) continua oferecendo a troca; avaliar dizer "principal de identidade: fica" quando for o caso (só texto, sem mudar função).
+- [x] Tela: o texto da linha do plano "Livre sem número de buscas → use “Procurar outra principal”" (`planRowWithoutVolumeSentence`) continua oferecendo a troca; avaliar dizer "principal de identidade: fica" quando for o caso (só texto, sem mudar função). **Feito em 17/10 (noite):** `PLAN_IDENTITY_NO_VOLUME_SENTENCE` na linha da principal de identidade; "Procurar outra principal" continua na linha (decisão do dono).
 
 ## Sem canibalização no Silo, a keyword nova nas telas e na diferenciação — Arquiteto — 2026-10-17
 

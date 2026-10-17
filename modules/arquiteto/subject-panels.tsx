@@ -102,8 +102,11 @@ export type SubjectAnchorView = {
 
 export type SubjectSiloSuggestionView = { ref: string; label: string; reason: string };
 
-/** O rótulo do seletor do Assunto na barra (as ações do Assunto, sem filtro). */
-export const SUBJECT_ACTIONS_LABEL = "Ações do Assunto";
+/**
+ * O rótulo do seletor do Assunto (as ações do Assunto, sem filtro). 2026-10-17 (noite) · SUBSTITUÍDO "Ações do
+ * Assunto" (o dono: "não sei o que é Ações do Assunto"): o seletor saiu da barra e mora no painel do artigo aberto.
+ */
+export const SUBJECT_ACTIONS_LABEL = "Assunto (prender ou soltar)";
 
 /**
  * 2026-10-16 (noite) · AS AÇÕES DO ASSUNTO NA BARRA DE SEMPRE. Pedido do dono,
@@ -114,6 +117,12 @@ export const SUBJECT_ACTIONS_LABEL = "Ações do Assunto";
  * Formar artigos automaticamente, Soltar Assunto e Confirmar Assunto do Silo —
  * ficam na barra: escolhe-se o Assunto e as ações dele aparecem logo abaixo,
  * pelos mesmos handlers de antes. Nenhuma função saiu.
+ *
+ * 2026-10-17 (noite) · SUBSTITUÍDO "ficam na barra" (dono: "3 botões já é
+ * suficiente"; "não sei o que é Ações do Assunto"): o controle mora no painel do
+ * artigo aberto (a linha expandida da tabela), com os MESMOS handlers. "Formar
+ * artigos automaticamente" aparece só no Assunto sem plano (`onOpenSupport`
+ * nulo no Assunto com plano, onde é duplicata de Processar + Concluir).
  */
 export function SubjectActionsControl({
   entries,
@@ -140,7 +149,8 @@ export function SubjectActionsControl({
   controlClassName: string;
   onSelect: (keywordId: string | null) => void;
   onOpenAttach: () => void;
-  onOpenSupport: () => void;
+  /** 2026-10-17 (noite) · `null` no Assunto com plano: "Formar artigos automaticamente" lá é duplicata de Processar + Concluir. */
+  onOpenSupport: (() => void) | null;
   onDetach: (anchor: SubjectAnchorView) => void;
   onConfirmSiloSuggestion: (ref: string) => void;
 }) {
@@ -154,7 +164,7 @@ export function SubjectActionsControl({
           value={selected?.keywordId ?? ""}
           onChange={event => onSelect(event.target.value || null)}
           className={controlClassName}
-          title="Escolha o Assunto para prender, formar automaticamente ou soltar. Não filtra a tabela (o filtro é a etiqueta da cor)."
+          title="Escolha o Assunto para prender ou soltar. Não filtra a tabela (o filtro é a etiqueta da cor)."
           data-testid="architect-subject-actions-select"
         >
           <option value="">Escolha…</option>
@@ -222,9 +232,9 @@ export function SubjectActionsControl({
             <button type="button" disabled={busy || !selected.attachable} onClick={onOpenAttach} className={primaryButtonClassName} data-testid="architect-subject-attach-open">
               {SUBJECT_ATTACH_ACTION_LABEL}
             </button>
-            <button type="button" disabled={busy || !selected.attachable} onClick={onOpenSupport} className={buttonClassName} data-testid="architect-subject-support-open">
+            {onOpenSupport && <button type="button" disabled={busy || !selected.attachable} onClick={onOpenSupport} className={buttonClassName} data-testid="architect-subject-support-open">
               Formar artigos automaticamente
-            </button>
+            </button>}
           </div>
           <p className="text-sm leading-6 text-text-muted" data-testid="architect-subject-serp-hint">{SUBJECT_PHRASE_SERP_HINT}</p>
         </div>

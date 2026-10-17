@@ -332,10 +332,14 @@ test("3 · a análise antiga da melhoria (outro recorte, ou anterior à mudança
   assert.match(humano, /^Isto já foi tentado com os mesmos insumos e deu a mesma recusa; nada foi pago de novo\. A mesma recusa aconteceu em 14\/10\/2026/);
   assert.equal(humanizeOperationMessage("Etapa não confirmada."), "Etapa não confirmada.");
   assert.doesNotMatch(humanizeOperationMessage("CODIGO_DESCONHECIDO"), /CODIGO_DESCONHECIDO/);
+  /*
+   * 2026-10-17 (noite) · SUBSTITUÍDO o "recolhida + Retomar esta análise" (dono: "tem 7 botões totalmente inúteis"): o
+   * refazedor nunca mostra uma análise antiga como a de agora porque ABRIR = LER DE NOVO (grátis; o servidor
+   * reaproveita o que já leu e pagou). Só a coleta ou a gravação já autorizadas continuam sozinhas.
+   */
   const painel = ler("modules/arquiteto/article-improvement-panel.tsx");
-  assert.match(painel, /const run = previousRun \? null : runState;/);
-  assert.match(painel, /data-testid="architect-improvement-previous"/);
-  assert.match(painel, /Retomar esta análise/);
+  assert.doesNotMatch(painel, /architect-improvement-previous|Retomar esta análise|previousRun/);
+  assert.match(painel, /if \(restored && restored\.origin !== "plan_sheet" && \(restored\.state === "collecting" \|\| \(restored\.state === "applying" && restored\.acceptedIds\?\.length\)\)\) \{/);
+  assert.match(painel, /void execute\("prepare", recorte, null\);/);
   assert.match(painel, /setError\(e instanceof Error \? humanizeOperationMessage\(e\.message\) : "Falha na execução\."\)/);
-  assert.match(ler("modules/arquiteto/arquiteto-workspace.tsx"), /mesaChangedAt=\{mesaChangedAt\} \/>/);
 });

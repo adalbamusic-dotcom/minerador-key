@@ -39,14 +39,18 @@ test("o plano do GRUPO entra no recorte do Arquiteto mesmo sem Assunto nas keywo
 });
 
 test("com uma cor na etiqueta, o painel da melhoria busca só aquela cor e avisa a análise de outro recorte", () => {
+  /*
+   * 2026-10-17 (noite) · SUBSTITUÍDOS o botão "Buscar keywords da cor …" e o aviso "análise de outro recorte" (dono:
+   * "tem 7 botões totalmente inúteis"): abrir o refazedor JÁ lê a cor da etiqueta (a leitura é sempre a de agora);
+   * a busca nova, o refazer e a leitura paga mantêm o recorte da execução.
+   */
   const painel = semComentarios(ler("../modules/arquiteto/article-improvement-panel.tsx"));
-  assert.match(painel, /const recorteAtivo = activeGroup \? \{ group: activeGroup\.requested \} : \{\};/);
-  assert.match(painel, /if \(next\.kind === "prepare"\) void execute\("prepare", recorteAtivo\);/, "o cartão Próximo passo usa a cor");
-  assert.match(painel, /onClick=\{\(\) => void execute\("prepare", recorteAtivo\)\}>\{activeGroup \? `Buscar keywords da cor \$\{activeGroup\.label\} \(grátis\)`/, "o botão diz a cor");
-  assert.match(painel, /execute\("prepare", \{ \.\.\.recorteDaExecucao, discover: true \}\)/, "a busca nova no Google Ads mantém o recorte da execução");
-  assert.match(painel, /execute\("prepare", \{ \.\.\.recorteDaExecucao, reworkReason: reason \}\)/, "refazer mantém o recorte da execução");
-  assert.match(painel, /data-testid="architect-improvement-other-scope"/);
-  assert.match(painel, /run\.groupScope\?\.requested !== activeGroup\.requested/);
+  assert.match(painel, /const recorte = activeGroup \? \{ group: activeGroup\.requested \} : \{\};/);
+  assert.match(painel, /void execute\("prepare", recorte, null\);/, "abrir lê a cor da etiqueta");
+  assert.match(painel, /\.\.\.\(action === "prepare" \? \{ discover: true \} : \{\}\)/, "a busca nova no Google Ads é passo da leitura");
+  assert.match(painel, /const recorteDaExecucao = run\?\.groupScope \? \{ group: run\.groupScope\.requested \} : recorte;/);
+  assert.match(painel, /execute\("prepare", \{ \.\.\.recorteDaExecucao, reworkReason: dito \}\)/, "refazer mantém o recorte da execução");
+  assert.doesNotMatch(painel, /Buscar keywords da cor|architect-improvement-other-scope/);
 
   const tela = semComentarios(ler("../modules/arquiteto/arquiteto-workspace.tsx"));
   // 2026-10-14 · a etiqueta escolhe por COR (`kind: "groups"`): sem isso o painel analisava a marca inteira com o azul escolhido.

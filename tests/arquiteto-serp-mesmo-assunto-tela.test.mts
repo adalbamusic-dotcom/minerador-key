@@ -791,7 +791,8 @@ test("D2.3 · fiação: aplicar e criar passam pelo writer da formação com rel
   assert.match(aplicar, /if \(!vinculo\.ok\) recusas\.push\(/, "sem vínculo do Assunto, o artigo não nasce");
   assert.match(aplicar, /relidos\.get\(ref\)\?\.subjectKeywordId === diagnosis\.anchorKeywordId/, "o vínculo é conferido na releitura");
   // A lista antiga de não agrupadas: recolhida quando há o painel de Sobras, por volume, sem volume no fim.
-  assert.match(workspace, /<details open=\{!leftoverOpportunities\}>[\s\S]{0,900}formationDeferredRowsByVolume\.map/);
+  // 2026-10-17 (noite) · a linha do plano não se repete nesta lista (ela é linha da tabela).
+  assert.match(workspace, /<details open=\{!leftoverOpportunities\}>[\s\S]{0,900}formationDeferredRowsByVolume\.filter\(row => !planSheet\.rowByKeywordId\.has\(row\.keywordId\)\)\.map/);
   assert.match(workspace, /\(right\.volume \?\? -1\) - \(left\.volume \?\? -1\)/);
   // Troca Provável fica fora de "Marcar todas".
   assert.match(painel, /disponiveis\.filter\(choice => !choice\.probable\)\.map\(choice => choice\.id\)/);

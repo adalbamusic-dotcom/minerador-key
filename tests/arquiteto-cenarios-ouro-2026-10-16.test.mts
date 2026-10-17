@@ -22,7 +22,7 @@ import { createInternalLinkGraph, createInternalLinkGraphWorkingCopy } from "../
 import { resolveRadarEligibility } from "../lib/arquiteto/radar-handoff-gate.ts";
 import { ArticleDNASchema, type ArchitectKeyword, type ArticleDNA, type InternalLinkGraphEdge, type InternalLinkGraphNode, type ProvisionalArticleGroup, type SiloDNA, type VersionEnvelope } from "../lib/arquiteto/contracts.ts";
 import { choosePlanSiloTerritory, planGroupTerritory, planRecreatePlanSiloLines, planSiloHeadKeywordIds } from "../lib/arquiteto/declared-plan-silo.ts";
-import { buildPlanSheetRows, editorialGroupCut, planArticleKeywordIds, planPrincipalSwapCandidates, planRowAlerts, planRowDefinition, planRowRoleLabel, planRowSeals, planSheetFormationSelection, planSheetPreviewLines, planSheetSerpPlanLine, planSheetSerpSelection, splitTableSelectionForPlan, PLAN_NO_SEARCHES_SENTENCE, PLAN_SHEET_LOCKED_SEAL, PLAN_SUPPORT_SEARCH_PATH } from "../lib/arquiteto/plan-article-sheet.ts";
+import { buildPlanSheetRows, editorialGroupCut, planArticleKeywordIds, planPrincipalSwapCandidates, planRowAlerts, planRowDefinition, planRowRoleLabel, planRowSeals, planSheetFormationSelection, planSheetPreviewLines, planSheetSerpPlanLine, planSheetSerpSelection, splitTableSelectionForPlan, PLAN_IDENTITY_NO_VOLUME_SENTENCE, PLAN_NO_SEARCHES_SENTENCE, PLAN_SHEET_LOCKED_SEAL, PLAN_SUPPORT_SEARCH_PATH } from "../lib/arquiteto/plan-article-sheet.ts";
 import { attachSubjectToArticleDna, planSubjectAttachment, readArchitectSubjectStanding, readArchitectSubjectStandings, suggestSubjectSupport } from "../lib/arquiteto/declared-subject.ts";
 import { planArticleImprovements, volumelessPrincipalSwap, type ImprovementEvidence, type ImprovementKeyword, type ImprovementTarget } from "../lib/arquiteto/article-improvement.ts";
 import { buildSerpSubjectIndex } from "../lib/arquiteto/serp-subject-overlap.ts";
@@ -658,14 +658,22 @@ test("C17 · amarelo com 4 Livres medidas sem número de buscas (o Pilar entre e
   assert.equal(planRowSeals(livres[0]).find(selo => selo.kind === "volume")?.label, "Sem buscas", "linguagem simples no selo");
   assert.doesNotMatch(livres[0].lock.why, /Sem volume medido/);
 
-  // 1 · CONCLUIR FORMAÇÃO (a prévia por linha, da execução preparada): a Livre medida ouve (b), nunca "meça no Minerador".
+  // 1 · CONCLUIR FORMAÇÃO (a prévia por linha, da execução preparada): a Livre medida nunca ouve "meça no Minerador".
+  // 2026-10-17 (noite) · SUBSTITUÍDO "as 4 formadas ficam fora (o reforço é do 'Melhorar publicados…')": o Concluir leva as 8 — o reforço dos formados vira a versão seguinte na mesma confirmação.
   const doGrupo = planSheetFormationSelection(linhas, "concludeFormation");
-  assert.deepEqual(doGrupo.byGroup.get(AMARELO)?.map(linha => linha.keywordId), ["a1", "a3", "a5", "a7"], "as 4 formadas ficam fora (o reforço é do 'Melhorar publicados…')");
+  assert.deepEqual(doGrupo.byGroup.get(AMARELO)?.map(linha => linha.keywordId), ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"], "as 8 do plano, formadas ou não");
   const naoSustenta = (id: string) => ({ targetId: id, status: "insufficient_evidence" as const, reasons: ["Assunto declarado mantido como fundamento do artigo."], principalId: id, currentPrimaryId: id, memberIds: [id], needsValidation: false });
   const previa = planSheetPreviewLines({ proposals: livres.map(linha => naoSustenta(linha.keywordId)) }, livres);
+  /*
+   * 2026-10-17 (noite) · T12 NO CONCLUIR (o dono viu "use Procurar outra principal" nos 4 Livres do amarelo): as 4 são a
+   * principal de IDENTIDADE (no título do Assunto): ouvem a frase dela — fica; o reforço e a SERP vêm do "Processar
+   * artigos". SUBSTITUI a frase (b) para a identidade; a (b) vale para a Livre fora da identidade.
+   */
+  assert.ok(livres.every(linha => linha.identityPrincipal === true), "as 4 Livres são a principal de identidade");
+  assert.deepEqual(previa.map(linha => [linha.kind, linha.sentence]), livres.map(() => ["refused", PLAN_IDENTITY_NO_VOLUME_SENTENCE]), "a frase da identidade, igual para as 4 — o Pilar incluído");
+  assert.ok(previa.every(linha => !/meça no Minerador|não tem volume medido|Procurar outra principal/.test(linha.sentence)));
   const FRASE_B = "O Google Ads não tem número de buscas para esta keyword (zero ou poucas buscas). Como ela é Livre, use “Procurar outra principal” ou traga sustentações com volume (Minerador → perfil da keyword → “Buscar sustentação”, grátis).";
-  assert.deepEqual(previa.map(linha => [linha.kind, linha.sentence]), livres.map(() => ["refused", FRASE_B]), "a frase (b), igual para as 4 — o Pilar incluído");
-  assert.ok(previa.every(linha => !/meça no Minerador|não tem volume medido/.test(linha.sentence)));
+  assert.equal(planSheetPreviewLines({ proposals: [naoSustenta("a1")] }, [{ ...livres[0], identityPrincipal: undefined }])[0].sentence, FRASE_B, "fora da identidade, a frase (b)");
   assert.ok(FRASE_B.startsWith(PLAN_NO_SEARCHES_SENTENCE) && FRASE_B.includes(PLAN_SUPPORT_SEARCH_PATH));
   /*
    * VALIDAR SERP ("Processar artigos" nas linhas do plano). 2026-10-17 · A RÉGUA
@@ -685,8 +693,9 @@ test("C17 · amarelo com 4 Livres medidas sem número de buscas (o Pilar entre e
   const recusadas = planSheetSerpSelection(foraDaIdentidade).refused;
   assert.deepEqual(recusadas.map(item => item.keywordId), ["a3"]);
   assert.ok(recusadas.every(item => item.reason.startsWith(`${PLAN_NO_SEARCHES_SENTENCE}: a SERP não é coletada para keyword sem volume que não é a principal de identidade do artigo`) && item.reason.includes("Procurar outra principal") && !/meça no Minerador/.test(item.reason)));
-  // O alerta da linha: "sem número de buscas — livre, pode trocar" (o porquê inteiro no title).
-  assert.equal(planRowAlerts(livres[0]).find(alerta => alerta.kind === "no_volume")?.label, "sem número de buscas — livre, pode trocar");
+  // O alerta da linha (o porquê inteiro no title): a principal de identidade fica (2026-10-17, noite); fora da identidade, "livre, pode trocar".
+  assert.equal(planRowAlerts(livres[0]).find(alerta => alerta.kind === "no_volume")?.label, "sem número de buscas — identidade, fica");
+  assert.equal(planRowAlerts({ ...livres[0], identityPrincipal: undefined }).find(alerta => alerta.kind === "no_volume")?.label, "sem número de buscas — livre, pode trocar");
   // (a) a NUNCA medida (azul, "diferença entre internet e Wi-Fi", Livre) continua "meça no Minerador (Volume)".
   const azul = buildPlanSheetRows({ brandId: MARCA_WIFI, keywords: mesa, groupOf: id => GRUPOS_COM_AMARELO[id] ?? null, keywordGroupOf: grupoDaKeywordWifi, articles: [], radarArticleIds: new Set(), serp: null, filter: { kind: "groups", color: "azul", groupIds: [AZUL] }, now: AGORA });
   const nuncaMedida = azul.find(linha => linha.keywordId === "k10")!;
@@ -703,8 +712,9 @@ test("C17 · amarelo com 4 Livres medidas sem número de buscas (o Pilar entre e
   assert.equal(planRowRoleLabel(linhas[0]), "Pilar · 1º");
   assert.equal(planRowRoleLabel(linhas[6]), "Suporte · 7º");
   assert.deepEqual(linhas.map(linha => planRowDefinition(linha).label), ["Aguardando formação", "Formado · v1", "Aguardando formação", "Formado · v1", "Aguardando formação", "Formado · v1", "Aguardando formação", "Formado · v1"], "nunca 'Pendente' sem explicação para a linha do plano");
-  assert.equal(planRowDefinition(linhas[0]).reason, "sem número de buscas · Livre: “Procurar outra principal” ou sustentação");
-  assert.equal(planRowDefinition(linhas[0]).title, FRASE_B);
+  assert.equal(planRowDefinition(linhas[0]).reason, "identidade, fica · “Processar artigos”");
+  assert.equal(planRowDefinition(linhas[0]).title, PLAN_IDENTITY_NO_VOLUME_SENTENCE);
+  assert.equal(planRowDefinition({ ...linhas[0], identityPrincipal: undefined }).reason, "sem número de buscas · Livre: “Procurar outra principal” ou sustentação");
   assert.equal(planRowDefinition(linhas[1]).reason, null);
   // Na tabela de sempre: o artigo da mesa que é do plano lê as MESMAS funções (a linha do plano sem artigo também).
   const mesaDaTela = codigoSemComentarios("modules/arquiteto/arquiteto-workspace.tsx");
