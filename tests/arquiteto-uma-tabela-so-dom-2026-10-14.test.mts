@@ -98,14 +98,16 @@ test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mes
   const barra = screen.get("architect-articles-formation-actions");
   assert.equal(barra.dataset.planMode, undefined);
   assert.deepEqual([...barra.querySelectorAll("button")].map(botao => botao.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
-  assert.deepEqual([...barra.querySelectorAll<HTMLButtonElement>("button")].map(botao => botao.disabled), [true, true, false], "sem nada marcado, Processar e Concluir esperam a seleção");
+  // 2026-10-17 (noite) · os 3 em sequência: sem nada marcado e sem publicado no recorte, os três esperam (o porquê no title).
+  assert.deepEqual([...barra.querySelectorAll<HTMLButtonElement>("button")].map(botao => botao.disabled), [true, true, true], "sem nada marcado, Processar e Concluir esperam a seleção; sem publicado, o refazedor espera o Concluir");
   // A linha do artigo do plano ganha os selos curtos: trava, volume, SERP e formação.
   const selosK9 = [...linhaDaMesa("cand-k9").querySelectorAll<HTMLElement>("[data-plan-seal]")].map(selo => `${selo.dataset.planSeal}:${selo.textContent}`);
   assert.deepEqual(selosK9, ["lock:Travada", "volume:Vol. 5.400", "serp:SERP 4/4", "formation:Aguardando formação"]);
   assert.match(linhaDaMesa("cand-k9").querySelector<HTMLElement>("[data-plan-seal='lock']")!.title, /Volume definido não se troca/, "o porquê no title, não repetido na linha");
   const selosK10 = [...linhaDaMesa("cand-k10").querySelectorAll<HTMLElement>("[data-plan-seal]")].map(selo => selo.textContent);
   assert.deepEqual(selosK10, ["Livre", "Sem volume", "Sem SERP", "Aguardando formação"]);
-  assert.match(linhaDaMesa("cand-k10").querySelector("[data-testid='architect-plan-row-alerts']")!.textContent!, /sem volume — livre, pode trocar/);
+  // 2026-10-17 (noite) · T12: "diferença entre internet e Wi-Fi" está no título do Assunto — é a identidade, fica (nunca "livre, pode trocar").
+  assert.match(linhaDaMesa("cand-k10").querySelector("[data-testid='architect-plan-row-alerts']")!.textContent!, /sem volume — identidade, fica/);
   assert.equal(linhaDaMesa("cand-k10").querySelector("[data-plan-action='swapPrincipal']")?.textContent, "Procurar outra principal", "sem volume e Livre: procurar outra na linha");
   assert.equal(linhaDaMesa("cand-k9").querySelector("[data-plan-action='swapPrincipal']"), null, "volume definido: nunca troca");
   assert.equal(linhaDaMesa("cand-k9").querySelector("[data-testid='architect-plan-row-actions']"), null, "linha travada sem nada a fazer: sem botões");
@@ -130,7 +132,7 @@ test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mes
   semMinerador();
 });
 
-test("'Todos' (azul e laranja com plano): a barra de sempre — Processar artigos com linhas do plano marcadas: o comum vai ao handler de sempre; as do plano, ao Validar SERP com custo antes", async () => {
+test("'Todos' (azul e laranja com plano): a barra de sempre — Processar artigos com linhas do plano marcadas: o comum vai ao handler de sempre; as do plano, à leitura da melhoria (reforço e SERP que falta), a presa recusada antes do servidor", async () => {
   rede();
   await screen.render(mesaWifi(TODOS)); await assentar();
   await marcar(linhaDaMesa("cand-k9"));
@@ -140,30 +142,29 @@ test("'Todos' (azul e laranja com plano): a barra de sempre — Processar artigo
   assert.equal(barra.dataset.planSelected, "2");
   await screen.click("architect-articles-top-process"); await assentar();
   assert.deepEqual(registro.processar, [["comum-1"]], "o artigo de sempre pelo handler de sempre");
-  const planos = chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "plan");
-  assert.deepEqual(planos.flatMap(chamada => chamada.body.keywords.map((item: any) => item.keywordId)), ["k13"], "k9 já tem as 4 lentes: nada a pagar; k13 entra no plano de custo");
-  assert.equal(planos[0].body.onlyMeasuredVolume, true);
-  assert.equal(chamadas.some(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute"), false, "nada é pago antes da confirmação");
-  assert.equal(screen.get("architect-plan-sheet-preview").dataset.action, "validateSerp");
-  await screen.click("architect-plan-sheet-confirm"); await assentar();
-  const pagos = chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute");
-  assert.deepEqual(pagos.flatMap(chamada => chamada.body.keywords.map((item: any) => item.keywordId)), ["k13"]);
-  assert.match(linhaDaMesa("cand-k9").querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /Já temos as 4 lentes/);
-  assert.match(linhaDoPlano("k13")!.querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /SERP coletada nas 4 lentes/);
+  // 2026-10-17 (noite) · SUBSTITUÍDO "as do plano, ao Validar SERP": a leitura da melhoria com a busca do reforço; a presa não vai ao servidor.
+  const preparos = chamadas.filter(chamada => chamada.body?.action === "prepare");
+  assert.deepEqual(preparos.map(chamada => [chamada.body.origin, chamada.body.discover, chamada.body.targetIds]), [["plan_sheet", true, ["k9"]]]);
+  assert.equal(chamadas.some(chamada => chamada.url === "/api/arquiteto/keyword-serp"), false, "o Validar SERP à parte saiu");
+  assert.match(linhaDaMesa("cand-k9").querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /^Cópia de trabalho \(nada gravado\)/);
+  assert.match(linhaDoPlano("k13")!.querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /^Presa no artigo/);
   assert.equal(screen.query("architect-plan-sheet-progress"), null, "nada fica girando");
   semMinerador();
 });
 
-test("'Todos' · Concluir formação (barra) com o plano azul marcado: as 3 presas recusadas antes do servidor; as 4 formam pela melhoria do plano; o handler de sempre não é chamado", async () => {
+test("'Todos' · Concluir formação (barra) com o plano azul marcado, depois do Processar: as 3 presas recusadas antes do servidor; as 4 formam pela melhoria do plano; o handler de sempre não é chamado", async () => {
   rede();
   await screen.render(mesaWifi(TODOS)); await assentar();
   for (const id of ["cand-k9", "cand-k10", "cand-k11", "cand-k15"]) await marcar(linhaDaMesa(id));
   for (const id of ["k12", "k13", "k14"]) await marcar(linhaDoPlano(id)!);
-  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false, "o botão de sempre vale para as linhas do plano (sem processar antes)");
+  // 2026-10-17 (noite) · SUBSTITUÍDO "sem processar antes": o Concluir espera o Processar (o porquê no title).
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, true, "o Concluir espera o Processar");
+  await screen.click("architect-articles-top-process"); await assentar();
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false);
   await screen.click("architect-articles-top-confirm"); await assentar();
   assert.deepEqual(registro.concluir, [], "nenhum artigo de sempre selecionado");
   const preparos = chamadas.filter(chamada => chamada.body?.action === "prepare");
-  assert.equal(preparos.length, 1);
+  assert.equal(preparos.length, 1, "uma leitura só: a do Processar");
   assert.deepEqual(preparos[0].body.targetIds, ["k9", "k10", "k11", "k15"], "a presa não vai ao servidor");
   assert.equal(preparos[0].body.origin, "plan_sheet");
   assert.equal(preparos[0].body.group, AZUL);
@@ -177,17 +178,23 @@ test("'Todos' · Concluir formação (barra) com o plano azul marcado: as 3 pres
   semMinerador();
 });
 
-test("2026-10-16 · Concluir formação FORMA: a linha do plano já formada fica fora com o caminho do reforço ('Melhorar publicados…'); só a sem ArticleDNA vai ao servidor", async () => {
+/*
+ * 2026-10-17 (noite) · SUBSTITUÍDO "Concluir formação FORMA: a linha já formada fica fora com o caminho do reforço"
+ * (dono: "cadê as keywords de reforço?"): o Processar e o Concluir levam também o artigo do plano já formado; o
+ * reforço dele vira a versão seguinte na mesma confirmação. Só o que já está no Radar fica fora (o refazedor).
+ */
+test("2026-10-17 · o artigo do plano já formado entra no Processar e no Concluir: a versão seguinte (v3), na mesma confirmação", async () => {
   rede();
   const formadoK9 = { articleId: "art-k9", versionNumber: 2, subjectKeywordId: "k9", principalKeywordId: "k9", keywordIds: ["k9"] };
   await screen.render(comProductShell(h(MesaDoPlano, { marca: MARCA_WIFI, keywords: mesaWifiReal(), articles: [ARTIGO_INTRUSO, formadoK9], mesa: MESA_WIFI, filtro: AZUL_FILTRO, registro, groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeywordReal }))); await assentar();
   await marcar(linhaDaMesa("cand-k9"));
   await marcar(linhaDaMesa("cand-k10"));
+  await screen.click("architect-articles-top-process"); await assentar();
   await screen.click("architect-articles-top-confirm"); await assentar();
   const preparos = chamadas.filter(chamada => chamada.body?.action === "prepare");
-  assert.deepEqual(preparos.map(chamada => chamada.body.targetIds), [["k10"]], "o formado não vai de novo à formação");
+  assert.deepEqual(preparos.map(chamada => chamada.body.targetIds), [["k9", "k10"]], "o formado entra também");
   const linhaK9 = [...screen.all("architect-plan-sheet-preview-line")].find(item => item.textContent!.startsWith("internet fibra óptica"))!;
-  assert.match(linhaK9.textContent!, /Formado · v2: já formado — para reforçar com keywords de respaldo, use “Melhorar publicados…”/);
+  assert.match(linhaK9.textContent!, /Vai gravar: nova versão \(v3\)/);
   semMinerador();
 });
 

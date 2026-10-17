@@ -150,8 +150,15 @@ test("os dois botões da operação são os da barra de sempre, com o escopo da 
   assert.match(barra, /"Processar artigos"/);
   assert.match(barra, /Concluir formação/);
   assert.doesNotMatch(panel, /architect-process-articles|architect-confirm-formation|architect-formation-selection-count/);
-  assert.match(barra, /const concluirBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : !processed \|\| Boolean\(selectionScope\.reason\)\)/);
-  assert.match(barra, /const processarBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : Boolean\(selectionScope\.reason\)\)/);
+  /*
+   * 2026-10-17 (noite) · as MESMAS travas, agora em sequência (dono: "tem que ser sequencial"): ocupado (processando ou
+   * prévia aberta) → seleção (a autoridade única) → o passo anterior. Para os artigos de sempre, "processou" é o marcador.
+   */
+  assert.match(barra, /const processou = total > 0 && \(plano \? plano\.processed : true\) && \(regulares \? processed : true\);/);
+  assert.match(barra, /const motivoProcessar = ocupado \?\? semSelecao;/);
+  assert.match(barra, /const motivoConcluir = ocupado \?\? semSelecao \?\? \(processou \? null : /);
+  assert.match(barra, /disabled=\{Boolean\(motivoConcluir\)\}/);
+  assert.match(barra, /disabled=\{Boolean\(motivoProcessar\)\}/);
   assert.match(barra, /data-testid="architect-articles-selection-count"/);
 });
 

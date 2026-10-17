@@ -710,7 +710,9 @@ test("2026-10-12 · a busca nova no Google Ads só roda sob pedido, e cada chama
   assert.equal(semPedido.discovery?.requested, false);
   assert.deepEqual(semPedido.discovery?.gapTargetIds, [oldId]);
   assert.notEqual(semPedido.proposals[0].status, "ready");
-  assert.ok(semPedido.notices.some(n => /não roda sozinha/.test(n)), JSON.stringify(semPedido.notices));
+  // 2026-10-17 (noite) · SUBSTITUÍDO "não roda sozinha: peça em 'Buscar keywords novas no Google Ads'" (o botão saiu): quem chama ("Processar artigos", "Melhorar publicados…") pede a busca sozinho.
+  assert.ok(semPedido.notices.some(n => /ainda não rodou nesta leitura — “Processar artigos” e “Melhorar publicados…” a fazem sozinhos/.test(n)), JSON.stringify(semPedido.notices));
+  assert.match(semPedido.reading?.sentences.missing ?? "", /^Falta: a busca de reforço no Google Ads \(grátis, cota\) para 1 artigo\(s\)\.$/, "nunca 'Falta: nada' quando a busca de reforço ainda não rodou");
   assert.equal(usage.length, 0);
   const comPedido = await handleArticleImprovement(comUso, { brandId, action: "prepare", discover: true, authorizeReading: LER });
   assert.deepEqual(events.filter(e => e === "busca").length, 1);
@@ -825,7 +827,13 @@ test("D2(a) · sem parecer pelas sustentações, Gravar melhorias recusa e apont
   // Sem parecer, a linha não fica pronta: a principal declarada continua fixa e o motivo é dito (a saída é a D2(b), paga, por clique).
   assert.equal(proposta.status, "insufficient_evidence", JSON.stringify(run.proposals));
   assert.equal(proposta.principalId, declaredId);
-  assert.ok(proposta.reasons.includes("sem parecer da SERP"), JSON.stringify(proposta.reasons));
+  /*
+   * 2026-10-17 (noite) · SUBSTITUÍDO o "sem parecer da SERP" genérico: o artigo ainda sem ArticleDNA fica "precisa
+   * coletar" com o caminho e o custo (L12: "aponta a coleta paga, com custo antes") — a secundária de mais volume,
+   * porque a principal sem volume não é a identidade. A SERP paga entra no plano de custo do Processar.
+   */
+  assert.equal(proposta.needsValidation, true, JSON.stringify(proposta));
+  assert.ok(proposta.reasons.some(reason => /Falta a SERP de “captação de pacientes para clínica de estética”, a secundária de mais volume/.test(reason)), JSON.stringify(proposta.reasons));
   await assert.rejects(() => handleArticleImprovement(runtime, { brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash, targetIds: [oldId] }), /prontas/);
   assert.equal(articles.length, 0, "nenhum ArticleDNA sem parecer");
   assert.equal(paid, 0);

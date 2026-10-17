@@ -46,7 +46,8 @@ test("sem Sobras, o cartão não manda para um lugar vazio: leva a Artigos novos
   assert.match(barraFonte, /<section id="architect-articles-new" [^>]*data-testid="architect-articles-formation-actions">/);
   // 2026-10-16 · a barra mora no topo de "Detalhes técnicos" (uma só).
   assert.equal(fonte.split("<ArticlesFormationBar").length - 1, 1);
-  assert.match(fonte, /hasLeftovers=\{hasLeftoverOpportunities\}/);
+  // 2026-10-17 (noite) · SUBSTITUÍDO o cartão "Próximo passo" no refazedor (dono: "tem 7 botões totalmente inúteis"): o "nada a fazer" é uma linha sem botão; a função de domínio (acima) segue decidindo o passo da prévia.
+  assert.doesNotMatch(fonte, /hasLeftovers=\{hasLeftoverOpportunities\}/);
   assert.match(fonte, /const hasLeftoverOpportunities = !leftoversDismissed && Boolean\(leftoverOpportunities && \(leftoverOpportunities\.groups\.length \|\| leftoverOpportunities\.withoutVolume\.length\)\);/);
 });
 
@@ -72,19 +73,20 @@ test("execução presa vem antes de tudo; retomar é Continuar e só ler o andam
   }
 });
 
-test("os números 1 · 2 · 3 ficam só no cartão; a fileira mostra os outros atos sem número", () => {
+/*
+ * 2026-10-17 (noite) · SUBSTITUÍDOS a fileira de botões e o cartão numerado do refazedor (dono: "tem 7 botões
+ * totalmente inúteis"): a prévia tem só "Cancelar" e "Confirmar", e o Confirmar faz o passo que falta (ler o que custa,
+ * coletar a SERP no DataForSEO com o custo antes, ou gravar). "Gravar sem validar" virou a caixa "Gravar só as linhas
+ * prontas agora, sem coletar a SERP" dentro da prévia (a função fica). Os rótulos de domínio continuam.
+ */
+test("o refazedor tem só Cancelar e Confirmar; o Confirmar faz o passo que falta; gravar sem coletar continua (caixa na prévia)", () => {
   assert.equal(improvementApplyLabel(2, false), "Gravar melhorias (2)");
   assert.equal(improvementValidateLabel(2, 0.006, false), "Coletar a SERP no DataForSEO (pago: 2 consultas, até US$ 0.01)");
-  const fileira = painel.slice(painel.indexOf("<div className=\"flex flex-wrap gap-2\">"), painel.indexOf("{confirm && run &&"));
-  assert.ok(fileira.length > 0);
-  assert.doesNotMatch(fileira, /[123] · /, "nenhum botão numerado na fileira");
-  // F5 (backlog): o rótulo da fileira sai de uma função só; "Gravar sem validar" só com validação obrigatória pendente.
-  assert.match(fileira, /improvementRowApplyLabel\(\{ selectedCount: selected\.size/);
   assert.equal(improvementRowApplyLabel({ selectedCount: 3, paidQueries: 4 }), "Gravar sem validar (3)");
-  assert.equal(improvementRowApplyLabel({ selectedCount: 3, paidQueries: 4, optionalPaidQueries: 1 }), "Gravar sem validar (3)");
-  // O parágrafo dos três passos fica no InfoHint "Como funciona" (pedido do dono, 2026-09-30), não num bloco aberto.
-  assert.match(painel, /<InfoHint title="Como funciona" description="1 · Buscar keywords/);
-  assert.doesNotMatch(painel, /<summary className="cursor-pointer">Como funciona<\/summary>/);
+  assert.equal(painel.split("<button").length - 1, 2, "Cancelar e Confirmar");
+  assert.match(painel, /passo === "validate" \? `Autorizar \$\{pagas\} consulta\(s\) e coletar a SERP \(até \$\{usd\(run\?\.costs\.estimatedCostUsd\.max \?\? 0\)\}\)`/);
+  assert.match(painel, /data-testid="architect-improvement-without-serp"/);
+  assert.doesNotMatch(painel, /<InfoHint title="Como funciona"|improvementRowApplyLabel\(/);
 });
 
 /* -------------------------------- a ordem da aba ------------------------------ */
@@ -139,10 +141,11 @@ test("na aba Artigos: Detalhes técnicos no topo (barra de sempre, prévia do pl
   assert.match(tela, /\{improvementPanel !== "closed" && \(/);
   assert.match(fonte, /useState<"closed" \| "open" \| "hidden">\("closed"\)/);
   assert.match(barraFonte, /data-testid="architect-articles-improve-published"/);
-  assert.match(tela, /onToggleImprovement=\{\(\) => setImprovementPanel\(atual => atual === "open" \? "hidden" : "open"\)\}/);
+  // 2026-10-17 (noite) · abrir = ler de novo (o refazedor); fechar desmonta (o autorizado continua pelo servidor ao reabrir).
+  assert.match(tela, /onToggleImprovement=\{\(\) => setImprovementPanel\(atual => atual === "open" \? "closed" : "open"\)\}/);
   assert.doesNotMatch(tela, /activeColorHasPlan=/, "o modo recolhido com 'Próximo passo' para a planilha saiu");
-  // Dentro do painel (quando aberto), o cartão continua antes do título.
-  assert.ok(painel.indexOf("architect-improvement-next-step") < painel.indexOf("<h3"), "o cartão vem antes do título do painel");
+  // 2026-10-17 (noite) · SUBSTITUÍDO "o cartão vem antes do título": sem cartão nem título; a prévia tem Cancelar e Confirmar.
+  assert.equal(painel.includes("architect-improvement-next-step"), false);
   // Detalhes técnicos: fechado por padrão, aberto sozinho quando há ação pendente; depois vale a escolha da pessoa.
   assert.match(tela, /<details\s+open=\{articlesTechnicalOpen \?\? articlesHavePendingAction\}\s+onToggle=/);
   assert.match(fonte, /const \[articlesTechnicalOpen, setArticlesTechnicalOpen\] = useState<boolean \| null>\(null\);/);
@@ -170,7 +173,9 @@ test("nada saiu da tela: os blocos técnicos continuam na grade, e melhoria e So
   ]) assert.ok(grade.includes(marca), `${marca} continua em Detalhes técnicos`);
   // 2026-10-16 (noite) · pedido do dono: os blocos "Assuntos · N" (fichas com o filtro) e "Assuntos como tronco · N" saíram; as AÇÕES do Assunto foram para a barra de sempre.
   assert.equal(grade.includes("<SubjectFilterPanel") || grade.includes("architect-anchored-subjects"), false);
-  assert.ok(tela.indexOf("subjectActions={") > tela.indexOf("<ArticlesFormationBar") && tela.indexOf("subjectActions={") < tela.indexOf("<PlanSheetOperations"), "as ações do Assunto moram na barra");
+  // 2026-10-17 (noite) · SUBSTITUÍDO "as ações do Assunto moram na barra": moram no painel do artigo aberto (a linha expandida).
+  assert.equal(tela.includes("subjectActions={"), false, "as ações do Assunto saíram da barra");
+  assert.ok(tela.indexOf("data-testid=\"architect-article-subject-actions\"") > tela.indexOf("data-architect-table=\"articles\""), "as ações do Assunto moram na linha aberta da tabela");
   // 2026-10-16 · o mapa continua na grade, mas só é desenhado em Links internos.
   assert.match(grade, /\{linksMode && <div className="min-h-0 min-w-0 overflow-hidden p-0">\s*<ArchitectArchitectureMap/);
   assert.equal(grade.includes("<ArticleImprovementPanel"), false);
@@ -188,10 +193,14 @@ test("Processar e Concluir formação ficam à mão, com os mesmos handlers e as
   assert.match(uso, /processed=\{Boolean\(articleFormationMarker\)\}/);
   assert.match(uso, /planTargets=\{tableSelection\.planTargets\}/);
   const barra = barraFonte;
-  assert.match(barra, /if \(regulares > 0\) await onProcess\(\);\s*if \(doPlano\.length\) planSheet\.start\("validateSerp", doPlano\);/);
+  // 2026-10-17 (noite) · SUBSTITUÍDO "Processar = Validar SERP": Processar = leitura com o reforço e a SERP que falta (custo antes).
+  assert.match(barra, /if \(regulares > 0\) await onProcess\(\);\s*if \(doPlano\.length\) planSheet\.start\("processArticles", doPlano\);/);
   assert.match(barra, /if \(regulares > 0\) await onConfirm\(\);\s*if \(doPlano\.length\) planSheet\.start\("concludeFormation", doPlano\);/);
-  assert.match(barra, /const processarBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : Boolean\(selectionScope\.reason\)\);/);
-  assert.match(barra, /const concluirBloqueado = formationBusy \|\| \(doPlano\.length \? planSheet\.ocupado : !processed \|\| Boolean\(selectionScope\.reason\)\);/);
+  // As mesmas travas, em sequência: ocupado → seleção → o passo anterior.
+  assert.match(barra, /const motivoProcessar = ocupado \?\? semSelecao;/);
+  assert.match(barra, /const motivoConcluir = ocupado \?\? semSelecao \?\? \(processou \? null : /);
+  assert.match(uso, /publishedCount=\{publishedInCutCount\}/);
+  assert.match(uso, /regularConcluded=\{regularSelectionConcluded\}/);
   assert.match(barra, /Concluir formação/);
   assert.match(barra, /Melhorar publicados…/);
   // 2026-10-16 · a barra é a de sempre para TODOS os recortes (sem etapas do plano).

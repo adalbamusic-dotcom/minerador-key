@@ -13,6 +13,8 @@ import type { ArchitectSubjectStanding } from "../lib/arquiteto/declared-subject
  * 2026-10-16 · restauração do fluxo de sempre: a barra é a de sempre
  * (Processar artigos · Concluir formação · Melhorar publicados…) em todo
  * recorte; sem etapas do plano e sem a linha "Consolidar o Silo do plano".
+ * 2026-10-17 (noite) · os 3 botões em sequência e o Silo do plano fechado no
+ * mesmo ato do Concluir (`onConcluded`, registrado em `registro.silos`).
  */
 
 const h = React.createElement;
@@ -21,10 +23,10 @@ const VAZIO = new Set<string>();
 
 /** O artigo da mesa, na forma mínima: o Assunto dele diz se é do plano (o mesmo critério da aba). */
 export type ArtigoDaMesa = { id: string; keyword: string; subjectKeywordId: string | null; published?: boolean };
-export type Registro = { processar: string[][]; concluir: string[][]; aplicados: number };
-export const novoRegistro = (): Registro => ({ processar: [], concluir: [], aplicados: 0 });
+export type Registro = { processar: string[][]; concluir: string[][]; aplicados: number; silos: string[][] };
+export const novoRegistro = (): Registro => ({ processar: [], concluir: [], aplicados: 0, silos: [] });
 
-export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro, registro, groupOf, keywordGroupOf }: {
+export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro, registro, groupOf, keywordGroupOf, publishedCount = 0, improvementOpen = false, onToggleImprovement }: {
   marca: string;
   keywords: readonly Record<string, unknown>[];
   /** Como na aba: o Assunto lido do pacote aprovado, à parte da linha (a linha que veio do ArticleDNA não traz a semântica). */
@@ -35,10 +37,15 @@ export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro
   registro: Registro;
   groupOf: (id: string) => { color: string; name: string } | null;
   keywordGroupOf: (id: string) => string | null;
+  /** Publicados no recorte (a aba conta a tabela): "Melhorar publicados…" fica habilitado para eles. */
+  publishedCount?: number;
+  improvementOpen?: boolean;
+  onToggleImprovement?: () => void;
 }) {
   const sheet = usePlanArticleSheet({
     brandId: marca, brandRef: "wificonecta--d4fa133a", keywords, standings, groupOf, keywordGroupOf, filter: filtro, articles, radarArticleIds: VAZIO,
     onApplied: () => { registro.aplicados += 1; },
+    onConcluded: async groupIds => { registro.silos.push([...groupIds]); return { tone: "success", text: "Silo do plano fechado (dublê do fechamento canônico)." }; },
   });
   const [selecionados, setSelecionados] = React.useState<Set<string>>(new Set());
   const planRowOf = (art: ArtigoDaMesa): PlanSheetRow | null => !art.published && art.subjectKeywordId ? sheet.rowByKeywordId.get(art.subjectKeywordId) ?? null : null;
@@ -53,7 +60,7 @@ export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro
       formationBusy: false, processed: false, selectionScope: escopo, planTargets: divisao.planTargets, planSheet: sheet,
       onProcess: async () => { registro.processar.push([...divisao.regularArticleIds]); },
       onConfirm: async () => { registro.concluir.push([...divisao.regularArticleIds]); },
-      improvementOpen: false, onToggleImprovement: () => undefined, buttonClassName: "button",
+      improvementOpen, onToggleImprovement: onToggleImprovement ?? (() => undefined), buttonClassName: "button", attentionClassName: "primary", publishedCount,
     }),
     h(PlanSheetOperations, { sheet, buttonClassName: "button", primaryButtonClassName: "primary", controlClassName: "control", dangerButtonClassName: "danger" }),
     h("table", { "data-architect-table": "articles" }, h("tbody", null, itens.map(item => item.kind === "plan"
@@ -68,6 +75,14 @@ export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro
 /**
  * Os rótulos que o dono mandou tirar da aba (2026-10-14) e as portas paralelas
  * que saíram na restauração (2026-10-16): nenhum pode aparecer na mesa.
+ * 2026-10-17 (noite) · e os 7 botões que o dono chamou de "totalmente inúteis".
  */
-export const ROTULOS_REMOVIDOS = [/Ir para “Artigos do plano”/, /Abrir “Melhorar publicados”/, /Marcar toda a cor/, /Validar SERP \(\d+\)/, /Trocar principal/, /Concluir formação \(\d+\)/, /Próximo passo/, /Melhorar publicados · recolhido/, /mude a trava no Minerador/, /Volume de outra fonte/,
-  /1 · Formar/, /2 · Reforçar/, /3 · Linha editorial/, /4 · Links internos/, /Consolidar o Silo do plano/, /Completar sustentações e SERP/];
+export const ROTULOS_REMOVIDOS = [/Ir para “Artigos do plano”/, /Abrir “Melhorar publicados”/, /Marcar toda a cor/, /Validar SERP/, /Trocar principal/, /Concluir formação \(\d+\)/, /Próximo passo/, /Melhorar publicados · recolhido/, /mude a trava no Minerador/, /Volume de outra fonte/,
+  /1 · Formar/, /2 · Reforçar/, /3 · Linha editorial/, /4 · Links internos/, /Consolidar o Silo do plano/, /Completar sustentações e SERP/,
+  /Ações do Assunto/, /Fechar “Melhorar publicados”/, /Ir para Artigos novos/, /Buscar keywords da cor/, /Buscar keywords novas no Google Ads/, /Refazer mesmo assim/];
+
+/** Os botões visíveis da área de ações da aba Artigos (a barra e as operações das linhas do plano). */
+export function botoesDaArea(container: HTMLElement): HTMLButtonElement[] {
+  const area = [container.querySelector("[data-testid='architect-articles-formation-actions']"), container.querySelector("[data-testid='architect-plan-operations']"), container.querySelector("[data-testid='architect-article-improvement']")];
+  return area.flatMap(parte => parte ? [...parte.querySelectorAll<HTMLButtonElement>("button")] : []).filter(botao => !botao.closest("[hidden]"));
+}

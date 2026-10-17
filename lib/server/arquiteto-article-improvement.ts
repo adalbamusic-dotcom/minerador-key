@@ -915,7 +915,12 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     // Quem segue sem proposta depois da conferência é quem a busca nova poderia ajudar.
     // F4: quem já tem proposta à espera do Minerador não pede busca nova (a sugestão está lá).
     run.discovery.gapTargetIds = run.targets.filter(t => { const proposta = run.proposals.find(p => p.targetId === t.id); return !comLista(t) && !proposta?.needsMinerador && pedeReforco(t); }).map(t => t.id);
-    if (!run.discovery.requested && run.discovery.gapTargetIds.length) run.notices.push(`${run.discovery.gapTargetIds.length} publicado(s) ou Assunto(s) ficaram sem proposta só com a lista da marca. A busca nova no Google Ads não roda sozinha: peça em “Buscar keywords novas no Google Ads”, com o custo dito antes.`);
+    /*
+     * 2026-10-17 (noite) · SUBSTITUÍDO (dono: "cadê as keywords de reforço?"): a busca nova no Google Ads (grátis,
+     * cota) é um passo do "Processar artigos" e do "Melhorar publicados…", que a pedem sozinhos. O "peça em 'Buscar
+     * keywords novas no Google Ads'" de 12/10 saiu com o botão. Esta leitura só fica sem ela quando quem chamou não pediu.
+     */
+    if (!run.discovery.requested && run.discovery.gapTargetIds.length) run.notices.push(`${run.discovery.gapTargetIds.length} artigo(s) sem reforço só com a lista da marca: a busca nova no Google Ads (grátis, cota do Google Ads) ainda não rodou nesta leitura — “Processar artigos” e “Melhorar publicados…” a fazem sozinhos.`);
     // F3 · "JÁ TEMOS · FALTA · CUSTA": lido de graça, dito antes de qualquer pagamento.
     const lidoAgora = new Date();
     const completas = new Set(evidence.filter(item => item.complete).map(item => item.keywordId));
@@ -934,7 +939,15 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
       serp: { calls: run.costs.paidQueries, costUsd: run.costs.estimatedCostUsd },
       done: { aiCalls: iaChamadaAgora ? 1 : 0, measuredKeywords: medidas.asked, googleAdsCalls: medidas.calls },
     });
-    run.reading = { ...plano, authorized: autorizado, sentences: knownBeforeSearchSentences(plano) };
+    const frases = knownBeforeSearchSentences(plano);
+    /*
+     * 2026-10-17 (noite) · "Falta: nada" era falso quando a busca de reforço ainda não tinha rodado (amarelo: os 8
+     * artigos sem reforço e a tela dizia "Falta: nada"). Aqui a frase diz o que a próxima ação faz.
+     */
+    // A SERP que falta pagar já entra na frase de sempre (`plano.serp`); faltava dizer a busca de reforço não feita.
+    const aindaFalta = !run.discovery.requested && run.discovery.gapTargetIds.length > 0 ? `a busca de reforço no Google Ads (grátis, cota) para ${run.discovery.gapTargetIds.length} artigo(s)` : "";
+    if (aindaFalta) frases.missing = /^Falta: nada/.test(frases.missing) ? `Falta: ${aindaFalta}.` : `${frases.missing.replace(/\.$/, "")}; e ${aindaFalta}.`;
+    run.reading = { ...plano, authorized: autorizado, sentences: frases };
     run.decisionHash = decisionHashOf(run);
     /*
      * F5 — MESMOS INSUMOS, MESMA EXECUÇÃO (as 9 da WifiConecta viram 1). Sem
@@ -1163,7 +1176,13 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
         const composition = assessment ? serpAssessmentComposition(assessment.payload.assessment, object(assessment.payload.interpretation).lenses) : null;
         const mismatch = serpCompositionMismatch(composition, { keywordIds: proposal.memberIds, principalKeywordId: proposal.principalId!, roles: Object.fromEntries(group.keywordIds.map(id => [id, id === group.principalSuggestion.keywordId ? "principal" as const : "secundaria" as const])) });
         // Sem lente no cache, a rota em modo só-cache deixa a composição sem parecer (nada pago).
-        if ((isListReading(proposal) || isCopyLineReading(proposal)) && (!assessment || composition?.lensesComplete !== true) && assessment?.payload.verdict !== "DIVERGENCE") {
+        /*
+         * 2026-10-17 (noite) · o artigo do plano ou do Assunto que ainda NÃO tem ArticleDNA (formar, não reforçar) e
+         * só falta a SERP da principal fica "precisa coletar" (passo pago do Processar, custo antes), como a linha de
+         * copy — antes ele caía em "a SERP da composição final está incompleta" e nunca entrava no plano de custo.
+         */
+        const alvoSemDna = proposal.kind === "subject" && (run.targets.find(t => t.id === proposal.targetId)?.memberIds.length ?? 0) === 0;
+        if ((isListReading(proposal) || isCopyLineReading(proposal) || alvoSemDna) && (!assessment || composition?.lensesComplete !== true) && assessment?.payload.verdict !== "DIVERGENCE") {
           // Faltam lentes da composição escolhida na lista: a linha fica "precisa validar" (passo 2, pago, com prévia).
           proposal.status = "insufficient_evidence"; proposal.needsValidation = true;
           const principal = run.keywords.find(k => k.id === proposal.principalId)?.keyword ?? proposal.principalId;
@@ -1188,9 +1207,9 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
           const linhaDaPrincipal = proposal.principalId ? rows.get(proposal.principalId) : undefined;
           const principalDaRun = run.keywords.find(k => k.id === proposal.principalId);
           // §15 passos 3a/3b: o reforço já está escolhido; o que falta é a primeira coleta da SERP da principal (4 lentes), paga e com o custo antes.
-          proposal.reasons.push(isCopyLineReading(proposal)
+          proposal.reasons.push(isCopyLineReading(proposal) || alvoSemDna
             ? deIdentidade
-              ? `${identityPrincipalSerpSentence(principalTexto, { queries: faltam, neverMeasured: principalDaRun ? knownVolumeOfKeyword(principalDaRun, linhaDaPrincipal, new Date()).state === "missing" : false })} É a primeira coleta do artigo no DataForSEO (paga; o custo aparece antes de autorizar) e o parecer passa a usar a SERP dela.${nomeDaBase ? ` A secundária de mais volume (“${nomeDaBase}”) não é coletada por padrão; colete pelo artigo se quiser mais evidência.` : ""} A principal fica; o reforço já está escolhido; nada foi pago nem gravado.`
+              ? `${identityPrincipalSerpSentence(principalTexto, { queries: faltam, neverMeasured: principalDaRun ? knownVolumeOfKeyword(principalDaRun, linhaDaPrincipal, new Date()).state === "missing" : false })} É a primeira coleta do artigo no DataForSEO (paga; o custo aparece antes de autorizar) e o parecer passa a usar a SERP dela.${nomeDaBase ? ` A secundária de mais volume (“${nomeDaBase}”) não é coletada por padrão; colete pelo artigo se quiser mais evidência.` : ""} A principal fica; ${proposal.addIds.some(id => id !== proposal.principalId) ? "o reforço já está escolhido" : "sem reforço novo nesta leitura"}; nada foi pago nem gravado.`
               : nomeDaBase
                 ? `A principal “${principal}” não tem volume e não é a identidade do artigo: a SERP dela não é coletada e o parecer do artigo vem das secundárias. Falta a SERP de “${nomeDaBase}”, a secundária de mais volume, no cache: a primeira coleta dela no DataForSEO (4 lentes) é paga, serve de base de evidência do artigo, e o custo aparece antes de autorizar. A principal fica; o reforço já está escolhido; nada foi pago nem gravado.`
                 : `Falta a SERP da principal “${principal}” no cache: a primeira coleta dela no DataForSEO (4 lentes) é paga e o custo aparece antes de autorizar. O reforço já está escolhido; nada foi pago nem gravado.`

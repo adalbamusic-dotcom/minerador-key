@@ -602,8 +602,13 @@ test("2026-10-09 · o catálogo diz o processo novo: sem D9, sem 'o CSV sai sem 
   /* 2026-10-13 · F5: a pendência virou a adoção no Radar (mudança declarada desta asserção). */
   assert.match(guia, /Levar a versão nova ao Radar é a adoção no Radar \(radar\.adopt_architect_version, desde 2026-10-13\)/);
   assert.doesNotMatch(guia, /reenvio da versão nova ao Radar, pendência registrada/);
-  /* 2026-10-09 · o cartão do Arquiteto voltou ao de antes da rodada: o Arquiteto não ganha passo do Radar. */
-  assert.match(guia, /o cartão é o de sempre: o Arquiteto não ganha passo do Radar/);
+  /*
+   * 2026-10-09 · o cartão do Arquiteto voltou ao de antes da rodada: o Arquiteto não ganha passo do Radar.
+   * 2026-10-17 (noite) · mudança declarada: o cartão "Próximo passo" saiu do painel (dono: "tem 7 botões totalmente
+   * inúteis"); o refazedor mostra o desfecho, e a regra é a mesma.
+   */
+  assert.match(guia, /o refazedor mostra o desfecho: o Arquiteto não ganha passo do Radar/);
+  assert.doesNotMatch(guia, /o cartão é o de sempre/);
   assert.doesNotMatch(guia, /Abrir Links internos/);
   assert.doesNotMatch(guia, /Reinvestigar no Radar e reorganizar o artigo-modelo/, "o catálogo ainda oferece o caminho que não existe");
   assert.doesNotMatch(guia, /é a vigente pela regra da mesa do Arquiteto/);

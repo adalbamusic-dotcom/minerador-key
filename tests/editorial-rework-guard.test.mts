@@ -194,7 +194,16 @@ test("F5-11 · estrutural: a guarda é chamada pelos núcleos (nunca só pela te
   const aviso = readFileSync("components/editorial/rework-notice.tsx", "utf8");
   assert.match(aviso, /border-warning\/40 bg-warning\/10/);
   assert.match(aviso, /<InfoHint /);
-  for (const tela of ["modules/arquiteto/article-improvement-panel.tsx", "modules/arquiteto/silo-declared-plan-panel.tsx", "modules/arquiteto/silo-article-withdrawal-panel.tsx", "modules/arquiteto/arquiteto-workspace.tsx"]) {
+  for (const tela of ["modules/arquiteto/silo-declared-plan-panel.tsx", "modules/arquiteto/silo-article-withdrawal-panel.tsx", "modules/arquiteto/arquiteto-workspace.tsx"]) {
     assert.match(limpa(tela), /<ReworkNotice /, tela);
   }
+  /*
+   * 2026-10-17 (noite) · o refazedor ("Melhorar publicados…") lê a MESMA guarda (`run.rework`, do núcleo), mas o
+   * "Refazer mesmo assim" solto saiu (dono: "tem 7 botões totalmente inúteis"): o motivo é pedido DENTRO da prévia e o
+   * Confirmar dela vira "Refazer com o motivo dito" (o servidor continua recusando sem motivo).
+   */
+  const refazedor = limpa("modules/arquiteto/article-improvement-panel.tsx");
+  assert.match(refazedor, /const podeRefazer = Boolean\(run\?\.rework\?\.canOverride\)/);
+  assert.match(refazedor, /motivo\.trim\(\)\.length >= REWORK_OVERRIDE_REASON_MIN/);
+  assert.match(refazedor, /reworkOverride: \{ reason: options\.reworkReason \}/);
 });

@@ -567,7 +567,10 @@ test("Vínculo e importação mostram o Assunto pelo resolver do Minerador", () 
 
 test("ações humanas: prender, soltar, confirmar a sugestão do Silo e formar em torno do Assunto", () => {
   // 2026-10-16 (noite) · as ações saíram do bloco "Assuntos · N" (que saiu) para a barra de sempre; os mesmos handlers.
-  assert.match(workspace, /subjectActions=\{\s*<SubjectActionsControl/);
+  // 2026-10-17 (noite) · SUBSTITUÍDO "para a barra de sempre": moram no painel do artigo aberto (linha expandida); "Formar automaticamente" só no Assunto sem plano.
+  assert.doesNotMatch(workspace, /subjectActions=\{/);
+  assert.match(workspace, /\{isExpanded && subjectFilterEntries\.length > 0 && \(\s*<tr className="border-b border-divider bg-surface" data-testid="architect-article-subject-actions">/);
+  assert.match(workspace, /onOpenSupport=\{activeSubjectFilter && !subjectStandings\.get\(activeSubjectFilter\)\?\.plan \? \(\) => setSubjectSupportOpen\(true\) : null\}/);
   assert.doesNotMatch(workspace, /<SubjectFilterPanel/);
   assert.match(workspace, /<SubjectAttachDialog/);
   assert.match(workspace, /<SubjectSupportDialog/);

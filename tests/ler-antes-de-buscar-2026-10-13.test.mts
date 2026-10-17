@@ -177,7 +177,11 @@ test("estrutural: o prepare só chama IA e Google Ads com a autorização; a med
   assert.match(servidor.slice(inicio, fim), /measureKeywordVolume\(editar, idsNovos, guardadas\.length === novas\.length \? \{ measure: \(req, params, ctx\) => handleGoogleAdsKeywordMetrics\(req, params, ctx, \{ replay: replayStoredMeasurements\(guardadas\) \}\) \} : \{\}\)/);
   const caixa = stripComments(read("lib/server/minerador-architect-suggestions.ts"));
   assert.match(caixa, /measureKeywordVolume\(editar, entries\.map\(entry => entry\.keywordId\), \{ measure: \(req, params, ctx\) => handleGoogleAdsKeywordMetrics\(req, params, ctx, \{ replay \}\) \}\)/);
-  assert.match(servidor, /run\.reading = \{ \.\.\.plano, authorized: autorizado, sentences: knownBeforeSearchSentences\(plano\) \};/);
+  // 2026-10-17 (noite) · as frases de sempre, com o "Falta" corrigido quando a busca de reforço ou a SERP ainda faltam (nunca "Falta: nada" falso).
+  assert.match(servidor, /const frases = knownBeforeSearchSentences\(plano\);/);
+  assert.match(servidor, /const aindaFalta = !run\.discovery\.requested && run\.discovery\.gapTargetIds\.length > 0 \? /);
+  assert.match(servidor, /if \(aindaFalta\) frases\.missing = \/\^Falta: nada\/\.test\(frases\.missing\) \? `Falta: \$\{aindaFalta\}\.` : /);
+  assert.match(servidor, /run\.reading = \{ \.\.\.plano, authorized: autorizado, sentences: frases \};/);
   // A projeção para o navegador e o MCP não leva a medição guardada.
   assert.match(servidor, /keywords: run\.keywords\.filter\(k => used\.has\(k\.id\)\)\.map\(semMedicaoGuardada\)/);
   assert.match(servidor, /delete copia\.measurement;/);
@@ -202,14 +206,19 @@ test("estrutural: o servidor decide o volume na SERP do lote e no parecer; a tel
   assert.doesNotMatch(servidorLeitor, /\.(update|insert|upsert|delete)\(/, "o leitor só lê");
 });
 
-test("estrutural: a tela mostra 'Já temos · Falta · Custa' e só pede a leitura paga depois da prévia", () => {
+/*
+ * 2026-10-17 (noite) · SUBSTITUÍDOS o bloco fixo "Já temos · Falta · Custa" e o botão "Buscar keywords (grátis)" (dono:
+ * "do resto dos dados inúteis… pode apagar"; "tem 7 botões totalmente inúteis"): abrir o refazedor JÁ lê de graça; o que
+ * custa (IA, medição) fica na prévia, com a frase do custo, e só roda pelo Confirmar dela — a mesma autorização de antes.
+ */
+test("estrutural: a leitura é grátis ao abrir; a leitura paga só pelo Confirmar da prévia, com o custo dito", () => {
   const painel = stripComments(read("modules/arquiteto/article-improvement-panel.tsx"));
-  assert.match(painel, /data-testid="architect-improvement-known"/);
-  assert.match(painel, /confirm === "read" \? execute\("prepare", \{ \.\.\.recorteDaExecucao, authorizeReading: autorizacaoDaLeitura \}\)/);
+  assert.doesNotMatch(painel, /data-testid="architect-improvement-known"|Buscar keywords \(grátis\)/);
+  assert.match(painel, /else if \(passo === "read_paid"\) void execute\("prepare", \{ \.\.\.recorteDaExecucao, authorizeReading: autorizacaoDaLeitura \}\);/);
   assert.match(painel, /\.\.\.\(action === "prepare" && options\.authorizeReading \? \{ authorizeReading: options\.authorizeReading \} : \{\}\)/);
-  assert.match(painel, /else if \(next\.kind === "read_paid"\) setConfirm\("read"\);/);
-  // O botão grátis não carrega autorização nenhuma.
-  assert.match(painel, /onClick=\{\(\) => void execute\("prepare", recorteAtivo\)\}>\{activeGroup \? `Buscar keywords da cor \$\{activeGroup\.label\} \(grátis\)` : "Buscar keywords \(grátis\)"\}/);
+  assert.match(painel, /data-testid="architect-improvement-read-cost"/);
+  // Abrir lê sem autorização nenhuma (nem IA, nem medição): só a busca grátis no Google Ads.
+  assert.match(painel, /void execute\("prepare", recorte, null\);/);
   assert.match(improvementDiscoveryCostSentence(2), /A ideia que já existe no Minerador é só lida \(usa o volume dele, sem medir de novo; o Arquiteto não a altera\)/);
 });
 

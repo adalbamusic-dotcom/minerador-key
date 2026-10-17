@@ -181,13 +181,19 @@ test("prévia por linha (da execução preparada): vai gravar, já adequado, Pre
   }, rows);
   assert.deepEqual(linhasDaPrevia.map(item => item.kind), ["will_write", "will_write", "needs_minerador", "needs_serp", "refused"]);
   assert.match(linhasDaPrevia[0].sentence, /primeiro ArticleDNA \(v1\)/);
-  assert.match(linhasDaPrevia[1].sentence, /principal: diferença entre internet e wi-fi → wifi e internet são a mesma coisa/);
-  assert.match(linhasDaPrevia[3].sentence, /Validar SERP/);
+  // 2026-10-17 (noite) · a composição inteira na frase (dono: "cadê as keywords de reforço?"): a troca, a principal e as secundárias.
+  assert.match(linhasDaPrevia[1].sentence, /principal “wifi e internet são a mesma coisa” \(troca proposta: “diferença entre internet e wi-fi” → esta; decisão sua\)/);
+  // SUBSTITUÍDO "use Validar SERP" (o botão saiu): a SERP que falta é coletada no "Processar artigos", com o custo antes.
+  assert.match(linhasDaPrevia[3].sentence, /Falta a SERP da principal: “Processar artigos” coleta, com o custo antes\./);
   assert.equal(linhasDaPrevia[4].sentence, "Não é um Assunto do plano recebido.");
   // O motivo genérico do núcleo ("Assunto declarado mantido…") não explica nada: a linha livre sem volume aponta a saída.
   const generica = planSheetPreviewLines({ proposals: [proposta("k10", { status: "insufficient_evidence", reasons: ["Assunto declarado mantido como fundamento, fora das seis keywords."] })] }, [rows[1]]);
   assert.equal(generica[0].kind, "refused");
-  assert.match(generica[0].sentence, /use “Procurar outra principal” para uma sustentação com volume/);
+  // 2026-10-17 (noite) · T12 no Concluir: a Livre que é a principal de identidade (no título do Assunto) fica — a saída é o "Processar artigos"; fora da identidade, "Procurar outra principal".
+  assert.equal(rows[1].identityPrincipal, true);
+  assert.match(generica[0].sentence, /^Principal de identidade \(está no título ou no slug do plano\): fica como principal/);
+  const foraDaIdentidade = planSheetPreviewLines({ proposals: [proposta("k10", { status: "insufficient_evidence", reasons: ["Assunto declarado mantido como fundamento, fora das seis keywords."] })] }, [{ ...rows[1], identityPrincipal: undefined }]);
+  assert.match(foraDaIdentidade[0].sentence, /use “Procurar outra principal” para uma sustentação com volume/);
   const formado = planSheetPreviewLines({ proposals: [proposta("k9")] }, [{ ...rows[0], formation: { ...rows[0].formation, state: "formed", version: 3 } }]);
   assert.match(formado[0].sentence, /nova versão \(v4\)/);
   assert.deepEqual(planSheetOutcomeSentence({ status: "dna_created", message: "Primeiro ArticleDNA criado." }), { tone: "success", text: "Primeiro ArticleDNA criado." });
@@ -229,16 +235,21 @@ const semComentarios = (codigo: string) => codigo.replace(/\/\*[\s\S]*?\*\//g, "
 test("estrutural · a planilha só chama a melhoria, a SERP por keyword e a leitura do cache: nada no Minerador", () => {
   const tela = semComentarios(ler("../modules/arquiteto/plan-article-sheet.tsx"));
   const rotas = [...tela.matchAll(/["'`](\/api\/[^"'`?$]+)/g)].map(match => match[1]).sort();
-  // 2026-10-16 · restauração do fluxo de sempre: sem "Consolidar o Silo do plano" nem "Linha editorial", as rotas são as de 99ec14f.
-  assert.deepEqual([...new Set(rotas)], ["/api/arquiteto/article-improvement", "/api/arquiteto/keyword-serp", "/api/arquiteto/serp-subject"]);
+  /*
+   * 2026-10-16 · restauração do fluxo de sempre: sem "Consolidar o Silo do plano" nem "Linha editorial".
+   * 2026-10-17 (noite) · SUBSTITUÍDO o "Validar SERP" pela rota `keyword-serp` (SDD da linha única, F3: "Sai: o Validar
+   * SERP só de coleta para linhas do plano"): a SERP da principal que falta é a coleta da MESMA melhoria (`collect`, o
+   * servidor confere volume e identidade e recusa pagar além do autorizado). Sobram duas rotas.
+   */
+  assert.deepEqual([...new Set(rotas)], ["/api/arquiteto/article-improvement", "/api/arquiteto/serp-subject"]);
   assert.doesNotMatch(tela, /\/api\/minerador/);
   assert.doesNotMatch(tela, /measureKeywordVolume|runKeywordLogicWithCore|importSubjectDiscoveryWithCore|applyKeywordDecisionEntries|keywords\/delete/);
   // 2026-10-17 (decisão do dono de 16/10; SUBSTITUI "nunca approveNewKeywords" aqui): o aceite das keywords NOVAS vai só quando a prévia as listou — o servidor incorpora pelos núcleos do Minerador; a tela não fala com o Minerador.
   assert.match(tela, /const comNovas = improvementNewKeywordsPreview\(item\.run, item\.readyIds\)\.total > 0;/);
   assert.match(tela, /\.\.\.\(approveNewKeywords \? \{ approveNewKeywords: true \} : \{\}\)/);
-  assert.match(tela, /onlyMeasuredVolume: true/, "o servidor confere o volume no banco antes de pagar");
   assert.match(tela, /origin: "plan_sheet"/);
-  assert.match(tela, /runPaidSerpBlocks/, "o mesmo executor de blocos pagos da mesa (plano somado, uma confirmação)");
+  assert.match(tela, /action: "collect", runId: item\.run\.runId, decisionHash: item\.run\.decisionHash, authorizedCostUsd: item\.run\.costs\.estimatedCostUsd\.max/, "a coleta paga só com o custo autorizado na prévia");
+  assert.doesNotMatch(tela, /keyword-serp|runPaidSerpBlocks|validateSerp/);
   assert.match(tela, /<OperationProgress /, "o andamento de cada ação");
   // 2026-10-14 (noite) · sem a planilha separada, o resultado de cada linha fica na própria linha da tabela.
   assert.match(tela, /data-testid="architect-plan-row-result"/, "o resultado por linha");
@@ -253,7 +264,7 @@ test("estrutural · o painel 'Melhorar publicados' inclui os Assuntos com plano 
   assert.doesNotMatch(painel, /planGroups|Formar os artigos do plano|architect-improvement-plan-group/);
   // 2026-10-16 · restauração do fluxo de sempre: o painel volta a reforçar os artigos do plano (sem excludePlanArticles).
   assert.doesNotMatch(painel, /excludePlanArticles/);
-  assert.match(painel, /restored\.origin === "plan_sheet"/, "o painel não retoma a execução da planilha");
+  assert.match(painel, /restored\.origin !== "plan_sheet"/, "o painel não retoma a execução da planilha");
   const tela = semComentarios(ler("../modules/arquiteto/arquiteto-workspace.tsx"));
   assert.doesNotMatch(tela, /planGroups=/);
   // 2026-10-14 (tarde) · pedido do dono ("uma lista só, sem planilhas duplicadas"): a planilha separada saiu da aba;

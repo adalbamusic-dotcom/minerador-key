@@ -896,11 +896,19 @@ export function planArticleImprovements(input: {
       const nucleo = peloNucleo ? slugCoreWords(subjectSlugOf(target), target.signals.centralEntity).join(" + ") : "";
       reasons.push(`Livre sem volume e fora da identidade (“${old?.keyword ?? target.theme}” não está no título nem no slug do Assunto): “${nova.keyword}” (${nova.volume}) assume como principal pelo Assunto, pelo slug e pelo DNA (${peloNucleo ? `leva o núcleo do slug, ${nucleo}` : "mesma entidade e mesma intenção"}); “${old?.keyword ?? target.theme}” continua no artigo como o Assunto (fundamento), e o título e o slug do plano ficam. Proposta: decisão sua na prévia.`);
     } else if (principalId && principalId !== target.primaryId) reasons.push(proof && proof.sharedPages < 2 ? "Nova principal sustentada pelo fundamento editorial e pela SERP completa da candidata; não por coincidência com a frase antiga." : "Principal com demanda medida e compatibilidade de SERP.");
+    /*
+     * 2026-10-17 (noite) · amarelo da WifiConecta: o artigo do plano ou do Assunto que ainda NÃO tem ArticleDNA e cuja
+     * principal é a IDENTIDADE (T12) forma com ela, mesmo sem nenhuma candidata de reforço — formar o primeiro DNA é
+     * mudança. Sem isto, a Livre sem volume e sem candidata saía "evidência insuficiente", com zero membros, e o
+     * "Concluir formação" a recusava com "use Procurar outra principal": a regra da identidade não chegava ao Concluir.
+     * A principal entra nos membros por `enforceSubjectMembership` (a de sempre).
+     */
+    const formaOPrimeiro = target.kind === "subject" && !target.memberIds.length && Boolean(principalId) && principalId === target.primaryId && identidade && !old?.published;
     // 2026-10-17 · a principal de identidade fica com pouco ou nenhum volume; a linha diz por quê.
-    if (identidade && old && !old.volumeValidated && (target.kind === "subject" || target.post === "free") && (added.length || candidates.length)) reasons.push(identityPrincipalReason(target, old));
+    if (identidade && old && !old.volumeValidated && (target.kind === "subject" || target.post === "free") && (added.length || candidates.length || formaOPrimeiro)) reasons.push(identityPrincipalReason(target, old));
     if (livreSemVolume && pelaLinha && !pelaLinha.length && added.length) reasons.push(`Nenhuma candidata com volume mantém a intenção de “${old?.keyword ?? target.theme}” nem leva o núcleo do slug: a principal fica e o artigo só recebe reforço.`);
     for (const id of pelaCopy.filter(id => id !== principalId || principalId === target.primaryId)) reasons.push(`${COPY_LINE_LABEL}: ${copyReason(byId.get(id)!, daLinhaDeCopy(id)!.match, linha?.principalText ?? null)}`);
-    const mudou = added.length || principalId !== target.primaryId;
+    const mudou = added.length || principalId !== target.primaryId || formaOPrimeiro;
     return { targetId: target.id, kind: target.kind, theme: target.theme, currentPrimaryId: target.primaryId, principalId, memberIds: members, addIds: added, removeIds, transfers: added.filter(id => byId.get(id)?.territoryRef !== target.territoryRef), angle: angleOf(byId.get(principalId ?? "")), exclusions: [], reasons,
       status: !target.territoryRef ? "insufficient_evidence" : mudou && principalId ? "ready" : old?.volumeValidated ? "adequate" : eligible.some(e => e.targetId === target.id) ? "no_alternative" : "insufficient_evidence",
       evidenceBasis: mudou ? pelaCopy.length ? "copy_line" : proof && proof.sharedPages >= 2 ? "serp" : "editorial_and_candidate_serp" : null,
@@ -1085,7 +1093,8 @@ function enforceChosenPrincipals(targets: readonly ImprovementTarget[], proposal
 }
 
 /** F4 — o motivo que a prévia mostra quando a principal declarada assume. */
-export const DECLARED_PRINCIPAL_IMPROVEMENT_REASON = "Principal declarada no plano do Silo: cabeceira fixa (D1-bis), mesmo sem volume medido.";
+/* 2026-10-17 (noite) · SUBSTITUÍDO o "mesmo sem volume medido", que aparecia também na Travada COM volume (amarelo: "internet residencial barata", 1.600). */
+export const DECLARED_PRINCIPAL_IMPROVEMENT_REASON = "Principal declarada no plano: fica como principal (Travada ou com volume definido).";
 export const DECLARED_PLAN_PENDING_REASON = "Plano declarado: a descrição do escopo vira a promessa e o papel do plano vira a hierarquia (D8).";
 
 /**
