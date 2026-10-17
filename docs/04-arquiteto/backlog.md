@@ -1,5 +1,10 @@
 - [ ] **APROVADA em 2026-10-16 (F0 entregue em 16/10; F1 aguarda a aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 aprovadas com as recomendações.
 
+## Slug declarado no plano do Minerador — 2026-10-16
+
+- [x] O candidato novo do artigo do plano e o ArticleDNA (`suggestedSlug`) usam o `plan.slug` declarado no Minerador; publicado intocado; plano sem slug como antes (detalhe em `estado-atual.md`, mesmo título).
+- [ ] Dono: depois de cadastrar o plano com slug no Minerador, aprovar e enviar, conferir na aba Artigos do Arquiteto que o artigo novo do plano mostra o slug declarado.
+
 ## F0 da linha única — cenários-ouro — Arquiteto — 2026-10-16
 
 Só testes; nenhum código de produção mudou. Detalhe e a conclusão de cada cenário em `estado-atual.md` (mesmo título). **Validado manualmente: não** (nada mudou na tela).

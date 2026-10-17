@@ -80,6 +80,12 @@ keywords" e "Importar CSV"; some com os grupos indisponíveis, 409):
 - **"Colar plano em texto"** — o mesmo formato de `parseDeclaredPlanText`
   (cabeçalho do Silo + "1. Título" + "Palavra-chave: …" + descrição; aceita
   também "Trava: travada|livre|automática") preenche o topo e as linhas.
+  > **AMPLIADO em 2026-10-16** (pedido do dono: "reconhecer todo tipo de
+  > organização"). O MESMO leitor aceita também blocos com o papel na 1ª
+  > linha ("Silo", "Pilar", "Suporte"), linhas sem rótulo pela forma,
+  > planilha (TAB) e CSV com cabeçalho, tabela sem número e numerado sem
+  > "Palavra-chave:", e o slug opcional por artigo (`plan.slug`, aditivo). Os
+  > formatos acima continuam valendo. Vale o §79.1 da spec do Minerador.
 - **Linhas:** `#` (ordem), Papel (Pilar/Suporte; no Silo novo a 1ª é Pilar),
   **Assunto (título)**, **Keyword**, **Detalhes** (até 1.200, uma linha), **Trava**
   (Automática pelo volume · Travada · Livre).

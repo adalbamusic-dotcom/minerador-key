@@ -78,11 +78,25 @@ test("o envio manda o importRequestId gerado uma vez por prévia; sucesso só de
 test("o card tem cor, destino (Silo novo, Silo existente, artigo publicado) e, por linha, Assunto, keyword, detalhes, papel e trava", () => {
   assert.match(CARD, /new_silo: "Silo novo", existing_silo: "Silo existente", published: "Artigo publicado"/);
   assert.match(CARD, /auto: "Automática \(pelo volume\)", locked: "Travada", free: "Livre"/);
-  for (const coluna of ["Assunto (título)", "Keyword", "Detalhes", "Papel", "Trava"]) assert.ok(CARD.includes(`>${coluna}</th>`), coluna);
-  assert.match(CARD, /const preencherDoTexto = \(texto: string = colado\) => \{[\s\S]*?parseDeclaredPlanText\(texto\)/, "colar o plano em texto preenche as linhas");
+  for (const coluna of ["Assunto (título)", "Keyword", "Slug", "Detalhes", "Papel", "Trava"]) assert.ok(CARD.includes(`>${coluna}</th>`), coluna);
+  // 2026-10-16 · o 2º parâmetro é o Silo escolhido quando o texto traz vários (o MESMO leitor, com `siloName`).
+  assert.match(CARD, /const preencherDoTexto = \(texto: string = colado, siloName: string \| null = null\) => \{[\s\S]*?parseDeclaredPlanText\(texto\)[\s\S]*?parseDeclaredPlanText\(texto, \{ siloName: escolhido \}\)/, "colar o plano em texto preenche as linhas");
   assert.match(CARD, /method: "GET", groupId/, "Silo existente lê as linhas gravadas (leitura compatível)");
   assert.match(CARD, /linhaVazia\(1, "Pilar"\)/, "no Silo novo a primeira linha nasce Pilar");
   assert.match(CARD, /maxLength=\{DECLARED_PLAN_SCOPE_MAX\}/);
+});
+
+test("2026-10-16 · o slug do artigo: a linha tem o campo (editável, colar dispara o preenchimento), o texto colado o preenche, o pedido o leva (fora do publicado) e a prévia o mostra", () => {
+  assert.match(CARD, /aria-label=\{`Slug da linha \$\{index \+ 1\}`\} onPaste=\{colarPlano\} value=\{linha\.slug\}/);
+  assert.match(CARD, /onChange=\{event => mudarLinha\(linha\.key, \{ slug: event\.target\.value \}\)\}/);
+  const preencher = trecho(CARD, "const preencherDoTexto", "const preencheuInicial");
+  assert.match(preencher, /slug: article\.rawSlug \?\? ""/, "o slug colado (caminho, URL ou só o trecho) vai para a linha");
+  assert.match(preencher, /FORMATO_LABELS\[lido\.format\]/, "o aviso da colagem diz o formato reconhecido");
+  const pedido = trecho(CARD, "const currentRequest = ()", "const handlePreview = async");
+  assert.match(pedido, /\.\.\.\(destino === "published" \? \{\} : \{ slug: linha\.slug\.trim\(\) \|\| null \}\)/, "no publicado, URL/slug/canonical são da página");
+  assert.match(CARD, /data-subject-cadastro-slug/);
+  assert.match(CARD, /article\.slug \? <span className="break-all text-identity-slug">/);
+  assert.match(CARD, /sem slug: o Arquiteto forma pela keyword/);
 });
 
 test("GROUPS_NOT_AVAILABLE esconde o recurso", () => {

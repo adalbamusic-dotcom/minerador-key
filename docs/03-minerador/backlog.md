@@ -2,6 +2,33 @@
 
 - [ ] **Linha única do Minerador (2026-10-16, APROVADA — F0 e F1 feitas):** `docs/compartilhado/sdd-linha-unica-do-minerador-2026-10-16.md` — F0 cenários-ouro, depois uma fase por etapa unificada; decisões D1–D8 no topo e no §8.
 
+## Cadastrar Assuntos: o CSV de planejamento, vários Silos e abrir o .csv — 2026-10-16
+
+Detalhe em `docs/03-minerador/estado-atual.md`. **Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- [x] Cabeçalho do CSV/planilha/tabela por sinônimo e por token (numero, silo, hierarquia, titulo_h1_sugerido, keyword_hipotese_a_validar, slug_proposto, intencao_exclusiva…), com BOM, `_`, acento e caixa; colunas que o plano não usa numa linha só ("Colunas ignoradas: …").
+- [x] Do arquivo, só Silo, papel, ordem, Assunto, keyword, slug e detalhes (decisão do dono, 16/10); fora do escopo, CTA, página comercial e links ficam fora (o pedido de levá-los ao ArticleDNA foi retirado pelo dono — nada implementado).
+- [x] Vários Silos no mesmo texto: agrupados por Silo; o card pede a escolha e preenche o escolhido; o núcleo (rota e MCP) pede `siloName` (`SILO_CHOICE_REQUIRED`) antes de ler o banco. A recusa antiga "dois Silos = recusa" está marcada SUBSTITUÍDO na spec §79.1.
+- [x] Slug do Silo pelo começo comum dos slugs dos artigos, quando o texto não traz o do Silo.
+- [x] "ou abrir um arquivo .csv" e arrastar o .csv no "Colar plano em texto" (UTF-8 com/sem BOM, Windows-1252, acento quebrado desfeito); nada é gravado ao abrir.
+- [x] Catálogo, MCP (`siloName`), rota, cenário-ouro G17, guarda e DOM.
+- [ ] Dono: homologar na tela — abrir o CSV da WifiConecta, escolher "Planos e contratação", cadastrar; depois "Wi-Fi e fibra óptica" pelo "Silo existente" (azul) → "Substituir o plano" → conferir as quatro listas antes de decidir.
+- [ ] Decidir (dono), se quiser manter as keywords já gravadas no azul: "wifi lento" e "diferença entre internet e wifi" do arquivo não deduplicam com "Wi-Fi lento" e "diferença entre internet e Wi-Fi" (o hífen conta — E-4); hoje entram como novas e as gravadas saem pelo "Tirar do plano". Corrigir a keyword na linha antes da prévia resolve caso a caso.
+- [ ] Ideia (não pedida): o aviso "já é o Silo da cor X" do card casa pelo nome do grupo; se o dono quiser, casar também pelo nome do Silo gravado no plano do grupo (exige o plano no resumo do grupo).
+
+## Cadastrar Assuntos: o leitor tolerante e o slug do artigo — 2026-10-16
+
+Detalhe em `docs/03-minerador/estado-atual.md`. **Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- [x] O leitor único (`parseDeclaredPlanText`) reconhece blocos com o papel na 1ª linha ("Silo", "Pilar", "Suporte"…), linhas sem rótulo pela forma (endereço = slug; minúsculas sem pontuação = keyword; 1ª linha = título; resto = detalhes), planilha (TAB) e CSV com cabeçalho em qualquer ordem, tabela sem número e numerado sem "Palavra-chave:"; os formatos de antes continuam. O ambíguo vai para "não entendidas" com o motivo.
+- [x] O detector reconhece todos esses formatos e nunca confunde lista simples de keywords com plano; colar em qualquer campo do card preenche o Silo e as linhas.
+- [x] Slug do artigo (opcional, aditivo): gravado em `keyword_subject.plan.slug`, recusado quando inválido, repetido ou igual ao do Silo, aviso fora do caminho do Silo; coluna Slug no card e na prévia; `slug` no MCP `declare_silo_plan` e na rota `plans/import`; `validate_silo_plan` aceita o caminho inteiro; catálogo atualizado.
+- [x] Arquiteto: o candidato novo do artigo do plano e o ArticleDNA (`suggestedSlug`) usam o slug declarado; publicado nunca muda.
+- [x] Cenário-ouro G16 (o texto do dono de ponta a ponta + os outros formatos) e a guarda "UM leitor do plano colado"; C16 no Arquiteto.
+- [ ] Dono: homologar na tela — colar o texto dos blocos em "Cadastrar Assuntos" (Silo novo), conferir Silo + 8 linhas com o slug, gerar a prévia, cadastrar e reabrir em "Silo existente".
+- [ ] Deploy: depois de cadastrar plano com slug, não voltar a um deploy anterior a este (o schema `.strict()` do plano anterior recusaria o `slug`).
+- [ ] Limite: o resumo do histórico escrito pelo gatilho do banco (`20261015120000`) não guarda o slug (só o do código guarda); mudar exige migration própria.
+
 ## F1 da linha única — 2026-10-16
 
 Detalhe em `docs/03-minerador/estado-atual.md`. **Verificado no código e confirmado por teste. Validado manualmente: não.**

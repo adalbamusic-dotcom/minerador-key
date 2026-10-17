@@ -194,6 +194,7 @@ const DeclaredSiloPlanInput = z.object({
     role: z.enum(DECLARED_PLAN_ROLES).describe("Exatamente um Pilar no plano; os demais são Suporte."),
     scope: z.string().max(DECLARED_PLAN_SCOPE_MAX * 2).describe(`Os detalhes do artigo, uma linha, até ${DECLARED_PLAN_SCOPE_MAX} caracteres.`),
     lock: z.enum(DECLARED_PLAN_LOCK_CHOICES).nullable().optional().describe("Trava da keyword: auto (pelo volume medido; padrão), locked (travada à mão) ou free (livre à mão). Omitida = mantém a gravada."),
+    slug: z.string().trim().max(400).nullable().optional().describe("Opcional: o slug do artigo ('/slug-do-silo/slug-do-artigo/', a URL ou só o último trecho). Vale só para artigo novo (publicado nunca muda); o servidor normaliza, recusa o inválido e o repetido e avisa quando não fica dentro do slug do Silo. Omitido = mantém o gravado; null = tira."),
   }).strict()).min(1).max(DECLARED_PLAN_ARTICLES_MAX + 10),
 }).strict();
 
@@ -841,7 +842,8 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     inputSchema: z.object({
       brandId: brandIdInput,
       mode: z.enum(["preview", "apply"]),
-      text: z.string().max(60000).optional().describe("O plano do Silo como o usuário colou (tabela ou texto)."),
+      text: z.string().max(60000).optional().describe("O plano do Silo como o usuário colou, pelo mesmo leitor do card: lista numerada ('1. Título', 'Palavra-chave: …'), blocos separados por linha em branco com o papel na 1ª linha ('Silo', 'Pilar', 'Suporte') e título, keyword, slug e descrição com ou sem rótulo, tabela com '|', planilha colada (TAB) ou CSV com cabeçalho (Papel, Assunto, Keyword, Slug, Descrição — também por sinônimo, como o CSV de planejamento: numero, silo, hierarquia, titulo_h1_sugerido, keyword_hipotese_a_validar, slug_proposto, intencao_exclusiva; as outras colunas são ignoradas e ditas nos avisos)."),
+      siloName: z.string().trim().min(1).max(200).optional().describe("Só com text que traz MAIS DE UM Silo (ex.: o CSV com a coluna silo): o nome do Silo a cadastrar agora. Sem ele, a recusa SILO_CHOICE_REQUIRED lista os Silos com a contagem; um cadastro = um Silo, e o outro continua no mesmo texto para o próximo cadastro."),
       plan: DeclaredSiloPlanInput.optional(),
       group: DeclaredPlanGroupInput,
       destination: SubjectCadastroDestinationInput.optional(),
@@ -851,7 +853,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       userConfirmation: confirmationInput.optional(),
     }),
     annotations: write,
-  }, async ({ brandId, mode, text, plan, group, destination, importRequestId, planMode, decisionHash, userConfirmation }) => {
+  }, async ({ brandId, mode, text, plan, group, destination, importRequestId, planMode, decisionHash, userConfirmation, siloName }) => {
     if (mode === "apply" && !userConfirmation) {
       return asText({ ok: false, code: "human_confirmation_required", message: "Declarar o plano do Silo é decisão humana (ADR-022). Mostre a prévia, peça o aceite e envie as palavras dele em userConfirmation." });
     }
@@ -895,6 +897,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
         brandSiteUrl: typeof siteUrl === "string" ? siteUrl : null,
         planMode: planMode ?? null,
         decisionHash: decisionHash ?? null,
+        siloName: plan ? null : siloName ?? null,
       });
       if (!result.ok) throw new PlatformToolFailure(result.code, { message: result.reason, ...(result.blockers ? { blockers: result.blockers } : {}) });
       return result;

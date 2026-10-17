@@ -140,9 +140,22 @@ export function validateSiloPlan(input: SiloPlan, context: SiloPlanContext): Val
 
   /* O slug que a casa formaria, lado a lado com o artigo — para comparar, não para devolver. */
   const sugeridos = input.articles.map(article => article.targetKeyword ? suggestArticleSlugFor(article.targetKeyword, siloSlug || null) : null);
+  /*
+   * 2026-10-16 · o slug do artigo pode vir com o caminho inteiro, como o dono
+   * escreve no plano ("/planos-de-internet/x/" ou a URL): vale o último trecho
+   * (o mesmo que o cadastro grava, `normalizeDeclaredArticleSlug`) e, fora do
+   * slug do silo, é aviso.
+   */
+  const caminhos = input.articles.map(article => article.slug ? semBarras(article.slug.trim().replace(/^https?:\/\/[^/]+/i, "")) : "");
   const artigos = input.articles.map((article, indice) => {
-    const slug = article.slug ? semBarras(article.slug) : sugeridos[indice];
+    const caminho = caminhos[indice];
+    const slug = article.slug ? (caminho.includes("/") ? ultimoSegmento(caminho) : caminho) : sugeridos[indice];
     return { ...article, slug, path: slug ? `${siloSlug}/${slug}` : null };
+  });
+  caminhos.forEach((caminho, indice) => {
+    const segmentos = caminho.split("/").filter(Boolean);
+    const pai = segmentos.length >= 2 ? segmentos[segmentos.length - 2] : null;
+    if (pai && siloSlug && pai !== siloSlug) add("warning", `articles.${indice}.slug`, `O slug "${input.articles[indice].slug}" não fica dentro do slug do silo ("${siloSlug}"): vale o último trecho, "${artigos[indice].slug}".`);
   });
 
   const publicados = new Set(context.publishedPaths.map(semBarras));

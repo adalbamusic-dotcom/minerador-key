@@ -16,6 +16,7 @@ import {
   SUBJECT_ENTRY_TITLE_MAX,
   declaredPlanLeftoverReason,
   declaredPrincipalLock,
+  normalizeDeclaredArticleSlug,
   normalizeDeclaredPhraseKey,
   normalizeDeclaredSiloSlug,
   parseDeclaredPlanText,
@@ -140,10 +141,14 @@ export type SubjectCadastroDestination =
  */
 export type SubjectConversionRequest = { order: number; fromKeywordId: string; articleId?: string | null };
 
-/** O cadastro já estruturado (card e MCP): `subject` = título do Assunto, `principal` = a keyword que o carrega. */
+/**
+ * O cadastro já estruturado (card e MCP): `subject` = título do Assunto, `principal` = a keyword que o carrega.
+ * 2026-10-16 · `slug` (opcional) = o slug do artigo, do jeito que o dono escreveu ("/planos-de-internet/x/",
+ * URL ou "x"); ausente = mantém o gravado (como a trava); `null` = tira o slug declarado.
+ */
 export type StructuredDeclaredPlan = {
   silo?: { name: string; slug?: string | null; objective?: string | null } | null;
-  articles: Array<{ order: number; subject: string; principal?: string | null; role: DeclaredPlanRole; scope: string; lock?: DeclaredPlanLockChoice | null }>;
+  articles: Array<{ order: number; subject: string; principal?: string | null; role: DeclaredPlanRole; scope: string; lock?: DeclaredPlanLockChoice | null; slug?: string | null }>;
 };
 
 export type DeclaredPlanSubjectState = "new" | "existing" | "existing_subject" | "other_plan" | "published";
@@ -210,6 +215,13 @@ export type DeclaredPlanPreviewArticle = {
   /** A keyword que carrega o Assunto (no cadastro único) ou a principal declarada (no formato anterior). */
   principal: { phrase: string | null; state: DeclaredPlanPrincipalState; label: string; keywordId: string | null; status: string | null; volumeValidated: boolean; volume: number | null; groupId: string | null };
   lock: DeclaredPlanLockPreview | null;
+  /**
+   * 2026-10-16 · o slug declarado do artigo que vai ser gravado (o último
+   * segmento), e o caminho inteiro quando veio no texto. `null` = sem slug
+   * declarado (o Arquiteto forma pela principal). Ausente no destino publicado.
+   */
+  slug?: string | null;
+  slugPath?: string | null;
   /** Por que este artigo impede gravar (vazio = pode). */
   problems: string[];
   /** Itens aprovados deste artigo que voltam para "Em revisão" ao gravar (R2). */
@@ -322,7 +334,9 @@ export type DeclaredPlanImportRefusalCode =
   /** 2026-10-13 · "Substituir o plano": aplicar sem a prévia, sobre prévia velha, ou a retirada ("Sai") parou no meio. */
   | "DECISION_REQUIRED"
   | "DECISION_STALE"
-  | "WITHDRAWAL_FAILED";
+  | "WITHDRAWAL_FAILED"
+  /** 2026-10-16 · o texto traz mais de um Silo e `siloName` não escolheu um deles (os Silos vão em `blockers`). */
+  | "SILO_CHOICE_REQUIRED";
 
 export type DeclaredPlanImportResult =
   | ({ ok: true; mode: "preview" } & DeclaredPlanPreview)
@@ -475,15 +489,21 @@ export function parsedPlanFromStructured(plan: StructuredDeclaredPlan): ParsedDe
     rawSlug,
     objective: typeof plan.silo?.objective === "string" && plan.silo.objective.trim() ? plan.silo.objective.replace(/\s+/g, " ").trim() : null,
   };
-  const articles: ParsedPlanArticle[] = plan.articles.map((article, index) => ({
-    order: article.order,
-    subject: (article.subject || "").replace(/\s+/g, " ").trim(),
-    principal: typeof article.principal === "string" && article.principal.trim() ? article.principal.replace(/\s+/g, " ").trim() : null,
-    role: article.role,
-    scope: (article.scope || "").replace(/\s+/g, " ").trim(),
-    line: index + 1,
-    ...(article.lock ? { lock: article.lock } : {}),
-  }));
+  const articles: ParsedPlanArticle[] = plan.articles.map((article, index) => {
+    // 2026-10-16 · o slug do artigo pela MESMA normalização do texto colado (ausente = mantém o gravado; null = tira).
+    const rawSlug = article.slug === undefined ? undefined : typeof article.slug === "string" && article.slug.trim() ? article.slug.trim() : null;
+    const endereco = rawSlug ? normalizeDeclaredArticleSlug(rawSlug) : null;
+    return {
+      order: article.order,
+      subject: (article.subject || "").replace(/\s+/g, " ").trim(),
+      principal: typeof article.principal === "string" && article.principal.trim() ? article.principal.replace(/\s+/g, " ").trim() : null,
+      role: article.role,
+      scope: (article.scope || "").replace(/\s+/g, " ").trim(),
+      line: index + 1,
+      ...(article.lock ? { lock: article.lock } : {}),
+      ...(rawSlug !== undefined ? { rawSlug, slug: endereco?.slug ?? null, slugPath: endereco?.path ?? null } : {}),
+    };
+  });
   const { refusals, notices } = validateParsedDeclaredPlan({ silo, articles });
   return { silo, articles, unparsed: [], refusals, notices };
 }
@@ -500,6 +520,8 @@ export async function declaredPlanHash(parsed: Pick<ParsedDeclaredPlan, "silo" |
       scope: article.scope,
       // 2026-10-13 · a trava manual é significado; "auto" (ou nada) mantém o hash de antes.
       ...(article.lock === "locked" || article.lock === "free" ? { lock: article.lock } : {}),
+      // 2026-10-16 · o slug declarado também é significado; sem slug, o hash é o de antes.
+      ...(article.slug ? { slug: article.slug } : {}),
     })),
   });
 }
@@ -533,6 +555,8 @@ type Resolved = {
   keywordRow: LiveRow | null;
   /** A trava a gravar: `undefined` = sem trava manual. */
   nextLock: DeclaredPlanLock | undefined;
+  /** 2026-10-16 · o slug declarado a gravar: `undefined` = sem slug (o Arquiteto forma pela principal). */
+  nextSlug: string | undefined;
   /** O Assunto cadastrado a gravar (`undefined` = manter o gravado). */
   nextEntry: SubjectEntry | null | undefined;
   change: "new" | "changed" | "unchanged";
@@ -591,7 +615,8 @@ async function classify(input: {
   const notices: string[] = [];
   if (substituir && destino?.kind !== "existing_silo") blockers.push(`“${DECLARED_PLAN_MODE_LABELS.replace}” só vale no destino “Silo existente”: escolha o Silo da cor.`);
   // As recusas do plano são conferidas no plano INTEIRO (os já gravados + os do cadastro), mais abaixo.
-  if (!publicado) notices.push(...parsed.notices.filter(notice => !/sem "Palavra-chave:"/.test(notice)));
+  // 2026-10-16 · no Silo existente o Silo é o gravado: o slug tirado dos endereços dos artigos não é dito ali.
+  if (!publicado) notices.push(...parsed.notices.filter(notice => !/sem "Palavra-chave:"/.test(notice) && !(destino?.kind === "existing_silo" && parsed.silo.slugDerived && /^O texto não trouxe o slug do Silo/.test(notice))));
 
   // O grupo: pela cor, pelo uuid, ou o grupo do Silo existente.
   const grupo = await resolveGroupChoice({ brandId, groupsClient: input.groupsClient, group: input.group, destination: destino, notices });
@@ -658,15 +683,17 @@ async function classify(input: {
      * Arquiteto (e publicado nunca muda, AGENTS §11).
      */
     if (substituir && storedPlan && parsed.silo.name) {
-      const slugPedido = parsed.silo.rawSlug ? parsed.silo.slug : storedPlan.siloSlug;
-      if (parsed.silo.rawSlug && slugPedido !== storedPlan.siloSlug && groupRow?.siloId) {
+      // 2026-10-16 · o slug tirado dos endereços dos artigos (não escrito no texto) só vale quando o Silo ainda não tem slug nem foi confirmado.
+      const slugDoTexto = parsed.silo.rawSlug && (!parsed.silo.slugDerived || (!storedPlan.siloSlug && !groupRow?.siloId)) ? parsed.silo.rawSlug : null;
+      const slugPedido = slugDoTexto ? parsed.silo.slug : storedPlan.siloSlug;
+      if (slugDoTexto && slugPedido !== storedPlan.siloSlug && groupRow?.siloId) {
         blockers.push(`O slug do Silo (${storedPlan.siloSlug ? `/${storedPlan.siloSlug}/` : "sem slug"}) já está confirmado no Arquiteto: trocar o slug é decisão de lá. Tire o "Slug:" do plano novo ou repita o atual.`);
       }
       silo = {
         heading: parsed.silo.heading,
         name: parsed.silo.name,
-        slug: parsed.silo.rawSlug ? parsed.silo.slug : storedPlan.siloSlug,
-        rawSlug: parsed.silo.rawSlug ?? storedPlan.siloSlug,
+        slug: slugDoTexto ? parsed.silo.slug : storedPlan.siloSlug,
+        rawSlug: slugDoTexto ?? storedPlan.siloSlug,
         objective: parsed.silo.objective ?? storedPlan.objective,
       };
       if (chave(storedPlan.siloName) !== chave(parsed.silo.name)) notices.push(`O Silo passa de "${storedPlan.siloName}" para "${parsed.silo.name}".`);
@@ -815,6 +842,8 @@ async function classify(input: {
     const escolha = article.lock;
     const storedLock = match?.plan.lock;
     const nextLock: DeclaredPlanLock | undefined = escolha === undefined ? storedLock : escolha === "auto" ? undefined : escolha;
+    // 2026-10-16 · o slug: o do texto/linha; sem ele (ausente), o gravado fica; `null` tira.
+    const nextSlug: string | undefined = article.rawSlug === undefined ? match?.plan.slug : article.slug ?? undefined;
     const nextEntry: SubjectEntry | null | undefined = shape === "cadastro"
       ? { title, source: "cadastro" }
       : chave(title) === chave(subjectRow?.keyword ?? "") ? undefined : { title, source: "cadastro" };
@@ -830,6 +859,7 @@ async function classify(input: {
         order: article.order, role: article.role, scope: article.scope,
         declaredPrincipal: article.principal ? { keywordId: principalRow?.id ?? "", phrase: principalRow?.keyword || article.principal } : null,
         ...(nextLock ? { lock: nextLock } : {}),
+        ...(nextSlug ? { slug: nextSlug } : {}),
       };
       const entryNext = nextEntry === undefined ? match.entry : nextEntry;
       if (principalRow && sameDeclaredArticleContent(match.plan, nextContent) && sameSubjectEntry(match.entry, entryNext)) change = "unchanged";
@@ -844,7 +874,7 @@ async function classify(input: {
     const aprovados = change === "unchanged" ? [] : [subjectRow, principalRow && principalRow !== subjectRow ? principalRow : null].filter((row): row is LiveRow => Boolean(row) && row!.status === "aprovado");
     approvedToReview += aprovados.length;
     blockers.push(...problems);
-    resolved.push({ article, shape, stored: match, subjectRow, keywordRow: principalRow, nextLock, nextEntry, change, conversion });
+    resolved.push({ article, shape, stored: match, subjectRow, keywordRow: principalRow, nextLock, nextSlug, nextEntry, change, conversion });
     return {
       order: article.order,
       role: article.role,
@@ -853,6 +883,8 @@ async function classify(input: {
       title,
       shape,
       change,
+      slug: nextSlug ?? null,
+      slugPath: nextSlug ? (article.slug === nextSlug && article.slugPath ? article.slugPath : null) : null,
       subject: { phrase: title, state: subjectState, label: shape === "cadastro" ? `${DECLARED_PLAN_SHAPE_LABELS.cadastro} · ${DECLARED_PLAN_SUBJECT_STATE_LABELS[subjectState]}` : DECLARED_PLAN_SUBJECT_STATE_LABELS[subjectState], keywordId: subjectRow?.id ?? null, status: subjectRow?.status ?? null, groupId: subjectRow?.group_id ?? null },
       principal: { phrase: article.principal, state: principalState, label: DECLARED_PLAN_PRINCIPAL_STATE_LABELS[principalState], keywordId: principalRow?.id ?? null, status: principalRow?.status ?? null, volumeValidated: volume.validated, volume: volume.value, groupId: principalRow?.group_id ?? null },
       lock: lockView ? { choice: nextLock ?? "auto", state: lockView.state, origin: lockView.origin, label: lockView.label } : null,
@@ -867,8 +899,17 @@ async function classify(input: {
   const keptArticles: ParsedPlanArticle[] = kept.map(item => ({
     order: item.plan.order, subject: item.title, principal: item.plan.declaredPrincipal?.phrase ?? null, role: item.plan.role, scope: item.plan.scope, line: 0,
     ...(item.plan.lock ? { lock: item.plan.lock } : {}),
+    ...(item.plan.slug ? { rawSlug: item.plan.slug, slug: item.plan.slug, slugPath: null } : {}),
   }));
-  const merged: ParsedPlanArticle[] = [...keptArticles, ...parsed.articles.map((article, index) => ({ ...article, lock: resolved[index].nextLock ?? "auto" as const }))];
+  // 2026-10-16 · o slug efetivo de cada linha (o do texto, ou o gravado que fica) entra na conferência e no hash do plano inteiro.
+  const merged: ParsedPlanArticle[] = [...keptArticles, ...parsed.articles.map((article, index) => {
+    const nextSlug = resolved[index].nextSlug;
+    return {
+      ...article,
+      lock: resolved[index].nextLock ?? "auto" as const,
+      ...(article.rawSlug === undefined ? (nextSlug ? { rawSlug: nextSlug, slug: nextSlug, slugPath: null } : {}) : {}),
+    };
+  })];
   const mergedCheck = validateParsedDeclaredPlan({ silo, articles: merged });
   for (const refusal of mergedCheck.refusals) {
     blockers.push(kept.length && !parsed.refusals.some(item => item.message === refusal.message) ? `${refusal.message} (contando os ${kept.length} artigo(s) já gravados no plano)` : refusal.message);
@@ -1013,6 +1054,7 @@ async function buildReplacePreview(input: {
       if ((principalAntes?.keywordId ?? null) !== (item.keywordRow?.id ?? null)) motivos.push(`keyword “${principalAntes?.phrase ?? "sem keyword"}” → “${article.principal ?? "sem keyword"}”`);
       if ((match.plan.lock ?? null) !== (item.nextLock ?? null)) motivos.push(`trava ${lockLabel(match.plan.lock)} → ${lockLabel(item.nextLock)}`);
       if (match.plan.scope !== article.scope) motivos.push("detalhes mudam");
+      if ((match.plan.slug ?? null) !== (item.nextSlug ?? null)) motivos.push(`slug ${match.plan.slug ? `/${match.plan.slug}/` : "sem slug"} → ${item.nextSlug ? `/${item.nextSlug}/` : "sem slug"}`);
       const tituloDepois = item.nextEntry === undefined ? match.title : item.nextEntry?.title ?? match.title;
       if (chave(tituloDepois) !== chave(match.title)) motivos.push(`título “${match.title}” → “${tituloDepois}”`);
       if (item.conversion) motivos.push("o Assunto do formato anterior passa a morar na keyword (conversão)");
@@ -1165,6 +1207,8 @@ async function classifyPublished(input: {
   // Título e detalhes: um Assunto por página — a primeira linha que trouxer.
   const titulos = [...new Set(parsed.articles.map(article => article.subject).filter(Boolean))];
   const detalhes = [...new Set(parsed.articles.map(article => article.scope).filter(Boolean))];
+  // 2026-10-16 · publicado: URL, slug e canonical são da página (AGENTS §11); o slug colado não é usado.
+  if (parsed.articles.some(article => typeof article.rawSlug === "string" && article.rawSlug.trim())) notices.push("O slug das linhas não vale no destino “Artigo publicado”: URL, slug e canonical da página não mudam; ele foi ignorado.");
   if (!titulos.length) blockers.push("Escreva o Assunto (título) do artigo publicado na primeira linha.");
   if (titulos.length > 1 && new Set(titulos.map(chave)).size > 1) blockers.push(`Um Assunto por artigo publicado: as linhas trazem títulos diferentes (${titulos.map(item => `"${item}"`).join(", ")}). Deixe o título só na primeira linha.`);
   if (detalhes.length > 1) blockers.push("Os detalhes do Assunto vão uma vez só (na primeira linha) no destino publicado.");
@@ -1269,14 +1313,30 @@ export async function importDeclaredPlanWithCore(input: {
   planMode?: DeclaredPlanMode | null;
   /** 2026-10-13 · "Substituir o plano": o `decisionHash` da prévia das quatro listas (obrigatório no apply). */
   decisionHash?: string | null;
+  /**
+   * 2026-10-16 · o texto (`text`) traz vários Silos (o CSV de planejamento):
+   * o nome do Silo a cadastrar agora. Sem ele, o núcleo recusa
+   * (SILO_CHOICE_REQUIRED) listando os Silos. Não vale para o plano estruturado.
+   */
+  siloName?: string | null;
   now?: string;
 }): Promise<DeclaredPlanImportResult> {
   const brandId = typeof input.brandId === "string" ? input.brandId.trim() : "";
   if (!brandId) return { ok: false, code: "BRAND_REQUIRED", reason: "A marca ativa é necessária para cadastrar Assuntos." };
   if (!isKeywordSubjectActorId(input.actorUserId)) return { ok: false, code: "ACTOR_REQUIRED", reason: "Cadastrar Assuntos exige o usuário autenticado (auth.users.id)." };
   const actorUserId = input.actorUserId.trim();
-  const parsed = input.plan ? parsedPlanFromStructured(input.plan) : typeof input.text === "string" && input.text.trim() ? parseDeclaredPlanText(input.text) : null;
+  const parsed = input.plan ? parsedPlanFromStructured(input.plan) : typeof input.text === "string" && input.text.trim() ? parseDeclaredPlanText(input.text, { siloName: input.siloName ?? null }) : null;
   if (!parsed) return { ok: false, code: "PLAN_REQUIRED", reason: "Preencha as linhas do cadastro (ou cole o plano em texto)." };
+  // 2026-10-16 · um cadastro = um Silo: o texto com vários pede a escolha antes de qualquer leitura do banco.
+  const escolhaDoSilo = input.plan ? null : parsed.refusals.find(refusal => refusal.code === "SILO_REPEATED" || refusal.code === "SILO_NOT_IN_TEXT");
+  if (escolhaDoSilo) {
+    return {
+      ok: false,
+      code: "SILO_CHOICE_REQUIRED",
+      reason: `${escolhaDoSilo.message} Diga qual Silo cadastrar agora (siloName); o outro continua no mesmo texto para o próximo cadastro.`,
+      blockers: (parsed.silos ?? []).map(silo => `${silo.name || "Silo sem nome"}: ${silo.articleCount} artigo(s)${silo.rawSlug ? `, ${silo.rawSlug}` : ""}`),
+    };
+  }
   const importRequestId = typeof input.importRequestId === "string" && input.importRequestId.trim() ? input.importRequestId.trim() : null;
   if (input.mode === "apply" && !importRequestId) return { ok: false, code: "IMPORT_REQUEST_REQUIRED", reason: "O envio precisa de um importRequestId." };
   const now = input.now || new Date().toISOString();
@@ -1488,6 +1548,8 @@ async function applyPlan(input: {
       scope: article.scope,
       declaredPrincipal: principalId && article.principal ? { keywordId: principalId, phrase: live.find(row => row.id === principalId)?.keyword || article.principal } : null,
       ...(item.nextLock ? { lock: item.nextLock } : {}),
+      // 2026-10-16 · o slug declarado do artigo (o Arquiteto usa só no artigo novo).
+      ...(item.nextSlug ? { slug: item.nextSlug } : {}),
     };
     const comPlano = setKeywordSubject(subjectSemantic, {
       note: atual.note, destinationUrl: atual.destinationUrl, destinationCheck: atual.destinationCheck, plan,
@@ -1684,6 +1746,8 @@ export type DeclaredPlanCardRow = {
   details: string;
   lock: DeclaredPlanLockChoice;
   lockLabel: string | null;
+  /** 2026-10-16 · o slug declarado do artigo (o último segmento); `null`/ausente = sem slug declarado. */
+  slug?: string | null;
   shape: DeclaredPlanShape;
   subjectKeywordId: string;
   keywordId: string | null;
@@ -1757,6 +1821,7 @@ export async function readDeclaredPlanCardRows(input: { brandId: string; keyword
       details: item.plan.scope,
       lock: (item.plan.lock ?? "auto") as DeclaredPlanLockChoice,
       lockLabel: lock?.label ?? null,
+      slug: item.plan.slug ?? null,
       shape: item.shape,
       subjectKeywordId: item.subjectId,
       keywordId: principalId,
@@ -1781,6 +1846,7 @@ export async function readDeclaredPlanCardRows(input: { brandId: string; keyword
       details: item.details,
       lock: item.lock,
       lockLabel: lock?.label ?? null,
+      slug: item.slug ?? null,
       shape: "cadastro",
       subjectKeywordId: item.keywordId,
       keywordId: item.keywordId,
@@ -1924,6 +1990,8 @@ export async function setKeywordPlanLockWithCore(input: {
         role: gravado.plan.role,
         scope: gravado.plan.scope,
         lock,
+        // 2026-10-16 · a linha gravada igual: o slug declarado vai junto (só a trava muda).
+        ...(gravado.plan.slug ? { slug: gravado.plan.slug } : {}),
       });
     }
     if (!articles.length) continue;

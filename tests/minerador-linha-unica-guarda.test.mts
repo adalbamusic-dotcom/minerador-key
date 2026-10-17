@@ -81,6 +81,28 @@ test("linha: o card e o MCP cadastram pelo MESMO núcleo; a conversão e a trava
   assert.doesNotMatch(codigo("app/api/minerador/marcas/[brandId]/plans/import/route.ts"), /setKeywordSubject|\.update\(/, "a rota não grava direto");
 });
 
+test("linha: UM leitor do plano colado (`parseDeclaredPlanText`) — o card, o detector das entradas de keyword e o núcleo (rota e MCP) leem por ele; nenhum outro leitor de texto de plano (2026-10-16)", () => {
+  assert.deepEqual(quemTem(/function parse\w*Plan\w*Text\s*\(/), ["lib/minerador/declared-plan.ts"], "um leitor só");
+  assert.deepEqual(quemTem(/parseDeclaredPlanText\(/), [
+    "lib/minerador/declared-plan-import-core.ts",
+    "lib/minerador/declared-plan.ts",
+    "lib/minerador/plan-text-detector.ts",
+    "modules/minerador/subject-cadastro-card.tsx",
+  ]);
+  // O "colar em qualquer campo" do card dispara pelo detector, que pergunta ao MESMO leitor.
+  assert.match(codigo("lib/minerador/plan-text-detector.ts"), /const lido = parseDeclaredPlanText\(valor\);/);
+  assert.match(codigo("modules/minerador/subject-cadastro-card.tsx"), /if \(!looksLikeSiloPlanText\(texto\)\) return;[\s\S]*?preencherDoTexto\(texto\)/);
+  // 2026-10-16 · abrir/arrastar o .csv não é porta nova: os bytes viram o texto do MESMO campo e vão ao MESMO preenchimento (nenhum fetch novo).
+  assert.deepEqual(quemTem(/decodeDeclaredPlanFile\(/), ["lib/minerador/declared-plan.ts", "modules/minerador/subject-cadastro-card.tsx"]);
+  const card = codigo("modules/minerador/subject-cadastro-card.tsx");
+  const abrir = card.slice(card.indexOf("const abrirArquivo = async"), card.indexOf("const escolherArquivo"));
+  assert.match(abrir, /decodeDeclaredPlanFile\(await arquivo\.arrayBuffer\(\)\)[\s\S]*setColado\(lido\.text\);[\s\S]*preencherDoTexto\(lido\.text\);/);
+  assert.doesNotMatch(abrir, /fetch\(|callCadastro\(/, "abrir o arquivo não grava nem chama o servidor");
+  // A escolha do Silo do texto (vários Silos) volta ao MESMO preenchimento, com o MESMO leitor.
+  assert.match(card, /const escolherSiloDoTexto = \(nome: string \| null\) => \{[\s\S]*?preencherDoTexto\(colado, nome\);/);
+  assert.equal((card.match(/data-subject-cadastro-abrir-arquivo/g) || []).length, 1, "um link só para abrir o arquivo");
+});
+
 test("linha: a Pesquisa por Assunto entra pelo mesmo núcleo na tela, no MCP, no cadastro e nas sugestões do Arquiteto", () => {
   assert.deepEqual(quemTem(/importSubjectDiscoveryWithCore\(\{/), [
     "app/api/minerador/marcas/[brandId]/subject-discovery/import/route.ts",

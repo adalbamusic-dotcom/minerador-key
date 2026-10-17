@@ -598,6 +598,8 @@ export function buildArticleFormationUniverse(input: {
   deferredKeywordIds?: ReadonlyMap<string, string>;
   /** Assunto do Silo pai: os artigos sem Assunto recebem a SUGESTÃO dele. */
   siloSubjectKeywordId?: string | null;
+  /** 2026-10-16 · o slug declarado no plano do Minerador, por Assunto: o candidato NOVO preso a ele nasce com este slug. */
+  declaredSlugBySubjectKeywordId?: ReadonlyMap<string, string>;
 }): ArticleFormationUniverse {
   const publicados = [...(input.publishedArticles || [])];
   const conflicts: string[] = [];
@@ -935,6 +937,9 @@ export function buildArticleFormationUniverse(input: {
       if (subjectKeywordId || input.suggestedSubjectByCandidateRef?.has(candidate.candidateRef)) candidate.carriesSubject = true;
       if (subjectKeywordId) {
         candidate.subjectKeywordId = subjectKeywordId;
+        // 2026-10-16 · o slug declarado no plano (só no candidato novo: o publicado não tem slug sugerido). A conferência do publicado abaixo vale para ele também.
+        const slugDeclarado = input.declaredSlugBySubjectKeywordId?.get(subjectKeywordId);
+        if (slugDeclarado && candidate.suggestedSlug !== null) candidate.suggestedSlug = slugDeclarado;
         const membro = candidate.keywords.find(item => item.keywordId === subjectKeywordId);
         if (membro && membro.role !== "principal") {
           candidate.conflicts.push(`o Assunto "${nomeDe(subjectKeywordId)}" não pode ser secundária nem reforço do mesmo artigo`);
