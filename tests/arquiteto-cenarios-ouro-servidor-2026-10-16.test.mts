@@ -82,6 +82,8 @@ mock.module("../lib/arquiteto/canonical-workspace.ts", { namedExports: { buildCa
 mock.module("../lib/server/arquiteto-workspace.ts", { namedExports: { loadCanonicalArquitetoWorkspace: async (_c: any, options: any = {}) => recortado(options.groupFilter), createMineradorArquitetoHandoff: async () => { throw new Error("o Arquiteto não envia ao Minerador"); } } });
 mock.module("../lib/server/arquiteto-differentiation-store.ts", { namedExports: {
   readDifferentiationBrandKeywords: async () => ({ pages: clone(paginasPublicadas), existingByNormalized: new Map(rows.map(r => [normalizeKeyword(r.keyword), r.id])), knownVolumeByNormalized: new Map() }),
+  // 2026-10-16 · §15: o vocabulário da SERP da principal em cache; vazio aqui (o amarelo tem o arquivo próprio).
+  readPrincipalSerpVocabulary: async () => new Map(),
   // A SERP do cache por fixture: as mesmas 4 páginas nas 4 lentes = o Google junta.
   readPublishedFootprints: async (_c: any, queries: any[]) => ({ missingLenses: [], footprints: queries.map(q => ({ ...q, lenses: SERP_SUBJECT_LENS_LABELS.map(lens => ({ lens, urls: ["https://example.org/1", "https://example.org/2", "https://example.org/3", "https://example.org/4"] })) })) }),
 } });
@@ -251,19 +253,29 @@ test("C6 · servidor · Assunto SEM plano com DNA (principal de volume 10) e can
 /* C9 · publicado Livre sem volume pela melhoria                            */
 /* ======================================================================= */
 
-const URL_PUB = "https://adalbapro.com.br/captacao-de-pacientes/como-captar-clientes-para-clinica-de-estetica";
-function publicadoLivreSemVolume() {
+/*
+ * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono): com o slug feito da principal ("como-captar-clientes-para-clinica-de-
+ * estetica"), a Livre sem volume FICA e a melhoria só reforça. A troca do C9/C15 é a da principal FORA da identidade:
+ * a mesma página com um slug que não foi feito dela (`URL_PUB`); a real (`URL_DE_IDENTIDADE`) é conferida no C9.
+ */
+const URL_DE_IDENTIDADE = "https://adalbapro.com.br/captacao-de-pacientes/como-captar-clientes-para-clinica-de-estetica";
+const URL_PUB = "https://adalbapro.com.br/captacao-de-pacientes/captacao-para-clinica-de-estetica";
+function publicadoLivreSemVolume(url = URL_PUB) {
   zerar("61d2e019-f44f-4fa3-af2f-d86b95628ab3");
   const t = "territory:0b8f7c3e-1a2b-4c3d-8e9f-0a1b2c3d4e5f";
   territorios = [territorio(t, "Captação de pacientes", "captacao-de-pacientes")];
-  const pub = linhaDoServidor("pub", "como captar clientes para clínica de estética", { entidade_central: "captação de pacientes" }, { territoryRef: t, isPublished: true, publishedUrl: URL_PUB, primaryKeywordPolicy: "reviewable" });
+  const pub = linhaDoServidor("pub", "como captar clientes para clínica de estética", { entidade_central: "captação de pacientes" }, { territoryRef: t, isPublished: true, publishedUrl: url, primaryKeywordPolicy: "reviewable" });
   const nova = linhaDoServidor("nova", "captação de pacientes para clínica de estética", { entidade_central: "captação de pacientes" }, { territoryRef: "territory:outro", volume_search: 50, volume_source: "google_ads" });
   rows = [pub, nova];
-  paginasPublicadas = [{ keywordId: "pub", keyword: pub.keyword, url: URL_PUB, canonical: URL_PUB, slug: URL_PUB.split("/").at(-1), post: "reviewable" }];
+  paginasPublicadas = [{ keywordId: "pub", keyword: pub.keyword, url, canonical: url, slug: url.split("/").at(-1), post: "reviewable" }];
   return { t };
 }
 
-test("C9 · servidor · publicado Livre, principal sem volume: a melhoria troca, a antiga fica secundária, primaryKeywordDecision confirmada, URL/slug/canonical intactos e grava APROVADO (a mesa grava 'proposed' — muda na F5)", async () => {
+test("C9 · servidor · publicado Livre, principal sem volume: de identidade, a melhoria não troca e não paga SERP de candidata; fora da identidade, troca, a antiga fica secundária, primaryKeywordDecision confirmada, URL/slug/canonical intactos e grava APROVADO (a mesa grava 'proposed' — muda na F5)", async () => {
+  publicadoLivreSemVolume(URL_DE_IDENTIDADE);
+  const real = await prepare({ authorizeReading: { ai: true, measure: true } });
+  assert.equal(real.proposals[0].principalId, "pub", `principal de identidade: fica (${JSON.stringify(real.proposals[0].reasons)})`);
+  assert.ok(!(real.costs?.missingDetails ?? []).some((d: any) => /captacao de pacientes para clinica/.test(String(d.keyword))), "nenhuma SERP de candidata a principal entra no plano pago");
   const { t } = publicadoLivreSemVolume();
   const run = await prepare({ authorizeReading: { ai: true, measure: true } });
   assert.equal(run.proposals[0].status, "ready", JSON.stringify(run.proposals));
@@ -286,14 +298,15 @@ test("C9 · servidor · publicado Livre, principal sem volume: a melhoria troca,
 /* C10 · keyword solta no recorte do grupo                                  */
 /* ======================================================================= */
 
-function linhaDoPlanoAzul(id: string, keyword: string, ordem: number, opcoes: { lock?: "locked" | "free"; volume?: number } = {}) {
-  const semantico = { ...(opcoes.volume ? VOLUME_VALIDADO : {}), keyword_subject: { declared: true, note: null, destinationUrl: null, destinationCheck: null, entry: { title: keyword, source: "cadastro" }, plan: { groupId: AZUL, planVersion: 4, order: ordem, role: "Suporte", scope: escopoDo(ordem), declaredPrincipal: { keywordId: id, phrase: keyword }, ...(opcoes.lock ? { lock: opcoes.lock } : {}) } }, keyword_subject_actor: ATOR, keyword_subject_at: "2026-10-13T10:00:00+00:00", keyword_subject_origin: "import", keyword_declared_principal: { subjectKeywordId: id, groupId: AZUL, planVersion: 4 } };
+function linhaDoPlanoAzul(id: string, keyword: string, ordem: number, opcoes: { lock?: "locked" | "free"; volume?: number; titulo?: string } = {}) {
+  const semantico = { ...(opcoes.volume ? VOLUME_VALIDADO : {}), keyword_subject: { declared: true, note: null, destinationUrl: null, destinationCheck: null, entry: { title: opcoes.titulo ?? keyword, source: "cadastro" }, plan: { groupId: AZUL, planVersion: 4, order: ordem, role: "Suporte", scope: escopoDo(ordem), declaredPrincipal: { keywordId: id, phrase: keyword }, ...(opcoes.lock ? { lock: opcoes.lock } : {}) } }, keyword_subject_actor: ATOR, keyword_subject_at: "2026-10-13T10:00:00+00:00", keyword_subject_origin: "import", keyword_declared_principal: { subjectKeywordId: id, groupId: AZUL, planVersion: 4 } };
   return linhaDoServidor(id, keyword, semantico, opcoes.volume ? { volume_search: opcoes.volume, volume_source: "google_ads" } : {});
 }
 const apoioDe = (id: string, keyword: string, volume: number, de: string) => linhaDoServidor(id, keyword, { ...VOLUME_VALIDADO, subject_discovery: { version: 1, searches: [], subjectKeywordIds: [de] } }, { volume_search: volume, volume_source: "google_ads" });
 
-test("C10 · servidor · keyword SOLTA (sem Assunto, grupo ou artigo) com volume, no recorte do grupo do plano: entra na lista; vira principal SÓ da Livre sem volume; Travada e Livre com volume a recebem como secundária", async () => {
-  for (const caso of [{ nome: "Livre sem volume", opcoes: {}, principal: "solta" }, { nome: "Travada", opcoes: { lock: "locked" as const }, principal: "k10" }, { nome: "Livre com volume 30", opcoes: { volume: 30 }, principal: "k10" }]) {
+test("C10 · servidor · keyword SOLTA (sem Assunto, grupo ou artigo) com volume, no recorte do grupo do plano: entra na lista; vira principal SÓ da Livre sem volume FORA da identidade (2026-10-17); a de identidade, a Travada e a Livre com volume a recebem como secundária", async () => {
+  // 2026-10-17 · "diferença entre internet e wi-fi" é o título do Assunto: principal de identidade, fica (SUBSTITUÍDO: "a solta assume" na Livre sem volume).
+  for (const caso of [{ nome: "Livre sem volume de identidade", opcoes: {}, principal: "k10" }, { nome: "Livre sem volume fora da identidade", opcoes: { titulo: "Wi-Fi caindo no quarto: o que fazer" }, principal: "solta" }, { nome: "Travada", opcoes: { lock: "locked" as const }, principal: "k10" }, { nome: "Livre com volume 30", opcoes: { volume: 30 }, principal: "k10" }]) {
     zerar();
     territorios = [territorio(TERRITORIO_AZUL, "Wi-Fi e fibra óptica", "wifi-e-fibra")];
     rows = [linhaDoPlanoAzul("k10", "diferença entre internet e wi-fi", 10, caso.opcoes), linhaDoServidor("solta", "diferença entre internet e wi-fi em casa", {}, { volume_search: 900, volume_source: "google_ads" })];

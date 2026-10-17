@@ -9,11 +9,12 @@ import type { EditorialGroupScreenFilter } from "@/lib/editorial/editorial-group
 import { describeSerpPaidPlan, type SerpPaidPlan, type SerpPaidPlanChoice } from "@/lib/arquiteto/serp-lens-plan";
 import { runPaidSerpBlocks } from "@/lib/arquiteto/serp-blocks";
 import { ARCHITECT_SUGGESTIONS_LABEL, mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
+import { improvementNewKeywordsPreview } from "@/lib/arquiteto/article-improvement-minerador";
 import {
   PLAN_SHEET_ACTION_LABELS,
-  applyPlanSheetSerp, planRowAlerts, buildPlanSheetRows, planPrincipalSwapCandidates, planRowRoleLabel, planRowSeals, planSheetColorLabel, planSheetFormationSelection,
-  planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpSelection, planSheetServerErrorSentence, planSwapCandidateLabel,
-  type PlanRowSeal, type PlanSheetAction, type PlanSheetArticle, type PlanSheetConflict, type PlanSheetRow, type PlanSheetSerpRead, type PlanSwapCandidate,
+  applyPlanSheetSerp, planRowAlerts, buildPlanSheetRows, planPrincipalSwapCandidates, planRowDefinition, planRowRoleLabel, planRowSeals, planSheetColorLabel, planSheetFormationSelection,
+  planSheetOutcomeSentence, planSheetPreviewLines, planSheetSerpByKeyword, planSheetSerpPlanLine, planSheetSerpSelection, planSheetServerErrorSentence, planSwapCandidateLabel,
+  type PlanRowDefinition, type PlanRowSeal, type PlanSheetAction, type PlanSheetArticle, type PlanSheetConflict, type PlanSheetRow, type PlanSheetSerpRead, type PlanSwapCandidate,
 } from "@/lib/arquiteto/plan-article-sheet";
 import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "@/lib/arquiteto/silo-article-withdrawal";
 import { SiloArticleWithdrawalPanel } from "./silo-article-withdrawal-panel";
@@ -310,7 +311,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     const linhas = new Map<string, PlanSheetResult>();
     for (const item of escolha.refused) linhas.set(item.keywordId, { tone: "warning", text: item.reason });
     for (const item of escolha.known) linhas.set(item.keywordId, { tone: "neutral", text: item.reason });
-    if (!escolha.toPlan.length) { finish(vivo, linhas, { tone: "neutral", text: `Validar SERP: nada a coletar — ${escolha.known.length} já com as 4 lentes, ${escolha.refused.length} fora (sem volume). Nenhuma chamada paga.` }); return; }
+    if (!escolha.toPlan.length) { finish(vivo, linhas, { tone: "neutral", text: `Validar SERP: nada a coletar — ${escolha.known.length} já com as 4 lentes, ${escolha.refused.length} fora (sem volume e fora da principal de identidade). Nenhuma chamada paga.` }); return; }
     const blocos: { keywordId: string; keyword: string }[][] = [];
     for (let inicio = 0; inicio < escolha.toPlan.length; inicio += SERP_BLOCK) blocos.push(escolha.toPlan.slice(inicio, inicio + SERP_BLOCK).map(row => ({ keywordId: row.keywordId, keyword: row.keyword })));
     const foraPorVolume = new Map<string, string>();
@@ -338,7 +339,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
           const prevista: PreviewLine[] = [
             ...escolha.toPlan.map(row => foraPorVolume.has(row.keywordId)
               ? { keywordId: row.keywordId, keyword: row.keyword, kind: "refused" as const, text: foraPorVolume.get(row.keywordId)! }
-              : { keywordId: row.keywordId, keyword: row.keyword, kind: "go" as const, text: `Falta ${4 - row.serp.lenses} lente(s): coleta nas 4 lentes (cache primeiro).` }),
+              : { keywordId: row.keywordId, keyword: row.keyword, kind: "go" as const, text: planSheetSerpPlanLine(row) }),
             ...escolha.known.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, kind: "known" as const, text: item.reason })),
             ...escolha.refused.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, kind: "refused" as const, text: item.reason })),
           ];
@@ -403,9 +404,10 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   }
 
   /* ================ CONCLUIR FORMAÇÃO / TROCAR PRINCIPAL (gravar) ================ */
-  async function applyRun(vivo: () => boolean, run: ImprovementRun, readyIds: string[] | null, contar: (feitos: number) => void): Promise<ImprovementRun> {
+  async function applyRun(vivo: () => boolean, run: ImprovementRun, readyIds: string[] | null, contar: (feitos: number) => void, approveNewKeywords = false): Promise<ImprovementRun> {
+    // 2026-10-17 · keyword NOVA na marca entra na mesma confirmação: o aceite vai só quando a prévia a listou.
     let current = run.state === "applying" && run.acceptedIds ? await improvement({ brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash })
-      : await improvement({ brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash, ...(readyIds ? { targetIds: readyIds } : {}) });
+      : await improvement({ brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash, ...(readyIds ? { targetIds: readyIds } : {}), ...(approveNewKeywords ? { approveNewKeywords: true } : {}) });
     let tentativas = 0;
     // 2026-10-14 · sem avanço por ≈ 2 minutos (vez ocupada por outra gravação da marca), para com a frase e deixa retomar.
     let semAvanco = 0, feitosAntes = current.outcomes.length;
@@ -439,12 +441,14 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     for (const item of previa) if (item.kind !== "go") linhas.set(item.keywordId, { tone: item.kind === "adequate" ? "neutral" : "warning", text: `Não gravado: ${item.text}` });
     if (!total) { finish(vivo, linhas, { tone: "warning", text: "Nada a gravar: nenhuma linha ficou pronta na prévia. Veja o motivo de cada uma." }); return; }
     startBusy(action === "swapPrincipal" ? "Gravando a troca de principal (nova versão do ArticleDNA)" : "Concluindo a formação (ArticleDNA, composição e parecer)", total, "artigo(s)");
-    let antes = 0, gravados = 0, falhas = 0;
+    let antes = 0, gravados = 0, falhas = 0, novasNaConfirmacao = false;
     try {
       for (const item of runs) {
         if (!item.readyIds.length) continue;
         const base = antes;
-        const fim = await applyRun(vivo, item.run, item.readyIds, feitos => { if (vivo()) setBusy(atual => atual ? { ...atual, done: base + feitos } : atual); });
+        const comNovas = improvementNewKeywordsPreview(item.run, item.readyIds).total > 0;
+        if (comNovas) novasNaConfirmacao = true;
+        const fim = await applyRun(vivo, item.run, item.readyIds, feitos => { if (vivo()) setBusy(atual => atual ? { ...atual, done: base + feitos } : atual); }, comNovas);
         antes += item.readyIds.length;
         for (const id of item.readyIds) {
           const desfecho = planSheetOutcomeSentence(fim.outcomes.find(outcome => outcome.targetId === id));
@@ -452,7 +456,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
           linhas.set(id, desfecho);
         }
       }
-      finish(vivo, linhas, { tone: falhas ? "warning" : "success", text: `${action === "swapPrincipal" ? PLAN_SHEET_ACTION_LABELS.swapPrincipal : PLAN_SHEET_ACTION_LABELS.concludeFormation}: ${gravados} gravado(s) e relido(s)${falhas ? `, ${falhas} com falha` : ""}; ${previa.filter(line => line.kind !== "go").length} fora desta confirmação. Nada foi gravado no Minerador.` });
+      finish(vivo, linhas, { tone: falhas ? "warning" : "success", text: `${action === "swapPrincipal" ? PLAN_SHEET_ACTION_LABELS.swapPrincipal : PLAN_SHEET_ACTION_LABELS.concludeFormation}: ${gravados} gravado(s) e relido(s)${falhas ? `, ${falhas} com falha` : ""}; ${previa.filter(line => line.kind !== "go").length} fora desta confirmação.${novasNaConfirmacao ? " As keywords novas da prévia seguiram pelos núcleos do Minerador (import, Lógica, Volume, aprovação e envio) nos artigos gravados; as que já estavam lá não mudaram." : " Nada foi gravado no Minerador."}` });
       if (vivo()) onApplied();
     } catch (e) {
       if (vivo()) { setBusy(null); setResults(atual => new Map([...atual, ...linhas])); setError(e instanceof Error ? e.message : "A gravação não foi confirmada."); onApplied(); }
@@ -598,11 +602,20 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
           {frases.cacheWarning && <p className="text-warning">{frases.cacheWarning}</p>}
           <p className="text-foreground" data-testid="architect-plan-sheet-serp-cost">{frases.headline}{frases.cost ? ` ${frases.cost}` : ""}</p>
           {frases.dates && <p className="text-text-muted">{frases.dates}</p>}
-          <p className="text-text-muted">O que já está no cache não é pago de novo. O servidor confere no banco o volume de cada keyword: sem volume, nada é coletado.</p>
+          <p className="text-text-muted">O que já está no cache não é pago de novo. O servidor confere no banco o volume de cada keyword: sem volume, nada é coletado — exceto a principal de identidade do artigo, que o servidor também confere.</p>
         </div>;
       })()}
       {preview.action === "chooseSwap" && <p className="mt-1 text-text-muted">Só artigo do plano com a trava Livre. As candidatas são a keyword do Assunto e as sustentações com volume medido da lista dele, das que têm mais lentes de SERP e mais volume. A prévia (grátis) mostra o que muda; gravar é a sua confirmação e gera uma nova versão.</p>}
-      {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && <p className="mt-1 text-text-muted">Grava só o ArticleDNA, a composição e o parecer, pelo mesmo núcleo da formação; nada é gravado no Minerador. Uma confirmação vale para as linhas “vai gravar”; as outras ficam como estão, com o motivo.</p>}
+      {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && (() => {
+        // 2026-10-17 · as keywords NOVAS das linhas "vai gravar", por artigo, com volume e fonte: entram nesta confirmação.
+        const novas = preview.runs.map(item => improvementNewKeywordsPreview(item.run, item.readyIds)).filter(item => item.total > 0);
+        return <>
+          <p className="mt-1 text-text-muted">{novas.length ? "Grava o ArticleDNA, a composição e o parecer, pelo mesmo núcleo da formação, e incorpora as keywords novas listadas abaixo; as que já estão no Minerador não mudam." : "Grava só o ArticleDNA, a composição e o parecer, pelo mesmo núcleo da formação; nada é gravado no Minerador."} Uma confirmação vale para as linhas “vai gravar”; as outras ficam como estão, com o motivo.</p>
+          {novas.length > 0 && <div className="mt-2 rounded-md border border-divider bg-surface p-2" data-testid="architect-plan-sheet-new-keywords">
+            {novas.map(item => <div key={item.lines.join("|")}><p className="font-medium text-foreground">{item.approvalText}</p><ul className="mt-1 list-disc pl-5 text-foreground">{item.lines.map(line => <li key={line}>{line}</li>)}</ul></div>)}
+          </div>}
+        </>;
+      })()}
 
       {preview.action === "chooseSwap"
         ? <ul className="mt-2 grid gap-2">
@@ -638,6 +651,20 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
 }
 
 /* ===================== a linha do plano DENTRO da tabela de artigos ===================== */
+
+const DEFINITION_TONE: Record<PlanRowDefinition["tone"], string> = { positive: "text-positive-soft", neutral: "text-text-muted", warning: "text-warning" };
+
+/**
+ * 2026-10-16 (noite) · a coluna "Definição do artigo" da linha do plano (a do
+ * candidato da mesa e a da linha sem artigo): o estado de verdade e o porquê
+ * curto, o inteiro no `title` (pedido do dono: "Pendente" sem explicação).
+ */
+export function PlanRowDefinitionCell({ definition }: { definition: PlanRowDefinition }) {
+  return <span className="inline-flex flex-col items-center gap-0.5" title={definition.title} data-testid="architect-plan-row-definition">
+    <span className={`text-sm font-medium ${DEFINITION_TONE[definition.tone]}`}>{definition.label}</span>
+    {definition.reason && <span className="text-sm leading-tight text-text-muted" data-testid="architect-plan-row-definition-reason">{definition.reason}</span>}
+  </span>;
+}
 
 /** Os selos curtos da linha do plano (trava, volume, SERP, formação ou conflito) e o resultado da última ação. */
 export function PlanRowSeals({ row, result = null, className = "" }: { row: PlanSheetRow; result?: PlanSheetResult | null; className?: string }) {
@@ -717,7 +744,7 @@ export function PlanArticleTableRow({ sheet, row, columns, buttonClassName, stri
           <span className={`inline-flex rounded-md border px-2 py-1 text-sm font-semibold ${row.role === "Pilar" ? "border-positive-soft/40 bg-positive-soft/10 text-positive-soft" : "border-divider text-text-muted"}`} data-testid="architect-plan-row-role">{planRowRoleLabel(row)}</span>
         </td>;
       case "articleDefinition":
-        return <td key={columnId} className={`border-r border-divider px-2 py-2 text-center text-sm ${row.formation.state === "conflict" || row.formation.state === "awaiting_principal" ? "text-warning" : "text-text-muted"}`}>{row.formation.label}</td>;
+        return <td key={columnId} className="border-r border-divider px-2 py-2 text-center"><PlanRowDefinitionCell definition={planRowDefinition(row)} /></td>;
       case "silo":
         return <td key={columnId} className="border-r border-divider px-2 py-2 text-sm text-foreground">{planSheetColorLabel(row)}</td>;
       case "actions":

@@ -105,17 +105,17 @@ test("plano: só o que falta entra — uma consulta de métricas para as que fal
   assert.deepEqual(plano.missing.volumeToMeasureSample.map(item => [item.keywordId, item.reason]), [["b", "other_provider"], ["c", "other_provider"]]);
   const frases = knownBeforeSearchSentences(plano);
   assert.match(frases.missing, /medir 2 keyword\(s\) no Google Ads; 1 leitura da IA \(2 alvo\(s\) sem proposta, lista de 5\); 3 consulta\(s\) de SERP/);
-  assert.match(frases.cost, /Google Ads: 1 consulta\(s\) de métricas para 2 keyword\(s\) — sem custo em dólar, usa a cota da marca/);
+  assert.match(frases.cost, /Google Ads: 1 consulta\(s\) de métricas para 2 keyword\(s\) — grátis \(cota do Google Ads\)/);
   assert.match(frases.cost, /IA: 1 chamada \(OpenRouter, cobrada pelo uso\)/);
   assert.match(frases.cost, /DataForSEO: 3 consulta\(s\), US\$ 0,01 a US\$ 0,01/);
-  assert.equal(knownBeforeSearchAuthorizeLabel(plano), "Ler com IA e medir · 1 chamada de IA + 2 keyword(s) no Google Ads (cota)");
+  assert.equal(knownBeforeSearchAuthorizeLabel(plano), "Ler com IA e medir · 1 chamada de IA + 2 keyword(s) no Google Ads, grátis (cota do Google Ads)");
 });
 
 test("rótulos verdadeiros: só IA, só medição e nada (o botão nunca diz 'grátis' quando chama provider)", () => {
   const soIa = buildKnownBeforeSearchPlan({ ...base, keywords: [conhecida("a", medida)], aiReading: { targets: 1, listSize: 3 } });
   assert.equal(knownBeforeSearchAuthorizeLabel(soIa), "Ler com IA · 1 chamada de IA (OpenRouter)");
   const soMedir = buildKnownBeforeSearchPlan({ ...base, keywords: [conhecida("a", falta)] });
-  assert.equal(knownBeforeSearchAuthorizeLabel(soMedir), "Medir 1 keyword(s) no Google Ads · cota, sem custo em dólar");
+  assert.equal(knownBeforeSearchAuthorizeLabel(soMedir), "Medir 1 keyword(s) no Google Ads · grátis (cota do Google Ads)");
   // Lista vazia: a IA não teria o que ler — não é cobrada nem prometida.
   assert.equal(buildKnownBeforeSearchPlan({ ...base, keywords: [], aiReading: { targets: 2, listSize: 0 } }).plan.ai.calls, 0);
   // O que esta preparação chamou com a autorização fica dito.
@@ -154,7 +154,7 @@ test("pedido: sem authorizeReading o prepare só lê; a autorização é explíc
 test("próximo passo: a leitura paga vem antes de validar, com o botão que diz o custo; começar continua grátis e verdadeiro", () => {
   const inicio = resolveImprovementNextStep({ hasRun: false, state: null, leaseActive: false, accepted: false, paidQueries: 0, costMaxUsd: 0, selectedCount: 0 });
   assert.equal(inicio.button, "1 · Buscar keywords (grátis)");
-  assert.match(inicio.sentence, /É grátis: a IA e o Google Ads só rodam depois, com o custo dito e a sua autorização/);
+  assert.match(inicio.sentence, /É grátis: a IA e o Google Ads \(grátis, cota do Google Ads\) só rodam depois, com a sua autorização/);
   const leitura = resolveImprovementNextStep({ hasRun: true, state: "prepared", leaseActive: false, accepted: false, paidQueries: 4, costMaxUsd: 0.02, selectedCount: 1, paidReading: { button: "Ler com IA · 1 chamada de IA (OpenRouter)", sentence: "Já temos: … Falta: … Custa: …" } });
   assert.deepEqual([leitura.kind, leitura.button], ["read_paid", "Ler com IA · 1 chamada de IA (OpenRouter)"]);
   const semLeitura = resolveImprovementNextStep({ hasRun: true, state: "prepared", leaseActive: false, accepted: false, paidQueries: 4, costMaxUsd: 0.02, selectedCount: 1, paidReading: null });
@@ -170,7 +170,11 @@ test("estrutural: o prepare só chama IA e Google Ads com a autorização; a med
   assert.match(servidor, /const medidas = autorizado\.measure \? await measureOldVolumes\(runtime, run\) : \{ asked: 0, calls: 0 \};/);
   assert.equal([...servidor.matchAll(/await measureOldVolumes\(/g)].length, 1, "medir o volume antigo só pela autorização");
   assert.doesNotMatch(servidor, /\} else await measureOldVolumes/, "a semente não mede sozinha");
-  assert.doesNotMatch(servidor, /measureKeywordVolume|handleGoogleAdsKeywordMetrics|replayStoredMeasurements/, "F4: o Arquiteto não grava a medição no Minerador");
+  // 2026-10-16 (decisão do dono, SUBSTITUI a F4 nesta parte): só a keyword NOVA que a confirmação criou tem a medição gravada, pelo replay da medição da prévia (sem consultar o Google Ads de novo), e só dentro de `incorporateNewKeywords`.
+  const inicio = servidor.indexOf("async function incorporateNewKeywords("), fim = servidor.indexOf("async function applyTarget(", inicio);
+  const foraDaIncorporacao = (servidor.slice(0, inicio) + servidor.slice(fim)).split("\n").filter(linha => !/^import /.test(linha)).join("\n");
+  assert.doesNotMatch(foraDaIncorporacao, /measureKeywordVolume|handleGoogleAdsKeywordMetrics|replayStoredMeasurements/, "fora da incorporação da keyword nova, o Arquiteto não grava medição no Minerador");
+  assert.match(servidor.slice(inicio, fim), /measureKeywordVolume\(editar, idsNovos, guardadas\.length === novas\.length \? \{ measure: \(req, params, ctx\) => handleGoogleAdsKeywordMetrics\(req, params, ctx, \{ replay: replayStoredMeasurements\(guardadas\) \}\) \} : \{\}\)/);
   const caixa = stripComments(read("lib/server/minerador-architect-suggestions.ts"));
   assert.match(caixa, /measureKeywordVolume\(editar, entries\.map\(entry => entry\.keywordId\), \{ measure: \(req, params, ctx\) => handleGoogleAdsKeywordMetrics\(req, params, ctx, \{ replay \}\) \}\)/);
   assert.match(servidor, /run\.reading = \{ \.\.\.plano, authorized: autorizado, sentences: knownBeforeSearchSentences\(plano\) \};/);
@@ -206,7 +210,7 @@ test("estrutural: a tela mostra 'Já temos · Falta · Custa' e só pede a leitu
   assert.match(painel, /else if \(next\.kind === "read_paid"\) setConfirm\("read"\);/);
   // O botão grátis não carrega autorização nenhuma.
   assert.match(painel, /onClick=\{\(\) => void execute\("prepare", recorteAtivo\)\}>\{activeGroup \? `Buscar keywords da cor \$\{activeGroup\.label\} \(grátis\)` : "Buscar keywords \(grátis\)"\}/);
-  assert.match(improvementDiscoveryCostSentence(2), /A ideia que já existe no Minerador com volume medido usa o volume dele, sem medir de novo/);
+  assert.match(improvementDiscoveryCostSentence(2), /A ideia que já existe no Minerador é só lida \(usa o volume dele, sem medir de novo; o Arquiteto não a altera\)/);
 });
 
 test("estrutural: Reforçar publicados e a diferenciação não remedem a candidata que o Minerador já mediu", () => {

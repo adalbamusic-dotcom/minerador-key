@@ -125,7 +125,25 @@ export function articleFormationMarkerIsStale(input: {
   storedBaseHash: string;
   currentBaseHash: string;
 }): boolean {
-  return input.storedBaseHash !== input.currentBaseHash;
+  // 2026-10-16 (noite) · só a base do LOTE (a de "Processar artigos") envelhece; ver `articleFormationMarkerReadsLot`.
+  return articleFormationMarkerReadsLot(input.storedBaseHash) && input.storedBaseHash !== input.currentBaseHash;
+}
+
+/** O prefixo da base do lote (`articleFormationBaseHash`, "Processar artigos"). */
+export const ARTICLE_FORMATION_LOT_BASE_PREFIX = "artbase:" as const;
+
+/**
+ * 2026-10-16 (noite) · caso WifiConecta: a tela dizia "Formação desatualizada"
+ * para sempre. O marcador da marca nasceu pela linha do plano ("Concluir
+ * formação" das linhas do plano e o Reforçar publicados gravam
+ * `baseHash: marcador?.baseHash ?? <base da composição do artigo>`), e a base
+ * da composição (`serpbase:…`) NUNCA é igual à base do lote (`artbase:…`). Esse
+ * marcador guarda as formações concluídas, mas não é análise do lote: não há
+ * o que envelhecer. A base do lote volta a valer quando "Processar artigos"
+ * grava o marcador.
+ */
+export function articleFormationMarkerReadsLot(storedBaseHash: string): boolean {
+  return storedBaseHash.startsWith(ARTICLE_FORMATION_LOT_BASE_PREFIX);
 }
 
 export type ArticleFormationScenarioState =

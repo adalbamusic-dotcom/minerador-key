@@ -453,9 +453,11 @@ const workspace = lerSemComentarios("modules/arquiteto/arquiteto-workspace.tsx")
 const linhas = lerSemComentarios("modules/arquiteto/territorial-workspace-rows.tsx");
 
 test("os rótulos vêm do domínio: a tela não repete as frases do Assunto", () => {
-  for (const nome of ["SUBJECT_ATTACH_ACTION_LABEL", "SUBJECT_DETACH_ACTION_LABEL", "SUBJECT_FILTER_LABEL", "SUBJECT_SILO_SUGGESTION_ACTION_LABEL", "SUBJECT_SUGGESTION_SIGNAL_LABELS"]) {
+  // 2026-10-16 (noite) · SUBJECT_FILTER_LABEL saiu da tela com o bloco "Assuntos · N" (pedido do dono); as ações seguem pelos rótulos do domínio.
+  for (const nome of ["SUBJECT_ATTACH_ACTION_LABEL", "SUBJECT_DETACH_ACTION_LABEL", "SUBJECT_SILO_SUGGESTION_ACTION_LABEL", "SUBJECT_SUGGESTION_SIGNAL_LABELS"]) {
     assert.match(painel, new RegExp(`\\b${nome}\\b`), `${nome} fora do painel`);
   }
+  assert.doesNotMatch(painel, /\bSUBJECT_FILTER_LABEL\b|Todos os artigos|architect-subject-filter/, "o filtro de fichas não volta");
   for (const fonte of [painel, workspace, linhas]) {
     assert.doesNotMatch(fonte, /"Assunto · aguardando sustentação"/);
     assert.doesNotMatch(fonte, /"Prender Assunto"|"Soltar Assunto"|"Confirmar Assunto do Silo"/);
@@ -512,7 +514,8 @@ test("não agrupadas: o predicado do domínio decide, e nenhuma keyword some", (
   // Recolhida (2026-09-30): a lista continua inteira, só não empurra a jornada para baixo.
   assert.match(workspace, /Keywords sem artigo · \{visibleUngroupedArticleKeywords\.length\}/);
   assert.match(workspace, /<SubjectConservationBadge label=\{selo\} tone="awaiting"/);
-  assert.match(workspace, /<SubjectConservationBadge label=\{item\.label\} tone="trunk"/);
+  // 2026-10-16 (noite) · o bloco "Assuntos como tronco · N" saiu (pedido do dono); o tronco continua fora de "não agrupadas".
+  assert.doesNotMatch(workspace, /<SubjectConservationBadge label=\{item\.label\} tone="trunk"|Assuntos como tronco/);
   assert.match(workspace, /\$\{visibleUngroupedArticleKeywords\.length\} keyword\(s\) sem grupo/);
 });
 
@@ -563,7 +566,9 @@ test("Vínculo e importação mostram o Assunto pelo resolver do Minerador", () 
 });
 
 test("ações humanas: prender, soltar, confirmar a sugestão do Silo e formar em torno do Assunto", () => {
-  assert.match(workspace, /<SubjectFilterPanel/);
+  // 2026-10-16 (noite) · as ações saíram do bloco "Assuntos · N" (que saiu) para a barra de sempre; os mesmos handlers.
+  assert.match(workspace, /subjectActions=\{\s*<SubjectActionsControl/);
+  assert.doesNotMatch(workspace, /<SubjectFilterPanel/);
   assert.match(workspace, /<SubjectAttachDialog/);
   assert.match(workspace, /<SubjectSupportDialog/);
   assert.match(workspace, /onDetach=\{anchor => \{ void detachSubjectAnchor\(anchor\); \}\}/);
@@ -582,7 +587,8 @@ test("ações humanas: prender, soltar, confirmar a sugestão do Silo e formar e
   const formar = workspace.slice(workspace.indexOf("const confirmSubjectSupport = async"));
   assert.ok(formar.indexOf("planSubjectAttachment(") < formar.indexOf("await applyFormationPlan("), "o Assunto é conferido antes de gravar a formação");
   assert.match(formar, /setWorkingSubjectAnchor\(anchor\.candidateRef, anchor\.subjectKeywordId\)/);
-  assert.match(workspace, /filterBySubject\(porCampos, workspaceMode === "articles" \? activeSubjectFilter : null/);
+  // 2026-10-16 (noite) · o Assunto escolhido não filtra mais a tabela (o filtro é a etiqueta da cor): só escolhe a quem as ações se aplicam.
+  assert.doesNotMatch(workspace, /filterBySubject\(/);
   assert.match(workspace, /detachSubjectFromArticleDna\(entry\.version\.payload\);\s*if \(article\.candidateRef\) await persistWorkingSubjectAnchor\(\{ candidateRef: article\.candidateRef, subjectKeywordId: null, holderKeywordId: null, actorId \}\);/);
   assert.match(workspace, /authenticatedArchitectActor\(\{ sessionStatus, actorUserId: session\?\.user\?\.id, brandId: selectedBrandId \}\);\s*if \(!actorId\) \{\s*showNotification\("error", "Prender o Assunto é ato humano/);
 });

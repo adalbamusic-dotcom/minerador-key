@@ -17,7 +17,9 @@ import { requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { integrationRuntimeErrorResponse, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { collectAndCacheSerp, lookupSerpCache, type SerpCacheRequest } from "@/lib/server/serp-cache";
-import { readKnownBeforeSearch } from "@/lib/server/known-before-search";
+import { readKnownBeforeSearch, readSerpIdentityPrincipals } from "@/lib/server/known-before-search";
+import { identityPrincipalSerpSentence, serpCollectionAllowed, serpCollectionRefusal } from "@/lib/arquiteto/article-batch-serp";
+import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 
 /**
  * SERP POR KEYWORD, NAS QUATRO LENTES.
@@ -67,7 +69,9 @@ const RequestSchema = z.object({
   /**
    * F3 · LER ANTES DE BUSCAR (SDD 2026-10-13, item 3, regra 6): o servidor
    * confere no BANCO o volume de cada keyword pedida; a que não tem volume (ou
-   * não é da marca) sai do plano e da coleta, com o motivo. Ausente = como antes.
+   * não é da marca) sai do plano e da coleta, com o motivo — EXCETO, desde
+   * 2026-10-17, a principal de identidade do artigo, também conferida no banco
+   * (`readSerpIdentityPrincipals`). Ausente = como antes.
    */
   onlyMeasuredVolume: z.boolean().optional(),
 });
@@ -123,19 +127,35 @@ export async function POST(request: Request) {
      * F3 · O SERVIDOR DECIDE O VOLUME. A tela manda só as keywords com volume
      * na visão dela, que pode estar velha; aqui o volume é relido do banco
      * (projeção estreita, por id) e a keyword sem volume não é planejada nem
-     * paga. Leitura que falha: nada é pago às cegas.
+     * paga, salvo a principal de identidade do artigo (2026-10-17). Leitura que
+     * falha: nada é pago às cegas.
      */
     const foraPorVolume: { keywordId: string; keyword: string; reason: string }[] = [];
+    /** 2026-10-17 · as principais de identidade SEM volume que o servidor conferiu e deixou na coleta (com o propósito). */
+    const principaisDeIdentidade: { keywordId: string; keyword: string; reason: string }[] = [];
     if (parsed.data.onlyMeasuredVolume) {
       const conferido = await readKnownBeforeSearch(pipelineContext.supabase as unknown as Parameters<typeof readKnownBeforeSearch>[0], pipelineContext.brandId, parsed.data.keywords.map(keyword => keyword.keywordId), now);
       if (conferido.readFailed) return NextResponse.json({ success: false, error: "Não foi possível conferir no banco o volume das keywords; nada foi planejado nem pago.", code: "KEYWORD_SERP_VOLUME_UNVERIFIED" }, { status: 503 });
+      /*
+       * 2026-10-17 · A RÉGUA ÚNICA (`serpCollectionAllowed`): sem volume, só a
+       * principal de identidade do artigo — conferida AQUI, no banco (pacote
+       * aprovado, ArticleDNA vigente, publicado), nunca pelo pedido.
+       */
+      const semVolume = parsed.data.keywords.filter(keyword => { const lida = conferido.keywords.get(keyword.keywordId); return lida && !hasSearchVolume(lida.volumeSearch ?? null); }).map(keyword => keyword.keywordId);
+      const identidade = semVolume.length ? await readSerpIdentityPrincipals(pipelineContext.supabase as unknown as Parameters<typeof readSerpIdentityPrincipals>[0], pipelineContext.brandId, semVolume) : null;
+      if (identidade?.readFailed) return NextResponse.json({ success: false, error: "Não foi possível conferir no banco se a keyword sem volume é a principal de identidade do artigo; nada foi planejado nem pago.", code: "KEYWORD_SERP_VOLUME_UNVERIFIED" }, { status: 503 });
       parsed.data.keywords = parsed.data.keywords.filter(keyword => {
         const lida = conferido.keywords.get(keyword.keywordId);
-        if (lida && typeof lida.volumeSearch === "number" && lida.volumeSearch > 0) return true;
-        foraPorVolume.push({ keywordId: keyword.keywordId, keyword: keyword.keyword, reason: lida ? "Sem volume no Minerador (o servidor conferiu): a SERP não é coletada para keyword sem volume." : "Fora do acervo da marca ativa: nada é coletado." });
+        if (!lida) { foraPorVolume.push({ keywordId: keyword.keywordId, keyword: keyword.keyword, reason: "Fora do acervo da marca ativa: nada é coletado." }); return false; }
+        const check = identidade?.checks.get(keyword.keywordId) ?? null;
+        if (serpCollectionAllowed({ volume: lida.volumeSearch ?? null, identityPrincipal: check?.identity === true })) {
+          if (!hasSearchVolume(lida.volumeSearch ?? null)) principaisDeIdentidade.push({ keywordId: keyword.keywordId, keyword: keyword.keyword, reason: identityPrincipalSerpSentence(keyword.keyword, { neverMeasured: lida.volume.state === "missing" }) });
+          return true;
+        }
+        foraPorVolume.push({ keywordId: keyword.keywordId, keyword: keyword.keyword, reason: `${serpCollectionRefusal(check)} (O servidor conferiu.)` });
         return false;
       });
-      if (!parsed.data.keywords.length) return NextResponse.json({ success: false, error: "Nenhuma keyword pedida tem volume no banco (o servidor conferiu): nada foi planejado nem pago.", code: "KEYWORD_SERP_NO_VOLUME", data: { operationRequestId, excludedByVolume: foraPorVolume } }, { status: 409 });
+      if (!parsed.data.keywords.length) return NextResponse.json({ success: false, error: "Nenhuma keyword pedida tem volume no banco nem é a principal de identidade do artigo (o servidor conferiu): nada foi planejado nem pago.", code: "KEYWORD_SERP_NO_VOLUME", data: { operationRequestId, excludedByVolume: foraPorVolume } }, { status: 409 });
     }
 
     /*
@@ -229,7 +249,7 @@ export async function POST(request: Request) {
      */
     const plan = buildSerpPaidPlan({ lenses: parsed.data.lenses, slots, payMissingExtraLenses: true, recollectStaleLenses: false, recollectAvailable: false });
     if (parsed.data.mode === "plan") {
-      return NextResponse.json({ success: true, data: { mode: "plan", operationRequestId, scopeId: parsed.data.scopeId, plan, lenses: parsed.data.lenses.map(serpCacheLensLabel), requested: alvos.length, ...(foraPorVolume.length ? { excludedByVolume: foraPorVolume } : {}) } });
+      return NextResponse.json({ success: true, data: { mode: "plan", operationRequestId, scopeId: parsed.data.scopeId, plan, lenses: parsed.data.lenses.map(serpCacheLensLabel), requested: alvos.length, ...(foraPorVolume.length ? { excludedByVolume: foraPorVolume } : {}), ...(principaisDeIdentidade.length ? { identityPrincipals: principaisDeIdentidade } : {}) } });
     }
     const autorizacao = authorizeSerpPaidPlan(plan, parsed.data.authorizedPaidQueries);
     if (!autorizacao.ok) {
@@ -393,6 +413,7 @@ export async function POST(request: Request) {
         reused,
         collected: coletadas,
         ...(foraPorVolume.length ? { excludedByVolume: foraPorVolume } : {}),
+        ...(principaisDeIdentidade.length ? { identityPrincipals: principaisDeIdentidade } : {}),
       },
     });
   } catch (error) {

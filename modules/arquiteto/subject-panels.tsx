@@ -4,7 +4,6 @@ import React, { useEffect, useRef, type RefObject } from "react";
 import {
   SUBJECT_ATTACH_ACTION_LABEL,
   SUBJECT_DETACH_ACTION_LABEL,
-  SUBJECT_FILTER_LABEL,
   SUBJECT_SILO_SUGGESTION_ACTION_LABEL,
   SUBJECT_SUGGESTION_SIGNAL_LABELS,
   type SubjectSupportSuggestion,
@@ -23,7 +22,9 @@ import {
 /**
  * O ASSUNTO NA MESA DO ARQUITETO (SDD 2026-09-24, F2.2 a F2.4).
  *
- * Um painel com o filtro "Assuntos" e dois diálogos: prender o Assunto numa
+ * As ações do Assunto na barra da aba Artigos (desde 2026-10-16, noite: o
+ * bloco com o filtro "Assuntos" saiu, ver `SubjectActionsControl`) e dois
+ * diálogos: prender o Assunto numa
  * unidade (artigo, landing, página de serviço ou Silo) e marcar as keywords
  * de sustentação. A tela não decide nada: as recusas e as sugestões chegam
  * prontas do domínio, e toda gravação é ato humano confirmado pelo remoto.
@@ -101,7 +102,20 @@ export type SubjectAnchorView = {
 
 export type SubjectSiloSuggestionView = { ref: string; label: string; reason: string };
 
-export function SubjectFilterPanel({
+/** O rótulo do seletor do Assunto na barra (as ações do Assunto, sem filtro). */
+export const SUBJECT_ACTIONS_LABEL = "Ações do Assunto";
+
+/**
+ * 2026-10-16 (noite) · AS AÇÕES DO ASSUNTO NA BARRA DE SEMPRE. Pedido do dono,
+ * literal: "quero que desapareça esse monte de texto no painel que só confunde
+ * (…) Assuntos · 15". O bloco "Assuntos · N" (as fichas com a lista dos
+ * Assuntos e "Todos os artigos") saiu: o filtro é a etiqueta da cor, e nada
+ * aqui filtra a tabela. As ações que só existiam nele — Prender Assunto,
+ * Formar artigos automaticamente, Soltar Assunto e Confirmar Assunto do Silo —
+ * ficam na barra: escolhe-se o Assunto e as ações dele aparecem logo abaixo,
+ * pelos mesmos handlers de antes. Nenhuma função saiu.
+ */
+export function SubjectActionsControl({
   entries,
   selectedKeywordId,
   anchors,
@@ -109,6 +123,7 @@ export function SubjectFilterPanel({
   busy,
   buttonClassName,
   primaryButtonClassName,
+  controlClassName,
   onSelect,
   onOpenAttach,
   onOpenSupport,
@@ -122,6 +137,7 @@ export function SubjectFilterPanel({
   busy: boolean;
   buttonClassName: string;
   primaryButtonClassName: string;
+  controlClassName: string;
   onSelect: (keywordId: string | null) => void;
   onOpenAttach: () => void;
   onOpenSupport: () => void;
@@ -129,43 +145,25 @@ export function SubjectFilterPanel({
   onConfirmSiloSuggestion: (ref: string) => void;
 }) {
   const selected = entries.find(entry => entry.keywordId === selectedKeywordId) ?? null;
-  const pressed = (active: boolean) => active
-    ? "border-module-accent/60 bg-module-accent/10 text-foreground"
-    : "border-divider bg-surface-subtle text-foreground/80 hover:border-module-accent/30 hover:bg-surface-elevated";
+  if (!entries.length) return null;
   return (
-    <section className="border-b border-context-accent/30 bg-surface-subtle px-4 py-4" data-testid="architect-subject-panel" aria-labelledby="architect-subject-panel-title">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 id="architect-subject-panel-title" className="text-sm font-bold uppercase tracking-widest text-context-accent">
-          {SUBJECT_FILTER_LABEL} · {entries.length}
-        </h2>
-        <span className="text-sm text-text-muted">Frases declaradas no Minerador como tronco de um ou mais artigos</span>
-      </div>
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label={`Filtro ${SUBJECT_FILTER_LABEL}`} data-testid="architect-subject-filter">
-        <button
-          type="button"
-          aria-pressed={selectedKeywordId === null}
-          onClick={() => onSelect(null)}
-          className={`inline-flex min-h-8 items-center rounded border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 ${pressed(selectedKeywordId === null)}`}
+    <>
+      <label className="inline-flex items-center gap-2 text-sm text-text-muted">
+        <span>{SUBJECT_ACTIONS_LABEL}</span>
+        <select
+          value={selected?.keywordId ?? ""}
+          onChange={event => onSelect(event.target.value || null)}
+          className={controlClassName}
+          title="Escolha o Assunto para prender, formar automaticamente ou soltar. Não filtra a tabela (o filtro é a etiqueta da cor)."
+          data-testid="architect-subject-actions-select"
         >
-          Todos os artigos
-        </button>
-        {entries.map(entry => (
-          <button
-            key={entry.keywordId}
-            type="button"
-            aria-pressed={selectedKeywordId === entry.keywordId}
-            onClick={() => onSelect(selectedKeywordId === entry.keywordId ? null : entry.keywordId)}
-            data-testid="architect-subject-filter-option"
-            className={`inline-flex min-h-8 items-center gap-2 rounded border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 ${pressed(selectedKeywordId === entry.keywordId)}`}
-          >
-            <span className="font-medium text-keyword">{entry.phrase}</span>
-            <span className="text-text-muted">{entry.label}</span>
-          </button>
-        ))}
-      </div>
+          <option value="">Escolha…</option>
+          {entries.map(entry => <option key={entry.keywordId} value={entry.keywordId}>{entry.phrase}</option>)}
+        </select>
+      </label>
 
       {selected && (
-        <div className="mt-3 grid gap-3 rounded-md border border-divider bg-surface p-3" data-testid="architect-subject-detail">
+        <div className="grid basis-full gap-3 rounded-md border border-divider bg-surface p-3" data-testid="architect-subject-detail">
           <div className="min-w-0">
             <p className="text-sm leading-6">
               <span className="text-text-muted">Assunto: </span>
@@ -231,7 +229,7 @@ export function SubjectFilterPanel({
           <p className="text-sm leading-6 text-text-muted" data-testid="architect-subject-serp-hint">{SUBJECT_PHRASE_SERP_HINT}</p>
         </div>
       )}
-    </section>
+    </>
   );
 }
 

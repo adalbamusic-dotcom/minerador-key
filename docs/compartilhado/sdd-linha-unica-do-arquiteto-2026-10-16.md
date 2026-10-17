@@ -491,10 +491,12 @@ e na melhoria, na tela, no servidor e no MCP.
    As proteções que já travam hoje continuam valendo, sem nada novo: KGR
    confirmado vinculado ao slug e `confirmed_primary + architecture_confirmed`
    (spec §25 e §29).
-2. **Pode trocar:** só **Livre e sem volume definido**. A troca é sempre:
+2. **Pode trocar:** só **Livre e sem volume definido** — e, desde 2026-10-17, **fora da identidade** (a principal que está no título ou de onde o slug declarado/publicado foi feito fica; §15.5). A troca é sempre:
    - proposta e decisão humana na prévia;
    - versão nova, com `primaryKeywordDecision` confirmada (ator e hora);
-   - a antiga vira secundária;
+   - a antiga vira secundária — salvo quando ela é a keyword que carrega o
+     Assunto (artigo do plano, cadastro único): aí ela fica como a âncora do
+     Assunto, fora das keywords (§15.2, 2026-10-17);
    - histórico no contexto da política.
 3. **Desconhecido:** publicado sem Posto, ou com política em conflito. Nada é
    proposto nem bloqueado em silêncio, e a principal fica (`AGENTS.md` §11).
@@ -928,4 +930,235 @@ Regras comuns a todas as fases:
 - [ ] aprovada para implementação da F0
 - [ ] aprovada para implementação da fase ___
 - [ ] bloqueada: decisão humana pendente (D1–D5)
-- Decisão, data e aprovador:
+- Decisão, data e aprovador: aprovada pelo dono em 2026-10-16 ("segue as recomendações"), fases na ordem a partir da F0.
+
+## 15. Roteiro do grupo com plano: primeiro os dados, depois o trabalho (dono, 2026-10-16)
+
+O dono, literal: "não tem problema de pagar, o problema é procurar à toa, sem
+propósito real, sem ideia, sem sentido lógico… a lista que eu introduzi não
+tinha nenhum problema, tudo estava bem claro aí, é só olhar nela para entender
+e só depois trabalhar… desde os Silos até os links internos ele não está
+olhando para os dados já existentes… OLHA OS DADOS!"
+
+Este roteiro é a regra permanente do Arquiteto para um grupo que chega com
+plano. Cada passo diz o que lê, para que serve e quanto custa. Nenhum passo
+busca ou paga sem uma semente tirada do plano ou do DNA.
+
+| # | Passo | Lê (dados que já existem) | Faz | Custo e propósito |
+|---|---|---|---|---|
+| 1 | Ler o plano | Silo (nome, slug); por artigo: ordem, papel, Assunto, keyword, slug, detalhes, trava, volume medido (o KeywordDNA) | Monta a cópia de trabalho do Silo e dos artigos exatamente como o plano diz | Grátis. Nada é gravado. |
+| 2 | Silo | Nome e slug do plano | Reusa ou confirma o Silo do plano. Nunca propõe outro nem converte artigo em Silo | Grátis |
+| 3a | Artigo com principal Travada ou com volume | Keyword, volume, trava | A principal é fixa. Se a SERP da principal não está no cache, coleta (4 lentes) e forma o artigo | Pago só a SERP da principal (custo antes). Propósito: base de evidência do artigo |
+| 3b | Artigo com principal Livre e SEM volume | Assunto, slug, detalhes, DNA (entidade, problema, resultado) | **SUBSTITUÍDO em 2026-10-17 (§15.5, "Principal de identidade"):** se a principal está no título ou no slug declarado (identidade), ela FICA; as buscas mais amplas entram como secundárias (passo 4), o parecer vem das secundárias (D2a) e o artigo forma sem troca (**17/10, tarde, §15.6:** a SERP da principal de identidade é a da primeira coleta e, coletada, o parecer usa ela); "Procurar outra principal" continua a decisão do dono. Só FORA da identidade vale o texto abaixo. ~~Procura uma principal substituta com essas sementes (ideias do Google Ads); a candidata precisa ter a mesma entidade e a mesma intenção e ter volume. Propõe a troca~~ (fora da identidade: primeiro a que leva o núcleo do slug com a entidade do DNA, depois a que mantém a intenção; ~~a antiga vira secundária~~ **SUBSTITUÍDO em 2026-10-17, §15.2:** a antiga, que carrega o Assunto, fica como a âncora do Assunto, fora das keywords; Assunto, título e slug do plano ficam). Decisão humana. Depois coleta a SERP da nova principal e forma | Google Ads grátis; identidade: ~~SERP só da secundária de mais volume (custo antes)~~ **SUBSTITUÍDO em 2026-10-17 (tarde, §15.6):** SERP da própria principal de identidade (4 lentes, até US$ 0,014, custo e propósito antes); troca: SERP só da principal escolhida (custo antes) |
+| 4 | Reforço (todos os artigos) | Assunto, slug, detalhes, DNA e a SERP JÁ em cache da principal (relacionadas, "as pessoas também perguntam", títulos e entidades do top 10) | Busca secundárias com essas sementes (Google Ads), escolhe pelo encaixe semântico com evidência na SERP do artigo, até 6 por artigo, sem duas no mesmo par entre artigos do Silo; a mais fraca sai só por uma melhor. Prévia → decisão humana → nova versão | Google Ads grátis. SERP extra por candidata só se o dono pedir evidência a mais |
+| 5 | Fechar o Silo | Pilar e ordem do plano, artigos formados | SiloDNA e SiloPage com o tema do Silo e o Pilar do plano | Grátis |
+| 6 | Links internos | Papel e ordem do plano (Pilar↔Suportes; Suportes entre si) e o grafo do Silo interligado | Malha proposta pela regra do Silo interligado (SDD `sdd-silo-interligado-seo-semantico-2026-10-14.md`) | Grátis |
+
+Regras do roteiro:
+- Busca sem semente do plano ou do DNA não roda. Toda chamada paga diz, antes,
+  quantas consultas, de quê, para qual artigo e por quê.
+- A tela mostra, para cada artigo, só o que os dados dizem e o que falta ("Livre
+  sem volume: procurar principal pelo Assunto e pelo slug"). Não mostra
+  contagem interna nem texto sem ação.
+- Cenário-ouro obrigatório (§0.3): o plano amarelo da WifiConecta (16/10).
+  Dados reais: 8 artigos; Travados com volume: internet residencial barata
+  (1.600), internet no meu cep (720), combo internet e celular (720),
+  instalação de internet residencial (170); Livres sem volume (volume nulo no
+  banco): como escolher plano de internet residencial (Pilar), claro vivo ou
+  tim internet residencial, quantos mega de internet preciso, combo internet tv
+  streaming. Esperado: 3a nos 4 Travados, 3b nos 4 Livres, 4 nos 8, 5 e 6
+  depois.
+
+### 15.1 Passo 4 com keyword nova — no código desde 2026-10-16 (noite)
+
+Decisão do dono (16/10, noite): "TUDO QUE VEM DO MINERADOR NÃO PODE MEXER, SÓ
+ANALISAR E TRABALHAR COM ISSO… PROCURA NOVOS, DIFERENTES DAS QUE JÁ ESTÃO NA
+LISTA, PODE PROCESSAR ELES E INCORPORAR ELES".
+
+- A keyword NOVA (que não existe na marca: chave normalizada do Minerador,
+  qualquer lista e status) entra na MESMA confirmação dos passos 3b e 4:
+  import da Pesquisa por Assunto (com a Lógica nas criadas), o Volume medido
+  na prévia (sem consultar o Google Ads de novo), aprovação e envio ao
+  Arquiteto, só nas linhas que esta confirmação cria; depois, o ArticleDNA.
+  Exige o aceite explícito (`approveNewKeywords`) e as permissões do Minerador
+  e do Arquiteto, conferidas antes de qualquer escrita. Vale na melhoria
+  ("Melhorar publicados e formar Assuntos") e no "Reforçar publicados".
+- A keyword que JÁ veio do Minerador é só lida: nunca importada, medida,
+  processada, aprovada nem enviada pelo Arquiteto. Sem estar no Arquiteto, ela
+  fica "Precisa do Minerador" (melhoria) ou de fora com o motivo (Reforçar).
+- **SUBSTITUÍDO** em 2026-10-16: a F4 de 14/10
+  (`sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`, item 2), na parte em que
+  a keyword nova ia só como "Sugestões do Arquiteto". As sugestões já gravadas
+  continuam legíveis no Minerador; nada foi apagado.
+- No código: a linha de copy (Assunto, slug, detalhes, DNA e a SERP da
+  principal em cache) escolhe o reforço e a troca; a única SERP paga é a
+  primeira da principal que ainda não tem; o parecer pelo cache usa a SERP da
+  principal e deixa o apoio sem SERP "não observado". Cenário-ouro:
+  `tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts`.
+
+### 15.2 A antiga principal fica como âncora do Assunto (dono, 2026-10-17)
+
+- **O que vale agora:** na troca do passo 3b (Livre sem volume), a principal
+  antiga do artigo do plano é a keyword que carrega o Assunto (cadastro
+  único). Ela **não** vira secundária: sai das keywords do artigo e fica como
+  a âncora do Assunto (`subject.keywordId`), com o título, o Assunto e o slug
+  do plano. O motivo aparece na linha da prévia
+  (`SUBJECT_KEYWORD_STAYS_SUBJECT_REASON`).
+- **Por quê:** o contrato do ArticleDNA (`ArticleDNASchema`, `superRefine`)
+  recusa o Assunto como secundária ou reforço; gravar "a antiga vira
+  secundária" daria versão inválida. A keyword continua no artigo, como o
+  Assunto dele — nada some.
+- **SUBSTITUÍDO** em 2026-10-17: o "(a antiga vira secundária)" da linha 3b da
+  tabela acima e o item 2 da R1 nesse caso. Vale para todo artigo cuja
+  principal antiga é a keyword do Assunto (com ou sem plano). No publicado
+  (D2.1), a antiga continua secundária, como antes.
+
+### 15.3 Sem canibalização dentro do Silo (dono, 2026-10-17)
+
+Tudo no MESMO alocador (`copyLineEdges` / `planArticleImprovements`), sem
+motor novo:
+
+- **(a) Variantes da mesma busca vão para UM artigo.** Variante = as mesmas
+  palavras sem as de ligação, plural ou singular, qualquer ordem ("plano de
+  internet residencial", "planos de internet residencial", "plano internet
+  residencial"). Dono: o artigo cuja principal tem essas palavras; senão o que
+  já tem uma secundária dessa variante; senão o que melhor as contém na
+  principal, no slug e no Assunto (o Pilar desempata). A variante da própria
+  principal vale no máximo duas vezes no artigo.
+- **(b) Busca com marca** (operadora, provedor — tirada dos domínios que a SERP
+  da principal mostra, como `vivo.com.br`) só vai para o artigo cujo Assunto,
+  slug ou principal nomeia aquela marca ou fala de operadoras. Nos outros,
+  fica de fora. A mesma regra vale para as sementes da busca nova: relacionada
+  com marca só semeia o artigo que nomeia a marca.
+- **(c) Uma secundária nunca é a principal nem a secundária de outro artigo do
+  mesmo Silo**, nem variante delas (dono da variante acima; keyword com dono
+  fica com ele).
+- **(d) Cabeça acima do volume da principal** (palavras da principal, menos que
+  todas, com mais volume) só entra no Pilar. No Suporte, ela fica de fora.
+- A secundária precisa levar ao menos uma palavra própria do artigo (da
+  principal, do slug, do Assunto ou dos detalhes) que não seja o assunto comum
+  do Silo ("internet residencial wifi" não reforça "internet residencial
+  barata").
+- Sementes da busca nova: palavra solta do DNA ("internet", "plano") não
+  semeia — é cabeça genérica e não diz do que o artigo fala.
+- Cenário-ouro: `tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts`
+  (variantes de "plano(s) de internet residencial" todas no Pilar; busca com
+  marca só no artigo das operadoras; "barata" com "preço internet
+  residencial" e parecidas). Testes do alocador em
+  `tests/arquiteto-article-improvement.test.mts`.
+
+### 15.4 Telas e diferenciação com a keyword nova (dono, 2026-10-17)
+
+- Melhoria ("Melhorar publicados…"), "Artigos do plano" (Concluir formação) e
+  "Reforçar publicados": a confirmação lista, por artigo, as keywords NOVAS com
+  volume e fonte e diz que elas são importadas, processadas, aprovadas e
+  enviadas nesta confirmação; o pedido leva `approveNewKeywords: true` só
+  nesse caso. A keyword nova aparece marcada "nova" na linha.
+- O passo pago chama-se **"Coletar a SERP no DataForSEO (pago: N consultas,
+  até US$ X)"** — SUBSTITUI "Validar no Google" (2026-10-17), que parecia o
+  Google Ads. O Google Ads aparece sempre como "grátis (cota do Google Ads)".
+- Diferenciação de publicados ("Aceitar grupo"): a mesma regra. A keyword NOVA
+  entra no Minerador no próprio aceite (import, Lógica, Volume, aprovação e
+  envio ao Arquiteto), pelas MESMAS portas do "Reforçar publicados"
+  (`mineradorPortsForNewKeywords`, agora em
+  `lib/server/arquiteto-published-reinforcement-deps.ts`); a que já existe é só
+  lida. Depois ela entra no artigo pelo "Colocar no artigo" de sempre.
+  **SUBSTITUÍDO** em 2026-10-17: a F4 de 14/10 na diferenciação (a nova ia
+  como "Sugestões do Arquiteto").
+
+### 15.5 Principal de identidade (dono, 2026-10-17)
+
+O dono, literal: "Se o termo principal tem pouco volume, mas faz sentido
+preservá-lo por ser a identidade do assunto/tema, principalmente nos
+publicados mas também nos novos. As keywords mais amplas podem reforçar o
+contexto."
+
+- **Teste (dos dados, sem IA):** a principal é a identidade quando está no
+  título do Assunto (todas as palavras de conteúdo dela, 2 ou mais) ou quando
+  o slug foi feito dela (todas as palavras dela no slug, cobrindo ao menos
+  metade dele; ou 3/4 das palavras do slug nela). Slug declarado no plano ou
+  publicado; o slug sugerido do DNA (que sai da própria principal) não conta.
+  Função única: `principalIsIdentity` / `targetPrincipalIsIdentity`
+  (`lib/arquiteto/article-improvement.ts`).
+- **Identidade fica** (Travada ou Livre, com pouco ou nenhum volume). As buscas
+  mais amplas entram como secundárias pelo passo 4 e pelas regras do Silo
+  (§15.3). A trava Livre não dispara troca. "Procurar outra principal" continua
+  a decisão do dono na linha.
+- **Troca só fora da identidade** (frase fora do título e do slug): no plano e
+  no Assunto, primeiro a busca com volume que leva o núcleo do slug com a
+  entidade do DNA (`subjectSlugCoreSwap`, a régua de 30/09 do publicado,
+  estendida), depois a que mantém a intenção; no publicado, D2.1, principal
+  mais ampla com o núcleo do slug, reserva da keyword mais próxima do slug e IA.
+  Sempre proposta, decisão do dono, motivo escrito ("fora da identidade").
+- **Formar sem trocar:** ~~a SERP da principal sem volume não é coletada; o
+  parecer vem das secundárias com volume e 4 lentes no cache (D2a, estendida à
+  keyword da própria página publicada). A coleta paga, quando falta, é a da
+  secundária de mais volume (custo e propósito antes).~~ **SUBSTITUÍDO em
+  2026-10-17 (tarde) pela §15.6:** a SERP da principal de identidade é coletada
+  na primeira coleta do artigo e o parecer usa ela; a secundária de mais volume
+  não é coletada por padrão; a D2a fica só enquanto a SERP dela não foi
+  coletada (e, fora da identidade, como antes).
+- **Publicados:** a mesma régua em `proposePublishedPrimarySwap` (mesa,
+  "Reforçar publicados", diferenciação), `volumelessPrincipalSwap`,
+  `editorialAiPrincipalBlock` e `validationGroups` (nenhuma SERP de candidata a
+  principal é paga para identidade). A régua lê a principal ATUAL do DNA
+  quando uma troca anterior já a mudou (`currentPrincipalKeyword`, aditivo).
+- **SUBSTITUÍDO** em 2026-10-17: "Livre sem volume troca" como padrão (passo
+  3b acima, R1 item 2, spec §35 item 3 e §32 item 6, catálogo item c). Vale
+  agora: só fora da identidade.
+- Cenário-ouro: `tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts`
+  (o Pilar fica com "como escolher plano de internet residencial" e recebe
+  "planos de internet residencial" 6.600, "plano de internet residencial"
+  2.900, "plano internet residencial" 1.000, "melhores planos…" 480 e "melhor
+  plano…" 260; os 3 Suportes Livres ficam com a principal e recebem o reforço
+  da busca nova; a única SERP paga é a da secundária de mais volume de cada
+  Livre — **SUBSTITUÍDO em 17/10, tarde:** é a da principal de identidade de
+  cada Livre, §15.6); C6, C9, C9b e C10 (identidade × fora da identidade).
+
+### 15.6 A régua única da coleta da SERP: sem volume, só a principal de identidade (dono, 2026-10-17, tarde)
+
+Decisão do dono sobre a recomendação: "implementa a sua recomendação".
+
+- **O que vale agora:** keyword SEM volume não tem a SERP coletada, EXCETO a
+  principal de identidade do artigo (§15.5: no título do Assunto ou o slug
+  declarado/publicado foi feito dela) — linha do plano, Assunto ou página
+  publicada. A SERP dela é coletada na primeira coleta do artigo ("Processar
+  artigos" de sempre e, na melhoria, a primeira coleta do artigo), 4 lentes,
+  até US$ 0,014, com o propósito e o custo ditos antes, por artigo: "SERP da
+  principal de identidade “…” (sem buscas no Google Ads): 4 consultas, até
+  US$ X — para ver o que o Google mostra para a frase do artigo".
+- **Por quê:** mostra o que o Google exibe para a frase exata do artigo
+  (estrutura, concorrentes, base para o Radar). É barato e tem propósito.
+- **Uma régua só:** `serpCollectionAllowed` (`lib/arquiteto/article-batch-serp.ts`),
+  reconduzindo as que existiam: `planArticleBatchSerpLot` ("Processar artigos"),
+  `planSheetSerpSelection` ("Validar SERP"), "Consultar nas 4 lentes", o
+  `onlyMeasuredVolume` do `/api/arquiteto/keyword-serp`, o "a Principal sempre
+  consultada" do `/api/arquiteto/serp` e a base da coleta da melhoria
+  (`validationGroups`). A identidade é a função de sempre (`principalIsIdentity`),
+  lida dos dados por `serpIdentityPrincipalCheck`.
+- **O servidor confere de novo:** `readSerpIdentityPrincipals`
+  (`lib/server/known-before-search.ts`) relê, em projeção estreita, o pacote
+  aprovado que o Arquiteto recebeu (plano, título do Assunto, marca de principal
+  declarada, Vínculo publicado), o status legado e o ArticleDNA vigente (só vale
+  como principal). Recusa a coleta da que não é, com o motivo
+  (`excludedByVolume` no keyword-serp; `refusedPrincipals` no plano do serp; a
+  execução nunca a paga, nem nas lentes extras). Leitura que falha: nada pago.
+- **Parecer:** com a SERP da principal de identidade no cache, o parecer usa ela
+  (e as secundárias com SERP, se houver). D2a só enquanto ela não foi coletada.
+- **A secundária de mais volume** não é mais coletada por padrão quando a
+  principal de identidade tem a SERP (gasto duplo); continua opcional pelo
+  artigo, para mais evidência.
+- **Continua recusada** a keyword sem volume que não é a principal de
+  identidade (secundária, reforço, a do Assunto que virou âncora numa troca,
+  principal fora da identidade). No Minerador nada muda.
+- **SUBSTITUÍDO** em 2026-10-17 (tarde): "keyword sem volume nunca é coletada"
+  como regra sem exceção (spec §38 item 2, SDD SERP no artigo A3), "a Principal
+  continua sempre consultada" (dúvida Q2, agora decidida: a fora da identidade
+  não é paga) e o "formar sem trocar" da §15.5 (a coleta da secundária de mais
+  volume). Spec §42.
+- Cenário-ouro: `tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts` (os
+  4 Livres: 16 consultas, até US$ 0,056, só as principais de identidade; a
+  secundária não; o parecer pela SERP da principal); servidor:
+  `tests/arquiteto-quatro-lentes-rota.test.mts` ("régua única ·…": identidade
+  conferida no pacote → paga; fora da identidade ou sem pacote → recusada, nada
+  pago mesmo autorizado).

@@ -17,6 +17,8 @@ import {
 } from "../lib/arquiteto/minerador-suggestions.ts";
 import {
   IMPROVEMENT_APPROVE_NEW_KEYWORDS_RETIRED,
+  IMPROVEMENT_NEW_KEYWORDS_APPROVAL_REQUIRED,
+  improvementNewKeywordIds,
   improvementMineradorNeeds,
   improvementSuggestionDrafts,
   markImprovementMineradorNeeds,
@@ -82,14 +84,67 @@ const ESCRITORES_DO_MINERADOR = [
   "replayStoredMeasurements",
 ];
 
-test("estrutural · lista fechada: nenhum arquivo do Arquiteto usa núcleo do Minerador que escreve", () => {
+/*
+ * 2026-10-16 (decisão do dono; SDD da linha única §15 passo 4) — SUBSTITUI a
+ * lista fechada absoluta da F4: a keyword NOVA (que não existe na marca) volta
+ * a entrar na MESMA confirmação, pelos núcleos do Minerador. Só UM lugar do
+ * Arquiteto os chama — `incorporateNewKeywords` da melhoria — e só nas linhas
+ * que o import dela criou. Em qualquer outro arquivo ou função, continua proibido.
+ */
+const INCORPORACAO = "lib/server/arquiteto-article-improvement.ts";
+const corpoDaIncorporacao = (codigo: string) => {
+  const inicio = codigo.indexOf("async function incorporateNewKeywords(");
+  const fim = codigo.indexOf("\nasync function applyTarget(", inicio);
+  return inicio >= 0 && fim > inicio ? codigo.slice(inicio, fim) : "";
+};
+/**
+ * O segundo (e último) lugar: as portas da keyword nova, UMA função para o
+ * "Reforçar publicados" e o "Aceitar grupo" da diferenciação (2026-10-17: saiu
+ * da rota do Reforçar para um arquivo próprio, sem mudar; a leitura do MCP não
+ * carrega os núcleos de escrita).
+ */
+const ROTA_DO_REFORCO = "lib/server/arquiteto-minerador-new-keyword-ports.ts";
+const corpoDasPortasDoReforco = (codigo: string) => {
+  const inicio = codigo.indexOf("export async function mineradorPortsForNewKeywords(");
+  const proxima = codigo.indexOf("\nexport ", inicio + 10);
+  return inicio >= 0 ? codigo.slice(inicio, proxima > inicio ? proxima : codigo.length) : "";
+};
+const semImports = (codigo: string) => codigo.split("\n").filter(linha => !/^import /.test(linha)).join("\n");
+
+test("estrutural · lista fechada: nenhum arquivo do Arquiteto usa núcleo do Minerador que escreve — salvo a incorporação da keyword NOVA, num lugar só", () => {
   assert.ok(DO_ARQUITETO.length > 40, `varredura vazia? ${DO_ARQUITETO.length}`);
   const achados: string[] = [];
   for (const caminho of DO_ARQUITETO) {
     const codigo = ler(caminho);
-    for (const simbolo of ESCRITORES_DO_MINERADOR) if (new RegExp(`\\b${simbolo}\\b`).test(codigo)) achados.push(`${caminho}: ${simbolo}`);
+    const fora = caminho === INCORPORACAO ? semImports(codigo).replace(corpoDaIncorporacao(codigo), "")
+      : caminho === ROTA_DO_REFORCO ? semImports(codigo).replace(corpoDasPortasDoReforco(codigo), "") : codigo;
+    for (const simbolo of ESCRITORES_DO_MINERADOR) if (new RegExp(`\\b${simbolo}\\b`).test(fora)) achados.push(`${caminho}: ${simbolo}`);
   }
   assert.deepEqual(achados, []);
+  const corpo = corpoDaIncorporacao(ler(INCORPORACAO));
+  assert.ok(corpo.length > 400, "a incorporação existe");
+  for (const nucleo of ["importSubjectDiscoveryWithCore", "runKeywordLogicWithCore", "measureKeywordVolume", "applyKeywordDecisionEntries", "createMineradorArquitetoHandoff"]) assert.match(corpo, new RegExp(`\\b${nucleo}\\b`));
+  // Só as linhas que ESTE import criou: a que já existia (ou passou a existir) nunca é tocada.
+  assert.match(corpo, /row\.outcome === "created"/);
+  assert.match(corpo, /marca\.existingByNormalized\.has\(normalizeKeyword\(k\.keyword\)\)/);
+  const portas = corpoDasPortasDoReforco(ler(ROTA_DO_REFORCO));
+  assert.ok(portas.length > 400, "as portas do Reforçar publicados existem");
+  assert.match(portas, /row\.outcome === "created"/);
+  // As duas rotas usam a MESMA função (nenhuma porta paralela).
+  for (const rota of ["app/api/arquiteto/published-reinforcement/route.ts", "app/api/arquiteto/cannibalization/apply/route.ts"]) {
+    assert.match(ler(rota), /mineradorPortsForNewKeywords\(/, rota);
+    assert.doesNotMatch(ler(rota), /async function mineradorPortsForNewKeywords\(/, `${rota} não monta portas próprias`);
+  }
+});
+
+test("estrutural · 2026-10-17 · diferenciação: a keyword NOVA entra no mesmo aceite; a que já existe é só lida; nada de 'Sugestões do Arquiteto' para a nova", () => {
+  const servidor = ler("lib/server/arquiteto-differentiation.ts");
+  assert.doesNotMatch(servidor, /recordMineradorSuggestions|ArchitectSuggestionDraft/);
+  assert.match(servidor, /body\.approveNewKeywords !== true\) return falhou\(422, "HUMAN_APPROVAL_REQUIRED"/);
+  assert.match(servidor, /"MINERADOR_PERMISSION_REQUIRED"/);
+  assert.match(servidor, /marcaAntes\.existingByNormalized\.has\(normalizeKeyword\(item\.keyword\)\)/);
+  assert.ok(servidor.indexOf('"HUMAN_APPROVAL_REQUIRED"') < servidor.indexOf("deps.persistArticleVersion(sucessora"), "aceite e permissão antes de gravar o DNA");
+  assert.doesNotMatch(ler("app/api/arquiteto/cannibalization/apply/route.ts"), /recordArquitetoMineradorSuggestionsSafely/);
 });
 
 function escritasNoMinerador(caminho: string, codigo: string): string[] {
@@ -109,7 +164,9 @@ test("estrutural · nenhum arquivo do Arquiteto grava em tabela minerador_* nem 
   assert.equal(escritasNoMinerador("amostra", "await fetch(`/api/minerador/marcas/${id}/keywords/delete`, { method: \"POST\" })").length, 1);
   assert.equal(escritasNoMinerador("amostra", 'import { POST } from "@/app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route";').length, 1);
   assert.equal(escritasNoMinerador("amostra", 'await db.from("minerador_keywords").select("id")').length, 0, "ler pode");
-  assert.ok(ESCRITORES_DO_MINERADOR.every(simbolo => !new RegExp(`\\b${simbolo}\\b`).test(ler("lib/server/arquiteto-article-improvement.ts"))));
+  // 2026-10-16: na melhoria, os núcleos só aparecem dentro da incorporação da keyword nova.
+  const melhoria = ler("lib/server/arquiteto-article-improvement.ts");
+  assert.ok(ESCRITORES_DO_MINERADOR.every(simbolo => !new RegExp(`\\b${simbolo}\\b`).test(semImports(melhoria).replace(corpoDaIncorporacao(melhoria), ""))));
   const achados = DO_ARQUITETO.flatMap(caminho => escritasNoMinerador(caminho, ler(caminho)));
   assert.deepEqual(achados, []);
   // A rota legada de Silo (W8) não insere mais lista do Minerador.
@@ -123,10 +180,20 @@ test("estrutural · o modal 'Importar do Minerador' não aprova e não usa servi
   assert.match(servidor, /approve: async \(\) => \{ throw new Error\("O Arquiteto não aprova keyword: aprove no Minerador\."\); \}/);
 });
 
-test("estrutural · a tela e o MCP do Arquiteto não pedem mais a aprovação no Minerador", () => {
-  assert.doesNotMatch(ler("modules/arquiteto/article-improvement-panel.tsx"), /approveNewKeywords/);
-  assert.doesNotMatch(ler("modules/arquiteto/published-reinforcement-model.ts"), /approveNewKeywords: true/);
-  assert.doesNotMatch(ler("modules/arquiteto/use-published-reinforcement.ts"), /approveNewKeywords/);
+/*
+ * SUBSTITUÍDO em 2026-10-17 (decisão do dono de 16/10): a tela não "nunca pede"
+ * mais a aprovação — ela a pede SÓ na confirmação que lista, por artigo, as
+ * keywords NOVAS com volume e fonte. A keyword que já está no Minerador
+ * continua só lida (as guardas do servidor acima).
+ */
+test("estrutural · 2026-10-17 · a tela pede a aprovação das keywords NOVAS só na confirmação que as lista", () => {
+  const painel = ler("modules/arquiteto/article-improvement-panel.tsx");
+  assert.equal((painel.match(/approveNewKeywords: true/g) || []).length, 2, "uma vez no pedido, uma vez no botão da confirmação");
+  assert.match(painel, /options\.approveNewKeywords \? \{ approveNewKeywords: true \}/);
+  assert.match(painel, /novasDaConfirmacao\?\.total \? \{ approveNewKeywords: true \} : \{\}/, "só quando a confirmação mostrou as novas");
+  assert.match(painel, /novasDaConfirmacao\.lines\.map/);
+  assert.match(ler("modules/arquiteto/published-reinforcement-model.ts"), /input\.approveNewKeywords \? \{ approveNewKeywords: true as const \} : \{\}/);
+  assert.match(ler("modules/arquiteto/use-published-reinforcement.ts"), /approveNewKeywords: Boolean\(data\.approvalText\)/);
   assert.doesNotMatch(ler("modules/arquiteto/use-published-differentiation.ts"), /subject-discovery\/import|sendIngest/);
   const mcp = ler("lib/server/platform-mcp-tools.ts");
   const improve = mcp.slice(mcp.indexOf('server.registerTool("improve_articles"'), mcp.indexOf("server.registerTool(\"apply_declared_plan_to_silo\""));
@@ -150,17 +217,21 @@ test("melhoria · só keywords recebidas, com volume e Lógica: nada precisa do 
   assert.equal(propostas[0].needsMinerador, undefined);
 });
 
-test("melhoria · keyword nova, medição a gravar e Lógica: 'Precisa do Minerador', não aceitável, com o motivo", () => {
-  const keywords = [kw("p", { signals: sinais(null) }), kw("a", { external: true }), kw("m", { volumePendingWrite: true })];
-  const propostas = [proposta({ memberIds: ["p", "a", "m"], addIds: ["a", "m"] }), proposta({ targetId: "outro", serpRefresh: { recordVersionId: "r", intent: "i", funnel: "f", detail: "d" } })];
+test("melhoria · keyword que JÁ existe no Minerador (não enviada, medição a gravar, sem Lógica): 'Precisa do Minerador', não aceitável; a NOVA entra na confirmação (2026-10-16)", () => {
+  const keywords = [kw("p", { signals: sinais(null) }), kw("a", { external: true, knownInMinerador: { keywordId: "ja-existe" } }), kw("m", { volumePendingWrite: true }), kw("n", { external: true })];
+  const propostas = [proposta({ memberIds: ["p", "a", "m", "n"], addIds: ["a", "m", "n"] }), proposta({ targetId: "outro", serpRefresh: { recordVersionId: "r", intent: "i", funnel: "f", detail: "d" } })];
   assert.equal(markImprovementMineradorNeeds(propostas, keywords), 1);
   assert.equal(propostas[0].status, "insufficient_evidence");
-  assert.deepEqual(propostas[0].needsMinerador, { newKeywordIds: ["a"], measureKeywordIds: ["m"], logicKeywordIds: ["p"] });
+  assert.deepEqual(propostas[0].needsMinerador, { newKeywordIds: ["a"], measureKeywordIds: ["m"], logicKeywordIds: ["p"] }, "a NOVA (n) não é 'precisa do Minerador': entra na confirmação");
   assert.match(propostas[0].reasons.at(-1)!, /^Precisa do Minerador: 1 keyword\(s\) nova\(s\) para importar e aprovar no Minerador \(“kw a”\); 1 medição\(ões\) de volume para gravar no Minerador \(“kw m”\); a Lógica do Minerador em 1 keyword\(s\) sem intenção \(“kw p”\)\. O Arquiteto não grava no Minerador/);
   assert.equal(propostas[1].status, "ready", "atualizar o DNA com a SERP não depende do Minerador");
+  // A keyword que carrega o Assunto (o próprio alvo) não pede a Lógica para ficar no artigo dela (2026-10-16).
+  assert.equal(improvementMineradorNeeds(proposta({ targetId: "p" }), [kw("p", { signals: sinais(null) }), kw("a")]), null);
   // Na gravação, a intenção é a da linha relida (não a da prévia).
   assert.deepEqual(improvementMineradorNeeds(proposta(), [kw("p", { signals: sinais(null) }), kw("a")], id => id === "p" ? true : null), null);
-  assert.match(IMPROVEMENT_APPROVE_NEW_KEYWORDS_RETIRED, /O Arquiteto não aprova keyword no Minerador/);
+  assert.deepEqual(improvementNewKeywordIds(propostas[0], keywords), ["n"]);
+  assert.match(IMPROVEMENT_NEW_KEYWORDS_APPROVAL_REQUIRED, /approveNewKeywords/);
+  assert.match(IMPROVEMENT_APPROVE_NEW_KEYWORDS_RETIRED, /O Arquiteto não aprova keyword no Minerador/, "o texto antigo fica legível (SUBSTITUÍDO)");
 });
 
 test("melhoria · as sugestões da execução: destino, motivo, a medição guardada só no servidor", () => {
@@ -174,11 +245,11 @@ test("melhoria · as sugestões da execução: destino, motivo, a medição guar
   assert.equal(architectSuggestionRecordKey("improvement", "11111111-1111-4111-8111-111111111111"), "improvement:11111111-1111-4111-8111-111111111111");
   assert.equal(ARCHITECT_SUGGESTIONS_SUBJECT_TYPE, "architect_minerador_suggestions");
   const porPalavra = Object.fromEntries(record.items.map(item => [item.keyword, item]));
-  assert.deepEqual([porPalavra["ideia nova"].kind, porPalavra["ideia nova"].keywordId, porPalavra["ideia nova"].subjectKeywordId, porPalavra["ideia nova"].hasStoredMeasurement, porPalavra["ideia nova"].searchId], ["new_keyword", null, "alvo", true, "11111111-1111-4111-8111-111111111111"]);
-  assert.match(porPalavra["ideia nova"].reason, /Entraria como secundária em “Assunto do artigo”\. Responde a dúvida do Assunto\./);
-  assert.deepEqual([porPalavra["já no minerador"].keywordId, porPalavra["já no minerador"].hasStoredMeasurement], ["id-do-minerador", false], "a que o Minerador já tem não leva medição para regravar");
+  // 2026-10-16: a keyword NOVA não vira sugestão — ela entra na mesma confirmação (import, Lógica, Volume, aprovação, envio).
+  assert.equal(porPalavra["ideia nova"], undefined);
+  assert.deepEqual([porPalavra["já no minerador"].kind, porPalavra["já no minerador"].keywordId, porPalavra["já no minerador"].hasStoredMeasurement, porPalavra["já no minerador"].subjectKeywordId], ["new_keyword", "id-do-minerador", false, "alvo"], "a que o Minerador já tem não leva medição para regravar");
   assert.deepEqual([porPalavra["medir esta"].kind, porPalavra["medir esta"].keywordId, porPalavra["medir esta"].hasStoredMeasurement], ["measure", "m", true]);
-  assert.equal(Object.keys(record.measurements ?? {}).length, 2);
+  assert.equal(Object.keys(record.measurements ?? {}).length, 1);
   // O que sai para o navegador e o MCP não leva a medição guardada.
   assert.equal("measurements" in projectArchitectSuggestionRecord(record), false);
   // Item gravado que não fecha o contrato fica de fora; o resto é lido como gravado.

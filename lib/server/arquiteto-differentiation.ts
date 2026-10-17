@@ -3,12 +3,14 @@ import "server-only";
 import { z } from "zod";
 import { knownVolumesByNormalized } from "@/lib/server/known-before-search";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
-import type { ArchitectSuggestionDraft } from "@/lib/arquiteto/minerador-suggestions";
+import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
+import { stableUuid, type PublishedReinforcementMineradorPorts } from "@/lib/server/arquiteto-published-reinforcement";
 import { contentHash, createVersionEnvelope } from "@/lib/arquiteto/versioning";
 import { buildSerpSubjectIndex, type KeywordSerpFootprint } from "@/lib/arquiteto/serp-subject-overlap";
 import {
   DIFFERENTIATION_AI_SYSTEM_PROMPT,
   DIFFERENTIATION_CONTRACT_VERSION,
+  DIFFERENTIATION_NEW_KEYWORDS_APPROVAL_TEXT,
   DIFFERENTIATION_RUNNING_STALE_MS,
   buildDifferentiationAiPrompt,
   compactDifferentiationGroup,
@@ -116,6 +118,8 @@ export const DifferentiationApplyRequestSchema = z.object({
   decision: z.enum(["accept", "keep"]),
   evaluationHash: z.string().min(1).max(200).optional(),
   pageKeywordIds: z.array(z.string().min(1).max(80)).min(1).max(12).optional(),
+  /** 2026-10-17 · o aceite das keywords NOVAS listadas na confirmação (entram no Minerador neste aceite). */
+  approveNewKeywords: z.boolean().optional(),
 }).strict().superRefine((value, context) => {
   if (value.decision === "accept" && !value.evaluationHash) context.addIssue({ code: "custom", path: ["evaluationHash"], message: "Aceitar exige o hash da prévia avaliada." });
 });
@@ -130,12 +134,28 @@ export type DifferentiationHandlerDeps = {
   /** Grava uma versão nova do ArticleDNA pelo writer canônico do Arquiteto. */
   persistArticleVersion?: (version: VersionEnvelope<ArticleDNA>) => Promise<{ status: "PERSISTED" | "UNCHANGED"; versionId: string }>;
   /**
-   * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13, item 2): as keywords novas do
-   * aceite viram "Sugestões do Arquiteto" (item de workflow do Arquiteto). O
-   * import é do Minerador, pelo clique do dono — antes a tela chamava a rota
-   * de import do Minerador direto daqui ("Enviar ao Minerador").
+   * 2026-10-17 · KEYWORD NOVA NO MESMO ACEITE (a regra de 16/10 da melhoria e
+   * do "Reforçar publicados"; SUBSTITUI a F4 de 14/10, quando a nova virava
+   * "Sugestões do Arquiteto"): as MESMAS portas do Minerador do Reforçar
+   * (`mineradorPortsForNewKeywords`), montadas só quando o aceite tem keyword
+   * nova; a rota confere ali as permissões, antes de qualquer escrita.
    */
-  recordMineradorSuggestions?: (input: { source: "differentiation"; sourceId: string; drafts: ArchitectSuggestionDraft[] }) => Promise<{ recorded: number; recordKey: string } | { recorded: 0; error: string } | null>;
+  minerador?: PublishedReinforcementMineradorPorts;
+  loadMinerador?: () => Promise<PublishedReinforcementMineradorPorts>;
+};
+
+/** A keyword que já existe na marca é só lida: o aceite nunca a importa, processa nem aprova. */
+export const DIFFERENTIATION_EXISTING_UNTOUCHED_REASON = "já existe no Minerador: o Arquiteto só a lê (nunca importa, processa nem aprova de novo)";
+
+export type DifferentiationIncorporation = {
+  pageKeywordId: string;
+  keyword: string;
+  /** As que ESTE aceite criou, com volume, aprovadas e enviadas ao Arquiteto: seguem para "Colocar no artigo". */
+  created: Array<{ keywordId: string; keyword: string }>;
+  leftOut: Array<{ keyword: string; reason: string }>;
+  /** O que ficou gravado no Minerador, na ordem (mesmo se parou depois). */
+  done: string[];
+  error: string | null;
 };
 
 export type DifferentiationHandlerOutcome = { status: number; body: Record<string, unknown> };
@@ -570,6 +590,74 @@ export async function handleDifferentiationApply(deps: DifferentiationHandlerDep
     selectedPageIds: selecionadas,
   });
 
+  /*
+   * 2026-10-17 · KEYWORD NOVA NO MESMO ACEITE (decisão do dono de 16/10, a
+   * mesma regra da melhoria e do "Reforçar publicados"; SUBSTITUI a F4 de
+   * 14/10). Com keyword nova (que não existe na marca) no aceite: o aceite
+   * explícito e as permissões do Minerador são conferidos AQUI, antes de
+   * qualquer escrita. Depois, pelos MESMOS núcleos do Minerador (import →
+   * Lógica → Volume → aprovação → envio ao Arquiteto), só nas linhas que este
+   * import cria; a que já existe é só lida. As criadas seguem a linha da
+   * diferenciação: keyword do Minerador fora do artigo → "Colocar no artigo".
+   */
+  const novasDoAceite = plano.ingestBatches.reduce((total, lote) => total + lote.items.length, 0);
+  let portasDoMinerador: PublishedReinforcementMineradorPorts | undefined;
+  if (novasDoAceite) {
+    if (body.approveNewKeywords !== true) return falhou(422, "HUMAN_APPROVAL_REQUIRED", `Há ${novasDoAceite} keyword(s) nova(s) neste aceite: a confirmação precisa dizer que você as aprova no Minerador. ${DIFFERENTIATION_NEW_KEYWORDS_APPROVAL_TEXT} Nada foi gravado.`);
+    try { portasDoMinerador = deps.minerador ?? (deps.loadMinerador ? await deps.loadMinerador() : undefined); }
+    catch (error) { return falhou(403, "MINERADOR_PERMISSION_REQUIRED", `Para incorporar keyword nova é preciso criar, editar e aprovar no Minerador e criar no Arquiteto (${error instanceof Error ? error.message.slice(0, 160) : "sem permissão"}). Nada foi gravado.`); }
+    if (!portasDoMinerador) return falhou(503, "MINERADOR_UNAVAILABLE", "Os núcleos do Minerador não estão disponíveis para as keywords novas. Nada foi gravado.");
+  }
+  const incorporacao: DifferentiationIncorporation[] = [];
+  const criadasPorPagina = new Map<string, Array<{ keywordId: string; keyword: string; role: "principal" | "secundaria" }>>();
+  if (portasDoMinerador) {
+    const portas = portasDoMinerador;
+    for (const lote of plano.ingestBatches) {
+      const desfecho: DifferentiationIncorporation = { pageKeywordId: lote.pageKeywordId, keyword: lote.subjectPhrase, created: [], leftOut: [], done: [], error: null };
+      incorporacao.push(desfecho);
+      // Relida agora: a que passou a existir depois da avaliação não é tocada.
+      const marcaAntes = await readDifferentiationBrandKeywords(deps.store);
+      const itens = lote.items.filter(item => {
+        const existe = marcaAntes.existingByNormalized.has(normalizeKeyword(item.keyword));
+        if (existe) desfecho.leftOut.push({ keyword: item.keyword, reason: DIFFERENTIATION_EXISTING_UNTOUCHED_REASON });
+        return !existe;
+      });
+      if (!itens.length) continue;
+      const importado = await portas.importKeywords({
+        importRequestId: stableUuid(deps.store.brandId, group.groupId, run.operationRequestId, lote.pageKeywordId, "import"),
+        searchId: run.operationRequestId,
+        subjectKeywordId: null,
+        subjectPhrase: lote.subjectPhrase,
+        items: itens.map(item => ({ keyword: item.keyword, origins: item.origins, evidence: item.evidence })),
+      });
+      if (!importado.ok) { desfecho.error = `o import no Minerador falhou: ${importado.reason}`; continue; }
+      const ids = importado.createdIds;
+      if (!ids.length) { desfecho.error = "o import não criou nenhuma keyword nova (nenhuma que já existia é tocada)."; continue; }
+      desfecho.done.push(`${ids.length} keyword(s) importada(s) no Minerador`);
+      const logica = await portas.runLogic(ids);
+      if (!logica.ok) { desfecho.error = `a Lógica não foi confirmada: ${logica.reason ?? "releitura falhou"}`; continue; }
+      desfecho.done.push("a Lógica delas");
+      const volume = await portas.measureVolume(ids, stableUuid(deps.store.brandId, group.groupId, run.operationRequestId, lote.pageKeywordId, "volume"));
+      if (!volume.ok) { desfecho.error = `o Volume do Google Ads não foi medido: ${volume.reason ?? "falha no Google Ads"}`; continue; }
+      desfecho.done.push("o Volume do Google Ads delas");
+      const volumes = await portas.readVolumes(ids);
+      const marcaDepois = await readDifferentiationBrandKeywords(deps.store);
+      const nomeDe = (id: string) => itens.find(item => marcaDepois.existingByNormalized.get(normalizeKeyword(item.keyword)) === id)?.keyword ?? id;
+      const comVolume = ids.filter(id => volumes.get(id)?.validated);
+      desfecho.leftOut.push(...ids.filter(id => !volumes.get(id)?.validated).map(id => ({ keyword: nomeDe(id), reason: "o Google Ads não confirmou volume: ficou no Minerador, fora do artigo" })));
+      if (!comVolume.length) continue;
+      const aprovacao = await portas.approve(comVolume);
+      if (!aprovacao.ok) { desfecho.error = `a aprovação no Minerador não foi confirmada: ${aprovacao.reason ?? "releitura falhou"}`; continue; }
+      desfecho.done.push(`aprovação de ${comVolume.length} no Minerador`);
+      try { await portas.handoff(comVolume); }
+      catch (error) { desfecho.error = `o envio ao Arquiteto falhou: ${error instanceof Error ? error.message.slice(0, 160) : "erro"}`; continue; }
+      desfecho.done.push(`envio de ${comVolume.length} ao Arquiteto`);
+      desfecho.created = comVolume.map(id => ({ keywordId: id, keyword: nomeDe(id) }));
+      const principalNova = run.evaluation.pages.find(pagina => pagina.keywordId === lote.pageKeywordId)?.newPrincipal?.keyword ?? null;
+      criadasPorPagina.set(lote.pageKeywordId, desfecho.created.map(item => ({ ...item, role: principalNova && normalizeKeyword(principalNova) === normalizeKeyword(item.keyword) ? "principal" as const : "secundaria" as const })));
+    }
+  }
+
   const paginas: Array<Record<string, unknown>> = [];
   for (const pagina of plano.pages) {
     const atual = versoes.get(pagina.keywordId) ?? null;
@@ -603,7 +691,8 @@ export async function handleDifferentiationApply(deps: DifferentiationHandlerDep
       readbackConfirmed: pagina.nextPayload ? escrita.readbackConfirmed : null,
       error: escrita.error,
       swap: pagina.swap,
-      formation: pagina.formation,
+      // As novas criadas neste aceite entram na fila "Colocar no artigo", como qualquer keyword do Minerador fora do artigo.
+      formation: [...pagina.formation, ...(criadasPorPagina.get(pagina.keywordId) ?? [])],
       ingest: pagina.ingest,
       refusal: pagina.refusal,
     });
@@ -620,6 +709,7 @@ export async function handleDifferentiationApply(deps: DifferentiationHandlerDep
     selectedPageIds: selecionadas ? [...selecionadas] : null,
     pages: paginas.map(pagina => ({ keywordId: pagina.keywordId, articleId: pagina.articleId, versionId: pagina.versionId, written: pagina.written, swapApplied: (pagina.swap as { applied: boolean }).applied })),
     ingestBatches: plano.ingestBatches,
+    incorporation: incorporacao,
   };
   let proposta: { state: DifferentiationRowState; lockVersion: number } | null = null;
   let persistWarning: string | null = null;
@@ -631,28 +721,6 @@ export async function handleDifferentiationApply(deps: DifferentiationHandlerDep
     persistWarning = error instanceof Error ? error.message : "A decisão não pôde ser registrada na proposta.";
   }
   const readbackConfirmed = paginas.every(pagina => pagina.readbackConfirmed !== false) && Boolean(proposta);
-  /*
-   * F4 · AS KEYWORDS NOVAS VIRAM SUGESTÃO AO MINERADOR (nenhuma escrita lá).
-   * A caixa "Sugestões do Arquiteto" do Minerador as lê; o import é do dono.
-   */
-  let mineradorSuggestions: { recorded: number; recordKey: string } | { recorded: 0; error: string } | null = null;
-  const drafts: ArchitectSuggestionDraft[] = plano.ingestBatches.flatMap(lote => lote.items.map(item => ({
-    kind: "new_keyword" as const,
-    keyword: item.keyword,
-    keywordId: null,
-    targetKeywordId: lote.pageKeywordId,
-    targetTheme: lote.subjectPhrase,
-    targetKind: "published" as const,
-    subjectKeywordId: null,
-    volume: null,
-    volumeSource: null,
-    measuredAt: null,
-    reason: `Diferenciaria o publicado “${lote.subjectPhrase}” do resto do grupo (aceite da diferenciação).`,
-    origins: item.origins,
-    evidence: item.evidence,
-    searchId: run.operationRequestId,
-  })));
-  if (drafts.length && deps.recordMineradorSuggestions) mineradorSuggestions = await deps.recordMineradorSuggestions({ source: "differentiation", sourceId: `${group.groupId}:${run.operationRequestId}`, drafts });
   return {
     status: 200,
     body: {
@@ -662,8 +730,8 @@ export async function handleDifferentiationApply(deps: DifferentiationHandlerDep
         decision: "accept",
         groupId: group.groupId,
         pages: paginas,
-        ...(mineradorSuggestions ? { mineradorSuggestions } : {}),
         ingestBatches: plano.ingestBatches.map(lote => ({ ...lote, searchId: run.operationRequestId, subjectKeywordId: null })),
+        incorporation: incorporacao,
         proposal: proposta,
         persistWarning,
         readbackConfirmed,

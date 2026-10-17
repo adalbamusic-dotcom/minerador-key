@@ -18,7 +18,7 @@ import {
 import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
 import { DATAFORSEO_LABS_LANGUAGE_CODE, DATAFORSEO_LABS_LOCATION_CODE } from "@/lib/minerador/dataforseo-labs-keyword-research-core";
 import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
-import { readSerpSubjectFootprints, type SerpSubjectReadEgress } from "@/lib/server/arquiteto-serp-subject-store";
+import { readSerpSubjectFootprints, readSerpSubjectVocabulary, type SerpSubjectReadEgress, type SerpSubjectVocabulary } from "@/lib/server/arquiteto-serp-subject-store";
 import { knownKeywordFromRow } from "@/lib/server/known-before-search";
 import type { KnownVolume } from "@/lib/editorial/known-before-search";
 
@@ -271,6 +271,18 @@ export async function readPublishedFootprints(context: DifferentiationStoreConte
   const targeting = await readMineradorKeywordTargetCodes(context.supabase, context.brandId, pages.map(page => page.keywordId), ambiente);
   const alvos = pages.map(page => ({ keywordId: page.keywordId, keyword: page.keyword, ...serpTargetCodesFor(targeting.codes, page.keywordId, ambiente) }));
   return readSerpSubjectFootprints(context, alvos, { now });
+}
+
+/**
+ * 2026-10-16 · §15 passo 4 — o que a SERP de cada principal, já no cache, mostra
+ * (perguntas, relacionadas, títulos do top 10), com o targeting de cada keyword.
+ * Só leitura: nada pago, nada gravado.
+ */
+export async function readPrincipalSerpVocabulary(context: DifferentiationStoreContext, principals: ReadonlyArray<{ keywordId: string; keyword: string }>, now: Date): Promise<Map<string, SerpSubjectVocabulary>> {
+  if (!principals.length) return new Map();
+  const ambiente = readDataForSeoTargetCodes();
+  const targeting = await readMineradorKeywordTargetCodes(context.supabase, context.brandId, principals.map(item => item.keywordId), ambiente);
+  return readSerpSubjectVocabulary(context, principals.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, ...serpTargetCodesFor(targeting.codes, item.keywordId, ambiente) })), { now });
 }
 
 /** A pegada das candidatas: a mesma chave que a Pesquisa por Assunto grava (Brasil, "pt"). */

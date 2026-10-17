@@ -2,8 +2,8 @@
 
 import { ArticleImprovementPanel } from "./article-improvement-panel";
 import { ArticlesFormationBar } from "./articles-formation-bar";
-import { PlanArticleTableRow, PlanRowActions, PlanRowSeals, PlanSheetOperations, usePlanArticleSheet } from "./plan-article-sheet";
-import { buildPlanSheetRows, planArticleKeywordIds, planOrderedGroupItems, planRowsWithoutArticle, planSubjectOfKeyword, splitTableSelectionForPlan, type PlanGroupItem, type PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
+import { PlanArticleTableRow, PlanRowActions, PlanRowDefinitionCell, PlanRowSeals, PlanSheetOperations, usePlanArticleSheet } from "./plan-article-sheet";
+import { buildPlanSheetRows, editorialGroupCut, planArticleKeywordIds, planOrderedGroupItems, planRowDefinition, planRowRoleLabel, planRowsWithoutArticle, planSubjectOfKeyword, splitTableSelectionForPlan, type PlanGroupItem, type PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
 
 import { GLOBAL_WORKFLOW_STATUSES, GLOBAL_WORKFLOW_LABELS, globalWorkflowStatus, type GlobalWorkflowStatus } from "@/lib/editorial/global-workflow-status";
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
@@ -153,7 +153,7 @@ import { LeftoverOpportunitiesPanel } from "./leftover-opportunities-panel";
 import { OperationProgress } from "./operation-progress";
 import { ARTICLE_FORMATION_REF_PREFIX, resolveArticleFormationState } from "@/lib/arquiteto/article-formation-decision";
 import { buildArticleFormationConfirmationPlan, readyConclusionSubset, summarizeConfirmationPlan, validateFormationConclusion, type ConclusionGate, type ConclusionHeldOut, type ConfirmationEntry } from "@/lib/arquiteto/article-formation-confirmation";
-import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, siloThemeTokens, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
+import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, cutArticleFormationUniverses, siloThemeTokens, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
 import { siloContextTokens } from "@/lib/arquiteto/semantic-nucleus";
 import { resolveCandidateBoundaries, type CandidateSerpEvidence } from "@/lib/arquiteto/candidate-serp-boundary";
 import { challengesRequiringSiloReview, describeSiloReconsideration, resolveSiloBoundaryChallenge, type SiloBoundaryChallenge } from "@/lib/arquiteto/silo-boundary-challenge";
@@ -169,7 +169,7 @@ import { SerpPaidPlanDialog } from "./serp-paid-plan-dialog";
 import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, articleSerpIntentOf, articleSerpLensesComplete, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
 import { comparePrincipalCandidates, simulateScenarioChange, type ScenarioChange, type ScenarioKeyword } from "@/lib/arquiteto/formation-scenario";
 import { ArticleFormationReviewPanel, type EvidenceState } from "./article-formation-review";
-import { ARTICLE_FORMATION_MARKER_CONTRACT_VERSION, type ArticleFormationMarkerPayload } from "@/lib/arquiteto/article-formation-marker";
+import { ARTICLE_FORMATION_MARKER_CONTRACT_VERSION, articleFormationMarkerIsStale, type ArticleFormationMarkerPayload } from "@/lib/arquiteto/article-formation-marker";
 import { SitemapViewHeader, SitemapViewRows } from "./sitemap-rows";
 import { buildArticlePipelineRows } from "@/lib/arquiteto/article-pipeline";
 import { buildSitemapView } from "@/lib/arquiteto/sitemap-view";
@@ -204,7 +204,7 @@ import {
   trunkAnchoredKeywordIds,
   type SubjectAnchorCarrier,
 } from "@/lib/arquiteto/declared-subject";
-import { SubjectAttachDialog, SubjectConservationBadge, SubjectFilterPanel, SubjectSupportDialog, type SubjectAnchorView, type SubjectSiloSuggestionView } from "./subject-panels";
+import { SubjectActionsControl, SubjectAttachDialog, SubjectConservationBadge, SubjectSupportDialog, type SubjectAnchorView, type SubjectSiloSuggestionView } from "./subject-panels";
 import { SerpSubjectCard, SerpSubjectDiagnosisPanel, cardReinforcementOf, type SerpSubjectReadStatus } from "./serp-subject-panels";
 import { PublishedDifferentiationSection } from "./published-differentiation-panel";
 import { usePublishedReinforcement } from "./use-published-reinforcement";
@@ -250,7 +250,6 @@ import { buildBrandRef } from "@/lib/tenant-routing";
 import {
   attachedSubjectWarning,
   buildSubjectFilterEntries,
-  filterBySubject,
   groupAutomaticSubjectSupports,
   heldOutSubjectIds,
   liveWorkingSubjectAnchors,
@@ -302,7 +301,7 @@ import {
 } from "@/lib/arquiteto/article-ai-review";
 import { ARTICLE_KGR_INTEREST_VOLUME_RANGE, articleKgrIdentityChangedMaterially, mergeArticleAllintitleEvidence, readArticleKgrDecision, reconcileArticleKgrIdentityWithCanonical, resolveArticleKgrSerpReadout, type ArticleKgrDecisionTone } from "@/lib/arquiteto/article-kgr-decision";
 import { ARTICLE_ALLINTITLE_BLOCK_SIZE } from "@/lib/arquiteto/article-allintitle";
-import { articleBatchSerpScopeId, describeArticleBatchSerpLot, planArticleBatchSerpLot, type ArticleBatchSerpTarget } from "@/lib/arquiteto/article-batch-serp";
+import { articleBatchSerpScopeId, describeArticleBatchSerpLot, planArticleBatchSerpLot, serpCollectionAllowed, serpIdentityArticleOf, serpIdentityPrincipalIds, type ArticleBatchSerpTarget } from "@/lib/arquiteto/article-batch-serp";
 import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import { aggregateArticleProcessReadModels, articleAiStateLabel, articleReviewStateLabel, deriveArticleProcessReadModel, type ArticleProcessReadModel } from "@/lib/arquiteto/article-process-read-model";
 import { selectArticlePanelProcessTab } from "@/lib/arquiteto/article-panel-tab-navigation";
@@ -5613,6 +5612,18 @@ export default function ArquitetoPage() {
    */
   const subjectStandings = useMemo(() => readSubjectStandings(masterList), [masterList]);
   /*
+   * 2026-10-16 (noite) · O RECORTE DA COR FORA DA TABELA (teste do dono, WifiConecta
+   * `?grupo=amarelo`: as contagens misturavam o azul com o amarelo). O MESMO recorte
+   * da tabela, para o que a aba Artigos conta fora dela; sem cor, a marca inteira.
+   */
+  const groupCut = useMemo(() => editorialGroupCut({
+    brandId: selectedBrandId || null,
+    filter: arquitetoGroups.filter,
+    keywordGroupById: arquitetoGroups.keywordGroupById,
+    standings: subjectStandings,
+    articleGroupOf: articleId => arquitetoGroups.articleGroupById.get(articleId)?.groupId ?? null,
+  }), [selectedBrandId, arquitetoGroups.filter, arquitetoGroups.keywordGroupById, arquitetoGroups.articleGroupById, subjectStandings]);
+  /*
    * 2026-10-15 · O SILO DO PLANO É O DNA DO PLANO (pedido do dono). As keywords
    * que o plano declara como artigo (Pilar ou Suporte) e a KEYWORD DO SILO
    * (texto = nome/slug do Silo do plano; opcional — 0 volume ou não cadastrada é
@@ -6256,10 +6267,14 @@ export default function ArquitetoPage() {
     [subjectHeldOut, subjectAnchorCarriers],
   );
 
-  /** O filtro "Assuntos": cada Assunto recebido e quantos artigos ele sustenta. */
+  /**
+   * Os Assuntos recebidos e quantos artigos cada um sustenta. 2026-10-16 (noite) ·
+   * o bloco de fichas "Assuntos · N" saiu (pedido do dono): a lista serve só ao
+   * seletor "Ações do Assunto" da barra, no recorte da cor (o filtro é a etiqueta).
+   */
   const subjectFilterEntries = useMemo(
-    () => selectedBrandId ? buildSubjectFilterEntries({ brandId: selectedBrandId, standings: subjectStandings, anchors: subjectAnchorCarriers }) : [],
-    [selectedBrandId, subjectStandings, subjectAnchorCarriers],
+    () => selectedBrandId ? buildSubjectFilterEntries({ brandId: selectedBrandId, standings: subjectStandings, anchors: subjectAnchorCarriers }).filter(entry => groupCut.keyword(entry.keywordId)) : [],
+    [selectedBrandId, subjectStandings, subjectAnchorCarriers, groupCut],
   );
   const activeSubjectFilter = subjectFilterEntries.some(entry => entry.keywordId === subjectFilterKeywordId) ? subjectFilterKeywordId : null;
 
@@ -7351,15 +7366,14 @@ export default function ArquitetoPage() {
       if (filterStatus !== "Todos" && globalWorkflowStatus(remoteWorkflowStatus.get(articleEntityIdFor(art))?.status) !== filterStatus) return false;
       return true;
     });
-    // Filtro "Assuntos" (F2.2): só os artigos que o Assunto escolhido sustenta.
-    const porAssunto = filterBySubject(porCampos, workspaceMode === "articles" ? activeSubjectFilter : null, art => articleSubjectFor(art)?.keywordId ?? null);
+    // 2026-10-16 (noite) · saiu o filtro "Assuntos" (F2.2) da tabela, com o bloco de fichas (pedido do dono): o filtro é a etiqueta da cor.
     // F2 · o grupo ativo no topo recorta o que aparece; a lista de artigos continua inteira.
     // 2026-10-14 (noite) · o artigo do plano (caso "jogos online") entra pelo grupo do PLANO — uma etiqueta perdida não o tira da tabela.
-    return filterRowsByEditorialGroup(porAssunto, arquitetoGroups.filter, art => (workspaceMode === "articles" ? planRowOfArticle(art)?.groupId : null) ?? articleGroupInfoFor(art).groupId) as typeof porAssunto;
-  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode, activeSubjectFilter, articleSubjectFor, arquitetoGroups.filter, articleGroupInfoFor, planRowOfArticle]);
+    return filterRowsByEditorialGroup(porCampos, arquitetoGroups.filter, art => (workspaceMode === "articles" ? planRowOfArticle(art)?.groupId : null) ?? articleGroupInfoFor(art).groupId) as typeof porCampos;
+  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode, arquitetoGroups.filter, articleGroupInfoFor, planRowOfArticle]);
   /**
    * As linhas do plano sem artigo na mesa, com os MESMOS filtros da tabela: a
-   * busca (keyword ou Assunto), o filtro de Assunto e o de status (linha do
+   * busca (keyword ou Assunto) e o de status (linha do
    * plano ainda não tem status gravado: só aparece em "Todos"). A cor já veio
    * recortada em `buildPlanSheetRows`.
    */
@@ -7369,9 +7383,8 @@ export default function ArquitetoPage() {
     // 2026-10-14 (noite) · "todo artigo do plano tem que aparecer": a linha do plano só cede o lugar a um artigo que ESTÁ na tabela.
     const naTabela = new Set<string>();
     for (const art of filteredArticles) { const row = planRowOfArticle(art); if (row) naTabela.add(row.keywordId); }
-    return planRowsWithoutArticle(planSheet.rows, naTabela).filter(row => (!busca || row.keyword.toLowerCase().includes(busca) || row.title.toLowerCase().includes(busca))
-      && (!activeSubjectFilter || row.keywordId === activeSubjectFilter));
-  }, [workspaceMode, filterStatus, searchQuery, planSheet.rows, filteredArticles, planRowOfArticle, activeSubjectFilter]);
+    return planRowsWithoutArticle(planSheet.rows, naTabela).filter(row => !busca || row.keyword.toLowerCase().includes(busca) || row.title.toLowerCase().includes(busca));
+  }, [workspaceMode, filterStatus, searchQuery, planSheet.rows, filteredArticles, planRowOfArticle]);
 
   const ungroupedKeywords = useMemo(
     () => masterList.filter(keyword => keyword.clusterId === null || keyword.clusterId === undefined || keyword.clusterId === "" || keyword.clusterId === 0),
@@ -7408,14 +7421,12 @@ export default function ArquitetoPage() {
     () => new Map(ungroupedSubjectView.ungrouped.map(item => [item.keywordId, item.label])),
     [ungroupedSubjectView],
   );
+  // 2026-10-16 (noite) · "Keywords sem artigo" conta só o recorte da cor (o mesmo da tabela); sem cor, a marca inteira.
   const visibleUngroupedArticleKeywords = useMemo(
-    () => ungroupedArticleKeywords.filter(keyword => ungroupedSubjectLabels.has(String(keyword.id))),
-    [ungroupedArticleKeywords, ungroupedSubjectLabels],
+    () => ungroupedArticleKeywords.filter(keyword => ungroupedSubjectLabels.has(String(keyword.id)) && groupCut.keyword(String(keyword.id))),
+    [ungroupedArticleKeywords, ungroupedSubjectLabels, groupCut],
   );
-  const anchoredSubjectRows = useMemo(() => ungroupedSubjectView.anchored.map(item => ({
-    ...item,
-    phrase: subjectStandings.get(item.keywordId)?.phrase || String(masterList.find(keyword => String(keyword.id) === item.keywordId)?.keyword || item.keywordId),
-  })), [ungroupedSubjectView, subjectStandings, masterList]);
+  /* 2026-10-16 (noite) · saiu o bloco "Assuntos como tronco · N" (pedido do dono): o tronco continua fora de "não agrupadas" (`ungroupedSubjectView`). */
 
   /** Transparência: a cabeceira reservada é mostrada, sem virar artigo falso. */
   const reservedSiloHeadKeywords = useMemo(
@@ -10403,10 +10414,16 @@ export default function ArquitetoPage() {
   const siloUndoEligibleRefs = useMemo(() => [...siloUndoReadings.entries()]
     .filter(([, leitura]) => leitura.refusals.length === 0)
     .map(([ref]) => ref), [siloUndoReadings]);
-  /** O lote diz quantos ficaram de fora por serem o Silo do plano, e por quê. */
+  /*
+   * O lote "Desfazer os Silos sugeridos" diz que o Silo do plano não entra nele, e por quê.
+   * 2026-10-16 (noite) · teste do dono (WifiConecta, amarelo): o cabeçalho dizia "1 fica de fora:
+   * Silo do plano Amarelo…" logo acima do mesmo Silo, Confirmado e visível. A frase falava do
+   * LOTE de desfazer, mas aparecia sem o botão do lote e dizia "fica de fora" como se o Silo
+   * tivesse saído. Agora ela só acompanha o botão (ver `SectionRow`) e diz só o que é verdade.
+   */
   const siloUndoPlanExcluded = useMemo(() => [...siloUndoReadings.values()].filter(leitura => leitura.declaredPlan), [siloUndoReadings]);
   const siloUndoExcludedNote = siloUndoPlanExcluded.length
-    ? `${siloUndoPlanExcluded.length} fica${siloUndoPlanExcluded.length === 1 ? "" : "m"} de fora: ${siloUndoPlanExcluded.map(leitura => `Silo do plano ${leitura.declaredPlan!.groupLabel} (“${leitura.label}”)`).join(", ")} — o plano é decisão do cadastro; muda no Minerador (“Tirar do plano” ou “Substituir o plano”).`
+    ? `Não entra${siloUndoPlanExcluded.length === 1 ? "" : "m"} no Desfazer: ${siloUndoPlanExcluded.map(leitura => `Silo do plano ${leitura.declaredPlan!.groupLabel} (“${leitura.label}”)`).join(", ")} — o Silo do plano segue o cadastro do Minerador (“Tirar do plano” ou “Substituir o plano”).`
     : null;
   const [siloUndoBulk, setSiloUndoBulk] = useState(false);
   /*
@@ -10920,16 +10937,18 @@ export default function ArquitetoPage() {
       const LOTE_DE_KEYWORDS = 6;
       /*
        * Ação MANUAL e opcional da fase Silos (SDD 2026-09-28, fatia A5): a
-       * primeira coleta do fluxo é a da aba Artigos. Aqui também vale a regra
-       * das coletas novas — keyword sem volume nunca é coletada.
+       * primeira coleta do fluxo é a da aba Artigos. Aqui também vale a régua
+       * única das coletas (2026-10-17) — keyword sem volume nunca é coletada,
+       * exceto a principal de identidade do artigo (o servidor confere de novo).
        */
-      const comVolume = doTerritorio.filter(kw => hasSearchVolume(typeof kw.volume_search === "number" ? kw.volume_search : null));
+      const identidade = serpIdentityPrincipalIds({ rows: masterListRef.current, articles: Object.values(acceptedArticleDnas).map(version => serpIdentityArticleOf(version.payload)) });
+      const comVolume = doTerritorio.filter(kw => serpCollectionAllowed({ volume: typeof kw.volume_search === "number" ? kw.volume_search : null, identityPrincipal: identidade.has(String(kw.id)) }));
       const semVolume = doTerritorio.length - comVolume.length;
       if (!comVolume.length) {
-        showNotification("warning", "Nenhuma keyword com volume neste Silo: a SERP não é coletada para keyword sem volume.");
+        showNotification("warning", "Nenhuma keyword com volume neste Silo: a SERP não é coletada para keyword sem volume (só a principal de identidade do artigo).");
         return;
       }
-      if (semVolume) showNotification("warning", `${semVolume} keyword(s) sem volume ficam fora da consulta nas 4 lentes (nunca coletadas).`);
+      if (semVolume) showNotification("warning", `${semVolume} keyword(s) sem volume ficam fora da consulta nas 4 lentes (nunca coletadas: não são a principal de identidade do artigo).`);
       const todas = comVolume.map(kw => ({ keywordId: String(kw.id), keyword: String(kw.keyword || "") }));
       const pedirLote = async (keywords: typeof todas, extra: Record<string, unknown>) => {
         const response = await fetch("/api/arquiteto/keyword-serp", {
@@ -11024,7 +11043,9 @@ export default function ArquitetoPage() {
     // "todas as keywords com volume" do lote. Ela não forma Article, mas a SERP
     // dela alimenta o índice "mesmo assunto" (artigo competindo com a página do
     // Silo) e a SiloPage no Radar, pela mesma chave de cache.
-    const lote = planArticleBatchSerpLot({ keywords: masterListRef.current, siloRefs });
+    // 2026-10-17 · a régua única da coleta: sem volume, só a principal de identidade do artigo entra (o servidor confere de novo).
+    const identityPrincipalIds = serpIdentityPrincipalIds({ rows: masterListRef.current, articles: Object.values(acceptedArticleDnas).map(version => serpIdentityArticleOf(version.payload)) });
+    const lote = planArticleBatchSerpLot({ keywords: masterListRef.current, siloRefs, identityPrincipalIds });
     if (!lote.targets.length) return "empty";
     const scopeId = articleBatchSerpScopeId(lote.siloRefs);
     const pedirBloco = async (keywords: ArticleBatchSerpTarget[], extra: Record<string, unknown>) => {
@@ -11527,12 +11548,13 @@ export default function ArquitetoPage() {
    * Só leitura (painel e mapa); a proposta e a confirmação leem a análise de
    * sempre. Marca sem plano: a mesma análise.
    */
+  // 2026-10-16 (noite) · cada artigo do plano é a sua leitura, com o nome da keyword (o grupo léxico não junta dois artigos do plano).
   const architectureAnalysisView = useMemo(() => withDeclaredPlanReading(architectureAnalysis, keywordId => {
     const standing = subjectStandings.get(keywordId);
     if (!standing?.declared || !standing.plan) return null;
     const plano = planosLidos?.find(item => item.groupId === standing.plan!.groupId);
     return plano ? { siloName: plano.siloName, role: standing.plan.role, order: standing.plan.order } : null;
-  }), [architectureAnalysis, subjectStandings, planosLidos]);
+  }, keywordId => keywordLabelById.get(keywordId) ?? null), [architectureAnalysis, subjectStandings, planosLidos, keywordLabelById]);
   /*
    * SDD acelerar 2026-10-13, item 4 — UMA PORTA PARA O PLANO. Desde a F5 da
    * SDD `sdd-arquiteto-so-le-e-listas-leves` (2026-10-14), a porta é a das
@@ -11597,9 +11619,18 @@ export default function ArquitetoPage() {
     [masterList],
   );
 
+  /*
+   * 2026-10-16 (noite) · o painel conta o recorte da cor (o mesmo da tabela);
+   * sem cor, a marca inteira. Só a LEITURA do painel: a formação, a conclusão e
+   * o hash do lote continuam lendo os universos inteiros.
+   */
+  const articleFormationUniversesInCut = useMemo(() => groupCut.all ? articleFormationUniverses : cutArticleFormationUniverses(articleFormationUniverses, {
+    candidate: candidate => groupCut.article({ subjectKeywordId: candidate.subjectKeywordId ?? null, principalKeywordId: candidate.principalKeywordId, keywordIds: candidate.keywords.map(item => item.keywordId) }),
+    keyword: groupCut.keyword,
+  }), [articleFormationUniverses, groupCut]);
   const articleFormationSummary = useMemo(
-    () => summarizeArticleFormation(articleFormationUniverses),
-    [articleFormationUniverses],
+    () => summarizeArticleFormation(articleFormationUniversesInCut),
+    [articleFormationUniversesInCut],
   );
 
   /**
@@ -11853,25 +11884,17 @@ export default function ArquitetoPage() {
       }),
   }), [articleFormationUniverses, dnaSignalsByKeyword]);
 
-  const formationIsStale = Boolean(articleFormationMarker)
-    && articleFormationMarker!.baseHash !== articleFormationBase;
-
-  /**
-   * Síntese da última confirmação, lida do próprio marcador.
-   *
-   * Guardar isso em estado de sessão faria a frase sumir no F5 enquanto o
-   * marcador continuava dizendo "Confirmada" — duas verdades sobre o mesmo
-   * fato.
+  /*
+   * 2026-10-16 (noite) · caso WifiConecta: o marcador nascido pela linha do plano
+   * guarda a base da composição de um artigo (`serpbase:…`), que nunca é igual à
+   * base do lote — "Formação desatualizada" para sempre. Só a base do lote
+   * envelhece (`articleFormationMarkerIsStale`). E a frase saiu do painel: é o
+   * destaque do botão "Reprocessar artigos", na barra.
    */
-  const confirmedFormation = useMemo(() => {
-    const confirmation = articleFormationMarker?.confirmation;
-    if (!confirmation || confirmation.status === "none") return null;
-    return {
-      articles: confirmation.confirmedArticleCount,
-      keywords: confirmation.coveredKeywordCount,
-      pending: confirmation.pendingSiloCount,
-    };
-  }, [articleFormationMarker]);
+  const formationIsStale = Boolean(articleFormationMarker)
+    && articleFormationMarkerIsStale({ storedBaseHash: articleFormationMarker!.baseHash, currentBaseHash: articleFormationBase });
+
+  /* 2026-10-16 (noite) · saiu a síntese "Formação concluída. N artigo(s)…" (pedido do dono): a coluna "Definição do artigo" de cada linha diz o que foi formado. */
 
 
 
@@ -18537,12 +18560,10 @@ export default function ArquitetoPage() {
               formation={{
                 panel: (
                   <ArticleFormationPanel
-                    universes={articleFormationUniverses}
+                    universes={articleFormationUniversesInCut}
                     summary={articleFormationSummary}
                     processed={Boolean(articleFormationMarker)}
-                    stale={formationIsStale}
                     busy={formationBusy}
-                    confirmed={confirmedFormation}
                     selectedCandidate={selectedFormationCandidate}
                     selectedCandidateSerp={serpSubjectCardForCandidate(selectedFormationCandidate)}
                     selectedSingletonAudit={selectedSingletonAudit}
@@ -18551,6 +18572,7 @@ export default function ArquitetoPage() {
                     waiting={{
                       awaitingConfirmation: articlePipeline.counts.awaiting_silo_confirmation,
                       withoutSilo: articlePipeline.counts.awaiting_silo,
+                      // 2026-10-16 (noite) · o contador das pendências conta o recorte da cor (o mesmo da tabela).
                       rows: [
                         ...visiblePipelineRows.map(row => ({
                           keywordId: row.keywordId,
@@ -18559,10 +18581,9 @@ export default function ArquitetoPage() {
                           siloName: row.siloName,
                         })),
                         ...formationDeferredRows,
-                      ],
+                      ].filter(row => groupCut.keyword(row.keywordId)),
                     }}
                     crossSilo={articleScopeAudit.crossSilo}
-                    serpGate={articleSerpGateSummary}
                     conclusionGates={conclusionGates}
                     parentBinding={{
                       conflict: [...articleParentBindings.values()].filter(item => item.code === "PARENT_CONFLICT").length,
@@ -19333,38 +19354,7 @@ export default function ArquitetoPage() {
             </div>
           </section>
         )}
-        {workspaceMode === "articles" && (subjectFilterEntries.length > 0 || anchoredSubjectRows.length > 0) && (
-          <SubjectFilterPanel
-            entries={subjectFilterEntries}
-            selectedKeywordId={activeSubjectFilter}
-            anchors={selectedSubjectAnchors}
-            siloSuggestions={selectedSubjectSiloSuggestions}
-            busy={subjectBusy || formationBusy}
-            buttonClassName={ARCHITECT_UI.toolbarButton}
-            primaryButtonClassName={ARCHITECT_UI.primaryButton}
-            onSelect={setSubjectFilterKeywordId}
-            onOpenAttach={() => setSubjectAttachOpen(true)}
-            onOpenSupport={() => setSubjectSupportOpen(true)}
-            onDetach={anchor => { void detachSubjectAnchor(anchor); }}
-            onConfirmSiloSuggestion={ref => { void confirmSiloSubjectSuggestion(ref); }}
-          />
-        )}
-        {workspaceMode === "articles" && anchoredSubjectRows.length > 0 && (
-          <section className="border-b border-context-accent/30 bg-surface-subtle px-4 py-3" data-testid="architect-anchored-subjects">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-bold uppercase tracking-widest text-context-accent">Assuntos como tronco · {anchoredSubjectRows.length}</span>
-              <span className="text-sm text-text-muted">Não são keywords não agrupadas: os artigos já os sustentam</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {anchoredSubjectRows.map(item => (
-                <div key={item.keywordId} className="flex flex-wrap items-center gap-2 rounded-md border border-divider bg-surface px-3 py-2 text-sm">
-                  <span className="font-medium text-keyword">{item.phrase}</span>
-                  <SubjectConservationBadge label={item.label} tone="trunk" testId="architect-subject-trunk" />
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
+        {/* 2026-10-16 (noite) · pedido do dono: saíram os blocos "Assuntos · N" (as fichas com o filtro) e "Assuntos como tronco · N". As ações do Assunto (Prender, Formar automaticamente, Soltar, Confirmar o do Silo) ficam na barra de sempre (`SubjectActionsControl`). */}
         {workspaceMode === "articles" && visibleUngroupedArticleKeywords.length > 0 && (
           <details className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-ungrouped-keywords">
             <summary className="cursor-pointer text-sm font-semibold text-foreground">Keywords sem artigo · {visibleUngroupedArticleKeywords.length} (as com volume estão em Sobras, abaixo)</summary>
@@ -19728,6 +19718,25 @@ export default function ArquitetoPage() {
               improvementOpen={improvementPanel === "open"}
               onToggleImprovement={() => setImprovementPanel(atual => atual === "open" ? "hidden" : "open")}
               buttonClassName={ARCHITECT_UI.toolbarButton}
+              stale={formationIsStale}
+              attentionClassName={ARCHITECT_UI.primaryButton}
+              subjectActions={
+                <SubjectActionsControl
+                  entries={subjectFilterEntries}
+                  selectedKeywordId={activeSubjectFilter}
+                  anchors={selectedSubjectAnchors}
+                  siloSuggestions={selectedSubjectSiloSuggestions}
+                  busy={subjectBusy || formationBusy}
+                  buttonClassName={ARCHITECT_UI.toolbarButton}
+                  primaryButtonClassName={ARCHITECT_UI.primaryButton}
+                  controlClassName={ARCHITECT_UI.control}
+                  onSelect={setSubjectFilterKeywordId}
+                  onOpenAttach={() => setSubjectAttachOpen(true)}
+                  onOpenSupport={() => setSubjectSupportOpen(true)}
+                  onDetach={anchor => { void detachSubjectAnchor(anchor); }}
+                  onConfirmSiloSuggestion={ref => { void confirmSiloSubjectSuggestion(ref); }}
+                />
+              }
             />
             {/* A barra de progressão dos processos: o "Processo ativo" de sempre (Lógica, SERP ou IA), só enquanto roda. */}
             {articleProcessActivity}
@@ -20309,6 +20318,9 @@ export default function ArquitetoPage() {
                     // 2026-10-13 · pedido do dono: o Assunto/tema na cabeceira da linha, para identificar o artigo.
                     const assuntoDaLinhaRef = articleSubjectFor(art);
                     const assuntoDaLinha = assuntoDaLinhaRef ? (assuntoDaLinhaRef.subject?.phrase || assuntoDaLinhaRef.phrase || keywordLabelById.get(assuntoDaLinhaRef.keywordId) || null) : null;
+                    // 2026-10-16 (noite) · pedido do dono: o artigo do plano diz o Papel no Silo (Pilar/Suporte e a posição) e a Definição de verdade, lidos da linha do plano.
+                    const linhaDoPlanoDaLinha = articleMode ? planRowOfArticle(art) : null;
+                    const definicaoDoPlano = linhaDoPlanoDaLinha ? planRowDefinition(linhaDoPlanoDaLinha) : null;
 
                   return (
                     <React.Fragment key={art.id}>
@@ -20365,13 +20377,14 @@ export default function ArquitetoPage() {
                            * mapa e o painel — que leem pelo nó do grafo, cujo id
                            * vem do ArticleDNA — mostravam PILAR e SUPORTE.
                            */
+                          if (linhaDoPlanoDaLinha) return <span data-testid="architect-silo-role-cell" title="Papel e posição do plano do Minerador (o plano manda na formação)." className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${linhaDoPlanoDaLinha.role === "Pilar" ? "border-positive-soft/40 bg-positive-soft/10 text-positive-soft" : "border-divider text-text-muted"}`}>{planRowRoleLabel(linhaDoPlanoDaLinha)}</span>;
                           const papel = linksHierarchy?.roleByArticleId.get(String(articleDnaVersion?.payload.articleId || ""))
                             ?? siloRoleByArticleId.get(String(articleDnaVersion?.payload.articleId || ""));
                           return papel
                             ? <span data-testid="architect-silo-role-cell" className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${papel === "PILAR" ? "border-positive-soft/40 bg-positive-soft/10 text-positive-soft" : "border-divider text-text-muted"}`}>{papel}</span>
                             : <span className="text-xs text-text-muted">—</span>;
                         })()}</td>}
-                        <td className="border-r border-divider px-2 py-2 text-center">{articleDnaVersion ? <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${articleDnaStatus === "approved" ? "border-positive-soft/35 bg-positive-soft/10 text-positive-soft" : "border-context-accent/35 bg-context-accent/10 text-context-accent"}`}>{articleDnaStatus === "approved" ? `Consolidado · v${articleDnaVersion.versionNumber}` : `Em revisão · v${articleDnaVersion.versionNumber}`}</span> : <span className="text-xs text-text-muted" data-testid="architect-article-definition">{formacao.definitionLabel}</span>}</td>
+                        <td className="border-r border-divider px-2 py-2 text-center">{definicaoDoPlano ? <PlanRowDefinitionCell definition={definicaoDoPlano} /> : articleDnaVersion ? <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${articleDnaStatus === "approved" ? "border-positive-soft/35 bg-positive-soft/10 text-positive-soft" : "border-context-accent/35 bg-context-accent/10 text-context-accent"}`}>{articleDnaStatus === "approved" ? `Consolidado · v${articleDnaVersion.versionNumber}` : `Em revisão · v${articleDnaVersion.versionNumber}`}</span> : <span className="text-xs text-text-muted" data-testid="architect-article-definition">{formacao.definitionLabel}</span>}</td>
                         <td className="border-r border-divider px-2 py-2">{(() => { const pai = articleParentFor(art); if (!(pai.state === "CANONICAL_SILO" && art.siloId)) return <span className={`text-xs ${pai.hasParent ? "text-foreground" : "text-text-muted"}`} title={pai.hasParent ? "O Silo foi confirmado na fase Silos. Consolidar SiloDNA e SiloPage é a etapa seguinte e não desfaz esse vínculo." : "O artigo não declara a que Silo pertence: não há pai editorial."}>{articleParentLabel(pai)}</span>; return <div className="space-y-1"><p className="break-words text-sm font-medium text-foreground">{pai.label}</p><select value={art.hierarquia || ""} onFocus={() => pushMasterHistory(masterList, `Editar hierarquia de ${art.keywordPrincipal}`)} onChange={e => setCustomHierarquias(prev => ({ ...prev, [art.id]: e.target.value, [art.briefingId]: e.target.value }))} onBlur={e => persistArticleIdentityField(art, "computedHierarquia", e.target.value)} className={`${ARCHITECT_UI.control} h-7 w-full text-xs`}><option value="Pilar" className="bg-surface-elevated">Pilar</option>{Array.from({ length: Math.max(group.articles.length - 1, 1) }, (_, idx) => `Suporte ${idx + 1}`).map(option => <option key={option} value={option} className="bg-surface-elevated">{option}</option>)}</select></div>; })()}</td>
                         <td className="border-r border-divider px-2 py-2">{!art.isPublished ? <div className="flex items-center justify-end gap-1.5"><button onClick={() => handleDetachArticle(art)} className={`${ARCHITECT_UI.iconButton} min-h-8 min-w-8 border-transparent`} title="Remover do Grupo" aria-label={`Remover ${art.keywordPrincipal} do grupo`}><Unlink className="w-3.5 h-3.5" /></button>{articleMode ? (() => {
                           /*

@@ -1124,6 +1124,40 @@ export function summarizeArticleFormation(universes: readonly ArticleFormationUn
   };
 }
 
+/**
+ * 2026-10-16 (noite) · O RECORTE DA COR NA LEITURA DO PAINEL (só leitura). Com
+ * uma cor escolhida na etiqueta, o painel da aba Artigos conta só o recorte —
+ * o mesmo da tabela (quem diz se a keyword e o candidato estão nele é quem
+ * chama). Os universos de verdade não mudam: a formação, a conclusão e o hash
+ * continuam lendo a marca inteira. Universo sem nada no recorte sai.
+ */
+export function cutArticleFormationUniverses(
+  universes: readonly ArticleFormationUniverse[],
+  inCut: { candidate: (candidate: ArticleCandidate) => boolean; keyword: (keywordId: string) => boolean },
+): ArticleFormationUniverse[] {
+  return universes.flatMap(universe => {
+    const candidates = universe.candidates.filter(inCut.candidate);
+    const refs = new Set(candidates.map(candidate => candidate.candidateRef));
+    const keywordIds = universe.keywordIds.filter(inCut.keyword);
+    if (!candidates.length && !keywordIds.length) return [];
+    const ids = (lista: readonly string[] | undefined) => lista?.filter(inCut.keyword);
+    return [{
+      ...universe,
+      keywordIds,
+      candidates,
+      publishedArticles: universe.publishedArticles.filter(page => Boolean(page.matchedKeywordId) && inCut.keyword(page.matchedKeywordId!)),
+      ungroupedKeywordIds: universe.ungroupedKeywordIds.filter(inCut.keyword),
+      singletonAudits: universe.singletonAudits.filter(audit => refs.has(audit.candidateRef)),
+      relations: universe.relations.filter(relation => refs.has(relation.leftCandidateRef) && refs.has(relation.rightCandidateRef)),
+      matchedToPublished: universe.matchedToPublished.filter(item => inCut.keyword(item.keywordId)),
+      ...(universe.anchoredSubjectKeywordIds ? { anchoredSubjectKeywordIds: ids(universe.anchoredSubjectKeywordIds) } : {}),
+      ...(universe.awaitingSupportSubjectKeywordIds ? { awaitingSupportSubjectKeywordIds: ids(universe.awaitingSupportSubjectKeywordIds) } : {}),
+      ...(universe.suggestedTrunkSubjectKeywordIds ? { suggestedTrunkSubjectKeywordIds: ids(universe.suggestedTrunkSubjectKeywordIds) } : {}),
+      ...(universe.deferredKeywords ? { deferredKeywords: universe.deferredKeywords.filter(item => inCut.keyword(item.keywordId)) } : {}),
+    }];
+  });
+}
+
 /* --------------------------------- base ---------------------------------- */
 
 /**

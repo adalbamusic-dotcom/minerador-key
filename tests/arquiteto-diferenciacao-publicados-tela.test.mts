@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 
 import { buildSerpSubjectIndex, type KeywordSerpFootprint } from "../lib/arquiteto/serp-subject-overlap.ts";
 import {
+  DIFFERENTIATION_NEW_KEYWORDS_APPROVAL_TEXT,
   compactDifferentiationGroup,
   detectPublishedCannibalization,
   proposeDifferentiationAngles,
@@ -31,6 +32,7 @@ import {
   DIFFERENTIATION_REACCEPT_ACTION,
   DIFFERENTIATION_REPLAN_ACTION,
   DIFFERENTIATION_RUN_ACTION,
+  acceptNewKeywordLines,
   acceptPreviewLines,
   defaultAcceptPageIds,
   keepPreviewLines,
@@ -225,7 +227,7 @@ test("proposta por página: ângulo, principal nova, secundárias com volume, an
   assert.equal(vista.tone, "success");
   assert.match(vista.costLabel, /^Gasto: US\$ 0,10 \(autorizado até US\$ 0,29\)\. SERP: 4 do cache, 12 coletada\(s\)\.$/);
   const captar = vista.pages.find(pagina => pagina.keyword === CAPTAR)!;
-  assert.deepEqual(captar.newPrincipal, { keyword: "anúncios para clínica de estética", volumeLabel: "volume 320" });
+  assert.deepEqual(captar.newPrincipal, { keyword: "anúncios para clínica de estética", volumeLabel: "volume 320", isNew: true, sourceLabel: "rodada antiga (DataForSEO Labs)" });
   assert.deepEqual(captar.siblings, [{ keyword: ATRAIR, before: "6", after: 1 }]);
   const atrair = vista.pages.find(pagina => pagina.keyword === ATRAIR)!;
   assert.equal(atrair.newPrincipal, null);
@@ -235,6 +237,11 @@ test("proposta por página: ângulo, principal nova, secundárias com volume, an
   const previa = acceptPreviewLines(vista);
   assert.ok(previa.some(linha => linha.includes("principal nova \"anúncios para clínica de estética\"")));
   assert.ok(previa.includes("URL, slug, canonical e marca não mudam. Nada é apagado."));
+  // 2026-10-17 · a confirmação diz o que o aceite faz com as NOVAS e lista, por página, volume e fonte.
+  assert.ok(previa.includes(DIFFERENTIATION_NEW_KEYWORDS_APPROVAL_TEXT));
+  assert.ok(previa.some(linha => linha.startsWith(`Novas em "${CAPTAR}": "anúncios para clínica de estética" (volume 320, rodada antiga (DataForSEO Labs))`)), previa.join(" | "));
+  assert.ok(!previa.some(linha => /vai para lá antes de entrar no artigo/.test(linha)), "o texto da F4 saiu");
+  assert.ok(acceptNewKeywordLines(vista).length > 0);
 });
 
 test("sem saída ou avaliação não gravada: nada a aceitar, com o motivo", () => {
@@ -280,8 +287,13 @@ test("aceite: sucesso só com a releitura; passos seguintes com o contrato do im
   assert.match(semReleitura.headline, /^1 página\(s\) não confirmada\(s\) na releitura/);
   assert.doesNotMatch(semReleitura.headline, /gravada\(s\) e confirmada/);
 
-  // F4 (ajuste declarado 2026-10-14): a tela do Arquiteto não monta mais o pedido de import do Minerador; o aceite grava a sugestão no servidor.
-  assert.equal(vista.ingestCount, 1, "a tela só conta as novas que foram como sugestão");
+  // 2026-10-17 · a nova entra no Minerador no próprio aceite (servidor): a tela diz o que entrou e o que ficou de fora.
+  const incorporada = differentiationApplyView(aceite({ incorporation: [{ pageKeywordId: CAPTAR, keyword: CAPTAR, created: [{ keywordId: "kw-anuncios", keyword: "anúncios para clínica de estética" }], leftOut: [], done: ["1 keyword(s) importada(s) no Minerador", "a Lógica delas", "o Volume do Google Ads delas", "aprovação de 1 no Minerador", "envio de 1 ao Arquiteto"], error: null }] }));
+  assert.equal(incorporada.ingestCount, 0, "nada pendente de incorporar");
+  assert.deepEqual(incorporada.incorporationLines, [`"${CAPTAR}": 1 keyword(s) nova(s) entraram no Minerador neste aceite (importadas, processadas, com volume, aprovadas e enviadas ao Arquiteto): "anúncios para clínica de estética" — falta "Colocar no artigo" abaixo.`]);
+  const parou = differentiationApplyView(aceite({ incorporation: [{ pageKeywordId: CAPTAR, keyword: CAPTAR, created: [], leftOut: [], done: ["1 keyword(s) importada(s) no Minerador"], error: "a Lógica não foi confirmada: releitura falhou" }] }));
+  assert.equal(parou.ingestCount, 1, "o aceite de novo retoma");
+  assert.match(parou.incorporationLines[0], /Parou: a Lógica não foi confirmada: releitura falhou\. Já ficou gravado no Minerador: 1 keyword\(s\) importada\(s\) no Minerador\./);
 });
 
 test("erros: código conhecido vira frase curta; sem código, a do servidor; nada pago é dito", () => {
@@ -309,7 +321,7 @@ test("fraca: a melhor possível é só evidência; o aceite padrão leva só as 
   const atrair = vista.pages.find(pagina => pagina.keywordId === ATRAIR)!;
   assert.equal(atrair.included, false, "fraca não entra sem a marca da pessoa");
   assert.deepEqual(atrair.secondaries, [], "a melhor possível nunca vira secundária");
-  assert.deepEqual(atrair.bestEffort, { keyword: "curso de maquiagem", volumeLabel: "volume 900" });
+  assert.deepEqual(atrair.bestEffort, { keyword: "curso de maquiagem", volumeLabel: "volume 900", isNew: true, sourceLabel: "rodada antiga (DataForSEO Labs)" });
   const previa = acceptPreviewLines(vista);
   assert.ok(!previa.some(linha => linha.includes("curso de maquiagem")));
   const desmarcada = differentiationEvaluationView(fraca, PAR_COMPACTO, []);
@@ -351,7 +363,8 @@ test("painel e modelo: sem rede, tokens, 14px+, checkbox com rótulo, diálogo c
   assert.equal((painel.match(/<label htmlFor=\{/g) || []).length, 2, "grupo e opção da IA");
   assert.match(painel, /text-keyword/);
   assert.match(painel, /onConfirm=\{\(\) => \{ setConfirmRun\(false\); void controller\.runConfirmed\(\); \}\}/, "pagar só pela confirmação");
-  assert.match(painel, /onConfirm=\{\(\) => \{ const alvo = confirmAccept; setConfirmAccept\(null\); void controller\.accept\(alvo\); \}\}/, "aceitar só pela confirmação");
+  // 2026-10-17 · o aceite das novas vai só quando a confirmação as listou.
+  assert.match(painel, /onConfirm=\{\(\) => \{ const alvo = confirmAccept; setConfirmAccept\(null\); void controller\.accept\(alvo, \{ approveNewKeywords: acceptNewKeywordLines\(acceptView\)\.length > 0 \}\); \}\}/, "aceitar só pela confirmação");
   assert.match(painel, /disabled=\{!controller\.readiness\.ready\}/);
   assert.match(painel, /onConfirm=\{\(\) => \{ const alvo = confirmKeep; setConfirmKeep\(null\); void controller\.keep\(alvo\); \}\}/, "manter só pela confirmação");
   assert.doesNotMatch(painel, /onClick=\{\(\) => void controller\.keep\(/, "nenhum clique grava Manter direto");
@@ -390,9 +403,11 @@ test("catálogo das IAs fala os rótulos da tela (AGENTS §17.1)", () => {
   const operacao = PLATFORM_OPERATIONS.find(item => item.id === "arquiteto.published_differentiation")!;
   const deteccao = PLATFORM_OPERATIONS.find(item => item.id === "arquiteto.published_differentiation_detect")!;
   assert.ok(deteccao.howOnScreen.includes(`'${DIFFERENTIATION_PLAN_ACTION} (grátis)'`));
-  for (const rotulo of [`'${DIFFERENTIATION_RUN_ACTION} (US$ x a y)'`, `'${DIFFERENTIATION_ACCEPT_ACTION}'`, `'${DIFFERENTIATION_KEEP_ACTION}'`, "'Sugestões do Arquiteto'", "'Colocar no artigo'", `'${DIFFERENTIATION_REACCEPT_ACTION}'`, `'${DIFFERENTIATION_REPLAN_ACTION}'`, `'${DIFFERENTIATION_INCLUDE_OPTION}'`]) {
+  for (const rotulo of [`'${DIFFERENTIATION_RUN_ACTION} (US$ x a y)'`, `'${DIFFERENTIATION_ACCEPT_ACTION}'`, `'${DIFFERENTIATION_KEEP_ACTION}'`, "'Colocar no artigo'", `'${DIFFERENTIATION_REACCEPT_ACTION}'`, `'${DIFFERENTIATION_REPLAN_ACTION}'`, `'${DIFFERENTIATION_INCLUDE_OPTION}'`]) {
     assert.ok(operacao.howOnScreen.includes(rotulo), rotulo);
   }
   assert.doesNotMatch(`${operacao.howOnScreen} ${deteccao.howOnScreen}`, /Montar prévia|Buscar keywords \(pago\)/);
+  // 2026-10-17 · a nova entra no próprio aceite; a F4 ("vão como Sugestões") está marcada SUBSTITUÍDA.
+  assert.match(operacao.howOnScreen, /o próprio aceite \(approveNewKeywords\) as importa no Minerador/);
   assert.equal(chamadasDeRede, 0);
 });

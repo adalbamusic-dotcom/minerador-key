@@ -84,6 +84,10 @@ com a SERP como autoridade acima da lógica e da IA (4 lentes). Em especial:
 - A suíte também guarda a forma da linha: os botões e etapas do contrato
   existem uma vez cada, e não existe porta paralela.
 - Entrega sem a suíte verde não é entrega.
+- O registro das situações resolvidas de cada área (no Arquiteto,
+  `docs/04-arquiteto/situacoes-resolvidas.md`) é leitura obrigatória antes de
+  mexer na área, e toda situação nova resolvida entra nele com o cenário que a
+  guarda.
 
 ### 0.4 Forma na cópia de trabalho; grava só ao confirmar
 

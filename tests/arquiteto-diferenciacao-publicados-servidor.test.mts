@@ -8,6 +8,7 @@ import { createVersionEnvelope } from "../lib/arquiteto/versioning.ts";
 import { normalizeSerpPageUrl } from "../lib/arquiteto/serp-subject-overlap.ts";
 import { DIFFERENTIATION_STAGE, DIFFERENTIATION_SUBJECT_TYPE } from "../lib/arquiteto/published-differentiation.ts";
 import type { DifferentiationRunPorts } from "../lib/arquiteto/published-differentiation-run.ts";
+import type { PublishedReinforcementMineradorPorts } from "../lib/server/arquiteto-published-reinforcement.ts";
 import { normalizeKeyword } from "../lib/minerador/keyword-import-core.ts";
 import {
   DifferentiationApplyRequestSchema,
@@ -187,7 +188,13 @@ async function linhaDeVersao(payload: ArticleDNA): Promise<Linha> {
   return { version_id: envelope.versionId, entity_id: envelope.entityId, marca_id: MARCA, artifact_type: "article_dna", version_number: 1, previous_version_id: null, content_hash: envelope.contentHash, origin: "human", change_reason: "inicial", created_at: envelope.createdAt, created_by: ATOR, status: "approved", payload };
 }
 
-const URL_CAPTAR = "https://adalbapro.com.br/blog/como-captar-clientes-para-clinica-de-estetica";
+/*
+ * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono): com a URL feita da principal ("como-captar-clientes-para-clinica-de-
+ * estetica"), a Livre fica e a diferenciação não a troca. Para exercitar a troca do aceite, a página de "captar" aqui
+ * tem um slug que não foi feito da principal (fora da identidade); o complemento "para clínica de estética" continua.
+ */
+const SLUG_CAPTAR = "blog/captacao-para-clinica-de-estetica";
+const URL_CAPTAR = `https://adalbapro.com.br/${SLUG_CAPTAR}`;
 const URL_ATRAIR = "https://adalbapro.com.br/blog/como-atrair-pacientes-para-clinica-de-estetica";
 
 async function montarBanco() {
@@ -202,7 +209,7 @@ async function montarBanco() {
   );
   banco.linhas("editorial_workflow_items").push(...cacheReal(CAPTAR), ...cacheReal(ATRAIR), ...cacheReal("promoções para estética"), ...cacheReal(CAPTAR, OUTRA_MARCA));
   banco.linhas("editorial_artifact_versions").push(
-    await linhaDeVersao(artigo("article-captar", K_CAPTAR, [K_ANUNCIOS], "blog/como-captar-clientes-para-clinica-de-estetica")),
+    await linhaDeVersao(artigo("article-captar", K_CAPTAR, [K_ANUNCIOS], SLUG_CAPTAR)),
     await linhaDeVersao(artigo("article-atrair", K_ATRAIR, [], "blog/como-atrair-pacientes-para-clinica-de-estetica")),
   );
   return banco;
@@ -247,6 +254,25 @@ function portas() {
     async readFootprints(alvos) { return { footprints: [], missingLenses: alvos.flatMap(alvo => ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"].map(lens => ({ keywordId: alvo.keywordId, lens, reason: "sem entrada no cache" }))) }; },
   };
   return { run, registro };
+}
+
+/** As portas do Minerador, dubladas: o import cria a linha no banco falso; nada de rede. */
+function portasDoMinerador(banco: Banco) {
+  const chamadas: string[] = [];
+  const portas: PublishedReinforcementMineradorPorts = {
+    importKeywords: async pedido => {
+      chamadas.push(`import:${pedido.items.map(item => item.keyword).join("|")}`);
+      const ids = pedido.items.map((_, indice) => `cccccccc-0000-4000-8000-00000000000${indice + 1}`);
+      pedido.items.forEach((item, indice) => banco.linhas("minerador_keywords").push(keyword(ids[indice], item.keyword, { volume_search: null })));
+      return { ok: true, createdIds: ids };
+    },
+    runLogic: async ids => { chamadas.push(`logic:${ids.join(",")}`); return { ok: true, reason: null }; },
+    measureVolume: async ids => { chamadas.push(`volume:${ids.join(",")}`); return { ok: true, reason: null }; },
+    readVolumes: async ids => new Map(ids.map(id => [id, { volume: 90, validated: true }])),
+    approve: async ids => { chamadas.push(`approve:${ids.join(",")}`); return { ok: true, reason: null }; },
+    handoff: async ids => { chamadas.push(`handoff:${ids.join(",")}`); },
+  };
+  return { portas, chamadas };
 }
 
 function deps(banco: Banco, extra: Partial<DifferentiationHandlerDeps> = {}): DifferentiationHandlerDeps {
@@ -333,24 +359,41 @@ test("prévia, rodada e aceite: hash exigido, grupo relido, readback e decisão 
   assert.equal(velha.status, 409);
   assert.equal(versoes.length, 0);
 
-  const aceite = await handleDifferentiationApply(deps(banco, { persistArticleVersion: gravar }), DifferentiationApplyRequestSchema.parse({ brandId: MARCA, groupId, decision: "accept", evaluationHash: rodada.evaluationHash }));
+  // 2026-10-17 · keyword NOVA no aceite: sem o aceite dela, nada é gravado; sem a permissão do Minerador, também não.
+  const semAceite = await handleDifferentiationApply(deps(banco, { persistArticleVersion: gravar }), DifferentiationApplyRequestSchema.parse({ brandId: MARCA, groupId, decision: "accept", evaluationHash: rodada.evaluationHash }));
+  assert.equal(semAceite.status, 422);
+  assert.equal(semAceite.body.code, "HUMAN_APPROVAL_REQUIRED");
+  assert.match(String(semAceite.body.error), /1 keyword\(s\) nova\(s\) neste aceite/);
+  assert.equal(versoes.length, 0, "nada gravado sem o aceite das novas");
+  const semPermissao = await handleDifferentiationApply(deps(banco, { persistArticleVersion: gravar, loadMinerador: async () => { throw new Error("sem permissão: minerador approve"); } }), DifferentiationApplyRequestSchema.parse({ brandId: MARCA, groupId, decision: "accept", evaluationHash: rodada.evaluationHash, approveNewKeywords: true }));
+  assert.equal(semPermissao.status, 403);
+  assert.equal(semPermissao.body.code, "MINERADOR_PERMISSION_REQUIRED");
+  assert.equal(versoes.length, 0, "a permissão é conferida antes de qualquer escrita");
+  const minerador = portasDoMinerador(banco);
+  const aceite = await handleDifferentiationApply(deps(banco, { persistArticleVersion: gravar, minerador: minerador.portas }), DifferentiationApplyRequestSchema.parse({ brandId: MARCA, groupId, decision: "accept", evaluationHash: rodada.evaluationHash, approveNewKeywords: true }));
   assert.equal(aceite.status, 200, JSON.stringify(aceite.body));
   const resultado = dados(aceite);
-  const porPagina = new Map((resultado.pages as Array<{ keywordId: string; written: boolean; readbackConfirmed: boolean | null; swap: { applied: boolean } ; ingest: Array<{ keyword: string }> }>).map(pagina => [pagina.keywordId, pagina]));
+  // Só a NOVA passa pelos núcleos do Minerador, na ordem; a que já existia ("anúncios…") nunca.
+  const NOVA = "cccccccc-0000-4000-8000-000000000001";
+  assert.deepEqual(minerador.chamadas, ["import:instagram para clínica de estética", `logic:${NOVA}`, `volume:${NOVA}`, `approve:${NOVA}`, `handoff:${NOVA}`]);
+  const incorporacao = resultado.incorporation as Array<{ pageKeywordId: string; created: Array<{ keywordId: string; keyword: string }>; error: string | null }>;
+  assert.deepEqual(incorporacao.map(item => [item.pageKeywordId, item.created, item.error]), [[K_ATRAIR, [{ keywordId: NOVA, keyword: "instagram para clínica de estética" }], null]]);
+  const porPagina = new Map((resultado.pages as Array<{ keywordId: string; written: boolean; readbackConfirmed: boolean | null; swap: { applied: boolean } ; ingest: Array<{ keyword: string }>; formation: Array<{ keywordId: string; keyword: string }> }>).map(pagina => [pagina.keywordId, pagina]));
+  assert.deepEqual(porPagina.get(K_ATRAIR)!.formation.map(item => [item.keywordId, item.keyword]), [[NOVA, "instagram para clínica de estética"]], "a nova segue para 'Colocar no artigo'");
   assert.equal(porPagina.get(K_CAPTAR)!.written, true);
   assert.equal(porPagina.get(K_CAPTAR)!.swap.applied, true, "a nova principal já está no ArticleDNA, Posto Livre, não ranqueia");
   assert.equal(porPagina.get(K_ATRAIR)!.swap.applied, false);
-  assert.deepEqual(porPagina.get(K_ATRAIR)!.ingest.map(item => item.keyword), ["instagram para clínica de estética"], "a nova vai ao Processador");
+  assert.deepEqual(porPagina.get(K_ATRAIR)!.ingest.map(item => item.keyword), ["instagram para clínica de estética"], "o plano diz qual era nova");
   assert.equal(versoes.length, 2);
   const captar = versoes.find(versao => versao.entityId === "article-captar")!;
   assert.equal(captar.versionNumber, 2);
   assert.equal(captar.createdBy, ATOR);
   assert.equal(captar.origin, "human");
   assert.equal(captar.payload.principalKeywordId, K_ANUNCIOS);
-  assert.equal(captar.payload.suggestedSlug, "blog/como-captar-clientes-para-clinica-de-estetica");
+  assert.equal(captar.payload.suggestedSlug, SLUG_CAPTAR);
   assert.ok(captar.payload.differentiation.some(linha => linha.startsWith("Diferenciação: ")));
   assert.equal(resultado.readbackConfirmed, true);
-  assert.equal((resultado.proposal as { state: string }).state, "partially_applied", "há keyword nova esperando o Minerador");
+  assert.equal((resultado.proposal as { state: string }).state, "partially_applied", "a nova entrou no Minerador; falta colocar no artigo");
   const lotes = resultado.ingestBatches as Array<{ subjectPhrase: string; searchId: string }>;
   assert.equal(lotes[0].subjectPhrase, ATRAIR);
   assert.equal(lotes[0].searchId, "44444444-4444-4444-8444-444444444444");

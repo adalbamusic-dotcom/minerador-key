@@ -159,3 +159,72 @@ export async function readSerpSubjectFootprints(
   }
   return { footprints, withoutSerp, missingLenses, egress };
 }
+
+/*
+ * 2026-10-16 · O VOCABULÁRIO DA SERP DA PRINCIPAL — LEITURA ESTREITA DO CACHE
+ * (SDD `sdd-linha-unica-do-arquiteto-2026-10-16.md` §15, passo 4). O reforço
+ * escolhe pela SERP do artigo JÁ paga: as perguntas ("as pessoas também
+ * perguntam") e as buscas relacionadas da observação, e os títulos do top 10
+ * do digest. Só esses caminhos trafegam (≈ 1,5 KB por keyword × lente); nada
+ * é pago nem gravado. A lente canônica guarda o corpo e não o digest: entra
+ * pelas perguntas e relacionadas.
+ */
+export const SERP_VOCABULARY_READ_COLUMNS = [
+  "subject_id",
+  "meta:payload->meta",
+  "questions:payload->observation->questions",
+  "related:payload->observation->relatedSearches",
+  // 2026-10-17 · os domínios concorrentes: de onde sai o nome das marcas/operadoras (a busca com marca só vai ao artigo que a nomeia).
+  "domains:payload->observation->competitorDomains",
+  ...Array.from({ length: SERP_SUBJECT_URL_SLOTS }, (_, indice) => `t${indice}:payload->digest->organic->${indice}->>title`),
+].join(",");
+
+export type SerpSubjectVocabulary = { keywordId: string; questions: string[]; relatedSearches: string[]; titles: string[]; lenses: number; domains: string[] };
+
+export async function readSerpSubjectVocabulary(
+  context: SerpCacheContext,
+  targets: readonly SerpSubjectReadTarget[],
+  options: { now: Date; maxAgeMs?: number },
+): Promise<Map<string, SerpSubjectVocabulary>> {
+  type Pedido = { target: SerpSubjectReadTarget; query: SerpCacheQuery; subjectId: string };
+  const pedidos: Pedido[] = [];
+  const vistos = new Set<string>();
+  for (const target of targets) {
+    if (vistos.has(target.keywordId)) continue;
+    vistos.add(target.keywordId);
+    for (const lens of SERP_CACHE_LENSES) {
+      const query: SerpCacheQuery = { keyword: target.keyword, locationCode: target.locationCode, languageCode: target.languageCode, lens, endpoint: "advanced" };
+      pedidos.push({ target, query, subjectId: serpCacheSubjectId(query) });
+    }
+  }
+  const linhas = new Map<string, Linha>();
+  const ids = [...new Set(pedidos.map(pedido => pedido.subjectId))];
+  for (let inicio = 0; inicio < ids.length; inicio += SERP_CACHE_READ_CHUNK) {
+    const resultado = await context.supabase
+      .from("editorial_workflow_items")
+      .select(SERP_VOCABULARY_READ_COLUMNS)
+      .eq("marca_id", context.brandId)
+      .eq("subject_type", SERP_CACHE_SUBJECT_TYPE)
+      .eq("stage", SERP_CACHE_STAGE)
+      .in("subject_id", ids.slice(inicio, inicio + SERP_CACHE_READ_CHUNK));
+    if (resultado.error) throw new Error(`Leitura do vocabulário da SERP no cache: ${resultado.error.message || "falha desconhecida"}`);
+    for (const linha of (resultado.data || []) as unknown as Linha[]) { const id = texto(linha.subject_id); if (id) linhas.set(id, linha); }
+  }
+  const lista = (valor: unknown) => Array.isArray(valor) ? valor.map(texto).filter((item): item is string => Boolean(item)) : [];
+  const saida = new Map<string, SerpSubjectVocabulary>();
+  for (const pedido of pedidos) {
+    const linha = linhas.get(pedido.subjectId);
+    if (!linha) continue;
+    const meta = SerpCacheMetaSchema.safeParse(linha.meta);
+    if (!meta.success || !serpCacheEntryServes(meta.data, { query: pedido.query, depth: SERP_SUBJECT_URL_SLOTS, now: options.now, maxAgeMs: options.maxAgeMs }).serves) continue;
+    const atual = saida.get(pedido.target.keywordId) ?? { keywordId: pedido.target.keywordId, questions: [], relatedSearches: [], titles: [], lenses: 0, domains: [] };
+    atual.lenses += 1;
+    const junta = (destino: string[], novos: string[]) => { for (const item of novos) if (!destino.includes(item)) destino.push(item); };
+    junta(atual.questions, lista(linha.questions));
+    junta(atual.relatedSearches, lista(linha.related));
+    junta(atual.domains, lista(linha.domains));
+    junta(atual.titles, Array.from({ length: SERP_SUBJECT_URL_SLOTS }, (_, indice) => texto(linha[`t${indice}`])).filter((item): item is string => Boolean(item)));
+    saida.set(pedido.target.keywordId, atual);
+  }
+  return saida;
+}

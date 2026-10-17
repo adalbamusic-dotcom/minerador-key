@@ -168,9 +168,17 @@ test("plano: ArticleDNA de outra principal recusa a página; o mesmo conteúdo n
   assert.equal(plano.dna.mode, "none");
 });
 
+/*
+ * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono): com o slug feito da principal da página, nada é proposto (ela fica e
+ * as mais amplas reforçam). Os testes da MÁQUINA da troca abaixo usam uma página FORA da identidade (slug que não foi
+ * feito da principal, ou a principal estranha ao slug).
+ */
+const FORA_DA_IDENTIDADE = "atrair pacientes no consultório";
 test("troca: só Posto Livre, sem ranquear, substituta no artigo e pela régua da troca; Travado só secundárias", () => {
   const serp = buildSerpSubjectIndex([pegada("kw-03"), pegada("kw-10")]);
-  const page = pagina("kw-03");
+  const deIdentidade = pagina("kw-03");
+  assert.equal(proposePublishedPrimarySwap({ published: formationKeywordOfPage(deIdentidade), post: "free", identity: { url: deIdentidade.url, canonical: deIdentidade.canonical, slug: deIdentidade.slug }, candidates: [{ ...formationKeywordOfPage(pagina("kw-10")), isPublished: false, volumeValidated: true }], serp }).state, "locked", "principal de identidade: fica");
+  const page = pagina("kw-03", { slug: "/blog/dicas-de-atendimento-para-consultorio" });
   const proposta = proposePublishedPrimarySwap({
     published: formationKeywordOfPage(page), post: "free", identity: { url: page.url, canonical: page.canonical, slug: page.slug },
     candidates: [{ ...formationKeywordOfPage(pagina("kw-10")), isPublished: false, volumeValidated: true }], serp,
@@ -192,7 +200,8 @@ test("troca: só Posto Livre, sem ranquear, substituta no artigo e pela régua d
 });
 
 // F4 (ajuste declarado 2026-10-14): a keyword nova vai como sugestão ao Minerador; não entra no artigo nem é aprovada daqui.
-test("keyword nova: só com volume do Google Ads, e a confirmação diz que ela vai como sugestão ao Minerador (F4)", () => {
+// 2026-10-16 (decisão do dono, SUBSTITUI a F4 de 14/10): a NOVA entra nesta confirmação; a que já existe no Minerador fica fora, sem ser tocada.
+test("keyword nova: só com volume do Google Ads e entra nesta confirmação (aprovada por você); a que já existe no Minerador fica fora com o motivo", () => {
   const plano = planPublishedReinforcementPage(fatos({
     newKeywords: [
       { keyword: "captar pacientes clínica", normalizedKeyword: "captar pacientes clinica", adsVolume: 50, level: "strong", sharedPageCount: 4, origins: ["ads_url_seed"], evidence: [], searchId: "11111111-1111-4111-8111-111111111111", existingKeywordId: null },
@@ -203,17 +212,15 @@ test("keyword nova: só com volume do Google Ads, e a confirmação diz que ela 
   assert.deepEqual(plano.create.map(item => item.keyword), ["captar pacientes clínica"]);
   assert.match(plano.refused.find(item => item.keyword === "sem volume")!.reason, /Sem volume do Google Ads/);
   assert.match(plano.refused.find(item => item.keyword === "inventada")!.reason, /Não está no resultado gravado da busca/);
-  assert.ok(plano.lines.some(linha => /Vão como sugestão ao Minerador \(“Sugestões do Arquiteto”\) 1 keyword nova: "captar pacientes clínica"\. Não entram no artigo agora/.test(linha)), plano.lines.join(" | "));
-  assert.ok(!plano.lines.some(linha => /aprovadas por você/.test(linha)), "o Arquiteto não aprova");
-  // Só sugestão também é "pronta" (gravar = gravar a sugestão, nada no Minerador nem no artigo).
+  assert.ok(plano.lines.some(linha => /Entram 1 keyword nova \(importadas no Minerador e aprovadas por você nesta confirmação\): "captar pacientes clínica"/.test(linha)), plano.lines.join(" | "));
   assert.equal(plano.status, "ready");
-  // A que já existe no Minerador e não chegou ao Arquiteto: a frase diz para aprovar e enviar lá.
+  // A que já existe no Minerador e não chegou ao Arquiteto: fica fora, sem ser tocada, com o caminho.
   const existente = planPublishedReinforcementPage(fatos({ newKeywords: [{ keyword: "gestão de clínica", normalizedKeyword: "gestao de clinica", adsVolume: 50, level: "probable", sharedPageCount: 2, origins: ["ads_keyword_seed"], evidence: [], searchId: "11111111-1111-4111-8111-111111111111", existingKeywordId: "kw-77" }] }));
-  assert.ok(existente.lines.some(linha => /1 keyword que já está no Minerador e ainda não chegou ao Arquiteto: "gestão de clínica"\. Aprove e envie no Minerador/.test(linha)), existente.lines.join(" | "));
+  assert.deepEqual(existente.create, []);
+  assert.match(existente.refused.find(item => item.keyword === "gestão de clínica")!.reason, /Já existe no Minerador e ainda não chegou ao Arquiteto: o Arquiteto não mexe/);
   assert.ok(!existente.lines.some(linha => /importadas/.test(linha)));
-  assert.match(PUBLISHED_REINFORCEMENT_APPROVAL_TEXT, /o Arquiteto só lê keyword/);
-  assert.match(PUBLISHED_REINFORCEMENT_APPROVAL_TEXT, /Sugestões do Arquiteto/);
-  assert.doesNotMatch(PUBLISHED_REINFORCEMENT_APPROVAL_TEXT, /você aprova estas keywords/);
+  assert.match(PUBLISHED_REINFORCEMENT_APPROVAL_TEXT, /você aprova estas keywords NOVAS no Minerador/);
+  assert.match(PUBLISHED_REINFORCEMENT_APPROVAL_TEXT, /As keywords que já vieram do Minerador não mudam/);
 });
 
 /* ============================== 2. o ArticleDNA ============================== */
@@ -479,7 +486,8 @@ test("Defeito 1: depois da troca confirmada, o artigo continua identificado pela
   const dna = dnaPublicado(["kw-09"]);
   const indice = buildSerpSubjectIndex([pegada("kw-01"), pegada("kw-09")]);
   const page = pagina("kw-01");
-  const proposta = proposePublishedPrimarySwap({ published: formationKeywordOfPage(page), post: "free", identity: { url: page.url, canonical: page.canonical, slug: "como-atrair-pacientes-para-clinica" }, candidates: [{ ...formationKeywordOfPage(pagina("kw-09")), isPublished: false, volumeValidated: true }], serp: indice });
+  // Fora da identidade (2026-10-17): a principal da página estranha ao slug.
+  const proposta = proposePublishedPrimarySwap({ published: { ...formationKeywordOfPage(page), keyword: FORA_DA_IDENTIDADE }, post: "free", identity: { url: page.url, canonical: page.canonical, slug: "como-atrair-pacientes-para-clinica" }, candidates: [{ ...formationKeywordOfPage(pagina("kw-09")), isPublished: false, volumeValidated: true }], serp: indice });
   assert.equal(proposta.state, "proposed", proposta.note);
   const trocada = applyReinforcementSwap({ current: dna, proposal: proposta, page: { ...page, slug: "como-atrair-pacientes-para-clinica" }, substituteVolume: 20, actorId: ATOR_CORRECAO, decidedAt: "2026-09-28T22:52:00Z" });
   assert.ok(trocada.ok, trocada.ok ? "" : trocada.reason);
@@ -588,8 +596,11 @@ test("Defeito 2: a troca prefere a que cabe no slug; a que troca a entidade não
   const page = pagina("kw-01");
   const identidade = { url: "https://adalbapro.com.br/captacao-de-pacientes/como-atrair-pacientes-para-clinica", canonical: null, slug: null };
   const candidata = (id: string, extra: Partial<ArticleFormationKeyword> = {}) => ({ ...formationKeywordOfPage(pagina(id)), isPublished: false, ...extra, volumeValidated: true });
-  // O caso real: "para o consultório" com MAIS volume ainda perde — ela troca a entidade do slug.
-  const real = proposePublishedPrimarySwap({ published: formationKeywordOfPage(page), post: "free", identity: identidade, candidates: [candidata("kw-10", { volume: 90 }), candidata("kw-09")], serp: indice });
+  // 2026-10-17 · a página real tem o slug feito da principal: identidade, nada é proposto.
+  assert.equal(proposePublishedPrimarySwap({ published: formationKeywordOfPage(page), post: "free", identity: identidade, candidates: [candidata("kw-09")], serp: indice }).state, "locked");
+  // Fora da identidade: o caso real "para o consultório" com MAIS volume ainda perde — ela troca a entidade do slug.
+  const fora = { ...formationKeywordOfPage(page), keyword: FORA_DA_IDENTIDADE };
+  const real = proposePublishedPrimarySwap({ published: fora, post: "free", identity: identidade, candidates: [candidata("kw-10", { volume: 90 }), candidata("kw-09")], serp: indice });
   assert.equal(real.substitute?.keyword, "como atrair pacientes");
   assert.equal(real.substitute?.slugFit, "fits");
   assert.match(real.substitute!.reason, /cabe no slug "como-atrair-pacientes-para-clinica"/);
@@ -597,7 +608,7 @@ test("Defeito 2: a troca prefere a que cabe no slug; a que troca a entidade não
   assert.equal(recusada.missing, "slug_entity");
   assert.match(recusada.reason, /o slug diz "clinica" e ela diz "consultorio"/);
   // Âncora de outro publicado ou membro de outro artigo: recusada com o motivo.
-  const alheia = proposePublishedPrimarySwap({ published: formationKeywordOfPage(page), post: "free", identity: identidade, candidates: [candidata("kw-11"), candidata("kw-09")], serp: indice, elsewhere: id => id === "kw-09" ? 'Está no artigo "leads sem tráfego pago"' : null });
+  const alheia = proposePublishedPrimarySwap({ published: fora, post: "free", identity: identidade, candidates: [candidata("kw-11"), candidata("kw-09")], serp: indice, elsewhere: id => id === "kw-09" ? 'Está no artigo "leads sem tráfego pago"' : null });
   assert.equal(alheia.substitute?.keywordId, "kw-11");
   assert.equal(alheia.rejected.find(item => item.keywordId === "kw-09")?.missing, "other_article");
 });
@@ -681,7 +692,8 @@ test("Corretor D2: o encaixe usa só o último segmento — a pasta do Silo não
   const indice = buildSerpSubjectIndex(["kw-01", "kw-13"].map(id => pegada(id)));
   const page = pagina("kw-01");
   const pilar = { ...formationKeywordOfPage(pagina("kw-13")), keyword: "captação de pacientes", volume: 90, isPublished: false, volumeValidated: true };
-  const proposta = proposePublishedPrimarySwap({ published: formationKeywordOfPage(page), post: "free", identity: { url, canonical: url, slug: caminho }, candidates: [pilar], serp: indice });
+  // Fora da identidade (2026-10-17): com a principal da página, o slug foi feito dela e nada seria proposto.
+  const proposta = proposePublishedPrimarySwap({ published: { ...formationKeywordOfPage(page), keyword: FORA_DA_IDENTIDADE }, post: "free", identity: { url, canonical: url, slug: caminho }, candidates: [pilar], serp: indice });
   assert.equal(proposta.substitute?.keywordId, "kw-13");
   assert.equal(proposta.substitute?.slugFit, "neutral");
   assert.doesNotMatch(proposta.substitute!.reason, /cabe no slug/);
@@ -758,7 +770,8 @@ test("Corretor D2 (mesa): a troca já confirmada que contradiz o slug não é al
   assert.ok(!comReforco.lines.some(linha => /Alinha na mesa/.test(linha)));
 
   // Nova troca para a que cabe no slug: refaz (antes: "a troca já foi aplicada").
-  const cabe = proposePublishedPrimarySwap({ published: formationKeywordOfPage(page), post: "free", identity: { url: page.url, canonical: page.canonical, slug: page.slug }, candidates: [{ ...formationKeywordOfPage(pagina("kw-09")), isPublished: false, volumeValidated: true }], serp: indice });
+  // 2026-10-17 · a régua da identidade lê a principal ATUAL ("para o consultório", que contradiz o slug): não é identidade, a troca de reparo vale.
+  const cabe = proposePublishedPrimarySwap({ published: formationKeywordOfPage(page), post: "free", identity: { url: page.url, canonical: page.canonical, slug: page.slug }, candidates: [{ ...formationKeywordOfPage(pagina("kw-09")), isPublished: false, volumeValidated: true }], serp: indice, currentPrincipalKeyword: "como atrair pacientes para o consultório" });
   assert.equal(cabe.substitute?.keywordId, "kw-09", cabe.note);
   const refeita = planPublishedReinforcementPage(fatos({ ...mesa, chosen: [escolhida("kw-09")], swapKeywordId: "kw-09", swapProposal: cabe, swapSource: "request" }));
   assert.equal(refeita.swap.state, "apply", refeita.swap.reason);

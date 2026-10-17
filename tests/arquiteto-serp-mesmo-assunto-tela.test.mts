@@ -79,7 +79,7 @@ const nomeDe = (keywordId: string) => LINHA.get(keywordId)?.keyword || keywordId
 const ATOR = "11111111-1111-4111-8111-111111111111";
 
 /** O lote do domínio: um publicado por dilema, com a SERP real. */
-function loteReal() {
+function loteReal(slugDoUm = "captacao-de-pacientes-para-clinica") {
   const keywords = mapaDe(
     ["kw-01", "kw-02", "kw-04", "kw-07", "kw-08", "kw-09", "kw-10", "kw-11", "kw-15", "kw-16", "kw-17", "kw-19"],
     { "kw-01": { intent: "Informativo" } },
@@ -101,8 +101,13 @@ function loteReal() {
   ];
   const indice = buildSerpSubjectIndex(pegadas().filter(item => item.keywordId !== "kw-08"));
   const crossSiloProposals = proposeCrossSiloReinforcements({ silos, keywords, serpSubject: indice });
+  /*
+   * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono): com o slug feito da principal ("como-atrair-pacientes-para-clinica"),
+   * a Livre fica e nada é proposto. A tela da TROCA abaixo usa a mesma página com um slug que não foi feito da
+   * principal (fora da identidade), para exercitar a máquina da troca; a identidade é conferida no teste do dilema.
+   */
   const published = new Map([
-    ["kw-01", publicado("free", "como-atrair-pacientes-para-clinica")],
+    ["kw-01", publicado("free", slugDoUm)],
     ["kw-02", publicado("locked", "marketing-digital-para-dentistas")],
     ["kw-04", publicado("locked", "captacao-de-pacientes")],
     ["kw-07", publicado("locked", "promocoes-para-estetica")],
@@ -168,6 +173,12 @@ test("cada dilema fala como o dono pediu: curto, com o ato certo", () => {
   assert.match(troca.subline!, /Posto: Livre.*"como atrair pacientes para clínica" vira secundária/);
   assert.deepEqual(troca.actions.map(action => action.label), ["Aplicar troca", "Manter"]);
   assert.equal(troca.actions[0].kind === "apply_swap" && troca.actions[0].disabledReason, null);
+  // 2026-10-17 · a página real (o slug foi feito da principal): principal de identidade — o cartão não oferece troca.
+  const real = loteReal("como-atrair-pacientes-para-clinica").de.get("kw-01")!;
+  assert.equal(real.swap?.state, "locked");
+  const cartaoReal = serpSubjectCardView(real, { nameOf: nomeDe, post: "free" });
+  assert.notEqual(cartaoReal.state, "swap_proposed");
+  assert.ok(!cartaoReal.actions.some(action => action.label === "Aplicar troca"));
 
   const reforcado = cartao("kw-02", { post: "locked" });
   assert.equal(reforcado.state, "reinforced");
@@ -544,7 +555,8 @@ test("Par em outro artigo, Livre sem substituta e SERP vencida: cada cartão diz
   const [livre] = diagnoseSerpSubjectAnchors({
     silos: [{ siloRef: "territory:c", siloLabel: "Captação", plan: { anchors: [{ kind: "published", principalKeywordId: "pub", keywordIds: ["pub", "par"] }], awaitingSubjectKeywordIds: [], leftoverKeywordIds: [] } }],
     keywords: new Map([["pub", { ...base, keywordId: "pub", keyword: "captação de pacientes", volume: 90, isPublished: true }], ["par", { ...base, keywordId: "par", keyword: "como captar pacientes", volume: 30, isPublished: false }]]),
-    serp: indice, published: new Map([["pub", publicado("free", "captacao")]]), volumeValidated: new Set(["par"]), brandRef: "adalbapro--brand",
+    // 2026-10-17 · slug que não foi feito da principal (fora da identidade): com "captacao", ela seria a identidade e ficaria.
+    serp: indice, published: new Map([["pub", publicado("free", "dicas-de-marketing")]]), volumeValidated: new Set(["par"]), brandRef: "adalbapro--brand",
   });
   const cartaoLivre = serpSubjectCardView(livre, { post: "free", reinforcementHref: "/adalbapro--brand/minerador/descobrir?modo=assunto&reforco=pub" });
   assert.equal(cartaoLivre.state, "reinforced");

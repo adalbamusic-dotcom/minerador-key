@@ -116,6 +116,11 @@ test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mes
   assert.match(presa.querySelector<HTMLElement>("[data-plan-seal='conflict']")!.title, /Presa no artigo “melhor-para-jogos-online” do Silo “planos de internet”/);
   assert.equal(presa.querySelector("[data-testid='architect-plan-row-withdraw']")?.textContent, "Retirar artigo do Silo");
   assert.equal(presa.querySelector("[data-testid='architect-plan-row-role']")?.textContent, "Suporte · 13º");
+  // 2026-10-16 (noite) · pedido do dono ("Pendente" sem explicação): a Definição da linha do plano diz o estado e o porquê curto; o inteiro no title.
+  const definicao = presa.querySelector<HTMLElement>("[data-testid='architect-plan-row-definition']")!;
+  assert.equal(definicao.firstElementChild!.textContent, "Pendente");
+  assert.equal(definicao.querySelector("[data-testid='architect-plan-row-definition-reason']")!.textContent, "presa em outro artigo");
+  assert.match(definicao.title, /Presa no artigo “melhor-para-jogos-online”/);
   assert.equal(presa.querySelectorAll("td").length, COLUNAS.length, "as colunas da tabela de sempre");
   assert.equal([...presa.querySelectorAll("td")].at(-1)!.textContent, "Do plano", "uma versão do plano só: a do grupo, sem 'v1/v2/v3' por linha");
   // A linha comum não tem nada do plano.

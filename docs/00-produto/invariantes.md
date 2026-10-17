@@ -6,6 +6,7 @@
 - Agrupar, reforçar, investigar, escrever e ligar seguem o SEO semântico (entidade, intenção, contexto, cobertura), com a SERP como autoridade acima da lógica e da IA.
 - A linha de cada área é guardada por cenários de fluxo automáticos que chegam à conclusão documentada. Mudança de regra atualiza o cenário na mesma entrega.
 - Formar, agrupar, reforçar e propor acontece na cópia de trabalho. O artefato canônico só é gravado no servidor quando o usuário confirma ou finaliza, por um gravador por artefato que revalida e relê. Provider e IA rodam no servidor só para ler e calcular (`AGENTS.md` §0.4).
+- **O propósito central do Arquiteto é o esqueleto do artigo: a principal certa e o reforço real** (dono, 2026-10-16: "o sucesso real do artigo vai depender de quão bom é o reforço e a keyword primária… sem um bom esqueleto do artigo não vai bem mais lá na frente, então todo o Minerador Key será completamente inútil"). Nenhuma mudança no Arquiteto pode enfraquecer a escolha da principal ou o reforço. Toda situação já resolvida fica registrada em `docs/04-arquiteto/situacoes-resolvidas.md`, com a regra, a data e o cenário de teste que a guarda.
 - A melhoria nova prevalece sobre a antiga em todo caminho da área. Na mesma entrega, o texto antigo é marcado SUBSTITUÍDO na spec, na SDD e no catálogo, e o código antigo sai (`AGENTS.md` §0.5).
 
 13. Site observa, Minerador qualifica, Arquiteto forma e Radar valida somente o ArticleDNA formado; KGR, volume, resultados e intenção não podem ser promovidos por inferência de URL ou slug.

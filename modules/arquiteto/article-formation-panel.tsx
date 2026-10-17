@@ -23,6 +23,13 @@ import {
  * singletons, agrupamentos, distribuição, estado do cenário, acervo antigo)
  * saíram da tela; nenhum dado foi apagado.
  *
+ * 2026-10-16 (noite) · pedido do dono, literal: "quero que desapareça esse
+ * monte de texto no painel que só confunde". Saíram também "Formação
+ * desatualizada…" (vira o destaque do botão "Reprocessar artigos"), "N
+ * Assunto(s) aguardando sustentação", "N de M artigo(s) foram confrontados
+ * com a SERP…" e "Formação concluída. N artigo(s)…"; as pendências são só o
+ * contador no botão que as abre. Nenhuma função saiu.
+ *
  * A pergunta que o painel responde é editorial, não técnica: estes candidatos
  * são mesmo conteúdos diferentes? Os números são pontuação editorial
  * explicável — não são score de SEO nem probabilidade de ranking.
@@ -67,9 +74,7 @@ export function ArticleFormationPanel({
   universes,
   summary,
   processed,
-  stale,
   busy,
-  confirmed,
   selectedCandidate,
   selectedCandidateSerp = null,
   selectedSingletonAudit,
@@ -78,7 +83,6 @@ export function ArticleFormationPanel({
   waiting,
   crossSilo,
   parentBinding,
-  serpGate,
   conclusionGates,
   onChangePrincipal,
   onSplitKeyword,
@@ -88,9 +92,7 @@ export function ArticleFormationPanel({
   universes: readonly ArticleFormationUniverse[];
   summary: ReturnType<typeof summarizeArticleFormation>;
   processed: boolean;
-  stale: boolean;
   busy: boolean;
-  confirmed: { articles: number; keywords: number; pending: number } | null;
   selectedCandidate: ArticleCandidate | null;
   /**
    * D2.2 — o dilema de "mesmo assunto no Google" do artigo selecionado,
@@ -112,28 +114,12 @@ export function ArticleFormationPanel({
   crossSilo: number;
   /** §21 — artigo cujo Silo não se resolve: conflito não move nada. */
   parentBinding: { conflict: number; unresolved: number };
-  /**
-   * §12 — o gate SERP do lote.
-   *
-   * A lógica propõe; o mercado verifica. Enquanto houver artigo sem
-   * evidência vigente, "Concluir formação" não grava — e a mesa diz
-   * exatamente quantos e por quê, em vez de deixar o botão falhar mudo.
+  /*
+   * 2026-10-16 (noite) · saíram `stale`, `confirmed` e `serpGate` (pedido do
+   * dono: "esse monte de texto no painel que só confunde"). O gate SERP do lote
+   * continua barrando "Concluir formação" na portaria (abaixo, quando barra); a
+   * formação desatualizada é o destaque do botão "Reprocessar artigos".
    */
-  serpGate: {
-    total: number;
-    /** Foram ao mercado — divergente e inconclusivo INCLUSOS. */
-    analyzed: number;
-    divergent: number;
-    divergentResolved: number;
-    inconclusive: number;
-    inconclusiveResolved: number;
-    missing: number;
-    stale: number;
-    failed: number;
-    /** Evidência existe; falta a decisão editorial da pessoa. */
-    awaitingHuman: number;
-    blocking: number;
-  };
   /** §14 — resposta da portaria na última tentativa de concluir. */
   conclusionGates: readonly { code: string; ok: boolean; detail: string }[];
   onChangePrincipal: (candidateRef: string, keywordId: string) => void;
@@ -156,13 +142,7 @@ export function ArticleFormationPanel({
 
   return (
     <section className="mt-3 rounded border border-divider bg-surface-subtle p-3" data-testid="architect-formation-panel">
-      {/* Desatualizada: o botão que resolve ("Reprocessar artigos") é o da barra, logo acima. */}
-      {stale && (
-        <p className="text-sm leading-6 text-warning" data-testid="architect-formation-stale">
-          Formação desatualizada: o lote mudou desde a última análise. Use “Reprocessar artigos”, acima.
-        </p>
-      )}
-
+      {/* 2026-10-16 (noite) · "Formação desatualizada" saiu daqui: é o próprio botão "Reprocessar artigos" (destacado, com o porquê no title), na barra. */}
       {!processed ? (
         <p className="text-sm leading-6 text-text-muted" data-testid="architect-formation-idle">
           {summary.silos
@@ -172,10 +152,10 @@ export function ArticleFormationPanel({
       ) : (
         <>
           {/* O que falta fazer — só o que existe. */}
-          {(summary.publishedAwaitingSupport > 0 || summary.subjectsAwaitingSupport > 0 || aRevisar > 0) && (
+          {/* 2026-10-16 (noite) · pedido do dono: sem "N Assunto(s) aguardando sustentação" (cada linha da tabela diz o estado dela). */}
+          {(summary.publishedAwaitingSupport > 0 || aRevisar > 0) && (
             <ul className="space-y-0.5 text-sm leading-6 text-foreground" data-testid="architect-formation-todo">
               {summary.publishedAwaitingSupport > 0 && <li>{summary.publishedAwaitingSupport} publicado(s) aguardando reforço</li>}
-              {summary.subjectsAwaitingSupport > 0 && <li>{summary.subjectsAwaitingSupport} Assunto(s) aguardando sustentação</li>}
               {aRevisar > 0 && <li className="text-warning">{aRevisar} formação(ões) precisa(m) de revisão</li>}
             </ul>
           )}
@@ -190,22 +170,7 @@ export function ArticleFormationPanel({
             </p>
           )}
 
-          {/* O gate em uma frase: por que Concluir não está liberado. */}
-          {serpGate.blocking > 0 && (
-            <p className="mt-2 text-sm leading-6 text-warning" data-testid="architect-serp-gate-alert">
-              {serpGate.analyzed} de {serpGate.total} artigo(s) foram confrontados com a SERP.{" "}
-              {serpGate.awaitingHuman > 0 && (
-                <>
-                  {serpGate.awaitingHuman} precisa(m) de decisão humana:{" "}
-                  {serpGate.divergent - serpGate.divergentResolved} divergente(s) e{" "}
-                  {serpGate.inconclusive - serpGate.inconclusiveResolved} inconclusivo(s).{" "}
-                </>
-              )}
-              {serpGate.missing + serpGate.stale + serpGate.failed > 0 && (
-                <>{serpGate.missing + serpGate.stale + serpGate.failed} ainda precisa(m) de coleta.</>
-              )}
-            </p>
-          )}
+          {/* 2026-10-16 (noite) · pedido do dono: sem "N de M artigo(s) foram confrontados com a SERP…" — a portaria da conclusão (abaixo) diz o que barrou, quando barra. */}
 
           {/* §1: um Article que mistura Silos não tem pai. Isso é defeito, não preferência. */}
           {crossSilo > 0 && (
@@ -224,24 +189,22 @@ export function ArticleFormationPanel({
             </p>
           )}
 
-          {/* As pendências não pertencem à arquitetura de Article: o detalhe fica sob demanda. */}
-          {(semSilo > 0 || waiting.rows.length > 0) && (
+          {/*
+            * As pendências não pertencem à arquitetura de Article: o detalhe fica sob demanda.
+            * 2026-10-16 (noite) · pedido do dono: só o contador no botão que as abre, quando há (> 0) — nenhuma frase solta.
+            */}
+          {waiting.rows.length > 0 && (
             <div className="mt-2" data-testid="architect-waiting-summary">
-              {semSilo > 0 && (
-                <p className="text-sm leading-6 text-text-muted">
-                  {waiting.awaitingConfirmation} keyword(s) aguardam confirmação do Silo · {waiting.withoutSilo} ainda não possuem Silo
-                </p>
-              )}
-              {waiting.rows.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setWaitingOpen(valor => !valor)}
-                  data-testid="architect-waiting-toggle"
-                  className="mt-1 text-sm text-text-muted transition-colors hover:text-foreground"
-                >
-                  {waitingOpen ? "Ocultar pendências" : `Ver ${waiting.rows.length} pendência(s)`}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setWaitingOpen(valor => !valor)}
+                aria-expanded={waitingOpen}
+                data-testid="architect-waiting-toggle"
+                title={semSilo > 0 ? `${waiting.awaitingConfirmation} aguardam a confirmação do Silo · ${waiting.withoutSilo} sem Silo` : undefined}
+                className="min-h-8 text-sm text-text-muted transition-colors hover:text-foreground"
+              >
+                {`Pendências (${waiting.rows.length})`}
+              </button>
               {waitingOpen && (
                 <ul className="mt-1 space-y-0.5 text-sm leading-6 text-text-muted" data-testid="architect-waiting-details">
                   {waiting.rows.map(row => (
@@ -408,17 +371,7 @@ export function ArticleFormationPanel({
             </div>
           )}
 
-          {confirmed && (
-            <p
-              className={`mt-3 text-sm leading-6 ${confirmed.pending ? "text-warning" : "text-positive-soft"}`}
-              data-testid="architect-formation-confirmed"
-            >
-              {/* Com pendência, dizer "confirmada" seria contraditório. */}
-              {confirmed.pending ? "Formação aplicada parcialmente." : "Formação concluída."}{" "}
-              {confirmed.articles} artigo(s) confirmado(s) · {confirmed.keywords} keyword(s) cobertas
-              {confirmed.pending ? ` · ${confirmed.pending} continuam pendentes e não foram alteradas` : ""}
-            </p>
-          )}
+          {/* 2026-10-16 (noite) · pedido do dono: sem "Formação concluída. N artigo(s)…" — a coluna "Definição do artigo" de cada linha diz o que foi formado. */}
         </>
       )}
     </section>

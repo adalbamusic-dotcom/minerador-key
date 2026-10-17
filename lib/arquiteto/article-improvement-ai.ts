@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   editorialAiBarrier,
+  targetPrincipalIsIdentity,
   IMPROVEMENT_AI_MAX_PER_TARGET,
   IMPROVEMENT_ARTICLE_MAX_KEYWORDS,
   type ImprovementEditorialPick,
@@ -142,7 +143,8 @@ export function buildImprovementAiPrompt(input: {
     aliases.targets[`A${index + 1}`] = target.id;
     const current = target.primaryId ? byId.get(target.primaryId) : undefined;
     const semVolume = !current?.volumeValidated;
-    const podeTrocarPrincipal = target.post === "free" && semVolume && (target.kind === "subject" || input.ranking?.[target.id] === false);
+    // 2026-10-17 · a principal de identidade (título ou slug) fica: a IA só traz secundárias para ela.
+    const podeTrocarPrincipal = target.post === "free" && semVolume && !targetPrincipalIsIdentity(target, current) && (target.kind === "subject" || input.ranking?.[target.id] === false);
     return {
       targetId: `A${index + 1}`,
       tipo: target.kind === "published" ? "publicado" : "assunto",

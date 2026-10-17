@@ -3,7 +3,6 @@
 import React, { useId, useRef, useState } from "react";
 import { useSubjectDialogFocus } from "./subject-panels";
 import { SERP_SUBJECT_TONE_CLASSES } from "./serp-subject-model";
-import { ARCHITECT_SUGGESTIONS_LABEL } from "@/lib/arquiteto/minerador-suggestions";
 import {
   DIFFERENTIATION_ACCEPT_ACTION,
   DIFFERENTIATION_AI_OPTION,
@@ -14,6 +13,7 @@ import {
   DIFFERENTIATION_REACCEPT_ACTION,
   DIFFERENTIATION_REPLAN_ACTION,
   DIFFERENTIATION_RUN_STATUS_LABELS,
+  acceptNewKeywordLines,
   acceptPreviewLines,
   costRangeLabel,
   differentiationApplyView,
@@ -134,11 +134,10 @@ function AppliedBlock({ controller, group, entry, buttonClassName, onReaccept }:
     <div className="mt-2 grid gap-1 rounded border border-divider p-2 text-sm leading-6" data-testid="architect-differentiation-applied">
       <p className={view.tone === "success" ? "text-success" : view.tone === "warning" ? "text-warning" : "text-foreground/85"}>{view.headline}</p>
       {view.lines.map(line => <p key={line} className="text-text-muted">{line}</p>)}
-      {view.ingestCount > 0 && (
-        // F4 · O ARQUITETO SÓ LÊ: as novas foram como sugestão ao Minerador no aceite; o import é do dono, lá.
-        <div className="flex flex-wrap items-center gap-2" data-testid="architect-differentiation-ingest">
-          <span className="text-foreground/85">{view.ingestCount} keyword(s) nova(s) foram como sugestão ao Minerador (“{ARCHITECT_SUGGESTIONS_LABEL}”): importar, medir e aprovar é lá, pelo seu clique.</span>
-          {controller.mineradorSuggestionsHref ? <a href={controller.mineradorSuggestionsHref} className={buttonClassName}>Abrir “{ARCHITECT_SUGGESTIONS_LABEL}” no Minerador</a> : null}
+      {/* 2026-10-17 · as novas entraram no Minerador neste aceite (SUBSTITUI a F4: iam como sugestão); a linha diz o que entrou e o que ficou de fora. */}
+      {view.incorporationLines.length > 0 && (
+        <div className="grid gap-1" data-testid="architect-differentiation-ingest">
+          {view.incorporationLines.map(line => <p key={line} className="text-foreground/85">{line}</p>)}
         </div>
       )}
       {view.formation.map(step => {
@@ -353,10 +352,10 @@ export function PublishedDifferentiationPanel({ controller, buttonClassName, pri
           testId="architect-differentiation-accept-dialog"
           title={`${DIFFERENTIATION_ACCEPT_ACTION}?`}
           lines={acceptPreviewLines(acceptView)}
-          confirmLabel="Gravar e reler"
+          confirmLabel={acceptNewKeywordLines(acceptView).length ? "Gravar, incorporar as novas e reler" : "Gravar e reler"}
           busy={controller.busy}
           onClose={() => setConfirmAccept(null)}
-          onConfirm={() => { const alvo = confirmAccept; setConfirmAccept(null); void controller.accept(alvo); }}
+          onConfirm={() => { const alvo = confirmAccept; setConfirmAccept(null); void controller.accept(alvo, { approveNewKeywords: acceptNewKeywordLines(acceptView).length > 0 }); }}
           buttonClassName={buttonClassName}
           primaryButtonClassName={primaryButtonClassName}
         />

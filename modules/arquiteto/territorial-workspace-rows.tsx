@@ -760,7 +760,8 @@ function SectionRow({
               {`Desfazer os Silos sugeridos (${undoAll.count})`}
             </button>
           )}
-          {undoAll?.excludedNote && (
+          {/* 2026-10-16 (noite) · a frase é do LOTE de desfazer: só aparece com o botão (sem ele, o Silo do plano visível abaixo não "ficou de fora" de nada). */}
+          {undoAll && undoAll.count > 0 && undoAll.excludedNote && (
             <span className="text-sm text-text-muted" data-testid="architect-undo-all-excluded">{undoAll.excludedNote}</span>
           )}
         </div>

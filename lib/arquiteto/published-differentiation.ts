@@ -62,6 +62,13 @@ export type DifferentiationRowState = (typeof DIFFERENTIATION_ROW_STATES)[number
 /** Rodada reservada há mais que isto sem terminar é tida como interrompida. */
 export const DIFFERENTIATION_RUNNING_STALE_MS = 30 * 60 * 1000;
 
+/*
+ * 2026-10-17 · KEYWORD NOVA NO MESMO ACEITE (a regra de 16/10 da melhoria e do
+ * "Reforçar publicados", aqui no "Aceitar grupo"; SUBSTITUI a F4 de 14/10,
+ * quando a nova ia como "Sugestões do Arquiteto"). Nova = não existe na marca.
+ */
+export const DIFFERENTIATION_NEW_KEYWORDS_APPROVAL_TEXT = "Ao aceitar, as keywords NOVAS (que não existem na marca) são importadas no Minerador, processadas pela Lógica, recebem o Volume do Google Ads (grátis, cota do Google Ads), são aprovadas e enviadas ao Arquiteto — tudo neste mesmo aceite. Depois elas entram no artigo pelo “Colocar no artigo” do cartão. As keywords que já estão no Minerador são só lidas.";
+
 /** O resumo da proposta que a detecção devolve por grupo (colunas estreitas). */
 export type DifferentiationProposalSummary = {
   state: DifferentiationRowState;

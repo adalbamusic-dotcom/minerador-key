@@ -1,4 +1,5 @@
 import {
+  DIFFERENTIATION_NEW_KEYWORDS_APPROVAL_TEXT,
   DIFFERENTIATION_ANGLE_SOURCE_LABELS,
   type CompactDifferentiationGroup,
   type DifferentiationAngle,
@@ -129,6 +130,15 @@ export type DifferentiationIngestBatch = {
   subjectKeywordId: null;
 };
 
+export type DifferentiationIncorporationData = {
+  pageKeywordId: string;
+  keyword: string;
+  created: Array<{ keywordId: string; keyword: string }>;
+  leftOut: Array<{ keyword: string; reason: string }>;
+  done: string[];
+  error: string | null;
+};
+
 /** `POST /api/arquiteto/cannibalization/apply`. */
 export type DifferentiationApplyData =
   | {
@@ -145,6 +155,8 @@ export type DifferentiationApplyData =
     groupId: string;
     pages: DifferentiationApplyPageData[];
     ingestBatches: DifferentiationIngestBatch[];
+    /** 2026-10-17 · as keywords novas incorporadas pelo Minerador neste aceite, por página. */
+    incorporation?: DifferentiationIncorporationData[];
     proposal: { state: DifferentiationRowState; lockVersion: number } | null;
     persistWarning: string | null;
     readbackConfirmed: boolean;
@@ -347,7 +359,20 @@ export function differentiationRunRequest(input: { brandId: string; plan: Pick<D
 
 /* --------------------------------- avaliação --------------------------------- */
 
-export type DifferentiationChoiceView = { keyword: string; volumeLabel: string };
+/**
+ * `isNew` (2026-10-17): não existe na marca — entra no Minerador NESTE aceite
+ * (import, Lógica, Volume, aprovação e envio). A que já existe é só lida.
+ */
+export type DifferentiationChoiceView = { keyword: string; volumeLabel: string; isNew: boolean; sourceLabel: string };
+
+/** A fonte da keyword, em palavras. */
+export function differentiationSourceLabel(origins: readonly string[]): string {
+  const url = origins.includes("ads_url_seed"), frase = origins.includes("ads_keyword_seed");
+  if (url && frase) return "Google Ads, pela frase e pela página";
+  if (url) return "Google Ads, pela página publicada";
+  if (frase || !origins.length) return "Google Ads, pela frase";
+  return "rodada antiga (DataForSEO Labs)";
+}
 
 export type DifferentiationSiblingMeasure = { keyword: string; before: string; after: number | null };
 
@@ -385,7 +410,7 @@ export type DifferentiationEvaluationView = {
 };
 
 const parChave = (a: string, b: string) => a < b ? `${a}|${b}` : `${b}|${a}`;
-const escolhaVista = (choice: DifferentiationChoice): DifferentiationChoiceView => ({ keyword: choice.keyword, volumeLabel: choiceVolumeLabel(choice) });
+const escolhaVista = (choice: DifferentiationChoice): DifferentiationChoiceView => ({ keyword: choice.keyword, volumeLabel: choiceVolumeLabel(choice), isNew: !choice.existingKeywordId, sourceLabel: differentiationSourceLabel(choice.origins) });
 
 /** As páginas que o aceite leva sem a pessoa marcar: só as "Diferenciado". */
 export function defaultAcceptPageIds(run: Pick<DifferentiationRunData, "evaluation">): string[] {
@@ -468,13 +493,24 @@ export function acceptPreviewLines(view: Pick<DifferentiationEvaluationView, "pa
       return `"${page.keyword}": ${partes.join(" e ")}.`;
     });
   const fora = view.pages.filter(page => !page.included).length;
+  const novas = acceptNewKeywordLines(view);
   return [
     ...linhas,
     "Cada artigo ganha uma versão nova do DNA, em revisão, com a nota do ângulo e o link para as irmãs.",
     "URL, slug, canonical e marca não mudam. Nada é apagado.",
-    "Keyword que ainda não está no Minerador vai para lá antes de entrar no artigo.",
+    // 2026-10-17 · SUBSTITUI "Keyword que ainda não está no Minerador vai para lá antes de entrar no artigo" (F4: ia como sugestão).
+    ...(novas.length ? [DIFFERENTIATION_NEW_KEYWORDS_APPROVAL_TEXT, ...novas] : []),
     ...(fora ? [`${fora} página(s) fora deste aceite: nada muda nelas.`] : []),
   ];
+}
+
+/** Por página do aceite, as keywords NOVAS na marca com volume e fonte (o que o aceite aprova no Minerador). */
+export function acceptNewKeywordLines(view: Pick<DifferentiationEvaluationView, "pages">): string[] {
+  return view.pages
+    .filter(page => page.included && !page.noteOnly)
+    .map(page => ({ page, novas: [page.newPrincipal, ...page.secondaries].filter((item): item is DifferentiationChoiceView => Boolean(item?.isNew)) }))
+    .filter(item => item.novas.length)
+    .map(item => `Novas em "${item.page.keyword}": ${item.novas.map(nova => `"${nova.keyword}" (${nova.volumeLabel}, ${nova.sourceLabel})`).join(", ")}.`);
 }
 
 /** O que a confirmação de "Manter como está" diz: é decisão humana, registrada. */
@@ -494,7 +530,10 @@ export type DifferentiationApplyView = {
   headline: string;
   lines: string[];
   formation: DifferentiationFormationStep[];
+  /** Keywords novas que este aceite NÃO incorporou (falha no meio): o aceite de novo retoma. */
   ingestCount: number;
+  /** 2026-10-17 · por página, o que entrou no Minerador neste aceite (ou por que não). */
+  incorporationLines: string[];
   needsSecondAccept: boolean;
 };
 
@@ -511,7 +550,20 @@ export function differentiationApplyView(data: DifferentiationAcceptData): Diffe
   const formation = data.pages
     .filter(page => page.formation.length)
     .map(page => ({ pageKeywordId: page.keywordId, pageKeyword: page.keyword, keywordIds: page.formation.map(item => item.keywordId), keywords: page.formation.map(item => item.keyword) }));
-  const ingestCount = data.ingestBatches.reduce((total, batch) => total + batch.items.length, 0);
+  const incorporacao = new Map((data.incorporation ?? []).map(item => [item.pageKeywordId, item]));
+  // Nova que ficou sem incorporar (o Minerador parou no meio): o aceite de novo retoma; a que já existia ou ficou sem volume não volta.
+  const ingestCount = data.ingestBatches.reduce((total, batch) => {
+    const feito = incorporacao.get(batch.pageKeywordId);
+    return total + (!feito || feito.error ? Math.max(0, batch.items.length - (feito?.created.length ?? 0) - (feito?.leftOut.length ?? 0)) : 0);
+  }, 0);
+  const incorporationLines = (data.incorporation ?? []).map(item => {
+    const partes = [
+      item.created.length ? `${item.created.length} keyword(s) nova(s) entraram no Minerador neste aceite (importadas, processadas, com volume, aprovadas e enviadas ao Arquiteto): ${item.created.map(nova => `"${nova.keyword}"`).join(", ")} — falta "Colocar no artigo" abaixo.` : "",
+      item.leftOut.length ? `Ficaram de fora: ${item.leftOut.map(fora => `"${fora.keyword}" (${fora.reason})`).join("; ")}.` : "",
+      item.error ? `Parou: ${item.error}.${item.done.length ? ` Já ficou gravado no Minerador: ${item.done.join("; ")}.` : " Nada foi gravado no Minerador."}` : "",
+    ].filter(Boolean);
+    return `"${item.keyword}": ${partes.join(" ") || "nada a incorporar."}`;
+  });
   // Só o que um novo aceite da MESMA avaliação resolve (sem rodada paga): keyword a trazer ou troca à espera dela.
   const trocaPendente = data.pages.some(page => page.swap.keyword && !page.swap.applied && /ainda não está|aceite de novo/i.test(page.swap.reason));
   const needsSecondAccept = trocaPendente || formation.length > 0 || ingestCount > 0;
@@ -527,15 +579,17 @@ export function differentiationApplyView(data: DifferentiationAcceptData): Diffe
     lines,
     formation,
     ingestCount,
+    incorporationLines,
     needsSecondAccept,
   };
 }
 
 /*
- * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13, item 2): o pedido de import ao
- * Processador do Minerador montado aqui (`differentiationIngestRequest`) saiu.
- * O aceite grava as keywords novas como "Sugestões do Arquiteto" no servidor;
- * o import acontece no Minerador, pelo clique do dono.
+ * 2026-10-17 · a keyword NOVA entra no Minerador NESTE aceite, pelo servidor
+ * (as mesmas portas do "Reforçar publicados"). SUBSTITUI a F4 de 14/10, quando
+ * ela virava "Sugestões do Arquiteto"; o pedido de import montado aqui antes
+ * (`differentiationIngestRequest`, chamado da tela) não volta: a tela não fala
+ * com o Minerador.
  */
 
 /* ---------------------------------- erros ---------------------------------- */

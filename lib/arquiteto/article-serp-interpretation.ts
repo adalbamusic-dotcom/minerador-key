@@ -78,6 +78,13 @@ export const NOT_OBSERVED_REASON = "Sem SERP consultada nesta validação: não 
 /** Busca sem volume do Google Ads: nunca coletada (SDD 2026-09-28, fatia A3). Mesma regra: sai da conta. */
 export const NO_VOLUME_NOT_OBSERVED_REASON = "Sem volume no Google Ads: a SERP desta busca nunca é coletada; não conta como convergente nem como de fora.";
 
+/**
+ * 2026-10-16 · Reforço pela SERP da principal (SDD da linha única §15, passo 4):
+ * a busca de apoio entrou pela SERP da principal em cache e a SERP dela não foi
+ * coletada (é opcional). Mesma regra: sai da conta, nunca vira "de fora".
+ */
+export const SUPPORT_NOT_IN_CACHE_REASON = "Reforço escolhido pela SERP da principal (em cache); a SERP desta busca não foi coletada (opcional): não conta como convergente nem como de fora.";
+
 /** O recorte de um resultado orgânico que o parecer lê. Estrutural, não o tipo inteiro. */
 type ObservedResultLike = {
   position?: unknown;
@@ -799,13 +806,19 @@ export function interpretArticleSerpAcrossLenses(input: {
  * volume e as 4 lentes no cache — nada é pago — e a proveniência fica escrita.
  */
 export const DECLARED_PRINCIPAL_NOT_OBSERVED_REASON = "Principal declarada no plano (D1-bis), sem volume e sem SERP no cache: não é coletada sem pedido; o parecer vem das sustentações com volume (D2a). Não conta como convergente nem como de fora.";
+/**
+ * 2026-10-17 · PRINCIPAL DE IDENTIDADE da página publicada (dono: "Se o termo principal tem pouco volume, mas faz
+ * sentido preservá-lo por ser a identidade do assunto/tema, principalmente nos publicados"). A keyword da própria
+ * página, sem volume e sem SERP no cache, recebe a MESMA D2(a): o parecer vem das sustentações com volume.
+ */
+export const PUBLISHED_IDENTITY_PRINCIPAL_NOT_OBSERVED_REASON = "Principal de identidade da página publicada, sem volume e sem SERP no cache: não é coletada sem pedido; o parecer vem das sustentações com volume (D2a). Não conta como convergente nem como de fora.";
 
 /** O prefixo da proveniência do parecer pelas sustentações: o DNA, a tela e os testes leem por aqui. */
 export const DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX = "Parecer pelas sustentações" as const;
 
 /** A proveniência legível: "Parecer pelas sustentações: “a”, “b” — …". Uma escrita só. */
-export function declaredPrincipalSupportBasisReason(principalLabel: string, supportLabels: readonly string[]): string {
-  return `${DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX}: ${supportLabels.map(label => `“${label}”`).join(", ")} — a principal declarada “${principalLabel}” não tem volume nem SERP no cache (D2a); nenhuma coleta nova foi feita.`;
+export function declaredPrincipalSupportBasisReason(principalLabel: string, supportLabels: readonly string[], publishedPage = false): string {
+  return `${DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX}: ${supportLabels.map(label => `“${label}”`).join(", ")} — a principal ${publishedPage ? "de identidade da página" : "declarada"} “${principalLabel}” não tem volume nem SERP no cache (D2a); nenhuma coleta nova foi feita.`;
 }
 
 export type DeclaredPrincipalSupportCandidate = {
@@ -822,6 +835,8 @@ export type DeclaredPrincipalSupportSelection = {
   anchorKeywordId: string;
   /** As sustentações usadas, por volume (maior primeiro). */
   supportKeywordIds: string[];
+  /** 2026-10-17 · aditivo: a principal é a keyword da própria página publicada (identidade), não a declarada no plano. */
+  publishedPage?: boolean;
 };
 
 /**
@@ -836,15 +851,17 @@ export function selectDeclaredPrincipalSupports(input: {
   principalHasVolume: boolean;
   principalCached: boolean;
   candidates: readonly DeclaredPrincipalSupportCandidate[];
+  /** 2026-10-17 · aditivo: a principal é a keyword da própria página publicada (a identidade dela). */
+  principalIsPublishedPage?: boolean;
 }): DeclaredPrincipalSupportSelection | null {
-  if (!input.principalDeclared || input.principalHasVolume || input.principalCached) return null;
+  if (!(input.principalDeclared || input.principalIsPublishedPage) || input.principalHasVolume || input.principalCached) return null;
   const sustentacoes = input.candidates
     .map((candidate, index) => ({ candidate, index }))
     .filter(({ candidate }) => candidate.keywordId !== input.principalKeywordId && typeof candidate.volume === "number" && candidate.volume > 0 && candidate.lensesCached)
     .sort((left, right) => (right.candidate.volume ?? 0) - (left.candidate.volume ?? 0) || left.index - right.index)
     .map(({ candidate }) => candidate.keywordId);
   if (!sustentacoes.length) return null;
-  return { principalKeywordId: input.principalKeywordId, anchorKeywordId: sustentacoes[0], supportKeywordIds: sustentacoes };
+  return { principalKeywordId: input.principalKeywordId, anchorKeywordId: sustentacoes[0], supportKeywordIds: sustentacoes, ...(!input.principalDeclared && input.principalIsPublishedPage ? { publishedPage: true } : {}) };
 }
 
 /**
@@ -856,7 +873,7 @@ export function selectDeclaredPrincipalSupports(input: {
  */
 export function applyDeclaredPrincipalSupportBasis(
   interpretation: ArticleSerpLensesInterpretation,
-  basis: { principalKeywordId: string; principalLabel: string; anchorLabel: string; supportLabels: readonly string[] },
+  basis: { principalKeywordId: string; principalLabel: string; anchorLabel: string; supportLabels: readonly string[]; publishedPage?: boolean },
 ): ArticleSerpLensesInterpretation {
   const referencia = `“${basis.anchorLabel}”`;
   const groupReason = `${DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX} (referência dos pares: ${referencia}, a de maior volume). ${interpretation.group.reason
@@ -868,7 +885,9 @@ export function applyDeclaredPrincipalSupportBasis(
     kind: "PRINCIPAL_SUPPORTED",
     principalKeywordId: basis.principalKeywordId,
     principalAlternativeKeywordId: null,
-    reason: `Principal declarada no plano (D1-bis): “${basis.principalLabel}” é a cabeceira por decisão humana e a SERP não a troca. ${declaredPrincipalSupportBasisReason(basis.principalLabel, basis.supportLabels)}`,
+    reason: basis.publishedPage
+      ? `Principal de identidade da página publicada: “${basis.principalLabel}” é o assunto do slug publicado e a SERP não a troca. ${declaredPrincipalSupportBasisReason(basis.principalLabel, basis.supportLabels, true)}`
+      : `Principal declarada no plano (D1-bis): “${basis.principalLabel}” é a cabeceira por decisão humana e a SERP não a troca. ${declaredPrincipalSupportBasisReason(basis.principalLabel, basis.supportLabels)}`,
     coverage: interpretation.principal.coverage,
   };
   const verdict = group.kind === "SPLIT_RECOMMENDED" || group.kind === "REMOVE_KEYWORD_RECOMMENDED"
@@ -882,7 +901,7 @@ export function applyDeclaredPrincipalSupportBasis(
   const outras = interpretation.notObserved.filter(item => item.keywordId !== basis.principalKeywordId);
   const declarada = interpretation.notObserved.find(item => item.keywordId === basis.principalKeywordId);
   const notObserved: UnobservedKeyword[] = [
-    { keywordId: basis.principalKeywordId, keyword: declarada?.keyword || basis.principalLabel, role: "principal", reason: DECLARED_PRINCIPAL_NOT_OBSERVED_REASON },
+    { keywordId: basis.principalKeywordId, keyword: declarada?.keyword || basis.principalLabel, role: "principal", reason: basis.publishedPage ? PUBLISHED_IDENTITY_PRINCIPAL_NOT_OBSERVED_REASON : DECLARED_PRINCIPAL_NOT_OBSERVED_REASON },
     ...outras,
   ];
   const observadas = interpretation.lensReadings.filter(reading => reading.verdict !== null);

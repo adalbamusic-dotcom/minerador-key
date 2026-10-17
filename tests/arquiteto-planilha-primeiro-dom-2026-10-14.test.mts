@@ -100,8 +100,12 @@ test("'Processar artigos' (barra de sempre) com as linhas do plano marcadas = Va
   await screen.click("architect-articles-top-process"); await assentar();
   const previa = screen.get("architect-plan-sheet-preview");
   assert.equal(previa.dataset.action, "validateSerp");
-  assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /Até 20 chamada\(s\) paga\(s\)/);
-  assert.deepEqual(screen.all("architect-plan-sheet-preview-line").filter(item => item.dataset.kind === "go").map(item => item.textContent!.split(" · ")[0]).length, 5, "só as principais com volume sem as 4 lentes vão ao custo");
+  // 2026-10-17 · régua única: a Livre sem volume "diferença entre internet e wi-fi" é a principal de identidade (no título do Assunto) e vai ao custo, com o propósito.
+  assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /Até 24 chamada\(s\) paga\(s\)/);
+  const vaiColetar = screen.all("architect-plan-sheet-preview-line").filter(item => item.dataset.kind === "go");
+  assert.equal(vaiColetar.length, 6, "as principais com volume sem as 4 lentes e a principal de identidade sem volume vão ao custo");
+  assert.ok(vaiColetar.some(item => item.textContent!.includes("SERP da principal de identidade “diferença entre internet e wi-fi” (sem volume medido): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo.")), vaiColetar.map(item => item.textContent).join(" | "));
+  assert.match(previa.textContent!, /sem volume, nada é coletado — exceto a principal de identidade do artigo, que o servidor também confere/);
   await screen.click(botao("Cancelar", previa)!); await assentar();
   assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute").length, 0, "cancelar não paga nada");
   assert.match(screen.get("architect-plan-sheet-summary").textContent!, /nenhuma chamada foi paga/);
@@ -109,11 +113,11 @@ test("'Processar artigos' (barra de sempre) com as linhas do plano marcadas = Va
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   const executados = chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp" && chamada.body.mode === "execute");
   assert.equal(executados.length, 1);
-  assert.equal(executados[0].body.authorizedPaidQueries, 20);
-  assert.equal(executados[0].body.onlyMeasuredVolume, true);
-  assert.deepEqual(executados[0].body.keywords.map((item: any) => item.keywordId), ["k11", "k12", "k13", "k14", "k15"]);
+  assert.equal(executados[0].body.authorizedPaidQueries, 24);
+  assert.equal(executados[0].body.onlyMeasuredVolume, true, "o servidor confere de novo o volume e a identidade");
+  assert.deepEqual(executados[0].body.keywords.map((item: any) => item.keywordId), ["k10", "k11", "k12", "k13", "k14", "k15"]);
   assert.match(resultado("k11"), /SERP coletada nas 4 lentes/);
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /Validar SERP: 20 lente\(s\) paga\(s\) agora/);
+  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /Validar SERP: 24 lente\(s\) paga\(s\) agora/);
   assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/serp-subject").length, 2, "a coluna SERP é relida do cache");
   semMinerador();
 });

@@ -40,9 +40,11 @@ import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { readbackArticleFormationSerpAssessment, saveArticleFormationSerpAssessment } from "@/lib/server/arquiteto-article-serp-store";
 import { recordSerpFormationOutcomes, serpFormationReworkGate, serpReworkView } from "@/lib/server/arquiteto-serp-rework-guard";
 import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
+import { serpCollectionAllowed, serpCollectionRefusal } from "@/lib/arquiteto/article-batch-serp";
 import { resolveDeclaredPrincipal } from "@/lib/minerador/keyword-subject";
 import { serpIntentReadingOf,
   NO_VOLUME_NOT_OBSERVED_REASON,
+  SUPPORT_NOT_IN_CACHE_REASON,
   applyDeclaredPrincipalSupportBasis,
   declaredPrincipalSupportBasisReason,
   selectDeclaredPrincipalSupports,
@@ -59,7 +61,7 @@ import { serpIntentReadingOf,
 import { inspectDataForSeoSerpResponse, type DataForSeoSerpProviderDiagnostic } from "@/lib/server/dataforseo-serp-operation";
 import { normalizeDataForSeoSerpResponse } from "@/lib/server/dataforseo-serp-normalizer";
 import { collectAndCacheSerp, lookupSerpCache, type SerpCacheLookup } from "@/lib/server/serp-cache";
-import { readKnownBeforeSearch } from "@/lib/server/known-before-search";
+import { readKnownBeforeSearch, readSerpIdentityPrincipals } from "@/lib/server/known-before-search";
 import { serpCacheLensLabel, serpCacheSubjectId, type SerpCacheLens, type SerpCacheMeta } from "@/lib/editorial/serp-cache";
 import type { SerpResearchSnapshot, SerpSearchInput } from "@/lib/radar/serp/contracts";
 
@@ -91,6 +93,13 @@ const RequestSchema = z.object({
   recollectStaleLenses: z.boolean().default(false),
   /** Reinterpreta somente a SERP já guardada; nenhuma falta pode chamar o provider. */
   cacheOnly: z.boolean().default(false),
+  /**
+   * 2026-10-16 · SDD da linha única §15 passo 4 (reforço pela SERP da principal).
+   * Só com `cacheOnly`: a busca de apoio (não principal) cuja SERP não está no
+   * cache fica NÃO OBSERVADA, com o motivo, em vez de derrubar o parecer do
+   * artigo inteiro. A principal continua obrigatória. Ausente = como antes.
+   */
+  observeCachedSupportsOnly: z.boolean().default(false),
   /**
    * F5 — "Refazer mesmo assim" (D11): recoletar pago a MESMA composição que
    * já deu parecer inconclusivo, com o motivo dito pelo humano.
@@ -407,12 +416,15 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
      * do artigo, secundária e reforço sem volume do Google Ads ficam fora do
      * plano e da coleta e saem como não observados, com o motivo — nunca em
      * `missing`, que é enum fechado e travaria a conclusão por falta de lente.
-     * A Principal continua sempre consultada: o parecer depende dela (o caso
-     * "artigo sem nenhuma keyword com volume" segue a regra de hoje até o dono
-     * confirmar, SDD §13).
+     * A Principal é sempre LIDA do cache (o parecer depende dela); PAGA, sem
+     * volume, só quando é a principal de identidade do artigo — SUBSTITUÍDO em
+     * 2026-10-17 o "a Principal continua sempre consultada" (ver
+     * `principalRecusada`, logo abaixo).
      */
+    /** 2026-10-16 · `observeCachedSupportsOnly`: as buscas de apoio sem a SERP no cache (preenchido depois da leitura `meta`). */
+    const apoioForaDoCache = new Set<string>();
     const observableInGroup = (group: typeof groups[number], keyword: typeof groups[number]["keywords"][number]) =>
-      keyword.id === group.principalSuggestion.keywordId || hasSearchVolume(keyword.volume_search);
+      keyword.id === group.principalSuggestion.keywordId || (hasSearchVolume(keyword.volume_search) && !apoioForaDoCache.has(String(keyword.id)));
 
     /*
      * OS CÓDIGOS DO MINERADOR (A8). Keyword do acervo da marca ativa usa os
@@ -439,6 +451,31 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
       keyword.volume_search = lida.volumeSearch;
     }
     diagnostic.knownBeforeSearch = { checked: conferido.keywords.size, corrected: corrigidas, readFailed: conferido.readFailed };
+    /*
+     * 2026-10-17 · A RÉGUA ÚNICA DA COLETA (`serpCollectionAllowed`, decisão do
+     * dono): a principal SEM volume só é paga quando é a principal de identidade
+     * do artigo — conferida AQUI, no banco (pacote aprovado, ArticleDNA vigente,
+     * publicado), nunca pelo pedido. A que não é fica fora do plano pago e da
+     * coleta, com o motivo; o cache continua lido (ler não é coletar).
+     * SUBSTITUI "a Principal continua sempre consultada" (dúvida Q2, decidida).
+     */
+    const principalRecusada = new Map<string, string>();
+    if (parsed.data.mode === "plan" || !parsed.data.cacheOnly) {
+      const principaisSemVolume = [...new Set(groups
+        .map(group => group.keywords.find(keyword => keyword.id === group.principalSuggestion.keywordId))
+        .filter((keyword): keyword is NonNullable<typeof keyword> => Boolean(keyword) && !hasSearchVolume(keyword!.volume_search))
+        .map(keyword => String(keyword.id)))];
+      if (principaisSemVolume.length) {
+        const identidade = await readSerpIdentityPrincipals(pipelineContext.supabase as unknown as Parameters<typeof readSerpIdentityPrincipals>[0], pipelineContext.brandId, principaisSemVolume);
+        for (const keywordId of principaisSemVolume) {
+          const check = identidade.readFailed ? { identity: false, reason: "não deu para conferir no banco se ela é a principal de identidade do artigo" } : identidade.checks.get(keywordId) ?? null;
+          if (!serpCollectionAllowed({ volume: null, identityPrincipal: check?.identity === true })) principalRecusada.set(keywordId, serpCollectionRefusal(check));
+        }
+      }
+    }
+    /** Entra no plano pago? A observável, menos a principal recusada pela régua. */
+    const payableInGroup = (group: typeof groups[number], keyword: typeof groups[number]["keywords"][number]) =>
+      observableInGroup(group, keyword) && !(keyword.id === group.principalSuggestion.keywordId && principalRecusada.has(String(keyword.id)));
     const usesEnvironmentCodes = (keywordId: string) => !targeting.codes.has(keywordId);
     const codesFor = (keywordId: string) => serpTargetCodesFor(targeting.codes, keywordId, targetCodes);
     const cacheRequestFor = (keyword: { id: string; keyword: string }, codes = codesFor(String(keyword.id)), requestLens = lens) => formationSerpCacheRequest({
@@ -521,6 +558,22 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
     }
 
     /*
+     * 2026-10-16 · REFORÇO PELA SERP DA PRINCIPAL (SDD da linha única §15,
+     * passo 4). Na leitura SOMENTE COM CACHE pedida com
+     * `observeCachedSupportsOnly`, a busca de apoio com volume cuja lente
+     * principal não está no cache sai da observação (fica não observada, com o
+     * motivo) e o parecer vem da principal e das que estão no cache. Antes, uma
+     * secundária sem SERP derrubava o parecer do artigo inteiro ("pendente") e
+     * o reforço só andava pagando a SERP de cada candidata.
+     */
+    if (parsed.data.mode === "execute" && parsed.data.cacheOnly && parsed.data.observeCachedSupportsOnly && !requested.legacy) {
+      groups.flatMap(group => group.keywords.map(keyword => ({ group, keyword }))).forEach(({ group, keyword }, index) => {
+        if (keyword.id !== group.principalSuggestion.keywordId && !metaLookups[index]?.hit) apoioForaDoCache.add(String(keyword.id));
+      });
+      // A mesma keyword como principal de outro grupo continua observada lá (a regra olha a principal primeiro).
+    }
+
+    /*
      * D2(a) — PARECER PELAS SUSTENTAÇÕES (SDD 2026-10-12 §17, decidido pelo
      * dono: "(a) padrão, (b) opcional"). Só na validação SOMENTE COM CACHE: a
      * principal DECLARADA no plano (marca `keyword_declared_principal`), sem
@@ -547,6 +600,8 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         const selecao = selectDeclaredPrincipalSupports({
           principalKeywordId: principalId,
           principalDeclared: Boolean(resolveDeclaredPrincipal(principal.analise_semantica ?? null).mark),
+          // 2026-10-17 · a keyword da própria página publicada (principal de identidade): a mesma D2(a).
+          principalIsPublishedPage: Boolean(group.publishedAnchorId) && group.publishedAnchorId === principalId,
           principalHasVolume: hasSearchVolume(principal.volume_search),
           principalCached: canonicaEmCache.get(`${indice}|${principalId}`) === true,
           candidates: group.keywords.filter(keyword => keyword.id !== principalId).map(keyword => ({
@@ -580,6 +635,8 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         cursor += 1;
         // Sem volume: fora do plano pago (a leitura meta acima é só posição).
         if (!observableInGroup(group, keyword)) continue;
+        // 2026-10-17 · a principal sem volume que não é a de identidade: fora do plano pago, com o motivo.
+        if (!payableInGroup(group, keyword)) continue;
         const payKey = payKeyOf(articleId, String(keyword.id), lens);
         if (lookup) primarySubjectByPayKey.set(payKey, lookup.subjectId);
         slots.push({
@@ -602,6 +659,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
     extraSlotsWanted.forEach((item, index) => {
       const lookup = extraMetaLookups[index];
       const { validationProfile } = groupProfileOf(item.group);
+      if (!payableInGroup(item.group, item.keyword)) return;
       slots.push({
         payKey: extraPayKeyOf(serpCacheSubjectId(cacheRequestFor(item.keyword, undefined, item.extraLens).query)), dateGroup: String(item.keyword.id), lens: item.extraLens, primary: false,
         conditional: validationProfile === "kgr_light", payable: true,
@@ -625,7 +683,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
       const missingDetails = groups.flatMap(group => {
         const missing = group.keywords.flatMap(keyword => {
           const lookup = metaLookups[position++];
-          return lookup?.hit || !observableInGroup(group, keyword) ? [] : [{
+          return lookup?.hit || !observableInGroup(group, keyword) || !payableInGroup(group, keyword) ? [] : [{
             article: group.keywords.find(item => item.id === group.principalSuggestion.keywordId)?.keyword || group.keywords[0]?.keyword || group.id,
             keyword: keyword.keyword,
             lens: serpCacheLensLabel(lens),
@@ -644,7 +702,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         const lookup = extraMetaLookups[index];
         // Leitura que não devolveu a posição não derruba o plano: a chave sai da própria consulta.
         const subjectId = lookup?.subjectId ?? serpCacheSubjectId(cacheRequestFor(item.keyword, undefined, item.extraLens).query);
-        if (!lookup?.hit && !extraMissingSeen.has(subjectId)) {
+        if (!lookup?.hit && !extraMissingSeen.has(subjectId) && payableInGroup(item.group, item.keyword)) {
           extraMissingSeen.add(subjectId);
           missingDetails.push({
           article: item.group.keywords.find(keyword => keyword.id === item.group.principalSuggestion.keywordId)?.keyword || item.group.id,
@@ -656,6 +714,8 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         }
       });
       return NextResponse.json({ success: true, data: { mode: "plan", plan: { ...plan, missingDetails }, lenses: lensLabels, requestedKeywordCount: totalKeywords,
+        // 2026-10-17 · a principal sem volume que não é a de identidade: fora do plano pago, com o motivo (o servidor conferiu).
+        ...(principalRecusada.size ? { refusedPrincipals: [...principalRecusada].map(([keywordId, reason]) => ({ keywordId, reason })) } : {}),
         // F5 — os artigos fora do plano pago pela guarda (a mesma recusa), com o registro anterior.
         ...(reworkGate?.refused.length ? { rework: { articles: serpReworkView(reworkGate) } } : {}) }, diagnostic });
     }
@@ -793,6 +853,12 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         queryDiagnostic.internalCode = "SERP_PAID_NOT_AUTHORIZED";
         throw new SerpPaidBudgetExhaustedError(`A lente ${serpCacheLensLabel(lens)} de "${input.serpInput.keyword}" não está no cache e a coleta paga não foi autorizada: este artigo fica pendente, sem custo.`);
       }
+      // 2026-10-17 · a régua única: a principal sem volume que não é a de identidade nunca é paga (o motivo vai na falha do artigo).
+      const recusada = principalRecusada.get(input.keywordId);
+      if (recusada) {
+        queryDiagnostic.internalCode = "SERP_PAID_NOT_AUTHORIZED";
+        throw new SerpPaidBudgetExhaustedError(recusada);
+      }
       // Fora do plano autorizado, nada é pago: a unidade falha dizendo por quê.
       if (!budget.take(payKeyOf(input.articleId, input.keywordId, lens))) {
         queryDiagnostic.internalCode = "SERP_PAID_NOT_AUTHORIZED";
@@ -906,6 +972,8 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
      */
     const extraCollections = new Map<string, Promise<ExtraLensCollection>>();
     const collectExtraLens = async (input: { payKey: string; articleId: string; keyword: { id: string; keyword: string }; extraLens: SerpCacheLens }): Promise<ExtraLensCollection> => {
+      const recusada = principalRecusada.get(String(input.keyword.id));
+      if (recusada) return { missing: "não paga", detail: recusada };
       if (!budget.take(input.payKey)) return { missing: "não paga", detail: "Fora do plano de chamadas autorizado." };
       const keywordId = String(input.keyword.id);
       try {
@@ -1112,7 +1180,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
           principalKeywordId: principalId,
           anchorKeywordId: usadas[0].id,
           supportKeywordIds: usadas.map(keyword => keyword.id),
-          reason: declaredPrincipalSupportBasisReason(group.keywords[principalIndex].keyword, usadas.map(keyword => keyword.keyword)),
+          reason: declaredPrincipalSupportBasisReason(group.keywords[principalIndex].keyword, usadas.map(keyword => keyword.keyword), apoio.publishedPage === true),
         };
         appliedSupportBasis.set(articleId, supportBasis);
         const keywordDnaReferencesApoio = references.map(reference => reference.keywordDnaSnapshot).filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
@@ -1247,8 +1315,8 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         snapshots: assessment.snapshots,
       });
       // A busca sem volume diz POR QUE ficou fora: não foi falta de dado.
-      const semVolume = new Set(group.keywords.filter(keyword => !observableInGroup(group, keyword)).map(keyword => String(keyword.id)));
-      const notObserved = naoObservadas.map(item => semVolume.has(item.keywordId) ? { ...item, reason: NO_VOLUME_NOT_OBSERVED_REASON } : item);
+      const semVolume = new Set(group.keywords.filter(keyword => !observableInGroup(group, keyword) && !apoioForaDoCache.has(String(keyword.id))).map(keyword => String(keyword.id)));
+      const notObserved = naoObservadas.map(item => semVolume.has(item.keywordId) ? { ...item, reason: NO_VOLUME_NOT_OBSERVED_REASON } : apoioForaDoCache.has(item.keywordId) ? { ...item, reason: SUPPORT_NOT_IN_CACHE_REASON } : item);
 
       /*
        * Pedido legado (`device`): uma lente, o parecer de antes, sem marcador.
@@ -1279,7 +1347,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
           notObserved,
         });
         const parecer = apoio
-          ? applyDeclaredPrincipalSupportBasis(across, { principalKeywordId: apoio.principalKeywordId, principalLabel: rotulo(apoio.principalKeywordId), anchorLabel: rotulo(apoio.anchorKeywordId), supportLabels: apoio.supportKeywordIds.map(rotulo) })
+          ? applyDeclaredPrincipalSupportBasis(across, { principalKeywordId: apoio.principalKeywordId, principalLabel: rotulo(apoio.principalKeywordId), anchorLabel: rotulo(apoio.anchorKeywordId), supportLabels: apoio.supportKeywordIds.map(rotulo), ...(supportSelectionByArticle.get(assessment.articleId)?.publishedPage ? { publishedPage: true } : {}) })
           : across;
         const missing: SerpLensesMarker["missing"] = extras?.missing || [];
         const collectedAtByLens = new Map<string, string[]>([[primaryLabel, assessment.snapshots.map(snapshot => snapshot.collectedAt)], ...(extras?.collectedAtByLens || new Map<string, string[]>())]);

@@ -397,7 +397,8 @@ test("A1 · a rota monta os membros pelos snapshots, não pelo grupo inteiro", (
     .join("\n");
   assert.match(route, /const \{ members, notObserved: naoObservadas \} = splitArticleSerpMembers\(\{/);
   // A busca sem volume sai como não observada, com o motivo próprio (SDD 2026-09-28, A3).
-  assert.match(route, /const notObserved = naoObservadas\.map\(item => semVolume\.has\(item\.keywordId\) \? \{ \.\.\.item, reason: NO_VOLUME_NOT_OBSERVED_REASON \} : item\);/);
+  // 2026-10-16 (SDD da linha única §15, passo 4): o apoio sem SERP no cache, na leitura só com cache do reforço, também — com o motivo dele.
+  assert.match(route, /const notObserved = naoObservadas\.map\(item => semVolume\.has\(item\.keywordId\) \? \{ \.\.\.item, reason: NO_VOLUME_NOT_OBSERVED_REASON \} : apoioForaDoCache\.has\(item\.keywordId\) \? \{ \.\.\.item, reason: SUPPORT_NOT_IN_CACHE_REASON \} : item\);/);
   assert.match(route, /snapshots: assessment\.snapshots,/);
   assert.match(route, /interpretArticleSerp\(\{\s*candidateRef: assessment\.articleId,\s*members,\s*notObserved,/);
   // O membro vazio da construção antiga não volta.

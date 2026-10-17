@@ -5,7 +5,11 @@ import {
   ARTICLE_BATCH_SERP_BLOCK_SIZE,
   articleBatchSerpScopeId,
   describeArticleBatchSerpLot,
+  identityPrincipalSerpSentence,
   planArticleBatchSerpLot,
+  serpCollectionAllowed,
+  serpIdentityArticleOf,
+  serpIdentityPrincipalIds,
 } from "../lib/arquiteto/article-batch-serp.ts";
 import {
   ARTICLE_ALLINTITLE_EVIDENCE_LIMIT,
@@ -64,7 +68,58 @@ test("A2 · o lote da coleta tem só keyword com volume dos Silos em formação;
   assert.deepEqual(lote.withoutVolume.map(item => item.keywordId), ["k2", "k3"]);
   assert.deepEqual(lote.sameTextAs, [{ keywordId: "k4", keyword: "Skincare   Facial", sameAsKeywordId: "k1" }]);
   assert.equal(lote.blocks.length, 1);
-  assert.match(describeArticleBatchSerpLot(lote), /2 keyword\(s\) com volume nas 4 lentes · 2 sem volume ficam fora \(nunca coletadas\)/);
+  assert.deepEqual(lote.identityPrincipals, []);
+  assert.match(describeArticleBatchSerpLot(lote), /2 keyword\(s\) com volume nas 4 lentes · 2 sem volume ficam fora \(nunca coletadas: não são a principal de identidade do artigo\)/);
+});
+
+test("A2 · régua única (2026-10-17): no lote, a principal de identidade SEM volume é coletada (4 lentes) com o propósito e o custo ditos; a outra sem volume continua fora", () => {
+  const lote = planArticleBatchSerpLot({
+    siloRefs: ["territory:a"],
+    identityPrincipalIds: new Set(["k3"]),
+    keywords: [kw("k1", "skincare facial", 880), kw("k2", "rotina skincare", 0), kw("k3", "skincare noturno", null)],
+  });
+  assert.deepEqual(lote.targets.map(item => item.keywordId), ["k1", "k3"]);
+  assert.deepEqual(lote.identityPrincipals.map(item => item.keywordId), ["k3"]);
+  assert.deepEqual(lote.withoutVolume.map(item => item.keywordId), ["k2"]);
+  assert.equal(describeArticleBatchSerpLot(lote), "1 keyword(s) com volume nas 4 lentes · SERP da principal de identidade “skincare noturno” (sem buscas no Google Ads): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo · 1 sem volume ficam fora (nunca coletadas: não são a principal de identidade do artigo)");
+  // A régua é UMA: com volume coleta; sem volume, só a principal de identidade.
+  assert.equal(serpCollectionAllowed({ volume: 10, identityPrincipal: false }), true);
+  assert.equal(serpCollectionAllowed({ volume: null, identityPrincipal: true }), true);
+  assert.equal(serpCollectionAllowed({ volume: 0, identityPrincipal: false }), false);
+  assert.equal(identityPrincipalSerpSentence("como escolher plano de internet residencial"), "SERP da principal de identidade “como escolher plano de internet residencial” (sem buscas no Google Ads): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo.");
+});
+
+test("A2 · régua única: a principal de identidade é lida dos dados (pacote aprovado, ArticleDNA, publicado) pela régua de T12, sem IA", () => {
+  const PLANO = { groupId: "36300396-90cc-4af6-9741-f2811251b584", planVersion: 2, order: 1, role: "Pilar", scope: "Escolha de plano.", lock: "free", slug: "como-escolher-plano-internet-residencial" };
+  const URL_PUB = "https://marca.com.br/blog/como-captar-clientes-para-clinica-de-estetica";
+  const pacote = (id: string, keyword: string, analiseSemantica: Record<string, unknown>) => ({ id, keyword, canonicalWorkflow: { state: "received", payload: { approvedDna: { keywordId: id, keyword, analiseSemantica } } } });
+  const assunto = (id: string, keyword: string, titulo: string, principalId = id, slug = PLANO.slug) => pacote(id, keyword, { keyword_subject: { declared: true, note: null, destinationUrl: null, destinationCheck: null, entry: { title: titulo, source: "cadastro" }, plan: { ...PLANO, slug, declaredPrincipal: { keywordId: principalId, phrase: keyword } } } });
+  const linhas = [
+    // No título e no slug do plano: identidade.
+    assunto("l1", "como escolher plano de internet residencial", "Como escolher um plano de internet residencial sem cair em uma oferta ruim"),
+    // Fora do título e do slug: não é a identidade.
+    assunto("l9", "wi-fi mesh", "Internet lenta em casa: o que fazer", "l9", "internet-lenta-em-casa"),
+    // A principal declarada é OUTRA keyword (marca recíproca): o título e o slug moram no Assunto.
+    assunto("a2", "operadoras para casa", "Claro, Vivo ou TIM para casa: como comparar", "p2", "claro-vivo-tim-internet-residencial"),
+    pacote("p2", "claro vivo ou tim internet residencial", { keyword_declared_principal: { subjectKeywordId: "a2", groupId: PLANO.groupId, planVersion: 2 } }),
+    // Página publicada: o slug foi feito dela.
+    pacote("pub", "como captar clientes para clínica de estética", { site_origin: { publicationStatus: "published", sourceUrl: URL_PUB, resolvedUrl: URL_PUB, canonicalUrl: URL_PUB, urlSituation: "canonical_confirmed", lastCheckedAt: "2026-10-01T12:00:00.000Z", publicationConfirmedBy: "user-1", publicationConfirmedAt: "2026-10-01T12:00:00.000Z" } }),
+    // Página publicada cujo slug é de outro assunto: não é a identidade.
+    pacote("pub2", "marketing digital", { site_origin: { publicationStatus: "published", sourceUrl: URL_PUB, resolvedUrl: URL_PUB, canonicalUrl: URL_PUB, urlSituation: "canonical_confirmed", lastCheckedAt: "2026-10-01T12:00:00.000Z", publicationConfirmedBy: "user-1", publicationConfirmedAt: "2026-10-01T12:00:00.000Z" } }),
+    // Sem pacote aprovado: nunca é conferida como identidade.
+    { id: "solta", keyword: "skincare noturno" },
+  ];
+  const ids = serpIdentityPrincipalIds({ rows: linhas, articles: [] });
+  assert.ok(ids.has("l1"), "no título e no slug do plano");
+  assert.ok(!ids.has("l9"), "fora do título e do slug");
+  assert.ok(ids.has("p2"), "a principal declarada pelo Assunto (marca recíproca)");
+  assert.ok(!ids.has("a2"), "o Assunto cuja principal declarada é outra não é a principal");
+  assert.ok(!ids.has("solta"), "sem pacote, nada é conferido");
+  assert.ok(ids.has("pub"), "a página publicada cujo slug foi feito dela");
+  assert.ok(!ids.has("pub2"), "a página publicada com slug de outro assunto");
+  // No ArticleDNA vigente, só vale como principal: a do Assunto que virou âncora numa troca não é.
+  const trocado = serpIdentityPrincipalIds({ rows: linhas, articles: [serpIdentityArticleOf({ principalKeywordId: "nova", subject: { keywordId: "l1", phrase: "Como escolher um plano de internet residencial sem cair em uma oferta ruim" }, keywordReferences: [{ keywordId: "nova" }] })] });
+  assert.ok(!trocado.has("l1"));
 });
 
 test("A2 · blocos cabem no teto da rota keyword-serp e o escopo do ledger é estável", () => {
@@ -90,7 +145,9 @@ test("A2 · Processar artigos coleta o lote ANTES da formação, sempre nas 4 le
   const lote = workspace.slice(workspace.indexOf("const collectArticleBatchSerp = async"), workspace.indexOf("const collectArticleBatchSerpRef = useRef"));
   assert.match(lote, /fetch\("\/api\/arquiteto\/keyword-serp"/);
   // Correção de 2026-09-28: a cabeça da SiloPage com volume também é coletada ("todas as keywords com volume").
-  assert.ok(lote.includes("planArticleBatchSerpLot({ keywords: masterListRef.current, siloRefs })"));
+  // 2026-10-17 · a régua única: sem volume, só a principal de identidade do artigo entra no lote (lida da mesa e dos ArticleDNAs).
+  assert.ok(lote.includes("planArticleBatchSerpLot({ keywords: masterListRef.current, siloRefs, identityPrincipalIds })"));
+  assert.ok(lote.includes("const identityPrincipalIds = serpIdentityPrincipalIds({ rows: masterListRef.current, articles: Object.values(acceptedArticleDnas).map(version => serpIdentityArticleOf(version.payload)) });"));
   // Nunca "só a principal": o terceiro argumento do diálogo é `false`.
   assert.match(lote, /perguntar\(`Primeira coleta da SERP do lote · 4 lentes · \$\{describeArticleBatchSerpLot\(lote\)\}`, merged, false\)/);
   assert.match(lote, /authorizedPaidQueries: escolha\.authorizedPaidQueries/);
@@ -108,10 +165,17 @@ test("A2 · o plano da coleta nunca oferece só a lente principal", () => {
 
 test("A3 · a rota do parecer tira secundária sem volume do plano e da coleta e a declara como não observada", () => {
   const rota = semComentarios(readFileSync("lib/server/arquiteto-serp-http.ts", "utf8"));
-  assert.match(rota, /keyword\.id === group\.principalSuggestion\.keywordId \|\| hasSearchVolume\(keyword\.volume_search\)/);
+  // 2026-10-16 (SDD da linha única §15, passo 4): com `observeCachedSupportsOnly`, o apoio sem SERP no cache também fica fora da coleta (não observado); a principal nunca.
+  assert.match(rota, /keyword\.id === group\.principalSuggestion\.keywordId \|\| \(hasSearchVolume\(keyword\.volume_search\) && !apoioForaDoCache\.has\(String\(keyword\.id\)\)\)/);
+  assert.match(rota, /parsed\.data\.cacheOnly && parsed\.data\.observeCachedSupportsOnly/);
   assert.match(rota, /if \(!observableInGroup\(group, keyword\)\) continue;/);
   assert.match(rota, /group\.keywords\.filter\(keyword => observableInGroup\(group, keyword\)\)\.flatMap\(keyword => requested\.extras/);
-  assert.match(rota, /return lookup\?\.hit \|\| !observableInGroup\(group, keyword\) \? \[\] : \[\{/);
+  assert.match(rota, /return lookup\?\.hit \|\| !observableInGroup\(group, keyword\) \|\| !payableInGroup\(group, keyword\) \? \[\] : \[\{/);
+  // 2026-10-17 · a régua única: a principal sem volume só é paga quando é a de identidade, conferida no banco.
+  assert.match(rota, /if \(!payableInGroup\(group, keyword\)\) continue;/);
+  assert.match(rota, /const identidade = await readSerpIdentityPrincipals\(/);
+  assert.match(rota, /if \(!serpCollectionAllowed\(\{ volume: null, identityPrincipal: check\?\.identity === true \}\)\) principalRecusada\.set\(keywordId, serpCollectionRefusal\(check\)\);/);
+  assert.match(rota, /const recusada = principalRecusada\.get\(input\.keywordId\);/);
   assert.match(rota, /index === principalIndex \|\| !observableInGroup\(group, keyword\) \? null : collect\(/);
   assert.match(NO_VOLUME_NOT_OBSERVED_REASON, /Sem volume no Google Ads/);
 });
@@ -298,9 +362,10 @@ test("A4 · a rota do allintitle só lê o Minerador e grava no item de workflow
 
 /* ------------------------------ A5 · fase Silos ---------------------------- */
 
-test("A5 · a consulta nas 4 lentes da fase Silos é manual, opcional e nunca coleta keyword sem volume", () => {
+test("A5 · a consulta nas 4 lentes da fase Silos é manual, opcional e nunca coleta keyword sem volume (salvo a principal de identidade, régua única de 17/10)", () => {
   const coleta = workspace.slice(workspace.indexOf("const collectKeywordSerp = async"), workspace.indexOf("const collectArticleBatchSerp = async"));
-  assert.match(coleta, /const comVolume = doTerritorio\.filter\(kw => hasSearchVolume\(/);
+  assert.match(coleta, /const comVolume = doTerritorio\.filter\(kw => serpCollectionAllowed\(\{ volume: typeof kw\.volume_search === "number" \? kw\.volume_search : null, identityPrincipal: identidade\.has\(String\(kw\.id\)\) \}\)\);/);
+  assert.match(coleta, /const identidade = serpIdentityPrincipalIds\(\{ rows: masterListRef\.current, articles: Object\.values\(acceptedArticleDnas\)\.map\(version => serpIdentityArticleOf\(version\.payload\)\) \}\);/);
   assert.match(coleta, /const todas = comVolume\.map\(/);
   assert.match(coleta, /ação manual e opcional/);
 });

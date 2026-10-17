@@ -24,11 +24,11 @@ test.beforeEach(async()=>{
 test.afterEach(()=>screen.destroy());
 test("one acceptance completes the batch; cancelling costs does not block ready targets",async()=>{
   await screen.render(panel());await screen.click(button("1 · Buscar keywords (grátis)"));assert.equal(calls.length,1);
-  assert.match(screen.text(),/volume 50/);await screen.click(button("2 · Validar no Google (2 consultas, até US$ 0.01)"));assert.match(screen.text(),/mobile-ios/);await screen.click(button("Cancelar"));assert.equal(calls.filter(c=>c.action==="collect").length,0);
+  assert.match(screen.text(),/volume 50/);await screen.click(button("2 · Coletar a SERP no DataForSEO (pago: 2 consultas, até US$ 0.01)"));assert.match(screen.text(),/Coletar a SERP no DataForSEO · pago: 2 consulta\(s\)/);assert.match(screen.text(),/mobile-ios/);await screen.click(button("Cancelar"));assert.equal(calls.filter(c=>c.action==="collect").length,0);
   // Com a validação pendente (passo 2 no cartão), gravar direto fica na fileira, sem número.
   await screen.click(button("Gravar sem validar (2)"));assert.equal(calls.length,1);await screen.click(button("Confirmar e aplicar"));
   const applies=calls.filter(c=>c.action==="apply");assert.equal(applies.length,2);assert.deepEqual(applies[0].targetIds,["a","b"]);
-  // F4 (ajuste declarado 2026-10-14): o Arquiteto não aprova keyword no Minerador — o pedido nunca leva approveNewKeywords.
+  // 2026-10-17 · sem keyword nova na confirmação, o pedido não leva o aceite de incorporar (ele só vai quando a confirmação lista as novas).
   assert.equal("approveNewKeywords" in applies[0],false);assert.equal(applies[1].targetIds,undefined);
   assert.match(screen.text(),/Melhoria gravada/);assert.match(screen.text(),/Falha recuperável/);assert.equal(applied,1);
 });
@@ -45,7 +45,7 @@ test("o cartão Próximo passo mostra uma frase e um botão, na ordem 1 → 2 �
   // Um botão por ato: o "1 · Buscar" do cartão não aparece de novo na fileira.
   assert.equal([...screen.container.querySelectorAll("button")].filter(b=>b.textContent==="1 · Buscar keywords (grátis)").length,1);
   await screen.click(button("1 · Buscar keywords (grátis)"));
-  assert.equal(nextStep()?.dataset.nextStep,"validate");assert.equal(nextStep()!.querySelector("button")!.textContent,"2 · Validar no Google (2 consultas, até US$ 0.01)");
+  assert.equal(nextStep()?.dataset.nextStep,"validate");assert.equal(nextStep()!.querySelector("button")!.textContent,"2 · Coletar a SERP no DataForSEO (pago: 2 consultas, até US$ 0.01)");
 });
 test("sem nada pendente, o cartão manda para as Sobras quando elas existem",async()=>{
   restored={...fixture(),state:"complete",acceptedIds:["a","b"],costs:{paidQueries:0,estimatedCostUsd:{min:0,max:0},missingDetails:[]}};
@@ -117,7 +117,7 @@ test("leitura da IA: a linha mostra 'Leitura da IA — confira' com o motivo; a 
   assert.equal(screen.container.querySelectorAll("tbody tr").length,2,"a linha que precisa validar continua visível");
   const caixas=[...screen.container.querySelectorAll<HTMLInputElement>("input[type='checkbox']")];
   assert.equal(caixas[0].disabled,false);assert.equal(caixas[1].disabled,true);
-  assert.match(screen.text(),/Precisa validar no Google \(passo 2\)/);
+  assert.match(screen.text(),/Precisa coletar a SERP no DataForSEO \(passo 2\)/);
 });
 test("origem por linha, recusas da IA recolhidas e sugestão da IA derrubada pela SERP com o motivo",async()=>{
   const base=fixture();
@@ -137,7 +137,7 @@ test("barra de progresso: contador e porcentagem quando o total é conhecido; pu
   const { ImprovementProgress } = await import("../modules/arquiteto/article-improvement-panel.tsx");
   const inicio = 1_000_000;
   await screen.render(React.createElement(ImprovementProgress, { activity: { action: "collect", startedAt: inicio }, now: inicio + 75_000, done: 7, total: 36, unit: "grupos validados" }));
-  assert.match(screen.text(), /Validando no Google/);
+  assert.match(screen.text(), /Coletando a SERP no DataForSEO \(pago, com o seu aceite\)/);
   assert.match(screen.text(), /7 de 36 grupos validados/);
   assert.match(screen.text(), /19%/);
   assert.match(screen.text(), /1 min 15 s/);
@@ -157,11 +157,12 @@ test("barra de progresso: contador e porcentagem quando o total é conhecido; pu
  */
 test("F4 · linha 'Precisa do Minerador': à vista, não marcável, com o link para as Sugestões do Arquiteto no Minerador", async () => {
   const base = fixture();
-  restored = { ...base, groupScope: { requested: "azul", filter: "group", groupId: "g-azul" }, keywords: [...base.keywords, { id: "ext", keyword: "ideia nova", volume: 90, volumeValidated: true, external: true }],
+  // 2026-10-17 · só a keyword que JÁ existe no Minerador (e não chegou ao Arquiteto) faz a linha precisar dele; a nova entra na confirmação.
+  restored = { ...base, groupScope: { requested: "azul", filter: "group", groupId: "g-azul" }, keywords: [...base.keywords, { id: "ext", keyword: "ideia nova", volume: 90, volumeValidated: true, external: true, knownInMinerador: { keywordId: "ja-no-minerador" } }],
     proposals: [{ ...base.proposals[0], addIds: ["ext"], memberIds: ["old", "ext"], principalId: "old", status: "insufficient_evidence", needsMinerador: { newKeywordIds: ["ext"], measureKeywordIds: [], logicKeywordIds: [] }, reasons: ["Precisa do Minerador: 1 keyword(s) nova(s) para importar e aprovar no Minerador (“ideia nova”)."] }] };
   // 2026-10-14: a análise do azul é a atual quando a etiqueta está no azul (com outra etiqueta ela fica recolhida como "análise anterior").
   await screen.render(comProductShell(React.createElement(ArticleImprovementPanel, { brandId: "brand-a", brandRef: "adalbapro--brand-a", onApplied: () => { applied++; }, buttonClassName: "button", primaryButtonClassName: "button", activeGroup: { requested: "azul", label: "Azul" } })));
-  assert.match(screen.text(), /1 linha\(s\) precisa do minerador: keyword nova, medição ou Lógica são decididas lá/);
+  assert.match(screen.text(), /1 linha\(s\) precisa do minerador: dependem de keyword que JÁ existe no Minerador/);
   const celula = screen.container.querySelector("[data-testid='architect-improvement-row-needs-minerador']")!;
   assert.match(celula.textContent ?? "", /Precisa do Minerador · Sugestões do Arquiteto/);
   const link = screen.container.querySelector<HTMLAnchorElement>("[data-testid='architect-improvement-open-suggestions']")!;
@@ -187,4 +188,31 @@ test("análise anterior à última mudança da mesa: recolhida, sem linhas à vi
   await screen.click(button("Retomar esta análise"));
   assert.ok(screen.container.querySelector("input[aria-label='Aplicar melhoria em Publicado a']"), "retomada, ela volta a ser a atual");
   assert.equal(calls.length, 0, "nada foi pedido ao servidor");
+});
+
+/*
+ * 2026-10-17 · KEYWORD NOVA NA MESMA CONFIRMAÇÃO (decisão do dono de 16/10).
+ * O que o dono vê: a keyword nova vem marcada "nova" na linha; a confirmação
+ * lista, por artigo, as novas com volume e fonte e diz que elas são
+ * importadas, processadas, aprovadas e enviadas nesta confirmação; o botão diz
+ * quantas são; o pedido leva approveNewKeywords: true só nesse caso.
+ */
+test("2026-10-17 · keyword nova: a confirmação lista por artigo (volume e fonte) e o pedido leva approveNewKeywords", async () => {
+  const base = fixture();
+  restored = { ...base, costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] },
+    keywords: [...base.keywords, { id: "ideia", keyword: "preço internet residencial", volume: 170, volumeValidated: true, external: true }],
+    proposals: [{ ...base.proposals[0], theme: "Internet residencial barata", principalId: "new", memberIds: ["new", "ideia"], addIds: ["ideia"], evidenceBasis: "copy_line" }, base.proposals[1]] };
+  await screen.render(panel());
+  assert.match(screen.text(), /Entram: preço internet residencial · volume 170 · nova/);
+  await screen.click(button("3 · Gravar melhorias (2)"));
+  const caixa = screen.container.querySelector<HTMLElement>("[data-testid='architect-improvement-new-keywords']")!;
+  assert.ok(caixa, "a confirmação mostra as keywords novas");
+  assert.match(caixa.textContent ?? "", /1 keyword\(s\) NOVA\(S\) na marca\. Ao confirmar, as keywords NOVAS desta prévia \(que não existem na marca\) são importadas no Minerador, processadas pela Lógica, recebem o Volume do Google Ads já medido na prévia \(sem consultar de novo\), são aprovadas e enviadas ao Arquiteto e entram no artigo — tudo nesta mesma confirmação\./);
+  assert.match(caixa.textContent ?? "", /“Internet residencial barata”: “preço internet residencial” \(170\/mês, busca nova no Google Ads\)\./);
+  assert.doesNotMatch(screen.text(), /nenhuma keyword do Minerador é importada/);
+  await screen.click(button("Confirmar e aplicar (com 1 keyword(s) nova(s))"));
+  const applies = calls.filter(c => c.action === "apply");
+  assert.equal(applies[0].approveNewKeywords, true);
+  assert.deepEqual(applies[0].targetIds, ["a", "b"]);
+  assert.equal("approveNewKeywords" in applies[1], false, "a retomada continua o lote aceito, sem novo aceite");
 });

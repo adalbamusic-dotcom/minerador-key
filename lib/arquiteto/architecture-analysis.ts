@@ -345,26 +345,59 @@ export function declaredPlanClusterReason(plan: ClusterDeclaredPlan): string {
  * profundidade para Silo", por keyword "O grupo não tem profundidade para um
  * silo próprio neste lote…" e "Coerência 0 · Aderência 0 · Profundidade 0"
  * para as 7 keywords do plano — que não precisam de profundidade: seguem o
- * plano do Silo. Esta LEITURA (só para a tela) marca o grupo cujas keywords
- * são todas artigos de UM plano declarado: a frase passa a ser a do plano, e
- * ele sai das quatro contagens (entra em `summary.declaredPlan`). O destino,
+ * plano do Silo. Esta LEITURA (só para a tela) dá ao artigo do plano a frase
+ * do plano, fora das quatro contagens (entra em `summary.declaredPlan`).
+ * [SUBSTITUÍDO 2026-10-16 (noite): "marca o grupo cujas keywords são todas
+ * artigos de UM plano" — agora cada artigo do plano é a sua leitura, ver
+ * abaixo.] O destino,
  * os escores e o `baseHash` ficam como estão — a proposta e a confirmação não
  * leem isto. Marca sem plano (`planOf` sempre nulo): a mesma análise, intacta.
+ */
+/*
+ * 2026-10-16 (noite) · teste do dono (WifiConecta, amarelo): o léxico juntou
+ * "internet residencial barata" e "internet no meu cep" num grupo só ("Grupo:
+ * internet no meu cep — Segue o plano… (Suporte, posição 2; Suporte, posição
+ * 4)"), e juntou "combo internet tv streaming" (amarelo, artigo 7) com
+ * "internet para streaming" (azul, artigo 12) — dois planos no mesmo grupo, e
+ * a leitura caía em "sem profundidade". Agora CADA ARTIGO DO PLANO É A SUA
+ * LEITURA: a keyword do plano sai do grupo léxico como leitura própria
+ * ("Segue o plano do Silo “X” (Suporte, posição 7)"), com o próprio Silo do
+ * plano; o que sobra do grupo (sem plano) continua com a análise de sempre.
+ * 15 keywords do plano = 15 que seguem o plano. Só leitura, como antes.
  */
 export function withDeclaredPlanReading(
   analysis: ArchitectureAnalysis,
   planOf: (keywordId: string) => { siloName: string; role: "Pilar" | "Suporte"; order: number } | null,
+  /** O texto da keyword (a leitura própria do artigo do plano leva o nome dele). Sem ele, o do grupo. */
+  labelOf?: (keywordId: string) => string | null | undefined,
 ): ArchitectureAnalysis {
   let marcados = 0;
-  const clusters = analysis.clusters.map(cluster => {
-    if (!cluster.memberKeywordIds.length) return cluster;
+  const clusters = analysis.clusters.flatMap((cluster): ClusterAnalysis[] => {
+    if (!cluster.memberKeywordIds.length) return [cluster];
     const planos = cluster.memberKeywordIds.map(keywordId => ({ keywordId, plano: planOf(keywordId) }));
-    if (planos.some(item => !item.plano)) return cluster;
-    const nomes = new Set(planos.map(item => item.plano!.siloName));
-    if (nomes.size !== 1) return cluster;
-    const declaredPlan: ClusterDeclaredPlan = { siloName: planos[0].plano!.siloName, members: planos.map(item => ({ keywordId: item.keywordId, role: item.plano!.role, order: item.plano!.order })) };
-    marcados += 1;
-    return { ...cluster, declaredPlan, reason: declaredPlanClusterReason(declaredPlan) };
+    const doPlano = planos.filter(item => item.plano);
+    if (!doPlano.length) return [cluster];
+    const leitura = (item: (typeof planos)[number], ref: string): ClusterAnalysis => {
+      const declaredPlan: ClusterDeclaredPlan = { siloName: item.plano!.siloName, members: [{ keywordId: item.keywordId, role: item.plano!.role, order: item.plano!.order }] };
+      marcados += 1;
+      return {
+        ...cluster,
+        clusterRef: ref,
+        label: (planos.length > 1 ? labelOf?.(item.keywordId) : null) || cluster.label,
+        memberKeywordIds: [item.keywordId],
+        headKeywordId: item.keywordId,
+        ambiguousHeadKeywordIds: [],
+        declaredPlan,
+        reason: declaredPlanClusterReason(declaredPlan),
+      };
+    };
+    // O grupo de uma keyword só (o caso de sempre): a mesma referência do grupo.
+    if (planos.length === 1) return [leitura(doPlano[0], cluster.clusterRef)];
+    const proprias = [...doPlano].sort((a, b) => a.plano!.order - b.plano!.order).map(item => leitura(item, `${cluster.clusterRef}#plano:${item.keywordId}`));
+    const resto = planos.filter(item => !item.plano).map(item => item.keywordId);
+    if (!resto.length) return proprias;
+    const cabeca = cluster.headKeywordId && resto.includes(cluster.headKeywordId) ? cluster.headKeywordId : resto[0];
+    return [...proprias, { ...cluster, memberKeywordIds: resto, headKeywordId: cabeca, ambiguousHeadKeywordIds: cluster.ambiguousHeadKeywordIds.filter(id => resto.includes(id)), label: cabeca === cluster.headKeywordId ? cluster.label : labelOf?.(cabeca) || cluster.label }];
   });
   if (!marcados) return analysis;
   const livres = clusters.filter(cluster => !cluster.declaredPlan);
@@ -374,6 +407,8 @@ export function withDeclaredPlanReading(
     clusters,
     summary: {
       ...analysis.summary,
+      // Cada artigo do plano é uma leitura: os grupos da tela são as leituras.
+      clusters: clusters.length,
       strengthening: conta("strengthen_existing_silo"),
       newSilos: conta("new_silo_candidate"),
       insufficient: conta("insufficient_depth"),

@@ -10,10 +10,12 @@
  * planeja, por página publicada, TUDO o que o botão "Reforçar publicados" grava
  * numa confirmação só:
  *
- *   1. as keywords novas escolhidas da busca em lote — desde a F4 (SDD
- *      2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`, item 2) só como
- *      SUGESTÃO ao Minerador ("Sugestões do Arquiteto"): o Arquiteto não
- *      importa, não mede, não aprova nem envia; o dono decide no Minerador;
+ *   1. as keywords NOVAS escolhidas da busca em lote (as que não existem na
+ *      marca): import no Minerador, Lógica, Volume do Google Ads, aprovação
+ *      humana, envio ao Arquiteto e o Silo do publicado — pelos MESMOS núcleos
+ *      das telas, só nas linhas que esta confirmação cria (2026-10-16, decisão
+ *      do dono; SUBSTITUI a F4 de 14/10, que as mandava só como sugestão). A
+ *      que já existe no Minerador é só lida: o Arquiteto não mexe nela;
  *   2. a composição do artigo no item de workflow (`articleFormationRef` +
  *      decisão humana "move"), com quem vem de outro Silo mudando de Silo;
  *   3. o ArticleDNA do publicado: o PRIMEIRO, quando ainda não existe (o mesmo
@@ -53,10 +55,12 @@ import { classifySlugFit, slugTextOf } from "./published-slug-fit.ts";
 export const PUBLISHED_REINFORCEMENT_ACTION_LABEL = "Reforçar publicados";
 /** Páginas por confirmação. */
 export const PUBLISHED_REINFORCEMENT_MAX_PAGES = 30;
-/** O texto da confirmação quando há keyword nova: o dono aprova no Minerador. */
-export const PUBLISHED_REINFORCEMENT_APPROVAL_TEXT = "As keywords novas não entram no artigo agora: o Arquiteto só lê keyword. Ao confirmar, elas vão como sugestão ao Minerador (“Sugestões do Arquiteto”), onde você importa, mede e aprova; depois, “Reforçar publicados” as coloca no artigo. URL, slug e canonical não mudam.";
-/** F4 · a recusa do pedido antigo `approveNewKeywords: true`: o Arquiteto não aprova no Minerador. */
+/** O texto da confirmação quando há keyword nova: o dono aprova no Minerador, nesta mesma confirmação (2026-10-16). */
+export const PUBLISHED_REINFORCEMENT_APPROVAL_TEXT = "Ao confirmar, você aprova estas keywords NOVAS no Minerador: nesta mesma confirmação elas são importadas, processadas pela Lógica, recebem o Volume do Google Ads (grátis, cota do Google Ads), são aprovadas e enviadas ao Arquiteto e entram nos artigos publicados. As keywords que já vieram do Minerador não mudam. URL, slug e canonical não mudam.";
+/** SUBSTITUÍDO em 2026-10-16 (a keyword nova voltou a entrar na mesma confirmação). Mantido só para leitura de mensagens antigas. */
 export const PUBLISHED_REINFORCEMENT_APPROVE_RETIRED = "O Arquiteto não aprova keyword no Minerador: as keywords novas vão como sugestão (“Sugestões do Arquiteto”) e são decididas lá. Confirme de novo sem o aceite de aprovação. Nada foi gravado.";
+/** 2026-10-16 · a ideia da busca que JÁ existe na marca e não chegou ao Arquiteto: só lida, nunca tocada. */
+export const REINFORCEMENT_EXISTING_UNTOUCHED_REASON = "Já existe no Minerador e ainda não chegou ao Arquiteto: o Arquiteto não mexe em keyword que veio do Minerador. Aprove e envie no Minerador; depois ela entra aqui como keyword da lista.";
 
 /* ---------------------------------- fatos ---------------------------------- */
 
@@ -173,7 +177,7 @@ export type PublishedReinforcementPagePlan = {
   keep: Array<{ keywordId: string; keyword: string }>;
   /** Keywords do Minerador que entram agora. */
   add: ReinforcementAdd[];
-  /** Keywords novas da busca em lote: F4 — vão como sugestão ao Minerador; não entram no artigo nesta confirmação. */
+  /** Keywords NOVAS da busca em lote (não existem na marca): entram agora, passando pelo Minerador antes (2026-10-16). */
   create: ReinforcementNewKeyword[];
   swap: { keywordId: string | null; keyword: string | null; state: "apply" | "refused" | "none"; reason: string };
   /** Pedidas e recusadas, com o motivo em português. */
@@ -331,6 +335,12 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
     novasVistas.add(nova.normalizedKeyword);
     if (!(nova.adsVolume > 0)) { refused.push({ keyword: nova.keyword, reason: "Sem volume do Google Ads: não reforça nada." }); continue; }
     if (nova.existingKeywordId && vistos.has(nova.existingKeywordId)) continue;
+    /*
+     * 2026-10-16 · "TUDO QUE VEM DO MINERADOR NÃO PODE MEXER" (dono): a que já
+     * existe na marca e não chegou ao Arquiteto é só lida — nunca importada,
+     * processada, aprovada nem enviada daqui. Ela fica fora, com o caminho.
+     */
+    if (nova.existingKeywordId) { refused.push({ keyword: nova.keyword, reason: REINFORCEMENT_EXISTING_UNTOUCHED_REASON }); continue; }
     create.push(nova);
   }
 
@@ -338,15 +348,13 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
   let vagas = Math.max(0, MAX_ARTICLE_KEYWORDS - composicao.size);
   const addNoTeto = add.filter(item => { if (vagas > 0) { vagas -= 1; return true; } refused.push({ keyword: item.keyword, reason: `Passa do teto de ${MAX_ARTICLE_KEYWORDS} keywords do artigo.` }); return false; });
   /*
-   * F4 · O ARQUITETO SÓ LÊ (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`,
-   * item 2): a keyword nova da busca em lote NÃO entra no artigo nesta
-   * confirmação (antes: import, Lógica, Volume, aprovação e envio no Minerador,
-   * daqui). Ela vai como sugestão ao Minerador ("Sugestões do Arquiteto"); só
-   * depois de o dono importar, aprovar e enviar lá ela volta como keyword do
-   * Minerador ("add"), com o teto do artigo. Por isso não ocupa vaga nem muda
-   * a composição, o parecer ou o ArticleDNA aqui.
+   * 2026-10-16 · A KEYWORD NOVA ENTRA NESTA CONFIRMAÇÃO (decisão do dono; SDD da
+   * linha única §15 passo 4; SUBSTITUI a F4 de 14/10, quando ela ia só como
+   * sugestão ao Minerador): import, Lógica, Volume, aprovação e envio pelos
+   * núcleos do Minerador, só nas linhas que esta confirmação cria, e ela ocupa
+   * vaga no teto do artigo.
    */
-  const createNoTeto = create;
+  const createNoTeto = create.filter(item => { if (vagas > 0) { vagas -= 1; return true; } refused.push({ keyword: item.keyword, reason: `Passa do teto de ${MAX_ARTICLE_KEYWORDS} keywords do artigo.` }); return false; });
 
   // A troca: Posto Livre relido, sem ranquear, substituta no artigo, régua da troca (D2.1).
   const finais = new Set([...composicao, ...addNoTeto.map(item => item.keywordId)]);
@@ -382,7 +390,7 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
   if (principalDaMesa && swap.state !== "apply") {
     return recusar(`A formação gravada deste publicado tem "${principalDaMesa.keyword}" como principal, por decisão sua, e a troca não passa agora: ${swap.reason || "a régua da troca não a aceita"} Confirme a composição na mesa antes.`);
   }
-  const mudaComposicao = addNoTeto.length > 0 || pendentesNoDna.length > 0;
+  const mudaComposicao = addNoTeto.length > 0 || createNoTeto.length > 0 || pendentesNoDna.length > 0;
   let dnaMode: PublishedReinforcementPagePlan["dna"]["mode"] = !facts.article ? "first" : mudaComposicao || swap.state === "apply" ? "successor" : "none";
 
   /*
@@ -412,7 +420,7 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
   // (o servidor sempre manda a lista, mesmo vazia).
   const confereSerp = facts.serpCandidates !== undefined;
   const candidatosSerp = facts.serpCandidates || [];
-  const doAlvo = candidatosSerp.find(item => serpCompositionMismatch(item.composition, alvo) === null) ?? null;
+  const doAlvo = createNoTeto.length ? null : candidatosSerp.find(item => serpCompositionMismatch(item.composition, alvo) === null) ?? null;
   let serpRefresh = false;
   /*
    * A troca já confirmada no ArticleDNA e a mesa dizendo o contrário (a página
@@ -444,21 +452,22 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
       return { ...recusar(comAviso(`O ArticleDNA v${facts.article.versionNumber} foi aprovado com o parecer da SERP de outra composição (${plural(composicaoDoArtigo.keywordIds.length, "keyword", "keywords")} no artigo)${detalhe}. Rode "Processar artigos" para este artigo (cache primeiro: sem custo quando as 4 lentes estão no cache) e use "Gravar reforços" de novo (tabela "Reforçar publicados"): a nova versão leva o parecer desta composição.`)), refused };
     }
   }
-  const mesaMuda = addNoTeto.length > 0 || alinharTroca
+  const mesaMuda = addNoTeto.length > 0 || createNoTeto.length > 0 || alinharTroca
     || (swap.state === "apply" && facts.members.find(item => item.keywordId === swap.keywordId)?.formationRole !== "principal");
   let dnaDeferred: string | null = motivoDoDnaVigente;
   if (confereSerp && dnaMode !== "none" && !doAlvo) {
     const primeiroMotivo = candidatosSerp.length ? serpCompositionMismatch(candidatosSerp[0].composition, alvo) : null;
     const motivo = !candidatosSerp.length
       ? "O artigo ainda não tem parecer da SERP gravado."
-      : `${primeiroMotivo ? `${primeiroMotivo[0].toUpperCase()}${primeiroMotivo.slice(1)}` : "O parecer da SERP gravado não descreve esta composição"}.`;
+      : createNoTeto.length
+        ? "Entram keywords novas: o parecer da SERP gravado não as confrontou."
+        : `${primeiroMotivo ? `${primeiroMotivo[0].toUpperCase()}${primeiroMotivo.slice(1)}` : "O parecer da SERP gravado não descreve esta composição"}.`;
     if (!mesaMuda) return { ...recusar(comAviso(`${motivo} Rode "Processar artigos" para este artigo (cache primeiro: sem custo quando as 4 lentes estão no cache) e abra a prévia de novo.`)), refused };
     dnaDeferred = motivo;
   }
   // A troca confirmada que contradiz o slug, sem nada a gravar agora: recusada com o aviso (nunca "nada muda" calado).
   if (avisoDaTroca && swap.state !== "apply" && dnaMode === "none" && !alinharTroca) return { ...recusar(avisoDaTroca), refused };
-  // F4: só sugestões ao Minerador também é "pronto" — "Gravar reforços" grava a sugestão (nada no Minerador, nada no artigo).
-  const status: PublishedReinforcementPagePlan["status"] = dnaMode === "none" && !alinharTroca && !createNoTeto.length ? "unchanged" : "ready";
+  const status: PublishedReinforcementPagePlan["status"] = dnaMode === "none" && !alinharTroca ? "unchanged" : "ready";
 
   const lines: string[] = [];
   if (dnaDeferred) lines.push(`"${page.keyword}": grava agora a composição na mesa; o ArticleDNA fica para a próxima confirmação. ${dnaDeferred}`);
@@ -472,10 +481,8 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
   if (addNoTeto.length) lines.push(`Entram ${plural(addNoTeto.length, "keyword do Minerador", "keywords do Minerador")}: ${lista(addNoTeto.map(item => item.keyword))}.`);
   const outroSilo = addNoTeto.filter(item => item.fromTerritoryRef);
   if (outroSilo.length) lines.push(`${plural(outroSilo.length, "delas muda", "delas mudam")} para o Silo do publicado.`);
-  const importadas = createNoTeto.filter(item => !item.existingKeywordId);
-  const jaNoMinerador = createNoTeto.filter(item => item.existingKeywordId);
-  if (importadas.length) lines.push(`Vão como sugestão ao Minerador (“Sugestões do Arquiteto”) ${plural(importadas.length, "keyword nova", "keywords novas")}: ${lista(importadas.map(item => item.keyword))}. Não entram no artigo agora: importar, medir e aprovar é no Minerador, pelo seu clique.`);
-  if (jaNoMinerador.length) lines.push(`Vão como sugestão ao Minerador ${plural(jaNoMinerador.length, "keyword que já está no Minerador", "keywords que já estão no Minerador")} e ainda não chegou ao Arquiteto: ${lista(jaNoMinerador.map(item => item.keyword))}. Aprove e envie no Minerador; depois "Reforçar publicados" as coloca no artigo.`);
+  // 2026-10-16: só as NOVAS (a que já existe no Minerador ficou fora, com o motivo).
+  if (createNoTeto.length) lines.push(`Entram ${plural(createNoTeto.length, "keyword nova", "keywords novas")} (importadas no Minerador e aprovadas por você nesta confirmação): ${lista(createNoTeto.map(item => item.keyword))}.`);
   if (swap.state === "apply") lines.push(`Troca da principal: ${swap.reason}`);
   if (swap.state === "refused") lines.push(`Troca da principal não será feita: ${swap.reason}`);
   if (refused.length) lines.push(`Ficam de fora: ${refused.map(item => `"${item.keyword}" (${item.reason})`).join("; ")}`);

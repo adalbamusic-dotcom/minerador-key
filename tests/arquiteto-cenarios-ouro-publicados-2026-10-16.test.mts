@@ -216,7 +216,13 @@ type FixtureDif = { serp: Array<{ keyword: string; lente: string; urls: string[]
 const SERP_DIF = JSON.parse(readFileSync(new URL("./fixtures/adalbapro-publicados-serp-2026-09-26.json", import.meta.url), "utf8")) as FixtureDif;
 const K_CAPTAR = "aaaaaaaa-0000-4000-8000-000000000011", K_ATRAIR = "aaaaaaaa-0000-4000-8000-000000000012", K_ANUNCIOS = "aaaaaaaa-0000-4000-8000-000000000015";
 const CAPTAR = "como captar clientes para clínica de estética", ATRAIR = "como atrair pacientes para clínica de estética";
-const URL_CAPTAR = "https://adalbapro.com.br/blog/como-captar-clientes-para-clinica-de-estetica", URL_ATRAIR = "https://adalbapro.com.br/blog/como-atrair-pacientes-para-clinica-de-estetica";
+/*
+ * 2026-10-17 · PRINCIPAL DE IDENTIDADE (dono): com a URL feita da principal ("como-captar-clientes-para-clinica-de-
+ * estetica"), a Livre fica e a diferenciação não a troca (conferido em `arquiteto-diferenciacao-publicados`). Para o C8
+ * exercitar a troca do aceite, a página de "captar" tem um slug que não foi feito da principal (fora da identidade).
+ */
+const SLUG_CAPTAR = "blog/captacao-para-clinica-de-estetica";
+const URL_CAPTAR = `https://adalbapro.com.br/${SLUG_CAPTAR}`, URL_ATRAIR = "https://adalbapro.com.br/blog/como-atrair-pacientes-para-clinica-de-estetica";
 
 function referencia(keywordId: string, role: "principal" | "secundaria") {
   return { keywordId, keywordDnaVersionId: `legacy:dna-${keywordId}:v1`, keywordDnaContentHash: `legacy:dna-${keywordId}`, role, strategicContribution: "Sustenta.", coveredIntentions: ["informacional"], requiredTopics: [], excludedTopics: [], classificationOrigin: "system" as const, confidence: 0.7, humanConfirmed: false };
@@ -243,7 +249,7 @@ async function montarDiferenciacao() {
     return { version_id: envelope.versionId, entity_id: envelope.entityId, marca_id: MARCA, artifact_type: "article_dna", version_number: 1, previous_version_id: null, content_hash: envelope.contentHash, origin: "human", change_reason: "inicial", created_at: envelope.createdAt, created_by: ATOR, status: "approved", payload };
   };
   banco.linhas("editorial_artifact_versions").push(
-    await linhaDeVersao(artigoPublicado("article-captar", K_CAPTAR, [K_ANUNCIOS], "blog/como-captar-clientes-para-clinica-de-estetica")),
+    await linhaDeVersao(artigoPublicado("article-captar", K_CAPTAR, [K_ANUNCIOS], SLUG_CAPTAR)),
     await linhaDeVersao(artigoPublicado("article-atrair", K_ATRAIR, [], "blog/como-atrair-pacientes-para-clinica-de-estetica")),
   );
   return banco;
@@ -296,17 +302,39 @@ test("C8 · diferenciação de 2 publicados com 3+ páginas em comum: detect →
     banco.linhas("editorial_artifact_versions").push({ version_id: version.versionId, entity_id: version.entityId, marca_id: MARCA, artifact_type: "article_dna", version_number: version.versionNumber, previous_version_id: version.previousVersionId, content_hash: version.contentHash, origin: version.origin, change_reason: version.changeReason, created_at: version.createdAt, created_by: version.createdBy, status: "proposed", payload: version.payload });
     return { status: "PERSISTED", versionId: version.versionId };
   };
-  const aceite = await handleDifferentiationApply(deps({ persistArticleVersion: gravar }), DifferentiationApplyRequestSchema.parse({ brandId: MARCA, groupId, decision: "accept", evaluationHash: rodada.evaluationHash }));
+  /*
+   * 2026-10-17 · a keyword NOVA ("instagram para clínica de estética", fora da
+   * marca) entra NESTE aceite, pelos núcleos do Minerador, só com o aceite dela;
+   * a que já existe ("anúncios…") é só lida. SUBSTITUI a F4 (ia como sugestão).
+   */
+  const semAceite = await handleDifferentiationApply(deps({ persistArticleVersion: gravar }), DifferentiationApplyRequestSchema.parse({ brandId: MARCA, groupId, decision: "accept", evaluationHash: rodada.evaluationHash }));
+  assert.equal(semAceite.status, 422);
+  assert.equal(semAceite.body.code, "HUMAN_APPROVAL_REQUIRED");
+  assert.equal(gravadas.length, 0, "sem o aceite das novas, nada é gravado");
+  const chamadasDoMinerador: string[] = [];
+  const NOVA = "cccccccc-0000-4000-8000-000000000001";
+  const minerador: NonNullable<DifferentiationHandlerDeps["minerador"]> = {
+    importKeywords: async pedido => { chamadasDoMinerador.push(`import:${pedido.items.map(item => item.keyword).join("|")}`); banco.linhas("minerador_keywords").push({ id: NOVA, brand_id: MARCA, keyword: pedido.items[0].keyword, status: "pendente", volume_search: null, volume_source: null, intent: null, deleted_at: null, analise_semantica: {} }); return { ok: true, createdIds: [NOVA] }; },
+    runLogic: async ids => { chamadasDoMinerador.push(`logic:${ids.join(",")}`); return { ok: true, reason: null }; },
+    measureVolume: async ids => { chamadasDoMinerador.push(`volume:${ids.join(",")}`); return { ok: true, reason: null }; },
+    readVolumes: async ids => new Map(ids.map(id => [id, { volume: 480, validated: true }])),
+    approve: async ids => { chamadasDoMinerador.push(`approve:${ids.join(",")}`); return { ok: true, reason: null }; },
+    handoff: async ids => { chamadasDoMinerador.push(`handoff:${ids.join(",")}`); },
+  };
+  const aceite = await handleDifferentiationApply(deps({ persistArticleVersion: gravar, minerador }), DifferentiationApplyRequestSchema.parse({ brandId: MARCA, groupId, decision: "accept", evaluationHash: rodada.evaluationHash, approveNewKeywords: true }));
   assert.equal(aceite.status, 200, JSON.stringify(aceite.body));
   assert.equal(dados(aceite).readbackConfirmed, true);
+  assert.deepEqual(chamadasDoMinerador, ["import:instagram para clínica de estética", `logic:${NOVA}`, `volume:${NOVA}`, `approve:${NOVA}`, `handoff:${NOVA}`], "só a nova, na ordem das telas");
+  const atrair = (dados(aceite).pages as Array<{ keywordId: string; formation: Array<{ keywordId: string }> }>).find(pagina => pagina.keywordId === K_ATRAIR)!;
+  assert.deepEqual(atrair.formation.map(item => item.keywordId), [NOVA], "a nova segue para 'Colocar no artigo', a mesma etapa da keyword do Minerador fora do artigo");
   const captar = gravadas.find(versao => versao.entityId === "article-captar")!;
   assert.equal(captar.versionNumber, 2);
   assert.ok(captar.payload.differentiation.some(linha => linha.startsWith("Diferenciação: ")), "a nota 'Diferenciação:'");
   assert.ok(Array.isArray(captar.payload.excludedSubjects), "excludedSubjects no DNA (o Redator lê)");
   const ids = captar.payload.keywordReferences.map(reference => reference.keywordId);
   assert.ok([K_CAPTAR, K_ANUNCIOS].every(id => ids.includes(id)), "nada some: a página e a secundária ficam no artigo");
-  assert.equal(captar.payload.suggestedSlug, "blog/como-captar-clientes-para-clinica-de-estetica");
-  assert.equal(captar.payload.canonical, "https://adalbapro.com.br/blog/como-captar-clientes-para-clinica-de-estetica", "URL intacta");
+  assert.equal(captar.payload.suggestedSlug, SLUG_CAPTAR);
+  assert.equal(captar.payload.canonical, URL_CAPTAR, "URL intacta");
   assert.equal(captar.createdBy, ATOR);
   // HOJE: a rota grava 'proposed' com 'edit'; o núcleo não faz PATCH da cópia de trabalho, não atualiza o marcador e não revalida — muda na F5.
   const rota = codigoSemComentarios("app/api/arquiteto/cannibalization/apply/route.ts");
