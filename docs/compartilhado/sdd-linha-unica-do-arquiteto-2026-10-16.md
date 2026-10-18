@@ -1043,8 +1043,11 @@ motor novo:
   internet residencial", "planos de internet residencial", "plano internet
   residencial"). Dono: o artigo cuja principal tem essas palavras; senão o que
   já tem uma secundária dessa variante; senão o que melhor as contém na
-  principal, no slug e no Assunto (o Pilar desempata). A variante da própria
-  principal vale no máximo duas vezes no artigo.
+  principal, no slug e no Assunto (o Pilar desempata). ~~A variante da própria
+  principal vale no máximo duas vezes no artigo.~~ **SUBSTITUÍDO em 2026-10-17
+  (noite), §15.8:** toda variante da mesma busca (não só a da principal) entra
+  no máximo duas vezes no artigo, as de maior volume; e o "melhor contém" olha
+  primeiro as palavras que distinguem o artigo (fora do assunto comum do Silo).
 - **(b) Busca com marca** (operadora, provedor — tirada dos domínios que a SERP
   da principal mostra, como `vivo.com.br`) só vai para o artigo cujo Assunto,
   slug ou principal nomeia aquela marca ou fala de operadoras. Nos outros,
@@ -1129,7 +1132,9 @@ contexto."
 - Cenário-ouro: `tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts`
   (o Pilar fica com "como escolher plano de internet residencial" e recebe
   "planos de internet residencial" 6.600, "plano de internet residencial"
-  2.900, "plano internet residencial" 1.000, "melhores planos…" 480 e "melhor
+  2.900, ~~"plano internet residencial" 1.000~~ (**SUBSTITUÍDO em 2026-10-17,
+  noite, §15.8:** é a terceira grafia da mesma busca; ficam as duas de maior
+  volume), "melhores planos…" 480 e "melhor
   plano…" 260; os 3 Suportes Livres ficam com a principal e recebem o reforço
   da busca nova; a única SERP paga é a da secundária de mais volume de cada
   Livre — **SUBSTITUÍDO em 17/10, tarde:** é a da principal de identidade de
@@ -1252,3 +1257,72 @@ milagroso do refazedor". Regra permanente: spec §43.
   regra nova); `tests/arquiteto-tres-botoes-dom-2026-10-17.test.mts` (a
   sequência (a)(b)(c) e os 3 botões contados na tela); a forma da linha em
   `tests/arquiteto-linha-de-processo-guarda.test.mts`.
+
+### 15.8 Reforço equilibrado: a mesma busca, as entidades do Assunto e o "adequado" (teste no ar, 2026-10-17, noite)
+
+O coordenador clicou "Processar artigos" no amarelo (marca `d4fa133a-…`, execução
+`5afa893a`, nada gravado). Pilar, "barata", "cep", "quantos mega" e "combo
+celular" bons; três defeitos de qualidade, todos no motor de sempre (linha de
+copy, sementes e alocador da melhoria), sem rota, etapa, botão nem núcleo novo:
+
+| Artigo | O que saiu | Causa (verificado no código e nos dados reais) |
+|---|---|---|
+| "Claro, Vivo ou TIM para casa" (identidade, sem volume) | 4 grafias da mesma busca da Vivo ("internet residencial vivo" 2.400, "vivo residencial internet" 1.600, "internet da vivo residencial" 1.300, "internet residencial da vivo" 170) | (1) a busca nova filtrava as ideias pela linha de copy SEM a régua de marca: "claro internet residencial" e "tim internet residencial" nem eram medidas (as da Vivo passavam pela linha de "internet residencial barata"); (2) as sementes eram só frases longas (13 ideias); (3) só a variante da principal tinha teto; (4) nada equilibrava as entidades; (5) as cabeças (22.200, 6.600) ocupavam vagas e saíam depois da alocação; (6) o vocabulário da SERP da principal de identidade (já coletada, §15.6) não era lido |
+| "Instalação de internet: taxas, prazo e quando chega a primeira fatura" (Travada, 170) | "Já formado e adequado: nada a gravar", com 1 keyword | sementes = a principal e o slug inteiros (o Google Ads devolveu 6 ideias); "adequado" = principal com volume e nada mudou, mesmo com 5 vagas |
+| "Internet, TV Box e streaming" (identidade, sem volume) | sem secundária | sementes longas (2 ideias); a linha só aceitava 3 das 4 palavras da principal; sem o vocabulário da SERP dela. A anticanibalização NÃO tirou dele o que era dele: "combo tv internet e celular" (320) leva a principal inteira do "combo internet e celular" e fica nele (decisão abaixo) |
+
+O que vale agora (spec §44):
+
+- **(a) A mesma busca no máximo 2 vezes por artigo**, as de maior volume
+  (`sameSearchKey`; "melhor", "bom", "vale a pena" fazem outra busca).
+  SUBSTITUI "a variante da própria principal vale no máximo duas vezes" (§15.3 a)
+  e as cinco grafias do Pilar (§15.5, cenário).
+- **(b) Assunto que enumera entidades** (`assuntoEntityList`: a cabeça do título
+  com vírgula, "ou" ou "vs"; lista com número não conta): carrega o artigo a
+  candidata que nomeia uma entidade com o resto do artigo, ou duas comparadas;
+  reforço por rodadas — a melhor de cada entidade e a comparação antes da
+  segunda de qualquer uma, a busca nova antes da repetição; nenhuma passa da
+  sua parte (`ceil(vagas / entidades)`); a parte vazia é dita ("Equilíbrio por
+  entidade do Assunto: … sem keyword…").
+- **(c) Palavra própria de outro artigo** (está na principal de um só artigo do
+  Silo e fora da linha deste) indica o artigo dele, salvo quando a frase leva a
+  principal inteira deste. Com os três serviços ("combo tv internet e
+  celular"): fica no artigo 6, que tem a principal inteira dentro dela; do
+  artigo 7 faltaria "streaming". TV + internet ("combo internet e tv",
+  "internet e tv residencial") vai para o 7; celular + internet, para o 6.
+- **(d) Afinidade da variante:** primeiro as palavras que distinguem (fora do
+  assunto comum do Silo: o slug do Silo e as palavras de 2+ principais), depois
+  a principal inteira, depois a régua de antes.
+- **(e) Cabeça da principal de identidade (> 5.000) fora antes de alocar**, e a
+  vaga da principal de identidade sem DNA reservada no alocador (antes o teto
+  cortava depois a de menos volume — no artigo comparativo, a comparação).
+- **(f) Sementes curtas do plano:** uma por entidade enumerada (a principal só
+  com ela) e, com facetas depois dos dois-pontos, a cabeça e cada faceta
+  ("taxas de instalação de internet", "prazo de instalação de internet",
+  "primeira fatura internet"). A busca nova usa a régua de marca do alocador
+  (`improvementSiloContext`); a ideia que leva o artigo com uma palavra fora da
+  linha também é medida (grátis) — SUBSTITUI, nesse caso, "ideia fora da linha
+  de copy nem é medida".
+- **(g) Vocabulário da principal de identidade:** `principalVocabularyOf` lê do
+  cache a SERP dela (coletada pela §15.6) — SUBSTITUI "só a principal com volume
+  tem SERP".
+- **(h) "Adequado" só com reforço suficiente:** com vaga e nada achado, a linha
+  diz "Sem keyword de reforço encontrada" e o motivo (as que cabiam e por que
+  ficaram fora, ou que nenhuma coube); status `adequate`, nada a gravar.
+
+Com os dados reais (simulação no domínio, sem chamada): o pool da execução
+`5afa893a` mais as ideias reais de "claro/tim internet residencial" e de TV da
+execução `4bbcf025` dá ao artigo das operadoras "claro residencial internet"
+(1.900), "internet residencial vivo" (2.400), "tim residencial internet" (480),
+"tim claro ou vivo" (90) e "internet da claro residencial é boa" (210); ao de TV
+"internet e tv residencial" (170), "plano de internet e tv residencial" (110) e
+"tv box sem internet" (110), com "streaming" dito sem keyword; a instalação, sem
+ideia real que caiba, diz "Sem keyword de reforço encontrada" e o motivo. As
+ideias das sementes novas só existirão no próximo "Processar artigos" real.
+
+Cenário-ouro: `tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts` (as
+sementes curtas pedidas; o Google Ads da fixture só devolve as relacionadas para
+a semente curta; l2 com uma de cada operadora e as comparações; l4 com as de
+streaming e, depois da coleta, as de TV; "combo tv internet e celular" no t2;
+"combo tv e celular" fora; t4 com as facetas; e o teste novo "'adequado' só com
+reforço suficiente"). Alocador: `tests/arquiteto-article-improvement.test.mts`.

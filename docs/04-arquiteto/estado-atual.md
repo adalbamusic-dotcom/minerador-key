@@ -1,4 +1,33 @@
-> **Situações resolvidas — leitura obrigatória antes de mexer no Arquiteto (2026-10-17):** [`situacoes-resolvidas.md`](situacoes-resolvidas.md) registra as 192 situações que fazem o esqueleto do artigo (principal, troca, trava e volume, reforço, publicados, Assunto, plano, Silo, SERP, canibalização, KGR), com a regra vigente, a data, o código e o cenário que guarda; mais as regras substituídas, as 12 situações sem cenário e o que o código ainda não cumpre.
+> **Situações resolvidas — leitura obrigatória antes de mexer no Arquiteto (2026-10-17):** [`situacoes-resolvidas.md`](situacoes-resolvidas.md) registra as 197 situações que fazem o esqueleto do artigo (principal, troca, trava e volume, reforço, publicados, Assunto, plano, Silo, SERP, canibalização, KGR), com a regra vigente, a data, o código e o cenário que guarda; mais as regras substituídas, as 12 situações sem cenário e o que o código ainda não cumpre.
+
+## Reforço equilibrado: a mesma busca, as entidades do Assunto e o "adequado" — teste no ar do amarelo — 2026-10-17 (noite)
+
+O coordenador clicou "Processar artigos" no amarelo da WifiConecta (execução `5afa893a`, 23:32 UTC, código `a4e65e8`; nada gravado). Pilar, "barata", "cep", "quantos mega" e "combo celular" bons; três defeitos de qualidade, corrigidos no motor de sempre (linha de copy, sementes e alocador da melhoria; o vocabulário da SERP no servidor; o texto da prévia). **Verificado no código e confirmado por teste (fixtures; dados reais lidos por SELECT, sem chamada paga nem ao Google Ads). Validado manualmente: não.**
+
+```text
+ROTA_NOVA = 0 · ETAPA_NOVA = 0 · NUCLEO_NOVO = 0 · BOTAO_NOVO = 0 · MIGRATION = 0 · CONTRATO_INCOMPATIVEL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · CHAMADA_GOOGLE_ADS = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Causas (dados reais + código):** (1) "Claro, Vivo ou TIM": a busca nova filtrava as ideias pela linha de copy sem a régua de marca — "claro internet residencial" e "tim internet residencial" nem eram medidas; as 4 da Vivo passavam pela linha de "internet residencial barata" e ocupavam as vagas (só a variante da principal tinha teto; nada equilibrava as entidades; as cabeças de 22.200 e 6.600 ocupavam vaga e saíam depois); (2) "Instalação de internet…": sementes = a principal e o slug inteiros (o Google Ads devolveu 6 ideias; nenhuma coube) e "adequado" = principal com volume e nada mudou, mesmo com 5 vagas; (3) "Internet, TV Box e streaming": sementes longas (2 ideias), a linha exigia 3 das 4 palavras da principal e o vocabulário da SERP da principal de identidade (já coletada, G6) não era lido. A anticanibalização não tirou dele "combo tv internet e celular" (320): ela leva a principal inteira do "combo internet e celular" e fica nele.
+
+| # | O que muda | Onde |
+|---|---|---|
+| 1 | A mesma busca entra no máximo 2 vezes por artigo, as de maior volume ("melhor", "bom" fazem outra busca) | `lib/arquiteto/article-improvement.ts:sameSearchKey`, `copyLineEdges` |
+| 2 | Assunto que enumera entidades: carrega a candidata com uma entidade + o resto do artigo, ou duas comparadas; rodadas equilibradas; parte de cada entidade; a parte vazia é dita | `assuntoEntityList`, `namedEntities`, `copyLineMatch`, `copyLineEdges`, `entityGapReason` |
+| 3 | Palavra própria de outro artigo indica o artigo dele (salvo com a principal inteira deste); a variante vai para quem tem as palavras que distinguem | `copyLineEdges` (`deOutro`), `afinidadeNoSilo` |
+| 4 | Cabeça (> 5.000) da principal de identidade fora antes de alocar; a vaga da principal de identidade sem DNA reservada no alocador | `copyLineEdges`, `planArticleImprovements` (`vagaDaPrincipal`) |
+| 5 | Sementes curtas do plano (por entidade e por faceta); a busca nova mede pela régua de marca do alocador e mede também a ideia com uma palavra fora da linha | `improvementDiscoverySeeds` (`entitySeeds`, `facetSeeds`), `improvementSiloContext`, `improvementIdeaOnCopyLine`; servidor `discover` |
+| 6 | O vocabulário da SERP da principal de identidade é lido do cache | `lib/server/arquiteto-article-improvement.ts:principalVocabularyOf` |
+| 7 | "Adequado" só no artigo cheio; com vaga, "Sem keyword de reforço encontrada" e o motivo | `noReinforcementReason`; `lib/arquiteto/plan-article-sheet.ts:planSheetPreviewLines`; `modules/arquiteto/article-improvement-panel.tsx` (rótulo) |
+| 8 | Catálogo do MCP, item (k) da nota do roteiro | `lib/agent/platform-catalog.ts` |
+
+**Com os dados reais (simulação no domínio):** pool da `5afa893a` + as ideias reais de Claro/TIM e de TV da `4bbcf025` → operadoras: "claro residencial internet" (1.900), "internet residencial vivo" (2.400), "tim residencial internet" (480), "tim claro ou vivo" (90), "internet da claro residencial é boa" (210); TV e streaming: "internet e tv residencial" (170), "plano de internet e tv residencial" (110), "tv box sem internet" (110), com "streaming" dito sem keyword; instalação: nenhuma ideia real cabe → "Sem keyword de reforço encontrada: … “instalação de internet residencial vivo” (10) cita uma marca que o artigo não nomeia". Pilar: "planos de…" (6.600), "plano de…" (2.900), "melhores planos…" (480), "melhor plano…" (260) e uma quinta de outra busca ("plano internet residencial" sai: 3ª grafia). As ideias das sementes novas só existirão no próximo "Processar artigos" real.
+
+**SUBSTITUÍDO (§0.5):** SDD §15.3 (a) (teto só da variante da principal) e §15.5 (as 5 grafias do Pilar); catálogo item (e) ("ideia fora da linha nem é medida", nesse caso); `principalVocabularyOf` ("só a principal com volume tem SERP"); "Já formado e adequado" com vaga. Spec §44; SDD §15.8; registro RF19–RF22, M4, RF7 e 5 regras novas em "Regras substituídas".
+
+**Testes:** cenário-ouro amarelo (sementes curtas pedidas; o Google Ads da fixture só devolve as relacionadas para a semente curta; l2 equilibrado; l4 com streaming e, depois da coleta, TV; "combo tv internet e celular" no t2 e "combo tv e celular" fora; t4 com as facetas; teste novo "'adequado' só com reforço suficiente"); `arquiteto-article-improvement` (3 testes atualizados com SUBSTITUÍDO). `test:arquiteto` 3.028/3.028 · `test:arquiteto:servidor` 180/180 · `test:arquiteto:cenarios` 43 + 2 `todo` (C4, C15, os de antes) · `test:arquiteto:lentes` 113/113 · `test:arquiteto:dom` 43/43 · `test:agent` 90/90 · `tsc --noEmit` 0.
+
+**Limitações:** (1) as volumes de "prazo de instalação de internet", "primeira fatura de internet" e das de streaming no cenário são de fixture (o Google Ads não foi chamado com as sementes novas); (2) no primeiro "Processar artigos", a busca nova roda antes da coleta da SERP da principal de identidade: as ideias que só cabem com o vocabulário dela entram se tiverem sido medidas (a régua de "uma palavra fora da linha"); (3) homologação na tela: pendente (dono).
 
 ## Os 3 botões em sequência — Processar, Concluir e o refazedor (F2 da linha única) — 2026-10-17 (noite)
 

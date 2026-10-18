@@ -8,6 +8,7 @@ import { normalizeKeyword } from "../lib/minerador/keyword-import-core.ts";
 import { ATOR, linhaDaMesa } from "./arquiteto-assunto-fixtures.mts";
 import { planGroupSiloClosure, planSheetConclusionChecklist, planSheetPreviewLines, planSheetSequence, planSheetWorkingCopyLines } from "../lib/arquiteto/plan-article-sheet.ts";
 import { resolveSiloDeclaredGroup } from "../lib/arquiteto/silo-declared-plan.ts";
+import { NO_REINFORCEMENT_FOUND_LABEL } from "../lib/arquiteto/article-improvement.ts";
 
 /*
  * CENÁRIO-OURO DO AMARELO DA WIFICONECTA (16/10) — SDD
@@ -90,6 +91,12 @@ const VOCAB: Record<string, { questions: string[]; relatedSearches: string[]; ti
   "combo internet e celular": { questions: ["Qual o melhor combo internet e celular?", "Qual é o combo TV, internet e telefone mais barato?"], relatedSearches: ["Claro combo internet e celular", "Melhor combo internet e celular", "Combo claro tv internet e celular", "Combo tv e internet residencial", "Combo internet e celular vale a pena"], titles: ["Vivo Total | Combo de internet fibra + celular pós-pago", "TIM Ultracombo: internet fibra e plano de celular"], domains: DOMINIOS },
   "internet no meu cep": { questions: ["Como saber qual provedor de internet tem na minha rua?", "Como saber qual internet pega no meu CEP?"], relatedSearches: ["Internet no meu bairro", "Comparador de planos de internet", "Melhor internet no meu cep", "Internet fibra no meu cep", "Internet no meu endereço"], titles: ["Cobertura de Internet: Guia Prático para Verificar no seu Endereço"], domains: DOMINIOS },
   "instalação de internet residencial": { questions: ["Como é feita a instalação de internet?", "Quanto custa internet para um apartamento?"], relatedSearches: ["Plano internet residencial", "Internet residencial wifi", "Internet barata para casa"], titles: ["Planos de internet residencial em Belo Horizonte"], domains: DOMINIOS },
+  /*
+   * 2026-10-17 (noite) · a SERP da principal de IDENTIDADE dos Livres também é lida do cache depois da coleta (G6): o
+   * vocabulário dela guia o reforço (antes, só a principal com volume tinha vocabulário). Resumo do SELECT real de 17/10.
+   */
+  "claro vivo ou tim internet residencial": { questions: ["Qual a melhor internet, da TIM ou da Vivo?", "Qual a melhor internet residencial TIM ou Vivo?"], relatedSearches: ["Tim vivo ou claro qual melhor", "Vivo ou claro qual a melhor internet residencial", "Tim claro ou vivo", "Claro internet residencial", "Vivo fibra"], titles: ["Vivo vs Claro vs TIM Fibra 2026: Qual a Melhor Internet Residencial?", "TIM Fibra ou Vivo Fibra: Qual é a Melhor Internet para Você?"], domains: ["reddit.com", "techtudo.com.br", "tim.com.br", "claromulti.com.br"] },
+  "combo internet tv streaming": { questions: ["Qual a melhor internet com TV?", "Tem algum combo de streaming?", "Qual o melhor pacote de internet e TV por assinatura?"], relatedSearches: ["Plano internet mais streaming", "Combo tv e internet barato", "Plano claro residencial tv e internet", "Internet com streaming incluso", "Streaming tv por assinatura", "Planos tv box"], titles: ["Internet com streaming e Globoplay incluso - Nio Fibra", "Pacote de TV com Internet Fibra barato"], domains: ["ofertasclaro.com.br", "niointernet.com.br", "claro.com.br", "vivo.com.br"] },
 };
 
 /** As ideias do Google Ads (fixture), com o volume medido. As de fora do assunto têm de cair. */
@@ -97,36 +104,60 @@ const IDEIAS: Array<[string, number]> = [
   ["preço internet residencial", 170], ["internet residencial mais barata", 320],
   ["melhor combo internet e celular", 210], ["combo internet e celular vale a pena", 110], ["combo claro tv internet e celular", 880],
   ["operadoras que atendem meu cep", 320], ["melhor internet no meu cep", 260],
-  ["taxa de instalação de internet", 260],
   // As do Pilar, com os números reais da execução 4bbcf025 (17/10): variantes da MESMA busca (singular/plural/ordem),
-  // todas no Pilar, nunca divididas com "internet residencial barata"; nenhuma tem o "como escolher" da principal.
+  // nunca divididas com "internet residencial barata"; nenhuma tem o "como escolher" da principal.
   ["planos de internet residencial", 6600], ["plano de internet residencial", 2900], ["plano internet residencial", 1000],
   ["melhores planos de internet residencial", 480], ["melhor plano de internet residencial", 260],
-  ["claro vivo ou tim qual a melhor internet", 140], ["internet residencial claro ou vivo", 110],
   ["quantos mega de internet eu preciso", 90], ["quantos mega preciso", 50],
-  ["combo internet e streaming", 210], ["combo de internet e streaming", 50],
+  // 2026-10-17 (noite) · REAIS (execuções 5afa893a e 4bbcf025 da WifiConecta): as 4 grafias da MESMA busca da Vivo que
+  // ocupavam as 4 vagas de "Claro, Vivo ou TIM"; as comparações entre as operadoras; o combo com TV e celular.
+  ["internet residencial vivo", 2400], ["vivo residencial internet", 1600], ["internet da vivo residencial", 1300], ["internet residencial da vivo", 170],
+  ["tim claro ou vivo", 90], ["vivo ou tim qual a melhor internet", 30],
+  ["combo tv internet e celular", 320], ["combo tv e celular", 10],
   // Fora do assunto, cabeça de outro artigo ou busca local: medidas ou não, nunca entram.
   ["entra na conta do google", 90500], ["qual é o meu cep", 74000], ["primeira fatura claro", 1900],
   ["vivo internet residencial", 22200], ["internet residencial barata sp", 90], ["instalação de internet", 1900], ["internet com tv por assinatura", 1000],
 ];
-const VOLUME_DA_IDEIA = new Map(IDEIAS.map(([k, v]) => [normalizeKeyword(k), v]));
-// Fora: sem o assunto, local, cabeça mais ampla de um Suporte, e a busca com marca num artigo que não nomeia a marca.
-const FORA = ["entra na conta do google", "qual é o meu cep", "primeira fatura claro", "vivo internet residencial", "internet residencial barata sp", "instalação de internet", "internet com tv por assinatura", "combo claro tv internet e celular"];
+/*
+ * 2026-10-17 (noite) · O GOOGLE ADS SÓ DEVOLVE AS RELACIONADAS PARA A SEMENTE CURTA (o real: 2 ideias para "combo internet
+ * tv streaming" + o slug, 6 para "instalação de internet residencial" + o slug). Estas só voltam quando a chamada leva a
+ * semente curta da entidade ou da faceta do Assunto — com as sementes antigas, os 3 artigos ficavam sem reforço.
+ * Claro e TIM e as de TV são REAIS (execução 4bbcf025); as de instalação e de streaming são de fixture (o Google Ads
+ * não foi chamado com estas sementes ainda).
+ */
+const IDEIAS_POR_SEMENTE: Array<{ semente: string; ideias: Array<[string, number]> }> = [
+  { semente: "claro internet residencial", ideias: [["claro internet residencial", 49500], ["claro residencial internet", 1900], ["internet residencial da claro", 210]] },
+  { semente: "tim internet residencial", ideias: [["tim internet residencial", 12100], ["tim residencial internet", 480], ["internet residencial da tim", 390]] },
+  // "tv box sem internet" (real, 110) nega a entidade central do artigo de TV ("internet"): outra intenção, fica fora e é dita.
+  { semente: "combo internet tv", ideias: [["internet e tv residencial", 170], ["tv e internet residencial", 110], ["plano de internet e tv residencial", 110], ["tv box sem internet", 110]] },
+  { semente: "combo internet streaming", ideias: [["combo internet e streaming", 210], ["combo de internet e streaming", 50]] },
+  { semente: "taxas de instalação de internet", ideias: [["taxa de instalação de internet", 260], ["prazo de instalação de internet", 90], ["primeira fatura de internet", 50]] },
+];
+const VOLUME_DA_IDEIA = new Map([...IDEIAS, ...IDEIAS_POR_SEMENTE.flatMap(g => g.ideias)].map(([k, v]) => [normalizeKeyword(k), v]));
+// Fora: sem o assunto, local, cabeça mais ampla de um Suporte, a busca com marca num artigo que não nomeia a marca e a palavra própria de outro artigo.
+const FORA = ["entra na conta do google", "qual é o meu cep", "primeira fatura claro", "vivo internet residencial", "internet residencial barata sp", "instalação de internet", "combo claro tv internet e celular", "claro internet residencial", "tim internet residencial", "combo tv e celular", "tv box sem internet"];
 /**
  * O que cada artigo deve receber (keyword nova → artigo). 2026-10-17 · nos Livres a principal FICA (identidade:
  * está no título e no slug do plano) e é a SERP DELA a paga na primeira coleta; `base` é a secundária de mais volume,
  * que deixou de ser coletada por padrão (continua opcional, para mais evidência).
+ * 2026-10-17 (noite) · `novas` é a cópia de trabalho DEPOIS da coleta (a SERP da principal de identidade, no cache, guia
+ * o reforço); `previa`, quando difere, é a de antes da coleta (l4: as de TV pedem a SERP dela).
+ *  - l1: SUBSTITUÍDO "as 5 variantes": "plano internet residencial" é a terceira grafia da mesma busca — no máximo duas;
+ *  - l2: reforço equilibrado por entidade (Claro, Vivo, TIM) e comparações; a Vivo não ocupa mais as 4 vagas;
+ *  - l4: as de TV e as de streaming; "combo tv internet e celular" fica no t2 (leva a principal inteira dele);
+ *  - t4: as sementes das facetas (taxas, prazo, primeira fatura) trazem o reforço que faltava.
  */
-const ESPERADO: Record<string, { base?: string; novas: string[] }> = {
+const ESPERADO: Record<string, { base?: string; novas: string[]; previa?: string[] }> = {
   t1: { novas: ["preço internet residencial", "internet residencial mais barata"] },
-  t2: { novas: ["melhor combo internet e celular", "combo internet e celular vale a pena"] },
+  t2: { novas: ["melhor combo internet e celular", "combo internet e celular vale a pena", "combo tv internet e celular"] },
   t3: { novas: ["operadoras que atendem meu cep", "melhor internet no meu cep"] },
-  t4: { novas: ["taxa de instalação de internet"] },
-  l1: { base: "planos de internet residencial", novas: ["planos de internet residencial", "plano de internet residencial", "plano internet residencial", "melhores planos de internet residencial", "melhor plano de internet residencial"] },
-  l2: { base: "claro vivo ou tim qual a melhor internet", novas: ["claro vivo ou tim qual a melhor internet", "internet residencial claro ou vivo"] },
+  t4: { novas: ["taxa de instalação de internet", "prazo de instalação de internet", "primeira fatura de internet"] },
+  l1: { base: "planos de internet residencial", novas: ["planos de internet residencial", "plano de internet residencial", "melhores planos de internet residencial", "melhor plano de internet residencial"] },
+  l2: { base: "internet residencial vivo", novas: ["internet residencial vivo", "claro residencial internet", "tim residencial internet", "tim claro ou vivo", "vivo ou tim qual a melhor internet"] },
   l3: { base: "quantos mega de internet eu preciso", novas: ["quantos mega de internet eu preciso", "quantos mega preciso"] },
-  l4: { base: "combo internet e streaming", novas: ["combo internet e streaming", "combo de internet e streaming"] },
+  l4: { base: "combo internet e streaming", novas: ["combo internet e streaming", "combo de internet e streaming", "internet com tv por assinatura", "internet e tv residencial", "plano de internet e tv residencial"], previa: ["combo internet e streaming", "combo de internet e streaming"] },
 };
+const naPrevia = (id: string) => ESPERADO[id].previa ?? ESPERADO[id].novas;
 
 /* ------------------------------------------------------ estado em memória */
 
@@ -312,9 +343,13 @@ mock.module("../lib/server/google-ads-canonical.ts", { namedExports: {
 } });
 /** 2026-10-17 (noite) · a busca nova que não traz nada (o caso da Livre de identidade sem nenhuma candidata). */
 let semIdeias = false;
+/** 2026-10-17 (noite) · o Google Ads que não devolve nada para as facetas da instalação (o caso do "adequado" falso). */
+let semFacetasDaInstalacao = false;
 mock.module("../lib/google/ads/keyword-ideas.ts", { namedExports: { generateGoogleAdsKeywordIdeas: async (_client: any, input: any) => {
   sementes.push([...input.seed.keywords]);
-  return { ideas: semIdeias ? [] : IDEIAS.map(([keyword]) => ({ keyword })), nextPageToken: null, requestId: "ads-ideias" };
+  const pedidas = new Set((input.seed.keywords as string[]).map(normalizeKeyword));
+  const curtas = IDEIAS_POR_SEMENTE.filter(g => pedidas.has(normalizeKeyword(g.semente)) && !(semFacetasDaInstalacao && /instala/.test(g.semente))).flatMap(g => g.ideias);
+  return { ideas: semIdeias ? [] : [...IDEIAS, ...curtas].map(([keyword]) => ({ keyword })), nextPageToken: null, requestId: "ads-ideias" };
 } } });
 mock.module("../lib/server/arquiteto-published-reinforcement.ts", { namedExports: { stableUuid: (...parts: string[]) => { const h = createHash("sha256").update(parts.join("|")).digest("hex"); return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`; } } });
 mock.module("../lib/server/arquiteto-minerador-suggestions.ts", { namedExports: { recordArquitetoMineradorSuggestionsSafely: async (_c: any, input: any) => { sugestoes.push(clone(input)); return { recorded: input.drafts.length, recordKey: "registro" }; } } });
@@ -346,7 +381,7 @@ const doMineradorDe = (r: Row) => JSON.stringify({ keyword: r.keyword, status: r
 function zerar() {
   mesa = PLANO.map(linhaDoPlano);
   minerador = mesa.map(r => ({ id: r.id, keyword: r.keyword, brand_id: MARCA, status: r.status, intent: r.intent, volume_search: r.volume_search, volume_source: r.volume_source, group_id: AMARELO, analise_semantica: clone(r.analise_semantica) }));
-  gravacoes = []; journal = []; assessments = []; marker = null; pagas = []; pago = 0; sementes = []; medicoes = []; sugestoes = []; observeFlags = []; parecerPelasSustentacoes = []; semIdeias = false;
+  gravacoes = []; journal = []; assessments = []; marker = null; pagas = []; pago = 0; sementes = []; medicoes = []; sugestoes = []; observeFlags = []; parecerPelasSustentacoes = []; semIdeias = false; semFacetasDaInstalacao = false;
   for (const lista of Object.values(chamadas)) lista.length = 0;
   autorizados.length = 0; proximoId = 0;
   // A SERP das 4 lentes da principal de cada Travado já está no cache (coletada em 16/10).
@@ -386,8 +421,16 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
     assert.ok(lista.some(semente => doPlanoOuDoDna.has(normalizeKeyword(semente))), `semente sem o plano nem o DNA: ${JSON.stringify(lista)}`);
     assert.ok(lista.every(semente => !/entra na conta|primeira fatura claro/.test(semente)), "nunca pedaço do título");
   }
+  // 2026-10-17 (noite) · as sementes CURTAS saem do plano: uma por entidade do Assunto e uma por faceta depois dos dois-pontos.
+  const pedidas = new Set(sementes.flat().map(normalizeKeyword));
+  for (const curta of ["claro internet residencial", "vivo internet residencial", "tim internet residencial", "combo internet tv", "combo internet streaming", "instalação de internet", "taxas de instalação de internet", "prazo de instalação de internet", "primeira fatura internet"]) {
+    assert.ok(pedidas.has(normalizeKeyword(curta)), `semente curta do plano: “${curta}” (${JSON.stringify(sementes)})`);
+  }
   const medidas = medicoes.flat().map(normalizeKeyword);
-  for (const fora of ["entra na conta do google", "qual é o meu cep", "primeira fatura claro", "internet com tv por assinatura"]) assert.ok(!medidas.includes(normalizeKeyword(fora)), `“${fora}” está fora da linha de copy: nem é medida`);
+  // 2026-10-17 (noite) · SUBSTITUÍDO "internet com tv por assinatura nem é medida": ela leva o artigo de TV e streaming com uma
+  // palavra fora da linha — é medida (grátis) e a SERP da principal de identidade, coletada depois, decide (entra no l4).
+  for (const fora of ["entra na conta do google", "qual é o meu cep", "primeira fatura claro"]) assert.ok(!medidas.includes(normalizeKeyword(fora)), `“${fora}” está fora da linha de copy: nem é medida`);
+  assert.ok(medidas.includes(normalizeKeyword("internet com tv por assinatura")), "a que leva o artigo com uma palavra fora da linha é medida");
   const de = (run: any, id: string) => run.proposals.find((p: any) => p.targetId === id);
   for (const id of TRAVADOS) {
     const p = de(previa, id);
@@ -401,8 +444,8 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
   for (const id of LIVRES) {
     const p = de(previa, id), linha = PLANO.find(l => l.id === id)!;
     assert.equal(p.principalId, id, `${id}: a principal de identidade fica (${JSON.stringify(p.reasons)})`);
-    assert.deepEqual(p.addIds.map((k: string) => palavra(previa, k)).sort(), [...ESPERADO[id].novas].sort(), `${id}: as mais amplas entram como secundárias`);
-    assert.deepEqual(p.memberIds.map((k: string) => palavra(previa, k)).sort(), [linha.keyword, ...ESPERADO[id].novas].sort(), `${id}: membros`);
+    assert.deepEqual(p.addIds.map((k: string) => palavra(previa, k)).sort(), [...naPrevia(id)].sort(), `${id}: as mais amplas entram como secundárias (${JSON.stringify(p.reasons)})`);
+    assert.deepEqual(p.memberIds.map((k: string) => palavra(previa, k)).sort(), [linha.keyword, ...naPrevia(id)].sort(), `${id}: membros`);
     assert.equal(p.needsValidation, true, `${id}: falta a SERP da principal de identidade (a primeira coleta do artigo, paga)`);
     assert.match(p.reasons.join(" "), new RegExp(`Principal de identidade: “${linha.keyword}” \\(sem volume\\) está no título e no slug do Assunto e fica como principal`));
     assert.ok(!p.reasons.some((r: string) => /assume como principal/.test(r)), `${id}: nenhuma troca proposta`);
@@ -417,9 +460,22 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
   const ondeEsta = (texto: string) => previa.proposals.filter((p: any) => p.memberIds.some((id: string) => palavra(previa, id) === texto)).map((p: any) => p.targetId);
   assert.deepEqual(ondeEsta("planos de internet residencial"), ["l1"]);
   assert.deepEqual(ondeEsta("plano de internet residencial"), ["l1"]);
-  assert.deepEqual(ondeEsta("internet residencial claro ou vivo"), ["l2"]);
+  assert.deepEqual(ondeEsta("plano internet residencial"), [], "2026-10-17 (noite) · a terceira grafia da mesma busca não entra em nenhum artigo");
   assert.deepEqual(ondeEsta("vivo internet residencial"), [], "cabeça de 22.200 num Suporte: fica fora (só o Pilar recebe a cabeça mais ampla)");
   assert.deepEqual(ondeEsta("combo claro tv internet e celular"), [], "marca num artigo que não nomeia a operadora: fora");
+  /*
+   * 2026-10-17 (noite) · ASSUNTO COMPARATIVO COM VÁRIAS ENTIDADES ("Claro, Vivo ou TIM"): uma de cada operadora e as
+   * comparações; as 4 grafias da mesma busca da Vivo não ocupam mais o artigo (no máximo 2, e a Vivo só tem a parte dela);
+   * as cabeças de cada operadora (49.500, 22.200, 12.100) ficam fora num Suporte.
+   */
+  for (const texto of ["internet residencial vivo", "claro residencial internet", "tim residencial internet", "tim claro ou vivo"]) assert.deepEqual(ondeEsta(texto), ["l2"], texto);
+  const daVivo = de(previa, "l2").memberIds.filter((id: string) => /vivo/.test(palavra(previa, id)) && !/claro|tim/.test(palavra(previa, id)));
+  assert.equal(daVivo.length, 1, `uma só da Vivo: ${JSON.stringify(daVivo.map((id: string) => palavra(previa, id)))}`);
+  for (const texto of ["vivo residencial internet", "internet da vivo residencial", "internet residencial da vivo"]) assert.deepEqual(ondeEsta(texto), [], `${texto}: a mesma busca da Vivo já está no artigo`);
+  // TV + celular + internet: "combo tv internet e celular" leva a principal INTEIRA do t2 ("combo internet e celular") e só acrescenta "tv" — fica no t2;
+  // "combo tv e celular" leva "celular", a palavra própria do t2, sem a principal de ninguém: não reforça o l4.
+  assert.deepEqual(ondeEsta("combo tv internet e celular"), ["t2"]);
+  assert.deepEqual(ondeEsta("combo tv e celular"), []);
   // A conta paga (2026-10-17, régua única): só a primeira SERP da PRINCIPAL DE IDENTIDADE de cada Livre (4 lentes cada) = 16 consultas,
   // até US$ 0,056 (US$ 0,014 por artigo). A secundária de mais volume não entra por padrão (evita o gasto duplo).
   assert.equal(previa.costs.paidQueries, 16, JSON.stringify(previa.costs.missingDetails));
@@ -443,6 +499,14 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
   assert.equal(pago, 16);
   assert.deepEqual(pagas.map(normalizeKeyword).sort(), LIVRES.map(id => normalizeKeyword(PLANO.find(l => l.id === id)!.keyword)).sort(), "só a SERP da principal de identidade de cada Livre; nenhuma secundária nem candidata foi paga");
   for (const id of [...TRAVADOS, ...LIVRES]) assert.equal(de(coleta, id).status, "ready", `${id}: ${JSON.stringify(de(coleta, id).reasons)}`);
+  // 2026-10-17 (noite) · com a SERP da principal de identidade no cache, o vocabulário DELA guia o reforço (l4: as de TV entram).
+  for (const id of [...TRAVADOS, ...LIVRES]) assert.deepEqual(de(coleta, id).addIds.map((k: string) => palavra(coleta, k)).sort(), [...ESPERADO[id].novas].sort(), `${id} depois da coleta: ${JSON.stringify(de(coleta, id).reasons)}`);
+  assert.ok(!de(coleta, "l4").memberIds.some((id: string) => /celular/.test(palavra(coleta, id))), "o l4 não leva a palavra própria do t2");
+  // A candidata que NEGA a entidade do artigo ("sem internet") fica fora, antes e depois da coleta, e a prévia diz por quê.
+  for (const run of [previa, coleta]) {
+    assert.ok(!run.proposals.some((p: any) => p.memberIds.some((id: string) => palavra(run, id) === "tv box sem internet")), "“tv box sem internet” não entra em artigo nenhum");
+    assert.match(de(run, "l4").reasons.join(" "), /“tv box sem internet” \(110\) fica fora: contradiz o Assunto: sem internet\./);
+  }
   // O artigo forma com a principal de identidade SEM volume e o parecer usa a SERP DELA (não é mais D2a), sem trocar a principal.
   assert.deepEqual(parecerPelasSustentacoes, [], "com a SERP da principal de identidade no cache, o parecer usa ela");
   for (const id of LIVRES) assert.equal(de(coleta, id).principalId, id, `${id}: a principal fica depois da coleta`);
@@ -626,5 +690,37 @@ test("amarelo · a Livre de IDENTIDADE sem nenhuma candidata (a busca nova não 
     assert.ok(dna.payload.serpAssessmentRef, `${id}: aprovado com o parecer da SERP da principal de identidade`);
   }
   assert.deepEqual(chamadas.import, [], "sem keyword nova, nada no Minerador");
+  assert.equal(chamadasDeRede, 0);
+});
+
+/*
+ * 2026-10-17 (noite) · TESTE DO COORDENADOR NO AR: "Instalação de internet: taxas, prazo e quando chega a primeira fatura"
+ * (Travada, 170) saiu "Já formado e adequado: nada a gravar" com 1 keyword só — a busca não tinha achado reforço (as
+ * sementes eram a principal e o slug inteiros). "Adequado" só com reforço suficiente: com vaga e nada achado, a linha diz
+ * "Sem keyword de reforço encontrada" e o motivo; com a semente curta da faceta, o reforço vem e a linha grava.
+ */
+test("amarelo · 'adequado' só com reforço suficiente: a Travada da instalação sem ideia que caiba diz 'Sem keyword de reforço encontrada' e o motivo (nunca 'Já formado e adequado'); com a semente da faceta, o reforço vem", async () => {
+  zerar(); semFacetasDaInstalacao = true;
+  const v1 = await aplicarTudo(await prepare({ targetIds: TRAVADOS, origin: "plan_sheet" }));
+  assert.equal(v1.state, "complete", JSON.stringify(v1.outcomes));
+  const t4 = PLANO.find(l => l.id === "t4")!;
+  const sem = await prepare({ targetIds: ["t4"], origin: "plan_sheet", discover: true });
+  const p = sem.proposals.find((x: any) => x.targetId === "t4")!;
+  assert.equal(p.status, "adequate", JSON.stringify(p.reasons));
+  assert.deepEqual(p.addIds, []);
+  const motivo = p.reasons.find((r: string) => r.startsWith(NO_REINFORCEMENT_FOUND_LABEL)) ?? "";
+  assert.match(motivo, /“instalação de internet” \(1900\) é mais ampla que a principal \(cabeça do Pilar\)/, JSON.stringify(p.reasons));
+  const [linha] = planSheetPreviewLines(sem, [linhaDaPlanilha(t4)]);
+  assert.equal(linha.kind, "adequate");
+  assert.match(linha.sentence, /^Sem keyword de reforço encontrada: .* Nada a gravar\.$/);
+  assert.doesNotMatch(linha.sentence, /adequad/i, "nunca 'adequado' com vaga e sem reforço");
+  assert.ok(sementes.flat().some(s => normalizeKeyword(s) === normalizeKeyword("taxas de instalação de internet")), "a semente da faceta foi pedida");
+  // O Google Ads que responde à semente da faceta: o MESMO Processar traz o reforço (refazer com o motivo dito, sem caminho novo).
+  semFacetasDaInstalacao = false;
+  const com = await prepare({ targetIds: ["t4"], origin: "plan_sheet", discover: true, reworkOverride: { reason: "o Google Ads respondeu às facetas" } });
+  const q = com.proposals.find((x: any) => x.targetId === "t4")!;
+  assert.equal(q.status, "ready", JSON.stringify(q.reasons));
+  assert.deepEqual(q.addIds.map((k: string) => palavra(com, k)).sort(), [...ESPERADO.t4.novas].sort());
+  assert.match(planSheetPreviewLines(com, [linhaDaPlanilha(t4)])[0].sentence, /^Vai gravar: nova versão \(v2\)/);
   assert.equal(chamadasDeRede, 0);
 });

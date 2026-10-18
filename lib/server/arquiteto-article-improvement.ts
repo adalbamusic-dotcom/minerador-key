@@ -22,7 +22,7 @@ import { applyDeclaredPlanToArticleDna, applySerpSupportBasisProvenance, declare
 import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import { identityPrincipalSerpSentence, serpCollectionAllowed } from "@/lib/arquiteto/article-batch-serp";
 import { shortSeedsOf, sharesTheme } from "@/lib/minerador/short-seeds";
-import { ARTICLE_IMPROVEMENT_VERSION, volumelessPrincipalSwap, carriesSlugCore, targetPrincipalIsIdentity, planArticleImprovements, improvementEditorialFit, isListReading, isCopyLineReading, serpSupportedMembers, improvementDiscoverySeeds, improvementIdeaOnCopyLine, IMPROVEMENT_ARTICLE_MAX_KEYWORDS, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence, type ImprovementSerpVocabulary } from "@/lib/arquiteto/article-improvement";
+import { ARTICLE_IMPROVEMENT_VERSION, volumelessPrincipalSwap, carriesSlugCore, targetPrincipalIsIdentity, planArticleImprovements, improvementEditorialFit, isListReading, isCopyLineReading, serpSupportedMembers, improvementDiscoverySeeds, improvementIdeaOnCopyLine, improvementSiloContext, IMPROVEMENT_ARTICLE_MAX_KEYWORDS, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence, type ImprovementSerpVocabulary } from "@/lib/arquiteto/article-improvement";
 import { buildImprovementAiPrompt, editorialAiRecord, improvementAiEligibleTargets, improvementAiList, improvementAiTargets, IMPROVEMENT_AI_TIMEOUT_MS, validateImprovementAiPicks, type ImprovementEditorialAi } from "@/lib/arquiteto/article-improvement-ai";
 import { readPageRanking, rankingBlocksSwap } from "@/lib/arquiteto/published-differentiation";
 import { buildSerpSubjectIndex, SERP_SUBJECT_LENS_LABELS } from "@/lib/arquiteto/serp-subject-overlap";
@@ -405,15 +405,19 @@ function keywordsTiedToTargets(run: Pick<ImprovementRun, "targets" | "keywords">
 type EvidenceRead = { evidence: ImprovementEvidence[]; ranking: Record<string, boolean | null>; vocabulary: Record<string, ImprovementSerpVocabulary> };
 /**
  * 2026-10-16 · §15 passo 4: o que a SERP da principal de cada alvo mostra, do
- * cache (grátis). Só a principal com volume tem SERP (sem volume, nunca é
- * coletada). Falha de leitura = sem vocabulário: o reforço segue pela linha de
- * copy do plano e do DNA, sem inventar evidência.
+ * cache (grátis). Falha de leitura = sem vocabulário: o reforço segue pela linha
+ * de copy do plano e do DNA, sem inventar evidência.
+ * 2026-10-17 · SUBSTITUÍDO "só a principal com volume tem SERP (sem volume, nunca
+ * é coletada)": desde a régua única da coleta (G6, 17/10 tarde) a principal de
+ * identidade sem volume TEM a SERP coletada; o vocabulário dela é lido do cache
+ * como o de qualquer principal (antes, "Claro, Vivo ou TIM" e "Internet, TV Box e
+ * streaming" ficavam sem as relacionadas e os domínios da própria SERP).
  */
 async function principalVocabularyOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]): Promise<Record<string, ImprovementSerpVocabulary>> {
   const porId = new Map(keywords.map(k => [k.id, k]));
   const principais = targets.flatMap(target => {
     const principal = porId.get(target.primaryId ?? "") ?? porId.get(target.declaredPrincipalId ?? "") ?? porId.get(target.planPrincipalId ?? "");
-    return principal && principal.volumeValidated && !principal.external ? [{ targetId: target.id, keywordId: principal.id, keyword: principal.keyword }] : [];
+    return principal && !principal.external && (principal.volumeValidated || targetPrincipalIsIdentity(target, principal)) ? [{ targetId: target.id, keywordId: principal.id, keyword: principal.keyword }] : [];
   });
   if (!principais.length) return {};
   try {
@@ -660,7 +664,9 @@ async function discover(runtime: ImprovementRuntime, run: ImprovementRun, target
    * Alvo sem semente não busca.
    */
   const porIdDaLista = new Map(existing.map(k => [k.id, k]));
-  const sementesDe = (target: ImprovementTarget) => target.kind === "subject" ? improvementDiscoverySeeds(target, porIdDaLista, vocabulary[target.id], shortSeedsOf(target.theme).slice(0, 2)) : shortSeedsOf(target.theme);
+  // 2026-10-17 · o contexto do Silo (marcas da SERP, assunto comum) de TODOS os alvos da execução: a mesma régua do alocador.
+  const silo = improvementSiloContext(run.targets, porIdDaLista, vocabulary);
+  const sementesDe = (target: ImprovementTarget) => target.kind === "subject" ? improvementDiscoverySeeds(target, porIdDaLista, vocabulary[target.id], shortSeedsOf(target.theme).slice(0, 2), { common: silo.common.get(target.territoryRef ?? "") }) : shortSeedsOf(target.theme);
   const semSemente = targets.filter(target => !sementesDe(target).length);
   if (semSemente.length) notices.push(`Busca nova sem semente do plano ou do DNA não roda: ${semSemente.slice(0, 3).map(t => t.theme).join("; ")}${semSemente.length > 3 ? "…" : ""}.`);
   targets = targets.filter(target => sementesDe(target).length);
@@ -713,7 +719,7 @@ async function discover(runtime: ImprovementRuntime, run: ImprovementRun, target
   }
   if (pending.length) notices.push(`Pesquisa gratuita pendente para ${pending.length} item(ns) nesta rodada (${pending.slice(0, 3).join("; ")}${pending.length > 3 ? "…" : ""}). Prepare de novo para continuar.`);
   // §15: no Assunto, só a ideia na linha de copy dele (Assunto, slug, DNA, SERP da principal) é medida; no publicado, a regra de sempre.
-  const candidates = [...found.values()].filter(k => k.external && !k.published && !k.ownerId && targets.some(t => t.kind === "subject" ? improvementIdeaOnCopyLine(t, porIdDaLista, vocabulary[t.id], k.keyword) : sharesTheme(t.theme, k.keyword) || improvementEditorialFit(t, k).fits));
+  const candidates = [...found.values()].filter(k => k.external && !k.published && !k.ownerId && targets.some(t => t.kind === "subject" ? improvementIdeaOnCopyLine(t, porIdDaLista, vocabulary[t.id], k.keyword, silo) : sharesTheme(t.theme, k.keyword) || improvementEditorialFit(t, k).fits));
   /*
    * F3 · A BUSCA NOVA DEDUPLICA CONTRA A MARCA INTEIRA (regra 5 do item 3). A
    * ideia que já existe no Minerador com volume medido (ou "sem média" há

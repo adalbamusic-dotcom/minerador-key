@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { OperationProgress } from "./operation-progress";
-import { ARTICLE_IMPROVEMENT_LABEL, IMPROVEMENT_AI_LABEL, IMPROVEMENT_LIST_CORE_LABEL, isListReading } from "@/lib/arquiteto/article-improvement";
+import { ARTICLE_IMPROVEMENT_LABEL, IMPROVEMENT_AI_LABEL, IMPROVEMENT_LIST_CORE_LABEL, NO_REINFORCEMENT_FOUND_LABEL, hasNoReinforcementFound, isListReading } from "@/lib/arquiteto/article-improvement";
 import { humanizeOperationMessage, resolveImprovementNextStep } from "@/lib/arquiteto/article-improvement-next-step";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
 import { knownBeforeSearchAuthorizeLabel } from "@/lib/editorial/known-before-search";
@@ -257,7 +257,7 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
             <ul className="grid gap-0.5 text-text-muted">{p.aiReasons!.map(item => <li key={item.keywordId}><span className="text-keyword">{keyword(item.keywordId)?.keyword ?? item.keywordId}</span>: {item.reason}</li>)}</ul>
           </div>}
         </td>
-        <td className="p-2 text-foreground">{result ? outcomes[result.status] : p.needsMinerador ? <span data-testid="architect-improvement-row-needs-minerador">{IMPROVEMENT_NEEDS_MINERADOR_LABEL}{sugestoesHref ? <> · <a href={sugestoesHref} className="text-module-accent underline underline-offset-2">{ARCHITECT_SUGGESTIONS_LABEL}</a></> : null}</span> : p.needsValidation ? "Falta a SERP da principal (coleta paga, custo antes)" : statuses[p.status]}{result && <p className="text-text-muted">{humanizeOperationMessage(result.message)}</p>}
+        <td className="p-2 text-foreground">{result ? outcomes[result.status] : p.needsMinerador ? <span data-testid="architect-improvement-row-needs-minerador">{IMPROVEMENT_NEEDS_MINERADOR_LABEL}{sugestoesHref ? <> · <a href={sugestoesHref} className="text-module-accent underline underline-offset-2">{ARCHITECT_SUGGESTIONS_LABEL}</a></> : null}</span> : p.needsValidation ? "Falta a SERP da principal (coleta paga, custo antes)" : p.status === "adequate" && hasNoReinforcementFound(p) ? NO_REINFORCEMENT_FOUND_LABEL : statuses[p.status]}{result && <p className="text-text-muted">{humanizeOperationMessage(result.message)}</p>}
           {p.reasons.length > 0 && <details className="text-text-muted"><summary className="cursor-pointer">Por quê</summary><p>{p.angle ? `Enfoque: ${p.angle}. ` : ""}{p.reasons.join(" ")}</p></details>}
         </td>
       </tr>;
