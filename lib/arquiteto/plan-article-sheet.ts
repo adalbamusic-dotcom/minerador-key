@@ -23,7 +23,7 @@ import { declaredPlanSubjectList } from "./declared-plan-formation.ts";
 import { readKnownVolume, type KnownVolume } from "../editorial/known-before-search.ts";
 import { EDITORIAL_GROUP_COLORS, EDITORIAL_GROUP_COLOR_LABELS, editorialGroupFilterMatches, isEditorialGroupColor, type EditorialGroupColor, type EditorialGroupScreenFilter } from "../editorial/editorial-groups.ts";
 import { articleKeywordIndex, inheritArticleGroup } from "../editorial/article-groups.ts";
-import type { ImprovementProposal } from "./article-improvement.ts";
+import { NO_REINFORCEMENT_FOUND_LABEL, type ImprovementProposal } from "./article-improvement.ts";
 import { SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL } from "./silo-article-withdrawal.ts";
 import { identityPrincipalSerpSentence, serpCollectionAllowed, serpIdentityPrincipalCheck, serpIdentityRowOf, type SerpIdentityArticle } from "./article-batch-serp.ts";
 
@@ -683,7 +683,9 @@ export function planSheetPreviewLines(run: RunLike, rows: readonly PreviewRow[])
       const versao = row.formation.version ? `nova versão (v${row.formation.version + 1})` : "primeiro ArticleDNA (v1)";
       return { keywordId: row.keywordId, kind: "will_write", sentence: `Vai gravar: ${versao} · ${composicao}.`, principalFrom: de, principalTo: para };
     }
-    if (proposta.status === "adequate") return { keywordId: row.keywordId, kind: "adequate", sentence: "Já formado e adequado: nada a gravar.", principalFrom: de, principalTo: para };
+    // 2026-10-17 · "adequado" só com reforço suficiente: com vaga e sem keyword achada, a linha diz isso e o motivo (nada a gravar).
+    const semReforco = proposta.reasons.find(reason => reason.startsWith(NO_REINFORCEMENT_FOUND_LABEL));
+    if (proposta.status === "adequate") return { keywordId: row.keywordId, kind: "adequate", sentence: semReforco ? `${semReforco} Nada a gravar.` : "Já formado e adequado: nada a gravar.", principalFrom: de, principalTo: para };
     const util = [...proposta.reasons].reverse().find(reason => !GENERIC_SUBJECT_REASON.test(reason));
     // 2026-10-16 (noite) · a frase sai da régua de volume da linha: nunca medida, medida sem número de buscas (Livre ou Travada).
     // 2026-10-17 (noite) · a principal de identidade ouve a frase dela (fica), nunca "Procurar outra principal".

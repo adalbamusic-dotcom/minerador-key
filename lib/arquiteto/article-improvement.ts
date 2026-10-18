@@ -258,6 +258,10 @@ export function editorialAiBarrier(target: ImprovementTarget, candidate: Improve
    */
   const fit = improvementEditorialFit(target, candidate);
   if (fit.conflict && /restrição editorial/.test(fit.reason)) return fit.reason;
+  // 2026-10-17 (noite) · a mesma regra da linha de copy: a que nega uma entidade do artigo é outra intenção.
+  const textoDoAlvo = `${target.theme} ${targetSubjectText(target).replace(/-/g, " ")}`;
+  const nega = negaOAssunto(textoDoAlvo, copyWords(textoDoAlvo), candidate.keyword);
+  if (nega) return `Contradiz o Assunto: ${nega}.`;
   const words = slugWords(candidate.keyword);
   if (new Set(words).size <= 2 && candidate.volume! > BROAD_HEAD_MAX_VOLUME) return `Cabeça genérica (volume ${candidate.volume}): uma página de nicho não ranqueia nela.`;
   const subject = targetSubjectText(target);
@@ -389,6 +393,72 @@ const COPY_ALIASES: Record<string, string> = { melhore: "melhor" };
 const copyStem = (word: string) => { let w = word.replace(/s$/, ""); if (w.length > 4 && /[ao]$/.test(w)) w = w.slice(0, -1); return COPY_ALIASES[w] ?? w; };
 export const copyWords = (value: string | null | undefined): Set<string> => new Set(key((value ?? "").replace(/[-/]/g, " ")).split(/[^a-z0-9]+/).filter(word => word.length >= 2 && !COPY_STOPWORDS.has(word)).map(copyStem));
 const lastSlugSegment = (slug: string | null | undefined) => (slug ?? "").split("/").filter(Boolean).at(-1)?.replace(/-/g, " ") ?? "";
+/*
+ * 2026-10-17 · A MESMA BUSCA (dono, teste no amarelo: "internet residencial vivo", "vivo residencial internet",
+ * "internet da vivo residencial" e "internet residencial da vivo" ocupavam as 4 vagas de "Claro, Vivo ou TIM").
+ * Variante da mesma busca = as mesmas palavras, sem as de ligação (preposição, artigo, "ou", "mais"), plural ou
+ * singular, qualquer ordem. A palavra de intenção ("melhor", "bom", "vale a pena") faz OUTRA busca: "melhores planos
+ * de internet residencial" não é variante de "planos de internet residencial". Num artigo, entram no máximo
+ * `SAME_SEARCH_MAX_PER_ARTICLE` variantes da mesma busca: as de maior volume.
+ */
+const VARIANT_CONNECTORS = new Set(["de", "da", "do", "das", "dos", "e", "o", "a", "os", "as", "em", "no", "na", "nos", "nas", "um", "uma", "uns", "umas", "para", "pra", "por", "pelo", "pela", "pelos", "pelas", "ao", "aos", "com", "ou", "vs", "versus", "mais", "eu", "voce", "se", "me"]);
+const VARIANT_ALIASES: Record<string, string> = { boa: "bom", melhore: "melhor" };
+export const SAME_SEARCH_MAX_PER_ARTICLE = 2;
+export function sameSearchKey(value: string | null | undefined): string {
+  const palavras = key((value ?? "").replace(/[-/]/g, " ")).split(/[^a-z0-9]+/).filter(word => word.length >= 2 && !VARIANT_CONNECTORS.has(word)).map(copyStem).map(word => VARIANT_ALIASES[word] ?? word);
+  return [...new Set(palavras)].sort().join(" ");
+}
+/*
+ * 2026-10-17 · AS ENTIDADES QUE O ASSUNTO ENUMERA (dono: "o reforço tem que cobrir as entidades do título/slug de
+ * forma equilibrada"). O título que abre com uma lista — "Claro, Vivo ou TIM para casa: …", "Internet, TV Box e
+ * streaming: …" — compara ou junta essas entidades. Lido só do texto do Assunto: a cabeça (antes de ":" ou "?", até
+ * "para"/"sem"/"com"), com vírgula, "ou" ou "vs", cada item com 1 a 3 palavras de conteúdo. Lista com número
+ * ("300, 500, 600 Mega ou 1 Giga") é de valores, não de entidades. Sem lista, nenhuma entidade (o de sempre).
+ */
+export function assuntoEntityList(title: string | null | undefined): { label: string; words: Set<string> }[] {
+  const cabeca = (title ?? "").split(/[:?!]/)[0] ?? "";
+  const ate = cabeca.split(/\s+(?:para|pra|sem|com)\s+/i)[0] ?? "";
+  if (!/,|\s(?:ou|vs|versus)\s/i.test(ate)) return [];
+  const itens = ate.split(/,|\s+(?:e|ou|vs|versus)\s+/i).map(item => item.trim()).filter(Boolean);
+  if (itens.length < 2 || itens.some(item => /\d/.test(item))) return [];
+  const lista = itens.map(item => ({ label: item, words: copyWords(item) }));
+  return lista.every(item => item.words.size >= 1 && item.words.size <= 3) ? lista : [];
+}
+export const assuntoEntityItems = (title: string | null | undefined): Set<string>[] => assuntoEntityList(title).map(item => item.words);
+/*
+ * 2026-10-17 · AS FACETAS DO ASSUNTO: "Instalação de internet: taxas, prazo e quando chega a primeira fatura" — a
+ * cabeça ("Instalação de internet") e a lista depois dos dois-pontos. Só com lista (vírgula ou "e"/"ou"); a frase
+ * solta depois dos dois-pontos ("como comparar onde você mora") não é faceta.
+ */
+function assuntoFacets(title: string | null | undefined): { head: string; facets: string[] } | null {
+  const [cabeca, ...resto] = (title ?? "").split(":");
+  const depois = resto.join(":").replace(/[?!.]+\s*$/, "").trim();
+  if (!cabeca?.trim() || !depois || !/,|\s(?:e|ou)\s/i.test(depois)) return null;
+  const facets = depois.split(/,|\s+(?:e|ou)\s+/i).map(item => item.trim()).filter(item => copyWords(item).size > 0);
+  return facets.length >= 2 ? { head: cabeca.trim(), facets } : null;
+}
+/*
+ * 2026-10-17 (noite) · A CANDIDATA QUE NEGA O ASSUNTO NÃO ENTRA (coordenador: "tv box sem internet" no artigo "Internet,
+ * TV Box e streaming: quando compensa contratar tudo junto?" é outra intenção — usar o TV box sem internet). "sem X"
+ * contradiz o artigo quando X é uma entidade dele (principal, slug, Assunto) e o artigo não diz ele mesmo "sem X";
+ * "sem fio" contradiz o artigo de internet a cabo; "grátis" contradiz o artigo de contratar (plano, combo, assinatura).
+ */
+const NEGACAO_SINONIMOS: Record<string, string[]> = { fio: ["fio", "cabo", "cabead", "cabeament"] };
+const PALAVRAS_DE_CONTRATAR = copyWords("contratar contratação contrato assinar assinatura plano combo pacote");
+const PALAVRAS_DE_GRATIS = new Set(["gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"]);
+function negaOAssunto(textoDoArtigo: string, palavrasDoArtigo: ReadonlySet<string>, frase: string): string | null {
+  const tokens = key(frase.replace(/[-/]/g, " ")).split(/[^a-z0-9]+/).filter(Boolean);
+  const texto = key(textoDoArtigo.replace(/[-/]/g, " "));
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (tokens[i] !== "sem") continue;
+    const negada = tokens.slice(i + 1).find(token => copyWords(token).size > 0);
+    if (!negada || texto.includes(`sem ${negada}`)) continue;
+    const raiz = [...copyWords(negada)][0];
+    if ((NEGACAO_SINONIMOS[raiz] ?? [raiz]).some(word => palavrasDoArtigo.has(word))) return `sem ${negada}`;
+  }
+  if (tokens.some(token => PALAVRAS_DE_GRATIS.has(token)) && ![...PALAVRAS_DE_GRATIS].some(word => texto.includes(word)) && [...palavrasDoArtigo].some(word => PALAVRAS_DE_CONTRATAR.has(word))) return "grátis";
+  return null;
+}
 /** Pergunta, comparação ou preço: a família de intenção que a principal Livre não pode perder na troca. */
 const INTENT_FAMILIES: Array<[string, RegExp]> = [
   ["pergunta", /\b(como|qual|quais|quanto|quantos|quanta|quantas|porque|por que|quando|onde|o que|vale a pena|preciso|precisa)\b/],
@@ -400,9 +470,13 @@ export type ImprovementCopyLine = {
   principalText: string | null;
   principal: Set<string>; slug: Set<string>; entity: Set<string>; words: Set<string>;
   vocabulary: { related: Set<string>[]; questions: Set<string>[]; titles: Set<string>[]; words: Set<string> };
+  /** 2026-10-17 · as entidades que o Assunto enumera (`assuntoEntityItems`), cada uma com as palavras dela. */
+  entities: Set<string>[];
+  /** 2026-10-17 · o assunto comum do Silo (o slug do Silo e as palavras da principal de dois ou mais artigos dele): não distingue um artigo do outro. */
+  common: Set<string>;
 };
 /** A linha de copy de um alvo: Assunto + slug + detalhes do plano + principal + DNA (+ a SERP da principal em cache). */
-export function improvementCopyLine(target: ImprovementTarget, byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary?: ImprovementSerpVocabulary | null): ImprovementCopyLine {
+export function improvementCopyLine(target: ImprovementTarget, byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary?: ImprovementSerpVocabulary | null, context: { common?: ReadonlySet<string> } = {}): ImprovementCopyLine {
   const principal = byId.get(target.primaryId ?? "") ?? byId.get(target.planPrincipalId ?? "") ?? byId.get(target.declaredPrincipalId ?? "");
   const principalText = principal?.keyword ?? (target.kind === "published" ? target.theme : null);
   const signals = principal?.signals ?? target.signals;
@@ -414,7 +488,17 @@ export function improvementCopyLine(target: ImprovementTarget, byId: ReadonlyMap
   ]);
   const listOf = (items: readonly string[] | undefined) => (items ?? []).map(copyWords).filter(set => set.size > 0);
   const related = listOf(vocabulary?.relatedSearches), questions = listOf(vocabulary?.questions), titles = listOf(vocabulary?.titles);
-  return { principalText, principal: copyWords(principalText), slug, entity, words, vocabulary: { related, questions, titles, words: new Set([...related, ...questions, ...titles].flatMap(set => [...set])) } };
+  const common = new Set([...copyWords(lastSlugSegment(target.siloContext?.slug ?? null)), ...(context.common ?? [])]);
+  const entities = target.kind === "subject" ? assuntoEntityItems(target.theme) : [];
+  return { principalText, principal: copyWords(principalText), slug, entity, words, vocabulary: { related, questions, titles, words: new Set([...related, ...questions, ...titles].flatMap(set => [...set])) }, entities, common };
+}
+/**
+ * 2026-10-17 · As entidades enumeradas pelo Assunto que a frase nomeia (índices de `line.entities`). Uma entidade que
+ * é só o assunto comum do Silo ("internet") conta para a comparação, mas sozinha não distingue o artigo.
+ */
+function namedEntities(line: ImprovementCopyLine, words: Set<string>): { all: number[]; own: number[] } {
+  const all = line.entities.flatMap((items, index) => [...items].some(word => words.has(word)) ? [index] : []);
+  return { all, own: all.filter(index => [...line.entities[index]].some(word => words.has(word) && !line.common.has(word))) };
 }
 export type ImprovementCopyMatch = { carries: boolean; fits: boolean; cover: number; serp: 0 | 1 | 2 | 3; where: "relacionadas" | "perguntas" | "títulos" | null;
   /** Palavras que só a SERP usa (nem o plano nem o DNA): a marca de uma operadora, por exemplo. Contam contra no desempate. */
@@ -431,7 +515,15 @@ export function copyLineMatch(line: ImprovementCopyLine, phrase: string, brands?
   const entityOk = line.entity.size > 0 && contains(words, line.entity) && (line.entity.size >= 2 || [...words].some(word => !line.entity.has(word) && (line.principal.has(word) || line.slug.has(word))));
   // 2026-10-17 · a busca de UMA das marcas que o artigo compara ("internet residencial vivo" em "Claro, Vivo ou TIM"): a marca nomeada pelo artigo e o resto dentro da principal.
   const daMarcaNomeada = Boolean(brands?.size) && [...brands!].every(word => line.words.has(word)) && [...words].every(word => brands!.has(word) || line.principal.has(word) || line.slug.has(word)) && [...words].some(word => !brands!.has(word));
-  const carries = entityOk || cover >= 0.75 || daMarcaNomeada;
+  /*
+   * 2026-10-17 · uma das ENTIDADES que o Assunto enumera, com o resto do artigo ("tim residencial internet" em "Claro,
+   * Vivo ou TIM…"; "internet e tv residencial" em "Internet, TV Box e streaming…"), ou duas delas comparadas ("vivo ou
+   * tim"). A entidade que é só o assunto comum do Silo não basta sozinha.
+   */
+  const nomeadas = namedEntities(line, words);
+  const daEntidade = (word: string) => line.entities.some(items => items.has(word));
+  const daEntidadeNomeada = nomeadas.own.length > 0 && (nomeadas.all.length >= 2 || [...words].some(word => !daEntidade(word) && (line.principal.has(word) || line.slug.has(word))));
+  const carries = entityOk || cover >= 0.75 || daMarcaNomeada || daEntidadeNomeada;
   const same = (set: Set<string>) => set.size === words.size && contains(set, words);
   const { related, questions, titles } = line.vocabulary;
   // A relacionada que contém a candidata inteira, ou a candidata que é uma relacionada mais palavras DA LINHA ("instalação" + "internet residencial vivo").
@@ -445,7 +537,7 @@ export function copyLineMatch(line: ImprovementCopyLine, phrase: string, brands?
   const serpOnlyWords = [...words].filter(word => !line.words.has(word) && line.vocabulary.words.has(word)).length;
   const onLine = serp >= 2 ? outside <= 1 && (outside === 0 || words.size >= 3) : outside === 0;
   // Sem menção na SERP, vale a mesma busca reescrita OU a entidade com todas as palavras dentro do Assunto, do slug, dos detalhes e do DNA.
-  return { carries, fits: carries && onLine && (serp > 0 || cover >= 0.75 || daMarcaNomeada || (entityOk && outside === 0 && serpOnlyWords === 0)), cover, serp, where, serpOnlyWords };
+  return { carries, fits: carries && onLine && (serp > 0 || cover >= 0.75 || daMarcaNomeada || ((entityOk || daEntidadeNomeada) && outside === 0 && serpOnlyWords === 0)), cover, serp, where, serpOnlyWords };
 }
 /**
  * Secundária reforça a principal; não a engole (AGENTS.md §13: o termo de
@@ -581,17 +673,51 @@ function rotuloDoDominio(dominio: string): string | null {
 }
 /** As palavras do artigo que dizem do que ele fala: a principal, o slug e o Assunto (sem os detalhes nem a SERP). */
 const nucleoDoArtigo = (target: ImprovementTarget, line: ImprovementCopyLine) => new Set([...line.principal, ...line.slug, ...copyWords(target.theme)]);
-/** Quanto do conjunto de palavras o artigo contém: principal e slug pesam mais que o Assunto, que pesa mais que os detalhes. */
+/**
+ * Quanto do conjunto de palavras o artigo contém. 2026-10-17 · primeiro as palavras que DISTINGUEM (fora do assunto
+ * comum do Silo: "plano de internet residencial mais barato" é de "barata", não do Pilar, porque "plano", "internet" e
+ * "residencial" são de todos); depois o artigo cuja principal inteira está na frase ("combo tv internet e celular"
+ * leva "combo internet e celular" inteira e só acrescenta "tv"; de "combo internet tv streaming" falta "streaming");
+ * por último, como antes: principal e slug pesam mais que o Assunto, que pesa mais que os detalhes (o Pilar desempata).
+ */
 function afinidadeNoSilo(target: ImprovementTarget, line: ImprovementCopyLine, palavras: Set<string>): number {
-  const quota = (conjunto: Set<string>) => [...palavras].filter(word => conjunto.has(word)).length / Math.max(1, palavras.size);
-  return quota(new Set([...line.principal, ...line.slug])) * 3 + quota(copyWords(target.theme)) * 2 + quota(line.words) + (target.planRole === "Pilar" ? 0.1 : 0);
+  const quota = (conjunto: Set<string>, de: Set<string> = palavras) => [...de].filter(word => conjunto.has(word)).length / Math.max(1, de.size);
+  const doArtigo = new Set([...line.principal, ...line.slug]), doAssunto = copyWords(target.theme);
+  const distintas = new Set([...palavras].filter(word => !line.common.has(word)));
+  const peloQueDistingue = distintas.size ? quota(doArtigo, distintas) * 3 + quota(doAssunto, distintas) * 2 + quota(line.words, distintas) : 0;
+  const contemAPrincipal = line.principal.size > 0 && contains(palavras, line.principal) ? 1 : 0;
+  return peloQueDistingue * 100 + contemAPrincipal * 10 + quota(doArtigo) * 3 + quota(doAssunto) * 2 + quota(line.words) + (target.planRole === "Pilar" ? 0.1 : 0);
 }
 const chaveDaVariante = (palavras: Set<string>) => [...palavras].sort().join(" ");
 
-function copyLineEdges(targets: readonly ImprovementTarget[], keywords: readonly ImprovementKeyword[], byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary: Readonly<Record<string, ImprovementSerpVocabulary>>): CopyEdge[] {
+/**
+ * 2026-10-17 · O CONTEXTO DO SILO PARA A LINHA DE COPY, uma regra só para a busca nova (o que é medido) e para o
+ * alocador (o que entra): as marcas que a SERP mostra e o assunto comum de cada Silo (as palavras que estão na principal
+ * de dois ou mais artigos dele).
+ */
+export type ImprovementSiloContext = { brands: Set<string>; common: Map<string, Set<string>> };
+export function improvementSiloContext(targets: readonly ImprovementTarget[], byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary: Readonly<Record<string, ImprovementSerpVocabulary>>): ImprovementSiloContext {
+  const base = new Map(targets.map(target => [target.id, improvementCopyLine(target, byId, vocabulary[target.id] ?? null)]));
+  const contagem = new Map<string, Map<string, number>>();
+  for (const target of targets) {
+    if (!target.territoryRef) continue;
+    const doSilo = contagem.get(target.territoryRef) ?? new Map<string, number>();
+    for (const word of base.get(target.id)!.principal) doSilo.set(word, (doSilo.get(word) ?? 0) + 1);
+    contagem.set(target.territoryRef, doSilo);
+  }
+  const common = new Map([...contagem].map(([ref, doSilo]) => [ref, new Set([...doSilo].filter(([, vezes]) => vezes >= 2).map(([word]) => word))] as const));
+  return { brands: brandWordsOf(targets, base, vocabulary), common };
+}
+/** Por que uma candidata que cabia na linha de copy ficou de fora (a frase da prévia quando o artigo fica sem reforço). */
+type CopyLineRejection = { keywordId: string; motivo: string };
+
+function copyLineEdges(targets: readonly ImprovementTarget[], keywords: readonly ImprovementKeyword[], byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary: Readonly<Record<string, ImprovementSerpVocabulary>>): { edges: CopyEdge[]; rejected: Map<string, CopyLineRejection[]>; lines: Map<string, ImprovementCopyLine> } {
   const textosDaLista = new Set(keywords.filter(k => !k.external).map(k => key(k.keyword)));
-  const linhas = new Map(targets.map(target => [target.id, improvementCopyLine(target, byId, vocabulary[target.id] ?? null)]));
-  const marcas = brandWordsOf(targets, linhas, vocabulary);
+  const silo = improvementSiloContext(targets, byId, vocabulary);
+  const linhas = new Map(targets.map(target => [target.id, improvementCopyLine(target, byId, vocabulary[target.id] ?? null, { common: silo.common.get(target.territoryRef ?? "") })]));
+  const marcas = silo.brands;
+  const rejected = new Map<string, CopyLineRejection[]>();
+  const fora = (targetId: string, keywordId: string, motivo: string) => { rejected.set(targetId, [...(rejected.get(targetId) ?? []), { keywordId, motivo }]); };
   const brutas = targets.flatMap(target => {
     if (!target.territoryRef) return [];
     const vocab = vocabulary[target.id] ?? null;
@@ -608,13 +734,25 @@ function copyLineEdges(targets: readonly ImprovementTarget[], keywords: readonly
       // A ideia da busca que repete uma keyword que já está na lista (ou a própria principal) não entra de novo.
       if (candidate.external && (textosDaLista.has(key(candidate.keyword)) || key(candidate.keyword) === principalText)) return [];
       if (copyLineBarrier(target, candidate)) return [];
-      // Do plano: a cabeça mais ampla que a principal, com mais volume, só vai para o Pilar (as demais regras de cabeça valem fora do plano).
-      if (target.planRole ? target.planRole !== "Pilar" && (cabecaDaPrincipal(old, candidate) || headOverPrincipal(old, candidate)) : headOverPrincipal(old, candidate)) return [];
-      // A busca com marca (operadora…) só vai para o artigo que nomeia aquela marca ou fala de operadoras.
       const marcasDaCandidata = [...copyWords(candidate.keyword)].filter(word => marcas.has(word));
-      if (marcasDaCandidata.length && !nomeiaOperadoras && !marcasDaCandidata.every(word => doArtigo.has(word))) return [];
       const match = copyLineMatch(line, candidate.keyword, marcasDaCandidata.length ? new Set(marcasDaCandidata) : undefined);
       if (!match.fits) return [];
+      // 2026-10-17 (noite) · a candidata que NEGA uma entidade do artigo ("tv box sem internet") é outra intenção: fica fora, dito na prévia.
+      const nega = negaOAssunto(`${line.principalText ?? ""} ${target.theme} ${lastSlugSegment(target.slug ?? target.planSlug ?? null)}`, new Set([...doArtigo, ...line.entities.flatMap(items => [...items])]), candidate.keyword);
+      if (nega) { fora(target.id, candidate.id, `contradiz o Assunto: ${nega}`); return []; }
+      // Do plano: a cabeça mais ampla que a principal, com mais volume, só vai para o Pilar (as demais regras de cabeça valem fora do plano).
+      if (target.planRole ? target.planRole !== "Pilar" && (cabecaDaPrincipal(old, candidate) || headOverPrincipal(old, candidate)) : headOverPrincipal(old, candidate)) { fora(target.id, candidate.id, "é mais ampla que a principal (cabeça do Pilar)"); return []; }
+      /*
+       * 2026-10-17 · com a principal de identidade SEM volume num Suporte, o pedaço dela acima de `BROAD_HEAD_MAX_VOLUME`
+       * ("claro internet residencial", 49.500) fica de fora ANTES de alocar — antes ele ocupava a vaga e saía depois,
+       * e o artigo ficava com menos reforço do que podia (amarelo: 4 de 5 vagas).
+       */
+      if (identidade && target.planRole === "Suporte" && old && (candidate.volume ?? 0) > BROAD_HEAD_MAX_VOLUME) {
+        const daPrincipal = copyWords(old.keyword), dela = copyWords(candidate.keyword);
+        if (dela.size < daPrincipal.size && [...dela].every(word => daPrincipal.has(word))) { fora(target.id, candidate.id, `é cabeça (mais de ${BROAD_HEAD_MAX_VOLUME} buscas): um Suporte não ranqueia nela`); return []; }
+      }
+      // A busca com marca (operadora…) só vai para o artigo que nomeia aquela marca ou fala de operadoras.
+      if (marcasDaCandidata.length && !nomeiaOperadoras && !marcasDaCandidata.every(word => doArtigo.has(word))) { fora(target.id, candidate.id, "cita uma marca que o artigo não nomeia"); return []; }
       // 2026-10-17 · a principal de identidade (título ou slug) fica: a candidata só reforça.
       const slugCore = livre && !identidade && subjectSlugCoreSwap(target, old, candidate);
       const principalOk = livre && !identidade && (slugCore || keepsIntent(old, candidate) && (match.cover >= 0.75 || match.serp >= 2 || contains(copyWords(candidate.keyword), line.entity)));
@@ -671,31 +809,115 @@ function copyLineEdges(targets: readonly ImprovementTarget[], keywords: readonly
   const contagemNoSilo = new Map<string, number>();
   for (const target of targets) for (const word of linhas.get(target.id)?.principal ?? []) contagemNoSilo.set(`${target.territoryRef}|${word}`, (contagemNoSilo.get(`${target.territoryRef}|${word}`) ?? 0) + 1);
   const variantesDaPrincipal = new Map<string, number>();
-  return brutas
+  /*
+   * 2026-10-17 · A MESMA BUSCA ENTRA NO MÁXIMO DUAS VEZES NO ARTIGO (`sameSearchKey`), as de maior volume — vale para
+   * toda variante, não só para a da principal (SUBSTITUI "a variante da própria principal vale no máximo duas vezes",
+   * que deixava "internet residencial vivo", "vivo residencial internet", "internet da vivo residencial" e "internet
+   * residencial da vivo" ocuparem as 4 vagas de "Claro, Vivo ou TIM").
+   */
+  const mesmaBusca = new Map<string, number>();
+  const nomeDe = (id: string) => targets.find(t => t.id === id)?.theme ?? id;
+  const filtradas = brutas
     .filter(edge => {
       const target = targets.find(t => t.id === edge.targetId)!;
-      return donoDaVariante.get(`${target.territoryRef}|${chaveDaVariante(copyWords(byId.get(edge.keywordId)?.keyword))}`) === edge.targetId;
+      const dono = donoDaVariante.get(`${target.territoryRef}|${chaveDaVariante(copyWords(byId.get(edge.keywordId)?.keyword))}`);
+      if (dono !== edge.targetId && dono) fora(edge.targetId, edge.keywordId, `é variante da mesma busca de outro artigo do Silo (“${nomeDe(dono)}”)`);
+      return dono === edge.targetId;
     })
     .sort((a, b) => b.volume - a.volume)
     .filter(edge => {
       const target = targets.find(t => t.id === edge.targetId)!, line = linhas.get(target.id)!;
       const palavras = copyWords(byId.get(edge.keywordId)?.keyword);
+      const chave = `${target.id}|${sameSearchKey(byId.get(edge.keywordId)?.keyword)}`;
+      if ((mesmaBusca.get(chave) ?? 0) >= SAME_SEARCH_MAX_PER_ARTICLE && !edge.principalOk) { fora(target.id, edge.keywordId, `o artigo já leva ${SAME_SEARCH_MAX_PER_ARTICLE} variantes desta mesma busca`); return false; }
       const daPrincipal = line.principal.size > 0 && chaveDaVariante(palavras) === chaveDaVariante(line.principal);
       if (daPrincipal) {
         const ja = variantesDaPrincipal.get(target.id) ?? 0;
-        if (ja >= 2 && !edge.principalOk) return false;
+        if (ja >= 2 && !edge.principalOk) { fora(target.id, edge.keywordId, "o artigo já leva duas variantes da principal"); return false; }
         variantesDaPrincipal.set(target.id, ja + 1);
+        mesmaBusca.set(chave, (mesmaBusca.get(chave) ?? 0) + 1);
         return true;
       }
       const proprias = [...palavras].filter(word => line.words.has(word) && (contagemNoSilo.get(`${target.territoryRef}|${word}`) ?? 0) < 2);
-      return proprias.length > 0;
+      if (!proprias.length) { fora(target.id, edge.keywordId, "leva só o assunto comum do Silo, nada próprio do artigo"); return false; }
+      /*
+       * 2026-10-17 · A PALAVRA PRÓPRIA DE OUTRO ARTIGO INDICA O ARTIGO DELE ("combo tv e celular" não reforça "Internet,
+       * TV Box e streaming": "celular" é a palavra de "combo internet e celular"). Só fica quando a frase leva a principal
+       * inteira deste artigo ("combo tv internet e celular" leva "combo internet e celular" inteira: é dele).
+       */
+      const deOutro = [...palavras].find(word => !line.words.has(word) && !line.common.has(word) && (contagemNoSilo.get(`${target.territoryRef}|${word}`) ?? 0) === 1 && targets.some(outro => outro.id !== target.id && outro.territoryRef === target.territoryRef && linhas.get(outro.id)?.principal.has(word)));
+      if (deOutro && !(line.principal.size > 0 && contains(palavras, line.principal))) {
+        const dono = targets.find(outro => outro.id !== target.id && outro.territoryRef === target.territoryRef && linhas.get(outro.id)?.principal.has(deOutro));
+        fora(target.id, edge.keywordId, `leva palavra própria de outro artigo do Silo (“${dono?.theme ?? deOutro}”)`);
+        return false;
+      }
+      mesmaBusca.set(chave, (mesmaBusca.get(chave) ?? 0) + 1);
+      return true;
     });
+  /*
+   * 2026-10-17 · ASSUNTO QUE ENUMERA ENTIDADES: REFORÇO EQUILIBRADO POR ENTIDADE (dono: "o artigo compara 3 operadoras:
+   * o reforço tem que cobrir as entidades do título/slug de forma equilibrada"). Com 2+ entidades próprias
+   * (`assuntoEntityItems`), as candidatas vão em rodadas: a melhor de cada entidade (e da comparação entre elas) antes da
+   * segunda de qualquer uma; dentro da entidade, uma busca nova antes da repetição da mesma busca. A rodada vira o tier
+   * (o alocador atende o tier menor primeiro); fora desse caso, nada muda.
+   */
+  const foraDoEquilibrio = new Set<CopyEdge>();
+  for (const target of targets) {
+    const line = linhas.get(target.id)!;
+    const proprias = line.entities.filter(items => [...items].some(word => !line.common.has(word)));
+    if (proprias.length < 2) continue;
+    // Nenhuma entidade passa da sua parte das vagas, mesmo quando as outras não têm candidata (a vaga fica aberta, dita).
+    const vagas = Math.max(1, IMPROVEMENT_ARTICLE_MAX_KEYWORDS - Math.max(1, target.memberIds.length));
+    const parte = Math.ceil(vagas / proprias.length);
+    const grupos = new Map<string, CopyEdge[]>();
+    for (const edge of filtradas.filter(e => e.targetId === target.id)) {
+      const nomeadas = namedEntities(line, copyWords(byId.get(edge.keywordId)?.keyword)).own;
+      const grupo = nomeadas.length === 1 ? `entidade:${nomeadas[0]}` : nomeadas.length > 1 ? "comparacao" : "neutra";
+      grupos.set(grupo, [...(grupos.get(grupo) ?? []), edge]);
+    }
+    for (const [grupo, arestas] of grupos) {
+      const vistas = new Set<string>();
+      const ordem = arestas.map(edge => {
+        const chave = sameSearchKey(byId.get(edge.keywordId)?.keyword), repete = vistas.has(chave);
+        vistas.add(chave);
+        return { edge, repete };
+      }).sort((a, b) => Number(a.repete) - Number(b.repete) || a.edge.tier - b.edge.tier || b.edge.score - a.edge.score || b.edge.volume - a.edge.volume);
+      // A rodada vem antes; na mesma rodada, uma busca nova antes da repetição da mesma busca (rodada × 3 + repete: sem sobrepor rodadas).
+      ordem.forEach(({ edge, repete }, rodada) => {
+        if (grupo !== "neutra" && rodada >= parte) { foraDoEquilibrio.add(edge); fora(target.id, edge.keywordId, `a parte de cada entidade do Assunto é de ${parte} vaga(s): o resto fica para as outras`); return; }
+        edge.tier += rodada * 3 + (repete ? 1 : 0);
+      });
+    }
+  }
+  return { edges: filtradas.filter(edge => !foraDoEquilibrio.has(edge)), rejected, lines: linhas };
+}
+/**
+ * 2026-10-17 · No artigo que enumera entidades, as que ficaram sem nenhuma keyword (nenhuma com volume coube nesta
+ * leitura) são ditas: a parte delas fica aberta, nunca preenchida por outra entidade.
+ */
+function entityGapReason(target: ImprovementTarget, line: ImprovementCopyLine | undefined, memberIds: readonly string[], byId: ReadonlyMap<string, ImprovementKeyword>): string | null {
+  if (!line || target.kind !== "subject") return null;
+  const lista = assuntoEntityList(target.theme).filter(item => [...item.words].some(word => !line.common.has(word)));
+  if (lista.length < 2) return null;
+  const palavras = memberIds.filter(id => id !== target.primaryId).map(id => copyWords(byId.get(id)?.keyword));
+  const semNada = lista.filter(item => !palavras.some(set => [...item.words].some(word => set.has(word) && !line.common.has(word))));
+  return semNada.length ? `Equilíbrio por entidade do Assunto: ${semNada.map(item => `“${item.label}”`).join(", ")} sem keyword de reforço com volume nesta leitura; a parte de cada uma fica aberta (nunca vai para outra entidade).` : null;
 }
 /** Do plano: a candidata é a cabeça mais ampla da principal (só palavras dela, menos que todas) e tem mais volume. */
 function cabecaDaPrincipal(principal: ImprovementKeyword | undefined, candidate: ImprovementKeyword): boolean {
   if (!principal?.volumeValidated || !(principal.volume! > 0) || !(candidate.volume! > principal.volume!)) return false;
   const daPrincipal = copyWords(principal.keyword), daCandidata = copyWords(candidate.keyword);
   return daCandidata.size < daPrincipal.size && [...daCandidata].every(word => daPrincipal.has(word));
+}
+/** 2026-10-17 · o artigo tem vaga e nenhuma keyword de reforço entrou: a frase diz isso (nunca "adequado") e o motivo. */
+export const NO_REINFORCEMENT_FOUND_LABEL = "Sem keyword de reforço encontrada";
+export const hasNoReinforcementFound = (p: Pick<ImprovementProposal, "reasons">) => p.reasons.some(reason => reason.startsWith(NO_REINFORCEMENT_FOUND_LABEL));
+function noReinforcementReason(rejeitadas: readonly CopyLineRejection[], byId: ReadonlyMap<string, ImprovementKeyword>): string {
+  const vistas = new Set<string>();
+  const principais = rejeitadas.filter(item => { if (vistas.has(item.keywordId) || !byId.get(item.keywordId)) return false; vistas.add(item.keywordId); return true; })
+    .sort((a, b) => (byId.get(b.keywordId)!.volume ?? 0) - (byId.get(a.keywordId)!.volume ?? 0)).slice(0, 3);
+  if (!principais.length) return `${NO_REINFORCEMENT_FOUND_LABEL}: nenhuma keyword com volume da lista da marca nem das ideias do Google Ads desta leitura cabe no Assunto, no slug e no DNA do artigo. A principal fica; a vaga continua aberta para a próxima leitura.`;
+  return `${NO_REINFORCEMENT_FOUND_LABEL}: as que cabiam no Assunto ficaram de fora pelas regras do Silo — ${principais.map(item => `“${byId.get(item.keywordId)!.keyword}” (${byId.get(item.keywordId)!.volume}) ${item.motivo}`).join("; ")}. A principal fica; a vaga continua aberta para a próxima leitura.`;
 }
 const copyReason = (candidate: ImprovementKeyword, match: ImprovementCopyMatch, principalText: string | null) => match.where
   ? `“${candidate.keyword}” (${candidate.volume}) aparece nas ${match.where} da SERP de “${principalText ?? "principal"}” (em cache, grátis).`
@@ -708,8 +930,46 @@ export const COPY_LINE_LABEL = "Linha de copy · Assunto, slug, DNA e a SERP da 
  * buscas relacionadas da SERP da principal (cache) que estão na linha de copy.
  * Vazio = o alvo não tem de onde semear; a busca dele não roda.
  */
-export function improvementDiscoverySeeds(target: ImprovementTarget, byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary: ImprovementSerpVocabulary | null | undefined, assuntoSeeds: readonly string[] = []): string[] {
-  const line = improvementCopyLine(target, byId, vocabulary);
+/*
+ * 2026-10-17 · SEMENTES POR ENTIDADE E POR FACETA DO ASSUNTO (amarelo: o Google Ads devolveu 2 ideias para "combo
+ * internet tv streaming" + o slug, 6 para "instalação de internet residencial" + o slug e 13 para "claro vivo ou tim
+ * internet residencial" — frase longa volta quase só ela mesma). As curtas saem do próprio plano:
+ *  - por entidade enumerada no Assunto: a principal só com aquela entidade ("claro internet residencial", "vivo internet
+ *    residencial", "tim internet residencial"; "combo internet tv", "combo internet streaming");
+ *  - pelas facetas depois dos dois-pontos: a cabeça ("instalação de internet"), a faceta de uma palavra com a cabeça
+ *    ("taxas de instalação de internet", "prazo de instalação de internet") e a de várias, curta, com o assunto da
+ *    cabeça ("primeira fatura internet").
+ */
+const conteudo = (token: string) => copyWords(token).size > 0;
+function entitySeeds(principalText: string | null, line: ImprovementCopyLine): string[] {
+  const proprias = line.entities.filter(items => [...items].some(word => !line.common.has(word)));
+  if (!principalText || proprias.length < 2) return [];
+  const tokens = principalText.trim().split(/\s+/);
+  const daPalavra = tokens.map(token => [...copyWords(token)][0] ?? null);
+  return proprias.flatMap((items, index) => {
+    const outras = new Set(proprias.filter((_, outro) => outro !== index).flatMap(set => [...set]));
+    const sai = daPalavra.map(word => Boolean(word && outras.has(word)));
+    const fica = tokens.filter((token, i) => !sai[i] && (conteudo(token) || !(sai[i - 1] || sai[i + 1])));
+    return daPalavra.some((word, i) => !sai[i] && word && items.has(word)) ? [fica.join(" ")] : [];
+  });
+}
+function facetSeeds(theme: string): string[] {
+  const facetas = assuntoFacets(theme);
+  if (!facetas) return [];
+  const cabeca = facetas.head.toLowerCase();
+  const assuntoDaCabeca = cabeca.split(/\s+/).filter(conteudo).at(-1) ?? "";
+  return [cabeca, ...facetas.facets.map(faceta => {
+    const tokens = faceta.toLowerCase().split(/\s+/);
+    const deConteudo = tokens.filter(conteudo);
+    if (deConteudo.length === 1) return `${deConteudo[0]} de ${cabeca}`;
+    let inicio = tokens.length, achadas = 0;
+    while (inicio > 0 && achadas < 2) { inicio--; if (conteudo(tokens[inicio])) achadas++; }
+    const cauda = tokens.slice(inicio).join(" ");
+    return copyWords(cauda).has([...copyWords(assuntoDaCabeca)][0] ?? "") ? cauda : `${cauda} ${assuntoDaCabeca}`.trim();
+  })];
+}
+export function improvementDiscoverySeeds(target: ImprovementTarget, byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary: ImprovementSerpVocabulary | null | undefined, assuntoSeeds: readonly string[] = [], context: { common?: ReadonlySet<string> } = {}): string[] {
+  const line = improvementCopyLine(target, byId, vocabulary, context);
   /*
    * 2026-10-17 · nada de procurar à toa: semente de uma palavra só ("internet",
    * "plano") é cabeça genérica e não diz do que o artigo fala; e a relacionada
@@ -725,15 +985,38 @@ export function improvementDiscoverySeeds(target: ImprovementTarget, byId: Reado
   const relacionadas = (vocabulary?.relatedSearches ?? []).filter(phrase => { const daFrase = marcasDe(phrase); return !localSearchOf(phrase) && !marcaAlheia(phrase) && copyLineMatch(line, phrase, daFrase.length ? new Set(daFrase) : undefined).fits; }).slice(0, 4);
   // Pedaços do TÍTULO só quando o Assunto não tem keyword nem slug (formato antigo): "Veja o que entra na conta" trazia "entra na conta do google".
   const doTitulo = line.principalText || line.slug.size ? [] : assuntoSeeds;
-  const sementes = [line.principalText, lastSlugSegment(target.slug ?? target.planSlug ?? null), target.signals.centralEntity, ...doTitulo, ...relacionadas]
+  const doAssunto = target.kind === "subject" ? [...facetSeeds(target.theme), ...entitySeeds(line.principalText, line)] : [];
+  const sementes = [line.principalText, lastSlugSegment(target.slug ?? target.planSlug ?? null), target.signals.centralEntity, ...doAssunto, ...doTitulo, ...relacionadas]
     .map(seed => (seed ?? "").trim())
     .filter(seed => copyWords(seed).size > 0 && (seed === line.principalText || copyWords(seed).size >= 2) && !marcaAlheia(seed));
   const vistas = new Set<string>();
   return sementes.filter(seed => { const k = key(seed); if (vistas.has(k)) return false; vistas.add(k); return true; }).slice(0, 10);
 }
-/** A ideia da busca nova está na linha de copy deste alvo? (só texto; volume e dono são lidos depois) */
-export function improvementIdeaOnCopyLine(target: ImprovementTarget, byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary: ImprovementSerpVocabulary | null | undefined, phrase: string): boolean {
-  return copyLineMatch(improvementCopyLine(target, byId, vocabulary), phrase).fits && !localSearchOf(phrase);
+/**
+ * A ideia da busca nova está na linha de copy deste alvo? (só texto; volume e dono são lidos depois)
+ * 2026-10-17 · com o contexto do Silo, a MESMA régua do alocador: a busca com marca vale no artigo que nomeia a marca
+ * (antes, "claro internet residencial" e "tim internet residencial" caíam aqui, sem medir, e o artigo "Claro, Vivo ou
+ * TIM" só recebia as da Vivo, que passavam pela linha de "internet residencial barata").
+ */
+export function improvementIdeaOnCopyLine(target: ImprovementTarget, byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary: ImprovementSerpVocabulary | null | undefined, phrase: string, silo?: ImprovementSiloContext): boolean {
+  if (localSearchOf(phrase)) return false;
+  const line = improvementCopyLine(target, byId, vocabulary, { common: silo?.common.get(target.territoryRef ?? "") });
+  const marcasDaFrase = silo ? [...copyWords(phrase)].filter(word => silo.brands.has(word)) : [];
+  if (marcasDaFrase.length) {
+    const doArtigo = nucleoDoArtigo(target, line);
+    if (![...doArtigo].some(word => OPERATOR_WORDS.has(word)) && !marcasDaFrase.every(word => doArtigo.has(word))) return false;
+  }
+  const match = copyLineMatch(line, phrase, marcasDaFrase.length ? new Set(marcasDaFrase) : undefined);
+  if (match.fits || !match.carries) return match.fits;
+  /*
+   * 2026-10-17 (noite) · MEDIR É GRÁTIS (cota do Google Ads); quem decide se entra é a linha de copy com a SERP da
+   * principal. A ideia que leva o artigo e tem UMA palavra fora da linha (o assunto comum do Silo não conta) também é
+   * medida: a SERP da principal de identidade, coletada no mesmo "Processar artigos", decide depois ("internet e tv
+   * residencial" no artigo de TV e streaming — antes ela nem era medida e o artigo ficava sem as de TV).
+   */
+  const palavras = copyWords(phrase);
+  const fora = [...palavras].filter(word => !line.words.has(word) && !line.vocabulary.words.has(word) && !line.common.has(word)).length;
+  return fora <= 1 && palavras.size >= 3;
 }
 
 /** One allocator, whole brand, no ownership granted to discarded proposals. */
@@ -781,7 +1064,8 @@ export function planArticleImprovements(input: {
    * linha de copy com a SERP da principal. A candidata que o Google contradiz
    * (zero páginas com a principal de volume) fica fora.
    */
-  const copyEdges = copyLineEdges(input.targets, input.keywords, byId, input.serpVocabulary ?? {})
+  const linhaDeCopy = copyLineEdges(input.targets, input.keywords, byId, input.serpVocabulary ?? {});
+  const copyEdges = linhaDeCopy.edges
     .filter(edge => !(declaredOwner.has(edge.keywordId) && declaredOwner.get(edge.keywordId) !== edge.targetId) && !observations.get(`${edge.targetId}:${edge.keywordId}`)?.contradiction);
   const copyByPair = new Map(copyEdges.map(edge => [`${edge.targetId}:${edge.keywordId}`, edge]));
   const eligible = [...pairEdges];
@@ -802,8 +1086,14 @@ export function planArticleImprovements(input: {
   }
   // F4 — a principal declarada ocupa a vaga dela no artigo do plano, com ou sem volume.
   for (const t of input.targets) if (t.declaredPrincipalId) fixed.set(t.declaredPrincipalId, t.id);
+  /*
+   * 2026-10-17 · a principal de identidade que ainda não está nas keywords (artigo sem DNA) já tem a vaga dela: o
+   * alocador enche só as outras cinco. Antes ele enchia seis e o teto cortava depois a de menos volume — no artigo que
+   * compara entidades, isso tirava justamente a comparação (o equilíbrio é decidido aqui, não no corte).
+   */
+  const vagaDaPrincipal = (t: ImprovementTarget) => t.kind === "subject" && Boolean(t.primaryId) && !fixed.has(t.primaryId!) && !t.declaredPrincipalId && targetPrincipalIsIdentity(t, byId.get(t.primaryId!)) ? 1 : 0;
   const owners = allocateReinforcementChoices({
-    targets: input.targets.map(t => ({ id: t.id, capacity: Math.max(0, 6 - [...fixed.values()].filter(id => id === t.id).length), priority: (byId.get(t.primaryId ?? "")?.volumeValidated ? 10 : 0) + (t.kind === "published" ? 0 : 1) })),
+    targets: input.targets.map(t => ({ id: t.id, capacity: Math.max(0, 6 - [...fixed.values()].filter(id => id === t.id).length - vagaDaPrincipal(t)), priority: (byId.get(t.primaryId ?? "")?.volumeValidated ? 10 : 0) + (t.kind === "published" ? 0 : 1) })),
     edges: eligible, fixed,
   });
   const proposals = input.targets.map(target => {
@@ -909,6 +1199,21 @@ export function planArticleImprovements(input: {
     if (livreSemVolume && pelaLinha && !pelaLinha.length && added.length) reasons.push(`Nenhuma candidata com volume mantém a intenção de “${old?.keyword ?? target.theme}” nem leva o núcleo do slug: a principal fica e o artigo só recebe reforço.`);
     for (const id of pelaCopy.filter(id => id !== principalId || principalId === target.primaryId)) reasons.push(`${COPY_LINE_LABEL}: ${copyReason(byId.get(id)!, daLinhaDeCopy(id)!.match, linha?.principalText ?? null)}`);
     const mudou = added.length || principalId !== target.primaryId || formaOPrimeiro;
+    /*
+     * 2026-10-17 · "ADEQUADO" SÓ COM REFORÇO SUFICIENTE (amarelo: "Instalação de internet…" saiu "Já formado e adequado"
+     * com 1 keyword só — a busca não tinha achado reforço). Com vaga e sem nenhuma entrada, a linha diz que não achou e
+     * por quê; o status continua o de sempre (nada a gravar, ou o primeiro DNA só com a principal).
+     */
+    const ficaAdequado = Boolean(target.territoryRef) && !(mudou && principalId) && Boolean(old?.volumeValidated);
+    const vagas = IMPROVEMENT_ARTICLE_MAX_KEYWORDS - new Set([...members, ...(principalId ? [principalId] : [])]).size;
+    if (!added.length && principalId === target.primaryId && vagas > 0 && (ficaAdequado || formaOPrimeiro)) reasons.push(noReinforcementReason(linhaDeCopy.rejected.get(target.id) ?? [], byId));
+    const lacuna = added.length && vagas > 0 ? entityGapReason(target, linhaDeCopy.lines.get(target.id), members, byId) : null;
+    if (lacuna) reasons.push(lacuna);
+    // 2026-10-17 (noite) · a que contradiz o Assunto é dita na prévia, uma frase por keyword.
+    for (const item of linhaDeCopy.rejected.get(target.id) ?? []) {
+      const k = byId.get(item.keywordId);
+      if (k && item.motivo.startsWith("contradiz o Assunto")) reasons.push(`“${k.keyword}” (${k.volume}) fica fora: ${item.motivo}.`);
+    }
     return { targetId: target.id, kind: target.kind, theme: target.theme, currentPrimaryId: target.primaryId, principalId, memberIds: members, addIds: added, removeIds, transfers: added.filter(id => byId.get(id)?.territoryRef !== target.territoryRef), angle: angleOf(byId.get(principalId ?? "")), exclusions: [], reasons,
       status: !target.territoryRef ? "insufficient_evidence" : mudou && principalId ? "ready" : old?.volumeValidated ? "adequate" : eligible.some(e => e.targetId === target.id) ? "no_alternative" : "insufficient_evidence",
       evidenceBasis: mudou ? pelaCopy.length ? "copy_line" : proof && proof.sharedPages >= 2 ? "serp" : "editorial_and_candidate_serp" : null,

@@ -1,6 +1,18 @@
 - [ ] **Situações resolvidas (2026-10-17)** · [`situacoes-resolvidas.md`](situacoes-resolvidas.md) é leitura obrigatória antes de mexer no Arquiteto: transformar em cenário-ouro as 12 situações da lista (a), tirar da lista (b) cada item quando a fase dele for entregue e registrar ali, com o cenário que a guarda, toda situação nova resolvida.
 - [ ] **APROVADA em 2026-10-16 (F0 entregue em 16/10; F2 entregue em 17/10, noite, a pedido do dono no amarelo, com desvio declarado de D1 — §15.7; F1 aguarda a aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 aprovadas com as recomendações.
 
+## Reforço equilibrado: a mesma busca, as entidades do Assunto e o "adequado" — Arquiteto — 2026-10-17 (noite)
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] A mesma busca no máximo 2 vezes por artigo (as de maior volume); Assunto que enumera entidades com reforço equilibrado; palavra própria de outro artigo indica o artigo dele; cabeça da identidade fora antes de alocar.
+- [x] Sementes curtas do plano (por entidade e por faceta); a busca nova mede pela régua de marca do alocador; vocabulário da SERP da principal de identidade lido do cache.
+- [x] "Adequado" só no artigo cheio; com vaga, "Sem keyword de reforço encontrada" e o motivo (prévia do plano e painel).
+- [x] Cenário-ouro amarelo e alocador atualizados; spec §44, SDD §15.8, situações RF19–RF22, catálogo (k).
+- [ ] **Dono/coordenador:** rodar de novo "Processar artigos" no amarelo e conferir os 3 artigos com as ideias reais das sementes novas (o Google Ads não foi chamado nesta entrega).
+- [ ] No primeiro "Processar", a busca nova roda antes da coleta da SERP da principal de identidade; avaliar se a busca nova deve rodar de novo, grátis, depois da coleta (no mesmo Processar, sem botão), para as ideias que só cabem com o vocabulário dela.
+- [ ] O mesmo equilíbrio por entidade e as sementes por faceta no publicado (hoje o publicado semeia pelo título e pela URL — b1).
+
 ## Os 3 botões em sequência — Processar, Concluir e o refazedor (F2 da linha única) — Arquiteto — 2026-10-17 (noite)
 
 Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**

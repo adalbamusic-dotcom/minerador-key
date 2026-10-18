@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { allocateReinforcementChoices } from "../lib/arquiteto/reinforcement-allocation.ts";
 import { planArticleImprovements, volumelessPrincipalSwap, carriesSlugCore, slugCoreWords, principalIsIdentity, targetPrincipalIsIdentity, improvementEditorialFit, improvementCopyLine, copyLineMatch, improvementDiscoverySeeds, COPY_LINE_LABEL, SUBJECT_KEYWORD_STAYS_SUBJECT_REASON, type ImprovementTarget, type ImprovementKeyword, type ImprovementEvidence, type ImprovementSerpVocabulary } from "../lib/arquiteto/article-improvement.ts";
 import { resolveKeywordDnaSignals } from "../lib/arquiteto/keyword-dna-signals.ts";
+import { normalizeKeyword } from "../lib/minerador/keyword-import-core.ts";
 
 const dna = (id: string, text = "captação de pacientes") => resolveKeywordDnaSignals({ keywordId: id, text, semantic: { entidade_central: "captação de pacientes", problema_percebido: "poucos agendamentos", publico: "gestores de clínicas", resultado_desejado: "ampliar agendamentos", intencao_principal: "Informativa" } });
 const term = (id: string, overrides: Partial<ImprovementKeyword> = {}): ImprovementKeyword => ({ id, keyword: `captação de pacientes ${id}`, volume: 50, volumeValidated: true, signals: dna(id), ownerId: null, published: false, territoryRef: "territory:b", external: false, ...overrides });
@@ -270,8 +271,11 @@ test("2026-10-17 · Principal de identidade: a Livre SEM volume que está no tí
   const [p] = planArticleImprovements({ targets: [{ ...t, planRole: "Pilar" }], keywords, evidence: [] });
   assert.equal(p.status, "ready", JSON.stringify(p.reasons));
   assert.equal(p.principalId, "l1", "a principal de identidade fica, mesmo sem volume");
-  assert.deepEqual([...p.addIds].sort(), ["e1", "e2", "e3", "e4", "e5"], "as mais amplas reforçam");
-  assert.ok(p.memberIds.includes("l1") && p.memberIds.length === 6, JSON.stringify(p.memberIds));
+  // 2026-10-17 · SUBSTITUÍDO "as cinco entram": "plano internet residencial" (1.000) é a TERCEIRA grafia da mesma busca
+  // ("planos de internet residencial", "plano de internet residencial") — no máximo duas, as de maior volume (SAME_SEARCH_MAX_PER_ARTICLE).
+  assert.deepEqual([...p.addIds].sort(), ["e1", "e2", "e4", "e5"], "as mais amplas reforçam; a mesma busca entra no máximo duas vezes");
+  assert.ok(!p.memberIds.includes("e3"), "a terceira variante da mesma busca fica de fora");
+  assert.ok(p.memberIds.includes("l1") && p.memberIds.length === 5, JSON.stringify(p.memberIds));
   assert.match(p.reasons.join(" "), /^.*Principal de identidade: “como escolher plano de internet residencial” \(sem volume\) está no título e no slug do Assunto e fica como principal/);
   assert.ok(!p.reasons.some(reason => /assume como principal/.test(reason)), "nenhuma troca proposta");
   // "Procurar outra principal" (decisão do dono na linha) continua trocando.
@@ -332,8 +336,10 @@ test("2026-10-17 · sem canibalização no Silo: as variantes da mesma busca vã
     daLista("p1", "preço internet residencial", 170), daLista("b1", "vivo internet residencial", 2400), daLista("b2", "internet residencial claro ou vivo", 110)];
   const propostas = planArticleImprovements({ targets: alvos, keywords, evidence: [], serpVocabulary: { t1: vocab } });
   const de = (id: string) => propostas.find(p => p.targetId === id)!;
-  assert.deepEqual(["v1", "v2", "v3"].filter(id => de("l1").memberIds.includes(id)), ["v1", "v2", "v3"], "as três variantes no Pilar");
+  // 2026-10-17 · SUBSTITUÍDO "as três variantes no Pilar": a mesma busca entra no máximo duas vezes (as de maior volume) e nunca vai para outro artigo.
+  assert.deepEqual(["v1", "v2", "v3"].filter(id => de("l1").memberIds.includes(id)), ["v1", "v2"], "as duas de maior volume no Pilar");
   assert.ok(!["v1", "v2", "v3"].some(id => de("t1").memberIds.includes(id)), "nenhuma variante dividida com 'barata'");
+  assert.ok(!propostas.some(p => p.memberIds.includes("v3")), "a terceira grafia da mesma busca não vai para outro artigo");
   assert.ok(de("t1").memberIds.includes("p1"), "'barata' fica com 'preço internet residencial'");
   assert.ok(!de("t1").memberIds.includes("b1") && !de("t1").memberIds.includes("b2"), "'barata' não nomeia operadora: a busca com marca não entra");
   assert.ok(de("l2").memberIds.includes("b2"), "a busca com marca vai para o artigo que nomeia as operadoras");
@@ -348,7 +354,7 @@ test("2026-10-17 · sementes sem procurar à toa: palavra solta do DNA não seme
   assert.ok(!sementes.some(seed => /claro/i.test(seed)), "o artigo não nomeia operadora: a relacionada com marca não semeia");
   const operadoras = doPlano("l2", "claro vivo ou tim internet residencial", "Claro, Vivo ou TIM para casa: como comparar onde você mora", "claro-vivo-tim-internet-residencial", "claro vivo ou tim internet", {});
   const deles = improvementDiscoverySeeds(operadoras.t, new Map([[operadoras.k.id, operadoras.k]]), { ...vocab, keywordId: "l2", relatedSearches: ["Claro internet residencial"] }, []);
-  assert.ok(deles.includes("Claro internet residencial"), "o artigo que nomeia a marca recebe a semente dela");
+  assert.ok(deles.some(seed => normalizeKeyword(seed) === "claro internet residencial"), "o artigo que nomeia a marca recebe a semente dela");
 });
 
 test("2026-10-17 · a variante de uma secundária que JÁ está num artigo do Silo fica com esse artigo, nunca vai para outro", () => {
