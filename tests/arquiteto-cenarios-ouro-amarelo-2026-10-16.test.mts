@@ -9,6 +9,10 @@ import { ATOR, linhaDaMesa } from "./arquiteto-assunto-fixtures.mts";
 import { planGroupSiloClosure, planSheetConclusionChecklist, planSheetPreviewLines, planSheetSequence, planSheetWorkingCopyLines } from "../lib/arquiteto/plan-article-sheet.ts";
 import { resolveSiloDeclaredGroup } from "../lib/arquiteto/silo-declared-plan.ts";
 import { NO_REINFORCEMENT_FOUND_LABEL } from "../lib/arquiteto/article-improvement.ts";
+import { improvementReadingLines } from "../lib/arquiteto/article-improvement-next-step.ts";
+import { choosePlanSiloTerritory, declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, resolveLinksSilo } from "../lib/arquiteto/declared-plan-silo.ts";
+import { keywordIdsInArticleDnas, splitUngroupedBySubjectAnchor } from "../lib/arquiteto/declared-subject.ts";
+import { territoryUndoRefusals, territoryUndoWholeSiloReasons } from "../lib/arquiteto/territory-undo.ts";
 
 /*
  * CENÁRIO-OURO DO AMARELO DA WIFICONECTA (16/10) — SDD
@@ -48,6 +52,11 @@ import { NO_REINFORCEMENT_FOUND_LABEL } from "../lib/arquiteto/article-improveme
  *    parecer usa a SERP da principal. SUBSTITUÍDO: "a principal sem volume não
  *    tem SERP coletada; a coleta paga é a da secundária de mais volume (D2a)"
  *    (manhã de 17/10);
+ *  - 2026-10-17 (noite) · "PILAR TROCA, SUPORTES FICAM" (dono): o Pilar (l1),
+ *    Livre e sem volume, recebe a proposta do termo-cabeça com volume que leva o
+ *    núcleo do slug ("planos de internet residencial", 6.600); "plano de internet
+ *    residencial" (2.900) fica secundária; "como escolher…" fica como o Assunto.
+ *    A SERP paga do Pilar é a do termo-cabeça. Os 3 Suportes Livres ficam;
  *  - UMA confirmação incorpora as novas (import, Lógica, Volume pela medição
  *    da prévia, aprovação, envio) e grava os 8 ArticleDNAs;
  *  - nada que veio do Minerador é alterado (as 8 originais byte a byte) e
@@ -115,8 +124,10 @@ const IDEIAS: Array<[string, number]> = [
   ["tim claro ou vivo", 90], ["vivo ou tim qual a melhor internet", 30],
   ["combo tv internet e celular", 320], ["combo tv e celular", 10],
   // Fora do assunto, cabeça de outro artigo ou busca local: medidas ou não, nunca entram.
+  // 2026-10-18 · SUBSTITUÍDO "instalação de internet" (1.900, fixture) aqui: a cabeça da faceta da instalação é da semente
+  // curta da faceta (abaixo, com os números REAIS do refazedor) e reforça o Suporte da instalação (não é cabeça do Pilar).
   ["entra na conta do google", 90500], ["qual é o meu cep", 74000], ["primeira fatura claro", 1900],
-  ["vivo internet residencial", 22200], ["internet residencial barata sp", 90], ["instalação de internet", 1900], ["internet com tv por assinatura", 1000],
+  ["vivo internet residencial", 22200], ["internet residencial barata sp", 90], ["internet com tv por assinatura", 1000],
 ];
 /*
  * 2026-10-17 (noite) · O GOOGLE ADS SÓ DEVOLVE AS RELACIONADAS PARA A SEMENTE CURTA (o real: 2 ideias para "combo internet
@@ -132,10 +143,18 @@ const IDEIAS_POR_SEMENTE: Array<{ semente: string; ideias: Array<[string, number
   { semente: "combo internet tv", ideias: [["internet e tv residencial", 170], ["tv e internet residencial", 110], ["plano de internet e tv residencial", 110], ["tv box sem internet", 110]] },
   { semente: "combo internet streaming", ideias: [["combo internet e streaming", 210], ["combo de internet e streaming", 50]] },
   { semente: "taxas de instalação de internet", ideias: [["taxa de instalação de internet", 260], ["prazo de instalação de internet", 90], ["primeira fatura de internet", 50]] },
+  /*
+   * 2026-10-18 · REAIS (refazedor da WifiConecta, 18/10): a semente curta da cabeça da faceta ("instalação de internet")
+   * traz a cabeça da PRÓPRIA faceta do Suporte. "internet instalação" e "instalação internet" têm o mesmo volume (880): o
+   * Google Ads agrupa as grafias da mesma busca — é uma linha só (RF19).
+   */
+  { semente: "instalação de internet", ideias: [["internet instalação", 880], ["instalação internet", 880], ["instalação de internet", 720]] },
 ];
 const VOLUME_DA_IDEIA = new Map([...IDEIAS, ...IDEIAS_POR_SEMENTE.flatMap(g => g.ideias)].map(([k, v]) => [normalizeKeyword(k), v]));
 // Fora: sem o assunto, local, cabeça mais ampla de um Suporte, a busca com marca num artigo que não nomeia a marca e a palavra própria de outro artigo.
-const FORA = ["entra na conta do google", "qual é o meu cep", "primeira fatura claro", "vivo internet residencial", "internet residencial barata sp", "instalação de internet", "combo claro tv internet e celular", "claro internet residencial", "tim internet residencial", "combo tv e celular", "tv box sem internet"];
+// 2026-10-18 · "instalação de internet" SAIU desta lista (é a cabeça da faceta do t4 e o reforça); entra "instalação internet",
+// a mesma linha do Google Ads de "internet instalação" (a mesma busca, o mesmo volume): não ocupa outra vaga.
+const FORA = ["entra na conta do google", "qual é o meu cep", "primeira fatura claro", "vivo internet residencial", "internet residencial barata sp", "instalação internet", "combo claro tv internet e celular", "claro internet residencial", "tim internet residencial", "combo tv e celular", "tv box sem internet"];
 /**
  * O que cada artigo deve receber (keyword nova → artigo). 2026-10-17 · nos Livres a principal FICA (identidade:
  * está no título e no slug do plano) e é a SERP DELA a paga na primeira coleta; `base` é a secundária de mais volume,
@@ -145,19 +164,43 @@ const FORA = ["entra na conta do google", "qual é o meu cep", "primeira fatura 
  *  - l1: SUBSTITUÍDO "as 5 variantes": "plano internet residencial" é a terceira grafia da mesma busca — no máximo duas;
  *  - l2: reforço equilibrado por entidade (Claro, Vivo, TIM) e comparações; a Vivo não ocupa mais as 4 vagas;
  *  - l4: as de TV e as de streaming; "combo tv internet e celular" fica no t2 (leva a principal inteira dele);
- *  - t4: as sementes das facetas (taxas, prazo, primeira fatura) trazem o reforço que faltava.
+ *  - t4: as sementes das facetas (taxas, prazo, primeira fatura) trazem o reforço que faltava;
+ *  - t4, 2026-10-18 · a cabeça da PRÓPRIA faceta ("instalação de internet" 720 e "internet instalação" 880) reforça o
+ *    contexto do Suporte — SUBSTITUÍDO "fica fora como cabeça do Pilar": cabeça do Pilar é só a do núcleo do Pilar/Silo.
  */
 const ESPERADO: Record<string, { base?: string; novas: string[]; previa?: string[] }> = {
   t1: { novas: ["preço internet residencial", "internet residencial mais barata"] },
   t2: { novas: ["melhor combo internet e celular", "combo internet e celular vale a pena", "combo tv internet e celular"] },
   t3: { novas: ["operadoras que atendem meu cep", "melhor internet no meu cep"] },
-  t4: { novas: ["taxa de instalação de internet", "prazo de instalação de internet", "primeira fatura de internet"] },
+  t4: { novas: ["taxa de instalação de internet", "prazo de instalação de internet", "primeira fatura de internet", "internet instalação", "instalação de internet"] },
   l1: { base: "planos de internet residencial", novas: ["planos de internet residencial", "plano de internet residencial", "melhores planos de internet residencial", "melhor plano de internet residencial"] },
   l2: { base: "internet residencial vivo", novas: ["internet residencial vivo", "claro residencial internet", "tim residencial internet", "tim claro ou vivo", "vivo ou tim qual a melhor internet"] },
   l3: { base: "quantos mega de internet eu preciso", novas: ["quantos mega de internet eu preciso", "quantos mega preciso"] },
   l4: { base: "combo internet e streaming", novas: ["combo internet e streaming", "combo de internet e streaming", "internet com tv por assinatura", "internet e tv residencial", "plano de internet e tv residencial"], previa: ["combo internet e streaming", "combo de internet e streaming"] },
 };
 const naPrevia = (id: string) => ESPERADO[id].previa ?? ESPERADO[id].novas;
+/*
+ * 2026-10-17 (noite) · DECISÃO DO DONO: "PILAR TROCA, SUPORTES FICAM". O Pilar (l1) é Livre e sem volume; mesmo com a
+ * principal de identidade, ele recebe a proposta do termo-cabeça com volume que leva o núcleo do slug (plano + internet +
+ * residencial) e a centralidade: entre "planos de internet residencial" (6.600) e "plano de internet residencial" (2.900)
+ * — a mesma busca, as duas levam o núcleo, mesma cauda —, a de mais volume. A outra fica secundária; "como escolher…"
+ * fica como o Assunto (âncora), com o título e o slug do plano. Os 3 Suportes de identidade continuam com a principal.
+ */
+const PILAR_CABECA = "planos de internet residencial";
+const SUPORTES_LIVRES = LIVRES.filter(id => id !== "l1");
+/*
+ * 2026-10-18 · SUBSTITUÍDO "Pilar troca, Suportes ficam" (SDD do Assunto pela principal §6.3-b, cenário Z12): o Suporte de
+ * volume 0 ("sem média") também recebe a proposta — a principal nova é a FACETA dele com volume, que leva o núcleo do slug
+ * e cabe no Assunto (régua c). No amarelo só o l3 tem essa faceta: "quantos mega de internet eu preciso" (90), a mesma
+ * busca de "quantos mega de internet preciso" (sem média). O l2 e o l4 só têm pedaços da principal (cabeças do Pilar ou
+ * das operadoras): a principal fica, a prévia diz "Volume 0 sem candidata", e as mais amplas reforçam o contexto.
+ */
+const SUPORTE_TROCA: Record<string, string> = { l3: "quantos mega de internet eu preciso" };
+const SUPORTES_QUE_FICAM = SUPORTES_LIVRES.filter(id => !SUPORTE_TROCA[id]);
+/** A principal de cada Livre depois da prévia: o Pilar ganha o termo-cabeça; o l3 a faceta com volume; os outros Suportes ficam. */
+const principalDoLivre = (id: string) => id === "l1" ? PILAR_CABECA : SUPORTE_TROCA[id] ?? PLANO.find(l => l.id === id)!.keyword;
+/** A SERP paga na primeira coleta: a da principal de cada Livre (a do Pilar é a do termo-cabeça, com volume). */
+const SERP_PAGA = LIVRES.map(id => normalizeKeyword(principalDoLivre(id))).sort();
 
 /* ------------------------------------------------------ estado em memória */
 
@@ -203,10 +246,27 @@ const runtime = () => {
 
 /* ----------------------------------------------------------- os dublês */
 
+/** O Silo do plano amarelo como o store o devolve; `estado` muda para "consolidated" depois do Concluir (o banco de 18/10). */
+const territorioDoPlano = (estado: "confirmed" | "consolidated") => ({ territoryRef: TERRITORIO, lockVersion: estado === "consolidated" ? 4 : 1, territory: { name: "Planos e contratação", lifecycleStatus: estado, centralEntity: "planos de internet", macroIntent: "Informativa", reasons: [], slugState: { publishedSlug: null, confirmed: "planos-e-contratacao", proposals: [] } } });
+let territoriosDoStore: any[] = [territorioDoPlano("confirmed")];
+const territoriosCriados: any[] = [];
 mock.module("../lib/server/arquiteto-territory-store.ts", { namedExports: {
-  listTerritoryWorkflowItems: async () => [{ territoryRef: TERRITORIO, lockVersion: 1, territory: { name: "Planos e contratação", lifecycleStatus: "confirmed", centralEntity: "planos de internet", macroIntent: "Informativa", reasons: [], slugState: { publishedSlug: null, confirmed: "planos-e-contratacao", proposals: [] } } }],
-  createTerritoryWorkflowItem: async () => { throw new Error("criar território não é esperado"); },
+  listTerritoryWorkflowItems: async () => clone(territoriosDoStore),
+  // 2026-10-18 · criar território é o defeito do duplicado: fica registrado (e a asserção diz se aconteceu).
+  createTerritoryWorkflowItem: async (_c: any, draft: any) => { territoriosCriados.push(clone(draft)); return { territoryRef: "territory:duplicado", lockVersion: 1, territory: { ...clone(draft), territoryRef: "territory:duplicado" } }; },
   updateTerritoryWorkflowItem: async () => { throw new Error("atualizar território não é esperado"); },
+} });
+/* 2026-10-18 · os grupos (a etiqueta amarela com o plano e o silo_id) para o envio das keywords novas ao Arquiteto. */
+let siloDoGrupo: string | null = TERRITORIO;
+const ligacoesDoGrupo: string[] = [];
+const gruposActual = await import("../lib/editorial/article-groups-store.ts");
+mock.module("../lib/editorial/article-groups-store.ts", { namedExports: { ...gruposActual,
+  readKeywordGroupInfo: async (_client: any, _brand: string, ids: readonly string[]) => ({ ok: true, info: new Map(ids.map(id => [id, { keyword: doMinerador(id)?.keyword ?? null, groupId: doMinerador(id)?.group_id ?? AMARELO }])) }),
+} });
+const planosActual = await import("../lib/editorial/editorial-groups-store.ts");
+mock.module("../lib/editorial/editorial-groups-store.ts", { namedExports: { ...planosActual,
+  listEditorialGroupPlans: async () => ({ ok: true, groups: [{ id: AMARELO, name: "Planos e contratação", color: "amarelo", origin: "declared_plan", status: "active", plan: { siloName: "Planos e contratação", siloSlug: "planos-de-internet", objective: null, articleCount: 8 }, planVersion: 3, planHash: null, siloId: siloDoGrupo, lockVersion: 1 }] }),
+  linkEditorialGroupSilo: async (_client: any, input: any) => { ligacoesDoGrupo.push(input.siloId); return { ok: true }; },
 } });
 mock.module("../lib/arquiteto/canonical-workspace.ts", { namedExports: { buildCanonicalWorkflowWorkspaceItems: (_w: any, k: any) => k } });
 const recortado = (filtro: any) => {
@@ -345,15 +405,18 @@ mock.module("../lib/server/google-ads-canonical.ts", { namedExports: {
 let semIdeias = false;
 /** 2026-10-17 (noite) · o Google Ads que não devolve nada para as facetas da instalação (o caso do "adequado" falso). */
 let semFacetasDaInstalacao = false;
+/** 2026-10-18 · o Google Ads que ainda não devolveu a cabeça da faceta da instalação (o artigo formado com poucas keywords). */
+let semCabecaDaInstalacao = false;
 mock.module("../lib/google/ads/keyword-ideas.ts", { namedExports: { generateGoogleAdsKeywordIdeas: async (_client: any, input: any) => {
   sementes.push([...input.seed.keywords]);
   const pedidas = new Set((input.seed.keywords as string[]).map(normalizeKeyword));
-  const curtas = IDEIAS_POR_SEMENTE.filter(g => pedidas.has(normalizeKeyword(g.semente)) && !(semFacetasDaInstalacao && /instala/.test(g.semente))).flatMap(g => g.ideias);
+  const curtas = IDEIAS_POR_SEMENTE.filter(g => pedidas.has(normalizeKeyword(g.semente)) && !(semFacetasDaInstalacao && /instala/.test(g.semente)) && !(semCabecaDaInstalacao && g.semente === "instalação de internet")).flatMap(g => g.ideias);
   return { ideas: semIdeias ? [] : [...IDEIAS, ...curtas].map(([keyword]) => ({ keyword })), nextPageToken: null, requestId: "ads-ideias" };
 } } });
 mock.module("../lib/server/arquiteto-published-reinforcement.ts", { namedExports: { stableUuid: (...parts: string[]) => { const h = createHash("sha256").update(parts.join("|")).digest("hex"); return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`; } } });
 mock.module("../lib/server/arquiteto-minerador-suggestions.ts", { namedExports: { recordArquitetoMineradorSuggestionsSafely: async (_c: any, input: any) => { sugestoes.push(clone(input)); return { recorded: input.drafts.length, recordKey: "registro" }; } } });
 const { handleArticleImprovement } = await import("../lib/server/arquiteto-article-improvement.ts");
+const { materializeDeclaredPlanSilo } = await import("../lib/server/arquiteto-declared-plan-silo.ts");
 
 /* ---------------------------------------------------------------- a mesa */
 
@@ -381,9 +444,10 @@ const doMineradorDe = (r: Row) => JSON.stringify({ keyword: r.keyword, status: r
 function zerar() {
   mesa = PLANO.map(linhaDoPlano);
   minerador = mesa.map(r => ({ id: r.id, keyword: r.keyword, brand_id: MARCA, status: r.status, intent: r.intent, volume_search: r.volume_search, volume_source: r.volume_source, group_id: AMARELO, analise_semantica: clone(r.analise_semantica) }));
-  gravacoes = []; journal = []; assessments = []; marker = null; pagas = []; pago = 0; sementes = []; medicoes = []; sugestoes = []; observeFlags = []; parecerPelasSustentacoes = []; semIdeias = false; semFacetasDaInstalacao = false;
+  gravacoes = []; journal = []; assessments = []; marker = null; pagas = []; pago = 0; sementes = []; medicoes = []; sugestoes = []; observeFlags = []; parecerPelasSustentacoes = []; semIdeias = false; semFacetasDaInstalacao = false; semCabecaDaInstalacao = false;
   for (const lista of Object.values(chamadas)) lista.length = 0;
   autorizados.length = 0; proximoId = 0;
+  territoriosDoStore = [territorioDoPlano("confirmed")]; territoriosCriados.length = 0; siloDoGrupo = TERRITORIO; ligacoesDoGrupo.length = 0;
   // A SERP das 4 lentes da principal de cada Travado já está no cache (coletada em 16/10).
   serpEmCache = new Set(PLANO.filter(l => l.volume).map(l => normalizeKeyword(l.keyword)));
 }
@@ -440,20 +504,48 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
     assert.deepEqual(p.addIds.map((k: string) => palavra(previa, k)).sort(), [...ESPERADO[id].novas].sort(), `${id}: ${JSON.stringify(p.reasons)}`);
     assert.ok(p.reasons.some((r: string) => /em cache, grátis|mesma busca da principal|Assunto, slug e DNA/.test(r)), JSON.stringify(p.reasons));
   }
-  // 2026-10-17 · Principal de identidade: os 4 Livres sem volume estão no título e no slug do plano — a principal FICA e as mais amplas reforçam.
-  for (const id of LIVRES) {
+  // 2026-10-17 · Principal de identidade: os 3 Suportes Livres sem volume estão no título e no slug do plano — a principal FICA e as mais amplas reforçam.
+  // 2026-10-17 (noite) · SUBSTITUÍDO "os 4 Livres" — o Pilar troca pelo termo-cabeça ("Pilar troca, Suportes ficam", abaixo).
+  // 2026-10-18 · o l3 recebe a proposta da faceta com volume (Z12); a "sem média" sai das keywords e fica como o Assunto.
+  for (const [id, nova] of Object.entries(SUPORTE_TROCA)) {
+    const p = de(previa, id), linha = PLANO.find(l => l.id === id)!;
+    assert.equal(palavra(previa, p.principalId), nova, `${id}: a faceta com volume assume (${JSON.stringify(p.reasons)})`);
+    assert.ok(!p.memberIds.includes(id), `${id}: a keyword do Assunto sai das keywords (fica como o Assunto)`);
+    assert.ok(p.reasons.some((r: string) => r.startsWith(`Assunto pela principal (SDD 2026-10-18): “${linha.keyword}” tem volume 0; “${nova}” (90) assume como principal`)), JSON.stringify(p.reasons));
+  }
+  for (const id of SUPORTES_QUE_FICAM) {
     const p = de(previa, id), linha = PLANO.find(l => l.id === id)!;
     assert.equal(p.principalId, id, `${id}: a principal de identidade fica (${JSON.stringify(p.reasons)})`);
     assert.deepEqual(p.addIds.map((k: string) => palavra(previa, k)).sort(), [...naPrevia(id)].sort(), `${id}: as mais amplas entram como secundárias (${JSON.stringify(p.reasons)})`);
     assert.deepEqual(p.memberIds.map((k: string) => palavra(previa, k)).sort(), [linha.keyword, ...naPrevia(id)].sort(), `${id}: membros`);
     assert.equal(p.needsValidation, true, `${id}: falta a SERP da principal de identidade (a primeira coleta do artigo, paga)`);
-    assert.match(p.reasons.join(" "), new RegExp(`Principal de identidade: “${linha.keyword}” \\(sem volume\\) está no título e no slug do Assunto e fica como principal`));
+    // 2026-10-18 · SUBSTITUÍDO "Principal de identidade: … fica como principal": o volume 0 libera, mas nenhuma faceta com volume passa na régua c.
+    assert.ok(p.reasons.some((r: string) => r.startsWith(`Volume 0 sem candidata: “${linha.keyword}” tem volume 0 e fica livre`)), JSON.stringify(p.reasons));
     assert.ok(!p.reasons.some((r: string) => /assume como principal/.test(r)), `${id}: nenhuma troca proposta`);
     // 2026-10-17 · a prévia de custo por artigo: o propósito, as consultas e o teto; a secundária de mais volume fica opcional.
     const fixo = (texto: string) => texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     assert.match(p.reasons.join(" "), new RegExp(fixo(`SERP da principal de identidade “${linha.keyword}” (sem buscas no Google Ads): 4 consultas, até US$ 0,014 — para ver o que o Google mostra para a frase do artigo. É a primeira coleta do artigo no DataForSEO`)));
     assert.match(p.reasons.join(" "), new RegExp(fixo(`A secundária de mais volume (“${ESPERADO[id].base}”) não é coletada por padrão; colete pelo artigo se quiser mais evidência.`)));
     assert.ok(!p.reasons.some((r: string) => /a SERP dela não é coletada/.test(r)), `${id}: SUBSTITUÍDO — a SERP da principal de identidade é coletada`);
+  }
+  /*
+   * 2026-10-17 (noite) · "PILAR TROCA, SUPORTES FICAM": o Pilar sem volume ganha a proposta do termo-cabeça com volume
+   * que leva o núcleo do slug ("planos de internet residencial", 6.600); "plano de internet residencial" (2.900), a mesma
+   * busca, fica secundária; "como escolher…" sai das keywords e fica como o Assunto (âncora). Proposta, decisão do dono.
+   */
+  {
+    const p = de(previa, "l1"), linha = PLANO.find(l => l.id === "l1")!;
+    assert.equal(palavra(previa, p.principalId), PILAR_CABECA, `l1: o termo-cabeça assume (${JSON.stringify(p.reasons)})`);
+    assert.equal(p.currentPrimaryId, "l1");
+    assert.ok(!p.memberIds.includes("l1"), "a frase do plano sai das keywords (fica como o Assunto)");
+    assert.deepEqual(p.memberIds.map((k: string) => palavra(previa, k)).sort(), [...naPrevia("l1")].sort(), "l1: membros = o termo-cabeça e as secundárias");
+    assert.ok(p.memberIds.some((k: string) => palavra(previa, k) === "plano de internet residencial"), "a outra variante fica secundária");
+    const motivo = p.reasons.join(" ");
+    assert.match(motivo, /Pilar sem volume troca pelo termo-cabeça: “planos de internet residencial” \(6600\) assume como principal do Pilar — é o termo-cabeça com volume que leva o núcleo do slug \(plano \+ internet \+ residencial\) e a centralidade do Silo/);
+    assert.match(motivo, /“plano de internet residencial” \(2900\) é a mesma busca e fica como secundária/);
+    assert.match(motivo, new RegExp(`“${linha.keyword}” continua no artigo como o Assunto \\(âncora\\), e o título e o slug do plano ficam\\. Proposta: decisão sua na prévia`));
+    assert.ok(!motivo.includes(`Principal de identidade: “${linha.keyword}”`), "o Pilar não ouve 'fica como principal'");
+    assert.equal(p.needsValidation, true, "falta a SERP do termo-cabeça (a primeira coleta do Pilar, paga, custo antes)");
   }
   for (const p of previa.proposals) for (const id of p.memberIds) assert.ok(!FORA.includes(palavra(previa, id)), `${p.targetId}: “${palavra(previa, id)}” não podia entrar`);
   // Regras do Silo (2026-10-17): as variantes da MESMA busca vão todas para o Pilar; a busca com marca só vai para o artigo que nomeia as operadoras.
@@ -478,9 +570,10 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
   assert.deepEqual(ondeEsta("combo tv e celular"), []);
   // A conta paga (2026-10-17, régua única): só a primeira SERP da PRINCIPAL DE IDENTIDADE de cada Livre (4 lentes cada) = 16 consultas,
   // até US$ 0,056 (US$ 0,014 por artigo). A secundária de mais volume não entra por padrão (evita o gasto duplo).
+  // 2026-10-17 (noite) · a do Pilar é a SERP do termo-cabeça (com volume): "como escolher…" deixa de ser a principal e não é paga.
   assert.equal(previa.costs.paidQueries, 16, JSON.stringify(previa.costs.missingDetails));
-  assert.deepEqual([...new Set(previa.costs.missingDetails.map((d: any) => d.keyword))].sort(), LIVRES.map(id => normalizeKeyword(PLANO.find(l => l.id === id)!.keyword)).sort());
-  assert.ok(!previa.costs.missingDetails.some((d: any) => LIVRES.some(id => normalizeKeyword(ESPERADO[id].base!) === d.keyword)), "a secundária de mais volume não é coletada por padrão");
+  assert.deepEqual([...new Set(previa.costs.missingDetails.map((d: any) => d.keyword))].sort(), SERP_PAGA);
+  assert.ok(!previa.costs.missingDetails.some((d: any) => SUPORTES_QUE_FICAM.some(id => normalizeKeyword(ESPERADO[id].base!) === d.keyword)), "a secundária de mais volume não é coletada por padrão");
   assert.equal(previa.costs.estimatedCostUsd.max, 0.056);
   assert.ok(observeFlags.length > 0 && observeFlags.every(Boolean), "o parecer pelo cache sai pela SERP da principal (apoio sem SERP fica não observado)");
   assert.equal(sugestoes.length, 0, "keyword nova não vira 'Sugestões do Arquiteto'");
@@ -497,7 +590,7 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
   for (let volta = 0; coleta.state === "collecting" && volta < 10; volta += 1) coleta = await handleArticleImprovement(runtime(), { brandId: MARCA, action: "collect", runId: previa.runId, decisionHash: coleta.decisionHash } as any);
   assert.equal(coleta.state, "prepared");
   assert.equal(pago, 16);
-  assert.deepEqual(pagas.map(normalizeKeyword).sort(), LIVRES.map(id => normalizeKeyword(PLANO.find(l => l.id === id)!.keyword)).sort(), "só a SERP da principal de identidade de cada Livre; nenhuma secundária nem candidata foi paga");
+  assert.deepEqual(pagas.map(normalizeKeyword).sort(), SERP_PAGA, "só a SERP da principal de cada Livre (a de identidade dos Suportes; o termo-cabeça do Pilar); nenhuma secundária nem candidata foi paga");
   for (const id of [...TRAVADOS, ...LIVRES]) assert.equal(de(coleta, id).status, "ready", `${id}: ${JSON.stringify(de(coleta, id).reasons)}`);
   // 2026-10-17 (noite) · com a SERP da principal de identidade no cache, o vocabulário DELA guia o reforço (l4: as de TV entram).
   for (const id of [...TRAVADOS, ...LIVRES]) assert.deepEqual(de(coleta, id).addIds.map((k: string) => palavra(coleta, k)).sort(), [...ESPERADO[id].novas].sort(), `${id} depois da coleta: ${JSON.stringify(de(coleta, id).reasons)}`);
@@ -509,7 +602,9 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
   }
   // O artigo forma com a principal de identidade SEM volume e o parecer usa a SERP DELA (não é mais D2a), sem trocar a principal.
   assert.deepEqual(parecerPelasSustentacoes, [], "com a SERP da principal de identidade no cache, o parecer usa ela");
-  for (const id of LIVRES) assert.equal(de(coleta, id).principalId, id, `${id}: a principal fica depois da coleta`);
+  for (const [id, nova] of Object.entries(SUPORTE_TROCA)) assert.equal(palavra(coleta, de(coleta, id).principalId), nova, id + ": a faceta com volume continua proposta depois da coleta");
+  for (const id of SUPORTES_QUE_FICAM) assert.equal(de(coleta, id).principalId, id, `${id}: a principal fica depois da coleta`);
+  assert.equal(palavra(coleta, de(coleta, "l1").principalId), PILAR_CABECA, "l1: o Pilar continua com a proposta do termo-cabeça depois da coleta");
   assert.deepEqual(chamadas, { import: [], logic: [], measure: [], approve: [], handoff: [] }, "a coleta não toca o Minerador");
 
   // C · UMA confirmação: sem o aceite explícito das novas, nada é gravado.
@@ -519,7 +614,7 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
   assert.equal(fim.state, "complete", JSON.stringify(fim.outcomes));
   assert.ok(fim.outcomes.every((o: any) => o.status === "improved" || o.status === "dna_created"), JSON.stringify(fim.outcomes));
   for (const permissao of ["minerador:create", "minerador:edit", "minerador:approve", "arquiteto:create", "arquiteto:approve"]) assert.ok(autorizados.includes(permissao), `pediu ${permissao}`);
-  // Entraram as 15 novas — e só elas — pelos núcleos do Minerador.
+  // Entraram as novas (2026-10-18: mais as 2 da cabeça da faceta da instalação) — e só elas — pelos núcleos do Minerador.
   const todasNovas = Object.values(ESPERADO).flatMap(e => e.novas);
   assert.deepEqual([...chamadas.import].sort(), [...new Set(todasNovas)].sort());
   for (const lista of [chamadas.logic, chamadas.measure, chamadas.approve, chamadas.handoff] as string[][]) assert.ok(lista.length === todasNovas.length && lista.every(id => id.startsWith("nova-")), JSON.stringify(lista));
@@ -530,7 +625,28 @@ test("amarelo · §15 de ponta a ponta: sementes do plano e do DNA, reforço pel
     const dna = porAssunto.get(l.id);
     assert.ok(dna, `${l.id}: artigo gravado`);
     const textos = dna.keywordReferences.map((r: any) => mesa.find(m => m.id === r.keywordId)?.keyword);
-    assert.equal(dna.principalKeywordId, l.id, `${l.id}: a principal continua a mesma (Travada, ou Livre de identidade)`);
+    if (l.id === "l1") {
+      // 2026-10-17 (noite) · o Pilar grava com o termo-cabeça como principal; a frase do plano é o Assunto (fora das seis), com o slug do plano.
+      assert.equal(mesa.find(m => m.id === dna.principalKeywordId)?.keyword, PILAR_CABECA, "l1: o termo-cabeça é a principal");
+      assert.ok(!textos.includes(l.keyword), "l1: a frase do plano não é keyword do artigo (é o Assunto)");
+      assert.equal(dna.subject?.keywordId, "l1", "l1: a frase do plano fica como o Assunto (âncora)");
+      assert.deepEqual([...textos].sort(), [...ESPERADO.l1.novas].sort());
+      assert.ok(dna.serpAssessmentRef, "l1: aprovado com o parecer da SERP do termo-cabeça");
+      assert.equal(dna.suggestedSlug, l.slug, "l1: o slug do plano fica");
+      assert.equal(dna.hierarchy, l.role);
+      assert.equal(dna.promise, l.scope);
+      continue;
+    }
+    // 2026-10-18 · Z12: o l3 grava com a faceta com volume como principal; a "sem média" fica como o Assunto (fora das seis), com o slug do plano.
+    if (SUPORTE_TROCA[l.id]) {
+      assert.equal(mesa.find(m => m.id === dna.principalKeywordId)?.keyword, SUPORTE_TROCA[l.id], `${l.id}: a faceta com volume é a principal`);
+      assert.ok(!textos.includes(l.keyword), `${l.id}: a keyword do Assunto não é keyword do artigo`);
+      assert.equal(dna.subject?.keywordId, l.id, `${l.id}: fica como o Assunto`);
+      assert.equal(dna.suggestedSlug, l.slug, `${l.id}: o slug do plano fica`);
+      assert.ok(dna.serpAssessmentRef, `${l.id}: aprovado com o parecer`);
+      continue;
+    }
+    assert.equal(dna.principalKeywordId, l.id, `${l.id}: a principal continua a mesma (Travada, ou Suporte Livre de identidade)`);
     assert.deepEqual(textos.filter((t: string) => t !== l.keyword).sort(), [...ESPERADO[l.id].novas].sort());
     if (l.lock === "free") {
       assert.ok(textos.includes(l.keyword), `${l.id}: a principal de identidade está entre as keywords`);
@@ -611,11 +727,14 @@ test("amarelo · OS 3 BOTÕES pela barra: Processar (reforço grátis + custo da
   assert.deepEqual(chamadas, { import: [], logic: [], measure: [], approve: [], handoff: [] }, "Processar não toca o Minerador");
   assert.equal(processado.costs.paidQueries, 16);
   assert.equal(processado.costs.estimatedCostUsd.max, 0.056);
-  assert.deepEqual([...new Set(processado.costs.missingDetails.map((d: any) => d.keyword))].sort(), LIVRES.map(id => normalizeKeyword(PLANO.find(l => l.id === id)!.keyword)).sort(), "a SERP paga é só a da principal de identidade de cada Livre");
+  assert.deepEqual([...new Set(processado.costs.missingDetails.map((d: any) => d.keyword))].sort(), SERP_PAGA, "a SERP paga é só a da principal de cada Livre (a do Pilar: o termo-cabeça)");
   assert.match(processado.reading?.sentences.missing ?? "", /^Falta: 16 consulta\(s\) de SERP/, "nunca 'Falta: nada' com a SERP por pagar");
   const copia = planSheetWorkingCopyLines(processado, linhas);
   for (const id of TRAVADOS) assert.match(copia.find(c => c.keywordId === id)!.text, /^Cópia de trabalho \(nada gravado\): principal “.+” \(Travada, fica\) · secundárias: .*, nova\)/, id);
-  for (const id of LIVRES) assert.match(copia.find(c => c.keywordId === id)!.text, /\(identidade, fica\) · secundárias: .*\. Falta a SERP da principal: “Processar artigos” coleta, com o custo antes\.$/, id);
+  for (const [id, nova] of Object.entries(SUPORTE_TROCA)) assert.ok(copia.find(c => c.keywordId === id)!.text.includes("principal “" + nova + "” (troca proposta: “" + PLANO.find(l => l.id === id)!.keyword + "” → esta; decisão sua)"), copia.find(c => c.keywordId === id)!.text);
+  for (const id of SUPORTES_QUE_FICAM) assert.match(copia.find(c => c.keywordId === id)!.text, /\(identidade, fica\) · secundárias: .*\. Falta a SERP da principal: “Processar artigos” coleta, com o custo antes\.$/, id);
+  // 2026-10-17 (noite) · o Pilar: a troca proposta pelo termo-cabeça, na cópia de trabalho (nada gravado; decisão do dono).
+  assert.match(copia.find(c => c.keywordId === "l1")!.text, /principal “planos de internet residencial” \(troca proposta: “como escolher plano de internet residencial” → esta; decisão sua\) · secundárias: .*“plano de internet residencial”/);
   assert.equal(planSheetSequence({ rows: linhas, processedIds: processadasDe(processado), pendingIds: new Set() }).step, "process", "com a SERP por pagar, o passo 1 não terminou para os Livres");
 
   const coleta = await coletar(processado);
@@ -629,7 +748,9 @@ test("amarelo · OS 3 BOTÕES pela barra: Processar (reforço grátis + custo da
   const previa = planSheetPreviewLines(coleta, linhas);
   assert.ok(previa.every(l => l.kind === "will_write"), JSON.stringify(previa));
   for (const id of TRAVADOS) assert.match(previa.find(l => l.keywordId === id)!.sentence, /^Vai gravar: nova versão \(v2\) · principal/, id);
-  for (const id of LIVRES) assert.match(previa.find(l => l.keywordId === id)!.sentence, /^Vai gravar: primeiro ArticleDNA \(v1\) · principal “.+” \(identidade, fica\)/, id);
+  for (const [id, nova] of Object.entries(SUPORTE_TROCA)) assert.ok(previa.find(l => l.keywordId === id)!.sentence.startsWith("Vai gravar: primeiro ArticleDNA (v1) · principal “" + nova + "” (troca proposta"), previa.find(l => l.keywordId === id)!.sentence);
+  for (const id of SUPORTES_QUE_FICAM) assert.match(previa.find(l => l.keywordId === id)!.sentence, /^Vai gravar: primeiro ArticleDNA \(v1\) · principal “.+” \(identidade, fica\)/, id);
+  assert.match(previa.find(l => l.keywordId === "l1")!.sentence, /^Vai gravar: primeiro ArticleDNA \(v1\) · principal “planos de internet residencial” \(troca proposta: “como escolher plano de internet residencial” → esta; decisão sua\)/);
   assert.ok(previa.every(l => !/Procurar outra principal|Buscar sustentação/.test(l.sentence)), "a regra da principal de identidade chega ao Concluir");
   const checklist = planSheetConclusionChecklist({ lines: previa, rows: linhas, proposals: coleta.proposals, groupRows: linhas });
   assert.deepEqual(checklist.map(item => [item.key, item.ok]), [["principal", true], ["reforco", true], ["serp", true], ["plano", true], ["silo", true]], JSON.stringify(checklist));
@@ -643,7 +764,9 @@ test("amarelo · OS 3 BOTÕES pela barra: Processar (reforço grátis + custo da
     const dna = dnas.find(v => v.payload.subject?.keywordId === l.id)!;
     assert.ok(dna, l.id);
     assert.equal(dna.versionNumber, l.lock === "locked" ? versoesAntes.get(l.id)! + 1 : 1, `${l.id}: ${l.lock === "locked" ? "v2 (reforço)" : "v1"}`);
-    assert.equal(dna.payload.principalKeywordId, l.id, `${l.id}: a principal fica (Travada ou de identidade)`);
+    if (l.id === "l1") assert.equal(mesa.find(m => m.id === dna.payload.principalKeywordId)?.keyword, PILAR_CABECA, "l1: o Pilar grava com o termo-cabeça");
+    else if (SUPORTE_TROCA[l.id]) assert.equal(mesa.find(m => m.id === dna.payload.principalKeywordId)?.keyword, SUPORTE_TROCA[l.id], `${l.id}: grava com a faceta com volume (Z12)`);
+    else assert.equal(dna.payload.principalKeywordId, l.id, `${l.id}: a principal fica (Travada ou Suporte de identidade)`);
     assert.ok(dna.payload.keywordReferences.length > 1, `${l.id}: com reforço`);
     assert.equal(dna.payload.hierarchy, l.role);
     assert.ok(dna.payload.serpAssessmentRef, `${l.id}: aprovado com o parecer`);
@@ -709,7 +832,10 @@ test("amarelo · 'adequado' só com reforço suficiente: a Travada da instalaç�
   assert.equal(p.status, "adequate", JSON.stringify(p.reasons));
   assert.deepEqual(p.addIds, []);
   const motivo = p.reasons.find((r: string) => r.startsWith(NO_REINFORCEMENT_FOUND_LABEL)) ?? "";
-  assert.match(motivo, /“instalação de internet” \(1900\) é mais ampla que a principal \(cabeça do Pilar\)/, JSON.stringify(p.reasons));
+  // 2026-10-18 · SUBSTITUÍDO "“instalação de internet” (1900) é mais ampla que a principal (cabeça do Pilar)": a cabeça da
+  // faceta reforça o Suporte (cenário G); sem nenhuma ideia da instalação, a linha diz que nenhuma coube.
+  assert.match(motivo, /nenhuma keyword com volume da lista da marca nem das ideias do Google Ads desta leitura cabe no Assunto, no slug e no DNA do artigo/, JSON.stringify(p.reasons));
+  assert.doesNotMatch(p.reasons.join(" "), /cabeça do Pilar/, "a faceta do Suporte nunca é dita 'cabeça do Pilar'");
   const [linha] = planSheetPreviewLines(sem, [linhaDaPlanilha(t4)]);
   assert.equal(linha.kind, "adequate");
   assert.match(linha.sentence, /^Sem keyword de reforço encontrada: .* Nada a gravar\.$/);
@@ -722,5 +848,234 @@ test("amarelo · 'adequado' só com reforço suficiente: a Travada da instalaç�
   assert.equal(q.status, "ready", JSON.stringify(q.reasons));
   assert.deepEqual(q.addIds.map((k: string) => palavra(com, k)).sort(), [...ESPERADO.t4.novas].sort());
   assert.match(planSheetPreviewLines(com, [linhaDaPlanilha(t4)])[0].sentence, /^Vai gravar: nova versão \(v2\)/);
+  assert.equal(chamadasDeRede, 0);
+});
+
+/* =================================================================== */
+/*
+ * 2026-10-18 · DEPOIS DO CONCLUIR (teste no ar, verificado pelo coordenador no navegador e por SELECT). O dono rodou
+ * Processar → Concluir no amarelo: 8 ArticleDNA aprovados, 32 keywords novas, SiloDNA v1 + SiloPage v1 do
+ * territory:2318febb (consolidado, ligado ao grupo). Depois disso:
+ *  A · às 01:10 UTC nasceu territory:c8c9ee94 "Planos e contratação", confirmado e VAZIO — o envio das keywords novas
+ *      de uma segunda confirmação procurava o Silo do plano só entre candidate/confirmed e não via o consolidado;
+ *  B · "Keywords sem artigo · 32": as 32 estavam DENTRO dos ArticleDNAs, mas sem `clusterId` na cópia de trabalho;
+ *  C · Links internos: com os 8 marcados, o Silo deles não era achado ("Selecione o Silo do grafo…");
+ *  D · o refazedor mostrava só "Já feito com os mesmos insumos" e tirava da busca nova os 4 Assuntos "com lista".
+ * A MESMA linha de sempre; nenhuma porta nova.
+ */
+async function processarEConcluir() {
+  await aplicarTudo(await prepare({ targetIds: TRAVADOS, origin: "plan_sheet" }));
+  const processado = await prepare({ targetIds: PLANO.map(l => l.id), origin: "plan_sheet", discover: true });
+  const coleta = await coletar(processado);
+  const fim = await aplicarTudo({ runId: processado.runId, decisionHash: coleta.decisionHash }, { approveNewKeywords: true });
+  assert.equal(fim.state, "complete", JSON.stringify(fim.outcomes));
+  // O fechamento do Silo do plano no mesmo ato (a tela grava o par; o território fica consolidado, como no banco).
+  territoriosDoStore = [territorioDoPlano("consolidated")];
+}
+
+test("amarelo · depois do Concluir · A: o envio das keywords NOVAS ao Arquiteto acha o Silo do plano FECHADO (consolidado, ligado ao grupo) — nenhum Silo novo nasce; o duplicado vazio de 18/10 sai pelo “Desfazer Silo” de sempre", async () => {
+  zerar();
+  await processarEConcluir();
+  const novas = chamadas.handoff.slice(0, 3);
+  assert.ok(novas.length > 0, "há keywords novas da confirmação");
+  // O mesmo núcleo que o envio chama depois da releitura do recebimento (createMineradorArquitetoHandoff → materializeDeclaredPlanSilo).
+  const saida = await materializeDeclaredPlanSilo(contexto(), novas);
+  assert.deepEqual(territoriosCriados, [], "nenhum território criado: o Silo do plano é o consolidado");
+  assert.equal(saida.length, 1);
+  assert.equal(saida[0].territoryRef, TERRITORIO);
+  assert.equal(saida[0].territory, "linked");
+  assert.match(saida[0].message, /já está fechado \(SiloDNA e SiloPage\): nenhum Silo novo; as keywords novas entram nele pelo artigo/);
+  assert.deepEqual(ligacoesDoGrupo, [], "o grupo já está ligado: nada religado");
+  // Sem o silo_id no grupo, o consolidado de mesmo slug também é achado (nunca um segundo).
+  siloDoGrupo = null;
+  territoriosDoStore = [{ ...territorioDoPlano("consolidated"), territory: { ...territorioDoPlano("consolidated").territory, slugState: { publishedSlug: null, confirmed: null, proposals: [{ slug: "planos-de-internet", source: "human", rationale: "Proposta declarada na criação manual do silo." }] } } }];
+  const semLigacao = await materializeDeclaredPlanSilo(contexto(), novas);
+  assert.deepEqual(territoriosCriados, []);
+  assert.equal(semLigacao[0].territory, "slug");
+  assert.deepEqual(ligacoesDoGrupo, [TERRITORIO], "o grupo sem silo_id é ligado ao Silo do plano que já existe");
+
+  // A regra pura: o consolidado ligado vence; entre os de mesmo slug, o fechado vem antes do duplicado confirmado.
+  const slugOf = (texto: string) => normalizeKeyword(texto).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const PLANO_AMARELO = { siloName: "Planos e contratação", siloSlug: "planos-de-internet" };
+  const DUPLICADO = "territory:c8c9ee94-fe9a-429f-9358-be866e325b1f";
+  const vistas = [
+    { territoryRef: DUPLICADO, lifecycleStatus: "confirmed", slugs: [null, null, "planos-de-internet"], name: "Planos e contratação" },
+    { territoryRef: TERRITORIO, lifecycleStatus: "consolidated", slugs: [null, null, "planos-de-internet"], name: "Planos e contratação" },
+  ];
+  assert.deepEqual(choosePlanSiloTerritory({ plan: PLANO_AMARELO, linkedTerritoryRef: TERRITORIO, territories: vistas, slugOf }), { kind: "linked", territoryRef: TERRITORIO, lifecycleStatus: "consolidated" });
+  assert.deepEqual(choosePlanSiloTerritory({ plan: PLANO_AMARELO, linkedTerritoryRef: null, territories: vistas, slugOf }), { kind: "slug", territoryRef: TERRITORIO, lifecycleStatus: "consolidated" });
+  // O duplicado (vazio) não é o Silo do plano: o "Desfazer Silo" de sempre o desfaz (nada é apagado); o Silo do plano continua protegido.
+  const planos = [{ groupId: AMARELO, groupLabel: "Amarelo (Planos e contratação)", siloName: PLANO_AMARELO.siloName, siloSlug: PLANO_AMARELO.siloSlug, linkedTerritoryRef: TERRITORIO }];
+  const vivos = new Set([TERRITORIO, DUPLICADO]);
+  const visao = (ref: string, estado: string) => declaredPlanViewOfTerritory({ territoryRef: ref, lifecycleStatus: estado, name: "Planos e contratação", reasons: ["Silo do plano declarado: Planos e contratação."], provenance: { note: "Plano declarado no cadastro: grupo Amarelo (Planos e contratação), plano v3." }, slugState: { publishedSlug: null, confirmed: null, proposals: [{ slug: "planos-de-internet" }] } });
+  assert.equal(declaredPlanSiloGroupFor(visao(DUPLICADO, "confirmed"), planos, slugOf, vivos), null, "o duplicado não é o Silo do plano");
+  assert.equal(declaredPlanSiloGroupFor(visao(TERRITORIO, "consolidated"), planos, slugOf, vivos)?.groupId, AMARELO, "o ligado ao grupo é o Silo do plano");
+  assert.equal(declaredPlanSiloGroupFor(visao(DUPLICADO, "confirmed"), planos, slugOf)?.groupId, AMARELO, "sem a leitura dos vivos, a regra de antes (fecha para o lado seguro)");
+  const dnas = vigentes();
+  const territorioDuplicado = { territoryRef: DUPLICADO, name: "Planos e contratação", centralEntity: null, lifecycleStatus: "confirmed", publicationProtection: "none", slugState: { publishedSlug: null, publishedCanonical: null, confirmed: null, proposals: [] }, existingSiloRef: null, consolidation: null } as any;
+  const aprovados = dnas.map(v => ({ articleId: v.payload.articleId, territoryRef: v.payload.territoryRef ?? null, keywordIds: v.payload.keywordReferences.map((r: any) => r.keywordId) }));
+  const artefatos = [{ kind: "silo_dna" as const, territoryRef: TERRITORIO, status: "approved" }, { kind: "silo_page" as const, territoryRef: TERRITORIO, status: "approved" }];
+  assert.deepEqual(territoryUndoRefusals({ territory: territorioDuplicado, members: [], approvedArticles: aprovados, siloArtifacts: artefatos, declaredPlan: null }), [], "o duplicado vazio pode ser desfeito");
+  // 2026-10-18 (decisão do dono "Manter em duas etapas") · SUBSTITUI "o Silo do plano nunca sai pelo Desfazer": ele sai
+  // pelo MESMO "Desfazer Silo", como o Silo INTEIRO (artigos, Pilar incluído, e o par), com a prévia e a confirmação forte;
+  // nunca pelo lote dos sugeridos e nunca sem a confirmação.
+  const doPlanoConsolidado = { territory: { ...territorioDuplicado, territoryRef: TERRITORIO, lifecycleStatus: "consolidated" }, members: [], approvedArticles: aprovados, siloArtifacts: artefatos, declaredPlan: { groupLabel: "Amarelo", siloName: "Planos e contratação" } };
+  assert.deepEqual(territoryUndoRefusals(doPlanoConsolidado), [], "o Silo do plano consolidado pode ser desfeito inteiro");
+  const porque = territoryUndoWholeSiloReasons(doPlanoConsolidado);
+  assert.ok(porque.includes("consolidated") && porque.includes("declared_plan") && porque.includes("silo_pair"), `…mas só como o Silo inteiro (prévia e confirmação forte): ${porque.join(", ")}`);
+  assert.equal(chamadasDeRede, 0);
+});
+
+test("amarelo · depois do Concluir · B: as keywords novas que a confirmação gravou DENTRO dos ArticleDNAs contam como no artigo (nunca 'Keywords sem artigo'); nada é gravado no Minerador", async () => {
+  zerar();
+  await processarEConcluir();
+  const minerAntes = JSON.stringify(minerador);
+  const novas = [...chamadas.handoff];
+  assert.ok(novas.length >= 15, `as novas da confirmação: ${novas.length}`);
+  // A tela recebe as novas sem `clusterId` na cópia de trabalho (o item do envio não tem artigo): elas chegam como "não agrupadas".
+  const vista = splitUngroupedBySubjectAnchor({ ungroupedKeywordIds: novas, articles: [], isDeclaredSubject: () => false, inArticleKeywordIds: keywordIdsInArticleDnas(vigentes().map(v => v.payload)) });
+  assert.deepEqual(vista.ungrouped, [], "nenhuma nova em 'Keywords sem artigo'");
+  assert.deepEqual([...vista.inArticle!].sort(), [...novas].sort(), "todas estão no artigo (ArticleDNA vigente)");
+  // A keyword que NENHUM ArticleDNA referencia continua "sem artigo" (nada some, só muda de lista).
+  const solta = splitUngroupedBySubjectAnchor({ ungroupedKeywordIds: ["solta-1"], articles: [], isDeclaredSubject: () => false, inArticleKeywordIds: keywordIdsInArticleDnas(vigentes().map(v => v.payload)) });
+  assert.deepEqual(solta.ungrouped.map(item => item.keywordId), ["solta-1"]);
+  assert.equal(JSON.stringify(minerador), minerAntes, "a leitura não grava nada");
+});
+
+test("amarelo · depois do Concluir · C: Links internos — com a etiqueta amarela, o Silo da cor com SiloDNA + SiloPage é escolhido sozinho (mesmo com o azul na marca); sem cor, o seletor de sempre lista só os Silos com o par", () => {
+  const AZUL_SILO = "territory:5e689f8c-8f06-4e65-94c4-b3cd7ac906cc";
+  const contextos = [{ siloId: AZUL_SILO, territoryRef: AZUL_SILO }, { siloId: TERRITORIO, territoryRef: TERRITORIO }];
+  assert.deepEqual(resolveLinksSilo({ contexts: contextos, selected: null, colorSiloRefs: [TERRITORIO] }), { siloId: TERRITORIO, byColor: true, colorWaiting: false }, "a cor decide: o amarelo, não o primeiro da lista");
+  assert.deepEqual(resolveLinksSilo({ contexts: contextos, selected: AZUL_SILO, colorSiloRefs: [TERRITORIO] }).siloId, TERRITORIO, "com a cor ativa, o Silo de outra cor não fica escolhido");
+  assert.deepEqual(resolveLinksSilo({ contexts: contextos, selected: TERRITORIO, colorSiloRefs: null }), { siloId: TERRITORIO, byColor: false, colorWaiting: false }, "sem cor: a escolha do seletor");
+  assert.equal(resolveLinksSilo({ contexts: contextos, selected: null, colorSiloRefs: null }).siloId, AZUL_SILO, "sem cor e sem escolha: o primeiro com o par");
+  assert.deepEqual(resolveLinksSilo({ contexts: [contextos[0]], selected: null, colorSiloRefs: [TERRITORIO] }), { siloId: AZUL_SILO, byColor: false, colorWaiting: true }, "a cor com Silo ainda sem o par diz que espera o fechamento");
+});
+
+test("amarelo · depois do Concluir · D: o refazedor ('Melhorar publicados…') LÊ os 8 artigos (o que tem, o que falta, a proposta) e a busca nova roda também para os Assuntos 'com lista' (SUBSTITUI o F5 de 12/10)", async () => {
+  zerar();
+  await processarEConcluir();
+  const chamadasAntes = sementes.length;
+  const refazedor = await prepare({ targetIds: PLANO.map(l => l.id), discover: true });
+  assert.ok(!refazedor.notices.some((n: string) => /com lista da Pesquisa por Assunto do Minerador não entram na busca nova/.test(n)), JSON.stringify(refazedor.notices));
+  const comVaga = refazedor.targets.filter((t: any) => t.memberIds.length < 6).map((t: any) => t.id);
+  assert.ok(comVaga.length > 0);
+  assert.ok(sementes.length > chamadasAntes || comVaga.every((id: string) => refazedor.discovery?.gapTargetIds.includes(id) === false), "a busca nova roda para quem ainda pede reforço");
+  const leitura = improvementReadingLines({ proposals: refazedor.proposals, targets: refazedor.targets, keywordName: id => palavra(refazedor, id ?? ""), max: 6 });
+  assert.equal(leitura.length, 8, "uma leitura por artigo lido");
+  for (const linha of leitura) {
+    assert.match(linha.has, /^\d+ keywords? hoje$/, linha.theme);
+    assert.match(linha.missing, /^(cabem mais \d+|cheio \(6 de 6\))/, linha.theme);
+    assert.ok(linha.proposal.length > 0, linha.theme);
+  }
+  const instalacao = leitura.find(l => l.targetId === "t4")!;
+  const t4 = refazedor.targets.find((t: any) => t.id === "t4")!;
+  assert.equal(instalacao.has, `${t4.memberIds.length} keywords hoje`);
+  // 2026-10-18 · com a cabeça da própria faceta ("instalação de internet", "internet instalação"), o Suporte da instalação sai cheio do Concluir.
+  assert.equal(t4.memberIds.length, 6, JSON.stringify(t4.memberIds.map((id: string) => palavra(refazedor, id))));
+  assert.equal(instalacao.missing.split(";")[0], "cheio (6 de 6)");
+  assert.equal(chamadasDeRede, 0);
+});
+
+/*
+ * 2026-10-17 (noite) · F · "PILAR TROCA, SUPORTES FICAM" NO REFAZEDOR: o Pilar já formado com a principal de identidade
+ * (sem volume) recebe, em "Melhorar publicados…", a proposta do termo-cabeça com volume que leva o núcleo do slug — com
+ * as keywords que JÁ existem na marca (as do banco: "planos de internet residencial" 6.600 e "plano de internet
+ * residencial" 2.900). Proposta na prévia; o dono confirma; a frase do plano fica como o Assunto.
+ */
+test("amarelo · F: o Pilar JÁ FORMADO com a principal de identidade recebe no refazedor a proposta do termo-cabeça (as keywords da marca), grava v2 com ele como principal e a frase do plano como o Assunto; os Suportes ficam", async () => {
+  zerar(); semIdeias = true;
+  // O Pilar formado só com a principal de identidade (v1), como no banco antes de 18/10.
+  const formado = await prepare({ targetIds: ["l1"], origin: "plan_sheet", discover: true });
+  const v1 = await aplicarTudo({ runId: formado.runId, decisionHash: (await coletar(formado)).decisionHash });
+  assert.equal(v1.state, "complete", JSON.stringify(v1.outcomes));
+  assert.equal(vigentes().find(v => v.payload.subject?.keywordId === "l1")!.payload.principalKeywordId, "l1");
+  // As keywords da marca que o Pilar pode receber (aprovadas, recebidas, do grupo e do Silo, com volume do Google Ads).
+  for (const [id, keyword, volume] of [["k-planos", "planos de internet residencial", 6600], ["k-plano", "plano de internet residencial", 2900], ["k-melhores", "melhores planos de internet residencial", 480]] as const) {
+    // Como no banco (SELECT de 18/10): a Lógica do Minerador JÁ rodou nelas e deixou a intenção "Pendente" (ambígua).
+    const semantic = { dna_origem: "logico_deterministico", logicProcessedAt: "2026-10-18T00:54:30.000Z", entidade_central: "plano", intencao_principal: "Pendente", subject_discovery: { version: 1, searches: [], subjectKeywordIds: ["l1"] } };
+    const base = linhaDaMesa({ id, keyword, brandId: MARCA, semantic }) as Row;
+    mesa.push({ ...base, intent: "Pendente", volume_search: volume, volume_source: "google_ads", group_id: AMARELO, isPublished: false, primaryKeywordPolicy: "free", territoryRef: TERRITORIO, keywordDnaRef: { entityId: id, versionId: `${id}:v1`, contentHash: sha("d") }, canonicalWorkflow: { ...base.canonicalWorkflow, id: `workflow-${id}`, lockVersion: 1 } });
+    minerador.push({ id, keyword, brand_id: MARCA, status: "aprovado", intent: "Pendente", volume_search: volume, volume_source: "google_ads", group_id: AMARELO, analise_semantica: clone(semantic) });
+  }
+  const antes = new Map(minerador.map(r => [r.id, doMineradorDe(r)]));
+  const refazedor = await prepare({ targetIds: ["l1", "l2"], discover: true });
+  const p = refazedor.proposals.find((x: any) => x.targetId === "l1")!;
+  assert.equal(p.principalId, "k-planos", `o termo-cabeça assume: ${JSON.stringify(p.reasons)}`);
+  assert.equal(p.needsMinerador, undefined, "a Lógica já rodou nelas (intenção 'Pendente'): não é 'Precisa do Minerador' — a SERP decide a intenção");
+  assert.ok(p.memberIds.includes("k-plano"), "a outra variante fica secundária");
+  assert.ok(!p.memberIds.includes("l1"), "a frase do plano sai das keywords (fica como o Assunto)");
+  assert.match(p.reasons.join(" "), /Pilar sem volume troca pelo termo-cabeça: “planos de internet residencial” \(6600\) assume como principal do Pilar.*“plano de internet residencial” \(2900\) é a mesma busca e fica como secundária/);
+  // O Suporte de identidade (l2) continua com a principal.
+  assert.equal(refazedor.proposals.find((x: any) => x.targetId === "l2")!.principalId, "l2");
+  // A leitura do refazedor mostra a proposta do Pilar.
+  const linhaDoPilar = improvementReadingLines({ proposals: refazedor.proposals, targets: refazedor.targets, keywordName: id => palavra(refazedor, id ?? ""), max: 6 }).find(l => l.targetId === "l1")!;
+  assert.match(linhaDoPilar.proposal, /^Proposta: principal: como escolher plano de internet residencial → planos de internet residencial/);
+  // A SERP do termo-cabeça (com volume) é a coleta paga, custo antes; depois, o dono confirma e grava.
+  const coleta = p.needsValidation ? await coletar(refazedor) : refazedor;
+  assert.equal(coleta.proposals.find((x: any) => x.targetId === "l1")!.status, "ready", JSON.stringify(coleta.proposals.find((x: any) => x.targetId === "l1")!.reasons));
+  const fim = await aplicarTudo({ runId: refazedor.runId, decisionHash: coleta.decisionHash }, { targetIds: ["l1"] });
+  assert.equal(fim.state, "complete", JSON.stringify(fim.outcomes));
+  const v2 = vigentes().find(v => v.payload.subject?.keywordId === "l1")!;
+  assert.equal(v2.versionNumber, 2, JSON.stringify(fim.outcomes));
+  assert.equal(v2.payload.principalKeywordId, "k-planos");
+  assert.equal(v2.payload.subject?.keywordId, "l1", "a frase do plano é o Assunto (âncora)");
+  assert.equal(v2.payload.suggestedSlug, "como-escolher-plano-internet-residencial", "o slug do plano fica");
+  assert.equal(v2.payload.hierarchy, "Pilar");
+  assert.ok(v2.payload.serpAssessmentRef);
+  for (const [id, valor] of antes) assert.equal(doMineradorDe(doMinerador(id)!), valor, `${id}: o Arquiteto mexeu em keyword do Minerador`);
+  assert.deepEqual(chamadas.import, [], "keyword que já existe na marca nunca é importada");
+  assert.equal(chamadasDeRede, 0);
+});
+
+/* =================================================================== */
+/*
+ * 2026-10-18 · G · A CABEÇA DA FACETA DO SUPORTE NÃO É A CABEÇA DO PILAR (teste no ar do coordenador, 17–18/10, no
+ * refazedor do amarelo). O Suporte "Instalação de internet: taxas, prazo e quando chega a primeira fatura" (Travada,
+ * "instalação de internet residencial", 170; slug instalacao-internet-primeira-fatura) ficou com poucas keywords: o
+ * refazedor recusava "internet instalação" (880), "instalação internet" (880) e "instalação de internet" (720) como "mais
+ * ampla que a principal (cabeça do Pilar)" — a regra do termo-cabeça (só no Pilar) aplicada à faceta do próprio Suporte;
+ * com 170 buscas na principal, toda busca mais ampla da faceta passava por "cabeça do Pilar". Pelos botões de sempre:
+ * "Processar artigos" → "Concluir formação" (o artigo forma com o que o Google Ads trouxe então) → "Melhorar
+ * publicados…" (o refazedor: prepare → apply na rota de sempre). Nenhuma porta nova.
+ */
+test("amarelo · G: no refazedor ('Melhorar publicados…'), o Suporte da instalação recebe a cabeça da PRÓPRIA faceta — “instalação de internet” (720) e UMA grafia de 880 (a outra é a mesma linha do Google Ads) — como secundárias de contexto; a cabeça do núcleo do Pilar continua só no Pilar; o mesmo no refazedor de um artigo só", async () => {
+  zerar(); semCabecaDaInstalacao = true;
+  await processarEConcluir();
+  const doT4 = (run: any) => run.proposals.find((x: any) => x.targetId === "t4")!;
+  const textoDe = (id: string) => mesa.find(m => m.id === id)?.keyword ?? id;
+  const antes = vigentes().find(v => v.payload.subject?.keywordId === "t4")!;
+  const keywordsAntes = antes.payload.keywordReferences.map((r: any) => textoDe(r.keywordId));
+  assert.deepEqual([...keywordsAntes].sort(), ["instalação de internet residencial", "prazo de instalação de internet", "primeira fatura de internet", "taxa de instalação de internet"].sort(), "o ponto de partida: a instalação formada com poucas keywords (cabem mais 2)");
+  const originais = new Map(minerador.map(r => [r.id, doMineradorDe(r)]));
+  const importadasAntes = chamadas.import.length;
+  // O Google Ads agora devolve a cabeça da faceta (os números reais do refazedor).
+  semCabecaDaInstalacao = false;
+  const refazedor = await prepare({ targetIds: PLANO.map(l => l.id), discover: true });
+  const p = doT4(refazedor);
+  assert.equal(p.status, "ready", JSON.stringify(p.reasons));
+  assert.equal(p.principalId, "t4", "Travada: a principal fica");
+  assert.deepEqual(p.addIds.map((id: string) => palavra(refazedor, id)).sort(), ["instalação de internet", "internet instalação"].sort(), JSON.stringify(p.reasons));
+  assert.equal(p.memberIds.length, 6, "cheio, sem passar do teto");
+  assert.ok(!refazedor.proposals.some((x: any) => x.memberIds.some((id: string) => palavra(refazedor, id) === "instalação internet")), "a mesma linha do Google Ads (880 = 880, a mesma busca) não ocupa outra vaga");
+  assert.ok(!refazedor.proposals.some((x: any) => x.reasons.some((r: string) => /instala[^”]*” \(\d+\) é mais ampla que a principal \(cabeça do Pilar\)/.test(r))), "a faceta do Suporte nunca é 'cabeça do Pilar'");
+  // A cabeça do núcleo do Pilar/Silo continua só no Pilar: nenhuma vaza para um Suporte.
+  for (const cabeca of ["planos de internet residencial", "plano de internet residencial", "plano internet residencial"]) {
+    for (const x of refazedor.proposals.filter((y: any) => y.targetId !== "l1")) assert.ok(!x.memberIds.some((id: string) => palavra(refazedor, id) === cabeca), `${x.targetId}: “${cabeca}” é do Pilar`);
+  }
+  // O refazedor de UM artigo só (o Pilar fora da leitura): o núcleo do Pilar vem do servidor (`planPillar`) — o mesmo resultado.
+  const so = await prepare({ targetIds: ["t4"], discover: true });
+  assert.equal(so.targets.find((t: any) => t.id === "t4")?.planPillar?.slug, "como-escolher-plano-internet-residencial", "o servidor leu o Pilar do mesmo plano");
+  assert.deepEqual(doT4(so).addIds.map((id: string) => palavra(so, id)).sort(), ["instalação de internet", "internet instalação"].sort(), JSON.stringify(doT4(so).reasons));
+  // "Confirmar" no refazedor: versão nova com as duas, incorporadas pelos núcleos do Minerador; nada do Minerador é mexido.
+  const coleta = p.needsValidation ? await coletar(refazedor) : refazedor;
+  const fim = await aplicarTudo({ runId: refazedor.runId, decisionHash: coleta.decisionHash }, { targetIds: ["t4"], approveNewKeywords: true });
+  assert.equal(fim.state, "complete", JSON.stringify(fim.outcomes));
+  const depois = vigentes().find(v => v.payload.subject?.keywordId === "t4")!;
+  assert.equal(depois.versionNumber, antes.versionNumber + 1);
+  assert.equal(depois.payload.principalKeywordId, "t4");
+  assert.deepEqual(depois.payload.keywordReferences.map((r: any) => textoDe(r.keywordId)).sort(), [...keywordsAntes, "instalação de internet", "internet instalação"].sort());
+  assert.deepEqual(chamadas.import.slice(importadasAntes).sort(), ["instalação de internet", "internet instalação"].sort(), "só as 2 novas pelos núcleos do Minerador");
+  for (const [id, valor] of originais) assert.equal(doMineradorDe(doMinerador(id)!), valor, `${id}: o Arquiteto mexeu em keyword do Minerador`);
   assert.equal(chamadasDeRede, 0);
 });

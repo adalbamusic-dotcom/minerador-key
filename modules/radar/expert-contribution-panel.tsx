@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useNoticeBridge } from "@/components/global-notice-center";
 import {
   EXPERT_CONTRIBUTION_FIXTURE,
   EXPERT_CONTRIBUTION_STATUS_LABEL,
@@ -67,6 +68,8 @@ export function ExpertContributionPanel({ article, radarNeed, serpAnalyzed }: Ex
   const [followupPrepared, setFollowupPrepared] = useState(false);
   const [discardPrompt, setDiscardPrompt] = useState(false);
   const [notice, setNotice] = useState("");
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): o aviso desta demonstração também vai para o sino. */
+  useNoticeBridge({ notice, module: "radar", area: "Radar · Especialista", title: "Radar · Especialista", fallbackSeverity: "INFO" });
   const [existingContentStatus, setExistingContentStatus] = useState<ExistingContentStatus>("registered");
 
   const selectedEvidenceCount = useMemo(() => countSelectedExpertEvidence(decisions), [decisions]);
@@ -274,7 +277,6 @@ export function ExpertContributionPanel({ article, radarNeed, serpAnalyzed }: Ex
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-divider bg-surface-subtle p-4"><p className="text-base text-text-muted">Resumo: {questions.length} perguntas · {hasReceivedMaterials ? fixture.contributions.length : 0} contribuições · 2 evidências · {selectedEvidenceCount} selecionada(s) · {followupPrepared ? 0 : 1} pendência(s)</p>{discardPrompt ? <div className="flex flex-wrap gap-2"><span className="self-center text-base text-text-muted">Descartar somente o estado local?</span><button type="button" className={button} onClick={() => setDiscardPrompt(false)}>Cancelar</button><button type="button" className={primaryButton} onClick={discardContribution}>Confirmar descarte</button></div> : <button type="button" className={button} onClick={() => setDiscardPrompt(true)}>Descartar contribuição</button>}</div>
-      {notice && <p className="rounded-lg border border-context-accent bg-selected p-3 text-base text-foreground" role="status">{notice}</p>}
     </section>
   );
 }

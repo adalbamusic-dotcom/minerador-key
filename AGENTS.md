@@ -47,6 +47,19 @@ essa mesma linha de processo vai se atualizando e melhorando".
   função ao "limpar a tela".
 - Limpar a tela = tirar DUPLICATAS (a mesma ação em dois lugares) e ruído de
   texto. Nunca é tirar função.
+- **Botão novo, só se for mesmo necessário, e no mesmo lugar dos botões da
+  etapa (dono, 18/10).** Em teste ou desenvolvimento não se cria botão para
+  tarefa específica em outro lugar (exemplo do dono: "Organizar o
+  artigo-modelo (2)" e "… do Silo (8)" na barra de lote do Radar). Botão solto
+  cria conflito, contradição e bug nos botões que já existem. Os botões
+  temporários da barra de etapas do processo (escolher, prosseguir, seguinte…)
+  existem dentro do fluxo normal da etapa, nunca fora da linha central da área.
+- **Todo botão e toda etapa explicam para que servem e como se usam (dono,
+  18/10):** um `InfoHint` (`components/info-hint.tsx`) ao lado de cada um. O
+  ícone de ajuda global (o "?" do topo, `components/context-help-center.tsx`)
+  traz o tutorial de uso de cada área e etapa. Mudou um botão ou uma etapa,
+  mudam na mesma entrega o InfoHint, o tutorial e o catálogo
+  (`lib/agent/platform-catalog.ts`).
 - Quando parecer que algo precisa mudar de processo: parar, mostrar ao dono o
   que sai e o que entra, e esperar a decisão. Ao delegar a agentes, o prompt
   diz "não mudar funcionalidade; só corrigir dentro da linha existente", e o
@@ -84,6 +97,19 @@ com a SERP como autoridade acima da lógica e da IA (4 lentes). Em especial:
 - A suíte também guarda a forma da linha: os botões e etapas do contrato
   existem uma vez cada, e não existe porta paralela.
 - Entrega sem a suíte verde não é entrega.
+- **Nada vai para deploy sem a bateria verde no local (dono, 17/10).** A bateria é
+  `npm run test:regressao` (`scripts/regressao.mjs`): TypeScript e as suítes de
+  cada área (cenários-ouro, servidor, DOM e contratos), com fixtures e sem
+  chamada paga. O agente `regressao` (`.claude/agents/regressao.md`) roda a
+  bateria e diz se pode ir. Em `minerador:todos`, as falhas antigas têm teto
+  conhecido; passar do teto é regressão.
+- **Teste real é pelos botões que o humano usa (dono, 18/10).** "Não adianta
+  testar as funcionalidades sem arrumar os botões que acionam essas funções; não
+  pode processar nada por fora dos botões." No navegador, o teste clica com o
+  mouse no botão de sempre e nunca chama rota, script ou SQL para avançar o
+  fluxo; o banco é só lido, para conferir o que o botão gravou. Defeito achado é
+  consertado no núcleo e no botão e provado com o mesmo clique. Na bateria, a
+  suíte DOM do botão conta tanto quanto a do núcleo.
 - O registro das situações resolvidas de cada área (no Arquiteto,
   `docs/04-arquiteto/situacoes-resolvidas.md`) é leitura obrigatória antes de
   mexer na área, e toda situação nova resolvida entra nele com o cenário que a

@@ -18,7 +18,7 @@ import { applyApproveAndSend, previewApproveAndSend, type ApproveAndSendDeps } f
 import { applyApproval, approvedPackageDiverged } from "../lib/minerador/approved-package.ts";
 import { buildPlanSheetRows } from "../lib/arquiteto/plan-article-sheet.ts";
 import { choosePlanSiloTerritory, declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, planRecreatePlanSiloLines } from "../lib/arquiteto/declared-plan-silo.ts";
-import { territoryUndoRefusals } from "../lib/arquiteto/territory-undo.ts";
+import { territoryUndoRefusals, territoryUndoWholeSiloReasons } from "../lib/arquiteto/territory-undo.ts";
 import { architectureConfirmBlocker, classifyProposalAssignment, nothingToConfirmMessage, proposalAssignmentStatusLabel } from "../lib/arquiteto/proposal-confirmability.ts";
 import { humanizeOperationMessage, improvementPreviousRunLabel, improvementRunIsPrevious } from "../lib/arquiteto/article-improvement-next-step.ts";
 import { AZUL, AZUL_PLANO, GRUPOS, MARCA_WIFI, cadastro, grupoDaKeyword, linha } from "./arquiteto-planilha-primeiro-fixtures.mts";
@@ -239,16 +239,22 @@ test("2a · o Silo do plano declarado NÃO entra em 'Desfazer os Silos sugeridos
   assert.equal(declaredPlanSiloGroupFor(declaredPlanViewOfTerritory(SILO_DO_PLANO), [], slug), null);
   const base = { members: [], approvedArticles: [], siloArtifacts: [] };
   const territorio = (t: typeof SILO_DO_PLANO) => ({ territoryRef: t.territoryRef, name: t.name, centralEntity: t.name, lifecycleStatus: "confirmed" as const, publicationProtection: "unpublished" as const, slugState: { publishedSlug: null, publishedCanonical: null, confirmed: null, proposals: [] } as never, existingSiloRef: null, consolidation: null as never });
-  const recusas = territoryUndoRefusals({ ...base, territory: territorio(SILO_DO_PLANO), declaredPlan: doPlano });
-  assert.deepEqual(recusas.map(item => item.code), ["DECLARED_PLAN_SILO"]);
-  assert.match(recusas[0].message, /Tirar do plano.*Substituir o plano.*Minerador/);
+  // 2026-10-18 (decisão do dono "Manter em duas etapas") · SUBSTITUI a recusa DECLARED_PLAN_SILO ("o caminho é Tirar do
+  // plano/Substituir o plano no Minerador"): o Silo do plano sai pelo MESMO "Desfazer Silo", como o Silo inteiro
+  // (prévia + confirmação forte), um por vez. O lote "Desfazer os Silos sugeridos" continua só com os sugeridos.
+  const doPlanoEntrada = { ...base, territory: territorio(SILO_DO_PLANO), declaredPlan: doPlano };
+  assert.deepEqual(territoryUndoRefusals(doPlanoEntrada), []);
+  assert.deepEqual(territoryUndoWholeSiloReasons(doPlanoEntrada), ["declared_plan"], "o Silo do plano é o Silo inteiro: prévia e confirmação forte");
   assert.deepEqual(territoryUndoRefusals({ ...base, territory: territorio(SILO_SUGERIDO), declaredPlan: null }), []);
+  assert.deepEqual(territoryUndoWholeSiloReasons({ ...base, territory: territorio(SILO_SUGERIDO), declaredPlan: null }), [], "o sugerido continua o de sempre");
   const tela = ler("modules/arquiteto/arquiteto-workspace.tsx");
   assert.match(tela, /territoryUndoRefusals\(\{ territory, members: membros, approvedArticles: aprovados, siloArtifacts: artefatos, declaredPlan: doPlano \}\)/);
   // 2026-10-16 (noite) · teste do dono: "1 fica de fora: Silo do plano…" aparecia sem o botão do lote, sobre o Silo do plano Confirmado e visível.
-  // A frase diz só o que é verdade (não entra no Desfazer; segue o cadastro do Minerador) e só acompanha o botão do lote.
-  assert.match(tela, /`Não entra\$\{siloUndoPlanExcluded\.length === 1 \? "" : "m"\} no Desfazer: /, "o lote diz o que não entra nele e por quê");
-  assert.match(tela, /o Silo do plano segue o cadastro do Minerador \(“Tirar do plano” ou “Substituir o plano”\)/);
+  // A frase diz só o que é verdade (não entra no LOTE; sai pelo Desfazer dele) e só acompanha o botão do lote.
+  assert.match(tela, /`Não entra\$\{siloUndoPlanExcluded\.length === 1 \? "" : "m"\} no lote: /, "o lote diz o que não entra nele e por quê");
+  assert.match(tela, /o Silo inteiro sai pelo “Desfazer Silo” dele, um por vez, com a prévia e a confirmação forte/);
+  assert.match(tela, /leitura\.refusals\.length === 0 && leitura\.wholeSilo === null/, "o lote só leva os sugeridos");
+  assert.doesNotMatch(tela, /o Silo do plano segue o cadastro do Minerador/, "a frase antiga saiu (SUBSTITUÍDA em 2026-10-18)");
   assert.doesNotMatch(tela, /de fora: \$\{siloUndoPlanExcluded/);
   assert.match(ler("modules/arquiteto/territorial-workspace-rows.tsx"), /\{undoAll && undoAll\.count > 0 && undoAll\.excludedNote && \(\s*<span className="text-sm text-text-muted" data-testid="architect-undo-all-excluded">/);
 });

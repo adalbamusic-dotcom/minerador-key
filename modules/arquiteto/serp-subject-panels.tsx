@@ -11,6 +11,7 @@ import {
   SERP_SUBJECT_EVIDENCE_RELATION_LABELS,
   SERP_SUBJECT_TONE_CLASSES,
   initialSuggestionSelection,
+  serpSubjectNationalFallbackLabel,
   suggestionApplyPreview,
   type SerpSubjectBatchChoice,
   type SerpSubjectCardAction,
@@ -63,6 +64,9 @@ export type SerpSubjectReadStatus = {
   requested: number;
   withoutSerp: number;
   targetingReadFailed: boolean;
+  /** 2026-10-18 · aditivos, só na marca com cidade: a localidade e as keywords com a SERP antiga nacional (marcada). */
+  serpLocation?: string;
+  nationalFallbackKeywords?: number;
 };
 
 type Handlers = {
@@ -651,7 +655,7 @@ export function SerpSubjectDiagnosisPanel({
               : read.state === "failed"
                 ? `A leitura do cache falhou: ${read.error || "sem detalhe"}. A formação usou só palavras e DNA.`
                 : read.state === "ready"
-                  ? `${read.egressLabel}${read.withoutSerp ? ` ${read.withoutSerp} de ${read.requested} keyword(s) sem SERP no cache.` : ""}${read.targetingReadFailed ? " A localidade do Minerador não pôde ser lida; a leitura usou a do ambiente." : ""}`
+                  ? `${read.egressLabel}${read.withoutSerp ? ` ${read.withoutSerp} de ${read.requested} keyword(s) sem SERP no cache.` : ""}${read.targetingReadFailed ? " A localidade do Minerador não pôde ser lida; a leitura usou a do ambiente." : ""}${serpSubjectNationalFallbackLabel(read)}`
                   : "A SERP do cache ainda não foi lida."}
           </p>
         </div>

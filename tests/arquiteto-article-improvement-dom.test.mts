@@ -82,11 +82,19 @@ test("a coleta pela metade continua sozinha ao abrir; tempo esgotado numa volta 
   assert.deepEqual(calls.map(c => c.action), ["collect", "collect", "status", "collect"]); assert.doesNotMatch(screen.text(), /demorou demais/);
 });
 
-test("a tabela mostra só o que pode mudar (sem a lista 'sem melhoria possível'); nada a refazer = uma linha, sem botão", async () => {
+/*
+ * 2026-10-18 · SUBSTITUÍDO "a tabela mostra só o que pode mudar": a tabela é a LEITURA de cada artigo lido (o que tem,
+ * o que falta, a proposta) — o dono, no amarelo, viu só "Já feito…" e achou que o refazedor "não fez nada". Só a linha
+ * pronta é marcável; a lista solta "sem melhoria possível" continua fora.
+ */
+test("a tabela é a leitura de cada artigo lido (tem · falta · proposta), só a pronta marcável; sem a lista 'sem melhoria possível'; nada a refazer = sem botão", async () => {
   const base = fixture();
-  prepared = () => ({ ...base, proposals: [base.proposals[0], { ...base.proposals[1], status: "adequate", reasons: ["Já cobre a busca"] }] });
+  prepared = () => ({ ...base, proposals: [base.proposals[0], { ...base.proposals[1], status: "adequate", addIds: [], principalId: "old", reasons: ["Já cobre a busca"] }] });
   await screen.render(panel()); await settle();
-  assert.equal(screen.container.querySelectorAll("tbody tr").length, 1);
+  assert.equal(screen.container.querySelectorAll("tbody tr").length, 2, "as duas leituras");
+  assert.equal(screen.all("architect-improvement-reading").length, 2);
+  const caixas = [...screen.container.querySelectorAll<HTMLInputElement>("input[type='checkbox'][aria-label^='Aplicar']")];
+  assert.deepEqual(caixas.map(caixa => caixa.disabled), [false, true], "só a pronta é marcável");
   assert.doesNotMatch(screen.text(), /sem melhoria possível/);
   screen.destroy(); screen = await montarRadar(); calls = [];
   prepared = () => ({ ...semCusto(), proposals: [{ ...base.proposals[0], status: "adequate", addIds: [], memberIds: ["old"], principalId: "old" }] });
@@ -171,4 +179,48 @@ test("keyword nova: a prévia lista por artigo (volume e fonte); o Confirmar diz
   assert.equal(applies[0].approveNewKeywords, true);
   assert.deepEqual(applies[0].targetIds, ["a", "b"]);
   assert.equal("approveNewKeywords" in applies[1], false, "a retomada continua o lote aceito, sem novo aceite");
+});
+
+/*
+ * 2026-10-18 · O ASSUNTO PELA PRINCIPAL NO "MELHORAR PUBLICADOS…" (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md`
+ * §14, DOM pelos botões): a prévia de cada página diz "a página passa a ser o Assunto" e a troca da principal pelo volume
+ * 0 (com o porquê); o Confirmar de sempre manda as linhas marcadas. Nenhum botão novo.
+ */
+test("Assunto pela principal: a prévia mostra 'página → Assunto' e a principal nova com volume (volume 0); o Confirmar de sempre grava", async () => {
+  const base = fixture();
+  prepared = () => ({ ...semCusto(), keywords: [{ id: "pagina", keyword: "como atrair pacientes para clínica de estética", volumeValidated: false }, { id: "nova", keyword: "como atrair pacientes", volume: 720, volumeValidated: true }],
+    proposals: [{ ...base.proposals[0], theme: "como atrair pacientes para clínica de estética", currentPrimaryId: "pagina", principalId: "nova", memberIds: ["nova"], addIds: ["nova"], removeIds: ["pagina"], subjectKeywordId: "pagina", evidenceBasis: "copy_line",
+      reasons: ["Assunto pela principal (SDD 2026-10-18): “como atrair pacientes para clínica de estética” tem volume 0; “como atrair pacientes” (720) assume como principal — leva o núcleo do slug (atrair + paciente) e cabe no Assunto (público, restrição, localidade e intenção). “como atrair pacientes para clínica de estética” continua no artigo como o Assunto (a página). Título, slug e canonical não mudam. Proposta: decisão sua na prévia.", "A keyword da página publicada passa a ser o Assunto do artigo (sai das secundárias e continua no artigo como o Assunto); URL, slug e canonical não mudam (SDD 2026-10-18)."] }, base.proposals[1]] });
+  await screen.render(panel()); await settle();
+  assert.match(screen.text(), /A keyword da página publicada passa a ser o Assunto do artigo/);
+  assert.match(screen.text(), /“como atrair pacientes” \(720\) assume como principal/);
+  await screen.click(button("Confirmar e gravar (2)")!); await settle();
+  assert.deepEqual(calls.filter(c => c.action === "apply")[0].targetIds, ["a", "b"], "o Confirmar de sempre");
+});
+
+/*
+ * 2026-10-19 · CASO REAL DO VERDE: a coleta autorizada parou com um 409 (REWORK_SAME_REFUSAL) e a tela ficou muda —
+ * o erro não era mostrado no painel, a prévia fechava com a execução em "collecting" e o botão sumia. Agora o erro
+ * aparece no painel e no sino dizendo o que foi pago e o que parou, e o MESMO Confirmar continua a coleta autorizada.
+ */
+test("coleta que para no meio (409): o erro aparece no painel e no sino com o pago e o que parou; o Confirmar 'Continuar a coleta autorizada' não some", async () => {
+  const avisos: Array<[string, string]> = [];
+  let collects = 0;
+  globalThis.fetch = async (_url, options) => {
+    if (!options?.method) return new Response(JSON.stringify({ success: true, data: null }));
+    const body = JSON.parse(String(options.body)); calls.push(body);
+    if (body.action === "prepare") return new Response(JSON.stringify({ success: true, data: { ...fixture(), costs: { paidQueries: 84, estimatedCostUsd: { min: .2, max: .294 }, missingDetails: [] } } }));
+    if (body.action === "collect" && ++collects === 1) return new Response(JSON.stringify({ success: true, data: { ...fixture(), state: "collecting", costs: { paidQueries: 84, estimatedCostUsd: { min: .2, max: .294 }, missingDetails: [] }, collect: { doneGroupIds: ["g1", "g2", "g3"], remaining: 72, reservedRemaining: .252, phase: "collect", totalGroups: 33 } } }));
+    if (body.action === "collect" && collects === 2) return new Response(JSON.stringify({ success: false, error: "REWORK_SAME_REFUSAL: A mesma recusa aconteceu em 18/10 às 22:34.", code: "CONFLICT" }), { status: 409 });
+    return new Response(JSON.stringify({ success: true, data: { ...fixture(), ...semCusto() } }));
+  };
+  await screen.render(panel("brand-a", { onNotify: (tone: string, message: string) => avisos.push([tone, message]) })); await settle();
+  await screen.click(button("Autorizar 84 consulta(s) e coletar a SERP (até US$ 0,294)")!); await settle();
+  const erro = screen.get("architect-improvement-error").textContent!;
+  assert.match(erro, /A coleta parou: 12 de 84 consulta\(s\) autorizada\(s\) foram pagas \(3 de 33 grupos\)/);
+  assert.ok(avisos.some(([tone, message]) => tone === "error" && /A coleta parou: 12 de 84/.test(message)), "o mesmo aviso vai para o sino");
+  const continuar = button("Continuar a coleta autorizada");
+  assert.ok(continuar && !continuar.disabled, "o Confirmar de sempre continua a coleta");
+  await screen.click(continuar!); await settle();
+  assert.equal(calls.filter(c => c.action === "collect").length, 3, "continuar chama a mesma coleta autorizada");
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useNoticeBridge } from "@/components/global-notice-center";
 import type { RadarSiloLinksArticle, RadarSiloLinksReading } from "@/lib/server/radar-silo-links";
 import { RADAR_STORED_ZIP_MIME, radarStoredZipOfTexts } from "@/lib/radar/stored-zip";
 
@@ -52,6 +53,8 @@ export function RadarSiloLinksPanel({ brandId, articleId }: { brandId: string; a
   const [leitura, setLeitura] = useState<Leitura | null>(null);
   const [lendo, setLendo] = useState(false);
   const [erro, setErro] = useState("");
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a falha da leitura da malha vai para o sino; a linha da tela saiu. */
+  useNoticeBridge({ notice: erro, module: "radar", area: "Radar · Links do Silo", title: "Radar · Links do Silo", fallbackSeverity: "ERROR" });
 
   const conferir = async () => {
     setLendo(true);
@@ -88,7 +91,6 @@ export function RadarSiloLinksPanel({ brandId, articleId }: { brandId: string; a
       </div>
       <button type="button" className={leitura ? botao : botaoPrincipal} disabled={lendo} onClick={() => void conferir()} data-testid="radar-silo-links-conferir">{lendo ? "Lendo as páginas…" : leitura ? "Conferir de novo" : "Conferir links do Silo"}</button>
     </div>
-    {erro && <p className="text-sm text-warning" role="status">{erro}</p>}
     {leitura && <>
       <p className="text-sm font-semibold leading-6 text-foreground" data-testid="radar-silo-links-malha">{leitura.summary.line}</p>
       <p className="text-sm leading-6 text-text-muted">{leitura.notice}</p>

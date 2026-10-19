@@ -210,8 +210,10 @@ test("D · puro: recusa lançada (escrita) e devolvida (vídeo) viram o mesmo es
 
 test("E · os botões e o custo que o MCP manda o usuário procurar são os mesmos da tela", async () => {
   assert.equal(mcp.MCP_ARTICLE_BLUEPRINT_MAX_CALLS_PER_ARTICLE, painel.RADAR_ARTICLE_BLUEPRINT_MAX_CALLS_PER_ARTICLE);
+  /* 2026-10-18 · o lote do artigo-modelo é o "Pesquisar e finalizar (N artigos)" da barra (o botão solto saiu). */
+  const { radarResearchBatchButtonLabel } = await import("../lib/radar/research-batch.ts");
   for (const n of [1, 2, 7]) {
-    assert.equal(mcp.mcpArticleBlueprintBatchLabel(n), painel.radarArticleBlueprintBatchLabel(n));
+    assert.equal(mcp.mcpArticleBlueprintBatchLabel(n), radarResearchBatchButtonLabel({ run: [], blueprint: Array.from({ length: n }, (_, i) => ({ kind: "BLUEPRINT" as const, articleId: `a${i}`, title: "t", aiCallsCeiling: 2 })) }));
     assert.equal(mcp.mcpArticleBlueprintOrganizeAndExportLabel(n), painel.radarArticleBlueprintOrganizeAndExportLabel(n));
     assert.equal(mcp.mcpArticleBlueprintCostLabel(n), painel.radarArticleBlueprintCostLabel(n));
   }
@@ -222,7 +224,7 @@ test("E · os botões e o custo que o MCP manda o usuário procurar são os mesm
   const bancada = await readFile(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");
   assert.match(bancada, /Artigo-modelo da SERP|RadarArticleBlueprintPanel/, "o painel mora na Pesquisa do artigo");
   const acao = mcp.mcpArticleBlueprintAction({ articles: 3, afterwards: "Chame de novo.", flowButton: mcp.mcpArticleBlueprintOrganizeAndExportLabel(3) });
-  assert.deepEqual(acao.buttons, [mcp.MCP_ARTICLE_BLUEPRINT_SCREEN.organize, painel.radarArticleBlueprintOrganizeAndExportLabel(3), `${painel.radarArticleBlueprintBatchLabel(3)} (barra de lote do Radar)`]);
+  assert.deepEqual(acao.buttons, [mcp.MCP_ARTICLE_BLUEPRINT_SCREEN.organize, painel.radarArticleBlueprintOrganizeAndExportLabel(3), `${mcp.mcpArticleBlueprintBatchLabel(3)} (barra de lote do Radar: nos já finalizados, organiza só o artigo-modelo que falta, ${painel.radarArticleBlueprintCostLabel(3)}, sem pesquisa paga)`]);
   assert.match(acao.cost, /Até 6 chamadas de IA/);
   assert.doesNotMatch(JSON.stringify(acao), D10);
 });

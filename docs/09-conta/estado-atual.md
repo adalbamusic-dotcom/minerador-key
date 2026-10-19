@@ -1,5 +1,14 @@
 # Estado atual — Conta
 
+## Todos os avisos no sino — 2026-10-18
+
+Regra do dono: "estes e todos os avisos têm que estar dentro do sino" (`docs/compartilhado/sistema-visual.md` §24.2). **Verificado no código e confirmado por teste. Ainda não validado na tela.**
+
+- Saíram as faixas de resultado de Dados da Agência, Membros, Integrações da Agência, Conexões de IA e "Marca cadastrada com sucesso". Cada um vai ao sino com o seu tom (erro e resultado em avisos separados).
+- Perfil: o resultado de salvar o nome e a foto fica só no sino (já ia); ao lado do campo fica a validação ("Informe um nome…", tipo e tamanho da imagem).
+- Ficaram: o erro do cadastro de Marca dentro do diálogo modal (cobre o sino) e o erro do consentimento OAuth (tela sem sino).
+- Guarda: `tests/avisos-no-sino-2026-10-18.test.mts`.
+
 ## Evolução funcional da identidade — 2026-08-18
 
 - **Nome:** a página pessoal usa `auth.users.user_metadata.full_name`, salva

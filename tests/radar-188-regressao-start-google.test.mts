@@ -154,15 +154,17 @@ test("RADAR 18.8 · C — a coleta entra no estado ANTES da cópia local", () =>
   assert.match(corpo, /localRecoveryWarning: recuperacao\.saved \? null : localRecoveryWarning\(/, "a falha vira aviso, dentro da mesma escrita de estado");
 
   /*
-   * E O AVISO CHEGA À TELA.
+   * E O AVISO CHEGA A QUEM OPERA.
    *
-   * Guardar a frase num campo do workspace e não renderizá-la seria o mesmo
-   * silêncio do `catch` mudo, com mais código. O aviso tem lugar próprio, fora
+   * Guardar a frase num campo do workspace e não mostrá-la seria o mesmo
+   * silêncio do `catch` mudo, com mais código. O aviso tem ponte própria, fora
    * do `notice`, porque ele coexiste com a mensagem de sucesso da coleta.
+   * 2026-10-18 · SUBSTITUÍDO "renderizado numa faixa da tela": todos os avisos
+   * no sino (regra do dono) — a ponte publica como Atenção e a faixa não volta.
    */
   const tela = pagina();
-  assert.match(tela, /pipeline\.localRecoveryWarning && <div[^>]*data-testid="radar-local-recovery-warning"/, "o aviso precisa ser renderizado");
-  assert.match(tela, /\{pipeline\.localRecoveryWarning\}<\/div>/, "e o texto exibido é o do próprio aviso");
+  assert.match(tela, /useNoticeBridge\(\{ notice: pipeline\?\.localRecoveryWarning \|\| "", module: "radar"[^)]*fallbackSeverity: "WARNING" \}\)/, "o aviso precisa chegar ao sino");
+  assert.doesNotMatch(tela, /data-testid="radar-local-recovery-warning"/, "a faixa da tela não volta");
 });
 
 test("RADAR 18.8 · D — revisão e análise do Radar tinham o mesmo defeito", () => {

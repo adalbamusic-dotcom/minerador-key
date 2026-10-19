@@ -1492,7 +1492,9 @@ test("K6 · a rota consulta o CACHE antes da credencial e só paga as lentes que
   assert.match(rota, /lenses\.map/);
   // A lente enviada é a lente da chave: nada é suposto.
   assert.match(rota, /lens: alvo\.lens, endpoint: "advanced"/);
-  assert.match(rota, /readDataForSeoTargetCodes\(\)/);
+  /* SUBSTITUÍDO (2026-10-18, SDD localidade da SERP por marca, L2): os códigos da chave são os da marca. */
+  assert.match(rota, /const codigosDaChave = alvoDaMarca\.codes;/);
+  assert.doesNotMatch(rota, /readDataForSeoTargetCodes/);
 
   // 1. Cache primeiro, só a observação compacta, com um relógio por requisição.
   const consulta = rota.indexOf("await lookupSerpCache(");

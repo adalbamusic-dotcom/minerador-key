@@ -1,5 +1,25 @@
 # Estado atual — Publicações
 
+## A entrega do Redator chega à Fila — 2026-10-18
+
+Defeito 1 do inventário de botões (`docs/compartilhado/inventario-botoes-e-linha-2026-10-18.md`), decisão do dono "Só os defeitos agora". **Verificado no código e confirmado por teste. Ainda não validado na tela.**
+
+- **Antes:** "Enviar a Publicações" criava o registro em rascunho (`draft`) e nada o levava a "pronto para exportar"; `PublicationRepository.importApproved` não tinha chamador; "Colocar na fila" nunca aparecia para artigo novo.
+- **Agora (dentro da linha):** o mesmo núcleo do botão e da ferramenta MCP, `sendWriterToPublications` (`lib/server/writer-publication-handoff.ts`), chama o `importApproved` que já existia entre PERSISTIR e RELER. O documento já foi validado como aprovado, então o registro fica `ready_to_export` e aparece na aba "Fila" com "Colocar na fila".
+- `importApproved` aceita os estados antes da exportação (`PUBLICATION_PRE_EXPORT_STATES`: rascunho, escrita, revisão, aprovado). Registro antigo parado em rascunho avança quando o artigo é enviado de novo no Redator, sem duplicar. Fila, exportado e publicado não voltam.
+- O texto "Importe pelo seletor" (o seletor não existe mais) virou "Aguardando “Enviar a Publicações” no Redator", com InfoHint. "Colocar na fila" ganhou InfoHint.
+- Nada de rota, botão ou estado novo; sem migration. Tutorial do "?" e catálogo MCP (`publicacoes.register`) atualizados.
+- **Limite conhecido:** `syncDocumentStatus` (salvar o documento no Redator) ainda rebaixa o registro para o estado do documento; o caminho de volta é o mesmo "Enviar a Publicações".
+- Teste: `tests/publicacoes-entrega-chega-a-fila-2026-10-18.test.mts` (núcleo inteiro contra PostgREST simulado; em `test:redator`).
+
+## Todos os avisos no sino — 2026-10-18
+
+Regra do dono: "estes e todos os avisos têm que estar dentro do sino" (`docs/compartilhado/sistema-visual.md` §24.2). **Verificado no código e confirmado por teste. Ainda não validado na tela.**
+
+- A faixa do topo (âmbar, com cor fixa) saiu. O resultado vai ao sino com o tom: ação salva e manifesto exportado como Sucesso; fallback local e URL inválida como Atenção; falha como Erro.
+- O rodapé da planilha (`OperationalDataGrid`, o mesmo do Radar) quebra linha em vez de rolar de lado.
+- Guarda: `tests/avisos-no-sino-2026-10-18.test.mts`.
+
 ## Links a ativar quando um destino vai ao ar (F5 da SDD silo interligado) — 2026-10-14
 
 Autorização do dono (2026-10-14): "pode concluir as pendências, vou testar depois". SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §6.5 e D10. **Nada mudou no código de Publicações** (sem arquivo de `modules/publicacoes`, sem rota, sem contrato, sem migration). **Verificado no código.**

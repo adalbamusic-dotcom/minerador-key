@@ -75,6 +75,8 @@ async function readContext(context: PipelineContext, groupId: string) {
     slugOf: normalizeManualSiloPageSlug,
   });
   if (escolha.kind === "create") throw new PipelineRuntimeError("CONFLICT", `Não há Silo do plano ${rotulo} desfeito para recriar: envie as keywords do grupo ao Arquiteto e o Silo do plano é preparado no envio.`, 409);
+  // 2026-10-18 · o Silo do plano fechado (consolidado) é achado pela mesma regra: não há o que recriar.
+  if (escolha.kind !== "rejected_by_human" && escolha.lifecycleStatus === "consolidated") throw new PipelineRuntimeError("CONFLICT", `O Silo do plano ${rotulo} já está fechado (SiloDNA e SiloPage): não há o que recriar.`, 409);
   const territorio = territorios.find(item => item.territoryRef === escolha.territoryRef)!;
 
   const { loadCanonicalArquitetoWorkspace } = await import("./arquiteto-workspace");

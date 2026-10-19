@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { OperationProgress } from "./operation-progress";
-import { ARTICLE_IMPROVEMENT_LABEL, IMPROVEMENT_AI_LABEL, IMPROVEMENT_LIST_CORE_LABEL, NO_REINFORCEMENT_FOUND_LABEL, hasNoReinforcementFound, isListReading } from "@/lib/arquiteto/article-improvement";
-import { humanizeOperationMessage, resolveImprovementNextStep } from "@/lib/arquiteto/article-improvement-next-step";
+import { ARTICLE_IMPROVEMENT_LABEL, IMPROVEMENT_AI_LABEL, IMPROVEMENT_ARTICLE_MAX_KEYWORDS, IMPROVEMENT_LIST_CORE_LABEL, NO_REINFORCEMENT_FOUND_LABEL, hasNoReinforcementFound, isListReading } from "@/lib/arquiteto/article-improvement";
+import { humanizeOperationMessage, improvementReadingLines, resolveImprovementNextStep } from "@/lib/arquiteto/article-improvement-next-step";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
 import { knownBeforeSearchAuthorizeLabel } from "@/lib/editorial/known-before-search";
 import { REWORK_OVERRIDE_REASON_MIN } from "@/lib/editorial/rework-guard";
@@ -68,8 +68,15 @@ export function ImprovementProgress({ activity, now, done, total, unit }: { acti
 
 type SendOptions = { reworkReason?: string; group?: string; authorizeReading?: { ai?: boolean; measure?: boolean }; approveNewKeywords?: boolean };
 
-function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClose, buttonClassName, primaryButtonClassName, selectedTargetIds = [], activeGroup = null }: {
+function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClose, onNotify, buttonClassName, primaryButtonClassName, selectedTargetIds = [], activeGroup = null }: {
   brandId: string | null; onApplied: () => void; buttonClassName: string; primaryButtonClassName: string;
+  /**
+   * 2026-10-18 · TODOS OS AVISOS NO SINO (regra do dono). A falha da etapa e os
+   * avisos do servidor sobre a leitura vão para o sino por aqui (na aba, o
+   * `showNotification` de sempre); as linhas soltas no pé do painel saíram.
+   * Aditivo: ausente, nada é publicado.
+   */
+  onNotify?: (tone: "success" | "warning" | "error" | "info", message: string) => void;
   /** O "Cancelar" da prévia fecha o refazedor (o mesmo efeito do botão da barra). */
   onClose?: () => void;
   /** A rota da marca, para o link "Sugestões do Arquiteto" no Minerador (o Arquiteto nunca grava lá). */
@@ -88,8 +95,32 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
   const [now, setNow] = useState(() => Date.now());
   /** O motivo do "refazer" (mesmos insumos), dito dentro da prévia. */
   const [motivo, setMotivo] = useState("");
+  /** 2026-10-18 · o "Já feito com os mesmos insumos" só aparece quando a pessoa pede para refazer o que custa. */
+  const [pedirRefazer, setPedirRefazer] = useState(false);
   /** Gravar só as prontas agora, sem coletar a SERP (a opção que era o "Gravar sem validar"). */
   const [semColeta, setSemColeta] = useState(false);
+  /* 2026-10-18 · falha e avisos da leitura no sino: um aviso por desfecho, e o mesmo conjunto de avisos não se repete a cada releitura. */
+  const onNotifyRef = useRef(onNotify);
+  useEffect(() => { onNotifyRef.current = onNotify; });
+  useEffect(() => { if (error) onNotifyRef.current?.("error", error); }, [error]);
+  /*
+   * 2026-10-19 · CASO REAL DO VERDE: a coleta parou com um 409 e a tela não disse nada (o erro não era mostrado no
+   * painel e a prévia fechava com a execução em "collecting"). O erro da coleta diz o que foi pago e o que parou.
+   */
+  function collectStopText(message: string, current: ImprovementRun | null): string {
+    const progresso = current?.collect;
+    if (!current || !progresso) return message;
+    const pagas = Math.max(0, current.costs.paidQueries - progresso.remaining);
+    return `${message} A coleta parou: ${pagas} de ${current.costs.paidQueries} consulta(s) autorizada(s) foram pagas (${progresso.doneGroupIds.length}${progresso.totalGroups ? ` de ${progresso.totalGroups}` : ""} grupos); o que foi pago fica no cache e não é cobrado de novo. Toque em “Continuar a coleta autorizada” para seguir.`;
+  }
+  const avisosDaLeitura = run ? [...new Set(run.notices)].filter(notice => !NOTICES_WITHOUT_ACTION.some(padrao => padrao.test(notice))).map(notice => humanizeOperationMessage(notice)) : [];
+  const assinaturaDosAvisos = avisosDaLeitura.join("\n");
+  const ultimosAvisosPublicados = useRef("");
+  useEffect(() => {
+    if (!assinaturaDosAvisos || assinaturaDosAvisos === ultimosAvisosPublicados.current) return;
+    ultimosAvisosPublicados.current = assinaturaDosAvisos;
+    onNotifyRef.current?.("info", assinaturaDosAvisos.split("\n").join(" · "));
+  }, [assinaturaDosAvisos]);
   // O relógio só anda enquanto há etapa em curso: o contador de tempo mostra que está processando.
   useEffect(() => {
     if (!activity) return;
@@ -124,8 +155,10 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
     setBusy(true); setError(null);
     const startedAt = Date.now();
     setActivity({ action, startedAt }); setNow(startedAt);
+    let ultimo: ImprovementRun | null = from;
     try {
       let current = await send(action, from, options);
+      ultimo = current;
       if (action === "apply") {
         // One editorial acceptance; these requests resume the persisted accepted batch.
         let tentativas = 0;
@@ -147,7 +180,7 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
         // The server works in bounded steps; keep calling until it leaves "collecting".
         let timeouts = 0;
         while (mounted.current && current.state === "collecting") {
-          try { current = await send("collect", current); timeouts = 0; }
+          try { current = await send("collect", current); ultimo = current; timeouts = 0; }
           catch (e) {
             if (!(e instanceof Error && e.message === "TEMPO_ESGOTADO") || ++timeouts > 3) throw e;
             current = await send("status", current);
@@ -157,7 +190,8 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
       } else if (action === "prepare") setSelected(new Set(current.proposals.filter(p => p.status === "ready").map(p => p.targetId)));
     } catch (e) {
       // 2026-10-14 · o código técnico (REWORK_SAME_REFUSAL…) nunca aparece cru: vira a frase humana.
-      if (mounted.current) setError(e instanceof Error ? humanizeOperationMessage(e.message) : "Falha na execução.");
+      if (mounted.current && action === "collect") setError(collectStopText(e instanceof Error ? humanizeOperationMessage(e.message) : "Falha na execução.", ultimo));
+      else if (mounted.current) setError(e instanceof Error ? humanizeOperationMessage(e.message) : "Falha na execução.");
     }
     finally { if (mounted.current) { setBusy(false); setActivity(null); } }
   }
@@ -209,20 +243,24 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
   const podeRefazer = Boolean(run?.rework?.canOverride) && run?.state === "prepared" && !run?.acceptedIds;
   const refazer = podeRefazer && motivo.trim().length >= REWORK_OVERRIDE_REASON_MIN;
   const gravarSemColeta = next.kind === "validate" && semColeta && selected.size > 0;
-  const passo = refazer ? "rework" as const : gravarSemColeta ? "apply" as const : next.kind === "read_paid" || next.kind === "validate" || next.kind === "apply" || next.kind === "select" ? next.kind : null;
-  const previaAberta = Boolean(run) && !busy && run?.state === "prepared" && !run?.acceptedIds && (passo !== null || podeRefazer);
+  const passo = refazer ? "rework" as const : gravarSemColeta ? "apply" as const : next.kind === "read_paid" || next.kind === "validate" || next.kind === "apply" || next.kind === "select" || next.kind === "resume_collect" ? next.kind : null;
+  // 2026-10-19 · a coleta autorizada que parou no meio (state "collecting", nada em curso) mantém a prévia aberta, com o Confirmar de sempre para continuar.
+  const coletaParada = Boolean(run) && !busy && run?.state === "collecting";
+  const previaAberta = coletaParada || (Boolean(run) && !busy && run?.state === "prepared" && !run?.acceptedIds && (passo !== null || podeRefazer));
   const novasDaConfirmacao = run ? improvementNewKeywordsPreview(run, run.acceptedIds ?? selected) : null;
   const pagas = run ? Math.max(0, run.costs.paidQueries - Math.max(0, run.costs.optionalPaidQueries ?? 0)) : 0;
-  const rotuloConfirmar = passo === "rework" ? "Refazer com o motivo dito"
+  const rotuloConfirmar = passo === "resume_collect" ? "Continuar a coleta autorizada" : passo === "rework" ? "Refazer com o motivo dito"
     : passo === "read_paid" ? leituraPaga?.button ?? "Autorizar e ler"
     : passo === "validate" ? `Autorizar ${pagas} consulta(s) e coletar a SERP (até ${usd(run?.costs.estimatedCostUsd.max ?? 0)})`
     : passo === "apply" ? novasDaConfirmacao?.total ? `Confirmar e gravar (com ${novasDaConfirmacao.total} keyword(s) nova(s))` : `Confirmar e gravar (${selected.size})`
-    : passo === "select" ? "Marque ao menos uma linha" : "Diga o motivo para refazer";
+    : passo === "select" ? "Marque ao menos uma linha" : pedirRefazer ? "Diga o motivo para refazer" : "Nada a gravar agora";
+  /* 2026-10-18 · a leitura grátis de CADA artigo lido (tem · falta · proposta), não só das linhas que mudam. */
+  const leituraPorArtigo = new Map(run ? improvementReadingLines({ proposals: run.proposals, targets: run.targets ?? [], keywordName: id => keyword(id)?.keyword ?? "—", max: IMPROVEMENT_ARTICLE_MAX_KEYWORDS }).map(line => [line.targetId, line] as const) : []);
   const recorteDaExecucao = run?.groupScope ? { group: run.groupScope.requested } : recorte;
   const confirmar = () => {
     if (passo === "rework") { const dito = motivo.trim(); setMotivo(""); void execute("prepare", { ...recorteDaExecucao, reworkReason: dito }); }
     else if (passo === "read_paid") void execute("prepare", { ...recorteDaExecucao, authorizeReading: autorizacaoDaLeitura });
-    else if (passo === "validate") void execute("collect");
+    else if (passo === "validate" || passo === "resume_collect") void execute("collect");
     else if (passo === "apply") void execute("apply", novasDaConfirmacao?.total ? { approveNewKeywords: true } : {});
   };
   const progressOf = (current: Activity): { done: number | null; total: number | null; unit: string } => {
@@ -230,8 +268,10 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
     if (current.action === "apply" && run?.acceptedIds?.length) return { done: run.outcomes.filter(o => run.acceptedIds!.includes(o.targetId)).length, total: run.acceptedIds.length, unit: "artigos gravados" };
     return { done: null, total: null, unit: "" };
   };
-  const tabela = actionable.length > 0 && run ? <div className="mt-2 overflow-x-auto"><table className="w-full border-collapse text-left text-sm"><thead><tr className="border-b border-divider text-text-muted"><th className="p-2">Aplicar</th><th className="p-2">Publicado ou artigo</th><th className="p-2">O que muda</th><th className="p-2">Resultado</th></tr></thead><tbody>
-    {actionable.map(p => {
+  // 2026-10-18 · a tabela é a LEITURA de todos os artigos lidos (o que tem, o que falta, a proposta); só a linha pronta é marcável.
+  const tabela = proposals.length > 0 && run ? <div className="mt-2 overflow-x-auto"><table className="w-full border-collapse text-left text-sm"><thead><tr className="border-b border-divider text-text-muted"><th className="p-2">Aplicar</th><th className="p-2">Publicado ou artigo</th><th className="p-2">O que muda</th><th className="p-2">Resultado</th></tr></thead><tbody>
+    {proposals.map(p => {
+      const lido = leituraPorArtigo.get(p.targetId);
       const target = (run.targets ?? []).find(t => t.id === p.targetId);
       const before = totals(target?.memberIds ?? []), after = totals(p.memberIds);
       const result = run.outcomes.find(o => o.targetId === p.targetId);
@@ -239,7 +279,8 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
       const origin = changes ? originOf(p, run) : null;
       return <tr key={p.targetId} className="border-b border-divider align-top">
         <td className="p-2"><input type="checkbox" aria-label={`Aplicar melhoria em ${p.theme}`} disabled={busy || Boolean(run.acceptedIds) || p.status !== "ready"} checked={selected.has(p.targetId)} onChange={e => setSelected(previous => { const nextSet = new Set(previous); if (e.target.checked) nextSet.add(p.targetId); else nextSet.delete(p.targetId); return nextSet; })} /></td>
-        <td className="p-2"><span className={p.kind === "published" ? "font-medium text-identity-published" : "font-medium text-keyword"}>{p.theme}</span><p className="text-text-muted">{p.kind === "published" ? "Publicado" : "Artigo"}</p></td>
+        <td className="p-2"><span className={p.kind === "published" ? "font-medium text-identity-published" : "font-medium text-keyword"}>{p.theme}</span><p className="text-text-muted">{p.kind === "published" ? "Publicado" : "Artigo"}</p>
+          {lido && <p className="text-foreground" data-testid="architect-improvement-reading">Tem: {lido.has} · Falta: {lido.missing}</p>}</td>
         <td className="p-2 text-foreground">
           {changes ? <>
             {p.principalId && p.principalId !== p.currentPrimaryId && <p>Principal: <span className="text-keyword">{label(p.currentPrimaryId)}</span> → <span className="text-keyword">{label(p.principalId)}</span></p>}
@@ -250,7 +291,7 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
             {origin && <p className="text-text-muted" data-testid="architect-improvement-origin">Origem: {origin}</p>}
           </> : p.serpRefresh
             ? <p data-testid="architect-improvement-serp-refresh">Atualizar o DNA com a SERP: intenção {p.serpRefresh.intent} · funil {p.serpRefresh.funnel}. <span className="text-text-muted">A composição não muda.</span></p>
-            : <p className="text-text-muted">Nada a mudar.</p>}
+            : <p className="text-text-muted" data-testid="architect-improvement-reading-proposal">{lido?.proposal ?? "Nada a mudar."}</p>}
           {p.exclusions.length > 0 && <p className="text-text-muted">Não cobrir: {p.exclusions.join("; ")}</p>}
           {isListReading(p) && (p.aiReasons?.length ?? 0) > 0 && <div className="mt-1" data-testid="architect-improvement-ai-reading">
             <p className="font-medium text-foreground">{p.evidenceBasis === "list_core" ? IMPROVEMENT_LIST_CORE_LABEL : IMPROVEMENT_AI_LABEL}</p>
@@ -266,19 +307,24 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
   return <section className="border-b border-divider bg-surface px-4 py-4 text-sm leading-6" aria-label={ARTICLE_IMPROVEMENT_LABEL} data-testid="architect-article-improvement">
     {busy && activity && <ImprovementProgress activity={activity} now={now} {...progressOf(activity)} />}
     {busy && <p role="status" className="sr-only">Processando; o andamento fica guardado no servidor.</p>}
-    {error && <p role="alert" className="mt-2 text-warning">{error}</p>}
     {leaseActive && !busy && <p className="mt-2 text-text-muted" role="status">Outra gravação desta marca está em andamento: feche e abra o painel em instantes.</p>}
     {precisamDoMinerador > 0 && <p className="mt-2 text-foreground" role="status" data-testid="architect-improvement-needs-minerador">
       {precisamDoMinerador} linha(s) {IMPROVEMENT_NEEDS_MINERADOR_LABEL.toLocaleLowerCase("pt-BR")}: dependem de keyword que JÁ existe no Minerador e o Arquiteto não mexe nela.{" "}
       {sugestoesHref ? <a href={sugestoesHref} className="font-medium text-module-accent underline underline-offset-2" data-testid="architect-improvement-open-suggestions">Abrir “{ARCHITECT_SUGGESTIONS_LABEL}” no Minerador</a> : <span className="text-text-muted">Abra “{ARCHITECT_SUGGESTIONS_LABEL}” no Minerador.</span>}
     </p>}
     {previaAberta && run ? <div className="mt-2 rounded-md border border-divider bg-surface-subtle p-3" role="region" aria-label="Prévia do refazedor" data-testid="architect-improvement-preview" data-step={passo ?? "rework"}>
-      {podeRefazer && run.rework && <div className="mb-2" data-testid="architect-improvement-rework">
-        <p className="text-foreground">{humanizeOperationMessage(run.rework.message)}</p>
-        <label className="mt-1 grid gap-1 text-foreground">Para refazer de verdade (chamar de novo o que custa), diga o motivo:
-          <input type="text" value={motivo} onChange={event => setMotivo(event.target.value)} className="min-h-9 rounded border border-divider bg-surface px-2 text-sm text-foreground" aria-label="Motivo para refazer" data-testid="architect-improvement-rework-reason" />
-        </label>
-      </div>}
+      {/* 2026-10-18 · primeiro a leitura de cada artigo (a tabela); o "já feito" e o motivo só quando a pessoa pede para refazer o que custa. */}
+      {podeRefazer && run.rework && <details className="mb-2" data-testid="architect-improvement-rework" open={pedirRefazer} onToggle={event => setPedirRefazer((event.currentTarget as HTMLDetailsElement).open)}>
+        <summary className="cursor-pointer text-foreground" data-testid="architect-improvement-rework-ask">Refazer o que custa (IA, medições ou busca de novo), com o motivo</summary>
+        {pedirRefazer && <>
+          <p className="text-foreground">{humanizeOperationMessage(run.rework.message)}</p>
+          <label className="mt-1 grid gap-1 text-foreground">Para refazer de verdade (chamar de novo o que custa), diga o motivo:
+            <input type="text" value={motivo} onChange={event => setMotivo(event.target.value)} className="min-h-9 rounded border border-divider bg-surface px-2 text-sm text-foreground" aria-label="Motivo para refazer" data-testid="architect-improvement-rework-reason" />
+          </label>
+        </>}
+      </details>}
+      {error && <p className="mb-2 text-danger" role="alert" data-testid="architect-improvement-error">{error}</p>}
+      {passo === "resume_collect" && !error && <p className="text-foreground" data-testid="architect-improvement-resume-collect">{next.sentence}</p>}
       {passo === "read_paid" && leituraPaga && <p className="text-foreground" data-testid="architect-improvement-read-cost">{leituraPaga.sentence}</p>}
       {next.kind === "validate" && !refazer && <p className="text-foreground" data-testid="architect-improvement-cost">SERP no DataForSEO: {pagas} consulta(s), até {usd(run.costs.estimatedCostUsd.max)} — a primeira coleta da principal que falta. O que está no cache não é pago.</p>}
       {next.kind === "validate" && ready > 0 && !refazer && <label className="mt-1 flex items-center gap-2 text-foreground"><input type="checkbox" checked={semColeta} onChange={event => setSemColeta(event.target.checked)} data-testid="architect-improvement-without-serp" /> Gravar só as linhas prontas agora, sem coletar a SERP</label>}
@@ -293,13 +339,13 @@ function ArticleImprovementSession({ brandId, brandRef = null, onApplied, onClos
         <button type="button" className={primaryButtonClassName} disabled={passo === null || passo === "select"} onClick={confirmar} data-testid="architect-improvement-confirm">{rotuloConfirmar}</button>
       </div>
     </div> : <>
+      {error && !busy && <p className="mt-2 text-danger" role="alert" data-testid="architect-improvement-error">{error}</p>}
       {run && !busy && run.state === "prepared" && !actionable.length && <p className="mt-2 text-text-muted" data-testid="architect-improvement-nothing">Nada a refazer agora nos artigos lidos.</p>}
       {tabela}
     </>}
     {(run?.editorialAi?.rejected.length ?? 0) > 0 && <details className="mt-3 text-text-muted" data-testid="architect-improvement-ai-rejected"><summary className="cursor-pointer font-medium text-foreground">Sugestões da IA recusadas pelas regras ({run!.editorialAi!.rejectedCount})</summary>
       <ul className="mt-2 grid gap-1">{run!.editorialAi!.rejected.map((r, i) => <li key={i}><span className="text-keyword">{r.keyword ?? r.keywordId ?? "—"}</span> → {r.theme ?? (run!.targets ?? []).find(t => t.id === r.targetId)?.theme ?? r.targetId ?? "—"}: {r.reason}</li>)}</ul>
     </details>}
-    {run && [...new Set(run.notices)].filter(notice => !NOTICES_WITHOUT_ACTION.some(padrao => padrao.test(notice))).map((notice, i) => <p className="mt-2 text-text-muted" key={`${i}:${notice}`}>{humanizeOperationMessage(notice)}</p>)}
   </section>;
 }
 

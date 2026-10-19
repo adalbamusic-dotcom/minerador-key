@@ -13,7 +13,8 @@ import { radarDeclaredArticleIntent } from "@/lib/radar/editorial-identity";
 import { radarResearchContextSiloRole } from "@/lib/radar/article-research-context";
 import { radarSiloRoleLabelOrNull } from "@/lib/radar/silo-role";
 import { lookupSerpCache } from "@/lib/server/serp-cache";
-import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
+import { resolveBrandSerpTarget } from "@/lib/server/brand-serp-target";
+import type { BrandSerpTarget } from "@/lib/marca/brand-serp-location";
 import { readMineradorKeywordTargetCodes, serpTargetCodesFor } from "@/lib/arquiteto/serp-lens-targeting";
 import { radarPortableSerpLensRequests } from "@/lib/radar/portable-serp-observed";
 import { planRadarSiloExport, type RadarSiloExportItem } from "@/lib/radar/portable-silo-export";
@@ -563,22 +564,37 @@ export async function assembleRadarPortableExport(input: {
    * lote de 100 ids, filtrada pela marca; sem alvo resolvível, ou com a
    * leitura falha, valem os códigos do ambiente, como antes.
    */
+  /*
+   * ===== 2026-10-18 · A LOCALIDADE DA SERP É A DA MARCA (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`) =====
+   *
+   * L2: a leitura das lentes usa os códigos da marca (`resolveBrandSerpTarget`,
+   * pelo `brandId`, nunca pelo cliente); marca sem localidade = os do ambiente,
+   * como antes. L3: o território da marca vai em cada entrada (`serpTerritory`)
+   * para a régua D11 marcar "fora do território: outra localidade" na leitura
+   * competitiva e na SERP crua. Marca nacional: nada é acrescentado à entrada.
+   * A falha da leitura fica contida, como a das lentes: o arquivo sai.
+   */
+  let alvoDaMarca: BrandSerpTarget | null = null;
+  if (montadas.length) {
+    try { alvoDaMarca = await resolveBrandSerpTarget(input.supabase, input.brandId); } catch { alvoDaMarca = null; }
+    if (alvoDaMarca?.territory) for (const item of montadas) item.entrada.serpTerritory = alvoDaMarca.territory;
+  }
   /* 2026-10-07 · os pedidos ficam guardados para o resumo das lentes extras do CSV de vídeo: sem outra leitura de alvo. */
   let pedidosDasLentes: ReturnType<typeof radarPortableSerpLensRequests> = [];
   const lentes = montadas.length
     ? await radarPortableExportReadLenses(async () => {
-      const ambiente = readDataForSeoTargetCodes();
+      const codigosDaMarca = (alvoDaMarca ?? await resolveBrandSerpTarget(input.supabase, input.brandId)).codes;
       const keywordsDoLote = montadas.flatMap(item => item.lentes);
       const alvos = await readMineradorKeywordTargetCodes(
         input.supabase,
         input.brandId,
         keywordsDoLote.map(item => item.keywordId || "").filter(Boolean),
-        ambiente,
+        codigosDaMarca,
       );
       const pedidos = radarPortableSerpLensRequests({
         keywords: keywordsDoLote,
-        ...ambiente,
-        codesFor: keywordId => serpTargetCodesFor(alvos.codes, keywordId, ambiente),
+        ...codigosDaMarca,
+        codesFor: keywordId => serpTargetCodesFor(alvos.codes, keywordId, codigosDaMarca),
       });
       pedidosDasLentes = pedidos;
       if (!pedidos.length) return [];

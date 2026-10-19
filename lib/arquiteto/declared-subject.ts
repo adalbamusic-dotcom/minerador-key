@@ -187,6 +187,13 @@ export type ArchitectSubjectStanding = {
    */
   carriesSubject?: boolean;
   /**
+   * 2026-10-19 · O ASSUNTO MORA NA PRÓPRIA KEYWORD SEM PLANO (o `entry` do cadastro único, sem `plan`: a página publicada
+   * cujo Assunto é ela mesma, ou a "Keyword (sem Silo)", SDD 2026-10-18 §6.2-a). A frase é a keyword de verdade, não um
+   * título: ela pode ser a principal do próprio artigo sem volume (A5, ADR-022 D1-ter) — o "Assunto como foco" do
+   * refazer, quando nenhuma busca com volume cabe no Assunto. Não muda a formação (`heldOutOfFormation` fica igual).
+   */
+  subjectOnKeyword?: boolean;
+  /**
    * 2026-10-13 · a TRAVA da principal do plano (`declaredPrincipalLock`):
    * travada = principal fixa; livre = a formação/melhoria pode propor outra.
    * `null` sem principal declarada. Ausente (standing antigo) = calculada.
@@ -233,8 +240,8 @@ export function freePlanPrincipal(standing: Pick<ArchitectSubjectStanding, "plan
  * quando ele MORA na keyword (cadastro único, ADR-022 D1-ter): aí a frase é uma
  * keyword de verdade, não um título.
  */
-export function subjectMayBePrincipal(standing: Pick<ArchitectSubjectStanding, "volumeValidated"> & { carriesSubject?: boolean } | null | undefined): boolean {
-  return Boolean(standing?.volumeValidated || standing?.carriesSubject);
+export function subjectMayBePrincipal(standing: Pick<ArchitectSubjectStanding, "volumeValidated"> & { carriesSubject?: boolean; subjectOnKeyword?: boolean } | null | undefined): boolean {
+  return Boolean(standing?.volumeValidated || standing?.carriesSubject || standing?.subjectOnKeyword);
 }
 
 /**
@@ -273,6 +280,7 @@ export function readArchitectSubjectStanding(keyword: RecordLike): ArchitectSubj
       plan,
       declaredPrincipal: dna.declaredPrincipal ?? null,
       carriesSubject,
+      ...(declared && !plan && dna.subject?.entry ? { subjectOnKeyword: true } : {}),
       planLock: plan ? declaredPrincipalLock(plan, { subjectKeywordId: keywordId, volume: carriesSubject ? { validated: volumeValidated, value: volumeValue } : null }) : null,
       volumeValue,
       // A conversão só vale com o Assunto cadastrado na própria keyword (o bloco nasce junto do `entry`). Aditivo: só aparece quando há.
@@ -422,11 +430,22 @@ export function articleDnaIncorporatedKeywordIds(
   return subject && !ids.includes(subject) ? [...ids, subject] : ids;
 }
 
+/** 2026-10-18 · as keywords que os ArticleDNAs vigentes referenciam (principal e secundárias; o Assunto fica fora). */
+export function keywordIdsInArticleDnas(articles: ReadonlyArray<Pick<ArticleDNA, "keywordReferences">>): Set<string> {
+  return new Set(articles.flatMap(article => article.keywordReferences.map(reference => reference.keywordId)));
+}
+
 export type UngroupedSubjectView = {
   /** Continuam em "Keywords não agrupadas"; o Assunto sem artigo leva o selo. */
   ungrouped: Array<{ keywordId: string; label: string | null }>;
   /** Troncos ancorados: saem de "não agrupadas" e mostram "tronco de N". */
   anchored: Array<{ keywordId: string; label: string; articleCount: number }>;
+  /**
+   * 2026-10-18 · aditivo: as que JÁ estão num ArticleDNA vigente (principal ou secundária) e chegaram à mesa sem a
+   * marca de artigo na cópia de trabalho (a keyword NOVA incorporada pela confirmação da melhoria). Estão no artigo:
+   * não são "sem artigo". Ausente quando ninguém passou `inArticleKeywordIds`.
+   */
+  inArticle?: string[];
 };
 
 /**
@@ -451,13 +470,24 @@ export function splitUngroupedBySubjectAnchor(input: {
    * keyword). Fica em "não agrupadas" com o selo próprio — nunca some.
    */
   convertedTitleOf?: (keywordId: string) => ArchitectConvertedTitle | null | undefined;
+  /**
+   * 2026-10-18 (amarelo da WifiConecta, teste no ar) · aditivo: as keywords referenciadas por um ArticleDNA vigente
+   * (`keywordReferences`). As 32 novas que a confirmação gravou DENTRO dos artigos chegavam à mesa sem `clusterId` na
+   * cópia de trabalho e a aba as listava em "Keywords sem artigo · 32" (com "Reservar como candidata" a Silo). Keyword
+   * de ArticleDNA vigente está no artigo: sai de "sem artigo" (para `inArticle`); nada é gravado.
+   */
+  inArticleKeywordIds?: ReadonlySet<string>;
 }): UngroupedSubjectView {
-  const view: UngroupedSubjectView = { ungrouped: [], anchored: [] };
+  const view: UngroupedSubjectView = { ungrouped: [], anchored: [], ...(input.inArticleKeywordIds ? { inArticle: [] } : {}) };
   for (const raw of input.ungroupedKeywordIds) {
     const keywordId = String(raw);
     const articleCount = countSubjectAnchors(keywordId, input.articles);
     if (articleCount > 0) {
       view.anchored.push({ keywordId, label: subjectTrunkLabel(articleCount), articleCount });
+      continue;
+    }
+    if (input.inArticleKeywordIds?.has(keywordId)) {
+      view.inArticle!.push(keywordId);
       continue;
     }
     const convertida = input.convertedTitleOf?.(keywordId);

@@ -3,9 +3,14 @@ import test from "node:test";
 import { comProductShell, montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
 import { VOLUME_VALIDADO } from "./arquiteto-assunto-fixtures.mts";
 import { cadastro, linha, MARCA_WIFI } from "./arquiteto-planilha-primeiro-fixtures.mts";
-import { MesaDoPlano, ROTULOS_REMOVIDOS, botoesDaArea, novoRegistro, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
+import { MesaDoPlano, ROTULOS_REMOVIDOS, botoesDaArea, novoRegistro, ultimoAviso, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
 import { ArticleImprovementPanel } from "../modules/arquiteto/article-improvement-panel.tsx";
+import { LinksSiloPicker } from "../modules/arquiteto/links-silo-picker.tsx";
+import { resolveLinksSilo } from "../lib/arquiteto/declared-plan-silo.ts";
+import { readFileSync } from "node:fs";
 import type { PlanSheetArticle } from "../lib/arquiteto/plan-article-sheet.ts";
+import { planArticleImprovements, type ImprovementKeyword, type ImprovementTarget } from "../lib/arquiteto/article-improvement.ts";
+import { resolveKeywordDnaSignals } from "../lib/arquiteto/keyword-dna-signals.ts";
 
 /*
  * 2026-10-17 (noite) · OS 3 BOTÕES EM SEQUÊNCIA, NA TELA DE VERDADE (DOM), com o amarelo da WifiConecta.
@@ -131,8 +136,10 @@ test("amarelo · os 3 botões em sequência: (a) só Processar ativo · (b) depo
   assert.equal(passoAtual(), "process");
   assert.equal(barraBotao("architect-articles-top-process").className, "primary", "o passo atual é o destacado");
   for (const rotulo of ROTULOS_REMOVIDOS) assert.doesNotMatch(screen.text(), rotulo, String(rotulo));
-  // A linha Livre de identidade diz que fica (nunca "livre, pode trocar").
-  assert.match(linhaDa("a1").querySelector("[data-testid='architect-plan-row-alerts']")!.textContent!, /sem número de buscas — identidade, fica/);
+  // A linha Livre de identidade (Suporte) diz que fica (nunca "livre, pode trocar").
+  assert.match(linhaDa("a3").querySelector("[data-testid='architect-plan-row-alerts']")!.textContent!, /sem número de buscas — identidade, fica/);
+  // 2026-10-17 (noite) · "Pilar troca, Suportes ficam": o Pilar sem volume diz o termo-cabeça (proposta no Processar; decisão do dono).
+  assert.match(linhaDa("a1").querySelector("[data-testid='architect-plan-row-alerts']")!.textContent!, /sem número de buscas — Pilar: termo-cabeça/);
 
   // (b) PROCESSAR ARTIGOS: a leitura com a busca do reforço (grátis) e UMA prévia de custo da SERP das principais de identidade.
   await screen.click("architect-articles-top-process"); await assentar();
@@ -151,7 +158,7 @@ test("amarelo · os 3 botões em sequência: (a) só Processar ativo · (b) depo
   assert.equal(coletas.length, 1);
   assert.equal(coletas[0].body.authorizedCostUsd, 0.056, "a coleta paga só o custo autorizado na prévia");
   for (const id of IDS) assert.match(resultado(id), /^Cópia de trabalho \(nada gravado\): principal “.+” \((Travada|identidade), fica\) · secundárias: .+, nova\)\. Pronto para “Concluir formação”\.$/, id);
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /^Processar artigos: 8 artigo\(s\) lido\(s\), reforço proposto para 8; SERP paga agora: 16 consulta\(s\)\. Nada foi gravado/);
+  assert.match(ultimoAviso(registro), /^Processar artigos: 8 artigo\(s\) lido\(s\), reforço proposto para 8; SERP paga agora: 16 consulta\(s\)\. Nada foi gravado/);
   assert.equal(barraBotao("architect-articles-top-confirm").disabled, false);
   assert.equal(passoAtual(), "conclude", "depois do Processar, o Concluir é o passo");
   assert.equal(barraBotao("architect-articles-top-confirm").className, "primary");
@@ -175,7 +182,7 @@ test("amarelo · os 3 botões em sequência: (a) só Processar ativo · (b) depo
   assert.deepEqual(gravacoes[0].body.targetIds, IDS);
   assert.equal(gravacoes[0].body.approveNewKeywords, true, "o aceite das novas só porque a prévia as listou");
   assert.deepEqual(registro.silos, [[AMARELO]], "o Silo do plano fecha no MESMO ato do Concluir");
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /^Concluir formação: 8 gravado\(s\) e relido\(s\); 0 fora desta confirmação\..*Silo do plano fechado/);
+  assert.match(ultimoAviso(registro), /^Concluir formação: 8 gravado\(s\) e relido\(s\); 0 fora desta confirmação\..*Silo do plano fechado/);
   assert.equal(registro.aplicados, 1, "a mesa é relida");
   // Com os 8 formados (a releitura da mesa), o refazedor é o passo.
   await screen.render(mesa([...TRAVADOS.map(id => formado(id, 2)), ...LIVRES.map(id => formado(id))])); await assentar();
@@ -193,7 +200,7 @@ test("amarelo · cancelar a coleta paga do Processar não paga nada, deixa o ref
   await screen.click("architect-articles-top-process"); await assentar();
   await screen.click([...screen.get("architect-plan-sheet-preview").querySelectorAll<HTMLButtonElement>("button")].find(botao => botao.textContent === "Cancelar")!); await assentar();
   assert.equal(chamadas.filter(chamada => chamada.body?.action === "collect").length, 0);
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /a coleta paga foi cancelada — nada foi pago nem gravado/);
+  assert.match(ultimoAviso(registro), /a coleta paga foi cancelada — nada foi pago nem gravado/);
   for (const id of LIVRES) assert.match(resultado(id), /Falta a SERP da principal: “Processar artigos” coleta, com o custo antes\./, id);
   assert.equal(barraBotao("architect-articles-top-confirm").disabled, true);
   assert.equal(passoAtual(), "process");
@@ -244,9 +251,14 @@ test("refazedor · o refazer (mesmos insumos) pede o motivo DENTRO da prévia; s
   const reuso = { verdict: "same_inputs_reuse", previous: null, reasons: [], blocks: false, canOverride: true, message: "Já feito com os mesmos insumos em 17/10 às 20:00 — o resultado foi reaproveitado." };
   redeDoRefazedor(body => execucaoPublicado({ rework: reuso, proposals: [], ...(body.reworkOverride ? { rework: undefined } : {}) }));
   await screen.render(refazedor()); await assentar();
-  assert.match(screen.get("architect-improvement-rework").textContent!, /Já feito com os mesmos insumos em 17\/10/);
+  // 2026-10-18 · o "já feito" só aparece quando a pessoa pede para refazer o que custa (antes ele era tudo o que a prévia mostrava).
+  assert.doesNotMatch(screen.text(), /Já feito com os mesmos insumos/, "fechado até a pessoa pedir");
   const confirmar = () => screen.get("architect-improvement-confirm") as HTMLButtonElement;
   assert.equal(confirmar().disabled, true);
+  assert.equal(confirmar().textContent, "Nada a gravar agora");
+  const pedido = screen.get("architect-improvement-rework") as HTMLDetailsElement;
+  await React.act(async () => { pedido.open = true; pedido.dispatchEvent(new (pedido.ownerDocument.defaultView as unknown as { Event: typeof Event }).Event("toggle")); });
+  assert.match(screen.get("architect-improvement-rework").textContent!, /Já feito com os mesmos insumos em 17\/10/);
   assert.equal(confirmar().textContent, "Diga o motivo para refazer");
   await screen.type(screen.get("architect-improvement-rework-reason") as HTMLInputElement, "o artigo ficou fraco: refazer o reforço");
   assert.equal(confirmar().textContent, "Refazer com o motivo dito");
@@ -254,4 +266,99 @@ test("refazedor · o refazer (mesmos insumos) pede o motivo DENTRO da prévia; s
   const refeitas = chamadas.filter(chamada => chamada.body.reworkOverride);
   assert.deepEqual(refeitas.map(chamada => [chamada.body.action, chamada.body.reworkOverride.reason, chamada.body.discover]), [["prepare", "o artigo ficou fraco: refazer o reforço", true]]);
   assert.equal([...screen.container.querySelectorAll("button")].filter(botao => /Refazer mesmo assim/.test(botao.textContent ?? "")).length, 0);
+});
+
+/*
+ * 2026-10-18 · TESTE NO AR DO AMARELO: com os 8 artigos formados, "Melhorar publicados…" mostrava só "Já feito com os
+ * mesmos insumos… diga o motivo" e o dono achou que "não fez nada". Abrir o refazedor mostra a LEITURA de cada artigo:
+ * o que tem, o que falta e a proposta (se houver); o custo só se precisar pagar; o "já feito" só quando se pede.
+ */
+test("refazedor · com os 8 formados, abrir mostra a leitura de CADA artigo (tem · falta · proposta) e o 'já feito' só quando se pede", async () => {
+  restaurada = null; fechou = 0;
+  const reuso = { verdict: "same_inputs_reuse", previous: null, reasons: [], blocks: false, canOverride: true, message: "Já feito com os mesmos insumos em 17/10 às 22:13 — o resultado foi reaproveitado." };
+  const membros: Record<string, string[]> = { a1: ["n1", "n2", "x1", "x2", "x3"], a2: ["a2", "n3", "x4", "x5", "x6", "x7"], a3: ["a3", "n4", "x8"], a4: ["a4", "n5", "x9", "x10"], a5: ["a5", "n6"], a6: ["a6", "n7", "x11"], a7: ["a7", "n8", "x12", "x13"], a8: ["a8", "n9", "x14"] };
+  const run = execucao(true, {
+    brandId: "brand-a", rework: reuso, costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] },
+    targets: IDS.map(id => ({ id, kind: "subject", theme: nome(id), memberIds: membros[id] })),
+    proposals: IDS.map(id => ({ targetId: id, kind: "subject", theme: nome(id), currentPrimaryId: id === "a1" ? "n1" : id, principalId: id === "a1" ? "n1" : id, memberIds: membros[id], addIds: id === "a8" ? ["n10"] : [], removeIds: [], transfers: [], angle: "", exclusions: [], reasons: id === "a5" ? ["Sem keyword de reforço encontrada: nenhuma keyword com volume da lista da marca nem das ideias do Google Ads desta leitura cabe no Assunto, no slug e no DNA do artigo. A principal fica; a vaga continua aberta para a próxima leitura."] : ["Motivo."], status: id === "a8" ? "ready" : "adequate", evidenceBasis: id === "a8" ? "copy_line" : null })),
+    keywords: [...keywordsDaRun(), { id: "n10", keyword: "prazo de instalação de internet", volume: 90, volumeValidated: true, external: true }],
+  });
+  redeDoRefazedor(() => run);
+  await screen.render(refazedor()); await assentar();
+  const leituras = screen.all("architect-improvement-reading");
+  assert.equal(leituras.length, 8, "uma leitura por artigo lido (não só as linhas que mudam)");
+  const daLinha = (theme: string) => leituras.find(item => item.closest("tr")!.textContent!.includes(theme))!.textContent!;
+  assert.equal(daLinha(nome("a8")), "Tem: 3 keywords hoje · Falta: cabem mais 3", "Instalação: 3 keywords — cabem mais 3");
+  assert.equal(daLinha(nome("a3")), "Tem: 3 keywords hoje · Falta: cabem mais 3", "Claro, Vivo ou TIM: 3 keywords");
+  assert.equal(daLinha(nome("a2")), "Tem: 6 keywords hoje · Falta: cheio (6 de 6)");
+  assert.match(screen.text(), /Entram: prazo de instalação de internet/, "a proposta da instalação");
+  assert.match(screen.text(), /Sem keyword de reforço encontrada/, "a leitura diz quando não achou reforço");
+  assert.doesNotMatch(screen.text(), /Já feito com os mesmos insumos/, "o 'já feito' só aparece quando a pessoa pede");
+  assert.doesNotMatch(screen.text(), /SERP no DataForSEO/, "sem custo a pagar, nenhum custo na tela");
+  assert.match(screen.get("architect-improvement-confirm").textContent!, /^Confirmar e gravar \(/, "a linha pronta grava; as outras só leem");
+});
+
+/*
+ * 2026-10-18 · G · A CABEÇA DA FACETA DO SUPORTE NÃO É A CABEÇA DO PILAR (teste no ar, refazedor do amarelo): a instalação
+ * (Travada, 170, 3 keywords) ficava "Sem keyword de reforço encontrada" com "“instalação de internet” (720) é mais ampla
+ * que a principal (cabeça do Pilar)". A proposta abaixo sai do MOTOR de sempre (`planArticleImprovements`, o que o
+ * servidor chama ao abrir "Melhorar publicados…"): a tela mostra "Entram: …" com a cabeça da própria faceta (uma grafia
+ * por linha do Google Ads) e o Confirmar grava com o aceite das keywords novas.
+ */
+test("refazedor · G: a instalação (3 keywords) recebe a cabeça da PRÓPRIA faceta pelo motor de sempre — a tela diz 'Entram: internet instalação; instalação de internet' (nunca 'cabeça do Pilar') e o Confirmar grava com o aceite das novas", async () => {
+  restaurada = null; fechou = 0;
+  const sinais = (id: string, texto: string, entidade: string | null = null) => resolveKeywordDnaSignals({ keywordId: id, text: texto, semantic: entidade ? { entidade_central: entidade } : {} });
+  const kw = (id: string, keyword: string, volume: number | null, extra: Partial<ImprovementKeyword> = {}): ImprovementKeyword => ({ id, keyword, volume, volumeValidated: volume !== null, signals: sinais(id, keyword), ownerId: null, published: false, territoryRef: TERRITORIO_AMARELO, external: false, ...extra });
+  const [, , tituloDoPilar, , , slugDoPilar] = AMARELO_REAL[0], [, principal, titulo, , , slug] = AMARELO_REAL[7];
+  const pilar: ImprovementTarget = { id: "a1", kind: "subject", theme: tituloDoPilar, note: null, primaryId: "a1", post: "free", memberIds: ["a1"], territoryRef: TERRITORIO_AMARELO, slug: slugDoPilar, url: null, canonical: null, signals: sinais("a1", nome("a1"), "plano"), planSlug: slugDoPilar, planRole: "Pilar" };
+  const instalacao: ImprovementTarget = { id: "a8", kind: "subject", theme: titulo, note: null, primaryId: "a8", post: "free", memberIds: ["a8", "n9", "n10"], territoryRef: TERRITORIO_AMARELO, slug, url: null, canonical: null, signals: sinais("a8", principal, "instalacao"), planSlug: slug, planScope: "Instalação, agendamento, viabilidade, cobrança inicial e fidelidade", planRole: "Suporte", declaredPrincipalId: "a8" };
+  const lista = [kw("a1", nome("a1"), null, { ownerId: "a1" }), kw("a8", principal, 170, { ownerId: "a8" }), kw("n9", "taxa de instalação de internet", 260, { ownerId: "a8" }), kw("n10", "prazo de instalação de internet", 90, { ownerId: "a8" }),
+    // As ideias REAIS do Google Ads no refazedor (18/10): 880 = 880 é a mesma linha do Google Ads (a mesma busca).
+    kw("c1", "internet instalação", 880, { external: true }), kw("c2", "instalação internet", 880, { external: true }), kw("c3", "instalação de internet", 720, { external: true })];
+  const proposta = planArticleImprovements({ targets: [pilar, instalacao], keywords: lista, evidence: [] }).find(p => p.targetId === "a8")!;
+  assert.deepEqual([...proposta.addIds].sort(), ["c1", "c3"], JSON.stringify(proposta.reasons));
+  const daTela = { brandId: "brand-a", costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] }, targets: [{ id: "a8", kind: "subject", theme: nome("a8"), memberIds: instalacao.memberIds }], proposals: [{ ...proposta, theme: nome("a8") }], keywords: lista.map(({ id, keyword, volume, volumeValidated, external }) => ({ id, keyword, volume, volumeValidated, external })) };
+  redeDoRefazedor(body => body.action === "apply" ? execucao(true, { ...daTela, state: "complete", acceptedIds: ["a8"], outcomes: [{ targetId: "a8", status: "improved", message: "ArticleDNA de instalação de internet residencial gravado (v3) e relido." }] }) : execucao(true, daTela));
+  await screen.render(refazedor()); await assentar();
+  const texto = screen.text();
+  assert.match(texto, /Entram: [^\n]*internet instalação · volume 880 · nova/, texto);
+  assert.match(texto, /Entram: [^\n]*instalação de internet · volume 720 · nova/);
+  assert.doesNotMatch(texto, /instalação internet · volume/, "a mesma linha do Google Ads não ocupa outra vaga");
+  assert.match(texto, /3 → 5 keywords/);
+  assert.doesNotMatch(texto, /cabeça do Pilar/, "a faceta do Suporte nunca é dita 'cabeça do Pilar'");
+  assert.doesNotMatch(texto, /Sem keyword de reforço encontrada/);
+  assert.equal(screen.get("architect-improvement-confirm").textContent, "Confirmar e gravar (com 2 keyword(s) nova(s))");
+  await screen.click(screen.get("architect-improvement-confirm")); await assentar();
+  assert.deepEqual(chamadas.filter(chamada => chamada.body.action === "apply").map(chamada => [chamada.body.targetIds, chamada.body.approveNewKeywords]), [[["a8"], true]], "o Confirmar do refazedor grava com o aceite das novas");
+  assert.match(screen.text(), /Melhoria gravada/);
+});
+
+/*
+ * 2026-10-18 · C · LINKS INTERNOS: a escolha do Silo do grafo era o clique no mapa (saiu em 16/10). O seletor de sempre
+ * ("Silo do grafo"): com a etiqueta de cor, o Silo da cor com SiloDNA + SiloPage é escolhido sozinho; sem cor, a pessoa
+ * escolhe entre os Silos com o par.
+ */
+test("links · o Silo do grafo: com a cor, o Silo dela é escolhido sozinho (sem seletor); sem cor, o seletor lista só os Silos com o par e a escolha vale", async () => {
+  const contextos = [{ siloId: "territory:azul", label: "Wi-Fi e fibra óptica" }, { siloId: TERRITORIO_AMARELO, label: "Planos e contratação" }];
+  const escolhas: Array<string | null> = [];
+  const desenhar = (choice: { siloId: string | null; byColor: boolean; colorWaiting: boolean }) => screen.render(comProductShell(React.createElement(LinksSiloPicker, { contexts: contextos, choice, onChange: (siloId: string | null) => { escolhas.push(siloId); } })));
+  // Com a etiqueta amarela: o Silo do plano amarelo (com o par), escrito, sem seletor.
+  await desenhar(resolveLinksSilo({ contexts: contextos.map(c => ({ siloId: c.siloId, territoryRef: c.siloId })), selected: null, colorSiloRefs: [TERRITORIO_AMARELO] }));
+  assert.equal(screen.get("architect-links-silo-by-color").textContent, "Silo do grafo (cor da etiqueta): Planos e contratação");
+  assert.equal(screen.container.querySelector("[data-testid='architect-links-silo-select']"), null);
+  // Sem cor: o seletor de sempre, só com os Silos que têm o par; a escolha vai para a tela.
+  await desenhar(resolveLinksSilo({ contexts: contextos.map(c => ({ siloId: c.siloId, territoryRef: c.siloId })), selected: null, colorSiloRefs: null }));
+  const seletor = screen.get("architect-links-silo-select") as HTMLSelectElement;
+  assert.deepEqual([...seletor.options].map(option => option.textContent), ["Wi-Fi e fibra óptica", "Planos e contratação"]);
+  await screen.select(seletor, TERRITORIO_AMARELO);
+  assert.deepEqual(escolhas, [TERRITORIO_AMARELO]);
+  // A cor cujo Silo ainda não tem o par diz que espera o fechamento (e o seletor continua).
+  await desenhar(resolveLinksSilo({ contexts: [{ siloId: "territory:azul", territoryRef: "territory:azul" }], selected: null, colorSiloRefs: [TERRITORIO_AMARELO] }));
+  assert.match(screen.get("architect-links-silo-color-waiting").textContent!, /ainda não tem SiloDNA e SiloPage/);
+  // A tela usa o seletor e a regra (sem o mapa).
+  const tela = readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.match(tela, /<LinksSiloPicker\s+contexts=\{linkSiloContexts\.map/);
+  assert.match(tela, /const linksSiloChoice = resolveLinksSilo\(\{/);
+  assert.match(tela, /const resolvedLinksSiloId = linksSiloChoice\.siloId;/);
+  assert.match(tela, /const daComposicao = articleDnaEntryFor\(\{ articleId: idDaLinha \?\? null, candidateRef: article\.candidateRef \?\? null \}\)\.version\?\.payload\.articleId \?\? null;/, "o Silo da linha sai do ArticleDNA dela (a chave da fase)");
 });

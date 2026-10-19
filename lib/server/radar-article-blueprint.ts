@@ -32,7 +32,8 @@ import {
   type RadarArticleBlueprintInvestigationRef,
   type RadarArticleBlueprintVersionMeta,
 } from "@/lib/radar/article-blueprint-freeze";
-import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
+import { resolveDeepSeekCanonicalConfig, type DeepSeekCanonicalResolution } from "@/lib/server/deepseek-canonical";
+import { recordIntegrationUsage, type RecordIntegrationUsageInput } from "@/lib/server/integrations-runtime";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
 
@@ -66,6 +67,11 @@ import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
  * ArticleDNA (`radarArticleBlueprintPick`, sem rascunho); o pedido recebe o
  * bloco comercial da Amazon congelada e as exclusões dos reajustes no
  * ArticleDNA; a versão grava também o congelamento da Amazon no vínculo.
+ *
+ * 2026-10-18 · LIVRO DE USO. Cada chamada que sai (primeira, nova tentativa e
+ * correção) grava um evento `module: "radar"` em `integration_usage_events`,
+ * pelo mesmo gravador das rotas de IA do Arquiteto (`radarArticleBlueprintUsageRecorder`):
+ * a cota da marca passa a contar o artigo-modelo.
  */
 
 export type RadarArticleBlueprintRow = {
@@ -209,6 +215,55 @@ export function radarArticleBlueprintCallTimeout(prazo: number | undefined, agor
 type ProvedorDaIa = Parameters<typeof generateStructuredAI>[0]["provider"];
 
 /**
+ * 2026-10-18 · CADA CHAMADA À IA ENTRA NO LIVRO DE USO, COMO NO ARQUITETO.
+ *
+ * O teste real de 17–18/10 (WifiConecta) mostrou o Radar pagando a IA da
+ * plataforma (OpenRouter, cota da marca) sem nenhuma linha em
+ * `integration_usage_events`: a cota da marca e o livro não viam o artigo-modelo.
+ * Agora cada chamada que sai para o provider — a primeira, a nova tentativa e a
+ * passada de correção — vira UM evento, pelo MESMO gravador e pela mesma chave
+ * idempotente das rotas de IA do Arquiteto (`internal-link-graph/anchors`):
+ * `<provider>:<operação>:<pedido>[:failed]`, aqui com o rótulo da chamada.
+ * Chamada não pedida (sem tempo no prazo da rota) não registra nada. O registro
+ * de falha não esconde o erro do provider (como a revisão territorial); o de
+ * sucesso, falhando, derruba a operação — sucesso só depois do livro gravado.
+ */
+export type RadarArticleBlueprintAiCall = "first" | "retry" | "correction";
+export type RadarArticleBlueprintCallRecorder = (call: { kind: RadarArticleBlueprintAiCall; ok: boolean; error?: unknown }) => Promise<void>;
+
+export function radarArticleBlueprintUsageRecorder(input: {
+  provider: Pick<DeepSeekCanonicalResolution, "provider" | "resource">;
+  articleId: string;
+  operationRequestId: string;
+  record: (event: RecordIntegrationUsageInput) => Promise<unknown>;
+}): RadarArticleBlueprintCallRecorder {
+  return async ({ kind, ok, error }) => {
+    const evento: RecordIntegrationUsageInput = {
+      resource: input.provider.resource,
+      operation: "module_operation",
+      module: "radar",
+      resultStatus: ok ? "succeeded" : "failed",
+      units: 1,
+      ...(ok ? {} : { errorCode: "RADAR_ARTICLE_BLUEPRINT_FAILED" }),
+      idempotencyKey: `${input.provider.provider}:radar_article_blueprint:${input.operationRequestId}:${kind}${ok ? "" : ":failed"}`,
+      metadata: {
+        operationRequestId: input.operationRequestId, operationKind: "radar_article_blueprint", call: kind, articleId: input.articleId,
+        ...(ok ? {} : { failureCode: error instanceof StructuredAIError ? error.code : null }),
+      },
+    };
+    if (ok) {
+      await input.record(evento);
+      return;
+    }
+    try {
+      await input.record(evento);
+    } catch {
+      /* o erro que a tela precisa ver é o do provider, não o do livro */
+    }
+  };
+}
+
+/**
  * 2026-10-02 · O PEDIDO À IA, COM NO MÁXIMO UMA NOVA TENTATIVA.
  *
  * Sem modo de raciocínio (o raciocínio consome o mesmo teto de tokens e foi o
@@ -225,9 +280,16 @@ export async function requestRadarArticleBlueprintAi(input: {
   fetchImpl?: typeof fetch;
   /** 2026-10-08 (revisão) · prazo da rota (epoch ms); a nova tentativa só usa o que sobra. */
   deadlineAt?: number;
+  /** 2026-10-18 · cada chamada que sai vira um evento no livro de uso (`radarArticleBlueprintUsageRecorder`). */
+  recordCall?: RadarArticleBlueprintCallRecorder;
 }): Promise<{ ai: RadarArticleBlueprintAi; calls: 1 | 2; notes: string[] }> {
-  const tentar = async (curta: boolean, timeoutMs: number) => {
-    const visto = { finishReason: null as string | null };
+  /*
+   * 2026-10-18 · o tamanho da resposta vai junto no log (tokens da resposta, do
+   * raciocínio e caracteres): no teste real, as duas cortadas não diziam se o
+   * teto foi gasto pela resposta ou pelo raciocínio.
+   */
+  const pedir = async (curta: boolean, timeoutMs: number) => {
+    const visto = { finishReason: null as string | null, completionTokens: null as number | null, reasoningTokens: null as number | null, contentLength: null as number | null };
     const { system, user } = radarArticleBlueprintPrompt(input.brief, { short: curta });
     try {
       const ai = await generateStructuredAI({
@@ -239,13 +301,26 @@ export async function requestRadarArticleBlueprintAi(input: {
         thinkingMode: "disabled",
         timeoutMs,
         fetchImpl: input.fetchImpl,
-        onDiagnostic: diagnostico => { if (diagnostico.finishReason) visto.finishReason = diagnostico.finishReason; },
+        onDiagnostic: diagnostico => {
+          if (diagnostico.finishReason) visto.finishReason = diagnostico.finishReason;
+          if (typeof diagnostico.completionTokens === "number") visto.completionTokens = diagnostico.completionTokens;
+          if (typeof diagnostico.reasoningTokens === "number") visto.reasoningTokens = diagnostico.reasoningTokens;
+          if (diagnostico.contentLength) visto.contentLength = diagnostico.contentLength;
+        },
       });
-      return { ok: true as const, ai, finishReason: visto.finishReason };
+      return { ok: true as const, ai, ...visto };
     } catch (error) {
-      return { ok: false as const, error, finishReason: visto.finishReason };
+      return { ok: false as const, error, ...visto };
     }
   };
+  /* 2026-10-18 · a curta é a nova tentativa; cada chamada que saiu entra no livro de uso, com o resultado dela. */
+  const tentar = async (curta: boolean, timeoutMs: number) => {
+    const resultado = await pedir(curta, timeoutMs);
+    await input.recordCall?.({ kind: curta ? "retry" : "first", ok: resultado.ok, error: resultado.ok ? undefined : resultado.error });
+    return resultado;
+  };
+  const tamanho = (tentativa: { completionTokens: number | null; reasoningTokens: number | null; contentLength: number | null }) =>
+    ({ completionTokens: tentativa.completionTokens, reasoningTokens: tentativa.reasoningTokens, contentLength: tentativa.contentLength });
   const codigo = (error: unknown) => (error instanceof StructuredAIError ? error.code : null);
 
   const primeira = await tentar(false, radarArticleBlueprintCallTimeout(input.deadlineAt, Date.now(), RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.first) ?? RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.first);
@@ -262,6 +337,7 @@ export async function requestRadarArticleBlueprintAi(input: {
     finishReason: primeira.finishReason,
     code: codigo(primeira.error),
     chamadasDeIa: 2,
+    ...tamanho(primeira),
   });
   const segunda = await tentar(true, tetoDaSegunda);
   if (segunda.ok) return { ai: segunda.ai, calls: 2, notes: [radarArticleBlueprintRetryNote(falha)] };
@@ -271,9 +347,10 @@ export async function requestRadarArticleBlueprintAi(input: {
     motivo: falhaFinal,
     finishReason: segunda.finishReason,
     code: codigo(segunda.error),
+    ...tamanho(segunda),
   });
   if (!falhaFinal) throw segunda.error;
-  throw new StructuredAIError(radarArticleBlueprintAiFailureMessage(falhaFinal, 2), 502, undefined, "AI_OUTPUT_INVALID");
+  throw new StructuredAIError(radarArticleBlueprintAiFailureMessage(falhaFinal, 2, tamanho(segunda)), 502, undefined, "AI_OUTPUT_INVALID");
 }
 
 /** 2026-10-08 · B1 · O leitor da página publicada (o MESMO do export: só GET, URL validada, tempo limite próprio). */
@@ -362,8 +439,10 @@ export async function generateRadarArticleBlueprint(input: {
   const comercial = radarArticleBlueprintCommercialOfBlock(bloco) ?? radarArticleBlueprintCommercialOf(montada.entrada, investigacao?.amazonFrozenAt ?? null);
   const brief = buildRadarArticleBlueprintBrief({ entrada: montada.entrada, silo, articleId: input.articleId, publication: publicacao, brandVoice: brandVoice.kind === "available" ? brandVoice.voice : null, siloPublications: publicacoes ?? null, previous: anterior?.payload ?? null, commercial: comercial });
   const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, brandId: input.brandId, client: input.client, quotaUnits: 1 });
-  const resposta = await requestRadarArticleBlueprintAi({ provider, brief, articleId: input.articleId, deadlineAt: prazo });
-  const fechada = await fecharArtigoModelo({ provider, brief, ai: resposta.ai, articleId: input.articleId, allowFix: resposta.calls === 1, deadlineAt: prazo });
+  /* 2026-10-18 · o MESMO gravador das rotas de IA do Arquiteto, módulo radar: um evento por chamada (primeira, nova tentativa, correção). */
+  const recordCall = radarArticleBlueprintUsageRecorder({ provider, articleId: input.articleId, operationRequestId: crypto.randomUUID(), record: recordIntegrationUsage });
+  const resposta = await requestRadarArticleBlueprintAi({ provider, brief, articleId: input.articleId, deadlineAt: prazo, recordCall });
+  const fechada = await fecharArtigoModelo({ provider, brief, ai: resposta.ai, articleId: input.articleId, allowFix: resposta.calls === 1, deadlineAt: prazo, recordCall });
   return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: montada.bundleHash!, origin: "ai", payload: fechada.payload, validation: [...resposta.notes, ...fechada.notes], actorUserId: input.actorUserId, investigationRef: investigacao });
 }
 
@@ -387,6 +466,8 @@ export async function fecharArtigoModelo(input: {
   allowFix?: boolean;
   /** 2026-10-08 (revisão) · prazo da rota (epoch ms): a correção usa o que sobra, e sem 30 s não é pedida. */
   deadlineAt?: number;
+  /** 2026-10-18 · a passada de correção é uma chamada: vira um evento no livro de uso (`radarArticleBlueprintUsageRecorder`). */
+  recordCall?: RadarArticleBlueprintCallRecorder;
 }): Promise<{ payload: RadarArticleBlueprintPayload; notes: string[]; calls: 0 | 1 }> {
   const primeira = radarSanitizeArticleBlueprint(input.ai, input.brief);
   const pendentes = radarArticleBlueprintPendingNotes(primeira.notes).pending;
@@ -396,13 +477,20 @@ export async function fecharArtigoModelo(input: {
   const semTempo = Boolean(pendentes.length && input.allowFix !== false && tetoDaCorrecao === null);
   if (pendentes.length && input.allowFix !== false && tetoDaCorrecao !== null) {
     chamadas = 1;
-    try {
+    const correcao = await (async () => {
       const { system, user } = radarArticleBlueprintPrompt(input.brief, { fix: { previous: input.ai, pending: pendentes } });
-      const corrigida = await generateStructuredAI({
+      return generateStructuredAI({
         provider: input.provider, system, user, schema: RadarArticleBlueprintAiSchema,
         maxTokens: RADAR_ARTICLE_BLUEPRINT_LIMITS.maxTokens, thinkingMode: "disabled",
         timeoutMs: tetoDaCorrecao!, fetchImpl: input.fetchImpl,
       });
+    })().then(ai => ({ ok: true as const, ai }), (error: unknown) => ({ ok: false as const, error }));
+    /* 2026-10-18 · o livro de uso fica fora do try: o registro falhando não se passa por correção falhando. */
+    await input.recordCall?.({ kind: "correction", ok: correcao.ok, error: correcao.ok ? undefined : correcao.error });
+    try {
+      /* a correção que falhou cai no aviso de sempre, e grava-se a primeira */
+      if (!correcao.ok) throw correcao.error;
+      const corrigida = correcao.ai;
       const conferida = radarSanitizeArticleBlueprint(corrigida, input.brief);
       if (radarArticleBlueprintPendingNotes(conferida.notes).pending.length <= pendentes.length) escolhida = corrigida;
     } catch (error) {

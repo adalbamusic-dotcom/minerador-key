@@ -43,7 +43,8 @@ import { radarFrozenObservedAtOfAnalysis } from "../radar/evidence-bundle-runtim
 import { assertRadarEvidenceBundleIntegrity, radarEvidenceBundleMatchesArticle, type RadarEvidenceBinding, type RadarEvidenceBundle } from "../radar/evidence-bundle.ts";
 import { RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING, radarArticleBlueprintMissingBlock, type RadarHandoffReadiness } from "../radar/handoff-readiness.ts";
 import { readWriterApprovedArticleBlueprint, type WriterBlueprintInvestigation } from "./writer-evidence-sources.ts";
-import { ContentDocumentSchema, type ArticleDNA, type ContentDocument, type SiloDNA, type VersionEnvelope } from "../arquiteto/contracts.ts";
+import { ContentDocumentSchema, type ArticleDNA, type ContentDocument, type RadarDocumentOrigin, type SiloDNA, type VersionEnvelope } from "../arquiteto/contracts.ts";
+import { radarPortableExportCurrentAnalysisOfRow, radarPortableExportCurrentVersionPick } from "../radar/portable-export-reading.ts";
 import { buildRadarDocument, radarDocumentId, radarWriterDocumentIdentity, resolveRadarImportEligibility, type RadarImportOutcome } from "../redator/radar-import.ts";
 import { radarWriterMayNotFor } from "../redator/writer-handoff.ts";
 import { RadarStartError, radarStartPorts } from "./radar-youtube-start.ts";
@@ -131,7 +132,12 @@ export type RadarWriterHandoffPorts = {
    */
   loadArticleIdentity: (input: { brandId: string; articleId: string; siloId?: string | null; transportedVersionId?: string | null }) => Promise<{ article: VersionEnvelope<ArticleDNA>; silo: VersionEnvelope<SiloDNA> | null } | null>;
   findWorkflowItem: (input: { brandId: string; articleId: string; stage: "radar" }) => Promise<ItemDeWorkflow | null>;
-  findDocument: (input: { brandId: string; articleId: string }) => Promise<ContentDocument | null>;
+  /*
+   * 2026-10-19 · O RECIBO, NÃO O DOCUMENTO. O envio lê do documento só id,
+   * `schemaVersion` e `radarOrigin` (elegibilidade e readback). A bancada que
+   * devolve o documento inteiro continua valendo (ele tem esses campos).
+   */
+  findDocument: (input: { brandId: string; articleId: string }) => Promise<RadarWriterDocumentReceipt | null>;
   createDocument: (input: { brandId: string; articleId: string; document: ContentDocument; articleDnaVersionId: string; slug: string; actorId: string }) => Promise<void>;
   /**
    * ===== SÓ O ESTADO VIAJA — §5 =====
@@ -150,6 +156,16 @@ export type RadarWriterHandoffPorts = {
    * do mesmo congelamento e ArticleDNA). Só metadados, nunca a planta.
    */
   loadArticleBlueprint: (input: { brandId: string; articleId: string; bundleHash: string; investigation: WriterBlueprintInvestigation | null }) => Promise<RadarWriterArticleBlueprintCheck>;
+};
+
+/**
+ * 2026-10-19 · o que o envio lê do documento do Redator: o id e o pacote de
+ * origem. `storedBundleHash` (opcional) é o `bundleHash` gravado no dossiê do
+ * documento; quando a porta o devolve, o readback o confronta também.
+ */
+export type RadarWriterDocumentReceipt = Pick<ContentDocument, "id" | "schemaVersion"> & {
+  radarOrigin?: RadarDocumentOrigin;
+  storedBundleHash?: string | null;
 };
 
 /** 2026-10-09 · o que o envio precisa saber da planta: existe a concluída deste pacote, não existe, ou a leitura falhou. */
@@ -184,7 +200,27 @@ export { RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING };
  * da versão nova ao Radar. Sem versão transportada, a regra da mesa.
  */
 export const radarWriterHandoffPorts: RadarWriterHandoffPorts = {
-  loadRadarState: input => radarStartPorts.loadRadarState(input),
+  /*
+   * 2026-10-19 · SÓ A CORRIDA DA VERSÃO CORRENTE. O envio usa uma análise só —
+   * a de maior `versionNumber` (a primeira do array no empate), a mesma regra
+   * do export (`radarPortableExportCurrentVersionPick`). `loadRadarState`
+   * reidratava as corridas de TODAS as versões: medido no WifiConecta, 8 a
+   * 11,6 MB por leitura, para usar 3,2 a 4,5 MB. Versão escolhida fora do
+   * contrato, ou erro na leitura estreita: a leitura antiga, inteira, responde.
+   */
+  async loadRadarState({ brandId, articleId }) {
+    try {
+      const linha = await new WorkflowRepository().findByArticleHydratingVersions(brandId, articleId, "radar", radarPortableExportCurrentVersionPick);
+      const leitura = radarPortableExportCurrentAnalysisOfRow({ row: linha, brandId, articleId });
+      if (leitura.kind === "none") return null;
+      if (leitura.kind === "current") {
+        return { lockVersion: Number((linha as { lock_version?: unknown }).lock_version), analyses: [leitura.analysis] };
+      }
+    } catch {
+      /* a leitura antiga decide, inclusive o erro real de persistência */
+    }
+    return radarStartPorts.loadRadarState({ brandId, articleId });
+  },
 
   async loadArticleFoundation({ brandId, articleId, transportedVersionId }) {
     const artefatos = await new ArtifactRepository().list(brandId);
@@ -210,14 +246,20 @@ export const radarWriterHandoffPorts: RadarWriterHandoffPorts = {
     return { article, silo };
   },
 
+  /*
+   * 2026-10-19 · A LINHA SEM AS CORRIDAS. Do item o envio lê id, estado, trava,
+   * a versão transportada e o Silo do payload — nada que mora em
+   * `radar_analysis_runs` (a análise vem de `loadRadarState`). A leitura com
+   * reidratação total custava 8 a 11,6 MB, duas vezes por envio.
+   */
   async findWorkflowItem({ brandId, articleId, stage }) {
-    const item = await new WorkflowRepository().findByArticle(brandId, articleId, stage);
+    const item = await new WorkflowRepository().findByArticleWithoutRuns(brandId, articleId, stage);
     return (item as ItemDeWorkflow | null) || null;
   },
 
+  /* 2026-10-19 · o recibo (id, `schemaVersion`, `radarOrigin`, `bundleHash` gravado), sem os 7 a 11 MB do documento. */
   async findDocument({ brandId, articleId }) {
-    const documento = await new ContentDocumentRepository().findByArticle(brandId, articleId);
-    return documento;
+    return new ContentDocumentRepository().findRadarReceiptByArticle(brandId, articleId);
   },
 
   async createDocument({ brandId, articleId, document, articleDnaVersionId, slug, actorId }) {
@@ -308,6 +350,10 @@ export async function sendRadarToWriter(entrada: {
 
   if (!radarItem) {
     throw new RadarWriterSendError("radar_workflow_item_not_found", "O item do Radar não foi encontrado no fluxo operacional.", 404);
+  }
+  // 2026-10-18 · o item retirado da operação (o Silo/artigo foi desmontado) não segue para o Redator.
+  if (radarItem.state === "withdrawn") {
+    throw new RadarWriterSendError("radar_item_withdrawn", "Este artigo foi retirado da operação (o Silo ou o artigo foi desmontado); a investigação ficou como histórico e não segue para o Redator.", 409);
   }
 
   /*
@@ -421,7 +467,7 @@ export async function sendRadarToWriter(entrada: {
    * esse hash e reconhece a entrega em vez de refazê-la — a mesma pergunta,
    * respondida por quem realmente tem a resposta.
    */
-  const entregueAntes = documentoExistente?.schemaVersion === 2 ? documentoExistente.radarOrigin : null;
+  const entregueAntes = documentoExistente?.schemaVersion === 2 ? documentoExistente.radarOrigin ?? null : null;
   const mesmoDossie = entregueAntes?.evidenceBundleHash === bundle.bundleHash;
 
   const recibo = RadarWriterBundleRecordSchema.parse({
@@ -638,7 +684,9 @@ export async function sendRadarToWriter(entrada: {
   if (destino.id !== documentId) {
     throw new RadarWriterSendError("radar_handoff_destination_mismatch", "O documento confirmado no Redator é de outro artigo.", 502);
   }
-  if (destino.schemaVersion !== 2 || destino.radarOrigin.evidenceBundleHash !== record!.bundleHash) {
+  if (destino.schemaVersion !== 2 || destino.radarOrigin?.evidenceBundleHash !== record!.bundleHash
+    /* 2026-10-19 · com o recibo estreito, o pacote GRAVADO no dossiê também é confrontado. */
+    || (typeof destino.storedBundleHash === "string" && destino.storedBundleHash !== record!.bundleHash)) {
     throw new RadarWriterSendError(
       "radar_handoff_destination_mismatch",
       "O documento confirmado no Redator não descreve o pacote desta entrega.",

@@ -41,6 +41,8 @@ test("contratos não expõem service role ao navegador e bloqueiam chamadas dire
   assert.doesNotMatch(service, /\.from\("brand_memberships"\)\.insert|\.from\("brand_memberships"\)\.update|\.from\("brand_memberships"\)\.delete/);
   assert.doesNotMatch(service, /\.from\("agency_memberships"\)\.insert|\.from\("agency_memberships"\)\.update|\.from\("agency_memberships"\)\.delete/);
   assert.doesNotMatch(panel, /SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(panel, /role="status"/);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): o resultado vai pelo `useNoticeBridge`, não por faixa `role="status"` na tela. */
+  assert.match(panel, /useNoticeBridge\(\{ notice, module: "admin", area: "Usuários"/);
+  assert.doesNotMatch(panel, /\{notice && <p role="status"/);
   assert.match(panel, /Confirmar remoção/);
 });

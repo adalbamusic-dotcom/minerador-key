@@ -177,7 +177,7 @@ test("R1 · principal com o ano: o cabeçalho com o MESMO ano não é 'conteúdo
 
 /* ============================== R2 e F3 · o "Não cobrir" tira a seção só pelo mesmo item ============================== */
 
-test("R2 · com o artigo-modelo, a seção que toca um rótulo fora do escopo sai pela régua da conferência (dito com o motivo); o mesmo item também", () => {
+test("R2 · a seção que a investigação PROMOVEU não sai por rótulo genérico que ela trata; o rótulo que ela não trata continua no pedido", () => {
   const PRINCIPAL = "como atrair pacientes para clínica de estética";
   sequencia = 0;
   const base = modelo(PRINCIPAL, [
@@ -185,31 +185,39 @@ test("R2 · com o artigo-modelo, a seção que toca um rótulo fora do escopo sa
     candidato("Como usar o Instagram para atrair pacientes?", 6),
     candidato("Indicação de pacientes: como pedir?", 5),
   ]);
-  const comFora: RadarEditorialArticleModel = { ...base, candidates: [...base.candidates, foraDoEscopo("Instagram para restaurantes")] };
   /*
-   * 2026-10-09 · com o artigo-modelo como fundamento único, a seção sai do
-   * CSV pela régua da CONFERÊNCIA da planta (a de 2026-10-02: metade das palavras
-   * distintivas do rótulo). Num rótulo de duas palavras distintivas, uma em
-   * comum basta, e a seção promovida chega ao gerador marcada para descarte —
-   * a correção R2 do CSV legado não chegou à conferência (registrado como
-   * proposta: decidir se a conferência adota o "mesmo item" para a seção).
-   * O rótulo continua no "Não cobrir", e o descarte é dito com o motivo.
+   * SUBSTITUÍDO em 2026-10-18 (teste real WifiConecta; regra do dono: a SERP do
+   * artigo é a autoridade e a identidade do artigo nunca sai por "fora do
+   * escopo"). Antes (2026-10-09), a régua larga da conferência marcava para
+   * descarte a seção que a própria investigação promoveu ("Como usar o Instagram
+   * para atrair pacientes?", 6 páginas) por UMA palavra do rótulo genérico
+   * "Instagram para restaurantes" — e o "quantos mega de internet preciso" perdeu
+   * assim "Como medir sua velocidade real" e caiu em 422. Agora a estrutura que
+   * a investigação promoveu é referência da regra 3(a) no pedido
+   * (`radarArticleBlueprintScopeReference`): o item genérico que ela trata sai
+   * do "Não cobrir" do pedido e a seção chega ao gerador sem marca de descarte.
+   * O rótulo que ela não trata continua no pedido; o tópico do Silo (3b), a voz
+   * da marca e o reajuste no ArticleDNA continuam duros.
    */
-  const instagram = esqueletoDe(entradaDoArtigo(comFora, PRINCIPAL)).find(item => /Instagram para atrair pacientes/.test(item.heading));
-  assert.equal(instagram?.outOfScope, true, "a régua larga da conferência marca a seção");
-  const linha = linhaDe(entradaDoArtigo(comFora, PRINCIPAL));
-  assert.equal(titulos(linha.row.estrutura).some(titulo => /Instagram para atrair pacientes/.test(titulo)), false, linha.row.estrutura);
-  assert.match(linha.row.estrutura, /^Descartado do esqueleto da SERP: .*Instagram para atrair pacientes[^"]*" \(fora do escopo do pacote\)/m);
-  assert.match(linha.row.cobrir_e_superar, /"Instagram para restaurantes"/, "o rótulo continua no Não cobrir");
-  /* A seção que não toca o rótulo fica. */
+  const comFora: RadarEditorialArticleModel = { ...base, candidates: [...base.candidates, foraDoEscopo("Instagram para restaurantes"), foraDoEscopo("Cardápio digital para restaurantes")] };
+  const entrada = entradaDoArtigo(comFora, PRINCIPAL);
+  const instagram = esqueletoDe(entrada).find(item => /Instagram para atrair pacientes/.test(item.heading));
+  assert.equal(instagram?.outOfScope, false, "a seção promovida chega ao gerador sem marca de descarte");
+  const pedido = buildRadarArticleBlueprintBrief({ entrada, silo: null, articleId: ARTIGO, publication: null }).outOfScope;
+  assert.equal(pedido.includes("Instagram para restaurantes"), false, "o item genérico que a estrutura promovida trata sai do pedido");
+  assert.equal(pedido.includes("Cardápio digital para restaurantes"), true, "o que ela não trata continua no pedido");
+  const linha = linhaDe(entrada);
+  /* A bancada organiza só os H2 do esqueleto; o que importa é que a seção promovida não vai mais ao descarte "fora do escopo". */
+  assert.doesNotMatch(linha.row.estrutura, /^Descartado do esqueleto da SERP: .*Instagram para atrair pacientes[^"]*" \(fora do escopo do pacote\)/m);
+  assert.match(linha.row.cobrir_e_superar, /"Cardápio digital para restaurantes"/, "o rótulo que a planta não trata continua no Não cobrir");
+  /* A seção que não toca o rótulo fica, como antes. */
   assert.ok(titulos(linha.row.estrutura).some(titulo => /indicação de pacientes/i.test(titulo)), linha.row.estrutura);
 
-  /* O mesmo item (o rótulo é a seção) chega marcado para descarte; a planta não o organiza, e o descarte é dito com o motivo. */
+  /* O mesmo item (o rótulo é a seção que a investigação promoveu): a promoção vence, a seção fica. */
   const mesmo: RadarEditorialArticleModel = { ...base, candidates: [...base.candidates, foraDoEscopo("Como usar o Instagram para atrair pacientes")] };
-  assert.equal(esqueletoDe(entradaDoArtigo(mesmo, PRINCIPAL)).find(item => /Instagram para atrair pacientes/.test(item.heading))?.outOfScope, true);
-  const semSecao = linhaDe(entradaDoArtigo(mesmo, PRINCIPAL));
-  assert.equal(titulos(semSecao.row.estrutura).some(titulo => /Instagram para atrair pacientes/.test(titulo)), false, semSecao.row.estrutura);
-  assert.match(semSecao.row.estrutura, /^Descartado do esqueleto da SERP: .*Instagram para atrair pacientes[^"]*" \(fora do escopo do pacote\)/m);
+  assert.equal(esqueletoDe(entradaDoArtigo(mesmo, PRINCIPAL)).find(item => /Instagram para atrair pacientes/.test(item.heading))?.outOfScope, false);
+  const comSecao = linhaDe(entradaDoArtigo(mesmo, PRINCIPAL));
+  assert.doesNotMatch(comSecao.row.estrutura, /^Descartado do esqueleto da SERP: .*Instagram para atrair pacientes[^"]*" \(fora do escopo do pacote\)/m);
 });
 
 test("F3 · só a pergunta do leitor tocava o 'Não cobrir': sai a pergunta, a seção fica pelo cabeçalho; 'outros' e 'estratégia' não distinguem", () => {

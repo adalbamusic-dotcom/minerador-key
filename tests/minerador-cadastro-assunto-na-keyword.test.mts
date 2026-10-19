@@ -100,13 +100,16 @@ test("parser: o Silo 2 vira 7 artigos (9 a 15), Pilar no 9, e a linha \"Trava:\"
   assert.equal(readDeclaredPlanLockChoice("talvez"), null);
 });
 
-test("trava: manual vence; no cadastro único segue o volume (0 = livre); plano anterior é travado pela declaração", () => {
+// 2026-10-18 · SUBSTITUÍDO "manual vence" (SDD do Assunto pela principal §6.2-f, G11; D1 de 16/10): volume definido fixa, mesmo com "Livre" à mão.
+test("trava: volume definido fixa (mesmo Livre à mão); sem volume a manual decide; no cadastro único segue o volume (0 = livre); plano anterior é travado pela declaração", () => {
   const plan = (keywordId: string, lock?: "locked" | "free") => ({ declaredPrincipal: { keywordId, phrase: "k" }, ...(lock ? { lock } : {}) });
   assert.equal(declaredPrincipalLock(plan("K"), { subjectKeywordId: "K", volume: { validated: true, value: 260 } })?.state, "locked");
   assert.equal(declaredPrincipalLock(plan("K"), { subjectKeywordId: "K", volume: { validated: true, value: 0 } })?.state, "free");
   assert.equal(declaredPrincipalLock(plan("K"), { subjectKeywordId: "K", volume: { validated: false, value: 900 } })?.state, "free", "volume importado, não medido, não trava");
   assert.equal(declaredPrincipalLock(plan("K", "locked"), { subjectKeywordId: "K", volume: null })?.origin, "manual");
-  assert.equal(declaredPrincipalLock(plan("K", "free"), { subjectKeywordId: "K", volume: { validated: true, value: 5000 } })?.state, "free");
+  assert.equal(declaredPrincipalLock(plan("K", "free"), { subjectKeywordId: "K", volume: { validated: true, value: 5000 } })?.state, "locked", "volume definido fixa: Livre à mão não vence o volume");
+  assert.equal(declaredPrincipalLock(plan("K", "free"), { subjectKeywordId: "K", volume: { validated: true, value: 0 } })?.state, "free", "sem volume, a trava manual decide");
+  assert.equal(declaredPrincipalLock(plan("K", "free"), { subjectKeywordId: "K", volume: { validated: true, value: 0 } })?.origin, "manual");
   const anterior = declaredPrincipalLock(plan("P"), { subjectKeywordId: "S", volume: null });
   assert.equal(anterior?.state, "locked");
   assert.equal(anterior?.origin, "declared");

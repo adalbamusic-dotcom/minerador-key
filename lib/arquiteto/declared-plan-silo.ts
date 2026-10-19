@@ -32,6 +32,17 @@ export type PlanSiloChoice =
 
 /** Territórios que ainda recebem membros (os mesmos da decisão de Silo). */
 export const PLAN_SILO_ASSIGNABLE = new Set(["candidate", "confirmed"]);
+/*
+ * 2026-10-18 (amarelo da WifiConecta, teste no ar) · O SILO DO PLANO FECHADO TAMBÉM É O SILO DO PLANO. Depois do
+ * "Concluir formação", o Silo do plano fica `consolidated` (SiloDNA e SiloPage gravados). O envio das keywords NOVAS
+ * ao Arquiteto (a incorporação da melhoria) procurava o Silo do plano só entre os que recebem membros (candidate,
+ * confirmed): não via o consolidado ligado ao grupo e criava OUTRO "Planos e contratação", vazio — o Silo paralelo que
+ * a regra proíbe (S4, S5). Agora o consolidado é achado (ligado ao grupo, mesmo slug), como em `planGroupTerritory`;
+ * quem chama não confirma nem põe membro nele (consolidado não recebe membro pela decisão de Silo: a keyword nova entra
+ * pelo artigo).
+ */
+/** Territórios que existem como o Silo do plano (recebendo membros ou já fechados). */
+export const PLAN_SILO_ALIVE = new Set(["candidate", "confirmed", "consolidated"]);
 
 /** A marca que o Silo do plano carrega desde que nasce (`declaredPlanSiloDraft`). */
 export const DECLARED_PLAN_SILO_REASON_PREFIX = "Silo do plano declarado:";
@@ -45,7 +56,9 @@ export function choosePlanSiloTerritory(input: {
   territories: readonly PlanSiloTerritoryView[];
   slugOf: (text: string) => string;
 }): PlanSiloChoice {
-  const vivos = input.territories.filter(territory => PLAN_SILO_ASSIGNABLE.has(territory.lifecycleStatus));
+  // 2026-10-18 · o consolidado conta (ver `PLAN_SILO_ALIVE`); entre os de mesmo slug, o fechado vem antes (é o do plano).
+  const vivos = input.territories.filter(territory => PLAN_SILO_ALIVE.has(territory.lifecycleStatus))
+    .sort((a, b) => Number(b.lifecycleStatus === "consolidated") - Number(a.lifecycleStatus === "consolidated"));
   if (input.linkedTerritoryRef) {
     const ligado = vivos.find(territory => territory.territoryRef === input.linkedTerritoryRef);
     if (ligado) return { kind: "linked", territoryRef: ligado.territoryRef, lifecycleStatus: ligado.lifecycleStatus };
@@ -176,6 +189,34 @@ export function planSiloCreationRefusal(input: {
     : `“${plano.siloName}” é o Silo do plano${plano.groupLabel ? ` ${plano.groupLabel}` : ""}: ele nasce com o nome e o slug do plano — ${PLAN_SILO_PATH} — não por aqui.`;
 }
 
+/**
+ * 2026-10-18 (amarelo da WifiConecta, teste no ar) · O SILO DO GRAFO DE LINKS. A escolha do Silo do grafo era o clique
+ * no mapa das abas Silos e Artigos, que saiu em 16/10; desde então a aba ficava com o primeiro Silo da lista (que podia
+ * ser o de outra cor) e, com artigos marcados cujo Silo a tela não achava, "Processar links" respondia "Selecione o
+ * Silo do grafo". Agora, a MESMA escolha, sem mapa:
+ *  - com a etiqueta de cor: o Silo da cor (o ligado ao grupo) que tem o par SiloDNA + SiloPage é escolhido sozinho;
+ *  - sem cor (ou a cor sem Silo pronto): a escolha da pessoa no seletor de sempre ("Silo do grafo"), que lista só os
+ *    Silos com o par; sem escolha, o primeiro.
+ * `byColor` diz que a cor decidiu (o seletor fica como leitura). `colorWaiting` diz que a cor tem Silo, mas ele ainda
+ * não tem o par (o grafo espera o fechamento do Silo).
+ */
+export function resolveLinksSilo(input: {
+  contexts: ReadonlyArray<{ siloId: string; territoryRef: string | null }>;
+  /** A escolha da pessoa no seletor ("Silo do grafo"), quando há. */
+  selected: string | null;
+  /** Os Silos ligados aos grupos da cor ativa (`editorial_groups.silo_id`); `null` = sem cor. */
+  colorSiloRefs: ReadonlyArray<string> | null;
+}): { siloId: string | null; byColor: boolean; colorWaiting: boolean } {
+  const daCor = input.colorSiloRefs?.length ? input.contexts.filter(context => input.colorSiloRefs!.includes(context.siloId) || (context.territoryRef !== null && input.colorSiloRefs!.includes(context.territoryRef))) : [];
+  if (daCor.length) {
+    const escolhido = daCor.find(context => context.siloId === input.selected) ?? daCor[0];
+    return { siloId: escolhido.siloId, byColor: true, colorWaiting: false };
+  }
+  const colorWaiting = Boolean(input.colorSiloRefs?.length);
+  const escolhido = input.contexts.find(context => context.siloId === input.selected) ?? input.contexts[0] ?? null;
+  return { siloId: escolhido?.siloId ?? null, byColor: false, colorWaiting };
+}
+
 /** O caminho de sempre do Silo do plano, dito nas recusas (2026-10-16: restauração do fluxo de sempre). */
 export const PLAN_SILO_PATH = "na aba Silos, “Processar arquitetura” o propõe e “Confirmar propostas novas” o confirma (desfeito: “Recriar o Silo do plano”)";
 
@@ -225,10 +266,18 @@ export function declaredPlanSiloGroupFor(
   territory: DeclaredPlanTerritoryView,
   plans: readonly DeclaredPlanGroupView[] | null,
   slugOf: (text: string) => string,
+  /**
+   * 2026-10-18 · aditivo: os territórios vivos da marca (não desfeitos nem arquivados). Com ele, o território que NÃO é
+   * o ligado ao grupo, quando o ligado existe vivo, é um DUPLICADO do Silo do plano (nasceu pelo defeito de 18/10), não o
+   * Silo do plano: fica de fora desta resposta e pode ser desfeito pelo "Desfazer Silo" de sempre (se vazio). Sem ele, o
+   * de antes.
+   */
+  aliveTerritoryRefs?: ReadonlySet<string>,
 ): { groupId: string | null; groupLabel: string; siloName: string } | null {
   const marcado = territoryCarriesDeclaredPlanMark(territory);
   if (plans === null) return marcado ? { groupId: null, groupLabel: "do cadastro", siloName: territory.name || "Silo do plano" } : null;
   for (const plan of plans) {
+    if (aliveTerritoryRefs && planSiloDuplicateOf(territory, plan, aliveTerritoryRefs)) continue;
     const slug = plan.siloSlug || slugOf(plan.siloName);
     const ligado = plan.linkedTerritoryRef === territory.territoryRef;
     const mesmoSlug = territory.slugs.some(item => item && item === slug);
@@ -236,6 +285,16 @@ export function declaredPlanSiloGroupFor(
     if (ligado || mesmoSlug || mesmoNome) return { groupId: plan.groupId, groupLabel: plan.groupLabel, siloName: plan.siloName };
   }
   return null;
+}
+
+/**
+ * 2026-10-18 · ESTE TERRITÓRIO É UM DUPLICADO DO SILO DO PLANO? Sim quando o grupo está ligado a OUTRO território, vivo,
+ * e este não é o ligado. O Silo do plano é um só: o ligado ao grupo. O duplicado (o "Planos e contratação" vazio que o
+ * envio das keywords novas criou em 18/10) não é decisão do cadastro — é defeito — e sai pelo "Desfazer Silo" de sempre
+ * (nada é apagado: ele fica no banco como desfeito, com o motivo).
+ */
+export function planSiloDuplicateOf(territory: Pick<DeclaredPlanTerritoryView, "territoryRef">, plan: Pick<DeclaredPlanGroupView, "linkedTerritoryRef">, aliveTerritoryRefs: ReadonlySet<string>): boolean {
+  return Boolean(plan.linkedTerritoryRef) && plan.linkedTerritoryRef !== territory.territoryRef && aliveTerritoryRefs.has(plan.linkedTerritoryRef!);
 }
 
 /**

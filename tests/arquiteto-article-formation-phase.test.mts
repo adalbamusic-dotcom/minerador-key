@@ -63,7 +63,9 @@ test("sem formação processada, nenhuma keyword vira artigo sozinha", () => {
 });
 
 test("keyword sem artigo continua visível como pendente", () => {
-  assert.match(workspace, /keywordIdsInArticles: new Set\(articlesList\.flatMap/);
+  // 2026-10-18 · também quem está num ArticleDNA vigente (a keyword nova incorporada pela confirmação) não é pendente.
+  assert.match(workspace, /keywordIdsInArticles: new Set\(\[\.\.\.articlesList\.flatMap/);
+  assert.match(workspace, /\.\.\.keywordIdsInArticleDnas\(Object\.values\(acceptedArticleDnas\)/);
   const pipeline = readFileSync("lib/arquiteto/article-pipeline.ts", "utf8");
   assert.match(pipeline, /aguardando processar artigos/);
 });

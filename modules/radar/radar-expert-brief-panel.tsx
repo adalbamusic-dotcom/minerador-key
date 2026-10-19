@@ -19,6 +19,7 @@ import {
   type RadarSpecialistCounters,
 } from "@/lib/radar/specialist-lifecycle";
 import { useRadarAreaLiveRead } from "./use-radar-area-live-read";
+import { useNoticeBridge } from "@/components/global-notice-center";
 import { RADAR_SPECIALIST_INVITE_LABELS, RADAR_SPECIALIST_INVITE_STATES, radarSpecialistConsultationOf, type RadarSpecialistInviteState } from "@/lib/radar/specialist-consultation";
 import {
   RADAR_SPECIALIST_CLASSIFICATIONS,
@@ -363,6 +364,8 @@ function RadarSpecialistDirectEntry({ brandId, articleId, articleDnaVersionId, e
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [desfecho, setDesfecho] = useState<{ ok: boolean; message: string } | null>(null);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): o desfecho do envio vai para o sino; a linha abaixo do botão saiu. */
+  useNoticeBridge({ notice: desfecho ? { type: desfecho.ok ? "success" : "error", message: desfecho.message } : "", module: "radar", area: "Radar · Especialista", title: "Radar · Especialista", fallbackSeverity: "INFO" });
   const emVoo = useRef(false);
   const especialista = expertId || defaultExpertId;
   const ponto = requirements.find(item => item.requirementId === pontoId) || null;
@@ -426,7 +429,6 @@ function RadarSpecialistDirectEntry({ brandId, articleId, articleDnaVersionId, e
       <span className="text-sm text-text-muted">{texto.length.toLocaleString("pt-BR")} de {PARECER_MAX.toLocaleString("pt-BR")} caracteres</span>
       <button type="button" className={primaryAction} disabled={!podeEnviar} onClick={() => void enviar()} data-testid="radar-specialist-direct-send">{enviando ? "Enviando…" : "Enviar parecer"}</button>
     </div>
-    {desfecho && <p className={`mt-2 text-sm ${desfecho.ok ? "text-success" : "text-warning"}`} role="status" data-testid="radar-specialist-direct-outcome">{desfecho.message}</p>}
   </section>;
 }
 
@@ -501,6 +503,9 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
   const criandoPauta = useRef<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): falha e resultado do painel vão para o sino; as faixas saíram. */
+  useNoticeBridge({ notice: error, module: "radar", area: "Radar · Especialista", title: "Radar · Especialista", fallbackSeverity: "ERROR" });
+  useNoticeBridge({ notice, module: "radar", area: "Radar · Especialista", title: "Radar · Especialista", fallbackSeverity: "SUCCESS" });
   const [newQuestion, setNewQuestion] = useState("");
   /** A contribuição cuja classificação está aberta para correção — §5. */
   const [editandoClassificacao, setEditandoClassificacao] = useState("");
@@ -1465,8 +1470,6 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     </header>
 
     {loading && <p className={surface + " text-sm text-text-muted"}>Carregando especialistas utilizáveis desta Marca…</p>}
-    {error && <p className="rounded-md border border-warning/50 bg-warning-soft/20 p-3 text-sm text-warning" role="alert">{error}</p>}
-    {notice && <p className="rounded-md border border-divider bg-surface-subtle p-3 text-sm text-success" role="status">{notice}</p>}
 
     {/*
       * AS DUAS COLUNAS — SPECIALIST_1 · §7, o mesmo princípio de Vídeos.

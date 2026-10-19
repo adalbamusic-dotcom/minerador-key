@@ -42,8 +42,8 @@
 import type { ArticleDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
 import { SerpCollectionRecordSchema, SerpQueryInputSchema, type SerpCollectionRecord } from "../editorial/contracts.ts";
 import { SERP_CACHE_CANONICAL_LENS } from "../editorial/serp-cache.ts";
-import { readDataForSeoTargetCodes } from "../minerador/dataforseo-serp-core.ts";
 import type { SerpSearchInput } from "../radar/serp/contracts.ts";
+import { resolveBrandSerpTarget } from "./brand-serp-target.ts";
 import { RADAR_SERP_MAX_AGE_MS, RADAR_SERP_SNAPSHOT_DEPTH } from "../radar/serp/lens-set.ts";
 import { resolveDataForSeoCanonicalSerpCompatibilityConfig } from "./dataforseo-canonical.ts";
 import { recordIntegrationUsage } from "./integrations-runtime.ts";
@@ -100,6 +100,7 @@ export async function collectRadarGoogleSupport(input: {
   articleId: string;
   actorUserId: string;
   role: RadarResearchSourceRole;
+  /** 2026-10-18 · o texto da tela, mantido no contrato; a localidade da SERP é a da marca (`resolveBrandSerpTarget`). */
   location: string;
   /**
    * §4 · A KEYWORD PRINCIPAL — a MESMA que a coleta primária usou.
@@ -174,10 +175,16 @@ export async function collectRadarGoogleSupport(input: {
      * idioma no pedido passa a ser o código consultado, não um literal.
      */
     const cliente = deps.cacheClient || getOperationalClient();
-    const alvo = await readRadarKeywordTargetCodes(cliente, input.brandId, article.payload.principalKeywordId, deps.environmentCodes || readDataForSeoTargetCodes());
+    /*
+     * 2026-10-18 · A LOCALIDADE É A DA MARCA (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L2),
+     * lida no servidor pelo `brandId`; `input.location` (o texto da tela) não decide
+     * nem rotula. `environmentCodes` (teste) é o nacional da marca sem localidade.
+     */
+    const alvoDaMarca = await resolveBrandSerpTarget(cliente, input.brandId, deps.environmentCodes ? { national: deps.environmentCodes } : {});
+    const alvo = await readRadarKeywordTargetCodes(cliente, input.brandId, article.payload.principalKeywordId, alvoDaMarca.codes);
 
     const consulta = SerpQueryInputSchema.parse({
-      keyword, articleId: input.articleId, location: input.location, language: alvo.codes.languageCode, device: SERP_CACHE_CANONICAL_LENS.device,
+      keyword, articleId: input.articleId, location: alvoDaMarca.label, language: alvo.codes.languageCode, device: SERP_CACHE_CANONICAL_LENS.device,
     });
 
     const busca: SerpSearchInput = {

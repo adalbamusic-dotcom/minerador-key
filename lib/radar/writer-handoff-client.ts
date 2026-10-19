@@ -79,19 +79,52 @@ const OUTCOME_OF_CHANGE: Record<string, RadarHandoffOutcome> = {
  * Ela NUNCA lança: o lote precisa continuar depois de um artigo que falhou, e
  * uma exceção no meio da lista esconderia os que já tinham passado.
  */
+/**
+ * 2026-10-19 · RENOVAR A SESSÃO É DA SESSÃO, NÃO DO LOTE.
+ *
+ * O lote de 8 (WifiConecta) levou 4 respostas 401 "sessão Supabase ausente" no
+ * meio da fila: o token venceu entre um artigo e outro, a sessão estava válida
+ * logo depois, e o lote seguia mandando o token velho. A renovação é a do
+ * cliente de sempre (`auth.refreshSession()` do cliente do navegador, o mesmo
+ * de `withSupabaseSelectRetry`); devolve `true` só quando voltou sessão.
+ */
+export type RadarHandoffSessionRefresh = () => Promise<boolean>;
+
+async function renovarSessaoDoNavegador(): Promise<boolean> {
+  try {
+    const { getBrowserSupabaseClient } = await import("../supabase/browser-client");
+    const { data, error } = await getBrowserSupabaseClient().auth.refreshSession();
+    return !error && Boolean(data?.session?.access_token);
+  } catch {
+    return false;
+  }
+}
+
 export async function postRadarWriterHandoff(input: {
   brandId: string;
   articleId: string;
   fetchImpl?: typeof fetch;
+  /** A renovação da sessão; ausente, a do cliente do navegador. */
+  refreshSession?: RadarHandoffSessionRefresh;
 }): Promise<RadarHandoffItemResult> {
   const chamar = input.fetchImpl || fetch;
+  const enviar = () => chamar("/api/editorial/radar-writer-handoff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ brandId: input.brandId, articleId: input.articleId }),
+  });
 
   try {
-    const resposta = await chamar("/api/editorial/radar-writer-handoff", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ brandId: input.brandId, articleId: input.articleId }),
-    });
+    let resposta = await enviar();
+    /*
+     * 401 = a sessão venceu no caminho. Renova e tenta ESTE artigo UMA vez;
+     * sem sessão nova, ou com outro 401, o desfecho é a recusa de sempre. O
+     * envio é idempotente (o documento é a chave), então repetir não duplica.
+     */
+    if (resposta.status === 401) {
+      const renovou = await (input.refreshSession || renovarSessaoDoNavegador)().catch(() => false);
+      if (renovou) resposta = await enviar();
+    }
     const corpo = await resposta.json().catch(() => ({} as Record<string, unknown>));
 
     if (!resposta.ok || !corpo?.success) {
@@ -136,11 +169,12 @@ export async function postRadarWriterHandoffBatch(input: {
   brandId: string;
   articleIds: readonly string[];
   fetchImpl?: typeof fetch;
+  refreshSession?: RadarHandoffSessionRefresh;
 }): Promise<RadarHandoffItemResult[]> {
   const resultados: RadarHandoffItemResult[] = [];
   for (const articleId of input.articleIds) {
     resultados.push(await postRadarWriterHandoff({
-      brandId: input.brandId, articleId, fetchImpl: input.fetchImpl,
+      brandId: input.brandId, articleId, fetchImpl: input.fetchImpl, refreshSession: input.refreshSession,
     }));
   }
   return resultados;

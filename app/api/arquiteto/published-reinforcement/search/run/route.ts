@@ -3,6 +3,7 @@ import { ReinforcementSearchRunRequestSchema, handleReinforcementSearchRun } fro
 import { differentiationErrorResponse } from "@/lib/server/arquiteto-differentiation-http";
 import { readGoogleAdsAverageVolumes } from "@/lib/server/arquiteto-differentiation-runtime";
 import { readCandidateFootprints } from "@/lib/server/arquiteto-differentiation-store";
+import { resolveBrandSerpTarget } from "@/lib/server/brand-serp-target";
 import { requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { buildSubjectDiscoveryPorts } from "@/lib/server/subject-discovery-runtime";
@@ -33,10 +34,14 @@ export async function POST(request: Request) {
         if (profile.userId !== context.actorUserId) throw new Error("A sessão mudou durante a rodada.");
         const tenant = await requireTenantPermission({ brandId: context.brandId, actorUserId: profile.userId, module: "arquiteto", action: "edit", profile });
         const subject = buildSubjectDiscoveryPorts({ profile, context: tenant, input: { operationRequestId }, usage: { module: "arquiteto", collectedBy: "arquiteto" } });
+        // 2026-10-18 · a SERP das candidatas na localidade da marca (SDD localidade, L2); marca nacional: a chave de sempre.
+        const alvoDaMarca = await resolveBrandSerpTarget(context.supabase, context.brandId);
+        const serpCodes = alvoDaMarca.source === "brand" ? alvoDaMarca.codes : null;
         return {
           openExecution: () => subject.openExecution(),
           googleAdsVolumes: keywords => readGoogleAdsAverageVolumes({ actorUserId: profile.userId, agencyId: tenant.agencyId ?? null, brandId: tenant.brandId, keywords }),
-          readFootprints: targets => readCandidateFootprints(context, targets, new Date()),
+          readFootprints: targets => readCandidateFootprints(context, targets, new Date(), serpCodes),
+          serpCodes,
         };
       },
     }, parsed.data);

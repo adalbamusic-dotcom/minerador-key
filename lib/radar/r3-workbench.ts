@@ -1,4 +1,4 @@
-import type { RadarSpecialistSummary } from "./operational-view.ts";
+import type { RadarReportInputs, RadarSpecialistSummary } from "./operational-view.ts";
 import type { RadarFrozenSpecialistRequirement } from "./specialist-lifecycle.ts";
 import { radarConclusiveIntent, radarDeclaredArticleIntent } from "./editorial-identity.ts";
 import type { RadarSerpCollectionAction } from "./serp-collection-state.ts";
@@ -85,6 +85,8 @@ export type RadarR3Model = {
    * conseguiria recompor sozinha.
    */
   deepResearch?: RadarDeepResearchView;
+  /** 2026-10-18 · Aditivo: as entradas do Relatório que a linha conhece (vídeos, YouTube/Amazon congelados, amostra carregada), montadas uma vez para a coluna, o card e o painel. */
+  reportInputs?: RadarReportInputs;
   /**
    * O contexto editorial recebido, já classificado por origem e por dono.
    *

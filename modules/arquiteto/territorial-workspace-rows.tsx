@@ -229,7 +229,8 @@ export type SiloConfirmationControls = {
  * mostrado na confirmação. Quem grava é o workspace.
  */
 export type SiloUndoControls = {
-  byRef: ReadonlyMap<string, { keywordCount: number; refusals: readonly string[] }>;
+  /** 2026-10-18 · `wholeSilo` (aditivo): o Silo sai inteiro — artigos, Pilar incluído, e o par —, com a prévia e a confirmação forte. */
+  byRef: ReadonlyMap<string, { keywordCount: number; refusals: readonly string[]; wholeSilo?: string | null }>;
   /** Quantos podem ser desfeitos agora, para o botão em lote. */
   eligibleCount: number;
   busy: boolean;
@@ -373,7 +374,7 @@ function SiloPageRow({
                 type="button"
                 onClick={() => undoControls.onUndo(header.ref)}
                 disabled={undoControls.busy}
-                title="Sugestão sem endereço publicado. Desfazer não apaga nada: as keywords voltam para sem Silo."
+                title={undoControls.byRef.get(header.ref)?.wholeSilo || "Sugestão sem endereço publicado. Desfazer não apaga nada: as keywords voltam para sem Silo."}
                 data-testid="architect-undo-silo"
                 className="min-h-8 rounded border border-warning/45 px-2.5 text-sm font-semibold text-warning transition-colors hover:bg-warning/10 disabled:opacity-40"
               >

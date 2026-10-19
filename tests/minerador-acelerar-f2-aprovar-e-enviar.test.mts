@@ -104,7 +104,8 @@ test("item 2 · aplicar: desmarcada fica fora, lote misto sem 409, recusa do env
   const por = Object.fromEntries(resultado.results.map(line => [line.id, line.outcome]));
   assert.deepEqual(por, { a: "approved_and_sent", b: "approved_not_sent", c: "excluded", "ja-d": "sent", e: "blocked" });
   assert.equal(resultado.results.find(line => line.id === "b")?.reason, "Página de destino recusada.");
-  assert.deepEqual(chamadas.approve, [["a", "b"]], "só as marcadas e prontas são aprovadas");
+  // 2026-10-19 · uma keyword por chamada do núcleo de sempre: o erro de uma não esconde o que as outras gravaram.
+  assert.deepEqual(chamadas.approve, [["a"], ["b"]], "só as marcadas e prontas são aprovadas, uma por vez");
   assert.deepEqual(chamadas.send, [["a", "b", "ja-d"]], "um envio só, parcial");
   assert.equal(estado.get("c")!.status, "em revisão", "a desmarcada não muda");
   assert.equal(resultado.readbackConfirmed, true);

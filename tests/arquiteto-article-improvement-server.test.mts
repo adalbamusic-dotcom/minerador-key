@@ -738,8 +738,9 @@ test("2026-10-12 · registro de uso que falha não derruba a preparação e fica
 /*
  * F5 · GUARDA DE RETRABALHO (SDD 2026-10-12 §10.3). O registro da melhoria é a
  * própria execução (`inputsHash`): "Refazer mesmo assim" só com motivo; a busca
- * já feita com os mesmos insumos não se repete; o Assunto com lista da
- * Pesquisa por Assunto do Minerador não entra na busca nova.
+ * já feita com os mesmos insumos não se repete. ~~O Assunto com lista da
+ * Pesquisa por Assunto do Minerador não entra na busca nova~~ (SUBSTITUÍDO em
+ * 2026-10-18: ver o teste logo abaixo).
  */
 test("F5 · Refazer mesmo assim (com motivo): a IA é chamada de novo e a execução nova diz o motivo", async () => {
   setup(); listCandidate();
@@ -767,18 +768,23 @@ test("F5 · a busca nova no Google Ads já feita com os mesmos insumos não é r
   assert.equal(deNovo.rework?.verdict, "same_inputs_reuse");
 });
 
-test("F5 · Assunto com lista da Pesquisa por Assunto do Minerador não entra na busca nova (as sustentações saem da lista)", async () => {
-  setup(); external = false;
+/*
+ * 2026-10-18 · SUBSTITUÍDO (§0.5): "Assunto com lista da Pesquisa por Assunto do Minerador não entra na busca nova"
+ * (F5 de 12/10). Vale a regra de 16/10 (§15 passo 4, AGENTS.md §0.2): a lista é lida primeiro e, se o artigo ainda pede
+ * reforço, a busca nova roda pelas sementes do plano e do DNA. No amarelo, as keywords que a própria confirmação
+ * incorporou levam o Assunto na lista e tiravam da busca os artigos já formados ("4 Assunto(s) com lista… não entram").
+ */
+test("2026-10-18 · o Assunto com lista da Pesquisa por Assunto do Minerador ENTRA na busca nova quando ainda pede reforço (a lista é lida primeiro; SUBSTITUI o F5 de 12/10)", async () => {
+  setup(); external = true;
   const subject = linhaDaMesa({ id: oldId, keyword: "Como transformar interesse em agendamento na clínica", brandId, semantic: { ...semantic, ...declarado("Apresentar os serviços e conduzir os contatos para a agenda.") } });
   rows[0] = { ...rows[0], ...subject, isPublished: false, publishedUrl: undefined }; rows[0].canonicalWorkflow.lockVersion = 1;
-  // A sustentação que a Pesquisa por Assunto trouxe para ele, ainda sem volume: o Assunto fica sem proposta.
+  // A sustentação que a Pesquisa por Assunto trouxe para ele, ainda sem volume: a lista não basta.
   rows[1] = { ...rows[1], volume_search: null, volume_source: null, analise_semantica: { ...semantic, subject_discovery: { version: 1, searches: [], subjectKeywordIds: [oldId] } } };
   const run = await handleArticleImprovement(runtime, { brandId, action: "prepare", discover: true, authorizeReading: LER });
   assert.equal(run.targets[0].kind, "subject");
-  assert.ok(!events.includes("busca"), "nenhuma busca nova para o Assunto com lista");
-  assert.deepEqual(run.discovery?.gapTargetIds, [], "o Assunto com lista não conta como alvo da busca");
-  assert.notEqual(run.proposals[0].status, "ready", "o Assunto ficou sem proposta: sem a guarda, ele seria alvo da busca");
-  assert.ok(run.notices.some(n => /Assunto\(s\) com lista da Pesquisa por Assunto do Minerador não entram na busca nova/.test(n)), JSON.stringify(run.notices));
+  assert.ok(events.includes("busca"), `a busca nova roda para o Assunto com lista que ainda pede reforço: ${JSON.stringify(run.discovery)}`);
+  assert.ok((run.discovery?.requests ?? 0) > 0, JSON.stringify(run.discovery));
+  assert.ok(!run.notices.some(n => /Assunto\(s\) com lista da Pesquisa por Assunto do Minerador não entram na busca nova/.test(n)), "o aviso antigo saiu");
 });
 
 /*

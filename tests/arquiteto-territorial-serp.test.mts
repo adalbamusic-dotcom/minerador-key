@@ -352,7 +352,10 @@ test("a consulta é advanced e a lente enviada é explícita", () => {
   // O snapshot rotula a lente que foi enviada — nunca uma suposta.
   assert.match(rota, /operatingSystem: lens\.operatingSystem/);
   // Os códigos da chave são os mesmos que a config terá, lidos sem credencial.
-  assert.match(rota, /const alvo = readDataForSeoTargetCodes\(\)/);
+  /* SUBSTITUÍDO (2026-10-18, SDD localidade da SERP por marca, L2): os códigos são os da marca, e a config recebe a mesma localidade. */
+  assert.match(rota, /const alvo = alvoDaMarca\.codes;/);
+  assert.match(rota, /await resolveBrandSerpTarget\(pipelineContext\.supabase, pipelineContext\.brandId\)/);
+  assert.doesNotMatch(rota, /readDataForSeoTargetCodes/);
   assert.match(rota, /if \(codigosDivergem\)/);
 });
 

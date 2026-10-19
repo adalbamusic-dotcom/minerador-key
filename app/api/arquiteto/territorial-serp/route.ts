@@ -26,7 +26,8 @@ import {
   type SerpPlanSlot,
 } from "@/lib/arquiteto/serp-lens-plan";
 import { readMineradorKeywordTargetCodes, serpTargetCodesFor } from "@/lib/arquiteto/serp-lens-targeting";
-import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
+import { resolveBrandSerpTarget } from "@/lib/server/brand-serp-target";
+import { brandSerpPlanLocation, withBrandSerpLocation } from "@/lib/marca/brand-serp-location";
 import { executeDataForSeoSerpOperation } from "@/lib/server/dataforseo-serp-operation";
 import { normalizeDataForSeoSerpResponse } from "@/lib/server/dataforseo-serp-normalizer";
 import {
@@ -169,8 +170,14 @@ export async function POST(request: Request) {
 
     // Um único instante por requisição: validade do cache e `collectedAt` das faltas.
     const now = new Date();
-    // Os mesmos códigos que a config resolvida terá, lidos sem tocar credencial.
-    const alvo = readDataForSeoTargetCodes();
+    /*
+     * Os mesmos códigos que a config resolvida terá, lidos sem tocar credencial.
+     * 2026-10-18 · a localidade é a da MARCA (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L2),
+     * resolvida no servidor pelo `brandId`; a config recebe a mesma localidade.
+     * Marca sem localidade: os códigos do ambiente, como antes.
+     */
+    const alvoDaMarca = await resolveBrandSerpTarget(pipelineContext.supabase, pipelineContext.brandId);
+    const alvo = alvoDaMarca.codes;
     /*
      * A lente principal é SEMPRE enviada ao provider: desktop é a canônica
      * desktop-windows (o eco provou que desktop sem `os` já era windows) e o
@@ -225,9 +232,10 @@ export async function POST(request: Request) {
           hitCollectedAt: lookup.hit?.meta.collectedAt ?? null, missReason: lookup.missReason,
         })),
       ];
+      const planoLocal = brandSerpPlanLocation(alvoDaMarca);
       return {
         slots,
-        plan: buildSerpPaidPlan({ lenses: requested.lenses, slots, payMissingExtraLenses: parsed.data.payMissingExtraLenses, recollectStaleLenses: parsed.data.recollectStaleLenses }),
+        plan: { ...buildSerpPaidPlan({ lenses: requested.lenses, slots, payMissingExtraLenses: parsed.data.payMissingExtraLenses, recollectStaleLenses: parsed.data.recollectStaleLenses }), ...(planoLocal ? { location: planoLocal } : {}) },
       };
     };
 
@@ -276,7 +284,7 @@ export async function POST(request: Request) {
     // vários novos) é paga uma vez só: a quota conta consultas distintas.
     const faltantes = plan.paidQueries;
     // A quota recusa zero unidade; sem falta, credencial e quota nem são lidas.
-    const dataForSeo = faltantes > 0
+    const resolvida = faltantes > 0
       ? await resolveDataForSeoCompatibilityConfig({
         actorUserId: pipelineContext.actorUserId,
         brandId: pipelineContext.brandId,
@@ -284,10 +292,12 @@ export async function POST(request: Request) {
         quotaUnits: faltantes,
       })
       : null;
+    // 2026-10-18 · a config com a localidade da marca: a chave é o que vai ao provider.
+    const dataForSeo = resolvida ? { ...resolvida, config: withBrandSerpLocation(resolvida.config, alvoDaMarca) } : null;
 
     /*
-     * A chave do texto de território foi montada com `readDataForSeoTargetCodes()`,
-     * que é de onde a config tira os mesmos códigos. Se ainda assim divergirem,
+     * A chave do texto de território foi montada com os códigos da marca
+     * (`resolveBrandSerpTarget`), os mesmos que a config recebe. Se ainda assim divergirem,
      * a chave não descreve o que a config enviaria: essas faltas são pagas SEM
      * cache, com os códigos da config — exatamente como a rota fazia antes. A
      * consulta com os códigos do Minerador não é afetada: a chave dela é o que
@@ -427,7 +437,8 @@ export async function POST(request: Request) {
             keywordId: query.keywordId,
             keywordDnaVersionId: `territorial:${query.keywordId}`,
             keyword: query.keyword,
-            location: "Brasil",
+            // 2026-10-18 · o rótulo do que foi pedido: a localidade da marca ("Brasil" na marca nacional).
+            location: alvoDaMarca.label,
             language: "pt-br",
             device: lens.device,
             // Rotula a lente que de fato foi enviada ao provider.
@@ -491,7 +502,7 @@ export async function POST(request: Request) {
           const snapshot = normalizeOrganicDigestSerp(observado.digest, {
             brandId: parsed.data.brandId, articleId: question.questionId, articleDnaVersionId: `territorial:${question.questionId}`,
             keywordId: query.keywordId, keywordDnaVersionId: `territorial:${query.keywordId}:${label}`, keyword: query.keyword,
-            location: "Brasil", language: "pt-br", device: pedido.extraLens.device, operatingSystem: pedido.extraLens.operatingSystem,
+            location: alvoDaMarca.label, language: "pt-br", device: pedido.extraLens.device, operatingSystem: pedido.extraLens.operatingSystem,
             expectedIntent: "", expectedFormat: "", requiredTopics: [query.keyword], articleEntities: [],
             resultLimit: parsed.data.resultLimit, version: 1, previousSnapshotId: null,
           } satisfies SerpSearchInput, { locationCode: observado.locationCode, languageCode: observado.languageCode, collectedAt: observado.collectedAt, providerRequestId: observado.providerRequestId });

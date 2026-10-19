@@ -22,7 +22,10 @@ import { recoverSubjectFromHistory, subjectRestoreHint } from "./subject-recover
  * Domínio puro. Não grava, não busca.
  */
 
-export const SUBJECT_ARTICLE_EDIT_HINT = "Para mudar, use Cadastrar Assuntos → Silo existente." as const;
+/* 2026-10-18 · SUBSTITUÍDO "Para mudar, use Cadastrar Assuntos → Silo existente.": os campos do Assunto são editados aqui no painel (SDD 2026-10-18 §8), pelo núcleo do cadastro. */
+export const SUBJECT_ARTICLE_EDIT_HINT = "Para mudar o título ou os detalhes, use “Editar Assunto” aqui no painel (prévia, gravar e releitura pelo núcleo do cadastro)." as const;
+/** 2026-10-18 · a principal do formato anterior: o Assunto mora em outra linha, e é lá que se edita. */
+export const SUBJECT_ARTICLE_PRINCIPAL_HINT = "O Assunto mora na linha dele: para mudar, abra o painel daquela keyword (Editar Assunto)." as const;
 export const SUBJECT_ARTICLE_ORPHAN_HINT = "Para recuperar, cadastre o artigo de novo em Cadastrar Assuntos → Silo existente (a keyword já está no grupo)." as const;
 
 export type SubjectArticleGroup = { color: string; name: string } | null;
@@ -103,6 +106,8 @@ export type SubjectArticleViewInput = {
    * REAIS do artigo (que moram na linha do Assunto). Sem ele, o de antes.
    */
   subjectSemanticOf?: (keywordId: string) => Record<string, unknown> | null | undefined;
+  /** 2026-10-18 · aditivo: a keyword é a página publicada (Vínculo). Decide o rótulo do Assunto sem plano (M8). */
+  published?: boolean;
 };
 
 export const SUBJECT_ARTICLE_CONVERTED_HINT = "A linha-título fica arquivada como histórico: não a exclua (a exclusão de keyword não publicada é definitiva). Para desfazer, converta de volta pela keyword que carrega o Assunto." as const;
@@ -133,10 +138,21 @@ function lockOf(view: NonNullable<ReturnType<typeof declaredPrincipalLock>>): Su
   return { state: view.state, label: view.label, reason };
 }
 
-const PROTECTED_LOCK: SubjectArticleLock = {
+/*
+ * 2026-10-18 · SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.2-g (M8).
+ * SUBSTITUI "Protegida pela página publicada · a keyword da página publicada não é
+ * trocada": o rótulo valia também para keyword NÃO publicada, e o publicado de
+ * volume 0 agora pode trocar de principal (decisão do dono na prévia do Arquiteto).
+ */
+const PUBLISHED_PAGE_LOCK: SubjectArticleLock = {
   state: "protected",
-  label: "Protegida pela página publicada",
-  reason: "A keyword da página publicada não é trocada: URL, slug e canonical ficam como estão.",
+  label: "Página publicada · URL, slug e canonical ficam; a principal segue o volume",
+  reason: "URL, slug e canonical da página nunca mudam. Volume 0: a principal fica livre para uma com volume (decisão sua no Arquiteto); volume definido: fica.",
+};
+const KEYWORD_SUBJECT_LOCK: SubjectArticleLock = {
+  state: "free",
+  label: "Assunto na própria keyword (sem Silo) · a principal segue o volume",
+  reason: "Sem plano de Silo: volume 0 deixa a principal livre para uma com volume (decisão sua no Arquiteto); volume definido a mantém.",
 };
 
 function lastHistoryTitle(semantic: Record<string, unknown> | null | undefined): string | null {
@@ -165,7 +181,7 @@ export function resolveSubjectArticleView(input: SubjectArticleViewInput): Subje
     const carried = Boolean(principal && principal.keywordId === input.keywordId);
     const format: "cadastro" | "anterior" = subject.entry || carried ? "cadastro" : "anterior";
     const lockView = plan ? declaredPrincipalLock(plan, { subjectKeywordId: input.keywordId, volume: input.volume ?? null }) : null;
-    const lock = lockView ? lockOf(lockView) : subject.entry && !plan ? PROTECTED_LOCK : null;
+    const lock = lockView ? lockOf(lockView) : subject.entry && !plan ? (input.published ? PUBLISHED_PAGE_LOCK : KEYWORD_SUBJECT_LOCK) : null;
     return {
       kind: "subject",
       format,
@@ -214,7 +230,7 @@ export function resolveSubjectArticleView(input: SubjectArticleViewInput): Subje
     lock: subjectLock
       ? lockOf(subjectLock)
       : { state: "locked", label: "Principal declarada · plano anterior", reason: "A trava é a do Assunto, na linha dele; no plano anterior ao cadastro único ela fica fixa até você mudar no card." },
-    hint: SUBJECT_ARTICLE_EDIT_HINT,
+    hint: SUBJECT_ARTICLE_PRINCIPAL_HINT,
     ...(subjectPlan ? { role: subjectPlan.role, order: subjectPlan.order } : {}),
   };
 }

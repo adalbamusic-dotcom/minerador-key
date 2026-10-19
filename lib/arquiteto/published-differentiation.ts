@@ -23,6 +23,7 @@
  * Nada aqui apaga, funde, redireciona, muda URL, slug, canonical ou marca.
  * Domínio puro: sem React, sem banco, sem rede, sem provider.
  */
+import type { PublishedPageSubject } from "./article-improvement.ts";
 import { z } from "zod";
 import type { ArticleFormationKeyword } from "./article-formation.ts";
 import { MAX_ARTICLE_KEYWORDS } from "./article-formation.ts";
@@ -98,6 +99,8 @@ export type DifferentiationPage = {
   problem: string | null;
   /** O ArticleDNA do artigo publicado, quando existe. */
   articleId: string | null;
+  /** 2026-10-19 · o Assunto declarado na página (a régua da troca do refazedor); ausente = sem Assunto. */
+  pageSubject?: PublishedPageSubject | null;
   /** Keywords do artigo hoje (principal + apoio). Sem ArticleDNA: nulo. */
   articleKeywordCount: number | null;
 };

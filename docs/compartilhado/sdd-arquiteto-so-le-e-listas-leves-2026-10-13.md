@@ -643,11 +643,27 @@ convivendo na transição → o catálogo e a tela apontam só para a linha; a
 
 ## 10. Item 6 — Excluir tudo da cor X (dono: compartilhado; cada área pelo seu núcleo)
 
+> **SUBSTITUÍDO em parte — dono, 2026-10-18:** "tem que poder apagar sim não interessa qual seja o
+> estado … tudo tem que poder ser apagado e claro com instâncias de seleção e confirmação, e alerta
+> falando o que está apagando". Deixam de valer nesta seção, em TODO caminho: a recusa
+> `architect_reference` (keyword no ArticleDNA vigente fica fora; "o Arquiteto não exclui keyword
+> (F4)"), as colunas "Fica fora" do Arquiteto (Pilar, publicado, com item adiante, Silo consolidado)
+> e o D8 ("Radar, Redator e Publicações não mudam; ficam fora com o motivo"). Vale agora: a exclusão
+> do Minerador ("Excluir" e "Excluir tudo da cor") roda ANTES o mesmo núcleo do "Desfazer Silo" /
+> "Retirar artigo do Silo" (`planArchitectDismantleForKeywords`/`applyArchitectDismantle`), que
+> rejeita as versões vigentes (nada é apagado; ficam como histórico), desfaz o Silo inteiro quando
+> todos os artigos ou o Pilar saem, e retira o item do Radar/Redator/Publicações (`withdrawn`). A
+> prévia mostra isso por área (é o alerta). Continua fora só a keyword com documento no Redator
+> (`blocked_descendant`), porque a recusa está no banco — migration proposta ao dono
+> (`20261018120000_documento_do_redator_nao_prende_a_keyword`, não escrita). Contrato:
+> `sdd-lifecycle-global-plataforma-2026-08-20.md` (adendo 2026-10-18) e
+> `sdd-linha-unica-do-arquiteto-2026-10-16.md` §15.11.
+
 ### 10.1 Contratos de exclusão que já existem (verificados)
 
 | Área / objeto | Como sai hoje | Confirmação | Recusas | Onde |
 |---|---|---|---|---|
-| Minerador · keyword **não publicada** | **DELETE definitivo** (medições, origens, métricas de descoberta, itens de workflow sem evento de decisão; candidatas desligadas) | prévia de impacto + nome digitado (uma: o nome; várias: "N keywords selecionadas", `minerador-workspace.tsx:2358-2360`) | descendente `content_documents` → `LIFECYCLE_DRAFT_DESCENDANT_REQUIRES_OWNER`; sem `minerador:manage`; com a migration `20261015120000` aplicada: Assunto com plano → `KEYWORD_DELETE_SUBJECT_PROTECTED` | RPC `lifecycle_delete_minerador_keywords` (`supabase/migrations/20260921100000_exclusao_publicada_exige_declaracao.sql:43-143`, DELETE em `:117-133`); rotas `…/keywords/delete/preview` e `…/keywords/delete` (**máx. 100 ids**, `route.ts:10`); lote tudo-ou-nada |
+| Minerador · keyword **não publicada** | **DELETE definitivo** (medições, origens, métricas de descoberta, itens de workflow sem evento de decisão; candidatas desligadas) | prévia de impacto + nome digitado (uma: o nome; várias: "N keywords selecionadas", `minerador-workspace.tsx:2358-2360`) | descendente `content_documents` → `LIFECYCLE_DRAFT_DESCENDANT_REQUIRES_OWNER`; sem `minerador:manage`; com a migration `20261015120000` aplicada: Assunto com plano → `KEYWORD_DELETE_SUBJECT_PROTECTED` (**SUBSTITUÍDO em 2026-10-17** na exclusão comum: a keyword do plano sai do plano e é apagada pelo núcleo deste item 6, com prévia, hash e a confirmação da regra única — P-4 da `sdd-linha-unica-do-minerador-2026-10-16.md`) | RPC `lifecycle_delete_minerador_keywords` (`supabase/migrations/20260921100000_exclusao_publicada_exige_declaracao.sql:43-143`, DELETE em `:117-133`); rotas `…/keywords/delete/preview` e `…/keywords/delete` (**máx. 100 ids**, `route.ts:10`); lote tudo-ou-nada |
 | Minerador · keyword **publicada** | lixeira de 24 h (`deleted_at`, `purge_after`), restaurável; purga só por endpoint sem cron | a mesma + `allowRecoverable` declarado e nome digitado | sem a declaração, o lote inteiro é recusado (`:85-87`, `:150-176`) | idem; `…/keywords/restore`, `…/keywords/purge` |
 | Minerador · lista (`minerador_keyword_lists`) | **não há exclusão** (FK `lista_id` `ON DELETE RESTRICT`; `AGENTS.md` §14) | — | — | — |
 | Minerador · sobras do cadastro | o mesmo DELETE, opt-in | a confirmação de sempre | publicada; já enviada ao Arquiteto | `lib/minerador/declared-plan-leftovers.ts:21-61` |
@@ -1050,7 +1066,7 @@ SQL de escrita, chamada paga ou exclusão fora do que a própria fase descreve
 | D5 | Item 4: projeção por view (M-L) ou por seletores na rota | F2 por seletores (sem migration); F6 por view, depois do ensaio de tempo |
 | D6 | Item 6: publicadas entram na exclusão da cor? | só com a marcação "incluir publicadas na lixeira de 24 h" e a confirmação por nome de cada uma |
 | D7 | Item 6: a cor é liberada no fim | sim, se nada ficou: plano limpo, Silo desligado (só o desfeito), grupo arquivado; reativação começa sem plano |
-| D8 | Item 6: Radar, Redator e Publicações ganham exclusão? | **não nesta SDD** (não há contrato; exigiria SDD própria); ficam fora com o motivo |
+| D8 | Item 6: Radar, Redator e Publicações ganham exclusão? | ~~**não nesta SDD** (não há contrato; exigiria SDD própria); ficam fora com o motivo~~ **SUBSTITUÍDO (dono, 2026-10-18):** tudo pode ser apagado; o item adiante sai da operação (`withdrawn`) pelo handler do Radar, na mesma ação, e a prévia diz o que sai (§10, nota de 2026-10-18) |
 
 ## 18. Autorização e andamento
 
@@ -1716,7 +1732,9 @@ foi editado. Dono: Minerador (D8: só ele executa nesta SDD).
 2. **Domínio** `lib/minerador/group-delete-all.ts` (puro): prévia (`buildGroupDeleteAllPreview`), recusa por
    item — `blocked_descendant` (documento no Redator), `architect_reference` (ArticleDNA VIGENTE de artigo
    não retirado: o último evento da versão vigente não é `rejected`/`superseded`; caminho "Retirar artigo do
-   Silo"/"Tirar do plano"), `published_not_included` (D6), `subject_of_other_color`,
+   Silo"/"Tirar do plano"; **SUBSTITUÍDO em 2026-10-18** por `architect_unavailable`: o desmonte no
+   Arquiteto roda antes, pelo núcleo do "Desfazer Silo"; só fica fora se o desmonte não puder ser lido ou
+   faltar a permissão de aprovar no Arquiteto), `published_not_included` (D6), `subject_of_other_color`,
    `principal_of_other_color`, `principal_outside_color`, `same_article` (o artigo do plano — Assunto +
    principal declarada — sai inteiro ou fica inteiro, para nunca sobrar marca apontando para Assunto
    apagado), `lifecycle_unread`; blocos de até 100 sem partir artigo; o plano depois (`unchanged`,
@@ -1776,7 +1794,8 @@ nome, TAP; a base desta máquina difere das contagens do §18.6 por arquivos de 
 `tsc` 0; eslint dos arquivos novos e tocados sem erro (os de `minerador-workspace.tsx` são antigos, nenhum
 nas linhas desta fase); `git diff --check` limpo.
 
-**Limites:** (a) keyword no ArticleDNA vigente de artigo que não pode sair do Silo (sem Silo consolidado,
+**Limites:** (a) [**SUBSTITUÍDO em 2026-10-18**: a cadeia inteira foi feita — ver a nota do §10 e
+`sdd-linha-unica-do-arquiteto-2026-10-16.md` §15.11] keyword no ArticleDNA vigente de artigo que não pode sair do Silo (sem Silo consolidado,
 Pilar, publicado ou com item no Radar) fica fora até o dono resolver no Arquiteto — a cadeia inteira
 (retirar do Silo, desfazer Silo sugerido, tirar etiquetas) não foi feita: D8 e o pedido desta fase
 limitaram a execução ao Minerador; (b) a mesa do Arquiteto usa `planVersion > 0` como "grupo com plano"

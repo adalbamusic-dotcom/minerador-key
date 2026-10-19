@@ -1,5 +1,6 @@
 import "server-only";
 
+import { publishedPageSubjectFromRow } from "@/lib/arquiteto/article-improvement";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ArticleDNASchema, type ArticleDNA, type VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { readPublishedIdentity } from "@/lib/arquiteto/published-identity";
@@ -17,7 +18,7 @@ import {
 } from "@/lib/arquiteto/published-differentiation";
 import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
 import { DATAFORSEO_LABS_LANGUAGE_CODE, DATAFORSEO_LABS_LOCATION_CODE } from "@/lib/minerador/dataforseo-labs-keyword-research-core";
-import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
+import { resolveBrandSerpTarget } from "@/lib/server/brand-serp-target";
 import { readSerpSubjectFootprints, readSerpSubjectVocabulary, type SerpSubjectReadEgress, type SerpSubjectVocabulary } from "@/lib/server/arquiteto-serp-subject-store";
 import { knownKeywordFromRow } from "@/lib/server/known-before-search";
 import type { KnownVolume } from "@/lib/editorial/known-before-search";
@@ -68,6 +69,10 @@ export const DIFFERENTIATION_KEYWORD_COLUMNS = [
   "volume_measured_at:analise_semantica->volume_measurement->>measuredAt",
   "volume_measured_average:analise_semantica->volume_measurement->averageMonthlySearches",
   "volume_measured_provider:analise_semantica->volume_measurement->>provider",
+  // 2026-10-19 · o Assunto da página e o tipo de página: a régua da troca do refazedor também na diferenciação.
+  "keyword_subject:analise_semantica->keyword_subject",
+  "keyword_page_type:analise_semantica->>keyword_page_type",
+  "intencao_principal:analise_semantica->>intencao_principal",
 ].join(",");
 
 type LinhaKeyword = {
@@ -153,6 +158,14 @@ export async function readDifferentiationBrandKeywords(context: DifferentiationS
         problem: texto(linha.problema_percebido),
         articleId: null,
         articleKeywordCount: null,
+        ...(() => {
+          const bruta = linha as unknown as Record<string, unknown>;
+          // Só leitura: a mesma reconstrução de `knownKeywordFromRow` (as colunas estreitas voltam ao formato do resolvedor).
+          const semantica: Record<string, unknown> = { keyword_subject: bruta.keyword_subject, keyword_page_type: bruta.keyword_page_type, site_origin: linha.site_origin, intencao_principal: bruta.intencao_principal, entidade_central: linha.entidade_central, ...(bruta.volume_eligibility ? { volume_eligibility: bruta.volume_eligibility } : {}) };
+          if (bruta.volume_measured_at !== undefined) semantica.volume_measurement = { measuredAt: bruta.volume_measured_at ?? null, averageMonthlySearches: bruta.volume_measured_average ?? null, provider: bruta.volume_measured_provider ?? null };
+          const pageSubject = publishedPageSubjectFromRow({ id, keyword, volume_search: linha.volume_search, volume_source: linha.volume_source, analise_semantica: semantica }, slug, agora);
+          return pageSubject ? { pageSubject } : {};
+        })(),
       });
     }
     if (linhas.length < PAGINA) break;
@@ -267,10 +280,12 @@ export async function readLatestArticleDnaVersion(context: DifferentiationStoreC
 /** A pegada dos publicados no cache, com o targeting de cada keyword (a chave do cache). */
 export async function readPublishedFootprints(context: DifferentiationStoreContext, pages: ReadonlyArray<Pick<DifferentiationPage, "keywordId" | "keyword">>, now: Date): Promise<{ footprints: KeywordSerpFootprint[]; withoutSerp: string[]; missingLenses: Array<{ keywordId: string; lens: string; reason: string }>; egress: SerpSubjectReadEgress }> {
   if (!pages.length) return { footprints: [], withoutSerp: [], missingLenses: [], egress: { queries: 0, entriesRead: 0, approxBytes: 0 } };
-  const ambiente = readDataForSeoTargetCodes();
-  const targeting = await readMineradorKeywordTargetCodes(context.supabase, context.brandId, pages.map(page => page.keywordId), ambiente);
-  const alvos = pages.map(page => ({ keywordId: page.keywordId, keyword: page.keyword, ...serpTargetCodesFor(targeting.codes, page.keywordId, ambiente) }));
-  return readSerpSubjectFootprints(context, alvos, { now });
+  // 2026-10-18 · a localidade da marca (SDD localidade, L2); com cidade, a SERP antiga nacional aparece marcada, como na mesa.
+  const alvoDaMarca = await resolveBrandSerpTarget(context.supabase, context.brandId);
+  const daMarca = alvoDaMarca.codes;
+  const targeting = await readMineradorKeywordTargetCodes(context.supabase, context.brandId, pages.map(page => page.keywordId), daMarca);
+  const alvos = pages.map(page => ({ keywordId: page.keywordId, keyword: page.keyword, ...serpTargetCodesFor(targeting.codes, page.keywordId, daMarca) }));
+  return readSerpSubjectFootprints(context, alvos, { now, ...(alvoDaMarca.source === "brand" ? { nationalFallback: alvoDaMarca.national } : {}) });
 }
 
 /**
@@ -280,14 +295,19 @@ export async function readPublishedFootprints(context: DifferentiationStoreConte
  */
 export async function readPrincipalSerpVocabulary(context: DifferentiationStoreContext, principals: ReadonlyArray<{ keywordId: string; keyword: string }>, now: Date): Promise<Map<string, SerpSubjectVocabulary>> {
   if (!principals.length) return new Map();
-  const ambiente = readDataForSeoTargetCodes();
-  const targeting = await readMineradorKeywordTargetCodes(context.supabase, context.brandId, principals.map(item => item.keywordId), ambiente);
-  return readSerpSubjectVocabulary(context, principals.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, ...serpTargetCodesFor(targeting.codes, item.keywordId, ambiente) })), { now });
+  // 2026-10-18 · a localidade da marca (SDD localidade, L2): o vocabulário é lido na chave dela.
+  const daMarca = (await resolveBrandSerpTarget(context.supabase, context.brandId)).codes;
+  const targeting = await readMineradorKeywordTargetCodes(context.supabase, context.brandId, principals.map(item => item.keywordId), daMarca);
+  return readSerpSubjectVocabulary(context, principals.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, ...serpTargetCodesFor(targeting.codes, item.keywordId, daMarca) })), { now });
 }
 
-/** A pegada das candidatas: a mesma chave que a Pesquisa por Assunto grava (Brasil, "pt"). */
-export async function readCandidateFootprints(context: DifferentiationStoreContext, targets: ReadonlyArray<{ keywordId: string; keyword: string }>, now: Date) {
-  const alvos = targets.map(target => ({ keywordId: target.keywordId, keyword: target.keyword, locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE }));
+/**
+ * A pegada das candidatas: a mesma chave que a Pesquisa por Assunto grava (Brasil, "pt").
+ * 2026-10-18 · com `codes` (a localidade da marca, SDD localidade L2), a chave é a
+ * dela — a mesma que a rodada paga grava (`serpCodes` das portas). Ausente = Brasil.
+ */
+export async function readCandidateFootprints(context: DifferentiationStoreContext, targets: ReadonlyArray<{ keywordId: string; keyword: string }>, now: Date, codes?: { locationCode: number; languageCode: string } | null) {
+  const alvos = targets.map(target => ({ keywordId: target.keywordId, keyword: target.keyword, locationCode: codes?.locationCode ?? DATAFORSEO_LABS_LOCATION_CODE, languageCode: codes?.languageCode ?? DATAFORSEO_LABS_LANGUAGE_CODE }));
   const leitura = await readSerpSubjectFootprints(context, alvos, { now });
   return { footprints: leitura.footprints.filter(pegada => pegada.lenses.length), missingLenses: leitura.missingLenses };
 }

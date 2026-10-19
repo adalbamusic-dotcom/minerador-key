@@ -106,17 +106,22 @@ test("aplicação: evento rejected ANTES do par, sucesso só depois da releitura
   if (resultado.state === "APPLIED") assert.equal(resultado.siloDna.versionId, vigente.versionId);
 });
 
-test("aplicação sem motivo ou com o artigo no Radar: recusa e nenhuma escrita", async () => {
+test("aplicação sem motivo: recusa e nenhuma escrita; com o artigo no Radar: sai e o item do Radar sai da operação (SUBSTITUI a recusa, 2026-10-18)", async () => {
   const base = await acervo();
   const semMotivo = dependencias(base);
   const r1 = await handleSiloArticleWithdrawal(semMotivo.deps, { siloId: base.dna.payload.siloId, articleId: base.artigos[1].payload.articleId, reason: " ", mode: "apply" });
   assert.equal(r1.state, "REFUSED");
   if (r1.state === "REFUSED") assert.equal(r1.code, "REASON_REQUIRED");
   assert.deepEqual(semMotivo.ordem, []);
+  // O dono, 18/10: "tem que poder apagar sim não interessa qual seja o estado" — o item adiante sai da operação na mesma ação.
   const noRadar = dependencias(base, { estagios: ["radar"] });
+  const retirados: string[] = [];
+  noRadar.deps.withdrawDownstream = async articleId => { retirados.push(articleId); noRadar.ordem.push("adiante"); return { withdrawn: 1, failed: [] }; };
   const r2 = await handleSiloArticleWithdrawal(noRadar.deps, { siloId: base.dna.payload.siloId, articleId: base.artigos[1].payload.articleId, reason: "fora do plano", mode: "apply" });
-  assert.equal(r2.state === "REFUSED" ? r2.code : null, "ARTICLE_IN_DOWNSTREAM");
-  assert.deepEqual(noRadar.ordem, []);
+  assert.equal(r2.state, "APPLIED", JSON.stringify(r2));
+  assert.deepEqual(noRadar.ordem, ["evento", "par", "adiante"]);
+  assert.deepEqual(retirados, [base.artigos[1].payload.articleId]);
+  if (r2.state === "APPLIED") assert.equal(r2.withdrawnItems, 1);
 });
 
 test("releitura divergente: não declara sucesso (503)", async () => {

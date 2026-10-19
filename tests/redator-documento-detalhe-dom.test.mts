@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
+import { comProductShell, montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
 
 /*
  * ======  E1 · O REDATOR SÓ EDITA O DOCUMENTO COMPLETO  =====================
@@ -118,6 +118,8 @@ Object.defineProperty(globalThis, "fetch", {
 
 const { EditorialPipelineProvider, useEditorialPipeline } = await import("../components/editorial-pipeline-context.tsx");
 const { ProfessionalWriter } = await import("../components/editorial/professional-writer.tsx");
+/* 2026-10-18 · o Redator passou a publicar os resultados no sino (regra do dono): a tela monta dentro do centro de avisos, como no app. */
+const { GlobalNoticeProvider } = await import("../components/global-notice-center.tsx");
 const h = React.createElement;
 
 type Mesa = ReturnType<typeof useEditorialPipeline>;
@@ -125,7 +127,8 @@ const sonda: { mesa: Mesa | null } = { mesa: null };
 function Sonda() { sonda.mesa = useEditorialPipeline(); return null; }
 
 const arvore = (strict = false) => {
-  const conteudo = h(EditorialPipelineProvider, null, h(Sonda), h(ProfessionalWriter, {}));
+  /* 2026-10-18 · os botões de IA do Redator ganharam InfoHint: a árvore leva o Tooltip.Provider do ProductShell, como no app. */
+  const conteudo = comProductShell(h(GlobalNoticeProvider, null, h(EditorialPipelineProvider, null, h(Sonda), h(ProfessionalWriter, {}))));
   return strict ? h(React.StrictMode, null, conteudo) : conteudo;
 };
 const assentar = async (ms = 40) => { await React.act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); }); };
@@ -285,12 +288,12 @@ test("08 · Strict Mode: uma leitura de detalhe só, mesmo abrindo o Redator com
    * O documento já está na memória (parcial) quando o Redator monta, e o
    * Strict Mode monta os efeitos duas vezes (R13).
    */
-  await tela!.render(h(EditorialPipelineProvider, null, h(Sonda)));
+  await tela!.render(comProductShell(h(GlobalNoticeProvider, null, h(EditorialPipelineProvider, null, h(Sonda)))));
   await assentar(80);
   assert.ok(isPartialContentDocument(sonda.mesa!.documents["doc-e1"]));
   assert.equal(leiturasDoDetalhe(), 0, "sem Redator, ninguém pede o detalhe");
 
-  await tela!.render(h(EditorialPipelineProvider, null, h(Sonda), h(React.StrictMode, null, h(ProfessionalWriter, {}))));
+  await tela!.render(comProductShell(h(GlobalNoticeProvider, null, h(EditorialPipelineProvider, null, h(Sonda), h(React.StrictMode, null, h(ProfessionalWriter, {}))))));
   await assentar(150);
   assert.equal(leiturasDoDetalhe(), 1);
   assert.ok(editorAberto(tela!)?.editor);

@@ -174,8 +174,16 @@ export function declaredPrincipalLock(
   const carriedByKeyword = principal.keywordId === input.subjectKeywordId;
   let state: DeclaredPlanLock;
   let origin: DeclaredPrincipalLockOrigin;
-  if (plan!.lock) { state = plan!.lock; origin = "manual"; }
-  else if (carriedByKeyword) { state = hasLockingVolume(input.volume) ? "locked" : "free"; origin = "volume"; }
+  /*
+   * 2026-10-18 · VOLUME DEFINIDO FIXA (D1 da linha única do Minerador, 16/10; SDD
+   * `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.2-f, G11). SUBSTITUI "a
+   * trava manual vence o volume": a keyword que carrega o Assunto com Volume
+   * validado > 0 fica travada mesmo com "Livre" gravado à mão. Sem volume, a trava
+   * gravada decide (como antes).
+   */
+  if (carriedByKeyword && hasLockingVolume(input.volume)) { state = "locked"; origin = "volume"; }
+  else if (plan!.lock) { state = plan!.lock; origin = "manual"; }
+  else if (carriedByKeyword) { state = "free"; origin = "volume"; }
   else { state = "locked"; origin = "declared"; }
   const label = state === "locked"
     ? `Travada · ${DECLARED_PLAN_LOCK_ORIGIN_LABELS[origin]}`

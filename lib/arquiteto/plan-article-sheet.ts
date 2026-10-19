@@ -296,8 +296,16 @@ function planNoSearchesPath(lockState: PlanSheetLockView["state"] | null | undef
  * viu nos 4 Livres do amarelo, no Concluir): o reforço e a SERP dela vêm do "Processar artigos".
  */
 export const PLAN_IDENTITY_NO_VOLUME_SENTENCE = `Principal de identidade (está no título ou no slug do plano): fica como principal, mesmo sem número de buscas no Google Ads. “${PLAN_SHEET_ACTION_LABELS.processArticles}” busca o reforço (Google Ads, grátis) e coleta a SERP dela (custo antes).`;
-export function planRowWithoutVolumeSentence(row: { volume: Pick<PlanSheetVolumeView, "state" | "value">; lock?: Pick<PlanSheetLockView, "state"> | null; supports?: Pick<PlanSheetRow["supports"], "withVolume"> | null; identityPrincipal?: boolean }): string | null {
+/**
+ * 2026-10-17 (noite) · "Pilar troca, Suportes ficam" (dono): o PILAR Livre sem volume — mesmo de identidade — recebe a
+ * proposta do termo-cabeça com volume que leva o núcleo do slug; a frase do plano fica como o Assunto, com o título e o
+ * slug. A proposta vem no "Processar artigos" (Pilar ainda não formado) ou no "Melhorar publicados…" (já formado).
+ */
+export const PLAN_PILLAR_HEAD_SWAP_SENTENCE = `Pilar sem volume: a principal passa a ser o termo-cabeça com volume que leva o núcleo do slug (proposta no “${PLAN_SHEET_ACTION_LABELS.processArticles}” ou, já formado, no “Melhorar publicados…”; decisão sua na prévia). A frase do plano fica como o Assunto, com o título e o slug.`;
+export function planRowWithoutVolumeSentence(row: { volume: Pick<PlanSheetVolumeView, "state" | "value">; lock?: Pick<PlanSheetLockView, "state"> | null; supports?: Pick<PlanSheetRow["supports"], "withVolume"> | null; identityPrincipal?: boolean; role?: PlanSheetRow["role"] | null }): string | null {
   if (row.volume.state === "measured" && (row.volume.value ?? 0) > 0) return null;
+  // 2026-10-17 (noite) · o Pilar Livre sem volume de identidade troca pelo termo-cabeça (a exceção da identidade, T12).
+  if (row.identityPrincipal && row.role === "Pilar" && row.lock?.state !== "locked") return PLAN_PILLAR_HEAD_SWAP_SENTENCE;
   // A Travada fica de qualquer jeito: ela ouve a frase dela (abaixo). A nunca medida também ouve o caminho do Volume (T6).
   if (row.identityPrincipal && row.lock?.state !== "locked") return row.volume.state === "missing" ? `${PLAN_IDENTITY_NO_VOLUME_SENTENCE} Ela nunca foi medida no Google Ads: meça no Minerador (Volume) se quiser o número de buscas.` : PLAN_IDENTITY_NO_VOLUME_SENTENCE;
   if (planRowHasNoSearches(row.volume)) return `${PLAN_NO_SEARCHES_SENTENCE}. ${planNoSearchesPath(row.lock?.state)}`;
@@ -665,7 +673,7 @@ export function planSheetCompositionText(run: RunLike, proposal: Pick<Improvemen
 /** O motivo genérico do núcleo para todo Assunto: não explica a recusa da linha. */
 const GENERIC_SUBJECT_REASON = /^Assunto declarado mantido como fundamento/;
 
-type PreviewRow = Pick<PlanSheetRow, "keywordId" | "keyword" | "formation"> & Partial<Pick<PlanSheetRow, "volume" | "lock" | "supports" | "identityPrincipal">>;
+type PreviewRow = Pick<PlanSheetRow, "keywordId" | "keyword" | "formation"> & Partial<Pick<PlanSheetRow, "volume" | "lock" | "supports" | "identityPrincipal" | "role">>;
 export function planSheetPreviewLines(run: RunLike, rows: readonly PreviewRow[]): PlanSheetPreviewLine[] {
   const nome = (id: string | null) => !id ? null : rows.find(row => row.keywordId === id)?.keyword ?? run.keywords?.find(keyword => keyword.id === id)?.keyword ?? id;
   return rows.map(row => {
@@ -689,7 +697,7 @@ export function planSheetPreviewLines(run: RunLike, rows: readonly PreviewRow[])
     const util = [...proposta.reasons].reverse().find(reason => !GENERIC_SUBJECT_REASON.test(reason));
     // 2026-10-16 (noite) · a frase sai da régua de volume da linha: nunca medida, medida sem número de buscas (Livre ou Travada).
     // 2026-10-17 (noite) · a principal de identidade ouve a frase dela (fica), nunca "Procurar outra principal".
-    const semVolume = row.volume ? planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock ?? null, supports: row.supports ?? null, identityPrincipal: row.identityPrincipal === true }) : null;
+    const semVolume = row.volume ? planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock ?? null, supports: row.supports ?? null, identityPrincipal: row.identityPrincipal === true, role: row.role ?? null }) : null;
     const dica = semVolume ?? `Sem evidência suficiente para formar agora: “${PLAN_SHEET_ACTION_LABELS.processArticles}” busca o reforço e coleta a SERP que falta (custo antes).`;
     return { keywordId: row.keywordId, kind: "refused", sentence: util ?? dica, principalFrom: de, principalTo: para };
   });
@@ -903,21 +911,24 @@ export type PlanRowDefinition = { label: string; reason: string | null; title: s
  * "No Radar · vN", "Aguardando formação" ou "Pendente" — com o porquê curto
  * (o inteiro vai no `title`). Só lê a linha; nada é gravado.
  */
-export function planRowDefinition(row: Pick<PlanSheetRow, "formation" | "conflict" | "volume" | "lock" | "serp"> & Partial<Pick<PlanSheetRow, "identityPrincipal">>): PlanRowDefinition {
+export function planRowDefinition(row: Pick<PlanSheetRow, "formation" | "conflict" | "volume" | "lock" | "serp"> & Partial<Pick<PlanSheetRow, "identityPrincipal" | "role">>): PlanRowDefinition {
   const formation = row.formation;
   if (formation.state === "formed" || formation.state === "in_radar") return { label: formation.label, reason: null, title: `ArticleDNA ${formation.version ? `v${formation.version}` : "gravado"} pelo plano.`, tone: "positive" };
   if (row.conflict || formation.state === "conflict") return { label: "Pendente", reason: "presa em outro artigo", title: row.conflict?.sentence ?? formation.label, tone: "warning" };
   if (formation.state === "awaiting_principal") return { label: "Pendente", reason: "aguarda a principal chegar ao Arquiteto", title: formation.label, tone: "warning" };
-  const semVolume = planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock, identityPrincipal: row.identityPrincipal === true });
+  const semVolume = planRowWithoutVolumeSentence({ volume: row.volume, lock: row.lock, identityPrincipal: row.identityPrincipal === true, role: row.role ?? null });
   if (semVolume) {
     const semBuscas = planRowHasNoSearches(row.volume);
+    // 2026-10-17 (noite) · "Pilar troca, Suportes ficam": o Pilar Livre sem volume recebe a proposta do termo-cabeça.
+    const pilarCabeca = row.identityPrincipal === true && row.role === "Pilar" && row.lock.state !== "locked";
     // 2026-10-17 (noite) · a principal de identidade fica: o caminho é o "Processar artigos" (reforço e SERP dela).
-    const identidade = row.identityPrincipal === true && row.lock.state !== "locked";
-    const reason = identidade ? `identidade, fica · “${PLAN_SHEET_ACTION_LABELS.processArticles}”`
+    const identidade = !pilarCabeca && row.identityPrincipal === true && row.lock.state !== "locked";
+    const reason = pilarCabeca ? `Pilar sem volume: termo-cabeça · “${PLAN_SHEET_ACTION_LABELS.processArticles}”`
+      : identidade ? `identidade, fica · “${PLAN_SHEET_ACTION_LABELS.processArticles}”`
       : semBuscas
       ? row.lock.state === "free" ? `sem número de buscas · Livre: “${PLAN_SHEET_ACTION_LABELS.swapPrincipal}” ou sustentação` : "sem número de buscas · traga sustentação"
       : row.lock.state === "free" ? "sem volume medido · Livre: pode trocar" : "sem volume medido: meça no Minerador";
-    return { label: "Aguardando formação", reason, title: semVolume, tone: identidade ? "neutral" : "warning" };
+    return { label: "Aguardando formação", reason, title: semVolume, tone: identidade || pilarCabeca ? "neutral" : "warning" };
   }
   if (row.serp.state === "none" || row.serp.state === "partial") return { label: "Aguardando formação", reason: "falta SERP: “Processar artigos”", title: `${row.serp.label}. Marque a linha e use “Processar artigos” (custo antes, cache primeiro).`, tone: "warning" };
   if (row.serp.state === "complete") return { label: "Aguardando formação", reason: `pronta: “${PLAN_SHEET_ACTION_LABELS.concludeFormation}”`, title: `SERP 4/4 no cache: marque a linha e use “${PLAN_SHEET_ACTION_LABELS.concludeFormation}” (prévia antes).`, tone: "neutral" };
@@ -1058,12 +1069,15 @@ export function splitTableSelectionForPlan<A>(input: {
 export type PlanRowAlert = { kind: "no_volume" | "no_serp" | "conflict" | "awaiting_principal"; label: string; title: string };
 
 /** Os alertas da linha: só a keyword presa em outro artigo e a principal que não chegou ficam fora de "Concluir formação". */
-export function planRowAlerts(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" | "conflict" | "formation"> & Partial<Pick<PlanSheetRow, "identityPrincipal">>): PlanRowAlert[] {
+export function planRowAlerts(row: Pick<PlanSheetRow, "lock" | "volume" | "serp" | "conflict" | "formation"> & Partial<Pick<PlanSheetRow, "identityPrincipal" | "role">>): PlanRowAlert[] {
   const alertas: PlanRowAlert[] = [];
   const semVolume = !(row.volume.state === "measured" && (row.volume.value ?? 0) > 0);
   if (row.conflict) alertas.push({ kind: "conflict", label: "presa em outro artigo", title: row.conflict.sentence });
   if (row.formation.state === "awaiting_principal") alertas.push({ kind: "awaiting_principal", label: "aguarda a principal", title: row.formation.label });
-  if (semVolume && row.identityPrincipal && row.lock.state !== "locked") {
+  if (semVolume && row.identityPrincipal && row.role === "Pilar" && row.lock.state !== "locked") {
+    // 2026-10-17 (noite) · "Pilar troca, Suportes ficam" (dono): a exceção da identidade.
+    alertas.push({ kind: "no_volume", label: planRowHasNoSearches(row.volume) ? "sem número de buscas — Pilar: termo-cabeça" : "sem volume — Pilar: termo-cabeça", title: `${row.volume.label}. ${PLAN_PILLAR_HEAD_SWAP_SENTENCE}` });
+  } else if (semVolume && row.identityPrincipal && row.lock.state !== "locked") {
     // 2026-10-17 (noite) · T12: a principal de identidade fica (o "livre, pode trocar" contradizia a regra do dono).
     alertas.push({ kind: "no_volume", label: planRowHasNoSearches(row.volume) ? "sem número de buscas — identidade, fica" : "sem volume — identidade, fica", title: `${row.volume.label}. ${PLAN_IDENTITY_NO_VOLUME_SENTENCE}` });
   } else if (semVolume) {

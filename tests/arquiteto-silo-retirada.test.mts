@@ -86,16 +86,17 @@ test("recusa: o Pilar não sai (troque o Pilar antes)", async () => {
   const base = await siloConsolidado();
   const plano = planSiloArticleWithdrawal(entrada(base, { articleId: base.ids[0] }));
   assert.equal(plano.ok, false);
-  if (!plano.ok) { assert.equal(plano.code, "ARTICLE_IS_PILLAR"); assert.match(plano.message, /troque o Pilar antes/); }
+  if (!plano.ok) { assert.equal(plano.code, "ARTICLE_IS_PILLAR"); assert.match(plano.message, /troque o Pilar antes de retirá-lo, ou desfaça o Silo inteiro \(“Desfazer Silo”, Pilar incluído\)/); }
 });
 
-test("recusa: artigo publicado não sai por aqui", async () => {
+// 2026-10-18 (o dono: "tem que poder apagar … não interessa qual seja o estado") · SUBSTITUÍDA a recusa ARTICLE_PUBLISHED: sai, com o aviso (o site não muda).
+test("artigo publicado sai do Silo, com o aviso: no site nada muda (SUBSTITUI a recusa)", async () => {
   const base = await siloConsolidado();
   const publicadoPayload: ArticleDNA = { ...base.artigos[1].payload, publishedIdentityRef: { publicationStatus: "published_protected", slug: "plano-vivo-controle" } };
   const publicado = await createVersionEnvelope({ entityId: publicadoPayload.articleId, versionNumber: 2, previousVersionId: base.artigos[1].versionId, origin: "human", changeReason: "fixture", createdBy: "test", payload: publicadoPayload });
   const plano = planSiloArticleWithdrawal(entrada(base, { articleDnaVersions: [...base.artigos, publicado] }));
-  assert.equal(plano.ok, false);
-  if (!plano.ok) { assert.equal(plano.code, "ARTICLE_PUBLISHED"); assert.match(plano.message, /publicado não sai por aqui/); }
+  assert.equal(plano.ok, true);
+  if (plano.ok) assert.match(plano.warnings.join(" "), /Este artigo está publicado: no site nada muda \(URL, slug e canonical ficam como estão\)/);
 });
 
 test("recusa: artigo fora do Silo, Silo inexistente e Silo sem versão aprovada", async () => {
@@ -108,10 +109,15 @@ test("recusa: artigo fora do Silo, Silo inexistente e Silo sem versão aprovada"
   assert.equal(naoAprovado.ok ? null : naoAprovado.code, "SILO_NOT_APPROVED");
 });
 
-test("recusa: artigo já em etapa posterior, prévia vencida, par incoerente e motivo ausente", async () => {
+test("artigo já no Radar sai do Silo e o item sai da operação (SUBSTITUI a recusa); recusa: prévia vencida, par incoerente e motivo ausente", async () => {
   const base = await siloConsolidado();
+  // 2026-10-18 · SUBSTITUÍDA a recusa ARTICLE_IN_DOWNSTREAM: o artigo sai, e o item do Radar sai da operação na mesma ação.
   const radar = planSiloArticleWithdrawal(entrada(base, { downstreamStages: ["radar"] }));
-  assert.equal(radar.ok ? null : radar.code, "ARTICLE_IN_DOWNSTREAM");
+  assert.equal(radar.ok, true);
+  if (radar.ok) {
+    assert.deepEqual(radar.downstreamStages, ["radar"]);
+    assert.match(radar.warnings.join(" "), /já seguiu para o Radar: o item sai da operação/);
+  }
   const vencida = planSiloArticleWithdrawal(entrada(base, { expectedSiloDnaVersionId: "versao-antiga" }));
   assert.equal(vencida.ok ? null : vencida.code, "STALE_SILO");
   const paginaSolta = await createVersionEnvelope({ entityId: base.page.entityId, versionNumber: 3, previousVersionId: base.page.versionId, origin: "human", changeReason: "fixture", createdBy: ATOR, payload: { ...base.page.payload, siloDnaRef: { ...base.page.payload.siloDnaRef, versionId: "outra" } } });

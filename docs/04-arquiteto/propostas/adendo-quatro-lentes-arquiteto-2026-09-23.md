@@ -230,6 +230,7 @@ lenses: {
     - `collectAndCacheSerp` envia os códigos da **consulta**, então a chave é o que vai ao provider.
   - Consultas territoriais por texto e keyword sem `targeting` continuam com os códigos do ambiente.
   - A checagem de divergência da config (`formationSerpCodesMatch`) passa a valer só para esse caso.
+  - **SUBSTITUÍDO (2026-10-18) na parte de LOCALIDADE:** a localidade da chave e do pedido é a da MARCA (`resolveBrandSerpTarget`, pelo `brandId`; sem localidade válida, a do ambiente, como antes), e a config recebe a mesma localidade. Do `targeting` da keyword sai só o IDIOMA. SDD `docs/compartilhado/sdd-localidade-serp-por-marca-2026-10-18.md`.
 - **Testes:**
   - keyword com `targeting` gera a mesma chave que o Minerador gravaria;
   - `targeting` de outra marca não é lido;

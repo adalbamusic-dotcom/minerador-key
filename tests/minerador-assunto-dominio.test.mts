@@ -302,7 +302,8 @@ const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   // 2026-10-12 (F4): o plano do Silo tem um núcleo só — a rota da tela e a
   // ferramenta MCP `declare_silo_plan` (com a guarda do aceite, P4b).
   // 2026-10-13 (SDD da conversão do formato anterior): a conversão passa pelo MESMO núcleo do cadastro.
-  importDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/import/route.ts", "lib/minerador/subject-conversion-core.ts", "lib/server/platform-mcp-tools.ts"],
+  // 2026-10-18 (SDD do Assunto pela principal §6.2-b, F4): o "Aprovar e enviar" grava o Assunto do volume 0 pelo MESMO núcleo (destino "Keyword (sem Silo)").
+  importDeclaredPlanWithCore: ["app/api/minerador/marcas/[brandId]/plans/import/route.ts", "lib/minerador/subject-conversion-core.ts", "lib/server/minerador-approve-and-send.ts", "lib/server/platform-mcp-tools.ts"],
   // 2026-10-13: converter tem a rota da tela e a ferramenta MCP `convert_legacy_subjects` (com a guarda do aceite).
   convertLegacySubjectsWithCore: ["app/api/minerador/marcas/[brandId]/plans/convert/route.ts", "lib/server/platform-mcp-tools.ts"],
   // 2026-10-12: "Tirar do plano" é só da tela (prévia → decisão humana); nenhuma ferramenta MCP.

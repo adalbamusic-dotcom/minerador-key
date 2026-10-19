@@ -40,6 +40,15 @@ export type RadarResearchNoiseContext = {
   domain?: string | null;
   /** Domínios dos concorrentes lidos: as marcas deles (produto de terceiro, institucional do concorrente). */
   competitorDomains?: ReadonlyArray<string | null | undefined>;
+  /**
+   * 2026-10-18 · Aditivo (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L3): o
+   * território da marca com cidade (rótulo, cidade, UF e apelidos). Com ele, a
+   * régua D11 marca o resultado de outra cidade ou UF ("fora do território:
+   * outra localidade", pelo gazetteer `territory-gazetteer.ts`, chamado em
+   * `competitive-reading.ts` — esta régua continua sem import). Ausente = marca
+   * nacional: nenhum motivo geográfico. Mesma forma de `BrandSerpTerritory`.
+   */
+  location?: { label: string; city: string; uf: string; aliases: readonly string[] } | null;
 };
 
 /* ============================== normalização ============================== */

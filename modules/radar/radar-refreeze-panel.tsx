@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useNoticeBridge } from "@/components/global-notice-center";
 import { radarRefreezeButtonLabel, type RadarRefreezeDiagnosis, type RadarRefreezeProfile } from "@/lib/radar/refreeze-repair";
 
 /**
@@ -38,6 +39,8 @@ export function RadarRefreezePanel({ profile, disabled = false, onDiagnose, onRe
   const [estado, setEstado] = useState<"" | "lendo" | "gravando">("");
   const [diagnostico, setDiagnostico] = useState<RadarRefreezeDiagnosis | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a falha do diagnóstico ou do reparo vai para o sino; a linha da tela saiu. */
+  useNoticeBridge({ notice: erro || "", module: "radar", area: "Radar · Reparar congelamento", title: "Radar · Reparar congelamento", fallbackSeverity: "ERROR" });
   const prefixo = `radar-refreeze-${profile.toLowerCase()}`;
 
   const diagnosticar = async () => {
@@ -80,7 +83,6 @@ export function RadarRefreezePanel({ profile, disabled = false, onDiagnose, onRe
     <p className="text-sm font-semibold text-foreground">{radarRefreezeButtonLabel(profile)}</p>
     <p className="text-sm leading-6 text-text-muted">O diagnóstico é leitura e não altera nada. Só a confirmação abaixo grava.</p>
     {estado === "lendo" && <p className="text-sm text-text-muted" role="status">Lendo a investigação no servidor e refazendo a leitura sem gravar…</p>}
-    {erro && <p className="text-sm text-warning" role="status" data-testid={`${prefixo}-error`}>{erro}</p>}
     {diagnostico && <div className="space-y-2" data-testid={`${prefixo}-diagnosis`} data-mode={diagnostico.mode}>
       <p className={`text-sm leading-6 ${diagnostico.mode === "NOTHING" ? "text-success" : diagnostico.mode === "RECOLLECT" ? "text-warning" : "text-foreground"}`}>{diagnostico.headline}</p>
       {diagnostico.differences.length > 0 && <div>

@@ -42,6 +42,14 @@ const VAZIAS = new Set([
   "aqui", "mais", "muito", "ser", "ter", "tem", "fazer", "pode", "sao", "nao", "ja", "the", "and", "for", "of",
   /* 2026-10-08 (correção) · "E os outros canais orgânicos?" tirava "tipos de tráfego orgânico" só pelo "outros". */
   "outro", "outra", "outros", "outras",
+  /*
+   * 2026-10-18 (teste real, WifiConecta) · o pronome de quantidade e o advérbio de
+   * tempo também não dizem assunto: "Não sabe quanto tem de internet?" tirava
+   * "Quanto custa de fato" do Pilar só pelo "quanto"; "O que analisar antes de
+   * contratar internet residencial" tirava "Como confirmar a disponibilidade
+   * antes de contratar" do artigo do CEP pelo "antes" + "contratar".
+   */
+  "quanto", "quanta", "quantos", "quantas", "antes", "depois",
 ]);
 
 /*
@@ -85,6 +93,29 @@ export function radarOutOfScopeDistinctiveStems(rotulo: string | null | undefine
   const doNucleo = new Set(core.flatMap(valor => [...raizesDe(valor)]));
   const genericas = raizesQueNaoDistinguem();
   return [...raizesDe(rotulo)].filter(raiz => !doNucleo.has(raiz) && !genericas.has(raiz));
+}
+
+/**
+ * 2026-10-18 · DE QUAL ARTIGO DO SILO É ESTE RÓTULO FORA DO ESCOPO? O "Não
+ * cobrir" dizia "pertence a outro artigo" sem dizer qual. O dono é o irmão cuja
+ * identidade (principal, keywords e Assunto) traz palavras que distinguem o
+ * rótulo deste artigo — duas ao menos (uma, quando o rótulo só tem uma ou duas)
+ * — e mais delas que qualquer outro irmão. Sem irmão assim, ou com dois
+ * empatados, ninguém é nomeado (nada se inventa).
+ */
+export function radarOutOfScopeOwner<T extends { label: string; keywords: ReadonlyArray<string | null | undefined> }>(
+  rotulo: string | null | undefined,
+  input: { core: ReadonlyArray<string | null | undefined>; members: readonly T[] },
+): T | null {
+  const distintivas = radarOutOfScopeDistinctiveStems(rotulo, input.core);
+  if (!distintivas.length) return null;
+  const minimo = distintivas.length <= 2 ? 1 : 2;
+  const placar = input.members.map(membro => {
+    const doMembro = new Set([membro.label, ...membro.keywords].flatMap(valor => [...raizesDe(valor)]));
+    return { membro, pontos: distintivas.filter(raiz => doMembro.has(raiz)).length };
+  }).filter(item => item.pontos >= minimo).sort((a, b) => b.pontos - a.pontos);
+  if (!placar.length || (placar[1] && placar[1].pontos === placar[0].pontos)) return null;
+  return placar[0].membro;
 }
 
 /**

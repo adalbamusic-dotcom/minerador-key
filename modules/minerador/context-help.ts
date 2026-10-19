@@ -1,5 +1,224 @@
 import type { ContextHelpAreaDefinition, ContextHelpTopic } from "@/lib/context-help";
 
+/*
+ * TUTORIAL DO MINERADOR no "?" global (dono, 2026-10-18: "escreve toda a
+ * usabilidade no ícone de informações no ícone do global, como se fosse um
+ * tutorial da usabilidade em cada área ou etapa").
+ *
+ * Abre a ajuda: "Como funciona esta área" e um tópico por etapa da linha única
+ * do Minerador (SDD `sdd-linha-unica-do-minerador-2026-10-16.md` §3), na ordem
+ * da linha. Todo botão entre aspas curvas duplas é o rótulo exato da tela,
+ * conferido por `tests/context-help.test.mts`; exemplo e botão de outra área
+ * usam aspas simples. Depois do tutorial ficam os tópicos de consulta
+ * (colunas, perfil, revisão). Mudou um botão ou uma etapa, muda na mesma
+ * entrega o InfoHint, este tutorial e o catálogo `lib/agent/platform-catalog.ts`.
+ */
+const TUTORIAL_TOPICS: readonly ContextHelpTopic[] = [
+  {
+    id: "como-funciona",
+    title: "Como funciona esta área",
+    summary: "O Minerador traz as keywords da marca, lê o sentido de cada uma, mede a procura no Google Ads e entrega as aprovadas ao Arquiteto.",
+    description: "Cada keyword ganha aqui o seu DNA: o que a pessoa procura (intenção), o tema, a etapa da jornada e quantas vezes é buscada. O Minerador qualifica; quem junta as keywords em artigos é o Arquiteto. Ele tem duas telas, nas abas do topo: “Descobrir Keywords” (achar candidatas) e “Processar Keywords” (a planilha onde a linha acontece).",
+    sections: [
+      { heading: "A barra das selecionadas", body: "Na planilha, marque as keywords: a barra do rodapé aparece com os botões da linha, na ordem — “Conferir site”, “Lógica”, “Volume”, “Revisar”, “Resultados (opcional · pago)”, o KGR, o “Vínculo”, o “Grupo”, “Concluir revisão”, “Aprovar e enviar”, o Status e “Excluir”. Sem seleção, a barra não aparece." },
+      { heading: "O que é gravado e quando", body: "A lista da Descoberta e a da Pesquisa por Assunto ficam neste navegador até você enviar ao Processador. Na planilha, cada botão grava ao terminar (a Lógica, a medição, a aprovação). Antes de gravar algo grande, a tela mostra a prévia: o cadastro de Assuntos, o “Aprovar e enviar” e a exclusão." },
+      { heading: "Custo", body: "Lógica, cadastro, aprovação e envio são grátis. Volume e as pesquisas usam o Google Ads (sem custo em dinheiro; gasta a cota do Google Ads da marca). Só “Resultados (opcional · pago)” custa dinheiro (DataForSEO), sempre com confirmação." },
+    ],
+    howToUse: [
+      "Traga keywords em “Descobrir Keywords” (ou cole, ou importe um CSV).",
+      "Se tem um plano de Silo, cadastre-o em “Cadastrar Assuntos”.",
+      "Na planilha, selecione e clique em “Lógica”.",
+      "Clique em “Volume” para medir a procura no Google Ads.",
+      "Se precisar, revise o Vínculo, o posto da principal e o KGR (“Revisar”).",
+      "Clique em “Aprovar e enviar”: as aprovadas vão para o Arquiteto.",
+      "Organize os lotes por cor (a etiqueta ao lado do sino).",
+      "Decida o que o Arquiteto pediu em “Sugestões do Arquiteto”.",
+      "Para tirar keywords do trabalho, use “Excluir” (prévia e confirmação).",
+    ],
+    keywords: ["minerador", "tutorial", "como funciona", "passo a passo", "ordem", "fluxo", "linha", "por onde começar"],
+  },
+  {
+    id: "etapa-trazer-keywords",
+    title: "1 · Trazer keywords",
+    summary: "Encontra keywords reais no Google Ads a partir de uma palavra, de um serviço ou de um Assunto, ou recebe uma lista colada ou um CSV.",
+    description: "Em “Descobrir Keywords”, escolha o modo: “Palavra-chave” (expande um termo), “Como clientes me encontram” (formas de procura de quem compra) ou “Por Assunto” (keywords que sustentam um tema). O Minerador não inventa keyword: as candidatas vêm do Google Ads ou da sua lista.",
+    sections: [
+      { heading: "Quando usar", body: "No começo do trabalho, ou quando um artigo precisa de mais keywords." },
+      { heading: "O que acontece", body: "A busca monta a lista de candidatas, que fica neste navegador. Nada vira keyword da marca até “Enviar selecionadas ao Processador” (ou “Enviar ao Processador”, no modo Por Assunto). No Por Assunto, o envio já grava o volume do Google Ads e roda a Lógica." },
+      { heading: "Custo", body: "Buscar e “Atualizar métricas” usam o Google Ads: sem custo em dinheiro, gasta a cota. “Medir resultados” é pago (DataForSEO), opcional, e pede confirmação. No Por Assunto, o plano aparece antes e nada é consultado sem “Confirmar e pesquisar”." },
+      { heading: "Quem decide", body: "Você escolhe quais candidatas enviar." },
+      { heading: "Depois", body: "As enviadas aparecem na planilha de “Processar Keywords”, prontas para a Lógica (etapa 3)." },
+      { heading: "Situações comuns", body: "Keyword com volume 0 ou sem média do Google Ads não traz visitas: no Por Assunto, “Só com volume” já vem ligado. Texto colado que parece um plano de Silo oferece “Abrir em Cadastrar Assuntos”." },
+    ],
+    howToUse: [
+      "Abra “Descobrir Keywords” e escolha o modo.",
+      "Digite a semente e clique em “Buscar Keywords” (ou “Descobrir formas de procura”); no Por Assunto, clique em “Pesquisar” e depois em “Confirmar e pesquisar”.",
+      "Para uma lista pronta, use “Colar keywords” ou “Importar CSV”.",
+      "Marque as candidatas e clique em “Enviar selecionadas ao Processador”.",
+    ],
+    keywords: ["descobrir", "trazer keywords", "buscar keywords", "por assunto", "colar keywords", "importar csv", "candidatas", "google ads", "enviar ao processador"],
+  },
+  {
+    id: "etapa-cadastrar-assuntos",
+    title: "2 · Cadastrar Assuntos (o plano do Silo)",
+    summary: "Registra o plano de um Silo: os artigos, a keyword de cada um, o papel (Pilar ou Suporte), a ordem e a trava. O Arquiteto segue esse plano.",
+    description: "O Assunto é o tema de um artigo. Ele mora dentro da keyword que carrega o artigo. Use quando você já sabe quais artigos quer (por exemplo, um plano feito com outra IA). Escolha o destino — “Silo novo”, “Silo existente”, “Artigo publicado” ou “Keyword (sem Silo)” — e a cor do grupo. No painel da keyword, o bloco “Assunto deste artigo” edita o título e os detalhes (“Editar Assunto”).",
+    sections: [
+      { heading: "Quando usar", body: "Quando há um plano de Silo pronto, ou para dar um Assunto a um artigo publicado." },
+      { heading: "O que acontece", body: "As linhas são a cópia de trabalho. “Gerar prévia” mostra o que vai ser gravado, sem gravar. Só “Cadastrar” grava o plano e as keywords que ainda não existiam. Num Silo existente, “Acrescentar” mantém o que já está gravado; “Substituir o plano” troca o plano inteiro e, se algo sai, pede o nome da cor." },
+      { heading: "Custo", body: "Grátis. Buscar a sustentação dos artigos depois usa o Google Ads (cota)." },
+      { heading: "Quem decide", body: "Só você declara o plano. A IA pode propor o plano no chat, mas não cadastra sozinha." },
+      { heading: "Depois", body: "No resultado, “Ver na planilha” abre a cor do plano. “Buscar sustentação para os” artigos pesquisa no Google Ads as keywords de apoio de cada um. Depois, a Lógica e o Volume (etapas 3 e 4)." },
+      { heading: "Situações comuns", body: "A trava: “Automática (pelo volume)” — com volume medido, a principal fica fixa; sem volume, o Arquiteto pode propor outra. “Travada” nunca muda; “Livre” deixa o Arquiteto propor quando não há volume (com volume medido, fica fixa mesmo Livre). Keyword do Silo com 0 volume é normal. Volume baixo (1 a 39): no painel da keyword, “Usar como Assunto do artigo” a torna o Assunto e a principal fica. O Assunto do formato anterior sem cor converte em “Converter formato anterior” → “Sem grupo”. Para tirar um artigo do plano, use ‘Tirar do plano’ (etapa 7)." },
+    ],
+    howToUse: [
+      "Clique em “Cadastrar Assuntos”, escolha o destino e a cor.",
+      "Preencha as linhas ou use “Colar plano em texto” e “Preencher as linhas”.",
+      "Clique em “Gerar prévia”, confira e clique em “Cadastrar”.",
+      "Para o reforço: “Buscar sustentação para os” artigos → “Confirmar e pesquisar as” linhas → “Marcar as com volume” → “Enviar ao Processador” → “Confirmar envio ao Processador”.",
+      "Para corrigir o título do Assunto: abra o painel da keyword, clique em “Editar Assunto” → “Revisar mudança” → “Gravar” e, se ela voltou a Em revisão, “Reaprovar (só a Lógica)”.",
+    ],
+    keywords: ["cadastrar assuntos", "plano", "silo", "pilar", "suporte", "trava", "assunto", "colar plano", "substituir o plano", "acrescentar", "sustentação", "editar assunto", "keyword sem silo", "volume baixo", "sem grupo"],
+  },
+  {
+    id: "etapa-logica",
+    title: "3 · Lógica (ler o sentido)",
+    summary: "Lê cada keyword e propõe a intenção, a entidade, o nicho e a etapa do funil. É a primeira leitura do DNA.",
+    description: "A Lógica é uma leitura automática pelas palavras, sem IA e sem consulta externa. Ela pode errar: a SERP, lá no Arquiteto, tem a última palavra sobre a intenção.",
+    sections: [
+      { heading: "Quando usar", body: "Em toda keyword nova. Sem a Lógica, a keyword não pode ser aprovada." },
+      { heading: "O que acontece", body: "Grava a leitura em cada keyword selecionada. Decisões humanas já registradas são preservadas." },
+      { heading: "Custo", body: "Grátis." },
+      { heading: "Quem decide", body: "A leitura é automática; você pode corrigir na Revisão (etapa 5)." },
+      { heading: "Depois", body: "Meça o Volume (etapa 4)." },
+      { heading: "Situações comuns", body: "Intenção ‘Pendente’ depois da Lógica quer dizer ambígua: a SERP decide no Arquiteto." },
+    ],
+    howToUse: [
+      "Em “Processar Keywords”, marque as keywords.",
+      "Clique em “Lógica” na barra do rodapé.",
+    ],
+    keywords: ["lógica", "intenção", "entidade", "nicho", "funil", "leitura", "dna"],
+  },
+  {
+    id: "etapa-volume",
+    title: "4 · Volume (quanto é procurada)",
+    summary: "Mede no Google Ads quantas vezes por mês a keyword é buscada, o CPC e a tendência. Sem volume, a keyword não traz visitas.",
+    description: "Volume é a procura mensal no Google Ads. A keyword que já tem volume medido não precisa medir de novo. ‘Sem média’ (o Google Ads não tem número) é uma resposta válida, não um erro.",
+    sections: [
+      { heading: "Quando usar", body: "Depois da Lógica, em toda keyword comum. A principal de um plano de Silo pode ser aprovada só com a Lógica." },
+      { heading: "O que acontece", body: "Mede em blocos e grava o volume de cada keyword, com a data. “Resultados (opcional · pago)” mede a concorrência no Google (allintitle e KD): não é exigido para aprovar." },
+      { heading: "Custo", body: "Volume: sem custo em dinheiro, gasta a cota do Google Ads da marca (o botão não pede confirmação). Resultados: pago no DataForSEO, cerca de US$ 0,025 a 0,036 por keyword, com confirmação; keyword sem volume fica fora." },
+      { heading: "Quem decide", body: "Você escolhe o que medir." },
+      { heading: "Depois", body: "Revise o que precisar (etapa 5) ou aprove (etapa 6)." },
+      { heading: "Situações comuns", body: "Keyword com 0 de volume continua na planilha, nada é apagado; o Arquiteto não a usa como apoio. A primeira coleta da SERP acontece no Arquiteto, não aqui." },
+    ],
+    howToUse: [
+      "Marque as keywords na planilha.",
+      "Clique em “Volume” e acompanhe a barra de progresso.",
+      "Só se quiser a concorrência: “Resultados (opcional · pago)”, leia o custo e confirme.",
+    ],
+    keywords: ["volume", "google ads", "cpc", "demanda", "sem média", "resultados", "allintitle", "kd", "cota"],
+  },
+  {
+    id: "etapa-revisar",
+    title: "5 · Revisar: Vínculo, posto da principal e KGR",
+    summary: "Diz se a keyword já tem página no site, se a principal fica travada e se o KGR vale para ela. É opcional: só use onde precisa de decisão.",
+    description: "A Revisão não é obrigatória para aprovar. Ela serve para as decisões que só você pode tomar: a página publicada da keyword, o posto de principal (travada ou livre) e a aplicabilidade do KGR.",
+    sections: [
+      { heading: "Quando usar", body: "Quando a keyword é de uma página publicada, quando você quer travar ou soltar a principal, ou quando quer trabalhar o KGR." },
+      { heading: "O que acontece", body: "“Conferir site” procura a página da marca e mostra a prévia antes de gravar. “Vínculo” abre o painel “Vínculo das selecionadas” (“Posto de principal” e “Potencial de página”); nada grava antes de “Aplicar”. O KGR tem o padrão Não aplicável. “Revisar” abre a Revisão Humana da primeira selecionada; “Concluir revisão” registra a revisão." },
+      { heading: "Custo", body: "Grátis." },
+      { heading: "Quem decide", body: "Você." },
+      { heading: "Depois", body: "Aprove e envie (etapa 6)." },
+      { heading: "Situações comuns", body: "Página publicada: URL, slug e canonical ficam protegidos. Na keyword do plano, o posto de principal é a trava do cadastro." },
+    ],
+    howToUse: [
+      "Marque as keywords e clique em “Conferir site” para achar a página publicada.",
+      "Clique em “Vínculo”, escolha o “Posto de principal” e clique em “Aplicar”.",
+      "Se quiser, mude o KGR e clique em “Concluir revisão”.",
+    ],
+    keywords: ["revisar", "revisão humana", "vínculo", "conferir site", "posto de principal", "travada", "livre", "kgr", "concluir revisão", "publicado"],
+  },
+  {
+    id: "etapa-aprovar-e-enviar",
+    title: "6 · Aprovar e enviar ao Arquiteto",
+    summary: "Aprova as keywords prontas e entrega ao Arquiteto numa confirmação só, com a prévia do que vai e do que não pode ir.",
+    description: "Para ir, a keyword precisa da Lógica e do Volume (a principal do plano, só da Lógica). A prévia separa em grupos: as que serão aprovadas e enviadas, as “Já aprovadas, só enviar” e as que “Não podem ir”, cada uma com o motivo.",
+    sections: [
+      { heading: "Quando usar", body: "Quando as keywords estão qualificadas e você quer formar artigos com elas." },
+      { heading: "O que acontece", body: "A prévia não grava. Desmarque o que não deve ir e confirme: a aprovação e o envio são gravados e a planilha é relida. Sem seleção, com uma cor escolhida na etiqueta, o botão do topo vale para a cor inteira. A página publicada (ou o Assunto do formato anterior) com volume 0 ou sem média no Google Ads aparece com ‘vira o Assunto do artigo (volume 0)’: ao confirmar, ela ganha o Assunto (o título é o texto dela, corrigível no painel) antes de ser aprovada; no Arquiteto, a principal fica livre para uma com volume." },
+      { heading: "Custo", body: "Grátis." },
+      { heading: "Quem decide", body: "Você aprova. A IA conectada só aplica depois do seu aceite no chat." },
+      { heading: "Depois", body: "As keywords chegam ao Arquiteto. Com plano de Silo, o Silo do plano chega junto." },
+      { heading: "Situações comuns", body: "Keyword reaprovada depois do envio atualiza o que o Arquiteto tem (pacote novo). O envio sem aprovar continua em “Mais ações” → “Enviar ao Arquiteto”." },
+    ],
+    howToUse: [
+      "Marque as keywords (ou escolha a cor na etiqueta).",
+      "Clique em “Aprovar e enviar”.",
+      "Confira os grupos da prévia, desmarque o que não deve ir e confirme.",
+    ],
+    keywords: ["aprovar e enviar", "aprovar", "enviar ao arquiteto", "prévia", "não podem ir", "já aprovadas", "status"],
+  },
+  {
+    id: "etapa-grupos",
+    title: "7 · Organizar por cor (grupos)",
+    summary: "Separa os lotes de trabalho em cinco cores. Cada cor é um grupo; o plano de um Silo fica numa cor.",
+    description: "A etiqueta ao lado do sino filtra a planilha pela cor: “Todos os grupos”, uma das cores ou “Sem grupo”. Filtrar nunca grava. Para mudar a cor das keywords, use “Grupo” na barra do rodapé.",
+    sections: [
+      { heading: "Quando usar", body: "Para trabalhar um Silo ou um lote de cada vez." },
+      { heading: "O que acontece", body: "“Mover para” uma cor grava só o grupo: status, aprovação e DNA não mudam. Em “Gerenciar a cor”: “Salvar nome”, trocar de cor, “Liberar a cor” (só vazia), “Histórico do grupo” e, com plano, “Ver artigos do plano” → “Tirar do plano” → “Confirmar: tirar do plano”." },
+      { heading: "Custo", body: "Grátis." },
+      { heading: "Quem decide", body: "Você." },
+      { heading: "Depois", body: "A mesma cor aparece no Arquiteto, no Radar, no Redator e em Publicações." },
+      { heading: "Situações comuns", body: "Tirar um artigo do plano nunca apaga nada: o Assunto continua na keyword, sem o plano." },
+    ],
+    howToUse: [
+      "Clique na etiqueta ao lado do sino e escolha a cor.",
+      "Para mover: marque as keywords, abra “Grupo” e escolha “Mover para” a cor (ou “Tirar do grupo”).",
+    ],
+    keywords: ["grupo", "cor", "etiqueta", "lote", "mover para", "tirar do grupo", "gerenciar a cor", "tirar do plano"],
+  },
+  {
+    id: "etapa-sugestoes-do-arquiteto",
+    title: "8 · Sugestões do Arquiteto",
+    summary: "Mostra o que o Arquiteto precisa e só o Minerador pode gravar: keyword que já existe aqui, medição de volume ou Lógica a rodar.",
+    description: "O Arquiteto não grava no Minerador. Quando ele precisa de algo daqui, a sugestão aparece nesta caixa, por cor, com o artigo de destino e o motivo.",
+    sections: [
+      { heading: "Quando usar", body: "Quando o Arquiteto mostra ‘Precisa do Minerador’, ou de vez em quando, para ver o que ficou pendente." },
+      { heading: "O que acontece", body: "“Trazer para o Minerador” mostra a prévia; “Confirmar e trazer” grava (importa, grava a medição já feita, sem consultar o Google Ads de novo, e roda a Lógica). “Marcar para medir” marca as linhas para o botão Volume; “Aprovar e enviar” abre a aprovação de sempre." },
+      { heading: "Custo", body: "Grátis." },
+      { heading: "Quem decide", body: "Você." },
+      { heading: "Depois", body: "Aprove e envie as que chegaram (etapa 6)." },
+    ],
+    howToUse: [
+      "Clique em “Sugestões do Arquiteto”, no topo.",
+      "Marque as sugestões e clique em “Trazer para o Minerador”.",
+      "Confira e clique em “Confirmar e trazer”.",
+    ],
+    keywords: ["sugestões do arquiteto", "precisa do minerador", "trazer para o minerador", "medir", "lógica"],
+  },
+  {
+    id: "etapa-excluir",
+    title: "9 · Excluir keywords",
+    summary: "Tira keywords do trabalho com prévia e confirmação. A não publicada é apagada de vez; a publicada vai para a lixeira de 24 horas.",
+    description: "Selecione e clique em “Excluir”. A prévia diz, antes de tudo, o que é apagado de vez, o que vai para a lixeira, o que fica fora e por quê, e o que acontece com o plano de cada cor. Para apagar a cor inteira, use “Excluir tudo da cor”.",
+    sections: [
+      { heading: "Quando usar", body: "Para limpar keywords que não servem, sobras de importação ou um lote inteiro." },
+      { heading: "O que acontece", body: "A confirmação pede o nome digitado; com keyword do plano ou mais de 10, a confirmação forte (“Digite o nome da cor” e “apaga de vez”). A keyword do plano sai do plano na mesma hora (“Saem do plano do Silo”). A publicada pode ser restaurada em até 24 horas (“Restaurar”)." },
+      { heading: "Custo", body: "Grátis." },
+      { heading: "Quem decide", body: "Só você. A IA nunca exclui." },
+      { heading: "Depois", body: "A planilha é relida e o relatório diz o que saiu e o que ficou." },
+      { heading: "Situações comuns", body: "Regra nova do dono (entrando nesta versão): tudo pode ser apagado, em qualquer estado, sempre com a prévia que avisa, a seleção e a confirmação forte; a publicada continua indo para a lixeira de 24 horas. Até a regra entrar, o que está num artigo do Arquiteto ou num documento do Redator aparece em “Ficam fora”, com o motivo." },
+    ],
+    howToUse: [
+      "Marque as keywords e clique em “Excluir”.",
+      "Leia a prévia: o que sai de vez, a lixeira e o que fica fora.",
+      "Digite o que a confirmação pede e clique em “Excluir definitivamente” (ou “Remover por 24 horas”, com publicadas).",
+    ],
+    keywords: ["excluir", "apagar", "lixeira", "24 horas", "restaurar", "excluir tudo da cor", "apaga de vez", "confirmação"],
+  },
+];
+
 const GENERAL_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "sobre-o-minerador",
@@ -18,22 +237,10 @@ const GENERAL_TOPICS: readonly ContextHelpTopic[] = [
     keywords: ["processar keywords", "descoberta", "listas", "keyworddna", "arquiteto", "marca ativa"],
   },
   {
-    id: "ordem-recomendada",
-    title: "Ordem recomendada para processar uma keyword",
-    summary: "Siga a sequência lógica → Volume → IA → Revisar → Status. Resultados e KGR são opcionais.",
-    description: "Cada etapa acrescenta evidências ao DNA. A lógica propõe uma leitura, os provedores medem fatos, a IA revisa e a pessoa consolida a decisão.",
-    howToUse: [
-      "Execute Lógica para criar a leitura inicial.",
-      "Atualize Volume pelo Google Ads. Resultados (SERP) é opcional e pago: a primeira coleta da SERP acontece no Arquiteto.",
-      "Execute IA e Revisar somente depois de reunir o contexto necessário.",
-    ],
-    keywords: ["fluxo", "etapas", "processar", "volume", "resultados", "kgr", "ia", "revisão", "status"],
-  },
-  {
     id: "processo-revisao-decisao",
     title: "Entenda processo, revisão e decisão",
     summary: "Processar prepara o DNA; revisar resolve pendências; decidir define o estado final.",
-    description: "Uma etapa concluída não significa aprovação. A IA sugere, a revisão humana resolve divergências e o Status final registra a decisão do usuário.",
+    description: "Uma etapa concluída não significa aprovação. A Lógica propõe, a revisão humana resolve o que precisa de decisão e o Status final (ou o “Aprovar e enviar”) registra a decisão do usuário. O Minerador não usa IA desde 2026-09-18.",
     sections: [
       { heading: "Depois da revisão", body: "Confira se as pendências foram resolvidas e se o DNA está confirmado antes de usar a keyword em outra etapa." },
       { heading: "Importante", body: "Vínculo com publicação e Status editorial são informações diferentes: uma keyword pode estar aprovada sem estar publicada." },
@@ -189,7 +396,7 @@ const DISCOVERY_TOPICS: readonly ContextHelpTopic[] = [
     id: "descobrir-medir-resultados",
     title: "Consultar a concorrência orgânica",
     summary: "Medir resultados consulta Resultado e KD disponíveis para as candidatas selecionadas.",
-    description: "A ação é opcional e pode consumir a consulta SEO disponível. Resultado é a quantidade da medição orgânica usada pelo Minerador; internamente essa evidência pode ser identificada como allintitle.",
+    description: "A ação é opcional e paga (DataForSEO); a tela pede confirmação antes. Resultado é a quantidade da medição orgânica usada pelo Minerador; internamente essa evidência pode ser identificada como allintitle.",
     sections: [
       { heading: "Quando usar", body: "Use depois de reduzir a lista por demanda, quando quiser comparar a concorrência de um grupo menor." },
       { heading: "Limite", body: "A presença do valor na Descoberta não marca Resultados como validado no Processador; a keyword será revalidada lá." },
@@ -252,7 +459,7 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
     id: "processar-fluxo",
     title: "Usar a sequência de processos",
     summary: "A barra de processos mostra as etapas validadas no Processador, não apenas dados importados.",
-    description: "Lógica e Volume recebem confirmação após sua execução no Processador. Resultados e KGR são opcionais e não contam para aprovar; IA e Revisão dependem das condições próprias de cada etapa.",
+    description: "Lógica e Volume recebem confirmação após sua execução no Processador. Resultados e KGR são opcionais e não contam para aprovar; a Revisão também é opcional e só pede ação onde existe decisão humana.",
     sections: [
       { heading: "Importante", body: "Uma medição trazida da Descoberta permanece como histórico ou contexto até ser revalidada no Processador." },
       { heading: "Acompanhe", body: "Use a barra de progresso e os avisos para saber o que foi executado e abra a linha para ler o resultado persistido." },
@@ -327,7 +534,7 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
     id: "processar-intencao",
     title: "Intenção",
     summary: "Intenção é a leitura canônica atual, depois das etapas e das decisões humanas registradas.",
-    description: "A intenção lógica é uma proposta determinística. A IA pode conferir ou sugerir, mas somente a revisão humana confirma ou edita o valor consolidado.",
+    description: "A intenção lógica é uma proposta determinística. A revisão humana confirma ou edita o valor consolidado, e no Arquiteto a SERP tem a última palavra sobre a intenção do artigo.",
     keywords: ["intenção", "intenção lógica", "intenção externa", "canônica", "confirmada", "humana"],
   },
   {
@@ -341,7 +548,7 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
     id: "processar-funil",
     title: "Entender TOFU, MOFU e BOFU",
     summary: "O Funil indica em qual etapa da jornada a busca provavelmente se encontra.",
-    description: "O Funil indica em qual etapa da jornada a busca provavelmente se encontra. A classificação é uma leitura de apoio: a lógica propõe, a IA pode revisar e a decisão humana consolida o KeywordDNA. Intenção e Funil são relacionados, mas não são a mesma coisa.",
+    description: "O Funil indica em qual etapa da jornada a busca provavelmente se encontra. A classificação é uma leitura de apoio: a lógica propõe, a decisão humana consolida o KeywordDNA e, no Arquiteto, a SERP confirma. Intenção e Funil são relacionados, mas não são a mesma coisa.",
     sections: [
       { heading: "TOFU — Topo do funil", body: "Busca ampla de descoberta ou aprendizado. A pessoa ainda está entendendo o tema ou explorando possibilidades. Exemplo: unhas em acrilico." },
       { heading: "MOFU — Meio do funil", body: "A pessoa já conhece o tema e começa a considerar, avaliar ou comparar alternativas. Exemplo: gel ou acrilico qual é melhor." },
@@ -414,28 +621,16 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
     keywords: ["resultados", "resultado", "allintitle", "dataforseo", "kd", "overview", "concorrência orgânica"],
   },
   {
-    id: "ia",
-    title: "IA",
-    summary: "Revisa a leitura lógica diante das evidências reunidas.",
-    description: "A IA funciona como uma segunda leitura crítica: identifica inconsistências, propõe correções semânticas e acrescenta informações úteis. Ela não altera os números dos provedores nem aprova a keyword sozinha.",
-    howToUse: [
-      "Execute a leitura lógica e reúna as evidências disponíveis.",
-      "Acione IA e acompanhe as fases do processamento.",
-      "Abra Revisar para decidir o que fazer com as sugestões.",
-    ],
-    keywords: ["ia", "revisão ia", "inteligência artificial", "concordâncias", "divergências", "enriquecimentos"],
-  },
-  {
     id: "revisao-humana",
     title: "Revisar",
-    summary: "Confirma as decisões humanas necessárias para consolidar o KeywordDNA.",
-    description: "A revisão mostra fatos medidos, concordâncias, divergências e enriquecimentos. Concordâncias podem ser resolvidas automaticamente; o usuário atua onde existe decisão real e conclui quando o gate estiver completo.",
+    summary: "Abre a Revisão Humana da keyword: Vínculo, posto de principal, potencial de página e KGR. É opcional e não condiciona a aprovação.",
+    description: "A revisão mostra os fatos medidos e os campos que só um humano decide. Ela não é exigida para aprovar nem para enviar ao Arquiteto. Keywords revisadas pela antiga IA do Minerador (até 2026-09-18) ainda podem mostrar divergências e enriquecimentos daquela leitura.",
     howToUse: [
-      "Execute IA e abra Revisar.",
-      "Resolva divergências e escolha incluir ou ignorar enriquecimentos.",
-      "Se quiser trabalhar KGR, marque Aplicável (o padrão é Não aplicável) e acione Concluir revisão.",
+      "Selecione a keyword e clique em Revisar (abre a da primeira selecionada).",
+      "Ajuste o Vínculo, o Posto de principal e o Potencial de página, se precisar.",
+      "Se quiser trabalhar KGR, marque Aplicável (o padrão é Não aplicável) e clique em Concluir revisão.",
     ],
-    keywords: ["revisar", "revisão humana", "concluir revisão", "divergência", "enriquecimento", "decisão humana"],
+    keywords: ["revisar", "revisão humana", "concluir revisão", "vínculo", "posto de principal", "potencial de página", "decisão humana"],
   },
   {
     id: "estados-processos",
@@ -499,15 +694,15 @@ const PROFILE_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "perfil-revisao-humana",
     title: "Ler a Revisão Humana no Perfil",
-    summary: "Concentra fatos, resumo da IA, KGR, pendências e ações de consolidação.",
-    description: "A revisão separa concordâncias resolvidas, divergências que exigem escolha e enriquecimentos que podem ser incluídos ou ignorados. KGR e sua aplicabilidade aparecem como evidência e decisão própria.",
-    keywords: ["perfil revisão humana", "concordância", "divergência", "enriquecimento", "kgr", "concluir"],
+    summary: "Concentra os fatos medidos, o Vínculo, o Posto de principal, o KGR e as ações de concluir ou revisar novamente.",
+    description: "O Vínculo diz se a keyword tem página publicada e se a principal fica travada. KGR e sua aplicabilidade aparecem como evidência e decisão própria. Divergências e enriquecimentos só aparecem em keywords revisadas pela antiga IA do Minerador (até 2026-09-18).",
+    keywords: ["perfil revisão humana", "vínculo", "posto de principal", "kgr", "concluir", "revisar novamente"],
   },
   {
     id: "perfil-decisao",
     title: "Usar o card Decisão",
     summary: "O card Decisão resume os sinais necessários para escolher o destino da keyword.",
-    description: "Volume, CPC, Resultado, KGR, KD, Intenção, IA, DNA e aplicabilidade KGR aparecem como resumo. Históricos, justificativas e detalhes técnicos continuam nos cards de origem.",
+    description: "Volume, CPC, Resultado, KGR, KD, Intenção, DNA e aplicabilidade KGR aparecem como resumo. Históricos, justificativas e detalhes técnicos continuam nos cards de origem.",
     keywords: ["decisão", "resumo para decisão", "status final", "volume", "cpc", "resultado", "kgr", "kd", "dna"],
   },
   {
@@ -523,27 +718,20 @@ const REVIEW_DECISION_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "revisao-checklist",
     title: "Trabalhar com a revisão em checklist",
-    summary: "A revisão humana pede ação somente onde a IA divergiu ou acrescentou algo novo.",
-    description: "Concordâncias são resolvidas automaticamente. Divergências oferecem Manter lógica, Aceitar IA ou Editar; enriquecimentos oferecem Incluir ou Ignorar.",
+    summary: "A revisão humana pede ação só onde existe decisão real: Vínculo, Posto de principal, Potencial de página e KGR.",
+    description: "Nada na revisão é obrigatório para aprovar. Ao concluir, divergências sem decisão mantêm a Lógica, enriquecimentos não selecionados são ignorados e campos sem evidência permanecem desconhecidos. “Ver detalhes da revisão” abre os detalhes técnicos do KGR.",
     howToUse: [
-      "Leia primeiro os fatos medidos e o resumo da IA.",
-      "Resolva cada divergência real e trate os enriquecimentos relevantes.",
-      "Conclua a revisão quando não houver pendência aberta.",
+      "Leia primeiro os fatos medidos.",
+      "Ajuste o Vínculo e o Posto de principal se a keyword tem página ou deve ficar travada.",
+      "Clique em Concluir revisão quando terminar.",
     ],
-    keywords: ["checklist", "concordância", "divergência", "enriquecimento", "manter lógica", "aceitar ia", "editar"],
-  },
-  {
-    id: "revisao-divergencias",
-    title: "Resolver uma divergência da IA",
-    summary: "Divergência é uma sugestão diferente da leitura lógica que precisa de decisão humana.",
-    description: "Compare o valor lógico, a sugestão da IA e o motivo apresentado. A escolha humana pode manter a lógica, aceitar a sugestão ou editar o campo.",
-    keywords: ["divergência", "manter lógica", "aceitar ia", "editar", "sugestão", "motivo"],
+    keywords: ["checklist", "revisão humana", "vínculo", "posto de principal", "potencial de página", "kgr", "ver detalhes da revisão"],
   },
   {
     id: "revisao-enriquecimentos",
-    title: "Tratar enriquecimentos",
-    summary: "Enriquecimento é uma sugestão nova da IA, não uma contradição do valor lógico.",
-    description: "Leia a sugestão e inclua ou ignore conforme sua utilidade para o DNA. Incluir uma sugestão não significa aceitar toda a análise da IA.",
+    title: "Tratar enriquecimentos (keywords antigas)",
+    summary: "Enriquecimento era uma sugestão nova da antiga IA do Minerador. Só aparece em keywords revisadas até 2026-09-18.",
+    description: "O Minerador não usa mais IA. Nas keywords antigas, leia a sugestão e inclua ou ignore conforme sua utilidade para o DNA; ao concluir, o que não foi selecionado é ignorado.",
     keywords: ["enriquecimento", "incluir", "ignorar", "sugestão semântica", "ia"],
   },
   {
@@ -555,9 +743,9 @@ const REVIEW_DECISION_TOPICS: readonly ContextHelpTopic[] = [
   },
   {
     id: "revisao-concluir",
-    title: "Concluir ou reabrir uma revisão",
-    summary: "Concluir confirma a consolidação; Reabrir permite revisar novamente sem refazer medições.",
-    description: "A conclusão exige IA executada, divergências resolvidas e nenhuma alteração aberta sem salvar; o KGR não bloqueia. Reabrir cria uma cópia de trabalho e mantém os fatos medidos somente leitura.",
+    title: "Concluir ou revisar novamente",
+    summary: "Concluir revisão registra a revisão; Revisar novamente reabre sem refazer medições.",
+    description: "Concluir revisão é opcional e não condiciona aprovação nem envio; o KGR não bloqueia. Revisar novamente reabre a revisão numa cópia de trabalho e mantém os fatos medidos somente leitura; Cancelar desiste.",
     keywords: ["concluir revisão", "reabrir", "revisar novamente", "cancelar", "cópia de trabalho", "pendências"],
   },
   {
@@ -573,6 +761,7 @@ export const MINERADOR_CONTEXT_HELP: ContextHelpAreaDefinition = {
   area: "minerador",
   title: "Minerador",
   topics: [
+    ...TUTORIAL_TOPICS,
     ...GENERAL_TOPICS,
     ...DISCOVERY_TOPICS,
     ...PROCESSOR_TOPICS,

@@ -201,7 +201,7 @@ export function BrandSkillDetailDialog({ skill, definition, onReplace, onRename,
 
       <section className="mt-5 border-t border-divider pt-5">
         <label className="block text-sm font-semibold text-foreground" htmlFor="brand-skill-rename"><span className="flex items-center gap-1.5">Nome<InfoHint description={brandSkillHints.name}/></span>
-          <span className="mt-2 flex flex-wrap gap-2"><input id="brand-skill-rename" className={`${internalField} min-w-0 flex-1`} value={name} onChange={event => setName(event.target.value)}/><button type="button" className={internalButton} onClick={() => onRename(name)} disabled={!name.trim() || name.trim() === skill.name}>Renomear</button></span>
+          <span className="mt-2 flex flex-wrap gap-2"><input id="brand-skill-rename" className={`${internalField} min-w-0 flex-1`} value={name} onChange={event => setName(event.target.value)}/><button type="button" className={internalButton} onClick={() => onRename(name)} disabled={!name.trim() || name.trim() === skill.name}>Renomear</button><InfoHint title="Renomear" description="Para que serve: troca o nome da Skill sem mexer no conteúdo. Como usar: escreva o nome novo e clique em Renomear; é gravada uma nova versão em rascunho, com o mesmo arquivo, e ela vale depois de “Enviar para aprovação” e “Ativar”. Só a versão mais recente pode ser renomeada."/></span>
         </label>
       </section>
 

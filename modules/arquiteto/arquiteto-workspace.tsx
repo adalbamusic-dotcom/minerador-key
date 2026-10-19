@@ -48,7 +48,7 @@ import { createStatusEvent, createVersionEnvelope, toVersionReference } from "@/
 import { loadCanonicalArquitetoArtifacts, persistArquitetoArtifact, persistArquitetoSiloPair } from "@/lib/arquiteto/canonical-persistence";
 import { buildCanonicalArticleWorkspaceItems, mergeCanonicalArticleWorkspaceItems } from "@/lib/arquiteto/canonical-bootstrap";
 import { persistArticleFormationMarker } from "@/lib/arquiteto/canonical-workspace";
-import { anchorRemoteTerritoryForSilo, buildCanonicalWorkflowWorkspaceItems, confirmRemoteSiloCandidate, undoRemoteSiloCandidate, createRemoteSiloCandidate, persistArchitectureMarker, updateRemoteTerritoryContext, consolidateRemoteSiloFromWorkingCopy, createRemoteSiloWorkingCopy, loadCanonicalArquitetoWorkspace, persistArchitectWorkingCopy, updateRemoteSiloWorkingCopy, type CanonicalSiloWorkingCopy, type CanonicalTerritory, type CanonicalWorkspaceSnapshot, type RemoteArticleFormationSerp } from "@/lib/arquiteto/canonical-workspace";
+import { anchorRemoteTerritoryForSilo, buildCanonicalWorkflowWorkspaceItems, confirmRemoteSiloCandidate, createRemoteSiloCandidate, persistArchitectureMarker, updateRemoteTerritoryContext, consolidateRemoteSiloFromWorkingCopy, createRemoteSiloWorkingCopy, loadCanonicalArquitetoWorkspace, persistArchitectWorkingCopy, updateRemoteSiloWorkingCopy, type CanonicalSiloWorkingCopy, type CanonicalTerritory, type CanonicalWorkspaceSnapshot, type RemoteArticleFormationSerp } from "@/lib/arquiteto/canonical-workspace";
 import { absolutePublishedUrl, applySiloIdentityToProposal, classifySiloWorkingCopyFailure, consolidatedTerritoryRefsOf, deriveSupportArticleIds, draftSiloWorkingCopyFromProposal, humanExclusion, humanPillarSelection, proposalFromRemoteWorkingCopy, resolveAuthoritativeSiloWorkingCopies, resolveProposalTerritoryRef, resolveSiloWorkingCopyIdentity, siloWorkingCopyIsReadOnly } from "@/lib/arquiteto/silo-working-copy-bridge";
 import type { SiloWorkingCopyState } from "@/lib/arquiteto/silo-working-copy-record";
 import { markSiloConsolidationIndeterminate, openSiloConsolidationOperation, registerSiloConsolidationAttempt, siloConsolidationFailureDisposition, siloConsolidationOperationForRetry, siloConsolidationRequestBody, siloPageCanonicalRefusal, type SiloConsolidationOperation } from "@/lib/arquiteto/silo-consolidation-operation";
@@ -182,14 +182,17 @@ import { ArchitecturePanel } from "./architecture-panel";
 import { ARCHITECTURE_MARKER_CONTRACT_VERSION, ARCHITECTURE_SCENARIO_LABELS, resolveArchitectureScenarioState, type ArchitectureMarkerPayload } from "@/lib/arquiteto/architecture-marker-record";
 import { buildPublishedSiteArchitecture } from "@/lib/arquiteto/published-site-architecture";
 import { readinessWithPlannedMembers, resolveTerritoryConfirmationReadiness, siloIsHumanDecided } from "@/lib/arquiteto/territory";
-import { resolveTerritoryUndoOutcome, territoryHasPublishedAddress, territoryUndoLabel, territoryUndoRefusals } from "@/lib/arquiteto/territory-undo";
+import { territoryUndoLabel, territoryUndoRefusals, territoryUndoWholeSiloReasons, territoryUndoWholeSiloSentence } from "@/lib/arquiteto/territory-undo";
+import { SiloUndoDialog, type SiloUndoReading } from "./silo-undo-dialog";
 import { TerritorialReviewPanel } from "./territorial-review-panel";
 import { PublishedSerpPanel } from "./published-serp-panel";
+import { LinksSiloPicker } from "./links-silo-picker";
 import { SiloPrimaryProposalPanel } from "./silo-primary-proposal-panel";
 import {
   attachSubjectToArticleDna,
   attachSubjectToSiloDna,
   countSubjectAnchors,
+  keywordIdsInArticleDnas,
   readArchitectSubjectStanding,
   detachSubjectFromArticleDna,
   detachSubjectFromSiloDna,
@@ -236,6 +239,7 @@ import {
   SERP_SUBJECT_SESSION_PREFIX,
   serpSubjectEvidencePairs,
   summarizeSerpSubjectCards,
+  serpSubjectNationalFallbackStatus,
   type ReinforcementSearchRecordLike,
   type SerpSubjectBatchChoice,
   type SerpSubjectCardView,
@@ -245,6 +249,7 @@ import {
 import { buildSerpSubjectIndex } from "@/lib/arquiteto/serp-subject-overlap";
 import { diagnoseSerpSubjectAnchors, reinforcementSearchHref, serpGapsFromMissingLenses, type PublishedAnchorInfo, type ReinforcementSearchOutcome, type SubjectAnchorInfo } from "@/lib/arquiteto/serp-subject-diagnosis";
 import { decidePublishedPrimarySwap, publishedPrimaryPostOf, type PublishedPrimaryPost } from "@/lib/arquiteto/published-primary-swap";
+import { publishedPageSubjectFromRow } from "@/lib/arquiteto/article-improvement";
 import { createIndexedDbSubjectSearchStorage, readSubjectSearchLocalRecord, subjectSearchLocalScope } from "@/modules/minerador/discovery/subject-search-local-store";
 import { buildBrandRef } from "@/lib/tenant-routing";
 import {
@@ -361,7 +366,7 @@ import { WorkflowStatusBadge } from "@/components/editorial/workflow-status";
 import { MineradorImportDialog } from "./minerador-import-dialog";
 import { mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
 import { initialArquitetoImportColor, MINERADOR_PACKAGE_UPDATES_DETAIL, mineradorPackageUpdatesOf, mineradorPackageUpdatesSentence } from "@/lib/arquiteto/minerador-import";
-import { declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, planGroupTerritory, planSiloCreationRefusal, planSiloHeadKeywordIds, type DeclaredPlanGroupView, type RecreatePlanSiloLine } from "@/lib/arquiteto/declared-plan-silo";
+import { declaredPlanSiloGroupFor, declaredPlanViewOfTerritory, planGroupTerritory, planSiloCreationRefusal, planSiloHeadKeywordIds, resolveLinksSilo, type DeclaredPlanGroupView, type RecreatePlanSiloLine } from "@/lib/arquiteto/declared-plan-silo";
 import { architectureConfirmBlocker, classifyProposalAssignment, proposalAssignmentStatusLabel, type ProposalAssignmentState } from "@/lib/arquiteto/proposal-confirmability";
 import { ArticleSubjectLine, articleSubjectPhraseOf } from "@/components/editorial/article-subject-line";
 import { DangerApprovalDialog } from "@/components/editorial/danger-approval-dialog";
@@ -1110,7 +1115,8 @@ export default function ArquitetoPage() {
   // sendo só a PROPOSTA inicial: assim que existe linha remota para o
   // território, é esta lista que manda.
   const [remoteSiloWorkingCopies, setRemoteSiloWorkingCopies] = useState<CanonicalSiloWorkingCopy[]>([]);
-  const [siloWorkingCopyConflict, setSiloWorkingCopyConflict] = useState<string | null>(null);
+  /* 2026-10-18 · o conflito já ia para o sino; a faixa repetida na aba Silos saiu (regra do dono). */
+  const [, setSiloWorkingCopyConflict] = useState<string | null>(null);
   // Territórios remotos: o `lockVersion` daqui é o expectedLock que a
   // consolidação exige, e o lifecycleStatus diz o que já virou histórico.
   const [remoteTerritories, setRemoteTerritories] = useState<CanonicalTerritory[]>([]);
@@ -1248,7 +1254,8 @@ export default function ArquitetoPage() {
    * saída excepcional.
    */
   const SILO_ADVANCED_CONTROLS = false;
-  const [linksError, setLinksError] = useState<string | null>(null);
+  /* 2026-10-18 · a falha da aba Links vai para o sino (regra do dono); o estado continua sendo zerado nos mesmos pontos. */
+  const [, setLinksError] = useState<string | null>(null);
   const [linksLoading, setLinksLoading] = useState(false);
   /**
    * §8 — O QUE A DERIVAÇÃO FEZ, EM NÚMEROS QUE NÃO OMITEM ZERO.
@@ -1311,6 +1318,20 @@ export default function ArquitetoPage() {
   const [pendingReadyRetry, setPendingReadyRetry] = useState(false);
   const [loadingKeywords,   setLoadingKeywords]   = useState(false);
   const architectTasks = useMemo(() => backgroundTasks.filter(task => ["logical_grouping", "keyword_review", "article_dna", "silo_dna", "silo_page"].includes(task.type)), [backgroundTasks]);
+  /*
+   * 2026-10-18 · TODOS OS AVISOS NO SINO (regra do dono). O cartão das tarefas
+   * mostra só o ANDAMENTO; a tarefa que falhou não era consumida e o motivo
+   * ficava só no cartão. Agora a falha vai para o sino, uma vez por tarefa (a
+   * concluída já vai pelo consumo de sempre, com o resultado).
+   */
+  const tarefasComFalhaAvisadas = useRef(new Set<string>());
+  useEffect(() => {
+    for (const task of architectTasks) {
+      if (task.status !== "failed" || tarefasComFalhaAvisadas.current.has(task.id)) continue;
+      tarefasComFalhaAvisadas.current.add(task.id);
+      showNotification("error", `${task.label}: ${task.error || task.message || "a tarefa parou sem motivo informado."}`);
+    }
+  }, [architectTasks, showNotification]);
   const runningArchitectTask = (type: "logical_grouping" | "keyword_review" | "article_dna" | "silo_dna" | "silo_page") =>
     architectTasks.find(task => task.type === type && (task.status === "queued" || task.status === "running"));
   const activeLogicalTask = runningArchitectTask("logical_grouping");
@@ -7338,6 +7359,8 @@ export default function ArquitetoPage() {
     baseRows: planBaseRows,
     onApplied: () => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); },
     onConcluded: groupIds => closePlanGroupSilosRef.current(groupIds),
+    /* 2026-10-18 · todos os avisos no sino (regra do dono): o resumo e a falha das linhas do plano saem pelo aviso de sempre. */
+    onNotify: showNotification,
   });
   /* 2026-10-14 · "Melhorar publicados…" é um botão da barra: o painel abre só no clique (fechado = escondido, sem perder a execução). */
   const [improvementPanel, setImprovementPanel] = useState<"closed" | "open" | "hidden">("closed");
@@ -7420,7 +7443,9 @@ export default function ArquitetoPage() {
     suggestedTrunkKeywordIds: new Set(articleFormationUniverses.flatMap(universe => universe.suggestedTrunkSubjectKeywordIds || [])),
     // 2026-10-13 · a linha-título convertida fica aqui com o selo "convertida → <keyword>".
     convertedTitleOf: keywordId => subjectStandings.get(keywordId)?.convertedTo ?? null,
-  }), [ungroupedArticleKeywords, subjectAnchorCarriers, subjectStandings, articleFormationUniverses]);
+    // 2026-10-18 · a keyword referenciada por ArticleDNA vigente está no artigo (as 32 novas do amarelo): nunca "sem artigo".
+    inArticleKeywordIds: keywordIdsInArticleDnas(Object.values(acceptedArticleDnas).filter(version => version.payload.brandId === selectedBrandId).map(version => version.payload)),
+  }), [ungroupedArticleKeywords, subjectAnchorCarriers, subjectStandings, articleFormationUniverses, acceptedArticleDnas, selectedBrandId]);
   const ungroupedSubjectLabels = useMemo(
     () => new Map(ungroupedSubjectView.ungrouped.map(item => [item.keywordId, item.label])),
     [ungroupedSubjectView],
@@ -8360,8 +8385,14 @@ export default function ArquitetoPage() {
    */
   const linksSiloOfArticle = (article: (typeof articlesList)[number]) => {
     const idDaLinha = articleEntityIdFor(article);
+    /*
+     * 2026-10-18 (amarelo da WifiConecta) · a linha do artigo do plano tem o id da cópia de trabalho ("workflow:…"), não
+     * o do ArticleDNA: o Silo dela não era achado e, com os 8 marcados, "Processar links" respondia "Selecione o Silo do
+     * grafo". O ArticleDNA da linha vem pela MESMA chave que a fase usa (`articleDnaEntryFor`, composição do cenário).
+     */
+    const daComposicao = articleDnaEntryFor({ articleId: idDaLinha ?? null, candidateRef: article.candidateRef ?? null }).version?.payload.articleId ?? null;
     // Publicado com a principal trocada: o artigo é achado pela principal nova.
-    const entityId = idDaLinha && !acceptedArticleDnas[idDaLinha] ? articleIdByPrincipalKeyword.get(idDaLinha) ?? idDaLinha : idDaLinha;
+    const entityId = daComposicao ?? (idDaLinha && !acceptedArticleDnas[idDaLinha] ? articleIdByPrincipalKeyword.get(idDaLinha) ?? idDaLinha : idDaLinha);
     if (entityId) {
       const contexto = linkSiloContexts.find(context => context.siloDna.payload.articleReferences.some(reference => reference.articleId === entityId));
       if (contexto) return contexto.siloId;
@@ -8370,9 +8401,22 @@ export default function ArquitetoPage() {
     }
     return article.siloId ? String(article.siloId) : null;
   };
-  const resolvedLinksSiloId = linksSelectedSiloId && linkSiloContexts.some(context => context.siloId === linksSelectedSiloId)
-    ? linksSelectedSiloId
-    : linkSiloContexts[0]?.siloId || null;
+  /*
+   * 2026-10-18 · o Silo do grafo sem o mapa (saiu em 16/10): com a etiqueta de cor, o Silo da cor com o par
+   * SiloDNA + SiloPage é escolhido sozinho; sem cor, a escolha do seletor "Silo do grafo" (só Silos com o par).
+   */
+  const linksColorSiloRefs = useMemo(() => {
+    const filtro = arquitetoGroups.filter;
+    const ids = filtro.kind === "groups" ? [...filtro.groupIds] : filtro.kind === "group" ? [filtro.groupId] : [];
+    if (!ids.length) return null;
+    return ids.map(id => arquitetoGroups.groupById.get(id)?.siloId ?? null).filter((ref): ref is string => Boolean(ref));
+  }, [arquitetoGroups.filter, arquitetoGroups.groupById]);
+  const linksSiloChoice = resolveLinksSilo({
+    contexts: linkSiloContexts.map(context => ({ siloId: context.siloId, territoryRef: context.siloDna.payload.territoryRef ?? null })),
+    selected: linksSelectedSiloId,
+    colorSiloRefs: linksColorSiloRefs,
+  });
+  const resolvedLinksSiloId = linksSiloChoice.siloId;
   const linkNodeDisplay = useMemo(() => Object.fromEntries((linksWorkingCopy || linksApprovedGraph)?.nodes.map(node => {
     const article = node.articleDnaVersionRef ? Object.values(acceptedArticleDnas).find(version => version.versionId === node.articleDnaVersionRef?.versionId)?.payload : null;
     const siloPage = node.siloPageVersionRef ? Object.values(acceptedSiloPages).find(version => version.versionId === node.siloPageVersionRef?.versionId)?.payload : null;
@@ -8413,7 +8457,15 @@ export default function ArquitetoPage() {
         .sort((left, right) => right.versionNumber - left.versionNumber)[0] || null;
       const graphIdentity = siloGraphs[0];
       const graphId = graphIdentity?.graphId || stableLinksGraphId;
-      const workingCopy = await loadInternalLinkGraphWorkingCopy(selectedBrandId, graphId);
+      const copiaRemota = await loadInternalLinkGraphWorkingCopy(selectedBrandId, graphId);
+      /*
+       * A aprovação não apaga a cópia (ver `abrirCopiaVigente`). Cópia de
+       * linhagem anterior ao aprovado vigente já foi consumida por ele: não é
+       * proposta aberta. Mostrá-la como "nada aprovado ainda" liberava o
+       * Confirmar para uma v+1 sem mudança real (2026-10-17, teste do amarelo).
+       * O Processar continua adotando e rebaseando essa mesma cópia.
+       */
+      const workingCopy = copiaRemota && approved && copiaRemota.baseGraphVersionId !== approved.graphVersionId ? null : copiaRemota;
       setLinksLoadedGraphId(graphId);
       setLinksApprovedGraph(approved);
       setLinksWorkingCopy(workingCopy);
@@ -8424,11 +8476,13 @@ export default function ArquitetoPage() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Não foi possível carregar o InternalLinkGraph canônico.";
       setLinksError(message);
+      /* 2026-10-18 · todos os avisos no sino (regra do dono): a falha de leitura também vai para o sino (a faixa da aba Links saiu). */
+      showNotification("error", message);
       setLinksSaveState("error");
     } finally {
       setLinksLoading(false);
     }
-  }, [linksSelectedContext, selectedBrandId, stableLinksGraphId]);
+  }, [linksSelectedContext, selectedBrandId, stableLinksGraphId, showNotification]);
 
   useEffect(() => {
     if (workspaceMode !== "links") return;
@@ -8589,7 +8643,9 @@ export default function ArquitetoPage() {
       return resultado;
     } catch (error) {
       setLinksSaveState("error");
-      setLinksError(error instanceof Error ? error.message : "A alteração não corresponde ao contrato do grafo.");
+      const mensagem = error instanceof Error ? error.message : "A alteração não corresponde ao contrato do grafo.";
+      setLinksError(mensagem);
+      showNotification("error", mensagem);
       return null;
     }
   };
@@ -8709,7 +8765,8 @@ export default function ArquitetoPage() {
   const processarLinks = async () => {
     const marcados = articlesList.filter(article => selectedArticleIds.has(article.id));
     const silosMarcados = [...new Set(marcados.map(article => linksSiloOfArticle(article) || "").filter(Boolean))];
-    const alvos = marcados.length
+    // 2026-10-18 · marcados sem Silo achado não travam: vale o Silo do grafo da tela (o da cor, ou o do seletor).
+    const alvos = marcados.length && silosMarcados.length
       ? linkSiloContexts.filter(context => silosMarcados.includes(context.siloId))
       : linksSelectedContext ? [linksSelectedContext] : [];
     const semGrafo = silosMarcados.filter(siloId => !linkSiloContexts.some(context => context.siloId === siloId)).length;
@@ -9137,7 +9194,9 @@ export default function ArquitetoPage() {
       await updateLinksWorkingCopy({ edges });
     } catch (error) {
       setLinksSaveState("error");
-      setLinksError(error instanceof Error ? error.message : "A relação não corresponde ao contrato canônico.");
+      const mensagem = error instanceof Error ? error.message : "A relação não corresponde ao contrato canônico.";
+      setLinksError(mensagem);
+      showNotification("error", mensagem);
     }
   };
 
@@ -9501,11 +9560,14 @@ export default function ArquitetoPage() {
   const abrirPreviaDosLinks = (mode: "process" | "complete") => {
     const marcados = mode === "complete" ? [] : articlesList.filter(article => selectedArticleIds.has(article.id));
     const silosMarcados = [...new Set(marcados.map(article => linksSiloOfArticle(article) || "").filter(Boolean))];
-    const alvos = marcados.length
+    // 2026-10-18 · marcados sem Silo achado não travam: vale o Silo do grafo da tela (o da cor, ou o do seletor).
+    const alvos = marcados.length && silosMarcados.length
       ? linkSiloContexts.filter(context => silosMarcados.includes(context.siloId))
       : linksSelectedContext ? [linksSelectedContext] : [];
     if (!alvos.length) {
-      showNotification("error", "Selecione o Silo do grafo antes de processar os links.");
+      showNotification("error", linksSiloChoice.colorWaiting
+        ? "O Silo desta cor ainda não tem SiloDNA e SiloPage: ele fecha no “Concluir formação” da aba Artigos."
+        : "Selecione o Silo do grafo antes de processar os links.");
       return;
     }
     const silos = alvos.map(contexto => {
@@ -9732,13 +9794,14 @@ export default function ArquitetoPage() {
       confirmedTerritoryRefs,
       reservedHeadKeywordIds: reservedSiloHeadIds,
       // Quem já está numa linha de artigo não aparece de novo como pendente.
-      keywordIdsInArticles: new Set(articlesList.flatMap(article => [
+      // 2026-10-18 · nem quem está num ArticleDNA vigente (a keyword nova incorporada pela confirmação, sem linha na mesa).
+      keywordIdsInArticles: new Set([...articlesList.flatMap(article => [
         ...(article.mainKeywordObj ? [String(article.mainKeywordObj.id)] : []),
         ...article.supportKeywords.map(keyword => String(keyword.id)),
-      ])),
+      ]), ...keywordIdsInArticleDnas(Object.values(acceptedArticleDnas).filter(version => version.payload.brandId === selectedBrandId).map(version => version.payload))]),
       territoryNames,
     });
-  }, [masterList, confirmedTerritoryRefs, reservedSiloHeadIds, territorialSurface, articlesList]);
+  }, [masterList, confirmedTerritoryRefs, reservedSiloHeadIds, territorialSurface, articlesList, acceptedArticleDnas, selectedBrandId]);
 
   /**
    * A mesma busca da área alcança a keyword bloqueada. Depender de artigo
@@ -10370,65 +10433,76 @@ export default function ArquitetoPage() {
   };
 
   /*
-   * DESFAZER SILO SUGERIDO.
+   * DESFAZER SILO.
    *
    * Só Silo sem endereço publicado aparece aqui. A leitura abaixo usa o que a
    * tela já tem (membros, ArticleDNA e SiloDNA/SiloPage aprovados) para dizer
    * ANTES do clique se ele pode sair; o servidor confere tudo de novo, no
    * banco, e é quem decide. Nada é apagado: o Silo vira "rejeitado" e as
    * keywords voltam para "sem Silo", na mesa.
+   *
+   * 2026-10-18 · o Silo inteiro (consolidado, do plano, com par ou artigos
+   * aprovados) também aparece: o MESMO botão, a prévia do servidor e a
+   * confirmação forte (`modules/arquiteto/silo-undo-dialog.tsx`). O lote só
+   * leva os sugeridos.
    */
   const [siloUndoPrompt, setSiloUndoPrompt] = useState<string[] | null>(null);
   const [siloUndoBusy, setSiloUndoBusy] = useState(false);
-  /** Andamento do lote: o diálogo fica aberto e diz "Desfazendo 1 de 3…". */
-  const [siloUndoProgress, setSiloUndoProgress] = useState<{ done: number; total: number } | null>(null);
-  const siloUndoCancelRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { if (siloUndoPrompt) siloUndoCancelRef.current?.focus(); }, [siloUndoPrompt]);
   const siloUndoReadings = useMemo(() => {
-    const leituras = new Map<string, { label: string; keywordCount: number; refusals: string[]; declaredPlan: { groupLabel: string; siloName: string } | null }>();
+    const leituras = new Map<string, SiloUndoReading>();
     const aprovados = Object.values(acceptedArticleDnas)
       .filter(version => version.payload.brandId === selectedBrandId && effectiveVersionStatus(version.versionId, versionEvents) === "approved")
       .map(version => ({
         articleId: version.payload.articleId,
         label: version.payload.suggestedSlug || null,
         territoryRef: version.payload.territoryRef ?? null,
+        siloId: version.payload.siloId ?? null,
         keywordIds: [version.payload.principalKeywordId, ...version.payload.secondaryKeywordIds, ...version.payload.narrativeReinforcementIds],
       }));
     const artefatos = [
-      ...Object.values(acceptedSiloDnas).map(version => ({ kind: "silo_dna" as const, territoryRef: version.payload.territoryRef ?? null, status: effectiveVersionStatus(version.versionId, versionEvents) || "", published: false })),
-      ...Object.values(acceptedSiloPages).map(version => ({ kind: "silo_page" as const, territoryRef: version.payload.territoryRef ?? null, status: effectiveVersionStatus(version.versionId, versionEvents) || "", published: version.payload.publicationStatus === "published" })),
+      ...Object.values(acceptedSiloDnas).map(version => ({ kind: "silo_dna" as const, territoryRef: version.payload.territoryRef ?? null, siloId: version.payload.siloId, status: effectiveVersionStatus(version.versionId, versionEvents) || "", published: false, pillarArticleId: version.payload.pillarArticleId ?? null, articleIds: version.payload.supportArticleIds })),
+      ...Object.values(acceptedSiloPages).map(version => ({ kind: "silo_page" as const, territoryRef: version.payload.territoryRef ?? null, siloId: version.payload.siloId, status: effectiveVersionStatus(version.versionId, versionEvents) || "", published: version.payload.publicationStatus === "published" })),
     ];
+    // 2026-10-18 · o duplicado do Silo do plano (o grupo está ligado a OUTRO território vivo) não é o Silo do plano: o "Desfazer Silo" de sempre o desfaz quando vazio.
+    const vivos = new Set(remoteTerritories.filter(remote => remote.territory.lifecycleStatus !== "rejected" && remote.territory.lifecycleStatus !== "archived").map(remote => String(remote.territoryRef)));
     for (const remote of remoteTerritories) {
       const territory = remote.territory;
-      if (territory.lifecycleStatus !== "candidate" && territory.lifecycleStatus !== "confirmed") continue;
-      if (territoryHasPublishedAddress(territory)) continue;
+      // 2026-10-18 · o consolidado também (o Silo inteiro sai pelo mesmo botão, com a prévia e a confirmação forte).
+      if (territory.lifecycleStatus !== "candidate" && territory.lifecycleStatus !== "confirmed" && territory.lifecycleStatus !== "consolidated") continue;
+      // 2026-10-18 (o dono: "tem que poder apagar … não interessa qual seja o estado") · SUBSTITUÍDO "Silo publicado não aparece": ele sai inteiro, com a prévia (o site não muda).
       const membros = masterList
         .filter(item => item.territoryRef === remote.territoryRef)
         .map(item => ({ keywordId: String(item.id), label: String(item.keyword || ""), isPublished: Boolean(item.isPublished) }));
-      // 2026-10-14 (WifiConecta, azul): o Silo do plano declarado não é sugestão; não entra no "Desfazer" (o servidor confere de novo).
-      const doPlano = declaredPlanSiloGroupFor(declaredPlanViewOfTerritory(territory), planosLidos, normalizeManualSiloPageSlug);
+      // 2026-10-14 (WifiConecta, azul) → 2026-10-18: o Silo do plano declarado não é sugestão: sai inteiro, um por vez, nunca pelo lote (o servidor confere de novo).
+      const doPlano = declaredPlanSiloGroupFor(declaredPlanViewOfTerritory(territory), planosLidos, normalizeManualSiloPageSlug, vivos);
+      const entrada = { territory, members: membros, approvedArticles: aprovados, siloArtifacts: artefatos, declaredPlan: doPlano };
+      const inteiro = territoryUndoWholeSiloReasons(entrada);
       leituras.set(remote.territoryRef, {
         label: territoryUndoLabel(territory),
         keywordCount: membros.length,
         refusals: territoryUndoRefusals({ territory, members: membros, approvedArticles: aprovados, siloArtifacts: artefatos, declaredPlan: doPlano }).map(refusal => refusal.message),
         declaredPlan: doPlano,
+        wholeSilo: inteiro.length ? territoryUndoWholeSiloSentence(inteiro) : null,
       });
     }
     return leituras;
   }, [acceptedArticleDnas, acceptedSiloDnas, acceptedSiloPages, masterList, remoteTerritories, selectedBrandId, versionEvents, planosLidos]);
   const siloUndoEligibleRefs = useMemo(() => [...siloUndoReadings.entries()]
-    .filter(([, leitura]) => leitura.refusals.length === 0)
+    .filter(([, leitura]) => leitura.refusals.length === 0 && leitura.wholeSilo === null)
     .map(([ref]) => ref), [siloUndoReadings]);
   /*
-   * O lote "Desfazer os Silos sugeridos" diz que o Silo do plano não entra nele, e por quê.
+   * O lote "Desfazer os Silos sugeridos" diz quem não entra nele, e por quê.
    * 2026-10-16 (noite) · teste do dono (WifiConecta, amarelo): o cabeçalho dizia "1 fica de fora:
    * Silo do plano Amarelo…" logo acima do mesmo Silo, Confirmado e visível. A frase falava do
    * LOTE de desfazer, mas aparecia sem o botão do lote e dizia "fica de fora" como se o Silo
    * tivesse saído. Agora ela só acompanha o botão (ver `SectionRow`) e diz só o que é verdade.
+   * 2026-10-18 · SUBSTITUÍDO "o Silo do plano segue o cadastro do Minerador (Tirar do plano ou
+   * Substituir o plano)": o Silo inteiro (do plano, consolidado, com par ou artigos) sai pelo
+   * "Desfazer Silo" dele, um por vez, com a prévia e a confirmação forte.
    */
-  const siloUndoPlanExcluded = useMemo(() => [...siloUndoReadings.values()].filter(leitura => leitura.declaredPlan), [siloUndoReadings]);
+  const siloUndoPlanExcluded = useMemo(() => [...siloUndoReadings.values()].filter(leitura => leitura.wholeSilo !== null), [siloUndoReadings]);
   const siloUndoExcludedNote = siloUndoPlanExcluded.length
-    ? `Não entra${siloUndoPlanExcluded.length === 1 ? "" : "m"} no Desfazer: ${siloUndoPlanExcluded.map(leitura => `Silo do plano ${leitura.declaredPlan!.groupLabel} (“${leitura.label}”)`).join(", ")} — o Silo do plano segue o cadastro do Minerador (“Tirar do plano” ou “Substituir o plano”).`
+    ? `Não entra${siloUndoPlanExcluded.length === 1 ? "" : "m"} no lote: ${siloUndoPlanExcluded.map(leitura => leitura.declaredPlan ? `Silo do plano ${leitura.declaredPlan.groupLabel} (“${leitura.label}”)` : `“${leitura.label}”`).join(", ")} — o Silo inteiro sai pelo “Desfazer Silo” dele, um por vez, com a prévia e a confirmação forte.`
     : null;
   const [siloUndoBulk, setSiloUndoBulk] = useState(false);
   /*
@@ -10480,67 +10554,13 @@ export default function ArquitetoPage() {
   };
 
   /**
-   * Um Silo por requisição, cada um com o seu lock; UMA releitura no fim diz
-   * o desfecho de cada. Sucesso só é anunciado para o que a releitura
-   * confirmou: território `rejected` e nenhuma keyword apontando para ele.
+   * O desfecho do "Desfazer Silo" (`runSiloUndo`, no diálogo): a mesa relida
+   * vira a de agora e a frase diz só o que a releitura confirmou.
    */
-  const undoSuggestedSilos = async (refs: readonly string[]) => {
-    if (!selectedBrandId || !refs.length || siloUndoBusy) return;
-    setSiloUndoBusy(true);
-    const recusas: string[] = [];
-    const esperados = new Map<string, string[]>();
-    try {
-      for (const [indice, ref] of refs.entries()) {
-        setSiloUndoProgress({ done: indice + 1, total: refs.length });
-        const remote = remoteTerritories.find(item => item.territoryRef === ref);
-        const nome = remote ? territoryUndoLabel(remote.territory) : "Silo";
-        if (!remote) { recusas.push(`${nome}: não está no snapshot remoto; recarregue.`); continue; }
-        esperados.set(ref, masterList.filter(item => item.territoryRef === ref).map(item => String(item.id)));
-        try {
-          await undoRemoteSiloCandidate({ brandId: selectedBrandId, territoryRef: ref, expectedLock: remote.lockVersion });
-        } catch (error) {
-          const bruto = error instanceof Error ? error.message : "";
-          recusas.push(bruto.replace(/territory:[0-9a-f-]{36}/gi, nome).trim() || `${nome} não pôde ser desfeito.`);
-        }
-      }
-      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
-      const membrosRelidos = new Map<string, string[]>();
-      for (const entry of buildCanonicalWorkflowWorkspaceItems(canonical.workflowItems, canonical.keywords, selectedBrandId)) {
-        const ref = (entry as Record<string, unknown>).territoryRef;
-        if (typeof ref === "string" && esperados.has(ref)) membrosRelidos.set(ref, [...(membrosRelidos.get(ref) || []), String((entry as Record<string, unknown>).id)]);
-      }
-      const desfeitos: string[] = [];
-      const pendentes: string[] = [];
-      for (const [ref, esperadas] of esperados) {
-        const relido = canonical.territories.find(item => item.territoryRef === ref);
-        const nome = relido ? territoryUndoLabel(relido.territory) : "Silo";
-        const veredito = resolveTerritoryUndoOutcome({
-          territoryRef: ref,
-          readbackLifecycle: relido?.territory.lifecycleStatus ?? null,
-          expectedMemberIds: esperadas,
-          readbackMemberIds: membrosRelidos.get(ref) || [],
-        });
-        if (veredito.outcome === "applied") desfeitos.push(`${nome} (${esperadas.length} keyword(s) em sem Silo)`);
-        else if (veredito.outcome === "partial") pendentes.push(veredito.remaining.length
-          ? `${nome}: ficou pela metade (${veredito.remaining.length} keyword(s) ainda no Silo). Tente de novo.`
-          : `${nome}: as keywords já saíram do Silo; falta marcar o Silo como desfeito. Tente de novo.`);
-      }
-      setRemoteTerritories(canonical.territories);
-      const partes = [
-        desfeitos.length ? `Silo(s) desfeito(s) e conferido(s) na releitura: ${desfeitos.join(" · ")}. Nada foi apagado.` : "",
-        ...pendentes,
-        ...recusas,
-      ].filter(Boolean);
-      showNotification(recusas.length || pendentes.length ? (desfeitos.length ? "warning" : "error") : "success",
-        partes.join(" ") || "Nenhum Silo foi desfeito.");
-    } catch (error) {
-      showNotification("error", `Não deu para conferir o resultado: ${error instanceof Error ? error.message : "falha na releitura"}. Recarregue antes de tentar de novo.`);
-    } finally {
-      setSiloUndoBusy(false);
-      setSiloUndoProgress(null);
-      setSiloUndoPrompt(null);
-      setCanonicalWorkspaceReload(current => current + 1);
-    }
+  const concludeSiloUndo = (resultado: { tone: "success" | "warning" | "error"; message: string; snapshot: CanonicalWorkspaceSnapshot | null }) => {
+    if (resultado.snapshot) setRemoteTerritories(resultado.snapshot.territories);
+    showNotification(resultado.tone, resultado.message);
+    setCanonicalWorkspaceReload(current => current + 1);
   };
 
   /**
@@ -12421,11 +12441,14 @@ export default function ArquitetoPage() {
       const url = vinculo.url ?? null;
       let slug: string | null = null;
       try { slug = url ? new URL(url).pathname.replace(/\/+$/, "") || "/" : null; } catch { slug = null; }
+      // 2026-10-19 · o Assunto declarado na página: a mesa D2.1 usa a mesma régua do refazedor (o Assunto é a âncora).
+      const pageSubject = publishedPageSubjectFromRow({ ...keyword, analise_semantica: semantica }, slug);
       mapa.set(String(keyword.id), {
         post: postoDeclarado ? publishedPrimaryPostOf(vinculo.post) : "unknown",
         url,
         canonical: vinculo.canonicalUrl ?? null,
         slug,
+        ...(pageSubject ? { pageSubject } : {}),
       });
     }
     return mapa;
@@ -12597,6 +12620,8 @@ export default function ArquitetoPage() {
     requested: serpSubjectReadPlan.total,
     withoutSerp: serpSubjectRead.data?.withoutSerp.length ?? 0,
     targetingReadFailed: Boolean(serpSubjectRead.data?.targetingReadFailed),
+    /* 2026-10-18 · marca com cidade: a SERP antiga nacional aparece marcada na linha da leitura (SDD localidade da SERP). */
+    ...serpSubjectNationalFallbackStatus(serpSubjectRead.data),
   }), [serpSubjectRead, selectedBrandId, serpSubjectReadPlan.total]);
 
   const [serpSubjectBusy, setSerpSubjectBusy] = useState(false);
@@ -12661,7 +12686,8 @@ export default function ArquitetoPage() {
       if (!diagnosis || !swap?.substitute) { refused.push({ label, reason: "não há troca proposta" }); continue; }
       const info = serpPublishedInfo.get(anchorKeywordId);
       const postoMostrado: PublishedPrimaryPost = info?.post ?? "unknown";
-      const recusaDoPosto = freshPostRefusal({ shown: postoMostrado, fresh: postosRelidos.get(anchorKeywordId) ?? null });
+      const peloAssunto = swap.previousPrimaryBecomes === "assunto";
+      const recusaDoPosto = freshPostRefusal({ shown: postoMostrado, fresh: postosRelidos.get(anchorKeywordId) ?? null, byPageSubject: peloAssunto });
       if (recusaDoPosto) { refused.push({ label, reason: recusaDoPosto }); continue; }
       const post: PublishedPrimaryPost = postosRelidos.get(anchorKeywordId) ?? "unknown";
       const candidateRef = serpAnchorCandidateRef(diagnosis.siloRef, diagnosis.principalKeywordId);
@@ -12687,8 +12713,13 @@ export default function ArquitetoPage() {
         // As métricas da nova principal vêm do Minerador; sem elas, null — nunca as da antiga.
         const linhaDaNova = masterList.find(item => String(item.id) === swap.substitute!.keywordId) as (Record<string, unknown> | undefined);
         const numero = (valor: unknown) => typeof valor === "number" && Number.isFinite(valor) ? valor : null;
+        // 2026-10-19 · a página vira o Assunto do artigo (U18), presa pelo ato humano desta troca, pela guarda de sempre.
+        const linhaDaPagina = masterList.find(item => String(item.id) === anchorKeywordId) as (Record<string, unknown> | undefined);
+        const assuntoDaPagina = peloAssunto && linhaDaPagina ? planSubjectAttachment({ brandId: selectedBrandId, keyword: linhaDaPagina, actorUserId: actorId, attachedAt: decidedAt, target: { principalKeywordId: outcome.principalKeywordId, excludedSubjects: current.payload.excludedSubjects } }) : null;
+        if (assuntoDaPagina && !assuntoDaPagina.ok) { refused.push({ label, reason: `o Assunto da página não pôde entrar no artigo: ${assuntoDaPagina.reason}` }); continue; }
         const payload = buildPublishedSwapArticlePayload({
           current: current.payload, outcome, actorId, decidedAt, substituteLabel: swap.substitute.keyword, previousLabel: diagnosis.anchorLabel,
+          ...(assuntoDaPagina?.ok ? { pageSubject: assuntoDaPagina.subject } : {}),
           substituteMetrics: {
             volume: numero(linhaDaNova?.volume_search) ?? swap.substitute.volume,
             resultCount: numero(linhaDaNova?.results_allintitle),
@@ -12700,7 +12731,9 @@ export default function ArquitetoPage() {
           current,
           payload,
           actorId,
-          changeReason: `Troca da principal publicada (Posto Livre): "${swap.substitute.keyword}" assume e "${diagnosis.anchorLabel}" fica como secundária. URL, slug e canonical preservados.`,
+          changeReason: peloAssunto
+            ? `Troca da principal publicada (Assunto pela principal, volume 0): "${swap.substitute.keyword}" assume e "${diagnosis.anchorLabel}" é o Assunto do artigo. URL, slug e canonical preservados.`
+            : `Troca da principal publicada (Posto Livre): "${swap.substitute.keyword}" assume e "${diagnosis.anchorLabel}" fica como secundária. URL, slug e canonical preservados.`,
         });
         gravadas.push({ articleId: String(current.payload.articleId), principalKeywordId: outcome.principalKeywordId, label });
       } catch (error) {
@@ -19053,9 +19086,12 @@ export default function ArquitetoPage() {
                   {linksLoading ? "Carregando" : linksSaveState === "saving" ? "Salvando" : linksSaveState === "conflict" ? "Conflito de versão" : linksSaveState === "error" ? "Erro de persistência" : linksIsDirty ? "Alterações não salvas" : linksWorkingCopy ? "Salvo · readback confirmado" : linksApprovedGraph ? `Aprovado v${linksApprovedGraph.versionNumber}` : "Sem grafo"}
                 </span>
               </div>
-              {linkSiloContexts.length > 0 ? <label className="mt-3 block text-sm font-semibold text-text-muted">Silo do grafo<select aria-label="Silo do InternalLinkGraph" value={resolvedLinksSiloId || ""} onChange={event => handleLinksSiloChange(event.target.value || null)} className="mt-1 w-full rounded border border-divider bg-surface-elevated px-2 py-1.5 text-sm font-normal text-foreground">
-                {linkSiloContexts.map(context => <option key={context.siloId} value={context.siloId}>{context.siloDna.payload.name || context.siloDna.payload.centralEntity || context.siloId}</option>)}
-              </select></label> : <p className="mt-3 rounded border border-warning/40 bg-warning/10 px-2 py-2 text-sm leading-6 text-warning">Nenhum par SiloDNA + SiloPage disponível para formar o contexto do grafo.</p>}
+              {/* 2026-10-18 · o seletor de sempre: com a cor, o Silo da cor é escolhido sozinho; sem cor, a pessoa escolhe entre os Silos com o par. */}
+              <LinksSiloPicker
+                contexts={linkSiloContexts.map(context => ({ siloId: context.siloId, label: context.siloDna.payload.name || context.siloDna.payload.centralEntity || context.siloId }))}
+                choice={linksSiloChoice}
+                onChange={handleLinksSiloChange}
+              />
               {siloClosureSummaries.some(item => item.state !== "closed") && (
                 <div className="mt-3 rounded border border-divider bg-surface px-2.5 py-2" data-testid="architect-silo-closure-status">
                   <p className="text-sm font-semibold text-foreground">Fechamento dos Silos</p>
@@ -19071,7 +19107,6 @@ export default function ArquitetoPage() {
                 <div className="rounded border border-divider bg-surface px-2.5 py-2 text-sm"><span className="font-semibold text-foreground">Base:</span> {linksSelectedContext.siloDna.versionId} · {linksSelectedContext.siloPage.versionId}</div>
                 <div className="rounded border border-divider bg-surface px-2.5 py-2 text-sm"><span className="font-semibold text-foreground">Participantes:</span> {(linksWorkingCopy || linksApprovedGraph)?.participatingArticleDnaVersionRefs.length || linksSelectedContext.siloDna.payload.articleReferences.length}</div>
               </div>}
-              {linksError && <p className="mt-3 rounded border border-danger/40 bg-danger/10 px-2 py-2 text-sm leading-6 text-danger" role="alert">{linksError}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
                 {LINKS_ADVANCED_CONTROLS && !linksWorkingCopy && linksSelectedContext && <button type="button" onClick={() => void (linksApprovedGraph ? handleCreateLinksSuccessor() : handleOpenLinksWorkingCopy())} disabled={linksLoading || linksSaveState === "saving"} className={ARCHITECT_UI.primaryButton}>{linksApprovedGraph ? "Criar nova working copy" : "Abrir working copy"}</button>}
                 {LINKS_ADVANCED_CONTROLS && linksWorkingCopy && <button type="button" onClick={() => void generateStructuralLinks()} disabled={linksLoading || linksSaveState === "saving"} data-testid="architect-generate-structural-links" className={ARCHITECT_UI.toolbarButton} title="Deriva as relações que a arquitetura do Silo já decidiu: raiz, Pilar e Suportes">Gerar conexões estruturais</button>}
@@ -19550,9 +19585,6 @@ export default function ArquitetoPage() {
               <span className="text-sm font-bold uppercase tracking-widest text-module-accent">Working copy de Silos · {authoritativeSiloWorkingCopies.length}</span>
               <span className="text-sm text-text-muted">{remoteSiloWorkingCopies.length ? "Autoridade remota: as decisões humanas estão persistidas no servidor." : "Rascunho local: nenhuma working copy foi persistida ainda."}</span>
             </div>
-            {siloWorkingCopyConflict && (
-              <p className="mb-2 rounded border border-warning/40 bg-warning/10 px-2 py-1.5 text-sm leading-6 text-warning">{siloWorkingCopyConflict}</p>
-            )}
             <div className="grid gap-2 lg:grid-cols-2">
               {authoritativeSiloWorkingCopies.map(entry => {
                 const copy = entry.proposal;
@@ -19797,6 +19829,7 @@ export default function ArquitetoPage() {
                   */}
                 <ArticleImprovementPanel brandId={selectedBrandId} brandRef={serpSubjectBrandRef} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton}
                   onClose={() => setImprovementPanel("closed")}
+                  onNotify={showNotification}
                   selectedTargetIds={[
                     ...articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id)),
                     ...tableSelection.planTargets.filter(row => row.formation.state === "formed").map(row => row.keywordId),
@@ -21565,43 +21598,22 @@ export default function ArquitetoPage() {
         </div>
       )}
 
-      {siloUndoPrompt && (() => {
-        const itens = siloUndoPrompt.map(ref => ({ ref, leitura: siloUndoReadings.get(ref) })).filter(item => item.leitura);
-        const podem = itens.filter(item => item.leitura!.refusals.length === 0);
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="dialog" aria-modal="true" aria-label="Confirmar desfazer Silo" data-testid="architect-undo-silo-dialog"
-            onKeyDown={event => { if (event.key === "Escape" && !siloUndoBusy) setSiloUndoPrompt(null); }}>
-            <div className="flex max-h-[86vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl">
-              <p className="text-base font-semibold text-foreground">{itens.length > 1 || siloUndoBulk ? `Desfazer os Silos sugeridos (${podem.length})` : "Desfazer Silo"}</p>
-              <p className="text-sm leading-6 text-text-muted">O Silo sai da aba Silos (fica guardado como rejeitado; nada é apagado). As keywords dele voltam para “sem Silo” e continuam na mesa.</p>
-              {siloUndoBulk && siloUndoExcludedNote && <p className="text-sm leading-6 text-warning" data-testid="architect-undo-silo-plan-excluded">{siloUndoExcludedNote}</p>}
-              <ul className="grid gap-2 text-sm leading-6">
-                {itens.map(({ ref, leitura }) => (
-                  <li key={ref} className="rounded border border-divider bg-surface px-3 py-2">
-                    <span className="font-semibold text-foreground">{leitura!.label}</span>
-                    {leitura!.refusals.length === 0
-                      ? <span className="text-text-muted">{` · ${leitura!.keywordCount} keyword(s) voltam para sem Silo`}</span>
-                      : <span className="block text-warning">{`Não pode ser desfeito: ${leitura!.refusals.join(" ")}`}</span>}
-                  </li>
-                ))}
-              </ul>
-              {siloUndoProgress && (
-                <p role="status" className="text-sm leading-6 text-foreground" data-testid="architect-undo-silo-progress">
-                  {`Desfazendo ${siloUndoProgress.done} de ${siloUndoProgress.total}… Depois a tela relê o banco para conferir.`}
-                </p>
-              )}
-              <div className="flex flex-wrap justify-end gap-2">
-                <button type="button" ref={siloUndoCancelRef} disabled={siloUndoBusy} onClick={() => setSiloUndoPrompt(null)} className={ARCHITECT_UI.toolbarButton}>Cancelar</button>
-                {podem.length > 0 && (
-                  <button type="button" disabled={siloUndoBusy} onClick={() => { void undoSuggestedSilos(podem.map(item => item.ref)); }} className={ARCHITECT_UI.primaryButton} data-testid="architect-undo-silo-confirm">
-                    {siloUndoBusy ? "Desfazendo…" : podem.length > 1 ? `Desfazer ${podem.length} Silos` : "Desfazer Silo"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {siloUndoPrompt && selectedBrandId && (
+        <SiloUndoDialog
+          brandId={selectedBrandId}
+          refs={siloUndoPrompt}
+          bulk={siloUndoBulk}
+          readings={siloUndoReadings}
+          excludedNote={siloUndoExcludedNote}
+          lockOf={ref => remoteTerritories.find(item => item.territoryRef === ref)?.lockVersion ?? null}
+          expectedMembersOf={ref => masterList.filter(item => item.territoryRef === ref).map(item => String(item.id))}
+          busy={siloUndoBusy}
+          onBusyChange={setSiloUndoBusy}
+          onClose={() => setSiloUndoPrompt(null)}
+          onDone={concludeSiloUndo}
+          classes={{ cancel: ARCHITECT_UI.toolbarButton, confirm: ARCHITECT_UI.primaryButton }}
+        />
+      )}
 
       {planSiloRecreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="dialog" aria-modal="true" aria-label="Recriar o Silo do plano" data-testid="architect-plan-silo-recreate-dialog"

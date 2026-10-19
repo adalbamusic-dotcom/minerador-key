@@ -30,6 +30,14 @@ import type { SubjectImportChannel } from "./keyword-import-core.ts";
 type Client = Pick<SupabaseClient, "from">;
 const PAGE = 1000;
 
+/**
+ * 2026-10-18 · "SEM GRUPO" (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.2-d, G3): o Assunto do formato
+ * anterior que não tem grupo de cor também converte. Sem Silo e sem plano: o Assunto passa a morar na keyword escolhida
+ * pelo destino "Keyword (sem Silo)" do MESMO núcleo do card (`importDeclaredPlanWithCore`); quando a keyword escolhida é
+ * a própria linha, ela só ganha o título (o texto) e a nota antiga vira os detalhes.
+ */
+export const CONVERSION_WITHOUT_GROUP = "sem-grupo" as const;
+
 export type ConversionRowInput = {
   fromKeywordId: string;
   articleId: string | null;
@@ -119,6 +127,16 @@ export async function readConversionDraftWithCore(input: { brandId: string; keyw
   | { ok: true; group: { id: string; name: string; color: string; hasPlan: boolean; planVersion: number }; draft: ConversionDraft }
   | { ok: false; code: "GROUP_NOT_FOUND" | "GROUPS_NOT_AVAILABLE"; reason: string }
 > {
+  if (input.groupId === CONVERSION_WITHOUT_GROUP) {
+    const [keywords, artigos] = await Promise.all([readBrandKeywords(input.keywordsClient, input.brandId), readArtifacts(input.keywordsClient, input.brandId, "article_dna")]);
+    const articles: ConversionDraftArticle[] = artigos.map(row => {
+      const payload = record(row.payload);
+      return { articleId: text(payload.articleId) ?? String(row.entity_id ?? ""), versionNumber: Number(row.version_number) || 0, principalKeywordId: text(payload.principalKeywordId) ?? "", secondaryKeywordIds: strings(payload.secondaryKeywordIds), narrativeReinforcementIds: strings(payload.narrativeReinforcementIds), subjectKeywordId: text(record(payload.subject).keywordId), promise: text(payload.promise), hierarchy: text(payload.hierarchy) };
+    });
+    const semGrupo = keywords.map(keyword => ({ ...keyword, groupId: keyword.groupId ?? CONVERSION_WITHOUT_GROUP }));
+    const draft = buildConversionDraft({ groupId: CONVERSION_WITHOUT_GROUP, keywords: semGrupo, articles, silo: null });
+    return { ok: true, group: { id: CONVERSION_WITHOUT_GROUP, name: "Sem grupo", color: "", hasPlan: false, planVersion: 0 }, draft };
+  }
   let lido;
   try {
     lido = await readEditorialGroupPlan(input.groupsClient, input.brandId, input.groupId);
@@ -191,6 +209,7 @@ export async function convertLegacySubjectsWithCore(input: {
   now?: string;
 }): Promise<ConversionResult> {
   if (!input.rows.length) return { ok: false, code: "NOTHING_TO_CONVERT", reason: "Escolha pelo menos um Assunto do formato anterior para converter." };
+  if (input.groupId === CONVERSION_WITHOUT_GROUP) return convertWithoutGroup(input);
   const lido = await readEditorialGroupPlan(input.groupsClient, input.brandId, input.groupId);
   if (!lido.ok) return { ok: false, code: "GROUPS_NOT_AVAILABLE", reason: lido.message };
   if (!lido.group) return { ok: false, code: "GROUP_NOT_FOUND", reason: "O grupo não existe nesta marca." };
@@ -263,6 +282,47 @@ export async function convertLegacySubjectsWithCore(input: {
   const keywordIds = [...new Set(result.articles.filter(article => convertidas.has(article.order) && article.outcome !== "failed" && article.subjectKeywordId).map(article => article.subjectKeywordId!))];
   const followUp = await runConversionFollowUp(keywordIds, input.followUp ?? null);
   return { ok: true, mode: "apply", applied: result, followUp };
+}
+
+/** "Sem grupo": uma linha = um Assunto na keyword escolhida, pelo destino "Keyword (sem Silo)" do núcleo do card. */
+async function convertWithoutGroup(input: Parameters<typeof convertLegacySubjectsWithCore>[0]): Promise<ConversionResult> {
+  const ids = [...new Set(input.rows.map(row => row.fromKeywordId))];
+  const vivas = await input.keywordsClient.from("minerador_keywords").select("id,keyword,group_id").eq("brand_id", input.brandId).is("deleted_at", null);
+  if (vivas.error) throw vivas.error;
+  const linhas = (vivas.data || []) as Array<{ id: unknown; keyword?: unknown; group_id?: unknown }>;
+  const porId = new Map(linhas.map(row => [String(row.id), row] as const));
+  const porTexto = new Map<string, string>();
+  for (const row of linhas) { const chave = normalizeDeclaredPhraseKey(row.keyword); if (chave && !porTexto.has(chave)) porTexto.set(chave, String(row.id)); }
+  const comGrupo = ids.filter(id => !porId.has(id) || porId.get(id)?.group_id);
+  if (comGrupo.length) return { ok: false, code: "PLAN_BLOCKED", reason: "“Sem grupo” converte só o Assunto anterior que não tem cor: escolha o grupo dele.", blockers: comGrupo.map(id => `A linha-título ${id} tem grupo (ou não existe mais).`) };
+  const previas: Array<Extract<DeclaredPlanImportResult, { ok: true; mode: "preview" }>> = [];
+  const aplicados: Array<Extract<DeclaredPlanImportResult, { ok: true; mode: "apply" }>> = [];
+  for (const [index, row] of input.rows.entries()) {
+    const alvo = porTexto.get(normalizeDeclaredPhraseKey(row.keyword)) ?? null;
+    if (!alvo) return { ok: false, code: "PLAN_BLOCKED", reason: "A keyword escolhida não existe nesta marca.", blockers: [`Linha ${row.order}: “${row.keyword}” não existe nesta marca.`] };
+    const result = await importDeclaredPlanWithCore({
+      brandId: input.brandId, actorUserId: input.actorUserId, keywordsClient: input.keywordsClient, groupsClient: input.groupsClient, mode: input.mode,
+      plan: { silo: null, articles: [{ order: 1, subject: row.title, principal: row.keyword, role: row.role, scope: row.scope }] },
+      group: { mode: "new", name: null, color: "" },
+      destination: { kind: "keyword", keywordId: alvo },
+      importRequestId: input.importRequestId ? `${input.importRequestId}:${index + 1}` : null,
+      brandSiteUrl: input.brandSiteUrl ?? null,
+      conversions: alvo === row.fromKeywordId ? null : [{ order: 1, fromKeywordId: row.fromKeywordId, articleId: row.articleId }],
+      ...(input.channel ? { channel: input.channel } : {}),
+      ...(input.now ? { now: input.now } : {}),
+    });
+    if (!result.ok) return { ok: false, code: result.code, reason: result.reason, ...(result.blockers ? { blockers: result.blockers } : {}) };
+    if (result.mode === "preview") previas.push(result); else aplicados.push(result);
+  }
+  if (input.mode === "preview") {
+    const primeira = previas[0];
+    const articles = previas.flatMap((previa, index) => previa.articles.map(article => ({ ...article, order: input.rows[index].order })));
+    const blockers = [...new Set(previas.flatMap(previa => previa.blockers))];
+    return { ok: true, mode: "preview", preview: { ...primeira, articles, blockers, notices: [...new Set(previas.flatMap(previa => previa.notices))], approvedToReview: previas.reduce((soma, previa) => soma + previa.approvedToReview, 0), canApply: previas.every(previa => previa.canApply) } };
+  }
+  const applied = { ...aplicados[0], articles: aplicados.flatMap((aplicado, index) => aplicado.articles.map(article => ({ ...article, order: input.rows[index].order }))), failed: aplicados.reduce((soma, aplicado) => soma + aplicado.failed, 0), notices: [...new Set(aplicados.flatMap(aplicado => aplicado.notices))] };
+  const keywordIds = [...new Set(applied.articles.filter(article => article.outcome !== "failed" && article.subjectKeywordId).map(article => article.subjectKeywordId!))];
+  return { ok: true, mode: "apply", applied, followUp: await runConversionFollowUp(keywordIds, input.followUp ?? null) };
 }
 
 /**

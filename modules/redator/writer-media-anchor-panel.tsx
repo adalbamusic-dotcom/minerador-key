@@ -32,6 +32,7 @@
  */
 
 import { useState } from "react";
+import { useNoticeBridge } from "@/components/global-notice-center";
 import type { MediaAnchorKind } from "@/lib/redator/media-anchor";
 import {
   actionsFor, anchorStateFor, type AnchorState, type MediaAnchorTarget, type PanelAsset,
@@ -84,7 +85,14 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
 }) {
   const [selecionado, setSelecionado] = useState("");
   const [etapa, setEtapa] = useState<Etapa>("parado");
-  const [mensagem, setMensagem] = useState("");
+  /*
+   * 2026-10-18 · TODOS OS AVISOS NO SINO (regra do dono). O resultado de cada
+   * ação (sucesso ou falha) vai para o sino com o tom certo; na tela fica só o
+   * andamento ("Enviando arquivo…"). Falha passa `true` no segundo argumento.
+   */
+  const [aviso, setAviso] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const setMensagem = (texto: string, falha = false) => setAviso(texto ? { type: falha ? "error" : "success", message: texto } : null);
+  useNoticeBridge({ notice: aviso, module: "redator", area: "Imagem por posição", title: "Redator · Mídia", fallbackSeverity: "INFO" });
   const [previewUrl, setPreviewUrl] = useState("");
   const [objetivo, setObjetivo] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -160,7 +168,7 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
       await recarregar();
       return String(dados.id);
     } catch (erro) {
-      setEtapa("erro"); setMensagem(erro instanceof Error ? erro.message : "Falha ao registrar briefing.");
+      setEtapa("erro"); setMensagem(erro instanceof Error ? erro.message : "Falha ao registrar briefing.", true);
       return null;
     }
   };
@@ -214,7 +222,7 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
       await recarregar();
     } catch (erro) {
       setEtapa("erro");
-      setMensagem(erro instanceof Error ? erro.message : "Falha ao anexar imagem.");
+      setMensagem(erro instanceof Error ? erro.message : "Falha ao anexar imagem.", true);
     }
   };
 
@@ -223,7 +231,7 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
     if (!target) return null;
     if (!objetivo.trim() || !prompt.trim()) {
       setEtapa("erro");
-      setMensagem("Preencha objetivo e prompt antes de anexar: o briefing é o que dá contexto à imagem.");
+      setMensagem("Preencha objetivo e prompt antes de anexar: o briefing é o que dá contexto à imagem.", true);
       return null;
     }
     const resposta = await fetch("/api/redator/deliverables", {
@@ -234,7 +242,7 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
       }),
     });
     const dados = await resposta.json();
-    if (!resposta.ok) { setEtapa("erro"); setMensagem(descreverFalha(dados)); return null; }
+    if (!resposta.ok) { setEtapa("erro"); setMensagem(descreverFalha(dados), true); return null; }
     return String(dados.id);
   };
 
@@ -246,7 +254,7 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
       const dados = await chamarAncora({ action: "preview", brandId, assetId: estado.current.id });
       setPreviewUrl(String(dados.url));
     } catch (erro) {
-      setMensagem(erro instanceof Error ? erro.message : "Não foi possível carregar a imagem.");
+      setMensagem(erro instanceof Error ? erro.message : "Não foi possível carregar a imagem.", true);
     }
   };
 
@@ -258,7 +266,7 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
       setMensagem("Texto alternativo salvo e confirmado na leitura remota.");
       await onChanged();
     } catch (erro) {
-      setMensagem(erro instanceof Error ? erro.message : "Falha ao salvar o texto alternativo.");
+      setMensagem(erro instanceof Error ? erro.message : "Falha ao salvar o texto alternativo.", true);
     }
   };
 
@@ -272,7 +280,7 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
       setEditandoBriefing(false);
       await onChanged();
     } catch (erro) {
-      setMensagem(erro instanceof Error ? erro.message : "Falha ao atualizar o briefing.");
+      setMensagem(erro instanceof Error ? erro.message : "Falha ao atualizar o briefing.", true);
     }
   };
 
@@ -366,10 +374,8 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
         </button>}
       </div>}
 
-      {/* ===== PROGRESSO E ERRO ===== */}
+      {/* ===== ANDAMENTO (o resultado vai para o sino) ===== */}
       {ocupado && <p className="mt-2 text-[9px] text-context-accent" role="status" data-media-progresso>{TEXTO_DA_ETAPA[etapa]}</p>}
-      {etapa === "concluido" && !mensagem && <p className="mt-2 text-[9px] text-success" role="status">{TEXTO_DA_ETAPA.concluido}</p>}
-      {mensagem && <p className={`mt-2 text-[9px] ${etapa === "erro" ? "text-danger" : "text-success"}`} role="status" data-media-mensagem>{mensagem}</p>}
 
       {/*
         * O predecessor aparece como HISTÓRICO, nunca como segunda imagem atual.

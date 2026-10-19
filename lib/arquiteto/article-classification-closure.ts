@@ -1,3 +1,4 @@
+import { intentComparisonKey } from "./keyword-dna-signals.ts";
 import { normalizeIntentKey } from "../minerador/intent-taxonomy.ts";
 /**
  * FECHAMENTO DAS CLASSIFICAÇÕES DO ARTICLE.
@@ -534,7 +535,7 @@ export function buildClassificationEvidence(input: {
   // relação à Principal — a mesma leitura que o resumo já fazia.
   const avaliadas = secondaries.filter(item => item.intent).length;
   const conflitos = principal.intent
-    ? secondaries.filter(item => item.intent && item.intent !== principal.intent).length
+    ? secondaries.filter(item => { const a = intentComparisonKey(item.intent), b = intentComparisonKey(principal.intent); return Boolean(a && b && a !== b); }).length
     : 0;
   const observada = input.serpInterpretation?.observedIntent ?? null;
   return {

@@ -13,6 +13,7 @@ import { ArtifactRepository } from "./editorial-repositories";
 import { reworkGuardPort, type ReworkGuardPort, type ReworkOperation } from "./rework-guard";
 import { operationFingerprint, reworkView, type ReworkView } from "@/lib/editorial/rework-guard";
 import { readArticleGroupMemberships } from "@/lib/editorial/article-groups-store";
+import { readActiveDownstreamItems, withdrawDownstreamItems } from "./radar-item-withdrawal";
 
 /**
  * ===== RETIRAR ARTIGO DO SILO — SERVIDOR (F4) =====
@@ -65,6 +66,8 @@ export type SiloArticleWithdrawalDeps = {
   rework?: ReworkGuardPort;
   /** F5 — o grupo do artigo, para o histórico do grupo (melhor esforço). */
   groupOf?: (articleId: string) => Promise<string | null>;
+  /** 2026-10-18 · o item adiante (Radar/Redator/Publicações) sai da operação na mesma ação; ausente = nada adiante a tirar. */
+  withdrawDownstream?: (articleId: string, reason: string) => Promise<{ withdrawn: number; failed: string[] }>;
 };
 
 export type SiloArticleWithdrawalPreview = {
@@ -94,6 +97,8 @@ export type SiloArticleWithdrawalApplied = {
   warnings: string[];
   /** 2026-10-14 · aditivo: o artigo só apontava para o Silo; o par ficou como estava (só o evento `rejected`). */
   pairUnchanged?: true;
+  /** 2026-10-18 · aditivo: quantos itens adiante saíram da operação. */
+  withdrawnItems?: number;
 };
 
 export type SiloArticleWithdrawalRefused = { state: "REFUSED"; code: SiloArticleWithdrawalRefusalCode; message: string; rework?: ReworkView };
@@ -177,6 +182,14 @@ export async function handleSiloArticleWithdrawal(
     ? { siloDna: plan.current.siloDna, siloPage: plan.current.siloPage }
     : await deps.persistPair(versions.siloDna, versions.siloPage, plan.statuses);
 
+  // 2b. 2026-10-18 · o item adiante sai da operação ("retirado"; a investigação fica). Falhou = a retirada não fecha.
+  let withdrawnItems = 0;
+  if (plan.downstreamStages?.length && deps.withdrawDownstream) {
+    const adiante = await deps.withdrawDownstream(plan.article.articleId, `Retirado do Silo “${plan.siloName}”: ${plan.reason}`);
+    if (adiante.failed.length) throw new PipelineRuntimeError("CONFLICT", `O artigo saiu do Silo, mas ${adiante.failed.length} item(ns) adiante não saíram da operação (${adiante.failed.join("; ")}). Repita a retirada (é seguro).`, 409);
+    withdrawnItems = adiante.withdrawn;
+  }
+
   // 3. Releitura: sem ela não há sucesso.
   const relido = await deps.listArtifacts();
   const dna = latestOf(relido.siloDnas, version => version.payload.siloId === plan.siloId);
@@ -210,10 +223,9 @@ export async function handleSiloArticleWithdrawal(
     article: { articleId: plan.article.articleId, label: plan.article.label },
     warnings: plan.warnings,
     ...(plan.pairUnchanged ? { pairUnchanged: true as const } : {}),
+    ...(withdrawnItems ? { withdrawnItems } : {}),
   };
 }
-
-const DOWNSTREAM_STAGES = ["radar", "writer", "publications"] as const;
 
 /** As dependências reais, sobre o contexto já autorizado da rota. */
 export function siloArticleWithdrawalRuntime(context: PipelineContext): SiloArticleWithdrawalDeps {
@@ -224,16 +236,8 @@ export function siloArticleWithdrawalRuntime(context: PipelineContext): SiloArti
       const lido = await listArquitetoArtifacts(context);
       return { articleDnas: lido.articleDnas, siloDnas: lido.siloDnas, siloPages: lido.siloPages, statuses: lido.statuses };
     },
-    readDownstreamStages: async articleId => {
-      const result = await context.supabase
-        .from("editorial_workflow_items")
-        .select("stage")
-        .eq("marca_id", context.brandId)
-        .eq("article_id", articleId)
-        .in("stage", [...DOWNSTREAM_STAGES]);
-      if (result.error) throw result.error;
-      return [...new Set(((result.data || []) as Array<{ stage?: unknown }>).map(row => String(row.stage ?? "")).filter(Boolean))];
-    },
+    // 2026-10-18 · só os itens ATIVOS (o já retirado da operação não conta de novo).
+    readDownstreamStages: async articleId => [...new Set((await readActiveDownstreamItems(context.supabase, context.brandId, [articleId])).map(item => item.stage))],
     persistPair: async (siloDna, siloPage, statuses) => {
       const persisted = await persistSiloPairAtomic(context, siloDna, siloPage, statuses);
       return { siloDna: persisted.siloDna, siloPage: persisted.siloPage };
@@ -250,6 +254,10 @@ export function siloArticleWithdrawalRuntime(context: PipelineContext): SiloArti
       return row ? { versionId: String(row.version_id ?? ""), status: String(row.status ?? "") } : null;
     },
     rework: reworkGuardPort(context),
+    withdrawDownstream: async (articleId, reason) => {
+      const feito = await withdrawDownstreamItems(context.supabase, { brandId: context.brandId, actorUserId: context.actorUserId, articleIds: [articleId], reason, at: new Date().toISOString() });
+      return { withdrawn: feito.withdrawn.length, failed: feito.failed.map(item => `${item.stage}: ${item.message}`) };
+    },
     groupOf: async articleId => {
       try {
         const lido = await readArticleGroupMemberships(context.supabase, context.brandId, { articleIds: [articleId] });

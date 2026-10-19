@@ -173,6 +173,12 @@ export type RadarSerpLensSet = z.infer<typeof RadarSerpLensSetSchema>;
  * os CÓDIGOS do alvo da keyword. `snapshotOpenedAt` é quando esta versão foi
  * aberta; `collectedAt` é quando o provider observou a SERP — com cache, pode
  * ser anterior à versão que ela substituiu.
+ *
+ * 2026-10-18 · SDD `sdd-localidade-serp-por-marca-2026-10-18.md` (L2): o
+ * `locationCode` é o da localidade da MARCA (`resolveBrandSerpTarget`), e
+ * `location` passa a ser o rótulo do que foi pedido ("Brasil" ou "São Paulo
+ * (cidade)"), não mais o texto do cliente. `codesSource` diz de onde veio o
+ * IDIOMA (o targeting da keyword ou o ambiente); o enum não mudou.
  */
 export const RadarSerpCodesSourceSchema = z.enum(["keyword_targeting", "environment"]);
 export type RadarSerpCodesSource = z.infer<typeof RadarSerpCodesSourceSchema>;

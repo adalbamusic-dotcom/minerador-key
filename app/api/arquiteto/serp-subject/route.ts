@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { readMineradorKeywordTargetCodes, serpTargetCodesFor } from "@/lib/arquiteto/serp-lens-targeting";
 import { SERP_SUBJECT_LENS_LABELS, SERP_SUBJECT_THRESHOLDS } from "@/lib/arquiteto/serp-subject-overlap";
-import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
+import { resolveBrandSerpTarget } from "@/lib/server/brand-serp-target";
 import { SERP_SUBJECT_MAX_KEYWORDS, readSerpSubjectFootprints } from "@/lib/server/arquiteto-serp-subject-store";
 import { pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
@@ -45,15 +45,22 @@ export async function POST(request: Request) {
      * do targeting do Minerador para a keyword; sem ele, os do ambiente — a
      * mesma regra da SERP por keyword (`/api/arquiteto/keyword-serp`).
      */
-    const ambiente = readDataForSeoTargetCodes();
-    const targeting = await readMineradorKeywordTargetCodes(context.supabase, context.brandId, parsed.data.keywords.map(item => item.keywordId), ambiente);
+    /*
+     * 2026-10-18 · A LOCALIDADE É A DA MARCA (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L2):
+     * a chave usa os códigos da marca. Com cidade, a lente que só tem a SERP
+     * antiga NACIONAL é mostrada marcada (decisão do dono); a coleta local é pelo
+     * botão pago de sempre, com o custo antes. Marca nacional: a leitura de antes.
+     */
+    const alvoDaMarca = await resolveBrandSerpTarget(context.supabase, context.brandId);
+    const daMarca = alvoDaMarca.codes;
+    const targeting = await readMineradorKeywordTargetCodes(context.supabase, context.brandId, parsed.data.keywords.map(item => item.keywordId), daMarca);
     const alvos = parsed.data.keywords.map(item => ({
       keywordId: item.keywordId,
       keyword: item.keyword,
-      ...serpTargetCodesFor(targeting.codes, item.keywordId, ambiente),
+      ...serpTargetCodesFor(targeting.codes, item.keywordId, daMarca),
     }));
 
-    const leitura = await readSerpSubjectFootprints(context, alvos, { now });
+    const leitura = await readSerpSubjectFootprints(context, alvos, { now, ...(alvoDaMarca.source === "brand" ? { nationalFallback: alvoDaMarca.national } : {}) });
     return NextResponse.json({
       success: true,
       data: {
@@ -64,6 +71,8 @@ export async function POST(request: Request) {
         lenses: SERP_SUBJECT_LENS_LABELS,
         thresholds: SERP_SUBJECT_THRESHOLDS,
         targetingReadFailed: targeting.readFailed,
+        // 2026-10-18 · aditivos, só na marca com cidade: a localidade e as lentes da SERP antiga nacional (marcadas).
+        ...(alvoDaMarca.source === "brand" ? { serpLocation: alvoDaMarca.label, nationalFallback: leitura.nationalFallback ?? [] } : {}),
         paid: false,
       },
     });

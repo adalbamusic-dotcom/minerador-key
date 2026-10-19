@@ -21,7 +21,9 @@ import {
   GROUP_DELETE_ALL_RELEASE_VIA,
   GROUP_DELETE_ALL_RPC,
   groupDeleteAllEventPayload,
+  groupDeleteOperationLabel,
   type GroupDeleteAllBlockOutcome,
+  type GroupDeleteAllInput,
   type GroupDeleteAllKeyword,
   type GroupDeleteAllLifecycleMode,
   type GroupDeleteAllOut,
@@ -29,6 +31,7 @@ import {
   type GroupDeleteAllTyped,
 } from "./group-delete-all.ts";
 import { isKeywordSubjectActorId, resolveKeywordSubject } from "./keyword-subject.ts";
+import { architectDismantleFailureMessage, EMPTY_ARCHITECT_DISMANTLE, type ArchitectDismantlePort } from "./architect-dismantle.ts";
 
 /**
  * ===== EXCLUIR TUDO DA COR X — O NÚCLEO (F7, 2026-10-14) =====
@@ -58,6 +61,13 @@ import { isKeywordSubjectActorId, resolveKeywordSubject } from "./keyword-subjec
  * recusa com `GROUP_DELETE_NOT_AVAILABLE` (nada é escrito).
  *
  * O MCP NÃO chama isto (`AGENTS.md` §17.1: exclusão fora do MCP).
+ *
+ * 2026-10-17 · A EXCLUSÃO COMUM CHAMA ESTE MESMO NÚCLEO para as keywords
+ * selecionadas que carregam o plano (`lib/minerador/keyword-delete-core.ts`),
+ * com `keywordIds` = as selecionadas desta cor: a mesma prévia (restrita), a
+ * mesma RPC que libera o Assunto e exclui na mesma transação, o mesmo plano
+ * acompanhando, o mesmo histórico e a mesma D7 (a cor só fica livre quando
+ * nada dela ficou). Sem `keywordIds`, a cor inteira, como sempre.
  */
 
 export type GroupDeleteAllClient = Pick<SupabaseClient, "from" | "rpc">;
@@ -74,7 +84,9 @@ export type GroupDeleteAllRefusalCode =
   | "CONFIRMATION_REQUIRED"
   | "GROUP_DELETE_NOT_AVAILABLE"
   | "NOTHING_TO_DELETE"
-  | "DELETE_IN_PROGRESS";
+  | "DELETE_IN_PROGRESS"
+  /** 2026-10-18 · o desmonte do Arquiteto (antes das keywords) não fechou: nenhuma keyword foi excluída. */
+  | "ARCHITECT_DISMANTLE_FAILED";
 
 export type GroupDeleteAllRefusal = {
   ok: false;
@@ -99,6 +111,7 @@ export const GROUP_DELETE_ALL_REFUSAL_STATUS: Record<GroupDeleteAllRefusalCode, 
   GROUP_DELETE_NOT_AVAILABLE: 409,
   NOTHING_TO_DELETE: 409,
   DELETE_IN_PROGRESS: 409,
+  ARCHITECT_DISMANTLE_FAILED: 409,
 };
 
 export type GroupDeleteAllPreviewResult = { ok: true; mode: "preview"; preview: GroupDeleteAllPreview; decisionHash: string };
@@ -120,6 +133,8 @@ export type GroupDeleteAllApplyResult = {
   /** Tudo o que a prévia pôs para sair saiu, e tudo foi relido. */
   complete: boolean;
   notices: string[];
+  /** 2026-10-18 · o que o desmonte do Arquiteto fez antes das keywords (vazio quando não havia o que desmontar). */
+  architect: { applied: string[] };
 };
 
 const PAGE = 1000;
@@ -159,6 +174,11 @@ const RPC_REFUSAL_MESSAGES: Record<string, string> = {
   KEYWORD_DELETE_TRANSACTION_FAILED: "O bloco não foi confirmado pelo banco; nenhuma alteração parcial dele ficou.",
   GROUP_DELETE_NOT_AVAILABLE: GROUP_DELETE_ALL_NOT_AVAILABLE_MESSAGE,
 };
+
+/** A frase de cada recusa de bloco (a exclusão comum usa as mesmas). */
+export function groupDeleteRefusalMessage(code: string): string {
+  return RPC_REFUSAL_MESSAGES[code] ?? RPC_REFUSAL_MESSAGES.KEYWORD_DELETE_TRANSACTION_FAILED;
+}
 
 /** O código da recusa do banco (a mensagem do RAISE começa por ele). */
 export function groupDeleteRpcErrorCode(error: unknown): string {
@@ -316,9 +336,9 @@ async function readSiloConsolidated(client: GroupDeleteAllClient, brandId: strin
   return Array.isArray(data) && data.length > 0;
 }
 
-type Loaded = { group: GroupRead; preview: GroupDeleteAllPreview; decisionHash: string };
+type Loaded = { group: GroupRead; preview: GroupDeleteAllPreview; decisionHash: string; architectRequest: { keywordIds: string[]; linkedTerritoryRef: string | null; basis: Record<string, unknown> } | null };
 
-async function loadPreview(input: { client: GroupDeleteAllClient; brandId: string; actorUserId: string; groupId: string; includePublished: boolean }): Promise<Loaded | GroupDeleteAllRefusal> {
+async function loadPreview(input: { client: GroupDeleteAllClient; brandId: string; actorUserId: string; groupId: string; includePublished: boolean; keywordIds?: readonly string[] | null; architect?: ArchitectDismantlePort | null }): Promise<Loaded | GroupDeleteAllRefusal> {
   const { client, brandId, actorUserId, groupId } = input;
   const lido = await readEditorialGroupPlan(client, brandId, groupId);
   if (!lido.ok) return refuse("GROUPS_NOT_AVAILABLE", lido.message);
@@ -334,7 +354,9 @@ async function loadPreview(input: { client: GroupDeleteAllClient; brandId: strin
     hasPlan: Boolean(lido.group.plan),
   };
   const linhas = await readGroupKeywords(client, brandId, groupId);
-  const ids = linhas.map(row => row.id);
+  // A exclusão comum: o impacto e o Arquiteto só das selecionadas; o resto da cor entra como contexto.
+  const selecao = input.keywordIds ? new Set(input.keywordIds) : null;
+  const ids = linhas.map(row => row.id).filter(id => !selecao || selecao.has(id));
   const [modos, referencias, etiquetados, lixeira, siloConsolidado, disponibilidade] = await Promise.all([
     readLifecycleModes(client, brandId, actorUserId, ids),
     readArchitectReferences(client, brandId, new Set(ids)),
@@ -358,8 +380,14 @@ async function loadPreview(input: { client: GroupDeleteAllClient; brandId: strin
     };
   });
   const artigosDoArquiteto = [...new Map([...referencias.porKeyword.values()].flat().map(ref => [ref.articleId, ref])).values()];
+  /*
+   * 2026-10-18 · O DESMONTE DO ARQUITETO (decisão do dono "tem que poder apagar … não interessa qual seja o estado"):
+   * as keywords com artigo vigente e — na cor inteira — o Silo ligado ao grupo saem lá ANTES, pelo mesmo núcleo do
+   * "Desfazer Silo". A prévia dele entra nesta (o alerta, por área). Sem porta, fica fora com o porquê.
+   */
+  const comArtigo = ids.filter(id => (referencias.porKeyword.get(id) ?? []).length > 0);
   const etapas = await readDownstreamStages(client, brandId, [...etiquetados, ...artigosDoArquiteto.map(ref => ref.articleId)]);
-  const preview = buildGroupDeleteAllPreview({
+  const entrada: GroupDeleteAllInput = {
     group,
     keywords,
     trashedCount: lixeira,
@@ -368,10 +396,24 @@ async function loadPreview(input: { client: GroupDeleteAllClient; brandId: strin
     siloConsolidated: siloConsolidado,
     includePublished: input.includePublished,
     available: disponibilidade.available,
-  });
+    selectedIds: selecao ? ids : null,
+  };
+  // 1ª passada: o que fica fora por OUTRO motivo (publicada sem a marcação, documento do Redator…) não vai ao Arquiteto.
+  const primeira = buildGroupDeleteAllPreview({ ...entrada, architectDismantle: { ok: true, preview: EMPTY_ARCHITECT_DISMANTLE } });
+  const foraPorOutroMotivo = new Set(primeira.out.map(item => item.id));
+  const vaoSair = ids.filter(id => !foraPorOutroMotivo.has(id));
+  // O Silo ligado ao grupo sai inteiro só quando a cor inteira sai (nada fica fora).
+  const siloLigado = !selecao && group.siloId && foraPorOutroMotivo.size === 0 ? group.siloId : null;
+  const precisa = vaoSair.some(id => comArtigo.includes(id)) || Boolean(siloLigado);
+  let architectDismantle: GroupDeleteAllInput["architectDismantle"] = precisa ? null : { ok: true, preview: EMPTY_ARCHITECT_DISMANTLE };
+  if (precisa && input.architect) architectDismantle = await input.architect.preview({ keywordIds: vaoSair, linkedTerritoryRef: siloLigado });
+  const architectRequest = architectDismantle && architectDismantle.ok && architectDismantle.preview.lines.length
+    ? { keywordIds: vaoSair, linkedTerritoryRef: siloLigado, basis: architectDismantle.preview.basis }
+    : null;
+  const preview = buildGroupDeleteAllPreview({ ...entrada, architectDismantle });
   if (!disponibilidade.available && disponibilidade.message) preview.unavailableMessage = disponibilidade.message;
   const decisionHash = await contentHash(preview.decisionBasis);
-  return { group, preview, decisionHash };
+  return { group, preview, decisionHash, architectRequest };
 }
 
 function baseChecks(input: { brandId: unknown; actorUserId: unknown }): GroupDeleteAllRefusal | null {
@@ -387,11 +429,15 @@ export async function previewGroupDeleteAllWithCore(input: {
   actorUserId: string;
   groupId: string;
   includePublished?: boolean;
+  /** 2026-10-17 · a exclusão comum: só estas keywords da cor. Ausente = a cor inteira. */
+  keywordIds?: readonly string[] | null;
+  /** 2026-10-18 · o desmonte do Arquiteto (a rota liga a porta do servidor do Arquiteto). */
+  architect?: ArchitectDismantlePort | null;
 }): Promise<GroupDeleteAllPreviewResult | GroupDeleteAllRefusal> {
   const base = baseChecks(input);
   if (base) return base;
   try {
-    const lido = await loadPreview({ client: input.client, brandId: input.brandId.trim(), actorUserId: input.actorUserId.trim(), groupId: input.groupId, includePublished: input.includePublished === true });
+    const lido = await loadPreview({ client: input.client, brandId: input.brandId.trim(), actorUserId: input.actorUserId.trim(), groupId: input.groupId, includePublished: input.includePublished === true, keywordIds: input.keywordIds ?? null, architect: input.architect ?? null });
     if ("ok" in lido) return lido;
     return { ok: true, mode: "preview", preview: lido.preview, decisionHash: lido.decisionHash };
   } catch (error) {
@@ -411,6 +457,10 @@ export async function applyGroupDeleteAllWithCore(input: {
   typed: GroupDeleteAllTyped;
   /** Para testes: o id de cada bloco (a RPC exige um uuid por chamada). */
   requestId?: () => string;
+  /** 2026-10-17 · a exclusão comum: só estas keywords da cor. Ausente = a cor inteira. */
+  keywordIds?: readonly string[] | null;
+  /** 2026-10-18 · o desmonte do Arquiteto (a rota liga a porta do servidor do Arquiteto). */
+  architect?: ArchitectDismantlePort | null;
 }): Promise<GroupDeleteAllApplyResult | GroupDeleteAllRefusal> {
   const base = baseChecks(input);
   if (base) return base;
@@ -422,7 +472,7 @@ export async function applyGroupDeleteAllWithCore(input: {
   try {
     let lido: Loaded | GroupDeleteAllRefusal;
     try {
-      lido = await loadPreview({ client: input.client, brandId, actorUserId, groupId: input.groupId, includePublished: input.includePublished === true });
+      lido = await loadPreview({ client: input.client, brandId, actorUserId, groupId: input.groupId, includePublished: input.includePublished === true, keywordIds: input.keywordIds ?? null, architect: input.architect ?? null });
     } catch (error) {
       if (isEditorialGroupsSchemaMissing(error)) return refuse("GROUPS_NOT_AVAILABLE", "Os grupos ainda não estão disponíveis neste banco (migration 20261013120000 não aplicada).");
       return refuse("READ_FAILED", "A prévia não pôde ser relida agora. Nada foi excluído. Tente de novo.");
@@ -434,7 +484,16 @@ export async function applyGroupDeleteAllWithCore(input: {
     if (!preview.available) return refuse("GROUP_DELETE_NOT_AVAILABLE", preview.unavailableMessage ?? GROUP_DELETE_ALL_NOT_AVAILABLE_MESSAGE);
     const confirmacao = checkGroupDeleteAllConfirmation(preview, input.typed);
     if (!confirmacao.ok) return refuse("CONFIRMATION_REQUIRED", confirmacao.message, { missing: confirmacao.missing });
-    if (!preview.blocks.length) return refuse("NOTHING_TO_DELETE", "Nada desta cor pode ser excluído agora: tudo ficou fora (veja os motivos na prévia).");
+    if (!preview.blocks.length && !lido.architectRequest) return refuse("NOTHING_TO_DELETE", "Nada desta cor pode ser excluído agora: tudo ficou fora (veja os motivos na prévia).");
+
+    // 0. 2026-10-18 · o desmonte do Arquiteto ANTES das keywords; não fechou = nenhuma keyword é excluída (o resultado diz o que foi feito).
+    let architectApplied: string[] = [];
+    if (lido.architectRequest) {
+      if (!input.architect) return refuse("ARCHITECT_DISMANTLE_FAILED", "Nada foi excluído: o desmonte do Arquiteto não está ligado nesta exclusão.");
+      const desmonte = await input.architect.apply(lido.architectRequest);
+      if (!desmonte.ok) return refuse("ARCHITECT_DISMANTLE_FAILED", architectDismantleFailureMessage(desmonte));
+      architectApplied = desmonte.applied;
+    }
 
     // 1. Os blocos, cada um tudo-ou-nada; um recusado não desfaz os anteriores.
     const novoId = input.requestId ?? (() => crypto.randomUUID());
@@ -514,7 +573,7 @@ export async function applyGroupDeleteAllWithCore(input: {
         groupsClient: input.client,
         groupId: input.groupId,
         removedSubjects: assuntosQueSairam,
-        eventPayload: { via: GROUP_DELETE_ALL_RELEASE_VIA, decisionHash },
+        eventPayload: { via: GROUP_DELETE_ALL_RELEASE_VIA, decisionHash, ...(preview.selection ? { operation: groupDeleteOperationLabel(preview) } : {}) },
       });
       if (!plan.ok) notices.push(`As keywords saíram, mas o plano do grupo não foi atualizado: ${plan.reason} Gere a prévia de novo (é seguro).`);
     }
@@ -564,7 +623,7 @@ export async function applyGroupDeleteAllWithCore(input: {
             groupId: input.groupId,
             lockVersion: atual.lockVersion,
             status: "archived",
-            eventPayload: { via: GROUP_DELETE_ALL_RELEASE_VIA, decisionHash, siloUnlinked: color.siloUnlinked },
+            eventPayload: { via: GROUP_DELETE_ALL_RELEASE_VIA, decisionHash, siloUnlinked: color.siloUnlinked, ...(preview.selection ? { operation: groupDeleteOperationLabel(preview) } : {}) },
           }) : null;
           if (arquivado && arquivado.ok && arquivado.group.status === "archived") {
             color.freed = true;
@@ -596,6 +655,7 @@ export async function applyGroupDeleteAllWithCore(input: {
       readback: { confirmed: !divergences.length, divergences },
       complete,
       notices,
+      architect: { applied: architectApplied },
     };
   } finally {
     inFlight.delete(lockKey);

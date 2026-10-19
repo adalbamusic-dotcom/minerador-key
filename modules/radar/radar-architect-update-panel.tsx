@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useNoticeBridge } from "@/components/global-notice-center";
+import { InfoHint } from "@/components/info-hint";
 import {
   RADAR_ARCHITECT_ADOPT_BUTTON,
   RADAR_ARCHITECT_ADOPT_LINKS_BUTTON,
@@ -36,7 +38,10 @@ const botao = "inline-flex min-h-10 items-center justify-center rounded-md borde
 const botaoPrincipal = "inline-flex min-h-10 items-center justify-center rounded-md border border-context-accent px-3 py-2 text-sm font-medium text-foreground transition-colors hover:text-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50";
 const bloco = "rounded-md border border-divider bg-surface-subtle p-3";
 
-type Desfecho = { articleId: string; status: string; updateKind?: string; title?: string; reason?: string; from?: number; to?: number; fromGraphVersion?: number | null; toGraphVersion?: number; redo?: string[] };
+type Desfecho = { articleId: string; status: string; updateKind?: string; title?: string; reason?: string; from?: number; to?: number; fromGraphVersion?: number | null; toGraphVersion?: number; redo?: string[]; refreeze?: boolean };
+
+/** 2026-10-18 · O "i" do botão de adotar: o que a confirmação faz, inclusive o congelamento novo. */
+export const RADAR_ARCHITECT_ADOPT_HINT = "Leva os artigos marcados à versão nova do Arquiteto sem reenviar nada. Se a investigação já estava congelada e a principal ficou, a mesma confirmação segue sozinha: pesquisa só o que falta (cache primeiro, 4 lentes), congela de novo pelo \"Finalizar\" de sempre e organiza o artigo-modelo. O custo de cada artigo está na prévia, em \"Custo\". A investigação antiga fica no histórico.";
 
 /** A marcação é por atualização: o mesmo artigo pode ter a versão nova do ArticleDNA e os links novos. */
 const tipoDe = (item: Pick<RadarArchitectUpdatePreviewItem, "updateKind">) => item.updateKind ?? "article_dna";
@@ -46,12 +51,14 @@ const chaveDe = (item: Pick<RadarArchitectUpdatePreviewItem, "updateKind" | "art
 function textoDoDesfecho(item: Desfecho): string {
   if (item.status !== "adopted") return `${item.title || item.articleId}: ${item.reason}`;
   if (item.updateKind === "links") return `${item.title}: links do grafo v${item.toGraphVersion} (era ${typeof item.fromGraphVersion === "number" ? `v${item.fromGraphVersion}` : "o do envio"}). A pesquisa e o pacote ficam.`;
+  if (item.refreeze) return `${item.title}: agora na v${item.to} (era v${item.from}). Investigação reaberta: o congelamento novo segue agora (pesquisa do que falta, análise, congelamento e artigo-modelo) — acompanhe na faixa do lote.`;
   return `${item.title}: agora na v${item.to} (era v${item.from}).${item.redo?.length ? ` Para refazer: ${item.redo.join(" ")}` : ""}`;
 }
 
 /** A prévia da marca (só leitura): os itens do Radar atrás de uma versão aprovada mais nova do ArticleDNA. */
 async function lerAtualizacoesDoArquiteto(brandId: string, sinal: AbortSignal): Promise<RadarArchitectUpdatePreviewItem[]> {
-  const resposta = await fetch(`/api/editorial/radar-architect-update?brandId=${encodeURIComponent(brandId)}`, { headers: { Accept: "application/json" }, signal: sinal });
+  /* 2026-10-18 · a tela continua o congelamento novo: a investigação congelada (principal igual) é adotável aqui. */
+  const resposta = await fetch(`/api/editorial/radar-architect-update?brandId=${encodeURIComponent(brandId)}&continueOnScreen=1`, { headers: { Accept: "application/json" }, signal: sinal });
   const corpo = await resposta.json().catch(() => ({}));
   if (!resposta.ok || !corpo?.ok) throw new Error(corpo?.error || "Não foi possível ler as atualizações do Arquiteto.");
   return Array.isArray(corpo.items) ? corpo.items as RadarArchitectUpdatePreviewItem[] : [];
@@ -61,14 +68,20 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
   brandId: string | null;
   /** Os artigos que a planilha mostra (o recorte da cor vale aqui). */
   articleIds: readonly string[];
-  /** Depois da adoção confirmada pelo servidor: o aviso e a releitura da mesa. */
-  onAdopted: (message: string) => void | Promise<void>;
+  /**
+   * Depois da adoção confirmada pelo servidor: o aviso e a releitura da mesa.
+   * 2026-10-18 · `refreezeArticleIds`: os artigos reabertos que a página leva
+   * ao congelamento novo pelo "Pesquisar e finalizar" de sempre.
+   */
+  onAdopted: (message: string, refreezeArticleIds?: string[]) => void | Promise<void>;
 }) {
   const [itens, setItens] = useState<RadarArchitectUpdatePreviewItem[]>([]);
   const [aberto, setAberto] = useState(false);
   const [marcados, setMarcados] = useState<Set<string>>(new Set());
   const [estado, setEstado] = useState<"" | "gravando">("");
   const [erro, setErro] = useState<string | null>(null);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a falha de leitura e a da adoção vão para o sino; as linhas da tela saíram. */
+  useNoticeBridge({ notice: erro || "", module: "radar", area: "Radar · Atualização do Arquiteto", title: "Radar · Atualização do Arquiteto", fallbackSeverity: "ERROR" });
   const [desfechos, setDesfechos] = useState<Desfecho[]>([]);
   const [rodada, setRodada] = useState(0);
   const chave = useMemo(() => [...articleIds].sort().join(","), [articleIds]);
@@ -126,6 +139,7 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
           articleIds: selecionados.filter(item => tipoDe(item) === "article_dna").map(item => item.articleId),
           ...(linkArticleIds.length ? { linkArticleIds } : {}),
           decisionHash,
+          continueOnScreen: true,
         }),
       });
       const corpo = await resposta.json().catch(() => ({}));
@@ -140,7 +154,9 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
         ...(linksAdotados ? [`${linksAdotados} artigo(s) passaram a transportar os links novos do Arquiteto, sem refazer a pesquisa (confirmado pelo servidor)`] : []),
       ];
       if (recusados.length) partes.push(`${recusados.length} recusado(s): ${recusados.map(item => item.reason).join(" ")}`);
-      await onAdopted(partes.join(" · "));
+      const congelarDeNovo = lista.filter(item => item.status === "adopted" && item.updateKind !== "links" && item.refreeze).map(item => item.articleId);
+      if (congelarDeNovo.length) partes.push(`${congelarDeNovo.length} com a investigação reaberta: o congelamento novo segue agora, pelo "Pesquisar e finalizar" de sempre`);
+      await onAdopted(partes.join(" · "), congelarDeNovo);
       setRodada(valor => valor + 1);
     } catch (falha) {
       setErro(falha instanceof Error ? falha.message : "A adoção não foi concluída.");
@@ -149,9 +165,7 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
     }
   };
 
-  if (!brandId || (!itens.length && !desfechos.length)) {
-    return erro ? <p className="mt-1 text-sm text-warning" role="status" data-testid="radar-architect-update-error">{erro}</p> : null;
-  }
+  if (!brandId || (!itens.length && !desfechos.length)) return null;
 
   const ocupado = Boolean(estado);
   return <div className="mt-2 space-y-2" data-testid="radar-architect-update">
@@ -165,7 +179,6 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
     </ul>}
     {aberto && itens.length > 0 && <div className={`${bloco} space-y-3`} role="region" aria-label={RADAR_ARCHITECT_UPDATE_LABEL} data-testid="radar-architect-update-panel">
       <p className="text-sm leading-6 text-text-muted">A prévia é leitura e não altera nada. O Radar se adapta ao Arquiteto: não reagrupa, não troca a principal por conta própria e não muda slug, canonical nem URL publicados. Links novos não pedem pesquisa nova: links não mudam a SERP. Desmarque o que não quer adotar agora.</p>
-      {erro && <p className="text-sm text-warning" role="status" data-testid="radar-architect-update-error">{erro}</p>}
       {porSilo.map(grupo => {
         const adotaveis = grupo.items.filter(item => item.adoptable);
         const todos = adotaveis.length > 0 && adotaveis.every(item => marcados.has(chaveDe(item)));
@@ -197,10 +210,11 @@ export function RadarArchitectUpdatePanel({ brandId, articleIds, onAdopted }: {
           </ul>
         </section>;
       })}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={botaoPrincipal} disabled={ocupado || !selecionados.length} onClick={() => void adotar()} data-testid="radar-architect-update-confirm">
           {estado === "gravando" ? "Adotando…" : `${textoDoBotao} (${selecionados.length})`}
         </button>
+        <InfoHint title={RADAR_ARCHITECT_ADOPT_BUTTON} description={RADAR_ARCHITECT_ADOPT_HINT} side="top" align="start" />
         <button type="button" className={botao} disabled={estado === "gravando"} onClick={() => { setAberto(false); setErro(null); }} data-testid="radar-architect-update-close">Fechar</button>
       </div>
     </div>}

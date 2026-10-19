@@ -42,7 +42,7 @@ import { readPlatformState, readPublishedPagesForMatching, topicCandidatesFrom }
 import { createMineradorArquitetoHandoff } from "./arquiteto-workspace";
 import { PublishedReinforcementRequestSchema, handlePublishedReinforcement } from "./arquiteto-published-reinforcement";
 import { publishedReinforcementReadDeps } from "./arquiteto-published-reinforcement-deps";
-import { applyKeywordDecisionEntries, constrainKeywordSnapshot, keywordDecisionBase, keywordDecisionEntries, readDecisionKeywords, runKeywordLogicWithCore, type DecisionKeywordRow } from "./minerador-keyword-decision-core";
+import { applyKeywordDecisionEntries, constrainKeywordSnapshot, keywordSnapshotStillCurrent, keywordDecisionBase, keywordDecisionEntries, readDecisionKeywords, runKeywordLogicWithCore, type DecisionKeywordRow } from "./minerador-keyword-decision-core";
 import { handleDifferentiationPlan } from "./arquiteto-differentiation";
 import { readMcpRuntimeConfig } from "./mcp-runtime-config";
 import { resolvePipelineContext } from "./pipeline-runtime";
@@ -139,6 +139,10 @@ async function persistSemanticDecision(input: {
       results.push({ id: update.id, outcome: "stale", reason: "subject_release_required" });
       continue;
     }
+    if (!await keywordSnapshotStillCurrent(db, input.brandId, current)) {
+      results.push({ id: update.id, outcome: "stale", reason: "compare_and_swap_failed" });
+      continue;
+    }
     const saved = await constrainKeywordSnapshot(
       db.from("minerador_keywords").update({ analise_semantica: guarded.semantic })
         .eq("id", update.id).eq("brand_id", input.brandId).is("deleted_at", null),
@@ -206,7 +210,9 @@ const SubjectCadastroDestinationInput = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("new_silo") }).strict(),
   z.object({ kind: z.literal("existing_silo"), groupId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("published"), url: z.string().trim().min(1).max(2048) }).strict(),
-]).describe("Destino: { kind: 'new_silo' } (padrão), { kind: 'existing_silo', groupId } (acrescenta artigos; os gravados ficam) ou { kind: 'published', url } (o Assunto vai para a página publicada e as keywords entram como reforço dela).");
+  // 2026-10-18 · SDD sdd-assunto-pela-principal-e-volume-2026-10-18 §6.2-a / §6.4: o mesmo núcleo do card.
+  z.object({ kind: z.literal("keyword"), keywordId: z.string().uuid().optional(), keyword: z.string().trim().min(1).max(400).optional(), basis: z.enum(["zero", "low"]).nullable().optional() }).strict(),
+]).describe("Destino: { kind: 'new_silo' } (padrão), { kind: 'existing_silo', groupId } (acrescenta artigos; os gravados ficam), { kind: 'published', url } (o Assunto vai para a página publicada; as keywords entram como reforço dela — linha sem keyword = a página vira o próprio Assunto, e o título gravado pode ser corrigido) ou { kind: 'keyword', keywordId, basis? } (Keyword sem Silo: o Assunto — título e detalhes — mora na própria keyword, sem plano nem trava; basis 'low' = usar a keyword de volume baixo como Assunto; o grupo é ignorado).");
 
 /*
  * 2026-10-12 · F6 (decisão do dono) · o grupo do plano é a COR: a cor que já
@@ -922,7 +928,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     inputSchema: z.object({
       brandId: brandIdInput,
       mode: z.enum(["read", "preview", "apply"]),
-      groupId: z.string().uuid().describe("O grupo (cor) das linhas-título."),
+      groupId: z.union([z.string().uuid(), z.literal("sem-grupo")]).describe("O grupo (cor) das linhas-título, ou 'sem-grupo' (2026-10-18): o Assunto anterior sem cor passa a morar na keyword escolhida, sem Silo nem plano."),
       silo: z.object({ name: z.string().trim().min(1).max(200), slug: z.string().trim().max(200).nullable().optional(), objective: z.string().max(4000).nullable().optional() }).strict().nullable().optional().describe("Só quando o grupo ainda não tem plano (padrão: o do rascunho)."),
       rows: z.array(z.object({
         fromKeywordId: z.string().uuid(),
@@ -1536,7 +1542,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       "Quando o Arquiteto aprova uma versão nova de um artigo que já está no Radar, o item mostra 'Atualização disponível do Arquiteto · vN → vM' (rótulo do Radar, diferente do 'Atualização disponível' da publicação). mode=preview lista os itens atrás, o que mudou (principal, slug, keywords, papel, promessa/escopo, Assunto), a classe (mesma base de pesquisa, composição mudou, principal mudou), o que continua valendo, o que fica para refazer, o custo e quem é recusado e por quê.",
       "Mostre a prévia ao usuário; só depois do aceite explícito chame mode=apply com os mesmos articleIds (ou o mesmo siloId) e o decisionHash da prévia, e userConfirmation com as palavras do usuário. Desmarcar um artigo é a recusa por item: tire-o de articleIds e gere a prévia de novo para ter o hash daquele conjunto.",
       "A adoção troca o item para a versão nova pelo mesmo caminho do envio, reaproveita a investigação que continua válida numa versão nova da análise e marca o que precisa ser refeito; a releitura do servidor confirma. Nada pago e nada de IA na adoção; refazer uma pesquisa (quando a prévia diz) é na tela, com o custo no botão.",
-      "Recusas: investigação congelada, pacote aprovado ou enviado ao Redator (a troca só depois de um congelamento novo, que esta fase ainda não faz: o item e os entregáveis seguem na versão enviada), slug publicado que mudaria, Silo não resolvido. O Radar não reagrupa, não troca a principal por conta própria nem muda slug, canonical ou URL publicada.",
+      "Recusas aqui: investigação congelada, pacote aprovado ou enviado ao Redator (a troca só depois de um congelamento novo: o item e os entregáveis seguem na versão enviada), slug publicado que mudaria, Silo não resolvido. Desde 2026-10-18, com o Google congelado e a principal e o slug iguais, a adoção com congelamento novo é feita na tela do Radar ('Ver e adotar' → 'Adotar a versão nova'), que pesquisa só o que falta, congela de novo e organiza o artigo-modelo, com o custo na prévia: indique esse caminho ao usuário. O Radar não reagrupa, não troca a principal por conta própria nem muda slug, canonical ou URL publicada.",
       "Links (2026-10-14): quando o grafo de links aprovado vigente do Silo é mais novo que o transportado pelo item, a prévia traz também 'Atualização disponível do Arquiteto · links · grafo vA → vB' (updateKind=links, classe links_changed), com os links que entram e saem por destino, a obrigação (obrigatório no corpo, no corpo se a seção tratar, trilha 'Continue no Silo') e quem aponta para o artigo. Adotar troca só os links do item, sem refazer a pesquisa e sem nada pago (links não mudam a SERP), também em item finalizado, aprovado ou enviado ao Redator; o artigo-modelo e o CSV leem a malha nova na leitura. kinds escolhe o que aplicar (padrão: as duas); com uma só, use o hash dela em decisionHashByKind.",
     ].join(" "),
     inputSchema: z.object({

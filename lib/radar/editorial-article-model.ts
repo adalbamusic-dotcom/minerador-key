@@ -486,7 +486,39 @@ function territorioDoArtigo(context: RadarArticleResearchContext) {
   const assunto = radarSubjectStems(context);
   if (assunto?.phrase.length) exigidos.push({ texto: assunto.subject.phrase, raizes: assunto.phrase, assunto: true });
 
-  return { principal, raizes, exigidos, genericas };
+  /*
+   * 2026-10-18 · AS SIGLAS DA IDENTIDADE. As raízes semânticas só veem palavras
+   * de quatro letras ou mais: "CEP" em "internet no meu cep" e "TIM" em "claro
+   * vivo ou tim internet residencial" sumiam do território, e "Como Funciona a
+   * Busca de Internet por CEP?" saía "fora do escopo: pertence a outro artigo"
+   * no próprio artigo do CEP (só "internet" sobrava, e ela é cenário).
+   */
+  const curtas = siglasDaIdentidade([
+    ...context.resolvedKeywordTexts,
+    ...context.editorialTopics,
+    context.article.subject?.phrase || null,
+  ]);
+
+  return { principal, raizes, exigidos, genericas, curtas };
+}
+
+/*
+ * 2026-10-18 · As palavras curtas (2 ou 3 caracteres, com letra) que a
+ * identidade do artigo declara — keyword, tópico declarado e Assunto: "cep",
+ * "tim", "tv", "5g". Preposição, artigo e pronome curtos não são sigla. Só
+ * entram na aderência ao território, nunca nas raízes do agrupamento.
+ */
+const CURTAS_VAZIAS = new Set([
+  "a", "o", "e", "as", "os", "um", "de", "da", "do", "em", "no", "na", "ao", "aos", "por", "com", "sem", "que", "se",
+  "seu", "sua", "meu", "teu", "mais", "ou", "ja", "nao", "sao", "the", "of", "and", "for", "via", "ate", "pra", "pro",
+  "dos", "das", "nos", "nas", "num", "uma", "uns", "lhe", "eu", "tu", "ele", "ela", "qual", "bom", "boa", "mau", "mal",
+  "tem", "ter", "ser", "vai", "ver", "faz", "dar", "ir", "ha", "foi", "sei", "sim", "so", "nem", "mas", "mes", "ano", "dia",
+]);
+function siglasDe(valor: string | null | undefined): string[] {
+  return normalizar(String(valor || "")).split(" ").filter(palavra => palavra.length >= 2 && palavra.length <= 3 && /[a-z]/.test(palavra) && !CURTAS_VAZIAS.has(palavra));
+}
+function siglasDaIdentidade(textos: ReadonlyArray<string | null | undefined>): Set<string> {
+  return new Set(textos.flatMap(siglasDe));
 }
 
 /**
@@ -1453,6 +1485,16 @@ export function buildRadarEditorialArticleModel(input: {
   const ruidosos: Array<{ candidato: RadarSectionCandidate; motivo: string }> = [];
   const validos = observados.filter(candidato => {
     const raizes = new Set(radarSemanticStems(candidato.workingTitle));
+    /*
+     * 2026-10-18 · FAQ NÃO VIRA SEÇÃO (AGENTS §13). Com a sigla da identidade no
+     * território, "Perguntas Frequentes Sobre Internet por CEP" deixou de ser
+     * "fora do escopo" no artigo do CEP — e não pode virar seção sugerida: fica
+     * como evidência, com o motivo.
+     */
+    if (/\b(faq|perguntas frequentes|d[uú]vidas frequentes)\b/i.test(candidato.workingTitle)) {
+      ruidosos.push({ candidato, motivo: "FAQ, que não integra o fluxo" });
+      return false;
+    }
     if (territorio.exigidos.some(item => item.assunto && item.raizes.every(raiz => raizes.has(raiz)))) return true;
     const motivo = radarEditorialHeadingNoiseReason(candidato.workingTitle, contextoDoRuido);
     /*
@@ -1502,7 +1544,15 @@ export function buildRadarEditorialArticleModel(input: {
     const lider = [...grupo.candidatos].sort((esquerda, direita) =>
       direita.marketEvidence.pages - esquerda.marketEvidence.pages)[0];
 
-    const alinhado = radarAdheresToCore({ stems: grupo.raizes, core: territorio.raizes, ubiquitous: onipresentes });
+    /* 2026-10-18 · a sigla da identidade ("CEP", "TIM") conta como raiz do território (sem ela, "Busca de Internet por CEP" ficava fora no artigo do CEP). */
+    const siglasDoGrupo = territorio.curtas.size
+      ? [...new Set(grupo.candidatos.flatMap(candidato => siglasDe(candidato.workingTitle)))].filter(sigla => territorio.curtas.has(sigla))
+      : [];
+    const alinhado = radarAdheresToCore({
+      stems: siglasDoGrupo.length ? [...grupo.raizes, ...siglasDoGrupo] : grupo.raizes,
+      core: siglasDoGrupo.length ? new Set([...territorio.raizes, ...siglasDoGrupo]) : territorio.raizes,
+      ubiquitous: onipresentes,
+    });
     const serve = serveAIntencao(lider.workingTitle, intencao);
     const evidenciaBasta = grupo.pages >= PISO_DE_EVIDENCIA;
 

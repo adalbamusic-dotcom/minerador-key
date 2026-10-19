@@ -181,6 +181,23 @@ export function radarOperationalStatus(input: {
 
 /* ============================ o card Pesquisa =========================== */
 
+type RadarFrozenBundleView = NonNullable<RadarDeepResearchView["finalizedBundle"]>;
+
+/**
+ * 2026-10-18 · O MODELO COMPETITIVO DE UMA INVESTIGAÇÃO CONGELADA.
+ *
+ * A leitura viva (`observed.sufficiency`) conta domínios e conceitos sobre as
+ * páginas extraídas — e a mesa entrega a versão sem elas (corridas fora da
+ * linha; a congelada ainda é compactada), enquanto o readback por artigo as
+ * devolve. O mesmo artigo dizia "Pronto" e "Parcial" conforme o que tinha
+ * chegado. Congelada, quem responde é a suficiência gravada no pacote — a
+ * mesma que vai ao Redator: pronta só a amostra suficiente, sem insuficiência
+ * declarada ao encerrar.
+ */
+export function radarFrozenModelReady(congelado: RadarFrozenBundleView): boolean {
+  return congelado.conclusion !== "INSUFFICIENT_BUT_FINALIZABLE" && congelado.model.sufficiency === "SUFFICIENT";
+}
+
 /**
  * O CARD COLAPSADO, INTEIRO.
  *
@@ -229,9 +246,9 @@ export function buildRadarResearchCardSummary(input: {
     : view.observed.sample;
 
   const modeloPronto = amostra.comparablePages > 0;
-  const insuficienteAoCongelar = congelado?.conclusion === "INSUFFICIENT_BUT_FINALIZABLE";
+  /* 2026-10-18 · congelada, o modelo é o congelado (`radarFrozenModelReady`): a leitura viva muda com o transporte. */
   const modelo = modeloPronto
-    ? !insuficienteAoCongelar && view.observed.sufficiency.level === "GOOD"
+    ? (congelado ? radarFrozenModelReady(congelado) : view.observed.sufficiency.level === "GOOD")
       ? { label: "Pronto", tone: "success" as const }
       : { label: "Parcial", tone: "warning" as const }
     : { label: "Não iniciado", tone: "neutral" as const };
@@ -626,6 +643,8 @@ export type RadarReportSummary = {
   checks: RadarReportCheck[];
   /** O que impede de considerar a investigação concluída. Vazio quando nada impede. */
   blockers: string[];
+  /** 2026-10-18 · Investigação viva cuja amostra ainda não chegou à tela: as verificações dela estão "carregando". */
+  loading: boolean;
 };
 
 const REPORT_TONE: Record<RadarReportCheckState, RadarOperationalTone> = {
@@ -683,6 +702,15 @@ export function buildRadarReportSummary(input: {
    * prontidão.
    */
   articleBlueprint?: "APPROVED" | "MISSING" | null;
+  /**
+   * 2026-10-18 · Aditivo: a amostra da versão corrente está carregada nesta
+   * tela? A mesa entrega a versão LEVE (`extractions: []` com `extractionIds`
+   * gravados); só o readback por artigo devolve as páginas. `false` numa
+   * investigação viva deixa as verificações da amostra pendentes
+   * ("carregando") em vez de "não se aplica". Ausente = carregada (como antes).
+   * Congelada, o pacote responde e isto não pesa.
+   */
+  sampleLoaded?: boolean;
 }): RadarReportSummary {
   const observed = input.observed;
   /*
@@ -693,13 +721,49 @@ export function buildRadarReportSummary(input: {
    * investigação, e a que o Redator vai receber é a congelada.
    */
   const congelado = input.view.finalizedBundle;
+  /*
+   * 2026-10-18 · CONGELADA, A FOTOGRAFIA RESPONDE POR TODAS AS VERIFICAÇÕES.
+   *
+   * Só `frozen` e `handoff` liam o pacote; links, fontes, especialista,
+   * descoberta, esqueleto e modelo liam a leitura VIVA — montada sobre as
+   * páginas, que a mesa entrega sem (versão leve, compactada quando congelada)
+   * e o readback por artigo entrega com. A planilha dizia "83% · 5 de 8" e
+   * "50% · 2 de 6" sobre o mesmo artigo finalizado. Agora cada número de uma
+   * investigação congelada sai do que foi congelado, e a leitura viva só
+   * responde enquanto a investigação está aberta.
+   */
+  const carregando = !congelado && input.sampleLoaded === false;
+  const CARREGANDO = "Carregando a amostra desta investigação…";
   const competitivo = buildRadarCompetitiveSummary(observed);
-  const links = buildRadarInternalLinkSummary(observed);
-  const autoridade = buildRadarAuthoritySummary(observed);
-  const descoberta = buildRadarDiscoverySummary(observed.aiDiscovery);
+  const links = congelado ? radarFrozenInternalLinkSummary(congelado) : buildRadarInternalLinkSummary(observed);
+  const autoridadeViva = buildRadarAuthoritySummary(observed);
+  const autoridade = congelado
+    ? {
+      ...autoridadeViva,
+      /* As fontes verificadas ficaram no pacote; as observadas, no resumo gravado ao finalizar. */
+      verifiedSources: congelado.authority.verifiedSources.filter(item => item.verified).length,
+      distinctSources: Math.max(congelado.authority.verifiedSources.length, input.view.record?.summary?.externalSourceCandidates ?? 0),
+      specialistPoints: congelado.authority.specialistRequirements.length,
+      conflicts: congelado.authority.marketVsFactConflicts.length,
+    }
+    : autoridadeViva;
+  const descobertaViva = buildRadarDiscoverySummary(observed.aiDiscovery);
+  const descoberta = congelado
+    ? {
+      ...descobertaViva,
+      applicable: congelado.discovery.applicable,
+      funnelNote: congelado.discovery.required
+        ? "Obrigatório neste estágio de funil."
+        : congelado.discovery.applicable ? "Aplicável como contexto neste estágio." : "Não se aplica a este estágio de funil nesta investigação congelada.",
+      coreQuestions: congelado.discovery.coreQuestions,
+      answersNeedingClarity: congelado.discovery.answerableUnits.length,
+      unitsNeedingEvidence: congelado.discovery.answerableUnits.filter(unit => unit.blockedBy === "FACTUAL_EVIDENCE" || unit.blockedBy === "CONFLICT").length,
+    }
+    : descobertaViva;
   const blockers: string[] = [];
 
-  const amostra = observed.sample.comparablePages;
+  const amostra = congelado ? congelado.sample.comparablePages : observed.sample.comparablePages;
+  const consultasDaAmostra = congelado ? congelado.search.canonicalQueries + congelado.search.auxiliaryQueries : observed.sample.queriesExecuted;
   /* §8 · investigação de vídeo congelada responde por si. */
   const videoCongelado = input.youtube?.finalized ? input.youtube : null;
   /* §33 · a investigação comercial congelada também responde por si. */
@@ -711,10 +775,12 @@ export function buildRadarReportSummary(input: {
     }
     : videoCongelado
     ? { id: "research", question: "Pesquisa pronta?", state: "READY", detail: `${videoCongelado.videos} vídeo(s) no universo competitivo em ${videoCongelado.queries} consulta(s), congelados na investigação.` }
+    : carregando
+      ? { id: "research", question: "Pesquisa pronta?", state: "PENDING", detail: CARREGANDO }
     : amostra > 0
-      ? { id: "research", question: "Pesquisa pronta?", state: "READY", detail: `${amostra} página(s) comparável(is) em ${observed.sample.queriesExecuted} consulta(s).` }
+      ? { id: "research", question: "Pesquisa pronta?", state: "READY", detail: `${amostra} página(s) comparável(is) em ${consultasDaAmostra} consulta(s).` }
       : { id: "research", question: "Pesquisa pronta?", state: "PENDING", detail: "Nenhuma página comparável foi analisada nesta investigação." };
-  if (pesquisa.state === "PENDING") blockers.push("A investigação ainda não tem amostra comparável.");
+  if (pesquisa.state === "PENDING" && !carregando) blockers.push("A investigação ainda não tem amostra comparável.");
 
   const modelo: RadarReportCheck = amazonCongelada
     ? amazonCongelada.blueprintFrozen
@@ -724,8 +790,14 @@ export function buildRadarReportSummary(input: {
     ? videoCongelado.multimodalFrozen
       ? { id: "model", question: "Modelo competitivo pronto?", state: "READY", detail: "Blueprint multiformato congelado: leitura das duas SERPs, cruzamento e saída editorial." }
       : { id: "model", question: "Modelo competitivo pronto?", state: "PARTIAL", detail: "Blueprint de vídeo congelado, sem a camada multiformato — não houve leitura do Google nesta investigação." }
+    : carregando
+      ? { id: "model", question: "Modelo competitivo pronto?", state: "PENDING", detail: CARREGANDO }
     : amostra === 0
       ? { id: "model", question: "Modelo competitivo pronto?", state: "PENDING", detail: "Depende da amostra." }
+      : congelado
+        ? radarFrozenModelReady(congelado)
+          ? { id: "model", question: "Modelo competitivo pronto?", state: "READY", detail: `${congelado.model.recurrentConcepts} conceito(s) recorrente(s) · ${congelado.model.gaps} lacuna(s) · ${congelado.model.conflicts} conflito(s).` }
+          : { id: "model", question: "Modelo competitivo pronto?", state: "PARTIAL", detail: congelado.acknowledgedInsufficiency || congelado.model.sufficiencyReasons[0] || "A amostra foi congelada como parcial." }
       : observed.sufficiency.level === "GOOD"
         ? { id: "model", question: "Modelo competitivo pronto?", state: "READY", detail: `${competitivo.recurrentConcepts} conceito(s) recorrente(s) · ${competitivo.gaps} lacuna(s) · ${competitivo.conflicts} conflito(s).` }
         : { id: "model", question: "Modelo competitivo pronto?", state: "PARTIAL", detail: observed.sufficiency.reasons[0] || competitivo.sufficiency };
@@ -740,24 +812,34 @@ export function buildRadarReportSummary(input: {
    */
   const linksCheck: RadarReportCheck = links.relatedDestinations === 0
     ? { id: "links", question: "Links planejados?", state: "NOT_REQUIRED", detail: "O grafo aprovado não relaciona este artigo a outras páginas." }
+    : carregando
+      ? { id: "links", question: "Links planejados?", state: "PENDING", detail: CARREGANDO }
     : links.resolvedApplications > 0
       ? { id: "links", question: "Links planejados?", state: "READY", detail: `${links.resolvedApplications} aplicação(ões) fundamentada(s) · ${links.recommendedOccurrences} ocorrência(s) recomendada(s)${links.unresolvedRelations ? ` · ${links.unresolvedRelations} relação(ões) sem contexto natural` : ""}.` }
       : { id: "links", question: "Links planejados?", state: "PARTIAL", detail: links.unresolvedNote || "As relações existem; a aplicação não foi fundamentada nesta rodada." };
 
-  const fontes: RadarReportCheck = autoridade.distinctSources === 0
+  const fontes: RadarReportCheck = carregando
+    ? { id: "sources", question: "Fontes verificadas?", state: "PENDING", detail: CARREGANDO }
+    : autoridade.distinctSources === 0
     ? { id: "sources", question: "Fontes verificadas?", state: "NOT_REQUIRED", detail: "Nenhuma citação externa foi observada na amostra." }
     : autoridade.verifiedSources > 0
       ? { id: "sources", question: "Fontes verificadas?", state: "READY", detail: `${autoridade.verifiedSources} de ${autoridade.distinctSources} fonte(s) verificada(s) durante a análise.` }
       : { id: "sources", question: "Fontes verificadas?", state: "PENDING", detail: `${autoridade.distinctSources} fonte(s) observada(s), nenhuma verificada nesta versão.` };
 
-  const especialista: RadarReportCheck = autoridade.specialistPoints === 0
+  const especialista: RadarReportCheck = carregando
+    ? { id: "specialist", question: "Especialista necessário?", state: "PENDING", detail: CARREGANDO }
+    : autoridade.specialistPoints === 0
     ? { id: "specialist", question: "Especialista necessário?", state: "NOT_REQUIRED", detail: "Nenhum ponto de revisão foi criado: não há dúvida factual nem conflito que justifique." }
     : { id: "specialist", question: "Especialista necessário?", state: "PENDING", detail: `${autoridade.specialistPoints} ponto(s) preparado(s), cada um com a pergunta já contextualizada.` };
-  if (autoridade.specialistPoints) blockers.push(`${autoridade.specialistPoints} ponto(s) dependem da contribuição de um profissional.`);
-  if (autoridade.conflicts) blockers.push(`${autoridade.conflicts} conflito(s) entre o que o mercado repete e o que a evidência permite afirmar.`);
-  if (descoberta.unitsNeedingEvidence) blockers.push(`${descoberta.unitsNeedingEvidence} necessidade(s) sensível(is) seguem sem fonte adequada.`);
+  if (autoridade.specialistPoints && !carregando) blockers.push(`${autoridade.specialistPoints} ponto(s) dependem da contribuição de um profissional.`);
+  if (autoridade.conflicts && !carregando) blockers.push(`${autoridade.conflicts} conflito(s) entre o que o mercado repete e o que a evidência permite afirmar.`);
+  if (descoberta.unitsNeedingEvidence && !carregando) blockers.push(`${descoberta.unitsNeedingEvidence} necessidade(s) sensível(is) seguem sem fonte adequada.`);
 
-  const descobertaCheck: RadarReportCheck = !descoberta.applicable
+  const descobertaCheck: RadarReportCheck = carregando
+    ? { id: "discovery", question: "Descoberta preparada?", state: "PENDING", detail: CARREGANDO }
+    : congelado && descoberta.applicable && !descoberta.unitsNeedingEvidence
+      ? { id: "discovery", question: "Descoberta preparada?", state: "READY", detail: `${descoberta.coreQuestions} pergunta(s) central(is) · ${descoberta.answersNeedingClarity} unidade(s) de resposta congelada(s).` }
+    : !descoberta.applicable
     ? { id: "discovery", question: "Descoberta preparada?", state: "NOT_REQUIRED", detail: descoberta.funnelNote }
     : descoberta.unitsNeedingEvidence
       ? { id: "discovery", question: "Descoberta preparada?", state: "PARTIAL", detail: `${descoberta.coreQuestions} pergunta(s) central(is) · ${descoberta.unitsNeedingEvidence} sem sustentação factual.` }
@@ -854,7 +936,22 @@ export function buildRadarReportSummary(input: {
    */
   const blueprint = input.view.blueprint;
   /* A seção da virada do Assunto é exigida, não observada: sozinha não faz dossiê (F3.1). */
-  const dossieEditorial: RadarReportCheck = !blueprint.sections.filter(secao => !radarIsSubjectTurnSection(secao.id)).length
+  const esqueletoCongelado = congelado?.blueprint || null;
+  const secoesCongeladas = esqueletoCongelado ? esqueletoCongelado.sections.filter(secao => !radarIsSubjectTurnSection(secao.id)).length : 0;
+  const dossieEditorial: RadarReportCheck = carregando
+    ? { id: "blueprint", question: "Esqueleto da SERP?", state: "PENDING", detail: CARREGANDO }
+    : congelado
+      ? !esqueletoCongelado
+        ? { id: "blueprint", question: "Esqueleto da SERP?", state: "PENDING", detail: "Esta investigação foi congelada sem o esqueleto da SERP." }
+        : !secoesCongeladas
+          ? { id: "blueprint", question: "Esqueleto da SERP?", state: "PENDING", detail: "O esqueleto congelado não tem seção sustentada pela amostra." }
+          : {
+            id: "blueprint",
+            question: "Esqueleto da SERP?",
+            state: esqueletoCongelado.readiness === "READY" ? "READY" : "PARTIAL",
+            detail: `Esqueleto congelado com ${secoesCongeladas} seção(ões). ${esqueletoCongelado.specialistBriefIds.length} pauta(s) para especialista · ${esqueletoCongelado.videoBriefIds.length} oportunidade(s) de vídeo.`,
+          }
+    : !blueprint.sections.filter(secao => !radarIsSubjectTurnSection(secao.id)).length
     ? { id: "blueprint", question: "Esqueleto da SERP?", state: "PENDING", detail: blueprint.readiness.reason }
     : {
       id: "blueprint",
@@ -870,8 +967,44 @@ export function buildRadarReportSummary(input: {
       ? { id: "videos", question: "Vídeos utilizados?", state: "READY", detail: `${input.videos.transcribed} de ${registrados} material(is) já viraram texto aproveitável.` }
       : { id: "videos", question: "Vídeos utilizados?", state: "PENDING", detail: `${registrados} material(is) registrado(s), nenhum transcrito: a transcrição ainda não existe como processo.` };
 
-  return { checks: [pesquisa, modelo, linksCheck, fontes, videos, especialista, descobertaCheck, dossieEditorial, congelamento, pacote], blockers };
+  return { checks: [pesquisa, modelo, linksCheck, fontes, videos, especialista, descobertaCheck, dossieEditorial, congelamento, pacote], blockers, loading: carregando };
 }
+
+/**
+ * 2026-10-18 · Os links de uma investigação congelada, pela mesma conta de
+ * `buildRadarInternalLinkSummary` — sobre o plano que o pacote guardou
+ * (`outgoing` já inclui a SiloPage), e não sobre o plano remontado das páginas.
+ */
+function radarFrozenInternalLinkSummary(congelado: RadarFrozenBundleView): RadarInternalLinkSummary {
+  const aplicacoes = congelado.links.outgoing;
+  const naoResolvidas = [...aplicacoes, ...congelado.links.incoming]
+    .filter(item => item.applicationStatus === "REQUIRED_RELATION_WITHOUT_SUPPORTED_PLACEMENT").length;
+  return {
+    relatedDestinations: congelado.links.relatedDestinations,
+    resolvedApplications: aplicacoes.filter(item => item.applicationStatus === "RESOLVED").length,
+    unresolvedRelations: naoResolvidas,
+    recommendedOccurrences: congelado.links.totalRecommendedLinks,
+    unresolvedNote: naoResolvidas
+      ? `${naoResolvidas} relação(ões) do grafo aprovado ainda não têm contexto suficientemente sustentado por esta investigação. A relação permanece; o que falta é onde aplicá-la.`
+      : null,
+  };
+}
+
+/**
+ * 2026-10-18 · A AMOSTRA DESTA VERSÃO ESTÁ NA TELA?
+ *
+ * A listagem da mesa traz a versão leve: `extractions: []` com os
+ * `extractionIds` gravados (as páginas moram em `radar_analysis_runs`). Só o
+ * readback por artigo devolve as páginas. Versão sem página nenhuma não tem o
+ * que esperar.
+ */
+export function radarAnalysisSampleLoaded(payload: { extractions?: readonly unknown[]; extractionIds?: readonly unknown[] } | null | undefined): boolean {
+  if (!payload) return true;
+  return (payload.extractions?.length || 0) > 0 || (payload.extractionIds?.length || 0) === 0;
+}
+
+/** 2026-10-18 · As entradas do Relatório que a LINHA conhece, montadas uma vez (coluna, card e painel). */
+export type RadarReportInputs = Pick<Parameters<typeof buildRadarReportSummary>[0], "videos" | "youtube" | "amazon" | "sampleLoaded">;
 
 /* ====================== os detalhes da pesquisa ========================= */
 

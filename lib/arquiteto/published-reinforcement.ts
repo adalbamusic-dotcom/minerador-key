@@ -32,7 +32,7 @@
  *
  * Domínio puro: sem banco, sem rede. Quem grava é o servidor, com releitura.
  */
-import { ArticleDNASchema, type ArchitectKeyword, type ArticleDNA, type ProvisionalArticleGroup, type SiloDNA, type VersionEnvelope, type VersionReference } from "./contracts.ts";
+import { ArticleDNASchema, type ArchitectKeyword, type ArticleDNA, type DeclaredSubject, type ProvisionalArticleGroup, type SiloDNA, type VersionEnvelope, type VersionReference } from "./contracts.ts";
 import { articleKeywordReference, deterministicArticleDnaPayload } from "./adapters.ts";
 import { guardPublishedArticleProposal } from "./published-guard.ts";
 import { editorialUnitTypeIsDerived } from "./unit-strategy.ts";
@@ -364,10 +364,15 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
     const recusarTroca = (reason: string) => { swap = { keywordId: facts.swapKeywordId, keyword: nome, state: "refused", reason }; };
     const post: PublishedPrimaryPost = page.post;
     const jaTrocada = facts.article?.payload.primaryKeywordDecision?.status === "confirmed" && facts.article.payload.principalKeywordId !== page.keywordId;
-    // Refazer a troca só quando a principal de agora contradiz o slug (e para outra keyword).
-    if (jaTrocada && (!trocaConfirmadaContradiz || facts.swapKeywordId === trocaConfirmada)) recusarTroca("A troca da principal já foi aplicada neste artigo.");
-    else if (post === "locked") recusarTroca("Posto \"Travado ao slug\": a principal fica; o artigo só recebe secundárias.");
-    else if (post !== "free") recusarTroca("O Posto não está declarado: declare \"Livre\" no Minerador antes de trocar.");
+    /*
+     * 2026-10-19 · com o Assunto declarado na página (a régua do refazedor, `proposePublishedPrimarySwap` com
+     * `pageSubject`): a troca do modo antigo é refeita quando a principal de agora não cabe no Assunto, o volume 0 da
+     * página libera mesmo "Travado ao slug" (dono, 18/10) e a página vira o Assunto (U18) — não fica secundária.
+     */
+    const peloAssunto = facts.swapProposal?.previousPrimaryBecomes === "assunto";
+    if (jaTrocada && !peloAssunto && (!trocaConfirmadaContradiz || facts.swapKeywordId === trocaConfirmada)) recusarTroca("A troca da principal já foi aplicada neste artigo.");
+    else if (post === "locked" && !peloAssunto) recusarTroca("Posto \"Travado ao slug\": a principal fica; o artigo só recebe secundárias.");
+    else if (post !== "free" && !peloAssunto) recusarTroca("O Posto não está declarado: declare \"Livre\" no Minerador antes de trocar.");
     else if (!facts.ranking) recusarTroca("Não deu para reler a SERP da página agora: a principal fica. Tente de novo depois.");
     else if (rankingBlocksSwap(facts.ranking)) recusarTroca("A página aparece no Google: a principal fica (página que ranqueia não troca de principal).");
     else if (!finais.has(facts.swapKeywordId)) recusarTroca(`"${nome}" não está no artigo nesta confirmação: marque-a como reforço também.`);
@@ -377,7 +382,9 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
     } else {
       const deQuem = facts.swapSource === "recorded" ? "Troca que você confirmou na confirmação anterior do Reforçar (gravada na mesa, esperando o ArticleDNA): " : "";
       const refeita = jaTrocada ? ` "${nomes.get(trocaConfirmada!) ?? trocaConfirmada}", que contradiz o slug, deixa de ser a principal e fica como secundária.` : "";
-      swap = { keywordId: facts.swapKeywordId, keyword: nome, state: "apply", reason: `${deQuem}"${nome}" assume a principal; "${page.keyword}" fica como secundária.${refeita}` };
+      swap = { keywordId: facts.swapKeywordId, keyword: nome, state: "apply", reason: peloAssunto
+        ? `${deQuem}"${nome}" assume a principal (Assunto pela principal: cabe no Assunto da página); "${page.keyword}" é o Assunto do artigo (sai das keywords; URL, slug e canonical ficam).${jaTrocada ? ` "${nomes.get(facts.article!.payload.principalKeywordId) ?? facts.article!.payload.principalKeywordId}" deixa de ser a principal e fica como secundária.` : ""}`
+        : `${deQuem}"${nome}" assume a principal; "${page.keyword}" fica como secundária.${refeita}` };
     }
   }
 
@@ -677,6 +684,8 @@ export function applyReinforcementSwap(input: {
    * principal de agora vira secundária. `currentPrincipalLabel` é o texto dela.
    */
   redo?: { currentPrincipalLabel: string } | null;
+  /** 2026-10-19 · o Assunto da página (U18): a página sai das keywords e vira o `subject` (a mesma montagem da mesa). */
+  pageSubject?: DeclaredSubject | null;
 }): { ok: true; payload: ArticleDNA } | { ok: false; reason: string } {
   const desfecho = decidePublishedPrimarySwap({
     proposal: input.proposal,
@@ -701,6 +710,7 @@ export function applyReinforcementSwap(input: {
       substituteLabel: input.proposal.substitute?.keyword ?? "",
       previousLabel: input.redo ? input.redo.currentPrincipalLabel : input.page.keyword,
       substituteMetrics: { volume: input.substituteVolume, resultCount: null, kgrScore: null },
+      ...(input.pageSubject ? { pageSubject: input.pageSubject } : {}),
     });
     return { ok: true, payload };
   } catch (error) {
@@ -712,14 +722,22 @@ export function applyReinforcementSwap(input: {
  * A releitura confirma a versão: a mesma principal, as mesmas keywords
  * (nenhuma a menos), e a identidade publicada intacta (slug, canonical, marca).
  */
-export function publishedReinforcementReadbackConfirms(input: { written: ArticleDNA; readback: ArticleDNA | null; previous: ArticleDNA | null }): boolean {
+export function publishedReinforcementReadbackConfirms(input: { written: ArticleDNA; readback: ArticleDNA | null; previous: ArticleDNA | null; confirmedExits?: readonly string[] }): boolean {
   const { written, readback, previous } = input;
   if (!readback) return false;
   const ids = (payload: ArticleDNA) => new Set(payload.keywordReferences.map(reference => String(reference.keywordId)));
   const escritas = ids(written);
   const relidas = ids(readback);
   const mesmas = escritas.size === relidas.size && [...escritas].every(id => relidas.has(id));
-  const nenhumaSumiu = !previous || [...ids(previous)].every(id => relidas.has(id));
+  /*
+   * 2026-10-18 · SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.3-g (G10; U12 SUBSTITUÍDO em parte): a versão
+   * nova do publicado pode tirar uma keyword em dois casos, sempre com a decisão do dono na prévia — a página que vira o
+   * Assunto (continua no artigo, no `subject`) e a secundária que contradiz o Assunto (vai para "não agrupadas"; vem em
+   * `confirmedExits`). Fora disso, continua: nenhuma a menos.
+   */
+  const saidas = new Set((input.confirmedExits ?? []).map(String));
+  const assunto = readback.subject?.keywordId ? String(readback.subject.keywordId) : null;
+  const nenhumaSumiu = !previous || [...ids(previous)].every(id => relidas.has(id) || id === assunto || saidas.has(id));
   return readback.principalKeywordId === written.principalKeywordId
     && readback.articleId === written.articleId
     && readback.brandId === written.brandId

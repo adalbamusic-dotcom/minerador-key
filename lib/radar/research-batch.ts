@@ -57,6 +57,13 @@ export type RadarResearchBatchCandidate = {
   /** Nível da suficiência: CONFLICTING_SEARCH_INTENT é decisão humana. */
   sufficiencyLevel?: string | null;
   sufficiencyHeadline?: string | null;
+  /**
+   * 2026-10-18 · O artigo-modelo da investigação vigente, quando a tela já
+   * sabe: "APPROVED" (concluído nesta sessão) ou "MISSING" (o envio recusou
+   * por falta dele). Ausente/nulo: a tela não sabe, e quem decide é o servidor
+   * ("só se faltar" — quem já tem não paga).
+   */
+  articleBlueprint?: "APPROVED" | "MISSING" | null;
 };
 
 export type RadarResearchBatchPlanItem =
@@ -73,12 +80,20 @@ export type RadarResearchBatchPlanItem =
     /** Teto de IA do artigo-modelo (só se faltar). */
     aiCallsCeiling: number;
   }
+  /**
+   * 2026-10-18 · Já finalizado, sem artigo-modelo concluído conhecido: o lote
+   * NÃO pesquisa (nada pago no DataForSEO) e só organiza o artigo-modelo, pelo
+   * mesmo pedido "só se faltar" do botão do artigo.
+   */
+  | { kind: "BLUEPRINT"; articleId: string; title: string; aiCallsCeiling: number }
   | { kind: "SKIP_FINALIZED"; articleId: string; title: string; reason: string }
   | { kind: "REFUSED"; articleId: string; title: string; reason: string };
 
 export type RadarResearchBatchPlan = {
   items: RadarResearchBatchPlanItem[];
   run: Array<Extract<RadarResearchBatchPlanItem, { kind: "RUN" }>>;
+  /** 2026-10-18 · Os finalizados que só organizam o artigo-modelo. */
+  blueprint: Array<Extract<RadarResearchBatchPlanItem, { kind: "BLUEPRINT" }>>;
   skipped: Array<Extract<RadarResearchBatchPlanItem, { kind: "SKIP_FINALIZED" }>>;
   refused: Array<Extract<RadarResearchBatchPlanItem, { kind: "REFUSED" }>>;
   serpCallsCeiling: number;
@@ -87,7 +102,7 @@ export type RadarResearchBatchPlan = {
 
 const CONFLITO_DE_INTENCAO = "CONFLICTING_SEARCH_INTENT";
 
-export const RADAR_RESEARCH_BATCH_FINALIZED_REASON = "Já finalizado: não é pesquisado nem pago de novo.";
+export const RADAR_RESEARCH_BATCH_FINALIZED_REASON = "Já finalizado e com o artigo-modelo concluído: não é pesquisado nem pago de novo.";
 
 function conflitoDeIntencao(headline: string | null | undefined): string {
   return `${headline || "Intenção da SERP em conflito com a declarada"}: a intenção observada na SERP pede a sua decisão antes de congelar. Abra o artigo e decida em Pesquisa.`;
@@ -107,7 +122,17 @@ export function planRadarResearchBatch(candidates: readonly RadarResearchBatchCa
     if (!artigo.articleId || vistos.has(artigo.articleId)) continue;
     vistos.add(artigo.articleId);
     const base = { articleId: artigo.articleId, title: artigo.title };
-    if (artigo.finalized) { items.push({ kind: "SKIP_FINALIZED", ...base, reason: RADAR_RESEARCH_BATCH_FINALIZED_REASON }); continue; }
+    /*
+     * 2026-10-18 (dono) · o "Organizar o artigo-modelo (N)" que era botão solto
+     * da barra entrou aqui: o finalizado sem artigo-modelo concluído conhecido
+     * não é mais pulado — só o artigo-modelo é organizado, sem pesquisa paga.
+     */
+    if (artigo.finalized) {
+      items.push(artigo.articleBlueprint === "APPROVED"
+        ? { kind: "SKIP_FINALIZED", ...base, reason: RADAR_RESEARCH_BATCH_FINALIZED_REASON }
+        : { kind: "BLUEPRINT", ...base, aiCallsCeiling: RADAR_ARTICLE_BLUEPRINT_MAX_AI_CALLS });
+      continue;
+    }
     if (artigo.mode !== "WEB") {
       items.push({ kind: "REFUSED", ...base, reason: "Este artigo está numa pesquisa de YouTube ou Amazon: o lote é da pesquisa Google. Siga pelo botão do artigo." });
       continue;
@@ -139,19 +164,24 @@ export function planRadarResearchBatch(candidates: readonly RadarResearchBatchCa
     });
   }
   const run = items.filter((item): item is Extract<RadarResearchBatchPlanItem, { kind: "RUN" }> => item.kind === "RUN");
+  const blueprint = items.filter((item): item is Extract<RadarResearchBatchPlanItem, { kind: "BLUEPRINT" }> => item.kind === "BLUEPRINT");
   return {
     items,
     run,
+    blueprint,
     skipped: items.filter((item): item is Extract<RadarResearchBatchPlanItem, { kind: "SKIP_FINALIZED" }> => item.kind === "SKIP_FINALIZED"),
     refused: items.filter((item): item is Extract<RadarResearchBatchPlanItem, { kind: "REFUSED" }> => item.kind === "REFUSED"),
     serpCallsCeiling: run.reduce((soma, item) => soma + item.serpCallsCeiling, 0),
-    aiCallsCeiling: run.reduce((soma, item) => soma + item.aiCallsCeiling, 0),
+    aiCallsCeiling: [...run, ...blueprint].reduce((soma, item) => soma + item.aiCallsCeiling, 0),
   };
 }
 
+/** 2026-10-18 · O "i" ao lado do botão: para que serve e como usar. */
+export const RADAR_RESEARCH_BATCH_HINT = "Para os artigos selecionados, em série e um por vez: pesquisa no Google o que falta (cache primeiro), analisa a concorrência e finaliza; e organiza o artigo-modelo da SERP que faltar — inclusive dos já finalizados, sem pesquisar de novo. O custo (DataForSEO e IA) é dito na prévia, e nada roda antes de \"Confirmar e pesquisar\". Quem já está finalizado e com o artigo-modelo concluído é pulado, sem custo.";
+
 /** O rótulo do botão da barra de lote: a ação e quantos artigos ela vai pesquisar. */
-export function radarResearchBatchButtonLabel(plan: Pick<RadarResearchBatchPlan, "run">): string {
-  const n = plan.run.length;
+export function radarResearchBatchButtonLabel(plan: Pick<RadarResearchBatchPlan, "run"> & Partial<Pick<RadarResearchBatchPlan, "blueprint">>): string {
+  const n = plan.run.length + (plan.blueprint?.length || 0);
   return `Pesquisar e finalizar (${n} artigo${n === 1 ? "" : "s"})`;
 }
 
@@ -162,7 +192,8 @@ export function radarResearchBatchConfirmation(plan: RadarResearchBatchPlan): st
   linhas.push(`${n} artigo(s) seguem, em série, um por vez, pela MESMA sequência do botão do artigo: "Iniciar Pesquisa Google" (quando falta) e "Analisar concorrência · e finaliza". Cada artigo termina finalizado e com o artigo-modelo da SERP organizado.`);
   linhas.push(`DataForSEO: no pior caso, até ${plan.serpCallsCeiling} chamada(s) — cache primeiro, nas 4 lentes: lente válida no cache não é paga, e a SERP principal já gravada é reaproveitada sem nova cobrança.`);
   linhas.push(`IA: até ${plan.aiCallsCeiling} chamada(s) para organizar o artigo-modelo (até ${RADAR_ARTICLE_BLUEPRINT_MAX_AI_CALLS} por artigo, só se faltar; um artigo por vez). A leitura das páginas da concorrência não consulta o buscador.`);
-  if (plan.skipped.length) linhas.push(`${plan.skipped.length} já finalizado(s): pulado(s), sem custo.`);
+  if (plan.blueprint.length) linhas.push(`${plan.blueprint.length} já finalizado(s) sem artigo-modelo: só o artigo-modelo é organizado (+ até ${RADAR_ARTICLE_BLUEPRINT_MAX_AI_CALLS} chamadas de IA cada), sem pesquisa paga de novo; quem já tiver o da investigação vigente não paga.`);
+  if (plan.skipped.length) linhas.push(`${plan.skipped.length} já finalizado(s) com o artigo-modelo concluído: pulado(s), sem custo.`);
   for (const item of plan.refused) linhas.push(`Fora do lote — "${item.title}": ${item.reason}`);
   linhas.push("Um artigo que parar não para os outros: o motivo fica escrito, e no fim a plataforma relê cada artigo no servidor para confirmar o que ficou finalizado.");
   return linhas;
@@ -229,19 +260,26 @@ export async function runRadarResearchBatch(input: {
   lastMessage?: () => string | null;
   onProgress?: (progress: RadarResearchBatchProgress) => void;
   maxStepsPerArticle?: number;
+  /**
+   * 2026-10-18 · Organiza o artigo-modelo dos finalizados que só precisam dele
+   * (`plan.blueprint`), em série, pelo mesmo pedido do botão do artigo ("só se
+   * faltar"). Sem ele, esses artigos param com o motivo.
+   */
+  organizeBlueprints?: (articleIds: string[]) => Promise<{ done: readonly string[]; failed: ReadonlyArray<{ articleId: string; message: string }> }>;
 }): Promise<RadarResearchBatchResult> {
   const itens: RadarResearchBatchItemProgress[] = input.plan.items.map(item => ({
     articleId: item.articleId,
     title: item.title,
-    status: item.kind === "RUN" ? "QUEUED" : item.kind === "SKIP_FINALIZED" ? "SKIPPED" : "REFUSED",
+    status: item.kind === "RUN" || item.kind === "BLUEPRINT" ? "QUEUED" : item.kind === "SKIP_FINALIZED" ? "SKIPPED" : "REFUSED",
     step: null,
-    reason: item.kind === "RUN" ? null : item.reason,
+    reason: item.kind === "RUN" || item.kind === "BLUEPRINT" ? null : item.reason,
     steps: [],
   }));
-  if (!input.confirmed || !input.plan.run.length) return { started: false, items: itens };
+  const soArtigoModelo = input.plan.blueprint || [];
+  if (!input.confirmed || (!input.plan.run.length && !soArtigoModelo.length)) return { started: false, items: itens };
 
   const limite = input.maxStepsPerArticle ?? PASSOS_POR_ARTIGO;
-  const total = input.plan.run.length;
+  const total = input.plan.run.length + soArtigoModelo.length;
   let posicao = 0;
   const emitir = (ativo: boolean) => input.onProgress?.({ active: ativo, items: itens.map(item => ({ ...item, steps: [...item.steps] })), position: ativo ? posicao : 0, total });
   const ultimaFrase = () => (input.lastMessage?.() || "").trim();
@@ -305,6 +343,26 @@ export async function runRadarResearchBatch(input: {
       emitir(true);
     }
   }
+  /* 2026-10-18 · Depois das pesquisas, os finalizados que só precisam do artigo-modelo. */
+  if (soArtigoModelo.length) {
+    const ids = soArtigoModelo.map(item => item.articleId);
+    const desteGrupo = itens.filter(item => ids.includes(item.articleId));
+    for (const item of desteGrupo) item.status = "RUNNING";
+    posicao = total;
+    emitir(true);
+    try {
+      if (!input.organizeBlueprints) throw new Error("O artigo-modelo não pôde ser organizado por este lote.");
+      const resultado = await input.organizeBlueprints(ids);
+      for (const item of desteGrupo) {
+        const falha = resultado.failed.find(atual => atual.articleId === item.articleId);
+        if (falha) { item.status = "REFUSED"; item.reason = `Artigo-modelo: ${falha.message}`; }
+        else if (resultado.done.includes(item.articleId)) { item.status = "FINALIZED"; item.reason = null; }
+        else { item.status = "REFUSED"; item.reason = "O artigo-modelo não foi confirmado."; }
+      }
+    } catch (error) {
+      for (const item of desteGrupo) { item.status = "REFUSED"; item.reason = error instanceof Error && error.message ? error.message : "O artigo-modelo falhou sem mensagem."; }
+    }
+  }
   emitir(false);
   return { started: true, items: itens };
 }
@@ -347,7 +405,7 @@ export function radarResearchBatchSummary(
   if (recusados.length) partes.push(`${recusados.length} parado(s) — ${recusados.slice(0, 3).map(item => `"${item.title}": ${item.reason || "sem motivo informado"}`).join(" · ")}${recusados.length > 3 ? ` · e mais ${recusados.length - 3}` : ""}`);
   if (blueprint && (blueprint.done || blueprint.failed)) {
     partes.push(blueprint.failed
-      ? `artigo-modelo: ${blueprint.done} concluído(s) e ${blueprint.failed} com falha (a investigação continua finalizada; "Organizar o artigo-modelo" na barra de lote refaz só os que faltam)`
+      ? `artigo-modelo: ${blueprint.done} concluído(s) e ${blueprint.failed} com falha (a investigação continua finalizada; "Pesquisar e finalizar" na barra de lote organiza só os que faltam)`
       : `artigo-modelo: ${blueprint.done} concluído(s)`);
   }
   return `${partes.join("; ")}.`;

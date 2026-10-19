@@ -38,7 +38,7 @@ import { listTerritorialAiProposals } from "./arquiteto-territorial-ai-store";
 import { readArchitectureMarker } from "./arquiteto-architecture-marker-store";
 import { readArticleFormationMarker } from "./arquiteto-article-formation-marker-store";
 import { MINERADOR_ARQUITETO_RECEIVED_STATE, resolveCanonicalMineradorArquitetoImportEligibility } from "@/lib/arquiteto/minerador-handoff";
-import { releaseRejectedArticles, type RejectedArticleRelease } from "@/lib/arquiteto/rejected-article-release";
+import { releaseRejectedArticles, releaseRejectedSiloPairs, type RejectedArticleRelease } from "@/lib/arquiteto/rejected-article-release";
 import { readBrandSiloCatalog } from "@/lib/arquiteto/territorial-landscape";
 import { ARTICLE_AI_REVIEW_ARTIFACT_TYPE } from "@/lib/arquiteto/article-ai-review";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
@@ -156,10 +156,21 @@ export async function readArchitectSyncState(context: PipelineContext) {
   const ativas = new Set(liberacao.articleDnas.map(version => version.versionId));
   const liberadaPor = new Map<string, RejectedArticleRelease>();
   for (const item of liberacao.rejected) for (const keywordId of item.releasedKeywordIds) if (!liberadaPor.has(keywordId)) liberadaPor.set(keywordId, item);
+  /* 2026-10-18 · a mesma regra da leitura inteira: o par do Silo desfeito inteiro (evento `rejected` na vigente) sai. */
+  const siloDnasVigentes = vigentes.filter(meta => meta.artifactType === "silo_dna" && meta.brandId === context.brandId);
+  const siloPagesVigentes = vigentes.filter(meta => meta.artifactType === "silo_page" && meta.brandId === context.brandId);
+  const paresAtivos = releaseRejectedSiloPairs({
+    // O entity_id do SiloDNA é o siloId; o da SiloPage, "silo-page:<siloId>" (o contrato do par).
+    siloDnas: siloDnasVigentes.map(meta => ({ versionId: meta.versionId, payload: { siloId: meta.entityId } })),
+    siloPages: siloPagesVigentes.map(meta => ({ versionId: meta.versionId, payload: { siloId: meta.entityId.replace(/^silo-page:/, "") } })),
+    statuses: statusesDasVigentes,
+    events: await readArticleVersionEvents(context, [...siloDnasVigentes, ...siloPagesVigentes].map(meta => meta.versionId)),
+  });
+  const paresQueFicam = new Set([...paresAtivos.siloDnas, ...paresAtivos.siloPages].map(item => item.versionId));
   const included = {
     articleDnas: articleVigentes.filter(meta => ativas.has(meta.versionId)),
-    siloDnas: vigentes.filter(meta => meta.artifactType === "silo_dna" && meta.brandId === context.brandId),
-    siloPages: vigentes.filter(meta => meta.artifactType === "silo_page" && meta.brandId === context.brandId),
+    siloDnas: siloDnasVigentes.filter(meta => paresQueFicam.has(meta.versionId)),
+    siloPages: siloPagesVigentes.filter(meta => paresQueFicam.has(meta.versionId)),
     aiReviews: vigentes.filter(meta => meta.artifactType === ARTICLE_AI_REVIEW_ARTIFACT_TYPE && meta.brandId === context.brandId),
   };
   const relacionadas = new Set(Object.values(included).flat().map(meta => meta.versionId));

@@ -409,7 +409,13 @@ test("§3 · card, corpo, tabela e relatório partem da MESMA chamada", async ()
   assert.ok(fonte.includes("projecao: projecaoDePesquisa(activeRadarItem),"), "o corpo");
   assert.ok(fonte.includes("researchProjection={projecaoDePesquisa(activeRadarItem)}"), "o card");
   assert.ok(fonte.includes("const projecao = projecaoDePesquisa(row);"), "a tabela");
-  assert.ok(fonte.includes("youtube: radarYoutubeReportEvidence(projecaoDePesquisa(row))"), "o relatório");
+  /*
+   * 2026-10-18 · o relatório lê as entradas da LINHA (`reportInputs`), montadas
+   * no modelo da linha com a projeção do perfil que ele já resolve
+   * (`projecaoDoPerfil`, a mesma chamada de `calcularProjecaoDePesquisa`).
+   */
+  assert.ok(fonte.includes("youtube: radarYoutubeReportEvidence(input.perfil)"), "o relatório");
+  assert.ok(fonte.includes("perfil: projecaoDoPerfil,"), "o relatório, pela projeção da linha");
 });
 
 test("PROVIDER_CALLS = 0", () => {

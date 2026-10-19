@@ -630,7 +630,7 @@ function HumanReviewPanel({
  * continua aqui (abre a Pesquisa por Assunto; nada é pago antes de você
  * confirmar o custo).
  */
-export function SubjectArticleBlock({ view, onSubjectSearch }: { view: SubjectArticleView; onSubjectSearch?: () => void }) {
+export function SubjectArticleBlock({ view, onSubjectSearch, editor }: { view: SubjectArticleView; onSubjectSearch?: () => void; /** 2026-10-18 · os campos do Assunto editáveis aqui (SDD do Assunto pela principal §8); ausente = só leitura, como antes. */ editor?: ReactNode }) {
   // 2026-10-13 · a linha-título convertida: o Assunto mora agora em outra keyword (conversão do formato anterior).
   if (view.kind === "converted_title") {
     return <section data-keyword-subject-article="converted_title" aria-label="Assunto deste artigo" className="min-w-0 rounded-md border border-context-accent/35 bg-surface-subtle p-2.5">
@@ -649,7 +649,7 @@ export function SubjectArticleBlock({ view, onSubjectSearch }: { view: SubjectAr
   return <section data-keyword-subject-article={view.kind} aria-label="Assunto deste artigo" className="min-w-0 rounded-md border border-context-accent/35 bg-surface-subtle p-2.5">
     <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
       <h3 className="min-w-0 break-words text-base font-semibold tracking-tight text-foreground">ASSUNTO DESTE ARTIGO</h3>
-      <span className="text-sm font-medium text-text-muted">somente leitura</span>
+      <span className="text-sm font-medium text-text-muted">{editor ? "editável aqui" : "somente leitura"}</span>
     </header>
 
     {view.kind === "subject" ? <>
@@ -701,7 +701,8 @@ export function SubjectArticleBlock({ view, onSubjectSearch }: { view: SubjectAr
       </dl>
     </>}
 
-    <p data-subject-article-hint className="mt-2 text-sm text-text-muted">{view.hint}</p>
+    {editor ?? null}
+    <p data-subject-article-hint className="mt-2 text-sm text-text-muted">{editor || view.kind !== "subject" ? view.hint : "Para mudar, abra o painel da keyword na planilha do Minerador (Editar Assunto)."}</p>
   </section>;
 }
 
@@ -816,6 +817,7 @@ export function KeywordDnaPanel({
   subjectKeywordTextOf,
   subjectConvertedTitleOf,
   subjectSemanticOf,
+  subjectEditor,
 }: {
   keyword: { id: string; keyword: string; intent?: string | null; status?: string | null; volume_search?: number | null; results_allintitle?: number | null; kgr_score?: number | null; volume_source?: string | null; analise_semantica?: ProfileRecord | null };
   onWorkflowStatusChange?: (status: string) => void | Promise<void>;
@@ -836,6 +838,8 @@ export function KeywordDnaPanel({
    * publicada e lê a trava/posição reais da principal do formato anterior.
    */
   subjectSemanticOf?: (keywordId: string) => Record<string, unknown> | null | undefined;
+  /** 2026-10-18 · os campos do Assunto editáveis no bloco "Assunto deste artigo" (SDD do Assunto pela principal §8). O Minerador passa. */
+  subjectEditor?: (view: SubjectArticleView | null) => ReactNode;
   reviewDraftActive?: boolean;
   statusUpdating?: boolean;
   visualPosition?: number;
@@ -899,6 +903,8 @@ export function KeywordDnaPanel({
     keywordTextOf: subjectKeywordTextOf,
     convertedTo: subjectConvertedTitleOf?.(keyword.id) ?? null,
     ...(subjectSemanticOf ? { subjectSemanticOf } : {}),
+    // 2026-10-18 · o rótulo do Assunto sem plano diz se é a página publicada (M8).
+    published: publicationLink.state === "published",
   });
   // 2026-10-13 · o Assunto no cabeçalho (pedido do dono): título, papel/posição e cor, numa linha.
   const subjectHeader = subjectHeadline(subjectArticle);
@@ -1168,7 +1174,15 @@ export function KeywordDnaPanel({
       </div>}
       {subjectArticle ? (
         <div className="min-w-0 xl:col-span-2" data-keyword-profile-stage="subject">
-          <SubjectArticleBlock view={subjectArticle} onSubjectSearch={subjectArticle.kind === "subject" ? onSubjectSearch : undefined} />
+          <SubjectArticleBlock view={subjectArticle} onSubjectSearch={subjectArticle.kind === "subject" ? onSubjectSearch : undefined} editor={subjectEditor?.(subjectArticle) ?? undefined} />
+        </div>
+      ) : subjectEditor ? (
+        <div className="min-w-0 xl:col-span-2" data-keyword-profile-stage="subject">
+          <section data-keyword-subject-article="none" aria-label="Assunto deste artigo" className="min-w-0 rounded-md border border-divider bg-surface-subtle p-2.5">
+            <h3 className="min-w-0 break-words text-base font-semibold tracking-tight text-foreground">ASSUNTO DESTE ARTIGO</h3>
+            <p className="mt-1 text-sm text-text-muted">Esta keyword ainda não carrega Assunto.</p>
+            {subjectEditor(null)}
+          </section>
         </div>
       ) : null}
       <div className="min-w-0 xl:col-span-2" data-keyword-profile-stage="human-review">

@@ -99,6 +99,7 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
   const [excludeTerms, setExcludeTerms] = useState(initialDraft.excludeTerms);
   const [activeFilterPopover, setActiveFilterPopover] = useState<"result" | "volume" | "keywordDifficulty" | "cpc" | "include" | "exclude" | null>(null);
   const [notice, setNotice] = useState<DiscoveryNotice>(null);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a falha fica só no sino; a faixa acima da tabela saiu. */
   useNoticeBridge({ notice, module: "minerador", area: "Descoberta de keywords", title: "Descoberta de keywords", fallbackSeverity: "ERROR" });
   const [executedSearch, setExecutedSearch] = useState<ExecutedDiscoverySearch | null>(null);
   const [loading, setLoading] = useState(false);
@@ -209,7 +210,7 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
     if (normalizedSeed.length < 2) { setNotice(normalizedSeed ? "Informe pelo menos 2 caracteres para iniciar a busca." : null); return; }
     loadingRef.current = true;
     setLoading(true); setNotice(null);
-    publishNotice({ severity: "PENDING", title: "Descoberta de keywords", message: "Consultando ideias e métricas oficiais no Google Ads…", source: "workflow", module: "minerador", area: "Descoberta de keywords" });
+    /* 2026-10-18 · SDD padrão de planilha §5.7: andamento nunca vai para o sino — o botão de buscar mostra a busca em curso; só o fim publica. */
     const operationRequestId = crypto.randomUUID();
     const requestDraft = { ...searchDraft, seed: normalizedSeed };
     try {
@@ -275,7 +276,6 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
     <DiscoverySearchRow searchKind={searchKind} onSearchKindChange={changeSearchKind} subjectFields={<SubjectSearchFields controller={subjectSearch} />} discoveryFocus={discoveryFocus} setDiscoveryFocus={setDiscoveryFocus} seed={seed} setSeed={setSeed} relation={relation} setRelation={setRelation} intent={preliminaryIntent} setIntent={setPreliminaryIntent} funnel={preliminaryFunnel} setFunnel={setPreliminaryFunnel} language={language} setLanguage={setLanguage} states={states} setStates={setStates} onSubmit={discover} />
     {subjectSearchOpen ? <SubjectSearchResults controller={subjectSearch} /> : <>
     <DiscoveryFilterRow discoveryMode={discoveryMode} volume={volume} setVolume={setVolume} cpc={cpc} setCpc={setCpc} resultPreset={resultPreset} setResultPreset={setResultPreset} resultMin={resultMin} setResultMin={setResultMin} resultMax={resultMax} setResultMax={setResultMax} keywordDifficultyPreset={keywordDifficultyPreset} setKeywordDifficultyPreset={setKeywordDifficultyPreset} keywordDifficultyMin={keywordDifficultyMin} setKeywordDifficultyMin={setKeywordDifficultyMin} keywordDifficultyMax={keywordDifficultyMax} setKeywordDifficultyMax={setKeywordDifficultyMax} hasSeoData={hasSeoData} serpMeasurementEnabled={serpMeasurementEnabled} includeTerms={includeTerms} setIncludeTerms={setIncludeTerms} excludeTerms={excludeTerms} setExcludeTerms={setExcludeTerms} includeAdultKeywords={includeAdultKeywords} setIncludeAdultKeywords={setIncludeAdultKeywords} activeFilterPopover={activeFilterPopover} setActiveFilterPopover={setActiveFilterPopover} onDiscover={discover} onClear={clearFilters} loading={loading} canSubmit={seed.trim().length >= 2} />
-    {notice && <p className="mt-3 rounded border border-danger/45 bg-danger-soft px-3 py-2 text-sm leading-6 text-danger" role="alert">{notice}</p>}
     <DiscoveryTablePlaceholder candidates={executedSearch?.acceptedCandidates || []} seoFilters={seoFilters} seed={executedSearch?.config.seed || ""} intent={executedSearch?.config.preliminaryIntent} funnel={executedSearch?.config.preliminaryFunnel} discoveryMode={executedSearch?.config.discoveryMode || "keyword"} discoveryFocus={executedSearch?.config.discoveryFocus || "all_customer"} brandRef={brandRef} onCandidatesPatched={patchCandidates} onSerpMeasured={keepMeasuredCandidatesVisible} />
     </>}
   </main>;

@@ -3,7 +3,7 @@ import { z, ZodError } from "zod";
 import { isTenantId } from "@/lib/tenant-routing";
 import { AuthzError, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { requireTenantPermission } from "@/lib/server/tenant-context";
-import { ApproveAndSendStaleError } from "@/lib/minerador/approve-and-send-core";
+import { APPROVE_AND_SEND_RESUME, ApproveAndSendStaleError, approveAndSendErrorText, approveAndSendNothingWritten } from "@/lib/minerador/approve-and-send-core";
 import { applyApproveAndSendOnServer, previewApproveAndSendOnServer } from "@/lib/server/minerador-approve-and-send";
 import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
 
@@ -36,16 +36,22 @@ const RequestSchema = z.object({
   excludedIds: z.array(z.string().uuid()).max(500).optional(),
 }).strict();
 
-function failure(code: string, status: number, message: string, requestId: string) {
-  return NextResponse.json({ success: false, code, message, diagnostic: { requestId } }, { status });
+/**
+ * 2026-10-19 · `nothingWritten`: `true` só quando a falha veio antes de qualquer gravação (pedido inválido,
+ * permissão, prévia vencida, a prévia refeita no aplicar). Fora disso a tela NÃO diz "nada foi gravado".
+ */
+function failure(code: string, status: number, message: string, requestId: string, nothingWritten = true) {
+  return NextResponse.json({ success: false, code, message, nothingWritten, diagnostic: { requestId } }, { status });
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ brandId: string }> }) {
   const requestId = crypto.randomUUID();
+  let mode: "preview" | "apply" | null = null;
   try {
     const { brandId } = await params;
     if (!isTenantId(brandId)) return failure("BRAND_NOT_FOUND", 404, "Marca inválida.", requestId);
     const input = RequestSchema.parse(await request.json());
+    mode = input.mode;
     const send = input.send !== false;
     if (input.mode === "apply" && !input.decisionHash) return failure("DECISION_HASH_REQUIRED", 400, "Aplicar exige o decisionHash da prévia.", requestId);
     const profile = await requireCanonicalSessionProfile();
@@ -66,7 +72,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (error instanceof SyntaxError || error instanceof ZodError) return failure("INVALID_APPROVE_AND_SEND_REQUEST", 400, "O pedido de aprovar e enviar é inválido.", requestId);
     if (error instanceof ApproveAndSendStaleError) return failure(error.code, 409, error.message, requestId);
     if (error instanceof AuthzError) return failure(error.status === 401 ? "APPROVE_AND_SEND_UNAUTHENTICATED" : "APPROVE_AND_SEND_FORBIDDEN", error.status, error.message, requestId);
-    if (error instanceof PipelineRuntimeError) return failure(`APPROVE_AND_SEND_${error.code}`, error.status, error.message, requestId);
-    return failure("APPROVE_AND_SEND_FAILED", 503, "Aprovar e enviar não pôde ser concluído agora. Releia o Minerador: o que foi gravado aparece lá.", requestId);
+    // 2026-10-19 · o erro fica no log com o requestId (antes, o 503 não deixava rastro).
+    console.error("[approve-and-send]", requestId, mode ?? "?", error instanceof Error ? error.name : typeof error, approveAndSendErrorText(error));
+    const nadaGravado = mode !== "apply" || approveAndSendNothingWritten(error);
+    if (error instanceof PipelineRuntimeError) return failure(`APPROVE_AND_SEND_${error.code}`, error.status, error.message, requestId, nadaGravado);
+    if (nadaGravado) return failure("APPROVE_AND_SEND_FAILED", 503, "Aprovar e enviar não pôde começar agora: a leitura das keywords falhou. Nada foi gravado; tente de novo em instantes.", requestId, true);
+    return failure("APPROVE_AND_SEND_FAILED", 503, `Aprovar e enviar parou no meio. Parte pode ter sido gravada: releia o Minerador para ver cada keyword. ${APPROVE_AND_SEND_RESUME}`, requestId, false);
   }
 }

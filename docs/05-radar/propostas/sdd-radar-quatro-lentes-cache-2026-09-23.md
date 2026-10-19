@@ -157,6 +157,7 @@ Rota: `app/api/editorial/serp/route.ts`, `POST`, `action: "collect"`, linhas 488
    - As lentes são `SERP_CACHE_LENSES`, decididas no servidor. O cliente não escolhe lente, endpoint nem profundidade.
 2. **Alvo da consulta.**
    - Locale e idioma vêm de `readDataForSeoTargetCodes(env)`, a mesma função do Minerador. Assim as chaves de cache coincidem: um idioma diferente divide a chave, e o acerto some.
+   - **SUBSTITUÍDO (2026-10-18) no locale:** a localidade é a da MARCA (`resolveBrandSerpTarget`, pelo `brandId`; sem localidade válida, a do ambiente, como antes), e o `location` do snapshot é o rótulo do que foi pedido, não o texto do cliente. SDD `docs/compartilhado/sdd-localidade-serp-por-marca-2026-10-18.md`.
    - Endpoint: `advanced` nas 4 lentes.
 3. **Cache primeiro, antes de credencial e quota:**
    - **canônica** (`desktop-windows`): `lookupSerpCache` em modo `body` com pedido de profundidade 10, atendido por qualquer entrada ≥ 10, inclusive a do Minerador (20);

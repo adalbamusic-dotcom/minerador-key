@@ -1,5 +1,26 @@
 # Estado atual — Redator
 
+## Defeitos do inventário de botões — 2026-10-18
+
+Decisão do dono "Só os defeitos agora" (`docs/compartilhado/inventario-botoes-e-linha-2026-10-18.md`). Nada de botão, rota ou etapa novos. **Verificado no código e confirmado por teste DOM (clique no botão). Ainda não validado na tela.**
+
+- **Cancelar a caixa de instrução não chama a IA.** "Propor escrita para esta seção" e "Melhorar trecho" seguiam para a chamada paga com `window.prompt(...) ?? ""`. Agora Cancelar (null) encerra antes de qualquer chamada; confirmar com a caixa em branco continua chamando.
+- **O custo vem antes da chamada.** As duas caixas, o título dos botões e o InfoHint dizem "IA paga: até 2 chamadas de IA (IA da plataforma, cota da marca)" (1 e mais 1 só se a resposta vier vazia, `structured-ai`). "Criar roteiro/carrossel a partir deste contexto" mostra o custo ao lado do botão e pede confirmação antes. Frase única em `lib/redator/action-feedback.ts` (`WRITER_AI_COST_LABEL`).
+- **Finalizar não perde o que não foi salvo.** "Finalizar roteiro/carrossel" com alteração na tela salva primeiro pelo mesmo "Salvar rascunho" e finaliza com o lock do que foi salvo; se salvar falhar, não finaliza e o texto fica na tela.
+- **Desfazer/Refazer da barra valem só na aba ativa.** No Artigo, a edição do texto; nas abas "Roteiro e storyboard" e "Carrossel" ficam desligados (com o motivo no título) e nunca mexem no artigo escondido.
+- Tutorial do "?" e catálogo MCP (`redator.write_draft`: nota do custo, SUBSTITUI "escrita grátis"; `redator.approve`: rótulos reais "Finalizar artigo" e "Enviar a Publicações") atualizados.
+- Testes: `tests/redator-defeitos-2026-10-18-dom.test.mts` (em `test:redator:dom`); `redator-documento-detalhe-dom` passa a montar com o `Tooltip.Provider` do ProductShell (os botões ganharam InfoHint).
+
+## Todos os avisos no sino — 2026-10-18
+
+Regra do dono: "estes e todos os avisos têm que estar dentro do sino" (`docs/compartilhado/sistema-visual.md` §24.2). **Verificado no código e confirmado por teste. Ainda não validado na tela.**
+
+- O Redator não publicava nada no sino. Agora publica: o resultado do Guardião, das propostas e melhorias, da entrega a Publicações, da importação do Radar e do link inválido (`professional-writer.tsx`); o desfecho do roteiro e do carrossel (`writer-derived-environment.tsx`); e o da mídia por posição (`writer-media-anchor-panel.tsx`), com a falha como Erro.
+- Saíram da tela: o bloco "A ação não foi concluída." do entregável (o sino mostra o motivo inteiro, com quebra de linha) e as linhas de resultado da mídia.
+- Ficaram na tela: o estado do salvamento ("Salvando…", "Salvo no servidor às…") e o andamento na linha da barra; o andamento da mídia ("Enviando arquivo…"); a falha do documento completo com "Tentar de novo"; os avisos do relatório do Guardião (conteúdo do painel).
+- A linha do entregável na barra mostra só o andamento; o desfecho está no sino.
+- Testes: `redator-feedback-acoes` (teste 09 SUBSTITUÍDO) e `redator-documento-detalhe-dom` (a tela monta dentro do centro de avisos, como no app). Guarda: `tests/avisos-no-sino-2026-10-18.test.mts`.
+
 ## "Destino no ar: ative o link" e o carrossel por curto (F5 da SDD silo interligado) — 2026-10-14
 
 Autorização do dono (2026-10-14), literal: "pode concluir as pendências, vou testar depois". SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §6.5, D10 e §18.1 (F5). Mudança aditiva no Redator; dono da fase: Radar. **Verificado no código e confirmado por teste. Validado manualmente: não.** Sem migration, sem escrita nova, sem IA a mais.

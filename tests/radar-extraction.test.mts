@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CompetitorExtractionError, extractCompetitorPage, validateExternalUrl } from "../lib/radar/competitor-extractor.ts";
+import { CompetitorExtractionError, competitorPageId, extractCompetitorPage, validateExternalUrl } from "../lib/radar/competitor-extractor.ts";
+
+test("2026-10-18 · páginas do mesmo site têm ids diferentes (o base64 cortado em 32 colidia)", () => {
+  const urls = [
+    "https://www.minhaconexao.com.br/planos/internet-residencial",
+    "https://www.minhaconexao.com.br/operadoras/claro",
+    "https://www.claro.com.br/internet/residencial",
+    "https://www.claro.com.br/internet",
+  ];
+  const ids = urls.map(competitorPageId);
+  assert.equal(new Set(ids).size, urls.length);
+  for (const id of ids) assert.match(id, /^competitor:[A-Za-z0-9_-]{32}$/);
+  assert.equal(competitorPageId(urls[0]), ids[0], "a mesma URL dá o mesmo id");
+});
 
 test("extrator bloqueia protocolos e destinos privados", () => {
   assert.throws(() => validateExternalUrl("file:///etc/passwd"), (error: unknown) => error instanceof CompetitorExtractionError && error.code === "invalid_url");

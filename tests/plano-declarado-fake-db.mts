@@ -58,7 +58,7 @@ export class PlanFakeDb {
 
 class PlanFakeQuery implements PromiseLike<{ data: unknown; error: unknown; count?: number | null }> {
   private filters: Filter[] = [];
-  private op: "select" | "insert" | "update" = "select";
+  private op: "select" | "insert" | "update" | "delete" = "select";
   private payload: unknown = null;
   private columns = "*";
   private returning: string | null = null;
@@ -90,6 +90,8 @@ class PlanFakeQuery implements PromiseLike<{ data: unknown; error: unknown; coun
   limit(n: number) { this.faixa = [0, n - 1]; return this; }
   insert(rows: Row | Row[]) { this.op = "insert"; this.payload = rows; return this; }
   update(patch: Row) { this.op = "update"; this.payload = patch; return this; }
+  // 2026-10-18 · `delete` (a etiqueta de cor do artigo retirado: `deleteArticleGroupRows`).
+  delete() { this.op = "delete"; return this; }
   maybeSingle() { this.singleMode = "maybe"; return this; }
   single() { this.singleMode = "one"; return this; }
   then<A = { data: unknown; error: unknown }, B = never>(onfulfilled?: ((value: { data: unknown; error: unknown; count?: number | null }) => A | PromiseLike<A>) | null, onrejected?: ((reason: unknown) => B | PromiseLike<B>) | null): PromiseLike<A | B> {
@@ -121,6 +123,11 @@ class PlanFakeQuery implements PromiseLike<{ data: unknown; error: unknown; coun
       }
       linhas.push(...novas);
       return this.returning ? this.finish(novas, this.returning) : { data: null, error: null };
+    }
+    if (this.op === "delete") {
+      const ficam = linhas.filter(row => !casa(row));
+      linhas.splice(0, linhas.length, ...ficam);
+      return { data: null, error: null };
     }
     const alvo = linhas.filter(casa);
     const patch = this.payload as Row;

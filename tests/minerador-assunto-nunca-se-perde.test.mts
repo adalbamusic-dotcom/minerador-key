@@ -92,9 +92,11 @@ test("migration: ordena depois de todas as de antes, numa transação, com guard
    * e M-E `20261016130000_excluir_tudo_da_cor` (que EXIGE esta antes). O que este
    * teste protege continua: ela ordena depois de todas as que já existiam, e só as
    * reservadas pela SDD vêm depois.
+   * 2026-10-19 (ajuste declarado, Radar): entra também a do Radar que dá tempo próprio à gravação do
+   * documento (`content_documents`); não toca `minerador_keywords` e foi aplicada pelo dono em 19/10.
    */
   const depois = nomes.slice(posicao + 1);
-  assert.ok(depois.every(nome => /^20261016120000_listas_leves\.sql$|^20261016130000_excluir_tudo_da_cor\.sql$/.test(nome)), `só as migrations reservadas pela SDD vêm depois: ${depois.join(", ")}`);
+  assert.ok(depois.every(nome => /^20261016120000_listas_leves\.sql$|^20261016130000_excluir_tudo_da_cor\.sql$|^20261019120000_documento_do_radar_gravacao_com_tempo_proprio\.sql$/.test(nome)), `só as migrations reservadas pela SDD vêm depois: ${depois.join(", ")}`);
   const sql = limpaSql(MIGRATION);
   assert.match(sql, /^\s*BEGIN;/m);
   assert.match(sql, /COMMIT;\s*$/);
@@ -245,7 +247,9 @@ test("setKeywordSubject: tirar o plano exige o marcador; com ele, o marcador e o
   // as asserções que só a testavam saíram junto. O antigo "Assunto: Não" continua recusado pela guarda (acima).
 });
 
-test("exclusão: a mesma regra do gatilho (plano bloqueia; título só sai depois de Tirar do plano ou da futura exclusão da cor)", () => {
+// 2026-10-17: a "futura exclusão da cor" existe (F7, M-E) e, desde 17/10, a exclusão comum libera pelo MESMO núcleo dela
+// (cenário G18 em tests/minerador-linha-unica-cenarios.test.mts); o espelho do gatilho é o mesmo.
+test("exclusão: a mesma regra do gatilho (plano bloqueia; título só sai depois de Tirar do plano ou da exclusão da cor — também a comum, pelo núcleo da cor)", () => {
   const antes = cadastrado();
   assert.equal(keywordSubjectBlocksDeletion(antes), true);
   const tirado = setKeywordSubject(antes, { actorId: ACTOR, changedAt: LATER, origin: "review", plan: null, release: release() });
@@ -254,7 +258,7 @@ test("exclusão: a mesma regra do gatilho (plano bloqueia; título só sai depoi
   const soTitulo = setKeywordSubject({}, { actorId: ACTOR, changedAt: AT, origin: "import", entry: { title: "Reforço", source: "cadastro" } });
   assert.ok(soTitulo.ok);
   assert.equal(keywordSubjectBlocksDeletion(soTitulo.semantic), true);
-  assert.equal(keywordSubjectBlocksDeletion({ ...soTitulo.semantic, [KEYWORD_SUBJECT_RELEASE_KEY]: release("cor:1", "excluir_cor") }), false, "a exclusão da cor (SDD futura) libera pelo marcador");
+  assert.equal(keywordSubjectBlocksDeletion({ ...soTitulo.semantic, [KEYWORD_SUBJECT_RELEASE_KEY]: release("cor:1", "excluir_cor") }), false, "a exclusão da cor (e a comum, pelo núcleo da cor) libera pelo marcador");
   assert.equal(keywordSubjectBlocksDeletion({ nicho: "x" }), false);
 });
 

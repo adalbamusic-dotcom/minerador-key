@@ -320,7 +320,13 @@ export async function loadRadarCanonicalAuthorities(input: {
    */
   siloVersions?: readonly VersionEnvelope<SiloDNA>[];
 }): Promise<RadarCanonicalAuthorities> {
-  const item = await new WorkflowRepository().findByArticle(input.brandId, input.articleId, "radar");
+  /*
+   * 2026-10-19 · a linha SEM as corridas: daqui saem só os campos do item
+   * (Silo, título, slug, hidratação) para o contexto de pesquisa; a análise é a
+   * que o chamador passou (`input.analysis`). Reidratar todas as corridas aqui
+   * custava 8 a 11,6 MB por envio ao Redator e por export, para descartá-las.
+   */
+  const item = await new WorkflowRepository().findByArticleWithoutRuns(input.brandId, input.articleId, "radar");
   const lido = item ? RadarItemSchema.safeParse({ ...(item.payload as object), id: item.id }) : null;
   const researchContext = lido?.success
     ? buildRadarArticleResearchContext({

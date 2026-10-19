@@ -48,8 +48,14 @@ import { radarKeywordOccurrences } from "./human-voice-guideline.ts";
 import type { RadarPortableExportInput } from "./portable-export.ts";
 import type { RadarPortableSerpObserved } from "./portable-serp-observed.ts";
 import type { RadarSampleBasis } from "./sample-basis.ts";
+import type { BrandSerpTerritory } from "../marca/brand-serp-location.ts";
+import { radarTerritoryOtherLocality } from "./territory-gazetteer.ts";
 
-/** A versão da leitura. Mudou um detector ou um teto, muda a data. */
+/**
+ * A versão da leitura. Mudou um detector ou um teto, muda a data.
+ * 2026-10-18 · o D11 geográfico NÃO muda a versão: ele só existe com o território
+ * da marca com cidade, e a leitura da marca nacional é byte a byte a de antes (E0).
+ */
 export const RADAR_COMPETITIVE_READING_VERSION = "2026-10-14b";
 
 /** Os tetos: até 6 itens por bloco no pacote (SDD §17), até 4 perguntas que valem resposta no CSV (D13). */
@@ -75,17 +81,31 @@ export const RADAR_COMPETITIVE_READING_LIMITS = Object.freeze({
  * medida fora da curva (mais de 3× ou menos de 1/3 da mediana de palavras).
  * `palavras` null = página não medida (o outlier não se aplica).
  */
+/*
+ * 2026-10-18 · L3 (SDD `sdd-localidade-serp-por-marca-2026-10-18.md` §4.5) · D11
+ * GEOGRÁFICO, na MESMA régua: com o território da marca (`contexto.location`), a
+ * página que cita outra cidade ou UF do gazetteer do IBGE e não cita a da marca
+ * sai como "fora do território: outra localidade (<citada>; a marca atende
+ * <rótulo>)" — marcada, nunca escondida. `geo` (aditivo: o endereço e os
+ * cabeçalhos que o `conteudo` não traz) entra só nesta leitura.
+ * Marca nacional (sem `location`): nenhum motivo novo, a régua de antes.
+ */
 export function radarCompetitiveRelevanceReasons(
   conteudo: string,
   palavras: number | null,
   contexto: RadarResearchNoiseContext,
   mediana: number | null,
+  geo?: { url?: string | null; headings?: ReadonlyArray<string | null | undefined> } | null,
 ): string[] {
   const motivos: string[] = [];
   if (radarResearchOtherProfession(conteudo, contexto)) motivos.push("fora do leitor: outra profissão, fora do público do artigo");
   const area = radarResearchNeighborArea(conteudo, contexto);
   if (area) motivos.push(`fora do território: ${area}`);
   if (radarResearchStoreNoise(conteudo, contexto)) motivos.push("fora do território: loja ou consumo, fora do artigo");
+  const outraLocalidade = contexto.location
+    ? radarTerritoryOtherLocality([conteudo, ...(geo?.headings || []).slice(0, 4)].filter(Boolean).join(" · "), geo?.url ?? null, contexto.location)
+    : null;
+  if (outraLocalidade) motivos.push(`fora do território: outra localidade (${outraLocalidade}; a marca atende ${contexto.location!.label})`);
   const fator = RADAR_COMPETITIVE_READING_LIMITS.outlierFactor;
   if (palavras !== null && palavras > 0 && mediana && (palavras > mediana * fator || palavras < mediana / fator)) {
     motivos.push(`outlier de medida: ${palavras} palavras (mediana das páginas lidas: ${mediana})`);
@@ -130,6 +150,8 @@ export type RadarCompetitiveReadingInput = {
   /** O ângulo e o diferencial que o Radar já recomendava (blueprint competitivo), nunca usados até aqui. */
   recommendedAngle: string | null;
   recommendedDifferentiation: readonly string[];
+  /** 2026-10-18 · L3 · o território da marca com cidade (D11 geográfico). Ausente = marca nacional. */
+  territory?: BrandSerpTerritory | null;
 };
 
 /* ============================== a saída ============================== */
@@ -198,16 +220,16 @@ type Detector = { pattern: string; instead: string; seenIn: Set<string> };
 export function buildRadarCompetitiveReading(input: RadarCompetitiveReadingInput): RadarCompetitiveReading {
   const L = RADAR_COMPETITIVE_READING_LIMITS;
   const principal = texto(input.principal);
-  const contexto: RadarResearchNoiseContext = { core: [principal, ...input.core], audience: input.audience };
+  const contexto: RadarResearchNoiseContext = { core: [principal, ...input.core], audience: input.audience, ...(input.territory ? { location: input.territory } : {}) };
   const trechoDaUrl = new Map(input.organic.map(item => [chaveDaUrl(item.url), texto(item.snippet)]));
 
   /* ---- D11 · a amostra relevante (marcada, nunca escondida) ---- */
   const paginas = input.pages.filter(pagina => texto(pagina.url));
-  const doLeitor = paginas.filter(pagina => !radarCompetitiveRelevanceReasons(conteudoDe(pagina), null, contexto, null).length);
+  const doLeitor = paginas.filter(pagina => !radarCompetitiveRelevanceReasons(conteudoDe(pagina), null, contexto, null, { url: pagina.url }).length);
   /* O outlier de medida mede contra a mediana das páginas DO LEITOR (as de outra profissão não puxam a régua); com menos de 3 medidas, não há outlier. */
   const medidasDoLeitor = doLeitor.map(pagina => pagina.words ?? 0).filter(valor => valor > 0);
   const medianaDoLeitor = medidasDoLeitor.length >= 3 ? mediana(medidasDoLeitor) : null;
-  const lidas = paginas.map(pagina => ({ pagina, motivos: radarCompetitiveRelevanceReasons(conteudoDe(pagina), pagina.words, contexto, medianaDoLeitor) }));
+  const lidas = paginas.map(pagina => ({ pagina, motivos: radarCompetitiveRelevanceReasons(conteudoDe(pagina), pagina.words, contexto, medianaDoLeitor, { url: pagina.url }) }));
   const relevantes = lidas.filter(item => !item.motivos.length).map(item => item.pagina);
   function conteudoDe(pagina: RadarCompetitiveReadingPage): string {
     return [texto(pagina.title), trechoDaUrl.get(chaveDaUrl(pagina.url)) || "", ...pagina.headings.slice(0, 4).map(texto)].filter(Boolean).join(" · ");
@@ -390,7 +412,7 @@ export function radarCompetitiveReferenceLine(leitura: Pick<RadarCompetitiveRead
  * recomendava. Nada é coletado.
  */
 export function radarCompetitiveReadingInputOf(
-  entrada: Pick<RadarPortableExportInput, "article" | "googleObserved" | "competitorOutlines" | "serpRawPages" | "blueprintView">,
+  entrada: Pick<RadarPortableExportInput, "article" | "googleObserved" | "competitorOutlines" | "serpRawPages" | "blueprintView" | "serpTerritory">,
   extra: { serpObserved: RadarPortableSerpObserved | null; base: RadarSampleBasis | null; subject?: string | null },
 ): RadarCompetitiveReadingInput {
   const observado = entrada.googleObserved ?? null;
@@ -433,6 +455,8 @@ export function radarCompetitiveReadingInputOf(
     marketOnlyEntities: (observado?.entities.marketOnly || []).map(item => ({ label: item.label, pages: item.pages })),
     recommendedAngle: recomendado?.editorialAngle?.statement ?? null,
     recommendedDifferentiation: (recomendado?.differentiation || []).map(item => item.statement),
+    /* 2026-10-18 · L3 · só a marca com cidade leva território (o export só o põe nela). */
+    ...(entrada.serpTerritory ? { territory: entrada.serpTerritory } : {}),
   };
 }
 
@@ -442,7 +466,7 @@ export function radarCompetitiveReadingInputOf(
  * lido; senão, null (o pedido e a coluna são os de antes).
  */
 export function radarCompetitiveReadingOf(
-  entrada: Pick<RadarPortableExportInput, "profile" | "article" | "googleObserved" | "competitorOutlines" | "serpRawPages" | "blueprintView">,
+  entrada: Pick<RadarPortableExportInput, "profile" | "article" | "googleObserved" | "competitorOutlines" | "serpRawPages" | "blueprintView" | "serpTerritory">,
   extra: { serpObserved: RadarPortableSerpObserved | null; base: RadarSampleBasis | null; subject?: string | null },
 ): RadarCompetitiveReading | null {
   if (entrada.profile !== "GOOGLE") return null;

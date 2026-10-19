@@ -969,7 +969,7 @@ busca ou paga sem uma semente tirada do plano ou do DNA.
 | 1 | Ler o plano | Silo (nome, slug); por artigo: ordem, papel, Assunto, keyword, slug, detalhes, trava, volume medido (o KeywordDNA) | Monta a cópia de trabalho do Silo e dos artigos exatamente como o plano diz | Grátis. Nada é gravado. |
 | 2 | Silo | Nome e slug do plano | Reusa ou confirma o Silo do plano. Nunca propõe outro nem converte artigo em Silo | Grátis |
 | 3a | Artigo com principal Travada ou com volume | Keyword, volume, trava | A principal é fixa. Se a SERP da principal não está no cache, coleta (4 lentes) e forma o artigo | Pago só a SERP da principal (custo antes). Propósito: base de evidência do artigo |
-| 3b | Artigo com principal Livre e SEM volume | Assunto, slug, detalhes, DNA (entidade, problema, resultado) | **SUBSTITUÍDO em 2026-10-17 (§15.5, "Principal de identidade"):** se a principal está no título ou no slug declarado (identidade), ela FICA; as buscas mais amplas entram como secundárias (passo 4), o parecer vem das secundárias (D2a) e o artigo forma sem troca (**17/10, tarde, §15.6:** a SERP da principal de identidade é a da primeira coleta e, coletada, o parecer usa ela); "Procurar outra principal" continua a decisão do dono. Só FORA da identidade vale o texto abaixo. ~~Procura uma principal substituta com essas sementes (ideias do Google Ads); a candidata precisa ter a mesma entidade e a mesma intenção e ter volume. Propõe a troca~~ (fora da identidade: primeiro a que leva o núcleo do slug com a entidade do DNA, depois a que mantém a intenção; ~~a antiga vira secundária~~ **SUBSTITUÍDO em 2026-10-17, §15.2:** a antiga, que carrega o Assunto, fica como a âncora do Assunto, fora das keywords; Assunto, título e slug do plano ficam). Decisão humana. Depois coleta a SERP da nova principal e forma | Google Ads grátis; identidade: ~~SERP só da secundária de mais volume (custo antes)~~ **SUBSTITUÍDO em 2026-10-17 (tarde, §15.6):** SERP da própria principal de identidade (4 lentes, até US$ 0,014, custo e propósito antes); troca: SERP só da principal escolhida (custo antes) |
+| 3b | Artigo com principal Livre e SEM volume | Assunto, slug, detalhes, DNA (entidade, problema, resultado) | **Exceção de 2026-10-17 (noite, dono: "Pilar troca, Suportes ficam"; §15.9 F):** o PILAR Livre sem volume, mesmo de identidade, recebe a proposta do termo-cabeça com volume que leva o núcleo do slug (a antiga fica como o Assunto). **SUBSTITUÍDO em 2026-10-17 (§15.5, "Principal de identidade"):** se a principal está no título ou no slug declarado (identidade), ela FICA; as buscas mais amplas entram como secundárias (passo 4), o parecer vem das secundárias (D2a) e o artigo forma sem troca (**17/10, tarde, §15.6:** a SERP da principal de identidade é a da primeira coleta e, coletada, o parecer usa ela); "Procurar outra principal" continua a decisão do dono. Só FORA da identidade vale o texto abaixo. ~~Procura uma principal substituta com essas sementes (ideias do Google Ads); a candidata precisa ter a mesma entidade e a mesma intenção e ter volume. Propõe a troca~~ (fora da identidade: primeiro a que leva o núcleo do slug com a entidade do DNA, depois a que mantém a intenção; ~~a antiga vira secundária~~ **SUBSTITUÍDO em 2026-10-17, §15.2:** a antiga, que carrega o Assunto, fica como a âncora do Assunto, fora das keywords; Assunto, título e slug do plano ficam). Decisão humana. Depois coleta a SERP da nova principal e forma | Google Ads grátis; identidade: ~~SERP só da secundária de mais volume (custo antes)~~ **SUBSTITUÍDO em 2026-10-17 (tarde, §15.6):** SERP da própria principal de identidade (4 lentes, até US$ 0,014, custo e propósito antes); troca: SERP só da principal escolhida (custo antes) |
 | 4 | Reforço (todos os artigos) | Assunto, slug, detalhes, DNA e a SERP JÁ em cache da principal (relacionadas, "as pessoas também perguntam", títulos e entidades do top 10) | Busca secundárias com essas sementes (Google Ads), escolhe pelo encaixe semântico com evidência na SERP do artigo, até 6 por artigo, sem duas no mesmo par entre artigos do Silo; a mais fraca sai só por uma melhor. Prévia → decisão humana → nova versão | Google Ads grátis. SERP extra por candidata só se o dono pedir evidência a mais |
 | 5 | Fechar o Silo | Pilar e ordem do plano, artigos formados | SiloDNA e SiloPage com o tema do Silo e o Pilar do plano | Grátis |
 | 6 | Links internos | Papel e ordem do plano (Pilar↔Suportes; Suportes entre si) e o grafo do Silo interligado | Malha proposta pela regra do Silo interligado (SDD `sdd-silo-interligado-seo-semantico-2026-10-14.md`) | Grátis |
@@ -1018,6 +1018,8 @@ LISTA, PODE PROCESSAR ELES E INCORPORAR ELES".
 
 ### 15.2 A antiga principal fica como âncora do Assunto (dono, 2026-10-17)
 
+> **2026-10-18 · SUBSTITUÍDO em parte** (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.3-d): no publicado com o Assunto declarado na página, a antiga **também** vira o Assunto (sai das keywords) — não continua secundária (D2.1). Sem Assunto na página, como abaixo.
+
 - **O que vale agora:** na troca do passo 3b (Livre sem volume), a principal
   antiga do artigo do plano é a keyword que carrega o Assunto (cadastro
   único). Ela **não** vira secundária: sai das keywords do artigo e fica como
@@ -1057,7 +1059,10 @@ motor novo:
   mesmo Silo**, nem variante delas (dono da variante acima; keyword com dono
   fica com ele).
 - **(d) Cabeça acima do volume da principal** (palavras da principal, menos que
-  todas, com mais volume) só entra no Pilar. No Suporte, ela fica de fora.
+  todas, com mais volume) só entra no Pilar. ~~No Suporte, ela fica de fora.~~
+  **SUBSTITUÍDO em 2026-10-18, §15.10:** no Suporte, fica de fora só a cabeça do
+  núcleo do Pilar/Silo (nenhuma palavra própria do Suporte); a cabeça da faceta do
+  próprio Suporte entra como secundária de contexto, até 5.000 buscas.
 - A secundária precisa levar ao menos uma palavra própria do artigo (da
   principal, do slug, do Assunto ou dos detalhes) que não seja o assunto comum
   do Silo ("internet residencial wifi" não reforça "internet residencial
@@ -1090,6 +1095,8 @@ motor novo:
   como "Sugestões do Arquiteto").
 
 ### 15.5 Principal de identidade (dono, 2026-10-17)
+
+> **2026-10-18 · SUBSTITUÍDO como portão da troca** (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.3-b/c, aprovada): "identidade fica" e "Publicados" desta seção — vale a régua do volume (volume 0 → proposta no Pilar e no Suporte, publicado e novo; volume definido fica; desconhecido não decide) com a régua c. Continuam: o motivo, a SERP da principal de identidade e "as mais amplas reforçam o contexto" quando a principal fica.
 
 O dono, literal: "Se o termo principal tem pouco volume, mas faz sentido
 preservá-lo por ser a identidade do assunto/tema, principalmente nos
@@ -1276,7 +1283,9 @@ O que vale agora (spec §44):
 - **(a) A mesma busca no máximo 2 vezes por artigo**, as de maior volume
   (`sameSearchKey`; "melhor", "bom", "vale a pena" fazem outra busca).
   SUBSTITUI "a variante da própria principal vale no máximo duas vezes" (§15.3 a)
-  e as cinco grafias do Pilar (§15.5, cenário).
+  e as cinco grafias do Pilar (§15.5, cenário). Complemento de 2026-10-18
+  (§15.10): a mesma busca com o MESMO volume é a mesma linha do Google Ads e conta
+  uma vez.
 - **(b) Assunto que enumera entidades** (`assuntoEntityList`: a cabeça do título
   com vírgula, "ou" ou "vs"; lista com número não conta): carrega o artigo a
   candidata que nomeia uma entidade com o resto do artigo, ou duas comparadas;
@@ -1326,3 +1335,216 @@ a semente curta; l2 com uma de cada operadora e as comparações; l4 com as de
 streaming e, depois da coleta, as de TV; "combo tv internet e celular" no t2;
 "combo tv e celular" fora; t4 com as facetas; e o teste novo "'adequado' só com
 reforço suficiente"). Alocador: `tests/arquiteto-article-improvement.test.mts`.
+
+### 15.9 Depois do Concluir: Silo do plano fechado, keywords no artigo, links pela cor, o refazedor que lê e o Pilar que troca (teste no ar e dono, 2026-10-17 noite / 2026-10-18)
+
+O dono rodou Processar → Concluir no amarelo (marca `d4fa133a-…`): 8 ArticleDNA
+aprovados (4 v1 + 4 v2), 32 keywords novas, SiloDNA v1 + SiloPage v1 do
+`territory:2318febb` (consolidado, ligado ao grupo). Verificado pelo coordenador no
+navegador e por SELECT. Tudo dentro da linha de sempre: nenhuma rota, etapa, barra,
+botão nem núcleo novo; nada foi apagado nem gravado no banco por este trabalho.
+
+| # | O que apareceu | Causa (verificado no código e no banco) | Conserto |
+|---|---|---|---|
+| A | `territory:c8c9ee94` "Planos e contratação", confirmado, vazio, às 01:10 UTC | Uma segunda confirmação (run `e5d5ec39`, 01:10–01:11) incorporou 5 keywords novas; o envio delas ao Arquiteto (`createMineradorArquitetoHandoff` → `materializeDeclaredPlanSilo` → `choosePlanSiloTerritory`) só via candidate/confirmed (`PLAN_SILO_ASSIGNABLE`): o 2318febb, já `consolidated` desde 00:57, era invisível → `create`. Na primeira confirmação (00:54–00:57) ele ainda estava `confirmed`, por isso não duplicou | `choosePlanSiloTerritory` acha o consolidado (ligado ou mesmo slug, o fechado antes; `PLAN_SILO_ALIVE`); `materializeDeclaredPlanSilo` não cria, não confirma nem põe membro no consolidado (a nova entra pelo artigo); "Recriar o Silo do plano" recusa o consolidado; o duplicado (grupo ligado a outro território vivo) deixa de ser "Silo do plano" no Desfazer (`planSiloDuplicateOf`), na tela e no servidor |
+| B | "Keywords sem artigo · 32" | As 32 estão nos `keywordReferences` dos ArticleDNA vigentes, mas o item de workflow delas não tem `clusterId`/`workingArticleId`; a mesa sobrepõe a cópia de trabalho (nula) à projeção do ArticleDNA e as lista como "não agrupadas" (com "Reservar como candidata" a Silo) | `splitUngroupedBySubjectAnchor` recebe `inArticleKeywordIds` (`keywordIdsInArticleDnas` dos vigentes): saem de "sem artigo"; a contagem do pipeline também as conta como no artigo. Só leitura |
+| C | Links internos: "Selecione o Silo do grafo antes de processar os links" com os 8 marcados | A escolha do Silo do grafo era o clique no mapa (saiu em 16/10); `linksSiloOfArticle` lia o id da cópia de trabalho ("workflow:…"), não o do ArticleDNA, e os 8 ficavam sem Silo; sem marcação, valia o primeiro Silo da lista (podia ser o azul) | `linksSiloOfArticle` lê o ArticleDNA pela chave da fase (`articleDnaEntryFor`); `resolveLinksSilo`: com a cor, o Silo da cor com o par; sem cor, o seletor de sempre ("Silo do grafo", agora `LinksSiloPicker`) com só os Silos com o par; marcados sem Silo achado não travam |
+| D | Refazedor: só "Já feito… diga o motivo" e "4 Assunto(s) com lista… não entram na busca nova" | A tabela mostrava só as linhas que mudam (com 8 adequados, nada) e o aviso do refazer vinha aberto; o F5 de 12/10 tirava da busca nova o Assunto com lista da Pesquisa por Assunto — e as keywords que a própria confirmação incorporou levam o Assunto na lista (`subject_discovery`) | A tabela é a leitura de cada artigo (`improvementReadingLines`: tem · falta · proposta); o "já feito" e o motivo dentro de um recolhido que só abre quando a pessoa pede; o F5 foi **SUBSTITUÍDO** pela regra de 16/10 (§15 passo 4): a lista é lida primeiro e a busca nova roda para quem ainda pede reforço |
+| D′ | (achado no SELECT) toda proposta PRONTA com as keywords novas (a troca do Pilar, por exemplo) viraria "Precisa do Minerador: a Lógica…" | A Lógica do Minerador já rodou nelas (`logicProcessedAt`) e deixou "Pendente" (ambígua); a melhoria pedia a Lógica de novo — laço | `mineradorIntentSettled` (prévia e gravador): Lógica que já rodou resolve; a intenção é da SERP (§40) |
+| E | Finalizar | — | Depois de "Confirmar links internos", "Marcar Pronto para Radar e enviar os N artigos deste Silo" (o de sempre) aparece: os 8 agora resolvem o Silo do grafo |
+| F | Decisão do dono: "Pilar troca, Suportes ficam" (**SUBSTITUÍDO em 2026-10-18** pela SDD do Assunto pela principal: o Suporte de volume 0 também troca, pela faceta dele) | A T12 (§15.5) segurava a principal de identidade também no Pilar sem volume | Exceção na MESMA régua: `pilarTrocaPelaCabeca` / `identityHoldsPrincipal` em `subjectSlugCoreSwap`, `copyLineEdges` e `planArticleImprovements`: o Pilar Livre sem volume recebe a proposta do termo-cabeça com volume que leva o núcleo do slug (no Pilar, cauda curta e mais volume entre as que levam o núcleo); a antiga fica como o Assunto (§15.2); a principal nova conta no teto da mesma busca (§15.8 a); sem termo-cabeça, a identidade fica. Travada e Suportes, como antes |
+
+- **SUBSTITUÍDO** em 2026-10-18 (§0.5): "Assunto com lista da Pesquisa por Assunto
+  do Minerador não entra na busca nova" (SDD do plano declarado, F5, 2026-10-12;
+  catálogo, guarda de retrabalho); "a tabela do refazedor mostra só o que pode mudar";
+  e, para o Pilar, o "identidade fica" da §15.5 (a linha 3b da tabela do §15 e o
+  cenário da §15.5: o Pilar recebe a proposta do termo-cabeça; os 3 Suportes Livres
+  ficam).
+- **O que o dono clica:** (A) Arquiteto → aba Silos → na linha "Planos e contratação"
+  que está **Confirmado** com 0 keywords (a outra, Consolidada, não tem o botão) →
+  "Desfazer Silo" → confirmar na prévia. É seguro: nenhuma keyword aponta para ele,
+  não tem SiloDNA nem SiloPage, nenhum ArticleDNA o usa; ele fica no banco como
+  desfeito. (E) Links internos com a etiqueta amarela → "Processar links" → confirmar
+  na prévia → revisar → "Confirmar links internos" → "Marcar Pronto para Radar e
+  enviar os 8 artigos deste Silo" → confirmar.
+- **Limites:** o Pilar já formado precisa da SERP do termo-cabeça (4 consultas, até
+  US$ 0,014, custo dito antes) para gravar; a escolha do Silo do grafo é de tela
+  (nada gravado). Nada validado na tela pelo dono.
+- **Cenários:** `tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts` (o Pilar
+  troca no Processar/Concluir e no refazedor; "depois do Concluir" A, B, C, D);
+  `tests/arquiteto-cenarios-ouro-2026-10-16.test.mts` (C17: a frase do Pilar);
+  `tests/arquiteto-tres-botoes-dom-2026-10-17.test.mts` (a leitura do refazedor; o
+  "já feito" só quando se pede; o Silo do grafo pela cor); alocador em
+  `tests/arquiteto-article-improvement.test.mts`; servidor em
+  `tests/arquiteto-article-improvement-server.test.mts` (o Assunto com lista entra na
+  busca nova).
+
+### 15.10 A cabeça do Pilar é a do núcleo do Pilar/Silo; a da faceta do Suporte reforça o contexto (teste no ar, 2026-10-18)
+
+O coordenador abriu o refazedor ("Melhorar publicados…") no amarelo (marca
+`d4fa133a-…`). O Suporte "Instalação de internet: taxas, prazo e quando chega a
+primeira fatura" (principal Travada "instalação de internet residencial", 170; slug
+`instalacao-internet-primeira-fatura`; detalhes "Instalação, agendamento,
+viabilidade, cobrança inicial e fidelidade") ficou com 3 keywords: o motor recusava
+"internet instalação" (880), "instalação internet" (880) e "instalação de internet"
+(720) como "mais ampla que a principal (cabeça do Pilar)".
+
+- **Causa (verificada no código):** a régua da cabeça no Suporte (§15.3 d:
+  `cabecaDaPrincipal || headOverPrincipal`, em `copyLineEdges` e no filtro do Suporte
+  de `planArticleImprovements`) comparava só com o volume da principal do Suporte.
+  Com 170 buscas, toda busca mais ampla da MESMA faceta virava "cabeça do Pilar" —
+  são a cabeça da faceta "instalação", não a do tema do Silo ("planos de internet
+  residencial").
+- **Conserto, no mesmo motor (`suporteReservaAoPilar`, `nucleoDoPilarESilo`):** no
+  Suporte do plano, a busca mais ampla que a principal só fica com o Pilar quando
+  nenhuma palavra dela é própria do Suporte — todas são do Pilar (principal, slug,
+  entidade), do Silo (entidade, slug) ou do assunto comum dos artigos ("internet
+  residencial", "plano de internet", "planos de internet residencial"). A que leva a
+  palavra própria do Suporte é a cabeça da faceta dele e entra como secundária de
+  contexto (§15.5: "as keywords mais amplas podem reforçar o contexto"), até
+  `BROAD_HEAD_MAX_VOLUME` (5.000; acima, "é cabeça (mais de 5000 buscas): um Suporte
+  não ranqueia nela"), com as regras do Silo de sempre (§15.3 a–c, §15.8 a–d). Sem o
+  Pilar lido, a regra de antes (fecha para o lado seguro).
+- **O Pilar fora da leitura:** o "Processar artigos" de algumas linhas e o refazedor
+  de um artigo só não têm o Pilar entre os alvos. `readInputs` lê o Pilar do mesmo
+  plano em todas as linhas do recorte, antes do filtro por `targetIds`, e o põe no
+  alvo do Suporte (`ImprovementTarget.planPillar`, opcional; só leitura). Runs já
+  gravados sem o campo usam o Pilar da leitura.
+- **A mesma linha do Google Ads (§15.8 a, complemento):** "internet instalação" e
+  "instalação internet" têm o mesmo volume (880): o Google Ads agrupa as grafias da
+  mesma busca e repete o número — é um dado só. A primeira entra; a outra fica fora
+  ("é a mesma linha do Google Ads de …") e não conta no teto de 2; a segunda vaga vai
+  para a grafia de volume próprio ("instalação de internet", 720).
+- **Resultado no amarelo (fixture com os números reais):** a instalação recebe
+  "instalação de internet" e "internet instalação"; nenhuma cabeça do núcleo do Pilar
+  entra em Suporte; o refazedor de um artigo só dá o mesmo resultado.
+- **Botões:** "Processar artigos" e "Melhorar publicados…" — o mesmo
+  `handleArticleImprovement` → `planArticleImprovements` (a mesma rota
+  `/api/arquiteto/article-improvement`; o MCP chama o mesmo núcleo). Nenhuma rota,
+  etapa, botão nem núcleo novo.
+- **SUBSTITUÍDO (§0.5):** §15.3 (d) "No Suporte, ela fica de fora"; spec §39 item 7
+  ("a cabeça acima do volume da principal só no Pilar"); catálogo (`article_improvement`,
+  itens b e h); no cenário amarelo, "instalação de internet" (1.900, fixture) como
+  "cabeça mais ampla de um Suporte".
+- **Decisão do dono pendente:** a leitura "mesma busca + mesmo volume = um dado só"
+  também muda "preço internet residencial" × "preço de internet residencial" (170 ×
+  170, no artigo "barata"): entra só uma.
+- **Cenários:** `tests/arquiteto-cenarios-ouro-amarelo-2026-10-16.test.mts` ("G: no
+  refazedor…", novo; "§15 de ponta a ponta", "'adequado' só com reforço suficiente" e
+  "depois do Concluir · D" atualizados); `tests/arquiteto-article-improvement.test.mts`
+  ("2026-10-18 · a cabeça do Pilar é a do núcleo do Pilar/Silo…");
+  `tests/arquiteto-tres-botoes-dom-2026-10-17.test.mts` ("refazedor · G…": a proposta
+  sai do motor e a tela diz "Entram: …").
+
+### 15.11 "Desfazer Silo" desmonta o Silo inteiro, em qualquer estado, e é o mesmo núcleo da exclusão do Minerador (dono, 2026-10-18)
+
+**Decisões do dono, no mesmo dia, nesta ordem.**
+
+1. Pergunta do coordenador: como apagar uma cor inteira cujo Silo já está
+   consolidado (azul da WifiConecta, "Wi-Fi e fibra óptica",
+   `territory:5e689f8c-8f06-4e65-94c4-b3cd7ac906cc`, grupo
+   `07fec332-4b0a-43cb-af19-cedfd9b24897`, 7 artigos, SiloDNA/SiloPage v2, plano do
+   CSV). Escolha literal do dono: **"Manter em duas etapas"** — (1) no Arquiteto, o
+   "Desfazer Silo" de sempre aceita o Silo consolidado e o do plano, **Pilar
+   incluído**, retirando todos os artigos e desmontando o Silo sem apagar versão;
+   (2) no Minerador, o "Excluir tudo da cor" de sempre exclui as keywords.
+2. Depois, a decisão que amplia (literal): **"sobre apagar, tem que poder apagar sim
+   não interessa qual seja o estado, isso está no contrato global, tudo tem que poder
+   ser apagado e claro com instâncias de seleção e confirmação, e alerta falando o
+   que está apagando. mas tem que poder apagar tudo sim"** (contrato global:
+   `docs/compartilhado/sdd-lifecycle-global-plataforma-2026-08-20.md`, adendo de
+   2026-10-18).
+
+**O que vale agora (uma linha, os botões de sempre).**
+
+- **"Desfazer Silo" (aba Silos)** aceita qualquer Silo candidato, confirmado ou
+  consolidado. Só não tem o que desfazer o já desfeito, substituído ou arquivado.
+  - *Silo sugerido* (sem artigo aprovado, sem par, fora do plano, nada publicado nem
+    adiante): o de sempre — território `rejected`, keywords para "sem Silo", uma
+    confirmação simples; continua no lote "Desfazer os Silos sugeridos (N)".
+  - *Silo inteiro* (consolidado, do plano, com SiloDNA/SiloPage aprovado, com artigo
+    aprovado, com algo publicado, com artigo adiante, ou o registro de um Silo
+    anterior): um por vez, nunca pelo lote. O mesmo PATCH canônico
+    (`/api/arquiteto/workspace`, `territoryUndos`) com `mode: "preview"` devolve a
+    prévia (grátis, nada gravado) e, na confirmação, leva o `decisionHash` da prévia e
+    o nome do Silo digitado (`typedConfirmationMatches`, a regra da plataforma); exige
+    `arquiteto:approve` (rejeitar ArticleDNA é decisão sobre o artefato).
+  - O que sai, pelos writers de sempre, nesta ordem: o evento `rejected` na versão
+    vigente de cada ArticleDNA do Silo, Pilar incluído, e do SiloDNA e da SiloPage (o
+    writer de "Retirar artigo do Silo", id determinístico); o item do artigo no
+    Radar/Redator/Publicações passa a `withdrawn` (handler mínimo do Radar,
+    `lib/server/radar-item-withdrawal.ts`; a investigação fica); as etiquetas da cor
+    dos artigos retirados (`deleteArticleGroupRows`); as keywords editáveis voltam para
+    "sem Silo" (a decisão de Silo de sempre); o grupo é desligado
+    (`unlinkEditorialGroupSilo`; o plano do cadastro fica no Minerador); o território
+    vira `rejected` (a consolidação sai do território e fica registrada nos `reasons`,
+    porque o contrato só aceita `consolidation` em consolidated/superseded/archived). O
+    grafo de links aprovado deixa de valer junto com o par em que foi feito
+    (`findApprovedGraphForSilo`): nada é regravado (as versões do grafo são
+    append-only e sem evento de status).
+  - **Nada recusa pelo estado** (SUBSTITUI as recusas de 14/10 a 18/10, abaixo): o
+    publicado sai de vigência no Arquiteto e a prévia diz que a página no site, a URL,
+    o slug e o canonical não mudam (nada é despublicado; excluir a keyword publicada é
+    no Minerador, na lixeira de 24 h); o artigo adiante sai com o item retirado da
+    operação; o artigo aprovado de outro Silo que usa keyword deste fica como está; a
+    keyword fora da etapa do Arquiteto fica como está. Tudo isso vira o **alerta** da
+    prévia, por área, com os nomes.
+  - A mesa aplica o evento `rejected` também no par (`releaseRejectedSiloPairs`, na
+    leitura inteira e na releitura do que mudou): o Silo desfeito sai dos Silos ativos
+    e do seletor de links; nada é apagado.
+- **"Retirar artigo do Silo"**: as recusas ARTICLE_PUBLISHED e ARTICLE_IN_DOWNSTREAM
+  viraram avisos (o item adiante sai da operação na mesma ação). O Pilar continua não
+  saindo sozinho ("troque o Pilar antes, ou desfaça o Silo inteiro").
+- **Minerador ("Excluir" e "Excluir tudo da cor")** — o MESMO núcleo:
+  `planArchitectDismantleForKeywords` / `applyArchitectDismantle`
+  (`lib/server/arquiteto-territory-undo.ts`), pela porta
+  `lib/minerador/architect-dismantle.ts`. A keyword no ArticleDNA vigente deixa de
+  ficar fora: cada artigo vigente que cita uma keyword que sai deixa de valer; o Silo
+  dele sai inteiro quando todos os artigos dele (ou o Pilar) saem, ou quando é a cor
+  inteira (o Silo ligado ao grupo); senão o artigo sai pela "Retirar artigo do Silo";
+  o artigo sem Silo vivo recebe só o evento. A prévia do Minerador mostra isso por
+  área (é o alerta) e entra no `decisionHash`; a confirmação forte é a de sempre (a
+  cor e "apaga de vez"; a publicada com a marcação e o nome). O desmonte roda ANTES das
+  keywords; se não fechar, nenhuma keyword é excluída e o resultado diz o que foi feito
+  e o que não foi (`ARCHITECT_DISMANTLE_FAILED`). Só fica fora (`architect_unavailable`)
+  quando o desmonte não pôde ser lido ou falta a permissão de aprovar no Arquiteto.
+
+**Recusas SUBSTITUÍDAS (AGENTS.md §0.5).** No "Desfazer Silo": CONSOLIDATED ("Silo
+consolidado não se desfaz por aqui"), DECLARED_PLAN_SILO ("Tirar do plano/Substituir o
+plano no Minerador"), APPROVED_ARTICLE_DNA ("Desfaça ou refaça o artigo antes"),
+APPROVED_SILO_ARTIFACT, PUBLISHED_ADDRESS ("Silo publicado continua ativo"),
+EXISTING_SILO, PUBLISHED_KEYWORD, KEYWORD_NOT_EDITABLE (S7 e S12 do registro). No
+Minerador: `architect_reference` ("O Arquiteto não exclui keyword (F4): retire o artigo
+do Silo lá…") e o D8 "Radar, Redator e Publicações não mudam". Na "Retirar artigo do
+Silo": ARTICLE_PUBLISHED e ARTICLE_IN_DOWNSTREAM.
+
+**O que ainda depende do dono (migration).** A keyword com documento no Redator
+continua fora: a recusa está no banco (`lifecycle_keyword_deletion_impact` devolve
+`mode = 'blocked'` quando há `content_documents` do artigo, e
+`lifecycle_delete_minerador_keywords` levanta `LIFECYCLE_DRAFT_DESCENDANT_REQUIRES_OWNER`).
+O código não muda essa regra sozinho (`AGENTS.md` §15); a migration proposta
+(`20261018120000_documento_do_redator_nao_prende_a_keyword`, não escrita) muda só a
+classificação do documento para histórico preservado (`behavior = 'preserve'`, sem
+`mode = 'blocked'`). O texto do motivo já nomeia a migration.
+
+**Rollback.** Nada novo no banco: eventos de status (append-only), estados de item de
+esteira (texto livre), linhas de etiqueta e o `silo_id` do grupo. Reverter o código
+volta às recusas; um Silo já desfeito volta por "Recriar o Silo do plano" (S6); o
+artigo rejeitado continua no histórico (um novo evento `approved` o reativaria, sem
+porta de tela hoje); o item `withdrawn` do Radar fica como histórico (o mesmo artigo
+reenviado esbarra na unicidade da esteira — pendência registrada).
+
+**Testes.** `tests/arquiteto-desfazer-silo.test.mts` (domínio: nada recusa pelo estado,
+o alerta, o Silo inteiro do azul com Pilar + 6, os eventos determinísticos, o desfecho
+da releitura, o par rejeitado fora da mesa); `tests/arquiteto-desfazer-silo-servidor.test.mts`
+(o PATCH: prévia sem escrita, confirmação forte, permissão, 9 eventos, keywords,
+etiquetas, grupo, território, retomada, Radar retirado, publicado e SiloPage publicada
+com o alerta); `tests/arquiteto-desfazer-silo-dom-2026-10-18.test.mts` (o botão de
+sempre → prévia → nome digitado → PATCH com a prévia → releitura);
+`tests/arquiteto-cenarios-ouro-apagar-tudo-2026-10-18.test.mts` (cenários-ouro: (a) a
+cor do plano consolidada numa confirmação só do Minerador, (b) em duas etapas, (c) o
+artigo no Radar, (d) a publicada na lixeira de 24 h, e o desmonte que não fecha);
+`tests/arquiteto-silo-retirada*.test.mts`, `tests/minerador-excluir-tudo-da-cor-2026-10-14.test.mts`,
+`tests/radar-grupos-excluir-tudo-da-cor-dom-2026-10-14.test.mts` (o alerta por área no
+diálogo de sempre) e `tests/minerador-exclusao-confirmacao-forte-dom.test.mts`
+atualizados para a regra nova.

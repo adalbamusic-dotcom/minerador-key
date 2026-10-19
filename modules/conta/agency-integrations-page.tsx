@@ -3,7 +3,7 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Gauge, Link2, Loader2, ShieldCheck } from "lucide-react";
 import type { AgencyIntegrationWorkspace } from "@/lib/server/integration-governance";
-import { internalBadge, internalButtonPrimary, internalField, internalNoticeError, internalNoticeSuccess, internalNoticeWarning, internalSurface, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
+import { internalBadge, internalButtonPrimary, internalField, internalNoticeWarning, internalSurface, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
 import { useNoticeBridge } from "@/components/global-notice-center";
 import { AgencyMcpPanel } from "@/modules/conta/agency-mcp-panel";
 
@@ -11,10 +11,6 @@ const panel = `${internalSurface} p-5 sm:p-6`;
 
 function statusLabel(value: string) {
   return value === "active" ? "Ativo" : value === "ready" ? "READY" : value === "agency_distributed" ? "Distribuído pela Agência" : value;
-}
-
-function Result({ message, error = false }: { message: string; error?: boolean }) {
-  return <p role={error ? "alert" : "status"} className={error ? internalNoticeError : internalNoticeSuccess}>{message}</p>;
 }
 
 export function AgencyIntegrationsPage({ initialData }: { initialData: AgencyIntegrationWorkspace }) {
@@ -26,7 +22,9 @@ export function AgencyIntegrationsPage({ initialData }: { initialData: AgencyInt
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  useNoticeBridge({ notice: error || message, module: "conta", area: "Integrações da Agência", title: "Conta · Integrações", fallbackSeverity: error ? "ERROR" : "INFO" });
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): resultado e falha vão para o sino, cada um com o seu tom; as faixas da tela saíram. */
+  useNoticeBridge({ notice: error, module: "conta", area: "Integrações da Agência", title: "Conta · Integrações", fallbackSeverity: "ERROR" });
+  useNoticeBridge({ notice: message, module: "conta", area: "Integrações da Agência", title: "Conta · Integrações", fallbackSeverity: "SUCCESS" });
 
   const effectiveGrantId = data.platformGrants.some((grant) => grant.id === selectedGrantId) ? selectedGrantId : data.platformGrants[0]?.id || "";
   const effectiveBrandId = data.brands.some((brand) => brand.id === selectedBrandId) ? selectedBrandId : data.brands[0]?.id || "";
@@ -70,9 +68,6 @@ export function AgencyIntegrationsPage({ initialData }: { initialData: AgencyInt
       <div><p className="text-sm font-medium text-text-muted">Integrações da Agência</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Distribua recursos às Marcas</h1><p className="mt-3 max-w-3xl text-base leading-7 text-text-muted">A Plataforma concede o recurso à Agência; a Agência escolhe quais Marcas podem consumi-lo. Nenhum segredo ou fallback de ambiente participa deste fluxo.</p></div>
       <div className="flex items-center gap-2 rounded-md border border-context-accent/35 px-3 py-2 text-sm font-semibold text-context-accent"><Link2 className="h-4 w-4" aria-hidden="true" />{data.agency.name}</div>
     </header>
-
-    {message ? <Result message={message} /> : null}
-    {error ? <Result message={error} error /> : null}
 
     <AgencyMcpPanel data={data} saving={saving} agencyRef={data.agency.agencyRef} mutate={mutate} reload={reload} notify={(text, isError) => { if (isError) { setError(text); setMessage(""); } else { setMessage(text); setError(""); } }} />
 

@@ -19,7 +19,8 @@ import { recoverRadarSerpSnapshot } from "@/lib/radar/serp-recovery";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { AuthzError, authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { PersistenceUnavailableError, getOperationalClient, mapPersistenceError } from "@/lib/server/editorial-db";
-import { DataForSeoSerpError, readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
+import { DataForSeoSerpError } from "@/lib/minerador/dataforseo-serp-core";
+import { resolveBrandSerpTarget } from "@/lib/server/brand-serp-target";
 import { resolveDataForSeoCanonicalSerpCompatibilityConfig, DataForSeoCanonicalError } from "@/lib/server/dataforseo-canonical";
 import { IntegrationRuntimeError, integrationRuntimeErrorResponse, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { radarSerpSnapshotSummary } from "@/lib/radar/serp-snapshot-summary";
@@ -420,6 +421,13 @@ export async function POST(request: NextRequest) {
     const resolutionEnvelope = await validateRadarSerpResolutionEnvelope(input.resolutionEnvelope);
     const { article, resolved, hydration, resolutionMode, canonicalRemoteVerified } = await resolveArticle(profile, input.brandId, input.articleId, input.articleVersion, input.hydration, resolutionEnvelope);
     if (input.articleDnaVersionId && input.articleDnaVersionId !== article.versionId) throw new RadarResolutionEnvelopeError("transfer_conflict", "A versão do ArticleDNA enviada pelo Radar diverge da versão canônica.");
+    /*
+     * 2026-10-18 · A LOCALIDADE DA SERP É A DA MARCA (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L2).
+     * Lida aqui, no servidor, pelo `brandId`: o `location` do pedido não decide nada
+     * e não vira rótulo (o rótulo falso "São Paulo" de uma SERP nacional acabou).
+     * Marca sem localidade válida: os códigos do ambiente, como antes.
+     */
+    const alvoDaMarca = await resolveBrandSerpTarget(getOperationalClient(), input.brandId);
 
     /*
      * ===================== A PESQUISA AUXILIAR =============================
@@ -485,7 +493,7 @@ export async function POST(request: NextRequest) {
        * somar posições de aparelhos diferentes misturaria lentes. Continua fora
        * de `serpRecords`: sem snapshot anterior, sem "sem mudança", sem versão.
        */
-      const queryInput = SerpQueryInputSchema.parse({ keyword: auxiliar.keyword, articleId: input.articleId, location: input.location, language: input.language, device: SERP_CACHE_CANONICAL_LENS.device });
+      const queryInput = SerpQueryInputSchema.parse({ keyword: auxiliar.keyword, articleId: input.articleId, location: alvoDaMarca.label, language: input.language, device: SERP_CACHE_CANONICAL_LENS.device });
       const searchInput: SerpSearchInput = {
         brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: article.versionId,
         keywordId: reference.keywordId, keywordDnaVersionId: reference.keywordDnaVersionId,
@@ -499,7 +507,7 @@ export async function POST(request: NextRequest) {
         version: 1, previousSnapshotId: null,
       };
       const clienteDaAuxiliar = getOperationalClient();
-      const alvoDaAuxiliar = await readRadarKeywordTargetCodes(clienteDaAuxiliar, input.brandId, reference.keywordId, readDataForSeoTargetCodes());
+      const alvoDaAuxiliar = await readRadarKeywordTargetCodes(clienteDaAuxiliar, input.brandId, reference.keywordId, alvoDaMarca.codes);
       const lentesDaAuxiliar = await collectRadarSerpLensSnapshot({
         context: { supabase: clienteDaAuxiliar, brandId: input.brandId, actorUserId: profile.userId },
         searchInput,
@@ -566,12 +574,12 @@ export async function POST(request: NextRequest) {
      * Os códigos de local e idioma são os do ALVO da keyword, pela função do
      * Minerador: é o que faz a SERP que ele já pagou servir aqui de graça.
      */
-    const queryInput = SerpQueryInputSchema.parse({ keyword: resolved.keyword, articleId: input.articleId, location: input.location, language: input.language, device: SERP_CACHE_CANONICAL_LENS.device });
+    const queryInput = SerpQueryInputSchema.parse({ keyword: resolved.keyword, articleId: input.articleId, location: alvoDaMarca.label, language: input.language, device: SERP_CACHE_CANONICAL_LENS.device });
     const searchInput: SerpSearchInput = { brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: article.versionId, keywordId: resolved.keywordId, keywordDnaVersionId: resolved.keywordDnaVersionId,
       keyword: queryInput.keyword, location: queryInput.location, language: queryInput.language, device: SERP_CACHE_CANONICAL_LENS.device, operatingSystem: SERP_CACHE_CANONICAL_LENS.operatingSystem, expectedIntent: intencaoCanonica, expectedFormat: article.payload.hierarchy,
       requiredTopics: article.payload.requiredTopics, articleEntities: article.payload.entities, resultLimit: RADAR_SERP_SNAPSHOT_DEPTH, version: lastVersion + 1, previousSnapshotId: previous?.id || null };
     const cliente = getOperationalClient();
-    const alvo = await readRadarKeywordTargetCodes(cliente, input.brandId, resolved.keywordId, readDataForSeoTargetCodes());
+    const alvo = await readRadarKeywordTargetCodes(cliente, input.brandId, resolved.keywordId, alvoDaMarca.codes);
     const operationRequestId = crypto.randomUUID();
     /*
      * O núcleo lê o cache ANTES de resolver credencial e quota, paga só as

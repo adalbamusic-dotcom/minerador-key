@@ -244,7 +244,8 @@ test("prévia: grátis e sem gravar — primeiro ArticleDNA do publicado, as dua
   assert.equal(patches.length + versoes.length, 0);
   // R4: toda consulta filtra a marca.
   for (const consulta of banco.log) {
-    const coluna = consulta.tabela === "minerador_keywords" ? "brand_id" : "marca_id";
+    // 2026-10-18 · `marcas` (a localidade da SERP, SDD localidade por marca) é a própria marca: o filtro é o `id`.
+    const coluna = consulta.tabela === "minerador_keywords" ? "brand_id" : consulta.tabela === "marcas" ? "id" : "marca_id";
     assert.ok(consulta.filtros.some(filtro => filtro.coluna === coluna && filtro.valor === MARCA), `${consulta.tabela} sem filtro de marca`);
   }
 });

@@ -49,10 +49,17 @@ function optionalUrl(value: unknown): string | null | undefined {
  * principal ANTERIOR de uma troca confirmada (a página continua a mesma);
  * senão a principal. Artigo sem identidade publicada não tem página: `null`.
  */
-export function publishedPageKeywordIdOf(article: Pick<ArticleDNA, "articleId" | "principalKeywordId" | "keywordReferences" | "primaryKeywordDecision" | "publishedIdentityRef">, entityId?: string): string | null {
+export function publishedPageKeywordIdOf(article: Pick<ArticleDNA, "articleId" | "principalKeywordId" | "keywordReferences" | "primaryKeywordDecision" | "publishedIdentityRef"> & Partial<Pick<ArticleDNA, "subject">>, entityId?: string): string | null {
   if (article.publishedIdentityRef?.publicationStatus !== "published_protected") return null;
   const ids = new Set(article.keywordReferences.map(reference => reference.keywordId));
   for (const candidato of [entityId, article.articleId]) if (candidato && ids.has(candidato)) return candidato;
+  /*
+   * 2026-10-18 · A PÁGINA QUE VIROU O ASSUNTO (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.3-d, R3): ela
+   * saiu das keywords e mora no `subject` do artigo. Continua sendo a página (o id do artigo/entidade ou a origem da
+   * identidade publicada); a principal nova nunca vira "publicado".
+   */
+  const assunto = article.subject?.keywordId ?? null;
+  if (assunto && !ids.has(assunto) && ([entityId, article.articleId].includes(assunto) || article.publishedIdentityRef?.sourceKeywordDnaIds?.includes(assunto) || article.primaryKeywordDecision?.previousKeywordId === assunto)) return assunto;
   const troca = article.primaryKeywordDecision;
   if (troca?.status === "confirmed" && troca.previousKeywordId && ids.has(troca.previousKeywordId)) return troca.previousKeywordId;
   return article.principalKeywordId;

@@ -18,7 +18,7 @@ const previaDoPlano = {
 function deps(over: Partial<WithdrawChainDeps> = {}, chamadas: string[] = []): WithdrawChainDeps {
   return {
     withdraw: async mode => { chamadas.push(`plano:${mode}`); return mode === "preview" ? previaDoPlano : { ok: true, mode: "apply", group: previaDoPlano.group, subjectKeywordId: "s2", principalKeywordId: null, planVersion: 2, groupAlreadyUpdated: false, readback: { subjectPlanRemoved: true, subjectStillDeclared: true, principalMarkRemoved: null, groupPlanHash: "x" }, notices: [] }; },
-    approveAndSend: async ids => { chamadas.push(`aprovar:${ids.join(",")}`); return { send: true, results: ids.map(id => ({ id, keyword: id, outcome: "approved_and_sent" as const, reason: null })), counts: { approved_and_sent: ids.length, sent: 0, approved: 0, unchanged: 0, approved_not_sent: 0, not_sent: 0, blocked: 0, excluded: 0, stale: 0 }, readbackConfirmed: true, decisionHash: "d", notices: [] }; },
+    approveAndSend: async ids => { chamadas.push(`aprovar:${ids.join(",")}`); return { send: true, results: ids.map(id => ({ id, keyword: id, outcome: "approved_and_sent" as const, reason: null })), counts: { approved_and_sent: ids.length, sent: 0, approved: 0, unchanged: 0, approved_not_sent: 0, not_sent: 0, blocked: 0, excluded: 0, stale: 0, failed: 0 }, readbackConfirmed: true, decisionHash: "d", notices: [] }; },
     locateArticle: async () => ({ articleId: "a2", label: "Barata", siloId: "territory:x", isPillar: false }),
     canWithdrawFromSilo: async () => true,
     withdrawFromSilo: async ({ mode }) => { chamadas.push(`silo:${mode}`); return { ok: true, message: mode === "apply" ? "“Barata” saiu do Silo." : "“Barata” sai do Silo." }; },

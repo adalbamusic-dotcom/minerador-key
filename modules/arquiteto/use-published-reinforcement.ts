@@ -266,7 +266,8 @@ export function usePublishedReinforcement(input: {
       const desfecho = { tone: result.data.tone, message: result.data.message, lines: reinforcementOutcomeLines(result.data) };
       setOutcome(desfecho);
       setDialog(dialogoFechado());
-      onNotify?.(desfecho.tone, desfecho.message);
+      /* 2026-10-18 · todos os avisos no sino (regra do dono): o desfecho vai inteiro (com as linhas por publicado); o bloco na tela saiu. */
+      onNotify?.(desfecho.tone, [desfecho.message, ...desfecho.lines].join(" · "));
       setWrittenPageIds(new Set(result.data.pages.filter(page => page.written).map(page => page.publishedKeywordId)));
       setDeferredPageIds(new Map(result.data.pages.filter(page => !page.written && page.dnaDeferred).map(page => [page.publishedKeywordId, page.dnaDeferred!] as const)));
       /*
@@ -337,9 +338,25 @@ export function usePublishedReinforcement(input: {
     const run = result.data;
     setSearchPicks({});
     setSearch(current => ({ ...current, status: "done", run, error: null, retryOperationId: null, message: [run.message, run.persistWarning, run.ledgerWarning].filter(Boolean).join(" ") }));
-    // Erro do Google Ads numa página é aviso, nunca "nada achado" em tom neutro.
-    onNotify?.(run.pages.some(page => page.state === "ads_error") ? "warning" : "info", run.message);
-  }, [brandId, search.plan, onNotify]);
+    /* O resumo da busca vai para o sino pelo efeito único abaixo (com os avisos de gravação), não por aqui. */
+  }, [brandId, search.plan]);
+
+  /*
+   * 2026-10-18 · TODOS OS AVISOS NO SINO (regra do dono). O resumo da busca —
+   * da rodada nova ou relido sem custo — sai daqui, uma vez por texto; a linha
+   * solta abaixo dos botões saiu. Erro do Google Ads numa página é Atenção,
+   * nunca "nada achado" em tom neutro.
+   */
+  const onNotifyRef = useRef(onNotify);
+  useEffect(() => { onNotifyRef.current = onNotify; });
+  const ultimoResumoPublicado = useRef("");
+  useEffect(() => {
+    const texto = search.message || "";
+    if (!texto) { ultimoResumoPublicado.current = ""; return; }
+    if (texto === ultimoResumoPublicado.current) return;
+    ultimoResumoPublicado.current = texto;
+    onNotifyRef.current?.(search.run?.pages.some(page => page.state === "ads_error") ? "warning" : "info", texto);
+  }, [search.message, search.run]);
 
   /** Só depois da confirmação única do custo: um id novo por rodada. */
   const runSearchConfirmed = useCallback(async () => {

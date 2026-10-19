@@ -6,6 +6,7 @@ import { isKeywordPublished } from "@/lib/minerador/keyword-lifecycle";
 import { guardKeywordSemanticWrite } from "@/lib/minerador/keyword-subject";
 import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";
 import { hasCompleteLogicalOutputContract, hasCurrentLogicalProcessorMetadata } from "@/lib/minerador/logical-processor";
+import { constrainSemanticSnapshot, planSemanticSnapshot, semanticSnapshotNeedsReread, semanticSnapshotStillCurrent } from "@/lib/minerador/semantic-snapshot-guard";
 import { getOperationalClient, mapPersistenceError } from "./editorial-db";
 
 /**
@@ -30,6 +31,8 @@ export type DecisionKeywordRow = {
   status: string | null;
   intent: string | null;
   volume_search: number | null;
+  /** 2026-10-18 · aditivo: a fonte do volume (a régua do Assunto pela principal lê o volume conhecido por ela). */
+  volume_source?: string | null;
   results_allintitle: number | null;
   kgr_score: number | null;
   lista_id: string | null;
@@ -39,7 +42,7 @@ export type DecisionKeywordRow = {
 export async function readDecisionKeywords(brandId: string, ids: readonly string[], db: Db = getOperationalClient()) {
   const uniqueIds = [...new Set(ids)];
   const { data, error } = await db.from("minerador_keywords")
-    .select("id,brand_id,keyword,status,intent,volume_search,results_allintitle,kgr_score,lista_id,analise_semantica")
+    .select("id,brand_id,keyword,status,intent,volume_search,volume_source,results_allintitle,kgr_score,lista_id,analise_semantica")
     .eq("brand_id", brandId).is("deleted_at", null).in("id", uniqueIds);
   if (error) mapPersistenceError(error);
   const rows = (data || []) as unknown as DecisionKeywordRow[];
@@ -95,10 +98,19 @@ export function constrainKeywordSnapshot<T extends {
     ["results_allintitle", row.results_allintitle], ["kgr_score", row.kgr_score], ["lista_id", row.lista_id],
   ];
   for (const [column, value] of nullable) guarded = value === null ? guarded.is(column, null) : guarded.eq(column, value);
-  guarded = row.analise_semantica === null
-    ? guarded.is("analise_semantica", null)
-    : guarded.filter("analise_semantica", "eq", JSON.stringify(row.analise_semantica));
-  return guarded;
+  // 2026-10-19 · o DNA vai por chave, com a URL limitada (o DNA inteiro passava de ~25 kB e o gateway recusava);
+  // as chaves que não cabem são conferidas antes por `keywordSnapshotStillCurrent`.
+  return constrainSemanticSnapshot(guarded, row.analise_semantica);
+}
+
+/** A releitura logo antes do UPDATE, para as chaves do DNA que não couberam nos filtros (`semantic-snapshot-guard.ts`). */
+export async function keywordSnapshotStillCurrent(db: Db, brandId: string, row: DecisionKeywordRow): Promise<boolean> {
+  if (!semanticSnapshotNeedsReread(row.analise_semantica, row.analise_semantica ? planSemanticSnapshot(row.analise_semantica) : null)) return true;
+  try {
+    return await semanticSnapshotStillCurrent(db, { brandId, keywordId: row.id, semantic: row.analise_semantica });
+  } catch (error) {
+    return mapPersistenceError(error);
+  }
 }
 
 /* ---------------------------------- Lógica ---------------------------------- */
@@ -148,6 +160,7 @@ export async function runKeywordLogicWithCore(input: { brandId: string; keywordI
     // 2026-10-13 · o Assunto nunca se perde: a Lógica não grava cópia sem ele (merge, não replace).
     const guarded = guardKeywordSemanticWrite(row.analise_semantica, derived.update.analise_semantica);
     if (!guarded.ok) { results.push({ id: row.id, keyword: row.keyword, outcome: "stale", reason: guarded.reason }); continue; }
+    if (!await keywordSnapshotStillCurrent(db, input.brandId, row)) { results.push({ id: row.id, keyword: row.keyword, outcome: "stale", reason: "compare_and_swap_or_readback_failed" }); continue; }
     const saved = await constrainKeywordSnapshot(
       db.from("minerador_keywords").update({ intent: derived.update.intent, analise_semantica: guarded.semantic })
         .eq("id", row.id).eq("brand_id", input.brandId).is("deleted_at", null),
@@ -191,7 +204,14 @@ export function keywordDecisionEntries(rows: readonly DecisionKeywordRow[], acti
     const noop = action === "approve"
       ? current.status === "aprovado" && Boolean(approval) && diverged === false
       : current.status === "rejeitado";
-    const blocked = published ? "Conteúdo publicado é protegido." : action === "approve" && !readiness.ok ? readiness.reason : null;
+    /*
+     * 2026-10-18 · SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.2-b/e (F4): a página publicada com a
+     * coluna `aprovado` pode ter o pacote RE-ASSINADO (o Assunto entrou nele; a coluna continua `aprovado`, nada muda
+     * de status, URL, slug nem canonical). Rejeitar, ou "aprovar" uma linha com status legado `publicado`, continua
+     * protegido — a proteção é do status da publicação, não do DNA da keyword.
+     */
+    const reassinaPublicada = published && action === "approve" && readiness.ok && (row.status || "").trim().toLocaleLowerCase("pt-BR") === "aprovado";
+    const blocked = published && !reassinaPublicada ? "Conteúdo publicado é protegido." : action === "approve" && !readiness.ok ? readiness.reason : null;
     return {
       id: row.id, keyword: row.keyword, currentStatus: current.status,
       proposedStatus: action === "approve" ? "aprovado" as const : "rejeitado" as const,
@@ -234,6 +254,7 @@ export async function applyKeywordDecisionEntries(input: {
       if (!guarded.ok) { results.push({ id: row.id, outcome: "blocked", reason: guarded.reason }); continue; }
       semantic = guarded.semantic;
     }
+    if (!await keywordSnapshotStillCurrent(db, input.brandId, row)) { results.push({ id: row.id, outcome: "stale", reason: "compare_and_swap_or_readback_failed" }); continue; }
     const saved = await constrainKeywordSnapshot(
       db.from("minerador_keywords")
         .update({ status: entry.proposedStatus, ...(input.action === "approve" ? { analise_semantica: semantic } : {}) })

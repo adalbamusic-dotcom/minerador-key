@@ -1,4 +1,5 @@
 import type { ArticleDNA, SiloDNA, SiloPage, VersionEnvelope } from "./contracts.ts";
+import { intentComparisonKey } from "./keyword-dna-signals.ts";
 import type { DeclaredSiloPlan } from "../minerador/declared-plan.ts";
 import { applyDeclaredSiloIdentity, orderIdsByDeclaredPlan, resolveDeclaredSiloPlan, type DeclaredSiloPlanEntry } from "./silo-declared-plan.ts";
 
@@ -155,7 +156,8 @@ export function shortSiloSlug(name: string) {
 }
 
 function intentKey(article: ArticleDNA) {
-  return normalize(article.intentProfile?.primaryIntent || article.mainIntent);
+  // 2026-10-19 · o normalizador único da intenção ("Informativo" = "Informativa").
+  return intentComparisonKey(String(article.intentProfile?.primaryIntent || article.mainIntent || "")) ?? "";
 }
 
 function articleSimilarity(left: ArticleDNA, right: ArticleDNA) {
@@ -167,7 +169,7 @@ function articleSimilarity(left: ArticleDNA, right: ArticleDNA) {
 
 function existingSiloMatches(article: ArticleDNA, silo: SiloDNA) {
   const entityMatch = overlap(articleEntityTokens(article), tokens(`${silo.centralEntity} ${silo.name || ""}`)) > 0;
-  const siloIntent = normalize(silo.dominantIntent);
+  const siloIntent = intentComparisonKey(String(silo.dominantIntent ?? "")) ?? "";
   const articleIntentValue = intentKey(article);
   const intentMatch = !siloIntent || !articleIntentValue || siloIntent === articleIntentValue || siloIntent.includes(articleIntentValue) || articleIntentValue.includes(siloIntent);
   return entityMatch && intentMatch;

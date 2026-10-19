@@ -209,6 +209,12 @@ export type SerpPaidPlan = {
    * o custo MÁXIMO. A tela avisa e oferece coletar ou tentar ler de novo.
    */
   cacheUnavailable?: boolean;
+  /**
+   * 2026-10-18 · Aditivo (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`): a
+   * localidade da SERP que este plano pagaria, quando a marca tem cidade. Marca
+   * nacional: ausente, e a prévia é a de antes.
+   */
+  location?: { label: string; scope: "city" };
 };
 
 const arredondar = (valor: number) => Math.round(valor * 10000) / 10000;
@@ -343,6 +349,8 @@ export function mergeSerpPaidPlans(plans: readonly SerpPaidPlan[]): SerpPaidPlan
   const soma = (campo: "paidQueries" | "primaryPaidQueries" | "extraPaidQueries" | "conditionalPaidQueries" | "recollectableQueries") =>
     plans.reduce((total, plan) => total + plan[campo], 0);
   const spread = Math.max(...plans.map(plan => plan.collectedAtSpreadDays));
+  /* 2026-10-18 · a localidade da SERP é uma por marca: a do primeiro plano que a diz. */
+  const comLocalidade = plans.find(plan => plan.location);
   return {
     lenses: [...primeiro.lenses],
     perLens: [...perLens.values()],
@@ -361,6 +369,7 @@ export function mergeSerpPaidPlans(plans: readonly SerpPaidPlan[]): SerpPaidPlan
     recollectStaleLenses: primeiro.recollectStaleLenses,
     digestChecked: false,
     ...(plans.some(plan => plan.cacheUnavailable) ? { cacheUnavailable: true } : {}),
+    ...(comLocalidade?.location ? { location: { ...comLocalidade.location } } : {}),
   };
 }
 
@@ -444,9 +453,10 @@ export function describeSerpPaidPlan(plan: SerpPaidPlan): { headline: string; co
   const cacheWarning = plan.cacheUnavailable
     ? "Não foi possível ler o cache da SERP, então não dá para saber o que já está pago. O total abaixo é o custo máximo, como se nada estivesse no cache: você pode coletar com esse teto ou tentar ler o cache de novo."
     : null;
+  const local = plan.location ? ` SERP de ${plan.location.label}.` : "";
   const headline = plan.paidQueries > 0
-    ? `Até ${plan.paidQueries} chamada(s) paga(s): ${plan.primaryPaidQueries} na lente principal e ${plan.extraPaidQueries} nas lentes extras.`
-    : "Nenhuma chamada paga: tudo o que esta validação lê já está no cache.";
+    ? `Até ${plan.paidQueries} chamada(s) paga(s): ${plan.primaryPaidQueries} na lente principal e ${plan.extraPaidQueries} nas lentes extras.${local}`
+    : `Nenhuma chamada paga: tudo o que esta validação lê já está no cache.${local}`;
   const cost = plan.paidQueries > 0
     ? `≈ US$ ${dolares(plan.estimatedCostUsd.min)} a ${dolares(plan.estimatedCostUsd.max)} (estimado; o preço com 10 resultados não foi medido).`
     : null;

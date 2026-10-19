@@ -145,10 +145,12 @@ test("prévia: o que sai de vez, o que fica fora (com motivo e caminho), Assunto
   const motivo = (id: string) => p.out.find(item => item.id === id);
   assert.equal(motivo(X.publicada)?.reason, "published_not_included");
   assert.equal(motivo(X.redator)?.reason, "blocked_descendant");
-  assert.equal(motivo(X.noArtigo)?.reason, "architect_reference");
-  assert.match(motivo(X.noArtigo)!.message, /ArticleDNA vigente de 1 artigo do Arquiteto \(“Wifi 6 vale a pena”\)/);
-  assert.match(motivo(X.noArtigo)!.path || "", /Retirar artigo do Silo/);
-  assert.equal(motivo(P[1])?.reason, "architect_reference");
+  // 2026-10-18 · SUBSTITUÍDO "architect_reference" (o Arquiteto não exclui keyword): com a porta do desmonte, a keyword
+  // sai (o Arquiteto desmonta antes — teste "o Arquiteto desmonta antes" abaixo); SEM a porta, fica fora com o porquê.
+  assert.equal(motivo(X.noArtigo)?.reason, "architect_unavailable");
+  assert.match(motivo(X.noArtigo)!.message, /ArticleDNA vigente de 1 artigo do Arquiteto \(“Wifi 6 vale a pena”\): a exclusão desmonta o artigo lá/);
+  assert.match(motivo(X.noArtigo)!.path || "", /Desfazer Silo.*Retirar artigo do Silo/);
+  assert.equal(motivo(P[1])?.reason, "architect_unavailable");
   assert.equal(motivo(S[1])?.reason, "same_article", "o Assunto do artigo fica com a principal");
   assert.equal(motivo(X.solta), undefined, "a versão ANTIGA do ArticleDNA e o artigo retirado (rejected) não prendem a keyword");
   assert.ok(!p.out.some(item => item.id === X.azul || item.id === X.outraMarca), "outra cor e outra marca nem aparecem");
@@ -160,8 +162,8 @@ test("prévia: o que sai de vez, o que fica fora (com motivo e caminho), Assunto
   const areas = Object.fromEntries(p.areas.map(area => [area.area, area]));
   assert.equal(areas.minerador.executable, true);
   for (const area of ["arquiteto", "radar", "redator", "publicacoes"]) assert.equal(areas[area].executable, false, area);
-  assert.match(areas.arquiteto.reason || "", /O Arquiteto não exclui keyword \(F4\)/);
-  assert.match(areas.radar.reason || "", /Sem contrato de exclusão no Radar \(D8/);
+  assert.match(areas.arquiteto.reason || "", /^Fica fora: o desmonte do Arquiteto não está ligado nesta exclusão\.$/);
+  assert.match(areas.radar.reason || "", /^Fica fora: o desmonte do Arquiteto não está ligado nesta exclusão\.$/);
   assert.deepEqual(areas.radar.items.map(item => item.id), ["art-wifi"]);
   assert.deepEqual(areas.redator.items.map(item => item.id), ["art-barata"]);
   assert.deepEqual(p.confirmation, { colorWord: "laranja", hardPhrase: GROUP_DELETE_ALL_HARD_PHRASE, publishedNames: [] });
@@ -374,6 +376,49 @@ test("o artigo do plano nunca é partido entre dois blocos; fora do grupo/marca 
   assert.ok(viva(db, S[0]) && resolveKeywordSubject(viva(db, S[0])!.analise_semantica as Row).plan, "a recusa desfaz também a liberação");
 });
 
+/*
+ * 2026-10-17 · A EXCLUSÃO COMUM USA ESTE MESMO DOMÍNIO (dono: "ele tem que
+ * deixar apagar todo o grupo"; P-4 da linha única). Com `selectedIds`, só as
+ * selecionadas da cor entram; sem, a cor inteira — a mesma prévia e o mesmo hash.
+ */
+test("seleção (a exclusão comum): só as selecionadas entram; o artigo do plano com metade na seleção fica inteiro fora; as não selecionadas prendem a cor; sem seleção, a mesma prévia de antes", async () => {
+  const base = (id: string, keyword: string, extra: Partial<GroupDeleteAllKeyword> = {}): GroupDeleteAllKeyword => ({ id, keyword, status: null, subjectDeclared: false, plan: null, entryTitle: null, principalMark: null, lifecycle: "hard", architectRefs: [], ...extra });
+  const linhas: GroupDeleteAllKeyword[] = [
+    base("a-assunto", "assunto do artigo", { subjectDeclared: true, entryTitle: "Assunto", plan: { groupId: G, planVersion: 3, order: 1, role: "Pilar", scope: "x", declaredPrincipal: { keywordId: "a-principal", phrase: "principal" } } }),
+    base("a-principal", "principal", { principalMark: { subjectKeywordId: "a-assunto", groupId: G, planVersion: 3 } }),
+    base("b-suporte", "suporte", { subjectDeclared: true, entryTitle: "Suporte", plan: { groupId: G, planVersion: 3, order: 2, role: "Suporte", scope: "y", declaredPrincipal: { keywordId: "b-suporte", phrase: "suporte" } }, principalMark: { subjectKeywordId: "b-suporte", groupId: G, planVersion: 3 } }),
+    base("c-solta", "solta da cor"),
+  ];
+  const grupoAzul = { id: G, name: "Laranja", color: "laranja" as const, planVersion: 3, lockVersion: 4, siloId: null, hasPlan: true };
+  const entrada = { group: grupoAzul, keywords: linhas, trashedCount: 0, taggedArticles: [], siloConsolidated: false, includePublished: true, available: true };
+  const inteira = buildGroupDeleteAllPreview(entrada);
+  const semSelecao = buildGroupDeleteAllPreview({ ...entrada, selectedIds: null });
+  assert.deepEqual(semSelecao, inteira, "sem seleção: a mesma prévia (e a mesma base do hash) de antes");
+  assert.equal(inteira.selection, null);
+  assert.equal("selection" in inteira.decisionBasis, false, "a cor inteira não muda de hash");
+
+  // Só o Assunto selecionado (a principal declarada dele, não): o artigo fica inteiro fora, com o caminho.
+  const metade = buildGroupDeleteAllPreview({ ...entrada, selectedIds: ["a-assunto", "b-suporte"] });
+  assert.deepEqual(metade.out.map(item => [item.id, item.reason]), [["a-assunto", "same_article_not_selected"]]);
+  assert.match(metade.out[0].message, /que não está na seleção: o artigo sai inteiro ou fica inteiro/);
+  assert.match(metade.out[0].path || "", /Selecione também “principal”/);
+  assert.deepEqual(metade.hard.map(item => item.id), ["b-suporte"]);
+  assert.deepEqual(metade.releasedSubjects.map(item => item.keywordId), ["b-suporte"]);
+  assert.deepEqual(metade.plan, { hasPlan: true, articlesNow: 2, articlesLeaving: 1, articlesStaying: 1, after: "reduced", nextPlanVersion: 4 });
+  assert.equal(metade.color.freedAtEnd, false);
+  assert.ok(metade.color.keptBecause.some(item => /2 keywords da cor não estão na seleção e ficam/.test(item)), JSON.stringify(metade.color.keptBecause));
+  assert.ok(!metade.out.some(item => item.id === "c-solta" || item.id === "a-principal"), "a não selecionada não entra na lista de fora: ela só fica");
+  assert.deepEqual(metade.selection, { selected: 2, notSelected: 2 });
+  assert.deepEqual(metade.decisionBasis.selection, ["a-assunto", "b-suporte"]);
+  assert.deepEqual(metade.confirmation, { colorWord: "laranja", hardPhrase: GROUP_DELETE_ALL_HARD_PHRASE, publishedNames: [] }, "a mesma confirmação forte da cor");
+
+  // Selecionar a cor inteira = a cor inteira (só a base do hash diz que veio da seleção).
+  const todas = buildGroupDeleteAllPreview({ ...entrada, selectedIds: linhas.map(linha => linha.id) });
+  for (const campo of ["hard", "recoverable", "out", "releasedSubjects", "blocks", "plan", "color", "confirmation", "effects"] as const) assert.deepEqual(todas[campo], inteira[campo], campo);
+  assert.equal(todas.plan.after, "cleared");
+  assert.equal(todas.color.freedAtEnd, true);
+});
+
 test("sem a M-E aplicada: a prévia aparece com a explicação e o apply recusa sem chamar a exclusão (o deploy não quebra)", async () => {
   const db = await comPlano();
   db.meAplicada = false;
@@ -459,10 +504,22 @@ test("tela, rota e MCP: só o Minerador executa; o Arquiteto só leva ao Minerad
   assert.match(planilha, /window\.addEventListener\(GROUP_DELETE_ALL_DONE_EVENT, aoExcluirCor\)/, "a planilha tira as linhas que o servidor confirmou");
 });
 
-test("defeito achado (SDD §10.2): a exclusão comum do Minerador fatia seleções acima de 100 (prévia e execução), bloco a bloco", () => {
+/*
+ * 2026-10-17 · SUBSTITUÍDO (P-4 da linha única do Minerador): a exclusão comum
+ * não fatia mais no navegador. A seleção vai inteira numa prévia (com o
+ * `decisionHash`) e numa execução; os blocos de 100 são do NÚCLEO
+ * (`lib/minerador/keyword-delete-core.ts`), cada um tudo-ou-nada, um recusado sem
+ * desfazer os anteriores — a mesma regra dos blocos da cor. A declaração da
+ * publicada continua indo só no bloco que tem publicada da prévia.
+ */
+test("defeito achado (SDD §10.2), forma de 17/10: a exclusão comum manda a seleção inteira; o núcleo executa em blocos de 100, bloco a bloco", () => {
   const planilha = limpa("../modules/minerador/minerador-workspace.tsx");
-  assert.match(planilha, /keywordIds: unicos\.slice\(inicio, inicio \+ 100\)/, "a prévia vai em blocos de 100 e é somada");
-  assert.match(planilha, /const bloco = review\.ids\.slice\(inicio, inicio \+ 100\);/, "a execução vai em blocos de 100");
-  assert.match(planilha, /allowRecoverable: review\.publishedIds\.length > 0 && bloco\.some\(id => publicadasDaPrevia\.has\(id\)\)/, "a declaração da publicada só no bloco que tem publicada da prévia");
-  assert.match(planilha, /O bloco seguinte foi recusado e nada dele saiu/, "o bloco recusado para a sequência e a tela diz o que saiu");
+  assert.match(planilha, /body: JSON\.stringify\(\{ keywordIds: unicos \}\)/, "a prévia vai inteira, numa decisão só");
+  assert.match(planilha, /body: JSON\.stringify\(\{ keywordIds: review\.ids, allowRecoverable: review\.publishedIds\.length > 0, decisionHash: review\.decisionHash, typed \}\)/, "a execução leva a decisão e o que foi digitado");
+  assert.doesNotMatch(planilha, /review\.ids\.slice\(inicio, inicio \+ 100\)|unicos\.slice\(inicio, inicio \+ 100\)/, "o navegador não fatia mais");
+  assert.match(planilha, /Um bloco foi recusado e nada dele saiu/, "o bloco recusado não desfaz os anteriores e a tela diz o que saiu");
+  const nucleo = limpa("../lib/minerador/keyword-delete-core.ts");
+  assert.match(nucleo, /for \(const bloco of chunks\(\[\.\.\.preview\.free\.hard, \.\.\.preview\.free\.recoverable\], GROUP_DELETE_ALL_BLOCK_SIZE\)\)/, "blocos de 100 no núcleo");
+  assert.match(nucleo, /const temPublicada = bloco\.some\(id => recuperaveis\.has\(id\)\);/, "a declaração da publicada só no bloco que tem publicada da prévia");
+  assert.match(nucleo, /continue;\s*\}\s*const resposta = asRecord\(data\)/, "um bloco recusado não para os seguintes (como na cor)");
 });

@@ -129,8 +129,9 @@ test("menu · só no Minerador e com a cor escolhida aparece \"Excluir tudo da c
   assert.equal($("[data-group-delete-all-area='minerador']")!.getAttribute("data-executable"), "sim");
   assert.equal($("[data-group-delete-all-area='radar']")!.getAttribute("data-executable"), "nao");
   assert.match($("[data-group-delete-all-area='radar']")!.textContent || "", /Roteador mesh/);
-  assert.match($("[data-group-delete-all-area='arquiteto']")!.textContent || "", /O Arquiteto não exclui keyword/);
-  assert.match($("[data-group-delete-all-out='architect_reference']")!.textContent || "", /Retirar artigo do Silo/);
+  // 2026-10-18 · SUBSTITUÍDO "O Arquiteto não exclui keyword (F4)" / architect_reference: sem o desmonte ligado, a keyword com artigo fica fora com o porquê.
+  assert.match($("[data-group-delete-all-area='arquiteto']")!.textContent || "", /Fica fora: o desmonte do Arquiteto não está ligado nesta exclusão/);
+  assert.match($("[data-group-delete-all-out='architect_unavailable']")!.textContent || "", /Desfazer Silo.*Retirar artigo do Silo/);
   assert.ok(!chamadas.some(chamada => chamada.body?.mode === "apply"));
   tela.destroy();
 });
@@ -188,5 +189,64 @@ test("Gerenciar a cor no Arquiteto: a seção leva ao Minerador (sem botão de e
   assert.ok($("[data-group-delete-all]"), "o diálogo abriu pelo link");
   assert.equal(new URL(janela().location.href).searchParams.get("excluir_tudo_da_cor"), null, "o parâmetro saiu da URL");
   assert.ok(!chamadas.some(chamada => chamada.body?.mode === "apply"), "abrir não exclui");
+  tela.destroy();
+});
+
+/*
+ * 2026-10-18 · O ALERTA NA TELA (decisão do dono, literal: "tem que poder apagar sim não interessa qual seja o estado …
+ * e alerta falando o que está apagando"). Pelo MESMO botão "Excluir tudo da cor": a prévia traz o desmonte do Arquiteto
+ * (o mesmo núcleo do "Desfazer Silo") e o diálogo lista, por área, o que sai antes das keywords; a keyword com artigo
+ * vigente não fica mais fora; o relatório diz o que foi feito no Arquiteto.
+ */
+test("o alerta por área: o Arquiteto e o Radar saem junto, antes das keywords; nenhuma fica fora por estar num artigo; o relatório diz o que foi feito lá", async () => {
+  limpar(`/adalbapro--${MARCA}/minerador?grupo=laranja`);
+  const linhasArquiteto = ["Silo “Roteadores”: sai inteiro — 1 artigo(s) (Pilar incluído): “Roteador mesh”; SiloDNA e SiloPage deixam de valer. As versões ficam como histórico."];
+  const linhasRadar = ["“Roteador mesh”: o item sai da operação do Radar (“retirado”); a investigação e o histórico ficam."];
+  const comDesmonte = buildGroupDeleteAllPreview({
+    group: { id: LARANJA_ID, name: "Laranja", color: "laranja", planVersion: 0, lockVersion: 3, siloId: null, hasPlan: false },
+    keywords: [
+      { id: K1, keyword: "internet fibra barata", status: "bruto", subjectDeclared: false, plan: null, entryTitle: null, principalMark: null, lifecycle: "hard", architectRefs: [] },
+      { id: K3, keyword: "roteador mesh", status: "aprovado", subjectDeclared: false, plan: null, entryTitle: null, principalMark: null, lifecycle: "hard", architectRefs: [{ articleId: "art-mesh", label: "Roteador mesh" }] },
+    ],
+    trashedCount: 0,
+    taggedArticles: [],
+    architectArticles: [{ articleId: "art-mesh", label: "Roteador mesh", stages: ["radar"] }],
+    siloConsolidated: false,
+    includePublished: false,
+    available: true,
+    architectDismantle: { ok: true, preview: { keywordIds: [K3], articleIds: ["art-mesh"], territoryRefs: ["territory:1"], untagArticleIds: ["art-mesh"], unlinkGroupIds: [], areas: { arquiteto: linhasArquiteto, radar: linhasRadar, redator: [], publicacoes: [] }, lines: [...linhasArquiteto.map(linha => `Arquiteto · ${linha}`), ...linhasRadar.map(linha => `Radar · ${linha}`)], basis: { operation: "architect_dismantle@1", silos: ["territory:1"] } } },
+  });
+  roteiro = (url, method, body) => {
+    if (method === "GET" && url.startsWith("/api/editorial/groups?")) return { status: 200, body: { success: true, available: true, groups: [grupoLaranja], ungroupedKeywordCount: 0 } };
+    if (method === "POST" && url === `/api/minerador/marcas/${MARCA}/keywords/delete-group` && body!.mode === "preview") return { status: 200, body: { success: true, mode: "preview", preview: comDesmonte, decisionHash: "sha256:previa-2" } };
+    if (method === "POST" && url === `/api/minerador/marcas/${MARCA}/keywords/delete-group` && body!.mode === "apply") {
+      return { status: 200, body: { success: true, mode: "apply", decisionHash: "sha256:previa-2", blocks: [{ ids: [K1, K3], allowRecoverable: false, outcome: "done", hardDeletedIds: [K1, K3], recoverableIds: [], releasedSubjectIds: [], code: null, message: null }], hardDeletedIds: [K1, K3], recoverableIds: [], releasedSubjectIds: [], out: [], plan: null, color: { freed: true, archived: true, siloUnlinked: false, keptBecause: [] }, historyRecorded: true, readback: { confirmed: true, divergences: [] }, complete: true, notices: [], architect: { applied: ["Silo “Roteadores” desfeito", "1 item(ns) adiante retirado(s) da operação"] } } };
+    }
+    return "pendente";
+  };
+  const tela = await harness.montarRadar();
+  await tela.render(React.createElement(TopbarGroupTag, { brandId: MARCA, area: "minerador" }));
+  await esperar();
+  await abrirMenu(tela);
+  await tela.click($("[data-group-delete-all-menu='laranja']")!);
+  await esperar();
+  assert.equal(comDesmonte.out.length, 0, "a keyword com artigo vigente não fica mais fora");
+  assert.equal($("[data-group-delete-all-area='arquiteto']")!.getAttribute("data-executable"), "sim");
+  assert.equal($("[data-group-delete-all-area='radar']")!.getAttribute("data-executable"), "sim");
+  assert.match($("[data-group-delete-all-area='arquiteto']")!.textContent || "", /sai junto, antes das keywords/);
+  assert.match($("[data-group-delete-all-area-items='arquiteto']")!.textContent || "", /Silo “Roteadores”: sai inteiro — 1 artigo\(s\) \(Pilar incluído\): “Roteador mesh”/);
+  assert.match($("[data-group-delete-all-area-items='radar']")!.textContent || "", /o item sai da operação do Radar/);
+  assert.match($("[data-group-delete-all-effects]")!.textContent || "", /Antes das keywords, sai junto/);
+  const botao = () => $("[data-group-delete-all-confirm]") as HTMLButtonElement;
+  assert.match(botao().textContent || "", /Excluir tudo da cor Laranja \(2\)/);
+  await tela.type($("[data-group-delete-all-typed-color]")!, "laranja");
+  await tela.type($("[data-group-delete-all-typed-phrase]")!, "apaga de vez");
+  assert.equal(botao().disabled, false);
+  await tela.click(botao());
+  await esperar();
+  const aplicar = chamadas.find(chamada => chamada.body?.mode === "apply");
+  assert.deepEqual(aplicar?.body, { groupId: LARANJA_ID, mode: "apply", includePublished: false, decisionHash: "sha256:previa-2", typed: { color: "laranja", phrase: "apaga de vez", publishedNames: {} } }, "uma confirmação só: a da cor");
+  assert.match($("[data-group-delete-all-result]")!.textContent || "", /Antes, no Arquiteto: Silo “Roteadores” desfeito · 1 item\(ns\) adiante retirado\(s\) da operação\./);
+  assert.match($("[data-group-delete-all-result]")!.textContent || "", /A cor Laranja está livre/);
   tela.destroy();
 });

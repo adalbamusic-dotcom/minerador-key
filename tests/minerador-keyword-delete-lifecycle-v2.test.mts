@@ -50,9 +50,17 @@ test("a UI não faz delete client-side e a publicação é revalidada no servido
   assert.doesNotMatch(workspace, /\.from\(["']minerador_keywords["']\)[\s\S]{0,180}\.delete\(\)/);
   assert.match(workspace, /keywords\/delete\/preview/);
   assert.match(workspace, /keywords\/delete/);
-  assert.match(previewRoute, /rpc\("lifecycle_preview_minerador_keywords"/);
-  assert.match(deleteRoute, /rpc\("lifecycle_delete_minerador_keywords"/);
-  assert.match(deleteRoute, /p_actor_user_id: profile\.userId/);
+  // 2026-10-17 (ajuste declarado, P-4 da linha única): as rotas chamam o núcleo da exclusão, que chama as RPCs de sempre
+  // com o ator autenticado da sessão.
+  const nucleo = read("../lib/minerador/keyword-delete-core.ts");
+  assert.match(previewRoute, /previewKeywordDeleteWithCore\(\{ client: profile\.supabase, brandId, actorUserId: profile\.userId/);
+  assert.match(deleteRoute, /applyKeywordDeleteWithCore\(\{/);
+  assert.match(deleteRoute, /actorUserId: profile\.userId,/);
+  assert.match(nucleo, /KEYWORD_DELETE_PREVIEW_RPC = "lifecycle_preview_minerador_keywords"/);
+  assert.match(nucleo, /KEYWORD_DELETE_RPC = "lifecycle_delete_minerador_keywords"/);
+  assert.match(nucleo, /client\.rpc\(KEYWORD_DELETE_PREVIEW_RPC, \{ p_brand_id: brandId, p_keyword_ids: bloco, p_actor_user_id: actorUserId \}\)/);
+  assert.match(nucleo, /input\.client\.rpc\(KEYWORD_DELETE_RPC, \{\s*p_brand_id: brandId,\s*p_keyword_ids: bloco,\s*p_actor_user_id: actorUserId,/);
+  assert.doesNotMatch(nucleo, /\.delete\(\s*\)/, "o núcleo não apaga direto: só a RPC do ciclo de vida");
 });
 
 test("a trigger impede novos processamentos durante a janela recuperável", () => {

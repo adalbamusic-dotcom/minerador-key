@@ -3,7 +3,8 @@
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Bot, Loader2 } from "lucide-react";
-import { internalButtonDanger, internalButtonPrimary, internalField, internalNoticeError, internalNoticeSuccess, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
+import { internalButtonDanger, internalButtonPrimary, internalField, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
+import { useNoticeBridge } from "@/components/global-notice-center";
 import { WRITER_MCP_DEFAULT_SCOPES, WRITER_MCP_SCOPE_LABELS, type ConsentBrandOption, type WriterMcpClientSummary, type WriterMcpScope } from "@/lib/redator/mcp-consent-domain";
 
 export type AiConnectionsInitialState = {
@@ -33,6 +34,9 @@ export function AiConnectionsPanel({ initial }: { initial: AiConnectionsInitialS
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(initial.unavailable);
   const [busy, setBusy] = useState(false);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): resultado e falha das autorizações saem das faixas da tela. */
+  useNoticeBridge({ notice: error, module: "perfil", area: "Conexões de IA", title: "Conta · Conexões de IA", fallbackSeverity: "ERROR" });
+  useNoticeBridge({ notice: message, module: "perfil", area: "Conexões de IA", title: "Conta · Conexões de IA", fallbackSeverity: "SUCCESS" });
   const [clientId, setClientId] = useState(() => searchParams.get("mcp_client") || "");
   const [clientName, setClientName] = useState("");
   const [brandIds, setBrandIds] = useState<string[]>([]);
@@ -96,9 +100,6 @@ export function AiConnectionsPanel({ initial }: { initial: AiConnectionsInitialS
   const activeClients = data.clients.filter((client) => client.grants.some((grant) => grant.status === "active"));
 
   return <div className="space-y-5">
-    {message ? <p role="status" className={internalNoticeSuccess}>{message}</p> : null}
-    {error ? <p role="alert" className={internalNoticeError}>{error}</p> : null}
-
     {activeClients.length ? <ul className="grid gap-3 md:grid-cols-2">{activeClients.map((client) => <li key={client.oauthClientId} className={internalSurfaceSubtle}>
       <div className="flex items-start gap-3"><Bot className="mt-0.5 h-4 w-4 shrink-0 text-context-accent" aria-hidden="true" /><div className="min-w-0">
         <p className="text-sm font-semibold">{client.clientName}</p>

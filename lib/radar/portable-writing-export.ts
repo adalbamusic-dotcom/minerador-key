@@ -5,7 +5,7 @@ import { RADAR_AMAZON_INTENT_LABELS, type RadarAmazonEditorialIntentType } from 
 import { radarClaimNeedsFactualSupport } from "./claim-evidence.ts";
 import { radarTextAdheresToCore, radarUbiquitousStems } from "./intent-adherence.ts";
 import { radarSemanticStems } from "./semantic-concept-model.ts";
-import { radarOutOfScopeDistinctiveStems, radarOutOfScopeMatcher, radarSuggestionGuard, radarSuggestionRestatesKeyword, type RadarSuggestionVeto } from "./out-of-scope.ts";
+import { radarOutOfScopeDistinctiveStems, radarOutOfScopeMatcher, radarOutOfScopeOwner, radarSuggestionGuard, radarSuggestionRestatesKeyword, type RadarSuggestionVeto } from "./out-of-scope.ts";
 /* 2026-10-09 · Defeito 2 · a base única da amostra (agente N): as páginas comparáveis do modelo, sem o teto de 20 da coluna JSON. */
 import { radarSampleBasisFraction, radarSampleBasisLabel, radarSampleBasisOf, radarSampleBasisRewriteCount, radarSampleBasisSources, type RadarSampleBasis } from "./sample-basis.ts";
 import { radarSubjectTurnTitle } from "./declared-subject.ts";
@@ -2737,8 +2737,20 @@ function colunaCobrir(
   /* ---- o que não cobrir ---- */
   /* 2026-10-09 · Defeito 5 · a exclusão da voz da marca é exclusão dura: dita uma vez, com a seção da Skill de onde vem. */
   const linhaDaVoz = radarBrandVoiceExclusionsLine(voz);
+  /*
+   * 2026-10-18 · O "pertence a outro artigo" diz QUAL, quando o Silo sabe: o
+   * irmão cuja principal e keywords trazem o que distingue o rótulo
+   * (`radarOutOfScopeOwner`). Sem dono claro, o motivo do pacote, como antes.
+   */
+  const irmaos = (contexto.silo?.members || [])
+    .filter(membro => membro.articleId !== contexto.articleId && texto(membro.principalKeyword))
+    .map(membro => ({ label: texto(membro.principalKeyword), keywords: contexto.siloPublications?.get(membro.articleId)?.keywords || [] }));
+  const motivoDoForaDoEscopo = (item: (typeof foraDoEscopo)[number]) => {
+    const dono = irmaos.length && /pertence a outro artigo/i.test(item.reason) ? radarOutOfScopeOwner(radarWritingDecodeEntities(item.observedLabel), { core: nucleoDoArtigo(p), members: irmaos }) : null;
+    return dono ? `é do artigo ${entreAspas(dono.label)} do Silo, que no máximo se menciona e linka` : semPontoFinal(item.reason);
+  };
   const naoCobrir = [
-    ...foraDoEscopo.map(item => `${entreAspas(radarWritingDecodeEntities(item.observedLabel))}: ${semPontoFinal(item.reason)}.`),
+    ...foraDoEscopo.map(item => `${entreAspas(radarWritingDecodeEntities(item.observedLabel))}: ${motivoDoForaDoEscopo(item)}.`),
     ...foraDoFoco,
     ...(linhaDaVoz ? [comPontoFinal(linhaDaVoz)] : []),
     ...(contexto.silo?.excludedTopics || []).map(item => `${entreAspas(item)}: fora da fronteira do Silo.`),

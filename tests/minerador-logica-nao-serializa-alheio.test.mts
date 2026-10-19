@@ -144,9 +144,15 @@ test("a rota declara o fluxo; quem recusa é o banco", () => {
    * tela oferecendo o que a rota negava. Duas fontes de verdade.
    */
   assert.match(limpa, /allowRecoverable: z\.boolean\(\)\.optional\(\)\.default\(false\)/, "ausente é false");
-  assert.match(limpa, /p_allow_recoverable: input\.allowRecoverable/, "a declaração chega ao banco");
+  // 2026-10-17 (ajuste declarado, P-4 da linha única): a rota passa a declaração ao núcleo da exclusão,
+  // que a entrega à RPC em cada bloco. A regra continua: quem recusa é o banco.
+  assert.match(limpa, /allowRecoverable: input\.allowRecoverable,/, "a declaração vai ao núcleo");
+  const nucleo = readFileSync(new URL("../lib/minerador/keyword-delete-core.ts", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.match(nucleo, /p_allow_recoverable: input\.allowRecoverable === true && temPublicada/, "a declaração chega ao banco");
   assert.doesNotMatch(limpa, /isKeywordPublished\(/, "a rota não repete a decisão");
+  assert.doesNotMatch(nucleo, /isKeywordPublished\(/, "nem o núcleo");
 
   // Nenhuma métrica justifica apagar: a decisão não olha volume nem KGR.
   assert.doesNotMatch(limpa, /volume_search|kgr_score|results_allintitle/, "nenhuma métrica entra na decisão");
+  assert.doesNotMatch(nucleo, /volume_search|kgr_score|results_allintitle/, "nenhuma métrica entra na decisão do núcleo");
 });

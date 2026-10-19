@@ -9,6 +9,7 @@ import {
   GROUP_DELETE_ALL_REFUSAL_STATUS,
   previewGroupDeleteAllWithCore,
 } from "@/lib/minerador/group-delete-all-core";
+import { architectDismantlePortForBrand } from "@/lib/server/arquiteto-territory-undo";
 
 /**
  * EXCLUIR TUDO DA COR X (F7; SDD `docs/compartilhado/sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md`,
@@ -60,7 +61,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const input = RequestSchema.parse(await request.json());
     const profile = await requireCanonicalSessionProfile();
     const context = await requireMineradorLifecyclePermission(profile, brandId, "manage");
-    const base = { client: profile.supabase, brandId: context.brandId, actorUserId: profile.userId, groupId: input.groupId, includePublished: input.includePublished };
+    // 2026-10-18 · o desmonte do Arquiteto (prévia e execução, antes das keywords): o mesmo núcleo do "Desfazer Silo".
+    const base = { client: profile.supabase, brandId: context.brandId, actorUserId: profile.userId, groupId: input.groupId, includePublished: input.includePublished, architect: architectDismantlePortForBrand(context.brandId) };
     const result = input.mode === "preview"
       ? await previewGroupDeleteAllWithCore(base)
       : await applyGroupDeleteAllWithCore({ ...base, decisionHash: input.decisionHash ?? null, typed: input.typed ?? {} });

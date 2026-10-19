@@ -1,4 +1,10 @@
 # Backlog — Publicações
+## A entrega do Redator chega à Fila — 2026-10-18
+- [x] "Enviar a Publicações" deixa o registro pronto para exportar (`importApproved` ligado ao handoff); "Colocar na fila" aparece; texto do seletor inexistente corrigido.
+- [ ] **Dono:** no local, pelo botão: Redator → "Enviar a Publicações" → Publicações → "Fila" → "Colocar na fila" → "Markdown" → "Registrar URL".
+- [ ] Avaliar: `syncDocumentStatus` não rebaixar registro já na fila ou exportado quando o documento é salvo de novo como aprovado (hoje volta a "aprovado" e pede novo envio).
+- [ ] Limpeza adiada pelo dono (inventário): "CSV" × "Exportar", filtro "Publicados", "Reeditar" × "Solicitar atualização".
+
 ## Links a ativar (F5 da SDD silo interligado) — 2026-10-14
 - [x] Destino que vai ao ar → "Links a ativar" nos artigos que ligam para ele (Radar, `-links.csv`, MCP `get_silo_links_update`, Redator), sem editar a página nem URL/slug/canonical. Nada mudou no código de Publicações.
 - [ ] Avaliar: depois de registrar a URL de um artigo, Publicações apontar "N links a ativar no Silo" com o caminho para o Radar (SDD §6.5 cita Publicações; exigiria ler a malha na tela de Publicações — fora da frente "listas leves").

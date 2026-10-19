@@ -45,6 +45,7 @@ import type { RadarSiloExportPlan } from "./portable-silo-export.ts";
 import { radarCompetitorCitedSources, type RadarCompetitorCitedSource } from "./authority-sources.ts";
 import { RADAR_AUTHORITY_KIND_LABEL, RADAR_AUTHORITY_ORIGIN_LABEL, type RadarAuthoritySourcesRecord } from "./authority-sources-contract.ts";
 import type { RadarExtractionPage } from "./analysis-contracts.ts";
+import type { BrandSerpTerritory } from "../marca/brand-serp-location.ts";
 
 /** A versão do formato do arquivo. Mudou coluna ou regra de linha, muda a data. */
 export const RADAR_SERP_RAW_VERSION = "2026-10-14";
@@ -140,6 +141,12 @@ export type RadarSerpRawArticleInput = {
   frozenLenses?: readonly RadarFrozenSerpLens[] | null;
   /** 2026-10-14 · "Fontes citadas pelos concorrentes" e "Fontes verificadas". Ausente = o arquivo de antes. */
   sources?: RadarSerpRawSources | null;
+  /**
+   * 2026-10-18 · L3 (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`) · o território da
+   * marca com cidade: o orgânico de outra cidade ou UF sai em `relevancia_d11` como
+   * "fora do território: outra localidade". Ausente = marca nacional, o arquivo de antes.
+   */
+  territory?: BrandSerpTerritory | null;
 };
 
 const ROTULO_DA_LENTE: Record<RadarSerpLensLabel, string> = {
@@ -195,9 +202,10 @@ const PAGINA_LIDA = new Set(["success", "partial"]);
  * a mesma régua de `competitive-model.ts`).
  */
 /* 2026-10-14 · F3 · a régua é UMA SÓ: a mesma da amostra relevante da leitura competitiva (`competitive-reading.ts`). */
-function relevanciaDe(conteudo: string, pagina: RadarSerpRawPage | undefined, contexto: RadarResearchNoiseContext, mediana: number | null): string {
+function relevanciaDe(conteudo: string, pagina: RadarSerpRawPage | undefined, contexto: RadarResearchNoiseContext, mediana: number | null, url?: string | null): string {
   const palavras = pagina && PAGINA_LIDA.has(pagina.status) && pagina.wordCount > 0 ? pagina.wordCount : null;
-  const motivos = radarCompetitiveRelevanceReasons(conteudo, palavras, contexto, mediana);
+  /* 2026-10-18 · L3 · o endereço e os 4 primeiros H2 entram só no D11 geográfico (com o território da marca). */
+  const motivos = radarCompetitiveRelevanceReasons(conteudo, palavras, contexto, mediana, { url, headings: pagina && PAGINA_LIDA.has(pagina.status) ? pagina.h2 : [] });
   return motivos.length ? `irrelevante (D11): ${motivos.join("; ")}` : "relevante";
 }
 
@@ -218,6 +226,7 @@ export function radarSerpRawRows(input: RadarSerpRawArticleInput): RadarSerpRawR
   const contexto: RadarResearchNoiseContext = {
     core: [principal, ...(input.article.secondaryKeywords || []), ...(input.article.narrativeReinforcements || [])],
     audience: input.article.audience ?? null,
+    ...(input.territory ? { location: input.territory } : {}),
   };
   const linhas: RadarSerpRawRow[] = [];
   const lenteCanonica = snapshot ? `${snapshot.device}-${snapshot.operatingSystem || "windows"}` : CANONICA;
@@ -256,6 +265,7 @@ export function radarSerpRawRows(input: RadarSerpRawArticleInput): RadarSerpRawR
       "Uma linha por resultado orgânico por lente (as 4 lentes), mais \"Pessoas também perguntam\" (com a resposta exibida pelo Google e a fonte, quando a lente a guarda), buscas relacionadas e as fontes citadas pelo resumo de IA.",
       "Sem o texto integral das páginas: só título, trecho, estrutura de títulos (H1/H2) e URL. Referência para conferir, não para copiar.",
       "A coluna relevancia_d11 marca, sem esconder, o concorrente fora do leitor, fora do território ou com medida fora da curva (D11).",
+      ...(input.territory ? [`A marca atende ${input.territory.label}: o resultado que cita outra cidade ou UF (e não a da marca) sai marcado como "fora do território: outra localidade".`] : []),
       ...(input.sources ? ["No fim, as fontes citadas pelos concorrentes (sem verificação) e as fontes de autoridade verificadas no Radar (id X, com o trecho e a afirmação que sustentam) ou não conferidas (com o motivo)."] : []),
     ].join(" "),
     sinais: snapshot ? `consulta: ${texto(snapshot.query)} · ${[texto(snapshot.location), texto(snapshot.language)].filter(Boolean).join(" · ")}` : "sem SERP canônica gravada no pacote",
@@ -282,7 +292,7 @@ export function radarSerpRawRows(input: RadarSerpRawArticleInput): RadarSerpRawR
       descricao: cortar(texto(item.snippet), RADAR_SERP_RAW_LIMITS.excerptChars),
       estrutura_h1_h2: estruturaDe(pagina && PAGINA_LIDA.has(pagina.status) ? pagina : undefined),
       sinais: sinais.join("; "),
-      relevancia_d11: relevanciaDe(conteudo, pagina, contexto, mediana),
+      relevancia_d11: relevanciaDe(conteudo, pagina, contexto, mediana, item.url),
     });
   };
 
@@ -486,7 +496,7 @@ export function radarSerpRawArchiveFilename(input: { writingFilename: string | n
 /** Um artigo do lote, na forma que a montagem do export entrega. */
 export type RadarSerpRawAssembled = {
   articleId: string;
-  entrada: { article: RadarSerpRawArticleInput["article"] & { slug?: string | null }; serpObserved?: RadarPortableSerpObservedInput | null; serpRawPages?: readonly RadarSerpRawPage[] | null; serpRawSources?: RadarSerpRawSources | null };
+  entrada: { article: RadarSerpRawArticleInput["article"] & { slug?: string | null }; serpObserved?: RadarPortableSerpObservedInput | null; serpRawPages?: readonly RadarSerpRawPage[] | null; serpRawSources?: RadarSerpRawSources | null; serpTerritory?: BrandSerpTerritory | null };
   lentes: ReadonlyArray<{ keyword: string; role: string }>;
   lensDigests?: RadarVideoLensOrganicReading | null;
   lentesCongeladas?: { block: { lenses: readonly RadarFrozenSerpLens[] } | null } | null;
@@ -527,6 +537,8 @@ export function radarSerpRawExport(input: {
       lensLookups: principal ? input.lookups.filter(item => chave(item.request.query.keyword) === chave(principal)) : [],
       frozenLenses: artigo.lentesCongeladas?.block?.lenses ?? null,
       sources: artigo.entrada.serpRawSources ?? null,
+      /* 2026-10-18 · L3 · o território da marca com cidade, posto pela montagem do export. */
+      territory: artigo.entrada.serpTerritory ?? null,
     });
     const lugar = input.positionOf?.(artigo.articleId) ?? null;
     return {

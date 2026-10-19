@@ -304,6 +304,40 @@ export function startRadarDeepResearch(input: {
   };
 }
 
+/**
+ * 2026-10-18 · REFAZER SEM PAGAR DUAS VEZES O QUE NÃO MUDOU.
+ *
+ * "Refazer Pesquisa Google" sobre uma investigação desatualizada (a composição
+ * do ArticleDNA mudou, a principal ficou — a adoção da versão nova do
+ * Arquiteto) reaproveitava o registro ANTIGO inteiro: a impressão continuava
+ * a de antes, as keywords novas não entravam na fila e a Fase 1 voltava a
+ * pedir "Refazer". O registro passa a nascer do plano NOVO (impressão nova,
+ * keywords novas planejadas), carregando a evidência gravada de cada consulta
+ * que continua no plano com a mesma keyword e a mesma classe de SERP: a
+ * principal e as auxiliares que ficaram não são coletadas de novo; só as
+ * novas (e as que nunca tiveram resultado) vão à fila da retomada.
+ */
+export function rebaseRadarDeepResearch(input: { previous: RadarDeepResearchRecord; next: RadarDeepResearchRecord }): { record: RadarDeepResearchRecord; carried: number; canonicalCarried: boolean } {
+  const anteriores = new Map(input.previous.queries
+    .filter(query => query.evidence && (query.execution === "EXECUTED" || query.execution === "REUSED_FORMATION_EVIDENCE"))
+    .map(query => [`${query.serpClass}:${query.keywordId}`, query]));
+  let carried = 0;
+  let canonicalCarried = false;
+  const queries = input.next.queries.map(query => {
+    if (query.disposition !== "EXECUTE") return query;
+    const antes = anteriores.get(`${query.serpClass}:${query.keywordId}`);
+    if (!antes) return query;
+    carried += 1;
+    if (query.serpClass === "canonical") canonicalCarried = true;
+    return { ...query, execution: antes.execution, reason: antes.reason, evidence: antes.evidence };
+  });
+  return {
+    record: { ...input.next, primarySearchMode: input.previous.primarySearchMode, queries },
+    carried,
+    canonicalCarried,
+  };
+}
+
 /** O que de fato aconteceu com uma consulta, depois que a coleta respondeu. */
 export function settleRadarDeepResearchQuery(
   record: RadarDeepResearchRecord,

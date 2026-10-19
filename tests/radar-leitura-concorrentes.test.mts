@@ -90,7 +90,8 @@ test("o CSV mostra os temas, a limitação diz de qual camada fala, e o prompt l
   const planta = await ler("lib/radar/article-blueprint.ts");
   /* 2026-10-09 (correção · contrato-F7) · o tema conta SITES: o esqueleto diz "N de S sites", como o CSV. */
   /* 2026-10-09 · o esqueleto ganha, entre o da SERP e os temas, o esqueleto do bloco comercial da Amazon congelada (quando há). */
-  assert.match(planta, /const secoesDaSerp = esqueletoDaSerp\(p\.editorial\.sections, tocaFora, \{ unidade: p\.unidade, ruido: p\.ruido, perfil: p\.perfil \}\);/);
+  /* 2026-10-18 · e a exclusão dura (`duro`), a única que marca a seção que o ArticleDNA exige. */
+  assert.match(planta, /const secoesDaSerp = esqueletoDaSerp\(p\.editorial\.sections, tocaFora, \{ unidade: p\.unidade, ruido: p\.ruido, perfil: p\.perfil, duro: tocaForaDuro \}\);/);
   assert.match(planta, /skeleton: esqueletoComTemas\(esqueletoComComercial\(secoesDaSerp, comercial\?\.skeleton\), temasDosConcorrentes\?\.topics \|\| \[\], temasDosConcorrentes\?\.sampleDomains \?\? null\)/, "os temas viram seções M do esqueleto");
   assert.match(planta, /const temasDosConcorrentes = radarWritingCompetitorTopicsOf\(input\.entrada, p\);/);
   assert.match(planta, /tema tratado por \$\{tema\.pages\} \$\{sites \? `de \$\{sites\} sites comparáveis`/);

@@ -25,7 +25,7 @@
 import { z } from "zod";
 import { isKeywordSubjectActorId } from "../minerador/keyword-subject.ts";
 import type { DeclaredSubject } from "./contracts.ts";
-import { planSubjectAttachment, readArchitectSubjectStanding, type SubjectAttachRefusalCode } from "./declared-subject.ts";
+import { planSubjectAttachment, readArchitectSubjectStanding, subjectMayBePrincipal, type SubjectAttachRefusalCode } from "./declared-subject.ts";
 
 type RecordLike = Record<string, unknown>;
 
@@ -233,8 +233,9 @@ export function verifySubjectAsPrincipal(input: {
   if (text(keyword.brand_id) !== input.brandId || standing.brandId !== input.brandId) {
     return refuse("SUBJECT_CROSS_BRAND", "A keyword do Assunto pertence a outra marca e não pode ser presa aqui.");
   }
-  if (!standing.volumeValidated) {
-    return refuse("SUBJECT_PRINCIPAL_WITHOUT_VOLUME", "O Assunto só pode ser a própria principal com Volume validado no pacote aprovado.");
+  // 2026-10-19 · A5 (ADR-022 D1-ter): com Volume validado, ou quando o Assunto MORA na keyword (cadastro único) — b2-14.
+  if (!subjectMayBePrincipal(standing)) {
+    return refuse("SUBJECT_PRINCIPAL_WITHOUT_VOLUME", "O Assunto só pode ser a própria principal com Volume validado no pacote aprovado (ou quando ele mora na keyword, cadastro único).");
   }
   return { ok: true };
 }

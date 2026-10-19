@@ -134,7 +134,7 @@ export function ArticlesFormationBar({
         disabled={Boolean(motivoMelhorar)}
         aria-pressed={improvementOpen}
         aria-expanded={improvementOpen}
-        title={motivoMelhorar ?? (improvementOpen ? "Fecha o refazedor." : "Passo 3 · o refazedor: refaz a leitura, o reforço e a troca dos publicados e dos artigos que falharam ou ficaram fracos (prévia e uma confirmação). URL, slug e canonical nunca mudam.")}
+        title={motivoMelhorar ?? (improvementOpen ? "Fecha o refazedor." : "Passo 3 · o refazedor: refaz a leitura, o reforço e a troca dos publicados e dos artigos que falharam ou ficaram fracos (prévia e uma confirmação). No publicado, o Assunto da página é a âncora: a principal leva o que define o artigo, e a keyword que é de outro artigo do grupo vai para ele. URL, slug e canonical nunca mudam.")}
         data-testid="architect-articles-improve-published"
         data-step="improve"
         aria-current={passo === "improve" ? "step" : undefined}

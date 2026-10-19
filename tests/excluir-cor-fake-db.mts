@@ -81,6 +81,12 @@ export class CorFakeDb extends PlanFakeDb {
       }
       return this.grupoDelete(args);
     }
+    // 2026-10-17 · a exclusão comum de sempre (a RPC que a rota `keywords/delete` chama), sem a liberação:
+    // o gatilho do Assunto recusa a do plano; qualquer recusa desfaz o bloco inteiro.
+    if (name === "lifecycle_delete_minerador_keywords") {
+      const ids = [...new Set(((args.p_keyword_ids as string[]) ?? []).filter(Boolean))];
+      return this.exclusaoComum(String(args.p_brand_id), ids, args.p_allow_recoverable === true);
+    }
     return erro(`Could not find the function public.${name}`, "PGRST202");
   }
 

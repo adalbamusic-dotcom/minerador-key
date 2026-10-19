@@ -1,7 +1,10 @@
 import { z } from "zod";
 import {
   editorialAiBarrier,
-  targetPrincipalIsIdentity,
+  identityHoldsPrincipal,
+  principalSwapByVolume,
+  subjectDefiningModifiers,
+  principalSwapStanding,
   IMPROVEMENT_AI_MAX_PER_TARGET,
   IMPROVEMENT_ARTICLE_MAX_KEYWORDS,
   type ImprovementEditorialPick,
@@ -122,7 +125,7 @@ export const IMPROVEMENT_AI_SYSTEM = [
   "Regras:",
   "1. Use só targetId e keywordId que vieram no pedido. Nunca invente id.",
   "2. No máximo 3 keywords por alvo, respeitando as vagas do alvo. Uma keyword vai para um alvo só.",
-  "3. role \"principal\" só quando o alvo diz podeTrocarPrincipal=true e a keyword resume o assunto do slug; em todos os outros casos, \"secundaria\".",
+  "3. role \"principal\" só quando o alvo diz podeTrocarPrincipal=true e a keyword é o MESMO tema do `assunto` dito em linguagem natural de quem busca: mesma entidade, mesma intenção, o mesmo público e sem perder nem contrariar nada de `oQueDefine` (\"sem tráfego pago\", \"não traz\", \"vs orgânico\", \"para clínica de estética\"). Ex.: para \"captação de pacientes sem tráfego pago\", \"captação de pacientes dentista\" NÃO é principal (outro público e perde a restrição); para \"instagram não traz pacientes\", \"como atrair clientes pelo instagram\" NÃO é principal (outra intenção: o artigo explica o problema). Sem uma assim, não escolha principal: o Assunto fica como foco. Em todos os outros casos, \"secundaria\".",
   "4. Recuse: intenção oposta (o artigo promete \"sem tráfego pago\" e a keyword é \"tráfego pago como funciona\"); público diferente (\"como atrair pacientes para clínica de estética\" ← \"clínica de estética facial\": quem busca quer uma clínica, não marketing); outro nicho (\"checklist de plano de marketing para clínica de estética\" ← \"marketing para veterinários\"); cabeça genérica de volume enorme (\"agência de marketing para cosméticos\" ← \"agência de marketing\", 18.100).",
   "5. Bons exemplos: \"como atrair clientes para consultório\" ← \"como atrair clientes\" (720) e \"como atrair os clientes\" (720); \"como captar clientes para clínica de estética\" ← \"como captar clientes\" (390).",
   "6. reason: UMA frase curta (até 12 palavras) em português do Brasil dizendo por que quem busca a keyword leria o artigo.",
@@ -144,11 +147,15 @@ export function buildImprovementAiPrompt(input: {
     const current = target.primaryId ? byId.get(target.primaryId) : undefined;
     const semVolume = !current?.volumeValidated;
     // 2026-10-17 · a principal de identidade (título ou slug) fica: a IA só traz secundárias para ela.
-    const podeTrocarPrincipal = target.post === "free" && semVolume && !targetPrincipalIsIdentity(target, current) && (target.kind === "subject" || input.ranking?.[target.id] === false);
+    // 2026-10-18 · SUBSTITUÍDO pela régua do volume (SDD do Assunto pela principal §6.3-b): volume 0 libera (a página que ranqueia é só aviso); desconhecido não decide.
+    const podeTrocarPrincipal = principalSwapByVolume(target, current) || (target.post === "free" && semVolume && !identityHoldsPrincipal(target, current) && (!current || principalSwapStanding(target, current) !== "unknown") && (target.kind === "subject" || input.ranking?.[target.id] === false));
     return {
       targetId: `A${index + 1}`,
       tipo: target.kind === "published" ? "publicado" : "assunto",
       tema: target.theme,
+      // 2026-10-19 · o Assunto da página (a keyword original, a do slug) e o que define o artigo: o critério da escolha.
+      ...(target.kind === "published" && target.principalSubject ? { assunto: target.theme } : {}),
+      ...(() => { const define = target.kind === "published" && target.principalSubject ? subjectDefiningModifiers(target).map(m => m.label) : []; return define.length ? { oQueDefine: define } : {}; })(),
       ...(target.note ? { nota: target.note } : {}),
       slug: target.slug,
       principalAtual: current ? { keyword: current.keyword, volume: current.volumeValidated ? current.volume : null } : null,

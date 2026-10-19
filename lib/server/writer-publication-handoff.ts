@@ -32,7 +32,7 @@ import { ContentDocumentSchema, type ArticleDNA, type VersionEnvelope } from "..
 import { createWriterPublication } from "../editorial/operational-flow.ts";
 import { runGuardian } from "../redator/guardian.ts";
 import { getOperationalClient, mapPersistenceError } from "./editorial-db";
-import { PublicationRepository } from "./editorial-repositories";
+import { PUBLICATION_PRE_EXPORT_STATES, PublicationRepository } from "./editorial-repositories";
 import { checkOpenBlockingWriterDivergence } from "./writer-evidence-divergences";
 
 export class WriterPublicationError extends Error {
@@ -181,6 +181,20 @@ export async function sendWriterToPublications(input: {
    * registro JÁ existia — desfecho legítimo e idempotente, não falha.
    */
   const change: WriterPublicationChange = inserido ? "CREATED" : "ALREADY_SENT";
+
+  /* ---------- 5b. IMPORTAR: PRONTO PARA EXPORTAR ---------- */
+  /*
+   * 2026-10-18 · defeito 1 do inventário. O registro nascia em rascunho e nada o
+   * levava a "pronto para exportar": o "Colocar na fila" nunca aparecia. O
+   * documento já foi validado como APROVADO acima, então a entrega é a
+   * importação do spec (§5: "importar de forma idempotente"). Registro antigo
+   * parado antes da exportação também avança no reenvio; fila, exportado e
+   * publicado ficam como estão.
+   */
+  const gravado = await repositorio.find(input.brandId, publication.id);
+  if (gravado && PUBLICATION_PRE_EXPORT_STATES.includes(gravado.publication.state)) {
+    await repositorio.importApproved(gravado.publication.articleId, input.brandId, gravado.publication.lockVersion, input.actorId);
+  }
 
   /* ---------- 6. RELER DO SERVIDOR ---------- */
   const relido = await repositorio.find(input.brandId, publication.id);

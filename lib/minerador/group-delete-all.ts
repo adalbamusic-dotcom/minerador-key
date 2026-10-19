@@ -1,7 +1,8 @@
 import { EDITORIAL_GROUP_COLOR_LABELS, type EditorialGroupArea, type EditorialGroupColor } from "../editorial/editorial-groups.ts";
-import { normalizeTypedConfirmation } from "../lifecycle/typed-confirmation.ts";
+import { checkDeleteConfirmation, DELETE_HARD_PHRASE, deleteConfirmationRequirement, normalizeTypedConfirmation } from "../lifecycle/typed-confirmation.ts";
 import type { DeclaredArticlePlan, DeclaredPrincipalMark } from "./declared-plan.ts";
 import type { KeywordSubjectReleaseVia } from "./keyword-subject.ts";
+import type { ArchitectDismantlePreview } from "./architect-dismantle.ts";
 
 /**
  * ===== EXCLUIR TUDO DA COR X — DOMÍNIO PURO (F7, 2026-10-14) =====
@@ -35,13 +36,24 @@ import type { KeywordSubjectReleaseVia } from "./keyword-subject.ts";
  *   - o artigo do plano sai INTEIRO ou fica inteiro: Assunto e principal
  *     declarada andam juntos (nunca sobra marca de principal apontando para um
  *     Assunto apagado).
+ *
+ * 2026-10-17 · A EXCLUSÃO COMUM USA ESTE MESMO DOMÍNIO (pedido do dono: "ele tem
+ * que deixar apagar todo o grupo"; SDD da linha única do Minerador, P-4). Com
+ * `selectedIds`, a prévia vale só para as keywords SELECIONADAS desta cor: as
+ * não selecionadas ficam (não entram na lista de fora), contam como "ficam" no
+ * plano e prendem a cor; o artigo do plano com metade na seleção fica inteiro
+ * fora (`same_article_not_selected`). Sem `selectedIds`, a cor inteira, como
+ * sempre (mesma prévia e mesmo `decisionHash` de antes). Selecionar a cor inteira
+ * dá o MESMO resultado de "Excluir tudo da cor".
  */
 
 export const GROUP_DELETE_ALL_ACTION_LABEL = "Excluir tudo da cor" as const;
+/** O rótulo da exclusão comum quando passa por este domínio (as keywords selecionadas de uma cor). */
+export const GROUP_DELETE_SELECTION_ACTION_LABEL = "Excluir as selecionadas" as const;
 /** O limite das rotas de exclusão (e da RPC): cada bloco é tudo-ou-nada. */
 export const GROUP_DELETE_ALL_BLOCK_SIZE = 100;
-/** O segundo texto da confirmação forte, quando há exclusão definitiva. */
-export const GROUP_DELETE_ALL_HARD_PHRASE = "apaga de vez" as const;
+/** O segundo texto da confirmação forte, quando há exclusão definitiva (a regra única: `lib/lifecycle/typed-confirmation.ts`). */
+export const GROUP_DELETE_ALL_HARD_PHRASE = DELETE_HARD_PHRASE;
 /** O marcador que a RPC grava ao liberar o Assunto (reservado em 20261015120000). */
 export const GROUP_DELETE_ALL_RELEASE_VIA: KeywordSubjectReleaseVia = "excluir_cor";
 export const GROUP_DELETE_ALL_RPC = "lifecycle_delete_group_keywords" as const;
@@ -55,7 +67,11 @@ export const GROUP_DELETE_ALL_DONE_EVENT = "minerador:excluir-tudo-da-cor" as co
 export type GroupDeleteAllDoneDetail = { brandId: string; groupId: string; hardDeletedIds: string[]; recoverableIds: string[] };
 
 export const GROUP_DELETE_ALL_NOT_AVAILABLE_MESSAGE =
-  `“${GROUP_DELETE_ALL_ACTION_LABEL}” ainda não está disponível neste banco: a migration ${GROUP_DELETE_ALL_MIGRATION} não foi aplicada. Nada pode ser excluído por aqui; a prévia continua valendo, e a exclusão comum (selecionar → Excluir) segue como sempre.`;
+  `“${GROUP_DELETE_ALL_ACTION_LABEL}” ainda não está disponível neste banco: a migration ${GROUP_DELETE_ALL_MIGRATION} não foi aplicada. Nada pode ser excluído por aqui; a prévia continua valendo. A exclusão comum (selecionar → Excluir) segue como sempre para as keywords sem Assunto do plano; as do plano dependem desta migration.`;
+
+/** 2026-10-17 · a exclusão comum: a keyword do plano fica fora enquanto a M-E não estiver no banco. */
+export const KEYWORD_DELETE_PLAN_NOT_AVAILABLE_MESSAGE =
+  `Carrega Assunto do plano do Silo: ela sai do plano e é apagada na MESMA transação pela função da migration ${GROUP_DELETE_ALL_MIGRATION}, que ainda não foi aplicada neste banco. Fica fora (nada dela muda); o resto da seleção sai como sempre.`;
 
 /* ---------------------------------------------------------------- áreas */
 
@@ -67,13 +83,27 @@ export const GROUP_DELETE_ALL_AREA_LABELS: Record<EditorialGroupArea, string> = 
   publicacoes: "Publicações",
 };
 
-/** D8: só o Minerador executa nesta SDD; as outras áreas ficam fora, com o motivo. */
+/**
+ * As frases de cada área quando nada dela muda.
+ * 2026-10-18 · SUBSTITUÍDO o D8 "só o Minerador executa; as outras áreas ficam fora" (decisão do dono: "tudo tem que
+ * poder ser apagado … e alerta falando o que está apagando"): o que a exclusão tira do Arquiteto, do Radar, do Redator e
+ * de Publicações sai junto, ANTES das keywords, pelo núcleo do "Desfazer Silo" (`lib/minerador/architect-dismantle.ts`),
+ * e a prévia diz o quê, por área (`GROUP_DELETE_ALL_AREA_DISMANTLE_REASON`). As versões (ArticleDNA, SiloDNA, SiloPage,
+ * documento) ficam como histórico.
+ */
 export const GROUP_DELETE_ALL_AREA_REASONS: Record<EditorialGroupArea, string | null> = {
   minerador: null,
-  arquiteto: "O Arquiteto não exclui keyword (F4): ArticleDNA, SiloDNA e SiloPage ficam como histórico. Para um artigo sair do Silo, use “Retirar artigo do Silo” no Arquiteto.",
-  radar: "Sem contrato de exclusão no Radar (D8 da SDD): os itens da cor continuam.",
-  redator: "Sem contrato de exclusão no Redator (D8 da SDD): os documentos da cor continuam.",
-  publicacoes: "Sem contrato de exclusão em Publicações (D8 da SDD): os registros continuam; URL, slug e canonical ficam protegidos.",
+  arquiteto: "Nenhum artigo vigente do Arquiteto cita estas keywords: nada muda lá (as versões antigas ficam como histórico).",
+  radar: "Nenhum item da cor no Radar: nada muda lá.",
+  redator: "Nenhum documento da cor no Redator: nada muda lá.",
+  publicacoes: "Nada publicado da cor: nada muda lá; URL, slug e canonical ficam protegidos.",
+};
+/** A frase da área que sai junto (o desmonte, antes de excluir as keywords). */
+export const GROUP_DELETE_ALL_AREA_DISMANTLE_REASON: Record<Exclude<EditorialGroupArea, "minerador">, string> = {
+  arquiteto: "Sai junto, antes das keywords (o mesmo núcleo do “Desfazer Silo”): os artigos saem de vigência e o Silo se desfaz; as versões ficam como histórico.",
+  radar: "Sai junto: o item sai da operação do Radar (“retirado”); a investigação fica como histórico.",
+  redator: "O documento do Redator fica como histórico (não é apagado).",
+  publicacoes: "Publicado: no site nada muda (URL, slug e canonical ficam); a keyword publicada vai para a lixeira de 24 h com a marcação.",
 };
 
 export type GroupDeleteAllAreaItem = { id: string; label: string };
@@ -130,10 +160,21 @@ export type GroupDeleteAllInput = {
   architectArticles?: ReadonlyArray<{ articleId: string; label: string | null; stages: readonly string[] }>;
   /** O Silo ligado ao grupo tem SiloDNA (consolidado): desfazer é do Arquiteto. */
   siloConsolidated: boolean;
+  /**
+   * 2026-10-18 · a prévia do desmonte do Arquiteto para as keywords desta exclusão (a porta
+   * `ArchitectDismantlePort`). `ok: false` = não dá para ler/desmontar agora (permissão, leitura):
+   * as keywords com artigo vigente ficam fora com esse motivo. Ausente = nenhuma porta (fica fora, dito).
+   */
+  architectDismantle?: { ok: true; preview: ArchitectDismantlePreview } | { ok: false; message: string } | null;
   /** Incluir publicadas na lixeira de 24 h (D6). */
   includePublished: boolean;
   /** A M-E está no banco (a RPC responde). */
   available: boolean;
+  /**
+   * 2026-10-17 · a exclusão comum: só estas keywords da cor entram (as outras
+   * ficam). Ausente/`null` = a cor inteira ("Excluir tudo da cor").
+   */
+  selectedIds?: readonly string[] | null;
 };
 
 /* ---------------------------------------------------------------- prévia */
@@ -141,12 +182,18 @@ export type GroupDeleteAllInput = {
 export type GroupDeleteAllOutReason =
   | "lifecycle_unread"
   | "blocked_descendant"
-  | "architect_reference"
+  /** 2026-10-18 · SUBSTITUI "architect_reference": só quando o desmonte do Arquiteto não pôde ser lido ou não é permitido. */
+  | "architect_unavailable"
   | "published_not_included"
   | "subject_of_other_color"
   | "principal_of_other_color"
   | "principal_outside_color"
-  | "same_article";
+  | "same_article"
+  /** 2026-10-17 · exclusão comum: o outro lado do artigo do plano não está na seleção. */
+  | "same_article_not_selected";
+
+/** Os motivos próprios da keyword (os dois "mesmo artigo" vêm do companheiro). */
+export type GroupDeleteAllOwnOutReason = Exclude<GroupDeleteAllOutReason, "same_article" | "same_article_not_selected">;
 
 export type GroupDeleteAllItem = { id: string; keyword: string };
 export type GroupDeleteAllOut = GroupDeleteAllItem & { reason: GroupDeleteAllOutReason; message: string; path: string | null };
@@ -174,23 +221,36 @@ export type GroupDeleteAllPreview = {
   effects: string[];
   confirmation: { colorWord: string; hardPhrase: string | null; publishedNames: Array<{ id: string; keyword: string }> };
   totals: { live: number; hard: number; recoverable: number; out: number; trashedBefore: number; blocks: number };
+  /** 2026-10-17 · a exclusão comum: quantas da cor estão na seleção e quantas ficam fora dela. `null`/ausente = a cor inteira. */
+  selection?: { selected: number; notSelected: number } | null;
   /** A base do `decisionHash` (o núcleo calcula o hash): mudou qualquer coisa, a decisão é outra. */
   decisionBasis: Record<string, unknown>;
 };
 
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 
-const ARCHITECT_PATH = "Arquiteto → “Retirar artigo do Silo” (ou “Tirar do plano” no Gerenciar a cor) e depois uma prévia nova";
+/*
+ * 2026-10-18 · decisão do dono "Manter em duas etapas": a cor com o Silo consolidado sai em duas etapas, em dois
+ * lugares — no Arquiteto, o "Desfazer Silo" de sempre (o Silo inteiro, Pilar incluído; ou "Retirar artigo do Silo", um
+ * artigo); depois, aqui, uma prévia nova. SUBSTITUÍDO: "Retirar artigo do Silo (ou Tirar do plano no Gerenciar a cor)".
+ */
+export const ARCHITECT_PATH = "Arquiteto → “Desfazer Silo” (o Silo inteiro, Pilar incluído) ou “Retirar artigo do Silo” (um artigo); depois uma prévia nova aqui";
+/**
+ * 2026-10-18 · a migration que o dono aplica para a keyword com documento do Redator poder sair (o documento fica como
+ * histórico). Enquanto não aplicada, o ciclo de vida do banco recusa (`LIFECYCLE_DRAFT_DESCENDANT_REQUIRES_OWNER`).
+ */
+export const KEYWORD_DELETE_DOCUMENT_MIGRATION = "20261018120000_documento_do_redator_nao_prende_a_keyword" as const;
 
-function reasonMessage(reason: Exclude<GroupDeleteAllOutReason, "same_article">, row: GroupDeleteAllKeyword): { message: string; path: string | null } {
+/** A frase e o caminho de cada motivo próprio (a exclusão comum usa os mesmos textos). */
+export function groupDeleteAllReasonMessage(reason: GroupDeleteAllOwnOutReason, row: Pick<GroupDeleteAllKeyword, "architectRefs" | "plan"> & { architectUnavailable?: string | null }): { message: string; path: string | null } {
   switch (reason) {
     case "lifecycle_unread":
       return { message: "O impacto da exclusão desta keyword não pôde ser lido agora: ela fica fora (nada é excluído às cegas).", path: "Gere a prévia de novo" };
     case "blocked_descendant":
-      return { message: "Tem documento no Redator (ContentDocument): o ciclo de vida recusa a exclusão. O Redator não tem exclusão (D8); a keyword continua.", path: null };
-    case "architect_reference": {
+      return { message: `Tem documento no Redator (ContentDocument). O documento fica como histórico, mas o ciclo de vida do banco ainda recusa excluir a keyword com documento: falta a migration ${KEYWORD_DELETE_DOCUMENT_MIGRATION} (o dono aplica). Até lá ela continua.`, path: "O dono aplica a migration do documento do Redator e gera a prévia de novo" };
+    case "architect_unavailable": {
       const nomes = row.architectRefs.map(ref => ref.label ? `“${ref.label}”` : ref.articleId).slice(0, 3).join(", ");
-      return { message: `Está no ArticleDNA vigente de ${plural(row.architectRefs.length, "artigo", "artigos")} do Arquiteto (${nomes}). O Arquiteto não exclui keyword (F4): retire o artigo do Silo lá ou tire-o do plano antes.`, path: ARCHITECT_PATH };
+      return { message: `Está no ArticleDNA vigente de ${plural(row.architectRefs.length, "artigo", "artigos")} do Arquiteto (${nomes}): a exclusão desmonta o artigo lá, e o desmonte não pôde ser preparado agora${row.architectUnavailable ? ` (${row.architectUnavailable})` : ""}.`, path: ARCHITECT_PATH };
     }
     case "published_not_included":
       return { message: "Publicada: só sai com a marcação “Incluir publicadas na lixeira de 24 h” e o nome dela digitado (D6). Fica restaurável por 24 h.", path: "Marque “Incluir publicadas na lixeira de 24 h”" };
@@ -214,6 +274,9 @@ export function buildGroupDeleteAllPreview(input: GroupDeleteAllInput): GroupDel
   const colorLabel = EDITORIAL_GROUP_COLOR_LABELS[group.color];
   const rows = [...input.keywords].sort((a, b) => a.keyword.localeCompare(b.keyword, "pt-BR") || a.id.localeCompare(b.id));
   const byId = new Map(rows.map(row => [row.id, row]));
+  // A exclusão comum: só as selecionadas desta cor entram; as outras ficam (contexto do artigo, do plano e da cor).
+  const selecao = input.selectedIds ? new Set(input.selectedIds.filter(id => byId.has(id))) : null;
+  const naSelecao = (id: string) => !selecao || selecao.has(id);
 
   // 1. Unidades: o artigo do plano (Assunto + principal declarada) sai inteiro ou fica inteiro.
   const pai = new Map(rows.map(row => [row.id, row.id]));
@@ -224,13 +287,16 @@ export function buildGroupDeleteAllPreview(input: GroupDeleteAllInput): GroupDel
   };
   const junta = (a: string, b: string) => { const ra = raiz(a); const rb = raiz(b); if (ra !== rb) pai.set(rb, ra); };
 
-  const motivos = new Map<string, Exclude<GroupDeleteAllOutReason, "same_article">>();
-  const marcaMotivo = (id: string, motivo: Exclude<GroupDeleteAllOutReason, "same_article">) => { if (!motivos.has(id)) motivos.set(id, motivo); };
+  const motivos = new Map<string, GroupDeleteAllOwnOutReason>();
+  const desmonte = input.architectDismantle && input.architectDismantle.ok ? input.architectDismantle.preview : null;
+  const desmonteIndisponivel = input.architectDismantle && !input.architectDismantle.ok ? input.architectDismantle.message : input.architectDismantle === undefined || input.architectDismantle === null ? "o desmonte do Arquiteto não está ligado nesta exclusão" : null;
+  const marcaMotivo = (id: string, motivo: GroupDeleteAllOwnOutReason) => { if (naSelecao(id) && !motivos.has(id)) motivos.set(id, motivo); };
 
   for (const row of rows) {
     if (row.lifecycle === "unknown") marcaMotivo(row.id, "lifecycle_unread");
     else if (row.lifecycle === "blocked") marcaMotivo(row.id, "blocked_descendant");
-    if (row.architectRefs.length) marcaMotivo(row.id, "architect_reference");
+    // 2026-10-18 · com o desmonte do Arquiteto lido, a keyword com artigo vigente sai (o desmonte vem antes); sem ele, fica fora com o porquê.
+    if (row.architectRefs.length && !desmonte) marcaMotivo(row.id, "architect_unavailable");
     if (row.lifecycle === "recoverable" && !input.includePublished) marcaMotivo(row.id, "published_not_included");
     if (row.plan) {
       if (row.plan.groupId !== group.id) marcaMotivo(row.id, "subject_of_other_color");
@@ -256,17 +322,27 @@ export function buildGroupDeleteAllPreview(input: GroupDeleteAllInput): GroupDel
   const out: GroupDeleteAllOut[] = [];
   const fora = new Set<string>();
   for (const row of rows) {
+    // Fora da seleção: fica, sem entrar na lista de fora (o dono não pediu para excluí-la).
+    if (!naSelecao(row.id)) { fora.add(row.id); continue; }
     const proprio = motivos.get(row.id);
     if (proprio) {
-      const texto = reasonMessage(proprio, row);
+      const texto = groupDeleteAllReasonMessage(proprio, { ...row, architectUnavailable: desmonteIndisponivel });
       out.push({ id: row.id, keyword: row.keyword, reason: proprio, message: texto.message, path: texto.path });
       fora.add(row.id);
       continue;
     }
-    const companheiro = (membros.get(raiz(row.id)) ?? []).find(id => motivos.has(id));
+    const daUnidade = membros.get(raiz(row.id)) ?? [];
+    const companheiro = daUnidade.find(id => motivos.has(id));
     if (companheiro) {
       const nome = byId.get(companheiro)?.keyword ?? companheiro;
       out.push({ id: row.id, keyword: row.keyword, reason: "same_article", message: `Faz parte do mesmo artigo do plano que “${nome}”, que fica fora: o artigo sai inteiro ou fica inteiro.`, path: null });
+      fora.add(row.id);
+      continue;
+    }
+    const naoSelecionada = daUnidade.find(id => !naSelecao(id));
+    if (naoSelecionada) {
+      const nome = byId.get(naoSelecionada)?.keyword ?? naoSelecionada;
+      out.push({ id: row.id, keyword: row.keyword, reason: "same_article_not_selected", message: `Faz parte do mesmo artigo do plano que “${nome}”, que não está na seleção: o artigo sai inteiro ou fica inteiro.`, path: `Selecione também “${nome}” e clique Excluir de novo` });
       fora.add(row.id);
     }
   }
@@ -274,7 +350,8 @@ export function buildGroupDeleteAllPreview(input: GroupDeleteAllInput): GroupDel
   const elegiveis = rows.filter(row => !fora.has(row.id));
   const hard = elegiveis.filter(row => row.lifecycle === "hard").map(row => ({ id: row.id, keyword: row.keyword }));
   const recoverable = elegiveis.filter(row => row.lifecycle === "recoverable").map(row => ({ id: row.id, keyword: row.keyword }));
-  const publishedInColor = rows.filter(row => row.lifecycle === "recoverable").map(row => ({ id: row.id, keyword: row.keyword }));
+  const publishedInColor = rows.filter(row => naSelecao(row.id) && row.lifecycle === "recoverable").map(row => ({ id: row.id, keyword: row.keyword }));
+  const foraDaSelecao = selecao ? rows.length - selecao.size : 0;
 
   const releasedSubjects: GroupDeleteAllReleasedSubject[] = elegiveis
     .filter(row => row.subjectDeclared && (row.plan || row.entryTitle))
@@ -306,12 +383,16 @@ export function buildGroupDeleteAllPreview(input: GroupDeleteAllInput): GroupDel
   // 5. A cor no fim (D7): livre só se nada ficar.
   const keptBecause: string[] = [];
   if (out.length) keptBecause.push(`${plural(out.length, "keyword fica", "keywords ficam")} fora (motivos na lista)`);
+  if (foraDaSelecao > 0) keptBecause.push(`${plural(foraDaSelecao, "keyword da cor não está", "keywords da cor não estão")} na seleção e ${foraDaSelecao === 1 ? "fica" : "ficam"}`);
   if (recoverable.length) keptBecause.push(`${plural(recoverable.length, "publicada vai", "publicadas vão")} para a lixeira de 24 h e prendem a cor até a purga (D7)`);
   if (input.trashedCount > 0) keptBecause.push(`${plural(input.trashedCount, "keyword já está", "keywords já estão")} na lixeira (restauráveis)`);
-  if (input.taggedArticles.length) keptBecause.push(`${plural(input.taggedArticles.length, "artigo etiquetado", "artigos etiquetados")} na cor (a etiqueta é do Arquiteto; nada é excluído lá)`);
-  if (group.siloId && input.siloConsolidated) keptBecause.push("Silo consolidado ligado ao grupo (não há exclusão de Silo consolidado; desfazer é do Arquiteto)");
+  const desetiquetados = new Set(desmonte?.untagArticleIds ?? []);
+  const etiquetadosQueFicam = input.taggedArticles.filter(item => !desetiquetados.has(item.articleId));
+  if (etiquetadosQueFicam.length) keptBecause.push(`${plural(etiquetadosQueFicam.length, "artigo etiquetado", "artigos etiquetados")} na cor que não saem nesta exclusão`);
+  const siloSai = Boolean(desmonte && desmonte.unlinkGroupIds.includes(group.id));
+  if (group.siloId && input.siloConsolidated && !siloSai) keptBecause.push("Silo consolidado ligado ao grupo (desfazer é do Arquiteto: “Desfazer Silo”, o Silo inteiro)");
   const freedAtEnd = keptBecause.length === 0;
-  const siloUnlinkAtEnd = freedAtEnd && Boolean(group.siloId) && !input.siloConsolidated;
+  const siloUnlinkAtEnd = freedAtEnd && Boolean(group.siloId) && (!input.siloConsolidated || siloSai);
 
   // 6. As outras áreas (D8): listadas, sem exclusão.
   const artigos = new Map<string, { articleId: string; label: string | null; stages: Set<string> }>();
@@ -325,13 +406,13 @@ export function buildGroupDeleteAllPreview(input: GroupDeleteAllInput): GroupDel
   const itensDa = (stage: string | null) => listaArtigos
     .filter(artigo => stage === null || artigo.stages.has(stage))
     .map(artigo => ({ id: artigo.articleId, label: artigo.label ?? artigo.articleId }));
-  const areas: GroupDeleteAllAreaView[] = (["minerador", "arquiteto", "radar", "redator", "publicacoes"] as const).map(area => ({
-    area,
-    label: GROUP_DELETE_ALL_AREA_LABELS[area],
-    executable: area === "minerador",
-    reason: GROUP_DELETE_ALL_AREA_REASONS[area],
-    items: area === "minerador" ? [] : itensDa(area === "arquiteto" ? null : area === "redator" ? "writer" : area === "publicacoes" ? "publications" : "radar"),
-  }));
+  const areas: GroupDeleteAllAreaView[] = (["minerador", "arquiteto", "radar", "redator", "publicacoes"] as const).map(area => {
+    if (area === "minerador") return { area, label: GROUP_DELETE_ALL_AREA_LABELS[area], executable: true, reason: null, items: [] };
+    const doDesmonte = desmonte?.areas[area] ?? [];
+    if (doDesmonte.length) return { area, label: GROUP_DELETE_ALL_AREA_LABELS[area], executable: true, reason: GROUP_DELETE_ALL_AREA_DISMANTLE_REASON[area], items: doDesmonte.map((linha, indice) => ({ id: `${area}:${indice}`, label: linha })) };
+    const itens = itensDa(area === "arquiteto" ? null : area === "redator" ? "writer" : area === "publicacoes" ? "publications" : "radar");
+    return { area, label: GROUP_DELETE_ALL_AREA_LABELS[area], executable: false, reason: itens.length ? (desmonteIndisponivel ? `Fica fora: ${desmonteIndisponivel}.` : "Fica como está (nenhuma keyword desta exclusão está num artigo vigente dele).") : GROUP_DELETE_ALL_AREA_REASONS[area], items: itens };
+  });
 
   // 7. Frases da prévia.
   const effects: string[] = [];
@@ -344,7 +425,13 @@ export function buildGroupDeleteAllPreview(input: GroupDeleteAllInput): GroupDel
   effects.push(freedAtEnd
     ? `No fim, nada fica: a cor ${colorLabel} é liberada (grupo arquivado${siloUnlinkAtEnd ? ", Silo não consolidado desligado" : ""}); ao usar a cor de novo, o grupo volta sem plano, com o histórico.`
     : `A cor ${colorLabel} continua ocupada no fim: ${keptBecause.join("; ")}.`);
-  effects.push("As versões do ArticleDNA, SiloDNA e SiloPage ficam como histórico; Radar, Redator e Publicações não mudam.");
+  if (desmonte?.lines.length) {
+    effects.push(`Antes das keywords, sai junto (o mesmo núcleo do “Desfazer Silo”; se algo não fechar, nenhuma keyword é excluída e o resultado diz o que foi feito):`);
+    effects.push(...desmonte.lines);
+    effects.push("As versões do ArticleDNA, SiloDNA, SiloPage e do documento do Redator ficam como histórico (não são apagadas).");
+  } else {
+    effects.push("As versões do ArticleDNA, SiloDNA e SiloPage ficam como histórico; Radar, Redator e Publicações não mudam.");
+  }
   if (blocks.length > 1) effects.push(`Execução em ${blocks.length} blocos de até ${GROUP_DELETE_ALL_BLOCK_SIZE}: cada bloco é tudo-ou-nada; um bloco recusado não desfaz os anteriores.`);
 
   const sortIds = (items: readonly { id: string }[]) => items.map(item => item.id).sort();
@@ -359,7 +446,14 @@ export function buildGroupDeleteAllPreview(input: GroupDeleteAllInput): GroupDel
     out: out.map(item => `${item.id}:${item.reason}`).sort(),
     released: releasedSubjects.map(item => item.keywordId).sort(),
     blocks: blocks.map(bloco => bloco.ids.join(",")),
+    // 2026-10-18 · o desmonte do Arquiteto (mudou lá, a decisão é outra). Sem desmonte, o hash de antes.
+    ...(desmonte && desmonte.lines.length ? { architect: desmonte.basis } : {}),
+    // Só na exclusão comum: a cor inteira continua com o MESMO hash de antes.
+    ...(selecao ? { selection: [...selecao].sort(), notSelected: foraDaSelecao } : {}),
   };
+  // A regra única da confirmação (a cor é sempre forte): o nome da cor, "apaga de vez" e o nome de cada publicada.
+  const colorWord = colorLabel.toLocaleLowerCase("pt-BR");
+  const regra = deleteConfirmationRequirement({ selectionName: colorWord, colorWords: [colorWord], hardCount: hard.length, recoverable, alwaysStrong: true });
 
   return {
     group: { ...group, colorLabel },
@@ -377,11 +471,12 @@ export function buildGroupDeleteAllPreview(input: GroupDeleteAllInput): GroupDel
     areas,
     effects,
     confirmation: {
-      colorWord: colorLabel.toLocaleLowerCase("pt-BR"),
-      hardPhrase: hard.length ? GROUP_DELETE_ALL_HARD_PHRASE : null,
-      publishedNames: recoverable.map(item => ({ id: item.id, keyword: item.keyword })),
+      colorWord,
+      hardPhrase: regra.hardPhrase,
+      publishedNames: regra.publishedNames,
     },
     totals: { live: rows.length, hard: hard.length, recoverable: recoverable.length, out: out.length, trashedBefore: input.trashedCount, blocks: blocks.length },
+    selection: selecao ? { selected: selecao.size, notSelected: foraDaSelecao } : null,
     decisionBasis,
   };
 }
@@ -411,17 +506,15 @@ export type GroupDeleteAllConfirmationCheck =
  * qualquer exclusão definitiva; o nome de cada publicada incluída (a
  * confirmação de sempre da lixeira de 24 h). É a autorização explícita da
  * operação (`AGENTS.md` §15) — a tela e o servidor conferem a mesma regra.
+ * 2026-10-17: a conferência é a regra ÚNICA da exclusão (`checkDeleteConfirmation`,
+ * a mesma da exclusão comum); aqui só se traduz o formato da prévia da cor.
  */
 export function checkGroupDeleteAllConfirmation(preview: Pick<GroupDeleteAllPreview, "confirmation">, typed: GroupDeleteAllTyped): GroupDeleteAllConfirmationCheck {
-  const faltam: string[] = [];
-  if (normalizeGroupDeleteAllTyped(typed.color) !== normalizeGroupDeleteAllTyped(preview.confirmation.colorWord)) faltam.push(`o nome da cor (“${preview.confirmation.colorWord}”)`);
-  if (preview.confirmation.hardPhrase && normalizeGroupDeleteAllTyped(typed.phrase) !== normalizeGroupDeleteAllTyped(preview.confirmation.hardPhrase)) faltam.push(`“${preview.confirmation.hardPhrase}”`);
-  const nomes = typed.publishedNames && typeof typed.publishedNames === "object" ? typed.publishedNames : {};
-  for (const publicada of preview.confirmation.publishedNames) {
-    if (normalizeGroupDeleteAllTyped(nomes[publicada.id]) !== normalizeGroupDeleteAllTyped(publicada.keyword)) faltam.push(`o nome da publicada “${publicada.keyword}”`);
-  }
-  if (!faltam.length) return { ok: true };
-  return { ok: false, code: "CONFIRMATION_REQUIRED", missing: faltam, message: `Nada foi excluído: falta digitar ${faltam.join(", ")}.` };
+  const { colorWord, hardPhrase, publishedNames } = preview.confirmation;
+  return checkDeleteConfirmation(
+    { selectionName: null, colorWords: [colorWord], hardPhrase, publishedNames },
+    { colors: { [colorWord]: typed.color }, phrase: typed.phrase, publishedNames: typed.publishedNames },
+  );
 }
 
 /* ------------------------------------------------------------- resultado */
@@ -437,6 +530,11 @@ export type GroupDeleteAllBlockOutcome = {
   message: string | null;
 };
 
+/** O nome da operação no histórico do grupo: a cor inteira ou as selecionadas dela (exclusão comum). */
+export function groupDeleteOperationLabel(preview: Pick<GroupDeleteAllPreview, "selection">): string {
+  return preview.selection ? GROUP_DELETE_SELECTION_ACTION_LABEL : GROUP_DELETE_ALL_ACTION_LABEL;
+}
+
 /** O registro do histórico do grupo (`keywords_unassigned`, append-only): sobrevive às keywords apagadas. */
 export function groupDeleteAllEventPayload(input: {
   preview: GroupDeleteAllPreview;
@@ -450,7 +548,7 @@ export function groupDeleteAllEventPayload(input: {
   const recusadas = input.blocks.filter(bloco => bloco.outcome !== "done");
   return {
     via: GROUP_DELETE_ALL_RELEASE_VIA,
-    operation: GROUP_DELETE_ALL_ACTION_LABEL,
+    operation: groupDeleteOperationLabel(input.preview),
     decisionHash: input.decisionHash,
     keywordIds: [...apagadas, ...lixeira],
     keywords: [...apagadas, ...lixeira].map(id => nomes.get(id) ?? id).slice(0, 500),

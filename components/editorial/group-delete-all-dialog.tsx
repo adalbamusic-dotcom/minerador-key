@@ -165,10 +165,12 @@ export function EditorialGroupDeleteAllDialog({ brandId, group, onClose }: {
                 <div className="flex items-center gap-2 text-sm">
                   <input type="radio" name={`${titleId}-area`} className="h-4 w-4" checked={area.executable} disabled={!area.executable} readOnly aria-label={area.label} />
                   <span className="font-medium">{area.label}</span>
-                  <span className="text-text-muted">{area.executable ? "executa (keywords da cor)" : `fica fora${area.items.length ? ` · ${area.items.length} item(ns) da cor` : ""}`}</span>
+                  <span className="text-text-muted">{area.executable ? (area.area === "minerador" ? "executa (keywords da cor)" : "sai junto, antes das keywords") : `fica como está${area.items.length ? ` · ${area.items.length} item(ns) da cor` : ""}`}</span>
                 </div>
                 {area.reason ? <p className="mt-1 text-sm text-text-muted">{area.reason}</p> : null}
-                {area.items.length ? <p className="mt-1 break-words text-sm text-text-muted">{area.items.slice(0, 8).map(item => item.label).join(" · ")}{area.items.length > 8 ? ` · e mais ${area.items.length - 8}` : ""}</p> : null}
+                {/* 2026-10-18 · o alerta: o que sai em cada área, frase por frase (o desmonte do Arquiteto antes das keywords). */}
+                {area.items.length && area.executable && area.area !== "minerador" ? <ul className="mt-1 list-disc space-y-1 pl-5 text-sm leading-5" data-group-delete-all-area-items={area.area}>{area.items.map(item => <li key={item.id} className="break-words">{item.label}</li>)}</ul> : null}
+                {area.items.length && !area.executable ? <p className="mt-1 break-words text-sm text-text-muted">{area.items.slice(0, 8).map(item => item.label).join(" · ")}{area.items.length > 8 ? ` · e mais ${area.items.length - 8}` : ""}</p> : null}
               </div>
             ))}
           </div>
@@ -259,6 +261,7 @@ export function EditorialGroupDeleteAllDialog({ brandId, group, onClose }: {
           <section className="space-y-2" data-group-delete-all-result>
             <h3 className="text-sm font-semibold">Relatório</h3>
             <ul className="list-disc space-y-1 pl-5 text-sm leading-5">
+              {resultado.architect?.applied.length ? <li>Antes, no Arquiteto: {resultado.architect.applied.join(" · ")}.</li> : null}
               <li>{resultado.hardDeletedIds.length} apagada(s) de vez; {resultado.recoverableIds.length} na lixeira de 24 h (restauráveis no Minerador).</li>
               {resultado.blocks.filter(bloco => bloco.outcome !== "done").map((bloco, indice) => <li key={`recusa-${indice}`} className="text-warning">Bloco de {bloco.ids.length} recusado: {bloco.message}</li>)}
               {resultado.out.length ? <li>{resultado.out.length} ficaram fora já na prévia (com o motivo).</li> : null}
