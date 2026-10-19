@@ -372,7 +372,11 @@ test("acerto que degrada em falta é previsto e a quota reavaliada ANTES de paga
 });
 
 test("a chave usa os códigos-alvo e a divergência com a config descarta os acertos", () => {
-  assert.match(rota, /const targetCodes = readDataForSeoTargetCodes\(\);/);
+  /* SUBSTITUÍDO (2026-10-18, SDD localidade da SERP por marca, L2): os códigos da chave são os da marca, e a config recebe a mesma localidade. */
+  assert.match(rota, /const alvoDaMarca = await resolveBrandSerpTarget\(pipelineContext\.supabase, pipelineContext\.brandId\);/);
+  assert.match(rota, /const targetCodes = alvoDaMarca\.codes;/);
+  assert.match(rota, /config: withBrandSerpLocation\(resolvida\.config, alvoDaMarca\)/);
+  assert.doesNotMatch(rota, /readDataForSeoTargetCodes/);
   assert.match(rota, /formationSerpCodesMatch\(targetCodes, resolution\.config\)/);
   assert.match(rota, /cacheCodesMatch = false;/);
   /*
@@ -867,7 +871,13 @@ test("A8 · keyword do acervo usa o resolvedor do Minerador e cai na MESMA chave
   assert.deepEqual(mineradorSerpTargetCodes({ language: "languageConstants/1000", geoTargetConstants: ["geoTargetConstants/2076"] }, AMBIENTE_PT_BR), { locationCode: 2076, languageCode: "en" });
   // Fora do Brasil o Minerador recusa: não há entrada dele a reaproveitar.
   assert.equal(mineradorSerpTargetCodes({ geoTargetConstants: ["geoTargetConstants/2840"] }, AMBIENTE_PT_BR), null);
-  assert.equal(mineradorSerpTargetCodes(null, { locationCode: 2840, languageCode: "en" }), null);
+  /*
+   * SUBSTITUÍDO (2026-10-18, SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L2): a base
+   * (`environment`) é a localidade da MARCA e passa direto — a A8 só decide o idioma.
+   * Antes, uma base fora do Brasil dava `null`; agora a marca com cidade tem a chave dela.
+   */
+  assert.deepEqual(mineradorSerpTargetCodes(null, { locationCode: 2840, languageCode: "en" }), { locationCode: 2840, languageCode: "pt" });
+  assert.deepEqual(mineradorSerpTargetCodes({ languageCode: "pt", sourceGeoTargetConstants: ["geoTargetConstants/2076"] }, { locationCode: 1001773, languageCode: "pt" }), { locationCode: 1001773, languageCode: "pt" });
 
   // O defeito: com o ambiente em `pt-br`, a chave do Arquiteto não era a do Minerador.
   const codigos = mineradorSerpTargetCodes(null, AMBIENTE_PT_BR)!;

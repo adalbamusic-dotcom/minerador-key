@@ -366,15 +366,24 @@ test("P0-B (4) · o que está no 'Não cobrir' sai de H2/H3 e do 'Cobrir:' — o
   });
   const comForaDoEscopo = { ...leads, candidates: [...leads.candidates, { id: "fora-1", observedLabel: "Como qualificar um lead na prática?", pages: 1, sampleSize: 23, dnaAligned: false, dnaRequired: false, intentFit: true, verdict: "OUT_OF_SCOPE" as const, reason: "O ArticleDNA não declara este assunto e ele não toca a composição de keywords: pertence a outro artigo.", sectionId: null }] };
   const entradaLeads = entradaDoArtigo(comForaDoEscopo, "leads qualificados", ["gerar leads qualificados", "captação de leads qualificados"]);
-  /* 2026-10-09 · a régua chega ao GERADOR: a seção M que toca o "Não cobrir" vai marcada para descarte; sem planta, nada sai. */
   recusaSemPlanta(entradaLeads);
-  assert.ok(esqueletoDe(entradaLeads).some(item => /identificar um lead qualificado na prática/i.test(item.heading) && item.outOfScope), "a seção M vai marcada fora do escopo");
+  /*
+   * SUBSTITUÍDO em 2026-10-18 (teste real WifiConecta): antes (2026-10-09) a
+   * seção M que a investigação PROMOVEU ("Como identificar um lead qualificado
+   * na prática", 6 páginas) ia marcada para descarte por tocar o rótulo genérico
+   * "Como qualificar um lead na prática?" (1 página) — o artigo de leads
+   * qualificados perdia o próprio assunto. Agora a incoerência do CSV (H2 e
+   * "Não cobrir" ao mesmo tempo) se resolve do outro lado: a estrutura promovida
+   * é referência da regra 3(a) (`radarArticleBlueprintScopeReference`), o item
+   * genérico que ela trata sai do "Não cobrir" e a seção fica.
+   */
+  assert.ok(esqueletoDe(entradaLeads).some(item => /identificar um lead qualificado na prática/i.test(item.heading) && !item.outOfScope), "a seção M promovida chega sem marca de descarte");
   const linhaLeads = linhaDe(entradaLeads);
   CSVS.push(csvDe(linhaLeads));
-  /* A planta não organiza a seção: ela fica só como descarte do esqueleto, dito com o motivo. */
-  assert.doesNotMatch(linhaLeads.row.estrutura, /^#{2,3} .*identificar um lead qualificado na prática/im);
-  assert.match(linhaLeads.row.estrutura, /^Descartado do esqueleto da SERP: .*identificar um lead qualificado na prática[^"]*" \(fora do escopo do pacote\)/m);
-  assert.match(linhaLeads.row.cobrir_e_superar, /- "Como qualificar um lead na prática\?": /);
+  /* A planta organiza a seção, e o rótulo que ela trata não fica no "Não cobrir" (nada de H2 e "não cobrir" ao mesmo tempo). */
+  assert.match(linhaLeads.row.estrutura, /^#{2,3} .*identificar um lead qualificado/im);
+  assert.doesNotMatch(linhaLeads.row.estrutura, /^Descartado do esqueleto da SERP: .*identificar um lead qualificado na prática[^"]*" \(fora do escopo do pacote\)/m);
+  assert.doesNotMatch(linhaLeads.row.cobrir_e_superar, /- "Como qualificar um lead na prática\?": /);
 
   /* Tráfego: "como funciona o tráfego vindo de ferramentas de IA" no "Cobrir:" e a pergunta mandada a outro tópico do Silo. */
   sequencia = 0;

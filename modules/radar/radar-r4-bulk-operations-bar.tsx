@@ -3,7 +3,8 @@ import { availableBulkActions } from "@/lib/radar/r4-queue";
 import { buildRadarR5QueueProgress } from "@/lib/radar/r5-sequential";
 import { radarSerpBatchButtonLabel } from "./radar-serp-collect-notices";
 import { useState } from "react";
-import { RADAR_RESEARCH_BATCH_STEP_LABEL, radarResearchBatchButtonLabel, radarResearchBatchConfirmation, type RadarResearchBatchPlan, type RadarResearchBatchProgress } from "@/lib/radar/research-batch";
+import { InfoHint } from "@/components/info-hint";
+import { RADAR_RESEARCH_BATCH_HINT, RADAR_RESEARCH_BATCH_STEP_LABEL, radarResearchBatchButtonLabel, radarResearchBatchConfirmation, type RadarResearchBatchPlan, type RadarResearchBatchProgress } from "@/lib/radar/research-batch";
 
 type RadarR4BulkOperationsBarProps = {
   selectedRows: RadarR4BulkArticleSnapshot[];
@@ -57,7 +58,7 @@ function EligibilityDetails({ operation, eligibility }: { operation: RadarR4Bulk
 export function RadarR4BulkOperationsBar({ selectedRows, onAction }: RadarR4BulkOperationsBarProps) {
   const actions = availableBulkActions(selectedRows);
   const specialistBlocked = selectedRows.some(row => row.specialistState === "READY_TO_SEND") && actions.specialist.blocked.length > 0;
-  return <div className="flex min-w-max flex-wrap items-center gap-2" data-testid="radar-r4-bulk-bar" aria-label="Operações em lote do Radar">
+  return <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="radar-r4-bulk-bar" aria-label="Operações em lote do Radar">
     <span className="mr-1 text-sm font-semibold text-foreground">{selectedRows.length} selecionados</span>
     {actionCopy.filter(({ operation }) => RADAR_PILOT_BULK_OPERATIONS.includes(operation)).map(({ operation, label }) => {
       const eligibility = actions[operation];
@@ -82,7 +83,8 @@ export function RadarR4BulkOperationsBar({ selectedRows, onAction }: RadarR4Bulk
  */
 export function RadarResearchBatchAction({ plan, busy, onConfirm }: { plan: RadarResearchBatchPlan; busy: boolean; onConfirm: () => void }) {
   const [confirmando, setConfirmando] = useState(false);
-  if (!plan.run.length) return null;
+  /* 2026-10-18 · os finalizados sem artigo-modelo também contam: o botão organiza o que falta deles. */
+  if (!plan.run.length && !plan.blueprint.length) return null;
   if (confirmando) {
     return <div className="grid max-w-3xl gap-2 rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-pesquisa-lote-confirm">
       {radarResearchBatchConfirmation(plan).map((linha, indice) => <p key={indice} className="text-sm leading-6 text-foreground">{linha}</p>)}
@@ -92,35 +94,30 @@ export function RadarResearchBatchAction({ plan, busy, onConfirm }: { plan: Rada
       </div>
     </div>;
   }
-  return <button type="button" className={button} disabled={busy} onClick={() => setConfirmando(true)} data-testid="radar-pesquisa-lote" title="Mostra o custo antes: nada roda sem a sua confirmação.">{radarResearchBatchButtonLabel(plan)}</button>;
+  return <span className="inline-flex items-center gap-1">
+    <button type="button" className={button} disabled={busy} onClick={() => setConfirmando(true)} data-testid="radar-pesquisa-lote" title="Mostra o custo antes: nada roda sem a sua confirmação.">{radarResearchBatchButtonLabel(plan)}</button>
+    <InfoHint title="Pesquisar e finalizar" description={RADAR_RESEARCH_BATCH_HINT} side="top" align="start" />
+  </span>;
 }
 
-const ROTULO_DO_STATUS: Record<RadarResearchBatchProgress["items"][number]["status"], string> = {
-  QUEUED: "na fila",
-  RUNNING: "em curso",
-  FINALIZED: "finalizado",
-  SKIPPED: "já finalizado (pulado)",
-  REFUSED: "parado",
-};
-
-/** O progresso do lote, por artigo, e no fim o desfecho de cada um com o motivo de quem parou. */
-export function RadarResearchBatchProgressStrip({ progress, onClose }: { progress: RadarResearchBatchProgress | null; onClose?: () => void }) {
-  if (!progress) return null;
+/**
+ * O ANDAMENTO do lote, por artigo. 2026-10-18 · SUBSTITUÍDO o "no fim, o desfecho de cada um" na tela: todos os avisos
+ * no sino (regra do dono) — o desfecho do lote, com os parados e o motivo, vai para o sino (`radarResearchBatchSummary`);
+ * a faixa some quando o lote encerra. `onClose` fica no contrato por compatibilidade.
+ */
+export function RadarResearchBatchProgressStrip({ progress }: { progress: RadarResearchBatchProgress | null; onClose?: () => void }) {
+  if (!progress || !progress.active) return null;
   const emCurso = progress.items.find(item => item.status === "RUNNING") || null;
   const finalizados = progress.items.filter(item => item.status === "FINALIZED").length;
   const parados = progress.items.filter(item => item.status === "REFUSED");
   return <div className="shrink-0 border-b border-divider bg-surface-subtle px-4 py-2 text-sm" data-testid="radar-pesquisa-lote-progresso" role="status" aria-label="Progresso do lote Pesquisar e finalizar">
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <strong className="text-foreground">Pesquisar e finalizar · {progress.total} artigo(s)</strong>
-      {progress.active && emCurso
+      {emCurso
         ? <span className="text-text-muted">Artigo {progress.position} de {progress.total} · “{emCurso.title}” · {emCurso.step ? RADAR_RESEARCH_BATCH_STEP_LABEL[emCurso.step] : "abrindo"}…</span>
-        : <span className="text-text-muted">{progress.active ? "Conferindo no servidor…" : "Lote encerrado."}</span>}
+        : <span className="text-text-muted">Conferindo no servidor…</span>}
       <span className="text-text-muted">{finalizados} finalizado(s){parados.length ? ` · ${parados.length} parado(s)` : ""}</span>
-      {!progress.active && onClose && <button type="button" className={button} onClick={onClose}>Fechar</button>}
     </div>
-    {!progress.active && progress.items.length > 0 && <ul className="mt-2 grid gap-1">
-      {progress.items.map(item => <li key={item.articleId} className={item.status === "REFUSED" ? "text-warning" : "text-text-muted"}><span className="font-medium text-foreground">“{item.title}”</span> · {ROTULO_DO_STATUS[item.status]}{item.reason ? ` — ${item.reason}` : ""}</li>)}
-    </ul>}
   </div>;
 }
 

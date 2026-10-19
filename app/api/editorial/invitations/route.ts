@@ -34,6 +34,33 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/*
+ * 2026-10-18 · "Cancelar" convite (defeito da Marca no inventário de botões).
+ * O botão de sempre da Equipe passa a gravar pelo `InvitationRepository.updateStatus`
+ * que já existia, e a tela só muda depois da releitura. Suspender e revogar não
+ * entram: o banco não guarda esses estados (CHECK da 0002), e a tela diz isso.
+ */
+const InvitationCancelSchema = z.object({ brandId: z.string().uuid(), invitationId: z.string().uuid(), action: z.literal("cancel") }).strict();
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const profile = await requireCanonicalSessionProfile();
+    const input = InvitationCancelSchema.parse(await request.json());
+    await assertCanAccessMarca(profile.userId, input.brandId, profile); await assertEditorialPermission(profile, input.brandId, "marca", "manage");
+    const repository = new InvitationRepository();
+    const cancelado = await repository.updateStatus(input.brandId, input.invitationId, "cancelled");
+    const relido = (await repository.list(input.brandId)).find(item => item.id === input.invitationId) || null;
+    if (!relido) return NextResponse.json({ error: "Convite não encontrado nesta marca." }, { status: 404 });
+    if (!cancelado && relido.status !== "cancelled") return NextResponse.json({ error: "Só um convite pendente pode ser cancelado.", invitation: relido }, { status: 409 });
+    return NextResponse.json({ invitation: relido, persisted: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) return NextResponse.json({ error: "Pedido de cancelamento inválido.", details: error.issues }, { status: 400 });
+    if (error instanceof PersistenceUnavailableError) return NextResponse.json({ code: error.code, error: error.message }, { status: 503 });
+    const mapped = authzErrorResponse(error);
+    return NextResponse.json({ error: mapped.message }, { status: mapped.status });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const profile = await requireCanonicalSessionProfile();

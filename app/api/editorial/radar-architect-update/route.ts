@@ -25,6 +25,8 @@ const PreviewQuerySchema = z.object({
   brandId: z.string().uuid(),
   articleIds: z.array(z.string().trim().min(1).max(400)).max(500).optional(),
   siloId: z.string().trim().min(1).max(400).optional(),
+  /* 2026-10-18 · a tela do Radar continua o congelamento novo depois da adoção (Google congelado, principal igual). */
+  continueOnScreen: z.boolean().optional(),
 }).strict();
 
 /* 2026-10-14 · `linkArticleIds`: os links novos (grafo vigente) adotados; ao menos uma das duas seleções. */
@@ -34,6 +36,7 @@ const AdoptSchema = z.object({
   articleIds: z.array(z.string().trim().min(1).max(400)).max(200),
   linkArticleIds: z.array(z.string().trim().min(1).max(400)).max(200).optional(),
   decisionHash: z.string().regex(/^[a-f0-9]{64}$/i),
+  continueOnScreen: z.boolean().optional(),
 }).strict().refine(input => input.articleIds.length > 0 || (input.linkArticleIds?.length ?? 0) > 0, { message: "Selecione ao menos um artigo.", path: ["articleIds"] });
 
 function falha(error: unknown) {
@@ -53,9 +56,10 @@ export async function GET(request: NextRequest) {
       brandId: params.get("brandId"),
       ...(ids.length ? { articleIds: ids } : {}),
       ...(params.get("siloId") ? { siloId: params.get("siloId") } : {}),
+      ...(params.get("continueOnScreen") === "1" ? { continueOnScreen: true } : {}),
     });
     await assertEditorialPermission(profile, input.brandId, "radar", "view");
-    const preview = await previewArchitectUpdatesWithCore(supabaseRadarArchitectAdoptionStore(), { brandId: input.brandId, articleIds: input.articleIds ?? null, siloId: input.siloId ?? null });
+    const preview = await previewArchitectUpdatesWithCore(supabaseRadarArchitectAdoptionStore(), { brandId: input.brandId, articleIds: input.articleIds ?? null, siloId: input.siloId ?? null, continueOnScreen: input.continueOnScreen });
     return NextResponse.json({ ok: true, ...preview });
   } catch (error) {
     return falha(error);
@@ -69,6 +73,7 @@ export async function POST(request: NextRequest) {
     await assertEditorialPermission(profile, input.brandId, "radar", "edit");
     const result = await adoptArchitectVersionWithCore(supabaseRadarArchitectAdoptionStore(), {
       brandId: input.brandId, actorId: profile.userId, articleIds: input.articleIds, linkArticleIds: input.linkArticleIds ?? [], decisionHash: input.decisionHash.toLowerCase(),
+      continueOnScreen: input.continueOnScreen,
     });
     if (result.state === "REFUSED") {
       return NextResponse.json({ ok: false, code: result.code === "STALE_DECISION" ? "decision_stale" : "nothing_to_adopt", error: result.message }, { status: 409 });

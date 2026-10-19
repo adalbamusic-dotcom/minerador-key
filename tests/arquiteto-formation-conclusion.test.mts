@@ -373,6 +373,7 @@ test("SiloPage projetada não é SiloPage canônica", () => {
   // prometeria uma página publicável que ninguém criou.
   assert.match(view, /canonical: boolean/);
   assert.match(workspace, /const canonicais = new Set\(Object\.values\(acceptedSiloPages\)/);
-  // E a fase Links exige o par canônico — não aceita a projeção.
-  assert.match(workspace, /Nenhum par SiloDNA \+ SiloPage disponível para formar o contexto do grafo/);
+  // E a fase Links exige o par canônico — não aceita a projeção. 2026-10-18 · o seletor "Silo do grafo" saiu para o componente dele (a mesma frase).
+  assert.match(readFileSync("modules/arquiteto/links-silo-picker.tsx", "utf8"), /Nenhum par SiloDNA \+ SiloPage disponível para formar o contexto do grafo/);
+  assert.match(workspace, /<LinksSiloPicker/);
 });

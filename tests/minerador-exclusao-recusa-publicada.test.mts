@@ -88,11 +88,18 @@ test("a rota declara o fluxo e não duplica a decisão", () => {
   const limpa = rota.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
   assert.match(limpa, /allowRecoverable: z\.boolean\(\)\.optional\(\)\.default\(false\)/, "ausente é false");
-  assert.match(limpa, /p_allow_recoverable: input\.allowRecoverable/, "a declaração chega ao banco");
+  // 2026-10-17 (ajuste declarado, P-4 da linha única): a rota passa a declaração ao núcleo da exclusão,
+  // que a entrega à RPC em cada bloco (só no bloco que tem publicada da prévia).
+  assert.match(limpa, /allowRecoverable: input\.allowRecoverable,/, "a declaração vai ao núcleo");
+  const nucleo = readFileSync(new URL("../lib/minerador/keyword-delete-core.ts", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.match(nucleo, /p_allow_recoverable: input\.allowRecoverable === true && temPublicada/, "a declaração chega ao banco");
+  // A falta da declaração não começa nada (o banco recusaria o bloco do mesmo jeito): é a declaração, não a publicada, que é recusada.
+  assert.match(nucleo, /if \(preview\.recoverable\.length && input\.allowRecoverable !== true\) \{\s*return refuse\("KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW"/);
 
   // Uma guarda própria aqui recusaria o fluxo legítimo antes do banco — foi
   // exatamente o que aconteceu, e a tela ficou oferecendo o que a rota negava.
   assert.doesNotMatch(limpa, /isKeywordPublished\(/, "a rota não repete a decisão do banco");
+  assert.doesNotMatch(nucleo, /isKeywordPublished\(/, "nem o núcleo");
   assert.doesNotMatch(limpa, /status: 409/, "nem inventa recusa própria");
 });
 

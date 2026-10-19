@@ -1,5 +1,26 @@
 # Backlog — Marca
 
+## Defeitos do inventário de botões — 2026-10-18
+
+- [x] "Cancelar" convite grava no servidor (PATCH da rota de convites, operação que já existia).
+- [x] "Ver keywords" mostra as keywords do conteúdo.
+- [x] "Renomear" renomeia pela gravação de sempre (versão sucessora).
+- [x] Mensagens da importação do Site em português.
+- [ ] **Dono decide:** "Suspender" e "Revogar" convite precisam de migration (o CHECK de `brand_invitations.status` não aceita esses estados). Até lá, desligados com InfoHint.
+- [ ] **Dono:** conferir na tela pelos botões (Equipe → Cancelar; Site → Catálogo → Ver keywords; Skills → Abrir → Renomear).
+- [ ] Texto antigo da Equipe ("Convites … ainda não possuem persistência própria") está desatualizado; fica para a limpeza de texto.
+
+## Localidade da SERP por marca — 2026-10-18
+
+SDD `docs/compartilhado/sdd-localidade-serp-por-marca-2026-10-18.md`. Detalhe em `estado-atual.md` (mesmo título).
+
+- [x] L1: catálogo puro (`lib/marca/brand-serp-location.ts`) e resolvedor no servidor (`lib/server/brand-serp-target.ts`), com testes.
+- [x] O campo "Localização" diz a SERP que vale, os valores aceitos e o que fica nacional (sem botão nem painel novo).
+- [ ] **L4, do dono:** conferir na lista da DataForSEO o código da cidade de São Paulo (candidato 1001773) e ativar a entrada "São Paulo (cidade)" (preencher `codeConfirmation`, versão nova do catálogo, teste da entrada ativa).
+- [ ] **L4, do dono:** escrever `São Paulo (cidade)` no campo "Localização" da WifiConecta (hoje vazio) e da AdalbaPro (hoje "São Paulo", ambíguo).
+- [ ] Avaliar levar a mesma frase ao campo "Localização / área de atuação" da criação de marca pela agência (`modules/conta/agency-brand-create-modal.tsx`); hoje só a página da Marca diz a SERP.
+- [ ] Mais de uma cidade por marca (Q3): fora desta entrega; exige decisão de chave e de custo.
+
 ## Fontes de autoridade da marca — 2026-10-14
 
 - [x] Bloco "Fontes de autoridade" na Identidade da marca (campo opcional do BrandDNA; SDD do Silo interligado §16.2).

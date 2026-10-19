@@ -90,6 +90,15 @@ test("a tela abre a cópia pela composição vigente e processa os Silos marcado
   assert.match(abrir, /rebaseInternalLinkGraph\(\{ previousEdges: aprovado\.edges/);
 });
 
+test("cópia de linhagem anterior ao aprovado não reabre o Confirmar (2026-10-17, amarelo)", () => {
+  const fonte = readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
+  const carregar = fonte.slice(fonte.indexOf("const loadLinksRemote = useCallback"), fonte.indexOf("const linkArticleLabel = "));
+  assert.match(carregar, /copiaRemota && approved && copiaRemota\.baseGraphVersionId !== approved\.graphVersionId \? null : copiaRemota/, "a cópia consumida pela aprovação não é proposta aberta");
+  assert.match(carregar, /setLinksWorkingCopy\(workingCopy\)/);
+  const abrir = fonte.slice(fonte.indexOf("const abrirCopiaVigente = async"), fonte.indexOf("const processarLinks = async () => {"));
+  assert.match(abrir, /loadInternalLinkGraphWorkingCopy\(selectedBrandId, graphId\)/, "o Processar continua adotando a mesma cópia");
+});
+
 test("o Silo da linha vem do SiloDNA, não da keyword (a keyword não carrega Silo decidido na fase Silos)", () => {
   const fonte = readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   const processar = fonte.slice(fonte.indexOf("const processarLinks = async () => {"), fonte.indexOf("const handleApproveLinks = async"));

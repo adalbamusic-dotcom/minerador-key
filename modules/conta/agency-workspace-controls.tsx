@@ -3,15 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AgencyCapability, AgencyWorkspaceMember } from "@/lib/server/agency-workspace";
-import { internalButton, internalField, internalNoticeError, internalNoticeSuccess } from "@/components/editorial/internal-page-visual";
+import { internalButton, internalField } from "@/components/editorial/internal-page-visual";
 import { useNoticeBridge } from "@/components/global-notice-center";
 
 const button = `${internalButton} min-h-11 px-4`;
 const input = `${internalField} min-h-11`;
 
-function Result({ message, error = false }: { message: string; error?: boolean }) {
-  return <p role={error ? "alert" : "status"} className={error ? internalNoticeError : internalNoticeSuccess}>{message}</p>;
-}
+/* 2026-10-18 · todos os avisos no sino (regra do dono): resultado e falha vão para o sino, cada um com o seu tom; as faixas da tela saíram. */
 
 export function AgencyDataForm({ agencyRef, name, canManage }: { agencyRef: string; name: string; canManage: boolean }) {
   const router = useRouter();
@@ -19,7 +17,8 @@ export function AgencyDataForm({ agencyRef, name, canManage }: { agencyRef: stri
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  useNoticeBridge({ notice: error || message, module: "conta", area: "Agência", title: "Conta · Agência", fallbackSeverity: error ? "ERROR" : "INFO" });
+  useNoticeBridge({ notice: error, module: "conta", area: "Agência", title: "Conta · Agência", fallbackSeverity: "ERROR" });
+  useNoticeBridge({ notice: message, module: "conta", area: "Agência", title: "Conta · Agência", fallbackSeverity: "SUCCESS" });
 
   async function save() {
     setSaving(true); setMessage(""); setError("");
@@ -35,7 +34,6 @@ export function AgencyDataForm({ agencyRef, name, canManage }: { agencyRef: stri
   return <div className="space-y-4">
     <label className="block text-sm font-semibold" htmlFor="agency-name">Nome da Agência<input id="agency-name" className={`${input} mt-2`} value={value} onChange={(event) => setValue(event.target.value)} disabled={!canManage || saving} /></label>
     {canManage ? <button type="button" className={button} onClick={() => void save()} disabled={saving || !value.trim()}>{saving ? "Salvando…" : "Salvar dados"}</button> : <p className="text-sm leading-6 text-foreground/65">Seu acesso é somente leitura para os dados estruturais da Agência.</p>}
-    {message ? <Result message={message} /> : null}{error ? <Result message={error} error /> : null}
   </div>;
 }
 
@@ -48,7 +46,8 @@ export function AgencyMemberControls({ agencyRef, members, capabilities, canMana
   const [error, setError] = useState("");
   const [candidates, setCandidates] = useState<Array<{ name: string | null; email: string }>>([]);
   const [saving, setSaving] = useState(false);
-  useNoticeBridge({ notice: error || message, module: "conta", area: "Membros da Agência", title: "Conta · Membros", fallbackSeverity: error ? "ERROR" : "INFO" });
+  useNoticeBridge({ notice: error, module: "conta", area: "Membros da Agência", title: "Conta · Membros", fallbackSeverity: "ERROR" });
+  useNoticeBridge({ notice: message, module: "conta", area: "Membros da Agência", title: "Conta · Membros", fallbackSeverity: "SUCCESS" });
 
      if (!canManage) return <p className="text-sm leading-6 text-text-muted">Você pode consultar os membros, mas apenas o owner ou um administrador da Agência pode gerenciar vínculos e capacidades.</p>;
 
@@ -71,6 +70,7 @@ export function AgencyMemberControls({ agencyRef, members, capabilities, canMana
 
   async function toggleStatus(member: AgencyWorkspaceMember) {
     if (!member.id) return;
+    setMessage(""); setError("");
     const next = member.status === "active" ? "suspended" : "active";
     const response = await fetch(`/api/agencies/${agencyRef}/members`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ membershipId: member.id, status: next }) });
     const body = await response.json().catch(() => ({}));
@@ -86,7 +86,6 @@ export function AgencyMemberControls({ agencyRef, members, capabilities, canMana
        <fieldset className="md:col-span-2"><legend className="text-sm font-semibold">Capacidades explícitas</legend><div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{capabilities.map((capability) => <label key={capability.code} className="flex min-h-10 items-center gap-2 text-sm"><input className="h-4 w-4 accent-module-accent" type="checkbox" checked={selectedCapabilities.includes(capability.code)} onChange={(event) => setSelectedCapabilities((current) => event.target.checked ? [...new Set([...current, capability.code])] : current.filter((item) => item !== capability.code))} />{capability.label}</label>)}</div></fieldset>
       <button type="button" className={`${button} md:col-span-2 md:justify-self-start`} onClick={() => void save()} disabled={saving || !email}>{saving ? "Salvando…" : "Salvar membro"}</button>
     </div>
-    {message ? <Result message={message} /> : null}{error ? <Result message={error} error /> : null}
      <div className="overflow-x-auto"><table className="w-full min-w-[44rem] border-separate border-spacing-0 text-left text-sm"><thead><tr className="text-text-muted"><th className="border-b border-divider px-3 py-3 font-medium">Pessoa</th><th className="border-b border-divider px-3 py-3 font-medium">Papel</th><th className="border-b border-divider px-3 py-3 font-medium">Status</th><th className="border-b border-divider px-3 py-3 font-medium">Capacidades</th><th className="border-b border-divider px-3 py-3 font-medium">Ação</th></tr></thead><tbody>{members.map((member) => <tr key={member.id || "owner"}><td className="border-b border-divider px-3 py-4"><span className="font-semibold">{member.name || "Identidade sem nome"}</span><span className="block text-text-muted">{member.email || "E-mail não disponível"}</span></td><td className="border-b border-divider px-3 py-4">{member.role === "owner" ? "Owner" : member.role === "agency_admin" ? "Administrador" : "Membro"}</td><td className="border-b border-divider px-3 py-4">{member.status === "active" ? "Ativo" : member.status === "suspended" ? "Suspenso" : "Removido"}</td><td className="border-b border-divider px-3 py-4">{member.isOwner ? "Acesso máximo da Agência" : `${member.capabilities.length} de ${capabilities.length}`}</td><td className="border-b border-divider px-3 py-4">{member.isOwner ? <span className="text-text-muted">Protegido</span> : <button type="button" className={`${internalButton} min-h-10 px-3`} onClick={() => void toggleStatus(member)}>{member.status === "active" ? "Suspender" : "Ativar"}</button>}</td></tr>)}</tbody></table></div>
   </div>;
 }

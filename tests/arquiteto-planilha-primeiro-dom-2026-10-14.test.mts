@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { comProductShell, montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
 import { AZUL, GRUPOS, MARCA_WIFI, TERRITORIO, grupoDaKeyword, mesaWifi } from "./arquiteto-planilha-primeiro-fixtures.mts";
-import { MesaDoPlano, ROTULOS_REMOVIDOS, novoRegistro, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
+import { MesaDoPlano, ROTULOS_REMOVIDOS, novoRegistro, ultimoAviso, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
 import { planPrincipalSwapCandidates, type PlanSheetArticle } from "../lib/arquiteto/plan-article-sheet.ts";
 
 /*
@@ -115,14 +115,16 @@ test("'Processar artigos' (barra de sempre) com as linhas do plano marcadas: a l
   assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /^SERP no DataForSEO: 4 consulta\(s\), até US\$ 0,014 — a primeira coleta da principal que falta \(inclusive a principal de identidade, sem buscas no Google Ads\)/);
   await screen.click(botao("Cancelar", previa)!); await assentar();
   assert.equal(chamadas.filter(chamada => chamada.body?.action === "collect").length, 0, "cancelar não paga nada");
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /a coleta paga foi cancelada — nada foi pago nem gravado/);
+  assert.match(ultimoAviso(registro), /a coleta paga foi cancelada — nada foi pago nem gravado/);
   await screen.click("architect-articles-top-process"); await assentar();
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   const coletas = chamadas.filter(chamada => chamada.body?.action === "collect");
   assert.equal(coletas.length, 1);
   assert.equal(coletas[0].body.authorizedCostUsd, 0.014, "só o custo autorizado na prévia; o servidor confere volume e identidade");
   assert.match(resultado("k11"), /^Cópia de trabalho \(nada gravado\): principal “wi-fi lento” \(Travada, fica\) · sem secundária\. Pronto para “Concluir formação”\.$/);
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /^Processar artigos: 7 artigo\(s\) lido\(s\), reforço proposto para 0; SERP paga agora: 4 consulta\(s\)\. Nada foi gravado/);
+  assert.match(ultimoAviso(registro), /^Processar artigos: 7 artigo\(s\) lido\(s\), reforço proposto para 0; SERP paga agora: 4 consulta\(s\)\. Nada foi gravado/);
+  /* 2026-10-18 · o resumo do lote vai para o sino, não para uma faixa na tela (regra do dono). */
+  assert.equal(screen.query("architect-plan-sheet-summary"), null, "o resumo não volta a ser faixa na tela");
   assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp").length, 0, "o Validar SERP de coleta à parte saiu (F3 da linha única)");
   assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/serp-subject").length, 2, "a coluna SERP é relida do cache");
   semMinerador();

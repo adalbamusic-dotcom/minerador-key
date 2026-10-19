@@ -132,7 +132,8 @@ test("resposta cortada (finish_reason length): UMA nova tentativa, com saída cu
   assert.match(valor!.notes[0], /^A primeira resposta da IA veio cortada \(passou do tamanho máximo\); o servidor fez 1 nova tentativa pedindo saída mais curta \(2 chamadas de IA nesta organização\)\.$/);
   const log = avisos.find(item => item[0] === "[radar-article-blueprint] nova_tentativa");
   assert.ok(log, "o log diz a nova tentativa");
-  assert.deepEqual(log![1], { articleId: "artigo-1", motivo: "CUT", finishReason: "length", code: "AI_OUTPUT_INVALID", chamadasDeIa: 2 });
+  /* 2026-10-18 · o log diz também o tamanho da resposta cortada (tokens da resposta, do raciocínio e caracteres). */
+  assert.deepEqual(log![1], { articleId: "artigo-1", motivo: "CUT", finishReason: "length", code: "AI_OUTPUT_INVALID", chamadasDeIa: 2, completionTokens: 900, reasoningTokens: null, contentLength: cortada.length });
 });
 
 test("cortada duas vezes: erro claro para a tela, nunca 'JSON invalido' cru, e nenhuma terceira chamada", async () => {
@@ -142,7 +143,8 @@ test("cortada duas vezes: erro claro para a tela, nunca 'JSON invalido' cru, e n
   assert.equal(pedidos.length, 2);
   assert.ok(erro instanceof StructuredAIError);
   assert.equal((erro as StructuredAIError).code, "AI_OUTPUT_INVALID");
-  assert.match((erro as Error).message, /^A resposta da IA veio cortada \(passou do tamanho máximo\), mesmo depois de 1 nova tentativa com saída mais curta\. Tente de novo; a investigação continua finalizada\.$/);
+  /* 2026-10-18 · a mensagem do botão leva o tamanho da última resposta (o log do dev gravava "{}"). */
+  assert.match((erro as Error).message, /^A resposta da IA veio cortada \(passou do tamanho máximo\), mesmo depois de 1 nova tentativa com saída mais curta\. \(Última resposta: 900 tokens, 0 de raciocínio, 120 caracteres de texto\.\) Tente de novo; a investigação continua finalizada\.$/);
   assert.doesNotMatch((erro as Error).message, /JSON/);
 });
 
@@ -314,7 +316,12 @@ test("o painel: título, explicação e o estado do trabalho pedido pela página
   assert.match(emCurso, /A SERP monta o esqueleto, a IA organiza e corrige o que a conferência apontar, e a planta sai concluída para o CSV, o Redator e o MCP\./);
   assert.match(emCurso, /data-testid="radar-article-blueprint-organizing"[^>]*>Organizando o artigo-modelo da SERP com a IA… a investigação já está finalizada\./);
   const falhou = html(job("failed", "A resposta da IA veio cortada (passou do tamanho máximo)."));
-  assert.match(falhou, /A investigação está finalizada, mas a IA não organizou o artigo-modelo: A resposta da IA veio cortada/);
+  /*
+   * 2026-10-18 · SUBSTITUÍDO "a falha aparece no painel": todos os avisos no
+   * sino (regra do dono). A falha da série vai ao sino pelo resumo da página;
+   * o painel fica com o botão de organizar de novo ("Organizar de novo (IA)", conferido abaixo na fonte).
+   */
+  assert.doesNotMatch(falhou, /A investigação está finalizada, mas a IA não organizou o artigo-modelo/);
   assert.doesNotMatch(html(null), /Organizando/);
   const fonte = readFileSync(new URL("../modules/radar/radar-article-blueprint-panel.tsx", import.meta.url), "utf8");
   assert.match(fonte, /"Organizar de novo \(IA\)" : "Organizar o artigo-modelo da SERP \(IA\)"/);

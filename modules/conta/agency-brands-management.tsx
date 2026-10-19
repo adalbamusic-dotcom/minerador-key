@@ -6,12 +6,15 @@ import { AgencyBrandCard } from "@/components/brand-context-cards";
 import { buildTenantPath } from "@/lib/tenant-routing";
 import type { AgencyWorkspaceData } from "@/lib/server/agency-workspace";
 import { AgencyBrandCreateModal } from "@/modules/conta/agency-brand-create-modal";
-import { internalButtonPrimary, internalNoticeSuccess, internalSurface } from "@/components/editorial/internal-page-visual";
+import { internalButtonPrimary, internalSurface } from "@/components/editorial/internal-page-visual";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 const panel = `${internalSurface} p-5 sm:p-6`;
 
 export function AgencyBrandsManagement({ workspace, createdBrandName }: { workspace: AgencyWorkspaceData; createdBrandName?: string }) {
   const [createOpen, setCreateOpen] = useState(false);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a confirmação do cadastro vai para o sino, não para uma faixa da tela. */
+  useNoticeBridge({ notice: createdBrandName ? `Marca cadastrada com sucesso: ${createdBrandName}.` : "", module: "conta", area: "Marcas da Agência", title: "Conta · Marca", fallbackSeverity: "SUCCESS" });
   const brands = workspace.brands.map((brand) => ({ ...brand, ownerUserId: null, agencyName: workspace.agency.name }));
 
   return <section>
@@ -20,7 +23,6 @@ export function AgencyBrandsManagement({ workspace, createdBrandName }: { worksp
       {workspace.canManage ? <button type="button" className={`${internalButtonPrimary} min-h-11 px-4`} onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" aria-hidden="true" />Cadastrar Marca</button> : null}
     </div>
 
-    {createdBrandName ? <p role="status" className={`mt-5 ${internalNoticeSuccess}`}>Marca cadastrada com sucesso: <strong>{createdBrandName}</strong>.</p> : null}
     <AgencyBrandCreateModal agencyRef={workspace.agency.agencyRef} canManage={workspace.canManage} open={createOpen} onClose={() => setCreateOpen(false)} />
 
     {brands.length ? <div className="mt-6 grid gap-5 md:grid-cols-2">{brands.map((brand) => <AgencyBrandCard key={brand.id} brand={brand} brandHref={brand.authorizedForEditorial ? buildTenantPath({ brandId: brand.id, brandName: brand.name, module: "marca" }) : undefined} showStrategySummary={false} />)}</div> : <div className={`${panel} mt-6`}><div className="flex items-start gap-3"><Building2 className="mt-0.5 h-5 w-5 shrink-0 text-context-accent" aria-hidden="true" /><div><h3 className="font-semibold">Você ainda não cadastrou nenhuma Marca.</h3>{workspace.canManage ? <><p className="mt-2 text-sm leading-6 text-text-muted">Comece cadastrando a primeira Marca atendida pela sua Agência.</p><button type="button" className={`${internalButtonPrimary} mt-4 min-h-11 px-4`} onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" aria-hidden="true" />Cadastrar primeira Marca</button></> : <p className="mt-2 text-sm leading-6 text-text-muted">O owner ou administrador da Agência precisa cadastrar a primeira Marca.</p>}</div></div></div>}

@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, ListOrdered, Loader2, Plus, Trash2, X } fr
 import { GLOBAL_TOPBAR_ACTION_CONTROL } from "@/components/global-topbar-control";
 import { internalButton, internalButtonPrimary, internalField } from "@/components/editorial/internal-page-visual";
 import { EditorialGroupDot, EditorialGroupTag } from "@/components/editorial/group-tag";
+import { InfoHint } from "@/components/info-hint";
 import {
   EDITORIAL_GROUP_COLORS,
   EDITORIAL_GROUP_COLOR_CLASSES,
@@ -57,7 +58,7 @@ import { CADASTRO_FOLLOW_UP_TEXTS, cadastroLeftoversToDelete, cadastroReapproval
 
 const CADASTRO_ROUTE = (brandId: string) => `/api/minerador/marcas/${encodeURIComponent(brandId)}/plans/import`;
 
-type Destino = "new_silo" | "existing_silo" | "published";
+type Destino = "new_silo" | "existing_silo" | "published" | "keyword";
 type Linha = {
   key: string;
   order: number;
@@ -79,7 +80,7 @@ type SiloDoPlano = { name: string; slug: string | null; objective: string | null
 type CadastroRequest = {
   plan: { silo: SiloDoPlano | null; articles: Array<{ order: number; subject: string; principal: string | null; role: DeclaredPlanRole; scope: string; lock: DeclaredPlanLockChoice; slug?: string | null }> };
   group: GroupChoice;
-  destination: { kind: "new_silo" } | { kind: "existing_silo"; groupId: string } | { kind: "published"; url: string };
+  destination: { kind: "new_silo" } | { kind: "existing_silo"; groupId: string } | { kind: "published"; url: string } | { kind: "keyword"; keyword: string };
   /** 2026-10-13 · só no Silo existente com "Substituir o plano" (ausente = acréscimo, o pedido de sempre). */
   planMode?: "replace";
 };
@@ -94,7 +95,8 @@ export type DeclaredPlanAppliedIds = {
 };
 
 const LOCK_LABELS: Record<DeclaredPlanLockChoice, string> = { auto: "Automática (pelo volume)", locked: "Travada", free: "Livre" };
-const DESTINO_LABELS: Record<Destino, string> = { new_silo: "Silo novo", existing_silo: "Silo existente", published: "Artigo publicado" };
+/* 2026-10-18 · "Keyword (sem Silo)" (SDD do Assunto pela principal §6.2-a): o Assunto mora numa keyword solta ou publicada, sem plano nem trava. */
+const DESTINO_LABELS: Record<Destino, string> = { new_silo: "Silo novo", existing_silo: "Silo existente", published: "Artigo publicado", keyword: "Keyword (sem Silo)" };
 /** 2026-10-13 · Silo existente (SDD `sdd-arquiteto-so-le-e-listas-leves-2026-10-13.md` §5.2, F1): o mesmo texto do núcleo (`DECLARED_PLAN_MODE_LABELS`). */
 const MODO_PLANO_LABELS: Record<DeclaredPlanMode, string> = { append: "Acrescentar", replace: "Substituir o plano" };
 const MODO_PLANO_AJUDA: Record<DeclaredPlanMode, string> = {
@@ -484,6 +486,11 @@ export function SubjectCadastroCard({
     }
     const existente = groupOfColor(groups, color);
     const group: GroupChoice = existente ? { mode: "existing", groupId: existente.id } : { mode: "new", name: null, color };
+    if (destino === "keyword") {
+      const primeira = preenchidas[0];
+      if (!primeira?.keyword.trim()) return null;
+      return { plan: { silo: null, articles: [{ order: 1, subject: primeira.title.trim(), principal: primeira.keyword.trim(), role: "Suporte", scope: primeira.details.trim(), lock: "auto" }] }, group, destination: { kind: "keyword", keyword: primeira.keyword.trim() } };
+    }
     if (destino === "published") {
       if (!publishedUrl.trim()) return null;
       return { plan: { silo: null, articles }, group, destination: { kind: "published", url: publishedUrl.trim() } };
@@ -636,6 +643,12 @@ export function SubjectCadastroCard({
                   </label>
                 ))}
               </div>
+              {destino === "keyword" ? (
+                <p className="flex items-start gap-1 text-sm text-text-muted" data-subject-cadastro-keyword-destino>
+                  <span>Uma linha: a keyword que já existe nesta marca (solta ou publicada) passa a carregar o Assunto — o título (padrão: o texto dela) e os detalhes —, sem Silo, sem plano e sem trava. URL, slug e canonical de página publicada não mudam.</span>
+                  <InfoHint title="Keyword (sem Silo)" description="O mesmo núcleo do cadastro. A aprovada volta a “Em revisão” (o Assunto entra no pacote aprovado) e a reaprovação só pede a Lógica. Volume 0 (ou sem média) na página publicada vira o Assunto sozinho no “Aprovar e enviar”." />
+                </p>
+              ) : null}
               {!silosExistentes.length ? <p className="text-sm text-text-muted">Ainda não há Silo cadastrado nesta marca: “Silo existente” aparece depois do primeiro cadastro.</p> : null}
             </fieldset>
 

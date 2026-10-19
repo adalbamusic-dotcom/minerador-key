@@ -158,3 +158,32 @@ export function releaseRejectedArticles<W extends WorkflowItemLike>(input: {
   const statuses = input.statuses.map(item => (rejeitadasIds.has(item.versionId) ? { ...item, status: "rejected" } : item));
   return { articleDnas: ativas, statuses, workflowItems, rejected };
 }
+
+/**
+ * ===== 2026-10-18 · A MESA APLICA O EVENTO `rejected` TAMBÉM NO PAR DO SILO =====
+ *
+ * "Desfazer Silo" no Silo inteiro (decisão do dono, "Manter em duas etapas")
+ * grava o evento `rejected` na versão vigente do SiloDNA e da SiloPage — a
+ * mesma regra dos artigos acima. A leitura da mesa aplica o evento: o par cuja
+ * versão VIGENTE está `rejected` sai dos Silos ativos (a versão anterior não
+ * volta), e a SiloPage do SiloDNA rejeitado sai junto. Nada é apagado nem
+ * regravado; sem evento, a mesa de sempre.
+ */
+export function releaseRejectedSiloPairs<D extends { versionId: string; payload: { siloId: string } }, P extends { versionId: string; payload: { siloId: string } }>(input: {
+  siloDnas: readonly D[];
+  siloPages: readonly P[];
+  statuses: readonly VersionStatusLike[];
+  events: readonly VersionEventLike[];
+}): { siloDnas: D[]; siloPages: P[]; rejectedSiloIds: string[] } {
+  const linha = new Map(input.statuses.map(item => [item.versionId, item.status]));
+  const rejeitada = (versionId: string) => effectiveArtifactStatus(versionId, linha.get(versionId) ?? null, input.events) === "rejected";
+  const silosRejeitados = new Set(input.siloDnas.filter(version => rejeitada(version.versionId)).map(version => version.payload.siloId));
+  if (!silosRejeitados.size && !input.siloPages.some(version => rejeitada(version.versionId))) {
+    return { siloDnas: [...input.siloDnas], siloPages: [...input.siloPages], rejectedSiloIds: [] };
+  }
+  return {
+    siloDnas: input.siloDnas.filter(version => !silosRejeitados.has(version.payload.siloId)),
+    siloPages: input.siloPages.filter(version => !silosRejeitados.has(version.payload.siloId) && !rejeitada(version.versionId)),
+    rejectedSiloIds: [...silosRejeitados].sort(),
+  };
+}

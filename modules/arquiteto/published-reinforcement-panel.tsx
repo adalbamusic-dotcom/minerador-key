@@ -81,21 +81,6 @@ export function SearchSuggestionList({ controller, pageId, result }: { controlle
   );
 }
 
-function OutcomeBlock({ controller, buttonClassName }: { controller: PublishedReinforcementController; buttonClassName: string }) {
-  const desfecho = controller.outcome;
-  if (!desfecho) return null;
-  const cor = desfecho.tone === "success" ? "text-success" : desfecho.tone === "warning" ? "text-warning" : "text-foreground";
-  return (
-    <div className="mt-2 grid gap-1 rounded-md border border-divider bg-surface p-3 text-sm leading-6" data-testid="architect-reinforcement-outcome" aria-live="polite">
-      <p className={cor}>{desfecho.message}</p>
-      {desfecho.lines.map(line => <p key={line} className="text-text-muted">{line}</p>)}
-      <div>
-        <button type="button" onClick={controller.dismissOutcome} className={buttonClassName}>Fechar</button>
-      </div>
-    </div>
-  );
-}
-
 /** A confirmação única do "Reforçar publicados", montada da prévia do servidor. */
 function ReinforcementDialog({ controller, cards, rows = [], buttonClassName, primaryButtonClassName }: { controller: PublishedReinforcementController; cards: readonly SerpSubjectCardView[]; rows?: readonly ReinforcementTableRow[] } & ButtonClasses) {
   const dialogRef = useRef<HTMLElement | null>(null);
@@ -335,7 +320,7 @@ export function PublishedReinforcementTable({ controller, cards, rows, allRows, 
           <span className="text-sm leading-6 text-text-muted" data-testid="architect-reinforcement-summary">{reinforcementTableSummary(allRows)}</span>
         </div>
       )}
-      <OutcomeBlock controller={controller} buttonClassName={buttonClassName} />
+      {/* 2026-10-18 · o desfecho do "Gravar reforços" vai só para o sino (regra do dono); o bloco que ficava aqui saiu. */}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[960px] border-collapse text-left text-sm leading-6" aria-labelledby={tituloId} data-testid="architect-reinforcement-table">
           <thead>
@@ -442,7 +427,6 @@ export function NoPairPublishedLine({ controller, view, buttonClassName, primary
           {search.retryOperationId && <button type="button" disabled={controller.busy} onClick={() => void controller.retrySearch()} className={buttonClassName}>Tentar de novo (a mesma rodada, sem pagar de novo)</button>}
         </div>
       )}
-      {search.message && !rodando && <p className="mt-1 text-foreground/85" aria-live="polite">{search.message}</p>}
       {search.plan?.differentiation.map(grupo => <p key={grupo.groupId} className="mt-1 text-text-muted">{grupo.message}</p>)}
       <SearchConfirmDialog controller={controller} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} />
     </div>

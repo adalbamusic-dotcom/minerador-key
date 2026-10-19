@@ -13,6 +13,8 @@ import { serpSuggestionMatch } from "@/lib/arquiteto/serp-subject-suggestions";
 import type { ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
 import { ARTICLE_FORMATION_REF_PREFIX } from "@/lib/arquiteto/article-formation-decision";
 import { proposePublishedPrimarySwap, type PublishedPrimarySwapProposal } from "@/lib/arquiteto/published-primary-swap";
+import { publishedPageSubjectFromRow } from "@/lib/arquiteto/article-improvement";
+import { planSubjectAttachment } from "@/lib/arquiteto/declared-subject";
 import { formationKeywordOfPage, readPageRanking, type DifferentiationPage } from "@/lib/arquiteto/published-differentiation";
 import { REINFORCEMENT_SEARCH_SUBJECT_TYPE } from "@/lib/arquiteto/published-reinforcement-search";
 import { calculatedCandidateRefOf, PUBLISHED_REINFORCEMENT_SWAP_REASON, publishedSwapDecisionRole, type SerpAssessmentComposition } from "@/lib/arquiteto/published-formation-serp";
@@ -422,6 +424,8 @@ async function readAndPlan(deps: PublishedReinforcementDeps, body: PublishedRein
         post: page.post,
         identity: { url: page.url, canonical: page.canonical, slug: page.slug },
         ...(principalDoDna ? { currentPrincipalKeyword: principalDoDna } : {}),
+        // 2026-10-19 · com o Assunto declarado na página, a régua do refazedor (o Assunto é a âncora; U18, T14).
+        pageSubject: rows.get(page.keywordId) ? publishedPageSubjectFromRow(rows.get(page.keywordId) as unknown as Record<string, unknown> & { id: unknown }, page.slug) : null,
         candidates: [{ keywordId: substituta.keywordId, keyword: substituta.keyword, intent: null, volume: substituta.volume, kgr: null, entity: null, problem: null, isPublished: substituta.isPublished, volumeValidated: substituta.volumeValidated, ...observedOf(rows.get(swapKeywordId)) }],
         serp,
         elsewhere: emOutroArtigo,
@@ -701,9 +705,14 @@ export async function handlePublishedReinforcement(deps: PublishedReinforcementD
     if (plan.swap.state === "apply" && facts.swapProposal) {
       // Refazer: a troca já confirmada contradiz o slug e o humano escolheu outra (a página segue sendo o artigo).
       const principalAtual = facts.article && facts.article.payload.principalKeywordId !== facts.page.keywordId ? facts.article.payload.principalKeywordId : null;
+      // 2026-10-19 · a página vira o Assunto do artigo (U18), presa pelo ato humano desta confirmação (a guarda de sempre).
+      const linhaDaPagina = rows.get(facts.page.keywordId);
+      const assuntoDaPagina = facts.swapProposal.previousPrimaryBecomes === "assunto" && linhaDaPagina ? planSubjectAttachment({ brandId: deps.store.brandId, keyword: linhaDaPagina as unknown as Record<string, unknown>, actorUserId: deps.store.actorUserId, attachedAt: agora, target: { principalKeywordId: facts.swapProposal.substitute?.keywordId ?? "", excludedSubjects: payload.excludedSubjects } }) : null;
+      if (assuntoDaPagina && !assuntoDaPagina.ok) { parar(`o Assunto da página não pôde entrar no artigo: ${assuntoDaPagina.reason}`); break; }
       const troca = applyReinforcementSwap({
         current: payload,
         proposal: facts.swapProposal,
+        ...(assuntoDaPagina?.ok ? { pageSubject: assuntoDaPagina.subject } : {}),
         page: facts.page,
         redo: principalAtual ? { currentPrincipalLabel: String(rows.get(principalAtual)?.keyword ?? plan.keep.find(item => item.keywordId === principalAtual)?.keyword ?? principalAtual) } : null,
         substituteVolume: facts.chosen.find(item => item.keywordId === plan.swap.keywordId)?.volume ?? null,

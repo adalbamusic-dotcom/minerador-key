@@ -107,6 +107,8 @@ const count = (value: unknown) => (Array.isArray(value) ? value.length : numberO
 function eventDetail(eventType: string, payload: Record<string, unknown>): string | null {
   // 2026-10-14 · F7 "Excluir tudo da cor": o registro diz quanto saiu e como (as keywords apagadas não existem mais).
   if (payload.via === GROUP_DELETE_ALL_RELEASE_VIA) {
+    // 2026-10-17 · a exclusão comum passa pelo mesmo núcleo e grava o nome dela ("Excluir as selecionadas").
+    const rotulo = text(payload.operation) ?? GROUP_DELETE_ALL_ACTION_LABEL;
     if (eventType === "keywords_unassigned") {
       const contagens = asRecord(payload.counts);
       const partes = [
@@ -115,16 +117,16 @@ function eventDetail(eventType: string, payload: Record<string, unknown>): strin
         numberOf(contagens.out) ? `${numberOf(contagens.out)} ficaram fora` : null,
         numberOf(contagens.refusedKeywords) ? `${numberOf(contagens.refusedKeywords)} recusada(s) por bloco` : null,
       ].filter(Boolean);
-      return `${GROUP_DELETE_ALL_ACTION_LABEL} · ${partes.join(" · ")}`;
+      return `${rotulo} · ${partes.join(" · ")}`;
     }
     if (eventType === "plan_changed") {
       const versao = numberOf(payload.planVersion);
       const saiu = count(payload.removedSubjects);
       return payload.cleared === true
-        ? `${GROUP_DELETE_ALL_ACTION_LABEL} · plano limpo${versao ? ` (v${versao})` : ""}`
-        : `${GROUP_DELETE_ALL_ACTION_LABEL} · plano v${versao ?? "?"}${saiu ? ` · ${saiu} Assunto(s) saíram` : ""}`;
+        ? `${rotulo} · plano limpo${versao ? ` (v${versao})` : ""}`
+        : `${rotulo} · plano v${versao ?? "?"}${saiu ? ` · ${saiu} Assunto(s) saíram` : ""}`;
     }
-    if (eventType === "archived") return `${GROUP_DELETE_ALL_ACTION_LABEL}${payload.siloUnlinked === true ? " · Silo não consolidado desligado" : ""}`;
+    if (eventType === "archived") return `${rotulo}${payload.siloUnlinked === true ? " · Silo não consolidado desligado" : ""}`;
   }
   if (eventType === "renamed") {
     const de = text(payload.from);

@@ -28,7 +28,7 @@ import type { RadarResearchProvenancePayload } from "@/lib/radar/research-read-m
 import {
   buildRadarArticleDnaSummary, buildRadarAuthoritySummary, buildRadarCompetitiveSummary,
   buildRadarDiscoverySummary, buildRadarInternalLinkSummary, buildRadarReportSummary,
-  buildRadarResearchCardSummary,
+  buildRadarResearchCardSummary, type RadarReportInputs,
 } from "@/lib/radar/operational-view";
 import { radarQueryExecutionLabel } from "@/lib/radar/deep-research";
 import { radarQueryDispositionLabel } from "@/lib/radar/research-query-plan";
@@ -289,7 +289,8 @@ function areaCopy(area: RadarR3Area, model: RadarR3Model, mode: RadarPrimarySear
   if (area === "relatorio") {
     const observado = model.deepResearch?.observed || null;
     if (observado && model.deepResearch) {
-      const resumo = buildRadarReportSummary({ observed: observado, view: model.deepResearch, youtube: radarYoutubeReportEvidence(researchProjection) });
+      const resumo = buildRadarReportSummary({ observed: observado, view: model.deepResearch, ...entradasDoRelatorio(model, researchProjection) });
+      if (resumo.loading) return { lines: ["Carregando a amostra desta investigação…"], status: "Painel informativo", tone: "info" };
       const prontos = resumo.checks.filter(item => item.state === "READY").length;
       const placar = radarSeoGuidelineState(resumo.checks, { specialistAccepted: model.specialist.reviewedEvidence });
       const exigidos = resumo.checks.filter(item => item.state !== "NOT_REQUIRED").length;
@@ -1413,19 +1414,28 @@ function ArticleContextBand({ model }: { model: RadarR3Model }) {
  * estado SEO em relação às diretrizes do Google e das respostas de IA. Não pede
  * revisão e não alerta: o que falta aparece como nota baixa no pilar.
  */
-function ReportSummaryPanel({ model, brandId = null, articleId = null, articleDnaVersionId = null }: { model: RadarR3Model; brandId?: string | null; articleId?: string | null; articleDnaVersionId?: string | null }) {
+/*
+ * 2026-10-18 · AS ENTRADAS DO RELATÓRIO VÊM DA LINHA (`model.reportInputs`),
+ * as mesmas da coluna "Relatório" da planilha. Sem elas (tela que monta o
+ * modelo sem a linha), a leitura de antes: vídeos registrados e o YouTube
+ * congelado.
+ */
+function entradasDoRelatorio(model: RadarR3Model, researchProjection?: RadarResearchProfileProjection | null): RadarReportInputs {
+  if (model.reportInputs) return model.reportInputs;
+  const materiais = model.r4?.existingContent || [];
+  return {
+    videos: { registered: materiais.filter(item => item.state !== "IGNORED_FOR_ARTICLE").length, transcribed: 0 },
+    youtube: radarYoutubeReportEvidence(researchProjection),
+  };
+}
+
+function ReportSummaryPanel({ model, brandId = null, articleId = null, articleDnaVersionId = null, researchProjection = null }: { model: RadarR3Model; brandId?: string | null; articleId?: string | null; articleDnaVersionId?: string | null; researchProjection?: RadarResearchProfileProjection | null }) {
   /* 2026-10-02 · o artigo-modelo da SERP do pacote vigente: estrutura e links passam a ler a planta. */
   /* 2026-10-08 · P0-A · e o pacote congelado inteiro (instante e id): a planta vale pelo congelamento, não pelo hash do dossiê. */
   const planta = useRadarArticleBlueprintForReport(brandId, articleId, model.deepResearch?.finalizedBundle?.bundleHash ?? null, radarArticleBlueprintFreezeOf(model.deepResearch?.finalizedBundle ?? null, articleDnaVersionId));
   if (!model.deepResearch) return null;
-  const materiais = model.r4?.existingContent || [];
-  const resumo = buildRadarReportSummary({
-    observed: model.deepResearch.observed,
-    view: model.deepResearch,
-    videos: { registered: materiais.filter(item => item.state !== "IGNORED_FOR_ARTICLE").length, transcribed: 0 },
-    /* 2026-10-09 · "Pronto para o Redator" só com o artigo-modelo concluído conferido; sem a conferência, a pergunta não afirma prontidão. */
-    articleBlueprint: planta?.approval === "APPROVED" ? "APPROVED" : null,
-  });
+  /* 2026-10-09 · "Pronto para o Redator" só com o artigo-modelo concluído conferido; sem a conferência, a pergunta não afirma prontidão. */
+  const resumo = buildRadarReportSummary({ observed: model.deepResearch.observed, view: model.deepResearch, ...entradasDoRelatorio(model, researchProjection), articleBlueprint: planta?.approval === "APPROVED" ? "APPROVED" : null });
   const placar = radarSeoGuidelineState(resumo.checks, { specialistAccepted: model.specialist.reviewedEvidence, articleBlueprint: planta });
   const intencao = model.deepResearch.observed.intent;
   const dna = model.article?.payload || null;
@@ -1450,9 +1460,9 @@ function ReportSummaryPanel({ model, brandId = null, articleId = null, articleDn
     <div className="rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-report-seo-chart">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold text-foreground">Estado SEO do artigo</h3>
-        <span className="text-sm text-text-muted">{placar.overall === null ? "Sem pilares aplicáveis" : `${placar.overall}% das diretrizes atendidas`}</span>
+        <span className="text-sm text-text-muted">{resumo.loading ? "Carregando a amostra desta investigação…" : placar.overall === null ? "Sem pilares aplicáveis" : `${placar.overall}% das diretrizes atendidas`}</span>
       </div>
-      <ul className="mt-3 space-y-2.5">{placar.pillars.map(pilar => <li key={pilar.id}>
+      <ul className="mt-3 space-y-2.5">{!resumo.loading && placar.pillars.map(pilar => <li key={pilar.id}>
         <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
           <span className="font-medium text-foreground">{pilar.label}</span>
           <span className="text-text-muted">{pilar.percent === null ? "Não se aplica" : `${pilar.percent}%`}</span>
@@ -1672,7 +1682,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
         <RadarR3SpecialistPanel model={model} expertContext={expertContext} onExpertEvidenceChange={onExpertEvidenceChange} onTopicChange={onTopicChange} onTopicRemove={onTopicRemove} onTopicMove={onTopicMove} onTopicAdd={onTopicAdd} onTopicReview={onTopicReview} onTopicUndo={onTopicUndo} onTopicRedo={onTopicRedo} canUndoTopics={canUndoTopics} canRedoTopics={canRedoTopics} onTopicAdjacent={onTopicAdjacent} topicQueuePosition={topicQueuePosition} topicQueueTotal={topicQueueTotal} />
       </div>}
       {expandedArea === "relatorio" && <div key={model.articleId} className="space-y-3">
-        <ReportSummaryPanel model={model} brandId={brandId} articleId={articleId} articleDnaVersionId={expertContext?.articleDnaVersionId ?? null} />
+        <ReportSummaryPanel model={model} brandId={brandId} articleId={articleId} articleDnaVersionId={expertContext?.articleDnaVersionId ?? null} researchProjection={researchProjection} />
         <RadarR6ReportPanel report={model.r6Report} canonicalApproved={model.report.approved} onGenerate={onReportGenerate} informational />
       </div>}
     </div>

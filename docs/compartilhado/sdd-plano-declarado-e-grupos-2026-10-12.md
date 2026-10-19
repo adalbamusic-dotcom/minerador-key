@@ -912,6 +912,13 @@ internet disponível no meu CEP" estão `bruto`.
    "Keywords não agrupadas" (só na leitura; nada é apagado). Faça este passo
    ANTES do 7: com "plano vivo controle" no Silo, o passo 7 recusa ("fora do
    plano") e aponta esta ação.
+   **SUBSTITUÍDO em parte (dono, 2026-10-18):** a "Retirar artigo do Silo" não
+   recusa mais o artigo publicado (`ARTICLE_PUBLISHED`) nem o que tem item no
+   Radar/Redator/Publicações (`ARTICLE_IN_DOWNSTREAM`): os dois viram aviso na
+   prévia, e o item adiante sai da operação (`withdrawn`) na mesma ação. O Pilar
+   continua não saindo sozinho; o Silo inteiro, Pilar incluído e em qualquer
+   estado (consolidado, do plano, publicado), sai pelo "Desfazer Silo" com a
+   prévia e o nome digitado (`sdd-linha-unica-do-arquiteto-2026-10-16.md` §15.11).
 7. **Aplicar o plano declarado ao Silo (adendo de 2026-10-12: caminho pela
    tela).** Arquiteto → **aba Silos** → cartão do Silo consolidado "planos de
    internet" → **"Aplicar o plano declarado ao Silo"** → conferir a prévia:

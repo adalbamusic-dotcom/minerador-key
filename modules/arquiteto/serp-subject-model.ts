@@ -1,4 +1,4 @@
-import { ArticleDNASchema, type ArticleDNA } from "../../lib/arquiteto/contracts.ts";
+import { ArticleDNASchema, type ArticleDNA, type DeclaredSubject } from "../../lib/arquiteto/contracts.ts";
 import {
   SERP_SUBJECT_DILEMMA_LABELS,
   SERP_SUBJECT_DILEMMA_TONES,
@@ -109,7 +109,31 @@ export type SerpSubjectReadResponse = {
   missingLenses: Array<{ keywordId: string; lens: string; reason: string; collectedAt?: string | null }>;
   egress: SerpSubjectEgress;
   targetingReadFailed: boolean;
+  /**
+   * 2026-10-18 · Aditivos, só na marca com cidade (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`,
+   * decisão do dono): a localidade da SERP e as lentes servidas pela SERP antiga,
+   * NACIONAL — mostradas marcadas; a coleta local é pelo botão de sempre.
+   */
+  serpLocation?: string;
+  nationalFallback?: Array<{ keywordId: string; lens: string; collectedAt: string }>;
 };
+
+/**
+ * 2026-10-18 · O que a linha da leitura diz da SERP antiga nacional (marca com
+ * cidade): quantas keywords a mesa mostra com ela, e a localidade da marca.
+ * Marca nacional: nada (a linha de antes).
+ */
+export function serpSubjectNationalFallbackStatus(data: Pick<SerpSubjectReadResponse, "serpLocation" | "nationalFallback"> | null | undefined): { nationalFallbackKeywords?: number; serpLocation?: string } {
+  if (!data?.serpLocation) return {};
+  const keywords = new Set((data.nationalFallback || []).map(item => item.keywordId)).size;
+  return { serpLocation: data.serpLocation, ...(keywords ? { nationalFallbackKeywords: keywords } : {}) };
+}
+
+/** A frase da SERP antiga marcada, na linha da leitura do cache; vazia na marca nacional ou sem recuo. */
+export function serpSubjectNationalFallbackLabel(status: { nationalFallbackKeywords?: number; serpLocation?: string }): string {
+  if (!status.serpLocation || !status.nationalFallbackKeywords) return "";
+  return ` ${status.nationalFallbackKeywords} keyword(s) com a SERP antiga, nacional (marcada): a marca agora é ${status.serpLocation}. A coleta local é pelo botão de sempre, com o custo antes.`;
+}
 
 /** Junta as respostas dos lotes. Uma keyword aparece uma vez; o egress soma. */
 export function mergeSerpSubjectReads(responses: readonly SerpSubjectReadResponse[]): SerpSubjectReadResponse {
@@ -118,7 +142,11 @@ export function mergeSerpSubjectReads(responses: readonly SerpSubjectReadRespons
   const lacunas = new Map<string, { keywordId: string; lens: string; reason: string; collectedAt?: string | null }>();
   const egress: SerpSubjectEgress = { queries: 0, entriesRead: 0, approxBytes: 0 };
   let targetingReadFailed = false;
+  let serpLocation: string | undefined;
+  const recuos = new Map<string, { keywordId: string; lens: string; collectedAt: string }>();
   for (const resposta of responses) {
+    serpLocation = serpLocation ?? resposta.serpLocation;
+    for (const recuo of resposta.nationalFallback || []) recuos.set(`${recuo.keywordId}\u0000${recuo.lens}`, recuo);
     for (const pegada of resposta.footprints || []) footprints.set(pegada.keywordId, pegada);
     for (const keywordId of resposta.withoutSerp || []) semSerp.add(keywordId);
     for (const lacuna of resposta.missingLenses || []) lacunas.set(`${lacuna.keywordId}\u0000${lacuna.lens}`, lacuna);
@@ -128,7 +156,11 @@ export function mergeSerpSubjectReads(responses: readonly SerpSubjectReadRespons
     targetingReadFailed = targetingReadFailed || Boolean(resposta.targetingReadFailed);
   }
   for (const keywordId of footprints.keys()) semSerp.delete(keywordId);
-  return { footprints: [...footprints.values()], withoutSerp: [...semSerp].sort(), missingLenses: [...lacunas.values()], egress, targetingReadFailed };
+  return {
+    footprints: [...footprints.values()], withoutSerp: [...semSerp].sort(), missingLenses: [...lacunas.values()], egress, targetingReadFailed,
+    // 2026-10-18 · só na marca com cidade: a resposta da marca nacional é a de antes.
+    ...(serpLocation ? { serpLocation, nationalFallback: [...recuos.values()] } : {}),
+  };
 }
 
 /** O custo da leitura, dito em português: nenhuma chamada paga, só egress do banco. */
@@ -337,7 +369,9 @@ export function publishedSwapReadiness(input: {
 }): PublishedSwapReadiness {
   const troca = input.diagnosis.swap;
   if (!troca || troca.state !== "proposed" || !troca.substitute) return { ready: false, reason: "Não há troca proposta para este artigo." };
-  if (input.currentPost !== "free") {
+  // 2026-10-19 · com o Assunto na página (volume 0), a página libera a principal mesmo "Travado ao slug" (dono, 18/10) e a principal atual pode ser a do modo antigo.
+  const peloAssunto = troca.previousPrimaryBecomes === "assunto";
+  if (input.currentPost !== "free" && !peloAssunto) {
     return { ready: false, reason: input.currentPost === "locked"
       ? "O Posto agora está \"Travado ao slug\": a principal fica e o artigo só recebe reforço."
       : "O Posto da principal não está declarado: declare \"Livre\" na Revisão Humana do Minerador antes de trocar." };
@@ -349,7 +383,7 @@ export function publishedSwapReadiness(input: {
   if (aplicada && aplicada.previousKeywordId === troca.publishedKeywordId) {
     return { ready: false, reason: "A troca já foi aplicada neste artigo." };
   }
-  if (input.article.principalKeywordId !== troca.publishedKeywordId) {
+  if (input.article.principalKeywordId !== troca.publishedKeywordId && !peloAssunto) {
     return { ready: false, reason: "O ArticleDNA deste artigo já tem outra principal: recarregue a mesa antes de decidir." };
   }
   if (!input.article.keywordReferences.some(reference => reference.keywordId === troca.substitute!.keywordId)) {
@@ -399,6 +433,13 @@ export function buildPublishedSwapArticlePayload(input: {
   previousLabel: string;
   /** As métricas da nova principal, lidas do Minerador. Ausentes = desconhecidas (null), nunca as da antiga. */
   substituteMetrics?: Partial<PublishedSwapSubstituteMetrics> | null;
+  /**
+   * 2026-10-19 · A PÁGINA VIRA O ASSUNTO TAMBÉM NA MESA E NO "REFORÇAR PUBLICADOS" (U18; AGENTS.md §0.5: a regra nova em
+   * todo caminho). O Assunto da página, preso pelo ato humano desta troca (`planSubjectAttachment`): a página sai das
+   * keywords e fica como o `subject` do ArticleDNA — a principal antiga do modo antigo fica como secundária. Ausente = o
+   * publicado sem Assunto, como antes (a antiga fica secundária e a página continua entre as keywords).
+   */
+  pageSubject?: DeclaredSubject | null;
 }): ArticleDNA {
   const { current, outcome } = input;
   const metricas: PublishedSwapSubstituteMetrics = {
@@ -413,7 +454,8 @@ export function buildPublishedSwapArticlePayload(input: {
   if (!current.keywordReferences.some(reference => reference.keywordId === nova)) {
     throw new Error(`"${input.substituteLabel}" não está no ArticleDNA deste artigo.`);
   }
-  const references = current.keywordReferences.map(reference => {
+  const paginaAssunto = input.pageSubject && input.pageSubject.keywordId !== nova ? input.pageSubject.keywordId : null;
+  const references = current.keywordReferences.filter(reference => reference.keywordId !== paginaAssunto).map(reference => {
     if (reference.keywordId === nova) {
       return { ...reference, role: "principal" as const, keywordUrlRelation: "confirmed_primary" as const, humanConfirmed: true, classificationOrigin: "human" as const };
     }
@@ -450,7 +492,7 @@ export function buildPublishedSwapArticlePayload(input: {
   const alerta = `Principal publicada trocada por decisão humana (Posto Livre): "${input.substituteLabel}" no lugar de "${input.previousLabel}", que ficou como secundária. URL, slug e canonical preservados.`;
 
   // As métricas da principal acompanham a troca (ver o cabeçalho).
-  const contribuicoes = current.volumeStrategy?.contributions.map(contribution => {
+  const contribuicoes = current.volumeStrategy?.contributions.filter(contribution => contribution.keywordId !== paginaAssunto).map(contribution => {
     if (contribution.keywordId === nova) {
       return { ...contribution, role: "principal" as const, contribution: "central" as const, volume: metricas.volume ?? contribution.volume, rationale: `Nova principal por decisão humana (Posto Livre), no lugar de "${input.previousLabel}".` };
     }
@@ -528,6 +570,7 @@ export function buildPublishedSwapArticlePayload(input: {
     primaryKeywordCandidates: outcome.articleDnaFields.primaryKeywordCandidates,
     primaryKeywordDecision: outcome.articleDnaFields.primaryKeywordDecision,
     alerts: current.alerts.includes(alerta) ? current.alerts : [...current.alerts, alerta],
+    ...(input.pageSubject ? { subject: input.pageSubject } : {}),
   });
 }
 
@@ -548,8 +591,10 @@ export function freshPublishedPostOf(row: { primary_keyword_policy?: unknown } |
   return publishedPrimaryPostOf(typeof politica === "string" && politica.trim() ? politica : null);
 }
 
-export function freshPostRefusal(input: { shown: PublishedPrimaryPost; fresh: PublishedPrimaryPost | null }): string | null {
+export function freshPostRefusal(input: { shown: PublishedPrimaryPost; fresh: PublishedPrimaryPost | null; byPageSubject?: boolean }): string | null {
   if (input.fresh === null) return "o Posto não pôde ser relido agora; nada foi gravado — tente de novo";
+  // 2026-10-19 · a página com Assunto e volume 0 libera a principal sozinha (dono, 18/10): o Posto relido não barra.
+  if (input.byPageSubject) return null;
   if (input.fresh !== "free") {
     return input.fresh === "locked"
       ? "o Posto foi travado (\"Travado ao slug\") depois que a mesa foi lida; a troca não foi aplicada — recarregue a mesa"

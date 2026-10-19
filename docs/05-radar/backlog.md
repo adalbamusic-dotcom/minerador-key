@@ -1,5 +1,99 @@
 # Backlog — Radar
 
+## "Enviar ao Redator (1)" ainda em 500 nos 3 maiores — 2026-10-19 (2)
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] Instrução medida: o INSERT do documento (~0,9 s/MB; 10–11 MB > 8 s). Leituras já estreitas.
+- [x] Repositório usa a função de gravação com tempo próprio quando existir; sem ela, o upsert de sempre.
+- [ ] **Dono:** aplicar `supabase/migrations/20261019120000_documento_do_radar_gravacao_com_tempo_proprio.sql` (`db query --linked -f` + `migration repair`; nunca `db push`).
+- [ ] **Dono (depois da migration, grátis):** WifiConecta amarelo → Radar → "Enviar ao Redator" nos 3 (`90326a17…`, `978165e0…`, `de3573ab…`); conferir "enviado(s)" no sino e o documento no Redator.
+- [ ] Proposta (SDD, não implementada): referenciar o pacote congelado em vez de copiá-lo no documento — tiraria os 7–11 MB da escrita, do autosave do Redator e da listagem; muda o contrato do ContentDocument.
+
+## "Enviar ao Redator (N)" com investigação grande e token vencido — 2026-10-19
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] Gravação do documento do Redator sem devolver a linha (era ~40% do comando que estourava os 8 s); confirmação e recibo sem `payload`.
+- [x] Envio lê só a corrida da versão corrente; item e autoridades sem corridas.
+- [x] Lote: 401 → renova a sessão → repete o artigo uma vez; outras falhas por artigo, aviso único no sino.
+- [ ] **Dono (homologação, grátis):** WifiConecta amarelo → Radar → "Enviar ao Redator (3)" nos 3 que faltam (`de3573ab…`, `978165e0…`, `90326a17…`); conferir no Redator.
+- [x] Se algum ainda estourar o tempo: gravação do documento por função no banco com `statement_timeout` próprio — estourou; migration proposta em 2026-10-19 (2), acima (aplicação do dono).
+- [ ] Observado, fora do escopo: o autosave do Redator regrava o documento inteiro (7 a 11 MB) a cada pausa — pode bater no mesmo limite nesses documentos.
+
+## Adotar a versão nova sobre a investigação congelada — 2026-10-18
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] Na tela, Google congelado (enviado ou não ao Redator) com principal e slug iguais é adotável: prévia com reaproveitado, coletado, IA e teto; uma confirmação leva à versão nova, reabre e segue pelo "Pesquisar e finalizar" de sempre (só o que falta, congelamento novo, artigo-modelo).
+- [x] "Refazer Pesquisa Google" sobre composição nova carrega a evidência do que ficou (`rebaseRadarDeepResearch`).
+- [x] Catálogo, MCP (texto) e "?" do Radar atualizados; InfoHint no botão.
+- [ ] **Dono (homologação, paga — só as keywords novas e até 2 chamadas de IA por artigo):** WifiConecta amarelo → "Ver e adotar" → "Adotar a versão nova (1)"; conferir finalizado na v3, artigo-modelo novo e, se já enviado, "Atualização disponível" ao reenviar.
+- [ ] Proposta (não implementada): principal ou slug novo sobre investigação congelada continua recusado; se o dono quiser, a mesma confirmação poderia zerar e recoletar a principal (paga) — decisão do dono.
+- [ ] Proposta (não implementada): pelo MCP, a adoção do congelado continua recusada (o congelamento novo roda na tela).
+
+## Estado SEO estável e artigo-modelo no "Pesquisar e finalizar" — 2026-10-18
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] O Estado SEO da coluna Relatório de uma investigação congelada sai do pacote congelado (igual com e sem as páginas carregadas); viva sem amostra = "carregando".
+- [x] Coluna, card e painel do Relatório com as mesmas entradas da linha (`reportInputs`).
+- [x] "Organizar o artigo-modelo (N)" / "… do Silo (N)" fora da barra; a função está no "Pesquisar e finalizar" (com InfoHint); a faixa do export só com a confirmação aberta.
+- [ ] **Dono (homologação, grátis):** abrir o Radar, conferir que a coluna não muda ao carregar nem ao trocar de artigo; selecionar finalizados sem artigo-modelo → "Pesquisar e finalizar" → prévia com o custo → confirmar.
+- [ ] Proposta (já listada): o Relatório da planilha ler a planta por linha — hoje o painel "Estado SEO do artigo" lê o artigo-modelo aprovado e a coluna não, e os dois pilares (Estrutura editorial, Links) podem diferir.
+
+## Localidade da SERP por marca e D11 geográfico — 2026-10-18
+
+Detalhe em `estado-atual.md` (mesmo título). SDD `docs/compartilhado/sdd-localidade-serp-por-marca-2026-10-18.md`. **Validado manualmente: não.**
+
+- [x] Pesquisa canônica, auxiliar, apoio e leitura do cache no CSV na localidade da marca; o rótulo do snapshot é o do que foi pedido.
+- [x] D11 geográfico na mesma régua (amostra, medidas, PAA, `relevancia_d11` da SERP crua), pelo gazetteer do IBGE (capitais e municípios de 500 mil+, Censo 2022).
+- [ ] A prévia do "Pesquisar e finalizar" dizer a localidade ("SERP de São Paulo (cidade)") — a tela do Radar está com outra frente; fazer pelo mesmo `plan.location` do Arquiteto quando ela fechar.
+- [ ] Depois da L4: "Pesquisar de novo" e "Organizar de novo (IA)" onde o dono decidir, com o custo antes; conferir no CSV `relevancia_d11` com "fora do território: outra localidade".
+- [ ] Decisão do dono: o corte de 500 mil habitantes do gazetteer (escolha desta entrega) e se as perguntas e buscas relacionadas de outra cidade também saem ("de fora do leitor").
+
+## Artigo-modelo · a identidade do artigo nunca é "fora do escopo" — 2026-10-18
+
+Teste real local (WifiConecta, Silo "Planos e contratação"): 422 em "quantos mega de internet preciso" e "claro vivo ou tim internet residencial"; o Assunto do "internet no meu cep" ia ao descarte. Ver `estado-atual.md`, seção de mesma data.
+
+- [x] Sigla curta da identidade ("CEP", "TIM") no território da classificação; FAQ não vira seção do modelo.
+- [x] A estrutura promovida pela investigação é referência da regra 3(a) no pedido; a seção obrigatória só cai por exclusão dura; a identidade do artigo não sai pelo rótulo genérico na conferência.
+- [x] "quanto(s)", "antes", "depois" não distinguem assunto; o "Não cobrir" do CSV nomeia o irmão dono do rótulo quando o Silo sabe.
+- [x] Regressão com os rótulos reais (`tests/radar-fora-do-escopo-identidade-2026-10-18.test.mts`); R2 e P0-B (4) com SUBSTITUÍDO.
+- [ ] Coordenador: "Organizar o artigo-modelo (2)" pelo botão nos dois artigos do 422 e conferir a versão gravada (SELECT só leitura).
+- [ ] Decisão do dono: os detalhes do plano (promessa) no núcleo da régua do "não cobrir" (todos os consumidores: CSV, vídeo, Redator).
+- [ ] Decisão do dono: a ligação "velocidade" ↔ "Mega" (ou a SERP do irmão como identidade dele) para nomear o dono e não tirar seção de velocidade no "quantos mega".
+
+## Livro de uso da IA do Radar (artigo-modelo e pautas do especialista) — 2026-10-18
+
+Achado do teste real local (2026-10-18, WifiConecta): as chamadas pagas de IA do Radar não entravam em `integration_usage_events` nem na cota da marca. Detalhe em `docs/05-radar/estado-atual.md`. **Testado pelo botão no local (2026-10-18), com readback no banco.**
+
+- [x] Artigo-modelo: um evento por chamada (primeira, nova tentativa, passada de correção), `module_operation`, módulo `radar`, pelo mesmo gravador e chave idempotente das rotas de IA do Arquiteto; a checagem de cota de antes mantida (1 unidade).
+- [x] "Analisar concorrência · e finaliza (+ até 2 chamadas de IA)" e o lote "Pesquisar e finalizar (N artigos)": a IA deles é a organização do artigo-modelo — coberta pelo mesmo núcleo (a análise de concorrência não chama IA).
+- [x] Pautas do especialista (`/api/editorial/radar-topics`): um evento por chamada, mesmo padrão.
+- [x] Catálogo (`radar.article_blueprint`, `radar.investigate`) e cenário de teste com `fetch` falso.
+- [x] Teste real pelo botão (2026-10-18): "Organizar de novo (IA)" → 2 chamadas (primeira + correção) → 2 eventos `module = 'radar'` (`first`, `correction`), conferidos por SELECT só leitura; o reaproveitamento pelo lote (`ifMissing`) não chamou a IA nem registrou nada.
+- [x] Organização da contribuição do especialista no worker local: feito na mesma data, sem checagem de cota nova (entrada logo abaixo).
+- [ ] Avaliar com o dono: rechecar a cota antes da 2ª chamada (nova tentativa ou correção) do artigo-modelo — hoje, como no Arquiteto, a checagem é uma por operação.
+
+## Livro de uso · organização do especialista no worker local — 2026-10-18
+
+- [x] Organização da contribuição do especialista (worker local, `organize_expert_transcript`) grava um evento por chamada em `integration_usage_events` (módulo `radar`). Teste: `tests/radar-livro-de-uso-especialista-worker-2026-10-18.test.mts`.
+- [ ] Decisão do dono: checar a cota da marca antes da chamada no worker (hoje o worker não checa; só passa a contar).
+- [ ] Rodar `npm run test:radar` completo depois de juntar com o worktree do artigo-modelo/pautas.
+
+## Artigo-modelo · a saída curta cabe no teto — 2026-10-18
+
+Teste real local (WifiConecta, Pilar "planos de internet residencial"): o artigo-modelo veio cortado nas duas chamadas (502 `AI_OUTPUT_INVALID`). Ver `estado-atual.md`, seção de mesma data.
+
+- [x] Saída curta com teto em cada campo (`RADAR_ARTICLE_BLUEPRINT_SHORT_LIMITS`, `radarArticleBlueprintShortOutputRule`): pior caso de ~15,6 mil para ~5,6 mil tokens (teto 8 mil); as alternatives voltam (SUBSTITUÍDO "sem alternatives").
+- [x] Guarda de tamanho: `tests/radar-artigo-modelo-saida-curta-2026-10-18.test.mts` (pior caso ≤ 75% do teto; com o mapa da página publicada no teto, ≤ 90%; esquema não corta; todo campo na conta; botões de sempre).
+- [x] Log da nova tentativa com `completionTokens`, `reasoningTokens` e `contentLength`.
+- [ ] **Decisão do dono (E0):** o teto por campo também no pedido NORMAL (a primeira chamada). Hoje o pior caso dele é ~20,9 mil tokens contra 8 mil; um Pilar grande gasta uma chamada cortada antes da curta. Mudar o pedido muda as chaves `*/artigo-modelo.pedido.system` do E0 e exige a decisão registrada numa SDD. Medida sugerida: a mesma régua da curta com os números do normal (até 6 seções, 4 H3, 3 explain, 4 itens por bloco competitivo, textos até 100/220) — mesmo assim o pior caso fica perto de 12 mil tokens, então a decisão inclui também quantos itens a resposta normal pede.
+- [ ] **Decisão do dono:** "tempo esgotado não ganha nova tentativa" (2026-10-02). Com a primeira chamada perto dos 150 s num Pilar grande, o tempo esgotado sobe como 504 sem a saída curta; a nova tentativa caberia nos 130 s que sobram do prazo de 280 s.
+- [ ] Compartilhado (fora do Radar): na OpenRouter, `thinkingMode: "disabled"` vira `reasoning.effort: "low"` com 8000 tokens de folga (`openRouterReasoningEffort`/`openRouterMaxTokens`); o raciocínio é cobrado e divide os 16 mil do pedido. Desligar de fato para modelos que aceitam é decisão da camada de IA.
+- [ ] Homologação do dono: "Organizar de novo (IA)" no Pilar `de3573ab-…` e conferir, no terminal do `next dev`, os tokens da resposta e do raciocínio nos logs `nova_tentativa`.
+
 ## F5 · Links a ativar, "Atualizar links do Silo" e as pendências da F6 — 2026-10-14
 
 Autorização do dono (2026-10-14): "pode concluir as pendências, vou testar depois". SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §6.5, §10, D10 e §18.1. Detalhe em `docs/05-radar/estado-atual.md`. **Validado manualmente: não.**
@@ -505,7 +599,7 @@ Validado manualmente: não. O detalhe, os testes e as limitações estão em `es
 - [x] A frase de parada nomeia o botão que a tela mostra (`radarPhase1VisibleLabel`) e diz a área; catálogo MCP e spec atualizados. Detalhe em `estado-atual.md`.
 - [ ] **Dono (homologação):** 1 clique em "Analisar concorrência · e finaliza (+ 1 chamada de IA)" em "marketing digital para dentistas" e conferir `finalizedBundle` gravado no readback.
 - [ ] Decidir se YouTube e Amazon seguem a mesma regra (hoje ainda param por amostra insuficiente e consulta que falhou).
-- [ ] Tarefa separada: o id da extração (`competitor:` + base64 cortado em 32) colide em páginas do mesmo domínio; trocar por hash da URL inteira depois de mapear quem deduplica por `page.id`.
+- [x] Tarefa separada: o id da extração (`competitor:` + base64 cortado em 32) colide em páginas do mesmo domínio; trocar por hash da URL inteira depois de mapear quem deduplica por `page.id`. **Feito em 2026-10-18:** `competitorPageId` (SHA-256 da URL inteira). O id tinha um gerador só; os consumidores ligam termos e páginas dentro da mesma extração, e a referência congelada resolve por URL. Detalhe em `estado-atual.md`.
 - [ ] Decidir se a página guarda a URL final (`fetchedUrl` opcional no `RadarExtractionPageSchema`, contrato `.strict()` compartilhado).
 - [ ] "Reparar congelamento" ainda diz "Finalizar pesquisa" fixo quando a releitura falha.
 

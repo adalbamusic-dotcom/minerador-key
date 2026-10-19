@@ -379,16 +379,23 @@ const EVIDENCE_TEXT_MAX = 160;
  * A pesquisa v2 não o usa; a diferenciação de publicados coleta a SERP das
  * candidatas por ele, na MESMA chave do Resultados do Processador.
  */
-export function subjectDiscoverySerpRequests(phrase: string, subjectKeywordId: string | null): Array<{ lens: SerpCacheLens; label: string; canonical: boolean; request: SubjectDiscoverySerpRequest }> {
+export function subjectDiscoverySerpRequests(phrase: string, subjectKeywordId: string | null, codes?: { locationCode: number; languageCode: string } | null): Array<{ lens: SerpCacheLens; label: string; canonical: boolean; request: SubjectDiscoverySerpRequest }> {
   return SERP_CACHE_LENSES.map(lens => {
     const canonical = sameSerpCacheLens(lens, SERP_CACHE_CANONICAL_LENS);
     return {
       lens,
       label: serpCacheLensLabel(lens),
       canonical,
-      // Os mesmos parâmetros do Resultados do Processador: o cache serve aos dois.
+      /*
+       * Os mesmos parâmetros do Resultados do Processador: o cache serve aos dois.
+       * 2026-10-18 · `codes` (SDD localidade da SERP por marca, L2): a marca com
+       * cidade coleta e lê a SERP das candidatas na localidade DELA; sem `codes`
+       * (marca nacional), a chave de sempre, Brasil e "pt".
+       */
       request: {
-        query: { keyword: phrase, locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE, lens, endpoint: "advanced" },
+        query: codes
+          ? { keyword: phrase, locationCode: codes.locationCode, languageCode: codes.languageCode, lens, endpoint: "advanced" }
+          : { keyword: phrase, locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE, lens, endpoint: "advanced" },
         depth: canonical ? SERP_CANONICAL_DEPTH : SERP_OTHER_LENS_DEPTH,
         keywordId: subjectKeywordId,
       },

@@ -3,7 +3,7 @@
 import { AlertTriangle, CheckCircle2, RotateCcw, X } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { DeletionImpactEntry } from "@/lib/lifecycle";
-import { typedConfirmationMatches } from "@/lib/lifecycle/typed-confirmation";
+import { checkDeleteConfirmation, typedConfirmationMatches, type DeleteConfirmationRequirement, type DeleteConfirmationTyped } from "@/lib/lifecycle/typed-confirmation";
 import { TypedConfirmField } from "./typed-confirm-field";
 
 export type DeletionImpactSummaryEntry = Pick<DeletionImpactEntry, "key" | "label"> & { count?: number };
@@ -60,6 +60,57 @@ function LifecycleDialogShell({ open, title, description, children, onCancel, da
   </div>;
 }
 
+/*
+ * 2026-10-17 · A confirmação FORTE da regra única da exclusão
+ * (`lib/lifecycle/typed-confirmation.ts`; SDD da linha única do Minerador, P-4):
+ * o nome de cada cor cujo plano muda, "apaga de vez" quando há exclusão
+ * definitiva e o nome de cada publicada. Opcional e aditiva: sem `requirement`
+ * (ou com a confirmação simples), os diálogos são os de sempre — o nome digitado.
+ */
+const STRONG_FIELD = "min-h-10 w-full rounded-md border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors placeholder:text-text-muted focus:border-context-accent focus:ring-2 focus:ring-context-accent/25 disabled:cursor-wait disabled:opacity-60";
+
+function StrongConfirmFields({ requirement, typed, onChange, onSubmit, disabled }: {
+  requirement: DeleteConfirmationRequirement;
+  typed: DeleteConfirmationTyped;
+  onChange: (next: DeleteConfirmationTyped) => void;
+  onSubmit: () => void;
+  disabled: boolean;
+}) {
+  const baseId = useId();
+  const valor = (value: unknown) => (typeof value === "string" ? value : "");
+  const cores = typed.colors ?? {};
+  const nomes = typed.publishedNames ?? {};
+  const conferida = checkDeleteConfirmation(requirement, typed);
+  const digitouAlgo = Object.values(cores).some(Boolean) || Boolean(valor(typed.phrase)) || Object.values(nomes).some(Boolean);
+  const enter = (event: { key: string; preventDefault: () => void }) => { if (event.key === "Enter" && conferida.ok) { event.preventDefault(); onSubmit(); } };
+  return <div className="space-y-3" data-delete-strong-confirmation>
+    {requirement.colorWords.map((cor, indice) => <div key={cor} className="space-y-1">
+      <label htmlFor={`${baseId}-cor-${indice}`} className="block text-sm leading-5 text-text-muted">Digite o nome da cor: <strong className="break-words font-semibold text-foreground">{cor}</strong></label>
+      <input id={`${baseId}-cor-${indice}`} type="text" value={valor(cores[cor])} disabled={disabled} autoFocus={indice === 0} autoComplete="off" spellCheck={false} onKeyDown={enter} onChange={event => onChange({ ...typed, colors: { ...cores, [cor]: event.target.value } })} className={STRONG_FIELD} data-delete-strong-color={cor}/>
+    </div>)}
+    {requirement.hardPhrase ? <div className="space-y-1">
+      <label htmlFor={`${baseId}-frase`} className="block text-sm leading-5 text-text-muted">Há exclusão definitiva. Digite: <strong className="font-semibold text-foreground">{requirement.hardPhrase}</strong></label>
+      <input id={`${baseId}-frase`} type="text" value={valor(typed.phrase)} disabled={disabled} autoFocus={requirement.colorWords.length === 0} autoComplete="off" spellCheck={false} onKeyDown={enter} onChange={event => onChange({ ...typed, phrase: event.target.value })} className={STRONG_FIELD} data-delete-strong-phrase/>
+    </div> : null}
+    {requirement.publishedNames.map((publicada, indice) => <div key={publicada.id} className="space-y-1">
+      <label htmlFor={`${baseId}-pub-${indice}`} className="block text-sm leading-5 text-text-muted">Publicada (lixeira de 24 h). Digite: <strong className="break-words font-semibold text-foreground">{publicada.keyword}</strong></label>
+      <input id={`${baseId}-pub-${indice}`} type="text" value={valor(nomes[publicada.id])} disabled={disabled} autoFocus={!requirement.colorWords.length && !requirement.hardPhrase && indice === 0} autoComplete="off" spellCheck={false} onKeyDown={enter} onChange={event => onChange({ ...typed, publishedNames: { ...nomes, [publicada.id]: event.target.value } })} className={STRONG_FIELD} data-delete-strong-published={publicada.id}/>
+    </div>)}
+    {digitouAlgo && !conferida.ok ? <p className="text-sm leading-5 text-text-muted" role="status">Falta: {conferida.missing.join(", ")}.</p> : null}
+  </div>;
+}
+
+/** O estado do que foi digitado: a confirmação simples (o nome) ou a forte (a regra única). */
+function useDeleteTyped(confirmationName: string, requirement: DeleteConfirmationRequirement | null | undefined) {
+  const forte = requirement && requirement.selectionName === null ? requirement : null;
+  const [simples, setSimples] = useState("");
+  const [digitado, setDigitado] = useState<DeleteConfirmationTyped>({});
+  const matches = forte ? checkDeleteConfirmation(forte, digitado).ok : typedConfirmationMatches(simples, confirmationName);
+  const reset = () => { setSimples(""); setDigitado({}); };
+  const typed = (): DeleteConfirmationTyped => (forte ? digitado : { selection: simples });
+  return { forte, simples, setSimples, digitado, setDigitado, matches, reset, typed };
+}
+
 export type DeleteConfirmationProps = {
   open: boolean;
   title: string;
@@ -69,8 +120,13 @@ export type DeleteConfirmationProps = {
   confirmLabel?: string;
   notice?: string | null;
   eyebrow?: string;
+  /** 2026-10-17 · a regra única: com a confirmação forte, os campos dela substituem o nome digitado. */
+  requirement?: DeleteConfirmationRequirement | null;
+  /** 2026-10-17 · o que a prévia diz além do impacto (ex.: o plano do Silo de cada cor). */
+  details?: ReactNode;
   onCancel: () => void;
-  onConfirm: () => void | boolean | Promise<void | boolean>;
+  /** Recebe o que foi digitado (a tela manda ao servidor, que confere pela mesma regra). */
+  onConfirm: (typed: DeleteConfirmationTyped) => void | boolean | Promise<void | boolean>;
 };
 
 export function DeleteConfirmation(props: DeleteConfirmationProps) {
@@ -78,19 +134,22 @@ export function DeleteConfirmation(props: DeleteConfirmationProps) {
   return <DeleteConfirmationContent {...props}/>;
 }
 
-function DeleteConfirmationContent({ open, title, description, confirmationName, impact = [], confirmLabel = "Excluir", notice = "A exclusão é definitiva. Se a confirmação falhar, nada será apagado.", eyebrow = "Ciclo de vida", onCancel, onConfirm }: DeleteConfirmationProps) {
-  const [typed, setTyped] = useState("");
+function DeleteConfirmationContent({ open, title, description, confirmationName, impact = [], confirmLabel = "Excluir", notice = "A exclusão é definitiva. Se a confirmação falhar, nada será apagado.", eyebrow = "Ciclo de vida", requirement, details, onCancel, onConfirm }: DeleteConfirmationProps) {
+  const estado = useDeleteTyped(confirmationName, requirement);
   const [confirming, setConfirming] = useState(false);
-  const matches = typedConfirmationMatches(typed, confirmationName);
-  const close = () => { if (!confirming) { setTyped(""); onCancel(); } };
+  const matches = estado.matches;
+  const close = () => { if (!confirming) { estado.reset(); onCancel(); } };
   const confirm = async () => {
     if (!matches) return;
     setConfirming(true);
-    try { await onConfirm(); setTyped(""); } finally { setConfirming(false); }
+    try { await onConfirm(estado.typed()); estado.reset(); } finally { setConfirming(false); }
   };
   return <LifecycleDialogShell open={open} title={title} description={description} onCancel={close} danger eyebrow={eyebrow}>
+    {details ?? null}
     <DeletionImpactSummary entries={impact}/>
-    <TypedConfirmField confirmationName={confirmationName} value={typed} onChange={setTyped} disabled={confirming} onKeyDown={event => { if (event.key === "Enter" && matches) { event.preventDefault(); void confirm(); } }}/>
+    {estado.forte
+      ? <StrongConfirmFields requirement={estado.forte} typed={estado.digitado} onChange={estado.setDigitado} onSubmit={() => void confirm()} disabled={confirming}/>
+      : <TypedConfirmField confirmationName={confirmationName} value={estado.simples} onChange={estado.setSimples} disabled={confirming} onKeyDown={event => { if (event.key === "Enter" && matches) { event.preventDefault(); void confirm(); } }}/>}
     {notice === null ? null : <p className="text-sm leading-5 text-text-muted">{notice}</p>}
     <footer className="flex flex-wrap justify-end gap-2 border-t border-divider pt-3"><button type="button" onClick={close} className="min-h-10 rounded-md border border-divider px-3 text-sm font-medium text-text-muted hover:bg-surface hover:text-foreground">Cancelar</button><button type="button" onClick={() => void confirm()} disabled={!matches || confirming} className="min-h-10 rounded-md border border-danger/50 bg-danger-soft px-3 text-sm font-semibold text-danger hover:bg-danger-soft/80 disabled:cursor-not-allowed disabled:opacity-50">{confirming ? "Excluindo…" : confirmLabel}</button></footer>
     </LifecycleDialogShell>;
@@ -102,8 +161,13 @@ export type PublishedDeleteConfirmationProps = {
   description: string;
   confirmationName: string;
   impact?: readonly DeletionImpactSummaryEntry[];
+  /** 2026-10-17 · a regra única: com a confirmação forte, os campos dela substituem o nome digitado. */
+  requirement?: DeleteConfirmationRequirement | null;
+  /** 2026-10-17 · o que a prévia diz além do impacto (ex.: o plano do Silo de cada cor). */
+  details?: ReactNode;
   onCancel: () => void;
-  onConfirm: () => void | boolean | Promise<void | boolean>;
+  /** Recebe o que foi digitado (a tela manda ao servidor, que confere pela mesma regra). */
+  onConfirm: (typed: DeleteConfirmationTyped) => void | boolean | Promise<void | boolean>;
 };
 
 export function PublishedDeleteConfirmation(props: PublishedDeleteConfirmationProps) {
@@ -111,20 +175,23 @@ export function PublishedDeleteConfirmation(props: PublishedDeleteConfirmationPr
   return <PublishedDeleteConfirmationContent {...props}/>;
 }
 
-function PublishedDeleteConfirmationContent({ open, title = "Remover item publicado?", description, confirmationName, impact = [], onCancel, onConfirm }: PublishedDeleteConfirmationProps) {
-  const [typed, setTyped] = useState("");
+function PublishedDeleteConfirmationContent({ open, title = "Remover item publicado?", description, confirmationName, impact = [], requirement, details, onCancel, onConfirm }: PublishedDeleteConfirmationProps) {
+  const estado = useDeleteTyped(confirmationName, requirement);
   const [confirming, setConfirming] = useState(false);
-  const matches = typedConfirmationMatches(typed, confirmationName);
-  const close = () => { if (!confirming) { setTyped(""); onCancel(); } };
+  const matches = estado.matches;
+  const close = () => { if (!confirming) { estado.reset(); onCancel(); } };
   const confirm = async () => {
     if (!matches) return;
     setConfirming(true);
-    try { await onConfirm(); setTyped(""); } finally { setConfirming(false); }
+    try { await onConfirm(estado.typed()); estado.reset(); } finally { setConfirming(false); }
   };
   return <LifecycleDialogShell open={open} title={title} description={description} onCancel={close}>
     <div className="rounded-md border border-warning/35 bg-warning-soft p-3 text-sm leading-5 text-text-muted"><p className="font-semibold text-foreground">O item sairá da operação normal e poderá ser restaurado por 24 horas.</p><p className="mt-1">A publicação, a URL, o canonical e a proveniência canônica não serão apagados nesta etapa.</p></div>
+    {details ?? null}
     <DeletionImpactSummary entries={impact}/>
-    <TypedConfirmField confirmationName={confirmationName} value={typed} onChange={setTyped} disabled={confirming} onKeyDown={event => { if (event.key === "Enter" && matches) { event.preventDefault(); void confirm(); } }}/>
+    {estado.forte
+      ? <StrongConfirmFields requirement={estado.forte} typed={estado.digitado} onChange={estado.setDigitado} onSubmit={() => void confirm()} disabled={confirming}/>
+      : <TypedConfirmField confirmationName={confirmationName} value={estado.simples} onChange={estado.setSimples} disabled={confirming} onKeyDown={event => { if (event.key === "Enter" && matches) { event.preventDefault(); void confirm(); } }}/>}
     <footer className="flex flex-wrap justify-end gap-2 border-t border-divider pt-3"><button type="button" onClick={close} className="min-h-10 rounded-md border border-divider px-3 text-sm font-medium text-text-muted hover:bg-surface hover:text-foreground">Cancelar</button><button type="button" onClick={() => void confirm()} disabled={!matches || confirming} className="min-h-10 rounded-md border border-warning/50 bg-warning-soft px-3 text-sm font-semibold text-foreground hover:bg-warning-soft/80 disabled:cursor-not-allowed disabled:opacity-50">{confirming ? "Confirmando…" : "Remover por 24 horas"}</button></footer>
   </LifecycleDialogShell>;
 }

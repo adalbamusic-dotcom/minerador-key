@@ -272,6 +272,8 @@ export function planDifferentiationApply(input: {
           published: formationKeywordOfPage(page),
           post: "free",
           identity: { url: page.url, canonical: page.canonical, slug: page.slug },
+          // 2026-10-19 · a régua do refazedor com o Assunto na página (T14, régua c).
+          pageSubject: page.pageSubject ?? null,
           candidates: [{ keywordId: novaId, keyword: nova.keyword, intent: null, volume: nova.adsVolume, kgr: null, entity: null, problem: null, isPublished: false, volumeValidated: typeof nova.adsVolume === "number" && nova.adsVolume > 0 }],
           serp: indice,
         });
@@ -285,7 +287,10 @@ export function planDifferentiationApply(input: {
             decidedAt: input.decidedAt,
           })
           : null;
-        if (desfecho?.ok && desfecho.accepted) {
+        if (proposta.previousPrimaryBecomes === "assunto" && proposta.state === "proposed") {
+          // 2026-10-19 · com o Assunto na página, a troca prende o Assunto (U18): isso é do refazedor, que lê o pacote aprovado e grava pela guarda do Assunto.
+          swap = { applied: false, keyword: nova.keyword, reason: `Com o Assunto declarado na página, a troca da principal passa pelo “Melhorar publicados…”: lá a página vira o Assunto do artigo (sai das keywords) e "${nova.keyword}" assume, na mesma confirmação. A diferenciação foi aplicada sem trocar a principal.` };
+        } else if (desfecho?.ok && desfecho.accepted) {
           atual = buildPublishedSwapArticlePayload({
             current: atual, outcome: desfecho, actorId: input.actorId, decidedAt: input.decidedAt,
             substituteLabel: nova.keyword, previousLabel: page.keyword,

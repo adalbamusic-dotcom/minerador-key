@@ -51,18 +51,12 @@ import {
   type ArticleFormationKeyword,
 } from "./article-formation.ts";
 import type { SerpSubjectIndex, SerpSubjectOverlap } from "./serp-subject-overlap.ts";
-import { intentComparisonKey } from "./keyword-dna-signals.ts";
+import { funnelComparisonKey, intentComparisonKey } from "./keyword-dna-signals.ts";
 
 /* ------------------------- D2.3 — quem barra é a SERP ------------------------- */
 
-const etapaDoFunil = (value: string | null | undefined): "TOP" | "MIDDLE" | "BOTTOM" | null => {
-  const texto = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (!texto) return null;
-  if (/^tofu|topo|^top|awareness|descoberta/.test(texto)) return "TOP";
-  if (/^mofu|meio|middle|considera/.test(texto)) return "MIDDLE";
-  if (/^bofu|fundo|bottom|decis|convers/.test(texto)) return "BOTTOM";
-  return null;
-};
+/** 2026-10-19 · o normalizador único do funil (keyword-dna-signals). */
+const etapaDoFunil = funnelComparisonKey;
 
 /** A intenção ou o funil OBSERVADOS na SERP (evidencia_serp conclusiva) separam as duas. */
 export function serpObservedDnaContradiction(left: ArticleFormationKeyword, right: ArticleFormationKeyword): string | null {

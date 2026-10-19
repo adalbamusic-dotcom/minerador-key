@@ -46,6 +46,11 @@ export async function serpFormationReworkGate(context: PipelineContext, input: {
   formationBaseHashes?: Record<string, string>;
   lenses: readonly string[];
   resultLimit: number;
+  /**
+   * 2026-10-18 · o RÓTULO RESOLVIDO da localidade da marca ("Brasil" ou "São Paulo
+   * (cidade)", `resolveBrandSerpTarget`), não o texto do pedido (SDD localidade
+   * §4.3): localidade nova = composição nova, e a coleta não é barrada como a mesma.
+   */
   location: string;
   language: string;
   override?: ReworkOverride;

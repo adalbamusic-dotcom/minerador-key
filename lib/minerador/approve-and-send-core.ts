@@ -1,5 +1,7 @@
 import type { ApprovalRequirement } from "./approved-package.ts";
 import { approvalBlockerLabel, groupApprovalBlockers, summarizeApprovalBlockers, type ApprovalBlockerGroup } from "./approval-blockers.ts";
+import { isKeywordPublished } from "./keyword-lifecycle.ts";
+import { principalSubjectEntry, resolveKeywordSubject, type PrincipalSubjectStanding } from "./keyword-subject.ts";
 
 /**
  * "APROVAR E ENVIAR AO ARQUITETO" — UMA DECISÃO, COM PRÉVIA E RECUSA POR ITEM
@@ -35,21 +37,78 @@ export type ApproveAndSendLine = {
   refreshInArquiteto?: boolean;
   missing: ApprovalRequirement[];
   reasons: string[];
+  /**
+   * 2026-10-18 · O ASSUNTO PELA PRINCIPAL (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.2-b, F4):
+   * a página publicada (ou a keyword que já carrega o Assunto do formato anterior) com volume 0 — medido 0 ou "sem
+   * média no Google Ads" — vira o Assunto fixo do artigo ANTES de aprovar, nesta mesma confirmação. Título = o texto
+   * da keyword (editável depois no painel); a nota antiga vira os detalhes. Opcional: ausente = nada muda no Assunto.
+   */
+  subjectFromVolume?: { title: string; details: string | null; legacy: boolean };
+  /**
+   * 2026-10-19 · a página de volume 0 que NÃO vira o Assunto agora, com o motivo: com o Assunto cadastrado ela deixaria
+   * de poder ser aprovada (ex.: o Assunto do formato anterior com volume importado não confirmado). Fica como está —
+   * nada pela metade (Assunto gravado e a aprovação recusada). Opcional: ausente = nada segurado.
+   */
+  subjectFromVolumeHeld?: string;
 };
+
+/** O começo da frase da linha segurada (a MESMA na tela e no MCP). */
+export const APPROVE_AND_SEND_SUBJECT_HELD = "não vira o Assunto agora" as const;
+
+/** A frase da prévia e do resultado para a linha que vira o Assunto (a MESMA na tela e no MCP). */
+export const APPROVE_AND_SEND_SUBJECT_LINE = "vira o Assunto do artigo (volume 0)" as const;
+export function approveAndSendSubjectSummary(count: number): string {
+  const verbo = count === 1 ? "vira" : "viram";
+  return String(count) + " " + verbo + " o Assunto do artigo (volume 0): o título nasce do texto da keyword (editável no painel do KeywordDNA); no Arquiteto a principal fica livre para uma com volume, por decisão sua na prévia. URL, slug e canonical não mudam.";
+}
 
 export type ApproveAndSendPreview = {
   send: boolean;
   lines: ApproveAndSendLine[];
-  counts: { approveAndSend: number; sendOnly: number; approveOnly: number; unchanged: number; blocked: number };
+  counts: { approveAndSend: number; sendOnly: number; approveOnly: number; unchanged: number; blocked: number; subjectFromVolume?: number };
   blockedGroups: ApprovalBlockerGroup[];
   blockedSummary: string;
   missingIds: string[];
   decisionHash: string;
 };
 
+/**
+ * 2026-10-19 · `failed`: a gravação desta keyword não pôde ser concluída agora (erro do banco ou da rede). O `reason`
+ * diz o que ficou gravado nela e o que não ficou; rodar o MESMO botão de novo continua de onde parou.
+ */
 export type ApproveAndSendOutcome =
   | "approved_and_sent" | "sent" | "approved" | "unchanged"
-  | "approved_not_sent" | "not_sent" | "blocked" | "excluded" | "stale";
+  | "approved_not_sent" | "not_sent" | "blocked" | "excluded" | "stale" | "failed";
+
+export const APPROVE_AND_SEND_OUTCOMES: readonly ApproveAndSendOutcome[] = ["approved_and_sent", "sent", "approved", "unchanged", "approved_not_sent", "not_sent", "blocked", "excluded", "stale", "failed"];
+
+/** A frase curta do erro, sem pilha nem credencial (o texto do driver, cortado). */
+export function approveAndSendErrorText(error: unknown): string {
+  const bruto = error instanceof Error ? error.message : typeof error === "object" && error && "message" in error ? String((error as { message: unknown }).message) : String(error ?? "");
+  const texto = bruto.replace(/\s+/g, " ").trim().slice(0, 160);
+  return texto || "erro sem mensagem";
+}
+
+/** As frases do resultado por keyword quando a gravação parou no meio (honestas: o que foi gravado e o que não foi). */
+export const APPROVE_AND_SEND_RESUME = "Rode “Aprovar e enviar” de novo: continua de onde parou (o que já foi gravado não se repete)." as const;
+export function approveAndSendSubjectFailedReason(motivo: string): string {
+  return `Nada foi gravado nesta keyword: o Assunto (volume 0) não pôde ser gravado agora (${motivo}). ${APPROVE_AND_SEND_RESUME}`;
+}
+export function approveAndSendApproveFailedReason(motivo: string, subjectWritten: boolean): string {
+  return `${subjectWritten ? "O Assunto (volume 0) FOI gravado; a aprovação não" : "A aprovação não foi gravada"} (${motivo}). ${APPROVE_AND_SEND_RESUME}`;
+}
+export function approveAndSendSendFailedReason(motivo: string, justApproved: boolean): string {
+  return `${justApproved ? "A aprovação FOI gravada; o envio ao Arquiteto não" : "O envio ao Arquiteto não foi feito"} (${motivo}). ${APPROVE_AND_SEND_RESUME}`;
+}
+
+/** Marca o erro que aconteceu ANTES de qualquer gravação (a prévia refeita no aplicar): a rota pode dizer "nada foi gravado". */
+export function markApproveAndSendNothingWritten<E>(error: E): E {
+  if (error && typeof error === "object") (error as { approveAndSendNothingWritten?: boolean }).approveAndSendNothingWritten = true;
+  return error;
+}
+export function approveAndSendNothingWritten(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && (error as { approveAndSendNothingWritten?: boolean }).approveAndSendNothingWritten === true);
+}
 
 export type ApproveAndSendResultLine = { id: string; keyword: string; outcome: ApproveAndSendOutcome; reason: string | null };
 
@@ -61,6 +120,8 @@ export type ApproveAndSendResult = {
   decisionHash: string;
   /** O que o envio fez além das keywords (ex.: "Silo do plano Azul confirmado; 6 keywords entraram nele"). */
   notices: string[];
+  /** 2026-10-18 · as keywords que viraram o Assunto do artigo pelo volume 0 nesta confirmação (relidas). */
+  subjectFromVolumeIds?: string[];
 };
 
 /** O que a orquestração lê de cada keyword (o mesmo `DecisionKeywordRow` do servidor). */
@@ -89,6 +150,15 @@ export type ApproveAndSendDeps<Row extends ApproveAndSendRow, Entry extends Appr
     /** Item 1: o Silo do plano preparado no envio (aditivo). */
     declaredPlanSilos?: ReadonlyArray<{ message: string; pendingConfirmation?: string | null }> }>;
   hash: (value: unknown) => string;
+  /**
+   * 2026-10-18 · F4 da SDD do Assunto pela principal: a régua do volume (`principalSubjectStanding`) e o gravador do
+   * Assunto — o MESMO núcleo do card ("Keyword (sem Silo)", `importDeclaredPlanWithCore`), com releitura. Ausente = o
+   * comportamento de antes (nenhum Assunto é gravado por aqui).
+   */
+  subjectByVolume?: {
+    standing: (row: Row) => PrincipalSubjectStanding;
+    write: (rows: readonly Row[]) => Promise<Array<{ id: string; outcome: "declared" | "unchanged" | "failed"; reason: string | null }>>;
+  };
 };
 
 const PUBLICADA = "publicad";
@@ -103,6 +173,28 @@ export function approveAndSendRefreshNotice(count: number): string {
 }
 
 export const APPROVE_AND_SEND_STALE_REASON ="A keyword mudou entre a prévia e a gravação; nada foi gravado nela. Gere a prévia de novo.";
+
+/**
+ * Quem vira o Assunto pelo volume 0 (§6.1, alcance): a página publicada de ARTIGO (o Vínculo) ou a keyword que já
+ * carrega um Assunto do formato anterior, sem o Assunto cadastrado (`entry`) e sem plano. Página de Silo fica fora.
+ * A keyword solta comum NUNCA vira Assunto sozinha: só pelo cadastro do dono.
+ */
+export function subjectFromVolumeOf(row: ApproveAndSendRow, standing: PrincipalSubjectStanding): ApproveAndSendLine["subjectFromVolume"] | null {
+  if (standing.volumeState !== "zero" || standing.outOfScope) return null;
+  const assunto = resolveKeywordSubject(row.analise_semantica);
+  if (assunto.entry || assunto.plan) return null;
+  if (!assunto.declared && !isKeywordPublished({ status: row.status, semantic: row.analise_semantica })) return null;
+  const entry = principalSubjectEntry(row.keyword, assunto);
+  return { title: entry.title, details: entry.details ?? null, legacy: assunto.declared };
+}
+
+/** A linha como ficaria com o Assunto do cadastro (`entry`), só para a prévia da decisão — nada é gravado. */
+function withSimulatedSubjectEntry<Row extends ApproveAndSendRow>(row: Row, title: string): Row {
+  const semantic = { ...(row.analise_semantica ?? {}) };
+  const atual = semantic.keyword_subject && typeof semantic.keyword_subject === "object" && !Array.isArray(semantic.keyword_subject) ? semantic.keyword_subject as Record<string, unknown> : { note: null, destinationUrl: null, destinationCheck: null };
+  semantic.keyword_subject = { ...atual, declared: true, entry: { title, source: "cadastro" } };
+  return { ...row, analise_semantica: semantic };
+}
 
 export async function previewApproveAndSend<Row extends ApproveAndSendRow, Entry extends ApproveAndSendEntry>(
   input: { brandId: string; actorId: string; keywordIds: readonly string[]; send: boolean },
@@ -123,10 +215,33 @@ export async function previewApproveAndSend<Row extends ApproveAndSendRow, Entry
   const atualizam = new Set("refreshKeywordIds" in envio ? envio.refreshKeywordIds ?? [] : []);
   const recusaDoEnvio = new Map(envio.refused.map(item => [item.keywordId, item.reason] as const));
 
+  const assuntoDe = new Map<string, NonNullable<ApproveAndSendLine["subjectFromVolume"]>>();
+  const seguradas = new Map<string, string>();
+  if (deps.subjectByVolume) for (const row of rows) {
+    const virar = subjectFromVolumeOf(row, deps.subjectByVolume.standing(row));
+    if (!virar) continue;
+    // 2026-10-19 · nada pela metade: só vira o Assunto quem continua aprovável com ele (a mesma prévia da decisão).
+    const depois = deps.entries([withSimulatedSubjectEntry(row, virar.title)])[0];
+    if (entryById.get(row.id)?.readiness?.ok !== false && depois && depois.readiness && !depois.readiness.ok) {
+      seguradas.set(row.id, `${APPROVE_AND_SEND_SUBJECT_HELD}: com o Assunto cadastrado ela deixaria de poder ser aprovada (${depois.readiness.reason || "falta requisito"}). Fica como está; meça no Volume e rode de novo.`);
+      continue;
+    }
+    assuntoDe.set(row.id, virar);
+  }
   const lines: ApproveAndSendLine[] = rows.map(row => {
+    const linha = lineOf(row);
+    const segurada = seguradas.get(row.id);
+    return segurada ? { ...linha, subjectFromVolumeHeld: segurada } : linha;
+  });
+  function lineOf(row: Row): ApproveAndSendLine {
     const entry = entryById.get(row.id)!;
+    const virar = assuntoDe.get(row.id);
+    // 2026-10-18 · o Assunto entra no pacote: a linha já aprovada (ou a publicada) volta a ser aprovada nesta confirmação.
+    if (virar && (entry.outcome === "unchanged" || (entry.outcome === "blocked" && isPublishedBlock(entry) && !missingOf(entry).length))) {
+      return { id: row.id, keyword: row.keyword, currentStatus: entry.currentStatus, alreadyInArquiteto: existentes.has(row.id), ...(existentes.has(row.id) ? { refreshInArquiteto: true } : {}), missing: [], reasons: [], subjectFromVolume: virar, action: input.send ? "approve_and_send" as const : "approve_only" as const };
+    }
     const base = { id: row.id, keyword: row.keyword, currentStatus: entry.currentStatus, alreadyInArquiteto: existentes.has(row.id), ...(existentes.has(row.id) && atualizam.has(row.id) ? { refreshInArquiteto: true } : {}), missing: [] as ApprovalRequirement[], reasons: [] as string[] };
-    if (entry.outcome === "ready") return { ...base, action: input.send ? "approve_and_send" as const : "approve_only" as const };
+    if (entry.outcome === "ready") return { ...base, ...(virar ? { subjectFromVolume: virar } : {}), action: input.send ? "approve_and_send" as const : "approve_only" as const };
     if (entry.outcome === "unchanged") {
       if (!input.send) return { ...base, action: "unchanged" as const };
       if (elegiveis.has(row.id)) return { ...base, action: "send_only" as const };
@@ -138,7 +253,7 @@ export async function previewApproveAndSend<Row extends ApproveAndSendRow, Entry
       ? ["publicada (protegida): não muda de status", ...(recusaDoEnvio.has(row.id) ? [recusaDoEnvio.get(row.id)!] : [])]
       : missing.length ? [] : entry.blockers;
     return { ...base, action: "blocked" as const, missing, reasons };
-  });
+  }
   const missingLines: ApproveAndSendLine[] = missingIds.map(id => ({ id, keyword: id, currentStatus: "desconhecido", action: "blocked", alreadyInArquiteto: false, missing: [], reasons: [APPROVE_AND_SEND_MISSING_REASON] }));
   const todas = [...lines, ...missingLines];
   const bloqueadas = todas.filter(line => line.action === "blocked");
@@ -147,12 +262,12 @@ export async function previewApproveAndSend<Row extends ApproveAndSendRow, Entry
   const decisionHash = deps.hash({
     contract: "approve-and-send@1", brandId: input.brandId, actorId: input.actorId, send: input.send,
     rows: rows.map(row => ({ id: row.id, keyword: row.keyword, status: row.status, semantic: row.analise_semantica })),
-    lines: todas.map(line => ({ id: line.id, action: line.action, reasons: line.reasons, missing: line.missing, alreadyInArquiteto: line.alreadyInArquiteto, ...(line.refreshInArquiteto ? { refreshInArquiteto: true } : {}) })),
+    lines: todas.map(line => ({ id: line.id, action: line.action, reasons: line.reasons, missing: line.missing, alreadyInArquiteto: line.alreadyInArquiteto, ...(line.refreshInArquiteto ? { refreshInArquiteto: true } : {}), ...(line.subjectFromVolume ? { subjectFromVolume: line.subjectFromVolume } : {}), ...(line.subjectFromVolumeHeld ? { subjectFromVolumeHeld: line.subjectFromVolumeHeld } : {}) })),
   });
   return {
     send: input.send,
     lines: todas,
-    counts: { approveAndSend: conta("approve_and_send"), sendOnly: conta("send_only"), approveOnly: conta("approve_only"), unchanged: conta("unchanged"), blocked: conta("blocked") },
+    counts: { approveAndSend: conta("approve_and_send"), sendOnly: conta("send_only"), approveOnly: conta("approve_only"), unchanged: conta("unchanged"), blocked: conta("blocked"), ...(assuntoDe.size ? { subjectFromVolume: todas.filter(line => line.subjectFromVolume && line.action !== "blocked").length } : {}) },
     blockedGroups,
     blockedSummary: summarizeApprovalBlockers(blockedGroups),
     missingIds,
@@ -171,7 +286,8 @@ export async function applyApproveAndSend<Row extends ApproveAndSendRow, Entry e
   input: { brandId: string; actorId: string; keywordIds: readonly string[]; send: boolean; decisionHash: string; excludedIds?: readonly string[] },
   deps: ApproveAndSendDeps<Row, Entry>,
 ): Promise<ApproveAndSendResult> {
-  const previa = await previewApproveAndSend(input, deps);
+  // A prévia refeita só lê: erro aqui = nada foi gravado (a rota pode dizer isso).
+  const previa = await previewApproveAndSend(input, deps).catch((error: unknown) => { throw markApproveAndSendNothingWritten(error); });
   if (previa.decisionHash !== input.decisionHash) throw new ApproveAndSendStaleError();
   const excluidas = new Set(input.excludedIds ?? []);
   const results = new Map<string, ApproveAndSendResultLine>();
@@ -185,18 +301,69 @@ export async function applyApproveAndSend<Row extends ApproveAndSendRow, Entry e
     else if (line.action === "unchanged") registrar(line.id, "unchanged");
   }
 
-  // 1 · Aprovar as marcadas (núcleo de sempre, compare-and-swap e releitura por linha).
+  // 0 · 2026-10-18 · o Assunto pelo volume 0 (F4): gravado ANTES de aprovar, pelo núcleo do cadastro, com releitura.
   const aAprovar = new Set(previa.lines.filter(line => (line.action === "approve_and_send" || line.action === "approve_only") && !excluidas.has(line.id)).map(line => line.id));
+  let linhasLidas: Row[] = previa.rows;
+  let entradas: Entry[] = previa.entries;
+  const viraram = new Set<string>();
+  const virar = previa.lines.filter(line => line.subjectFromVolume && aAprovar.has(line.id)).map(line => line.id);
+  /*
+   * 2026-10-19 · a gravação nunca para no meio em silêncio: cada etapa trata o erro POR KEYWORD (o que foi gravado e o
+   * que não foi), e a próxima etapa segue com as que avançaram. Rodar o mesmo botão de novo continua: a keyword que já
+   * ganhou o Assunto sai da lista "vira o Assunto" (já tem) e entra só na reaprovação; a já aprovada só é enviada.
+   */
+  if (virar.length && deps.subjectByVolume) {
+    const alvo = previa.rows.filter(row => virar.includes(row.id));
+    let gravados: Awaited<ReturnType<NonNullable<ApproveAndSendDeps<Row, Entry>["subjectByVolume"]>["write"]>>;
+    try {
+      gravados = await deps.subjectByVolume.write(alvo);
+    } catch (error) {
+      // O gravador do servidor já trata o erro por keyword; aqui é a rede de segurança (ninguém confirmado = nada dito como gravado).
+      const motivo = approveAndSendErrorText(error);
+      gravados = alvo.map(row => ({ id: row.id, outcome: "failed" as const, reason: `não confirmado (${motivo}); releia o Minerador para ver se o Assunto entrou` }));
+    }
+    const tratados = new Set<string>();
+    for (const item of gravados) {
+      tratados.add(item.id);
+      if (item.outcome === "failed") { aAprovar.delete(item.id); registrar(item.id, "failed", approveAndSendSubjectFailedReason(item.reason || "sem confirmação")); }
+      else viraram.add(item.id);
+    }
+    for (const id of virar) if (!tratados.has(id)) { aAprovar.delete(id); registrar(id, "failed", approveAndSendSubjectFailedReason("o gravador não respondeu por ela")); }
+    if (viraram.size) {
+      try {
+        const relidas = await deps.readRows([...viraram]);
+        const porId = new Map(relidas.rows.map(row => [row.id, row] as const));
+        linhasLidas = previa.rows.map(row => porId.get(row.id) ?? row);
+        const novaPorId = new Map(deps.entries(relidas.rows).map(entry => [entry.id, entry] as const));
+        entradas = previa.entries.map(entry => novaPorId.get(entry.id) ?? entry);
+      } catch (error) {
+        const motivo = approveAndSendErrorText(error);
+        for (const id of viraram) { aAprovar.delete(id); registrar(id, "failed", approveAndSendApproveFailedReason(`a releitura depois do Assunto falhou: ${motivo}`, true)); }
+      }
+    }
+  }
+
+  // 1 · Aprovar as marcadas (núcleo de sempre, compare-and-swap e releitura por linha), uma keyword por chamada.
   const aprovadas = new Set<string>();
   if (aAprovar.size) {
-    const rows = previa.rows.filter(row => aAprovar.has(row.id));
-    const entries = previa.entries.filter(entry => aAprovar.has(entry.id));
-    for (const resultado of await deps.approve(rows, entries)) {
+    const entradaPorId = new Map(entradas.map(entry => [entry.id, entry] as const));
+    for (const row of linhasLidas.filter(item => aAprovar.has(item.id))) {
+      const entry = entradaPorId.get(row.id);
+      if (!entry) { registrar(row.id, "failed", approveAndSendApproveFailedReason("a prévia da decisão não achou a keyword", viraram.has(row.id))); continue; }
+      let resultados: Awaited<ReturnType<ApproveAndSendDeps<Row, Entry>["approve"]>>;
+      try {
+        resultados = await deps.approve([row], [entry]);
+      } catch (error) {
+        registrar(row.id, "failed", approveAndSendApproveFailedReason(approveAndSendErrorText(error), viraram.has(row.id)));
+        continue;
+      }
+      const resultado = resultados.find(item => item.id === row.id);
+      if (!resultado) { registrar(row.id, "failed", approveAndSendApproveFailedReason("sem resposta do gravador", viraram.has(row.id))); continue; }
       if (resultado.outcome === "applied" || resultado.outcome === "unchanged") {
         aprovadas.add(resultado.id);
         if (!input.send) registrar(resultado.id, resultado.outcome === "applied" ? "approved" : "unchanged");
       } else {
-        registrar(resultado.id, resultado.outcome === "stale" ? "stale" : "blocked", resultado.outcome === "stale" ? APPROVE_AND_SEND_STALE_REASON : resultado.reason || null);
+        registrar(resultado.id, resultado.outcome === "stale" ? "stale" : "blocked", resultado.outcome === "stale" ? (viraram.has(resultado.id) ? approveAndSendApproveFailedReason("a keyword mudou entre a prévia e a gravação", true) : APPROVE_AND_SEND_STALE_REASON) : resultado.reason || null);
       }
     }
   }
@@ -206,15 +373,20 @@ export async function applyApproveAndSend<Row extends ApproveAndSendRow, Entry e
     const soEnviar = previa.lines.filter(line => line.action === "send_only" && !excluidas.has(line.id)).map(line => line.id);
     const aEnviar = [...aprovadas, ...soEnviar];
     if (aEnviar.length) {
-      const envio = await deps.send(aEnviar);
-      if (envio.refreshedKeywordIds?.length) notices.push(approveAndSendRefreshNotice(envio.refreshedKeywordIds.length));
-      for (const silo of envio.declaredPlanSilos ?? []) notices.push([silo.message, silo.pendingConfirmation].filter(Boolean).join(" "));
-      const enviadas = new Set(envio.importedKeywordIds);
-      const recusas = new Map((envio.refused ?? []).map(item => [item.keywordId, item.reason] as const));
-      for (const id of aEnviar) {
-        const acabouDeAprovar = aprovadas.has(id);
-        if (enviadas.has(id)) registrar(id, acabouDeAprovar ? "approved_and_sent" : "sent");
-        else registrar(id, acabouDeAprovar ? "approved_not_sent" : "not_sent", recusas.get(id) || "O envio ao Arquiteto não aceitou esta keyword.");
+      try {
+        const envio = await deps.send(aEnviar);
+        if (envio.refreshedKeywordIds?.length) notices.push(approveAndSendRefreshNotice(envio.refreshedKeywordIds.length));
+        for (const silo of envio.declaredPlanSilos ?? []) notices.push([silo.message, silo.pendingConfirmation].filter(Boolean).join(" "));
+        const enviadas = new Set(envio.importedKeywordIds);
+        const recusas = new Map((envio.refused ?? []).map(item => [item.keywordId, item.reason] as const));
+        for (const id of aEnviar) {
+          const acabouDeAprovar = aprovadas.has(id);
+          if (enviadas.has(id)) registrar(id, acabouDeAprovar ? "approved_and_sent" : "sent");
+          else registrar(id, acabouDeAprovar ? "approved_not_sent" : "not_sent", recusas.get(id) || "O envio ao Arquiteto não aceitou esta keyword.");
+        }
+      } catch (error) {
+        const motivo = approveAndSendErrorText(error);
+        for (const id of aEnviar) registrar(id, aprovadas.has(id) ? "approved_not_sent" : "not_sent", approveAndSendSendFailedReason(motivo, aprovadas.has(id)));
       }
     }
   }
@@ -223,23 +395,29 @@ export async function applyApproveAndSend<Row extends ApproveAndSendRow, Entry e
   const conferir = [...aprovadas];
   let readbackConfirmed = true;
   if (conferir.length) {
-    const relidas = await deps.readRows(conferir);
-    const porId = new Map(relidas.rows.map(row => [row.id, row] as const));
-    for (const id of conferir) {
-      const status = (porId.get(id)?.status || "").toLocaleLowerCase("pt-BR");
-      if (status !== "aprovado" && status !== "publicado") {
-        readbackConfirmed = false;
-        registrar(id, "stale", "A releitura não confirmou a aprovação desta keyword.");
+    try {
+      const relidas = await deps.readRows(conferir);
+      const porId = new Map(relidas.rows.map(row => [row.id, row] as const));
+      for (const id of conferir) {
+        const status = (porId.get(id)?.status || "").toLocaleLowerCase("pt-BR");
+        if (status !== "aprovado" && status !== "publicado") {
+          readbackConfirmed = false;
+          registrar(id, "stale", "A releitura não confirmou a aprovação desta keyword.");
+        }
       }
+    } catch (error) {
+      readbackConfirmed = false;
+      notices.push(`A releitura final falhou (${approveAndSendErrorText(error)}): recarregue o Minerador para conferir o status gravado.`);
     }
   }
-  if ([...results.values()].some(line => line.outcome === "stale")) readbackConfirmed = false;
+  if ([...results.values()].some(line => line.outcome === "stale" || line.outcome === "failed")) readbackConfirmed = false;
 
   const ordem = previa.lines.map(line => line.id);
   const lista = ordem.flatMap(id => results.has(id) ? [results.get(id)!] : []);
-  const counts = Object.fromEntries((["approved_and_sent", "sent", "approved", "unchanged", "approved_not_sent", "not_sent", "blocked", "excluded", "stale"] as const)
+  const counts = Object.fromEntries(APPROVE_AND_SEND_OUTCOMES
     .map(outcome => [outcome, lista.filter(line => line.outcome === outcome).length])) as Record<ApproveAndSendOutcome, number>;
-  return { send: input.send, results: lista, counts, readbackConfirmed, decisionHash: previa.decisionHash, notices };
+  if (viraram.size) notices.unshift(approveAndSendSubjectSummary(viraram.size));
+  return { send: input.send, results: lista, counts, readbackConfirmed, decisionHash: previa.decisionHash, notices, ...(viraram.size ? { subjectFromVolumeIds: [...viraram] } : {}) };
 }
 
 /** A frase do resultado, em português simples. */
@@ -258,5 +436,6 @@ export function describeApproveAndSendResult(result: Pick<ApproveAndSendResult, 
   if (c.blocked) partes.push(`${c.blocked} não puderam ir`);
   if (c.excluded) partes.push(`${c.excluded} desmarcada(s) por você`);
   if (c.stale) partes.push(`${c.stale} mudaram no meio (nada gravado nelas)`);
+  if (c.failed) partes.push(`${c.failed} não concluída(s) agora (veja em cada uma o que foi gravado; rode de novo para continuar)`);
   return partes.length ? partes.join(" · ") : "Nada a fazer.";
 }

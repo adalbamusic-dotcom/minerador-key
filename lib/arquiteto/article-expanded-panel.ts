@@ -1,3 +1,4 @@
+import { funnelComparisonKey, intentComparisonKey } from "./keyword-dna-signals.ts";
 import { readCanonicalKeywordDna } from "../minerador/logical-read-model.ts";
 import { kgrApplicabilityLabel, readKgrApplicability, type KgrApplicability } from "../minerador/kgr-applicability.ts";
 
@@ -71,12 +72,12 @@ export function summarizeArticleExpandedPanel(
   const results = numericValues(keywords, "results_allintitle");
   const principalFacts = readArticleExpandedPanelKeywordFacts(principal);
   const supportFacts = supports.map(readArticleExpandedPanelKeywordFacts);
-  const intentConflicts = supportFacts.filter(facts => principalFacts.intent !== null && facts.intent !== null && facts.intent !== principalFacts.intent).length;
-  const funnelConflicts = supportFacts.filter(facts => principalFacts.funnel !== null && facts.funnel !== null && facts.funnel !== principalFacts.funnel).length;
-  const compatibilityConflicts = supportFacts.filter(facts =>
-    (principalFacts.intent !== null && facts.intent !== null && facts.intent !== principalFacts.intent)
-    || (principalFacts.funnel !== null && facts.funnel !== null && facts.funnel !== principalFacts.funnel),
-  ).length;
+  // 2026-10-19 · comparados pelo normalizador único ("Informativo" = "Informativa"; "Topo" = "TOFU").
+  const intentDiffers = (facts: ArticleExpandedPanelKeywordFacts) => { const a = intentComparisonKey(principalFacts.intent), b = intentComparisonKey(facts.intent); return Boolean(a && b && a !== b); };
+  const funnelDiffers = (facts: ArticleExpandedPanelKeywordFacts) => { const a = funnelComparisonKey(principalFacts.funnel) ?? principalFacts.funnel?.trim().toLowerCase() ?? null, b = funnelComparisonKey(facts.funnel) ?? facts.funnel?.trim().toLowerCase() ?? null; return Boolean(a && b && a !== b); };
+  const intentConflicts = supportFacts.filter(intentDiffers).length;
+  const funnelConflicts = supportFacts.filter(funnelDiffers).length;
+  const compatibilityConflicts = supportFacts.filter(facts => intentDiffers(facts) || funnelDiffers(facts)).length;
 
   return {
     keywordCount: keywords.length,

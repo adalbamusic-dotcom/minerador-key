@@ -23,8 +23,11 @@ const VAZIO = new Set<string>();
 
 /** O artigo da mesa, na forma mínima: o Assunto dele diz se é do plano (o mesmo critério da aba). */
 export type ArtigoDaMesa = { id: string; keyword: string; subjectKeywordId: string | null; published?: boolean };
-export type Registro = { processar: string[][]; concluir: string[][]; aplicados: number; silos: string[][] };
-export const novoRegistro = (): Registro => ({ processar: [], concluir: [], aplicados: 0, silos: [] });
+/* 2026-10-18 · `avisos`: o que a aba manda para o sino (`onNotify`, regra do dono "todos os avisos no sino"). */
+export type Registro = { processar: string[][]; concluir: string[][]; aplicados: number; silos: string[][]; avisos: Array<{ tone: string; text: string }> };
+export const novoRegistro = (): Registro => ({ processar: [], concluir: [], aplicados: 0, silos: [], avisos: [] });
+/** O último aviso que a aba mandou ao sino (o resumo do lote ou a falha). */
+export const ultimoAviso = (registro: Registro): string => registro.avisos.at(-1)?.text ?? "";
 
 export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro, registro, groupOf, keywordGroupOf, publishedCount = 0, improvementOpen = false, onToggleImprovement }: {
   marca: string;
@@ -46,6 +49,7 @@ export function MesaDoPlano({ marca, keywords, standings, articles, mesa, filtro
     brandId: marca, brandRef: "wificonecta--d4fa133a", keywords, standings, groupOf, keywordGroupOf, filter: filtro, articles, radarArticleIds: VAZIO,
     onApplied: () => { registro.aplicados += 1; },
     onConcluded: async groupIds => { registro.silos.push([...groupIds]); return { tone: "success", text: "Silo do plano fechado (dublê do fechamento canônico)." }; },
+    onNotify: (tone, text) => { registro.avisos.push({ tone, text }); },
   });
   const [selecionados, setSelecionados] = React.useState<Set<string>>(new Set());
   const planRowOf = (art: ArtigoDaMesa): PlanSheetRow | null => !art.published && art.subjectKeywordId ? sheet.rowByKeywordId.get(art.subjectKeywordId) ?? null : null;

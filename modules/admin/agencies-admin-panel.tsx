@@ -65,6 +65,8 @@ export default function AgenciesAdminPanel() {
   const [deleteTarget, setDeleteTarget] = useState<Invitation | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a falha também vai para o sino; as faixas da tela saíram. */
+  useNoticeBridge({ notice: error, module: "admin", area: "Agências", title: "Administração · Agências", fallbackSeverity: "ERROR" });
   useNoticeBridge({ notice, module: "admin", area: "Agências", title: "Administração · Agências", fallbackSeverity: "INFO" });
   const [form, setForm] = useState({ agencyName: "", responsibleName: "", destinationEmail: "", accessExpiresAt: "" });
 
@@ -90,7 +92,7 @@ export default function AgenciesAdminPanel() {
   };
 
   const review = async (applicationId: string, action: "approve" | "reject" | "reinvite") => {
-    setError(""); setSaving(true);
+    setError(""); setNotice(""); setSaving(true);
     try {
       const response = await fetch("/api/admin/agency-applications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationId, action }) });
       const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.error || "Não foi possível revisar a solicitação.");
@@ -100,7 +102,7 @@ export default function AgenciesAdminPanel() {
   };
 
   const invitationAction = async (invitationId: string, action: "rotate" | "revoke") => {
-    setError(""); setSaving(true);
+    setError(""); setNotice(""); setSaving(true);
     try {
       const response = await fetch("/api/admin/agency-invitations", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action === "rotate" ? { action, invitationId } : { invitationId }) });
       const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.error || "Não foi possível atualizar o convite.");
@@ -132,8 +134,6 @@ export default function AgenciesAdminPanel() {
 
   return <><GlobalTopbarPageControls actions={pageAction}/><main className="min-w-0 p-4 sm:p-6">
     <p className="max-w-3xl text-sm leading-6 text-foreground/70">Solicitações, convites autorizados e agências existentes.</p>
-    {error ? <p role="alert" className="mt-4 rounded-md border border-danger/35 bg-danger-soft p-3 text-sm text-danger">{error}</p> : null}
-    {notice ? <p role="status" className="mt-4 rounded-md border border-foreground/15 bg-foreground/5 p-3 text-sm">{notice}</p> : null}
     <p className="mt-3 text-sm text-foreground/65">Convites são persistidos e processados pela fila de comunicação. Nenhum link ou credencial é exposto ao administrador.</p>
     <nav aria-label="Visões de agências" className="mt-5 flex flex-wrap gap-2 border-b border-foreground/10 pb-3">{([["pending", "Pendentes"], ["invitations", "Convites"], ["active", "Ativas"], ["history", "Histórico"]] as const).map(([key, label]) => <button key={key} type="button" onClick={() => setView(key)} className={`min-h-10 rounded-md px-3 text-sm font-semibold ${view === key ? "bg-accent text-foreground" : "border border-foreground/20 text-foreground/75 hover:bg-foreground/10"}`}>{label}</button>)}</nav>
     {view === "pending" ? <section className={`${card} mt-5`}><h2 className="text-lg font-semibold">Solicitações pendentes</h2>{loading ? <p className="mt-4 flex items-center gap-2 text-sm"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</p> : pendingApplications.length ? <div className="mt-4 divide-y divide-foreground/10">{pendingApplications.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"><div><p className="font-medium">{item.proposed_agency_name}</p><p className="text-foreground/65">Plano {item.plan_code} · {item.status}</p></div><div className="flex gap-2"><button type="button" disabled={saving} className={actionButton} onClick={() => void review(item.id, "reject")}>Rejeitar</button><button type="button" disabled={saving} className={btn} onClick={() => void review(item.id, "approve")}>Aprovar e convidar</button></div></div>)}</div> : <p className="mt-3 text-sm text-foreground/65">Nenhuma solicitação pendente.</p>}</section> : null}

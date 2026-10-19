@@ -50,6 +50,9 @@ const DestinationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("new_silo") }).strict(),
   z.object({ kind: z.literal("existing_silo"), groupId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("published"), url: z.string().trim().min(1).max(2048) }).strict(),
+  // 2026-10-18 · "Keyword (sem Silo)" (SDD sdd-assunto-pela-principal-e-volume-2026-10-18 §6.2-a): sem grupo, sem plano, sem trava.
+  z.object({ kind: z.literal("keyword"), keywordId: z.string().uuid().optional(), keyword: z.string().trim().min(1).max(400).optional(), basis: z.enum(["zero", "low"]).nullable().optional() }).strict()
+    .refine(value => Boolean(value.keywordId) || Boolean(value.keyword), "Informe a keyword (id ou texto)."),
 ]);
 
 const RequestSchema = z.object({
@@ -59,7 +62,7 @@ const RequestSchema = z.object({
   group: z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("existing"), groupId: z.string().uuid() }).strict(),
     z.object({ mode: z.literal("new"), name: z.string().max(200).nullable().optional(), color: z.enum(EDITORIAL_GROUP_COLORS) }).strict(),
-  ]),
+  ]).optional(),
   destination: DestinationSchema.optional(),
   importRequestId: z.string().uuid().optional(),
   /** 2026-10-13 · Silo existente: "append" (padrão) ou "replace" (SDD sdd-arquiteto-so-le-e-listas-leves §5.2). */
@@ -68,7 +71,8 @@ const RequestSchema = z.object({
   decisionHash: z.string().trim().min(1).max(200).optional(),
   /** 2026-10-16 · o texto traz vários Silos (CSV de planejamento): o Silo a cadastrar agora. Sem ele, 422 SILO_CHOICE_REQUIRED com os Silos. */
   siloName: z.string().trim().min(1).max(200).optional(),
-}).strict().refine(value => Boolean(value.text?.trim()) !== Boolean(value.plan), "Envie o texto colado ou o plano estruturado (um dos dois).");
+}).strict().refine(value => Boolean(value.text?.trim()) !== Boolean(value.plan), "Envie o texto colado ou o plano estruturado (um dos dois).")
+  .refine(value => Boolean(value.group) || value.destination?.kind === "keyword", "Escolha o grupo (cor) do cadastro.");
 
 const REFUSAL_STATUS: Record<DeclaredPlanImportRefusalCode, number> = {
   ACTOR_REQUIRED: 401,
@@ -106,7 +110,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       mode: input.mode,
       text: input.text ?? null,
       plan: input.plan ?? null,
-      group: input.group,
+      // O destino "Keyword (sem Silo)" não usa grupo (o núcleo nem o lê).
+      group: input.group ?? { mode: "new", name: null, color: "" },
       destination: input.destination ?? null,
       importRequestId: input.importRequestId ?? null,
       brandSiteUrl,

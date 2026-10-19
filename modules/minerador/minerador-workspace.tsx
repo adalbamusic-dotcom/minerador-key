@@ -61,6 +61,9 @@ import { keywordLockVolume, keywordPlanLockHint, planLockChange, PLAN_LOCK_ARCHI
 import type { KeywordPlanLockItem, KeywordPlanLockResult } from "@/lib/minerador/declared-plan-import-core";
 import type { DeclaredPlanLockChoice } from "@/lib/minerador/declared-plan";
 import { GROUP_DELETE_ALL_DONE_EVENT, type GroupDeleteAllDoneDetail } from "@/lib/minerador/group-delete-all";
+import type { KeywordDeleteColorView, KeywordDeleteOut } from "@/lib/minerador/keyword-delete-core";
+import type { DeleteConfirmationRequirement, DeleteConfirmationTyped } from "@/lib/lifecycle/typed-confirmation";
+import { KeywordDeleteDetails } from "./keyword-delete-details";
 import { resolveSubjectArticleView, subjectHeadline } from "@/lib/minerador/subject-article-view";
 import { isKeywordSubjectActorId, semanticForKeywordWrite } from "@/lib/minerador/keyword-subject";
 import { convertedTitleIndex } from "@/lib/minerador/subject-conversion";
@@ -102,6 +105,7 @@ import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS, MINERADOR_
 import { approvedPackageDiverged, resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE, type ApprovalRequirement } from "@/lib/minerador/approved-package";
 import { approvalBlockerLabel } from "@/lib/minerador/approval-blockers";
 import { ApproveAndSendDialog, callApproveAndSend } from "./approve-and-send-dialog";
+import { APPROVE_AND_SEND_RESUME, describeApproveAndSendResult } from "@/lib/minerador/approve-and-send-core";
 import { ArchitectSuggestionsButton, ArchitectSuggestionsDialog } from "./architect-suggestions-dialog";
 import { readMineradorHandoff } from "@/lib/arquiteto/minerador-suggestions";
 
@@ -124,6 +128,7 @@ import { useKeywordTableOrder } from "./keyword-table/use-keyword-table-order";
 import { KeywordTableColumnResizeHandle, KeywordTableRowResizeHandle, useKeywordTableColumnResize, useKeywordTableRowResize } from "./keyword-table/keyword-table-resize";
 import { MineradorProcessAction } from "./minerador-process-action";
 import { SubjectCadastroButton, SubjectCadastroCard, type DeclaredPlanAppliedIds } from "./subject-cadastro-card";
+import { SubjectArticleEditor } from "./subject-article-editor";
 import { SUBJECT_CADASTRO_URL_PARAM, takeSubjectCadastroText } from "./subject-cadastro-handoff";
 import { subjectSearchLinkHref } from "./discovery/subject-search-model";
 import {
@@ -134,6 +139,26 @@ import {
   isSupabaseTokenExpirationError,
   withSupabaseSelectRetry,
 } from "@/lib/supabase/browser-authenticated-client";
+
+/**
+ * A prévia da exclusão de sempre, como o servidor devolveu (2026-10-17, P-4):
+ * o impacto, o `decisionHash` da decisão, a confirmação que a regra única pede,
+ * o plano do Silo de cada cor tocada e o que fica fora.
+ */
+type KeywordDeleteReview = {
+  ids: string[];
+  publishedIds: string[];
+  hardDeleteIds: string[];
+  impact: DeletionImpactEntry[];
+  confirmationName: string;
+  decisionHash: string;
+  requirement: DeleteConfirmationRequirement | null;
+  colors: KeywordDeleteColorView[];
+  out: KeywordDeleteOut[];
+  effects: string[];
+  unavailableMessage: string | null;
+  totalToDelete: number;
+};
 
 interface ListObject {
   id: string;
@@ -659,7 +684,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   );
   const [deleteApprovalOpen, setDeleteApprovalOpen] = useState(false);
   const [deleteSimpleOpen, setDeleteSimpleOpen] = useState(false);
-  const [deleteReview, setDeleteReview] = useState<{ ids: string[]; publishedIds: string[]; hardDeleteIds: string[]; impact: DeletionImpactEntry[]; confirmationName: string } | null>(null);
+  const [deleteReview, setDeleteReview] = useState<KeywordDeleteReview | null>(null);
   const [recoverableKeywords, setRecoverableKeywords] = useState<KeywordItem[]>([]);
   const restoreKeywordSnapshot = useCallback((snapshot: KeywordItem[]) => {
     setKeywords(snapshot);
@@ -2518,32 +2543,30 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     return Object.values(counts).filter(group => group.length > 1);
   }, [filteredKeywords]);
 
-  type KeywordDeleteReview = { ids: string[]; publishedIds: string[]; hardDeleteIds: string[]; impact: DeletionImpactEntry[]; confirmationName: string };
-
   const requestKeywordDeletePreview = useCallback(async (ids: readonly string[]): Promise<KeywordDeleteReview> => {
     if (!selectedBrandId) throw new Error("Marca ativa ausente para a exclusão.");
-    // F7 (SDD 2026-10-13 item 6, defeito achado): a rota aceita até 100 ids; a prévia vai em blocos e é somada.
+    /*
+     * 2026-10-17 (SDD da linha única do Minerador, P-4): a seleção vai inteira
+     * numa prévia só (até 1.000; o servidor executa em blocos de 100) e volta com
+     * o `decisionHash`, a confirmação da regra única, o plano do Silo de cada cor
+     * tocada e o que fica fora. SUBSTITUÍDO em 2026-10-17: a prévia em blocos de
+     * 100 somada no navegador (F7, 14/10) — sem ela não havia uma decisão só.
+     */
     const unicos = [...new Set(ids)];
-    const somado: { items: Array<{ impact?: Record<string, unknown>; id?: unknown; keyword?: unknown }>; publishedIds: unknown[]; hardDeleteIds: unknown[] } = { items: [], publishedIds: [], hardDeleteIds: [] };
-    for (let inicio = 0; inicio < unicos.length; inicio += 100) {
-      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywordIds: unicos.slice(inicio, inicio + 100) }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok || body?.success !== true) {
-        const error = new Error(body?.message || "Não foi possível resolver a publicação das keywords.") as Error & { code?: string; diagnostic?: Record<string, unknown> };
-        error.code = typeof body?.code === "string" ? body.code : "KEYWORD_DELETE_TRANSACTION_FAILED";
-        // O servidor envia a causa tecnica; descarta-la aqui tornava a falha ininvestigavel.
-        if (body?.diagnostic && typeof body.diagnostic === "object") error.diagnostic = body.diagnostic as Record<string, unknown>;
-        throw error;
-      }
-      if (Array.isArray(body.items)) somado.items.push(...body.items);
-      if (Array.isArray(body.publishedIds)) somado.publishedIds.push(...body.publishedIds);
-      if (Array.isArray(body.hardDeleteIds)) somado.hardDeleteIds.push(...body.hardDeleteIds);
+    const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keywordIds: unicos }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.success !== true) {
+      const error = new Error(body?.message || "Não foi possível resolver a publicação das keywords.") as Error & { code?: string; diagnostic?: Record<string, unknown> };
+      error.code = typeof body?.code === "string" ? body.code : "KEYWORD_DELETE_TRANSACTION_FAILED";
+      // O servidor envia a causa tecnica; descarta-la aqui tornava a falha ininvestigavel.
+      if (body?.diagnostic && typeof body.diagnostic === "object") error.diagnostic = body.diagnostic as Record<string, unknown>;
+      throw error;
     }
-    const body = somado;
+    const soTextos = (value: unknown) => (Array.isArray(value) ? value.filter((item: unknown): item is string => typeof item === "string") : []);
     const impact = Array.isArray(body.items) ? body.items.flatMap((item: { impact?: Record<string, unknown> }) => {
       const nested = item?.impact || {};
       return ["ownedChildren", "downstreamDrafts", "sharedReferences", "publishedReferences"].flatMap(key => Array.isArray(nested[key]) ? nested[key] : []);
@@ -2553,63 +2576,66 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       return typeof value.key === "string" && typeof value.label === "string" && typeof value.count === "number" && typeof value.classification === "string" && typeof value.behavior === "string";
     }) : [];
     const previewItems = Array.isArray(body.items) ? body.items as Array<{ id?: unknown; keyword?: unknown }> : [];
-    const resolvedIds = previewItems.map(item => item.id).filter((id: unknown): id is string => typeof id === "string");
+    const resolvedIds = soTextos(body.ids).length ? soTextos(body.ids) : previewItems.map(item => item.id).filter((id: unknown): id is string => typeof id === "string");
     const resolvedNames = previewItems.map(item => typeof item.keyword === "string" ? item.keyword.trim() : "").filter(Boolean);
-    const confirmationName = resolvedNames.length === 1
-      ? resolvedNames[0]
-      : `${resolvedIds.length || new Set(ids).size} keywords selecionadas`;
+    const requirement = body.confirmation && typeof body.confirmation === "object" ? body.confirmation as DeleteConfirmationRequirement : null;
+    const confirmationName = typeof requirement?.selectionName === "string" && requirement.selectionName
+      ? requirement.selectionName
+      : resolvedNames.length === 1 ? resolvedNames[0] : `${resolvedIds.length || unicos.length} keywords selecionadas`;
+    // O preview do servidor continua sendo a única fonte de publishedIds/hardDeleteIds.
+    const doServidor = {
+      publishedIds: Array.isArray(body.publishedIds) ? soTextos(body.publishedIds) : [],
+      hardDeleteIds: Array.isArray(body.hardDeleteIds) ? soTextos(body.hardDeleteIds) : [],
+    };
+    const { publishedIds, hardDeleteIds } = doServidor;
     return {
-      ids: resolvedIds.length > 0 ? resolvedIds : [...new Set(ids)],
-      publishedIds: Array.isArray(body.publishedIds) ? body.publishedIds.filter((id: unknown): id is string => typeof id === "string") : [],
-      hardDeleteIds: Array.isArray(body.hardDeleteIds) ? body.hardDeleteIds.filter((id: unknown): id is string => typeof id === "string") : [],
+      ids: resolvedIds.length > 0 ? resolvedIds : unicos,
+      publishedIds,
+      hardDeleteIds,
       impact,
       confirmationName,
+      decisionHash: typeof body.decisionHash === "string" ? body.decisionHash : "",
+      requirement,
+      colors: Array.isArray(body.colors) ? body.colors as KeywordDeleteColorView[] : [],
+      out: Array.isArray(body.out) ? body.out as KeywordDeleteOut[] : [],
+      effects: soTextos(body.effects),
+      unavailableMessage: typeof body.unavailableMessage === "string" ? body.unavailableMessage : null,
+      totalToDelete: publishedIds.length + hardDeleteIds.length,
     };
   }, [selectedBrandId]);
 
-  const executeKeywordDeletion = useCallback(async (review: KeywordDeleteReview) => {
+  const executeKeywordDeletion = useCallback(async (review: KeywordDeleteReview, typed: DeleteConfirmationTyped) => {
     if (!selectedBrandId) throw new Error("Marca ativa ausente para a exclusão.");
     setUpdating(true);
     try {
       /*
-       * F7 (SDD 2026-10-13 item 6, defeito achado): a rota aceita até 100 ids.
-       * A seleção maior vai em blocos de 100, cada um tudo-ou-nada; o primeiro
-       * bloco recusado para a sequência (os anteriores já foram confirmados) e
-       * a tela diz quantas saíram e por que o resto ficou.
+       * 2026-10-17 (SDD da linha única do Minerador, P-4; pedido do dono "ele tem
+       * que deixar apagar todo o grupo"): UMA chamada com a decisão inteira — o
+       * `decisionHash` da prévia e o que o dono digitou. O servidor confere pela
+       * mesma regra, executa em blocos de 100 (cada um tudo-ou-nada; um recusado
+       * não desfaz os anteriores) e relê. A keyword que carrega o plano sai pelo
+       * núcleo de "Excluir tudo da cor": sai do plano e é apagada na mesma
+       * transação. SUBSTITUÍDO em 2026-10-17: os blocos de 100 mandados pelo
+       * navegador (F7, 14/10).
        */
-      const publicadasDaPrevia = new Set(review.publishedIds);
-      const hardDeletedIds: string[] = [];
-      const recoverableIds: string[] = [];
-      let blocoRecusado: (Error & { code?: string }) | null = null;
-      for (let inicio = 0; inicio < review.ids.length; inicio += 100) {
-        const bloco = review.ids.slice(inicio, inicio + 100);
-        const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          // A declaracao do fluxo recuperavel: o humano viu o dialogo "Remover
-          // keywords publicadas por 24 horas" e digitou o nome. Sem ela o banco
-          // recusa o lote — que e o que impede uma publicada sumir sozinha.
-          body: JSON.stringify({ keywordIds: bloco, allowRecoverable: review.publishedIds.length > 0 && bloco.some(id => publicadasDaPrevia.has(id)) }),
-        });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok || body?.success !== true) {
-          const error = new Error(body?.message || "A exclusão não foi concluída.") as Error & { code?: string };
-          error.code = typeof body?.code === "string" ? body.code : "KEYWORD_DELETE_TRANSACTION_FAILED";
-          if (!hardDeletedIds.length && !recoverableIds.length) throw error;
-          blocoRecusado = error;
-          break;
-        }
-        if (Array.isArray(body.hardDeletedIds)) hardDeletedIds.push(...(body.hardDeletedIds as string[]));
-        if (Array.isArray(body.recoverableIds)) recoverableIds.push(...(body.recoverableIds as string[]));
+      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // A declaracao do fluxo recuperavel: o humano viu o dialogo "Remover
+        // keywords publicadas por 24 horas" e digitou o nome. Sem ela o banco
+        // recusa o lote — que e o que impede uma publicada sumir sozinha.
+        body: JSON.stringify({ keywordIds: review.ids, allowRecoverable: review.publishedIds.length > 0, decisionHash: review.decisionHash, typed }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body?.success !== true) {
+        const error = new Error(body?.message || "A exclusão não foi concluída.") as Error & { code?: string };
+        error.code = typeof body?.code === "string" ? body.code : "KEYWORD_DELETE_TRANSACTION_FAILED";
+        throw error;
       }
+      const soTextos = (value: unknown) => (Array.isArray(value) ? value.filter((item: unknown): item is string => typeof item === "string") : []);
+      const hardDeletedIds = soTextos(body.hardDeletedIds);
+      const recoverableIds = soTextos(body.recoverableIds);
       const confirmadas = new Set([...hardDeletedIds, ...recoverableIds]);
-      if (blocoRecusado) {
-        setKeywords(previous => previous.filter(item => !confirmadas.has(item.id)));
-        setSelectedIds(current => new Set([...current].filter(id => !confirmadas.has(id))));
-        if (recoverableIds.length) void loadRecoverableKeywords(selectedBrandId).then(linhas => setRecoverableKeywords(linhas)).catch(() => undefined);
-        showNotification("error", `${confirmadas.size} de ${review.ids.length} keyword(s) saíram (blocos de 100). O bloco seguinte foi recusado e nada dele saiu: ${blocoRecusado.message}`, { code: blocoRecusado.code || "KEYWORD_DELETE_TRANSACTION_FAILED", stage: "delete_transaction", persistent: true });
-        return false;
-      }
       // The server/RPC is the timestamp authority. Re-read the tombstones
       // instead of projecting deleted_at/purge_after from the browser clock.
       const recoverableReadback = recoverableIds.length > 0
@@ -2617,8 +2643,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         : [];
       const recoveryRows = recoverableReadback.filter(item => recoverableIds.includes(item.id));
 
-      setKeywords(previous => previous.filter(item => !review.ids.includes(item.id)));
-      setSelectedIds(current => new Set([...current].filter(id => !review.ids.includes(id))));
+      // Só sai da planilha o que o servidor confirmou (o que ficou fora continua).
+      setKeywords(previous => previous.filter(item => !confirmadas.has(item.id)));
+      setSelectedIds(current => new Set([...current].filter(id => !confirmadas.has(id))));
       if (recoveryRows.length > 0) {
         setRecoverableKeywords(previous => {
           const byId = new Map(previous.map(item => [item.id, item]));
@@ -2627,35 +2654,55 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         });
       }
 
-      if (hardDeletedIds.length > 0 && recoverableIds.length > 0) {
-        showNotification("success", `${hardDeletedIds.length} keyword(s) excluída(s) definitivamente; ${recoverableIds.length} removida(s) da operação por 24 horas.`);
-      } else if (recoverableIds.length > 0) {
-        showNotification("success", `${recoverableIds.length} keyword(s) publicada(s) removida(s) da operação e disponível(is) para restauração por 24 horas.`);
+      type CorDoResultado = { colorLabel?: unknown; outcome?: unknown; message?: unknown; colorFreed?: unknown; plan?: { ok?: unknown; outcome?: unknown; planVersion?: unknown } | null };
+      const cores = Array.isArray(body.colors) ? body.colors as CorDoResultado[] : [];
+      // O plano do grupo mudou: a etiqueta de cor relê os grupos.
+      if (cores.length) void keywordGroups.refresh();
+      const blocos = Array.isArray(body.blocks) ? body.blocks as Array<{ outcome?: unknown; message?: unknown }> : [];
+      const recusas = [
+        ...blocos.filter(bloco => bloco.outcome !== "done").map(bloco => String(bloco.message || "")),
+        ...cores.filter(cor => cor.outcome === "refused").map(cor => `Cor ${String(cor.colorLabel || "")}: ${String(cor.message || "")}`),
+      ].filter(Boolean);
+      const partes = [
+        hardDeletedIds.length ? `${hardDeletedIds.length} keyword(s) excluída(s) definitivamente` : null,
+        recoverableIds.length ? `${recoverableIds.length} publicada(s) removida(s) da operação e disponível(is) para restauração por 24 horas` : null,
+        ...cores.map(cor => cor.plan && cor.plan.ok === true
+          ? cor.plan.outcome === "cleared" ? `o plano do Silo da cor ${String(cor.colorLabel || "")} ficou limpo`
+            : cor.plan.outcome === "reduced" ? `o plano do Silo da cor ${String(cor.colorLabel || "")} está na v${String(cor.plan.planVersion ?? "?")}` : null
+          : null),
+        ...cores.filter(cor => cor.colorFreed === true).map(cor => `a cor ${String(cor.colorLabel || "")} ficou livre`),
+        Array.isArray(body.out) && body.out.length ? `${body.out.length} ficaram fora (o motivo estava na prévia)` : null,
+      ].filter((parte): parte is string => Boolean(parte));
+      if (body.complete === true) {
+        showNotification("success", `${partes.join("; ")}.`);
       } else {
-        showNotification("success", `${hardDeletedIds.length} keyword(s) excluída(s) definitivamente.`);
+        showNotification(confirmadas.size ? "warning" : "error", `${confirmadas.size} de ${review.totalToDelete} keyword(s) saíram${partes.length ? ` (${partes.join("; ")})` : ""}. ${recusas.length ? `Um bloco foi recusado e nada dele saiu: ${recusas.slice(0, 2).join(" ")}` : "Parte não foi confirmada na releitura; recarregue o Minerador para conferir."}`, { code: "KEYWORD_DELETE_PARTIAL", stage: "delete_transaction", persistent: true });
       }
       if (recoverableIds.length > 0 && recoveryRows.length !== recoverableIds.length) {
         showNotification("info", "A remoção recuperável foi confirmada pelo servidor; recarregue a marca para atualizar a lista de recuperação.", { code: "KEYWORD_RECOVERY_READBACK_PENDING", stage: "delete_readback", persistent: true });
       }
-      return true;
+      return body.complete === true;
     } catch (error) {
-      const failure = error && typeof error === "object" ? error as { code?: unknown; diagnostic?: unknown } : {};
+      const failure = error && typeof error === "object" ? error as { code?: unknown; diagnostic?: unknown; message?: unknown } : {};
         const code = typeof failure.code === "string" ? failure.code : "KEYWORD_DELETE_TRANSACTION_FAILED";
         const diagnostic = failure.diagnostic && typeof failure.diagnostic === "object" && !Array.isArray(failure.diagnostic)
           ? failure.diagnostic as Record<string, unknown>
           : undefined;
       if (code === "KEYWORD_DELETE_SUBJECT_PROTECTED") {
-        showNotification("error", "Nada foi apagado: a seleção tem keyword que carrega um Assunto do plano do Silo. Tire-a do plano antes (“Tirar do plano” no card Cadastrar Assuntos → Silo existente).", { code, stage: "subject_protected", persistent: true });
+        // 2026-10-17: a exclusão comum tira a keyword do plano; esta recusa só sobra para a corrida (o plano mudou depois da prévia).
+        showNotification("error", "Nada foi apagado neste bloco: uma keyword passou a carregar Assunto do plano depois da prévia. Clique Excluir de novo: a prévia mostra o que sai do plano.", { code, stage: "subject_protected", persistent: true });
       } else if (code === "KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW") {
         showNotification("error", "A seleção contém uma keyword publicada. Reabra a confirmação reforçada para usar a recuperação de 24 horas.", { code, stage: "publication_recheck", persistent: true });
+      } else if (code === "DECISION_STALE" || code === "CONFIRMATION_REQUIRED" || code === "NOTHING_TO_DELETE" || code === "DELETE_IN_PROGRESS") {
+        showNotification("error", typeof failure.message === "string" && failure.message ? failure.message : "Nada foi apagado. Clique Excluir de novo.", { code, stage: "delete_decision", persistent: true });
       } else {
-        showNotification("error", "Nada foi apagado: a transação não foi confirmada e nenhuma alteração parcial foi mantida.", { code, stage: "delete_transaction", persistent: true });
+        showNotification("error", "Nada foi apagado: a transação não foi confirmada e nenhuma alteração parcial foi mantida.", { code, stage: "delete_transaction", persistent: true, diagnostic });
       }
       return false;
     } finally {
       setUpdating(false);
     }
-  }, [loadRecoverableKeywords, keywords, selectedBrandId, setSelectedIds, showNotification]);
+  }, [keywordGroups, loadRecoverableKeywords, selectedBrandId, setSelectedIds, showNotification]);
 
   /*
    * F7 · EXCLUIR TUDO DA COR (SDD 2026-10-13 `sdd-arquiteto-so-le-e-listas-leves`, item 6).
@@ -3729,20 +3776,24 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   };
 
   // Ação em lote: o servidor resolve publicação antes de abrir a confirmação.
-  const handleBatchDelete = async (approved = false, requestedIds?: readonly string[]) => {
+  const handleBatchDelete = async (approved = false, requestedIds?: readonly string[], typed: DeleteConfirmationTyped = {}) => {
     if (!selectedBrandId) return false;
 
     if (approved) {
       if (!deleteReview) return false;
       setDeleteApprovalOpen(false);
       setDeleteSimpleOpen(false);
-      const completed = await executeKeywordDeletion(deleteReview);
+      const completed = await executeKeywordDeletion(deleteReview, typed);
       if (completed) setDeleteReview(null);
       return completed;
     }
 
     const ids = requestedIds ? [...new Set(requestedIds)] : [...selectedIds];
     if (ids.length === 0) return false;
+    if (ids.length > 1000) {
+      showNotification("error", `São ${ids.length} keywords: a exclusão aceita até 1000 numa decisão. Exclua em partes.`);
+      return false;
+    }
     setUpdating(true);
     let review: KeywordDeleteReview;
     try {
@@ -3761,6 +3812,13 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       return false;
     } finally {
       setUpdating(false);
+    }
+
+    // Tudo ficou fora (com o motivo): nada a confirmar.
+    if (review.totalToDelete === 0) {
+      const motivos = review.out.slice(0, 3).map(item => `“${item.keyword}”: ${item.message}`).join(" ");
+      showNotification("error", `Nada foi apagado: ${review.out.length || ids.length} keyword(s) ficam fora. ${motivos}`.trim(), { code: "NOTHING_TO_DELETE", stage: "delete_preview", persistent: true });
+      return false;
     }
 
     setDeleteReview(review);
@@ -4810,6 +4868,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             subjectKeywordTextOf={subjectKeywordTextOf}
                             subjectConvertedTitleOf={subjectConvertedTitleOf}
                             subjectSemanticOf={keywordSemanticOf}
+                            subjectEditor={selectedBrandId && item.id ? view => <SubjectArticleEditor brandId={selectedBrandId} keyword={item} view={view} onApplied={ids => handleCadastroKeywordsChanged(ids)} /> : undefined}
                             onPublicationAction={(action) => handlePublicationLinkAction(item, action)}
                             allowPublishedWorkflowStatus={false}
                             statusUpdating={updating}
@@ -4845,7 +4904,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           scopeLabel={approveAndSendRequest.scopeLabel}
           send={approveAndSendRequest.send}
           onClose={() => setApproveAndSendRequest(null)}
-          onApplied={touched => rereadAfterApproval(touched)}
+          onApplied={async (touched, result) => {
+            // 2026-10-19 · um aviso só, no sino, no fim: o desfecho depois da releitura (ou o "parou no meio").
+            const relida = await rereadAfterApproval(touched).catch(() => false);
+            if (!result) showNotification("warning", `Aprovar e enviar parou no meio: a planilha foi relida com o que ficou gravado. ${APPROVE_AND_SEND_RESUME}`, { code: "APPROVE_AND_SEND_PARTIAL", stage: "approve_and_send", persistent: true });
+            else {
+              const pendente = Boolean(result.counts.stale || result.counts.failed || result.counts.approved_not_sent || result.counts.not_sent || !relida);
+              showNotification(pendente ? "warning" : "success", `${describeApproveAndSendResult(result)}${relida ? " · conferido na releitura." : " · a releitura da planilha falhou: recarregue o Minerador para conferir."}`, pendente ? { code: "APPROVE_AND_SEND_PARTIAL", stage: "approve_and_send", persistent: true } : {});
+            }
+            return relida;
+          }}
         />
       ) : null}
       {architectSuggestionsOpen && selectedBrandId ? (
@@ -5352,12 +5420,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       <DeleteConfirmation open={deleteSimpleOpen} title="Excluir keywords não publicadas?"
         description="Esta ação excluirá definitivamente as keywords selecionadas e os dados operacionais não publicados que pertencem a elas. Versões e eventos canônicos permanecem preservados."
         confirmationName={deleteReview?.confirmationName || ""} impact={deleteReview?.impact || []} confirmLabel="Excluir definitivamente"
-        onCancel={() => { setDeleteSimpleOpen(false); setDeleteReview(null); }} onConfirm={() => handleBatchDelete(true)}/>
+        requirement={deleteReview?.requirement ?? null}
+        details={deleteReview ? <KeywordDeleteDetails effects={deleteReview.effects} out={deleteReview.out} colors={deleteReview.colors} unavailableMessage={deleteReview.unavailableMessage}/> : null}
+        onCancel={() => { setDeleteSimpleOpen(false); setDeleteReview(null); }} onConfirm={typed => handleBatchDelete(true, undefined, typed)}/>
 
       <PublishedDeleteConfirmation open={deleteApprovalOpen} title="Remover keywords publicadas por 24 horas"
-        description={`Esta ação removerá ${deleteReview?.publishedIds.length || 0} keyword(s) publicada(s) da operação e permitirá restauração durante 24 horas.`}
+        description={`Esta ação removerá ${deleteReview?.publishedIds.length || 0} keyword(s) publicada(s) da operação e permitirá restauração durante 24 horas.${deleteReview && deleteReview.hardDeleteIds.length ? ` ${deleteReview.hardDeleteIds.length} não publicada(s) da seleção ${deleteReview.hardDeleteIds.length === 1 ? "é apagada" : "são apagadas"} de vez.` : ""}`}
         confirmationName={deleteReview?.confirmationName || ""} impact={deleteReview?.impact || []}
-        onCancel={() => { setDeleteApprovalOpen(false); setDeleteReview(null); }} onConfirm={() => handleBatchDelete(true)}/>
+        requirement={deleteReview?.requirement ?? null}
+        details={deleteReview ? <KeywordDeleteDetails effects={deleteReview.effects} out={deleteReview.out} colors={deleteReview.colors} unavailableMessage={deleteReview.unavailableMessage}/> : null}
+        onCancel={() => { setDeleteApprovalOpen(false); setDeleteReview(null); }} onConfirm={typed => handleBatchDelete(true, undefined, typed)}/>
 
       {/* Modal de ExportaÃ§Ã£o com OpÃ§Ã£o de Renomear Arquivo */}
       {isExportModalOpen && (

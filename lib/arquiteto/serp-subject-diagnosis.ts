@@ -64,6 +64,7 @@
  *
  * Domínio puro: sem React, sem storage, sem rede.
  */
+import type { PublishedPageSubject } from "./article-improvement.ts";
 import type { ArticleFormationKeyword } from "./article-formation.ts";
 import type { CrossSiloReinforcementProposal, SiloFormationPlan } from "./article-formation-priority.ts";
 import { bestAnchorConvergence, type AnchorConvergenceBasis } from "./serp-subject-convergence.ts";
@@ -233,6 +234,8 @@ export type PublishedAnchorInfo = {
   url: string | null;
   canonical: string | null;
   slug: string | null;
+  /** 2026-10-19 · o Assunto declarado na página (a régua da troca do refazedor, `proposePublishedPrimarySwap`); ausente = sem Assunto. */
+  pageSubject?: PublishedPageSubject | null;
 };
 
 export type SubjectAnchorInfo = { note: string | null; destinationUrl: string | null };
@@ -515,11 +518,13 @@ export function diagnoseSerpSubjectAnchors(input: {
         .filter((item): item is ArticleFormationKeyword => Boolean(item))
         .map(item => ({ ...item, volumeValidated: input.volumeValidated.has(item.keywordId), subjectDeclared: input.subjectDeclared?.has(item.keywordId) ?? false }));
       const identity = { url: info.url, canonical: info.canonical, slug: info.slug };
+      // 2026-10-19 · com o Assunto na página, a mesma régua do refazedor: o Assunto é a âncora e a principal ATUAL é avaliada.
+      const peloAssunto = "pageSubject" in info && info.pageSubject ? { pageSubject: info.pageSubject, currentPrincipalKeyword: input.keywords.get(params.principalKeywordId)?.keyword ?? null } : {};
       const cabem = slotsLeft > 0 ? [...params.memberIds, ...deFora] : [...params.memberIds];
-      swap = proposePublishedPrimarySwap({ published: ancoraKw, post: info.post, identity, candidates: comoCandidatas(cabem), serp, elsewhere: emOutroArtigo });
+      swap = proposePublishedPrimarySwap({ published: ancoraKw, post: info.post, identity, candidates: comoCandidatas(cabem), serp, elsewhere: emOutroArtigo, ...peloAssunto });
       const postoParaMedir = info.post === "unknown" ? "free" as const : info.post;
       if (postoParaMedir === "free" && !slotsLeft && deFora.length) {
-        const todas = proposePublishedPrimarySwap({ published: ancoraKw, post: "free", identity, candidates: comoCandidatas([...params.memberIds, ...deFora]), serp, elsewhere: emOutroArtigo });
+        const todas = proposePublishedPrimarySwap({ published: ancoraKw, post: "free", identity, candidates: comoCandidatas([...params.memberIds, ...deFora]), serp, elsewhere: emOutroArtigo, ...peloAssunto });
         const melhor = todas.substitute;
         const atual = info.post === "free" ? swap.substitute : null;
         if (melhor && !noArtigo.has(melhor.keywordId) && (!atual || melhor.volume > atual.volume)) {
@@ -528,7 +533,7 @@ export function diagnoseSerpSubjectAnchors(input: {
       }
       // Posto não declarado: o que SERIA proposto se o dono declarasse "Livre".
       if (info.post === "unknown") {
-        swapIfDeclaredFree = proposePublishedPrimarySwap({ published: ancoraKw, post: "free", identity, candidates: comoCandidatas(cabem), serp, elsewhere: emOutroArtigo });
+        swapIfDeclaredFree = proposePublishedPrimarySwap({ published: ancoraKw, post: "free", identity, candidates: comoCandidatas(cabem), serp, elsewhere: emOutroArtigo, ...peloAssunto });
       }
     }
 

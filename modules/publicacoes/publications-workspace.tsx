@@ -20,6 +20,7 @@ import { createPublicationExport, createPublicationsCsv } from "@/lib/publicacoe
 import { isPartialContentDocument } from "@/lib/editorial/content-document-listing";
 import { useNoticeBridge } from "@/components/global-notice-center";
 import Link from "next/link";
+import { InfoHint } from "@/components/info-hint";
 import { PUBLICATIONS_LIBRARY_DEFAULT_FILTER, PUBLICATIONS_LIBRARY_FILTERS, PUBLICATIONS_LIBRARY_FILTER_LABELS, filterEditorialLibrary, projectEditorialLibrary, writerHrefForRow, type EditorialLibraryFilter } from "@/lib/publicacoes/editorial-library";
 import { useEditorialGroups } from "@/components/editorial/use-editorial-groups";
 import { ArticleGroupRowTag, editorialGroupStripeClass } from "@/components/editorial/article-group-controls";
@@ -48,7 +49,8 @@ export function PublicationsWorkspace() {
   /* O escopo da biblioteca é a ENTREGA. Sem registro, o documento não é daqui. */
   const [libraryStatus, setLibraryStatus] = useState<EditorialLibraryFilter>(PUBLICATIONS_LIBRARY_DEFAULT_FILTER);
   const [tab, setTab] = useState<"library" | "queue" | "published" | "updates">("library");
-  const [notice, setNotice] = useState(""); const [busyId, setBusyId] = useState<string | null>(null);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a faixa do topo saiu; o tom vai junto para o sino. */
+  const [notice, setNotice] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null); const [busyId, setBusyId] = useState<string | null>(null);
   useNoticeBridge({ notice, module: "publicacoes", area: "Publicações", title: "Publicações", fallbackSeverity: "INFO" });
   const historyValue = useMemo(() => ({ operationalPublications: pipeline.operationalPublications }), [pipeline.operationalPublications]);
   const history = useLocalHistory("publicacoes", historyValue, snapshot => pipeline.restoreOperationalSnapshot("publicacoes", snapshot), 30, selectedBrandId || "sem-marca");
@@ -107,22 +109,22 @@ export function PublicationsWorkspace() {
     if (!selectedBrandId) return null;
     const request = { ...action, brandId: selectedBrandId, publicationId: publication.id, expectedLockVersion: publication.lockVersion } as PublicationActionRequest;
     const actor = sessionId(session); let optimistic: OperationalPublication;
-    try { optimistic = applyPublicationAction(publication, request, actor); } catch (error) { setNotice(error instanceof Error ? error.message : "Ação inválida."); return null; }
-    history.capture(`Publicações: ${request.action}`); replaceLocal(optimistic); setBusyId(publication.id); setNotice("");
+    try { optimistic = applyPublicationAction(publication, request, actor); } catch (error) { setNotice({ type: "error", message: error instanceof Error ? error.message : "Ação inválida." }); return null; }
+    history.capture(`Publicações: ${request.action}`); replaceLocal(optimistic); setBusyId(publication.id); setNotice(null);
     try {
       const response = await fetch("/api/publicacoes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) }); const body = await response.json();
       if (!response.ok) { replaceLocal(publication); throw new Error(body.error || "Não foi possível salvar a ação."); }
-      if (body.publication) replaceLocal(body.publication as OperationalPublication); setNotice("Ação de Publicações salva."); return body.publication as OperationalPublication;
+      if (body.publication) replaceLocal(body.publication as OperationalPublication); setNotice({ type: "success", message: "Ação de Publicações salva." }); return body.publication as OperationalPublication;
     } catch (error) {
-      if (error instanceof Error && (error.message.includes("persistência") || error.message.includes("indisponível"))) setNotice(`${error.message} Resultado mantido apenas no fallback local.`);
-      else if (error instanceof Error) setNotice(error.message);
+      if (error instanceof Error && (error.message.includes("persistência") || error.message.includes("indisponível"))) setNotice({ type: "warning", message: `${error.message} Resultado mantido apenas no fallback local.` });
+      else if (error instanceof Error) setNotice({ type: "error", message: error.message });
       return null;
     } finally { setBusyId(null); }
   };
 
   const exportPublication = async (publication: OperationalPublication, format: "markdown" | "json") => {
-    const listado = pipeline.documents[publication.documentId]; if (!listado) { setNotice("O conteúdo do artigo não está disponível para exportação."); return; }
-    setBusyId(publication.id); setNotice("");
+    const listado = pipeline.documents[publication.documentId]; if (!listado) { setNotice({ type: "warning", message: "O conteúdo do artigo não está disponível para exportação." }); return; }
+    setBusyId(publication.id); setNotice(null);
     try {
       /*
        * E1 · a mesa entrega o documento sem o pacote do Radar. A exportação e o
@@ -132,10 +134,10 @@ export function PublicationsWorkspace() {
       const document = isPartialContentDocument(listado) ? await pipeline.loadDocumentDetail(listado.id) : listado;
       const artifact = await createPublicationExport(publication, document, format); downloadFile(artifact.fileName, artifact.mimeType, artifact.content);
       await runAction(publication, { action: "record_export", exportFileName: artifact.fileName, exportFormat: format, documentHash: artifact.documentHash });
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível exportar."); setBusyId(null); }
+    } catch (error) { setNotice({ type: "error", message: error instanceof Error ? error.message : "Não foi possível exportar." }); setBusyId(null); }
   };
 
-  const exportManifest = () => { downloadFile("publicacoes.csv", "text/csv;charset=utf-8", createPublicationsCsv(pipeline.operationalPublications)); setNotice("Manifesto CSV exportado."); };
+  const exportManifest = () => { downloadFile("publicacoes.csv", "text/csv;charset=utf-8", createPublicationsCsv(pipeline.operationalPublications)); setNotice({ type: "success", message: "Manifesto CSV exportado." }); };
   const columns: OperationalGridColumn<PublicationRow>[] = [
     { id: "title", header: "Conteúdo", value: row => row.title, pinned: "left", sortable: true, width: 250, render: row => <span className="flex min-w-0 flex-col items-start gap-1"><ArticleSubjectLine as="span" phrase={assuntoDoArtigo(row.articleId)} showEmpty={false} testId="publicacoes-row-subject"/><span className="max-w-full truncate">{row.title}</span><ArticleGroupRowTag group={grupoDoArtigo(row.articleId)} inherited={!gruposDePublicacoes.articleGroupById.get(row.articleId)?.persisted}/></span> },
     { id: "unitType", header: "Unidade", value: row => row.unitType === "silo_page" ? "Página do silo" : "Artigo", width: 95 },
@@ -199,16 +201,21 @@ export function PublicationsWorkspace() {
     </select>
   </>;
 
-  return <div className="flex h-screen min-h-0 flex-col">{notice && <div className="shrink-0 border-b border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-[9px] text-amber-300">{notice}</div>}
-    <HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="publicacoes" showHistory={false} showUndoRedo={false}/>{tab === "library" ? <><PublicacoesAreaTabs tabs={areaTabs} ungroupedDetail={semGrupoNaEtiqueta}/><BibliotecaEditorial rows={libraryVisible} status={libraryStatus} onStatus={setLibraryStatus} brandRef={activeBrandRef} groupOf={grupoDoArtigo} subjectOf={assuntoDoArtigo} emptyByGroup={libraryDoEixo.length > 0 && libraryVisible.length === 0 ? vazioPeloGrupo : null}/></> : <OperationalDataGrid module={`publicacoes:${tab}`} userId={sessionId(session)} brandId={selectedBrandId} rows={rows} rowFilter={filtroDoGrupo} rowStripeClassName={row => editorialGroupStripeClass(grupoDoArtigo(row.articleId))} columns={columns} topbar={{ moduleId: "publicacoes", tabs: areaTabs, groupTagUngroupedDetail: semGrupoNaEtiqueta, history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "publicacoes" } })), undoLabel: "Desfazer publicação", redoLabel: "Refazer publicação", historyLabel: "Histórico de Publicações", undoTitle: "Desfazer alteração em Publicações", redoTitle: "Refazer alteração em Publicações", historyTitle: count => `Histórico de Publicações (${count})` }, renderActions: renderTopbarActions }} emptyTitle="Nenhum conteúdo nesta aba." renderActions={row => <PublicationRowActions row={row} busy={busyId === row.id} onAction={runAction} onExport={exportPublication} onNotice={setNotice}/>} renderExpanded={row => <PublicationExpanded row={row}/>}/>}
+  return <div className="flex h-screen min-h-0 flex-col">
+    <HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="publicacoes" showHistory={false} showUndoRedo={false}/>{tab === "library" ? <><PublicacoesAreaTabs tabs={areaTabs} ungroupedDetail={semGrupoNaEtiqueta}/><BibliotecaEditorial rows={libraryVisible} status={libraryStatus} onStatus={setLibraryStatus} brandRef={activeBrandRef} groupOf={grupoDoArtigo} subjectOf={assuntoDoArtigo} emptyByGroup={libraryDoEixo.length > 0 && libraryVisible.length === 0 ? vazioPeloGrupo : null}/></> : <OperationalDataGrid module={`publicacoes:${tab}`} userId={sessionId(session)} brandId={selectedBrandId} rows={rows} rowFilter={filtroDoGrupo} rowStripeClassName={row => editorialGroupStripeClass(grupoDoArtigo(row.articleId))} columns={columns} topbar={{ moduleId: "publicacoes", tabs: areaTabs, groupTagUngroupedDetail: semGrupoNaEtiqueta, history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "publicacoes" } })), undoLabel: "Desfazer publicação", redoLabel: "Refazer publicação", historyLabel: "Histórico de Publicações", undoTitle: "Desfazer alteração em Publicações", redoTitle: "Refazer alteração em Publicações", historyTitle: count => `Histórico de Publicações (${count})` }, renderActions: renderTopbarActions }} emptyTitle="Nenhum conteúdo nesta aba." renderActions={row => <PublicationRowActions row={row} busy={busyId === row.id} onAction={runAction} onExport={exportPublication} onNotice={message => setNotice({ type: "warning", message })}/>} renderExpanded={row => <PublicationExpanded row={row}/>}/>}
 
   </div>;
 }
 
 function PublicationRowActions({ row, busy, onAction, onExport, onNotice }: { row: PublicationRow; busy: boolean; onAction: (publication: OperationalPublication, action: PublicationAction) => Promise<OperationalPublication | null>; onExport: (publication: OperationalPublication, format: "markdown" | "json") => Promise<void>; onNotice: (message: string) => void }) {
   if (!isWorkflow(row)) return <span className="text-[9px] text-slate-600">Registro legado; documento local ausente</span>;
-  if (row.state === "approved") return <span className="text-[9px] text-cyan-400">Importe pelo seletor</span>;
-  if (row.state === "ready_to_export") return <button className={btn} disabled={busy} onClick={() => void onAction(row, { action: "queue" })}><Send className="mr-1 h-3 w-3"/>Colocar na fila</button>;
+  /*
+   * 2026-10-18 · defeito 1: o seletor de importação não existe mais. A entrada é
+   * "Enviar a Publicações" no Redator, que já deixa o registro pronto para
+   * exportar; aprovado sem envio só pede esse envio.
+   */
+  if (row.state === "approved") return <span className="inline-flex items-center gap-1 text-sm text-context-accent">Aguardando “Enviar a Publicações” no Redator<InfoHint title="Aguardando envio" description="O documento está aprovado no Redator, mas ainda não foi entregue. Abra o artigo no Redator e clique em “Enviar a Publicações”: o registro passa a pronto para exportar e o “Colocar na fila” aparece aqui."/></span>;
+  if (row.state === "ready_to_export") return <span className="inline-flex items-center gap-1"><button className={btn} disabled={busy} onClick={() => void onAction(row, { action: "queue" })}><Send className="mr-1 h-3 w-3"/>Colocar na fila</button><InfoHint title="Colocar na fila" description="Para que serve: põe o artigo entregue pelo Redator na fila de exportação. Como usar: clique; a linha passa a “fila” e ganha os botões Markdown e JSON para baixar o arquivo. Grátis; não publica nada fora da plataforma."/></span>;
   if (row.state === "queued") return <div className="flex gap-1"><button className={btn} disabled={busy} onClick={() => void onExport(row, "markdown")}><Download className="mr-1 h-3 w-3"/>Markdown</button><button className={btn} disabled={busy} onClick={() => void onExport(row, "json")}>JSON</button></div>;
   if (row.state === "exported") return <PublicationPublishForm row={row} busy={busy} onPublish={onAction} onNotice={onNotice}/>;
   if (row.state === "published") {

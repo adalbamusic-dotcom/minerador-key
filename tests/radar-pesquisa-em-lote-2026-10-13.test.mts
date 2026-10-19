@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { montarRadar, React } from "./radar-dom-harness.mts";
+import { comProductShell, montarRadar, React } from "./radar-dom-harness.mts";
 import {
   RADAR_RESEARCH_BATCH_FINALIZED_REASON,
   planRadarResearchBatch,
@@ -56,22 +56,47 @@ test("prévia · o teto do lote: 4 lentes por consulta, SERP gravada reaproveita
     candidato("novo"), // canônica + 2 auxiliares = 3 consultas × 4 lentes
     candidato("retomado", { phase1: COMPLETAR, canonicalReusable: true, auxiliaryToRun: 1 }), // só 1 auxiliar
     candidato("analisar", { phase1: ANALISAR }), // nenhuma consulta paga
-    candidato("pronto", { finalized: true, phase1: fase("NONE", "Pesquisa finalizada", { enabled: false }) }),
+    candidato("pronto", { finalized: true, articleBlueprint: "APPROVED", phase1: fase("NONE", "Pesquisa finalizada", { enabled: false }) }),
+    /* 2026-10-18 (dono) · finalizado sem artigo-modelo concluído conhecido: só o artigo-modelo, sem pesquisa paga. */
+    candidato("sem-modelo", { finalized: true, phase1: fase("NONE", "Pesquisa finalizada", { enabled: false }) }),
   ]);
   assert.deepEqual(plano.run.map(item => [item.articleId, item.firstStep, item.serpCallsCeiling, item.aiCallsCeiling]), [
     ["novo", "START", 12, 2],
     ["retomado", "START", 4, 2],
     ["analisar", "ANALYZE", 0, 2],
   ]);
-  assert.equal(plano.serpCallsCeiling, 16);
-  assert.equal(plano.aiCallsCeiling, 6);
+  assert.deepEqual(plano.blueprint.map(item => [item.articleId, item.aiCallsCeiling]), [["sem-modelo", 2]]);
+  assert.equal(plano.serpCallsCeiling, 16, "o finalizado sem artigo-modelo não paga pesquisa");
+  assert.equal(plano.aiCallsCeiling, 8);
   assert.deepEqual(plano.skipped.map(item => [item.articleId, item.reason]), [["pronto", RADAR_RESEARCH_BATCH_FINALIZED_REASON]]);
-  assert.equal(radarResearchBatchButtonLabel(plano), "Pesquisar e finalizar (3 artigos)");
+  assert.equal(radarResearchBatchButtonLabel(plano), "Pesquisar e finalizar (4 artigos)");
   const prevista = radarResearchBatchConfirmation(plano).join(" ");
   assert.match(prevista, /até 16 chamada\(s\)/);
   assert.match(prevista, /cache primeiro, nas 4 lentes/);
-  assert.match(prevista, /até 6 chamada\(s\) para organizar o artigo-modelo/);
-  assert.match(prevista, /1 já finalizado\(s\): pulado\(s\), sem custo/);
+  assert.match(prevista, /até 8 chamada\(s\) para organizar o artigo-modelo/);
+  assert.match(prevista, /1 já finalizado\(s\) sem artigo-modelo: só o artigo-modelo é organizado \(\+ até 2 chamadas de IA cada\)/);
+  assert.match(prevista, /1 já finalizado\(s\) com o artigo-modelo concluído: pulado\(s\), sem custo/);
+});
+
+test("2026-10-18 · execução · o finalizado sem artigo-modelo não é aberto nem pesquisado: só a série do artigo-modelo, depois das pesquisas", async () => {
+  const plano = planRadarResearchBatch([candidato("sem-modelo", { finalized: true }), candidato("falha-modelo", { finalized: true }), candidato("a1", { phase1: ANALISAR }), candidato("pronto", { finalized: true, articleBlueprint: "APPROVED" })]);
+  const tela = telaDeMentira({ a1: { finalized: false, phase1: ANALISAR } }, { a1: { ANALYZE: finalizado } });
+  const pedidos: string[][] = [];
+  const resultado = await runRadarResearchBatch({
+    plan: plano, confirmed: true, open: tela.open, read: tela.read, run: tela.run,
+    organizeBlueprints: async ids => { pedidos.push(ids); return { done: ["sem-modelo"], failed: [{ articleId: "falha-modelo", message: "A IA não respondeu." }] }; },
+  });
+  assert.deepEqual(tela.abertos, ["a1"], "o finalizado não é aberto: nada é pesquisado nele");
+  assert.deepEqual(pedidos, [["sem-modelo", "falha-modelo"]], "uma série só, depois das pesquisas");
+  assert.deepEqual(resultado.items.map(item => [item.articleId, item.status]), [["sem-modelo", "FINALIZED"], ["falha-modelo", "REFUSED"], ["a1", "FINALIZED"], ["pronto", "SKIPPED"]]);
+  assert.match(resultado.items[1].reason || "", /Artigo-modelo: A IA não respondeu\./);
+  /* Só finalizados sem artigo-modelo também abrem o lote. */
+  const soModelo = planRadarResearchBatch([candidato("sem-modelo", { finalized: true })]);
+  assert.equal(soModelo.run.length, 0);
+  assert.equal(radarResearchBatchButtonLabel(soModelo), "Pesquisar e finalizar (1 artigo)");
+  const semPorta = await runRadarResearchBatch({ plan: soModelo, confirmed: true, open: tela.open, read: tela.read, run: tela.run });
+  assert.equal(semPorta.started, true);
+  assert.equal(semPorta.items[0].status, "REFUSED", "sem a série, para com o motivo — nunca some");
 });
 
 test("prévia · fica fora com motivo: YouTube/Amazon, contexto não resolvido, ação indisponível, Refazer depois de nada analisável, intenção em conflito", () => {
@@ -163,7 +188,7 @@ test("execução · a MESMA sequência do botão: Iniciar → Analisar e finaliz
 
 test("execução · o finalizado é pulado (nem aberto) e o recusado na prévia não roda", async () => {
   const plano = planRadarResearchBatch([
-    candidato("pronto", { finalized: true }),
+    candidato("pronto", { finalized: true, articleBlueprint: "APPROVED" }),
     candidato("video", { mode: "YOUTUBE" }),
     candidato("a1", { phase1: ANALISAR }),
   ]);
@@ -255,36 +280,45 @@ test("releitura · finalizado só com o servidor confirmando; o resumo diz pulad
 /* ============================== 4 · a tela ============================== */
 
 test("tela (DOM) · o botão abre a prévia com o teto; só o \"Confirmar e pesquisar\" dispara", async () => {
-  const plano = planRadarResearchBatch([candidato("a1"), candidato("a2", { phase1: ANALISAR }), candidato("pronto", { finalized: true })]);
+  const plano = planRadarResearchBatch([candidato("a1"), candidato("a2", { phase1: ANALISAR }), candidato("pronto", { finalized: true, articleBlueprint: "APPROVED" })]);
   let confirmacoes = 0;
   const tela = await montarRadar();
-  await tela.render(React.createElement(RadarResearchBatchAction, { plan: plano, busy: false, onConfirm: () => { confirmacoes += 1; } }));
+  await tela.render(comProductShell(React.createElement(RadarResearchBatchAction, { plan: plano, busy: false, onConfirm: () => { confirmacoes += 1; } })));
   assert.equal(tela.get("radar-pesquisa-lote").textContent, "Pesquisar e finalizar (2 artigos)");
+  /* 2026-10-18 · o "i" ao lado do botão explica para que serve e como usar. */
+  assert.ok(tela.container.querySelector(".info-hint-inline-trigger"), "o InfoHint ao lado de \"Pesquisar e finalizar\"");
   await tela.click("radar-pesquisa-lote");
   assert.equal(confirmacoes, 0, "abrir a prévia não dispara nada");
   const previa = tela.get("radar-pesquisa-lote-confirm").textContent || "";
   assert.match(previa, /até 12 chamada\(s\)/);
   assert.match(previa, /até 4 chamada\(s\) para organizar o artigo-modelo/);
-  assert.match(previa, /1 já finalizado\(s\): pulado\(s\), sem custo/);
+  assert.match(previa, /1 já finalizado\(s\) com o artigo-modelo concluído: pulado\(s\), sem custo/);
   await tela.click("radar-pesquisa-lote-confirmar");
   assert.equal(confirmacoes, 1);
   tela.destroy();
 });
 
-test("tela (DOM) · sem artigo para pesquisar não há botão; o progresso diz quem parou e por quê", async () => {
+/*
+ * 2026-10-18 · SUBSTITUÍDO "no fim, a faixa diz quem parou e por quê": todos os
+ * avisos no sino (regra do dono). A faixa é só ANDAMENTO; o desfecho do lote,
+ * com os parados e o motivo, vai para o sino pelo resumo (`radarResearchBatchSummary`).
+ */
+test("tela (DOM) · sem artigo para pesquisar não há botão; a faixa é só andamento e some no fim (o desfecho vai ao sino)", async () => {
   const tela = await montarRadar();
-  await tela.render(React.createElement(RadarResearchBatchAction, { plan: planRadarResearchBatch([candidato("pronto", { finalized: true })]), busy: false, onConfirm: () => {} }));
+  await tela.render(React.createElement(RadarResearchBatchAction, { plan: planRadarResearchBatch([candidato("pronto", { finalized: true, articleBlueprint: "APPROVED" })]), busy: false, onConfirm: () => {} }));
   assert.equal(tela.query("radar-pesquisa-lote"), null);
-  await tela.render(React.createElement(RadarResearchBatchProgressStrip, { progress: {
-    active: false, position: 0, total: 2,
-    items: [
-      { articleId: "a1", title: "Creme facial", status: "FINALIZED", step: "ANALYZE", reason: null, steps: ["START", "ANALYZE"] },
-      { articleId: "a2", title: "Sérum", status: "REFUSED", step: "START", reason: "O DataForSEO recusou a consulta.", steps: ["START"] },
-    ],
-  } }));
-  const texto = tela.get("radar-pesquisa-lote-progresso").textContent || "";
-  assert.match(texto, /1 finalizado\(s\) · 1 parado\(s\)/);
-  assert.match(texto, /“Sérum” · parado — O DataForSEO recusou a consulta\./);
+  const itens = [
+    { articleId: "a1", title: "Creme facial", status: "FINALIZED" as const, step: "ANALYZE" as const, reason: null, steps: ["START" as const, "ANALYZE" as const] },
+    { articleId: "a2", title: "Sérum", status: "RUNNING" as const, step: "START" as const, reason: null, steps: ["START" as const] },
+  ];
+  await tela.render(React.createElement(RadarResearchBatchProgressStrip, { progress: { active: true, position: 2, total: 2, items: itens } }));
+  const andamento = tela.get("radar-pesquisa-lote-progresso").textContent || "";
+  assert.match(andamento, /Artigo 2 de 2 · “Sérum”/);
+  assert.match(andamento, /1 finalizado\(s\)/);
+  await tela.render(React.createElement(RadarResearchBatchProgressStrip, { progress: { active: false, position: 0, total: 2, items: [itens[0], { ...itens[1], status: "REFUSED" as const, reason: "O DataForSEO recusou a consulta." }] } }));
+  assert.equal(tela.query("radar-pesquisa-lote-progresso"), null, "lote encerrado: a faixa sai; o desfecho está no sino");
+  const resumo = radarResearchBatchSummary([itens[0], { ...itens[1], status: "REFUSED" as const, reason: "O DataForSEO recusou a consulta." }]);
+  assert.match(resumo, /1 parado\(s\) — "Sérum": O DataForSEO recusou a consulta\./, "quem parou e por quê vai no aviso do sino");
   tela.destroy();
 });
 
@@ -311,7 +345,14 @@ test("estrutura · o lote da página chama os handlers do botão do artigo, e ne
   assert.doesNotMatch(lote, /fetch\(|collectSerp|collectAuxiliarySerp|postRadarArticleBlueprintOrganize|recollect/, "o lote não tem caminho próprio até provider ou IA");
   /* Só o "Confirmar e pesquisar" da prévia chega ao laço. */
   assert.match(lote, /<RadarResearchBatchAction plan=\{plano\} busy=\{Boolean\(lotePesquisa\?\.active\)\} onConfirm=\{\(\) => void pesquisarEFinalizarEmLote\(plano\)\} \/>/);
-  assert.equal((pagina.match(/pesquisarEFinalizarEmLote\(/g) || []).length, 1, "o laço só é chamado pela confirmação");
+  /*
+   * 2026-10-18 · e pela confirmação de "Adotar a versão nova" sobre a
+   * investigação congelada (o congelamento novo segue pelo MESMO lote, com o
+   * custo dito na prévia da adoção). Nenhum outro caminho chega ao laço.
+   */
+  assert.equal((pagina.match(/pesquisarEFinalizarEmLote\(/g) || []).length, 2, "o laço só é chamado pela confirmação do lote e pela da adoção");
+  assert.match(pagina, /const congelarDeNovoDepoisDaAdocao = async[\s\S]*?await pesquisarEFinalizarEmLote\(plano\);/);
+  assert.match(pagina, /if \(congelarDeNovo\?\.length\) void congelarDeNovoRef\.current\?\.\(congelarDeNovo\);/, "só depois da adoção confirmada pelo servidor");
 });
 
 test("estrutura · a barra oferece só o caminho do piloto; as operações antigas ficam no código, fora da tela", () => {

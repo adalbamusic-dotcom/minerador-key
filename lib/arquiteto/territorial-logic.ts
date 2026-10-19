@@ -8,6 +8,7 @@ import {
   type KeywordTerritoryAssignment,
   type TerritoryMembershipState,
 } from "./territory.ts";
+import { intentComparisonKey } from "./keyword-dna-signals.ts";
 import type { TerritorialLandscape } from "./territorial-landscape.ts";
 import { qualifiesAsNewSiloHead, type KeywordUniverse } from "./keyword-universe.ts";
 
@@ -121,7 +122,8 @@ const keywordText = (keyword: Record<string, unknown>) => {
   return {
     text: tokens(keyword.keyword),
     entity: tokens(semantic.entidade_central),
-    intent: normalize(keyword.intent ?? semantic.intencao_principal),
+    // 2026-10-19 · o normalizador único da intenção ("Informativo" = "Informativa").
+    intent: intentComparisonKey(String(keyword.intent ?? semantic.intencao_principal ?? "")) ?? "",
   };
 };
 
@@ -212,7 +214,7 @@ export function deriveTerritorialLogic(input: {
         continue;
       }
       const intentAffinity = facts.intent && normalize(territory.macroIntent)
-        ? (facts.intent === normalize(territory.macroIntent) ? 1 : 0.5)
+        ? (facts.intent === intentComparisonKey(String(territory.macroIntent ?? "")) ? 1 : 0.5)
         : 0.5;
       // Entidade e fronteira pesam mais que o texto: similaridade lexical
       // sozinha nunca sustenta um destino.

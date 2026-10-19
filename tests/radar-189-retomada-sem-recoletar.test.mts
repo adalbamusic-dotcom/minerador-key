@@ -235,7 +235,8 @@ test("RADAR 18.9 · D — a decisão de reaproveitar é domínio, e ela recusa p
    * todo o domínio verde e a canônica sendo recoletada — paga — em runtime. É
    * a única linha do fluxo que separa retomar de recobrar, e ela é fixada.
    */
-  assert.match(rodada, /const reaproveitarCanonica = planoDeReaproveitamento\.reuse;/, "o handler usa a decisão do domínio, não um literal");
+  /* 2026-10-18 · a mesma decisão do domínio; sobre composição nova, só reaproveita se o rebase carregou a principal. */
+  assert.match(rodada, /const reaproveitarCanonica = planoDeReaproveitamento\.reuse && \(!rebase \|\| rebase\.canonicalCarried\);/, "o handler usa a decisão do domínio, não um literal");
   assert.match(rodada, /hasPersistedRecord: Boolean\(registroAnterior\)/);
   assert.match(rodada, /hasCanonicalSnapshot: Boolean\(data\.latestSerpRecord\?\.research\)/);
   assert.equal((rodada.match(/await collect\(target\)/g) || []).length, 1, "uma só coleta canônica no procedimento");
@@ -383,7 +384,8 @@ test("RADAR 18.9 · L — a materialização é persistida, e preserva o que já
 
   /* A rodada também preserva: ela só começa do zero quando não reaproveita. */
   const rodada = trecho(pagina(), "const rodadaDePesquisaProfunda = async () => {", "const recuperarPesquisaPaga = async () => {");
-  assert.match(rodada, /reaproveitarCanonica && registroAnterior\s*\r?\n?\s*\? registroAnterior/);
+  /* 2026-10-18 · sobre composição nova, o registro rebaseado (plano novo + evidência do que ficou) — nunca do zero. */
+  assert.match(rodada, /reaproveitarCanonica && registroAnterior\s*\r?\n?\s*\? rebase\?\.record \?\? registroAnterior/);
   assert.match(rodada, /radarResearchResumption\(\{ record: registro \}\)\.auxiliaryToCollect/, "a fila sai da autoridade, não de um filtro local");
 });
 

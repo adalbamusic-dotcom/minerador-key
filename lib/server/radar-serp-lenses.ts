@@ -151,6 +151,11 @@ const texto = (valor: unknown) => (typeof valor === "string" && valor.trim() ? v
  * sobre o targeting que a última medição da keyword gravou, lido no servidor,
  * filtrado pela marca, em coluna estreita. Sem keyword do acervo, sem
  * targeting resolvível ou com a leitura falha: os códigos do ambiente.
+ *
+ * SUBSTITUÍDO (2026-10-18, SDD `sdd-localidade-serp-por-marca-2026-10-18.md`,
+ * L2): a LOCALIDADE não sai mais do targeting da keyword. `environment` é a
+ * base resolvida pela marca (`resolveBrandSerpTarget`): a localidade é sempre
+ * a dela; do targeting sai só o idioma. Marca nacional: os do ambiente, como antes.
  */
 export async function readRadarKeywordTargetCodes(
   client: Pick<SupabaseClient, "from">,
@@ -173,12 +178,12 @@ export async function readRadarKeywordTargetCodes(
     if (!linha || linha.id !== keywordId) return { ...ambiente, readFailed: false };
     const alvo = registro(linha.targeting);
     try {
+      // 2026-10-18 · só o idioma sai do targeting; a localidade é a da marca (`environment`, a base resolvida).
       const resolvido = resolveDataForSeoTargeting({
         geoTargetConstants: alvo?.sourceGeoTargetConstants ?? alvo?.geoTargetConstants,
         languageCode: texto(alvo?.languageCode) ?? texto(alvo?.language),
-        locationCode: environment.locationCode,
       });
-      return { codes: { locationCode: resolvido.locationCode, languageCode: resolvido.languageCode }, cacheKeywordId: keywordId, source: "keyword_targeting", readFailed: false };
+      return { codes: { locationCode: environment.locationCode, languageCode: resolvido.languageCode }, cacheKeywordId: keywordId, source: "keyword_targeting", readFailed: false };
     } catch (error) {
       // Localidade que o Minerador também recusaria: não há entrada dele a reaproveitar.
       if (error instanceof DataForSeoTargetingError) return { codes: environment, cacheKeywordId: keywordId, source: "environment", readFailed: false };

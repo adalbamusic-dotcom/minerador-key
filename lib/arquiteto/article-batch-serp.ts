@@ -102,8 +102,15 @@ export function serpIdentityPrincipalCheck(input: { keywordId: string; rowOf: (k
   if (!row || !row.keyword || !row.packageSemantic) return { identity: false, reason: IDENTITY_REASONS.absent };
   const doArtigo = input.articles.filter(article => article.principalKeywordId === input.keywordId || article.subjectKeywordId === input.keywordId || article.keywordIds.includes(input.keywordId));
   const comoPrincipal = doArtigo.find(article => article.principalKeywordId === input.keywordId) ?? null;
-  if (doArtigo.length && !comoPrincipal) return { identity: false, reason: IDENTITY_REASONS.notPrincipal };
   const proprio = resolveKeywordSubject(row.packageSemantic);
+  /*
+   * 2026-10-19 · O ASSUNTO COMO FOCO NO REFAZER (cobrança do dono de 19/10): a página publicada com o Assunto declarado
+   * nela mesma é o tema do artigo; trocada no modo antigo, ela é secundária no DNA vigente, mas a prévia do refazedor a
+   * propõe como o foco (a principal) quando nenhuma busca com volume cabe no Assunto. A SERP dela, na localidade da
+   * marca, é a coleta (G6), conferida aqui no banco como antes.
+   */
+  const paginaComAssunto = proprio.declared && Boolean(readPublishedIdentity({ status: row.status ?? null, analise_semantica: row.packageSemantic }));
+  if (doArtigo.length && !comoPrincipal && !paginaComAssunto) return { identity: false, reason: IDENTITY_REASONS.notPrincipal };
   const marca = resolveDeclaredPrincipal(row.packageSemantic).mark;
   // O Assunto do artigo: o do ArticleDNA; sem ele, o desta keyword (cadastro único) ou o do plano que a declarou principal.
   const assuntoId = comoPrincipal?.subjectKeywordId ?? (proprio.declared ? input.keywordId : marca?.subjectKeywordId ?? null);

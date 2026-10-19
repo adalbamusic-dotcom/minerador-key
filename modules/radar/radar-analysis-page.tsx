@@ -709,7 +709,7 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
         </div>
         <nav className="mt-5 flex flex-wrap gap-2" aria-label="Etapas do Radar">{tabs.map(item => <button key={item} className={`${button} ${tab === item ? "border-module-accent/50 bg-selected text-foreground" : ""}`} onClick={() => setTab(item)}>{tabLabels[item]}</button>)}</nav>
       </header>
-      {notice && <div className="border-b border-warning/40 bg-warning-soft px-5 py-3 text-base text-warning" role="status">{notice}</div>}
+      {/* 2026-10-18 · o aviso desta tela vai só para o sino (regra do dono: todos os avisos no sino); a faixa amarela saiu. */}
       <div className="flex-1 overflow-auto p-5"><div className="mx-auto max-w-7xl space-y-5">
         {tab === "resumo" && renderFlowProgress()}
         {tab === "resumo" && renderOverview()}

@@ -12,7 +12,19 @@ import { ArticleFormationDecisionSchema, ArticleFormationRefSchema } from "@/lib
 import { WorkingSubjectAnchorSchema } from "@/lib/arquiteto/declared-subject-guard";
 import { assertWorkingSubjectAnchorAssignment } from "@/lib/server/arquiteto-subject-guard";
 import { createTerritoryWorkflowItem, listTerritoryWorkflowItems, readTerritoryWorkflowItem, updateTerritoryWorkflowItem } from "@/lib/server/arquiteto-territory-store";
-import { planTerritoryUndoForBrand } from "@/lib/server/arquiteto-territory-undo";
+import {
+  assertWholeSiloUndoConfirmed,
+  planTerritoryUndoForBrand,
+  readBackWholeSiloUndo,
+  territoryUndoPreviewOf,
+  territoryUndoWriteRuntime,
+  unlinkWholeSiloGroup,
+  writeWholeSiloDownstream,
+  writeWholeSiloUndoRejections,
+  type TerritoryUndoPreview,
+  type TerritoryUndoWriteDeps,
+} from "@/lib/server/arquiteto-territory-undo";
+import { territoryUndoLabel } from "@/lib/arquiteto/territory-undo";
 import { listTerritorialSerpAssessments } from "@/lib/server/arquiteto-territorial-serp-store";
 import { listArticleFormationSerpAssessments, listArticleFormationSerpForList } from "@/lib/server/arquiteto-article-serp-store";
 import { listTerritorialAiProposals } from "@/lib/server/arquiteto-territorial-ai-store";
@@ -103,11 +115,17 @@ const PatchSchema = z.object({
     territory: TerritoryDraftSchema,
     acceptance: SerpPrimaryAcceptanceSchema,
   }).strict()).max(20).optional(),
-  // Desfazer Silo sugerido: só o ref e o lock. Ator, hora, motivo e as
-  // keywords que saem são do servidor, lidos do banco.
+  // Desfazer Silo: só o ref e o lock. Ator, hora, motivo e as keywords que
+  // saem são do servidor, lidos do banco. 2026-10-18 · o Silo inteiro
+  // (consolidado, do plano, com par ou artigos aprovados): `mode: "preview"`
+  // devolve o que sai, sem gravar; a gravação leva o `decisionHash` da prévia e
+  // o nome do Silo digitado (`typedName`). Aditivos: sem eles, o de sempre.
   territoryUndos: z.array(z.object({
     territoryRef: TerritoryRefSchema,
     expectedLock: z.number().int().positive(),
+    mode: z.enum(["preview", "apply"]).optional(),
+    decisionHash: z.string().min(1).max(200).optional(),
+    typedName: z.string().max(500).optional(),
   }).strict()).max(20).optional(),
   // Working copy de Silo: operações de EDIÇÃO da cópia de trabalho. Consolidar
   // o Silo é outro ato, e não passa por aqui.
@@ -225,11 +243,33 @@ export async function handleArchitectWorkspaceDelta(request: Request) {
   }
 }
 
-export async function handleArchitectWorkspacePatch(request: Request, authorizedContext?: import("./pipeline-runtime").PipelineContext) {
+/** Dependências injetáveis da gravação (os testes trocam o writer do evento; a rota usa as reais). */
+export type ArchitectWorkspacePatchDeps = { territoryUndo?: Partial<TerritoryUndoWriteDeps> };
+
+export async function handleArchitectWorkspacePatch(request: Request, authorizedContext?: import("./pipeline-runtime").PipelineContext, deps: ArchitectWorkspacePatchDeps = {}) {
   try {
     const parsed = PatchSchema.parse(await request.json());
     const context = authorizedContext ?? await resolvePipelineContext({ brandId: parsed.brandId, module: "arquiteto", action: "edit" });
     if (authorizedContext && (context.brandId !== parsed.brandId || context.module !== "arquiteto" || !["edit", "approve"].includes(context.action))) throw new PipelineRuntimeError("NOT_AUTHORIZED", "Contexto incompatível com a edição.", 403);
+    /*
+     * 2026-10-18 · A PRÉVIA DO "DESFAZER SILO" (Silo inteiro). Só leitura: o
+     * plano é lido e conferido como na gravação, e nada é escrito. Um pedido de
+     * prévia só leva prévias (nenhuma outra alteração junto).
+     */
+    const previas = (parsed.territoryUndos || []).filter(undo => undo.mode === "preview");
+    if (previas.length) {
+      const soPrevia = previas.length === parsed.territoryUndos!.length
+        && !parsed.updates?.length && !parsed.territoryCreates?.length && !parsed.territoryUpdates?.length
+        && !parsed.territoryPrimaryAcceptances?.length && !parsed.siloWorkingCopyCreates?.length && !parsed.siloWorkingCopyUpdates?.length;
+      if (!soPrevia) return NextResponse.json({ success: false, error: "A prévia do Desfazer Silo vai sozinha: nenhuma alteração junto.", code: "INVALID_CONTEXT" }, { status: 400 });
+      const territoryUndoPreviews: TerritoryUndoPreview[] = [];
+      for (const undo of previas) {
+        const plano = await planTerritoryUndoForBrand(context, undo.territoryRef, undo.expectedLock);
+        const vigente = await readTerritoryWorkflowItem(context, undo.territoryRef);
+        territoryUndoPreviews.push(territoryUndoPreviewOf(undo.territoryRef, plano, vigente ? territoryUndoLabel(vigente.territory) : "Silo"));
+      }
+      return NextResponse.json({ success: true, data: { persistence: "NOT_PERSISTED", source: "CANONICAL_REMOTE", territoryUndoPreviews } });
+    }
     const repository = new WorkflowRepository(context);
     // Só as keywords dos itens enviados, lidas antes de qualquer gravação, como
     // antes; a marca é filtrada e `deleted_at` continua sem filtro.
@@ -325,20 +365,35 @@ export async function handleArchitectWorkspacePatch(request: Request, authorized
       territories.push(await updateTerritoryWorkflowItem(context, update.territoryRef, update.expectedLock, update.territory));
     }
     /*
-     * DESFAZER SILO SUGERIDO. O plano lê e confere tudo antes da primeira
-     * escrita (lock do território incluído). Depois: cada keyword volta para
-     * "sem Silo" pelo writer da decisão de Silo, com o lock dela; por último o
-     * território vira `rejected` pelo writer territorial, com o lock dele.
-     * Se uma keyword falhar, o território fica de pé e o Silo continua na tela
-     * para tentar de novo. Nada é apagado.
+     * DESFAZER SILO. O plano lê e confere tudo antes da primeira escrita (lock
+     * do território incluído). Depois: cada keyword volta para "sem Silo" pelo
+     * writer da decisão de Silo, com o lock dela; por último o território vira
+     * `rejected` pelo writer territorial, com o lock dele. Se uma keyword
+     * falhar, o território fica de pé e o Silo continua na tela para tentar de
+     * novo. Nada é apagado.
+     *
+     * 2026-10-18 · o SILO INTEIRO (consolidado, do plano, com par ou artigos
+     * aprovados — o Pilar incluído): a prévia vigente, o nome digitado e a
+     * permissão de aprovar são conferidos antes de tudo; os eventos `rejected`
+     * (artigos e par, pelo writer de "Retirar artigo do Silo") vêm primeiro —
+     * repetir não duplica —, o grupo é desligado antes do território, e o
+     * sucesso só sai da releitura.
      */
+    const territoryUndoResults: Array<{ territoryRef: string; scope: "whole_silo"; rejectedVersionIds: string[]; groupUnlinked: boolean; downstreamActive: number; withdrawnItems: number; untaggedArticles: number }> = [];
     for (const undo of parsed.territoryUndos || []) {
       const plano = await planTerritoryUndoForBrand(context, undo.territoryRef, undo.expectedLock);
+      const escrita: TerritoryUndoWriteDeps = { ...territoryUndoWriteRuntime(context), ...deps.territoryUndo };
+      await assertWholeSiloUndoConfirmed(plano, undo, escrita);
+      const eventos = await writeWholeSiloUndoRejections(context, undo.territoryRef, plano, escrita);
+      // 2026-10-18 · o item adiante (Radar/Redator/Publicações) sai da operação e o artigo retirado perde a etiqueta da cor.
+      const adiante = await writeWholeSiloDownstream(context, plano, escrita);
       const undoKeywordById = await readArchitectPatchKeywords(context, architectPatchKeywordReadInput(
         plano.keywordUpdates.map(update => ({ workflowItemId: update.workflowItemId, assignment: {} })),
       ));
       for (const update of plano.keywordUpdates) updated.push(await applyKeywordUpdate(update, undoKeywordById));
+      await unlinkWholeSiloGroup(context, plano);
       territories.push(await updateTerritoryWorkflowItem(context, undo.territoryRef, undo.expectedLock, plano.territoryDraft));
+      if (plano.wholeSilo) territoryUndoResults.push({ territoryRef: undo.territoryRef, scope: "whole_silo", ...await readBackWholeSiloUndo(context, undo.territoryRef, plano, eventos), withdrawnItems: adiante.downstream.withdrawn.length, untaggedArticles: adiante.untagged.length });
     }
     for (const acceptance of parsed.territoryPrimaryAcceptances || []) {
       const declaredRef = acceptance.territory.territoryRef;
@@ -381,7 +436,7 @@ export async function handleArchitectWorkspacePatch(request: Request, authorized
       }
       siloWorkingCopies.push(await updateSiloWorkingCopy(context, update.workingCopyRef, update.expectedLock, update.workingCopy));
     }
-    return NextResponse.json({ success: true, data: { persistence: "PERSISTED", source: "CANONICAL_REMOTE", items: updated, territories, siloWorkingCopies } });
+    return NextResponse.json({ success: true, data: { persistence: "PERSISTED", source: "CANONICAL_REMOTE", items: updated, territories, siloWorkingCopies, ...(territoryUndoResults.length ? { territoryUndoResults } : {}) } });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ success: false, error: "A edição da cópia de trabalho é inválida.", code: "INVALID_CONTEXT" }, { status: 400 });
     const mapped = pipelineArtifactErrorResponse(error);

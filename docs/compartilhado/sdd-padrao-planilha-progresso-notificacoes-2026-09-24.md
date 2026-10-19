@@ -558,6 +558,7 @@ export const NOTICE_AUTO_OPEN_PREVIEW = false; // rollback: true
 - **Andamento nunca vai para o sino.** Um lote publica **um** aviso, no fim: SUCCESS só se tudo foi confirmado; WARNING se parcial ou parado; ERROR se nada deu certo. O aviso INFO `persistent` do início de lote do Processador deixa de existir.
 - O Radar para de mandar "Analisando páginas x de N" por `setNotice`: esse texto passa para o runner. `useNoticeBridge` não muda de contrato.
 - Toast continua só por `showToast` explícito.
+- **2026-10-18 · todos os avisos no sino (regra do dono, `sistema-visual.md` §24.2).** A tela não repete o aviso numa faixa: o resultado sai só pelo sino. No Radar, o andamento escrito no `notice` virou `emAndamento(...)` (linha de andamento na tela, nunca no sino). `useNoticeBridge` mantém a assinatura; o comentário "sem substituir o feedback imediato do módulo" está SUBSTITUÍDO, e fora do provider ele não publica (em vez de derrubar a tela). O cartão de tarefa do Arquiteto mostra só andamento (Q2); a tarefa que falha vai para o sino.
 
 ---
 

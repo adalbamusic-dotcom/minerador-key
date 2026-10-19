@@ -4,7 +4,7 @@ import { comProductShell, montarRadar, React, type RadarDomScreen } from "./rada
 import { ArticleImprovementPanel } from "../modules/arquiteto/article-improvement-panel.tsx";
 import { GRUPOS } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import { ARTIGO_INTRUSO, AZUL, INTRUSO_ID, MARCA_WIFI, SILO_PLANOS, grupoDaKeywordReal, mesaWifiReal } from "./arquiteto-uma-lista-so-fixtures.mts";
-import { MesaDoPlano, novoRegistro, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
+import { MesaDoPlano, novoRegistro, ultimoAviso, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
 import type { EditorialGroupScreenFilter } from "../lib/editorial/editorial-groups.ts";
 
 /*
@@ -113,7 +113,7 @@ test("Concluir formação (7, barra de sempre em 'Todos', depois do Processar): 
   assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k9", "k10", "k11", "k15"]]);
   assert.match(resultado("k9"), /ArticleDNA de k9 criado e relido/);
   assert.match(resultado("k13"), /^Não gravado: Presa no artigo/);
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /4 gravado\(s\) e relido\(s\); 3 fora desta confirmação/);
+  assert.match(ultimoAviso(registro), /4 gravado\(s\) e relido\(s\); 3 fora desta confirmação/);
   assert.equal(registro.aplicados, 1);
   semGirar(); semMinerador();
 });
@@ -139,7 +139,7 @@ test("erro do servidor na leitura do Processar: frase humana com o que fazer, po
   await marcarAzuis();
   await screen.click("architect-articles-top-process"); await assentar();
   for (const id of ["k9", "k10", "k11", "k15"]) assert.match(resultado(id), /O servidor falhou nesta etapa \(erro 500\)\. Nada foi gravado por ela; tente de novo/, id);
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /a leitura não foi confirmada \(o motivo está em cada linha\)/);
+  assert.match(ultimoAviso(registro), /a leitura não foi confirmada \(o motivo está em cada linha\)/);
   assert.doesNotMatch(screen.text(), /QUERY_FAILURE/);
   semGirar();
   assert.equal((screen.get("architect-articles-top-process") as HTMLButtonElement).disabled, false, "o Processar volta");
@@ -155,7 +155,10 @@ test("gravação que não avança: para com a frase e oferece 'Continuar a grava
   await screen.click("architect-plan-sheet-confirm"); await assentar(200);
   const aplicacoes = chamadas.filter(chamada => chamada.body?.action === "apply").length;
   assert.ok(aplicacoes > 1 && aplicacoes < 60, `chamadas limitadas (${aplicacoes})`);
-  assert.match(screen.container.querySelector("[role='alert']")!.textContent!, /A gravação parou de avançar \(0 de 4 gravado\(s\)\).*Continuar a gravação/);
+  /* 2026-10-18 · a falha vai para o sino (regra do dono); a retomada, que tem botão, fica na tela. */
+  assert.deepEqual(registro.avisos.at(-1)?.tone, "error");
+  assert.match(ultimoAviso(registro), /A gravação parou de avançar \(0 de 4 gravado\(s\)\).*Continuar a gravação/);
+  assert.equal(screen.container.querySelector("[data-testid='architect-plan-operations'] [role='alert']"), null, "a falha não volta a ser faixa na tela");
   assert.ok(screen.query("architect-plan-sheet-resume"), "a retomada fica à mão, sem novo aceite");
   semGirar();
 });

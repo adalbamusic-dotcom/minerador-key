@@ -1,3 +1,5 @@
+import { normalizeIntentKey, type CanonicalIntentKey } from "../minerador/intent-taxonomy.ts";
+
 /**
  * A ÚNICA INTERPRETAÇÃO DO KEYWORDDNA.
  *
@@ -65,12 +67,37 @@ const MARCADORES_SEM_INTENCAO = new Set([
   "indefinido", "indefinida", "nao definido", "nao definida", "n/a", "na", "-", "",
 ]);
 
-/** Normalização só para COMPARAR intenções; nada é reescrito. */
+/**
+ * Normalização só para COMPARAR intenções; nada é reescrito.
+ *
+ * 2026-10-19 · UMA TAXONOMIA SÓ (a do Minerador, `normalizeIntentKey`): o rótulo
+ * conhecido vira a família dele, sem gênero, acento nem caixa. Caso real (teste do
+ * verde, AdalbaPro): "Informativo" × "Informativa" saía como "outra intenção" e
+ * tirava 4 keywords de "como atrair pacientes sem redes sociais". Rótulo que a
+ * taxonomia não conhece continua comparado pelo texto limpo, como antes.
+ */
+/** A chave de cada família (o rótulo curto, sem acento): "Informativo", "Informativa" e "Informacional" → "informativa". */
+const INTENT_FAMILY_KEYS: Record<Exclude<CanonicalIntentKey, "unknown">, string> = { informational: "informativa", commercial_investigation: "comercial", transactional: "transacional", navigational: "navegacional", local: "local", mixed: "mista" };
 export function intentComparisonKey(value: string | null | undefined): string | null {
   if (!value) return null;
   const limpo = value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
   if (!limpo || MARCADORES_SEM_INTENCAO.has(limpo)) return null;
-  return limpo;
+  const familia = normalizeIntentKey(limpo);
+  if (familia === "unknown") return limpo;
+  return INTENT_FAMILY_KEYS[familia];
+}
+
+/**
+ * Normalização só para COMPARAR estágios de funil (topo, meio, fundo); nada é reescrito.
+ * 2026-10-19 · a mesma régua que a formação e a convergência tinham cada uma em cópia.
+ */
+export function funnelComparisonKey(value: string | null | undefined): "TOP" | "MIDDLE" | "BOTTOM" | null {
+  const texto = typeof value === "string" ? value.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") : "";
+  if (!texto) return null;
+  if (/^tofu|topo|^top|awareness|descoberta/.test(texto)) return "TOP";
+  if (/^mofu|meio|middle|considera/.test(texto)) return "MIDDLE";
+  if (/^bofu|fundo|bottom|decis|convers/.test(texto)) return "BOTTOM";
+  return null;
 }
 
 /** A intenção é dado editorial de verdade, e não um marcador de pendência. */

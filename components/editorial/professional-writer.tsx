@@ -5,6 +5,7 @@ import { radarWriterImportable } from "@/lib/redator/writer-handoff";
 import { radarPrimaryProfileOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useNoticeBridge } from "@/components/global-notice-center";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
@@ -34,7 +35,8 @@ import { runGuardian } from "@/lib/redator/guardian";
 import { writerGuardianApprovalBlockingCount, writerGuardianPanelSummary } from "@/lib/redator/guardian-panel-summary";
 import { postRadarWriterHandoffBatch, radarWriterHandoffBatchSummary } from "@/lib/radar/writer-handoff-client";
 import { WriterDerivedEnvironment, type WriterDeliverableBar } from "@/modules/redator/writer-derived-environment";
-import { actionButtonLabel, feedbackClass, toneForSaveState } from "@/lib/redator/action-feedback";
+import { actionButtonLabel, feedbackClass, toneForSaveState, WRITER_AI_COST_LABEL, writerAiInstructionPrompt } from "@/lib/redator/action-feedback";
+import { InfoHint } from "@/components/info-hint";
 import { newlyArrivedIds, resolveActiveDocument, shouldPersistLastOpened } from "@/lib/redator/active-document";
 import { WriterMediaAnchorPanel } from "@/modules/redator/writer-media-anchor-panel";
 import { WriterRadarFoundationsPanel } from "@/modules/redator/writer-radar-foundations-panel";
@@ -88,8 +90,22 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
    */
   const [mediaAssets, setMediaAssets] = useState<PanelAsset[]>([]);
   const [saveState, setSaveState] = useState<SaveState>("idle"); const [pending, setPending] = useState<ContentDocument | null>(null); const [saveMessage, setSaveMessage] = useState("");
+  /*
+   * 2026-10-18 · TODOS OS AVISOS NO SINO (regra do dono). O resultado das ações
+   * do Redator (Guardião, propostas, entrega a Publicações, importação do Radar,
+   * link) vai para o sino; a linha da barra fica com o estado do salvamento e o
+   * andamento ("Analisando o documento…"). Antes o resultado ficava só nessa
+   * linha, e o "Salvo no servidor às…" o escondia.
+   */
+  const [avisoDoRedator, setAvisoDoRedator] = useState<{ type: "success" | "error" | "warning" | "info"; message: string } | null>(null);
+  useNoticeBridge({ notice: avisoDoRedator, module: "redator", area: "Redator", title: "Redator", fallbackSeverity: "INFO" });
+  /** O desfecho vai ao sino e a linha da barra volta ao estado do salvamento (o andamento acabou). */
+  const avisarRedator = (type: "success" | "error" | "warning" | "info", message: string) => { setAvisoDoRedator({ type, message }); setSaveMessage(""); };
   const [guardianReport, setGuardianReport] = useState<GuardianReport | null>(null); const [sectionProposal, setSectionProposal] = useState<RedatorSectionProposal | null>(null); const [improveProposal, setImproveProposal] = useState<RedatorImproveProposal | null>(null); const [aiBusy, setAiBusy] = useState(false);
   const [writingFormat, setWritingFormat] = useState<"article" | "video_script" | "carousel">("article");
+  /* A aba ativa lida na hora do clique pelo Desfazer/Refazer da barra (defeito 4, 2026-10-18). */
+  const writingFormatRef = useRef(writingFormat);
+  useEffect(() => { writingFormatRef.current = writingFormat; }, [writingFormat]);
   /*
    * ===== CORTE 6A.1 · OS CONTROLES DO ENTREGÁVEL NA BARRA QUE JÁ EXISTE =====
    *
@@ -368,29 +384,29 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
     try {
       const resultado = await pipeline.sendToPublications(selected.id);
       setSaveState("saved_server");
-      setSaveMessage(resultado.change === "ALREADY_SENT"
+      avisarRedator(resultado.change === "ALREADY_SENT" ? "info" : "success", resultado.change === "ALREADY_SENT"
         ? "Este artigo já estava em Publicações; nada foi duplicado."
         : "Pacote entregue a Publicações e confirmado na leitura remota.");
     } catch (error) {
       setSaveState("error");
-      setSaveMessage(error instanceof Error ? error.message : "A entrega a Publicações não foi confirmada.");
+      avisarRedator("error", error instanceof Error ? error.message : "A entrega a Publicações não foi confirmada.");
     } finally { setAiBusy(false); }
   };
 
   const importFromRadar = async (ids: string[]) => {
-    if (!selectedBrandId) { setSaveMessage("Selecione uma marca antes de importar do Radar."); return; }
+    if (!selectedBrandId) { avisarRedator("warning", "Selecione uma marca antes de importar do Radar."); return; }
     history.capture(`Importar ${ids.length} artigo(s) do Radar`);
     setAiBusy(true);
     try {
       const resultados = await postRadarWriterHandoffBatch({ brandId: selectedBrandId, articleIds: ids });
       setImportOpen(false);
-      setSaveMessage(radarWriterHandoffBatchSummary(resultados));
+      avisarRedator(resultados.every(item => item.outcome === "IMPORTED" || item.outcome === "TRANSITION_COMPLETED") ? "success" : "info", radarWriterHandoffBatchSummary(resultados));
       /* A tela só recarrega o que o servidor confirmou ter criado. */
       if (resultados.some(item => item.outcome === "IMPORTED" || item.outcome === "TRANSITION_COMPLETED")) await pipeline.reloadOperational();
     } finally { setAiBusy(false); }
   };
   const addBlock = (kind: string, label: string, data: object) => { history.capture(`Inserir bloco: ${label}`); editor?.chain().focus().insertContent({ type: "editorialBlock", attrs: { blockId: crypto.randomUUID(), kind, label, data: JSON.stringify(data) } }).run(); };
-  const promptLink = () => { if (!editor) return; const current = editor.getAttributes("link").href as string | undefined; const href = window.prompt("URL do link", current || "https://"); if (href === null) return; if (!href) editor.chain().focus().unsetLink().run(); else { try { new URL(href); editor.chain().focus().extendMarkRange("link").setLink({ href }).run(); } catch { setSaveMessage("URL inválida; o link não foi inserido."); } } };
+  const promptLink = () => { if (!editor) return; const current = editor.getAttributes("link").href as string | undefined; const href = window.prompt("URL do link", current || "https://"); if (href === null) return; if (!href) editor.chain().focus().unsetLink().run(); else { try { new URL(href); editor.chain().focus().extendMarkRange("link").setLink({ href }).run(); } catch { avisarRedator("warning", "URL inválida; o link não foi inserido."); } } };
   const metadata = (key: keyof ContentDocument["metadata"], value: string | string[]) => { if (!selected || (published && ["slug", "principalKeyword", "canonical"].includes(key))) return; if (!editCheckpointRef.current) { history.capture(`Editar metadados de ${selected.title}`); editCheckpointRef.current = true; } const updated = ContentDocumentSchema.parse({ ...selected, metadata: { ...selected.metadata, [key]: key === "canonical" ? value || null : value } }); setGuardianReport(null); setPending(updated); pipeline.updateDocumentLocal(updated); setSaveState("dirty"); };
   const wordCount = editor?.getText().split(/\s+/).filter(Boolean).length || 0;
   const localGuardian = selected ? runGuardian(selected, "local") : null;
@@ -404,34 +420,42 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
       const hash = await contentHash(selected);
       const response = await fetch("/api/redator/guardian", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brandId: selectedBrandId, document: selected, contentHash: hash }) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error || "Não foi possível analisar o documento.");
-      setGuardianReport(GuardianReportSchema.parse(body.report)); setSaveMessage("Guardião atualizado; a decisão continua humana.");
-    } catch (error) { setGuardianReport(localGuardian); setSaveMessage(error instanceof Error ? error.message : "Análise local disponível; servidor indisponível."); }
+      setGuardianReport(GuardianReportSchema.parse(body.report)); avisarRedator("info", "Guardião atualizado; a decisão continua humana.");
+    } catch (error) { setGuardianReport(localGuardian); avisarRedator("warning", error instanceof Error ? error.message : "Análise local disponível; servidor indisponível."); }
     finally { setAiBusy(false); }
   };
 
   const requestSectionProposal = async (sectionId: string) => {
     if (!selected || aiBusy) return;
-    const humanInstruction = window.prompt("Instrução opcional para esta seção", "") ?? "";
+    /*
+     * 2026-10-18 · defeitos 2 e 5 do inventário: a caixa diz o custo ANTES da
+     * chamada paga, e Cancelar (null) não chama a IA. Antes, `?? ""` seguia
+     * para a chamada mesmo cancelada.
+     */
+    const humanInstruction = window.prompt(writerAiInstructionPrompt("section"), "");
+    if (humanInstruction === null) return;
     setAiBusy(true); setSaveMessage("Preparando proposta da seção…");
     try {
       const response = await fetch("/api/redator/section", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brandId: selectedBrandId, document: selected, sectionId, humanInstruction }) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error || "Não foi possível preparar a seção.");
-      setSectionProposal(body.proposal as RedatorSectionProposal); setSaveMessage(`Proposta pronta para revisão humana; nada foi aplicado.${writerAlertRegistrationNotice(body.divergences)}`);
-    } catch (error) { setSaveMessage(error instanceof Error ? error.message : "Não foi possível preparar a seção."); }
+      setSectionProposal(body.proposal as RedatorSectionProposal); avisarRedator("info", `Proposta pronta para revisão humana; nada foi aplicado.${writerAlertRegistrationNotice(body.divergences)}`);
+    } catch (error) { avisarRedator("error", error instanceof Error ? error.message : "Não foi possível preparar a seção."); }
     finally { setAiBusy(false); }
   };
 
   const requestImproveProposal = async () => {
     if (!selected || !editor || aiBusy) return;
     const { from, to } = editor.state.selection; const selectedText = editor.state.doc.textBetween(from, to, "\n");
-    if (!selectedText.trim()) { setSaveMessage("Selecione um trecho antes de pedir melhoria."); return; }
-    const humanInstruction = window.prompt("Como deseja melhorar o trecho?", "Melhorar clareza e naturalidade sem mudar o sentido.") ?? "";
+    if (!selectedText.trim()) { avisarRedator("warning", "Selecione um trecho antes de pedir melhoria."); return; }
+    /* 2026-10-18 · defeitos 2 e 5: o custo vem antes da chamada; Cancelar não chama a IA. */
+    const humanInstruction = window.prompt(writerAiInstructionPrompt("improve"), "Melhorar clareza e naturalidade sem mudar o sentido.");
+    if (humanInstruction === null) return;
     setAiBusy(true); setSaveMessage("Preparando melhoria do trecho…");
     try {
       const response = await fetch("/api/redator/improve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brandId: selectedBrandId, document: selected, selectedText, humanInstruction }) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error || "Não foi possível melhorar o trecho.");
-      setImproveProposal(body.proposal as RedatorImproveProposal); setSaveMessage(`Melhoria pronta para revisão humana; nada foi aplicado.${writerAlertRegistrationNotice(body.divergences)}`);
-    } catch (error) { setSaveMessage(error instanceof Error ? error.message : "Não foi possível melhorar o trecho."); }
+      setImproveProposal(body.proposal as RedatorImproveProposal); avisarRedator("info", `Melhoria pronta para revisão humana; nada foi aplicado.${writerAlertRegistrationNotice(body.divergences)}`);
+    } catch (error) { avisarRedator("error", error instanceof Error ? error.message : "Não foi possível melhorar o trecho."); }
     finally { setAiBusy(false); }
   };
 
@@ -439,12 +463,12 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
     if (!editor || !sectionProposal) return;
     let insertionPosition: number | null = null;
     editor.state.doc.descendants((node, position) => { if (node.attrs?.blockId === sectionProposal.sectionId) insertionPosition = position + node.nodeSize; });
-    if (insertionPosition === null) { setSaveMessage("A seção não está mais no documento; a proposta foi descartada."); setSectionProposal(null); return; }
+    if (insertionPosition === null) { avisarRedator("warning", "A seção não está mais no documento; a proposta foi descartada."); setSectionProposal(null); return; }
     editor.chain().focus().insertContentAt(insertionPosition, sectionProposal.paragraphs.map(text => ({ type: "paragraph", attrs: { blockId: crypto.randomUUID() }, content: [{ type: "text", text }] }))).run();
-    setSectionProposal(null); setSaveMessage("Proposta aplicada como novos parágrafos editáveis.");
+    setSectionProposal(null); avisarRedator("success", "Proposta aplicada como novos parágrafos editáveis.");
   };
 
-  const applyImproveProposal = () => { if (!editor || !improveProposal) return; editor.chain().focus().insertContent(improveProposal.replacementText).run(); setImproveProposal(null); setSaveMessage("Melhoria aplicada ao trecho selecionado; revise antes de salvar."); };
+  const applyImproveProposal = () => { if (!editor || !improveProposal) return; editor.chain().focus().insertContent(improveProposal.replacementText).run(); setImproveProposal(null); avisarRedator("success", "Melhoria aplicada ao trecho selecionado; revise antes de salvar."); };
 
   const { registerControls, updateControls, unregisterControls } = useGlobalTopbarControlsRegistration();
   const globalTopbarControls = useMemo<GlobalTopbarModuleControls>(() => ({
@@ -453,15 +477,22 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
     groupTagUngroupedDetail: documentosSemGrupo === null ? "" : `${documentosSemGrupo} documento${documentosSemGrupo === 1 ? "" : "s"}`,
     history: {
       getCount: () => history.entries.length,
-      canUndo: () => { const current = editorRef.current; return Boolean(current && !current.isDestroyed && current.can().chain().undo().run()); },
-      canRedo: () => { const current = editorRef.current; return Boolean(current && !current.isDestroyed && current.can().chain().redo().run()); },
-      undo: () => { const current = editorRef.current; if (current && !current.isDestroyed) current.chain().focus().undo().run(); },
-      redo: () => { const current = editorRef.current; if (current && !current.isDestroyed) current.chain().focus().redo().run(); },
+      /*
+       * 2026-10-18 · defeito 4 do inventário: nas abas Roteiro e Carrossel o
+       * editor do artigo continua montado, escondido, e Desfazer/Refazer mexiam
+       * nele sem a pessoa ver. Agora valem só na aba ativa: no Artigo, a edição
+       * do texto; nas abas derivadas ficam desligados (o roteiro e o carrossel
+       * não têm desfazer próprio) e nunca tocam o artigo escondido.
+       */
+      canUndo: () => { const current = editorRef.current; return writingFormatRef.current === "article" && Boolean(current && !current.isDestroyed && current.can().chain().undo().run()); },
+      canRedo: () => { const current = editorRef.current; return writingFormatRef.current === "article" && Boolean(current && !current.isDestroyed && current.can().chain().redo().run()); },
+      undo: () => { const current = editorRef.current; if (writingFormatRef.current === "article" && current && !current.isDestroyed) current.chain().focus().undo().run(); },
+      redo: () => { const current = editorRef.current; if (writingFormatRef.current === "article" && current && !current.isDestroyed) current.chain().focus().redo().run(); },
       undoLabel: "Desfazer edição",
       redoLabel: "Refazer edição",
       historyLabel: "Histórico do documento",
-      undoTitle: "Desfazer edição no documento",
-      redoTitle: "Refazer edição no documento",
+      undoTitle: writingFormat === "article" ? "Desfazer edição no documento" : "Desfazer vale só para o texto da aba Artigo; no roteiro e no carrossel, nada é desfeito por aqui",
+      redoTitle: writingFormat === "article" ? "Refazer edição no documento" : "Refazer vale só para o texto da aba Artigo; no roteiro e no carrossel, nada é refeito por aqui",
       historyTitle: count => `Histórico do documento (${count})`,
       open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "redator" } })),
     },
@@ -598,7 +629,7 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
     <div className={`grid min-h-0 flex-1 ${leftOpen && rightOpen ? "grid-cols-[260px_minmax(0,1fr)_300px]" : leftOpen ? "grid-cols-[260px_minmax(0,1fr)]" : rightOpen ? "grid-cols-[minmax(0,1fr)_300px]" : "grid-cols-1"}`}>
       {leftOpen && <aside className="min-h-0 overflow-auto border-r border-slate-850 bg-[#090a0e] p-3"><div className="flex items-center justify-between"><h2 className="text-[9px] font-bold uppercase text-slate-500">Rascunhos e fundamentos</h2><button className={tool} onClick={() => setLeftOpen(false)}><ChevronLeft className="h-3 w-3"/></button></div><div className="mt-2 space-y-1">{listaVaziaPeloGrupo ? <p className="text-sm text-text-muted" role="status" data-redator-lista-grupo-vazia>{listaVaziaPeloGrupo}</p> : null}{documentosDaLista.map(item => <button key={item.id} onClick={() => choose(item.id)} aria-current={item.id === selected?.id ? "true" : undefined} data-documento-ativo={item.id === selected?.id ? "sim" : undefined} data-documento-grupo={grupoDoDocumento(item)?.color || undefined} className={`block w-full rounded border p-2 text-left text-[9px] ${editorialGroupStripeClass(grupoDoDocumento(item))} ${item.id === selected?.id ? "border-module-accent/40 bg-surface-subtle text-white" : "border-slate-850 text-slate-500"}`}><ArticleSubjectLine as="span" phrase={writerDocumentSubjectPhrase(item, pipeline.articleVersions)} className="mb-0.5" testId="redator-document-list-subject"/><strong className="block truncate">{item.title}</strong>{grupoDoDocumento(item) ? <span className="my-1 block"><ArticleGroupRowTag group={grupoDoDocumento(item)} inherited={!gruposDoRedator.articleGroupById.get(item.articleDnaRef.entityId)?.persisted}/></span> : null}<span>{item.status}</span>{item.id === selected?.id && <span className="ml-1 font-bold text-module-accent">· em edição</span>}{novos.has(item.id) && item.id !== selected?.id && <span className="ml-1 rounded bg-context-accent/20 px-1 font-bold text-context-accent" data-documento-novo>novo</span>}</button>)}</div>{ativo.origin === "pending"
          ? <p className="mt-3 text-[10px] text-slate-600" data-selecao-pendente>Carregando o que você abriu por último…</p>
-         : !documents.length && <p className="mt-3 text-[10px] text-slate-600">Nenhum rascunho disponível. Envie uma investigação finalizada do Radar.</p>}<button type="button" onClick={() => setImportOpen(true)} className={`${tool} mt-3 w-full justify-center`} title="Lista os artigos aprovados no Radar e chama a mesma autoridade de entrega usada pelo botão do Radar."><Plus className="mr-1 h-2.5 w-2.5" aria-hidden="true"/>Importar do Radar</button>{selected && <><h3 className="mt-4 text-[9px] font-bold uppercase text-slate-600">Outline</h3>{selected.blocks.filter(block => block.type === "heading").map(block => <div key={block.id} className="mt-1 flex items-center gap-1"><button onClick={() => globalThis.document.querySelector(`[data-block-id="${block.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" })} className="min-w-0 flex-1 truncate text-left text-[9px] text-slate-400">{"level" in block ? `H${block.level}` : ""} {"text" in block ? block.text : ""}</button><button className={tool} disabled={aiBusy} onClick={() => void requestSectionProposal(block.id)} title="Propor escrita para esta seção"><Sparkles className="h-3 w-3"/></button></div>)}<div className="mt-4 space-y-1 text-[9px] text-slate-600"><p>{`Origem: Radar · análise ${selected.radarOrigin.analysisVersionId}`}</p><p>Definição do artigo: {selected.articleDnaRef.versionId}</p><p>Arquitetura do silo: {selected.siloDnaRef.versionId}</p><p>Perfis das keywords: {selected.keywordDnaRefs.length}</p></div></>}</aside>}
+         : !documents.length && <p className="mt-3 text-[10px] text-slate-600">Nenhum rascunho disponível. Envie uma investigação finalizada do Radar.</p>}<button type="button" onClick={() => setImportOpen(true)} className={`${tool} mt-3 w-full justify-center`} title="Lista os artigos aprovados no Radar e chama a mesma autoridade de entrega usada pelo botão do Radar."><Plus className="mr-1 h-2.5 w-2.5" aria-hidden="true"/>Importar do Radar</button>{selected && <><h3 className="mt-4 flex items-center gap-1 text-[9px] font-bold uppercase text-slate-600">Outline<InfoHint title="Propor escrita para esta seção" description={`Para que serve: a IA propõe o texto de uma seção (H2) seguindo o artigo-modelo e a voz da marca. Como usar: clique no ícone ao lado da seção, escreva uma instrução opcional e confirme; a proposta aparece para revisão e só entra no texto com “Aplicar como texto editável”. Custo: ${WRITER_AI_COST_LABEL}. Cancelar a caixa não chama a IA.`}/></h3>{selected.blocks.filter(block => block.type === "heading").map(block => <div key={block.id} className="mt-1 flex items-center gap-1"><button onClick={() => globalThis.document.querySelector(`[data-block-id="${block.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" })} className="min-w-0 flex-1 truncate text-left text-[9px] text-slate-400">{"level" in block ? `H${block.level}` : ""} {"text" in block ? block.text : ""}</button><button className={tool} disabled={aiBusy} onClick={() => void requestSectionProposal(block.id)} title={`Propor escrita para esta seção · ${WRITER_AI_COST_LABEL}`} aria-label="Propor escrita para esta seção" data-propor-secao={block.id}><Sparkles className="h-3 w-3"/></button></div>)}<div className="mt-4 space-y-1 text-[9px] text-slate-600"><p>{`Origem: Radar · análise ${selected.radarOrigin.analysisVersionId}`}</p><p>Definição do artigo: {selected.articleDnaRef.versionId}</p><p>Arquitetura do silo: {selected.siloDnaRef.versionId}</p><p>Perfis das keywords: {selected.keywordDnaRefs.length}</p></div></>}</aside>}
       <main ref={scrollRef} className="min-h-0 overflow-auto bg-[#17181d] p-5">{!leftOpen && <button className={`${tool} fixed left-12 top-24 z-20`} onClick={() => setLeftOpen(true)}><ChevronRight className="h-3 w-3"/></button>}{listado && <div className="mx-auto mb-3 w-full max-w-[880px]"><ArticleSubjectLine phrase={writerDocumentSubjectPhrase(listado, pipeline.articleVersions)} testId="redator-document-header-subject"/></div>}<div className="mx-auto min-h-[calc(100vh-150px)] w-full max-w-[880px] bg-white px-14 py-12 text-slate-900 shadow-2xl">{sectionProposal && <div className="mb-5 rounded border border-action-accent/30 bg-action-accent/5 p-3 text-xs"><strong>Proposta de seção — revisão humana</strong><p className="mt-1 text-slate-600">{sectionProposal.paragraphs.length} parágrafo(s) aguardando aplicação.</p><div className="mt-2 flex gap-2"><button className="rounded bg-action-accent px-2 py-1 text-white" onClick={applySectionProposal}>Aplicar como texto editável</button><button className="rounded border border-slate-300 px-2 py-1" onClick={() => setSectionProposal(null)}>Descartar</button></div></div>}{improveProposal && <div className="mb-5 rounded border border-amber-200 bg-amber-50 p-3 text-xs"><strong>Melhoria de trecho — revisão humana</strong><p className="mt-1 text-slate-600">{improveProposal.replacementText}</p><div className="mt-2 flex gap-2"><button className="rounded bg-amber-600 px-2 py-1 text-white" onClick={applyImproveProposal}>Aplicar melhoria</button><button className="rounded border border-slate-300 px-2 py-1" onClick={() => setImproveProposal(null)}>Descartar</button></div></div>}{selected ? <EditorContent editor={editor} className="professional-editor"/> : idAguardandoDetalhe ? <div className="flex min-h-[55vh] items-center justify-center text-center text-sm text-slate-400" data-documento-detalhe={falhaDoDocumentoAberto ? "falhou" : "carregando"} role={falhaDoDocumentoAberto ? "alert" : "status"}><div><FileText className="mx-auto mb-3 h-8 w-8"/>{falhaDoDocumentoAberto ? <><p>Não foi possível abrir o documento completo: {falhaDoDocumentoAberto}</p><p className="mt-1">A edição fica bloqueada até o documento completo chegar do servidor.</p>{rascunhoLocalGuardado && <p className="mt-1" data-rascunho-local-guardado>Há um rascunho local deste documento guardado neste navegador. Ele será restaurado quando o documento completo abrir.</p>}<button type="button" onClick={() => { setFalhaDoDetalhe(null); setTentativaDoDetalhe(total => total + 1); }} className="mt-3 inline-block text-action-accent underline">Tentar de novo</button></> : <p>Carregando o documento completo…</p>}</div></div> : <div className="flex min-h-[55vh] items-center justify-center text-center text-sm text-slate-400"><div><FileText className="mx-auto mb-3 h-8 w-8"/><p>Nenhum conteúdo de artigo disponível.</p><Link href="/radar" className="mt-3 inline-block text-action-accent underline">Abrir Radar</Link></div></div>}</div></main>
       {rightOpen && <aside className="min-h-0 overflow-auto border-l border-slate-850 bg-[#090a0e] p-3">{/*
         * A ENTREGA É CONTEXTUAL, E SÓ EXISTE DEPOIS DE FINALIZAR.
@@ -638,7 +669,7 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
 
 function Toolbar({ editor, addBlock, promptLink, onImprove, aiBusy }: { editor: Editor | null; addBlock: (kind: string, label: string, data: object) => void; promptLink: () => void; onImprove: () => void; aiBusy: boolean }) {
   const action = (label: string, icon: React.ReactNode, run: () => void, active = false) => <button key={label} className={`${tool} ${active ? "border-module-accent/45 bg-context-accent/10 text-white" : ""}`} onClick={run} disabled={!editor} title={label}>{icon}</button>;
-  return <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-850 bg-[#0a0b0f] p-1.5">{[1,2,3,4].map(level => action(`H${level}`, level === 1 ? <Heading1 className="h-3 w-3"/> : level === 2 ? <Heading2 className="h-3 w-3"/> : level === 3 ? <Heading3 className="h-3 w-3"/> : <Heading4 className="h-3 w-3"/>, () => editor?.chain().focus().toggleHeading({ level: level as 1|2|3|4 }).run(), Boolean(editor?.isActive("heading", { level }))))}{action("Parágrafo", <Pilcrow className="h-3 w-3"/>, () => editor?.chain().focus().setParagraph().run(), Boolean(editor?.isActive("paragraph")))}{action("Negrito", <Bold className="h-3 w-3"/>, () => editor?.chain().focus().toggleBold().run(), Boolean(editor?.isActive("bold")))}{action("Itálico", <Italic className="h-3 w-3"/>, () => editor?.chain().focus().toggleItalic().run(), Boolean(editor?.isActive("italic")))}{action("Sublinhado", <UnderlineIcon className="h-3 w-3"/>, () => editor?.chain().focus().toggleUnderline().run(), Boolean(editor?.isActive("underline")))}{action("Tachado", <Strikethrough className="h-3 w-3"/>, () => editor?.chain().focus().toggleStrike().run(), Boolean(editor?.isActive("strike")))}{action("Lista", <List className="h-3 w-3"/>, () => editor?.chain().focus().toggleBulletList().run())}{action("Lista numerada", <ListOrdered className="h-3 w-3"/>, () => editor?.chain().focus().toggleOrderedList().run())}{action("Citação", <Quote className="h-3 w-3"/>, () => editor?.chain().focus().toggleBlockquote().run())}{action("Tabela", <Table2 className="h-3 w-3"/>, () => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}{action("Link", <Link2 className="h-3 w-3"/>, promptLink)}{action("Alinhar à esquerda", <AlignLeft className="h-3 w-3"/>, () => editor?.chain().focus().setTextAlign("left").run())}{action("Centralizar", <AlignCenter className="h-3 w-3"/>, () => editor?.chain().focus().setTextAlign("center").run())}{action("Alinhar à direita", <AlignRight className="h-3 w-3"/>, () => editor?.chain().focus().setTextAlign("right").run())}<span className="mx-1 h-5 border-l border-slate-800"/>{action("Link interno", <Columns3 className="h-3 w-3"/>, () => { const target = window.prompt("ID do artigo de destino"); const anchor = window.prompt("Âncora sugerida"); if (target && anchor) addBlock("internal_link", `Link interno: ${anchor}`, { targetArticleId: target, anchor }); })}{action("Fonte externa", <ExternalLink className="h-3 w-3"/>, () => { const claim = window.prompt("Afirmação que precisa de fonte"); const url = window.prompt("URL validada (opcional)", ""); if (claim) addBlock("external_source", `Fonte externa: ${claim}`, { sourceId: crypto.randomUUID(), claim, url: url || null }); })}{action("CTA", <Minus className="h-3 w-3"/>, () => { const text = window.prompt("Texto do CTA"); if (text) addBlock("CTA", `CTA: ${text}`, { text, objective: "Definir objetivo" }); })}{action("Produto", <FileText className="h-3 w-3"/>, () => addBlock("product_block", "Bloco de produto pendente", { productEvidenceId: "pending", title: "Produto", summary: "Evidência pendente" }))}{action("Comparação", <Table2 className="h-3 w-3"/>, () => addBlock("comparison", "Comparação editorial", { title: "Comparação", columns: ["Critério", "Opção"], rows: [] }))}{action("Briefing de imagem", <Image className="h-3 w-3"/>, () => addBlock("image_brief", "Briefing de imagem", { objective: "Definir objetivo", format: "editorial", requiredElements: [], avoid: [] }))}{action("Comentário", <MessageSquare className="h-3 w-3"/>, () => { const body = window.prompt("Comentário sobre o trecho selecionado"); if (body) editor?.chain().focus().setMark("editorialComment", { commentId: crypto.randomUUID(), body }).run(); })}{action("Localizar", <Search className="h-3 w-3"/>, () => { const query = window.prompt("Localizar no documento"); if (query) [...globalThis.document.querySelectorAll(".professional-editor *")].find(element => element.textContent?.toLocaleLowerCase("pt-BR").includes(query.toLocaleLowerCase("pt-BR")))?.scrollIntoView({ behavior: "smooth", block: "center" }); })}{action("Melhorar trecho", <Sparkles className="h-3 w-3"/>, onImprove, false)}{action("Limpar formatação", <Eraser className="h-3 w-3"/>, () => editor?.chain().focus().unsetAllMarks().clearNodes().run())}{aiBusy && <span className="px-2 text-[9px] text-context-accent">IA preparando proposta…</span>}</div>;
+  return <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-850 bg-[#0a0b0f] p-1.5">{[1,2,3,4].map(level => action(`H${level}`, level === 1 ? <Heading1 className="h-3 w-3"/> : level === 2 ? <Heading2 className="h-3 w-3"/> : level === 3 ? <Heading3 className="h-3 w-3"/> : <Heading4 className="h-3 w-3"/>, () => editor?.chain().focus().toggleHeading({ level: level as 1|2|3|4 }).run(), Boolean(editor?.isActive("heading", { level }))))}{action("Parágrafo", <Pilcrow className="h-3 w-3"/>, () => editor?.chain().focus().setParagraph().run(), Boolean(editor?.isActive("paragraph")))}{action("Negrito", <Bold className="h-3 w-3"/>, () => editor?.chain().focus().toggleBold().run(), Boolean(editor?.isActive("bold")))}{action("Itálico", <Italic className="h-3 w-3"/>, () => editor?.chain().focus().toggleItalic().run(), Boolean(editor?.isActive("italic")))}{action("Sublinhado", <UnderlineIcon className="h-3 w-3"/>, () => editor?.chain().focus().toggleUnderline().run(), Boolean(editor?.isActive("underline")))}{action("Tachado", <Strikethrough className="h-3 w-3"/>, () => editor?.chain().focus().toggleStrike().run(), Boolean(editor?.isActive("strike")))}{action("Lista", <List className="h-3 w-3"/>, () => editor?.chain().focus().toggleBulletList().run())}{action("Lista numerada", <ListOrdered className="h-3 w-3"/>, () => editor?.chain().focus().toggleOrderedList().run())}{action("Citação", <Quote className="h-3 w-3"/>, () => editor?.chain().focus().toggleBlockquote().run())}{action("Tabela", <Table2 className="h-3 w-3"/>, () => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}{action("Link", <Link2 className="h-3 w-3"/>, promptLink)}{action("Alinhar à esquerda", <AlignLeft className="h-3 w-3"/>, () => editor?.chain().focus().setTextAlign("left").run())}{action("Centralizar", <AlignCenter className="h-3 w-3"/>, () => editor?.chain().focus().setTextAlign("center").run())}{action("Alinhar à direita", <AlignRight className="h-3 w-3"/>, () => editor?.chain().focus().setTextAlign("right").run())}<span className="mx-1 h-5 border-l border-slate-800"/>{action("Link interno", <Columns3 className="h-3 w-3"/>, () => { const target = window.prompt("ID do artigo de destino"); const anchor = window.prompt("Âncora sugerida"); if (target && anchor) addBlock("internal_link", `Link interno: ${anchor}`, { targetArticleId: target, anchor }); })}{action("Fonte externa", <ExternalLink className="h-3 w-3"/>, () => { const claim = window.prompt("Afirmação que precisa de fonte"); const url = window.prompt("URL validada (opcional)", ""); if (claim) addBlock("external_source", `Fonte externa: ${claim}`, { sourceId: crypto.randomUUID(), claim, url: url || null }); })}{action("CTA", <Minus className="h-3 w-3"/>, () => { const text = window.prompt("Texto do CTA"); if (text) addBlock("CTA", `CTA: ${text}`, { text, objective: "Definir objetivo" }); })}{action("Produto", <FileText className="h-3 w-3"/>, () => addBlock("product_block", "Bloco de produto pendente", { productEvidenceId: "pending", title: "Produto", summary: "Evidência pendente" }))}{action("Comparação", <Table2 className="h-3 w-3"/>, () => addBlock("comparison", "Comparação editorial", { title: "Comparação", columns: ["Critério", "Opção"], rows: [] }))}{action("Briefing de imagem", <Image className="h-3 w-3"/>, () => addBlock("image_brief", "Briefing de imagem", { objective: "Definir objetivo", format: "editorial", requiredElements: [], avoid: [] }))}{action("Comentário", <MessageSquare className="h-3 w-3"/>, () => { const body = window.prompt("Comentário sobre o trecho selecionado"); if (body) editor?.chain().focus().setMark("editorialComment", { commentId: crypto.randomUUID(), body }).run(); })}{action("Localizar", <Search className="h-3 w-3"/>, () => { const query = window.prompt("Localizar no documento"); if (query) [...globalThis.document.querySelectorAll(".professional-editor *")].find(element => element.textContent?.toLocaleLowerCase("pt-BR").includes(query.toLocaleLowerCase("pt-BR")))?.scrollIntoView({ behavior: "smooth", block: "center" }); })}{action(`Melhorar trecho · ${WRITER_AI_COST_LABEL}`, <Sparkles className="h-3 w-3"/>, onImprove, false)}<InfoHint title="Melhorar trecho" description={`Para que serve: a IA reescreve o trecho selecionado com mais clareza, sem mudar o sentido nem acrescentar CTA, link ou afirmação nova. Como usar: selecione o trecho no texto, clique no ícone e confirme a instrução; a melhoria aparece para revisão e só entra com “Aplicar melhoria”. Custo: ${WRITER_AI_COST_LABEL}. Cancelar a caixa não chama a IA.`}/>{action("Limpar formatação", <Eraser className="h-3 w-3"/>, () => editor?.chain().focus().unsetAllMarks().clearNodes().run())}{aiBusy && <span className="px-2 text-[9px] text-context-accent">IA preparando proposta…</span>}</div>;
 }
 
 function MetadataPanel({ document, published, onChange }: { document: ContentDocument; published: boolean; onChange: (key: keyof ContentDocument["metadata"], value: string | string[]) => void }) {

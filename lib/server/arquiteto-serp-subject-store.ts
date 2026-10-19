@@ -80,6 +80,13 @@ export type SerpSubjectReadResult = {
    */
   missingLenses: Array<{ keywordId: string; lens: string; reason: string; collectedAt?: string | null }>;
   egress: SerpSubjectReadEgress;
+  /**
+   * 2026-10-18 · Aditivo (SDD localidade da SERP por marca): as lentes servidas
+   * pela SERP antiga NACIONAL porque a da localidade da marca ainda não foi
+   * coletada — mostradas marcadas (`nationalFallback` na lente). Só existe
+   * quando quem chama pediu o recuo (marca com cidade).
+   */
+  nationalFallback?: Array<{ keywordId: string; lens: string; collectedAt: string }>;
 };
 
 type Linha = Record<string, unknown>;
@@ -96,22 +103,37 @@ const texto = (valor: unknown) => typeof valor === "string" && valor.trim() ? va
 export async function readSerpSubjectFootprints(
   context: SerpCacheContext,
   targets: readonly SerpSubjectReadTarget[],
-  options: { now: Date; maxAgeMs?: number; lenses?: readonly SerpCacheLens[] },
+  options: {
+    now: Date;
+    maxAgeMs?: number;
+    lenses?: readonly SerpCacheLens[];
+    /**
+     * 2026-10-18 · Os códigos NACIONAIS, só para a marca com cidade (decisão do
+     * dono: "a keyword com SERP só nacional mostra a SERP antiga marcada"). A
+     * lente sem a entrada da localidade da marca é servida pela entrada nacional
+     * que ainda vale, marcada (`nationalFallback`). Ausente = a leitura de antes.
+     */
+    nationalFallback?: { locationCode: number; languageCode: string } | null;
+  },
 ): Promise<SerpSubjectReadResult> {
   const lentes = options.lenses?.length ? options.lenses : SERP_CACHE_LENSES;
-  type Pedido = { target: SerpSubjectReadTarget; lens: SerpCacheLens; query: SerpCacheQuery; subjectId: string };
+  type Pedido = { target: SerpSubjectReadTarget; lens: SerpCacheLens; query: SerpCacheQuery; subjectId: string; nacional: { query: SerpCacheQuery; subjectId: string } | null };
   const pedidos: Pedido[] = [];
   const vistos = new Set<string>();
+  const recuo = options.nationalFallback ?? null;
   for (const target of targets) {
     if (vistos.has(target.keywordId)) continue;
     vistos.add(target.keywordId);
     for (const lens of lentes) {
       const query: SerpCacheQuery = { keyword: target.keyword, locationCode: target.locationCode, languageCode: target.languageCode, lens, endpoint: "advanced" };
-      pedidos.push({ target, lens, query, subjectId: serpCacheSubjectId(query) });
+      const nacional = recuo && recuo.locationCode !== target.locationCode
+        ? { keyword: target.keyword, locationCode: recuo.locationCode, languageCode: target.languageCode, lens, endpoint: "advanced" as const }
+        : null;
+      pedidos.push({ target, lens, query, subjectId: serpCacheSubjectId(query), nacional: nacional ? { query: nacional, subjectId: serpCacheSubjectId(nacional) } : null });
     }
   }
 
-  const ids = [...new Set(pedidos.map(pedido => pedido.subjectId))];
+  const ids = [...new Set(pedidos.flatMap(pedido => pedido.nacional ? [pedido.subjectId, pedido.nacional.subjectId] : [pedido.subjectId]))];
   const linhas = new Map<string, Linha>();
   const egress: SerpSubjectReadEgress = { queries: 0, entriesRead: 0, approxBytes: 0 };
   for (let inicio = 0; inicio < ids.length; inicio += SERP_CACHE_READ_CHUNK) {
@@ -135,20 +157,33 @@ export async function readSerpSubjectFootprints(
 
   const porKeyword = new Map<string, { target: SerpSubjectReadTarget; lenses: SerpSubjectLensReading[] }>();
   const missingLenses: SerpSubjectReadResult["missingLenses"] = [];
+  const nationalFallback: NonNullable<SerpSubjectReadResult["nationalFallback"]> = [];
+  /** Uma entrada lida → a leitura da lente, ou por que ela não serve. */
+  const lerEntrada = (linha: Linha | undefined, query: SerpCacheQuery, rotulo: string): { reading: SerpSubjectLensReading } | { reason: string; collectedAt?: string } => {
+    if (!linha) return { reason: "sem entrada no cache" };
+    const meta = SerpCacheMetaSchema.safeParse(linha.meta);
+    if (!meta.success) return { reason: "entrada ilegível" };
+    const atende = serpCacheEntryServes(meta.data, { query, depth: SERP_SUBJECT_URL_SLOTS, now: options.now, maxAgeMs: options.maxAgeMs });
+    if (!atende.serves) return { reason: atende.reason, collectedAt: meta.data.collectedAt };
+    const urls = Array.from({ length: SERP_SUBJECT_URL_SLOTS }, (_, indice) => texto(linha[`u${indice}`])).filter((url): url is string => Boolean(url));
+    const dominios = Array.isArray(linha.domains) ? (linha.domains as unknown[]).map(texto).filter((item): item is string => Boolean(item)) : [];
+    if (!urls.length && !dominios.length) return { reason: "entrada sem URLs nem domínios" };
+    return { reading: { lens: rotulo, urls: urls.length ? urls : null, domains: dominios.length ? dominios : null, collectedAt: meta.data.collectedAt } };
+  };
   for (const pedido of pedidos) {
     const entrada = porKeyword.get(pedido.target.keywordId) || { target: pedido.target, lenses: [] };
     porKeyword.set(pedido.target.keywordId, entrada);
     const rotulo = serpCacheLensLabel(pedido.lens);
-    const linha = linhas.get(pedido.subjectId);
-    if (!linha) { missingLenses.push({ keywordId: pedido.target.keywordId, lens: rotulo, reason: "sem entrada no cache" }); continue; }
-    const meta = SerpCacheMetaSchema.safeParse(linha.meta);
-    if (!meta.success) { missingLenses.push({ keywordId: pedido.target.keywordId, lens: rotulo, reason: "entrada ilegível" }); continue; }
-    const atende = serpCacheEntryServes(meta.data, { query: pedido.query, depth: SERP_SUBJECT_URL_SLOTS, now: options.now, maxAgeMs: options.maxAgeMs });
-    if (!atende.serves) { missingLenses.push({ keywordId: pedido.target.keywordId, lens: rotulo, reason: atende.reason, collectedAt: meta.data.collectedAt }); continue; }
-    const urls = Array.from({ length: SERP_SUBJECT_URL_SLOTS }, (_, indice) => texto(linha[`u${indice}`])).filter((url): url is string => Boolean(url));
-    const dominios = Array.isArray(linha.domains) ? (linha.domains as unknown[]).map(texto).filter((item): item is string => Boolean(item)) : [];
-    if (!urls.length && !dominios.length) { missingLenses.push({ keywordId: pedido.target.keywordId, lens: rotulo, reason: "entrada sem URLs nem domínios" }); continue; }
-    entrada.lenses.push({ lens: rotulo, urls: urls.length ? urls : null, domains: dominios.length ? dominios : null, collectedAt: meta.data.collectedAt });
+    const lida = lerEntrada(linhas.get(pedido.subjectId), pedido.query, rotulo);
+    if ("reading" in lida) { entrada.lenses.push(lida.reading); continue; }
+    // 2026-10-18 · a marca tem cidade e a lente local falta: a SERP antiga nacional que ainda vale, marcada.
+    const antiga = pedido.nacional ? lerEntrada(linhas.get(pedido.nacional.subjectId), pedido.nacional.query, rotulo) : null;
+    if (antiga && "reading" in antiga) {
+      entrada.lenses.push({ ...antiga.reading, nationalFallback: true });
+      nationalFallback.push({ keywordId: pedido.target.keywordId, lens: rotulo, collectedAt: antiga.reading.collectedAt ?? "" });
+      continue;
+    }
+    missingLenses.push({ keywordId: pedido.target.keywordId, lens: rotulo, reason: lida.reason, ...(lida.collectedAt ? { collectedAt: lida.collectedAt } : {}) });
   }
 
   const footprints: KeywordSerpFootprint[] = [];
@@ -157,7 +192,7 @@ export async function readSerpSubjectFootprints(
     footprints.push({ keywordId, keyword: entrada.target.keyword, lenses: entrada.lenses });
     if (!entrada.lenses.some(leitura => leitura.urls?.length)) withoutSerp.push(keywordId);
   }
-  return { footprints, withoutSerp, missingLenses, egress };
+  return { footprints, withoutSerp, missingLenses, egress, ...(nationalFallback.length ? { nationalFallback } : {}) };
 }
 
 /*

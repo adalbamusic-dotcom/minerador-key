@@ -166,7 +166,8 @@ test("F3 · (d) SEO antigo a não copiar: listicle, título-isca, H2 numerados, 
 test("F3 · D11 · uma régua só: a SERP crua do F-S marca a relevância pela mesma função", async () => {
   const fonte = semComentarios(await readFile(new URL("../lib/radar/serp-raw-export.ts", import.meta.url), "utf8"));
   assert.match(fonte, /import \{ radarCompetitiveRelevanceReasons \} from "\.\/competitive-reading\.ts";/);
-  assert.match(fonte, /const motivos = radarCompetitiveRelevanceReasons\(conteudo, palavras, contexto, mediana\);/);
+  /* 2026-10-18 · L3 (SDD localidade da SERP por marca): a MESMA chamada, com o endereço e os H2 só para o D11 geográfico. */
+  assert.match(fonte, /const motivos = radarCompetitiveRelevanceReasons\(conteudo, palavras, contexto, mediana, \{ url, headings: /);
   const contexto = { core: [PRINCIPAL_DO_CASO], audience: "Dentistas e donos de consultório odontológico." };
   assert.deepEqual(radarCompetitiveRelevanceReasons("Zenklub: Terapia online com psicólogos", null, contexto, null), ["fora do leitor: outra profissão, fora do público do artigo"]);
   assert.deepEqual(radarCompetitiveRelevanceReasons("Captação de pacientes na odontologia", 2000, contexto, 2050), []);

@@ -76,9 +76,13 @@ test("linha: o card e o MCP cadastram pelo MESMO núcleo; a conversão e a trava
     "app/api/minerador/marcas/[brandId]/plans/import/route.ts",
     "lib/minerador/declared-plan-import-core.ts",
     "lib/minerador/subject-conversion-core.ts",
+    // 2026-10-18 · o "Aprovar e enviar" grava o Assunto do volume 0 pelo MESMO núcleo (SDD do Assunto pela principal §6.2-b).
+    "lib/server/minerador-approve-and-send.ts",
     "lib/server/platform-mcp-tools.ts",
   ]);
   assert.doesNotMatch(codigo("app/api/minerador/marcas/[brandId]/plans/import/route.ts"), /setKeywordSubject|\.update\(/, "a rota não grava direto");
+  // 2026-10-18 · o Volume só mede: nenhum gravador do Assunto no núcleo do Volume.
+  assert.doesNotMatch(codigo("lib/server/minerador-volume-measure.ts"), /setKeywordSubject|importDeclaredPlanWithCore|keyword_subject_basis/, "o Volume não grava Assunto");
 });
 
 test("linha: UM leitor do plano colado (`parseDeclaredPlanText`) — o card, o detector das entradas de keyword e o núcleo (rota e MCP) leem por ele; nenhum outro leitor de texto de plano (2026-10-16)", () => {
@@ -133,6 +137,37 @@ test("linha: a Lógica do servidor é uma só (MCP, reaprovar, recibo, sugestõe
     "lib/server/platform-mcp-tools.ts",
     "lib/server/subject-search-receipts.ts",
   ]);
+});
+
+/*
+ * 2026-10-17 (dono: "ele tem que deixar apagar todo o grupo"; P-4 da SDD): a
+ * exclusão de sempre e "Excluir tudo da cor" são UMA linha — a keyword do plano
+ * sai pelo MESMO núcleo (a RPC da M-E libera o Assunto e exclui na mesma
+ * transação), a confirmação é UMA regra e nenhuma tela grava a liberação.
+ */
+test("linha: a exclusão comum e a da cor saem pelo MESMO núcleo e conferem pela MESMA regra; nenhuma porta nova", () => {
+  assert.deepEqual(quemTem(/applyGroupDeleteAllWithCore\(\{/), [
+    "app/api/minerador/marcas/[brandId]/keywords/delete-group/route.ts",
+    "lib/minerador/keyword-delete-core.ts",
+  ]);
+  assert.deepEqual(quemTem(/client\.rpc\(GROUP_DELETE_ALL_RPC/), ["lib/minerador/group-delete-all-core.ts"], "só o núcleo da cor chama a RPC que libera e exclui");
+  assert.deepEqual(quemTem(/rpc\(KEYWORD_DELETE_RPC|rpc\("lifecycle_delete_minerador_keywords"/), ["lib/minerador/keyword-delete-core.ts"], "a RPC de sempre, só pelo núcleo da exclusão");
+  assert.deepEqual(quemTem(/applyKeywordDeleteWithCore\(\{|previewKeywordDeleteWithCore\(\{/), [
+    "app/api/minerador/marcas/[brandId]/keywords/delete/preview/route.ts",
+    "app/api/minerador/marcas/[brandId]/keywords/delete/route.ts",
+  ], "as duas rotas de sempre; nenhuma rota nova");
+  assert.deepEqual(quemTem(/function checkDeleteConfirmation\(/), ["lib/lifecycle/typed-confirmation.ts"], "uma regra da confirmação");
+  assert.deepEqual(quemTem(/checkDeleteConfirmation\(/), [
+    "components/lifecycle/delete-confirmation.tsx",
+    "lib/lifecycle/typed-confirmation.ts",
+    "lib/minerador/group-delete-all.ts",
+    "lib/minerador/keyword-delete-core.ts",
+  ]);
+  const tela = codigo(TELA);
+  assert.equal(contar(tela, "/keywords/delete/preview`"), 1, "um pedido de prévia na tela");
+  assert.equal(contar(tela, "/keywords/delete`"), 1, "um pedido de execução na tela");
+  assert.doesNotMatch(tela, /delete-group/, "a tela comum não chama a rota da cor");
+  assert.doesNotMatch(codigo("lib/server/platform-mcp-tools.ts"), /keyword-delete-core|applyKeywordDeleteWithCore|keywords\/delete/, "exclusão fora do MCP (AGENTS.md §17.1)");
 });
 
 test("hoje: a tela tem a Lógica e o Status não-aprovado gravados pelo navegador (A3/A4), ao lado do núcleo", () => {

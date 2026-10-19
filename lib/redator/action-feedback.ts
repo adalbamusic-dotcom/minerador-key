@@ -151,3 +151,35 @@ export function actionButtonLabel(input: {
 }): string {
   return input.emCurso === input.action ? progressMessage(input.action) : input.rotuloParado;
 }
+
+/*
+ * ===== 2026-10-18 · O CUSTO DA IA DO REDATOR, DITO ANTES DA CHAMADA =====
+ *
+ * Defeito 5 do inventário de botões: "Propor escrita para esta seção",
+ * "Melhorar trecho" e "Criar … a partir deste contexto" chamavam a IA paga sem
+ * dizer o custo. Cada uma é UMA operação de IA da plataforma, que repete uma
+ * vez só quando a resposta volta vazia (`structured-ai`, no máximo 2 tentativas):
+ * até 2 chamadas de IA. A frase é uma só, aqui, para o botão, a caixa de
+ * confirmação e o InfoHint dizerem o mesmo.
+ */
+export const WRITER_AI_COST_LABEL = "IA paga: até 2 chamadas de IA (IA da plataforma, cota da marca)";
+
+export type WriterAiAction = "section" | "improve" | "seed_script" | "seed_carousel";
+
+const PERGUNTA_DA_IA: Readonly<Record<WriterAiAction, string>> = {
+  section: "Propor escrita para esta seção",
+  improve: "Melhorar trecho",
+  seed_script: "Criar roteiro a partir deste contexto",
+  seed_carousel: "Criar carrossel a partir deste contexto",
+};
+
+/** A caixa de instrução: o custo primeiro; Cancelar não faz a chamada. */
+export function writerAiInstructionPrompt(action: "section" | "improve"): string {
+  const pedido = action === "section" ? "Instrução opcional para esta seção" : "Como deseja melhorar o trecho?";
+  return `${PERGUNTA_DA_IA[action]} · ${WRITER_AI_COST_LABEL}. A proposta volta para você revisar; nada é aplicado sozinho. Cancelar não chama a IA.\n\n${pedido}`;
+}
+
+/** A confirmação da semeadura do roteiro ou do carrossel. */
+export function writerAiSeedConfirmation(action: "seed_script" | "seed_carousel"): string {
+  return `${PERGUNTA_DA_IA[action]} · ${WRITER_AI_COST_LABEL}. O resultado é gravado como rascunho; se a geração falhar, nada é gravado. Confirmar?`;
+}

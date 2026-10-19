@@ -748,8 +748,10 @@ o shell compartilhado:
   logout e novo login iniciam estado limpo. Não há persistência após F5/login,
   tabela, migration, polling ou websocket nesta etapa.
 - Bridges aditivos foram conectados aos avisos existentes de Minerador,
-  Arquiteto, Radar, Marca, Planejador, Publicações, Conta e Admin. Os
-  contratos locais continuam válidos onde a mensagem inline ainda é útil.
+  Arquiteto, Radar, Marca, Planejador, Publicações, Conta e Admin. ~~Os
+  contratos locais continuam válidos onde a mensagem inline ainda é útil.~~
+  **SUBSTITUÍDO em 2026-10-18 (§24.2):** todos os avisos ficam no sino; a
+  tela não repete o aviso numa faixa.
 - Testes automatizados visuais passaram; a validação manual autenticada foi
   concluída em Minerador, Arquiteto e Radar. O painel ficou ancorado ao sino,
   contido no viewport, com scroll interno, conteúdo visível, auto-open/preview
@@ -777,11 +779,48 @@ Pedido do dono do produto: os avisos não abrem mais cards. O sino só marca.
 - Vale para a plataforma inteira: todos os produtores (Minerador, Arquiteto,
   Radar, Marca, Planejador, Publicações, Conta e Admin, direto ou por
   `useNoticeBridge`) passam por `publishNotice`. Nenhum contrato de produtor
-  mudou. O card de tarefa em segundo plano do Arquiteto não é aviso do sino e
-  continua como está (decisão Q2 da SDD de planilha, progresso e notificações).
+  mudou. ~~O card de tarefa em segundo plano do Arquiteto não é aviso do sino e
+  continua como está (decisão Q2 da SDD de planilha, progresso e notificações).~~
+  **SUBSTITUÍDO em 2026-10-18 (§24.2):** o cartão mostra só a tarefa em
+  andamento; o desfecho (concluída ou com falha) vai para o sino.
 - Andamento de lote não vai para o sino: fica na barra de progresso do rodapé.
   Um lote publica um aviso só, no fim, com o resumo e a lista das falhas nos
   detalhes.
 - **Confirmado por teste:** `tests/minerador-lote-progressivo.test.mts`.
   **Ainda não verificado:** validação manual na tela, nos dois temas.
 - Rollback: voltar as duas constantes para `true`.
+
+### 24.2 Todos os avisos no sino — 2026-10-18
+
+Regra do dono, literal: "estes e todos os avisos têm que estar dentro do
+sino". Ele viu no Radar uma faixa no topo da página ("Artigo-modelo: 0
+pronto(s) e 1 com falha…") que também já estava no sino: aviso duplicado.
+
+- **Vai para o sino, e só para o sino** (`publishNotice` / `useNoticeBridge`,
+  com o tom certo): o resultado de qualquer ação (sucesso, falha, parcial,
+  atenção, informação), o resumo de lote (um aviso no fim, SDD de planilha,
+  progresso e notificações §5.7), a falha de leitura e a recuperação local, e
+  o resultado de importação e exportação.
+- **Fica na tela, porque não é aviso:** o andamento ("Analisando páginas x de
+  N…", barra de progresso, "em curso"); a prévia com Confirmar e Cancelar; o
+  motivo ao lado do botão desligado (o bloqueio da etapa); a validação do
+  campo, ao lado do campo; o estado vazio; e o conteúdo dos painéis (dados,
+  relatórios, o resultado de cada linha de uma tabela).
+- **Fica na tela até o dono decidir:** o aviso que carrega um botão de ação
+  com clique ("Tentar carregar novamente", "Continuar a gravação", "Recriar o
+  Silo do plano", "Atualizar do Minerador"). O `NoticeAction` do sino só tem
+  rótulo e link, e o painel do sino ainda não desenha a ação. Também ficam o
+  erro de um diálogo modal aberto (o diálogo cobre o sino) e o aviso das
+  telas sem sino (login, cadastro, recuperação de senha, convite, consentimento
+  OAuth, seleção de marca, onboarding da agência).
+- `useNoticeBridge` deixou de dizer "sem substituir o feedback imediato do
+  módulo" (SUBSTITUÍDO): ele é a única saída do aviso. Fora do
+  `GlobalNoticeProvider` (só em teste de tela isolada) ele não publica, em vez
+  de derrubar a tela.
+- Andamento nunca vai para o sino. No Radar, o andamento que era escrito no
+  `notice` passou a `emAndamento(...)`: aparece numa linha de andamento e o
+  resultado seguinte o substitui.
+- **Confirmado por teste:** `tests/avisos-no-sino-2026-10-18.test.mts` (lê o
+  código sem comentários; a guarda foi conferida contra a versão anterior de
+  cada arquivo, onde a faixa existia). **Ainda não verificado:** validação
+  manual na tela, nos dois temas.

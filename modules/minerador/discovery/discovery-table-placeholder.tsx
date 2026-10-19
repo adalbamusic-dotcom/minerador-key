@@ -116,7 +116,8 @@ export function DiscoveryTablePlaceholder({ candidates = [], seoFilters = DEFAUL
   const [volumeMeasuring, setVolumeMeasuring] = useState(false);
   const [allintitleMeasuring, setAllintitleMeasuring] = useState(false);
   const [inlineNotice, setInlineNotice] = useState<InlineTableNotice>(null);
-  useNoticeBridge({ notice: inlineNotice, module: "minerador", area: "Tabela de descoberta", title: "Minerador · Descoberta", fallbackSeverity: "ERROR" });
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a faixa acima da tabela saiu. São recusas de início ("não pôde ser iniciada", "cancelada"), por isso Atenção. */
+  useNoticeBridge({ notice: inlineNotice, module: "minerador", area: "Tabela de descoberta", title: "Minerador · Descoberta", fallbackSeverity: "WARNING" });
   const [importedById, setImportedById] = useState<Record<string, "created" | "already_existing" | "failed">>({});
   const [metricPatches, setMetricPatches] = useState<Record<string, DiscoveryCandidatePatch>>({});
   // Candidatas pedidas em "Atualizar métricas" que voltaram sem volume (fora
@@ -193,7 +194,7 @@ export function DiscoveryTablePlaceholder({ candidates = [], seoFilters = DEFAUL
     if (!isTenantId(brandId)) { setInlineNotice("A atualização não pôde ser iniciada. Sua seleção foi preservada."); return; }
     setVolumeMeasuring(true);
     setInlineNotice(null);
-    publishNotice({ severity: "PENDING", title: "Atualização de métricas", message: `Atualizando Google Ads para ${selectedCandidateIds.length} candidata(s)…`, source: "workflow" });
+    /* 2026-10-18 · SDD §5.7: andamento não vai para o sino ("Atualizando métricas..." fica no botão); o lote publica um aviso só, no fim. */
     try {
       const requestedIds = [...selectedCandidateIds];
       const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(brandId)}/google-ads/metricas-keywords`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operationRequestId: crypto.randomUUID(), candidateIds: requestedIds }) });
@@ -227,7 +228,7 @@ export function DiscoveryTablePlaceholder({ candidates = [], seoFilters = DEFAUL
     setAllintitleMeasuring(true);
     setInlineNotice(null);
     const operationRequestId = crypto.randomUUID();
-    publishNotice({ severity: "PENDING", title: "Medição SEO", message: `Medindo Resultado e KD para ${selectedCandidateIds.length} candidata(s)…`, source: "workflow" });
+    /* 2026-10-18 · SDD §5.7: "Medindo resultados..." fica no botão; o sino recebe só o fim. */
     try {
       const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(brandId)}/dataforseo/allintitle`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operationRequestId, candidateIds: selectedCandidateIds }) });
       const payload = await response.json() as { success?: boolean; message?: string; projections?: Array<{ targetId?: string; candidateId?: string | null; resultsAllintitle?: number; measuredAt?: string; keywordDifficulty?: number | null; keywordOverview?: { measuredAt?: string } | null }> };
@@ -240,7 +241,19 @@ export function DiscoveryTablePlaceholder({ candidates = [], seoFilters = DEFAUL
         patchCandidate(candidateId, { currentMetrics: { resultsAllintitle: item.resultsAllintitle, allintitleStatus: "measured", allintitleMeasuredAt: item.measuredAt || null, allintitleProvider: "dataforseo", allintitleExecutor: "minerador_server", allintitleErrorCode: null, allintitleErrorMessage: null, keywordDifficulty: typeof item.keywordDifficulty === "number" ? item.keywordDifficulty : null, keywordDifficultyMeasuredAt: item.keywordOverview?.measuredAt || item.measuredAt || null, keywordDifficultyProvider: "dataforseo", keywordDifficultyOperationRequestId: operationRequestId } });
       }
       const filtersRevealed = measuredCount > 0 && onSerpMeasured?.() === true;
-      publishNotice({ severity: "SUCCESS", title: "Medição SEO concluída", message: payload.message || "Resultado e KD atualizados nas candidatas selecionadas.", details: filtersRevealed ? "Filtros em Sem medição passaram para Todos para manter as candidatas medidas visíveis." : undefined, source: "persistence", confirmed: true });
+      /* 2026-10-18 · SDD §5.7: SUCCESS só com todas medidas; parcial é WARNING; nenhuma, ERROR. */
+      const pedidas = selectedCandidateIds.length;
+      const severidade = measuredCount >= pedidas ? "SUCCESS" : measuredCount > 0 ? "WARNING" : "ERROR";
+      publishNotice({
+        severity: severidade,
+        title: severidade === "SUCCESS" ? "Medição SEO concluída" : "Medição SEO",
+        message: severidade === "SUCCESS"
+          ? payload.message || "Resultado e KD atualizados nas candidatas selecionadas."
+          : severidade === "WARNING" ? `Resultado e KD medidos em ${measuredCount} de ${pedidas} candidata(s); as demais ficaram sem medição.` : "Nenhuma candidata foi medida: o DataForSEO não devolveu Resultado para a seleção.",
+        details: filtersRevealed ? "Filtros em Sem medição passaram para Todos para manter as candidatas medidas visíveis." : undefined,
+        source: "persistence",
+        confirmed: severidade === "SUCCESS",
+      });
     } catch (error) {
       publishNotice({ severity: "ERROR", title: "Medição SEO", message: error instanceof Error ? error.message : "A medição SEO não foi concluída.", source: "persistence", details: process.env.NODE_ENV !== "production" && error instanceof Error ? error.message : undefined });
     } finally { setAllintitleMeasuring(false); }
@@ -264,7 +277,7 @@ export function DiscoveryTablePlaceholder({ candidates = [], seoFilters = DEFAUL
     }
     setImporting(true);
     setInlineNotice(null);
-    publishNotice({ severity: "PENDING", title: "Importação para o Processador", message: `Enviando ${selectedCandidateIds.length} candidata(s)…`, source: "workflow" });
+    /* 2026-10-18 · SDD §5.7: "Enviando..." fica no botão; o sino recebe só o resultado da importação. */
     let apiRequestStarted = false;
     try {
       const importRequestId = crypto.randomUUID();
@@ -302,7 +315,6 @@ export function DiscoveryTablePlaceholder({ candidates = [], seoFilters = DEFAUL
     {candidates.length > 0 && <div className="mb-3 flex min-w-0 w-full flex-wrap items-center gap-2"><label className="relative min-w-0 flex-1 sm:max-w-md"><span className="sr-only">Buscar nos resultados</span><Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted" aria-hidden="true" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar nos resultados..." className="w-full rounded border border-divider bg-surface-subtle py-1.5 pl-7 pr-2 text-sm text-foreground outline-none transition-colors placeholder:text-text-muted focus:border-module-accent/50 focus-visible:ring-2 focus-visible:ring-module-accent/40" /></label>{customerDiscovery && <label className="inline-flex min-h-9 items-center gap-2 text-sm text-foreground/80">Perspectiva<select value={perspectiveFilter} onChange={event => setPerspectiveFilter(event.target.value as DiscoveryPerspectiveFilter)} aria-label="Filtrar perspectiva" className={control}><option className={optionClass} value="all">Todas</option><option className={optionClass} value="customer">Cliente provável</option><option className={optionClass} value="ambiguous">Ambígua</option><option className={optionClass} value="other">Outra perspectiva</option></select></label>}<KeywordTableOrganizeButton ref={organizeRef} aria-expanded={organizeOpen} onClick={() => setOrganizeOpen(value => !value)} />{orderMode === "manual" ? <span className="text-sm text-text-muted">Ordem manual</span> : primarySort && <span className="text-sm text-text-muted">Ordenado por {tableColumns.find(column => column.field === primarySort.field)?.label} · {primarySort.direction === "asc" ? "crescente" : "decrescente"}</span>}<button type="button" onClick={clearOrganization} className="inline-flex min-h-9 items-center rounded border border-divider px-2.5 py-1 text-sm font-semibold text-text-muted hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground">Limpar organização</button><AnchoredPopover open={organizeOpen} onClose={() => setOrganizeOpen(false)} triggerRef={organizeRef} ariaLabel="Organizar resultados" className="max-h-[min(70vh,34rem)] overflow-y-auto"><OrganizationPanel columns={tableColumns} filters={filters} setFilters={setFilters} orderMode={orderMode} setOrderMode={setOrderMode} primarySort={primarySort} secondarySort={secondarySort} setPrimarySort={setPrimarySort} setSecondarySort={setSecondarySort} /></AnchoredPopover></div>}
     {seoHiddenCount > 0 && <p data-discovery-seo-hidden className="mb-3 text-sm leading-6 text-text-muted">{seoHiddenCount} {seoHiddenCount === 1 ? "candidata oculta" : "candidatas ocultas"} pelos filtros Resultado e KD. Escolha Todos nos dois para ver todas.</p>}
     {selection.selectedIds.size > 0 && !serpMeasurementEnabled && <p data-discovery-serp-gate-compact className="mb-3 text-sm leading-6 text-text-muted md:hidden">{DISCOVERY_SERP_GATE_MESSAGE}</p>}
-    {inlineNotice && <p className="mb-3 rounded border border-danger/45 bg-danger-soft px-3 py-2 text-sm leading-6 text-danger" role="alert">{inlineNotice}</p>}
     <KeywordTableShell ref={tableRef} scroll="both" data-discovery-table-viewport className={`max-h-[calc(100dvh-2.5rem)] ${selection.selectedIds.size ? "pb-14" : ""}`.trim()}>
       <table data-keyword-table="discovery" className="w-full border-collapse text-left text-sm font-sans whitespace-nowrap">
         <colgroup>{tableColumnIds.map(columnId => <col key={columnId} data-keyword-table-column={columnId} style={{ width: columnWidth(columnId) }} />)}</colgroup>

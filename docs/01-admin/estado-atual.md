@@ -1,5 +1,13 @@
 # Estado atual — Admin
 
+## Todos os avisos no sino — 2026-10-18
+
+Regra do dono: "estes e todos os avisos têm que estar dentro do sino" (`docs/compartilhado/sistema-visual.md` §24.2). **Verificado no código e confirmado por teste. Ainda não validado na tela.**
+
+- Saíram as faixas de erro e de resultado de Agências, Comunicação, Integrações, Marcas e Usuários. O erro, que antes ficava só na tela em Agências, Comunicação e Integrações, também vai ao sino.
+- Marcas: com a leitura falhada, a lista não diz mais "Nenhuma marca cadastrada".
+- `tests/admin-users.test.mts` deixou de exigir `role="status"` na tela (SUBSTITUÍDO) e passou a exigir a ponte do sino. Guarda: `tests/avisos-no-sino-2026-10-18.test.mts`.
+
 ## IA da plataforma pela OpenRouter — implementação local de 2026-10-11
 
 - **Decisão do dono:** deixar a DeepSeek e usar os créditos da OpenRouter. A capability `ai_generation` resolve a Connection global OpenRouter; modelo padrão `anthropic/claude-haiku-5.5` desde 2026-10-12. Fonte: [adendo](../compartilhado/adendo-ia-openrouter-2026-10-11.md).

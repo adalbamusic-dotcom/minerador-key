@@ -1,6 +1,92 @@
 - [ ] **Situações resolvidas (2026-10-17)** · [`situacoes-resolvidas.md`](situacoes-resolvidas.md) é leitura obrigatória antes de mexer no Arquiteto: transformar em cenário-ouro as 12 situações da lista (a), tirar da lista (b) cada item quando a fase dele for entregue e registrar ali, com o cenário que a guarda, toda situação nova resolvida.
 - [ ] **APROVADA em 2026-10-16 (F0 entregue em 16/10; F2 entregue em 17/10, noite, a pedido do dono no amarelo, com desvio declarado de D1 — §15.7; F1 aguarda a aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 aprovadas com as recomendações.
 
+## O Assunto da página é a âncora do refazer — 2026-10-19 (tarde)
+
+Detalhe e roteiro de teste manual em `estado-atual.md` (mesmo título). Spec §48; situações T15, Z11, G21, U19. **Validado manualmente: não** (o dono testa à mão).
+
+- [x] T15 · a principal leva o que define o artigo (restrição, negação, comparação, nicho; núcleo com a entidade); a antiga que não cabe deixa o posto; sem candidata, o Assunto como foco (A5; b2-14 resolvido).
+- [x] Z11 · canibalização entre os artigos do recorte (mesma linha do Google Ads, mesma busca, a keyword que serve a outro Assunto), com as duas linhas gravadas juntas.
+- [x] G21 · a SERP nacional do Minerador não decide com a marca numa cidade; no refazedor a recoleta não é barrada; a coleta de uma keyword só fora do registro da guarda.
+- [x] U19 · mesa D2.1, "Reforçar publicados" e diferenciação pela mesma régua; a página vira o Assunto na troca da mesa e do Reforçar.
+- [x] A IA recebe o `assunto` e o `oQueDefine`.
+- [ ] **Dono:** o roteiro do verde pelos botões (estado-atual, 19/10 tarde) e as 6 decisões listadas lá (nicho, Assunto como foco gravado sem volume, recoleta com cache válido, mover entre publicados, "harmonização facial o que é", Reforçar de ponta a ponta).
+- [ ] Cenário de ponta a ponta no servidor da troca de artigo (`movedOut`/`movedIn`) pelas duas linhas gravadas (hoje: domínio, aceite e ordem; a tolerância do gravador não tem cenário próprio).
+- [ ] A diferenciação prender o Assunto da página na troca (hoje ela deixa a troca para o refazedor quando a página tem o Assunto).
+
+## A coleta paga do verde parou com 409 — 2026-10-19
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] G20 · a guarda de retrabalho barra UMA coleta (plano 409 → "nada a pagar" com os barrados; a linha diz a recusa e a saída; a coleta pula e avisa).
+- [x] V7 · a coleta parada aparece no painel e no sino (pago e o que parou) e continua pelo mesmo Confirmar ("Continuar a coleta autorizada").
+- [ ] **Dono:** abrir "Melhorar publicados…" no verde retoma a coleta autorizada (até 72 consultas, US$ 0,252) e conferir a prévia.
+- [x] ~~**Decisão do dono:** a coleta de uma keyword só (encher o cache da principal) fora do registro da guarda de retrabalho~~ — decidido em 19/10 (tarde): sim (G21).
+
+## Teste do verde pelo botão (intenção, SERP, localidade, coleta) — 2026-10-19
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] RF25 · intenção e funil por um normalizador só (`intentComparisonKey`, `funnelComparisonKey`), em todas as réguas do Arquiteto.
+- [x] RF26 · a secundária do publicado só sai por intenção pela SERP (4 lentes, conclusiva; RF11 com 3+ páginas).
+- [x] RF13 · a cidade da marca não é busca local de fora nem troca a entidade do slug.
+- [x] G19 · a coleta paga cobre a principal que o plano contou (`needsValidation` na falta de lente).
+- [ ] **Dono:** o dono refaz o verde pelo botão ("Melhorar publicados…" → coletar → conferir a prévia). Custo esperado: as 16 principais que faltam (64 consultas, até ~US$ 0,22), uma vez.
+- [x] ~~**Decisão do dono:** a `evidencia_serp` do Minerador coletada antes da localidade São Paulo conta como "a SERP" da régua c (R12)?~~ — decidido em 19/10 (tarde): não conta (G21).
+- [ ] O `engine.ts:normalizedIntent` (regex por família, motor antigo) passar a chamar `intentComparisonKey` quando o motor for revisto (hoje já agrupa por família).
+
+## O Assunto pela principal e pelo volume — 2026-10-18
+
+Detalhe em `estado-atual.md` (mesmo título). SDD `docs/compartilhado/sdd-assunto-pela-principal-e-volume-2026-10-18.md`. **Validado manualmente: não.**
+
+- [x] F5 · régua da troca pelo volume (Pilar e Suporte, publicado e novo), régua c, publicado com o Assunto na página (página → `subject`, saídas com decisão), página achada pelo `subject`, releitura com `confirmedExits`.
+- [x] F0 · cenários-ouro Z1–Z8, Z10–Z12 e DOM pelos botões ("Melhorar publicados…").
+- [ ] **F7 (coordenador):** o grupo verde da AdalbaPro pelos botões (§16 da SDD), antes de 2026-10-25 (validade do "sem média") e com a localidade São Paulo ativada (R12).
+- [x] (2026-10-19, U19) A mesa D2.1 (`modules/arquiteto/serp-subject-model.ts:buildPublishedSwapArticlePayload`) e o "Reforçar publicados" seguirem a U18 (a antiga vira o Assunto, não secundária) e a T14 (`lib/arquiteto/published-primary-swap.ts:proposePublishedPrimarySwap` ainda usa a identidade como portão).
+- [ ] Z9 · apontar o artigo duplicado do mesmo Assunto (dois ArticleDNA vigentes com o mesmo `subject.keywordId`); decisão do dono no WhatsApp duplicado (Q11).
+
+## "Desfazer Silo" e a exclusão em qualquer estado — 2026-10-18
+
+Detalhe em `estado-atual.md` (mesmo título). SDD `sdd-linha-unica-do-arquiteto-2026-10-16.md` §15.11. **Validado manualmente: não.**
+
+- [x] "Desfazer Silo" aceita o Silo inteiro em qualquer estado (Pilar incluído), com prévia, nome digitado e `decisionHash`; writers de sempre; releitura e retomada.
+- [x] "Retirar artigo do Silo": publicado e adiante viram aviso; o item adiante sai junto.
+- [x] Porta do desmonte para a exclusão do Minerador (mesmo núcleo); cenários-ouro (a)–(d).
+- [ ] Teste pelo botão no navegador local (azul da WifiConecta): "Desfazer Silo" → prévia → nome → confirmar; conferir por SELECT os eventos `rejected`, o território e o `silo_id` do grupo.
+- [ ] Reenvio ao Radar de artigo com item `withdrawn` (unicidade da esteira): decidir se o envio reabre o item retirado.
+- [ ] Depois da migration do dono (documento do Redator), tirar a recusa `blocked_descendant` do texto e do cenário.
+
+## Localidade da SERP por marca — Arquiteto — 2026-10-18
+
+Detalhe em `estado-atual.md` (mesmo título). SDD `docs/compartilhado/sdd-localidade-serp-por-marca-2026-10-18.md`. **Validado manualmente: não.**
+
+- [x] Todo ponto da SERP Google orgânica do Arquiteto usa a localidade da marca (chave, pedido, config, rótulo do snapshot, guarda de retrabalho).
+- [x] A mesa mostra a SERP antiga nacional marcada quando a marca tem cidade; a prévia de custo diz a cidade.
+- [ ] Depois da L4 (o dono põe "São Paulo (cidade)"): pelos botões de sempre, "Validar no Google"/"Processar artigos" da WifiConecta com o custo dito antes, e conferir no banco (SELECT) entradas de cache com o `locationCode` da capital.
+- [ ] Levar a marca "(nacional)" também à coluna de lentes da planilha do plano (`plan-article-sheet`), hoje só a linha da leitura da mesa diz.
+
+## A cabeça do Pilar é a do núcleo do Pilar/Silo; Links: a cópia já aprovada não reabre o "Confirmar" — Arquiteto — 2026-10-18
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] No Suporte do plano, só a cabeça do núcleo do Pilar/Silo fica com o Pilar; a cabeça da faceta do próprio Suporte reforça o contexto até 5.000 buscas (RF24); o servidor lê o Pilar do mesmo plano antes do recorte por `targetIds` (`planPillar`).
+- [x] A mesma busca com o mesmo volume (a mesma linha do Google Ads) conta uma vez no teto de 2 (RF19, complemento).
+- [x] Registrado o conserto do coordenador nos Links: a cópia de outra linhagem que o grafo aprovado não reabre "Confirmar links internos" (S24).
+- [ ] **Do dono, na tela:** abrir "Melhorar publicados…" no amarelo e conferir a instalação ("instalação de internet" e "internet instalação" na proposta) antes de confirmar.
+- [ ] **Decisão do dono:** confirmar a leitura "mesma busca + mesmo volume = um dado só" (muda também "preço internet residencial" × "preço de internet residencial", 170 × 170, no artigo "barata").
+
+## Depois do Concluir: Silo do plano fechado, keywords no artigo, Links pela cor, o refazedor que lê e o Pilar que troca — Arquiteto — 2026-10-18
+
+Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] O envio das keywords novas acha o Silo do plano consolidado (nenhum Silo novo); "Recriar" recusa o consolidado; o duplicado vazio sai pelo "Desfazer Silo" de sempre.
+- [x] Keyword de ArticleDNA vigente nunca é "sem artigo" nem pendente.
+- [x] Links: o Silo da cor com o par é escolhido sozinho; sem cor, o seletor de sempre; o Silo da linha vem do ArticleDNA.
+- [x] O refazedor mostra a leitura de cada artigo (tem · falta · proposta); o "já feito" só quando se pede; o Assunto com lista entra na busca nova (F5 de 12/10 SUBSTITUÍDO).
+- [x] "Pilar troca, Suportes ficam": o Pilar Livre sem volume recebe a proposta do termo-cabeça; a Lógica que já rodou com "Pendente" não é "Precisa do Minerador".
+- [ ] **Do dono, na tela:** "Desfazer Silo" no `territory:c8c9ee94` (vazio); Links internos → "Confirmar links internos" → "Marcar Pronto para Radar e enviar"; refazedor no Pilar (a troca proposta, com a SERP do termo-cabeça, custo antes).
+- [ ] O item da keyword nova incorporada não ganha `clusterId`/`workingArticleId` na cópia de trabalho (a leitura agora a reconhece pelo ArticleDNA; gravar a marca no item é outra entrega, se o dono quiser).
+
 ## Reforço equilibrado: a mesma busca, as entidades do Assunto e o "adequado" — Arquiteto — 2026-10-17 (noite)
 
 Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
@@ -60,7 +146,7 @@ Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
 Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
 
 - [x] Variantes da mesma busca num artigo só do Silo (o da principal; senão o da secundária; senão o que melhor as contém; o Pilar desempata).
-- [x] Busca com marca só no artigo que nomeia a marca ou fala de operadoras; cabeça acima da principal só no Pilar; secundária com palavra própria do artigo.
+- [x] Busca com marca só no artigo que nomeia a marca ou fala de operadoras; cabeça acima da principal só no Pilar (SUBSTITUÍDO em 2026-10-18, RF24: só a do núcleo do Pilar/Silo); secundária com palavra própria do artigo.
 - [x] Sementes sem palavra solta do DNA e sem marca alheia.
 - [x] A antiga principal que carrega o Assunto fica como âncora do Assunto (SDD §15.2, SUBSTITUI "a antiga vira secundária" nesse caso).
 - [x] Telas: confirmação com as keywords novas por artigo (volume e fonte) e `approveNewKeywords` só então (melhoria, Artigos do plano, Reforçar publicados).

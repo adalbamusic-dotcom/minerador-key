@@ -43,9 +43,13 @@ export const MCP_ARTICLE_BLUEPRINT_SCREEN = Object.freeze({
   organizeAndSend: `Organizar o artigo-modelo e enviar (${mcpArticleBlueprintCostLabel(1)})`,
 });
 
-/** A barra de lote do Radar (a seleção). */
+/**
+ * A barra de lote do Radar (a seleção). 2026-10-18 (dono) · o botão solto
+ * "Organizar o artigo-modelo (N)" saiu: o "Pesquisar e finalizar (N artigos)"
+ * organiza o artigo-modelo que falta dos finalizados, sem pesquisa paga.
+ */
 export const mcpArticleBlueprintBatchLabel = (artigos: number) =>
-  `Organizar o artigo-modelo (${artigos}) · ${mcpArticleBlueprintCostLabel(artigos)}`;
+  `Pesquisar e finalizar (${artigos} artigo${artigos === 1 ? "" : "s"})`;
 
 /** O botão do export quando falta a planta. */
 export const mcpArticleBlueprintOrganizeAndExportLabel = (artigos: number) =>
@@ -74,7 +78,7 @@ export function mcpArticleBlueprintAction(input: {
   const botoes = [
     MCP_ARTICLE_BLUEPRINT_SCREEN.organize,
     ...(input.flowButton ? [input.flowButton] : []),
-    ...(artigos > 1 ? [`${mcpArticleBlueprintBatchLabel(artigos)} (barra de lote do Radar)`] : []),
+    ...(artigos > 1 ? [`${mcpArticleBlueprintBatchLabel(artigos)} (barra de lote do Radar: nos já finalizados, organiza só o artigo-modelo que falta, ${mcpArticleBlueprintCostLabel(artigos)}, sem pesquisa paga)`] : []),
   ];
   return {
     who: "human",

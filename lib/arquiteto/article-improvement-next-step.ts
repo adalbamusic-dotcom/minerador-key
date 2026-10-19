@@ -213,3 +213,42 @@ export function resolveImprovementNextStep(input: ImprovementNextStepInput): Imp
   }
   return { kind: "none", sentence: IMPROVEMENT_NO_PENDING_SENTENCE, button: "Ver Sobras", anchorId: ARTICLES_SOBRAS_ANCHOR };
 }
+
+/*
+ * 2026-10-18 (amarelo da WifiConecta, teste no ar) · A LEITURA GRÁTIS DO REFAZEDOR, POR ARTIGO. Com os 8 artigos já
+ * formados, "Melhorar publicados…" abria e mostrava só "Já feito com os mesmos insumos… diga o motivo para refazer": o
+ * dono achou que "não fez nada". Abrir o refazedor mostra, para cada artigo lido, o que ele TEM, o que FALTA e a
+ * PROPOSTA (se houver); o custo aparece só quando precisa pagar, e o "já feito" só quando a pessoa pede para refazer o
+ * que custa. Só leitura: nada aqui chama nem grava.
+ */
+export type ImprovementReadingLine = { targetId: string; theme: string; has: string; missing: string; proposal: string };
+const contagem = (n: number) => `${n} keyword${n === 1 ? "" : "s"}`;
+export function improvementReadingLines(input: {
+  proposals: ReadonlyArray<{ targetId: string; theme: string; memberIds: readonly string[]; addIds: readonly string[]; removeIds: readonly string[]; principalId: string | null; currentPrimaryId: string | null; status: string; reasons: readonly string[]; needsValidation?: boolean; needsMinerador?: unknown }>;
+  targets: ReadonlyArray<{ id: string; memberIds: readonly string[] }>;
+  keywordName: (id: string | null) => string;
+  /** O teto do artigo (seis: uma principal e até cinco de apoio). */
+  max: number;
+}): ImprovementReadingLine[] {
+  return input.proposals.map(p => {
+    const atuais = input.targets.find(t => t.id === p.targetId)?.memberIds.length ?? 0;
+    const has = atuais ? `${contagem(atuais)} hoje` : "ainda sem ArticleDNA";
+    const cabem = input.max - Math.max(atuais, 1);
+    const faltas = [
+      cabem > 0 ? `cabem mais ${cabem}` : `cheio (${input.max} de ${input.max})`,
+      p.needsValidation ? "falta a SERP da principal (coleta paga, custo antes)" : null,
+      p.needsMinerador ? "precisa do Minerador" : null,
+    ].filter(Boolean);
+    const troca = p.principalId && p.principalId !== p.currentPrimaryId ? `principal: ${input.keywordName(p.currentPrimaryId)} → ${input.keywordName(p.principalId)}` : null;
+    const muda = [
+      troca,
+      p.addIds.length ? `entram ${p.addIds.length}: ${p.addIds.map(id => input.keywordName(id)).join("; ")}` : null,
+      p.removeIds.length ? `saem ${p.removeIds.length}: ${p.removeIds.map(id => input.keywordName(id)).join("; ")}` : null,
+    ].filter(Boolean);
+    const semReforco = p.reasons.find(reason => reason.startsWith("Sem keyword de reforço encontrada"));
+    const proposal = muda.length
+      ? `Proposta: ${muda.join(" · ")} (${contagem(atuais)} → ${contagem(p.memberIds.length)}).`
+      : semReforco ?? (cabem > 0 ? "Nenhuma keyword nova coube nesta leitura; a vaga continua aberta." : "Nada a mudar: o artigo está cheio.");
+    return { targetId: p.targetId, theme: p.theme, has, missing: faltas.join("; "), proposal };
+  });
+}

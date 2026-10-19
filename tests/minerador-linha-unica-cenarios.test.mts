@@ -70,6 +70,13 @@ import { setKeywordPageType } from "../lib/minerador/keyword-page-type.ts";
 import { setKgrApplicability } from "../lib/minerador/kgr-applicability.ts";
 import { applyHumanReviewField } from "../lib/minerador/human-review.ts";
 import { isLegacyPublishedStatus } from "../lib/minerador/editorial-status.ts";
+import { applyKeywordDeleteWithCore, previewKeywordDeleteWithCore } from "../lib/minerador/keyword-delete-core.ts";
+import { previewGroupDeleteAllWithCore } from "../lib/minerador/group-delete-all-core.ts";
+import { GROUP_DELETE_ALL_RELEASE_VIA, GROUP_DELETE_SELECTION_ACTION_LABEL } from "../lib/minerador/group-delete-all.ts";
+import { checkDeleteConfirmation, DELETE_STRONG_CONFIRMATION_ABOVE, deleteConfirmationRequirement } from "../lib/lifecycle/typed-confirmation.ts";
+import { groupEventHistoryEntry } from "../lib/editorial/group-history.ts";
+import { keywordCarriesDeclaredPlan } from "../lib/minerador/keyword-subject.ts";
+import { liberacaoDaCor } from "./excluir-cor-fake-db.mts";
 
 /*
  * F0 DA LINHA ÚNICA DO MINERADOR — CENÁRIOS-OURO DO FLUXO DE HOJE (SDD
@@ -499,13 +506,8 @@ async function azulComVolume10Livre() {
   return { minerador: minerador?.kind === "plan" ? minerador.state : null, planilha: planilha.state, selo: selos.some(selo => selo.kind === "free_principal") ? "free" : selos.some(selo => selo.kind === "declared_principal") ? "locked" : null, standing };
 }
 
-test("G6 · hoje: keyword do plano com volume 10 e trava Livre gravada — Posto (Minerador) diz Livre, planilha do plano diz Travada, selo diz Livre", async () => {
-  const leitura = await azulComVolume10Livre();
-  assert.equal(leitura.standing.volumeValue, 10);
-  assert.deepEqual({ minerador: leitura.minerador, planilha: leitura.planilha, selo: leitura.selo }, { minerador: "free", planilha: "locked", selo: "free" });
-});
-
-test("G6 · trava × volume: Posto, planilha do plano e selo dizem o mesmo estado (D1: volume definido fixa)", { todo: "vermelho até a F2 (A1/E-7/D1): `declaredPrincipalLock` com a regra de 14/10, todo leitor passa o volume" }, async () => {
+// 2026-10-18 · a F2 da SDD do Assunto pela principal (§6.2-f, G11) adiantou a D1: o cenário "hoje" (Posto Livre × planilha Travada) saiu; os três dizem Travada.
+test("G6 · trava × volume: Posto, planilha do plano e selo dizem o mesmo estado (D1: volume definido fixa)", async () => {
   const leitura = await azulComVolume10Livre();
   assert.deepEqual({ minerador: leitura.minerador, planilha: leitura.planilha, selo: leitura.selo }, { minerador: "locked", planilha: "locked", selo: "locked" });
 });
@@ -656,6 +658,7 @@ test("G10 · publicado: cadastro com destino \"Artigo publicado\" põe o Assunto
   assert.equal(assunto.plan, null, "publicado não entra em plano de Silo");
   assert.equal(resolveKeywordPlanLock({ keywordId: String(depois.id), status: String(depois.status), semantic: semantica(depois) }), null, "o posto é o da publicação, não a trava do plano");
   const entrada = keywordDecisionEntries((await readDecisionKeywords(BRAND, [String(depois.id)], client(db))).rows, "approve")[0];
+  // Sem a Lógica, a publicada continua protegida (só envia); com a Lógica e a coluna `aprovado`, o pacote pode ser re-assinado (2026-10-18, F4).
   assert.equal(entrada.outcome, "blocked");
   assert.match(entrada.blockers[0], /publicado é protegido/);
   const arquiteto = arquitetoFalso(db);
@@ -790,7 +793,7 @@ test("G14 · abrir a tela não grava", { todo: "vermelho até a F3 (A6/D3): sai 
 
 /* ===================================================================== G15 */
 
-test("G15 · exclusão: não publicada sai de vez; publicada vai à lixeira por 24 h; a do plano é recusada pelo banco (KEYWORD_DELETE_SUBJECT_PROTECTED); excluir lista não apaga keyword", async () => {
+test("G15 · exclusão: não publicada sai de vez; publicada vai à lixeira por 24 h; a do plano, SEM a liberação, é recusada pelo banco (KEYWORD_DELETE_SUBJECT_PROTECTED; a exclusão comum libera pelo núcleo da cor — G18); excluir lista não apaga keyword", async () => {
   const { db, ids } = await azulCadastrado();
   const solta = linha(db, KEYWORD_DO_SILO)!;
   const publicada = linha(db, "internet fibra empresarial")!;
@@ -808,8 +811,269 @@ test("G15 · exclusão: não publicada sai de vez; publicada vai à lixeira por 
   assert.match(migration, /KEYWORD_DELETE_SUBJECT_PROTECTED/);
   const fk = cru("supabase/migrations/0005_tenant_ownership_and_rls.sql");
   assert.match(fk, /FOREIGN KEY \(lista_id\) REFERENCES public\.listas_kgr\(id\) ON DELETE RESTRICT/, "lista → keyword: RESTRICT");
+  // 2026-10-17 (P-4): a rota chama o núcleo da exclusão, que grava pela RPC do ciclo de vida de sempre.
   const rota = codigo("app/api/minerador/marcas/[brandId]/keywords/delete/route.ts");
-  assert.match(rota, /rpc\("lifecycle_delete_minerador_keywords"/, "o gravador é a RPC do ciclo de vida");
+  assert.match(rota, /applyKeywordDeleteWithCore\(\{/, "a rota passa pelo núcleo");
+  const nucleo = codigo("lib/minerador/keyword-delete-core.ts");
+  assert.match(nucleo, /KEYWORD_DELETE_RPC = "lifecycle_delete_minerador_keywords"/);
+  assert.match(nucleo, /input\.client\.rpc\(KEYWORD_DELETE_RPC, \{/, "o gravador é a RPC do ciclo de vida");
+});
+
+/* ===================================================================== G18 */
+
+/*
+ * 2026-10-17 · o dono: "não está deixando apagar no Minerador, ele tem que
+ * deixar apagar todo o grupo, isso está no contrato global" (e, em 14/10, "só
+ * com selecionar já está bom"). A MESMA linha ganha o caso: a exclusão de
+ * sempre (selecionar → Excluir) manda a keyword que carrega o plano ao MESMO
+ * núcleo de "Excluir tudo da cor" (a RPC da M-E libera o Assunto e exclui na
+ * mesma transação; o plano ganha a versão nova; o histórico do grupo registra;
+ * a D7 vale) e confere pela MESMA regra da confirmação (P-4 da SDD).
+ */
+
+/** O ciclo de vida do banco, em memória: as RPCs de sempre e a da M-E (o espelho do SQL) e o gatilho do Assunto. */
+function cicloDeVidaNoBanco(db: LinhaUnicaFakeDb, opcoes: { meAplicada?: boolean } = {}) {
+  const publicada = (row: Row) => isKeywordPublished({ status: String(row.status || ""), semantic: semantica(row) });
+  const erro = (message: string, code = "P0001") => ({ data: null, error: { code, message } });
+  // `lifecycle_delete_minerador_keywords` (20260921100000) + o gatilho `minerador_keywords_recusa_exclusao_com_assunto`.
+  const ciclo = (brandId: string, ids: string[], allowRecoverable: boolean): { data: unknown; error: unknown } => {
+    const linhas = ids.map(id => db.rows("minerador_keywords").find(row => row.id === id && row.brand_id === brandId && !row.deleted_at));
+    if (linhas.some(row => !row)) return erro("KEYWORD_DELETE_NOT_FOUND");
+    const publicadas = (linhas as Row[]).filter(publicada);
+    if (publicadas.length && !allowRecoverable) return erro(`KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW: ${publicadas.map(row => row.keyword).join(", ")}`);
+    const hard: string[] = [];
+    const recoverable: string[] = [];
+    for (const row of linhas as Row[]) {
+      if (keywordSubjectBlocksDeletion(semantica(row))) return erro(`KEYWORD_DELETE_SUBJECT_PROTECTED: a keyword "${row.keyword}" carrega o Assunto do plano do Silo.`);
+      if (publicada(row)) { row.deleted_at = LATER; row.purge_after = "2026-10-17T15:00:00.000Z"; recoverable.push(String(row.id)); }
+      else hard.push(String(row.id));
+    }
+    db.tables.minerador_keywords = db.rows("minerador_keywords").filter(row => !hard.includes(String(row.id)));
+    return { data: { hardDeletedIds: hard.sort(), recoverableIds: recoverable.sort(), partialDelete: false }, error: null };
+  };
+  // Uma transação: qualquer recusa desfaz tudo o que a chamada escreveu (inclusive a liberação).
+  const transacao = (corpo: () => { data: unknown; error: unknown }) => {
+    const foto = structuredClone(db.tables.minerador_keywords);
+    const resultado = corpo();
+    if (resultado.error) db.tables.minerador_keywords = foto;
+    return resultado;
+  };
+  db.rpcs.lifecycle_preview_minerador_keywords = args => ({
+    data: {
+      items: ((args.p_keyword_ids as string[]) ?? []).map(id => {
+        const row = db.rows("minerador_keywords").find(item => item.id === id && item.brand_id === args.p_brand_id);
+        return { root: { id, label: row?.keyword ?? "" }, mode: row && publicada(row) ? "recoverable" : "hard", recoveryState: row?.deleted_at ? "recoverable" : "active" };
+      }),
+    },
+    error: null,
+  });
+  db.rpcs.lifecycle_delete_minerador_keywords = args => transacao(() => ciclo(String(args.p_brand_id), [...new Set((args.p_keyword_ids as string[]) ?? [])], args.p_allow_recoverable === true));
+  if (opcoes.meAplicada === false) return;
+  db.rpcs.lifecycle_delete_group_keywords_contract = () => ({ data: { operation: "lifecycle_delete_group_keywords", version: 1, maxIds: 100, via: GROUP_DELETE_ALL_RELEASE_VIA }, error: null });
+  // `lifecycle_delete_group_keywords` (M-E 20261016130000): libera o Assunto e chama a exclusão de sempre, na mesma transação.
+  db.rpcs.lifecycle_delete_group_keywords = args => transacao(() => {
+    const ids = [...new Set((args.p_keyword_ids as string[]) ?? [])].sort();
+    if (!ids.length || ids.length > 100) return erro("GROUP_DELETE_INVALID");
+    if (!db.rows("editorial_groups").some(grupo => grupo.id === args.p_group_id && grupo.marca_id === args.p_brand_id)) return erro("GROUP_DELETE_OUTSIDE_GROUP");
+    const vivas = db.rows("minerador_keywords").filter(row => row.brand_id === args.p_brand_id && ids.includes(String(row.id)) && row.group_id === args.p_group_id && !row.deleted_at);
+    if (vivas.length !== ids.length) return erro("GROUP_DELETE_OUTSIDE_GROUP");
+    const liberadas: string[] = [];
+    for (const row of vivas) {
+      const antes = semantica(row);
+      const depois = liberacaoDaCor(antes, { actorId: String(args.p_actor_user_id), requestId: String(args.p_request_id), at: LATER });
+      if (depois !== antes) { row.analise_semantica = depois; liberadas.push(String(row.id)); }
+    }
+    const resultado = ciclo(String(args.p_brand_id), ids, args.p_allow_recoverable === true);
+    if (resultado.error) return resultado;
+    return { data: { ...(resultado.data as Row), releasedSubjectIds: liberadas.sort(), requestId: args.p_request_id, groupId: args.p_group_id, via: GROUP_DELETE_ALL_RELEASE_VIA }, error: null };
+  });
+}
+
+const excluirPreview = (db: LinhaUnicaFakeDb, keywordIds: string[]) => previewKeywordDeleteWithCore({ client: client(db), brandId: BRAND, actorUserId: ACTOR, keywordIds });
+const excluir = (db: LinhaUnicaFakeDb, keywordIds: string[], input: { decisionHash: string | null; allowRecoverable?: boolean; typed: Record<string, unknown> }) => {
+  let n = 0;
+  return applyKeywordDeleteWithCore({ client: client(db), brandId: BRAND, actorUserId: ACTOR, keywordIds, allowRecoverable: input.allowRecoverable ?? false, decisionHash: input.decisionHash, typed: input.typed, requestId: () => `7c000000-0000-4000-8000-${String(++n).padStart(12, "0")}` });
+};
+const exclusoesNoBanco = (db: LinhaUnicaFakeDb) => db.log.filter(entrada => entrada.op === "rpc" && (entrada.table === "lifecycle_delete_minerador_keywords" || entrada.table === "lifecycle_delete_group_keywords")).length;
+const escritasForaDeRpc = (db: LinhaUnicaFakeDb) => db.writes().filter(entrada => entrada.op !== "rpc").length;
+
+test("G18 · selecionar keywords do plano e Excluir (a exclusão de sempre): a prévia avisa que saem do plano, pede a confirmação forte (a cor, “apaga de vez” e o nome da publicada), o plano ganha a versão nova, as do plano e a solta saem de vez, a publicada vai à lixeira de 24 h; a outra marca e o Assunto das não selecionadas ficam intactos", async () => {
+  const { db, ids } = await azulCadastrado();
+  cicloDeVidaNoBanco(db);
+  const importado = await importar(db, ["roteador wifi 6 vale a pena"]);
+  const solta = String(importado.items[0].keywordId);
+  const publicada = String(linha(db, "internet fibra empresarial")!.id);
+  const outraMarcaAntes = JSON.stringify(db.rows("minerador_keywords").filter(row => row.brand_id === OTHER_BRAND));
+  const naoSelecionadas = [ids[0], ids[2], ids[4], ids[5], ids[6]];
+  const assuntoAntes = new Map(naoSelecionadas.map(id => [id, JSON.stringify(semantica(porId(db, id)).keyword_subject)]));
+  const versaoAntes = Number(db.rows("editorial_groups").find(grupo => grupo.id === AZUL)!.plan_version);
+  const selecao = [ids[1], ids[3], solta, publicada];
+
+  // 1. A prévia (grátis, só leitura): não recusa; diz o que sai do plano e pede a confirmação forte.
+  const escritasAntes = escritasForaDeRpc(db);
+  const previa = await excluirPreview(db, selecao);
+  assert.ok(previa.ok, JSON.stringify(previa));
+  if (!previa.ok) return;
+  const p = previa.preview;
+  assert.match(previa.decisionHash, /^sha256:/);
+  assert.equal(escritasForaDeRpc(db), escritasAntes, "a prévia não grava");
+  assert.equal(exclusoesNoBanco(db), 0, "a prévia não exclui");
+  assert.deepEqual(p.colors.map(cor => [cor.groupId, cor.keywordIds]), [[AZUL, [ids[1], ids[3]].sort()]], "as do plano vão ao núcleo da cor Azul");
+  const cor = p.colors[0].preview;
+  assert.deepEqual(cor.releasedSubjects.map(item => item.keywordId).sort(), [ids[1], ids[3]].sort(), "as duas saem do plano");
+  assert.deepEqual(cor.plan, { hasPlan: true, articlesNow: 7, articlesLeaving: 2, articlesStaying: 5, after: "reduced", nextPlanVersion: versaoAntes + 1 });
+  assert.equal(cor.color.freedAtEnd, false);
+  assert.ok(cor.color.keptBecause.some(item => /6 keywords da cor não estão na seleção e ficam/.test(item)), JSON.stringify(cor.color.keptBecause));
+  assert.deepEqual(p.free, { hard: [solta], recoverable: [publicada] });
+  assert.deepEqual(p.out, []);
+  assert.deepEqual(p.confirmation, { selectionName: null, colorWords: ["azul"], hardPhrase: "apaga de vez", publishedNames: [{ id: publicada, keyword: "internet fibra empresarial" }] });
+  assert.ok(p.effects.some(efeito => efeito.startsWith(`Cor Azul: 2 keywords saem do plano (o Assunto é liberado e apagado na mesma transação); o plano do Silo passa para a v${versaoAntes + 1} com 5 artigos; a cor Azul continua ocupada`)), JSON.stringify(p.effects));
+  // SUBSTITUÍDO (dono, 2026-10-18): o aviso "O Arquiteto não exclui keyword (F4)" saiu; tudo pode
+  // ser apagado, e a prévia diz que as versões dos artefatos ficam como histórico.
+  assert.ok(!p.effects.some(efeito => /O Arquiteto não exclui keyword \(F4\)/.test(efeito)), "a recusa F4 saiu da prévia");
+  assert.ok(p.effects.some(efeito => /ficam como histórico \(não são apagadas\)/.test(efeito)), JSON.stringify(p.effects));
+  assert.ok(p.effects.some(efeito => /3 keywords não publicadas são apagadas DE VEZ/.test(efeito)));
+  assert.ok(p.effects.some(efeito => /1 publicada vai para a lixeira de 24 h/.test(efeito)));
+  assert.deepEqual([...p.publishedIds], [publicada]);
+  assert.equal(p.requiresRecoverableConfirmation, true);
+
+  // 2. Sem a decisão certa, nada começa.
+  const certo = { colors: { azul: "  Azul " }, phrase: "Apaga de vez", publishedNames: { [publicada]: "internet fibra empresarial" } };
+  for (const [entrada, codigoEsperado] of [
+    [{ decisionHash: previa.decisionHash, allowRecoverable: true, typed: { selection: "4 keywords selecionadas" } }, "CONFIRMATION_REQUIRED"],
+    [{ decisionHash: previa.decisionHash, allowRecoverable: true, typed: { ...certo, colors: { azul: "verde" } } }, "CONFIRMATION_REQUIRED"],
+    [{ decisionHash: previa.decisionHash, allowRecoverable: false, typed: certo }, "KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW"],
+    [{ decisionHash: "sha256:outra", allowRecoverable: true, typed: certo }, "DECISION_STALE"],
+    [{ decisionHash: null, allowRecoverable: true, typed: certo }, "DECISION_REQUIRED"],
+  ] as const) {
+    const recusa = await excluir(db, selecao, entrada as never);
+    assert.ok(!recusa.ok && recusa.code === codigoEsperado, `${codigoEsperado}: ${JSON.stringify(recusa).slice(0, 300)}`);
+  }
+  assert.equal(exclusoesNoBanco(db), 0, "nenhuma recusa chega ao banco");
+  assert.ok(porId(db, ids[1]) && resolveKeywordSubject(semantica(porId(db, ids[1]))).plan, "nada mudou");
+
+  // 3. Confirmado: as do plano saem do plano e de vez, a solta de vez, a publicada para a lixeira.
+  const feito = await excluir(db, selecao, { decisionHash: previa.decisionHash, allowRecoverable: true, typed: certo });
+  assert.ok(feito.ok && feito.complete, JSON.stringify(feito));
+  if (!feito.ok) return;
+  assert.deepEqual([...feito.hardDeletedIds].sort(), [ids[1], ids[3], solta].sort());
+  assert.deepEqual(feito.recoverableIds, [publicada]);
+  assert.deepEqual([...feito.releasedSubjectIds].sort(), [ids[1], ids[3]].sort());
+  assert.equal(feito.readback.confirmed, true);
+  for (const id of [ids[1], ids[3], solta]) assert.equal(db.rows("minerador_keywords").some(row => row.id === id), false, `${id} saiu de vez`);
+  assert.ok(porId(db, publicada).deleted_at, "a publicada está na lixeira de 24 h (restaurável), não sumiu");
+  const grupo = db.rows("editorial_groups").find(item => item.id === AZUL)!;
+  assert.equal(grupo.plan_version, versaoAntes + 1, "o plano do grupo ganhou a versão nova");
+  assert.equal((grupo.plan as Row).articleCount, 5);
+  assert.equal(grupo.status, "active", "sobrou coisa: a cor continua ocupada");
+  assert.deepEqual(feito.colors.map(item => [item.groupId, item.outcome, item.plan && item.plan.ok ? item.plan.outcome : null, item.colorFreed]), [[AZUL, "done", "reduced", false]]);
+  // O Assunto das não selecionadas: intacto, byte a byte. A outra marca: intacta.
+  for (const id of naoSelecionadas) assert.equal(JSON.stringify(semantica(porId(db, id)).keyword_subject), assuntoAntes.get(id), id);
+  assert.equal(JSON.stringify(db.rows("minerador_keywords").filter(row => row.brand_id === OTHER_BRAND)), outraMarcaAntes);
+  // O histórico do grupo: o nome da exclusão comum, as contagens e o plano.
+  const eventos = db.rows("editorial_group_events").filter(evento => evento.group_id === AZUL);
+  const saida = eventos.find(evento => evento.event_type === "keywords_unassigned")!;
+  assert.equal((saida.payload as Row).operation, GROUP_DELETE_SELECTION_ACTION_LABEL);
+  assert.deepEqual(((saida.payload as Row).counts as Row), { hardDeleted: 2, recoverable: 0, out: 0, refusedBlocks: 0, refusedKeywords: 0 });
+  assert.match(groupEventHistoryEntry({ ...saida, occurred_at: LATER })?.detail || "", /^Excluir as selecionadas · 2 apagada\(s\) de vez · 0 na lixeira de 24 h/);
+  const plano = eventos.find(evento => evento.event_type === "plan_changed" && (evento.payload as Row).via === GROUP_DELETE_ALL_RELEASE_VIA)!;
+  assert.equal((plano.payload as Row).operation, GROUP_DELETE_SELECTION_ACTION_LABEL);
+});
+
+test("G18 · selecionar a cor INTEIRA e Excluir = “Excluir tudo da cor”: a mesma prévia (o que sai, o plano limpo, a cor livre), as keywords apagadas e a cor liberada (D7); a outra marca intacta", async () => {
+  const { db } = await azulCadastrado();
+  cicloDeVidaNoBanco(db);
+  const daCor = db.rows("minerador_keywords").filter(row => row.brand_id === BRAND && row.group_id === AZUL && !row.deleted_at).map(row => String(row.id)).sort();
+  assert.equal(daCor.length, 8, "7 do plano + a keyword do Silo");
+  const outraMarcaAntes = JSON.stringify(db.rows("minerador_keywords").filter(row => row.brand_id === OTHER_BRAND));
+
+  const daSelecao = await excluirPreview(db, daCor);
+  const daCorInteira = await previewGroupDeleteAllWithCore({ client: client(db), brandId: BRAND, actorUserId: ACTOR, groupId: AZUL, includePublished: true });
+  assert.ok(daSelecao.ok && daCorInteira.ok, JSON.stringify(daSelecao));
+  if (!daSelecao.ok || !daCorInteira.ok) return;
+  const sel = daSelecao.preview.colors[0].preview;
+  const tudo = daCorInteira.preview;
+  for (const campo of ["hard", "recoverable", "out", "releasedSubjects", "blocks", "plan", "color", "confirmation"] as const) {
+    assert.deepEqual(sel[campo], tudo[campo], `a mesma prévia: ${campo}`);
+  }
+  assert.equal(sel.plan.after, "cleared");
+  assert.equal(sel.color.freedAtEnd, true);
+  assert.deepEqual(daSelecao.preview.confirmation, { selectionName: null, colorWords: ["azul"], hardPhrase: "apaga de vez", publishedNames: [] });
+  assert.deepEqual(daSelecao.preview.free, { hard: [], recoverable: [] }, "a cor inteira vai pelo núcleo da cor");
+
+  const feito = await excluir(db, daCor, { decisionHash: daSelecao.decisionHash, typed: { colors: { azul: "azul" }, phrase: "apaga de vez" } });
+  assert.ok(feito.ok && feito.complete, JSON.stringify(feito));
+  if (!feito.ok) return;
+  assert.deepEqual([...feito.hardDeletedIds].sort(), daCor);
+  assert.equal(db.rows("minerador_keywords").filter(row => row.brand_id === BRAND && row.group_id === AZUL).length, 0, "nada da cor ficou");
+  const grupo = db.rows("editorial_groups").find(item => item.id === AZUL)!;
+  assert.equal(grupo.plan, null, "plano limpo (um plano sem artigos não existe)");
+  assert.equal(grupo.status, "archived", "D7: nada ficou, a cor está livre");
+  assert.deepEqual(feito.colors.map(item => [item.outcome, item.plan && item.plan.ok ? item.plan.outcome : null, item.colorFreed]), [["done", "cleared", true]]);
+  assert.equal(JSON.stringify(db.rows("minerador_keywords").filter(row => row.brand_id === OTHER_BRAND)), outraMarcaAntes);
+});
+
+test("G18 · sem a M-E no banco: a keyword do plano fica fora com a explicação (nada dela muda) e o resto da seleção sai como sempre, com a confirmação simples", async () => {
+  const { db, ids } = await azulCadastrado();
+  cicloDeVidaNoBanco(db, { meAplicada: false });
+  const importado = await importar(db, ["roteador wifi 6 vale a pena"]);
+  const solta = String(importado.items[0].keywordId);
+  const assuntoAntes = JSON.stringify(semantica(porId(db, ids[1])));
+  const previa = await excluirPreview(db, [ids[1], solta]);
+  assert.ok(previa.ok);
+  if (!previa.ok) return;
+  assert.deepEqual(previa.preview.colors, []);
+  assert.deepEqual(previa.preview.out.map(item => [item.id, item.reason]), [[ids[1], "plan_delete_unavailable"]]);
+  assert.match(previa.preview.out[0].message, /migration 20261016130000_excluir_tudo_da_cor, que ainda não foi aplicada/);
+  assert.match(previa.preview.unavailableMessage || "", /não foi aplicada/);
+  assert.deepEqual(previa.preview.free, { hard: [solta], recoverable: [] });
+  assert.deepEqual(previa.preview.confirmation, { selectionName: "2 keywords selecionadas", colorWords: [], hardPhrase: null, publishedNames: [] }, "sem plano a sair e até 10: a confirmação simples de sempre");
+  const feito = await excluir(db, [ids[1], solta], { decisionHash: previa.decisionHash, typed: { selection: "2 keywords selecionadas" } });
+  assert.ok(feito.ok && feito.complete, JSON.stringify(feito));
+  if (!feito.ok) return;
+  assert.deepEqual(feito.hardDeletedIds, [solta]);
+  assert.equal(JSON.stringify(semantica(porId(db, ids[1]))), assuntoAntes, "a do plano ficou como estava");
+  assert.equal(db.log.some(entrada => entrada.op === "rpc" && entrada.table === "lifecycle_delete_group_keywords"), false);
+});
+
+test("G18 · a regra única da confirmação (P-4): simples até 10 sem plano; forte acima de 10, com plano a sair ou na cor inteira — a mesma função na tela, no servidor e em “Excluir tudo da cor”", () => {
+  const publicadas = [{ id: "p1", keyword: "internet fibra empresarial" }];
+  assert.deepEqual(deleteConfirmationRequirement({ selectionName: "10 keywords selecionadas", colorWords: [], hardCount: 10, recoverable: [] }), { selectionName: "10 keywords selecionadas", colorWords: [], hardPhrase: null, publishedNames: [] });
+  assert.equal(DELETE_STRONG_CONFIRMATION_ABOVE, 10);
+  assert.deepEqual(deleteConfirmationRequirement({ selectionName: "11 keywords selecionadas", colorWords: [], hardCount: 11, recoverable: [] }), { selectionName: null, colorWords: [], hardPhrase: "apaga de vez", publishedNames: [] });
+  const comPlano = deleteConfirmationRequirement({ selectionName: "x", colorWords: ["amarelo"], hardCount: 1, recoverable: publicadas });
+  assert.deepEqual(comPlano, { selectionName: null, colorWords: ["amarelo"], hardPhrase: "apaga de vez", publishedNames: publicadas });
+  assert.deepEqual(checkDeleteConfirmation(comPlano, { colors: { amarelo: " AMARELO " }, phrase: "apaga de vez", publishedNames: { p1: "Internet fibra empresarial" } }), { ok: true });
+  const falta = checkDeleteConfirmation(comPlano, { colors: { amarelo: "amarelo" } });
+  assert.ok(!falta.ok && /falta digitar “apaga de vez”, o nome da publicada “internet fibra empresarial”/.test(falta.message));
+  assert.deepEqual(checkDeleteConfirmation({ selectionName: "wifi lento", colorWords: [], hardPhrase: null, publishedNames: [] }, { selection: " WiFi Lento " }), { ok: true });
+  // Uma regra só: a da cor e a comum chamam a MESMA função (o código, sem comentários).
+  const cor = codigo("lib/minerador/group-delete-all.ts");
+  assert.match(cor, /return checkDeleteConfirmation\(/);
+  assert.match(cor, /deleteConfirmationRequirement\(\{ selectionName: colorWord, colorWords: \[colorWord\], hardCount: hard\.length, recoverable, alwaysStrong: true \}\)/);
+  assert.match(codigo("lib/minerador/keyword-delete-core.ts"), /checkDeleteConfirmation\(preview\.confirmation, input\.typed \?\? \{\}\)/);
+  assert.match(codigo("components/lifecycle/delete-confirmation.tsx"), /checkDeleteConfirmation\(forte, digitado\)\.ok/);
+});
+
+test("G18 · espelho do gatilho: a liberação da exclusão comum é a da cor (“excluir_cor”), que os dois gatilhos JÁ aceitam — nenhuma migration nova; o núcleo comum não grava o marcador (só a RPC da M-E, na transação da exclusão)", () => {
+  const gatilhos = cru("supabase/migrations/20261015120000_assunto_nunca_se_perde.sql");
+  assert.match(gatilhos, /\(liberacao ->> 'via'\) IN \('tirar_do_plano', 'conversao', 'excluir_cor'\)/, "(a) aceita o marcador da exclusão da cor");
+  assert.match(gatilhos, /NOT IN \('tirar_do_plano', 'excluir_cor'\)/, "(b) deixa excluir com o marcador da exclusão da cor");
+  assert.equal(GROUP_DELETE_ALL_RELEASE_VIA, "excluir_cor");
+  assert.match(cru("supabase/migrations/20261016130000_excluir_tudo_da_cor.sql"), /'via', 'excluir_cor'\);/);
+  // O espelho em TS: a keyword do plano bloqueia sozinha; liberada pela cor, deixa de carregar o plano e passa.
+  const doPlano = { keyword_subject: { declared: true, entry: { title: "Wi-Fi lento em casa", source: "cadastro" }, plan: { groupId: AZUL, planVersion: 1, order: 11, role: "Suporte", scope: "x", declaredPrincipal: { keywordId: "k1", phrase: "Wi-Fi lento" } } }, keyword_declared_principal: { subjectKeywordId: "k1", groupId: AZUL, planVersion: 1 } };
+  assert.equal(keywordSubjectBlocksDeletion(doPlano), true);
+  assert.equal(keywordCarriesDeclaredPlan(doPlano), true);
+  const liberada = liberacaoDaCor(doPlano, { actorId: ACTOR, requestId: "r-1", at: LATER });
+  assert.equal(keywordSubjectBlocksDeletion(liberada), false);
+  assert.equal(keywordCarriesDeclaredPlan(liberada), false);
+  assert.equal(resolveKeywordSubject(liberada).declared, true, "o Assunto continua declarado até a exclusão (a mesma transação)");
+  // Nenhum escritor novo do marcador: o núcleo comum não grava keyword (só chama as RPCs).
+  const comum = codigo("lib/minerador/keyword-delete-core.ts");
+  assert.doesNotMatch(comum, /\.update\(|\.insert\(|\.upsert\(|\.delete\(\s*\)/);
+  assert.doesNotMatch(comum, /keyword_subject_release|excluir_cor/);
+  assert.match(comum, /applyGroupDeleteAllWithCore\(\{/, "a do plano vai pelo MESMO núcleo da cor");
 });
 
 /* ======================================================= E-1 · entrada */
@@ -1310,18 +1574,30 @@ test("P-3 · desfazer não volta dado gravado sem o servidor (D7)", { todo: "ver
 
 /* ======================================= P-4 · exclusão comum × por cor */
 
-test("P-4 · hoje: a exclusão por cor exige prévia com hash; a exclusão comum (e \"Apagar Duplicadas\") manda só os ids, e quem fica é palpite do navegador", async () => {
-  const comum = codigo("app/api/minerador/marcas/[brandId]/keywords/delete/route.ts");
-  assert.doesNotMatch(comum, /decisionHash|confirmation/i, "a exclusão comum não tem hash");
-  const cor = codigo("app/api/minerador/marcas/[brandId]/keywords/delete-group/route.ts");
-  assert.match(cor, /decisionHash|planHash|hash/i, "a exclusão por cor exige hash");
+/*
+ * 2026-10-17 · P-4 FEITA (pedido do dono "ele tem que deixar apagar todo o
+ * grupo"): o "hoje:" da exclusão comum sem hash deu lugar à regra nova (abaixo
+ * e no G18). Continua "hoje:" só o palpite de "Apagar Duplicadas" sobre qual
+ * fica — ele entra na MESMA prévia, hash e confirmação, mas a escolha de qual
+ * manter ainda é do navegador (backlog).
+ */
+test("P-4 · hoje: \"Apagar Duplicadas\" escolhe qual fica por palpite do navegador (a exclusão passa pela mesma prévia, hash e confirmação)", async () => {
   const tela = codigo("modules/minerador/minerador-workspace.tsx").replace(/\r\n/g, "\n");
   assert.match(tela, /: nonPublished\.slice\(1\)\.map\(k => k\.id\);/, "\"Apagar Duplicadas\" mantém a primeira da tela");
+  assert.match(tela, /await handleBatchDelete\(false, idsToDelete\);/, "e entra na exclusão de sempre");
 });
 
-test("P-4 · a mesma confirmação forte e com hash nos dois casos", { todo: "vermelho até a F6 (P-4): exclusão comum com prévia e hash, como a da cor" }, async () => {
+test("P-4 · a mesma confirmação forte e com hash nos dois casos", async () => {
   const comum = codigo("app/api/minerador/marcas/[brandId]/keywords/delete/route.ts");
-  assert.match(comum, /decisionHash/);
+  assert.match(comum, /decisionHash: z\.string\(\)/, "a exclusão comum recebe a decisão");
+  assert.match(comum, /decisionHash: input\.decisionHash \?\? null/);
+  const nucleo = codigo("lib/minerador/keyword-delete-core.ts");
+  assert.match(nucleo, /if \(input\.decisionHash !== decisionHash\) return refuse\("DECISION_STALE"/);
+  assert.match(nucleo, /const conferida = checkDeleteConfirmation\(preview\.confirmation, input\.typed \?\? \{\}\);/);
+  const cor = codigo("app/api/minerador/marcas/[brandId]/keywords/delete-group/route.ts");
+  assert.match(cor, /decisionHash/, "a exclusão por cor exige hash");
+  const tela = codigo("modules/minerador/minerador-workspace.tsx");
+  assert.match(tela, /requirement=\{deleteReview\?\.requirement \?\? null\}/, "o diálogo de sempre pede a confirmação da regra única");
 });
 
 /* ============================== A11 · D2-bis pela marca órfã (Ainda não verificado → fechado) */

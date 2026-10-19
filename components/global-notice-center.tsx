@@ -188,9 +188,17 @@ export function useNoticeCenter() {
 type LegacyNoticeValue = string | { type?: string; tone?: string; message?: string } | null | undefined;
 
 /**
- * Bridges an existing inline notice into the shared center without replacing
- * the module's immediate feedback. It deliberately keeps the local UI state
- * as the source for the inline message and publishes only new non-empty text.
+ * Publica no sino o aviso que o módulo guarda no próprio estado (texto ou
+ * `{ type, message }`), só quando o texto muda e não é vazio.
+ *
+ * 2026-10-18 · SUBSTITUÍDO o "sem substituir o feedback imediato do módulo":
+ * todos os avisos ficam no sino (regra do dono); a tela não desenha o mesmo
+ * aviso numa faixa. Na tela ficam só andamento, prévia com Confirmar,
+ * motivo de botão desligado, validação de campo e estado vazio
+ * (`docs/compartilhado/sistema-visual.md` §24.2).
+ *
+ * Fora do `GlobalNoticeProvider` (só em teste de tela isolada; o app monta o
+ * provider na raiz) a ponte não publica nada, em vez de derrubar a tela.
  */
 export function useNoticeBridge({
   notice,
@@ -208,7 +216,6 @@ export function useNoticeBridge({
   fallbackSeverity?: NoticeSeverity;
 }) {
   const publishNotice = useContext(NoticePublisherContext);
-  if (!publishNotice) throw new Error("useNoticeCenter deve ser usado dentro de GlobalNoticeProvider.");
   const lastPublished = useRef("");
   const text = typeof notice === "string" ? notice : notice?.message || "";
   const rawSeverity = typeof notice === "object" && notice ? notice.type || notice.tone : undefined;
@@ -219,6 +226,7 @@ export function useNoticeBridge({
       lastPublished.current = "";
       return;
     }
+    if (!publishNotice) return;
     const signature = `${module}:${area}:${severity}:${text}`;
     if (signature === lastPublished.current) return;
     lastPublished.current = signature;

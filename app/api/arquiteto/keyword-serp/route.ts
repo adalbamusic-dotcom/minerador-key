@@ -11,7 +11,8 @@ import type { SerpCompetitiveObservation } from "@/lib/arquiteto/silo-primary-ke
 import { SerpPaidBudgetExhaustedError, authorizeSerpPaidPlan, buildSerpPaidPlan, createPaidQueryBudget, type SerpPlanSlot } from "@/lib/arquiteto/serp-lens-plan";
 import { readMineradorKeywordTargetCodes, serpTargetCodesFor } from "@/lib/arquiteto/serp-lens-targeting";
 import { SERP_CACHE_CANONICAL_LENS, sameSerpCacheLens, serpCacheLensLabel, type SerpCacheObservation } from "@/lib/editorial/serp-cache";
-import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
+import { resolveBrandSerpTarget } from "@/lib/server/brand-serp-target";
+import { brandSerpPlanLocation, withBrandSerpLocation } from "@/lib/marca/brand-serp-location";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { integrationRuntimeErrorResponse, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
@@ -173,7 +174,8 @@ export async function POST(request: Request) {
      * entregue); o `advanced` devolveu 13 domínios e 4 perguntas — os 5 a mais
      * são citações do AI Overview.
      *
-     * Localidade e idioma da chave: os que o Minerador usaria para a keyword
+     * Localidade e idioma da chave (localidade SUBSTITUÍDA em 2026-10-18: é a
+     * da marca, logo abaixo): os que o Minerador usaria para a keyword
      * (adendo A8 — o resolvedor dele sobre o targeting da última medição, lido
      * aqui, no servidor, filtrado pela marca). Sem esse targeting, os do
      * ambiente, sem ler credencial: é deles que `buildDataForSeoSerpConfig`
@@ -184,7 +186,14 @@ export async function POST(request: Request) {
       depth: parsed.data.resultLimit,
       keywordId: alvo.keyword.keywordId,
     });
-    const codigosDaChave = readDataForSeoTargetCodes();
+    /*
+     * 2026-10-18 · A LOCALIDADE É A DA MARCA (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L2):
+     * resolvida no servidor pelo `brandId`; a config recebe a mesma localidade
+     * (`withBrandSerpLocation`), e a chave é o que vai ao provider. Marca sem
+     * localidade: os códigos do ambiente, como antes. Do targeting sai só o idioma.
+     */
+    const alvoDaMarca = await resolveBrandSerpTarget(pipelineContext.supabase, pipelineContext.brandId);
+    const codigosDaChave = alvoDaMarca.codes;
     const targeting = await readMineradorKeywordTargetCodes(pipelineContext.supabase, pipelineContext.brandId, parsed.data.keywords.map(keyword => keyword.keywordId), codigosDaChave);
     const codigosDe = (alvo: Alvo): Codigos => serpTargetCodesFor(targeting.codes, alvo.keyword.keywordId, codigosDaChave);
     const usaCodigosDoAmbiente = (alvo: Alvo) => !targeting.codes.has(alvo.keyword.keywordId);
@@ -247,7 +256,8 @@ export async function POST(request: Request) {
      * segue marcada no plano e em cada observação (`collectedAt`), que a
      * afinidade e a força usam para NÃO contar a divergência em dobro.
      */
-    const plan = buildSerpPaidPlan({ lenses: parsed.data.lenses, slots, payMissingExtraLenses: true, recollectStaleLenses: false, recollectAvailable: false });
+    const planoLocal = brandSerpPlanLocation(alvoDaMarca);
+    const plan = { ...buildSerpPaidPlan({ lenses: parsed.data.lenses, slots, payMissingExtraLenses: true, recollectStaleLenses: false, recollectAvailable: false }), ...(planoLocal ? { location: planoLocal } : {}) };
     if (parsed.data.mode === "plan") {
       return NextResponse.json({ success: true, data: { mode: "plan", operationRequestId, scopeId: parsed.data.scopeId, plan, lenses: parsed.data.lenses.map(serpCacheLensLabel), requested: alvos.length, ...(foraPorVolume.length ? { excludedByVolume: foraPorVolume } : {}), ...(principaisDeIdentidade.length ? { identityPrincipals: principaisDeIdentidade } : {}) } });
     }
@@ -275,6 +285,8 @@ export async function POST(request: Request) {
         client: pipelineContext.supabase,
         quotaUnits: quotaResolvida,
       });
+      // 2026-10-18 · a config leva a localidade da marca: a chave é o que vai ao provider (SDD localidade §4.3).
+      dataForSeo = { ...dataForSeo, config: withBrandSerpLocation(dataForSeo.config, alvoDaMarca) };
 
       /*
        * A chave precisa ser o que vai ao provider. Se a config resolvida trouxer
@@ -307,6 +319,7 @@ export async function POST(request: Request) {
             client: pipelineContext.supabase,
             quotaUnits: quotaResolvida,
           });
+          dataForSeo = { ...dataForSeo, config: withBrandSerpLocation(dataForSeo.config, alvoDaMarca) };
         }
       }
 

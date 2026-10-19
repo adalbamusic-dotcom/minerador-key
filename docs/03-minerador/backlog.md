@@ -1,6 +1,55 @@
 # Backlog — Minerador
 
-- [ ] **Linha única do Minerador (2026-10-16, APROVADA — F0 e F1 feitas):** `docs/compartilhado/sdd-linha-unica-do-minerador-2026-10-16.md` — F0 cenários-ouro, depois uma fase por etapa unificada; decisões D1–D8 no topo e no §8.
+## "Aprovar e enviar" do verde: URL do compare-and-swap e resultado honesto — 2026-10-19
+
+Detalhe em `docs/03-minerador/estado-atual.md` (mesmo título). **Validado manualmente: não.**
+
+- [x] CAS do DNA por chave com a URL limitada + releitura antes do UPDATE (`semantic-snapshot-guard.ts`), nos dois gravadores e no MCP.
+- [x] Erro por keyword (`failed`, com o que foi gravado), retomada pelo mesmo botão, `nothingWritten` na rota, log com `requestId`, aviso final no sino.
+- [x] A página de volume 0 que deixaria de ser aprovável com o Assunto não vira o Assunto (`subjectFromVolumeHeld`).
+- [ ] **Coordenador:** rodar "Aprovar e enviar" nas 25 do verde pelo botão e conferir por SELECT (16 com `keyword_subject_basis` zero e aprovação re-assinada; "como atrair pacientes para clínica" segurada).
+- [ ] **Dono:** a 7ª ("como atrair pacientes para clínica") tem volume importado 10 não confirmado e "sem média" no Google Ads: a régua do Assunto (`readKnownVolume`) diz volume 0 e a prontidão da aprovação diz "volume não confirmado". Decidir qual vale (hoje: fica no formato anterior até medir de novo).
+- [ ] **Proposta (SQL do usuário):** aplicar `20260923140000_minerador_keywords_row_version.sql` no remoto fecha o limite residual do CAS por chave; não é necessária para este conserto.
+
+## O Assunto pela principal e pelo volume — 2026-10-18
+
+Detalhe em `docs/03-minerador/estado-atual.md` (mesmo título). SDD `docs/compartilhado/sdd-assunto-pela-principal-e-volume-2026-10-18.md`. **Validado manualmente: não.**
+
+- [x] F1 régua `principalSubjectStanding`; F2 destino "Keyword (sem Silo)", publicado sem reforço e título corrigível, conversão "Sem grupo", trava pelo volume (G11), rótulo M8; F3 painel editável + "Usar como Assunto do artigo"; F4 "Aprovar e enviar" grava o Assunto do volume 0.
+- [ ] **F7 (coordenador):** o verde da AdalbaPro pelos botões (§16 da SDD), antes de 2026-10-25 ("sem média" vence).
+- [ ] O WhatsApp duplicado (`8bcd8ff3` × `article-formation:62ade5c4`): decisão do dono (Q11).
+- [ ] As 158 keywords sem grupo da AdalbaPro: fora desta SDD (Lógica/Revisão de sempre).
+
+- [ ] **Linha única do Minerador (2026-10-16, APROVADA — F0, F1 e P-4 feitas):** `docs/compartilhado/sdd-linha-unica-do-minerador-2026-10-16.md` — F0 cenários-ouro, depois uma fase por etapa unificada; decisões D1–D8 no topo e no §8.
+
+## O início do lote não vai mais ao sino — 2026-10-18
+
+Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] Avisos `PENDING` de início ("Atualizando…", "Medindo…", "Enviando…", "Consultando…") fora do sino; o andamento fica no botão e na barra do rodapé.
+- [x] Um aviso por lote, no fim, com o tom (Medir resultados: SUCCESS / WARNING / ERROR).
+- [ ] **Dono (homologação):** Descoberta → Atualizar métricas / Medir resultados / Enviar ao Processador: o sino recebe só o desfecho.
+
+## A exclusão apaga em qualquer estado — 2026-10-18
+
+Detalhe em `docs/03-minerador/estado-atual.md`. **Validado manualmente: não.**
+
+- [x] A exclusão de sempre desmonta o Arquiteto antes (mesmo núcleo do "Desfazer Silo"); a prévia diz por área o que sai; nada parcial.
+- [ ] Migration do dono para o documento do Redator não prender a keyword (SQL no relatório de 2026-10-18); depois, tirar `blocked_descendant`.
+- [ ] Teste pelo botão no navegador local: "Excluir tudo da cor" do azul da WifiConecta com o Silo consolidado (a prévia com as áreas; a confirmação forte).
+
+## A exclusão de sempre apaga também a keyword do plano (P-4) — 2026-10-17
+
+Detalhe em `docs/03-minerador/estado-atual.md`; regra na spec §79.2. **Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- [x] Prévia da exclusão comum com `decisionHash`, o que sai, o que fica fora (com motivo e caminho) e, por cor, os Assuntos que saem do plano, o plano depois, a cor no fim e o aviso do Arquiteto; execução só sobre a prévia vigente (núcleo `lib/minerador/keyword-delete-core.ts`, rotas de sempre).
+- [x] A keyword que carrega o plano sai pelo MESMO núcleo de "Excluir tudo da cor" (`keywordIds`): libera o Assunto e exclui na mesma transação; plano v+1 ou limpo; histórico "Excluir as selecionadas"; a cor inteira selecionada = "Excluir tudo da cor" (D7). Sem migration nova.
+- [x] Uma regra da confirmação para as duas exclusões (`checkDeleteConfirmation`): simples até 10 sem plano; forte (cor, "apaga de vez", nome de cada publicada) com plano a sair, acima de 10 ou na cor inteira. Diálogos de sempre com os campos da forte (props opcionais).
+- [x] Cenário-ouro G18 (5), guarda da forma, DOM da confirmação forte, teste do domínio com seleção; o `todo` do P-4 virou teste normal; catálogo e SDD (P-4 FEITA).
+- [ ] **Dono: aplicar a M-E** (`supabase/migrations/20261016130000_excluir_tudo_da_cor.sql`; o item de 14/10 abaixo) — sem ela, a keyword do plano fica fora da exclusão comum (com a explicação) e "Excluir tudo da cor" fica desabilitado.
+- [ ] Dono: homologar na tela — selecionar a cor inteira (ex.: Amarelo) → Excluir → ler a prévia → digitar a cor e "apaga de vez" → conferir a etiqueta e o histórico do grupo; depois uma seleção parcial com publicada (lixeira de 24 h).
+- [ ] Decidir (dono): keyword do plano no ArticleDNA vigente de um artigo do Arquiteto fica fora (regra da exclusão da cor; no amarelo, as 4 Travadas com ArticleDNA v1). Hoje o caminho é "Retirar artigo do Silo" no Arquiteto antes; apagar mesmo assim é mudança da regra da cor.
+- [ ] P-4, resto: "Apagar Duplicadas" ainda escolhe qual duplicata fica pelo navegador (a exclusão já passa pela mesma prévia, hash e confirmação).
 
 ## Cadastrar Assuntos: o CSV de planejamento, vários Silos e abrir o .csv — 2026-10-16
 

@@ -318,8 +318,8 @@ test("E · o custo no botão, antes do clique: até 2 chamadas por artigo, e a c
   assert.equal(panel.RADAR_ARTICLE_BLUEPRINT_MAX_CALLS_PER_ARTICLE, 2);
   assert.equal(panel.radarArticleBlueprintOrganizeAndExportLabel(3), "Organizar 3 artigo(s)-modelo e exportar (+ até 6 chamadas de IA)");
   assert.equal(panel.RADAR_ARTICLE_BLUEPRINT_ORGANIZE_AND_SEND_LABEL, "Organizar o artigo-modelo e enviar (+ até 2 chamadas de IA)");
-  assert.equal(panel.radarArticleBlueprintBatchLabel(4), "Organizar o artigo-modelo (4) · + até 8 chamadas de IA");
-  assert.equal(panel.radarArticleBlueprintBatchLabel(7, "silo"), "Organizar o artigo-modelo do Silo (7) · + até 14 chamadas de IA");
+  /* 2026-10-18 (dono) · "Organizar o artigo-modelo (N)" e "… do Silo (N)" saíram da barra: a função está no "Pesquisar e finalizar". */
+  assert.equal("radarArticleBlueprintBatchLabel" in panel, false);
   for (const artigos of [1, 5]) {
     const texto = panel.radarArticleBlueprintCostConfirmation(artigos);
     assert.match(texto, new RegExp(`até ${artigos * 2} chamadas de IA`));
@@ -366,7 +366,8 @@ test("E · organizar e seguir: em série, um por vez; com falha, a entrega não 
   assert.deepEqual(comFalha.failed.map(item => item.articleId), ["falha"]);
   assert.deepEqual(seguiu, ["exportou"], "a entrega não sai sem o artigo-modelo de todos");
   assert.match(panel.radarArticleBlueprintProgressNotice({ articleId: "a", state: "running", message: null, at: 1, position: { index: 2, total: 5 } }, "exportar"), /2 de 5…/);
-  assert.doesNotMatch(panel.radarArticleBlueprintBatchSummary({ done: ["a", "b"], failed: [] }), /\d+ chamadas de IA/, "a barra não conta chamadas que o 'só se faltar' pode ter evitado");
+  /* 2026-10-18 · o fim do lote é o do "Pesquisar e finalizar" (`radarResearchBatchSummary`), que não conta chamadas. */
+  assert.equal("radarArticleBlueprintBatchSummary" in panel, false);
 });
 
 test("E · o painel também sem o Google congelado (Amazon, YouTube), pela precedência do servidor; a entrega pela regra do painel", () => {
@@ -404,15 +405,21 @@ test("E · a tela: o botão do próprio pedido diz o custo; a barra de lote orga
   assert.match(organizar, /organizeRadarArticleBlueprintsThenRun\(\{/);
   assert.match(organizar, /postRadarArticleBlueprintOrganize\(\{ brandId: marca, articleId, ifMissing: true \}\)/);
   assert.match(organizar, /marcarFaltaArtigoModelo\(null\);\s*if \(parado\.pedido === "silos" && parado\.modo !== "video"\) await exportarSilosCompletos\(parado\.modo\);\s*else await exportarDossiesFinalizados\(parado\.modo\);/);
-  /* A barra de lote: "só se faltar", com progresso, e o teto no botão. */
-  const lote = pagina.slice(pagina.indexOf("const organizarArtigosModeloEmLote"), pagina.indexOf("const fronteiraDoRedator"));
-  assert.match(lote, /postRadarArticleBlueprintOrganize\(\{ brandId: marca, articleId, ifMissing: true \}\)/);
-  assert.match(lote, /setNotice\(radarArticleBlueprintProgressNotice\(job\)\)/);
-  /* 2026-10-13 · "Pesquisar e finalizar (N artigos)" vem antes, na mesma barra. */
-  assert.match(pagina, /renderBulkBar=\{rows => <div className="flex min-w-max flex-wrap items-center gap-2">\{barraDoLoteDePesquisa\(rows\)\}<RadarR4BulkOperationsBar selectedRows=\{selectedSnapshotsFor\(rows\)\} onAction=\{handleBulkAction\}\/>\{barraDoArtigoModelo\(rows\)\}<\/div>\}/);
-  const barra = pagina.slice(pagina.indexOf("const barraDoArtigoModelo"), pagina.indexOf("const importable ="));
-  assert.match(barra, /label=\{radarArticleBlueprintBatchLabel\(daSelecao\.length\)\}/);
-  assert.match(barra, /label=\{radarArticleBlueprintBatchLabel\(doSilo\.length, "silo"\)\}/);
+  /*
+   * 2026-10-18 (dono) · a barra de lote: o artigo-modelo que falta dos
+   * finalizados sai pelo "Pesquisar e finalizar" ("só se faltar"); os botões
+   * soltos "Organizar o artigo-modelo (N)" e "… do Silo (N)" saíram.
+   */
+  const lote = pagina.slice(pagina.indexOf("const pesquisarEFinalizarEmLote"), pagina.indexOf("const barraDoLoteDePesquisa"));
+  assert.match(lote, /organizeBlueprints: async articleIds => \{/);
+  assert.match(lote, /await organizarArtigosModeloDaSerp\(articleIds, \{ avisoNoFim: false \}\)/, "a mesma série do encadeamento do finalizar");
+  const serie = pagina.slice(pagina.indexOf("const organizarArtigosModeloDaSerp"), pagina.indexOf("const approveTopicsBatch"));
+  assert.match(serie, /postRadarArticleBlueprintOrganize\(\{ brandId: marca, articleId, ifMissing: true \}\)/, "só se faltar");
+  /* 2026-10-13 · "Pesquisar e finalizar (N artigos)" na barra. 2026-10-18 · a barra QUEBRA linha (min-w-0), nunca corta botão nem custo. */
+  assert.match(pagina, /renderBulkBar=\{rows => <div className="flex min-w-0 flex-wrap items-center gap-2">\{barraDoLoteDePesquisa\(rows\)\}<RadarR4BulkOperationsBar selectedRows=\{selectedSnapshotsFor\(rows\)\} onAction=\{handleBulkAction\}\/><\/div>\}/);
+  assert.equal(pagina.includes("barraDoArtigoModelo"), false, "sem a barra solta do artigo-modelo");
+  assert.equal(pagina.includes("radar-artigo-modelo-lote"), false, "nem o botão solto");
+  const barra = lote;
   /* O envio: recusado por falta de planta, o botão organiza e envia pela mesma porta. */
   assert.match(pagina, /if \(resultado\.code === RADAR_HANDOFF_ARTICLE_BLUEPRINT_MISSING\) \{/);
   const envio = pagina.slice(pagina.indexOf("const organizarArtigoModeloEEnviar"), pagina.indexOf("const enviarAoRedator"));

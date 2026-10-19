@@ -1,5 +1,41 @@
 # Estado atual — Marca
 
+## Defeitos do inventário de botões — 2026-10-18
+
+Decisão do dono "Só os defeitos agora" (`docs/compartilhado/inventario-botoes-e-linha-2026-10-18.md`). **Verificado no código e confirmado por teste (rota contra PostgREST simulado + estrutural). Ainda não validado na tela.**
+
+- **"Cancelar" convite grava no servidor.** Usa o `InvitationRepository.updateStatus` que já existia (sem chamador), agora filtrado pela marca, pelo PATCH `{ action: "cancel" }` da rota de sempre `/api/editorial/invitations` (`marca:manage`, relê antes de responder). A linha muda só depois da confirmação. Convite só local (sem `persisted:`) não pode ser cancelado no servidor e fica desligado.
+- **"Suspender" e "Revogar" ficam desligados, com InfoHint "ainda não disponível".** O banco só aceita `pending`, `accepted`, `expired` e `cancelled` (CHECK da migration 0002): gravar esses estados exige migration e decisão do dono. Nenhuma migration foi feita.
+- **"Ver keywords"** abre o modo "Keywords" no quadro do conteúdo (antes só escolhia o conteúdo e ficava em "Conteúdos", onde o quadro não aparece). InfoHint.
+- **"Renomear" (Skills) renomeia** pelo mesmo salvamento da Skill (`action: "save"`, com o arquivo atual e o nome novo): nasce a versão sucessora em rascunho, que vale depois de "Enviar para aprovação" e "Ativar". No domínio (`replaceBrandSkillMarkdown`), nome novo com o mesmo conteúdo passou a contar como mudança real; o hash continua só do conteúdo. Só a versão mais recente pode ser renomeada. InfoHint.
+- **Mensagens em português** na importação do Site: "Prepare a prévia antes de confirmar.", "Importação confirmada no Minerador." e as outras quatro do mesmo fluxo que também estavam em inglês.
+- Tutorial do "?" e catálogo (`marca.site_catalog`, rota `/api/editorial/invitations`) atualizados.
+- Teste: `tests/marca-defeitos-2026-10-18.test.mts` (em `test:marca`).
+
+## Localidade da SERP por marca (L1–L3) — 2026-10-18
+
+SDD `docs/compartilhado/sdd-localidade-serp-por-marca-2026-10-18.md` (aprovada pelo dono em 2026-10-18; opção A, sem migration). Módulo proprietário: Marca. **Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- O campo "Localização" de sempre (`marcas.localizacao`) passa a ser a localidade de mercado da marca para a SERP Google orgânica, só quando casa com o catálogo `lib/marca/brand-serp-location.ts` (versão `2026-10-18-br`). Texto que não casa fica guardado e vale nacional, com o motivo dito.
+- Na página da Marca (Configurações), debaixo do campo: "SERP: Brasil (nacional)…", os valores aceitos, o que está a confirmar e o que fica nacional; o campo sugere as entradas do catálogo (`datalist`). Sem botão nem painel novo; o PUT de sempre grava o texto como está.
+- **Catálogo hoje:** "Brasil" (nacional, os códigos do ambiente, 2076/"pt"). "São Paulo (cidade)" está **a confirmar**: o código da DataForSEO não foi conferido na lista pública (CSV de mais de 10 MB não lido; a lista por país é a API, não chamada). Candidato 1001773 (lista do Google Ads). Até a confirmação, toda marca é nacional.
+- **"São Paulo" solto é ambíguo** (estado ou capital) e vale nacional: é o caso da AdalbaPro hoje.
+- Resolvedor no servidor: `lib/server/brand-serp-target.ts` (`resolveBrandSerpTarget`, pelo `brandId`, coluna `id,localizacao`); nenhuma localidade vem do cliente; leitura falha = nacional, dita.
+- Mudar a localidade não coleta nada; Google Ads, allintitle (KGR), Labs, YouTube e Amazon ficam nacionais.
+- Consumidores (Arquiteto e Radar): ver `docs/04-arquiteto/estado-atual.md` e `docs/05-radar/estado-atual.md` (mesma data).
+- Testes: `tests/radar-localidade-serp-por-marca-2026-10-18.test.mts` (catálogo, resolvedor, isolamento, rótulo, campo da Marca — estrutural: não há suíte DOM da página da Marca).
+- **L4 (do dono):** conferir o código da capital e ativar a entrada; depois escrever `São Paulo (cidade)` no campo da WifiConecta e da AdalbaPro.
+
+## Todos os avisos no sino — 2026-10-18
+
+Regra do dono: "estes e todos os avisos têm que estar dentro do sino" (`docs/compartilhado/sistema-visual.md` §24.2). **Verificado no código e confirmado por teste. Ainda não validado na tela.**
+
+- Saíram as faixas de resultado da Marca (página, Site e Sitemap, Identidade da marca, Skills, Especialistas externos e a do Google Ads, que não tem rota hoje). O resultado vai ao sino com o tom (Sucesso, Atenção, Erro) e não só como Informação.
+- A falha de leitura dos convites (Equipe) e a recuperação do estado local do site também vão ao sino. Com a leitura dos convites falhada, a lista fica vazia e não diz "Nenhum convite".
+- A falha de "Salvar site" saía duas vezes no sino (página e painel); agora sai uma, pelo painel.
+- Ficaram na tela: o motivo ao lado do envio ao Minerador ("Importação indisponível…"), a validação do Customer ID ao lado do campo e, no diálogo de Skill (modal, cobre o sino), o erro do salvamento e a validação do arquivo.
+- Guarda: `tests/avisos-no-sino-2026-10-18.test.mts`.
+
 ## Fontes de autoridade da marca (para o Radar) — 2026-10-14
 
 SDD `docs/compartilhado/sdd-silo-interligado-seo-semantico-2026-10-14.md` §16.2, Fase A (módulo proprietário: Radar; aqui, mudança aditiva). **Verificado no código e confirmado por teste. Validado manualmente: não.**

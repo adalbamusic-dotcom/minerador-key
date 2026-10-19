@@ -589,7 +589,7 @@ test("2026-10-09 · o catálogo diz o processo novo: sem D9, sem 'o CSV sai sem 
   assert.match(guia, /\/api\/redator\/article-blueprint/);
   assert.match(guia, /save_writer_deliverable exige a mesma planta concluída/);
   assert.doesNotMatch(guia, /sem pendência, finalizam sozinhos/);
-  for (const frase of [/needs_article_blueprint/, /get_video_material/, /articleBlueprintState/, /raw_material/, /'2026-10-09b'/, /amazonFrozenAt/, /regra 26/, /Organizar o artigo-modelo \(N\) · \+ até 2N chamadas de IA/]) {
+  for (const frase of [/needs_article_blueprint/, /get_video_material/, /articleBlueprintState/, /raw_material/, /'2026-10-09b'/, /amazonFrozenAt/, /regra 26/, /'Pesquisar e finalizar \(N artigos\)' da barra do Radar organiza o artigo-modelo que falta dos já finalizados/]) {
     assert.match(guia, frase, String(frase));
   }
   /*

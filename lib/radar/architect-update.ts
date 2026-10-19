@@ -32,6 +32,9 @@ import { canonicalJson, contentHash } from "../arquiteto/versioning.ts";
 import type { RadarItem } from "../editorial/operational-flow.ts";
 import type { RadarAnalysisPayload } from "./analysis-contracts.ts";
 import { buildRadarResetPayload } from "./radar-reset.ts";
+import { RADAR_ARTICLE_BLUEPRINT_MAX_AI_CALLS } from "./operational-actions.ts";
+import { RADAR_SERP_RECOLLECT_CALLS } from "./serp/lens-set.ts";
+import { radarReopenedGooglePatch } from "./refreeze-repair.ts";
 import { radarDeclaredArticleIntent } from "./editorial-identity.ts";
 import { radarSiloMeshPriority, radarSiloMeshStrongest, type RadarSiloMeshPriority } from "./silo-link-mesh.ts";
 
@@ -243,13 +246,25 @@ export function radarArchitectAdoptionRefusal(input: {
   analysis: AnaliseLeve;
   from: ArticleDNA;
   to: ArticleDNA;
+  /**
+   * 2026-10-18 · Quem chama continua o congelamento novo na tela ("Ver e
+   * adotar" do Radar). Com ele, a investigação do Google congelada (enviada ou
+   * não ao Redator) é adotável quando a principal e o slug ficam: a mesma
+   * confirmação pesquisa só o que falta, congela de novo e organiza o
+   * artigo-modelo. Sem ele (MCP), a recusa é a de antes.
+   */
+  allowRefreeze?: boolean;
 }): RadarArchitectAdoptionRefusal | null {
   const analise = input.analysis || null;
   if (input.from.publishedIdentityRef && input.from.suggestedSlug !== input.to.suggestedSlug) {
     return { code: "published_slug_change", reason: `O artigo está publicado em /${input.from.suggestedSlug} e a versão nova traz /${input.to.suggestedSlug}: o Radar não muda URL, slug nem canonical publicados. A troca é decisão do Arquiteto com a política da principal publicada.` };
   }
-  if (input.state === "sent_writer" || analise?.writerBundle || analise?.writerTransfer) {
-    return { code: "sent_to_writer", reason: "O pacote já foi enviado ao Redator sobre a versão transportada: o documento fica nela. Adotar a versão nova pede um congelamento novo, que esta fase ainda não faz sozinha; até lá o item e os entregáveis seguem na versão enviada." };
+  const refaz = radarArchitectAdoptionRefreezes(input);
+  const pelaTela = classifyArchitectUpdate(input.from, input.to).classification !== "principal_changed" && radarGoogleFrozenOf(analise);
+  if (!refaz && (input.state === "sent_writer" || analise?.writerBundle || analise?.writerTransfer)) {
+    return { code: "sent_to_writer", reason: pelaTela
+      ? "O pacote já foi enviado ao Redator sobre a versão transportada: o documento fica nela. A adoção com congelamento novo é feita na tela do Radar ('Ver e adotar' → 'Adotar a versão nova'), que diz o custo antes; depois, o Redator mostra 'Atualização disponível'. Até lá o item e os entregáveis seguem na versão enviada."
+      : "O pacote já foi enviado ao Redator sobre a versão transportada: o documento fica nela. Adotar a versão nova pede um congelamento novo, que esta fase ainda não faz sozinha; até lá o item e os entregáveis seguem na versão enviada." };
   }
   if (input.state === "approved" || analise?.approvedPackage || analise?.status === "approved") {
     return { code: "approved_package", reason: "O pacote do Radar já foi aprovado sobre a versão transportada. Adotar a versão nova pede um congelamento novo; até lá o item e os entregáveis seguem na versão enviada." };
@@ -259,19 +274,140 @@ export function radarArchitectAdoptionRefusal(input: {
     analise?.youtubeFrozenInvestigation ? "YouTube" : null,
     analise?.amazonFrozenInvestigation ? "Amazon" : null,
   ].filter((valor): valor is string => Boolean(valor));
-  if (congelados.length) {
-    return { code: "frozen_investigation", reason: `A investigação está congelada (${congelados.join(", ")}) sobre a versão transportada: o artigo-modelo, o CSV e o envio dependem dessa fotografia. A troca só acontece depois de um congelamento novo sobre a versão nova, que esta fase ainda não faz sozinha; até lá o item e os entregáveis seguem na versão enviada.` };
+  if (congelados.length && !refaz) {
+    return { code: "frozen_investigation", reason: pelaTela
+      ? `A investigação está congelada (${congelados.join(", ")}) sobre a versão transportada: o artigo-modelo, o CSV e o envio dependem dessa fotografia. A troca com congelamento novo sobre a versão nova é feita na tela do Radar ('Ver e adotar' → 'Adotar a versão nova'), que diz o custo antes; até lá o item e os entregáveis seguem na versão enviada.`
+      : `A investigação está congelada (${congelados.join(", ")}) sobre a versão transportada: o artigo-modelo, o CSV e o envio dependem dessa fotografia. A troca só acontece depois de um congelamento novo sobre a versão nova, que esta fase ainda não faz sozinha; até lá o item e os entregáveis seguem na versão enviada.` };
   }
   return null;
 }
 
+/** A investigação do Google está congelada (a fotografia canônica do pacote)? */
+export const radarGoogleFrozenOf = (analise: AnaliseLeve) => Boolean(analise?.finalizedBundle || analise?.deepResearch?.finalizedAt);
+
+/**
+ * 2026-10-18 · A ADOÇÃO COM CONGELAMENTO NOVO (defeito do teste real, WifiConecta).
+ *
+ * "Melhorar publicados…" acrescentou keywords ao Suporte (v2 → v3, principal
+ * igual) e o Radar recusava a adoção porque a investigação estava congelada:
+ * o artigo finalizado nunca recebia a melhoria do Arquiteto e ia ao Redator
+ * com a composição velha. Agora, na tela, a adoção vale quando o Google está
+ * congelado e a principal e o slug ficam — a MESMA confirmação leva o item à
+ * versão nova, reabre a investigação numa versão nova da análise (a fotografia
+ * antiga fica no histórico), pesquisa só o que falta, congela de novo pelo
+ * "Finalizar" de sempre e organiza o artigo-modelo. Principal ou slug novo
+ * continua recusado aqui: a pesquisa da principal recomeça, decisão do artigo.
+ * Pacote aprovado (fluxo antigo de aprovação) continua recusado.
+ */
+export function radarArchitectAdoptionRefreezes(input: { analysis: AnaliseLeve; from: ArticleDNA; to: ArticleDNA; allowRefreeze?: boolean }): boolean {
+  if (!input.allowRefreeze || !radarGoogleFrozenOf(input.analysis)) return false;
+  if (input.from.publishedIdentityRef && input.from.suggestedSlug !== input.to.suggestedSlug) return false;
+  return classifyArchitectUpdate(input.from, input.to).classification !== "principal_changed";
+}
+
 /* ===================== o que fica, o que refaz, o que custa ================ */
+
+/**
+ * 2026-10-18 · O CONGELAMENTO NOVO QUE A MESMA CONFIRMAÇÃO FAZ (investigação
+ * do Google congelada, principal e slug iguais). A tela segue, depois da
+ * releitura da adoção, pelo MESMO "Pesquisar e finalizar" do lote: pesquisa só
+ * o que falta (cache primeiro, 4 lentes), analisa, congela pelo "Finalizar" de
+ * sempre e organiza o artigo-modelo ("só se faltar").
+ */
+export type RadarArchitectRefreezePlan = {
+  /** As keywords que entraram e ainda não têm SERP auxiliar gravada. */
+  newKeywords: string[];
+  /** Consultas que a pesquisa pode pagar: a principal (se faltar) e as auxiliares que faltam. */
+  queriesToCollect: number;
+  /** Teto DataForSEO: consultas × 4 lentes (cache primeiro: lente válida no cache não é paga). */
+  serpCallsCeiling: number;
+  /** Teto de IA do artigo-modelo. */
+  aiCallsCeiling: number;
+  /** O pacote já foi enviado ao Redator: o documento de lá não muda. */
+  sentToWriter: boolean;
+};
 
 export type RadarArchitectAdoptionPlan = {
   keeps: string[];
   redo: string[];
   costs: string[];
+  /** 2026-10-18 · presente quando a confirmação também congela de novo (ausente = a adoção de antes). */
+  refreeze?: RadarArchitectRefreezePlan | null;
 };
+
+/** O que a prévia sabe para o congelamento novo (leitura da investigação gravada). */
+export type RadarArchitectRefreezeInput = {
+  sentToWriter: boolean;
+  /** A SERP da principal tem evidência gravada (reaproveitada sem cobrança). */
+  canonicalReused: boolean;
+  /** Keywords que entraram, sem SERP auxiliar gravada. */
+  newKeywords: string[];
+  /** Auxiliares das keywords que ficaram e que ainda não têm evidência (nunca coletadas ou falharam). */
+  keptAuxiliaryMissing: number;
+  /** Auxiliares das keywords que ficaram, com evidência gravada (reaproveitadas). */
+  keptAuxiliaryReused: number;
+  youtubeFrozen: boolean;
+  amazonFrozen: boolean;
+  fromVersionNumber: number;
+  toVersionNumber: number;
+};
+
+export function radarArchitectRefreezePlan(input: RadarArchitectRefreezeInput): RadarArchitectRefreezePlan {
+  const consultas = (input.canonicalReused ? 0 : 1) + input.newKeywords.length + Math.max(0, Math.trunc(input.keptAuxiliaryMissing));
+  return {
+    newKeywords: [...input.newKeywords],
+    queriesToCollect: consultas,
+    serpCallsCeiling: consultas * RADAR_SERP_RECOLLECT_CALLS,
+    aiCallsCeiling: RADAR_ARTICLE_BLUEPRINT_MAX_AI_CALLS,
+    sentToWriter: input.sentToWriter,
+  };
+}
+
+/** As linhas da prévia do congelamento novo: o que é reaproveitado, o que é coletado, a IA e o teto. */
+function planoDoCongelamentoNovo(input: {
+  classification: RadarArchitectDnaUpdateClass;
+  refreeze: RadarArchitectRefreezeInput;
+  linksCoverNewVersion: boolean | null;
+}): RadarArchitectAdoptionPlan {
+  const dados = input.refreeze;
+  const plano = radarArchitectRefreezePlan(dados);
+  const keeps: string[] = [
+    dados.canonicalReused
+      ? "Reaproveitado, sem nova cobrança: a SERP da principal (4 lentes) já gravada."
+      : "A SERP da principal não tem evidência gravada: ela entra na coleta abaixo (cache primeiro, 4 lentes).",
+  ];
+  if (dados.keptAuxiliaryReused) keeps.push(`Reaproveitado, sem nova cobrança: a SERP auxiliar de ${dados.keptAuxiliaryReused} keyword(s) que ficaram.`);
+  keeps.push("Reaproveitado: as páginas da concorrência já lidas; Vídeos e Especialista ficam gravados.");
+  if (dados.youtubeFrozen || dados.amazonFrozen) keeps.push(`O congelamento ${[dados.youtubeFrozen ? "do YouTube" : null, dados.amazonFrozen ? "da Amazon" : null].filter(Boolean).join(" e ")} fica como está (não depende das keywords do artigo).`);
+  keeps.push(`Histórico: a investigação congelada e o artigo-modelo da v${dados.fromVersionNumber} ficam no histórico; nada é apagado.`);
+  if (dados.sentToWriter) keeps.push("O documento do Redator não muda: depois do congelamento novo, 'Enviar ao Redator' mostra lá 'Atualização disponível' (a base não é substituída sem decisão).");
+  if (input.linksCoverNewVersion === true) keeps.push("Links internos: o grafo aprovado vigente já cobre a versão nova e vem junto na adoção (links não mudam a SERP).");
+  if (input.linksCoverNewVersion === false) keeps.push("Links internos: seguem as relações aprovadas no envio; o grafo aprovado ainda não cobre a versão nova (lacuna declarada, não bloqueia).");
+  const coletar = input.classification === "composition_changed"
+    ? plano.queriesToCollect
+      ? `2. "Refazer Pesquisa Google" coleta só o que falta: ${[
+        ...(dados.canonicalReused ? [] : ["a SERP da principal"]),
+        ...(dados.newKeywords.length ? [`a SERP das keywords novas (${dados.newKeywords.join(", ")})`] : []),
+        ...(dados.keptAuxiliaryMissing ? [`${dados.keptAuxiliaryMissing} auxiliar(es) que ainda não tinham resultado`] : []),
+      ].join(", ")} — cache primeiro, 4 lentes.`
+      : "2. \"Refazer Pesquisa Google\" sem coleta nova: tudo o que a composição nova pede já está gravado."
+    : "2. Sem pesquisa nova: a investigação gravada vale para a versão nova (mesma base de pesquisa).";
+  const redo = [
+    `1. O item passa para a v${dados.toVersionNumber} do ArticleDNA, com a principal, o slug e o canonical de sempre, e a investigação é reaberta numa versão nova da análise.`,
+    coletar,
+    `3. A concorrência é analisada e a investigação é congelada de novo sobre a v${dados.toVersionNumber}, pelo mesmo "Finalizar" de sempre.`,
+    "4. O artigo-modelo da SERP é organizado de novo para o pacote novo.",
+    "5. O servidor relê cada passo; o artigo que parar diz o motivo e continua pelo botão dele.",
+  ];
+  const costs = [
+    plano.serpCallsCeiling
+      ? `DataForSEO: no máximo ${plano.serpCallsCeiling} chamada(s) (${plano.queriesToCollect} consulta(s) × 4 lentes); cache primeiro: lente válida no cache não é paga.`
+      : "DataForSEO: nada a pagar (nenhuma consulta nova).",
+    `IA: até ${plano.aiCallsCeiling} chamada(s) para organizar o artigo-modelo.`,
+    "A leitura das páginas da concorrência não consulta o buscador.",
+  ];
+  return { keeps, redo, costs, refreeze: plano };
+}
 
 export function radarArchitectAdoptionPlan(input: {
   classification: RadarArchitectDnaUpdateClass;
@@ -281,7 +417,12 @@ export function radarArchitectAdoptionPlan(input: {
   hasAmazonRun: boolean;
   /** O grafo aprovado já cobre a versão nova? `null` = o item não carrega links. */
   linksCoverNewVersion: boolean | null;
+  /** 2026-10-18 · a confirmação também congela de novo (investigação do Google congelada, principal igual). */
+  refreeze?: RadarArchitectRefreezeInput | null;
 }): RadarArchitectAdoptionPlan {
+  if (input.refreeze && input.hasAnalysis && input.classification !== "principal_changed") {
+    return planoDoCongelamentoNovo({ classification: input.classification, refreeze: input.refreeze, linksCoverNewVersion: input.linksCoverNewVersion });
+  }
   const keeps: string[] = [];
   const redo: string[] = [];
   const costs = ["A adoção em si não chama provider nem IA: grava o item na versão nova e uma versão nova da análise (as anteriores ficam no histórico)."];
@@ -386,6 +527,13 @@ export function radarAnalysisAdoptionPatch(input: {
   current: RadarAnalysisPayload;
   to: VersionEnvelope<ArticleDNA>;
   classification: RadarArchitectDnaUpdateClass;
+  /**
+   * 2026-10-18 · a adoção com congelamento novo: a investigação do Google é
+   * REABERTA nesta versão nova da análise (sem a fotografia e sem o carimbo de
+   * finalização — o mesmo `radarReopenedGooglePatch` do "Reparar
+   * congelamento"). A fotografia antiga fica na versão anterior, no histórico.
+   */
+  refreeze?: boolean;
 }): Partial<RadarAnalysisPayload> {
   const decisoes = new Map(input.current.keywordDecisions.map(decision => [decision.keywordId, decision]));
   const keywordDecisions = input.to.payload.keywordReferences.map(reference =>
@@ -395,11 +543,14 @@ export function radarAnalysisAdoptionPatch(input: {
     const zerada = buildRadarResetPayload(input.current);
     return { ...zerada, ...base };
   }
-  if (input.classification === "same_research_basis" && input.current.deepResearch) {
-    const impressao = radarRebindResearchFingerprint(input.current.deepResearch.fingerprint, { versionId: input.to.versionId, contentHash: input.to.contentHash });
-    if (impressao) return { ...base, deepResearch: { ...input.current.deepResearch, fingerprint: impressao } };
+  let deepResearch = input.current.deepResearch;
+  let reapontada = false;
+  if (input.classification === "same_research_basis" && deepResearch) {
+    const impressao = radarRebindResearchFingerprint(deepResearch.fingerprint, { versionId: input.to.versionId, contentHash: input.to.contentHash });
+    if (impressao) { deepResearch = { ...deepResearch, fingerprint: impressao }; reapontada = true; }
   }
-  return base;
+  if (input.refreeze) return { ...base, ...radarReopenedGooglePatch(deepResearch) };
+  return reapontada ? { ...base, deepResearch } : base;
 }
 
 /* ============================ a prévia e o hash ============================ */

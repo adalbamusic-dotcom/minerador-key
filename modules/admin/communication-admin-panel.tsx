@@ -26,6 +26,8 @@ export default function CommunicationAdminPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a falha também vai para o sino; as faixas da tela saíram. */
+  useNoticeBridge({ notice: error, module: "admin", area: "Comunicação", title: "Administração · Comunicação", fallbackSeverity: "ERROR" });
   useNoticeBridge({ notice, module: "admin", area: "Comunicação", title: "Administração · Comunicação", fallbackSeverity: "INFO" });
 
   const load = async () => {
@@ -70,8 +72,6 @@ export default function CommunicationAdminPanel() {
 
   return <main className="min-w-0 p-4 sm:p-6">
     <p className="max-w-3xl text-sm leading-6 text-foreground/70">Provider global da plataforma, herdado por agências e marcas.</p>
-    {error ? <p role="alert" className="mt-4 rounded-md border border-danger/35 bg-danger-soft p-3 text-sm text-danger">{error}</p> : null}
-    {notice ? <p role="status" className="mt-4 rounded-md border border-foreground/15 bg-foreground/5 p-3 text-sm">{notice}</p> : null}
     {loading ? <p className="mt-6 flex items-center gap-2 text-sm text-text-muted"><Loader2 className="h-4 w-4 animate-spin" />Carregando configuração…</p> : <section className={`${internalSurface} mt-6 max-w-2xl`}>
       <div className="flex items-start justify-between gap-4">
         <div>

@@ -7,7 +7,7 @@ import { buildPlanSheetRows } from "../lib/arquiteto/plan-article-sheet.ts";
 import type { EditorialGroupScreenFilter } from "../lib/editorial/editorial-groups.ts";
 import { GRUPOS } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import { ARTIGO_INTRUSO, AZUL, MARCA_WIFI, grupoDaKeywordReal, mesaWifiReal } from "./arquiteto-uma-lista-so-fixtures.mts";
-import { COLUNAS, MesaDoPlano, ROTULOS_REMOVIDOS, novoRegistro, type ArtigoDaMesa, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
+import { COLUNAS, MesaDoPlano, ROTULOS_REMOVIDOS, novoRegistro, ultimoAviso, type ArtigoDaMesa, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
 
 /*
  * 2026-10-14 (tarde) · PEDIDO DO DONO, na tela de verdade: "coloca só numa
@@ -173,7 +173,7 @@ test("'Todos' · Concluir formação (barra) com o plano azul marcado, depois do
   assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k9", "k10", "k11", "k15"]]);
   assert.match(linhaDaMesa("cand-k15").querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /ArticleDNA de k15 criado e relido/);
   assert.match(linhaDoPlano("k14")!.querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /^Não gravado: Presa no artigo/);
-  assert.match(screen.get("architect-plan-sheet-summary").textContent!, /4 gravado\(s\) e relido\(s\); 3 fora desta confirmação/);
+  assert.match(ultimoAviso(registro), /4 gravado\(s\) e relido\(s\); 3 fora desta confirmação/);
   assert.equal(registro.aplicados, 1, "a mesa é relida");
   semMinerador();
 });

@@ -1,4 +1,6 @@
 import type { SitePageType } from "../marca/site-contracts.ts";
+import { readKnownVolume, type KnownVolumeRow } from "../editorial/known-before-search.ts";
+import { readKeywordPageType } from "./keyword-page-type.ts";
 import { isLightKeywordSemantic, LIGHT_ROW_WRITE_REFUSAL } from "./keyword-light-list.ts";
 import { readDeclaredArticlePlan, readDeclaredPrincipalMark, readSubjectEntry, sameDeclaredArticlePlan, sameSubjectEntry, type DeclaredArticlePlan, type DeclaredPrincipalMark, type SubjectEntry } from "./declared-plan.ts";
 
@@ -233,6 +235,116 @@ export function resolveKeywordSubject(semantic: Semantic): KeywordSubjectResolut
  */
 export function subjectPhraseOf(keywordText: string, resolution: Pick<KeywordSubjectResolution, "entry">): string {
   return resolution.entry?.title || keywordText.trim();
+}
+
+/* ========================================================================== */
+/* O ASSUNTO PELA PRINCIPAL E PELO VOLUME (SDD 2026-10-18)                     */
+/* ========================================================================== */
+
+/*
+ * SDD `docs/compartilhado/sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.1
+ * (APROVADA pelo dono em 2026-10-18). A RÉGUA ÚNICA, lida por todos os caminhos
+ * (painel do KeywordDNA, "Aprovar e enviar", Arquiteto e MCP):
+ *
+ *   volume da principal                    → Assunto     · principal
+ *   zero (medido 0 ou "sem média" válida)  → required    · free   (vira o Assunto no "Aprovar e enviar")
+ *   baixo (1 a 39)                         → optional    · fixed  (opção no painel; o Arquiteto só reforça)
+ *   com volume (40 ou mais)                → manual      · fixed  (como antes: Assunto só por cadastro)
+ *   desconhecido                           → unknown     · —      ("Meça no Minerador (Volume)")
+ *
+ * "Sem média no Google Ads" conta como volume 0 (dono, 18/10), pela mesma leitura
+ * do volume conhecido (`readKnownVolume`: vale 30 dias; depois, desconhecido).
+ * Página de Silo fica fora (S2). Domínio puro: não grava nada.
+ */
+export const SUBJECT_LOW_VOLUME_MAX = 39 as const;
+/** O bloco aditivo que diz de onde veio o Assunto (fora do schema do KeywordDNA; ignorado pelos leitores antigos). */
+export const KEYWORD_SUBJECT_BASIS_KEY = "keyword_subject_basis" as const;
+
+export type PrincipalVolumeState = "zero" | "low" | "with_volume" | "unknown";
+export type PrincipalSubjectStanding = {
+  volumeState: PrincipalVolumeState;
+  subject: "required" | "optional" | "manual" | "unknown";
+  /** `free`: a principal pode ser trocada no Arquiteto (decisão do dono na prévia). `fixed`: fica. `null`: nada se decide. */
+  principal: "free" | "fixed" | null;
+  volume: number | null;
+  measuredAt: string | null;
+  /** `silo_page`: página de Silo, fora desta régua (S2). */
+  outOfScope: "silo_page" | null;
+  /** A frase única (painel, prévia do "Aprovar e enviar", Arquiteto e MCP). */
+  sentence: string;
+};
+
+export type PrincipalSubjectRow = KnownVolumeRow;
+
+export const PRINCIPAL_SUBJECT_SENTENCES = {
+  zero: "Volume 0 (ou sem média no Google Ads): vira o Assunto fixo do artigo no “Aprovar e enviar”; no Arquiteto a principal fica livre para uma com volume (decisão sua na prévia). URL, slug e canonical não mudam.",
+  low: `Volume baixo (1 a ${SUBJECT_LOW_VOLUME_MAX}): você pode usar esta keyword como o Assunto do artigo; a principal fica fixa e o Arquiteto só acrescenta reforço.`,
+  with_volume: "Com volume (40 ou mais): a principal fica fixa; o Assunto só se você cadastrar.",
+  unknown: "Volume desconhecido: meça no Minerador (Volume) antes; nada é decidido sem a medição.",
+  silo_page: "Página de Silo: fora da régua do Assunto pela principal.",
+} as const;
+
+/** A régua do §6.1. `now` decide a validade do "sem média" (30 dias). */
+export function principalSubjectStanding(row: PrincipalSubjectRow, now: Date): PrincipalSubjectStanding {
+  const semantic = asRecord(row.analise_semantica) ?? {};
+  const siteRole = asRecord(semantic.site_origin)?.siteRole;
+  if (readKeywordPageType({ semantic, siteRole }) === "silo") {
+    return { volumeState: "unknown", subject: "unknown", principal: null, volume: null, measuredAt: null, outOfScope: "silo_page", sentence: PRINCIPAL_SUBJECT_SENTENCES.silo_page };
+  }
+  const known = readKnownVolume(row, now);
+  if (known.state === "no_average") return { volumeState: "zero", subject: "required", principal: "free", volume: 0, measuredAt: known.measuredAt, outOfScope: null, sentence: PRINCIPAL_SUBJECT_SENTENCES.zero };
+  if (known.state === "missing") return { volumeState: "unknown", subject: "unknown", principal: null, volume: null, measuredAt: known.measuredAt, outOfScope: null, sentence: PRINCIPAL_SUBJECT_SENTENCES.unknown };
+  const volume = Math.max(0, Math.round(known.volume));
+  if (volume === 0) return { volumeState: "zero", subject: "required", principal: "free", volume: 0, measuredAt: known.measuredAt, outOfScope: null, sentence: PRINCIPAL_SUBJECT_SENTENCES.zero };
+  if (volume <= SUBJECT_LOW_VOLUME_MAX) return { volumeState: "low", subject: "optional", principal: "fixed", volume, measuredAt: known.measuredAt, outOfScope: null, sentence: PRINCIPAL_SUBJECT_SENTENCES.low };
+  return { volumeState: "with_volume", subject: "manual", principal: "fixed", volume, measuredAt: known.measuredAt, outOfScope: null, sentence: PRINCIPAL_SUBJECT_SENTENCES.with_volume };
+}
+
+export type KeywordSubjectBasis = {
+  /** `principal_volume`: o Assunto veio do volume da principal (zero automático, ou a opção do volume baixo). `cadastro`: o dono cadastrou. */
+  kind: "principal_volume" | "cadastro";
+  volumeState: "zero" | "low" | null;
+  measuredAt: string | null;
+  decidedBy: string;
+  at: string;
+};
+
+export function readKeywordSubjectBasis(semantic: Semantic): KeywordSubjectBasis | null {
+  const record = asRecord(semantic?.[KEYWORD_SUBJECT_BASIS_KEY]);
+  if (!record) return null;
+  const kind = record.kind === "principal_volume" || record.kind === "cadastro" ? record.kind : null;
+  const decidedBy = text(record.decidedBy), at = text(record.at);
+  if (!kind || !decidedBy || !at) return null;
+  return { kind, volumeState: record.volumeState === "zero" || record.volumeState === "low" ? record.volumeState : null, measuredAt: text(record.measuredAt), decidedBy, at };
+}
+
+export const KEYWORD_SUBJECT_BASIS_LABELS = {
+  zero: "Assunto pelo volume 0 da principal (automático no “Aprovar e enviar”)",
+  low: "Assunto pelo volume baixo (escolhido no painel)",
+  cadastro: "Assunto cadastrado",
+} as const;
+
+export function keywordSubjectBasisLabel(basis: KeywordSubjectBasis | null): string | null {
+  if (!basis) return null;
+  if (basis.kind === "cadastro") return KEYWORD_SUBJECT_BASIS_LABELS.cadastro;
+  return basis.volumeState === "low" ? KEYWORD_SUBJECT_BASIS_LABELS.low : KEYWORD_SUBJECT_BASIS_LABELS.zero;
+}
+
+/** Acrescenta o bloco de origem na MESMA escrita do Assunto (aditivo: `analise_semantica.keyword_subject_basis`). */
+export function withKeywordSubjectBasis(semantic: Record<string, unknown>, basis: KeywordSubjectBasis): Record<string, unknown> {
+  return { ...semantic, [KEYWORD_SUBJECT_BASIS_KEY]: basis };
+}
+
+/**
+ * O Assunto que nasce da própria keyword (volume 0, a opção do volume baixo ou o
+ * formato anterior que é a própria linha): o título é o texto da keyword (editável
+ * depois no painel) e a nota antiga, quando há, vira os detalhes.
+ */
+export function principalSubjectEntry(keywordText: string, resolution: Pick<KeywordSubjectResolution, "entry" | "note">): SubjectEntry {
+  if (resolution.entry) return resolution.entry;
+  const title = keywordText.replace(/\s+/g, " ").trim().slice(0, 300);
+  const details = resolution.note ? resolution.note.replace(/\s+/g, " ").trim().slice(0, 1200) : null;
+  return { title, source: "cadastro", ...(details ? { details } : {}) };
 }
 
 /**
@@ -592,6 +704,26 @@ export const KEYWORD_DECLARED_PRINCIPAL_AT_KEY = "keyword_declared_principal_at"
 export const KEYWORD_DECLARED_PRINCIPAL_HISTORY_KEY = "keyword_declared_principal_history" as const;
 
 export const KEYWORD_DECLARED_PRINCIPAL_LABEL = "Principal declarada" as const;
+
+/**
+ * 2026-10-17 · A EXCLUSÃO COMUM (SDD da linha única do Minerador, P-4; pedido
+ * do dono: "ele tem que deixar apagar todo o grupo"). A keyword selecionada
+ * "carrega o plano" quando o banco recusaria apagá-la sozinha (o espelho do
+ * gatilho, `keywordSubjectBlocksDeletion`) ou quando é a principal declarada de
+ * um Assunto. Essa sai pelo núcleo de "Excluir tudo da cor" — que libera o
+ * Assunto e exclui na mesma transação —; as outras, pela exclusão de sempre.
+ * As colunas são estreitas (caminho JSON), nunca o jsonb inteiro.
+ */
+export const KEYWORD_DELETE_SUBJECT_COLUMNS = `ks:analise_semantica->${KEYWORD_SUBJECT_KEY},rel:analise_semantica->${KEYWORD_SUBJECT_RELEASE_KEY},dp:analise_semantica->${KEYWORD_DECLARED_PRINCIPAL_KEY}`;
+
+/** As colunas estreitas da exclusão de volta no formato do DNA (para as leituras de sempre). */
+export function keywordDeleteSubjectSemantic(row: { ks?: unknown; rel?: unknown; dp?: unknown }): Record<string, unknown> {
+  return { [KEYWORD_SUBJECT_KEY]: row.ks ?? null, [KEYWORD_SUBJECT_RELEASE_KEY]: row.rel ?? null, [KEYWORD_DECLARED_PRINCIPAL_KEY]: row.dp ?? null };
+}
+
+export function keywordCarriesDeclaredPlan(semantic: Semantic): boolean {
+  return keywordSubjectBlocksDeletion(semantic) || Boolean(readDeclaredPrincipalMark(semantic?.[KEYWORD_DECLARED_PRINCIPAL_KEY]));
+}
 
 export type DeclaredPrincipalResolution = {
   mark: DeclaredPrincipalMark | null;

@@ -179,8 +179,12 @@ Arquiteto:
   Pesquisa por Assunto (`importSubjectDiscoveryWithCore`, origem nova
   `cadastro`), com a cor. O Arquiteto as recebe pelo caminho de sempre: a
   formação põe a sustentação primeiro na página publicada (passo 1a) e "Melhorar
-  publicados" trata a página como alvo publicado. Trava não se aplica (a
-  principal do publicado é protegida).
+  publicados" trata a página como alvo publicado. ~~Trava não se aplica (a
+  principal do publicado é protegida).~~ **SUBSTITUÍDO em 2026-10-18** (SDD
+  `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.2-a/§6.3): no publicado de
+  volume 0 a principal fica livre para troca, com decisão do dono na prévia; a
+  página pode virar o próprio Assunto sem linha de reforço e o título pode ser
+  corrigido; existe o destino "Keyword (sem Silo)".
 
 ### 3.5 Arquiteto obedece à trava
 

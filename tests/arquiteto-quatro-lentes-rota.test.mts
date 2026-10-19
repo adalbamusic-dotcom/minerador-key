@@ -217,6 +217,13 @@ mock.module("@/lib/server/arquiteto-territory-store", { namedExports: {
 } });
 mock.module("@/lib/server/arquiteto-territory-undo", { namedExports: {
   planTerritoryUndoForBrand: async () => { throw new Error("Desfazer Silo fora do escopo desta suíte."); },
+  assertWholeSiloUndoConfirmed: async () => undefined,
+  readBackWholeSiloUndo: async () => { throw new Error("Desfazer Silo fora do escopo desta suíte."); },
+  territoryUndoPreviewOf: () => { throw new Error("Desfazer Silo fora do escopo desta suíte."); },
+  territoryUndoWriteRuntime: () => ({}),
+  unlinkWholeSiloGroup: async () => undefined,
+  writeWholeSiloDownstream: async () => undefined,
+  writeWholeSiloUndoRejections: async () => undefined,
 } });
 mock.module("@/lib/server/arquiteto-territorial-ai-store", { namedExports: { listTerritorialAiProposals: async () => [] } });
 mock.module("@/lib/server/arquiteto-article-formation-marker-store", { namedExports: { readArticleFormationMarker: async () => null } });

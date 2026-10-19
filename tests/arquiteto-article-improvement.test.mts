@@ -268,15 +268,53 @@ test("2026-10-17 · Principal de identidade: a Livre SEM volume que está no tí
   assert.equal(targetPrincipalIsIdentity(t, k), true);
   // Os números reais do Pilar do amarelo (17/10).
   const keywords = [k, daLista("e1", "planos de internet residencial", 6600), daLista("e2", "plano de internet residencial", 2900), daLista("e3", "plano internet residencial", 1000), daLista("e4", "melhores planos de internet residencial", 480, "Comercial"), daLista("e5", "melhor plano de internet residencial", 260, "Comercial")];
-  const [p] = planArticleImprovements({ targets: [{ ...t, planRole: "Pilar" }], keywords, evidence: [] });
+  /*
+   * 2026-10-17 (noite) · "PILAR TROCA, SUPORTES FICAM" (dono): no PILAR do plano, a Livre sem volume — mesmo de
+   * identidade — recebe a proposta do termo-cabeça com volume que leva o núcleo do slug e a centralidade: entre
+   * "planos de internet residencial" (6.600) e "plano de internet residencial" (2.900) — a mesma busca, as duas levam o
+   * núcleo, mesma cauda —, a de mais volume; a outra fica secundária; a frase do plano fica como o Assunto.
+   * SUBSTITUI, para o Pilar, "a principal de identidade fica" (abaixo, o mesmo artigo sem o papel de Pilar fica).
+   */
+  const [pilar] = planArticleImprovements({ targets: [{ ...t, planRole: "Pilar" }], keywords, evidence: [] });
+  assert.equal(pilar.status, "ready", JSON.stringify(pilar.reasons));
+  assert.equal(pilar.currentPrimaryId, "l1");
+  assert.equal(pilar.principalId, "e1", `o termo-cabeça assume no Pilar: ${JSON.stringify(pilar.reasons)}`);
+  assert.ok(pilar.memberIds.includes("e2"), "a outra variante da mesma busca fica secundária");
+  assert.ok(!pilar.memberIds.includes("e3"), "a terceira grafia da mesma busca continua fora (no máximo duas, contando a nova principal)");
+  assert.ok(!pilar.memberIds.includes("l1"), "a frase do plano sai das keywords e fica como o Assunto");
+  assert.match(pilar.reasons.join(" "), /Pilar sem volume troca pelo termo-cabeça: “planos de internet residencial” \(6600\) assume como principal do Pilar — é o termo-cabeça com volume que leva o núcleo do slug \(plano \+ internet \+ residencial\)/);
+  assert.match(pilar.reasons.join(" "), /“plano de internet residencial” \(2900\) é a mesma busca e fica como secundária/);
+  // Sem nenhuma busca que leve o núcleo, o Pilar fica com a principal de identidade (e forma com ela).
+  const [pilarSemCabeca] = planArticleImprovements({ targets: [{ ...t, planRole: "Pilar" }], keywords: keywords.filter(item => !["e1", "e2", "e3", "e4", "e5"].includes(item.id)), evidence: [] });
+  assert.equal(pilarSemCabeca.principalId, "l1");
+  // A Travada nunca troca, nem no Pilar.
+  const [pilarTravado] = planArticleImprovements({ targets: [{ ...t, planRole: "Pilar", declaredPrincipalId: "l1" }], keywords, evidence: [] });
+  assert.equal(pilarTravado.principalId, "l1");
+  /*
+   * 2026-10-18 · SUBSTITUÍDO "fora do Pilar, a principal de identidade fica (T12)" (SDD do Assunto pela principal §6.3-b):
+   * o Suporte de volume 0 também recebe a proposta — mas a principal nova dele é a FACETA do Suporte; os pedaços da
+   * principal antiga ("planos de internet residencial"…) são a cabeça do Pilar. Sem faceta com volume, a principal fica e
+   * a prévia diz por quê (nunca troca às cegas).
+   */
+  const [p] = planArticleImprovements({ targets: [{ ...t, planRole: "Suporte" }], keywords, evidence: [] });
   assert.equal(p.status, "ready", JSON.stringify(p.reasons));
-  assert.equal(p.principalId, "l1", "a principal de identidade fica, mesmo sem volume");
+  assert.equal(p.principalId, "l1", "no Suporte, o pedaço da principal antiga não é a principal nova (é do Pilar)");
   // 2026-10-17 · SUBSTITUÍDO "as cinco entram": "plano internet residencial" (1.000) é a TERCEIRA grafia da mesma busca
   // ("planos de internet residencial", "plano de internet residencial") — no máximo duas, as de maior volume (SAME_SEARCH_MAX_PER_ARTICLE).
-  assert.deepEqual([...p.addIds].sort(), ["e1", "e2", "e4", "e5"], "as mais amplas reforçam; a mesma busca entra no máximo duas vezes");
-  assert.ok(!p.memberIds.includes("e3"), "a terceira variante da mesma busca fica de fora");
+  // 2026-10-18 · no Suporte, o pedaço da principal acima de 5.000 ("planos de internet residencial", 6.600) é do Pilar e fica
+  // fora ANTES de alocar; as duas grafias da mesma busca que sobram ("plano de…" 2.900 e "plano internet…" 1.000) entram.
+  assert.deepEqual([...p.addIds].sort(), ["e2", "e3", "e4", "e5"], "as mais amplas reforçam o contexto; a mesma busca entra no máximo duas vezes");
+  assert.ok(!p.memberIds.includes("e1"), "a cabeça acima de 5.000 é do Pilar");
   assert.ok(p.memberIds.includes("l1") && p.memberIds.length === 5, JSON.stringify(p.memberIds));
-  assert.match(p.reasons.join(" "), /^.*Principal de identidade: “como escolher plano de internet residencial” \(sem volume\) está no título e no slug do Assunto e fica como principal/);
+  // Sem papel de plano (Assunto sem Silo), volume 0: a proposta é a de mais volume que leva o núcleo e cabe no Assunto.
+  const [semPapel] = planArticleImprovements({ targets: [t], keywords, evidence: [] });
+  assert.equal(semPapel.principalId, "e1", JSON.stringify(semPapel.reasons));
+  assert.ok(!semPapel.memberIds.includes("l1"), "a keyword do Assunto sai das keywords e continua como o Assunto");
+  assert.match(p.reasons.join(" "), /Volume 0 sem candidata: “como escolher plano de internet residencial” tem volume 0 e fica livre.*faceta deste Suporte/);
+  // Volume DESCONHECIDO (nunca medida): nada se decide sobre a principal (SDD 2026-10-18 §6.1).
+  const [desconhecida] = planArticleImprovements({ targets: [{ ...t, planRole: "Pilar" }], keywords: keywords.map(item => item.id === "l1" ? { ...item, volumeUnknown: true } : item), evidence: [] });
+  assert.equal(desconhecida.principalId, "l1", "desconhecido: nada se decide");
+  assert.ok(desconhecida.reasons.some(reason => /Volume da principal desconhecido/.test(reason)), JSON.stringify(desconhecida.reasons));
   assert.ok(!p.reasons.some(reason => /assume como principal/.test(reason)), "nenhuma troca proposta");
   // "Procurar outra principal" (decisão do dono na linha) continua trocando.
   const [escolhida] = planArticleImprovements({ targets: [{ ...t, chosenPrincipalId: "e1" }], keywords, evidence: [] });
@@ -294,7 +332,8 @@ test("§15 passo 3b · Livre SEM volume FORA da identidade (fora do título e do
   assert.equal(p.principalId, "e3", "leva o núcleo do slug (plano + internet + residencial), mais volume");
   assert.ok(!p.memberIds.includes("lx"), "o Assunto não é secundária do próprio artigo (contrato do ArticleDNA)");
   assert.ok(p.memberIds.includes("e1") && p.memberIds.includes("e2"), "as outras reforçam");
-  assert.match(p.reasons.join(" "), /Livre sem volume e fora da identidade .*“planos de internet residencial” \(6600\) assume como principal .*leva o núcleo do slug, plano \+ internet \+ residencial.*Proposta: decisão sua na prévia/);
+  // 2026-10-18 · a frase da régua nova (volume 0 → principal com volume que leva o núcleo e cabe no Assunto).
+  assert.match(p.reasons.join(" "), /Assunto pela principal \(SDD 2026-10-18\): “internet sem fidelidade” tem volume 0; “planos de internet residencial” \(6600\) assume como principal — leva o núcleo do slug \(plano \+ internet \+ residencial\).*Proposta: decisão sua na prévia/);
   assert.ok(p.reasons.includes(SUBJECT_KEYWORD_STAYS_SUBJECT_REASON) || !p.memberIds.includes("lx"));
   // Sem a do núcleo, a que mantém a intenção; sem nenhuma, a principal fica e o artigo só recebe reforço.
   const [semNucleo] = planArticleImprovements({ targets: [t], keywords: keywords.filter(item => item.id !== "e3" && item.id !== "e2"), evidence: [] });
@@ -303,7 +342,8 @@ test("§15 passo 3b · Livre SEM volume FORA da identidade (fora do título e do
   const [so] = planArticleImprovements({ targets: [pergunta.t], keywords: [pergunta.k, daLista("e2", "melhor plano de internet residencial", 880, "Comercial")], evidence: [] });
   assert.equal(so.principalId, "lq");
   assert.ok(so.memberIds.includes("lq"), "a Livre que fica é a principal, entre as keywords");
-  assert.match(so.reasons.join(" "), /Nenhuma candidata com volume mantém a intenção de “quais dúvidas antes de assinar” nem leva o núcleo do slug/);
+  // 2026-10-18 · a frase da régua nova: volume 0, nenhuma candidata cabe no Assunto (outra intenção ou sem o núcleo do slug).
+  assert.match(so.reasons.join(" "), /Volume 0 sem candidata: “quais dúvidas antes de assinar” tem volume 0 e fica livre, mas nenhuma busca com volume desta leitura leva o núcleo do slug/);
 });
 
 test("§15 passo 3a · Travada ou Livre com volume: nunca troca, mesmo com candidata parecida de mais volume", () => {
@@ -365,4 +405,37 @@ test("2026-10-17 · a variante de uma secundária que JÁ está num artigo do Si
   const keywords = [pilar.k, barata.k, membro, daLista("v1", "preço de internet residencial", 170)];
   const propostas = planArticleImprovements({ targets: alvos, keywords, evidence: [], serpVocabulary: { t1: VOCAB_BARATA } });
   assert.ok(!propostas.find(p => p.targetId === "t1")!.memberIds.includes("v1"), "'preço de internet residencial' é variante da secundária do Pilar: não vai para 'barata'");
+});
+
+/*
+ * 2026-10-18 · A CABEÇA DO PILAR É A DO NÚCLEO DO PILAR/SILO (amarelo, refazedor): no Suporte da instalação (Travada, 170),
+ * "internet instalação" (880), "instalação internet" (880) e "instalação de internet" (720) saíam como "mais ampla que a
+ * principal (cabeça do Pilar)". Agora a cabeça da PRÓPRIA faceta do Suporte reforça o contexto (dono: "as keywords mais
+ * amplas podem reforçar o contexto"); a do núcleo do Pilar/Silo continua só no Pilar; acima de 5.000 fica fora; sem o
+ * Pilar lido, a regra de antes. RF19: a mesma busca com o MESMO volume é uma linha só do Google Ads.
+ */
+test("2026-10-18 · a cabeça do Pilar é a do núcleo do Pilar/Silo: a cabeça da faceta do Suporte reforça o contexto (uma grafia por linha do Google Ads); a do núcleo do Pilar fica fora do Suporte; acima de 5.000 também; sem o Pilar lido, a regra de antes", () => {
+  const pilar = doPlano("l1", "como escolher plano de internet residencial", "Como escolher um plano de internet residencial sem cair em uma oferta ruim", "como-escolher-plano-internet-residencial", "plano", { intencao: "Informativo" });
+  const instalacao = doPlano("t4", "instalação de internet residencial", "Instalação de internet: taxas, prazo e quando chega a primeira fatura", "instalacao-internet-primeira-fatura", "instalacao", { volume: 170, travada: true, escopo: "Instalação, agendamento, viabilidade, cobrança inicial e fidelidade" });
+  const barata = doPlano("t1", "internet residencial barata", "Internet residencial barata: o que comparar além da mensalidade", "internet-residencial-barata", "internet residencial", { volume: 1600, travada: true, escopo: "Diferença entre preço promocional e custo real" });
+  const suporte = { ...instalacao.t, planRole: "Suporte" as const };
+  const alvos = [{ ...pilar.t, planRole: "Pilar" as const }, suporte, { ...barata.t, planRole: "Suporte" as const }];
+  const facetas = [daLista("i1", "internet instalação", 880), daLista("i2", "instalação internet", 880), daLista("i3", "instalação de internet", 720)];
+  // "internet residencial" (fixture, abaixo de 5.000): a cabeça do núcleo do Pilar/Silo, que cabe na linha de "barata".
+  const keywords = [pilar.k, instalacao.k, barata.k, ...facetas, daLista("r1", "internet residencial", 4400), daLista("g1", "taxa de instalação internet", 6000)];
+  const propostas = planArticleImprovements({ targets: alvos, keywords, evidence: [], serpVocabulary: { t1: VOCAB_BARATA } });
+  const de = (id: string) => propostas.find(p => p.targetId === id)!;
+  assert.equal(de("t4").principalId, "t4", "Travada: a principal fica");
+  assert.deepEqual([...de("t4").addIds].sort(), ["i1", "i3"], `a cabeça da faceta entra; a mesma linha do Google Ads (880 = 880) só uma vez: ${JSON.stringify(de("t4").reasons)}`);
+  assert.ok(!propostas.some(p => p.memberIds.includes("i2")), "a outra grafia de 880 não ocupa outra vaga em artigo nenhum");
+  assert.ok(!propostas.some(p => p.memberIds.includes("g1")), "a cabeça da faceta acima de 5.000: um Suporte não ranqueia nela");
+  assert.ok(!de("t1").memberIds.includes("r1"), "'internet residencial' é a cabeça do núcleo do Pilar/Silo: nunca num Suporte");
+  assert.match(de("t1").reasons.join(" "), /“internet residencial” \(4400\) é mais ampla que a principal \(cabeça do Pilar\)/, JSON.stringify(de("t1").reasons));
+  // Sem o Pilar lido (nem nesta leitura nem pelo servidor), a regra de antes: fecha para o lado seguro.
+  const [sozinho] = planArticleImprovements({ targets: [suporte], keywords: [instalacao.k, ...facetas], evidence: [] });
+  assert.deepEqual(sozinho.addIds, [], JSON.stringify(sozinho.reasons));
+  assert.match(sozinho.reasons.join(" "), /é mais ampla que a principal \(cabeça do Pilar\)/);
+  // Com o Pilar do mesmo plano lido pelo servidor (`planPillar`), o mesmo resultado da leitura com o Pilar.
+  const [comPilar] = planArticleImprovements({ targets: [{ ...suporte, planPillar: { keyword: pilar.k.keyword, slug: pilar.t.planSlug!, entity: "plano" } }], keywords: [instalacao.k, ...facetas], evidence: [] });
+  assert.deepEqual([...comPilar.addIds].sort(), ["i1", "i3"], JSON.stringify(comPilar.reasons));
 });

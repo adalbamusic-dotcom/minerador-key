@@ -19,7 +19,7 @@ import { RADAR_VIDEO_USAGE_HINT, RADAR_VIDEO_USAGE_LABEL, type RadarVideoUsage }
 import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "./competitive-blueprint.ts";
 import { radarSemanticStems } from "./semantic-concept-model.ts";
 import { radarUbiquitousStems } from "./intent-adherence.ts";
-import { radarOutOfScopeMatcher, radarSuggestionRestatesKeyword } from "./out-of-scope.ts";
+import { radarOutOfScopeDistinctiveStems, radarOutOfScopeMatcher, radarSuggestionRestatesKeyword } from "./out-of-scope.ts";
 import {
   radarWritingCleanUrl,
   radarWritingCompareKey,
@@ -240,6 +240,14 @@ import type { RadarAuthorityKind } from "./authority-sources-contract.ts";
  * resposta de ~4 mil tokens. `maxTokens` é o mesmo que o modelo já aceitou na
  * primeira chamada real (8000): o que cortou a resposta foi o tamanho pedido,
  * não o teto.
+ *
+ * 2026-10-18 · Os tetos de texto daqui são do ESQUEMA: cortam depois de a IA
+ * escrever, não limitam o que ela escreve. Com as regras 29 e 30 (análise
+ * competitiva, diferencial, fechamento em 4 campos) e as variações, o pior caso
+ * do pedido normal nesses tetos passa de 20 mil tokens; o teto da SAÍDA CURTA
+ * está em `RADAR_ARTICLE_BLUEPRINT_SHORT_LIMITS`. `maxTokens` fica em 8000: na
+ * OpenRouter o pedido vai com 16 mil (8000 + a folga de raciocínio "low" de
+ * `openRouterMaxTokens`) e subir o teto não cabe nos 150 s da primeira chamada.
  */
 export const RADAR_ARTICLE_BLUEPRINT_LIMITS = Object.freeze({
   sections: 8,
@@ -267,6 +275,68 @@ export const RADAR_ARTICLE_BLUEPRINT_LIMITS = Object.freeze({
   maxTokens: 8_000,
   /** 2026-10-08 · B1 · os H2 da página publicada que vão à IA (e ao mapa da atualização). */
   publishedH2: 20,
+});
+
+/**
+ * 2026-10-18 · A SAÍDA CURTA COM TETO DE VERDADE (a segunda tentativa, depois de
+ * uma resposta cortada ou fora do formato).
+ *
+ * Teste real local (WifiConecta, Pilar "planos de internet residencial"): as
+ * duas chamadas vieram cortadas pelo teto, a curta também. Causa: o pedido não
+ * dizia o tamanho de nenhum texto, e a "saída curta" só encolhia seções, H3,
+ * explain, alternativas e a análise competitiva — o resto (plano de keywords,
+ * variações, descartes, fechamento com turn e cta repetidos, links com motivo,
+ * bold e terms, e-e-a-t, avisos) seguia nos tetos do esquema (`L.textChars`,
+ * `L.shortChars`), que só cortam DEPOIS de a IA escrever. O pior caso que a
+ * curta permitia passava de 16 mil tokens contra o teto de 8 mil.
+ *
+ * Aqui estão os tetos que a SAÍDA CURTA diz à IA, campo por campo (cada um
+ * abaixo do teto do esquema: a resposta que os segue nunca é cortada). O
+ * teste `tests/radar-artigo-modelo-saida-curta-2026-10-18.test.mts` monta a
+ * maior resposta que estes tetos permitem e confere que ela cabe em
+ * `RADAR_ARTICLE_BLUEPRINT_LIMITS.maxTokens` com folga. Os mínimos das regras
+ * continuam valendo (3 H2, a capa e 2 respiros, 6 variações, 2 sinais locais).
+ * O pedido normal (a primeira chamada) não muda: é entregável protegido do E0.
+ */
+export const RADAR_ARTICLE_BLUEPRINT_SHORT_LIMITS = Object.freeze({
+  sections: 5,
+  h3: 2,
+  explain: 2,
+  bold: 2,
+  terms: 3,
+  /** ids em from, em evidence e em cada item da análise competitiva. */
+  ids: 3,
+  internalLinks: 2,
+  externalLinks: 1,
+  /** practical só nas seções que ensinam a fazer; nas outras, null. */
+  practicalSections: 2,
+  complementary: RADAR_ARTICLE_BLUEPRINT_LIMITS.complementary,
+  semanticVariants: RADAR_HUMAN_VOICE_SEMANTIC_VARIANTS.min,
+  discarded: RADAR_ARTICLE_BLUEPRINT_LIMITS.discarded,
+  /** itens em consensus, bestOnly, gains e oldSeo. */
+  competitivePerBlock: 2,
+  seenIn: 2,
+  questionsKept: 2,
+  method: 1,
+  localSignals: RADAR_BRAND_EDGE_LIMITS.localSignalsMin,
+  respiros: 2,
+  eeat: 2,
+  warnings: 2,
+  /** h2, h3, readerQuestion, h1, alternativas, section, topic, gap, question, signal, deliverable, concept, alt, caption. */
+  headingChars: 70,
+  /** answerFirst, explain, claim, practical, reader, promise, angle, direction, os 4 campos do fechamento, vsGeneric, bottomFunnel, eeat, warnings, keywordPlan.reading. */
+  sentenceChars: 140,
+  /** howWeCover, doBetter, instead, valueAnswer. */
+  competitiveChars: 100,
+  /** bold, terms, seenIn, principalPlacement, sourceType, methodName. */
+  termChars: 30,
+  /** anchor dos links internos. */
+  anchorChars: 50,
+  /** reason (links, descarte, mapa da página publicada) e placement do plano de keywords. */
+  reasonChars: 50,
+  seoTitleChars: 60,
+  metaChars: 155,
+  imagePromptChars: 250,
 });
 
 /**
@@ -1023,6 +1093,32 @@ export function radarArticleBlueprintOutOfScopeMatcher(rotulos: readonly string[
   return radarOutOfScopeMatcher({ labels: rotulos, core: nucleo });
 }
 
+/**
+ * 2026-10-18 · A REFERÊNCIA DA REGRA 3(a) NO PEDIDO: a planta anterior (ou a
+ * página publicada) MAIS a estrutura que a investigação promoveu — os TÍTULOS
+ * das seções do modelo da SERP (H2 e H3), sem o molde ("no dia a dia", "O que
+ * considerar sobre…"). A pergunta do leitor não entra: ela pode ser justamente
+ * o candidato que a investigação pôs fora do escopo. A seção da virada
+ * ("Virada para <Assunto>") também não: o título dela é o Assunto (já no núcleo).
+ */
+export function radarArticleBlueprintScopeReference(
+  referencia: { textos: string[]; titulos: string[] },
+  secoesDaInvestigacao: readonly RadarPortableSection[],
+): { textos: string[]; titulos: string[] } {
+  const daInvestigacao: string[] = [];
+  const visitar = (lista: readonly RadarPortableSection[]) => {
+    for (const secao of lista) {
+      if (/^virada para\s/i.test(t(secao.heading))) continue;
+      const titulo = radarWritingStripHeadingTemplate(secao.heading);
+      if (titulo && !UUID.test(titulo)) daInvestigacao.push(titulo);
+      visitar(secao.children || []);
+    }
+  };
+  visitar(secoesDaInvestigacao || []);
+  if (!daInvestigacao.length) return referencia;
+  return { textos: [...referencia.textos, ...daInvestigacao], titulos: [...referencia.titulos, ...daInvestigacao] };
+}
+
 /* ============================== o tipo da unidade ============================== */
 
 const TIPO_DA_UNIDADE: Record<string, string> = {
@@ -1094,8 +1190,15 @@ export function radarArticleBlueprintSubjectTurnOf(
  *     sozinha: a seção fica pelo cabeçalho (F3).
  * A seção que o ArticleDNA exige nunca sai por estas réguas (decisão humana), e
  * a chamada para ação fica (é seção da página).
+ *
+ * 2026-10-18 · E nem pelo "Não cobrir" genérico da SERP: a seção obrigatória (o
+ * Assunto, o tópico declarado) só é marcada fora do escopo pela exclusão dura
+ * (`duro`: a voz da marca e o reajuste no ArticleDNA). No artigo do CEP, a
+ * pergunta-molde da virada ("O que o leitor desta BUSCA precisa entender…")
+ * casava com o rótulo "Como Funciona a Busca de Internet por CEP?" e o próprio
+ * Assunto ia ao descarte "fora do escopo do pacote".
  */
-type ReguaDoEsqueleto = { unidade?: RadarWritingUnit; ruido?: RadarResearchNoiseContext | null; perfil?: string | null };
+type ReguaDoEsqueleto = { unidade?: RadarWritingUnit; ruido?: RadarResearchNoiseContext | null; perfil?: string | null; duro?: (valor: string | null | undefined) => boolean };
 
 function esqueletoDaSerp(secoes: readonly RadarPortableSection[], tocaFora: (valor: string | null | undefined) => boolean, regua: ReguaDoEsqueleto = {}): RadarArticleBlueprintSkeletonItem[] {
   const saida: RadarArticleBlueprintSkeletonItem[] = [];
@@ -1144,7 +1247,8 @@ function esqueletoDaSerp(secoes: readonly RadarPortableSection[], tocaFora: (val
         mustCover: secao.mustCoverReasons.length > 0,
         needsSource: Boolean(secao.sourceNeeded),
         needsSpecialist: Boolean(secao.specialistRequired),
-        outOfScope: cabecalhoFora || tocaFora(readerQuestion),
+        /* 2026-10-18 · a obrigatória só pela exclusão dura (ver `ReguaDoEsqueleto.duro`). */
+        outOfScope: protegida && regua.duro ? regua.duro(heading) || regua.duro(readerQuestion) : cabecalhoFora || tocaFora(readerQuestion),
       });
       visitar(secao.children, id);
     }
@@ -1325,7 +1429,22 @@ export function buildRadarArticleBlueprintBrief(input: {
    * genérico que ela trata não vai ao pedido; o tópico que o Silo exclui (outro
    * artigo, regra 3b) continua fora.
    */
-  const referenciaDoPedido = radarWritingReferenceTexts(input.previous ?? null, input.previous ? null : input.publication?.currentStructure ?? null);
+  /*
+   * 2026-10-18 (teste real, WifiConecta) · A ESTRUTURA QUE A PRÓPRIA INVESTIGAÇÃO
+   * PROMOVEU TAMBÉM É REFERÊNCIA DA REGRA 3(a), ao lado da planta anterior (ou da
+   * página publicada). No "quantos mega de internet preciso", o rótulo genérico
+   * "Qual é a velocidade de internet ideal?" (2 páginas, fora do território pela
+   * régua de palavras) marcava fora do escopo a seção que a investigação
+   * promoveu ("Como medir sua velocidade real", 6 de 30 páginas) e a obrigatória
+   * "Como a velocidade em Mega é distribuída…"; a conferência tirava as seções
+   * da IA com "velocidade" e o artigo-modelo caía em 422. A SERP do artigo é a
+   * autoridade: o item genérico que a estrutura dela trata sai do pedido. O
+   * tópico que o Silo exclui (outro artigo, regra 3b) continua fora.
+   */
+  const referenciaDoPedido = radarArticleBlueprintScopeReference(
+    radarWritingReferenceTexts(input.previous ?? null, input.previous ? null : input.publication?.currentStructure ?? null),
+    p.editorial.sections,
+  );
   const referenciaTrata = radarWritingReferenceTreats(referenciaDoPedido, [principal, ...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements, p.assunto?.phrase || ""].filter(Boolean));
   const foraDoEscopo = p.serp.editorialCandidates.filter(item => item.verdict === "OUT_OF_SCOPE").map(item => radarWritingDecodeEntities(item.observedLabel))
     .filter(rotulo => !referenciaTrata(rotulo));
@@ -1347,7 +1466,9 @@ export function buildRadarArticleBlueprintBrief(input: {
    */
   const exclusoesDoDna = radarResearchContextScopeExclusions(entrada.researchContext);
   const tocaExclusaoDoDna = radarArticleBlueprintOutOfScopeMatcher(exclusoesDoDna.map(item => item.label), nucleo);
-  const tocaFora = (valor: string | null | undefined) => tocaForaDoPacote(valor) || Boolean(radarBrandVoiceExclusionOf(valor, exclusoesDaVoz)) || tocaExclusaoDoDna(valor);
+  /* 2026-10-18 · a exclusão DURA (voz da marca e reajuste no ArticleDNA): a única que marca a seção que o ArticleDNA exige. */
+  const tocaForaDuro = (valor: string | null | undefined) => Boolean(radarBrandVoiceExclusionOf(valor, exclusoesDaVoz)) || tocaExclusaoDoDna(valor);
+  const tocaFora = (valor: string | null | undefined) => tocaForaDoPacote(valor) || tocaForaDuro(valor);
 
   const serp = p.serpObservada;
   for (const item of serp?.organic.slice(0, 10) || []) {
@@ -1597,8 +1718,12 @@ export function buildRadarArticleBlueprintBrief(input: {
    * cabeçalho pela unidade, pergunta que toca o "não cobrir") valem no esqueleto
    * do gerador. O fora do escopo da SEÇÃO segue a régua da conferência da planta
    * (a larga, de 2026-10-02): a seção M que toca o "não cobrir" chega marcada.
+   * SUBSTITUÍDO em parte em 2026-10-18: o "não cobrir" do pedido já vem sem o
+   * item genérico que a estrutura promovida pela investigação trata
+   * (`radarArticleBlueprintScopeReference`), e a seção obrigatória (Assunto,
+   * tópico declarado) só é marcada pela exclusão dura (`tocaForaDuro`).
    */
-  const secoesDaSerp = esqueletoDaSerp(p.editorial.sections, tocaFora, { unidade: p.unidade, ruido: p.ruido, perfil: p.perfil });
+  const secoesDaSerp = esqueletoDaSerp(p.editorial.sections, tocaFora, { unidade: p.unidade, ruido: p.ruido, perfil: p.perfil, duro: tocaForaDuro });
   return {
     article: {
       principal,
@@ -1628,7 +1753,8 @@ export function buildRadarArticleBlueprintBrief(input: {
     /* 2026-10-09 · 5 · o tema dos concorrentes que toca o fora do escopo (ou a exclusão da voz) chega marcado para descarte, como a seção M. */
     /* 2026-10-09b · com a Amazon congelada, as seções genéricas da forma comercial entram como M (matéria-prima), antes dos temas dos concorrentes. */
     skeleton: esqueletoComTemas(esqueletoComComercial(secoesDaSerp, comercial?.skeleton), temasDosConcorrentes?.topics || [], temasDosConcorrentes?.sampleDomains ?? null)
-      .map(item => (item.outOfScope || !tocaFora(item.heading) ? item : { ...item, outOfScope: true })),
+      /* 2026-10-18 · a obrigatória (o Assunto, o tópico declarado) só pela exclusão dura. */
+      .map(item => (item.outOfScope || !(item.mustCover ? tocaForaDuro : tocaFora)(item.heading) ? item : { ...item, outOfScope: true })),
     skeletonFrame: {
       workingTitle: limpo(p.editorial.title) || null,
       /* 2026-10-09 · 12 · a promessa do esqueleto também chega sem a moldura. */
@@ -1756,8 +1882,24 @@ const nomesDosAutores = (autores: readonly RadarArticleBlueprintAuthor[]) =>
   autores.map(autor => `${autor.name}${autor.specialty ? ` (${autor.specialty})` : ""}`).join(" e ");
 
 /**
+ * 2026-10-18 · A REGRA DA SAÍDA CURTA, campo por campo, pelos tetos de
+ * `RADAR_ARTICLE_BLUEPRINT_SHORT_LIMITS` (uma linha do pedido de sistema, no fim).
+ */
+export function radarArticleBlueprintShortOutputRule(): string {
+  const c = RADAR_ARTICLE_BLUEPRINT_SHORT_LIMITS;
+  return [
+    `SAÍDA CURTA (a resposta anterior veio cortada ou fora do formato): os tetos abaixo valem para TODOS os campos e vencem os números das regras acima; os mínimos delas continuam (${RADAR_HUMAN_VOICE_H2.min} seções, a capa e ${c.respiros} respiros, ${c.semanticVariants} variações semânticas, ${c.localSignals} sinais locais).`,
+    `sections: de ${RADAR_HUMAN_VOICE_H2.min} a ${c.sections} seções; em cada uma, até ${c.h3} H3, ${c.explain} itens em explain, ${c.bold} em bold, ${c.terms} em terms, ${c.ids} ids em from e ${c.ids} em evidence, ${c.internalLinks} internalLinks e ${c.externalLinks} externalLinks; practical só em até ${c.practicalSections} seções que ensinam a fazer (nas outras, null).`,
+    `Textos: h2, h3, readerQuestion, h1, alternatives, section, topic, practice, gap, pattern, question, deliverable, signal, concept, alt e caption até ${c.headingChars} caracteres; answerFirst, explain, claim, practical, reader, promise, angle.statement, opening.direction, keywordPlan.reading, os 4 campos do fechamento, vsGeneric, bottomFunnel, eeat e warnings até ${c.sentenceChars}; howWeCover, doBetter, instead e valueAnswer até ${c.competitiveChars}; bold, terms, seenIn, principalPlacement, sourceType e methodName até ${c.termChars}; anchor até ${c.anchorChars}; reason e placement até ${c.reasonChars}; seoTitle até ${c.seoTitleChars}; metaDescription até ${c.metaChars}; prompt de imagem até ${c.imagePromptChars}.`,
+    `Listas: keywordPlan.complementary até ${c.complementary} itens; semanticVariants com ${c.semanticVariants}; discarded até ${c.discarded}, sem a seção M marcada FORA DO ESCOPO e sem o H3 do esqueleto cujo H2 você usou (o servidor já os conta); competitive com até ${c.competitivePerBlock} itens em consensus, bestOnly, gains e oldSeo (seenIn até ${c.seenIn}), até ${c.questionsKept} questionsKept e questionsDropped vazio ([]); brandEdge com ${c.method} method e ${c.localSignals} localSignals; visual com a CAPA e ${c.respiros} respiros; eeat até ${c.eeat} itens; warnings até ${c.warnings}; publishedMap (quando pedido) com todos os H2 atuais e reason só quando section = null.`,
+    `closing: turn e cta vazios ("") e nextStep null (o servidor monta a virada e o CTA dos 4 campos). Feche o JSON.`,
+  ].join(" ");
+}
+
+/**
  * O PEDIDO À IA. `short` é a SEGUNDA tentativa, depois de uma resposta cortada
- * ou fora do formato (2026-10-02): mesmas regras, saída menor.
+ * ou fora do formato (2026-10-02): mesmas regras, saída menor — desde
+ * 2026-10-18 com o teto de cada campo (`radarArticleBlueprintShortOutputRule`).
  */
 export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, opcoes: { short?: boolean; fix?: { previous: unknown; pending: readonly string[] } } = {}): { system: string; user: string } {
   const m = brief.measures;
@@ -1830,9 +1972,16 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
       ? [`29. ANÁLISE COMPETITIVA (regras ${RADAR_CLOSING_RULES_VERSION}; só dados já coletados, em '# Análise competitiva'): devolva competitive com os quatro blocos, até ${RADAR_COMPETITIVE_READING_LIMITS.perBlockInPlan} itens cada, cada item citando os ids que o sustentam. consensus: a base que todos cobrem (ids T), com howWeCover dizendo em poucas linhas como o artigo cobre sem copiar. bestOnly: o que só os melhores fazem (ids M+), com doBetter dizendo como fazer melhor. gains: o que ninguém entrega e este artigo entrega (ids N, G, D, P): kind (dado, experiencia, exemplo, ferramenta, comparacao ou regra_oficial), giver (marca, especialista ou fonte_oficial; marca ou especialista só quando a Skill de voz ou o parecer do especialista sustentam) e a seção onde entra. oldSeo: o SEO antigo que não se copia (ids U), com instead dizendo o que fazer no lugar. angle: o ângulo de diferenciação deste artigo (a entrega concreta que a amostra relevante não tem; parta do ângulo que o Radar recomendava, quando servir). questionsKept: até ${RADAR_COMPETITIVE_READING_LIMITS.questionsKept} perguntas reais (ids P) que valem resposta, cada uma com valueAnswer (a resposta de valor, concreta, que a marca pode dar) e a seção; as outras vão em questionsDropped com o motivo (repetida, rasa, de outro artigo, já respondida pela resposta de IA). A estrutura dos concorrentes é REFERÊNCIA, nunca gabarito: a seção M só vira H2 se responde a uma pergunta do leitor deste papel no Silo; tema de definição com resposta de IA no topo vira 1 ou 2 frases da abertura; as medidas são faixa de referência.`]
       : []),
     `30. DIFERENCIAL DA MARCA E FECHAMENTO (regras ${RADAR_CLOSING_RULES_VERSION}): devolva brandEdge. method: até ${RADAR_BRAND_EDGE_LIMITS.method} entregas concretas da marca (o que ela faz, como entrega), cada uma com o nome do método DEPOIS da entrega, uma vez (ex.: "uma página por tratamento com as perguntas da recepção, ligadas entre si; isso tem nome: Silo"), e a seção; vsGeneric: o contraste com a agência de posts e anúncios, ancorado no que a SERP mostra (o serviço genérico no topo, as listas de dicas); localSignals: ${RADAR_BRAND_EDGE_LIMITS.localSignalsMin} ou ${RADAR_BRAND_EDGE_LIMITS.localSignals} sinais de autoridade local, cada um com a seção; bottomFunnel: a seção de decisão (critérios, custo, prazo, como avaliar quem executa), obrigatória quando a intenção tem componente comercial. Só o que a Skill de voz, o parecer do especialista e o pacote sustentam: sem preço, prazo, garantia nem número inventado. O fechamento vai em closing.pain, closing.structureShift, closing.ease e closing.diagnosis (regra 28); o diagnóstico parte da 'Oferta de diagnóstico' do pacote. ${RADAR_CLOSING_SPECIALIST_RULE} ${RADAR_HUMAN_VOICE_RESERVATION_RULE}`,
-    ...(opcoes.short
-      ? [`SAÍDA CURTA (a resposta anterior veio cortada ou fora do formato): no máximo 5 seções, 2 H3 por seção, 2 itens em explain, sem alternatives, uma frase curta por campo e prompts de imagem de até 250 caracteres; em competitive, até 2 itens por bloco e só as perguntas mantidas; em brandEdge, 1 entrega e 2 sinais locais. Feche o JSON.`]
-      : []),
+    /*
+     * 2026-10-18 · A SAÍDA CURTA DIZ O TETO DE CADA CAMPO (`RADAR_ARTICLE_BLUEPRINT_SHORT_LIMITS`).
+     * SUBSTITUÍDO (2026-10-18): "no máximo 5 seções, 2 H3 por seção, 2 itens em
+     * explain, sem alternatives, uma frase curta por campo e prompts de imagem de
+     * até 250 caracteres; em competitive, até 2 itens por bloco e só as perguntas
+     * mantidas; em brandEdge, 1 entrega e 2 sinais locais" — encolhia só parte da
+     * resposta, e a curta também veio cortada no teste real. Agora todo campo tem
+     * número e as alternatives voltam (a regra 28 pede 3 opções de título).
+     */
+    ...(opcoes.short ? [radarArticleBlueprintShortOutputRule()] : []),
   ].join("\n");
 
   const linhas = (titulo: string, itens: string[]) => (itens.length ? [`## ${titulo}`, ...itens.map(item => `- ${item}`), ""] : []);
@@ -2015,10 +2164,18 @@ export function radarArticleBlueprintAiFailure(input: { code: string | null | un
 }
 
 /** A frase para a tela: nunca "JSON invalido" cru. */
-export function radarArticleBlueprintAiFailureMessage(falha: RadarArticleBlueprintAiFailure, chamadas: number): string {
+export function radarArticleBlueprintAiFailureMessage(
+  falha: RadarArticleBlueprintAiFailure,
+  chamadas: number,
+  /* 2026-10-18 · o tamanho da última resposta vai na mensagem do botão: o log do dev gravava "{}" e o corte não dizia se foi a resposta ou o raciocínio. */
+  tamanho?: { completionTokens: number | null; reasoningTokens: number | null; contentLength: number | null },
+): string {
   const depois = chamadas > 1 ? ", mesmo depois de 1 nova tentativa com saída mais curta" : "";
   const fim = "Tente de novo; a investigação continua finalizada.";
-  if (falha === "CUT") return `A resposta da IA veio cortada (passou do tamanho máximo)${depois}. ${fim}`;
+  const medida = tamanho && (tamanho.completionTokens !== null || tamanho.contentLength !== null)
+    ? ` (Última resposta: ${tamanho.completionTokens ?? "?"} tokens, ${tamanho.reasoningTokens ?? 0} de raciocínio, ${tamanho.contentLength ?? 0} caracteres de texto.)`
+    : "";
+  if (falha === "CUT") return `A resposta da IA veio cortada (passou do tamanho máximo)${depois}.${medida} ${fim}`;
   if (falha === "EMPTY") return `A IA não devolveu conteúdo${depois}. ${fim}`;
   return `A IA respondeu fora do formato combinado${depois}. ${fim}`;
 }
@@ -4017,6 +4174,29 @@ export function titulosGenericosIguais(a: string, b: string, comuns: ReadonlySet
   return emComum.length > 0 && especificas(ra).length <= 1 && especificas(rb).length <= 1;
 }
 
+/**
+ * 2026-10-18 · A SEÇÃO DA IA É A IDENTIDADE DO ARTIGO? Sim quando o H2 (sem o
+ * "Virada para") não tem palavra fora do núcleo (principal, complementares,
+ * Assunto) além das genéricas, ou quando a seção cumpre uma seção M obrigatória
+ * do esqueleto (não marcada fora do escopo) e trata do assunto dela. Só o
+ * "Não cobrir" genérico da SERP cede a ela; a exclusão dura não.
+ */
+export function radarArticleBlueprintSectionIsIdentity(
+  secao: { h2: string; readerQuestion?: string | null; h3?: readonly string[]; from?: readonly string[] | null },
+  contexto: { esqueleto: ReadonlyMap<string, RadarArticleBlueprintSkeletonItem>; nucleo: readonly string[]; raizesComuns: ReadonlySet<string> },
+): boolean {
+  const semVirada = (valor: string | null | undefined) => t(valor).replace(/^virada para\s+/i, "");
+  const titulo = semVirada(secao.h2);
+  if (titulo && radarOutOfScopeDistinctiveStems(titulo, contexto.nucleo).length === 0) return true;
+  const raizesDaSecao = new Set(radarSemanticStems([secao.h2, secao.readerQuestion || "", ...(secao.h3 || [])].join(" ")));
+  return (secao.from || []).some(id => {
+    const m = contexto.esqueleto.get(id);
+    if (!m || !m.mustCover || m.outOfScope) return false;
+    const distintas = radarSemanticStems(semVirada(radarWritingStripHeadingTemplate(m.heading))).filter(raiz => !contexto.raizesComuns.has(raiz));
+    return !distintas.length || distintas.some(raiz => raizesDaSecao.has(raiz));
+  });
+}
+
 export const RADAR_ABSOLUTE_CLAIM =/\b(nunca|sempre|jamais|ningu[eé]m|todo mundo|(n[aã]o )?foi (feito|feita|desenhad[oa]|criad[oa]) para|procura[mr]? no [a-z]+, n[aã]o no|n[aã]o serve para|s[oó] serve para)\b/i;
 
 export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief: RadarArticleBlueprintBrief, opcoes: { close?: boolean } = {}): { payload: RadarArticleBlueprintPayload; notes: string[] } {
@@ -4080,8 +4260,21 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
       return [];
     }
     if (tocaForaDoEscopo(secao.h2) || tocaForaDoEscopo(secao.readerQuestion)) {
-      notes.push(`Seção "${secao.h2}" removida: o pacote marca o assunto como fora do escopo.`);
-      return [];
+      /*
+       * 2026-10-18 (teste real, WifiConecta) · A IDENTIDADE DO ARTIGO NÃO SAI POR
+       * RÓTULO GENÉRICO DA SERP. A voz da marca e o reajuste no ArticleDNA já
+       * tiraram acima o que é exclusão dura; aqui sobra o "Não cobrir" do pacote.
+       * A seção cujo H2 é só a identidade (principal, complementares, Assunto —
+       * "Virada para <Assunto>" inclusive) ou que cumpre uma seção M obrigatória
+       * (o Assunto, o tópico declarado) e trata dela fica: no "quantos mega", a
+       * "Virada para 300, 500, 600 Mega ou 1 Giga…" saía pela pergunta do leitor
+       * e o artigo-modelo caía em 422. O H3 que toca o rótulo continua saindo.
+       */
+      if (!radarArticleBlueprintSectionIsIdentity(secao, { esqueleto: doEsqueleto, nucleo, raizesComuns })) {
+        notes.push(`Seção "${secao.h2}" removida: o pacote marca o assunto como fora do escopo.`);
+        return [];
+      }
+      notes.push(`Seção "${secao.h2}" ficou: é a identidade do artigo (o que o ArticleDNA exige); o rótulo genérico da SERP não a tira.`);
     }
     const h3 = secao.h3.filter(item => !EH_FAQ.test(item) && !tocaForaDoEscopo(item));
     if (h3.length < secao.h3.length) notes.push(`Seção "${secao.h2}": ${secao.h3.length - h3.length} H3 de FAQ ou fora do escopo removido(s).`);

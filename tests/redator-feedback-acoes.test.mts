@@ -192,7 +192,8 @@ test("08 · ESTRUTURAL · toda ação produz estado, e a falha não vira sucesso
   assert.equal(falhas, BLOCOS_COM_FALHA, "toda ação traduz a falha do servidor");
 
   const retornosAposFalha =
-    src.split(/setTom\(falha\.tone\); setMessage\(falha\.mensagem\);\s*\n\s*return;/).length - 1;
+    /* 2026-10-18 · `save` passou a devolver o entregável relido (ou `null` na falha) para a finalização salvar antes: o retorno da falha é `return null;`. */
+    src.split(/setTom\(falha\.tone\); setMessage\(falha\.mensagem\);\s*\n\s*return(?: null)?;/).length - 1;
   assert.equal(retornosAposFalha, BLOCOS_COM_FALHA,
     "TODOS os caminhos precisam retornar antes de load() e de qualquer sucesso");
 
@@ -206,15 +207,22 @@ test("08 · ESTRUTURAL · toda ação produz estado, e a falha não vira sucesso
     "cada ação marca o início e libera no finally");
 });
 
-test("09 · ESTRUTURAL · o motivo inteiro aparece sem DevTools", async () => {
+/*
+ * 09 · SUBSTITUÍDO 2026-10-18 (regra do dono: "todos os avisos têm que estar
+ * dentro do sino"). O bloco `data-deliverable-erro` no corpo saiu; o desfecho
+ * vai para o sino, que mostra o motivo inteiro com quebra de linha. O
+ * andamento nunca vai para o sino.
+ */
+test("09 · ESTRUTURAL · o motivo inteiro aparece no sino, não numa faixa da tela", async () => {
   const src = semComentarios(await fonte(AMBIENTE));
 
-  /* Bloco contextual no corpo, onde há largura e quebra de linha. */
-  assert.match(src, /\{tom === "erro" && message && <div role="alert" data-deliverable-erro/);
-  assert.match(src, /break-words/);
-  assert.match(src, /A ação não foi concluída\./);
+  /* A faixa de erro no corpo não volta. */
+  assert.doesNotMatch(src, /data-deliverable-erro/);
+  assert.doesNotMatch(src, /A ação não foi concluída\./);
 
-  /* E ele fica FORA do trecho travado por finalizado: erro precisa aparecer sempre. */
-  const corpo = trecho(src, "data-deliverable-erro", "<header");
-  assert.doesNotMatch(corpo, /disabled=/);
+  /* O desfecho (erro e sucesso) vai para o sino; o andamento não. */
+  const ponte = trecho(src, "useNoticeBridge({", "});");
+  assert.match(ponte, /tom === "erro" \? \{ type: "error", message \}/);
+  assert.match(ponte, /tom === "sucesso" \? \{ type: "success", message \}/);
+  assert.doesNotMatch(ponte, /progresso/);
 });

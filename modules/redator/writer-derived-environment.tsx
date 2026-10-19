@@ -34,8 +34,10 @@ import { WriterRadarFoundationsPanel } from "@/modules/redator/writer-radar-foun
 import type { ContentDocument } from "@/lib/arquiteto/contracts";
 import { carouselAnchorTargets, mediaRowsToPanelAssets, scriptAnchorTargets } from "@/lib/redator/media-anchor-targets";
 import { adicionarCena, cenasEmOrdem, duplicarCena, editarCena, moverCena, novaCena, removerCena } from "@/lib/redator/script-scenes";
-import { actionButtonLabel, describeActionFailure, progressMessage, type DeliverableAction, type FeedbackTone } from "@/lib/redator/action-feedback";
+import { actionButtonLabel, describeActionFailure, progressMessage, WRITER_AI_COST_LABEL, writerAiSeedConfirmation, type DeliverableAction, type FeedbackTone } from "@/lib/redator/action-feedback";
+import { InfoHint } from "@/components/info-hint";
 import { radarWriterDossierOfDocument } from "@/lib/redator/radar-foundations";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 type Kind = WriterDeliverablePayload["kind"];
 
@@ -93,13 +95,23 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [tom, setTom] = useState<FeedbackTone>("neutro");
+  /*
+   * 2026-10-18 · TODOS OS AVISOS NO SINO (regra do dono). O desfecho de cada
+   * ação (sucesso ou falha) vai para o sino com o texto inteiro — o sino quebra
+   * linha, então o motivo do servidor aparece completo. Andamento ("Salvando…")
+   * nunca vai para o sino: fica na barra, ao lado do botão.
+   */
+  useNoticeBridge({
+    notice: tom === "erro" ? { type: "error", message } : tom === "sucesso" ? { type: "success", message } : "",
+    module: "redator", area: kind === "video_script" ? "Roteiro" : "Carrossel", title: "Redator", fallbackSeverity: "INFO",
+  });
   const [acaoEmCurso, setAcaoEmCurso] = useState<DeliverableAction | null>(null);
   /** A cena aberta manda no painel de mídia. Sem ela, o painel não fala de nada. */
   const [cenaSelecionada, setCenaSelecionada] = useState("");
   const [metadadosAbertos, setMetadadosAbertos] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!brandId || !documentId) return;
+  const load = useCallback(async (): Promise<Stored | null> => {
+    if (!brandId || !documentId) return null;
     try {
       const response = await fetch(`/api/redator/deliverables?brandId=${encodeURIComponent(brandId)}&documentId=${encodeURIComponent(documentId)}`, { cache: "no-store" });
       const body = await response.json();
@@ -109,9 +121,11 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
       setSourceHash(body.sourceDocumentHash);
       setDraft(current?.payload || newWriterDeliverable(kind, { documentId, title, sourceDocumentHash: body.sourceDocumentHash }));
       setMedia(body.media || []);
+      return current;
     } catch (error) {
       setTom("erro");
       setMessage(error instanceof Error ? error.message : "Falha ao ler entregáveis.");
+      return null;
     }
   }, [brandId, documentId, kind, title]);
 
@@ -128,14 +142,15 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
    * escrita própria, então continua herdando a recusa de entregável finalizado e
    * o conflito de lock sem reimplementá-los.
    */
-  const save = async (override?: WriterDeliverablePayload, mensagemSucesso?: string) => {
+  /* Devolve o entregável relido depois de salvar, ou `null` quando não salvou (a finalização usa o lock novo). */
+  const save = async (override?: WriterDeliverablePayload, mensagemSucesso?: string): Promise<Stored | null> => {
     const alvo = override ?? draft;
-    if (!brandId || !documentId || !alvo) return;
+    if (!brandId || !documentId || !alvo) return null;
     const parsed = WriterDeliverablePayloadSchema.safeParse(alvo);
     if (!parsed.success) {
       setTom("erro");
       setMessage(`Campo inválido: ${parsed.error.issues[0]?.path.join(".") || "entregável"}.`);
-      return;
+      return null;
     }
     setBusy(true); setAcaoEmCurso("salvar"); setTom("progresso"); setMessage(progressMessage("salvar"));
     try {
@@ -151,14 +166,16 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
          */
         const falha = describeActionFailure({ status: response.status, body });
         setTom(falha.tone); setMessage(falha.mensagem);
-        return;
+        return null;
       }
-      await load();
+      const relido = await load();
       setTom("sucesso");
       setMessage(mensagemSucesso ?? (body?.unchanged ? "Sem alterações a salvar." : "Rascunho salvo e confirmado no servidor."));
+      return relido;
     } catch (error) {
       setTom("erro");
       setMessage(error instanceof Error ? error.message : "Falha ao salvar.");
+      return null;
     }
     finally { setBusy(false); setAcaoEmCurso(null); }
   };
@@ -179,6 +196,8 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
     /* `kind` é prop e existe sempre; `ehRoteiro` só é declarado depois da guarda de `draft`. */
     const roteiro = kind === "video_script";
     const qual: DeliverableAction = roteiro ? "semear_roteiro" : "semear_carrossel";
+    /* 2026-10-18 · defeito 5 do inventário: a IA paga diz o custo antes da chamada; Cancelar não chama. */
+    if (!window.confirm(writerAiSeedConfirmation(roteiro ? "seed_script" : "seed_carousel"))) return;
     setBusy(true); setAcaoEmCurso(qual); setTom("progresso"); setMessage(progressMessage(qual));
     try {
       const response = await fetch("/api/redator/seed", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -220,10 +239,23 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
   const acao = async (action: "finalize" | "reopen") => {
     if (!brandId || !documentId || !stored) return;
     const qual: DeliverableAction = action === "finalize" ? "finalizar" : "reabrir";
+    /*
+     * 2026-10-18 · defeito 3 do inventário: finalizar mandava o lock do que
+     * estava GRAVADO e, depois, a releitura escrevia por cima da tela — o que a
+     * pessoa editou e não salvou sumia. Agora, com alteração na tela, finalizar
+     * salva primeiro (o mesmo "Salvar rascunho") e finaliza o que foi salvo; se
+     * salvar falhar, não finaliza e a tela continua com o que foi digitado.
+     */
+    let alvo: Stored = stored;
+    if (action === "finalize" && draft && JSON.stringify(draft) !== JSON.stringify(stored.payload)) {
+      const salvo = await save(undefined, "Alterações salvas antes de finalizar.");
+      if (!salvo) return;
+      alvo = salvo;
+    }
     setBusy(true); setAcaoEmCurso(qual); setTom("progresso"); setMessage(progressMessage(qual));
     try {
       const corpo = action === "finalize"
-        ? { action, brandId, documentId, kind, expectedLockVersion: stored.lockVersion }
+        ? { action, brandId, documentId, kind, expectedLockVersion: alvo.lockVersion }
         : { action, brandId, documentId, kind };
       const response = await fetch("/api/redator/deliverables", { method: "PATCH",
         headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
@@ -317,8 +349,9 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
     kind,
     estado: !stored ? "none" : stored.status === "approved" ? "approved" : "draft",
     ocupado: busy,
-    mensagem: message,
-    tom,
+    /* 2026-10-18 · a barra mostra só o ANDAMENTO; o desfecho (sucesso ou falha) está no sino (regra do dono). */
+    mensagem: tom === "progresso" ? message : "",
+    tom: tom === "progresso" ? "progresso" : "neutro",
     acaoEmCurso,
     salvar: () => void save(),
     finalizar: () => void acao("finalize"),
@@ -375,18 +408,11 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
         */}
       <fieldset className="m-0 min-w-0 flex-1 space-y-4 border-0 p-0">
         {/*
-          * ===== CORTE 6A.8 · O MOTIVO INTEIRO, ONDE CABE =====
+          * ===== CORTE 6A.8 · O MOTIVO INTEIRO, ONDE CABE — SUBSTITUÍDO 2026-10-18 =====
           *
-          * A barra tem altura fixa e trunca. Aqui há largura e quebra de linha,
-          * então a mensagem aparece completa — sem DevTools, sem tooltip, sem
-          * depender de reticências.
+          * O bloco de erro que ficava aqui saiu: todos os avisos vão para o sino
+          * (regra do dono), e o sino mostra o motivo inteiro, com quebra de linha.
           */}
-        {tom === "erro" && message && <div role="alert" data-deliverable-erro
-          className="rounded border border-danger bg-danger/10 p-3 text-sm text-danger">
-          <strong className="block">A ação não foi concluída.</strong>
-          <span className="mt-1 block break-words">{message}</span>
-        </div>}
-
         <header className="border-b border-border pb-3">
           <input className="w-full bg-transparent text-2xl font-semibold outline-none" value={draft.title}
             readOnly={finalizado}
@@ -436,6 +462,8 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
               {actionButtonLabel({ action: ehRoteiro ? "semear_roteiro" : "semear_carrossel", emCurso: acaoEmCurso,
                 rotuloParado: `Criar ${ehRoteiro ? "roteiro" : "carrossel"} a partir deste contexto` })}
             </button>
+            <span className="ml-1 inline-block align-middle"><InfoHint title={`Criar ${ehRoteiro ? "roteiro" : "carrossel"} a partir deste contexto`} description={`Para que serve: a IA monta o primeiro rascunho ${ehRoteiro ? "das cenas do roteiro" : "dos slides do carrossel"} a partir dos Fundamentos do Radar e do artigo-modelo. Como usar: clique e confirme; o resultado é gravado como rascunho para você editar. Custo: ${WRITER_AI_COST_LABEL}, dito também na confirmação. Cancelar não chama a IA.`}/></span>
+            <p className="mt-1 text-sm text-text-muted" data-semear-custo>{WRITER_AI_COST_LABEL}.</p>
           </>}
           <button className={`${button} ${temDossie ? "mt-2" : "mt-3"}`} disabled={finalizado || busy} onClick={adicionar} data-adicionar-primeira>
             <Plus className="mr-1 inline h-4 w-4" aria-hidden="true"/>
@@ -554,7 +582,7 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, doc
         {cenaSelecionada
           ? <WriterMediaAnchorPanel brandId={brandId} documentId={documentId}
               targets={alvos.filter(alvo => alvo.ref === cenaSelecionada)}
-              assets={mediaRowsToPanelAssets(media)} onChanged={load} readOnly={finalizado}/>
+              assets={mediaRowsToPanelAssets(media)} onChanged={async () => { await load(); }} readOnly={finalizado}/>
           : <>
               {/*
                 * ===== REDATOR_DOSSIER_SURFACE_1 · SEM CENA ABERTA, O PAINEL É O DOSSIÊ =====

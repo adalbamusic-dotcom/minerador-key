@@ -51,7 +51,7 @@ import { SERP_SUBJECT_THRESHOLDS, type SerpSubjectIndex, type SerpSubjectOverlap
 import { logicDnaDivergence, logicWarningText, measureAnchorConvergence, serpAwareDnaBarrier } from "./serp-subject-convergence.ts";
 import { SERP_SUGGESTION_LEVEL_LABELS, type SerpSuggestionLevel } from "./serp-subject-suggestions.ts";
 import { classifySlugFit, slugTextOf, type SlugFit } from "./published-slug-fit.ts";
-import { principalIsIdentity } from "./article-improvement.ts";
+import { principalIsIdentity, publishedSubjectPrincipalVerdict, type PublishedPageSubject } from "./article-improvement.ts";
 
 /* -------------------------------- o posto -------------------------------- */
 
@@ -116,7 +116,7 @@ export type PublishedPrimarySwapRejection = {
    * ("para o consultório" num slug "-para-clinica"); `other_article` = é
    * âncora de outro publicado ou membro de outro artigo.
    */
-  missing: "volume" | "volume_not_higher" | "intent" | "serp" | "serp_support" | "serp_unknown" | "published" | "subject_without_volume" | "slug_entity" | "other_article";
+  missing: "volume" | "volume_not_higher" | "intent" | "serp" | "serp_support" | "serp_unknown" | "published" | "subject_without_volume" | "slug_entity" | "other_article" | "subject_fit";
   reason: string;
   sharedPageCount: number | null;
 };
@@ -147,8 +147,11 @@ export type PublishedPrimarySwapProposal = {
   rejected: PublishedPrimarySwapRejection[];
   /** URL, slug, canonical e marca ficam como estão. */
   protectedIdentity: PublishedPrimarySwapIdentity;
-  /** A principal antiga fica no artigo como secundária. */
-  previousPrimaryBecomes: "secundaria";
+  /**
+   * A principal antiga fica no artigo como secundária. 2026-10-19 · com o Assunto declarado na página (`pageSubject`), a
+   * PÁGINA vira o Assunto do artigo (sai das keywords, U18) — `"assunto"`.
+   */
+  previousPrimaryBecomes: "secundaria" | "assunto";
   /** Contratos que o ArticleDNA já aceita: vigente + candidatas; decisão pendente. */
   candidates: PrimaryKeywordCandidate[];
   decision: PrimaryKeywordDecision | null;
@@ -186,15 +189,24 @@ export function proposePublishedPrimarySwap(input: {
    * principal de identidade lê a atual; ausente, a da página.
    */
   currentPrincipalKeyword?: string | null;
+  /**
+   * 2026-10-19 · O ASSUNTO DA PÁGINA (SDD 2026-10-18 §6.3; cobrança do dono de 19/10). Presente = a página publicada tem o
+   * Assunto declarado: a régua da troca é a do refazedor, uma só (`publishedSubjectPrincipalVerdict`): volume 0 libera
+   * (mesmo "Travado ao slug", dono 18/10), volume definido fica, desconhecido não decide; a principal atual só fica se
+   * cabe no Assunto (sem perder o que define o artigo) e a candidata também precisa caber. SUBSTITUI, nesse caso, o
+   * portão da principal de identidade (T12). Ausente = o publicado sem Assunto, como antes (espera o Minerador).
+   */
+  pageSubject?: PublishedPageSubject | null;
 }): PublishedPrimarySwapProposal {
   const { published } = input;
   const slugPublicado = slugTextOf(input.identity);
+  const assunto = input.pageSubject ?? null;
   const base = {
     publishedKeywordId: published.keywordId,
     publishedKeyword: published.keyword,
     post: input.post,
     protectedIdentity: { url: input.identity.url, canonical: input.identity.canonical, slug: input.identity.slug },
-    previousPrimaryBecomes: "secundaria" as const,
+    previousPrimaryBecomes: (assunto ? "assunto" : "secundaria") as "secundaria" | "assunto",
     requiresHumanDecision: true as const,
   };
   const vigente = PrimaryKeywordCandidateSchema.safeParse({
@@ -209,13 +221,23 @@ export function proposePublishedPrimarySwap(input: {
   });
   const candidatesBase: PrimaryKeywordCandidate[] = vigente.success ? [vigente.data] : [];
 
-  if (input.post === "locked") {
+  const principalAtual = input.currentPrincipalKeyword?.trim() || published.keyword;
+  if (assunto) {
+    const so = (note: string) => ({ ...base, state: "locked" as const, substitute: null, alternatives: [], rejected: [], candidates: candidatesBase, decision: null, note });
+    if (assunto.volumeState === "unknown") return so(`Assunto pela principal: o volume de "${assunto.theme}" é desconhecido (nunca medida, "sem média" vencida ou outro provider): nada é decidido sobre a principal; meça no Minerador (Volume).`);
+    if (assunto.volumeState !== "zero") return so(`Assunto pela principal: "${assunto.theme}" tem volume definido e fica como principal; o artigo só recebe reforço.`);
+    if (principalAtual !== published.keyword) {
+      const naoCabe = publishedSubjectPrincipalVerdict(assunto, { keywordId: "atual", keyword: principalAtual });
+      if (!naoCabe) return so(`Assunto pela principal: "${principalAtual}" cabe no Assunto "${assunto.theme}" (mesmo tema, sem perder o que define o artigo) e fica como principal; a página é o Assunto e o artigo só recebe reforço.`);
+    }
+  }
+  if (input.post === "locked" && !assunto) {
     return {
       ...base, state: "locked", substitute: null, alternatives: [], rejected: [], candidates: candidatesBase, decision: null,
       note: `Posto "Travado ao slug": "${published.keyword}" fica como principal. O artigo só recebe reforço.`,
     };
   }
-  if (input.post === "unknown") {
+  if (input.post === "unknown" && !assunto) {
     return {
       ...base, state: "unknown_post", substitute: null, alternatives: [], rejected: [], candidates: candidatesBase, decision: null,
       note: `O Posto de "${published.keyword}" não está declarado. O Minerador mostra "Travado ao slug" por padrão em página publicada, mas padrão não é decisão: nada é proposto nem bloqueado até você declarar, na Revisão Humana do Minerador, "Travado ao slug" (só reforço) ou "Livre" (a principal está ali para ser trocada).`,
@@ -229,8 +251,7 @@ export function proposePublishedPrimarySwap(input: {
    * pouco volume, ela fica; as buscas mais amplas entram como reforço. Nada é
    * proposto (o estado é o de "só reforço").
    */
-  const principalAtual = input.currentPrincipalKeyword?.trim() || published.keyword;
-  if (principalIsIdentity({ keyword: principalAtual, slug: slugPublicado })) {
+  if (!assunto && principalIsIdentity({ keyword: principalAtual, slug: slugPublicado })) {
     return {
       ...base, state: "locked", substitute: null, alternatives: [], rejected: [], candidates: candidatesBase, decision: null,
       note: `Principal de identidade: o slug publicado foi feito de "${principalAtual}", então ela fica como principal mesmo com Posto Livre e pouco volume. As buscas mais amplas entram como reforço.`,
@@ -259,6 +280,9 @@ export function proposePublishedPrimarySwap(input: {
     const contradicao = serpAwareDnaBarrier(published, candidata, input.serp);
     const intencao = intencaoDe(candidata);
     if (contradicao) { recusar("intent", `O DNA separa as duas: ${contradicao}. A troca exige a mesma intenção.`); continue; }
+    // 2026-10-19 · a régua c do Assunto da página: a candidata é o mesmo tema, sem perder o que define o artigo.
+    const foraDoAssunto = assunto ? publishedSubjectPrincipalVerdict(assunto, candidata) : null;
+    if (foraDoAssunto) { recusar("subject_fit", `Não cabe no Assunto "${assunto!.theme}": ${foraDoAssunto}.`); continue; }
     const overlap = input.serp ? input.serp.overlap(published.keywordId, candidata.keywordId) : null;
     if (!overlap || overlap.strength === "unknown") {
       recusar("serp_unknown", overlap ? overlap.reason : "Sem a SERP da mesa: não dá para saber se ela divide o Google com o artigo.", overlap);
@@ -362,7 +386,7 @@ export function proposePublishedPrimarySwap(input: {
     status: "pending",
     previousKeywordId: published.keywordId,
     selectedKeywordId: melhor.keyword.keywordId,
-    reason: `Proposta de troca (Posto Livre): ${reason} URL, slug e canonical ficam; "${published.keyword}" vira secundária.`,
+    reason: `Proposta de troca (${assunto ? "Assunto pela principal, volume 0" : "Posto Livre"}): ${reason} URL, slug e canonical ficam; "${published.keyword}" ${assunto ? "vira o Assunto do artigo" : "vira secundária"}.`,
   });
   return {
     ...base,
@@ -382,7 +406,7 @@ export function proposePublishedPrimarySwap(input: {
     rejected,
     candidates,
     decision: decisao.success ? decisao.data : null,
-    note: `Troca proposta: ${reason} URL, slug e canonical não mudam, e "${published.keyword}" fica no artigo como secundária. Só vale com a sua decisão.`,
+    note: `Troca proposta: ${reason} URL, slug e canonical não mudam, e "${published.keyword}" ${assunto ? "fica no artigo como o Assunto (sai das keywords)" : "fica no artigo como secundária"}. Só vale com a sua decisão.`,
   };
 }
 
@@ -439,10 +463,13 @@ export function decidePublishedPrimarySwap(input: {
   }
   if (!input.actorUserId.trim()) return { ok: false, reason: "A decisão precisa do usuário que decidiu." };
   if (!Number.isFinite(Date.parse(input.decidedAt))) return { ok: false, reason: "A decisão precisa da data e hora." };
-  if (article.principalKeywordId !== proposal.publishedKeywordId) {
+  // 2026-10-19 · com o Assunto na página, a principal atual pode ser a do modo antigo (não a página): a troca é sobre ela.
+  const peloAssunto = proposal.previousPrimaryBecomes === "assunto";
+  if (article.principalKeywordId !== proposal.publishedKeywordId && !peloAssunto) {
     return { ok: false, reason: "A principal do artigo mudou depois da proposta: recarregue a mesa antes de decidir." };
   }
-  if (input.accepted && input.currentPost !== "free") {
+  // O volume 0 da página com Assunto libera a principal mesmo "Travado ao slug" (dono, 18/10); URL, slug e canonical ficam.
+  if (input.accepted && input.currentPost !== "free" && !peloAssunto) {
     return { ok: false, reason: input.currentPost === "locked"
       ? "O Posto agora está \"Travado ao slug\": a troca não pode ser aplicada."
       : "O Posto não está declarado: declare \"Livre\" na Revisão Humana antes de trocar." };
@@ -460,7 +487,7 @@ export function decidePublishedPrimarySwap(input: {
     actorId: input.actorUserId,
     decidedAt: new Date(input.decidedAt).toISOString(),
     reason: input.accepted
-      ? `Troca aceita: "${proposal.substitute.keyword}" assume a principal; "${proposal.publishedKeyword}" fica como secundária. URL, slug e canonical preservados.`
+      ? `Troca aceita: "${proposal.substitute.keyword}" assume a principal; "${proposal.publishedKeyword}" ${peloAssunto ? "é o Assunto do artigo" : "fica como secundária"}. URL, slug e canonical preservados.`
       : `Troca recusada: "${proposal.publishedKeyword}" continua principal.`,
   });
   const candidatas = proposal.candidates.map(candidata => {
@@ -486,7 +513,7 @@ export function decidePublishedPrimarySwap(input: {
     ok: true, accepted: true,
     principalKeywordId: nova,
     keywordIds,
-    roleChanges: [{ keywordId: nova, role: "principal" }, { keywordId: proposal.publishedKeywordId, role: "secundaria" }],
+    roleChanges: [{ keywordId: nova, role: "principal" }, ...(peloAssunto ? [] : [{ keywordId: proposal.publishedKeywordId, role: "secundaria" as const }])],
     identity: { ...article.identity },
     articleDnaFields: { primaryKeywordCandidates: candidatas, primaryKeywordDecision: decisao },
     requiresNewVersion: true,

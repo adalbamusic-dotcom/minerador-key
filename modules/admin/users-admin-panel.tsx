@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AdminMembershipSummary, AdminUserRecord } from "@/lib/admin-users-contract";
-import { internalButton, internalButtonDanger, internalButtonPrimary, internalField, internalNoticeError, internalNoticeSuccess, internalSelected, internalSurface, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
+import { internalButton, internalButtonDanger, internalButtonPrimary, internalField, internalSelected, internalSurface, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
 import { useNoticeBridge } from "@/components/global-notice-center";
 
 type Notice = { tone: "success" | "error"; message: string } | null;
@@ -36,6 +36,7 @@ export default function UsersAdminPanel() {
   const [confirmGrant, setConfirmGrant] = useState(false);
   const [confirmRemoval, setConfirmRemoval] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): o resultado fica só no sino; a faixa da tela saiu. */
   useNoticeBridge({ notice, module: "admin", area: "Usuários", title: "Administração · Usuários", fallbackSeverity: "INFO" });
 
   const load = useCallback(async (nextQuery: string) => {
@@ -93,7 +94,6 @@ export default function UsersAdminPanel() {
   return <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
     <header className="border-b border-divider pb-5"><p className="max-w-3xl text-sm leading-6 text-text-muted">Consulte identidades do Supabase Auth e gerencie somente o papel global. Propriedade de marcas e memberships são exibidos para contexto e não são alterados aqui.</p></header>
     <form onSubmit={submitSearch} className={`${internalSurface} mt-5 flex flex-col gap-3 sm:flex-row sm:items-end`} aria-label="Buscar usuários Auth"><label className="grid flex-1 gap-1.5 text-sm font-medium text-foreground">Buscar usuário por e-mail ou nome<input value={query} onChange={event => setQuery(event.target.value)} placeholder="Ex.: scalbeto@gmail.com" className={`${internalField} mt-1`} /></label><div className="flex gap-2"><button type="submit" disabled={loading} className={`${internalButtonPrimary} min-h-10 px-4`}>{loading ? "Consultando…" : "Buscar"}</button><button type="button" onClick={() => { setQuery(""); setNotice(null); void load(""); }} className={`${internalButton} min-h-10 px-4`}>Limpar</button></div></form>
-    {notice && <p role="status" className={`mt-4 ${notice.tone === "success" ? internalNoticeSuccess : internalNoticeError}`}>{notice.message}</p>}
     <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(18rem,0.8fr)_minmax(0,1.6fr)]">
       <section className={`${internalSurface} overflow-hidden p-0`} aria-label="Resultados de usuários"><div className="border-b border-divider px-4 py-3 text-sm font-semibold text-foreground">{loading ? "Consultando usuários…" : `${users.length} usuário${users.length === 1 ? "" : "s"} encontrado${users.length === 1 ? "" : "s"}`}</div><div className="divide-y divide-divider">{!loading && !users.length && <p className="p-4 text-sm text-text-muted">Nenhum usuário encontrado. Use ao menos dois caracteres para pesquisar por nome ou e-mail.</p>}{users.map(user => <button type="button" key={user.identity.id} onClick={() => { setSelectedId(user.identity.id); setConfirmRemoval(false); }} className={`block w-full px-4 py-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-module-accent/40 ${selectedId === user.identity.id ? internalSelected : "hover:bg-surface-elevated"}`}><span className="block text-sm font-medium text-foreground">{user.identity.name || user.identity.email}</span><span className="mt-1 block truncate text-xs text-text-muted">{user.identity.email}</span><span className={roleBadge(user.globalRole === "admin")}>{user.globalRole === "admin" ? "Administrador global" : "Usuário padrão"}</span></button>)}</div></section>
       <section className={`${internalSurface} p-5`} aria-live="polite">{!selected ? <p className="text-sm text-text-muted">Selecione um usuário para ver seus acessos.</p> : <>

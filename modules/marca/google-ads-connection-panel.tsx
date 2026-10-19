@@ -27,7 +27,9 @@ export function GoogleAdsConnectionPanel({ brandId }: { brandId: string }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [forbidden, setForbidden] = useState(false);
-  const [message, setMessage] = useState("");
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): o resultado vai para o sino; só a validação do campo fica ao lado do campo. */
+  const [message, setMessage] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null);
+  const [validationError, setValidationError] = useState("");
   useNoticeBridge({ notice: message, module: "marca", area: "Google Ads", title: "Marca · Google Ads", fallbackSeverity: "INFO" });
   const [replaceConfirmed, setReplaceConfirmed] = useState(false);
   const [form, setForm] = useState({ customerId: "" });
@@ -40,13 +42,13 @@ export function GoogleAdsConnectionPanel({ brandId }: { brandId: string }) {
         const response = await fetch(connectionUrl(brandId), { method: "GET", cache: "no-store" });
         const body = await response.json() as ConnectionResponse;
         if (!response.ok || !body.success) {
-          if (active) { setForbidden(response.status === 403); setMessage(body.message || "Não foi possível consultar a conexão Google Ads desta marca."); }
+          if (active) { setForbidden(response.status === 403); setMessage({ type: "error", message: body.message || "Não foi possível consultar a conexão Google Ads desta marca." }); }
           return;
         }
         if (active) {
           setConnection(body.connection || null);
         }
-      } catch { if (active) setMessage("Não foi possível consultar a conexão Google Ads desta marca."); }
+      } catch { if (active) setMessage({ type: "error", message: "Não foi possível consultar a conexão Google Ads desta marca." }); }
       finally { if (active) setLoading(false); }
     };
     void loadConnection();
@@ -54,17 +56,17 @@ export function GoogleAdsConnectionPanel({ brandId }: { brandId: string }) {
   }, [brandId]);
 
   const submit = async () => {
-    setMessage("");
-    const validationError = validateClientInput(form.customerId);
-    if (validationError) { setMessage(validationError); return; }
-    if (connection && !replaceConfirmed) { setMessage("Confirme a substituição da conexão ativa antes de revalidar a conta."); return; }
+    setMessage(null); setValidationError("");
+    const fieldError = validateClientInput(form.customerId);
+    if (fieldError) { setValidationError(fieldError); return; }
+    if (connection && !replaceConfirmed) { setMessage({ type: "warning", message: "Confirme a substituição da conexão ativa antes de revalidar a conta." }); return; }
     setSubmitting(true);
     try {
       const response = await fetch(connectionUrl(brandId), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customerId: normalizeCustomerIdInput(form.customerId) }) });
       const body = await response.json() as ConnectionResponse;
-      if (!response.ok || !body.success || !body.connection) { setForbidden(response.status === 403); setMessage(body.message || "Não foi possível validar a conexão Google Ads."); return; }
-      setConnection(body.connection); setForm({ customerId: "" }); setReplaceConfirmed(false); setMessage("Customer ID Google Ads salvo e validado para esta marca.");
-    } catch { setMessage("Não foi possível validar a conexão Google Ads. Tente novamente."); }
+      if (!response.ok || !body.success || !body.connection) { setForbidden(response.status === 403); setMessage({ type: "error", message: body.message || "Não foi possível validar a conexão Google Ads." }); return; }
+      setConnection(body.connection); setForm({ customerId: "" }); setReplaceConfirmed(false); setMessage({ type: "success", message: "Customer ID Google Ads salvo e validado para esta marca." });
+    } catch { setMessage({ type: "error", message: "Não foi possível validar a conexão Google Ads. Tente novamente." }); }
     finally { setSubmitting(false); }
   };
 
@@ -74,9 +76,9 @@ export function GoogleAdsConnectionPanel({ brandId }: { brandId: string }) {
       {connection && <div className="mt-6 grid gap-4 border-y border-divider py-5 sm:grid-cols-2"><div><p className="text-sm font-semibold text-text-muted">Customer ID aplicável</p><p className="mt-1 text-base text-foreground">Google Ads · {connection.customerIdRef}</p></div><div><p className="text-sm font-semibold text-text-muted">Estado</p><p className="mt-1 text-base text-foreground">{connection.status === "validated" ? "Validado pela Connection global" : "Pendente de validação"}</p>{connection.validatedAt ? <p className="mt-1 text-sm text-text-muted">Validado em {formatValidationDate(connection.validatedAt)}</p> : null}</div></div>}
       <label className="mt-6 block text-sm font-semibold text-foreground">Google Ads Customer ID<input inputMode="numeric" autoComplete="off" value={form.customerId} onChange={event => setForm({ customerId: event.target.value })} className={field} placeholder="10 dígitos, com ou sem hífens" aria-describedby="google-ads-id-help"/></label>
       <p id="google-ads-id-help" className="mt-2 text-sm leading-6 text-text-muted">Informe somente o Customer ID da conta anunciante. O valor é normalizado no servidor e não volta completo ao navegador.</p>
+      {validationError && <p role="alert" className="mt-2 text-sm leading-6 text-warning">{validationError}</p>}
       {connection && <label className="mt-6 flex items-start gap-3 border-y border-divider py-4 text-sm leading-6 text-text-muted"><input type="checkbox" checked={replaceConfirmed} onChange={event => setReplaceConfirmed(event.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-module-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30"/>Confirmo que desejo substituir o Customer ID ativo desta marca após nova validação pela Connection global.</label>}
-      {message && <p role={message.startsWith("Customer ID Google Ads salvo") ? "status" : "alert"} aria-live="polite" className={`mt-6 border-y px-4 py-3 text-sm leading-6 ${message.startsWith("Customer ID Google Ads salvo") ? "border-success/35 bg-success-soft text-success" : "border-warning/35 bg-warning-soft text-warning"}`}>{message}</p>}
-      <div className="mt-6 flex flex-wrap gap-3"><button type="button" onClick={() => void submit()} disabled={submitting || (connection !== null && !replaceConfirmed)} className={primaryButton}>{submitting ? "Salvando e validando…" : connection ? "Revalidar e substituir Customer ID" : "Salvar Customer ID"}</button>{connection && <button type="button" onClick={() => { setForm({ customerId: "" }); setReplaceConfirmed(false); setMessage(""); }} disabled={submitting} className={secondaryButton}>Cancelar alteração</button>}</div>
+      <div className="mt-6 flex flex-wrap gap-3"><button type="button" onClick={() => void submit()} disabled={submitting || (connection !== null && !replaceConfirmed)} className={primaryButton}>{submitting ? "Salvando e validando…" : connection ? "Revalidar e substituir Customer ID" : "Salvar Customer ID"}</button>{connection && <button type="button" onClick={() => { setForm({ customerId: "" }); setReplaceConfirmed(false); setMessage(null); setValidationError(""); }} disabled={submitting} className={secondaryButton}>Cancelar alteração</button>}</div>
     </>}
   </section>;
 }

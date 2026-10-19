@@ -929,20 +929,18 @@ test("F · acima do teto do servidor, o aviso vem ANTES do pedido — e a rota u
  *
  * Sistema visual §5.1: INFO → context-accent, WARNING → warning, ERROR →
  * danger. A faixa inline saía sempre na cor de atenção e com role=status.
+ *
+ * 2026-10-18 · SUBSTITUÍDO: todos os avisos no sino (regra do dono). A faixa
+ * do export saiu; a severidade continua indo junto, pelo `type` do aviso, para
+ * o sino (`useNoticeBridge`), e o andamento do export nunca vai para o sino.
  */
-test("F · a faixa do aviso de export usa a cor e o papel da severidade", async () => {
+test("F · o aviso de export vai ao sino com a severidade; a faixa não volta", async () => {
   const pagina = semComentarios(await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8"));
-  const tom = pagina.slice(pagina.indexOf("const TOM_DO_AVISO_DE_EXPORT"), pagina.indexOf("};", pagina.indexOf("const TOM_DO_AVISO_DE_EXPORT")));
-  assert.match(tom, /info: "[^"]*\bborder-context-accent\/40\b[^"]*\btext-context-accent\b[^"]*"/);
-  assert.match(tom, /warning: "[^"]*\bborder-warning\/40\b[^"]*\btext-warning\b[^"]*"/);
-  assert.match(tom, /error: "[^"]*\bborder-danger\/40\b[^"]*\btext-danger\b[^"]*"/);
-  assert.equal(/#[0-9a-f]{3,6}\b|rgb\(/i.test(tom), false, "cor fixa na faixa");
-
-  const faixa = pagina.slice(pagina.lastIndexOf("<div", pagina.indexOf('data-testid="radar-export-notice"')), pagina.indexOf("</div>", pagina.indexOf('data-testid="radar-export-notice"')));
-  assert.match(faixa, /TOM_DO_AVISO_DE_EXPORT\[avisoDeExport\.type\]/, "a faixa não lê a severidade do aviso");
-  assert.match(faixa, /role=\{avisoDeExport\.type === "error" \? "alert" : "status"\}/);
-  assert.equal(/border-warning\/40 bg-warning-soft\/30/.test(faixa), false, "a faixa voltou a ter a cor de atenção fixa");
-  assert.match(faixa, /text-sm/);
+  assert.doesNotMatch(pagina, /data-testid="radar-export-notice"/, "a faixa do export não volta");
+  assert.doesNotMatch(pagina, /TOM_DO_AVISO_DE_EXPORT/);
+  assert.match(pagina, /useNoticeBridge\(\{ notice: avisoDeExport, module: "radar"/, "a severidade vai pelo tipo do aviso");
+  assert.doesNotMatch(pagina, /setAvisoDeExport\(\{ type: "info", message: radarArticleBlueprintProgressNotice/, "andamento do export não vai ao sino");
+  assert.match(pagina, /setNotice\(emAndamento\(radarArticleBlueprintProgressNotice\(job, "exportar"\)\)\)/);
 });
 
 test("F · o card: o silo completo é a PRIMEIRA opção (o padrão é por artigo desde 2026-10-14), em 14px, e o download não vira 'sucesso'", async () => {
@@ -1038,18 +1036,20 @@ test("H · a rota liga as colunas novas com leituras por LOTE, sem coleta e sem 
   assert.equal((rota.match(/lookupSerpCache\(/g) || []).length, 1);
   assert.match(rota, /mode: "observation"/);
   assert.match(rota, /radarPortableExportReadLenses\(/, "a falha do cache precisa ser contida");
-  assert.match(rota, /readDataForSeoTargetCodes\(\)/);
+  /* SUBSTITUÍDO (2026-10-18, SDD localidade da SERP por marca, L2): os códigos são os da marca, resolvidos no servidor. */
+  assert.match(rota, /resolveBrandSerpTarget\(input\.supabase, input\.brandId\)/);
+  assert.doesNotMatch(rota, /readDataForSeoTargetCodes/);
 
   /*
    * A8 (revisão adversarial): os códigos do ALVO de cada keyword, por uma
    * leitura estreita por lote, dentro da leitura contida das lentes.
    */
   const leituraDasLentes = rota.slice(rota.indexOf("const lentes ="), rota.indexOf("const plano ="));
-  assert.match(leituraDasLentes, /const ambiente = readDataForSeoTargetCodes\(\)/);
+  assert.match(leituraDasLentes, /const codigosDaMarca = \(alvoDaMarca \?\? await resolveBrandSerpTarget\(input\.supabase, input\.brandId\)\)\.codes;/);
   // Desde a extração do núcleo (SDD MCP F1), o cliente chega como parâmetro; a rota passa o da sessão.
   assert.match(leituraDasLentes, /readMineradorKeywordTargetCodes\(\s*input\.supabase,\s*input\.brandId,/);
   assert.match(rota, /assembleRadarPortableExport\(\{[\s\S]*?supabase: profile\.supabase,\s*actorUserId: profile\.userId,/);
-  assert.match(leituraDasLentes, /codesFor: keywordId => serpTargetCodesFor\(alvos\.codes, keywordId, ambiente\)/, "o pedido ao cache voltou aos códigos do ambiente");
+  assert.match(leituraDasLentes, /codesFor: keywordId => serpTargetCodesFor\(alvos\.codes, keywordId, codigosDaMarca\)/, "o pedido ao cache voltou aos códigos do ambiente");
   assert.equal((rota.match(/readMineradorKeywordTargetCodes\(/g) || []).length, 1);
 
   /* O silo agrupa pelo item do Radar, e o plano só existe quando pedido. */

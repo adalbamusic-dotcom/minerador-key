@@ -299,7 +299,8 @@ test("detectar (grátis): o grupo captar × atrair, só da marca, sem gravar e s
   assert.equal(dados(saida).paid, false);
   // R4/R5: toda consulta filtra a marca; o payload do ArticleDNA e o analise_semantica inteiro não trafegam.
   for (const consulta of banco.log) {
-    const coluna = consulta.tabela === "minerador_keywords" ? "brand_id" : "marca_id";
+    // 2026-10-18 · `marcas` (a localidade da SERP, SDD localidade por marca) é a própria marca: o filtro é o `id`.
+    const coluna = consulta.tabela === "minerador_keywords" ? "brand_id" : consulta.tabela === "marcas" ? "id" : "marca_id";
     assert.ok(consulta.filtros.some(filtro => filtro.coluna === coluna && filtro.valor === MARCA), `${consulta.tabela} sem filtro de marca`);
     assert.ok(!consulta.colunas.split(",").includes("analise_semantica"), "analise_semantica inteira não trafega");
     assert.ok(!(consulta.tabela === "editorial_artifact_versions" && consulta.colunas.split(",").includes("payload")), "a detecção não lê o payload do ArticleDNA");

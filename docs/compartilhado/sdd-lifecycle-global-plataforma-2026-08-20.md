@@ -155,3 +155,46 @@ aguarda registro publicado elegível no ambiente para smoke visual separado.
   contrato compartilhado e o handler operacional do Minerador estão ativos;
   handlers de exclusão dos demais módulos permanecem dependentes de seus
   contratos próprios.
+
+## Adendo 2026-10-18 — tudo pode ser apagado, em qualquer estado (decisão do dono)
+
+Decisão literal do dono (2026-10-18): **"sobre apagar, tem que poder apagar sim não
+interessa qual seja o estado, isso está no contrato global, tudo tem que poder ser
+apagado e claro com instâncias de seleção e confirmação, e alerta falando o que está
+apagando. mas tem que poder apagar tudo sim"**.
+
+O que passa a valer (as regras acima continuam, salvo o que este adendo substitui):
+
+- **Nenhum estado editorial impede a exclusão.** Consolidado, do plano declarado,
+  aprovado, Pilar, no Radar/Redator/Publicações ou publicado: tudo pode sair, sempre
+  pela seleção, pela prévia e pela confirmação de sempre. A regra de publicação não
+  muda: o publicado (com evidência real) vai para a lixeira de 24 h e só depois é
+  purgado; o não publicado sai de vez.
+- **A prévia é o alerta.** Ela diz, por área, o que sai (keywords, artigos, Silo, par
+  SiloDNA/SiloPage, grafo, itens adiante, etiquetas da cor) e o que fica como histórico,
+  com os nomes; entra no `decisionHash`. A confirmação forte é a da plataforma
+  (`lib/lifecycle/typed-confirmation.ts`).
+- **O que está adiante sai pelo dono da área**, na mesma ação e antes da raiz: no
+  Arquiteto, o "Desfazer Silo"/"Retirar artigo do Silo" de sempre (eventos `rejected`
+  nas versões vigentes; nada de versão é apagado); no Radar, o item da esteira passa a
+  `withdrawn` (handler mínimo `lib/server/radar-item-withdrawal.ts`; a investigação
+  fica). Versões consolidadas continuam `CANONICAL_HISTORY` (não são apagadas; deixam
+  de valer).
+- **Nada parcial.** Os desmontes rodam antes da exclusão da raiz; se um não fechar, a
+  raiz não é excluída e o resultado diz o que foi aplicado e o que não foi.
+- **SUBSTITUÍDO (2026-10-18):** a frase acima "Se um downstream operacional ainda não
+  possuir handler de remoção seguro, a RPC falha fechada antes de qualquer mutação" deixa
+  de ser motivo para recusar a exclusão por estado: o handler mínimo é construído no
+  núcleo da área dona. Enquanto o handler não existir, a recusa diz qual é e o que falta.
+- **Pendência do dono (migration, não escrita):** a keyword cujo artigo tem
+  `content_documents` no Redator ainda é recusada pelo banco
+  (`lifecycle_keyword_deletion_impact` classifica o documento como `DRAFT_DESCENDANT`
+  com `mode = 'blocked'`, e `lifecycle_delete_minerador_keywords` levanta
+  `LIFECYCLE_DRAFT_DESCENDANT_REQUIRES_OWNER`). A migration proposta
+  `20261018120000_documento_do_redator_nao_prende_a_keyword` muda só essa classificação
+  para `CANONICAL_HISTORY` com `behavior = 'preserve'`, sem `mode = 'blocked'` (o
+  documento fica como histórico, como o ArticleDNA). Aplicação pelo dono.
+- Exclusão, restauração e purga continuam fora das ferramentas MCP (`AGENTS.md` §17.1).
+
+Onde está: `docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md` §15.11
+(Arquiteto e Minerador, testes e rollback).

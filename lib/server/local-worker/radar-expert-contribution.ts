@@ -2,9 +2,11 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildRadarExpertOrganizationPrompt, RADAR_EXPERT_ORGANIZATION_SYSTEM_PROMPT, RadarExpertOrganizationSchema, validateRadarExpertOrganization } from "@/lib/radar/expert-organization";
-import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
-import { generateStructuredAI } from "@/lib/server/structured-ai";
+import { buildRadarExpertOrganizationPrompt, RADAR_EXPERT_ORGANIZATION_SYSTEM_PROMPT, RadarExpertOrganizationSchema, validateRadarExpertOrganization, type RadarExpertOrganization } from "@/lib/radar/expert-organization";
+import { createCanonicalAuthorizationRepository } from "@/lib/server/canonical-authorization";
+import { resolveDeepSeekCanonicalConfig, type DeepSeekCanonicalResolution } from "@/lib/server/deepseek-canonical";
+import { createIntegrationRuntimeRepository, recordIntegrationUsageForResource, type RecordIntegrationUsageInput } from "@/lib/server/integrations-runtime";
+import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { runSharedLongSpeech, uploadSharedTemporaryMedia } from "@/lib/server/google-cloud/media-operations";
 import { fetchSharedTelegramFile } from "@/lib/server/telegram/operations";
 import { getExpertBrief, getExpertContribution, markExpertContributionProcessing } from "@/lib/server/telegram/persistence";
@@ -21,7 +23,63 @@ type RadarContributionWorkerDependencies = {
   persistOriginalAsset?: (asset: PreservedTelegramAsset & { job: ExternalProcessingJob }) => Promise<{ uri: string; checksum?: string | null }>;
   transcribe?: (input: { job: ExternalProcessingJob; contribution: Awaited<ReturnType<typeof getExpertContribution>> }) => Promise<SpeechTranscriptResult>;
   organize?: (input: { job: ExternalProcessingJob; contribution: NonNullable<Awaited<ReturnType<typeof getExpertContribution>>>, brief: NonNullable<Awaited<ReturnType<typeof getExpertBrief>>> }) => Promise<Record<string, unknown>>;
+  /** 2026-10-18 · a Connection de IA e o fetch da organização, injetáveis para o teste sem rede; o padrão é o caminho real. */
+  resolveAi?: (input: { actorUserId: string; brandId: string; client?: WorkerClient }) => Promise<DeepSeekCanonicalResolution>;
+  fetchImpl?: typeof fetch;
 };
+
+/**
+ * 2026-10-18 · LIVRO DE USO DA ORGANIZAÇÃO DO ESPECIALISTA.
+ *
+ * O worker paga a IA da plataforma (a cota da marca) e roda fora da sessão:
+ * `recordIntegrationUsage` exige a sessão, então o evento vai por
+ * `recordIntegrationUsageForResource` com o repositório do cliente do worker,
+ * como a melhoria de artigos do Arquiteto (`recordImprovementUsageEvent`). É o
+ * evento do artigo-modelo e das pautas do Radar: `module_operation`, módulo
+ * `radar`, 1 unidade, a resource da Connection resolvida. Cada execução do job
+ * faz no máximo uma chamada, e cada nova tentativa do job (`attempts`) é outra
+ * chamada paga: a chave `<provider>:radar_expert_organization:<job>:<tentativa>[:failed]`
+ * dá um evento a cada uma e torna idempotente regravar a mesma. A falha do
+ * provider registra `failed` sem esconder o erro original; o sucesso, sem o
+ * livro, derruba o job (sucesso só depois do livro gravado). A organização
+ * injetada (`organize`) não chama provider e não registra nada.
+ */
+export type RadarExpertOrganizationCallRecorder = (call: { ok: boolean; error?: unknown }) => Promise<void>;
+
+export function radarExpertOrganizationUsageRecorder(input: {
+  provider: Pick<DeepSeekCanonicalResolution, "provider" | "resource">;
+  job: Pick<ExternalProcessingJob, "id" | "attempts">;
+  contributionId: string;
+  briefId: string;
+  articleId: string | null;
+  record: (event: RecordIntegrationUsageInput) => Promise<unknown>;
+}): RadarExpertOrganizationCallRecorder {
+  return async ({ ok, error }) => {
+    const evento: RecordIntegrationUsageInput = {
+      resource: input.provider.resource,
+      operation: "module_operation",
+      module: "radar",
+      resultStatus: ok ? "succeeded" : "failed",
+      units: 1,
+      ...(ok ? {} : { errorCode: "RADAR_EXPERT_ORGANIZATION_FAILED" }),
+      idempotencyKey: `${input.provider.provider}:radar_expert_organization:${input.job.id}:${input.job.attempts}${ok ? "" : ":failed"}`,
+      metadata: {
+        operationRequestId: input.job.id, operationKind: "radar_expert_organization", attempt: input.job.attempts,
+        contributionId: input.contributionId, briefId: input.briefId, articleId: input.articleId,
+        ...(ok ? {} : { failureCode: error instanceof StructuredAIError ? error.code : null }),
+      },
+    };
+    if (ok) {
+      await input.record(evento);
+      return;
+    }
+    try {
+      await input.record(evento);
+    } catch {
+      /* o erro que o job registra é o do provider, não o do livro */
+    }
+  };
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -154,9 +212,19 @@ export function createRadarExpertContributionWorkerProcessor(input: RadarContrib
     const organization = input.organize
       ? await input.organize({ job, contribution, brief })
       : await (async () => {
-        const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, brandId: contribution.brandId, client });
+        const provider = await (input.resolveAi ?? resolveDeepSeekCanonicalConfig)({ actorUserId: input.actorUserId, brandId: contribution.brandId, client });
         organizer = provider.provider;
-        const generated = await generateStructuredAI({ provider, system: RADAR_EXPERT_ORGANIZATION_SYSTEM_PROMPT, user: buildRadarExpertOrganizationPrompt({ briefTitle: brief.title, questions: brief.questions, radarContext: brief.radarContext, transcript }), schema: RadarExpertOrganizationSchema, maxTokens: 3500 });
+        /* 2026-10-18 · a chamada paga entra no livro de uso pelo cliente do worker (`radarExpertOrganizationUsageRecorder`). */
+        const usageDependencies = { repository: createIntegrationRuntimeRepository(workerClient), authorizationRepository: createCanonicalAuthorizationRepository(workerClient) };
+        const recordCall = radarExpertOrganizationUsageRecorder({ provider, job, contributionId: contribution.id, briefId: contribution.briefId, articleId: brief.articleId, record: event => recordIntegrationUsageForResource(event, usageDependencies) });
+        let generated: RadarExpertOrganization;
+        try {
+          generated = await generateStructuredAI({ provider, system: RADAR_EXPERT_ORGANIZATION_SYSTEM_PROMPT, user: buildRadarExpertOrganizationPrompt({ briefTitle: brief.title, questions: brief.questions, radarContext: brief.radarContext, transcript }), schema: RadarExpertOrganizationSchema, maxTokens: 3500, fetchImpl: input.fetchImpl });
+        } catch (error) {
+          await recordCall({ ok: false, error });
+          throw error;
+        }
+        await recordCall({ ok: true });
         return validateRadarExpertOrganization({ transcript, organization: generated });
       })();
     const validatedOrganization = validateRadarExpertOrganization({ transcript, organization: RadarExpertOrganizationSchema.parse(organization) });

@@ -69,7 +69,6 @@ export function ArchitecturePanel({
   stale,
   scenarioState,
   busy,
-  confirmed,
   canContinueToArticles,
   processChips,
   selectedCluster,
@@ -92,7 +91,7 @@ export function ArchitecturePanel({
   /** Estágio do cenário em uma palavra: processada, parcial, confirmada… */
   scenarioState: string;
   busy: boolean;
-  /** Síntese da última confirmação, quando houver. */
+  /** Síntese da última confirmação, quando houver. 2026-10-18 · não é mais desenhada aqui (o resultado vai para o sino); o campo fica por compatibilidade. */
   confirmed: { silos: number; keywords: number; pending: number } | null;
   /** Um Silo publicado já efetivado também libera a entrada na fase Artigos. */
   canContinueToArticles: boolean;
@@ -587,19 +586,8 @@ export function ArchitecturePanel({
             </div>
           )}
 
-          {confirmed && (
-            <p
-              className={`mt-3 text-sm leading-6 ${confirmed.pending ? "text-warning" : "text-positive-soft"}`}
-              data-testid="architect-architecture-confirmed"
-            >
-              {/* Com pendência, dizer "confirmada" seria contraditório: parte do
-                  cenário continua intocada. */}
-              {confirmed.pending ? "Arquitetura aplicada parcialmente." : "Arquitetura confirmada."}{" "}
-              {confirmed.keywords} associação(ões) confirmada(s)
-              {confirmed.silos ? ` · ${confirmed.silos} Silo(s) confirmado(s)` : ""}
-              {confirmed.pending ? ` · ${confirmed.pending} Silo(s) continuam pendentes e não foram alterados` : ""}
-            </p>
-          )}
+          {/* 2026-10-18 · o resultado da confirmação ("Arquitetura confirmada / aplicada parcialmente") vai só para o sino
+              (regra do dono: todos os avisos no sino); a linha repetida aqui saiu. */}
         </>
       )}
 

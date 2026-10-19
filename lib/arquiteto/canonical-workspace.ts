@@ -857,13 +857,17 @@ export async function undoRemoteSiloCandidate(input: {
   brandId: string;
   territoryRef: string;
   expectedLock: number;
+  /** 2026-10-18 · Silo inteiro: a prévia vigente e o nome do Silo digitado (aditivo; sem eles, o de sempre). */
+  confirmation?: { decisionHash: string; typedName: string } | null;
 }): Promise<CanonicalTerritory> {
   const response = await fetch("/api/arquiteto/workspace", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       brandId: input.brandId,
-      territoryUndos: [{ territoryRef: input.territoryRef, expectedLock: input.expectedLock }],
+      territoryUndos: input.confirmation
+        ? [{ territoryRef: input.territoryRef, expectedLock: input.expectedLock, decisionHash: input.confirmation.decisionHash, typedName: input.confirmation.typedName }]
+        : [{ territoryRef: input.territoryRef, expectedLock: input.expectedLock }],
     }),
   });
   const body = WorkingCopyResponseSchema.parse(await readResponse(response));
@@ -872,6 +876,52 @@ export async function undoRemoteSiloCandidate(input: {
     throw new CanonicalWorkspaceError("QUERY_FAILURE", "O servidor não confirmou o Silo como desfeito.");
   }
   return updated;
+}
+
+/**
+ * 2026-10-18 · A PRÉVIA DO "DESFAZER SILO" (decisão do dono "Manter em duas
+ * etapas"). O mesmo PATCH canônico, com `territoryUndos[].mode: "preview"`: o
+ * servidor lê e confere tudo como na gravação e devolve o que sai — no Silo
+ * inteiro, os artigos (Pilar incluído), o par, o grafo, o território e o grupo,
+ * a frase de cada um, o `decisionHash` e o nome a digitar. Nada é gravado nem
+ * pago. Recusa (publicado, artigo no Radar…) volta como erro, com o motivo.
+ */
+const SiloUndoPreviewResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    persistence: z.literal("NOT_PERSISTED"),
+    territoryUndoPreviews: z.array(z.object({
+      territoryRef: z.string().min(1),
+      scope: z.enum(["suggested", "whole_silo"]),
+      label: z.string(),
+      memberCount: z.number().int().nonnegative(),
+      wholeSilo: z.object({
+        siloName: z.string(),
+        confirmationName: z.string().min(1),
+        decisionHash: z.string().min(1),
+        lines: z.array(z.string()),
+        articles: z.array(z.object({ articleId: z.string(), versionId: z.string(), label: z.string(), role: z.enum(["Pilar", "Suporte"]).nullable() }).passthrough()),
+        pair: z.array(z.object({ kind: z.enum(["silo_dna", "silo_page"]), versionId: z.string(), siloId: z.string().nullable() }).passthrough()),
+        group: z.object({ groupId: z.string(), groupLabel: z.string(), siloId: z.string() }).nullable(),
+      }).passthrough().nullable(),
+    })),
+  }),
+});
+export type RemoteSiloUndoPreview = z.infer<typeof SiloUndoPreviewResponseSchema>["data"]["territoryUndoPreviews"][number];
+
+export async function previewRemoteSiloUndo(input: { brandId: string; territoryRef: string; expectedLock: number }): Promise<RemoteSiloUndoPreview> {
+  const response = await fetch("/api/arquiteto/workspace", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      brandId: input.brandId,
+      territoryUndos: [{ territoryRef: input.territoryRef, expectedLock: input.expectedLock, mode: "preview" }],
+    }),
+  });
+  const body = SiloUndoPreviewResponseSchema.parse(await readResponse(response));
+  const previa = body.data.territoryUndoPreviews.find(item => item.territoryRef === input.territoryRef);
+  if (!previa) throw new CanonicalWorkspaceError("QUERY_FAILURE", "O servidor não devolveu a prévia deste Silo.");
+  return previa;
 }
 
 /**

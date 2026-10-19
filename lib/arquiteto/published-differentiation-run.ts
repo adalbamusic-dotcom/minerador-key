@@ -632,6 +632,8 @@ export function evaluateDifferentiation(input: {
       published: formationKeywordOfPage(page),
       post: "free",
       identity: { url: page.url, canonical: page.canonical, slug: page.slug },
+      // 2026-10-19 · a régua do refazedor com o Assunto na página (T14, régua c).
+      pageSubject: page.pageSubject ?? null,
       candidates: lista.map((item): PublishedPrimarySwapCandidate => ({
         keywordId: item.candidateId, keyword: item.keyword, intent: null, volume: item.adsVolume, kgr: null,
         entity: null, problem: null, isPublished: false, volumeValidated: typeof item.adsVolume === "number" && item.adsVolume > 0,
@@ -769,6 +771,13 @@ export type DifferentiationRunPorts = {
   googleAdsVolumes: (keywords: readonly string[]) => Promise<ReadonlyMap<string, number | null>>;
   /** Pegada das candidatas no cache (4 lentes), lida como a medida lê. */
   readFootprints: (targets: ReadonlyArray<{ keywordId: string; keyword: string }>) => Promise<{ footprints: KeywordSerpFootprint[]; missingLenses: Array<{ keywordId: string; lens: string; reason: string }> }>;
+  /**
+   * 2026-10-18 · Aditivo (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L2): os
+   * códigos da localidade da marca com cidade, resolvidos no servidor. A SERP das
+   * candidatas é coletada (e lida, em `readFootprints`) nesta chave. Ausente =
+   * marca nacional, a chave de sempre (Brasil, "pt").
+   */
+  serpCodes?: { locationCode: number; languageCode: string } | null;
 };
 
 export type DifferentiationRunErrorCode =
@@ -1245,11 +1254,11 @@ export async function executePublishedSearchRound(input: {
     } catch {
       // D6: cache ilegível não proíbe a coleta — o plano já cobre todas as lentes.
       serpOutcome.readFailed = true;
-      faltando = selecionadas.flatMap(item => subjectDiscoverySerpRequests(item.candidate.keyword, null).map(slot => ({ keywordId: item.candidate.candidateId, lens: slot.label })));
+      faltando = selecionadas.flatMap(item => subjectDiscoverySerpRequests(item.candidate.keyword, null, ports.serpCodes).map(slot => ({ keywordId: item.candidate.candidateId, lens: slot.label })));
     }
   }
   for (const item of selecionadas) {
-    const slots = subjectDiscoverySerpRequests(item.candidate.keyword, null);
+    const slots = subjectDiscoverySerpRequests(item.candidate.keyword, null, ports.serpCodes);
     for (const [lensIndex, slot] of slots.entries()) {
       if (!faltando.some(falta => falta.keywordId === item.candidate.candidateId && falta.lens === slot.label)) continue;
       const callId = serpSlotId(item.pageIndex, item.slot, lensIndex);

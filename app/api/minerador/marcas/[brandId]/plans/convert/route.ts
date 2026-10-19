@@ -4,7 +4,7 @@ import { isTenantId } from "@/lib/tenant-routing";
 import { AuthzError, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { requireTenantPermission } from "@/lib/server/tenant-context";
 import { DECLARED_PLAN_ARTICLES_MAX, DECLARED_PLAN_LOCK_CHOICES, DECLARED_PLAN_ROLES, DECLARED_PLAN_SCOPE_MAX } from "@/lib/minerador/declared-plan";
-import { convertLegacySubjectsWithCore, readConversionDraftWithCore } from "@/lib/minerador/subject-conversion-core";
+import { CONVERSION_WITHOUT_GROUP, convertLegacySubjectsWithCore, readConversionDraftWithCore } from "@/lib/minerador/subject-conversion-core";
 import { serverConversionFollowUp } from "@/lib/server/minerador-subject-conversion";
 import { EDITORIAL_GROUP_REFUSAL_STATUS, editorialGroupsClient, editorialGroupsFailure, safeDatabaseCode } from "@/lib/server/editorial-groups";
 
@@ -36,9 +36,12 @@ const RowSchema = z.object({
   lock: z.enum(DECLARED_PLAN_LOCK_CHOICES).nullable().optional(),
 }).strict();
 
+/** 2026-10-18 · o grupo, ou "sem-grupo" (o Assunto anterior sem cor; SDD sdd-assunto-pela-principal-e-volume-2026-10-18 §6.2-d). */
+const GroupIdSchema = z.union([z.string().uuid(), z.literal(CONVERSION_WITHOUT_GROUP)]);
+
 const RequestSchema = z.object({
   mode: z.enum(["preview", "apply"]),
-  groupId: z.string().uuid(),
+  groupId: GroupIdSchema,
   silo: z.object({
     name: z.string().trim().min(1).max(200),
     slug: z.string().trim().max(200).nullable().optional(),
@@ -68,7 +71,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { brandId } = await params;
     if (!isTenantId(brandId)) return editorialGroupsFailure("BRAND_NOT_FOUND", 404, "Marca inválida.", { requestId });
     const groupId = request.nextUrl.searchParams.get("groupId") || "";
-    if (!z.string().uuid().safeParse(groupId).success) return editorialGroupsFailure("INVALID_CONVERSION_READ", 400, "Informe o grupo (groupId).", { requestId });
+    if (!GroupIdSchema.safeParse(groupId).success) return editorialGroupsFailure("INVALID_CONVERSION_READ", 400, "Informe o grupo (groupId) ou “sem-grupo”.", { requestId });
     const profile = await requireCanonicalSessionProfile();
     const context = await requireTenantPermission({ brandId, actorUserId: profile.userId, module: "minerador", action: "view", profile });
     const result = await readConversionDraftWithCore({ brandId: context.brandId, keywordsClient: profile.supabase, groupsClient: editorialGroupsClient(), groupId });

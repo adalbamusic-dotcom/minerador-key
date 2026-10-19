@@ -1,5 +1,14 @@
 # Backlog — Redator
 
+## Defeitos do inventário de botões — 2026-10-18
+
+- [x] Cancelar a caixa de instrução não chama a IA paga.
+- [x] Custo dito antes em "Propor escrita para esta seção", "Melhorar trecho" e "Criar … a partir deste contexto".
+- [x] "Finalizar roteiro/carrossel" salva antes o que está na tela.
+- [x] Desfazer/Refazer só na aba ativa.
+- [ ] **Dono:** conferir na tela, pelos botões (nenhuma chamada paga é necessária para ver o custo e cancelar).
+- [ ] Limpeza adiada pelo dono: "Enviar artigo a Publicações" × "Enviar a Publicações", "Briefing de imagem" × "Registrar briefing", Desfazer × "Restaurar", tela antiga `LegacyWriterPrototype`.
+
 ## "Destino no ar: ative o link" e o carrossel por curto (F5) — 2026-10-14
 
 Autorização do dono: "pode concluir as pendências, vou testar depois". Detalhe em `docs/07-redator/estado-atual.md`. **Validado manualmente: não.**

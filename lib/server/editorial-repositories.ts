@@ -3,10 +3,10 @@ import { hasInlineAnalysisRun, mergeAnalysisRun, splitAnalysisRun } from "@/lib/
 import { radarGoogleResearchIsFinalized } from "@/lib/radar/google-research-write-lock";
 import { compactRadarResearchForRead } from "@/lib/radar/research-read-model";
 import "server-only";
-import type { ArticleDNA, ContentDocument, SiloDNA, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts";
-import { VersionedArticleDNASchema, VersionedSiloDNASchema, VersionStatusEventSchema, ContentDocumentSchema } from "../arquiteto/contracts";
+import type { ArticleDNA, ContentDocument, RadarDocumentOrigin, SiloDNA, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts";
+import { VersionedArticleDNASchema, VersionedSiloDNASchema, VersionStatusEventSchema, ContentDocumentSchema, RadarDocumentOriginSchema } from "../arquiteto/contracts";
 import type { BrandInvitation, OperationalPublication, RadarItem } from "../editorial/operational-flow";
-import { BrandInvitationSchema, CollaboratorRoleSchema, OperationalPublicationSchema, PermissionModuleSchema, RadarItemSchema } from "../editorial/operational-flow";
+import { BrandInvitationSchema, CollaboratorRoleSchema, OperationalPublicationSchema, PermissionModuleSchema, RADAR_WITHDRAWN_STATE, RadarItemSchema } from "../editorial/operational-flow";
 import type { SavedGridView } from "../editorial/data-grid";
 import { SavedGridViewSchema } from "../editorial/data-grid";
 import { firstIssueMessage, rejectedPaths, type IncompatibleRecord } from "../editorial/partial-read.ts";
@@ -300,6 +300,13 @@ function funcaoDeListagemAusente(error: { code?: string | null; message?: string
   return code === "PGRST202" || code === "42883" || String(error.message || "").includes("editorial_content_documents_listing");
 }
 
+/** A função de gravação do documento do Radar ainda não existe no banco (migration 20261019120000 não aplicada). */
+function funcaoDeGravacaoDoDocumentoAusente(error: { code?: string | null; message?: string | null } | null): boolean {
+  if (!error) return false;
+  const code = String(error.code || "");
+  return code === "PGRST202" || code === "42883" || (/editorial_content_document_create_from_radar/.test(String(error.message || "")) && /could not find|does not exist|schema cache/i.test(String(error.message || "")));
+}
+
 function viewDeWorkflowAusente(error: { code?: string | null; message?: string | null } | null): boolean {
   if (!error) return false;
   const code = String(error.code || "");
@@ -342,6 +349,8 @@ export class WorkflowRepository {
     }
     unwrap(data, error); const radar: RadarItem[] = []; const incompatible: IncompatibleRecord[] = [];
     for (const row of data || []) {
+      // 2026-10-18 · o item retirado da operação (Silo/artigo desmontado) fica como histórico: a mesa do Radar não o lista.
+      if (row.state === RADAR_WITHDRAWN_STATE) continue;
       /*
        * safeParse POR LINHA. Antes, `.parse()` dentro do laço derrubava a
        * consulta inteira por causa de um registro em formato anterior — e
@@ -878,6 +887,36 @@ export function documentStatusColumn(status: string) {
   return "approved";
 }
 
+/** 2026-10-19 · a linha confirmada depois do upsert, sem `payload` (ver `ContentDocumentRepository.create`). */
+export const CONTENT_DOCUMENT_ROW_RECEIPT_SELECT = "id,marca_id,article_id,status,content_hash,lock_version,updated_at";
+
+/** 2026-10-19 · o recibo do documento: só os caminhos que o envio ao Redator lê (ver `findRadarReceiptByArticle`). */
+export const CONTENT_DOCUMENT_RADAR_RECEIPT_SELECT = "id,schemaVersion:payload->schemaVersion,radarOrigin:payload->radarOrigin,storedBundleHash:payload->importedContext->dossier->>bundleHash";
+
+export type ContentDocumentRadarReceipt = Pick<ContentDocument, "id" | "schemaVersion"> & {
+  radarOrigin?: RadarDocumentOrigin;
+  /** O `bundleHash` gravado no dossiê do documento (`null` sem dossiê). */
+  storedBundleHash?: string | null;
+};
+
+/**
+ * A linha estreita vira recibo. `radarOrigin` passa pelo contrato de sempre:
+ * fora de forma, ele não existe — e a elegibilidade trata como pacote anterior
+ * (bloqueia em vez de reconhecer a entrega), igual ao documento legado.
+ */
+export function contentDocumentRadarReceiptOfRow(row: Record<string, unknown>): ContentDocumentRadarReceipt | null {
+  const id = typeof row.id === "string" && row.id ? row.id : null;
+  if (!id) return null;
+  const schemaVersion = row.schemaVersion === 2 ? 2 : 1;
+  const origem = RadarDocumentOriginSchema.safeParse(row.radarOrigin);
+  return {
+    id,
+    schemaVersion,
+    ...(origem.success ? { radarOrigin: origem.data } : {}),
+    storedBundleHash: typeof row.storedBundleHash === "string" && row.storedBundleHash ? row.storedBundleHash : null,
+  } as ContentDocumentRadarReceipt;
+}
+
 export class ContentDocumentRepository {
   /**
    * ===== E1 · A LISTAGEM SAI SEM O PACOTE DO RADAR =====
@@ -995,12 +1034,63 @@ export class ContentDocumentRepository {
      * Redator desaparecer do banco no instante em que ela começa.
      */
     const status = document.status === "planejado" ? "planned" : document.status === "em_revisao" ? "in_review" : document.status === "aprovado" ? "approved" : "writing";
-    const { data, error } = await client().from("content_documents").upsert({ id: document.id, marca_id: marcaId, article_id: articleId,
+    /*
+     * 2026-10-19 · A GRAVAÇÃO NÃO DEVOLVE O DOCUMENTO (envio ao Redator em lote,
+     * WifiConecta). O documento de um artigo com investigação grande tem 7 a 11 MB
+     * (quase tudo `importedContext.dossier.bundle.observed`), e `select("*")` no
+     * upsert fazia o MESMO comando reconverter os 11 MB em JSON para a resposta:
+     * medido no banco, a volta custava ~40% do comando, e os três maiores
+     * passavam dos 8 s do `statement_timeout` (57014) em toda tentativa. Agora a
+     * escrita volta sem corpo (return=minimal) e a confirmação é uma leitura
+     * estreita, sem `payload`. Quem confere o conteúdo gravado é o readback do
+     * serviço (`findRadarReceiptByArticle`). A idempotência é a mesma: upsert com
+     * `ignoreDuplicates` e nada sobrescrito.
+     *
+     * 2026-10-19 (2) · O INSERT EM SI PASSA DOS 8 s ACIMA DE ~9 MB. Mesmo sem a
+     * volta, medido em pg_stat_statements: 5,2 s em média e 7,5 s no máximo para
+     * documentos de 5,3 a 8,4 MB (~0,9 s por MB). Os três que falham têm 10 a 11 MB,
+     * e o pacote entra no hash: não há o que podar sem mudar o contrato. A MESMA
+     * escrita passa a ir pela função `editorial_content_document_create_from_radar`
+     * (migration 20261019120000), que tem `statement_timeout` próprio de 60 s só
+     * para ela — o insert, o ON CONFLICT (marca_id, article_id) DO NOTHING e o
+     * recibo estreito são os de sempre. Sem a função no banco (migration não
+     * aplicada), o upsert antigo responde, como antes. Erro da função que não é
+     * "função ausente" (inclusive 57014) sobe como está: repetir a escrita de
+     * 10 MB pelo outro caminho só dobraria a carga.
+     */
+    const viaFuncao = await client().rpc("editorial_content_document_create_from_radar", {
+      p_id: document.id, p_marca_id: marcaId, p_article_id: articleId, p_article_dna_version_id: articleVersionId,
+      p_status: status, p_title: document.title, p_slug: slug, p_payload: document, p_content_hash: hash, p_actor_id: actorId,
+    });
+    if (!viaFuncao.error) {
+      const recibo = viaFuncao.data && typeof viaFuncao.data === "object" ? viaFuncao.data as Record<string, unknown> : null;
+      if (!recibo) throw new PersistenceUnavailableError("O documento do Redator não foi confirmado depois da gravação.", "repository_unavailable");
+      return Object.fromEntries(CONTENT_DOCUMENT_ROW_RECEIPT_SELECT.split(",").map(coluna => [coluna, recibo[coluna] ?? null]));
+    }
+    if (!funcaoDeGravacaoDoDocumentoAusente(viaFuncao.error)) mapPersistenceError(viaFuncao.error);
+    const { error } = await client().from("content_documents").upsert({ id: document.id, marca_id: marcaId, article_id: articleId,
       article_dna_version_id: articleVersionId, status, title: document.title, slug, payload: document, content_hash: hash, created_by: actorId, updated_by: actorId },
-      { onConflict: "marca_id,article_id", ignoreDuplicates: true }).select("*").maybeSingle();
-    if (error) mapPersistenceError(error); if (data) return data;
-    const { data: existing, error: existingError } = await client().from("content_documents").select("*").eq("marca_id", marcaId).eq("article_id", articleId).single();
+      { onConflict: "marca_id,article_id", ignoreDuplicates: true });
+    if (error) mapPersistenceError(error);
+    const { data: existing, error: existingError } = await client().from("content_documents").select(CONTENT_DOCUMENT_ROW_RECEIPT_SELECT).eq("marca_id", marcaId).eq("article_id", articleId).single();
     return unwrap(existing, existingError);
+  }
+
+  /**
+   * 2026-10-19 · O RECIBO DO DOCUMENTO, SEM O DOCUMENTO.
+   *
+   * O envio ao Redator só precisa saber se o documento do artigo existe, com
+   * que id e de que pacote (`schemaVersion` e `radarOrigin`, a mesma leitura de
+   * `resolveRadarImportEligibility` e do readback). Ler o `payload` inteiro —
+   * 7 a 11 MB — para isso convertia o documento todo em JSON duas vezes por
+   * envio. Aqui saem só os caminhos pedidos, mais o `bundleHash` gravado no
+   * dossiê, que o readback confronta com o do pacote entregue.
+   */
+  async findRadarReceiptByArticle(marcaId: string, articleId: string): Promise<ContentDocumentRadarReceipt | null> {
+    const { data, error } = await client().from("content_documents").select(CONTENT_DOCUMENT_RADAR_RECEIPT_SELECT).eq("marca_id", marcaId).eq("article_id", articleId).maybeSingle();
+    if (error) mapPersistenceError(error);
+    if (!data) return null;
+    return contentDocumentRadarReceiptOfRow(data as unknown as Record<string, unknown>);
   }
 
   /*
@@ -1097,6 +1187,9 @@ export class ContentDocumentRepository {
   }
 }
 
+/** Estados do registro antes da exportação: o documento aprovado e entregue os leva a `ready_to_export`. */
+export const PUBLICATION_PRE_EXPORT_STATES: readonly string[] = ["draft", "writing", "awaiting_review", "in_review", "approved"];
+
 export class PublicationProtectionError extends Error {
   constructor(message: string) { super(message); this.name = "PublicationProtectionError"; }
 }
@@ -1148,10 +1241,18 @@ export class PublicationRepository {
     if (error) mapPersistenceError(error); if (!data) throw new OptimisticLockError("A publicação vinculada foi alterada por outra sessão.");
   }
 
+  /*
+   * 2026-10-18 · defeito 1 do inventário: esta função existia sem chamador, e o
+   * registro criado por "Enviar a Publicações" ficava em rascunho para sempre.
+   * Agora é o passo IMPORTAR do próprio handoff (`sendWriterToPublications`),
+   * que já validou o documento aprovado: registro ainda antes da exportação
+   * (rascunho, escrita, revisão ou aprovado) passa a pronto para exportar, e o
+   * "Colocar na fila" de sempre aparece. Fila, exportado e publicado não voltam.
+   */
   async importApproved(articleId: string, marcaId: string, expectedLock: number, actorId: string) {
     const { data: current, error: currentError } = await client().from("publication_records").select("id,marca_id,status,payload,lock_version").eq("article_id", articleId).eq("marca_id", marcaId).maybeSingle();
     if (currentError) mapPersistenceError(currentError);
-    if (!current || current.status !== "approved") return null;
+    if (!current || !PUBLICATION_PRE_EXPORT_STATES.includes(current.status as string)) return null;
     const payload = OperationalPublicationSchema.parse({ ...(current.payload as object), state: "ready_to_export", lockVersion: current.lock_version + 1, updatedAt: new Date().toISOString() });
     const { data, error } = await client().from("publication_records").update({ status: "ready_to_export", payload, updated_by: actorId }).eq("id", current.id).eq("lock_version", expectedLock).select("id").maybeSingle();
     if (error) mapPersistenceError(error);
@@ -1194,8 +1295,15 @@ export class InvitationRepository {
     return BrandInvitationSchema.parse({ ...input, id: row.id, status: "pending", createdAt: isoDate(row.created_at), createdBy: actorId, delivery: "not_sent", tokenId: `persisted:${row.id}` });
   }
 
-  async updateStatus(id: string, status: "cancelled" | "expired") {
-    const { data, error } = await client().from("brand_invitations").update({ status, ...(status === "cancelled" ? { cancelled_at: new Date().toISOString() } : {}) }).eq("id", id).eq("status", "pending").select("id").maybeSingle();
+  /*
+   * 2026-10-18 · defeito da Marca no inventário de botões: "Cancelar" o convite
+   * só mudava a tela. Esta operação já existia (sem chamador); agora é ela que o
+   * botão aciona, pelo PATCH de /api/editorial/invitations. Filtra pela MARCA
+   * (isolamento) e só cancela o pendente. O banco aceita só pending, accepted,
+   * expired e cancelled: suspender e revogar não têm onde ser gravados.
+   */
+  async updateStatus(marcaId: string, id: string, status: "cancelled" | "expired") {
+    const { data, error } = await client().from("brand_invitations").update({ status, ...(status === "cancelled" ? { cancelled_at: new Date().toISOString() } : {}) }).eq("id", id).eq("marca_id", marcaId).eq("status", "pending").select("id").maybeSingle();
     if (error) mapPersistenceError(error); return data;
   }
 

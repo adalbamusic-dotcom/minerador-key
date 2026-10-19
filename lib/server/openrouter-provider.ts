@@ -16,25 +16,38 @@ import type { DeepSeekThinkingMode } from "@/lib/server/deepseek-canonical";
  *   gastar tudo pensando e devolver `finish_reason: "length"` vazio.
  */
 
-export type OpenRouterReasoningEffort = "low" | "medium" | "high";
+export type OpenRouterReasoningEffort = "none" | "low" | "medium" | "high";
 
 /** Folga de tokens de raciocínio somada ao orçamento da resposta, por esforço. */
 export const OPENROUTER_REASONING_HEADROOM: Record<OpenRouterReasoningEffort, number> = {
+  none: 0,
   low: 8_000,
   medium: 16_000,
   high: 32_000,
 };
+
+/**
+ * Modelos que a OpenRouter marca com raciocínio obrigatório recusam `effort: "none"`.
+ * Na lista da plataforma, são as variantes "-pro" da OpenAI.
+ */
+export function openRouterModelRequiresReasoning(model: string | undefined): boolean {
+  return /-pro(?::[a-z0-9._-]+)?$/i.test((model ?? "").trim());
+}
 
 /** Teto de saída do modelo padrão (`max_completion_tokens` publicado pela OpenRouter). */
 export const OPENROUTER_MAX_COMPLETION_TOKENS = 128_000;
 
 /**
  * O modo de Thinking das operações vira esforço de raciocínio.
- * "disabled" não desliga: modelos pro exigem raciocínio, então vira o mínimo
- * seguro. Sem override, vale o esforço médio.
+ * "disabled" desliga (`effort: "none"`), menos nos modelos de raciocínio
+ * obrigatório, em que vira o mínimo seguro ("low"). Sem override, vale o esforço médio.
+ *
+ * SUBSTITUÍDO em 2026-10-18: "disabled" virava sempre "low". No Claude Haiku 5.5
+ * o "low" é pensamento adaptativo: no teste real do artigo-modelo do Radar, 12.274
+ * de 16.000 tokens foram de raciocínio e a resposta saiu cortada nas duas tentativas.
  */
-export function openRouterReasoningEffort(thinkingMode: DeepSeekThinkingMode | undefined): OpenRouterReasoningEffort {
-  if (thinkingMode === "disabled") return "low";
+export function openRouterReasoningEffort(thinkingMode: DeepSeekThinkingMode | undefined, model?: string): OpenRouterReasoningEffort {
+  if (thinkingMode === "disabled") return openRouterModelRequiresReasoning(model) ? "low" : "none";
   if (thinkingMode === "enabled") return "high";
   return "medium";
 }
@@ -60,12 +73,12 @@ export type OpenRouterProviderRequest = {
 };
 
 export function buildOpenRouterChatRequest(input: Omit<OpenRouterProviderRequest, "fetchImpl" | "signal">) {
-  const effort = openRouterReasoningEffort(input.thinkingMode);
+  const effort = openRouterReasoningEffort(input.thinkingMode, input.model);
   const body: Record<string, unknown> = {
     model: input.model,
     messages: [{ role: "system", content: input.system }, { role: "user", content: input.user }],
     max_tokens: openRouterMaxTokens(input.maxTokens, effort),
-    reasoning: { effort, exclude: true },
+    reasoning: effort === "none" ? { effort } : { effort, exclude: true },
   };
   if ((input.responseFormat ?? "json_object") === "json_object") body.response_format = { type: "json_object" };
   return body;

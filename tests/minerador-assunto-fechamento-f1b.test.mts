@@ -75,7 +75,7 @@ test("KeywordDnaPanel só repassa onSubjectSearch ao bloco do Assunto; o workspa
   const dna = functionBody(dnaPanels, "export function KeywordDnaPanel(");
   assert.match(dna, /\n  onSubjectSearch,\n|\r\n  onSubjectSearch,\r\n/);
   assert.match(dna, /onSubjectSearch\?: \(\) => void;/);
-  assert.match(dna, /<SubjectArticleBlock view=\{subjectArticle\} onSubjectSearch=\{subjectArticle\.kind === "subject" \? onSubjectSearch : undefined\} \/>/);
+  assert.match(dna, /<SubjectArticleBlock view=\{subjectArticle\} onSubjectSearch=\{subjectArticle\.kind === "subject" \? onSubjectSearch : undefined\}(?: editor=\{subjectEditor\?\.\(subjectArticle\) \?\? undefined\})? \/>/);
 
   const rowLink = "router.push(subjectSearchLinkHref(brandRef, item.id))";
   const uses = workspace.split(rowLink).length - 1;

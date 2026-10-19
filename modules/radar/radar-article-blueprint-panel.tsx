@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNoticeBridge } from "@/components/global-notice-center";
 /* 2026-10-14 · F5 (SDD silo interligado) · o painel "malha X/Y" do Silo e os links a ativar. */
 import { RadarSiloLinksPanel } from "./radar-silo-links-panel";
 import {
@@ -215,9 +216,11 @@ export const radarArticleBlueprintOrganizeAndExportLabel = (artigos: number) =>
 /** O botão do envio ao Redator quando falta o artigo-modelo. */
 export const RADAR_ARTICLE_BLUEPRINT_ORGANIZE_AND_SEND_LABEL = `Organizar o artigo-modelo e enviar (${radarArticleBlueprintCostLabel(1)})`;
 
-/** O botão da barra de lote (a seleção, ou o Silo dela). */
-export const radarArticleBlueprintBatchLabel = (artigos: number, escopo: "selecao" | "silo" = "selecao") =>
-  `${escopo === "silo" ? "Organizar o artigo-modelo do Silo" : "Organizar o artigo-modelo"} (${artigos}) · ${radarArticleBlueprintCostLabel(artigos)}`;
+/*
+ * 2026-10-18 (dono) · SUBSTITUÍDO: "Organizar o artigo-modelo (N)" e "… do Silo
+ * (N)" eram botões soltos da barra de lote. A função entrou no "Pesquisar e
+ * finalizar (N artigos)" (`lib/radar/research-batch.ts`, `plan.blueprint`).
+ */
 
 /** A confirmação: o custo inteiro, com a passada de correção e o teto por artigo. */
 export function radarArticleBlueprintCostConfirmation(artigos: number): string {
@@ -390,19 +393,7 @@ export function radarArticleBlueprintProgressNotice(job: RadarArticleBlueprintJo
     : `Organizando o artigo-modelo com a IA…${seguir}`;
 }
 
-/**
- * 2026-10-09 · O FIM DO LOTE DA BARRA. A barra organiza "só se faltar"
- * (`ifMissing`): o artigo que já tem o artigo-modelo da investigação vigente
- * não paga de novo, e a rota não diz quais pagaram — a frase não conta
- * chamadas que podem não ter acontecido.
- */
-export function radarArticleBlueprintBatchSummary(resultado: { done: readonly string[]; failed: ReadonlyArray<{ message: string }> }): string {
-  const total = resultado.done.length + resultado.failed.length;
-  if (!resultado.failed.length) {
-    return `Artigo-modelo conferido em ${total} artigo(s): os que não tinham foram organizados e concluídos; os que já tinham o da investigação vigente não pagaram de novo. Já vão ao CSV, ao Redator e ao MCP.`;
-  }
-  return `Artigo-modelo: ${resultado.done.length} pronto(s) e ${resultado.failed.length} com falha. As investigações continuam finalizadas; a primeira falha: ${resultado.failed[0].message} Use o botão de novo para os que faltam.`;
-}
+/* 2026-10-18 · SUBSTITUÍDO: o fim do lote do antigo botão da barra; o desfecho agora é o do "Pesquisar e finalizar" (`radarResearchBatchSummary`). */
 
 /* ============================== a leitura ============================== */
 
@@ -600,6 +591,8 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
   const [confirmando, setConfirmando] = useState(false);
   const [editando, setEditando] = useState(false);
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): o desfecho e a falha de leitura deste painel vão para o sino. */
+  useNoticeBridge({ notice: aviso ? { type: aviso.ok ? "success" : "error", message: aviso.texto } : "", module: "radar", area: "Radar · Artigo-modelo", title: "Radar · Artigo-modelo", fallbackSeverity: "INFO" });
   const [rascunho, setRascunho] = useState<{ h1: string; seoTitle: string; metaDescription: string; promise: string; openingQuestion: string; secoes: SecaoEditada[] } | null>(null);
 
   const aplicar = useCallback((leitura: Leitura) => {
@@ -710,8 +703,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
     {organizandoPelaPagina && <p className="text-sm text-pending" role="status" data-testid="radar-article-blueprint-organizing">
       Organizando o artigo-modelo da SERP com a IA{job && job.position.total > 1 ? ` (${job.position.index} de ${job.position.total})` : ""}… a investigação já está finalizada.
     </p>}
-    {falhaDaPagina && !ocupado && <p className="text-sm text-warning" role="status" data-testid="radar-article-blueprint-job-failed">A investigação está finalizada, mas a IA não organizou o artigo-modelo: {falhaDaPagina}</p>}
-    {aviso && <p className={`text-sm ${aviso.ok ? "text-success" : "text-warning"}`} role="status">{aviso.texto}</p>}
+    {/* 2026-10-18 · a falha da organização pela página e o desfecho das ações deste painel vão para o sino (regra do dono); as linhas saíram. */}
     {!carregando && atual && !organizandoPelaPagina && <RadarArticleBlueprintRulesNotice payload={atual.payload} />}
     {/* 2026-10-02 · a versão mais nova de outro congelamento não é a que vai ao CSV: o painel diz qual vai. */}
     {!carregando && escolha.newestFromOtherFreeze && <p className="text-sm leading-6 text-warning" role="status" data-testid="radar-article-blueprint-other-freeze">
@@ -730,7 +722,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
       <p className="text-sm leading-6 text-pending">Esta investigação tem só uma versão antiga em rascunho (v{escolha.newerDraft.versionNumber}). Os CSVs, o envio ao Redator e o MCP exigem a versão concluída: conclua o rascunho, se ele for o certo, ou organize de novo.</p>
       <button type="button" className={botao} onClick={() => { setRevisarNova(true); setEditando(false); }}>{`Ver o rascunho v${escolha.newerDraft.versionNumber}`}</button>
     </div>}
-    {!carregando && !atual && !escolha.newerDraft && !organizandoPelaPagina && !falhaDaPagina && !semTabela && <p className="text-sm leading-6 text-text-muted" data-testid="radar-article-blueprint-empty">
+    {!carregando && !atual && !escolha.newerDraft && !organizandoPelaPagina && !semTabela && <p className="text-sm leading-6 text-text-muted" data-testid="radar-article-blueprint-empty">
       Ainda não há artigo-modelo organizado para esta investigação (por exemplo, ela foi finalizada antes desta etapa existir). Organize quando quiser: a IA trabalha sobre o pacote congelado.
     </p>}
 

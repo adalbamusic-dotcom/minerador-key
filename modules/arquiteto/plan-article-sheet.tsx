@@ -162,6 +162,14 @@ export type PlanArticleSheetProps = {
    * fechamento de sempre (aditivo).
    */
   onConcluded?: (groupIds: readonly string[]) => Promise<PlanSheetResult | null>;
+  /**
+   * 2026-10-18 · TODOS OS AVISOS NO SINO (regra do dono). O resumo do lote e a
+   * falha das ações das linhas do plano vão para o sino por aqui (na aba, o
+   * `showNotification` de sempre); a faixa abaixo da barra saiu. O resultado
+   * de cada linha continua na própria linha (é o conteúdo da tabela).
+   * Aditivo: ausente, o aviso não sai da lógica (testes que não olham o sino).
+   */
+  onNotify?: (tone: "success" | "warning" | "error" | "info", message: string) => void;
 };
 
 export type PlanSheetResult = { tone: Tone; text: string };
@@ -287,6 +295,11 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   const [summary, setSummary] = useState<PlanSheetResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resumable, setResumable] = useState<ImprovementRun | null>(null);
+  /* 2026-10-18 · o resumo e a falha vão para o sino (um aviso por desfecho); a tela mostra só o andamento, a prévia e a retomada. */
+  const onNotifyRef = useRef(props.onNotify);
+  useEffect(() => { onNotifyRef.current = props.onNotify; });
+  useEffect(() => { if (summary) onNotifyRef.current?.(summary.tone === "neutral" ? "info" : summary.tone, summary.text); }, [summary]);
+  useEffect(() => { if (error) onNotifyRef.current?.("error", error); }, [error]);
   /* 2026-10-14 · "Retirar artigo do Silo" aberto a partir da linha presa (prévia grátis; motivo e confirmação do dono). */
   const [withdrawing, setWithdrawing] = useState<PlanSheetConflict | null>(null);
   /*
@@ -656,13 +669,13 @@ type SheetClassNames = {
  * abaixo da barra de sempre — não é painel fixo de texto.
  */
 export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClassName, controlClassName, dangerButtonClassName }: SheetClassNames & { sheet: PlanArticleSheetController }) {
-  const { brandId, preview, busy, now, error, summary, resumable, withdrawing, sugestoesHref } = sheet;
+  const { brandId, preview, busy, now, resumable, withdrawing, sugestoesHref } = sheet;
   const withdrawRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { if (withdrawing) withdrawRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" }); }, [withdrawing]);
   const previewRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { if (preview) previewRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" }); }, [preview]);
   if (!brandId) return null;
-  if (!preview && !busy && !error && !summary && !resumable && !(withdrawing && withdrawing.siloRef)) return null;
+  if (!preview && !busy && !resumable && !(withdrawing && withdrawing.siloRef)) return null;
   const perigo = dangerButtonClassName ?? buttonClassName;
   const tituloDaPrevia = preview?.action === "processArticles" ? `${PLAN_SHEET_ACTION_LABELS.processArticles} · custo antes`
     : preview?.action === "chooseSwap" ? `${PLAN_SHEET_ACTION_LABELS.swapPrincipal} · escolha a nova principal`
@@ -692,9 +705,7 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
     </div>}
 
     {busy && <OperationProgress label={busy.label} startedAt={busy.startedAt} now={now} done={busy.done} total={busy.total} unit={busy.unit} note="o andamento fica guardado no servidor" testId="architect-plan-sheet-progress" />}
-    {error && <p role="alert" className="mt-2 text-warning">{error}</p>}
-    {/* 2026-10-17 (noite) · sem botão "Fechar" no resumo (pedido do dono: só os 3 botões na área): a próxima ação o substitui. */}
-    {summary && !busy && <p role="status" className={`mt-2 ${TONE_CLASS[summary.tone]}`} data-testid="architect-plan-sheet-summary">{summary.text}</p>}
+    {/* 2026-10-18 · a falha e o resumo do lote saíram daqui: vão para o sino (`onNotify`, regra do dono). SUBSTITUÍDO o resumo na tela de 2026-10-17. */}
 
     {preview && <div ref={previewRef} className="mt-3 rounded-md border border-divider bg-surface-subtle p-3" role="region" aria-label={tituloDaPrevia} data-testid="architect-plan-sheet-preview" data-action={preview.action}>
       <h4 className="font-semibold text-foreground">{tituloDaPrevia}</h4>

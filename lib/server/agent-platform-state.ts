@@ -245,7 +245,8 @@ export async function readPlatformState(brandId: string, options: { group?: Plat
     .select("id,article_id,title,status:payload->>status").eq("marca_id", brandId).order("updated_at", { ascending: false }).limit(TETO.documentos);
   if (documentosLidos.error) mapPersistenceError(documentosLidos.error);
   /* 2026-10-12 · F6 · o item do Radar e o documento herdam o grupo pelo artigo. */
-  const radarLido = ((radar.data || []) as unknown as Row[]);
+  // 2026-10-18 · o item retirado da operação (Silo/artigo desmontado) não conta como artigo no Radar.
+  const radarLido = ((radar.data || []) as unknown as Row[]).filter(row => row.state !== "withdrawn");
   /* F5 · a última APROVADA de cada artigo, pela coluna de status (a prévia de adopt_architect_version confere com o índice canônico). */
   const ultimaAprovadaPorArtigo = new Map<string, Row>();
   for (const versao of artigosRows.rows) {

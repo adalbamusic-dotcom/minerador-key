@@ -19,6 +19,13 @@ import { DataForSeoTargetingError, resolveDataForSeoTargeting } from "../minerad
  * nunca vem do cliente. A localidade entra como o Minerador a passa: a do
  * ambiente. Texto sem keyword (pergunta territorial) e keyword que não é da
  * marca continuam com os códigos do ambiente.
+ *
+ * SUBSTITUÍDO (2026-10-18, SDD `sdd-localidade-serp-por-marca-2026-10-18.md`,
+ * L2): a parte de LOCALIDADE desta regra. A localidade é a da MARCA, resolvida
+ * no servidor pelo `brandId` (`resolveBrandSerpTarget`); o targeting da medição
+ * do Google Ads é da medição de volume, não da SERP, e deixou de decidir o
+ * local. O IDIOMA continua o da A8. Quem chama passa os códigos da marca como
+ * base (`environment`): marca nacional = os do ambiente, como antes.
  */
 
 export type SerpTargetCodes = { locationCode: number; languageCode: string };
@@ -40,12 +47,12 @@ const texto = (value: unknown) => (typeof value === "string" && value.trim() ? v
 export function mineradorSerpTargetCodes(storedTargeting: unknown, environment: SerpTargetCodes): SerpTargetCodes | null {
   const alvo = registro(storedTargeting);
   try {
+    // 2026-10-18 · só o idioma sai daqui; a localidade é a da marca (`environment`, a base resolvida).
     const resolvido = resolveDataForSeoTargeting({
       geoTargetConstants: alvo?.sourceGeoTargetConstants ?? alvo?.geoTargetConstants,
       languageCode: texto(alvo?.languageCode) ?? texto(alvo?.language),
-      locationCode: environment.locationCode,
     });
-    return { locationCode: resolvido.locationCode, languageCode: resolvido.languageCode };
+    return { locationCode: environment.locationCode, languageCode: resolvido.languageCode };
   } catch (error) {
     if (error instanceof DataForSeoTargetingError) return null;
     throw error;

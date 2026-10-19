@@ -3,10 +3,19 @@
 import { CheckCircle2, Loader2, TriangleAlert, X } from "lucide-react";
 import type { EditorialBackgroundTask } from "@/lib/editorial/background-tasks";
 
-export function BackgroundTaskNotice({ tasks, onDismiss }: {
+/*
+ * 2026-10-18 · TODOS OS AVISOS NO SINO (regra do dono). SUBSTITUÍDO o cartão
+ * que ficava com "Tarefa terminada" / "Tarefa interrompida por erro" até ser
+ * fechado (decisão Q2 de 2026-09-24): o cartão mostra só a tarefa em ANDAMENTO
+ * (andamento nunca vai ao sino). O desfecho vai para o sino: a concluída pelo
+ * consumo de sempre, a que falhou pelo aviso do Arquiteto. O código que pinta
+ * concluída e falha fica para o `task.status === "completed"` do contrato antigo.
+ */
+export function BackgroundTaskNotice({ tasks: todas, onDismiss }: {
   tasks: EditorialBackgroundTask[];
   onDismiss: (id: string) => void;
 }) {
+  const tasks = todas.filter(task => task.status === "queued" || task.status === "running");
   if (!tasks.length) return null;
   return <aside className="fixed bottom-14 right-4 z-[70] flex w-[min(390px,calc(100vw-2rem))] flex-col gap-2" aria-live="polite" aria-label="Tarefas do Arquiteto">
     {tasks.map(task => {

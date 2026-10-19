@@ -34,7 +34,8 @@ import { assertEditorialPermission } from "@/lib/server/editorial-authorization"
 import { authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { DataForSeoCanonicalError } from "@/lib/server/dataforseo-canonical";
 import { DataForSeoSerpError } from "@/lib/minerador/dataforseo-serp";
-import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
+import { resolveBrandSerpTarget } from "@/lib/server/brand-serp-target";
+import { brandSerpPlanLocation, withBrandSerpLocation } from "@/lib/marca/brand-serp-location";
 import { IntegrationRuntimeError, integrationRuntimeErrorResponse, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { readbackArticleFormationSerpAssessment, saveArticleFormationSerpAssessment } from "@/lib/server/arquiteto-article-serp-store";
@@ -171,6 +172,8 @@ type SerpOperationDiagnostic = {
    * outro número (o do banco vale) e se a leitura falhou (o pedido vale, como antes).
    */
   knownBeforeSearch?: { checked: number; corrected: number; readFailed: boolean };
+  /** 2026-10-18 · a localidade da SERP desta execução: a da marca, resolvida no servidor (SDD localidade, L2). */
+  serpLocation?: { label: string; source: "brand" | "national"; locationCode: number; readFailed: boolean };
   queries: SerpQueryDiagnostic[];
   extraLensQueries: ExtraLensQueryDiagnostic[];
 };
@@ -367,6 +370,15 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
       return NextResponse.json({ success: false, error: "O grupo contém keywords divergentes entre IDs e objetos." }, { status: 422 });
     }
     /*
+     * 2026-10-18 · A LOCALIDADE DA SERP É A DA MARCA (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L2).
+     * Lida aqui, no servidor, pelo `brandId` do contexto autorizado; o `location`
+     * do pedido não decide a chave, o pedido ao provider, o rótulo do snapshot nem
+     * a impressão digital da guarda. Marca sem localidade válida: os códigos do
+     * ambiente e o rótulo "Brasil", como antes.
+     */
+    const alvoDaMarca = await resolveBrandSerpTarget(pipelineContext.supabase, pipelineContext.brandId);
+    diagnostic.serpLocation = { label: alvoDaMarca.label, source: alvoDaMarca.source, locationCode: alvoDaMarca.codes.locationCode, readFailed: alvoDaMarca.readFailed };
+    /*
      * F5 · GUARDA DE RETRABALHO (SDD 2026-10-12 §10.3). Só onde se pode pagar
      * (plano e execução paga): o artigo cuja coleta paga da MESMA composição já
      * deu parecer inconclusivo sai do plano e da execução — nada é pago por
@@ -375,11 +387,17 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
      */
     const reworkGate = parsed.data.mode === "plan" || !parsed.data.cacheOnly
       ? await serpFormationReworkGate(pipelineContext, {
-        groups: parsed.data.groups,
+        /*
+         * 2026-10-19 · DECISÃO DO DONO: a coleta que só enche o cache de UMA keyword (sem composição — a principal que a
+         * melhoria coleta, `validationGroups`) não entra no registro da guarda de retrabalho nem é barrada por ele: uma
+         * keyword sozinha não converge com nada e saía sempre "inconclusiva", barrando a recoleta para sempre. A guarda
+         * continua valendo para a composição (2+ keywords). O cache de 30 dias continua: só a lente que falta é paga.
+         */
+        groups: parsed.data.groups.filter(group => group.keywordIds.length > 1),
         formationBaseHashes: parsed.data.formationBaseHashes,
         lenses: parsed.data.lenses ?? (parsed.data.device ? [parsed.data.device] : ["default"]),
         resultLimit: parsed.data.resultLimit,
-        location: parsed.data.location,
+        location: alvoDaMarca.label,
         language: parsed.data.language,
         override: parsed.data.reworkOverride,
       })
@@ -404,10 +422,10 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
     const lens = requested.primary;
     const lensLabels = requested.lenses.map(serpCacheLensLabel);
     diagnostic.stage = "connection_resolution";
-    // Os MESMOS códigos que a config resolvida terá (`buildDataForSeoSerpConfig`
-    // lê este leitor), obtidos sem tocar credencial: a chave precisa deles
-    // antes de a quota ser avaliada.
-    const targetCodes = readDataForSeoTargetCodes();
+    // Os MESMOS códigos que a config resolvida terá (a config recebe a localidade
+    // da marca em `resolveDataForSeo`), obtidos sem tocar credencial: a chave
+    // precisa deles antes de a quota ser avaliada.
+    const targetCodes = alvoDaMarca.codes;
 
     const siloCandidateKeywords = parsed.data.siloCandidates.filter(keyword => keyword.siloCandidate?.status === "candidate");
     const potentialKeywords = [...groups.flatMap(group => group.keywords), ...siloCandidateKeywords];
@@ -675,6 +693,8 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
       ...buildSerpPaidPlan(planInput),
       // Aditivo: a tela avisa que o total é o máximo, porque o cache não foi lido.
       ...(diagnostic.cacheReadFailed ? { cacheUnavailable: true } : {}),
+      // 2026-10-18 · aditivo: a prévia diz a localidade da SERP quando a marca tem cidade (nacional: a prévia de antes).
+      ...(brandSerpPlanLocation(alvoDaMarca) ? { location: brandSerpPlanLocation(alvoDaMarca)! } : {}),
     };
 
     // O plano não paga, não resolve credencial e não lê corpo.
@@ -746,12 +766,14 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
     // Cai para `false` se a config resolvida divergir dos códigos da chave.
     let cacheCodesMatch = true;
     const resolveDataForSeo = async (quotaUnits: number): Promise<DataForSeoResolution> => {
-      const resolution = await resolveDataForSeoCompatibilityConfig({
+      const resolvida = await resolveDataForSeoCompatibilityConfig({
         actorUserId: pipelineContext.actorUserId,
         brandId: pipelineContext.brandId,
         client: pipelineContext.supabase,
         quotaUnits,
       });
+      // 2026-10-18 · a config leva a localidade da marca: a chave é o que vai ao provider (SDD localidade §4.3).
+      const resolution = { ...resolvida, config: withBrandSerpLocation(resolvida.config, alvoDaMarca) };
       diagnostic.connectionResolved = true;
       if (!formationSerpCodesMatch(targetCodes, resolution.config) && cacheCodesMatch) {
         /*
@@ -1059,7 +1081,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         const serpInput: SerpSearchInput = {
           brandId: parsed.data.brandId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId, keywordId,
           keywordDnaVersionId: `lens:${label}:${keywordId}`, keyword: item.keyword.keyword,
-          location: parsed.data.location, language: parsed.data.language,
+          location: alvoDaMarca.label, language: parsed.data.language,
           device: item.extraLens.device, operatingSystem: item.extraLens.operatingSystem,
           expectedIntent: "", expectedFormat: "", requiredTopics: [item.keyword.keyword], articleEntities: [],
           resultLimit: parsed.data.resultLimit, version: 1, previousSnapshotId: null,
@@ -1134,7 +1156,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
         const serpInput: SerpSearchInput = {
           brandId: parsed.data.brandId, articleId, articleDnaVersionId, keywordId: keyword.id,
           keywordDnaVersionId: reference.keywordDnaVersionId, keyword: keyword.keyword,
-          location: parsed.data.location, language: parsed.data.language,
+          location: alvoDaMarca.label, language: parsed.data.language,
           // A lente enviada ao provider — e só ela — fica registrada no snapshot.
           device: lens.device, operatingSystem: lens.operatingSystem,
           expectedIntent: normalizeSearchIntent(keyword.intent || keyword.analise_semantica?.intencao_principal), expectedFormat: explicitEditorialFormat(keyword) || "",
@@ -1266,7 +1288,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
             serpInput: {
               brandId: parsed.data.brandId, articleId, articleDnaVersionId, keywordId: keyword.id,
               keywordDnaVersionId: keywordDnaSnapshot.versionReference.versionId, keyword: keyword.keyword,
-              location: parsed.data.location, language: parsed.data.language,
+              location: alvoDaMarca.label, language: parsed.data.language,
               device: lens.device, operatingSystem: lens.operatingSystem,
               expectedIntent: normalizeSearchIntent(keyword.intent || keyword.analise_semantica?.intencao_principal),
               expectedFormat: explicitEditorialFormat(keyword) || "", requiredTopics: [keyword.keyword], articleEntities: [],

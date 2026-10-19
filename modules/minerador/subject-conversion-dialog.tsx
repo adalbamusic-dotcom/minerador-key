@@ -7,7 +7,8 @@ import { EDITORIAL_GROUP_COLOR_LABELS, type EditorialGroupSummary } from "@/lib/
 import { DECLARED_PLAN_SCOPE_MAX, SUBJECT_ENTRY_TITLE_MAX, type DeclaredPlanLockChoice, type DeclaredPlanRole } from "@/lib/minerador/declared-plan";
 import type { DeclaredPlanPreview } from "@/lib/minerador/declared-plan-import-core";
 import type { ConversionDraft, ConversionDraftRow } from "@/lib/minerador/subject-conversion-draft";
-import type { ConversionFollowUpResult } from "@/lib/minerador/subject-conversion-core";
+import { CONVERSION_WITHOUT_GROUP, type ConversionFollowUpResult } from "@/lib/minerador/subject-conversion-core";
+import { InfoHint } from "@/components/info-hint";
 import { CadastroPreview, type DeclaredPlanAppliedIds } from "./subject-cadastro-card";
 
 /**
@@ -49,6 +50,8 @@ export function SubjectConversionDialog({ brandId, groups, onClose, onApplied }:
 }) {
   const ativos = groups.filter(group => group.status === "active");
   const [groupId, setGroupId] = useState(ativos.length === 1 ? ativos[0].id : "");
+  // 2026-10-18 · "Sem grupo" (SDD 2026-10-18 §6.2-d): sem Silo nem plano — o Assunto vai para a keyword escolhida, pelo destino "Keyword (sem Silo)".
+  const semGrupo = groupId === CONVERSION_WITHOUT_GROUP;
   const [draft, setDraft] = useState<ConversionDraft | null>(null);
   const [hasPlan, setHasPlan] = useState(false);
   const [linhas, setLinhas] = useState<Linha[]>([]);
@@ -100,7 +103,7 @@ export function SubjectConversionDialog({ brandId, groups, onClose, onApplied }:
     if (!groupId || !escolhidas.length) return null;
     return {
       groupId,
-      silo: hasPlan ? null : { name: silo.name.trim(), slug: silo.slug.trim() || null, objective: silo.objective.trim() || null },
+      silo: hasPlan || semGrupo ? null : { name: silo.name.trim(), slug: silo.slug.trim() || null, objective: silo.objective.trim() || null },
       rows: escolhidas.map(linha => ({ fromKeywordId: linha.fromKeywordId, articleId: linha.articleId, order: linha.order, role: linha.role, title: linha.title.trim(), keyword: linha.keyword.trim(), scope: linha.scope.trim(), lock: linha.lock })),
     };
   };
@@ -160,10 +163,11 @@ export function SubjectConversionDialog({ brandId, groups, onClose, onApplied }:
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
-              <label htmlFor={ids.group} className="text-sm font-medium text-foreground">Grupo</label>
-              <select id={ids.group} value={groupId} disabled={busy} onChange={event => setGroupId(event.target.value)} className={internalField}>
+              <label htmlFor={ids.group} className="flex items-center gap-1 text-sm font-medium text-foreground">Grupo<InfoHint title="Grupo da conversão" description="A cor do Assunto do formato anterior. “Sem grupo” converte o Assunto que não tem cor: ele passa a morar na keyword escolhida, sem Silo e sem plano (se a keyword for a própria linha, ela só ganha o título e a nota vira os detalhes)." /></label>
+              <select id={ids.group} value={groupId} disabled={busy} onChange={event => setGroupId(event.target.value)} className={internalField} data-subject-conversion-group>
                 <option value="">Escolha o grupo…</option>
                 {ativos.map(group => <option key={group.id} value={group.id}>{EDITORIAL_GROUP_COLOR_LABELS[group.color]} · {group.name}</option>)}
+                <option value={CONVERSION_WITHOUT_GROUP}>Sem grupo</option>
               </select>
             </div>
 
@@ -175,7 +179,7 @@ export function SubjectConversionDialog({ brandId, groups, onClose, onApplied }:
 
             {draft && draft.rows.length ? (
               <>
-                {!hasPlan ? (
+                {semGrupo ? <p className="text-sm text-text-muted" data-subject-conversion-sem-grupo>Sem grupo: cada Assunto passa a morar na keyword escolhida, sem Silo e sem plano.</p> : !hasPlan ? (
                   <div className="grid gap-3 md:grid-cols-3">
                     <div className="flex flex-col gap-1">
                       <label htmlFor={ids.name} className="text-sm font-medium text-foreground">Nome do Silo</label>

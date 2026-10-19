@@ -36,8 +36,8 @@ test("o pedido à OpenRouter não leva temperature e soma a folga do raciocínio
   const body = buildOpenRouterChatRequest({ apiUrl: OPENROUTER_API_URL, apiKey: API_KEY, model: OPENROUTER_DEFAULT_MODEL, system: "s", user: "u", maxTokens: 4_000, thinkingMode: "disabled" });
   assert.equal("temperature" in body, false);
   assert.equal("thinking" in body, false);
-  assert.deepEqual(body.reasoning, { effort: "low", exclude: true });
-  assert.equal(body.max_tokens, 4_000 + OPENROUTER_REASONING_HEADROOM.low);
+  assert.deepEqual(body.reasoning, { effort: "none" });
+  assert.equal(body.max_tokens, 4_000 + OPENROUTER_REASONING_HEADROOM.none);
   assert.deepEqual(body.response_format, { type: "json_object" });
   assert.equal(body.model, OPENROUTER_DEFAULT_MODEL);
 
@@ -48,7 +48,15 @@ test("o pedido à OpenRouter não leva temperature e soma a folga do raciocínio
 });
 
 test("o modo de Thinking vira esforço de raciocínio e o teto do modelo é respeitado", () => {
-  assert.equal(openRouterReasoningEffort("disabled"), "low");
+  /* 2026-10-18 · "disabled" desliga de verdade; só o modelo de raciocínio obrigatório (variante -pro) fica no mínimo "low". */
+  assert.equal(openRouterReasoningEffort("disabled"), "none");
+  assert.equal(openRouterReasoningEffort("disabled", "anthropic/claude-haiku-5.5"), "none");
+  assert.equal(openRouterReasoningEffort("disabled", "openai/gpt-6-luna"), "none");
+  assert.equal(openRouterReasoningEffort("disabled", "openai/gpt-6-luna-pro"), "low");
+  assert.equal(openRouterReasoningEffort("disabled", "openai/gpt-6.1-sol-pro"), "low");
+  const pro = buildOpenRouterChatRequest({ apiUrl: OPENROUTER_API_URL, apiKey: API_KEY, model: "openai/gpt-6.1-sol-pro", system: "s", user: "u", maxTokens: 4_000, thinkingMode: "disabled" });
+  assert.deepEqual(pro.reasoning, { effort: "low", exclude: true });
+  assert.equal(pro.max_tokens, 4_000 + OPENROUTER_REASONING_HEADROOM.low);
   assert.equal(openRouterReasoningEffort("provider_default"), "medium");
   assert.equal(openRouterReasoningEffort(undefined), "medium");
   assert.equal(openRouterReasoningEffort("enabled"), "high");
@@ -119,8 +127,8 @@ test("generateStructuredAI com a Connection OpenRouter valida o JSON pelo Zod e 
     fetchImpl: async (url, init) => {
       urls.push(String(url));
       const body = JSON.parse(String(init?.body));
-      assert.deepEqual(body.reasoning, { effort: "low", exclude: true });
-      assert.equal(body.max_tokens, 500 + OPENROUTER_REASONING_HEADROOM.low);
+      assert.deepEqual(body.reasoning, { effort: "none" });
+      assert.equal(body.max_tokens, 500 + OPENROUTER_REASONING_HEADROOM.none);
       return response({ choices: [{ message: { content: JSON.stringify({ answer: "ok" }) }, finish_reason: "stop" }] });
     },
   });

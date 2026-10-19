@@ -344,6 +344,8 @@ export default function PlatformIntegrationsPanel() {
   const [checkingProvider, setCheckingProvider] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  /* 2026-10-18 · todos os avisos no sino (regra do dono): a falha também vai para o sino; as faixas da tela saíram. */
+  useNoticeBridge({ notice: error, module: "admin", area: "Integrações", title: "Administração · Integrações", fallbackSeverity: "ERROR" });
   useNoticeBridge({ notice, module: "admin", area: "Integrações", title: "Administração · Integrações", fallbackSeverity: "INFO" });
   const [view, setView] = useState<IntegrationView>("overview");
   const [editingProvider, setEditingProvider] = useState<SupportedProviderKey | null>(null);
@@ -569,8 +571,6 @@ export default function PlatformIntegrationsPanel() {
       <p className="max-w-3xl text-sm leading-6 text-foreground/70">Confira quais APIs da Plataforma estão configuradas e prepare suas credenciais sem expor segredos. Nenhum provider é chamado automaticamente ao abrir esta tela.</p>
     </header>
 
-    {error ? <p role="alert" className="rounded-md border border-foreground/20 bg-foreground/5 p-3 text-sm">{error}</p> : null}
-    {notice ? <p role="status" className="rounded-md border border-foreground/20 bg-foreground/5 p-3 text-sm">{notice}</p> : null}
     {loading && !data ? <p className="flex items-center gap-2 text-sm text-foreground/70"><Loader2 className="h-4 w-4 animate-spin" />Carregando dados reais de Integrações…</p> : null}
 
     {data ? <>

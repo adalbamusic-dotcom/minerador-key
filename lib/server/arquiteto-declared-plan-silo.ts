@@ -165,6 +165,18 @@ export async function materializeDeclaredPlanSilo(context: PipelineContext, keyw
         territorio = territorios.find(item => item.territoryRef === escolha.territoryRef)!;
         como = escolha.kind;
       }
+      /*
+       * 2026-10-18 (amarelo da WifiConecta) · O SILO DO PLANO JÁ FECHADO (consolidado, depois do "Concluir formação"):
+       * é ele — nada é criado, confirmado nem religado. Consolidado não recebe membro pela decisão de Silo; a keyword
+       * nova entra nele pelo artigo (a gravação do ArticleDNA de "Concluir formação" ou "Melhorar publicados…"). Antes,
+       * este passo não o via e criava um segundo Silo do plano, vazio.
+       */
+      if (territorio.territory.lifecycleStatus === "consolidated") {
+        if (!grupo.siloId) await linkEditorialGroupSilo(context.supabase, { brandId: context.brandId, actorUserId: context.actorUserId, groupId: grupo.id, siloId: territorio.territoryRef }).catch(() => null);
+        saida.push({ ...base, territoryRef: territorio.territoryRef, territory: como, confirmed: true, pendingConfirmation: null,
+          message: `Silo do plano ${rotulo} (“${plano.siloName}”) já está fechado (SiloDNA e SiloPage): nenhum Silo novo; as keywords novas entram nele pelo artigo (“Concluir formação” ou “Melhorar publicados…”).` });
+        continue;
+      }
       // 2 · confirmar (só com a permissão; nunca muda slug nem identidade)
       let pendente: string | null = null;
       if (territorio.territory.lifecycleStatus === "candidate") {

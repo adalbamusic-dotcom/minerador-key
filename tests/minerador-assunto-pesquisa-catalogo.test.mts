@@ -141,6 +141,12 @@ test("a chave de local do cache de SERP continua 2076 + \"pt\" (constantes do n�
   assert.match(labs, /DATAFORSEO_LABS_LANGUAGE_CODE = "pt";/);
   // A SERP das 4 lentes (a diferenciação coleta por aqui) usa a mesma chave do Resultados.
   const serpRequests = search.slice(search.indexOf("export function subjectDiscoverySerpRequests("), search.indexOf("export function selectSubjectDiscoveryTopUrls("));
-  assert.match(serpRequests, /query: \{ keyword: phrase, locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE, lens, endpoint: "advanced" \}/);
+  /*
+   * 2026-10-18 · SDD `sdd-localidade-serp-por-marca-2026-10-18.md` (L2): sem `codes` (marca
+   * nacional), a chave de sempre, Brasil e "pt"; com `codes` (a marca com cidade, resolvida no
+   * servidor), a da marca. O Labs continua 2076 + "pt".
+   */
+  assert.match(serpRequests, /: \{ keyword: phrase, locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE, lens, endpoint: "advanced" \}/);
+  assert.match(serpRequests, /query: codes\s*\? \{ keyword: phrase, locationCode: codes\.locationCode, languageCode: codes\.languageCode, lens, endpoint: "advanced" \}/);
   assert.doesNotMatch(serpRequests, /geoTargetConstants/, "a UF nunca chega à chave da SERP");
 });

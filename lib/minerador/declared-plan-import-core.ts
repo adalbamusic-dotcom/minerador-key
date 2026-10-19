@@ -41,11 +41,17 @@ import { isKeywordPublished } from "./keyword-lifecycle.ts";
 import { DECLARED_PLAN_LEFTOVER_BLOCKED, classifyDeclaredPlanLeftovers } from "./declared-plan-leftovers.ts";
 import {
   declaredPrincipalReciprocity,
+  guardKeywordSemanticWrite,
   isKeywordSubjectActorId,
+  principalSubjectEntry,
+  principalSubjectStanding,
+  readKeywordSubjectBasis,
   resolveDeclaredPrincipal,
   resolveKeywordSubject,
   setDeclaredPrincipal,
   setKeywordSubject,
+  withKeywordSubjectBasis,
+  type KeywordSubjectBasis,
 } from "./keyword-subject.ts";
 import { PLAN_LOCK_ARCHITECT_HINT, PLAN_LOCK_CHOICE_LABELS, PLAN_LOCK_PUBLISHED_REFUSAL, keywordLockVolume, planLockChange, resolveKeywordPlanLock } from "./keyword-plan-lock.ts";
 import { readSiteOrigin } from "./publication-link.ts";
@@ -54,6 +60,7 @@ import { SUBJECT_CONVERSION_KEY, convertedTitleIndex, isConvertibleLegacySubject
 import { validateSubjectDestination } from "./subject-destination.ts";
 import { SUBJECT_RECOVERED_LABEL, recoverSubjectFromHistory, type RecoveredSubjectRow } from "./subject-recovery.ts";
 import { withdrawForPlanReplacementWithCore } from "./declared-plan-withdraw-core.ts";
+import { constrainSemanticSnapshot, planSemanticSnapshot, semanticSnapshotNeedsReread, semanticSnapshotStillCurrent } from "./semantic-snapshot-guard.ts";
 
 /**
  * ===== CADASTRAR ASSUNTOS — O NÚCLEO ÚNICO (card, rota e MCP) =====
@@ -130,7 +137,14 @@ export type DeclaredPlanGroupChoice =
 export type SubjectCadastroDestination =
   | { kind: "new_silo" }
   | { kind: "existing_silo"; groupId: string }
-  | { kind: "published"; url: string };
+  | { kind: "published"; url: string }
+  /**
+   * 2026-10-18 · "KEYWORD (SEM SILO)" (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.2-a, G1):
+   * o Assunto (título e detalhes) cadastrado DENTRO de uma keyword solta ou publicada, sem plano nem trava.
+   * `basis` diz de onde veio: "zero" (o "Aprovar e enviar" pelo volume 0), "low" (a opção do volume baixo no
+   * painel) ou ausente (cadastro do dono). A mesma porta edita o título e os detalhes depois (painel do KeywordDNA).
+   */
+  | { kind: "keyword"; keywordId?: string | null; keyword?: string | null; basis?: "zero" | "low" | null };
 
 /**
  * 2026-10-13 · CONVERTER O ASSUNTO DO FORMATO ANTERIOR (SDD
@@ -228,6 +242,8 @@ export type DeclaredPlanPreviewArticle = {
   approvedToReview: number;
   /** 2026-10-13 · conversão do formato anterior: a linha-título que deixa de carregar o Assunto. Ausente = cadastro comum. */
   conversion?: { fromKeywordId: string; fromPhrase: string; articleId: string | null } | null;
+  /** 2026-10-18 · aditivo: o Assunto gravado antes desta prévia (antes → depois), no destino "Keyword (sem Silo)" e no publicado. */
+  before?: { title: string | null; details: string | null } | null;
 };
 
 /** 2026-10-13 · Silo existente: acrescentar (o padrão de sempre) ou substituir o plano gravado pelo plano novo inteiro. */
@@ -1217,14 +1233,21 @@ async function classifyPublished(input: {
   if (title.length > SUBJECT_ENTRY_TITLE_MAX) blockers.push(`O título passa de ${SUBJECT_ENTRY_TITLE_MAX} caracteres.`);
   if (details && details.length > DECLARED_PLAN_SCOPE_MAX) blockers.push(`Os detalhes passam de ${DECLARED_PLAN_SCOPE_MAX} caracteres.`);
   const atual = pagina ? resolveKeywordSubject(paginaSemantic) : null;
-  if (atual?.declared && atual.entry && chave(atual.entry.title) !== chave(title)) blockers.push(`A página já tem o Assunto "${atual.entry.title}": um Assunto por artigo. Use o mesmo título para acrescentar keywords.`);
+  /*
+   * 2026-10-18 · SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.2-a (G2). SUBSTITUI "um Assunto por
+   * artigo: use o mesmo título": o título do Assunto da página pode ser CORRIGIDO aqui (a prévia diz antes → depois;
+   * continua um Assunto por página). E a página pode virar o próprio Assunto SEM linha de reforço (a linha sem keyword).
+   */
+  if (atual?.declared && atual.entry && chave(atual.entry.title) !== chave(title) && title) notices.push(`O título do Assunto da página passa de “${atual.entry.title}” para “${title}” (correção; continua um Assunto por página).`);
   if (atual?.plan) blockers.push("A keyword desta página carrega um artigo de plano de Silo: acrescente pelo destino \"Silo existente\".");
+  const soOAssunto = parsed.articles.length > 0 && parsed.articles.every(article => !article.principal);
 
   const articles: DeclaredPlanPreviewArticle[] = parsed.articles.map((article, index) => {
     const problems: string[] = [];
     const row = article.principal ? liveByKey.get(chave(article.principal)) ?? null : null;
     let state: DeclaredPlanPrincipalState = row ? "existing_without_volume" : "new";
-    if (!article.principal) { state = "missing"; problems.push(`Linha ${index + 1}: falta a keyword que reforça a página.`); }
+    // 2026-10-18 · sem nenhuma keyword nas linhas: a própria página vira o Assunto (sem reforço agora; o Arquiteto reforça).
+    if (!article.principal) { state = "missing"; if (!soOAssunto) problems.push(`Linha ${index + 1}: falta a keyword que reforça a página.`); }
     else if (row && pagina && row.id === pagina.id) problems.push(`Linha ${index + 1}: "${row.keyword}" é a própria keyword da página publicada (protegida); escreva a keyword que vai reforçá-la.`);
     else if (row && row.status && /publicad|published/i.test(row.status)) { state = "published"; problems.push(`Linha ${index + 1}: "${row.keyword}" já tem página própria publicada.`); }
     blockers.push(...problems);
@@ -1235,9 +1258,12 @@ async function classifyPublished(input: {
       lock: null,
       problems,
       approvedToReview: 0,
+      ...(index === 0 && atual?.declared ? { before: { title: atual.entry?.title ?? pagina?.keyword ?? null, details: atual.entry?.details ?? atual.note ?? null } } : {}),
     };
   });
-  if (pagina) notices.push(`Destino: a página publicada "${pagina.keyword}" — URL, slug, canonical e principal não mudam (AGENTS §11). As keywords entram como sustentações do Assunto dela e chegam ao Arquiteto pelo caminho de "Melhorar publicados".`);
+  if (pagina) notices.push(soOAssunto
+    ? `Destino: a página publicada "${pagina.keyword}" vira o próprio Assunto (sem keyword de reforço nesta linha). URL, slug e canonical não mudam (AGENTS §11); o reforço vem do Arquiteto, em "Melhorar publicados".`
+    : `Destino: a página publicada "${pagina.keyword}" — URL, slug, canonical e principal não mudam (AGENTS §11). As keywords entram como sustentações do Assunto dela e chegam ao Arquiteto pelo caminho de "Melhorar publicados".`);
   if (articles.some(article => article.principal.keywordId)) notices.push("Keyword já aprovada não recebe a origem do cadastro (para não tirar a aprovação): o Arquiteto ainda pode usá-la pela SERP.");
 
   const uniqueBlockers = [...new Set(blockers)];
@@ -1282,6 +1308,200 @@ async function readSiteOrigins(client: Client, brandId: string): Promise<Map<str
     }
     if (data.length < PAGE) return out;
   }
+}
+
+/* ============================================ destino: keyword (sem Silo) */
+
+/*
+ * 2026-10-18 · "KEYWORD (SEM SILO)" — SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md`
+ * §6.2-a/b/c/e (G1, G5). O Assunto mora na própria keyword (solta ou publicada),
+ * sem plano e sem trava: o título (padrão: o texto da keyword) e os detalhes. É o
+ * MESMO núcleo do card — chamado pelo card (destino "Keyword (sem Silo)"), pelo
+ * painel do KeywordDNA ("Editar Assunto", "Usar como Assunto do artigo"), pelo
+ * "Aprovar e enviar" (volume 0) e pela conversão "Sem grupo". Um gravador só
+ * (`setKeywordSubject`), com compare-and-swap e releitura; o bloco de origem
+ * (`keyword_subject_basis`) entra na mesma escrita. Nada pago; nada apagado.
+ */
+type KeywordSubjectRow = { id: string; keyword: string; status: string | null; group_id: string | null; volume_search: number | null; volume_source: string | null; analise_semantica: Semantic };
+
+export const KEYWORD_DESTINATION_PLAN_REFUSAL = "A keyword carrega um artigo de plano de Silo: edite o Assunto pelo destino “Silo existente” (o painel faz isso sozinho)." as const;
+
+async function readKeywordSubjectRow(client: Client, brandId: string, keywordId: string): Promise<KeywordSubjectRow | null> {
+  const result = await client.from("minerador_keywords").select("id,keyword,status,group_id,volume_search,volume_source,analise_semantica").eq("brand_id", brandId).eq("id", keywordId).is("deleted_at", null).maybeSingle();
+  if (result.error) throw result.error;
+  const row = result.data as Record<string, unknown> | null;
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    keyword: typeof row.keyword === "string" ? row.keyword : "",
+    status: typeof row.status === "string" ? row.status : null,
+    group_id: typeof row.group_id === "string" ? row.group_id : null,
+    volume_search: typeof row.volume_search === "number" ? row.volume_search : null,
+    volume_source: typeof row.volume_source === "string" ? row.volume_source : null,
+    analise_semantica: asRecord(row.analise_semantica),
+  };
+}
+
+type KeywordSubjectPlanned = {
+  row: KeywordSubjectRow | null;
+  entry: SubjectEntry | null;
+  before: { title: string | null; details: string | null } | null;
+  basis: KeywordSubjectBasis | null;
+  conversion: { fromKeywordId: string; fromPhrase: string; articleId: string | null } | null;
+  change: "new" | "changed" | "unchanged";
+  blockers: string[];
+  notices: string[];
+};
+
+async function planKeywordSubject(input: {
+  brandId: string;
+  actorUserId: string;
+  keywordsClient: Client;
+  parsed: ParsedDeclaredPlan;
+  destination: { kind: "keyword"; keywordId?: string | null; keyword?: string | null; basis?: "zero" | "low" | null };
+  conversions?: readonly SubjectConversionRequest[] | null;
+  now: string;
+}): Promise<KeywordSubjectPlanned> {
+  const blockers: string[] = [];
+  const notices: string[] = [];
+  // O painel manda o id; o card manda o texto da keyword (a da linha), lido na marca ativa.
+  const texto = (input.destination.keyword ?? input.parsed.articles[0]?.principal ?? "").trim();
+  const porTexto = !input.destination.keywordId && texto ? (await readLiveRows(input.keywordsClient, input.brandId)).find(row => chave(row.keyword) === chave(texto)) ?? null : null;
+  const idAlvo = typeof input.destination.keywordId === "string" && input.destination.keywordId.trim() ? input.destination.keywordId.trim() : porTexto?.id ?? null;
+  const row = idAlvo ? await readKeywordSubjectRow(input.keywordsClient, input.brandId, idAlvo) : null;
+  if (!row && texto && !input.destination.keywordId) blockers.push(`“${texto}” não existe nesta marca: o destino “Keyword (sem Silo)” cadastra o Assunto numa keyword que já existe.`);
+  if (!row) blockers.push("A keyword não existe nesta marca (excluída ou de outra marca).");
+  if (input.parsed.articles.length !== 1) blockers.push("Um Assunto por keyword: o destino “Keyword (sem Silo)” recebe uma linha só.");
+  const article = input.parsed.articles[0];
+  const atual = row ? resolveKeywordSubject(row.analise_semantica) : null;
+  if (atual?.plan) blockers.push(KEYWORD_DESTINATION_PLAN_REFUSAL);
+  const padrao = row ? principalSubjectEntry(row.keyword, atual ?? { entry: null, note: null }) : null;
+  const title = (article?.subject || padrao?.title || "").replace(/\s+/g, " ").trim();
+  // Sem detalhes escritos: os do Assunto gravado (ou a nota antiga do formato anterior).
+  const details = article?.scope ? article.scope.replace(/\s+/g, " ").trim() : !atual?.entry ? padrao?.details ?? null : null;
+  if (!title) blockers.push("Escreva o título do Assunto (padrão: o texto da keyword).");
+  if (title.length > SUBJECT_ENTRY_TITLE_MAX) blockers.push(`O título passa de ${SUBJECT_ENTRY_TITLE_MAX} caracteres.`);
+  if (details && details.length > DECLARED_PLAN_SCOPE_MAX) blockers.push(`Os detalhes passam de ${DECLARED_PLAN_SCOPE_MAX} caracteres.`);
+  if (article?.principal && row && chave(article.principal) !== chave(row.keyword)) blockers.push(`A linha traz outra keyword (“${article.principal}”): no destino “Keyword (sem Silo)” o Assunto mora em “${row.keyword}”.`);
+
+  // A régua do volume (§6.1): o pedido de origem precisa bater com o volume medido agora.
+  let basis: KeywordSubjectBasis | null = null;
+  if (row) {
+    const standing = principalSubjectStanding(row, new Date(input.now));
+    const pedido = input.destination.basis ?? null;
+    if (pedido === "zero" && standing.volumeState !== "zero") blockers.push(`“${row.keyword}” não está com volume 0: ${standing.sentence}`);
+    if (pedido === "low" && standing.volumeState !== "low" && standing.volumeState !== "with_volume") blockers.push(`“Usar como Assunto do artigo” vale para volume baixo ou com volume: ${standing.sentence}`);
+    if (standing.outOfScope === "silo_page" && pedido) blockers.push(standing.sentence);
+    const gravada = readKeywordSubjectBasis(row.analise_semantica);
+    basis = gravada ?? { kind: pedido ? "principal_volume" : "cadastro", volumeState: pedido, measuredAt: pedido ? standing.measuredAt : null, decidedBy: input.actorUserId, at: input.now };
+  }
+
+  // Conversão "Sem grupo" (§6.2-d): a linha-título que deixa o Assunto para esta keyword.
+  let conversion: KeywordSubjectPlanned["conversion"] = null;
+  const pedida = (input.conversions ?? [])[0] ?? null;
+  if (pedida && row && pedida.fromKeywordId !== row.id) {
+    const titulo = await readKeywordSubjectRow(input.keywordsClient, input.brandId, pedida.fromKeywordId);
+    if (!titulo) blockers.push("A linha-título a converter não existe mais nesta marca.");
+    else if (!isConvertibleLegacySubject(titulo.analise_semantica)) blockers.push(`“${titulo.keyword}” não é um Assunto do formato anterior sem plano; nada a converter.`);
+    else if (atual?.declared && !atual.entry) blockers.push(`“${row.keyword}” já é um Assunto do formato anterior; escolha outra keyword.`);
+    else {
+      conversion = { fromKeywordId: titulo.id, fromPhrase: titulo.keyword, articleId: pedida.articleId ?? null };
+      notices.push(`O Assunto sai da linha-título “${titulo.keyword}” e passa a morar em “${row.keyword}”; a linha-título fica arquivada (não vai para a lixeira).`);
+    }
+  }
+
+  const entry: SubjectEntry | null = title ? { title, source: "cadastro", ...(details ? { details } : {}) } : null;
+  const before = atual?.declared ? { title: atual.entry?.title ?? (row?.keyword ?? null), details: atual.entry?.details ?? atual.note ?? null } : null;
+  const gravadaConversao = row ? readSubjectConversion(row.analise_semantica) : null;
+  const mesmaConversao = !conversion || Boolean(gravadaConversao && gravadaConversao.fromKeywordId === conversion.fromKeywordId && gravadaConversao.articleId === conversion.articleId);
+  const change: KeywordSubjectPlanned["change"] = !atual?.declared ? "new" : atual.entry && entry && sameSubjectEntry(atual.entry, entry) && mesmaConversao ? "unchanged" : "changed";
+  if (before && entry && change === "changed" && before.title !== entry.title) notices.push(`O título do Assunto passa de “${before.title}” para “${entry.title}”.`);
+  if (atual?.declared && !atual.entry && row) notices.push(`“${row.keyword}” era um Assunto do formato anterior: ganha o título${atual.note ? " e a nota antiga vira os detalhes" : ""} (a frase continua a mesma).`);
+  if (row && isKeywordPublished({ status: row.status, semantic: row.analise_semantica })) notices.push(`“${row.keyword}” é a página publicada: URL, slug e canonical não mudam (AGENTS §11).`);
+  if (row?.status === "aprovado" && change !== "unchanged") notices.push("A keyword aprovada volta a “Em revisão” (o Assunto entra no pacote aprovado); “Reaprovar” só pede a Lógica.");
+  return { row, entry, before, basis, conversion, change, blockers, notices };
+}
+
+async function keywordSubjectCadastro(input: {
+  brandId: string;
+  actorUserId: string;
+  keywordsClient: Client;
+  mode: "preview" | "apply";
+  parsed: ParsedDeclaredPlan;
+  destination: { kind: "keyword"; keywordId?: string | null; keyword?: string | null; basis?: "zero" | "low" | null };
+  conversions?: readonly SubjectConversionRequest[] | null;
+  now: string;
+}): Promise<DeclaredPlanImportResult> {
+  const plano = await planKeywordSubject(input);
+  const { row, entry, before, change } = plano;
+  const blockers = [...new Set(plano.blockers)];
+  const publicada = Boolean(row && isKeywordPublished({ status: row.status, semantic: row.analise_semantica }));
+  const article: DeclaredPlanPreviewArticle = {
+    order: 1, role: "Suporte", scope: entry?.details ?? "", line: 1, title: entry?.title ?? "", shape: "cadastro", change,
+    subject: { phrase: entry?.title ?? "", state: row ? (resolveKeywordSubject(row.analise_semantica).declared ? "existing_subject" : publicada ? "published" : "existing") : "new", label: row ? `Assunto dentro da keyword “${row.keyword}” (sem Silo)` : "keyword não encontrada", keywordId: row?.id ?? null, status: row?.status ?? null, groupId: row?.group_id ?? null },
+    principal: { phrase: row?.keyword ?? null, state: "same_as_subject", label: "a própria keyword (sem plano, sem trava)", keywordId: row?.id ?? null, status: row?.status ?? null, volumeValidated: false, volume: row?.volume_search ?? null, groupId: row?.group_id ?? null },
+    lock: null,
+    problems: blockers,
+    approvedToReview: row?.status === "aprovado" && change !== "unchanged" ? 1 : 0,
+    before,
+    ...(plano.conversion ? { conversion: plano.conversion } : {}),
+  };
+  const preview: DeclaredPlanPreview = {
+    destination: { kind: "keyword", url: null, publishedKeyword: row && publicada ? { keywordId: row.id, keyword: row.keyword } : null },
+    silo: { heading: null, name: null, slug: null, rawSlug: null, objective: null },
+    siloPlan: null,
+    unparsed: input.parsed.unparsed,
+    refusals: [],
+    notices: [...new Set(plano.notices)],
+    group: { mode: "new", name: "", color: null },
+    articles: [article],
+    keptArticles: [],
+    leftovers: [],
+    supports: { total: 0, withoutGroup: 0, inOtherGroup: 0 },
+    approvedToReview: article.approvedToReview,
+    blockers,
+    canApply: blockers.length === 0 && Boolean(row && entry),
+    planHash: null,
+  };
+  if (input.mode === "preview") return { ok: true, mode: "preview", ...preview };
+  if (!preview.canApply || !row || !entry) return { ok: false, code: "PLAN_BLOCKED", reason: "O cadastro tem impedimentos: corrija e gere a prévia de novo.", blockers };
+  const base = { ok: true as const, mode: "apply" as const, destination: preview.destination, silo: preview.silo, siloPlan: null, leftovers: [], groupId: row.group_id ?? "", planVersion: 0, createdSubjectIds: [], createdPrincipalIds: [], groupAssignment: { moved: 0, unchanged: 0, refused: 0 }, supportsStamped: 0 };
+  if (change === "unchanged") {
+    return { ...base, articles: [{ order: 1, title: entry.title, subjectKeywordId: row.id, principalKeywordId: row.id, outcome: "unchanged", reason: "igual ao gravado: nada é regravado e não volta a “Em revisão”" }], reciprocityConfirmed: 1, failed: 0, notices: preview.notices };
+  }
+  const atual = resolveKeywordSubject(row.analise_semantica);
+  const escrito = setKeywordSubject(row.analise_semantica, { note: atual.note, destinationUrl: atual.destinationUrl, destinationCheck: atual.destinationCheck, entry, actorId: input.actorUserId, changedAt: input.now, origin: "review" });
+  if (!escrito.ok) return { ok: false, code: "PLAN_BLOCKED", reason: escrito.reason };
+  let semantic = plano.basis ? withKeywordSubjectBasis(escrito.semantic, plano.basis) : escrito.semantic;
+  if (plano.conversion) {
+    const convertida = setSubjectConversion(semantic, { conversion: plano.conversion, actorId: input.actorUserId, changedAt: input.now });
+    if (!convertida.ok) return { ok: false, code: "PLAN_BLOCKED", reason: convertida.reason };
+    semantic = convertida.semantic;
+  }
+  const guarded = guardKeywordSemanticWrite(row.analise_semantica, semantic);
+  if (!guarded.ok) return { ok: false, code: "PLAN_BLOCKED", reason: guarded.reason };
+  // Compare-and-swap: só grava se o DNA ainda for o lido nesta aplicação. 2026-10-19 · por chave, com a URL limitada
+  // (o DNA inteiro na URL passava de ~25 kB nas páginas publicadas e o gateway recusava): `semantic-snapshot-guard.ts`.
+  const snapshot = planSemanticSnapshot(row.analise_semantica);
+  const aindaIgual = semanticSnapshotNeedsReread(row.analise_semantica, snapshot)
+    ? await semanticSnapshotStillCurrent(input.keywordsClient, { brandId: input.brandId, keywordId: row.id, semantic: row.analise_semantica })
+    : true;
+  const update = aindaIgual
+    ? await constrainSemanticSnapshot(input.keywordsClient.from("minerador_keywords").update({ analise_semantica: guarded.semantic })
+      .eq("id", row.id).eq("brand_id", input.brandId).is("deleted_at", null), row.analise_semantica, snapshot).select("id")
+    : { data: [], error: null };
+  if (update.error) throw update.error;
+  const gravou = ((update.data || []) as Array<{ id: unknown }>).some(item => String(item.id) === row.id);
+  const relido = gravou ? await readKeywordSubjectRow(input.keywordsClient, input.brandId, row.id) : null;
+  const releitura = relido ? resolveKeywordSubject(relido.analise_semantica) : null;
+  const confirmado = Boolean(releitura?.declared && releitura.entry && sameSubjectEntry(releitura.entry, entry));
+  return {
+    ...base,
+    articles: [{ order: 1, title: entry.title, subjectKeywordId: row.id, principalKeywordId: row.id, outcome: confirmado ? "declared" : "failed", reason: confirmado ? null : gravou ? "A releitura não encontrou o Assunto gravado." : "A keyword mudou entre a prévia e a gravação; nada foi gravado. Gere a prévia de novo." }],
+    reciprocityConfirmed: confirmado ? 1 : 0,
+    failed: confirmado ? 0 : 1,
+    notices: preview.notices,
+  };
 }
 
 /* ===================================================================== entrada */
@@ -1347,6 +1567,8 @@ export async function importDeclaredPlanWithCore(input: {
     inFlight.add(lockKey);
   }
   try {
+    // 2026-10-18 · "Keyword (sem Silo)": o Assunto na própria keyword, sem plano, sem trava e sem grupo (SDD 2026-10-18 §6.2-a).
+    if (input.destination?.kind === "keyword") return await keywordSubjectCadastro({ brandId, actorUserId, keywordsClient: input.keywordsClient, mode: input.mode, parsed, destination: input.destination, conversions: input.conversions ?? null, now });
     const substituir = input.planMode === "replace";
     const classified = await classify({ brandId, keywordsClient: input.keywordsClient, groupsClient: input.groupsClient, parsed, group: input.group, destination: input.destination ?? null, brandSiteUrl: input.brandSiteUrl ?? null, conversions: input.conversions ?? null, replace: substituir, now });
     if ("ok" in classified) return classified;
@@ -1687,11 +1909,14 @@ async function applyPublished(input: {
 
   // 2 — as keywords das linhas: sustentações do Assunto da página, pelo núcleo da Pesquisa por Assunto (origem `cadastro`).
   const items = classified.parsed.articles.filter(article => article.principal).map(article => ({ keyword: article.principal!, origins: ["cadastro" as const], evidence: [] as string[] }));
-  const importado = await importSubjectDiscoveryWithCore({
-    brandId, actorUserId, supabase: keywordsClient as SupabaseClient,
-    request: { importRequestId: input.importRequestId, searchId: input.importRequestId, subjectKeywordId: pagina.id, subjectPhrase: alvoPublicado.title.slice(0, 200), items },
-    now,
-  });
+  // 2026-10-18 · só o Assunto da página (sem linha de reforço): nada a importar (SDD 2026-10-18 §6.2-a).
+  const importado = items.length
+    ? await importSubjectDiscoveryWithCore({
+      brandId, actorUserId, supabase: keywordsClient as SupabaseClient,
+      request: { importRequestId: input.importRequestId, searchId: input.importRequestId, subjectKeywordId: pagina.id, subjectPhrase: alvoPublicado.title.slice(0, 200), items },
+      now,
+    })
+    : { ok: true as const, rows: [] as Array<{ keywordId: string | null; outcome: string; reason: string | null }>, notAffected: [] as Array<{ keyword: string; reason: string | null }> };
   if (!importado.ok) return { ok: false, code: "PLAN_BLOCKED", reason: importado.reason };
 
   // 3 — a cor: nas keywords das linhas e na página (se ela ainda não tem grupo).
@@ -1708,7 +1933,9 @@ async function applyPublished(input: {
   // 4 — releitura: o Assunto da página com o título.
   const relido = resolveKeywordSubject((await readSemantics(keywordsClient, brandId, [pagina.id])).get(pagina.id) ?? {});
   const confirmado = relido.declared && relido.entry?.title === alvoPublicado.title;
-  const results: DeclaredPlanApplyArticle[] = importado.rows.map((row, index) => ({
+  const results: DeclaredPlanApplyArticle[] = !importado.rows.length
+    ? [{ order: 1, title: alvoPublicado.title, subjectKeywordId: pagina.id, principalKeywordId: null, outcome: confirmado ? "declared" : "failed", reason: confirmado ? null : "A releitura não encontrou o Assunto na página publicada." }]
+    : importado.rows.map((row, index) => ({
     order: index + 1,
     title: alvoPublicado.title,
     subjectKeywordId: pagina.id,

@@ -2,7 +2,9 @@ import { allocateReinforcementChoices } from "./reinforcement-allocation.ts";
 import { intentComparisonKey, type KeywordDnaSignals } from "./keyword-dna-signals.ts";
 import { classifySlugFit } from "./published-slug-fit.ts";
 import { normalizeKeyword } from "../minerador/keyword-import-core.ts";
+import { normalizeBrandSerpLocationText, type BrandSerpTerritory } from "../marca/brand-serp-location.ts";
 import type { GoogleAdsHistoricalMetric } from "../google/ads/contracts.ts";
+import { principalSubjectStanding, resolveKeywordSubject, subjectPhraseOf } from "../minerador/keyword-subject.ts";
 
 export const ARTICLE_IMPROVEMENT_VERSION = 1;
 export const ARTICLE_IMPROVEMENT_LABEL = "Melhorar publicados e formar Assuntos";
@@ -20,6 +22,12 @@ export type ImprovementKeyword = {
   /** Já medida no Google Ads (mesmo sem média): não é medida de novo no preparo. */
   googleAdsMeasured?: boolean;
   /**
+   * 2026-10-18 · SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.1: o servidor sabe que o volume desta
+   * keyword é DESCONHECIDO (nunca medida, "sem média" vencida, outro provider). Desconhecido = nada se decide sobre a
+   * principal ("Meça no Minerador (Volume)"). Ausente = o de sempre: sem volume validado conta como volume 0.
+   */
+  volumeUnknown?: boolean;
+  /**
    * F3 · LER ANTES DE BUSCAR (D4): "o Google Ads não tem média" registrado há
    * menos de 30 dias (no Minerador ou nesta preparação) — conta como medida.
    */
@@ -36,6 +44,12 @@ export type ImprovementKeyword = {
   measurement?: ImprovementStoredMeasurement;
   /** F3 — a ideia da busca nova já existe no Minerador com volume medido: "já temos", não é medida de novo. */
   knownInMinerador?: { keywordId: string };
+  /**
+   * 2026-10-19 · a intenção que a SERP mostrou para esta keyword (`evidencia_serp` CONCLUSIVA e com as 4 lentes, do KeywordDNA, a mesma
+   * leitura da mesa: `serpEvidenceAxisValue`). Ausente = a SERP não decidiu a intenção dela; o rótulo do DNA não
+   * basta para tirar uma secundária do publicado (régua c, SDD 2026-10-18 §6.3-c).
+   */
+  observedIntent?: string | null;
 };
 /** A medição guardada na execução para ser gravada depois sem nova chamada (F3). */
 export type ImprovementStoredMeasurement = { metric: GoogleAdsHistoricalMetric; requestId: string | null };
@@ -75,6 +89,29 @@ export type ImprovementTarget = {
   planScope?: string | null;
   /** 2026-10-17 · o papel do artigo no plano (Pilar ou Suporte): só o Pilar recebe a cabeça mais ampla do Silo. */
   planRole?: "Pilar" | "Suporte" | null;
+  /**
+   * 2026-10-18 · o Pilar do MESMO plano (a principal atual, o slug e a entidade do DNA dele), lido pelo servidor em todas
+   * as linhas do recorte, antes do filtro por `targetIds`: é o núcleo do Pilar/Silo que a regra da cabeça reserva ao
+   * Pilar (`suporteReservaAoPilar`). Ausente = o Pilar desta leitura, no mesmo Silo; sem nenhum, a regra de antes.
+   */
+  planPillar?: { keyword: string | null; slug: string | null; entity: string | null } | null;
+  /**
+   * 2026-10-18 · O ASSUNTO PELA PRINCIPAL (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.3-a): a keyword que
+   * é o Assunto do artigo — no publicado, a PÁGINA (o Assunto dela, lido do pacote aprovado do Minerador) — e o estado do
+   * volume dela pela régua única do Minerador (`principalSubjectStanding`). Ausente = o publicado sem Assunto, como antes.
+   */
+  principalSubject?: { keywordId: string; volumeState: "zero" | "low" | "with_volume" | "unknown" } | null;
+  /** 2026-10-18 · a keyword que o ArticleDNA vigente já tem como `subject` (`null` = sem Assunto no DNA). */
+  currentSubjectKeywordId?: string | null;
+  /** 2026-10-18 · o alvo já tem ArticleDNA (o primeiro DNA do publicado nasce com a página entre as keywords; a página vira o Assunto na versão seguinte). */
+  articleExists?: boolean;
+  /** 2026-10-19 · a intenção que a SERP mostrou para a keyword do alvo (a página ou a do Assunto), como em `ImprovementKeyword.observedIntent`. */
+  observedIntent?: string | null;
+  /**
+   * 2026-10-19 · o território da localidade da marca (`resolveBrandSerpTarget`, SDD localidade D11): a busca com a
+   * cidade da própria marca não é "busca local" de fora. Ausente/`null` = marca nacional, a régua de antes.
+   */
+  brandTerritory?: BrandSerpTerritory | null;
 };
 /**
  * 2026-10-16 · O que a SERP da principal, JÁ no cache (grátis), mostra: as
@@ -119,6 +156,20 @@ export type ImprovementProposal = {
    * "Sugestões do Arquiteto" do Minerador (`article-improvement-minerador.ts`).
    */
   needsMinerador?: { newKeywordIds: string[]; measureKeywordIds: string[]; logicKeywordIds: string[] };
+  /**
+   * 2026-10-18 · SDD do Assunto pela principal §6.3-d/e/f: a keyword que fica como o `subject` do ArticleDNA nesta
+   * versão (no publicado, a página). Quando ela não é a principal, sai das keywords (`removeIds`) e continua no artigo
+   * como o Assunto; URL, slug e canonical não mudam. Ausente = o Assunto do DNA não muda por esta proposta.
+   */
+  subjectKeywordId?: string | null;
+  /**
+   * 2026-10-19 · CANIBALIZAÇÃO ENTRE OS ARTIGOS DO GRUPO (cobrança do dono: "muitas keywords que deveriam estar aqui
+   * estão em outros artigos que nada têm a ver"): a keyword que JÁ estava em outro artigo publicado do recorte e serve
+   * ao Assunto deste (`movedIn`), ou que sai deste para o artigo dela (`movedOut`). As duas linhas são gravadas na mesma
+   * confirmação: a de origem primeiro (o gravador confere). Ausente = nada muda de artigo.
+   */
+  movedIn?: { keywordId: string; fromTargetId: string }[];
+  movedOut?: { keywordId: string; toTargetId: string }[];
 };
 /**
  * Uma escolha da IA já conferida pelas barreiras do código (a IA tem a menor
@@ -136,6 +187,8 @@ export const IMPROVEMENT_AI_MAX_PER_TARGET = 3;
 export const IMPROVEMENT_ARTICLE_MAX_KEYWORDS = 6;
 const key = (value: string | null | undefined) => normalizeKeyword(value ?? "");
 const knownEqual = (a: string | null, b: string | null) => Boolean(a && b && key(a) === key(b));
+/** 2026-10-19 · a mesma intenção pelo normalizador único ("Informativo" = "Informativa"). */
+const sameIntent = (a: string | null, b: string | null) => { const x = intentComparisonKey(a), y = intentComparisonKey(b); return Boolean(x && y && x === y); };
 // This alias only normalizes an editorial concept in the clinical context. It
 // is not enough to establish SERP compatibility or distinct coverage.
 const clinicalConcept = (v: string | null) => key(v).replace(/captar clientes|atrair clientes|atrair pacientes|captar pacientes|captacao de pacientes|captacao de clientes/g, "captacao pacientes");
@@ -198,12 +251,27 @@ export function carriesSlugCore(slug: string | null, candidate: Pick<Improvement
   return !broadHead;
 }
 
+/**
+ * 2026-10-19 · O MESMO PÚBLICO ESCRITO NO SINGULAR OU NO PLURAL (caso real do verde: "Responsável por clinica" ×
+ * "Responsável por clinicas" tirava "agencia de marketing para clinicas" de "agência de marketing para clínica de
+ * estética" por "públicos distintos"). Mesma régua de `slugWords`: sem acento, caixa, palavras de ligação e o "s" final.
+ */
+// O público mais específico do mesmo ("Responsável por clinica estetica" ⊂ "Responsável por clinica") é o mesmo público.
+const sameAudience = (a: string, b: string) => {
+  if (knownEqual(a, b)) return true;
+  const x = new Set(slugWords(a)), y = new Set(slugWords(b));
+  if (!x.size || !y.size) return false;
+  const [menor, maior] = x.size <= y.size ? [x, y] : [y, x];
+  return [...menor].every(word => maior.has(word));
+};
+
 /** A structured editorial match needs entity plus problem, audience or outcome. */
 export function improvementEditorialFit(target: ImprovementTarget, candidate: ImprovementKeyword): { fits: boolean; reason: string; conflict?: boolean; conflictKind?: "intent" } {
-  if (target.kind === "published" && classifySlugFit(target.slug ?? "", candidate.keyword).fit === "contradicts") return { fits: false, conflict: true, reason: "A candidata contradiz a entidade do slug publicado." };
+  // 2026-10-19 · a cidade da marca não troca a entidade do slug (SDD 2026-10-18 R12: "julgada pela intenção na SERP de São Paulo, não pela palavra").
+  if (target.kind === "published" && classifySlugFit(target.slug ?? "", withoutBrandLocality(candidate.keyword, target.brandTerritory)).fit === "contradicts") return { fits: false, conflict: true, reason: "A candidata contradiz a entidade do slug publicado." };
   const a = target.signals, b = candidate.signals;
   const intentA = intentComparisonKey(a.intent), intentB = intentComparisonKey(b.intent);
-  if (a.audience && b.audience && !knownEqual(a.audience, b.audience)) return { fits: false, conflict: true, reason: "Públicos distintos no DNA; não há evidência para reuni-los." };
+  if (a.audience && b.audience && !sameAudience(a.audience, b.audience)) return { fits: false, conflict: true, reason: "Públicos distintos no DNA; não há evidência para reuni-los." };
   const restrictive = /sem (anuncios|redes sociais|trafego pago)|organico|gratuito/;
   const aRestriction = key(`${target.theme} ${target.note ?? ""} ${a.modifiers.join(" ")}`).match(restrictive)?.[0];
   if (aRestriction && /trafego pago|anuncios pagos/.test(key(candidate.keyword)) && !key(candidate.keyword).includes("sem")) return { fits: false, conflict: true, reason: "A candidata contraria a restrição editorial do tema." };
@@ -238,6 +306,32 @@ const LOCAL_PLACES = /\b(sao paulo|rio de janeiro|belo horizonte|porto alegre|cu
 function localSearchOf(keyword: string): string | null {
   return key(keyword).match(LOCAL_PLACES)?.[0] ?? null;
 }
+/** 2026-10-19 · a keyword sem a localidade da marca ("agencia de marketing em são paulo" → "agencia de marketing"); sem território, igual. */
+export function withoutBrandLocality(keyword: string, territory: BrandSerpTerritory | null | undefined): string {
+  if (!territory) return keyword;
+  const formas = [territory.city, ...territory.aliases, territory.uf].map(normalizeBrandSerpLocationText).filter(Boolean).sort((x, y) => y.length - x.length);
+  let texto = normalizeBrandSerpLocationText(keyword);
+  for (const forma of formas) texto = texto.replace(new RegExp(`(^| )(?:(?:em|de|no|na|do|da) )?` + forma + `(?= |$)`, "g"), " ");
+  const limpo = texto.replace(/ +/g, " ").trim();
+  return limpo && limpo !== normalizeBrandSerpLocationText(keyword) ? limpo : keyword;
+}
+/** 2026-10-19 · o lugar é a localidade da própria marca (cidade, apelidos do catálogo ou a UF)? Leitor: `resolveBrandSerpTarget`. */
+export function isBrandLocality(local: string, territory: BrandSerpTerritory | null | undefined): boolean {
+  if (!territory) return false;
+  const lugar = normalizeBrandSerpLocationText(local);
+  return [territory.city, ...territory.aliases, territory.uf].map(normalizeBrandSerpLocationText).filter(Boolean).includes(lugar);
+}
+/**
+ * 2026-10-19 · A BUSCA LOCAL DE FORA (RF13 com a localidade da marca, SDD `sdd-localidade-serp-por-marca-2026-10-18.md`
+ * D11: "resultado de outra cidade é fora do território"). O lugar que a keyword cita só barra quando não está no alvo
+ * E não é a cidade da marca: "agencia de marketing em são paulo" na AdalbaPro (São Paulo, cidade) é do mercado dela.
+ * Uma régua só para o reforço, a leitura da IA e a régua c.
+ */
+export function foreignLocalSearch(target: Pick<ImprovementTarget, "brandTerritory">, keyword: string, targetText: string): string | null {
+  const local = localSearchOf(keyword);
+  if (!local || key(targetText).includes(local) || isBrandLocality(local, target.brandTerritory)) return null;
+  return local;
+}
 /** O slug publicado (ou o do Assunto; 2026-10-17: ou o declarado no plano, E5); sem slug, o próprio tema. */
 const targetSubjectText = (target: ImprovementTarget) => target.slug ?? target.planSlug ?? target.theme.replace(/\//g, " ");
 
@@ -265,8 +359,8 @@ export function editorialAiBarrier(target: ImprovementTarget, candidate: Improve
   const words = slugWords(candidate.keyword);
   if (new Set(words).size <= 2 && candidate.volume! > BROAD_HEAD_MAX_VOLUME) return `Cabeça genérica (volume ${candidate.volume}): uma página de nicho não ranqueia nela.`;
   const subject = targetSubjectText(target);
-  const local = localSearchOf(candidate.keyword);
-  if (local && !key(`${target.theme} ${subject.replace(/-/g, " ")}`).includes(local)) return `Busca local (“${local}”): quem busca quer um serviço nessa região, não o assunto deste artigo.`;
+  const local = foreignLocalSearch(target, candidate.keyword, `${target.theme} ${subject.replace(/-/g, " ")}`);
+  if (local) return `Busca local (“${local}”): quem busca quer um serviço nessa região, não o assunto deste artigo.`;
   /*
    * Serve quando leva o núcleo inteiro ("como captar clientes") OU divide com o
    * assunto uma palavra que não é só do nicho ("tráfego orgânico" num artigo
@@ -296,11 +390,18 @@ export function editorialAiBarrier(target: ImprovementTarget, candidate: Improve
 export function editorialAiPrincipalBlock(target: ImprovementTarget, current: ImprovementKeyword | undefined, candidate: ImprovementKeyword, blocksSwap: boolean | null | undefined): string | null {
   // F4 — a principal declarada no plano do Silo é fixa.
   if (target.declaredPrincipalId) return "a principal foi declarada no plano do Silo";
+  // 2026-10-18 · a régua do Assunto pela principal (SDD 2026-10-18 §6.3-b/c): volume 0 libera; a candidata precisa caber no Assunto.
+  const porVolume = principalSwapByVolume(target, current ?? null);
+  if (porVolume) {
+    const naoCabe = principalFitsSubject(target, candidate);
+    return naoCabe ? `ela não cabe no Assunto (${naoCabe})` : null;
+  }
   if (target.post === "locked") return "o Posto é Travado";
   if (target.post !== "free") return "o Posto não foi declarado";
   if (current?.volumeValidated) return "a principal atual já tem volume";
-  // 2026-10-17 · Principal de identidade: a que está no título ou no slug fica; a IA só traz reforço.
-  if (targetPrincipalIsIdentity(target, current)) return "a principal atual é a identidade do assunto (está no título ou no slug) e fica";
+  if (current && (target.kind === "subject" || target.principalSubject) && principalSwapStanding(target, current) === "unknown") return "o volume da principal atual é desconhecido (meça no Minerador)";
+  // 2026-10-17 · Principal de identidade: a que está no título ou no slug fica; a IA só traz reforço. (2026-10-18: só enquanto o volume não é 0.)
+  if (identityHoldsPrincipal(target, current)) return "a principal atual é a identidade do assunto (está no título ou no slug) e fica";
   if (target.kind !== "published") return null;
   if (blocksSwap === true) return "a página aparece no Google (página que ranqueia não troca de principal)";
   if (blocksSwap !== false) return "não deu para reler se a página ranqueia";
@@ -333,7 +434,7 @@ function subjectPrincipalPick(target: ImprovementTarget, picks: readonly Improve
 }
 
 function editorialAiProposal(target: ImprovementTarget, picks: readonly ImprovementEditorialPick[], byId: ReadonlyMap<string, ImprovementKeyword>, blocksSwap: boolean | null | undefined, basis: "editorial_ai" | "list_core" = "editorial_ai"): ImprovementProposal {
-  const current = target.primaryId ? byId.get(target.primaryId) : undefined;
+  const current = improvementCurrentPrincipal(target, byId);
   const reasons = [target.kind === "published" ? "URL, slug, canonical e Silo publicados preservados." : "Assunto declarado mantido como fundamento, fora das seis keywords."];
   const wanted = picks.find(pick => pick.role === "principal");
   // Assunto sem principal precisa de uma: a que leva o núcleo, com mais volume e menos palavras.
@@ -348,8 +449,12 @@ function editorialAiProposal(target: ImprovementTarget, picks: readonly Improvem
   }
   const addIds = picks.map(pick => pick.keywordId);
   const novaPrincipal = principalId && principalId !== target.primaryId ? byId.get(principalId) : undefined;
-  if (novaPrincipal && target.kind === "published" && !coversSlugSubject(target.slug, novaPrincipal.keyword)) reasons.push(broaderPrincipalReason(novaPrincipal.keyword));
-  if (principalId !== target.primaryId && current) reasons.push(`Principal com volume escolhida na lista; “${current.keyword}” fica como secundária.`);
+  // 2026-10-18 · a troca pela régua do volume (SDD do Assunto pela principal §6.3-b) diz o porquê e o destino da antiga.
+  if (novaPrincipal && principalSwapByVolume(target, current)) reasons.push(principalSubjectSwapReason(target, current, novaPrincipal, blocksSwap));
+  else {
+    if (novaPrincipal && target.kind === "published" && !coversSlugSubject(target.slug, novaPrincipal.keyword)) reasons.push(broaderPrincipalReason(novaPrincipal.keyword));
+    if (principalId !== target.primaryId && current) reasons.push(`Principal com volume escolhida na lista; “${current.keyword}” fica como secundária.`);
+  }
   reasons.push(basis === "list_core"
     ? "Leitura da lista pelo código: keywords com volume que são o núcleo do slug. Para gravar, o parecer da SERP da composição final continua obrigatório."
     : "Sugestão da IA na lista existente, conferida pelas barreiras do código. Para gravar, o parecer da SERP da composição final continua obrigatório.");
@@ -558,8 +663,7 @@ function copyLineBarrier(target: ImprovementTarget, candidate: ImprovementKeywor
   const fit = improvementEditorialFit(target, candidate);
   if (fit.conflict) return fit.reason;
   if (new Set(slugWords(candidate.keyword)).size <= 2 && candidate.volume! > BROAD_HEAD_MAX_VOLUME) return "cabeça genérica";
-  const local = localSearchOf(candidate.keyword);
-  if (local && !key(`${target.theme} ${lastSlugSegment(target.slug ?? target.planSlug ?? null)} ${target.planScope ?? ""}`).includes(local)) return "busca local";
+  if (foreignLocalSearch(target, candidate.keyword, `${target.theme} ${lastSlugSegment(target.slug ?? target.planSlug ?? null)} ${target.planScope ?? ""}`)) return "busca local";
   return null;
 }
 /** A troca da principal Livre sem volume não muda a intenção: a família (pergunta, comparação) da antiga fica, ou o DNA das duas diz a mesma. */
@@ -610,13 +714,271 @@ export function targetPrincipalIsIdentity(target: Pick<ImprovementTarget, "kind"
   if (!principal) return false;
   return principalIsIdentity({ keyword: principal.keyword, title: target.kind === "subject" ? target.theme : null, slug: target.kind === "published" ? target.slug : target.planSlug ?? null });
 }
+/*
+ * 2026-10-17 (noite) · DECISÃO DO DONO: "PILAR TROCA, SUPORTES FICAM". A exceção da T12 (principal de identidade): o
+ * PILAR do plano com a principal Livre e SEM volume — mesmo quando ela é a identidade (título ou slug) — recebe a
+ * proposta de troca pelo termo-cabeça com volume que leva o núcleo do slug e a centralidade do Silo (a régua de sempre:
+ * principal mais ampla com o núcleo do slug, X3/X14; no Pilar, entre as que levam o núcleo, a de cauda curta e mais
+ * volume, AGENTS.md §13). A antiga fica como a âncora do Assunto (§15.2); título, Assunto e slug do plano ficam.
+ * Proposta na prévia; decide o dono. Os Suportes de identidade sem volume continuam com a principal (como antes); a
+ * Travada nunca troca (T2/T10).
+ */
+/*
+ * 2026-10-18 · SUBSTITUÍDO (SDD do Assunto pela principal §9): "Pilar troca, Suportes ficam". O Pilar segue a régua
+ * nova (volume 0 → proposta, com a ordem do termo-cabeça: cauda curta e mais volume); o Suporte de volume 0 também
+ * recebe a proposta (a faceta dele). A função continua dizendo só "é o Pilar com volume 0" (a ordem e a frase do Pilar).
+ */
+export function pilarTrocaPelaCabeca(target: Pick<ImprovementTarget, "kind" | "planRole" | "declaredPrincipalId"> & Partial<Pick<ImprovementTarget, "post" | "principalSubject">>, principal: (Pick<ImprovementKeyword, "volumeValidated"> & Partial<Pick<ImprovementKeyword, "volume" | "volumeUnknown" | "id">>) | null | undefined): boolean {
+  return target.kind === "subject" && target.planRole === "Pilar" && Boolean(principal) && principalSwapStanding({ kind: target.kind, post: target.post ?? "free", declaredPrincipalId: target.declaredPrincipalId, principalSubject: target.principalSubject }, { volume: principal!.volume ?? null, volumeValidated: principal!.volumeValidated, volumeUnknown: principal!.volumeUnknown, id: principal!.id }) === "swap";
+}
+/**
+ * A principal de identidade que FICA: 2026-10-18 · SUBSTITUÍDO "identidade fica com pouco ou nenhum volume" (T12) pela
+ * régua do volume (`principalSwapStanding`): fica com volume definido ou com volume desconhecido; com volume 0 recebe a
+ * proposta (Pilar e Suporte, publicado e novo).
+ */
+export function identityHoldsPrincipal(target: Pick<ImprovementTarget, "kind" | "theme" | "slug" | "planSlug" | "planRole" | "declaredPrincipalId"> & Partial<Pick<ImprovementTarget, "post" | "principalSubject">>, principal: (Pick<ImprovementKeyword, "keyword"> & Partial<Pick<ImprovementKeyword, "volumeValidated" | "volume" | "volumeUnknown" | "id">>) | null | undefined): boolean {
+  if (!targetPrincipalIsIdentity(target, principal)) return false;
+  if (target.kind === "published" && !target.principalSubject) return true;
+  return principalSwapStanding({ kind: target.kind, post: target.post ?? "free", declaredPrincipalId: target.declaredPrincipalId, principalSubject: target.principalSubject }, principal ? { volume: principal.volume ?? null, volumeValidated: principal.volumeValidated === true, volumeUnknown: principal.volumeUnknown, id: principal.id } : null) !== "swap";
+}
 export const IDENTITY_PRINCIPAL_LABEL = "Principal de identidade";
+/** 2026-10-17 (noite) · a frase da prévia quando o Pilar sem volume recebe (ou espera) o termo-cabeça. */
+export const PILLAR_HEAD_SWAP_LABEL = "Pilar sem volume troca pelo termo-cabeça";
 /** A frase da prévia quando a principal fica por ser a identidade. */
 export function identityPrincipalReason(target: Pick<ImprovementTarget, "kind">, principal: Pick<ImprovementKeyword, "keyword" | "volume" | "volumeValidated">): string {
   const volume = principal.volumeValidated && (principal.volume ?? 0) > 0 ? `volume ${principal.volume}` : "sem volume";
   return target.kind === "published"
     ? `${IDENTITY_PRINCIPAL_LABEL}: “${principal.keyword}” (${volume}) é o assunto do slug publicado e fica como principal; as buscas mais amplas entram como secundárias e reforçam o contexto (dono, 17/10).`
     : `${IDENTITY_PRINCIPAL_LABEL}: “${principal.keyword}” (${volume}) está no título e no slug do Assunto e fica como principal; as buscas mais amplas entram como secundárias e reforçam o contexto (dono, 17/10). Trocar só pela sua decisão, em “Procurar outra principal”.`;
+}
+/*
+ * 2026-10-18 · O ASSUNTO PELA PRINCIPAL E PELO VOLUME — A RÉGUA DA TROCA (SDD `sdd-assunto-pela-principal-e-volume-
+ * 2026-10-18.md` §6.3-b/c, APROVADA). SUBSTITUI a régua de 17/10 "principal de identidade com pouco ou nenhum volume
+ * fica (só o Pilar troca)" (T12/T13) como PORTÃO da troca, em publicado e novo, Pilar e Suporte:
+ *
+ *   travada (plano Travado, principal declarada fixa)            → nunca troca
+ *   volume definido (Google Ads > 0, mesmo 10)                   → fica (T1); o Arquiteto só reforça
+ *   volume 0 (medido 0 ou "sem média")                          → a proposta de uma principal nova COM volume
+ *   desconhecido (nunca medida, "sem média" vencida)            → nada se decide ("Meça no Minerador")
+ *
+ * No publicado, o volume 0 da PÁGINA libera a principal sozinho (dono, 18/10), mesmo com "Travado ao slug"; a troca é
+ * sempre proposta na prévia e decisão do dono; URL, slug e canonical nunca mudam. As 16 páginas trocadas no modo antigo:
+ * a principal atual fica se passar na régua c abaixo; senão, a proposta de troca. `principalIsIdentity` continua só
+ * para o motivo e para a SERP da principal de identidade (§42).
+ */
+export type PrincipalSwapStanding = "locked" | "fixed" | "swap" | "unknown";
+/**
+ * A principal atual do alvo. A página publicada que é um Assunto declarado fica fora da lista de keywords (é o Assunto,
+ * não uma keyword a reorganizar): quando ela ainda é a principal, este é o retrato dela para a régua do volume.
+ */
+export function improvementCurrentPrincipal(target: ImprovementTarget, byId: ReadonlyMap<string, ImprovementKeyword>): ImprovementKeyword | undefined {
+  const lida = byId.get(target.primaryId ?? "");
+  if (lida || !target.principalSubject || target.primaryId !== target.principalSubject.keywordId) return lida;
+  const estado = target.principalSubject.volumeState;
+  return { id: target.primaryId!, keyword: target.theme, volume: null, volumeValidated: estado === "low" || estado === "with_volume", signals: target.signals, ownerId: target.id, published: true, territoryRef: target.territoryRef, external: false, ...(estado === "unknown" ? { volumeUnknown: true } : {}) };
+}
+/** O volume de uma keyword pela régua do §6.1 (o servidor marca o desconhecido em `volumeUnknown`). */
+export function improvementVolumeState(k: Pick<ImprovementKeyword, "volume" | "volumeValidated"> & Partial<Pick<ImprovementKeyword, "volumeUnknown">> | null | undefined): "zero" | "low" | "with_volume" | "unknown" {
+  if (!k) return "unknown";
+  if (k.volumeValidated && (k.volume ?? 0) > 0) return (k.volume ?? 0) <= 39 ? "low" : "with_volume";
+  return k.volumeUnknown ? "unknown" : "zero";
+}
+/** A página publicada é o Assunto do artigo e tem volume 0: a principal fica livre (a troca é decisão do dono). */
+const paginaDeVolumeZero = (target: Pick<ImprovementTarget, "kind" | "principalSubject">) => target.kind === "published" && target.principalSubject?.volumeState === "zero";
+export function principalSwapStanding(target: Pick<ImprovementTarget, "kind" | "post" | "declaredPrincipalId" | "principalSubject">, principal: (Pick<ImprovementKeyword, "volume" | "volumeValidated"> & Partial<Pick<ImprovementKeyword, "volumeUnknown" | "id">>) | null | undefined): PrincipalSwapStanding {
+  if (target.declaredPrincipalId) return "locked";
+  if (paginaDeVolumeZero(target)) return "swap";
+  if (target.kind === "published" && target.post !== "free") return "locked";
+  // Sem principal ainda (Assunto sem artigo), não há o que proteger: a formação escolhe a principal.
+  if (!principal) return "swap";
+  const estado = target.principalSubject && principal?.id === target.principalSubject.keywordId ? target.principalSubject.volumeState : improvementVolumeState(principal);
+  if (estado === "low" || estado === "with_volume") return "fixed";
+  return estado === "zero" ? "swap" : "unknown";
+}
+/*
+ * RÉGUA c · A CANDIDATA PRECISA CABER NO ASSUNTO (§6.3-c): leva o núcleo do slug E não contradiz o DNA do Assunto —
+ * público/nicho, restrição ("sem tráfego pago", "sem anúncios", "sem redes sociais"), localidade, intenção do
+ * consumidor (preço) e grafia quebrada ("plano de e marketing"). A ampla sem o nicho, mesma intenção, pode ser a
+ * principal (o nicho fica no Assunto, no título e no slug).
+ */
+const PUBLICO_PALAVRAS = /\b(dentistas?|odontolog\w*|medicos?|advogad\w*|psicolog\w*|nutricionistas?|fisioterapeut\w*|veterinari\w*|dermatolog\w*|feminin\w*|masculin\w*|infantil|criancas?)\b/;
+const PRECO_PALAVRAS = /\b(preco|precos|valor|valores|quanto custa|custa|custo|orcamento|barato|barata)\b/;
+const RESTRICOES: Array<[RegExp, RegExp]> = [
+  [/\bsem (trafego pago|anuncios?|redes sociais)\b/, /\b(trafego pago|anuncios?|redes sociais|ads|facebook ads|google ads)\b/],
+];
+export function principalSubjectConflict(target: ImprovementTarget, candidate: Pick<ImprovementKeyword, "keyword" | "signals" | "volume" | "volumeValidated" | "id"> & Partial<ImprovementKeyword>): string | null {
+  return principalSubjectConflictDetail(target, candidate)?.reason ?? null;
+}
+/**
+ * A régua c com o TIPO do conflito (2026-10-19). `intent_dna` = a intenção só diverge no rótulo do DNA, sem a SERP
+ * ter decidido a intenção das duas; `intent_serp` = a SERP (evidencia_serp conclusiva) mostrou intenções diferentes;
+ * `other` = público, preço do consumidor, localidade de fora, restrição, negação do Assunto ou grafia quebrada.
+ * Para ESCOLHER a principal, todo conflito barra (sem SERP, a Lógica segura a entrada automática, RF10). Para TIRAR
+ * uma secundária do publicado, a intenção só vale pela SERP (régua c: "intenção pela SERP, 4 lentes").
+ */
+export function principalSubjectConflictDetail(target: ImprovementTarget, candidate: Pick<ImprovementKeyword, "keyword" | "signals" | "volume" | "volumeValidated" | "id"> & Partial<ImprovementKeyword>): { reason: string; kind: "intent_dna" | "intent_serp" | "other" } | null {
+  const outro = (reason: string) => ({ reason, kind: "other" as const });
+  const frase = key(candidate.keyword);
+  const alvo = key(`${target.theme} ${(target.slug ?? target.planSlug ?? "").replace(/[-/]/g, " ")} ${target.note ?? ""} ${target.planScope ?? ""}`);
+  if (/\b(de|da|do|das|dos|para|com|em|no|na) e\b(?!-)/.test(frase) || /(^|\s)[b-df-hj-np-tv-z](\s|$)/.test(frase)) return outro("grafia quebrada");
+  const publico = frase.match(PUBLICO_PALAVRAS)?.[0];
+  // 2026-10-19 · dentista e odontologia são o mesmo público ("captação de pacientes dentista" cabe em "…consultório odontológico").
+  if (publico && !alvo.includes(publico.replace(/s$/, "")) && !(/^(dentist|odontolog)/.test(publico) && /\b(dentist|odontolog)/.test(alvo))) return outro(`outro público (“${publico}”)`);
+  const preco = frase.match(PRECO_PALAVRAS)?.[0];
+  if (preco && !alvo.includes(preco)) return outro(`intenção do consumidor (“${preco}”), não a do artigo`);
+  // 2026-10-19 · a cidade da própria marca não é busca local de fora (SDD localidade D11).
+  const local = foreignLocalSearch(target, candidate.keyword, alvo);
+  if (local) return outro(`busca local (“${local}”)`);
+  for (const [restricao, contraria] of RESTRICOES) {
+    const doAlvo = alvo.match(restricao)?.[0];
+    if (doAlvo && contraria.test(frase) && !/\bsem\b/.test(frase)) return outro(`contraria a restrição do Assunto (“${doAlvo}”)`);
+  }
+  const nega = negaOAssunto(`${target.theme} ${(target.slug ?? target.planSlug ?? "").replace(/-/g, " ")}`, copyWords(`${target.theme} ${target.slug ?? target.planSlug ?? ""}`), candidate.keyword);
+  if (nega) return outro(`contradiz o Assunto: ${nega}`);
+  const fit = improvementEditorialFit(target, candidate as ImprovementKeyword);
+  /*
+   * A intenção. A SERP decide quando mostrou a intenção das duas (evidencia_serp conclusiva): diferentes = conflito pela
+   * SERP; iguais = nenhum conflito, mesmo com rótulos diferentes no DNA. Sem a SERP das duas, o rótulo do DNA (pelo
+   * normalizador único: "Informativo" = "Informativa") diferente é conflito só do DNA.
+   */
+  const serpDoAssunto = intentComparisonKey(target.observedIntent), serpDela = intentComparisonKey(candidate.observedIntent);
+  if (serpDoAssunto && serpDela) {
+    if (serpDoAssunto !== serpDela) return { reason: `outra intenção pela SERP (${target.observedIntent} × ${candidate.observedIntent})`, kind: "intent_serp" };
+  } else {
+    const intencaoDoAssunto = intentComparisonKey(target.signals.intent), intencaoDela = intentComparisonKey(candidate.signals?.intent);
+    if (intencaoDoAssunto && intencaoDela && intencaoDoAssunto !== intencaoDela) return { reason: `outra intenção (${target.signals.intent} × ${candidate.signals.intent})`, kind: "intent_dna" };
+  }
+  if (fit.conflict && fit.conflictKind !== "intent") return outro(fit.reason.replace(/\.$/, ""));
+  return null;
+}
+/*
+ * 2026-10-19 · O MODIFICADOR QUE DEFINE O ARTIGO (cobrança do dono depois da prévia do verde: "não está aplicando o SEO
+ * semântico, não está aplicando a linguagem natural orgânica"). A régua c checava o núcleo do slug só pelas palavras:
+ * "captação + paciente" casava com "captação de pacientes dentista" no artigo "captação de pacientes SEM TRÁFEGO PAGO".
+ * No publicado cujo Assunto é a própria keyword da página (o Assunto pela principal, SDD 2026-10-18), a frase da página
+ * É o tema; a principal do artigo é o mesmo tema dito com volume. Ela não pode perder nem contrariar o que define o
+ * artigo — lido do Assunto e do slug, sem IA:
+ *   restrição   "sem X"      → a principal diz "sem X" (ou o positivo dela: "orgânico" para "sem tráfego pago/anúncios");
+ *   negação     "não X"      → a principal leva a negação ("instagram não traz pacientes" ≠ "como atrair clientes pelo instagram");
+ *   comparação  "X vs Y"     → a principal leva os dois lados;
+ *   nicho       "para N"     → a principal leva o público/nicho N (consultório = clínica; dentista = odontologia).
+ * A ampla que perde o modificador continua podendo REFORÇAR como secundária de contexto (dono, 30/09: "tráfego
+ * orgânico" num artigo sem tráfego pago); só não é a principal. SUBSTITUI, para esse publicado, a "principal mais ampla
+ * com o núcleo do slug" (30/09) e "a ampla sem o nicho, mesma intenção, pode ser a principal" (SDD 2026-10-18 §6.3-c).
+ */
+export type SubjectDefiningModifier = { kind: "restricao" | "negacao" | "comparacao" | "nicho"; label: string; words: string[]; sides?: [string[], string[]] };
+const MODIFIER_STOP = new Set(["para", "pra", "sem", "com", "vs", "versus", "e", "ou"]);
+// As palavras já no radical de `copyWords` ("clínica" → clinic, "consultório" → consultori, "odontológico" → odontologic).
+const NICHE_FAMILY: Record<string, string> = { consultori: "clinic", clinic: "clinic", odontologic: "odonto", odontologi: "odonto", odontolog: "odonto", dentist: "odonto", estetic: "estetic", cosmetic: "cosmetic" };
+const nicheFamily = (word: string) => NICHE_FAMILY[word] ?? word;
+const ORGANICO_DE = /^(trafeg|anunci|ads|pago)$/;
+/** O que define o artigo cujo Assunto é a keyword da página: lido do Assunto e do último segmento do slug. */
+export function subjectDefiningModifiers(target: Pick<ImprovementTarget, "theme" | "slug" | "planSlug">): SubjectDefiningModifier[] {
+  const out: SubjectDefiningModifier[] = [];
+  const vistos = new Set<string>();
+  for (const texto of [target.theme, lastSlugSegment(target.slug ?? target.planSlug ?? null)]) {
+    // As palavras como estão escritas no Assunto (o rótulo da prévia) e a forma normalizada (a comparação).
+    const brutas = texto.replace(/[-/:]/g, " ").split(/\s+/).filter(Boolean);
+    const tokens = brutas.map(word => key(word).replace(/[^a-z0-9]/g, ""));
+    const conteudo = (start: number, max = 3) => {
+      const words: string[] = []; let fim = start;
+      for (let i = start; i < tokens.length && words.length < max; i++) { if (MODIFIER_STOP.has(tokens[i]) && words.length) break; const w = [...copyWords(tokens[i])][0]; if (w) words.push(w); fim = i + 1; }
+      return { words, rotulo: brutas.slice(start, fim).join(" ") };
+    };
+    tokens.forEach((token, i) => {
+      const add = (m: SubjectDefiningModifier) => { const chave = `${m.kind}|${m.words.join(" ")}`; if (!m.words.length || vistos.has(chave)) return; vistos.add(chave); out.push(m); };
+      if (token === "sem") { const c = conteudo(i + 1, 2); add({ kind: "restricao", label: `${brutas[i]} ${c.rotulo}`, words: c.words }); }
+      if (token === "nao") { const c = conteudo(i + 1, 2); add({ kind: "negacao", label: `${brutas[i]} ${c.rotulo}`, words: ["nao", ...c.words] }); }
+      if ((token === "vs" || token === "versus") && i > 0) {
+        const antes = [...copyWords(tokens[i - 1])], depois = conteudo(i + 1, 1);
+        if (antes.length && depois.words.length) add({ kind: "comparacao", label: `${brutas[i - 1]} ${brutas[i]} ${depois.rotulo}`, words: [...antes, ...depois.words], sides: [antes, depois.words] });
+      }
+      if (token === "para" || token === "pra") { const c = conteudo(i + 1, 3); add({ kind: "nicho", label: `${brutas[i]} ${c.rotulo}`, words: c.words }); }
+    });
+  }
+  return out;
+}
+/** A principal perde ou contraria o modificador que define o artigo? Devolve o motivo (régua c, 19/10) ou `null`. */
+export function principalLosesDefiningModifier(target: Pick<ImprovementTarget, "theme" | "slug" | "planSlug">, candidate: Pick<ImprovementKeyword, "keyword">): string | null {
+  const tokens = key(candidate.keyword.replace(/[-/]/g, " ")).split(/[^a-z0-9]+/).filter(Boolean);
+  const palavras = copyWords(candidate.keyword);
+  const familias = new Set([...palavras].map(nicheFamily));
+  for (const m of subjectDefiningModifiers(target)) {
+    if (m.kind === "restricao") {
+      const disseSem = tokens.some((token, i) => token === "sem" && tokens.slice(i + 1, i + 3).some(t => m.words.includes([...copyWords(t)][0] ?? "")));
+      const organico = m.words.some(word => ORGANICO_DE.test(word)) && palavras.has("organic");
+      if (!disseSem && !organico) return `perde o que define o artigo (“${m.label}”)`;
+    }
+    if (m.kind === "negacao" && !tokens.includes("nao")) return `perde o que define o artigo (“${m.label}”: a principal sem a negação é outra intenção)`;
+    if (m.kind === "comparacao" && m.sides && !(m.sides[0].some(w => palavras.has(w)) && m.sides[1].some(w => palavras.has(w)))) return `perde a comparação que define o artigo (“${m.label}”)`;
+    if (m.kind === "nicho" && !m.words.some(word => familias.has(nicheFamily(word)))) return `perde o público/nicho que define o artigo (“${m.label}”)`;
+  }
+  return null;
+}
+/** O publicado cujo Assunto é a própria keyword da página (lido do pacote aprovado do Minerador). */
+const assuntoEhAPagina = (target: Pick<ImprovementTarget, "kind" | "principalSubject">) => target.kind === "published" && Boolean(target.principalSubject);
+/** Régua c inteira para a PRINCIPAL: cabe no Assunto e leva o núcleo do slug (com a entidade do DNA). */
+export function principalFitsSubject(target: ImprovementTarget, candidate: Pick<ImprovementKeyword, "keyword" | "signals" | "volume" | "volumeValidated" | "id"> & Partial<ImprovementKeyword>): string | null {
+  const conflito = principalSubjectConflict(target, candidate);
+  if (conflito) return conflito;
+  // Sem slug (artigo novo sem slug declarado), o título do Assunto faz as vezes do slug (a mesma régua de `targetSubjectText`).
+  const slug = target.slug ?? target.planSlug ?? target.theme.split("/").join(" ");
+  /*
+   * 2026-10-19 · no publicado cujo Assunto é a página, o núcleo leva a entidade do DNA que o slug escreve (a régua do
+   * plano, X14): "marketing-harmonizacao-facial" é marketing + harmonização + facial — "harmonização facial o que é"
+   * (quem quer o procedimento) perdia o "marketing" e passava pelas duas últimas palavras.
+   */
+  const soComEntidade = assuntoEhAPagina(target) && slugCoreWords(slug, target.signals.centralEntity).length > 0;
+  if (!carriesSlugCore(slug, candidate, target.signals.centralEntity) && (soComEntidade || !carriesSlugCore(slug, candidate))) return `não leva o núcleo do slug (${slugCoreWords(slug, target.signals.centralEntity).join(" + ") || "slug sem núcleo"})`;
+  // 2026-10-19 · no publicado cujo Assunto é a página: o modificador que define o artigo (restrição, negação, comparação, nicho).
+  if (assuntoEhAPagina(target) && candidate.id !== target.principalSubject?.keywordId) {
+    const perde = principalLosesDefiningModifier(target, candidate);
+    if (perde) return perde;
+  }
+  return null;
+}
+/**
+ * No publicado com o Assunto na página de volume 0: a principal ATUAL (a do modo antigo, quando já não é a página) passa
+ * na régua c? Passa → fica (dono, 18/10: "a principal atual fica se passar na régua nova"); não passa → `null` aqui e a
+ * proposta de troca. Sem Assunto na página, ou a principal ainda é a página: `null` (o volume 0 da página decide).
+ */
+export function publishedCurrentPrincipalHolds(target: ImprovementTarget, current: ImprovementKeyword | null | undefined): boolean {
+  if (!paginaDeVolumeZero(target) || !current || current.id === target.principalSubject?.keywordId) return false;
+  return current.volumeValidated && (current.volume ?? 0) > 0 && !principalFitsSubject(target, current);
+}
+/** A troca proposta pela régua nova vale para este alvo agora (volume 0 da principal ou da página, e a atual não passa)? */
+export function principalSwapByVolume(target: ImprovementTarget, current: ImprovementKeyword | null | undefined): boolean {
+  // Sem principal (Assunto sem artigo), não é troca: a formação escolhe a principal pela régua de sempre.
+  if (!current) return false;
+  // O publicado SEM o Assunto na página espera o "Aprovar e enviar" do Minerador (o volume 0 vira o Assunto lá): até lá, a régua de antes.
+  if (target.kind === "published" && !target.principalSubject) return false;
+  if (principalSwapStanding(target, current) !== "swap") return false;
+  return !publishedCurrentPrincipalHolds(target, current);
+}
+export const PAGE_BECOMES_SUBJECT_REASON = "A keyword da página publicada passa a ser o Assunto do artigo (sai das secundárias e continua no artigo como o Assunto); URL, slug e canonical não mudam (SDD 2026-10-18).";
+/** A frase quando o volume 0 libera a principal mas nenhuma candidata passa na régua c (R7: nunca troca às cegas). */
+export const VOLUME_ZERO_NO_CANDIDATE_LABEL = "Volume 0 sem candidata";
+export function volumeZeroWithoutCandidateReason(target: ImprovementTarget, old: ImprovementKeyword | undefined): string {
+  const nucleo = slugCoreWords(target.slug ?? target.planSlug ?? null, target.signals.centralEntity).join(" + ") || "o núcleo do slug";
+  /*
+   * 2026-10-19 · O ASSUNTO COMO FOCO (cobrança do dono: a principal sem relação com o slug não fica "por enquanto"). No
+   * publicado cujo Assunto é a página, sem candidata que caiba no Assunto, a própria página (o Assunto) é o foco e a
+   * principal do artigo; a vaga da principal com volume fica aberta, dita. SUBSTITUI "a principal fica por enquanto".
+   */
+  if (assuntoEhAPagina(target) && old?.id === target.principalSubject?.keywordId) {
+    const define = subjectDefiningModifiers(target).map(m => `“${m.label}”`).join(", ");
+    return `${ASSUNTO_AS_FOCUS_LABEL}: nenhuma busca com volume desta leitura leva o núcleo do slug (${nucleo})${define ? `, o que define o artigo (${define})` : ""} e cabe no Assunto. “${target.theme}” (o Assunto, volume 0) fica como o foco e a principal do artigo; a vaga da principal com volume fica aberta (nunca uma troca às cegas). A busca nova no Google Ads (grátis) procura outra; para gravar, a SERP da página na localidade da marca é coletada (custo dito antes).`;
+  }
+  const porque = old && old.volumeValidated && (old.volume ?? 0) > 0 ? `“${old.keyword}” não cabe no Assunto (${principalFitsSubject(target, old) ?? "régua c"})` : `“${old?.keyword ?? target.theme}” tem volume 0`;
+  return `${VOLUME_ZERO_NO_CANDIDATE_LABEL}: ${porque} e fica livre, mas nenhuma busca com volume desta leitura leva o núcleo do slug (${nucleo}), cabe no Assunto${target.planRole === "Suporte" ? " e é a faceta deste Suporte (o pedaço da principal é do Pilar)" : ""}: a principal fica por enquanto e o artigo só recebe reforço (nunca troca às cegas). A busca nova no Google Ads (grátis) procura outra.`;
+}
+export const PRINCIPAL_SUBJECT_UNKNOWN_REASON = "Volume da principal desconhecido (nunca medida, “sem média” vencida ou outro provider): nada é decidido sobre a principal; meça no Minerador (Volume).";
+export function principalSubjectSwapReason(target: ImprovementTarget, old: ImprovementKeyword | undefined, nova: ImprovementKeyword, ranking: boolean | null | undefined): string {
+  const nucleo = slugCoreWords(target.slug ?? target.planSlug ?? null, target.signals.centralEntity).join(" + ");
+  const antiga = old?.keyword ?? target.theme;
+  const porque = old && old.volumeValidated && (old.volume ?? 0) > 0 ? `“${antiga}” não passa na régua do Assunto (${principalFitsSubject(target, old) ?? "não cabe no Assunto"})` : `“${antiga}” tem volume 0`;
+  const destino = target.kind === "published" && old?.id === target.principalSubject?.keywordId ? "continua no artigo como o Assunto (a página)" : target.kind === "subject" ? "continua no artigo como o Assunto" : (principalSubjectConflictDetail(target, old ?? nova)?.kind ?? "intent_dna") !== "intent_dna" ? "sai do artigo (vai para “Keywords não agrupadas”, nunca some)" : "fica como secundária";
+  return `Assunto pela principal (SDD 2026-10-18): ${porque}; “${nova.keyword}” (${nova.volume}) assume como principal — leva o núcleo do slug (${nucleo}) e cabe no Assunto (público, restrição, localidade e intenção). “${antiga}” ${destino}. Título, slug e canonical não mudam. Proposta: decisão sua na prévia.${ranking === true ? " Aviso: a página aparece no Google pela principal antiga — ela fica no título e no slug como o Assunto." : ""}`;
 }
 /*
  * 2026-10-17 · QUANDO A PRINCIPAL NÃO É A IDENTIDADE (fora do título e do slug,
@@ -635,7 +997,8 @@ function keepsDnaIntent(old: ImprovementKeyword | undefined, candidate: Improvem
 /** O slug do artigo do plano ou do Assunto: o do DNA formado; antes dele, o declarado no plano. */
 const subjectSlugOf = (target: ImprovementTarget) => target.slug ?? target.planSlug ?? null;
 export function subjectSlugCoreSwap(target: ImprovementTarget, old: ImprovementKeyword | undefined, candidate: ImprovementKeyword): boolean {
-  if (target.kind !== "subject" || target.declaredPrincipalId || old?.volumeValidated || targetPrincipalIsIdentity(target, old)) return false;
+  // 2026-10-17 (noite) · o Pilar sem volume troca mesmo com a principal de identidade ("Pilar troca, Suportes ficam").
+  if (target.kind !== "subject" || target.declaredPrincipalId || old?.volumeValidated || identityHoldsPrincipal(target, old)) return false;
   if (!candidate.volumeValidated || !(candidate.volume! > 0)) return false;
   if (!carriesSlugCore(subjectSlugOf(target), candidate, target.signals.centralEntity) || !keepsDnaIntent(old, candidate)) return false;
   if (target.planRole === "Suporte" && old) {
@@ -721,12 +1084,15 @@ function copyLineEdges(targets: readonly ImprovementTarget[], keywords: readonly
   const brutas = targets.flatMap(target => {
     if (!target.territoryRef) return [];
     const vocab = vocabulary[target.id] ?? null;
-    const old = byId.get(target.primaryId ?? "");
-    if (target.kind === "published" && !(vocab && old?.volumeValidated)) return [];
+    const old = improvementCurrentPrincipal(target, byId);
+    // 2026-10-18 · o publicado com o Assunto na página de volume 0 (ou com a principal antiga fora da régua c) também recebe a linha de copy.
+    const porVolume = principalSwapByVolume(target, old);
+    if (target.kind === "published" && !(vocab && old?.volumeValidated) && !porVolume) return [];
     const line = linhas.get(target.id)!;
     if (!line.principal.size && !line.slug.size && !line.entity.size) return [];
-    const livre = target.kind === "subject" && !target.declaredPrincipalId && !old?.volumeValidated;
-    const identidade = livre && targetPrincipalIsIdentity(target, old);
+    const livre = porVolume || (target.kind === "subject" && !target.declaredPrincipalId && !old?.volumeValidated && principalSwapStanding(target, old) !== "unknown");
+    // A identidade que FICA: 2026-10-18 · só com volume definido ou desconhecido (o volume 0 recebe a proposta — SDD do Assunto pela principal).
+    const identidade = livre && !porVolume && identityHoldsPrincipal(target, old);
     const principalText = line.principalText ? key(line.principalText) : null;
     const doArtigo = nucleoDoArtigo(target, line);
     const nomeiaOperadoras = [...doArtigo].some(word => OPERATOR_WORDS.has(word));
@@ -741,21 +1107,26 @@ function copyLineEdges(targets: readonly ImprovementTarget[], keywords: readonly
       const nega = negaOAssunto(`${line.principalText ?? ""} ${target.theme} ${lastSlugSegment(target.slug ?? target.planSlug ?? null)}`, new Set([...doArtigo, ...line.entities.flatMap(items => [...items])]), candidate.keyword);
       if (nega) { fora(target.id, candidate.id, `contradiz o Assunto: ${nega}`); return []; }
       // Do plano: a cabeça mais ampla que a principal, com mais volume, só vai para o Pilar (as demais regras de cabeça valem fora do plano).
-      if (target.planRole ? target.planRole !== "Pilar" && (cabecaDaPrincipal(old, candidate) || headOverPrincipal(old, candidate)) : headOverPrincipal(old, candidate)) { fora(target.id, candidate.id, "é mais ampla que a principal (cabeça do Pilar)"); return []; }
+      // 2026-10-18 · "cabeça do Pilar" = a do núcleo do Pilar/Silo; a cabeça da faceta do próprio Suporte reforça o contexto (`suporteReservaAoPilar`).
+      const reservada = target.planRole ? (target.planRole !== "Pilar" ? suporteReservaAoPilar(target, targets, linhas, old, candidate) : null) : headOverPrincipal(old, candidate) ? CABECA_DO_PILAR_REASON : null;
+      if (reservada) { fora(target.id, candidate.id, reservada); return []; }
       /*
        * 2026-10-17 · com a principal de identidade SEM volume num Suporte, o pedaço dela acima de `BROAD_HEAD_MAX_VOLUME`
        * ("claro internet residencial", 49.500) fica de fora ANTES de alocar — antes ele ocupava a vaga e saía depois,
        * e o artigo ficava com menos reforço do que podia (amarelo: 4 de 5 vagas).
        */
-      if (identidade && target.planRole === "Suporte" && old && (candidate.volume ?? 0) > BROAD_HEAD_MAX_VOLUME) {
+      // 2026-10-18 · vale para a principal de identidade do Suporte com ou sem a troca pelo volume 0 (o pedaço acima de 5.000 nunca é dele).
+      if (targetPrincipalIsIdentity(target, old) && livre && target.planRole === "Suporte" && old && (candidate.volume ?? 0) > BROAD_HEAD_MAX_VOLUME) {
         const daPrincipal = copyWords(old.keyword), dela = copyWords(candidate.keyword);
         if (dela.size < daPrincipal.size && [...dela].every(word => daPrincipal.has(word))) { fora(target.id, candidate.id, `é cabeça (mais de ${BROAD_HEAD_MAX_VOLUME} buscas): um Suporte não ranqueia nela`); return []; }
       }
       // A busca com marca (operadora…) só vai para o artigo que nomeia aquela marca ou fala de operadoras.
       if (marcasDaCandidata.length && !nomeiaOperadoras && !marcasDaCandidata.every(word => doArtigo.has(word))) { fora(target.id, candidate.id, "cita uma marca que o artigo não nomeia"); return []; }
       // 2026-10-17 · a principal de identidade (título ou slug) fica: a candidata só reforça.
-      const slugCore = livre && !identidade && subjectSlugCoreSwap(target, old, candidate);
-      const principalOk = livre && !identidade && (slugCore || keepsIntent(old, candidate) && (match.cover >= 0.75 || match.serp >= 2 || contains(copyWords(candidate.keyword), line.entity)));
+      const slugCore = livre && !identidade && (target.kind === "subject" ? subjectSlugCoreSwap(target, old, candidate) : carriesSlugCore(target.slug, candidate, target.signals.centralEntity) || carriesSlugCore(target.slug, candidate));
+      // 2026-10-18 · régua c: com a troca pelo volume, a candidata a principal leva o núcleo do slug E cabe no Assunto.
+      const pedacoDaAntiga = Boolean(old) && target.planRole === "Suporte" && (() => { const antiga = copyWords(old!.keyword), dela = copyWords(candidate.keyword); return dela.size < antiga.size && [...dela].every(word => antiga.has(word)); })();
+      const principalOk = livre && !identidade && (porVolume ? principalFitsSubject(target, candidate) === null && !pedacoDaAntiga : slugCore || keepsIntent(old, candidate) && (match.cover >= 0.75 || match.serp >= 2 || contains(copyWords(candidate.keyword), line.entity)));
       /*
        * A evidência da SERP primeiro; reescrever a principal ou o slug conta; a
        * frase com as MESMAS palavras da principal (só reordenada) quase não
@@ -816,6 +1187,13 @@ function copyLineEdges(targets: readonly ImprovementTarget[], keywords: readonly
    * residencial da vivo" ocuparem as 4 vagas de "Claro, Vivo ou TIM").
    */
   const mesmaBusca = new Map<string, number>();
+  /*
+   * 2026-10-18 · A MESMA LINHA DO GOOGLE ADS NÃO OCUPA DUAS VAGAS (RF19, amarelo: "internet instalação" 880 e "instalação
+   * internet" 880 levavam as 2 vagas da mesma busca e "instalação de internet" 720 sobrava). O Google Ads agrupa as
+   * variantes próximas e dá o MESMO volume para cada grafia do grupo: a mesma busca com o mesmo volume é um dado só. A
+   * primeira entra; a outra fica fora, dita, e não conta no teto — a segunda vaga vai para a grafia de volume próprio.
+   */
+  const mesmaLinhaDoAds = new Map<string, string>();
   const nomeDe = (id: string) => targets.find(t => t.id === id)?.theme ?? id;
   const filtradas = brutas
     .filter(edge => {
@@ -829,14 +1207,17 @@ function copyLineEdges(targets: readonly ImprovementTarget[], keywords: readonly
       const target = targets.find(t => t.id === edge.targetId)!, line = linhas.get(target.id)!;
       const palavras = copyWords(byId.get(edge.keywordId)?.keyword);
       const chave = `${target.id}|${sameSearchKey(byId.get(edge.keywordId)?.keyword)}`;
-      if ((mesmaBusca.get(chave) ?? 0) >= SAME_SEARCH_MAX_PER_ARTICLE && !edge.principalOk) { fora(target.id, edge.keywordId, `o artigo já leva ${SAME_SEARCH_MAX_PER_ARTICLE} variantes desta mesma busca`); return false; }
+      const linhaDoAds = `${chave}|${edge.volume}`, jaNaLinha = mesmaLinhaDoAds.get(linhaDoAds);
+      if (jaNaLinha) { fora(target.id, edge.keywordId, `é a mesma linha do Google Ads de “${jaNaLinha}” (a mesma busca, o mesmo volume): não ocupa outra vaga`); return false; }
+      const entra = () => { mesmaBusca.set(chave, (mesmaBusca.get(chave) ?? 0) + 1); mesmaLinhaDoAds.set(linhaDoAds, byId.get(edge.keywordId)?.keyword ?? edge.keywordId); return true; };
+      // 2026-10-17 (noite) · no Pilar que troca pelo termo-cabeça, a candidata a principal também conta no teto da mesma busca (RF19): a principal nova + uma variante.
+      if ((mesmaBusca.get(chave) ?? 0) >= SAME_SEARCH_MAX_PER_ARTICLE && !(edge.principalOk && !(pilarTrocaPelaCabeca(target, byId.get(target.primaryId ?? "")) && targetPrincipalIsIdentity(target, byId.get(target.primaryId ?? ""))))) { fora(target.id, edge.keywordId, `o artigo já leva ${SAME_SEARCH_MAX_PER_ARTICLE} variantes desta mesma busca`); return false; }
       const daPrincipal = line.principal.size > 0 && chaveDaVariante(palavras) === chaveDaVariante(line.principal);
       if (daPrincipal) {
         const ja = variantesDaPrincipal.get(target.id) ?? 0;
         if (ja >= 2 && !edge.principalOk) { fora(target.id, edge.keywordId, "o artigo já leva duas variantes da principal"); return false; }
         variantesDaPrincipal.set(target.id, ja + 1);
-        mesmaBusca.set(chave, (mesmaBusca.get(chave) ?? 0) + 1);
-        return true;
+        return entra();
       }
       const proprias = [...palavras].filter(word => line.words.has(word) && (contagemNoSilo.get(`${target.territoryRef}|${word}`) ?? 0) < 2);
       if (!proprias.length) { fora(target.id, edge.keywordId, "leva só o assunto comum do Silo, nada próprio do artigo"); return false; }
@@ -851,8 +1232,7 @@ function copyLineEdges(targets: readonly ImprovementTarget[], keywords: readonly
         fora(target.id, edge.keywordId, `leva palavra própria de outro artigo do Silo (“${dono?.theme ?? deOutro}”)`);
         return false;
       }
-      mesmaBusca.set(chave, (mesmaBusca.get(chave) ?? 0) + 1);
-      return true;
+      return entra();
     });
   /*
    * 2026-10-17 · ASSUNTO QUE ENUMERA ENTIDADES: REFORÇO EQUILIBRADO POR ENTIDADE (dono: "o artigo compara 3 operadoras:
@@ -908,6 +1288,42 @@ function cabecaDaPrincipal(principal: ImprovementKeyword | undefined, candidate:
   if (!principal?.volumeValidated || !(principal.volume! > 0) || !(candidate.volume! > principal.volume!)) return false;
   const daPrincipal = copyWords(principal.keyword), daCandidata = copyWords(candidate.keyword);
   return daCandidata.size < daPrincipal.size && [...daCandidata].every(word => daPrincipal.has(word));
+}
+const CABECA_DO_PILAR_REASON = "é mais ampla que a principal (cabeça do Pilar)";
+/*
+ * 2026-10-18 · A CABEÇA DO PILAR É A DO NÚCLEO DO PILAR/SILO, NÃO A DA FACETA DO SUPORTE (amarelo da WifiConecta, no
+ * refazedor: o Suporte "Instalação de internet: taxas, prazo e quando chega a primeira fatura" — principal Travada
+ * "instalação de internet residencial", 170 — recusava "internet instalação" 880, "instalação internet" 880 e "instalação
+ * de internet" 720 como "mais ampla que a principal (cabeça do Pilar)" e ficou com 3 keywords). Com a principal de pouco
+ * volume, toda busca mais ampla da MESMA faceta passava por cabeça do Pilar. No Suporte do plano, a busca mais ampla que a
+ * principal (`cabecaDaPrincipal`, `headOverPrincipal`) só fica reservada ao Pilar quando não leva nenhuma palavra própria
+ * deste artigo: todas as palavras dela são do núcleo do Pilar/Silo (a principal, o slug e a entidade do Pilar; a entidade
+ * e o slug do Silo; o assunto comum dos artigos) — "internet residencial", "plano de internet", "planos de internet
+ * residencial". A que leva a palavra própria do Suporte (a faceta dele: "instalação") é a cabeça da faceta e entra como
+ * secundária de contexto (dono, 17/10: "as keywords mais amplas podem reforçar o contexto"), até `BROAD_HEAD_MAX_VOLUME`
+ * (acima, um Suporte não ranqueia nela) e com as regras do Silo de sempre (variante num artigo só, no máximo 2 da mesma
+ * busca, marca, palavra de outro artigo). Sem o Pilar lido — nem nesta leitura nem pelo servidor (`planPillar`) —, a regra
+ * de antes: fecha para o lado seguro.
+ */
+function nucleoDoPilarESilo(target: ImprovementTarget, targets: readonly ImprovementTarget[], lines: ReadonlyMap<string, ImprovementCopyLine>): Set<string> | null {
+  const pilares = targets
+    .filter(t => t.id !== target.id && t.kind === "subject" && t.planRole === "Pilar" && Boolean(t.territoryRef) && t.territoryRef === target.territoryRef)
+    .map(t => ({ keyword: lines.get(t.id)?.principalText ?? null, slug: subjectSlugOf(t), entity: t.signals.centralEntity ?? null }));
+  const fontes = [...pilares, ...(target.planPillar ? [target.planPillar] : [])];
+  if (!fontes.length) return null;
+  return new Set([
+    ...fontes.flatMap(pilar => [...copyWords(pilar.keyword), ...copyWords(lastSlugSegment(pilar.slug)), ...copyWords(pilar.entity)]),
+    ...(lines.get(target.id)?.common ?? []), ...copyWords(target.siloContext?.centralEntity ?? null),
+  ]);
+}
+/** No Suporte do plano: por que a busca mais ampla que a principal fica com o Pilar (ou fora); `null` = ela reforça o contexto deste artigo. */
+function suporteReservaAoPilar(target: ImprovementTarget, targets: readonly ImprovementTarget[], lines: ReadonlyMap<string, ImprovementCopyLine>, principal: ImprovementKeyword | undefined, candidate: ImprovementKeyword): string | null {
+  if (!(cabecaDaPrincipal(principal, candidate) || headOverPrincipal(principal, candidate))) return null;
+  const nucleo = nucleoDoPilarESilo(target, targets, lines), line = lines.get(target.id);
+  const proprias = nucleo && line ? new Set([...nucleoDoArtigo(target, line)].filter(word => !nucleo.has(word))) : null;
+  if (!proprias || ![...copyWords(candidate.keyword)].some(word => proprias.has(word))) return CABECA_DO_PILAR_REASON;
+  if ((candidate.volume ?? 0) > BROAD_HEAD_MAX_VOLUME) return `é cabeça (mais de ${BROAD_HEAD_MAX_VOLUME} buscas): um Suporte não ranqueia nela`;
+  return null;
 }
 /** 2026-10-17 · o artigo tem vaga e nenhuma keyword de reforço entrou: a frase diz isso (nunca "adequado") e o motivo. */
 export const NO_REINFORCEMENT_FOUND_LABEL = "Sem keyword de reforço encontrada";
@@ -982,7 +1398,7 @@ export function improvementDiscoverySeeds(target: ImprovementTarget, byId: Reado
   const nomeiaOperadoras = [...doArtigo].some(word => OPERATOR_WORDS.has(word));
   const marcasDe = (seed: string) => [...copyWords(seed)].filter(word => marcas.has(word));
   const marcaAlheia = (seed: string) => { const daSemente = marcasDe(seed); return daSemente.length > 0 && !nomeiaOperadoras && !daSemente.every(word => doArtigo.has(word)); };
-  const relacionadas = (vocabulary?.relatedSearches ?? []).filter(phrase => { const daFrase = marcasDe(phrase); return !localSearchOf(phrase) && !marcaAlheia(phrase) && copyLineMatch(line, phrase, daFrase.length ? new Set(daFrase) : undefined).fits; }).slice(0, 4);
+  const relacionadas = (vocabulary?.relatedSearches ?? []).filter(phrase => { const daFrase = marcasDe(phrase); return !foreignLocalSearch(target, phrase, "") && !marcaAlheia(phrase) && copyLineMatch(line, phrase, daFrase.length ? new Set(daFrase) : undefined).fits; }).slice(0, 4);
   // Pedaços do TÍTULO só quando o Assunto não tem keyword nem slug (formato antigo): "Veja o que entra na conta" trazia "entra na conta do google".
   const doTitulo = line.principalText || line.slug.size ? [] : assuntoSeeds;
   const doAssunto = target.kind === "subject" ? [...facetSeeds(target.theme), ...entitySeeds(line.principalText, line)] : [];
@@ -999,7 +1415,8 @@ export function improvementDiscoverySeeds(target: ImprovementTarget, byId: Reado
  * TIM" só recebia as da Vivo, que passavam pela linha de "internet residencial barata").
  */
 export function improvementIdeaOnCopyLine(target: ImprovementTarget, byId: ReadonlyMap<string, ImprovementKeyword>, vocabulary: ImprovementSerpVocabulary | null | undefined, phrase: string, silo?: ImprovementSiloContext): boolean {
-  if (localSearchOf(phrase)) return false;
+  // 2026-10-19 · a cidade da marca não é busca local de fora (a mesma régua do reforço).
+  if (foreignLocalSearch(target, phrase, "")) return false;
   const line = improvementCopyLine(target, byId, vocabulary, { common: silo?.common.get(target.territoryRef ?? "") });
   const marcasDaFrase = silo ? [...copyWords(phrase)].filter(word => silo.brands.has(word)) : [];
   if (marcasDaFrase.length) {
@@ -1020,7 +1437,220 @@ export function improvementIdeaOnCopyLine(target: ImprovementTarget, byId: Reado
 }
 
 /** One allocator, whole brand, no ownership granted to discarded proposals. */
+/*
+ * 2026-10-19 · O REFAZER DOS PUBLICADOS COM O ASSUNTO NA PÁGINA (cobrança do dono depois da prévia do verde da
+ * AdalbaPro). Antes de a linha de sempre escolher principal e reforço, o recorte é reorganizado em volta do Assunto de
+ * cada página — a keyword original, a do slug, que é o tema do artigo:
+ *
+ *   1. a principal antiga que não cabe no Assunto (régua c com o modificador que define o artigo) deixa de ser a
+ *      principal: o Assunto vira o foco e a linha procura a principal com volume pela régua de sempre; sem candidata,
+ *      o Assunto fica como o foco e a vaga da principal com volume fica aberta, dita na prévia (SUBSTITUI "a principal
+ *      fica por enquanto", R7 da SDD 2026-10-18);
+ *   2. a MESMA busca em dois artigos do recorte é canibalização (RF5, RF19): fica no artigo cuja linha a leva (o de
+ *      principal com ela; senão o que melhor a cabe) e sai dos outros para "Keywords não agrupadas" (nunca some);
+ *   3. a keyword que não cabe no Assunto do artigo onde está e cabe no Assunto de UM outro artigo do recorte vai para
+ *      ele (a mesma régua da linha de copy, `copyLineMatch`, e a régua c; a afinidade pelo que distingue o artigo,
+ *      `afinidadeNoSilo`, desempata). Só com vaga no destino; nunca em ciclo.
+ *
+ * Tudo é proposta na prévia (a cópia de trabalho); nada é gravado sem o Confirmar. Um núcleo só: esta função prepara os
+ * alvos e as keywords que `planArticleImprovementsCore` lê, e devolve o que mudou de lugar para a prévia e o gravador.
+ */
+type SubjectReorganization = {
+  targets: ImprovementTarget[]; keywords: ImprovementKeyword[];
+  demoted: Map<string, { keywordId: string; reason: string }>;
+  moves: { keywordId: string; from: string; to: string }[];
+  drops: { keywordId: string; from: string; reason: string }[];
+};
+export const ASSUNTO_AS_FOCUS_LABEL = "Assunto como foco";
+const participaDoRefazer = (t: ImprovementTarget) => assuntoEhAPagina(t) && t.articleExists !== false && Boolean(t.territoryRef);
+/** A keyword que sai do artigo pela reorganização não volta por outra régua nesta mesma leitura (nem para o dono da busca). */
+const FORA_PELA_REORGANIZACAO = "reorganizacao:fora";
+function reorganizePublishedSubjects(targets: readonly ImprovementTarget[], keywords: readonly ImprovementKeyword[]): SubjectReorganization {
+  const vazio: SubjectReorganization = { targets: [...targets], keywords: [...keywords], demoted: new Map(), moves: [], drops: [] };
+  const byId = new Map(keywords.map(k => [k.id, k]));
+  const novos = targets.map(t => ({ ...t, memberIds: [...t.memberIds] }));
+  const participantes = novos.filter(participaDoRefazer);
+  if (!participantes.length) return vazio;
+  const demoted = new Map<string, { keywordId: string; reason: string }>();
+  // 1 · a principal antiga que não cabe no Assunto deixa de ser a principal (fica entre as keywords, como qualquer candidata).
+  for (const t of participantes) {
+    const pagina = t.principalSubject!.keywordId;
+    const antiga = t.primaryId && t.primaryId !== pagina ? byId.get(t.primaryId) : undefined;
+    if (!antiga || t.principalSubject!.volumeState !== "zero" || principalSwapStanding(t, antiga) === "locked") continue;
+    const motivo = principalFitsSubject(t, antiga);
+    if (!motivo) continue;
+    demoted.set(t.id, { keywordId: antiga.id, reason: motivo });
+    t.primaryId = pagina;
+  }
+  // A linha de cada Assunto: o título e o slug da página (a principal antiga não conta: ela pode ser justamente a errada).
+  const linhas = new Map(participantes.map(t => {
+    const line = improvementCopyLine({ ...t, primaryId: null, planPrincipalId: null, declaredPrincipalId: null }, byId, null);
+    // "sem tráfego pago" / "sem anúncios" fala de orgânico: a busca orgânica cabe na linha dele.
+    if (subjectDefiningModifiers(t).some(m => m.kind === "restricao" && m.words.some(word => ORGANICO_DE.test(word)))) line.words.add("organic");
+    return [t.id, line] as const;
+  }));
+  const comuns = new Map<string, number>();
+  for (const line of linhas.values()) for (const word of line.principal) comuns.set(word, (comuns.get(word) ?? 0) + 1);
+  for (const line of linhas.values()) for (const [word, vezes] of comuns) if (vezes >= 2) line.common.add(word);
+  const cabeNoAssunto = (t: ImprovementTarget, k: ImprovementKeyword) => {
+    const line = linhas.get(t.id)!;
+    const match = copyLineMatch(line, k.keyword);
+    if (!match.fits) return null;
+    const conflito = principalSubjectConflictDetail(t, k);
+    if (conflito && conflito.kind !== "intent_dna") return null;
+    if (negaOAssunto(`${t.theme} ${lastSlugSegment(t.slug)}`, new Set([...line.principal, ...line.slug]), k.keyword)) return null;
+    return match;
+  };
+  const membrosMoveis = (t: ImprovementTarget) => t.memberIds.filter(id => id !== t.primaryId && id !== t.principalSubject!.keywordId).map(id => byId.get(id)).filter((k): k is ImprovementKeyword => Boolean(k) && !k!.published && !k!.external);
+  const vagas = (t: ImprovementTarget) => IMPROVEMENT_ARTICLE_MAX_KEYWORDS - t.memberIds.filter(id => id !== t.principalSubject!.keywordId || id === t.primaryId).length;
+  const drops: SubjectReorganization["drops"] = [];
+  const moves: SubjectReorganization["moves"] = [];
+  const clones = new Map<string, ImprovementKeyword>();
+  const move = (k: ImprovementKeyword, de: ImprovementTarget, para: ImprovementTarget) => {
+    de.memberIds = de.memberIds.filter(id => id !== k.id);
+    para.memberIds = [...para.memberIds, k.id];
+    clones.set(k.id, { ...k, ownerId: para.id });
+    moves.push({ keywordId: k.id, from: de.id, to: para.id });
+  };
+  const larga = (k: ImprovementKeyword, de: ImprovementTarget, reason: string) => {
+    de.memberIds = de.memberIds.filter(id => id !== k.id);
+    clones.set(k.id, { ...k, ownerId: FORA_PELA_REORGANIZACAO });
+    drops.push({ keywordId: k.id, from: de.id, reason });
+  };
+  /*
+   * 2 · A MESMA BUSCA EM DOIS ARTIGOS DO RECORTE (`sameSearchKey`: as mesmas palavras sem as de ligação, qualquer ordem).
+   * Dono: o artigo cuja principal é essa busca; senão o artigo cuja linha a cabe (copyLineMatch + régua c), o de mais
+   * cobertura, o que já leva a de mais volume. Se o dono não a leva, a grafia de mais volume vai para ele; as outras saem.
+   */
+  // 2a · dentro do artigo: a MESMA linha do Google Ads (a mesma busca com o mesmo volume, RF19) é um dado só — fica a que mais cabe no Assunto.
+  for (const t of participantes) {
+    const porLinha = new Map<string, ImprovementKeyword[]>();
+    for (const k of membrosMoveis(t)) if (k.volumeValidated && (k.volume ?? 0) > 0) { const chave = `${sameSearchKey(k.keyword)}|${k.volume}`; porLinha.set(chave, [...(porLinha.get(chave) ?? []), k]); }
+    const principal = byId.get(t.primaryId ?? "");
+    for (const [chave, grafias] of porLinha) {
+      // A principal na mesma linha do Google Ads: ela fica, e as outras grafias saem.
+      if (principal?.volumeValidated && `${sameSearchKey(principal.keyword)}|${principal.volume}` === chave) {
+        for (const k of grafias) larga(k, t, `é a mesma linha do Google Ads da principal “${principal.keyword}” (a mesma busca, o mesmo volume): não ocupa outra vaga (RF19)`);
+        continue;
+      }
+      if (grafias.length < 2) continue;
+      const [fica, ...resto] = [...grafias].sort((a, b) => (cabeNoAssunto(t, b)?.cover ?? -1) - (cabeNoAssunto(t, a)?.cover ?? -1) || copyWords(a.keyword).size - copyWords(b.keyword).size || a.keyword.length - b.keyword.length || a.id.localeCompare(b.id));
+      for (const k of resto) larga(k, t, `é a mesma linha do Google Ads de “${fica.keyword}” (a mesma busca, o mesmo volume): não ocupa outra vaga (RF19)`);
+    }
+  }
+  const porBusca = new Map<string, { t: ImprovementTarget; k: ImprovementKeyword }[]>();
+  for (const t of participantes) for (const k of membrosMoveis(t)) { const chave = sameSearchKey(k.keyword); porBusca.set(chave, [...(porBusca.get(chave) ?? []), { t, k }]); }
+  // A principal de verdade (com volume) é dona da busca dela; a página (o Assunto, volume 0) não: a grafia com volume da mesma busca vai para o artigo dela.
+  const principalDe = new Map(participantes.flatMap(t => { const p = t.primaryId !== t.principalSubject!.keywordId ? byId.get(t.primaryId ?? "") : undefined; return p ? [[sameSearchKey(p.keyword), t.id] as const] : []; }));
+  for (const [chave, itens] of porBusca) {
+    const alvos = [...new Set(itens.map(item => item.t.id))];
+    const doPrincipal = principalDe.get(chave);
+    if (alvos.length < 2 && !(doPrincipal && alvos.some(id => id !== doPrincipal))) continue;
+    const nota = (t: ImprovementTarget) => {
+      const deles = itens.filter(item => item.t.id === t.id);
+      const leituras = itens.map(item => cabeNoAssunto(t, item.k));
+      return { cabe: leituras.some(Boolean) ? 1 : 0, cover: Math.max(0, ...leituras.map(m => m?.cover ?? 0)), leva: deles.length ? 1 : 0, volume: Math.max(0, ...deles.map(item => item.k.volume ?? 0)), ordem: participantes.indexOf(t) };
+    };
+    const dono = doPrincipal ? participantes.find(t => t.id === doPrincipal)! : [...participantes].sort((a, b) => { const x = nota(a), y = nota(b); return y.cabe - x.cabe || y.cover - x.cover || y.leva - x.leva || y.volume - x.volume || x.ordem - y.ordem; })[0];
+    const doDono = itens.filter(item => item.t.id === dono.id);
+    const fora = itens.filter(item => item.t.id !== dono.id).sort((a, b) => (b.k.volume ?? 0) - (a.k.volume ?? 0));
+    if (!doDono.length && !doPrincipal && fora.length && vagas(dono) > 0 && cabeNoAssunto(dono, fora[0].k)) { const primeiro = fora.shift()!; move(primeiro.k, primeiro.t, dono); }
+    for (const item of fora) if (item.t.memberIds.includes(item.k.id)) larga(item.k, item.t, `é a mesma busca que o artigo “${dono.theme}” já leva (canibalização entre os artigos do grupo)`);
+  }
+  // 3 · a keyword que não cabe no Assunto do artigo onde está e cabe no de UM outro artigo do recorte vai para ele.
+  for (const a of participantes) for (const k of membrosMoveis(a)) {
+    if (!k.volumeValidated || !(k.volume! > 0) || cabeNoAssunto(a, k)) continue;
+    const palavras = copyWords(k.keyword);
+    const destinos = participantes.filter(b => b.id !== a.id && vagas(b) > 0).flatMap(b => {
+      const m = cabeNoAssunto(b, k);
+      return m ? [{ b, cover: m.cover, afinidade: afinidadeNoSilo(b, linhas.get(b.id)!, palavras) }] : [];
+    }).sort((x, y) => y.cover - x.cover || y.afinidade - x.afinidade);
+    const [melhor, segundo] = destinos;
+    if (!melhor || (segundo && segundo.cover === melhor.cover && segundo.afinidade === melhor.afinidade)) continue;
+    move(k, a, melhor.b);
+  }
+  return { targets: novos, keywords: keywords.map(k => clones.get(k.id) ?? k), demoted, moves, drops };
+}
+/*
+ * 2026-10-19 · A MESMA RÉGUA EM TODO CAMINHO DO PUBLICADO (AGENTS.md §0.5; coordenador: "não pode sobrar caminho velho
+ * rodando ao lado"). A mesa D2.1, o "Reforçar publicados" e a diferenciação propõem a troca por
+ * `proposePublishedPrimarySwap`; com o Assunto declarado na página, eles leem o Assunto e a régua c daqui — a mesma
+ * `principalFitsSubject` do refazedor —, nunca a régua da identidade (T12) nem uma cópia.
+ */
+export type PublishedPageSubject = { keywordId: string; theme: string; slug: string | null; volumeState: "zero" | "low" | "with_volume" | "unknown"; intent?: string | null; entity?: string | null; territory?: BrandSerpTerritory | null };
+const sinaisMinimos = (keywordId: string, text: string, intent: string | null | undefined, entity: string | null | undefined): KeywordDnaSignals => ({ keywordId, text, intent: intent ?? null, secondaryIntent: null, funnel: null, semanticState: null, confidence: null, centralEntity: entity ?? null, modifiers: [], perceivedProblem: null, audience: null, desiredResult: null, editorialType: null, awarenessLevel: null, journeyStage: null, cannibalizationNote: null, dnaVersionId: null, dnaContentHash: null });
+/** A candidata (ou a principal atual) cabe no Assunto da página? `null` = cabe; senão, o motivo (a régua c inteira). */
+export function publishedSubjectPrincipalVerdict(page: PublishedPageSubject, candidate: { keywordId: string; keyword: string; intent?: string | null; entity?: string | null; volume?: number | null }): string | null {
+  const target: ImprovementTarget = { id: page.keywordId, kind: "published", theme: page.theme, note: null, primaryId: page.keywordId, post: "free", memberIds: [page.keywordId], territoryRef: null, slug: page.slug, url: null, canonical: null, signals: sinaisMinimos(page.keywordId, page.theme, page.intent, page.entity), principalSubject: { keywordId: page.keywordId, volumeState: page.volumeState }, articleExists: true, brandTerritory: page.territory ?? null };
+  return principalFitsSubject(target, { id: candidate.keywordId, keyword: candidate.keyword, volume: candidate.volume ?? null, volumeValidated: (candidate.volume ?? 0) > 0, signals: sinaisMinimos(candidate.keywordId, candidate.keyword, candidate.intent, candidate.entity) });
+}
+/** O Assunto da página publicada lido da linha (o resolvedor do Minerador e a régua do volume de §6.1); `null` sem Assunto ou página de Silo. */
+export function publishedPageSubjectFromRow(row: { id: unknown; keyword?: unknown; volume_search?: unknown; volume_source?: unknown; analise_semantica?: unknown }, slug: string | null, now = new Date()): PublishedPageSubject | null {
+  const semantic = row.analise_semantica && typeof row.analise_semantica === "object" ? row.analise_semantica as Record<string, unknown> : {};
+  const subject = resolveKeywordSubject(semantic);
+  if (!subject.declared) return null;
+  const standing = principalSubjectStanding({ volume_search: typeof row.volume_search === "number" ? row.volume_search : null, volume_source: typeof row.volume_source === "string" ? row.volume_source : null, analise_semantica: semantic }, now);
+  if (standing.outOfScope) return null;
+  const texto = (value: unknown) => typeof value === "string" && value.trim() && !/^pendente$/i.test(value.trim()) ? value.trim() : null;
+  return { keywordId: String(row.id), theme: subjectPhraseOf(String(row.keyword ?? ""), subject), slug, volumeState: standing.volumeState, intent: texto(semantic.intencao_principal), entity: texto(semantic.entidade_central) };
+}
+/** Depois da linha de sempre: a prévia diz o que mudou de artigo, e o gravador sabe a ordem (a origem primeiro). */
+function applySubjectReorganization(original: readonly ImprovementTarget[], reorg: SubjectReorganization, proposals: ImprovementProposal[], byId: ReadonlyMap<string, ImprovementKeyword>): ImprovementProposal[] {
+  if (!reorg.demoted.size && !reorg.moves.length && !reorg.drops.length) return proposals;
+  const nome = (id: string) => byId.get(id)?.keyword ?? id;
+  const tema = (id: string) => original.find(t => t.id === id)?.theme ?? id;
+  original.forEach((t, index) => {
+    const p = proposals[index];
+    if (!p) return;
+    p.currentPrimaryId = t.primaryId;
+    let mudou = false;
+    const sai = (id: string, frase: string) => {
+      p.memberIds = p.memberIds.filter(item => item !== id); p.addIds = p.addIds.filter(item => item !== id); p.transfers = p.transfers.filter(item => item !== id);
+      if (t.memberIds.includes(id) && !p.removeIds.includes(id)) p.removeIds = [...p.removeIds, id];
+      p.reasons.push(frase); mudou = true;
+    };
+    for (const d of reorg.drops.filter(d => d.from === t.id)) sai(d.keywordId, `“${nome(d.keywordId)}” sai do artigo (vai para “Keywords não agrupadas”, nunca some): ${d.reason}. Decisão sua na prévia.`);
+    for (const m of reorg.moves.filter(m => m.from === t.id)) {
+      const destino = proposals[original.findIndex(o => o.id === m.to)];
+      if (!destino?.memberIds.includes(m.keywordId)) { sai(m.keywordId, `“${nome(m.keywordId)}” sai do artigo (vai para “Keywords não agrupadas”, nunca some): não cabe no Assunto “${t.theme}”. Decisão sua na prévia.`); continue; }
+      sai(m.keywordId, `“${nome(m.keywordId)}” vai para o artigo “${tema(m.to)}”: serve ao Assunto dele, não a este (canibalização entre os artigos do grupo). As duas linhas são gravadas na mesma confirmação. Decisão sua na prévia.`);
+      p.movedOut = [...(p.movedOut ?? []), { keywordId: m.keywordId, toTargetId: m.to }];
+    }
+    for (const m of reorg.moves.filter(m => m.to === t.id)) {
+      if (!p.memberIds.includes(m.keywordId)) continue;
+      if (!p.addIds.includes(m.keywordId)) p.addIds = [...p.addIds, m.keywordId];
+      const k = byId.get(m.keywordId);
+      const outroSilo = Boolean(k && k.territoryRef !== t.territoryRef);
+      if (outroSilo && !p.transfers.includes(m.keywordId)) p.transfers = [...p.transfers, m.keywordId];
+      p.reasons.push(`“${nome(m.keywordId)}” vem do artigo “${tema(m.from)}”: serve ao Assunto deste${outroSilo ? " (muda de Silo junto)" : ""}. Para gravar, aceite também “${tema(m.from)}”.`);
+      p.movedIn = [...(p.movedIn ?? []), { keywordId: m.keywordId, fromTargetId: m.from }];
+      mudou = true;
+    }
+    const rebaixada = reorg.demoted.get(t.id);
+    if (rebaixada) {
+      const ficou = p.memberIds.includes(rebaixada.keywordId) && p.principalId !== rebaixada.keywordId;
+      p.reasons.push(`“${nome(rebaixada.keywordId)}” deixa de ser a principal: ${rebaixada.reason} (régua c; cobrança do dono de 19/10).${ficou ? " Fica como secundária de contexto." : ""}`);
+      if (p.principalId === t.principalSubject?.keywordId) p.subjectKeywordId = t.principalSubject.keywordId;
+      mudou = true;
+    }
+    if (mudou) { p.status = "ready"; p.evidenceBasis = p.evidenceBasis ?? "editorial_and_candidate_serp"; p.reasons = [...new Set(p.reasons)]; }
+  });
+  return proposals;
+}
+
 export function planArticleImprovements(input: {
+  targets: readonly ImprovementTarget[]; keywords: readonly ImprovementKeyword[]; evidence: readonly ImprovementEvidence[];
+  editorialPicks?: readonly ImprovementEditorialPick[];
+  ranking?: Readonly<Record<string, boolean | null>>;
+  listReading?: boolean;
+  serpVocabulary?: Readonly<Record<string, ImprovementSerpVocabulary>>;
+}): ImprovementProposal[] {
+  const reorg = reorganizePublishedSubjects(input.targets, input.keywords);
+  const proposals = planArticleImprovementsCore({ ...input, targets: reorg.targets, keywords: reorg.keywords });
+  return applySubjectReorganization(input.targets, reorg, proposals, new Map(reorg.keywords.map(k => [k.id, k])));
+}
+
+function planArticleImprovementsCore(input: {
   targets: readonly ImprovementTarget[]; keywords: readonly ImprovementKeyword[]; evidence: readonly ImprovementEvidence[];
   /** Escolhas da IA já validadas; valem só para quem ficou sem proposta pronta pela SERP. */
   editorialPicks?: readonly ImprovementEditorialPick[];
@@ -1100,7 +1730,7 @@ export function planArticleImprovements(input: {
     const kept = target.memberIds.filter(id => fixed.get(id) === target.id);
     let added = [...owners].filter(([id, owner]) => owner === target.id && !kept.includes(id)).map(([id]) => id);
     const candidates = [...kept, ...added].filter(id => eligible.some(e => e.targetId === target.id && e.keywordId === id)).map(id => byId.get(id)!).sort((a, b) => (eligible.find(e => e.targetId === target.id && e.keywordId === a.id)?.tier ?? 2) - (eligible.find(e => e.targetId === target.id && e.keywordId === b.id)?.tier ?? 2) || b.volume! - a.volume!);
-    const old = byId.get(target.primaryId ?? "");
+    const old = improvementCurrentPrincipal(target, byId);
     /*
      * Publicado: só a principal SEM volume é Livre para trocar (dono,
      * 2026-10-01: "só as que têm volume estão travadas ao slug"). Antes, uma
@@ -1110,8 +1740,20 @@ export function planArticleImprovements(input: {
      */
     // F4 — com principal declarada no plano, a melhoria nunca troca a principal (D1-bis).
     // 2026-10-17 · a principal de identidade (título ou slug) também nunca troca sozinha: as mais amplas só reforçam.
-    const identidade = Boolean(old) && !target.declaredPrincipalId && targetPrincipalIsIdentity(target, old);
-    const needsPrimary = target.declaredPrincipalId || identidade ? false : target.kind === "subject"
+    const identidadeBruta = Boolean(old) && !target.declaredPrincipalId && targetPrincipalIsIdentity(target, old);
+    /*
+     * 2026-10-18 · O ASSUNTO PELA PRINCIPAL (SDD 2026-10-18 §6.3-b/c). SUBSTITUI "Pilar troca, Suportes ficam" (17/10,
+     * noite): com volume 0 — da principal do plano/Assunto ou da PÁGINA publicada com Assunto — a proposta é de uma
+     * principal nova com volume que leva o núcleo do slug e cabe no Assunto (régua c), no Pilar (termo-cabeça: cauda
+     * curta, mais volume) e no Suporte (a faceta dele); publicado e novo. Volume definido fica (T1); desconhecido: nada.
+     */
+    const porVolume = Boolean(old) && principalSwapByVolume(target, old);
+    const pilarCabeca = porVolume && target.kind === "subject" && target.planRole === "Pilar";
+    const identidade = identidadeBruta && !porVolume;
+    // A régua nova vale no Assunto (plano ou sem plano) e no publicado COM o Assunto na página; o publicado sem Assunto espera o Minerador.
+    const naReguaNova = target.kind === "subject" || Boolean(target.principalSubject);
+    const desconhecido = naReguaNova && Boolean(old) && !target.declaredPrincipalId && !old!.volumeValidated && principalSwapStanding(target, old) === "unknown";
+    const needsPrimary = target.declaredPrincipalId || identidade || desconhecido ? false : porVolume ? true : target.kind === "subject"
       ? !old?.volumeValidated || (candidates[0]?.volume ?? 0) > (old.volume ?? 0)
       : target.post === "free" && !old?.volumeValidated;
     /*
@@ -1124,7 +1766,7 @@ export function planArticleImprovements(input: {
      * só quando a principal NÃO é a identidade do Assunto (fora do título e do
      * slug). Identidade fica, com pouco ou nenhum volume.
      */
-    const livreSemVolume = target.kind === "subject" && !target.declaredPrincipalId && !old?.volumeValidated && !identidade;
+    const livreSemVolume = (target.kind === "subject" || porVolume) && !target.declaredPrincipalId && (!old?.volumeValidated || porVolume) && !identidade && !desconhecido;
     const daLinhaDeCopy = (id: string) => copyByPair.get(`${target.id}:${id}`);
     /*
      * 2026-10-17 · ORDEM (SDD da linha única §13 D2, item 1 primeiro): a que leva
@@ -1133,10 +1775,12 @@ export function planArticleImprovements(input: {
      * Pilar"); depois, como antes, a mais próxima da principal e do slug, a de
      * mais evidência na SERP e o volume.
      */
-    const levaONucleo = (k: ImprovementKeyword) => daLinhaDeCopy(k.id)?.slugCore ?? subjectSlugCoreSwap(target, old, k);
+    // 2026-10-18 · no Suporte, o pedaço da principal antiga (a cabeça dela) é do Pilar: a principal nova do Suporte é a faceta dele (§15.10).
+    const pedacoDaAntiga = (k: ImprovementKeyword) => { if (!old) return false; const antiga = copyWords(old.keyword), dela = copyWords(k.keyword); return dela.size < antiga.size && [...dela].every(word => antiga.has(word)); };
+    const levaONucleo = (k: ImprovementKeyword) => daLinhaDeCopy(k.id)?.slugCore ?? (target.kind === "subject" ? subjectSlugCoreSwap(target, old, k) : carriesSlugCore(target.slug, k, target.signals.centralEntity));
     const pilar = target.planRole === "Pilar";
-    const pelaLinha = livreSemVolume && candidates.some(k => daLinhaDeCopy(k.id))
-      ? candidates.filter(k => daLinhaDeCopy(k.id) ? daLinhaDeCopy(k.id)!.principalOk : keepsIntent(old, k) || subjectSlugCoreSwap(target, old, k))
+    const pelaLinha = livreSemVolume && (porVolume || candidates.some(k => daLinhaDeCopy(k.id)))
+      ? candidates.filter(k => k.id !== target.primaryId && (porVolume ? principalFitsSubject(target, k) === null && !(target.planRole === "Suporte" && pedacoDaAntiga(k)) : daLinhaDeCopy(k.id) ? daLinhaDeCopy(k.id)!.principalOk : keepsIntent(old, k) || subjectSlugCoreSwap(target, old, k)))
         .sort((a, b) => {
           const x = daLinhaDeCopy(a.id)?.match, y = daLinhaDeCopy(b.id)?.match, na = levaONucleo(a), nb = levaONucleo(b);
           return Number(nb) - Number(na)
@@ -1144,13 +1788,16 @@ export function planArticleImprovements(input: {
             || (y?.cover ?? 0) - (x?.cover ?? 0) || (y?.serp ?? 0) - (x?.serp ?? 0) || b.volume! - a.volume!;
         })
       : null;
-    const principalId = target.declaredPrincipalId ?? (needsPrimary ? (pelaLinha ? pelaLinha[0]?.id ?? target.primaryId : candidates[0]?.id ?? target.primaryId) : target.primaryId);
+    const principalId = target.declaredPrincipalId ?? (needsPrimary ? (pelaLinha ? pelaLinha[0]?.id ?? target.primaryId : pilarCabeca ? target.primaryId : candidates[0]?.id ?? target.primaryId) : target.primaryId);
     /*
      * 2026-10-17 · no Suporte do plano, a cabeça mais ampla que a principal não
      * fica: ela é do Pilar. Com a troca, compara com a NOVA principal (mais
      * volume e só palavras dela); sem troca e com a principal sem volume, toda
      * busca que é só um pedaço da principal ("claro internet residencial" em
      * "claro vivo ou tim internet residencial") é mais ampla que o artigo.
+     * SUBSTITUÍDO em 2026-10-18, na parte "com volume" (amarelo, a instalação):
+     * só a cabeça do núcleo do Pilar/Silo é do Pilar; a cabeça da faceta do
+     * próprio Suporte reforça o contexto até 5.000 (`suporteReservaAoPilar`).
      */
     /*
      * 2026-10-17 · com a principal de identidade SEM volume (ela fica), as buscas
@@ -1164,8 +1811,11 @@ export function planArticleImprovements(input: {
     if (target.planRole === "Suporte" && principalId) {
       const base = byId.get(principalId);
       const pedacoDa = (frase: string | undefined, k: ImprovementKeyword) => { const da = copyWords(frase), dela = copyWords(k.keyword); return dela.size < da.size && [...dela].every(word => da.has(word)); };
-      const cabecaDoPedaco = (k: ImprovementKeyword) => pedacoDa(base?.keyword ?? old?.keyword, k) && (!identidade || (k.volume ?? 0) > BROAD_HEAD_MAX_VOLUME);
-      added = added.filter(id => id === principalId || !(base?.volumeValidated ? cabecaDaPrincipal(base, byId.get(id)!) || headOverPrincipal(base, byId.get(id)!) : cabecaDoPedaco(byId.get(id)!)));
+      // 2026-10-18 · com a principal de identidade que FICA (volume definido, desconhecido, ou volume 0 sem candidata), as mais amplas reforçam o contexto (T12, parte que continua).
+      const mantemAIdentidade = identidadeBruta && principalId === target.primaryId;
+      const cabecaDoPedaco = (k: ImprovementKeyword) => pedacoDa(base?.keyword ?? old?.keyword, k) && (!mantemAIdentidade || (k.volume ?? 0) > BROAD_HEAD_MAX_VOLUME);
+      // 2026-10-18 · com volume, a MESMA régua das arestas: só a cabeça do núcleo do Pilar/Silo (ou acima de 5.000) sai; a da faceta do Suporte fica.
+      added = added.filter(id => id === principalId || !(base?.volumeValidated ? suporteReservaAoPilar(target, input.targets, linhaDeCopy.lines, base, byId.get(id)!) : cabecaDoPedaco(byId.get(id)!)));
     }
     // Avoid churn: a weak support leaves only when there is a real replacement.
     const weak = target.memberIds.filter(id => !kept.includes(id));
@@ -1180,7 +1830,14 @@ export function planArticleImprovements(input: {
     const provadoPeloPar = (id: string) => { const par = observations.get(`${target.id}:${id}`); return Boolean(par?.complete && par.sharedPages >= 2 && pairEdges.some(e => e.targetId === target.id && e.keywordId === id)); };
     const pelaCopy = [...new Set([...added, ...(principalId && principalId !== target.primaryId ? [principalId] : [])])].filter(id => daLinhaDeCopy(id) && !provadoPeloPar(id));
     const linha = pelaCopy.length ? improvementCopyLine(target, byId, input.serpVocabulary?.[target.id] ?? null) : null;
-    if (principalId && principalId !== target.primaryId && pelaCopy.includes(principalId)) {
+    if (porVolume && !pilarCabeca && principalId && principalId !== target.primaryId) {
+      reasons.push(principalSubjectSwapReason(target, old, byId.get(principalId)!, input.ranking?.[target.id]));
+    } else if (pilarCabeca && principalId && principalId !== target.primaryId) {
+      const nova = byId.get(principalId)!;
+      const nucleo = slugCoreWords(subjectSlugOf(target), target.signals.centralEntity).join(" + ");
+      const mesmaBuscaDela = members.filter(id => id !== principalId && sameSearchKey(byId.get(id)?.keyword) === sameSearchKey(nova.keyword)).map(id => byId.get(id)!).filter(Boolean);
+      reasons.push(`${PILLAR_HEAD_SWAP_LABEL}: “${nova.keyword}” (${nova.volume}) assume como principal do Pilar — é o termo-cabeça com volume que leva o núcleo do slug (${nucleo}) e a centralidade do Silo (entre as que levam o núcleo, a de cauda mais curta e mais volume; AGENTS.md §13)${mesmaBuscaDela.length ? `; ${mesmaBuscaDela.map(k => `“${k.keyword}” (${k.volume})`).join(", ")} é a mesma busca e fica como secundária` : ""}. “${old?.keyword ?? target.theme}” continua no artigo como o Assunto (âncora), e o título e o slug do plano ficam. Proposta: decisão sua na prévia (dono, 17/10: “Pilar troca, Suportes ficam”).`);
+    } else if (principalId && principalId !== target.primaryId && pelaCopy.includes(principalId)) {
       const nova = byId.get(principalId)!;
       const peloNucleo = daLinhaDeCopy(principalId)?.slugCore === true;
       const nucleo = peloNucleo ? slugCoreWords(subjectSlugOf(target), target.signals.centralEntity).join(" + ") : "";
@@ -1193,11 +1850,16 @@ export function planArticleImprovements(input: {
      * "Concluir formação" a recusava com "use Procurar outra principal": a regra da identidade não chegava ao Concluir.
      * A principal entra nos membros por `enforceSubjectMembership` (a de sempre).
      */
-    const formaOPrimeiro = target.kind === "subject" && !target.memberIds.length && Boolean(principalId) && principalId === target.primaryId && identidade && !old?.published;
+    // O Pilar de identidade sem termo-cabeça que leve o núcleo também forma com a principal de identidade (como antes).
+    const formaOPrimeiro = target.kind === "subject" && !target.memberIds.length && Boolean(principalId) && principalId === target.primaryId && identidadeBruta && !old?.published;
+    const identidadeFica = identidade || (pilarCabeca && principalId === target.primaryId);
     // 2026-10-17 · a principal de identidade fica com pouco ou nenhum volume; a linha diz por quê.
-    if (identidade && old && !old.volumeValidated && (target.kind === "subject" || target.post === "free") && (added.length || candidates.length || formaOPrimeiro)) reasons.push(identityPrincipalReason(target, old));
-    if (livreSemVolume && pelaLinha && !pelaLinha.length && added.length) reasons.push(`Nenhuma candidata com volume mantém a intenção de “${old?.keyword ?? target.theme}” nem leva o núcleo do slug: a principal fica e o artigo só recebe reforço.`);
+    if (identidadeFica && old && !old.volumeValidated && (target.kind === "subject" || target.post === "free") && (added.length || candidates.length || formaOPrimeiro)) reasons.push(identityPrincipalReason(target, old));
+    if (pilarCabeca && principalId === target.primaryId) reasons.push(`${PILLAR_HEAD_SWAP_LABEL}: nenhuma busca com volume desta leitura leva o núcleo do slug (${slugCoreWords(subjectSlugOf(target), target.signals.centralEntity).join(" + ")}); a principal de identidade fica até aparecer o termo-cabeça.`);
+    if (livreSemVolume && !porVolume && !pilarCabeca && pelaLinha && !pelaLinha.length && added.length) reasons.push(`Nenhuma candidata com volume mantém a intenção de “${old?.keyword ?? target.theme}” nem leva o núcleo do slug: a principal fica e o artigo só recebe reforço.`);
     for (const id of pelaCopy.filter(id => id !== principalId || principalId === target.primaryId)) reasons.push(`${COPY_LINE_LABEL}: ${copyReason(byId.get(id)!, daLinhaDeCopy(id)!.match, linha?.principalText ?? null)}`);
+    if (desconhecido) reasons.push(PRINCIPAL_SUBJECT_UNKNOWN_REASON);
+    if (porVolume && principalId === target.primaryId) reasons.push(volumeZeroWithoutCandidateReason(target, old));
     const mudou = added.length || principalId !== target.primaryId || formaOPrimeiro;
     /*
      * 2026-10-17 · "ADEQUADO" SÓ COM REFORÇO SUFICIENTE (amarelo: "Instalação de internet…" saiu "Já formado e adequado"
@@ -1237,7 +1899,7 @@ export function planArticleImprovements(input: {
     }
   }
   guardCannibalPairs(input.targets, proposals, byId, () => true);
-  if (input.listReading === false) return enforceSubjectMembership(input.targets, enforceChosenPrincipals(input.targets, enforceDeclaredPrincipals(input.targets, proposals, byId), byId), byId);
+  if (input.listReading === false) return enforcePageSubject(input.targets, enforceSubjectMembership(input.targets, enforceChosenPrincipals(input.targets, enforceDeclaredPrincipals(input.targets, proposals, byId), byId), byId), byId, observations);
   /*
    * 4 · LEITURA DA LISTA PELO CÓDIGO (dono, 2026-09-30: "não está se
    * aproveitando bem das keywords da lista"). Quem ficou sem proposta pronta —
@@ -1301,7 +1963,86 @@ export function planArticleImprovements(input: {
     if (troca) proposals[index] = troca;
   });
   for (const p of proposals) { p.exclusions = [...new Set(p.exclusions)]; p.reasons = [...new Set(p.reasons)]; }
-  return enforceSubjectMembership(input.targets, enforceChosenPrincipals(input.targets, enforceDeclaredPrincipals(input.targets, proposals, byId), byId), byId);
+  return enforcePageSubject(input.targets, enforceSubjectMembership(input.targets, enforceChosenPrincipals(input.targets, enforceDeclaredPrincipals(input.targets, proposals, byId), byId), byId), byId, observations);
+}
+
+/*
+ * 2026-10-18 · A PÁGINA VIRA O ASSUNTO (SDD `sdd-assunto-pela-principal-e-volume-2026-10-18.md` §6.3-d/e/f/g; X12 e U12
+ * SUBSTITUÍDOS em parte). Uma regra só, depois de TODAS as leituras (pares da SERP, linha de copy, IA, lista pelo código,
+ * reserva do slug): com o Assunto declarado na página publicada,
+ *   - trocada a principal (agora ou no modo antigo), a página sai das secundárias e fica como o `subject` do artigo
+ *     (continua sendo a página: URL, slug e canonical não mudam) — a antiga não fica secundária;
+ *   - a página que continua a principal com volume definido (volume baixo) é o Assunto E a principal: só reforço;
+ *   - a secundária que contradiz o Assunto (público, preço do consumidor, restrição, localidade, grafia quebrada) sai do
+ *     artigo e vai para "Keywords não agrupadas" (nunca some); a ampla de mesma intenção fica como contexto.
+ * Tudo proposto na prévia; decisão do dono. O primeiro ArticleDNA do publicado nasce com a página entre as keywords.
+ */
+/*
+ * 2026-10-19 · A SAÍDA POR INTENÇÃO SÓ PELA SERP (régua c da SDD 2026-10-18 §6.3-c: "não contradiz o DNA do Assunto —
+ * … localidade e intenção pela SERP (4 lentes)"; C9; RF10: "a intenção que barra é a da SERP"). Caso real do verde
+ * (19/10): "tráfego orgânico" (1.000), "oque é trafego organico" (590) e "tráfego pago e orgânico" (140) saíam de
+ * "tráfego pago vs orgânico…" por "outra intenção (Comercial × Informativa)", sem parecer da SERP (volume 1.870 → 140).
+ * Agora: a intenção que só diverge no rótulo do DNA não tira a secundária (ela fica, e a prévia diz que a SERP decide);
+ * a que a SERP mostrou diferente tira — salvo com 3+ páginas em comum com a página nas 4 lentes (RF11: aí é aviso).
+ */
+export const INTENT_DNA_ONLY_STAYS = "fica: a intenção só diverge no rótulo do DNA e a SERP não decidiu a intenção das duas (quem tira por intenção é a SERP, régua c)";
+function enforcePageSubject(targets: readonly ImprovementTarget[], proposals: ImprovementProposal[], byId: ReadonlyMap<string, ImprovementKeyword>, observations?: ReadonlyMap<string, ImprovementEvidence>): ImprovementProposal[] {
+  targets.forEach((target, index) => {
+    const p = proposals[index];
+    const pagina = target.kind === "published" && target.articleExists !== false ? target.principalSubject?.keywordId ?? null : null;
+    if (!pagina || !p.principalId || !target.territoryRef) return;
+    let mudou = false;
+    if (p.principalId !== pagina) {
+      p.subjectKeywordId = pagina;
+      if (p.memberIds.includes(pagina)) {
+        p.memberIds = p.memberIds.filter(id => id !== pagina);
+        if (target.memberIds.includes(pagina) && !p.removeIds.includes(pagina)) p.removeIds = [...p.removeIds, pagina];
+      }
+      const nomeDaPagina = byId.get(pagina)?.keyword ?? target.theme;
+      p.reasons = p.reasons.filter(reason => !(reason.includes(`“${nomeDaPagina}”`) && /fica como secundária/.test(reason)) && !/^Principal mais ampla, com volume: .* a antiga fica como secundária\.$/.test(reason));
+      p.reasons.push(PAGE_BECOMES_SUBJECT_REASON);
+      mudou = true;
+    } else {
+      const estado = target.principalSubject?.volumeState;
+      if (estado === "low" || estado === "with_volume") {
+        p.subjectKeywordId = pagina;
+        p.reasons.push("Assunto pela principal: a página é o Assunto do artigo e continua a principal (volume definido); o Arquiteto só acrescenta reforço.");
+        mudou = (target.currentSubjectKeywordId ?? null) !== pagina;
+      } else if (estado === "zero") {
+        // 2026-10-19 · o Assunto como foco: a página (volume 0) é o Assunto e a principal, com a vaga da principal com volume aberta.
+        p.subjectKeywordId = pagina;
+        mudou = (target.currentSubjectKeywordId ?? null) !== pagina;
+      }
+    }
+    for (const id of [...p.memberIds]) {
+      if (id === p.principalId || id === pagina) continue;
+      const k = byId.get(id);
+      const detalhe = k ? principalSubjectConflictDetail(target, k) : null;
+      if (!k || !detalhe) continue;
+      const conflito = detalhe.reason;
+      if (detalhe.kind === "intent_dna") {
+        p.reasons.push(`“${k.keyword}” ${INTENT_DNA_ONLY_STAYS} (${conflito}).`);
+        continue;
+      }
+      const par = observations?.get(`${target.id}:${id}`);
+      if (detalhe.kind === "intent_serp" && par?.complete && par.sharedPages >= 3) {
+        p.reasons.push(`Aviso: “${k.keyword}” — ${conflito}, mas ${par.sharedPages} páginas do top 10 coincidem com a página nas 4 lentes; fica (quem diz o assunto são as páginas).`);
+        continue;
+      }
+      p.memberIds = p.memberIds.filter(item => item !== id);
+      p.addIds = p.addIds.filter(item => item !== id);
+      p.transfers = p.transfers.filter(item => item !== id);
+      if (target.memberIds.includes(id) && !p.removeIds.includes(id)) p.removeIds = [...p.removeIds, id];
+      p.reasons.push(`“${k.keyword}” sai do artigo (vai para “Keywords não agrupadas”, nunca some): ${conflito}. Decisão sua na prévia.`);
+      mudou = true;
+    }
+    if (mudou && (p.subjectKeywordId ?? null) !== (target.currentSubjectKeywordId ?? null) || p.removeIds.length) {
+      p.status = "ready";
+      p.evidenceBasis = p.evidenceBasis ?? "editorial_and_candidate_serp";
+    }
+    p.reasons = [...new Set(p.reasons)];
+  });
+  return proposals;
 }
 
 /** 2026-10-16 · o motivo da prévia quando a keyword do Assunto deixa de ser a principal. */
@@ -1458,11 +2199,13 @@ export function volumelessPrincipalSwap(
   ranking?: boolean | null,
   contradicts: (keywordId: string) => boolean = () => false,
 ): ImprovementProposal | null {
-  if (target.kind !== "published" || target.post !== "free" || !target.territoryRef) return null;
-  const atual = byId.get(target.primaryId ?? "");
-  if (atual?.volumeValidated && (atual.volume ?? 0) > 0) return null;
-  // 2026-10-17 · Principal de identidade (o slug publicado foi feito dela): fica; a reserva não troca.
-  if (targetPrincipalIsIdentity(target, atual)) return null;
+  const atual = improvementCurrentPrincipal(target, byId);
+  // 2026-10-18 · o volume 0 da página com Assunto libera a principal (mesmo "Travado ao slug"), e a candidata segue a régua c.
+  const porVolume = principalSwapByVolume(target, atual ?? null);
+  if (target.kind !== "published" || (target.post !== "free" && !porVolume) || !target.territoryRef) return null;
+  if (atual?.volumeValidated && (atual.volume ?? 0) > 0 && !porVolume) return null;
+  // 2026-10-17 · Principal de identidade (o slug publicado foi feito dela): fica; a reserva não troca. (2026-10-18: só com volume definido ou desconhecido.)
+  if (!porVolume && (identityHoldsPrincipal(target, atual) || (target.principalSubject && principalSwapStanding(target, atual ?? null) === "unknown"))) return null;
   const doSlug = aliased(slugWords(targetSubjectText(target)), CORE_ALIASES);
   const nucleo = aliased(slugCoreWords(targetSubjectText(target)), CORE_ALIASES);
   const afinidade = (k: ImprovementKeyword) => {
@@ -1472,18 +2215,23 @@ export function volumelessPrincipalSwap(
   };
   const melhor = target.memberIds
     .map(id => byId.get(id))
-    .filter((k): k is ImprovementKeyword => Boolean(k) && k!.id !== target.primaryId && !k!.published && k!.volumeValidated && (k!.volume ?? 0) > 0 && (!k!.ownerId || k!.ownerId === target.id) && !contradicts(k!.id))
+    .filter((k): k is ImprovementKeyword => Boolean(k) && k!.id !== target.primaryId && !k!.published && k!.volumeValidated && (k!.volume ?? 0) > 0 && (!k!.ownerId || k!.ownerId === target.id) && !contradicts(k!.id) && (!porVolume || principalFitsSubject(target, k!) === null))
     .map(k => ({ k, a: afinidade(k) }))
     .filter(item => item.a.comuns > 0)
     .sort((x, y) => y.a.nucleo - x.a.nucleo || y.a.comuns - x.a.comuns || y.a.precisao - x.a.precisao || (y.k.volume ?? 0) - (x.k.volume ?? 0))[0]?.k;
   if (!melhor) return null;
+  // 2026-10-18 · com o Assunto na página, a página sai das secundárias e fica como o Assunto (SDD do Assunto pela principal §6.3-d).
+  const pagina = target.principalSubject?.keywordId ?? null;
+  const viraAssunto = Boolean(pagina && pagina !== melhor.id && target.memberIds.includes(pagina));
   return {
     targetId: target.id, kind: target.kind, theme: target.theme,
-    currentPrimaryId: target.primaryId, principalId: melhor.id, memberIds: [...target.memberIds],
-    addIds: [], removeIds: [], transfers: [], angle: angleOf(melhor), exclusions: [],
+    currentPrimaryId: target.primaryId, principalId: melhor.id, memberIds: viraAssunto ? target.memberIds.filter(id => id !== pagina) : [...target.memberIds],
+    addIds: [], removeIds: viraAssunto ? [pagina!] : [], transfers: [], angle: angleOf(melhor), exclusions: [],
+    ...(pagina && pagina !== melhor.id ? { subjectKeywordId: pagina } : {}),
     reasons: [
       "URL, slug, canonical e Silo publicados preservados.",
-      `Principal sem volume com Posto Livre: “${melhor.keyword}” (${melhor.volume}), já no artigo e a mais próxima do slug em sentido e palavras, assume; “${atual?.keyword ?? target.theme}” fica como secundária. Nada entra nem sai.`,
+      porVolume ? principalSubjectSwapReason(target, atual, melhor, ranking) : `Principal sem volume com Posto Livre: “${melhor.keyword}” (${melhor.volume}), já no artigo e a mais próxima do slug em sentido e palavras, assume; “${atual?.keyword ?? target.theme}” fica como secundária. Nada entra nem sai.`,
+      ...(viraAssunto ? [PAGE_BECOMES_SUBJECT_REASON] : []),
       "A SERP desta composição é relida pelo cache ao gravar e decide.",
       ...(ranking === true ? ["A página ranqueia hoje para a frase antiga: risco de ranking é aviso, não revoga o Posto Livre."] : []),
     ],
@@ -1536,7 +2284,7 @@ function guardCannibalPairs(targets: readonly ImprovementTarget[], proposals: Im
     const a = proposals[i], b = proposals[j];
     if (a.kind !== "published" || b.kind !== "published") continue;
     const ta = targets[i], tb = targets[j];
-    if (collisionKey(ta) !== collisionKey(tb) && !(knownEqual(ta.signals.centralEntity, tb.signals.centralEntity) && knownEqual(ta.signals.perceivedProblem, tb.signals.perceivedProblem) && knownEqual(ta.signals.intent, tb.signals.intent))) continue;
+    if (collisionKey(ta) !== collisionKey(tb) && !(knownEqual(ta.signals.centralEntity, tb.signals.centralEntity) && knownEqual(ta.signals.perceivedProblem, tb.signals.perceivedProblem) && sameIntent(ta.signals.intent, tb.signals.intent))) continue;
     if (!a.angle || !b.angle || key(a.angle) === key(b.angle) || key(a.angle).replace(/captar clientes|atrair pacientes/g, "captacao") === key(b.angle).replace(/captar clientes|atrair pacientes/g, "captacao")) {
       /*
        * Diferenciar por GRUPOS DE KEYWORDS (dono, 2026-09-30): "como captar

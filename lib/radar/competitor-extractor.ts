@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { RadarExtractionPageSchema, RadarObservedLinkSchema, type RadarExtractionPage } from "./analysis-contracts.ts";
@@ -358,7 +359,12 @@ export function stripHtmlMarkup(html: string): string {
   return stripMarkup(html);
 }
 
-export async function extractCompetitorPage(rawUrl: string, options: { fetchImpl?: typeof fetch; lookupImpl?: typeof lookup; timeoutMs?: number; now?: string; keyword?: string } = {}): Promise<RadarExtractionPage> {
+/** O id da página extraída: hash da URL inteira (32 caracteres base64url do SHA-256). */
+export function competitorPageId(url: string): string {
+  return `competitor:${createHash("sha256").update(url).digest("base64url").slice(0, 32)}`;
+}
+
+export async function extractCompetitorPage(rawUrl: string, options:{ fetchImpl?: typeof fetch; lookupImpl?: typeof lookup; timeoutMs?: number; now?: string; keyword?: string } = {}): Promise<RadarExtractionPage> {
   validateExternalUrl(rawUrl);
   try {
     const { url: current, response } = await fetchGuardedExternalResponse(rawUrl, { fetchImpl: options.fetchImpl, lookupImpl: options.lookupImpl, timeoutMs: options.timeoutMs });
@@ -379,7 +385,13 @@ export async function extractCompetitorPage(rawUrl: string, options: { fetchImpl
     const html = await readBody(response);
     if (!/<html\b|<body\b/i.test(html)) throw new CompetitorExtractionError("invalid_html", "A resposta nao contem HTML reconhecivel.");
     const body = stripMarkup(html);
-    const pageId = `competitor:${Buffer.from(current.toString()).toString("base64url").slice(0, 32)}`;
+    /*
+     * 2026-10-18 · o id é o hash da URL INTEIRA. O base64 cortado em 32 cobria só
+     * "https://www.<domínio>": páginas do mesmo site colidiam (teste real do amarelo,
+     * chaves React duplicadas em minhaconexao, claro e net). A referência congelada
+     * continua resolvida por URL normalizada (`research-read-model`).
+     */
+    const pageId = competitorPageId(current.toString());
     const h1 = tags(html, "h1");
     const h2 = tags(html, "h2");
     const h3 = tags(html, "h3");

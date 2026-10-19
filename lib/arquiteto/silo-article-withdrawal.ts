@@ -49,9 +49,11 @@ export const SILO_ARTICLE_WITHDRAWAL_REFUSALS = {
   SILO_PAGE_NOT_FOUND: "O Silo não tem SiloPage: o par SiloDNA + SiloPage precisa existir para versionar junto.",
   SILO_PAIR_INCOHERENT: "A SiloPage vigente não aponta para a versão vigente do SiloDNA; recarregue antes de retirar.",
   ARTICLE_NOT_IN_SILO: "Este artigo não está no Silo.",
-  ARTICLE_IS_PILLAR: "Este artigo é o Pilar do Silo: troque o Pilar antes de retirá-lo.",
+  ARTICLE_IS_PILLAR: "Este artigo é o Pilar do Silo: troque o Pilar antes de retirá-lo, ou desfaça o Silo inteiro (“Desfazer Silo”, Pilar incluído).",
   ARTICLE_NOT_FOUND: "O ArticleDNA deste artigo não foi encontrado nesta marca.",
+  /** SUBSTITUÍDO em 2026-10-18 (o dono: "tem que poder apagar … não interessa qual seja o estado"): não recusa mais; vira aviso da prévia. */
   ARTICLE_PUBLISHED: "Este artigo está publicado: publicado não sai por aqui (URL, slug e canonical ficam como estão).",
+  /** SUBSTITUÍDO em 2026-10-18: não recusa mais; o item adiante sai da operação (estado "retirado") na mesma ação. */
   ARTICLE_IN_DOWNSTREAM: "Este artigo já seguiu para outra etapa (Radar, Redator ou Publicações): retire por lá antes.",
 } as const;
 export type SiloArticleWithdrawalRefusalCode = keyof typeof SILO_ARTICLE_WITHDRAWAL_REFUSALS;
@@ -95,6 +97,8 @@ export type SiloArticleWithdrawalPlan = {
   /** O que muda, em frases para a prévia. */
   changes: string[];
   warnings: string[];
+  /** 2026-10-18 · aditivo: as etapas adiante onde o artigo tem item (saem da operação na mesma ação). */
+  downstreamStages?: string[];
 };
 
 export type SiloArticleWithdrawalRefusal = { ok: false; code: SiloArticleWithdrawalRefusalCode; message: string };
@@ -146,8 +150,17 @@ export function planSiloArticleWithdrawal(input: SiloArticleWithdrawalInput): Si
 
   const artigo = artigoVigente ?? latestBy(input.articleDnaVersions, version => version.payload.articleId === sai && version.payload.brandId === input.brandId);
   if (!artigo) return refuse("ARTICLE_NOT_FOUND");
-  if (artigo.payload.publishedIdentityRef) return refuse("ARTICLE_PUBLISHED");
-  if (input.downstreamStages?.length) return refuse("ARTICLE_IN_DOWNSTREAM");
+  /*
+   * 2026-10-18 (decisão do dono, literal: "tem que poder apagar sim não interessa qual seja o estado … e alerta falando o
+   * que está apagando") · SUBSTITUÍDAS as recusas ARTICLE_PUBLISHED e ARTICLE_IN_DOWNSTREAM: o publicado sai de vigência no
+   * Arquiteto (no site nada muda) e o item adiante sai da operação (estado "retirado", a investigação fica), ditos na prévia.
+   */
+  const etapasAdiante = [...new Set(input.downstreamStages ?? [])].sort();
+  const nomeDaEtapa: Record<string, string> = { radar: "Radar", writer: "Redator", publications: "Publicações" };
+  const avisosDoEstado = [
+    ...(artigo.payload.publishedIdentityRef ? ["Este artigo está publicado: no site nada muda (URL, slug e canonical ficam como estão); no Arquiteto o ArticleDNA sai de vigência."] : []),
+    ...(etapasAdiante.length ? [`Este artigo já seguiu para o ${etapasAdiante.map(etapa => nomeDaEtapa[etapa] || etapa).join(" e ")}: o item sai da operação (“retirado”); a investigação e o documento ficam como histórico.`] : []),
+  ];
 
   if (soApontaParaOSilo) {
     const label = articleWithdrawalLabel(artigo.payload);
@@ -169,7 +182,8 @@ export function planSiloArticleWithdrawal(input: SiloArticleWithdrawalInput): Si
         `SiloDNA v${dna.versionNumber} e SiloPage v${page.versionNumber} não mudam: este artigo aponta para o Silo, mas não entrou na composição consolidada.`,
         `As ${artigo.payload.keywordReferences.length} keyword(s) dele ficam livres (voltam para “Keywords não agrupadas” do grupo delas) e podem formar o artigo do plano a que pertencem.`,
       ],
-      warnings: [],
+      warnings: avisosDoEstado,
+      downstreamStages: etapasAdiante,
     };
   }
 
@@ -231,7 +245,7 @@ export function planSiloArticleWithdrawal(input: SiloArticleWithdrawalInput): Si
     `ArticleDNA de “${label}”: a versão vigente (v${artigo.versionNumber}) recebe o status “rejeitado” com o motivo. Nada é apagado.`,
     `O Silo fica com ${restantes.length} artigo(s): o Pilar e ${suportes.length} suporte(s).`,
   ];
-  const warnings: string[] = [];
+  const warnings: string[] = [...avisosDoEstado];
   if (restantes.length < SILO_ARTICLE_RANGE.min) {
     warnings.push(`O Silo fica abaixo do mínimo do plano (${SILO_ARTICLE_RANGE.min} artigos)${raso ? "; a rasura fica registrada como dívida no SiloDNA" : ""}.`);
   }
@@ -250,11 +264,15 @@ export function planSiloArticleWithdrawal(input: SiloArticleWithdrawalInput): Si
     remainingArticleIds: restantes,
     changes,
     warnings,
+    downstreamStages: etapasAdiante,
   };
 }
 
-/** UUID determinístico (a partir de SHA-256): a mesma retirada repetida grava o mesmo evento. */
-async function deterministicUuid(seed: string): Promise<string> {
+/**
+ * UUID determinístico (a partir de SHA-256): a mesma retirada repetida grava o mesmo evento.
+ * 2026-10-18 · exportado (aditivo): o "Desfazer Silo" do Silo inteiro grava o MESMO evento `rejected` com a mesma regra de id.
+ */
+export async function deterministicUuid(seed: string): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed))).slice(0, 16);
   bytes[6] = (bytes[6] & 0x0f) | 0x50;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;

@@ -59,7 +59,7 @@ test("F5 · faixa, prévia por Silo, recusa por item e adoção com o hash da se
   };
   const avisos: string[] = [];
   const tela = await harness.montarRadar();
-  await tela.render(React.createElement(RadarArchitectUpdatePanel, { brandId: MARCA, articleIds: ["a", "b", "f"], onAdopted: (mensagem: string) => { avisos.push(mensagem); } }));
+  await tela.render(harness.comProductShell(React.createElement(RadarArchitectUpdatePanel, { brandId: MARCA, articleIds: ["a", "b", "f"], onAdopted: (mensagem: string) => { avisos.push(mensagem); } })));
   await esperar();
 
   assert.equal(tela.get("radar-architect-update-count").textContent, "Atualização disponível do Arquiteto · 3 artigo(s)", "o item fora do recorte da planilha não conta");
@@ -80,7 +80,8 @@ test("F5 · faixa, prévia por Silo, recusa por item e adoção com o hash da se
   await tela.click("radar-architect-update-confirm");
   await esperar();
   const post = chamadas.find(chamada => chamada.method === "POST")!;
-  assert.deepEqual(post.body, { action: "adopt", brandId: MARCA, articleIds: ["a"], decisionHash: await radarArchitectAdoptionDecisionHash([A]) });
+  assert.deepEqual(post.body, { action: "adopt", brandId: MARCA, articleIds: ["a"], decisionHash: await radarArchitectAdoptionDecisionHash([A]), continueOnScreen: true });
+  assert.ok(chamadas.some(chamada => chamada.method === "GET" && /continueOnScreen=1/.test(chamada.url)), "a prévia da tela é a que continua o congelamento novo");
   assert.equal(avisos.length, 1);
   assert.match(avisos[0], /1 artigo\(s\) passaram a transportar a versão nova do Arquiteto \(confirmado pelo servidor\)/);
   assert.ok(chamadas.filter(chamada => chamada.method === "GET").length >= 2, "depois de adotar, a prévia é relida");
@@ -92,7 +93,7 @@ test("F5 · sem atualização, a faixa não aparece", async () => {
   chamadas.length = 0;
   roteiro = () => ({ status: 200, body: { ok: true, items: [], adoptable: 0, refused: 0 } });
   const tela = await harness.montarRadar();
-  await tela.render(React.createElement(RadarArchitectUpdatePanel, { brandId: MARCA, articleIds: ["a"], onAdopted: () => undefined }));
+  await tela.render(harness.comProductShell(React.createElement(RadarArchitectUpdatePanel, { brandId: MARCA, articleIds: ["a"], onAdopted: () => undefined })));
   await esperar();
   assert.equal(tela.query("radar-architect-update"), null);
   tela.destroy();
@@ -101,5 +102,5 @@ test("F5 · sem atualização, a faixa não aparece", async () => {
 test("F5 · a planilha do Radar monta a faixa com os artigos visíveis (recorte da cor) e relê a mesa depois de adotar", () => {
   const pagina = semComentarios(readFileSync(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8"));
   assert.match(pagina, /const itensDaAtualizacaoDoArquiteto = useMemo\(\(\) => pipeline\.radarItems\.filter\(row => !filtroDoGrupo \|\| filtroDoGrupo\(row\)\)/);
-  assert.match(pagina, /<RadarArchitectUpdatePanel brandId=\{selectedBrandId \|\| null\} articleIds=\{itensDaAtualizacaoDoArquiteto\} onAdopted=\{async mensagem => \{ setNotice\(mensagem\); await pipeline\.reloadOperational\(\); \}\}\/>/);
+  assert.match(pagina, /<RadarArchitectUpdatePanel brandId=\{selectedBrandId \|\| null\} articleIds=\{itensDaAtualizacaoDoArquiteto\} onAdopted=\{async \(mensagem, congelarDeNovo\) => \{ setNotice\(mensagem\); await pipeline\.reloadOperational\(\); if \(congelarDeNovo\?\.length\) void congelarDeNovoRef\.current\?\.\(congelarDeNovo\); \}\}\/>/);
 });

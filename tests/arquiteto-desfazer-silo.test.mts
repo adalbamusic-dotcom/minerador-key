@@ -3,10 +3,14 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   TERRITORY_UNDO_KEYWORD_REASON,
+  TERRITORY_UNDO_WHOLE_SILO_KEYWORD_REASON,
+  buildTerritoryUndoRejections,
   planTerritoryUndo,
   resolveTerritoryUndoOutcome,
   territoryHasPublishedAddress,
   territoryUndoRefusals,
+  territoryUndoNotices,
+  territoryUndoWholeSiloReasons,
 } from "../lib/arquiteto/territory-undo.ts";
 import { humanSiloDecision, manualSiloCandidateDraft, publishedSiloCandidateDraft } from "../lib/arquiteto/silo-assignment.ts";
 import { TerritoryCandidateSchema, type TerritoryCandidate } from "../lib/arquiteto/territory.ts";
@@ -51,30 +55,69 @@ test("Silo sugerido sem endereço publicado pode ser desfeito", () => {
   assert.deepEqual(territoryUndoRefusals({ territory: sugerido({ lifecycleStatus: "candidate", decisionState: "pending" }), members: [], ...vazio }), []);
 });
 
-test("Silo publicado nunca é desfeito: slug publicado, proteção ou página do site", () => {
-  const recusas = territoryUndoRefusals({ territory: publicado(), members: [], ...vazio });
+/*
+ * 2026-10-18 · DUAS DECISÕES DO DONO NO MESMO DIA. De manhã ("Manter em duas etapas"): o Silo consolidado, do plano, com
+ * par ou com artigo aprovado sai pelo MESMO "Desfazer Silo", inteiro (Pilar incluído), com a prévia e a confirmação forte
+ * — SUBSTITUÍDAS as recusas CONSOLIDATED, APPROVED_ARTICLE_DNA, APPROVED_SILO_ARTIFACT e DECLARED_PLAN_SILO. Depois, a que a
+ * amplia (literal): "tem que poder apagar sim não interessa qual seja o estado … e alerta falando o que está apagando" —
+ * SUBSTITUÍDAS também PUBLISHED_ADDRESS, EXISTING_SILO, PUBLISHED_KEYWORD, KEYWORD_NOT_EDITABLE, ARTICLE_OF_OTHER_SILO,
+ * ARTICLE_PUBLISHED e ARTICLE_IN_DOWNSTREAM: viraram LINHAS da prévia (o alerta). Só fica "já desfeito".
+ */
+test("Silo publicado também se desfaz (inteiro): a prévia diz que o site não muda — nada é recusado pelo estado", () => {
   assert.equal(territoryHasPublishedAddress(publicado()), true);
-  assert.deepEqual(recusas.map(item => item.code), ["PUBLISHED_ADDRESS"]);
-  assert.match(recusas[0].message, /endereço publicado \(\/captacao-de-pacientes\)/);
+  const entrada = { territory: publicado(), members: [], ...vazio };
+  assert.deepEqual(territoryUndoRefusals(entrada), []);
+  assert.ok(territoryUndoWholeSiloReasons(entrada).includes("published"), "publicado = o Silo inteiro, com a confirmação forte");
+  assert.match(territoryUndoNotices(entrada)[0], /^Publicado: o Silo tem endereço no site \(\/captacao-de-pacientes\)\. A página no site, a URL, o slug e o canonical não mudam/);
   const soCanonical = sugerido({ slugState: { proposals: [], confirmed: null, publishedSlug: null, publishedCanonical: "https://x.com/a" } });
   assert.equal(territoryHasPublishedAddress(soCanonical), true);
 });
 
-test("recusa com motivo: consolidado, já rejeitado, ArticleDNA aprovado, SiloDNA/SiloPage aprovado, keyword publicada", () => {
+test("nada é recusado pelo estado; o alerta diz o que é publicado, adiante, de outro Silo ou fora da etapa", () => {
   const codigos = (input: Parameters<typeof territoryUndoRefusals>[0]) => territoryUndoRefusals(input).map(item => item.code);
-  assert.deepEqual(codigos({ territory: sugerido({ lifecycleStatus: "rejected", decisionState: "rejected" }), members: [], ...vazio }), ["NOT_UNDOABLE_STATE"]);
-  assert.deepEqual(codigos({ territory: { ...sugerido(), lifecycleStatus: "consolidated" }, members: [], ...vazio }), ["CONSOLIDATED"]);
-  assert.deepEqual(codigos({ territory: sugerido(), members: membros, approvedArticles: [{ articleId: "a1", label: "botox-rosto", territoryRef: null, keywordIds: ["kw-2"] }], siloArtifacts: [] }), ["APPROVED_ARTICLE_DNA"]);
-  // ArticleDNA aprovado que declara o território, mesmo sem keyword membro hoje.
-  assert.deepEqual(codigos({ territory: sugerido(), members: [], approvedArticles: [{ articleId: "a2", territoryRef: REF, keywordIds: ["kw-9"] }], siloArtifacts: [] }), ["APPROVED_ARTICLE_DNA"]);
-  // ArticleDNA aprovado de outro Silo, sem keyword deste: não bloqueia.
-  assert.deepEqual(codigos({ territory: sugerido(), members: membros, approvedArticles: [{ articleId: "a3", territoryRef: REF_PUB, keywordIds: ["kw-9"] }], siloArtifacts: [] }), []);
-  assert.deepEqual(codigos({ territory: sugerido(), members: [], approvedArticles: [], siloArtifacts: [{ kind: "silo_dna", territoryRef: REF, status: "approved" }] }), ["APPROVED_SILO_ARTIFACT"]);
-  assert.deepEqual(codigos({ territory: sugerido(), members: [], approvedArticles: [], siloArtifacts: [{ kind: "silo_page", territoryRef: REF, status: "proposed", published: true }] }), ["APPROVED_SILO_ARTIFACT"]);
-  // SiloDNA só proposto não bloqueia: ainda não é aprovação.
-  assert.deepEqual(codigos({ territory: sugerido(), members: [], approvedArticles: [], siloArtifacts: [{ kind: "silo_dna", territoryRef: REF, status: "proposed" }] }), []);
-  assert.deepEqual(codigos({ territory: sugerido(), members: [{ keywordId: "kw-1", label: "botox", isPublished: true }], ...vazio }), ["PUBLISHED_KEYWORD"]);
-  assert.deepEqual(codigos({ territory: sugerido(), members: [{ keywordId: "kw-1", isPublished: false, editable: false }], ...vazio }), ["KEYWORD_NOT_EDITABLE"]);
+  const inteiro = (input: Parameters<typeof territoryUndoRefusals>[0]) => territoryUndoWholeSiloReasons(input);
+  assert.deepEqual(codigos({ territory: sugerido({ lifecycleStatus: "rejected", decisionState: "rejected" }), members: [], ...vazio }), ["NOT_UNDOABLE_STATE"], "só o já desfeito");
+  const consolidado = { territory: { ...sugerido(), lifecycleStatus: "consolidated" as const }, members: [], ...vazio };
+  assert.deepEqual(codigos(consolidado), [], "consolidado: sai inteiro");
+  assert.deepEqual(inteiro(consolidado), ["consolidated"]);
+  const comArtigo = { territory: sugerido(), members: membros, approvedArticles: [{ articleId: "a1", label: "botox-rosto", territoryRef: null, keywordIds: ["kw-2"] }], siloArtifacts: [] };
+  assert.deepEqual(codigos(comArtigo), []);
+  assert.deepEqual(inteiro(comArtigo), ["approved_articles"], "o artigo aprovado com keyword do Silo sai junto");
+  // ArticleDNA aprovado que declara o território, mesmo sem keyword membro hoje: é deste Silo.
+  assert.deepEqual(inteiro({ territory: sugerido(), members: [], approvedArticles: [{ articleId: "a2", territoryRef: REF, keywordIds: ["kw-9"] }], siloArtifacts: [] }), ["approved_articles"]);
+  // ArticleDNA aprovado de outro Silo, sem keyword deste: não conta.
+  const deOutroSemKeyword = { territory: sugerido(), members: membros, approvedArticles: [{ articleId: "a3", territoryRef: REF_PUB, keywordIds: ["kw-9"] }], siloArtifacts: [] };
+  assert.deepEqual(codigos(deOutroSemKeyword), []);
+  assert.deepEqual(inteiro(deOutroSemKeyword), []);
+  // Artigo aprovado de OUTRO Silo que usa keyword deste: fica como está (a keyword só sai deste Silo) — dito no alerta.
+  const deOutro = { territory: sugerido(), members: membros, approvedArticles: [{ articleId: "a4", label: "botox-testa", territoryRef: REF_PUB, keywordIds: ["kw-1"] }], siloArtifacts: [] };
+  assert.deepEqual(codigos(deOutro), []);
+  assert.match(territoryUndoNotices(deOutro).join(" "), /De outro Silo: 1 artigo\(s\) \(“botox-testa”\) usam keyword deste Silo e ficam como estão/);
+  const comPar = { territory: sugerido(), members: [], approvedArticles: [], siloArtifacts: [{ kind: "silo_dna" as const, territoryRef: REF, status: "approved" }] };
+  assert.deepEqual(codigos(comPar), []);
+  assert.deepEqual(inteiro(comPar), ["silo_pair"]);
+  const paginaPublicada = { territory: sugerido(), members: [], approvedArticles: [], siloArtifacts: [{ kind: "silo_page" as const, territoryRef: REF, status: "proposed", published: true }] };
+  assert.deepEqual(codigos(paginaPublicada), []);
+  assert.ok(inteiro(paginaPublicada).includes("published"));
+  // SiloDNA só proposto não faz o Silo inteiro: ainda não é aprovação.
+  assert.deepEqual(inteiro({ territory: sugerido(), members: [], approvedArticles: [], siloArtifacts: [{ kind: "silo_dna", territoryRef: REF, status: "proposed" }] }), []);
+  // Já rejeitado (evento) não conta: nem o artigo nem o par.
+  assert.deepEqual(inteiro({ territory: sugerido(), members: membros, approvedArticles: [{ articleId: "a1", territoryRef: REF, keywordIds: ["kw-2"], status: "rejected" }], siloArtifacts: [{ kind: "silo_dna", territoryRef: REF, status: "rejected" }] }), []);
+  const keywordPublicada = { territory: sugerido(), members: [{ keywordId: "kw-1", label: "botox", isPublished: true }], ...vazio };
+  assert.deepEqual(codigos(keywordPublicada), []);
+  assert.ok(inteiro(keywordPublicada).includes("published"));
+  assert.match(territoryUndoNotices(keywordPublicada).join(" "), /Publicada: 1 keyword\(s\) \(“botox”\) saem do Silo no Arquiteto; URL, slug e canonical não mudam/);
+  const foraDaEtapa = { territory: sugerido(), members: [{ keywordId: "kw-1", label: "botox", isPublished: false, editable: false }], ...vazio };
+  assert.deepEqual(codigos(foraDaEtapa), []);
+  assert.match(territoryUndoNotices(foraDaEtapa).join(" "), /Fora da etapa do Arquiteto: 1 keyword\(s\) \(“botox”\) ficam como estão/);
+  // Artigo publicado e artigo já no Radar/Redator: saem, com o alerta (o site não muda; o item sai da operação).
+  const publicadoNoSilo = { ...consolidado, approvedArticles: [{ articleId: "a5", label: "botox-preco", territoryRef: REF, keywordIds: [], published: true }] };
+  assert.deepEqual(codigos(publicadoNoSilo), []);
+  assert.match(territoryUndoNotices(publicadoNoSilo).join(" "), /Publicado: 1 artigo\(s\) deste Silo estão no ar \(“botox-preco”\)\. No site nada muda/);
+  const adiante = { ...consolidado, approvedArticles: [{ articleId: "a6", label: "botox-dor", territoryRef: REF, keywordIds: [], downstreamStages: ["radar", "writer"] }] };
+  assert.deepEqual(codigos(adiante), []);
+  assert.ok(inteiro(adiante).includes("downstream"));
+  assert.match(territoryUndoNotices(adiante).join(" "), /Adiante: “botox-dor” está no Radar e Redator — o item sai da operação \(“retirado”\); a investigação e o documento ficam como histórico/);
 });
 
 test("o plano: território em rejected com ator e hora, nada apagado, keyword pela mesma decisão de Silo", () => {
@@ -82,6 +125,8 @@ test("o plano: território em rejected com ator e hora, nada apagado, keyword pe
   const plano = planTerritoryUndo({ territory, members: membros, ...vazio, actorUserId: ATOR, decidedAt: "2026-09-30T12:00:00.000Z" });
   assert.equal(plano.ok, true);
   if (!plano.ok) return;
+  assert.equal(plano.scope, "suggested", "o Silo sugerido: o de sempre");
+  assert.equal(plano.wholeSilo, null);
   const draft = TerritoryCandidateSchema.parse(plano.territoryDraft);
   assert.equal(draft.lifecycleStatus, "rejected");
   assert.equal(draft.decisionState, "rejected");
@@ -94,7 +139,9 @@ test("o plano: território em rejected com ator e hora, nada apagado, keyword pe
   assert.deepEqual(plano.keywordDecision, humanSiloDecision("unassigned", TERRITORY_UNDO_KEYWORD_REASON, "2026-09-30T12:00:00.000Z"));
   assert.deepEqual(plano.keywordDecision, { state: "unassigned", reason: TERRITORY_UNDO_KEYWORD_REASON, source: "human", decidedAt: "2026-09-30T12:00:00.000Z" });
   assert.deepEqual(plano.memberKeywordIds, ["kw-1", "kw-2"]);
-  assert.equal(planTerritoryUndo({ territory: publicado(), members: [], ...vazio, actorUserId: ATOR, decidedAt: "x" }).ok, false);
+  // 2026-10-18 · o publicado também se desfaz (inteiro); o site não muda.
+  const doPublicado = planTerritoryUndo({ territory: publicado(), members: [], ...vazio, actorUserId: ATOR, decidedAt: "x" });
+  assert.equal(doPublicado.ok && doPublicado.scope, "whole_silo");
 });
 
 test("o desfecho vem da releitura: aplicado, pela metade ou recusado", () => {
@@ -103,6 +150,108 @@ test("o desfecho vem da releitura: aplicado, pela metade ou recusado", () => {
   assert.equal(resolveTerritoryUndoOutcome({ territoryRef: REF, readbackLifecycle: "rejected", expectedMemberIds: ["a"], readbackMemberIds: ["a"] }).outcome, "partial");
   assert.equal(resolveTerritoryUndoOutcome({ territoryRef: REF, readbackLifecycle: "confirmed", expectedMemberIds: ["a", "b"], readbackMemberIds: ["a", "b"] }).outcome, "refused");
   assert.equal(resolveTerritoryUndoOutcome({ territoryRef: REF, readbackLifecycle: "confirmed", expectedMemberIds: [], readbackMemberIds: [] }).outcome, "refused");
+});
+
+/*
+ * 2026-10-18 · O SILO INTEIRO (decisão do dono "Manter em duas etapas"): o azul da WifiConecta — Silo do plano
+ * "Wi-Fi e fibra óptica", consolidado (SiloDNA/SiloPage v2), Pilar + 6 Suportes.
+ */
+const DNA_V2 = "dddddddd-0000-4000-8000-000000000002";
+const PAGE_V2 = "eeeeeeee-0000-4000-8000-000000000002";
+const HASH = `sha256:${"a".repeat(64)}`;
+const consolidadoDoPlano = (): TerritoryCandidate => TerritoryCandidateSchema.parse({
+  ...manualSiloCandidateDraft({ name: "Wi-Fi e fibra óptica", slug: "wifi-e-fibra-optica" }),
+  territoryRef: REF, brandId: BRAND, lifecycleStatus: "consolidated", decisionState: "confirmed",
+  consolidation: {
+    siloId: REF,
+    siloDnaVersionRef: { entityId: REF, versionId: DNA_V2, contentHash: HASH, versionNumber: 2 },
+    siloPageVersionRef: { entityId: `silo-page:${REF}`, versionId: PAGE_V2, contentHash: HASH, versionNumber: 2 },
+    consolidatedAt: "2026-10-17T12:00:00.000Z",
+  },
+});
+const ARTIGOS = ["pilar", "s1", "s2", "s3", "s4", "s5", "s6"];
+const artigosDoAzul = ARTIGOS.map((id, indice) => ({ articleId: `art-${id}`, label: indice === 0 ? "diferença entre internet e wi-fi" : `suporte ${indice}`, territoryRef: REF, siloId: REF, keywordIds: [`kw-${id}`], versionId: `v-${id}`, versionNumber: 2, status: "approved" }));
+const parDoAzul = [
+  { kind: "silo_dna" as const, territoryRef: REF, siloId: REF, status: "approved", versionId: DNA_V2, versionNumber: 2, pillarArticleId: "art-pilar", articleIds: ARTIGOS.slice(1).map(id => `art-${id}`) },
+  { kind: "silo_page" as const, territoryRef: REF, siloId: REF, status: "approved", versionId: PAGE_V2, versionNumber: 2 },
+];
+const membrosDoAzul = ARTIGOS.map(id => ({ keywordId: `kw-${id}`, label: id, isPublished: false }));
+
+test("Silo inteiro (consolidado, do plano, Pilar + 6): 7 ArticleDNA rejeitados, o par fora de vigência, o grafo, o território desfeito e o grupo desligado — nada apagado", async () => {
+  const entrada = {
+    territory: consolidadoDoPlano(), members: membrosDoAzul, approvedArticles: artigosDoAzul, siloArtifacts: parDoAzul,
+    declaredPlan: { groupLabel: "Azul (Wi-Fi e fibra óptica)", siloName: "Wi-Fi e fibra óptica" },
+    linkGraphs: [{ graphVersionId: "g-1", versionNumber: 1, siloId: REF }],
+    linkedGroup: { groupId: "07fec332-4b0a-43cb-af19-cedfd9b24897", groupLabel: "Azul (Wi-Fi e fibra óptica)", siloId: REF },
+    actorUserId: ATOR, decidedAt: "2026-10-18T12:00:00.000Z",
+  };
+  assert.deepEqual(territoryUndoRefusals(entrada), []);
+  assert.deepEqual(territoryUndoWholeSiloReasons(entrada), ["consolidated", "declared_plan", "silo_pair", "approved_articles"]);
+  const plano = planTerritoryUndo(entrada);
+  assert.equal(plano.ok, true);
+  if (!plano.ok) return;
+  assert.equal(plano.scope, "whole_silo");
+  const silo = plano.wholeSilo!;
+  assert.equal(silo.articles.length, 7);
+  assert.deepEqual(silo.articles[0], { articleId: "art-pilar", versionId: "v-pilar", versionNumber: 2, label: "diferença entre internet e wi-fi", role: "Pilar", published: false, downstreamStages: [] }, "o Pilar vem primeiro e sai junto");
+  assert.equal(silo.articles.filter(article => article.role === "Suporte").length, 6);
+  assert.deepEqual(silo.pair.map(item => [item.kind, item.versionId]), [["silo_dna", DNA_V2], ["silo_page", PAGE_V2]]);
+  assert.equal(silo.confirmationName, "Wi-Fi e fibra óptica");
+  assert.equal(silo.group?.groupId, "07fec332-4b0a-43cb-af19-cedfd9b24897");
+  // A prévia diz exatamente o que sai, sem custo.
+  assert.match(silo.lines[0], /Artigos: 7 saem do Silo \(Pilar incluído\)/);
+  assert.ok(silo.lines.includes("Pilar · “diferença entre internet e wi-fi” v2"));
+  assert.ok(silo.lines.some(line => /^SiloDNA v2 e SiloPage v2: deixam de valer \(status “rejeitado”\); as versões ficam como histórico\.$/.test(line)));
+  assert.ok(silo.lines.some(line => /^Grafo de links internos v1 \(aprovado\): deixa de valer junto com o par/.test(line)));
+  assert.ok(silo.lines.some(line => /^Território “Wi-Fi e fibra óptica”: vira desfeito \(rejeitado\).*7 keyword\(s\) voltam para “sem Silo”/.test(line)));
+  assert.ok(silo.lines.some(line => /^Grupo Azul \(Wi-Fi e fibra óptica\): desligado deste Silo/.test(line)));
+  assert.ok(silo.lines.includes("Custo: nenhum (nada é pago)."));
+  // O território: desfeito, sem a consolidação (o contrato), com o registro de tudo; o resto fica igual.
+  const draft = TerritoryCandidateSchema.parse(plano.territoryDraft);
+  assert.equal(draft.lifecycleStatus, "rejected");
+  assert.equal(draft.decisionState, "rejected");
+  assert.equal(draft.consolidation, null);
+  assert.equal(draft.name, "Wi-Fi e fibra óptica");
+  assert.match(draft.reasons.at(-1)!, /^Silo inteiro desfeito por decisão humana em 2026-10-18T12:00:00\.000Z \(ator 11111111-1111-4111-8111-111111111111\): 7 artigo\(s\) retirado\(s\) .*Pilar incluído.*a consolidação registrada \(SiloDNA dddddddd-0000-4000-8000-000000000002 v2, SiloPage eeeeeeee-0000-4000-8000-000000000002 v2.*o grupo Azul \(Wi-Fi e fibra óptica\) desligado do Silo; nada de histórico foi apagado; 7 keyword\(s\) voltaram para sem Silo\.$/);
+  assert.deepEqual(plano.keywordDecision, humanSiloDecision("unassigned", TERRITORY_UNDO_WHOLE_SILO_KEYWORD_REASON, "2026-10-18T12:00:00.000Z"));
+  assert.equal(plano.memberKeywordIds.length, 7);
+  // Os eventos: um "rejected" por ArticleDNA vigente e um por versão do par; id determinístico (repetir não duplica).
+  const eventos = await buildTerritoryUndoRejections(silo, { territoryRef: REF, actorId: ATOR, occurredAt: "2026-10-18T12:00:00.000Z" });
+  assert.equal(eventos.length, 9);
+  assert.ok(eventos.every(evento => evento.status === "rejected" && evento.actorId === ATOR));
+  assert.deepEqual(eventos.map(evento => evento.versionId).sort(), [...ARTIGOS.map(id => `v-${id}`), DNA_V2, PAGE_V2].sort());
+  assert.match(eventos.find(evento => evento.versionId === "v-pilar")!.reason, /o artigo \(Pilar\) sai junto\. Nada é apagado\./);
+  const deNovo = await buildTerritoryUndoRejections(silo, { territoryRef: REF, actorId: ATOR, occurredAt: "2026-10-18T13:00:00.000Z" });
+  assert.deepEqual(deNovo.map(evento => evento.eventId), eventos.map(evento => evento.eventId));
+});
+
+test("Silo inteiro: o desfecho da releitura exige os artigos e o par fora da mesa", () => {
+  const base = { territoryRef: REF, readbackLifecycle: "rejected", expectedMemberIds: ["a"], readbackMemberIds: [], expectedGoneArticleIds: ["art-pilar"], expectedGoneSiloIds: [REF] };
+  assert.equal(resolveTerritoryUndoOutcome({ ...base, readbackArticleIds: [], readbackSiloIds: [] }).outcome, "applied");
+  const metade = resolveTerritoryUndoOutcome({ ...base, readbackArticleIds: ["art-pilar"], readbackSiloIds: [] });
+  assert.equal(metade.outcome, "partial");
+  assert.deepEqual(metade.remainingArticles, ["art-pilar"]);
+  assert.equal(resolveTerritoryUndoOutcome({ ...base, readbackArticleIds: [], readbackSiloIds: [REF] }).outcome, "partial");
+  assert.equal(resolveTerritoryUndoOutcome({ ...base, readbackLifecycle: "consolidated", readbackMemberIds: ["a"], readbackArticleIds: ["art-pilar"], readbackSiloIds: [REF] }).outcome, "refused");
+});
+
+test("a mesa aplica o evento 'rejeitado' também no par do Silo: o par desfeito sai dos Silos ativos (nada apagado)", async () => {
+  const { releaseRejectedSiloPairs } = await import("../lib/arquiteto/rejected-article-release.ts");
+  const dna = (versionId: string, siloId: string) => ({ versionId, payload: { siloId } });
+  const entrada = {
+    siloDnas: [dna("dna-azul", REF), dna("dna-outro", REF_PUB)],
+    siloPages: [dna("page-azul", REF), dna("page-outro", REF_PUB)],
+    statuses: [{ versionId: "dna-azul", status: "approved" }, { versionId: "page-azul", status: "approved" }, { versionId: "dna-outro", status: "approved" }, { versionId: "page-outro", status: "approved" }],
+  };
+  const semEvento = releaseRejectedSiloPairs({ ...entrada, events: [] });
+  assert.deepEqual(semEvento.siloDnas.map(item => item.versionId), ["dna-azul", "dna-outro"], "sem evento, a mesa de sempre");
+  const desfeito = releaseRejectedSiloPairs({ ...entrada, events: [{ versionId: "dna-azul", status: "rejected", occurredAt: "2026-10-18T12:00:00.000Z" }] });
+  assert.deepEqual(desfeito.siloDnas.map(item => item.versionId), ["dna-outro"]);
+  assert.deepEqual(desfeito.siloPages.map(item => item.versionId), ["page-outro"], "a SiloPage do SiloDNA rejeitado sai junto");
+  assert.deepEqual(desfeito.rejectedSiloIds, [REF]);
+  const leitura = readFileSync("lib/server/arquiteto-workspace.ts", "utf8");
+  assert.match(leitura, /releaseRejectedSiloPairs\(\{\s*siloDnas: siloDnasVigentes,/, "a leitura inteira aplica");
+  assert.match(readFileSync("lib/server/arquiteto-workspace-sync.ts", "utf8"), /const paresAtivos = releaseRejectedSiloPairs\(/, "a releitura do que mudou aplica a MESMA regra");
 });
 
 /* ------------------------------------ mesa ----------------------------------- */
@@ -149,43 +298,58 @@ const semComentarios = (codigo: string) => codigo
   .filter(line => !line.trimStart().startsWith("*") && !line.trimStart().startsWith("/*") && !line.trimStart().startsWith("//"))
   .join("\n");
 const workspace = semComentarios(readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8"));
+// 2026-10-18 · o diálogo e o fluxo do Desfazer saíram do corpo da aba (o mesmo diálogo, testável na tela).
+const dialogo = semComentarios(readFileSync("modules/arquiteto/silo-undo-dialog.tsx", "utf8"));
 const linhas = semComentarios(readFileSync("modules/arquiteto/territorial-workspace-rows.tsx", "utf8"));
 const cliente = readFileSync("lib/arquiteto/canonical-workspace.ts", "utf8");
 const rota = semComentarios(readFileSync("lib/server/arquiteto-workspace-http.ts", "utf8"));
 
 test("a tela usa o PATCH canônico do workspace e confere na releitura antes de anunciar", () => {
   const writer = cliente.slice(cliente.indexOf("export async function undoRemoteSiloCandidate"));
-  assert.match(writer.slice(0, 1500), /fetch\("\/api\/arquiteto\/workspace"[\s\S]*method: "PATCH"[\s\S]*territoryUndos: \[\{ territoryRef: input\.territoryRef, expectedLock: input\.expectedLock \}\]/);
-  assert.match(writer.slice(0, 1500), /lifecycleStatus !== "rejected"/);
-  const handler = workspace.slice(workspace.indexOf("const undoSuggestedSilos = async"));
-  assert.match(handler.slice(0, 4000), /undoRemoteSiloCandidate\(\{ brandId: selectedBrandId, territoryRef: ref, expectedLock: remote\.lockVersion \}\)/);
-  assert.match(handler.slice(0, 4000), /loadCanonicalArquitetoWorkspace\(selectedBrandId\)[\s\S]*resolveTerritoryUndoOutcome/);
+  assert.match(writer.slice(0, 2000), /fetch\("\/api\/arquiteto\/workspace"[\s\S]*method: "PATCH"[\s\S]*: \[\{ territoryRef: input\.territoryRef, expectedLock: input\.expectedLock \}\]/);
+  // 2026-10-18 · o Silo inteiro leva a prévia (decisionHash) e o nome digitado, no MESMO PATCH.
+  assert.match(writer.slice(0, 2000), /decisionHash: input\.confirmation\.decisionHash, typedName: input\.confirmation\.typedName/);
+  assert.match(writer.slice(0, 2000), /lifecycleStatus !== "rejected"/);
+  const previa = cliente.slice(cliente.indexOf("export async function previewRemoteSiloUndo"));
+  assert.match(previa.slice(0, 1200), /method: "PATCH"[\s\S]*territoryUndos: \[\{ territoryRef: input\.territoryRef, expectedLock: input\.expectedLock, mode: "preview" \}\]/);
+  const handler = dialogo.slice(dialogo.indexOf("export async function runSiloUndo"));
+  assert.match(handler.slice(0, 4000), /await undo\(\{ brandId: input\.brandId, territoryRef: alvo\.ref, expectedLock: alvo\.expectedLock, confirmation: alvo\.confirmation \?\? null \}\)/);
+  assert.match(handler.slice(0, 4000), /canonical = await reload\(input\.brandId\)[\s\S]*resolveTerritoryUndoOutcome/);
   // Só o que a releitura confirmou vira sucesso.
-  assert.match(handler.slice(0, 4000), /veredito\.outcome === "applied"\) desfeitos\.push/);
+  assert.match(handler.slice(0, 4000), /if \(veredito\.outcome === "applied"\) \{\s*desfeitos\.push/);
+  assert.match(workspace, /onDone=\{concludeSiloUndo\}/);
+  assert.match(workspace, /<SiloUndoDialog/);
 });
 
 test("botão por Silo sugerido, botão em lote e uma confirmação que diz o que acontece", () => {
   assert.match(linhas, /header\.kind === "territory" && undoControls\?\.byRef\.has\(header\.ref\)/);
   assert.match(linhas, />\s*Desfazer Silo\s*</);
   assert.match(linhas, /`Desfazer os Silos sugeridos \(\$\{undoAll\.count\}\)`/);
-  assert.match(workspace, /if \(territoryHasPublishedAddress\(territory\)\) continue;/);
+  // 2026-10-18 · SUBSTITUÍDO "Silo publicado não aparece no Desfazer": ele aparece e sai inteiro (o site não muda).
+  assert.doesNotMatch(workspace, /if \(territoryHasPublishedAddress\(territory\)\) continue;/);
+  assert.match(workspace, /territory\.lifecycleStatus !== "consolidated"\) continue;/);
   // 2026-10-14: o lote marca que é lote (a confirmação diz quantos ficaram de fora — o Silo do plano — e por quê).
   assert.match(workspace, /onUndoAll: \(\) => \{ setSiloUndoBulk\(true\); setSiloUndoPrompt\(siloUndoEligibleRefs\); \}/);
   assert.match(workspace, /excludedNote: siloUndoExcludedNote,/);
-  assert.match(workspace, /O Silo sai da aba Silos \(fica guardado como rejeitado; nada é apagado\)\. As keywords dele voltam para “sem Silo” e continuam na mesa\./);
-  assert.match(workspace, /Não pode ser desfeito: \$\{leitura!\.refusals\.join\(" "\)\}/);
+  assert.match(dialogo, /O Silo sai da aba Silos \(fica guardado como rejeitado; nada é apagado\)\. As keywords dele voltam para “sem Silo” e continuam na mesa\./);
+  assert.match(dialogo, /Não pode ser desfeito: \$\{leitura\.refusals\.join\(" "\)\}/);
+  // 2026-10-18 · o Silo inteiro: prévia do servidor, o nome digitado e um por vez (nunca pelo lote).
+  assert.match(dialogo, /typedConfirmationMatches\(digitado, silo\.confirmationName\)/);
+  assert.match(dialogo, /disabled=\{busy \|\| !nomeConfere\}/);
+  assert.match(dialogo, /const inteiro = !bulk && itens\.length === 1/);
 });
 
 test("o diálogo fica aberto com o andamento, fecha com Esc e abre com o foco no Cancelar", () => {
-  const handler = workspace.slice(workspace.indexOf("const undoSuggestedSilos = async"));
-  const corpo = handler.slice(0, handler.indexOf("\n  };\n"));
+  const handler = dialogo.slice(dialogo.indexOf("export async function runSiloUndo"));
+  const corpo = handler.slice(0, handler.indexOf("\n}\n"));
   // O diálogo só fecha no fim (finally), depois da releitura; durante o lote diz "Desfazendo i de N…".
-  assert.match(corpo, /setSiloUndoProgress\(\{ done: indice \+ 1, total: refs\.length \}\)/);
-  assert.ok(corpo.indexOf("setSiloUndoPrompt(null)") > corpo.indexOf("finally"), "o diálogo fecha só no finally");
-  assert.match(workspace, /`Desfazendo \$\{siloUndoProgress\.done\} de \$\{siloUndoProgress\.total\}…/);
-  assert.match(workspace, /event\.key === "Escape" && !siloUndoBusy\) setSiloUndoPrompt\(null\)/);
-  assert.match(workspace, /if \(siloUndoPrompt\) siloUndoCancelRef\.current\?\.focus\(\)/);
-  assert.match(workspace, /ref=\{siloUndoCancelRef\} disabled=\{siloUndoBusy\}/);
+  assert.match(corpo, /input\.onProgress\?\.\(\{ done: indice \+ 1, total: input\.targets\.length \}\)/);
+  const confirmar = dialogo.slice(dialogo.indexOf("const confirmar = async"));
+  assert.ok(confirmar.indexOf("onClose()") > confirmar.indexOf("finally"), "o diálogo fecha só no finally");
+  assert.match(dialogo, /`Desfazendo \$\{progress\.done\} de \$\{progress\.total\}…/);
+  assert.match(dialogo, /event\.key === "Escape" && !busy\) onClose\(\)/);
+  assert.match(dialogo, /cancelRef\.current\?\.focus\(\)/);
+  assert.match(dialogo, /ref=\{cancelRef\} disabled=\{busy\}/);
   // Pela metade sem keyword restante: a frase diz o que falta, não "0 keyword(s)".
   assert.match(corpo, /falta marcar o Silo como desfeito/);
 });
@@ -196,6 +360,12 @@ test("a rota: plano antes da escrita, keywords pelo writer da decisão de Silo, 
   const keywords = bloco.indexOf("updated.push(await applyKeywordUpdate(update, undoKeywordById))");
   const territorio = bloco.indexOf("updateTerritoryWorkflowItem(context, undo.territoryRef, undo.expectedLock, plano.territoryDraft)");
   assert.ok(plano >= 0 && keywords > plano && territorio > keywords, "ordem: plano → keywords → território");
+  // 2026-10-18 · Silo inteiro: confirmação → eventos (artigos e par) → keywords → grupo → território → releitura.
+  const confirmado = bloco.indexOf("await assertWholeSiloUndoConfirmed(plano, undo, escrita)");
+  const eventos = bloco.indexOf("await writeWholeSiloUndoRejections(context, undo.territoryRef, plano, escrita)");
+  const grupo = bloco.indexOf("await unlinkWholeSiloGroup(context, plano)");
+  const releitura = bloco.indexOf("readBackWholeSiloUndo(context, undo.territoryRef, plano, eventos)");
+  assert.ok(confirmado > plano && eventos > confirmado && keywords > eventos && grupo > keywords && territorio > grupo && releitura > territorio, "ordem do Silo inteiro");
   assert.match(rota, /for \(const update of parsed\.updates \|\| \[\]\) updated\.push\(await applyKeywordUpdate\(update, keywordById\)\);/);
 });
 

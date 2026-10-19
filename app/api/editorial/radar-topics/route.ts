@@ -7,6 +7,7 @@ import { RadarR6ExpertTopicContextSchema, RadarR6TopicSuggestionSchema } from "@
 import { radarExpertTopicsSubjectPromptLines } from "@/lib/radar/expert-brief";
 import { expertTopicsBlueprintLines, expertTopicsContextWithoutNoise } from "@/lib/redator/expert-topics-pilot";
 import { resolveDeepSeekCanonicalConfig, DeepSeekCanonicalError } from "@/lib/server/deepseek-canonical";
+import { recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { PipelineRuntimeError, resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 
@@ -101,7 +102,21 @@ export async function POST(request: Request) {
     const pedido: Pedido = { ...parsed.data, context: expertTopicsContextWithoutNoise(parsed.data.context).context };
     const linhasDaPlanta = await linhasDoArtigoModelo(context.supabase, pedido);
     const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: context.actorUserId, brandId: context.brandId, client: context.supabase, quotaUnits: 1 });
-    const result = await generateStructuredAI({ provider, system: buildSystemPromptWithBlueprint(pedido, linhasDaPlanta), user: buildPrompt(pedido), schema: ResponseSchema, maxTokens: 2800 });
+    /*
+     * 2026-10-18 · a chamada paga entra no livro de uso, pelo MESMO gravador e
+     * chave idempotente das rotas de IA do Arquiteto (`internal-link-graph/anchors`),
+     * módulo radar: sem isso a cota da marca não via as pautas.
+     */
+    const operationRequestId = crypto.randomUUID();
+    const uso = { resource: provider.resource, operation: "module_operation" as const, module: "radar", units: 1, metadata: { operationRequestId, operationKind: "radar_expert_topics", articleId: pedido.articleId } };
+    let result: z.infer<typeof ResponseSchema>;
+    try {
+      result = await generateStructuredAI({ provider, system: buildSystemPromptWithBlueprint(pedido, linhasDaPlanta), user: buildPrompt(pedido), schema: ResponseSchema, maxTokens: 2800 });
+    } catch (error) {
+      await recordIntegrationUsage({ ...uso, resultStatus: "failed", errorCode: "RADAR_EXPERT_TOPICS_FAILED", idempotencyKey: `${provider.provider}:radar_expert_topics:${operationRequestId}:failed` }).catch(() => undefined);
+      throw error;
+    }
+    await recordIntegrationUsage({ ...uso, resultStatus: "succeeded", idempotencyKey: `${provider.provider}:radar_expert_topics:${operationRequestId}` });
 
     return NextResponse.json({ success: true, topics: result.topics, humanDecisionRequired: true, persistenceMode: "local" });
   } catch (error) {

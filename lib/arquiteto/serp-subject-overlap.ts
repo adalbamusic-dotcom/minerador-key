@@ -91,6 +91,13 @@ export type SerpSubjectLensReading = {
   /** Domínios concorrentes da observação. `null` = não lidos. */
   domains: readonly string[] | null;
   collectedAt: string | null;
+  /**
+   * 2026-10-18 · Aditivo (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, decisão
+   * do dono): a marca tem cidade e esta lente só tem a SERP antiga, NACIONAL — ela
+   * é mostrada marcada; a coleta local é pelo botão de sempre, com o custo antes.
+   * Ausente = a lente é da localidade da marca (ou a marca é nacional).
+   */
+  nationalFallback?: true;
 };
 
 /** A pegada de uma keyword na SERP: o que o cache tem dela nas 4 lentes. */

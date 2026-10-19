@@ -62,7 +62,8 @@ test("cadastro único: título, detalhes, papel/posição, grupo e trava LIVRE s
   assert.match(view.lock?.reason || "", /pode propor outra principal/);
   assert.equal(view.principalElsewhere, null);
   assert.equal(view.hint, SUBJECT_ARTICLE_EDIT_HINT);
-  assert.equal(SUBJECT_ARTICLE_EDIT_HINT, "Para mudar, use Cadastrar Assuntos → Silo existente.");
+  // 2026-10-18 · SUBSTITUÍDO "Para mudar, use Cadastrar Assuntos → Silo existente.": o painel edita (SDD do Assunto pela principal §8).
+  assert.equal(SUBJECT_ARTICLE_EDIT_HINT, "Para mudar o título ou os detalhes, use “Editar Assunto” aqui no painel (prévia, gravar e releitura pelo núcleo do cadastro).");
 });
 
 test("cadastro único: com Volume validado > 0 a trava é automática; trava manual vence", () => {
@@ -107,9 +108,13 @@ test("Assunto anterior sem plano (o laranja da WifiConecta) e Assunto de página
 
   const publicado = setKeywordSubject({}, { actorId: ACTOR, changedAt: AT, origin: "import", entry: { title: "Reforço do guia de fibra", source: "cadastro", details: "Detalhes do publicado." } });
   assert.ok(publicado.ok);
-  const pub = resolveSubjectArticleView({ keywordId: KW, keyword: "internet fibra", semantic: publicado.semantic });
+  const pub = resolveSubjectArticleView({ keywordId: KW, keyword: "internet fibra", semantic: publicado.semantic, published: true });
   assert.equal(pub?.kind === "subject" && pub.details, "Detalhes do publicado.");
   assert.equal(pub?.kind === "subject" && pub.lock?.state, "protected");
+  // 2026-10-18 · SUBSTITUÍDO "Protegida pela página publicada" (M8): a página guarda URL, slug e canonical; a principal segue o volume.
+  assert.equal(pub?.kind === "subject" && pub.lock?.label, "Página publicada · URL, slug e canonical ficam; a principal segue o volume");
+  const solta = resolveSubjectArticleView({ keywordId: KW, keyword: "internet fibra", semantic: publicado.semantic });
+  assert.equal(solta?.kind === "subject" && solta.lock?.state, "free", "keyword NÃO publicada com Assunto sem Silo não é dita protegida pela página");
 });
 
 test("marca de principal órfã (Assunto retirado pelo Vínculo antigo): o painel avisa e mostra o último título", () => {

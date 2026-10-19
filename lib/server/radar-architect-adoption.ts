@@ -20,6 +20,13 @@
  * Item com investigação congelada, pacote aprovado ou enviado ao Redator é
  * recusado nesta fase (D11: a troca só acontece depois do congelamento novo);
  * ele segue na versão transportada, e os entregáveis também.
+ * SUBSTITUÍDO em 2026-10-18 para a TELA (`continueOnScreen`): com o Google
+ * congelado (enviado ou não ao Redator) e a principal e o slug iguais, a
+ * adoção vale e reabre a investigação numa versão nova da análise; a tela
+ * continua na MESMA confirmação pelo "Pesquisar e finalizar" de sempre (só o
+ * que falta, congelamento novo, artigo-modelo). Pelo MCP, a recusa é a de
+ * antes (o congelamento novo é trabalho da tela). Pacote aprovado e principal
+ * ou slug novo continuam recusados.
  *
  * Sem `server-only` e sem Supabase aqui: o acesso ao banco é a porta
  * `RadarArchitectAdoptionStore` (`radar-architect-adoption-store.ts`), para o
@@ -49,8 +56,13 @@ import { radarReadbackMatches } from "../editorial/global-workflow-status.ts";
 import { createRadarAnalysisSuccessor, VersionedRadarAnalysisSchema, type RadarAnalysisVersion } from "../radar/analysis-contracts.ts";
 import { mergeAnalysisRun, splitAnalysisRun } from "../radar/analysis-run-storage.ts";
 import { radarTransportedArticleDnaVersionIdOf } from "../radar/article-dna-current.ts";
+import { RadarDeepResearchRecordSchema } from "../radar/deep-research.ts";
+import { radarResearchResumption } from "../radar/research-resumption.ts";
 import {
   classifyArchitectUpdate,
+  radarArchitectAdoptionRefreezes,
+  radarArchitectKeywordText,
+  type RadarArchitectRefreezeInput,
   detectArchitectUpdate,
   diffArchitectLinks,
   RADAR_ARCHITECT_UPDATE_CLASS_LABEL,
@@ -222,14 +234,53 @@ const maiorNumeroDeVersao = (payload: Record<string, unknown> | null) =>
   Math.max(0, ...versoesDaAnalise(payload).map(versao => typeof versao.versionNumber === "number" && Number.isInteger(versao.versionNumber) ? versao.versionNumber : 0));
 
 /** A primeira recusa entre as versões correntes (leves bastam: as fotografias e os recibos não saem da linha). */
-function recusaDasCorrentes(input: { state: string; payload: Record<string, unknown> | null; from: ArticleDNA; to: ArticleDNA }): RadarArchitectAdoptionRefusal | null {
+function recusaDasCorrentes(input: { state: string; payload: Record<string, unknown> | null; from: ArticleDNA; to: ArticleDNA; allowRefreeze?: boolean }): RadarArchitectAdoptionRefusal | null {
   const correntes = analisesCorrentesLeves(input.payload);
   if (!correntes.length) return radarArchitectAdoptionRefusal({ state: input.state, analysis: null, from: input.from, to: input.to });
   for (const corrente of correntes) {
-    const recusa = radarArchitectAdoptionRefusal({ state: input.state, analysis: registro(corrente.payload) as never, from: input.from, to: input.to });
+    const recusa = radarArchitectAdoptionRefusal({ state: input.state, analysis: registro(corrente.payload) as never, from: input.from, to: input.to, allowRefreeze: input.allowRefreeze });
     if (recusa) return recusa;
   }
   return null;
+}
+
+/** 2026-10-18 · Alguma versão corrente pede o congelamento novo (Google congelado, principal igual, na tela)? */
+const refazCongelamentoNasCorrentes = (input: { payload: Record<string, unknown> | null; from: ArticleDNA; to: ArticleDNA; allowRefreeze?: boolean }) =>
+  analisesCorrentesLeves(input.payload).some(corrente => radarArchitectAdoptionRefreezes({ analysis: registro(corrente.payload) as never, from: input.from, to: input.to, allowRefreeze: input.allowRefreeze }));
+
+/**
+ * 2026-10-18 · O QUE O CONGELAMENTO NOVO REAPROVEITA E O QUE COLETA, lido da
+ * investigação gravada (a mesma autoridade de retomada do START,
+ * `radarResearchResumption`): a SERP da principal com evidência, as auxiliares
+ * das keywords que ficaram com evidência, as que ficaram sem resultado e as
+ * keywords novas (secundárias e reforços) que ainda não têm SERP auxiliar.
+ */
+function entradaDoCongelamentoNovo(input: {
+  analise: Record<string, unknown> | null;
+  from: VersionEnvelope<ArticleDNA>;
+  to: VersionEnvelope<ArticleDNA>;
+  sentToWriter: boolean;
+}): RadarArchitectRefreezeInput {
+  const pesquisa = RadarDeepResearchRecordSchema.safeParse(input.analise?.deepResearch ?? null);
+  const record = pesquisa.success ? pesquisa.data : null;
+  const retomada = radarResearchResumption({ record });
+  const ficam = new Set(input.to.payload.keywordReferences.map(reference => reference.keywordId));
+  const antes = new Set(input.from.payload.keywordReferences.map(reference => reference.keywordId));
+  const comEvidencia = new Set((record?.queries || []).filter(query => query.serpClass === "auxiliary" && query.evidence).map(query => query.keywordId));
+  const novas = input.to.payload.keywordReferences
+    .filter(reference => reference.role !== "principal" && !antes.has(reference.keywordId) && !comEvidencia.has(reference.keywordId))
+    .map(radarArchitectKeywordText);
+  return {
+    sentToWriter: input.sentToWriter,
+    canonicalReused: retomada.canonicalComplete,
+    newKeywords: [...new Set(novas)],
+    keptAuxiliaryMissing: retomada.auxiliaryToCollect.filter(query => ficam.has(query.keywordId) && antes.has(query.keywordId)).length,
+    keptAuxiliaryReused: [...comEvidencia].filter(keywordId => ficam.has(keywordId)).length,
+    youtubeFrozen: Boolean(input.analise?.youtubeFrozenInvestigation),
+    amazonFrozen: Boolean(input.analise?.amazonFrozenInvestigation),
+    fromVersionNumber: input.from.versionNumber,
+    toVersionNumber: input.to.versionNumber,
+  };
 }
 
 /** A versão vigente aprovada do artigo no índice canônico (a mesma régua do envio). */
@@ -245,9 +296,10 @@ const ordemDaPrevia = (a: RadarArchitectUpdatePreviewItem, b: RadarArchitectUpda
   (a.siloName || "").localeCompare(b.siloName || "", "pt-BR") || a.title.localeCompare(b.title, "pt-BR")
   || Number((a.updateKind ?? "article_dna") === "links") - Number((b.updateKind ?? "article_dna") === "links");
 
-async function montarCandidatos(store: RadarArchitectAdoptionStore, input: { brandId: string; articleIds: readonly string[] | null; siloId?: string | null }): Promise<Candidatos> {
+async function montarCandidatos(store: RadarArchitectAdoptionStore, input: { brandId: string; articleIds: readonly string[] | null; siloId?: string | null; continueOnScreen?: boolean }): Promise<Candidatos> {
   const cabecas = (await store.listRadarItemHeads(input.brandId, input.articleIds))
-    .filter(cabeca => cabeca.marca_id === input.brandId && cabeca.stage === "radar" && cabeca.article_id);
+    // 2026-10-18 · o item retirado da operação (Silo/artigo desmontado) não recebe versão nova: é histórico.
+    .filter(cabeca => cabeca.marca_id === input.brandId && cabeca.stage === "radar" && cabeca.article_id && cabeca.state !== "withdrawn");
   if (!cabecas.length) return { dna: [], links: [] };
   const canonical = await store.canonicalIndex(input.brandId);
   const pares = cabecas.map(cabeca => ({
@@ -311,7 +363,9 @@ async function montarCandidatos(store: RadarArchitectAdoptionStore, input: { bra
     const corrida = versaoLeve ? await store.readAnalysisRun(linha.id, versaoLeve) : null;
     const analise = registro((corrida ? mergeAnalysisRun(leve, corrida) : leve)?.payload);
 
-    let refusal: RadarArchitectAdoptionRefusal | null = recusaDasCorrentes({ state: linha.state, payload, from: de.envelope.payload, to: para.envelope.payload });
+    let refusal: RadarArchitectAdoptionRefusal | null = recusaDasCorrentes({ state: linha.state, payload, from: de.envelope.payload, to: para.envelope.payload, allowRefreeze: input.continueOnScreen });
+    /* 2026-10-18 · a confirmação também congela de novo (Google congelado, principal igual, na tela). */
+    const refaz = !refusal && refazCongelamentoNasCorrentes({ payload, from: de.envelope.payload, to: para.envelope.payload, allowRefreeze: input.continueOnScreen });
     if (!refusal && para.storedContentHash !== para.envelope.contentHash) {
       refusal = { code: "version_integrity", reason: "A versão nova do ArticleDNA diverge do que está gravado no acervo; nada foi adotado." };
     }
@@ -340,6 +394,12 @@ async function montarCandidatos(store: RadarArchitectAdoptionStore, input: { bra
       hasYoutubeRun: Boolean(analise?.youtubeSearch) && !analise?.youtubeFrozenInvestigation,
       hasAmazonRun: Boolean(analise?.amazonSearch) && !analise?.amazonFrozenInvestigation,
       linksCoverNewVersion: linksCobrem,
+      refreeze: refaz && !refusal
+        ? entradaDoCongelamentoNovo({
+          analise, from: de.envelope, to: para.envelope,
+          sentToWriter: linha.state === "sent_writer" || analisesCorrentesLeves(payload).some(versao => Boolean(registro(versao.payload)?.writerBundle || registro(versao.payload)?.writerTransfer)),
+        })
+        : null,
     });
     const siloId = resolvedSilo?.siloId ?? (typeof payload?.siloId === "string" ? payload.siloId : null);
     const hidratacao = registro(payload?.hydration);
@@ -441,8 +501,12 @@ async function montarCandidatos(store: RadarArchitectAdoptionStore, input: { bra
 }
 
 /** A PRÉVIA: leitura pura. Nada é gravado; o Arquiteto não é lido além do acervo, do índice canônico e dos grafos. */
-export async function previewArchitectUpdatesWithCore(store: RadarArchitectAdoptionStore, input: { brandId: string; articleIds?: readonly string[] | null; siloId?: string | null }): Promise<RadarArchitectUpdatePreview> {
-  const { dna, links } = await montarCandidatos(store, { brandId: input.brandId, articleIds: input.articleIds?.length ? input.articleIds : null, siloId: input.siloId ?? null });
+export async function previewArchitectUpdatesWithCore(store: RadarArchitectAdoptionStore, input: {
+  brandId: string; articleIds?: readonly string[] | null; siloId?: string | null;
+  /** 2026-10-18 · a tela do Radar continua o congelamento novo depois da adoção (o MCP não: lá a recusa é a de antes). */
+  continueOnScreen?: boolean;
+}): Promise<RadarArchitectUpdatePreview> {
+  const { dna, links } = await montarCandidatos(store, { brandId: input.brandId, articleIds: input.articleIds?.length ? input.articleIds : null, siloId: input.siloId ?? null, continueOnScreen: input.continueOnScreen });
   const items = [...dna.map(candidato => candidato.preview), ...links.map(candidato => candidato.preview)].sort(ordemDaPrevia);
   const adotaveis = items.filter(item => item.adoptable);
   const doTipo = (tipo: "article_dna" | "links") => adotaveis.filter(item => (item.updateKind ?? "article_dna") === tipo);
@@ -462,7 +526,8 @@ export async function previewArchitectUpdatesWithCore(store: RadarArchitectAdopt
 
 /** `updateKind` ausente = a versão nova do ArticleDNA (o leitor de antes segue igual). */
 export type RadarArchitectAdoptionOutcome =
-  | { articleId: string; status: "adopted"; updateKind?: "article_dna"; title: string; from: number; to: number; classification: RadarArchitectUpdatePreviewItem["classification"]; redo: string[]; lockVersion: number }
+  /** 2026-10-18 · `refreeze`: a investigação foi reaberta na versão nova e a tela continua o congelamento novo. */
+  | { articleId: string; status: "adopted"; updateKind?: "article_dna"; title: string; from: number; to: number; classification: RadarArchitectUpdatePreviewItem["classification"]; redo: string[]; lockVersion: number; refreeze?: boolean }
   | { articleId: string; status: "adopted"; updateKind: "links"; title: string; fromGraphVersion: number | null; toGraphVersion: number; classification: "links_changed"; redo: string[]; lockVersion: number }
   | { articleId: string; status: "refused"; updateKind?: "article_dna" | "links"; code: string; reason: string }
   | { articleId: string; status: "nothing_to_adopt"; updateKind?: "article_dna" | "links"; reason: string };
@@ -492,11 +557,13 @@ export async function adoptArchitectVersionWithCore(store: RadarArchitectAdoptio
   linkArticleIds?: readonly string[];
   decisionHash: string;
   now?: string;
+  /** 2026-10-18 · a tela continua o congelamento novo (a mesma régua da prévia que ela mostrou). */
+  continueOnScreen?: boolean;
 }): Promise<RadarArchitectAdoptionResult> {
   const pedidos = [...new Set(input.articleIds.map(id => id.trim()).filter(Boolean))];
   const pedidosDeLinks = [...new Set((input.linkArticleIds ?? []).map(id => id.trim()).filter(Boolean))];
   if (!pedidos.length && !pedidosDeLinks.length) return { state: "REFUSED", code: "NOTHING_TO_ADOPT", message: "Nenhum artigo selecionado para adotar a versão nova." };
-  const { dna: candidatos, links: deLinks } = await montarCandidatos(store, { brandId: input.brandId, articleIds: [...new Set([...pedidos, ...pedidosDeLinks])] });
+  const { dna: candidatos, links: deLinks } = await montarCandidatos(store, { brandId: input.brandId, articleIds: [...new Set([...pedidos, ...pedidosDeLinks])], continueOnScreen: input.continueOnScreen });
   const porArtigo = new Map(candidatos.map(candidato => [candidato.row.article_id, candidato]));
   const linksPorArtigo = new Map(deLinks.map(candidato => [candidato.row.article_id, candidato]));
   const adotaveis = pedidos.map(id => porArtigo.get(id)).filter((candidato): candidato is Candidato => Boolean(candidato?.preview.adoptable));
@@ -520,9 +587,13 @@ export async function adoptArchitectVersionWithCore(store: RadarArchitectAdoptio
       continue;
     }
     try {
-      const lock = await adotarUm(store, candidato, { brandId: input.brandId, actorId: input.actorId, now });
+      const lock = await adotarUm(store, candidato, { brandId: input.brandId, actorId: input.actorId, now, continueOnScreen: input.continueOnScreen });
       adotadosAgora.add(articleId);
-      results.push({ articleId, status: "adopted", title: candidato.preview.title, from: candidato.preview.from.versionNumber, to: candidato.preview.to.versionNumber, classification: candidato.preview.classification, redo: candidato.preview.plan.redo, lockVersion: lock });
+      results.push({
+        articleId, status: "adopted", title: candidato.preview.title, from: candidato.preview.from.versionNumber, to: candidato.preview.to.versionNumber,
+        classification: candidato.preview.classification, redo: candidato.preview.plan.redo, lockVersion: lock,
+        ...(candidato.preview.plan.refreeze ? { refreeze: true } : {}),
+      });
     } catch (error) {
       if (error instanceof RecusaDoItem) { results.push({ articleId, status: "refused", code: error.code, reason: error.message }); continue; }
       throw error;
@@ -555,7 +626,7 @@ export async function adoptArchitectVersionWithCore(store: RadarArchitectAdoptio
   return { state: "APPLIED", adopted, refused: results.filter(item => item.status === "refused").length, results, readbackConfirmed: adopted > 0 };
 }
 
-async function adotarUm(store: RadarArchitectAdoptionStore, candidato: Candidato, input: { brandId: string; actorId: string; now: string }): Promise<number> {
+async function adotarUm(store: RadarArchitectAdoptionStore, candidato: Candidato, input: { brandId: string; actorId: string; now: string; continueOnScreen?: boolean }): Promise<number> {
   const { to, from } = candidato;
   const articleId = candidato.row.article_id;
   /* 1 · a linha de AGORA, com a trava da prévia. */
@@ -573,8 +644,10 @@ async function adotarUm(store: RadarArchitectAdoptionStore, candidato: Candidato
     const corrida = versionId ? await store.readAnalysisRun(linha.id, versionId) : null;
     corrente = VersionedRadarAnalysisSchema.parse(corrida ? mergeAnalysisRun(leve, corrida) : leve);
   }
-  const recusa = recusaDasCorrentes({ state: linha.state, payload: payloadAtual, from: from.payload, to: to.payload });
+  const recusa = recusaDasCorrentes({ state: linha.state, payload: payloadAtual, from: from.payload, to: to.payload, allowRefreeze: input.continueOnScreen });
   if (recusa) throw new RecusaDoItem(recusa.code, recusa.reason);
+  /* 2026-10-18 · a mesma régua da prévia: a investigação do Google é reaberta na versão nova (a fotografia antiga fica no histórico). */
+  const refaz = Boolean(candidato.preview.plan.refreeze) && refazCongelamentoNasCorrentes({ payload: payloadAtual, from: from.payload, to: to.payload, allowRefreeze: input.continueOnScreen });
 
   /* 3 · o item construído pelo MESMO caminho do envio. */
   const atual = RadarItemSchema.safeParse({ ...payloadAtual, id: linha.id, brandId: linha.marca_id, articleId, state: linha.state, lockVersion: linha.lock_version, importedAt: new Date(linha.created_at).toISOString(), updatedAt: new Date(linha.updated_at).toISOString(), origin: "real" });
@@ -599,13 +672,13 @@ async function adotarUm(store: RadarArchitectAdoptionStore, candidato: Candidato
   /* 4 · a versão nova da análise: reaproveita o que vale, marca o que refaz. A corrida vai antes do payload. */
   let versoes = versoesDaAnalise(payloadAtual);
   if (corrente) {
-    const patch = radarAnalysisAdoptionPatch({ current: corrente.payload, to, classification: candidato.classification });
+    const patch = radarAnalysisAdoptionPatch({ current: corrente.payload, to, classification: candidato.classification, refreeze: refaz });
     const sucessora = await createRadarAnalysisSuccessor(corrente, patch, input.actorId, input.now);
     /* O número nunca repete um que a linha já tem (a versão de maior número pode não ser a última do array). */
     const comMotivo = VersionedRadarAnalysisSchema.parse({
       ...sucessora,
       versionNumber: Math.max(sucessora.versionNumber, maiorNumeroDeVersao(payloadAtual) + 1),
-      changeReason: `Adoção da versão nova do ArticleDNA no Radar (v${from.versionNumber} → v${to.versionNumber}, ${candidato.preview.classification}).`,
+      changeReason: `Adoção da versão nova do ArticleDNA no Radar (v${from.versionNumber} → v${to.versionNumber}, ${candidato.preview.classification})${refaz ? "; investigação do Google reaberta para o congelamento novo" : ""}.`,
     });
     const { light, run, hasRun } = splitAnalysisRun(comMotivo as unknown as Record<string, unknown>);
     if (hasRun) await store.writeAnalysisRun({ itemId: linha.id, brandId: input.brandId, articleId, versionId: comMotivo.versionId, run, actorId: input.actorId });
@@ -629,6 +702,7 @@ async function adotarUm(store: RadarArchitectAdoptionStore, candidato: Candidato
       fromVersionId: from.versionId, fromVersionNumber: from.versionNumber, toVersionId: to.versionId, toVersionNumber: to.versionNumber,
       classification: candidato.preview.classification, changes: candidato.preview.changes.map(change => change.field), itemHash: candidato.preview.itemHash,
       ...(candidato.linksForNewVersion ? { linksGraphVersionId: candidato.linksForNewVersion.graphVersionId } : {}),
+      ...(refaz ? { refreeze: true } : {}),
     },
   });
   return relido.lock_version;

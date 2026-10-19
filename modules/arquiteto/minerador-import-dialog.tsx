@@ -57,6 +57,7 @@ const OUTCOME_LABEL: Record<ArquitetoImportResultLine["outcome"], string> = {
   blocked: "não pôde ir",
   excluded: "desmarcada por você",
   stale: "mudou no meio — nada gravado",
+  failed: "não concluída agora (veja o que foi gravado nela)",
 };
 
 const STATE_TONE: Record<ArquitetoImportItem["state"], string> = {

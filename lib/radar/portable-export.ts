@@ -1,6 +1,7 @@
 import type { RadarCompetitiveBlueprint } from "./competitive-blueprint.ts";
 import type { RadarCompetitorOutlinePage } from "./competitor-topics.ts";
 import type { RadarSerpRawPage, RadarSerpRawSources } from "./serp-raw-export.ts";
+import type { BrandSerpTerritory } from "../marca/brand-serp-location.ts";
 import type { RadarAuthoritySourcesRecord } from "./authority-sources-contract.ts";
 import type { RadarCompetitiveBlueprintView } from "./competitive-blueprint-view.ts";
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
@@ -746,6 +747,14 @@ export type RadarPortableExportInput = {
    * para a SERP crua; fora do congelamento e do hash.
    */
   serpRawSources?: RadarSerpRawSources | null;
+  /**
+   * 2026-10-18 · Aditivo (SDD `sdd-localidade-serp-por-marca-2026-10-18.md`, L3):
+   * o território da marca (cidade, UF e apelidos), para a régua D11 marcar
+   * "fora do território: outra localidade" na leitura competitiva e na SERP crua.
+   * Só a marca com localidade de cidade o recebe; ausente = a régua de antes.
+   * Fora do congelamento e do hash.
+   */
+  serpTerritory?: BrandSerpTerritory | null;
   /**
    * 2026-10-14c · Aditivo (fontes externas de autoridade, SDD silo interligado §16.2,
    * Fase B): o registro da conferência CONGELADO no pacote (`bundle.authoritySources`,

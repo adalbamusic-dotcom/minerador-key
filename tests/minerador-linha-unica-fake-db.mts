@@ -64,6 +64,11 @@ export class LinhaUnicaFakeDb {
   maxRows: number;
   rpcs: Record<string, RpcHandler> = {};
   beforeWrite: ((table: string, op: string, alvo: Row[]) => void) | null = null;
+  /**
+   * 2026-10-19 · o limite da URL do gateway do Supabase (~25,2 kB medidos): com valor, o pedido cujos filtros passam
+   * dele volta `400 Bad Request` (texto, sem JSON), como no remoto. Ausente = sem limite.
+   */
+  urlLimit: number | null = null;
   constructor(tables: Record<string, Row[]>, options: { maxRows?: number } = {}) {
     this.tables = tables;
     this.maxRows = options.maxRows ?? 1000;
@@ -122,7 +127,9 @@ class LinhaUnicaFakeQuery implements PromiseLike<{ data: unknown; error: unknown
     } else this.returning = columns;
     return this;
   }
-  eq(column: string, value: unknown) { this.filters.push(row => caminho(row, column) === value); return this; }
+  private urlCost = 0;
+  private custo(column: string, value: unknown) { this.urlCost += encodeURIComponent(column).length + encodeURIComponent(`eq.${String(value)}`).length + 2; }
+  eq(column: string, value: unknown) { this.custo(column, value); this.filters.push(row => caminho(row, column) === value); return this; }
   neq(column: string, value: unknown) { this.filters.push(row => caminho(row, column) !== value); return this; }
   is(column: string, value: unknown) { this.filters.push(row => (caminho(row, column) ?? null) === value); return this; }
   gt(column: string, value: unknown) { this.filters.push(row => String(caminho(row, column) ?? "") > String(value)); return this; }
@@ -141,10 +148,15 @@ class LinhaUnicaFakeQuery implements PromiseLike<{ data: unknown; error: unknown
   }
   filter(column: string, operator: string, value: string) {
     if (operator !== "eq") throw new Error(`filter não simulado: ${operator}`);
+    this.custo(column, value);
     let esperado: unknown = value;
-    try { esperado = JSON.parse(value); } catch { esperado = value; }
+    let jsonValido = true;
+    try { esperado = JSON.parse(value); } catch { esperado = value; jsonValido = false; }
+    // 2026-10-19 · `coluna->chave=eq.<json>` compara jsonb com jsonb (o CAS por chave do DNA), inclusive texto e número.
+    const caminhoJson = column.includes("->") && !column.includes("->>");
     this.filters.push(row => {
       const atual = caminho(row, column);
+      if (caminhoJson && jsonValido) return atual !== null && mesmoJson(atual, esperado);
       if (esperado && typeof esperado === "object") return mesmoJson(atual, esperado);
       return atual !== null && String(atual) === String(value);
     });
@@ -181,6 +193,7 @@ class LinhaUnicaFakeQuery implements PromiseLike<{ data: unknown; error: unknown
     });
   }
   private exec(): { data: unknown; error: unknown; count?: number | null } {
+    if (this.db.urlLimit !== null && this.urlCost > this.db.urlLimit) return { data: null, error: { message: "Bad Request", code: "", details: null, hint: null } };
     const linhas = this.db.rows(this.table);
     const casa = (row: Row) => this.filters.every(filter => filter(row));
     if (this.op === "select") {

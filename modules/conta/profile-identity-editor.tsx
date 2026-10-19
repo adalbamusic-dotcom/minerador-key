@@ -143,10 +143,9 @@ export function ProfileIdentityEditor({ identity, initialImage, isPlatformAdmin 
       setName(normalizedName);
       setNameDirty(false);
       setPresentationOverride({ name: normalizedName });
-      setNameStatus({ tone: "success", message: "Nome salvo e confirmado na identidade Auth." });
+      /* 2026-10-18 · todos os avisos no sino (regra do dono): o resultado do salvamento fica só no sino; ao lado do campo só a validação. */
       publishProfileNotice("SUCCESS", "Perfil atualizado", "O nome foi salvo e confirmado.", "PROFILE_NAME_PERSISTED");
     } catch {
-      setNameStatus({ tone: "error", message: "Não foi possível confirmar o salvamento do nome." });
       publishProfileNotice("ERROR", "Perfil", "O nome não foi confirmado pela autenticação.", "PROFILE_NAME_UPDATE_ERROR");
     } finally {
       setSavingName(false);
@@ -265,11 +264,11 @@ export function ProfileIdentityEditor({ identity, initialImage, isPlatformAdmin 
       }
 
       setPresentationOverride({ image: avatarUrl });
-      setAvatarStatus({ tone: "success", message: "Foto salva e confirmada na identidade." });
+      /* 2026-10-18 · resultado só no sino; a linha abaixo da foto fica para a validação do arquivo escolhido. */
       publishProfileNotice("SUCCESS", "Perfil atualizado", "A foto foi salva e confirmada.", "PROFILE_AVATAR_PERSISTED");
       closeAvatarEditor();
     } catch {
-      setAvatarError("Não foi possível confirmar o salvamento do avatar.", "PROFILE_AVATAR_PERSISTENCE_ERROR");
+      publishProfileNotice("ERROR", "Avatar", "Não foi possível confirmar o salvamento do avatar.", "PROFILE_AVATAR_PERSISTENCE_ERROR");
       setAvatarBusy(false);
     }
   }

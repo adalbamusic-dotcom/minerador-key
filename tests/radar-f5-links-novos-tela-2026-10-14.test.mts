@@ -73,7 +73,7 @@ test("links · a faixa conta os artigos, a prévia mostra '· links' e o que mud
   };
   const avisos: string[] = [];
   const tela = await harness.montarRadar();
-  await tela.render(React.createElement(RadarArchitectUpdatePanel, { brandId: MARCA, articleIds: ["a", "t"], onAdopted: (mensagem: string) => { avisos.push(mensagem); } }));
+  await tela.render(harness.comProductShell(React.createElement(RadarArchitectUpdatePanel, { brandId: MARCA, articleIds: ["a", "t"], onAdopted: (mensagem: string) => { avisos.push(mensagem); } })));
   await esperar();
 
   assert.equal(tela.get("radar-architect-update-count").textContent, "Atualização disponível do Arquiteto · 2 artigo(s) · links novos em 2");
@@ -92,7 +92,7 @@ test("links · a faixa conta os artigos, a prévia mostra '· links' e o que mud
   await tela.click("radar-architect-update-confirm");
   await esperar();
   const post = chamadas.find(chamada => chamada.method === "POST")!;
-  assert.deepEqual(post.body, { action: "adopt", brandId: MARCA, articleIds: [], linkArticleIds: ["a", "t"], decisionHash: await radarArchitectAdoptionDecisionHash([LINKS_A, LINKS_T] as never) });
+  assert.deepEqual(post.body, { action: "adopt", brandId: MARCA, articleIds: [], linkArticleIds: ["a", "t"], decisionHash: await radarArchitectAdoptionDecisionHash([LINKS_A, LINKS_T] as never), continueOnScreen: true });
   assert.match(avisos[0], /2 artigo\(s\) passaram a transportar os links novos do Arquiteto, sem refazer a pesquisa \(confirmado pelo servidor\)/);
   assert.doesNotMatch(avisos[0], /versão nova do Arquiteto/);
   assert.match(tela.text(), /Artigo t: links do grafo v2 \(era v1\)\. A pesquisa e o pacote ficam\./);

@@ -25,7 +25,13 @@ export const ArchitectWorkflowStateSchema = z.enum(["draft", "analyzing", "confl
  * `sent_planner` saiu com a aposentadoria do Planejador (2026-10-01): o
  * preflight confirmou zero linhas com esse estado.
  */
-export const RadarWorkflowStateSchema = z.enum(["imported", "research_pending", "researching", "needs_review", "conflicts", "awaiting_approval", "approved", "sent_writer"]);
+/*
+ * 2026-10-18 · `withdrawn` (aditivo): o item saiu da operação porque o Silo/artigo foi desmontado ("Desfazer Silo" ou a
+ * exclusão das keywords no Minerador — decisão do dono "tudo tem que poder ser apagado"). A linha e a investigação ficam
+ * como histórico; a mesa do Radar não o lista e o envio ao Redator o recusa. Nenhuma transição volta dele por aqui.
+ */
+export const RADAR_WITHDRAWN_STATE = "withdrawn" as const;
+export const RadarWorkflowStateSchema = z.enum(["imported", "research_pending", "researching", "needs_review", "conflicts", "awaiting_approval", "approved", "sent_writer", RADAR_WITHDRAWN_STATE]);
 export const PublicationWorkflowStateSchema = z.enum(["draft", "writing", "awaiting_review", "in_review", "approved", "ready_to_export", "queued", "exported", "published", "update_due", "blocked", "archived"]);
 export const PublicationHistoryEntrySchema = z.object({
   id: z.string(),
@@ -289,6 +295,7 @@ export function setRadarState(items: RadarItem[], ids: string[], target: RadarIt
     /* §18 · `approved → sent_writer` é a transição do fluxo vigente. */
     approved: ["sent_writer", "needs_review"],
     sent_writer: ["approved"],
+    withdrawn: [],
   };
   return items.map(item => ids.includes(item.id) && allowed[item.state].includes(target) ? { ...item, state: target, updatedAt: now, lockVersion: item.lockVersion + 1 } : item);
 }

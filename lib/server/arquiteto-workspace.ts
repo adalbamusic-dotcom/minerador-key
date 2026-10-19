@@ -11,7 +11,7 @@ import { isApprovedForArchitect } from "@/lib/minerador/editorial-status";
 import { resolveKeywordSubject } from "@/lib/minerador/keyword-subject";
 import { validateSubjectDestination } from "@/lib/minerador/subject-destination";
 import { articleDnaIncorporatedKeywordIds } from "@/lib/arquiteto/declared-subject";
-import { releaseRejectedArticles } from "@/lib/arquiteto/rejected-article-release";
+import { releaseRejectedArticles, releaseRejectedSiloPairs } from "@/lib/arquiteto/rejected-article-release";
 import {
   buildMineradorArquitetoHandoffPlan,
   MINERADOR_ARQUITETO_RECEIVED_STATE,
@@ -677,10 +677,17 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
   // O criador manual grava o par canônico antes de existir ArticleDNA. Se o
   // readback dependesse apenas de artigos associados, um F5 esconderia o
   // SiloDNA/SiloPage recém-criado da cópia de trabalho e do select de Silo.
-  const siloDnas = latestByEntity(artifacts.siloDnas)
+  const siloDnasVigentes = latestByEntity(artifacts.siloDnas)
     .filter(version => version.payload.brandId === context.brandId);
-  const siloPages = latestByEntity(artifacts.siloPages)
+  const siloPagesVigentes = latestByEntity(artifacts.siloPages)
     .filter(version => version.payload.brandId === context.brandId);
+  // 2026-10-18 · o par do Silo desfeito inteiro (evento `rejected` na vigente) sai dos Silos ativos, como o artigo rejeitado.
+  const { siloDnas, siloPages } = releaseRejectedSiloPairs({
+    siloDnas: siloDnasVigentes,
+    siloPages: siloPagesVigentes,
+    statuses: artifacts.statuses,
+    events: await readArticleVersionEvents(context, [...siloDnasVigentes, ...siloPagesVigentes].map(version => version.versionId)),
+  });
   // Revisão IA vigente por Article: é ela que faz o estado sobreviver ao F5.
   const aiReviews = latestByEntity(artifacts.aiReviews)
     .filter(version => version.payload.brandId === context.brandId);

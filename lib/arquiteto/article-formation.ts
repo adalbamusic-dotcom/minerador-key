@@ -29,7 +29,7 @@
  * Domínio puro: sem provider, sem storage, sem UI. Não cria ArticleDNA — o
  * resultado é CANDIDATO, para revisão humana.
  */
-import { intentComparisonKey } from "./keyword-dna-signals.ts";
+import { funnelComparisonKey, intentComparisonKey } from "./keyword-dna-signals.ts";
 
 /** Papel da keyword dentro do Article. Sugestão, não decisão. */
 export type ArticleKeywordRole = "principal" | "secundaria" | "reforco";
@@ -229,14 +229,8 @@ const overlap = (left: Set<string>, right: Set<string>) => {
  */
 const normalizedIntent = (value: string | null) => intentComparisonKey(value);
 
-const funnelStage = (value: string | null | undefined): "TOP" | "MIDDLE" | "BOTTOM" | null => {
-  const texto = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (!texto) return null;
-  if (/^tofu|topo|^top|awareness|descoberta/.test(texto)) return "TOP";
-  if (/^mofu|meio|middle|considera/.test(texto)) return "MIDDLE";
-  if (/^bofu|fundo|bottom|decis|convers/.test(texto)) return "BOTTOM";
-  return null;
-};
+/** 2026-10-19 · o normalizador único do funil (keyword-dna-signals). */
+const funnelStage = funnelComparisonKey;
 
 /**
  * D5 — O AGRUPAMENTO QUE CONTRARIA O DNA NÃO É AUTOMÁTICO.

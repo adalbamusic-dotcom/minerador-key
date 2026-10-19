@@ -4,6 +4,9 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, X } from "lucide-react";
 import { internalButton, internalButtonPrimary } from "@/components/editorial/internal-page-visual";
 import {
+  APPROVE_AND_SEND_RESUME,
+  APPROVE_AND_SEND_SUBJECT_LINE,
+  approveAndSendSubjectSummary,
   describeApproveAndSendResult,
   type ApproveAndSendLine,
   type ApproveAndSendOutcome,
@@ -11,6 +14,7 @@ import {
   type ApproveAndSendResult,
 } from "@/lib/minerador/approve-and-send-core";
 import { approvalBlockerLabel } from "@/lib/minerador/approval-blockers";
+import { InfoHint } from "@/components/info-hint";
 
 /**
  * "APROVAR E ENVIAR AO ARQUITETO" — a prévia e a confirmação (SDD
@@ -26,7 +30,11 @@ import { approvalBlockerLabel } from "@/lib/minerador/approval-blockers";
 
 const ROUTE = (brandId: string) => `/api/minerador/marcas/${encodeURIComponent(brandId)}/keywords/approve-and-send`;
 
-type Refusal = { code: string; message: string };
+/**
+ * 2026-10-19 · `nothingWritten`: a rota diz se a falha veio antes de qualquer gravação. Sem essa certeza (503 no meio,
+ * ou sem resposta no aplicar) a tela NÃO diz "Nada foi gravado": relê a planilha e manda reler o Minerador.
+ */
+type Refusal = { code: string; message: string; nothingWritten: boolean };
 
 const OUTCOME_LABEL: Record<ApproveAndSendOutcome, string> = {
   approved_and_sent: "Aprovada e enviada",
@@ -38,6 +46,7 @@ const OUTCOME_LABEL: Record<ApproveAndSendOutcome, string> = {
   blocked: "Não pôde ir",
   excluded: "Desmarcada por você",
   stale: "Mudou no meio — nada gravado",
+  failed: "Não concluída agora",
 };
 
 /** O pedido à rota (prévia ou aplicar). Também usado pela aprovação de uma keyword só, sem diálogo. */
@@ -49,7 +58,13 @@ async function call(brandId: string, body: Record<string, unknown>): Promise<{ o
   const response = await fetch(ROUTE(brandId), { method: "POST", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
   const data = response ? await response.json().catch(() => ({})) as Record<string, unknown> : {};
   if (!response || !response.ok || data.success !== true) {
-    return { ok: false, refusal: { code: typeof data.code === "string" ? data.code : response ? `HTTP_${response.status}` : "NETWORK_ERROR", message: typeof data.message === "string" ? data.message : response ? "Aprovar e enviar não pôde ser feito agora." : "Sem conexão com o servidor. Nada foi gravado." } };
+    const aplicando = body.mode === "apply";
+    // Sem a palavra da rota, só a prévia garante que nada foi gravado.
+    const nothingWritten = typeof data.nothingWritten === "boolean" ? data.nothingWritten : !aplicando;
+    const message = typeof data.message === "string" ? data.message
+      : !response ? (aplicando ? `Sem resposta do servidor: releia o Minerador para ver o que foi gravado. ${APPROVE_AND_SEND_RESUME}` : "Sem conexão com o servidor.")
+      : "Aprovar e enviar não pôde ser feito agora.";
+    return { ok: false, refusal: { code: typeof data.code === "string" ? data.code : response ? `HTTP_${response.status}` : "NETWORK_ERROR", message, nothingWritten } };
   }
   return { ok: true, data };
 }
@@ -65,8 +80,11 @@ export function ApproveAndSendDialog({ brandId, keywordIds, scopeLabel, send = t
   scopeLabel: string;
   send?: boolean;
   onClose: () => void;
-  /** Relê as linhas tocadas na planilha; devolve `true` quando a releitura confirmou. */
-  onApplied: (touchedIds: string[], result: ApproveAndSendResult) => Promise<boolean>;
+  /**
+   * Relê as linhas tocadas na planilha; devolve `true` quando a releitura confirmou. `result: null` (2026-10-19) = o
+   * aplicar parou sem resposta certa: relê todas as pedidas para a planilha mostrar o que foi gravado.
+   */
+  onApplied: (touchedIds: string[], result: ApproveAndSendResult | null) => Promise<boolean>;
 }) {
   const ids = { title: useId() };
   const [phase, setPhase] = useState<"previewing" | "ready" | "applying" | "rereading" | "done">("previewing");
@@ -128,7 +146,13 @@ export function ApproveAndSendDialog({ brandId, keywordIds, scopeLabel, send = t
     setRefusal(null);
     try {
       const answer = await call(brandId, { mode: "apply", keywordIds: pedidoIds, send, decisionHash: preview.decisionHash, excludedIds: [...excluded] });
-      if (!answer.ok) { setRefusal(answer.refusal); setPhase("ready"); return; }
+      if (!answer.ok) {
+        setRefusal(answer.refusal);
+        // Parou no meio sem certeza: a planilha relê as pedidas (mostra o que foi gravado) e a prévia nova continua dali.
+        if (!answer.refusal.nothingWritten) await onApplied([...pedidoIds], null).catch(() => false);
+        setPhase("ready");
+        return;
+      }
       const aplicado = answer.data as unknown as ApproveAndSendResult;
       setResult(aplicado);
       setPhase("rereading");
@@ -155,6 +179,12 @@ export function ApproveAndSendDialog({ brandId, keywordIds, scopeLabel, send = t
               {line.refreshInArquiteto
                 ? <span className="ml-2 text-context-accent" data-approve-and-send-refresh>· atualiza no Arquiteto (pacote novo; as decisões do Arquiteto ficam)</span>
                 : line.alreadyInArquiteto ? <span className="ml-2 text-text-muted">· já no Arquiteto (pacote igual: nada muda lá)</span> : null}
+              {line.subjectFromVolume ? (
+                <span className="block text-context-accent" data-approve-and-send-subject>
+                  {APPROVE_AND_SEND_SUBJECT_LINE}: “{line.subjectFromVolume.title}”{line.subjectFromVolume.details ? ` · detalhes: ${line.subjectFromVolume.details}` : ""}{line.subjectFromVolume.legacy ? " · o Assunto do formato anterior ganha o título" : ""}
+                </span>
+              ) : null}
+              {line.subjectFromVolumeHeld ? <span className="block text-text-muted" data-approve-and-send-subject-held>{line.subjectFromVolumeHeld}</span> : null}
               {line.action === "blocked" ? <span className="block text-text-muted">{reasonOf(line)}</span> : null}
             </span>
           </li>
@@ -163,7 +193,7 @@ export function ApproveAndSendDialog({ brandId, keywordIds, scopeLabel, send = t
     </section>
   ) : null;
 
-  const tom = result && (result.counts.stale || result.counts.approved_not_sent || result.counts.not_sent || rereadOk === false) ? "warning" : "success";
+  const tom = result && (result.counts.stale || result.counts.failed || result.counts.approved_not_sent || result.counts.not_sent || rereadOk === false) ? "warning" : "success";
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/90 p-4 font-sans" role="dialog" aria-modal="true" aria-labelledby={ids.title} data-minerador-approve-and-send>
@@ -184,6 +214,12 @@ export function ApproveAndSendDialog({ brandId, keywordIds, scopeLabel, send = t
 
             {preview && !result ? (
               <>
+                {preview.counts.subjectFromVolume ? (
+                  <p className="flex items-start gap-1 text-sm leading-6 text-foreground" data-approve-and-send-subject-summary>
+                    <span>{approveAndSendSubjectSummary(preview.counts.subjectFromVolume)}</span>
+                    <InfoHint title="Assunto pelo volume 0" description="A página publicada (ou o Assunto do formato anterior) com volume 0 ou sem média no Google Ads vira o Assunto fixo do artigo ao confirmar: o título é o texto da keyword e você o corrige depois no painel do KeywordDNA. O botão Volume só mede; quem grava o Assunto é esta confirmação. Página de Silo fica fora." />
+                  </p>
+                ) : null}
                 {preview.blockedSummary ? (
                   <p className="text-sm leading-6 text-foreground" data-approve-and-send-motivos><span className="font-semibold text-warning">Não podem ir:</span> {preview.blockedSummary}</p>
                 ) : null}
@@ -197,8 +233,8 @@ export function ApproveAndSendDialog({ brandId, keywordIds, scopeLabel, send = t
 
             {refusal ? (
               <div role="alert" className="rounded-md border border-danger/40 px-3 py-2 text-sm leading-6" data-approve-and-send-refusal>
-                <p className="flex items-center gap-2 font-semibold text-danger"><AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />Nada foi gravado: {refusal.message}</p>
-                {refusal.code === "APPROVE_AND_SEND_STALE" ? <button type="button" onClick={() => void gerarPrevia()} className={`${internalButton} mt-2`}>Gerar a prévia de novo</button> : null}
+                <p className="flex items-center gap-2 font-semibold text-danger"><AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />{refusal.nothingWritten ? "Nada foi gravado: " : "Não concluído: "}{refusal.message}</p>
+                {refusal.code === "APPROVE_AND_SEND_STALE" || !refusal.nothingWritten ? <button type="button" onClick={() => void gerarPrevia()} className={`${internalButton} mt-2`}>Gerar a prévia de novo</button> : null}
               </div>
             ) : null}
 
