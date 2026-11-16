@@ -8557,3 +8557,6 @@ bloqueado real — o caso que motivou a SDD foi destravado antes da entrega.
 ## SERP de artigo sem alteração na planilha — 2026-11-02
 
 **Implementado localmente e confirmado por testes com fixtures:** `Processar artigos` passa a planejar e conferir a SERP de uma formação já existente também quando a proposta não muda a composição. Antes, a condição `adequate` ignorava essa verificação; portanto, a ausência de alterações não comprovava as quatro lentes. Se a evidência faltar, a proposta permanece pendente e a coleta entra no orçamento para autorização; uma leitura com cache completo preserva o artigo sem nova versão. `tests/arquiteto-article-improvement-server.test.mts` cobre as duas situações, sem chamada paga; os testes DOM existentes cobrem os acionadores e a prévia de custo. A validação real pelo botão ainda está pendente.
+## Prévia longa da coleta SERP — 2026-11-16
+
+**Correção local e teste no navegador:** a prévia da coleta em lote cortava o título longo e escondia os botões, pois apenas a tabela interna rolava. O mesmo diálogo agora permite rolar todo o conteúdo e receber foco pelo teclado. Na prévia real da AdalbaPro, a rolagem chegou aos botões Cancelar e Pagar e validar; nenhuma opção foi acionada durante a conferência. Não muda o custo nem a autorização da coleta. A versão publicada ainda depende de deploy.

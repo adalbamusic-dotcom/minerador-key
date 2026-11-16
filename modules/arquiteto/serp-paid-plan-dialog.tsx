@@ -75,8 +75,8 @@ export function SerpPaidPlanDialog({
   const ofereceSomenteCache = allowCacheOnly && !plan.cacheUnavailable;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <div data-testid="architect-serp-paid-plan" className="flex max-h-[86vh] w-full max-w-2xl flex-col gap-3 overflow-hidden rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl">
-        <div className="min-w-0">
+      <div data-testid="architect-serp-paid-plan" tabIndex={0} className="flex max-h-[86vh] w-full max-w-2xl flex-col gap-3 overflow-y-auto overscroll-contain rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl">
+        <div className="min-w-0 break-words">
           <p className="text-base font-semibold text-foreground">{title}</p>
           {texto.cacheWarning && <p className="mt-1 text-sm leading-6 text-warning" data-testid="architect-serp-paid-plan-cache-warning">{texto.cacheWarning}</p>}
           <p className="mt-1 text-sm leading-6 text-foreground" data-testid="architect-serp-paid-plan-headline">{texto.headline}</p>

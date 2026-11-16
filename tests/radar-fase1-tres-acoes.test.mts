@@ -198,6 +198,26 @@ test("E · sem teto: dezoito referências úteis viram dezoito selecionadas", ()
   assert.equal(resultado.curation.confirmedBy, "sistema");
 });
 
+test("motivo automático extenso cabe na curadoria sem perder as aparições da pesquisa", () => {
+  const original = registro(["https://editorial-exemplo.com.br/artigo"]);
+  const base = original.queries[0];
+  const queries = Array.from({ length: 4 }, (_, index) => ({
+    ...base,
+    queryId: `query:${index}`,
+    keywordId: `keyword:${index}`,
+    keyword: `consulta ${index} ${"marketing ".repeat(50)}`,
+    role: index === 0 ? "principal" as const : "secundaria" as const,
+    serpClass: index === 0 ? "canonical" as const : "auxiliary" as const,
+  }));
+  const resultado = buildRadarAutomaticResearchCuration({ record: { ...original, queries }, context: contexto(), confirmedBy: "sistema" });
+  assert.ok(resultado.curation);
+  const item = resultado.curation.references[0];
+  assert.ok(item.reason.length <= 1000);
+  assert.match(item.reason, /detalhes nas evidências/);
+  assert.equal(resultado.references[0].appearances.length, 4);
+  assert.equal(resultado.references[0].queryCount, 4);
+});
+
 test("as consultas do universo são reconstruídas do próprio registro", () => {
   const executadas = radarExecutedQueriesFromRecord(registro(["https://x.com.br/a"]));
   assert.equal(executadas.length, 1);

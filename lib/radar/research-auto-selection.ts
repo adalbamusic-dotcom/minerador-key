@@ -38,7 +38,7 @@ export type RadarAutoDecision = { decision: RadarResearchDecision; reason: strin
  * "selecionada porque recorre em três consultas" é auditável; "selecionada"
  * sozinha não é.
  */
-export function autoDecideRadarReference(reference: RadarResearchReference, mode: RadarPrimarySearchMode = RADAR_DEFAULT_SEARCH_MODE): RadarAutoDecision {
+function autoDecideRadarReferenceUnbounded(reference: RadarResearchReference, mode: RadarPrimarySearchMode): RadarAutoDecision {
   const recorrencia = radarReferenceAppearanceSummary(reference);
   const tipo = reference.appearances[0]?.resultType || null;
 
@@ -92,6 +92,15 @@ export function autoDecideRadarReference(reference: RadarResearchReference, mode
       : { decision: "excluded", reason: "Aparece só em uma consulta de reforço e não menciona a entidade do artigo." };
   }
   return { decision: "excluded", reason: "Não aparece na consulta principal nem se repete entre as consultas." };
+}
+
+/** O resumo automático cabe no contrato; as aparições completas seguem na evidência. */
+export function autoDecideRadarReference(reference: RadarResearchReference, mode: RadarPrimarySearchMode = RADAR_DEFAULT_SEARCH_MODE): RadarAutoDecision {
+  const decision = autoDecideRadarReferenceUnbounded(reference, mode);
+  const suffix = "… (resumo; detalhes nas evidências)";
+  return decision.reason.length <= 1000
+    ? decision
+    : { ...decision, reason: decision.reason.slice(0, 1000 - suffix.length).trimEnd() + suffix };
 }
 
 export type RadarAutoSelectionResult = {

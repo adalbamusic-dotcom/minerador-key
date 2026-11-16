@@ -408,6 +408,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * até o último `finally`.
    */
   const pesquisaEmVooRef = useRef<string | null>(null);
+  const [pesquisaEmCurso, setPesquisaEmCurso] = useState<string | null>(null);
   /*
    * O RASCUNHO DA CURADORIA DA PESQUISA.
    *
@@ -4073,14 +4074,18 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const compromisso = compromissoDeModo(target, "WEB");
     if (!compromisso.canStart) { setNotice(compromisso.reason || "Este artigo já descreve outro universo."); return; }
     if (pesquisaEmVooRef.current || collectingArticleIdRef.current || serpActionRef.current || serpAction || busyArticleId || reviewingArticleIdRef.current || reviewingArticleId) {
-      setNotice("A pesquisa deste artigo já está em andamento. Aguarde a conclusão: cada clique é uma consulta paga ao provider.");
+      setNotice("Uma pesquisa ou outra ação do Radar já está em andamento. Aguarde a conclusão antes de tentar novamente: cada pesquisa pode gerar consultas pagas.");
       return;
     }
     pesquisaEmVooRef.current = target.articleId;
+    setPesquisaEmCurso(target.articleId);
     try {
       await rodadaDePesquisaProfunda();
+    } catch (error) {
+      setNotice({ type: "error", message: `Não foi possível concluir a pesquisa. Confira a pesquisa salva antes de tentar novamente. ${error instanceof Error ? error.message : "Erro inesperado."}` });
     } finally {
       pesquisaEmVooRef.current = null;
+      setPesquisaEmCurso(null);
     }
   };
 
@@ -6097,7 +6102,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     * entregue e cobrado. A frase nomeia o navegador como responsável e afirma,
     * na mesma linha, que a pesquisa não precisa ser refeita. 2026-10-18 · ela
     * vai para o sino (WARNING), não para uma faixa da tela (regra do dono).
-    */}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} brandId={selectedBrandId} articleBlueprintJob={activeRadarItem ? blueprintJobs[activeRadarItem.articleId] ?? null : null} videoSources={{ ...vistaDeVideos, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} writerHandoff={fronteiraDoRedator(activeRadarItem)} amazonSearch={{
+    */}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId || pesquisaEmCurso)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} brandId={selectedBrandId} articleBlueprintJob={activeRadarItem ? blueprintJobs[activeRadarItem.articleId] ?? null : null} videoSources={{ ...vistaDeVideos, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} writerHandoff={fronteiraDoRedator(activeRadarItem)} amazonSearch={{
       run: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.amazonSearch || null : null,
       plannedQueries: planoAmazon(activeRadarItem).queries.length,
       busy: amazonBusy,
