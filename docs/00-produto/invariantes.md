@@ -30,7 +30,7 @@
 17. `keywords_kgr.lista_id → listas_kgr.id` usa `ON DELETE RESTRICT`; excluir uma lista nunca apaga keywords.
 18. Histórico de undo/redo e operações recentes da interface é `SESSION_HISTORY`, local ou de sessão, e nunca substitui versionamento, auditoria, proveniência ou proteção contra exclusão.
 19. `isPublished(subject)` é resolvido server-side por publicação formal ou linhagem canônica real; status visual, ArticleDNA, workflow, aprovação, handoff, DNA e métricas isolados não promovem publicação.
-20. Entidade não publicada pode seguir para hard delete transacional após impacto, confirmação digitada pelo nome exato e readback; entidade publicada usa a mesma confirmação, tombstone recuperável por 24 horas, restore dentro da janela e purge server-side após o vencimento. História canônica append-only permanece preservada.
+20. Entidade não publicada pode seguir para hard delete transacional após impacto, confirmação e readback; entidade publicada segue a política aplicável de recuperação de 24 horas e purge. A regra anterior de preservar sempre o histórico canônico dos itens elegíveis foi **SUBSTITUÍDA** pela decisão do dono de 01/11/2026: a exclusão definitiva deve alcançar também versões, aprovações e dependências abrangidas dos itens selecionados, com proteção dos demais itens e marcas. O append-only continua valendo fora dessa operação restrita. A implementação transacional dessa substituição ainda está pendente; consultar `docs/compartilhado/sdd-exclusao-completa-artefatos-2026-11-01.md`.
 21. `InternalLinkGraph` é a fonte canônica das relações estruturais de links
     internos. Ele é tenantizado por `brandId`, versionado append-only e
     referencia versões de SiloDNA, SiloPage e ArticleDNA; React Flow, estado

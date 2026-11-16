@@ -24,7 +24,7 @@ const rota = readFileSync("app/api/arquiteto/workflow-status/route.ts", "utf8");
 /* ============ a causa raiz não pode voltar ============================= */
 
 test("o índice lê o status da LINHA da versão, como o loader canônico", () => {
-  assert.match(indice, /\.select\("version_id,entity_id,artifact_type,version_number,status,payload"\)/);
+  assert.match(indice, /\.select\("version_id,entity_id,artifact_type,version_number,status,payload",\s*\{\s*count:\s*"exact"\s*\}\)/);
   assert.match(indice, /effectiveVersionStatus\(row\.version_id, eventList\) \?\? row\.status/);
   // A leitura só por evento — que enxergava `null` em todo artefato do
   // Arquiteto — não pode voltar como única fonte.

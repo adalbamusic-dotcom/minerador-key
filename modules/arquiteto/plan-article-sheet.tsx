@@ -2,8 +2,10 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { EditorialGroupTag } from "@/components/editorial/group-tag";
 import { ArticleSubjectLine } from "@/components/editorial/article-subject-line";
+import { InfoHint } from "@/components/info-hint";
 import { OperationProgress } from "./operation-progress";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
+import { recoverPlanSheetRuns } from "@/lib/arquiteto/plan-sheet-recovery";
 import type { ArchitectSubjectStanding } from "@/lib/arquiteto/declared-subject";
 import type { EditorialGroupScreenFilter } from "@/lib/editorial/editorial-groups";
 import { ARCHITECT_SUGGESTIONS_LABEL, mineradorHandoffHref } from "@/lib/arquiteto/minerador-suggestions";
@@ -162,6 +164,8 @@ export type PlanArticleSheetProps = {
    * fechamento de sempre (aditivo).
    */
   onConcluded?: (groupIds: readonly string[]) => Promise<PlanSheetResult | null>;
+  /** Leitura do mesmo fechamento, sem gravação; a confirmação o relê. */
+  onReadClosure?: (groupIds: readonly string[]) => Promise<{ ready: boolean; detail: string }>;
   /**
    * 2026-10-18 · TODOS OS AVISOS NO SINO (regra do dono). O resumo do lote e a
    * falha das ações das linhas do plano vão para o sino por aqui (na aba, o
@@ -295,6 +299,8 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   const [summary, setSummary] = useState<PlanSheetResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resumable, setResumable] = useState<ImprovementRun | null>(null);
+  const [resumableQueue, setResumableQueue] = useState<ImprovementRun[]>([]);
+  const [recoveredBrand, setRecoveredBrand] = useState<string | null>(null);
   /* 2026-10-18 · o resumo e a falha vão para o sino (um aviso por desfecho); a tela mostra só o andamento, a prévia e a retomada. */
   const onNotifyRef = useRef(props.onNotify);
   useEffect(() => { onNotifyRef.current = props.onNotify; });
@@ -303,7 +309,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   /* 2026-10-14 · "Retirar artigo do Silo" aberto a partir da linha presa (prévia grátis; motivo e confirmação do dono). */
   const [withdrawing, setWithdrawing] = useState<PlanSheetConflict | null>(null);
   /*
-   * 2026-10-17 (noite) · A CÓPIA DE TRABALHO DO "PROCESSAR ARTIGOS", por grupo: a execução preparada (reforço e SERP)
+   * A CÓPIA DE TRABALHO DO "PROCESSAR ARTIGOS", por execução: cada run conserva seus próprios alvos e hash.
    * que o "Concluir formação" grava. É proposta persistida no servidor (o run da melhoria, §4.1 da SDD), nunca artefato.
    */
   const [processed, setProcessed] = useState<Map<string, ImprovementRun>>(new Map());
@@ -321,6 +327,8 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     setSummary(null);
     setError(null);
     setResumable(null);
+    setResumableQueue([]);
+    setRecoveredBrand(null);
     setWithdrawing(null);
     setSerpRead(null);
     setProcessed(new Map());
@@ -332,27 +340,40 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   useEffect(() => {
     if (!brandId) return;
     let ativo = true;
-    void fetch(`/api/arquiteto/article-improvement?brandId=${encodeURIComponent(brandId)}`).then(r => r.json()).then(body => {
-      const run = body?.data as ImprovementRun | null;
-      if (!ativo || !run || run.origin !== "plan_sheet") return;
-      if (run.state === "applying" && run.acceptedIds?.length) setResumable(run);
-      else if (run.state === "prepared" && !run.acceptedIds && run.discovery?.requested && run.groupScope?.groupId) setProcessed(atual => new Map([...atual, [run.groupScope!.groupId!, run]]));
-    }).catch(() => undefined);
+    void fetch(`/api/arquiteto/article-improvement?brandId=${encodeURIComponent(brandId)}&recovery=plan_sheet`).then(async response => {
+      const body = await response.json();
+      if (!response.ok || !body?.success || (body.data !== null && !Array.isArray(body.data))) throw new Error(body?.error || "Não foi possível reler as execuções da planilha.");
+      if (!ativo) return;
+      const recovered = recoverPlanSheetRuns((body.data ?? []) as ImprovementRun[]);
+      setProcessed(new Map(recovered.drafts.map(run => [run.runId, run])));
+      setResumable(recovered.interrupted[0] ?? null);
+      setResumableQueue(recovered.interrupted.slice(1));
+      setRecoveredBrand(brandId);
+      if (recovered.collecting) setError(`Há uma coleta de SERP interrompida. Use “${PLAN_SHEET_ACTION_LABELS.processArticles}” para verificar e continuar a coleta pelo fluxo normal.`);
+    }).catch(error => { if (ativo) setError(`${error instanceof Error ? error.message : "Não foi possível reler as execuções da planilha."} Recarregue a página para tentar a leitura novamente; as ações da planilha permanecem bloqueadas até ela ser confirmada.`); });
     return () => { ativo = false; };
   }, [brandId]);
 
   /* -------------------- a sequência dos 3 botões (2026-10-17, noite) -------------------- */
   // Processar fez a parte da linha quando ela tem a cópia de trabalho sem SERP paga pendente (ou a recusa com o motivo).
+  const processedByTarget = useMemo(() => {
+    const porAlvo = new Map<string, ImprovementRun>();
+    for (const run of processed.values()) {
+      for (const proposal of run.proposals) porAlvo.set(proposal.targetId, run);
+      for (const recusa of run.refusedTargets ?? []) porAlvo.set(recusa.id, run);
+    }
+    return porAlvo;
+  }, [processed]);
   const processedIds = useMemo(() => {
     const ids = new Set<string>(processedRefused);
-    for (const run of processed.values()) {
-      for (const proposal of run.proposals) if (!proposal.needsValidation) ids.add(proposal.targetId);
-      for (const recusa of run.refusedTargets ?? []) ids.add(recusa.id);
+    for (const [id, run] of processedByTarget) {
+      const proposal = run.proposals.find(item => item.targetId === id);
+      if (proposal && !proposal.needsValidation || run.refusedTargets?.some(item => item.id === id)) ids.add(id);
     }
     return ids;
-  }, [processed, processedRefused]);
+  }, [processedByTarget, processedRefused]);
   // A cópia de trabalho que ainda espera a gravação do Concluir (o que está pronto para gravar).
-  const pendingIds = useMemo(() => new Set([...processed.values()].flatMap(run => run.proposals.filter(proposal => proposal.status === "ready").map(proposal => proposal.targetId))), [processed]);
+  const pendingIds = useMemo(() => new Set([...processedByTarget].filter(([id, run]) => run.proposals.some(proposal => proposal.targetId === id && proposal.status === "ready")).map(([id]) => id)), [processedByTarget]);
   const stepOf = (alvo: readonly PlanSheetRow[]) => planSheetSequence({ rows: alvo, processedIds, pendingIds });
 
   const sugestoesHref = brandRef ? mineradorHandoffHref(brandRef, { action: "sugestoes", color: corDoRecorte }) : null;
@@ -362,7 +383,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     const daMesa = keywords.find(item => String(item.id) === keywordId)?.keyword;
     return typeof daMesa === "string" && daMesa ? daMesa : keywordId;
   };
-  const ocupado = Boolean(busy) || Boolean(preview);
+  const ocupado = Boolean(busy) || Boolean(preview) || Boolean(resumable) || Boolean(brandId && recoveredBrand !== brandId);
 
   const startBusy = (label: string, total: number | null = null, unit = "") => setBusy({ label, startedAt: agoraMs(), done: total === null ? null : 0, total, unit });
   const finish = (vivo: () => boolean, linhas: Map<string, PlanSheetResult>, texto: PlanSheetResult) => {
@@ -383,7 +404,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
    * 2026-10-17 (noite) · PASSO 1 DO ROTEIRO §15, numa passada (dono: "cadê as keywords de reforço?"): lê o plano e os
    * DNAs, busca o reforço (sementes do plano, do DNA e da SERP em cache; lista da marca e ideias do Google Ads, grátis,
    * cota) e diz o custo da SERP da principal que falta (inclusive a de identidade sem volume). A busca roda sozinha
-   * (SUBSTITUI o "Buscar keywords novas no Google Ads (N)" do painel); a SERP paga só com a confirmação. Nada é gravado.
+   * (SUBSTITUI o "Buscar keywords novas no Google Ads (N)" do painel); a SERP paga só com a confirmação. A leitura não grava ArticleDNA.
    */
   async function processArticles(alvo: PlanSheetRow[]) {
     if (!brandId) return;
@@ -393,7 +414,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     const linhas = new Map<string, PlanSheetResult>();
     for (const item of escolha.refused) linhas.set(item.keywordId, { tone: "warning", text: item.reason });
     if (escolha.refused.length) setProcessedRefused(atual => new Set([...atual, ...escolha.refused.map(item => item.keywordId)]));
-    if (!escolha.byGroup.size) { finish(vivo, linhas, { tone: "warning", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: nenhuma linha pode ser processada agora (o motivo está em cada uma). Nada foi pago nem gravado.` }); return; }
+    if (!escolha.byGroup.size) { finish(vivo, linhas, { tone: "warning", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: nenhuma linha pode ser processada agora (o motivo está em cada uma). Nada foi pago e nenhum artigo foi gravado.` }); return; }
     startBusy("Lendo o plano, os DNAs e a SERP em cache e buscando o reforço no Google Ads (grátis, cota)", escolha.byGroup.size, "cor(es)");
     const runs: FormationRun[] = [];
     for (const [indice, [groupId, doGrupo]] of [...escolha.byGroup].entries()) {
@@ -406,7 +427,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       if (vivo()) setBusy(atual => atual ? { ...atual, done: indice + 1 } : atual);
     }
     if (!vivo()) return;
-    if (!runs.length) { finish(vivo, linhas, { tone: "warning", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: a leitura não foi confirmada (o motivo está em cada linha). Nada foi pago nem gravado.` }); return; }
+    if (!runs.length) { finish(vivo, linhas, { tone: "warning", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: a leitura não foi confirmada (o motivo está em cada linha). Nenhum artigo foi gravado.` }); return; }
     const consultas = runs.reduce((soma, item) => soma + pagasDe(item.run), 0);
     if (consultas > 0) {
       const teto = runs.reduce((soma, item) => soma + (pagasDe(item.run) > 0 ? item.run.costs.estimatedCostUsd.max : 0), 0);
@@ -442,7 +463,8 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
         pagas += pagasDe(item.run);
         prontos.push({ ...item, run: atual });
         feitas += 1;
-        if (vivo()) setBusy(andamento => andamento ? { ...andamento, done: feitas } : andamento);
+        const feitasAgora = feitas;
+        if (vivo()) setBusy(andamento => andamento ? { ...andamento, done: feitasAgora } : andamento);
       }
       finishProcess(vivo, prontos, new Map(), pagas);
     } catch (e) {
@@ -458,10 +480,34 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       for (const line of planSheetWorkingCopyLines(item.run, item.rows ?? [])) { linhas.set(line.keywordId, { tone: line.tone, text: line.text }); lidos += 1; }
       comReforco += item.run.proposals.filter(proposal => proposal.memberIds.some(id => id !== proposal.principalId) && (proposal.status === "ready" || proposal.needsValidation)).length;
     }
-    setProcessed(atual => { const proximo = new Map(atual); for (const item of runs) proximo.set(item.groupId, item.run); return proximo; });
+    rememberProcessed(runs);
     const faltaSerp = runs.reduce((soma, item) => soma + item.run.proposals.filter(proposal => proposal.needsValidation).length, 0);
-    finish(vivo, linhas, { tone: faltaSerp ? "warning" : "success", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: ${lidos} artigo(s) lido(s), reforço proposto para ${comReforco}; ${pagas ? `SERP paga agora: ${pagas} consulta(s)` : "nada pago"}.${faltaSerp ? ` ${faltaSerp} ainda sem a SERP da principal.` : ""} Nada foi gravado: confira cada linha e use “${PLAN_SHEET_ACTION_LABELS.concludeFormation}”.` });
+    finish(vivo, linhas, { tone: faltaSerp ? "warning" : "success", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: ${lidos} artigo(s) lido(s), reforço proposto para ${comReforco}; ${pagas ? `SERP paga agora: ${pagas} consulta(s)` : "nada pago"}.${faltaSerp ? ` ${faltaSerp} ainda sem a SERP da principal.` : ""} Nenhum artigo foi gravado: confira cada linha e use “${PLAN_SHEET_ACTION_LABELS.concludeFormation}”.` });
     if (pagas && vivo()) setSerpReload(valor => valor + 1);
+  }
+
+  function rememberProcessed(runs: FormationRun[]) {
+    setProcessed(atual => {
+      const proximo = new Map(atual);
+      for (const item of runs) {
+        const substituidos = new Set(item.rows?.map(row => row.keywordId) ?? []);
+        // Uma nova leitura substitui só os alvos dela; os demais continuam
+        // ligados à execução e ao hash originais. Não ressuscitar leitura velha
+        // quando a nova execução for concluída.
+        for (const [id, anterior] of proximo) {
+          if (id === item.run.runId) continue;
+          const proposals = anterior.proposals.filter(proposal => !substituidos.has(proposal.targetId));
+          const refusedTargets = anterior.refusedTargets?.filter(refusal => !substituidos.has(refusal.id));
+          if (!proposals.length && !refusedTargets?.length) proximo.delete(id);
+          else proximo.set(id, { ...anterior, proposals, ...(anterior.refusedTargets ? { refusedTargets } : {}) });
+        }
+        proximo.delete(item.run.runId);
+        proximo.set(item.run.runId, item.run);
+      }
+      return proximo;
+    });
+    const recebidos = new Set(runs.flatMap(item => item.rows?.map(row => row.keywordId) ?? []));
+    setProcessedRefused(atual => new Set([...atual].filter(id => !recebidos.has(id))));
   }
 
   /* ================ CONCLUIR FORMAÇÃO / TROCAR PRINCIPAL (prévia) ================ */
@@ -476,29 +522,55 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     const doDominio: PlanSheetPreviewLine[] = [];
     for (const [indice, [groupId, linhasDoGrupo]] of [...escolha.byGroup].entries()) {
       const feitas = indice + 1;
-      try {
-        const escolhas = picks ? Object.fromEntries(linhasDoGrupo.filter(row => picks[row.keywordId]).map(row => [row.keywordId, picks[row.keywordId]])) : null;
-        /*
-         * 2026-10-17 (noite) · o Concluir grava a cópia de trabalho do "Processar artigos" (reforço e SERP já lidos);
-         * só sem ela (ou sem estas linhas nela) prepara de novo, grátis, como antes.
-         */
-        const processado = action === "concludeFormation" && !escolhas ? processed.get(groupId) : undefined;
-        const cobre = processado && linhasDoGrupo.every(row => processado.proposals.some(proposal => proposal.targetId === row.keywordId) || processado.refusedTargets?.some(item => item.id === row.keywordId));
-        const run = cobre ? processado! : await improvement({ brandId, action: "prepare", group: groupId, targetIds: linhasDoGrupo.map(row => row.keywordId), origin: "plan_sheet", ...(escolhas && Object.keys(escolhas).length ? { principalChoice: escolhas } : {}) });
-        const previa = planSheetPreviewLines(run, linhasDoGrupo);
-        doDominio.push(...previa);
-        for (const item of previa) linhas.push({ keywordId: item.keywordId, keyword: nomeDe(item.keywordId), kind: KIND_OF[item.kind], text: item.sentence });
-        runs.push({ groupId, run, readyIds: previa.filter(item => item.kind === "will_write").map(item => item.keywordId), rows: linhasDoGrupo });
-      } catch (e) {
-        for (const row of linhasDoGrupo) linhas.push({ keywordId: row.keywordId, keyword: row.keyword, kind: "refused", text: e instanceof Error ? e.message : "A prévia não foi confirmada." });
+      const partes = new Map<string, PlanSheetRow[]>();
+      for (const row of linhasDoGrupo) {
+        const anterior = action === "concludeFormation" && !picks ? processedByTarget.get(row.keywordId) : undefined;
+        const chave = anterior?.runId ?? "fresh";
+        partes.set(chave, [...(partes.get(chave) ?? []), row]);
+      }
+      for (const [chave, parte] of partes) {
+        try {
+          const escolhas = picks ? Object.fromEntries(parte.filter(row => picks[row.keywordId]).map(row => [row.keywordId, picks[row.keywordId]])) : null;
+          const anterior = chave === "fresh" ? undefined : processed.get(chave);
+          /* Uma run é consumida por uma única confirmação no servidor. Não
+           * perder as outras propostas dela ao confirmar só parte do lote. */
+          const selecionados = new Set(parte.map(row => row.keywordId));
+          const outras = anterior?.proposals.filter(proposal => proposal.status === "ready" && processedByTarget.get(proposal.targetId) === anterior && !selecionados.has(proposal.targetId)) ?? [];
+          if (outras.length) {
+            for (const row of parte) linhas.push({ keywordId: row.keywordId, keyword: row.keyword, kind: "refused", text: "Esta leitura também preparou outros artigos: selecione todos os artigos prontos da mesma leitura para não perder as propostas, ou reprocesse este artigo separadamente." });
+            continue;
+          }
+          const run = anterior ?? await improvement({ brandId, action: "prepare", group: groupId, targetIds: parte.map(row => row.keywordId), origin: "plan_sheet", ...(escolhas && Object.keys(escolhas).length ? { principalChoice: escolhas } : {}) });
+          const previa = planSheetPreviewLines(run, parte);
+          doDominio.push(...previa);
+          for (const item of previa) linhas.push({ keywordId: item.keywordId, keyword: nomeDe(item.keywordId), kind: KIND_OF[item.kind], text: item.sentence });
+          runs.push({ groupId, run, readyIds: previa.filter(item => item.kind === "will_write").map(item => item.keywordId), rows: parte });
+        } catch (e) {
+          for (const row of parte) linhas.push({ keywordId: row.keywordId, keyword: row.keyword, kind: "refused", text: e instanceof Error ? e.message : "A prévia não foi confirmada." });
+        }
       }
       if (vivo()) setBusy(atual => atual ? { ...atual, done: feitas } : atual);
     }
     if (!vivo()) return;
-    setBusy(null);
     // 2026-10-17 (noite) · o checklist da finalização (principal · reforço · SERP · plano · Silo), lido da própria prévia.
     const grupos = new Set(runs.map(item => item.groupId));
     const checklist = action === "concludeFormation" ? planSheetConclusionChecklist({ lines: doDominio, rows: alvo, proposals: runs.flatMap(item => item.run.proposals), groupRows: rows.filter(row => row.groupId && grupos.has(row.groupId)) }) : undefined;
+    if (checklist) {
+      const silo = checklist.find(item => item.key === "silo");
+      if (silo?.ok) {
+        try {
+          const leitura = props.onReadClosure ? await props.onReadClosure([...grupos]) : { ready: false, detail: "A leitura do fechamento não está disponível; o Silo não pode ser confirmado nesta prévia." };
+          if (!vivo()) return;
+          silo.ok = leitura.ready;
+          silo.detail = leitura.detail;
+        } catch {
+          if (!vivo()) return;
+          silo.ok = false;
+          silo.detail = "Não foi possível ler o fechamento do Silo. Recarregue e tente novamente; nenhum fechamento foi confirmado.";
+        }
+      }
+    }
+    setBusy(null);
     setPreview({ action, lines: linhas, runs, ...(checklist ? { checklist } : {}) });
   }
 
@@ -539,7 +611,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
     const linhas = new Map<string, PlanSheetResult>();
     for (const item of previa) if (item.kind !== "go") linhas.set(item.keywordId, { tone: item.kind === "adequate" ? "neutral" : "warning", text: `Não gravado: ${item.text}` });
     // 2026-10-17 (noite) · nada a gravar mas o Silo do plano pronto (todos formados): a confirmação só fecha o Silo.
-    const soOSilo = !total && action === "concludeFormation" && checklist?.find(item => item.key === "silo")?.ok === true;
+    const soOSilo = !total && action === "concludeFormation" && !previa.some(line => ["refused", "minerador", "serp"].includes(line.kind)) && checklist?.find(item => item.key === "silo")?.ok === true;
     if (!total && !soOSilo) { finish(vivo, linhas, { tone: "warning", text: "Nada a gravar: nenhuma linha ficou pronta na prévia. Veja o motivo de cada uma." }); return; }
     startBusy(action === "swapPrincipal" ? "Gravando a troca de principal (nova versão do ArticleDNA)" : soOSilo ? "Fechando o Silo do plano (SiloDNA e SiloPage)" : "Concluindo a formação (keywords novas, ArticleDNA e o Silo do plano)", total || null, "artigo(s)");
     let antes = 0, gravados = 0, falhas = 0, novasNaConfirmacao = false;
@@ -558,8 +630,8 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
         }
       }
       // A cópia de trabalho gravada saiu da fila: o passo 2 está feito para estas linhas.
-      const grupos = runs.map(item => item.groupId);
-      if (action === "concludeFormation" && vivo()) setProcessed(atual => { const proximo = new Map(atual); for (const grupo of grupos) proximo.delete(grupo); return proximo; });
+      const grupos = [...new Set(runs.map(item => item.groupId))];
+      if (action === "concludeFormation" && vivo()) setProcessed(atual => { const proximo = new Map(atual); for (const item of runs) if (item.readyIds.length) proximo.delete(item.run.runId); return proximo; });
       // 2026-10-17 (noite) · o Silo do plano fecha no MESMO ato (SDD da linha única, F2), pelo fechamento canônico de sempre.
       let silo: PlanSheetResult | null = null;
       if (action === "concludeFormation" && props.onConcluded && (gravados > 0 || soOSilo) && vivo()) {
@@ -568,7 +640,7 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
         catch (e) { silo = { tone: "warning", text: `O Silo do plano não fechou agora: ${e instanceof Error ? e.message : "erro sem resposta"}. Os ArticleDNA gravados continuam válidos; “${PLAN_SHEET_ACTION_LABELS.concludeFormation}” tenta de novo.` }; }
       }
       const artigos = soOSilo ? "nenhum artigo novo a gravar" : `${gravados} gravado(s) e relido(s)${falhas ? `, ${falhas} com falha` : ""}; ${previa.filter(line => line.kind !== "go").length} fora desta confirmação`;
-      const minerador = soOSilo ? "" : novasNaConfirmacao ? " As keywords novas da prévia seguiram pelos núcleos do Minerador (import, Lógica, Volume, aprovação e envio) nos artigos gravados; as que já estavam lá não mudaram." : " Nada foi gravado no Minerador.";
+      const minerador = soOSilo ? "" : novasNaConfirmacao ? " As keywords novas da prévia seguiram pelos núcleos do Minerador (import, Lógica, Volume, aprovação e envio) nos artigos gravados; as que já estavam lá não mudaram." : " Nenhuma keyword nova foi informada nesta confirmação.";
       finish(vivo, linhas, { tone: falhas || silo?.tone === "warning" ? "warning" : "success", text: `${action === "swapPrincipal" ? PLAN_SHEET_ACTION_LABELS.swapPrincipal : PLAN_SHEET_ACTION_LABELS.concludeFormation}: ${artigos}.${minerador}${silo ? ` ${silo.text}` : ""}` });
       if (vivo()) onApplied();
     } catch (e) {
@@ -584,10 +656,10 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       const fim = await applyRun(vivo, run, null, feitos => { if (vivo()) setBusy(atual => atual ? { ...atual, done: feitos } : atual); });
       const linhas = new Map<string, PlanSheetResult>();
       for (const id of fim.acceptedIds ?? []) linhas.set(id, planSheetOutcomeSentence(fim.outcomes.find(outcome => outcome.targetId === id)));
-      finish(vivo, linhas, { tone: "success", text: "Gravação interrompida retomada e relida. Nada foi gravado no Minerador." });
-      if (vivo()) onApplied();
+      finish(vivo, linhas, { tone: "success", text: "Gravação interrompida retomada e relida. Confira o resultado de cada artigo." });
+      if (vivo()) { setResumable(resumableQueue[0] ?? null); setResumableQueue(resumableQueue.slice(1)); onApplied(); }
     } catch (e) {
-      if (vivo()) { setBusy(null); setError(e instanceof Error ? e.message : "A retomada não foi confirmada."); }
+      if (vivo()) { setBusy(null); setResumable(run); setError(e instanceof Error ? e.message : "A retomada não foi confirmada."); }
     }
   }
 
@@ -605,7 +677,9 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       if (!lido.candidates.length) { recusadas.push({ keywordId: row.keywordId, keyword: row.keyword, kind: "refused", text: "Sem candidata: nenhuma sustentação com volume medido na lista do Assunto (Pesquisa por Assunto, no Minerador)." }); continue; }
       livres.push(row);
       candidates[row.keywordId] = lido.candidates;
-      picks[row.keywordId] = lido.candidates[0].keywordId;
+      // Ordem por volume e cache não equivale a uma decisão editorial: cada
+      // candidata deve ser escolhida pela pessoa antes da prévia.
+      picks[row.keywordId] = "";
     }
     setPreview({ action: "chooseSwap", rows: livres, candidates, picks, refused: recusadas });
   }
@@ -623,8 +697,8 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
       const linhas = new Map<string, PlanSheetResult>();
       for (const item of preview.runs) for (const line of planSheetWorkingCopyLines(item.run, item.rows ?? [])) linhas.set(line.keywordId, { tone: line.tone, text: line.text });
       setResults(atual => new Map([...atual, ...linhas]));
-      setProcessed(atual => { const proximo = new Map(atual); for (const item of preview.runs) proximo.set(item.groupId, item.run); return proximo; });
-      setSummary({ tone: "neutral", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: a coleta paga foi cancelada — nada foi pago nem gravado. O reforço proposto está em cada linha; sem a SERP da principal, “${PLAN_SHEET_ACTION_LABELS.concludeFormation}” espera.` });
+      rememberProcessed(preview.runs);
+      setSummary({ tone: "neutral", text: `${PLAN_SHEET_ACTION_LABELS.processArticles}: a coleta paga foi cancelada — nada foi pago e nenhum artigo foi gravado. O reforço proposto está em cada linha; sem a SERP da principal, “${PLAN_SHEET_ACTION_LABELS.concludeFormation}” espera.` });
     }
     setPreview(null);
   }
@@ -649,7 +723,13 @@ export function usePlanArticleSheet(props: PlanArticleSheetProps): PlanArticleSh
   return {
     brandId, rows, rowByKeywordId, selected, setSelected, toggleSelected, results, ocupado, busy, now, preview, setPreview,
     error, setError, summary, setSummary, resumable, withdrawing, setWithdrawing, sugestoesHref, corDoRecorte, revision,
-    start, stepOf, cancelPreview, prepareSwapPreview: (alvo, picks, refused) => { void prepareFormation(alvo, "swapPrincipal", picks, refused); },
+    start, stepOf, cancelPreview, prepareSwapPreview: (alvo, picks, refused) => {
+      if (!alvo.length || alvo.some(row => !picks[row.keywordId])) {
+        setError("Escolha uma candidata para cada artigo antes de ver a prévia.");
+        return;
+      }
+      void prepareFormation(alvo, "swapPrincipal", picks, refused);
+    },
     confirmPreview, resume: run => { void resume(run); }, onApplied,
   };
 }
@@ -710,8 +790,8 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
     {preview && <div ref={previewRef} className="mt-3 rounded-md border border-divider bg-surface-subtle p-3" role="region" aria-label={tituloDaPrevia} data-testid="architect-plan-sheet-preview" data-action={preview.action}>
       <h4 className="font-semibold text-foreground">{tituloDaPrevia}</h4>
       {/* 2026-10-17 (noite) · o custo antes de pagar: a ÚNICA confirmação do Processar (o reforço, grátis, já foi buscado). */}
-      {preview.action === "processArticles" && <p className="mt-1 text-foreground" data-testid="architect-plan-sheet-serp-cost">SERP no DataForSEO: {preview.paidQueries} consulta(s), até {usd(preview.costMaxUsd)} — a primeira coleta da principal que falta (inclusive a principal de identidade, sem buscas no Google Ads). O que está no cache não é pago; nada é gravado.</p>}
-      {preview.action === "chooseSwap" && <p className="mt-1 text-text-muted">Candidatas: a keyword do Assunto e as sustentações com volume da lista dele. Gravar gera uma nova versão.</p>}
+      {preview.action === "processArticles" && <p className="mt-1 text-foreground" data-testid="architect-plan-sheet-serp-cost">SERP no DataForSEO: {preview.paidQueries} consulta(s), até {usd(preview.costMaxUsd)} — a primeira coleta da principal que falta (inclusive a principal de identidade, sem buscas no Google Ads). O que está no cache não é pago; nenhum artigo é gravado nesta etapa.</p>}
+      {preview.action === "chooseSwap" && <p className="mt-1 text-text-muted">Escolha a candidata de cada artigo e confira se a intenção combina com o Assunto. Volume e lentes no cache não confirmam, sozinhos, a adequação. Gravar gera uma nova versão.</p>}
       {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && (() => {
         // 2026-10-17 · as keywords NOVAS das linhas "vai gravar", por artigo, com volume e fonte: entram nesta confirmação.
         const novas = preview.runs.map(item => improvementNewKeywordsPreview(item.run, item.readyIds)).filter(item => item.total > 0);
@@ -732,6 +812,7 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
             <label className="flex flex-wrap items-center gap-2 text-foreground">
               <span><span className="text-keyword">{row.keyword}</span> → </span>
               <select className={controlClassName} value={preview.picks[row.keywordId]} aria-label={`Nova principal de ${row.title}`} onChange={event => sheet.setPreview(atual => atual && atual.action === "chooseSwap" ? { ...atual, picks: { ...atual.picks, [row.keywordId]: event.target.value } } : atual)}>
+                <option value="">Escolha uma candidata</option>
                 {preview.candidates[row.keywordId].map(candidate => <option key={candidate.keywordId} value={candidate.keywordId}>{planSwapCandidateLabel(candidate)}</option>)}
               </select>
             </label>
@@ -749,11 +830,11 @@ export function PlanSheetOperations({ sheet, buttonClassName, primaryButtonClass
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={buttonClassName} onClick={sheet.cancelPreview}>Cancelar</button>
         {preview.action === "processArticles" && <button type="button" className={primaryButtonClassName} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{`Autorizar ${preview.paidQueries} consulta(s) e coletar (até ${usd(preview.costMaxUsd)})`}</button>}
-        {preview.action === "chooseSwap" && <button type="button" className={primaryButtonClassName} disabled={!preview.rows.length} data-testid="architect-plan-sheet-swap-preview" onClick={() => sheet.prepareSwapPreview(preview.rows, preview.picks, preview.refused)}>Ver prévia da troca (grátis)</button>}
+        {preview.action === "chooseSwap" && <><button type="button" className={primaryButtonClassName} disabled={!preview.rows.length || preview.rows.some(row => !preview.picks[row.keywordId])} data-testid="architect-plan-sheet-swap-preview" onClick={() => sheet.prepareSwapPreview(preview.rows, preview.picks, preview.refused)}>Ver prévia da troca (grátis)</button><InfoHint title="Ver prévia da troca" description="Escolha uma candidata para cada artigo e confira se ela corresponde ao Assunto. O botão prepara a prévia; a troca só é gravada após a confirmação seguinte." /></>}
         {(preview.action === "concludeFormation" || preview.action === "swapPrincipal") && (() => {
           const prontas = preview.runs.reduce((soma, item) => soma + item.readyIds.length, 0);
           const novas = preview.runs.reduce((soma, item) => soma + improvementNewKeywordsPreview(item.run, item.readyIds).total, 0);
-          const soOSilo = !prontas && preview.action === "concludeFormation" && preview.checklist?.find(item => item.key === "silo")?.ok === true;
+          const soOSilo = !prontas && preview.action === "concludeFormation" && !preview.lines.some(line => ["refused", "minerador", "serp"].includes(line.kind)) && preview.checklist?.find(item => item.key === "silo")?.ok === true;
           const rotulo = preview.action === "swapPrincipal" ? "Confirmar a troca" : soOSilo ? "Confirmar e fechar o Silo" : novas ? `Confirmar e gravar (com ${novas} keyword(s) nova(s))` : "Confirmar e gravar";
           return <button type="button" className={primaryButtonClassName} disabled={!prontas && !soOSilo} data-testid="architect-plan-sheet-confirm" onClick={sheet.confirmPreview}>{rotulo}</button>;
         })()}
@@ -808,7 +889,7 @@ export function PlanRowActions({ sheet, row, buttonClassName }: { sheet: PlanArt
     {row.conflict && (row.conflict.siloRef
       ? <button type="button" className={buttonClassName} disabled={sheet.ocupado} data-testid="architect-plan-row-withdraw" title={row.conflict.sentence} onClick={() => sheet.setWithdrawing(row.conflict)}>{SILO_ARTICLE_WITHDRAWAL_ACTION_LABEL}</button>
       : <span className="text-sm text-text-muted" title={row.conflict.sentence}>Retire em Silos</span>)}
-    {podeTrocar && <button type="button" className={buttonClassName} disabled={sheet.ocupado} data-plan-action="swapPrincipal" title={`${row.lock.label}. ${row.lock.why}`} onClick={() => sheet.start("swapPrincipal", [row])}>{PLAN_SHEET_ACTION_LABELS.swapPrincipal}</button>}
+    {podeTrocar && <><button type="button" className={buttonClassName} disabled={sheet.ocupado} data-plan-action="swapPrincipal" title={`${row.lock.label}. ${row.lock.why}`} onClick={() => sheet.start("swapPrincipal", [row])}>{PLAN_SHEET_ACTION_LABELS.swapPrincipal}</button><InfoHint title="Procurar outra principal" description="Mostra as candidatas para esta linha. Escolha uma e confira a intenção antes de abrir a prévia; a troca depende de confirmação." /></>}
   </div>;
 }
 

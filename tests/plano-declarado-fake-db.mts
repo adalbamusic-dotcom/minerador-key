@@ -61,6 +61,7 @@ class PlanFakeQuery implements PromiseLike<{ data: unknown; error: unknown; coun
   private op: "select" | "insert" | "update" | "delete" = "select";
   private payload: unknown = null;
   private columns = "*";
+  private exactCount = false;
   private returning: string | null = null;
   private faixa: [number, number] | null = null;
   private singleMode: "maybe" | "one" | null = null;
@@ -71,8 +72,8 @@ class PlanFakeQuery implements PromiseLike<{ data: unknown; error: unknown; coun
     this.db = db;
     this.table = table;
   }
-  select(columns = "*", options?: { head?: boolean }) {
-    if (this.op === "select") { this.columns = columns; this.head = Boolean(options?.head); } else this.returning = columns;
+  select(columns = "*", options?: { head?: boolean; count?: string }) {
+    if (this.op === "select") { this.columns = columns; this.head = Boolean(options?.head); this.exactCount = options?.count === "exact"; } else this.returning = columns;
     return this;
   }
   eq(column: string, value: unknown) { this.filters.push(row => caminho(row, column) === value); return this; }
@@ -110,8 +111,9 @@ class PlanFakeQuery implements PromiseLike<{ data: unknown; error: unknown; coun
     if (this.op === "select") {
       let encontradas = linhas.filter(casa);
       if (this.head) return { data: null, error: null, count: encontradas.length };
+      const count = encontradas.length;
       if (this.faixa) encontradas = encontradas.slice(this.faixa[0], this.faixa[1] + 1);
-      return this.finish(encontradas, this.columns);
+      return { ...this.finish(encontradas, this.columns), ...(this.exactCount ? { count } : {}) };
     }
     if (this.op === "insert") {
       const novas = ((Array.isArray(this.payload) ? this.payload : [this.payload]) as Row[]).map((row): Row => ({ id: randomUUID(), occurred_at: new Date().toISOString(), lock_version: 1, deleted_at: null, group_id: null, ...row }));

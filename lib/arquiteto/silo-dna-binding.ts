@@ -2,10 +2,13 @@ import type { SiloDNA, SiloPage } from "./contracts.ts";
 import type { TerritoryNarrative } from "./territory-narrative.ts";
 import type { SiloPageApprovalReadiness } from "./silo-page-approval.ts";
 import type { SiloWorkingCopyState } from "./silo-working-copy-record.ts";
+import type { PlannedSiloMember, PlannedSiloSourceRef } from "./planned-silo-member.ts";
+import type { ApprovedPackageRef } from "./contracts.ts";
 import type {
   SiloArticleExclusion,
   TerritorialSiloArticle,
   TerritorialSiloComposition,
+  PlannedSiloConsolidationDecision,
 } from "./silo-consolidation-territorial.ts";
 
 /**
@@ -41,8 +44,54 @@ export type SiloDnaBindingRefusal = (typeof SILO_DNA_BINDING_REFUSALS)[number];
 
 export type BindingRefusal = { code: SiloDnaBindingRefusal; detail: string };
 
+/** A confirmação precisa descrever a decisão humana e a mesma composição. */
+export function refusePlannedSiloConfirmation(input: {
+  workingCopy: SiloWorkingCopyState;
+  decision: PlannedSiloConsolidationDecision;
+  authenticatedActorId: string;
+}): BindingRefusal[] {
+  const planned = input.workingCopy.plannedComposition;
+  const selection = planned?.pillarSelection;
+  if (!planned || !selection || !input.authenticatedActorId || input.decision.actorUserId !== input.authenticatedActorId || input.decision.territoryRef !== input.workingCopy.territoryRef || !input.decision.decidedAt.trim() || !input.decision.reason.trim()) return [{ code: "PILLAR_NOT_HUMAN_DECIDED", detail: "A confirmação precisa ser feita pelo usuário autenticado sobre a cópia atual." }];
+  const expectedSupports = planned.members.filter(member => member.role === "Suporte").map(member => member.memberKey);
+  if (input.decision.pillarMemberKey !== selection.memberKey || JSON.stringify(input.decision.supportMemberKeys) !== JSON.stringify(expectedSupports) || planned.members.filter(member => member.role === "Pilar")[0]?.memberKey !== selection.memberKey) return [{ code: "PILLAR_DECISION_STALE", detail: "A confirmação descreve membros ou ordem diferentes da cópia revisada." }];
+  return [];
+}
+
 const sameSet = (left: readonly string[], right: readonly string[]) =>
   JSON.stringify([...new Set(left)].sort()) === JSON.stringify([...new Set(right)].sort());
+
+/** Confere que os envelopes preservam exatamente a decisão planejada da cópia. */
+export function refusePlannedSiloBinding(input: {
+  workingCopy: SiloWorkingCopyState;
+  siloDna: SiloDNA;
+  siloPage: SiloPage;
+  /** Reconstruída pelo servidor a partir dos pacotes aprovados. */
+  authority: { source: PlannedSiloSourceRef; members: readonly PlannedSiloMember[]; subjectProofs: readonly { keywordId: string; approvedPackageRef: ApprovedPackageRef }[] };
+}): BindingRefusal[] {
+  const { workingCopy, siloDna, siloPage } = input;
+  const planned = workingCopy.plannedComposition;
+  if (!planned || !planned.pillarSelection) return [{ code: "PILLAR_NOT_HUMAN_DECIDED", detail: "A cópia não tem decisão humana para o Pilar planejado." }];
+  const memberFields = (member: (typeof planned.members)[number]) => [member.memberKey, member.anchorKind, member.anchorId, member.role, member.order];
+  const expected = planned.members.map(memberFields);
+  const actual = (siloDna.plannedMembers ?? []).map(memberFields);
+  const source = siloDna.compositionSourceRef;
+  const expectedSource = planned.source;
+  const sameSource = source?.kind === expectedSource.kind && source.groupId === expectedSource.groupId && source.planVersion === expectedSource.planVersion && source.planHash === expectedSource.planHash && source.lockVersion === expectedSource.lockVersion;
+  const authoritySource = input.authority.source;
+  const proofs = (items: readonly { keywordId: string; approvedPackageRef: ApprovedPackageRef }[]) => items.map(item => [item.keywordId, item.approvedPackageRef.version, item.approvedPackageRef.contentHash, item.approvedPackageRef.approvedAt]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  const matchesAuthority = authoritySource.kind === expectedSource.kind && authoritySource.groupId === expectedSource.groupId && authoritySource.planVersion === expectedSource.planVersion && authoritySource.planHash === expectedSource.planHash && authoritySource.lockVersion === expectedSource.lockVersion && JSON.stringify(input.authority.members.map(memberFields)) === JSON.stringify(expected) && JSON.stringify(proofs(input.authority.subjectProofs)) === JSON.stringify(proofs(planned.subjectProofs));
+  const decision = planned.pillarSelection;
+  const keys = planned.members.map(member => member.memberKey);
+  const pillar = planned.members.filter(member => member.role === "Pilar");
+  const validDecision = pillar.length === 1 && pillar[0].memberKey === decision.memberKey && decision.decidedOverMemberKeys.length === keys.length && sameSet(decision.decidedOverMemberKeys, keys) && Boolean(decision.actorUserId.trim() && decision.decidedAt.trim() && decision.reason.trim());
+  const failures: BindingRefusal[] = [];
+  if (!validDecision) failures.push({ code: "PILLAR_DECISION_STALE", detail: "A decisão humana não cobre a composição planejada atual." });
+  const dnaProofs = (siloDna.keywordPackageRefs ?? []).map(item => ({ keywordId: item.keywordId, approvedPackageRef: { version: item.version, contentHash: item.contentHash, approvedAt: item.approvedAt } }));
+  if (siloDna.compositionBasis !== "planned_members" || siloDna.brandId !== workingCopy.brandId || siloDna.territoryRef !== workingCopy.territoryRef || !sameSource || !matchesAuthority || JSON.stringify(actual) !== JSON.stringify(expected) || JSON.stringify(proofs(dnaProofs)) !== JSON.stringify(proofs(planned.subjectProofs))) failures.push({ code: "SILO_DNA_WORKING_COPY_MISMATCH", detail: "O Silo não corresponde à fonte e aos membros da cópia decidida e dos pacotes aprovados." });
+  if (siloPage.compositionBasis !== "planned_members" || siloPage.brandId !== workingCopy.brandId || siloPage.territoryRef !== workingCopy.territoryRef || siloPage.siloId !== siloDna.siloId || JSON.stringify(siloPage.plannedMemberKeys ?? []) !== JSON.stringify(keys)) failures.push({ code: "SILO_PAGE_STRUCTURAL_MISMATCH", detail: "A página não preserva a composição planejada da cópia." });
+  return failures;
+}
 
 /**
  * Igualdade de narrativa: cópia fiel, campo a campo, `rationale` na ordem.
@@ -77,7 +126,7 @@ export function deriveExpectedCompositionFromWorkingCopy(
 /** Articles do território, montados a partir das referências versionadas da WC. */
 export function deriveTerritorialArticlesFromWorkingCopy(
   workingCopy: SiloWorkingCopyState,
-  loaded: ReadonlyMap<string, { brandId: string; territoryRef: string | null; contentHash: string }>,
+  loaded: ReadonlyMap<string, { brandId: string; territoryRef: string | null; contentHash: string; effectiveStatus?: string | null }>,
 ): TerritorialSiloArticle[] {
   return workingCopy.articleRefs.map(reference => {
     const remote = loaded.get(reference.articleDnaVersionId);
@@ -88,7 +137,7 @@ export function deriveTerritorialArticlesFromWorkingCopy(
       articleDnaVersionId: reference.articleDnaVersionId,
       articleDnaContentHash: reference.articleDnaContentHash,
       isConsolidated: Boolean(remote),
-      isHumanApproved: Boolean(remote),
+      isHumanApproved: remote?.effectiveStatus === "approved",
     };
   });
 }
@@ -99,6 +148,7 @@ export type RemoteArticleVersion = {
   contentHash: string;
   brandId: string;
   territoryRef: string | null;
+  effectiveStatus?: string | null;
 };
 
 /**

@@ -248,7 +248,7 @@ test("§2/§3 — hierarquia no painel e papel na tabela", () => {
   assert.equal(codigo.includes("resolveSiloHierarchyView({"), true);
   // O papel ganhou COLUNA própria neste corte; o badge solto saiu para o fato
   // não aparecer em dois lugares.
-  assert.equal(codigo.includes('data-testid="architect-silo-role-cell"'), true);
+  assert.equal(codigo.includes('<SiloRoleCell role={papel}'), true);
   assert.equal(codigo.includes("linksHierarchy?.roleByArticleId.get("), true);
 });
 
@@ -281,7 +281,7 @@ const workbenchCodigo = workbench
 test("§2 — Papel no Silo tem coluna própria, derivada do SiloDNA", () => {
   // Com a sua própria <col> e a alça de largura (2026-10-01).
   assert.equal(codigo.includes('>Papel no Silo<KeywordTableColumnResizeHandle columnId="siloRole"'), true);
-  assert.equal(codigo.includes('data-testid="architect-silo-role-cell"'), true);
+  assert.equal(codigo.includes('<SiloRoleCell role={papel}'), true);
   // A célula lê a projeção do SiloDNA — nunca volume, posição ou nº de links.
   assert.equal(codigo.includes("linksHierarchy?.roleByArticleId.get("), true);
   // E o fato aparece UMA vez: o badge solto na coluna Artigo saiu.
@@ -387,7 +387,7 @@ test("a linha re-renderiza ao entrar em Links: a coluna tem célula", () => {
   assert.equal(codigo.includes("const articleRowRevision = useMemo("), true);
   // E o papel lido do SiloDNA (Artigos e Links, 2026-09-30) também re-renderiza a linha.
   // 2026-10-12: os selos do plano declarado (SDD §9 item 6) também redesenham a linha.
-  assert.equal(codigo.includes("() => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor })"), true);
+  assert.equal(codigo.includes("() => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor, planRowOfArticle })"), true);
   assert.equal(codigo.includes("revision={articleRowRevision}"), true);
   assert.equal(codigo.includes("revision={articleTableRenderRevision}"), false, "as linhas não podem mais comparar a revisão antiga");
 });
@@ -397,7 +397,7 @@ test("a coluna Papel no Silo fica entre Quantidade de keywords e Definição do 
   assert.deepEqual(cabecalhos, ["Quantidade de keywords", "Papel no Silo", "Definição do artigo"]);
   // E a célula segue a mesma ordem: quantidade → papel → definição.
   const quantidade = codigo.indexOf("{art.supportKeywords.length + 1}");
-  const papel = codigo.indexOf('data-testid="architect-silo-role-cell"');
+  const papel = codigo.indexOf('<SiloRoleCell role={papel}');
   const definicao = codigo.indexOf('data-testid="architect-article-definition"');
   assert.ok(quantidade > 0 && papel > quantidade, "a célula do papel vem depois da quantidade");
   assert.ok(definicao > papel, "e antes da definição");

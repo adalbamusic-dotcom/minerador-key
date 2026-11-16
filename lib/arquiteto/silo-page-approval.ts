@@ -34,6 +34,7 @@ export const SILO_PAGE_APPROVAL_BLOCKERS = [
   "SILO_PAGE_APPROVAL_PUBLICATION_UNVERIFIED",
   "SILO_PAGE_APPROVAL_PILLAR_MISMATCH",
   "SILO_PAGE_APPROVAL_SUPPORTS_MISMATCH",
+  "SILO_PAGE_APPROVAL_PLANNED_MEMBERS_MISMATCH",
   "SILO_PAGE_APPROVAL_PUBLISHED_IDENTITY_MUTATED",
 ] as const;
 export type SiloPageApprovalBlockerCode = (typeof SILO_PAGE_APPROVAL_BLOCKERS)[number];
@@ -167,6 +168,12 @@ export function resolveSiloPageApprovalReadiness(input: SiloPageApprovalInput): 
   }
   if (!sameSet(siloPage.supportArticleIds, siloDna.supportArticleIds)) {
     blockers.push({ code: "SILO_PAGE_APPROVAL_SUPPORTS_MISMATCH", detail: "supportArticleIds" });
+  }
+  if (siloDna.compositionBasis === "planned_members" || siloPage.compositionBasis === "planned_members") {
+    const keys = siloDna.plannedMembers?.map(member => member.memberKey) ?? [];
+    if (siloDna.compositionBasis !== "planned_members" || siloPage.compositionBasis !== "planned_members" || !keys.length || JSON.stringify(siloPage.plannedMemberKeys ?? []) !== JSON.stringify(keys) || siloPage.sections.length !== keys.length || siloPage.sections.some((section, index) => section.id !== `planned:${keys[index]}` || section.linkedArticleIds.length !== 0)) {
+      blockers.push({ code: "SILO_PAGE_APPROVAL_PLANNED_MEMBERS_MISMATCH", detail: "As seções devem preservar todos os membros planejados na ordem aprovada." });
+    }
   }
 
   // ------------------------------------------------- estrutura publicável

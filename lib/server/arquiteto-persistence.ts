@@ -294,6 +294,15 @@ export async function appendArquitetoArtifact(
   options: { subjectActor?: SubjectActorMode } = {},
 ): Promise<ArquitetoPersistenceResult> {
   const payload = validatePayload(context, type, version);
+  // A variante nova só pode ser gravada depois de os consumidores e a RPC
+  // revalidarem a estrutura aprovada na mesma transação. O schema de leitura
+  // não é, por si só, autorização para este writer legado aceitá-la.
+  if ((type === "silo_dna" || type === "silo_page") && (payload as SiloDNA | SiloPage).compositionBasis === "planned_members") {
+    throw new PipelineRuntimeError("CONFLICT", "A gravação da estrutura planejada ainda está em adaptação.", 409);
+  }
+  if (type === "article_dna" && (payload as ArticleDNA).siloMembershipRef) {
+    throw new PipelineRuntimeError("CONFLICT", "A gravação do artigo vinculado à estrutura planejada ainda está em adaptação.", 409);
+  }
   if (type === "article_dna" || type === "silo_dna") {
     await assertDeclaredSubjectWrite(context, {
       artifactType: type,
@@ -376,6 +385,9 @@ export async function persistSiloPairAtomic(
 ): Promise<SiloPairPersistenceResult> {
   const dnaPayload = validatePayload(context, "silo_dna", siloDna) as SiloDNA;
   const pagePayload = validatePayload(context, "silo_page", siloPage) as SiloPage;
+  if (dnaPayload.compositionBasis === "planned_members" || pagePayload.compositionBasis === "planned_members") {
+    throw new PipelineRuntimeError("CONFLICT", "A gravação da estrutura planejada ainda está em adaptação.", 409);
+  }
   if (pagePayload.siloId !== dnaPayload.siloId || pagePayload.siloPageId !== `silo-page:${dnaPayload.siloId}`) {
     conflictArtifact("SiloDNA e SiloPage precisam pertencer ao mesmo Silo.");
   }
@@ -550,11 +562,11 @@ function metaTexts(value: unknown) {
 export async function listArquitetoVersionMeta(context: PipelineContext): Promise<ArquitetoVersionMeta[]> {
   const metas: ArquitetoVersionMeta[] = [];
   const vistas = new Set<string>();
-  for (let page = 0; page < 100; page += 1) {
-    const from = page * ARQUITETO_VERSION_META_PAGE;
+  let from = 0;
+  for (;;) {
     const result = await context.supabase
       .from("editorial_artifact_versions")
-      .select(ARQUITETO_VERSION_META_COLUMNS)
+      .select(ARQUITETO_VERSION_META_COLUMNS, { count: "exact" })
       .eq("marca_id", context.brandId)
       .in("artifact_type", [...ARQUITETO_LISTED_ARTIFACT_TYPES])
       .order("version_number", { ascending: true })
@@ -585,9 +597,16 @@ export async function listArquitetoVersionMeta(context: PipelineContext): Promis
         subjectKeywordId: subject,
       });
     }
-    if (rows.length < ARQUITETO_VERSION_META_PAGE || novas === 0) break;
+    from += rows.length;
+    // O limite configurado no PostgREST pode ser menor que o pedido. A contagem
+    // informa quando terminou; se a leitura empacar, falha em vez de esconder
+    // versões e dar aparência de acervo completo.
+    if (typeof result.count !== "number") throw new PipelineRuntimeError("QUERY_FAILURE", "Não foi possível confirmar a contagem das versões do Arquiteto.", 503);
+    if (from >= result.count && novas === rows.length) return metas;
+    if (!rows.length || novas !== rows.length) {
+      throw new PipelineRuntimeError("QUERY_FAILURE", "A leitura das versões do Arquiteto ficou incompleta ou mudou durante a consulta.", 503);
+    }
   }
-  return metas;
 }
 
 /** A vigente de cada artefato (maior `version_number`), na ordem do primeiro aparecimento. */
@@ -610,13 +629,24 @@ export async function readArquitetoVersionRows(context: PipelineContext, version
   const linhaPorVersao = new Map<string, Record<string, unknown>>();
   const ids = [...new Set(versionIds)];
   for (let inicio = 0; inicio < ids.length; inicio += 100) {
-    const result = await context.supabase
-      .from("editorial_artifact_versions")
-      .select("*")
-      .eq("marca_id", context.brandId)
-      .in("version_id", ids.slice(inicio, inicio + 100));
-    if (result.error) throw pipelineErrorFromSupabase(result.error);
-    for (const row of (result.data || []) as Array<Record<string, unknown>>) linhaPorVersao.set(String(row.version_id), row);
+    let offset = 0;
+    for (;;) {
+      const result = await context.supabase
+        .from("editorial_artifact_versions")
+        .select("*", { count: "exact" })
+        .eq("marca_id", context.brandId)
+        .in("version_id", ids.slice(inicio, inicio + 100))
+        .order("version_id", { ascending: true })
+        .range(offset, offset + 99);
+      if (result.error) throw pipelineErrorFromSupabase(result.error);
+      if (typeof result.count !== "number") throw new PipelineRuntimeError("QUERY_FAILURE", "Não foi possível confirmar a contagem das versões solicitadas.", 503);
+      const rows = (result.data || []) as Array<Record<string, unknown>>;
+      const previousSize = linhaPorVersao.size;
+      for (const row of rows) linhaPorVersao.set(String(row.version_id), row);
+      offset += rows.length;
+      if (linhaPorVersao.size - previousSize !== rows.length || (!rows.length && offset < result.count)) throw new PipelineRuntimeError("QUERY_FAILURE", "A leitura das versões solicitadas ficou incompleta ou mudou durante a consulta.", 503);
+      if (offset >= result.count) break;
+    }
   }
   return linhaPorVersao;
 }

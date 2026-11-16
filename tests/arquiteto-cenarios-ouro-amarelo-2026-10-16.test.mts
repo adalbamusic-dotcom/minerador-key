@@ -7,6 +7,20 @@ import { SERP_SUBJECT_LENS_LABELS } from "../lib/arquiteto/serp-subject-overlap.
 import { normalizeKeyword } from "../lib/minerador/keyword-import-core.ts";
 import { ATOR, linhaDaMesa } from "./arquiteto-assunto-fixtures.mts";
 import { planGroupSiloClosure, planSheetConclusionChecklist, planSheetPreviewLines, planSheetSequence, planSheetWorkingCopyLines } from "../lib/arquiteto/plan-article-sheet.ts";
+
+test("prévia não anuncia fechamento nem valida secundárias e SERP de artigos fora da confirmação", () => {
+  const checklist = planSheetConclusionChecklist({
+    lines: [{ keywordId: "streaming", kind: "refused", sentence: "principal sem candidata", principalFrom: null, principalTo: null }],
+    rows: [{ keywordId: "streaming", keyword: "quantos mega para streaming" }],
+    proposals: [],
+    groupRows: [{ keywordId: "streaming", keyword: "quantos mega para streaming", formation: { state: "formed", version: 1, articleId: "artigo", principalKeywordId: "streaming", label: "Formado" } }],
+  } as Parameters<typeof planSheetConclusionChecklist>[0]);
+  assert.equal(checklist.find(item => item.key === "plano")?.ok, false);
+  assert.equal(checklist.find(item => item.key === "silo")?.ok, false);
+  assert.match(checklist.find(item => item.key === "silo")!.detail, /aguarda/);
+  assert.match(checklist.find(item => item.key === "reforco")!.detail, /nenhum artigo previsto/);
+  assert.doesNotMatch(checklist.find(item => item.key === "serp")!.detail, /4 lentes.*todos/);
+});
 import { resolveSiloDeclaredGroup } from "../lib/arquiteto/silo-declared-plan.ts";
 import { NO_REINFORCEMENT_FOUND_LABEL } from "../lib/arquiteto/article-improvement.ts";
 import { improvementReadingLines } from "../lib/arquiteto/article-improvement-next-step.ts";
@@ -730,7 +744,7 @@ test("amarelo · OS 3 BOTÕES pela barra: Processar (reforço grátis + custo da
   assert.deepEqual([...new Set(processado.costs.missingDetails.map((d: any) => d.keyword))].sort(), SERP_PAGA, "a SERP paga é só a da principal de cada Livre (a do Pilar: o termo-cabeça)");
   assert.match(processado.reading?.sentences.missing ?? "", /^Falta: 16 consulta\(s\) de SERP/, "nunca 'Falta: nada' com a SERP por pagar");
   const copia = planSheetWorkingCopyLines(processado, linhas);
-  for (const id of TRAVADOS) assert.match(copia.find(c => c.keywordId === id)!.text, /^Cópia de trabalho \(nada gravado\): principal “.+” \(Travada, fica\) · secundárias: .*, nova\)/, id);
+  for (const id of TRAVADOS) assert.match(copia.find(c => c.keywordId === id)!.text, /^Cópia de trabalho \(ArticleDNA não gravado\): principal “.+” \(Travada, fica\) · secundárias: .*, nova\)/, id);
   for (const [id, nova] of Object.entries(SUPORTE_TROCA)) assert.ok(copia.find(c => c.keywordId === id)!.text.includes("principal “" + nova + "” (troca proposta: “" + PLANO.find(l => l.id === id)!.keyword + "” → esta; decisão sua)"), copia.find(c => c.keywordId === id)!.text);
   for (const id of SUPORTES_QUE_FICAM) assert.match(copia.find(c => c.keywordId === id)!.text, /\(identidade, fica\) · secundárias: .*\. Falta a SERP da principal: “Processar artigos” coleta, com o custo antes\.$/, id);
   // 2026-10-17 (noite) · o Pilar: a troca proposta pelo termo-cabeça, na cópia de trabalho (nada gravado; decisão do dono).
@@ -949,7 +963,8 @@ test("amarelo · depois do Concluir · C: Links internos — com a etiqueta amar
   assert.deepEqual(resolveLinksSilo({ contexts: contextos, selected: AZUL_SILO, colorSiloRefs: [TERRITORIO] }).siloId, TERRITORIO, "com a cor ativa, o Silo de outra cor não fica escolhido");
   assert.deepEqual(resolveLinksSilo({ contexts: contextos, selected: TERRITORIO, colorSiloRefs: null }), { siloId: TERRITORIO, byColor: false, colorWaiting: false }, "sem cor: a escolha do seletor");
   assert.equal(resolveLinksSilo({ contexts: contextos, selected: null, colorSiloRefs: null }).siloId, AZUL_SILO, "sem cor e sem escolha: o primeiro com o par");
-  assert.deepEqual(resolveLinksSilo({ contexts: [contextos[0]], selected: null, colorSiloRefs: [TERRITORIO] }), { siloId: AZUL_SILO, byColor: false, colorWaiting: true }, "a cor com Silo ainda sem o par diz que espera o fechamento");
+  assert.deepEqual(resolveLinksSilo({ contexts: [contextos[0]], selected: AZUL_SILO, colorSiloRefs: [TERRITORIO] }), { siloId: null, byColor: false, colorWaiting: true }, "a cor sem o par nunca usa o Silo de outra cor");
+  assert.deepEqual(resolveLinksSilo({ contexts: contextos, selected: null, colorSiloRefs: [] }), { siloId: null, byColor: false, colorWaiting: true }, "grupo sem vínculo também não usa outro Silo");
 });
 
 test("amarelo · depois do Concluir · D: o refazedor ('Melhorar publicados…') LÊ os 8 artigos (o que tem, o que falta, a proposta) e a busca nova roda também para os Assuntos 'com lista' (SUBSTITUI o F5 de 12/10)", async () => {

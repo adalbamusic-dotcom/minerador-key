@@ -4,6 +4,8 @@ import {
   InternalLinkGraphProposalSchema,
   InternalLinkGraphSchema,
   InternalLinkGraphWorkingCopySchema,
+  SiloDNASchema,
+  SiloPageSchema,
   type InternalLinkGraph,
   type InternalLinkGraphProposal,
   type InternalLinkGraphRef,
@@ -12,7 +14,10 @@ import {
 import { validateInternalLinkGraphReadback, toInternalLinkGraphRef } from "@/lib/arquiteto/internal-link-graph";
 import type { PipelineContext } from "./pipeline-runtime";
 import { PipelineRuntimeError, pipelineErrorFromSupabase } from "./pipeline-runtime";
-import { normalizeDatabaseTimestamp } from "./arquiteto-persistence";
+import { listArquitetoArtifactsVigentes, normalizeDatabaseTimestamp } from "./arquiteto-persistence";
+import { siloLinkBasisBlocker } from "@/lib/arquiteto/silo-link-mesh";
+import { resolvePlannedSiloMembers } from "@/lib/arquiteto/planned-silo-members";
+import { loadCurrentPlannedSiloSource } from "./arquiteto-silo-consolidation-adapter";
 
 type DatabaseRow = Record<string, unknown>;
 
@@ -48,7 +53,9 @@ type WorkingCopyArtifactExpectation = {
   sourceVersionId?: string | null;
 };
 
-function workingCopyArtifactExpectations(workingCopy: InternalLinkGraphWorkingCopy): WorkingCopyArtifactExpectation[] {
+type LinkGraphBasis = Pick<InternalLinkGraphWorkingCopy, "brandId" | "siloId" | "baseSiloDnaVersionRef" | "baseSiloPageVersionRef" | "participatingArticleDnaVersionRefs" | "nodes">;
+
+function workingCopyArtifactExpectations(workingCopy: LinkGraphBasis): WorkingCopyArtifactExpectation[] {
   const expectations: WorkingCopyArtifactExpectation[] = [
     {
       reference: workingCopy.baseSiloDnaVersionRef,
@@ -84,7 +91,7 @@ function workingCopyArtifactExpectations(workingCopy: InternalLinkGraphWorkingCo
   return expectations;
 }
 
-async function assertWorkingCopyArtifactReferences(context: PipelineContext, workingCopy: InternalLinkGraphWorkingCopy) {
+export async function assertWorkingCopyArtifactReferences(context: PipelineContext, workingCopy: LinkGraphBasis) {
   if (workingCopy.nodes.some(node => node.brandId !== workingCopy.brandId)) {
     throw new PipelineRuntimeError("NOT_AUTHORIZED", "A working copy possui um nó fora da Brand da sessão.", 403);
   }
@@ -93,7 +100,7 @@ async function assertWorkingCopyArtifactReferences(context: PipelineContext, wor
   const versionIds = [...new Set(expectations.map(expectation => expectation.reference.versionId))];
   const result = await context.supabase
     .from("editorial_artifact_versions")
-    .select("version_id, entity_id, marca_id, artifact_type, content_hash, source_version_id")
+    .select("version_id, entity_id, marca_id, artifact_type, version_number, status, payload, content_hash, source_version_id")
     .eq("marca_id", context.brandId)
     .in("version_id", versionIds);
   if (result.error) throw pipelineErrorFromSupabase(result.error);
@@ -111,6 +118,107 @@ async function assertWorkingCopyArtifactReferences(context: PipelineContext, wor
   if (invalid) {
     throw new PipelineRuntimeError("NOT_AUTHORIZED", "A working copy referencia artefatos incompatíveis com a Brand da sessão.", 403);
   }
+
+  const siloRow = rows.get(workingCopy.baseSiloDnaVersionRef.versionId)!;
+  const pageRow = rows.get(workingCopy.baseSiloPageVersionRef.versionId)!;
+  const silo = SiloDNASchema.safeParse(siloRow.payload);
+  const page = SiloPageSchema.safeParse(pageRow.payload);
+  if (!silo.success || !page.success || silo.data.formationStatus !== "formed" || page.data.formationStatus !== "formed") {
+    throw new PipelineRuntimeError("CONFLICT", "A estrutura do Silo ainda não pode ser conferida para processar links.", 409);
+  }
+  const participatingIds = workingCopy.participatingArticleDnaVersionRefs.map(reference => reference.entityId);
+  const effective = new Map<string, string>();
+  for (let offset = 0; ;) {
+    const events = await context.supabase.from("editorial_version_status_events").select("version_id,status,occurred_at,id", { count: "exact" }).in("version_id", versionIds).order("occurred_at", { ascending: true }).order("id", { ascending: true }).range(offset, offset + 999);
+    if (events.error) throw pipelineErrorFromSupabase(events.error);
+    if (typeof events.count !== "number") throw new PipelineRuntimeError("QUERY_FAILURE", "Não foi possível conferir todos os eventos de aprovação dos links.", 503);
+    const pageRows = (events.data || []) as DatabaseRow[];
+    for (const row of pageRows) if (typeof row.version_id === "string" && typeof row.status === "string") effective.set(row.version_id, row.status);
+    offset += pageRows.length;
+    if (!pageRows.length && offset < events.count) throw new PipelineRuntimeError("QUERY_FAILURE", "A leitura dos eventos de aprovação dos links ficou incompleta.", 503);
+    if (offset >= events.count) break;
+  }
+  const status = (row: DatabaseRow) => effective.get(String(row.version_id)) ?? (typeof row.status === "string" ? row.status : null);
+  const entities = [...new Set(expectations.map(item => item.entityId))];
+  const current = new Map<string, DatabaseRow>();
+  for (let offset = 0; ;) {
+    const latest = await context.supabase.from("editorial_artifact_versions").select("version_id,entity_id,artifact_type,version_number", { count: "exact" }).eq("marca_id", context.brandId).in("entity_id", entities).in("artifact_type", ["silo_dna", "silo_page", "article_dna"]).order("version_id", { ascending: true }).range(offset, offset + 999);
+    if (latest.error) throw pipelineErrorFromSupabase(latest.error);
+    if (typeof latest.count !== "number") throw new PipelineRuntimeError("QUERY_FAILURE", "Não foi possível conferir todas as versões da base dos links.", 503);
+    const pageRows = (latest.data || []) as DatabaseRow[];
+    for (const row of pageRows) {
+      const key = `${row.artifact_type}:${row.entity_id}`;
+      const previous = current.get(key);
+      if (!previous || Number(row.version_number) > Number(previous.version_number)) current.set(key, row);
+    }
+    offset += pageRows.length;
+    if (!pageRows.length && offset < latest.count) throw new PipelineRuntimeError("QUERY_FAILURE", "A leitura das versões da base dos links ficou incompleta.", 503);
+    if (offset >= latest.count) break;
+  }
+  if (expectations.some(item => current.get(`${item.artifactType}:${item.entityId}`)?.version_id !== item.reference.versionId)) {
+    throw new PipelineRuntimeError("CONFLICT", "A arquitetura, a página ou algum artigo mudou. Reabra a prévia dos links.", 409);
+  }
+  let articleReferences: Array<{ articleId: string; articleDnaVersionId: string; articleDnaContentHash: string; role: "Pilar" | "Suporte" }> = silo.data.articleReferences;
+  if (silo.data.compositionBasis === "planned_members") {
+    const source = silo.data.compositionSourceRef;
+    if (!source || !silo.data.territoryRef || !silo.data.brandId) throw new PipelineRuntimeError("CONFLICT", "A estrutura planejada não possui fonte e território completos.", 409);
+    // Ler todos os artigos vigentes da marca impede aceitar dois artigos para
+    // o mesmo membro apenas porque um deles não veio na seleção da tela.
+    const catalog = await listArquitetoArtifactsVigentes(context);
+    const baseStatuses = new Map(catalog.statuses.map(item => [item.versionId, item.status]));
+    const articleEvents = new Map<string, string>();
+    const allIds = catalog.articleDnas.map(item => item.versionId);
+    for (let start = 0; start < allIds.length; start += 100) {
+      const ids = allIds.slice(start, start + 100);
+      const seen = new Set<string>();
+      for (let offset = 0; ;) {
+        const result = await context.supabase.from("editorial_version_status_events").select("id,version_id,status,occurred_at", { count: "exact" }).in("version_id", ids).order("occurred_at", { ascending: true }).order("id", { ascending: true }).range(offset, offset + 999);
+        if (result.error) throw pipelineErrorFromSupabase(result.error);
+        if (typeof result.count !== "number") throw new PipelineRuntimeError("QUERY_FAILURE", "Não foi possível conferir as aprovações dos membros do Silo.", 503);
+        const items = (result.data || []) as DatabaseRow[];
+        for (const item of items) {
+          if (typeof item.id !== "string" || seen.has(item.id) || typeof item.version_id !== "string" || typeof item.status !== "string") throw new PipelineRuntimeError("QUERY_FAILURE", "A leitura das aprovações dos membros ficou inconsistente.", 503);
+          seen.add(item.id);
+          articleEvents.set(item.version_id, item.status);
+        }
+        offset += items.length;
+        if (!items.length && offset < result.count) throw new PipelineRuntimeError("QUERY_FAILURE", "A leitura das aprovações dos membros ficou incompleta.", 503);
+        if (offset >= result.count) break;
+      }
+    }
+    const sourceCurrent = await loadCurrentPlannedSiloSource(context, source, silo.data.territoryRef, silo.data.siloId);
+    const resolved = resolvePlannedSiloMembers({
+      brandId: context.brandId,
+      silo: { versionId: String(siloRow.version_id), contentHash: String(siloRow.content_hash), effectiveStatus: status(siloRow), current: true, payload: { ...silo.data, brandId: silo.data.brandId } },
+      page: { effectiveStatus: status(pageRow), current: true, payload: page.data },
+      articles: catalog.articleDnas.map(item => ({ versionId: item.versionId, contentHash: item.contentHash, current: true, effectiveStatus: articleEvents.get(item.versionId) ?? baseStatuses.get(item.versionId) ?? null, payload: item.payload })),
+      sourceCurrent,
+    });
+    if (!resolved.ok) throw new PipelineRuntimeError("CONFLICT", resolved.reasons.join(" "), 409);
+    articleReferences = resolved.members.map(({ member, article }) => ({ articleId: article.payload.articleId, articleDnaVersionId: article.versionId, articleDnaContentHash: article.contentHash, role: member.role }));
+  }
+  const expectedIds = articleReferences.map(reference => reference.articleId);
+  if (new Set(expectedIds).size !== expectedIds.length || new Set(participatingIds).size !== participatingIds.length || expectedIds.length !== participatingIds.length || expectedIds.some(id => !participatingIds.includes(id))) {
+    throw new PipelineRuntimeError("CONFLICT", "A cópia de links não cobre exatamente os artigos da arquitetura do Silo.", 409);
+  }
+  for (const node of workingCopy.nodes) {
+    if (node.nodeType !== "ARTICLE_DNA") continue;
+    const reference = articleReferences.find(item => item.articleId === node.articleDnaVersionRef?.entityId);
+    const expectedRole = reference?.role === "Pilar" ? "PILAR" : reference?.role === "Suporte" ? "SUPORTE" : null;
+    if (!reference || node.architecturalRole !== expectedRole) throw new PipelineRuntimeError("CONFLICT", "O papel de um artigo no grafo diverge da arquitetura aprovada do Silo.", 409);
+  }
+  const blocker = siloLinkBasisBlocker({
+    brandId: context.brandId,
+    silo: { brandId: silo.data.brandId, siloId: silo.data.siloId, entityId: String(siloRow.entity_id), versionId: String(siloRow.version_id), contentHash: String(siloRow.content_hash), status: status(siloRow) },
+    page: { brandId: page.data.brandId, siloId: page.data.siloId, status: status(pageRow), siloDnaRef: page.data.siloDnaRef },
+    articles: articleReferences.map(reference => {
+      const selected = workingCopy.participatingArticleDnaVersionRefs.find(item => item.entityId === reference.articleId)!;
+      const row = rows.get(selected.versionId)!;
+      const articlePayload = isRecord(row.payload) ? row.payload : {};
+      return { expectedVersionId: reference.articleDnaVersionId, expectedContentHash: reference.articleDnaContentHash, brandId: typeof articlePayload.brandId === "string" ? articlePayload.brandId : "", versionId: selected.versionId, contentHash: selected.contentHash, status: status(row) };
+    }),
+  });
+  if (blocker) throw new PipelineRuntimeError("CONFLICT", blocker, 409);
 }
 
 function workingCopyFromRow(row: DatabaseRow): InternalLinkGraphWorkingCopy {
@@ -258,6 +366,8 @@ export async function persistInternalLinkGraph(context: PipelineContext, graph: 
   if (parsed.brandId !== context.brandId || parsed.createdBy !== context.actorUserId) {
     throw new PipelineRuntimeError("NOT_AUTHORIZED", "O grafo precisa pertencer à Brand e ao ator da sessão.", 403);
   }
+  // A confirmação precisa reler a base: aprovações podem ter mudado desde a prévia.
+  await assertWorkingCopyArtifactReferences(context, parsed);
   const result = await context.supabase.rpc("persist_internal_link_graph", {
     p_marca_id: context.brandId,
     p_actor_user_id: context.actorUserId,

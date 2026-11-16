@@ -1,3 +1,17 @@
+## Sequência aprovada e implementação — 2026-11-15
+
+**Regra aprovada:** a linha única segue Silos → Artigos → Links → Radar, conforme [adendo de 02/11](../compartilhado/adendo-silo-antes-dos-artigos-2026-11-02.md). As afirmações abaixo de que o par do Silo deve ser fechado somente após formar artigos ficam **SUBSTITUÍDAS como contrato de destino**; permanecem como registro do comportamento atual enquanto a adaptação dos mesmos acionadores e gravadores não estiver concluída. Não se deve anunciar a sequência nova como implementada antes de sua integração e validação.
+
+**Dados descartados:** a ação existente de exclusão deve alcançar também referências e aprovações dos itens elegíveis, conforme a [SDD aprovada](../compartilhado/sdd-exclusao-completa-artefatos-2026-11-01.md). Ausência na tela, isoladamente, não prova exclusão definitiva; referências antigas não podem voltar a comandar a produção após a exclusão comprovada.
+
+## Contexto do grupo em Links internos — 2026-11-01
+
+**Prévia de links, 2026-11-02:** a confirmação só vale para a marca, seleção e composição exibidas; alteração exige outra prévia. Se um Silo selecionado estiver bloqueado, a operação não processa parte do lote com custo incompleto. Quando o custo de outro Silo vier apenas de estimativa sem leitura de sua cópia, a mesma etapa exige selecionar e processar um Silo por vez. Esse limite substitui a autorização do lote por estimativa até existir leitura confiável de todas as cópias. A confirmação de links continua humana.
+
+O fechamento do plano, no mesmo `Concluir formação`, não escolhe silenciosamente entre dois ArticleDNA para o mesmo Assunto e não incorpora automaticamente artigos adicionais do território que não pertencem ao plano: apresenta conflito e preserva todos até a decisão. A existência de uma formação antiga fora da mesa não a torna automaticamente rejeitada ou substituída.
+
+Com filtro de grupo ativo, a fase usa somente Silo do grupo com SiloDNA e SiloPage. Se não houver vínculo ou par, informa a espera e não escolhe outro Silo. Sem grupo, mantém o seletor existente. **SUBSTITUÍDO** o fallback para o primeiro Silo de outra cor quando a cor selecionada ainda não tem o par (SDD linha única §15.9): aguarda-se o fechamento. A ausência de referência de formação no cenário exige conferência; não comprova alteração de composição.
+
 ## 48. O refazer dos publicados com o Assunto na página: o Assunto é a âncora — 2026-10-19
 
 Cobrança do dono depois da prévia do grupo Verde da AdalbaPro (19/10): "não está aplicando o SEO semântico, não está aplicando a linguagem natural orgânica"; "o sistema não está vigiando a canibalização entre os artigos"; "tem que fazer uma nova coleta da SERP quando refizer os processos". Regra permanente, no mesmo núcleo do "Melhorar publicados…" (e do "Processar artigos"), na mesa D2.1, no "Reforçar publicados" e na diferenciação — uma régua só (`principalFitsSubject`, chamada por `publishedSubjectPrincipalVerdict` em `proposePublishedPrimarySwap`):
@@ -777,3 +791,13 @@ Regra permanente:
 Marca sem plano segue como antes. Contrato detalhado: adendo de 2026-10-15 em `docs/compartilhado/sdd-plano-declarado-e-grupos-2026-10-12.md` (S4, S5 e S7 REVERTIDOS em 2026-10-16; ver a nota de reversão no próprio adendo).
 
 **Revisão de 2026-10-16 (ordem do dono, 15/10 noite, literal):** "vocês não podem ficar mudando as funcionalidades" · "só tinham que arrumar esses erros e esse monte de botões e duplas listas, mas acabaram de mudar tudo" · "tem que voltar tudo, mas sem os erros, nem esse monte de botões, nem processo em paralelo". Os itens 1, 2, 4 e 6 são consertos e ficam; 3, 5 e 7 voltaram ao fluxo de sempre.
+# Ajustes da sequência de acionadores — 2026-11-02
+
+**SUBSTITUÍDO:** o fechamento canônico não retoma ao carregar a área. A retomada acontece pelo mesmo `Concluir formação`, com leitura completa, seleção exata do Silo e bloqueios revalidados. Publicadas mantêm o território na confirmação de arquitetura; a análise de impacto deve usar os destinos do lote efetivo. Execuções de `Processar artigos` da mesma cor permanecem separadas por identificação e hash ao concluir. Uma execução não pode ser consumida parcialmente enquanto o servidor não preservar os demais alvos; recusa e recuperação após reload continuam pendentes de melhoria. Testes locais; validação real pendente.
+
+# Escolha explícita da principal — 2026-11-01
+
+Na ação existente `Procurar outra principal`, a lista de candidatas começa sem escolha; `Ver prévia da troca (grátis)` exige que a pessoa escolha uma para cada artigo. Ordem por volume ou quantidade de lentes não é comprovação de adequação da intenção. A prévia e a confirmação permanecem as mesmas, sem gravação automática. Código e teste DOM locais; validação real pendente.
+## SERP em formação existente — 2026-11-02
+
+Na planilha, `Processar artigos` verifica a evidência da composição também quando não houver mudança proposta no ArticleDNA. A ausência de alteração, isoladamente, não comprova a SERP. Falta de evidência é informada e a coleta depende da prévia de custo e autorização; não regravar o artigo apenas para conferir.

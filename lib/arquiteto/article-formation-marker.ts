@@ -101,6 +101,26 @@ export const ArticleFormationMarkerPayloadSchema = z.object({
   }).strict()).default([]),
 }).strict();
 export type ArticleFormationMarkerPayload = z.infer<typeof ArticleFormationMarkerPayloadSchema>;
+
+/**
+ * Planeja apenas o alcance do marcador para a exclusão definitiva já aprovada.
+ * Não grava: o consumidor transacional deverá bloquear/reler o marcador e
+ * comparar a fotografia inteira antes de aplicar qualquer remoção.
+ * Não se infere identidade de artigo por keyword, slug ou território.
+ */
+export function planDeletedArticleMarkerEntries(
+  marker: ArticleFormationMarkerPayload,
+  selectedArticleIds: readonly string[],
+) {
+  const ids = new Set(selectedArticleIds.map(id => id.trim()));
+  if (ids.has("") || !ids.size) throw new Error("A seleção de artigos deve conter identidades válidas.");
+  const removed = marker.concludedFormations.filter(item => item.materializedArticleId !== null && ids.has(item.materializedArticleId));
+  const retained = marker.concludedFormations.filter(item => item.materializedArticleId === null || !ids.has(item.materializedArticleId));
+  const survivingRefs = new Set(retained.map(item => item.candidateRef));
+  const ambiguous = [...new Set(removed.filter(item => survivingRefs.has(item.candidateRef)).map(item => item.candidateRef))];
+  if (ambiguous.length) throw new Error("A formação selecionada compartilha sua referência com outro artigo; a exclusão precisa de revisão.");
+  return { removed, retained };
+}
 /**
  * O que o CHAMADOR precisa passar.
  *

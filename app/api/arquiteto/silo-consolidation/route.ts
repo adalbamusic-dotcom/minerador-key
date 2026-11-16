@@ -6,6 +6,7 @@ import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { VersionedSiloDNASchema, VersionedSiloPageSchema } from "@/lib/arquiteto/contracts";
 import { TerritoryRefSchema } from "@/lib/arquiteto/territory-ref";
 import { SiloPageApprovalDecisionSchema } from "@/lib/arquiteto/silo-page-approval";
+import { PlannedSiloConsolidationDecisionSchema } from "@/lib/arquiteto/silo-consolidation-territorial";
 
 /**
  * Consolidação Silo-first — separada da edição da working copy, que vive em
@@ -29,7 +30,7 @@ const RequestSchema = z.object({
   siloPageStatus: z.enum(["draft", "proposed", "approved"]),
   // Decisão humana de consolidação — não é `approved: true`. Ela descreve a
   // arquitetura aprovada, e o servidor confere contra a working copy remota.
-  decision: z.object({
+  decision: z.union([z.object({
     actorUserId: z.string().min(1),
     decidedAt: z.string().min(1),
     reason: z.string().min(1),
@@ -38,7 +39,7 @@ const RequestSchema = z.object({
     supportArticleIds: z.array(z.string().min(1)),
     excludedArticleIds: z.array(z.string().min(1)),
     publishedIdentityResolved: z.boolean(),
-  }).strict(),
+  }).strict(), PlannedSiloConsolidationDecisionSchema]),
   // Decisão humana de aprovação DA PÁGINA. Independente da consolidação:
   // aprovar o SiloDNA não aprova a SiloPage, então ela vem em campo próprio.
   siloPageApproval: SiloPageApprovalDecisionSchema.nullish(),

@@ -176,6 +176,12 @@ export type ClosureFormation = {
   materializedArticleId: string | null;
 };
 
+/** O histórico rejeitado não participa da composição ativa do Silo. */
+export function activeClosureFormations<F extends Pick<ClosureFormation, "materializedArticleId">>(formations: readonly F[], rejectedArticleIds: readonly string[]): F[] {
+  const rejected = new Set(rejectedArticleIds);
+  return formations.filter(item => !item.materializedArticleId || !rejected.has(item.materializedArticleId));
+}
+
 export function closureFormationsForSilo<F extends ClosureFormation>(input: {
   territoryRef: string;
   /** Todas as formações congeladas no marcador (de todos os Silos). */
@@ -264,6 +270,8 @@ export function describeSiloClosureReading(input: {
   blockers: readonly { code: string; detail: string }[];
   /** Formações concluídas cuja composição saiu do cenário. */
   outOfScenarioCount: number;
+  /** Identificação das formações que ficaram fora do cenário, quando conhecida. */
+  outOfScenarioLabels?: readonly string[];
   /** Há formação concluída neste Silo? */
   hasConcluded: boolean;
   planReady: boolean;
@@ -280,11 +288,12 @@ export function describeSiloClosureReading(input: {
     faltas.push(bloqueio.detail);
   }
   if (input.outOfScenarioCount) {
-    faltas.push(`${input.outOfScenarioCount} formação(ões) concluída(s) mudaram de composição depois: reprocesse e conclua de novo`);
+    const nomes = input.outOfScenarioLabels?.filter(Boolean) ?? [];
+    faltas.push(`${input.outOfScenarioCount} formação(ões) concluída(s) não foram reconhecidas no cenário atual${nomes.length ? `: ${nomes.join(", ")}` : ""}. Confira as referências e a composição antes de reprocessar ou concluir de novo`);
   }
   if (!input.hasConcluded && !input.pendingLabels.length) faltas.push("nenhum artigo concluído neste Silo");
   if (!faltas.length && input.planReady && input.resumable) {
-    return { state: "closing", text: `${input.label}: pronto — o fechamento roda sozinho (Pilar pela cobertura de buscas, os demais como Suporte).` };
+    return { state: "waiting", text: `${input.label}: pronto para retomar — marque os artigos deste Silo e use “Concluir formação” para fechar.` };
   }
   if (!faltas.length && input.resumptionReason) faltas.push(input.resumptionReason);
   return { state: "waiting", text: `${input.label}: ${faltas.join(" · ") || "aguardando a releitura do acervo"}.` };
@@ -296,6 +305,22 @@ export type SiloClosureReadiness = {
   /** Candidatos concluídos aguardando o Silo canônico para virar ArticleDNA. */
   awaitingMaterialization: string[];
 };
+
+/** Seleção exata para a retomada no mesmo Concluir, sem gravação no carregamento. */
+export function resumableClosureMatchesSelection(input: {
+  human: boolean;
+  bootstrapLoaded: boolean;
+  resumable: boolean;
+  planReady: boolean;
+  outOfScenarioCount: number;
+  activeRefs: readonly string[];
+  selectedRefs: ReadonlySet<string>;
+}): boolean {
+  const ativos = new Set(input.activeRefs);
+  return input.human && input.bootstrapLoaded && input.resumable && input.planReady
+    && input.outOfScenarioCount === 0 && ativos.size > 0 && ativos.size === input.selectedRefs.size
+    && [...ativos].every(ref => input.selectedRefs.has(ref));
+}
 
 /**
  * §5/§6 — o Silo fecha quando o lote dele para de se mexer.

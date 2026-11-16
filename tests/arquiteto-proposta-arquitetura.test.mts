@@ -8,11 +8,12 @@ import {
   identityCore,
   intentIsKnown,
   resolveKeywordDnaSignals,
+  proposalHashOf,
   proposalCoversScope,
   type ExistingSilo,
   type KeywordDnaSignals,
 } from "../lib/arquiteto/architecture-working-proposal.ts";
-import type { ArchitectureAnalysis, ClusterAnalysis, ClusterDestination } from "../lib/arquiteto/architecture-analysis.ts";
+import { architectureBaseHash, type ArchitectureAnalysis, type ClusterAnalysis, type ClusterDestination } from "../lib/arquiteto/architecture-analysis.ts";
 
 /* ------------------------------------------------------------- fixture */
 
@@ -642,6 +643,43 @@ test("§7 — DNA diferente é PROPOSTA diferente, mesmo com o mesmo destino", (
     depois.assignments.map(item => `${item.keywordId}->${item.siloKey}`).sort(),
   );
   assert.notEqual(antes.proposalHash, depois.proposalHash, "o hash precisa mudar quando o DNA muda");
+});
+
+test("diagnóstico: DNA diferente muda a proposta, mas não a base formada só por IDs", () => {
+  const entradas = { keywordIds: [...keywordTexts.keys()], territoryRefs: ["territory:original"], publishedRootPaths: [] };
+  const antes = propor(DOIS_GRUPOS);
+  const depois = propor(DOIS_GRUPOS, [], SINAIS.map(item =>
+    item.keywordId === "kw-1" ? { ...item, dnaContentHash: "sha256:mudou" } : item));
+  assert.equal(architectureBaseHash(entradas), architectureBaseHash({ ...entradas }), "mesmos IDs dão a mesma base legada");
+  assert.notEqual(antes.proposalHash, depois.proposalHash, "a identidade da proposta precisa captar a mudança de DNA");
+});
+
+test("diagnóstico: criar o Silo candidato muda os hashes, mesmo sem mudar o destino editorial", () => {
+  const original = propor(DOIS_GRUPOS);
+  const novo = original.silos.find(silo => silo.source === "proposed");
+  assert.ok(novo, "a fixture precisa de um Silo candidato ainda não criado");
+  const ref = "territory:00000000-0000-4000-8000-000000000001";
+  const base = { keywordIds: [...keywordTexts.keys()], territoryRefs: [] as string[], publishedRootPaths: [] as string[] };
+  assert.notEqual(architectureBaseHash(base), architectureBaseHash({ ...base, territoryRefs: [ref] }), "a criação muda a base legada");
+  const relido = {
+    ...original,
+    silos: original.silos.map(silo => silo.key === novo.key ? { ...silo, key: ref, territoryRef: ref, source: "reused" as const } : silo),
+    assignments: original.assignments.map(item => item.siloKey === novo.key ? { ...item, siloKey: ref } : item),
+  };
+  assert.notEqual(proposalHashOf(original), proposalHashOf(relido), "hash bruto também muda após materializar o mesmo Silo");
+});
+
+test("diagnóstico: mudar o plano altera destinos sem alterar a base legada", () => {
+  const entrada = { keywordIds: [...keywordTexts.keys()], territoryRefs: [] as string[], publishedRootPaths: [] as string[] };
+  const grupo = { groupId: "grupo-1", label: "Azul", siloName: "Skincare", siloSlug: "skincare", territoryRef: null, keywordIds: ["kw-1", "kw-2"] };
+  const proposta = (siloName: string, siloSlug: string) => buildArchitectureWorkingProposal({
+    analysis: analise(DOIS_GRUPOS), existingSilos: [], keywords: SINAIS, slugOf,
+    declaredPlanGroups: [{ ...grupo, siloName, siloSlug }],
+  });
+  const antes = proposta("Skincare", "skincare");
+  const depois = proposta("Cuidados com a pele", "cuidados-com-a-pele");
+  assert.equal(architectureBaseHash(entrada), architectureBaseHash({ ...entrada }), "a base antiga não inclui o plano");
+  assert.notDeepEqual(antes.assignments.filter(item => grupo.keywordIds.includes(item.keywordId)), depois.assignments.filter(item => grupo.keywordIds.includes(item.keywordId)), "a proposta acompanha a alteração do plano");
 });
 
 /* ============ §13 · integridade da importação ======================== */

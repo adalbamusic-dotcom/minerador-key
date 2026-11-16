@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  activeClosureFormations,
   describeFormationConclusionOutcome,
   resolveSiloClosureReadiness,
 } from "../lib/arquiteto/silo-closure-readiness.ts";
@@ -20,6 +21,16 @@ import { ArticleDNASchema } from "../lib/arquiteto/contracts.ts";
  */
 
 const SILO = "territory:9da03dd0-cf37-45c3-8562-20e943aa37bd";
+
+test("formações de artigos comprovadamente rejeitados não travam a composição atual", () => {
+  const formations = [
+    { materializedArticleId: "antigo", candidateRef: "old" },
+    { materializedArticleId: "atual", candidateRef: "new" },
+    { materializedArticleId: null, candidateRef: "pending" },
+  ];
+  assert.deepEqual(activeClosureFormations(formations, ["antigo"]).map(item => item.candidateRef), ["new", "pending"]);
+  assert.deepEqual(activeClosureFormations(formations, []).map(item => item.candidateRef), ["old", "new", "pending"]);
+});
 
 /* ================= §3 · o que o contrato REALMENTE exige =============== */
 
@@ -619,7 +630,7 @@ test("§1 — a fiação usa o ledger, não a contagem desta execução", () => 
   const corpo = trecho.slice(0, trecho.indexOf("\n  }, ["));
   assert.match(corpo, /const ledger = resolveFormationLedger\(\{/);
   // O acumulado remoto, lido pela MESMA regra do fechamento (órfão fora, aprovado sem conclusão dentro).
-  assert.match(corpo, /concludedFormations: marcador\.concludedFormations \|\| \[\],/);
+  assert.match(corpo, /concludedFormations: activeClosureFormations\(marcador\.concludedFormations \|\| \[\], rejectedFormationArticleIds\)/);
   assert.match(corpo, /remoteConcludedRefs: leituraDoSilo\.formations\.map\(item => item\.candidateRef\)/);
   assert.match(corpo, /concludedCandidateRefs: ledger\.concludedFormationRefs/);
   // A contagem só desta execução não pode voltar.

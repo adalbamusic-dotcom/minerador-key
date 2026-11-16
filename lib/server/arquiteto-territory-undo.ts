@@ -218,7 +218,7 @@ async function readDownstream(context: PipelineContext, articleIds: readonly str
   return etapas;
 }
 
-/** O grafo de links aprovado do Silo: só a prévia o cita (ele deixa de valer junto com o par). Tabela ausente = nenhum. */
+/** O grafo aprovado integra o impacto: uma leitura falha não equivale a uma lista vazia. */
 async function readApprovedLinkGraphs(context: PipelineContext, siloIds: readonly string[]): Promise<TerritoryUndoLinkGraph[]> {
   if (!siloIds.length) return [];
   const result = await context.supabase
@@ -226,7 +226,7 @@ async function readApprovedLinkGraphs(context: PipelineContext, siloIds: readonl
     .select("graph_version_id,silo_id,version_number,workflow_status")
     .eq("marca_id", context.brandId)
     .in("silo_id", [...siloIds]);
-  if (result.error) return [];
+  if (result.error) throw pipelineErrorFromSupabase(result.error);
   const aprovados = ((result.data || []) as Row[]).filter(row => row.workflow_status === "approved");
   const maisNovo = new Map<string, Row>();
   for (const row of aprovados) {
@@ -553,7 +553,7 @@ async function readDocumentsOf(context: PipelineContext, articleIds: readonly st
   const unicos = [...new Set(articleIds)];
   for (let inicio = 0; inicio < unicos.length; inicio += BATCH) {
     const result = await context.supabase.from("content_documents").select("id,article_id").eq("marca_id", context.brandId).in("article_id", unicos.slice(inicio, inicio + BATCH));
-    if (result.error) return contagem;
+    if (result.error) throw pipelineErrorFromSupabase(result.error);
     for (const row of (result.data || []) as Row[]) {
       const id = texto(row.article_id);
       if (id) contagem.set(id, (contagem.get(id) || 0) + 1);

@@ -693,7 +693,8 @@ export function planSheetPreviewLines(run: RunLike, rows: readonly PreviewRow[])
     }
     // 2026-10-17 · "adequado" só com reforço suficiente: com vaga e sem keyword achada, a linha diz isso e o motivo (nada a gravar).
     const semReforco = proposta.reasons.find(reason => reason.startsWith(NO_REINFORCEMENT_FOUND_LABEL));
-    if (proposta.status === "adequate") return { keywordId: row.keywordId, kind: "adequate", sentence: semReforco ? `${semReforco} Nada a gravar.` : "Já formado e adequado: nada a gravar.", principalFrom: de, principalTo: para };
+    const zeroSemCandidata = proposta.reasons.find(reason => reason.startsWith("Volume 0 sem candidata:"));
+    if (proposta.status === "adequate") return { keywordId: row.keywordId, kind: "adequate", sentence: zeroSemCandidata ? `${zeroSemCandidata}${semReforco ? ` ${semReforco}` : ""} Nenhuma alteração a gravar nesta leitura.` : semReforco ? `${semReforco} Nada a gravar.` : "Já formado e adequado: nada a gravar.", principalFrom: de, principalTo: para };
     const util = [...proposta.reasons].reverse().find(reason => !GENERIC_SUBJECT_REASON.test(reason));
     // 2026-10-16 (noite) · a frase sai da régua de volume da linha: nunca medida, medida sem número de buscas (Livre ou Travada).
     // 2026-10-17 (noite) · a principal de identidade ouve a frase dela (fica), nunca "Procurar outra principal".
@@ -709,7 +710,7 @@ export function planSheetPreviewLines(run: RunLike, rows: readonly PreviewRow[])
  */
 export function planSheetWorkingCopyLines(run: RunLike, rows: readonly PreviewRow[]): { keywordId: string; tone: "success" | "neutral" | "warning"; text: string }[] {
   return planSheetPreviewLines(run, rows).map(line => {
-    if (line.kind === "will_write") return { keywordId: line.keywordId, tone: "success", text: `Cópia de trabalho (nada gravado): ${line.sentence.replace(/^Vai gravar: [^·]+· /, "")} Pronto para “${PLAN_SHEET_ACTION_LABELS.concludeFormation}”.` };
+    if (line.kind === "will_write") return { keywordId: line.keywordId, tone: "success", text: `Cópia de trabalho (ArticleDNA não gravado): ${line.sentence.replace(/^Vai gravar: [^·]+· /, "")} Pronto para “${PLAN_SHEET_ACTION_LABELS.concludeFormation}”.` };
     if (line.kind === "adequate") return { keywordId: line.keywordId, tone: "neutral", text: line.sentence };
     return { keywordId: line.keywordId, tone: "warning", text: line.sentence };
   });
@@ -742,12 +743,13 @@ export function planSheetConclusionChecklist(input: {
   const semReforco = gravam.filter(line => { const proposta = input.proposals.find(item => item.targetId === line.keywordId); return !proposta || !proposta.memberIds.some(id => id !== proposta.principalId); }).map(line => line.keywordId);
   const ficaFormado = new Set([...input.groupRows.filter(row => row.formation.state === "formed" || row.formation.state === "in_radar").map(row => row.keywordId), ...gravam.map(line => line.keywordId)]);
   const faltamNoSilo = input.groupRows.filter(row => !ficaFormado.has(row.keywordId)).map(row => row.keywordId);
+  const pendencias = fora.length > 0 || semSerp.length > 0;
   return [
-    { key: "principal", ok: !semPrincipal.length, label: "principal", detail: semPrincipal.length ? `sem principal: ${lista(semPrincipal)}` : `${gravam.length} artigo(s) com a principal${trocas ? `; ${trocas} troca(s) proposta(s), decisão sua` : " (nenhuma troca)"}` },
-    { key: "reforco", ok: !semReforco.length, label: "reforço", detail: semReforco.length ? `sem secundária: ${lista(semReforco)} (o artigo grava só com a principal; refaça depois pelo “Melhorar publicados…”)` : "todos com secundárias" },
-    { key: "serp", ok: !semSerp.length, label: "SERP", detail: semSerp.length ? `falta a SERP da principal em ${lista(semSerp)}: “${PLAN_SHEET_ACTION_LABELS.processArticles}” coleta (custo antes)` : "parecer das 4 lentes em cache para todos" },
+    { key: "principal", ok: !semPrincipal.length, label: "principal", detail: semPrincipal.length ? `sem principal: ${lista(semPrincipal)}` : gravam.length ? `${gravam.length} artigo(s) com a principal${trocas ? `; ${trocas} troca(s) proposta(s), decisão sua` : " (nenhuma troca)"}` : "nenhum artigo previsto para gravação nesta prévia" },
+    { key: "reforco", ok: !semReforco.length, label: "reforço", detail: semReforco.length ? `sem secundária: ${lista(semReforco)} (o artigo grava só com a principal; refaça depois pelo “Melhorar publicados…”)` : gravam.length ? "artigos previstos para gravação com secundárias" : "nenhum artigo previsto para gravação nesta prévia" },
+    { key: "serp", ok: !semSerp.length, label: "SERP", detail: semSerp.length ? `falta a SERP da principal em ${lista(semSerp)}: “${PLAN_SHEET_ACTION_LABELS.processArticles}” coleta (custo antes)` : "nenhuma pendência de SERP indicada nesta prévia" },
     { key: "plano", ok: !fora.length, label: "plano", detail: fora.length ? `fora desta confirmação: ${lista(fora)} (o motivo está na linha)` : "papel, ordem e escopo do plano no ArticleDNA" },
-    { key: "silo", ok: !faltamNoSilo.length, label: "Silo", detail: faltamNoSilo.length ? `fica para depois: faltam ${faltamNoSilo.length} artigo(s) do plano (${lista(faltamNoSilo)})` : "fecha neste ato: SiloDNA e SiloPage com o Pilar e a ordem do plano; o grupo é ligado ao Silo" },
+    { key: "silo", ok: !faltamNoSilo.length && !pendencias, label: "Silo", detail: faltamNoSilo.length ? `fica para depois: faltam ${faltamNoSilo.length} artigo(s) do plano (${lista(faltamNoSilo)})` : pendencias ? "aguarda a resolução das pendências desta prévia antes da confirmação" : "fecha neste ato: SiloDNA e SiloPage com o Pilar e a ordem do plano; o grupo é ligado ao Silo" },
   ];
 }
 
@@ -777,16 +779,26 @@ export function planSheetSequence(input: {
  */
 export function planGroupSiloClosure(input: {
   planRows: readonly { keywordId: string; keyword: string; role: "Pilar" | "Suporte"; order: number }[];
-  articles: readonly { articleId: string; subjectKeywordId: string | null; territoryRef: string | null }[];
+  articles: readonly { articleId: string; subjectKeywordId: string | null; territoryRef: string | null; slug?: string | null }[];
 }): { state: "ready"; territoryRef: string; pillarArticleId: string; orderedArticleIds: string[] } | { state: "waiting"; missing: string[] } | { state: "conflict"; reason: string } {
   if (!input.planRows.length) return { state: "conflict", reason: "O grupo não tem artigos no plano." };
-  const doAssunto = new Map(input.articles.filter(article => article.subjectKeywordId).map(article => [article.subjectKeywordId!, article]));
+  const idsDoPlano = new Set(input.planRows.map(row => row.keywordId));
+  const associados = input.articles.filter(article => article.subjectKeywordId && idsDoPlano.has(article.subjectKeywordId));
+  const assuntos = new Set<string>();
+  for (const artigo of associados) {
+    if (assuntos.has(artigo.subjectKeywordId!)) return { state: "conflict", reason: "Há mais de um ArticleDNA para o mesmo Assunto do plano; confira as identidades antes de fechar o Silo." };
+    assuntos.add(artigo.subjectKeywordId!);
+  }
+  const doAssunto = new Map(associados.map(article => [article.subjectKeywordId!, article]));
   const faltam = input.planRows.filter(row => !doAssunto.has(row.keywordId)).map(row => row.keyword);
   if (faltam.length) return { state: "waiting", missing: faltam };
   const ordenadas = [...input.planRows].sort((a, b) => a.order - b.order || a.keyword.localeCompare(b.keyword, "pt-BR"));
   const artigos = ordenadas.map(row => doAssunto.get(row.keywordId)!);
   const silos = [...new Set(artigos.map(article => article.territoryRef).filter((ref): ref is string => Boolean(ref)))];
   if (silos.length !== 1 || artigos.some(article => !article.territoryRef)) return { state: "conflict", reason: silos.length > 1 ? `Os artigos do plano estão em ${silos.length} Silos: confira na aba Silos.` : "Há artigo do plano sem Silo: confirme o Silo do plano na aba Silos." };
+  const idsDoPlanoFormado = new Set(artigos.map(article => article.articleId));
+  const adicionais = input.articles.filter(article => article.territoryRef === silos[0] && !idsDoPlanoFormado.has(article.articleId));
+  if (adicionais.length) return { state: "conflict", reason: `Há ${adicionais.length} artigo(s) adicional(is) neste Silo fora do plano: ${adicionais.map(article => article.slug ? `/${article.slug}` : article.articleId).join(", ")}. Confira a composição antes de concluir; nenhum artigo foi retirado.` };
   const pilares = ordenadas.filter(row => row.role === "Pilar");
   if (pilares.length !== 1) return { state: "conflict", reason: pilares.length ? `O plano declara ${pilares.length} Pilares: o Pilar muda no Minerador.` : "O plano não declara o Pilar: o Pilar muda no Minerador." };
   return { state: "ready", territoryRef: silos[0], pillarArticleId: doAssunto.get(pilares[0].keywordId)!.articleId, orderedArticleIds: artigos.map(article => article.articleId) };

@@ -129,8 +129,8 @@ export async function persistArquitetoSiloPair(input: {
   };
 }
 
-export async function loadCanonicalArquitetoArtifacts(brandId: string) {
-  const response = await fetch(`/api/arquiteto/artifacts?brandId=${encodeURIComponent(brandId)}`, { cache: "no-store" });
+export async function loadCanonicalArquitetoArtifacts(brandId: string, options: { latest?: boolean } = {}) {
+  const response = await fetch(`/api/arquiteto/artifacts?brandId=${encodeURIComponent(brandId)}${options.latest ? "&latest=1" : ""}`, { cache: "no-store" });
   const body = ListResponseSchema.parse(await readResponse(response));
   return {
     source: body.data.source,

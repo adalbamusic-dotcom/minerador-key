@@ -6,6 +6,7 @@ import {
   parseArchitectKeywordDeletePreview,
   parseArchitectKeywordDeleteResult,
   selectedArticleKeywordIds,
+  unresolvedArticleKeywordSelection,
 } from "../lib/arquiteto/selected-keyword-delete-lifecycle.ts";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -38,6 +39,20 @@ test("a seleção resolve somente Principal e secundárias dos artigos seleciona
   assert.deepEqual(selectedArticleKeywordIds(new Set(["article-b"]), articles), ["keyword-b", "keyword-b-2"]);
   assert.deepEqual(selectedArticleKeywordIds(new Set(["article-a", "article-c"]), articles), ["keyword-a", "keyword-a-2", "keyword-c"]);
   assert.deepEqual(selectedArticleKeywordIds(new Set(), articles), []);
+});
+
+test("a seleção incompleta ou ambígua bloqueia o envio do lote inteiro ao Minerador", () => {
+  const semKeyword = { id: "article-orphan", mainKeywordObj: null, supportKeywords: [] };
+  assert.deepEqual(unresolvedArticleKeywordSelection(new Set(["article-a", "article-orphan"]), [...articles, semKeyword]), ["article-orphan"]);
+  assert.deepEqual(unresolvedArticleKeywordSelection(new Set(["article-orphan"]), [{ ...semKeyword, supportKeywords: [{ id: "secondary" }] }]), ["article-orphan"]);
+  assert.deepEqual(unresolvedArticleKeywordSelection(new Set(["article-a"]), [{ ...articles[0], supportKeywords: [{ id: "" }] }]), ["article-a"]);
+  assert.deepEqual(unresolvedArticleKeywordSelection(new Set(["article-a", "article-missing"]), articles), ["article-missing"]);
+  assert.deepEqual(unresolvedArticleKeywordSelection(new Set(["article-a"]), [...articles, articles[0]]), ["article-a"]);
+  assert.deepEqual(unresolvedArticleKeywordSelection(new Set(["article-a", "article-c"]), articles), []);
+  const workspace = read("../modules/arquiteto/arquiteto-workspace.tsx");
+  const handler = workspace.slice(workspace.indexOf("const openSelectedKeywordsInMineradorForDeletion"), workspace.indexOf("const confirmDangerAction"));
+  assert.match(handler, /unresolvedArticleKeywordSelection\(selectedArticleIdsRef\.current, articlesList\)/);
+  assert.match(handler, /if \(unresolved\.length\)[\s\S]*return;[\s\S]*window\.location\.assign/);
 });
 
 test("a prévia exige a confirmação exata da seleção e preserva impactos canônicos", () => {

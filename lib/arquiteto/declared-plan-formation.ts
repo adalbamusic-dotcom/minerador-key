@@ -8,7 +8,8 @@
  *
  * Domínio puro: sem React, sem storage, sem rede.
  */
-import type { ArticleDNA } from "./contracts.ts";
+import type { ArticleDNA, SiloDNA, SiloPage } from "./contracts.ts";
+import { plannedSiloMemberKey, plannedSiloSourceIsCurrent, type PlannedSiloCurrentSource } from "./planned-silo-member.ts";
 import { freePlanPrincipal, lockedPlanPrincipal, type ArchitectSubjectStanding, type SubjectSupportSuggestion } from "./declared-subject.ts";
 import type { DeclaredPrincipalLockView } from "../minerador/declared-plan.ts";
 import type { DeclaredPlanFormationInput } from "./article-formation-priority.ts";
@@ -16,6 +17,39 @@ import type { DeclaredPlanGateInput } from "./article-formation-confirmation.ts"
 import { DECLARED_PRINCIPAL_SUPPORT_BASIS_PREFIX } from "./article-serp-interpretation.ts";
 
 type StandingWithPlan = Pick<ArchitectSubjectStanding, "keywordId" | "brandId" | "declared" | "received" | "approvedPackageRef" | "plan"> & { planLock?: DeclaredPrincipalLockView | null };
+
+/**
+ * Prepara o vínculo de uma cópia de ArticleDNA à estrutura aprovada do Silo.
+ * A autoridade de status e vigência deve vir do servidor. Esta leitura não
+ * grava nem aprova: o writer deverá revalidar dentro da mesma transação.
+ */
+export function plannedArticleMembership(input: {
+  brandId: string;
+  article: Pick<ArticleDNA, "articleId" | "brandId" | "siloId" | "territoryRef" | "hierarchy" | "subject" | "keywordReferences">;
+  silo: { versionId: string; contentHash: string; current: boolean; effectiveStatus: string | null; payload: SiloDNA };
+  page: { current: boolean; effectiveStatus: string | null; payload: SiloPage };
+  sourceCurrent: PlannedSiloCurrentSource | null;
+  /** Ocupações correntes devem vir de uma leitura canônica completa da marca. */
+  occupied: readonly { articleId: string; memberKey: string }[];
+}): { ok: true; ref: NonNullable<ArticleDNA["siloMembershipRef"]>; order: number } | { ok: false; reason: string } {
+  const { brandId, article, silo, page } = input;
+  const members = silo.payload.plannedMembers ?? [];
+  if (!brandId || article.brandId !== brandId || silo.payload.brandId !== brandId || page.payload.brandId !== brandId) return { ok: false, reason: "A estrutura e o artigo precisam pertencer à marca ativa." };
+  if (!silo.current || silo.effectiveStatus !== "approved" || !page.current || page.effectiveStatus !== "approved" || silo.payload.formationStatus !== "formed" || page.payload.formationStatus !== "formed") return { ok: false, reason: "O Silo e sua página precisam estar vigentes e aprovados." };
+  if (!plannedSiloSourceIsCurrent({ brandId, source: silo.payload.compositionSourceRef, expectedSubjectProofs: silo.payload.keywordPackageRefs, current: input.sourceCurrent })) return { ok: false, reason: "O plano ou os Assuntos que originaram o Silo mudaram ou não puderam ser confirmados; revise o Silo antes de formar o artigo." };
+  if (!silo.versionId || !silo.contentHash || silo.payload.compositionBasis !== "planned_members" || page.payload.compositionBasis !== "planned_members" || silo.payload.siloId !== page.payload.siloId || article.siloId !== silo.payload.siloId || silo.payload.territoryRef !== page.payload.territoryRef || article.territoryRef !== silo.payload.territoryRef || !silo.payload.territoryRef || page.payload.siloDnaRef.entityId !== silo.payload.siloId || page.payload.siloDnaRef.versionId !== silo.versionId || page.payload.siloDnaRef.contentHash !== silo.contentHash) return { ok: false, reason: "O artigo e a página não correspondem à versão atual da estrutura do Silo." };
+  const keys = members.map(member => member.memberKey);
+  if (!members.length || members.filter(member => member.role === "Pilar").length !== 1 || members.some((member, index) => member.memberKey !== plannedSiloMemberKey(brandId, member.anchorKind, member.anchorId) || (index > 0 && members[index - 1].order >= member.order)) || new Set(keys).size !== keys.length || page.payload.plannedMemberKeys?.length !== keys.length || page.payload.plannedMemberKeys.some((key, index) => key !== keys[index])) return { ok: false, reason: "A composição planejada é incompleta ou ambígua." };
+  const anchors = members.filter(member => member.anchorKind === "existing_article"
+    ? member.anchorId === article.articleId
+    : article.subject?.keywordId ? member.anchorId === article.subject.keywordId : article.keywordReferences.some(reference => reference.keywordId === member.anchorId));
+  if (anchors.length !== 1) return { ok: false, reason: "O artigo não corresponde a um único membro planejado." };
+  const member = anchors[0];
+  if (article.hierarchy !== member.role) return { ok: false, reason: "O papel do artigo diverge da estrutura aprovada do Silo." };
+  if (input.occupied.some(item => item.memberKey === member.memberKey && item.articleId !== article.articleId)) return { ok: false, reason: "O membro planejado já está vinculado a outro artigo vigente." };
+  if (input.occupied.some(item => item.articleId === article.articleId && item.memberKey !== member.memberKey)) return { ok: false, reason: "O artigo já está vinculado a outro membro planejado; revise a estrutura antes de alterar o vínculo." };
+  return { ok: true, ref: { siloDnaVersionId: silo.versionId, siloDnaContentHash: silo.contentHash, memberKey: member.memberKey }, order: member.order };
+}
 
 /** Os Assuntos com plano que o Arquiteto pode obedecer: declarados, recebidos, com pacote aprovado, desta marca. */
 export function declaredPlanStandings<T extends StandingWithPlan>(standings: readonly T[], brandId: string | null): T[] {

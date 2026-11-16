@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TerritoryRefSchema, type TerritoryRef } from "./territory-ref.ts";
+import { PlannedSiloMemberSchema, PlannedSiloSourceRefSchema, plannedSiloMemberKey } from "./planned-silo-member.ts";
 
 /**
  * REGISTRO CANÔNICO REMOTO DA WORKING COPY DE SILO — Fase 2C.3.
@@ -112,6 +113,24 @@ export const SiloWorkingCopyArticleRefSchema = z.object({
  */
 export const SILO_WORKING_COPY_FORMATION_STATUSES = ["draft", "ready_for_review"] as const;
 
+/** A decisão do Pilar planejado referencia membros, não ArticleDNAs futuros. */
+export const PlannedSiloPillarSelectionSchema = z.object({
+  memberKey: z.string().min(1),
+  actorUserId: z.string().min(1),
+  decidedAt: z.string().min(1),
+  reason: z.string().min(1),
+  decidedOverMemberKeys: z.array(z.string().min(1)).min(1),
+}).strict();
+
+/** Formato preparado para a mesma cópia de trabalho; ainda não autoriza escrita. */
+export const PlannedSiloWorkingCompositionSchema = z.object({
+  source: PlannedSiloSourceRefSchema,
+  members: z.array(PlannedSiloMemberSchema).min(1),
+  /** Versões dos pacotes que sustentavam a prévia aceita para os Assuntos. */
+  subjectProofs: z.array(z.object({ keywordId: z.string().min(1), approvedPackageRef: z.object({ version: z.number().int().positive(), contentHash: z.string().refine(value => value.trim().length > 0), approvedAt: z.string().refine(value => value.trim().length > 0) }).strict() }).strict()),
+  pillarSelection: PlannedSiloPillarSelectionSchema.nullable(),
+}).strict();
+
 export const SiloWorkingCopyStateSchema = z.object({
   workingCopyRef: SiloWorkingCopyRefSchema,
   brandId: z.string().min(1),
@@ -131,8 +150,52 @@ export const SiloWorkingCopyStateSchema = z.object({
   exclusions: z.array(SiloWorkingCopyExclusionSchema),
   reasons: z.array(z.string().min(1)),
   conflicts: z.array(z.string().min(1)),
-}).strict();
+  plannedComposition: PlannedSiloWorkingCompositionSchema.optional(),
+}).strict().superRefine((copy, context) => {
+  const planned = copy.plannedComposition;
+  if (!planned) return;
+  const keys = planned.members.map(member => member.memberKey);
+  const anchors = planned.members.map(member => JSON.stringify([member.anchorKind, member.anchorId]));
+  const orders = planned.members.map(member => member.order);
+  const subjects = planned.members.filter(member => member.anchorKind === "subject_keyword").map(member => member.anchorId);
+  const proofs = planned.subjectProofs.map(proof => proof.keywordId);
+  if (new Set(proofs).size !== proofs.length || subjects.length !== proofs.length || subjects.some(id => !proofs.includes(id))) context.addIssue({ code: "custom", path: ["plannedComposition", "subjectProofs"], message: "Cada Assunto planejado precisa da versão do pacote aprovado que sustentou a decisão." });
+  if (new Set(keys).size !== keys.length || new Set(anchors).size !== anchors.length || new Set(orders).size !== orders.length) context.addIssue({ code: "custom", path: ["plannedComposition", "members"], message: "Membros, âncoras e posições devem ser únicos." });
+  if (planned.members.some((member, index) => index > 0 && planned.members[index - 1].order >= member.order)) context.addIssue({ code: "custom", path: ["plannedComposition", "members"], message: "Os membros precisam seguir a ordem declarada." });
+  if (planned.members.some(member => member.memberKey !== plannedSiloMemberKey(copy.brandId, member.anchorKind, member.anchorId))) context.addIssue({ code: "custom", path: ["plannedComposition", "members"], message: "A chave de membro deve corresponder à marca e à âncora." });
+  const pillars = planned.members.filter(member => member.role === "Pilar");
+  if (pillars.length !== 1) context.addIssue({ code: "custom", path: ["plannedComposition", "members"], message: "A composição exige exatamente um Pilar." });
+  if (copy.articleRefs.length || copy.pillarSuggestionArticleId !== null || copy.pillarSelection !== null || copy.supportArticleIds.length || copy.exclusions.length) context.addIssue({ code: "custom", path: ["plannedComposition"], message: "A composição planejada não pode misturar referências a versões de artigos." });
+  if (planned.pillarSelection) {
+    const selected = planned.pillarSelection;
+    const approvedKeys = [...new Set(selected.decidedOverMemberKeys)].sort();
+    if (pillars[0]?.memberKey !== selected.memberKey || selected.decidedOverMemberKeys.length !== approvedKeys.length || JSON.stringify(approvedKeys) !== JSON.stringify([...keys].sort())) context.addIssue({ code: "custom", path: ["plannedComposition", "pillarSelection"], message: "A decisão do Pilar deve cobrir exatamente a composição planejada." });
+  }
+});
 export type SiloWorkingCopyState = z.infer<typeof SiloWorkingCopyStateSchema>;
+
+/** Monta a mesma cópia do Silo a partir da composição lida; não grava nem aprova. */
+export function buildPlannedSiloWorkingCopy(input: {
+  brandId: string;
+  territoryRef: string;
+  name: string;
+  slug: string;
+  existingSiloId: string | null;
+  composition: Pick<z.infer<typeof PlannedSiloWorkingCompositionSchema>, "source" | "members" | "subjectProofs">;
+  pillarSelection: z.infer<typeof PlannedSiloPillarSelectionSchema> | null;
+}): SiloWorkingCopyState {
+  return SiloWorkingCopyStateSchema.parse({
+    workingCopyRef: buildSiloWorkingCopyRef(input.territoryRef),
+    brandId: input.brandId,
+    territoryRef: input.territoryRef,
+    name: input.name,
+    slug: input.slug,
+    formationStatus: input.pillarSelection ? "ready_for_review" : "draft",
+    existingSiloId: input.existingSiloId,
+    articleRefs: [], pillarSuggestionArticleId: null, pillarSelection: null, supportArticleIds: [], exclusions: [], reasons: [], conflicts: [],
+    plannedComposition: { source: input.composition.source, members: input.composition.members, subjectProofs: input.composition.subjectProofs, pillarSelection: input.pillarSelection },
+  });
+}
 
 export const SiloWorkingCopyPayloadSchema = z.object({
   contractVersion: z.literal(SILO_WORKING_COPY_CONTRACT_VERSION),

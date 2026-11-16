@@ -1860,13 +1860,20 @@ function planArticleImprovementsCore(input: {
     for (const id of pelaCopy.filter(id => id !== principalId || principalId === target.primaryId)) reasons.push(`${COPY_LINE_LABEL}: ${copyReason(byId.get(id)!, daLinhaDeCopy(id)!.match, linha?.principalText ?? null)}`);
     if (desconhecido) reasons.push(PRINCIPAL_SUBJECT_UNKNOWN_REASON);
     if (porVolume && principalId === target.primaryId) reasons.push(volumeZeroWithoutCandidateReason(target, old));
-    const mudou = added.length || principalId !== target.primaryId || formaOPrimeiro;
+    // O plano também pode precisar de gravação quando a principal é Livre.
+    // Isso não escolhe outra principal: só coloca a atualização do plano na
+    // mesma prévia e sujeita a gravação às validações normais do servidor.
+    const mudou = added.length || principalId !== target.primaryId || formaOPrimeiro || Boolean(target.declaredPlanPending && principalId);
     /*
      * 2026-10-17 · "ADEQUADO" SÓ COM REFORÇO SUFICIENTE (amarelo: "Instalação de internet…" saiu "Já formado e adequado"
      * com 1 keyword só — a busca não tinha achado reforço). Com vaga e sem nenhuma entrada, a linha diz que não achou e
      * por quê; o status continua o de sempre (nada a gravar, ou o primeiro DNA só com a principal).
      */
-    const ficaAdequado = Boolean(target.territoryRef) && !(mudou && principalId) && Boolean(old?.volumeValidated);
+    // Uma principal com volume zero, já presente no ArticleDNA, não deixa de
+    // existir só porque não foi encontrada uma troca ou reforço nesta leitura.
+    // Volume desconhecido continua recusado; não inventamos ArticleDNA novo.
+    const zeroJaFormado = target.kind === "subject" && porVolume && Boolean(principalId) && principalId === target.primaryId && target.memberIds.includes(principalId!);
+    const ficaAdequado = Boolean(target.territoryRef) && !(mudou && principalId) && (Boolean(old?.volumeValidated) || zeroJaFormado);
     const vagas = IMPROVEMENT_ARTICLE_MAX_KEYWORDS - new Set([...members, ...(principalId ? [principalId] : [])]).size;
     if (!added.length && principalId === target.primaryId && vagas > 0 && (ficaAdequado || formaOPrimeiro)) reasons.push(noReinforcementReason(linhaDeCopy.rejected.get(target.id) ?? [], byId));
     const lacuna = added.length && vagas > 0 ? entityGapReason(target, linhaDeCopy.lines.get(target.id), members, byId) : null;
@@ -1877,7 +1884,7 @@ function planArticleImprovementsCore(input: {
       if (k && item.motivo.startsWith("contradiz o Assunto")) reasons.push(`“${k.keyword}” (${k.volume}) fica fora: ${item.motivo}.`);
     }
     return { targetId: target.id, kind: target.kind, theme: target.theme, currentPrimaryId: target.primaryId, principalId, memberIds: members, addIds: added, removeIds, transfers: added.filter(id => byId.get(id)?.territoryRef !== target.territoryRef), angle: angleOf(byId.get(principalId ?? "")), exclusions: [], reasons,
-      status: !target.territoryRef ? "insufficient_evidence" : mudou && principalId ? "ready" : old?.volumeValidated ? "adequate" : eligible.some(e => e.targetId === target.id) ? "no_alternative" : "insufficient_evidence",
+      status: !target.territoryRef ? "insufficient_evidence" : mudou && principalId ? "ready" : ficaAdequado ? "adequate" : eligible.some(e => e.targetId === target.id) ? "no_alternative" : "insufficient_evidence",
       evidenceBasis: mudou ? pelaCopy.length ? "copy_line" : proof && proof.sharedPages >= 2 ? "serp" : "editorial_and_candidate_serp" : null,
     } as ImprovementProposal;
   });

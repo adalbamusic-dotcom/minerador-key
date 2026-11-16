@@ -1390,6 +1390,10 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       for (const entry of resolvido.eligible) {
         contexto[entry.articleId] = { silo: entry.silo, internalLinks: entry.internalLinks, serpProvenance: null };
       }
+      // Um artigo sem contexto resolvido já foi recusado acima. Não enviá-lo
+      // novamente ao servidor, onde produziria uma segunda recusa para a mesma
+      // linha e poderia impedir o restante do lote de ser interpretado.
+      const elegiveisParaEnvio = candidates.filter(version => Boolean(contexto[version.payload.articleId]));
 
       const hydrationByArticleId: Record<string, RadarHydrationSnapshot> = {};
       for (const version of candidates) {
@@ -1433,7 +1437,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         };
         void impedidos;
       }
-      const escrita = await sendWorkflowCommand({ action: "import_radar", brandId: selectedBrandId, articleVersions: candidates, versionEvents: workspace.versionEvents.filter(event => candidates.some(version => version.versionId === event.versionId)), hydrationByArticleId, handoffContext: contexto }, updateWorkspace);
+      if (!elegiveisParaEnvio.length) return { imported: 0, skipped: 0, blocked: resolvido.blocked };
+      const escrita = await sendWorkflowCommand({ action: "import_radar", brandId: selectedBrandId, articleVersions: elegiveisParaEnvio, versionEvents: workspace.versionEvents.filter(event => elegiveisParaEnvio.some(version => version.versionId === event.versionId)), hydrationByArticleId, handoffContext: contexto }, updateWorkspace);
       /*
        * Servidor recusou: NADA de estado local.
        *
@@ -1447,7 +1452,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
           skipped: 0,
           blocked: [
             ...resolvido.blocked,
-            ...candidates.map(version => ({
+            ...elegiveisParaEnvio.map(version => ({
               articleId: version.payload.articleId,
               label: version.payload.promise || version.payload.articleId,
               reasons: [escrita.message],
@@ -1469,7 +1474,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         reasons: [recusa.reason],
       }));
       const importados = remote.length;
-      return { imported: importados, skipped: Math.max(0, candidates.length - importados - bloqueados.length), blocked: [...resolvido.blocked, ...bloqueados] };
+      return { imported: importados, skipped: Math.max(0, elegiveisParaEnvio.length - importados - bloqueados.length), blocked: [...resolvido.blocked, ...bloqueados] };
     },
     importApprovedSiloPagesToRadar: siloPageIds => {
       const candidates = approvedSiloPageVersions(workspace.siloPageVersions, workspace.versionEvents).filter(version => siloPageIds.includes(version.payload.siloPageId));

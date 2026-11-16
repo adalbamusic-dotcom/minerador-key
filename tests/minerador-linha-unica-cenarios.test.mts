@@ -1319,11 +1319,12 @@ function marcaCom1001(): { db: LinhaUnicaFakeDb; alvo: string } {
   return { db: new LinhaUnicaFakeDb({ minerador_keywords: rows, editorial_workflow_items: [] }, { maxRows: 1000 }), alvo: "internet fibra óptica" };
 }
 
-test("E-2 · hoje: com 1.001 vivas (max_rows = 1000), `importKeywordsWithCore` não vê a 1.001ª e cria duplicata; os núcleos irmãos paginam e reconhecem", async () => {
+test("E-2 · com 1.001 vivas, importação e núcleos irmãos reconhecem a existente", async () => {
   const { db, alvo } = marcaCom1001();
   const resultado = await importar(db, [alvo]);
-  assert.equal(resultado.created, 1, "hoje: duplicata");
-  assert.equal(db.rows("minerador_keywords").filter(row => normalizeKeyword(row.keyword) === normalizeKeyword(alvo)).length, 2);
+  assert.equal(resultado.created, 0);
+  assert.equal(resultado.existing, 1);
+  assert.equal(db.rows("minerador_keywords").filter(row => normalizeKeyword(row.keyword) === normalizeKeyword(alvo)).length, 1);
   const irmao = marcaCom1001();
   const previa = await importSubjectsWithCore({ brandId: BRAND, actorUserId: ACTOR, supabase: client(irmao.db), mode: "preview", source: "manual", items: [{ keyword: alvo }] });
   assert.ok(previa.ok && previa.rows[0].classification === "existing_without_subject", "o import de Assunto pagina");
@@ -1333,10 +1334,19 @@ test("E-2 · hoje: com 1.001 vivas (max_rows = 1000), `importKeywordsWithCore` n
   assert.ok(lida.ok && lida.counts.created === 0, "a Pesquisa por Assunto pagina");
 });
 
-test("E-2 · acima de 1.000 vivas, o import comum reconhece a existente", { todo: "vermelho até a F2 (E-2): `importKeywordsWithCore` lê as vivas com o leitor paginado (o índice único é decisão do dono)" }, async () => {
+test("E-2 · acima de 1.000 vivas, o import comum reconhece a existente", async () => {
   const { db, alvo } = marcaCom1001();
   const resultado = await importar(db, [alvo]);
   assert.equal(resultado.created, 0);
+});
+
+test("E-2 · limite menor do servidor não esconde keyword em página posterior", async () => {
+  const { db, alvo } = marcaCom1001();
+  db.maxRows = 137;
+  const resultado = await importar(db, [alvo]);
+  assert.equal(resultado.created, 0);
+  assert.equal(resultado.existing, 1);
+  assert.equal(db.rows("minerador_keywords").filter(row => normalizeKeyword(row.keyword) === normalizeKeyword(alvo)).length, 1);
 });
 
 /* ============================================== E-3 · import pelo site */

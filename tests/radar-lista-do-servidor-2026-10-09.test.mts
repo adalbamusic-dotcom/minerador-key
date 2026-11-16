@@ -191,5 +191,5 @@ test("4 · o cliente confere o readback só dos que entraram e devolve cada recu
   assert.match(contexto, /recusas\.filter\(recusa => recusa\.code !== "already_in_radar"\)/);
   assert.match(contexto, /blocked: \[\.\.\.resolvido\.blocked, \.\.\.bloqueados\]/);
   /* "Já está no Radar" não é bloqueio: entra na conta dos já existentes. */
-  assert.match(contexto, /skipped: Math\.max\(0, candidates\.length - importados - bloqueados\.length\)/);
+  assert.match(contexto, /skipped: Math\.max\(0, elegiveisParaEnvio\.length - importados - bloqueados\.length\)/);
 });

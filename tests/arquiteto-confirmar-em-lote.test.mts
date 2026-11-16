@@ -12,6 +12,7 @@ import {
 import { buildTerritorialLandscape } from "../lib/arquiteto/territorial-landscape.ts";
 import type { SiloAssignmentKeyword } from "../lib/arquiteto/silo-assignment.ts";
 import type { TerritoryCandidate } from "../lib/arquiteto/territory.ts";
+import { classifyProposalAssignment, keepPublishedTerritory, publishedKeywordIdsForBrand } from "../lib/arquiteto/proposal-confirmability.ts";
 
 /**
  * CONFIRMAR EM LOTE — as mesmas garantias, sem 200 idas e voltas.
@@ -132,6 +133,41 @@ test("keyword publicada continua protegida contra remanejo no lote", () => {
   assert.equal(plano.refused[0]?.keywordId, "kw-publicada");
 });
 
+test("Confirmar preserva a publicada já associada mesmo quando a proposta declara outro Silo pelo site", () => {
+  const atual = "territory:22222222-2222-4222-8222-222222222222";
+  const decisao: BatchSiloDecision = { keywordId: "publicada", target: { kind: "territory", territoryRef: REF }, declaredBySite: true };
+  const keyword = keywordBase("publicada", { isPublished: true, currentTerritoryRef: atual });
+  // A exceção declarada pelo site deixa o writer planejar a movimentação:
+  // por isso a guarda do botão também precisa valer na lista enviada ao lote.
+  assert.equal(planejar([decisao], () => keyword).writes.length, 1);
+  const manter = keepPublishedTerritory({ published: true, current: atual, destination: REF });
+  const filtrado = planejar(manter ? [] : [decisao], () => keyword);
+  assert.equal(manter, true);
+  assert.equal(filtrado.writes.length, 0);
+  assert.equal(keepPublishedTerritory({ published: true, current: atual, destination: null }), true);
+  assert.equal(keepPublishedTerritory({ published: true, current: atual, destination: atual }), false);
+  assert.equal(keepPublishedTerritory({ published: true, current: null, destination: REF }), false);
+  assert.equal(keepPublishedTerritory({ published: false, current: atual, destination: REF }), false);
+});
+
+test("a tabela e o contador preservam publicada com Silo, sem barrar publicada sem Silo ou misturar marcas", () => {
+  const fixas = new Set(publishedKeywordIdsForBrand(BRAND, [
+    { id: "com-silo", brand_id: BRAND, isPublished: true },
+    { id: "sem-silo", brand_id: BRAND, isPublished: true },
+    { id: "outra-marca", brand_id: "brand-2", isPublished: true },
+    { id: "nao-publicada", brand_id: BRAND, isPublished: false },
+  ]));
+  const estados = [
+    { id: "com-silo", atual: "territory:outro" },
+    { id: "sem-silo", atual: null },
+    { id: "outra-marca", atual: "territory:outro" },
+    { id: "nao-publicada", atual: "territory:outro" },
+  ].map(item => ({ ...item, estado: classifyProposalAssignment({ destination: REF, destinationRejected: false, currentTerritoryRef: item.atual, fixed: fixas.has(item.id) }) }));
+  assert.deepEqual(estados.map(item => item.estado), ["fixed_in_article", "confirmable", "confirmable", "confirmable"]);
+  assert.equal(estados.filter(item => item.estado === "confirmable").length, 3);
+  assert.equal(fixas.has("outra-marca"), false);
+});
+
 test("a mesma keyword duas vezes no lote grava uma vez só", () => {
   /*
    * Duas gravações com o mesmo lock: a segunda falharia por lock vencido e
@@ -188,6 +224,9 @@ test("o Confirmar usa o lote, e não um await por keyword", () => {
   const corpo = corpoDe("const confirmArchitecture = async");
   assert.match(corpo, /applySiloDecisionsInBatch\(/);
   assert.equal(corpo.includes("await applySiloDecision("), false, "o Confirmar voltou a gravar uma keyword por vez");
+  assert.match(corpo, /manterPublicada\(assignment\.keywordId, territoryRef\).*sairiaDoSilo/);
+  assert.match(corpo, /manterPublicada\(item\.keywordId, null\).*sairiaDoSilo/);
+  assert.doesNotMatch(corpo, /Object\.assign\(plan,/);
 });
 
 test("o lote relê o workspace UMA vez, fora do laço de gravação", () => {

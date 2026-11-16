@@ -1,4 +1,5 @@
 "use client";
+import { InfoHint } from "@/components/info-hint";
 import type { PlanSheetRow } from "@/lib/arquiteto/plan-article-sheet";
 import type { PlanArticleSheetController } from "./plan-article-sheet";
 
@@ -104,7 +105,7 @@ export function ArticlesFormationBar({
           if (doPlano.length) planSheet.start("processArticles", doPlano);
         })(); }}
         disabled={Boolean(motivoProcessar)}
-        title={`${stale ? `${ARTICLES_STALE_TITLE} ` : ""}${motivoProcessar ?? `Passo 1 · lê o plano e os DNAs, busca o reforço (lista da marca e Google Ads, grátis) e coleta a SERP que falta, com o custo antes. Nada é gravado.`}`}
+        title={`${stale ? `${ARTICLES_STALE_TITLE} ` : ""}${motivoProcessar ?? `Passo 1 · lê o plano e os DNAs, busca o reforço (lista da marca e Google Ads, grátis) e coleta a SERP que falta, com o custo antes. Não grava ArticleDNA; pode registrar a execução e sugestões.`}`}
         data-testid="architect-articles-top-process"
         data-stale={stale ? "true" : undefined}
         data-step="process"
@@ -113,6 +114,7 @@ export function ArticlesFormationBar({
       >
         {formationBusy ? "Processando…" : processou || (regulares > 0 && processed) ? "Reprocessar artigos" : "Processar artigos"}
       </button>
+      <InfoHint title="Processar artigos" description="Selecione os artigos para preparar o reforço e a SERP. A etapa pode registrar a execução e sugestões; o ArticleDNA aguarda confirmação." />
       <button
         type="button"
         onClick={() => { void (async () => {
@@ -128,6 +130,7 @@ export function ArticlesFormationBar({
       >
         Concluir formação
       </button>
+      <InfoHint title="Concluir formação" description="Confira a prévia e confirme para gravar. Para retomar o fechamento interrompido, selecione os artigos do Silo e use este mesmo botão." />
       <button
         type="button"
         onClick={onToggleImprovement}
@@ -142,6 +145,7 @@ export function ArticlesFormationBar({
       >
         {"Melhorar publicados…"}
       </button>
+      <InfoHint title="Melhorar publicados" description="Abre a revisão de publicados e artigos já formados. Confira a proposta e os custos antes de confirmar." />
       <span className={`text-sm ${selectionScope.reason && regulares > 0 ? "text-warning" : "text-text-muted"}`} data-testid="architect-articles-selection-count">
         {total === 0
           ? selectionScope.reason

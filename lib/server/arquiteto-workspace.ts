@@ -61,14 +61,32 @@ export async function readArticleVersionEvents(context: PipelineContext, version
   const ids = [...new Set(versionIds)];
   const eventos: Array<{ versionId: string; status: string; occurredAt: string | null; reason: string | null }> = [];
   for (let inicio = 0; inicio < ids.length; inicio += 100) {
-    const result = await context.supabase
-      .from("editorial_version_status_events")
-      .select("version_id,status,occurred_at,reason")
-      .in("version_id", ids.slice(inicio, inicio + 100))
-      .order("occurred_at", { ascending: true });
-    if (result.error) readFailure(result.error);
-    for (const row of (result.data || []) as Array<{ version_id?: unknown; status?: unknown; occurred_at?: unknown; reason?: unknown }>) {
-      eventos.push({ versionId: String(row.version_id ?? ""), status: String(row.status ?? ""), occurredAt: typeof row.occurred_at === "string" ? row.occurred_at : null, reason: typeof row.reason === "string" ? row.reason : null });
+    let offset = 0;
+    let total: number | null = null;
+    const vistos = new Set<string>();
+    for (;;) {
+      const result = await context.supabase
+        .from("editorial_version_status_events")
+        .select("id,version_id,status,occurred_at,reason", { count: "exact" })
+        .in("version_id", ids.slice(inicio, inicio + 100))
+        .order("occurred_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, offset + 999);
+      if (result.error) readFailure(result.error);
+      if (typeof result.count !== "number" || (total !== null && total !== result.count)) {
+        throw new PipelineRuntimeError("QUERY_FAILURE", "Não foi possível confirmar a leitura integral dos eventos editoriais.", 503);
+      }
+      total = result.count;
+      const rows = (result.data || []) as Array<{ id?: unknown; version_id?: unknown; status?: unknown; occurred_at?: unknown; reason?: unknown }>;
+      for (const row of rows) {
+        const id = typeof row.id === "string" ? row.id : "";
+        if (!id || vistos.has(id)) throw new PipelineRuntimeError("QUERY_FAILURE", "A leitura dos eventos editoriais ficou incompleta ou repetida.", 503);
+        vistos.add(id);
+        eventos.push({ versionId: String(row.version_id ?? ""), status: String(row.status ?? ""), occurredAt: typeof row.occurred_at === "string" ? row.occurred_at : null, reason: typeof row.reason === "string" ? row.reason : null });
+      }
+      offset += rows.length;
+      if (offset === total) break;
+      if (!rows.length || offset > total) throw new PipelineRuntimeError("QUERY_FAILURE", "A leitura dos eventos editoriais ficou incompleta.", 503);
     }
   }
   return eventos.sort((left, right) => (left.occurredAt ? Date.parse(left.occurredAt) : 0) - (right.occurredAt ? Date.parse(right.occurredAt) : 0));
@@ -634,9 +652,10 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
     throw new PipelineRuntimeError("CONFLICT", "O workflow canônico referencia uma keyword que não está disponível na mesma Brand.", 409);
   }
 
-  const articleDnasVigentes = latestByEntity(artifacts.articleDnas).filter(version =>
-    version.payload.keywordReferences.some(reference => keywordIds.has(reference.keywordId)),
-  );
+  // A rejeição deve ser lida também quando a keyword original já foi apagada:
+  // filtrar antes da leitura escondia o descarte do artigo e deixava sua
+  // formação antiga comandando o fechamento do Silo.
+  const articleDnasVigentes = latestByEntity(artifacts.articleDnas);
   /*
    * A MESA APLICA O EVENTO `rejected` (2026-10-12). "Retirar artigo do Silo"
    * rejeita a versão vigente por evento; a linha continua `approved`. O artigo
@@ -649,7 +668,9 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
     events: await readArticleVersionEvents(context, articleDnasVigentes.map(version => version.versionId)),
     workflowItems: workflowRows.map(workflowSnapshot),
   });
-  const articleDnas = liberacao.articleDnas;
+  const articleDnas = liberacao.articleDnas.filter(version =>
+    version.payload.keywordReferences.some(reference => keywordIds.has(reference.keywordId)),
+  );
   // A elegibilidade é estrutural: status canônico, Brand, lifecycle e
   // duplicação. Nenhuma dimensão semântica participa desta decisão.
   const importEligibility = resolveCanonicalMineradorArquitetoImportEligibility({
@@ -709,6 +730,7 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
     siloPages,
     aiReviews,
     statuses: liberacao.statuses.filter(item => relatedVersionIds.has(item.versionId)),
+    rejectedArticleIds: liberacao.rejected.map(item => item.articleId),
     brandSiloCatalog: readBrandSiloCatalog(brandRow.data?.silos_existentes),
     // Aditivo, só quando há: os artigos cuja versão vigente foi rejeitada e as keywords liberadas.
     ...(liberacao.rejected.length ? { rejectedArticles: liberacao.rejected } : {}),

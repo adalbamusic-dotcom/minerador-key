@@ -354,6 +354,26 @@ test("§15 passo 3a · Travada ou Livre com volume: nunca troca, mesmo com candi
   }
 });
 
+test("principal de volume zero já formada sem candidata não vira recusa; plano pendente continua exigindo confirmação", () => {
+  const { k, t } = doPlano("stream", "quantos mega para streaming", "Quantos mega para Netflix e YouTube", "quantos-mega-netflix-youtube-streaming", "streaming");
+  const formada = { ...t, planRole: "Suporte" as const, memberIds: [k.id], slug: t.planSlug! };
+  const [inalterada] = planArticleImprovements({ targets: [formada], keywords: [k], evidence: [] });
+  assert.equal(inalterada.status, "adequate");
+  assert.equal(inalterada.principalId, k.id);
+  assert.match(inalterada.reasons.join(" "), /Volume 0 sem candidata/);
+  const [pendente] = planArticleImprovements({ targets: [{ ...formada, declaredPlanPending: true }], keywords: [k], evidence: [] });
+  assert.equal(pendente.status, "ready", "papel/escopo pendente entra na prévia, sem trocar a principal");
+  assert.equal(pendente.principalId, k.id);
+  const [semArtigo] = planArticleImprovements({ targets: [{ ...formada, memberIds: [] }], keywords: [k], evidence: [] });
+  assert.notEqual(semArtigo.status, "adequate", "uma composição sem ArticleDNA não vira artigo formado");
+  const [desconhecido] = planArticleImprovements({ targets: [formada], keywords: [{ ...k, volumeUnknown: true }], evidence: [] });
+  assert.notEqual(desconhecido.status, "adequate", "volume desconhecido não se confunde com zero medido");
+  const [semSilo] = planArticleImprovements({ targets: [{ ...formada, territoryRef: null }], keywords: [k], evidence: [] });
+  assert.notEqual(semSilo.status, "adequate", "a ausência de Silo não é ignorada");
+  const [semPrincipal] = planArticleImprovements({ targets: [{ ...formada, primaryId: null }], keywords: [k], evidence: [] });
+  assert.notEqual(semPrincipal.status, "adequate", "o artigo não fica adequado sem principal");
+});
+
 test("§15 · o teto de seis vale para o artigo do plano (a principal conta) e a busca nova só semeia do plano e do DNA", () => {
   const { k, t } = doPlano("l3", "quantos mega de internet preciso", "300, 500, 600 Mega ou 1 Giga: quantos Mega você realmente precisa?", "quantos-mega-de-internet-preciso", "quantos mega", {});
   const lista = Array.from({ length: 8 }, (_, i) => daLista(`q${i}`, `quantos mega de internet preciso ${["para jogar", "para home office", "em casa", "para streaming", "para 4 pessoas", "para trabalhar", "para estudar", "no wifi"][i]}`, 100 + i));

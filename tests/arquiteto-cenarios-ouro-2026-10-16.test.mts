@@ -731,8 +731,8 @@ test("C17 · amarelo com 4 Livres medidas sem número de buscas (o Pilar entre e
   assert.equal(planRowDefinition(linhas[1]).reason, null);
   // Na tabela de sempre: o artigo da mesa que é do plano lê as MESMAS funções (a linha do plano sem artigo também).
   const mesaDaTela = codigoSemComentarios("modules/arquiteto/arquiteto-workspace.tsx");
-  assert.match(mesaDaTela, /const linhaDoPlanoDaLinha = articleMode \? planRowOfArticle\(art\) : null;/);
-  assert.match(mesaDaTela, /if \(linhaDoPlanoDaLinha\) return <span data-testid="architect-silo-role-cell"[^>]*>\{planRowRoleLabel\(linhaDoPlanoDaLinha\)\}<\/span>;/);
+  assert.match(mesaDaTela, /const linhaDoPlanoDaLinha = articleMode \|\| linksMode \? planRowOfArticle\(art\) : null;/);
+  assert.match(mesaDaTela, /<SiloRoleCell role=\{papel\} plan=\{linhaDoPlanoDaLinha\} linksMode=\{linksMode\}/);
   assert.match(mesaDaTela, /\{definicaoDoPlano \? <PlanRowDefinitionCell definition=\{definicaoDoPlano\} \/> : articleDnaVersion \?/);
   assert.match(codigoSemComentarios("modules/arquiteto/plan-article-sheet.tsx"), /case "articleDefinition":\s*return <td key=\{columnId\} className="border-r border-divider px-2 py-2 text-center"><PlanRowDefinitionCell definition=\{planRowDefinition\(row\)\} \/><\/td>;/);
 

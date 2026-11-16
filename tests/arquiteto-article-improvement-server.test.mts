@@ -26,7 +26,7 @@ const URL_DE_IDENTIDADE = "https://adalbapro.com.br/captacao-de-pacientes/como-c
 const URL_FORA_DA_IDENTIDADE = "https://adalbapro.com.br/captacao-de-pacientes/captacao-de-pacientes-para-clinica-de-estetica";
 let url = URL_DE_IDENTIDADE;
 const semantic = { entidade_central: "captação de pacientes", problema_percebido: "poucos agendamentos", publico: "gestores de clínicas", resultado_desejado: "ampliar agendamentos", intencao_principal: "Informativa", modificadores: "agenda da clínica" };
-let rows: any[], articles: any[], journal: any[], assessments: any[], marker: any;
+let rows: any[], articles: any[], journal: any[], assessments: any[], marker: any, siloDnas: any[];
 let paid = 0, plansMissing = 0, failReadback = false, failPatch = false, incomplete = false, wrongRole = false;
 let external = false, qualification: string[] = [];
 // Leitura da IA: keywords com SERP sem páginas em comum, ordem dos passos e lentes que só chegam depois de pagar.
@@ -63,11 +63,11 @@ const context: any = { brandId, actorUserId, module: "arquiteto", action: "edit"
 const runtime: any = { context, authorize: async (module: string, action: string) => ({ ...context, module, action }) };
 // 2026-10-14 (noite) · "Consolidar o Silo do plano" importa também criar/atualizar território (nunca chamados aqui: o Silo do plano já está confirmado).
 mock.module("../lib/server/arquiteto-territory-store.ts", { namedExports: { listTerritoryWorkflowItems: async () => [{territoryRef:territory,lockVersion:1,territory:{name:"Wi-Fi e fibra óptica",lifecycleStatus:"confirmed",centralEntity:"clínica de estética",macroIntent:"Informativa",slugState:{publishedSlug:"captacao-de-pacientes",confirmed:null,proposals:[]}}}], createTerritoryWorkflowItem: async () => { throw new Error("criar território não é esperado neste teste"); }, updateTerritoryWorkflowItem: async () => { throw new Error("atualizar território não é esperado neste teste"); } } });
-const workspace = () => ({ workflowItems: [], keywords: clone(rows), articleDnas: clone(articles), siloDnas: [] });
+const workspace = () => ({ workflowItems: [], keywords: clone(rows), articleDnas: clone(articles), siloDnas: clone(siloDnas) });
 function setup(paginaUrl = URL_DE_IDENTIDADE) {
   url = paginaUrl;
   gruposDasKeywords = new Map();
-  journal=[]; articles=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];disjoint=new Set();events=[];incompleteUntilPaid=false;diverge=new Set();legacyVolumes=new Map();legacyAsked=[];legacyFail=false;measured=[];logicRan=[];supportBasisPrincipal=null;noSerpPrincipal=null;medicoesProvider=[];replays=[];knownInBrand=new Map();
+  journal=[]; articles=[]; siloDnas=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];disjoint=new Set();events=[];incompleteUntilPaid=false;diverge=new Set();legacyVolumes=new Map();legacyAsked=[];legacyFail=false;measured=[];logicRan=[];supportBasisPrincipal=null;noSerpPrincipal=null;medicoesProvider=[];replays=[];knownInBrand=new Map();
   rows = [oldId,newId].map((id,i) => ({ id, brand_id: brandId, keyword: i ? "captação de pacientes para clínica de estética" : "como captar clientes para clínica de estética", intent: "Informativa", volume_search: i ? 50 : null, volume_source: i ? "google_ads" : null, analise_semantica: semantic, isPublished: !i, publishedUrl: !i ? url : undefined, primaryKeywordPolicy: !i ? "reviewable" : "free", territoryRef: i ? "territory:other" : territory, keywordDnaRef: { entityId: id, versionId: `${id}:v1`, contentHash: `sha256:${"a".repeat(64)}` }, canonicalWorkflow: { id: `workflow-${id}`, lockVersion: 1, payload: { semanticQualification: { intent: "Informativa", semanticState: "conclusive" }, approvedDna: { analiseSemantica: semantic } } } }));
 }
 mock.module("../lib/arquiteto/canonical-workspace.ts", { namedExports: { buildCanonicalWorkflowWorkspaceItems: (_w: any,k: any) => k } });
@@ -226,6 +226,26 @@ test("readback failure never announces material improvement and keeps the accept
 });
 test("write failure does not emit approved DNA",async()=>{
   setup();const run=await prepare();failPatch=true;const result=await apply(run);assert.equal(result.outcomes[0].status,"failed");assert.equal(articles.length,0);assert.equal(paid,0);
+});
+test("Silo planejado recusa o apply antes de alterar SERP, assignments ou ArticleDNA enquanto o vínculo transacional não existe", async()=>{
+  setup(URL_FORA_DA_IDENTIDADE);
+  const run=await prepare();
+  assert.equal(run.proposals[0].status,"ready",JSON.stringify(run.proposals));
+  siloDnas=[{payload:{brandId,territoryRef:territory,siloId:"silo-plan",compositionBasis:"planned_members"}}];
+  const before={rows:clone(rows),articles:clone(articles),assessments:clone(assessments),marker:clone(marker)};
+  const result=await apply(run);
+  assert.equal(result.outcomes[0].status,"failed");
+  assert.match(result.outcomes[0].message,/estrutura planejada.*validação transacional/);
+  assert.deepEqual({rows,articles,assessments,marker},before);
+  assert.equal(paid,0);
+});
+test("a guarda do Silo planejado não bloqueia o fluxo legado por Silo de outra marca", async()=>{
+  setup(URL_FORA_DA_IDENTIDADE);
+  const run=await prepare();
+  siloDnas=[{payload:{brandId:"outra-marca",territoryRef:territory,siloId:"silo-outro",compositionBasis:"planned_members"}}];
+  const result=await apply(run);
+  assert.equal(result.outcomes[0].status,"improved",JSON.stringify(result.outcomes));
+  assert.equal(articles.length,1);
 });
 test("changed architecture rejects cost authorization before any provider call",async()=>{
   setup();plansMissing=1;const run=await prepare();rows[0].keyword="Changed after preview";await assert.rejects(()=>handleArticleImprovement(runtime,{brandId,action:"collect",runId:run.runId,decisionHash:run.decisionHash,authorizedCostUsd:run.costs.estimatedCostUsd.max}),/arquitetura mudou/);assert.equal(paid,0);
@@ -1015,6 +1035,29 @@ function planSheetScenario(lock?: "locked" | "free") {
   const apoio = linhaDaMesa({ id: newId, keyword: "internet e wi-fi qual a diferença", brandId, semantic: { ...semantic, subject_discovery: { version: 1, searches: [], subjectKeywordIds: [oldId] } } });
   rows[1] = { ...rows[1], ...apoio, volume_search: 50, volume_source: "google_ads", territoryRef: territory, canonicalWorkflow: { ...(apoio.canonicalWorkflow as object), id: `workflow-${newId}`, lockVersion: 1 } };
 }
+
+test("planilha relê a SERP da formação sem alterações antes de considerá-la pronta", async () => {
+  planSheetScenario("locked");
+  rows[0].volume_search = 30; rows[0].volume_source = "google_ads";
+  const primeira = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
+  await handleArticleImprovement(runtime, { brandId, action: "apply", runId: primeira.runId, decisionHash: primeira.decisionHash, targetIds: [oldId] });
+  assert.equal(articles.length, 1);
+  // Sem uma SERP no cache, nem o plano nem a prévia podem declarar que o
+  // artigo já está pronto apenas porque não apareceu alteração editorial.
+  noSerpPrincipal = oldId; assessments = []; plansMissing = 4;
+  const leitura = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
+  const proposta = leitura.proposals.find(p => p.targetId === oldId)!;
+  assert.equal(proposta.needsValidation, true, JSON.stringify(proposta));
+  assert.equal(proposta.status, "insufficient_evidence");
+  assert.equal(leitura.costs.paidQueries, 4, "a coleta é mostrada antes do aceite");
+  assert.equal(paid, 0, "preparar não executa chamada paga");
+  assert.equal(articles.length, 1, "não regrava o ArticleDNA aprovado");
+  noSerpPrincipal = null; plansMissing = 0;
+  const comCache = await handleArticleImprovement(runtime, { brandId, action: "prepare", group: planGroupId, targetIds: [oldId], origin: "plan_sheet" });
+  assert.equal(comCache.proposals.find(p => p.targetId === oldId)!.status, "adequate", JSON.stringify(comCache.proposals));
+  assert.equal(paid, 0);
+  assert.equal(articles.length, 1);
+});
 const minerador = () => ({ measured: measured.length, logic: logicRan.length, qualification: qualification.length, replays: replays.length, medicoes: medicoesProvider.length });
 
 test("F5 · Trocar principal (livre): prévia com a escolha do humano, uma confirmação, nova principal no ArticleDNA e nada no Minerador", async () => {

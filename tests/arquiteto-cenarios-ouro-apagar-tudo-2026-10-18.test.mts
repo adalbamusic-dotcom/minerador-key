@@ -177,6 +177,28 @@ const territorio = (db: Db) => db.rows("editorial_workflow_items").find(row => r
 const rejeitadas = (db: Db) => db.rows("editorial_version_status_events").filter(row => row.status === "rejected").map(row => String(row.version_id)).sort();
 const versoesVigentesDaCor = (cor: Cor) => [...cor.artigos.map((_, n) => uuid("aaaaaaa1", n + 1)), uuid("dddddddd", 2), uuid("eeeeeeee", 2)].sort();
 
+for (const tabela of ["internal_link_graphs", "content_documents"] as const) {
+  test(`a prévia da exclusão não esconde falha ao ler ${tabela}`, async () => {
+    const db = await marcaComSilo(AZUL);
+    const normal = db.from.bind(db);
+    db.from = (name: string) => {
+      if (name !== tabela) return normal(name);
+      const falha = { code: "42501", message: `leitura recusada de ${tabela}` };
+      const query = {
+        select: () => query,
+        eq: () => query,
+        in: () => query,
+        then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => Promise.resolve({ data: null, error: falha }).then(resolve, reject),
+      };
+      return query;
+    };
+    const antes = JSON.stringify(db.tables);
+    const resultado = await porta(db).preview({ keywordIds: [P(0)], linkedTerritoryRef: null });
+    assert.equal(resultado.ok, false, "uma falha de leitura não é uma lista vazia");
+    assert.equal(JSON.stringify(db.tables), antes, "a prévia não altera dados");
+  });
+}
+
 test("(a) a cor do plano consolidada sai numa confirmação só do Minerador: o Arquiteto desmonta antes (Pilar incluído), as keywords saem e a cor fica livre", async () => {
   const db = await marcaComSilo(AZUL);
   const versoesAntes = JSON.stringify(db.rows("editorial_artifact_versions"));
