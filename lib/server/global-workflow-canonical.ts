@@ -21,26 +21,53 @@ export async function buildCanonicalIndex(db: Db, brandId: string): Promise<Cano
    * a linha manda, e um evento POSTERIOR refina — porque evento é decisão mais
    * nova, e outros módulos do editorial escrevem por lá.
    */
-  const versions = await db
-    .from("editorial_artifact_versions")
-    .select("version_id,entity_id,artifact_type,version_number,status,payload")
-    .eq("marca_id", brandId)
-    .in("artifact_type", ["article_dna", "silo_dna", "silo_page"]);
-  if (versions.error) throw versions.error;
-  const rows = (versions.data || []) as Array<{
+  const rows: Array<{
     version_id: string; entity_id: string; artifact_type: string;
     version_number: number; status: string | null; payload: Record<string, unknown> | null;
-  }>;
+  }> = [];
+  const seenVersions = new Set<string>();
+  for (let offset = 0; ;) {
+    const result = await db.from("editorial_artifact_versions")
+      .select("version_id,entity_id,artifact_type,version_number,status,payload", { count: "exact" })
+      .eq("marca_id", brandId).in("artifact_type", ["article_dna", "silo_dna", "silo_page"])
+      .order("version_id", { ascending: true }).range(offset, offset + 999);
+    if (result.error) throw result.error;
+    if (typeof result.count !== "number") throw new Error("Não foi possível confirmar a contagem das versões editoriais.");
+    const page = (result.data || []) as typeof rows;
+    for (const row of page) {
+      if (!row.version_id || seenVersions.has(row.version_id)) throw new Error("A leitura das versões editoriais retornou itens repetidos.");
+      seenVersions.add(row.version_id);
+      rows.push(row);
+    }
+    offset += page.length;
+    if (!page.length && offset < result.count) throw new Error("A leitura das versões editoriais ficou incompleta.");
+    if (offset >= result.count) break;
+  }
 
-  const events = rows.length
-    ? await db
-      .from("editorial_version_status_events")
-      .select("event_id:id,version_id,status,occurred_at,actor_id,reason")
-      .in("version_id", rows.map(row => row.version_id))
-      .order("occurred_at", { ascending: true })
-    : { data: [], error: null };
-  if (events.error) throw events.error;
-  const eventList = ((events.data || []) as Array<Record<string, unknown>>).map(event => ({
+  const events: Array<Record<string, unknown>> = [];
+  const versionIds = rows.map(row => row.version_id);
+  for (let start = 0; start < versionIds.length; start += 100) {
+    const ids = versionIds.slice(start, start + 100);
+    const seenEvents = new Set<string>();
+    for (let offset = 0; ;) {
+      const result = await db.from("editorial_version_status_events")
+        .select("event_id:id,version_id,status,occurred_at,actor_id,reason", { count: "exact" })
+        .in("version_id", ids).order("occurred_at", { ascending: true }).order("id", { ascending: true })
+        .range(offset, offset + 999);
+      if (result.error) throw result.error;
+      if (typeof result.count !== "number") throw new Error("Não foi possível confirmar a contagem das decisões editoriais.");
+      const page = (result.data || []) as Array<Record<string, unknown>>;
+      for (const event of page) {
+        if (typeof event.event_id !== "string" || seenEvents.has(event.event_id)) throw new Error("A leitura das decisões editoriais retornou itens repetidos.");
+        seenEvents.add(event.event_id);
+        events.push(event);
+      }
+      offset += page.length;
+      if (!page.length && offset < result.count) throw new Error("A leitura das decisões editoriais ficou incompleta.");
+      if (offset >= result.count) break;
+    }
+  }
+  const eventList = events.map(event => ({
     eventId: String(event.event_id ?? ""),
     versionId: String(event.version_id ?? ""),
     status: String(event.status ?? ""),
@@ -117,24 +144,37 @@ export async function buildCanonicalIndex(db: Db, brandId: string): Promise<Cano
     else approvedSiloVersions.add(vigente.versionId);
   }
 
-  const graphs = await db
-    .from("internal_link_graphs")
-    .select("graph_version_id,graph_id,version_number,workflow_status,base_silo_dna_version_id,base_silo_page_version_id,participating_article_dna_version_refs,conflicts")
-    .eq("marca_id", brandId);
-  if (graphs.error) throw graphs.error;
+  const graphRows: Array<{ graph_version_id: string; graph_id: string; version_number: number; workflow_status: string; base_silo_dna_version_id: string; base_silo_page_version_id: string; participating_article_dna_version_refs: unknown; conflicts: unknown }> = [];
+  const seenGraphs = new Set<string>();
+  for (let offset = 0; ;) {
+    const result = await db.from("internal_link_graphs")
+      .select("graph_version_id,graph_id,version_number,workflow_status,base_silo_dna_version_id,base_silo_page_version_id,participating_article_dna_version_refs,conflicts", { count: "exact" })
+      .eq("marca_id", brandId).order("graph_version_id", { ascending: true }).range(offset, offset + 999);
+    if (result.error) throw result.error;
+    if (typeof result.count !== "number") throw new Error("Não foi possível confirmar a contagem dos grafos editoriais.");
+    const page = (result.data || []) as typeof graphRows;
+    for (const row of page) {
+      if (!row.graph_version_id || seenGraphs.has(row.graph_version_id)) throw new Error("A leitura dos grafos editoriais retornou itens repetidos.");
+      seenGraphs.add(row.graph_version_id);
+      graphRows.push(row);
+    }
+    offset += page.length;
+    if (!page.length && offset < result.count) throw new Error("A leitura dos grafos editoriais ficou incompleta.");
+    if (offset >= result.count) break;
+  }
   const vigentePorGrafo = new Map<string, { versionId: string; versionNumber: number }>();
-  for (const row of (graphs.data || []) as Array<{ graph_version_id: string; graph_id: string; version_number: number; workflow_status: string; conflicts: unknown[] }>) {
+  for (const row of graphRows) {
     if (row.workflow_status !== "approved") continue;
     const atual = vigentePorGrafo.get(row.graph_id);
     if (!atual || row.version_number > atual.versionNumber) {
       vigentePorGrafo.set(row.graph_id, { versionId: row.graph_version_id, versionNumber: row.version_number });
     }
   }
-  const conflictFree = new Set((graphs.data || []).filter(row => Array.isArray(row.conflicts) && row.conflicts.length === 0).map(row => row.graph_version_id));
+  const conflictFree = new Set(graphRows.filter(row => row.workflow_status === "approved" && Array.isArray(row.conflicts) && row.conflicts.length === 0).map(row => row.graph_version_id));
   const approvedGraphVersions = new Set([...vigentePorGrafo.values()].map(item => item.versionId).filter(id => conflictFree.has(id)));
 
   const graphBases = new Map<string, {siloDnaVersionId:string;siloPageVersionId:string;articleVersionIds:readonly string[]}>();
-  for (const row of graphs.data || []) {
+  for (const row of graphRows) {
     const refs = Array.isArray(row.participating_article_dna_version_refs) ? row.participating_article_dna_version_refs : [];
     graphBases.set(row.graph_version_id, {siloDnaVersionId:row.base_silo_dna_version_id,siloPageVersionId:row.base_silo_page_version_id,articleVersionIds:refs.map((ref: {versionId?:string}) => ref.versionId || "")});
   }

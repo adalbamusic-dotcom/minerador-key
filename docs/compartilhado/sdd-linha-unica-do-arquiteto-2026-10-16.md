@@ -1,4 +1,12 @@
+## Adendo de correção do contexto de Links — 2026-11-01
+
+No fechamento do plano acionado por `Concluir formação`, um ArticleDNA adicional no território ou dois para o mesmo Assunto exigem conflito explícito antes da gravação; o histórico e as decisões são preservados. Essa guarda corrige a montagem que reunia todo o território sem expor os adicionais. Nenhuma rota ou botão novo.
+
+**Módulo proprietário: Arquiteto.** A escolha anterior permitia o primeiro Silo disponível quando o grupo ativo não tinha vínculo ou par. **SUBSTITUÍDA:** com grupo ativo, esperar seu próprio SiloDNA e SiloPage; sem grupo, conservar o seletor. Mesmos acionadores e contratos; nenhum schema, rota, botão ou gravador novo. A ausência de referência do candidato na leitura do fechamento não prova mudança da composição e permanece bloqueante até conferência. Implementação local, ainda sem validação manual ou remota; detalhamento em `docs/04-arquiteto/estado-atual.md`.
+
 # SDD — A linha única do Arquiteto — 2026-10-16
+
+> **Atualização de 2026-11-15:** a ordem antiga que fechava o par do Silo depois dos artigos está **SUBSTITUÍDA como contrato de destino** pela sequência Silos → Artigos → Links → Radar do [adendo aprovado de 02/11](adendo-silo-antes-dos-artigos-2026-11-02.md). Trechos antigos que descrevem aquela ordem registram comportamento anterior ou ainda presente no código, não uma segunda linha autorizada. A implementação da ordem aprovada permanece em andamento, como registrado no estado atual do módulo.
 
 > **Status: APROVADA pelo dono em 2026-10-16 ("segue as recomendações").** Decisões D1–D5 conforme as recomendações do §13: D1 formação pelo caminho de sempre (navegador → Concluir → gravador), o plan_sheet deixa de formar linha sem DNA; D2 candidatas da principal Livre sem volume: núcleo do slug/lista do Assunto → páginas em comum → lentes → volume; D3 o que o dono confirma após a prévia fica aprovado (§35.4/§37.7 viram SUBSTITUÍDO na fase); D4 Silo sem migration se der, senão a migration é preparada para o dono executar; D5 rotas legadas aposentadas e ferramenta MCP da formação só na F7. Autoriza as fases na ordem, uma por vez, começando pela F0 (só testes).
 > **2026-10-17 (noite) · F2 FEITA, com um desvio declarado de D1** (§11.3 e §15.7): pelo pedido do dono no amarelo ("3 botões já é suficiente… na mesma linha de processo"), a linha do plano é gravada pelo gravador da melhoria (`origin: "plan_sheet"`, que revalida e relê e é o único que incorpora as keywords novas pelos núcleos do Minerador), não por `confirmArticleFormation`; o Silo do plano fecha no mesmo ato do Concluir. Manter o desvio ou voltar a D1 ao pé da letra é decisão do dono.
@@ -1548,3 +1556,13 @@ artigo no Radar, (d) a publicada na lixeira de 24 h, e o desmonte que não fecha
 `tests/radar-grupos-excluir-tudo-da-cor-dom-2026-10-14.test.mts` (o alerta por área no
 diálogo de sempre) e `tests/minerador-exclusao-confirmacao-forte-dom.test.mts`
 atualizados para a regra nova.
+# Adendo 2026-11-02 — acionadores sem regressão entre etapas
+
+**SUBSTITUÍDO:** a retomada automática ao carregar a área passa a ser acionada pelo mesmo `Concluir formação`, após leitura completa, seleção dos candidatos do Silo e guardas. `Confirmar propostas novas` calcula impacto sobre o lote real e mantém a publicação no território existente. O `Processar artigos` conserva execuções separadas; `Concluir formação` usa os respectivos hashes e fecha cada cor uma vez. Limites pendentes: aplicação de subconjunto de uma mesma execução e recuperação de múltiplas execuções após reload. Fixtures locais; validação real pendente.
+
+# Adendo 2026-11-01 — escolha explícita da principal
+
+O seletor do mesmo `Procurar outra principal` deixa de escolher automaticamente a primeira candidata: a pessoa escolhe em cada artigo antes de `Ver prévia da troca`. A ordenação por volume e lentes é informativa e não comprova intenção. A validação no servidor e a confirmação humana seguem existentes. Implementação e teste DOM locais; sem validação real ou mudança de persistência.
+## Adendo 2026-11-02 — SERP de composição sem alterações
+
+No `Processar artigos` da planilha, a ausência de alterações na composição não substitui a verificação da SERP: mesmo a proposta classificada inicialmente como sem mudanças é planejada e conferida pelo cache da etapa. Se faltar evidência, a coleta entra na prévia de custo e depende de autorização; não se regrava ArticleDNA apenas para conferir. Teste integrado com fixtures: `tests/arquiteto-article-improvement-server.test.mts`. A validação real permanece pendente.

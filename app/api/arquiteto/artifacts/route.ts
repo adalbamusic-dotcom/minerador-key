@@ -11,7 +11,7 @@ import {
 } from "@/lib/arquiteto/contracts";
 import { ARTICLE_AI_REVIEW_ARTIFACT_TYPE, VersionedArticleArchitectureAiReviewSchema, type ArticleArchitectureAiReview } from "@/lib/arquiteto/article-ai-review";
 import { articleApprovalRevalidationIssues } from "@/lib/arquiteto/article-approval-revalidation";
-import { appendArquitetoArtifact, listArquitetoArtifacts, pipelineArtifactErrorResponse, type ArquitetoArtifactType } from "@/lib/server/arquiteto-persistence";
+import { appendArquitetoArtifact, listArquitetoArtifacts, listArquitetoArtifactsVigentes, pipelineArtifactErrorResponse, type ArquitetoArtifactType } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
 const BrandQuerySchema = z.object({ brandId: z.string().min(1) });
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const query = BrandQuerySchema.parse({ brandId: url.searchParams.get("brandId") || "" });
     const context = await resolvePipelineContext({ brandId: query.brandId, module: "arquiteto", action: "view" });
-    return NextResponse.json({ success: true, data: await listArquitetoArtifacts(context) });
+    return NextResponse.json({ success: true, data: url.searchParams.get("latest") === "1" ? await listArquitetoArtifactsVigentes(context) : await listArquitetoArtifacts(context) });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ success: false, error: "brandId é obrigatório e deve ser válido." }, { status: 400 });
     const mapped = pipelineArtifactErrorResponse(error);

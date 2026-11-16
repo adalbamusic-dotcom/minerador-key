@@ -78,7 +78,10 @@ export const LINK_ANCHOR_MAX_CANDIDATES_PER_CALL = 40;
 export const LINK_ANCHOR_MAX_UNITS_PER_CALL = 40;
 
 export const LinkAnchorResponseSchema = z.object({
-  proposals: z.array(LinkAnchorProposalSchema).min(1).max(LINK_ANCHOR_MAX_CANDIDATES_PER_CALL),
+  // A IA pode devolver uma conexão sem conceitos: a revisão editorial a
+  // rejeita individualmente, sem descartar as demais propostas do lote.
+  // O contrato de uma proposta utilizável continua exigindo âncoras.
+  proposals: z.array(LinkAnchorProposalSchema.extend({ anchorConcepts: z.array(AnchorConceptProposalSchema).max(8) })).min(1).max(LINK_ANCHOR_MAX_CANDIDATES_PER_CALL),
 }).strict();
 
 /**

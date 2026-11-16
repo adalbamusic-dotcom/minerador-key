@@ -9,7 +9,8 @@ import {
   type VersionEnvelope,
   type VersionReference,
 } from "./contracts.ts";
-import { deterministicSiloDnaPayload, deterministicSiloPagePayload } from "./adapters.ts";
+import { deterministicSiloDnaPayload, deterministicSiloPagePayload, manualSiloDnaDraftPayload } from "./adapters.ts";
+import { SiloWorkingCopyStateSchema, type SiloWorkingCopyState } from "./silo-working-copy-record.ts";
 import { isPendingPlaceholder, retitleSiloPageText, siloMacroProblemText } from "./silo-plan-identity.ts";
 import { createVersionEnvelope, toVersionReference } from "./versioning.ts";
 import { chooseSiloWorkingCopyPillar, shortSiloSlug, SHALLOW_SILO_REASON, type SiloWorkingCopy } from "./silo-formation.ts";
@@ -95,6 +96,9 @@ export type SiloConsolidationInput = {
   articleVersions: readonly VersionEnvelope<ArticleDNA>[];
   existingSiloDna?: VersionEnvelope<SiloDNA>;
   existingSiloPage?: VersionEnvelope<SiloPage>;
+  /** Última versão gravada, mesmo rejeitada, usada somente para numeração. */
+  siloDnaPredecessor?: { entityId: string; versionId: string; versionNumber: number };
+  siloPagePredecessor?: { entityId: string; versionId: string; versionNumber: number };
   articleStatuses?: Record<string, string>;
   pendingAiOperations?: number;
   serpAssessments?: readonly SerpFormationAssessment[];
@@ -356,6 +360,98 @@ export function buildConsolidatedSiloDnaPayload(input: SiloConsolidationInput): 
   });
 }
 
+/** Monta o DNA de uma estrutura já decidida sem fabricar versões de artigos. */
+export function buildPlannedSiloDnaPayload(input: {
+  copy: SiloWorkingCopyState;
+  workingCopyLockVersion: number;
+  siloId: string;
+  /** Versão canônica anterior quando a cópia revisa um Silo existente. */
+  existingSilo?: VersionEnvelope<SiloDNA> | null;
+  centralEntity: string;
+  objective: string;
+  audience: string;
+  macroProblem: string;
+  dominantIntent: string;
+  boundary: string;
+  includedTopics: string[];
+  excludedTopics: string[];
+  territoryNarrative?: TerritoryNarrative;
+}): SiloDNA {
+  const copy = SiloWorkingCopyStateSchema.parse(input.copy);
+  if (!copy.plannedComposition?.pillarSelection || copy.formationStatus !== "ready_for_review") throw new Error("A estrutura planejada precisa de decisão humana sobre o Pilar antes de formar o Silo.");
+  if (copy.conflicts.length) throw new Error("A estrutura planejada ainda tem conflitos; resolva-os antes de formar o Silo.");
+  if (!Number.isSafeInteger(input.workingCopyLockVersion) || input.workingCopyLockVersion < 1) throw new Error("A versão da cópia de trabalho é obrigatória.");
+  const previous = input.existingSilo ?? null;
+  if (copy.existingSiloId && (!previous || copy.existingSiloId !== input.siloId || previous.entityId !== input.siloId || previous.payload.siloId !== input.siloId || previous.payload.brandId !== copy.brandId || previous.payload.territoryRef !== copy.territoryRef)) throw new Error("Para revisar um Silo existente, informe sua versão canônica da mesma marca e território.");
+  if (!copy.existingSiloId && previous) throw new Error("A cópia de um Silo novo não pode incorporar outro Silo existente.");
+  if ([input.centralEntity, input.objective, input.audience, input.macroProblem, input.dominantIntent, input.boundary].some(value => isPendingPlaceholder(value))) throw new Error("Os dados centrais da estrutura planejada precisam estar definidos antes de formar o Silo.");
+  return SiloDNASchema.parse({
+    ...manualSiloDnaDraftPayload(input.siloId, copy.name, copy.brandId),
+    ...(previous?.payload ?? {}),
+    // Referências a ArticleDNAs da versão anterior não descrevem a nova
+    // composição planejada; as demais informações editoriais são preservadas.
+    pillarArticleId: null,
+    supportArticleIds: [],
+    articleReferences: [],
+    articleRoles: [],
+    narrativeOrder: [],
+    linkMap: [],
+    hierarchySignals: [],
+    name: copy.name,
+    formationStatus: "formed",
+    compositionBasis: "planned_members",
+    compositionSourceRef: copy.plannedComposition.source,
+    plannedMembers: copy.plannedComposition.members,
+    keywordPackageRefs: copy.plannedComposition.subjectProofs.map(proof => ({ keywordId: proof.keywordId, ...proof.approvedPackageRef })),
+    territoryRef: copy.territoryRef,
+    ...(input.territoryNarrative ? { territoryNarrative: input.territoryNarrative } : {}),
+    workingCopyRef: copy.workingCopyRef,
+    workingCopyLockVersion: input.workingCopyLockVersion,
+    centralEntity: input.centralEntity,
+    objective: input.objective,
+    audience: input.audience,
+    macroProblem: input.macroProblem,
+    dominantIntent: input.dominantIntent,
+    boundary: input.boundary,
+    includedTopics: input.includedTopics,
+    excludedTopics: input.excludedTopics,
+    humanPendingDecisions: previous?.payload.humanPendingDecisions ?? [],
+  });
+}
+
+/** Página planejada usa títulos e escopos dos Assuntos, sem inventar ArticleDNA. */
+export function buildPlannedSiloPagePayload(input: {
+  siloDna: VersionEnvelope<SiloDNA>;
+  slug: string;
+  canonical: string;
+  outline: readonly { memberKey: string; heading: string; objective: string }[];
+  /** Página anterior, quando se prepara uma sucessora de Silo existente. */
+  existingPage?: VersionEnvelope<SiloPage> | null;
+}): SiloPage {
+  const { siloDna } = input;
+  const members = siloDna.payload.plannedMembers ?? [];
+  if (siloDna.payload.compositionBasis !== "planned_members" || !siloDna.payload.brandId || !members.length || input.outline.length !== members.length || input.outline.some((section, index) => section.memberKey !== members[index].memberKey || !section.heading.trim() || !section.objective.trim())) throw new Error("A página planejada precisa dos títulos e escopos de todos os membros na ordem aprovada.");
+  const previous = input.existingPage ?? null;
+  if (previous && (previous.entityId !== `silo-page:${siloDna.payload.siloId}` || previous.payload.siloId !== siloDna.payload.siloId || previous.payload.brandId !== siloDna.payload.brandId || (previous.payload.territoryRef && previous.payload.territoryRef !== siloDna.payload.territoryRef))) throw new Error("A página anterior não pertence ao mesmo Silo, marca e território.");
+  if (previous?.payload.publicationStatus === "published" && (previous.payload.slug !== input.slug || previous.payload.canonical !== input.canonical)) throw new Error("A página publicada precisa manter o slug e o canonical existentes.");
+  const page = deterministicSiloPagePayload(siloDna, siloDna.payload.brandId, input.slug);
+  return SiloPageSchema.parse({
+    ...page,
+    ...(previous?.payload.formationStatus === "formed" ? previous.payload : {}),
+    // Preserva o conteúdo anterior, mas a estrutura e a referência pertencem
+    // à nova proposta que o usuário ainda precisa revisar e confirmar.
+    siloDnaRef: page.siloDnaRef,
+    compositionBasis: "planned_members",
+    plannedMemberKeys: members.map(member => member.memberKey),
+    territoryRef: siloDna.payload.territoryRef,
+    slug: input.slug,
+    canonical: input.canonical,
+    pillarArticleId: null,
+    supportArticleIds: [],
+    sections: input.outline.map(section => ({ id: `planned:${section.memberKey}`, heading: section.heading, objective: section.objective, linkedArticleIds: [] })),
+  });
+}
+
 /**
  * Identidade publicável resolvida a partir do catálogo do site da Brand.
  *
@@ -435,20 +531,24 @@ export async function createSiloConsolidationVersions(input: SiloConsolidationIn
   const issues = siloConsolidationIssues(input);
   if (issues.length) throw new Error(issues.join(" "));
   const payload = buildConsolidatedSiloDnaPayload(input);
+  const dnaAnterior = input.siloDnaPredecessor ?? input.existingSiloDna;
+  if (dnaAnterior && dnaAnterior.entityId !== payload.siloId) throw new Error("A versão anterior do Silo não corresponde à identidade da proposta.");
   const siloDna = await createVersionEnvelope({
     entityId: payload.siloId,
-    versionNumber: (input.existingSiloDna?.versionNumber || 0) + 1,
-    previousVersionId: input.existingSiloDna?.versionId || null,
+    versionNumber: (dnaAnterior?.versionNumber || 0) + 1,
+    previousVersionId: dnaAnterior?.versionId || null,
     origin: "human",
     changeReason: "Consolidação humana da arquitetura do Silo.",
     createdBy: actorId,
     payload,
   });
   const pagePayload = buildConsolidatedSiloPagePayload(siloDna, input);
+  const pageAnterior = input.siloPagePredecessor ?? input.existingSiloPage;
+  if (pageAnterior && pageAnterior.entityId !== pagePayload.siloPageId) throw new Error("A versão anterior da página não corresponde à identidade da proposta.");
   const siloPage = await createVersionEnvelope({
     entityId: pagePayload.siloPageId,
-    versionNumber: (input.existingSiloPage?.versionNumber || 0) + 1,
-    previousVersionId: input.existingSiloPage?.versionId || null,
+    versionNumber: (pageAnterior?.versionNumber || 0) + 1,
+    previousVersionId: pageAnterior?.versionId || null,
     origin: "human",
     changeReason: "SiloPage correspondente à consolidação humana do Silo.",
     createdBy: actorId,

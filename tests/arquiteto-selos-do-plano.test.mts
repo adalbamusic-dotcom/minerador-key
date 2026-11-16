@@ -60,7 +60,7 @@ test("tela: os selos entram na linha do artigo, na SiloPage e no cartão do Silo
   const tela = limpar(readFileSync(join(process.cwd(), "modules/arquiteto/arquiteto-workspace.tsx"), "utf8"));
   assert.match(tela, /<DeclaredPlanSeals seals=\{declaredPlanSealsFor\(art\)\} className="mt-1"\/>/);
   assert.equal((tela.match(/siloDeclaredPlanSeal\(\{/g) || []).length, 2, "SiloPage (aba Artigos) e cartão do Silo (aba Silos)");
-  assert.match(tela, /siloRoleByArticleId, declaredPlanSealsFor \}\)/, "a linha memoizada redesenha quando o plano chega");
+  assert.match(tela, /siloRoleByArticleId, declaredPlanSealsFor, planRowOfArticle \}\)/, "a linha memoizada redesenha quando o plano chega");
   const selo = limpar(readFileSync(join(process.cwd(), "modules/arquiteto/declared-plan-seals.tsx"), "utf8"));
   assert.match(selo, /\{seal\.label\}/, "texto sempre");
   assert.match(selo, /text-sm/, "texto de 14 px");

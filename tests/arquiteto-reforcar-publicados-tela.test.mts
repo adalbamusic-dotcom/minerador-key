@@ -758,6 +758,7 @@ test("publicado fica no Silo da URL: a contestação de fronteira ignora publica
   const mesa = readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8").replace(/\/\/.*$/gm, "");
   assert.match(mesa, /if \(artigo\.isPublished\) candidatosPublicados\.add\(String\(artigo\.candidateRef\)\);/);
   assert.match(mesa, /if \(candidatosPublicados\.has\(evidencia\.candidateRef\)\) continue;/);
-  assert.match(mesa, /const mantidasNoSiloDaUrl = plan\.assignments\.filter\(item => buscasDePublicados\.has\(item\.keywordId\)/);
+  assert.match(mesa, /const mantidasNoSiloDaUrl = propostasComDestino\.filter\(item => manterPublicada\(item\.keywordId, item\.territoryRef\)\)/);
+  assert.match(mesa, /manterPublicada\(assignment\.keywordId, territoryRef\) \|\| sairiaDoSilo/);
   assert.ok(mesa.indexOf("const mantidasNoSiloDaUrl") < mesa.indexOf("const impactoEstrutural = resolveTerritoryChangeImpact"), "o filtro vem antes da trava de impacto");
 });

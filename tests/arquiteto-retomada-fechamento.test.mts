@@ -7,7 +7,7 @@ import {
   resolveCanonicalClosureResumption,
   verifyCanonicalSiloClosure,
 } from "../lib/arquiteto/silo-composition-from-formations.ts";
-import { closureFormationsForSilo, closureGuardsForSilo, describeSiloClosureReading, resolveSiloClosureReadiness } from "../lib/arquiteto/silo-closure-readiness.ts";
+import { closureFormationsForSilo, closureGuardsForSilo, describeSiloClosureReading, resolveSiloClosureReadiness, resumableClosureMatchesSelection } from "../lib/arquiteto/silo-closure-readiness.ts";
 import { proposalFromRemoteWorkingCopy } from "../lib/arquiteto/silo-working-copy-bridge.ts";
 import { existingTerritoryForProposedSilo } from "../lib/arquiteto/silo-assignment.ts";
 import { readFormationConclusionState } from "../lib/arquiteto/formation-conclusion-state.ts";
@@ -328,9 +328,22 @@ test("LOCAL_ARCHITECTURE_PROPOSAL_REQUIRED_FOR_CLOSURE = NO", () => {
   assert.equal(fechamento.includes("remoteWorkingCopies: comWorkingCopy"), true);
 });
 
-test("§5 — a retomada é automática e não cria botão", () => {
+test("retomada exige clique humano, leitura completa e seleção exata do Silo", () => {
+  const base = { human: true, bootstrapLoaded: true, resumable: true, planReady: true, outOfScenarioCount: 0, activeRefs: ["a", "b"], selectedRefs: new Set(["a", "b"]) };
+  assert.equal(resumableClosureMatchesSelection(base), true);
+  assert.equal(resumableClosureMatchesSelection({ ...base, human: false }), false);
+  assert.equal(resumableClosureMatchesSelection({ ...base, bootstrapLoaded: false }), false);
+  assert.equal(resumableClosureMatchesSelection({ ...base, planReady: false }), false);
+  assert.equal(resumableClosureMatchesSelection({ ...base, resumable: false }), false);
+  assert.equal(resumableClosureMatchesSelection({ ...base, outOfScenarioCount: 1 }), false);
+  assert.equal(resumableClosureMatchesSelection({ ...base, selectedRefs: new Set(["a"]) }), false);
+  assert.equal(resumableClosureMatchesSelection({ ...base, selectedRefs: new Set(["a", "b", "c"]) }), false);
+  assert.equal(resumableClosureMatchesSelection({ ...base, activeRefs: [], selectedRefs: new Set() }), false);
+});
+
+test("§5 — a retomada exige o Concluir e não cria botão", () => {
   assert.equal(codigo.includes("resolveCanonicalClosureResumption({"), true);
-  assert.equal(codigo.includes("closureResumptionAttempted"), true, "uma tentativa por território por sessão");
+  assert.equal(codigo.includes("closureResumptionAttempted"), false, "carregar a tela não dispara uma gravação");
   for (const rotulo of ["Retomar fechamento", "Consolidar Silo", "Materializar Articles"]) {
     assert.equal(codigo.includes(`>${rotulo}<`), false, `a retomada não pode criar o botão ${rotulo}`);
   }
@@ -338,10 +351,10 @@ test("§5 — a retomada é automática e não cria botão", () => {
 
 test("§9 — PROVIDER_CALLS = 0 também na retomada", () => {
   const retomada = codigo.slice(
-    codigo.indexOf("const closureResumptionAttempted = useRef"),
-    codigo.indexOf("const confirmArticleFormation = useCallback"),
+    codigo.indexOf("if (humano && !continuacao && canonicalBootstrapStatus"),
+    codigo.indexOf("    setFormationBusy(true);\n    try {", codigo.indexOf("if (humano && !continuacao && canonicalBootstrapStatus")),
   );
-  assert.ok(retomada.length > 0, "o efeito de retomada existe e é delimitável");
+  assert.ok(retomada.length > 0, "o trecho do clique é delimitável");
   for (const proibido of ["dataforseo", "/api/arquiteto/serp", "callAi", "/api/ai", "buildArticleFormationUniverses"]) {
     assert.equal(retomada.includes(proibido), false, `a retomada não pode conter ${proibido}`);
   }
@@ -365,10 +378,10 @@ test("o fechamento preserva as formações de outros territórios no marcador", 
   assert.equal(fechamento.includes("concludedFormations: todas.map("), false);
   // E a retomada só entrega as formações do território que está fechando.
   const retomada = codigo.slice(
-    codigo.indexOf("const closureResumptionAttempted = useRef"),
-    codigo.indexOf("const confirmArticleFormation = useCallback"),
+    codigo.indexOf("if (humano && !continuacao && canonicalBootstrapStatus"),
+    codigo.indexOf("    setFormationBusy(true);\n    try {", codigo.indexOf("if (humano && !continuacao && canonicalBootstrapStatus")),
   );
-  assert.equal(retomada.includes("formations: doSilo,"), true);
+  assert.equal(retomada.includes("formations: leitura.doSilo"), true);
   assert.equal(retomada.includes("formations: congeladas,"), false);
 });
 
@@ -397,8 +410,8 @@ test("o fechamento de cada Silo diz em português o que falta", () => {
   const base = { consolidated: false, pendingLabels: [] as string[], blockers: [] as { code: string; detail: string }[], outOfScenarioCount: 0, hasConcluded: true, planReady: true, resumable: true, resumptionReason: null };
   assert.equal(describeSiloClosureReading({ ...base, label: "Estratégia", consolidated: true }).state, "closed");
   const pronto = describeSiloClosureReading({ ...base, label: "Estratégia" });
-  assert.equal(pronto.state, "closing");
-  assert.match(pronto.text, /Pilar pela cobertura de buscas/);
+  assert.equal(pronto.state, "waiting");
+  assert.match(pronto.text, /marque os artigos deste Silo e use “Concluir formação”/);
   const espera = describeSiloClosureReading({
     ...base, label: "Leads", planReady: false, resumable: false, resumptionReason: "x",
     pendingLabels: ["leads qualificados"],
@@ -408,14 +421,20 @@ test("o fechamento de cada Silo diz em português o que falta", () => {
   assert.match(espera.text, /falta concluir 1 artigo\(s\): “leads qualificados” \(aba Artigos: marque os artigos do Silo e clique em “Concluir formação”\)/);
   assert.match(espera.text, /está em revisão/);
   assert.doesNotMatch(espera.text, /3 formações/, "a pendência de formação sai pelo nome, não pela contagem crua");
+  const divergencia = describeSiloClosureReading({ ...base, label: "Wi-Fi", outOfScenarioCount: 7 });
+  assert.match(divergencia.text, /não foram reconhecidas/);
+  assert.doesNotMatch(divergencia.text, /mudaram de composição/);
+  const comIdentificacao = describeSiloClosureReading({ ...base, label: "Wi-Fi", outOfScenarioCount: 2, outOfScenarioLabels: ["/internet-optica", "/wi-fi-lento"] });
+  assert.match(comIdentificacao.text, /\/internet-optica, \/wi-fi-lento/);
 });
 
 test("a retomada e a tela leem a MESMA leitura do fechamento, escopada por Silo", () => {
-  const leitura = codigo.slice(codigo.indexOf("const siloClosureReadings = useMemo"), codigo.indexOf("const closureResumptionAttempted = useRef"));
+  const leitura = codigo.slice(codigo.indexOf("const siloClosureReadings = useMemo"), codigo.indexOf("const confirmArticleFormation = useCallback"));
   assert.match(leitura, /closureGuardsForSilo\(\{/);
   assert.doesNotMatch(leitura, /unresolvedCannibalization: candidateGuards\.pares\.map/, "o par da marca inteira não barra este Silo");
-  const retomada = codigo.slice(codigo.indexOf("const closureResumptionAttempted = useRef"), codigo.indexOf("const confirmArticleFormation = useCallback"));
-  assert.match(retomada, /for \(const leitura of siloClosureReadings\)/);
+  const inicio = codigo.indexOf("if (humano && !continuacao && canonicalBootstrapStatus");
+  const retomada = codigo.slice(inicio, codigo.indexOf("    setFormationBusy(true);\n    try {", inicio));
+  assert.match(retomada, /siloClosureReadings\.filter/);
   // O gatilho pós-conclusão também filtra pelo Silo.
   const concluir = codigo.slice(codigo.indexOf("const confirmArticleFormation = useCallback"));
   assert.match(concluir.slice(0, concluir.indexOf("\n  }, [")), /closureGuardsForSilo\(\{\s*siloRef,/);
@@ -458,6 +477,16 @@ test("ponteiro órfão de formação concluída em outro Silo não é formação
   assert.deepEqual(leitura.outOfScenario, []);
   const fechamento = resolveSiloClosureReadiness({ siloRef: "silo-estrategia", activeCandidateRefs: leitura.activeCandidateRefs, concludedCandidateRefs: leitura.formations.map(item => item.candidateRef), pendingMaterializationRefs: [] });
   assert.equal(fechamento.ready, true);
+});
+
+test("Silo com sete formações antigas fora da mesa e sete atuais identifica as antigas sem apagá-las", () => {
+  const antigos = Array.from({ length: 7 }, (_, i) => ({ ...formacao(`antiga-${i}`, "azul", `k-antiga-${i}`, `artigo-antigo-${i}`), slug: `antiga-${i}` }));
+  const atuais = Array.from({ length: 7 }, (_, i) => ({ ...formacao(`atual-${i}`, "azul", `k-atual-${i}`, `artigo-atual-${i}`), slug: `atual-${i}` }));
+  const marcador = [...antigos, ...atuais];
+  const leitura = closureFormationsForSilo({ territoryRef: "azul", concludedFormations: marcador, candidates: atuais.map(item => ({ candidateRef: item.candidateRef, principalKeywordId: item.principalKeywordId })), approvedArticles: [] });
+  assert.deepEqual(leitura.outOfScenario, antigos.map(item => item.candidateRef));
+  assert.equal(leitura.formations.length, 14, "a leitura não descarta o histórico nem presume sua situação");
+  assert.equal(marcador.length, 14, "a leitura não altera o marcador recebido");
 });
 
 test("publicado com ArticleDNA aprovado e sem 'Concluir formação' entra no fechamento como está", () => {
@@ -532,7 +561,7 @@ test("o Concluir não entrega fragmento órfão, não apaga o vínculo e não li
   assert.match(corpo, /candidates: universe\.candidates\.filter\(candidate => !concluidaEm\.has\(candidate\.candidateRef\) \|\| concluidaEm\.get\(candidate\.candidateRef\) === universe\.siloRef\)/);
   assert.match(corpo, /materializedArticleId: materializado\?\.articleId \?\? anteriores\.get\(entrada\.candidateRef\)\?\.materializedArticleId \?\? null/);
   assert.match(corpo, /plano\.blocked\.filter\(item => item\.code !== "PUBLISHED_COLLISION"\)/);
-  assert.match(corpo, /closureResumptionAttempted\.current\.clear\(\);/);
+  assert.match(corpo, /resumableClosureMatchesSelection/);
   assert.match(codigo, /return candidateGuards\.openChallenges\.filter\(item => !humanKeptCandidate\(item\.scope\.id\) && !concluidos\.has\(item\.scope\.id\)\);/);
 });
 
@@ -569,7 +598,7 @@ test("Papel no Silo aparece em Artigos e em Links, lido do SiloDNA aprovado de t
   assert.match(codigo, /\?\? siloRoleByArticleId\.get\(String\(articleDnaVersion\?\.payload\.articleId \|\| ""\)\);/);
   assert.equal(codigo.includes('{workspaceMode === "links" && <th className="relative border-r border-divider px-2 py-2 text-center">Papel no Silo</th>}'), false);
   // 2026-10-12: + os selos do plano declarado (SDD §9 item 6), que também redesenham a linha.
-  assert.match(codigo, /\{ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor \}/);
+  assert.match(codigo, /\{ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId, declaredPlanSealsFor, planRowOfArticle \}/);
 });
 
 test("conclusão só fica desatualizada quando a composição DO ARTIGO mudou, não o lote", () => {
@@ -631,8 +660,8 @@ test("Confirmar propostas novas não tira keyword de artigo nem de Silo fechado,
   assert.match(corpo, /const sairiaDoSilo = \(keywordId: string, destino: string \| null\) => \{/);
   // Filtra o plano ANTES da trava de impacto: uma proposta inválida não barra o lote inteiro.
   assert.ok(corpo.indexOf("const mantidasNosArtigos = plan.assignments.filter(") < corpo.indexOf("const impactoEstrutural = resolveTerritoryChangeImpact("));
-  assert.match(corpo, /if \(sairiaDoSilo\(assignment\.keywordId, territoryRef\)\) \{ registrar\("unchanged", assignment\.keywordId\); continue; \}/);
-  assert.match(corpo, /if \(sairiaDoSilo\(item\.keywordId, null\)\) \{ registrar\("unchanged", item\.keywordId\);/);
+  assert.match(corpo, /if \(manterPublicada\(assignment\.keywordId, territoryRef\) \|\| sairiaDoSilo\(assignment\.keywordId, territoryRef\)\)/);
+  assert.match(corpo, /if \(manterPublicada\(item\.keywordId, null\) \|\| sairiaDoSilo\(item\.keywordId, null\)\)/);
   assert.match(codigo, /data-testid="architect-silo-closure-status-silos"/);
 });
 

@@ -81,7 +81,7 @@ test("item 4 · 'Formar os artigos do plano · cor': o prepare aceita o grupo e 
   const painel = ler("modules/arquiteto/article-improvement-panel.tsx");
   assert.doesNotMatch(painel, /Formar os artigos do plano · \{grupo\.label\}/);
   const planilha = ler("modules/arquiteto/plan-article-sheet.tsx");
-  assert.match(planilha, /improvement\(\{ brandId, action: "prepare", group: groupId, targetIds: linhasDoGrupo\.map\(row => row\.keywordId\), origin: "plan_sheet"/);
+  assert.match(planilha, /improvement\(\{ brandId, action: "prepare", group: groupId, targetIds: parte\.map\(row => row\.keywordId\), origin: "plan_sheet"/);
 });
 
 test("item 4 · as outras portas apontam para a do plano: Processar artigos (e a formação automática) não roda artigo do plano", () => {

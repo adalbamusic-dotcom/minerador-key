@@ -87,7 +87,7 @@ test("azul real: 7 linhas; 12, 13 e 14 presas no artigo do laranja com o caminho
   assert.equal(screen.query("architect-plan-sheet-next-step"), null);
   // 2026-10-16 · sem etapas do plano: os botões de sempre, uma vez cada.
   assert.equal(screen.query("architect-plan-stage"), null);
-  assert.deepEqual([...screen.get("architect-articles-formation-actions").querySelectorAll("button")].map(item => item.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
+  assert.deepEqual([...screen.get("architect-articles-formation-actions").querySelectorAll("button[data-step]")].map(item => item.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
   semMinerador();
 });
 
@@ -128,7 +128,7 @@ test("Processar artigos (7, barra de sempre em 'Todos'): a leitura com a busca d
   assert.equal(screen.query("architect-plan-sheet-preview"), null, "nada a pagar: nenhuma prévia de custo");
   assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp").length, 0, "o Validar SERP à parte saiu (F3 da linha única)");
   for (const id of AZUIS) assert.ok(resultado(id), `a linha ${id} tem resultado`);
-  assert.match(resultado("k9"), /^Cópia de trabalho \(nada gravado\): principal/);
+  assert.match(resultado("k9"), /^Cópia de trabalho \(ArticleDNA não gravado\): principal/);
   assert.match(resultado("k13"), /^Presa no artigo/);
   semGirar(); semMinerador();
 });

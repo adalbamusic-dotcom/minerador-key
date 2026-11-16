@@ -18,7 +18,7 @@ const semComentarios = (texto: string) => texto
 const workspace = semComentarios(readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8"));
 
 test("item 5 · o botão aparece só com o grafo aprovado e atual, e abre a prévia pelo mesmo portão", () => {
-  assert.match(workspace, /\{linksApprovedGraph && !linksPhaseReading\.graphStale && !linksIsDirty && linksSiloArticleIds\.length > 0 && \(/);
+  assert.match(workspace, /\{linksSelectedContext && linksApprovedGraph\?\.siloId === linksSelectedContext\.siloId && !linksPhaseReading\.graphStale && !linksIsDirty && linksSiloArticleIds\.length > 0 && \(/, "o grafo aprovado pertence ao Silo selecionado");
   assert.match(workspace, /`Marcar Pronto para Radar e enviar os \$\{linksSiloArticleIds\.length\} artigos deste Silo`/);
   assert.match(workspace, /setSelectedArticleIds\(new Set\(linksSiloArticleIds\)\);\s*setReadySendPreviewOpen\(true\);/);
   const previa = workspace.slice(workspace.indexOf("{readySendPreviewOpen && (() => {"), workspace.indexOf("architect-links-ready-and-send-confirm"));
@@ -27,6 +27,16 @@ test("item 5 · o botão aparece só com o grafo aprovado e atual, e abre a pré
   // Os dois botões de sempre continuam.
   assert.match(workspace, /data-testid="architect-links-confirm"/);
   assert.match(workspace, /<ArrowRight className="h-3 w-3"\/>Enviar ao Radar<\/button>/);
+});
+
+test("grupo sem par não processa nem confirma o grafo anterior", () => {
+  const processar = workspace.slice(workspace.indexOf("const processarLinks = async"), workspace.indexOf("const handleApproveLinks = async"));
+  const confirmar = workspace.slice(workspace.indexOf("const handleApproveLinks = async"), workspace.indexOf("const handleApproveLinks = async") + 700);
+  const previa = workspace.slice(workspace.indexOf("const abrirPreviaDosLinks ="), workspace.indexOf("const abrirPreviaDosLinks =") + 700);
+  assert.match(processar, /if \(linksSiloChoice\.colorWaiting\)/);
+  assert.match(previa, /if \(linksSiloChoice\.colorWaiting\)/);
+  assert.match(confirmar, /linksWorkingCopy\.siloId !== linksSelectedContext\.siloId/);
+  assert.match(workspace, /approvedGraph: linksSelectedContext && linksApprovedGraph\?\.siloId === linksSelectedContext\.siloId \? linksApprovedGraph : null/);
 });
 
 test("item 5 · marcar primeiro (com releitura); só então enviar; nada é enviado se a marcação falhar", () => {

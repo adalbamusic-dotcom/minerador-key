@@ -145,7 +145,7 @@ export async function readArchitectSyncState(context: PipelineContext) {
 
   /* Artefatos: a vigente de cada um, na ordem da leitura inteira, e os conjuntos que a mesa devolve. */
   const vigentes = vigentesFromMeta(versionMetas);
-  const articleVigentes = vigentes.filter(meta => meta.artifactType === "article_dna" && meta.referenceKeywordIds.some(id => received.has(id)));
+  const articleVigentes = vigentes.filter(meta => meta.artifactType === "article_dna" && meta.brandId === context.brandId);
   const statusesDasVigentes = vigentes.map(meta => ({ versionId: meta.versionId, status: meta.status }));
   const events = await readArticleVersionEvents(context, articleVigentes.map(meta => meta.versionId));
   const envelopes = articleVigentes.map(meta => ({
@@ -168,7 +168,7 @@ export async function readArchitectSyncState(context: PipelineContext) {
   });
   const paresQueFicam = new Set([...paresAtivos.siloDnas, ...paresAtivos.siloPages].map(item => item.versionId));
   const included = {
-    articleDnas: articleVigentes.filter(meta => ativas.has(meta.versionId)),
+    articleDnas: articleVigentes.filter(meta => ativas.has(meta.versionId) && meta.referenceKeywordIds.some(id => received.has(id))),
     siloDnas: siloDnasVigentes.filter(meta => paresQueFicam.has(meta.versionId)),
     siloPages: siloPagesVigentes.filter(meta => paresQueFicam.has(meta.versionId)),
     aiReviews: vigentes.filter(meta => meta.artifactType === ARTICLE_AI_REVIEW_ARTIFACT_TYPE && meta.brandId === context.brandId),
@@ -203,6 +203,7 @@ export async function readArchitectSyncState(context: PipelineContext) {
       runs: markOfRows(others.filter(item => (RUN_TYPES as readonly string[]).includes(item.subjectType))),
       eligibility: syncHash(eligibility.map(entry => `${entry.keywordId}|${entry.importability}|${entry.workflowState ?? ""}`).sort().join("\n")),
       statuses: syncHash(stableJson(statuses)),
+      rejectedArticleIds: syncHash(stableJson(liberacao.rejected.map(item => item.articleId).sort())),
       catalog: syncHash(stableJson(catalog)),
       orderItems: syncHash(receivedItems.map(item => item.id).join("\n")),
       orderArticleDnas: syncHash(included.articleDnas.map(meta => meta.entityId).join("\n")),
@@ -212,7 +213,7 @@ export async function readArchitectSyncState(context: PipelineContext) {
       orderSerp: syncHash(serpItems.map(item => item.subjectId).join("\n")),
     },
   };
-  return { marks, receivedItems, received, fpRows, versionMetas, included, envelopes, statusesDasVigentes, events, statuses, eligibility, catalog, serpItems };
+  return { marks, receivedItems, received, fpRows, versionMetas, included, envelopes, statusesDasVigentes, events, statuses, eligibility, catalog, serpItems, rejectedArticleIds: liberacao.rejected.map(item => item.articleId) };
 }
 
 /** Itens `keyword/architect` inteiros, pelo id, na forma da leitura da mesa (com a liberação por artigo rejeitado aplicada). */
@@ -296,6 +297,7 @@ export async function loadArchitectWorkspaceDelta(context: PipelineContext, know
     stats[secao] = upsert.length;
   }
   if (mudouHash("statuses")) changes.statuses = state.statuses;
+  if (mudouHash("rejectedArticleIds")) changes.rejectedArticleIds = state.rejectedArticleIds;
   if (mudouHash("catalog")) changes.brandSiloCatalog = state.catalog;
 
   /* 4. Coleções pequenas: relidas inteiras quando mudam (as mesmas leituras do GET). */

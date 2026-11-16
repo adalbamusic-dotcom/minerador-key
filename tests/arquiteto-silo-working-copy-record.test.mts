@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildTerritoryRef } from "../lib/arquiteto/territory.ts";
+import { plannedSiloMemberKey } from "../lib/arquiteto/planned-silo-member.ts";
 import {
   SILO_WORKING_COPY_CONTRACT_VERSION,
   SILO_WORKING_COPY_RPC_ERRORS,
@@ -10,6 +11,7 @@ import {
   SILO_WORKING_COPY_SUBJECT_TYPE,
   SiloWorkingCopyStateSchema,
   buildSiloWorkingCopyRef,
+  buildPlannedSiloWorkingCopy,
   buildSiloWorkingCopyRow,
   isSiloWorkingCopyRef,
   territoryRefOfWorkingCopy,
@@ -61,6 +63,29 @@ function workingCopy(overrides: Partial<SiloWorkingCopyState> = {}): SiloWorking
     ...overrides,
   });
 }
+
+test("estrutura planejada usa âncoras reais e decisão humana sobre a composição inteira", () => {
+  const pilar = { memberKey: plannedSiloMemberKey(BRAND, "subject_keyword", "subject-a"), anchorKind: "subject_keyword" as const, anchorId: "subject-a", role: "Pilar" as const, order: 1 };
+  const suporte = { memberKey: plannedSiloMemberKey(BRAND, "subject_keyword", "subject-b"), anchorKind: "subject_keyword" as const, anchorId: "subject-b", role: "Suporte" as const, order: 2 };
+  const plannedComposition = { source: { kind: "editorial_group_plan" as const, groupId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", planVersion: 1, planHash: HASH, lockVersion: 2 }, members: [pilar, suporte], subjectProofs: [pilar, suporte].map(member => ({ keywordId: member.anchorId, approvedPackageRef: { version: 1, contentHash: HASH, approvedAt: NOW } })), pillarSelection: { memberKey: pilar.memberKey, actorUserId: "user-1", decidedAt: NOW, reason: "Pilar confirmado", decidedOverMemberKeys: [pilar.memberKey, suporte.memberKey] } };
+  const copy = workingCopy({ articleRefs: [], pillarSuggestionArticleId: null, pillarSelection: null, supportArticleIds: [], plannedComposition });
+  assert.deepEqual(copy.plannedComposition, plannedComposition);
+  assert.equal(SiloWorkingCopyStateSchema.safeParse({ ...copy, articleRefs: [articleRef("inventado")] }).success, false);
+  assert.equal(SiloWorkingCopyStateSchema.safeParse({ ...copy, plannedComposition: { ...plannedComposition, members: [pilar, { ...suporte, order: 1 }] } }).success, false);
+  assert.equal(SiloWorkingCopyStateSchema.safeParse({ ...copy, plannedComposition: { ...plannedComposition, members: [suporte, pilar] } }).success, false);
+  assert.equal(SiloWorkingCopyStateSchema.safeParse({ ...copy, brandId: "outra-marca" }).success, false);
+  assert.equal(SiloWorkingCopyStateSchema.safeParse({ ...copy, plannedComposition: { ...plannedComposition, pillarSelection: { ...plannedComposition.pillarSelection, decidedOverMemberKeys: [pilar.memberKey] } } }).success, false);
+  assert.equal(SiloWorkingCopyStateSchema.safeParse({ ...copy, plannedComposition: { ...plannedComposition, subjectProofs: [plannedComposition.subjectProofs[0]] } }).success, false);
+  const { pillarSelection: decision, ...composition } = plannedComposition;
+  const base = { brandId: BRAND, territoryRef: TERRITORY, name: "Silo", slug: "silo", existingSiloId: null, composition };
+  const proposed = buildPlannedSiloWorkingCopy({ ...base, pillarSelection: null });
+  assert.equal(proposed.formationStatus, "draft");
+  assert.equal(proposed.plannedComposition?.pillarSelection, null);
+  const reviewed = buildPlannedSiloWorkingCopy({ ...base, pillarSelection: decision });
+  assert.equal(reviewed.formationStatus, "ready_for_review");
+  assert.equal(reviewed.workingCopyRef, REF);
+  assert.equal(reviewed.articleRefs.length, 0);
+});
 
 const territoryGuard = (overrides: Partial<TerritoryGuardInput> = {}): TerritoryGuardInput => ({
   found: true,

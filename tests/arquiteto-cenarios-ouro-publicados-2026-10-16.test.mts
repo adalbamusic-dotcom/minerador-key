@@ -344,6 +344,7 @@ test("C8 · diferenciação de 2 publicados com 3+ páginas em comum: detect →
   assert.doesNotMatch(aplicar, /handleArchitectWorkspacePatch|patchWorkingCopy|saveArticleFormationMarker|articleApprovalRevalidationIssues/, "HOJE: sem PATCH, sem marcador, sem revalidação");
   // §9 · a melhoria lê a versão 'proposed' como a vigente: a leitura canônica pega a última versão por entidade, sem filtro de status.
   const leitura = codigoSemComentarios("lib/server/arquiteto-workspace.ts");
-  assert.match(leitura, /const articleDnasVigentes = latestByEntity\(artifacts\.articleDnas\)\.filter\(version =>\s*version\.payload\.keywordReferences\.some/);
+  assert.match(leitura, /const articleDnasVigentes = latestByEntity\(artifacts\.articleDnas\)/);
+  assert.match(leitura, /const articleDnas = liberacao\.articleDnas\.filter\(version =>\s*version\.payload\.keywordReferences\.some/);
   assert.equal(chamadasDeRede, 0);
 });

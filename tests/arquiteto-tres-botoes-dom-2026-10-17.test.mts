@@ -123,6 +123,7 @@ test.afterEach(() => screen.destroy());
 
 test("amarelo · os 3 botões em sequência: (a) só Processar ativo · (b) depois do Processar, Concluir · (c) depois do Concluir, o refazedor — e a área de ações tem exatamente 3 botões fora das prévias", async () => {
   rede();
+  registro.closureRead = async () => ({ ready: false, detail: "O Silo aguarda artigos gravados; o fechamento será relido depois da gravação." });
   await screen.render(mesa(TRAVADOS.map(id => formado(id)))); await assentar();
   assert.equal(screen.all("architect-plan-table-row").length, 8);
   await marcarTodas();
@@ -157,8 +158,8 @@ test("amarelo · os 3 botões em sequência: (a) só Processar ativo · (b) depo
   const coletas = chamadas.filter(chamada => chamada.body?.action === "collect");
   assert.equal(coletas.length, 1);
   assert.equal(coletas[0].body.authorizedCostUsd, 0.056, "a coleta paga só o custo autorizado na prévia");
-  for (const id of IDS) assert.match(resultado(id), /^Cópia de trabalho \(nada gravado\): principal “.+” \((Travada|identidade), fica\) · secundárias: .+, nova\)\. Pronto para “Concluir formação”\.$/, id);
-  assert.match(ultimoAviso(registro), /^Processar artigos: 8 artigo\(s\) lido\(s\), reforço proposto para 8; SERP paga agora: 16 consulta\(s\)\. Nada foi gravado/);
+  for (const id of IDS) assert.match(resultado(id), /^Cópia de trabalho \(ArticleDNA não gravado\): principal “.+” \((Travada|identidade), fica\) · secundárias: .+, nova\)\. Pronto para “Concluir formação”\.$/, id);
+  assert.match(ultimoAviso(registro), /^Processar artigos: 8 artigo\(s\) lido\(s\), reforço proposto para 8; SERP paga agora: 16 consulta\(s\)\. Nenhum artigo foi gravado/);
   assert.equal(barraBotao("architect-articles-top-confirm").disabled, false);
   assert.equal(passoAtual(), "conclude", "depois do Processar, o Concluir é o passo");
   assert.equal(barraBotao("architect-articles-top-confirm").className, "primary");
@@ -170,8 +171,8 @@ test("amarelo · os 3 botões em sequência: (a) só Processar ativo · (b) depo
   assert.equal(chamadas.filter(chamada => chamada.body?.action === "prepare").length, 1, "o Concluir grava a cópia de trabalho do Processar");
   assert.equal(screen.get("architect-plan-sheet-preview").dataset.action, "concludeFormation");
   const checklist = screen.get("architect-plan-sheet-checklist");
-  assert.deepEqual([...checklist.querySelectorAll<HTMLElement>("li")].map(item => [item.dataset.check, item.dataset.ok]), [["principal", "true"], ["reforco", "true"], ["serp", "true"], ["plano", "true"], ["silo", "true"]]);
-  assert.match(checklist.textContent!, /✓ Silo — fecha neste ato: SiloDNA e SiloPage com o Pilar e a ordem do plano; o grupo é ligado ao Silo/);
+  assert.deepEqual([...checklist.querySelectorAll<HTMLElement>("li")].map(item => [item.dataset.check, item.dataset.ok]), [["principal", "true"], ["reforco", "true"], ["serp", "true"], ["plano", "true"], ["silo", "false"]]);
+  assert.match(checklist.textContent!, /✗ Silo — O Silo aguarda artigos gravados; o fechamento será relido depois da gravação/);
   assert.match(screen.get("architect-plan-sheet-new-keywords").textContent!, /9 keyword\(s\) NOVA\(S\) na marca/);
   for (const id of TRAVADOS) assert.match(screen.all("architect-plan-sheet-preview-line").find(item => item.textContent!.startsWith(nome(id)))!.textContent!, /Vai gravar: nova versão \(v2\)/, id);
   for (const id of LIVRES) assert.match(screen.all("architect-plan-sheet-preview-line").find(item => item.textContent!.startsWith(nome(id)))!.textContent!, /Vai gravar: primeiro ArticleDNA \(v1\) · principal “.+” \(identidade, fica\)/, id);
@@ -200,7 +201,7 @@ test("amarelo · cancelar a coleta paga do Processar não paga nada, deixa o ref
   await screen.click("architect-articles-top-process"); await assentar();
   await screen.click([...screen.get("architect-plan-sheet-preview").querySelectorAll<HTMLButtonElement>("button")].find(botao => botao.textContent === "Cancelar")!); await assentar();
   assert.equal(chamadas.filter(chamada => chamada.body?.action === "collect").length, 0);
-  assert.match(ultimoAviso(registro), /a coleta paga foi cancelada — nada foi pago nem gravado/);
+  assert.match(ultimoAviso(registro), /a coleta paga foi cancelada — nada foi pago e nenhum artigo foi gravado/);
   for (const id of LIVRES) assert.match(resultado(id), /Falta a SERP da principal: “Processar artigos” coleta, com o custo antes\./, id);
   assert.equal(barraBotao("architect-articles-top-confirm").disabled, true);
   assert.equal(passoAtual(), "process");
@@ -354,7 +355,8 @@ test("links · o Silo do grafo: com a cor, o Silo dela é escolhido sozinho (sem
   assert.deepEqual(escolhas, [TERRITORIO_AMARELO]);
   // A cor cujo Silo ainda não tem o par diz que espera o fechamento (e o seletor continua).
   await desenhar(resolveLinksSilo({ contexts: [{ siloId: "territory:azul", territoryRef: "territory:azul" }], selected: null, colorSiloRefs: [TERRITORIO_AMARELO] }));
-  assert.match(screen.get("architect-links-silo-color-waiting").textContent!, /ainda não tem SiloDNA e SiloPage/);
+  assert.match(screen.get("architect-links-silo-color-waiting").textContent!, /SiloDNA e SiloPage/);
+  assert.equal(screen.container.querySelector("[data-testid='architect-links-silo-select']"), null, "não oferece Silo de outra cor");
   // A tela usa o seletor e a regra (sem o mapa).
   const tela = readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.match(tela, /<LinksSiloPicker\s+contexts=\{linkSiloContexts\.map/);

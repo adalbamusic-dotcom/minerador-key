@@ -13,6 +13,9 @@ export function LinksSiloPicker({ contexts, choice, onChange }: {
   choice: { siloId: string | null; byColor: boolean; colorWaiting: boolean };
   onChange: (siloId: string | null) => void;
 }) {
+  if (choice.colorWaiting) {
+    return <p className="mt-3 rounded border border-warning/40 bg-warning/10 px-2 py-2 text-sm leading-6 text-warning" data-testid="architect-links-silo-color-waiting">O Silo deste grupo ainda não tem contexto disponível com SiloDNA e SiloPage. Confira o vínculo e o fechamento em “Concluir formação” na aba Artigos.</p>;
+  }
   if (!contexts.length) {
     return <p className="mt-3 rounded border border-warning/40 bg-warning/10 px-2 py-2 text-sm leading-6 text-warning" data-testid="architect-links-silo-none">Nenhum par SiloDNA + SiloPage disponível para formar o contexto do grafo.</p>;
   }
@@ -21,7 +24,6 @@ export function LinksSiloPicker({ contexts, choice, onChange }: {
     return <p className="mt-3 text-sm leading-6 text-foreground" data-testid="architect-links-silo-by-color"><span className="font-semibold text-text-muted">Silo do grafo (cor da etiqueta):</span> {escolhido.label}</p>;
   }
   return <>
-    {choice.colorWaiting && <p className="mt-3 rounded border border-warning/40 bg-warning/10 px-2 py-2 text-sm leading-6 text-warning" data-testid="architect-links-silo-color-waiting">O Silo desta cor ainda não tem SiloDNA e SiloPage: ele fecha no “Concluir formação” da aba Artigos.</p>}
     <label className="mt-3 block text-sm font-semibold text-text-muted">Silo do grafo<select aria-label="Silo do InternalLinkGraph" data-testid="architect-links-silo-select" value={choice.siloId || ""} onChange={event => onChange(event.target.value || null)} className="mt-1 w-full rounded border border-divider bg-surface-elevated px-2 py-1.5 text-sm font-normal text-foreground">
       {contexts.map(context => <option key={context.siloId} value={context.siloId}>{context.label}</option>)}
     </select></label>

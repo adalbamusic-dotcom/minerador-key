@@ -1271,7 +1271,9 @@ function validationGroups(run: ImprovementRun, rows: Map<string, Row>): Provisio
   for (const target of run.targets) {
     if (!target.territoryRef) continue;
     const proposal = run.proposals.find(p => p.targetId === target.id)!;
-    const validating = proposal.status === "ready" || proposal.needsValidation === true;
+    // A planilha também precisa verificar a formação existente quando não há
+    // alteração proposta: ausência de mudança não comprova a SERP atual.
+    const validating = proposal.status === "ready" || proposal.needsValidation === true || (run.origin === "plan_sheet" && proposal.status === "adequate");
     if (validating && proposal.principalId && proposal.memberIds.length) {
       /*
        * 2026-10-17 · A RÉGUA ÚNICA (`serpCollectionAllowed`): a primeira coleta
@@ -1328,7 +1330,7 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
   // Check the final roles and composition before asking for editorial acceptance.
   // Os pares da SERP primeiro (regra anterior); as composições da IA depois. Uma
   // composição só começa dentro do prazo; a que sobra fica "precisa validar".
-  const pending = run.proposals.filter(p => p.status === "ready").sort((a, b) => Number(isListReading(a)) - Number(isListReading(b)));
+  const pending = run.proposals.filter(p => p.status === "ready" || (run.origin === "plan_sheet" && p.status === "adequate")).sort((a, b) => Number(isListReading(a)) - Number(isListReading(b)));
   const executed: { proposal: ImprovementProposal; group: ProvisionalArticleGroup }[] = [];
   const unreadable = (proposal: ImprovementProposal) => {
     proposal.status = "insufficient_evidence"; proposal.reasons.push("Não foi possível validar a composição pelo cache. Consulte ou complete a evidência antes do aceite.");
@@ -1761,6 +1763,19 @@ function rowsBeforeMoves(run: ImprovementRun, proposal: ImprovementProposal, row
 async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, proposal: ImprovementProposal): Promise<Outcome> {
   const context = runtime.context, target = run.targets.find(t => t.id === proposal.targetId)!;
   let input = await readInputs(context, [target.id]);
+  // A variante planejada ainda não tem writer transacional de vínculo. Detecte
+  // o Silo pelo território ou pelo artigo corrente ANTES de aceitar a SERP,
+  // incorporar keywords ou alterar assignments: a recusa do append, sozinha,
+  // ocorreria depois dessas escritas e deixaria a operação parcialmente aplicada.
+  const artigoAtual = latestArticleOf(target, input.workspace);
+  const siloPlanejado = input.workspace.siloDnas.some(version =>
+    version.payload.brandId === context.brandId && version.payload.compositionBasis === "planned_members" &&
+    ((target.territoryRef && version.payload.territoryRef === target.territoryRef) ||
+      (artigoAtual?.payload.siloId && version.payload.siloId === artigoAtual.payload.siloId)),
+  );
+  if (siloPlanejado || artigoAtual?.payload.siloMembershipRef) {
+    throw refusal("A formação vinculada à estrutura planejada do Silo ainda não pode ser gravada: aguarde a validação transacional do vínculo. Nenhuma alteração editorial foi aplicada nesta tentativa.");
+  }
   if (proposal.serpRefresh) return applySerpRefresh(runtime, run, proposal, target, input);
   // The last article may have committed before its journal response was lost.
   // Recover only when the DNA, marker and every assignment prove this run;

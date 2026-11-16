@@ -90,8 +90,8 @@ const TUTORIAL_TOPICS: readonly ContextHelpTopic[] = [
       { heading: "O que acontece", body: "Se falta SERP paga, aparece UMA confirmação de custo antes: nas linhas do plano, ‘Autorizar N consulta(s) e coletar (até US$ X)’; nos artigos sem plano, ‘Pagar N chamada(s) e validar’ ou “Validar sem pagar”. Cancelar não paga nada. No fim, cada linha mostra a cópia de trabalho (principal, secundárias, o que falta) pronta para concluir." },
       { heading: "Custo", body: "Google Ads grátis (cota). SERP paga no DataForSEO só para a principal que ainda não tem (4 lentes, cache de 30 dias primeiro); a secundária usa a SERP da principal. “Cancelar pagamento · analisar com o cache (US$ 0)” segue só com o que está guardado." },
       { heading: "Quem decide", body: "Você autoriza o custo. A proposta é revisada por você antes de gravar." },
-      { heading: "Depois", body: "Clique em “Concluir formação” (etapa 4)." },
-      { heading: "Situações comuns", body: "Principal com volume fica fixa; Travada nunca muda. Principal Livre e sem volume: na linha, “Procurar outra principal” → “Ver prévia da troca (grátis)” → “Confirmar a troca”. Keyword presa em outro artigo: “Retirar artigo do Silo” na linha. Keyword sem volume não entra como apoio (fica recolhida em ‘Sem volume’)." },
+      { heading: "Depois", body: "Clique em “Concluir formação” (etapa 4). Leituras separadas conservam suas prévias na sessão; uma mesma leitura não pode ser confirmada parcialmente enquanto os demais alvos prontos dependerem dela." },
+      { heading: "Situações comuns", body: "Principal com volume fica fixa; Travada nunca muda. Principal Livre e sem volume: na linha, “Procurar outra principal” → escolha a candidata e confira a intenção → “Ver prévia da troca (grátis)” → “Confirmar a troca”. A ordem por volume e cache não escolhe por você. Keyword presa em outro artigo: “Retirar artigo do Silo” na linha. Keyword sem volume não entra como apoio (fica recolhida em ‘Sem volume’)." },
     ],
     howToUse: [
       "Abra a aba “Artigos” e “Detalhes técnicos”.",
@@ -109,8 +109,8 @@ const TUTORIAL_TOPICS: readonly ContextHelpTopic[] = [
       { heading: "Quando usar", body: "Depois do “Processar artigos”, com as linhas prontas." },
       { heading: "O que acontece", body: "Nas linhas do plano: “Confirmar e gravar” (ou “Confirmar e fechar o Silo”) importa no Minerador as keywords novas, grava cada artigo (a versão 1 do novo, a seguinte do já formado), fecha o Silo do plano e relê tudo. Nos artigos sem plano, quando a SERP diverge, a janela “Concluir formação” pede “Concluir e manter”. Se parar no meio, “Continuar a gravação” segue sem pagar de novo." },
       { heading: "Custo", body: "Grátis." },
-      { heading: "Quem decide", body: "Você confirma. A aprovação é sua; a IA nunca conclui sozinha." },
-      { heading: "Depois", body: "Ligue os artigos em “Links internos” (etapa 6). Publicados não passam por aqui: use “Melhorar publicados…” (etapa 5)." },
+      { heading: "Quem decide", body: "Você confirma com seu usuário autenticado. A aprovação do Silo e da página exige a permissão de aprovar no Arquiteto; a IA nunca conclui sozinha." },
+      { heading: "Depois", body: "Ligue os artigos em “Links internos” (etapa 6). Se o fechamento ficou interrompido, selecione os artigos do Silo e use novamente “Concluir formação”; abrir a área não grava o fechamento. Publicados não passam por aqui: use “Melhorar publicados…” (etapa 5)." },
       { heading: "Situações comuns", body: "Um artigo com problema (mais de 6 keywords, disputa com outro artigo, SERP pendente) fica fora com o motivo; os outros seguem. Artigo que já está no Radar não é regravado aqui: use o refazedor." },
     ],
     howToUse: [
@@ -147,10 +147,10 @@ const TUTORIAL_TOPICS: readonly ContextHelpTopic[] = [
     id: "etapa-links-internos",
     title: "6 · Links internos",
     summary: "Planeja os links entre os artigos do Silo e a página do Silo, com as âncoras. “Processar links” propõe; “Confirmar links internos” aprova.",
-    description: "Links internos ajudam o Google e o leitor a entender quais páginas são do mesmo tema. Escolha o Silo pela etiqueta de cor ou pelo seletor “Silo do grafo”.",
+    description: "Links internos ajudam o Google e o leitor a entender quais páginas são do mesmo tema. Com grupo selecionado, usa-se somente o Silo dele; sem grupo, escolha no seletor “Silo do grafo”. Se faltar o par do grupo, confira o fechamento na aba Artigos. O papel marcado como previsto vem do plano e não indica que o Silo está fechado; o papel aprovado vem da formação consolidada do Silo.",
     sections: [
-      { heading: "Quando usar", body: "Depois de concluir os artigos do Silo." },
-      { heading: "O que acontece", body: "“Processar links” abre a prévia: o que a malha do Silo acrescenta, as âncoras e o custo. “Confirmar e processar” monta a proposta, que você revisa. “Confirmar links internos” grava o mapa aprovado. Mapa já aprovado e incompleto: “Completar a malha do Silo” (só acrescenta)." },
+      { heading: "Quando usar", body: "Depois de aprovar o Silo, sua página e os artigos. A página deve apontar para a versão atual do Silo, e os artigos devem ser as versões aprovadas referenciadas nele." },
+      { heading: "O que acontece", body: "“Processar links” abre a prévia: o que a malha do Silo acrescenta, as âncoras e o custo. Se a seleção ou a composição mudar, abra uma nova prévia. Processe um Silo por vez quando o custo dos demais for apenas estimado. Se algum Silo não estiver pronto, resolva a pendência antes de processar o lote. “Confirmar e processar” monta a proposta, que você revisa. “Confirmar links internos” confere novamente as aprovações e versões e grava o mapa aprovado. Mapa já aprovado e incompleto: “Completar a malha do Silo” (só acrescenta)." },
       { heading: "Custo", body: "A sugestão das âncoras usa a IA da plataforma (o número de chamadas aparece na prévia). Aprovar é grátis." },
       { heading: "Quem decide", body: "Você revisa e aprova." },
       { heading: "Depois", body: "Envie os artigos prontos ao Radar (etapa 7)." },
@@ -196,7 +196,7 @@ const TUTORIAL_TOPICS: readonly ContextHelpTopic[] = [
     howToUse: [
       "Na aba “Silos”, clique em “Desfazer Silo” na linha do Silo (ou em “Desfazer os Silos sugeridos”).",
       "Leia a confirmação, digite o que ela pede e confirme.",
-      "Para apagar keywords: marque os artigos e clique em “Excluir no Minerador”.",
+      "Para apagar keywords: marque os artigos e clique em “Excluir no Minerador”. Se algum artigo selecionado não puder ser identificado com suas keywords, o encaminhamento é bloqueado para não enviar apenas parte do lote.",
     ],
     keywords: ["desfazer silo", "excluir", "apagar", "desfazer o silo inteiro", "silo sugerido", "excluir no minerador", "lixeira", "recriar o silo do plano"],
   },
@@ -332,7 +332,7 @@ const IMPROVEMENT_TOPICS: readonly ContextHelpTopic[] = [
     id: "detalhes-tecnicos",
     title: "Detalhes técnicos",
     summary: "O painel do topo da aba Artigos: os 3 botões em sequência, o andamento, o refazedor e as funções avançadas da aba.",
-    description: "No topo: “Processar artigos”, “Concluir formação” e “Melhorar publicados…”; logo abaixo, o andamento e a prévia das linhas do plano. Depois, os avisos que pedem ação e as funções avançadas: “Análise por keyword (avançado)” (mesmo assunto no Google, reforço por publicado), “Diferenciar publicados (avançado)” e o objetivo do lote. Abre sozinho quando há algo a fazer.",
+    description: "No topo: “Processar artigos”, “Concluir formação” e “Melhorar publicados…”; logo abaixo, o andamento e a prévia das linhas do plano. Ao fechar o Silo do plano, artigos adicionais ou duplicidade de Assunto são informados como conflito para conferência; nenhum artigo é retirado automaticamente. Depois, os avisos que pedem ação e as funções avançadas: “Análise por keyword (avançado)” (mesmo assunto no Google, reforço por publicado), “Diferenciar publicados (avançado)” e o objetivo do lote. Abre sozinho quando há algo a fazer.",
     sections: [
       { heading: "Reforçar publicados (avançado)", body: "Tabela por página publicada: Forte (3+ páginas em comum) vem marcada, Provável desmarcada. “Gravar reforços” grava numa confirmação. Para os publicados sem par, “Buscar keywords para os publicados sem par” faz uma rodada com teto de US$ 1,00." },
     ],

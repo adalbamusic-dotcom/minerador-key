@@ -97,9 +97,9 @@ test("azul real · UMA tabela: os 7 do plano na ordem do plano (4 artigos da mes
   // 2026-10-16 · restauração do fluxo de sempre: com um plano no recorte, a barra é a de sempre (sem etapas do plano).
   const barra = screen.get("architect-articles-formation-actions");
   assert.equal(barra.dataset.planMode, undefined);
-  assert.deepEqual([...barra.querySelectorAll("button")].map(botao => botao.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
+  assert.deepEqual([...barra.querySelectorAll("button[data-step]")].map(botao => botao.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
   // 2026-10-17 (noite) · os 3 em sequência: sem nada marcado e sem publicado no recorte, os três esperam (o porquê no title).
-  assert.deepEqual([...barra.querySelectorAll<HTMLButtonElement>("button")].map(botao => botao.disabled), [true, true, true], "sem nada marcado, Processar e Concluir esperam a seleção; sem publicado, o refazedor espera o Concluir");
+  assert.deepEqual([...barra.querySelectorAll<HTMLButtonElement>("button[data-step]")].map(botao => botao.disabled), [true, true, true], "sem nada marcado, Processar e Concluir esperam a seleção; sem publicado, o refazedor espera o Concluir");
   // A linha do artigo do plano ganha os selos curtos: trava, volume, SERP e formação.
   const selosK9 = [...linhaDaMesa("cand-k9").querySelectorAll<HTMLElement>("[data-plan-seal]")].map(selo => `${selo.dataset.planSeal}:${selo.textContent}`);
   assert.deepEqual(selosK9, ["lock:Travada", "volume:Vol. 5.400", "serp:SERP 4/4", "formation:Aguardando formação"]);
@@ -146,7 +146,7 @@ test("'Todos' (azul e laranja com plano): a barra de sempre — Processar artigo
   const preparos = chamadas.filter(chamada => chamada.body?.action === "prepare");
   assert.deepEqual(preparos.map(chamada => [chamada.body.origin, chamada.body.discover, chamada.body.targetIds]), [["plan_sheet", true, ["k9"]]]);
   assert.equal(chamadas.some(chamada => chamada.url === "/api/arquiteto/keyword-serp"), false, "o Validar SERP à parte saiu");
-  assert.match(linhaDaMesa("cand-k9").querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /^Cópia de trabalho \(nada gravado\)/);
+  assert.match(linhaDaMesa("cand-k9").querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /^Cópia de trabalho \(ArticleDNA não gravado\)/);
   assert.match(linhaDoPlano("k13")!.querySelector("[data-testid='architect-plan-row-result']")!.textContent!, /^Presa no artigo/);
   assert.equal(screen.query("architect-plan-sheet-progress"), null, "nada fica girando");
   semMinerador();
@@ -229,7 +229,7 @@ test("marca grande (AdalbaPro) sem plano na cor: só a tabela de sempre; a barra
   // A barra de sempre (a de 4d546ce): Processar artigos · Concluir formação · Melhorar publicados…, no mesmo lugar.
   const barra = screen.get("architect-articles-formation-actions");
   assert.equal(barra.dataset.planMode, undefined);
-  assert.deepEqual([...barra.querySelectorAll("button")].map(botao => botao.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
+  assert.deepEqual([...barra.querySelectorAll("button[data-step]")].map(botao => botao.textContent), ["Processar artigos", "Concluir formação", "Melhorar publicados…"]);
   await marcar(linhaDaMesa("art-7"));
   await screen.click("architect-articles-top-process"); await assentar();
   assert.deepEqual(registro.processar, [["art-7"]]);

@@ -1,5 +1,15 @@
 # Estado atual — Minerador
 
+## Exclusão completa: regra aprovada e implementação — 2026-11-16
+
+As descrições históricas abaixo de preservação de ArticleDNA e aprovações relatam o comportamento implementado em 2026-10-18, não a decisão atual. A regra de preservar versões dos itens elegíveis à exclusão definitiva foi **SUBSTITUÍDA** pela decisão do dono de 2026-11-01 e pela SDD `docs/compartilhado/sdd-exclusao-completa-artefatos-2026-11-01.md`. **Ainda não implementado:** o botão existente ainda preserva esse histórico; não anunciar que a purga integral ocorreu. A implementação deve preservar os demais itens e marcas e verificar dependências na transação.
+
+## Importação de keyword além da milésima — 2026-11-15
+
+**Correção local com fixtures; clique real pendente.** A importação comum e a releitura após falha de inserção usam o leitor paginado de keywords ativas da própria marca, antes de decidir se o texto já existe. O leitor avança pela quantidade devolvida, inclusive com limite menor que 1.000, e recusa IDs repetidos. O cenário E-2 cobre 1.001 keywords e confirma que a última não é criada novamente; o teste de aprovação preservada cobre a mesma entrada sem alterar decisões anteriores. A paginação não é uma transação e não impede sozinha importações concorrentes iguais. Nenhuma keyword real foi criada para este teste.
+
+`npm run test:regressao -- minerador`: verde; a suíte completa do Minerador mantém 25 falhas no teto histórico e os cenários incluem 16 testes pendentes. TypeScript passou após a alteração.
+
 ## "Aprovar e enviar" do verde: 503 depois de 6 Assuntos e "Nada foi gravado" — 2026-10-19
 
 Defeito relatado pelo coordenador (teste real, AdalbaPro `61d2e019…`, grupo verde, 25 keywords já aprovadas: 21 páginas de artigo + 4 de Silo). A prévia dizia "17 viram o Assunto"; o aplicar respondeu 503 (`APPROVE_AND_SEND_FAILED`) e a tela disse "Nada foi gravado", mas 6 Assuntos estavam no banco (SELECT só de leitura). **Verificado no código, confirmado por teste e por medição só de leitura; validado manualmente: não** (o coordenador roda o botão de novo).

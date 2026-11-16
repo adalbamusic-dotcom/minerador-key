@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { comProductShell, montarRadar, React, type RadarDomScreen } from "./radar-dom-harness.mts";
-import { AZUL, GRUPOS, MARCA_WIFI, TERRITORIO, grupoDaKeyword, mesaWifi } from "./arquiteto-planilha-primeiro-fixtures.mts";
+import { AZUL, GRUPOS, LARANJA, MARCA_WIFI, TERRITORIO, grupoDaKeyword, mesaWifi } from "./arquiteto-planilha-primeiro-fixtures.mts";
 import { MesaDoPlano, ROTULOS_REMOVIDOS, novoRegistro, ultimoAviso, type Registro } from "./arquiteto-mesa-do-plano-harness.mts";
 import { planPrincipalSwapCandidates, type PlanSheetArticle } from "../lib/arquiteto/plan-article-sheet.ts";
 
@@ -48,7 +48,8 @@ function rede(opcoes: { serpLida?: Record<string, number>; serpPorPagar?: boolea
       if (body.action === "prepare") {
         const escolhida = body.principalChoice?.k10;
         if (opcoes.serpPorPagar && body.discover) return responder(comSerpPorPagar(body.targetIds));
-        return responder(execucao({ proposals: body.targetIds.map((id: string) => id === "k10" && escolhida ? proposta("k10", { currentPrimaryId: "k10", principalId: escolhida, memberIds: [escolhida] }) : proposta(id)) }));
+        const numero = chamadas.filter(chamada => chamada.body?.action === "prepare").length;
+        return responder(execucao({ runId: `11111111-1111-4111-8111-${String(numero).padStart(12, "0")}`, proposals: body.targetIds.map((id: string) => id === "k10" && escolhida ? proposta("k10", { currentPrimaryId: "k10", principalId: escolhida, memberIds: [escolhida] }) : proposta(id)) }));
       }
       if (body.action === "collect") return responder(execucao({ proposals: ["k9", "k10", "k11", "k12", "k13", "k14", "k15"].map(id => proposta(id)) }));
       if (body.action === "apply") {
@@ -63,8 +64,8 @@ const assentar = async () => { for (let i = 0; i < 25; i += 1) await React.act(a
 const AZUL_FILTRO = { kind: "groups" as const, color: "azul" as const, groupIds: [AZUL] };
 /** Os 7 artigos do plano já formados. */
 const formados = (): PlanSheetArticle[] => ["k9", "k10", "k11", "k12", "k13", "k14", "k15"].map(id => ({ articleId: id, versionNumber: 1, subjectKeywordId: id, principalKeywordId: id, keywordIds: [id], slug: id, siloRef: TERRITORIO, siloLabel: "Wi-Fi e fibra óptica" }));
-const mesa = (opcoes: { articles?: PlanSheetArticle[]; keywords?: Record<string, unknown>[] } = {}) => comProductShell(React.createElement(MesaDoPlano, {
-  marca: MARCA_WIFI, keywords: opcoes.keywords ?? mesaWifi(), articles: opcoes.articles ?? [], mesa: [], filtro: AZUL_FILTRO, registro,
+const mesa = (opcoes: { articles?: PlanSheetArticle[]; keywords?: Record<string, unknown>[]; filtro?: typeof AZUL_FILTRO | { kind: "all" } } = {}) => comProductShell(React.createElement(MesaDoPlano, {
+  marca: MARCA_WIFI, keywords: opcoes.keywords ?? mesaWifi(), articles: opcoes.articles ?? [], mesa: [], filtro: opcoes.filtro ?? AZUL_FILTRO, registro,
   groupOf: (id: string) => GRUPOS[id] ?? null, keywordGroupOf: grupoDaKeyword,
 }));
 const linhaDa = (keywordId: string) => screen.container.querySelector<HTMLElement>(`[data-testid="architect-plan-table-row"][data-keyword-id="${keywordId}"]`)!;
@@ -115,14 +116,14 @@ test("'Processar artigos' (barra de sempre) com as linhas do plano marcadas: a l
   assert.match(screen.get("architect-plan-sheet-serp-cost").textContent!, /^SERP no DataForSEO: 4 consulta\(s\), até US\$ 0,014 — a primeira coleta da principal que falta \(inclusive a principal de identidade, sem buscas no Google Ads\)/);
   await screen.click(botao("Cancelar", previa)!); await assentar();
   assert.equal(chamadas.filter(chamada => chamada.body?.action === "collect").length, 0, "cancelar não paga nada");
-  assert.match(ultimoAviso(registro), /a coleta paga foi cancelada — nada foi pago nem gravado/);
+  assert.match(ultimoAviso(registro), /a coleta paga foi cancelada — nada foi pago e nenhum artigo foi gravado/);
   await screen.click("architect-articles-top-process"); await assentar();
   await screen.click("architect-plan-sheet-confirm"); await assentar();
   const coletas = chamadas.filter(chamada => chamada.body?.action === "collect");
   assert.equal(coletas.length, 1);
   assert.equal(coletas[0].body.authorizedCostUsd, 0.014, "só o custo autorizado na prévia; o servidor confere volume e identidade");
-  assert.match(resultado("k11"), /^Cópia de trabalho \(nada gravado\): principal “wi-fi lento” \(Travada, fica\) · sem secundária\. Pronto para “Concluir formação”\.$/);
-  assert.match(ultimoAviso(registro), /^Processar artigos: 7 artigo\(s\) lido\(s\), reforço proposto para 0; SERP paga agora: 4 consulta\(s\)\. Nada foi gravado/);
+  assert.match(resultado("k11"), /^Cópia de trabalho \(ArticleDNA não gravado\): principal “wi-fi lento” \(Travada, fica\) · sem secundária\. Pronto para “Concluir formação”\.$/);
+  assert.match(ultimoAviso(registro), /^Processar artigos: 7 artigo\(s\) lido\(s\), reforço proposto para 0; SERP paga agora: 4 consulta\(s\)\. Nenhum artigo foi gravado/);
   /* 2026-10-18 · o resumo do lote vai para o sino, não para uma faixa na tela (regra do dono). */
   assert.equal(screen.query("architect-plan-sheet-summary"), null, "o resumo não volta a ser faixa na tela");
   assert.equal(chamadas.filter(chamada => chamada.url === "/api/arquiteto/keyword-serp").length, 0, "o Validar SERP de coleta à parte saiu (F3 da linha única)");
@@ -153,6 +154,263 @@ test("'Concluir formação' (barra de sempre) grava a cópia de trabalho do Proc
   semMinerador();
 });
 
+test("Concluir formação mantém principal sem candidata do artigo já formado e fecha o Silo pelo mesmo botão", async () => {
+  rede();
+  const fallback = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (String(input) === "/api/arquiteto/article-improvement" && body?.action === "prepare" && body.discover) {
+      chamadas.push({ url: String(input), method: "POST", body });
+      return responder(execucao({ proposals: body.targetIds.map((id: string) => proposta(id, {
+        status: "adequate",
+        reasons: id === "k10" ? ["Volume 0 sem candidata: a principal fica; nenhuma troca às cegas."] : ["Sem mudança."],
+      })) }));
+    }
+    return fallback(input, init);
+  };
+  await screen.render(mesa({ articles: formados() })); await assentar();
+  await marcarTodas();
+  await screen.click("architect-articles-top-process"); await assentar();
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  const linha = screen.all("architect-plan-sheet-preview-line").find(item => item.textContent!.startsWith("diferença"));
+  assert.ok(screen.text().includes("Volume 0 sem candidata"));
+  assert.ok(linha || screen.get("architect-plan-sheet-preview"));
+  assert.equal((screen.get("architect-plan-sheet-confirm") as HTMLButtonElement).disabled, false);
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(registro.silos, [[AZUL]], "o mesmo clique confirma o fechamento");
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "apply").length, 0, "nenhum ArticleDNA é regravado sem mudança");
+});
+
+for (const leitura of ["conflito", "falha"] as const) test(`Concluir não promete nem fecha o Silo quando a leitura traz ${leitura}`, async () => {
+  rede();
+  const fallback = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (String(input) === "/api/arquiteto/article-improvement" && body?.action === "prepare" && body.discover) {
+      chamadas.push({ url: String(input), method: "POST", body });
+      return responder(execucao({ proposals: body.targetIds.map((id: string) => proposta(id, { status: "adequate", reasons: ["Sem mudança."] })) }));
+    }
+    return fallback(input, init);
+  };
+  registro.closureRead = leitura === "conflito"
+    ? async () => ({ ready: false, detail: "Há 7 formações fora do cenário." })
+    : async () => { throw new Error("leitura indisponível"); };
+  await screen.render(mesa({ articles: formados() })); await assentar();
+  await marcarTodas();
+  await screen.click("architect-articles-top-process"); await assentar();
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  const silo = screen.get("architect-plan-sheet-checklist").querySelector('[data-check="silo"]')!;
+  assert.equal(silo.getAttribute("data-ok"), "false");
+  assert.match(silo.textContent!, leitura === "conflito" ? /7 formações fora do cenário/ : /Não foi possível ler o fechamento/);
+  assert.equal((screen.get("architect-plan-sheet-confirm") as HTMLButtonElement).disabled, true);
+  assert.deepEqual(registro.silos, []);
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "apply").length, 0);
+});
+
+test("plano pendente na principal Livre aparece na prévia e só grava ao confirmar Concluir", async () => {
+  rede();
+  const fallback = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (String(input) === "/api/arquiteto/article-improvement" && body?.action === "prepare" && body.discover) {
+      chamadas.push({ url: String(input), method: "POST", body });
+      return responder(execucao({ proposals: body.targetIds.map((id: string) => proposta(id, {
+        status: id === "k10" ? "ready" : "adequate",
+        reasons: ["Volume 0 sem candidata: a principal fica; nenhuma troca às cegas."],
+      })) }));
+    }
+    return fallback(input, init);
+  };
+  await screen.render(mesa({ articles: formados() })); await assentar();
+  await marcarTodas();
+  await screen.click("architect-articles-top-process"); await assentar();
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "apply").length, 0, "prévia não grava");
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.targetIds), [["k10"]]);
+  assert.deepEqual(registro.silos, [[AZUL]]);
+});
+
+test("processamentos parciais da mesma cor preservam cada cópia, e concluir cada subconjunto não elimina a outra", async () => {
+  rede();
+  await screen.render(mesa()); await assentar();
+  const marcar = async (id: string) => { await screen.click(linhaDa(id).querySelector<HTMLInputElement>("input[type='checkbox']")!); await assentar(); };
+  await marcar("k9");
+  await screen.click("architect-articles-top-process"); await assentar();
+  await marcar("k9"); await marcar("k10");
+  await screen.click("architect-articles-top-process"); await assentar();
+  await marcar("k9");
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false, "ambas as leituras continuam prontas");
+  await marcar("k9"); // k10 sozinho, concluir só sua execução
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "prepare").length, 2, "a prévia reutiliza a segunda leitura");
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => [chamada.body.runId, chamada.body.targetIds]), [["11111111-1111-4111-8111-000000000002", ["k10"]]]);
+  await marcar("k10"); await marcar("k9");
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false, "concluir k10 não descarta a cópia de k9");
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "prepare").length, 2, "a primeira leitura também foi preservada");
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => [chamada.body.runId, chamada.body.targetIds]), [["11111111-1111-4111-8111-000000000002", ["k10"]], ["11111111-1111-4111-8111-000000000001", ["k9"]]]);
+  semMinerador();
+});
+
+test("a mesma confirmação reúne leituras separadas da cor e preserva o hash de cada run", async () => {
+  rede();
+  await screen.render(mesa()); await assentar();
+  const marcar = async (id: string) => { await screen.click(linhaDa(id).querySelector<HTMLInputElement>("input[type='checkbox']")!); await assentar(); };
+  await marcar("k9"); await screen.click("architect-articles-top-process"); await assentar();
+  await marcar("k9"); await marcar("k10"); await screen.click("architect-articles-top-process"); await assentar();
+  await marcar("k9");
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "prepare").length, 2);
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => [chamada.body.runId, chamada.body.targetIds]), [
+    ["11111111-1111-4111-8111-000000000001", ["k9"]],
+    ["11111111-1111-4111-8111-000000000002", ["k10"]],
+  ]);
+  assert.deepEqual(registro.silos, [[AZUL]], "fecha a cor uma única vez após as duas execuções");
+  semMinerador();
+});
+
+test("ao recarregar duas leituras, Concluir usa cada execução e hash originais", async () => {
+  rede();
+  const fallback = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes("recovery=plan_sheet")) {
+      return responder([
+        execucao({ runId: "run-new", decisionHash: "new", groupScope: { groupId: AZUL }, discovery: { requested: true }, proposals: [proposta("k10")] }),
+        execucao({ runId: "run-old", decisionHash: "old", groupScope: { groupId: AZUL }, discovery: { requested: true }, proposals: [proposta("k9")] }),
+      ]);
+    }
+    return fallback(input, init);
+  };
+  await screen.render(mesa()); await assentar();
+  for (const id of ["k9", "k10"]) await screen.click(linhaDa(id).querySelector<HTMLInputElement>("input[type='checkbox']")!);
+  await assentar();
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => [chamada.body.runId, chamada.body.decisionHash, chamada.body.targetIds]), [
+    ["run-old", "old", ["k9"]], ["run-new", "new", ["k10"]],
+  ]);
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "prepare").length, 0);
+});
+
+test("duas gravações interrompidas são retomadas uma a uma pelo botão existente", async () => {
+  rede();
+  const fallback = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (String(input).includes("recovery=plan_sheet")) return responder([
+      execucao({ runId: "write-one", state: "applying", acceptedIds: ["k9"], proposals: [proposta("k9")] }),
+      execucao({ runId: "write-two", state: "applying", acceptedIds: ["k10"], proposals: [proposta("k10")] }),
+    ]);
+    if (body?.action === "apply") {
+      chamadas.push({ url: String(input), method: "POST", body });
+      const id = body.runId === "write-one" ? "k9" : "k10";
+      return responder(execucao({ runId: body.runId, state: "complete", acceptedIds: [id], outcomes: [{ targetId: id, status: "improved", message: "Gravado e relido." }] }));
+    }
+    return fallback(input, init);
+  };
+  await screen.render(mesa()); await assentar();
+  await screen.click(botao("Continuar a gravação")!); await assentar();
+  assert.ok(botao("Continuar a gravação"), "a segunda gravação continua visível");
+  await screen.click(botao("Continuar a gravação")!); await assentar();
+  assert.equal(botao("Continuar a gravação"), undefined);
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => chamada.body.runId), ["write-one", "write-two"]);
+});
+
+test("cancelar SERP paga preserva outras leituras da mesma cor e usa a execução original", async () => {
+  rede();
+  const fallback = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (String(input) === "/api/arquiteto/article-improvement" && body?.action === "prepare") {
+      chamadas.push({ url: String(input), method: "POST", body });
+      return responder(body.targetIds.includes("k10")
+        ? comSerpPorPagar(["k10"])
+        : execucao({ runId: "first", decisionHash: "first-hash", proposals: [proposta("k9")] }));
+    }
+    return fallback(input, init);
+  };
+  await screen.render(mesa()); await assentar();
+  const marcar = async (id: string) => { await screen.click(linhaDa(id).querySelector<HTMLInputElement>("input[type='checkbox']")!); await assentar(); };
+  await marcar("k9"); await screen.click("architect-articles-top-process"); await assentar();
+  await marcar("k9"); await marcar("k10"); await screen.click("architect-articles-top-process"); await assentar();
+  await screen.click(botao("Cancelar", screen.get("architect-plan-sheet-preview"))!); await assentar();
+  await marcar("k10"); await marcar("k9");
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => [chamada.body.runId, chamada.body.decisionHash]), [["first", "first-hash"]]);
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "prepare").length, 2);
+});
+
+test("falha na recuperação bloqueia processamento até nova leitura", async () => {
+  rede();
+  const fallback = globalThis.fetch;
+  globalThis.fetch = async (input, init) => String(input).includes("recovery=plan_sheet")
+    ? responder(null, false, { error: "Falha de leitura" }) : fallback(input, init);
+  await screen.render(mesa()); await assentar();
+  await screen.click(linhaDa("k9").querySelector<HTMLInputElement>("input[type='checkbox']")!); await assentar();
+  await screen.click("architect-articles-top-process"); await assentar();
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "prepare").length, 0);
+  assert.match(ultimoAviso(registro), /ações da planilha permanecem bloqueadas/i);
+});
+
+test("reprocessar um artigo do lote substitui apenas a cópia dele, sem ressuscitar a anterior", async () => {
+  rede();
+  await screen.render(mesa()); await assentar();
+  const marcar = async (id: string) => { await screen.click(linhaDa(id).querySelector<HTMLInputElement>("input[type='checkbox']")!); await assentar(); };
+  await marcar("k9"); await marcar("k10");
+  await screen.click("architect-articles-top-process"); await assentar();
+  await marcar("k9");
+  await screen.click("architect-articles-top-process"); await assentar();
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  await marcar("k10"); await marcar("k9");
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false, "a proposta de k9 ainda está pronta");
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => [chamada.body.runId, chamada.body.targetIds]), [
+    ["11111111-1111-4111-8111-000000000002", ["k10"]],
+    ["11111111-1111-4111-8111-000000000001", ["k9"]],
+  ]);
+  semMinerador();
+});
+
+test("processar outra cor conserva a primeira e confirma cada execução do grupo certo", async () => {
+  rede();
+  await screen.render(mesa({ filtro: { kind: "all" } })); await assentar();
+  const marcar = async (id: string) => { await screen.click(linhaDa(id).querySelector<HTMLInputElement>("input[type='checkbox']")!); await assentar(); };
+  await marcar("k9"); await screen.click("architect-articles-top-process"); await assentar();
+  await marcar("k9"); await marcar("l1"); await screen.click("architect-articles-top-process"); await assentar();
+  await marcar("k9");
+  assert.equal((screen.get("architect-articles-top-confirm") as HTMLButtonElement).disabled, false);
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "prepare").length, 2);
+  await screen.click("architect-plan-sheet-confirm"); await assentar();
+  assert.deepEqual(chamadas.filter(chamada => chamada.body?.action === "apply").map(chamada => [chamada.body.runId, chamada.body.targetIds]).sort(([a], [b]) => String(a).localeCompare(String(b))), [
+    ["11111111-1111-4111-8111-000000000001", ["k9"]],
+    ["11111111-1111-4111-8111-000000000002", ["l1"]],
+  ]);
+  assert.deepEqual([...registro.silos[0]].sort(), [AZUL, LARANJA].sort());
+  semMinerador();
+});
+
+test("concluir parte de uma única leitura avisa antes de consumir as propostas restantes", async () => {
+  rede();
+  await screen.render(mesa()); await assentar();
+  const marcar = async (id: string) => { await screen.click(linhaDa(id).querySelector<HTMLInputElement>("input[type='checkbox']")!); await assentar(); };
+  await marcar("k9"); await marcar("k10");
+  await screen.click("architect-articles-top-process"); await assentar();
+  await marcar("k10");
+  await screen.click("architect-articles-top-confirm"); await assentar();
+  assert.match(screen.get("architect-plan-sheet-preview").textContent!, /selecione todos os artigos prontos da mesma leitura/);
+  assert.equal(chamadas.filter(chamada => chamada.body?.action === "apply").length, 0, "nenhuma parte é gravada");
+  assert.equal((screen.get("architect-plan-sheet-confirm") as HTMLButtonElement).disabled, true);
+  semMinerador();
+});
+
 test("Procurar outra principal na linha livre: escolha entre as candidatas, prévia com a troca, uma confirmação, nova versão", async () => {
   rede({ serpLida: { k9: 4, s1: 4, s2: 2 } });
   await screen.render(mesa()); await assentar();
@@ -160,8 +418,12 @@ test("Procurar outra principal na linha livre: escolha entre as candidatas, pré
   const escolha = screen.get("architect-plan-sheet-preview");
   assert.equal(escolha.dataset.action, "chooseSwap");
   const seletor = escolha.querySelector("select")!;
-  assert.deepEqual([...seletor.options].map(option => option.value), ["s1", "s2"], "mais lentes de SERP primeiro; sem volume e publicada fora");
+  assert.deepEqual([...seletor.options].map(option => option.value), ["", "s1", "s2"], "a ordem é informativa, não escolhe a principal pela pessoa");
+  assert.equal(seletor.value, "", "nenhuma candidata é escolhida automaticamente");
+  assert.equal((screen.get("architect-plan-sheet-swap-preview") as HTMLButtonElement).disabled, true);
+  assert.equal(chamadas.some(chamada => chamada.body?.principalChoice), false, "não prepara uma troca antes da escolha");
   await screen.select(seletor, "s2");
+  assert.equal((screen.get("architect-plan-sheet-swap-preview") as HTMLButtonElement).disabled, false);
   await screen.click("architect-plan-sheet-swap-preview"); await assentar();
   const preparo = chamadas.find(chamada => chamada.body?.action === "prepare")!;
   assert.deepEqual(preparo.body.principalChoice, { k10: "s2" });

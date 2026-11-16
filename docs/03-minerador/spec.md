@@ -561,6 +561,8 @@ A seleção total não tem limite funcional. O background cria uma operação ú
 
 ## 52. Ciclo de vida canônico de exclusão de keywords — 2026-08-20
 
+**Atualização de contrato de 01/11/2026:** a preservação obrigatória dos artefatos editoriais dos itens efetivamente elegíveis à exclusão definitiva, afirmada no texto histórico desta seção, fica **SUBSTITUÍDA** pela [SDD de exclusão completa aprovada](../compartilhado/sdd-exclusao-completa-artefatos-2026-11-01.md). As regras de proteção das publicações, itens não selecionados e outras marcas continuam aplicáveis. O código atual ainda preserva parte desses artefatos; a purga integral pelo mesmo acionador não está implementada.
+
 Keyword não publicada pode ser excluída definitivamente após o usuário digitar o nome exato da keyword, mesmo quando possui medições, proveniência, análise, KeywordDNA ou histórico próprio. A exclusão usa uma única operação transacional server-side, limpa dependências próprias de forma explícita e preserva referências compartilhadas e artefatos editoriais append-only.
 
 Keyword publicada é identificada no servidor por publicação formal em `analise_semantica.site_origin` ou por linhagem real até `PublicationRecord`, com evidência técnica e confirmação canônica pelo nome exato. `status = 'publicado'` ou `published` sem vínculo formal é somente sinal legado não verificado e não ativa a janela de recuperação. DNA, ArticleDNA, workflow, handoff, métricas, análise ou status editorial isolados nunca ativam a janela.

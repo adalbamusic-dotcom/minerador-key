@@ -498,7 +498,7 @@ test("§6 — o servidor registra o diagnóstico, e ele não vai para a mesa", (
 test("E — ArticleDNA com siloId null resolve SiloDNA e SiloPage pelo territoryRef", () => {
   const resolucao = resolveCanonicalSiloForArticle({
     article: { articleId: "art-1", siloId: null, territoryRef: "territory:skincare" } as never,
-    siloVersions: [{ versionId: "silo:v1", payload: { siloId: "silo-1", territoryRef: "territory:skincare" } } as never],
+    siloVersions: [{ versionId: "silo:v1", payload: { siloId: "silo-1", territoryRef: "territory:skincare", pillarArticleId: "art-1", supportArticleIds: [] } } as never],
     siloPageVersions: [{ versionId: "page:v1", payload: { siloPageId: "page-1", siloId: "silo-1" } } as never],
   });
   assert.equal(resolucao.ok, true, resolucao.ok ? "" : resolucao.reason);

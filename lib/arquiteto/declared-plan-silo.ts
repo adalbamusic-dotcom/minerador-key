@@ -195,7 +195,7 @@ export function planSiloCreationRefusal(input: {
  * ser o de outra cor) e, com artigos marcados cujo Silo a tela não achava, "Processar links" respondia "Selecione o
  * Silo do grafo". Agora, a MESMA escolha, sem mapa:
  *  - com a etiqueta de cor: o Silo da cor (o ligado ao grupo) que tem o par SiloDNA + SiloPage é escolhido sozinho;
- *  - sem cor (ou a cor sem Silo pronto): a escolha da pessoa no seletor de sempre ("Silo do grafo"), que lista só os
+ *  - sem cor: a escolha da pessoa no seletor de sempre ("Silo do grafo"), que lista só os
  *    Silos com o par; sem escolha, o primeiro.
  * `byColor` diz que a cor decidiu (o seletor fica como leitura). `colorWaiting` diz que a cor tem Silo, mas ele ainda
  * não tem o par (o grafo espera o fechamento do Silo).
@@ -212,9 +212,10 @@ export function resolveLinksSilo(input: {
     const escolhido = daCor.find(context => context.siloId === input.selected) ?? daCor[0];
     return { siloId: escolhido.siloId, byColor: true, colorWaiting: false };
   }
-  const colorWaiting = Boolean(input.colorSiloRefs?.length);
+  // Um filtro de grupo ativo, inclusive sem vínculo, nunca seleciona outro Silo.
+  if (input.colorSiloRefs !== null) return { siloId: null, byColor: false, colorWaiting: true };
   const escolhido = input.contexts.find(context => context.siloId === input.selected) ?? input.contexts[0] ?? null;
-  return { siloId: escolhido?.siloId ?? null, byColor: false, colorWaiting };
+  return { siloId: escolhido?.siloId ?? null, byColor: false, colorWaiting: false };
 }
 
 /** O caminho de sempre do Silo do plano, dito nas recusas (2026-10-16: restauração do fluxo de sempre). */

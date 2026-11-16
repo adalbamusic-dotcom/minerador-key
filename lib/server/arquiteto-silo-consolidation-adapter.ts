@@ -1,8 +1,9 @@
 import "server-only";
 
 import type { PipelineContext } from "./pipeline-runtime";
-import { PipelineRuntimeError, pipelineErrorFromSupabase } from "./pipeline-runtime";
+import { PipelineRuntimeError, pipelineErrorFromSupabase, resolvePipelineContext } from "./pipeline-runtime";
 import { readRpcDomainError } from "@/lib/arquiteto/silo-working-copy-record";
+import { siloRpcErrorDiagnostic } from "@/lib/arquiteto/silo-closure-diagnostics";
 import { canonicalVersionFromRow } from "./arquiteto-persistence";
 import { assertConsolidatedSiloSubject } from "./arquiteto-subject-guard";
 import { linkDeclaredPlanGroupToSilo, type SiloGroupLinkOutcome } from "./arquiteto-silo-group-link";
@@ -26,6 +27,8 @@ import {
   refuseArticleVersionBinding,
   refusePillarDecisionBinding,
   refuseStatusEscalation,
+  refusePlannedSiloBinding,
+  refusePlannedSiloConfirmation,
   type BindingRefusal,
   type RemoteArticleVersion,
 } from "@/lib/arquiteto/silo-dna-binding";
@@ -33,6 +36,7 @@ import {
   confirmSiloConsolidation,
   resolveSiloConsolidationReadiness,
   type SiloConsolidationDecision,
+  type PlannedSiloConsolidationDecision,
 } from "@/lib/arquiteto/silo-consolidation-territorial";
 import {
   resolveSiloPageApprovalReadiness,
@@ -41,6 +45,11 @@ import {
 import { CURRENT_SCENARIO_REQUIRES_PUBLISHED_VERIFICATION } from "@/lib/arquiteto/publication-scenario";
 import type { TerritoryCandidate } from "@/lib/arquiteto/territory";
 import type { SiloDNA, SiloPage, VersionEnvelope } from "@/lib/arquiteto/contracts";
+import { PlannedSiloSourceRefSchema, type PlannedSiloSourceRef, type PlannedSiloCurrentSource } from "@/lib/arquiteto/planned-silo-member";
+import { plannedSiloComposition, plannedSiloTerritoryMatches } from "@/lib/arquiteto/planned-silo-composition";
+import { readArchitectSubjectStanding } from "@/lib/arquiteto/declared-subject";
+import { buildCanonicalWorkflowWorkspaceItems } from "@/lib/arquiteto/canonical-workspace";
+import { loadCanonicalArquitetoWorkspace } from "./arquiteto-workspace";
 
 /**
  * ADAPTER DA CONSOLIDAÇÃO SILO-FIRST.
@@ -68,7 +77,7 @@ export type SiloConsolidationRequest = {
   /** Independentes por contrato: aprovar o SiloDNA não aprova a SiloPage. */
   statuses: { siloDna: string; siloPage: string };
   /** Decisão humana de consolidação, exigida pelo gate da 2C.2. */
-  decision: SiloConsolidationDecision;
+  decision: SiloConsolidationDecision | PlannedSiloConsolidationDecision;
   /**
    * Decisão humana de aprovação DA PÁGINA — independente da consolidação.
    * Ausente significa que a SiloPage não está sendo aprovada, não que a
@@ -76,6 +85,91 @@ export type SiloConsolidationRequest = {
    */
   siloPageApproval?: SiloPageApprovalDecision | null;
 };
+
+/**
+ * Pré-condição de leitura para o futuro writer planejado. Não faz lock e não
+ * autoriza gravação: a RPC deve repetir as mesmas verificações sob lock, além
+ * de comprovar o vínculo territorial e cada Assunto/membro aprovado.
+ */
+export async function loadVerifiedPlannedSiloSource(context: PipelineContext, rawSource: PlannedSiloSourceRef): Promise<Record<string, unknown>> {
+  const source = PlannedSiloSourceRefSchema.parse(rawSource);
+  const result = await context.supabase.from("editorial_groups")
+    .select("id,marca_id,origin,status,plan,plan_version,plan_hash,lock_version,silo_id")
+    .eq("marca_id", context.brandId).eq("id", source.groupId).maybeSingle();
+  if (result.error) throw pipelineErrorFromSupabase(result.error);
+  const row = result.data as Record<string, unknown> | null;
+  if (!row || row.id !== source.groupId || row.marca_id !== context.brandId || row.status !== "active" || row.origin !== "declared_plan" || !row.plan || typeof row.plan !== "object" || Array.isArray(row.plan)) {
+    throw new PipelineRuntimeError("CONFLICT", "A fonte do plano não está disponível nesta marca.", 409);
+  }
+  if (row.plan_version !== source.planVersion || row.plan_hash !== source.planHash || row.lock_version !== source.lockVersion) {
+    throw new PipelineRuntimeError("CONFLICT", "O plano ou sua versão mudou. Reprocesse a arquitetura antes de confirmar.", 409);
+  }
+  return row;
+}
+
+/** Leitura para etapas posteriores: vincular o grupo pode alterar só o lock. */
+export async function loadCurrentPlannedSiloSource(context: PipelineContext, rawSource: PlannedSiloSourceRef, territoryRef: string, siloId: string): Promise<PlannedSiloCurrentSource> {
+  const source = PlannedSiloSourceRefSchema.parse(rawSource);
+  const result = await context.supabase.from("editorial_groups").select("id,marca_id,origin,status,plan,plan_version,plan_hash,lock_version,silo_id").eq("marca_id", context.brandId).eq("id", source.groupId).maybeSingle();
+  if (result.error) throw pipelineErrorFromSupabase(result.error);
+  const row = result.data as Record<string, unknown> | null;
+  if (!row || !siloId || row.silo_id !== siloId || row.id !== source.groupId || row.marca_id !== context.brandId || row.origin !== "declared_plan" || row.status !== "active" || row.plan_version !== source.planVersion || row.plan_hash !== source.planHash) throw new PipelineRuntimeError("CONFLICT", "O plano ou o vínculo do Silo mudou ou não está disponível nesta marca. Revise a arquitetura antes de continuar.", 409);
+  const workspace = await loadCanonicalArquitetoWorkspace(context);
+  const rows = buildCanonicalWorkflowWorkspaceItems(workspace.workflowItems, workspace.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
+  const composition = plannedSiloComposition({ brandId: context.brandId, group: { id: String(row.id), brandId: String(row.marca_id), origin: String(row.origin), status: String(row.status), plan: row.plan, planVersion: Number(row.plan_version), planHash: typeof row.plan_hash === "string" ? row.plan_hash : null, lockVersion: Number(row.lock_version) }, subjects: rows.map(readArchitectSubjectStanding) });
+  if (!composition.ok || !plannedSiloTerritoryMatches({ territoryRef, members: composition.members, assignments: rows.map(item => ({ keywordId: String(item.id ?? ""), territoryRef: typeof item.territoryRef === "string" ? item.territoryRef : null })) })) throw new PipelineRuntimeError("CONFLICT", "Os Assuntos do plano ou seu território mudaram. Revise a arquitetura antes de continuar.", 409);
+  const current: PlannedSiloCurrentSource = { brandId: context.brandId, groupId: source.groupId, origin: "declared_plan", status: "active", planVersion: source.planVersion, planHash: source.planHash, subjectProofs: composition.subjectProofs.map(proof => ({ keywordId: proof.keywordId, ...proof.approvedPackageRef })) };
+  const reread = await context.supabase.from("editorial_groups").select("id,marca_id,origin,status,plan_version,plan_hash,silo_id").eq("marca_id", context.brandId).eq("id", source.groupId).maybeSingle();
+  if (reread.error) throw pipelineErrorFromSupabase(reread.error);
+  const after = reread.data as Record<string, unknown> | null;
+  if (!after || after.silo_id !== siloId || after.id !== source.groupId || after.marca_id !== context.brandId || after.origin !== "declared_plan" || after.status !== "active" || after.plan_version !== source.planVersion || after.plan_hash !== source.planHash) throw new PipelineRuntimeError("CONFLICT", "O plano do Silo mudou durante a leitura. Revise a arquitetura antes de continuar.", 409);
+  return current;
+}
+
+/**
+ * Reconstrói a composição a partir dos pacotes recebidos na mesa canônica,
+ * nunca de membros enviados pelo navegador. É uma leitura preparatória: não
+ * trava linhas e não substitui a revalidação da futura RPC na transação.
+ */
+export async function loadVerifiedPlannedSiloComposition(context: PipelineContext, source: PlannedSiloSourceRef, territoryRef: string, siloId: string) {
+  const group = await loadVerifiedPlannedSiloSource(context, source);
+  if (!siloId || (group.silo_id != null && group.silo_id !== siloId)) throw new PipelineRuntimeError("CONFLICT", "O grupo do plano já está ligado a outro Silo; revise a estrutura antes de confirmar.", 409);
+  const workspace = await loadCanonicalArquitetoWorkspace(context);
+  const rows = buildCanonicalWorkflowWorkspaceItems(workspace.workflowItems, workspace.keywords, context.brandId) as unknown as Array<Record<string, unknown>>;
+  const result = plannedSiloComposition({
+    brandId: context.brandId,
+    group: {
+      id: String(group.id), brandId: String(group.marca_id), origin: String(group.origin), status: String(group.status),
+      plan: group.plan, planVersion: Number(group.plan_version), planHash: typeof group.plan_hash === "string" ? group.plan_hash : null,
+      lockVersion: Number(group.lock_version),
+    },
+    subjects: rows.map(readArchitectSubjectStanding),
+  });
+  if (!result.ok) throw new PipelineRuntimeError("CONFLICT", result.reason, 409);
+  const assignments = rows.map(row => ({ keywordId: String(row.id ?? ""), territoryRef: typeof row.territoryRef === "string" ? row.territoryRef : null }));
+  if (!plannedSiloTerritoryMatches({ territoryRef, members: result.members, assignments })) throw new PipelineRuntimeError("CONFLICT", "Os Assuntos do plano não estão todos vinculados ao território confirmado deste Silo.", 409);
+  // Uma leitura longa da mesa não pode aceitar um plano já alterado durante a
+  // montagem. A dupla leitura não é lock e não substitui a futura RPC.
+  await loadVerifiedPlannedSiloSource(context, source);
+  return result;
+}
+
+/** Pré-validação do mesmo gravador; a RPC ainda deve repetir as provas sob lock. */
+export async function verifyPlannedSiloConsolidation(context: PipelineContext, workingCopy: SiloWorkingCopyState, siloDna: VersionEnvelope<SiloDNA>, siloPage: VersionEnvelope<SiloPage>, decision: PlannedSiloConsolidationDecision, options: { statuses: { siloDna: string; siloPage: string }; siloPageApproval: SiloPageApprovalDecision | null }) {
+  if (!workingCopy.plannedComposition) throw new PipelineRuntimeError("CONFLICT", "A cópia não contém uma composição planejada.", 409);
+  if (decision.actorUserId !== context.actorUserId || (options.siloPageApproval && options.siloPageApproval.actorUserId !== context.actorUserId)) throw new PipelineRuntimeError("NOT_AUTHORIZED", "A confirmação deve pertencer ao usuário autenticado.", 403);
+  refuse(refusePlannedSiloConfirmation({ workingCopy, decision, authenticatedActorId: context.actorUserId }));
+  const reference = siloPage.payload.siloDnaRef;
+  if (siloDna.entityId !== siloDna.payload.siloId || siloPage.entityId !== siloPage.payload.siloPageId || reference.entityId !== siloDna.entityId || reference.versionId !== siloDna.versionId || reference.contentHash !== siloDna.contentHash) throw new PipelineRuntimeError("CONFLICT", "A página não referencia a versão exata do Silo planejado.", 409);
+  const authority = await loadVerifiedPlannedSiloComposition(context, workingCopy.plannedComposition.source, workingCopy.territoryRef, siloDna.payload.siloId);
+  refuse(refusePlannedSiloBinding({ workingCopy, siloDna: siloDna.payload, siloPage: siloPage.payload, authority }));
+  const { territory } = await loadTerritory(context, workingCopy.territoryRef);
+  if (!["confirmed", "consolidated"].includes(territory.lifecycleStatus) || territory.decisionState !== "confirmed") throw new PipelineRuntimeError("CONFLICT", "O território do Silo precisa estar confirmado antes da consolidação.", 409);
+  refuse(assertSiloDnaMatchesConfirmedTerritory({ territory: { territoryRef: territory.territoryRef, centralEntity: territory.centralEntity, macroIntent: territory.macroIntent, boundary: territory.boundary, narrative: territory.narrative }, siloDna: siloDna.payload }));
+  const pageApproval = resolveSiloPageApprovalReadiness({ brandId: context.brandId, territoryRef: workingCopy.territoryRef, siloId: siloDna.payload.siloId, siloPage: siloPage.payload, siloPageVersion: { versionId: siloPage.versionId, contentHash: siloPage.contentHash }, siloDna: siloDna.payload, siloDnaVersion: { versionId: siloDna.versionId }, decision: options.siloPageApproval, actor: "human", publishedVerificationRequired: CURRENT_SCENARIO_REQUIRES_PUBLISHED_VERIFICATION });
+  refuse(refuseStatusEscalation({ siloDnaStatus: options.statuses.siloDna, siloPageStatus: options.statuses.siloPage, humanConsolidationConfirmed: true, siloPageApproval: pageApproval }));
+  return authority;
+}
 
 export type SiloConsolidationResult = {
   persistence: "PERSISTED";
@@ -177,7 +271,7 @@ async function loadWorkingCopy(
 }
 
 /** ArticleDNA versionados, pelas referências que a working copy registrou. */
-async function loadArticleVersions(
+export async function loadArticleVersions(
   context: PipelineContext,
   workingCopy: SiloWorkingCopyState,
 ): Promise<RemoteArticleVersion[]> {
@@ -185,11 +279,23 @@ async function loadArticleVersions(
   if (!versionIds.length) return [];
   const result = await context.supabase
     .from("editorial_artifact_versions")
-    .select("version_id,entity_id,content_hash,payload")
+    .select("version_id,entity_id,content_hash,payload,status")
     .eq("marca_id", context.brandId)
     .eq("artifact_type", "article_dna")
     .in("version_id", versionIds);
   if (result.error) throw pipelineErrorFromSupabase(result.error);
+  const statuses = new Map<string, string>();
+  const authorizedVersions = ((result.data || []) as Array<Record<string, unknown>>)
+    .map(row => typeof row.version_id === "string" ? row.version_id : "").filter(Boolean);
+  for (const versionId of [...new Set(authorizedVersions)]) {
+    const event = await context.supabase.from("editorial_version_status_events")
+      .select("status")
+      .eq("version_id", versionId)
+      .order("occurred_at", { ascending: false }).order("id", { ascending: false })
+      .limit(1).maybeSingle();
+    if (event.error) throw pipelineErrorFromSupabase(event.error);
+    if (typeof event.data?.status === "string") statuses.set(versionId, event.data.status);
+  }
   return ((result.data || []) as Array<Record<string, unknown>>).map(row => {
     const payload = row.payload && typeof row.payload === "object" ? row.payload as Record<string, unknown> : {};
     return {
@@ -198,6 +304,7 @@ async function loadArticleVersions(
       contentHash: String(row.content_hash ?? ""),
       brandId: typeof payload.brandId === "string" ? payload.brandId : "",
       territoryRef: typeof payload.territoryRef === "string" ? payload.territoryRef : null,
+      effectiveStatus: statuses.get(String(row.version_id ?? "")) ?? (typeof row.status === "string" ? row.status : null),
     };
   });
 }
@@ -209,6 +316,12 @@ async function consolidateSiloFromWorkingCopyCore(
   // ---------------------------------------------------------- 1. snapshot remoto
   const { workflowItemId, territory } = await loadTerritory(context, request.territoryRef);
   const { workingCopy, lockVersion } = await loadWorkingCopy(context, request.territoryRef);
+
+  // Não aplicar as guardas antigas, baseadas em ArticleDNA, ao contrato novo;
+  // a gravação planejada exige validação transacional da fonte e dos membros.
+  if (workingCopy.plannedComposition || request.siloDna.payload.compositionBasis === "planned_members" || request.siloPage.payload.compositionBasis === "planned_members" || "scope" in request.decision) {
+    throw new PipelineRuntimeError("CONFLICT", "A consolidação de estrutura planejada ainda está em adaptação.", 409);
+  }
 
   if (workingCopy.territoryRef !== territory.territoryRef) {
     throw new PipelineRuntimeError("CONFLICT", "TERRITORY_REF_MISMATCH", 409);
@@ -342,11 +455,9 @@ async function consolidateSiloFromWorkingCopyCore(
   if (result.error) {
     const code = readRpcDomainError(result.error);
     if (code) throw new PipelineRuntimeError("CONFLICT", code, 409);
-    // O erro bruto fica no log do servidor, nunca na resposta: a mensagem
-    // mapeada não distingue "faltou privilégio" de "faltou schema", e sem o
-    // original a investigação vira adivinhação. Expor ao cliente contaria a
-    // estrutura interna do banco a quem pediu a escrita.
-    console.error("[silo-consolidation] RPC recusou", result.error);
+    // O log conserva categoria e código, inclusive de Error não enumerável;
+    // mensagens SQL, dados editoriais e credenciais não são registradas.
+    console.error(`[silo-consolidation] RPC recusou ${JSON.stringify(siloRpcErrorDiagnostic(result.error))}`);
     throw pipelineErrorFromSupabase(result.error);
   }
 
@@ -370,6 +481,14 @@ async function consolidateSiloFromWorkingCopyCore(
   // pior desfecho possível, porque convida a repetir uma escrita que já valeu.
   const siloDnaEnvelope = canonicalVersionFromRow("silo_dna", data.siloDna as Record<string, unknown>);
   const siloPageEnvelope = canonicalVersionFromRow("silo_page", data.siloPage as Record<string, unknown>);
+
+  // Não anunciar a conclusão nem vincular o grupo quando o retorno da RPC não
+  // corresponde ao par confirmado. A RPC pode já ter gravado: o erro pede
+  // releitura, não uma nova versão criada automaticamente.
+  if (siloDnaEnvelope.entityId !== request.siloDna.entityId || siloDnaEnvelope.versionId !== request.siloDna.versionId || siloDnaEnvelope.contentHash !== request.siloDna.contentHash ||
+      siloPageEnvelope.entityId !== request.siloPage.entityId || siloPageEnvelope.versionId !== request.siloPage.versionId || siloPageEnvelope.contentHash !== request.siloPage.contentHash) {
+    throw new PipelineRuntimeError("QUERY_FAILURE", "A gravação do Silo retornou versões diferentes das confirmadas. Recarregue a arquitetura para verificar o resultado antes de tentar novamente.", 503);
+  }
 
   /*
    * F4 — DEPOIS do readback, nunca antes: o Silo já está gravado e confirmado.
@@ -411,6 +530,20 @@ export async function consolidateSiloFromWorkingCopy(
   request: SiloConsolidationRequest,
   options: { reworkOverride?: ReworkOverride } = {},
 ): Promise<SiloConsolidationResult> {
+  if (request.siloDna.payload.compositionBasis === "planned_members" || request.siloPage.payload.compositionBasis === "planned_members" || "scope" in request.decision) {
+    throw new PipelineRuntimeError("CONFLICT", "A consolidação de estrutura planejada ainda está em adaptação.", 409);
+  }
+  if (request.decision.actorUserId !== context.actorUserId || (request.siloPageApproval && request.siloPageApproval.actorUserId !== context.actorUserId)) {
+    throw new PipelineRuntimeError("NOT_AUTHORIZED", "A confirmação do Silo e da página deve pertencer ao usuário autenticado.", 403);
+  }
+  if (request.statuses.siloDna === "approved" || request.statuses.siloPage === "approved") {
+    // Criar/editar é uma permissão distinta de aprovar. A confirmação usa o
+    // mesmo ator e cliente já autenticados e precisa das duas autorizações.
+    await resolvePipelineContext({ brandId: context.brandId, module: "arquiteto", action: "approve" }, {
+      requireActorUserId: async () => context.actorUserId,
+      createServiceClient: () => context.supabase,
+    });
+  }
   const operation = {
     kind: "silo_consolidation" as const,
     fingerprint: await operationFingerprint("silo_consolidation", siloConsolidationReworkInputs(request)),

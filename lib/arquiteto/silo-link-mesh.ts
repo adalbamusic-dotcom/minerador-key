@@ -34,6 +34,41 @@ import { anchorCompareKey, anchorRepeatsTargetKeyword, batchLinkAnchorRequests }
 type Prioridade = "HIGH" | "MEDIUM" | "LOW";
 const par = (edge: { sourceNodeId: string; targetNodeId: string }) => `${edge.sourceNodeId}->${edge.targetNodeId}`;
 
+/** Valida a base do acionador de Links antes de criar ou rebasear um grafo. */
+export function siloLinkBasisBlocker(input: {
+  brandId: string;
+  silo: { brandId?: string; siloId: string; entityId: string; versionId: string; contentHash: string; status: string | null };
+  page: { brandId: string; siloId: string; status: string | null; siloDnaRef: { entityId: string; versionId: string; contentHash: string } };
+  articles: readonly { expectedVersionId: string; expectedContentHash: string; brandId: string; versionId: string; contentHash: string; status: string | null }[];
+}): string | null {
+  const { brandId, silo, page } = input;
+  if (silo.brandId !== brandId || page.brandId !== brandId || silo.status !== "approved" || page.status !== "approved") return "A arquitetura e a página do Silo precisam estar aprovadas na marca ativa antes de processar os links.";
+  if (page.siloId !== silo.siloId || page.siloDnaRef.entityId !== silo.entityId || page.siloDnaRef.versionId !== silo.versionId || page.siloDnaRef.contentHash !== silo.contentHash) return "A página do Silo não corresponde à versão atual da arquitetura. Revise o Silo antes de processar os links.";
+  if (!input.articles.length) return "A arquitetura do Silo não contém artigos aprovados para conectar.";
+  if (input.articles.some(article => article.brandId !== brandId || article.versionId !== article.expectedVersionId || article.contentHash !== article.expectedContentHash || article.status !== "approved")) return "A composição do Silo contém artigo sem aprovação ou com versão diferente da arquitetura. Revise a formação do Silo antes de processar os links.";
+  return null;
+}
+
+/** A confirmação vale apenas para a seleção e as bases que geraram a prévia. */
+export function linkMeshPreviewFingerprint(input: {
+  brandId: string | null;
+  selectedArticleIds: readonly string[];
+  selectedSiloId: string | null;
+  basis: unknown;
+}): string {
+  return JSON.stringify({ ...input, selectedArticleIds: [...input.selectedArticleIds].sort() });
+}
+
+/** Um custo incompleto não autoriza processar um lote parcialmente desconhecido. */
+export function linkMeshPreviewCanConfirm(input: {
+  fingerprint: string;
+  currentFingerprint: string;
+  silos: readonly { preview: unknown; blocker: string | null; estimate?: boolean }[];
+}): boolean {
+  return input.fingerprint === input.currentFingerprint && input.silos.length > 0
+    && input.silos.every(silo => silo.preview != null && !silo.blocker && !silo.estimate);
+}
+
 /* ============================ 1 · a malha de cada artigo ============================ */
 
 export type SiloLinkMeshArticle = {

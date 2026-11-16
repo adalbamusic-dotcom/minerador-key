@@ -58,13 +58,14 @@ class Consulta implements PromiseLike<{ data: unknown; error: unknown }> {
   private descricao: string[] = [];
   private ordens: Array<{ coluna: string; asc: boolean }> = [];
   private columns = "*";
+  private contar = false;
   private faixa: [number, number] | null = null;
   private limite: number | null = null;
   private single = false;
   private db: ListasLevesFakeDb;
   private table: string;
   constructor(db: ListasLevesFakeDb, table: string) { this.db = db; this.table = table; }
-  select(columns = "*") { this.columns = columns; return this; }
+  select(columns = "*", options?: { count?: string }) { this.columns = columns; this.contar = options?.count === "exact"; return this; }
   eq(column: string, value: unknown) { this.filters.push(row => row[column] === value); this.descricao.push(`${column}=${String(value)}`); return this; }
   is(column: string, value: unknown) { this.filters.push(row => (row[column] ?? null) === value); this.descricao.push(`${column} is ${String(value)}`); return this; }
   in(column: string, values: readonly unknown[]) { const set = new Set(values); this.filters.push(row => set.has(row[column])); this.descricao.push(`${column} in (${values.length})`); return this; }
@@ -86,6 +87,7 @@ class Consulta implements PromiseLike<{ data: unknown; error: unknown }> {
       return { data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${this.table}' in the schema cache` } };
     }
     let linhas = (this.db.tables[this.table] || []).filter(row => this.filters.every(filter => filter(row)));
+    const count = this.contar ? linhas.length : null;
     if (this.ordens.length) {
       linhas = linhas.map((row, indice) => ({ row, indice })).sort((a, b) => {
         for (const ordem of this.ordens) {
@@ -102,6 +104,6 @@ class Consulta implements PromiseLike<{ data: unknown; error: unknown }> {
     const data = linhas.map(row => projeta(row, this.columns));
     const devolvido = this.single ? data[0] ?? null : data;
     this.db.log.push({ table: this.table, select: this.columns, rows: data.length, bytes: JSON.stringify(devolvido).length, filters: this.descricao });
-    return { data: devolvido, error: null };
+    return { data: devolvido, error: null, count };
   }
 }

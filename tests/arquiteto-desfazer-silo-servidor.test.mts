@@ -130,7 +130,7 @@ class Banco {
     }
     let projetadas = alvo.map(linha => projetar(linha, consulta.colunas));
     if (consulta.faixa) projetadas = projetadas.slice(consulta.faixa[0], consulta.faixa[1] + 1);
-    return { data: consulta.unica ? projetadas[0] ?? null : projetadas, error: null };
+    return { data: consulta.unica ? projetadas[0] ?? null : projetadas, error: null, count: alvo.length };
   }
 }
 

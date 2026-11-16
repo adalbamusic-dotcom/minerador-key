@@ -446,7 +446,7 @@ test("marca com mais de 1000 vivas: a leitura pagina e a frase da segunda págin
   assert.equal(preview.rows[0].classification, "existing_without_subject");
   assert.equal(preview.rows[0].keywordId, "k-99999");
   const liveReads = db.log.filter(entry => entry.table === "minerador_keywords" && entry.op === "select" && entry.columns === SUBJECT_IMPORT_LIVE_COLUMNS);
-  assert.equal(liveReads.length, 2, "duas páginas");
+  assert.equal(liveReads.length, 3, "duas páginas e uma leitura vazia para confirmar o fim");
 
   const applied = await run(db, "apply", [{ keyword: "SEO para clínicas" }]);
   assert.equal(applied.ok, true);

@@ -1,5 +1,9 @@
 # SDD — Silo interligado, keyword sem repetição antiga, SERP competitiva de verdade e fechamento da marca — 2026-10-14
 
+**Atualização de 2026-11-15:** a sequência de aprovação do par do Silo anterior aos artigos substitui as descrições que o fechavam depois deles, conforme o [adendo aprovado de 02/11](adendo-silo-antes-dos-artigos-2026-11-02.md). Isso não cria outra linha nem comprova que os acionadores já foram adaptados; consultar o estado atual para o progresso real.
+
+**Adendo de 2026-11-02 — prévia dos links:** a autorização de processar Silos cuja prévia mostra apenas custo estimado está substituída: o mesmo botão exige custo calculado para o Silo escolhido na tela; selecione e processe um por vez enquanto as outras cópias não forem lidas. Seleção ou composição alterada exige nova prévia; o Radar continua apenas consumidor do grafo aprovado. Implementação local e testes em `docs/04-arquiteto/situacoes-resolvidas.md`; validação remota pendente.
+
 > **Status: APROVADA — D1–D14 DECIDIDAS pela recomendação (§16), com um item novo
 > (§16.1, SERP crua por artigo), em 2026-10-14.** Frase do dono: "sim, pode sim, e
 > do MCP também é uma boa ideia, pode implementar". Em implementação por fases; o

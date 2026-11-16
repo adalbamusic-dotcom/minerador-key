@@ -419,6 +419,7 @@ export function deterministicSiloPagePayload(
   const breadcrumbs = [{ label: "Início", slug: "/" }, { label: silo.centralEntity, slug }];
   return SiloPageSchema.parse({
     schemaVersion: 1, siloPageId: `silo-page:${silo.siloId}`, brandId, siloDnaRef, siloId: silo.siloId,
+    ...(silo.compositionBasis === "planned_members" ? { compositionBasis: "planned_members", plannedMemberKeys: silo.plannedMembers?.map(member => member.memberKey), ...(silo.territoryRef ? { territoryRef: silo.territoryRef } : {}) } : {}),
     slug, publicationStatus: options.publicationStatus || "new", publishedUrl: options.publishedUrl ?? null,
     publicationVerification: options.publicationVerification || {
       status: options.publicationStatus === "published" ? "not_checked" as const : "not_applicable" as const,

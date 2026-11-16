@@ -1,3 +1,59 @@
+## Leitura integral de eventos editoriais — 2026-11-16
+
+**Correção local com fixtures:** eventos de rejeição após o limite de uma página não são mais omitidos da leitura da mesa ou do delta; contagem ausente, divergente ou página repetida gera erro em vez de adotar um estado parcial. Cenário `arquiteto-eventos-paginacao`; validação pelo acionador pendente e exclusão física separada.
+
+## Rejeição de formação antiga na composição — 2026-11-15
+
+**Reteste:** a confirmação subsequente gravou e releu SiloDNA e SiloPage depois da correção da numeração do sucessor. A exclusão física dos registros antigos continua pendente.
+
+## Resposta parcial de âncoras — 2026-11-15
+
+**Correção local testada com fixture e pelo botão:** uma lista vazia de âncoras em uma proposta da IA não invalida a resposta inteira; a conexão é recusada individualmente e as demais seguem a validação habitual. `arquiteto-link-anchor-ai` cobre uma proposta vazia ao lado de outra válida. No reteste, `Processar links` salvou e releu 56 relações e `Confirmar links internos` aprovou o grafo; a ação de envio entregou os sete artigos, visíveis na lista do Radar.
+
+**Leitura corrigida e prévia validada no navegador.** A versão rejeitada de um artigo é identificada também quando suas keywords já não estão no lote; o fechamento não conta no cenário ativo uma formação ligada àquela identidade. O marcador não é apagado por essa leitura. A prévia do botão passou a habilitar o fechamento, mas a confirmação real falhou na consolidação do par, que permanece pendente de diagnóstico. `arquiteto-ciclo-silo-artigo` cobre a distinção entre rejeitado, atual e formação sem identidade comprovada.
+
+## Paginação de versões sem resultado parcial silencioso — 2026-11-13
+
+**Corrigido em código; validação real pendente.** A leitura do acervo de versões não presume que uma página menor que 1.000 linhas seja a última e não corta a leitura em 100 páginas. Ela compara com a contagem e recusa leitura repetida ou sem contagem. `arquiteto-versoes-paginacao-servidor` cobre o limite menor do servidor e o acervo com mais de 100 páginas, com fixtures. Alterações concorrentes entre páginas ainda não são snapshot transacional.
+
+## Confirmação ligada ao usuário e à permissão de aprovação — 2026-11-13
+
+**Testado com fixtures; teste pelo acionador ainda pendente.** O servidor do fechamento recusa decisão atribuída a outro usuário e exige `arquiteto:approve` para gravar Silo ou página como aprovados. A recusa acontece antes de escrita; os cenários de `arquiteto-silo-plano-writer-gate` também verificam o ator sem essa permissão.
+
+## Página planejada com seções e aprovação própria — 2026-11-13
+
+**Domínio preparado e testado; ainda não integrado ao botão ou ao writer.** A página planejada recebia seções vazias e não passava pelo próprio gate de aprovação. A montagem aceita os títulos e escopos dos membros, mantém a ordem e não fabrica ArticleDNA; o gate exige que seções e chaves sigam o Silo e continua exigindo canonical e decisão humana da página. Cenários: `arquiteto-silo-plano-par` e `arquiteto-silo-phase-2c-closure`.
+
+O cenário também exercita a troca de principal: o vínculo do artigo usa a identidade estável do Assunto, resolve o Pilar da estrutura aprovada e não depende de a keyword principal continuar a mesma. O planejador recusa ainda um artigo já vinculado a outra posição vigente, evitando duplo papel. São testes de domínio; o botão e a persistência do vínculo ainda não estão conectados.
+
+## Links não processam base sem aprovação ou com referências antigas — 2026-11-13
+
+**Teste local com fixtures; validação real pendente.** `Processar links` e a guarda do servidor recusam antes da gravação a página em outra versão do Silo, artigos não aprovados ou fora da versão/hash da composição, papel do nó divergente do Silo, marca divergente e Silo sem artigos. No fluxo legado o Silo decide o papel, sem exigir alteração de hierarquia antiga no ArticleDNA. `arquiteto-links-previa-vigente` e `arquiteto-links-base-servidor` cobrem os casos; a corrida entre leitura e RPC e a integração do Silo planejado continuam como pendências próprias.
+
+## Aprovação efetiva no fechamento — 2026-11-02
+
+O mesmo adaptador exige aprovação efetiva do ArticleDNA; existência de versão não é aprovação e falha na leitura bloqueia. `arquiteto-silo-status-servidor` cobre os estados e a marca com banco simulado e integra a bateria. A corrida entre leitura do evento e RPC permanece pendente; a situação não está homologada em persistência real nem garante atomicidade.
+
+## Prévia do Silo com fechamento bloqueado — 2026-11-02
+
+`Concluir formação` consulta a composição atual e as guardas antes de habilitar uma confirmação apenas do Silo; referências fora do cenário e falha de leitura não são apresentadas como fechamento garantido. `arquiteto-planilha-primeiro-dom-2026-10-14` cobre conflito e falha simulados pelos botões; validação real pendente.
+
+## Papel do plano em Links antes do Silo concluído — 2026-11-02
+
+O papel declarado pelo plano aparece como previsto quando não há papel canônico para o artigo. O SiloDNA aprovado prevalece; a apresentação não constitui aprovação nem libera a etapa. `SiloRoleCell` e `arquiteto-papel-links-dom-2026-11-02` guardam a precedência e a ausência de fonte. Validação real: pendente.
+
+## Principal de volume zero sem nova candidata — 2026-11-02
+
+Uma principal de volume zero que já integra o ArticleDNA não torna a proposta uma recusa apenas porque não foi encontrada substituta ou reforço. Sem mudança, a prévia informa a oportunidade aberta; o fechamento permanece sujeito às guardas do plano, Silo e SERP. Plano pendente entra na prévia para confirmação mesmo com principal Livre. `arquiteto-article-improvement.test.mts` cobre o núcleo e guardas de volume desconhecido, Silo e principal ausentes; `arquiteto-planilha-primeiro-dom-2026-10-14.test.mts` cobre os mesmos acionadores com rede simulada. Teste real pendente.
+
+## Contexto de Links do grupo sem par — 2026-11-01
+
+O grupo selecionado sem Silo associado ou sem SiloDNA + SiloPage aguarda o próprio fechamento; não escolhe grafo de outro grupo. Sem filtro de grupo, mantém o seletor existente. `resolveLinksSilo`, `LinksSiloPicker` e os mesmos acionadores de Links guardam o contexto; cenários amarelo e DOM cobrem seleção e espera. Validado manualmente: não. As sete referências fora do cenário da WifiConecta continuam em investigação: não é situação resolvida.
+
+## Recuperação local de várias leituras da planilha — 2026-11-02
+
+Após recarregar, leituras de artigos da mesma marca e ator podem ser recuperadas por execução e seus hashes, sem refazer a busca; leituras substituídas ou concluídas não devem voltar, e gravações aceitas interrompidas ficam na fila do mesmo acionador de retomada. `plan-sheet-recovery.ts` e `arquiteto-plan-sheet-recovery.test.mts` cobrem ordenação recebida, sobreposição e paginação com fixtures; `arquiteto-planilha-primeiro-dom-2026-10-14.test.mts` cobre conclusão e retomada pelos botões com rede simulada. Validação Supabase e de concorrência reais ainda pendente. Confirmar parte de uma única execução continua bloqueado para evitar perda das demais propostas.
+
 # Situações resolvidas do Arquiteto — registro canônico
 
 > **Leitura obrigatória antes de mexer no Arquiteto** (`AGENTS.md` §0.3 e
@@ -533,3 +589,30 @@ Atualização de 2026-10-18 (teste no ar do amarelo depois do Concluir e decisã
   mesma entrega, e o cenário que "registra o de HOJE" passa a exigir a regra nova.
 - Nenhuma mudança pode enfraquecer a escolha da principal ou o reforço
   (invariante de 2026-10-16).
+# Acionadores e retomada — 2026-11-02
+
+O carregamento não grava fechamento; o mesmo `Concluir formação` retoma com leitura integral e seleção exata (cenário em `arquiteto-retomada-fechamento`). O `Confirmar propostas novas` aplica ao lote a mesma proteção de publicação usada na análise e na tabela (`arquiteto-confirmar-em-lote`, `arquiteto-canonical-workspace`). Processamentos separados da mesma cor conservam os respectivos hashes e o fechamento acontece uma vez (`arquiteto-planilha-primeiro-dom-2026-10-14`). **Limites:** confirmação parcial de uma execução e recuperação de todas após recarga seguem pendentes; testes reais ainda não feitos.
+
+# Escolha explícita na troca — 2026-11-01
+
+Na ação `Procurar outra principal`, a primeira posição por volume/cache não é decisão humana. O seletor começa vazio e `Ver prévia da troca` espera escolha em cada linha; a intenção deve ser conferida. `tests/arquiteto-planilha-primeiro-dom-2026-10-14.test.mts`, cenário da troca, verifica seleção, prévia e confirmação por acionadores com rede simulada. Teste real pendente.
+# Guarda de seleção de exclusão — 2026-11-02
+
+O mesmo acionador `Excluir no Minerador` recusa encaminhar parte da seleção quando há linha ausente, identidade duplicada ou keyword principal/secundária sem ID. A guarda está em `unresolvedArticleKeywordSelection` e o cenário está em `tests/arquiteto-selected-keyword-delete-lifecycle.test.mts`. Confirmação por fixtures, sem teste real. Seleção dos sete rejeitados e purga completa continuam pendentes.
+# Links internos: prévia e confirmação do mesmo lote — 2026-11-02
+
+`Processar links` agora exige que a seleção e a composição mostradas na prévia continuem as mesmas ao confirmar; se a marca, os artigos, o Silo ou as bases locais mudarem, pede nova prévia. Um lote com Silo sem estrutura ou prévia bloqueada não é processado parcialmente com custo incompleto; se um Silo não é o da tela, sua prévia é apenas estimativa do grafo aprovado e não autoriza processamento: selecione-o e processe um Silo por vez. Esse limite substitui o processamento de lote com custos estimados até haver leitura de todas as cópias. O resultado de vários Silos conta só os efetivamente processados, sem anunciar sucesso de todos quando há falhas. Testes: `arquiteto-links-previa-vigente` (domínio e ligação) e `arquiteto-links-previa-dom-2026-11-02` (clique no mesmo botão de confirmação). Validação real e concorrência com outras sessões ainda não comprovadas. A alteração não cria rota nem acionador.
+
+## Composição existente sem alteração não comprova a SERP — 2026-11-02
+
+A mesma leitura `Processar artigos` verifica a SERP também quando o motor não propõe mudança para artigo já formado; ausência de mudança não equivale a evidência. Com cache incompleto, a coleta fica pendente com custo dito antes da autorização; o DNA existente não é regravado. `arquiteto-article-improvement-server.test.mts` cobre cache ausente e completo; prévia de custo é coberta pela suíte DOM da planilha. Teste real pendente.
+# Preparação do Silo planejado — proteção da decisão, 13/11/2026
+
+**Confirmado por testes locais de domínio; integração ainda pendente.** O
+plano só é montado com Assuntos recebidos e pacotes aprovados; a cópia preparada
+guarda a versão e o hash desses pacotes. A comparação recusa mudanças de fonte,
+pacote, membros, ordem ou Pilar entre a cópia e o Silo/Page propostos. A cópia e
+o Silo também recusam listas fora da ordem. Cenários:
+`arquiteto-silo-composicao-planejada`, `arquiteto-silo-plano-binding` e
+`arquiteto-silo-working-copy-record`. Isso ainda não conecta o botão, não
+revalida sob lock nem habilita o writer; o fluxo real permanece em aberto.

@@ -1,4 +1,5 @@
-import type { TerritoryRef } from "./territory-ref.ts";
+import { z } from "zod";
+import { TerritoryRefSchema, type TerritoryRef } from "./territory-ref.ts";
 import {
   isPartialMembershipOperation,
   type KeywordTerritoryState,
@@ -271,6 +272,22 @@ export type SiloConsolidationDecision = {
   /** Decisão sobre identidade publicada, quando houver o que decidir. */
   publishedIdentityResolved: boolean;
 };
+
+/** Decisão sobre membros existentes no plano, sem inventar ArticleDNA futuro. */
+export const PlannedSiloConsolidationDecisionSchema = z.object({
+  scope: z.literal("planned_members"),
+  actorUserId: z.string().trim().min(1),
+  decidedAt: z.string().trim().min(1),
+  reason: z.string().trim().min(1),
+  territoryRef: TerritoryRefSchema,
+  pillarMemberKey: z.string().min(1),
+  supportMemberKeys: z.array(z.string().min(1)),
+  publishedIdentityResolved: z.boolean(),
+}).strict().superRefine((decision, context) => {
+  const all = [decision.pillarMemberKey, ...decision.supportMemberKeys];
+  if (new Set(all).size !== all.length) context.addIssue({ code: "custom", path: ["supportMemberKeys"], message: "O Pilar e os Suportes não podem repetir membros." });
+});
+export type PlannedSiloConsolidationDecision = z.infer<typeof PlannedSiloConsolidationDecisionSchema>;
 
 export type SiloConsolidationReadinessInput = {
   territory: TerritoryCandidate;

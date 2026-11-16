@@ -24,6 +24,23 @@
 
 export type ProposalAssignmentState = "confirmed" | "confirmable" | "fixed_in_article" | "rejected_silo" | "missing_silo";
 
+/** A confirmação de propostas não desloca uma busca publicada que já tem Silo. */
+export function keepPublishedTerritory(input: { published: boolean; current: string | null; destination: string | null }): boolean {
+  return input.published && Boolean(input.current) && input.current !== input.destination;
+}
+
+/** Publicadas da marca ativa para a tabela, contador e lote usarem a mesma leitura. */
+export function publishedKeywordIdsForBrand(brandId: string, keywords: readonly { id: unknown; brand_id?: unknown; canonicalArtifact?: unknown; isPublished?: unknown }[]): string[] {
+  return keywords.filter(item => {
+    const artifact = item.canonicalArtifact && typeof item.canonicalArtifact === "object" ? item.canonicalArtifact as { brandId?: unknown } : null;
+    // A projeção de ArticleDNA materializada expõe canonicalArtifact.brandId;
+    // a keyword recebida expõe brand_id. Se ambos existem, nenhum pode divergir.
+    const marcas = [item.brand_id, artifact?.brandId].filter(value => value !== undefined && value !== null);
+    return marcas.length > 0 && marcas.every(value => value === brandId)
+      && item.isPublished === true && typeof item.id === "string" && item.id.length > 0;
+  }).map(item => String(item.id));
+}
+
 export function classifyProposalAssignment(input: {
   /** O `territoryRef` real do destino (`null` = proposto que não existe ou desfeito). */
   destination: string | null;

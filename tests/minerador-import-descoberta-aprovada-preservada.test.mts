@@ -49,10 +49,13 @@ function fakeSupabase(initial: Row[], options: { beforeUpdate?: (rows: Row[]) =>
   function builder() {
     const state: Recorded = { op: "select", columns: "", filters: [], values: null };
     let single = false;
+    let bounds: [number, number] | null = null;
     const query = {
       select(columns = "*") { state.columns = columns; return query; },
       eq(column: string, value: unknown) { state.filters.push({ column, kind: "eq", value }); return query; },
       is(column: string, value: unknown) { state.filters.push({ column, kind: "is", value }); return query; },
+      order() { return query; },
+      range(from: number, to: number) { bounds = [from, to]; return query; },
       insert(values: Row) { state.op = "insert"; state.values = values; return query; },
       update(values: Row) { state.op = "update"; state.values = values; return query; },
       single() { single = true; return query; },
@@ -74,7 +77,8 @@ function fakeSupabase(initial: Row[], options: { beforeUpdate?: (rows: Row[]) =>
         for (const row of target) Object.assign(row, structuredClone(state.values!));
         return { data: state.columns ? target.map(row => project(row, state.columns)) : null, error: null };
       }
-      return { data: target.map(row => project(row, state.columns)), error: null };
+      const page = bounds ? target.slice(bounds[0], bounds[1] + 1) : target;
+      return { data: page.map(row => project(row, state.columns)), error: null };
     }
     return query;
   }

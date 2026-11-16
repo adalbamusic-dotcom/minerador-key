@@ -171,13 +171,8 @@ async function updateEvidenceWithoutApproval(client: SupabaseClient, brandId: st
 }
 
 async function findExistingByKeyword(client: SupabaseClient, brandId: string, normalized: string) {
-  const result = await client
-    .from("minerador_keywords")
-    .select("id,keyword,brand_id,lista_id,status,analise_semantica")
-    .eq("brand_id", brandId)
-    .is("deleted_at", null);
-  if (result.error) throw result.error;
-  return ((result.data || []) as KeywordRow[]).find(row => normalizeKeyword(row.keyword) === normalized) || null;
+  const rows = await readLiveKeywordPages<KeywordRow>(client, brandId, "id,keyword,brand_id,lista_id,status,analise_semantica");
+  return rows.find(row => normalizeKeyword(row.keyword) === normalized) || null;
 }
 
 /**
@@ -194,15 +189,10 @@ export async function importKeywordsWithCore(input: {
 }): Promise<KeywordImportCoreResult> {
   void input.actorUserId;
   const now = input.now || new Date().toISOString();
-  const existingResult = await input.supabase
-    .from("minerador_keywords")
-    .select("id,keyword,brand_id,lista_id,status,analise_semantica")
-    .eq("brand_id", input.brandId)
-    .is("deleted_at", null);
-  if (existingResult.error) throw existingResult.error;
+  const existingRows = await readLiveKeywordPages<KeywordRow>(input.supabase, input.brandId, "id,keyword,brand_id,lista_id,status,analise_semantica");
 
   const existingByKey = new Map<string, KeywordRow>();
-  for (const row of (existingResult.data || []) as KeywordRow[]) {
+  for (const row of existingRows) {
     const normalized = normalizeKeyword(row.keyword);
     if (normalized && !existingByKey.has(normalized)) existingByKey.set(normalized, row);
   }
@@ -434,9 +424,10 @@ const LIVE_PAGE_SIZE = 1000;
  * marca com mais de 1000 vivas perderia as que ficam fora do corte, e o
  * import as trataria como novas (duplicata, sem índice único — Q8).
  */
-async function readLiveKeywordPages<T>(client: SupabaseClient, brandId: string, columns: string): Promise<T[]> {
+async function readLiveKeywordPages<T extends { id: unknown }>(client: SupabaseClient, brandId: string, columns: string): Promise<T[]> {
   const rows: T[] = [];
-  for (let from = 0; ; from += LIVE_PAGE_SIZE) {
+  const seenIds = new Set<string>();
+  for (let from = 0; ;) {
     const page = await client
       .from("minerador_keywords")
       .select(columns)
@@ -445,9 +436,15 @@ async function readLiveKeywordPages<T>(client: SupabaseClient, brandId: string, 
       .order("id", { ascending: true })
       .range(from, from + LIVE_PAGE_SIZE - 1);
     if (page.error) throw page.error;
-    const data = (page.data || []) as T[];
+    const data = (page.data || []) as unknown as T[];
+    if (!data.length) return rows;
+    for (const row of data) {
+      const id = String(row.id ?? "");
+      if (!id || seenIds.has(id)) throw new Error("Leitura de keywords incompleta ou repetida; tente novamente.");
+      seenIds.add(id);
+    }
     rows.push(...data);
-    if (data.length < LIVE_PAGE_SIZE) return rows;
+    from += data.length;
   }
 }
 

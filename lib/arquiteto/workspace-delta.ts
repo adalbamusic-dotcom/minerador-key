@@ -59,6 +59,7 @@ export type ArchitectWorkspaceDeltaChanges = {
   siloPages?: ArchitectKeyedChanges<Record<string, unknown>>;
   aiReviews?: ArchitectKeyedChanges<Record<string, unknown>>;
   statuses?: Array<{ versionId: string; status: string }>;
+  rejectedArticleIds?: string[];
   brandSiloCatalog?: unknown[];
   territories?: unknown[];
   siloWorkingCopies?: unknown[];
@@ -233,6 +234,9 @@ export function mergeArchitectWorkspaceDelta(
       siloPages: siloPages.items,
       aiReviews: aiReviews.items,
       statuses: changes.statuses ?? base.statuses,
+      ...((changes.rejectedArticleIds ?? base.rejectedArticleIds) === undefined ? {} : {
+        rejectedArticleIds: changes.rejectedArticleIds ?? base.rejectedArticleIds,
+      }),
       brandSiloCatalog: changes.brandSiloCatalog ?? base.brandSiloCatalog,
       territories: changes.territories ?? base.territories,
       siloWorkingCopies: changes.siloWorkingCopies ?? base.siloWorkingCopies,

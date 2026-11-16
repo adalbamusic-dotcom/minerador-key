@@ -5,6 +5,7 @@ import {
   ANCHOR_REJECTION_LABELS,
   LINK_ANCHOR_SYSTEM_PROMPT,
   LinkAnchorProposalSchema,
+  LinkAnchorResponseSchema,
   anchorRelatesToTarget,
   anchorRepeatsSlug,
   buildLinkAnchorPrompt,
@@ -211,6 +212,18 @@ test("conexão sem âncora utilizável vira pendência, não edge mudo", () => {
   assert.match(resultado.rejected[0].issues[0], /o mínimo é 2/);
   // E o motivo de cada recusa acompanha a pendência.
   assert.ok(resultado.rejected[0].issues.length > 1);
+});
+
+test("resposta com âncoras vazias rejeita somente aquela conexão", () => {
+  const resposta = LinkAnchorResponseSchema.parse({ proposals: [
+    proposta({ anchorConcepts: [] }),
+    proposta({ sourceRef: "silo:page", relationType: "SILO_PAGE_TO_ARTICLE" }),
+  ] });
+  const resultado = keepValidLinkAnchorProposals({ proposals: resposta.proposals, unitsByRef: universo() });
+  assert.equal(resultado.rejected.length, 1);
+  assert.match(resultado.rejected[0].issues[0], /o mínimo é 2/);
+  assert.equal(resultado.accepted.length, 1);
+  assert.equal(resultado.accepted[0].sourceRef, "silo:page");
 });
 
 test("o que foi recusado vira aviso na proposta que passou", () => {

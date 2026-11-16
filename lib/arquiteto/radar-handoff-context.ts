@@ -26,6 +26,19 @@ import type {
   VersionEnvelope,
 } from "./contracts.ts";
 import { resolveCanonicalSiloIdForTerritory } from "./article-silo-materialization.ts";
+import { resolvePlannedSiloMembers, type PlannedSiloArticle } from "./planned-silo-members.ts";
+import type { PlannedSiloCurrentSource } from "./planned-silo-member.ts";
+
+/** Autoridade lida do acervo: seleção da tela não comprova aprovação nem vigência. */
+export type PlannedHandoffAuthority = {
+  siloStatus: string | null;
+  siloCurrent: boolean;
+  pageStatus: string | null;
+  pageCurrent: boolean;
+  articleVersionId: string;
+  articles: readonly PlannedSiloArticle[];
+  sourceCurrent: PlannedSiloCurrentSource | null;
+};
 
 export type ResolvedSiloContext = {
   siloId: string;
@@ -68,6 +81,8 @@ export function resolveCanonicalSiloForArticle(input: {
   article: ArticleDNA;
   siloVersions: readonly VersionEnvelope<SiloDNA>[];
   siloPageVersions: readonly VersionEnvelope<SiloPage>[];
+  plannedAuthority?: PlannedHandoffAuthority;
+  articleVersion?: { versionId: string; contentHash: string };
 }): SiloResolution {
   const declarado = typeof input.article.siloId === "string" && input.article.siloId.trim()
     ? input.article.siloId
@@ -104,6 +119,31 @@ export function resolveCanonicalSiloForArticle(input: {
     || input.siloVersions.find(version => binding.state === "BOUND" && version.payload.siloId === binding.siloId)!;
   const pagina = input.siloPageVersions.find(version => version.payload.siloId === silo.payload.siloId) || null;
 
+  // A variante planejada não contém IDs de artigos finais. Sem a leitura de
+  // TODAS as versões/status atuais não se pode inferir que este artigo seja
+  // suporte, nem entregar um conjunto parcial ao Radar.
+  let plannedRole: "pillar" | "support" | null = null;
+  if (silo.payload.compositionBasis === "planned_members") {
+    const authority = input.plannedAuthority;
+    if (!authority || !pagina || !silo.payload.brandId || !input.articleVersion || input.articleVersion.versionId !== authority.articleVersionId) return { ok: false, reason: "A estrutura planejada precisa de leitura completa dos artigos e aprovações antes do envio ao Radar." };
+    const resolved = resolvePlannedSiloMembers({
+      brandId: input.article.brandId,
+      silo: { ...silo, payload: { ...silo.payload, brandId: silo.payload.brandId }, effectiveStatus: authority.siloStatus, current: authority.siloCurrent },
+      page: { ...pagina, effectiveStatus: authority.pageStatus, current: authority.pageCurrent },
+      articles: authority.articles,
+      sourceCurrent: authority.sourceCurrent,
+    });
+    if (!resolved.ok) return { ok: false, reason: resolved.reasons.join(" ") };
+    const current = resolved.members.find(item => item.article.versionId === input.articleVersion!.versionId && item.article.contentHash === input.articleVersion!.contentHash && item.article.payload.articleId === input.article.articleId);
+    const membership = input.article.siloMembershipRef;
+    if (!current || !membership || membership.memberKey !== current.member.memberKey || membership.siloDnaVersionId !== silo.versionId || membership.siloDnaContentHash !== silo.contentHash || input.article.siloId !== silo.payload.siloId || input.article.hierarchy !== current.member.role) return { ok: false, reason: "O artigo não corresponde à versão e ao membro aprovados do Silo." };
+    plannedRole = current.member.role === "Pilar" ? "pillar" : "support";
+  } else if (silo.payload.pillarArticleId !== input.article.articleId && !silo.payload.supportArticleIds?.includes(input.article.articleId)) {
+    // Declarar um Silo ou compartilhar território não torna o artigo membro
+    // da composição aprovada. Não inventar o papel de Suporte para ele.
+    return { ok: false, reason: "O artigo não consta como Pilar ou Suporte na composição deste Silo. Revise a formação no Arquiteto antes de enviá-lo ao Radar." };
+  }
+
   return {
     ok: true,
     context: {
@@ -117,7 +157,7 @@ export function resolveCanonicalSiloForArticle(input: {
       siloPageSlug: pagina?.payload.slug ?? null,
       siloPageCanonical: pagina?.payload.canonical ?? null,
       siloPagePublicationStatus: pagina?.payload.publicationStatus ?? null,
-      articleRole: silo.payload.pillarArticleId === input.article.articleId ? "pillar" : "support",
+      articleRole: plannedRole ?? (silo.payload.pillarArticleId === input.article.articleId ? "pillar" : "support"),
       siloIdProvenance: porDeclaracao ? "DECLARED" : "LEGACY_TERRITORY_HYDRATION",
     },
   };
@@ -250,6 +290,8 @@ export function buildRadarHandoffContexts(input: {
   requireSiloPage?: boolean;
   /** Exige grafo de links aprovado cobrindo o artigo. */
   requireApprovedGraph?: boolean;
+  /** Só fornecer após leitura canônica da estrutura e de todos os membros. */
+  plannedAuthorityFor?: (article: VersionEnvelope<ArticleDNA>, silo: VersionEnvelope<SiloDNA>, page: VersionEnvelope<SiloPage> | null) => PlannedHandoffAuthority | undefined;
 }): { eligible: RadarHandoffContextEntry[]; blocked: RadarHandoffBlocked[] } {
   const eligible: RadarHandoffContextEntry[] = [];
   const blocked: RadarHandoffBlocked[] = [];
@@ -259,10 +301,14 @@ export function buildRadarHandoffContexts(input: {
     const label = input.labels?.get(articleId) || article.payload.promise || articleId;
     const reasons: string[] = [];
 
+    const siloParaAutoridade = input.siloVersions.find(version => version.payload.siloId === article.payload.siloId);
+    const pageParaAutoridade = siloParaAutoridade ? input.siloPageVersions.find(version => version.payload.siloId === siloParaAutoridade.payload.siloId) ?? null : null;
     const resolucao = resolveCanonicalSiloForArticle({
       article: article.payload,
       siloVersions: input.siloVersions,
       siloPageVersions: input.siloPageVersions,
+      plannedAuthority: siloParaAutoridade ? input.plannedAuthorityFor?.(article, siloParaAutoridade, pageParaAutoridade) : undefined,
+      articleVersion: { versionId: article.versionId, contentHash: article.contentHash },
     });
     if (!resolucao.ok) {
       blocked.push({ articleId, label, reasons: [resolucao.reason] });

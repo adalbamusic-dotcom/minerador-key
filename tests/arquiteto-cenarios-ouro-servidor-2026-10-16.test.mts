@@ -9,6 +9,25 @@ import { declarado, linhaDaMesa } from "./arquiteto-assunto-fixtures.mts";
 import { ATOR, AZUL, LINHAS_AZUL, MARCA_WIFI, TERRITORIO_AZUL, VOLUME_VALIDADO, codigoSemComentarios, escopoDo, semanticoDoPlano } from "./arquiteto-cenarios-ouro-fixtures.mts";
 import { planGroupSiloClosure } from "../lib/arquiteto/plan-article-sheet.ts";
 
+test("azul: Concluir não incorpora sete artigos adicionais aprovados ao Silo do plano", () => {
+  const planRows = LINHAS_AZUL.map(linha => ({ keywordId: linha.id, keyword: linha.keyword, role: linha.role, order: linha.order }));
+  const atuais = planRows.map((row, i) => ({ articleId: `atual-${i}`, subjectKeywordId: row.keywordId, territoryRef: TERRITORIO_AZUL, slug: `atual-${i}` }));
+  const antigos = planRows.map((_, i) => ({ articleId: `antigo-${i}`, subjectKeywordId: null, territoryRef: TERRITORIO_AZUL, slug: `antigo-${i}` }));
+  const resultado = planGroupSiloClosure({ planRows, articles: [...atuais, ...antigos] });
+  assert.equal(resultado.state, "conflict");
+  if (resultado.state === "conflict") {
+    assert.match(resultado.reason, /7 artigo\(s\) adicional/);
+    assert.match(resultado.reason, /\/antigo-0/);
+    assert.match(resultado.reason, /nenhum artigo foi retirado/);
+  }
+  const tela = codigoSemComentarios("modules/arquiteto/arquiteto-workspace.tsx");
+  const fechar = tela.slice(tela.indexOf("const closePlanGroupSilos = async"), tela.indexOf("closePlanGroupSilosRef.current = closePlanGroupSilos;"));
+  assert.ok(fechar.indexOf('decisao.state === "conflict"') < fechar.indexOf("await writeSiloPairFromArticles("), "a recusa ocorre no mesmo Concluir antes do gravador");
+  assert.match(fechar, /decisao\.state === "conflict"\) \{ aviso = true;.*continue;/);
+  assert.equal(planGroupSiloClosure({ planRows, articles: atuais }).state, "ready");
+  assert.equal(planGroupSiloClosure({ planRows, articles: [...atuais, { ...atuais[0], articleId: "duplicado" }] }).state, "conflict");
+});
+
 /*
  * F0 DA LINHA ÚNICA DO ARQUITETO — CENÁRIOS-OURO NO SERVIDOR (2026-10-16).
  *
@@ -261,7 +280,9 @@ test("C2/C3 · servidor · 'Concluir formação' das 7 linhas do azul pela linha
   // A tela chama o MESMO par do fechamento canônico (nenhum gravador novo), depois de reler os DNAs.
   const tela = codigoSemComentarios("modules/arquiteto/arquiteto-workspace.tsx");
   const fechar = tela.slice(tela.indexOf("const closePlanGroupSilos = async"), tela.indexOf("closePlanGroupSilosRef.current = closePlanGroupSilos;"));
-  assert.match(fechar, /const decisao = planGroupSiloClosure\(\{/);
+  assert.match(tela, /const planClosureDecision = \(groupId: string, vigentes: ReadonlyMap<string, VersionEnvelope<ArticleDNA>>\) =>/);
+  assert.match(fechar, /planClosureDecision\(groupId, vigentes\)/);
+  assert.match(fechar, /readPlanGroupSilosRef\.current\(\[groupId\]\)/);
   assert.match(fechar, /await writeSiloPairFromArticles\(\{/);
   assert.match(tela, /onConcluded: groupIds => closePlanGroupSilosRef\.current\(groupIds\),/);
   assert.ok(autorizados.includes("arquiteto:approve"), "o append aprovado pede 'approve'");

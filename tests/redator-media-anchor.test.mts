@@ -276,8 +276,12 @@ test("16 · a autoridade da associação fica no Redator, fora dos contratos do 
    * O DNA não pode passar a depender de um ativo que nasce e morre no ciclo de
    * produção editorial. Nenhum `assetId` e nenhuma âncora entram aqui.
    */
-  assert.doesNotMatch(arquiteto, /anchor_kind|anchorKind|anchor_ref|anchorRef/);
-  assert.doesNotMatch(arquiteto, /writer_media_assets/);
+  // `member.anchorKind` identifica o Assunto ou artigo de um Silo planejado;
+  // não é a âncora de mídia do Redator. A exceção é restrita a essa expressão:
+  // qualquer campo de âncora de mídia no contrato continua sendo rejeitado.
+  const semIdentidadeDoMembro = arquiteto.replaceAll("member.anchorKind", "member.plannedMemberKind");
+  assert.doesNotMatch(semIdentidadeDoMembro, /anchor_kind|anchorKind|anchor_ref|anchorRef/);
+  assert.doesNotMatch(arquiteto, /writer_media_assets|assetId/);
 
   const m3 = await fonte("../supabase/migrations/20260918190200_m3_writer_media_anchor_lifecycle.sql");
   for (const intocavel of ["editorial_artifact_versions", "article_dna", "silo_dna"]) {

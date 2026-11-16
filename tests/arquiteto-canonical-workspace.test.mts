@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildCanonicalArticleWorkspaceItems } from "../lib/arquiteto/canonical-bootstrap.ts";
+import { buildCanonicalArticleWorkspaceItems, mergeCanonicalArticleWorkspaceItems } from "../lib/arquiteto/canonical-bootstrap.ts";
+import { publishedKeywordIdsForBrand } from "../lib/arquiteto/proposal-confirmability.ts";
 import { buildCanonicalWorkflowWorkspaceItems, type CanonicalWorkflowItem } from "../lib/arquiteto/canonical-workspace.ts";
 import { applyManualKeywordRole, manualKeywordRoleFor } from "../lib/arquiteto/manual-architecture.ts";
 import { compactKeywordForReview } from "../lib/arquiteto/keyword-article-review.ts";
@@ -210,5 +211,10 @@ test("proveniência completa atravessa bootstrap, working copy, ArticleDNA e rea
   assert.equal(readback.contractGaps.length, 0);
   assert.deepEqual(readback.items[0]?.keywordDnaSnapshot, snapshot);
   assert.deepEqual(readback.items[0]?.keywordDnaRef, snapshot.versionReference);
+  const mesclada = mergeCanonicalArticleWorkspaceItems([workingItem], readback.items, brandId);
+  assert.equal((mesclada[0] as Record<string, unknown>).brand_id, undefined, "a projeção do ArticleDNA não conserva brand_id na mescla");
+  const candidatas = mesclada.map(item => ({ ...item, id: item.id }));
+  assert.deepEqual(publishedKeywordIdsForBrand(brandId, candidatas), [keywordId], "a marca da projeção canônica protege a publicada");
+  assert.deepEqual(publishedKeywordIdsForBrand("550e8400-e29b-41d4-a716-446655440099", candidatas), [], "outra marca não a recebe");
   assert.deepEqual(buildCanonicalWorkflowWorkspaceItems([workflow({}, sourceVersionId, contentHash)], [sourceKeyword], "550e8400-e29b-41d4-a716-446655440099"), []);
 });

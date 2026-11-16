@@ -72,6 +72,20 @@ export function selectedArticleKeywordIds(
   return [...ids];
 }
 
+/** Não encaminhar só parte da seleção quando uma linha não pode ser resolvida. */
+export function unresolvedArticleKeywordSelection(
+  selectedArticleIds: ReadonlySet<string>,
+  articles: readonly SelectedArticleKeywordSource[],
+): string[] {
+  return [...selectedArticleIds].filter(id => {
+    const matches = articles.filter(article => article.id === id);
+    if (matches.length !== 1) return true;
+    const article = matches[0];
+    return !article.mainKeywordObj?.id?.trim()
+      || article.supportKeywords.some(keyword => !keyword.id?.trim());
+  });
+}
+
 export function parseArchitectKeywordDeletePreview(
   requestedIds: readonly string[],
   payload: DeletePreviewPayload,

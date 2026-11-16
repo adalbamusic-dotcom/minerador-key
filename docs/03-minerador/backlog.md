@@ -1,5 +1,7 @@
 # Backlog — Minerador
 
+- [ ] Validar pelo acionador de importação em ambiente de teste com mais de 1.000 keywords ativas a correção local E-2; a proteção contra inserções concorrentes ainda exige solução própria.
+
 ## "Aprovar e enviar" do verde: URL do compare-and-swap e resultado honesto — 2026-10-19
 
 Detalhe em `docs/03-minerador/estado-atual.md` (mesmo título). **Validado manualmente: não.**

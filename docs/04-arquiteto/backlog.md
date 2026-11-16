@@ -1,3 +1,61 @@
+## Eventos e exclusão — 2026-11-16
+
+- [ ] Validar pelos acionadores, com eventos de status paginados, a ausência de formações rejeitadas na mesa; a correção passou com fixtures, não apaga registros e não substitui a purga física aprovada.
+- [ ] Implementar a exclusão física pelo acionador existente conforme a SDD aprovada, com inventário completo, transação e proteção das identidades preservadas; não confundir rejeição com exclusão.
+
+## Prévia do fechamento do Silo — 2026-11-02
+
+- [x] Repetir `Processar links` após a correção da resposta de IA, confirmar o grafo e verificar o envio ao Radar pelos botões: 56 relações aprovadas e 7 itens visíveis no Radar no teste local com banco remoto de 15/11.
+
+- [ ] **Silo planejado:** conectar a autoridade completa ao acionador do Radar e concluir os gravadores do Silo e do artigo. A prévia e o validador de Links foram adaptados em 15/11 para conferir os membros vigentes, sem novos testes. Validar fluxo inteiro, marca, versões, concorrência e interface; não declarar conclusão com testes isolados.
+- [ ] Concluir a exclusão física das formações antigas e do marcador no fluxo existente. Em 15/11, a leitura passou a desconsiderar as identidades comprovadamente rejeitadas e os sete artigos atuais foram enviados ao Radar; isso não removeu os registros antigos.
+- [x] Corrigir a numeração do sucessor do Silo quando a versão anterior foi rejeitada; o reteste de `Concluir formação` informou o par gravado e relido. Confirmar os passos de Links e Radar separadamente.
+- [ ] Validar no acionador de confirmação do Silo a conferência local do par retornado pela RPC (identidade, versão e hash); não houve nova execução de testes por solicitação do dono.
+- [ ] Validar pelos acionadores o índice de aprovação compartilhado com o Radar após restaurar a autoridade da versão aprovada e paginar as leituras; não houve novo teste real.
+- [ ] Integrar ao mesmo acionador a proposta planejada para Silo existente, incluindo aprovação independente da SiloPage e identidade publicada. Os construtores do DNA e da página estão preparados localmente, sem testes novos nem gravação.
+- [ ] Validar a leitura integral das versões na marca real após a entrega local; a paginação agora usa a contagem do banco, mas não é uma transação única durante alterações concorrentes.
+- [ ] Validar pelo botão `Processar links` a recusa de base sem aprovação ou com versões divergentes e a aceitação quando o Silo, a página e todos os artigos estiverem aprovados e coerentes.
+- [ ] Fechar a corrida entre a releitura de status/versões pelo servidor e a RPC que grava o grafo; a guarda server-side anterior à chamada não é atômica com a gravação.
+- [ ] Usar a pré-validação de fonte, pacotes aprovados e decisão humana na consolidação planejada e repetir as verificações na mesma transação sob locks; a leitura preparada não libera gravação por si só.
+- [ ] Ligar a montagem da página planejada ao mesmo botão de confirmação do Silo, com canonical da marca, títulos e escopos aprovados, prévia e decisão humana independente; hoje existe apenas montagem de domínio testada.
+- [ ] Conectar a decisão por membros da rota de consolidação à verificação transacional e ao acionador de Silos; o novo formato é validado, mas a gravação segue bloqueada.
+- [ ] Alimentar os resolvedores de Artigos, Links e Radar com a leitura canônica da versão/hash atual do plano; a verificação de vigência já existe em domínio, mas ainda não está conectada aos leitores.
+- [x] Enquanto a leitura dos membros não estiver integrada, impedir que a base do acionador de Links trate as referências legadas vazias de `planned_members` como uma composição completa; teste local `arquiteto-links-previa-vigente`. A guarda é temporária e não implementa o fluxo planejado.
+
+- [x] Em Links, vincular a confirmação da prévia à seleção e bases locais e impedir custo parcialmente desconhecido; teste DOM cobre o acionador. Quando houver só estimativa, usar um Silo por vez.
+- [ ] Validar pelo botão no navegador com Silo consolidado e tratar alteração concorrente entre sessões; a verificação local não prova snapshot transacional.
+
+- [x] Reler composição e guardas antes de oferecer fechamento isolado do Silo no mesmo `Concluir formação`; falha de leitura não promete nem habilita o fechamento. Testes DOM com leitura simulada; validar no navegador e diagnosticar a falha remota ainda pendentes.
+
+## Papel do plano na aba Links — 2026-11-02
+
+- [x] Exibir como previsto o papel Pilar/Suporte declarado quando o SiloDNA ainda não dá papel; preservar prioridade do papel canônico aprovado. DOM com fixtures cobre os estados; validação manual pelos acionadores continua pendente.
+
+## Investigação WifiConecta e contexto de Links — 2026-11-01
+
+- [ ] Implementar e validar atomicamente a mesma RPC e os acionadores para a estrutura planejada aprovada (fonte do grupo, Assuntos, território e locks); os writers recusam a variante planejada enquanto consumidores, validação transacional e fluxo completo não estiverem prontos. Ver [adendo](../compartilhado/adendo-silo-antes-dos-artigos-2026-11-02.md).
+
+- [ ] Consolidar a revalidação do status efetivo de ArticleDNA e a RPC sob controle transacional de concorrência; o adaptador agora consulta o último evento, mas um evento pode mudar entre leitura e escrita. Testar corrida, isolamento de marca e rollback no banco antes de declarar garantia atômica.
+
+- [ ] Validar pelos botões Processar e Concluir o artigo já formado com principal de volume zero sem candidata e, separadamente, plano pendente com principal Livre. Correção de núcleo e DOM com fixtures implementada em 02/11; fechamento real, persistência e evidência da SERP ainda não verificados.
+
+- [x] Impedir que `Excluir no Minerador` encaminhe silenciosamente apenas os artigos identificáveis de uma seleção incompleta ou ambígua. Teste local do núcleo e da ligação ao acionador; clique real pendente. Isso não implementa a seleção dos rejeitados nem a purga.
+
+- [ ] Incluir na mesma seleção e prévia de exclusão os sete artigos rejeitados cujas principais não foram encontradas na marca, conforme consulta corrigida fornecida pelo dono em 02/11; preservar os sete atuais e validar todas as dependências antes da purga.
+
+- [x] `Procurar outra principal` / `Ver prévia da troca`: não pré-selecionar por volume e lentes; exigir escolha explícita na mesma tela e orientar revisão da intenção. Teste DOM com fixture e abertura real local; prévia e confirmação reais pendentes.
+- [ ] Auditar e validar pelos acionadores `Reprocessar arquitetura`, `Confirmar propostas novas`, `Processar artigos`, `Concluir formação`, `Melhorar publicados…` e a troca de principal; preservar autorização humana e custo das chamadas. Não declarar o fluxo resolvido até confirmar persistência e Silo.
+- [ ] Completar suporte a confirmação parcial de uma execução já processada; atualmente a seleção parcial da mesma execução é recusada para não perder propostas. A recuperação local de várias execuções após recarregar foi implementada e coberta por fixtures; falta validar paginação e concorrência no Supabase e os cliques reais. Avaliar contrato do servidor, concorrência e atomização antes de alterar persistência.
+- [x] Impedir que o grupo sem par use implicitamente o grafo de outro Silo; avisar sem inferir mudança de composição. Implementação local, testes e validação manual descritos no estado atual.
+- [ ] Identificar por leitura das referências e versões a causa das sete formações fora do cenário; comprovar a recuperação pelo mesmo Concluir formação, sem manipular artigos ou keywords diretamente.
+- [ ] Pela linha de exclusão existente, identificar e apagar completamente os sete artigos antigos descartados, inclusive aprovações e referências, preservando os sete atuais. Decisão anterior de preservá-los para revisão substituída pelo dono. Confirmar estado efetivo por eventos, dependências, alcance da prévia e releitura; ainda não executado. O fechamento do plano segue com guarda conservadora contra artigos adicionais e duplicidade de Assunto.
+- [x] Repetir a consulta de diagnóstico corrigida: resultado fornecido pelo dono em 02/11 confirma que as sete principais referenciadas não foram encontradas na marca.
+- [ ] Validar por botões o fechamento do Silo, Processar e Confirmar links e a entrega ao Radar; conferir persistência real sem escrita direta.
+- [ ] Validar pelo `Concluir formação` a retomada do fechamento parcial após a remoção do efeito que gravava ao carregar. Fixtures e cenário de seleção passaram; teste real e persistência pendentes.
+- [ ] Corrigir o hash da arquitetura que não percebe mudanças em DNA/plano: a solução deve sobreviver à criação e releitura dos próprios territórios pelo processamento e preservar o botão existente.
+- [ ] Reconciliar `Processar arquitetura` e a preparação de melhorias com a regra de cópia de trabalho: o processamento grava itens de território e a preparação registra execução e pode registrar sugestões para o Minerador antes da confirmação. Inventariar quais são artefatos editoriais ou registros técnicos, preservar a retomada e impedir alterações silenciosas entre áreas. Nenhuma conclusão sobre perda de dados foi inferida disso.
+- [ ] O seletor do Radar lista aprovados antes de verificar prontidão: alinhar informação e bloqueio à autoridade operacional existente e validar a importação, sem contornar os gates.
+
 - [ ] **Situações resolvidas (2026-10-17)** · [`situacoes-resolvidas.md`](situacoes-resolvidas.md) é leitura obrigatória antes de mexer no Arquiteto: transformar em cenário-ouro as 12 situações da lista (a), tirar da lista (b) cada item quando a fase dele for entregue e registrar ali, com o cenário que a guarda, toda situação nova resolvida.
 - [ ] **APROVADA em 2026-10-16 (F0 entregue em 16/10; F2 entregue em 17/10, noite, a pedido do dono no amarelo, com desvio declarado de D1 — §15.7; F1 aguarda a aprovação do dono)** · SDD da linha única do Arquiteto (`docs/compartilhado/sdd-linha-unica-do-arquiteto-2026-10-16.md`): um gravador por artefato, plano/Assunto/publicado como casos da mesma etapa, réguas R1 (principal) e R2 (status do publicado), fases F0–F7 com cenários-ouro; decisões D1–D5 aprovadas com as recomendações.
 
@@ -3224,3 +3282,9 @@ SDD: `sdd-reparo-pontual-do-artigo-2026-10-01.md` (1ª entrega feita).
   novo. Ainda não há leitura agregada disso.
 - **Exercitar a interface com um artigo bloqueado real.** O caso que motivou a
   SDD foi destravado antes da entrega; falta uma homologação com bloqueio vivo.
+## SERP de artigo sem alteração — 2026-11-02
+
+- [x] No `Processar artigos` da planilha, planejar e conferir a SERP mesmo para composição existente sem alteração; se faltar evidência, apresentar coleta com custo antes da autorização. Teste integrado local e fluxo DOM simulado; teste real pendente.
+# Pendência de validação — 2026-11-15
+
+- Validar pelos acionadores a recusa de artigo que não integra a composição legada do Silo. A integração transacional do Silo planejado e de seus consumidores permanece pendente.

@@ -92,6 +92,7 @@ export type CanonicalWorkspaceSnapshot = {
   /** Marcador do cenário; a análise em si é reconstruída, não persistida. */
   architectureMarker: ArchitectureMarkerPayload | null;
   articleFormationMarker: ArticleFormationMarkerPayload | null;
+  rejectedArticleIds: string[];
   /** Revisão arquitetural por IA vigente de cada Article. */
   aiReviews: VersionedArticleArchitectureAiReview[];
   statuses: Array<{ versionId: string; status: string }>;
@@ -222,6 +223,8 @@ const SnapshotResponseSchema = z.object({
     /** Cenário de arquitetura já processado/confirmado; só o fato humano. */
     architectureMarker: ArchitectureMarkerPayloadSchema.nullable().default(null),
     articleFormationMarker: ArticleFormationMarkerPayloadSchema.nullable().default(null),
+    rejectedArticles: z.array(z.object({ articleId: z.string() }).passthrough()).default([]),
+    rejectedArticleIds: z.array(z.string()).optional(),
   }),
 });
 
@@ -338,6 +341,7 @@ const DeltaResponseSchema = z.object({
       articleFormationSerp: KeyedChangesSchema(RemoteArticleFormationSerpSchema).optional(),
       architectureMarker: ArchitectureMarkerPayloadSchema.nullable().optional(),
       articleFormationMarker: ArticleFormationMarkerPayloadSchema.nullable().optional(),
+      rejectedArticleIds: z.array(z.string()).optional(),
     }),
     sync: z.unknown(),
   }),
@@ -429,6 +433,7 @@ function snapshotFromData(data: SnapshotData, brandId: string): CanonicalWorkspa
     territorialAi: [...body.data.territorialAi],
     architectureMarker: body.data.architectureMarker,
     articleFormationMarker: body.data.articleFormationMarker,
+    rejectedArticleIds: body.data.rejectedArticleIds ?? body.data.rejectedArticles.map(item => item.articleId),
   };
 }
 

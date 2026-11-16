@@ -65,7 +65,7 @@ test("a aba Artigos tem a barra de sempre — Processar artigos · Concluir form
   for (const testId of ["architect-articles-top-process", "architect-articles-top-confirm", "architect-articles-improve-published"]) {
     assert.equal(contar(barra, `data-testid="${testId}"`), 1, testId);
   }
-  assert.equal(contar(barra, "\"Processar artigos\""), 1);
+  assert.match(barra, /\? "Reprocessar artigos" : "Processar artigos"/);
   assert.equal(contar(barra, "Concluir formação\n"), 1);
   assert.equal(contar(barra, "\"Melhorar publicados…\""), 1);
   // Sem ramo de "um plano no recorte": a mesma barra para grupo com plano, sem plano e "Todos".

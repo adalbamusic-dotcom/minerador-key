@@ -3,6 +3,9 @@ import { MAX_KEYWORDS_PER_ARTICLE } from "./domain-rules.ts";
 import { TerritoryRefSchema } from "./territory-ref.ts";
 import { TerritoryNarrativeSchema } from "./territory-narrative.ts";
 import { SiloWorkingCopyRefSchema } from "./silo-working-copy-record.ts";
+import { PlannedSiloMemberSchema, PlannedSiloSourceRefSchema, plannedSiloMemberKey } from "./planned-silo-member.ts";
+export { PlannedSiloMemberSchema, PlannedSiloSourceRefSchema, plannedSiloMemberKey } from "./planned-silo-member.ts";
+export type { PlannedSiloMember, PlannedSiloSourceRef } from "./planned-silo-member.ts";
 import {
   ARTICLE_TERMINAL_COMPATIBILITY,
   ARTICLE_TERMINAL_FUNNELS,
@@ -1026,6 +1029,12 @@ export const ArticleDNASchema = z.object({
    */
   subject: DeclaredSubjectSchema.optional(),
   siloId: z.string().nullable(),
+  /** Vínculo à estrutura planejada aprovada; ausente nos artigos legados. */
+  siloMembershipRef: z.object({
+    siloDnaVersionId: z.string().min(1),
+    siloDnaContentHash: ContentHashSchema,
+    memberKey: z.string().min(1),
+  }).strict().optional(),
   /**
    * Território de origem no fluxo Silo-first. OPCIONAL por retrocompatibilidade:
    * todo ArticleDNA consolidado antes da Fase 2B não tem território, e ausência
@@ -1135,6 +1144,10 @@ export const ArticleDNAReferenceSchema = z.object({
 
 export const SiloDNASchema = z.object({
   schemaVersion: z.literal(1),
+  /** Ausente nos payloads legados: jamais transforma listas vazias em plano. */
+  compositionBasis: z.enum(["article_versions", "planned_members"]).optional(),
+  compositionSourceRef: PlannedSiloSourceRefSchema.optional(),
+  plannedMembers: z.array(PlannedSiloMemberSchema).min(1).optional(),
   formationStatus: z.enum(["draft", "formed"]).default("formed"),
   siloId: z.string().min(1),
   brandId: z.string().min(1).optional(),
@@ -1228,6 +1241,22 @@ export const SiloDNASchema = z.object({
     intentBreadth: z.number().nonnegative(), suggestedRole: z.enum(["pillar", "support"]), supportOrder: z.number().int().positive().nullable(), rationale: z.string().min(1),
   }).strict()).default([]),
 }).strict().superRefine((silo, context) => {
+  if (silo.compositionBasis === "planned_members") {
+    if (!silo.brandId?.trim()) context.addIssue({ code: "custom", path: ["brandId"], message: "A estrutura planejada exige a marca." });
+    if (!silo.compositionSourceRef) context.addIssue({ code: "custom", path: ["compositionSourceRef"], message: "A estrutura planejada exige referência versionada à origem." });
+    if (!silo.plannedMembers?.length) context.addIssue({ code: "custom", path: ["plannedMembers"], message: "A estrutura planejada exige membros." });
+    const members = silo.plannedMembers ?? [];
+    const subjectIds = members.filter(member => member.anchorKind === "subject_keyword").map(member => member.anchorId);
+    const proofIds = (silo.keywordPackageRefs ?? []).map(reference => reference.keywordId);
+    if (subjectIds.length !== proofIds.length || new Set(proofIds).size !== proofIds.length || subjectIds.some(id => !proofIds.includes(id))) context.addIssue({ code: "custom", path: ["keywordPackageRefs"], message: "A estrutura planejada precisa das versões aprovadas dos seus Assuntos." });
+    if (members.filter(member => member.role === "Pilar").length !== 1) context.addIssue({ code: "custom", path: ["plannedMembers"], message: "A estrutura planejada exige exatamente um Pilar." });
+    if (new Set(members.map(member => member.memberKey)).size !== members.length || new Set(members.map(member => JSON.stringify([member.anchorKind, member.anchorId]))).size !== members.length || new Set(members.map(member => member.order)).size !== members.length) context.addIssue({ code: "custom", path: ["plannedMembers"], message: "As âncoras, chaves e posições devem ser únicas." });
+    if (members.some((member, index) => index > 0 && members[index - 1].order >= member.order)) context.addIssue({ code: "custom", path: ["plannedMembers"], message: "Os membros planejados precisam seguir a ordem declarada." });
+    if (silo.brandId && members.some(member => member.memberKey !== plannedSiloMemberKey(silo.brandId!, member.anchorKind, member.anchorId))) context.addIssue({ code: "custom", path: ["plannedMembers"], message: "A chave de membro não corresponde à marca e à âncora." });
+    if (silo.pillarArticleId !== null || silo.supportArticleIds.length || silo.articleReferences.length || silo.articleRoles.length || silo.narrativeOrder.length || silo.linkMap.length || silo.hierarchySignals.length) context.addIssue({ code: "custom", path: ["articleReferences"], message: "Uma estrutura planejada não pode declarar referências a artigos finais." });
+  } else if (silo.plannedMembers !== undefined || silo.compositionSourceRef !== undefined) {
+    context.addIssue({ code: "custom", path: ["compositionBasis"], message: "Membros planejados exigem a variante explícita planned_members." });
+  }
   // Proveniência é PAR: ou os dois campos existem, ou nenhum. Meia proveniência
   // não diz de qual versão da working copy o Silo veio — descreve a metade que
   // sobrou. A checagem vem antes do desvio de rascunho porque vale para os dois.
@@ -1245,6 +1274,7 @@ export const SiloDNASchema = z.object({
   for (const field of ["centralEntity", "objective", "audience", "macroProblem", "dominantIntent", "boundary"] as const) {
     if (!silo[field].trim()) context.addIssue({ code: "custom", path: [field], message: "O SiloDNA formado precisa preencher este campo." });
   }
+  if (silo.compositionBasis === "planned_members") return;
   const referenced = new Set(silo.articleReferences.map(reference => reference.articleId));
   const expected = [silo.pillarArticleId, ...silo.supportArticleIds].filter((id): id is string => Boolean(id));
   if (expected.some(id => !referenced.has(id)) || referenced.size !== new Set(expected).size) {
@@ -1286,6 +1316,8 @@ export type SiloPagePublicationVerification = z.infer<typeof SiloPagePublication
 
 export const SiloPageSchema = z.object({
   schemaVersion: z.literal(1),
+  compositionBasis: z.enum(["article_versions", "planned_members"]).optional(),
+  plannedMemberKeys: z.array(z.string().min(1)).min(1).optional(),
   formationStatus: z.enum(["draft", "formed"]).default("formed"),
   siloPageId: z.string().min(1),
   brandId: z.string().min(1),
@@ -1317,6 +1349,11 @@ export const SiloPageSchema = z.object({
   confidence: ConfidenceSchema,
   humanPendingDecisions: z.array(z.string()),
 }).strict().superRefine((page, context) => {
+  if (page.compositionBasis === "planned_members") {
+    const keys = page.plannedMemberKeys ?? [];
+    if (!keys.length || new Set(keys).size !== keys.length) context.addIssue({ code: "custom", path: ["plannedMemberKeys"], message: "A página planejada exige chaves de membros únicas." });
+    if (page.pillarArticleId !== null || page.supportArticleIds.length || page.sections.some(section => section.linkedArticleIds.length)) context.addIssue({ code: "custom", path: ["pillarArticleId"], message: "Uma página planejada não pode declarar artigos finais inexistentes." });
+  } else if (page.plannedMemberKeys !== undefined) context.addIssue({ code: "custom", path: ["compositionBasis"], message: "Chaves planejadas exigem a variante explícita planned_members." });
   if (page.formationStatus === "draft") {
     if (page.publicationStatus !== "new") context.addIssue({ code: "custom", path: ["publicationStatus"], message: "Uma SiloPage em rascunho deve estar como nova." });
     if (page.publishedUrl) context.addIssue({ code: "custom", path: ["publishedUrl"], message: "Uma SiloPage em rascunho não pode possuir URL publicada." });

@@ -40,12 +40,12 @@ let screen: RadarDomScreen;
 test.beforeEach(async () => { screen = await montarRadar(); });
 test.afterEach(() => screen.destroy());
 
-const painel = (analysis: ArchitectureAnalysis, extra: { selectedCluster?: ClusterAnalysis | null; confirmBlocker?: string | null; processed?: boolean } = {}) => comProductShell(React.createElement(ArchitecturePanel, {
+const painel = (analysis: ArchitectureAnalysis, extra: { selectedCluster?: ClusterAnalysis | null; confirmBlocker?: string | null; processed?: boolean; onConfirm?: () => void } = {}) => comProductShell(React.createElement(ArchitecturePanel, {
   analysis, processed: extra.processed ?? true, stale: false, scenarioState: "Processado", busy: false, confirmed: null, canContinueToArticles: false, processChips: [],
   selectedCluster: extra.selectedCluster ?? null, consolidation: null, preflight: [], proposal: { KEYWORDS_ANALYZED: 8, RESOLVED_KEYWORDS: 8, SILOS_REUSED: 1, SILOS_PROPOSED: 0, ASSIGNED: 7, EXPLICIT_UNASSIGNED: 1, BLOCKED: 0 },
   currentAssigned: 7, pendingAssigned: 0,
   restore: { plan: { clean: true, summary: "", articlesAffected: 0, keywordsToRestore: 0, articles: [] }, previewOpen: false, busy: false, onRestore: () => undefined },
-  homologation: null, onProcess: () => undefined, onConfirm: () => undefined, onContinueToArticles: () => undefined,
+  homologation: null, onProcess: () => undefined, onConfirm: extra.onConfirm ?? (() => undefined), onContinueToArticles: () => undefined,
   ...(extra.confirmBlocker !== undefined ? { confirmBlocker: extra.confirmBlocker } : {}),
 }));
 
@@ -72,6 +72,25 @@ test("5 · a leitura do plano: o grupo do plano 'segue o plano do Silo “Wi-Fi 
   const mapa = buildArchitectureFlowProjection({ analysis: vista, keywordTexts: new Map(AZUL_REAL.map(([id, keyword]) => [id, keyword])), territoryLabels: new Map(), publishedTerritoryRefs: new Set() });
   assert.equal(mapa.nodes.find(node => node.id === "cluster:cluster:k9")?.meta, "Segue o plano do Silo “Wi-Fi e fibra óptica”");
   assert.equal(mapa.nodes.find(node => node.id === "cluster:cluster:solta")?.meta, "Sem profundidade para Silo");
+});
+
+test("Confirmar: só publicada fixa desabilita; uma atribuição nova ou um Silo pronto habilita o mesmo botão", async () => {
+  const decide = (confirmable: number, silos: number) => architectureConfirmBlocker({ confirmTerritoryCount: silos, assignmentCount: confirmable, confirmableCount: confirmable, skipped: [], counts: { fixed_in_article: 1 } });
+  let cliques = 0;
+  const onConfirm = () => { cliques += 1; };
+  const fixa = decide(0, 0);
+  await screen.render(painel(ANALISE, { confirmBlocker: fixa?.message, onConfirm }));
+  assert.equal((screen.get("architect-confirm-architecture") as HTMLButtonElement).disabled, true);
+  await screen.render(painel(ANALISE, { confirmBlocker: decide(1, 0)?.message ?? null, onConfirm }));
+  assert.equal((screen.get("architect-confirm-architecture") as HTMLButtonElement).disabled, false);
+  await screen.click("architect-confirm-architecture");
+  assert.equal(cliques, 1, "atribuição nova segue pelo acionador existente");
+  await screen.render(painel(ANALISE, { confirmBlocker: decide(0, 1)?.message ?? null, onConfirm }));
+  assert.equal((screen.get("architect-confirm-architecture") as HTMLButtonElement).disabled, false);
+  await screen.click("architect-confirm-architecture");
+  assert.equal(cliques, 2, "Silo pronto também segue pelo mesmo acionador");
+  const tela = readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
+  assert.match(tela, /assignmentCount: architectureProposalPending\.pendentes/);
 });
 
 test("5 · o painel: '1 sem profundidade para Silo · 7 segue(m) o plano do Silo'; o grupo do plano mostra só a frase do plano (sem Coerência/Aderência/Profundidade 0)", async () => {

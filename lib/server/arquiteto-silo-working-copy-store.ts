@@ -154,6 +154,9 @@ export async function createSiloWorkingCopy(
     workingCopyRef: buildSiloWorkingCopyRef(territoryRef),
     brandId: context.brandId,
   });
+  // A variante já pode ser lida e validada, mas o writer transacional ainda
+  // precisa revalidar a fonte e os locks do plano. Nunca gravar parcialmente.
+  if (workingCopy.plannedComposition) throw new PipelineRuntimeError("CONFLICT", "A estrutura planejada ainda não pode ser gravada: o gravador do Silo está em adaptação.", 409);
   const territoryWorkflowItemId = await findTerritoryWorkflowItemId(context, workingCopy.territoryRef);
 
   const result = await context.supabase.rpc("persist_silo_working_copy_atomic", {
@@ -195,6 +198,7 @@ export async function updateSiloWorkingCopy(
     territoryRef,
     brandId: context.brandId,
   });
+  if (workingCopy.plannedComposition) throw new PipelineRuntimeError("CONFLICT", "A estrutura planejada ainda não pode ser gravada: o gravador do Silo está em adaptação.", 409);
   const territoryWorkflowItemId = await findTerritoryWorkflowItemId(context, territoryRef);
 
   const result = await context.supabase.rpc("persist_silo_working_copy_atomic", {

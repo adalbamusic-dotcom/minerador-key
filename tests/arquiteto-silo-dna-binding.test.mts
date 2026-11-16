@@ -15,6 +15,7 @@ import {
   assertSiloDnaMatchesConfirmedWorkingCopy,
   assertSiloPageMatchesSiloDna,
   deriveExpectedCompositionFromWorkingCopy,
+  deriveTerritorialArticlesFromWorkingCopy,
   refuseArticleVersionBinding,
   refusePillarDecisionBinding,
   refuseStatusEscalation,
@@ -33,6 +34,19 @@ const LOCK = 4;
 
 const ref = (articleId: string) => ({
   articleId, articleDnaVersionId: `${articleId}:v1`, articleDnaContentHash: HASH,
+});
+
+test("fechamento não transforma existência, ausência ou status não aprovado em aprovação humana", () => {
+  const copy = workingCopy();
+  const artigo = (effectiveStatus?: string) => ({ brandId: BRAND, territoryRef: TERRITORY, contentHash: HASH, effectiveStatus });
+  const lidos = deriveTerritorialArticlesFromWorkingCopy(copy, new Map([
+    ["art-A:v1", artigo("approved")], ["art-B:v1", artigo("rejected")],
+  ]));
+  assert.equal(lidos[0].isHumanApproved, true);
+  assert.equal(lidos[1].isHumanApproved, false);
+  const desconhecido = deriveTerritorialArticlesFromWorkingCopy(copy, new Map([["art-A:v1", artigo()]]));
+  assert.equal(desconhecido[0].isHumanApproved, false);
+  assert.equal(desconhecido[1].isHumanApproved, false);
 });
 
 function workingCopy(overrides: Partial<SiloWorkingCopyState> = {}): SiloWorkingCopyState {
@@ -198,7 +212,8 @@ test("9 · a readiness do chamador não é autoridade", () => {
   // Não existe campo pelo qual o cliente declare estar pronto.
   assert.equal(/clientReady|readyForConsolidation|approved: z\.boolean|readiness:/.test(rota), false);
   // A decisão humana é descritiva e conferida, não um booleano.
-  assert.match(rota, /decision: z\.object\(\{/);
+  assert.match(rota, /decision: z\.union\(\[z\.object\(\{/);
+  assert.match(rota, /PlannedSiloConsolidationDecisionSchema/);
   assert.match(rota, /pillarArticleId: z\.string\(\)\.min\(1\)/);
   assert.match(rota, /supportArticleIds: z\.array/);
   assert.match(rota, /excludedArticleIds: z\.array/);
