@@ -1,5 +1,17 @@
 # Estado atual — Radar
 
+## Estado da pesquisa Google durante consultas auxiliares — 2026-11-16
+
+**Reproduzido na AdalbaPro:** durante as consultas auxiliares, a trava da pesquisa continuava ativa, mas o botão voltava a ficar disponível porque o estado visual acompanhava apenas a coleta canônica. Outro clique era recusado, parecendo não responder. A mensagem também atribuía a operação ao artigo selecionado mesmo quando outra ação ocupava o Radar.
+
+**Correção local:** o mesmo acionador mantém o estado visual ocupado até o fim da rodada inteira, inclusive auxiliares; uma falha inesperada recebe aviso e libera a trava. A mesma proteção contra pesquisa duplicada permanece. Teste manual após a alteração: o clique exibiu “A investigação está em andamento” durante a coleta e o botão permaneceu desabilitado até a terceira consulta auxiliar. A confirmação da conclusão dessa coleta e a validação no deployment permanecem pendentes. O teste de regressão `radar-188-regressao-start-google` cobre a ligação entre trava, estado e apresentação.
+
+**Verificações:** `npm run test:regressao` verde, incluindo TypeScript e 3.763 testes do Radar; Minerador, editorial e authz mantiveram falhas dentro dos tetos conhecidos da bateria. Lint direcionado sem erros, com dez avisos de símbolos não usados; `git diff --check` sem erros. Alteração disponível no checkout local, sem deploy.
+
+## Justificativa longa na seleção automática — 2026-11-16
+
+**Correção local e reteste pelo botão:** uma referência observada em várias consultas podia gerar justificativa automática com mais de 1.000 caracteres, acima do contrato da curadoria, e impedir o término da pesquisa. O mesmo gerador agora limita apenas o resumo automático e indica que os detalhes permanecem nas evidências; não altera justificativas humanas nem remove aparições. `radar-fase1-tres-acoes` cobre quatro consultas com texto longo. Na AdalbaPro, `Recuperar pesquisa já paga` releu a SERP principal sem nova coleta; após recarregar o código local, `Completar Pesquisa Google` avançou para 3 consultas, 11 referências e `Pronto para analisar`. A análise foi iniciada pelo botão e, em verificação posterior da interface local, o artigo constava como `Finalizado`, com 8 de 11 páginas analisadas. A Vercel foi inspecionada antes de receber esta alteração; deploy e validação nessa versão permanecem pendentes. O aviso de quota refere-se à cópia de recuperação local, com coleta remota confirmada, e não foi efetuada limpeza do armazenamento do navegador.
+
 - **Seleção em lote da planilha — 2026-10-18:** relato de "o checkbox substitui a seleção / o selecionar-todos fica só com a focada" **não reproduzido** no código atual: no navegador local (WifiConecta), com clique de mouse, 3 checkboxes ficaram 3 selecionados, o cabeçalho depois de "Limpar seleção" marcou as 8 e "Enviar ao Redator (N)" passou de 1 (N conta só os elegíveis da seleção, não as marcadas). Nenhum código alterado; o caso fica guardado por `tests/radar-selecao-em-lote-planilha.test.mts` (planilha real + transições reais de `lib/radar/spreadsheet-selection.ts`).
 
 ## "Enviar ao Redator (1)" ainda em 500 nos 3 maiores — 2026-10-19 (2) (reteste pelo botão, WifiConecta)

@@ -382,9 +382,13 @@ test("RADAR 18.8 · L — um clique, uma pesquisa; e o segundo é recusado em vo
    * a `collect`, recebia FAILED_RETRYABLE e voltava MUDO.
    */
   assert.match(invólucro, /pesquisaEmVooRef\.current \|\| collectingArticleIdRef\.current \|\| serpActionRef\.current/);
-  assert.match(invólucro, /setNotice\("A pesquisa deste artigo já está em andamento[^"]*consulta paga/, "a recusa é dita, e diz o custo");
+  assert.match(invólucro, /setNotice\("Uma pesquisa ou outra ação do Radar já está em andamento[^"]*consultas pagas/, "a recusa informa que outra ação pode estar em andamento e diz o custo");
   assert.match(invólucro, /pesquisaEmVooRef\.current = target\.articleId;/);
+  assert.match(invólucro, /setPesquisaEmCurso\(target\.articleId\)/, "a tela acompanha toda a rodada, inclusive auxiliares");
+  assert.match(invólucro, /catch \(error\)[\s\S]*Não foi possível concluir a pesquisa/, "falhas inesperadas não ficam silenciosas");
   assert.match(invólucro, /finally \{\s*\r?\n\s*pesquisaEmVooRef\.current = null;/, "e a porta reabre mesmo se a rodada explodir");
+  assert.match(invólucro, /setPesquisaEmCurso\(null\)/, "o estado visual também é liberado");
+  assert.match(fonte, /refreshing=\{Boolean\(busyArticleId \|\| pesquisaEmCurso\)\}/, "o botão permanece ocupado até o fim das auxiliares");
 
   /*
    * O REF COBRE O LAÇO DAS AUXILIARES — onde não havia guarda nenhum e cada

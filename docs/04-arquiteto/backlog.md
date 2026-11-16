@@ -3288,3 +3288,7 @@ SDD: `sdd-reparo-pontual-do-artigo-2026-10-01.md` (1ª entrega feita).
 # Pendência de validação — 2026-11-15
 
 - Validar pelos acionadores a recusa de artigo que não integra a composição legada do Silo. A integração transacional do Silo planejado e de seus consumidores permanece pendente.
+## Prévia longa da coleta SERP — 2026-11-16
+
+- [x] Permitir rolagem da prévia de custo e alcançar os botões existentes; conferido no popup real local, sem iniciar coleta paga.
+- [ ] Verificar a mesma prévia no deployment após a publicação da correção.

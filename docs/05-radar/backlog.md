@@ -1,5 +1,8 @@
 # Backlog — Radar
 
+- [x] Confirmar na interface local o término da análise de concorrência da AdalbaPro: artigo finalizado, 8 de 11 páginas analisadas.
+- [ ] Verificar no deployment atualizado a pesquisa e o estado ocupado durante consultas auxiliares. A correção é local até o próximo deploy.
+
 ## "Enviar ao Redator (1)" ainda em 500 nos 3 maiores — 2026-10-19 (2)
 
 Detalhe em `estado-atual.md` (mesmo título). **Validado manualmente: não.**
